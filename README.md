@@ -1,1 +1,1 @@
-# NOVAI-OS
+# OpenArc-OS
