@@ -9,6 +9,7 @@
     "desktop": "npm run build && electron .",
     "build": "tsc --noEmit && vite build",
     "test": "node --test tests/*.test.mjs",
+    "test:native": "node tests/native-view.mjs",
     "test:desktop": "npm run build && node tests/desktop.mjs"
   },
   "dependencies": {

@@ -1,0 +1,7 @@
+{
+  "name": "openarc-native-probe",
+  "version": "1.0.0",
+  "private": true,
+  "main": "main.cjs",
+  "description": "D1-01 原生能力探针，由 tests/native-view.mjs 拉起"
+}
