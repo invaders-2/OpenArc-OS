@@ -4,10 +4,12 @@ const {
   WebContentsView,
   ipcMain,
   session,
+  screen,
 } = require("electron");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { safeURL, safeBounds } = require("./policy.cjs");
+const geometry = require("./geometry.cjs");
 let win, view;
 const uiURL = pathToFileURL(path.join(__dirname, "../dist/index.html")).href;
 function trusted(event) {
@@ -45,6 +47,42 @@ app.whenReady().then(() => {
       sandbox: true,
     },
   });
+  // A05：显示器变化后必须把原生窗口拉回可见工作区。
+  // Electron 的 setBounds 不做可见性校验，窗口落在已拔掉的屏幕上不会被自动归位。
+  const displayInfo = () =>
+    screen.getAllDisplays().map((d) => ({
+      id: d.id,
+      scaleFactor: d.scaleFactor,
+      workArea: d.workArea,
+      internal: d.internal,
+      primary: d.id === screen.getPrimaryDisplay().id,
+    }));
+  const ensureWindowVisible = () => {
+    if (!win || win.isDestroyed()) return;
+    const b = win.getBounds();
+    const areas = screen.getAllDisplays().map((d) => d.workArea);
+    if (areas.some((a) => geometry.intersects(b, a))) return;
+    const p = screen.getPrimaryDisplay().workArea;
+    win.setBounds({
+      x: p.x + 40,
+      y: p.y + 40,
+      width: Math.max(geometry.MIN_W, Math.min(b.width, p.width - 80)),
+      height: Math.max(geometry.MIN_H, Math.min(b.height, p.height - 80)),
+    });
+  };
+  const publishDisplays = () => {
+    if (win && !win.isDestroyed())
+      win.webContents.send("display:changed", displayInfo());
+  };
+  for (const event of [
+    "display-added",
+    "display-removed",
+    "display-metrics-changed",
+  ])
+    screen.on(event, () => {
+      ensureWindowVisible();
+      publishDisplays();
+    });
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   win.webContents.on("will-navigate", (e, url) => {
     if (url !== uiURL) e.preventDefault();
@@ -126,5 +164,6 @@ app.whenReady().then(() => {
     win = null;
   });
   win.loadURL(uiURL);
+  win.webContents.once("did-finish-load", publishDisplays);
 });
 app.on("window-all-closed", () => app.quit());
