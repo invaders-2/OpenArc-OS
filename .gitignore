@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+npm-debug.log*
+# 代理工作区（记忆与会话数据），不进版本库
+.workbuddy/

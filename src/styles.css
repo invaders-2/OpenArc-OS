@@ -1,0 +1,954 @@
+:root {
+  font-family:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+    "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI",
+    "Microsoft YaHei", sans-serif;
+  color: #1d1d1f;
+  font-size: 14px;
+  font-weight: 400;
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  --text: #1d1d1f;
+  --muted: #6e6e73;
+  --surface: rgba(255, 255, 255, 0.68);
+  --content: rgba(255, 255, 255, 0.94);
+  --sunken: rgba(0, 0, 0, 0.04);
+  --bar: rgba(255, 255, 255, 0.58);
+  --pill: rgba(255, 255, 255, 0.58);
+  --line: rgba(0, 0, 0, 0.12);
+  --accent: #1d1d1f;
+  --on-accent: #fff;
+  --focus: #1d1d1f;
+  --failed: #d70015;
+  --shadow: 0 12px 40px rgba(0, 0, 0, 0.16);
+  --radius: 16px;
+  --quick: 160ms;
+  --standard: 220ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+}
+* {
+  box-sizing: border-box;
+}
+h1,
+h2,
+h3,
+h4,
+strong,
+b {
+  font-weight: 500;
+}
+body {
+  margin: 0;
+  overflow: hidden;
+  background: #f5f5f7;
+}
+body:has(.dark) {
+  background: #000;
+}
+button,
+input,
+textarea {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+  color: inherit;
+  border: 0;
+  background: transparent;
+}
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+button:active {
+  filter: brightness(0.93);
+}
+input,
+textarea {
+  color: var(--text);
+}
+.desktop {
+  height: 100vh;
+  overflow: hidden;
+  position: relative;
+  color: var(--text);
+  background:
+    radial-gradient(ellipse at 18% 96%, rgba(216, 216, 220, 0.5) 0, transparent 53%),
+    radial-gradient(ellipse at 85% 18%, rgba(236, 236, 236, 0.42) 0, transparent 48%),
+    linear-gradient(
+      140deg,
+      rgba(245, 245, 247, 0.58),
+      rgba(220, 220, 225, 0.58) 68%,
+      rgba(237, 237, 240, 0.58)
+    );
+}
+.desktop::before {
+  content: "";
+  position: absolute;
+  width: 1050px;
+  height: 1200px;
+  right: -520px;
+  top: 45px;
+  border-radius: 48%;
+  transform: rotate(-32deg);
+  background: linear-gradient(130deg, rgba(255, 255, 255, 0.56), rgba(200, 200, 205, 0.5));
+  box-shadow:
+    -35px 12px 90px rgba(255, 255, 255, 0.4),
+    inset 25px 0 80px rgba(255, 255, 255, 0.47);
+}
+.dark {
+  --text: #f5f5f7;
+  --muted: #98989d;
+  /* 深色统一基色 #171717，层级靠 alpha 分档（合成于纯黑桌面之上） */
+  --surface: rgba(23, 23, 23, 0.5);
+  --content: rgba(23, 23, 23, 0.6);
+  --sunken: rgba(0, 0, 0, 0.28);
+  /* 顶栏与 Dock 只保留模糊，无底色填充（用户指定透明度 0） */
+  --bar: rgba(23, 23, 23, 0);
+  /* 桌面 AI 胶囊仍需可见底板，否则纯黑上只剩一行字 */
+  --pill: rgba(23, 23, 23, 0.72);
+  --line: rgba(255, 255, 255, 0.16);
+  --accent: #f5f5f7;
+  --on-accent: #000;
+  --focus: #fff;
+  --failed: #ff453a;
+  /* 桌面环境光必须压得比窗口合成值（≈#0D0D0D）低，否则窗口会糊进背景 */
+  background:
+    radial-gradient(ellipse at 20% 80%, rgba(255, 255, 255, 0.03), transparent 65%),
+    linear-gradient(130deg, #000000, #000000);
+}
+.dark::before {
+  background: linear-gradient(
+    130deg,
+    rgba(255, 255, 255, 0.022),
+    rgba(255, 255, 255, 0.006)
+  );
+  box-shadow:
+    -35px 12px 90px rgba(0, 0, 0, 0.6),
+    inset 25px 0 80px rgba(255, 255, 255, 0.012);
+}
+.dark .ps {
+  background: rgba(255, 255, 255, 0.06);
+}
+.dark .illustrator {
+  background: rgba(255, 255, 255, 0.12);
+}
+.opaque {
+  --surface: #f5f5f7;
+  --content: #fff;
+  --bar: #ececed;
+}
+.opaque.dark {
+  /* 无模糊时取上表的合成值，保证与半透明版视觉一致 */
+  --surface: #0c0c0c;
+  --content: #0e0e0e;
+  /* 减少透明度模式下顶栏与 Dock 恢复实色，保证可辨识 */
+  --bar: #111111;
+  --pill: #111111;
+}
+.opaque * {
+  backdrop-filter: none !important;
+}
+.reduced {
+  --quick: 0ms;
+  --standard: 0ms;
+}
+.reduced * {
+  animation: none !important;
+  transition-duration: 0ms !important;
+}
+.topbar {
+  height: 38px;
+  background: var(--bar);
+  backdrop-filter: blur(40px) saturate(180%);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  padding: 0 23px;
+  font-size: 12px;
+  position: relative;
+  z-index: 80;
+}
+.wordmark {
+  font-size: 14px;
+  letter-spacing: -0.4px;
+}
+.topbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 17px;
+}
+.topbar button {
+  display: flex;
+  padding: 6px;
+}
+.local-tag {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+.desktop-brand {
+  position: absolute;
+  right: 7%;
+  top: 37%;
+  color: #fff9;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.1);
+}
+.desktop-brand div {
+  font-size: 65px;
+  font-weight: 400;
+  letter-spacing: -4px;
+}
+.desktop-brand p {
+  font-size: 13px;
+  letter-spacing: 1px;
+}
+.assistant-pill {
+  position: absolute;
+  top: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 15px;
+  border-radius: 30px;
+  background: var(--pill);
+  backdrop-filter: blur(32px) saturate(180%);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+  font-size: 12px;
+  z-index: 3;
+}
+.pill-status {
+  color: var(--muted);
+  font-size: 11px;
+  padding-left: 4px;
+}
+.window {
+  position: absolute;
+  border-radius: var(--radius);
+  background: var(--surface);
+  backdrop-filter: blur(34px) saturate(180%);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition:
+    box-shadow var(--quick) var(--ease),
+    opacity var(--quick) var(--ease);
+  animation: appear var(--standard) var(--ease);
+}
+.window.active {
+  box-shadow: var(--shadow);
+}
+/* 表面降到 #171717 50% 后合成值仅 #0C0C0C，与纯黑桌面明度差很小，
+   因此顶部高光相应提高，让上边缘仍可辨识；外阴影在有环境光渐变的区域仍起作用。 */
+.dark .window {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 18px 46px rgba(0, 0, 0, 0.7);
+}
+.dark .window.active {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 24px 60px rgba(0, 0, 0, 0.85);
+}
+.dark .ai-panel,
+.dark .search-panel,
+.dark .context-menu {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 18px 46px rgba(0, 0, 0, 0.7);
+}
+.dark .app-card,
+.dark .connection-card {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 2px 10px rgba(0, 0, 0, 0.45);
+}
+.window.minimized {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+.window-title {
+  height: 44px;
+  flex-shrink: 0;
+  background: rgba(0, 0, 0, 0.035);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px;
+  user-select: none;
+  touch-action: none;
+  font-size: 13px;
+}
+/* 标题栏无底色（用户指定透明度 0），与窗口外壳同值，不形成材质分区 */
+.dark .window-title {
+  background: transparent;
+}
+.traffic {
+  position: absolute;
+  left: 14px;
+  display: flex;
+  gap: 7px;
+}
+.traffic button {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+}
+.traffic svg {
+  opacity: 0;
+  color: #252525;
+}
+.traffic:hover svg,
+.traffic button:focus-visible svg {
+  opacity: 1;
+}
+/* 顶栏红绿灯：跟随文档流排在字标左侧，比窗口内的略小 */
+.traffic-bar {
+  position: static;
+  gap: 8px;
+  margin-right: -12px;
+}
+.traffic-bar button {
+  width: 12px;
+  height: 12px;
+}
+.traffic button:disabled {
+  background: rgba(125, 125, 125, 0.5);
+  cursor: default;
+}
+.traffic button:disabled svg {
+  opacity: 0;
+}
+.close {
+  background: #ff625b;
+}
+.minimize {
+  background: #ffbf3e;
+}
+.maximize {
+  background: #2bc94e;
+}
+.title-meta {
+  position: absolute;
+  right: 16px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.window-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.app-content,
+.settings-content {
+  padding: 31px 38px;
+}
+.eyebrow {
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: var(--muted);
+  font-weight: 400;
+}
+h1 {
+  font-size: 27px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  margin: 11px 0 7px;
+}
+h3 {
+  font-size: 14px;
+  font-weight: 500;
+  margin: 25px 0 12px;
+}
+p {
+  line-height: 1.7;
+}
+.subtitle {
+  color: var(--muted);
+  margin: 0 0 27px;
+  font-size: 13px;
+}
+.app-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+.app-card {
+  background: var(--content);
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.08),
+    0 8px 24px rgba(0, 0, 0, 0.05);
+  border-radius: 12px;
+  text-align: left;
+  padding: 16px;
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 9px;
+  transition: transform var(--quick) var(--ease);
+}
+.app-card:hover {
+  transform: translateY(-2px);
+}
+.app-card strong {
+  font-size: 13px;
+}
+.app-card small {
+  font-size: 11px;
+  color: var(--muted);
+}
+.app-icon {
+  width: 47px;
+  height: 47px;
+  object-fit: contain;
+  user-select: none;
+  transition: transform var(--quick) var(--ease);
+}
+.section-title {
+  display: flex;
+  justify-content: space-between;
+  margin: 25px 0 14px;
+  font-weight: 500;
+  font-size: 13px;
+}
+.section-title span {
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--muted);
+}
+.adobe-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.adobe-row > div:nth-child(2) {
+  margin-right: 23px;
+}
+.adobe {
+  height: 38px;
+  width: 38px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  font-size: 21px;
+  font-weight: 500;
+}
+.ps {
+  background: #1d1d1f;
+  color: #f5f5f7;
+}
+.illustrator {
+  background: #48484a;
+  color: #f5f5f7;
+}
+.adobe-row strong {
+  font-size: 12px;
+}
+.adobe-row small {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  margin-top: 4px;
+}
+.footnote {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 20px;
+}
+.dock {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bar);
+  backdrop-filter: blur(44px) saturate(180%);
+  border-radius: 20px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.15);
+  display: flex;
+  align-items: center;
+  padding: 9px 10px 2px;
+  gap: 5px;
+  z-index: 85;
+}
+.dock-item {
+  --s: 1;
+  position: relative;
+  padding: 0 5px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+.dock-icon {
+  width: 47px;
+  height: 47px;
+  object-fit: contain;
+  user-select: none;
+  transform: scale(var(--s));
+  transform-origin: bottom center;
+  transition: transform var(--quick) var(--ease);
+}
+.dock-tooltip {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%) translateY(6px);
+  white-space: nowrap;
+  padding: 4px 9px;
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--text);
+  background: var(--surface);
+  backdrop-filter: blur(24px) saturate(180%);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity var(--quick) var(--ease),
+    transform var(--quick) var(--ease);
+  z-index: 300;
+}
+.dock-item:hover .dock-tooltip,
+.dock-item:focus-visible .dock-tooltip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+@keyframes dock-bounce {
+  0% {
+    transform: translateY(0);
+  }
+  22% {
+    transform: translateY(-26px);
+  }
+  44% {
+    transform: translateY(0);
+  }
+  62% {
+    transform: translateY(-13px);
+  }
+  78% {
+    transform: translateY(0);
+  }
+  90% {
+    transform: translateY(-5px);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+.dock-item.bouncing {
+  animation: dock-bounce 760ms cubic-bezier(0.3, 0, 0.4, 1);
+}
+.running-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  margin-bottom: 2px;
+}
+.running {
+  background: var(--text);
+}
+.dock-divider {
+  height: 35px;
+  width: 1px;
+  background: var(--line);
+  margin: 0 12px 10px;
+}
+.resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  cursor: nwse-resize;
+  width: 22px;
+  height: 22px;
+  touch-action: none;
+  color: var(--muted);
+}
+.setting-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 15px 0;
+}
+input[type="checkbox"] {
+  width: 32px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+.badge {
+  display: inline-block;
+  background: var(--sunken);
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 14px;
+  font-size: 12px;
+}
+.field input,
+.addressbar input {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--content);
+  padding: 9px 12px;
+  width: 100%;
+  min-width: 0;
+}
+.muted {
+  font-size: 12px;
+  color: var(--muted);
+}
+.empty-content {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 35px;
+  text-align: center;
+  background: var(--content);
+}
+.empty-content p {
+  max-width: 380px;
+  font-size: 13px;
+}
+.large-icon {
+  width: 82px;
+  height: 82px;
+  object-fit: contain;
+  user-select: none;
+}
+.browser-shell {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--content);
+}
+.addressbar {
+  padding: 8px 10px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.addressbar button {
+  padding: 7px;
+  display: flex;
+  align-items: center;
+}
+.primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-radius: 7px;
+  white-space: nowrap;
+}
+.browser-status {
+  height: 28px;
+  flex-shrink: 0;
+  padding: 3px 13px;
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.web-viewport {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  background: var(--content);
+}
+.ai-panel {
+  position: absolute;
+  right: 16px;
+  top: 54px;
+  bottom: 110px;
+  width: 350px;
+  z-index: 90;
+  border-radius: 16px;
+  background: var(--surface);
+  backdrop-filter: blur(40px) saturate(180%);
+  box-shadow: var(--shadow);
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  animation: appear var(--standard) var(--ease);
+}
+.panel-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.panel-heading button {
+  margin-left: auto;
+  display: flex;
+}
+.ai-intro {
+  text-align: center;
+  padding: 35px 8px 22px;
+}
+.ai-orb {
+  width: 82px;
+  height: 82px;
+  object-fit: contain;
+  display: block;
+  margin: 0 auto;
+  user-select: none;
+}
+.ai-intro h2 {
+  font-size: 21px;
+}
+.ai-intro p,
+.connection-card p {
+  font-size: 12px;
+  color: var(--muted);
+}
+.connection-card {
+  padding: 17px;
+  background: var(--content);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+}
+.connection-card h3 {
+  margin: 13px 0 4px;
+}
+.connection-card button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  text-decoration: underline;
+  padding: 8px 0;
+  font-size: 12px;
+}
+.composer {
+  margin-top: auto;
+  padding-top: 20px;
+}
+.composer textarea {
+  width: 100%;
+  height: 85px;
+  resize: none;
+  background: var(--content);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+}
+.composer span {
+  font-size: 10px;
+  color: var(--muted);
+}
+.search-shade {
+  position: absolute;
+  inset: 38px 0 0;
+  background: rgba(0, 0, 0, 0.25);
+  z-index: 100;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 100px;
+}
+.search-panel {
+  width: 550px;
+  background: var(--surface);
+  backdrop-filter: blur(40px) saturate(180%);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: 12px;
+  animation: appear var(--quick) var(--ease);
+}
+.search-input {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 5px 15px;
+}
+.search-input input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 18px;
+  min-width: 0;
+}
+.search-input button {
+  font-size: 11px;
+  color: var(--muted);
+}
+.search-result {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px;
+  border-radius: 8px;
+  text-align: left;
+}
+.search-result:hover {
+  background: var(--content);
+}
+.search-result svg:last-child {
+  margin-left: auto;
+}
+.desktop-folder {
+  position: absolute;
+  width: 88px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 4px;
+  border-radius: 10px;
+  cursor: default;
+  user-select: none;
+  touch-action: none;
+  transition: background var(--quick) var(--ease);
+}
+.desktop-folder:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+.dark .desktop-folder:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.desktop-folder-icon {
+  width: 58px;
+  height: 46px;
+  object-fit: contain;
+  user-select: none;
+}
+.folder-name {
+  font-size: 11px;
+  max-width: 82px;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 2px;
+}
+.folder-rename {
+  width: 82px;
+  font-size: 11px;
+  text-align: center;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--content);
+  color: var(--text);
+  padding: 2px 4px;
+}
+.menu-shade {
+  position: absolute;
+  inset: 0;
+  z-index: 199;
+}
+.context-menu {
+  position: absolute;
+  z-index: 200;
+  min-width: 178px;
+  padding: 5px;
+  border-radius: 10px;
+  background: var(--surface);
+  backdrop-filter: blur(40px) saturate(180%);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+  display: flex;
+  flex-direction: column;
+  animation: appear var(--quick) var(--ease);
+}
+.context-menu button {
+  text-align: left;
+  padding: 8px 11px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.context-menu button:hover {
+  background: var(--sunken);
+}
+.context-menu .danger {
+  color: var(--failed);
+}
+@keyframes appear {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --quick: 0ms;
+    --standard: 0ms;
+  }
+  * {
+    animation: none !important;
+  }
+}
+@media (max-height: 800px) {
+  .ai-intro {
+    padding: 18px 8px 10px;
+  }
+  .ai-orb {
+    width: 50px;
+    height: 50px;
+  }
+  .ai-intro h2 {
+    margin: 10px;
+  }
+  .app-content {
+    padding: 22px 30px;
+  }
+}
+.viewport-icon {
+  width: 52px;
+  height: 52px;
+  object-fit: contain;
+  opacity: 0.55;
+  user-select: none;
+}
+.bar-icon {
+  width: 19px;
+  height: 19px;
+  object-fit: contain;
+  display: block;
+}
+.pill-icon {
+  width: 19px;
+  height: 19px;
+  object-fit: contain;
+}
+.heading-icon {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+.search-icon {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  opacity: 0.7;
+}
+.result-icon {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
