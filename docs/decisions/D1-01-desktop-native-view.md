@@ -142,12 +142,18 @@
 
 ## BLOCKED
 
-| 项 | 原因与处理 |
-| --- | --- |
-| `npm ci` | 沙箱批量删除保护拦截（`SAFE_DELETE_BULK_CONFIRM_REQUIRED`，54 项）；它已删掉部分依赖导致依赖树损坏，已从备份恢复。`npm ci --dry-run` 通过（54 包、无冲突），说明 lockfile 本身没问题 |
-| `npm install` | 沙箱拒绝 `node_modules/.bin` 内的 rename（`CODEBUDDY_BROKER_DENY`）。依赖恢复改用手写拷贝 |
-| Electron 二进制安装 | GitHub Releases 不可达（curl 返回 000）。改用 npmmirror 镜像下载并校验 SHA256 通过后手工解包 |
-| `npm run test:desktop` / Playwright | `_electron.launch` 握手超时 180 s（简单 app 只需 808 ms，vibrancy 窗口也只需 784 ms，故问题在驱动与本项目组合）；`chromium.connectOverCDP` 同样在 WS 连接后超时。Playwright 1.55 与 Chromium 152 不兼容 |
+**必须先区分两类阻塞，不可混为一谈：**
+
+- `PROJECT FAILURE` —— OpenArc 项目自身的安装或构建流程确实有问题。
+- `AGENT EXECUTION ENVIRONMENT BLOCK` —— 当前 Agent / sandbox 执行环境的限制，
+  **不能据此判断 OpenArc 安装流程本身失败**，必须在普通终端或 CI clean clone 中重新验证。
+
+| 项 | 分类 | 原因与处理 |
+| --- | --- | --- |
+| `npm ci` | **AGENT EXECUTION ENVIRONMENT BLOCK** | 当前 Agent 环境的批量删除保护拦截（`SAFE_DELETE_BULK_CONFIRM_REQUIRED`，54 项 > 阈值 50），且已删掉部分依赖导致依赖树损坏，已从备份恢复。`npm ci --dry-run` 通过（54 包、无冲突），说明 lockfile 本身没问题。**是否 PROJECT FAILURE：UNKNOWN，需 clean clone 复验** |
+| `npm install` | **AGENT EXECUTION ENVIRONMENT BLOCK** | 当前 Agent 环境拒绝 `node_modules/.bin` 内的 rename（`CODEBUDDY_BROKER_DENY`）。依赖恢复改用手写拷贝。**同上，需 clean clone 复验** |
+| Electron 二进制安装（官方源） | **AGENT EXECUTION ENVIRONMENT BLOCK** | GitHub Releases 在本环境不可达（curl 返回 000）。改用 npmmirror 镜像下载并校验 SHA256 通过后手工解包。**这是环境网络限制，不是项目缺陷；普通网络下 `npm install` 应能自行取到二进制，仍需复验** |
+| `npm run test:desktop` | **UNRESOLVED / NOT VERIFIED** | Playwright Electron driver 与当前 Electron 44 / Chromium 152 / 本项目组合发生启动超时（`_electron.launch` 握手 180 s 超时；同机简单 app 只需 808 ms、vibrancy 窗口 784 ms）。`chromium.connectOverCDP` 同样在 WS 连接后超时。**根因尚未确认**——版本兼容性只是候选原因之一，未取得上游证据或最小复现证明。**不得表述为"Playwright 与 Chromium 152 不兼容"** |
 
 ---
 
@@ -184,8 +190,11 @@
 2. 当前架构下"被其他 OpenArc 窗口遮挡"实际不会发生（聚焦窗口总被移到 `wins` 末尾即最上层），
    遮挡判定的真实触发者是 AI 面板、搜索面板与**右键菜单**。窗口遮挡分支作为防御保留。
 3. 单个矩形视图无法做非矩形裁剪：圆角、部分遮挡都做不到像素级正确。若 D2-02 需要
-   "窗口压住网页时网页只显示未被覆盖的部分"，必须改为每个 OpenArc 窗口一个原生 `BrowserWindow`，
-   或改用多视图拼接——这是架构决策，不在 D1-01 拍板。
+   "窗口压住网页时网页只显示未被覆盖的部分"，**当前只确认约束，未确认方案**——
+   候选方案包括但不限于：WebContentsView hide/show、矩形 bounds 管理、多 WebContentsView、
+   Child BrowserWindow、独立 BrowserWindow，或其他经验证的方案。
+   **状态：ARCHITECTURE DECISION REQUIRED**。需要单独 ADR + 原型验证后决定，**本轮不锁定实现**，
+   尤其不得直接断言"必须改为每个窗口一个原生 BrowserWindow"。
 4. `setVisible(false)` 后视图内容仍在（URL 不变），恢复显示无需重新导航。
 
 ---
@@ -199,9 +208,11 @@ NOT VERIFIED。本环境无 GPU 进程（`GPU process exited unexpectedly`），
 
 ## Decisions
 
-1. **D1 阶段维持"单原生窗口 + DOM 内层窗口"**，不引入"每个 OpenArc 窗口一个原生 BrowserWindow"。
+1. **D1 阶段维持"单原生窗口 + DOM 内层窗口"**（范围决策，非架构决策）。
    理由：本轮已证明原生层具备多窗口、焦点互斥、多显示器感知能力，改造窗口系统是 D2-02 的范围，
-   不应由 D1-01 顺带扩大。风险已记入 Remaining Risks。
+   不应由 D1-01 顺带扩大。
+   **本决策不预设 D2-02 的实现方案**：WebContentsView hide/show、bounds 管理、多视图、
+   Child / 独立 BrowserWindow 等候选均保持开放，需单独 ADR + 原型验证后决定（见 Browser View Findings #3）。
 2. **窗口几何与遮挡判定抽成纯函数 `electron/geometry.cjs`**，界面与主进程共用，可被 `node --test` 直接覆盖。
 3. **窗口几何持久化到 `localStorage` 的 `oa-wins`**，恢复时先收拢再渲染；显示器变化由主进程 `screen` 事件驱动。
 4. **原生视图的显示条件收敛为单一 `blocked` 判定**（AI 面板 / 搜索 / 右键菜单 / 更高层窗口），
@@ -217,11 +228,39 @@ NOT VERIFIED。本环境无 GPU 进程（`GPU process exited unexpectedly`），
 1. **无 Windows 主机**：mica、任务栏、系统快捷键、打包签名全部未验，D1-06 前必须补。
 2. **无第二块显示器**：A05 的物理拔插场景未取得实机证据。
 3. **Chromium 沙箱在本环境不可用**：渲染进程沙箱只有配置证据，没有运行时证据；换到正常 CI 后需补跑。
-4. **Playwright 与 Electron 44 不兼容**：`tests/desktop.mjs` 端到端断言无法执行，
-   A12/A13 的应用内行为只拿到主进程侧等价证据（同样的隔离配置与同样的策略函数）。
-5. **部分遮挡与圆角裁剪的观感未验**：若 D2-02 要求像素级正确，需要改窗口架构。
+4. **UI 侧端到端断言无法执行（UNRESOLVED / NOT VERIFIED）**：Playwright Electron driver 与
+   Electron 44 / Chromium 152 / 本项目组合启动超时，根因未确认。A12/A13 的应用内行为目前只拿到
+   主进程侧等价证据（同样的隔离配置与同样的策略函数）。解除前 UI E2E 一律记为 NOT VERIFIED。
+5. **部分遮挡与圆角裁剪的观感未验**：**ARCHITECTURE DECISION REQUIRED**。
+   若 D2-02 要求像素级正确，需先出 ADR + 原型，方案未定、不得提前锁定。
+6. **`npm ci` / `npm install` / 官方源二进制下载均为 AGENT EXECUTION ENVIRONMENT BLOCK**，
+   不是已证实的 PROJECT FAILURE。必须在普通终端或 CI clean clone 中复验后才能定性。
 6. **窗口几何持久化未做版本与异常校验之外的保护**：当前只校验字段类型与有限数值，
    D2-02 需要与应用生命周期（未保存内容、关闭与退出区分）一起设计。
+
+---
+
+## D1-01 未完成清单（保留，不删除，D1-06 前必须复查）
+
+以下 14 项本轮未取得证据，**持续保留**，后续补证。D1-06 关卡评审前必须逐项重新检查；
+未清空前 D1-01 状态恒为 **PARTIAL**，不得改判 PASS / COMPLETE。
+
+| # | 未完成项 | 当前状态 |
+| --- | --- | --- |
+| 1 | Windows Mica 实机 | NOT VERIFIED |
+| 2 | Windows 窗口行为 | NOT VERIFIED |
+| 3 | Windows 多显示器 | NOT VERIFIED |
+| 4 | macOS vibrancy 视觉 | NOT VERIFIED |
+| 5 | 真实多显示器拔插 | NOT VERIFIED |
+| 6 | 高 DPI | NOT VERIFIED |
+| 7 | 圆角 / 遮挡 | NOT VERIFIED（且 ARCHITECTURE DECISION REQUIRED） |
+| 8 | renderer sandbox 运行时强制 | NOT VERIFIED |
+| 9 | 下载（应用内运行时） | NOT VERIFIED |
+| 10 | permission（应用内运行时） | NOT VERIFIED |
+| 11 | external protocol（应用内运行时） | NOT VERIFIED |
+| 12 | `window.open` runtime | NOT VERIFIED |
+| 13 | UI E2E | NOT VERIFIED（UNRESOLVED，见 BLOCKED） |
+| 14 | GPU 性能 | NOT VERIFIED |
 
 ---
 

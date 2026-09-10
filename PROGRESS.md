@@ -36,9 +36,11 @@
 | A05 多窗口/多屏还原可见 | PASS（单屏几何层） | `tests/geometry.test.mjs` 5/5；`clampAll` 在显示变化时收敛 |
 | A12 菜单/UI 不穿透 | PASS（修复后） | 桌面右键菜单原先未进入原生视图可见性判定，已修 |
 | Windows 平台 | NOT VERIFIED | 本机无 Windows 主机，mica/打包/窗口行为均未实测 |
-| UI 侧端到端（Playwright） | BLOCKED | Playwright 1.55 与 Chromium 152 不兼容，`_electron` 与 `connectOverCDP` 均超时 |
+| UI 侧端到端 | UNRESOLVED / NOT VERIFIED | Playwright Electron driver 与 Electron 44 / Chromium 152 / 本项目组合启动超时，**根因未确认**，版本兼容性仅为候选原因之一 |
 | 运行时沙箱强制执行 | NOT VERIFIED | 本机 Chromium sandbox 初始化失败，需 `--no-sandbox --in-process-gpu` 才能起进程 |
 | 物理多显示器插拔 | NOT VERIFIED | 本机单显示器 |
+| `npm ci` / `npm install` / 官方源二进制 | AGENT EXECUTION ENVIRONMENT BLOCK | **不是已证实的 PROJECT FAILURE**，必须在普通终端或 CI clean clone 复验后才能定性 |
+| D2-02 窗口/视图架构 | ARCHITECTURE DECISION REQUIRED | 只确认"原生视图在 renderer DOM 合成层之外，DOM z-index 无法覆盖"，方案未定、不提前锁定 |
 
 完整证据与判定见 `docs/decisions/D1-01-desktop-native-view.md`。
 
@@ -50,12 +52,21 @@
 4. 窗口边界收敛逻辑原先散落在 `src/main.tsx`，已统一到 `electron/geometry.cjs` 并可被单测覆盖。
 5. 浏览器占位文案与实际可见性不一致（隐藏时仍显示"已就绪"），已按真实状态输出。
 
-### 下一步（需先解除阻塞，不自动进入 D1-02）
+### D1-01 未完成清单（保留，D1-06 前复查）
+
+Windows Mica 实机、Windows 窗口行为、Windows 多显示器、macOS vibrancy 视觉、真实多显示器拔插、
+高 DPI、圆角/遮挡、renderer sandbox 运行时、下载、permission、external protocol、`window.open` runtime、
+UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-01 状态恒为 **PARTIAL**，不得改判 PASS / COMPLETE。
+
+### 下一步
 
 1. 在 Windows 主机上执行 D1-01 未验证项，补齐双平台证据。
-2. 解决 Playwright 与 Chromium 152 的兼容问题（升级 Playwright 或改用 CDP 直连方案），恢复 UI 侧 A12/A13/A05 自动化。
+2. 定位 UI 侧启动超时的根因（最小复现 + 上游 issue），而非假定是版本不兼容。
 3. 在支持 Chromium sandbox 的机器上验证运行时沙箱强制执行。
-4. 上述完成后再判定 D1-01 是否达到 COMPLETE。
+4. 在普通终端 / CI clean clone 中复验 `npm ci` / `npm install`，确认不是项目缺陷。
+5. 出 D2-02 窗口与视图架构 ADR（候选方案均未锁定）。
+
+说明：D1-01 PARTIAL 不阻止 D1-02 开始。真正禁止的是在 D1-01 ～ D1-05 未达关卡要求时宣布 D1-06 PASS。
 
 ### 待验证（沿用）
 
