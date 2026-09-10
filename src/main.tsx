@@ -2,11 +2,19 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Search, ArrowLeft, ArrowRight, RotateCw, X, Minus, Maximize2, Monitor } from "lucide-react";
 import "./styles.css";
+import geometry from "../electron/geometry.cjs";
 type BrowserState = {
   url: string;
   loading: boolean;
   title: string;
   error: string;
+};
+type DisplayInfo = {
+  id: number;
+  scaleFactor: number;
+  workArea: { x: number; y: number; width: number; height: number };
+  internal: boolean;
+  primary: boolean;
 };
 declare global {
   interface Window {
@@ -15,6 +23,7 @@ declare global {
       layout: (p: unknown) => Promise<void>;
       action: (a: string) => Promise<void>;
       onBrowser: (cb: (s: BrowserState) => void) => () => void;
+      onDisplay: (cb: (d: DisplayInfo[]) => void) => () => void;
     };
   }
 }
@@ -31,6 +40,38 @@ type Win = {
   restore?: number[];
 };
 const FOLDER_PREFIX = "folder:";
+// 桌面工作区：顶栏之下、Dock 之上。所有窗口恢复时的收拢基准。
+const AREA_TOP = 44;
+const AREA_BOTTOM = 114;
+const workArea = () => ({
+  x: 0,
+  y: AREA_TOP,
+  width: innerWidth,
+  height: Math.max(geometry.MIN_H, innerHeight - AREA_TOP - AREA_BOTTOM),
+});
+const isWin = (v: unknown): v is Win => {
+  const w = v as Win;
+  return (
+    !!w &&
+    typeof w.id === "string" &&
+    ["x", "y", "w", "h"].every((k) => Number.isFinite(w[k as keyof Win] as number))
+  );
+};
+// A05：恢复持久化的窗口几何，并立即收拢到当前可见工作区。
+function restoreWins(): Win[] {
+  const fallback: Win[] = [
+    { id: "home", x: 90, y: 94, w: 830, h: 570, min: false, max: false },
+  ];
+  try {
+    const raw = localStorage.getItem("oa-wins");
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (!Array.isArray(parsed) || !parsed.length || !parsed.every(isWin))
+      return fallback;
+    return geometry.clampAll(parsed as Win[], [workArea()]);
+  } catch {
+    return fallback;
+  }
+}
 const icon = (name: string) => "./icons/" + name + ".png";
 const apps = [
   { id: "home", name: "应用中心", icon: "apps" },
@@ -41,9 +82,7 @@ const apps = [
   { id: "settings", name: "系统设置", icon: "settings" },
 ] as const;
 function App() {
-  const [wins, setWins] = useState<Win[]>([
-    { id: "home", x: 90, y: 94, w: 830, h: 570, min: false, max: false },
-  ]);
+  const [wins, setWins] = useState<Win[]>(restoreWins);
   const [folders, setFolders] = useState<Folder[]>(() => {
     try {
       const raw = localStorage.getItem("oa-folders");
@@ -78,6 +117,7 @@ function App() {
       title: "浏览器",
       error: "",
     });
+  const [browserHidden, setBrowserHidden] = useState(false);
   const [note, setNote] = useState(""),
     [endpoint, setEndpoint] = useState(""),
     [model, setModel] = useState("");
@@ -185,6 +225,18 @@ function App() {
   useEffect(() => {
     localStorage.setItem("oa-folders", JSON.stringify(folders));
   }, [folders]);
+  // A05：窗口几何持久化，重启后才有"恢复"这回事
+  useEffect(() => {
+    localStorage.setItem("oa-wins", JSON.stringify(wins));
+  }, [wins]);
+  // 显示器增删或分辨率变化后重新收拢所有窗口
+  useEffect(
+    () =>
+      window.openarc?.onDisplay(() =>
+        setWins((ws) => geometry.clampAll(ws, [workArea()])),
+      ),
+    [],
+  );
   useEffect(() => {
     const dock = dockRef.current;
     if (!dock) return;
@@ -231,25 +283,19 @@ function App() {
   useEffect(() => {
     const clamp = () =>
       setWins((ws) =>
-        ws.map((w) =>
-          w.max
-            ? { ...w, x: 12, y: 52, w: innerWidth - 24, h: innerHeight - 158 }
-            : {
-                ...w,
-                w: Math.min(w.w, innerWidth - 24),
-                h: Math.min(w.h, innerHeight - 158),
-                x: Math.max(
-                  0,
-                  Math.min(w.x, innerWidth - Math.min(w.w, innerWidth - 24)),
-                ),
-                y: Math.max(
-                  44,
-                  Math.min(
-                    w.y,
-                    innerHeight - 100 - Math.min(w.h, innerHeight - 158),
-                  ),
-                ),
-              },
+        geometry.clampAll(
+          ws.map((w) =>
+            w.max
+              ? {
+                  ...w,
+                  x: 12,
+                  y: 52,
+                  w: innerWidth - 24,
+                  h: Math.max(geometry.MIN_H, innerHeight - 158),
+                }
+              : w,
+          ),
+          [workArea()],
         ),
       );
     window.addEventListener("resize", clamp);
@@ -272,12 +318,23 @@ function App() {
   useLayoutEffect(() => {
     const sync = () => {
       const rect = viewport.current?.getBoundingClientRect();
-      void window.openarc?.layout({
-        visible: active === "browser" && !ai && !search && !!rect,
-        bounds: rect
-          ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
-          : null,
-      });
+      const target = rect
+        ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+        : null;
+      // A12：原生 WebContentsView 永远绘制在 DOM 之上，任何更高层的窗口压到
+      // 网页区都必须隐藏视图，否则网页会穿透 OpenArc 的窗口。
+      const index = wins.findIndex((w) => w.id === "browser");
+      const above =
+        index >= 0
+          ? wins
+              .slice(index + 1)
+              .filter((w) => !w.min)
+              .map(geometry.rectOf)
+          : [];
+      const blocked = ai || search || !!menu || geometry.occluded(target, above);
+      const shown = active === "browser" && !blocked && !!target;
+      setBrowserHidden(!shown);
+      void window.openarc?.layout({ visible: shown, bounds: target });
     };
     sync();
     const observer = new ResizeObserver(sync);
@@ -287,7 +344,7 @@ function App() {
       observer.disconnect();
       window.removeEventListener("resize", sync);
     };
-  }, [wins, active, ai, search]);
+  }, [wins, active, ai, search, menu]);
   const drag = (e: React.PointerEvent, id: string, resize = false) => {
     if ((e.target as HTMLElement).closest("button,input") && !resize) return;
     const w = wins.find((v) => v.id === id)!;
@@ -508,10 +565,11 @@ function App() {
               alt=""
               draggable={false}
             />
-            <p>
-              {active === "browser" && !ai && !search
-                ? "网页内容将在此处显示"
-                : "网页已暂时隐藏，避免遮挡系统窗口"}
+            {/* 文案必须与实际是否显示原生视图一致，否则界面会撒谎 */}
+            <p data-view={browserHidden ? "hidden" : "shown"}>
+              {browserHidden
+                ? "网页已暂时隐藏，避免遮挡系统窗口"
+                : "网页内容将在此处显示"}
             </p>
           </div>
         </div>
