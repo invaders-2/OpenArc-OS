@@ -115,7 +115,7 @@
    * 但在"透明窗口 + app-region: drag + backdrop-filter"这个组合下，它的合成层会被错位残留 ——
    * 表现为顶栏下沿多出一条横贯全宽的"小框"，而且只有开关覆盖层（例如全局 AI）才会刷掉/重现
    * （用户实测：点开 AI 就没、关掉又出现）。去掉它即可根除这一类残留；
-   * 窗口滑到顶栏下方时的磨砂由窗口自己的 window-scrim 负责。
+   * 窗口顶部不设任何磨砂层（用户口径：全透明），所以这里也没有需要跟它配合的东西。
    */
   transform: translateZ(0);
   /* 顶栏无底色（--bar 0），不能再有投影，否则会在桌面留下一条幽灵暗边 */
@@ -1294,58 +1294,8 @@ input[type="checkbox"] {
 .desktop[data-glass="full"]:not(.dark) .window:has(.split) .split-side {
   background-image: linear-gradient(rgba(0, 0, 0, 0.035), rgba(0, 0, 0, 0.035));
 }
-/* 窗口内部的"顶部磨砂渐变"：内容往上滚时钻进工具栏下面、被逐渐吃掉（Finder 口径）。
-   sticky + 负 margin：不占布局高度，却始终贴在滚动容器顶部，blur 作用于它背后的滚动内容。 */
-/* macOS 口径的"渐进磨砂"（复刻 NSVisualEffectView 的 headerView 观感）：
-   不是"一条硬边的模糊"，而是**多层 backdrop-filter 叠在同一段高度上，每层用不同斜率的 mask**，
-   于是模糊强度自上而下连续衰减；再叠一层极淡的材质底色与一道柔和投影，把它"托"成一条工具栏。
-   注：父层刻意**不加** backdrop-filter —— 否则子层的 backdrop 采样不到页面真实内容。 */
-.window-scrim {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 76px;
-  z-index: 1;
-  pointer-events: none;
-  /* 用户口径：**材质底色的透明度直接给 0** —— 不要任何渐变色，
-     只保留纯磨砂（下面两层 backdrop blur）。这样顶部完全"透明但糊"，
-     既不会出现任何硬边/底框，也不会读出滚上去的内容。 */
-  background: none;
-}
-/* 磨砂条横跨**整个窗口**（含侧栏区域）；但侧栏自己在上层（z-index 2）→ 不会被压住。
-   实测：scrim x 142..972（整窗），侧栏 x 150..342 且 z-index 2 > scrim 的 1。 */
-/* 第 1 层：轻模糊，几乎覆盖整段高度 → 顶部开始"化开" */
-.window-scrim::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  /* 用户口径：**不要任何提色**。带 saturate() 时，模糊层会把壁纸的颜色提亮，
-     看起来就像顶部"又染了一层主题色"。纯 blur 才是无色磨砂。 */
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 52%, transparent 100%);
-  -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 52%, transparent 100%);
-}
-/* 第 2 层：强模糊，只在最上面一段 → 越靠顶越糊（渐进） */
-.window-scrim::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  /* 同上：纯 blur，不提色 */
-  backdrop-filter: blur(64px);
-  -webkit-backdrop-filter: blur(64px);
-  mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 30%, transparent 70%);
-  -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 30%, transparent 70%);
-}
-/* 工具条自己贴顶，内容从它下面滚过去 */
-.pane-toolbar {
-  position: sticky;
-  top: 0;
-  z-index: 3;
-}
+/* 顶部磨砂层已按用户口径整层去掉，因此工具条**不再贴顶**（否则它会悬在滚动内容上、
+   又没有背景可依靠）。工具条随内容一起滚。 */
 /* 系统文字默认不可选中：拖拽 / 框选时误选文字是真实困扰；输入框与预格式文本除外 */
 .desktop {
   user-select: none;
