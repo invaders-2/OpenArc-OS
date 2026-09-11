@@ -11,7 +11,9 @@
     "test": "node --test tests/*.test.mjs",
     "test:native": "node tests/native-view.mjs",
     "test:desktop": "npm run build && node tests/desktop.mjs",
-    "test:security": "node experiments/d1-05/run-all.mjs"
+    "test:security": "node experiments/d1-05/run-all.mjs",
+    "test:design-system": "npm run build && node experiments/d2-01/run-all.mjs",
+    "test:theme-baseline": "npm run build && node experiments/d1-04/theme-matrix.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
