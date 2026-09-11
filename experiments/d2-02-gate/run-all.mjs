@@ -30,11 +30,15 @@ let failedEarly = false;
 const ENV_TOLERANT = ["inst.focusPreconditionWindowIsKey"];
 for (const [probe, title] of steps) {
   console.log(`\n${"=".repeat(78)}\n== ${probe} · ${title}\n${"=".repeat(78)}`);
+  const artifact = path.join(artifacts, `${probe}.json`);
+  // **先删掉上一轮的产物**。否则探针崩溃时（没写出 RESULT）汇总会读到上一次的
+  // 旧数字，把"没跑起来"显示成"全通过"—— 2026-09-11 实测踩到过：
+  // 未带 ELECTRON_EXTRA_ARGS 时 00–06 全部崩溃，汇总却逐行显示 14/14、42/42。
+  fs.rmSync(artifact, { force: true });
   const r = spawnSync(process.execPath, [path.join(here, `${probe}.mjs`)], {
     stdio: "inherit",
     env: process.env,
   });
-  const artifact = path.join(artifacts, `${probe}.json`);
   let stats = { pass: 0, fail: 0, total: 0 };
   let realFailures = [];
   if (fs.existsSync(artifact)) {
@@ -43,6 +47,9 @@ for (const [probe, title] of steps) {
     stats = { pass: cases.filter((c) => c.ok).length, fail: cases.filter((c) => !c.ok).length, total: cases.length };
     realFailures = cases.filter((c) => !c.ok && !ENV_TOLERANT.includes(c.id)).map((c) => c.id);
     if (report.errors?.length) stats.errors = report.errors.length;
+  } else {
+    // 没有产物 = 探针根本没跑起来（崩溃 / 被信号杀掉）。必须显式区别于"跑了但 0 通过"。
+    stats.missing = true;
   }
   summary.push({ probe, title, exit: r.status, ...stats, realFailures });
   if (probe === "00-instrument" && (realFailures.length > 0 || stats.errors)) {
@@ -57,7 +64,8 @@ for (const [probe, title] of steps) {
 console.log(`\n${"=".repeat(78)}\n== D2-02A Gate 汇总\n${"=".repeat(78)}`);
 for (const s of summary) {
   console.log(
-    `  ${s.exit === 0 ? "OK  " : "FAIL"} ${s.probe.padEnd(16)} ${String(s.pass).padStart(3)}/${String(s.total).padEnd(3)} 通过` +
+    `  ${s.exit === 0 ? "OK  " : "FAIL"} ${s.probe.padEnd(16)} ` +
+      (s.missing ? "未产出结论（探针未跑起来）".padEnd(12) : `${String(s.pass).padStart(3)}/${String(s.total).padEnd(3)} 通过`) +
       `${s.errors ? `  探针错误 ${s.errors}` : ""}  ${s.title}`,
   );
 }

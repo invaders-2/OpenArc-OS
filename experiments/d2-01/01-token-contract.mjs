@@ -419,6 +419,10 @@ const LARGE_WHITELIST = [
   ".ai-panel", // AI 侧栏面板（D1-04 既有）
   ".search-panel", // 全局搜索面板（D1-04 既有）
   ".ds-surface--large", // D2-01 显式选择加入的大面积 Surface
+  // D2-02 新增：模态对话框。它是**真正的**大面积表面 ——
+  // 打开时整块遮住桌面，在 REDUCED 下转实色正好减少被 backdrop-filter 覆盖的面积，
+  // 与 D1-04 的性能杠杆同向。登记它是为了让后来者必须回答"它真的是大面积吗"。
+  ".dialog",
 ];
 const largeRefs = [];
 for (const [file, rules] of [

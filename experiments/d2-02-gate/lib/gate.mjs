@@ -21,7 +21,8 @@ import path from "node:path";
 const require = createRequire(import.meta.url);
 export const electronPath = require("electron");
 const here = path.dirname(fileURLToPath(import.meta.url));
-const nativeDir = path.join(here, "..", "native");
+const defaultNativeDir = path.join(here, "..", "native");
+export const nativeDir = defaultNativeDir;
 export const artifactsDir = path.join(here, "..", "..", "..", "artifacts", "d2-02");
 export const extraArgs = (process.env.ELECTRON_EXTRA_ARGS || "").split(" ").filter(Boolean);
 
@@ -41,9 +42,15 @@ export function cleanEnv(extra = {}) {
 }
 export const hadRunAsNode = () => !!process.env.ELECTRON_RUN_AS_NODE;
 
-/** 跑一个 native 探针，返回其 RESULT 报告。超时或未输出即抛错。 */
-export function runNative(probe, { timeout = 300000, env = {} } = {}) {
-  const child = spawn(electronPath, [nativeDir, ...extraArgs], {
+/**
+ * 跑一个 native 探针，返回其 RESULT 报告。超时或未输出即抛错。
+ *
+ * `nativeDir` 可覆盖探针宿主目录 —— D2-02B 的产品侧原生探针
+ * （experiments/d2-02/native）复用本函数，从而也复用了 cleanEnv 的剥离逻辑，
+ * 不必把 `ELECTRON_RUN_AS_NODE` 那条踩坑记录再抄一遍。
+ */
+export function runNative(probe, { timeout = 300000, env = {}, nativeDir: dir = defaultNativeDir } = {}) {
+  const child = spawn(electronPath, [dir, ...extraArgs], {
     stdio: ["ignore", "pipe", "pipe"],
     env: cleanEnv({ GATE_PROBE: probe, ...env }),
   });

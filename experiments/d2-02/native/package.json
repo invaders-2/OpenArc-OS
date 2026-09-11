@@ -1,0 +1,7 @@
+{
+  "name": "openarc-d2-02-native-probe-host",
+  "version": "0.0.0",
+  "private": true,
+  "description": "D2-02B 产品侧原生探针宿主。必须以目录方式启动：electron experiments/d2-02/native",
+  "main": "main.cjs"
+}
