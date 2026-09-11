@@ -558,16 +558,17 @@ input[type="checkbox"] {
   /* 浮窗侧栏：上下左右都离窗口一点距离，圆角 + 投影 + 玻璃材质。
      因为 window-body 被上提盖住标题栏，这张卡片的顶边就在窗口顶部附近，
      原生红绿灯正好落在卡片内部。 */
-  margin: 10px 8px 10px 10px;
-  padding: 8px;
+  margin: 8px;
+  padding: 6px 8px 10px;
   border-radius: var(--radius-lg);
   background: rgb(var(--text-rgb) / 0.06);
   backdrop-filter: var(--glass-filter-window);
   box-shadow: var(--elevation-1);
 }
 .split-section {
-  padding: 13px 8px 5px;
+  padding: 12px 8px 4px;
   font-size: var(--fs-micro);
+  line-height: 1.2;
   color: var(--muted);
 }
 .split-side > .split-section:first-child {
@@ -588,7 +589,7 @@ input[type="checkbox"] {
   padding-top: 64px;
 }
 .window:has(.split) .split-side {
-  padding-top: 52px;
+  padding-top: 44px;
 }
 .split-main {
   flex: 1 1 auto;
@@ -600,14 +601,17 @@ input[type="checkbox"] {
 .split-nav {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
-  padding: 8px 10px;
-  border-radius: var(--radius-md);
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--muted);
   text-align: left;
   font-size: var(--fs-secondary);
+  /* 对齐 macOS 侧栏：行距收紧、字距略负，行高约 30px */
+  line-height: 1.25;
+  letter-spacing: -0.08px;
   transition: background var(--quick) var(--ease), color var(--quick) var(--ease);
 }
 .split-nav:hover {

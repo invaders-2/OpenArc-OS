@@ -1,5 +1,19 @@
 # 计划修订记录
 
+## 2026-09-12：侧栏间距/字号按原生 Finder 收紧
+
+用户复审：「边距没有做好，字体的间距也没有做好，看看原生 Apple Mac 的窗口」。
+对照原生 Finder 侧栏实测：行距约 31–33、图标 16、标签 13、行内边距更紧、组标题 11 且更收。
+
+- `.split-nav`：`padding 8px 10px → 6px 8px`、`gap 10 → 8`、`radius 8 → 6`，
+  新增 `line-height: 1.25` 与 `letter-spacing: -0.08px`（行高 28.3px，对齐 macOS 侧栏节奏）。
+- `.split-section`：`padding 13px 8px 5px → 12px 8px 4px` + `line-height: 1.2`。
+- `.split-side`：卡片四周距统一为 `margin: 8px`（原 10/8/10/10 不齐），
+  内边距 `6px 8px 10px`，红绿灯下方首项间距 52px → 44px。
+
+实测（Playwright 读数）：`.split-side` 188×554、margin 8、radius 12；`.split-nav` 高 28.3、
+字号 13/行高 16.25/字距 -0.08/内距 6×8/图标间距 8；`.split-section` 高 22.2、字号 11。
+
 ## 2026-09-12：侧栏改为内缩浮层卡片（红绿灯在卡片内）
 
 用户复审：「左侧边栏上下左右的边距要离窗口有一点点距离，那样才有浮窗效果」。
