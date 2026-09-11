@@ -1,105 +1,15 @@
-:root {
-  font-family:
-    -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
-    "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI",
-    "Microsoft YaHei", sans-serif;
-  color: #1d1d1f;
-  font-size: 14px;
-  font-weight: 400;
-  font-synthesis: none;
-  -webkit-font-smoothing: antialiased;
-  --text: #1d1d1f;
-  --muted: #6e6e73;
-  /* ── 玻璃材质层（D1-04B）─────────────────────────────────────────
-     三个维度互相正交，各自只碰自己的原料：
-       Theme  light / dark   → 只改 *-rgb 与 light/dark 的 alpha 基线
-       Glass  full / reduced / solid → 只改材质参数（alpha / blur / saturate）
+/* ══════════════════════════════════════════════════════════════════════════
+   OpenArc OS — 组件与布局样式
 
-     :root 只存原料，不存合成结果。合成一律在各消费位置用
-       rgb(var(--x-rgb) / var(--x-alpha))
-     完成。
+   Token 权威在 `src/design-system/tokens.css`（由 main.tsx 先于本文件导入）。
+   本文件**不得**声明任何自定义属性原料（`--x-rgb` / `--x-alpha`）或主题值；
+   需要的颜色 / 圆角 / 间距 / 时长 / 阴影一律引用 token。
 
-     为什么不在 token 层合成：var() 会在"声明它的元素"上完成替换并把结果
-     继承下去。若在 :root 写 --surface: rgb(var(--surface-rgb) / ...)，
-     那么 .dark 再改 --surface-rgb 不会回头影响已经算完的 --surface，
-     深色会被算成浅色。这个坑在 D1-04B 上真实发生过一次。 */
+   遗留说明：D1-04 之前本文件同时承担 token 与组件两层职责，D2-01 已把 token
+   层整层迁出。此处仍保留少量**未在刻度上**的圆角/间距字面值，属迁移欠账，
+   清单见 docs/decisions/D2-01-design-system.md §Radius / §Spacing。
+   ══════════════════════════════════════════════════════════════════════════ */
 
-  /* ── 主题原料：light 基线 ── */
-  --surface-rgb: 255 255 255;
-  --content-rgb: 255 255 255;
-  --bar-rgb: 255 255 255;
-  --pill-rgb: 255 255 255;
-  --surface-alpha: 0.68;
-  --content-alpha: 0.94;
-  /* 顶栏与 Dock 无底色填充（用户指定透明度 0），与深色口径一致 */
-  --bar-alpha: 0;
-  --pill-alpha: 0.58;
-
-  /* ── 材质原料：full 基线 ──
-     每个表面一条完整滤镜。用完整值而不是 blur()+saturate() 拼接，
-     是为了让 reduced 真正去掉 saturate——写成 saturate(1) 视觉等价，
-     但仍会保留一条滤镜链。 */
-  --glass-filter: blur(40px) saturate(1.8);
-  --glass-filter-window: blur(34px) saturate(1.8);
-  --glass-filter-pill: blur(32px) saturate(1.8);
-  --glass-filter-dock: blur(44px) saturate(1.8);
-  --glass-filter-tip: blur(24px) saturate(1.8);
-
-  --sunken: rgba(0, 0, 0, 0.04);
-  --line: rgba(0, 0, 0, 0.12);
-  --accent: #1d1d1f;
-  --on-accent: #fff;
-  --focus: #1d1d1f;
-  --failed: #d70015;
-  --shadow: 0 12px 40px rgba(0, 0, 0, 0.16);
-  --radius: 16px;
-  --quick: 160ms;
-  --standard: 220ms;
-  --ease: cubic-bezier(0.2, 0, 0, 1);
-}
-* {
-  box-sizing: border-box;
-}
-h1,
-h2,
-h3,
-h4,
-strong,
-b {
-  font-weight: 500;
-}
-body {
-  margin: 0;
-  overflow: hidden;
-  background: #f5f5f7;
-}
-body:has(.dark) {
-  background: #000;
-}
-button,
-input,
-textarea {
-  font: inherit;
-}
-button {
-  cursor: pointer;
-  color: inherit;
-  border: 0;
-  background: transparent;
-}
-button:focus-visible,
-input:focus-visible,
-textarea:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
-}
-button:active {
-  filter: brightness(0.93);
-}
-input,
-textarea {
-  color: var(--text);
-}
 .desktop {
   height: 100vh;
   overflow: hidden;
@@ -130,26 +40,8 @@ textarea {
     inset 25px 0 80px rgba(255, 255, 255, 0.47);
 }
 .dark {
-  --text: #f5f5f7;
-  --muted: #98989d;
-  /* 深色只覆盖主题原料：RGB 通道 + alpha 基线。
-     深色统一基色 #171717，层级靠 alpha 分档（合成于纯黑桌面之上） */
-  --surface-rgb: 23 23 23;
-  --content-rgb: 23 23 23;
-  --bar-rgb: 23 23 23;
-  --pill-rgb: 23 23 23;
-  --surface-alpha: 0.5;
-  --content-alpha: 0.6;
-  /* 顶栏与 Dock 只保留模糊，无底色填充（用户指定透明度 0） */
-  --bar-alpha: 0;
-  /* 桌面 AI 胶囊仍需可见底板，否则纯黑上只剩一行字 */
-  --pill-alpha: 0.72;
-  --sunken: rgba(0, 0, 0, 0.28);
-  --line: rgba(255, 255, 255, 0.16);
-  --accent: #f5f5f7;
-  --on-accent: #000;
-  --focus: #fff;
-  --failed: #ff453a;
+  /* 主题原料与主题作用域合成见 src/design-system/tokens.css（.dark）。
+     这里只放深色专属的**桌面环境光**——它不是 token，是桌面背景的一部分。 */
   /* 桌面环境光必须压得比窗口合成值（≈#0D0D0D）低，否则窗口会糊进背景 */
   background:
     radial-gradient(ellipse at 20% 80%, rgba(255, 255, 255, 0.03), transparent 65%),
@@ -171,91 +63,12 @@ textarea {
 .dark .illustrator {
   background: rgba(255, 255, 255, 0.12);
 }
-/* ── 材质档位 solid：无 backdrop-filter，全部实色 ─────────────────
-   SOLID 是唯一允许覆盖 RGB 通道的档位：没有模糊时，底色必须等于
-   它实际压着的桌面合成色，否则会浮出一条亮/暗带。 */
-.opaque,
-.desktop[data-glass="solid"] {
-  --surface-rgb: 245 245 247;
-  --surface-alpha: 1;
-  --content-rgb: 255 255 255;
-  --content-alpha: 1;
-  /* 顶栏处桌面 9 点均值 #efeff1、Dock 处 #e4e4e8，单一 token 取中点
-     #e9e9ec（D1-04 实测，experiments/d1-04/opaque-probe.mjs） */
-  --bar-rgb: 233 233 236;
-  --bar-alpha: 1;
-}
-.opaque.dark,
-.dark.desktop[data-glass="solid"] {
-  --surface-rgb: 12 12 12;
-  --surface-alpha: 1;
-  --content-rgb: 14 14 14;
-  --content-alpha: 1;
-  /* D1-04B：原值 #111111 比桌面亮 17 个 RGB 级，在纯黑桌面上形成一条亮带。
-     实测顶栏处真实桌面 = #000000（experiments/d1-04/opaque-probe.mjs）。 */
-  --bar-rgb: 0 0 0;
-  --bar-alpha: 1;
-  --pill-rgb: 0 0 0;
-  --pill-alpha: 1;
-}
-.opaque *,
-.desktop[data-glass="solid"] * {
-  backdrop-filter: none !important;
-}
+/* ── 材质档位 solid / reduced 的**token 部分**已整层迁至
+   src/design-system/tokens.css（含三种档位对照表与 D1-04C 的选择性玻璃定义）。
+   本文件只保留**组件行为**：哪些面在哪个档位换成实色、高光搬到哪一层、
+   实色面上 hover 用什么表达。 */
 
-/* ── 材质档位 reduced：选择性玻璃（D1-04C）──────────────────────────
-   性能杠杆 = **被 backdrop-filter 覆盖的总面积与面数**，不是模糊半径。
-   半径在 10–34px 区间几乎不影响成本（Chromium 按半径降采样 backdrop，
-   半径越大处理像素越少，两个效应抵消）。实测见 ADR 第 22 节。
-
-   所以 REDUCED = **大面积表面转实色，只在小面积系统 chrome 上保留玻璃**。
-   作用面白名单显式列出，不用 `.desktop[data-glass="reduced"] *` 这类全局规则。
-
-     Surface            FULL        REDUCED     SOLID
-     ──────────────────────────────────────────────────────
-     .topbar            玻璃        玻璃        实色
-     .dock              玻璃        玻璃        实色
-     .dock-tooltip      玻璃        玻璃        实色
-     .context-menu      玻璃        玻璃        实色
-     .assistant-pill    玻璃        玻璃        实色
-     .window-title      —(随窗口)   玻璃        实色
-     .window（容器）     玻璃        实色        实色
-     .window-body       —(随窗口)   实色        实色
-     .ai-panel          玻璃        实色        实色
-     .search-panel      玻璃        实色        实色
-     .app-card          无模糊      无模糊      无模糊
-       （卡片从来没有 backdrop-filter，它是"材质染色面"而非过滤面，
-         三档一致，不参与过滤面积统计。）
-
-   硬约束：不新增 border / hairline，不加重新阴影，不用 filter 补层级。
-   窗口边界仍靠明度差、alpha 与极轻阴影；浅色深色都必须可读。 */
-
-.desktop[data-glass="reduced"] {
-  /* 这段只当**视觉参数**用（小面积 chrome 的玻璃更薄），
-     不再声称"半径变小 ⇒ 成本下降"——该假设已被实测证伪。 */
-  --glass-filter: blur(12px);
-  --glass-filter-window: blur(10px);
-  --glass-filter-pill: blur(10px);
-  --glass-filter-dock: blur(13px);
-  --glass-filter-tip: blur(7px);
-  /* 小面积玻璃靠底色 alpha 找回可辨识度（light 基线） */
-  --surface-alpha: 0.9;
-  --content-alpha: 1;
-  --bar-alpha: 0.22;
-  --pill-alpha: 0.8;
-}
-
-/* ① 开关：REDUCED 把"大面积表面"的材质置 none。
-   引用 --glass-filter-large 的选择器就是大面积白名单成员：
-     .window / .ai-panel / .search-panel（产品内）
-     .oa-synth（性能载荷单元，模拟"额外的同尺寸大面"，见 perf-product.mjs）
-   没有用 `.desktop[data-glass="reduced"] *` 这类全局规则。
-   注意 --glass-filter-large 在别处**不定义**，所以 FULL 下各面自动回退到完整玻璃。 */
-.desktop[data-glass="reduced"] {
-  --glass-filter-large: none;
-}
-
-/* ② 窗口容器改为透明：容器若还留着不透明底色，标题条的 backdrop 只会采到它自己，
+/* 窗口容器改为透明：容器若还留着不透明底色，标题条的 backdrop 只会采到它自己，
    既白花一次合成、又看不到桌面。玻璃下沉到标题条这条 44px 窄带。 */
 .desktop[data-glass="reduced"] .window {
   background: transparent;
@@ -264,60 +77,31 @@ textarea {
   background: rgb(var(--surface-rgb) / var(--surface-alpha));
   backdrop-filter: var(--glass-filter-window);
 }
-/* ③ 窗口正文实色。用满 alpha 的 --content-rgb：深色即设计系统的统一基色 #171717、
+/* 窗口正文实色。用满 alpha 的 --content-rgb：深色即设计系统的统一基色 #171717、
    浅色 #fff，不引入新色。实测与 FULL 玻璃窗口的正文合成值只差 1 级（深色 23 vs 24），
    所以切档只去掉模糊，窗口明度不变，层级不被拉平（experiments/d1-04/reduced_probe.py）。 */
 .desktop[data-glass="reduced"] .window-body {
-  background: rgb(var(--content-rgb) / 1);
+  background: rgb(var(--content-rgb) / var(--content-alpha));
 }
-/* ④ 大面积浮层转实色；边界沿用各自原有阴影，不新增装饰 */
+/* 大面积浮层转实色；边界沿用各自原有阴影，不新增装饰 */
 .desktop[data-glass="reduced"] .ai-panel,
 .desktop[data-glass="reduced"] .search-panel {
   background: rgb(var(--surface-rgb) / 1);
 }
-/* ⑤ 窗口顶部 inset 高光原本打在 .window 上，会被标题条底色盖住；
+/* 窗口顶部 inset 高光原本打在 .window 上，会被标题条底色盖住；
    原样搬到标题条，保住材质厚度（同一条已有高光，不是新增装饰）。 */
 .dark.desktop[data-glass="reduced"] .window-title {
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 1px 0 var(--material-top-highlight);
 }
-.dark.desktop[data-glass="reduced"] {
-  --surface-alpha: 0.72;
-  /* ⑥ 内容面（卡片 / 设置内容 / 浏览器壳 / 视口）在 REDUCED 下**全不透明**：
-     它们从来没有 backdrop-filter，属"染色面"而非"过滤面"；
-     既然窗口正文已转实色，再留 0.82 只会白做一次 alpha 合成。
-     合成后仍是 #171717 家族，与 window-body 同色，层级靠既有阴影不靠这个 alpha。 */
-  --content-alpha: 1;
-  --bar-alpha: 0.22;
-  --pill-alpha: 0.94;
-}
-/* ⑦ 实色面板上的行级 hover 不能再用"同色 + alpha"：
+/* 实色面板上的行级 hover 不能再用"同色 + alpha"：
    在实色底上叠同色 rgba(...) 合成结果不变，hover 会消失。
-   REDUCED 与 SOLID 都命中这个条件（`--content-alpha` 为 1），所以两条都改。
-   沿用既有层级手段，不新增 border / 阴影 / 装饰：
-     浅色 → 复用既有 --sunken（4% 黑）：白面 255 → 245；
-     深色 → --sunken 是 28% 黑，在 #0C0C0C 这种近黑面上压黑只有 Δ3 级
-            （ΔL* 0.85，肉眼不可辨，实测见 experiments/d1-04/hover_probe.py）。
-            改为抬亮 3% 白：reduced 23 → 30、solid 12 → 19，Δ7 级，
-            与 FULL 档 hover 的 Δ6 级同量级，方向也与深色 UI 的"抬升"一致。 */
+   REDUCED 与 SOLID 都命中这个条件（--content-alpha 为 1），所以两条都改。
+   沿用既有层级手段，不新增 border / 阴影 / 装饰：走 --row-hover
+   （浅色 = --sunken 4% 黑；深色 = 3% 白抬亮，见 tokens.css）。 */
 .desktop[data-glass="reduced"] .search-result:hover,
 .desktop[data-glass="solid"] .search-result:hover,
 .opaque .search-result:hover {
-  background: var(--sunken);
-}
-.dark.desktop[data-glass="reduced"] .search-result:hover,
-.dark.desktop[data-glass="solid"] .search-result:hover,
-.dark.opaque .search-result:hover {
-  background: rgba(255, 255, 255, 0.03);
-}
-/* Reduce Motion —— 与材质档位完全无关，只碰动效时长。
-   D1-04B 之前 .reduced 只表示动效，材质档位另用 [data-glass]，不复用这个类名。 */
-.reduced {
-  --quick: 0ms;
-  --standard: 0ms;
-}
-.reduced * {
-  animation: none !important;
-  transition-duration: 0ms !important;
+  background: var(--row-hover);
 }
 .topbar {
   height: 38px;
@@ -1061,15 +845,6 @@ input[type="checkbox"] {
   }
   to {
     opacity: 1;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  :root {
-    --quick: 0ms;
-    --standard: 0ms;
-  }
-  * {
-    animation: none !important;
   }
 }
 @media (max-height: 800px) {

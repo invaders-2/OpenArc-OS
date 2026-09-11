@@ -1,6 +1,9 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Search, ArrowLeft, ArrowRight, RotateCw, X, Minus, Maximize2, Monitor } from "lucide-react";
+// Token 层必须先于组件层导入：tokens.css 只声明自定义属性与 base reset，
+// styles.css 全部是消费方。顺序颠倒会让组件拿到未定义的 var()。
+import "./design-system/tokens.css";
 import "./styles.css";
 import geometry from "../electron/geometry.cjs";
 type BrowserState = {
