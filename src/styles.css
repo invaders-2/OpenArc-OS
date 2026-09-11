@@ -1307,18 +1307,10 @@ input[type="checkbox"] {
   height: 76px;
   z-index: 1;
   pointer-events: none;
-  /* **不要全实心**：正文只有 ~0.27，顶部若给 100% 就会出现一条硬边实心横带
-     （用户实测：窗口顶部"多了一个小框"）。改成与正文同一透明度起步 —— 完全无缝，
-     靠下面那两层强模糊把滚上去的内容糊到不可读（这才是"不穿帮"的正解）。 */
-  /* 用户口径：这条渐变的透明度再降 50%（原来略抢眼） */
-  background: linear-gradient(
-    to bottom,
-    rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.225)) 0%,
-    rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.19)) 40%,
-    rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.08)) 72%,
-    rgb(var(--content-rgb) / 0) 100%
-  );
-  /* 无落影：用户口径——它不该像一条贴上去的板子 */
+  /* 用户口径：**材质底色的透明度直接给 0** —— 不要任何渐变色，
+     只保留纯磨砂（下面两层 backdrop blur）。这样顶部完全"透明但糊"，
+     既不会出现任何硬边/底框，也不会读出滚上去的内容。 */
+  background: none;
 }
 /* 磨砂条横跨**整个窗口**（含侧栏区域）；但侧栏自己在上层（z-index 2）→ 不会被压住。
    实测：scrim x 142..972（整窗），侧栏 x 150..342 且 z-index 2 > scrim 的 1。 */
@@ -1344,22 +1336,6 @@ input[type="checkbox"] {
   -webkit-backdrop-filter: blur(56px) saturate(1.9);
   mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 30%, transparent 70%);
   -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 30%, transparent 70%);
-}
-/* 深色下给顶栏一点点提亮，让它与内容区分开（macOS 深色工具栏比正文略亮） */
-.desktop.dark .window-scrim {
-  background-image: linear-gradient(
-      to bottom,
-      rgba(255, 255, 255, 0.015) 0%,
-      rgba(255, 255, 255, 0.006) 44%,
-      rgba(255, 255, 255, 0) 100%
-    ),
-    linear-gradient(
-      to bottom,
-      rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.225)) 0%,
-      rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.19)) 40%,
-      rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.08)) 72%,
-      rgb(var(--content-rgb) / 0) 100%
-    );
 }
 /* 工具条自己贴顶，内容从它下面滚过去 */
 .pane-toolbar {

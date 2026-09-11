@@ -1,5 +1,19 @@
 # 计划修订记录
 
+## 2026-09-12：窗口顶部改为「纯磨砂」（材质底色透明度 0%）
+
+用户口径：窗口顶部那条渐变，**材质底色直接归零** —— 只要磨砂玻璃本身。
+
+- `.window-scrim { background: none }`（原来是 content 色的四段渐变）；
+- 同时删掉深色下那层白色高光叠加（`.desktop.dark .window-scrim`）——它也属于"材质底色"；
+- **两层渐进模糊与 mask 原样保留**：`::before blur(14px) saturate(1.6)`、
+  `::after blur(56px) saturate(1.9)`（越靠顶越糊、向下连续衰减）。
+
+实测：`.window-scrim` 计算值 `background-image: none`、`background-color: rgba(0,0,0,0)`，
+`::before` / `::after` 的 `backdrop-filter` 仍在。滚上去的内容依旧被糊掉，**没有任何底色或硬边**。
+
+验证：`npm run build` PASS；`npm test` 96/96。
+
 ## 2026-09-12：修「降低材质」红绿灯底框 + 顶部渐变透明度减半 + 玻璃档位回归修正
 
 1. **降低材质时红绿灯"穿帮、多一层底框"** —— 真因在设计系统那侧：
