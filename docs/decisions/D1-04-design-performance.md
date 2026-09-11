@@ -4,15 +4,17 @@
 > **Component Baseline: ESTABLISHED（清单与测量方法已冻结）**
 > **Spectrum UI Verdict: REFERENCE ONLY（不引入源码）**
 > **ui-light-bar-zero Verdict: ADAPT（方向采纳，两处按实测修正）**
+> **D1-04B：REDUCED 档已进入产品代码（`data-glass` 三态）；主题合成已改为消费点合成**
 >
-> 判定为 PARTIAL 不是"做了一半"，而是三条硬性缺口仍未关闭：
-> 性能数字只在 Chromium 取得（Electron 内 NOT VERIFIED）、REDUCED 档位只定义未实现、Windows 平台未验证。
-> 这三条都直接命中"测量条件"的代表性，在关闭前不得宣布 COMPLETE。
+> 判定为 PARTIAL 不是"做了一半"，而是两条硬性缺口仍未关闭：
+> 性能数字只在 Chromium 取得（Electron 内 NOT VERIFIED）、Windows 平台未验证。
+> 这两条都直接命中"测量条件"的代表性，在关闭前不得宣布 COMPLETE。
+> （原第三条"REDUCED 档只定义未实现"已由 D1-04B 关闭，见第 20 节。）
 
 - 分支：`feature/d1-04-design-performance`（自 `b39eb93` 拉出，不含 D1-03 Adobe 内容）
-- 日期：2026-09-10
+- 日期：2026-09-10（D1-04）/ 2026-09-11（D1-04B）
 - 上游基线：PRODUCT.md / PLAN.md（D1-04、A12、A29、D2-01）/ DESIGN_SYSTEM.md / MOTION_SYSTEM.md / PROGRESS.md / CHANGELOG.md
-- 实测脚本：`experiments/d1-04/`（7 个）
+- 实测脚本：`experiments/d1-04/`（D1-04 七个 + D1-04B 七个）
 - 产物：`artifacts/d1-04/`
 
 ---
@@ -323,11 +325,11 @@ REDUCED 档以注入 CSS 模拟，**产品代码中不存在该档**。
 
 | 档位 | 定义 | 产品现状 |
 |---|---|---|
-| **FULL** | `blur(34px) saturate(1.8)` + `--bar/--pill` 半透明 | 已实现（默认） |
-| **REDUCED** | `blur(12px)`，去掉 saturate，底色不透明度上调补偿 | **未实现**，本轮仅模拟 |
-| **SOLID** | 无 `backdrop-filter`，全部实色 | 已实现（`.opaque`） |
+| **FULL** | `blur(40/44/34/32/24px) saturate(1.8)` + 半透明底色 | 已实现（默认，`data-glass="full"`） |
+| **REDUCED** | `blur(12/13/10/10/7px)`，**整条滤镜重写以真正去掉 saturate**，底色 alpha 上调补偿 | **已实现**（`data-glass="reduced"`，D1-04B） |
+| **SOLID** | 无 `backdrop-filter`，全部实色 | 已实现（`data-glass="solid"`，原 `.opaque`） |
 
-建议的触发链（本轮只冻结口径，不实现自动降级）：
+建议的触发链（只冻结口径，自动降级尚未实现）：
 
 ```
 FULL --(连续 N 帧 > 33ms)--> REDUCED --(仍连续超阈)--> SOLID
@@ -335,11 +337,14 @@ FULL --(连续 N 帧 > 33ms)--> REDUCED --(仍连续超阈)--> SOLID
 
 N 的建议初值：拖动场景下连续 10 帧。该值**未经实测校准**，标为 TARGET。
 
-REDUCED 档的实现要点（留给 D2-01 之前完成）：
+REDUCED 的实现约束（已在 D1-04B 落地，见第 20 节）：
 
-- 不能只降 blur 不补底色。`saturate(1.8)` 拿掉后浅色会发灰、深色会发闷，需要同步把 `--surface / --content / --bar` 的不透明度上调一档；
-- 必须保留窗口边界可辨（DESIGN_SYSTEM：窗口边界靠明度差，不用 border）；
-- 切换档位时不能触发全量重排，只改 `backdrop-filter` 与 CSS 变量。
+- 不能只降 blur 不补底色。`saturate(1.8)` 拿掉后浅色会发灰、深色会发闷，所以同步把
+  `--surface / --content / --bar / --pill` 的 alpha 上调一档（浅色 +0.22，深色按各自基线分别取值）；
+- 必须保留窗口边界可辨（DESIGN_SYSTEM：窗口边界靠明度差，不用 border）——
+  REDUCED 不加 border、不加 box-shadow；
+- 切换档位只改 CSS 变量与 `backdrop-filter`，不重建 DOM。
+  实测（`glass-switch.mjs`）：6 次往返切换，窗口数与矩形全部不变，无残留 class。
 
 ---
 
@@ -429,14 +434,18 @@ REDUCED 档的实现要点（留给 D2-01 之前完成）：
 
 ## 13. Design Token 现状与建议（不做大重构）
 
-现有 token（`src/styles.css`）：`--surface / --content / --sunken / --bar / --pill / --line / --accent / --on-accent / --focus / --failed / --shadow / --radius / --quick / --standard / --ease`，加 `--text / --muted`。
+> **本节记录的是 D1-04 当时的形态。D1-04B 已按"原料 + 消费点合成"重构，
+> 现状见第 20 节，下面的建议 1 已落地。**
 
-**现状判定：够用，不重构。** 理由：D1-04 的目标是冻结测量条件与组件许可，不是换样式体系；引入 Spectrum 必然带 Tailwind，是被禁止的大重构。
+D1-04 当时的 token（`src/styles.css`）：`--surface / --content / --sunken / --bar / --pill / --line / --accent / --on-accent / --focus / --failed / --shadow / --radius / --quick / --standard / --ease`，加 `--text / --muted`。
 
-**三点小建议（均为增量，可单独立项）：**
+**现状判定：够用，不做大重构。** 理由：D1-04 的目标是冻结测量条件与组件许可，不是换样式体系；引入 Spectrum 必然带 Tailwind，是被禁止的大重构。
 
-1. 补 `--glass-blur` / `--glass-saturate` 两个变量，让 REDUCED 档只需改两个变量而不是逐条覆盖 `backdrop-filter`。这是第 9 节 REDUCED 档落地的前置。
-2. `--pill` 保持独立（不并入 `--bar`）。当前桌面 AI 胶囊因此在纯黑上仍有 #171717@72% 底板，合并会让它在深色下消失。
+**三点小建议：**
+
+1. ~~补 `--glass-blur` / `--glass-saturate` 变量~~ → **D1-04B 已落地为每表面一条完整 `--glass-filter-*`**
+   （顶栏 / 窗口 / 胶囊 / Dock / 提示各一条），REDUCED 档整条重写，真正移除 saturate 段。
+2. `--pill` 保持独立（不并入 `--bar`）。当前桌面 AI 胶囊因此在纯黑上仍有 #171717@72% 底板，合并会让它在深色下消失。**D1-04B 后 pill 有独立的 `--pill-rgb` / `--pill-alpha`，仍然独立。**
 3. `--failed` 目前是唯一语义色，配合 `--focus`，建议保持"语义色 ≤ 3 个"的红线写进 DESIGN_SYSTEM 正文。
 
 ---
@@ -492,9 +501,10 @@ D2-01 的前置里，本轮**已满足**的：组件清单与需求等级（P0 1
 
 **未满足、且必须在 D2-01 前关闭的：**
 
-1. 实现 REDUCED 档位（并先补 `--glass-blur` / `--glass-saturate` 变量）；
-2. 在 Electron 内重跑一次 `perf2` 方法，把性能数字从"Chromium MEASURED"变成"Electron MEASURED"；
-3. Windows 上复跑同组测量。
+1. 在 Electron 内重跑一次 `perf2` 方法，把性能数字从"Chromium MEASURED"变成"Electron MEASURED"；
+2. Windows 上复跑同组测量。
+
+~~实现 REDUCED 档位~~ —— **已由 D1-04B 关闭**（`data-glass="reduced"` 已进入产品代码，六格主题矩阵 PASS）。
 
 其余（Toast 缺失、AdobeRow 假数据）不阻塞 D2-01，记入 D5。
 
@@ -504,11 +514,13 @@ D2-01 的前置里，本轮**已满足**的：组件清单与需求等级（P0 1
 
 | 动作 | 归属 | 时限 |
 |---|---|---|
-| 实现 REDUCED 档 + 两个玻璃变量 | D2-01 之前 | 阻塞 D2-01 |
+| ~~实现 REDUCED 档~~ | — | **已完成（D1-04B）** |
+| ~~深色 SOLID `--bar` #111111 → #000000~~ | — | **已完成（D1-04B，Boss 已确认）** |
+| REDUCED 档的性能对比（真实产品实现 × 4 档负载） | D1-04B 剩余部分 | 阻塞 D2-01 |
 | Electron 内重跑 perf2 | D2-01 之前 | 阻塞 D2-01 |
 | Windows 复跑 | D2-01 之前 | 阻塞 D2-01 |
 | 把 Spectrum 三条写法写进 MOTION_SYSTEM | D2 期间 | 不阻塞 |
-| 深色 `.opaque --bar` #111111 → #000000 | **等 Boss 确认** | 不阻塞 |
+| 自动降级触发链（FULL→REDUCED→SOLID）的阈值校准 | D2-01 之后 | 不阻塞 |
 | Toast 组件（按 Toast Stack 的 API 形状自研） | D5 | 不阻塞 |
 | AdobeRow 真实探测 | 与 D1-03 联动 | D1-03 当前 BLOCKED |
 
@@ -519,13 +531,98 @@ D2-01 的前置里，本轮**已满足**的：组件清单与需求等级（P0 1
 PLAN D1-04 通过条件为"动效可采用，测量条件及目标冻结"。
 
 - **动效可采用：达成。** MS-A02 / MS-A03 / A29 / 可打断性 / 对比度全部有实测证据，且修掉一个真实缺陷。
-- **测量条件及目标冻结：方法冻结达成，代表性未达成。** 方法可复现（负载单位、三档材质、采样口径、报告 p95 与长帧而非平均 fps 均已固定），但数字只在 Chromium 取得，产品是 Electron；REDUCED 档只模拟未实现；Windows 未测。
+- **测量条件及目标冻结：方法冻结达成，代表性未达成。** 方法可复现（负载单位、三档材质、采样口径、报告 p95 与长帧而非平均 fps 均已固定），且三档材质已是真实产品实现；但性能数字只在 Chromium 取得，产品是 Electron，Windows 未测。
 
-因此 **Task Status = PARTIAL**。清单清空前不得改为 COMPLETE。
+因此 **Task Status = PARTIAL**。剩余缺口清空前不得改为 COMPLETE。
 
 ---
 
-## 20. 复现命令
+## 20. D1-04B 主题合成修复（Token 架构）
+
+D1-04B 在实现 REDUCED 档时，把颜色拆成「通道 + alpha」两段原料，但**把合成结果留在了 `:root`**。
+结果：`.dark` 覆盖通道时，`--surface` / `--content` 早已在 `:root` 用浅色通道算完并继承下去。
+探测抓到的真实回归：
+
+```
+Dark + FULL · Window Content
+  期望（D1-04 baseline）  (20, 20, 20)
+  实际                    (250, 250, 250)   ← 深色拿到了浅色合成色
+```
+
+### 20.1 根因
+
+`var()` 替换发生在**声明该自定义属性的元素**上，替换结果再作为计算值继承。
+所以「原料在上层、合成也在上层」这个写法本身就是错的——
+只要原料在下层被覆盖，上层的合成结果就已经定型了。
+
+### 20.2 修复前后
+
+| | 修复前（错误） | 修复后 |
+|---|---|---|
+| `:root` | 原料 + **合成结果** `--surface` / `--content` / `--bar` / `--pill` | **只放原料**：`--surface-rgb` / `--content-rgb` / `--bar-rgb` / `--pill-rgb` + 各 alpha + 滤镜 token |
+| `.dark` | 只覆盖 `--glass-tint` | 只覆盖 `--*-rgb` 与 alpha 基线 |
+| 组件 | `background: var(--surface)`（拿继承来的合成值） | `background: rgb(var(--surface-rgb) / var(--surface-alpha))`（**在消费点合成**） |
+| 已删除的提前合成 token | `--glass-tint`、`--glass-alpha-boost`、`--surface`、`--content`、`--bar`、`--pill` | — |
+
+17 个消费点全部改为就地合成（surface ×5、content ×9、bar ×2、pill ×1）。
+`:root` 里不再存在任何"已经算好的颜色"。
+
+### 20.3 三维正交
+
+```
+Theme   light / dark          → 只管 *-rgb 与 alpha 基线
+Glass   full / reduced / solid → 只管材质（blur / saturate / alpha）
+Motion  normal / reduced       → 只管动效时长（.reduced 类）
+```
+
+- 材质档位用 `data-glass` 属性，**不复用 `.reduced`**——那个类名此前已经表示 Reduce Motion，
+  复用会造成语义碰撞。
+- SOLID 是唯一允许覆盖 RGB 的档位：没有模糊时底色必须等于它压着的桌面合成色，否则会浮出亮条。
+- 每档的滤镜写成**整条完整值**（`blur(34px) saturate(1.8)` / `blur(10px)`），
+  而不是拼接 `blur()` + `saturate()`。拼接时 REDUCED 只能写成 `saturate(1)`，
+  视觉等价但仍保留一条滤镜链。
+
+### 20.4 修复后主题矩阵（六格全 PASS）
+
+`experiments/d1-04/theme-matrix.mjs` + `matrix_pixels.py`：
+
+| 格 | Window | WindowContent | TopBar | Dock | Menu | Window 滤镜 |
+|---|---|---|---|---|---|---|
+| light-full | (185,185,187) | (234,234,234) | (237,237,242) | (169,169,173) | (232,232,233) | blur(34px) saturate(1.8) |
+| light-reduced | (190,190,190) | (249,249,249) | (242,242,243) | (174,174,176) | (249,249,249) | blur(10px) |
+| light-solid | (184,184,185) | (245,245,247) | (233,233,236) | (175,175,177) | (245,245,247) | none |
+| dark-full | (11,11,11) | **(19,19,19)** | (0,0,0) | (4,4,4) | (17,17,17) | blur(34px) saturate(1.8) |
+| dark-reduced | (14,14,14) | (21,21,21) | (5,5,5) | (7,7,7) | (21,21,21) | blur(10px) |
+| dark-solid | (9,9,9) | (12,12,12) | (0,0,0) | (0,0,0) | (12,12,12) | none |
+
+**Dark FULL 已回到 baseline**：同一套探测（`solid-bar-probe.mjs`）的逐点对照显示
+7 个采样点与 D1-04 基线**完全一致**，其中 Window Content = (20,20,20)。
+Light FULL / Light SOLID 同样逐点一致，没有反向回归。
+
+### 20.5 防回归断言
+
+`theme-matrix.mjs` 内置两类断言，任何后续 token 重构都会第一时间报错：
+
+1. **主题原料断言**：`--surface-rgb` 必须是本主题的 `23 23 23` / `255 255 255`（SOLID 另外取值）。
+2. **合成结果断言**：Window / Menu / Search / AI / Card 的 computed 背景通道不得跨主题
+   （深色格里出现 R/G/B > 200 即失败，浅色格里全 < 70 即失败）；
+   全透明背景的元素跳过，避免把 `rgba(0,0,0,0)` 误判成"深色"。
+3. **像素断言**：深色格的窗口内容必须落在暗部区间（dark-full `[12,30]`、dark-solid `[8,20]`）；
+   浅色格不得接近深色。
+
+### 20.6 受影响的历史证据
+
+| 证据 | 处置 |
+|---|---|
+| `solidbar-after` 第一次运行（`dark-full` Window Content = 250 / 173） | **保留为缺陷证据**，不退换。这是发现该 bug 的一次采样 |
+| `solidbar-after` 第二次运行起 | 有效（`.desktop` 合成版） |
+| `glass-tiers` / `glass-switch` / `flash_check` | 有效，但为通过**消费点合成**版重新跑过一遍，结果一致 |
+| D1-04 阶段（修复前）的 `perf2` 数据 | **不受该 bug 影响**——perf2 只测 frame timing，不读颜色；且当时样式路径尚未引入该 bug。保留作参考，但 D1-04B 正式验收必须用修复后的产品代码重跑 |
+| D1-04B 的 REDUCED 性能对比 | 尚未进行，本轮不产出。**必须用修复后的产品代码跑** |
+
+
+
+## 21. 复现命令
 
 ```bash
 npm run build
@@ -542,6 +639,13 @@ node experiments/d1-04/opaque-verify.mjs     # SOLID 档是否浮出亮带
 node experiments/d1-04/perf2.mjs             # 三档 × 四档负载性能基准
 node experiments/d1-04/light-bar-check.mjs   # 顶栏归零后的合成样式
 
+# D1-04B 主题矩阵与材质档位
+node experiments/d1-04/theme-matrix.mjs      # 六格矩阵 + computed 断言 + 像素断言
+node experiments/d1-04/solid-bar-probe.mjs   # 深色 SOLID 顶栏取证（OA_TAG=before|tokenfix）
+node experiments/d1-04/glass-tiers.mjs       # 三档 × 10 个面的材质矩阵
+node experiments/d1-04/glass-switch.mjs      # 运行时切换 + 动效解耦
+
 python3 experiments/d1-04/contrast_calc.py   # WCAG 对比度（改前/改后对照）
 python3 experiments/d1-04/hier_calc.py       # 层级明度差（改前/改后对照）
+python3 experiments/d1-04/flash_check.py     # 切换过渡期闪白/闪黑
 ```

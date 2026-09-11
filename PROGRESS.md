@@ -86,8 +86,9 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 
 分支 `feature/d1-04-design-performance`。完整 ADR：`docs/decisions/D1-04-design-performance.md`。
 
-**状态：PARTIAL。** 不是"做了一半"，是三条缺口未关闭：性能数字只在 Chromium 取得
-（Electron 内 NOT VERIFIED）、REDUCED 档位只定义未实现、Windows 平台未验证。
+**状态：PARTIAL。** 剩余两条硬缺口：性能数字只在 Chromium 取得
+（Electron 内 NOT VERIFIED）、Windows 平台未验证。
+原第三条"REDUCED 档位只定义未实现"已由 **D1-04B** 关闭。
 
 已达成：
 
@@ -123,8 +124,45 @@ morph 的 API 形状）写进规范，不抄源码。
 顺带发现（**未改，等确认**）：深色 `.opaque.dark --bar = #111111`，实测顶栏处真实桌面为
 `#000000`，SOLID 档下会浮出 17 级亮带；建议改 `#000000`，但会触及已验收的深色观感。
 
-D1-04 之后仍需：实现 REDUCED 档（先补 `--glass-blur` / `--glass-saturate`）、
-在 Electron 内重跑 perf2、Windows 复跑——三项都阻塞 D2-01。
+D1-04 之后仍需：在 Electron 内重跑 perf2、Windows 复跑——两项都阻塞 D2-01。
+
+### D1-04B 主题合成修复 + REDUCED 档落地（2026-09-11）
+
+在实现 REDUCED 档的过程中暴露了一个**真实的架构缺陷**并已修复：
+
+- **回归症状**：Dark + FULL 的窗口内容从 baseline `(20,20,20)` 变成 `(250,250,250)`。
+- **根因**：颜色被拆成「通道 + alpha」两段原料，但合成结果 `--surface / --content /
+  --bar / --pill` 写在了 `:root`。`var()` 在声明它的元素上就完成替换并继承下去，
+  所以 `.dark` 再改通道已经不影响上层算完的结果——深色拿到了浅色的合成值。
+- **修复**：`:root` 只存原料（`--surface-rgb` / `--content-rgb` / `--bar-rgb` /
+  `--pill-rgb` + 各自 alpha + 每表面一条完整滤镜），**17 个消费点全部改为
+  `rgb(var(--x-rgb) / var(--x-alpha))` 就地合成**。`:root` 里不再有任何算好的颜色。
+- **三维正交**：Theme（`light/dark`）× Glass（`data-glass="full|reduced|solid"`）×
+  Motion（`.reduced` 类）互不影响。材质档位**不复用** `.reduced`（它已表示 Reduce Motion）。
+
+REDUCED 档已进入产品代码（不再是实验脚本注入）：
+
+| 档位 | 滤镜 | 底色 alpha 补偿 |
+|---|---|---|
+| full | `blur(40/44/34/32/24px) saturate(1.8)` | 基线 |
+| reduced | `blur(12/13/10/10/7px)`，**整条滤镜重写以真正去掉 saturate** | 浅色 +0.22，深色按各基线分别取值 |
+| solid | 无 `backdrop-filter`，全实色 | alpha 1 |
+
+同时按 Boss 确认把深色 SOLID 顶栏 `--bar` 由 `#111111` 改为 `#000000`
+（实测深色桌面为纯黑，原值会浮出 17 级亮带）。
+
+**验证结果**：
+- 六格主题矩阵（light/dark × full/reduced/solid）**全 PASS**，10 个表面全部跟随 token。
+- Dark FULL 逐点回到 D1-04 baseline，窗口内容 `(20,20,20)`；Light FULL / Light SOLID 同样逐点一致。
+- 切换正确性：6 次往返，窗口数与矩形全部不变，无残留 class，过渡连拍无闪白/闪黑。
+- Reduce Motion 与材质档位实测解耦（`motion=ON + full/reduced/solid` 三档均不改变动效设置）。
+- 对比度无退化（浅色 4.86:1 / 深色 6.77:1）、`npm test` 7/7、UI 审计 20/27（与 D1-04 相同）。
+
+新增防回归探针 `experiments/d1-04/theme-matrix.mjs` + `matrix_pixels.py`：
+断言主题原料、computed 背景通道不跨主题、深色格窗口内容落在暗部区间。
+
+仍待办（D1-04B 剩余）：**用修复后的产品代码重跑 FULL/REDUCED/SOLID 性能对比**。
+修复前产生的视觉数据不作为最终证据。
 
 ### 待验证（沿用）
 
