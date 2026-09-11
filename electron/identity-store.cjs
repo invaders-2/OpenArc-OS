@@ -1,0 +1,1129 @@
+/**
+ * D3-01 · Identity 持久层。
+ *
+ * 这是**第一版身份持久层**，也是唯一一份 users / sessions 的真值。
+ *
+ * ## 为什么是 SQLite 而不是 JSON 文件（§28）
+ *
+ *   JSON 文件无法提供"原子事务 + 约束"，而 §5 的 A01 与 §27 的 failure-safe
+ *   恰好全靠这两件事：
+ *     · 原子事务 → 初始化的 check-then-act 被压进同一个 BEGIN IMMEDIATE，
+ *       两个并发请求不可能各写一半
+ *     · 约束     → 唯一 installation、唯一 root team、identifier 唯一、
+ *                  session → user 外键，全部由数据库强制执行，
+ *                  **不是**"UI 应该不会那样做"
+ *   因此不用 JSON 落盘当最终身份库（§28 明确禁止把它当作可 PASS 的方案）。
+ *
+ * ## 库的选择
+ *
+ *   `node:sqlite`（Node 22.5+ 内置，`DatabaseSync`）——
+ *     · **零第三方依赖、零 native 编译**：本机与 Windows 是同一条代码路径，
+ *       不会出现"mac 能装、Windows 装不上"这种把阶段卡死的情况
+ *     · 真实的 SQL、真实的 ACID 事务、真实的 UNIQUE / CHECK / 外键
+ *     · 与 Electron 主进程同 Node 版本一同分发，不需要重新编译
+ *
+ *   `better-sqlite3` —— 功能更全，但要 native 构建产物；
+ *                        D1-06 冻结"不引无法双端验证的 native 依赖"，故不选。
+ *
+ *   本文件对二者的差异做了隔离：所有 SQL 都只走 `prepare/run/get/all` 四个方法，
+ *   换库时改 `openDatabase()` 一处即可。
+ *
+ * ## 事务与并发（§31）
+ *
+ *   `transact()` = 连接内互斥队列 + `BEGIN IMMEDIATE` + COMMIT/ROLLBACK。
+ *     · 连接内互斥保证"async 事务体"不会被另一个事务体插进来
+ *       （KDF 是异步的，事务体里可能 await，这是真实存在的交错点）
+ *     · `BEGIN IMMEDIATE` 立刻取写锁，跨连接/跨进程的竞争由 SQLite 仲裁，
+ *       败者拿到 SQLITE_BUSY → **有界重试**后重读状态，绝不静默丢写
+ */
+"use strict";
+
+const crypto = require("node:crypto");
+const domain = require("./identity-domain.cjs");
+const passwords = require("./password.cjs");
+
+const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domain;
+
+/** 当前 schema 版本。**第一版就是 1**（§29）：不留"先上线后补版本号"的债。 */
+const SCHEMA_VERSION = 1;
+
+/**
+ * Schema。为了可读性写成整段 DDL。
+ *
+ * 三处"数据库级"硬约束，是本轮 A01 与 §30 的机器保证：
+ *   ① installations.singleton  CHECK(singleton = 1) + PRIMARY KEY
+ *      → **物理上不可能有第二个 installation**
+ *   ② teams 上的 partial unique index (root) WHERE root = 1
+ *      → 不可能有两个 root workspace
+ *   ③ users.identifier UNIQUE
+ *      → identifier 唯一性不靠 UI
+ */
+const SCHEMA_SQL = `
+CREATE TABLE installations (
+  singleton       INTEGER PRIMARY KEY CHECK (singleton = 1),
+  id              TEXT    NOT NULL UNIQUE,
+  status          TEXT    NOT NULL CHECK (status IN ('UNINITIALIZED','INITIALIZING','READY')),
+  created_at      INTEGER NOT NULL,
+  initialized_at  INTEGER
+);
+
+CREATE TABLE teams (
+  id          TEXT    PRIMARY KEY,
+  name        TEXT    NOT NULL,
+  root        INTEGER NOT NULL DEFAULT 0 CHECK (root IN (0,1)),
+  created_at  INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX idx_teams_single_root ON teams(root) WHERE root = 1;
+
+CREATE TABLE users (
+  id                TEXT    PRIMARY KEY,
+  installation_id   TEXT    NOT NULL REFERENCES installations(id),
+  team_id           TEXT    NOT NULL REFERENCES teams(id),
+  identifier        TEXT    NOT NULL UNIQUE,
+  display_name      TEXT    NOT NULL,
+  role              TEXT    NOT NULL CHECK (role IN ('ADMIN','MEMBER')),
+  status            TEXT    NOT NULL CHECK (status IN ('ACTIVE','DISABLED')),
+  auth_version      INTEGER NOT NULL DEFAULT 1,
+  password_algo     TEXT    NOT NULL,
+  password_params   TEXT    NOT NULL,
+  password_salt     BLOB    NOT NULL,
+  password_hash     TEXT    NOT NULL,
+  password_version  INTEGER NOT NULL DEFAULT 1,
+  created_at        INTEGER NOT NULL,
+  updated_at        INTEGER NOT NULL
+);
+CREATE INDEX idx_users_status ON users(status);
+
+CREATE TABLE sessions (
+  id               TEXT    PRIMARY KEY,
+  ref              TEXT    NOT NULL UNIQUE,
+  user_id          TEXT    NOT NULL REFERENCES users(id),
+  installation_id  TEXT    NOT NULL,
+  token_hash       TEXT    NOT NULL,
+  created_at       INTEGER NOT NULL,
+  last_seen_at     INTEGER NOT NULL,
+  expires_at       INTEGER NOT NULL,
+  idle_expires_at  INTEGER NOT NULL,
+  revoked_at       INTEGER,
+  revoked_reason   TEXT,
+  locked_at        INTEGER,
+  reauth_at        INTEGER,
+  auth_version     INTEGER NOT NULL
+);
+CREATE INDEX idx_sessions_user ON sessions(user_id);
+CREATE INDEX idx_sessions_token ON sessions(token_hash);
+
+CREATE TABLE login_attempts (
+  id                TEXT    PRIMARY KEY,
+  identifier_hash   TEXT    NOT NULL,
+  source            TEXT    NOT NULL,
+  failures          INTEGER NOT NULL DEFAULT 0,
+  first_failure_at  INTEGER NOT NULL,
+  last_failure_at   INTEGER NOT NULL,
+  cooldown_until    INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE audit_log (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  at               INTEGER NOT NULL,
+  event            TEXT    NOT NULL,
+  user_ref         TEXT,
+  session_ref_hash TEXT,
+  result           TEXT    NOT NULL,
+  error_code       TEXT,
+  duration_ms      INTEGER
+);
+CREATE INDEX idx_audit_at ON audit_log(at);
+`;
+
+const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000; // 12h 绝对上限
+const DEFAULT_IDLE_MS = 2 * 60 * 60 * 1000; //  2h 空闲上限
+const BUSY_RETRY = { attempts: 5, baseDelayMs: 15 };
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function isBusy(err) {
+  const s = `${err?.errstr || ""} ${err?.message || ""}`;
+  return s.includes("SQLITE_BUSY") || s.includes("database is locked");
+}
+
+/** 只包一层，把 node:sqlite 的缺失变成一句能行动的报错。 */
+function openDatabase(path) {
+  let sqlite;
+  try {
+    sqlite = require("node:sqlite");
+  } catch {
+    throw new Error("node:sqlite 不可用：需要 Node >= 22.5（Electron 主进程同版本）。");
+  }
+  if (!sqlite?.DatabaseSync) throw new Error("node:sqlite 缺少 DatabaseSync。");
+  const db = new sqlite.DatabaseSync(path);
+  db.exec("PRAGMA foreign_keys = ON");
+  db.exec("PRAGMA journal_mode = WAL");
+  db.exec("PRAGMA synchronous = FULL");
+  return db;
+}
+
+class IdentityStore {
+  /**
+   * @param opts.path       数据库文件路径
+   * @param opts.clock      () => number，注入时钟（测试用可控时钟，§32）
+   * @param opts.ttlMs      绝对有效期
+   * @param opts.idleMs     空闲有效期
+   * @param opts.busyTimeoutMs
+   * @param opts.hooks      { beforeCommit?, afterInstallationInsert? } 仅测试注入用
+   * @param opts.onAudit    (record) => void
+   */
+  constructor(opts = {}) {
+    this.path = opts.path || ":memory:";
+    this.clock = typeof opts.clock === "function" ? opts.clock : () => Date.now();
+    this.ttlMs = Number.isFinite(opts.ttlMs) ? opts.ttlMs : DEFAULT_TTL_MS;
+    this.idleMs = Number.isFinite(opts.idleMs) ? opts.idleMs : DEFAULT_IDLE_MS;
+    this.hooks = opts.hooks || {};
+    this.busyTimeoutMs = Number.isFinite(opts.busyTimeoutMs) ? opts.busyTimeoutMs : 5000;
+    this.onAudit = typeof opts.onAudit === "function" ? opts.onAudit : () => {};
+    this.db = null;
+    this.#queue = Promise.resolve();
+  }
+
+  #queue;
+
+  // -------------------------------------------------------------------------
+  // 生命周期 / 迁移
+  // -------------------------------------------------------------------------
+
+  open() {
+    if (this.db) return this;
+    this.db = openDatabase(this.path);
+    this.db.exec(`PRAGMA busy_timeout = ${Math.max(0, this.busyTimeoutMs | 0)}`);
+    this.#migrate();
+    return this;
+  }
+
+  close() {
+    if (!this.db) return;
+    try {
+      this.db.close();
+    } catch {
+      /* 已关闭 */
+    }
+    this.db = null;
+  }
+
+  get schemaVersion() {
+    return Number(this.db.prepare("PRAGMA user_version").get().user_version ?? 0);
+  }
+
+  /**
+   * 迁移。**第一版就把迁移框架立起来**（§29）：
+   * 现在只有一个 migration，但"以后补版本号"的债从今天起就不存在了。
+   */
+  #migrate() {
+    const current = this.schemaVersion;
+    if (current > SCHEMA_VERSION)
+      throw new Error(`身份库 schema_version=${current} 高于本程序支持的 ${SCHEMA_VERSION}，拒绝打开。`);
+    if (current === SCHEMA_VERSION) return;
+    this.transactSync(() => {
+      this.db.exec(SCHEMA_SQL);
+      // user_version 不能用占位符，只能整句拼；值是本文件常量，无注入面。
+      this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+    });
+  }
+
+  /** 同步事务：只给迁移用（迁移里没有任何 await）。 */
+  transactSync(fn) {
+    const db = this.db;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const out = fn();
+      db.exec("COMMIT");
+      return out;
+    } catch (e) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* 已回滚 */
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * 异步事务。
+   *
+   * 连接内互斥 + BEGIN IMMEDIATE。事务体可以 await（KDF 是异步的），
+   * 互斥队列保证**不会有第二个事务体插进来**——这是"事务体里有 await"时
+   * 唯一能保住原子性的做法。
+   */
+  async transact(fn) {
+    const run = async () => {
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        const out = await fn();
+        // 测试注入点：在 COMMIT 之前 yield，用来制造真实的交错窗口（§5）
+        if (this.hooks.beforeCommit) await this.hooks.beforeCommit(this);
+        this.db.exec("COMMIT");
+        return out;
+      } catch (e) {
+        try {
+          this.db.exec("ROLLBACK");
+        } catch {
+          /* 已回滚 */
+        }
+        throw e;
+      }
+    };
+    const prev = this.#queue;
+    this.#queue = prev.then(run, run);
+    return this.#queue;
+  }
+
+  /** SQLITE_BUSY 的有界重试。跨连接/跨进程竞争时败者走这里。 */
+  async #withBusyRetry(fn) {
+    let lastErr;
+    for (let i = 0; i < BUSY_RETRY.attempts; i += 1) {
+      try {
+        return await fn();
+      } catch (e) {
+        if (!isBusy(e)) throw e;
+        lastErr = e;
+        await sleep(BUSY_RETRY.baseDelayMs * 2 ** i);
+      }
+    }
+    throw lastErr;
+  }
+
+  // -------------------------------------------------------------------------
+  // 审计（§34）
+  // -------------------------------------------------------------------------
+
+  /**
+   * 审计落库。**字段白名单** —— 只写这七个字段，
+   * 任何"顺手多记一点"都会把 secret 带进持久化。
+   * session 只记 ref 的哈希（前 16 hex），不记 sessionId、更不记 token。
+   */
+  audit(event, { userId = null, sessionRef = null, result = "OK", errorCode = null, durationMs = null } = {}) {
+    const record = {
+      at: this.clock(),
+      event: String(event),
+      user_ref: userId,
+      session_ref_hash: sessionRef ? domain.hashRef(sessionRef) : null,
+      result: String(result),
+      error_code: errorCode,
+      duration_ms: durationMs == null ? null : Math.round(durationMs),
+    };
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO audit_log (at, event, user_ref, session_ref_hash, result, error_code, duration_ms)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(record.at, record.event, record.user_ref, record.session_ref_hash, record.result, record.error_code, record.duration_ms);
+    } catch {
+      /* 审计失败不该让身份操作失败；但它本身要能被探针看见 */
+    }
+    this.onAudit(record);
+    return record;
+  }
+
+  auditLog() {
+    return this.db.prepare("SELECT * FROM audit_log ORDER BY id").all();
+  }
+
+  // -------------------------------------------------------------------------
+  // 查询
+  // -------------------------------------------------------------------------
+
+  installation() {
+    return this.db.prepare("SELECT * FROM installations WHERE singleton = 1").get() || null;
+  }
+
+  userCount() {
+    return Number(this.db.prepare("SELECT COUNT(*) AS c FROM users").get().c ?? 0);
+  }
+
+  userById(id) {
+    return this.db.prepare("SELECT * FROM users WHERE id = ?").get(id) || null;
+  }
+
+  userByIdentifier(identifier) {
+    return this.db.prepare("SELECT * FROM users WHERE identifier = ?").get(domain.normalizeIdentifier(identifier)) || null;
+  }
+
+  sessionByRef(ref) {
+    return this.db.prepare("SELECT * FROM sessions WHERE ref = ?").get(String(ref ?? "")) || null;
+  }
+
+  sessionByTokenHash(tokenHash) {
+    return this.db.prepare("SELECT * FROM sessions WHERE token_hash = ?").get(String(tokenHash ?? "")) || null;
+  }
+
+  sessionsOf(userId) {
+    return this.db.prepare("SELECT * FROM sessions WHERE user_id = ? ORDER BY created_at, id").all(userId);
+  }
+
+  allSessions() {
+    return this.db.prepare("SELECT * FROM sessions ORDER BY created_at, id").all();
+  }
+
+  allUsers() {
+    return this.db.prepare("SELECT * FROM users ORDER BY created_at, id").all();
+  }
+
+  allTeams() {
+    return this.db.prepare("SELECT * FROM teams ORDER BY created_at, id").all();
+  }
+
+  /** 安装级状态。未初始化时也必须能安全调用（UI 首帧就问它）。 */
+  status() {
+    const inst = this.installation();
+    return {
+      initialized: inst?.status === INIT.READY,
+      status: inst?.status || INIT.UNINITIALIZED,
+      installationId: inst?.id ?? null,
+      userCount: this.userCount(),
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // 初始化（§4 / §5 / §6）
+  // -------------------------------------------------------------------------
+
+  /**
+   * 一次性原子初始化。
+   *
+   * **禁止 check-then-act**：不是"先问有没有用户，没有再建"，
+   * 而是把"检查 + 建 installation + 建 root team + 建 admin"压进同一个
+   * `BEGIN IMMEDIATE`。两个并发请求里必然有一个在事务内看到 status=READY，
+   * 拿到 ALREADY_INITIALIZED。
+   *
+   * KDF 在事务**之前**算完：口令派生是纯函数、不依赖库状态，
+   * 提前算掉能把事务体压到最短，也就把竞争窗口压到最小。
+   *
+   * `INITIALIZING` **永不落盘**：它只是事务内的一个瞬时值——
+   * 事务一回滚，这个状态连同半个用户一起消失（§27）。
+   */
+  async initialize({ identifier, password, displayName, source = "local" } = {}) {
+    const started = this.clock();
+    const idCheck = domain.validateIdentifier(identifier);
+    if (!idCheck.ok) {
+      this.audit("initialize", { result: "DENY", errorCode: idCheck.error });
+      return idCheck;
+    }
+    const nameCheck = domain.validateDisplayName(displayName);
+    if (!nameCheck.ok) {
+      this.audit("initialize", { result: "DENY", errorCode: nameCheck.error });
+      return nameCheck;
+    }
+    const pwCheck = passwords.validatePassword(password);
+    if (!pwCheck.ok) {
+      this.audit("initialize", { result: "DENY", errorCode: pwCheck.error });
+      return domain.fail(pwCheck.code, pwCheck.reason);
+    }
+
+    let verifier;
+    try {
+      verifier = await passwords.createVerifier(password);
+    } catch (e) {
+      this.audit("initialize", { result: "ERROR", errorCode: ERROR.INTERNAL_ERROR });
+      return domain.fail(ERROR.INTERNAL_ERROR, "kdf-failed");
+    }
+
+    try {
+      return await this.#withBusyRetry(() =>
+        this.transact(() => {
+          const existing = this.installation();
+          if (existing && existing.status === INIT.READY) {
+            this.audit("initialize", { result: "DENY", errorCode: ERROR.ALREADY_INITIALIZED, durationMs: this.clock() - started });
+            return domain.fail(ERROR.ALREADY_INITIALIZED);
+          }
+
+          const now = this.clock();
+          const installationId = domain.newId("INSTALLATION");
+          if (!existing) {
+            this.db
+              .prepare(
+                `INSERT INTO installations (singleton, id, status, created_at, initialized_at)
+                 VALUES (1, ?, 'INITIALIZING', ?, NULL)`,
+              )
+              .run(installationId, now);
+          } else {
+            this.db.prepare("UPDATE installations SET status = 'INITIALIZING' WHERE singleton = 1").run();
+          }
+
+          // 失败注入点：模拟"installation 已写、admin 还没写"时崩溃（§27）
+          if (this.hooks.afterInstallationInsert) this.hooks.afterInstallationInsert(this);
+
+          const teamId = domain.newId("TEAM");
+          this.db
+            .prepare(`INSERT INTO teams (id, name, root, created_at) VALUES (?, 'Primary Workspace', 1, ?)`)
+            .run(teamId, now);
+
+          const userId = domain.newId("USER");
+          this.db
+            .prepare(
+              `INSERT INTO users (id, installation_id, team_id, identifier, display_name, role, status,
+                                  auth_version, password_algo, password_params, password_salt, password_hash,
+                                  password_version, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, 'ADMIN', 'ACTIVE', 1, ?, ?, ?, ?, 1, ?, ?)`,
+            )
+            .run(
+              userId,
+              existing?.id || installationId,
+              teamId,
+              idCheck.identifier,
+              nameCheck.displayName,
+              verifier.algo,
+              JSON.stringify(verifier.params),
+              verifier.salt,
+              passwords.encodeVerifier(verifier),
+              now,
+              now,
+            );
+
+          this.db
+            .prepare(`UPDATE installations SET status = 'READY', initialized_at = ? WHERE singleton = 1`)
+            .run(now);
+
+          this.audit("initialize", {
+            userId,
+            result: "OK",
+            durationMs: this.clock() - started,
+          });
+          return domain.ok({
+            installationId: existing?.id || installationId,
+            userId,
+            teamId,
+            identifier: idCheck.identifier,
+          });
+        }),
+      );
+    } catch (e) {
+      // 事务已 ROLLBACK：没有半个用户、没有无 team 的 admin、没有 READY 的安装。
+      if (isBusy(e)) {
+        // 极端情况：重试次数用尽仍拿不到写锁。重新读一次状态给出诚实的答案。
+        const st = this.status();
+        if (st.initialized) {
+          this.audit("initialize", { result: "DENY", errorCode: ERROR.ALREADY_INITIALIZED });
+          return domain.fail(ERROR.ALREADY_INITIALIZED);
+        }
+      }
+      this.audit("initialize", { result: "ERROR", errorCode: ERROR.INTERNAL_ERROR });
+      return domain.fail(ERROR.INTERNAL_ERROR, isBusy(e) ? "busy" : "transaction-failed");
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 限流（§33）
+  // -------------------------------------------------------------------------
+
+  #attemptRow(key, identifierHash, source, now) {
+    let row = this.db.prepare("SELECT * FROM login_attempts WHERE id = ?").get(key);
+    if (!row) {
+      this.db
+        .prepare(
+          `INSERT INTO login_attempts (id, identifier_hash, source, failures, first_failure_at, last_failure_at, cooldown_until)
+           VALUES (?, ?, ?, 0, ?, ?, 0)`,
+        )
+        .run(key, identifierHash, String(source ?? "local"), now, now);
+      row = this.db.prepare("SELECT * FROM login_attempts WHERE id = ?").get(key);
+    }
+    return row;
+  }
+
+  /** 冷却中返回剩余毫秒；否则 0。 */
+  throttleRemaining(identifier, source = "local") {
+    const now = this.clock();
+    const row = this.db.prepare("SELECT * FROM login_attempts WHERE id = ?").get(domain.rateKey(identifier, source));
+    if (!row || !row.failures) return 0;
+    // 距上次失败太久 → 重新计数（手滑不该累积成封锁）
+    if (now - row.last_failure_at > RATE_LIMIT.FAILURE_WINDOW_MS) return 0;
+    return Math.max(0, row.cooldown_until - now);
+  }
+
+  #recordFailure(identifier, source) {
+    const now = this.clock();
+    const idHash = crypto.createHash("sha256").update(domain.normalizeIdentifier(identifier)).digest("hex").slice(0, 32);
+    const key = domain.rateKey(identifier, source);
+    let row = this.#attemptRow(key, idHash, source, now);
+    if (now - row.last_failure_at > RATE_LIMIT.FAILURE_WINDOW_MS) {
+      this.db.prepare("UPDATE login_attempts SET failures = 0, first_failure_at = ?, cooldown_until = 0 WHERE id = ?").run(now, key);
+      row = this.#attemptRow(key, idHash, source, now);
+    }
+    const failures = row.failures + 1;
+    const cooldown = domain.cooldownFor(failures);
+    this.db
+      .prepare("UPDATE login_attempts SET failures = ?, last_failure_at = ?, cooldown_until = ? WHERE id = ?")
+      .run(failures, now, now + cooldown, key);
+    return { failures, cooldownMs: cooldown };
+  }
+
+  #clearFailures(identifier, source) {
+    const key = domain.rateKey(identifier, source);
+    this.db.prepare("UPDATE login_attempts SET failures = 0, cooldown_until = 0 WHERE id = ?").run(key);
+  }
+
+  // -------------------------------------------------------------------------
+  // 登录（§12）
+  // -------------------------------------------------------------------------
+
+  /**
+   * 建 session 的内部实现。**唯一**的 session 诞生点。
+   *
+   * token 只在返回值里出现一次，调用方（service）负责写进 OS 受保护存储；
+   * 数据库里永远只有它的 SHA-256。
+   */
+  #createSession(user, now) {
+    const token = domain.newSessionToken();
+    const session = {
+      id: domain.newId("SESSION"),
+      ref: domain.newId("SESSION_REF"),
+      user_id: user.id,
+      installation_id: user.installation_id,
+      token_hash: domain.hashToken(token),
+      created_at: now,
+      last_seen_at: now,
+      expires_at: now + this.ttlMs,
+      idle_expires_at: now + this.idleMs,
+      revoked_at: null,
+      revoked_reason: null,
+      locked_at: null,
+      reauth_at: null,
+      auth_version: user.auth_version,
+    };
+    this.db
+      .prepare(
+        `INSERT INTO sessions (id, ref, user_id, installation_id, token_hash, created_at, last_seen_at,
+                               expires_at, idle_expires_at, revoked_at, revoked_reason, locked_at, reauth_at, auth_version)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?)`,
+      )
+      .run(
+        session.id,
+        session.ref,
+        session.user_id,
+        session.installation_id,
+        session.token_hash,
+        session.created_at,
+        session.last_seen_at,
+        session.expires_at,
+        session.idle_expires_at,
+        session.auth_version,
+      );
+    return { session, token };
+  }
+
+  async login({ identifier, password, source = "local" } = {}) {
+    const started = this.clock();
+    const idCheck = domain.validateIdentifier(identifier);
+    if (!idCheck.ok) {
+      this.audit("login", { result: "DENY", errorCode: idCheck.error });
+      return idCheck;
+    }
+
+    // 冷却检查在读用户之前：被限流的标识符不该因为"存在性"消耗一次 KDF
+    const remaining = this.throttleRemaining(idCheck.identifier, source);
+    if (remaining > 0) {
+      this.audit("login", { result: "DENY", errorCode: ERROR.RATE_LIMITED, durationMs: this.clock() - started });
+      return domain.fail(ERROR.RATE_LIMITED, { retryAfterMs: remaining });
+    }
+
+    const user = this.userByIdentifier(idCheck.identifier);
+    if (!user) {
+      // **照样跑一次完整 KDF**，让"用户不存在"与"口令错误"耗时同量级（§12）
+      await passwords.verifyPassword(String(password ?? ""), passwords.encodeVerifier(passwords.dummyVerifier()));
+      this.#recordFailure(idCheck.identifier, source);
+      this.audit("login", { result: "DENY", errorCode: ERROR.INVALID_CREDENTIALS, durationMs: this.clock() - started });
+      return domain.fail(ERROR.INVALID_CREDENTIALS);
+    }
+
+    let verified = false;
+    try {
+      verified = await passwords.verifyPassword(String(password ?? ""), user.password_hash);
+    } catch {
+      this.audit("login", { result: "ERROR", errorCode: ERROR.INTERNAL_ERROR });
+      return domain.fail(ERROR.INTERNAL_ERROR, "kdf-failed");
+    }
+    if (!verified) {
+      this.#recordFailure(idCheck.identifier, source);
+      this.audit("login", { userId: user.id, result: "DENY", errorCode: ERROR.INVALID_CREDENTIALS, durationMs: this.clock() - started });
+      return domain.fail(ERROR.INVALID_CREDENTIALS);
+    }
+
+    // 口令正确但账号被禁用：这时才报 USER_DISABLED。
+    // 顺序不能反——先报禁用等于免费提供"这个账号存在"的枚举接口。
+    if (user.status === USER_STATUS.DISABLED) {
+      this.audit("login", { userId: user.id, result: "DENY", errorCode: ERROR.USER_DISABLED, durationMs: this.clock() - started });
+      return domain.fail(ERROR.USER_DISABLED);
+    }
+
+    const notReady = this.status();
+    if (!notReady.initialized) {
+      this.audit("login", { userId: user.id, result: "DENY", errorCode: ERROR.NOT_INITIALIZED });
+      return domain.fail(ERROR.NOT_INITIALIZED);
+    }
+
+    this.#clearFailures(idCheck.identifier, source);
+
+    // 参数升级：登录成功后用当前默认参数透明重哈希（ADR §6）
+    if (passwords.needsUpgrade(user.password_hash)) {
+      try {
+        const v = await passwords.createVerifier(String(password));
+        this.db
+          .prepare(
+            `UPDATE users SET password_params = ?, password_salt = ?, password_hash = ?, updated_at = ? WHERE id = ?`,
+          )
+          .run(JSON.stringify(v.params), v.salt, passwords.encodeVerifier(v), this.clock(), user.id);
+      } catch {
+        /* 重哈希失败不影响本次登录 */
+      }
+    }
+
+    const { session, token } = await this.#withBusyRetry(() => this.transact(() => this.#createSession(user, this.clock())));
+    const fresh = this.userById(user.id);
+    this.audit("login", {
+      userId: fresh.id,
+      sessionRef: session.ref,
+      result: "OK",
+      durationMs: this.clock() - started,
+    });
+    return domain.ok({
+      user: fresh,
+      session,
+      token,
+      installationId: fresh.installation_id,
+    });
+  }
+
+  /**
+   * 重启后恢复：用 OS 受保护存储里的 token 反查 session。
+   *
+   * 这是"刷新/重启恢复身份"（§39）的唯一路径，
+   * 也是渲染进程**不需要**在 localStorage 里存任何身份凭据的原因。
+   */
+  restoreByToken(token) {
+    const started = this.clock();
+    if (!token) {
+      this.audit("restore", { result: "DENY", errorCode: ERROR.INVALID_CREDENTIALS });
+      return domain.fail(ERROR.INVALID_CREDENTIALS);
+    }
+    const session = this.sessionByTokenHash(domain.hashToken(token));
+    if (!session) {
+      this.audit("restore", { result: "DENY", errorCode: ERROR.SESSION_REVOKED });
+      return domain.fail(ERROR.SESSION_REVOKED);
+    }
+    const user = this.userById(session.user_id);
+    const verdict = domain.evaluateSession(session, user, this.clock());
+    if (!verdict.ok) {
+      this.audit("restore", { userId: session.user_id, sessionRef: session.ref, result: "DENY", errorCode: verdict.error });
+      return verdict;
+    }
+    this.#touch(session, this.clock());
+    this.audit("restore", {
+      userId: user.id,
+      sessionRef: session.ref,
+      result: "OK",
+      durationMs: this.clock() - started,
+    });
+    return domain.ok({ user, session: this.sessionByRef(session.ref), installationId: user.installation_id });
+  }
+
+  // -------------------------------------------------------------------------
+  // Session（§9 / §32）
+  // -------------------------------------------------------------------------
+
+  /** 滑动续期。锁定的 session **不续期**——锁屏不是"保持活跃"的理由。 */
+  #touch(session, now) {
+    if (session.locked_at != null) return session;
+    const idleExpiresAt = now + this.idleMs;
+    this.db.prepare("UPDATE sessions SET last_seen_at = ?, idle_expires_at = ? WHERE id = ?").run(now, idleExpiresAt, session.id);
+    return { ...session, last_seen_at: now, idle_expires_at: idleExpiresAt };
+  }
+
+  /**
+   * 校验 session。
+   *
+   * `sensitive: true`（默认）时锁定态返回 LOCKED（§47）；
+   * `sensitive: false` 时锁定态仍算有效（身份可识别，只是不能做受保护的事）。
+   */
+  validateSession(ref, { sensitive = true } = {}) {
+    const session = this.sessionByRef(ref);
+    if (!session) {
+      this.audit("validate", { result: "DENY", errorCode: ERROR.SESSION_REVOKED });
+      return domain.fail(ERROR.SESSION_REVOKED);
+    }
+    const user = this.userById(session.user_id);
+    const verdict = domain.guardProtected(session, user, this.clock(), { sensitive });
+    if (!verdict.ok) {
+      this.audit("validate", {
+        userId: session.user_id,
+        sessionRef: session.ref,
+        result: "DENY",
+        errorCode: verdict.error,
+      });
+      return verdict;
+    }
+    const touched = this.#touch(session, this.clock());
+    return domain.ok({ user, session: touched, locked: touched.locked_at != null });
+  }
+
+  /** 撤销单条 session。 */
+  #revokeSession(session, reason, now) {
+    if (session.revoked_at != null) return;
+    this.db
+      .prepare("UPDATE sessions SET revoked_at = ?, revoked_reason = ? WHERE id = ?")
+      .run(now, reason || REVOKE_REASON.ADMIN, session.id);
+  }
+
+  #revokeAllForUser(userId, reason, now) {
+    this.db
+      .prepare("UPDATE sessions SET revoked_at = ?, revoked_reason = ? WHERE user_id = ? AND revoked_at IS NULL")
+      .run(now, reason, userId);
+  }
+
+  /**
+   * 登出（§13）。真正撤销当前 session —— 不是"跳回登录页"就算完成。
+   * 返回被撤销 session 的 token_hash 供 service 清理 OS 受保护存储。
+   */
+  logout(ref) {
+    const started = this.clock();
+    const session = this.sessionByRef(ref);
+    if (!session) {
+      this.audit("logout", { result: "DENY", errorCode: ERROR.SESSION_REVOKED });
+      return domain.fail(ERROR.SESSION_REVOKED);
+    }
+    if (session.revoked_at != null) {
+      this.audit("logout", { userId: session.user_id, sessionRef: session.ref, result: "DENY", errorCode: ERROR.SESSION_REVOKED });
+      return domain.fail(ERROR.SESSION_REVOKED);
+    }
+    this.#revokeSession(session, REVOKE_REASON.LOGOUT, this.clock());
+    this.audit("logout", {
+      userId: session.user_id,
+      sessionRef: session.ref,
+      result: "OK",
+      durationMs: this.clock() - started,
+    });
+    return domain.ok({ sessionId: session.id, tokenHash: session.token_hash, userId: session.user_id });
+  }
+
+  // -------------------------------------------------------------------------
+  // Lock / Unlock（§14 / §15 / §16 / §47）
+  // -------------------------------------------------------------------------
+
+  /**
+   * 锁定。LOCK ≠ LOGOUT（§14）：session 仍然有效、身份仍然可识别，
+   * 只是受保护命令被挡住。落库是为了"锁定期间重启"仍保持锁定。
+   */
+  lock(ref) {
+    const started = this.clock();
+    const session = this.sessionByRef(ref);
+    if (!session) {
+      this.audit("lock", { result: "DENY", errorCode: ERROR.SESSION_REVOKED });
+      return domain.fail(ERROR.SESSION_REVOKED);
+    }
+    const user = this.userById(session.user_id);
+    const verdict = domain.evaluateSession(session, user, this.clock());
+    if (!verdict.ok) {
+      this.audit("lock", { userId: session.user_id, sessionRef: session.ref, result: "DENY", errorCode: verdict.error });
+      return verdict;
+    }
+    if (session.locked_at == null) {
+      this.db.prepare("UPDATE sessions SET locked_at = ? WHERE id = ?").run(this.clock(), session.id);
+    }
+    this.audit("lock", { userId: session.user_id, sessionRef: session.ref, result: "OK", durationMs: this.clock() - started });
+    return domain.ok({ locked: true, session: this.sessionByRef(session.ref) });
+  }
+
+  /**
+   * 解锁（§16）。**必须重新验证凭据** —— 不是"点一下按钮把 locked 置 false"。
+   *
+   * 成功后**轮换 ref 与 token**：
+   *   · 换 ref  → 旧 ref 立刻失效，"解锁前偷到的 ref"不能再用
+   *   · 换 token → OS 受保护存储里的旧 token 作废
+   * 已经 revoked 的 session **不会被偷偷恢复**：
+   * evaluateSession 在解锁路径里同样生效，revoked 一律 DENY。
+   */
+  async unlock(ref, password) {
+    const started = this.clock();
+    const session = this.sessionByRef(ref);
+    if (!session) {
+      this.audit("unlock", { result: "DENY", errorCode: ERROR.SESSION_REVOKED });
+      return domain.fail(ERROR.SESSION_REVOKED);
+    }
+    const user = this.userById(session.user_id);
+    // 注意：这里用 evaluateSession（不带敏感守卫）—— 锁定的 session 本身是有效的
+    const verdict = domain.evaluateSession(session, user, this.clock());
+    if (!verdict.ok) {
+      this.audit("unlock", { userId: session.user_id, sessionRef: session.ref, result: "DENY", errorCode: verdict.error });
+      return verdict;
+    }
+    if (session.locked_at == null) {
+      // 没锁却来解锁：不是错误，但也不该白送一次凭据校验成功
+      this.audit("unlock", { userId: session.user_id, sessionRef: session.ref, result: "DENY", errorCode: ERROR.INVALID_INPUT });
+      return domain.fail(ERROR.INVALID_INPUT, "not-locked");
+    }
+
+    // 解锁失败也走限流：锁屏不是无限次试密码的地方
+    const remaining = this.throttleRemaining(user.identifier, "lock");
+    if (remaining > 0) {
+      this.audit("unlock", { userId: user.id, sessionRef: session.ref, result: "DENY", errorCode: ERROR.RATE_LIMITED });
+      return domain.fail(ERROR.RATE_LIMITED, { retryAfterMs: remaining });
+    }
+
+    let verified = false;
+    try {
+      verified = await passwords.verifyPassword(String(password ?? ""), user.password_hash);
+    } catch {
+      this.audit("unlock", { userId: user.id, sessionRef: session.ref, result: "ERROR", errorCode: ERROR.INTERNAL_ERROR });
+      return domain.fail(ERROR.INTERNAL_ERROR, "kdf-failed");
+    }
+    if (!verified) {
+      this.#recordFailure(user.identifier, "lock");
+      this.audit("unlock", {
+        userId: user.id,
+        sessionRef: session.ref,
+        result: "DENY",
+        errorCode: ERROR.INVALID_CREDENTIALS,
+        durationMs: this.clock() - started,
+      });
+      return domain.fail(ERROR.INVALID_CREDENTIALS);
+    }
+    if (user.status === USER_STATUS.DISABLED) {
+      this.audit("unlock", { userId: user.id, sessionRef: session.ref, result: "DENY", errorCode: ERROR.USER_DISABLED });
+      return domain.fail(ERROR.USER_DISABLED);
+    }
+
+    this.#clearFailures(user.identifier, "lock");
+    const now = this.clock();
+    const newToken = domain.newSessionToken();
+    const newRef = domain.newId("SESSION_REF");
+    await this.#withBusyRetry(() =>
+      this.transact(() => {
+        this.db
+          .prepare(
+            `UPDATE sessions SET locked_at = NULL, reauth_at = ?, ref = ?, token_hash = ?, last_seen_at = ?,
+                                 idle_expires_at = ?, auth_version = ? WHERE id = ?`,
+          )
+          .run(now, newRef, domain.hashToken(newToken), now, now + this.idleMs, user.auth_version, session.id);
+        return true;
+      }),
+    );
+    this.audit("unlock", {
+      userId: user.id,
+      sessionRef: newRef,
+      result: "OK",
+      durationMs: this.clock() - started,
+    });
+    return domain.ok({ user, session: this.sessionByRef(newRef), token: newToken, previousRef: session.ref });
+  }
+
+  // -------------------------------------------------------------------------
+  // 改密（§21 / §46）
+  // -------------------------------------------------------------------------
+
+  /**
+   * 修改口令。
+   *
+   * **冻结策略：authVersion++ 且撤销该用户的全部 session（含当前这条）。**
+   *
+   * 为什么连当前 session 一起撤：
+   *   · 语义最干净——"改密之后，除了你刚刚用新密码建立的会话之外，没有任何旧凭据还活着"
+   *   · 可测：§46 的"旧 session 行为"只有一个答案，不存在"这条留着那条不留"的特例
+   *   · 代价只是"改完要重新登录一次"，而这恰恰是安全上正确的行为
+   * 备选方案（保留当前 session、只撤其它）被否决：它会让 §46 出现两种合法期望，
+   * 并且让"改密后当前会话仍持有旧 auth proof"成为一个需要额外解释的状态。
+   */
+  async changePassword(ref, currentPassword, newPassword) {
+    const started = this.clock();
+    const session = this.sessionByRef(ref);
+    if (!session) {
+      this.audit("change-password", { result: "DENY", errorCode: ERROR.SESSION_REVOKED });
+      return domain.fail(ERROR.SESSION_REVOKED);
+    }
+    const user = this.userById(session.user_id);
+    const verdict = domain.guardProtected(session, user, this.clock(), { sensitive: true });
+    if (!verdict.ok) {
+      this.audit("change-password", {
+        userId: session.user_id,
+        sessionRef: session.ref,
+        result: "DENY",
+        errorCode: verdict.error,
+      });
+      return verdict;
+    }
+
+    const pwCheck = passwords.validatePassword(newPassword);
+    if (!pwCheck.ok) {
+      this.audit("change-password", { userId: user.id, sessionRef: session.ref, result: "DENY", errorCode: pwCheck.error });
+      return domain.fail(pwCheck.code, pwCheck.reason);
+    }
+
+    let verified = false;
+    try {
+      verified = await passwords.verifyPassword(String(currentPassword ?? ""), user.password_hash);
+    } catch {
+      this.audit("change-password", { userId: user.id, sessionRef: session.ref, result: "ERROR", errorCode: ERROR.INTERNAL_ERROR });
+      return domain.fail(ERROR.INTERNAL_ERROR, "kdf-failed");
+    }
+    if (!verified) {
+      this.audit("change-password", {
+        userId: user.id,
+        sessionRef: session.ref,
+        result: "DENY",
+        errorCode: ERROR.INVALID_CREDENTIALS,
+        durationMs: this.clock() - started,
+      });
+      return domain.fail(ERROR.INVALID_CREDENTIALS);
+    }
+
+    let verifier;
+    try {
+      verifier = await passwords.createVerifier(newPassword);
+    } catch {
+      this.audit("change-password", { userId: user.id, sessionRef: session.ref, result: "ERROR", errorCode: ERROR.INTERNAL_ERROR });
+      return domain.fail(ERROR.INTERNAL_ERROR, "kdf-failed");
+    }
+
+    const now = this.clock();
+    const nextVersion = user.auth_version + 1;
+    await this.#withBusyRetry(() =>
+      this.transact(() => {
+        this.db
+          .prepare(
+            `UPDATE users SET password_algo = ?, password_params = ?, password_salt = ?, password_hash = ?,
+                              password_version = ?, auth_version = ?, updated_at = ?
+             WHERE id = ?`,
+          )
+          .run(
+            verifier.algo,
+            JSON.stringify(verifier.params),
+            verifier.salt,
+            passwords.encodeVerifier(verifier),
+            verifier.version,
+            nextVersion,
+            now,
+            user.id,
+          );
+        // authVersion 抬高了，所有旧 session 立刻不匹配 —— 这里只是把原因写清楚
+        this.#revokeAllForUser(user.id, REVOKE_REASON.PASSWORD_CHANGED, now);
+        return true;
+      }),
+    );
+
+    this.audit("change-password", {
+      userId: user.id,
+      sessionRef: session.ref,
+      result: "OK",
+      durationMs: this.clock() - started,
+    });
+    return domain.ok({ userId: user.id, authVersion: nextVersion, revokedSessions: this.sessionsOf(user.id).length });
+  }
+
+  // -------------------------------------------------------------------------
+  // 用户状态（§17 / §18 / §19 / §45）
+  // -------------------------------------------------------------------------
+
+  /**
+   * 设置用户状态。管理员 / 测试夹具命令（§18：本轮不建 admin UI）。
+   *
+   * **禁用不删 session 行**：这样校验时能返回 USER_DISABLED 而不是
+   * SESSION_REVOKED —— 后者会被 UI 当成"请重新登录"，而真实含义是
+   * "你的账号被停用了，重新登录也没用"。D4 需要这个区分（§19）。
+   * service 层负责把 OS 受保护存储里的 token 清掉，使重启无法恢复。
+   */
+  setUserStatus(userId, status) {
+    const started = this.clock();
+    if (status !== USER_STATUS.ACTIVE && status !== USER_STATUS.DISABLED)
+      return domain.fail(ERROR.INVALID_INPUT, "bad-status");
+    const user = this.userById(userId);
+    if (!user) {
+      this.audit("set-user-status", { result: "DENY", errorCode: ERROR.INVALID_INPUT });
+      return domain.fail(ERROR.INVALID_INPUT, "user-missing");
+    }
+    this.db.prepare("UPDATE users SET status = ?, updated_at = ? WHERE id = ?").run(status, this.clock(), user.id);
+    this.audit("set-user-status", {
+      userId: user.id,
+      result: "OK",
+      durationMs: this.clock() - started,
+    });
+    return domain.ok({ user: this.userById(user.id) });
+  }
+
+  // -------------------------------------------------------------------------
+  // Installation Reset（§20 / §22）
+  // -------------------------------------------------------------------------
+
+  /**
+   * 安装重置。**高风险操作**：
+   *   · 必须显式传 `confirm: "DELETE-ALL-IDENTITY-DATA"`，输错一字即拒
+   *   · 不在任何产品 UI 里暴露入口（本轮只有探针与未来的恢复流程会调）
+   *   · 审计留痕：audit_log **不删**，否则"谁重置了"将无据可查
+   */
+  resetInstallation({ confirm } = {}) {
+    if (confirm !== "DELETE-ALL-IDENTITY-DATA") {
+      this.audit("reset-installation", { result: "DENY", errorCode: ERROR.INVALID_INPUT });
+      return domain.fail(ERROR.INVALID_INPUT, "confirm-required");
+    }
+    const started = this.clock();
+    this.audit("reset-installation", { result: "OK_REQUESTED" });
+    this.transactSync(() => {
+      this.db.exec("DELETE FROM sessions");
+      this.db.exec("DELETE FROM login_attempts");
+      this.db.exec("DELETE FROM users");
+      this.db.exec("DELETE FROM teams");
+      this.db.exec("DELETE FROM installations");
+    });
+    this.audit("reset-installation", { result: "OK", durationMs: this.clock() - started });
+    return domain.ok({ status: this.status() });
+  }
+
+  // -------------------------------------------------------------------------
+  // 数据完整性（§30）—— 依赖数据库约束，这里是**可断言的复查**
+  // -------------------------------------------------------------------------
+
+  /** 返回违规描述数组，空数组 = 健康。 */
+  invariants() {
+    const bad = [];
+    const insts = this.db.prepare("SELECT * FROM installations").all();
+    if (insts.length > 1) bad.push(`installations 有 ${insts.length} 行（必须 <= 1）`);
+    const rootTeams = this.db.prepare("SELECT * FROM teams WHERE root = 1").all();
+    if (rootTeams.length > 1) bad.push(`root team 有 ${rootTeams.length} 个（必须 <= 1）`);
+
+    const users = this.allUsers();
+    const userIds = new Set(users.map((u) => u.id));
+    if (new Set(users.map((u) => u.identifier)).size !== users.length) bad.push("identifier 重复");
+    for (const u of users) {
+      if (![USER_ROLE.ADMIN, USER_ROLE.MEMBER].includes(u.role)) bad.push(`user ${u.id} role 非法`);
+      if (![USER_STATUS.ACTIVE, USER_STATUS.DISABLED].includes(u.status)) bad.push(`user ${u.id} status 非法`);
+      if (!this.db.prepare("SELECT 1 FROM teams WHERE id = ?").get(u.team_id)) bad.push(`user ${u.id} 指向不存在的 team`);
+      if (!Number.isFinite(u.created_at) || !Number.isFinite(u.updated_at)) bad.push(`user ${u.id} 时间戳非法`);
+      if (u.created_at > u.updated_at) bad.push(`user ${u.id} updated_at 早于 created_at`);
+      if (!u.password_hash || !u.password_salt) bad.push(`user ${u.id} 缺 verifier`);
+    }
+
+    const inst = insts[0];
+    if (inst) {
+      for (const u of users) if (u.installation_id !== inst.id) bad.push(`user ${u.id} 不属于本 installation`);
+      if (inst.status === INIT.INITIALIZING) bad.push("installation 停留在 INITIALIZING（事务未提交干净）");
+      if (inst.status === INIT.READY && !inst.initialized_at) bad.push("READY 但没有 initialized_at");
+      if (inst.status === INIT.READY && users.length === 0) bad.push("READY 但没有任何用户（无 admin 的安装）");
+    }
+
+    for (const s of this.allSessions()) {
+      if (!userIds.has(s.user_id)) bad.push(`session ${s.id} 指向不存在的 user`);
+      if (!Number.isFinite(s.expires_at) || !Number.isFinite(s.idle_expires_at)) bad.push(`session ${s.id} 时间戳非法`);
+      if (s.expires_at <= s.created_at) bad.push(`session ${s.id} 有效期非正`);
+      if (s.revoked_at != null && !s.revoked_reason) bad.push(`session ${s.id} 已撤销但无原因`);
+      if (!s.token_hash || s.token_hash.length !== 64) bad.push(`session ${s.id} token_hash 缺失或长度不对`);
+    }
+    return bad;
+  }
+}
+
+module.exports = {
+  IdentityStore,
+  SCHEMA_VERSION,
+  SCHEMA_SQL,
+  DEFAULT_TTL_MS,
+  DEFAULT_IDLE_MS,
+  openDatabase,
+  isBusy,
+};
