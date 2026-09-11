@@ -199,12 +199,13 @@ function AuroraBackground({ reduced }: { reduced: boolean }) {
         "  for (int i = 0; i < 3; i++) {",
         "    float fi = float(i);",
         "    vec3 tint = i == 0 ? c1 : (i == 1 ? c2 : c3);",
-        "    float speed = 0.030 + fi * 0.022;",
+        // 速度与对比都调高：之前太慢太淡，用户根本看不出"在动"
+        "    float speed = 0.115 + fi * 0.075;",
         "    float x = uv.x * (1.35 + fi * 0.55) + t * speed + fi * 7.3;",
-        "    float n = fbm(vec2(x, uv.y * 1.35 - t * 0.020 + fi * 2.1));",
-        "    float band = pow(smoothstep(0.28, 0.96, n), 1.7);",
+        "    float n = fbm(vec2(x, uv.y * 1.35 - t * 0.055 + fi * 2.1));",
+        "    float band = pow(smoothstep(0.24, 0.96, n), 1.45);",
         "    float vfade = smoothstep(0.0, 0.92, uv.y) * (1.0 - smoothstep(0.52, 1.05, uv.y));",
-        "    col += tint * band * vfade * 0.9;",
+        "    col += tint * band * vfade * 1.5;",
         "  }",
         "  gl_FragColor = vec4(col, 1.0);",
         "}",
@@ -269,9 +270,9 @@ function AuroraBackground({ reduced }: { reduced: boolean }) {
     };
     resize();
     const blobs = [
-      { c: AURORA_COLORS[0], sx: 0.2, sy: 0.8, ax: 0.18, ay: 0.12, sp: 0.00021, r: 0.75 },
-      { c: AURORA_COLORS[1], sx: 0.75, sy: 0.25, ax: 0.2, ay: 0.14, sp: 0.00016, r: 0.65 },
-      { c: AURORA_COLORS[2], sx: 0.5, sy: 0.55, ax: 0.14, ay: 0.18, sp: 0.00012, r: 0.9 },
+      { c: AURORA_COLORS[0], sx: 0.2, sy: 0.8, ax: 0.22, ay: 0.16, sp: 0.00055, r: 0.75 },
+      { c: AURORA_COLORS[1], sx: 0.75, sy: 0.25, ax: 0.24, ay: 0.18, sp: 0.00042, r: 0.65 },
+      { c: AURORA_COLORS[2], sx: 0.5, sy: 0.55, ax: 0.18, ay: 0.22, sp: 0.00034, r: 0.9 },
     ];
     const draw = (t: number) => {
       const w = cvs.width;
@@ -556,6 +557,13 @@ function App() {
     ? (customWallpapers.find((e) => e.id === wallpaper.slice(7)) ?? null)
     : null;
   /** 上传壁纸：拷进 wallpapers 存储文件夹，然后把它设为当前壁纸。 */
+  /** 删除自定义壁纸（真实删存储条目）；删掉的正好是当前壁纸就退回内置极光。 */
+  const deleteWallpaper = async (entryId: string) => {
+    if (!window.openarc?.files) return;
+    await window.openarc.files.remove(WALLPAPER_ID, entryId);
+    await refreshFiles(WALLPAPER_ID);
+    if (wallpaper === "custom:" + entryId) setWallpaper("aurora");
+  };
   const uploadWallpaper = async (file: File | undefined) => {
     if (!file || !window.openarc?.files) return;
     const p = window.openarc.files.pathFor(file);
@@ -1641,19 +1649,28 @@ function App() {
                     <span>动态 · Aurora</span>
                   </button>
                   {customWallpapers.map((e) => (
-                    <button
-                      key={e.id}
-                      className={"wallpaper-option" + (wallpaper === "custom:" + e.id ? " on" : "")}
-                      aria-pressed={wallpaper === "custom:" + e.id}
-                      onClick={() => setWallpaper("custom:" + e.id)}
-                    >
-                      {kindOfExt(e.ext) === "video" ? (
-                        <video src={fileUrl(WALLPAPER_ID, e.id)} muted loop autoPlay playsInline />
-                      ) : (
-                        <img src={fileUrl(WALLPAPER_ID, e.id)} alt="" />
-                      )}
-                      <span>{e.name}</span>
-                    </button>
+                    <div className="wallpaper-cell" key={e.id}>
+                      <button
+                        className={"wallpaper-option" + (wallpaper === "custom:" + e.id ? " on" : "")}
+                        aria-pressed={wallpaper === "custom:" + e.id}
+                        onClick={() => setWallpaper("custom:" + e.id)}
+                      >
+                        {kindOfExt(e.ext) === "video" ? (
+                          <video src={fileUrl(WALLPAPER_ID, e.id)} muted loop autoPlay playsInline />
+                        ) : (
+                          <img src={fileUrl(WALLPAPER_ID, e.id)} alt="" />
+                        )}
+                        <span>{e.name}</span>
+                      </button>
+                      <button
+                        className="wallpaper-del"
+                        aria-label="删除壁纸"
+                        title="删除壁纸"
+                        onClick={() => void deleteWallpaper(e.id)}
+                      >
+                        ✕
+                      </button>
+                    </div>
                   ))}
                 </div>
               </>
