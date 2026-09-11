@@ -13,7 +13,9 @@
   --surface: rgba(255, 255, 255, 0.68);
   --content: rgba(255, 255, 255, 0.94);
   --sunken: rgba(0, 0, 0, 0.04);
-  --bar: rgba(255, 255, 255, 0.58);
+  /* D1-04 采纳 feature/ui-light-bar-zero：顶栏与 Dock 只保留模糊，无底色填充。
+     与深色 --bar: rgba(23,23,23,0) 对齐，深浅两色口径一致 */
+  --bar: rgba(255, 255, 255, 0);
   --pill: rgba(255, 255, 255, 0.58);
   --line: rgba(0, 0, 0, 0.12);
   --accent: #1d1d1f;
@@ -138,7 +140,11 @@ textarea {
 .opaque {
   --surface: #f5f5f7;
   --content: #fff;
-  --bar: #ececed;
+  /* 无模糊时 --bar 必须等于它压着的桌面合成色，否则 opaque 下会浮出一条亮带。
+     D1-04 实测（experiments/d1-04/opaque-probe.mjs）：顶栏处桌面 9 点均值
+     #efeff1、Dock 处 #e4e4e8；单一 token 取中点 #e9e9ec，两端偏差 ≤6 级。
+     分支原值 #f5f5f7 比桌面上限还亮，实测不成立。 */
+  --bar: #e9e9ec;
 }
 .opaque.dark {
   /* 无模糊时取上表的合成值，保证与半透明版视觉一致 */
@@ -163,7 +169,7 @@ textarea {
   height: 38px;
   background: var(--bar);
   backdrop-filter: blur(40px) saturate(180%);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+  /* 顶栏无底色（--bar 0），不能再有投影，否则会在桌面留下一条幽灵暗边 */
   display: flex;
   align-items: center;
   gap: 26px;
@@ -279,7 +285,8 @@ textarea {
 .window-title {
   height: 44px;
   flex-shrink: 0;
-  background: rgba(0, 0, 0, 0.035);
+  /* 标题栏无底色（用户指定透明度 0），与窗口外壳同值，不形成材质分区 */
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -287,10 +294,6 @@ textarea {
   user-select: none;
   touch-action: none;
   font-size: 13px;
-}
-/* 标题栏无底色（用户指定透明度 0），与窗口外壳同值，不形成材质分区 */
-.dark .window-title {
-  background: transparent;
 }
 .traffic {
   position: absolute;
