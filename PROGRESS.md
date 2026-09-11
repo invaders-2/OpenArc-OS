@@ -4,17 +4,94 @@
 
 最新确认：产品为运行在 Windows/macOS 上的完整独立桌面系统。UI 全局采用 Apple 半透明磨砂玻璃质感，组件与交互动效遵循 https://ui.spectrumhq.in/ 参考方向，覆盖登录、桌面、应用、文件、AI、Skill 和设置。详细要求已写入 PRODUCT.md。
 
-已完成：明确 Windows/macOS 独立 AI 桌面工作台的产品方向，并将 Skill 市场与自定义 Skill 纳入首版范围。PRODUCT.md 已记录应用、MCP、Skill 的关系、局域网用户权限、设备执行边界，以及真实连接和演示的区分。
-
-当前状态：桌面壳已可运行（D1 桌面外壳与玻璃设计系统已落地并通过构建），D1-01「桌面与原生视图」技术验证已执行，结论为 PARTIAL——macOS 侧主进程与原生视图 26/26 项实测通过，Windows 侧与 Playwright 驱动的 UI 侧验收未验证/被阻断。没有已连接的 Adobe 应用。Illustrator 官方 MCP 文档已作为依据；Photoshop 社区方案与魔搭具体条目仍需实际验证。
-
-最新需求：API 在设置中统一配置，支持用户自定义并在所有接入应用中生效。内核 AI 指后端助手运行框架；DeepSeek Harness 为优先验证候选，尚未安装。已纠正将内核理解为单一模型的偏差，并写入 PRODUCT.md。
-
-本轮完成：按“上一版仍不够详细”的反馈扩展 PLAN.md，加入页面状态、账号生命周期、任务级分工与前置、权限矩阵、接口提案、38 个场景验收、双平台包装、性能目标、恢复演练、风险责任及需求追溯。进一步加入整体架构、单机与局域网拓扑、唯一调度权威、AI 验证与纠错闭环、三张架构图及两条端到端实例。（历史记录：该轮确实只写文档。）
-
 修订原则：后续计划必须写到任务级，每项明确任务 ID、前置、责任管理岗、交付证据及通过条件，避免仅罗列模块。修订记录见 CHANGELOG.md。
 
 ---
+
+# D1 当前状态（唯一口径 · D1-06 起生效）
+
+> **本节是 D1-01 ～ D1-06 当前状态的唯一权威口径。**
+> 下方「历史记录」各节保留原始过程与失败证据（不删除），但**若与本表冲突，以本表为准**。
+> 本表同时消除了此前"某段说 REDUCED 未实现、另一段说已实现""某段说 Harness 尚未安装、另一段说已实测"
+> 这类历史状态冲突。完整 Gate 判定见 `docs/decisions/D1-06-technical-gate.md`。
+
+## 1. 阶段任务状态总表
+
+| 任务 | Task Status | 技术决策 | 关键证据（真实执行） | 主要缺口 |
+| --- | --- | --- | --- | --- |
+| **D1-01** 桌面与原生视图 | **PARTIAL** | 桌面壳架构已落地；D2-02 架构 ADR 待出 | macOS 主进程 **26/26**；`tests/geometry.test.mjs` 5/5；A12 穿透已修 | Windows 6 项；UI E2E 根因未确认；运行时沙箱强制；真实多显示器拔插 |
+| **D1-02** Harness | **PARTIAL** | **ACCEPT WITH CONDITIONS**（走 **ACP** 接入面，唯一有 `session/cancel`） | 真实安装（521 包/47s）+ ACP 探针 **10/10**（含挂自建假 MCP 并枚举工具） | 真工具链路未端到端；**ACP 无鉴权**；**凭据无法与 agent 隔离**；Windows/Linux |
+| **D1-03** Adobe 双应用 | **BLOCKED** | 无 —— **不授权任何接入实现** | 稳定版无 MCP（二进制 `strings` 计数 0 + 端口零监听，双重否定）；**Beta 未安装**（四项独立证据） | Illustrator 全部运行时项；Photoshop UXP 桥接未实测 |
+| **D1-04** 组件与性能 | **PARTIAL** | 设计**内部方向 CLOSED**；选择性玻璃定义冻结 | MS-A02 / MS-A03 / A29；六格主题矩阵 PASS；过滤面积 **−86.6% ~ −99.0%**；63/63 切换压力 PASS | **Electron 内性能**；**Windows 视觉/性能** |
+| **D1-05** 服务与隔离 | **PARTIAL** | **20 条决策已冻结** | 9 探针 **FAIL 0 / PASS 6 / PARTIAL 3**；TLS 12 场景；攻击矩阵 12 条；**三条硬红线未触发** | **OS sandbox / 内存 / 网络三处 BLOCKED**；Windows 全项；file boundary 仍有绕过路径 |
+| **D1-06** 技术关卡 | **PARTIAL** | **RECOMMENDATION: CONDITIONAL GO** | 26 面 Master Gate Matrix；13 条 blocker 绑定最晚阶段；19 行 Phase Admission Matrix；集成树 `npm test` **7/7** + `npm run build` 通过 | 见第 2 节；Windows / Adobe / OS sandbox 三处 |
+
+### D1 整体判定
+
+> **D1 整体 = PARTIAL。不得描述为 COMPLETE。**
+
+只要下列任一条成立即不得写 COMPLETE，而**三条当前全部成立**：
+
+1. D1-03 仍 `BLOCKED`；
+2. D1-05 的 OS sandbox blocker 仍在（含内存 / 网络两项连带 blocker）；
+3. Windows 核心项仍 `NOT VERIFIED`。
+
+**"D1-06 = PARTIAL" 与 "D2 可以 CONDITIONAL GO" 不矛盾** —— 前者是技术验证完成度，后者是阶段准入。
+
+## 2. D1-06 Gate 关键面（非 PASS 项全列；全部 26 行见 ADR 第 3 节）
+
+统计：**PASS 11 / PARTIAL 6 / BLOCKED 4 / NOT VERIFIED 5 / FAIL 0**。
+
+| Area | Status | 缺口 | 最晚解决阶段 |
+| --- | --- | --- | --- |
+| Windows desktop | NOT VERIFIED | mica / 窗口行为 / 多显示器 / 打包 / sandbox runtime / UI E2E | **D6 / RELEASE** |
+| Harness | PARTIAL | 端到端工具链路；Windows/Linux | **D4-02** |
+| Tool interception | NOT VERIFIED | `tools/call` 实际拦截全未测 | **D4-03 / D4-04** |
+| Harness credential boundary | PARTIAL | 真实隔离方案（官方自承无法隔离） | **D4-01** |
+| Adobe Illustrator | BLOCKED | Beta 未安装，无重做前提 | **D5-05** |
+| Adobe Photoshop | NOT VERIFIED | UXP + 本机桥接未实测 | **D5-04** |
+| Electron performance | NOT VERIFIED | 数字只在 Chromium 侧取得 | **D6** |
+| Windows visual / performance | NOT VERIFIED | 全部 | **D6 / RELEASE** |
+| Local IPC | PARTIAL | **Windows Named Pipe ACL**；跨 uid 强制执行 | **D3-02（Win）** / **D6** |
+| Device identity | PARTIAL | device registry / revocation / team membership / authorization **全未实现** | **D3-03** |
+| Credential storage | PARTIAL | **Windows DPAPI / Credential Manager** | **D3-04（Win）** / **D6** |
+| File boundary | PARTIAL | **hard link** 与 **TOCTOU 中间段替换** 可绕过 | **任何不可信代码执行** |
+| Plugin isolation | BLOCKED | OS sandbox | **D5-03 / D5-08** |
+| Network isolation | BLOCKED | OS 级强制 | **D5-08** |
+| Memory limit | BLOCKED | OS 级方案（V8 `resourceLimits` 不覆盖堆外） | **任何不可信代码执行** |
+| Adobe 全模块关口 | BLOCKED | 两应用均无运行证据 | **D5-09** |
+
+## 3. 当前放行结论（详见 ADR 第 18 / 21 节）
+
+| 任务 | 决策 |
+| --- | --- |
+| D2-01 设计规范 | **CONDITIONAL GO** |
+| D2-02 窗口系统 | **CONDITIONAL GO**（仅 macOS；须同时出架构 ADR） |
+| D2-03 搜索与通知 | **BLOCK**（前置 D3-02 不存在） |
+| D2-04 页面状态 | **CONDITIONAL GO**（无权态留待 D3-02） |
+| D3-01 初始化与身份 | **CONDITIONAL GO** |
+| D3-02 对象授权 | **CONDITIONAL GO** |
+| D3-03 设备与 TLS | **CONDITIONAL GO**（须自建 registry + revocation） |
+| D3-04 文件与项目 | **CONDITIONAL GO** |
+| D3-05 身份关卡 | **BLOCK** |
+| D4-01 模型服务 | **CONDITIONAL GO（受限）** |
+| D4-02 任务与适配 | **CONDITIONAL GO** |
+| D4-03 工具门与租约 | **BLOCK** |
+| D4-04 纵向冒烟 | **BLOCK** |
+| D5-03 MCP 中心 | **CONDITIONAL GO（受限）** |
+| D5-04 PS 完整接入 | **BLOCK** |
+| D5-05 Illustrator 接入 | **BLOCK** |
+| D5-08 插件生命周期 | **BLOCK** |
+
+**冻结禁令**：不可信 Plugin / Skill 执行默认关闭（`UNTRUSTED CODE EXECUTION = DISABLED BY DEFAULT`）；
+应用层路径检查只作 defense-in-depth，不作为插件权限最终强制点；自动 `FULL→REDUCED→SOLID` 保持冻结；
+`network:none` 在无 OS 级强制证据前不得宣称已实现。
+
+---
+
+# 历史记录（过程与失败证据，保留不删）
+
+> 以下各节按当时实际状态书写，**不作为当前口径**。当前状态以 `# D1 当前状态` 一节为准。
 
 ## D1 阶段状态（2026-09-10）
 
@@ -68,7 +145,7 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 
 说明：D1-01 PARTIAL 不阻止 D1-02 开始。真正禁止的是在 D1-01 ～ D1-05 未达关卡要求时宣布 D1-06 PASS。
 
-### D1-02 Harness 技术验证（2026-09-11，结论 ACCEPT WITH CONDITIONS）
+### D1-02 Harness 技术验证（2026-09-11，Task Status = PARTIAL / Technology Decision = ACCEPT WITH CONDITIONS）
 
 分支 `feature/d1-02-harness`。目标是回答"OpenArc 能不能控制 DeepSeek Harness"，不是"能不能聊天"。
 
@@ -82,11 +159,39 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 - 未验：端到端工具链路（无可用模型 Key）、Windows/Linux、`tools/call` 实际拦截。
 - 完整判定见 `docs/decisions/D1-02-harness.md`。**不因本轮授权任何产品实现。**
 
+### D1-03 Adobe 双应用评估（2026-09-11，结论 BLOCKED）
+
+分支 `feature/d1-03-adobe`，基线 `b39eb93`。完整判定见 `docs/decisions/D1-03-adobe.md`。
+
+- **Illustrator：BLOCKED** —— 官方 MCP 仅存在于 Beta；稳定版 30.0.0 无 MCP 实现
+  （主二进制 `strings` 检索 + 端口监听双重否定证据）。D1-03A 复核进一步确认 **Beta 本身未安装**
+  （app 包 / 进程 / 偏好目录 / 端口四项皆无；近 3 小时无新安装）。需真实安装 Beta 后重做。
+- **Photoshop：NOT VERIFIED** —— 官方 Desktop MCP **NOT FOUND IN OFFICIAL SOURCES**；
+  Photoshop API v2 是云端能力、不等于本机控制；候选路线为 UXP + OpenArc 本机桥接，无运行时证据。
+- **不允许**出现 "Illustrator PASS + Photoshop NOT VERIFIED → D1-03 PASS" 这类结论；总状态取 **BLOCKED**。
+
+### D1-04 组件、视觉系统与性能技术验证（2026-09-11，结论 PARTIAL）
+
+分支 `feature/d1-04-design-performance`，基线 `b39eb93`。完整判定见 `docs/decisions/D1-04-design-performance.md`。
+
+- **动效可采用：达成。** MS-A02 / MS-A03 / A29 / 可打断性 / 对比度全部有实测证据，并修掉一个真实缺陷。
+- **测量条件与目标冻结：方法冻结达成，代表性未达成** —— 数字只在 Chromium 取得，产品是 Electron，Windows 未测。
+- **D1-04B 缺口（REDUCED 性能收益不成立）已由 D1-04C 关闭**：REDUCED 改为**选择性玻璃**
+  （减少过滤面积，而非调小模糊半径）。过滤面数 K=144 由 150 → **6**；过滤面积降幅 **−86.6% ~ −99.0%**；
+  63/63 切换压力 PASS；六格主题矩阵 PASS；并修掉一条实色面板 hover 回归。
+- **D1-04B 主题合成修复**：根因是"原料 + 合成结果都留在 `:root`"，`.dark` 覆盖通道时合成值已定型 →
+  深色窗口内容拿到浅色合成色 `(250,250,250)`。已改为**消费点合成**（`:root` 只放原料）。
+- **关闭的是"内部方向缺口"，不是"性能已代表 Electron"** → 整体 **PARTIAL**，剩余缺口 2 条：
+  ①Electron 内性能未验；②Windows 未验。
+- **性能口径冻结**：`Performance lever = filtered area / filtered surface count`；
+  `Blur radius = secondary visual parameter`（允许 7–13px，但不得作为性能主张依据）。
+- **自动 `FULL→REDUCED→SOLID` 降级链冻结到 D1-06 之后**，产品内只有手动选档。
+
 ### D1-05 服务 / TLS / 存储 / 沙箱 / 执行隔离技术验证（2026-09-11，结论 PARTIAL）
 
 分支 `feature/d1-05-service-isolation`，基线 `b39eb93`（含 D1-01 安全修复与 D1-02 状态修正，不含 D1-03 / D1-04 内容）。
 目标是回答"服务边界、设备接入、凭据存储、文件边界、代码执行**有没有一条能落地并被验证的安全路线**"，
-不是把后端建起来。完整判定与 20 条决策见 `docs/decisions/D1-05-service-isolation.md`。
+不是把后端建起来。完整判定与 20 条决策见 `docs/decisions/D1-05-service-isolation.md`（另见其 §30 口径修正 addendum）。
 
 **9 个探针实测（`experiments/d1-05/`，`npm run test:security`）：FAIL 0 / PASS 6 / PARTIAL 3**
 
@@ -119,10 +224,11 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 
 **其他未验证**：跨 uid UDS 强制执行 NOT VERIFIED；**Windows 全项 NOT VERIFIED**（无 Windows 主机，不因 Node API 相同就判定隔离有效）。
 
-**一次真实机器状态事故（已完全恢复并记录）**：`/usr/bin/security` 路线在测试中改写了全局钥匙串配置并把 `login.keychain-db` 改名为 `login_renamed_1.keychain-db`。已 `mv` 复原、重置 `default-keychain` / `login-keychain`、恢复 `list-keychains` 原有条目、删除测试钥匙串，并复核无探针残留。该路线因此被**明确否决**，凭据改走进程内 Security.framework。
+**一次真实机器状态事故（已完全恢复并记录）**：`/usr/bin/security` 路线在测试中改写了全局钥匙串配置并把 `login.keychain-db` 改名为 `login_renamed_1.keychain-db`。已 `mv` 复原、重置 `default-keychain` / `login-keychain`、恢复 `list-keychains` 原有条目、删除测试钥匙串，并复核无探针残留。该路线因此被**明确否决**，凭据改走进程内 Security.framework。该路线已在 D1-06 追加为**对所有未来安全 Probe 的硬约束**（只能用 isolated test item / 临时 service 名 / 假密钥）。
 
 **结论：PARTIAL，不是 COMPLETE。** 依据指令原文——"如果核心安全边界只有 JS 逻辑、没有 OS 级约束，不能写 COMPLETE"：
-路径/文件边界目前有可实测的绕过路径，OS 沙箱在本机无法建立。**不因本轮授权任何产品实现**，也不自动进入 D1-06。
+路径/文件边界目前有可实测的绕过路径，OS 沙箱在本机无法建立。**不因本轮授权任何产品实现。**
+（该轮末尾写的"不得进入 D1-06"是当时的前置要求；**D1-06 已由 Boss 正式授权执行**，门禁已解除，但 D1-05 结论未升级。）
 
 ### 待验证（沿用）
 

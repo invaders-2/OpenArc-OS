@@ -804,3 +804,47 @@ node experiments/d1-05/06-isolation-probe.mjs  # 依赖 05 先建好 sandbox 布
 因此 D1-05 **不得判 PASS / COMPLETE**，也不得进入 D1-06。
 
 **下一轮（D1-06）之前必须解决的前置**：见 §26 Remaining Blockers。
+
+---
+
+## 30. 口径修正 addendum（追加于 D1-06）
+
+> 本节由 **D1-06 技术关卡**追加，用于收紧本文档的一个表述口径。**不修改、不删除** §1–§29 的任何实测结果与判定。
+
+### 30.1 被修正的表述风险
+
+本文档 §10 / §12 / §24 反复强调"应用层路径检查不是安全边界""Worker Thread 不是安全边界"，
+这个结论是对的，但**容易被读成"既然不是 OS Sandbox，那这些控制都不算安全边界"** —— 那是错的。
+D1-06 第 5 节对此做了正式区分，本节与之一致。
+
+### 30.2 准确区分
+
+**（a）已经是有效安全控制的**（**不得**因为"不是沙箱"而贬低，D2–D5 应直接复用）：
+
+| 控制 | 成立依据 |
+| --- | --- |
+| authentication | 错 token / 无 token 一律 DENY（UDS 与 TCP 两侧） |
+| TLS | 12 场景全测；错误 / 过期 / 错 CA / 主机名不匹配全 DENY；**无明文降级** |
+| credential references | Renderer 只拿 `credentialRef`；明文不进 Renderer / localStorage / 日志 / 产物 |
+| `shell=false` | 7 类注入载荷全部无效（并跑了正例排除假阴性） |
+| argument schema | 工具注册表决定可执行文件与参数形状，12/12 越权 DENY |
+| logging redaction | 字段白名单 + 7 形态脱敏 + 落盘扫描 |
+| process-group cancellation | `kill(-pgid)` 无孤儿（单层 kill 留孤儿已同时证伪） |
+| `UNKNOWN_EFFECT` | 无允许盲目重放的路径 |
+
+**（b）不能被当作最终安全边界的**（限于：不可信 Plugin / Skill、任意文件访问、任意网络访问、内存与进程资源隔离）：
+
+JS path check（含加固版，被 hard link 与 TOCTOU 绕过） · 调用方持有 Node `fs` 时的任何路径检查 ·
+Worker Thread（共享地址空间与 `process.env`） · 普通 Child Process（fs / 网络无约束） ·
+V8 `resourceLimits`（不约束堆外内存）。
+
+### 30.3 一句话口径
+
+> **应用层控制负责正确性、防呆、审计与最小暴露；OS 级约束负责抵御恶意代码。**
+> **两者都必要，但不可互相替代。**
+
+### 30.4 与本文件 §29 门禁的关系
+
+§29 写"不得进入 D1-06"，那是当时的前置要求。**D1-06 已由 Boss 正式授权执行**，
+因此该门禁已解除；但 **D1-05 结论仍为 PARTIAL，未因 D1-06 开跑而升级**。
+D1-06 的 Gate 判定见 `docs/decisions/D1-06-technical-gate.md`。
