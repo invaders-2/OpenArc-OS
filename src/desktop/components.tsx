@@ -519,7 +519,7 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
 // ===========================================================================
 
 export type MenuItem =
-  | { id: string; label: string; danger?: boolean; disabled?: boolean; onSelect: () => void }
+  | { id: string; label: string; danger?: boolean; disabled?: boolean; checked?: boolean; onSelect: () => void }
   | { separator: true };
 
 type ContextMenuProps = {
@@ -616,6 +616,11 @@ export function ContextMenu({ x, y, items, onClose, label = "桌面菜单" }: Co
                 onClose();
               }}
             >
+              {"checked" in it ? (
+                <span className="menu-check" aria-hidden="true">
+                  {it.checked ? "✓" : ""}
+                </span>
+              ) : null}
               {it.label}
             </button>
           ),

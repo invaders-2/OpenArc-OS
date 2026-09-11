@@ -87,7 +87,16 @@ declare global {
           text?: string;
           error?: string;
         }>;
-        thumb: (folderId: string, id: string) => Promise<{ ok?: boolean; dataUrl?: string; error?: string }>;
+        thumb: (
+          folderId: string,
+          id: string,
+          size?: number,
+        ) => Promise<{ ok?: boolean; dataUrl?: string; error?: string }>;
+        info: (
+          folderId: string,
+          id: string,
+        ) => Promise<{ ok?: boolean; width?: number; height?: number; error?: string }>;
+        startDrag: (folderId: string, id: string) => void;
         copy: (
           folderId: string,
           ids: string[],
@@ -124,6 +133,22 @@ const THUMB_EXTS = [...FILE_KINDS.image, ...FILE_KINDS.video, ...FILE_KINDS.doc]
 
 /** 后缀 → 类别（渲染层用，和 FileGlyph 同一份表）。 */
 const kindOfExt = (ext: string) => Object.keys(FILE_KINDS).find((k) => FILE_KINDS[k].includes(ext)) ?? "other";
+
+/** 浏览器**自己**能渲染的图片格式；其余的（psd/ai/eps/tiff…）请主进程出一张位图。 */
+const WEB_IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif"];
+
+/** 桌面本身也是一个真实的存储文件夹：拖到桌面的文件就存在这里。 */
+const DESKTOP_ID = "desktop";
+/** 桌面图标栅格：整理与"网格吸附"共用同一套数。 */
+// 初始落位放在右侧空白区：左侧/中部会被默认窗口与品牌区压住
+const DESK_GRID = { x0: 1150, y0: 88, dx: 108, dy: 118, cols: 2 };
+/** 内置壁纸（都保持深色，符合设计语言的克制口径）。 */
+const WALLPAPERS = [
+  { id: "aurora", name: "极光" },
+  { id: "graphite", name: "石墨" },
+  { id: "midnight", name: "午夜" },
+  { id: "plain", name: "纯黑" },
+];
 
 /** 只读文件协议的媒体地址：openarc-file://media/<folderId>/<id>。 */
 const fileUrl = (folderId: string, id: string) =>
@@ -209,7 +234,7 @@ function App() {
   });
   const [renaming, setRenaming] = useState<string | null>(null);
   const [bouncing, setBouncing] = useState<string | null>(null);
-  const [menu, setMenu] = useState<{ x: number; y: number; folder?: string } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; folder?: string; file?: string } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const dockRef = useRef<HTMLElement>(null);
@@ -274,6 +299,16 @@ function App() {
       // 图片 / 视频 / 音频走**流式协议**：大视频也能播、能拖进度条；不再塞 data URL。
       // 文本 / 其它才需要主进程把内容读回来。
       if (kind === "image" || kind === "video" || kind === "audio") {
+        // psd / ai / eps / tiff 这类浏览器渲染不了的图片：向主进程要一张 1024 位图
+        if (kind === "image" && !WEB_IMAGE_EXTS.includes((known.ext ?? "").toLowerCase())) {
+          const big = await bridge.thumb(folderId, entryId, 1024);
+          if (big?.ok && big.dataUrl) {
+            setPreview({ entry: known, mime: "", kind: "image", src: big.dataUrl });
+            return;
+          }
+          setPreview({ entry: known, mime: "application/octet-stream", kind: "other" });
+          return;
+        }
         setPreview({ entry: known, mime: "", kind, src: fileUrl(folderId, entryId) });
         return;
       }
@@ -311,6 +346,8 @@ function App() {
       const fid = folderUI[win.id]?.folderId ?? win.appId.slice(FOLDER_PREFIX.length);
       if (fid) folderIds.add(fid);
     }
+    // 桌面上的文件也要缩略图
+    folderIds.add(DESKTOP_ID);
     for (const fid of folderIds) {
       for (const e of filesByFolder[fid] ?? []) {
         if (!THUMB_EXTS.includes(e.ext)) continue;
@@ -323,6 +360,86 @@ function App() {
       }
     }
   }, [state.windows, folderUI, filesByFolder, thumbs]);
+  // ---------------------------------------------------------------------------
+  // 桌面：图标位置 / 网格吸附 / 壁纸 / 排列方式（都持久化）
+  // ---------------------------------------------------------------------------
+  const [desktopIcons, setDesktopIcons] = useState<Record<string, { x: number; y: number }>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("oa-desktop-icons") || "{}");
+    } catch {
+      return {};
+    }
+  });
+  const [snap, setSnap] = useState(() => localStorage.getItem("oa-snap") !== "0");
+  const [wallpaper, setWallpaper] = useState(() => localStorage.getItem("oa-wallpaper") || "aurora");
+  const [deskSort, setDeskSort] = useState<"name" | "date" | "size">("name");
+  useEffect(() => {
+    localStorage.setItem("oa-desktop-icons", JSON.stringify(desktopIcons));
+  }, [desktopIcons]);
+  useEffect(() => {
+    localStorage.setItem("oa-snap", snap ? "1" : "0");
+  }, [snap]);
+  useEffect(() => {
+    localStorage.setItem("oa-wallpaper", wallpaper);
+  }, [wallpaper]);
+  /** 桌面上的文件来自真实存储（folderId = desktop），缩略图与文件夹里同一套。 */
+  useEffect(() => {
+    void refreshFiles(DESKTOP_ID);
+  }, [refreshFiles]);
+  const desktopFiles = useMemo(() => {
+    const list = [...(filesByFolder[DESKTOP_ID] ?? [])];
+    if (deskSort === "date") list.sort((a, b) => b.mtime - a.mtime);
+    else if (deskSort === "size") list.sort((a, b) => b.size - a.size);
+    else list.sort((a, b) => a.name.localeCompare(b.name, "zh"));
+    return list;
+  }, [filesByFolder, deskSort]);
+  const gridPos = (index: number) => ({
+    x: DESK_GRID.x0 + (index % DESK_GRID.cols) * DESK_GRID.dx,
+    y: DESK_GRID.y0 + Math.floor(index / DESK_GRID.cols) * DESK_GRID.dy,
+  });
+  const snapPos = (x: number, y: number) => ({
+    x: DESK_GRID.x0 + Math.round((x - DESK_GRID.x0) / DESK_GRID.dx) * DESK_GRID.dx,
+    y: DESK_GRID.y0 + Math.round((y - DESK_GRID.y0) / DESK_GRID.dy) * DESK_GRID.dy,
+  });
+  const deskPos = (id: string, index: number) => desktopIcons[id] ?? gridPos(index);
+  /** 拖桌面图标：跟随指针，开启吸附时落格（手势位移不做过渡，1:1）。 */
+  const dragDesktopIcon = (e: React.PointerEvent, id: string) => {
+    const start = deskPos(id, desktopFiles.findIndex((f) => f.id === id));
+    const x0 = e.clientX;
+    const y0 = e.clientY;
+    const el = e.currentTarget as HTMLElement;
+    el.setPointerCapture(e.pointerId);
+    const move = (ev: Event) => {
+      const p = ev as PointerEvent;
+      const nx = Math.max(0, Math.min(window.innerWidth - 96, start.x + p.clientX - x0));
+      const ny = Math.max(52, Math.min(window.innerHeight - 140, start.y + p.clientY - y0));
+      setDesktopIcons((m) => ({ ...m, [id]: snap ? snapPos(nx, ny) : { x: nx, y: ny } }));
+    };
+    const end = () => {
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", end);
+      el.removeEventListener("pointercancel", end);
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", end);
+    el.addEventListener("pointercancel", end);
+  };
+  /** 整理：按指定（或当前）排列顺序把桌面文件重新落到栅格上。 */
+  const arrangeDesktop = (sort?: "name" | "date" | "size") => {
+    const key = sort ?? deskSort;
+    const list = [...(filesByFolder[DESKTOP_ID] ?? [])];
+    if (key === "date") list.sort((a, b) => b.mtime - a.mtime);
+    else if (key === "size") list.sort((a, b) => b.size - a.size);
+    else list.sort((a, b) => a.name.localeCompare(b.name, "zh"));
+    setDesktopIcons((m) => {
+      const next = { ...m };
+      list.forEach((f, i) => {
+        next[f.id] = gridPos(i);
+      });
+      return next;
+    });
+  };
+
   // ---------------------------------------------------------------------------
   // 条目搬运：应用内移动/复制（应用层实现，文件夹窗口、侧栏、桌面磁贴共用同一套）
   // ---------------------------------------------------------------------------
@@ -348,7 +465,8 @@ function App() {
               if (cur === f.id) return f;
               cur = list.find((x) => x.id === cur)?.parentId;
             }
-            return { ...f, parentId: toFolderId };
+            // 拖到桌面 = 回到桌面根（桌面文件夹在虚拟树里就是"没有父"的那一层）
+            return { ...f, parentId: toFolderId === DESKTOP_ID ? undefined : toFolderId };
           }),
         );
       }
@@ -706,25 +824,37 @@ function App() {
               ? (n / 1024).toFixed(1) + " KB"
               : (n / 1048576).toFixed(1) + " MB";
       /** 显示简介：全部是真实数据（子项数 / 类型 / 大小 / 修改时间）。 */
-      const showInfo = (row: Row) => {
+      const showInfo = async (row: Row) => {
         setPaneMenu(null);
+        const rowsOut: { k: string; v: string }[] =
+          row.kind === "folder"
+            ? [
+                { k: "种类", v: "文件夹" },
+                { k: "包含", v: String(folders.filter((f) => f.parentId === row.id).length) + " 个子文件夹" },
+                { k: "位置", v: shown.name },
+              ]
+            : [
+                { k: "种类", v: row.ext ? row.ext.toUpperCase() + " 文件" : "文件" },
+                { k: "大小", v: fmtSize(row.size) },
+                { k: "修改时间", v: row.mtime ? new Date(row.mtime).toLocaleString("zh-CN") : "—" },
+                { k: "所在", v: shown.name },
+              ];
         setInfo({
           title: row.name,
           subtitle: row.kind === "folder" ? "文件夹" : row.ext ? row.ext.toUpperCase() + " 文件" : "文件",
-          rows:
-            row.kind === "folder"
-              ? [
-                  { k: "种类", v: "文件夹" },
-                  { k: "包含", v: String(folders.filter((f) => f.parentId === row.id).length) + " 个子文件夹" },
-                  { k: "位置", v: shown.name },
-                ]
-              : [
-                  { k: "种类", v: row.ext ? row.ext.toUpperCase() + " 文件" : "文件" },
-                  { k: "大小", v: fmtSize(row.size) },
-                  { k: "修改时间", v: row.mtime ? new Date(row.mtime).toLocaleString("zh-CN") : "—" },
-                  { k: "所在", v: shown.name },
-                ],
+          rows: rowsOut,
         });
+        // 图片再补一行真实分辨率（读不出来就不编）
+        if (row.kind === "file" && window.openarc?.files && kindOfExt(row.ext ?? "") === "image") {
+          const inf = await window.openarc.files.info(shown.id, row.id);
+          if (inf?.ok && inf.width) {
+            setInfo((cur) =>
+              cur && cur.title === row.name
+                ? { ...cur, rows: [...cur.rows, { k: "分辨率", v: `${inf.width} × ${inf.height}` }] }
+                : cur,
+            );
+          }
+        }
       };
       const copyNames = (ids: string[]) => {
         setPaneMenu(null);
@@ -802,7 +932,7 @@ function App() {
           ? one.kind === "folder"
             ? [
                 { id: "open", label: "打开", onSelect: () => go(one.id) },
-                { id: "info", label: "显示简介", onSelect: () => showInfo(one) },
+                { id: "info", label: "显示简介", onSelect: () => void showInfo(one) },
                 renameItem(one),
                 { separator: true },
                 { id: "copy", label: "拷贝", onSelect: doCopy },
@@ -812,7 +942,7 @@ function App() {
               ]
             : [
                 { id: "open", label: "打开", onSelect: () => void openPreview(shown.id, one.id) },
-                { id: "info", label: "显示简介", onSelect: () => showInfo(one) },
+                { id: "info", label: "显示简介", onSelect: () => void showInfo(one) },
                 renameItem(one),
                 { id: "copy", label: "拷贝名称", onSelect: () => copyNames([one.id]) },
                 { separator: true },
@@ -867,7 +997,7 @@ function App() {
           {
             id: "info",
             label: "显示简介",
-            onSelect: () => showInfo({ id: shown.id, name: shown.name, kind: "folder" }),
+            onSelect: () => void showInfo({ id: shown.id, name: shown.name, kind: "folder" }),
           },
           { separator: true },
           { id: "group", label: ui.group ? "关闭群组" : "使用群组", onSelect: () => patch({ group: !ui.group }) },
@@ -903,7 +1033,13 @@ function App() {
                 </button>
               ))}
           </nav>
-          <div className="split-main">
+          <div
+            className="split-main"
+            onClick={(e) => {
+              // 整块内容区（含工具栏下方的空白）点一下 = 取消选择；点条目由条目自己设选择
+              if (!(e.target as HTMLElement).closest(".file-cell")) setSelected((m) => ({ ...m, [id]: [] }));
+            }}
+          >
             <div className="pane-toolbar" onPointerDown={(e) => w && startDrag(e, w, onCommand)}>
               <button
                 className="icon-button"
@@ -1019,6 +1155,13 @@ function App() {
                               // 拖已选中的条目 = 拖整个选择；拖未选中的 = 只拖它自己
                               const ids = isSelected(r.id) ? selIds : [r.id];
                               if (!isSelected(r.id)) setSelected((m) => ({ ...m, [id]: [r.id] }));
+                              // 按住 ⌘ 拖动 = 走原生拖拽**导出到系统**（Finder/桌面）；
+                              // 原生拖拽与页面内 HTML5 拖拽互斥，所以必须把 HTML5 这一路取消。
+                              if (e.metaKey && r.kind === "file" && ids.length === 1) {
+                                e.preventDefault();
+                                window.openarc?.files?.startDrag(shown.id, r.id);
+                                return;
+                              }
                               e.dataTransfer.setData(INTERNAL_DND, JSON.stringify({ folderId: shown.id, ids }));
                               e.dataTransfer.effectAllowed = "copyMove";
                             }}
@@ -1344,7 +1487,99 @@ function App() {
             },
           },
         ]
-      : [{ id: "new-folder", label: "新建文件夹", onSelect: () => createFolder(menu.x, menu.y) }]
+      : menu.file
+        ? [
+            { id: "open", label: "打开", onSelect: () => void openPreview(DESKTOP_ID, menu.file!) },
+            {
+              id: "copy-name",
+              label: "拷贝名称",
+              onSelect: () =>
+                void navigator.clipboard?.writeText(desktopFiles.find((f) => f.id === menu.file)?.name ?? ""),
+            },
+            { separator: true },
+            {
+              id: "copy",
+              label: "拷贝",
+              onSelect: () => setClip({ mode: "copy", folderId: DESKTOP_ID, ids: [menu.file!] }),
+            },
+            {
+              id: "cut",
+              label: "剪切",
+              onSelect: () => setClip({ mode: "cut", folderId: DESKTOP_ID, ids: [menu.file!] }),
+            },
+            { separator: true },
+            {
+              id: "delete",
+              label: "删除",
+              danger: true,
+              onSelect: () => {
+                void window.openarc?.files?.remove(DESKTOP_ID, menu.file!).then(() => refreshFiles(DESKTOP_ID));
+              },
+            },
+          ]
+        : [
+            { id: "new-folder", label: "新建文件夹", onSelect: () => createFolder(menu.x, menu.y) },
+            ...(clip
+              ? ([
+                  {
+                    id: "paste",
+                    label:
+                      clip.mode === "cut"
+                        ? `粘贴（移动 ${clip.ids.length} 项）`
+                        : `粘贴（拷贝 ${clip.ids.length} 项）`,
+                    onSelect: () => {
+                      void (async () => {
+                        if (clip.mode === "cut") {
+                          await moveInto(DESKTOP_ID, clip.folderId, clip.ids);
+                          setClip(null);
+                        } else {
+                          await copyInto(DESKTOP_ID, clip.folderId, clip.ids);
+                        }
+                      })();
+                    },
+                  },
+                ] as MenuItem[])
+              : []),
+            { separator: true },
+            { id: "arrange", label: "整理", onSelect: () => arrangeDesktop() },
+            { id: "snap", label: "网格吸附", checked: snap, onSelect: () => setSnap((v) => !v) },
+            {
+              id: "sort-name",
+              label: "排列方式：名称",
+              checked: deskSort === "name",
+              onSelect: () => {
+                setDeskSort("name");
+                arrangeDesktop("name");
+              },
+            },
+            {
+              id: "sort-date",
+              label: "排列方式：日期",
+              checked: deskSort === "date",
+              onSelect: () => {
+                setDeskSort("date");
+                arrangeDesktop("date");
+              },
+            },
+            {
+              id: "sort-size",
+              label: "排列方式：大小",
+              checked: deskSort === "size",
+              onSelect: () => {
+                setDeskSort("size");
+                arrangeDesktop("size");
+              },
+            },
+            { separator: true },
+            ...WALLPAPERS.map(
+              (wp): MenuItem => ({
+                id: "wp-" + wp.id,
+                label: "壁纸：" + wp.name,
+                checked: wallpaper === wp.id,
+                onSelect: () => setWallpaper(wp.id),
+              }),
+            ),
+          ]
     : [];
 
   function createFolder(x: number, y: number) {
@@ -1402,17 +1637,11 @@ function App() {
     const el = e.currentTarget as HTMLElement;
     const move = (ev: Event) => {
       const p = ev as PointerEvent;
-      setFolders((fs) =>
-        fs.map((v) =>
-          v.id === f.id
-            ? {
-                ...v,
-                x: Math.max(0, Math.min(innerWidth - 88, f.x + p.clientX - x)),
-                y: Math.max(52, Math.min(innerHeight - 160, f.y + p.clientY - y)),
-              }
-            : v,
-        ),
-      );
+      const nx = Math.max(0, Math.min(innerWidth - 88, f.x + p.clientX - x));
+      const ny = Math.max(52, Math.min(innerHeight - 160, f.y + p.clientY - y));
+      // 网格吸附开启时文件夹也落格（与桌面文件同一套栅格）
+      const pos = snap ? snapPos(nx, ny) : { x: nx, y: ny };
+      setFolders((fs) => fs.map((v) => (v.id === f.id ? { ...v, x: pos.x, y: pos.y } : v)));
     };
     const end = () => {
       el.removeEventListener("pointermove", move);
@@ -1447,11 +1676,28 @@ function App() {
       className={`desktop ${dark ? "dark" : ""} ${reduced ? "reduced" : ""}`}
       data-glass={glass}
       data-identity-gate={gate}
+      data-wallpaper={wallpaper}
       onDragOver={(e) => {
         // 桌面磁贴要能接住内部拖拽；不 preventDefault 的话浏览器直接拒绝 drop
         if (!hasInternalDrag(e)) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = e.altKey ? "copy" : "move";
+      }}
+      onDrop={(e) => {
+        // 拖到桌面空白 = 把条目搬进"桌面"这个真实存储文件夹（桌面上的文件就是缩略图）
+        if (!hasInternalDrag(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        void (async () => {
+          try {
+            const p = JSON.parse(e.dataTransfer.getData(INTERNAL_DND)) as { folderId: string; ids: string[] };
+            if (!p?.ids?.length || p.folderId === DESKTOP_ID) return;
+            if (e.altKey) await copyInto(DESKTOP_ID, p.folderId, p.ids);
+            else await moveInto(DESKTOP_ID, p.folderId, p.ids);
+          } catch {
+            /* 载荷损坏就当作没有拖拽 */
+          }
+        })();
       }}
       onContextMenu={(e) => {
         if (!showDesktop) return;
@@ -1569,6 +1815,51 @@ function App() {
             )}
           </div>
         ))}
+        {/* 桌面上的文件：与文件夹里同一套真实存储 + 真实缩略图 */}
+        {desktopFiles.map((f, i) => {
+          const p = deskPos(f.id, i);
+          return (
+            <div
+              key={f.id}
+              className="desktop-file"
+              style={{ left: p.x, top: p.y }}
+              data-entry-id={f.id}
+              tabIndex={0}
+              draggable
+              onPointerDown={(e) => dragDesktopIcon(e, f.id)}
+              onDragStart={(e) => {
+                if (e.metaKey) {
+                  e.preventDefault();
+                  window.openarc?.files?.startDrag(DESKTOP_ID, f.id);
+                  return;
+                }
+                e.dataTransfer.setData(INTERNAL_DND, JSON.stringify({ folderId: DESKTOP_ID, ids: [f.id] }));
+                e.dataTransfer.effectAllowed = "copyMove";
+              }}
+              onDoubleClick={() => void openPreview(DESKTOP_ID, f.id)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                menuTrigger.current = e.currentTarget as HTMLElement;
+                setMenu({ x: e.clientX, y: e.clientY, file: f.id });
+              }}
+            >
+              {thumbs[DESKTOP_ID + "/" + f.id] ? (
+                <img
+                  className="desktop-thumb"
+                  src={thumbs[DESKTOP_ID + "/" + f.id]}
+                  alt=""
+                  draggable={false}
+                />
+              ) : (
+                <span className="desktop-glyph">
+                  <FileGlyph ext={f.ext} size={44} />
+                </span>
+              )}
+              <span className="desktop-file-name">{f.name}</span>
+            </div>
+          );
+        })}
         <AssistantPill
           onActivate={() => {
             setOverlays((o) => ({ ...o, ai: !o.ai }));

@@ -63,7 +63,10 @@ contextBridge.exposeInMainWorld("openarc", {
     rename: (folderId, id, name) => ipcRenderer.invoke("files:rename", { folderId, id, name }),
     remove: (folderId, id) => ipcRenderer.invoke("files:remove", { folderId, id }),
     read: (folderId, id) => ipcRenderer.invoke("files:read", { folderId, id }),
-    thumb: (folderId, id) => ipcRenderer.invoke("files:thumb", { folderId, id }),
+    thumb: (folderId, id, size) => ipcRenderer.invoke("files:thumb", { folderId, id, size }),
+    info: (folderId, id) => ipcRenderer.invoke("files:info", { folderId, id }),
+    /** 拖出到系统（Finder/桌面）：fire-and-forget，主进程用原生 startDrag。 */
+    startDrag: (folderId, id) => ipcRenderer.send("files:startDrag", { folderId, id }),
     copy: (folderId, ids, toFolderId) => ipcRenderer.invoke("files:copy", { folderId, ids, toFolderId }),
     move: (folderId, ids, toFolderId) => ipcRenderer.invoke("files:move", { folderId, ids, toFolderId }),
     exportTo: (folderId, ids) => ipcRenderer.invoke("files:export", { folderId, ids }),

@@ -50,6 +50,7 @@ const FROZEN_IPC_CHANNELS = [
   "files:copy",
   "files:export",
   "files:import",
+  "files:info",
   "files:list",
   "files:move",
   "files:read",
@@ -59,6 +60,11 @@ const FROZEN_IPC_CHANNELS = [
   "identity:command",
   "windows:sync",
 ];
+/**
+ * `ipcMain.on`（fire-and-forget）面：与 handle 分开冻结。
+ * 渲染层同样能打到它们，所以必须一起审 —— 不能因为"不是 invoke"就漏在清单外。
+ */
+const FROZEN_IPC_ON_CHANNELS = ["files:startDrag"];
 const IPC_SCAN_FILES = ["main.cjs", "identity-bootstrap.cjs"];
 /** D2-02 冻结的上一版清单（5 个），用于把"发生了什么变化"讲清楚。 */
 const PREV_BRIDGE_KEYS = ["action", "navigate", "onDisplay", "onNativeState", "sync"];
@@ -148,6 +154,22 @@ exports.run = async function run({ report, sleep, add, out }) {
     "sec.everyChannelTrustsSender",
     JSON.stringify(sorted(guarded)) === JSON.stringify(FROZEN_IPC_CHANNELS),
     `过 trusted() 校验的 handler：${JSON.stringify(sorted(guarded))}，应为全部 ${JSON.stringify(FROZEN_IPC_CHANNELS)}`,
+  );
+  const onChannels = sorted([...ipcSrc.matchAll(/ipcMain\.on\(\s*"([^"]+)"/g)].map((m) => m[1]));
+  add(
+    "sec.ipcOnChannelsMatchFrozenList",
+    JSON.stringify(onChannels) === JSON.stringify(FROZEN_IPC_ON_CHANNELS),
+    `注册的 ipcMain.on 通道 ${JSON.stringify(onChannels)}；冻结清单 ${JSON.stringify(FROZEN_IPC_ON_CHANNELS)}`,
+  );
+  const onGuarded = sorted(
+    [...ipcSrc.matchAll(/ipcMain\.on\(\s*"([^"]+)"/g)]
+      .filter((m) => /trusted\(/.test(ipcSrc.slice(m.index, m.index + 260)))
+      .map((m) => m[1]),
+  );
+  add(
+    "sec.everyOnChannelTrustsSender",
+    JSON.stringify(onGuarded) === JSON.stringify(FROZEN_IPC_ON_CHANNELS),
+    `过 trusted() 校验的 on handler：${JSON.stringify(onGuarded)}，应为全部 ${JSON.stringify(FROZEN_IPC_ON_CHANNELS)}`,
   );
   add(
     "sec.shellWebPreferencesHardened",

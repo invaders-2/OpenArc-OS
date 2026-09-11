@@ -1209,6 +1209,11 @@ input[type="checkbox"] {
   border-radius: var(--radius-sm);
   font-size: 13px;
 }
+.menu-check {
+  display: inline-block;
+  width: 15px;
+  color: var(--text);
+}
 .context-menu button:hover {
   background: var(--sunken);
 }
@@ -1232,6 +1237,82 @@ input[type="checkbox"] {
 .search-field:focus-within {
   background: rgb(var(--text-rgb) / 0.08);
 }
+/* 桌面上的文件（与文件夹里同一套真实数据，同样显示缩略图） */
+.desktop-file {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 96px;
+  padding: 7px 4px 5px;
+  border-radius: var(--radius-md);
+  text-align: center;
+  touch-action: none;
+  user-select: none;
+}
+.desktop-file:hover {
+  background: rgb(var(--text-rgb) / 0.06);
+}
+.desktop-thumb {
+  width: 52px;
+  height: 52px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+  pointer-events: none;
+}
+.desktop-glyph {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  color: var(--text);
+  pointer-events: none;
+}
+.desktop-file-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-caption);
+}
+/* 壁纸：四套都保持深/浅主色，只在光晕上做区分（设计语言要求克制） */
+.desktop.dark[data-wallpaper="aurora"] {
+  background:
+    radial-gradient(ellipse at 20% 92%, rgba(56, 189, 248, 0.16) 0, transparent 55%),
+    radial-gradient(ellipse at 82% 14%, rgba(167, 139, 250, 0.14) 0, transparent 50%),
+    linear-gradient(140deg, #0b0f14, #10141b 70%, #0c1016);
+}
+.desktop.dark[data-wallpaper="graphite"] {
+  background: linear-gradient(140deg, #17181c, #101114 70%, #14151a);
+}
+.desktop.dark[data-wallpaper="midnight"] {
+  background:
+    radial-gradient(ellipse at 50% 112%, rgba(99, 102, 241, 0.18) 0, transparent 60%),
+    linear-gradient(160deg, #0a0c14, #0e1119);
+}
+.desktop.dark[data-wallpaper="plain"] {
+  background: #000;
+}
+.desktop:not(.dark)[data-wallpaper="aurora"] {
+  background:
+    radial-gradient(ellipse at 20% 92%, rgba(56, 189, 248, 0.22) 0, transparent 55%),
+    radial-gradient(ellipse at 82% 14%, rgba(167, 139, 250, 0.18) 0, transparent 50%),
+    linear-gradient(140deg, #eef3f8, #e7edf5 70%, #eaf0f6);
+}
+.desktop:not(.dark)[data-wallpaper="graphite"] {
+  background: linear-gradient(140deg, #f2f3f5, #e6e7ea 70%, #edeeF1);
+}
+.desktop:not(.dark)[data-wallpaper="midnight"] {
+  background:
+    radial-gradient(ellipse at 50% 112%, rgba(99, 102, 241, 0.16) 0, transparent 60%),
+    linear-gradient(160deg, #eef0f7, #e8eaf2);
+}
+.desktop:not(.dark)[data-wallpaper="plain"] {
+  background: #fff;
+}
+
 /* 文件夹：分组块 + 框选橡皮筋 */
 .file-groups {
   display: flex;

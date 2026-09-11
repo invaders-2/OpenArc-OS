@@ -1,5 +1,31 @@
 # 计划修订记录
 
+## 2026-09-12：psd/ai 空预览 + 分辨率 + ⌘拖出到 Finder + 桌面图标与壁纸
+
+用户反馈：
+
+1. **`.psd` / `.ai` 空格预览**：浏览器渲染不了这两种格式，`openarc-file` 协议给它的是
+   二进制流。改为**向主进程要大尺寸位图**：`files:thumb` 增加 `size` 参数（夹在 32–1024），
+   Quick Look 对这类格式请求 **1024** 位图。实测空格后桥调用 `thumb("f1","i1",1024)` 且 `.quicklook img` 出现。
+2. **点空白取消选择**：之前只挂在 `.folder-body` 上，工具栏下方/内容区底部那一片点不到。
+   现在整块 `.split-main` 都接（`.file-cell` 除外）。实测：点网格下方空白 → `.selected` 0。
+3. **显示简介加分辨率**：新增 `files:info`，用 `nativeImage.createFromPath` 读真实像素尺寸；
+   读不出来就不编。实测简介出现「分辨率 1920 × 1080」。
+4. **⌘ + 拖动 = 拖出到 Finder**：走 Electron 原生 `webContents.startDrag`（不是 HTML5 拖拽，
+   两者互斥，所以挂在 ⌘ 上；不按 ⌘ 的拖动仍是**应用内移动**，Option 是**应用内复制**）。
+   安全探针**新增对 `ipcMain.on` 面的冻结与审计**（之前只扫 `handle`）：
+   `sec.ipcOnChannelsMatchFrozenList` + `sec.everyOnChannelTrustsSender` —— 现在 **17/17 PASS**。
+   实测 ⌘ 拖动 → `startDrag("f1","i1")`。
+5. **桌面图标**：桌面本身也是一个**真实存储文件夹**（`folderId = "desktop"`）。
+   从文件夹窗口把文件拖到桌面空白 → `move("f1",["i1"],"desktop")`；桌面上的图标和文件夹里一样
+   **显示真实缩略图**、可拖动（位置持久化在 `oa-desktop-icons`）。
+6. **桌面右键菜单**：新建文件夹 / 粘贴 / **整理** / **网格吸附（可勾选）** /
+   **排列方式：名称·日期·大小（勾选当前项）** / **壁纸：极光·石墨·午夜·纯黑（勾选当前项）**。
+   菜单项新增 `checked` 能力（`MenuItem.checked`，渲染成左侧勾）。
+   实测菜单文本带 ✓，壁纸切换后 `.desktop[data-wallpaper="midnight"]`，整理后图标落到栅格。
+
+验证：`npm run build` PASS；`npm test` 96/96；`security-surface` **17/17**。
+
 ## 2026-09-12：条目搬运 —— 拖拽移动 / 复制 / 剪切 / 粘贴 / 导出到电脑
 
 用户要求：文件夹支持拖拽移动位置、拖到别的文件夹或电脑、以及复制粘贴剪切（键盘 + 右键）。

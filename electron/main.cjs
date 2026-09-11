@@ -176,6 +176,36 @@ app.whenReady().then(() => {
     }
   });
 
+  // 图片信息（分辨率）：交给 Chromium 的图像解码器，读不出来就说读不出来。
+  ipcMain.handle("files:info", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    const hit = files.resolve(String(payload?.folderId ?? ""), String(payload?.id ?? ""));
+    if (!hit) return { ok: false, error: "NOT_FOUND" };
+    try {
+      const img = nativeImage.createFromPath(hit.path);
+      if (!img || img.isEmpty()) return { ok: false, error: "NO_INFO" };
+      const s = img.getSize();
+      return { ok: true, width: s.width, height: s.height };
+    } catch {
+      return { ok: false, error: "NO_INFO" };
+    }
+  });
+  // 拖出到系统（Finder / 桌面）：走 Electron 原生 startDrag，**不是** HTML5 拖拽。
+  // 说明：原生拖拽与页面内 HTML5 拖拽互斥，所以它挂在"按住 ⌘ 拖动"上（见渲染层）。
+  ipcMain.on("files:startDrag", async (event, payload) => {
+    if (!trusted(event)) return;
+    const hit = files.resolve(String(payload?.folderId ?? ""), String(payload?.id ?? ""));
+    if (!hit) return;
+    try {
+      const thumb = await nativeImage.createThumbnailFromPath(hit.path, { width: 64, height: 64 });
+      event.sender.startDrag({
+        file: hit.path,
+        icon: thumb && !thumb.isEmpty() ? thumb : nativeImage.createEmpty(),
+      });
+    } catch {
+      /* 拖拽启动失败就当作没有发生 */
+    }
+  });
   ipcMain.handle("files:copy", async (e, payload) => {
     if (!trusted(e)) throw Error("Forbidden");
     return files.copy(String(payload?.folderId ?? ""), payload?.ids, String(payload?.toFolderId ?? ""));
@@ -268,8 +298,10 @@ app.whenReady().then(() => {
     if (!trusted(e)) throw Error("Forbidden");
     const hit = files.resolve(String(payload?.folderId ?? ""), String(payload?.id ?? ""));
     if (!hit) return { ok: false, error: "NOT_FOUND" };
+    // size 可调：列表缩略图 160，psd/ai 这类浏览器渲染不了的格式在 Quick Look 里要 1024
+    const size = Math.min(1024, Math.max(32, Number(payload?.size) || 160));
     try {
-      const img = await nativeImage.createThumbnailFromPath(hit.path, { width: 160, height: 160 });
+      const img = await nativeImage.createThumbnailFromPath(hit.path, { width: size, height: size });
       if (!img || img.isEmpty()) return { ok: false, error: "NO_THUMBNAIL" };
       const png = img.toPNG();
       const generic = await genericIcon();
