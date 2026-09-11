@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Bot, Clock, LayoutGrid, Package, Sliders, Store, User, Wand2 } from "lucide-react";
 // Token 层必须先于组件层导入：tokens.css 只声明自定义属性与 base reset，
 // styles.css 全部是消费方。顺序颠倒会让组件拿到未定义的 var()。
 import "./design-system/tokens.css";
@@ -66,6 +66,23 @@ const apps = [
   { id: "settings", name: "系统设置", icon: "settings" },
 ] as const;
 
+/** 胶囊开关（role=switch）：设置页与控制中心共用，受控、无内部状态。 */
+function Switch({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="setting-row">
+      <span>{label}</span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        className="switch"
+        onClick={() => onChange(!checked)}
+      />
+    </div>
+  );
+}
+
 function App() {
   const identity = useIdentity();
   /**
@@ -108,6 +125,10 @@ function App() {
   const [dark, setDark] = useState(() => localStorage.getItem("oa-dark") === "true");
   const [endpoint, setEndpoint] = useState("");
   const [model, setModel] = useState("");
+  /** 左右分栏的当前页（设置 / 应用中心 / Skill 中心各一份，互不影响）。 */
+  const [settingsTab, setSettingsTab] = useState<"appearance" | "model">("appearance");
+  const [appTab, setAppTab] = useState<"all" | "pro" | "recent">("all");
+  const [skillTab, setSkillTab] = useState<"market" | "mine" | "installed">("market");
 
   /**
    * 唯一的命令入口。**组件与未来的 AI 都只能经由它改窗口状态**（§20 / §21）。
@@ -233,9 +254,6 @@ function App() {
 
   const activeId = domain.actionableId(state);
   const activeTitle = (activeId && domain.byId(state, activeId)?.meta.title) || "桌面";
-  /** 顶栏"最大化"按钮是切换语义，需要知道目标窗口当前是否已最大化。
-      这是域的投影，不是第二份 active state。 */
-  const activeMaximized = !!activeId && domain.byId(state, activeId)?.state === domain.WSTATE.MAXIMIZED;
   const runningApps = useMemo(() => new Set(state.windows.map((w) => w.appId)), [state.windows]);
 
   /**
@@ -265,43 +283,82 @@ function App() {
       );
     if (w?.appId === "home")
       return (
-        <div className="app-content">
-          <div className="eyebrow">YOUR WORKSPACE, CONNECTED</div>
-          <h1>把工作，放在一起。</h1>
-          <p className="subtitle">一个桌面，连接你的应用、创意与 AI。</p>
-          <div className="app-grid">
-            {apps
-              .filter((a) => a.id !== "home")
-              .map((a) => (
-                <button className="app-card" key={a.id} onClick={() => activateApp(a.id)}>
-                  <img className="app-icon" src={icon(a.icon)} alt="" draggable={false} />
-                  <strong>{a.name}</strong>
-                  <small>
-                    {a.id === "browser"
-                      ? "真实网页 · 隔离运行"
-                      : a.id === "settings"
-                        ? "外观与全局模型"
-                        : "规划中 · 查看说明"}
-                  </small>
-                </button>
-              ))}
+        <div className="split">
+          <nav className="split-side" aria-label="应用分类">
+            <button className="split-nav" aria-current={appTab === "all"} onClick={() => setAppTab("all")}>
+              <LayoutGrid size={15} /> 全部应用
+            </button>
+            <button className="split-nav" aria-current={appTab === "pro"} onClick={() => setAppTab("pro")}>
+              <Wand2 size={15} /> 专业应用
+            </button>
+            <button className="split-nav" aria-current={appTab === "recent"} onClick={() => setAppTab("recent")}>
+              <Clock size={15} /> 最近使用
+            </button>
+          </nav>
+          <div className="split-main">
+            {appTab === "all" ? (
+              <>
+                <h1>应用中心</h1>
+                <p className="subtitle">一个桌面，连接你的应用、创意与 AI。</p>
+                <div className="app-grid">
+                  {apps
+                    .filter((a) => a.id !== "home")
+                    .map((a) => (
+                      <button className="app-card" key={a.id} onClick={() => activateApp(a.id)}>
+                        <img className="app-icon" src={icon(a.icon)} alt="" draggable={false} />
+                        <strong>{a.name}</strong>
+                        <small>
+                          {a.id === "browser"
+                            ? "真实网页 · 隔离运行"
+                            : a.id === "settings"
+                              ? "外观与全局模型"
+                              : "规划中 · 查看说明"}
+                        </small>
+                      </button>
+                    ))}
+                </div>
+              </>
+            ) : appTab === "pro" ? (
+              <>
+                <h1>专业应用</h1>
+                <p className="subtitle">本机已安装的 Adobe 应用；启动与操控尚未接入。</p>
+                <div className="adobe-row">
+                  <div className="adobe ps">Ps</div>
+                  <div>
+                    <strong>Adobe Photoshop</strong>
+                    <small>已安装 27.1.0 · MCP 未连接</small>
+                  </div>
+                  <div className="adobe illustrator">Ai</div>
+                  <div>
+                    <strong>Adobe Illustrator</strong>
+                    <small>已安装 30.0.0 · MCP 未连接</small>
+                  </div>
+                </div>
+                <p className="footnote">Adobe 安装状态来自本次设备检查，尚未提供启动与操控。</p>
+              </>
+            ) : (
+              <>
+                <h1>最近使用</h1>
+                <p className="subtitle">当前打开的窗口。</p>
+                {state.windows.length === 0 ? (
+                  <p className="muted">还没有打开任何应用窗口。</p>
+                ) : (
+                  <div className="list">
+                    {state.windows.map((win) => (
+                      <button
+                        className="list-row"
+                        key={win.id}
+                        onClick={() => onCommand({ type: "window/focus", id: win.id })}
+                      >
+                        <img className="list-icon" src={icon(win.meta.icon)} alt="" draggable={false} />
+                        <span>{win.meta.title}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
           </div>
-          <div className="section-title">
-            专业应用 <span>本机连接</span>
-          </div>
-          <div className="adobe-row">
-            <div className="adobe ps">Ps</div>
-            <div>
-              <strong>Adobe Photoshop</strong>
-              <small>已安装 27.1.0 · MCP 未连接</small>
-            </div>
-            <div className="adobe illustrator">Ai</div>
-            <div>
-              <strong>Adobe Illustrator</strong>
-              <small>已安装 30.0.0 · MCP 未连接</small>
-            </div>
-          </div>
-          <p className="footnote">D1 桌面验证版 · Adobe 安装状态来自本次设备检查，尚未提供启动与操控。</p>
         </div>
       );
     if (w?.appId === "browser" || w?.kind === "browser") {
@@ -334,44 +391,93 @@ function App() {
     }
     if (w?.appId === "settings")
       return (
-        <div className="settings-content">
-          <div className="eyebrow">SYSTEM PREFERENCES</div>
-          <h1>系统设置</h1>
-          <p className="subtitle">整个工作空间，遵循你的习惯。</p>
-          <h3>外观与交互</h3>
-          {([
-            ["深色外观", dark, setDark],
-            ["减少动态效果", reduced, setReduced],
-          ] as const).map(([label, value, set]) => (
-            <label className="setting-row" key={label}>
-              <span>{label}</span>
-              <input type="checkbox" checked={value} onChange={(e) => (set as (v: boolean) => void)(e.target.checked)} />
-            </label>
-          ))}
-          <label className="setting-row">
-            <span>
-              材质
-              <span className="footnote"> 玻璃合成成本，与动效互不影响</span>
-            </span>
-            <select className="material-select" value={glass} onChange={(e) => setGlass(e.target.value as GlassMode)}>
-              <option value="full">完整玻璃</option>
-              <option value="reduced">降低材质</option>
-              <option value="solid">实色</option>
-            </select>
-          </label>
-          <h3>
-            全局模型服务 <span className="badge">尚未连接</span>
-          </h3>
-          <p className="muted">这里将统一配置所有应用使用的模型。当前字段仅保留在内存，不保存、不发送。</p>
-          <label className="field">
-            API 地址
-            <input placeholder="https://api.example.com/v1" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} />
-          </label>
-          <label className="field">
-            模型名称
-            <input placeholder="填写自定义模型名" value={model} onChange={(e) => setModel(e.target.value)} />
-          </label>
-          <p className="footnote">密钥保管后端尚未接入，本版不收集 API 密钥。</p>
+        <div className="split">
+          <nav className="split-side" aria-label="设置分类">
+            <button
+              className="split-nav"
+              aria-current={settingsTab === "appearance"}
+              onClick={() => setSettingsTab("appearance")}
+            >
+              <Sliders size={15} /> 外观与交互
+            </button>
+            <button className="split-nav" aria-current={settingsTab === "model"} onClick={() => setSettingsTab("model")}>
+              <Bot size={15} /> 全局模型服务
+            </button>
+          </nav>
+          <div className="split-main">
+            {settingsTab === "appearance" ? (
+              <>
+                <h1>外观与交互</h1>
+                <p className="subtitle">整个工作空间，遵循你的习惯。</p>
+                <Switch label="深色外观" checked={dark} onChange={setDark} />
+                <Switch label="减少动态效果" checked={reduced} onChange={setReduced} />
+                <div className="setting-row">
+                  <span>
+                    材质
+                    <span className="footnote"> 玻璃合成成本，与动效互不影响</span>
+                  </span>
+                  <select
+                    className="material-select"
+                    value={glass}
+                    onChange={(e) => setGlass(e.target.value as GlassMode)}
+                  >
+                    <option value="full">完整玻璃</option>
+                    <option value="reduced">降低材质</option>
+                    <option value="solid">实色</option>
+                  </select>
+                </div>
+              </>
+            ) : (
+              <>
+                <h1>
+                  全局模型服务 <span className="badge">尚未连接</span>
+                </h1>
+                <p className="subtitle">统一配置所有应用使用的模型；当前字段仅保留在内存，不保存、不发送。</p>
+                <label className="field">
+                  API 地址
+                  <input
+                    placeholder="https://api.example.com/v1"
+                    value={endpoint}
+                    onChange={(e) => setEndpoint(e.target.value)}
+                  />
+                </label>
+                <label className="field">
+                  模型名称
+                  <input placeholder="填写自定义模型名" value={model} onChange={(e) => setModel(e.target.value)} />
+                </label>
+                <p className="footnote">密钥保管后端尚未接入，本版不收集 API 密钥。</p>
+              </>
+            )}
+          </div>
+        </div>
+      );
+    if (w?.appId === "skills")
+      return (
+        <div className="split">
+          <nav className="split-side" aria-label="Skill 分类">
+            <button className="split-nav" aria-current={skillTab === "market"} onClick={() => setSkillTab("market")}>
+              <Store size={15} /> 市场
+            </button>
+            <button className="split-nav" aria-current={skillTab === "mine"} onClick={() => setSkillTab("mine")}>
+              <User size={15} /> 我的技能
+            </button>
+            <button
+              className="split-nav"
+              aria-current={skillTab === "installed"}
+              onClick={() => setSkillTab("installed")}
+            >
+              <Package size={15} /> 已安装
+            </button>
+          </nav>
+          <div className="split-main">
+            <div className="empty-content">
+              <img className="large-icon" src={icon("shortcuts")} alt="" draggable={false} />
+              <h1>Skill 中心</h1>
+              <span className="badge">尚未实现</span>
+              <p>市场、自定义技能、版本与团队分享将在后续阶段接入。</p>
+              <p className="muted">当前仅验证桌面窗口生命周期，不显示模拟业务数据。</p>
+            </div>
+          </div>
         </div>
       );
     return (
@@ -534,8 +640,6 @@ function App() {
           <div className="desktop-surface" inert={overlays.dialog || locked || undefined}>
         <TopBar
           activeTitle={activeTitle}
-          focusedId={activeId}
-          focusedMaximized={activeMaximized}
           searchOpen={overlays.search}
           onCommand={onCommand}
           onToggleSearch={() => setOverlays((o) => ({ ...o, search: !o.search }))}

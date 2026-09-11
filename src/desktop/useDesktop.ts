@@ -41,7 +41,14 @@ function restore(): WindowStateModel {
   // 首次启动 / 数据不可信 → 给一份默认工作区，而不是空桌面
   if (!domain.isPersistable(parsed)) {
     return manager.applyAll(domain.createState(), [
-      { type: "window/open", appId: "home", bounds: { x: 90, y: 94, w: 830, h: 570 } },
+      // 默认工作区要给 meta：否则窗口标题与顶栏会直接显示 appId（"home"），
+      // 而 activateApp 新建的窗口是有 meta 的，两处口径不一致。
+      {
+        type: "window/open",
+        appId: "home",
+        bounds: { x: 90, y: 94, w: 830, h: 570 },
+        meta: { title: "应用中心", icon: "apps" },
+      },
     ]);
   }
   return manager.deserialize(parsed, [workArea(host())]);

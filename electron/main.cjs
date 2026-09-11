@@ -53,10 +53,14 @@ app.whenReady().then(() => {
     minWidth: 1000,
     minHeight: 700,
     title: "OpenArc OS",
-    // 自绘 chrome：产品顶栏与窗口标题栏都是 DOM（含红绿灯），不能留原生标题栏 ——
-    // transparent 下它会变成一条透出后方的空带，并把内容整体下推 32px；
-    // 浏览器预览没有这条带，.app 与预览观感因此不一致（本机 Electron 实测 inset=32）。
-    frame: false,
+    // 自绘 chrome：产品顶栏与窗口标题栏都是 DOM，不能留原生标题栏 ——
+    // transparent 下它会变成一条透出后方的空带，并把内容整体下推 32px（实测 inset=32）。
+    // macOS 用 titleBarStyle:"hidden"：内容仍全屏铺满（实测 inset 0），但**保留原生红绿灯**，
+    // 它们操作 OpenArc 窗口本身（关闭/最小化/缩放），DOM 顶栏左侧相应留出位置。
+    // Windows 没有等价"保留控件"的方式，直接 frame:false（Windows 尚未验证）。
+    ...(isMac
+      ? { titleBarStyle: "hidden", trafficLightPosition: { x: 20, y: 13 } }
+      : { frame: false }),
     ...glass,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),

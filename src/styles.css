@@ -111,7 +111,8 @@
   display: flex;
   align-items: center;
   gap: 26px;
-  padding: 0 23px;
+  /* 左侧留出系统原生红绿灯的位置（titleBarStyle:"hidden" + trafficLightPosition x=20） */
+  padding: 0 23px 0 92px;
   font-size: 12px;
   position: relative;
   z-index: 80;
@@ -266,16 +267,6 @@
 .traffic:hover svg,
 .traffic button:focus-visible svg {
   opacity: 1;
-}
-/* 顶栏红绿灯：跟随文档流排在字标左侧，比窗口内的略小 */
-.traffic-bar {
-  position: static;
-  gap: 8px;
-  margin-right: -12px;
-}
-.traffic-bar button {
-  width: 12px;
-  height: 12px;
 }
 .traffic button:disabled {
   background: rgba(125, 125, 125, 0.5);
@@ -550,6 +541,111 @@ input[type="checkbox"] {
   height: 18px;
   accent-color: var(--accent);
 }
+/* ── 左右分栏（系统设置 / 应用中心 / Skill 中心） ─────────────────────────
+   分层不靠发丝线：侧栏用 --sunken 的底色差，选中项用 accent 胶囊。 */
+.split {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+.split-side {
+  flex: 0 0 188px;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--sunken);
+}
+.split-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 26px 30px 30px;
+}
+.split-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+  font-size: var(--fs-secondary);
+  transition: background var(--quick) var(--ease), color var(--quick) var(--ease);
+}
+.split-nav:hover {
+  background: rgb(var(--text-rgb) / 0.06);
+}
+.split-nav[aria-current="true"] {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: var(--fw-medium);
+}
+.split-nav svg {
+  flex: none;
+}
+/* 胶囊开关（role=switch）。设置与控制中心共用。 */
+.switch {
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 24px;
+  padding: 0;
+  border-radius: var(--radius-pill);
+  background: var(--sunken);
+  transition: background var(--quick) var(--ease);
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: var(--elevation-1);
+  transition: transform var(--quick) var(--ease);
+}
+.switch[aria-checked="true"] {
+  background: var(--accent);
+}
+.switch[aria-checked="true"]::after {
+  background: var(--on-accent);
+  transform: translateX(16px);
+}
+/* 简单列表（最近使用等） */
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: var(--radius-md);
+  background: transparent;
+  text-align: left;
+  font-size: var(--fs-secondary);
+  transition: background var(--quick) var(--ease);
+}
+.list-row:hover {
+  background: var(--row-hover);
+}
+.list-icon {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+
 .badge {
   display: inline-block;
   background: var(--sunken);

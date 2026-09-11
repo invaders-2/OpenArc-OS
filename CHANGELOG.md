@@ -1,5 +1,31 @@
 # 计划修订记录
 
+## 2026-09-12：窗口 chrome + 左右分栏（UI 反馈第一批，完成 1–4）
+
+用户反馈 6 项，本批完成 1–4：
+
+1. **顶部红绿灯可用**：顶栏不再自绘红绿灯，改用**系统原生红绿灯**
+   （`electron/main.cjs`：macOS `titleBarStyle:"hidden"` + `trafficLightPosition {x:20,y:13}`；
+   Windows `frame:false`）。原生三灯操作 **OpenArc 窗口本身**（关闭/最小化/缩放）；
+   之前的 DOM 三灯只能操作"当前聚焦的内部窗口"，没有聚焦窗口时三灯全灰 = 不可用。
+   `src/desktop/components.tsx` 删除 `TrafficBar`；`.topbar` 左侧留 92px 给原生三灯。
+   每个内部窗口标题栏仍保留自己的红绿灯。
+2. **内部窗口标题栏右侧去掉 "OpenArc"**：`TitleBar` 删除 `.title-meta`。
+3. **系统设置改左右分栏**：新增 `.split / .split-side / .split-main / .split-nav`；
+   左栏"外观与交互 / 全局模型服务"；去掉 `SYSTEM PREFERENCES` 英文眉标；
+   布尔项改用胶囊开关 `role="switch"`（`.switch`）。
+4. **应用中心 / Skill 中心改左右分栏**：应用中心左栏"全部应用 / 专业应用 / 最近使用"
+   （最近使用列出当前打开窗口，可点击聚焦）；Skill 中心左栏"市场 / 我的技能 / 已安装"。
+
+顺带修：默认工作区窗口缺 meta，导致窗口标题与顶栏一直显示 appId `home`
+（`src/desktop/useDesktop.ts` 默认 `window/open` 补上 `meta`，现为"应用中心"）。
+
+**实测**：`npm run build` PASS；`npm test` 96/96；浏览器逐屏核对 `/tmp/oa-ui/new-01..04`；
+`.app` 截图确认左上为系统原生三灯（红/黄/绿、可用），顶栏左侧留位正确。
+未触碰 renderer 白名单与身份边界。
+
+**未完成（下一批）**：5 顶栏 icon 全线性 + 最近应用 + 控制中心；6 交互动效对齐 Spectrum。
+
 ## 2026-09-12：修复 .app 顶部透明原生标题栏 + 顶栏拖动区 + 产品菜单
 
 **问题（仅 .app 可见，浏览器预览不受影响）**：`BrowserWindow` 用了 `transparent: true` 但没有关原生标题栏，

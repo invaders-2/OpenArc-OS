@@ -17,67 +17,18 @@ import type { Window as WinDomain, WindowCommand } from "../../electron/window-d
 const icon = (name: string) => "./icons/" + name + ".png";
 
 // ===========================================================================
-// 1-2. TopBar / TrafficBar
+// 1. TopBar
+//
+// 顶栏左侧**不再自绘红绿灯**：改用系统原生红绿灯（main.cjs: titleBarStyle:"hidden"
+// + trafficLightPosition）。原生三灯操作的是 OpenArc 窗口本身，可用且符合 macOS 预期；
+// 之前那套 DOM 红绿灯只能操作"当前聚焦的内部窗口"，没有聚焦窗口时三灯全灰，等于不可用。
+// 每个内部窗口标题栏内仍保留自己的红绿灯（TitleBar）。
 // ===========================================================================
-
-type TrafficBarProps = {
-  /** 可操作目标；null 表示无聚焦窗口 → 三个按钮全部禁用（§33）。 */
-  target: string | null;
-  /** 目标窗口是否已最大化。这是**域的投影**，不是第二份状态（§33）。 */
-  maximized: boolean;
-  onCommand: (c: WindowCommand) => void;
-};
-
-/**
- * 顶栏红绿灯。**只操作 focusedWindowId，不维护第二份 active state** ——
- * "谁被聚焦"这个问题只问 Window Manager 一次。
- *
- * 最大化是**切换**而不是单向：只看 `maximized` 这个投影决定派发哪条命令。
- * 否则 `window/unmaximize` 这条冻结命令在 UI 上不可达，
- * 用户一旦双击放大就再也回不到原尺寸（D2-02B 审出的真实缺陷）。
- */
-export function TrafficBar({ target, maximized, onCommand }: TrafficBarProps) {
-  // 还原不需要 host：restore 快照在最大化时就已按当时的工作区收拢过，
-  // 之后宿主尺寸变化由 system/reflow 继续维护它（§24 同一条 clamp 路径）。
-  const toggleMax = (id: string) =>
-    onCommand(maximized ? { type: "window/unmaximize", id } : { type: "window/maximize", id, host: host() });
-  return (
-    <div className="traffic traffic-bar" aria-label="当前窗口控制">
-      <button
-        className="close"
-        aria-label="关闭当前窗口"
-        disabled={!target}
-        onClick={() => target && onCommand({ type: "window/close", id: target })}
-      >
-        <X size={8} />
-      </button>
-      <button
-        className="minimize"
-        aria-label="最小化当前窗口"
-        disabled={!target}
-        onClick={() => target && onCommand({ type: "window/minimize", id: target })}
-      >
-        <Minus size={8} />
-      </button>
-      <button
-        className="maximize"
-        aria-label={maximized ? "还原当前窗口" : "最大化当前窗口"}
-        disabled={!target}
-        onClick={() => target && toggleMax(target)}
-      >
-        <Maximize2 size={7} />
-      </button>
-    </div>
-  );
-}
 
 const host = () => ({ width: innerWidth, height: innerHeight });
 
 type TopBarProps = {
   activeTitle: string;
-  focusedId: string | null;
-  /** focusedId 对应窗口是否已最大化。同样是域的投影，不是第二份状态。 */
-  focusedMaximized: boolean;
   /** 搜索是否打开。只用来表达 aria-expanded，因此是 boolean 而不是查询串 ——
       需要查询串的地方是搜索面板，不是顶栏。 */
   searchOpen: boolean;
@@ -98,8 +49,6 @@ type TopBarProps = {
 
 export function TopBar({
   activeTitle,
-  focusedId,
-  focusedMaximized,
   searchOpen,
   onCommand,
   onToggleSearch,
@@ -108,7 +57,6 @@ export function TopBar({
 }: TopBarProps) {
   return (
     <header className="topbar">
-      <TrafficBar target={focusedId} maximized={focusedMaximized} onCommand={onCommand} />
       <strong className="wordmark">◈ OpenArc</strong>
       <span>{activeTitle}</span>
       <div className="topbar-right">
@@ -246,7 +194,6 @@ export function TitleBar({ id, title, maximized, onCommand, onDragStart }: Title
         </button>
       </div>
       <strong>{title}</strong>
-      <span className="title-meta">OpenArc</span>
     </div>
   );
 }
