@@ -18,7 +18,6 @@ import {
   LayoutGrid,
   Lock,
   LogOut,
-  Maximize2,
   Minus,
   Monitor,
   PenTool,
@@ -243,7 +242,11 @@ export function TitleBar({ id, title, maximized, onCommand, onDragStart }: Title
           <Minus size={10} />
         </button>
         <button className="maximize" aria-label={`${maximized ? "还原" : "最大化"}${id}`} onClick={toggleMax}>
-          <Maximize2 size={9} />
+          {/* macOS 原生绿色按钮的"双三角"缩放符号，而不是对角箭头 */}
+          <svg width="7" height="7" viewBox="0 0 10 10" aria-hidden="true">
+            <path d="M1 4.6 L4.6 4.6 L4.6 1 Z" fill="currentColor" />
+            <path d="M9 5.4 L5.4 5.4 L5.4 9 Z" fill="currentColor" />
+          </svg>
         </button>
       </div>
       <strong>{title}</strong>

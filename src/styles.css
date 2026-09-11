@@ -549,21 +549,27 @@ input[type="checkbox"] {
   min-height: 0;
 }
 .split-side {
-  flex: 0 0 188px;
+  flex: 0 0 176px;
   min-height: 0;
   overflow: auto;
-  padding: 14px 10px;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  background: var(--sunken);
+  /* 类 macOS vibrancy 的浮窗侧栏：不用实心深灰底 ——
+     用"随主题变亮/变暗"的半透明材质 + 圆角 + 投影，浮在窗口背景之上。 */
+  margin: 10px 0 10px 10px;
+  padding: 8px;
+  border-radius: var(--radius-lg);
+  background: rgb(var(--text-rgb) / 0.05);
+  backdrop-filter: var(--glass-filter-window);
+  box-shadow: var(--elevation-1);
 }
 .split-main {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
   overflow: auto;
-  padding: 26px 30px 30px;
+  padding: 20px 26px 26px;
 }
 .split-nav {
   display: flex;
