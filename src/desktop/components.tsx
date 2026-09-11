@@ -217,14 +217,13 @@ export function Dock({ apps, runningApps, bouncing, dockRef, onActivate, onToggl
 
 type TitleBarProps = {
   id: string;
-  title: string;
   /** 是否已最大化 —— 决定"最大化"按钮与双击是放大还是还原。 */
   maximized: boolean;
   onCommand: (c: WindowCommand) => void;
   onDragStart: (e: React.PointerEvent) => void;
 };
 
-export function TitleBar({ id, title, maximized, onCommand, onDragStart }: TitleBarProps) {
+export function TitleBar({ id, maximized, onCommand, onDragStart }: TitleBarProps) {
   // 双向切换：双击/按钮在"放大"与"还原"之间切。只发 maximize 会让
   // window/unmaximize 成为不可达命令，用户放大后无法恢复（D2-02B 审出的缺陷）。
   const toggleMax = () =>
@@ -246,7 +245,6 @@ export function TitleBar({ id, title, maximized, onCommand, onDragStart }: Title
           </svg>
         </button>
       </div>
-      <strong>{title}</strong>
     </div>
   );
 }
@@ -277,7 +275,6 @@ export function Window({ window: w, focused, onCommand, snapshots, onResizeStart
     >
       <TitleBar
         id={w.id}
-        title={w.meta.title}
         maximized={w.state === domain.WSTATE.MAXIMIZED}
         onCommand={onCommand}
         onDragStart={(e) => startDrag(e, w, onCommand)}
