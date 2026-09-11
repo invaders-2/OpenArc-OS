@@ -1,0 +1,533 @@
+/**
+ * D2-02 · 桌面组件（§18 / §19）。
+ *
+ * 组件化的判据不是"拆得多"，而是**契约窄**：
+ *   · 每个组件只接受它真正需要的东西，不做"万能 props 包"
+ *   · 窗口状态一律从 `window` 领域对象读，组件不持有窗口业务状态（§19）
+ *   · 所有会改状态的动作只走 `onCommand(WindowCommand)`（§20）
+ *
+ * 视觉完全沿用既有 styles.css 类名 —— 组件化的目的是**换掉状态所有权**，
+ * 不是换外观。所以这里没有一处新增的视觉样式。
+ */
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, ArrowRight, Maximize2, Minus, Monitor, RotateCw, X } from "lucide-react";
+import domain from "../../electron/window-domain.cjs";
+import type { Window as WinDomain, WindowCommand } from "../../electron/window-domain.cjs";
+
+const icon = (name: string) => "./icons/" + name + ".png";
+
+// ===========================================================================
+// 1-2. TopBar / TrafficBar
+// ===========================================================================
+
+type TrafficBarProps = {
+  /** 可操作目标；null 表示无聚焦窗口 → 三个按钮全部禁用（§33）。 */
+  target: string | null;
+  onCommand: (c: WindowCommand) => void;
+};
+
+/**
+ * 顶栏红绿灯。**只操作 focusedWindowId，不维护第二份 active state** ——
+ * "谁被聚焦"这个问题只问 Window Manager 一次。
+ */
+export function TrafficBar({ target, onCommand }: TrafficBarProps) {
+  return (
+    <div className="traffic traffic-bar" aria-label="当前窗口控制">
+      <button
+        className="close"
+        aria-label="关闭当前窗口"
+        disabled={!target}
+        onClick={() => target && onCommand({ type: "window/close", id: target })}
+      >
+        <X size={8} />
+      </button>
+      <button
+        className="minimize"
+        aria-label="最小化当前窗口"
+        disabled={!target}
+        onClick={() => target && onCommand({ type: "window/minimize", id: target })}
+      >
+        <Minus size={8} />
+      </button>
+      <button
+        className="maximize"
+        aria-label="最大化当前窗口"
+        disabled={!target}
+        onClick={() => target && onCommand({ type: "window/maximize", id: target, host: host() })}
+      >
+        <Maximize2 size={7} />
+      </button>
+    </div>
+  );
+}
+
+const host = () => ({ width: innerWidth, height: innerHeight });
+
+type TopBarProps = {
+  activeTitle: string;
+  focusedId: string | null;
+  /** 搜索是否打开。只用来表达 aria-expanded，因此是 boolean 而不是查询串 ——
+      需要查询串的地方是搜索面板，不是顶栏。 */
+  searchOpen: boolean;
+  onCommand: (c: WindowCommand) => void;
+  onToggleSearch: () => void;
+  onToggleAI: () => void;
+};
+
+export function TopBar({ activeTitle, focusedId, searchOpen, onCommand, onToggleSearch, onToggleAI }: TopBarProps) {
+  return (
+    <header className="topbar">
+      <TrafficBar target={focusedId} onCommand={onCommand} />
+      <strong className="wordmark">◈ OpenArc</strong>
+      <span>{activeTitle}</span>
+      <div className="topbar-right">
+        <span className="local-tag">
+          <Monitor size={13} /> 本机 · D1
+        </span>
+        <button onClick={onToggleSearch} aria-label="全局搜索" aria-expanded={searchOpen}>
+          <img className="bar-icon" src={icon("spotlight")} alt="" />
+        </button>
+        <button onClick={onToggleAI} aria-label="全局 AI">
+          <img className="bar-icon" src={icon("siri")} alt="" />
+        </button>
+        <span>
+          {new Date().toLocaleDateString("zh-CN", { month: "long", day: "numeric" })}
+        </span>
+      </div>
+    </header>
+  );
+}
+
+// ===========================================================================
+// 3-5. Dock / DockItem / DockTooltip
+// ===========================================================================
+
+type DockTooltipProps = { label: string };
+export function DockTooltip({ label }: DockTooltipProps) {
+  return (
+    <span className="dock-tooltip" aria-hidden="true">
+      {label}
+    </span>
+  );
+}
+
+type DockItemProps = {
+  label: string;
+  iconName: string;
+  /** 该 App 是否有存活窗口（§32：按 appId 查询，而不是按 windowId）。 */
+  running: boolean;
+  bouncing: boolean;
+  onActivate: () => void;
+};
+
+export function DockItem({ label, iconName, running, bouncing, onActivate }: DockItemProps) {
+  return (
+    <button
+      className={`dock-item ${bouncing ? "bouncing" : ""}`}
+      aria-label={`打开${label}`}
+      onClick={onActivate}
+    >
+      <img className="dock-icon" src={icon(iconName)} alt="" draggable={false} />
+      <DockTooltip label={label} />
+      <span className={`running-dot ${running ? "running" : ""}`} />
+    </button>
+  );
+}
+
+type DockProps = {
+  apps: readonly { id: string; name: string; icon: string }[];
+  /** `appId → windowIds[]`。Dock 消费 Window Manager，不自己数窗口。 */
+  runningApps: ReadonlySet<string>;
+  bouncing: string | null;
+  dockRef: React.RefObject<HTMLElement | null>;
+  onCommand: (c: WindowCommand) => void;
+  onToggleAI: () => void;
+};
+
+export function Dock({ apps, runningApps, bouncing, dockRef, onCommand, onToggleAI }: DockProps) {
+  return (
+    <nav className="dock" aria-label="应用栏" ref={dockRef}>
+      {apps.map((a) => (
+        <DockItem
+          key={a.id}
+          label={a.name}
+          iconName={a.icon}
+          running={runningApps.has(a.id)}
+          bouncing={bouncing === a.id}
+          onActivate={() => onCommand({ type: "window/open", appId: a.id, meta: { title: a.name, icon: a.icon } })}
+        />
+      ))}
+      <div className="dock-divider" />
+      <DockItem label="全局 AI" iconName="siri" running={false} bouncing={bouncing === "__ai"} onActivate={onToggleAI} />
+    </nav>
+  );
+}
+
+// ===========================================================================
+// 6-7. Window / TitleBar
+// ===========================================================================
+
+type TitleBarProps = {
+  id: string;
+  title: string;
+  onCommand: (c: WindowCommand) => void;
+  onDragStart: (e: React.PointerEvent) => void;
+};
+
+export function TitleBar({ id, title, onCommand, onDragStart }: TitleBarProps) {
+  return (
+    <div
+      className="window-title"
+      onPointerDown={onDragStart}
+      onDoubleClick={() => onCommand({ type: "window/maximize", id, host: host() })}
+    >
+      <div className="traffic">
+        <button className="close" aria-label={`关闭${id}`} onClick={() => onCommand({ type: "window/close", id })}>
+          <X size={10} />
+        </button>
+        <button className="minimize" aria-label={`最小化${id}`} onClick={() => onCommand({ type: "window/minimize", id })}>
+          <Minus size={10} />
+        </button>
+        <button className="maximize" aria-label={`最大化${id}`} onClick={() => onCommand({ type: "window/maximize", id, host: host() })}>
+          <Maximize2 size={9} />
+        </button>
+      </div>
+      <strong>{title}</strong>
+      <span className="title-meta">OpenArc</span>
+    </div>
+  );
+}
+
+type WindowProps = {
+  window: WinDomain;
+  focused: boolean;
+  onCommand: (c: WindowCommand) => void;
+  /** 快照层：原生视图被收缩/隐藏后把网页画面补回 DOM（ADR §12）。 */
+  snapshots?: { rect: { x: number; y: number; width: number; height: number }; dataUrl: string }[];
+  onResizeStart: (e: React.PointerEvent) => void;
+  children: React.ReactNode;
+};
+
+/**
+ * 窗口容器。**不拥有任何业务状态** ——
+ * 位置尺寸来自 `window.bounds`，层级来自 `window.z`，聚焦来自 `focused`，
+ * 它自己只有"拖拽中"这一个纯交互状态，且不回写域（域在 pointermove 里更新）。
+ */
+export function Window({ window: w, focused, onCommand, snapshots, onResizeStart, children }: WindowProps) {
+  const viewportRef = useRef<HTMLDivElement>(null);
+  return (
+    <section
+      aria-label={`${w.meta.title}窗口`}
+      className={`window ${focused ? "active" : ""} ${w.visible ? "" : "minimized"}`}
+      style={{ left: w.bounds.x, top: w.bounds.y, width: w.bounds.w, height: w.bounds.h, zIndex: 10 + w.z }}
+      onPointerDown={() => !focused && onCommand({ type: "window/focus", id: w.id })}
+    >
+      <TitleBar id={w.id} title={w.meta.title} onCommand={onCommand} onDragStart={(e) => startDrag(e, w, onCommand)} />
+      <div className="window-body">{children}</div>
+      {snapshots?.length ? (
+        <div className="window-snapshot-layer" aria-hidden="true" data-window={w.id}>
+          {snapshots.map((s) => (
+            <img
+              key={`${s.rect.x},${s.rect.y},${s.rect.width},${s.rect.height}`}
+              src={s.dataUrl}
+              alt=""
+              draggable={false}
+              style={{
+                position: "absolute",
+                left: s.rect.x - w.bounds.x,
+                top: s.rect.y - w.bounds.y,
+                width: s.rect.width,
+                height: s.rect.height,
+                // 快照是静态图：必须让点击穿透，否则被补丁覆盖的区域会变成交互黑洞
+                pointerEvents: "none",
+              }}
+            />
+          ))}
+        </div>
+      ) : null}
+      {w.state !== domain.WSTATE.MAXIMIZED ? (
+        <button
+          className="resize"
+          aria-label={`调整${w.id}大小`}
+          onPointerDown={onResizeStart}
+          onKeyDown={(e) => {
+            if (!e.key.startsWith("Arrow")) return;
+            e.preventDefault();
+            const dx = e.key === "ArrowRight" ? 20 : e.key === "ArrowLeft" ? -20 : 0;
+            const dy = e.key === "ArrowDown" ? 20 : e.key === "ArrowUp" ? -20 : 0;
+            onCommand({ type: "window/resize", id: w.id, w: w.bounds.w + dx, h: w.bounds.h + dy, host: host() });
+          }}
+        >
+          ⌟
+        </button>
+      ) : null}
+      <div ref={viewportRef} hidden aria-hidden="true" />
+    </section>
+  );
+}
+
+/** 拖拽：位移量在组件里算，**clamp 在域里做**（electron/window-manager.cjs）。 */
+function startDrag(e: React.PointerEvent, w: WinDomain, onCommand: (c: WindowCommand) => void) {
+  if ((e.target as HTMLElement).closest("button,input") ) return;
+  if (w.state === domain.WSTATE.MAXIMIZED) return;
+  const startX = e.clientX;
+  const startY = e.clientY;
+  const x0 = w.bounds.x;
+  const y0 = w.bounds.y;
+  const el = e.currentTarget as HTMLElement;
+  el.setPointerCapture(e.pointerId);
+  const move = (ev: Event) => {
+    const p = ev as PointerEvent;
+    onCommand({ type: "window/move", id: w.id, x: x0 + p.clientX - startX, y: y0 + p.clientY - startY, host: host() });
+  };
+  const end = () => {
+    el.removeEventListener("pointermove", move);
+    el.removeEventListener("pointerup", end);
+    el.removeEventListener("pointercancel", end);
+  };
+  el.addEventListener("pointermove", move);
+  el.addEventListener("pointerup", end);
+  el.addEventListener("pointercancel", end);
+}
+
+export function startResize(e: React.PointerEvent, w: WinDomain, onCommand: (c: WindowCommand) => void) {
+  if (w.state === domain.WSTATE.MAXIMIZED) return;
+  const startX = e.clientX;
+  const startY = e.clientY;
+  const w0 = w.bounds.w;
+  const h0 = w.bounds.h;
+  const el = e.currentTarget as HTMLElement;
+  el.setPointerCapture(e.pointerId);
+  const move = (ev: Event) => {
+    const p = ev as PointerEvent;
+    onCommand({ type: "window/resize", id: w.id, w: w0 + p.clientX - startX, h: h0 + p.clientY - startY, host: host() });
+  };
+  const end = () => {
+    el.removeEventListener("pointermove", move);
+    el.removeEventListener("pointerup", end);
+    el.removeEventListener("pointercancel", end);
+  };
+  el.addEventListener("pointermove", move);
+  el.addEventListener("pointerup", end);
+  el.addEventListener("pointercancel", end);
+}
+
+// ===========================================================================
+// 8. WebViewport —— 只是 DOM 占位与几何锚点（§34）
+// ===========================================================================
+
+type WebViewportProps = {
+  /** 原生视图此刻是否真的可见 —— 文案必须与它一致，否则界面在撒谎。 */
+  nativeVisible: boolean;
+  error?: string;
+  children?: React.ReactNode;
+};
+
+/**
+ * **不接受任何 Electron 对象。** 它不知道 WebContentsView 的存在，
+ * 只知道"这块区域有没有被原生内容填上"，用来决定占位文案。
+ * 几何锚点也不是它自己量的 —— 视口矩形由 domain 的 bounds 推出。
+ */
+export function WebViewport({ nativeVisible, error, children }: WebViewportProps) {
+  return (
+    <div className="web-viewport">
+      {children}
+      <img className="viewport-icon" src={icon("safari")} alt="" draggable={false} />
+      <p data-view={nativeVisible ? "shown" : "hidden"}>
+        {error || (nativeVisible ? "网页内容将在此处显示" : "网页已暂时隐藏，避免遮挡系统窗口")}
+      </p>
+    </div>
+  );
+}
+
+// ===========================================================================
+// 9. AddressBar
+// ===========================================================================
+
+type AddressBarProps = {
+  url: string;
+  onUrlChange: (v: string) => void;
+  onNavigate: () => void;
+  onAction: (action: "back" | "forward" | "reload") => void;
+};
+
+export function AddressBar({ url, onUrlChange, onNavigate, onAction }: AddressBarProps) {
+  return (
+    <form
+      className="addressbar"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onNavigate();
+      }}
+    >
+      <button type="button" aria-label="后退" onClick={() => onAction("back")}>
+        <ArrowLeft size={17} />
+      </button>
+      <button type="button" aria-label="前进" onClick={() => onAction("forward")}>
+        <ArrowRight size={17} />
+      </button>
+      <button type="button" aria-label="刷新" onClick={() => onAction("reload")}>
+        <RotateCw size={16} />
+      </button>
+      <input aria-label="网页地址" value={url} onChange={(e) => onUrlChange(e.target.value)} />
+      <button className="primary">打开</button>
+    </form>
+  );
+}
+
+// ===========================================================================
+// 11-12. AssistantPill / AIPanel
+// ===========================================================================
+
+type AssistantPillProps = { onActivate: () => void };
+export function AssistantPill({ onActivate }: AssistantPillProps) {
+  return (
+    <button className="assistant-pill" onClick={onActivate}>
+      <img className="pill-icon" src={icon("siri")} alt="" />
+      <span>全局 AI</span>
+      <span className="pill-status">未连接</span>
+    </button>
+  );
+}
+
+type AIPanelProps = { onClose: () => void; onOpenSettings: () => void };
+export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
+  const [note, setNote] = useState("");
+  return (
+    <aside className="ai-panel" aria-label="AI 助手">
+      <div className="panel-heading">
+        <img className="heading-icon" src={icon("siri")} alt="" />
+        <strong>全局 AI 助手</strong>
+        <button aria-label="关闭AI面板" onClick={onClose}>
+          <X size={19} />
+        </button>
+      </div>
+      <div className="ai-intro">
+        <img className="ai-orb" src={icon("siri")} alt="" draggable={false} />
+        <h2>从一个想法开始</h2>
+        <p>连接模型与工具后，AI 将在授权范围内协调你的应用。</p>
+      </div>
+      <div className="connection-card">
+        <span className="badge">后端未接入</span>
+        <h3>准备你的全局助手</h3>
+        <p>DeepSeek Harness 正在验证。当前不会发送消息或执行任务。</p>
+        <button onClick={onOpenSettings}>
+          查看统一设置 <ArrowRight size={15} />
+        </button>
+      </div>
+      <div className="composer">
+        <textarea aria-label="任务草稿" placeholder="先记下你想完成的工作…" value={note} onChange={(e) => setNote(e.target.value)} />
+        <span>仅本次会话草稿 · 未发送</span>
+      </div>
+    </aside>
+  );
+}
+
+// ===========================================================================
+// 10. ContextMenu（§31）
+// ===========================================================================
+
+export type MenuItem =
+  | { id: string; label: string; danger?: boolean; disabled?: boolean; onSelect: () => void }
+  | { separator: true };
+
+type ContextMenuProps = {
+  x: number;
+  y: number;
+  items: MenuItem[];
+  onClose: () => void;
+  label?: string;
+};
+
+/**
+ * 真实菜单：键盘可完整操作。
+ *
+ *   ArrowDown / ArrowUp  在可选项之间移动（跳过 disabled 与分隔线，且**循环**）
+ *   Home / End           首 / 末项
+ *   Enter / Space        触发
+ *   Escape               关闭并把焦点还给触发者
+ *
+ * 关闭时把焦点还回去是硬要求：否则用户按 Esc 之后焦点会掉到 body，
+ * 键盘用户等于"迷失位置"（这条在 D2-01 登记为 NOT VERIFIED，本轮补上）。
+ */
+export function ContextMenu({ x, y, items, onClose, label = "桌面菜单" }: ContextMenuProps) {
+  const ref = useRef<HTMLDivElement>(null);
+  const returnTo = useRef<HTMLElement | null>(null);
+
+  const selectable = useMemo(
+    () => items.map((it, i) => ({ it, i })).filter(({ it }) => !("separator" in it) && !it.disabled).map(({ i }) => i),
+    [items],
+  );
+
+  useEffect(() => {
+    returnTo.current = document.activeElement as HTMLElement;
+    const first = selectable[0];
+    if (first !== undefined) ref.current?.querySelectorAll<HTMLElement>("[role=menuitem]")[0]?.focus();
+    return () => returnTo.current?.focus?.();
+  }, [selectable]);
+
+  const move = useCallback(
+    (dir: 1 | -1) => {
+      const nodes = Array.from(ref.current?.querySelectorAll<HTMLElement>("[role=menuitem]:not([disabled])") || []);
+      if (!nodes.length) return;
+      const at = nodes.indexOf(document.activeElement as HTMLElement);
+      const next = at < 0 ? (dir > 0 ? 0 : nodes.length - 1) : (at + dir + nodes.length) % nodes.length;
+      nodes[next].focus();
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        move(1);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        move(-1);
+      } else if (e.key === "Home" || e.key === "End") {
+        e.preventDefault();
+        const nodes = Array.from(ref.current?.querySelectorAll<HTMLElement>("[role=menuitem]:not([disabled])") || []);
+        nodes[e.key === "Home" ? 0 : nodes.length - 1]?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [move, onClose]);
+
+  return (
+    <>
+      <div className="menu-shade" onPointerDown={onClose} onContextMenu={(e) => { e.preventDefault(); onClose(); }} />
+      <div
+        className="context-menu"
+        role="menu"
+        aria-label={label}
+        ref={ref}
+        style={{ left: Math.min(x, innerWidth - 190), top: Math.min(y, innerHeight - 150) }}
+      >
+        {items.map((it, i) =>
+          "separator" in it ? (
+            <div className="menu-separator" role="separator" key={`sep-${i}`} />
+          ) : (
+            <button
+              key={it.id}
+              role="menuitem"
+              className={it.danger ? "danger" : undefined}
+              disabled={it.disabled}
+              onClick={() => {
+                it.onSelect();
+                onClose();
+              }}
+            >
+              {it.label}
+            </button>
+          ),
+        )}
+      </div>
+    </>
+  );
+}

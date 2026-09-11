@@ -161,7 +161,7 @@
   align-items: center;
   gap: 10px;
   padding: 9px 15px;
-  border-radius: 30px;
+  border-radius: var(--radius-pill);
   background: rgb(var(--pill-rgb) / var(--pill-alpha));
   backdrop-filter: var(--glass-filter-pill);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
@@ -334,7 +334,7 @@ p {
   box-shadow:
     0 1px 3px rgba(0, 0, 0, 0.08),
     0 8px 24px rgba(0, 0, 0, 0.05);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   text-align: left;
   padding: 16px;
   display: flex;
@@ -383,7 +383,7 @@ p {
 .adobe {
   height: 38px;
   width: 38px;
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   display: grid;
   place-items: center;
   font-size: 21px;
@@ -418,6 +418,7 @@ p {
   transform: translateX(-50%);
   background: rgb(var(--bar-rgb) / var(--bar-alpha));
   backdrop-filter: var(--glass-filter-dock);
+  /* D2-02 保留：Dock 的大圆角；最近刻度 16px 差 4px，属可见变化 */
   border-radius: 20px;
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.15);
   display: flex;
@@ -451,7 +452,7 @@ p {
   transform: translateX(-50%) translateY(6px);
   white-space: nowrap;
   padding: 4px 9px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-size: 11px;
   color: var(--text);
   background: rgb(var(--surface-rgb) / var(--surface-alpha));
@@ -530,7 +531,7 @@ p {
   color: var(--text);
   background: var(--sunken);
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 6px 10px;
   font-size: 13px;
   appearance: none;
@@ -544,7 +545,7 @@ input[type="checkbox"] {
   display: inline-block;
   background: var(--sunken);
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-size: 11px;
   font-weight: 400;
   color: var(--muted);
@@ -559,7 +560,7 @@ input[type="checkbox"] {
 .field input,
 .addressbar input {
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   background: rgb(var(--content-rgb) / var(--content-alpha));
   padding: 9px 12px;
   width: 100%;
@@ -609,7 +610,7 @@ input[type="checkbox"] {
 .primary {
   background: var(--accent);
   color: var(--on-accent);
-  border-radius: 7px;
+  border-radius: var(--radius-md);
   white-space: nowrap;
 }
 .browser-status {
@@ -639,7 +640,7 @@ input[type="checkbox"] {
   bottom: 110px;
   width: 350px;
   z-index: 90;
-  border-radius: 16px;
+  border-radius: var(--radius-xl);
   background: rgb(var(--surface-rgb) / var(--surface-alpha));
   backdrop-filter: var(--glass-filter-large, var(--glass-filter));
   box-shadow: var(--shadow);
@@ -681,7 +682,7 @@ input[type="checkbox"] {
   padding: 17px;
   background: rgb(var(--content-rgb) / var(--content-alpha));
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
 }
 .connection-card h3 {
   margin: 13px 0 4px;
@@ -705,6 +706,7 @@ input[type="checkbox"] {
   resize: none;
   background: rgb(var(--content-rgb) / var(--content-alpha));
   border: 1px solid var(--line);
+  /* D2-02 保留：AI 面板输入框；最近刻度 8/12px 差 2px */
   border-radius: 10px;
   padding: 12px;
 }
@@ -726,7 +728,7 @@ input[type="checkbox"] {
   width: 550px;
   background: rgb(var(--surface-rgb) / var(--surface-alpha));
   backdrop-filter: var(--glass-filter-large, var(--glass-filter));
-  border-radius: 16px;
+  border-radius: var(--radius-xl);
   box-shadow: var(--shadow);
   padding: 12px;
   animation: appear var(--quick) var(--ease);
@@ -754,7 +756,7 @@ input[type="checkbox"] {
   align-items: center;
   gap: 14px;
   padding: 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   text-align: left;
 }
 .search-result:hover {
@@ -772,6 +774,7 @@ input[type="checkbox"] {
   align-items: center;
   gap: 7px;
   padding: 8px 4px;
+  /* D2-02 保留：桌面文件夹磁贴；最近刻度 8/12px 差 2px */
   border-radius: 10px;
   cursor: default;
   user-select: none;
@@ -804,7 +807,7 @@ input[type="checkbox"] {
   font-size: 11px;
   text-align: center;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: rgb(var(--content-rgb) / var(--content-alpha));
   color: var(--text);
   padding: 2px 4px;
@@ -819,6 +822,7 @@ input[type="checkbox"] {
   z-index: 200;
   min-width: 178px;
   padding: 5px;
+  /* D2-02 保留：右键菜单面板；最近刻度 8/12px 差 2px */
   border-radius: 10px;
   background: rgb(var(--surface-rgb) / var(--surface-alpha));
   backdrop-filter: var(--glass-filter);
@@ -830,7 +834,7 @@ input[type="checkbox"] {
 .context-menu button {
   text-align: left;
   padding: 8px 11px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-size: 13px;
 }
 .context-menu button:hover {
@@ -895,4 +899,108 @@ input[type="checkbox"] {
   width: 22px;
   height: 22px;
   object-fit: contain;
+}
+
+/* ===========================================================================
+   D2-02 · 窗口系统结构样式
+
+   只有"新增结构"需要的规则：组件化换掉的是状态所有权，不是外观。
+   因此本段不新增任何魔法值 —— 全部消费既有 token。
+   =========================================================================== */
+
+/* inert 包装盒：Dialog 打开时背景整体失效。display:contents 让它不参与布局，
+   因此这一段不会改变任何既有版式。 */
+.desktop-surface {
+  display: contents;
+}
+
+/* 快照层：原生视图被收缩或隐藏后，把网页画面补回 DOM（ADR §12）。
+   本身不接收指针事件 —— 被快照覆盖的区域必须让点击穿透到正确目标，
+   否则会变成交互黑洞。 */
+.window-snapshot-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.menu-separator {
+  height: 1px;
+  margin: 5px 8px;
+  background: var(--line);
+}
+
+/* Dialog 原语（§16）。层级高于右键菜单(200)与搜索(100)，
+   与"Desktop → Window → System Overlay → Modal"的冻结层级一致。 */
+.dialog-shade {
+  position: absolute;
+  inset: 0;
+  z-index: 300;
+  background: var(--hover-tint);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: appear var(--quick) var(--ease);
+}
+.dialog {
+  width: min(460px, calc(100% - 64px));
+  padding: 18px;
+  border-radius: var(--radius-xl);
+  background: rgb(var(--surface-rgb) / var(--surface-alpha));
+  backdrop-filter: var(--glass-filter-large, var(--glass-filter));
+  box-shadow: var(--shadow);
+  animation: appear var(--quick) var(--ease);
+}
+.dialog-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.dialog-heading strong {
+  font-weight: var(--fw-medium);
+  font-size: var(--fs-title);
+}
+.dialog-heading button {
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+}
+.dialog-heading button:hover {
+  background: var(--row-hover);
+}
+.dialog-body {
+  margin-top: 12px;
+  font-size: var(--fs-body);
+}
+.dialog-body p {
+  margin: 0 0 8px;
+}
+.dialog-footer {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.dialog-footer button {
+  padding: 7px 14px;
+  border-radius: var(--radius-md);
+  background: rgb(var(--content-rgb) / var(--content-alpha));
+  font-size: var(--fs-secondary);
+}
+.dialog-footer button:hover {
+  background: var(--row-hover);
+}
+.dialog-footer .primary {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.dialog-footer .ghost {
+  background: transparent;
+  color: var(--muted);
+}
+.dialog-footer .danger {
+  color: var(--failed);
 }
