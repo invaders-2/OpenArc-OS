@@ -145,171 +145,14 @@ const DESKTOP_ID = "desktop";
 /** 桌面图标栅格：整理与"网格吸附"共用同一套数。 */
 // 初始落位放在右侧空白区：左侧/中部会被默认窗口与品牌区压住
 const DESK_GRID = { x0: 1150, y0: 88, dx: 108, dy: 118, cols: 2 };
-/** 内置壁纸（都保持深色，符合设计语言的克制口径）。 */
+/** 内置壁纸只保留两种：浅色 / 深色主题色（其余预设与动态 Aurora 已按用户口径删除）。 */
 const WALLPAPERS = [
-  { id: "aurora", name: "极光" },
-  { id: "graphite", name: "石墨" },
-  { id: "midnight", name: "午夜" },
-  { id: "plain", name: "纯黑" },
+  { id: "theme-light", name: "浅色主题色" },
+  { id: "theme-dark", name: "深色主题色" },
 ];
 
 /** 上传的自定义壁纸存在这个真实存储文件夹里（静态图片 / 动图 / 视频都走它）。 */
 const WALLPAPER_ID = "wallpapers";
-/** 动态 Aurora 壁纸的三个色（用户给的 ReactBits 链接里的配色）。 */
-const AURORA_COLORS = ["#6b6b6b", "#717171", "#292929"];
-
-/**
- * 动态壁纸（Aurora）：三团缓慢漂移的柔光，纯 Canvas 自绘、**不引第三方库**。
- * 遵守"减少动态效果"：reduced 时只画一帧，不跑 rAF。
- */
-function AuroraBackground({ reduced }: { reduced: boolean }) {
-  const ref = useRef<HTMLCanvasElement>(null);
-  useEffect(() => {
-    const cvs = ref.current;
-    if (!cvs) return;
-    // ── 首选：WebGL 着色器（对齐 reactbits.dev/backgrounds/aurora 的极光帘观感） ──
-    const gl = (cvs.getContext("webgl", { antialias: false, alpha: false, powerPreference: "low-power" }) ||
-      cvs.getContext("experimental-webgl")) as WebGLRenderingContext | null;
-    if (gl) {
-      const hex2rgb = (h: string): [number, number, number] => [
-        parseInt(h.slice(1, 3), 16) / 255,
-        parseInt(h.slice(3, 5), 16) / 255,
-        parseInt(h.slice(5, 7), 16) / 255,
-      ];
-      const tints = AURORA_COLORS.map(hex2rgb);
-      const VS = "attribute vec2 a; void main(){ gl_Position = vec4(a, 0.0, 1.0); }";
-      const FS = [
-        "precision highp float;",
-        "uniform float uTime; uniform vec2 uRes;",
-        "uniform vec3 uC1; uniform vec3 uC2; uniform vec3 uC3;",
-        "float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }",
-        "float noise(vec2 p){",
-        "  vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);",
-        "  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),",
-        "             mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);",
-        "}",
-        "float fbm(vec2 p){ float v = 0.0; float a = 0.5;",
-        "  for (int i = 0; i < 5; i++) { v += a * noise(p); p *= 2.03; a *= 0.5; } return v; }",
-        "void main(){",
-        "  vec2 uv = gl_FragCoord.xy / uRes;",
-        "  float t = uTime;",
-        "  vec3 col = vec3(0.035, 0.040, 0.050);",
-        "  vec3 c1 = uC1; vec3 c2 = uC2; vec3 c3 = uC3;",
-        // 三层"极光帘"：横向漂移 + 纵向渐隐，用 fbm 塑形
-        "  for (int i = 0; i < 3; i++) {",
-        "    float fi = float(i);",
-        "    vec3 tint = i == 0 ? c1 : (i == 1 ? c2 : c3);",
-        // 速度与对比都调高：之前太慢太淡，用户根本看不出"在动"
-        "    float speed = 0.115 + fi * 0.075;",
-        "    float x = uv.x * (1.35 + fi * 0.55) + t * speed + fi * 7.3;",
-        "    float n = fbm(vec2(x, uv.y * 1.35 - t * 0.055 + fi * 2.1));",
-        "    float band = pow(smoothstep(0.24, 0.96, n), 1.45);",
-        "    float vfade = smoothstep(0.0, 0.92, uv.y) * (1.0 - smoothstep(0.52, 1.05, uv.y));",
-        "    col += tint * band * vfade * 1.5;",
-        "  }",
-        "  gl_FragColor = vec4(col, 1.0);",
-        "}",
-      ].join("\n");
-      const mkShader = (type: number, src: string) => {
-        const s = gl.createShader(type)!;
-        gl.shaderSource(s, src);
-        gl.compileShader(s);
-        return s;
-      };
-      const prog = gl.createProgram()!;
-      gl.attachShader(prog, mkShader(gl.VERTEX_SHADER, VS));
-      gl.attachShader(prog, mkShader(gl.FRAGMENT_SHADER, FS));
-      gl.linkProgram(prog);
-      gl.useProgram(prog);
-      const buf = gl.createBuffer();
-      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
-      const loc = gl.getAttribLocation(prog, "a");
-      gl.enableVertexAttribArray(loc);
-      gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-      const uTime = gl.getUniformLocation(prog, "uTime");
-      const uRes = gl.getUniformLocation(prog, "uRes");
-      gl.uniform3fv(gl.getUniformLocation(prog, "uC1"), tints[0]);
-      gl.uniform3fv(gl.getUniformLocation(prog, "uC2"), tints[1]);
-      gl.uniform3fv(gl.getUniformLocation(prog, "uC3"), tints[2]);
-      const draw = (t: number) => {
-        gl.uniform1f(uTime, t);
-        gl.uniform2f(uRes, cvs.width, cvs.height);
-        gl.drawArrays(gl.TRIANGLES, 0, 3);
-      };
-      const resize = () => {
-        cvs.width = Math.max(1, cvs.clientWidth);
-        cvs.height = Math.max(1, cvs.clientHeight);
-        gl.viewport(0, 0, cvs.width, cvs.height);
-      };
-      resize();
-      let raf = 0;
-      const start = performance.now();
-      if (reduced) {
-        draw(0);
-      } else {
-        const frame = (now: number) => {
-          draw((now - start) / 1000);
-          raf = requestAnimationFrame(frame);
-        };
-        raf = requestAnimationFrame(frame);
-      }
-      window.addEventListener("resize", resize);
-      return () => {
-        cancelAnimationFrame(raf);
-        window.removeEventListener("resize", resize);
-      };
-    }
-    // ── 兜底：WebGL 不可用时退回 Canvas 2D 柔光版 ──
-    const ctx = cvs.getContext("2d");
-    if (!ctx) return;
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const resize = () => {
-      cvs.width = Math.max(1, Math.floor(cvs.clientWidth * dpr));
-      cvs.height = Math.max(1, Math.floor(cvs.clientHeight * dpr));
-    };
-    resize();
-    const blobs = [
-      { c: AURORA_COLORS[0], sx: 0.2, sy: 0.8, ax: 0.22, ay: 0.16, sp: 0.00055, r: 0.75 },
-      { c: AURORA_COLORS[1], sx: 0.75, sy: 0.25, ax: 0.24, ay: 0.18, sp: 0.00042, r: 0.65 },
-      { c: AURORA_COLORS[2], sx: 0.5, sy: 0.55, ax: 0.18, ay: 0.22, sp: 0.00034, r: 0.9 },
-    ];
-    const draw = (t: number) => {
-      const w = cvs.width;
-      const h = cvs.height;
-      ctx.clearRect(0, 0, w, h);
-      ctx.globalCompositeOperation = "lighter";
-      for (const b of blobs) {
-        const x = (b.sx + Math.sin(t * b.sp) * b.ax) * w;
-        const y = (b.sy + Math.cos(t * b.sp * 1.3) * b.ay) * h;
-        const rad = b.r * Math.max(w, h) * 0.55;
-        const g = ctx.createRadialGradient(x, y, 0, x, y, rad);
-        g.addColorStop(0, b.c);
-        g.addColorStop(0.55, b.c + "55");
-        g.addColorStop(1, "rgba(0,0,0,0)");
-        ctx.fillStyle = g;
-        ctx.beginPath();
-        ctx.arc(x, y, rad, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    };
-    if (reduced) {
-      draw(0);
-      return;
-    }
-    let raf = requestAnimationFrame(function loop(t) {
-      draw(t);
-      raf = requestAnimationFrame(loop);
-    });
-    window.addEventListener("resize", resize);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener("resize", resize);
-    };
-  }, [reduced]);
-  return <canvas className="aurora-canvas" ref={ref} />;
-}
-
 /** 只读文件协议的媒体地址：openarc-file://media/<folderId>/<id>。 */
 const fileUrl = (folderId: string, id: string) =>
   "openarc-file://media/" + encodeURIComponent(folderId) + "/" + encodeURIComponent(id);
@@ -409,7 +252,30 @@ function App() {
     if (v === "full" || v === "reduced" || v === "solid") return v;
     return localStorage.getItem("oa-opaque") === "true" ? "solid" : "full";
   });
-  const [dark, setDark] = useState(() => localStorage.getItem("oa-dark") === "true");
+  /**
+   * 外观：跟随系统 / 浅色 / 深色（默认跟随系统）。
+   * 旧键 oa-dark（布尔）保留写入以兼容既有数据；读取优先 oa-theme。
+   */
+  const [theme, setTheme] = useState<"system" | "light" | "dark">(() => {
+    const saved = localStorage.getItem("oa-theme");
+    if (saved === "system" || saved === "light" || saved === "dark") return saved;
+    const legacy = localStorage.getItem("oa-dark");
+    return legacy === null ? "system" : legacy === "true" ? "dark" : "light";
+  });
+  const [systemDark, setSystemDark] = useState(
+    () => window.matchMedia("(prefers-color-scheme: dark)").matches,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const on = (e: MediaQueryListEvent) => setSystemDark(e.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  const dark = theme === "system" ? systemDark : theme === "dark";
+  useEffect(() => {
+    localStorage.setItem("oa-theme", theme);
+    localStorage.setItem("oa-dark", String(dark));
+  }, [theme, dark]);
   const [endpoint, setEndpoint] = useState("");
   const [model, setModel] = useState("");
   /** 左右分栏的当前页（设置 / 应用中心 / Skill 中心各一份，互不影响）。 */
@@ -531,7 +397,7 @@ function App() {
     }
   });
   const [snap, setSnap] = useState(() => localStorage.getItem("oa-snap") !== "0");
-  const [wallpaper, setWallpaper] = useState(() => localStorage.getItem("oa-wallpaper") || "aurora");
+  const [wallpaper, setWallpaper] = useState(() => localStorage.getItem("oa-wallpaper") || "theme-dark");
   /** 正在"落格"的图标 id：只有松手后的这一段才用过渡，拖动过程严格 1:1。 */
   const [settling, setSettling] = useState<string | null>(null);
   const [deskSort, setDeskSort] = useState<"name" | "date" | "size">("name");
@@ -562,7 +428,7 @@ function App() {
     if (!window.openarc?.files) return;
     await window.openarc.files.remove(WALLPAPER_ID, entryId);
     await refreshFiles(WALLPAPER_ID);
-    if (wallpaper === "custom:" + entryId) setWallpaper("aurora");
+    if (wallpaper === "custom:" + entryId) setWallpaper("theme-dark");
   };
   const uploadWallpaper = async (file: File | undefined) => {
     if (!file || !window.openarc?.files) return;
@@ -1590,7 +1456,22 @@ function App() {
               <>
                 <h1>外观与交互</h1>
                 <p className="subtitle">整个工作空间，遵循你的习惯。</p>
-                <Switch label="深色外观" checked={dark} onChange={setDark} />
+                <div className="setting-row">
+                  <span>
+                    外观
+                    <span className="footnote"> 可跟随系统</span>
+                  </span>
+                  <select
+                    className="material-select"
+                    aria-label="外观"
+                    value={theme}
+                    onChange={(e) => setTheme(e.target.value as "system" | "light" | "dark")}
+                  >
+                    <option value="system">跟随系统</option>
+                    <option value="light">浅色</option>
+                    <option value="dark">深色</option>
+                  </select>
+                </div>
                 <Switch label="减少动态效果" checked={reduced} onChange={setReduced} />
                 <div className="setting-row">
                   <span>
@@ -1637,14 +1518,6 @@ function App() {
                       <span>{wp.name}</span>
                     </button>
                   ))}
-                  <button
-                    className={"wallpaper-option aurora-option" + (wallpaper === "aurora-live" ? " on" : "")}
-                    aria-pressed={wallpaper === "aurora-live"}
-                    onClick={() => setWallpaper("aurora-live")}
-                  >
-                    <AuroraBackground reduced={reduced} />
-                    <span>动态 · Aurora</span>
-                  </button>
                   {customWallpapers.map((e) => (
                     <div className="wallpaper-cell" key={e.id}>
                       <button
@@ -1866,12 +1739,6 @@ function App() {
                     onSelect: () => setWallpaper(wp.id),
                   }),
                 ),
-                {
-                  id: "wp-live",
-                  label: "动态 · Aurora",
-                  checked: wallpaper === "aurora-live",
-                  onSelect: () => setWallpaper("aurora-live"),
-                },
                 { separator: true },
                 ...(customWallpapers.length
                   ? ([
@@ -2031,9 +1898,8 @@ function App() {
         setMenu({ x: e.clientX, y: e.clientY });
       }}
     >
-      {/* 壁纸层：内置渐变由 data-wallpaper 提供；动态 Aurora 与自定义壁纸画在这里 */}
+      {/* 壁纸层：内置主题色由 data-wallpaper 提供；自定义壁纸画在这里 */}
       <div className="desktop-wallpaper" aria-hidden="true">
-        {wallpaper === "aurora-live" ? <AuroraBackground reduced={reduced} /> : null}
         {customEntry ? (
           kindOfExt(customEntry.ext) === "video" ? (
             <video
@@ -2249,7 +2115,22 @@ function App() {
           {/* 不压暗桌面（不同于搜索），只做点击外部关闭 */}
           <div className="cc-shade" onClick={() => setOverlays((o) => ({ ...o, control: false }))} />
           <div className="control-center" role="dialog" aria-modal="true" aria-label="控制中心">
-            <Switch label="深色外观" checked={dark} onChange={setDark} />
+            <div className="setting-row">
+              <span>
+                外观
+                <span className="footnote"> 可跟随系统</span>
+              </span>
+              <select
+                className="material-select"
+                aria-label="外观"
+                value={theme}
+                onChange={(e) => setTheme(e.target.value as "system" | "light" | "dark")}
+              >
+                <option value="system">跟随系统</option>
+                <option value="light">浅色</option>
+                <option value="dark">深色</option>
+              </select>
+            </div>
             <Switch label="减少动态效果" checked={reduced} onChange={setReduced} />
             <div className="setting-row">
               <span>材质</span>

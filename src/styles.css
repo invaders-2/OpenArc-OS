@@ -1366,7 +1366,7 @@ input[type="checkbox"] {
   -webkit-user-select: text;
 }
 
-/* 壁纸层（动态 Aurora / 自定义壁纸画在这里；内置渐变仍由 .desktop[data-wallpaper] 提供） */
+/* 壁纸层：只有自定义壁纸画在这里；内置"浅色 / 深色主题色"由 .desktop[data-wallpaper] 提供 */
 .desktop-wallpaper {
   position: absolute;
   inset: 0;
@@ -1374,20 +1374,18 @@ input[type="checkbox"] {
   overflow: hidden;
   pointer-events: none;
 }
-.aurora-canvas,
 .wallpaper-media {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
-.desktop.dark[data-wallpaper="aurora-live"],
+/* 自定义壁纸的底色（跟随主题的基色） */
 .desktop.dark[data-wallpaper="custom"] {
-  background: #0b0f14;
+  background: #171717;
 }
-.desktop:not(.dark)[data-wallpaper="aurora-live"],
 .desktop:not(.dark)[data-wallpaper="custom"] {
-  background: #eef0f4;
+  background: #f2f2f4;
 }
 /* 设置页：壁纸选择 */
 .control-button {
@@ -1462,23 +1460,12 @@ input[type="checkbox"] {
   position: relative;
   text-shadow: 0 1px 8px rgba(0, 0, 0, 0.55);
 }
-/* 内置壁纸的色板（与桌面上那四套一一对应） */
-.wallpaper-option[data-wallpaper="aurora"] {
-  background:
-    radial-gradient(ellipse at 20% 92%, rgba(56, 189, 248, 0.35) 0, transparent 55%),
-    radial-gradient(ellipse at 82% 14%, rgba(167, 139, 250, 0.3) 0, transparent 50%),
-    linear-gradient(140deg, #0b0f14, #10141b 70%, #0c1016);
+/* 内置壁纸色板：就是主题基色（浅色 / 深色） */
+.wallpaper-option[data-wallpaper="theme-light"] {
+  background: #f2f2f4;
 }
-.wallpaper-option[data-wallpaper="graphite"] {
-  background: linear-gradient(140deg, #17181c, #101114 70%, #14151a);
-}
-.wallpaper-option[data-wallpaper="midnight"] {
-  background:
-    radial-gradient(ellipse at 50% 112%, rgba(99, 102, 241, 0.3) 0, transparent 60%),
-    linear-gradient(160deg, #0a0c14, #0e1119);
-}
-.wallpaper-option[data-wallpaper="plain"] {
-  background: #000;
+.wallpaper-option[data-wallpaper="theme-dark"] {
+  background: #171717;
 }
 
 /* 桌面上的文件（与文件夹里同一套真实数据，同样显示缩略图） */
@@ -1528,40 +1515,12 @@ input[type="checkbox"] {
   white-space: nowrap;
   font-size: var(--fs-caption);
 }
-/* 壁纸：四套都保持深/浅主色，只在光晕上做区分（设计语言要求克制） */
-.desktop.dark[data-wallpaper="aurora"] {
-  background:
-    radial-gradient(ellipse at 20% 92%, rgba(56, 189, 248, 0.16) 0, transparent 55%),
-    radial-gradient(ellipse at 82% 14%, rgba(167, 139, 250, 0.14) 0, transparent 50%),
-    linear-gradient(140deg, #0b0f14, #10141b 70%, #0c1016);
+/* 内置壁纸：只保留"浅色 / 深色主题色"两种（其余预设已按用户口径删除） */
+.desktop[data-wallpaper="theme-light"] {
+  background: #f2f2f4;
 }
-.desktop.dark[data-wallpaper="graphite"] {
-  background: linear-gradient(140deg, #17181c, #101114 70%, #14151a);
-}
-.desktop.dark[data-wallpaper="midnight"] {
-  background:
-    radial-gradient(ellipse at 50% 112%, rgba(99, 102, 241, 0.18) 0, transparent 60%),
-    linear-gradient(160deg, #0a0c14, #0e1119);
-}
-.desktop.dark[data-wallpaper="plain"] {
-  background: #000;
-}
-.desktop:not(.dark)[data-wallpaper="aurora"] {
-  background:
-    radial-gradient(ellipse at 20% 92%, rgba(56, 189, 248, 0.22) 0, transparent 55%),
-    radial-gradient(ellipse at 82% 14%, rgba(167, 139, 250, 0.18) 0, transparent 50%),
-    linear-gradient(140deg, #eef3f8, #e7edf5 70%, #eaf0f6);
-}
-.desktop:not(.dark)[data-wallpaper="graphite"] {
-  background: linear-gradient(140deg, #f2f3f5, #e6e7ea 70%, #edeeF1);
-}
-.desktop:not(.dark)[data-wallpaper="midnight"] {
-  background:
-    radial-gradient(ellipse at 50% 112%, rgba(99, 102, 241, 0.16) 0, transparent 60%),
-    linear-gradient(160deg, #eef0f7, #e8eaf2);
-}
-.desktop:not(.dark)[data-wallpaper="plain"] {
-  background: #fff;
+.desktop[data-wallpaper="theme-dark"] {
+  background: #171717;
 }
 
 /* 文件夹：分组块 + 框选橡皮筋 */
