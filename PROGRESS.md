@@ -1,6 +1,6 @@
 # OpenArc OS 进度
 
-更新日期：2026-09-10
+更新日期：2026-09-11
 
 最新确认：产品为运行在 Windows/macOS 上的完整独立桌面系统。UI 全局采用 Apple 半透明磨砂玻璃质感，组件与交互动效遵循 https://ui.spectrumhq.in/ 参考方向，覆盖登录、桌面、应用、文件、AI、Skill 和设置。详细要求已写入 PRODUCT.md。
 
@@ -86,10 +86,11 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 
 分支 `feature/d1-04-design-performance`。完整 ADR：`docs/decisions/D1-04-design-performance.md`。
 
-**状态：PARTIAL。** 剩余三条硬缺口：①性能数字只在 Chromium 取得
-（Electron 内 NOT VERIFIED）、②Windows 平台未验证、
-③**REDUCED 档的性能收益不成立**（实现已在产品里，但"降模糊半径换性能"被实测证伪，见 D1-04B 性能轮）。
-原第三条"REDUCED 档位只定义未实现"的**实现层**已由 **D1-04B** 关闭。
+**状态：PARTIAL。** 剩余**两条**硬缺口，都是代表性缺口：①性能数字只在 Chromium 取得
+（Electron 内 NOT VERIFIED）；②Windows 平台未验证。
+
+缺口变化：原第三条"REDUCED 档位只定义未实现"的**实现层**已由 **D1-04B** 关闭；
+D1-04B 开出的"**REDUCED 性能假设不成立**"已由 **D1-04C** 关闭（见下方 D1-04C 轮）。
 
 已达成：
 
@@ -164,8 +165,9 @@ REDUCED 档已进入产品代码（不再是实验脚本注入）：
 新增防回归探针 `experiments/d1-04/theme-matrix.mjs` + `matrix_pixels.py`：
 断言主题原料、computed 背景通道不跨主题、深色格窗口内容落在暗部区间。
 
-仍待办（D1-04B 剩余）：**REDUCED 档方向重定**（ADR 21.9 的 A/B/C 三选项），
-以及在空载主机上重跑一次官方基线（本轮主机 loadavg ≈ 9）。
+仍待办（D1-04B 剩余）：~~**REDUCED 档方向重定**（ADR 21.9 的 A/B/C 三选项）~~ ——
+**已在 D1-04C 结案：Boss 选 A（重定义作用面），见下节。**
+空载主机重跑一次官方基线仍未做（本轮主机 loadavg ≈ 9）。
 修复前产生的视觉数据不作为最终证据。
 
 ### D1-04B 官方材质性能（2026-09-11，结论：SOLID PASS / REDUCED FAIL）
@@ -198,7 +200,58 @@ ADR 第 21 节。这一轮只做性能与证据闭合，测量**全程切换产�
   绝对数值不可与空载环境对比；相对比较靠交错 + 配对 + 多轮保持有效。
 - 代表性：**MEASURED (Chromium 149.0.7827.55)**，Electron 与 Windows 仍 **NOT VERIFIED**。
 
-遗留决策：REDUCED 档方向重定（A 重定义作用面 / B 并掉该档 / C 保留但不承诺性能），见 ADR 21.9。
+遗留决策：~~REDUCED 档方向重定（A 重定义作用面 / B 并掉该档 / C 保留但不承诺性能）~~
+—— **已由 D1-04C 结案，选 A**。
+
+### D1-04C 选择性玻璃（2026-09-11，结论：PASS / 方向缺口 CLOSED）
+
+ADR 第 22 节。Boss 在 A/B/C 中**选 A**：REDUCED 不再靠"降模糊半径"，
+改为**减少被 `backdrop-filter` 覆盖的面积与面数**——大面积表面转实色，小面积系统 chrome 保留玻璃。
+
+- **正式定义**：`REDUCED = selective glass / reduced filtered area`。
+  `Performance lever = filtered area / filtered surface count`；
+  `Blur radius = secondary visual parameter`（REDUCED 下取 7–13px，仅作视觉参数，不主张性能）。
+  旧的 `REDUCED = blur 10px` 降级为历史设计，记录留在 ADR 第 21 节，不删除。
+- **实现载体**：产品 token 里只有一个开关 `--glass-filter-large`，只在 `data-glass="reduced"` 下定义。
+  **引用它的选择器就是"大面积白名单"**（`.window` / `.ai-panel` / `.search-panel`，性能载荷 `.oa-synth` 同款）。
+  没有 `.desktop[data-glass="reduced"] *` 这类全局规则。
+  窗口这一面把玻璃**下沉到标题条**（44px 窄带），容器转透明、正文转 `#171717`/`#fff` 满 alpha。
+- **过滤面积/面数（本轮新增指标）**，深色：
+
+  | K | FULL 面数 / 面积 | **REDUCED 面数 / 面积** | SOLID | 面积降幅 |
+  |---|---|---|---|---|
+  | 0 | 6 / 1,523,824 px | **6 / 203,564 px** | 0 / 0 | **−86.6%** |
+  | 24 | 30 / 4,547,824 px | **6 / 203,564 px** | 0 / 0 | **−95.5%** |
+  | 72 | 78 / 10,595,824 px | **6 / 203,564 px** | 0 / 0 | **−98.1%** |
+  | 144 | 150 / 19,667,824 px | **6 / 203,564 px** | 0 / 0 | **−99.0%** |
+
+  REDUCED 的过滤面数与 K 完全无关，成本曲线是平线。
+- **性能（深色稳态 5 轮，`mean / p95 / >33ms 长帧`）**：
+
+  | 档位 | K=0 | K=24 | K=72 | K=144 |
+  |---|---|---|---|---|
+  | FULL | 8.20 / 9.1 / 0 | 8.33 / 8.9 / 0 | 9.25 / 9.4 / 1 | **11.35 / 41.6 / 5** |
+  | REDUCED | 8.33 / 9.0 / 0 | 8.33 / 9.0 / 0 | 9.18 / 8.9 / 0 | **8.33 / 9.1 / 0** |
+  | SOLID | 8.33 / 9.1 / 0 | 8.33 / 9.1 / 0 | 8.33 / 8.9 / 0 | 8.33 / 9.0 / 0 |
+
+  冷启动口径下差距更明确：K=72 FULL 19.72 / 40.2 / **29 帧长帧**、K=144 FULL 34.19 / 66.7 / **43 帧**，
+  REDUCED 全程 8.33 / 9.2 / 0。同轮配对 (FULL−REDUCED) K=144 **5/5 一致 +3.01ms**。
+  **REDUCED 与 SOLID 现在是同一条成本曲线。**
+- **判据按新规则**（不要求 K=24 有大 p95 差）：(a) 过滤面积确实显著下降 ✓、
+  (b) 高负载下不比 FULL 差 ✓、(c) 随压力上升比 FULL 更稳 ✓（K=0→144 mean 变化 REDUCED +0.00ms vs FULL +3.02ms）、
+  (d) SOLID 仍是最低成本基线 ✓。
+- **层级未被拉平**：切档不改窗口明度（浅色 0 级、深色 −1 级：24→23）；标题条仍是更亮的材质带；
+  对比度浅色最低 **5.07:1** / 深色 **6.24:1**，过 WCAG AA。
+- **回归**：六格主题矩阵 6/6 PASS；切换压力 63/63（366 帧内 >33ms 0 帧，结构全程不变）；
+  `npm test` 7/7；`a11y-check` 右键菜单 / Cmd+K 行为不变；`npm run build` 干净。
+- **修掉一条真实缺陷**：大面积面板转实色后，`.search-result:hover` 靠"同色 + alpha"表达，
+  实色底上合成结果不变 → hover 消失。改为浅色 `--sunken`（4% 黑）、深色 3% 白抬亮，
+  新探针 `hover_probe.py` 六格全部可辨（深色 SOLID 由 ΔL\* 0.65 → 3.00）。
+- **自动降级冻结到 D1-06**：不实现 FULL→REDUCED→SOLID 自动触发链。理由：现有数据只有 Chromium，
+  Electron / Windows NOT VERIFIED；真实产品负载（≈7 个玻璃面）三档全 120fps/0 长帧，没有需要降级的场景。
+  当前只允许用户手动选档 + 内部测试脚本切换。
+- 代表性：**MEASURED (Chromium 149.0.7827.55)**，Electron 与 Windows 仍 **NOT VERIFIED**。
+  本轮全部数字在同一天、同一台机、同一冻结代码版本上取得。
 
 ### 待验证（沿用）
 

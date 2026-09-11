@@ -5,20 +5,24 @@
 > **Spectrum UI Verdict: REFERENCE ONLY（不引入源码）**
 > **ui-light-bar-zero Verdict: ADAPT（方向采纳，两处按实测修正）**
 > **D1-04B：REDUCED 档已进入产品代码（`data-glass` 三态）；主题合成已改为消费点合成**
-> **D1-04B 材质性能判定：SOLID PASS / REDUCED FAIL（第 21 节）**
+> **D1-04B 材质性能判定：SOLID PASS / REDUCED FAIL（第 21 节，历史记录）**
+> **D1-04C：REDUCED 重新定义为「选择性玻璃 / 减少过滤面积」，方向缺口 CLOSED（第 22 节）**
 >
-> 判定为 PARTIAL 不是"做了一半"，而是三条硬性缺口仍未关闭：
-> ①性能数字只在 Chromium 取得（Electron 内 NOT VERIFIED）；②Windows 平台未验证；
-> ③**REDUCED 档的性能收益不成立**——实现已在产品里，但"降模糊半径换性能"的假设被实测证伪，
-> 需先定方向（第 21.9 节 A/B/C）。
-> 前两条命中"测量条件"的代表性，第三条命中"降级策略是否成立"，在关闭前不得宣布 COMPLETE。
-> （原"REDUCED 档只定义未实现"的**实现层**缺口已由 D1-04B 关闭，见第 20 节；
-> **性能层**缺口由第 21 节新开。）
+> 判定为 PARTIAL 不是"做了一半"，而是两条硬性缺口仍未关闭：
+> ①性能数字只在 Chromium 取得（Electron 内 NOT VERIFIED）；②Windows 平台未验证。
+> 两条都命中"测量条件"的代表性，在关闭前不得宣布 COMPLETE。
+>
+> 缺口变化轨迹：
+> - 原"REDUCED 只定义未实现"的**实现层**缺口 → 由 D1-04B 关闭（第 20 节）。
+> - D1-04B 开出的"**REDUCED 性能假设不成立**"缺口 → 由 D1-04C 关闭（第 22 节）：
+>   作用面策略已进入产品代码，过滤面积实测下降 −86.6%～−99.0%，
+>   高负载下不再比 FULL 差，六格主题矩阵与切换压力继续通过。
+> - 因此缺口数由 3 回到 **2**。
 
 - 分支：`feature/d1-04-design-performance`（自 `b39eb93` 拉出，不含 D1-03 Adobe 内容）
-- 日期：2026-09-10（D1-04）/ 2026-09-11（D1-04B）
+- 日期：2026-09-10（D1-04）/ 2026-09-11（D1-04B、D1-04C）
 - 上游基线：PRODUCT.md / PLAN.md（D1-04、A12、A29、D2-01）/ DESIGN_SYSTEM.md / MOTION_SYSTEM.md / PROGRESS.md / CHANGELOG.md
-- 实测脚本：`experiments/d1-04/`（D1-04 七个 + D1-04B 七个）
+- 实测脚本：`experiments/d1-04/`（D1-04 七个 + D1-04B 七个 + D1-04C 四个）
 - 产物：`artifacts/d1-04/`
 
 ---
@@ -35,7 +39,10 @@
 
 1. **Spectrum UI 整体 REFERENCE ONLY。** 仓库级 Apache-2.0 已确认，但目录中确实混入第三方 MIT 源码（Dynamic Island 与 Toast Stack 页面自述来自 beUI / beui.dev MIT），且第三方聚合站对同一仓库同时声称 MIT 与 Apache-2.0。更决定性的是：Spectrum 依赖 Tailwind CSS + Motion，OpenArc 是无 Tailwind 的纯 CSS token 体系，引入等于换样式范式，属被禁止的大重构。
 2. **性能数字不代表 Electron。** 本机 Electron 的 GPU 进程在代理执行环境下起不来，全部数据取自 Chromium 152 + ANGLE Metal（M3 Pro）。方法可复用，数字不可直接外推。
-3. **REDUCED 档位只有定义没有实现。** 产品现在只有 FULL（`blur(34px) saturate(1.8)`）与 SOLID（`.opaque`）。本次用注入 CSS 模拟 REDUCED 测出它值多少钱，但产品代码里它不存在。
+3. **REDUCED = IMPLEMENTED（D1-04B 起实现，D1-04C 重定作用面）。** 产品三个档位都是真实产品态：
+   FULL（完整玻璃）/ REDUCED（`data-glass="reduced"`，**选择性玻璃**：大面积实色 + 小面积 chrome 玻璃）/
+   SOLID（`data-glass="solid"`，原 `.opaque`）。D1-04 当时"用注入 CSS 模拟 REDUCED"的做法已废弃，
+   仅保留为历史对照（第 21 节）。
 
 ---
 
@@ -333,26 +340,41 @@
 
 | 档位 | 定义 | 产品现状 |
 |---|---|---|
-| **FULL** | `blur(40/44/34/32/24px) saturate(1.8)` + 半透明底色 | 已实现（默认，`data-glass="full"`） |
-| **REDUCED** | `blur(12/13/10/10/7px)`，**整条滤镜重写以真正去掉 saturate**，底色 alpha 上调补偿 | **已实现**（`data-glass="reduced"`，D1-04B）。**但实测无稳定性能收益**，见第 21.4 / 21.9 节 |
+| **FULL** | 全部表面走完整玻璃：`blur(40/44/34/32/24px) saturate(1.8)` + 半透明底色 | 已实现（默认，`data-glass="full"`） |
+| **REDUCED** | **选择性玻璃 / 减少过滤面积**：大面积表面（窗口、AI 面板、搜索面板、内容区）转实色，只在小面积系统 chrome（顶栏、Dock、tooltip、右键菜单、AI 胶囊、窗口标题条）保留薄玻璃。模糊半径只是次要视觉参数 | **已实现**（`data-glass="reduced"`）。作用面策略由 **D1-04C** 重定（第 22 节），过滤面积 −86.6%～−99.0%，高负载下不再比 FULL 差 |
 | **SOLID** | 无 `backdrop-filter`，全部实色 | 已实现（`data-glass="solid"`，原 `.opaque`） |
 
-建议的触发链（只冻结口径，自动降级尚未实现）：
+> **REDUCED 的正式定义在 D1-04C 被改写。** D1-04B 的定义是「把模糊半径从 34px 降到 10px」，
+> 该假设已被实测证伪（见第 22.12 节 `Why radius reduction was rejected`）。
+> 旧定义保留在第 21 节作为历史设计记录，不删除。
+
+**自动降级：本轮明确不做，且冻结到 D1-06。**
 
 ```
-FULL --(连续 N 帧 > 33ms)--> REDUCED --(仍连续超阈)--> SOLID
+【禁止】FULL --(连续 N 帧 > 33ms)--> REDUCED --(仍连续超阈)--> SOLID
 ```
 
-N 的建议初值：拖动场景下连续 10 帧。该值**未经实测校准**，标为 TARGET。
+理由（三条都要成立才允许开这条链）：
 
-REDUCED 的实现约束（已在 D1-04B 落地，见第 20 节）：
+1. 现有性能数字全部是 **Chromium**（`MEASURED (Chromium)`），Electron 内 **NOT VERIFIED**，Windows **NOT VERIFIED**；
+   用不可代表的数字去校准阈值，等于把误差写进产品行为。
+2. 真实产品负载（≈7 个玻璃面，K=0）三档全部 120fps / 0 长帧——**当前没有需要降级的场景**。
+   降级链要有意义，得先有真实 Electron 高负载数据。
+3. 代表性数据到手前，降级只允许**用户在设置里手动选三档**，以及**内部测试脚本切换**。
+   两者走的是同一条产品状态（`data-glass`），不做任何自动判定。
+
+归属：D1-06 或拿到 Electron/Windows 代表性数据之后。该决定写进第 22.13 节。
+
+REDUCED 的实现约束（已在 D1-04B 落地，见第 20 节；D1-04C 按作用面策略修订）：
 
 - 不能只降 blur 不补底色。`saturate(1.8)` 拿掉后浅色会发灰、深色会发闷，所以同步把
   `--surface / --content / --bar / --pill` 的 alpha 上调一档（浅色 +0.22，深色按各自基线分别取值）；
 - 必须保留窗口边界可辨（DESIGN_SYSTEM：窗口边界靠明度差，不用 border）——
-  REDUCED 不加 border、不加 box-shadow；
+  REDUCED 不加 border、不加 box-shadow、不加 hairline；
+- 窗口的玻璃**下沉到标题条**（44px 窄带），容器转透明、正文转实色（`--content-rgb` 满 alpha）；
+  实测切档只改模糊不改窗口明度（深色 FULL 24 → REDUCED 23，浅色都 255）；
 - 切换档位只改 CSS 变量与 `backdrop-filter`，不重建 DOM。
-  实测（`glass-switch.mjs`）：6 次往返切换，窗口数与矩形全部不变，无残留 class。
+  实测（`glass-switch.mjs` / `glass-switch-stress.mjs`）：63 次往返切换，窗口数与矩形全部不变，无残留 class。
 
 ---
 
@@ -363,12 +385,20 @@ REDUCED 的实现约束（已在 D1-04B 落地，见第 20 节）：
 | 指标 | TARGET（目标，未达成） | MEASURED（Chromium 实测） | NOT VERIFIED |
 |---|---|---|---|
 | 拖动 p50 | ≤ 8.3ms（120fps） | FULL K≤24: 8.3ms | Electron 内全部指标 |
-| 拖动 p95 | ≤ 16.7ms（60fps） | FULL K=24: 16.3ms（压线）；K=72: 25.7ms（超标） | Windows 全部指标 |
-| 长帧（>33ms） | 拖动 90 帧内 0 帧 | FULL K=72: 2 帧；K=144: 3 帧；REDUCED K=144: 0 帧 | 多显示器 / 外接屏 |
+| 拖动 p95 | ≤ 16.7ms（60fps） | FULL K=24: 8.9ms（压线）；K=144: 41.6ms（超标） | Windows 全部指标 |
+| 长帧（>33ms） | 拖动 90 帧内 0 帧 | FULL K=72: 1 帧；K=144: 5 帧；REDUCED 与 SOLID: 全 K 0 帧 | 多显示器 / 外接屏 |
+| **过滤面数 / 过滤面积**（D1-04C 新增） | **REDUCED 必须显著低于 FULL** | K=0 −86.6%、K=24 −95.5%、K=72 −98.1%、K=144 −99.0%（第 22.6 节） | Electron / Windows 内 |
 | 常规场景定义 | ≤ 10 个窗口 | 本轮基准 K=0~24 覆盖该区间 | 真实 10 窗口 + 真实网页内容 |
-| 静态合成成本 | 不冻结 | SOLID 与 K 无关（p95 9.1–9.2） | — |
+| 静态合成成本 | 不冻结 | SOLID 与 K 无关（p95 8.9–9.2） | — |
 
 **冻结的测量条件**（后续复用必须照抄）：视口 1440×900、深色主题、`oa-motion=false`、拖动 40 步正弦轨迹、采 90 帧丢 2、负载单位为 420×300 玻璃面板、报告 p50/p95/长帧数而非平均 fps。
+
+**D1-04C 追加冻结的条件**（三档材质性能比较必须同时报这两组数）：
+
+1. 每次测量同时记录 `filteredCount`（带非 `none` `backdrop-filter` 的元素数）与 `filteredArea`
+   （这些元素裁剪到视口后的面积之和）及其覆盖率；
+2. 判据以**过滤面积是否显著下降**为机制判据，以 p95 / 长帧为性能判据，两者都要报，不得只报其一；
+3. 模糊半径不得作为性能主张的依据（第 22.12 节），只能作为视觉参数记录。
 
 **明确不冻结为目标的：** 平均 fps（会被 vsync 截平，无分辨力）、JS 堆（与玻璃成本无关）。
 
@@ -493,28 +523,31 @@ D1-04 当时的 token（`src/styles.css`）：`--surface / --content / --sunken 
 | # | 未验证项 | 影响 | 阻塞什么 |
 |---|---|---|---|
 | 1 | Electron 内的玻璃性能 | 全部性能数字不可外推到产品 | 性能目标从 MEASURED 升级为 PASS |
-| 2 | REDUCED 档位的实现 | 降级链缺中间档 | D2-01 前的降级策略落地 |
+| 2 | ~~REDUCED 档位的实现~~ | — | **已关闭（D1-04B 实现 / D1-04C 重定作用面）** |
 | 3 | Windows 平台（mica、打包、多显示器） | 双平台一致性是硬性要求 | D1-04 判 COMPLETE |
 | 4 | 真实 Adobe 探测（AdobeRow 为 PLACEHOLDER） | 设置页显示的是假数据 | 与 D1-03 联动 |
 | 5 | 屏幕阅读器 / Windows 高对比度 | 可访问性只做了对比度与键盘 | A29 之外的一致性 |
 | 6 | 焦点可见性在玻璃上的表现 | 可能与"禁用发丝线框"冲突 | DESIGN_SYSTEM 补充 |
 | 7 | Spectrum 逐文件来源审计 | 只允许 REFERENCE ONLY，不能 ADOPT | 任何"抄源码"的提议 |
-| 8 | 自动降级触发阈值 N=10 | 未实测校准 | 降级策略自动化的安全性 |
+| 8 | 自动降级触发阈值 | 未实测校准 | **D1-04C 起冻结到 D1-06**（第 22.13 节）：代表性数据到手前不做自动降级 |
+| 9 | 大量真实窗口（≈10）下的过滤面积 | REDUCED 的成本曲线预期仍为平线，但未实测 | 不阻塞，记入第 22.14 节 |
 
 ---
 
 ## 17. 对 D2-01 的前置影响
 
-D2-01 的前置里，本轮**已满足**的：组件清单与需求等级（P0 17 项中 14 IMPLEMENTED / 2 PARTIAL / 1 无）、动效可打断性、A29、对比度、键盘可达。
+D2-01 的前置里，本轮**已满足**的：组件清单与需求等级（P0 17 项中 14 IMPLEMENTED / 2 PARTIAL / 1 无）、动效可打断性、A29、对比度、键盘可达、**三档材质均为产品态且各有独立定义**（第 22 节）。
 
-**未满足、且必须在 D2-01 前关闭的：**
+**未满足、且必须在 D2-01 前关闭的（两条）：**
 
 1. 在 Electron 内重跑一次材质性能方法（`perf-product.mjs`），把数字从"Chromium MEASURED"变成"Electron MEASURED"；
-2. Windows 上复跑同组测量；
-3. **REDUCED 档的性能假设未成立**（第 21 节）——必须先在 A/B/C 三个选项中定一个方向（重定义作用面 / 并掉该档 / 明确声明它不承诺性能），再谈自动降级触发链。
+2. Windows 上复跑同组测量。
 
-~~实现 REDUCED 档位~~ —— **代码层已由 D1-04B 关闭**（`data-glass="reduced"` 已进入产品代码，六格主题矩阵 PASS）；
-但**性能层未关闭**（第 21 节判定不通过）。
+~~实现 REDUCED 档位~~ —— **代码层已由 D1-04B 关闭**（`data-glass="reduced"` 已进入产品代码，六格主题矩阵 PASS）。
+
+~~REDUCED 档的性能假设未成立~~ —— **由 D1-04C 关闭**（第 22 节）：作用面策略已进入产品代码，
+过滤面积实测下降 −86.6%～−99.0%，高负载下不比 FULL 差，视觉/功能无回归。
+该缺口关闭后，D2-01 的阻塞项回到"只能在 Electron / Windows 上关闭"的两条代表性缺口。
 
 其余（Toast 缺失、AdobeRow 假数据）不阻塞 D2-01，记入 D5。
 
@@ -527,12 +560,15 @@ D2-01 的前置里，本轮**已满足**的：组件清单与需求等级（P0 1
 | ~~实现 REDUCED 档（代码层）~~ | — | **已完成（D1-04B）** |
 | ~~深色 SOLID `--bar` #111111 → #000000~~ | — | **已完成（D1-04B，Boss 已确认）** |
 | ~~REDUCED 档的性能对比（真实产品实现 × 4 档负载）~~ | — | **已完成（D1-04B，第 21 节）；结论：不通过** |
-| **REDUCED 档方向重定**（三选项 A/B/C，见 21.9） | **新增，阻塞 D2-01** | D2-01 之前 |
-| 在**空载**主机上重跑一次官方基线（当前机 loadavg ≈ 9） | **新增** | D2-01 之前 |
+| ~~REDUCED 档方向重定（三选项 A/B/C）~~ | — | **已完成（D1-04C，Boss 选 A；第 22 节）** |
+| ~~REDUCED 改为选择性玻璃并验证过滤面积下降~~ | — | **已完成（D1-04C）** |
+| ~~实色面板上的行级 hover 回归~~ | — | **已完成（D1-04C，第 22.11 节）** |
+| 在**空载**主机上重跑一次官方基线（当前机 loadavg ≈ 8–10） | 新增 | D2-01 之前 |
 | Electron 内重跑官方基线 | D2-01 之前 | 阻塞 D2-01 |
 | Windows 复跑 | D2-01 之前 | 阻塞 D2-01 |
+| **大量真实窗口（≈10）下的过滤面积实测** | **新增**（第 22.14 节） | D2-01 之前，不阻塞 |
 | 把 Spectrum 三条写法写进 MOTION_SYSTEM | D2 期间 | 不阻塞 |
-| 自动降级触发链（FULL→REDUCED→SOLID）的阈值校准 | **待 REDUCED 方向重定后** | 不阻塞 |
+| 自动降级触发链（FULL→REDUCED→SOLID）的阈值校准 | **冻结到 D1-06 或代表性数据到手**（第 22.13 节） | 不阻塞 |
 | Toast 组件（按 Toast Stack 的 API 形状自研） | D5 | 不阻塞 |
 | AdobeRow 真实探测 | 与 D1-03 联动 | D1-03 当前 BLOCKED |
 
@@ -544,12 +580,19 @@ PLAN D1-04 通过条件为"动效可采用，测量条件及目标冻结"。
 
 - **动效可采用：达成。** MS-A02 / MS-A03 / A29 / 可打断性 / 对比度全部有实测证据，且修掉一个真实缺陷。
 - **测量条件及目标冻结：方法冻结达成，代表性未达成。** 方法可复现（负载单位、三档材质、采样口径、报告 p95 与长帧而非平均 fps 均已固定），且三档材质已是真实产品实现；但性能数字只在 Chromium 取得，产品是 Electron，Windows 未测。
-- **新增缺口（D1-04B 第 21 节）：REDUCED 档的性能收益不成立。** 实现层已落地且无功能回归，
-  但"降 radius 换性能"的假设被实测证伪——SOLID 之外没有稳定的性能梯级。
+- **D1-04B 缺口（第 21 节）：REDUCED 档的性能收益不成立。** → **已由 D1-04C 关闭**（第 22 节）。
+  关闭依据（第 22.11 节的验收规则逐条对照）：
+  1. REDUCED 作用面策略进入真实产品代码（`--glass-filter-large` 开关 + 显式白名单）；
+  2. 六格主题矩阵继续 PASS；
+  3. 63/63 切换压力继续 PASS，结构（窗口数/矩形/视口）全程不变；
+  4. **过滤面积确实下降**：K=0 −86.6%，K=24 −95.5%，K=72 −98.1%，K=144 −99.0%；
+     过滤面数 K=144 由 150 → 6；
+  5. 无视觉/功能回归（层级差、对比度、a11y、单元测试全绿），并修掉一条实色面板 hover 回归。
+  注意：**关闭的是"内部方向缺口"，不是"性能已代表 Electron"**。所以本条不把整体状态推向 COMPLETE。
 
-因此 **Task Status = PARTIAL**，剩余缺口 **3 条**：
-①Electron 内性能未验；②Windows 未验；③REDUCED 档性能收益不成立（需重定方向）。
-缺口清空前不得改为 COMPLETE。
+因此 **Task Status = PARTIAL**，剩余缺口 **2 条**，两条都是代表性缺口：
+①Electron 内性能未验；②Windows 未验。
+缺口清空前不得改为 COMPLETE。阶段验收失败不得用下一阶段掩盖，也不得用"方向已定"顶替"数字未代表"。
 
 ---
 
@@ -640,7 +683,19 @@ Light FULL / Light SOLID 同样逐点一致，没有反向回归。
 
 ## 21. D1-04B Official Material Performance
 
-> **判定：不通过（仅 REDUCED 一项不通过）。**
+> **⚠️ 本节是 D1-04B 的历史记录，其中 REDUCED 的判定已被 D1-04C 取代。**
+> 本节测的是「REDUCED = blur 34px → 10px」这条路线，结论是**该路线不通过**。
+> D1-04C 据此把 REDUCED 重定义为「选择性玻璃 / 减少过滤面积」并重新验收：
+> 新的正式结论见 **第 22 节**，REDUCED 由不通过变为**通过**。
+> 本节的数字、方法与三条读数（`backdrop-filter` 有无才是强杠杆 / 半径不是可靠杠杆 /
+> 当前产品玻璃负载不构成性能问题）全部保留，它们是 D1-04C 结论的直接依据。
+>
+> **产物文件说明**：D1-04C 用同名输出重跑过 `perf-product-dark.json` / `-dark-cold.json` /
+> `-light.json`，磁盘上这三个文件现在装的是 D1-04C 数据。D1-04C 的正式产物另存为
+> `perf-product-c-*.json`；本节表格里的 D1-04B 数字以**本文档的表格**为准（表格即记录）。
+> 本节的 `perf-product-dark-grid.json` / `-dark-saturation.json` 未被覆盖，仍是 D1-04B 原物。
+
+> **判定（D1-04B 当时口径）：不通过（仅 REDUCED 一项不通过）。**
 > SOLID 通过；运行时切换压力通过；浅色 sanity 通过；**REDUCED 未达到第 8 节的验收目标**——
 > 在冻结的 K 集合内只有「稳态 × K=144」一格出现可重复收益，其余点位与 FULL 不可分辨，
 > 且冷启动口径下 REDUCED 的 p95 反而更差。因此 **D1-04 的内部实现缺口不关闭**，
@@ -756,6 +811,10 @@ D1-04 的 `perf2.mjs` 用 `page.addStyleTag` 注入材质值，三档是脚本�
 K≤24 是掷硬币（4/7），K=72 也是掷硬币（4/7）——**差异不可分辨**。
 只有 K=144 是 7/7 一致（+0.87ms，≈8%）。
 
+> **后续（D1-04C）**：上表判定的对象是"降半径版 REDUCED"，该实现已被替换为"选择性玻璃版 REDUCED"。
+> 新实现下 REDUCED 在 K=0/24/72/144 全部恒定 8.3ms、0 长帧，过滤面积与 SOLID 同量级（第 22 节）。
+> 本节数据不删，作为"半径不是杠杆"的证据保留。
+
 ### 21.5 SOLID results
 
 | 判据（第 9 节） | 结果 |
@@ -836,6 +895,8 @@ FULL 8.81 / 8.71，REDUCED 8.59 / 8.40，SOLID 8.33 / 8.33。
 - **B. 把 REDUCED 并掉**：既然中间档无稳定收益，降级链直接 `FULL → SOLID`，少一个状态与一套测试面。
 - **C. 维持现状但明确声明**：保留三档作为"视觉档位"（用户偏好），**不承诺性能收益**，并在 UI 上不要暗示它更省。
 
+> **Boss 决策（2026-09-11）：选 A。** 实施与验收见第 22 节。B / C 不再考虑。
+
 **测量可信度声明**：本机存在**外部持续负载**（loadavg ≈ 8–10 / 12 核，非本实验进程造成，
 在实验间隙的空载采样中同样维持）。绝对数值因此高于空载环境，**不可与 D1-04 的绝对数直接比较**。
 相对比较通过"同页交错 + 同轮配对 + 多轮重复"设计保持有效：K=144 的 7/7 配对一致与
@@ -854,7 +915,363 @@ SOLID 的全负载恒定，都证明仪器仍有分辨力。但**空载环境下
 
 ---
 
-## 22. 复现命令
+## 22. D1-04C 选择性玻璃（REDUCED 作用面重定）
+
+> **判定：PASS。D1-04 的内部方向缺口 CLOSED（D1-04 整体仍为 PARTIAL，只剩两条代表性缺口）。**
+> REDUCED 的作用面策略已进入真实产品代码；过滤面积在四个负载点下降 **−86.6% / −95.5% / −98.1% / −99.0%**；
+> 六格主题矩阵继续 PASS；63/63 切换压力继续 PASS 且结构性指标全程不变；无视觉/功能回归。
+> REDUCED 在高负载下**不再比 FULL 差**（冷启动口径 K=144：FULL 34.19ms / 43 帧长帧 vs REDUCED 8.33ms / 0 帧）。
+>
+> **本节数字标注 `D1-04C OFFICIAL CHROMIUM MEASUREMENT`，代表性一律 `NOT REPRESENTATIVE FOR ELECTRON`。**
+> 它们证明的是**机制成立**（过滤面积确实降下来了），不是"Electron 上已经更快"。
+> Electron 内与 Windows 上均为 **NOT VERIFIED**（第 22.14 节）。
+
+### 22.1 决策：选 A —— 减面积，不减半径
+
+Boss 在 D1-04B 给出的 A/B/C 三个选项中**选 A**：
+
+- **不降模糊半径**，改为**减少参与 `backdrop-filter` 的面数与面积**；
+- 大表面（窗口正文、AI 面板、搜索面板、内容区）在 REDUCED 下直接走实色；
+- 只在小面积系统 chrome（顶栏、Dock、tooltip、右键菜单、AI 胶囊、窗口标题条）保留玻璃。
+
+**为什么方向是面积而不是半径**——D1-04B 的三条读数（第 21.9 节）已经指向这一点：
+`backdrop-filter` 的"有无"是唯一的强成本杠杆（SOLID 全负载恒定 8.33ms），
+而半径在 10–34px 区间几乎没有分辨力。机制上说得通：**Chromium 会按半径对 backdrop 做降采样，
+半径越大处理的像素反而越少**，于是"把半径调小"这一侧的收益被"降采样变弱"吃掉了。
+
+因此把这条写进正式定义：
+
+| 项目 | 定位 | 说明 |
+|---|---|---|
+| **filtered area / filtered surface count** | **性能杠杆（primary）** | 降档的唯一性能机制。REDUCED 的过滤面积必须显著低于 FULL，否则该档没有存在意义 |
+| **blur radius** | **次要视觉参数（secondary）** | 允许在 REDUCED 下取更小的值（10–13px）用于视觉一致性，但**不得声称"34→10px 本身降低了成本"** |
+
+### 22.2 正式定义与实现载体
+
+| 档位 | `data-glass` | 正式定义 |
+|---|---|---|
+| FULL | `full` | 全部表面走完整玻璃 |
+| REDUCED | `reduced` | **选择性玻璃 / 减少过滤面积**：大面积表面转实色，小面积 chrome 保留薄玻璃 |
+| SOLID | `solid` | 全部表面无 `backdrop-filter` |
+
+实现只有一个开关，放在产品 token 层：
+
+```css
+/* 大面积表面开关：只在把大面积转实色的档位里被定义。
+   引用它的选择器就是"大面积白名单"成员；别处不定义 ⇒ FULL 自动回退到完整玻璃。 */
+.desktop[data-glass="reduced"] { --glass-filter-large: none; }
+
+.window      { backdrop-filter: var(--glass-filter-large, var(--glass-filter-window)); }
+.ai-panel    { backdrop-filter: var(--glass-filter-large, var(--glass-filter)); }
+.search-panel{ backdrop-filter: var(--glass-filter-large, var(--glass-filter)); }
+```
+
+窗口这一面还多做了一步（比"容器直接转实色"更好）：**玻璃下沉到标题条**。
+`.window` 容器转 `transparent`，`.window-title` 承接 `backdrop-filter: var(--glass-filter-window)`
+与 `rgb(var(--surface-rgb) / var(--surface-alpha))`，`.window-body` 接 `rgb(var(--content-rgb) / 1)`。
+理由是设计系统规定「窗口边界靠明度差」：容器若整块转实色，窗口会变成一块死板矩形；
+下沉后窗口仍有一条 44px 的材质带，窗口层级不变（量见第 22.10 节）。
+
+### 22.3 Surface × tier 矩阵（作用面白名单）
+
+这是本轮最该被复用的表。`过滤面` = 该面是否带非 `none` 的 `backdrop-filter`（即计入成本）；
+`染色面` = 只有底色、从不带滤镜。
+
+| # | Surface | FULL | **REDUCED** | SOLID | REDUCED 归类 |
+|---|---|---|---|---|---|
+| 1 | `.topbar` | 玻璃 `blur40` | **玻璃 `blur12`** | 实色 | 保留玻璃 |
+| 2 | `.dock` | 玻璃 `blur44` | **玻璃 `blur13`** | 实色 | 保留玻璃 |
+| 3 | `.dock-tooltip` | 玻璃 `blur24` | **玻璃 `blur7`** | 实色 | 保留玻璃（短时浮层） |
+| 4 | `.context-menu`（含小 popover） | 玻璃 `blur40` | **玻璃 `blur12`** | 实色 | 保留玻璃（小面积菜单） |
+| 5 | `.assistant-pill` | 玻璃 `blur32` | **玻璃 `blur10`** | 实色 | 保留玻璃（短时浮层） |
+| 6 | `.window-title` | 无滤镜（随窗口） | **玻璃 `blur10`** ← 玻璃下沉到这里 | 实色 | 新增过滤面（44px 窄带） |
+| 7 | `.window`（容器） | 玻璃 `blur34` | **实色 `transparent`** | 实色 | **转出过滤面** |
+| 8 | `.window-body` | 无滤镜（随窗口） | **实色 `rgb(23 23 23 / 1)`** | 实色 | 内容区转实色 |
+| 9 | `.ai-panel`（AI 面板主面） | 玻璃 `blur40` | **实色 `rgb(23 23 23 / 1)`** | 实色 | **转出过滤面** |
+| 10 | `.search-panel`（搜索主面，也是唯一 `role="dialog"`） | 玻璃 `blur40` | **实色 `rgb(23 23 23 / 1)`** | 实色 | **转出过滤面** |
+| 11 | `.content-region`（卡片 / 设置内容 / 浏览器壳 / 视口 / composer） | 染色面无滤镜 | **染色面，`--content-alpha: 1`** | 实色 | 内容区转实色 |
+| 12 | `.app-card` 等卡片 | 染色面无滤镜 | 染色面无滤镜 | 染色面无滤镜 | 三档一致（不参与过滤面积统计） |
+
+> **关于"large Dialog body"**：产品当前**没有**独立 Dialog 组件——全仓只有一个 `role="dialog"`，
+> 就是 `.search-panel`（第 10 行）。所以本轮把它按"大面积浮层"处理（REDUCED 下实色）。
+> 未来若引入独立 Dialog，规则已经写好：**大 Dialog 主体走实色、短时小浮层保留玻璃**。
+> 同理，`.context-menu` 就是当前唯一的"小 popover"。
+
+**深色 computed 实测**（`artifacts/d1-04/glass-matrix.json`，未删）证明上表不是文档承诺而是产品行为：
+
+| Surface | FULL | REDUCED | SOLID |
+|---|---|---|---|
+| TopBar | `blur(40px) saturate(1.8)` / `rgba(23,23,23,0)` | `blur(12px)` / `rgba(23,23,23,.22)` | `none` / `rgb(0,0,0)` |
+| Dock | `blur(44px) saturate(1.8)` / `rgba(23,23,23,0)` | `blur(13px)` / `rgba(23,23,23,.22)` | `none` / `rgb(0,0,0)` |
+| Window | `blur(34px) saturate(1.8)` / `rgba(23,23,23,.5)` | **`none`** / `transparent` | `none` / `rgb(12,12,12)` |
+| WindowTitle | `none` / `transparent` | **`blur(10px)`** / `rgba(23,23,23,.72)` | `none` / `transparent` |
+| Menu | `blur(40px) saturate(1.8)` / `rgba(23,23,23,.5)` | `blur(12px)` / `rgba(23,23,23,.72)` | `none` / `rgb(12,12,12)` |
+| Search | `blur(40px) saturate(1.8)` | **`none`** / `rgb(23,23,23)` | `none` / `rgb(12,12,12)` |
+| AI | `blur(40px) saturate(1.8)` | **`none`** / `rgb(23,23,23)` | `none` / `rgb(12,12,12)` |
+| Card | `none` / `rgba(23,23,23,.6)` | `none` / `rgb(23,23,23)` | `none` / `rgb(14,14,14)` |
+| Pill | `blur(32px) saturate(1.8)` | `blur(10px)` / `rgba(23,23,23,.94)` | `none` / `rgb(0,0,0)` |
+| Tip | `blur(24px) saturate(1.8)` | `blur(7px)` / `rgba(23,23,23,.72)` | `none` / `rgb(12,12,12)` |
+
+**正交性**：本轮的改动**只**发生在 Glass 维度。
+Theme（`light` / `dark`，`.dark` 类）与 Motion（`.reduced` 类，Reduce Motion）未被触碰；
+`.reduced` 这个类名仍然只表示动效，没有被拿去表示材质档位。
+
+### 22.4 为什么不用 `.desktop[data-glass="reduced"] *`
+
+如果用全局规则把 REDUCED 下所有 `backdrop-filter` 清掉，会同时打掉顶栏、Dock、tooltip、右键菜单——
+那是 SOLID 的策略，不是 REDUCED 的策略，三档就没有区分度了。
+
+本轮的做法是**显式白名单**：唯一开关是 `--glass-filter-large`，
+**引用它的选择器就是白名单成员**（`.window` / `.ai-panel` / `.search-panel`，性能脚本里的载荷 `.oa-synth` 同款引用）。
+好处有两个：
+
+1. 新增一个大面积面时，只要它引用 `--glass-filter-large` 就自动获得三档语义，不需要再写一条 `reduced` 规则；
+2. 不引用它的面在 FULL 下与 REDUCED 下行为一致，**"忘了加规则"的失败模式被消除**。
+
+静态检查（本轮实做）：`src/styles.css` 中不存在 `.desktop[data-glass="reduced"] *` 这类全局规则，
+`--glass-filter-large` 只出现 1 处定义 + 3 处引用（`.window` / `.ai-panel` / `.search-panel`）。
+
+### 22.5 Filtered surface count（过滤面数）
+
+脚本侧新增 `measureFiltered(page)`：遍历全部元素，取 `getComputedStyle` 里 `backdropFilter`
+非 `none` 的节点，排除 `display:none` / `visibility:hidden` / `opacity:0`，把包围盒裁剪到视口后累加。
+这个数**就是"成本面数"**，与第 21 节推断的"成本由面数/面积决定"直接对齐。
+
+| K（额外 420×300 玻璃面板数） | FULL | **REDUCED** | SOLID |
+|---|---|---|---|
+| 0 | 6 | **6** | 0 |
+| 24 | 30 | **6** | 0 |
+| 72 | 78 | **6** | 0 |
+| 144 | 150 | **6** | 0 |
+
+**REDUCED 的过滤面数与 K 完全无关**：产品自身的 6 个面（顶栏 / Dock / AI 胶囊 / 3 条窗口标题条）
+是全部，载荷面板一个都不进过滤集合（载荷引用的是 `--glass-filter-large`，在 REDUCED 下为 `none`）。
+这正是"选择性玻璃"该有的形状：**负载增长时，REDUCED 的成本曲线是平的。**
+
+### 22.6 Filtered area（过滤面积）
+
+`filteredArea` = 各过滤面裁剪到视口后的像素面积之和（面积为**叠加**值，因此 coverage 可以 >100%）。
+
+| K | FULL 过滤面数 / 面积 / 覆盖率 | **REDUCED 过滤面数 / 面积 / 覆盖率** | SOLID | 面积降幅 |
+|---|---|---|---|---|
+| 0 | 6 / 1,523,824 px / 117.6% | **6 / 203,564 px / 15.7%** | 0 / 0 / 0% | **−86.6%** |
+| 24 | 30 / 4,547,824 px / 350.9% | **6 / 203,564 px / 15.7%** | 0 / 0 / 0% | **−95.5%** |
+| 72 | 78 / 10,595,824 px / 817.6% | **6 / 203,564 px / 15.7%** | 0 / 0 / 0% | **−98.1%** |
+| 144 | 150 / 19,667,824 px / 1517.6% | **6 / 203,564 px / 15.7%** | 0 / 0 / 0% | **−99.0%** |
+
+视口面积 1,296,000 px（1440×900）。FULL/REDUCED 的面积比随负载拉大：7.5× → 22.3× → 52.1× → 96.6×。
+
+**REDUCED 那 203,564 px 的构成**（K=0，深色）：
+
+| 面 | 尺寸 | 面积 |
+|---|---|---|
+| `.topbar` | 1440 × 38 | 54,720 |
+| `.window-title` ×3 | 840×44 / 840×44 / 830×44 | 36,960 + 36,960 + 36,520 |
+| `.dock` | 479 × 69 | 33,051 |
+| `.assistant-pill` | 145 × 37 | 5,353 |
+| **合计** | | **203,564** |
+
+对照 FULL 同点位的 1,523,824 px：三块 `.window`（840×570、840×570、830×570）就占了 1,430,700 px，
+也就是**86% 的过滤面积本来花在窗口容器这一件事上**。把它转实色，就是本轮的全部收益来源。
+
+### 22.7 FULL comparison
+
+深色稳态（warm，scatter 布局，5 轮/格）。`mean / p95 / >33ms 长帧数`，单位 ms。
+
+| 档位 | K=0 | K=24 | K=72 | K=144 |
+|---|---|---|---|---|
+| **FULL** | 8.20 / 9.10 / 0 | 8.33 / 8.90 / 0 | 9.25 / 9.40 / 1 | **11.35 / 41.60 / 5** |
+| **REDUCED** | 8.33 / 9.00 / 0 | 8.33 / 9.00 / 0 | 9.18 / 8.90 / 0 | **8.33 / 9.10 / 0** |
+| **SOLID** | 8.33 / 9.10 / 0 | 8.33 / 9.10 / 0 | 8.33 / 8.90 / 0 | 8.33 / 9.00 / 0 |
+
+冷启动（cold，每格独立新页面、无预热，3 次重复）——这一栏是 D1-04B 判 REDUCED 不通过的地方，本轮反过来了：
+
+| 档位 | K=0 | K=24 | K=72 | K=144 |
+|---|---|---|---|---|
+| **FULL** | 8.33 / 9.10 / 0 | 9.09 / 16.70 / 0 | **19.72 / 40.20 / 29** | **34.19 / 66.70 / 43** |
+| **REDUCED** | 8.33 / 9.20 / 0 | 8.33 / 9.20 / 0 | **8.33 / 9.20 / 0** | **8.33 / 9.20 / 0** |
+| **SOLID** | 8.33 / 9.20 / 0 | 8.33 / 9.10 / 0 | 8.33 / 9.10 / 0 | 8.33 / 9.20 / 0 |
+
+三条读数：
+
+1. **p50 依旧没有分辨力**（全格 8.3–9.3ms，被 120Hz 垂直同步截平）。判据只用 p95、>33ms 长帧数、mean。
+2. **REDUCED 与 SOLID 现在是同一条成本曲线**：K=0/24/72/144 全部 8.33ms、p95 8.9–9.2、0 长帧。
+   也就是说，"大面积实色 + 小面积玻璃"的组合**没有为玻璃 chrome 付可测的代价**。
+3. **FULL 的代价随面积线性出现**：冷启动 K=72 起 mean 19.72、29 帧长帧；K=144 mean 34.19、43 帧长帧。
+   稳态下 K=144 也已经有 5 帧长帧、p95 41.60。
+
+### 22.8 REDUCED comparison
+
+按 Boss 给的新判据（不要求 K=24 有巨大 p95 差）逐条对照：
+
+| 新判据 | 结果 | 证据 |
+|---|---|---|
+| **(a) 过滤面积确实显著下降** | **通过** | K=0 −86.6% → K=144 −99.0%；过滤面数 150 → 6（第 22.5/22.6 节） |
+| **(b) 高负载下不比 FULL 差** | **通过** | 稳态 K=144：FULL 11.35/41.60/5 vs REDUCED 8.33/9.10/0；冷启动 K=144：34.19/66.70/43 vs 8.33/9.20/0 |
+| **(c) 随压力上升比 FULL 更稳** | **通过** | REDUCED 的 mean 从 K=0 到 K=144 变化 +0.00ms（8.33→8.33）；FULL 变化 +3.02ms（8.33→11.35 稳态）/ +25.86ms（8.33→34.19 冷启动） |
+| **(d) SOLID 仍是最低成本基线** | **通过** | SOLID 全负载 8.33ms / 0 长帧；REDUCED 与之同线但不低于它 |
+
+**同轮配对**（同一页面、同一负载，`FULL mean − REDUCED mean`，消除负载漂移）：
+
+| K | 各轮差值 (ms) | 均值 | 为正 |
+|---|---|---|---|
+| 0 | 0.00, 0.00, −0.02, −0.48, −0.15 | −0.13 | 0/5 |
+| 24 | 0.01, 0.00, 0.01, −0.01, −0.01 | +0.00 | 2/5 |
+| 72 | 0.86, −3.14, 0.52, 0.29, 1.80 | +0.07 | 4/5 |
+| 144 | 2.56, 2.27, 5.40, 2.28, 2.56 | **+3.01** | **5/5** |
+
+**K≤24 依旧不可分辨**（0/5 与 2/5，就是这个量级下的掷硬币），**K=144 变成 5/5 一致且差 3.01ms**。
+这正好符合新判据的精神：**轻载谈不上差异，重载必须不差、且趋势一致。**
+
+与 D1-04B 的"降半径版 REDUCED"直接对比（同为稳态 K=144）：
+
+| 实现 | REDUCED 过滤面积 | REDUCED K=144 mean / p95 / 长帧 | FULL K=144 mean / p95 / 长帧 |
+|---|---|---|---|
+| D1-04B 降半径版 | 与 FULL 同面数（面积未测） | 9.65 / 16.80 / 2 | 10.51 / 25.60 / 4 |
+| **D1-04C 选择性玻璃版** | **203,564 px（−99.0%）** | **8.33 / 9.10 / 0** | 11.35 / 41.60 / 5 |
+
+降半径版只能"好一点点"，选择性玻璃版直接把 REDUCED 压到 SOLID 的成本水平上。
+**这就是"性能杠杆是面积、不是半径"最直接的证据。**
+
+### 22.9 SOLID comparison
+
+| 判据 | 结果 |
+|---|---|
+| 不随 K 明显退化 | **通过**。K=0/24/72/144 全部 8.33ms / p95 8.9–9.2 / 0 长帧（冷启动同） |
+| 过滤面积是否为 0 | **通过**。四个 K 全为 0 面 / 0 px |
+| 是否被本轮改动影响 | **否**。SOLID 的 token 与 `.desktop[data-glass="solid"] *` 规则本轮未改（只加了 `.search-result:hover` 一条，见 22.11） |
+
+### 22.10 Light / Dark verification
+
+**浅色 sanity（warm，K=24，5 轮）**
+
+| 档位 | mean / p95 / 长帧 | 过滤面数 / 面积 |
+|---|---|---|
+| FULL | 8.33 / 9.10 / 0 | 30 / 4,547,824 px |
+| REDUCED | 8.33 / 9.10 / 0 | 6 / 203,564 px |
+| SOLID | 8.33 / 9.00 / 0 | 0 / 0 px |
+
+**浅色的过滤面积与深色完全一致**（同 K 下逐字节相同）——因为面积只由"哪些面带滤镜"决定，与主题颜色无关。
+这意味着浅色不需要独立的面积基线，只需一次性能 sanity；本轮满足。
+
+**层级不被拉平**（`experiments/d1-04/reduced_probe.py`，取窗口正文/标题条/桌面/顶栏/Dock 的众数色）
+
+| 主题 | 档位 | 窗口正文 | 桌面 | 正文−桌面 | 标题条 | 标题条−正文 |
+|---|---|---|---|---|---|---|
+| light | FULL | (255,255,255) | (243,243,245) | 11.3 | (247,247,248) | −8 |
+| light | **REDUCED** | (255,255,255) | (243,243,245) | **11.3** | (252,252,252) | −3 |
+| dark | FULL | (24,24,24) | (3,3,3) | 21.0 | (11,11,11) | −13 |
+| dark | **REDUCED** | (23,23,23) | (3,3,3) | **20.0** | (16,16,16) | −7 |
+
+- **切档不改窗口明度**：浅色 0 级变化，深色 −1 级（24 → 23）。窗口边界仍靠明度差成立。
+- **标题条仍是一条更亮的材质带**（深色 +7 相对正文、浅色 −3），窗口的"材质厚度"没丢。
+- **窗口正文实色取自设计系统自己的基色**（深色 `#171717`、浅色 `#fff`），没有引入新颜色，
+  也没有用"压暗"去凑层级——在近黑桌面上压暗反而会削弱窗口与桌面的明度差。
+
+**对比度（WCAG，REDUCED 档专项）**
+
+| 主题 | 最低对比度 | 位置 | 判定 |
+|---|---|---|---|
+| light | **5.07:1** | 副标题 `.subtitle`（`rgb(110,110,115)` on `#fff`） | AA 通过（≥4.5:1） |
+| dark | **6.24:1** | 副标题 `.subtitle`（`rgb(152,152,157)` on `#171717`） | AA 通过 |
+
+其余采样点（顶栏字标 / 窗口标题栏 / 应用卡片 / AI 面板正文）在 REDUCED 下均在 15.6–18.7:1。
+
+### 22.11 Runtime switching 与回归测试
+
+**切换压力**（`glass-switch-stress.mjs`，21 轮 × 3 = **63 次** FULL→REDUCED→SOLID→FULL 往返，全部走产品 Settings 控件）：
+
+| 检查项 | 结果 |
+|---|---|
+| `data-glass` / `localStorage` / `select` 三者一致 | **63/63** |
+| 窗口是否丢失 | 全程保持（基线 3 个，结束时仍 3 个可见） |
+| 窗口矩形 / 是否重新布局 | **全程不变**（逐轮比对） |
+| 残留错误 token / 类名 | 无。末态 `class="desktop dark"`，旧键 `oa-opaque` 为 `null` |
+| 切换期帧统计 | 366 帧：p50 8.3ms / p95 9.1ms / max 9.4ms / **>33ms 0 帧** / >100ms 0 帧 |
+| 闪白 / 闪黑 | 无（`flash_check.py` 72 个采样全部落在切换前后两档区间内，容差 ±4） |
+| WebContentsView 状态 | **NOT VERIFIED IN CHROMIUM**（Electron 独有对象）。以 DOM 侧 `.web-viewport` 计数作代理，全程 0 → 保持 0 |
+
+**六格主题矩阵**（`theme-matrix.mjs`，computed 断言 + 像素断言）：**6/6 PASS**。
+深色三格的窗口内容像素分别落在 `[12,30] / [12,30] / [8,20]` 的暗部区间内（`dark-reduced` 实测 (23,23,23)）。
+
+**逐档材质矩阵**（`glass-tiers.mjs`，10 个面 × 3 档）：与第 22.3 节表格逐行一致。
+
+**本轮修掉的真实缺陷（1 条，非顺手改动）**：把大面积面板转实色后，`.search-result:hover` 原来靠
+`rgb(var(--content-rgb) / var(--content-alpha))` 表达 hover，**在实色底上叠同色 rgba 合成结果不变，hover 消失**。
+这是一条真实的层级回归。修法沿既有手段（不加 border / 不加重阴影）：
+浅色复用既有 `--sunken`（4% 黑），深色用 3% 白抬亮——因为深色 `--sunken` 是 28% 黑，
+在 `#0C0C0C` 这种近黑面上压黑只有 Δ3 级（实测 ΔL\* 0.85，肉眼不可辨）。
+新探针 `experiments/d1-04/hover_probe.py`（六格 × 未 hover/已 hover 截图取众数色）：
+
+| 主题 | 档位 | 修前 ΔL\* | **修后 ΔL\*** | 判定 |
+|---|---|---|---|---|
+| light | full / reduced / solid | — / 不可辨 / 3.41 | 8.02 / **3.46** / **3.49** | 可辨 |
+| dark | full / reduced / solid | 2.25 / 不可辨 / **0.65** | 2.25 / **3.52** / **3.00** | 可辨 |
+
+其他回归：`npm test` **7/7 通过**；`a11y-check.mjs` 右键菜单 1→0（Esc 后）、`menu-shade` 1→0、
+桌面可 Tab 元素 0、`Cmd+K` 搜索面板 1→0；`npm run build` 干净（`tsc --noEmit` 无报错）。
+
+### 22.12 Why radius reduction was rejected
+
+D1-04B 的 REDUCED 定义是"把模糊半径从 34px 降到 10px，并整条滤镜重写以真正去掉 `saturate`"。
+这个方向在 D1-04B 被实测证伪，D1-04C 正式否决。四条理由：
+
+1. **暖态（warm）下，K ≤ 72 与 FULL 完全不可分辨。**
+   第 21.4 节的同轮配对：K=0 是 1/7、K=24 是 4/7、K=72 是 4/7——都在掷硬币区间。
+   只有 K=144 是 7/7 一致，且只赢 8%。
+2. **冷启动高负载下反而更差。**
+   第 21.3 节 cold：K=72 FULL 50.1 → REDUCED 58.2；K=144 FULL 83.4 → REDUCED 90.8。
+   降半径在这两个点上让 p95 变坏了。
+3. **历史记录的"省 43%"不可复现。**
+   D1-04 记的 REDUCED K=24 p95 = 9.2（FULL 16.3）；今天**一字未改**地用同一支 `perf2.mjs` 重跑，
+   得到 REDUCED 16.7 / FULL 16.8。原因已定位（非"接受"）：旧方法**按档位分块**测量 + **无预热**，
+   主机负载漂移与一次性光栅化成本被整块记到某一档头上，制造出档位差异。
+   同布局 A/B（复刻旧的 8 列网格）用新仪器测，差异只有 ~0.3ms（3%），与 43% 不是一个量级。
+4. **SOLID 证明"滤镜的有无"才是强变量。**
+   SOLID 关掉 `backdrop-filter` 后，K 从 0 到 648 全部恒定 8.33ms、0 长帧。
+   而半径从 34px 到 10px 几乎什么都没改变。
+   **机制解释**：Chromium 按半径对 backdrop 做降采样——半径越大，需要处理的像素越少；
+   "半径变小"与"降采样变弱"两个效应在 10–34px 区间相互抵消。
+   所以半径不是可以拿来做性能梯级的旋钮。
+
+**结论**：`REDUCED = blur 10px` 降级为**历史设计**（记录留在第 21 节与第 9 节的引用里，不删除）；
+正式定义改为 **`REDUCED = selective glass / reduced filtered area`**。
+`Blur radius` 保留为**次要视觉参数**（REDUCED 下取 7–13px 做视觉一致性），不得作为性能主张的依据。
+
+### 22.13 自动降级：冻结到 D1-06
+
+**本轮不实现 FULL→REDUCED→SOLID 的自动性能触发链，并且把这条冻结到 D1-06。**
+当前只允许两种切换方式：
+
+- 用户在设置里**手动**选择三档（`.material-select`，产品正式控件）；
+- 内部测试脚本按同一路径切换（用于本 ADR 的全部测量）。
+
+冻结理由：①现有数据全部是 Chromium，Electron NOT VERIFIED、Windows NOT VERIFIED，
+用不可代表的数字校准阈值等于把误差写进产品行为；②真实产品负载（≈7 个玻璃面）三档都是 120fps / 0 长帧，
+**当前没有需要自动降级的场景**；③代表性数据到手前，任何"自动降级"都无法验收。
+
+解锁条件（全部满足）：Electron 内跑完 `perf-product.mjs` 拿到真实分位数；Windows 复跑；
+在**空载**主机上重跑一次基线（当前机 loadvar ≈ 8–10）。
+
+### 22.14 未验证项与残余风险
+
+| 项 | 状态 |
+|---|---|
+| Electron 内材质性能 | **NOT VERIFIED**。本机 Electron 44.3.0 的 GPU 进程起不来（sandbox `Operation not permitted`），窗口合成路径与 Chromium 不同 |
+| Windows 平台 | **NOT VERIFIED**。未在 Windows 主机运行；Windows 走 mica/DWM，`backdrop-filter` 落地方式不同（D3 才验证） |
+| Windows / macOS 一致性 | 本次改动**只用 CSS token 与选择器**，无平台分支，理论上两端同构；但"理论上"不算验证 |
+| 大量真实窗口（≈10 个）下的过滤面积 | **待实测**。本轮 K=0 场景只有 3 个真实窗口 + 顶栏 + Dock + 胶囊。按 `filteredCount` 的规律，真实窗口数增加只会让 FULL 更贵、REDUCED 不变，但**该预测未实测** |
+| 外接屏 / 多显示器 | NOT VERIFIED |
+| WebContentsView 在档位切换时的状态 | NOT VERIFIED IN CHROMIUM（Chromium 里无此对象） |
+| 本机外部持续负载 | loadavg 8–10 / 12 核，绝对数值高于空载环境，**不可与 D1-04 的绝对数直接比较**；相对比较靠同页交错 + 同轮配对 + 多轮重复保持有效 |
+
+**测量可信度声明**：本轮所有数字在**同一天、同一台机、同一冻结代码版本**上取得（`src/styles.css`
+在测量前最后一次修改为 hover 修复，之后未再改动）。三个口径（深色稳态 5 轮 / 深色冷启动 3 次 /
+浅色 sanity 5 轮）各自内部可比；跨口径不可混用。
+
+---
+
+## 23. 复现命令
 
 ```bash
 npm run build
@@ -876,31 +1293,41 @@ node experiments/d1-04/theme-matrix.mjs      # 六格矩阵 + computed 断言 + 
 node experiments/d1-04/solid-bar-probe.mjs   # 深色 SOLID 顶栏取证（OA_TAG=before|tokenfix）
 node experiments/d1-04/glass-tiers.mjs       # 三档 × 10 个面的材质矩阵
 node experiments/d1-04/glass-switch.mjs      # 运行时切换 + 动效解耦
-node experiments/d1-04/glass-switch-stress.mjs  # §21.7 21 轮 × 3 档切换压力
+node experiments/d1-04/glass-switch-stress.mjs  # §22.11 21 轮 × 3 档切换压力
 ```
 
-D1-04B 官方材质性能（**切换产品状态，不注入材质值**）：
+D1-04C 选择性玻璃（**切换产品状态，不注入材质值；同时记录过滤面数与过滤面积**）：
 
 ```bash
-# 深色官方基线：稳态口径（同页交错 + 预热 + 拉丁方），7 轮
-OA_MODE=warm OA_THEME=dark OA_LAYOUT=scatter OA_KS=0,24,72,144 OA_REPEAT=7 \
-  OA_OUT=perf-product-dark.json node experiments/d1-04/perf-product.mjs
+# 深色官方基线：稳态口径（同页交错 + 预热 + 拉丁方），5 轮 —— 第 22.7 节
+OA_MODE=warm OA_THEME=dark OA_LAYOUT=scatter OA_KS=0,24,72,144 OA_REPEAT=5 \
+  OA_OUT=perf-product-c-dark.json node experiments/d1-04/perf-product.mjs
 
-# 深色官方基线：冻结口径（每格独立新页面、无预热），5 次重复
-OA_MODE=cold OA_THEME=dark OA_LAYOUT=scatter OA_KS=0,24,72,144 OA_COLD_REPEAT=5 \
-  OA_OUT=perf-product-dark-cold.json node experiments/d1-04/perf-product.mjs
+# 深色官方基线：冷启动口径（每格独立新页面、无预热），3 次 —— 第 22.7 节
+OA_MODE=cold OA_THEME=dark OA_LAYOUT=scatter OA_KS=0,24,72,144 OA_COLD_REPEAT=3 \
+  OA_OUT=perf-product-c-dark-cold.json node experiments/d1-04/perf-product.mjs
 
-# 同布局 A/B：复刻 D1-04 的 8 列网格布局（OA_LAYOUT=grid）
-OA_MODE=warm OA_LAYOUT=grid OA_KS=0,24,72,144 OA_REPEAT=3 \
-  OA_OUT=perf-product-dark-grid.json node experiments/d1-04/perf-product.mjs
-
-# 饱和探针：K 推到 288 / 432 / 648
-OA_MODE=warm OA_LAYOUT=scatter OA_KS=288,432,648 OA_REPEAT=3 \
-  OA_OUT=perf-product-dark-saturation.json node experiments/d1-04/perf-product.mjs
-
-# 浅色 sanity（K=24）
+# 浅色 sanity（K=24，5 轮）—— 第 22.10 节
 OA_MODE=warm OA_THEME=light OA_KS=24 OA_REPEAT=5 \
-  OA_OUT=perf-product-light.json node experiments/d1-04/perf-product.mjs
+  OA_OUT=perf-product-c-light.json node experiments/d1-04/perf-product.mjs
+
+# 产物里看这三个字段：runs[].filteredCount / filteredArea / filteredCoverage 与顶层 filtered[]
+```
+
+> 命名说明：D1-04C 的正式产物统一带 `-c`（`perf-product-c-*.json`）。
+> `perf-product-dark.json` / `-dark-cold.json` / `-light.json` 这三个旧名字在 D1-04C 被**重跑覆盖**过，
+> 磁盘上现在装的是 D1-04C 数据；D1-04B 的数字以第 21 节的表格为准。
+> `perf-product-dark-grid.json` 与 `-dark-saturation.json` 未被覆盖，仍是 D1-04B 原物。
+
+```bash
+# REDUCED 档视觉与层级取证
+OA_GLASS=reduced OA_TAG=reduced-c node experiments/d1-04/contrast2.mjs  # REDUCED 对比度
+node experiments/d1-04/reduced-color-probe.mjs   # 六格截图 + 几何
+python3 experiments/d1-04/reduced_probe.py       # 窗口正文/标题条/桌面 众数色与层级差
+
+# 实色面板上的行级 hover 回归（第 22.11 节）
+node experiments/d1-04/reduced-hover-probe.mjs  # 六格 × 未 hover/已 hover 截图
+python3 experiments/d1-04/hover_probe.py        # 众数色差与 ΔL*，六格必须都可辨
 ```
 
 ```bash
