@@ -1,5 +1,20 @@
 # 计划修订记录
 
+## 2026-09-12：分栏侧栏顶到窗口最上沿，红绿灯落在侧栏浮层内
+
+用户复审：「浮窗效果还是要有，红绿灯在浮窗里面，你看看 apple mac 的左侧边栏是怎样的」。
+上一版把侧栏做成与标题栏分开的两层，方向不对。
+
+- `.window:has(.split) .window-body { margin-top: -44px }`：把 body 上提 44px 盖住标题栏，
+  于是侧栏材质从窗口顶边一路铺到底，**原生红绿灯正好落在侧栏这块浮层里**。
+- `.window:has(.split) .window-title { position: relative; z-index: 2 }`：标题栏提到上层，
+  顶栏 44px 仍可拖动/可点红绿灯。
+- `.window:has(.split) .split-main { padding-top: 64px }`（内容让开标题栏）、
+  `.split-side { padding-top: 52px }`（导航项让开红绿灯）。
+- 侧栏材质略提亮到 `rgb(var(--text-rgb) / 0.05)` + `backdrop-filter`，与内容区拉开层次。
+
+实测：`npm run build` PASS；`npm test` 96/96；深色截图核对（侧栏顶到最上沿、红绿灯在侧栏内）。
+
 ## 2026-09-12：侧栏按 Finder 口径重做（贴边通高 + 分组 + 灰色选中）
 
 用户以原生 Finder 侧栏为参照复审：「左侧边栏要这样」。上一版的"内缩浮层卡片"方向不对。

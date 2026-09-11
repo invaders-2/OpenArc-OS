@@ -558,7 +558,7 @@ input[type="checkbox"] {
   padding: 8px 10px 12px;
   /* macOS 侧栏（参照 Finder）：贴左/上/下边、通高、无圆角无投影；
      只用一层"随主题变亮"的半透明材质与内容区分，不用实心底色框。 */
-  background: rgb(var(--text-rgb) / 0.04);
+  background: rgb(var(--text-rgb) / 0.05);
   backdrop-filter: var(--glass-filter-window);
 }
 .split-section {
@@ -568,6 +568,23 @@ input[type="checkbox"] {
 }
 .split-side > .split-section:first-child {
   padding-top: 5px;
+}
+/* ── 分栏窗口：侧栏顶到窗口最上沿，红绿灯落在侧栏这块浮层里 ──────────────
+   标题栏原本是 44px 的独立一层；这里把 window-body 上提 44px 盖住它，
+   再把标题栏提到上层保持可拖拽，于是侧栏材质向上一直铺到窗口顶边，
+   而红绿灯正好浮在侧栏内（Finder / 系统设置的口径）。 */
+.window:has(.split) .window-body {
+  margin-top: -44px;
+}
+.window:has(.split) .window-title {
+  position: relative;
+  z-index: 2;
+}
+.window:has(.split) .split-main {
+  padding-top: 64px;
+}
+.window:has(.split) .split-side {
+  padding-top: 52px;
 }
 .split-main {
   flex: 1 1 auto;
