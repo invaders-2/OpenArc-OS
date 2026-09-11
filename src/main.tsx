@@ -310,6 +310,9 @@ function App() {
       if (e.key === "Escape") {
         setSearch(false);
         setAI(false);
+        // MS-A03：桌面右键菜单此前只能靠点击遮罩关闭，Esc 无效会导致
+        // .menu-shade 继续拦截所有点击，形成功能性陷阱。菜单必须可键盘关闭。
+        setMenu(null);
       }
     };
     window.addEventListener("keydown", key);
