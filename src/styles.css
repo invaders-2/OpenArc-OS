@@ -561,7 +561,9 @@ input[type="checkbox"] {
   margin: 8px;
   padding: 6px 8px 10px;
   border-radius: var(--radius-lg);
-  background: rgb(var(--text-rgb) / 0.06);
+  /* 侧栏材质用设计语言里的 surface.content（比窗口外壳略实一档），
+     不再用 ad-hoc 的白色叠加。 */
+  background: rgb(var(--content-rgb) / var(--content-alpha));
   backdrop-filter: var(--glass-filter-window);
   box-shadow: var(--elevation-1);
 }
@@ -597,6 +599,14 @@ input[type="checkbox"] {
   min-height: 0;
   overflow: auto;
   padding: 20px 26px 26px;
+}
+/* 分栏内的页面标题按设计语言的"区块标题"（--fs-title），不再用页面主标题 27px */
+.split-main h1 {
+  font-size: var(--fs-title);
+  margin: 0 0 6px;
+}
+.split-main .subtitle {
+  margin-bottom: 20px;
 }
 .split-nav {
   display: flex;

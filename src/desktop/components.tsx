@@ -57,7 +57,6 @@ const appLineIcon: Record<string, React.ComponentType<{ size?: number }>> = {
 };
 
 type TopBarProps = {
-  activeTitle: string;
   /** 搜索是否打开。只用来表达 aria-expanded，因此是 boolean 而不是查询串 ——
       需要查询串的地方是搜索面板，不是顶栏。 */
   searchOpen: boolean;
@@ -83,7 +82,6 @@ type TopBarProps = {
 };
 
 export function TopBar({
-  activeTitle,
   searchOpen,
   onCommand,
   controlOpen,
@@ -97,7 +95,6 @@ export function TopBar({
   return (
     <header className="topbar">
       <strong className="wordmark">◈ OpenArc</strong>
-      <span>{activeTitle}</span>
       <div className="topbar-recent" aria-label="最近打开的窗口">
         {recent.map((w) => {
           const AppIcon = appLineIcon[w.appId] || LayoutGrid;

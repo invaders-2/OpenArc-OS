@@ -265,8 +265,6 @@ function App() {
     return () => window.removeEventListener("keydown", key);
   }, [setOverlays]);
 
-  const activeId = domain.actionableId(state);
-  const activeTitle = (activeId && domain.byId(state, activeId)?.meta.title) || "桌面";
   const runningApps = useMemo(() => new Set(state.windows.map((w) => w.appId)), [state.windows]);
 
   /**
@@ -657,7 +655,6 @@ function App() {
         <>
           <div className="desktop-surface" inert={overlays.dialog || locked || undefined}>
         <TopBar
-          activeTitle={activeTitle}
           searchOpen={overlays.search}
           controlOpen={overlays.control}
           onToggleControl={() => setOverlays((o) => ({ ...o, control: !o.control }))}
