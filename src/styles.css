@@ -203,28 +203,111 @@ textarea {
   backdrop-filter: none !important;
 }
 
-/* ── 材质档位 reduced：降模糊、真去掉 saturate、补底色 alpha ────────
-   目标是降低合成成本，不是"浅一点的 FULL"：
-   不加 border、不加 box-shadow、不引入新的 filter、不重建 DOM。 */
+/* ── 材质档位 reduced：选择性玻璃（D1-04C）──────────────────────────
+   性能杠杆 = **被 backdrop-filter 覆盖的总面积与面数**，不是模糊半径。
+   半径在 10–34px 区间几乎不影响成本（Chromium 按半径降采样 backdrop，
+   半径越大处理像素越少，两个效应抵消）。实测见 ADR 第 22 节。
+
+   所以 REDUCED = **大面积表面转实色，只在小面积系统 chrome 上保留玻璃**。
+   作用面白名单显式列出，不用 `.desktop[data-glass="reduced"] *` 这类全局规则。
+
+     Surface            FULL        REDUCED     SOLID
+     ──────────────────────────────────────────────────────
+     .topbar            玻璃        玻璃        实色
+     .dock              玻璃        玻璃        实色
+     .dock-tooltip      玻璃        玻璃        实色
+     .context-menu      玻璃        玻璃        实色
+     .assistant-pill    玻璃        玻璃        实色
+     .window-title      —(随窗口)   玻璃        实色
+     .window（容器）     玻璃        实色        实色
+     .window-body       —(随窗口)   实色        实色
+     .ai-panel          玻璃        实色        实色
+     .search-panel      玻璃        实色        实色
+     .app-card          无模糊      无模糊      无模糊
+       （卡片从来没有 backdrop-filter，它是"材质染色面"而非过滤面，
+         三档一致，不参与过滤面积统计。）
+
+   硬约束：不新增 border / hairline，不加重新阴影，不用 filter 补层级。
+   窗口边界仍靠明度差、alpha 与极轻阴影；浅色深色都必须可读。 */
+
 .desktop[data-glass="reduced"] {
-  /* 每档滤镜整条重写，而不是拼接 blur()+saturate()——
-     写成 saturate(1) 视觉等价，但仍会保留一条滤镜链。 */
+  /* 这段只当**视觉参数**用（小面积 chrome 的玻璃更薄），
+     不再声称"半径变小 ⇒ 成本下降"——该假设已被实测证伪。 */
   --glass-filter: blur(12px);
   --glass-filter-window: blur(10px);
   --glass-filter-pill: blur(10px);
   --glass-filter-dock: blur(13px);
   --glass-filter-tip: blur(7px);
-  /* 模糊变弱后靠底色 alpha 找回可辨识度（light 基线） */
+  /* 小面积玻璃靠底色 alpha 找回可辨识度（light 基线） */
   --surface-alpha: 0.9;
   --content-alpha: 1;
   --bar-alpha: 0.22;
   --pill-alpha: 0.8;
 }
+
+/* ① 开关：REDUCED 把"大面积表面"的材质置 none。
+   引用 --glass-filter-large 的选择器就是大面积白名单成员：
+     .window / .ai-panel / .search-panel（产品内）
+     .oa-synth（性能载荷单元，模拟"额外的同尺寸大面"，见 perf-product.mjs）
+   没有用 `.desktop[data-glass="reduced"] *` 这类全局规则。
+   注意 --glass-filter-large 在别处**不定义**，所以 FULL 下各面自动回退到完整玻璃。 */
+.desktop[data-glass="reduced"] {
+  --glass-filter-large: none;
+}
+
+/* ② 窗口容器改为透明：容器若还留着不透明底色，标题条的 backdrop 只会采到它自己，
+   既白花一次合成、又看不到桌面。玻璃下沉到标题条这条 44px 窄带。 */
+.desktop[data-glass="reduced"] .window {
+  background: transparent;
+}
+.desktop[data-glass="reduced"] .window-title {
+  background: rgb(var(--surface-rgb) / var(--surface-alpha));
+  backdrop-filter: var(--glass-filter-window);
+}
+/* ③ 窗口正文实色。用满 alpha 的 --content-rgb：深色即设计系统的统一基色 #171717、
+   浅色 #fff，不引入新色。实测与 FULL 玻璃窗口的正文合成值只差 1 级（深色 23 vs 24），
+   所以切档只去掉模糊，窗口明度不变，层级不被拉平（experiments/d1-04/reduced_probe.py）。 */
+.desktop[data-glass="reduced"] .window-body {
+  background: rgb(var(--content-rgb) / 1);
+}
+/* ④ 大面积浮层转实色；边界沿用各自原有阴影，不新增装饰 */
+.desktop[data-glass="reduced"] .ai-panel,
+.desktop[data-glass="reduced"] .search-panel {
+  background: rgb(var(--surface-rgb) / 1);
+}
+/* ⑤ 窗口顶部 inset 高光原本打在 .window 上，会被标题条底色盖住；
+   原样搬到标题条，保住材质厚度（同一条已有高光，不是新增装饰）。 */
+.dark.desktop[data-glass="reduced"] .window-title {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
 .dark.desktop[data-glass="reduced"] {
   --surface-alpha: 0.72;
-  --content-alpha: 0.82;
+  /* ⑥ 内容面（卡片 / 设置内容 / 浏览器壳 / 视口）在 REDUCED 下**全不透明**：
+     它们从来没有 backdrop-filter，属"染色面"而非"过滤面"；
+     既然窗口正文已转实色，再留 0.82 只会白做一次 alpha 合成。
+     合成后仍是 #171717 家族，与 window-body 同色，层级靠既有阴影不靠这个 alpha。 */
+  --content-alpha: 1;
   --bar-alpha: 0.22;
   --pill-alpha: 0.94;
+}
+/* ⑦ 实色面板上的行级 hover 不能再用"同色 + alpha"：
+   在实色底上叠同色 rgba(...) 合成结果不变，hover 会消失。
+   REDUCED 与 SOLID 都命中这个条件（`--content-alpha` 为 1），所以两条都改。
+   沿用既有层级手段，不新增 border / 阴影 / 装饰：
+     浅色 → 复用既有 --sunken（4% 黑）：白面 255 → 245；
+     深色 → --sunken 是 28% 黑，在 #0C0C0C 这种近黑面上压黑只有 Δ3 级
+            （ΔL* 0.85，肉眼不可辨，实测见 experiments/d1-04/hover_probe.py）。
+            改为抬亮 3% 白：reduced 23 → 30、solid 12 → 19，Δ7 级，
+            与 FULL 档 hover 的 Δ6 级同量级，方向也与深色 UI 的"抬升"一致。 */
+.desktop[data-glass="reduced"] .search-result:hover,
+.desktop[data-glass="solid"] .search-result:hover,
+.opaque .search-result:hover {
+  background: var(--sunken);
+}
+.dark.desktop[data-glass="reduced"] .search-result:hover,
+.dark.desktop[data-glass="solid"] .search-result:hover,
+.dark.opaque .search-result:hover {
+  background: rgba(255, 255, 255, 0.03);
 }
 /* Reduce Motion —— 与材质档位完全无关，只碰动效时长。
    D1-04B 之前 .reduced 只表示动效，材质档位另用 [data-glass]，不复用这个类名。 */
@@ -310,7 +393,9 @@ textarea {
   position: absolute;
   border-radius: var(--radius);
   background: rgb(var(--surface-rgb) / var(--surface-alpha));
-  backdrop-filter: var(--glass-filter-window);
+  /* --glass-filter-large 是"大面积表面"开关：只在把大面积转实色的档位里被定义。
+     未定义时回退到本面自己的完整玻璃（FULL 基线）。引用它的选择器即"大面积白名单"。 */
+  backdrop-filter: var(--glass-filter-large, var(--glass-filter-window));
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
   overflow: hidden;
   display: flex;
@@ -772,7 +857,7 @@ input[type="checkbox"] {
   z-index: 90;
   border-radius: 16px;
   background: rgb(var(--surface-rgb) / var(--surface-alpha));
-  backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter-large, var(--glass-filter));
   box-shadow: var(--shadow);
   padding: 22px;
   display: flex;
@@ -856,7 +941,7 @@ input[type="checkbox"] {
 .search-panel {
   width: 550px;
   background: rgb(var(--surface-rgb) / var(--surface-alpha));
-  backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter-large, var(--glass-filter));
   border-radius: 16px;
   box-shadow: var(--shadow);
   padding: 12px;
