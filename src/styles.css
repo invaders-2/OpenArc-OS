@@ -115,6 +115,9 @@
   font-size: 12px;
   position: relative;
   z-index: 80;
+  /* frame:false 后原生窗口没有标题栏可抓：整个顶栏就是唯一拖动区。
+     交互元素（按钮等）在下面用 no-drag 退出，否则点不到。 */
+  -webkit-app-region: drag;
 }
 .wordmark {
   font-size: 14px;
@@ -129,6 +132,12 @@
 .topbar button {
   display: flex;
   padding: 6px;
+}
+.topbar button,
+.topbar .bar-icon,
+.topbar a,
+.topbar input {
+  -webkit-app-region: no-drag;
 }
 .local-tag {
   display: flex;

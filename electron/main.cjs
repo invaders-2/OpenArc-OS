@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, safeStorage, screen } = require("electron");
+const { app, BrowserWindow, ipcMain, safeStorage, screen, Menu } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const { pathToFileURL } = require("node:url");
@@ -25,13 +25,38 @@ const glass = isMac
   ? { transparent: true, vibrancy: "under-window", backgroundColor: "#00000000" }
   : { backgroundMaterial: "mica", backgroundColor: "#00000000" };
 
+/**
+ * 应用菜单。Electron 默认菜单带 Reload / Toggle Developer Tools，属开发项、不属于产品；
+ * 这里换成最小产品菜单（必须保留 editMenu 角色，否则 macOS 上复制粘贴快捷键失效）。
+ * 开发期（electron . 未打包）额外挂 Developer 子菜单，打包后不出现。
+ */
+function installApplicationMenu() {
+  const template = [
+    isMac ? { role: "appMenu" } : { role: "fileMenu" },
+    { role: "editMenu" },
+    { role: "windowMenu" },
+  ];
+  if (!app.isPackaged) {
+    template.push({
+      label: "Developer",
+      submenu: [{ role: "reload" }, { role: "forceReload" }, { role: "toggleDevTools" }],
+    });
+  }
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 app.whenReady().then(() => {
+  installApplicationMenu();
   win = new BrowserWindow({
     width: 1440,
     height: 940,
     minWidth: 1000,
     minHeight: 700,
     title: "OpenArc OS",
+    // 自绘 chrome：产品顶栏与窗口标题栏都是 DOM（含红绿灯），不能留原生标题栏 ——
+    // transparent 下它会变成一条透出后方的空带，并把内容整体下推 32px；
+    // 浏览器预览没有这条带，.app 与预览观感因此不一致（本机 Electron 实测 inset=32）。
+    frame: false,
     ...glass,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),

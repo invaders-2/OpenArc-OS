@@ -1,5 +1,26 @@
 # 计划修订记录
 
+## 2026-09-12：修复 .app 顶部透明原生标题栏 + 顶栏拖动区 + 产品菜单
+
+**问题（仅 .app 可见，浏览器预览不受影响）**：`BrowserWindow` 用了 `transparent: true` 但没有关原生标题栏，
+窗口顶部多出一条 **32px 透明标题栏**，透出后方窗口，并把应用内容整体下推 32px。
+本机 Electron 实测 `getBounds().height - getContentBounds().height = 32`；红色测试页第一行出现在逻辑 y=32。
+
+**实现**（`electron/main.cjs`）
+- `BrowserWindow` 增加 `frame: false`：内容与窗口同高（实测 `innerHeight = 940 = window height`，inset 0；
+  `first_red_row = 0`）。
+- 新增 `installApplicationMenu()`：用 `appMenu / editMenu / windowMenu` 组成最小产品菜单，
+  取代 Electron 默认菜单里的 `File` 与 `View → Reload / Toggle Developer Tools`；
+  未打包（`electron .`）时额外挂 `Developer` 子菜单，打包后不出现。
+  **必须保留 `editMenu` 角色**，否则 macOS 上复制粘贴快捷键失效。
+
+**样式**（`src/styles.css`）
+- `.topbar` 增加 `-webkit-app-region: drag`：`frame:false` 后顶栏是拖动整个原生窗口的唯一区域。
+- `.topbar button / .bar-icon / a / input` 增加 `-webkit-app-region: no-drag`，保证按钮仍可点击。
+
+**实测**：`npm test` 96/96；`npm run build` 通过；D2-01 探针 PASS 4 / PARTIAL 1 / FAIL 0（无回归）；
+探针实测菜单 = `[appMenu, Edit, Window]`（未打包时 + `Developer`）。证据 `artifacts/ui-fix/`（gitignore）。
+
 ## 2026-09-10：顶栏左侧加红绿灯（控制当前活动窗口）
 
 用户："我是说软件最顶部那边，openarc的左边加一个红绿灯"。
