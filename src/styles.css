@@ -1252,13 +1252,18 @@ input[type="checkbox"] {
 /* 玻璃档：窗口正文更透 —— 桌面/壁纸能透过来，侧栏的磨砂才有东西可"磨"。
    （之前正文接近实色，侧栏背后是一块纯色，玻璃质感永远显不出来。） */
 .desktop:not([data-glass="solid"]) .window-body {
-  background: rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.62));
+  background: rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.45));
 }
-/* 用户口径：侧栏透明度 = 50%（显式值，不再乘 token；"实色"档仍不动，尊重它的语义） */
+/* 侧栏"材质"：比正文**略亮一档** + vibrancy（提饱和提亮）—— macOS 侧栏看起来"是另一种材料"，
+   靠的就是这个；同色同透明度只会像一块实心板。"实色"档仍不动。 */
 .desktop:not([data-glass="solid"]) .window:has(.split) .split-side {
-  background: rgb(var(--content-rgb) / 0.5);
-  backdrop-filter: blur(34px) saturate(1.8);
-  -webkit-backdrop-filter: blur(34px) saturate(1.8);
+  background-color: rgb(var(--content-rgb) / 0.5);
+  background-image: linear-gradient(rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.06));
+  backdrop-filter: blur(34px) saturate(1.9) brightness(1.1);
+  -webkit-backdrop-filter: blur(34px) saturate(1.9) brightness(1.1);
+}
+.desktop:not(.dark):not([data-glass="solid"]) .window:has(.split) .split-side {
+  background-image: linear-gradient(rgba(0, 0, 0, 0.035), rgba(0, 0, 0, 0.035));
 }
 /* 窗口内部的"顶部磨砂渐变"：内容往上滚时钻进工具栏下面、被逐渐吃掉（Finder 口径）。
    sticky + 负 margin：不占布局高度，却始终贴在滚动容器顶部，blur 作用于它背后的滚动内容。 */
@@ -1276,13 +1281,16 @@ input[type="checkbox"] {
   pointer-events: none;
   background: linear-gradient(
     to bottom,
-    rgb(var(--surface-rgb) / calc(var(--surface-alpha) * 0.98)) 0%,
-    rgb(var(--surface-rgb) / calc(var(--surface-alpha) * 0.72)) 34%,
-    rgb(var(--surface-rgb) / calc(var(--surface-alpha) * 0.28)) 68%,
+    rgb(var(--surface-rgb) / calc(var(--surface-alpha) * 0.62)) 0%,
+    rgb(var(--surface-rgb) / calc(var(--surface-alpha) * 0.36)) 40%,
+    rgb(var(--surface-rgb) / calc(var(--surface-alpha) * 0.14)) 72%,
     rgb(var(--surface-rgb) / 0) 100%
   );
-  /* 一道柔和的"落影"，让这条工具栏在没滚动时也成立（macOS 的工具栏下方就有这层） */
-  box-shadow: 0 18px 26px -20px rgba(0, 0, 0, 0.62);
+  /* 无落影：用户口径——它不该像一条贴上去的板子 */
+}
+/* 有侧栏的窗口：磨砂条**从侧栏右侧开始**，绝不盖住侧栏（侧栏自己是一块卡片） */
+.window:has(.split) .window-scrim {
+  left: 208px;
 }
 /* 第 1 层：轻模糊，几乎覆盖整段高度 → 顶部开始"化开" */
 .window-scrim::before {
@@ -1301,8 +1309,8 @@ input[type="checkbox"] {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  backdrop-filter: blur(44px) saturate(1.9);
-  -webkit-backdrop-filter: blur(44px) saturate(1.9);
+  backdrop-filter: blur(34px) saturate(1.8);
+  -webkit-backdrop-filter: blur(34px) saturate(1.8);
   mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.55) 24%, transparent 62%);
   -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.55) 24%, transparent 62%);
 }
@@ -1310,15 +1318,15 @@ input[type="checkbox"] {
 .desktop.dark .window-scrim {
   background-image: linear-gradient(
       to bottom,
-      rgba(255, 255, 255, 0.075) 0%,
-      rgba(255, 255, 255, 0.032) 44%,
+      rgba(255, 255, 255, 0.03) 0%,
+      rgba(255, 255, 255, 0.012) 44%,
       rgba(255, 255, 255, 0) 100%
     ),
     linear-gradient(
       to bottom,
-      rgb(var(--surface-rgb) / calc(var(--surface-alpha) * 0.98)) 0%,
-      rgb(var(--surface-rgb) / calc(var(--surface-alpha) * 0.72)) 34%,
-      rgb(var(--surface-rgb) / calc(var(--surface-alpha) * 0.28)) 68%,
+      rgb(var(--surface-rgb) / calc(var(--surface-alpha) * 0.62)) 0%,
+      rgb(var(--surface-rgb) / calc(var(--surface-alpha) * 0.36)) 40%,
+      rgb(var(--surface-rgb) / calc(var(--surface-alpha) * 0.14)) 72%,
       rgb(var(--surface-rgb) / 0) 100%
     );
 }
