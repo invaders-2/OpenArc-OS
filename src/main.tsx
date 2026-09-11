@@ -39,6 +39,7 @@ import {
   TopBar,
   WebViewport,
   Window as DesktopWindow,
+  startDrag,
   startResize,
 } from "./desktop/components";
 import type { MenuItem } from "./desktop/components";
@@ -376,7 +377,7 @@ function App() {
               ))}
           </nav>
           <div className="split-main">
-            <div className="pane-toolbar">
+            <div className="pane-toolbar" onPointerDown={(e) => w && startDrag(e, w, onCommand)}>
               <button
                 className="icon-button"
                 aria-label="后退"

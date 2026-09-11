@@ -368,7 +368,7 @@ function trackPointer(
 }
 
 /** 拖拽：位移量在组件里算，**clamp 在域里做**（electron/window-manager.cjs）。 */
-function startDrag(e: React.PointerEvent, w: WinDomain, onCommand: (c: WindowCommand) => void) {
+export function startDrag(e: React.PointerEvent, w: WinDomain, onCommand: (c: WindowCommand) => void) {
   if ((e.target as HTMLElement).closest("button,input")) return;
   if (w.state === domain.WSTATE.MAXIMIZED) return;
   const startX = e.clientX;
