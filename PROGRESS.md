@@ -177,6 +177,56 @@
 
 ---
 
+# D3-01 当前状态（唯一口径 · 2026-09-11）
+
+## 1. Task Status
+
+| 口径 | Task Status | 说明 |
+|---|---|---|
+| **macOS identity core** | **PASS** | 初始化原子性与 A01 竞态、session 生命周期、disable / 改密策略、渲染进程边界、日志脱敏、macOS 凭据后端、UI 真实消费领域层 —— 全部实测成立 |
+| **overall** | **PARTIAL** | Windows credential backend（DPAPI）与 Windows UI **NOT VERIFIED**，credential backend 不可从 macOS 外推 |
+
+**不得写双平台 COMPLETE。**
+
+## 2. 关键证据（真实执行）
+
+| 入口 | 结果 |
+|---|---|
+| `npm test` | **96 / 96**（基线 75 + 新增 21） |
+| `npm run build` | PASS |
+| `npm run test:d3-01` | **12 探针：PASS 12 / PARTIAL 0 / FAIL 0** |
+| `npm run test:identity-ui` | **24 / 24**（真实 Electron 44.3.0，驱动 dist/index.html） |
+| `npm run test:d2-02` | **PASS 7 / 7**（含 security-surface 15/15，暴露面已显式登记 5→6） |
+| `npm run test:design-system` | PASS 4 / PARTIAL 1 / FAIL 0 |
+| `npm run test:theme-baseline` | PASS |
+| `npm run test:security` | FAIL 0 / PARTIAL 3 / PASS 6 |
+
+分支 `feature/d3-01-identity-init`，基线 `88d1aa3`，未 merge main。
+ADR：`docs/decisions/D3-01-identity-initialization.md`；结果：`docs/D3-01-RESULT.md`。
+
+## 3. 本轮冻结（不可随意改）
+
+1. **LOCK ≠ LOGOUT**：锁定=session 仍有效但受保护命令 DENY；登出=session 撤销。两条命令、两个语义。
+2. **改密 = authVersion++ 且撤销全部 session（含当前）**。
+3. **禁用不删 session 行**：保住 `USER_DISABLED` 语义，不退化成 `SESSION_REVOKED`（D4 需要该区分）。
+4. **口令 KDF = scrypt**（Node 官方），参数 `N=2^15/r=8/p=1`，verifier 自描述可升级；Argon2id 留作第二取值。
+5. **session token 走 Electron safeStorage**（macOS Keychain / Windows DPAPI）；降级明文 0600 必须显式留痕，不静默。
+6. **渲染进程不持有任何凭据**：localStorage 零身份字段；`identity` 桥只有 `command` / `onEvent` 两个方法。
+7. **命令失败时 phase 只允许降级或保持，绝不升级**（UI 探针抓出的真实缺陷：错口令解锁曾能回到桌面）。
+8. **持久化 = `node:sqlite`**，schema_version 从第一版就是 1；JSON 文件不得作为最终身份库。
+
+## 4. D3-02 交接
+
+D3-01 只回答「你是谁 / session 是否有效」。D3-02 的对象权限必须挂在**同一套领域命令层**上，
+不得在渲染进程里加权限判断，也不得新建第二套入口。详见 ADR 的 `D3-02 Handoff` 一节。
+
+## 5. 主要缺口
+
+Windows 真机（credential backend + UI + DPAPI）、身份库备份/迁移/恢复策略、admin UI、
+credential store 产品化（API Key / OAuth Token → credentialRef）。
+
+---
+
 # 历史记录（过程与失败证据，保留不删）
 
 > 以下各节按当时实际状态书写，**不作为当前口径**。当前状态以 `# D1 当前状态` 一节为准。
