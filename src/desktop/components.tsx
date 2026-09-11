@@ -299,6 +299,18 @@ export function Window({ window: w, focused, onCommand, snapshots, onResizeStart
     document.addEventListener("scroll", onScroll, true);
     return () => document.removeEventListener("scroll", onScroll, true);
   }, [onScrolledChange, w.id]);
+
+  /**
+   * 兜底同步：**每次渲染后再核对一次真实滚动位置**。
+   * 只靠 scroll 事件会漏掉"容器被换掉 / 内容变短后 scrollTop 归零 / 切换标签"这些情况 ——
+   * 那时状态会停在旧值，磨砂条要么该出不出、要么该收不收。
+   */
+  useEffect(() => {
+    const el = bodyRef.current?.querySelector(".split-main") as HTMLElement | null;
+    const next = !!el && el.scrollTop > 4;
+    if (next !== scrolled) setScrolled(next);
+    onScrolledChange?.(w.id, next);
+  });
   return (
     <section
       aria-label={`${w.meta.title}窗口`}
