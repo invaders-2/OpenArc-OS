@@ -1,5 +1,23 @@
 # 计划修订记录
 
+## 2026-09-12：回退 Spectrum 映射接入（自引用圆角 token 导致全局直角）
+
+用户反馈：侧栏与所有框都变成直角了；要求退回未做映射前的状态。
+
+**根因（我的实现缺陷）**：`src/tailwind.css` 的 `@theme` 里写了
+`--radius-sm: var(--radius-sm)`、`--radius-md: var(--radius-md)` 这类**自引用循环**。
+浏览器把循环定义判为无效 → `--radius-*` 解析为空 → 所有 `border-radius: var(--radius-*)`
+全部落到 0。颜色映射本身没问题，是"把圆角 token 又指回自己"这一步错了。
+
+- 处理：`git revert 90d129c`（提交 `e6a55d7`），移除 `@tailwindcss/vite` 接线、
+  `src/tailwind.css` 与 `main.tsx` 的引入；Tailwind / Motion 依赖保留但当前未被使用。
+- 验证：`npm run build` PASS；`.window` 16px、`.split-side` 12px、`.segmented` 999px、
+  `.search-field` 8px、`.app-card` 12px、`.dock` 20px、`--radius-lg` 12px —— 全部恢复。
+
+**若将来还要接 Spectrum，正确做法**：Tailwind 的 `@theme` 里只能映射**颜色**，
+且要用**不同名字**（如 `--color-*`），**绝不重新声明我们自己的 `--radius-*` / `--fs-*`**；
+接入后必须先跑 D2-01 探针 + 目视核对圆角再继续。
+
 ## 2026-09-12：拖入的图片/视频显示真实缩略图
 
 用户反馈：文件拖进去后还是显示图标，要能看到缩略图。
