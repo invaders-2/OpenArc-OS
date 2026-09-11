@@ -635,11 +635,50 @@ input[type="checkbox"] {
   min-height: 26px;
   margin-bottom: 14px;
   color: var(--text);
+  /* 不换行：窄窗口时靠下面的 @container 规则依次收起次要控件 */
+  flex-wrap: nowrap;
+}
+.split-nav {
+  min-width: 0;
+}
+/* 侧栏里的名字也截断，不换行（长文件夹名在窄窗口里会把条目撑成两行） */
+.split-nav-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .pane-title {
   font-size: var(--fs-secondary);
   font-weight: var(--fw-medium);
   margin: 0 4px;
+  /* 用户实测：窗口缩到最小时标题被挤成一列字 —— 这里改为**截断**，永远单行 */
+  min-width: 0;
+  flex: 0 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 工具条按**窗口自身宽度**（容器查询）响应，而不是按屏幕宽度 */
+.window {
+  container-type: inline-size;
+}
+@container (max-width: 920px) {
+  .pane-toolbar .search-field {
+    display: none;
+  }
+}
+@container (max-width: 780px) {
+  .pane-toolbar .icon-button[aria-label="排序方式"],
+  .pane-toolbar .icon-button[aria-label="共享"],
+  .pane-toolbar .icon-button[aria-label="标签"] {
+    display: none;
+  }
+}
+@container (max-width: 680px) {
+  .pane-toolbar .segmented {
+    display: none;
+  }
 }
 .toolbar-spacer {
   margin-left: auto;
@@ -1193,6 +1232,63 @@ input[type="checkbox"] {
 .search-field:focus-within {
   background: rgb(var(--text-rgb) / 0.08);
 }
+/* 文件夹：分组块 + 框选橡皮筋 */
+.file-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.file-group-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.file-group-block .split-section {
+  margin: 0;
+}
+/* 框选：与指针 1:1（不加过渡 —— 手势驱动的位移永远跟随当前值） */
+.marquee {
+  position: absolute;
+  border: 1px solid rgb(var(--text-rgb) / 0.42);
+  background: rgb(var(--text-rgb) / 0.1);
+  border-radius: 2px;
+  pointer-events: none;
+}
+.folder-body {
+  position: relative;
+  /* 框选时不要选中文字 */
+  user-select: none;
+}
+/* 显示简介 */
+.info-card {
+  min-width: 280px;
+  max-width: 360px;
+}
+.info-title {
+  margin: 0;
+  font-size: var(--fs-heading);
+  font-weight: 600;
+}
+.info-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+}
+.info-row {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  gap: 10px;
+  font-size: var(--fs-caption);
+}
+.info-row dt {
+  color: var(--muted);
+}
+.info-row dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 /* Quick Look：空格预览（图片/视频/音频/文本） */
 .quicklook {
   position: fixed;

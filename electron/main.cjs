@@ -20,9 +20,14 @@ let files;
  * 路径解析走 file-service 的白名单，且只注册在默认 session：
  * 原生网页视图用的是独立 partition，**够不到这个协议**。
  */
-protocol.registerSchemesAsPrivileged([
-  { scheme: "openarc-file", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
-]);
+// 真实启动路径：本模块在 app ready 之前被 require，注册一定生效。
+// 安全探针等 harness 会在 ready 之后才 require 本模块，那时再调会抛错 —— 显式跳过，
+// 探针本身不测这个协议（它测的是 preload 暴露面与 IPC 通道）。
+if (!app.isReady()) {
+  protocol.registerSchemesAsPrivileged([
+    { scheme: "openarc-file", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+  ]);
+}
 
 const uiURL = pathToFileURL(path.join(__dirname, "../dist/index.html")).href;
 
@@ -184,6 +189,27 @@ app.whenReady().then(() => {
   });
   // 缩略图：用 Electron 原生缩略图（macOS/Windows 支持），只回 data URL。
   // 路径解析在 file-service 内部完成，**渲染进程仍然拿不到任何路径**。
+  // 系统对"没有缩略器"的类型会返回**通用文档图标**（一张白页）。它不是内容，
+  // 渲染层宁愿用自己的线性图标，所以这里先生成一次通用图标做基准、逐次比对拦截。
+  let genericIconPng = null;
+  async function genericIcon() {
+    if (genericIconPng) return genericIconPng;
+    try {
+      const probe = path.join(app.getPath("temp"), "openarc-generic-probe.zzz");
+      fs.writeFileSync(probe, "x");
+      const img = await nativeImage.createThumbnailFromPath(probe, { width: 160, height: 160 });
+      genericIconPng = img.toPNG();
+      try {
+        fs.unlinkSync(probe);
+      } catch {
+        /* 清理失败无所谓 */
+      }
+    } catch {
+      genericIconPng = Buffer.alloc(0);
+    }
+    return genericIconPng;
+  }
+
   ipcMain.handle("files:thumb", async (e, payload) => {
     if (!trusted(e)) throw Error("Forbidden");
     const hit = files.resolve(String(payload?.folderId ?? ""), String(payload?.id ?? ""));
@@ -191,7 +217,10 @@ app.whenReady().then(() => {
     try {
       const img = await nativeImage.createThumbnailFromPath(hit.path, { width: 160, height: 160 });
       if (!img || img.isEmpty()) return { ok: false, error: "NO_THUMBNAIL" };
-      return { ok: true, dataUrl: img.toDataURL() };
+      const png = img.toPNG();
+      const generic = await genericIcon();
+      if (generic.length && png.equals(generic)) return { ok: false, error: "GENERIC_ICON" };
+      return { ok: true, dataUrl: "data:image/png;base64," + png.toString("base64") };
     } catch {
       return { ok: false, error: "NO_THUMBNAIL" };
     }

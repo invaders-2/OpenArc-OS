@@ -96,12 +96,16 @@ declare global {
 /** 文件服务返回的条目（不含磁盘路径 —— 路径永不过桥）。 */
 type FileEntry = { id: string; name: string; ext: string; size: number; mtime: number };
 
+/** 文件夹里的一行：子文件夹或文件服务里的文件，统一结构后再排序 / 分组。 */
+type Row = { id: string; name: string; kind: "folder" | "file"; ext?: string; size?: number; mtime?: number };
+
 /** 按扩展名给线性图标：App 里的图标统一线性，文件类型也一致。 */
 const FILE_KINDS: Record<string, string[]> = {
-  image: ["png", "jpg", "jpeg", "gif", "webp", "heic", "bmp", "svg", "tif", "tiff"],
+  // ai / psd / eps 归到 image：macOS 对它们是能出真实内容缩略图的（.ai 实测通过）
+  image: ["png", "jpg", "jpeg", "gif", "webp", "heic", "bmp", "svg", "tif", "tiff", "avif", "ai", "psd", "eps"],
   video: ["mp4", "mov", "m4v", "avi", "mkv", "webm"],
   audio: ["mp3", "wav", "aac", "flac", "m4a", "ogg"],
-  doc: ["pdf", "doc", "docx", "pages", "rtf"],
+  doc: ["pdf", "doc", "docx", "pages", "rtf", "pad", "txt", "md"],
   text: ["txt", "md", "json", "csv", "log", "ts", "tsx", "js", "jsx", "css", "html", "yml", "yaml", "xml"],
   archive: ["zip", "tar", "gz", "rar", "7z"],
 };
@@ -231,7 +235,11 @@ function App() {
     }
   }, []);
   /** 当前选中的条目（按 windowId），Quick Look 的目标。 */
-  const [selected, setSelected] = useState<Record<string, string>>({});
+  /** 当前选中的条目（按 windowId 存 **一组 id**，支持多选）。 */
+  const [selected, setSelected] = useState<Record<string, string[]>>({});
+  /** 框选矩形（windowId + 相对 folder-body 的矩形）与「显示简介」浮层。 */
+  const [marquee, setMarquee] = useState<{ winId: string; x: number; y: number; w: number; h: number } | null>(null);
+  const [info, setInfo] = useState<{ title: string; subtitle?: string; rows: { k: string; v: string }[] } | null>(null);
   const [preview, setPreview] = useState<{
     entry: FileEntry;
     mime: string;
@@ -274,7 +282,7 @@ function App() {
     if (!fid) return;
     const folderId =
       folderUI[fid]?.folderId ?? (fid.startsWith(FOLDER_PREFIX) ? fid.slice(FOLDER_PREFIX.length) : null);
-    const entryId = selected[fid];
+    const entryId = (selected[fid] ?? [])[0];
     if (!folderId || !entryId) return;
     void openPreview(folderId, entryId);
   };
@@ -427,6 +435,7 @@ function App() {
         setOverlays((o) => ({ ...o, search: false, ai: false, control: false }));
         setMenu(null);
         setPreview(null);
+        setInfo(null);
       }
     };
     window.addEventListener("keydown", key);
@@ -487,13 +496,131 @@ function App() {
        * 搜索 / 排序的**代码路径是真实的**，只是当前没有数据可筛 —— 不放假文件。
        */
       const q = ui.query.trim().toLowerCase();
-      const children = folders
-        .filter((f) => f.parentId === shown.id)
-        .filter((f) => !q || f.name.toLowerCase().includes(q))
-        .sort((a, b) => (ui.sort === "name" ? a.name.localeCompare(b.name, "zh") : 0));
-      /** 文件服务里的条目（真实数据；索引里**没有磁盘路径**）。 */
-      const listedFiles = (filesByFolder[shown.id] ?? []).filter((e) => !q || e.name.toLowerCase().includes(q));
-      const hasEntries = children.length + listedFiles.length > 0;
+      /** 子文件夹 + 文件服务条目，统一成 Row 后再排序 / 分组。 */
+      const rows: Row[] = [
+        ...folders.filter((f) => f.parentId === shown.id).map((f) => ({ id: f.id, name: f.name, kind: "folder" as const })),
+        ...(filesByFolder[shown.id] ?? []).map((f) => ({
+          id: f.id,
+          name: f.name,
+          kind: "file" as const,
+          ext: f.ext,
+          size: f.size,
+          mtime: f.mtime,
+        })),
+      ].filter((r) => !q || r.name.toLowerCase().includes(q));
+      const bySort = (a: Row, b: Row) => {
+        if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
+        if (ui.sort === "date") return (b.mtime ?? 0) - (a.mtime ?? 0);
+        if (ui.sort === "size") return (b.size ?? 0) - (a.size ?? 0);
+        return a.name.localeCompare(b.name, "zh");
+      };
+      rows.sort(bySort);
+      const GROUP_LABEL: Record<string, string> = {
+        folder: "文件夹",
+        image: "图片",
+        video: "视频",
+        audio: "音频",
+        doc: "文档",
+        archive: "压缩包",
+        other: "其它",
+      };
+      const groupOf = (r: Row) => (r.kind === "folder" ? "folder" : kindOfExt(r.ext ?? ""));
+      const groupedRows: { label: string; rows: Row[] }[] = [];
+      if (ui.group) {
+        for (const key of ["folder", "image", "video", "audio", "doc", "archive", "other"]) {
+          const bucket = rows.filter((r) => groupOf(r) === key);
+          if (bucket.length) groupedRows.push({ label: GROUP_LABEL[key], rows: bucket });
+        }
+      } else {
+        groupedRows.push({ label: "", rows });
+      }
+      const selIds = selected[id] ?? [];
+      const isSelected = (entryId: string) => selIds.includes(entryId);
+      /** 单击：默认单选；Cmd/Ctrl = 加减选；Shift = 按当前顺序扩选。 */
+      const pick = (entryId: string, e: React.MouseEvent) => {
+        setSelected((m) => {
+          const cur = m[id] ?? [];
+          if (e.metaKey || e.ctrlKey) {
+            return { ...m, [id]: cur.includes(entryId) ? cur.filter((x) => x !== entryId) : [...cur, entryId] };
+          }
+          if (e.shiftKey && cur.length) {
+            const order = rows.map((r) => r.id);
+            const a = order.indexOf(cur[cur.length - 1]);
+            const b = order.indexOf(entryId);
+            if (a >= 0 && b >= 0) return { ...m, [id]: order.slice(Math.min(a, b), Math.max(a, b) + 1) };
+          }
+          return { ...m, [id]: [entryId] };
+        });
+      };
+      /** 框选：空白处按下拖动，命中的条目整体选中（Finder 的橡皮筋选择）。 */
+      const startMarquee = (e: React.PointerEvent) => {
+        if (e.button !== 0) return;
+        const body = e.currentTarget as HTMLElement;
+        if ((e.target as HTMLElement).closest(".file-cell")) return;
+        const rect = body.getBoundingClientRect();
+        const x0 = e.clientX - rect.left;
+        const y0 = e.clientY - rect.top;
+        const move = (ev: PointerEvent) => {
+          const x1 = ev.clientX - rect.left;
+          const y1 = ev.clientY - rect.top;
+          const box = {
+            left: Math.min(x0, x1),
+            top: Math.min(y0, y1),
+            right: Math.max(x0, x1),
+            bottom: Math.max(y0, y1),
+          };
+          setMarquee({ winId: id, x: box.left, y: box.top, w: box.right - box.left, h: box.bottom - box.top });
+          const hitting: string[] = [];
+          body.querySelectorAll<HTMLElement>(".file-cell[data-entry-id]").forEach((cell) => {
+            const r = cell.getBoundingClientRect();
+            const cx = r.left - rect.left;
+            const cy = r.top - rect.top;
+            if (cx < box.right && cx + r.width > box.left && cy < box.bottom && cy + r.height > box.top)
+              hitting.push(cell.dataset.entryId || "");
+          });
+          setSelected((m) => ({ ...m, [id]: hitting.filter(Boolean) }));
+        };
+        const up = () => {
+          window.removeEventListener("pointermove", move);
+          window.removeEventListener("pointerup", up);
+          setMarquee(null);
+        };
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", up);
+      };
+      const fmtSize = (n?: number) =>
+        n === undefined
+          ? "—"
+          : n < 1024
+            ? n + " B"
+            : n < 1048576
+              ? (n / 1024).toFixed(1) + " KB"
+              : (n / 1048576).toFixed(1) + " MB";
+      /** 显示简介：全部是真实数据（子项数 / 类型 / 大小 / 修改时间）。 */
+      const showInfo = (row: Row) => {
+        setPaneMenu(null);
+        setInfo({
+          title: row.name,
+          subtitle: row.kind === "folder" ? "文件夹" : row.ext ? row.ext.toUpperCase() + " 文件" : "文件",
+          rows:
+            row.kind === "folder"
+              ? [
+                  { k: "种类", v: "文件夹" },
+                  { k: "包含", v: String(folders.filter((f) => f.parentId === row.id).length) + " 个子文件夹" },
+                  { k: "位置", v: shown.name },
+                ]
+              : [
+                  { k: "种类", v: row.ext ? row.ext.toUpperCase() + " 文件" : "文件" },
+                  { k: "大小", v: fmtSize(row.size) },
+                  { k: "修改时间", v: row.mtime ? new Date(row.mtime).toLocaleString("zh-CN") : "—" },
+                  { k: "所在", v: shown.name },
+                ],
+        });
+      };
+      const copyNames = (ids: string[]) => {
+        setPaneMenu(null);
+        void navigator.clipboard?.writeText(rows.filter((r) => ids.includes(r.id)).map((r) => r.name).join("\n"));
+      };
       /** 改名：子文件夹走窗口内状态，文件走文件服务 —— 同一套按 id 的机制。 */
       const commitRename = (entryId: string, kind: "folder" | "file", name: string) => {
         if (kind === "folder") {
@@ -519,27 +646,55 @@ function App() {
         await bridge.import(shown.id, paths);
         await refreshFiles(shown.id);
       };
-      /** 条目右键菜单：打开 / 重命名 / 删除 —— 文件夹与文件共用。 */
-      const openEntryMenu = (x: number, y: number, entryId: string, kind: "folder" | "file") => {
-        setPaneMenu({
-          x,
-          y,
-          items: [
-            kind === "folder"
-              ? { id: "open", label: "打开", onSelect: () => go(entryId) }
-              : { id: "open", label: "打开", disabled: true, onSelect: () => {} },
-            // 延到菜单卸载之后再进入重命名：菜单卸载时会把焦点还给触发元素，
-            // 若同步进入重命名，输入框会立刻被抢焦点而提交并消失。
-            { id: "rename", label: "重命名", onSelect: () => window.setTimeout(() => setRenaming(entryId), 0) },
-            { separator: true },
-            {
-              id: "delete",
-              label: "删除",
-              danger: true,
-              onSelect: () => (kind === "folder" ? removeFolder(entryId) : removeFile(entryId)),
-            },
-          ],
+      /**
+       * 条目右键菜单。对齐 Finder 的常用项：
+       *   单选文件夹：打开 / 显示简介 / 重命名 / 删除
+       *   单选文件：  打开 / 显示简介 / 重命名 / 拷贝名称 / 删除
+       *   多选：      拷贝 N 项名称 / 删除 N 项
+       */
+      const openEntryMenu = (x: number, y: number, ids: string[]) => {
+        const picked = rows.filter((r) => ids.includes(r.id));
+        const one = picked.length === 1 ? picked[0] : null;
+        const renameItem = (row: Row): MenuItem => ({
+          id: "rename",
+          label: "重命名",
+          // 延到菜单卸载之后再进入重命名：菜单卸载时会把焦点还给触发元素，
+          // 若同步进入重命名，输入框会立刻被抢焦点而提交并消失。
+          onSelect: () => window.setTimeout(() => setRenaming(row.id), 0),
         });
+        const items: MenuItem[] = one
+          ? one.kind === "folder"
+            ? [
+                { id: "open", label: "打开", onSelect: () => go(one.id) },
+                { id: "info", label: "显示简介", onSelect: () => showInfo(one) },
+                renameItem(one),
+                { separator: true },
+                { id: "delete", label: "删除", danger: true, onSelect: () => removeFolder(one.id) },
+              ]
+            : [
+                { id: "open", label: "打开", onSelect: () => void openPreview(shown.id, one.id) },
+                { id: "info", label: "显示简介", onSelect: () => showInfo(one) },
+                renameItem(one),
+                { id: "copy", label: "拷贝名称", onSelect: () => copyNames([one.id]) },
+                { separator: true },
+                { id: "delete", label: "删除", danger: true, onSelect: () => removeFile(one.id) },
+              ]
+          : [
+              { id: "open", label: "打开", disabled: true, onSelect: () => {} },
+              { id: "info", label: "显示简介", disabled: true, onSelect: () => {} },
+              { id: "copy", label: "拷贝 " + picked.length + " 项名称", onSelect: () => copyNames(ids) },
+              { separator: true },
+              {
+                id: "delete",
+                label: "删除 " + picked.length + " 项",
+                danger: true,
+                onSelect: () => {
+                  for (const r of picked) if (r.kind === "folder") removeFolder(r.id);
+                  for (const r of picked) if (r.kind === "file") removeFile(r.id);
+                },
+              },
+            ];
+        setPaneMenu({ x, y, items });
       };
       const openPaneMenu = (x: number, y: number, which: "sort" | "content") => {
         const sortItems: MenuItem[] = [
@@ -549,14 +704,19 @@ function App() {
         ];
         const contentItems: MenuItem[] = [
           { id: "nf", label: "新建文件夹", onSelect: () => createSubfolder(shown.id) },
-          { id: "info", label: "显示简介", disabled: true, onSelect: () => {} },
+          {
+            id: "info",
+            label: "显示简介",
+            onSelect: () => showInfo({ id: shown.id, name: shown.name, kind: "folder" }),
+          },
           { separator: true },
           { id: "group", label: ui.group ? "关闭群组" : "使用群组", onSelect: () => patch({ group: !ui.group }) },
           { id: "s-name", label: "排序方式：名称", onSelect: () => patch({ sort: "name" }) },
           { id: "s-date", label: "排序方式：日期", onSelect: () => patch({ sort: "date" }) },
           { id: "s-size", label: "排序方式：大小", onSelect: () => patch({ sort: "size" }) },
           { separator: true },
-          { id: "vo", label: "查看显示选项", disabled: true, onSelect: () => {} },
+          { id: "vo-grid", label: "显示为图标", onSelect: () => patch({ view: "grid" }) },
+          { id: "vo-list", label: "显示为列表", onSelect: () => patch({ view: "list" }) },
         ];
         setPaneMenu({ x, y, items: which === "sort" ? sortItems : contentItems });
       };
@@ -568,7 +728,7 @@ function App() {
               .filter((f) => !f.parentId)
               .map((f) => (
                 <button key={f.id} className="split-nav" aria-current={f.id === shown.id} onClick={() => go(f.id)}>
-                  <Folder size={16} /> {f.name}
+                  <Folder size={16} /> <span className="split-nav-label">{f.name}</span>
                 </button>
               ))}
           </nav>
@@ -629,17 +789,14 @@ function App() {
             </div>
             <div
               className="folder-body"
+              onPointerDown={startMarquee}
               onContextMenu={(e) => {
                 e.preventDefault();
                 // 不要冒泡到桌面：否则桌面菜单会同时打开、盖在文件夹菜单上
                 e.stopPropagation();
+                // 空白处右键 = 先清空选择，再弹"文件夹级"菜单
+                if (!(e.target as HTMLElement).closest(".file-cell")) setSelected((m) => ({ ...m, [id]: [] }));
                 openPaneMenu(e.clientX, e.clientY, "content");
-              }}
-              onClick={(e) => {
-                // 点空白处 = 取消选择（点在条目上时由条目自己设选择）
-                if (!(e.target as HTMLElement).closest(".file-cell")) {
-                  setSelected((m) => ({ ...m, [id]: "" }));
-                }
               }}
               onDragOver={(e) => {
                 if (!window.openarc?.files) return;
@@ -652,7 +809,7 @@ function App() {
                 void importDropped(e.dataTransfer.files);
               }}
             >
-              {!hasEntries ? (
+              {rows.length === 0 ? (
                 <div className="empty-content">
                   <img className="large-icon" src={icon("folder")} alt="" draggable={false} />
                   <span className="badge">{q ? "无匹配项" : "暂无内容"}</span>
@@ -663,97 +820,81 @@ function App() {
                   )}
                 </div>
               ) : (
-                <div className={ui.view === "grid" ? "file-grid" : "file-list"}>
-                  {children.map((f) => (
-                    <div
-                      className="file-cell"
-                      key={f.id}
-                      role="button"
-                      tabIndex={0}
-                      onDoubleClick={() => go(f.id)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") go(f.id);
-                        if (e.key === "F2") setRenaming(f.id);
-                      }}
-                      onContextMenu={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        openEntryMenu(e.clientX, e.clientY, f.id, "folder");
-                      }}
-                    >
-                      <img className="file-icon" src={icon("folder")} alt="" draggable={false} />
-                      {renaming === f.id ? (
-                        <input
-                          className="folder-rename"
-                          autoFocus
-                          aria-label="名称"
-                          defaultValue={f.name}
-                          onClick={(e) => e.stopPropagation()}
-                          onDoubleClick={(e) => e.stopPropagation()}
-                          onBlur={(e) => commitRename(f.id, "folder", e.currentTarget.value)}
-                          onKeyDown={(e) => {
-                            // 必须拦住：否则回车会冒泡到磁贴的 onKeyDown，把"提交重命名"变成"进入该文件夹"
-                            e.stopPropagation();
-                            if (e.key === "Enter") commitRename(f.id, "folder", e.currentTarget.value);
-                            if (e.key === "Escape") setRenaming(null);
-                          }}
-                        />
-                      ) : (
-                        <span>{f.name}</span>
-                      )}
-                    </div>
-                  ))}
-                  {listedFiles.map((f) => (
-                    <div
-                      className={`file-cell ${selected[id] === f.id ? "selected" : ""}`}
-                      key={f.id}
-                      role="button"
-                      tabIndex={0}
-                      title={f.name}
-                      onClick={() => setSelected((m) => ({ ...m, [id]: f.id }))}
-                      onKeyDown={(e) => {
-                        if (e.key === "F2") setRenaming(f.id);
-                      }}
-                      onContextMenu={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        openEntryMenu(e.clientX, e.clientY, f.id, "file");
-                      }}
-                    >
-                      {renaming === f.id ? null : thumbs[shown.id + "/" + f.id] ? (
-                        <img
-                          className="file-thumb"
-                          src={thumbs[shown.id + "/" + f.id]}
-                          alt=""
-                          draggable={false}
-                        />
-                      ) : (
-                        <span className="file-glyph">
-                          <FileGlyph ext={f.ext} size={ui.view === "grid" ? 40 : 22} />
-                        </span>
-                      )}
-                      {renaming === f.id ? (
-                        <input
-                          className="folder-rename"
-                          autoFocus
-                          aria-label="名称"
-                          defaultValue={f.name}
-                          onClick={(e) => e.stopPropagation()}
-                          onDoubleClick={(e) => e.stopPropagation()}
-                          onBlur={(e) => commitRename(f.id, "file", e.currentTarget.value)}
-                          onKeyDown={(e) => {
-                            e.stopPropagation();
-                            if (e.key === "Enter") commitRename(f.id, "file", e.currentTarget.value);
-                            if (e.key === "Escape") setRenaming(null);
-                          }}
-                        />
-                      ) : (
-                        <span className="file-name">{f.name}</span>
-                      )}
+                <div className="file-groups">
+                  {groupedRows.map((g) => (
+                    <div className="file-group-block" key={g.label || "all"}>
+                      {g.label ? <div className="split-section">{g.label}</div> : null}
+                      <div className={ui.view === "grid" ? "file-grid" : "file-list"}>
+                        {g.rows.map((r) => (
+                          <div
+                            className={"file-cell " + (isSelected(r.id) ? "selected" : "")}
+                            key={r.kind + r.id}
+                            role="button"
+                            tabIndex={0}
+                            title={r.name}
+                            data-entry-id={r.id}
+                            onClick={(e) => pick(r.id, e)}
+                            onDoubleClick={() => (r.kind === "folder" ? go(r.id) : void openPreview(shown.id, r.id))}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") r.kind === "folder" ? go(r.id) : void openPreview(shown.id, r.id);
+                              if (e.key === "F2") setRenaming(r.id);
+                            }}
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              // 右键落在未选中的条目上 → 先把它设为唯一选中；落在选中集合内 → 对整个集合操作
+                              const ids = selIds.includes(r.id) ? selIds : [r.id];
+                              if (!selIds.includes(r.id)) setSelected((m) => ({ ...m, [id]: [r.id] }));
+                              openEntryMenu(e.clientX, e.clientY, ids);
+                            }}
+                          >
+                            {r.kind === "folder" ? (
+                              <img className="file-icon" src={icon("folder")} alt="" draggable={false} />
+                            ) : renaming === r.id ? null : thumbs[shown.id + "/" + r.id] ? (
+                              <img
+                                className="file-thumb"
+                                src={thumbs[shown.id + "/" + r.id]}
+                                alt=""
+                                draggable={false}
+                              />
+                            ) : (
+                              <span className="file-glyph">
+                                <FileGlyph ext={r.ext ?? ""} size={ui.view === "grid" ? 40 : 22} />
+                              </span>
+                            )}
+                            {renaming === r.id ? (
+                              <input
+                                className="folder-rename"
+                                autoFocus
+                                aria-label="名称"
+                                defaultValue={r.name}
+                                onClick={(e) => e.stopPropagation()}
+                                onDoubleClick={(e) => e.stopPropagation()}
+                                onBlur={(e) => commitRename(r.id, r.kind, e.currentTarget.value)}
+                                onKeyDown={(e) => {
+                                  // 必须拦住：否则回车会冒泡到磁贴的 onKeyDown，把"提交重命名"变成"进入该文件夹"
+                                  e.stopPropagation();
+                                  if (e.key === "Enter") commitRename(r.id, r.kind, e.currentTarget.value);
+                                  if (e.key === "Escape") setRenaming(null);
+                                }}
+                              />
+                            ) : (
+                              <span className="file-name">{r.name}</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   ))}
                 </div>
               )}
+              {marquee?.winId === id ? (
+                <div
+                  className="marquee"
+                  style={{ left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h }}
+                  aria-hidden="true"
+                />
+              ) : null}
             </div>
           </div>
         </div>
@@ -1365,6 +1506,24 @@ function App() {
               {preview.entry.name}
               <span className="muted">空格 / Esc 关闭</span>
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {info ? (
+        <div className="quicklook" role="dialog" aria-modal="true" aria-label="显示简介" onClick={() => setInfo(null)}>
+          <div className="quicklook-card info-card" onClick={(e) => e.stopPropagation()}>
+            <h2 className="info-title">{info.title}</h2>
+            {info.subtitle ? <p className="muted">{info.subtitle}</p> : null}
+            <dl className="info-rows">
+              {info.rows.map((row) => (
+                <div className="info-row" key={row.k}>
+                  <dt>{row.k}</dt>
+                  <dd>{row.v}</dd>
+                </div>
+              ))}
+            </dl>
+            <p className="muted">点击任意处关闭</p>
           </div>
         </div>
       ) : null}
