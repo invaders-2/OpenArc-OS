@@ -1,5 +1,18 @@
 # 计划修订记录
 
+## 2026-09-12：侧栏改为内缩浮层卡片（红绿灯在卡片内）
+
+用户复审：「左侧边栏上下左右的边距要离窗口有一点点距离，那样才有浮窗效果」。
+即：不是贴边通高，而是**上下左右都内缩的圆角玻璃卡片**，红绿灯嵌在卡片顶部。
+
+- `.split-side`：`margin: 10px 8px 10px 10px` + `border-radius: var(--radius-lg)`
+  + `box-shadow: var(--elevation-1)` + `rgb(var(--text-rgb) / 0.06)` 半透明材质 + 玻璃模糊。
+- 仍保留 `.window:has(.split) .window-body { margin-top: -44px }`：body 上提盖住标题栏，
+  卡片顶边才能到窗口顶部附近，原生红绿灯落在卡片内部。
+- `trafficLightPosition` y 13 → 16，让三灯在卡片顶部更居中。
+
+实测：`npm run build` PASS；深色截图核对（`artifacts/ui-fix/sidebar-inset-floating.png`）。
+
 ## 2026-09-12：分栏侧栏顶到窗口最上沿，红绿灯落在侧栏浮层内
 
 用户复审：「浮窗效果还是要有，红绿灯在浮窗里面，你看看 apple mac 的左侧边栏是怎样的」。

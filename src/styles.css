@@ -549,17 +549,21 @@ input[type="checkbox"] {
   min-height: 0;
 }
 .split-side {
-  flex: 0 0 196px;
+  flex: 0 0 188px;
   min-height: 0;
   overflow: auto;
   display: flex;
   flex-direction: column;
   gap: 1px;
-  padding: 8px 10px 12px;
-  /* macOS 侧栏（参照 Finder）：贴左/上/下边、通高、无圆角无投影；
-     只用一层"随主题变亮"的半透明材质与内容区分，不用实心底色框。 */
-  background: rgb(var(--text-rgb) / 0.05);
+  /* 浮窗侧栏：上下左右都离窗口一点距离，圆角 + 投影 + 玻璃材质。
+     因为 window-body 被上提盖住标题栏，这张卡片的顶边就在窗口顶部附近，
+     原生红绿灯正好落在卡片内部。 */
+  margin: 10px 8px 10px 10px;
+  padding: 8px;
+  border-radius: var(--radius-lg);
+  background: rgb(var(--text-rgb) / 0.06);
   backdrop-filter: var(--glass-filter-window);
+  box-shadow: var(--elevation-1);
 }
 .split-section {
   padding: 13px 8px 5px;
