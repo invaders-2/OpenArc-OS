@@ -1,5 +1,18 @@
 # 计划修订记录
 
+## 2026-09-12：文件夹窗口改为 Finder 式布局（左栏 + 工具条 + 内容）
+
+用户复审（附原生 Finder 截图）：文件夹这边同样处理，按截图布局，用我们自己的设计语言。
+
+- `content()` 的 folder 分支由"居中空态"改为 `.split`：
+  - 左栏 `.split-side`：分组「桌面」列出桌面上的文件夹（**真实数据** `folders`，不造 mock），
+    当前项高亮，点击切换/聚焦；
+  - 右栏 `.split-main`：顶部 `.pane-toolbar` 显示位置名（原页面中央的大标题移到这里），
+    下面是空态（folder 图标 + 「暂无内容」+ 说明）。
+- `.split-main` 改为 flex column；新增 `.pane-toolbar`；`.split-main > .empty-content` 改为 `flex: 1`。
+
+实测：`npm run build` PASS；`npm test` 96/96；截图核对（左栏高亮 + 工具条位置名 + 空态）。
+
 ## 2026-09-12：空态去掉右侧底色框
 
 用户复审：Skill 中心右边的底色框去掉。

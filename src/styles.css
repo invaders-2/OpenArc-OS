@@ -599,6 +599,25 @@ input[type="checkbox"] {
   min-height: 0;
   overflow: auto;
   padding: 20px 26px 26px;
+  display: flex;
+  flex-direction: column;
+}
+/* 内容区顶部工具条（Finder 口径：位置名在工具条里，而不是页面中央大标题） */
+.pane-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  margin-bottom: 16px;
+  font-size: var(--fs-secondary);
+  color: var(--text);
+}
+.pane-toolbar strong {
+  font-weight: var(--fw-medium);
+}
+.split-main > .empty-content {
+  flex: 1;
+  height: auto;
 }
 /* 分栏内的页面标题按设计语言的"区块标题"（--fs-title），不再用页面主标题 27px */
 .split-main h1 {

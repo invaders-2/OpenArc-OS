@@ -4,6 +4,7 @@ import {
   ArrowRight,
   Bot,
   Clock,
+  Folder,
   LayoutGrid,
   Lock,
   LogOut,
@@ -282,14 +283,33 @@ function App() {
     const folder = folderOf(id);
     if (folder)
       return (
-        <div className="empty-content">
-          <img className="large-icon" src={icon("folder")} alt="" draggable={false} />
-          <h1>{folder.name}</h1>
-          <span className="badge">暂无内容</span>
-          <p>
-            文件夹已创建，可重命名、移动和删除。文件本体与跨设备存储属于 D3
-            文件服务范围，本版不显示模拟文件。
-          </p>
+        <div className="split">
+          <nav className="split-side" aria-label="桌面文件夹">
+            <div className="split-section">桌面</div>
+            {folders.map((f) => (
+              <button
+                key={f.id}
+                className="split-nav"
+                aria-current={f.id === folder.id}
+                onClick={() => openFolder(f)}
+              >
+                <Folder size={16} /> {f.name}
+              </button>
+            ))}
+          </nav>
+          <div className="split-main">
+            <div className="pane-toolbar">
+              <strong>{folder.name}</strong>
+            </div>
+            <div className="empty-content">
+              <img className="large-icon" src={icon("folder")} alt="" draggable={false} />
+              <span className="badge">暂无内容</span>
+              <p>
+                文件夹已创建，可重命名、移动和删除。文件本体与跨设备存储属于 D3
+                文件服务范围，本版不显示模拟文件。
+              </p>
+            </div>
+          </div>
         </div>
       );
     if (w?.appId === "home")
