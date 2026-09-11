@@ -1,12 +1,16 @@
 // D1-04 性能基准 v2：把帧率压出垂直同步余量，玻璃成本才可分辨。
 //
+// ⚠️ 历史口径（HISTORICAL REFERENCE，D1-04B 起降级）
+//    本脚本用 page.addStyleTag **注入 CSS 模拟**三档材质，其中 REDUCED 在当时的
+//    产品代码里并不存在。它记录的是"REDUCED 值多少钱"这一早期判断。
+//    D1-04B 起 REDUCED 已真实进入产品代码，官方性能验收改用：
+//        experiments/d1-04/perf-product.mjs   （切换 data-glass，不注入材质值）
+//    本文件保留不删，作为回归对照的历史数据来源。
+//
 // v1 的问题：120Hz vsync 下 p50 恒为 8.3ms，FULL 与 SOLID 完全一致，
 // 于是"玻璃不花钱"是个假结论——实际是测量被 vsync 截断了。
 // v2 做法：注入 K 个与 .window 同材质的合成玻璃层，K 递增直到掉帧，
 // 三档材质各测一遍，用"能撑住多少层"和"掉到多少 fps"来量化成本。
-//
-// REDUCED 档当前产品未实现，本脚本用注入 CSS 模拟（blur 12px，去掉 saturate），
-// 仅用于冻结档位定义，**不代表产品已具备该档**。
 
 import { chromium } from "playwright";
 import http from "node:http";
