@@ -64,5 +64,8 @@ contextBridge.exposeInMainWorld("openarc", {
     remove: (folderId, id) => ipcRenderer.invoke("files:remove", { folderId, id }),
     read: (folderId, id) => ipcRenderer.invoke("files:read", { folderId, id }),
     thumb: (folderId, id) => ipcRenderer.invoke("files:thumb", { folderId, id }),
+    copy: (folderId, ids, toFolderId) => ipcRenderer.invoke("files:copy", { folderId, ids, toFolderId }),
+    move: (folderId, ids, toFolderId) => ipcRenderer.invoke("files:move", { folderId, ids, toFolderId }),
+    exportTo: (folderId, ids) => ipcRenderer.invoke("files:export", { folderId, ids }),
   },
 });

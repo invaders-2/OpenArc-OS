@@ -1,4 +1,15 @@
-const { app, BrowserWindow, ipcMain, safeStorage, screen, Menu, nativeImage, protocol, net } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  ipcMain,
+  safeStorage,
+  screen,
+  Menu,
+  nativeImage,
+  protocol,
+  net,
+  dialog,
+} = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const { pathToFileURL } = require("node:url");
@@ -165,6 +176,49 @@ app.whenReady().then(() => {
     }
   });
 
+  ipcMain.handle("files:copy", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    return files.copy(String(payload?.folderId ?? ""), payload?.ids, String(payload?.toFolderId ?? ""));
+  });
+  ipcMain.handle("files:move", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    return files.move(String(payload?.folderId ?? ""), payload?.ids, String(payload?.toFolderId ?? ""));
+  });
+  // 导出到电脑：让用户挑一个**真实目录**，把条目复制出去（不动我们自己的存储）。
+  ipcMain.handle("files:export", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    const folderId = String(payload?.folderId ?? "");
+    const ids = Array.isArray(payload?.ids) ? payload.ids.map(String) : [];
+    const picks = ids.map((id) => files.resolve(folderId, id)).filter(Boolean);
+    if (!picks.length) return { ok: false, error: "NOT_FOUND" };
+    const host = BrowserWindow.fromWebContents(e.sender);
+    const res = await dialog.showOpenDialog(host, {
+      title: "导出到电脑",
+      buttonLabel: "导出到此处",
+      properties: ["openDirectory", "createDirectory"],
+    });
+    if (res.canceled || !res.filePaths?.[0]) return { ok: false, error: "CANCELED" };
+    const dest = res.filePaths[0];
+    const used = new Set();
+    let count = 0;
+    for (const hit of picks) {
+      try {
+        const base = path.basename(hit.path);
+        const dot = base.lastIndexOf(".");
+        const stem = dot > 0 ? base.slice(0, dot) : base;
+        const ext = dot > 0 ? base.slice(dot) : "";
+        let name = base;
+        // 不覆盖同名的既有文件：沿用" 2 / 3"的习惯
+        for (let i = 2; used.has(name) || fs.existsSync(path.join(dest, name)); i += 1) name = stem + " " + i + ext;
+        used.add(name);
+        fs.copyFileSync(hit.path, path.join(dest, name));
+        count += 1;
+      } catch {
+        /* 单个失败不影响整批 */
+      }
+    }
+    return { ok: true, count, dest };
+  });
   ipcMain.handle("files:import", async (e, payload) => {
     if (!trusted(e)) throw Error("Forbidden");
     const folderId = String(payload && payload.folderId ? payload.folderId : "");

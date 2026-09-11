@@ -47,8 +47,11 @@ const FROZEN_BRIDGE_KEYS = ["action", "files", "identity", "navigate", "onDispla
 const FROZEN_IPC_CHANNELS = [
   "browser:action",
   "browser:navigate",
+  "files:copy",
+  "files:export",
   "files:import",
   "files:list",
+  "files:move",
   "files:read",
   "files:remove",
   "files:rename",

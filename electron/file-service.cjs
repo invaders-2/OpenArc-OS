@@ -169,6 +169,81 @@ function createFileService({ userDataDir }) {
   }
 
   /**
+   * 复制到另一个文件夹：新 id + 目标内去重名，逐字节复制（原条目保持不变）。
+   */
+  function copy(folderId, ids, toFolderId) {
+    const from = dirOf(folderId);
+    const to = dirOf(toFolderId);
+    if (!from || !to) return { ok: false, error: "INVALID_INPUT" };
+    const src = readIndex(from);
+    const dst = readIndex(to);
+    const added = [];
+    for (const id of Array.isArray(ids) ? ids : []) {
+      const e = src.find((x) => x.id === id);
+      if (!e) continue;
+      try {
+        const nid = "e" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+        const name = uniqueName(dst, e.name);
+        const ext = extOf(name);
+        const file = nid + (ext ? "." + ext : "");
+        fs.copyFileSync(path.join(from, fileOf(e)), path.join(to, file));
+        const entry = { id: nid, name, ext, size: e.size, mtime: Date.now(), file };
+        dst.push(entry);
+        added.push(entry);
+      } catch {
+        /* 单个失败不影响整批 */
+      }
+    }
+    writeIndex(to, dst);
+    return { ok: true, entries: dst, added };
+  }
+
+  /**
+   * 移动到另一个文件夹：id 不变，优先 rename；跨卷失败退化为"复制 + 删除"。
+   */
+  function move(folderId, ids, toFolderId) {
+    if (folderId === toFolderId) return { ok: false, error: "SAME_FOLDER" };
+    const from = dirOf(folderId);
+    const to = dirOf(toFolderId);
+    if (!from || !to) return { ok: false, error: "INVALID_INPUT" };
+    const src = readIndex(from);
+    const dst = readIndex(to);
+    const movedIds = [];
+    for (const id of Array.isArray(ids) ? ids : []) {
+      const e = src.find((x) => x.id === id);
+      if (!e) continue;
+      const name = uniqueName(dst, e.name);
+      const ext = extOf(name);
+      const file = e.id + (ext ? "." + ext : "");
+      const srcPath = path.join(from, fileOf(e));
+      const dstPath = path.join(to, file);
+      let ok = false;
+      try {
+        fs.renameSync(srcPath, dstPath);
+        ok = true;
+      } catch {
+        ok = false;
+      }
+      if (!ok) {
+        try {
+          fs.copyFileSync(srcPath, dstPath);
+          fs.unlinkSync(srcPath);
+          ok = true;
+        } catch {
+          ok = false;
+        }
+      }
+      if (!ok) continue;
+      dst.push({ ...e, name, ext, file, mtime: Date.now() });
+      movedIds.push(e.id);
+    }
+    const keep = src.filter((x) => !movedIds.includes(x.id));
+    writeIndex(from, keep);
+    writeIndex(to, dst);
+    return { ok: true, from: keep, to: dst, movedIds };
+  }
+
+  /**
    * 读取条目内容，给渲染层做 Quick Look 预览。
    * 只返回 **data URL / 文本**，不返回磁盘路径；超过上限的直接拒绝（避免把大文件塞进 IPC）。
    */
@@ -226,7 +301,7 @@ function createFileService({ userDataDir }) {
     return { path: path.join(dir, fileOf(entry)), entry };
   }
 
-  return { importPaths, list, rename, remove, read, resolve };
+  return { importPaths, list, rename, remove, read, resolve, copy, move };
 }
 
 module.exports = { createFileService };

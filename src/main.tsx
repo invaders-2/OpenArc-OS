@@ -88,6 +88,16 @@ declare global {
           error?: string;
         }>;
         thumb: (folderId: string, id: string) => Promise<{ ok?: boolean; dataUrl?: string; error?: string }>;
+        copy: (
+          folderId: string,
+          ids: string[],
+          toFolderId: string,
+        ) => Promise<{ ok?: boolean; entries?: FileEntry[]; error?: string }>;
+        move: (folderId: string, ids: string[], toFolderId: string) => Promise<{ ok?: boolean; error?: string }>;
+        exportTo: (
+          folderId: string,
+          ids: string[],
+        ) => Promise<{ ok?: boolean; count?: number; dest?: string; error?: string }>;
       };
     };
   }
@@ -240,6 +250,10 @@ function App() {
   /** 框选矩形（windowId + 相对 folder-body 的矩形）与「显示简介」浮层。 */
   const [marquee, setMarquee] = useState<{ winId: string; x: number; y: number; w: number; h: number } | null>(null);
   const [info, setInfo] = useState<{ title: string; subtitle?: string; rows: { k: string; v: string }[] } | null>(null);
+  /** 应用内剪贴板（复制 / 剪切），粘贴进当前文件夹。 */
+  const [clip, setClip] = useState<{ mode: "copy" | "cut"; folderId: string; ids: string[] } | null>(null);
+  /** 键盘快捷键要读"当前文件夹窗口"的最新状态，用 ref 传（避免把整套 state 塞进 effect 依赖）。 */
+  const fileOpsRef = useRef<{ copy: () => void; cut: () => void; paste: () => void } | null>(null);
   const [preview, setPreview] = useState<{
     entry: FileEntry;
     mime: string;
@@ -309,6 +323,87 @@ function App() {
       }
     }
   }, [state.windows, folderUI, filesByFolder, thumbs]);
+  // ---------------------------------------------------------------------------
+  // 条目搬运：应用内移动/复制（应用层实现，文件夹窗口、侧栏、桌面磁贴共用同一套）
+  // ---------------------------------------------------------------------------
+  /** 把一批条目移动进目标文件夹：文件走文件服务，子文件夹改 parentId（带环检测）。 */
+  const moveInto = useCallback(
+    async (toFolderId: string, srcFolderId: string, ids: string[]) => {
+      if (toFolderId === srcFolderId) return;
+      const isFolder = (x: string) => folders.some((f) => f.id === x);
+      const fileIds = ids.filter((x) => !isFolder(x));
+      const folderIds = ids.filter(isFolder);
+      if (fileIds.length && window.openarc?.files) {
+        await window.openarc.files.move(srcFolderId, fileIds, toFolderId);
+        await refreshFiles(srcFolderId);
+        await refreshFiles(toFolderId);
+      }
+      if (folderIds.length) {
+        setFolders((list) =>
+          list.map((f) => {
+            if (!folderIds.includes(f.id)) return f;
+            // 不能移进自己或自己的子孙，否则会出现环
+            let cur: string | undefined = toFolderId;
+            while (cur) {
+              if (cur === f.id) return f;
+              cur = list.find((x) => x.id === cur)?.parentId;
+            }
+            return { ...f, parentId: toFolderId };
+          }),
+        );
+      }
+    },
+    [folders, refreshFiles],
+  );
+  /** 深拷贝一个虚拟文件夹（含子文件夹与其中的文件）。 */
+  const cloneFolder = async (srcId: string, parentId: string, snapshot: Folder[]): Promise<string> => {
+    const src = snapshot.find((f) => f.id === srcId);
+    const newId = "f" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    setFolders((list) => [...list, { id: newId, name: (src?.name ?? "文件夹") + " 副本", x: 0, y: 0, parentId }]);
+    if (window.openarc?.files) {
+      const res = await window.openarc.files.list(srcId);
+      const ids = (res?.entries ?? []).map((x) => x.id);
+      if (ids.length) await window.openarc.files.copy(srcId, ids, newId);
+    }
+    for (const child of snapshot.filter((f) => f.parentId === srcId)) await cloneFolder(child.id, newId, snapshot);
+    return newId;
+  };
+  /** 复制一批条目到目标文件夹：文件走文件服务，子文件夹递归深拷贝。 */
+  const copyInto = useCallback(
+    async (toFolderId: string, srcFolderId: string, ids: string[]) => {
+      const isFolder = (x: string) => folders.some((f) => f.id === x);
+      const fileIds = ids.filter((x) => !isFolder(x));
+      const folderIds = ids.filter(isFolder);
+      if (fileIds.length && window.openarc?.files) {
+        await window.openarc.files.copy(srcFolderId, fileIds, toFolderId);
+        await refreshFiles(toFolderId);
+      }
+      for (const x of folderIds) await cloneFolder(x, toFolderId, folders);
+    },
+    [folders, refreshFiles],
+  );
+  /** 拖拽载荷（内部搬运专用 MIME，不会和"从电脑拖入文件"混淆）。 */
+  const INTERNAL_DND = "application/x-openarc";
+  const hasInternalDrag = (e: React.DragEvent) => e.dataTransfer.types.includes(INTERNAL_DND);
+  /**
+   * 内部拖拽落到某个文件夹上。默认**移动**；按住 Option 是**复制**
+   * （与 macOS 一致：同卷拖动=移动，Option=复制）。
+   */
+  const handleInternalDrop = async (e: React.DragEvent, toFolderId: string) => {
+    const raw = e.dataTransfer.getData(INTERNAL_DND);
+    if (!raw) return false;
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      const payload = JSON.parse(raw) as { folderId: string; ids: string[] };
+      if (!payload?.ids?.length || payload.folderId === toFolderId) return true;
+      if (e.altKey) await copyInto(toFolderId, payload.folderId, payload.ids);
+      else await moveInto(toFolderId, payload.folderId, payload.ids);
+    } catch {
+      /* 载荷损坏就当作没有拖拽 */
+    }
+    return true;
+  };
   const [paneMenu, setPaneMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
 
   /**
@@ -430,6 +525,20 @@ function App() {
       if (e.code === "Space" && !typing) {
         e.preventDefault();
         quickLookRef.current();
+      }
+      // 复制 / 剪切 / 粘贴（与右键菜单同一套动作）
+      if ((e.metaKey || e.ctrlKey) && !typing) {
+        const k = e.key.toLowerCase();
+        if (k === "c") {
+          e.preventDefault();
+          fileOpsRef.current?.copy();
+        } else if (k === "x") {
+          e.preventDefault();
+          fileOpsRef.current?.cut();
+        } else if (k === "v") {
+          e.preventDefault();
+          fileOpsRef.current?.paste();
+        }
       }
       if (e.key === "Escape") {
         setOverlays((o) => ({ ...o, search: false, ai: false, control: false }));
@@ -646,6 +755,32 @@ function App() {
         await bridge.import(shown.id, paths);
         await refreshFiles(shown.id);
       };
+      /** 复制 / 剪切 / 粘贴（键盘与右键菜单共用同一套动作）。 */
+      const doCopy = () => {
+        if (selIds.length) setClip({ mode: "copy", folderId: shown.id, ids: selIds });
+      };
+      const doCut = () => {
+        if (selIds.length) setClip({ mode: "cut", folderId: shown.id, ids: selIds });
+      };
+      const doPaste = async () => {
+        if (!clip) return;
+        setPaneMenu(null);
+        if (clip.mode === "cut") {
+          await moveInto(shown.id, clip.folderId, clip.ids);
+          setClip(null);
+        } else {
+          await copyInto(shown.id, clip.folderId, clip.ids);
+        }
+      };
+      /** 导出到电脑：让用户挑一个真实目录，把文件复制出去。 */
+      const exportItems = async (ids: string[]) => {
+        setPaneMenu(null);
+        const fileIds = rows.filter((r) => ids.includes(r.id) && r.kind === "file").map((r) => r.id);
+        if (!fileIds.length || !window.openarc?.files) return;
+        await window.openarc.files.exportTo(shown.id, fileIds);
+      };
+      const doExport = () => void exportItems(selIds);
+      fileOpsRef.current = { copy: doCopy, cut: doCut, paste: () => void doPaste() };
       /**
        * 条目右键菜单。对齐 Finder 的常用项：
        *   单选文件夹：打开 / 显示简介 / 重命名 / 删除
@@ -662,12 +797,16 @@ function App() {
           // 若同步进入重命名，输入框会立刻被抢焦点而提交并消失。
           onSelect: () => window.setTimeout(() => setRenaming(row.id), 0),
         });
+        const hasFiles = picked.some((r) => r.kind === "file");
         const items: MenuItem[] = one
           ? one.kind === "folder"
             ? [
                 { id: "open", label: "打开", onSelect: () => go(one.id) },
                 { id: "info", label: "显示简介", onSelect: () => showInfo(one) },
                 renameItem(one),
+                { separator: true },
+                { id: "copy", label: "拷贝", onSelect: doCopy },
+                { id: "cut", label: "剪切", onSelect: doCut },
                 { separator: true },
                 { id: "delete", label: "删除", danger: true, onSelect: () => removeFolder(one.id) },
               ]
@@ -677,12 +816,21 @@ function App() {
                 renameItem(one),
                 { id: "copy", label: "拷贝名称", onSelect: () => copyNames([one.id]) },
                 { separator: true },
+                { id: "copy", label: "拷贝", onSelect: doCopy },
+                { id: "cut", label: "剪切", onSelect: doCut },
+                { id: "export", label: "导出到电脑…", onSelect: () => void exportItems(ids) },
+                { separator: true },
                 { id: "delete", label: "删除", danger: true, onSelect: () => removeFile(one.id) },
               ]
           : [
               { id: "open", label: "打开", disabled: true, onSelect: () => {} },
-              { id: "info", label: "显示简介", disabled: true, onSelect: () => {} },
               { id: "copy", label: "拷贝 " + picked.length + " 项名称", onSelect: () => copyNames(ids) },
+              { separator: true },
+              { id: "copy", label: "拷贝 " + picked.length + " 项", onSelect: doCopy },
+              { id: "cut", label: "剪切 " + picked.length + " 项", onSelect: doCut },
+              ...(hasFiles
+                ? ([{ id: "export", label: "导出到电脑…", onSelect: () => void exportItems(ids) }] as MenuItem[])
+                : []),
               { separator: true },
               {
                 id: "delete",
@@ -704,6 +852,18 @@ function App() {
         ];
         const contentItems: MenuItem[] = [
           { id: "nf", label: "新建文件夹", onSelect: () => createSubfolder(shown.id) },
+          ...(clip
+            ? ([
+                {
+                  id: "paste",
+                  label:
+                    clip.mode === "cut"
+                      ? `粘贴（移动 ${clip.ids.length} 项）`
+                      : `粘贴（拷贝 ${clip.ids.length} 项）`,
+                  onSelect: () => void doPaste(),
+                },
+              ] as MenuItem[])
+            : []),
           {
             id: "info",
             label: "显示简介",
@@ -727,7 +887,18 @@ function App() {
             {folders
               .filter((f) => !f.parentId)
               .map((f) => (
-                <button key={f.id} className="split-nav" aria-current={f.id === shown.id} onClick={() => go(f.id)}>
+                <button
+                  key={f.id}
+                  className="split-nav"
+                  aria-current={f.id === shown.id}
+                  onClick={() => go(f.id)}
+                  onDragOver={(e) => {
+                    if (!hasInternalDrag(e)) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = e.altKey ? "copy" : "move";
+                  }}
+                  onDrop={(e) => void handleInternalDrop(e, f.id)}
+                >
                   <Folder size={16} /> <span className="split-nav-label">{f.name}</span>
                 </button>
               ))}
@@ -799,11 +970,21 @@ function App() {
                 openPaneMenu(e.clientX, e.clientY, "content");
               }}
               onDragOver={(e) => {
+                // 内部搬运动作：拖到空白处 = 移进当前文件夹
+                if (hasInternalDrag(e)) {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = e.altKey ? "copy" : "move";
+                  return;
+                }
                 if (!window.openarc?.files) return;
                 e.preventDefault();
                 e.dataTransfer.dropEffect = "copy";
               }}
               onDrop={(e) => {
+                if (hasInternalDrag(e)) {
+                  void handleInternalDrop(e, shown.id);
+                  return;
+                }
                 if (!window.openarc?.files) return;
                 e.preventDefault();
                 void importDropped(e.dataTransfer.files);
@@ -833,6 +1014,23 @@ function App() {
                             tabIndex={0}
                             title={r.name}
                             data-entry-id={r.id}
+                            draggable
+                            onDragStart={(e) => {
+                              // 拖已选中的条目 = 拖整个选择；拖未选中的 = 只拖它自己
+                              const ids = isSelected(r.id) ? selIds : [r.id];
+                              if (!isSelected(r.id)) setSelected((m) => ({ ...m, [id]: [r.id] }));
+                              e.dataTransfer.setData(INTERNAL_DND, JSON.stringify({ folderId: shown.id, ids }));
+                              e.dataTransfer.effectAllowed = "copyMove";
+                            }}
+                            onDragOver={(e) => {
+                              if (r.kind !== "folder" || !hasInternalDrag(e)) return;
+                              e.preventDefault();
+                              e.stopPropagation();
+                              e.dataTransfer.dropEffect = e.altKey ? "copy" : "move";
+                            }}
+                            onDrop={(e) => {
+                              if (r.kind === "folder") void handleInternalDrop(e, r.id);
+                            }}
                             onClick={(e) => pick(r.id, e)}
                             onDoubleClick={() => (r.kind === "folder" ? go(r.id) : void openPreview(shown.id, r.id))}
                             onKeyDown={(e) => {
@@ -1249,6 +1447,12 @@ function App() {
       className={`desktop ${dark ? "dark" : ""} ${reduced ? "reduced" : ""}`}
       data-glass={glass}
       data-identity-gate={gate}
+      onDragOver={(e) => {
+        // 桌面磁贴要能接住内部拖拽；不 preventDefault 的话浏览器直接拒绝 drop
+        if (!hasInternalDrag(e)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = e.altKey ? "copy" : "move";
+      }}
       onContextMenu={(e) => {
         if (!showDesktop) return;
         // 只有"桌面本身"才弹桌面菜单（含"新建文件夹"）。
@@ -1322,6 +1526,14 @@ function App() {
             className="desktop-folder"
             style={{ left: f.x, top: f.y }}
             tabIndex={0}
+            data-folder-id={f.id}
+            onDragOver={(e) => {
+              if (!hasInternalDrag(e)) return;
+              e.preventDefault();
+              e.stopPropagation();
+              e.dataTransfer.dropEffect = e.altKey ? "copy" : "move";
+            }}
+            onDrop={(e) => void handleInternalDrop(e, f.id)}
             onPointerDown={(e) => dragFolder(e, f)}
             onDoubleClick={() => openFolder(f)}
             onKeyDown={(e) => {
