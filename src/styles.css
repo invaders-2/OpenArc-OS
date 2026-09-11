@@ -1296,6 +1296,54 @@ input[type="checkbox"] {
 }
 /* 顶部磨砂层已按用户口径整层去掉，因此工具条**不再贴顶**（否则它会悬在滚动内容上、
    又没有背景可依靠）。工具条随内容一起滚。 */
+/* 窗口内部顶部磨砂：与 macOS 的 headerView 同口径 —— **一层"窗面色"材质 + 多层渐进模糊**。
+   材质底色是关键：它把背后壁纸的**颜色压住**，只留下被糊过的光影，
+   所以看起来是"磨砂玻璃"而不是"透出来的花色"（用户否掉的那版就是少了这层）。
+   只在内容滚上去后出现（见 Window 的 scrolled），底部用渐变收边，不出现硬边。 */
+.window-scrim {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 76px;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    rgb(var(--surface-rgb) / calc(var(--surface-alpha) * 0.96)) 0%,
+    rgb(var(--surface-rgb) / calc(var(--surface-alpha) * 0.88)) 44%,
+    rgb(var(--surface-rgb) / calc(var(--surface-alpha) * 0.5)) 76%,
+    rgb(var(--surface-rgb) / 0) 100%
+  );
+}
+/* 第 1 层：轻模糊铺满整段 → 顶部开始"化开" */
+.window-scrim::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 52%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 52%, transparent 100%);
+}
+/* 第 2 层：强模糊只在最上面 → 越靠顶越糊（渐进） */
+.window-scrim::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  backdrop-filter: blur(52px);
+  -webkit-backdrop-filter: blur(52px);
+  mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 30%, transparent 70%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 30%, transparent 70%);
+}
+/* 工具条自己贴顶，内容从它下面滚过去（下面有磨砂层兜着，不会糊成一团） */
+.pane-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
 /* 系统文字默认不可选中：拖拽 / 框选时误选文字是真实困扰；输入框与预格式文本除外 */
 .desktop {
   user-select: none;
