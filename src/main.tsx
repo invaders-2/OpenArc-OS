@@ -1250,6 +1250,7 @@ function App() {
               if (!(e.target as HTMLElement).closest(".file-cell")) setSelected((m) => ({ ...m, [id]: [] }));
             }}
           >
+            <div className="split-scrim" aria-hidden="true" />
             <div className="pane-toolbar" onPointerDown={(e) => w && startDrag(e, w, onCommand)}>
               <button
                 className="icon-button"
@@ -1468,6 +1469,7 @@ function App() {
             </button>
           </nav>
           <div className="split-main">
+            <div className="split-scrim" aria-hidden="true" />
             {appTab === "all" ? (
               <>
                 <h1>应用中心</h1>
@@ -1578,6 +1580,7 @@ function App() {
             </button>
           </nav>
           <div className="split-main">
+            <div className="split-scrim" aria-hidden="true" />
             {settingsTab === "appearance" ? (
               <>
                 <h1>外观与交互</h1>
@@ -1699,6 +1702,7 @@ function App() {
             </button>
           </nav>
           <div className="split-main">
+            <div className="split-scrim" aria-hidden="true" />
             <div className="empty-content">
               <img className="large-icon" src={icon("shortcuts")} alt="" draggable={false} />
               <h1>Skill 中心</h1>
@@ -2032,9 +2036,6 @@ function App() {
           )
         ) : null}
       </div>
-
-      {/* 顶栏下方的磨砂渐变（z-index 79，正好在顶栏 80 之下、窗口之上） */}
-      <div className="topbar-scrim" aria-hidden="true" />
 
       {gate === "checking" ? (
         identity.bootError ? (

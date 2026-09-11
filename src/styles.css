@@ -1255,35 +1255,35 @@ input[type="checkbox"] {
   backdrop-filter: blur(30px) saturate(1.7);
   -webkit-backdrop-filter: blur(30px) saturate(1.7);
 }
-/* 顶栏下方的磨砂渐变：窗口往上滑到顶栏下面时会被它"吃掉"（向下渐隐的毛玻璃） */
-.topbar-scrim {
-  position: fixed;
+/* 窗口内部的"顶部磨砂渐变"：内容往上滚时钻进工具栏下面、被逐渐吃掉（Finder 口径）。
+   sticky + 负 margin：不占布局高度，却始终贴在滚动容器顶部，blur 作用于它背后的滚动内容。 */
+.split-scrim {
+  position: sticky;
   top: 0;
-  left: 0;
-  right: 0;
-  height: 96px;
-  z-index: 79;
+  z-index: 2;
+  height: 56px;
+  margin-bottom: -56px;
   pointer-events: none;
-  backdrop-filter: blur(18px) saturate(1.5);
-  -webkit-backdrop-filter: blur(18px) saturate(1.5);
+  backdrop-filter: blur(16px) saturate(1.4);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
   mask-image: linear-gradient(
     to bottom,
     rgba(0, 0, 0, 1) 0,
-    rgba(0, 0, 0, 0.9) 38px,
-    rgba(0, 0, 0, 0) 96px
+    rgba(0, 0, 0, 0.92) 34%,
+    rgba(0, 0, 0, 0) 100%
   );
   -webkit-mask-image: linear-gradient(
     to bottom,
     rgba(0, 0, 0, 1) 0,
-    rgba(0, 0, 0, 0.9) 38px,
-    rgba(0, 0, 0, 0) 96px
+    rgba(0, 0, 0, 0.92) 34%,
+    rgba(0, 0, 0, 0) 100%
   );
 }
-.desktop.dark .topbar-scrim {
-  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.34), rgba(0, 0, 0, 0));
-}
-.desktop:not(.dark) .topbar-scrim {
-  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0));
+/* 工具条自己贴顶，内容从它下面滚过去 */
+.pane-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
 }
 /* 系统文字默认不可选中：拖拽 / 框选时误选文字是真实困扰；输入框与预格式文本除外 */
 .desktop {

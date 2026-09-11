@@ -1,5 +1,21 @@
 # 计划修订记录
 
+## 2026-09-12：窗口内的顶部磨砂渐变（纠正上一轮的理解偏差）
+
+用户澄清：磨砂渐变要的是**窗口内部**（内容往上滚时钻进工具栏下面被吃掉），不是软件顶栏。
+
+- 撤掉上一轮加在**软件顶部**的 `.topbar-scrim`（元素与样式都删）。
+- 新增 `.split-scrim`：`position: sticky` + `top: 0` + 负 `margin-bottom`（**不占布局高度**），
+  56px 高、`backdrop-filter: blur(16px) saturate(1.4)`、向下渐隐 mask，`z-index: 2`。
+  它始终贴在滚动容器顶部，blur 作用在**从它下面滚过去的内容**上。
+- `.pane-toolbar` 改 `position: sticky; top: 0; z-index: 3`：工具条自己贴顶，内容从它下面滚过去。
+- 四个分栏窗口（文件夹 / 应用中心 / 系统设置 / Skill 中心）都插入了 `.split-scrim`。
+
+实测：`.topbar-scrim` 0 个；设置窗口与文件夹窗口各 1 个 `.split-scrim`；
+文件夹工具条 `position: sticky`；滚动 900px 后工具条 y 仍为 **146**（钉住不动）。
+
+验证：`npm run build` PASS；`npm test` 96/96；`security-surface` 17/17。
+
 ## 2026-09-12：动态壁纸换 WebGL 极光帘 + 顶栏磨砂渐变 + 侧栏玻璃 + 系统文字不可选
 
 1. **动态壁纸（Aurora）真的动起来**：把 Canvas 2D 柔光版换成 **WebGL 片段着色器**
