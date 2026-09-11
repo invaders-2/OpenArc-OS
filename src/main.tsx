@@ -1471,18 +1471,18 @@ function App() {
                 </div>
                 <Switch label="减少动态效果" checked={reduced} onChange={setReduced} />
                 <div className="setting-row">
-                  <span>
-                    材质
-                  </span>
-                  <select
-                    className="material-select"
-                    value={glass}
-                    onChange={(e) => setGlass(e.target.value as GlassMode)}
-                  >
-                    <option value="full">完整玻璃</option>
-                    <option value="reduced">降低材质</option>
-                    <option value="solid">实色</option>
-                  </select>
+                  <span>材质</span>
+                  <div className="segmented text" role="group" aria-label="材质">
+                    <button aria-pressed={glass === "full"} onClick={() => setGlass("full")}>
+                      完整玻璃
+                    </button>
+                    <button aria-pressed={glass === "reduced"} onClick={() => setGlass("reduced")}>
+                      降低材质
+                    </button>
+                    <button aria-pressed={glass === "solid"} onClick={() => setGlass("solid")}>
+                      实色
+                    </button>
+                  </div>
                 </div>
                 <div className="setting-row">
                   <span>
@@ -2126,16 +2126,17 @@ function App() {
             <Switch label="减少动态效果" checked={reduced} onChange={setReduced} />
             <div className="setting-row">
               <span>材质</span>
-              <select
-                className="material-select"
-                aria-label="材质"
-                value={glass}
-                onChange={(e) => setGlass(e.target.value as GlassMode)}
-              >
-                <option value="full">完整玻璃</option>
-                <option value="reduced">降低材质</option>
-                <option value="solid">实色</option>
-              </select>
+              <div className="segmented text" role="group" aria-label="材质">
+                <button aria-pressed={glass === "full"} onClick={() => setGlass("full")}>
+                  完整玻璃
+                </button>
+                <button aria-pressed={glass === "reduced"} onClick={() => setGlass("reduced")}>
+                  降低材质
+                </button>
+                <button aria-pressed={glass === "solid"} onClick={() => setGlass("solid")}>
+                  实色
+                </button>
+              </div>
             </div>
             <div className="cc-status">
               <Monitor size={13} /> 本机 · D1

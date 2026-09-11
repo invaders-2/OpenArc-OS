@@ -1,5 +1,20 @@
 # 计划修订记录
 
+## 2026-09-12：材质也改胶囊三态 + 同步更新 D1-04 探针的驱动方式
+
+- **材质**（完整玻璃 / 降低材质 / 实色）从 `select` 改为与"外观"同款的 `.segmented.text` 胶囊分段控件，
+  设置页与控制中心一致。实测：点击「降低材质」→ `oa-glass = reduced`、桌面 `data-glass = reduced`。
+- **D1-04 探针必须同步**：`glass-switch.mjs` / `glass-switch-stress.mjs` / `perf-product.mjs`
+  原来都靠 `page.selectOption(".material-select", tier)` **驱动产品设置窗口**（这是回归基线），
+  改成胶囊后这条路失效 —— 已把它们改成**点击对应胶囊**，回读也改为读 `aria-pressed` 的当前项、
+  再映射回 `full/reduced/solid`，**断言契约（data-glass / storage / select 三者一致）完全不变**。
+  设计系统画廊（`src/design-system/gallery.tsx`）里的 `.material-select` 属于另一个面，**保持原样**。
+
+实测：`node experiments/d1-04/glass-switch.mjs` → **exit 0**，日志逐档打印 `select 同步 storage 同步`，
+产物 `artifacts/d1-04/glass-switch.json` 中 `baseline.select = "full"`（从新控件读出来的）。
+
+验证：`npm run build` PASS；`npm test` 96/96。
+
 ## 2026-09-12：磨砂条改为「滚动才触发」+ 外观改胶囊三态 + 去掉全部小字说明
 
 1. **顶部磨砂只在内容滚上去后才出现**（用户口径：常驻太刻意）：在 `Window` 里给 body 挂一个

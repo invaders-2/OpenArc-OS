@@ -242,8 +242,9 @@ const addSynth = (page, k, layout) =>
   );
 
 // 切换产品档位并回读取证。任何一项对不上就直接抛错，不静默继续。
+const TIER_LABEL = { full: "完整玻璃", reduced: "降低材质", solid: "实色" };
 const selectTier = async (page, tier, expectSynth) => {
-  await page.selectOption(".material-select", tier, { timeout: 5000 });
+  await page.click(`.segmented.text[aria-label="材质"] button:has-text("${TIER_LABEL[tier]}")`, { timeout: 5000 });
   await page.waitForTimeout(220);
   const s = await page.evaluate(() => {
     const d = document.querySelector(".desktop");
@@ -254,7 +255,12 @@ const selectTier = async (page, tier, expectSynth) => {
       dataGlass: d?.dataset.glass ?? null,
       cls: d?.className ?? null,
       stored: localStorage.getItem("oa-glass"),
-      select: document.querySelector(".material-select")?.value ?? null,
+      select: (() => {
+        const el = document
+          .querySelector('.segmented.text[aria-label="材质"] button[aria-pressed="true"]')
+          ?.textContent?.trim();
+        return el === "完整玻璃" ? "full" : el === "降低材质" ? "reduced" : el === "实色" ? "solid" : null;
+      })(),
       winBackdrop: w ? getComputedStyle(w).backdropFilter : null,
       titleBackdrop: t ? getComputedStyle(t).backdropFilter : null,
       synthBackdrop: probe ? getComputedStyle(probe).backdropFilter : null,
