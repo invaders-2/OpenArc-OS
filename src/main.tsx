@@ -329,6 +329,21 @@ function App() {
         .filter((f) => f.parentId === shown.id)
         .filter((f) => !q || f.name.toLowerCase().includes(q))
         .sort((a, b) => (ui.sort === "name" ? a.name.localeCompare(b.name, "zh") : 0));
+      /** 条目右键菜单：打开 / 重命名 / 删除。**按 id 操作，对文件、图片、视频同样成立**。 */
+      const openEntryMenu = (x: number, y: number, entryId: string) => {
+        setPaneMenu({
+          x,
+          y,
+          items: [
+            { id: "open", label: "打开", onSelect: () => go(entryId) },
+            // 延到菜单卸载之后再进入重命名：菜单卸载时会把焦点还给触发元素，
+            // 若同步进入重命名，输入框会立刻被抢焦点而提交并消失。
+            { id: "rename", label: "重命名", onSelect: () => window.setTimeout(() => setRenaming(entryId), 0) },
+            { separator: true },
+            { id: "delete", label: "删除", danger: true, onSelect: () => removeFolder(entryId) },
+          ],
+        });
+      };
       const openPaneMenu = (x: number, y: number, which: "sort" | "content") => {
         const sortItems: MenuItem[] = [
           { id: "s-name", label: "名称", onSelect: () => patch({ sort: "name" }) },
@@ -437,17 +452,43 @@ function App() {
               ) : (
                 <div className={ui.view === "grid" ? "file-grid" : "file-list"}>
                   {children.map((f) => (
-                    <button
+                    <div
                       className="file-cell"
                       key={f.id}
+                      role="button"
+                      tabIndex={0}
                       onDoubleClick={() => go(f.id)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") go(f.id);
+                        if (e.key === "F2") setRenaming(f.id);
+                      }}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        openEntryMenu(e.clientX, e.clientY, f.id);
                       }}
                     >
                       <img className="file-icon" src={icon("folder")} alt="" draggable={false} />
-                      <span>{f.name}</span>
-                    </button>
+                      {renaming === f.id ? (
+                        <input
+                          className="folder-rename"
+                          autoFocus
+                          aria-label="名称"
+                          defaultValue={f.name}
+                          onClick={(e) => e.stopPropagation()}
+                          onDoubleClick={(e) => e.stopPropagation()}
+                          onBlur={(e) => renameFolder(f.id, e.currentTarget.value)}
+                          onKeyDown={(e) => {
+                            // 必须拦住：否则回车会冒泡到磁贴的 onKeyDown，把"提交重命名"变成"进入该文件夹"
+                            e.stopPropagation();
+                            if (e.key === "Enter") renameFolder(f.id, e.currentTarget.value);
+                            if (e.key === "Escape") setRenaming(null);
+                          }}
+                        />
+                      ) : (
+                        <span>{f.name}</span>
+                      )}
+                    </div>
                   ))}
                 </div>
               )}
@@ -688,7 +729,7 @@ function App() {
               if (f) openFolder(f);
             },
           },
-          { id: "rename", label: "重命名", onSelect: () => setRenaming(menu.folder!) },
+          { id: "rename", label: "重命名", onSelect: () => window.setTimeout(() => setRenaming(menu.folder!), 0) },
           { separator: true },
           {
             id: "delete",

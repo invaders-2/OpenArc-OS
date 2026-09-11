@@ -1194,7 +1194,13 @@ input[type="checkbox"] {
   color: var(--text);
   font-size: var(--fs-caption);
   text-align: center;
+  cursor: default;
+  user-select: none;
   transition: background var(--quick) var(--ease);
+}
+.file-cell:focus-visible {
+  outline: none;
+  background: var(--row-hover);
 }
 .file-cell:hover {
   background: var(--row-hover);
