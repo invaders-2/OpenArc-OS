@@ -49,7 +49,10 @@ const MIN_WINDOW_W = 560;
 const MIN_WINDOW_H = 400;
 
 /** 桌面工作区：顶栏之下、Dock 之上。与 src/main.tsx 既有口径一致。 */
-const AREA_TOP = 44;
+// 工作区上沿 = 软件顶栏高度（styles.css 的 .topbar 是 38px）。
+// 2026-09-12：由 44 改成 38 —— 否则"全屏铺满、只让开顶栏"的 y=38 会被
+// normalizeBounds 夹回 44，reflow 与持久化往返都不是不动点（单测抓到）。
+const AREA_TOP = 38;
 const AREA_BOTTOM = 114;
 
 /**

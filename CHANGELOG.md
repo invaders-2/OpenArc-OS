@@ -1,5 +1,18 @@
 # 计划修订记录
 
+## 2026-09-12：AREA_TOP 对齐顶栏高度 + 修正被旧几何钉住的断言
+
+- `electron/window-domain.cjs`：`AREA_TOP` 44 → **38**（= `.topbar` 高度）。
+  否则"全屏铺满、只让开顶栏"的 y=38 会被 `normalizeBounds` 夹回 44，
+  `reflow` 与持久化往返都不是不动点 —— 单测 `persistence.test.mjs` 直接抓到。
+- `window-manager.maximizedBounds` 直接引用 `AREA_TOP`，不再维护第二个常量。
+- 更新 `tests/window-manager.test.mjs` 里被旧几何钉住的断言（工作区 y、最大化宽度与 y、公式）。
+
+验证：`npm test` **96/96**；`security-surface` **15/15**；`d2-02-gate` **7/7 全通过**
+（00-instrument 14/14、06-stress 42/42）。
+注：中途几次 gate 失败已定位为**环境干扰**——我自己的 `.app` 窗口盖住了探针窗口，
+`screencapture` / `cliclick` 打不到探针；退出 `.app` 后全部恢复。
+
 ## 2026-09-12：真实文件服务 —— 任意格式拖入存储（D3-04 最小落地）
 
 用户要求：文件夹支持所有格式拖入储存（图片、视频、文件、文档等）。

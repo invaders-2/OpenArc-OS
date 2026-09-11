@@ -35,18 +35,16 @@ function areaOf(host) {
   return { x: 0, y: AREA_TOP, width, height };
 }
 
-/** 软件顶栏高度（与 styles.css 的 .topbar { height: 38px } 对齐）。 */
-const TOPBAR_H = 38;
-
 /**
  * 最大化时的落位：**铺满整个宿主，只让开软件顶栏**。
  * 旧实现留了 12 / 52 / -24 / -158 的边距，用户口径是"全窗口展示，除了软件顶部的栏"，
  * 因此这里不再留边距（Dock 会被盖住，与 macOS 全屏一致，还原即恢复）。
+ * 上沿直接用 `AREA_TOP`（= 顶栏高度）—— 与 normalizeBounds 的夹取口径同源，避免两套数。
  */
 function maximizedBounds(host) {
   const width = Math.max(MIN_WINDOW_W, Math.round(host?.width || 0));
-  const height = Math.max(MIN_WINDOW_H, Math.round((host?.height || 0) - TOPBAR_H));
-  return { x: 0, y: TOPBAR_H, w: width, h: height };
+  const height = Math.max(MIN_WINDOW_H, Math.round((host?.height || 0) - AREA_TOP));
+  return { x: 0, y: AREA_TOP, w: width, h: height };
 }
 
 const clone = (state) => ({
