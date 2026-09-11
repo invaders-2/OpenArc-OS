@@ -23,6 +23,8 @@ import {
 } from "./desktop/components";
 import type { MenuItem } from "./desktop/components";
 import { Dialog } from "./desktop/Dialog";
+import { useIdentity } from "./identity/useIdentity";
+import { BootSurface, LockScreen, LoginScreen, SetupScreen } from "./identity/AuthScreens";
 
 type DisplayInfo = {
   id: number;
@@ -39,6 +41,10 @@ declare global {
       action: (windowId: string, action: string) => Promise<{ error?: string; ok?: boolean }>;
       onNativeState: (cb: (e: Record<string, string>) => void) => () => void;
       onDisplay: (cb: (d: DisplayInfo[]) => void) => () => void;
+      identity?: {
+        command: (cmd: Record<string, unknown>) => Promise<Record<string, unknown>>;
+        onEvent: (cb: (e: { event: string; snapshot?: unknown }) => void) => () => void;
+      };
     };
   }
 }
@@ -61,8 +67,14 @@ const apps = [
 ] as const;
 
 function App() {
+  const identity = useIdentity();
+  /**
+   * 锁定时整块原生视图必须让位（§15 / §40）—— 这是唯一能盖住 WebContentsView 的机制，
+   * DOM z-index 对它无效，因此 lock 必须一路传到主进程的 overlayOpen。
+   */
+  const locked = identity.phase === "locked";
   const { state, dispatch, overlays, setOverlays, snapshotLayers, nativeVisibleOf, browserEvents, clearBrowserEvent } =
-    useDesktop();
+    useDesktop({ locked });
 
   // ---------------------------------------------------------------------------
   // 桌面对象（文件夹）仍是独立的一类状态：它们不是窗口，不进 Window Manager。
@@ -464,18 +476,62 @@ function App() {
 
   const deleteTarget = pendingDelete ? folders.find((f) => f.id === pendingDelete) : null;
 
+  /**
+   * 身份门禁（§38 / §39）。
+   *
+   *   checking        → 只画启动态。**绝不先画桌面再闪回登录**——
+   *                     恢复结果出来之前桌面内容根本不存在
+   *   uninitialized   → 只能进初始化；刷新/回退也回不到可提交的空表单之外
+   *   unauthenticated → 登录
+   *   locked          → 桌面 DOM 保留（窗口状态不丢，§40），整块 inert + 锁屏覆盖
+   *   ready / unavailable → 桌面
+   *
+   * `unavailable` = 没有主进程（浏览器 / 视觉回归环境）。
+   * 真实产品里 preload 恒在，因此它不是可绕过的后门。
+   */
+  const gate = identity.phase;
+  const showDesktop = gate === "unavailable" || gate === "ready" || gate === "locked";
+
   return (
     <div
       className={`desktop ${dark ? "dark" : ""} ${reduced ? "reduced" : ""}`}
       data-glass={glass}
+      data-identity-gate={gate}
       onContextMenu={(e) => {
+        if (!showDesktop) return;
         e.preventDefault();
         setMenu({ x: e.clientX, y: e.clientY });
       }}
     >
+      {gate === "checking" ? <BootSurface /> : null}
+
+      {gate === "uninitialized" ? (
+        <SetupScreen
+          busy={identity.busy}
+          error={identity.error}
+          onSubmit={async (input) => {
+            const res = await identity.initialize(input);
+            // 初始化成功后不自动登录：交给登录页，让"初始口令是否可用"被真实验证一次
+            if (res && res.ok) return res;
+            return res;
+          }}
+        />
+      ) : null}
+
+      {gate === "unauthenticated" ? (
+        <LoginScreen
+          busy={identity.busy}
+          error={identity.error}
+          defaultIdentifier={identity.snapshot.identifier || ""}
+          onSubmit={(input) => identity.login(input)}
+        />
+      ) : null}
+
       {/* Dialog 打开时背景必须 inert：语义层就挡住，而不是只靠 Tab 循环这一层技巧。
           display:contents 让这个包装盒不参与布局，因此不改变任何既有版式。 */}
-      <div className="desktop-surface" inert={overlays.dialog || undefined}>
+      {showDesktop ? (
+        <>
+          <div className="desktop-surface" inert={overlays.dialog || locked || undefined}>
         <TopBar
           activeTitle={activeTitle}
           focusedId={activeId}
@@ -487,6 +543,16 @@ function App() {
             setOverlays((o) => ({ ...o, ai: !o.ai }));
             bounce("__ai");
           }}
+          identity={
+            gate === "unavailable"
+              ? null
+              : {
+                  displayName: identity.snapshot.displayName,
+                  locked,
+                  onLock: () => void identity.lock(),
+                  onLogout: () => void identity.logout(),
+                }
+          }
         />
         <div className="desktop-brand">
           <div>OpenArc</div>
@@ -642,7 +708,24 @@ function App() {
           确定删除「{deleteTarget?.name}」吗？该文件夹内的内容不会随之删除。
         </p>
         <p className="muted">此操作不可撤销。</p>
-      </Dialog>
+        </Dialog>
+        </>
+      ) : null}
+
+      {/*
+        锁屏是**覆盖层**而不是页面：桌面 DOM 与窗口状态都还在（§40），
+        只是整块 inert + 原生视图已隐藏。因此解锁后窗口原样回来，
+        不存在"锁定把浏览器会话销毁"这种副作用。
+      */}
+      {gate === "locked" ? (
+        <LockScreen
+          snapshot={identity.snapshot}
+          busy={identity.busy}
+          error={identity.error}
+          onUnlock={(password) => identity.unlock(password)}
+          onLogout={() => identity.logout()}
+        />
+      ) : null}
     </div>
   );
 }

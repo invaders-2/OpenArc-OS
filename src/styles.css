@@ -1004,3 +1004,122 @@ input[type="checkbox"] {
 .dialog-footer .danger {
   color: var(--failed);
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   D3-01 · 身份界面（初始化 / 登录 / 锁屏 / 启动态）
+
+   全部沿用既有 token：**不引入任何新颜色**。
+   分层靠 surface alpha 与明度差，不用 border 描边（DESIGN_SYSTEM 0.2）。
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.auth-screen {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8);
+}
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+  padding: var(--space-8);
+  border-radius: var(--radius-xl);
+  background: rgb(var(--surface-rgb) / var(--surface-alpha));
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  box-shadow: var(--elevation-4);
+}
+.auth-card h1 {
+  font-size: var(--fs-display);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--lh-tight);
+  margin: var(--space-2) 0 var(--space-1);
+}
+.auth-card .subtitle {
+  font-size: var(--fs-secondary);
+  color: var(--muted);
+  margin: 0 0 var(--space-2);
+}
+.auth-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
+}
+.auth-actions .primary,
+.auth-actions .ghost {
+  flex: 1;
+  padding: 10px 14px;
+  font-size: var(--fs-secondary);
+}
+.auth-actions .ghost {
+  background: transparent;
+  color: var(--muted);
+}
+.auth-error {
+  margin-top: var(--space-3);
+  font-size: var(--fs-caption);
+  color: var(--failed);
+}
+.auth-error:empty {
+  display: none;
+}
+.auth-boot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+.auth-boot strong {
+  font-size: var(--fs-title);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--tracking-tight);
+}
+
+/* 锁屏：覆盖在最上层，且必须挡住原生网页视图的键盘与指针。
+   原生视图的隐藏由主进程 overlayOpen 完成（DOM z-index 对 WebContentsView 无效）。 */
+.lock-shade {
+  position: absolute;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8);
+  background: rgb(var(--base-rgb) / 0.55);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+}
+.lock-panel {
+  width: 100%;
+  max-width: 380px;
+  padding: var(--space-8);
+  border-radius: var(--radius-xl);
+  background: rgb(var(--surface-rgb) / var(--surface-alpha));
+  box-shadow: var(--elevation-5);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.lock-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--fs-title);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: var(--space-3);
+}
+.lock-name {
+  font-size: var(--fs-heading);
+  font-weight: var(--fw-medium);
+}
+.lock-panel form {
+  width: 100%;
+}

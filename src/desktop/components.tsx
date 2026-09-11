@@ -84,6 +84,16 @@ type TopBarProps = {
   onCommand: (c: WindowCommand) => void;
   onToggleSearch: () => void;
   onToggleAI: () => void;
+  /**
+   * 身份投影（D3-01）。**可选**：没有主进程时门禁不参与，顶栏保持原样。
+   * 顶栏不持有任何身份状态，只显示快照并回调命令 —— 与 §25 的单一权威一致。
+   */
+  identity?: {
+    displayName: string | null;
+    locked: boolean;
+    onLock: () => void;
+    onLogout: () => void;
+  } | null;
 };
 
 export function TopBar({
@@ -94,6 +104,7 @@ export function TopBar({
   onCommand,
   onToggleSearch,
   onToggleAI,
+  identity,
 }: TopBarProps) {
   return (
     <header className="topbar">
@@ -110,6 +121,21 @@ export function TopBar({
         <button onClick={onToggleAI} aria-label="全局 AI">
           <img className="bar-icon" src={icon("siri")} alt="" />
         </button>
+        {identity ? (
+          <>
+            <button
+              onClick={identity.onLock}
+              disabled={identity.locked}
+              aria-label="锁定屏幕"
+              data-d3-id="topbar-lock"
+            >
+              锁定
+            </button>
+            <button onClick={identity.onLogout} aria-label="退出登录" data-d3-id="topbar-logout">
+              {identity.displayName || "退出"}
+            </button>
+          </>
+        ) : null}
         <span>
           {new Date().toLocaleDateString("zh-CN", { month: "long", day: "numeric" })}
         </span>

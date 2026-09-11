@@ -50,7 +50,16 @@ function restore(): WindowStateModel {
 const host = () => ({ width: innerWidth, height: innerHeight });
 const workArea = (h: { width: number; height: number }) => manager.areaOf(h);
 
-export function useDesktop() {
+/**
+ * @param opts.locked 屏幕是否已锁定。
+ *
+ * 锁定时所有原生网页视图必须整块让位（§15 / §40）：
+ * **WebContentsView 恒定绘制在 DOM 之上，DOM z-index 对它无效**，
+ * 因此"锁屏盖住网页"只能靠主进程把视图 setVisible(false)，
+ * 而主进程唯一听得懂的信号就是这个 overlayOpen。
+ */
+export function useDesktop(opts: { locked?: boolean } = {}) {
+  const locked = !!opts.locked;
   const [state, dispatch] = useReducer(
     (s: WindowStateModel, c: WindowCommand) => manager.reduce(s, c),
     undefined,
@@ -123,7 +132,7 @@ export function useDesktop() {
   // 存在，就是两份真相。现在只有域一份，DOM 只是它的渲染投影。
   // ---------------------------------------------------------------------------
   const intents: NativeIntent[] = useMemo(() => manager.nativeIntents(state, hostSize), [state, hostSize]);
-  const overlayOpen = overlays.dialog || overlays.search || overlays.ai;
+  const overlayOpen = overlays.dialog || overlays.search || overlays.ai || locked;
 
   // 意图的稳定指纹：只有它变化才触发 IPC，避免每帧同步
   const fingerprint = useMemo(
