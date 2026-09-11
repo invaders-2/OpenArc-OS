@@ -1,5 +1,20 @@
 # 计划修订记录
 
+## 2026-09-12：顶部改为「透明磨砂」—— 只有模糊，没有底色
+
+用户原话澄清：**滚动时顶部那边的文字 / 图片会变模糊，但那一层本身没有任何底色**。
+（我前几轮把"材质底色"当成磨砂的必需品，方向错了 —— 那正是用户否掉的那块板子。）
+
+- `.window-scrim { background: none }` —— 彻底没有底色（连渐变都没有）；
+- 效果**全部来自 `backdrop-filter`**：`::before blur(20px)`（铺满整段）+
+  `::after blur(52px)`（只在最上层），各带向下渐隐 mask；
+- 只在滚动之后出现；工具条 `sticky` 保留。
+
+实测：`.window-scrim` → `background-image: none`、`background-color: rgba(0,0,0,0)`、
+`::before blur(20px)`、`::after blur(52px)`；截图里滚上去的图标被糊掉，但**没有任何色块 / 板子**。
+
+验证：`npm run build` PASS；`npm test` 96/96。
+
 ## 2026-09-12：把磨砂找回来 —— 关键是"窗面色材质层"
 
 用户连否两版，其实分别撞在两个极端：

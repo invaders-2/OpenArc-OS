@@ -1296,10 +1296,10 @@ input[type="checkbox"] {
 }
 /* 顶部磨砂层已按用户口径整层去掉，因此工具条**不再贴顶**（否则它会悬在滚动内容上、
    又没有背景可依靠）。工具条随内容一起滚。 */
-/* 窗口内部顶部磨砂：与 macOS 的 headerView 同口径 —— **一层"窗面色"材质 + 多层渐进模糊**。
-   材质底色是关键：它把背后壁纸的**颜色压住**，只留下被糊过的光影，
-   所以看起来是"磨砂玻璃"而不是"透出来的花色"（用户否掉的那版就是少了这层）。
-   只在内容滚上去后出现（见 Window 的 scrolled），底部用渐变收边，不出现硬边。 */
+/* 窗口内部顶部"透明磨砂"（用户口径，原话）：
+   **滚上去的文字 / 图片会变模糊，但这一层本身没有任何底色** —— 不是一条板子，而是"透明的糊"。
+   所以：background 必须为 none，效果全部由 backdrop-filter 提供；
+   只在内容滚上去后出现（见 Window 的 scrolled）。 */
 .window-scrim {
   position: absolute;
   top: 0;
@@ -1308,13 +1308,7 @@ input[type="checkbox"] {
   height: 76px;
   z-index: 1;
   pointer-events: none;
-  background: linear-gradient(
-    to bottom,
-    rgb(var(--surface-rgb) / calc(var(--surface-alpha) * 0.96)) 0%,
-    rgb(var(--surface-rgb) / calc(var(--surface-alpha) * 0.88)) 44%,
-    rgb(var(--surface-rgb) / calc(var(--surface-alpha) * 0.5)) 76%,
-    rgb(var(--surface-rgb) / 0) 100%
-  );
+  background: none;
 }
 /* 第 1 层：轻模糊铺满整段 → 顶部开始"化开" */
 .window-scrim::before {
