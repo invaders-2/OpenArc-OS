@@ -616,6 +616,9 @@ input[type="checkbox"] {
 }
 .window:has(.split) .split-side {
   padding-top: 44px;
+  /* 侧栏在磨砂条之上：磨砂条横跨整窗，但侧栏这块"卡片"始终盖在它上面 */
+  position: relative;
+  z-index: 2;
 }
 .split-main {
   flex: 1 1 auto;
@@ -663,20 +666,20 @@ input[type="checkbox"] {
 .window {
   container-type: inline-size;
 }
-@container (max-width: 920px) {
-  .pane-toolbar .search-field {
-    display: none;
-  }
+/* 搜索框**永不隐藏**（上一轮窄窗口直接 display:none，看起来就像"搜索被删了"）：
+   它自己会收缩，标题也早就改成单行截断，两者可以并存。 */
+.pane-toolbar .search-field {
+  flex: 1 1 auto;
+  min-width: 108px;
+  max-width: 240px;
+}
+.pane-toolbar .search-field input {
+  width: 100%;
+  min-width: 0;
 }
 @container (max-width: 780px) {
-  .pane-toolbar .icon-button[aria-label="排序方式"],
   .pane-toolbar .icon-button[aria-label="共享"],
   .pane-toolbar .icon-button[aria-label="标签"] {
-    display: none;
-  }
-}
-@container (max-width: 680px) {
-  .pane-toolbar .segmented {
     display: none;
   }
 }
@@ -1257,10 +1260,10 @@ input[type="checkbox"] {
 /* 侧栏"材质"：比正文**略亮一档** + vibrancy（提饱和提亮）—— macOS 侧栏看起来"是另一种材料"，
    靠的就是这个；同色同透明度只会像一块实心板。"实色"档仍不动。 */
 .desktop:not([data-glass="solid"]) .window:has(.split) .split-side {
-  background-color: rgb(var(--content-rgb) / 0.5);
-  background-image: linear-gradient(rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.06));
-  backdrop-filter: blur(34px) saturate(1.9) brightness(1.1);
-  -webkit-backdrop-filter: blur(34px) saturate(1.9) brightness(1.1);
+  background-color: rgb(var(--content-rgb) / 0.34);
+  background-image: linear-gradient(rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.07));
+  backdrop-filter: blur(36px) saturate(2) brightness(1.16);
+  -webkit-backdrop-filter: blur(36px) saturate(2) brightness(1.16);
 }
 .desktop:not(.dark):not([data-glass="solid"]) .window:has(.split) .split-side {
   background-image: linear-gradient(rgba(0, 0, 0, 0.035), rgba(0, 0, 0, 0.035));
@@ -1288,10 +1291,8 @@ input[type="checkbox"] {
   );
   /* 无落影：用户口径——它不该像一条贴上去的板子 */
 }
-/* 有侧栏的窗口：磨砂条**从侧栏右侧开始**，绝不盖住侧栏（侧栏自己是一块卡片） */
-.window:has(.split) .window-scrim {
-  left: 208px;
-}
+/* 磨砂条横跨**整个窗口**（含侧栏区域）；但侧栏自己在上层（z-index 2）→ 不会被压住。
+   实测：scrim x 142..972（整窗），侧栏 x 150..342 且 z-index 2 > scrim 的 1。 */
 /* 第 1 层：轻模糊，几乎覆盖整段高度 → 顶部开始"化开" */
 .window-scrim::before {
   content: "";
