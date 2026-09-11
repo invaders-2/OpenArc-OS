@@ -1,12 +1,18 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
+  Archive,
   ArrowLeft,
   ArrowRight,
   ArrowUpDown,
   Bot,
   Clock,
+  File as FileIcon,
+  FileText,
+  Film,
   Folder,
+  Image as ImageIcon,
+  Music,
   LayoutGrid,
   List,
   Lock,
@@ -66,8 +72,37 @@ declare global {
         command: (cmd: Record<string, unknown>) => Promise<Record<string, unknown>>;
         onEvent: (cb: (e: { event: string; snapshot?: unknown }) => void) => () => void;
       };
+      files?: {
+        pathFor: (file: File) => string;
+        import: (folderId: string, paths: string[]) => Promise<{ ok?: boolean; entries?: FileEntry[]; error?: string }>;
+        list: (folderId: string) => Promise<{ ok?: boolean; entries?: FileEntry[]; error?: string }>;
+        rename: (folderId: string, id: string, name: string) => Promise<{ ok?: boolean; entries?: FileEntry[]; error?: string }>;
+        remove: (folderId: string, id: string) => Promise<{ ok?: boolean; entries?: FileEntry[]; error?: string }>;
+      };
     };
   }
+}
+
+/** 文件服务返回的条目（不含磁盘路径 —— 路径永不过桥）。 */
+type FileEntry = { id: string; name: string; ext: string; size: number; mtime: number };
+
+/** 按扩展名给线性图标：App 里的图标统一线性，文件类型也一致。 */
+const FILE_KINDS: Record<string, string[]> = {
+  image: ["png", "jpg", "jpeg", "gif", "webp", "heic", "bmp", "svg", "tif", "tiff"],
+  video: ["mp4", "mov", "m4v", "avi", "mkv", "webm"],
+  audio: ["mp3", "wav", "aac", "flac", "m4a", "ogg"],
+  doc: ["pdf", "doc", "docx", "pages", "rtf"],
+  text: ["txt", "md", "json", "csv", "log", "ts", "tsx", "js", "jsx", "css", "html", "yml", "yaml", "xml"],
+  archive: ["zip", "tar", "gz", "rar", "7z"],
+};
+function FileGlyph({ ext, size }: { ext: string; size: number }) {
+  const kind = Object.keys(FILE_KINDS).find((k) => FILE_KINDS[k].includes(ext));
+  if (kind === "image") return <ImageIcon size={size} strokeWidth={1.25} />;
+  if (kind === "video") return <Film size={size} strokeWidth={1.25} />;
+  if (kind === "audio") return <Music size={size} strokeWidth={1.25} />;
+  if (kind === "doc" || kind === "text") return <FileText size={size} strokeWidth={1.25} />;
+  if (kind === "archive") return <Archive size={size} strokeWidth={1.25} />;
+  return <FileIcon size={size} strokeWidth={1.25} />;
 }
 
 // D1-04B 玻璃材质档位：单值三态。full = 完整玻璃，reduced = 降合成成本，
@@ -163,6 +198,18 @@ function App() {
   const [appTab, setAppTab] = useState<"all" | "pro" | "recent">("all");
   const [skillTab, setSkillTab] = useState<"market" | "mine" | "installed">("market");
   const [folderUI, setFolderUI] = useState<Record<string, FolderUI>>({});
+  /** 文件服务里的条目（按 folderId）。渲染层只拿索引，拿不到磁盘路径。 */
+  const [filesByFolder, setFilesByFolder] = useState<Record<string, FileEntry[]>>({});
+  const refreshFiles = useCallback(async (folderId: string) => {
+    const bridge = window.openarc?.files;
+    if (!bridge) return;
+    try {
+      const res = await bridge.list(folderId);
+      if (res && Array.isArray(res.entries)) setFilesByFolder((m) => ({ ...m, [folderId]: res.entries as FileEntry[] }));
+    } catch {
+      /* 主进程不可用时保持原样 */
+    }
+  }, []);
   const [paneMenu, setPaneMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
 
   /**
@@ -289,6 +336,18 @@ function App() {
 
   const runningApps = useMemo(() => new Set(state.windows.map((w) => w.appId)), [state.windows]);
 
+  // 文件夹窗口打开 / 切换目录后，向文件服务取一次条目（每个 folderId 只取一次）
+  useEffect(() => {
+    if (!window.openarc?.files) return;
+    const ids = new Set<string>();
+    for (const win of state.windows) {
+      if (!win.appId.startsWith(FOLDER_PREFIX)) continue;
+      const fid = folderUI[win.id]?.folderId ?? win.appId.slice(FOLDER_PREFIX.length);
+      if (fid) ids.add(fid);
+    }
+    for (const fid of ids) if (!(fid in filesByFolder)) void refreshFiles(fid);
+  }, [state.windows, folderUI, filesByFolder, refreshFiles]);
+
   /**
    * 浏览器原生视图此刻是否真的可见 —— 文案与占位必须与它一致，否则界面在撒谎。
    * 必须按 **windowId** 查（不是写死 "browser"）：同一 App 可以开多个窗口（§12），
@@ -330,18 +389,53 @@ function App() {
         .filter((f) => f.parentId === shown.id)
         .filter((f) => !q || f.name.toLowerCase().includes(q))
         .sort((a, b) => (ui.sort === "name" ? a.name.localeCompare(b.name, "zh") : 0));
-      /** 条目右键菜单：打开 / 重命名 / 删除。**按 id 操作，对文件、图片、视频同样成立**。 */
-      const openEntryMenu = (x: number, y: number, entryId: string) => {
+      /** 文件服务里的条目（真实数据；索引里**没有磁盘路径**）。 */
+      const listedFiles = (filesByFolder[shown.id] ?? []).filter((e) => !q || e.name.toLowerCase().includes(q));
+      const hasEntries = children.length + listedFiles.length > 0;
+      /** 改名：子文件夹走窗口内状态，文件走文件服务 —— 同一套按 id 的机制。 */
+      const commitRename = (entryId: string, kind: "folder" | "file", name: string) => {
+        if (kind === "folder") {
+          renameFolder(entryId, name);
+          return;
+        }
+        void window.openarc?.files
+          ?.rename(shown.id, entryId, name)
+          .then(() => refreshFiles(shown.id))
+          .finally(() => setRenaming(null));
+      };
+      const removeFile = (entryId: string) => {
+        void window.openarc?.files?.remove(shown.id, entryId).then(() => refreshFiles(shown.id));
+      };
+      /** 外部拖入：把 File 换成磁盘路径 → 交给主进程**拷贝进** userData。 */
+      const importDropped = async (dropped: FileList) => {
+        const bridge = window.openarc?.files;
+        if (!bridge) return;
+        const paths = Array.from(dropped)
+          .map((f) => bridge.pathFor(f))
+          .filter((p): p is string => !!p);
+        if (!paths.length) return;
+        await bridge.import(shown.id, paths);
+        await refreshFiles(shown.id);
+      };
+      /** 条目右键菜单：打开 / 重命名 / 删除 —— 文件夹与文件共用。 */
+      const openEntryMenu = (x: number, y: number, entryId: string, kind: "folder" | "file") => {
         setPaneMenu({
           x,
           y,
           items: [
-            { id: "open", label: "打开", onSelect: () => go(entryId) },
+            kind === "folder"
+              ? { id: "open", label: "打开", onSelect: () => go(entryId) }
+              : { id: "open", label: "打开", disabled: true, onSelect: () => {} },
             // 延到菜单卸载之后再进入重命名：菜单卸载时会把焦点还给触发元素，
             // 若同步进入重命名，输入框会立刻被抢焦点而提交并消失。
             { id: "rename", label: "重命名", onSelect: () => window.setTimeout(() => setRenaming(entryId), 0) },
             { separator: true },
-            { id: "delete", label: "删除", danger: true, onSelect: () => removeFolder(entryId) },
+            {
+              id: "delete",
+              label: "删除",
+              danger: true,
+              onSelect: () => (kind === "folder" ? removeFolder(entryId) : removeFile(entryId)),
+            },
           ],
         });
       };
@@ -439,15 +533,25 @@ function App() {
                 e.stopPropagation();
                 openPaneMenu(e.clientX, e.clientY, "content");
               }}
+              onDragOver={(e) => {
+                if (!window.openarc?.files) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "copy";
+              }}
+              onDrop={(e) => {
+                if (!window.openarc?.files) return;
+                e.preventDefault();
+                void importDropped(e.dataTransfer.files);
+              }}
             >
-              {children.length === 0 ? (
+              {!hasEntries ? (
                 <div className="empty-content">
                   <img className="large-icon" src={icon("folder")} alt="" draggable={false} />
                   <span className="badge">{q ? "无匹配项" : "暂无内容"}</span>
                   {q ? (
                     <p>没有匹配「{ui.query}」的项目。</p>
                   ) : (
-                    <p>右键可在此文件夹里新建子文件夹。文件本体与跨设备存储属于 D3 文件服务范围。</p>
+                    <p>把电脑里的文件、图片、视频、文档拖到这里即可存入；右键可新建子文件夹。</p>
                   )}
                 </div>
               ) : (
@@ -466,7 +570,7 @@ function App() {
                       onContextMenu={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        openEntryMenu(e.clientX, e.clientY, f.id);
+                        openEntryMenu(e.clientX, e.clientY, f.id, "folder");
                       }}
                     >
                       <img className="file-icon" src={icon("folder")} alt="" draggable={false} />
@@ -478,16 +582,57 @@ function App() {
                           defaultValue={f.name}
                           onClick={(e) => e.stopPropagation()}
                           onDoubleClick={(e) => e.stopPropagation()}
-                          onBlur={(e) => renameFolder(f.id, e.currentTarget.value)}
+                          onBlur={(e) => commitRename(f.id, "folder", e.currentTarget.value)}
                           onKeyDown={(e) => {
                             // 必须拦住：否则回车会冒泡到磁贴的 onKeyDown，把"提交重命名"变成"进入该文件夹"
                             e.stopPropagation();
-                            if (e.key === "Enter") renameFolder(f.id, e.currentTarget.value);
+                            if (e.key === "Enter") commitRename(f.id, "folder", e.currentTarget.value);
                             if (e.key === "Escape") setRenaming(null);
                           }}
                         />
                       ) : (
                         <span>{f.name}</span>
+                      )}
+                    </div>
+                  ))}
+                  {listedFiles.map((f) => (
+                    <div
+                      className="file-cell"
+                      key={f.id}
+                      role="button"
+                      tabIndex={0}
+                      title={f.name}
+                      onKeyDown={(e) => {
+                        if (e.key === "F2") setRenaming(f.id);
+                      }}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        openEntryMenu(e.clientX, e.clientY, f.id, "file");
+                      }}
+                    >
+                      {renaming === f.id ? null : (
+                        <span className="file-glyph">
+                          <FileGlyph ext={f.ext} size={ui.view === "grid" ? 40 : 22} />
+                        </span>
+                      )}
+                      {renaming === f.id ? (
+                        <input
+                          className="folder-rename"
+                          autoFocus
+                          aria-label="名称"
+                          defaultValue={f.name}
+                          onClick={(e) => e.stopPropagation()}
+                          onDoubleClick={(e) => e.stopPropagation()}
+                          onBlur={(e) => commitRename(f.id, "file", e.currentTarget.value)}
+                          onKeyDown={(e) => {
+                            e.stopPropagation();
+                            if (e.key === "Enter") commitRename(f.id, "file", e.currentTarget.value);
+                            if (e.key === "Escape") setRenaming(null);
+                          }}
+                        />
+                      ) : (
+                        <span className="file-name">{f.name}</span>
                       )}
                     </div>
                   ))}

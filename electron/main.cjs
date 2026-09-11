@@ -6,10 +6,12 @@ const { safeURL } = require("./policy.cjs");
 const geometry = require("./geometry.cjs");
 const { NativeViewController } = require("./native-view-controller.cjs");
 const { createIdentityService, registerIdentityIpc } = require("./identity-bootstrap.cjs");
+const { createFileService } = require("./file-service.cjs");
 
 let win;
 let controller;
 let identity;
+let files;
 
 const uiURL = pathToFileURL(path.join(__dirname, "../dist/index.html")).href;
 
@@ -127,6 +129,31 @@ app.whenReady().then(() => {
       if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return;
       win.webContents.send("identity:event", event);
     },
+  });
+
+  // ---------------------------------------------------------------------------
+  // D3-04 · 本地文件服务。和身份服务同一原则：能力在**主进程**，
+  // 渲染进程只拿到"条目索引"，拿不到任意路径读写。
+  // ---------------------------------------------------------------------------
+  files = createFileService({ userDataDir: app.getPath("userData") });
+
+  ipcMain.handle("files:import", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    const folderId = String(payload && payload.folderId ? payload.folderId : "");
+    const paths = Array.isArray(payload && payload.paths) ? payload.paths.slice(0, 200) : [];
+    return files.importPaths(folderId, paths);
+  });
+  ipcMain.handle("files:list", async (e, folderId) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    return files.list(String(folderId ?? ""));
+  });
+  ipcMain.handle("files:rename", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    return files.rename(String(payload?.folderId ?? ""), String(payload?.id ?? ""), String(payload?.name ?? ""));
+  });
+  ipcMain.handle("files:remove", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    return files.remove(String(payload?.folderId ?? ""), String(payload?.id ?? ""));
   });
 
   // ---------------------------------------------------------------------------

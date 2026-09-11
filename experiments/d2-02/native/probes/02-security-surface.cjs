@@ -13,6 +13,13 @@
  *   ② 运行时 —— 在真实外壳页里枚举 window.openarc；再挂一个不可信 http 视图，
  *      在里面确认桥接与 Node 能力都够不着，并且伪输入被策略挡掉。
  *
+ * **D3-04 变更（2026-09-12，显式登记）**：暴露面 6 → 7，新增 `files` 与通道
+ *   `files:import` / `files:list` / `files:rename` / `files:remove`。
+ *   新增内容 = `pathFor(file)`（Electron 44 起 File.path 已移除，必须由 webUtils 换路径）、
+ *   `import(folderId, paths)`（**拷贝进** userData/files/<folderId>/）、`list` / `rename` / `remove`。
+ *   **没有**暴露 fs / path / shell，也没有任意路径读取：folderId 白名单与固定根目录在
+ *   electron/file-service.cjs 里收口，渲染进程只拿到条目索引（不含磁盘路径）。
+ *
  * **D3-01 变更（2026-09-11，显式登记）**：暴露面 5 → 6，新增 `identity`
  * 与通道 `identity:command`。
  *   新增内容 = **两个方法**：`identity.command(cmd)` 派发领域命令、
@@ -29,7 +36,7 @@ const path = require("node:path");
 const ROOT = path.join(__dirname, "..", "..", "..", "..");
 
 /** 冻结清单 —— 与 electron/preload.cjs 的现状逐字对应（D3-01 后为 6 个）。 */
-const FROZEN_BRIDGE_KEYS = ["action", "identity", "navigate", "onDisplay", "onNativeState", "sync"];
+const FROZEN_BRIDGE_KEYS = ["action", "files", "identity", "navigate", "onDisplay", "onNativeState", "sync"];
 /**
  * 冻结的 IPC 通道。
  *
@@ -37,7 +44,16 @@ const FROZEN_BRIDGE_KEYS = ["action", "identity", "navigate", "onDisplay", "onNa
  * （与 UI 探针共用同一份装配），不在 main.cjs 里。只扫 main.cjs 会漏掉它，
  * 等于"新增通道不再受这条断言约束"——因此两个文件都要扫。
  */
-const FROZEN_IPC_CHANNELS = ["browser:action", "browser:navigate", "identity:command", "windows:sync"];
+const FROZEN_IPC_CHANNELS = [
+  "browser:action",
+  "browser:navigate",
+  "files:import",
+  "files:list",
+  "files:remove",
+  "files:rename",
+  "identity:command",
+  "windows:sync",
+];
 const IPC_SCAN_FILES = ["main.cjs", "identity-bootstrap.cjs"];
 /** D2-02 冻结的上一版清单（5 个），用于把"发生了什么变化"讲清楚。 */
 const PREV_BRIDGE_KEYS = ["action", "navigate", "onDisplay", "onNativeState", "sync"];
@@ -83,13 +99,18 @@ exports.run = async function run({ report, sleep, add, out }) {
     JSON.stringify(bridgeKeys) === JSON.stringify(FROZEN_BRIDGE_KEYS),
     `preload 暴露 ${JSON.stringify(bridgeKeys)}；冻结清单 ${JSON.stringify(FROZEN_BRIDGE_KEYS)}`,
   );
+  // 暴露面的每一次扩张都必须在这里**显式登记**（D3-01 identity、D3-04 files）。
+  // 断言的是"新增的键恰好是登记过的这两个、且 D2-02 的键一个没少"，
+  // 因此任何未经登记的扩张都会让这条 FAIL。
+  const REGISTERED_EXPANSIONS = ["files", "identity"];
   add(
-    "sec.bridgeExpandedOnlyByIdentity",
-    bridgeKeys.length === PREV_BRIDGE_KEYS.length + 1 &&
-      bridgeKeys.filter((k) => !PREV_BRIDGE_KEYS.includes(k)).join() === "identity" &&
+    "sec.bridgeExpansionRegistered",
+    REGISTERED_EXPANSIONS.every((k) => bridgeKeys.includes(k)) &&
+      bridgeKeys.filter((k) => !PREV_BRIDGE_KEYS.includes(k)).sort().join() === REGISTERED_EXPANSIONS.join() &&
       PREV_BRIDGE_KEYS.every((k) => bridgeKeys.includes(k)),
     `D2-02 冻结 ${PREV_BRIDGE_KEYS.length} 个成员，现在 ${bridgeKeys.length} 个` +
-      `（新增 ${JSON.stringify(bridgeKeys.filter((k) => !PREV_BRIDGE_KEYS.includes(k)))}，` +
+      `（新增 ${JSON.stringify(bridgeKeys.filter((k) => !PREV_BRIDGE_KEYS.includes(k)).sort())}，` +
+      `登记为 ${JSON.stringify(REGISTERED_EXPANSIONS)}；` +
       `移除 ${JSON.stringify(PREV_BRIDGE_KEYS.filter((k) => !bridgeKeys.includes(k)))}）`,
   );
   add(
@@ -110,9 +131,12 @@ exports.run = async function run({ report, sleep, add, out }) {
   // 每个 handler 的第一件事都必须是信任校验。
   // 两条写法都要认：`!trusted(e)`（main.cjs）与 `isTrusted && !isTrusted(e)`（bootstrap，
   // 因为信任判据由调用方注入）。判据取"handler 开头 240 字符内出现 trusted(e)"。
+  // 注意：这里**不能**让匹配本身吃掉后面 240 个字符 —— matchAll 是不重叠的，
+  // 一旦吃掉，紧挨着的下一个 handler（比如 files:* 这组短 handler）会被整段跳过，
+  // 表现为"明明写了 trusted(e) 却判 FAIL"。改为记住位置、用 slice 看窗口。
   const guarded = sorted(
-    [...ipcSrc.matchAll(/ipcMain\.handle\(\s*"([^"]+)"\s*,[\s\S]{0,240}/g)]
-      .filter((m) => /trusted\(e\)|isTrusted\(e\)/.test(m[0]))
+    [...ipcSrc.matchAll(/ipcMain\.handle\(\s*"([^"]+)"/g)]
+      .filter((m) => /trusted\(e\)|isTrusted\(e\)/.test(ipcSrc.slice(m.index, m.index + 260)))
       .map((m) => m[1]),
   );
   add(

@@ -1220,6 +1220,24 @@ input[type="checkbox"] {
   width: 22px;
   height: 22px;
 }
+/* 文件条目的线性图标（图片/视频/音频/文档/压缩包/其它） */
+.file-glyph {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  color: var(--muted);
+}
+.file-list .file-glyph {
+  width: 22px;
+  height: 22px;
+}
+.file-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .context-menu .danger {
   color: var(--failed);
 }

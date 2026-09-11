@@ -1,5 +1,28 @@
 # 计划修订记录
 
+## 2026-09-12：真实文件服务 —— 任意格式拖入存储（D3-04 最小落地）
+
+用户要求：文件夹支持所有格式拖入储存（图片、视频、文件、文档等）。
+
+- 新增 `electron/file-service.cjs`：存 `<userData>/files/<folderId>/<entryId>` + `index.json` 索引；
+  folderId 白名单 `[A-Za-z0-9_-]` 从根上堵路径穿越；重名自动加 " 2"；索引先写临时文件再 rename；
+  单个文件失败不影响整批。
+- preload 新增 `files` 桥（**暴露面 6 → 7，显式登记**）：`pathFor` / `import` / `list` / `rename` / `remove`。
+  `pathFor` 用 `webUtils.getPathForFile`（Electron 44 起 `File.path` 已移除）。
+  **没有**暴露 fs / path / shell，也没有任意路径读取；渲染进程只拿条目索引（不含磁盘路径）。
+- `main.cjs` 注册 `files:import|list|rename|remove`，全部过 `trusted(event)`；单批上限 200 个路径。
+- 渲染层：文件夹窗口 `dragover/drop` → File 换路径 → 主进程**拷贝进** userData；
+  条目网格/列表按扩展名给线性图标（图片/视频/音频/文档/文本/压缩包/其它）；
+  文件条目复用同一套右键菜单（打开/重命名/删除）与就地重命名。
+- 安全探针：冻结清单登记 `files` 与四条通道；`bridgeExpandedOnlyByIdentity` 改为
+  `bridgeExpansionRegistered`（登记 D3-01 `identity` + D3-04 `files`）。
+  **顺带修探针自身一个真实缺陷**：`guarded` 扫描用了 `[\s\S]{0,240}`，`matchAll` 不重叠，
+  会把紧邻的下一个短 handler 整段跳过 —— `files:rename` 明明写了 `trusted(e)` 却判 FAIL。
+  改为记住匹配位置、用 slice 看窗口（断言强度不变）。
+
+实测：file-service 单测（导入 3 → 重名自动改名 → 重命名 → 删除 → 路径穿越被拒）；
+`node experiments/d2-02/security-surface.mjs` **15/15 PASS**（7 个桥键、8 条通道、全部过 trusted）。
+
 ## 2026-09-12：窗口全屏铺满（只让开顶栏）+ 工具条也能拖动窗口
 
 用户反馈：软件内窗口点击全屏后应铺满整个宿主、只让开软件顶栏；窗口拖动不了。
