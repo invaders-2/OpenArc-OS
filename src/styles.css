@@ -73,7 +73,10 @@
 .desktop[data-glass="reduced"] .window {
   background: transparent;
 }
-.desktop[data-glass="reduced"] .window-title {
+/* 注意：**分栏窗口要排除**。分栏窗口的标题条只有 208px 宽、正好压在侧栏那条上，
+   若它自己也上材质，就会在侧栏之上多出一块"底框"，红绿灯像浮在一块白板上
+   （用户实测：切到"降低材质"时红绿灯穿帮）。那块区域本来由侧栏负责。 */
+.desktop[data-glass="reduced"] .window:not(:has(.split)) .window-title {
   background: rgb(var(--surface-rgb) / var(--surface-alpha));
   backdrop-filter: var(--glass-filter-window);
 }
@@ -90,7 +93,7 @@
 }
 /* 窗口顶部 inset 高光原本打在 .window 上，会被标题条底色盖住；
    原样搬到标题条，保住材质厚度（同一条已有高光，不是新增装饰）。 */
-.dark.desktop[data-glass="reduced"] .window-title {
+.dark.desktop[data-glass="reduced"] .window:not(:has(.split)) .window-title {
   box-shadow: inset 0 1px 0 var(--material-top-highlight);
 }
 /* 实色面板上的行级 hover 不能再用"同色 + alpha"：
@@ -1274,18 +1277,20 @@ input[type="checkbox"] {
 }
 /* 玻璃档：窗口正文更透 —— 桌面/壁纸能透过来，侧栏的磨砂才有东西可"磨"。
    （之前正文接近实色，侧栏背后是一块纯色，玻璃质感永远显不出来。） */
-.desktop:not([data-glass="solid"]) .window-body {
+/* **只在"完整玻璃"档生效**：降低材质 / 实色两档在设计系统（D1-04C）里的定义就是
+   "正文实色、只去掉模糊"，不能被这条透化破坏。 */
+.desktop[data-glass="full"] .window-body {
   background: rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.45));
 }
 /* 侧栏"材质"：比正文**略亮一档** + vibrancy（提饱和提亮）—— macOS 侧栏看起来"是另一种材料"，
    靠的就是这个；同色同透明度只会像一块实心板。"实色"档仍不动。 */
-.desktop:not([data-glass="solid"]) .window:has(.split) .split-side {
+.desktop[data-glass="full"] .window:has(.split) .split-side {
   background-color: rgb(var(--content-rgb) / 0.34);
   background-image: linear-gradient(rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.07));
   backdrop-filter: blur(36px) saturate(2) brightness(1.16);
   -webkit-backdrop-filter: blur(36px) saturate(2) brightness(1.16);
 }
-.desktop:not(.dark):not([data-glass="solid"]) .window:has(.split) .split-side {
+.desktop[data-glass="full"]:not(.dark) .window:has(.split) .split-side {
   background-image: linear-gradient(rgba(0, 0, 0, 0.035), rgba(0, 0, 0, 0.035));
 }
 /* 窗口内部的"顶部磨砂渐变"：内容往上滚时钻进工具栏下面、被逐渐吃掉（Finder 口径）。
@@ -1305,11 +1310,12 @@ input[type="checkbox"] {
   /* **不要全实心**：正文只有 ~0.27，顶部若给 100% 就会出现一条硬边实心横带
      （用户实测：窗口顶部"多了一个小框"）。改成与正文同一透明度起步 —— 完全无缝，
      靠下面那两层强模糊把滚上去的内容糊到不可读（这才是"不穿帮"的正解）。 */
+  /* 用户口径：这条渐变的透明度再降 50%（原来略抢眼） */
   background: linear-gradient(
     to bottom,
-    rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.45)) 0%,
-    rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.38)) 40%,
-    rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.16)) 72%,
+    rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.225)) 0%,
+    rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.19)) 40%,
+    rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.08)) 72%,
     rgb(var(--content-rgb) / 0) 100%
   );
   /* 无落影：用户口径——它不该像一条贴上去的板子 */
@@ -1343,15 +1349,15 @@ input[type="checkbox"] {
 .desktop.dark .window-scrim {
   background-image: linear-gradient(
       to bottom,
-      rgba(255, 255, 255, 0.03) 0%,
-      rgba(255, 255, 255, 0.012) 44%,
+      rgba(255, 255, 255, 0.015) 0%,
+      rgba(255, 255, 255, 0.006) 44%,
       rgba(255, 255, 255, 0) 100%
     ),
     linear-gradient(
       to bottom,
-      rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.45)) 0%,
-      rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.38)) 40%,
-      rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.16)) 72%,
+      rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.225)) 0%,
+      rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.19)) 40%,
+      rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.08)) 72%,
       rgb(var(--content-rgb) / 0) 100%
     );
 }
