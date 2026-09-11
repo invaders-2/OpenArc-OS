@@ -1,5 +1,21 @@
 # 计划修订记录
 
+## 2026-09-12：Quick Look 空格预览 + 全屏 Dock 自动隐藏 + 显示方式改胶囊
+
+用户反馈 4 项，本批完成 1–3：
+
+1. **空格 Quick Look**：`file-service` 新增 `read(folderId, id)`（>12MB 直接拒绝；只回
+   data URL / 文本，**不回磁盘路径**），preload / main / 安全探针冻结清单同步登记 `files:read`。
+   文件夹里点选条目后按**空格**打开预览：图片 / 视频 / 音频 / 文本；Escape 或再按空格关闭。
+   CSP 增加 media-src self data:（音视频预览必需，data: 无外联能力）。
+2. **全屏 Dock 自动隐藏**：任一窗口最大化时 Dock 下沉隐藏，底部 8px hover 带唤回。
+3. **显示方式（网格/列表）改胶囊**：`.segmented` 与其按钮圆角改为 `--radius-pill`。
+
+实测：file-service read 单测（png → data:image/png;base64、md → 文本、不存在 → NOT_FOUND）；
+`npm test` 96/96；`security-surface` 15/15；浏览器核对全屏后 `.dock.hidden=1` + `.dock-hint=1`。
+
+**未完成**：4. 引入 Spectrum 源码（构建级重构，方案与影响见对话）。
+
 ## 2026-09-12：AREA_TOP 对齐顶栏高度 + 修正被旧几何钉住的断言
 
 - `electron/window-domain.cjs`：`AREA_TOP` 44 → **38**（= `.topbar` 高度）。

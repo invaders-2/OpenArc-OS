@@ -155,6 +155,10 @@ app.whenReady().then(() => {
     if (!trusted(e)) throw Error("Forbidden");
     return files.remove(String(payload?.folderId ?? ""), String(payload?.id ?? ""));
   });
+  ipcMain.handle("files:read", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    return files.read(String(payload?.folderId ?? ""), String(payload?.id ?? ""));
+  });
 
   // ---------------------------------------------------------------------------
   // 原生视图控制器。它不拥有任何 Window domain 业务规则 ——

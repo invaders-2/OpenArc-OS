@@ -190,11 +190,19 @@ type DockProps = {
    */
   onActivate: (appId: string) => void;
   onToggleAI: () => void;
+  /** 全屏时自动隐藏（底部留一条 hover 带把它唤回来）。 */
+  hidden?: boolean;
+  onPointerLeave?: () => void;
 };
 
-export function Dock({ apps, runningApps, bouncing, dockRef, onActivate, onToggleAI }: DockProps) {
+export function Dock({ apps, runningApps, bouncing, dockRef, onActivate, onToggleAI, hidden, onPointerLeave }: DockProps) {
   return (
-    <nav className="dock" aria-label="应用栏" ref={dockRef}>
+    <nav
+      className={`dock ${hidden ? "hidden" : ""}`}
+      aria-label="应用栏"
+      ref={dockRef}
+      onPointerLeave={onPointerLeave}
+    >
       {apps.map((a) => (
         <DockItem
           key={a.id}

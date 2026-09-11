@@ -78,6 +78,15 @@ declare global {
         list: (folderId: string) => Promise<{ ok?: boolean; entries?: FileEntry[]; error?: string }>;
         rename: (folderId: string, id: string, name: string) => Promise<{ ok?: boolean; entries?: FileEntry[]; error?: string }>;
         remove: (folderId: string, id: string) => Promise<{ ok?: boolean; entries?: FileEntry[]; error?: string }>;
+        read: (folderId: string, id: string) => Promise<{
+          ok?: boolean;
+          entry?: FileEntry;
+          mime?: string;
+          kind?: string;
+          dataUrl?: string;
+          text?: string;
+          error?: string;
+        }>;
       };
     };
   }
@@ -210,6 +219,44 @@ function App() {
       /* 主进程不可用时保持原样 */
     }
   }, []);
+  /** 当前选中的条目（按 windowId），Quick Look 的目标。 */
+  const [selected, setSelected] = useState<Record<string, string>>({});
+  const [preview, setPreview] = useState<{
+    entry: FileEntry;
+    mime: string;
+    kind: string;
+    dataUrl?: string;
+    text?: string;
+  } | null>(null);
+  /** 打开 Quick Look：只认 id，主进程回 data URL / 文本（**不暴露磁盘路径**）。 */
+  const openPreview = useCallback(
+    async (folderId: string, entryId: string) => {
+      const bridge = window.openarc?.files;
+      if (!bridge) return;
+      const known = (filesByFolder[folderId] ?? []).find((e) => e.id === entryId);
+      const res = await bridge.read(folderId, entryId);
+      if (!res || !res.ok || !res.entry) return;
+      setPreview({
+        entry: res.entry ?? known!,
+        mime: String(res.mime ?? ""),
+        kind: String(res.kind ?? "other"),
+        dataUrl: res.dataUrl,
+        text: res.text,
+      });
+    },
+    [filesByFolder],
+  );
+  /** 键盘回调里读最新状态用（避免把整套 state 塞进 effect 依赖）。 */
+  const quickLookRef = useRef<() => void>(() => {});
+  quickLookRef.current = () => {
+    const fid = state.focused;
+    if (!fid) return;
+    const folderId =
+      folderUI[fid]?.folderId ?? (fid.startsWith(FOLDER_PREFIX) ? fid.slice(FOLDER_PREFIX.length) : null);
+    const entryId = selected[fid];
+    if (!folderId || !entryId) return;
+    void openPreview(folderId, entryId);
+  };
   const [paneMenu, setPaneMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
 
   /**
@@ -325,9 +372,17 @@ function App() {
         e.preventDefault();
         setOverlays((o) => ({ ...o, search: !o.search }));
       }
+      // 空格 = Quick Look（只在有选中条目、且焦点不在输入框里时）
+      const t = e.target as HTMLElement | null;
+      const typing = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+      if (e.code === "Space" && !typing) {
+        e.preventDefault();
+        quickLookRef.current();
+      }
       if (e.key === "Escape") {
         setOverlays((o) => ({ ...o, search: false, ai: false, control: false }));
         setMenu(null);
+        setPreview(null);
       }
     };
     window.addEventListener("keydown", key);
@@ -335,6 +390,9 @@ function App() {
   }, [setOverlays]);
 
   const runningApps = useMemo(() => new Set(state.windows.map((w) => w.appId)), [state.windows]);
+  /** 任一窗口全屏 → Dock 自动隐藏；指针碰到底部才唤回。 */
+  const anyMaximized = state.windows.some((w) => w.state === domain.WSTATE.MAXIMIZED);
+  const [dockPeek, setDockPeek] = useState(false);
 
   // 文件夹窗口打开 / 切换目录后，向文件服务取一次条目（每个 folderId 只取一次）
   useEffect(() => {
@@ -597,11 +655,12 @@ function App() {
                   ))}
                   {listedFiles.map((f) => (
                     <div
-                      className="file-cell"
+                      className={`file-cell ${selected[id] === f.id ? "selected" : ""}`}
                       key={f.id}
                       role="button"
                       tabIndex={0}
                       title={f.name}
+                      onClick={() => setSelected((m) => ({ ...m, [id]: f.id }))}
                       onKeyDown={(e) => {
                         if (e.key === "F2") setRenaming(f.id);
                       }}
@@ -1115,11 +1174,16 @@ function App() {
             {content(w.id)}
           </DesktopWindow>
         ))}
+        {anyMaximized && !dockPeek ? (
+          <div className="dock-hint" onPointerEnter={() => setDockPeek(true)} aria-hidden="true" />
+        ) : null}
         <Dock
           apps={apps}
           runningApps={runningApps}
           bouncing={bouncing}
           dockRef={dockRef}
+          hidden={anyMaximized && !dockPeek}
+          onPointerLeave={() => setDockPeek(false)}
           onActivate={activateApp}
           onToggleAI={() => {
             setOverlays((o) => ({ ...o, ai: !o.ai }));
@@ -1213,6 +1277,34 @@ function App() {
                   <ArrowRight size={16} />
                 </button>
               ))}
+          </div>
+        </div>
+      ) : null}
+
+      {preview ? (
+        <div className="quicklook" role="dialog" aria-modal="true" aria-label="快速查看" onClick={() => setPreview(null)}>
+          <div className="quicklook-card" onClick={(e) => e.stopPropagation()}>
+            <div className="quicklook-body">
+              {preview.kind === "image" && preview.dataUrl ? (
+                <img src={preview.dataUrl} alt={preview.entry.name} draggable={false} />
+              ) : preview.kind === "video" && preview.dataUrl ? (
+                <video src={preview.dataUrl} controls autoPlay />
+              ) : preview.kind === "audio" && preview.dataUrl ? (
+                <audio src={preview.dataUrl} controls autoPlay />
+              ) : preview.kind === "text" ? (
+                <pre className="quicklook-text">{preview.text}</pre>
+              ) : preview.kind === "pdf" ? (
+                <p className="muted">PDF 预览需要后续接入只读文件协议（当前不开放 data: 框架）。</p>
+              ) : (
+                <p className="muted">
+                  暂不支持预览该格式{preview.entry.ext ? "（." + preview.entry.ext + "）" : ""}。
+                </p>
+              )}
+            </div>
+            <div className="quicklook-name">
+              {preview.entry.name}
+              <span className="muted">空格 / Esc 关闭</span>
+            </div>
           </div>
         </div>
       ) : null}

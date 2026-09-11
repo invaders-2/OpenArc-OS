@@ -49,6 +49,7 @@ const FROZEN_IPC_CHANNELS = [
   "browser:navigate",
   "files:import",
   "files:list",
+  "files:read",
   "files:remove",
   "files:rename",
   "identity:command",

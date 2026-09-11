@@ -126,7 +126,52 @@ function createFileService({ userDataDir }) {
     return { ok: true, entries: next };
   }
 
-  return { importPaths, list, rename, remove };
+  /**
+   * 读取条目内容，给渲染层做 Quick Look 预览。
+   * 只返回 **data URL / 文本**，不返回磁盘路径；超过上限的直接拒绝（避免把大文件塞进 IPC）。
+   */
+  const MIME = {
+    png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp",
+    svg: "image/svg+xml", bmp: "image/bmp", ico: "image/x-icon", avif: "image/avif",
+    mp4: "video/mp4", mov: "video/quicktime", m4v: "video/x-m4v", webm: "video/webm",
+    mp3: "audio/mpeg", wav: "audio/wav", m4a: "audio/mp4", aac: "audio/aac", ogg: "audio/ogg", flac: "audio/flac",
+    pdf: "application/pdf", txt: "text/plain", md: "text/markdown", json: "application/json",
+    csv: "text/csv", log: "text/plain", xml: "text/xml", yml: "text/yaml", yaml: "text/yaml",
+  };
+  const MAX_READ = 12 * 1024 * 1024;
+  const TEXT_LIMIT = 200000;
+
+  function read(folderId, id) {
+    const dir = dirOf(folderId);
+    if (!dir) return { ok: false, error: "INVALID_INPUT" };
+    const entry = readIndex(dir).find((e) => e.id === id);
+    if (!entry) return { ok: false, error: "NOT_FOUND" };
+    try {
+      const file = path.join(dir, String(id));
+      const st = fs.statSync(file);
+      if (st.size > MAX_READ) return { ok: false, error: "TOO_LARGE", entry };
+      const buf = fs.readFileSync(file);
+      const mime = MIME[entry.ext] || "application/octet-stream";
+      const kind = mime.startsWith("image/")
+        ? "image"
+        : mime.startsWith("video/")
+          ? "video"
+          : mime.startsWith("audio/")
+            ? "audio"
+            : mime === "application/pdf"
+              ? "pdf"
+              : mime.startsWith("text/") || mime === "application/json"
+                ? "text"
+                : "other";
+      const out = { ok: true, entry, mime, kind, dataUrl: "data:" + mime + ";base64," + buf.toString("base64") };
+      if (kind === "text") out.text = buf.toString("utf8").slice(0, TEXT_LIMIT);
+      return out;
+    } catch {
+      return { ok: false, error: "INTERNAL_ERROR", entry };
+    }
+  }
+
+  return { importPaths, list, rename, remove, read };
 }
 
 module.exports = { createFileService };

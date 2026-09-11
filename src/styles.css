@@ -417,6 +417,7 @@ p {
   bottom: 20px;
   left: 50%;
   transform: translateX(-50%);
+  transition: transform var(--standard) var(--ease), opacity var(--standard) var(--ease);
   background: rgb(var(--bar-rgb) / var(--bar-alpha));
   backdrop-filter: var(--glass-filter-dock);
   /* D2-02 保留：Dock 的大圆角；最近刻度 16px 差 4px，属可见变化 */
@@ -427,6 +428,20 @@ p {
   padding: 9px 10px 2px;
   gap: 5px;
   z-index: 85;
+}
+/* 全屏时 Dock 自动隐藏：底部 8px 的 hover 带把它唤回来 */
+.dock.hidden {
+  transform: translateX(-50%) translateY(90px);
+  opacity: 0;
+  pointer-events: none;
+}
+.dock-hint {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 8px;
+  z-index: 86;
 }
 .dock-item {
   --s: 1;
@@ -1172,6 +1187,71 @@ input[type="checkbox"] {
 .search-field:focus-within {
   background: rgb(var(--text-rgb) / 0.08);
 }
+/* Quick Look：空格预览（图片/视频/音频/文本） */
+.quicklook {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: grid;
+  place-items: center;
+  padding: 48px;
+  background: rgb(0 0 0 / 0.55);
+  backdrop-filter: blur(6px);
+}
+.quicklook-card {
+  max-width: min(920px, 82vw);
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: var(--radius-xl);
+  background: rgb(var(--surface-rgb) / var(--surface-alpha));
+  box-shadow: var(--elevation-4);
+}
+.quicklook-body {
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  overflow: auto;
+}
+.quicklook-body img,
+.quicklook-body video {
+  max-width: 100%;
+  max-height: 68vh;
+  border-radius: var(--radius-md);
+}
+.quicklook-text {
+  max-width: 780px;
+  max-height: 68vh;
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.quicklook-name {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: var(--fs-caption);
+}
+.file-cell.selected {
+  background: rgb(var(--text-rgb) / 0.1);
+}
+/* 查看方式：胶囊形分段控件 */
+.segmented {
+  border-radius: var(--radius-pill);
+}
+.segmented button {
+  border-radius: var(--radius-pill);
+}
+
 /* 文件夹内容：图标网格 / 列表 */
 .file-grid {
   display: grid;
