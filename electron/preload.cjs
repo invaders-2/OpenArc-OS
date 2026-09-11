@@ -27,4 +27,21 @@ contextBridge.exposeInMainWorld("openarc", {
     ipcRenderer.on("display:changed", listener);
     return () => ipcRenderer.removeListener("display:changed", listener);
   },
+
+  /**
+   * D3-01 身份桥。
+   *
+   * **只有两条能力**：派发领域命令、订阅身份事件。没有第三个口子。
+   * 特别注意：这里**不存在**任何读取 session token 的方法 ——
+   * 渲染进程拿不到 token，因此也就不可能把它写进 localStorage（§10 / §11）。
+   * 命令的返回值由主进程 sanitize 后再过桥（token / verifier 一律不过）。
+   */
+  identity: {
+    command: (command) => ipcRenderer.invoke("identity:command", command),
+    onEvent: (callback) => {
+      const listener = (_, event) => callback(event);
+      ipcRenderer.on("identity:event", listener);
+      return () => ipcRenderer.removeListener("identity:event", listener);
+    },
+  },
 });
