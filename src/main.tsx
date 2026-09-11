@@ -298,14 +298,16 @@ function App() {
       return (
         <div className="split">
           <nav className="split-side" aria-label="应用分类">
+            <div className="split-section">应用</div>
             <button className="split-nav" aria-current={appTab === "all"} onClick={() => setAppTab("all")}>
               <LayoutGrid size={15} /> 全部应用
             </button>
-            <button className="split-nav" aria-current={appTab === "pro"} onClick={() => setAppTab("pro")}>
-              <Wand2 size={15} /> 专业应用
-            </button>
             <button className="split-nav" aria-current={appTab === "recent"} onClick={() => setAppTab("recent")}>
               <Clock size={15} /> 最近使用
+            </button>
+            <div className="split-section">专业</div>
+            <button className="split-nav" aria-current={appTab === "pro"} onClick={() => setAppTab("pro")}>
+              <Wand2 size={15} /> 专业应用
             </button>
           </nav>
           <div className="split-main">
@@ -406,6 +408,7 @@ function App() {
       return (
         <div className="split">
           <nav className="split-side" aria-label="设置分类">
+            <div className="split-section">系统</div>
             <button
               className="split-nav"
               aria-current={settingsTab === "appearance"}
@@ -468,12 +471,14 @@ function App() {
       return (
         <div className="split">
           <nav className="split-side" aria-label="Skill 分类">
+            <div className="split-section">Skill</div>
             <button className="split-nav" aria-current={skillTab === "market"} onClick={() => setSkillTab("market")}>
               <Store size={15} /> 市场
             </button>
             <button className="split-nav" aria-current={skillTab === "mine"} onClick={() => setSkillTab("mine")}>
               <User size={15} /> 我的技能
             </button>
+            <div className="split-section">本机</div>
             <button
               className="split-nav"
               aria-current={skillTab === "installed"}

@@ -1,5 +1,18 @@
 # 计划修订记录
 
+## 2026-09-12：侧栏按 Finder 口径重做（贴边通高 + 分组 + 灰色选中）
+
+用户以原生 Finder 侧栏为参照复审：「左侧边栏要这样」。上一版的"内缩浮层卡片"方向不对。
+
+- `.split-side`：去掉 margin / 圆角 / 投影，改为**贴左上左下边、通高**（窗口自身
+  `overflow:hidden` 负责圆角裁切），只用一层 `rgb(var(--text-rgb) / 0.04)` 半透明材质
+  与内容区分；深色下是"略亮"而不是"更深"。
+- 新增 `.split-section` 分组标题（muted、micro 字号），三处侧栏分组：
+  应用（应用 / 专业）、设置（系统）、Skill（Skill / 本机）。
+- 选中态由 accent 胶囊改为 **Finder 式灰色高亮** `rgb(var(--text-rgb) / 0.1)`。
+
+实测：`npm run build` PASS；`npm test` 96/96；深色截图核对（`artifacts/ui-fix/finder-sidebar-*.png`）。
+
 ## 2026-09-12：浮层侧栏 + 窗口内红绿灯换原生符号（复审修正）
 
 用户复审分栏效果：「左侧边栏是浮窗效果，跟原生 Apple Mac 那样，不需要深灰色底色框」；

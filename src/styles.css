@@ -549,20 +549,25 @@ input[type="checkbox"] {
   min-height: 0;
 }
 .split-side {
-  flex: 0 0 176px;
+  flex: 0 0 196px;
   min-height: 0;
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  /* 类 macOS vibrancy 的浮窗侧栏：不用实心深灰底 ——
-     用"随主题变亮/变暗"的半透明材质 + 圆角 + 投影，浮在窗口背景之上。 */
-  margin: 10px 0 10px 10px;
-  padding: 8px;
-  border-radius: var(--radius-lg);
-  background: rgb(var(--text-rgb) / 0.05);
+  gap: 1px;
+  padding: 8px 10px 12px;
+  /* macOS 侧栏（参照 Finder）：贴左/上/下边、通高、无圆角无投影；
+     只用一层"随主题变亮"的半透明材质与内容区分，不用实心底色框。 */
+  background: rgb(var(--text-rgb) / 0.04);
   backdrop-filter: var(--glass-filter-window);
-  box-shadow: var(--elevation-1);
+}
+.split-section {
+  padding: 13px 8px 5px;
+  font-size: var(--fs-micro);
+  color: var(--muted);
+}
+.split-side > .split-section:first-child {
+  padding-top: 5px;
 }
 .split-main {
   flex: 1 1 auto;
@@ -588,8 +593,9 @@ input[type="checkbox"] {
   background: rgb(var(--text-rgb) / 0.06);
 }
 .split-nav[aria-current="true"] {
-  background: var(--accent);
-  color: var(--on-accent);
+  /* Finder 式选中态：灰色高亮，而不是彩色/高对比胶囊 */
+  background: rgb(var(--text-rgb) / 0.1);
+  color: var(--text);
   font-weight: var(--fw-medium);
 }
 .split-nav svg {
