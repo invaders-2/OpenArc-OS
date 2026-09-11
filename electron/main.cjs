@@ -1,37 +1,28 @@
-const {
-  app,
-  BrowserWindow,
-  WebContentsView,
-  ipcMain,
-  session,
-  screen,
-} = require("electron");
+const { app, BrowserWindow, ipcMain, screen } = require("electron");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
-const { safeURL, safeBounds } = require("./policy.cjs");
+const { safeURL } = require("./policy.cjs");
 const geometry = require("./geometry.cjs");
-let win, view;
+const { NativeViewController } = require("./native-view-controller.cjs");
+
+let win;
+let controller;
+
 const uiURL = pathToFileURL(path.join(__dirname, "../dist/index.html")).href;
+
+/**
+ * 只接受来自本应用外壳页的调用。
+ * 双重条件（sender + senderFrame.url）在 D1-05 冻结，本阶段不放宽。
+ */
 function trusted(event) {
   return event.sender === win?.webContents && event.senderFrame?.url === uiURL;
 }
-function publish(error = "") {
-  if (win && !win.isDestroyed() && view && !view.webContents.isDestroyed())
-    win.webContents.send("browser:state", {
-      url: view.webContents.getURL(),
-      loading: view.webContents.isLoading(),
-      title: view.webContents.getTitle(),
-      error,
-    });
-}
+
 const isMac = process.platform === "darwin";
 const glass = isMac
-  ? {
-      transparent: true,
-      vibrancy: "under-window",
-      backgroundColor: "#00000000",
-    }
+  ? { transparent: true, vibrancy: "under-window", backgroundColor: "#00000000" }
   : { backgroundMaterial: "mica", backgroundColor: "#00000000" };
+
 app.whenReady().then(() => {
   win = new BrowserWindow({
     width: 1440,
@@ -47,8 +38,11 @@ app.whenReady().then(() => {
       sandbox: true,
     },
   });
+
+  // ---------------------------------------------------------------------------
   // A05：显示器变化后必须把原生窗口拉回可见工作区。
   // Electron 的 setBounds 不做可见性校验，窗口落在已拔掉的屏幕上不会被自动归位。
+  // ---------------------------------------------------------------------------
   const displayInfo = () =>
     screen.getAllDisplays().map((d) => ({
       id: d.id,
@@ -70,100 +64,70 @@ app.whenReady().then(() => {
       height: Math.max(geometry.MIN_H, Math.min(b.height, p.height - 80)),
     });
   };
-  const publishDisplays = () => {
-    if (win && !win.isDestroyed())
-      win.webContents.send("display:changed", displayInfo());
-  };
-  for (const event of [
-    "display-added",
-    "display-removed",
-    "display-metrics-changed",
-  ])
+  for (const event of ["display-added", "display-removed", "display-metrics-changed"])
     screen.on(event, () => {
       ensureWindowVisible();
-      publishDisplays();
+      if (win && !win.isDestroyed()) win.webContents.send("display:changed", displayInfo());
     });
+
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   win.webContents.on("will-navigate", (e, url) => {
     if (url !== uiURL) e.preventDefault();
   });
-  const isolated = session.fromPartition("openarc-browser-d1");
-  isolated.setPermissionRequestHandler((_wc, _p, cb) => cb(false));
-  isolated.setPermissionCheckHandler(() => false);
-  isolated.on("will-download", (e) => {
-    e.preventDefault();
-    publish("D1 尚未启用下载管理，下载已阻止。");
-  });
-  view = new WebContentsView({
-    webPreferences: {
-      session: isolated,
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true,
-      webSecurity: true,
+
+  // ---------------------------------------------------------------------------
+  // 原生视图控制器。它不拥有任何 Window domain 业务规则 ——
+  // 窗口该不该存在、谁被聚焦、层级如何，全部由渲染进程的 Window Manager 决定，
+  // 通过 windows:sync 把"意图"传下来（ADR §35 / §36）。
+  // ---------------------------------------------------------------------------
+  controller = new NativeViewController({
+    parent: win.contentView,
+    // 事实：隐藏视图只让焦点落空、不交还外壳。必须显式移交，否则"键盘没有人收到"。
+    onFocusShell: () => {
+      if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.focus();
+    },
+    onEvent: (payload) => {
+      if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return;
+      win.webContents.send("native:state", payload);
     },
   });
-  win.contentView.addChildView(view);
-  view.setVisible(false);
-  view.webContents.setWindowOpenHandler(() => {
-    publish("弹出窗口已阻止，请在地址栏打开链接。");
-    return { action: "deny" };
-  });
-  for (const name of ["will-navigate", "will-redirect"])
-    view.webContents.on(name, (e, url) => {
-      if (!safeURL(url)) {
-        e.preventDefault();
-        publish("仅允许 HTTP / HTTPS 网页。");
-      }
+
+  ipcMain.handle("windows:sync", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    const intents = Array.isArray(payload?.intents) ? payload.intents : [];
+    if (intents.length > 32) return { error: "窗口数量超出上限" };
+    const results = await controller.sync(intents, {
+      overlayOpen: !!payload?.overlayOpen,
+      interactive: payload?.interactive !== false,
     });
-  view.webContents.on("will-attach-webview", (e) => e.preventDefault());
-  for (const name of [
-    "did-navigate",
-    "did-navigate-in-page",
-    "did-start-loading",
-    "did-stop-loading",
-    "page-title-updated",
-  ])
-    view.webContents.on(name, () => publish());
-  view.webContents.on("did-fail-load", (_e, code, description, _url, main) => {
-    if (main && code !== -3) publish(`网页加载失败：${description}`);
+    return { ok: true, results };
   });
-  ipcMain.handle("browser:navigate", async (e, url) => {
+
+  ipcMain.handle("browser:navigate", async (e, payload) => {
     if (!trusted(e)) throw Error("Forbidden");
-    const valid = typeof url === "string" && safeURL(url);
-    if (!valid)
-      return {
-        error: "请输入完整 HTTP / HTTPS 地址，不支持其他协议或含凭据的网址。",
-      };
-    try {
-      await view.webContents.loadURL(valid);
-      return { ok: true };
-    } catch {
-      return { error: "网页加载失败，请检查网络或地址。" };
-    }
+    const windowId = String(payload?.windowId ?? "");
+    const url = payload?.url;
+    if (typeof url !== "string" || !safeURL(url))
+      return { error: "请输入完整 HTTP / HTTPS 地址，不支持其他协议或含凭据的网址。" };
+    const res = controller.navigate(windowId, url);
+    return res.error ? res : { ok: true };
   });
-  ipcMain.handle("browser:layout", (e, p) => {
+
+  ipcMain.handle("browser:action", async (e, payload) => {
     if (!trusted(e)) throw Error("Forbidden");
-    const b = safeBounds(p?.bounds, win.getContentSize());
-    if (!b || !p.visible) {
-      view.setVisible(false);
-      return;
-    }
-    view.setBounds(b);
-    view.setVisible(b.width > 0 && b.height > 0);
+    return controller.act(String(payload?.windowId ?? ""), String(payload?.action ?? ""));
   });
-  ipcMain.handle("browser:action", (e, action) => {
-    if (!trusted(e)) throw Error("Forbidden");
-    const h = view.webContents.navigationHistory;
-    if (action === "back" && h.canGoBack()) h.goBack();
-    if (action === "forward" && h.canGoForward()) h.goForward();
-    if (action === "reload") view.webContents.reload();
-  });
+
   win.on("closed", () => {
-    if (view && !view.webContents.isDestroyed()) view.webContents.close();
+    controller?.destroyAll();
+    controller = null;
     win = null;
   });
+
   win.loadURL(uiURL);
-  win.webContents.once("did-finish-load", publishDisplays);
+  win.webContents.once("did-finish-load", () => {
+    if (win && !win.isDestroyed()) win.webContents.send("display:changed", displayInfo());
+  });
 });
+
 app.on("window-all-closed", () => app.quit());
