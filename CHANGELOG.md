@@ -1,5 +1,22 @@
 # 计划修订记录
 
+## 2026-09-12：动态壁纸换 WebGL 极光帘 + 顶栏磨砂渐变 + 侧栏玻璃 + 系统文字不可选
+
+1. **动态壁纸（Aurora）真的动起来**：把 Canvas 2D 柔光版换成 **WebGL 片段着色器**
+   （对齐 reactbits.dev/backgrounds/aurora 的极光帘观感）：5 阶 fbm 噪声塑形的三层帘幕横向漂移，
+   颜色用用户给的三色 `#6b6b6b / #717171 / #292929`；无第三方依赖；`reduced` 时冻结时间；
+   WebGL 不可用时回退到 Canvas 2D。
+   实测：canvas 拿到 `webgl` 上下文，相隔 1.4s 的两帧**不同**（218720 → 219392 字节）。
+2. **顶栏磨砂渐变**：新增 `.topbar-scrim` —— fixed / 96px / `backdrop-filter: blur(18px) saturate(1.5)` /
+   向下渐隐 mask / `z-index: 79`（正好在顶栏 80 之下、窗口之上）：窗口往上滑到顶栏下面时会被它"吃掉"。
+3. **侧栏玻璃更透**：`.desktop:not([data-glass="solid"]) .window:has(.split) .split-side` 用
+   `calc(var(--content-alpha) * 0.72)` + `blur(30px) saturate(1.7)`（"实色"档不动，尊重它的语义）。
+   实测计算值 `rgba(23,23,23,0.43)` + `blur(30px) saturate(1.7)`。
+4. **系统文字不可选中**：`.desktop { user-select: none }`；输入框 / `textarea` / `contenteditable` /
+   `.quicklook-text` / `pre` 仍可选中。实测 `.desktop` 计算值 `user-select: none`。
+
+验证：`npm run build` PASS；`npm test` 96/96；`security-surface` 17/17。
+
 ## 2026-09-12：排查「软件空白」+ 加两道防白屏兜底
 
 用户报"软件空白了"。**排查结论：应用本身没有白屏。** 证据链：

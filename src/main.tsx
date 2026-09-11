@@ -167,6 +167,99 @@ function AuroraBackground({ reduced }: { reduced: boolean }) {
   useEffect(() => {
     const cvs = ref.current;
     if (!cvs) return;
+    // ── 首选：WebGL 着色器（对齐 reactbits.dev/backgrounds/aurora 的极光帘观感） ──
+    const gl = (cvs.getContext("webgl", { antialias: false, alpha: false, powerPreference: "low-power" }) ||
+      cvs.getContext("experimental-webgl")) as WebGLRenderingContext | null;
+    if (gl) {
+      const hex2rgb = (h: string): [number, number, number] => [
+        parseInt(h.slice(1, 3), 16) / 255,
+        parseInt(h.slice(3, 5), 16) / 255,
+        parseInt(h.slice(5, 7), 16) / 255,
+      ];
+      const tints = AURORA_COLORS.map(hex2rgb);
+      const VS = "attribute vec2 a; void main(){ gl_Position = vec4(a, 0.0, 1.0); }";
+      const FS = [
+        "precision highp float;",
+        "uniform float uTime; uniform vec2 uRes;",
+        "uniform vec3 uC1; uniform vec3 uC2; uniform vec3 uC3;",
+        "float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }",
+        "float noise(vec2 p){",
+        "  vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);",
+        "  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),",
+        "             mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);",
+        "}",
+        "float fbm(vec2 p){ float v = 0.0; float a = 0.5;",
+        "  for (int i = 0; i < 5; i++) { v += a * noise(p); p *= 2.03; a *= 0.5; } return v; }",
+        "void main(){",
+        "  vec2 uv = gl_FragCoord.xy / uRes;",
+        "  float t = uTime;",
+        "  vec3 col = vec3(0.035, 0.040, 0.050);",
+        "  vec3 c1 = uC1; vec3 c2 = uC2; vec3 c3 = uC3;",
+        // 三层"极光帘"：横向漂移 + 纵向渐隐，用 fbm 塑形
+        "  for (int i = 0; i < 3; i++) {",
+        "    float fi = float(i);",
+        "    vec3 tint = i == 0 ? c1 : (i == 1 ? c2 : c3);",
+        "    float speed = 0.030 + fi * 0.022;",
+        "    float x = uv.x * (1.35 + fi * 0.55) + t * speed + fi * 7.3;",
+        "    float n = fbm(vec2(x, uv.y * 1.35 - t * 0.020 + fi * 2.1));",
+        "    float band = pow(smoothstep(0.28, 0.96, n), 1.7);",
+        "    float vfade = smoothstep(0.0, 0.92, uv.y) * (1.0 - smoothstep(0.52, 1.05, uv.y));",
+        "    col += tint * band * vfade * 0.9;",
+        "  }",
+        "  gl_FragColor = vec4(col, 1.0);",
+        "}",
+      ].join("\n");
+      const mkShader = (type: number, src: string) => {
+        const s = gl.createShader(type)!;
+        gl.shaderSource(s, src);
+        gl.compileShader(s);
+        return s;
+      };
+      const prog = gl.createProgram()!;
+      gl.attachShader(prog, mkShader(gl.VERTEX_SHADER, VS));
+      gl.attachShader(prog, mkShader(gl.FRAGMENT_SHADER, FS));
+      gl.linkProgram(prog);
+      gl.useProgram(prog);
+      const buf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+      const loc = gl.getAttribLocation(prog, "a");
+      gl.enableVertexAttribArray(loc);
+      gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+      const uTime = gl.getUniformLocation(prog, "uTime");
+      const uRes = gl.getUniformLocation(prog, "uRes");
+      gl.uniform3fv(gl.getUniformLocation(prog, "uC1"), tints[0]);
+      gl.uniform3fv(gl.getUniformLocation(prog, "uC2"), tints[1]);
+      gl.uniform3fv(gl.getUniformLocation(prog, "uC3"), tints[2]);
+      const draw = (t: number) => {
+        gl.uniform1f(uTime, t);
+        gl.uniform2f(uRes, cvs.width, cvs.height);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      };
+      const resize = () => {
+        cvs.width = Math.max(1, cvs.clientWidth);
+        cvs.height = Math.max(1, cvs.clientHeight);
+        gl.viewport(0, 0, cvs.width, cvs.height);
+      };
+      resize();
+      let raf = 0;
+      const start = performance.now();
+      if (reduced) {
+        draw(0);
+      } else {
+        const frame = (now: number) => {
+          draw((now - start) / 1000);
+          raf = requestAnimationFrame(frame);
+        };
+        raf = requestAnimationFrame(frame);
+      }
+      window.addEventListener("resize", resize);
+      return () => {
+        cancelAnimationFrame(raf);
+        window.removeEventListener("resize", resize);
+      };
+    }
+    // ── 兜底：WebGL 不可用时退回 Canvas 2D 柔光版 ──
     const ctx = cvs.getContext("2d");
     if (!ctx) return;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -1939,6 +2032,9 @@ function App() {
           )
         ) : null}
       </div>
+
+      {/* 顶栏下方的磨砂渐变（z-index 79，正好在顶栏 80 之下、窗口之上） */}
+      <div className="topbar-scrim" aria-hidden="true" />
 
       {gate === "checking" ? (
         identity.bootError ? (

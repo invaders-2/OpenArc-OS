@@ -1249,6 +1249,56 @@ input[type="checkbox"] {
 .search-field:focus-within {
   background: rgb(var(--text-rgb) / 0.08);
 }
+/* 用户口径：侧栏玻璃再透一点、模糊更强（"实色"档不动，尊重它的语义） */
+.desktop:not([data-glass="solid"]) .window:has(.split) .split-side {
+  background: rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.72));
+  backdrop-filter: blur(30px) saturate(1.7);
+  -webkit-backdrop-filter: blur(30px) saturate(1.7);
+}
+/* 顶栏下方的磨砂渐变：窗口往上滑到顶栏下面时会被它"吃掉"（向下渐隐的毛玻璃） */
+.topbar-scrim {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 96px;
+  z-index: 79;
+  pointer-events: none;
+  backdrop-filter: blur(18px) saturate(1.5);
+  -webkit-backdrop-filter: blur(18px) saturate(1.5);
+  mask-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 1) 0,
+    rgba(0, 0, 0, 0.9) 38px,
+    rgba(0, 0, 0, 0) 96px
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 1) 0,
+    rgba(0, 0, 0, 0.9) 38px,
+    rgba(0, 0, 0, 0) 96px
+  );
+}
+.desktop.dark .topbar-scrim {
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.34), rgba(0, 0, 0, 0));
+}
+.desktop:not(.dark) .topbar-scrim {
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0));
+}
+/* 系统文字默认不可选中：拖拽 / 框选时误选文字是真实困扰；输入框与预格式文本除外 */
+.desktop {
+  user-select: none;
+  -webkit-user-select: none;
+}
+.desktop input,
+.desktop textarea,
+.desktop [contenteditable="true"],
+.desktop .quicklook-text,
+.desktop pre {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 /* 壁纸层（动态 Aurora / 自定义壁纸画在这里；内置渐变仍由 .desktop[data-wallpaper] 提供） */
 .desktop-wallpaper {
   position: absolute;
