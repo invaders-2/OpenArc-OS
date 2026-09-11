@@ -1,0 +1,7 @@
+{
+  "name": "openarc-d2-02-gate-probe",
+  "version": "1.0.0",
+  "private": true,
+  "main": "main.cjs",
+  "description": "D2-02A Window Architecture Gate 原生探针，由 experiments/d2-02-gate/*.mjs 拉起"
+}

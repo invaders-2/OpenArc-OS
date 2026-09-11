@@ -21,8 +21,16 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const probeDir = path.join(here, "fixtures", "native-probe");
 const extraArgs = (process.env.ELECTRON_EXTRA_ARGS || "").split(" ").filter(Boolean);
 
+// 执行环境若导出 ELECTRON_RUN_AS_NODE，Electron 会退化成 Node 模式
+// （process.type === undefined，require("electron") 拿到 npm 包里的二进制路径字符串），
+// 探针会在 app.whenReady 处崩溃。这是环境产物，不是项目缺陷，必须显式剥离。
+const childEnv = { ...process.env };
+delete childEnv.ELECTRON_RUN_AS_NODE;
+delete childEnv.ELECTRON_NO_ATTACH_CONSOLE;
+
 const child = spawn(electronPath, [probeDir, ...extraArgs], {
   stdio: ["ignore", "pipe", "pipe"],
+  env: childEnv,
 });
 
 let stdout = "";
