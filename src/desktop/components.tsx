@@ -232,14 +232,14 @@ export function TitleBar({ id, maximized, onCommand, onDragStart }: TitleBarProp
     <div className="window-title" onPointerDown={onDragStart} onDoubleClick={toggleMax}>
       <div className="traffic">
         <button className="close" aria-label={`关闭${id}`} onClick={() => onCommand({ type: "window/close", id })}>
-          <X size={8} />
+          <X size={8} strokeWidth={3} />
         </button>
         <button className="minimize" aria-label={`最小化${id}`} onClick={() => onCommand({ type: "window/minimize", id })}>
-          <Minus size={8} />
+          <Minus size={8} strokeWidth={3} />
         </button>
         <button className="maximize" aria-label={`${maximized ? "还原" : "最大化"}${id}`} onClick={toggleMax}>
           {/* macOS 原生绿色按钮的"双三角"缩放符号，而不是对角箭头 */}
-          <svg width="7" height="7" viewBox="0 0 10 10" aria-hidden="true">
+          <svg width="8" height="8" viewBox="0 0 10 10" aria-hidden="true">
             <path d="M1 4.6 L4.6 4.6 L4.6 1 Z" fill="currentColor" />
             <path d="M9 5.4 L5.4 5.4 L5.4 9 Z" fill="currentColor" />
           </svg>
@@ -544,10 +544,11 @@ export function ContextMenu({ x, y, items, onClose, label = "桌面菜单" }: Co
 
   useEffect(() => {
     returnTo.current = document.activeElement as HTMLElement;
-    const first = selectable[0];
-    if (first !== undefined) ref.current?.querySelectorAll<HTMLElement>("[role=menuitem]")[0]?.focus();
+    // 打开时**不高亮第一项**（macOS 菜单只有悬停/键盘导航时才高亮）。
+    // 焦点给面板本身，方向键仍然能从第一项开始走。
+    ref.current?.focus();
     return () => returnTo.current?.focus?.();
-  }, [selectable]);
+  }, []);
 
   const move = useCallback(
     (dir: 1 | -1) => {
@@ -588,6 +589,7 @@ export function ContextMenu({ x, y, items, onClose, label = "桌面菜单" }: Co
       <div
         className="context-menu"
         role="menu"
+        tabIndex={-1}
         aria-label={label}
         ref={ref}
         style={{ left: Math.min(x, innerWidth - 190), top: Math.min(y, innerHeight - 150) }}

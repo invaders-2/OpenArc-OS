@@ -73,7 +73,7 @@ declare global {
 // solid = 关闭 backdrop-filter 走实色（原"减少透明度"）。
 // 与 reduce motion 完全解耦：减少动效不改变材质，降低材质不关动画。
 type GlassMode = "full" | "reduced" | "solid";
-type Folder = { id: string; name: string; x: number; y: number };
+type Folder = { id: string; name: string; x: number; y: number; parentId?: string };
 
 const FOLDER_PREFIX = domain.FOLDER_PREFIX;
 const icon = (name: string) => "./icons/" + name + ".png";
@@ -325,6 +325,10 @@ function App() {
        * 搜索 / 排序的**代码路径是真实的**，只是当前没有数据可筛 —— 不放假文件。
        */
       const q = ui.query.trim().toLowerCase();
+      const children = folders
+        .filter((f) => f.parentId === shown.id)
+        .filter((f) => !q || f.name.toLowerCase().includes(q))
+        .sort((a, b) => (ui.sort === "name" ? a.name.localeCompare(b.name, "zh") : 0));
       const openPaneMenu = (x: number, y: number, which: "sort" | "content") => {
         const sortItems: MenuItem[] = [
           { id: "s-name", label: "名称", onSelect: () => patch({ sort: "name" }) },
@@ -332,7 +336,7 @@ function App() {
           { id: "s-size", label: "大小", onSelect: () => patch({ sort: "size" }) },
         ];
         const contentItems: MenuItem[] = [
-          { id: "nf", label: "新建文件夹", disabled: true, onSelect: () => {} },
+          { id: "nf", label: "新建文件夹", onSelect: () => createSubfolder(shown.id) },
           { id: "info", label: "显示简介", disabled: true, onSelect: () => {} },
           { separator: true },
           { id: "group", label: ui.group ? "关闭群组" : "使用群组", onSelect: () => patch({ group: !ui.group }) },
@@ -348,11 +352,13 @@ function App() {
         <div className="split">
           <nav className="split-side" aria-label="桌面文件夹">
             <div className="split-section">桌面</div>
-            {folders.map((f) => (
-              <button key={f.id} className="split-nav" aria-current={f.id === shown.id} onClick={() => go(f.id)}>
-                <Folder size={16} /> {f.name}
-              </button>
-            ))}
+            {folders
+              .filter((f) => !f.parentId)
+              .map((f) => (
+                <button key={f.id} className="split-nav" aria-current={f.id === shown.id} onClick={() => go(f.id)}>
+                  <Folder size={16} /> {f.name}
+                </button>
+              ))}
           </nav>
           <div className="split-main">
             <div className="pane-toolbar">
@@ -413,21 +419,38 @@ function App() {
               className="folder-body"
               onContextMenu={(e) => {
                 e.preventDefault();
+                // 不要冒泡到桌面：否则桌面菜单会同时打开、盖在文件夹菜单上
+                e.stopPropagation();
                 openPaneMenu(e.clientX, e.clientY, "content");
               }}
             >
-              <div className="empty-content">
-                <img className="large-icon" src={icon("folder")} alt="" draggable={false} />
-                <span className="badge">{q ? "无匹配项" : "暂无内容"}</span>
-                {q ? (
-                  <p>没有匹配「{ui.query}」的项目。</p>
-                ) : (
-                  <p>
-                    文件夹已创建，可重命名、移动和删除。文件本体与跨设备存储属于 D3
-                    文件服务范围，本版不显示模拟文件。
-                  </p>
-                )}
-              </div>
+              {children.length === 0 ? (
+                <div className="empty-content">
+                  <img className="large-icon" src={icon("folder")} alt="" draggable={false} />
+                  <span className="badge">{q ? "无匹配项" : "暂无内容"}</span>
+                  {q ? (
+                    <p>没有匹配「{ui.query}」的项目。</p>
+                  ) : (
+                    <p>右键可在此文件夹里新建子文件夹。文件本体与跨设备存储属于 D3 文件服务范围。</p>
+                  )}
+                </div>
+              ) : (
+                <div className={ui.view === "grid" ? "file-grid" : "file-list"}>
+                  {children.map((f) => (
+                    <button
+                      className="file-cell"
+                      key={f.id}
+                      onDoubleClick={() => go(f.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") go(f.id);
+                      }}
+                    >
+                      <img className="file-icon" src={icon("folder")} alt="" draggable={false} />
+                      <span>{f.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -691,8 +714,30 @@ function App() {
     setMenu(null);
     setRenaming(folder.id);
   }
+  /** 在当前文件夹里新建**子文件夹**（同一窗口内导航，不新建窗口）。 */
+  function createSubfolder(parentId: string) {
+    const used = new Set(folders.filter((f) => f.parentId === parentId).map((f) => f.name));
+    let name = "新建文件夹";
+    for (let i = 2; used.has(name); i += 1) name = `新建文件夹 ${i}`;
+    const folder: Folder = { id: "f" + Date.now().toString(36), name, x: 0, y: 0, parentId };
+    setFolders((fs) => [...fs, folder]);
+    setPaneMenu(null);
+    return folder.id;
+  }
   function removeFolder(id: string) {
-    setFolders((fs) => fs.filter((f) => f.id !== id));
+    setFolders((fs) => {
+      // 删文件夹要连带它的子文件夹，否则会留下无父的孤儿条目
+      const doomed = new Set([id]);
+      for (let changed = true; changed; ) {
+        changed = false;
+        for (const f of fs)
+          if (f.parentId && doomed.has(f.parentId) && !doomed.has(f.id)) {
+            doomed.add(f.id);
+            changed = true;
+          }
+      }
+      return fs.filter((f) => !doomed.has(f.id));
+    });
     onCommand({ type: "window/close", id: FOLDER_PREFIX + id });
     setMenu(null);
     closeDialog();
@@ -822,7 +867,9 @@ function App() {
           <div>OpenArc</div>
           <p>A space for everything you create.</p>
         </div>
-        {folders.map((f) => (
+        {folders
+          .filter((f) => !f.parentId)
+          .map((f) => (
           <div
             key={f.id}
             className="desktop-folder"

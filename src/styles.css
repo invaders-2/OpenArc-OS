@@ -587,9 +587,13 @@ input[type="checkbox"] {
 .window:has(.split) .window-title {
   position: relative;
   z-index: 2;
+  /* 标题栏只盖住侧栏那一条，让右栏顶部的工具条与红绿灯同一行、且可点可输入 */
+  align-self: flex-start;
+  width: 208px;
 }
 .window:has(.split) .split-main {
-  padding-top: 64px;
+  /* 工具条与原生红绿灯对齐（红绿灯中心约 y=22，工具条 26px 高 → top≈10） */
+  padding-top: 10px;
 }
 .window:has(.split) .split-side {
   padding-top: 44px;
@@ -867,9 +871,10 @@ input[type="checkbox"] {
 }
 .field input,
 .addressbar input {
-  border: 1px solid var(--line);
+  /* 输入框不用线框分层（设计语言禁止发丝线框）：用 --sunken 填充分区 */
+  border: 0;
   border-radius: var(--radius-md);
-  background: rgb(var(--content-rgb) / var(--content-alpha));
+  background: var(--sunken);
   padding: 9px 12px;
   width: 100%;
   min-width: 0;
@@ -1012,10 +1017,9 @@ input[type="checkbox"] {
   width: 100%;
   height: 85px;
   resize: none;
-  background: rgb(var(--content-rgb) / var(--content-alpha));
-  border: 1px solid var(--line);
-  /* D2-02 保留：AI 面板输入框；最近刻度 8/12px 差 2px */
-  border-radius: 10px;
+  background: var(--sunken);
+  border: 0;
+  border-radius: var(--radius-md);
   padding: 12px;
 }
 .composer span {
@@ -1114,7 +1118,7 @@ input[type="checkbox"] {
   width: 82px;
   font-size: 11px;
   text-align: center;
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: var(--radius-xs);
   background: rgb(var(--content-rgb) / var(--content-alpha));
   color: var(--text);
@@ -1147,6 +1151,68 @@ input[type="checkbox"] {
 }
 .context-menu button:hover {
   background: var(--sunken);
+}
+/* 菜单项的键盘焦点用同一种高亮，不要 outline 方框 */
+.context-menu button:focus-visible {
+  outline: none;
+  background: var(--sunken);
+}
+/* 全应用输入框：不用任何线框/焦点环 —— 焦点只靠填充深浅变化表达（仍可见，但不是框） */
+.field input:focus-visible,
+.addressbar input:focus-visible,
+.composer textarea:focus-visible,
+.folder-rename:focus-visible {
+  outline: none;
+  background: rgb(var(--text-rgb) / 0.08);
+}
+.search-field input:focus-visible,
+.search-input input:focus-visible {
+  outline: none;
+}
+.search-field:focus-within {
+  background: rgb(var(--text-rgb) / 0.08);
+}
+/* 文件夹内容：图标网格 / 列表 */
+.file-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+}
+.file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.file-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 8px;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-caption);
+  text-align: center;
+  transition: background var(--quick) var(--ease);
+}
+.file-cell:hover {
+  background: var(--row-hover);
+}
+.file-list .file-cell {
+  flex-direction: row;
+  justify-content: flex-start;
+  text-align: left;
+  padding: 7px 10px;
+}
+.file-icon {
+  width: 46px;
+  height: 46px;
+  object-fit: contain;
+}
+.file-list .file-icon {
+  width: 22px;
+  height: 22px;
 }
 .context-menu .danger {
   color: var(--failed);
