@@ -1285,10 +1285,11 @@ input[type="checkbox"] {
 /* 侧栏"材质"：比正文**略亮一档** + vibrancy（提饱和提亮）—— macOS 侧栏看起来"是另一种材料"，
    靠的就是这个；同色同透明度只会像一块实心板。"实色"档仍不动。 */
 .desktop[data-glass="full"] .window:has(.split) .split-side {
-  background-color: rgb(var(--content-rgb) / 0.34);
-  background-image: linear-gradient(rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.07));
-  backdrop-filter: blur(36px) saturate(2) brightness(1.16);
-  -webkit-backdrop-filter: blur(36px) saturate(2) brightness(1.16);
+  /* 用户口径：侧栏再透一些（0.34 → 0.24），磨砂更厚（blur 36 → 46） */
+  background-color: rgb(var(--content-rgb) / 0.24);
+  background-image: linear-gradient(rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.06));
+  backdrop-filter: blur(46px) saturate(1.6);
+  -webkit-backdrop-filter: blur(46px) saturate(1.6);
 }
 .desktop[data-glass="full"]:not(.dark) .window:has(.split) .split-side {
   background-image: linear-gradient(rgba(0, 0, 0, 0.035), rgba(0, 0, 0, 0.035));
@@ -1320,8 +1321,10 @@ input[type="checkbox"] {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  backdrop-filter: blur(14px) saturate(1.6);
-  -webkit-backdrop-filter: blur(14px) saturate(1.6);
+  /* 用户口径：**不要任何提色**。带 saturate() 时，模糊层会把壁纸的颜色提亮，
+     看起来就像顶部"又染了一层主题色"。纯 blur 才是无色磨砂。 */
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 52%, transparent 100%);
   -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 52%, transparent 100%);
 }
@@ -1331,9 +1334,9 @@ input[type="checkbox"] {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  /* 顶部用更强的模糊替代"实心"：内容糊到不可读，但不会出现硬边材质缝 */
-  backdrop-filter: blur(56px) saturate(1.9);
-  -webkit-backdrop-filter: blur(56px) saturate(1.9);
+  /* 同上：纯 blur，不提色 */
+  backdrop-filter: blur(64px);
+  -webkit-backdrop-filter: blur(64px);
   mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 30%, transparent 70%);
   -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 30%, transparent 70%);
 }
