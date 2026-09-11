@@ -106,7 +106,15 @@
 .topbar {
   height: 38px;
   background: rgb(var(--bar-rgb) / var(--bar-alpha));
-  backdrop-filter: var(--glass-filter);
+  /**
+   * 刻意不加 backdrop-filter。
+   * 顶栏底色本来就是 0（--bar 0），这层 blur 几乎没有视觉产出；
+   * 但在"透明窗口 + app-region: drag + backdrop-filter"这个组合下，它的合成层会被错位残留 ——
+   * 表现为顶栏下沿多出一条横贯全宽的"小框"，而且只有开关覆盖层（例如全局 AI）才会刷掉/重现
+   * （用户实测：点开 AI 就没、关掉又出现）。去掉它即可根除这一类残留；
+   * 窗口滑到顶栏下方时的磨砂由窗口自己的 window-scrim 负责。
+   */
+  transform: translateZ(0);
   /* 顶栏无底色（--bar 0），不能再有投影，否则会在桌面留下一条幽灵暗边 */
   display: flex;
   align-items: center;
