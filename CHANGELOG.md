@@ -1,5 +1,20 @@
 # 计划修订记录
 
+## 2026-09-12：隐藏应用内滚动条
+
+用户口径：滑动时右边不要出现那条滚动条。
+
+- `.desktop * { scrollbar-width: none }` +
+  `.desktop *::-webkit-scrollbar { width: 0; height: 0; display: none }` ——
+  覆盖应用内**所有**可滚动容器（窗口内容、侧栏、Quick Look 文本…）；
+- 只影响我们自己的 DOM；内置浏览器窗口的原生视图是独立 `WebContentsView`，不受影响；
+- **滚动能力不变**，只是不画轨道/滑块。
+
+实测：`.split-main` 的 `::-webkit-scrollbar` 计算值为 `display: none` / `width: 0px`，
+同时 `scrollTop = 200` 仍然生效。
+
+验证：`npm run build` PASS；`npm test` 96/96。
+
 ## 2026-09-12：顶部「透明磨砂」终于对了 —— 把它从窗口里挪到**窗口外**
 
 用户第三次说"还是有一层颜色"。这次做了**像素级对照实验**（同画面 scrim 开/关逐行比对），

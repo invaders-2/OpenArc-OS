@@ -1336,6 +1336,15 @@ input[type="checkbox"] {
   top: 0;
   z-index: 3;
 }
+/* 用户口径：滚动时**不要出现滚动条**（内容仍可正常滚动，只是不画那条轨道/滑块）。 */
+.desktop * {
+  scrollbar-width: none; /* Firefox 写法，Chromium 会忽略 */
+}
+.desktop *::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
 /* 系统文字默认不可选中：拖拽 / 框选时误选文字是真实困扰；输入框与预格式文本除外 */
 .desktop {
   user-select: none;
