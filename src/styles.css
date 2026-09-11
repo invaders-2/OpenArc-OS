@@ -800,7 +800,7 @@ input[type="checkbox"] {
   justify-content: center;
   padding: 35px;
   text-align: center;
-  background: rgb(var(--content-rgb) / var(--content-alpha));
+  /* 空态直接落在内容面上，不再自带一块底色（会形成"右边一个框"） */
 }
 .empty-content p {
   max-width: 380px;
