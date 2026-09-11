@@ -28,7 +28,7 @@ type NativeResult = {
 export type SnapshotLayer = { windowId: string; rect: { x: number; y: number; width: number; height: number }; dataUrl: string };
 
 /** 系统级覆盖层：它们打开时原生视图整块让位（ADR §19 第 4 条）。 */
-export type OverlayState = { dialog: boolean; search: boolean; menu: boolean; ai: boolean };
+export type OverlayState = { dialog: boolean; search: boolean; menu: boolean; ai: boolean; control: boolean };
 
 function restore(): WindowStateModel {
   let parsed: unknown = null;
@@ -74,7 +74,13 @@ export function useDesktop(opts: { locked?: boolean } = {}) {
   );
   const [hostSize, setHostSize] = useState(host);
   const [native, setNative] = useState<NativeResult[]>([]);
-  const [overlays, setOverlays] = useState<OverlayState>({ dialog: false, search: false, menu: false, ai: false });
+  const [overlays, setOverlays] = useState<OverlayState>({
+    dialog: false,
+    search: false,
+    menu: false,
+    ai: false,
+    control: false,
+  });
 
   // ---------------------------------------------------------------------------
   // 持久化：唯一出口是 manager.serialize
@@ -139,7 +145,7 @@ export function useDesktop(opts: { locked?: boolean } = {}) {
   // 存在，就是两份真相。现在只有域一份，DOM 只是它的渲染投影。
   // ---------------------------------------------------------------------------
   const intents: NativeIntent[] = useMemo(() => manager.nativeIntents(state, hostSize), [state, hostSize]);
-  const overlayOpen = overlays.dialog || overlays.search || overlays.ai || locked;
+  const overlayOpen = overlays.dialog || overlays.search || overlays.ai || overlays.control || locked;
 
   // 意图的稳定指纹：只有它变化才触发 IPC，避免每帧同步
   const fingerprint = useMemo(

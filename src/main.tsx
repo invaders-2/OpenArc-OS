@@ -1,6 +1,19 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { ArrowRight, Bot, Clock, LayoutGrid, Package, Sliders, Store, User, Wand2 } from "lucide-react";
+import {
+  ArrowRight,
+  Bot,
+  Clock,
+  LayoutGrid,
+  Lock,
+  LogOut,
+  Monitor,
+  Package,
+  Sliders,
+  Store,
+  User,
+  Wand2,
+} from "lucide-react";
 // Token 层必须先于组件层导入：tokens.css 只声明自定义属性与 base reset，
 // styles.css 全部是消费方。顺序颠倒会让组件拿到未定义的 var()。
 import "./design-system/tokens.css";
@@ -244,7 +257,7 @@ function App() {
         setOverlays((o) => ({ ...o, search: !o.search }));
       }
       if (e.key === "Escape") {
-        setOverlays((o) => ({ ...o, search: false, ai: false }));
+        setOverlays((o) => ({ ...o, search: false, ai: false, control: false }));
         setMenu(null);
       }
     };
@@ -641,6 +654,10 @@ function App() {
         <TopBar
           activeTitle={activeTitle}
           searchOpen={overlays.search}
+          controlOpen={overlays.control}
+          onToggleControl={() => setOverlays((o) => ({ ...o, control: !o.control }))}
+          recent={[...state.windows].reverse().map((w) => ({ id: w.id, title: w.meta.title, appId: w.appId }))}
+          onFocusWindow={(id) => onCommand({ type: "window/focus", id })}
           onCommand={onCommand}
           onToggleSearch={() => setOverlays((o) => ({ ...o, search: !o.search }))}
           onToggleAI={() => {
@@ -742,6 +759,43 @@ function App() {
             activateApp("settings");
           }}
         />
+      ) : null}
+
+      {overlays.control ? (
+        <>
+          {/* 不压暗桌面（不同于搜索），只做点击外部关闭 */}
+          <div className="cc-shade" onClick={() => setOverlays((o) => ({ ...o, control: false }))} />
+          <div className="control-center" role="dialog" aria-modal="true" aria-label="控制中心">
+            <Switch label="深色外观" checked={dark} onChange={setDark} />
+            <Switch label="减少动态效果" checked={reduced} onChange={setReduced} />
+            <div className="setting-row">
+              <span>材质</span>
+              <select
+                className="material-select"
+                aria-label="材质"
+                value={glass}
+                onChange={(e) => setGlass(e.target.value as GlassMode)}
+              >
+                <option value="full">完整玻璃</option>
+                <option value="reduced">降低材质</option>
+                <option value="solid">实色</option>
+              </select>
+            </div>
+            <div className="cc-status">
+              <Monitor size={13} /> 本机 · D1
+            </div>
+            {gate === "unavailable" ? null : (
+              <div className="cc-actions">
+                <button onClick={() => void identity.lock()} disabled={locked}>
+                  <Lock size={13} /> 锁定
+                </button>
+                <button onClick={() => void identity.logout()}>
+                  <LogOut size={13} /> {identity.snapshot.displayName || "退出"}
+                </button>
+              </div>
+            )}
+          </div>
+        </>
       ) : null}
 
       {overlays.search ? (

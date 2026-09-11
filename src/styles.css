@@ -645,6 +645,76 @@ input[type="checkbox"] {
   height: 22px;
   object-fit: contain;
 }
+/* 顶栏"最近应用"：线性图标按钮 */
+.topbar-recent {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 2px;
+}
+.bar-app {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  transition: background var(--quick) var(--ease), color var(--quick) var(--ease);
+}
+.bar-app:hover {
+  background: var(--row-hover);
+  color: var(--text);
+}
+/* 控制中心：右上角浮层，不压暗桌面（区别于搜索） */
+.cc-shade {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+}
+.control-center {
+  position: absolute;
+  top: 46px;
+  right: 14px;
+  z-index: 60;
+  width: 272px;
+  padding: 12px 14px 14px;
+  border-radius: var(--radius-xl);
+  background: rgb(var(--surface-rgb) / var(--surface-alpha));
+  backdrop-filter: var(--glass-filter);
+  box-shadow: var(--elevation-4);
+}
+.control-center .setting-row {
+  padding: 10px 0;
+}
+.cc-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 8px;
+  padding-top: 12px;
+  color: var(--muted);
+  font-size: var(--fs-caption);
+}
+.cc-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.cc-actions button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+  color: var(--text);
+  font-size: var(--fs-caption);
+}
+.cc-actions button:hover {
+  background: var(--row-hover);
+}
+
 
 .badge {
   display: inline-block;

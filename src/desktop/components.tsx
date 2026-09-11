@@ -10,7 +10,26 @@
  * 不是换外观。所以这里没有一处新增的视觉样式。
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Maximize2, Minus, Monitor, RotateCw, X } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Compass,
+  Folder,
+  LayoutGrid,
+  Lock,
+  LogOut,
+  Maximize2,
+  Minus,
+  Monitor,
+  PenTool,
+  Puzzle,
+  RotateCw,
+  Search,
+  Settings,
+  SlidersHorizontal,
+  Sparkles,
+  X,
+} from "lucide-react";
 import domain from "../../electron/window-domain.cjs";
 import type { Window as WinDomain, WindowCommand } from "../../electron/window-domain.cjs";
 
@@ -27,12 +46,29 @@ const icon = (name: string) => "./icons/" + name + ".png";
 
 const host = () => ({ width: innerWidth, height: innerHeight });
 
+/** 顶栏"最近应用"的线性图标。与应用身份图标（Dock 里那套彩色 PNG）不是一层：
+ *  顶栏统一线性，应用身份保持彩色（DESIGN_SYSTEM 的"平台约定例外"）。 */
+const appLineIcon: Record<string, React.ComponentType<{ size?: number }>> = {
+  home: LayoutGrid,
+  browser: Compass,
+  files: Folder,
+  canvas: PenTool,
+  skills: Puzzle,
+  settings: Settings,
+};
+
 type TopBarProps = {
   activeTitle: string;
   /** 搜索是否打开。只用来表达 aria-expanded，因此是 boolean 而不是查询串 ——
       需要查询串的地方是搜索面板，不是顶栏。 */
   searchOpen: boolean;
   onCommand: (c: WindowCommand) => void;
+  /** 控制中心是否打开。只用于 aria-expanded。 */
+  controlOpen: boolean;
+  onToggleControl: () => void;
+  /** 最近打开的窗口（域的投影，不是第二份状态）。点击聚焦。 */
+  recent: { id: string; title: string; appId: string }[];
+  onFocusWindow: (id: string) => void;
   onToggleSearch: () => void;
   onToggleAI: () => void;
   /**
@@ -51,6 +87,10 @@ export function TopBar({
   activeTitle,
   searchOpen,
   onCommand,
+  controlOpen,
+  onToggleControl,
+  recent,
+  onFocusWindow,
   onToggleSearch,
   onToggleAI,
   identity,
@@ -59,15 +99,28 @@ export function TopBar({
     <header className="topbar">
       <strong className="wordmark">◈ OpenArc</strong>
       <span>{activeTitle}</span>
+      <div className="topbar-recent" aria-label="最近打开的窗口">
+        {recent.map((w) => {
+          const AppIcon = appLineIcon[w.appId] || LayoutGrid;
+          return (
+            <button key={w.id} className="bar-app" aria-label={`切换到${w.title}`} onClick={() => onFocusWindow(w.id)}>
+              <AppIcon size={15} />
+            </button>
+          );
+        })}
+      </div>
       <div className="topbar-right">
         <span className="local-tag">
           <Monitor size={13} /> 本机 · D1
         </span>
+        <button onClick={onToggleControl} aria-label="控制中心" aria-expanded={controlOpen}>
+          <SlidersHorizontal size={15} />
+        </button>
         <button onClick={onToggleSearch} aria-label="全局搜索" aria-expanded={searchOpen}>
-          <img className="bar-icon" src={icon("spotlight")} alt="" />
+          <Search size={15} />
         </button>
         <button onClick={onToggleAI} aria-label="全局 AI">
-          <img className="bar-icon" src={icon("siri")} alt="" />
+          <Sparkles size={15} />
         </button>
         {identity ? (
           <>
@@ -77,10 +130,10 @@ export function TopBar({
               aria-label="锁定屏幕"
               data-d3-id="topbar-lock"
             >
-              锁定
+              <Lock size={13} /> 锁定
             </button>
             <button onClick={identity.onLogout} aria-label="退出登录" data-d3-id="topbar-logout">
-              {identity.displayName || "退出"}
+              <LogOut size={13} /> {identity.displayName || "退出"}
             </button>
           </>
         ) : null}

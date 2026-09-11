@@ -1,5 +1,27 @@
 # 计划修订记录
 
+## 2026-09-12：顶栏线性图标 + 最近应用 + 控制中心（UI 反馈第二批）
+
+用户反馈第 5 项：顶栏 icon 全线性、显示最近打开的 app、加控制中心（类 Apple）。
+
+- **图标全线性**：顶栏改用 lucide 线性图标 —— 搜索 `Search`、全局 AI `Sparkles`、
+  控制中心 `SlidersHorizontal`、锁定 `Lock`、退出 `LogOut`；替换原彩色 PNG
+  （spotlight / siri）。应用身份图标（Dock 那套彩色）保持不变，两者不是一层。
+- **最近应用**：顶栏按 z 序倒序显示当前打开的窗口（`state.windows` 的投影，不是第二份
+  状态），线性图标按 appId 映射（home/browser/files/canvas/skills/settings），点击
+  `window/focus`。
+- **控制中心**：右上角浮层 `.control-center`；`overlays.control` 参与 `overlayOpen`，
+  打开时原生视图整块让位。内容：深色外观 / 减少动态效果（胶囊开关）、材质档位、
+  本机 · D1 状态、身份操作（锁定 / 退出）。不压暗桌面，点击外部或 Esc 关闭。
+  （浏览器里无主进程时不显示身份两项。）
+
+**实测**：`npm run build` PASS；`npm test` 96/96；Playwright 核对顶栏图标、最近应用
+（打开 3 个窗口时 recent=3）、控制中心可开（cc=1），零脚本错误。
+
+**仍未完成**：第 6 项"全部交互动效对齐 Spectrum"—— 与 D1-04 冻结的
+"Spectrum UI 全目录 REFERENCE ONLY，不引入源码（Tailwind + Motion）"冲突，
+需先定方向（见 CHANGELOG 下一条或对话）。
+
 ## 2026-09-12：窗口 chrome + 左右分栏（UI 反馈第一批，完成 1–4）
 
 用户反馈 6 项，本批完成 1–4：
