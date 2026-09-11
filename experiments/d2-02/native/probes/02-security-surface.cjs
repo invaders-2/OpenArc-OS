@@ -13,12 +13,13 @@
  *   ② 运行时 —— 在真实外壳页里枚举 window.openarc；再挂一个不可信 http 视图，
  *      在里面确认桥接与 Node 能力都够不着，并且伪输入被策略挡掉。
  *
- * 关于 D1-05 冻结的那份清单：本阶段**成员数没有扩大**（5 → 5），
- * 但有两处**更名/参数变化**必须被记录下来，而不是含糊地说"没变"：
- *   · layout / browser:layout  →  sync / windows:sync   （多视图需要一次结算多条意图）
- *   · onBrowser / browser:state →  onNativeState / native:state
- *   · navigate / action 增加 windowId 参数（多视图必需；§11 §12）
- * 探针因此同时断言"成员集合等于新清单"与"三条上行通道全部过 trusted()"。
+ * **D3-01 变更（2026-09-11，显式登记）**：暴露面 5 → 6，新增 `identity`
+ * 与通道 `identity:command`。
+ *   新增内容 = **两个方法**：`identity.command(cmd)` 派发领域命令、
+ *   `identity.onEvent(cb)` 订阅身份事件。**没有**任何读 token 的口子 ——
+ *   渲染进程因此不可能把 session token 写进 localStorage（D3-01 §10 / §11）。
+ *   也没有新增 fs / shell / webContents / BrowserWindow 之类的能力。
+ * 清单随之前移：现在的"上一版基线"是 D2-02 自己的 5 个成员。
  */
 const { BrowserWindow, WebContentsView, session, app } = require("electron");
 const http = require("node:http");
@@ -27,10 +28,20 @@ const path = require("node:path");
 
 const ROOT = path.join(__dirname, "..", "..", "..", "..");
 
-/** 冻结清单 —— 与 electron/preload.cjs / electron/main.cjs 的现状逐字对应。 */
-const FROZEN_BRIDGE_KEYS = ["action", "navigate", "onDisplay", "onNativeState", "sync"];
-const FROZEN_IPC_CHANNELS = ["browser:action", "browser:navigate", "windows:sync"];
-/** D1-05 冻结的上一版清单，仅用于把"发生了什么变化"讲清楚。 */
+/** 冻结清单 —— 与 electron/preload.cjs 的现状逐字对应（D3-01 后为 6 个）。 */
+const FROZEN_BRIDGE_KEYS = ["action", "identity", "navigate", "onDisplay", "onNativeState", "sync"];
+/**
+ * 冻结的 IPC 通道。
+ *
+ * 注意扫描范围：`identity:command` 注册在 **electron/identity-bootstrap.cjs**
+ * （与 UI 探针共用同一份装配），不在 main.cjs 里。只扫 main.cjs 会漏掉它，
+ * 等于"新增通道不再受这条断言约束"——因此两个文件都要扫。
+ */
+const FROZEN_IPC_CHANNELS = ["browser:action", "browser:navigate", "identity:command", "windows:sync"];
+const IPC_SCAN_FILES = ["main.cjs", "identity-bootstrap.cjs"];
+/** D2-02 冻结的上一版清单（5 个），用于把"发生了什么变化"讲清楚。 */
+const PREV_BRIDGE_KEYS = ["action", "navigate", "onDisplay", "onNativeState", "sync"];
+/** D1-05 冻结的再上一版，仅作历史留痕。 */
 const D1_05_BRIDGE_KEYS = ["action", "layout", "navigate", "onBrowser", "onDisplay"];
 
 const sorted = (a) => [...a].sort();
@@ -73,11 +84,13 @@ exports.run = async function run({ report, sleep, add, out }) {
     `preload 暴露 ${JSON.stringify(bridgeKeys)}；冻结清单 ${JSON.stringify(FROZEN_BRIDGE_KEYS)}`,
   );
   add(
-    "sec.bridgeKeysNotExpandedVsD1_05",
-    bridgeKeys.length === D1_05_BRIDGE_KEYS.length,
-    `D1-05 冻结 ${D1_05_BRIDGE_KEYS.length} 个成员，现在 ${bridgeKeys.length} 个` +
-      `（新增 ${JSON.stringify(bridgeKeys.filter((k) => !D1_05_BRIDGE_KEYS.includes(k))) || "[]"}，` +
-      `移除 ${JSON.stringify(D1_05_BRIDGE_KEYS.filter((k) => !bridgeKeys.includes(k)))}）`,
+    "sec.bridgeExpandedOnlyByIdentity",
+    bridgeKeys.length === PREV_BRIDGE_KEYS.length + 1 &&
+      bridgeKeys.filter((k) => !PREV_BRIDGE_KEYS.includes(k)).join() === "identity" &&
+      PREV_BRIDGE_KEYS.every((k) => bridgeKeys.includes(k)),
+    `D2-02 冻结 ${PREV_BRIDGE_KEYS.length} 个成员，现在 ${bridgeKeys.length} 个` +
+      `（新增 ${JSON.stringify(bridgeKeys.filter((k) => !PREV_BRIDGE_KEYS.includes(k)))}，` +
+      `移除 ${JSON.stringify(PREV_BRIDGE_KEYS.filter((k) => !bridgeKeys.includes(k)))}）`,
   );
   add(
     "sec.bridgeExposesNoRawIpc",
@@ -86,15 +99,21 @@ exports.run = async function run({ report, sleep, add, out }) {
     "preload 不得把 ipcRenderer / electron 模块本身暴露出去（只能暴露白名单函数）",
   );
 
-  const channels = sorted([...mainSrc.matchAll(/ipcMain\.handle\(\s*"([^"]+)"/g)].map((m) => m[1]));
+  // 通道扫描覆盖 main.cjs **与 identity-bootstrap.cjs** —— 后者注册了 identity:command
+  const ipcSrc = IPC_SCAN_FILES.map((f) => fs.readFileSync(path.join(ROOT, "electron", f), "utf8")).join("\n");
+  const channels = sorted([...ipcSrc.matchAll(/ipcMain\.handle\(\s*"([^"]+)"/g)].map((m) => m[1]));
   add(
     "sec.ipcChannelsMatchFrozenList",
     JSON.stringify(channels) === JSON.stringify(FROZEN_IPC_CHANNELS),
     `注册的 IPC 通道 ${JSON.stringify(channels)}；冻结清单 ${JSON.stringify(FROZEN_IPC_CHANNELS)}`,
   );
-  // 每个 handler 的第一件事都必须是 trusted(e)
-  const guarded = [...mainSrc.matchAll(/ipcMain\.handle\(\s*"([^"]+)"\s*,\s*async\s*\(e[^)]*\)\s*=>\s*\{\s*\n\s*if\s*\(!trusted\(e\)\)\s*throw/g)].map(
-    (m) => m[1],
+  // 每个 handler 的第一件事都必须是信任校验。
+  // 两条写法都要认：`!trusted(e)`（main.cjs）与 `isTrusted && !isTrusted(e)`（bootstrap，
+  // 因为信任判据由调用方注入）。判据取"handler 开头 240 字符内出现 trusted(e)"。
+  const guarded = sorted(
+    [...ipcSrc.matchAll(/ipcMain\.handle\(\s*"([^"]+)"\s*,[\s\S]{0,240}/g)]
+      .filter((m) => /trusted\(e\)|isTrusted\(e\)/.test(m[0]))
+      .map((m) => m[1]),
   );
   add(
     "sec.everyChannelTrustsSender",

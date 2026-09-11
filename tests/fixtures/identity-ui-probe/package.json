@@ -1,0 +1,7 @@
+{
+  "name": "openarc-d3-01-ui-probe",
+  "version": "1.0.0",
+  "private": true,
+  "main": "main.cjs",
+  "description": "D3-01 UI 探针：在真实 Electron 中驱动 dist/index.html 走完初始化 / 登录 / 锁定 / 解锁 / 登出 / 重启恢复"
+}

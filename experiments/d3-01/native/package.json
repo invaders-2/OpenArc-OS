@@ -1,0 +1,7 @@
+{
+  "name": "openarc-d3-01-credential-probe",
+  "version": "1.0.0",
+  "private": true,
+  "main": "main.cjs",
+  "description": "D3-01 凭据后端探针：在真实 Electron 主进程中验证 node:sqlite 与 safeStorage（macOS Keychain / Windows DPAPI）"
+}
