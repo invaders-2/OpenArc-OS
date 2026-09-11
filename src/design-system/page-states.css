@@ -1,0 +1,52 @@
+/* OpenArc Design System v1 — Page State 样式
+   只消费 token。层级极轻：状态区永远是"内容位"，不是卡片，不加 elevation。 */
+
+.ds-page-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-8) var(--space-6);
+  text-align: center;
+  color: var(--text);
+  min-height: 180px;
+}
+.ds-page-state__glyph {
+  font-size: var(--fs-title);
+  line-height: 1;
+  color: var(--muted);
+}
+.ds-page-state__title {
+  margin: 0;
+  font-size: var(--fs-heading);
+  font-weight: var(--fw-medium);
+  color: var(--text);
+}
+.ds-page-state__desc {
+  margin: 0;
+  font-size: var(--fs-caption);
+  color: var(--muted);
+  max-width: 380px;
+  line-height: var(--lh-relaxed);
+}
+.ds-page-state__missing {
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-caption);
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.ds-page-state__missing li::before {
+  content: "· ";
+  color: var(--muted);
+}
+/* Error / Unauthorized 的 glyph 走语义色；**永远与文案同时出现**，
+   颜色不单独承担语义（三种色觉类型都要能分辨）。 */
+.ds-page-state--error .ds-page-state__glyph,
+.ds-page-state--unauthorized .ds-page-state__glyph {
+  color: var(--failed);
+}

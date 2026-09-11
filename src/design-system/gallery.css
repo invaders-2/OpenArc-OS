@@ -1,0 +1,173 @@
+/* Design System Gallery — 仅用于内部回归，不属产品视觉面。
+   所有值仍走 token，避免"回归面自己违反规范"。 */
+
+.g-root {
+  min-height: 100vh;
+  color: var(--text);
+  /* .g-root 自己带 .dark 时就地取到深色基底（--base-rgb 在 .dark 里被重定义），
+     所以浅色 / 深色共用一条声明即可。 */
+  background: rgb(var(--base-rgb));
+}
+/* desktop 视图交给 styles.css 的 .desktop 处理 */
+.g-root[data-ds-view="desktop"] {
+  background: transparent;
+}
+
+.g-main {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: var(--space-8) var(--space-6) 96px;
+}
+.g-header {
+  margin-bottom: var(--space-6);
+}
+.g-header h1 {
+  margin: 0 0 var(--space-1);
+}
+.g-meta {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--muted);
+}
+
+.g-section {
+  margin: 0 0 var(--space-8);
+  padding-top: var(--space-4);
+}
+.g-section__title {
+  margin: 0 0 var(--space-3);
+  font-size: var(--fs-heading);
+  font-weight: var(--fw-medium);
+  color: var(--text);
+}
+
+.g-spec {
+  padding: var(--space-3) 0;
+}
+.g-spec__label {
+  margin: 0 0 var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-eyebrow);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.g-spec__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+.g-spec__stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 420px;
+}
+
+/* 排版标本：只用 token，不用字面值 */
+.g-display {
+  margin: 0;
+  font-size: var(--fs-display);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--lh-tight);
+}
+.g-title {
+  margin: 0;
+  font-size: var(--fs-title);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-tight);
+}
+.g-heading {
+  margin: 0;
+  font-size: var(--fs-heading);
+  font-weight: var(--fw-medium);
+}
+.g-body {
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: var(--lh-relaxed);
+  max-width: 620px;
+}
+.g-secondary {
+  margin: 0;
+  font-size: var(--fs-secondary);
+  line-height: var(--lh-normal);
+}
+.g-caption {
+  margin: 0;
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+.g-micro {
+  margin: 0;
+  font-size: var(--fs-micro);
+  color: var(--muted);
+}
+.g-eyebrow {
+  margin: 0;
+  font-size: var(--fs-eyebrow);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.g-mono {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+
+.g-sw {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-caption);
+}
+.g-sw--text {
+  color: var(--text);
+}
+.g-sw--muted {
+  color: var(--muted);
+}
+.g-sw--accent {
+  background: rgb(var(--accent-rgb));
+  color: rgb(var(--on-accent-rgb));
+}
+.g-sw--failed {
+  color: var(--failed);
+}
+.g-sw--focus {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.g-cell {
+  min-width: 132px;
+  font-size: var(--fs-caption);
+}
+.g-cell--sunken {
+  background: var(--sunken);
+}
+
+.g-list {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  list-style: none;
+  font-size: var(--fs-caption);
+}
+.g-list li {
+  padding: var(--space-1) 0;
+}
+
+.g-pagestate-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+.g-pagestate-cell {
+  border-radius: var(--radius-lg);
+  background: rgb(var(--content-rgb) / var(--content-alpha));
+  box-shadow: var(--elevation-1);
+}

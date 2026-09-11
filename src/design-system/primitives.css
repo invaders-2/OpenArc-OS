@@ -1,0 +1,611 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   OpenArc Design System v1 — Primitive 样式
+
+   只消费 `tokens.css` 的 token，**不声明任何自定义属性原料**，也不写
+   颜色 / 圆角 / 时长 / 阴影的字面值。
+
+   悬停与按压一律基于 `--text-rgb` 的 alpha（而不是叠加同色 rgba），
+   这样在 FULL 玻璃、REDUCED 实色、SOLID 三种底上都成立 ——
+   这与 D1-04C 修掉的 `.search-result:hover` 回归是同一类问题。
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── 共享：加载指示 ─────────────────────────────────────────────────────── */
+.ds-spinner {
+  width: 1em;
+  height: 1em;
+  flex: none;
+  border-radius: var(--radius-pill);
+  border: 2px solid rgb(var(--text-rgb) / 0.25);
+  border-top-color: rgb(var(--text-rgb) / 0.85);
+  animation: ds-spin 640ms linear infinite;
+}
+@keyframes ds-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.ds-kbd {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--muted);
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-xs);
+  background: rgb(var(--sunken-rgb) / var(--sunken-alpha));
+}
+
+/* ── Button ─────────────────────────────────────────────────────────────── */
+.ds-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-secondary);
+  font-weight: var(--fw-regular);
+  line-height: var(--lh-normal);
+  white-space: nowrap;
+  transition:
+    background-color var(--dur-quick) var(--ease-standard),
+    color var(--dur-quick) var(--ease-standard),
+    opacity var(--dur-quick) var(--ease-standard);
+}
+.ds-btn--md {
+  padding: var(--space-2) var(--space-3);
+  min-height: 30px;
+}
+.ds-btn--sm {
+  padding: var(--space-1) var(--space-2);
+  min-height: 24px;
+  font-size: var(--fs-caption);
+}
+.ds-btn--full {
+  width: 100%;
+}
+.ds-btn__label {
+  display: inline-block;
+}
+
+/* secondary（默认）：以文字色的 alpha 铺底，三档材质上都成立 */
+.ds-btn--secondary {
+  background: rgb(var(--text-rgb) / 0.06);
+  color: var(--text);
+}
+.ds-btn--secondary:hover:not(:disabled) {
+  background: rgb(var(--text-rgb) / 0.1);
+}
+.ds-btn--secondary:active:not(:disabled) {
+  background: rgb(var(--text-rgb) / 0.14);
+}
+
+/* ghost：无底色，仅悬停时出现 */
+.ds-btn--ghost {
+  color: var(--text);
+}
+.ds-btn--ghost:hover:not(:disabled) {
+  background: rgb(var(--text-rgb) / 0.08);
+}
+.ds-btn--ghost:active:not(:disabled) {
+  background: rgb(var(--text-rgb) / 0.12);
+}
+
+/* primary：单色体系里"强调"= 最深灰（浅色）/ 最浅灰（深色） */
+.ds-btn--primary {
+  background: rgb(var(--accent-rgb));
+  color: rgb(var(--on-accent-rgb));
+}
+.ds-btn--primary:hover:not(:disabled) {
+  background: rgb(var(--accent-rgb) / 0.88);
+}
+.ds-btn--primary:active:not(:disabled) {
+  background: rgb(var(--accent-rgb) / 0.78);
+}
+
+/* danger：只用 --failed 表达破坏性，**不加红色底**（避免彩色品牌化） */
+.ds-btn--danger {
+  color: var(--failed);
+  background: rgb(var(--failed-rgb) / 0.08);
+}
+.ds-btn--danger:hover:not(:disabled) {
+  background: rgb(var(--failed-rgb) / 0.14);
+}
+.ds-btn--danger:active:not(:disabled) {
+  background: rgb(var(--failed-rgb) / 0.2);
+}
+
+.ds-btn:disabled {
+  opacity: var(--disabled-opacity);
+  cursor: not-allowed;
+}
+
+/* ── IconButton ─────────────────────────────────────────────────────────── */
+.ds-iconbtn {
+  display: inline-grid;
+  place-items: center;
+  border-radius: var(--radius-md);
+  color: var(--text);
+  transition: background-color var(--dur-quick) var(--ease-standard);
+}
+.ds-iconbtn--md {
+  width: 30px;
+  height: 30px;
+}
+.ds-iconbtn--sm {
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-caption);
+}
+.ds-iconbtn--ghost:hover:not(:disabled) {
+  background: rgb(var(--text-rgb) / 0.1);
+}
+.ds-iconbtn--secondary {
+  background: rgb(var(--text-rgb) / 0.06);
+}
+.ds-iconbtn--secondary:hover:not(:disabled) {
+  background: rgb(var(--text-rgb) / 0.1);
+}
+.ds-iconbtn--primary {
+  background: rgb(var(--accent-rgb));
+  color: rgb(var(--on-accent-rgb));
+}
+.ds-iconbtn--danger {
+  color: var(--failed);
+}
+.ds-iconbtn--danger:hover:not(:disabled) {
+  background: rgb(var(--failed-rgb) / 0.14);
+}
+/* toggle 按下态：颜色 + aria-pressed 双通道，不靠颜色单独承担语义 */
+.ds-iconbtn.is-pressed {
+  background: rgb(var(--accent-rgb));
+  color: rgb(var(--on-accent-rgb));
+}
+.ds-iconbtn:disabled {
+  opacity: var(--disabled-opacity);
+  cursor: not-allowed;
+}
+
+/* ── TextField ──────────────────────────────────────────────────────────── */
+.ds-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--fs-caption);
+}
+.ds-field__label {
+  color: var(--muted);
+  font-size: var(--fs-caption);
+}
+.ds-field__box {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-md);
+  background: rgb(var(--content-rgb) / var(--content-alpha));
+  /* 边界用 alpha 而非 border，避免在玻璃面上叠加发丝线 */
+  box-shadow: inset 0 0 0 1px rgb(var(--line-rgb) / var(--line-alpha));
+  transition: box-shadow var(--dur-quick) var(--ease-standard);
+}
+.ds-field__box:hover {
+  box-shadow: inset 0 0 0 1px rgb(var(--line-rgb) / calc(var(--line-alpha) * 1.8));
+}
+/* focus 用外层 outline（tokens.css 的全局 focus-visible），
+   这里只补一层同色内描边，让焦点落在输入框上时边界更清楚 */
+.ds-field__input:focus-visible {
+  outline: none;
+}
+.ds-field__box:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.ds-field__input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-secondary);
+  padding: var(--space-2) 0;
+}
+.ds-field__input::placeholder {
+  color: var(--placeholder);
+}
+.ds-field__affix {
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+}
+.ds-field__hint,
+.ds-field__error {
+  margin: 0;
+  font-size: var(--fs-micro);
+}
+.ds-field__hint {
+  color: var(--muted);
+}
+.ds-field__error {
+  color: var(--failed);
+}
+.ds-field__flag {
+  flex: none;
+  font-size: var(--fs-micro);
+}
+.ds-field__flag--ok {
+  color: var(--text);
+}
+
+/* error 态：描边换 --failed，并保证**不只靠颜色**——同时有 role=alert 文案 */
+.ds-field[data-ds-status="error"] .ds-field__box {
+  box-shadow: inset 0 0 0 1px rgb(var(--failed-rgb) / 0.7);
+}
+/* readonly：仍可读、仍可聚焦复制，视觉降到 --sunken */
+.ds-field[data-ds-readonly="true"] .ds-field__box {
+  background: rgb(var(--sunken-rgb) / var(--sunken-alpha));
+  box-shadow: none;
+}
+.ds-field__input:disabled {
+  cursor: not-allowed;
+  opacity: var(--disabled-opacity);
+}
+
+/* ── SearchField ────────────────────────────────────────────────────────── */
+.ds-search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md);
+  /* 表面用 text 通道的淡色（而不是 content 实色）：搜索框通常是浮层上的内嵌控件，
+     需要一个"下沉"的浅槽感，与 .ds-field__box 的实色表面区分开。 */
+  background: rgb(var(--text-rgb) / 0.06);
+  transition: background var(--dur-quick) var(--ease-standard);
+}
+/* hover 必须存在：TextField 的 box 有 hover，SearchField 没有就是两个输入组件
+   对一个基本状态的判断不一致。加深槽色，幅度与 .ds-field__box 的描边加深同量级。 */
+.ds-search:hover {
+  background: rgb(var(--text-rgb) / 0.1);
+}
+.ds-search__icon {
+  color: var(--muted);
+  font-size: var(--fs-heading);
+}
+.ds-search__input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-secondary);
+}
+.ds-search__input:focus-visible {
+  outline: none;
+}
+/* placeholder 必须显式接 token。不写这一条，浏览器会用 UA 默认灰（Chromium ≈ rgba(0,0,0,.54)），
+   它在浅色下勉强够看，在深色近黑底上直接掉到 4.16:1 —— 而且完全不受主题切换影响。
+   这是"组件层漏掉一条契约 → 泄漏 UA 默认值"的典型，探针在浅色 3.66:1 / 深色 4.16:1 抓到。 */
+.ds-search__input::placeholder {
+  color: var(--placeholder);
+}
+.ds-search:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.ds-search__input::-webkit-search-cancel-button {
+  display: none;
+}
+
+/* ── Tooltip ────────────────────────────────────────────────────────────── */
+.ds-tip-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.ds-tip {
+  position: absolute;
+  z-index: 300;
+  white-space: nowrap;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-micro);
+  color: var(--text);
+  background: rgb(var(--surface-rgb) / var(--surface-alpha));
+  backdrop-filter: var(--glass-filter-tip);
+  box-shadow: var(--elevation-1);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity var(--dur-quick) var(--ease-standard),
+    transform var(--dur-quick) var(--ease-standard);
+}
+.ds-tip--top {
+  bottom: calc(100% + var(--space-1));
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+}
+.ds-tip--bottom {
+  top: calc(100% + var(--space-1));
+  left: 50%;
+  transform: translateX(-50%) translateY(-4px);
+}
+.ds-tip--left {
+  right: calc(100% + var(--space-1));
+  top: 50%;
+  transform: translateY(-50%) translateX(4px);
+}
+.ds-tip--right {
+  left: calc(100% + var(--space-1));
+  top: 50%;
+  transform: translateY(-50%) translateX(-4px);
+}
+.ds-tip-wrap[data-ds-open="true"] .ds-tip {
+  opacity: 1;
+}
+.ds-tip-wrap[data-ds-open="true"] .ds-tip--top,
+.ds-tip-wrap[data-ds-open="true"] .ds-tip--bottom {
+  transform: translateX(-50%) translateY(0);
+}
+.ds-tip-wrap[data-ds-open="true"] .ds-tip--left,
+.ds-tip-wrap[data-ds-open="true"] .ds-tip--right {
+  transform: translateY(-50%) translateX(0);
+}
+
+/* ── Badge ──────────────────────────────────────────────────────────────── */
+.ds-badge {
+  display: inline-block;
+  border-radius: var(--radius-sm);
+  font-weight: var(--fw-regular);
+  white-space: nowrap;
+}
+.ds-badge--md {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--fs-micro);
+}
+.ds-badge--sm {
+  padding: 1px var(--space-1);
+  font-size: var(--fs-eyebrow);
+}
+/* tone 只允许系统语义色；neutral 走 --sunken，其余走对应色 @ 低 alpha，
+   并且**永远与文字同时出现**（颜色不许单独承担语义）。 */
+.ds-badge--neutral {
+  background: rgb(var(--sunken-rgb) / var(--sunken-alpha));
+  color: var(--muted);
+}
+.ds-badge--success {
+  background: rgb(var(--text-rgb) / 0.1);
+  color: var(--text);
+}
+.ds-badge--warning {
+  background: rgb(var(--text-rgb) / 0.14);
+  color: var(--text);
+}
+.ds-badge--danger {
+  background: rgb(var(--failed-rgb) / 0.12);
+  color: var(--failed);
+}
+
+/* ── ScrollArea ─────────────────────────────────────────────────────────── */
+.ds-scroll {
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-radius: var(--radius-md);
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--text-rgb) / 0.25) transparent;
+}
+.ds-scroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.ds-scroll::-webkit-scrollbar-thumb {
+  background: rgb(var(--text-rgb) / 0.22);
+  border-radius: var(--radius-pill);
+  /* 用透明边框把滑块缩窄，而不是改宽度——避免滚动条宽度变化引起布局抖动 */
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+.ds-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ── Surface ────────────────────────────────────────────────────────────── */
+.ds-surface {
+  color: var(--text);
+  border-radius: var(--radius-lg);
+}
+.ds-surface--padded {
+  padding: var(--space-4);
+}
+.ds-surface--r-sm {
+  border-radius: var(--radius-sm);
+}
+.ds-surface--r-md {
+  border-radius: var(--radius-md);
+}
+.ds-surface--r-lg {
+  border-radius: var(--radius-lg);
+}
+.ds-surface--r-xl {
+  border-radius: var(--radius-xl);
+}
+.ds-surface--r-window {
+  border-radius: var(--radius-window);
+}
+/* 通用 Surface 属"小尺寸表面"家族：玻璃始终保留（REDUCED 下也保留），
+   所以引用基础 --glass-filter，**不**引用大面积开关。
+   否则任何用 Surface 搭的小卡片都会在 REDUCED 下莫名变实色。 */
+.ds-surface--glass {
+  background: rgb(var(--surface-rgb) / var(--surface-alpha));
+  backdrop-filter: var(--glass-filter);
+}
+/* 显式选择加入"大面积白名单"。只有真正的窗口/面板级表面才该加这个类
+   （消费方经 <Surface large> 或 className 显式声明，不靠尺寸自动推断）。 */
+.ds-surface--large {
+  backdrop-filter: var(--glass-filter-large, var(--glass-filter));
+}
+.ds-surface--solid {
+  background: rgb(var(--content-rgb) / var(--content-alpha));
+}
+.ds-surface--none {
+  background: transparent;
+}
+.ds-surface--elev-0 {
+  box-shadow: var(--elevation-0);
+}
+.ds-surface--elev-1 {
+  box-shadow: var(--elevation-1);
+}
+.ds-surface--elev-2 {
+  box-shadow: var(--elevation-2);
+}
+.ds-surface--elev-3 {
+  box-shadow: var(--elevation-3);
+}
+.ds-surface--elev-4 {
+  box-shadow: var(--elevation-4);
+}
+.ds-surface--elev-5 {
+  box-shadow: var(--elevation-5);
+}
+/* 深色下的顶部材质高光已并进 --elevation-N 本身（见 tokens.css），
+   所以这里不需要额外的 .dark 覆盖规则。 */
+
+/* ── Toast ──────────────────────────────────────────────────────────────── */
+.ds-toast-viewport {
+  position: fixed;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  z-index: 400;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 320px;
+  pointer-events: none;
+}
+.ds-toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  background: rgb(var(--surface-rgb) / var(--toast-alpha));
+  /* Toast 是 320px 的角落浮层，属小尺寸系统 chrome —— REDUCED 下保留玻璃。 */
+  backdrop-filter: var(--glass-filter);
+  box-shadow: var(--elevation-4);
+  color: var(--text);
+  animation: ds-toast-in var(--dur-standard) var(--ease-standard);
+}
+@keyframes ds-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-2));
+  }
+}
+.ds-toast__glyph {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-micro);
+  background: rgb(var(--text-rgb) / 0.12);
+  color: var(--text);
+}
+.ds-toast--danger .ds-toast__glyph {
+  background: rgb(var(--failed-rgb) / 0.16);
+  color: var(--failed);
+}
+.ds-toast__body {
+  flex: 1;
+  min-width: 0;
+}
+.ds-toast__title {
+  margin: 0;
+  font-size: var(--fs-secondary);
+  font-weight: var(--fw-medium);
+}
+.ds-toast__desc {
+  margin: var(--space-1) 0 0;
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+.ds-toast__bar {
+  margin-top: var(--space-2);
+  height: 3px;
+  border-radius: var(--radius-pill);
+  background: rgb(var(--text-rgb) / 0.14);
+  overflow: hidden;
+}
+.ds-toast__bar span {
+  display: block;
+  height: 100%;
+  width: 40%;
+  border-radius: var(--radius-pill);
+  background: rgb(var(--text-rgb) / 0.6);
+  animation: ds-progress 1400ms var(--ease-standard) infinite;
+}
+@keyframes ds-progress {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+/* Reduce Motion 的结构性静态替代见文件末尾的「Reduce Motion」区块 —— 那里
+   把产品内开关与系统级媒体查询两条路径并排写在一起，便于强制保持一致。 */
+
+/* 屏幕阅读器专用标签：视觉上不可见但**不**从可访问性树移除。
+   不用 display:none / visibility:hidden —— 那会把可读名称一起删掉。 */
+.ds-field__label--sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Reduce Motion · 结构性静态替代（**两条触发路径必须逐条一致**）
+
+   为什么需要"结构性替代"而不只是把 --dur-* 归零：
+     spinner 与进度条的可见性靠的是 animation，不是 transition-duration。
+     只归零时长，剩下的就是一个**卡住的半圈**和一条永远填不满的进度条 ——
+     用户看到的是"坏了"，而不是"安静了"。
+
+   有两条触发路径（tokens.css 明确承诺两者"走同一套结果"）：
+     ① 产品内开关：根节点 `.reduced` 类
+     ② 系统级设置：`@media (prefers-reduced-motion: reduce)`
+   媒体查询里没法加类，所以同一组声明必须写两遍。**两遍必须逐条一致** ——
+   这个约束由 `experiments/d2-01/01-token-contract.mjs` 的静态断言强制，
+   不靠人记。曾经只写 ① 不写 ②，系统级设置下会露出一个卡住的半圈。
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ① 产品内开关 */
+.reduced .ds-spinner {
+  animation: none;
+  border-color: rgb(var(--text-rgb) / 0.5);
+  border-top-color: rgb(var(--text-rgb) / 0.5);
+}
+.reduced .ds-toast__bar span {
+  animation: none;
+  width: 100%;
+  opacity: 0.5;
+}
+
+/* ② 系统级设置 —— 与 ① 逐条对应，不得少写 */
+@media (prefers-reduced-motion: reduce) {
+  .ds-spinner {
+    animation: none;
+    border-color: rgb(var(--text-rgb) / 0.5);
+    border-top-color: rgb(var(--text-rgb) / 0.5);
+  }
+  .ds-toast__bar span {
+    animation: none;
+    width: 100%;
+    opacity: 0.5;
+  }
+}
