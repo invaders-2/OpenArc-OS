@@ -299,6 +299,10 @@ D1-02 的核心缺口仍未闭合：
 
 ## 12. Adobe Gate
 
+> **★ 已由 §23 Boss Decision 裁定**：**安装 Illustrator Beta**（独立外部动作，D2-01 不等待）；
+> 安装后另行恢复 **D1-03A Illustrator Beta MCP Runtime Verification**；
+> 真实握手与文件操作完成前，**Illustrator 仍 = BLOCKED，D5-05 仍 = BLOCKED**。
+
 | 应用 | D1-03 状态 | 后果 |
 | --- | --- | --- |
 | Illustrator | **BLOCKED**（Beta 未安装；稳定版无 MCP 实现） | `D5-05` **BLOCKED** |
@@ -311,6 +315,9 @@ D1-02 的核心缺口仍未闭合：
 ---
 
 ## 13. Windows Gate（合并清单）
+
+> **★ 已由 §23 Boss Decision 裁定**：**投入 Windows 真机验证**；真机到位前
+> **不阻塞 D2-01 的 macOS / 通用设计系统开发**；所有既有缺口**继续 `NOT VERIFIED`，不得模拟 PASS**。
 
 **Windows 全部不能靠 macOS 推断 PASS。**
 
@@ -327,6 +334,10 @@ D1-02 的核心缺口仍未闭合：
 ---
 
 ## 14. macOS Sandbox blocker
+
+> **★ 已由 §23 Boss Decision 裁定**：生产安全目标 = **A（OS-supported signed sandbox/helper）**，
+> 工程拓扑用 **B**（独立 signed XPC / restricted helper）承载，**不是用 B 替代 OS Sandbox**；
+> 方案取得真实攻击测试 PASS 前，**D（trusted-plugin-only）继续生效**。本节保留原始候选分析。
 
 **本轮不死磕 `sandbox_apply`**（seatbelt 任何含 `deny` 规则的 profile 均返回
 `sandbox_apply: Operation not permitted`，本机无法建立 OS 级约束）。本轮**只做技术决策**。
@@ -532,3 +543,75 @@ docs/decisions/D1-05-service-isolation.md   # 另见 §30 口径修正 addendum
 **ADRs in this tree**：D1-01 · D1-02 · D1-03 · D1-04 · D1-05 —— 五份首次共处同一棵树。
 
 > **未取得真实证据的项目一律 `NOT VERIFIED`。安全边界不以"理论上应该安全"通过。**
+
+---
+
+## 23. Boss Decision（已确认，不再询问）
+
+> 本节由 Boss 正式裁定，**优先于**本文档中任何与之冲突的表述。裁定仅记录决策本身，**不重新执行 D1 的任何验证**。
+> 四项决定分别裁定 §6（Plugin 默认策略）、§12（Adobe）、§13（Windows）、§14（macOS Sandbox）。
+
+### 23.1 Governance（治理口径）
+
+**批准**：
+
+- `D1-06 Task Status = PARTIAL`
+- `RECOMMENDATION = CONDITIONAL GO`
+- **二者不冲突。**
+
+**禁止**：以后用 `CONDITIONAL GO` 把 D1 描述成 COMPLETE。
+
+即 §19 的 COMPLETE 禁令继续有效：D1-03 仍 BLOCKED、OS sandbox（含内存/网络连带）blocker 仍在、
+Windows 核心项仍 NOT VERIFIED —— 三条全部成立时 D1 整体恒为 **PARTIAL**。
+
+### 23.2 macOS Sandbox（生产安全目标与工程拓扑）
+
+| 项 | 裁定 |
+| --- | --- |
+| **生产安全目标** | **A = OS-supported signed sandbox / helper** |
+| **正式技术方向** | **Apple App Sandbox + 独立 signed XPC / restricted helper + capability-based RPC** |
+| **B 的定位** | **B（独立受限 Helper/Service）是 A 的工程拓扑实现，不是 A 的替代** |
+| **方案生效前** | **D（trusted-plugin-only policy）继续生效** |
+
+**继续生效的冻结**：
+
+> **UNTRUSTED CODE EXECUTION = DISABLED BY DEFAULT**
+
+**禁止**把下列任一项**描述成安全 sandbox**：
+
+- 普通 `child_process`
+- Worker Thread
+- JS path validation
+
+**解锁条件**：A 方案（含 B 作为其工程拓扑）必须取得**真实攻击测试 PASS**，在此之前 D 不可撤销。
+本节与 §6 一致：Plugin / Skill 的 manifest、permission declaration、package validation、signature /
+integrity、UI、install metadata **仍可继续开发**，但**不得宣称"不可信插件已安全隔离运行"**。
+
+### 23.3 Windows（投入真机 + 不阻塞 D2-01）
+
+- Boss 决定：**投入 Windows 真机验证**。
+- **真机尚未到位时：不阻塞 D2-01 的 macOS / 通用设计系统开发。**
+- Windows **所有现有缺口继续 `NOT VERIFIED`**，**不得模拟 PASS**。
+- §13 的 16 项缺口清单不变，解锁 Release 的条件不变。
+
+### 23.4 Illustrator（安装 Beta + 门禁不变）
+
+- Boss 决定：**安装 Illustrator Beta**。
+- **安装属于独立外部动作，D2-01 不等待它。**
+- 安装完成后**另行恢复** `D1-03A Illustrator Beta MCP Runtime Verification`。
+- **在真实握手与文件操作完成前**：
+
+> **Illustrator = `BLOCKED`，`D5-05` = `BLOCKED`。**
+
+### 23.5 对本文档其它小节的影响
+
+| 小节 | 影响 |
+| --- | --- |
+| §6 Plugin / Skill 默认策略 | **由 §23.2 确认并加强**（新增"普通 child_process / Worker Thread / JS path validation 不得被描述成安全 sandbox"） |
+| §7 File Boundary 决策 | **不变**（`application path validation = DEFENSE IN DEPTH ≠ SECURITY SANDBOX` 与 §23.2 一致） |
+| §12 Adobe Gate | **由 §23.4 部分推进**：安装动作已批准，但**门禁状态不变**（仍 BLOCKED） |
+| §13 Windows Gate | **由 §23.3 部分推进**：已批准投真机，但**16 项状态不变**（仍 NOT VERIFIED） |
+| §14 macOS Sandbox blocker | **由 §23.2 裁定**：候选 A 为目标、B 为拓扑、D 为当前兜底；C/E 不再作为主路线 |
+| §18 Phase Admission Matrix | **不变**（D2-01 本就为 CONDITIONAL GO） |
+| §19 COMPLETE 禁令 | **不变**，并由 §23.1 再次确认 |
+| §21 RECOMMENDATION | **不变**，但**不得被解读为 D1 已完成** |

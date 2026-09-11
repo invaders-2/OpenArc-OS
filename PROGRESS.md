@@ -87,6 +87,17 @@
 应用层路径检查只作 defense-in-depth，不作为插件权限最终强制点；自动 `FULL→REDUCED→SOLID` 保持冻结；
 `network:none` 在无 OS 级强制证据前不得宣称已实现。
 
+## 4. Boss Decision（已确认，不再询问）
+
+详见 `docs/decisions/D1-06-technical-gate.md` §23。仅记录决定，不重跑 D1。
+
+| # | 事项 | 裁定 | 对状态的影响 |
+| --- | --- | --- | --- |
+| 1 | **Governance** | 批准 `D1-06 = PARTIAL` **同时** `RECOMMENDATION = CONDITIONAL GO`；二者不冲突 | **禁止**用 `CONDITIONAL GO` 把 D1 描述成 COMPLETE |
+| 2 | **macOS Sandbox** | 生产目标 = **A（OS-supported signed sandbox/helper）**；技术方向 = **Apple App Sandbox + 独立 signed XPC / restricted helper + capability-based RPC**；**B 是 A 的工程拓扑，不是替代**；方案取得真实攻击测试 PASS 前 **D（trusted-plugin-only）继续生效** | 禁止把普通 `child_process` / Worker Thread / JS path validation 描述成安全 sandbox |
+| 3 | **Windows** | **投入真机验证**；真机到位前**不阻塞 D2-01 的 macOS / 通用设计系统开发** | Windows **16 项缺口继续 `NOT VERIFIED`，不得模拟 PASS** |
+| 4 | **Illustrator** | **安装 Illustrator Beta**（独立外部动作，D2-01 不等待）；安装后另行恢复 `D1-03A Beta MCP Runtime Verification` | **真实握手与文件操作完成前：Illustrator = BLOCKED，D5-05 = BLOCKED** |
+
 ---
 
 # 历史记录（过程与失败证据，保留不删）
