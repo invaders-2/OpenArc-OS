@@ -28,6 +28,10 @@ declare global {
   }
 }
 type AppId = "home" | "browser" | "files" | "canvas" | "skills" | "settings";
+// D1-04B 玻璃材质档位：单值三态。full = 完整玻璃，reduced = 降合成成本，
+// solid = 关闭 backdrop-filter 走实色（原"减少透明度"）。
+// 与 reduce motion 完全解耦：减少动效不改变材质，降低材质不关动画。
+type GlassMode = "full" | "reduced" | "solid";
 type Folder = { id: string; name: string; x: number; y: number };
 type Win = {
   id: string;
@@ -104,9 +108,13 @@ function App() {
   const [reduced, setReduced] = useState(
     () => localStorage.getItem("oa-motion") === "true",
   );
-  const [opaque, setOpaque] = useState(
-    () => localStorage.getItem("oa-opaque") === "true",
-  );
+  // D1-04B：材质档位是单值三态，不再用多个独立 boolean 拼状态。
+  // 兼容旧键 oa-opaque：true → solid，其余 → full。
+  const [glass, setGlass] = useState<GlassMode>(() => {
+    const v = localStorage.getItem("oa-glass");
+    if (v === "full" || v === "reduced" || v === "solid") return v;
+    return localStorage.getItem("oa-opaque") === "true" ? "solid" : "full";
+  });
   const [dark, setDark] = useState(
     () => localStorage.getItem("oa-dark") === "true",
   );
@@ -217,11 +225,11 @@ function App() {
   useEffect(() => {
     for (const [k, v] of [
       ["motion", reduced],
-      ["opaque", opaque],
+      ["glass", glass],
       ["dark", dark],
     ])
       localStorage.setItem("oa-" + k, String(v));
-  }, [reduced, opaque, dark]);
+  }, [reduced, glass, dark]);
   useEffect(() => {
     localStorage.setItem("oa-folders", JSON.stringify(folders));
   }, [folders]);
@@ -310,6 +318,9 @@ function App() {
       if (e.key === "Escape") {
         setSearch(false);
         setAI(false);
+        // MS-A03：桌面右键菜单此前只能靠点击遮罩关闭，Esc 无效会导致
+        // .menu-shade 继续拦截所有点击，形成功能性陷阱。菜单必须可键盘关闭。
+        setMenu(null);
       }
     };
     window.addEventListener("keydown", key);
@@ -584,7 +595,6 @@ function App() {
           {[
             ["深色外观", dark, setDark],
             ["减少动态效果", reduced, setReduced],
-            ["减少透明度", opaque, setOpaque],
           ].map(([label, value, set]) => (
             <label className="setting-row" key={String(label)}>
               <span>{String(label)}</span>
@@ -597,6 +607,23 @@ function App() {
               />
             </label>
           ))}
+          {/* D1-04B：材质档位取代原"减少透明度"勾选框。
+              材质与动效是两个独立设置，互不影响。 */}
+          <label className="setting-row">
+            <span>
+              材质
+              <span className="footnote"> 玻璃合成成本，与动效互不影响</span>
+            </span>
+            <select
+              className="material-select"
+              value={glass}
+              onChange={(e) => setGlass(e.target.value as GlassMode)}
+            >
+              <option value="full">完整玻璃</option>
+              <option value="reduced">降低材质</option>
+              <option value="solid">实色</option>
+            </select>
+          </label>
           <h3>
             全局模型服务 <span className="badge">尚未连接</span>
           </h3>
@@ -649,7 +676,8 @@ function App() {
   };
   return (
     <div
-      className={`desktop ${dark ? "dark" : ""} ${reduced ? "reduced" : ""} ${opaque ? "opaque" : ""}`}
+      className={`desktop ${dark ? "dark" : ""} ${reduced ? "reduced" : ""}`}
+      data-glass={glass}
       onContextMenu={(e) => {
         e.preventDefault();
         setMenu({ x: e.clientX, y: e.clientY });
