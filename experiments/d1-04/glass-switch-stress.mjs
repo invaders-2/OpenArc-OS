@@ -178,7 +178,7 @@ console.log(
 );
 
 const out = {
-  tag: "D1-04B runtime switch stress",
+  tag: "D1-04C runtime switch stress (selective-glass REDUCED)",
   cycles: CYCLES,
   switches,
   baseline,

@@ -28,15 +28,21 @@ const server = http
 
 const browser = await chromium.launch({ executablePath: EXEC });
 const result = {};
+// D1-04C：对比度要能按材质档位跑（REDUCED 把大面转实色，字心背景会变）
+const GLASS = process.env.OA_GLASS || "full";
 
 for (const dark of [false, true]) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   await page.goto(`http://127.0.0.1:${PORT}/`);
-  await page.evaluate((d) => {
-    localStorage.setItem("oa-dark", String(d));
-    localStorage.setItem("oa-opaque", "false");
-    localStorage.setItem("oa-motion", "false");
-  }, dark);
+  await page.evaluate(
+    ({ d, g }) => {
+      localStorage.setItem("oa-dark", String(d));
+      localStorage.setItem("oa-glass", g);
+      localStorage.setItem("oa-opaque", "false");
+      localStorage.setItem("oa-motion", "false");
+    },
+    { d: dark, g: GLASS }
+  );
   await page.reload();
   await page.waitForSelector(".dock-item");
   await page.locator(".dock-item").first().click();

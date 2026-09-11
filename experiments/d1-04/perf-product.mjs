@@ -1,10 +1,19 @@
-// D1-04B 官方材质性能基准：**切换产品正式状态**，不注入任何材质值。
+// D1-04B / D1-04C 官方材质性能基准：**切换产品正式状态**，不注入任何材质值。
 //
-// 与 D1-04 的 perf2.mjs 的区别（本轮核心要求）：
+// 与 D1-04 的 perf2.mjs 的区别（D1-04B 核心要求）：
 //   perf2.mjs  → page.addStyleTag 注入 `backdrop-filter: blur(...)` / `rgba(...)`，
 //                三档是脚本凭空模拟的（其中 REDUCED 当时产品里并不存在）。
 //   本脚本     → 只写 localStorage `oa-glass`，由产品自己把 `data-glass` 挂到
 //                `.desktop` 上，材质值全部来自 src/styles.css 的产品 token。
+//
+// D1-04C 追加：**过滤面积度量**（measureFiltered）。
+//   D1-04B 已证伪"降半径 = 降成本"，D1-04C 把 REDUCED 改成"减少被 backdrop-filter
+//   覆盖的面积与面数"。因此每次测量同时记录：
+//     filteredCount = 实际参与 backdrop-filter 的元素个数
+//     filteredArea  = 这些元素裁剪到视口后的像素面积之和
+//     coverage      = filteredArea / 视口面积（可 >1，因为面积是叠加的）
+//   这三个数与 p50/p95/长帧一起写入 runs[] 与 filtered[]。
+//   判据也随之改变：REDUCED 的 filteredArea 必须显著低于 FULL（第 22 节）。
 //
 // 测量设计（两项相对 perf2 的改进）：
 //   1. **同页交错**：不再"跑完 FULL 所有层数再跑 REDUCED"。同一个页面、同一批窗口里
@@ -14,9 +23,11 @@
 //      消除"总是先测某一档"的顺序偏置。报告中位数，并给出各轮离散度。
 //
 // 允许注入的只有**消费方**本身（合成玻璃载荷 .oa-synth），且它只引用产品 token：
-//   backdrop-filter: var(--glass-filter-window);
+//   backdrop-filter: var(--glass-filter-large, var(--glass-filter-window));
 //   background: rgb(var(--content-rgb) / var(--content-alpha));
 // 脚本里没有 blur/alpha/saturate 字面量。档位一变，产品 token 一变，载荷跟着变。
+// 注意载荷用的是与 .window 相同的 `--glass-filter-large` 开关——所以载荷在 REDUCED 下
+// 也是实色，这正是"大面积表面转实色"策略的一部分，而不是脚本在模拟。
 //
 // 环境变量：
 //   OA_THEME=dark|light   默认 dark
@@ -49,16 +60,29 @@ const LAYOUT = process.env.OA_LAYOUT === "grid" ? "grid" : "scatter";
 const MODE = process.env.OA_MODE === "cold" ? "cold" : "warm";
 const COLD_REPEAT = Number(process.env.OA_COLD_REPEAT || 5);
 const TAG =
-  process.env.OA_TAG || `D1-04B OFFICIAL CHROMIUM MEASUREMENT (${THEME})`;
+  process.env.OA_TAG || `D1-04C OFFICIAL CHROMIUM MEASUREMENT (${THEME})`;
 
 const TIERS = ["full", "reduced", "solid"];
 
-// 各档**预期**产品滤镜——只用于断言"产品确实切过去了"，不参与渲染。
-// 产品若改了 token，这里 fail 并提示，而不是悄悄测了个旧值。
+// 期待的**产品态**材质——只用于断言"产品确实切过去了"，不参与渲染。
+// D1-04C 起 REDUCED 改的是**作用面**而不是半径：
+//   大面积（.window / 载荷）→ none；小面积 chrome（.window-title）→ 保留薄玻璃。
 const EXPECT = {
-  full: /blur\(34px\)\s*saturate\(1\.8\)/,
-  reduced: /^blur\(10px\)$/,
-  solid: /^none$/,
+  full: {
+    window: /blur\(34px\)\s*saturate\(1\.8\)/,
+    title: /^none$/,
+    synth: /blur\(34px\)\s*saturate\(1\.8\)/,
+  },
+  reduced: {
+    window: /^none$/,
+    title: /^blur\(10px\)$/,
+    synth: /^none$/,
+  },
+  solid: {
+    window: /^none$/,
+    title: /^none$/,
+    synth: /^none$/,
+  },
 };
 
 const loadavg = () => os.loadavg().map((v) => +v.toFixed(2));
@@ -128,6 +152,7 @@ const out = {
   },
   productModes: [],
   runs: [],
+  filtered: [],
   rounds: [],
 };
 
@@ -174,7 +199,7 @@ const setup = async (page, tier) => {
   await page.waitForTimeout(350);
   await page.addStyleTag({
     content: `.oa-synth{
-      backdrop-filter: var(--glass-filter-window);
+      backdrop-filter: var(--glass-filter-large, var(--glass-filter-window));
       background: rgb(var(--content-rgb) / var(--content-alpha));
     }`,
   });
@@ -223,6 +248,7 @@ const selectTier = async (page, tier, expectSynth) => {
   const s = await page.evaluate(() => {
     const d = document.querySelector(".desktop");
     const w = document.querySelector(".window");
+    const t = document.querySelector(".window-title");
     const probe = document.querySelector(".oa-synth");
     return {
       dataGlass: d?.dataset.glass ?? null,
@@ -230,6 +256,7 @@ const selectTier = async (page, tier, expectSynth) => {
       stored: localStorage.getItem("oa-glass"),
       select: document.querySelector(".material-select")?.value ?? null,
       winBackdrop: w ? getComputedStyle(w).backdropFilter : null,
+      titleBackdrop: t ? getComputedStyle(t).backdropFilter : null,
       synthBackdrop: probe ? getComputedStyle(probe).backdropFilter : null,
       synthBg: probe ? getComputedStyle(probe).backgroundColor : null,
       surfAlpha: getComputedStyle(d).getPropertyValue("--surface-alpha").trim(),
@@ -240,18 +267,59 @@ const selectTier = async (page, tier, expectSynth) => {
     throw new Error(
       `档位不同步：期望 ${tier}，实际 data-glass=${s.dataGlass} stored=${s.stored} select=${s.select}`
     );
-  const norm = (s.winBackdrop || "none").replace(/\s+/g, " ").trim();
-  if (!EXPECT[tier].test(norm))
-    throw new Error(`产品滤镜与预期不符（token 可能被改动）：${tier} → ${norm}`);
+  const nz = (v) => (v || "none").replace(/\s+/g, " ").trim();
+  const E = EXPECT[tier];
+  if (!E.window.test(nz(s.winBackdrop)))
+    throw new Error(`窗口材质与预期不符（token 可能被改动）：${tier} → ${nz(s.winBackdrop)}`);
+  if (!E.title.test(nz(s.titleBackdrop)))
+    throw new Error(`窗口标题条材质与预期不符：${tier} → ${nz(s.titleBackdrop)}`);
   // K=0 时没有载荷单元，跳过载荷断言
   if (expectSynth) {
     if (!s.synthBackdrop) throw new Error(`载荷单元缺失：K>0 但找不到 .oa-synth`);
-    const sn = (s.synthBackdrop || "none").replace(/\s+/g, " ").trim();
-    if (!EXPECT[tier].test(sn))
-      throw new Error(`载荷未跟随产品档位：${tier} → ${s.synthBackdrop}`);
+    if (!E.synth.test(nz(s.synthBackdrop)))
+      throw new Error(`载荷未跟随产品档位：${tier} → ${nz(s.synthBackdrop)}`);
   }
   return s;
 };
+
+// D1-04C 核心指标：被 backdrop-filter 覆盖的**面数**与**像素面积**。
+// 这是本轮的独立变量——REDUCED 的判据不再是"半径更小"，而是"过滤面积显著更小"。
+const measureFiltered = (page) =>
+  page.evaluate(() => {
+    const VW = innerWidth;
+    const VH = innerHeight;
+    const hits = [];
+    let area = 0;
+    for (const el of document.querySelectorAll("*")) {
+      const cs = getComputedStyle(el);
+      const f = cs.backdropFilter || cs.webkitBackdropFilter || "none";
+      if (!f || f === "none") continue;
+      if (cs.display === "none" || cs.visibility === "hidden" || cs.opacity === "0")
+        continue;
+      const b = el.getBoundingClientRect();
+      if (b.width <= 0 || b.height <= 0) continue;
+      // 只计入视口内的可见部分，否则视口外的载荷会把面积虚高
+      const iw = Math.max(0, Math.min(b.right, VW) - Math.max(b.left, 0));
+      const ih = Math.max(0, Math.min(b.bottom, VH) - Math.max(b.top, 0));
+      const a = Math.round(iw * ih);
+      if (a === 0) continue;
+      area += a;
+      hits.push({
+        sel: typeof el.className === "string" && el.className ? "." + el.className.trim().split(/\s+/).join(".") : el.tagName.toLowerCase(),
+        filter: f,
+        w: Math.round(b.width),
+        h: Math.round(b.height),
+        area: a,
+      });
+    }
+    return {
+      filteredCount: hits.length,
+      filteredArea: area,
+      viewportArea: VW * VH,
+      coverage: +(area / (VW * VH)).toFixed(4),
+      hits,
+    };
+  });
 
 const measure = (page) =>
   page.evaluate(
@@ -341,6 +409,7 @@ for (const k of KS) {
   await page.waitForTimeout(400);
   const box = await page.locator(".window").last().boundingBox();
   const perTier = { full: [], reduced: [], solid: [] };
+  const filtByTier = {}; // D1-04C：每档的过滤面数 / 过滤面积
 
   if (MODE === "cold") {
     // 冷启动口径：复刻 D1-04 perf2.mjs 的采样方式——**每格独立新页面、无预热**，
@@ -356,7 +425,8 @@ for (const k of KS) {
         await p.waitForTimeout(400);
         const b = await p.locator(".window").last().boundingBox();
         const st0 = await selectTier(p, tier, k > 0);
-        if (r === 0)
+        if (r === 0) {
+          filtByTier[tier] = await measureFiltered(p);
           out.productModes.push({
             tier,
             theme: THEME,
@@ -364,10 +434,12 @@ for (const k of KS) {
             mode: "cold",
             dataGlass: st0.dataGlass,
             winBackdrop: st0.winBackdrop,
+            titleBackdrop: st0.titleBackdrop,
             synthBackdrop: st0.synthBackdrop,
             synthBg: st0.synthBg,
             surfaceAlpha: st0.surfAlpha,
           });
+        }
         const frames = await drag(p, b, true);
         const st = stats(frames);
         perTier[tier].push(st);
@@ -392,7 +464,8 @@ for (const k of KS) {
     for (let r = 0; r < REPEAT; r++) {
       for (const tier of ORDER(r)) {
         const s = await selectTier(page, tier, k > 0);
-        if (r === 0)
+        if (r === 0) {
+          filtByTier[tier] = await measureFiltered(page);
           out.productModes.push({
             tier,
             theme: THEME,
@@ -400,10 +473,12 @@ for (const k of KS) {
             mode: "warm",
             dataGlass: s.dataGlass,
             winBackdrop: s.winBackdrop,
+            titleBackdrop: s.titleBackdrop,
             synthBackdrop: s.synthBackdrop,
             synthBg: s.synthBg,
             surfaceAlpha: s.surfAlpha,
           });
+        }
         const frames = await drag(page, box, true);
         const st = stats(frames);
         perTier[tier].push(st);
@@ -420,6 +495,7 @@ for (const k of KS) {
   };
   for (const tier of TIERS) {
     const a = perTier[tier];
+    const f = filtByTier[tier] || null;
     const rec = {
       tier,
       panes: k,
@@ -431,6 +507,9 @@ for (const k of KS) {
       mean: +(a.reduce((s, x) => s + x.mean, 0) / a.length).toFixed(2),
       miss120: +(a.reduce((s, x) => s + x.miss120, 0) / a.length).toFixed(3),
       miss60: +(a.reduce((s, x) => s + x.miss60, 0) / a.length).toFixed(3),
+      filteredCount: f ? f.filteredCount : null,
+      filteredArea: f ? f.filteredArea : null,
+      filteredCoverage: f ? f.coverage : null,
       p95Spread: [
         +Math.min(...a.map((x) => x.p95)),
         +Math.max(...a.map((x) => x.p95)),
@@ -441,8 +520,22 @@ for (const k of KS) {
       ],
     };
     out.runs.push(rec);
+    if (f)
+      out.filtered.push({
+        panes: k,
+        tier,
+        filteredCount: f.filteredCount,
+        filteredArea: f.filteredArea,
+        viewportArea: f.viewportArea,
+        coverage: f.coverage,
+        // 只留最大的 6 个面，避免产物过大
+        top: f.hits.sort((x, y) => y.area - x.area).slice(0, 6),
+      });
     console.log(
-      `  ── K=${k} ${tier.padEnd(8)} mean ${rec.mean} 丢120Hz ${(rec.miss120 * 100).toFixed(0)}% 丢60Hz ${(rec.miss60 * 100).toFixed(0)}% | p95 中位 ${rec.p95}（各轮 ${rec.p95Spread.join("–")}）| mean 区间 ${rec.meanSpread.join("–")}\n`
+      `  ── K=${String(k).padStart(3)} ${tier.padEnd(8)} mean ${String(rec.mean).padStart(6)} 丢120Hz ${(rec.miss120 * 100).toFixed(0).padStart(3)}% ` +
+        `| p95 ${String(rec.p95).padStart(5)}（各轮 ${rec.p95Spread.join("–")}） ` +
+        `| 过滤面 ${String(rec.filteredCount).padStart(3)} 个 / 面积 ${String(rec.filteredArea).padStart(8)} px ` +
+        `(${(rec.filteredCoverage * 100).toFixed(1)}% 视口)\n`
     );
   }
   await page.close();
