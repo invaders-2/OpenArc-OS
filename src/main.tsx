@@ -755,8 +755,6 @@ function App() {
 
   const runningApps = useMemo(() => new Set(state.windows.map((w) => w.appId)), [state.windows]);
   /** 任一窗口全屏 → Dock 自动隐藏；指针碰到底部才唤回。 */
-  /** 哪些窗口的内容已经滚动了（磨砂条只在此时出现）。磨砂条画在桌面层，见下面渲染处。 */
-  const [scrolledWins, setScrolledWins] = useState<Record<string, boolean>>({});
   const SPLIT_APPS = new Set(["home", "settings", "skills"]);
   /** 窗口是否是"分栏"结构（左侧有一张 208px 侧栏卡）——磨砂条要避开它。 */
   const isSplitApp = (appId: string) => appId.startsWith(FOLDER_PREFIX) || SPLIT_APPS.has(appId);
@@ -2077,7 +2075,6 @@ function App() {
             onCommand={onCommand}
             onResizeStart={(e) => startResize(e, w, onCommand)}
             snapshots={snapshotLayers.filter((s) => s.windowId === w.id)}
-            onScrolledChange={(id, sc) => setScrolledWins((m) => (m[id] === sc ? m : { ...m, [id]: sc }))}
           >
             {content(w.id)}
           </DesktopWindow>
@@ -2086,7 +2083,7 @@ function App() {
             画在窗口内部时，窗口自己的 backdrop-filter 会在该区域被丢掉，顶部就会变暗去饱和。
             只覆盖内容区（避开 208px 的侧栏卡），并跟着各窗口的位置 / z 走。 */}
         {state.windows.map((w) =>
-          w.visible && scrolledWins[w.id] ? (
+          w.visible ? (
             <div
               key={"scrim-" + w.id}
               className="desktop-scrim"

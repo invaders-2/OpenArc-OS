@@ -264,12 +264,6 @@ type WindowProps = {
   /** 快照层：原生视图被收缩/隐藏后把网页画面补回 DOM（ADR §12）。 */
   snapshots?: { rect: { x: number; y: number; width: number; height: number }; dataUrl: string }[];
   onResizeStart: (e: React.PointerEvent) => void;
-  /**
-   * 内容是否已滚动。**磨砂条不能画在窗口内部** —— 窗口自己有 backdrop-filter，
-   * 子元素的 backdrop-filter 会导致祖先那层滤镜在该区域被丢掉（实测：顶部因此变暗去饱和）。
-   * 所以这里只上报状态，由桌面层在窗口**之外**、按窗口位置画那层模糊。
-   */
-  onScrolledChange?: (id: string, scrolled: boolean) => void;
   children: React.ReactNode;
 };
 
@@ -278,39 +272,9 @@ type WindowProps = {
  * 位置尺寸来自 `window.bounds`，层级来自 `window.z`，聚焦来自 `focused`，
  * 它自己只有"拖拽中"这一个纯交互状态，且不回写域（域在 pointermove 里更新）。
  */
-export function Window({ window: w, focused, onCommand, snapshots, onResizeStart, onScrolledChange, children }: WindowProps) {
+export function Window({ window: w, focused, onCommand, snapshots, onResizeStart, children }: WindowProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
-  /**
-   * 顶部磨砂：**只在内容滚上去之后才出现**（用户口径：常驻太刻意）。
-   * 用 document 上的捕获监听统一接：scroll 不冒泡，但捕获能收到所有滚动容器的事件。
-   */
-  const [scrolled, setScrolled] = useState(false);
-  useEffect(() => {
-    const onScroll = (e: Event) => {
-      const t = e.target as HTMLElement | null;
-      if (!t || typeof t.classList?.contains !== "function") return;
-      if (!t.classList.contains("split-main")) return;
-      if (!bodyRef.current || !bodyRef.current.contains(t)) return;
-      const next = t.scrollTop > 4;
-      setScrolled(next);
-      onScrolledChange?.(w.id, next);
-    };
-    document.addEventListener("scroll", onScroll, true);
-    return () => document.removeEventListener("scroll", onScroll, true);
-  }, [onScrolledChange, w.id]);
-
-  /**
-   * 兜底同步：**每次渲染后再核对一次真实滚动位置**。
-   * 只靠 scroll 事件会漏掉"容器被换掉 / 内容变短后 scrollTop 归零 / 切换标签"这些情况 ——
-   * 那时状态会停在旧值，磨砂条要么该出不出、要么该收不收。
-   */
-  useEffect(() => {
-    const el = bodyRef.current?.querySelector(".split-main") as HTMLElement | null;
-    const next = !!el && el.scrollTop > 4;
-    if (next !== scrolled) setScrolled(next);
-    onScrolledChange?.(w.id, next);
-  });
   return (
     <section
       aria-label={`${w.meta.title}窗口`}

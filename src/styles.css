@@ -1301,9 +1301,22 @@ input[type="checkbox"] {
    会在该区域被丢掉，顶部就会变暗去饱和（实测蓝色被压掉 70+）。 */
 .desktop-scrim {
   position: absolute;
-  height: 76px;
+  height: 96px;
   pointer-events: none;
-  background: none;
+  /**
+   * 关键结论（多轮实测）：
+   *   - **只有 blur、底色全透明** → 在深色界面上几乎看不见（用户连续反馈"没有"）；
+   *   - **底色接近实心** → 又像贴了一块板（用户反馈"有一层颜色"）。
+   * 所以取 macOS 真正的做法：**半透明材质 + 模糊** —— 顶部约 40%，向下渐隐到 0，
+   * 既看得见磨砂，又不形成硬边板子。想更淡/更浓只要调这两个系数。
+   */
+  background: linear-gradient(
+    to bottom,
+    rgb(var(--surface-rgb) / calc(var(--surface-alpha) * 0.4)) 0%,
+    rgb(var(--surface-rgb) / calc(var(--surface-alpha) * 0.22)) 46%,
+    rgb(var(--surface-rgb) / calc(var(--surface-alpha) * 0.08)) 74%,
+    rgb(var(--surface-rgb) / 0) 100%
+  );
 }
 /* 分栏窗口：整条都糊，但**把侧栏卡那块挖掉** —— 卡片（含红绿灯）保持清晰，
    卡片四周那圈 8px 边缝则被糊到，不会露出没处理过的桌面（用户口径）。 */
