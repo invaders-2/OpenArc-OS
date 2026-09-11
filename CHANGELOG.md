@@ -1,5 +1,22 @@
 # 计划修订记录
 
+## 2026-09-12：Spectrum 接入（映射口径）· 第一步 Tailwind 通道
+
+用户选择「映射」：用 Spectrum 的组件结构与动效，颜色 / 圆角映射到我们自己的 token。
+
+- `vite.config.ts` 接 `@tailwindcss/vite`。
+- 新增 `src/tailwind.css`：只引 `tailwindcss/theme.css` + `tailwindcss/utilities.css`，
+  **不引 preflight**（Tailwind 的全局 reset 会冲掉冻结的 token / 组件层）；
+  `@theme` 把 `--color-background/foreground/muted/border/surface/content/accent`、
+  `--color-primary` 与 radius 档位全部映射到我们的 token，**不引入任何彩色强调色**。
+- `main.tsx` 在 styles.css 之后引 tailwind.css（utilities 的优先级要能覆盖被接入的组件）。
+
+实测：`npm run build` PASS（Tailwind 产出独立 6.9KB CSS chunk，未使用类名时几乎为空）；
+`npm test` 96/96；**D2-01 设计系统探针 PASS 4 / PARTIAL 1 / FAIL 0，与基线一致（零回归）**。
+
+下一步：`npx shadcn add @spectrumui/<组件>` 拉第一个组件（建议 Dock / Toast Stack 的动效），
+补齐 shadcn 的 `--background` / `--primary` 等变量映射，再跑探针确认。
+
 ## 2026-09-12：拖入的图片/视频显示真实缩略图
 
 用户反馈：文件拖进去后还是显示图标，要能看到缩略图。
