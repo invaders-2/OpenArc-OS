@@ -1395,11 +1395,6 @@ input[type="checkbox"] {
   height: 0;
   display: none;
 }
-/* 常驻磨砂的窗口（设置 / 应用中心 / Skill）——把内容整体下移，让标题落在磨砂带**下面**，
-   否则标题自己会被糊掉（那正是"太刻意"的观感来源）。文件夹窗口有工具条，保持"滚动才触发"。 */
-.window:has(.split):not(:has(.pane-toolbar)) .split-main {
-  padding-top: 120px;
-}
 /* 系统文字默认不可选中：拖拽 / 框选时误选文字是真实困扰；输入框与预格式文本除外 */
 .desktop {
   user-select: none;

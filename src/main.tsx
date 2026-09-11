@@ -2086,7 +2086,7 @@ function App() {
             画在窗口内部时，窗口自己的 backdrop-filter 会在该区域被丢掉，顶部就会变暗去饱和。
             只覆盖内容区（避开 208px 的侧栏卡），并跟着各窗口的位置 / z 走。 */}
         {state.windows.map((w) =>
-          w.visible && (scrolledWins[w.id] || !w.appId.startsWith(FOLDER_PREFIX)) ? (
+          w.visible && scrolledWins[w.id] ? (
             <div
               key={"scrim-" + w.id}
               className="desktop-scrim"
