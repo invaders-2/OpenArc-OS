@@ -86,9 +86,10 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 
 分支 `feature/d1-04-design-performance`。完整 ADR：`docs/decisions/D1-04-design-performance.md`。
 
-**状态：PARTIAL。** 剩余两条硬缺口：性能数字只在 Chromium 取得
-（Electron 内 NOT VERIFIED）、Windows 平台未验证。
-原第三条"REDUCED 档位只定义未实现"已由 **D1-04B** 关闭。
+**状态：PARTIAL。** 剩余三条硬缺口：①性能数字只在 Chromium 取得
+（Electron 内 NOT VERIFIED）、②Windows 平台未验证、
+③**REDUCED 档的性能收益不成立**（实现已在产品里，但"降模糊半径换性能"被实测证伪，见 D1-04B 性能轮）。
+原第三条"REDUCED 档位只定义未实现"的**实现层**已由 **D1-04B** 关闭。
 
 已达成：
 
@@ -99,7 +100,9 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 - 对比度：浅色最低 4.86:1、深色最低 6.77:1，均过 WCAG AA。
 - 性能方法冻结：负载单位为 420×300 玻璃面板，三档材质 × 四档负载。**关键修正——
   p50 与平均 fps 会被 120Hz vsync 截平，必须看 p95 与 >33ms 长帧数。**
-  实测 FULL 在 24 层时 p95=16.3ms（压 60fps 线），72 层起出长帧；
+  （下列数字为 **D1-04 当时用注入 CSS 模拟**的结果，自 D1-04B 起降级为 HISTORICAL REFERENCE；
+  产品态重测见下方 D1-04B 性能轮。）
+  FULL 在 24 层时 p95=16.3ms（压 60fps 线），72 层起出长帧；
   REDUCED 在 24 层 p95=9.2ms、144 层 0 长帧；SOLID 与层数无关。
 
 **Spectrum UI 判定：REFERENCE ONLY，不引入任何源码。**
@@ -161,8 +164,41 @@ REDUCED 档已进入产品代码（不再是实验脚本注入）：
 新增防回归探针 `experiments/d1-04/theme-matrix.mjs` + `matrix_pixels.py`：
 断言主题原料、computed 背景通道不跨主题、深色格窗口内容落在暗部区间。
 
-仍待办（D1-04B 剩余）：**用修复后的产品代码重跑 FULL/REDUCED/SOLID 性能对比**。
+仍待办（D1-04B 剩余）：**REDUCED 档方向重定**（ADR 21.9 的 A/B/C 三选项），
+以及在空载主机上重跑一次官方基线（本轮主机 loadavg ≈ 9）。
 修复前产生的视觉数据不作为最终证据。
+
+### D1-04B 官方材质性能（2026-09-11，结论：SOLID PASS / REDUCED FAIL）
+
+ADR 第 21 节。这一轮只做性能与证据闭合，测量**全程切换产品正式状态**（`data-glass`
++ Settings 里的 `.material-select`），不再注入任何 blur / alpha / saturate / glass class。
+
+- 脚本 `experiments/d1-04/perf-product.mjs`：同页交错三档 + 拉丁方轮转顺序 + 每格回读断言
+  （`data-glass` / `localStorage` / `select` 三者一致，且 `.window` 与载荷的实际
+  `backdrop-filter` 命中预期）。两种口径：`cold`（每格独立新页面、无预热，复刻 D1-04 冻结方法）
+  与 `warm`（预热后稳态）。
+- **深色稳态（7 轮）** `mean / p95 / 长帧`：
+  | 档位 | K=0 | K=24 | K=72 | K=144 |
+  |---|---|---|---|---|
+  | FULL | 8.33 / 9.2 / 0 | 8.36 / 9.1 / 0 | 9.27 / 9.3 / 1 | **10.51 / 25.6 / 4** |
+  | REDUCED | 8.32 / 9.1 / 0 | 8.32 / 9.1 / 0 | 9.15 / 9.3 / 1 | **9.65 / 16.8 / 2** |
+  | SOLID | 8.33 / 9.1 / 0 | 8.32 / 9.1 / 0 | 8.33 / 9.2 / 0 | 8.33 / 9.1 / 0 |
+- **SOLID 通过**：关掉 `backdrop-filter` 后 K 从 0 到 648 恒定 8.33ms、0 长帧。
+- **REDUCED 不通过**：同轮配对 (FULL−REDUCED) mean 差在 K=0/24/72 是掷硬币（4/7），
+  只有 K=144 是 7/7 一致（+0.87ms，≈8%）。冷启动口径下 REDUCED 的 p95 反而更差
+  （K=72 58.2 vs 50.1；K=144 90.8 vs 83.4）。**"降模糊半径换性能"的假设被证伪**——
+  Chromium 按半径降采样 backdrop，10–34px 区间成本几乎是平的。
+- **历史数字不可复现**：用一字未改的旧 `perf2.mjs` 今天重跑，REDUCED K=24 得 16.7（记录 9.2）、
+  FULL 得 16.8（记录 16.3）。原因是旧方法分档块状测量（负载漂移整块落到某一档）+ 无预热
+  （一次性光栅化成本落在先测的档位）。旧的 REDUCED 优势是测量伪影。
+- **当前产品玻璃负载不构成性能问题**：真实场景（≈7 个玻璃面，K=0）三档全部 120fps、0 长帧。
+- 切换压力 **63/63** 通过：窗口数/矩形/`web-viewport` 全程不变，无残留 class，
+  373 帧内 >33ms 0 帧，过渡期 72 个采样点无闪白/闪黑。浅色 K=24 sanity 三档同路径。
+- 环境警示：测量期间主机 **loadavg ≈ 8–10 / 12 核**（外部持续负载，非实验进程），
+  绝对数值不可与空载环境对比；相对比较靠交错 + 配对 + 多轮保持有效。
+- 代表性：**MEASURED (Chromium 149.0.7827.55)**，Electron 与 Windows 仍 **NOT VERIFIED**。
+
+遗留决策：REDUCED 档方向重定（A 重定义作用面 / B 并掉该档 / C 保留但不承诺性能），见 ADR 21.9。
 
 ### 待验证（沿用）
 
