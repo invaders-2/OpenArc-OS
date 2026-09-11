@@ -13,6 +13,10 @@
  *   2. **只有一个状态权威。** `order` 是 z-order 的唯一真值；
  *      `window.z` 是它的缓存，由 reindex() 写回，任何算子在返回前都会调用它。
  *      这样"顺序"与"层级"不可能互相漂移。
+ *      **层级只由 order / z 表达，绝不由 `windows` 数组顺序表达**——
+ *      数组顺序是稳定的创建序，它就是渲染层的 DOM 节点顺序，
+ *      跟着层级走会让置顶变成"移动节点"，进而吃掉红绿灯按钮的 click
+ *      （见 reindex() 的说明与 window-stress 07 步）。
  *
  *   3. **domain model 必须支持 `appId → windowIds[]`。**
  *      §32 明确要求：不得把"一个 App = 一个 Window"写死。
@@ -144,12 +148,28 @@ function createState() {
 /**
  * 把 `order` 的一致性重新铸一遍，并把 z 缓存写回每个 window。
  *
- * 三件事：
+ * 四件事：
  *   1. 剔除 order 里已不存在的 id、补上 windows 里漏掉的 id（保持稳定顺序）
  *   2. 写回 window.z（= order 下标）与 window.visible
  *   3. 修正 focused —— 不允许指向不存在或已最小化的窗口
+ *   4. **windows 数组本身保持既有顺序（创建序）不变** —— 理由见下
  *
  * **任何域算子在返回前都必须经过它**，这是"不可能漂移"的机制保证。
+ *
+ * --- 为什么 windows 数组不跟着 order 排序 ---
+ *
+ * 这里曾经返回 `order.map(...)`，即让 windows 数组跟着层级走。那样"数组位置"与
+ * "z" 变成同一件事的两种写法，看着更整齐，但它把**层级泄漏成了数组顺序**——
+ * 而数组顺序在 React 里就是 DOM 顺序：每次聚焦/置顶，渲染层都会**移动**
+ * 那个 `<section class="window">` 节点。
+ *
+ * 实测后果（experiments/d2-02/window-stress 07 步）：
+ *   点一个**后台窗口**的红绿灯按钮时，`pointerdown` 先触发聚焦 → 重排被提交 →
+ *   节点在 mousedown 与 mouseup 之间被移动，浏览器随即放弃合成 click ——
+ *   事件序列里根本没有 click。用户看到的是"点关闭/最小化/最大化没反应，
+ *   得点第二次"（第二次窗口已在前台，不再重排，于是按钮生效）。
+ *
+ * 层级只由 `order` / `z` 表达，DOM 顺序保持稳定：置顶只改 z-index，不改节点身份。
  */
 function reindex(state) {
   const byId = new Map(state.windows.map((w) => [w.id, w]));
@@ -167,9 +187,13 @@ function reindex(state) {
       order.push(w.id);
     }
   }
-  const windows = order.map((id, i) => {
-    const w = byId.get(id);
-    return { ...w, z: i, visible: w.state !== WSTATE.MINIMIZED };
+  // order 下标 → z。**只在窗口的 z 真的变了时才换对象**，
+  // 让"没动过的窗口保持同一引用"这个性质继续成立（下面第 3 条的判据依赖它）。
+  const zOf = new Map(order.map((id, i) => [id, i]));
+  const windows = state.windows.map((w) => {
+    const z = zOf.get(w.id);
+    const visible = w.state !== WSTATE.MINIMIZED;
+    return w.z === z && w.visible === visible ? w : { ...w, z, visible };
   });
   const focused =
     state.focused && byId.has(state.focused) && byId.get(state.focused).state !== WSTATE.MINIMIZED
@@ -185,11 +209,7 @@ function reindex(state) {
     focused === state.focused &&
     order.length === state.order.length &&
     order.every((id, i) => id === state.order[i]) &&
-    windows.length === state.windows.length &&
-    windows.every((w, i) => {
-      const old = state.windows[i];
-      return w === old || (w.id === old.id && w.z === old.z && w.visible === old.visible);
-    })
+    windows.every((w, i) => w === state.windows[i])
   ) {
     return state;
   }

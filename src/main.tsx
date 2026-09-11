@@ -114,12 +114,36 @@ function App() {
     window.setTimeout(() => setBouncing((cur) => (cur === id ? null : cur)), 760);
   };
 
-  const open = (id: string) => {
+  /**
+   * 启动 / 唤起到前台一个 App。
+   *
+   * macOS 习惯：**点 Dock 图标 = 聚焦该 App 最近的窗口**，全部最小化时先恢复它，
+   * 只有该 App 一个窗口都没有时才新建。这不是额外功能，而是 §32 的直接后果 ——
+   * Dock 消费的是 `appId → windowIds[]`，不是"一个 App 一个窗口"。
+   *
+   * 早先的实现只派发 `window/open`（按 id 幂等）：当窗口 id ≠ appId 时
+   * （例如两个浏览器窗口 browser-a / browser-b），点 Dock 既恢复不了最小化的窗口，
+   * 还会因为 id 对不上而多开一个 —— 双浏览器探针抓到的真实缺陷。
+   */
+  const activateApp = (appId: string) => {
     setOverlays((o) => ({ ...o, search: false }));
-    bounce(id);
-    const app = apps.find((a) => a.id === id);
-    onCommand({ type: "window/open", appId: id, meta: { title: app?.name || id, icon: app?.icon || "apps" } });
+    bounce(appId);
+    const mine = domain.windowsOfApp(state, appId);
+    // order 是自底向上的唯一真值，因此"最近的窗口"就是末尾那个
+    const visibleId = [...mine].reverse().find((id) => domain.byId(state, id)?.state !== domain.WSTATE.MINIMIZED);
+    const topId = mine[mine.length - 1];
+    if (visibleId) {
+      onCommand({ type: "window/focus", id: visibleId });
+      return;
+    }
+    if (topId) {
+      onCommand({ type: "window/restore", id: topId });
+      return;
+    }
+    const app = apps.find((a) => a.id === appId);
+    onCommand({ type: "window/open", appId, meta: { title: app?.name || appId, icon: app?.icon || "apps" } });
   };
+
   const openFolder = (f: Folder) => {
     setMenu(null);
     const id = FOLDER_PREFIX + f.id;
@@ -197,10 +221,17 @@ function App() {
 
   const activeId = domain.actionableId(state);
   const activeTitle = (activeId && domain.byId(state, activeId)?.meta.title) || "桌面";
+  /** 顶栏"最大化"按钮是切换语义，需要知道目标窗口当前是否已最大化。
+      这是域的投影，不是第二份 active state。 */
+  const activeMaximized = !!activeId && domain.byId(state, activeId)?.state === domain.WSTATE.MAXIMIZED;
   const runningApps = useMemo(() => new Set(state.windows.map((w) => w.appId)), [state.windows]);
 
-  /** 浏览器原生视图此刻是否真的可见 —— 文案与占位必须与它一致，否则界面在撒谎。 */
-  const browserVisible = nativeVisibleOf("browser");
+  /**
+   * 浏览器原生视图此刻是否真的可见 —— 文案与占位必须与它一致，否则界面在撒谎。
+   * 必须按 **windowId** 查（不是写死 "browser"）：同一 App 可以开多个窗口（§12），
+   * 写死的话第二个浏览器窗口会显示第一个的可见性。
+   */
+  const browserVisibleOf = (id: string) => nativeVisibleOf(id);
 
   // ---------------------------------------------------------------------------
   // 各 App 的内容。浏览器窗口通过 AddressBar / WebViewport 消费原生视图状态。
@@ -230,7 +261,7 @@ function App() {
             {apps
               .filter((a) => a.id !== "home")
               .map((a) => (
-                <button className="app-card" key={a.id} onClick={() => open(a.id)}>
+                <button className="app-card" key={a.id} onClick={() => activateApp(a.id)}>
                   <img className="app-icon" src={icon(a.icon)} alt="" draggable={false} />
                   <strong>{a.name}</strong>
                   <small>
@@ -263,6 +294,7 @@ function App() {
       );
     if (w?.appId === "browser" || w?.kind === "browser") {
       const url = w.meta.url || "https://example.com";
+      const visible = browserVisibleOf(id);
       return (
         <div className="browser-shell">
           <AddressBar
@@ -280,11 +312,11 @@ function App() {
           <div className="browser-status" role="status">
             {browserEvents?.windowId === id
               ? browserEvents.message
-              : browserVisible
+              : visible
                 ? "正在显示网页。桌面窗口可遮挡它，遮挡时由快照补齐。"
                 : w.meta.url || "输入地址开始浏览。外部页面与桌面权限隔离。"}
           </div>
-          <WebViewport nativeVisible={browserVisible} error={undefined} />
+          <WebViewport nativeVisible={visible} error={undefined} />
         </div>
       );
     }
@@ -447,6 +479,7 @@ function App() {
         <TopBar
           activeTitle={activeTitle}
           focusedId={activeId}
+          focusedMaximized={activeMaximized}
           searchOpen={overlays.search}
           onCommand={onCommand}
           onToggleSearch={() => setOverlays((o) => ({ ...o, search: !o.search }))}
@@ -523,7 +556,7 @@ function App() {
           runningApps={runningApps}
           bouncing={bouncing}
           dockRef={dockRef}
-          onCommand={onCommand}
+          onActivate={activateApp}
           onToggleAI={() => {
             setOverlays((o) => ({ ...o, ai: !o.ai }));
             bounce("__ai");
@@ -536,7 +569,7 @@ function App() {
           onClose={() => setOverlays((o) => ({ ...o, ai: false }))}
           onOpenSettings={() => {
             setOverlays((o) => ({ ...o, ai: false }));
-            open("settings");
+            activateApp("settings");
           }}
         />
       ) : null}
@@ -573,7 +606,7 @@ function App() {
             {apps
               .filter((a) => a.name.toLowerCase().includes(query.toLowerCase()))
               .map((a) => (
-                <button className="search-result" key={a.id} onClick={() => open(a.id)}>
+                <button className="search-result" key={a.id} onClick={() => activateApp(a.id)}>
                   <img className="result-icon" src={icon(a.icon)} alt="" />
                   {a.name}
                   <ArrowRight size={15} />

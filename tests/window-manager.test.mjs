@@ -214,6 +214,28 @@ test("system/reflow：复用 geometry.clampAll 把屏外窗口拉回可见工作
   assert.deepEqual(domain.invariants(r2), []);
 });
 
+test("system/reflow：宿主窗口缩小后所有窗口仍完整落在工作区内（同一条 A05 不变量）", () => {
+  // 外壳从 1440 拖到 1000 宽。窗口原先贴着右边界，不收拢就会落到可见区域之外 ——
+  // 用户既抓不到标题栏也点不到关闭按钮。这里复用 reflow 的 clamp 路径，不另写边界判断。
+  const big = manager.areaOf({ width: 1440, height: 940 });
+  const state = boot([{ type: "window/open", appId: "home", bounds: { x: 1440 - 700, y: 300, w: 700, h: 500 } }]);
+  assert.equal(state.windows[0].bounds.x + 700 <= big.x + big.width, true);
+
+  const shrunkHost = { width: 1000, height: 940 };
+  const small = manager.areaOf(shrunkHost);
+  const next = manager.reduce(state, { type: "system/reflow", areas: [small], host: shrunkHost });
+  const b = domain.byId(next, "home").bounds;
+
+  assert.ok(b.x >= small.x && b.x + b.w <= small.x + small.width, `x=${b.x} w=${b.w} 越出缩小后的工作区`);
+  assert.ok(b.y >= small.y && b.y + b.h <= small.y + small.height, `y=${b.y} h=${b.h} 越出缩小后的工作区`);
+  assert.ok(b.w >= domain.MIN_WINDOW_W && b.h >= domain.MIN_WINDOW_H, "收拢不得把窗口压到最小尺寸之下");
+  assert.deepEqual(domain.invariants(next), []);
+
+  // 工作区没变时必须是 no-op（宿主 resize 会持续触发，空转会产生无意义的持久化与重渲染）
+  const again = manager.reduce(next, { type: "system/reflow", areas: [small], host: shrunkHost });
+  assert.equal(again, next, "工作区未变化时 reflow 返回了新的状态对象");
+});
+
 test("system/native-state：只写 meta，不触碰 bounds / order / focused", () => {
   const state = boot([
     { type: "window/open", appId: "browser", id: "browser", meta: { url: "https://example.com" } },

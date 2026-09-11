@@ -23,14 +23,24 @@ const icon = (name: string) => "./icons/" + name + ".png";
 type TrafficBarProps = {
   /** 可操作目标；null 表示无聚焦窗口 → 三个按钮全部禁用（§33）。 */
   target: string | null;
+  /** 目标窗口是否已最大化。这是**域的投影**，不是第二份状态（§33）。 */
+  maximized: boolean;
   onCommand: (c: WindowCommand) => void;
 };
 
 /**
  * 顶栏红绿灯。**只操作 focusedWindowId，不维护第二份 active state** ——
  * "谁被聚焦"这个问题只问 Window Manager 一次。
+ *
+ * 最大化是**切换**而不是单向：只看 `maximized` 这个投影决定派发哪条命令。
+ * 否则 `window/unmaximize` 这条冻结命令在 UI 上不可达，
+ * 用户一旦双击放大就再也回不到原尺寸（D2-02B 审出的真实缺陷）。
  */
-export function TrafficBar({ target, onCommand }: TrafficBarProps) {
+export function TrafficBar({ target, maximized, onCommand }: TrafficBarProps) {
+  // 还原不需要 host：restore 快照在最大化时就已按当时的工作区收拢过，
+  // 之后宿主尺寸变化由 system/reflow 继续维护它（§24 同一条 clamp 路径）。
+  const toggleMax = (id: string) =>
+    onCommand(maximized ? { type: "window/unmaximize", id } : { type: "window/maximize", id, host: host() });
   return (
     <div className="traffic traffic-bar" aria-label="当前窗口控制">
       <button
@@ -51,9 +61,9 @@ export function TrafficBar({ target, onCommand }: TrafficBarProps) {
       </button>
       <button
         className="maximize"
-        aria-label="最大化当前窗口"
+        aria-label={maximized ? "还原当前窗口" : "最大化当前窗口"}
         disabled={!target}
-        onClick={() => target && onCommand({ type: "window/maximize", id: target, host: host() })}
+        onClick={() => target && toggleMax(target)}
       >
         <Maximize2 size={7} />
       </button>
@@ -66,6 +76,8 @@ const host = () => ({ width: innerWidth, height: innerHeight });
 type TopBarProps = {
   activeTitle: string;
   focusedId: string | null;
+  /** focusedId 对应窗口是否已最大化。同样是域的投影，不是第二份状态。 */
+  focusedMaximized: boolean;
   /** 搜索是否打开。只用来表达 aria-expanded，因此是 boolean 而不是查询串 ——
       需要查询串的地方是搜索面板，不是顶栏。 */
   searchOpen: boolean;
@@ -74,10 +86,18 @@ type TopBarProps = {
   onToggleAI: () => void;
 };
 
-export function TopBar({ activeTitle, focusedId, searchOpen, onCommand, onToggleSearch, onToggleAI }: TopBarProps) {
+export function TopBar({
+  activeTitle,
+  focusedId,
+  focusedMaximized,
+  searchOpen,
+  onCommand,
+  onToggleSearch,
+  onToggleAI,
+}: TopBarProps) {
   return (
     <header className="topbar">
-      <TrafficBar target={focusedId} onCommand={onCommand} />
+      <TrafficBar target={focusedId} maximized={focusedMaximized} onCommand={onCommand} />
       <strong className="wordmark">◈ OpenArc</strong>
       <span>{activeTitle}</span>
       <div className="topbar-right">
@@ -140,11 +160,16 @@ type DockProps = {
   runningApps: ReadonlySet<string>;
   bouncing: string | null;
   dockRef: React.RefObject<HTMLElement | null>;
-  onCommand: (c: WindowCommand) => void;
+  /**
+   * 激活一个 App。**Dock 不自己决定要派发哪条窗口命令** ——
+   * "聚焦已有窗口 / 恢复最小化的窗口 / 新建"这个判断需要看 `appId → windowIds[]`，
+   * 属于窗口状态，只有持有 Window Manager 的那一层才做得对（§32 / §33）。
+   */
+  onActivate: (appId: string) => void;
   onToggleAI: () => void;
 };
 
-export function Dock({ apps, runningApps, bouncing, dockRef, onCommand, onToggleAI }: DockProps) {
+export function Dock({ apps, runningApps, bouncing, dockRef, onActivate, onToggleAI }: DockProps) {
   return (
     <nav className="dock" aria-label="应用栏" ref={dockRef}>
       {apps.map((a) => (
@@ -154,7 +179,7 @@ export function Dock({ apps, runningApps, bouncing, dockRef, onCommand, onToggle
           iconName={a.icon}
           running={runningApps.has(a.id)}
           bouncing={bouncing === a.id}
-          onActivate={() => onCommand({ type: "window/open", appId: a.id, meta: { title: a.name, icon: a.icon } })}
+          onActivate={() => onActivate(a.id)}
         />
       ))}
       <div className="dock-divider" />
@@ -170,17 +195,19 @@ export function Dock({ apps, runningApps, bouncing, dockRef, onCommand, onToggle
 type TitleBarProps = {
   id: string;
   title: string;
+  /** 是否已最大化 —— 决定"最大化"按钮与双击是放大还是还原。 */
+  maximized: boolean;
   onCommand: (c: WindowCommand) => void;
   onDragStart: (e: React.PointerEvent) => void;
 };
 
-export function TitleBar({ id, title, onCommand, onDragStart }: TitleBarProps) {
+export function TitleBar({ id, title, maximized, onCommand, onDragStart }: TitleBarProps) {
+  // 双向切换：双击/按钮在"放大"与"还原"之间切。只发 maximize 会让
+  // window/unmaximize 成为不可达命令，用户放大后无法恢复（D2-02B 审出的缺陷）。
+  const toggleMax = () =>
+    onCommand(maximized ? { type: "window/unmaximize", id } : { type: "window/maximize", id, host: host() });
   return (
-    <div
-      className="window-title"
-      onPointerDown={onDragStart}
-      onDoubleClick={() => onCommand({ type: "window/maximize", id, host: host() })}
-    >
+    <div className="window-title" onPointerDown={onDragStart} onDoubleClick={toggleMax}>
       <div className="traffic">
         <button className="close" aria-label={`关闭${id}`} onClick={() => onCommand({ type: "window/close", id })}>
           <X size={10} />
@@ -188,7 +215,7 @@ export function TitleBar({ id, title, onCommand, onDragStart }: TitleBarProps) {
         <button className="minimize" aria-label={`最小化${id}`} onClick={() => onCommand({ type: "window/minimize", id })}>
           <Minus size={10} />
         </button>
-        <button className="maximize" aria-label={`最大化${id}`} onClick={() => onCommand({ type: "window/maximize", id, host: host() })}>
+        <button className="maximize" aria-label={`${maximized ? "还原" : "最大化"}${id}`} onClick={toggleMax}>
           <Maximize2 size={9} />
         </button>
       </div>
@@ -222,7 +249,13 @@ export function Window({ window: w, focused, onCommand, snapshots, onResizeStart
       style={{ left: w.bounds.x, top: w.bounds.y, width: w.bounds.w, height: w.bounds.h, zIndex: 10 + w.z }}
       onPointerDown={() => !focused && onCommand({ type: "window/focus", id: w.id })}
     >
-      <TitleBar id={w.id} title={w.meta.title} onCommand={onCommand} onDragStart={(e) => startDrag(e, w, onCommand)} />
+      <TitleBar
+        id={w.id}
+        title={w.meta.title}
+        maximized={w.state === domain.WSTATE.MAXIMIZED}
+        onCommand={onCommand}
+        onDragStart={(e) => startDrag(e, w, onCommand)}
+      />
       <div className="window-body">{children}</div>
       {snapshots?.length ? (
         <div className="window-snapshot-layer" aria-hidden="true" data-window={w.id}>
@@ -266,28 +299,64 @@ export function Window({ window: w, focused, onCommand, snapshots, onResizeStart
   );
 }
 
+/**
+ * 追踪一次指针手势（拖动 / 缩放共用）。
+ *
+ * **监听器挂在 window 上，而不是在元素上依赖 `setPointerCapture`。**
+ *
+ * 原因（experiments/d2-02/window-stress 实测）：捕获并不总会真正生效 ——
+ * 探针里能看到 `setPointerCapture` 调用成功、`hasPointerCapture()` 当场返回 true，
+ * 但**从没有触发过 `gotpointercapture`**，随后 `pointermove` 被投给了指针下方的
+ * 别的元素。后果是：拖着拖着指针一离开元素（标题栏 44px、缩放手柄只有 22px），
+ * 窗口就不跟手了；缩放更是只要移动超过手柄大小就断。
+ *
+ * 这种问题在肉眼上表现为"卡顿"，很难归因，而挂到 window 上就不存在这个前提：
+ * 指针跑到哪里都还在同一个手势里。
+ *
+ * 捕获仍然尝试建立（减少重定向抖动），但**正确性不依赖它**。
+ */
+function trackPointer(
+  e: React.PointerEvent,
+  onMove: (p: PointerEvent) => void,
+  onEnd: () => void,
+) {
+  const id = e.pointerId;
+  const move = (ev: PointerEvent) => {
+    if (ev.pointerId === id) onMove(ev);
+  };
+  const stop = (ev: PointerEvent) => {
+    if (ev.pointerId !== id) return;
+    cleanup();
+    onEnd();
+  };
+  const cleanup = () => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", stop);
+    window.removeEventListener("pointercancel", stop);
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", stop);
+  window.addEventListener("pointercancel", stop);
+  try {
+    (e.currentTarget as HTMLElement).setPointerCapture?.(id);
+  } catch {
+    /* 捕获失败不影响手势本身 */
+  }
+}
+
 /** 拖拽：位移量在组件里算，**clamp 在域里做**（electron/window-manager.cjs）。 */
 function startDrag(e: React.PointerEvent, w: WinDomain, onCommand: (c: WindowCommand) => void) {
-  if ((e.target as HTMLElement).closest("button,input") ) return;
+  if ((e.target as HTMLElement).closest("button,input")) return;
   if (w.state === domain.WSTATE.MAXIMIZED) return;
   const startX = e.clientX;
   const startY = e.clientY;
   const x0 = w.bounds.x;
   const y0 = w.bounds.y;
-  const el = e.currentTarget as HTMLElement;
-  el.setPointerCapture(e.pointerId);
-  const move = (ev: Event) => {
-    const p = ev as PointerEvent;
-    onCommand({ type: "window/move", id: w.id, x: x0 + p.clientX - startX, y: y0 + p.clientY - startY, host: host() });
-  };
-  const end = () => {
-    el.removeEventListener("pointermove", move);
-    el.removeEventListener("pointerup", end);
-    el.removeEventListener("pointercancel", end);
-  };
-  el.addEventListener("pointermove", move);
-  el.addEventListener("pointerup", end);
-  el.addEventListener("pointercancel", end);
+  trackPointer(
+    e,
+    (p) => onCommand({ type: "window/move", id: w.id, x: x0 + p.clientX - startX, y: y0 + p.clientY - startY, host: host() }),
+    () => {},
+  );
 }
 
 export function startResize(e: React.PointerEvent, w: WinDomain, onCommand: (c: WindowCommand) => void) {
@@ -296,20 +365,11 @@ export function startResize(e: React.PointerEvent, w: WinDomain, onCommand: (c: 
   const startY = e.clientY;
   const w0 = w.bounds.w;
   const h0 = w.bounds.h;
-  const el = e.currentTarget as HTMLElement;
-  el.setPointerCapture(e.pointerId);
-  const move = (ev: Event) => {
-    const p = ev as PointerEvent;
-    onCommand({ type: "window/resize", id: w.id, w: w0 + p.clientX - startX, h: h0 + p.clientY - startY, host: host() });
-  };
-  const end = () => {
-    el.removeEventListener("pointermove", move);
-    el.removeEventListener("pointerup", end);
-    el.removeEventListener("pointercancel", end);
-  };
-  el.addEventListener("pointermove", move);
-  el.addEventListener("pointerup", end);
-  el.addEventListener("pointercancel", end);
+  trackPointer(
+    e,
+    (p) => onCommand({ type: "window/resize", id: w.id, w: w0 + p.clientX - startX, h: h0 + p.clientY - startY, host: host() }),
+    () => {},
+  );
 }
 
 // ===========================================================================

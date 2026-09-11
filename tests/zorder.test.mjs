@@ -125,6 +125,48 @@ test("随机命令序列：不变量与 z 一致性在每一步都成立", () =>
   }
 });
 
+test("windows 数组顺序稳定：置顶只改 z，不重排数组（DOM 节点因此不移动）", () => {
+  // 这一条锁的是"层级不得泄漏成数组顺序"。
+  // windows 数组顺序 = 渲染层的 DOM 顺序；它一旦跟着 order 走，
+  // 聚焦就会**移动** <section class="window"> 节点，而 pointerdown 里的聚焦
+  // 恰好发生在 mousedown 与 mouseup 之间 —— 浏览器会因此放弃合成 click，
+  // 表现是"点后台窗口的红绿灯按钮没反应，得点第二次"。
+  const state = boot(["a", "b", "c", "d"]);
+  const created = state.windows.map((w) => w.id);
+  const raised = manager.reduce(state, { type: "window/focus", id: "a" });
+
+  assert.deepEqual(raised.order, ["b", "c", "d", "a"], "order 必须跟着置顶变");
+  assert.deepEqual(raised.windows.map((w) => w.id), created, "windows 数组顺序必须原样不动");
+  assert.equal(domain.zOf(raised, "a"), 3, "z 必须跟着 order 走");
+  assert.ok(zConsistent(raised));
+
+  // z 没变时窗口对象必须保持同一引用（reindex 的"无变化 → 不换对象"性质）。
+  // 最小化只改 state，不动 order，因此其余窗口的 z 不变。
+  const min = manager.reduce(state, { type: "window/minimize", id: "b" });
+  assert.equal(domain.byId(min, "a"), domain.byId(state, "a"));
+  assert.equal(domain.byId(min, "b") === domain.byId(state, "b"), false, "被最小化的窗口必须换新对象");
+  // 幂等命令整体返回原状态
+  assert.equal(manager.reduce(state, { type: "window/focus", id: "d" }), state);
+
+  // 一串聚焦 / 最小化 / 恢复之后依然稳定
+  let s = raised;
+  for (const id of ["c", "b", "d", "a", "c"]) s = manager.reduce(s, { type: "window/focus", id });
+  s = manager.reduce(s, { type: "window/minimize", id: "b" });
+  s = manager.reduce(s, { type: "window/restore", id: "b" });
+  assert.deepEqual(s.windows.map((w) => w.id), created);
+  assert.deepEqual(domain.invariants(s), []);
+});
+
+test("关闭再开之后，数组顺序仍按创建序（DOM 节点不跳位）", () => {
+  const state = boot(["a", "b", "c"]);
+  const closed = manager.reduce(state, { type: "window/close", id: "b" });
+  assert.deepEqual(closed.windows.map((w) => w.id), ["a", "c"]);
+  const reopened = manager.reduce(closed, { type: "window/open", appId: "b" });
+  assert.deepEqual(reopened.windows.map((w) => w.id), ["a", "c", "b"]);
+  assert.equal(domain.zOf(reopened, "b"), 2);
+  assert.ok(zConsistent(reopened));
+});
+
 test("层级契约的边界：窗口顺序完全由 order 决定，不由创建时间或 id 决定", () => {
   // 反证：手工把 order 倒过来，层级必须跟着倒 —— 证明"创建时间"不是真值
   const state = boot(["a", "b", "c"]);

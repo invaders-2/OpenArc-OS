@@ -252,11 +252,14 @@ function hydrate(state, cmd) {
 }
 
 /**
- * A05：显示器增删 / 分辨率变化后把所有窗口拉回可见工作区。
+ * A05：显示器增删 / 分辨率变化 / **宿主窗口尺寸变化**后把所有窗口拉回可见工作区。
  *
  * **复用 `geometry.clampAll`，不重新发明另一套 clamp。**
  * 最大化的窗口不吃 clamp 结果，而是重新按新 host 计算最大化矩形；
  * 它的 restore 快照也要一起 clamp，否则"还原"会把窗口送回已拔掉的屏幕。
+ *
+ * 宿主尺寸变化也算这条路径：外壳被拖小时工作区变小，不 clamp 就会出现
+ * "窗口跑到可见区域之外、既抓不到也关不掉"。同一条不变量，同一个实现。
  */
 function reflow(state, cmd) {
   const areas = (cmd?.areas || []).filter(Boolean);
@@ -264,20 +267,31 @@ function reflow(state, cmd) {
   const flattened = state.windows.map((w) => ({ ...w, ...w.bounds }));
   const clamped = geometry.clampAll(flattened, areas);
   const maxRect = maximizedBounds(cmd.host);
-  return domain.reindex({
-    ...state,
-    windows: state.windows.map((w, i) => {
-      const b = clamped[i];
-      const bounds = w.state === WSTATE.MAXIMIZED ? maxRect : { x: b.x, y: b.y, w: b.w, h: b.h };
-      const restore = w.restore
-        ? (() => {
-            const r = geometry.clampAll([{ ...w.restore, ...w.restore }], areas)[0];
-            return { x: r.x, y: r.y, w: r.w, h: r.h };
-          })()
-        : null;
-      return { ...w, bounds: domain.normalizeBounds(bounds, w.bounds), restore };
-    }),
+  const next = state.windows.map((w, i) => {
+    const b = clamped[i];
+    const bounds = w.state === WSTATE.MAXIMIZED ? maxRect : { x: b.x, y: b.y, w: b.w, h: b.h };
+    const restore = w.restore
+      ? (() => {
+          const r = geometry.clampAll([{ ...w.restore, ...w.restore }], areas)[0];
+          return { x: r.x, y: r.y, w: r.w, h: r.h };
+        })()
+      : null;
+    return { ...w, bounds: domain.normalizeBounds(bounds, w.bounds), restore };
   });
+  // 无变化时返回原状态：尺寸变化事件会持续触发 reflow，
+  // 每次都产生新对象会让持久化与重渲染跟着空转（这是 reduce 的全局性质）。
+  const same = next.every((w, i) => {
+    const old = state.windows[i];
+    return (
+      w.bounds.x === old.bounds.x &&
+      w.bounds.y === old.bounds.y &&
+      w.bounds.w === old.bounds.w &&
+      w.bounds.h === old.bounds.h &&
+      JSON.stringify(w.restore) === JSON.stringify(old.restore)
+    );
+  });
+  if (same) return state;
+  return domain.reindex({ ...state, windows: next });
 }
 
 /**

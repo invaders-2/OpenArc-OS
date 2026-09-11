@@ -17,7 +17,9 @@ const KEY = "oa-wins";
 
 type NativeResult = {
   windowId: string;
-  strategy: "live" | "clip+snapshot" | "snapshot" | "hidden" | "closed";
+  /** 四态由 electron/occlusion.cjs 的 plan() 结算：live / clip+snapshot / snapshot / hidden。
+      "closed" 只表示原生视图已被释放。 */
+  mode: "live" | "clip+snapshot" | "snapshot" | "hidden" | "closed";
   bounds?: { x: number; y: number; width: number; height: number };
   snapshotRects?: { x: number; y: number; width: number; height: number }[];
   snapshots?: { rect: { x: number; y: number; width: number; height: number }; dataUrl: string | null }[];
@@ -78,13 +80,22 @@ export function useDesktop() {
   // host 尺寸变化 → 记录；显示器变化 → reflow（A05）
   // ---------------------------------------------------------------------------
   useEffect(() => {
-    const onResize = () => setHostSize(host());
-    window.addEventListener("resize", onResize);
-    const off = window.openarc?.onDisplay(() =>
-      dispatch({ type: "system/reflow", areas: [workArea(host())], host: host() }),
-    );
+    // 宿主窗口被拖小时工作区跟着变小。不重新收拢，窗口就会跑到可见区域之外，
+    // 用户既抓不到也关不掉。这里**复用 system/reflow 同一条 clamp 路径**（§24），
+    // 而不是在组件里另写一份边界判断。
+    const reflow = () => {
+      const size = host();
+      setHostSize(size);
+      dispatch({ type: "system/reflow", areas: [workArea(size)], host: size });
+    };
+    window.addEventListener("resize", reflow);
+    const off = window.openarc?.onDisplay(() => {
+      const size = host();
+      setHostSize(size);
+      dispatch({ type: "system/reflow", areas: [workArea(size)], host: size });
+    });
     return () => {
-      window.removeEventListener("resize", onResize);
+      window.removeEventListener("resize", reflow);
       off?.();
     };
   }, []);
@@ -145,7 +156,7 @@ export function useDesktop() {
   const snapshotLayers: SnapshotLayer[] = useMemo(() => {
     const out: SnapshotLayer[] = [];
     for (const r of native) {
-      if (r.strategy !== "clip+snapshot" && r.strategy !== "snapshot") continue;
+      if (r.mode !== "clip+snapshot" && r.mode !== "snapshot") continue;
       for (const s of r.snapshots || []) if (s.dataUrl) out.push({ windowId: r.windowId, rect: s.rect, dataUrl: s.dataUrl });
     }
     return out;
@@ -155,7 +166,7 @@ export function useDesktop() {
   const nativeVisibleOf = useCallback(
     (windowId: string) => {
       const r = native.find((n) => n.windowId === windowId);
-      return !!r && (r.strategy === "live" || r.strategy === "clip+snapshot");
+      return !!r && (r.mode === "live" || r.mode === "clip+snapshot");
     },
     [native],
   );

@@ -7,10 +7,10 @@
  * 它只回答一个问题：**"拿到这些意图之后，原生对象该以什么形态存在"**。
  *
  * 形态由 electron/occlusion.cjs 的 plan() 结算，四态：
- *   live          视口整块实时
- *   clip+snapshot 收缩到最大空闲矩形，其余区域由快照补齐
- *   snapshot      整块改用快照
- *   hidden        整块隐藏（最小化 / 系统级覆盖层打开）
+ *   live          视口整块实时（原生像素）
+ *   clip+snapshot 收缩到最大空闲矩形做实况，其余区域由快照补齐
+ *   snapshot      原生视图收起，整块由快照占位（空闲区域太小或当前不可交互）
+ *   hidden        整块隐藏且不出快照（最小化 / 系统级覆盖层打开）
  *
  * 本文件把 Gate 七组探针踩出来的六条硬事实落成实现，每条都有对应断言：
  *
@@ -39,6 +39,17 @@ const safeURL = require("./policy.cjs").safeURL;
 
 /** 快照的字节上限：超过就放弃补齐（宁可整块隐藏，也不把内存吃穿）。 */
 const SNAPSHOT_MAX_BYTES = 6 * 1024 * 1024;
+
+/**
+ * capturePage 的重试上限与间隔。
+ *
+ * 实测（experiments/d2-02/native-view-controller 探针）：视图几何刚变过时立刻取图，
+ * Chromium 会抛 `UnknownVizError` —— 合成器还没为新区域产出帧。
+ * 一次失败就把 dataUrl 留成 null 的后果是"这块区域永远补不上图"，
+ * 而失败本身是瞬时的。因此这里做**有界**重试（总开销 ≤ 约 80ms，不会拖住 sync）。
+ */
+const CAPTURE_RETRIES = 3;
+const CAPTURE_RETRY_MS = 40;
 
 class NativeViewController {
   /**
@@ -120,7 +131,7 @@ class NativeViewController {
     });
 
     // 父窗口关闭时由 destroyAll() 统一释放，这里不重复挂。
-    this.entries.set(intent.windowId, { view, url: "", key: "", snapshots: {} });
+    this.entries.set(intent.windowId, { view, url: "", key: "", snapshots: {}, lastMode: "" });
     this.log(`native-view: 创建 ${intent.windowId}（分区 ${partition}）`);
     return this.entries.get(intent.windowId);
   }
@@ -161,6 +172,8 @@ class NativeViewController {
 
   destroyAll() {
     for (const id of [...this.entries.keys()]) this.destroy(id);
+    // 父窗口已关，控制器不再可用。不置位的话后续 sync 会在已销毁的宿主上重建视图。
+    this.destroyed = true;
   }
 
   /** 资源现状（供探针断言"DOM 关了但 WebContentsView 还活着"不存在）。 */
@@ -207,7 +220,7 @@ class NativeViewController {
     const { view } = entry;
     const wc = view.webContents;
     if (!wc || wc.isDestroyed()) {
-      return { windowId: intent.windowId, strategy: "closed", snapshotRects: [] };
+      return { windowId: intent.windowId, mode: "closed", snapshotRects: [] };
     }
 
     const viewport = intent.viewport;
@@ -229,33 +242,62 @@ class NativeViewController {
       }
     }
 
-    const wasVisible = entry.lastStrategy && entry.lastStrategy !== "hidden";
+    const wasVisible = entry.lastMode && entry.lastMode !== "hidden";
 
-    if (plan.strategy === "hidden") {
-      if (wasVisible) {
-        // 事实 2：隐藏只让焦点落空，不交还外壳 —— 必须显式移交，
-        // 否则后果不是"焦点留在网页"，而是"键盘没有人收到"。
-        const hadFocus = wc.isFocused();
-        view.setVisible(false);
-        entry.lastStrategy = "hidden";
-        if (hadFocus) this.onFocusShell();
-      } else {
-        view.setVisible(false);
-        entry.lastStrategy = "hidden";
-      }
-      return { windowId: intent.windowId, strategy: "hidden", bounds: viewport, snapshotRects: [], plan };
+    /**
+     * 收起原生视图并把键盘交还外壳。
+     *
+     * 事实 2：隐藏只让焦点落空，不交还外壳 —— 必须显式移交，
+     * 否则后果不是"焦点留在网页"，而是"键盘没有人收到"。
+     * 事实 3：恢复可见不抢焦，因此这条移交只发生在真正收起的时候。
+     */
+    const hide = (mode) => {
+      const hadFocus = wasVisible && wc.isFocused();
+      view.setVisible(false);
+      entry.lastMode = mode;
+      if (hadFocus) this.onFocusShell();
+    };
+
+    if (plan.mode === "hidden") {
+      hide("hidden");
+      return { windowId: intent.windowId, mode: "hidden", bounds: viewport, snapshotRects: [], plan };
     }
 
+    const snapshotRects = plan.snapshotRects || [];
+
+    if (snapshotRects.length) {
+      // **必须先铺满完整视口再取图。**
+      // capturePage 的 rect 是页面坐标，而 WebContentsView 里的页面会随视图尺寸重排：
+      // 先收缩到 plan.bounds 再取补丁，补丁那块区域在页面里已经不存在了，
+      // 取到的只能是一张空图（探针抓到的第二个快照缺陷）。
+      view.setBounds(viewport);
+      view.setVisible(true);
+    }
+
+    if (plan.mode === "snapshot") {
+      // 「整块改用快照」= 这块区域没有任何活动像素。
+      // 另外 plan.bounds 在这个分支里是 null，直接 setBounds(null) 会抛
+      // "conversion failure from null" 并把整次 sync 打断。
+      const snaps = await this.#snapshots(entry, intent, snapshotRects, viewport);
+      hide("snapshot");
+      return {
+        windowId: intent.windowId,
+        mode: "snapshot",
+        bounds: null,
+        snapshotRects,
+        snapshots: snaps,
+        plan,
+      };
+    }
+
+    // clip+snapshot：先取补丁，再收缩到最大空闲矩形
+    const snaps = await this.#snapshots(entry, intent, snapshotRects, viewport);
     view.setBounds(plan.bounds);
     view.setVisible(true);
-    entry.lastStrategy = plan.strategy;
-
-    // 需要补齐的区域 → 取快照（capturePage 不含子视图，所以拿到的正是"网页自己的画面"）
-    const snapshotRects = plan.snapshotRects || [];
-    const snaps = await this.#snapshots(entry, intent, snapshotRects);
+    entry.lastMode = plan.mode;
     return {
       windowId: intent.windowId,
-      strategy: plan.strategy,
+      mode: plan.mode,
       bounds: plan.bounds,
       snapshotRects,
       snapshots: snaps,
@@ -269,8 +311,13 @@ class NativeViewController {
    * `snapshotKey` 是"视口 + 遮挡 + URL"，三者都不变就复用上一张 ——
    * 否则拖动窗口时每一帧都要重拍一次，成本会失控（05-snapshot 的
    * snap.staleSnapshotDetectable 证明不重取会留旧画面，但重取必须有闸门）。
+   *
+   * @param rects  **视口坐标**下的待补齐矩形（plan.snapshotRects）
+   * @param origin 视口原点。capturePage 吃的是页面坐标，两者相差一个 origin ——
+   *               视图正好铺在视口上，因此页面坐标 = 视口坐标 - 原点。
+   *               返回给渲染层的 rect 仍然是视口坐标（DOM 侧按窗口 bounds 取偏移）。
    */
-  async #snapshots(entry, intent, rects) {
+  async #snapshots(entry, intent, rects, origin) {
     if (!rects.length) {
       entry.key = "";
       entry.snapshots = {};
@@ -291,13 +338,21 @@ class NativeViewController {
     for (const rect of rects) {
       let dataUrl = null;
       try {
-        // capturePage 的 rect 用 DIP；返回的 NativeImage 是物理像素，
+        // capturePage 的 rect 是**页面坐标**，返回的 NativeImage 是物理像素，
         // 但这里只把它编码成 PNG 交给 DOM 拉伸，因此不需要 scale 换算。
-        const img = await entry.view.webContents.capturePage(rect);
+        const img = await this.#capture(entry, {
+          x: Math.round(rect.x - origin.x),
+          y: Math.round(rect.y - origin.y),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+        });
         const png = img.toPNG();
         if (png.length <= SNAPSHOT_MAX_BYTES) dataUrl = "data:image/png;base64," + png.toString("base64");
-      } catch {
-        /* 快照失败不是致命错误：这一块退回"看不见网页"，由渲染层决定是否整块隐藏 */
+        else this.log(`native-view: 快照超过上限，放弃补齐 ${intent.windowId}（${png.length} bytes）`);
+      } catch (e) {
+        // 快照失败不是致命错误：这一块退回"看不见网页"，由渲染层决定是否整块隐藏。
+        // 但**必须留下痕迹** —— 静默吞掉会让"DOM 侧永远补不上图"变成无从排查的现象。
+        this.log(`native-view: 快照失败 ${intent.windowId} ${this.#rectId(rect)}: ${String((e && e.message) || e)}`);
       }
       out.push({ rect, dataUrl, cached: false });
       next[this.#rectId(rect)] = dataUrl;
@@ -309,6 +364,26 @@ class NativeViewController {
 
   #rectId(r) {
     return `${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.width)},${Math.round(r.height)}`;
+  }
+
+  /**
+   * 取一张快照，带**有界**重试。
+   *
+   * `UnknownVizError` 在视图几何刚变过时是瞬时的（合成器还没为新区域产出帧），
+   * 因此重试有效；但它也可能是确定性的（区域真的不可合成），
+   * 所以次数必须封顶，不能无限等。
+   */
+  async #capture(entry, rect) {
+    let last = null;
+    for (let attempt = 1; attempt <= CAPTURE_RETRIES; attempt += 1) {
+      try {
+        return await entry.view.webContents.capturePage(rect);
+      } catch (e) {
+        last = e;
+        if (attempt < CAPTURE_RETRIES) await new Promise((r) => setTimeout(r, CAPTURE_RETRY_MS));
+      }
+    }
+    throw last;
   }
 
   /** 主动作：后退 / 前进 / 刷新。属于**视图内部**能力，不是窗口命令。 */
