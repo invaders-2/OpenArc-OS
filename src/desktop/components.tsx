@@ -264,6 +264,12 @@ type WindowProps = {
   /** 快照层：原生视图被收缩/隐藏后把网页画面补回 DOM（ADR §12）。 */
   snapshots?: { rect: { x: number; y: number; width: number; height: number }; dataUrl: string }[];
   onResizeStart: (e: React.PointerEvent) => void;
+  /**
+   * 内容是否已滚动。**磨砂条不能画在窗口内部** —— 窗口自己有 backdrop-filter，
+   * 子元素的 backdrop-filter 会导致祖先那层滤镜在该区域被丢掉（实测：顶部因此变暗去饱和）。
+   * 所以这里只上报状态，由桌面层在窗口**之外**、按窗口位置画那层模糊。
+   */
+  onScrolledChange?: (id: string, scrolled: boolean) => void;
   children: React.ReactNode;
 };
 
@@ -272,7 +278,7 @@ type WindowProps = {
  * 位置尺寸来自 `window.bounds`，层级来自 `window.z`，聚焦来自 `focused`，
  * 它自己只有"拖拽中"这一个纯交互状态，且不回写域（域在 pointermove 里更新）。
  */
-export function Window({ window: w, focused, onCommand, snapshots, onResizeStart, children }: WindowProps) {
+export function Window({ window: w, focused, onCommand, snapshots, onResizeStart, onScrolledChange, children }: WindowProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   /**
@@ -286,11 +292,13 @@ export function Window({ window: w, focused, onCommand, snapshots, onResizeStart
       if (!t || typeof t.classList?.contains !== "function") return;
       if (!t.classList.contains("split-main")) return;
       if (!bodyRef.current || !bodyRef.current.contains(t)) return;
-      setScrolled(t.scrollTop > 4);
+      const next = t.scrollTop > 4;
+      setScrolled(next);
+      onScrolledChange?.(w.id, next);
     };
     document.addEventListener("scroll", onScroll, true);
     return () => document.removeEventListener("scroll", onScroll, true);
-  }, []);
+  }, [onScrolledChange, w.id]);
   return (
     <section
       aria-label={`${w.meta.title}窗口`}
@@ -307,8 +315,7 @@ export function Window({ window: w, focused, onCommand, snapshots, onResizeStart
       <div className="window-body" ref={bodyRef}>
         {children}
       </div>
-      {/* 窗口级磨砂工具栏：横跨整窗、只覆盖侧栏之上的 44px 那条视线；**滚动后才出现** */}
-      {scrolled ? <div className="window-scrim" aria-hidden="true" /> : null}
+      {/* 磨砂条由桌面层按窗口位置绘制（见 onScrolledChange）——不能画在窗口内部，原因见 props 注释 */}
 
       {snapshots?.length ? (
         <div className="window-snapshot-layer" aria-hidden="true" data-window={w.id}>

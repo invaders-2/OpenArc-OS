@@ -1294,41 +1294,39 @@ input[type="checkbox"] {
 .desktop[data-glass="full"]:not(.dark) .window:has(.split) .split-side {
   background-image: linear-gradient(rgba(0, 0, 0, 0.035), rgba(0, 0, 0, 0.035));
 }
-/* 顶部磨砂层已按用户口径整层去掉，因此工具条**不再贴顶**（否则它会悬在滚动内容上、
-   又没有背景可依靠）。工具条随内容一起滚。 */
-/* 窗口内部顶部"透明磨砂"（用户口径，原话）：
-   **滚上去的文字 / 图片会变模糊，但这一层本身没有任何底色** —— 不是一条板子，而是"透明的糊"。
-   所以：background 必须为 none，效果全部由 backdrop-filter 提供；
-   只在内容滚上去后出现（见 Window 的 scrolled）。 */
-.window-scrim {
+/* 窗口顶部"透明磨砂"（用户口径，原话）：滚上去的文字 / 图片会变模糊，
+   但这一层本身**没有任何底色** —— 不是一条板子，而是"透明的糊"。
+   **位置由 JS 按窗口 bounds 内联给出**（left / top / width / zIndex），
+   关键：它画在**窗口之外**（桌面层）—— 画在窗口内部时，窗口自身的 backdrop-filter
+   会在该区域被丢掉，顶部就会变暗去饱和（实测蓝色被压掉 70+）。 */
+.desktop-scrim {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
   height: 76px;
-  z-index: 1;
   pointer-events: none;
   background: none;
 }
 /* 第 1 层：轻模糊铺满整段 → 顶部开始"化开" */
-.window-scrim::before {
+.desktop-scrim::before {
   content: "";
   position: absolute;
   inset: 0;
   pointer-events: none;
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  /* 半径刻意收小：半径一大，模糊会把**旁边的深色侧栏 / 窗口边缘**平均进来，
+     顶部就会显出一条"变暗的颜色带"（用户实测：蓝色被压掉 48 级）。小半径只糊局部内容。 */
+  /* **纯 blur**：位置正确之后，任何 saturate / 提亮都会变成可见色偏（实测加了 saturate 后蓝色被顶高 60 级）。 */
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
   mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 52%, transparent 100%);
   -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 52%, transparent 100%);
 }
 /* 第 2 层：强模糊只在最上面 → 越靠顶越糊（渐进） */
-.window-scrim::after {
+.desktop-scrim::after {
   content: "";
   position: absolute;
   inset: 0;
   pointer-events: none;
-  backdrop-filter: blur(52px);
-  -webkit-backdrop-filter: blur(52px);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 30%, transparent 70%);
   -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 30%, transparent 70%);
 }
