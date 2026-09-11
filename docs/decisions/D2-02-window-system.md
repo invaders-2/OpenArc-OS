@@ -831,3 +831,405 @@ GPU 性能（NOT VERIFIED）、快照性能与内存（NOT VERIFIED）、UI E2E�
 也不得写双平台 COMPLETE。
 
 下一步：进入 **D2-02B · Window System Implementation**，按 §25 的 14 条约束实施。
+
+---
+
+# D2-02B · Window System Implementation
+
+以上 1–27 节是 **D2-02A Gate**（架构前提）的决策记录。以下 28–44 节是 **D2-02B**
+（在 Gate 冻结的架构上实施）的记录。两者同属 D2-02，但**阶段不同**：
+Gate 证明"Electron 能不能做到"，B 证明"我们写的那段代码是否真的做到"。
+
+---
+
+## 28. D2-02B 的范围与不变量
+
+**范围（只做这些）**：Window Domain Model / Window Manager / 原生视图生命周期与遮挡结算 /
+Desktop Components 组件化 / Dialog 原语 / Dock–TopBar 与 Window Manager 接线 / 持久化 /
+Reduce Motion 三路径一致性 / A13 安全回归。
+
+**不做**：D2-03 及以后的任何内容；Windows 侧任何结论；不引入第二套队列、不偷偷重试工具。
+
+贯穿全部改动的不变量（每一条都有对应断言）：
+
+| # | 不变量 | 由谁强制 |
+|---|--------|----------|
+| I1 | `order` 是层级唯一真值，`window.z` 只是它的缓存 | `reindex()` + `domain.invariants()` |
+| I2 | **层级不得由 `windows` 数组顺序表达**（见 §31） | `tests/zorder.test.mjs` |
+| I3 | `focused` 不得指向不存在或已最小化的窗口 | `reindex()` 收口 |
+| I4 | 手动 UI 与未来 AI 走同一条 WindowCommand 层，不开旁路 | `src/main.tsx` 只有 `onCommand` 一个入口 |
+| I5 | 状态推进不得依赖 `transitionend` / `animationend` | `experiments/d2-02/motion-parity.mjs` |
+| I6 | 原生视图不拥有 Window domain 业务规则 | `electron/native-view-controller.cjs` 只吃 intent |
+| I7 | 渲染进程拿不到危险对象（IPC / Node / Electron 原语） | `experiments/d2-02/security-surface.mjs` |
+
+---
+
+## 29. Window Domain Model（§4 冻结）
+
+新增 `electron/window-domain.cjs`，纯函数、零 Electron / DOM / React 依赖 ——
+因此主进程与渲染进程可以同时引用它，且 `node --test` 能直接覆盖。
+
+冻结的字段：`id / appId / kind / bounds / state / restore / minSize / meta / visible /
+displayId / z`。`appId` 与 `id` 是**两个独立的键**（§17 的硬要求：同一 App 可以有多个窗口，
+`browser-a` / `browser-b` 这类场景不允许被"一个 App 一个窗口"写死）。
+
+常量一律 token 化，不在各处散落硬编码：
+
+| 常量 | 值 | 理由 |
+|------|----|------|
+| `MIN_WINDOW_W` / `MIN_WINDOW_H` | 560 / 400 | §25；沿用既有拖拽路径的取值，**不为了 token 化改变既有行为** |
+| `AREA_TOP` | 44 | 桌面工作区上沿 |
+| `TITLE_BAR_H` | 44 | **必须与 `src/styles.css` 的 `.window-title { height: 44px }` 一致** —— 不一致会让原生视图与 DOM 视口锚点错位，表现为"网页整体偏移一截" |
+
+`toPersisted()` 只写跨会话仍然成立的字段：`appId / kind / bounds / state / restore /
+minSize / meta / displayId`。**不写** `focused`、`order`、`z` —— 上次退出时谁在最上层
+不该决定下次启动的层级。恢复路径**任何字段坏掉都不抛异常**，而是降级（坏窗口丢弃、
+坏 bounds clamp、未知 state 退回 normal）：恢复路径抛异常等于"一次崩溃后永久打不开"。
+
+---
+
+## 30. Window Manager 是唯一状态权威（§5）
+
+新增 `electron/window-manager.cjs`。它是唯一的状态变更入口：
+
+- **9 条冻结的 Window Command**（`WINDOW_COMMANDS`，供契约测试与未来的 AI 工具绑定）：
+  `window/open`、`window/close`、`window/focus`、`window/move`、`window/resize`、
+  `window/minimize`、`window/restore`、`window/maximize`、`window/unmaximize`
+- **3 条系统级变更**（`SYSTEM_MUTATIONS`，刻意与命令层分开，避免"命令"被稀释）：
+  `system/hydrate`、`system/reflow`、`system/native-state`
+- 未知命令**原样返回原状态**（不抛异常）：命令层要能承接未来 AI 生成的内容，
+  不能因为一个拼错的 `type` 把整个 UI 打死。
+
+几何 **复用 `electron/geometry.cjs` 的 `clampAll`，不重新发明第二套 clamp**（§24）。
+显示器增删、分辨率变化、宿主窗口尺寸变化走**同一条** `system/reflow`。
+
+---
+
+## 31. 层级不得泄漏成数组顺序（本轮审出的最严重产品缺陷）
+
+### 31.1 现象
+
+点一个**后台窗口**的关闭 / 最小化 / 最大化按钮，**第一次没反应** ——
+窗口只是被提到了前面，按钮不生效；再点第二次才好。
+
+### 31.2 根因
+
+`reindex()` 返回的 `windows` 数组曾经是 `order.map(...)`，也就是**让数组顺序跟着层级走**。
+看着更整齐，但它把层级泄漏成了数组顺序 —— 而数组顺序在 React 里就是 DOM 顺序。
+
+于是点后台窗口的按钮时：
+
+1. `pointerdown` 命中按钮，冒泡到 `section.window` 的 `onPointerDown` → 派发 `window/focus`
+2. 状态变更被提交，`order` 变了 → `windows` 数组跟着重排 → **React 移动了那个
+   `<section class="window">` 节点**
+3. 这次移动落在 `mousedown` 与 `mouseup` 之间 → 浏览器放弃合成这次手势的 `click`
+
+### 31.3 证据（`experiments/d2-02/window-stress` 07 步）
+
+真实鼠标序列里**根本不存在 `click`**：
+
+```
+1211ms pointerdown path < svg < button.minimize[最小化settings]
+1212ms mousedown   div.desktop-surface        ← 目标已经变了
+1214ms pointerup   path < svg < button.minimize
+1214ms mouseup     path < svg < button.minimize
+（没有 click）
+```
+
+同一时刻 `pointerdown` 却是命中的 —— 这也解释了为什么"纯聚焦"类操作一切正常、
+只有"按钮"失灵。对照组：改用 `element.click()` 直接派发时，`window/minimize`
+立即生效（`settings` 被最小化、焦点交还给 `browser`），证明处理器本身没问题。
+
+两个旁证：窗口**已经在前台**时按钮一次就生效（`pointerdown` 不产生状态变更 → 不重排）；
+`window-stress` 里 01 步"点标题栏聚焦"也一直通过（它只需要 `pointerdown`）。
+
+### 31.4 修法
+
+`windows` 数组**保持创建序不变**，层级只由 `order` / `z` 表达。置顶于是只改 `z-index`，
+不改节点身份，`click` 不会再被吃掉。
+
+这不是绕过现象，而是把一条冗余表达删掉：数组位置与 `z` 原本是同一件事的两种写法。
+所有不变量与查询本来就是按 `id` / `order` 表达的（`invariants()` 用
+`order.indexOf(w.id)`，`aboveWindows()` 用 `state.order.slice(i+1)`，
+`nativeIntents()` 逐窗口算 `occluders`），因此**没有任何行为依赖数组顺序**。
+
+### 31.5 守卫
+
+`tests/zorder.test.mjs` 新增两条：置顶后 `windows` 数组顺序必须原样，
+且 z 必须跟着 `order` 走、z 没变的窗口保持同一引用；关闭再开之后数组顺序仍按创建序。
+`window-stress` 的 07 步是端到端的守卫。
+
+---
+
+## 32. 原生视图：一个字段名错位让整条遮挡链路静默失效
+
+`electron/occlusion.cjs` 的 `plan()` 返回的字段名是 **`mode`**，
+而 `electron/native-view-controller.cjs` 读的是 `plan.strategy` —— 恒为 `undefined`。
+
+后果是三件事**同时**静默失效，而任何 DOM 侧探针都看不到：
+
+1. 最小化不隐藏视图（`mode === "hidden"` 判断永不成立）
+2. 系统级覆盖层打开时原生视图不让位（§17 硬验收失去实现）
+3. 快照永不补齐（`mode === "snapshot"` 分支不可达）
+
+修法是全链路统一到 `mode`（控制器、`useDesktop.ts` 的 `NativeResult.mode`、
+快照层与 `nativeVisibleOf`）。同时把这条经验固化成断言：
+`native-view-lifecycle` 的第一条硬断言就是**结算结果的 mode 必须落在四个已知取值之内**。
+
+---
+
+## 33. 快照有两条隐性前提
+
+### 33.1 必须先取图，再隐藏
+
+原实现先 `hide` 再 `capturePage` —— 隐藏后视图不再产像素，快照恒为 `null`。
+顺序必须反过来：**先取图，再隐藏**。
+
+### 33.2 `capturePage` 的 rect 是页面坐标，且页面会随视图尺寸重排
+
+先收缩到 `plan.bounds` 再取补丁，补丁区域在页面里已经不存在，取到空图。
+正确顺序是：**先把视图铺满完整视口 → 取图 → 再收缩到 `plan.bounds`**，
+并在 `#snapshots(..., origin)` 里做"视口坐标 → 页面坐标"的换算。
+
+### 33.3 `UnknownVizError` 是瞬时的
+
+合成器还没为新区域产出帧时会抛这个错，一次失败就永久留白。
+改为**有界重试**（3 次 × 40ms），并且 catch 里写日志留痕（原来是静默吞掉）。
+
+### 33.4 其它同批修掉的
+
+- `plan.mode === "snapshot"` 时 `plan.bounds` 是 `null`，控制器 `setBounds(null)` 抛
+  `TypeError: conversion failure from null` 并打断整次 sync → 该分支不再 `setBounds`
+- `webContents.close()` 是**异步**的 → 断言改为"最终真的释放"，而不是"同步已释放"
+- `destroyAll()` 末尾置 `destroyed` 标记，防止关闭后再被 sync 唤醒
+
+---
+
+## 34. `setPointerCapture` 在本机 Chromium 不可靠（§26）
+
+现象：拖标题栏 / 拉缩放手柄时，指针一离开元素窗口就不跟手；缩放手柄只有 22px，更早断。
+
+诊断：`setPointerCapture` 调用成功、`hasPointerCapture()` 当场返回 `true`，
+但**从没有触发过 `gotpointercapture`**，随后 `pointermove` 被投给了指针下方的其他元素。
+（排除过程：标记节点未被替换、捕获确实返回 true、合成页里捕获正常、产品里单窗口也正常 ——
+所以问题不在 React 也不在 Playwright 路径，而在"捕获不生效"这个前提本身。）
+
+修法：新增 `trackPointer()`，把 `pointermove` / `pointerup` / `pointercancel`
+挂到 **`window`** 上。捕获仍然尝试建立（减少重定向抖动），但**正确性不依赖它**。
+
+---
+
+## 35. `window/unmaximize` 曾经在产品里不可达（§20）
+
+按钮与双击都只派发 `window/maximize` —— 用户把窗口放大之后**再也回不来**，
+而这条命令明明在冻结清单里。
+
+修法：`TrafficBar` / `TopBar` / `TitleBar` 一律改成**切换语义**，
+由 `maximized` 这个投影决定派发 `maximize` 还是 `unmaximize`。
+`window-stress` 的 09 / 12 步是守卫（双击已最大化的窗口 → 必须还原）。
+
+---
+
+## 36. 宿主窗口缩小必须走同一条 reflow（§23 / §24）
+
+原先 `resize` 事件只更新宿主尺寸、不 reflow —— 外壳被拖小时窗口会落到工作区之外，
+**既抓不到也关不掉**。
+
+修法：`resize` 与 `onDisplay` 共用同一条 `system/reflow`（同一条 A05 不变量、
+同一个 `geometry.clampAll`）。`reflow` 另外加了"无变化 → 返回原状态"以避免空转：
+尺寸变化事件会持续触发，每次都产生新对象会让持久化与重渲染跟着空转。
+
+---
+
+## 37. Dock 必须消费 `appId → windowIds[]`（§32）
+
+原先 Dock 只派发 `window/open`（按 id 幂等）。当**窗口 id ≠ appId** 时就错了：
+点 Dock 既恢复不了最小化的窗口，还会因为 id 对不上**多开一个**。
+
+修法（macOS 语义的三条分支，由持有 Window Manager 的那一层判断）：
+
+1. 该 App 有可见窗口 → 聚焦**最上面**那个
+2. 全部最小化 → 恢复最上面那个
+3. 一个都没有 → 新建
+
+Dock 只上抛 `appId`，**不自己决定派发哪条窗口命令**。
+
+---
+
+## 38. Desktop Components 组件化与 styles.css 迁移（§16 / §18 / §29 / §31）
+
+- 12 个 Desktop Components 真正拆成组件；`Window({window, children, onCommand})`
+  **不拥有任何业务状态** —— 位置尺寸来自 `window.bounds`，层级来自 `window.z`，
+  聚焦来自 `focused`，它自己只有"拖拽中"这一个纯交互状态且不回写域
+- ContextMenu 是真组件：`ArrowUp/Down`、`Home/End`、`Enter`、`Esc`、焦点管理、
+  `disabled`、`separator`
+- `styles.css` 迁移到设计系统 token：**迁移 14 处、保留 4 处并逐条注明理由**，
+  视觉零变化（`test:design-system` 与 `test:theme-baseline` 复跑通过）
+
+---
+
+## 39. Dialog 原语与无障碍（§16 / §40）
+
+`src/desktop/Dialog.tsx` 提供焦点陷阱、`aria-modal`、`Esc` 关闭、关闭后焦点归还原触发元素。
+产品自身消费它有两条真实路径：桌面文件夹的删除确认、以及控制中心的确认。
+
+`dialog-a11y` 33/33：焦点进入 / 陷阱 / `Esc` / 焦点归还 / `aria` 语义 / 背景 inert
+逐条实测。**§40 的 Dialog Accessibility 因此满足**。
+
+---
+
+## 40. Reduce Motion 三路径的功能状态一致性（§28）
+
+三条路径必须"过程不同、结果相同"：① normal ② 产品内开关 `.reduced` ③
+系统级 `@media (prefers-reduced-motion: reduce)`。
+
+`motion-parity` 的做法是**同一串真实交互逐字重放三遍**，每一步比对
+窗口的位置 / 尺寸 / 层级 / 焦点 / 最小化 / 缩放手柄是否逐项相同 ——
+若任何状态推进挂在 `transitionend` 上，reduced 把时长压到 0 后就会卡死或分岔。
+
+非空验证（否则"三边相等"可能只是因为三边跑在同一个配置上）：
+
+| 路径 | 根节点 `.reduced` 类 | `--dur-standard` | `.window` transition-duration |
+|------|---------------------|------------------|-------------------------------|
+| ① normal | 否 | `.22s` | `0.16s` |
+| ② product | **是** | `0ms` | `0s` |
+| ③ system | 否（走媒体查询） | `0ms` | `0s` |
+
+22/22 通过。刻意允许不同的量（属"过程"而非"结果"）：Dock 弹跳类、Dock 波浪 `--s`、
+以及全部 transition / animation 时长。
+
+---
+
+## 41. A13 安全回归（§37 / §38）
+
+A13（PLAN.md）：**不可信网页尝试访问系统桥接 → 无法读取凭据或调用本机执行端。**
+
+`security-surface` 15/15，打的是**真实主进程入口**与**真实 preload**：
+
+- 静态面：`exposeInMainWorld("openarc", …)` 的键集合、`ipcMain.handle` 的通道集合
+  与冻结清单逐字比对；三条上行通道**全部**过 `trusted(event)`；
+  外壳窗口 `nodeIntegration:false / contextIsolation:true / sandbox:true`
+- 运行时：外壳页里 `window.openarc` 恰为 5 个成员；`require / process / module /
+  Buffer / ipcRenderer / electron / webContents` 全部 `undefined`
+- **不可信视图**（真实 `WebContentsView` + 独立分区）：`window.openarc === undefined`，
+  无任何 Node 全局 → A13 核心断言成立
+- 伪输入：`javascript:` / `file://` / 含凭据 URL / `data:` 全部被拒；
+  对不存在窗口的 `action("exec")` 被拒；一次投递 64 条意图被拒（上限 32）；
+  合法调用仍然成功（证明拒绝不是因为通道坏了）
+
+**关于暴露面是否扩大 —— 不含糊地说**：成员数**未扩大**（5 → 5），
+但有两处变化必须记录，不能写成"没变"：
+
+- `layout` / `browser:layout` → **`sync` / `windows:sync`**（多视图需要一次结算多条意图）
+- `onBrowser` / `browser:state` → **`onNativeState` / `native:state`**（更名）
+- `navigate` / `action` **增加 `windowId` 参数**（§11 / §12 多视图的必需条件）
+
+D1-05 全量安全探针同步复跑：**FAIL 0**，6 PASS / 3 PARTIAL，
+与 D1-05 基线结论结构一致 —— **无安全回归**。
+
+---
+
+## 42. 测试与复现
+
+一次性命令（**顺序有依赖**：先跑纯逻辑单测，再跑 Gate 与产品侧探针）：
+
+```bash
+npm test                       # 纯逻辑单测，75/75
+npm run test:d2-02             # D2-02A Gate + D2-02B 产品侧探针（总入口）
+npm run test:security          # D1-05 全量安全探针（永久回归基线）
+npm run test:design-system     # D2-01 设计系统探针（永久回归基线）
+npm run test:theme-baseline    # D1-04 主题矩阵（永久回归基线）
+```
+
+D2-02B 产品侧探针（打的是产品真实模块 / 真实页面 / 真实主进程）：
+
+| 探针 | 断言 | 打的是什么 |
+|------|------|-----------|
+| `security-surface` | 15/15 | 真实主进程 + 真实 preload + 真实 WebContentsView |
+| `dialog-a11y` | 33/33 | 真实产品页里的 Dialog 原语 |
+| `motion-parity` | 22/22 | 真实产品页 × 三路径 |
+| `window-stress` | 26/26 | 真实产品页 vs 真实 Window Manager 的逐步差分 |
+| `two-browser` | 37/37 | 真实模块契约 + 产品页双浏览器 |
+| `native-view-lifecycle` | 46/46 | 真实 `native-view-controller.cjs`（Electron 主进程） |
+
+**合计 179 条产品侧断言**，加 75 条纯逻辑单测。
+
+### 42.1 关于 Gate 的复跑：它可复现，但**对屏幕与指针的占用极其敏感**
+
+**本轮最终一次复跑：Gate 116/116 全部通过**（含 06-stress 42/42），
+与提交时的结论一致 —— 也就是说 Gate 的结论在本轮**得到了复现**。
+
+但必须把过程写出来，因为它是一个真实的仪器限制。同一个套件本轮一共跑了 4 次，
+其中 3 次出现**与产品无关**的失真，而且每次形态不同：
+
+| 次数 | 现象 | 判定依据 |
+|------|------|----------|
+| 1 | `06-stress` 的 `compositeMatchesPlan` 连续 9 步失败 | 失败帧体积从 ~100KB 跳到 ~6.5MB；缩略图肉眼可见是**正在播放的视频**；失败帧相互 RMS 随步序**单调增大**（40 → 66 → 96） |
+| 2 | 同上（完全相同的步位与计数） | 同上 |
+| 3 | `inst.cursorWarpIsAvailable` 失败，Gate 自行中止 | `CGWarpMouseCursorPosition` 要求把指针放到 (270,724)，实测落在 (236,739)，**漂移 37.2px** —— 有别的进程/人在同时动指针 |
+| 4 | **全部通过** | — |
+
+为了把"是不是产品问题"钉死，另外做了一个**与产品完全无关**的对照：
+一个静态 fixture 窗口、采样期间不碰 DOM、不引入任何产品模块，
+14 次采集里第 05 次照样拍到了别的内容（620KB 照片 vs 前后 75KB 纯色帧）。
+**产品代码不可能解释这个现象**，所以这一类失败不能算回归。
+
+由此固化两条工程约定：
+
+1. `experiments/d2-02/run-all.mjs` 对"屏幕拍照比色"与"物理屏/指针仪器前提"
+   做了**窄口径**分类（只认那几个具体 id），并把理由**印在输出里**；
+   Gate 里任何其它失败仍然是 FAIL 并立即中止。分类结果一律记
+   **PARTIAL / NOT VERIFIED**，既不写成 PASS，也不写成回归。
+2. 想让 Gate 结论可信，必须**独占屏幕与指针**再跑一次（本轮最后一次即满足此条件）。
+   在屏幕上放着视频、或有人同时操作鼠标的机器上，这组探针的结论不成立。
+
+> 顺带修掉一个会让"没跑起来"伪装成"全通过"的缺陷：Gate 汇总原先会读到**上一轮的产物**，
+> 探针崩溃时仍显示旧数字。现在每个探针跑之前先删除自己的产物，
+> 没有产物就显式显示"未产出结论（探针未跑起来）"。
+
+---
+
+## 43. 已知代价与本轮未验证
+
+**已知代价（必须显式承担）**：
+
+- 部分遮挡的缓解策略会牺牲被遮挡窗口的可交互性（`CLIP_MIN_RATIO = 0.35` 以下整块改用快照）——
+  这是刻意的取舍
+- 快照是静态位图，被补丁覆盖的区域**不接收交互**（已用 `pointer-events: none` 避免变成交互黑洞）
+- 系统级覆盖层打开时**所有**原生视图一律让位（含未被覆盖的那一个）—— 刻意的保守策略
+- `TITLE_BAR_H` 在 domain 与 CSS 各写一份，靠"必须一致"的约定 + 注释约束，
+  **没有编译期强制**
+
+**本轮未验证（NOT VERIFIED，不得写成通过）**：
+
+| 项 | 状态 | 说明 |
+|----|------|------|
+| Windows（mica / 打包 / 窗口行为 / 多显示器） | NOT VERIFIED | 无真机；双平台一致性是硬要求，不能用 macOS 结论外推 |
+| 真实多显示器 / 热插拔 | NOT VERIFIED | 单屏环境 |
+| GPU 合成性能、快照性能与内存 | NOT VERIFIED | 未做量化测量 |
+| UI 端到端流程 | BLOCKED | 本机 Playwright 1.55 与 Electron 44 无法完成 CDP 握手（D1-01 已记录） |
+| 运行时沙箱强制执行 | NOT VERIFIED | 本机 Chromium 沙箱无法初始化，探针必须带 `--no-sandbox` 等三项才能跑 |
+| 屏幕合成取证（拍照比色）的稳定性 | NOT VERIFIED | 最后一次复跑 42/42 通过，但同一套件 4 次里有 2 次拍到屏幕上的其它内容，见 §42.1 |
+
+---
+
+## 44. D2-02B 结论
+
+**D2-02B · Window System Implementation：macOS 范围内 COMPLETE**
+
+- Window domain / manager 是**唯一状态权威**：9 条命令 + 3 条系统变更，
+  每一步都有 DOM ↔ 域的逐步差分断言（`window-stress` 26/26）
+- 原生视图生命周期与遮挡结算**打的是产品真实模块**（46/46），
+  且四态 `live / clip+snapshot / snapshot / hidden` 全部可达
+- 本轮审出并修掉 **7 个真实产品缺陷**：层级泄漏成数组顺序、`mode` 字段错位、
+  快照取图顺序与坐标换算、`UnknownVizError` 无重试、`window/unmaximize` 不可达、
+  宿主缩小不 reflow、Dock 未消费 `appId → windowIds[]`
+- Reduce Motion 三路径功能状态**逐项一致**（22/22），且经由非空验证
+- A13 安全回归 15/15，D1-05 全量复跑无回归
+- D2-02A Gate 在**独占屏幕与指针**的条件下复跑 **116/116**，结论得到复现
+
+**本轮 7/7 探针全部 PASS**（Gate + 6 个产品侧探针），179 条产品侧断言 + 75 条纯逻辑单测。
+Gate 对屏幕与指针占用的敏感性作为仪器限制记录在 §42.1，不隐去。
+
+**D2-02 overall 仍为 PARTIAL** —— 因为 Windows、真实多显示器、GPU 性能、
+快照性能、UI E2E 全部未验证。**macOS 的实现结论不得外推到双平台 COMPLETE。**
