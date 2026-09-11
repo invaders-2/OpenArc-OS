@@ -1305,6 +1305,56 @@ input[type="checkbox"] {
   pointer-events: none;
   background: none;
 }
+/* 分栏窗口：整条都糊，但**把侧栏卡那块挖掉** —— 卡片（含红绿灯）保持清晰，
+   卡片四周那圈 8px 边缝则被糊到，不会露出没处理过的桌面（用户口径）。 */
+.desktop-scrim[data-split="1"] {
+  mask-image:
+    linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 52%, transparent 100%),
+    linear-gradient(#000, #000);
+  -webkit-mask-image:
+    linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 52%, transparent 100%),
+    linear-gradient(#000, #000);
+  mask-size: 100% 100%, 192px 68px;
+  -webkit-mask-size: 100% 100%, 192px 68px;
+  mask-position: 0 0, 8px 8px;
+  -webkit-mask-position: 0 0, 8px 8px;
+  mask-repeat: no-repeat;
+  -webkit-mask-repeat: no-repeat;
+  mask-composite: exclude;
+  -webkit-mask-composite: xor;
+}
+.desktop-scrim[data-split="1"]::before {
+  mask-image:
+    linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 52%, transparent 100%),
+    linear-gradient(#000, #000);
+  -webkit-mask-image:
+    linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 52%, transparent 100%),
+    linear-gradient(#000, #000);
+  mask-size: 100% 100%, 192px 68px;
+  -webkit-mask-size: 100% 100%, 192px 68px;
+  mask-position: 0 0, 8px 8px;
+  -webkit-mask-position: 0 0, 8px 8px;
+  mask-repeat: no-repeat;
+  -webkit-mask-repeat: no-repeat;
+  mask-composite: exclude;
+  -webkit-mask-composite: xor;
+}
+.desktop-scrim[data-split="1"]::after {
+  mask-image:
+    linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.55) 24%, transparent 62%),
+    linear-gradient(#000, #000);
+  -webkit-mask-image:
+    linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.55) 24%, transparent 62%),
+    linear-gradient(#000, #000);
+  mask-size: 100% 100%, 192px 68px;
+  -webkit-mask-size: 100% 100%, 192px 68px;
+  mask-position: 0 0, 8px 8px;
+  -webkit-mask-position: 0 0, 8px 8px;
+  mask-repeat: no-repeat;
+  -webkit-mask-repeat: no-repeat;
+  mask-composite: exclude;
+  -webkit-mask-composite: xor;
+}
 /* 第 1 层：轻模糊铺满整段 → 顶部开始"化开" */
 .desktop-scrim::before {
   content: "";

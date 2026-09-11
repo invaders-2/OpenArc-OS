@@ -1,5 +1,22 @@
 # 计划修订记录
 
+## 2026-09-12：顶部磨砂恢复整窗宽 + 用 mask 挖掉侧栏卡（边缝不再穿帮）
+
+用户反馈：侧栏卡四周那圈 8px 边缝没被糊到，露出没处理过的桌面 → 穿帮；
+但**也不要把侧栏卡和红绿灯糊掉**。
+
+- 磨砂条恢复**整窗宽**（`left = w.bounds.x`、`width = w.bounds.w`），分栏窗口不再从 208px 处才开始；
+- 用 **CSS mask 挖洞**排除侧栏卡：`mask-image: <纵向渐隐>, linear-gradient(#000,#000)`、
+  `mask-size: 100% 100%, 192px 68px`、`mask-position: 0 0, 8px 8px`、**`mask-composite: exclude`**
+  （`-webkit-mask-composite: xor`）。本体 + 两层模糊伪元素各写一份（每层带自己的渐隐）；
+- 结果：**卡片四周那圈边缝被糊到，卡片与红绿灯保持清晰**；
+- 非分栏窗口（没有侧栏卡）仍只避开左侧 76px 的红绿灯区。
+
+实测：`.desktop-scrim` 的 box 与窗口 box 完全对齐（142..972）、`data-split="1"`、
+`mask-composite: xor`；截图里红绿灯与侧栏卡顶清晰、内容顶行被糊。
+
+验证：`npm run build` PASS；`npm test` 96/96。
+
 ## 2026-09-12：隐藏应用内滚动条
 
 用户口径：滑动时右边不要出现那条滚动条。

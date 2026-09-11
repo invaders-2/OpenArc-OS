@@ -2090,12 +2090,15 @@ function App() {
             <div
               key={"scrim-" + w.id}
               className="desktop-scrim"
+              data-split={isSplitApp(w.appId) ? "1" : "0"}
               aria-hidden="true"
               style={{
-                // 分栏窗口避开 208px 侧栏卡；非分栏窗口避开左侧那组 DOM 红绿灯（约 76px）
-                left: w.bounds.x + (isSplitApp(w.appId) ? 208 : 76),
+                // **整窗宽**（含侧栏卡四周那圈 8px 边缝，否则边缝没被糊到会穿帮）；
+                // 侧栏卡与红绿灯那块由 CSS mask 挖掉，保持清晰。
+                // 非分栏窗口没有侧栏卡，只需避开左侧那组 DOM 红绿灯（约 76px）。
+                left: w.bounds.x + (isSplitApp(w.appId) ? 0 : 76),
                 top: w.bounds.y,
-                width: Math.max(0, w.bounds.w - (isSplitApp(w.appId) ? 208 : 76)),
+                width: Math.max(0, w.bounds.w - (isSplitApp(w.appId) ? 0 : 76)),
                 zIndex: 11 + w.z,
               }}
             />
