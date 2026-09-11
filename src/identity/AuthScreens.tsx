@@ -52,6 +52,24 @@ export function BootSurface() {
   );
 }
 
+/**
+ * 启动超时兜底：**绝不让界面空白**。
+ * 主进程若卡在系统钥匙串授权上，这里给一句人话 + 一个重试入口。
+ */
+export function BootRetry({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="auth-screen" data-d3-id="boot-retry">
+      <div className="auth-boot">
+        <strong>OpenArc</strong>
+        <span className="muted">{message}</span>
+        <button className="control-button" onClick={onRetry}>
+          重试
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ===========================================================================
 // First-run Initialization（§6 / §38）
 // ===========================================================================

@@ -51,7 +51,7 @@ import {
 import type { MenuItem } from "./desktop/components";
 import { Dialog } from "./desktop/Dialog";
 import { useIdentity } from "./identity/useIdentity";
-import { BootSurface, LockScreen, LoginScreen, SetupScreen } from "./identity/AuthScreens";
+import { BootRetry, BootSurface, LockScreen, LoginScreen, SetupScreen } from "./identity/AuthScreens";
 
 type DisplayInfo = {
   id: number;
@@ -1940,7 +1940,13 @@ function App() {
         ) : null}
       </div>
 
-      {gate === "checking" ? <BootSurface /> : null}
+      {gate === "checking" ? (
+        identity.bootError ? (
+          <BootRetry message={identity.bootError} onRetry={identity.retry} />
+        ) : (
+          <BootSurface />
+        )
+      ) : null}
 
       {gate === "uninitialized" ? (
         <SetupScreen
@@ -2310,4 +2316,36 @@ function App() {
   );
 }
 
-createRoot(document.getElementById("root")!).render(<App />);
+/**
+ * 最后一道兜底：**任何渲染期异常都不允许把界面变成空白**。
+ * 只依赖最朴素的样式类，不读任何应用状态，所以它自己几乎不可能再挂。
+ */
+class AppErrorBoundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  componentDidCatch(error: unknown) {
+    console.error("openarc/render-error", error);
+  }
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <div className="auth-screen" data-d3-id="render-error">
+        <div className="auth-boot">
+          <strong>OpenArc</strong>
+          <span className="muted">界面遇到了一个错误。窗口状态没有丢，重新加载即可继续。</span>
+          <button className="control-button" onClick={() => location.reload()}>
+            重新加载
+          </button>
+        </div>
+      </div>
+    );
+  }
+}
+
+createRoot(document.getElementById("root")!).render(
+  <AppErrorBoundary>
+    <App />
+  </AppErrorBoundary>,
+);
