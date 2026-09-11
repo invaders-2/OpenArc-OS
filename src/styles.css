@@ -607,7 +607,11 @@ input[type="checkbox"] {
   width: 208px;
 }
 .window:has(.split) .split-main {
-  /* 工具条与原生红绿灯对齐（红绿灯中心约 y=22，工具条 26px 高 → top≈10） */
+  /* 普通分栏内容（系统设置 / 应用中心 / Skill 中心）：让开标题栏，再留出呼吸空间 */
+  padding-top: 64px;
+}
+.window:has(.split):has(.pane-toolbar) .split-main {
+  /* 文件夹：顶部就是工具条，它要与原生红绿灯同一行（红绿灯中心约 y=22，工具条 26px 高 → top≈10） */
   padding-top: 10px;
 }
 .window:has(.split) .split-side {
