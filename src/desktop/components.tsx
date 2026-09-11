@@ -274,6 +274,23 @@ type WindowProps = {
  */
 export function Window({ window: w, focused, onCommand, snapshots, onResizeStart, children }: WindowProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  /**
+   * 顶部磨砂**只在内容滚上去之后才出现**（用户口径：常驻太刻意）。
+   * 用 document 上的捕获监听统一接：scroll 不冒泡，但捕获能收到所有滚动容器的事件。
+   */
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const onScroll = (e: Event) => {
+      const t = e.target as HTMLElement | null;
+      if (!t || typeof t.classList?.contains !== "function") return;
+      if (!t.classList.contains("split-main")) return;
+      if (!bodyRef.current || !bodyRef.current.contains(t)) return;
+      setScrolled(t.scrollTop > 4);
+    };
+    document.addEventListener("scroll", onScroll, true);
+    return () => document.removeEventListener("scroll", onScroll, true);
+  }, []);
   return (
     <section
       aria-label={`${w.meta.title}窗口`}
@@ -287,9 +304,11 @@ export function Window({ window: w, focused, onCommand, snapshots, onResizeStart
         onCommand={onCommand}
         onDragStart={(e) => startDrag(e, w, onCommand)}
       />
-      <div className="window-body">{children}</div>
-      {/* 窗口级磨砂工具栏：**横跨整个窗口宽度**（含侧栏），内容从它下面滚过去 */}
-      <div className="window-scrim" aria-hidden="true" />
+      <div className="window-body" ref={bodyRef}>
+        {children}
+      </div>
+      {/* 窗口级磨砂工具栏：横跨整个窗口宽度；**只在内容滚上去之后**才出现 */}
+      {scrolled ? <div className="window-scrim" aria-hidden="true" /> : null}
       {snapshots?.length ? (
         <div className="window-snapshot-layer" aria-hidden="true" data-window={w.id}>
           {snapshots.map((s) => (

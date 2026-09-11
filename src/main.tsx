@@ -1380,7 +1380,6 @@ function App() {
                     <small>已安装 30.0.0 · MCP 未连接</small>
                   </div>
                 </div>
-                <p className="footnote">Adobe 安装状态来自本次设备检查，尚未提供启动与操控。</p>
               </>
             ) : (
               <>
@@ -1457,26 +1456,23 @@ function App() {
                 <h1>外观与交互</h1>
                 <p className="subtitle">整个工作空间，遵循你的习惯。</p>
                 <div className="setting-row">
-                  <span>
-                    外观
-                    <span className="footnote"> 可跟随系统</span>
-                  </span>
-                  <select
-                    className="material-select"
-                    aria-label="外观"
-                    value={theme}
-                    onChange={(e) => setTheme(e.target.value as "system" | "light" | "dark")}
-                  >
-                    <option value="system">跟随系统</option>
-                    <option value="light">浅色</option>
-                    <option value="dark">深色</option>
-                  </select>
+                  <span>外观</span>
+                  <div className="segmented text" role="group" aria-label="外观">
+                    <button aria-pressed={theme === "system"} onClick={() => setTheme("system")}>
+                      跟随系统
+                    </button>
+                    <button aria-pressed={theme === "light"} onClick={() => setTheme("light")}>
+                      浅色
+                    </button>
+                    <button aria-pressed={theme === "dark"} onClick={() => setTheme("dark")}>
+                      深色
+                    </button>
+                  </div>
                 </div>
                 <Switch label="减少动态效果" checked={reduced} onChange={setReduced} />
                 <div className="setting-row">
                   <span>
                     材质
-                    <span className="footnote"> 玻璃合成成本，与动效互不影响</span>
                   </span>
                   <select
                     className="material-select"
@@ -1491,7 +1487,6 @@ function App() {
                 <div className="setting-row">
                   <span>
                     壁纸
-                    <span className="footnote"> 静态图片、动图、视频都支持</span>
                   </span>
                   <label className="control-button">
                     上传壁纸
@@ -1562,7 +1557,6 @@ function App() {
                   模型名称
                   <input placeholder="填写自定义模型名" value={model} onChange={(e) => setModel(e.target.value)} />
                 </label>
-                <p className="footnote">密钥保管后端尚未接入，本版不收集 API 密钥。</p>
               </>
             )}
           </div>
@@ -2116,20 +2110,18 @@ function App() {
           <div className="cc-shade" onClick={() => setOverlays((o) => ({ ...o, control: false }))} />
           <div className="control-center" role="dialog" aria-modal="true" aria-label="控制中心">
             <div className="setting-row">
-              <span>
-                外观
-                <span className="footnote"> 可跟随系统</span>
-              </span>
-              <select
-                className="material-select"
-                aria-label="外观"
-                value={theme}
-                onChange={(e) => setTheme(e.target.value as "system" | "light" | "dark")}
-              >
-                <option value="system">跟随系统</option>
-                <option value="light">浅色</option>
-                <option value="dark">深色</option>
-              </select>
+              <span>外观</span>
+              <div className="segmented text" role="group" aria-label="外观">
+                <button aria-pressed={theme === "system"} onClick={() => setTheme("system")}>
+                  跟随系统
+                </button>
+                <button aria-pressed={theme === "light"} onClick={() => setTheme("light")}>
+                  浅色
+                </button>
+                <button aria-pressed={theme === "dark"} onClick={() => setTheme("dark")}>
+                  深色
+                </button>
+              </div>
             </div>
             <Switch label="减少动态效果" checked={reduced} onChange={setReduced} />
             <div className="setting-row">

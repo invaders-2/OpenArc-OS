@@ -754,6 +754,15 @@ input[type="checkbox"] {
   background: rgb(var(--content-rgb) / var(--content-alpha));
   color: var(--text);
 }
+/* 文字版分段控件（例如"外观"三态）：胶囊外形 + 文字，尺寸跟内容走 */
+.segmented.text button {
+  width: auto;
+  height: 26px;
+  padding: 0 12px;
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+  font-size: var(--fs-caption);
+}
 .folder-body {
   flex: 1;
   min-height: 0;
@@ -1463,6 +1472,11 @@ input[type="checkbox"] {
 /* 内置壁纸色板：就是主题基色（浅色 / 深色） */
 .wallpaper-option[data-wallpaper="theme-light"] {
   background: #f2f2f4;
+}
+/* 浅色色板上的标签要换深色字，否则白字看不清 */
+.wallpaper-option[data-wallpaper="theme-light"] > span {
+  color: #171717;
+  text-shadow: none;
 }
 .wallpaper-option[data-wallpaper="theme-dark"] {
   background: #171717;
