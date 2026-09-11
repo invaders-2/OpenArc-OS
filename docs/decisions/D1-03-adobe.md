@@ -1,10 +1,14 @@
 # D1-03 Adobe Integration Evaluation
 
-日期：2026-09-11
+日期：2026-09-11（含 D1-03A 复核）
 分支：`feature/d1-03-adobe`
 
 本轮只验证两件事：OpenArc OS 能否以**安全、稳定、可授权、可验证、可替换**的方式控制
 **Adobe Illustrator** 与 **Adobe Photoshop**。两个应用**独立验证**。
+
+> **D1-03A 结果（2026-09-11 追加）**：Illustrator Beta **未安装在本机**，
+> 无法进行任何真实 MCP 握手。见「Illustrator Beta Runtime Verification（D1-03A）」一节。
+> 稳定版调查结论（MCP NOT AVAILABLE）保持不变。
 
 判定口径：只接受 **Adobe 官方文档 / Adobe 应用实际安装物 / 真实 MCP 握手 / 真实运行结果**。
 第三方文章只能用于发现线索，**不能作为 PASS 证据**。
@@ -119,6 +123,60 @@ Windows 侧未实测（无 Windows 主机，与 D1-01 同一缺口）。
 阻塞原因：官方 Illustrator MCP 仅在 **Illustrator (Beta)** 提供；本机只有稳定版 30.0.0，
 且已用二进制检索 + 端口监听双重证据确认其**不含 MCP 实现、未暴露 MCP 端点**。
 解除阻塞的唯一条件是安装 Illustrator Beta（需用户操作 Creative Cloud）。
+
+---
+
+## Illustrator Beta Runtime Verification（D1-03A）
+
+> 本节追加于 2026-09-11，用于补证。**不覆盖、不删除**上一节稳定版调查证据
+> （Stable Illustrator: MCP NOT AVAILABLE 的结论继续有效）。
+
+### 前提复核结果：Beta 未安装（BLOCKED，不是"连不上"）
+
+任务前提为"Illustrator Beta 已由 Boss 安装"。**在本机复核后，该前提不成立。**
+四条相互独立的证据：
+
+| # | 检查 | 方法 | 结果 |
+| --- | --- | --- | --- |
+| 1 | 全盘 app 包 | `find /Applications ~/Applications /opt /usr/local -maxdepth 3 -iname "*Illustrator*.app"` | **只有** `/Applications/Adobe Illustrator 2026/Adobe Illustrator.app` |
+| 2 | Beta 进程 | `pgrep -lf "Beta"`；`pgrep -lf "Illustrator"` | **无 Beta 进程**；在跑的仍是 30.0.0 稳定版（PID 23509） |
+| 3 | Beta 偏好/设置目录 | `ls ~/Library/Preferences \| grep -i illustrator`、`ls ~/Library/Application Support/Adobe \| grep -i beta` | 只有 `Adobe Illustrator 29 / 30`，**无任何 Beta 设置目录** |
+| 4 | MCP 端点 | `lsof -nP -iTCP -sTCP:LISTEN \| grep -i adobe` | 只有 Creative Cloud 辅助进程（PID 2166）的 15292 / 15393 / 16494；**Illustrator 与 Photoshop 均无监听** |
+
+补充：对 15292 / 15393 / 16494 三个端口直接发 MCP `initialize`（POST `/v1/mcp`），
+**全部无响应** —— 排除"MCP 跑在 Creative Cloud 辅助端口上"的可能。
+另：`find /Applications -maxdepth 1 -newermt "-3 hours"` 无结果，近 3 小时未安装任何新应用。
+
+### 因此本轮未能执行的项目（全部 NOT VERIFIED）
+
+| 项 | 状态 | 阻塞原因 |
+| --- | --- | --- |
+| Beta 身份（版本 / build / 可执行路径 / PID / 架构） | **NOT VERIFIED** | 无 Beta 可读取 |
+| 从 MCP & Tools 取得 server URL | **NOT VERIFIED** | 无该面板可调出 |
+| transport / localhost port | **NOT VERIFIED** | 同上 |
+| authentication method / Bearer key | **NOT VERIFIED** | **未取得任何 key**（亦不应当取得） |
+| key rotation behavior | **NOT VERIFIED** | 同上 |
+| `initialize` 真实握手 | **NOT VERIFIED** | 无端点 |
+| `tools/list` 与工具计数核对（官方称约 40） | **NOT VERIFIED** | 无端点 |
+| 最小真实副作用测试 | **NOT VERIFIED** | 无端点 |
+| 产物验证（`D1-03-illustrator-test.ai`） | **NOT VERIFIED** | 未执行任何操作 |
+| 失败场景 1–9 | **NOT VERIFIED（9/9）** | 无端点 |
+
+失败场景明细（均未执行）：错误 token、无 token、Beta 未运行、无 active document、
+非法参数、不存在 tool、duplicate request、连接断开、重新连接。
+
+### 测试目录
+
+未创建 `artifacts/d1-03/illustrator/`，未创建 `D1-03-illustrator-test.ai`。
+理由：没有任何连接可供测试，先建空目录只会产生"看起来做过"的假证据。
+**待 Beta 真实安装后再建立，并严格遵守"不打开/不修改用户生产文件"。**
+
+### 状态
+
+**Illustrator（D1-03A）：BLOCKED**
+
+阻塞原因不是技术接口问题，而是**验证对象不存在**。
+解除条件：本机安装 Adobe Illustrator (Beta) 并启动，然后从其 MCP & Tools 面板取得连接信息。
 
 ---
 
@@ -309,10 +367,11 @@ Plugin export、日志、前端 localStorage、Git repository。
 
 ## Decision
 
-**D1-03 总状态：BLOCKED**
+**D1-03 总状态：BLOCKED**（D1-03A 复核后不变）
 
-- **Illustrator：BLOCKED** —— 官方 MCP 仅存在于 Beta，本机无 Beta；已用二进制检索 +
-  端口监听双重证据确认稳定版 30.0.0 无 MCP 实现。需安装 Illustrator Beta 后重做。
+- **Illustrator：BLOCKED** —— 官方 MCP 仅存在于 Beta；稳定版 30.0.0 无 MCP 实现
+  （二进制检索 + 端口监听双重证据）；D1-03A 复核进一步确认 **Beta 本身未安装**
+  （app 包 / 进程 / 偏好目录 / 端口 四项皆无）。需真实安装 Beta 后重做。
 - **Photoshop：NOT VERIFIED** —— 官方 Desktop MCP **NOT FOUND IN OFFICIAL SOURCES**；
   Photoshop API v2 是云端能力、不等于本机控制；候选路线为 UXP + OpenArc 本机桥接，但无运行时证据。
 
