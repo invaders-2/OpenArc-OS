@@ -87,6 +87,10 @@
 应用层路径检查只作 defense-in-depth，不作为插件权限最终强制点；自动 `FULL→REDUCED→SOLID` 保持冻结；
 `network:none` 在无 OS 级强制证据前不得宣称已实现。
 
+> **放行已消费**：上表 `D2-01 设计规范 = CONDITIONAL GO` 已于 2026-09-11 执行完毕，
+> 实际结论 **PARTIAL**（口径见本文 `# D2-01 当前状态` 与 `docs/decisions/D2-01-design-system.md`）。
+> 上表其余各项（D2-02 起）**尚未执行**，保持不变。
+
 ## 4. Boss Decision（已确认，不再询问）
 
 详见 `docs/decisions/D1-06-technical-gate.md` §23。仅记录决定，不重跑 D1。
@@ -97,6 +101,79 @@
 | 2 | **macOS Sandbox** | 生产目标 = **A（OS-supported signed sandbox/helper）**；技术方向 = **Apple App Sandbox + 独立 signed XPC / restricted helper + capability-based RPC**；**B 是 A 的工程拓扑，不是替代**；方案取得真实攻击测试 PASS 前 **D（trusted-plugin-only）继续生效** | 禁止把普通 `child_process` / Worker Thread / JS path validation 描述成安全 sandbox |
 | 3 | **Windows** | **投入真机验证**；真机到位前**不阻塞 D2-01 的 macOS / 通用设计系统开发** | Windows **16 项缺口继续 `NOT VERIFIED`，不得模拟 PASS** |
 | 4 | **Illustrator** | **安装 Illustrator Beta**（独立外部动作，D2-01 不等待）；安装后另行恢复 `D1-03A Beta MCP Runtime Verification` | **真实握手与文件操作完成前：Illustrator = BLOCKED，D5-05 = BLOCKED** |
+
+---
+
+# D2-01 当前状态（唯一口径 · D2-01 起生效）
+
+> 完整口径见 `docs/decisions/D2-01-design-system.md`（22 节）。本节只放状态与结论。
+> **D2-01 = PARTIAL。不得描述为"设计系统已完成"。**
+
+## 1. 维度状态
+
+| 维度 | 状态 | 关键证据 | 主要缺口 |
+| --- | --- | --- | --- |
+| Token 架构（T1/T2/T3） | **PASS** | `tokens.css` 单一权威（`:root` 92 / `.dark` 39）；T2/T3 静态断言 | — |
+| 颜色 | **PASS** | 15 组语义原料；placeholder 独立一档（7.02 / 5.73 / 7.42 / 7.25:1） | — |
+| 排版 | **PASS** | 系统字体栈；品牌字体零泄漏（断言强制） | — |
+| 间距 / 圆角 | **PASS（本轮范围）** | 4pt 刻度 + 7 档圆角；组件层零字面圆角 | `styles.css` 迁移欠账（见 §4） |
+| 材质 / 玻璃三档 | **PASS** | 12 格矩阵；REDUCED 大面积白名单受控；SOLID 过滤面 = 0 | Electron 侧观感待确认 |
+| 动效 | **PASS** | 三条路径实测；两条 reduced 路径逐条对齐 | — |
+| P0 基础组件 | **PASS** | 9 个组件 + 五态矩阵 56 条断言 | — |
+| 页面状态 | **PASS** | 7 种，role/live 与规范表逐条一致 | Unauthorized 真实权限待 D3-02 |
+| 无障碍 | **PARTIAL** | 对比度 / Tab 可达 / 焦点环 / ARIA 关联 / Esc 全部实测 | **对话框焦点陷阱 NOT VERIFIED**；无屏幕阅读器实测 |
+| 桌面端组件契约 | **PARTIAL** | 12 个表面以真实类名渲染为可探测样例 | **未组件化**（依赖 D2-02 窗口拓扑） |
+| Windows 视觉 | **NOT VERIFIED** | — | 无 Windows 机器，全部未测 |
+
+## 2. 探针矩阵（入口 `npm run test:design-system`）
+
+| 探针 | 断言 | 结论 |
+| --- | --- | --- |
+| `01-token-contract`（静态契约） | 26 | PASS |
+| `02-theme-glass-matrix`（6 格 × primitive + desktop） | 32 | PASS |
+| `03-component-states`（五态 / 焦点 / 禁用行为学） | 56 | PASS |
+| `04-keyboard-a11y`（键盘 / ARIA / Toast / 页面状态） | 33 | **PARTIAL**（含 1 条 NOT VERIFIED） |
+| `05-motion-matrix`（normal / reduced 类 / reduced 系统） | 18 | PASS |
+| **合计** | **166 通过 / 0 失败 / 1 NOT VERIFIED** | |
+
+**永久回归基线**：D1-04 `theme-matrix` 保留（入口 `npm run test:theme-baseline`），
+本轮 token 整层搬迁后**逐格像素值完全重现** —— 抽层未改变任何行为。
+
+## 3. 本轮探针抓出的真实缺陷（8 项，全部已修 + 受控反证）
+
+1. 小 `Surface`/`Toast` 被误挂进大面积开关 → REDUCED 下失去玻璃；
+2. 玻璃档位绑在 `.desktop` 上 → **任何非桌面子树档位完全不生效**；
+3. `SearchField` 无 hover 态（与 `TextField` 不一致）；
+4. `SearchField` placeholder 未接 token → 泄漏 UA 默认灰，浅色 **3.66:1** / 深色 **4.16:1** 不达 AA；
+5. 显式 `duration: null`（常驻通知）被 `??` 静默改成 4000ms 自动关闭；
+6. 系统级 Reduce Motion 下 spinner 是**卡住的半圈**（结构性替代只绑了 `.reduced` 类）；
+7. 系统级 Reduce Motion 缺 `transition-duration: 0ms !important` 兜底 → 硬编码时长的组件仍会动；
+8. 基底色没有 token，`#f5f5f7` / `#000` 在两个文件里各一份。
+
+另修正 3 处**探针自身**缺陷（指纹打在透明元素上 / 程序化 focus 验焦点环 /
+系统级路径被 `.reduced` 类遮蔽导致断言空转）。
+
+## 4. 迁移欠账（诚实计数）
+
+`styles.css`（898 行）：22 处圆角声明中 18 处字面值（10 处在刻度上可机械替换，
+**8 处不在刻度上需设计判断**）；颜色字面值 75 次 / 48 个不同值；
+硬编码 transition 时长 **0 处**。组件层（`src/design-system/`）已零字面值。
+目标是**减少** magic number，不要求一次性清零；与桌面组件组件化同批迁移更划算。
+
+## 5. 冻结禁令（D2-01 后继续有效）
+
+不可信 Plugin / Skill 执行默认关闭；应用层路径检查只作 defense-in-depth；
+**自动 `FULL→REDUCED→SOLID` 保持冻结**；`network:none` 在无 OS 级强制证据前不得宣称已实现；
+`REDUCED = 选择性玻璃（减面积，非减半径）` 不得回退为"调小模糊半径"。
+
+## 6. D2-02 交接
+
+①桌面端 12 个组件真组件化（**禁止**在 D2-02 前自行发明其 props API）；
+②对话框焦点陷阱 + 焦点返回（本轮 NOT VERIFIED）；
+③窗口/面板遮挡与层级（WebContentsView 恒定绘制在 DOM 之上）；
+④窗口进出动画的 `transitionend` 审查（严禁状态推进依赖动画结束）；
+⑤设计系统升级为 workspace 包的触发条件 = 出现第二个消费者；
+⑥`styles.css` 迁移与桌面组件组件化同批进行。
 
 ---
 
