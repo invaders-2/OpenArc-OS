@@ -1249,6 +1249,11 @@ input[type="checkbox"] {
 .search-field:focus-within {
   background: rgb(var(--text-rgb) / 0.08);
 }
+/* 玻璃档：窗口正文更透 —— 桌面/壁纸能透过来，侧栏的磨砂才有东西可"磨"。
+   （之前正文接近实色，侧栏背后是一块纯色，玻璃质感永远显不出来。） */
+.desktop:not([data-glass="solid"]) .window-body {
+  background: rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.62));
+}
 /* 用户口径：侧栏透明度 = 50%（显式值，不再乘 token；"实色"档仍不动，尊重它的语义） */
 .desktop:not([data-glass="solid"]) .window:has(.split) .split-side {
   background: rgb(var(--content-rgb) / 0.5);
@@ -1261,12 +1266,13 @@ input[type="checkbox"] {
    不是"一条硬边的模糊"，而是**多层 backdrop-filter 叠在同一段高度上，每层用不同斜率的 mask**，
    于是模糊强度自上而下连续衰减；再叠一层极淡的材质底色与一道柔和投影，把它"托"成一条工具栏。
    注：父层刻意**不加** backdrop-filter —— 否则子层的 backdrop 采样不到页面真实内容。 */
-.split-scrim {
-  position: sticky;
+.window-scrim {
+  position: absolute;
   top: 0;
-  z-index: 2;
+  left: 0;
+  right: 0;
   height: 76px;
-  margin-bottom: -76px;
+  z-index: 1;
   pointer-events: none;
   background: linear-gradient(
     to bottom,
@@ -1279,7 +1285,7 @@ input[type="checkbox"] {
   box-shadow: 0 18px 26px -20px rgba(0, 0, 0, 0.62);
 }
 /* 第 1 层：轻模糊，几乎覆盖整段高度 → 顶部开始"化开" */
-.split-scrim::before {
+.window-scrim::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -1290,7 +1296,7 @@ input[type="checkbox"] {
   -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 52%, transparent 100%);
 }
 /* 第 2 层：强模糊，只在最上面一段 → 越靠顶越糊（渐进） */
-.split-scrim::after {
+.window-scrim::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -1301,7 +1307,7 @@ input[type="checkbox"] {
   -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.55) 24%, transparent 62%);
 }
 /* 深色下给顶栏一点点提亮，让它与内容区分开（macOS 深色工具栏比正文略亮） */
-.desktop.dark .split-scrim {
+.desktop.dark .window-scrim {
   background-image: linear-gradient(
       to bottom,
       rgba(255, 255, 255, 0.075) 0%,

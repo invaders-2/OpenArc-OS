@@ -1,5 +1,21 @@
 # 计划修订记录
 
+## 2026-09-12：磨砂条横跨整个窗口 + 窗口正文更透（侧栏玻璃才有东西可"磨"）
+
+用户反馈：① 侧栏还是看不出磨砂质感与透明度；② 顶部渐变只在主内容区，要整个窗口生效。
+
+- **① 的根因**：**窗口正文接近实色**，侧栏背后就是一块纯色 —— 玻璃背后没有可"磨"的东西，
+  侧栏再透明也看不出质感。→ 玻璃档下把正文调透：
+  `.desktop:not([data-glass="solid"]) .window-body { background: rgb(var(--content-rgb) /
+  calc(var(--content-alpha) * 0.62)); }`（实测 `rgba(23,23,23,0.373)`）；
+  侧栏保持 50% + `blur(34px) saturate(1.8)`。两者叠加后壁纸能透过窗口与侧栏。
+- **② 磨砂条从"分栏内容区"提到窗口层级**：`Window` 组件在 `.window-body` 之后渲染 `.window-scrim`，
+  `position: absolute; top/left/right 0; height: 76px; z-index: 1`。
+  实测：窗口宽 830、scrim 宽 **830**（完全对齐，横跨侧栏 + 内容区）；工具条（z-index 3）仍在它之上。
+- 上一轮的渐进模糊（两层 `backdrop-filter` + 不同斜率 mask）保持不变，只是作用面变成整窗。
+
+验证：`npm run build` PASS；`npm test` 96/96。
+
 ## 2026-09-12：磨砂玻璃按 macOS 口径复刻（多层渐进模糊）+ 侧栏透明度 50%
 
 用户反馈：侧栏透明度要到 50%；窗口顶部的磨砂依然看不出来，要求按 Apple 的做法复刻。

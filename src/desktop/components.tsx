@@ -288,6 +288,8 @@ export function Window({ window: w, focused, onCommand, snapshots, onResizeStart
         onDragStart={(e) => startDrag(e, w, onCommand)}
       />
       <div className="window-body">{children}</div>
+      {/* 窗口级磨砂工具栏：**横跨整个窗口宽度**（含侧栏），内容从它下面滚过去 */}
+      <div className="window-scrim" aria-hidden="true" />
       {snapshots?.length ? (
         <div className="window-snapshot-layer" aria-hidden="true" data-window={w.id}>
           {snapshots.map((s) => (
