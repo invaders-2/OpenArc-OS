@@ -16,7 +16,8 @@
     "test:theme-baseline": "npm run build && node experiments/d1-04/theme-matrix.mjs",
     "test:d2-02": "npm run build && node experiments/d2-02/run-all.mjs",
     "test:d3-01": "npm run build && node experiments/d3-01/run-all.mjs",
-    "test:identity-ui": "npm run build && node tests/identity-ui.mjs"
+    "test:identity-ui": "npm run build && node tests/identity-ui.mjs",
+    "showcase": "npm run build && node tests/showcase.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

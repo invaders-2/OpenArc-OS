@@ -1,0 +1,7 @@
+{
+  "name": "openarc-showcase-probe",
+  "version": "1.0.0",
+  "private": true,
+  "main": "main.cjs",
+  "description": "拉起真实 Electron（完整产品装配：身份 + 原生视图 + 窗口系统），走完初始化→登录→桌面→各应用，并对真实屏幕截图取证"
+}

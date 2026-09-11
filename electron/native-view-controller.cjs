@@ -93,6 +93,10 @@ class NativeViewController {
         webSecurity: true,
       },
     });
+    // 修复（showcase 像素级截图抓出）：视图必须挂进窗口树。
+    // 没有 addChildView 时它是一个"孤儿视图"——url/title/bounds/visible 全部正常，
+    // 但永不显示（D1-01/D2-02 的验收只断言了 API 状态，未断言像素，因此未暴露）。
+    if (this.parent && !this.destroyed) this.parent.addChildView(view);
     view.setBorderRadius(VIEW_RADIUS);
     view.setVisible(false);
     // setBackgroundColor 是 View 的较新 API：存在才调用，避免旧版本直接抛异常。
