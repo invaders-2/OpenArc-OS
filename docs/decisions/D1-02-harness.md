@@ -7,6 +7,14 @@
 
 判定口径：SUPPORTED / PARTIAL / NOT SUPPORTED / UNKNOWN / NOT VERIFIED。不据产品介绍推断。
 
+> **Task Status: PARTIAL**
+> **Technology Decision: ACCEPT WITH CONDITIONS**
+>
+> 二者不可混为一谈。技术决策是"这条技术路线可以走"，不代表 D1-02 任务完成。
+> 原因：端到端 `tools/call` → OpenArc approval → tool execution → result 回灌
+> **仍未真实验证**。在该链路取得证据前，D1-02 任务状态恒为 PARTIAL。
+> **不得把 ACCEPT WITH CONDITIONS 当作任务 COMPLETE。**
+
 ---
 
 ## Candidate
@@ -20,7 +28,13 @@ DeepSeek Harness（`dsh`）—— DeepSeek AI 官方开源 agent harness（智�
 | --- | --- | --- |
 | `@deepseek-ai/dsh`（CLI，npm latest） | **0.1.5-rc.1** | `npm view` + `dsh --version` 实测输出 `0.1.5-rc.1` |
 | 核心子包（sdk-protocol / user-approval / llm-retry 等） | 0.1.5-rc.2 | 安装后 `package.json` |
-| ACP app 自报 | `deepseek-harness-acp@0.0.1` | ACP `initialize` 响应实测 |
+| ACP `initialize` 自报 | `deepseek-harness-acp@0.0.1` | ACP 响应实测。**仅为 protocol self-reported version / placeholder value** |
+
+> **版本口径（必须遵守）**：ACP `initialize` 返回的 `agentInfo.version = 0.0.1`
+> **只能记录为 ACP protocol self-reported version / placeholder value**，
+> **不得**当作 DeepSeek Harness ACP 包的真实发布版本。
+> 真实版本一律以 **安装包 `package.json` / npm metadata / lockfile** 为准
+> （本轮即 CLI `0.1.5-rc.1`、核心子包 `0.1.5-rc.2`）。
 | maturity | **developer preview** | README 原文：`THERE WILL BE COMPATIBILITY-BREAKING CHANGES` |
 
 **坑（实测）**：`npm view @deepseek-ai/<子包> version` 返回的 `latest` 标签落后于实际版本
@@ -295,7 +309,9 @@ MCP 中心、Skill 体系、任务队列**职责重叠**。若两边都启用，
 这是可替换 adapter 的关键前提；官方自带的调度/权限/持久能力**可以裁剪**，不构成硬冲突。
 但本轮**未取得端到端工具拦截证据**，且存在凭据边界与 ACP 无鉴权两个高危项，因此不能判 ACCEPT。
 
-必须满足的条件（写入 D2 验收）：
+必须满足的条件。**落实时限：启用 D4 AI 真实执行链之前，以及 D1-06 最终技术关卡之前**
+（二者取先到）。届时要么已落实，要么已形成明确的阻断结论。
+**D2 不由 Harness 阻塞**——D2 是视觉与桌面基础，与 Harness 是否就绪无关：
 
 1. **只走 ACP 接入面**，禁止依赖进程内 `ctx.*` 与 DSH 自有 SDK JSON-RPC（保 Gate 8 可替换性）。
 2. **OpenArc 自建 llm adapter 插件**，把模型请求代理到 OpenArc Model Proxy，真实密钥不进入 Harness 进程（保 Gate 6）。
@@ -311,6 +327,10 @@ MCP 中心、Skill 体系、任务队列**职责重叠**。若两边都启用，
    未补齐前，本 ADR 的 Gate 2 维持 PARTIAL。
 
 **不因本 ADR 授权任何产品实现。** D1-02 仅完成技术验证，不进入 D1-03 / D1-04 / D1-05 / D2。
+
+**任务完成判定**：本 ADR 出具后 D1-02 的 *技术决策* 成立（ACCEPT WITH CONDITIONS），
+但 *任务状态* 仍为 **PARTIAL**。转为 COMPLETE 的唯一条件是上述端到端工具链路
+（allow / deny / stop / timeout / tool error / duplicate call / retry）取得真实运行证据。
 
 ---
 
