@@ -74,7 +74,10 @@ declare global {
       };
       files?: {
         pathFor: (file: File) => string;
-        import: (folderId: string, paths: string[]) => Promise<{ ok?: boolean; entries?: FileEntry[]; error?: string }>;
+        import: (
+          folderId: string,
+          paths: string[],
+        ) => Promise<{ ok?: boolean; entries?: FileEntry[]; added?: FileEntry[]; error?: string }>;
         list: (folderId: string) => Promise<{ ok?: boolean; entries?: FileEntry[]; error?: string }>;
         rename: (folderId: string, id: string, name: string) => Promise<{ ok?: boolean; entries?: FileEntry[]; error?: string }>;
         remove: (folderId: string, id: string) => Promise<{ ok?: boolean; entries?: FileEntry[]; error?: string }>;
@@ -149,6 +152,69 @@ const WALLPAPERS = [
   { id: "midnight", name: "午夜" },
   { id: "plain", name: "纯黑" },
 ];
+
+/** 上传的自定义壁纸存在这个真实存储文件夹里（静态图片 / 动图 / 视频都走它）。 */
+const WALLPAPER_ID = "wallpapers";
+/** 动态 Aurora 壁纸的三个色（用户给的 ReactBits 链接里的配色）。 */
+const AURORA_COLORS = ["#6b6b6b", "#717171", "#292929"];
+
+/**
+ * 动态壁纸（Aurora）：三团缓慢漂移的柔光，纯 Canvas 自绘、**不引第三方库**。
+ * 遵守"减少动态效果"：reduced 时只画一帧，不跑 rAF。
+ */
+function AuroraBackground({ reduced }: { reduced: boolean }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const cvs = ref.current;
+    if (!cvs) return;
+    const ctx = cvs.getContext("2d");
+    if (!ctx) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const resize = () => {
+      cvs.width = Math.max(1, Math.floor(cvs.clientWidth * dpr));
+      cvs.height = Math.max(1, Math.floor(cvs.clientHeight * dpr));
+    };
+    resize();
+    const blobs = [
+      { c: AURORA_COLORS[0], sx: 0.2, sy: 0.8, ax: 0.18, ay: 0.12, sp: 0.00021, r: 0.75 },
+      { c: AURORA_COLORS[1], sx: 0.75, sy: 0.25, ax: 0.2, ay: 0.14, sp: 0.00016, r: 0.65 },
+      { c: AURORA_COLORS[2], sx: 0.5, sy: 0.55, ax: 0.14, ay: 0.18, sp: 0.00012, r: 0.9 },
+    ];
+    const draw = (t: number) => {
+      const w = cvs.width;
+      const h = cvs.height;
+      ctx.clearRect(0, 0, w, h);
+      ctx.globalCompositeOperation = "lighter";
+      for (const b of blobs) {
+        const x = (b.sx + Math.sin(t * b.sp) * b.ax) * w;
+        const y = (b.sy + Math.cos(t * b.sp * 1.3) * b.ay) * h;
+        const rad = b.r * Math.max(w, h) * 0.55;
+        const g = ctx.createRadialGradient(x, y, 0, x, y, rad);
+        g.addColorStop(0, b.c);
+        g.addColorStop(0.55, b.c + "55");
+        g.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(x, y, rad, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    };
+    if (reduced) {
+      draw(0);
+      return;
+    }
+    let raf = requestAnimationFrame(function loop(t) {
+      draw(t);
+      raf = requestAnimationFrame(loop);
+    });
+    window.addEventListener("resize", resize);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", resize);
+    };
+  }, [reduced]);
+  return <canvas className="aurora-canvas" ref={ref} />;
+}
 
 /** 只读文件协议的媒体地址：openarc-file://media/<folderId>/<id>。 */
 const fileUrl = (folderId: string, id: string) =>
@@ -372,6 +438,8 @@ function App() {
   });
   const [snap, setSnap] = useState(() => localStorage.getItem("oa-snap") !== "0");
   const [wallpaper, setWallpaper] = useState(() => localStorage.getItem("oa-wallpaper") || "aurora");
+  /** 正在"落格"的图标 id：只有松手后的这一段才用过渡，拖动过程严格 1:1。 */
+  const [settling, setSettling] = useState<string | null>(null);
   const [deskSort, setDeskSort] = useState<"name" | "date" | "size">("name");
   useEffect(() => {
     localStorage.setItem("oa-desktop-icons", JSON.stringify(desktopIcons));
@@ -386,6 +454,24 @@ function App() {
   useEffect(() => {
     void refreshFiles(DESKTOP_ID);
   }, [refreshFiles]);
+  /** 自定义壁纸来自真实存储（folderId = wallpapers）。 */
+  useEffect(() => {
+    void refreshFiles(WALLPAPER_ID);
+  }, [refreshFiles]);
+  const customWallpapers = filesByFolder[WALLPAPER_ID] ?? [];
+  const customEntry = wallpaper.startsWith("custom:")
+    ? (customWallpapers.find((e) => e.id === wallpaper.slice(7)) ?? null)
+    : null;
+  /** 上传壁纸：拷进 wallpapers 存储文件夹，然后把它设为当前壁纸。 */
+  const uploadWallpaper = async (file: File | undefined) => {
+    if (!file || !window.openarc?.files) return;
+    const p = window.openarc.files.pathFor(file);
+    if (!p) return;
+    const res = await window.openarc.files.import(WALLPAPER_ID, [p]);
+    await refreshFiles(WALLPAPER_ID);
+    const added = res?.added?.[res.added.length - 1];
+    if (added) setWallpaper("custom:" + added.id);
+  };
   const desktopFiles = useMemo(() => {
     const list = [...(filesByFolder[DESKTOP_ID] ?? [])];
     if (deskSort === "date") list.sort((a, b) => b.mtime - a.mtime);
@@ -402,23 +488,54 @@ function App() {
     y: DESK_GRID.y0 + Math.round((y - DESK_GRID.y0) / DESK_GRID.dy) * DESK_GRID.dy,
   });
   const deskPos = (id: string, index: number) => desktopIcons[id] ?? gridPos(index);
-  /** 拖桌面图标：跟随指针，开启吸附时落格（手势位移不做过渡，1:1）。 */
+  /** 落格：把图标动画到栅格（只有这一步用过渡，所以看起来是"轻轻吸过去"而不是跳）。 */
+  const settleTo = (id: string, pos: { x: number; y: number }) => {
+    setDesktopIcons((m) => ({ ...m, [id]: pos }));
+    setSettling(id);
+    window.setTimeout(() => setSettling((cur) => (cur === id ? null : cur)), 280);
+  };
+  /**
+   * 拖桌面图标：**拖动过程 1:1 跟手、不吸附**，松手时才用一段过渡落到栅格。
+   * （之前边拖边吸附，指针动一像素图标就跳一格，手感很生硬。）
+   */
   const dragDesktopIcon = (e: React.PointerEvent, id: string) => {
+    // ⌘ + 按下 = 拖到系统（Finder / 桌面）：直接走原生 startDrag。
+    // 桌面图标**不能**再挂 HTML5 draggable —— 那样浏览器会把"按下+移动"判成 HTML5 拖拽，
+    // 指针事件被吞掉，位置就再也拖不动了（实测如此）。
+    if (e.metaKey) {
+      window.openarc?.files?.startDrag(DESKTOP_ID, id);
+      return;
+    }
     const start = deskPos(id, desktopFiles.findIndex((f) => f.id === id));
     const x0 = e.clientX;
     const y0 = e.clientY;
     const el = e.currentTarget as HTMLElement;
     el.setPointerCapture(e.pointerId);
+    let last = start;
     const move = (ev: Event) => {
       const p = ev as PointerEvent;
       const nx = Math.max(0, Math.min(window.innerWidth - 96, start.x + p.clientX - x0));
       const ny = Math.max(52, Math.min(window.innerHeight - 140, start.y + p.clientY - y0));
-      setDesktopIcons((m) => ({ ...m, [id]: snap ? snapPos(nx, ny) : { x: nx, y: ny } }));
+      last = { x: nx, y: ny };
+      setDesktopIcons((m) => ({ ...m, [id]: last }));
     };
-    const end = () => {
+    const end = (ev?: PointerEvent) => {
       el.removeEventListener("pointermove", move);
       el.removeEventListener("pointerup", end);
       el.removeEventListener("pointercancel", end);
+      // 松手时若落在桌面上的某个文件夹磁贴里 → 搬进那个文件夹
+      const dropped = ev ? (document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null) : null;
+      const into = dropped?.closest("[data-folder-id]") as HTMLElement | null;
+      if (into?.dataset.folderId) {
+        void moveInto(into.dataset.folderId, DESKTOP_ID, [id]);
+        setDesktopIcons((m) => {
+          const next = { ...m };
+          delete next[id];
+          return next;
+        });
+        return;
+      }
+      if (snap) settleTo(id, snapPos(last.x, last.y));
     };
     el.addEventListener("pointermove", move);
     el.addEventListener("pointerup", end);
@@ -1389,6 +1506,60 @@ function App() {
                     <option value="solid">实色</option>
                   </select>
                 </div>
+                <div className="setting-row">
+                  <span>
+                    壁纸
+                    <span className="footnote"> 静态图片、动图、视频都支持</span>
+                  </span>
+                  <label className="control-button">
+                    上传壁纸
+                    <input
+                      type="file"
+                      accept="image/*,video/*"
+                      hidden
+                      onChange={(e) => {
+                        void uploadWallpaper(e.target.files?.[0]);
+                        e.currentTarget.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
+                <div className="wallpaper-grid">
+                  {WALLPAPERS.map((wp) => (
+                    <button
+                      key={wp.id}
+                      className={"wallpaper-option" + (wallpaper === wp.id ? " on" : "")}
+                      data-wallpaper={wp.id}
+                      aria-pressed={wallpaper === wp.id}
+                      onClick={() => setWallpaper(wp.id)}
+                    >
+                      <span>{wp.name}</span>
+                    </button>
+                  ))}
+                  <button
+                    className={"wallpaper-option aurora-option" + (wallpaper === "aurora-live" ? " on" : "")}
+                    aria-pressed={wallpaper === "aurora-live"}
+                    onClick={() => setWallpaper("aurora-live")}
+                  >
+                    <AuroraBackground reduced={reduced} />
+                    <span>动态 · Aurora</span>
+                  </button>
+                  {customWallpapers.map((e) => (
+                    <button
+                      key={e.id}
+                      className={"wallpaper-option" + (wallpaper === "custom:" + e.id ? " on" : "")}
+                      aria-pressed={wallpaper === "custom:" + e.id}
+                      onClick={() => setWallpaper("custom:" + e.id)}
+                    >
+                      {kindOfExt(e.ext) === "video" ? (
+                        <video src={fileUrl(WALLPAPER_ID, e.id)} muted loop autoPlay playsInline />
+                      ) : (
+                        <img src={fileUrl(WALLPAPER_ID, e.id)} alt="" />
+                      )}
+                      <span>{e.name}</span>
+                    </button>
+                  ))}
+                </div>
               </>
             ) : (
               <>
@@ -1571,14 +1742,49 @@ function App() {
               },
             },
             { separator: true },
-            ...WALLPAPERS.map(
-              (wp): MenuItem => ({
-                id: "wp-" + wp.id,
-                label: "壁纸：" + wp.name,
-                checked: wallpaper === wp.id,
-                onSelect: () => setWallpaper(wp.id),
-              }),
-            ),
+            {
+              id: "wallpaper",
+              label: "壁纸",
+              // 父项只负责展开子菜单（onSelect 不会被调用，但类型上必须给）
+              onSelect: () => {},
+              submenu: [
+                ...WALLPAPERS.map(
+                  (wp): MenuItem => ({
+                    id: "wp-" + wp.id,
+                    label: wp.name,
+                    checked: wallpaper === wp.id,
+                    onSelect: () => setWallpaper(wp.id),
+                  }),
+                ),
+                {
+                  id: "wp-live",
+                  label: "动态 · Aurora",
+                  checked: wallpaper === "aurora-live",
+                  onSelect: () => setWallpaper("aurora-live"),
+                },
+                { separator: true },
+                ...(customWallpapers.length
+                  ? ([
+                      ...customWallpapers.map(
+                        (e): MenuItem => ({
+                          id: "wp-c-" + e.id,
+                          label: e.name,
+                          checked: wallpaper === "custom:" + e.id,
+                          onSelect: () => setWallpaper("custom:" + e.id),
+                        }),
+                      ),
+                    ] as MenuItem[])
+                  : // 没有自定义壁纸时给一条可走的入口（在设置里上传），不做假菜单
+                    ([
+                      {
+                        id: "wp-none",
+                        label: "自定义壁纸请到设置里上传",
+                        disabled: true,
+                        onSelect: () => {},
+                      },
+                    ] as MenuItem[])),
+              ],
+            },
           ]
     : [];
 
@@ -1635,18 +1841,25 @@ function App() {
     const y = e.clientY;
     e.currentTarget.setPointerCapture(e.pointerId);
     const el = e.currentTarget as HTMLElement;
+    let last = { x: f.x, y: f.y };
     const move = (ev: Event) => {
       const p = ev as PointerEvent;
       const nx = Math.max(0, Math.min(innerWidth - 88, f.x + p.clientX - x));
       const ny = Math.max(52, Math.min(innerHeight - 160, f.y + p.clientY - y));
-      // 网格吸附开启时文件夹也落格（与桌面文件同一套栅格）
-      const pos = snap ? snapPos(nx, ny) : { x: nx, y: ny };
-      setFolders((fs) => fs.map((v) => (v.id === f.id ? { ...v, x: pos.x, y: pos.y } : v)));
+      last = { x: nx, y: ny };
+      // 拖动过程同样不吸附，松手才落格
+      setFolders((fs) => fs.map((v) => (v.id === f.id ? { ...v, x: nx, y: ny } : v)));
     };
     const end = () => {
       el.removeEventListener("pointermove", move);
       el.removeEventListener("pointerup", end);
       el.removeEventListener("pointercancel", end);
+      if (snap) {
+        const target = snapPos(last.x, last.y);
+        setFolders((fs) => fs.map((v) => (v.id === f.id ? { ...v, x: target.x, y: target.y } : v)));
+        setSettling(f.id);
+        window.setTimeout(() => setSettling((cur) => (cur === f.id ? null : cur)), 280);
+      }
     };
     el.addEventListener("pointermove", move);
     el.addEventListener("pointerup", end);
@@ -1708,6 +1921,25 @@ function App() {
         setMenu({ x: e.clientX, y: e.clientY });
       }}
     >
+      {/* 壁纸层：内置渐变由 data-wallpaper 提供；动态 Aurora 与自定义壁纸画在这里 */}
+      <div className="desktop-wallpaper" aria-hidden="true">
+        {wallpaper === "aurora-live" ? <AuroraBackground reduced={reduced} /> : null}
+        {customEntry ? (
+          kindOfExt(customEntry.ext) === "video" ? (
+            <video
+              className="wallpaper-media"
+              src={fileUrl(WALLPAPER_ID, customEntry.id)}
+              autoPlay
+              muted
+              loop
+              playsInline
+            />
+          ) : (
+            <img className="wallpaper-media" src={fileUrl(WALLPAPER_ID, customEntry.id)} alt="" />
+          )
+        ) : null}
+      </div>
+
       {gate === "checking" ? <BootSurface /> : null}
 
       {gate === "uninitialized" ? (
@@ -1769,7 +2001,7 @@ function App() {
           .map((f) => (
           <div
             key={f.id}
-            className="desktop-folder"
+            className={"desktop-folder" + (settling === f.id ? " settling" : "")}
             style={{ left: f.x, top: f.y }}
             tabIndex={0}
             data-folder-id={f.id}
@@ -1821,21 +2053,11 @@ function App() {
           return (
             <div
               key={f.id}
-              className="desktop-file"
+              className={"desktop-file" + (settling === f.id ? " settling" : "")}
               style={{ left: p.x, top: p.y }}
               data-entry-id={f.id}
               tabIndex={0}
-              draggable
               onPointerDown={(e) => dragDesktopIcon(e, f.id)}
-              onDragStart={(e) => {
-                if (e.metaKey) {
-                  e.preventDefault();
-                  window.openarc?.files?.startDrag(DESKTOP_ID, f.id);
-                  return;
-                }
-                e.dataTransfer.setData(INTERNAL_DND, JSON.stringify({ folderId: DESKTOP_ID, ids: [f.id] }));
-                e.dataTransfer.effectAllowed = "copyMove";
-              }}
               onDoubleClick={() => void openPreview(DESKTOP_ID, f.id)}
               onContextMenu={(e) => {
                 e.preventDefault();

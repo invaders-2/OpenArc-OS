@@ -519,7 +519,16 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
 // ===========================================================================
 
 export type MenuItem =
-  | { id: string; label: string; danger?: boolean; disabled?: boolean; checked?: boolean; onSelect: () => void }
+  | {
+      id: string;
+      label: string;
+      danger?: boolean;
+      disabled?: boolean;
+      checked?: boolean;
+      /** 悬停展开的子菜单（例如"壁纸"）。 */
+      submenu?: MenuItem[];
+      onSelect: () => void;
+    }
   | { separator: true };
 
 type ContextMenuProps = {
@@ -543,6 +552,8 @@ type ContextMenuProps = {
  */
 export function ContextMenu({ x, y, items, onClose, label = "桌面菜单" }: ContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
+  /** 当前展开的子菜单（悬停或键盘触发）。 */
+  const [openSub, setOpenSub] = useState<{ id: string; top: number; items: MenuItem[] } | null>(null);
   const returnTo = useRef<HTMLElement | null>(null);
 
   const selectable = useMemo(
@@ -611,7 +622,23 @@ export function ContextMenu({ x, y, items, onClose, label = "桌面菜单" }: Co
               role="menuitem"
               className={it.danger ? "danger" : undefined}
               disabled={it.disabled}
-              onClick={() => {
+              aria-haspopup={it.submenu ? "menu" : undefined}
+              onPointerEnter={(e) => {
+                if (it.submenu) {
+                  setOpenSub({ id: it.id, top: (e.currentTarget as HTMLElement).offsetTop, items: it.submenu });
+                } else {
+                  setOpenSub(null);
+                }
+              }}
+              onFocus={(e) => {
+                if (it.submenu) setOpenSub({ id: it.id, top: (e.currentTarget as HTMLElement).offsetTop, items: it.submenu });
+              }}
+              onClick={(e) => {
+                // 带子菜单的父项：点一下只展开，不关菜单、也不触发动作
+                if (it.submenu) {
+                  setOpenSub({ id: it.id, top: (e.currentTarget as HTMLElement).offsetTop, items: it.submenu });
+                  return;
+                }
                 it.onSelect();
                 onClose();
               }}
@@ -622,9 +649,41 @@ export function ContextMenu({ x, y, items, onClose, label = "桌面菜单" }: Co
                 </span>
               ) : null}
               {it.label}
+              {it.submenu ? (
+                <span className="menu-chevron" aria-hidden="true">
+                  ›
+                </span>
+              ) : null}
             </button>
           ),
         )}
+        {openSub ? (
+          <div className="context-menu context-submenu" role="menu" style={{ top: openSub.top }}>
+            {openSub.items.map((it, i) =>
+              "separator" in it ? (
+                <div className="menu-separator" role="separator" key={`sub-sep-${i}`} />
+              ) : (
+                <button
+                  key={it.id}
+                  role="menuitem"
+                  className={it.danger ? "danger" : undefined}
+                  disabled={it.disabled}
+                  onClick={() => {
+                    it.onSelect();
+                    onClose();
+                  }}
+                >
+                  {"checked" in it ? (
+                    <span className="menu-check" aria-hidden="true">
+                      {it.checked ? "✓" : ""}
+                    </span>
+                  ) : null}
+                  {it.label}
+                </button>
+              ),
+            )}
+          </div>
+        ) : null}
       </div>
     </>
   );

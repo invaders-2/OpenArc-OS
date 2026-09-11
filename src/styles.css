@@ -1204,10 +1204,22 @@ input[type="checkbox"] {
   animation: appear var(--quick) var(--ease);
 }
 .context-menu button {
+  display: flex;
+  align-items: center;
+  gap: 2px;
   text-align: left;
   padding: 8px 11px;
   border-radius: var(--radius-sm);
   font-size: 13px;
+}
+/* 子菜单（悬停展开） */
+.context-submenu {
+  left: calc(100% - 6px);
+  min-width: 168px;
+}
+.menu-chevron {
+  margin-left: auto;
+  opacity: 0.55;
 }
 .menu-check {
   display: inline-block;
@@ -1237,6 +1249,98 @@ input[type="checkbox"] {
 .search-field:focus-within {
   background: rgb(var(--text-rgb) / 0.08);
 }
+/* 壁纸层（动态 Aurora / 自定义壁纸画在这里；内置渐变仍由 .desktop[data-wallpaper] 提供） */
+.desktop-wallpaper {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.aurora-canvas,
+.wallpaper-media {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.desktop.dark[data-wallpaper="aurora-live"],
+.desktop.dark[data-wallpaper="custom"] {
+  background: #0b0f14;
+}
+.desktop:not(.dark)[data-wallpaper="aurora-live"],
+.desktop:not(.dark)[data-wallpaper="custom"] {
+  background: #eef0f4;
+}
+/* 设置页：壁纸选择 */
+.control-button {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--radius-pill);
+  background: var(--sunken);
+  color: var(--text);
+  font-size: var(--fs-caption);
+  cursor: pointer;
+}
+.control-button:hover {
+  background: var(--row-hover);
+}
+.wallpaper-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+.wallpaper-option {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  display: grid;
+  align-items: end;
+  padding: 8px;
+  text-align: left;
+  color: var(--text);
+  font-size: var(--fs-caption);
+  background: var(--sunken);
+}
+.wallpaper-option.on {
+  box-shadow: inset 0 0 0 2px rgb(var(--text-rgb) / 0.5);
+}
+.wallpaper-option img,
+.wallpaper-option video,
+.wallpaper-option canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.wallpaper-option > span {
+  position: relative;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.55);
+}
+/* 内置壁纸的色板（与桌面上那四套一一对应） */
+.wallpaper-option[data-wallpaper="aurora"] {
+  background:
+    radial-gradient(ellipse at 20% 92%, rgba(56, 189, 248, 0.35) 0, transparent 55%),
+    radial-gradient(ellipse at 82% 14%, rgba(167, 139, 250, 0.3) 0, transparent 50%),
+    linear-gradient(140deg, #0b0f14, #10141b 70%, #0c1016);
+}
+.wallpaper-option[data-wallpaper="graphite"] {
+  background: linear-gradient(140deg, #17181c, #101114 70%, #14151a);
+}
+.wallpaper-option[data-wallpaper="midnight"] {
+  background:
+    radial-gradient(ellipse at 50% 112%, rgba(99, 102, 241, 0.3) 0, transparent 60%),
+    linear-gradient(160deg, #0a0c14, #0e1119);
+}
+.wallpaper-option[data-wallpaper="plain"] {
+  background: #000;
+}
+
 /* 桌面上的文件（与文件夹里同一套真实数据，同样显示缩略图） */
 .desktop-file {
   position: absolute;
@@ -1253,6 +1357,13 @@ input[type="checkbox"] {
 }
 .desktop-file:hover {
   background: rgb(var(--text-rgb) / 0.06);
+}
+/* 只有"松手落格"这一段有过渡：拖动过程必须 1:1 跟手（reduced motion 下 token 为 0ms） */
+.desktop-file.settling,
+.desktop-folder.settling {
+  transition:
+    left var(--dur-standard) var(--ease-standard),
+    top var(--dur-standard) var(--ease-standard);
 }
 .desktop-thumb {
   width: 52px;
