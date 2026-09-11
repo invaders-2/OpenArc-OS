@@ -300,14 +300,14 @@ function App() {
           <nav className="split-side" aria-label="应用分类">
             <div className="split-section">应用</div>
             <button className="split-nav" aria-current={appTab === "all"} onClick={() => setAppTab("all")}>
-              <LayoutGrid size={15} /> 全部应用
+              <LayoutGrid size={16} /> 全部应用
             </button>
             <button className="split-nav" aria-current={appTab === "recent"} onClick={() => setAppTab("recent")}>
-              <Clock size={15} /> 最近使用
+              <Clock size={16} /> 最近使用
             </button>
             <div className="split-section">专业</div>
             <button className="split-nav" aria-current={appTab === "pro"} onClick={() => setAppTab("pro")}>
-              <Wand2 size={15} /> 专业应用
+              <Wand2 size={16} /> 专业应用
             </button>
           </nav>
           <div className="split-main">
@@ -414,10 +414,10 @@ function App() {
               aria-current={settingsTab === "appearance"}
               onClick={() => setSettingsTab("appearance")}
             >
-              <Sliders size={15} /> 外观与交互
+              <Sliders size={16} /> 外观与交互
             </button>
             <button className="split-nav" aria-current={settingsTab === "model"} onClick={() => setSettingsTab("model")}>
-              <Bot size={15} /> 全局模型服务
+              <Bot size={16} /> 全局模型服务
             </button>
           </nav>
           <div className="split-main">
@@ -473,10 +473,10 @@ function App() {
           <nav className="split-side" aria-label="Skill 分类">
             <div className="split-section">Skill</div>
             <button className="split-nav" aria-current={skillTab === "market"} onClick={() => setSkillTab("market")}>
-              <Store size={15} /> 市场
+              <Store size={16} /> 市场
             </button>
             <button className="split-nav" aria-current={skillTab === "mine"} onClick={() => setSkillTab("mine")}>
-              <User size={15} /> 我的技能
+              <User size={16} /> 我的技能
             </button>
             <div className="split-section">本机</div>
             <button
@@ -484,7 +484,7 @@ function App() {
               aria-current={skillTab === "installed"}
               onClick={() => setSkillTab("installed")}
             >
-              <Package size={15} /> 已安装
+              <Package size={16} /> 已安装
             </button>
           </nav>
           <div className="split-main">
@@ -838,7 +838,7 @@ function App() {
                 <button className="search-result" key={a.id} onClick={() => activateApp(a.id)}>
                   <img className="result-icon" src={icon(a.icon)} alt="" />
                   {a.name}
-                  <ArrowRight size={15} />
+                  <ArrowRight size={16} />
                 </button>
               ))}
           </div>

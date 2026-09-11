@@ -549,7 +549,7 @@ input[type="checkbox"] {
   min-height: 0;
 }
 .split-side {
-  flex: 0 0 188px;
+  flex: 0 0 192px;
   min-height: 0;
   overflow: auto;
   display: flex;
@@ -566,7 +566,7 @@ input[type="checkbox"] {
   box-shadow: var(--elevation-1);
 }
 .split-section {
-  padding: 12px 8px 4px;
+  padding: 14px 8px 5px;
   font-size: var(--fs-micro);
   line-height: 1.2;
   color: var(--muted);
@@ -603,14 +603,14 @@ input[type="checkbox"] {
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 6px 8px;
+  padding: 8px;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--muted);
   text-align: left;
   font-size: var(--fs-secondary);
-  /* 对齐 macOS 侧栏：行距收紧、字距略负，行高约 30px */
-  line-height: 1.25;
+  /* 对齐原生 Finder 实测：行高 31.5px、高亮左右各内缩 8px */
+  line-height: 1.2;
   letter-spacing: -0.08px;
   transition: background var(--quick) var(--ease), color var(--quick) var(--ease);
 }

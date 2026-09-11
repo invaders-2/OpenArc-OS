@@ -1,5 +1,17 @@
 # 计划修订记录
 
+## 2026-09-12：侧栏数值逐项对齐原生 Finder 实测
+
+从原生 Finder 截图逐像素量得：选中行高 **31.5px**、侧栏宽约 **192px**、高亮左右各内缩 **8px**、
+行距 **31.7px**、组标题 11px、图标 **16pt**。据此调整：
+
+- `.split-nav`：`padding: 8px` + `line-height: 1.2` → 行高 **32px**（原 28.3 偏紧）；导航图标 15 → **16**。
+- `.split-side`：`flex-basis` 188 → **192px**；卡片四周 `margin: 8px`；内边距 `6px 8px 10px`。
+- `.split-section`：`padding: 14px 8px 5px`。
+
+实测（Playwright 读数）：`.split-nav` 176×32、gap 8、radius 6、13px/1.2/-0.08px；
+`.split-side` 192×554、margin 8、radius 12 —— 与原生 Finder 基本一致。
+
 ## 2026-09-12：侧栏间距/字号按原生 Finder 收紧
 
 用户复审：「边距没有做好，字体的间距也没有做好，看看原生 Apple Mac 的窗口」。
