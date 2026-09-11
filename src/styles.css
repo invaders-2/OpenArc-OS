@@ -10,13 +10,42 @@
   -webkit-font-smoothing: antialiased;
   --text: #1d1d1f;
   --muted: #6e6e73;
-  --surface: rgba(255, 255, 255, 0.68);
-  --content: rgba(255, 255, 255, 0.94);
+  /* ── 玻璃材质层（D1-04B）─────────────────────────────────────────
+     三个维度互相正交，各自只碰自己的原料：
+       Theme  light / dark   → 只改 *-rgb 与 light/dark 的 alpha 基线
+       Glass  full / reduced / solid → 只改材质参数（alpha / blur / saturate）
+
+     :root 只存原料，不存合成结果。合成一律在各消费位置用
+       rgb(var(--x-rgb) / var(--x-alpha))
+     完成。
+
+     为什么不在 token 层合成：var() 会在"声明它的元素"上完成替换并把结果
+     继承下去。若在 :root 写 --surface: rgb(var(--surface-rgb) / ...)，
+     那么 .dark 再改 --surface-rgb 不会回头影响已经算完的 --surface，
+     深色会被算成浅色。这个坑在 D1-04B 上真实发生过一次。 */
+
+  /* ── 主题原料：light 基线 ── */
+  --surface-rgb: 255 255 255;
+  --content-rgb: 255 255 255;
+  --bar-rgb: 255 255 255;
+  --pill-rgb: 255 255 255;
+  --surface-alpha: 0.68;
+  --content-alpha: 0.94;
+  /* 顶栏与 Dock 无底色填充（用户指定透明度 0），与深色口径一致 */
+  --bar-alpha: 0;
+  --pill-alpha: 0.58;
+
+  /* ── 材质原料：full 基线 ──
+     每个表面一条完整滤镜。用完整值而不是 blur()+saturate() 拼接，
+     是为了让 reduced 真正去掉 saturate——写成 saturate(1) 视觉等价，
+     但仍会保留一条滤镜链。 */
+  --glass-filter: blur(40px) saturate(1.8);
+  --glass-filter-window: blur(34px) saturate(1.8);
+  --glass-filter-pill: blur(32px) saturate(1.8);
+  --glass-filter-dock: blur(44px) saturate(1.8);
+  --glass-filter-tip: blur(24px) saturate(1.8);
+
   --sunken: rgba(0, 0, 0, 0.04);
-  /* D1-04 采纳 feature/ui-light-bar-zero：顶栏与 Dock 只保留模糊，无底色填充。
-     与深色 --bar: rgba(23,23,23,0) 对齐，深浅两色口径一致 */
-  --bar: rgba(255, 255, 255, 0);
-  --pill: rgba(255, 255, 255, 0.58);
   --line: rgba(0, 0, 0, 0.12);
   --accent: #1d1d1f;
   --on-accent: #fff;
@@ -103,14 +132,19 @@ textarea {
 .dark {
   --text: #f5f5f7;
   --muted: #98989d;
-  /* 深色统一基色 #171717，层级靠 alpha 分档（合成于纯黑桌面之上） */
-  --surface: rgba(23, 23, 23, 0.5);
-  --content: rgba(23, 23, 23, 0.6);
-  --sunken: rgba(0, 0, 0, 0.28);
+  /* 深色只覆盖主题原料：RGB 通道 + alpha 基线。
+     深色统一基色 #171717，层级靠 alpha 分档（合成于纯黑桌面之上） */
+  --surface-rgb: 23 23 23;
+  --content-rgb: 23 23 23;
+  --bar-rgb: 23 23 23;
+  --pill-rgb: 23 23 23;
+  --surface-alpha: 0.5;
+  --content-alpha: 0.6;
   /* 顶栏与 Dock 只保留模糊，无底色填充（用户指定透明度 0） */
-  --bar: rgba(23, 23, 23, 0);
+  --bar-alpha: 0;
   /* 桌面 AI 胶囊仍需可见底板，否则纯黑上只剩一行字 */
-  --pill: rgba(23, 23, 23, 0.72);
+  --pill-alpha: 0.72;
+  --sunken: rgba(0, 0, 0, 0.28);
   --line: rgba(255, 255, 255, 0.16);
   --accent: #f5f5f7;
   --on-accent: #000;
@@ -137,26 +171,63 @@ textarea {
 .dark .illustrator {
   background: rgba(255, 255, 255, 0.12);
 }
-.opaque {
-  --surface: #f5f5f7;
-  --content: #fff;
-  /* 无模糊时 --bar 必须等于它压着的桌面合成色，否则 opaque 下会浮出一条亮带。
-     D1-04 实测（experiments/d1-04/opaque-probe.mjs）：顶栏处桌面 9 点均值
-     #efeff1、Dock 处 #e4e4e8；单一 token 取中点 #e9e9ec，两端偏差 ≤6 级。
-     分支原值 #f5f5f7 比桌面上限还亮，实测不成立。 */
-  --bar: #e9e9ec;
+/* ── 材质档位 solid：无 backdrop-filter，全部实色 ─────────────────
+   SOLID 是唯一允许覆盖 RGB 通道的档位：没有模糊时，底色必须等于
+   它实际压着的桌面合成色，否则会浮出一条亮/暗带。 */
+.opaque,
+.desktop[data-glass="solid"] {
+  --surface-rgb: 245 245 247;
+  --surface-alpha: 1;
+  --content-rgb: 255 255 255;
+  --content-alpha: 1;
+  /* 顶栏处桌面 9 点均值 #efeff1、Dock 处 #e4e4e8，单一 token 取中点
+     #e9e9ec（D1-04 实测，experiments/d1-04/opaque-probe.mjs） */
+  --bar-rgb: 233 233 236;
+  --bar-alpha: 1;
 }
-.opaque.dark {
-  /* 无模糊时取上表的合成值，保证与半透明版视觉一致 */
-  --surface: #0c0c0c;
-  --content: #0e0e0e;
-  /* 减少透明度模式下顶栏与 Dock 恢复实色，保证可辨识 */
-  --bar: #111111;
-  --pill: #111111;
+.opaque.dark,
+.dark.desktop[data-glass="solid"] {
+  --surface-rgb: 12 12 12;
+  --surface-alpha: 1;
+  --content-rgb: 14 14 14;
+  --content-alpha: 1;
+  /* D1-04B：原值 #111111 比桌面亮 17 个 RGB 级，在纯黑桌面上形成一条亮带。
+     实测顶栏处真实桌面 = #000000（experiments/d1-04/opaque-probe.mjs）。 */
+  --bar-rgb: 0 0 0;
+  --bar-alpha: 1;
+  --pill-rgb: 0 0 0;
+  --pill-alpha: 1;
 }
-.opaque * {
+.opaque *,
+.desktop[data-glass="solid"] * {
   backdrop-filter: none !important;
 }
+
+/* ── 材质档位 reduced：降模糊、真去掉 saturate、补底色 alpha ────────
+   目标是降低合成成本，不是"浅一点的 FULL"：
+   不加 border、不加 box-shadow、不引入新的 filter、不重建 DOM。 */
+.desktop[data-glass="reduced"] {
+  /* 每档滤镜整条重写，而不是拼接 blur()+saturate()——
+     写成 saturate(1) 视觉等价，但仍会保留一条滤镜链。 */
+  --glass-filter: blur(12px);
+  --glass-filter-window: blur(10px);
+  --glass-filter-pill: blur(10px);
+  --glass-filter-dock: blur(13px);
+  --glass-filter-tip: blur(7px);
+  /* 模糊变弱后靠底色 alpha 找回可辨识度（light 基线） */
+  --surface-alpha: 0.9;
+  --content-alpha: 1;
+  --bar-alpha: 0.22;
+  --pill-alpha: 0.8;
+}
+.dark.desktop[data-glass="reduced"] {
+  --surface-alpha: 0.72;
+  --content-alpha: 0.82;
+  --bar-alpha: 0.22;
+  --pill-alpha: 0.94;
+}
+/* Reduce Motion —— 与材质档位完全无关，只碰动效时长。
+   D1-04B 之前 .reduced 只表示动效，材质档位另用 [data-glass]，不复用这个类名。 */
 .reduced {
   --quick: 0ms;
   --standard: 0ms;
@@ -167,8 +238,8 @@ textarea {
 }
 .topbar {
   height: 38px;
-  background: var(--bar);
-  backdrop-filter: blur(40px) saturate(180%);
+  background: rgb(var(--bar-rgb) / var(--bar-alpha));
+  backdrop-filter: var(--glass-filter);
   /* 顶栏无底色（--bar 0），不能再有投影，否则会在桌面留下一条幽灵暗边 */
   display: flex;
   align-items: center;
@@ -224,8 +295,8 @@ textarea {
   gap: 10px;
   padding: 9px 15px;
   border-radius: 30px;
-  background: var(--pill);
-  backdrop-filter: blur(32px) saturate(180%);
+  background: rgb(var(--pill-rgb) / var(--pill-alpha));
+  backdrop-filter: var(--glass-filter-pill);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
   font-size: 12px;
   z-index: 3;
@@ -238,8 +309,8 @@ textarea {
 .window {
   position: absolute;
   border-radius: var(--radius);
-  background: var(--surface);
-  backdrop-filter: blur(34px) saturate(180%);
+  background: rgb(var(--surface-rgb) / var(--surface-alpha));
+  backdrop-filter: var(--glass-filter-window);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
   overflow: hidden;
   display: flex;
@@ -390,7 +461,7 @@ p {
   gap: 12px;
 }
 .app-card {
-  background: var(--content);
+  background: rgb(var(--content-rgb) / var(--content-alpha));
   box-shadow:
     0 1px 3px rgba(0, 0, 0, 0.08),
     0 8px 24px rgba(0, 0, 0, 0.05);
@@ -476,8 +547,8 @@ p {
   bottom: 20px;
   left: 50%;
   transform: translateX(-50%);
-  background: var(--bar);
-  backdrop-filter: blur(44px) saturate(180%);
+  background: rgb(var(--bar-rgb) / var(--bar-alpha));
+  backdrop-filter: var(--glass-filter-dock);
   border-radius: 20px;
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.15);
   display: flex;
@@ -514,8 +585,8 @@ p {
   border-radius: 6px;
   font-size: 11px;
   color: var(--text);
-  background: var(--surface);
-  backdrop-filter: blur(24px) saturate(180%);
+  background: rgb(var(--surface-rgb) / var(--surface-alpha));
+  backdrop-filter: var(--glass-filter-tip);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
   opacity: 0;
   pointer-events: none;
@@ -585,6 +656,16 @@ p {
   justify-content: space-between;
   padding: 15px 0;
 }
+/* D1-04B 材质档位选择器：无边框（分层不靠发丝线），靠 --sunken 底表达可操作 */
+.material-select {
+  color: var(--text);
+  background: var(--sunken);
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  appearance: none;
+}
 input[type="checkbox"] {
   width: 32px;
   height: 18px;
@@ -610,7 +691,7 @@ input[type="checkbox"] {
 .addressbar input {
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: var(--content);
+  background: rgb(var(--content-rgb) / var(--content-alpha));
   padding: 9px 12px;
   width: 100%;
   min-width: 0;
@@ -627,7 +708,7 @@ input[type="checkbox"] {
   justify-content: center;
   padding: 35px;
   text-align: center;
-  background: var(--content);
+  background: rgb(var(--content-rgb) / var(--content-alpha));
 }
 .empty-content p {
   max-width: 380px;
@@ -643,7 +724,7 @@ input[type="checkbox"] {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--content);
+  background: rgb(var(--content-rgb) / var(--content-alpha));
 }
 .addressbar {
   padding: 8px 10px;
@@ -680,7 +761,7 @@ input[type="checkbox"] {
   align-items: center;
   justify-content: center;
   color: var(--muted);
-  background: var(--content);
+  background: rgb(var(--content-rgb) / var(--content-alpha));
 }
 .ai-panel {
   position: absolute;
@@ -690,8 +771,8 @@ input[type="checkbox"] {
   width: 350px;
   z-index: 90;
   border-radius: 16px;
-  background: var(--surface);
-  backdrop-filter: blur(40px) saturate(180%);
+  background: rgb(var(--surface-rgb) / var(--surface-alpha));
+  backdrop-filter: var(--glass-filter);
   box-shadow: var(--shadow);
   padding: 22px;
   display: flex;
@@ -729,7 +810,7 @@ input[type="checkbox"] {
 }
 .connection-card {
   padding: 17px;
-  background: var(--content);
+  background: rgb(var(--content-rgb) / var(--content-alpha));
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
   border-radius: 12px;
 }
@@ -753,7 +834,7 @@ input[type="checkbox"] {
   width: 100%;
   height: 85px;
   resize: none;
-  background: var(--content);
+  background: rgb(var(--content-rgb) / var(--content-alpha));
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 12px;
@@ -774,8 +855,8 @@ input[type="checkbox"] {
 }
 .search-panel {
   width: 550px;
-  background: var(--surface);
-  backdrop-filter: blur(40px) saturate(180%);
+  background: rgb(var(--surface-rgb) / var(--surface-alpha));
+  backdrop-filter: var(--glass-filter);
   border-radius: 16px;
   box-shadow: var(--shadow);
   padding: 12px;
@@ -808,7 +889,7 @@ input[type="checkbox"] {
   text-align: left;
 }
 .search-result:hover {
-  background: var(--content);
+  background: rgb(var(--content-rgb) / var(--content-alpha));
 }
 .search-result svg:last-child {
   margin-left: auto;
@@ -855,7 +936,7 @@ input[type="checkbox"] {
   text-align: center;
   border: 1px solid var(--line);
   border-radius: 4px;
-  background: var(--content);
+  background: rgb(var(--content-rgb) / var(--content-alpha));
   color: var(--text);
   padding: 2px 4px;
 }
@@ -870,8 +951,8 @@ input[type="checkbox"] {
   min-width: 178px;
   padding: 5px;
   border-radius: 10px;
-  background: var(--surface);
-  backdrop-filter: blur(40px) saturate(180%);
+  background: rgb(var(--surface-rgb) / var(--surface-alpha));
+  backdrop-filter: var(--glass-filter);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
   display: flex;
   flex-direction: column;
