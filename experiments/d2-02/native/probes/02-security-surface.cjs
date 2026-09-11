@@ -52,6 +52,7 @@ const FROZEN_IPC_CHANNELS = [
   "files:read",
   "files:remove",
   "files:rename",
+  "files:thumb",
   "identity:command",
   "windows:sync",
 ];

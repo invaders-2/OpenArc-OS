@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, safeStorage, screen, Menu } = require("electron");
+const { app, BrowserWindow, ipcMain, safeStorage, screen, Menu, nativeImage } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const { pathToFileURL } = require("node:url");
@@ -158,6 +158,20 @@ app.whenReady().then(() => {
   ipcMain.handle("files:read", async (e, payload) => {
     if (!trusted(e)) throw Error("Forbidden");
     return files.read(String(payload?.folderId ?? ""), String(payload?.id ?? ""));
+  });
+  // 缩略图：用 Electron 原生缩略图（macOS/Windows 支持），只回 data URL。
+  // 路径解析在 file-service 内部完成，**渲染进程仍然拿不到任何路径**。
+  ipcMain.handle("files:thumb", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    const hit = files.resolve(String(payload?.folderId ?? ""), String(payload?.id ?? ""));
+    if (!hit) return { ok: false, error: "NOT_FOUND" };
+    try {
+      const img = await nativeImage.createThumbnailFromPath(hit.path, { width: 160, height: 160 });
+      if (!img || img.isEmpty()) return { ok: false, error: "NO_THUMBNAIL" };
+      return { ok: true, dataUrl: img.toDataURL() };
+    } catch {
+      return { ok: false, error: "NO_THUMBNAIL" };
+    }
   });
 
   // ---------------------------------------------------------------------------

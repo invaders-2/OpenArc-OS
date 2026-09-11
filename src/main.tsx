@@ -87,6 +87,7 @@ declare global {
           text?: string;
           error?: string;
         }>;
+        thumb: (folderId: string, id: string) => Promise<{ ok?: boolean; dataUrl?: string; error?: string }>;
       };
     };
   }
@@ -257,6 +258,29 @@ function App() {
     if (!folderId || !entryId) return;
     void openPreview(folderId, entryId);
   };
+  /** 缩略图缓存（key = folderId/entryId；空串表示"确认没有缩略图"，避免反复请求）。 */
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const bridge = window.openarc?.files;
+    if (!bridge?.thumb) return;
+    const folderIds = new Set<string>();
+    for (const win of state.windows) {
+      if (!win.appId.startsWith(FOLDER_PREFIX)) continue;
+      const fid = folderUI[win.id]?.folderId ?? win.appId.slice(FOLDER_PREFIX.length);
+      if (fid) folderIds.add(fid);
+    }
+    for (const fid of folderIds) {
+      for (const e of filesByFolder[fid] ?? []) {
+        if (!FILE_KINDS.image.includes(e.ext) && !FILE_KINDS.video.includes(e.ext)) continue;
+        const key = fid + "/" + e.id;
+        if (thumbs[key] !== undefined) continue;
+        void bridge
+          .thumb(fid, e.id)
+          .then((res) => setThumbs((m) => ({ ...m, [key]: res && res.ok && res.dataUrl ? res.dataUrl : "" })))
+          .catch(() => setThumbs((m) => ({ ...m, [key]: "" })));
+      }
+    }
+  }, [state.windows, folderUI, filesByFolder, thumbs]);
   const [paneMenu, setPaneMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
 
   /**
@@ -670,7 +694,14 @@ function App() {
                         openEntryMenu(e.clientX, e.clientY, f.id, "file");
                       }}
                     >
-                      {renaming === f.id ? null : (
+                      {renaming === f.id ? null : thumbs[shown.id + "/" + f.id] ? (
+                        <img
+                          className="file-thumb"
+                          src={thumbs[shown.id + "/" + f.id]}
+                          alt=""
+                          draggable={false}
+                        />
+                      ) : (
                         <span className="file-glyph">
                           <FileGlyph ext={f.ext} size={ui.view === "grid" ? 40 : 22} />
                         </span>

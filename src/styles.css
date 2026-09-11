@@ -1320,6 +1320,19 @@ input[type="checkbox"] {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 真实缩略图（图片/视频） */
+.file-thumb {
+  width: 46px;
+  height: 46px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+}
+.file-list .file-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-xs);
+}
 .context-menu .danger {
   color: var(--failed);
 }

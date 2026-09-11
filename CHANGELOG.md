@@ -1,5 +1,19 @@
 # 计划修订记录
 
+## 2026-09-12：拖入的图片/视频显示真实缩略图
+
+用户反馈：文件拖进去后还是显示图标，要能看到缩略图。
+
+- `file-service` 新增 `resolve(folderId, id)` —— **只给主进程用**，拿条目磁盘路径，
+  刻意**不挂到 preload**：渲染进程依然拿不到任何路径。
+- `main.cjs` 新增 `files:thumb`：用 Electron `nativeImage.createThumbnailFromPath(path, 160×160)`
+  生成缩略图，只回 data URL；`preload` 与安全探针冻结清单同步登记 `files:thumb`。
+- 渲染层给图片/视频条目**懒加载缩略图并缓存**（空串表示"确认没有缩略图"，避免反复请求）：
+  网格里 46×46 圆角缩略图，列表视图 22×22；取不到才回退到线性图标。
+
+实测：缩略图 API 探针（真实 Electron）→ `{"width":160,"height":160}` PNG data URL；
+`npm test` 96/96；`security-surface` 15/15。
+
 ## 2026-09-12：显示方式分段控件的图标居中
 
 用户反馈：胶囊分段控件里的 icon 没对齐居中。

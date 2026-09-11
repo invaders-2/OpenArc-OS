@@ -63,5 +63,6 @@ contextBridge.exposeInMainWorld("openarc", {
     rename: (folderId, id, name) => ipcRenderer.invoke("files:rename", { folderId, id, name }),
     remove: (folderId, id) => ipcRenderer.invoke("files:remove", { folderId, id }),
     read: (folderId, id) => ipcRenderer.invoke("files:read", { folderId, id }),
+    thumb: (folderId, id) => ipcRenderer.invoke("files:thumb", { folderId, id }),
   },
 });

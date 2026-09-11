@@ -171,7 +171,19 @@ function createFileService({ userDataDir }) {
     }
   }
 
-  return { importPaths, list, rename, remove, read };
+  /**
+   * **只给主进程用**：拿到条目的磁盘路径（缩略图生成需要真实路径）。
+   * 刻意不挂到 preload 上 —— 渲染进程永远拿不到路径。
+   */
+  function resolve(folderId, id) {
+    const dir = dirOf(folderId);
+    if (!dir) return null;
+    const entry = readIndex(dir).find((e) => e.id === id);
+    if (!entry) return null;
+    return { path: path.join(dir, String(id)), entry };
+  }
+
+  return { importPaths, list, rename, remove, read, resolve };
 }
 
 module.exports = { createFileService };
