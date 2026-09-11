@@ -755,9 +755,6 @@ function App() {
 
   const runningApps = useMemo(() => new Set(state.windows.map((w) => w.appId)), [state.windows]);
   /** 任一窗口全屏 → Dock 自动隐藏；指针碰到底部才唤回。 */
-  const SPLIT_APPS = new Set(["home", "settings", "skills"]);
-  /** 窗口是否是"分栏"结构（左侧有一张 208px 侧栏卡）——磨砂条要避开它。 */
-  const isSplitApp = (appId: string) => appId.startsWith(FOLDER_PREFIX) || SPLIT_APPS.has(appId);
   const anyMaximized = state.windows.some((w) => w.state === domain.WSTATE.MAXIMIZED);
   const [dockPeek, setDockPeek] = useState(false);
 
@@ -2079,28 +2076,6 @@ function App() {
             {content(w.id)}
           </DesktopWindow>
         ))}
-        {/* 顶部"透明磨砂"：画在窗口**之外**（桌面层），所以采样到的是真实合成结果 ——
-            画在窗口内部时，窗口自己的 backdrop-filter 会在该区域被丢掉，顶部就会变暗去饱和。
-            只覆盖内容区（避开 208px 的侧栏卡），并跟着各窗口的位置 / z 走。 */}
-        {state.windows.map((w) =>
-          w.visible ? (
-            <div
-              key={"scrim-" + w.id}
-              className="desktop-scrim"
-              data-split={isSplitApp(w.appId) ? "1" : "0"}
-              aria-hidden="true"
-              style={{
-                // **整窗宽**（含侧栏卡四周那圈 8px 边缝，否则边缝没被糊到会穿帮）；
-                // 侧栏卡与红绿灯那块由 CSS mask 挖掉，保持清晰。
-                // 非分栏窗口没有侧栏卡，只需避开左侧那组 DOM 红绿灯（约 76px）。
-                left: w.bounds.x + (isSplitApp(w.appId) ? 0 : 76),
-                top: w.bounds.y,
-                width: Math.max(0, w.bounds.w - (isSplitApp(w.appId) ? 0 : 76)),
-                zIndex: 11 + w.z,
-              }}
-            />
-          ) : null,
-        )}
         {anyMaximized && !dockPeek ? (
           <div className="dock-hint" onPointerEnter={() => setDockPeek(true)} aria-hidden="true" />
         ) : null}

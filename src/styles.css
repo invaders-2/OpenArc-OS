@@ -201,7 +201,8 @@
   /* --glass-filter-large 是"大面积表面"开关：只在把大面积转实色的档位里被定义。
      未定义时回退到本面自己的完整玻璃（FULL 基线）。引用它的选择器即"大面积白名单"。 */
   backdrop-filter: var(--glass-filter-large, var(--glass-filter-window));
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+  /* 用户口径：窗口阴影不要那么大那么深。 */
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.07);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -211,19 +212,19 @@
   animation: appear var(--standard) var(--ease);
 }
 .window.active {
-  box-shadow: var(--shadow);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1);
 }
 /* 表面降到 #171717 50% 后合成值仅 #0C0C0C，与纯黑桌面明度差很小，
    因此顶部高光相应提高，让上边缘仍可辨识；外阴影在有环境光渐变的区域仍起作用。 */
 .dark .window {
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.12),
-    0 18px 46px rgba(0, 0, 0, 0.7);
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 8px 20px rgba(0, 0, 0, 0.35);
 }
 .dark .window.active {
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.18),
-    0 24px 60px rgba(0, 0, 0, 0.85);
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 10px 26px rgba(0, 0, 0, 0.45);
 }
 .dark .ai-panel,
 .dark .search-panel,
@@ -1294,111 +1295,8 @@ input[type="checkbox"] {
 .desktop[data-glass="full"]:not(.dark) .window:has(.split) .split-side {
   background-image: linear-gradient(rgba(0, 0, 0, 0.035), rgba(0, 0, 0, 0.035));
 }
-/* 窗口顶部"透明磨砂"（用户口径，原话）：滚上去的文字 / 图片会变模糊，
-   但这一层本身**没有任何底色** —— 不是一条板子，而是"透明的糊"。
-   **位置由 JS 按窗口 bounds 内联给出**（left / top / width / zIndex），
-   关键：它画在**窗口之外**（桌面层）—— 画在窗口内部时，窗口自身的 backdrop-filter
-   会在该区域被丢掉，顶部就会变暗去饱和（实测蓝色被压掉 70+）。 */
-.desktop-scrim {
-  position: absolute;
-  height: 96px;
-  pointer-events: none;
-  /**
-   * 关键结论（多轮实测）：
-   *   - **只有 blur、底色全透明** → 在深色界面上几乎看不见（用户连续反馈"没有"）；
-   *   - **底色接近实心** → 又像贴了一块板（用户反馈"有一层颜色"）。
-   * 所以取 macOS 真正的做法：**半透明材质 + 模糊** —— 顶部约 40%，向下渐隐到 0，
-   * 既看得见磨砂，又不形成硬边板子。想更淡/更浓只要调这两个系数。
-   */
-  background: linear-gradient(
-    to bottom,
-    rgb(var(--surface-rgb) / calc(var(--surface-alpha) * 0.4)) 0%,
-    rgb(var(--surface-rgb) / calc(var(--surface-alpha) * 0.22)) 46%,
-    rgb(var(--surface-rgb) / calc(var(--surface-alpha) * 0.08)) 74%,
-    rgb(var(--surface-rgb) / 0) 100%
-  );
-}
-/* 分栏窗口：整条都糊，但**把侧栏卡那块挖掉** —— 卡片（含红绿灯）保持清晰，
-   卡片四周那圈 8px 边缝则被糊到，不会露出没处理过的桌面（用户口径）。 */
-.desktop-scrim[data-split="1"] {
-  mask-image:
-    linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 52%, transparent 100%),
-    linear-gradient(#000, #000);
-  -webkit-mask-image:
-    linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 52%, transparent 100%),
-    linear-gradient(#000, #000);
-  mask-size: 100% 100%, 192px 68px;
-  -webkit-mask-size: 100% 100%, 192px 68px;
-  mask-position: 0 0, 8px 8px;
-  -webkit-mask-position: 0 0, 8px 8px;
-  mask-repeat: no-repeat;
-  -webkit-mask-repeat: no-repeat;
-  mask-composite: exclude;
-  -webkit-mask-composite: xor;
-}
-.desktop-scrim[data-split="1"]::before {
-  mask-image:
-    linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 52%, transparent 100%),
-    linear-gradient(#000, #000);
-  -webkit-mask-image:
-    linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 52%, transparent 100%),
-    linear-gradient(#000, #000);
-  mask-size: 100% 100%, 192px 68px;
-  -webkit-mask-size: 100% 100%, 192px 68px;
-  mask-position: 0 0, 8px 8px;
-  -webkit-mask-position: 0 0, 8px 8px;
-  mask-repeat: no-repeat;
-  -webkit-mask-repeat: no-repeat;
-  mask-composite: exclude;
-  -webkit-mask-composite: xor;
-}
-.desktop-scrim[data-split="1"]::after {
-  mask-image:
-    linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.55) 24%, transparent 62%),
-    linear-gradient(#000, #000);
-  -webkit-mask-image:
-    linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.55) 24%, transparent 62%),
-    linear-gradient(#000, #000);
-  mask-size: 100% 100%, 192px 68px;
-  -webkit-mask-size: 100% 100%, 192px 68px;
-  mask-position: 0 0, 8px 8px;
-  -webkit-mask-position: 0 0, 8px 8px;
-  mask-repeat: no-repeat;
-  -webkit-mask-repeat: no-repeat;
-  mask-composite: exclude;
-  -webkit-mask-composite: xor;
-}
-/* 第 1 层：轻模糊铺满整段 → 顶部开始"化开" */
-.desktop-scrim::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  /* 半径刻意收小：半径一大，模糊会把**旁边的深色侧栏 / 窗口边缘**平均进来，
-     顶部就会显出一条"变暗的颜色带"（用户实测：蓝色被压掉 48 级）。小半径只糊局部内容。 */
-  /* **纯 blur**：位置正确之后，任何 saturate / 提亮都会变成可见色偏（实测加了 saturate 后蓝色被顶高 60 级）。 */
-  backdrop-filter: blur(7px);
-  -webkit-backdrop-filter: blur(7px);
-  mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 52%, transparent 100%);
-  -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 52%, transparent 100%);
-}
-/* 第 2 层：强模糊只在最上面 → 越靠顶越糊（渐进） */
-.desktop-scrim::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 30%, transparent 70%);
-  -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 30%, transparent 70%);
-}
-/* 工具条自己贴顶，内容从它下面滚过去（下面有磨砂层兜着，不会糊成一团） */
-.pane-toolbar {
-  position: sticky;
-  top: 0;
-  z-index: 3;
-}
+/* 顶部磨砂已整层移除，因此工具条不再贴顶（没有磨砂兜着，贴顶会压在滚动内容上）。
+   工具条随内容一起滚，这也是移除该功能前原本的行为。 */
 /* 用户口径：滚动时**不要出现滚动条**（内容仍可正常滚动，只是不画那条轨道/滑块）。 */
 .desktop * {
   scrollbar-width: none; /* Firefox 写法，Chromium 会忽略 */
