@@ -105,6 +105,16 @@ const FILE_KINDS: Record<string, string[]> = {
   text: ["txt", "md", "json", "csv", "log", "ts", "tsx", "js", "jsx", "css", "html", "yml", "yaml", "xml"],
   archive: ["zip", "tar", "gz", "rar", "7z"],
 };
+/** 会去文件服务取缩略图的后缀（图片 / 视频 / 文档 —— 其余用线性图标，不浪费一次 IPC）。 */
+const THUMB_EXTS = [...FILE_KINDS.image, ...FILE_KINDS.video, ...FILE_KINDS.doc];
+
+/** 后缀 → 类别（渲染层用，和 FileGlyph 同一份表）。 */
+const kindOfExt = (ext: string) => Object.keys(FILE_KINDS).find((k) => FILE_KINDS[k].includes(ext)) ?? "other";
+
+/** 只读文件协议的媒体地址：openarc-file://media/<folderId>/<id>。 */
+const fileUrl = (folderId: string, id: string) =>
+  "openarc-file://media/" + encodeURIComponent(folderId) + "/" + encodeURIComponent(id);
+
 function FileGlyph({ ext, size }: { ext: string; size: number }) {
   const kind = Object.keys(FILE_KINDS).find((k) => FILE_KINDS[k].includes(ext));
   if (kind === "image") return <ImageIcon size={size} strokeWidth={1.25} />;
@@ -226,6 +236,8 @@ function App() {
     entry: FileEntry;
     mime: string;
     kind: string;
+    /** 流式媒体源（图片/视频/音频走 openarc-file 协议）。 */
+    src?: string;
     dataUrl?: string;
     text?: string;
   } | null>(null);
@@ -235,10 +247,18 @@ function App() {
       const bridge = window.openarc?.files;
       if (!bridge) return;
       const known = (filesByFolder[folderId] ?? []).find((e) => e.id === entryId);
+      if (!known) return;
+      const kind = kindOfExt(known.ext);
+      // 图片 / 视频 / 音频走**流式协议**：大视频也能播、能拖进度条；不再塞 data URL。
+      // 文本 / 其它才需要主进程把内容读回来。
+      if (kind === "image" || kind === "video" || kind === "audio") {
+        setPreview({ entry: known, mime: "", kind, src: fileUrl(folderId, entryId) });
+        return;
+      }
       const res = await bridge.read(folderId, entryId);
       if (!res || !res.ok || !res.entry) return;
       setPreview({
-        entry: res.entry ?? known!,
+        entry: res.entry ?? known,
         mime: String(res.mime ?? ""),
         kind: String(res.kind ?? "other"),
         dataUrl: res.dataUrl,
@@ -271,7 +291,7 @@ function App() {
     }
     for (const fid of folderIds) {
       for (const e of filesByFolder[fid] ?? []) {
-        if (!FILE_KINDS.image.includes(e.ext) && !FILE_KINDS.video.includes(e.ext)) continue;
+        if (!THUMB_EXTS.includes(e.ext)) continue;
         const key = fid + "/" + e.id;
         if (thumbs[key] !== undefined) continue;
         void bridge
@@ -614,6 +634,12 @@ function App() {
                 // 不要冒泡到桌面：否则桌面菜单会同时打开、盖在文件夹菜单上
                 e.stopPropagation();
                 openPaneMenu(e.clientX, e.clientY, "content");
+              }}
+              onClick={(e) => {
+                // 点空白处 = 取消选择（点在条目上时由条目自己设选择）
+                if (!(e.target as HTMLElement).closest(".file-cell")) {
+                  setSelected((m) => ({ ...m, [id]: "" }));
+                }
               }}
               onDragOver={(e) => {
                 if (!window.openarc?.files) return;
@@ -1319,12 +1345,12 @@ function App() {
         <div className="quicklook" role="dialog" aria-modal="true" aria-label="快速查看" onClick={() => setPreview(null)}>
           <div className="quicklook-card" onClick={(e) => e.stopPropagation()}>
             <div className="quicklook-body">
-              {preview.kind === "image" && preview.dataUrl ? (
-                <img src={preview.dataUrl} alt={preview.entry.name} draggable={false} />
-              ) : preview.kind === "video" && preview.dataUrl ? (
-                <video src={preview.dataUrl} controls autoPlay />
-              ) : preview.kind === "audio" && preview.dataUrl ? (
-                <audio src={preview.dataUrl} controls autoPlay />
+              {preview.kind === "image" && (preview.src || preview.dataUrl) ? (
+                <img src={preview.src || preview.dataUrl} alt={preview.entry.name} draggable={false} />
+              ) : preview.kind === "video" && (preview.src || preview.dataUrl) ? (
+                <video src={preview.src || preview.dataUrl} controls autoPlay />
+              ) : preview.kind === "audio" && (preview.src || preview.dataUrl) ? (
+                <audio src={preview.src || preview.dataUrl} controls autoPlay />
               ) : preview.kind === "text" ? (
                 <pre className="quicklook-text">{preview.text}</pre>
               ) : preview.kind === "pdf" ? (

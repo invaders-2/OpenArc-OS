@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, safeStorage, screen, Menu, nativeImage } = require("electron");
+const { app, BrowserWindow, ipcMain, safeStorage, screen, Menu, nativeImage, protocol, net } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const { pathToFileURL } = require("node:url");
@@ -12,6 +12,17 @@ let win;
 let controller;
 let identity;
 let files;
+
+/**
+ * 只读文件协议（Quick Look 的流式媒体源）。
+ * 必须在 app ready **之前**登记为 privileged —— 否则 <video> 不能 seek/stream，
+ * 大视频只能塞 data URL（内存爆）。它只服务 openarc-file://media/<folderId>/<id>，
+ * 路径解析走 file-service 的白名单，且只注册在默认 session：
+ * 原生网页视图用的是独立 partition，**够不到这个协议**。
+ */
+protocol.registerSchemesAsPrivileged([
+  { scheme: "openarc-file", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+]);
 
 const uiURL = pathToFileURL(path.join(__dirname, "../dist/index.html")).href;
 
@@ -136,6 +147,18 @@ app.whenReady().then(() => {
   // 渲染进程只拿到"条目索引"，拿不到任意路径读写。
   // ---------------------------------------------------------------------------
   files = createFileService({ userDataDir: app.getPath("userData") });
+
+  protocol.handle("openarc-file", async (request) => {
+    try {
+      const url = new URL(request.url);
+      const parts = url.pathname.split("/").filter(Boolean);
+      const hit = files.resolve(decodeURIComponent(parts[0] || ""), decodeURIComponent(parts[1] || ""));
+      if (!hit) return new Response("Not Found", { status: 404 });
+      return await net.fetch(pathToFileURL(hit.path).toString());
+    } catch {
+      return new Response("Error", { status: 500 });
+    }
+  });
 
   ipcMain.handle("files:import", async (e, payload) => {
     if (!trusted(e)) throw Error("Forbidden");
