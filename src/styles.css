@@ -1285,15 +1285,15 @@ input[type="checkbox"] {
   height: 76px;
   z-index: 1;
   pointer-events: none;
-  /* 顶部**必须接近实色**：否则内容滚上去会从磨砂里透出来（"穿帮"）。
-     所以最上面 20% 直接给满，再往下才渐隐。 */
+  /* **不要全实心**：正文只有 ~0.27，顶部若给 100% 就会出现一条硬边实心横带
+     （用户实测：窗口顶部"多了一个小框"）。改成与正文同一透明度起步 —— 完全无缝，
+     靠下面那两层强模糊把滚上去的内容糊到不可读（这才是"不穿帮"的正解）。 */
   background: linear-gradient(
     to bottom,
-    rgb(var(--surface-rgb) / 1) 0%,
-    rgb(var(--surface-rgb) / 1) 20%,
-    rgb(var(--surface-rgb) / calc(var(--surface-alpha) * 0.62)) 48%,
-    rgb(var(--surface-rgb) / calc(var(--surface-alpha) * 0.28)) 74%,
-    rgb(var(--surface-rgb) / 0) 100%
+    rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.45)) 0%,
+    rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.38)) 40%,
+    rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.16)) 72%,
+    rgb(var(--content-rgb) / 0) 100%
   );
   /* 无落影：用户口径——它不该像一条贴上去的板子 */
 }
@@ -1316,10 +1316,11 @@ input[type="checkbox"] {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  backdrop-filter: blur(34px) saturate(1.8);
-  -webkit-backdrop-filter: blur(34px) saturate(1.8);
-  mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.55) 24%, transparent 62%);
-  -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.55) 24%, transparent 62%);
+  /* 顶部用更强的模糊替代"实心"：内容糊到不可读，但不会出现硬边材质缝 */
+  backdrop-filter: blur(56px) saturate(1.9);
+  -webkit-backdrop-filter: blur(56px) saturate(1.9);
+  mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 30%, transparent 70%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.6) 30%, transparent 70%);
 }
 /* 深色下给顶栏一点点提亮，让它与内容区分开（macOS 深色工具栏比正文略亮） */
 .desktop.dark .window-scrim {
@@ -1331,11 +1332,10 @@ input[type="checkbox"] {
     ),
     linear-gradient(
       to bottom,
-      rgb(var(--surface-rgb) / 1) 0%,
-      rgb(var(--surface-rgb) / 1) 20%,
-      rgb(var(--surface-rgb) / calc(var(--surface-alpha) * 0.62)) 48%,
-      rgb(var(--surface-rgb) / calc(var(--surface-alpha) * 0.28)) 74%,
-      rgb(var(--surface-rgb) / 0) 100%
+      rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.45)) 0%,
+      rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.38)) 40%,
+      rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.16)) 72%,
+      rgb(var(--content-rgb) / 0) 100%
     );
 }
 /* 工具条自己贴顶，内容从它下面滚过去 */
