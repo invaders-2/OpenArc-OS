@@ -82,6 +82,51 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 - 未验：端到端工具链路（无可用模型 Key）、Windows/Linux、`tools/call` 实际拦截。
 - 完整判定见 `docs/decisions/D1-02-harness.md`。**不因本轮授权任何产品实现。**
 
+### D1-04 组件、视觉系统与性能技术验证（2026-09-11，结论 PARTIAL）
+
+分支 `feature/d1-04-design-performance`。完整 ADR：`docs/decisions/D1-04-design-performance.md`。
+
+**状态：PARTIAL。** 不是"做了一半"，是三条缺口未关闭：性能数字只在 Chromium 取得
+（Electron 内 NOT VERIFIED）、REDUCED 档位只定义未实现、Windows 平台未验证。
+
+已达成：
+
+- 组件基线 **ESTABLISHED**：20 Primitives + 11 Desktop 矩阵；现有 16 个组件逐个定级
+  （IMPLEMENTED 14 / PLACEHOLDER 1 / MISSING 1）；P0 共 17 项，14 已实现、2 PARTIAL。
+- 动效**可采用**：MS-A02（10× 快速开关无残留）、MS-A03 可打断性、A29（token 归零、
+  动画移除、功能仍可用）全部实测通过。
+- 对比度：浅色最低 4.86:1、深色最低 6.77:1，均过 WCAG AA。
+- 性能方法冻结：负载单位为 420×300 玻璃面板，三档材质 × 四档负载。**关键修正——
+  p50 与平均 fps 会被 120Hz vsync 截平，必须看 p95 与 >33ms 长帧数。**
+  实测 FULL 在 24 层时 p95=16.3ms（压 60fps 线），72 层起出长帧；
+  REDUCED 在 24 层 p95=9.2ms、144 层 0 长帧；SOLID 与层数无关。
+
+**Spectrum UI 判定：REFERENCE ONLY，不引入任何源码。**
+三条独立理由：① Spectrum 每个组件都依赖 Tailwind CSS + Motion，OpenArc 是无 Tailwind 的
+纯 CSS token 体系，引入等于换样式范式（被禁止的大重构）；② 目录内混入第三方 MIT 源码
+（Dynamic Island、Toast Stack 页面自述来自 beUI / beui.dev MIT），仓库级是 Apache-2.0 但
+逐文件来源未审计；③ 其定位是 animation-ready SaaS 落地页，与桌面系统的克制动效方向相反。
+仅允许把三条**写法**（switch 交互定义、motion values 只动 transform/opacity、toast 状态
+morph 的 API 形状）写进规范，不抄源码。
+
+**`feature/ui-light-bar-zero` 判定：ADAPT**（方向采纳，两处按实测修正后落地，分支不整体合并）。
+
+- 修正一：`.opaque` 浅色 `--bar` 原值 `#f5f5f7` 不成立——实测顶栏处真实桌面 `#efeff1`、
+  Dock 处 `#e4e4e8`，原值比桌面上限 244 还亮；改为中点 `#e9e9ec`，顶栏带差由约 9 级降到 2.0 级。
+- 修正二：其新增的 `tests/visual-light-bar.mjs` 不进 `tests/`（该目录是 `node --test` 纯逻辑
+  测试目录，脚本依赖 Playwright + 硬编码本地 chromium 路径），同类验证统一放 `experiments/d1-04/`。
+- 深色未被破坏：8 个采样点改前改后像素完全一致，深色对比度 6.77:1 不变。
+
+本轮修复的真实缺陷：**桌面右键菜单无法用 Esc 关闭**（`src/main.tsx`，Escape 分支漏
+`setMenu(null)`，`.menu-shade` 继续拦截全部点击形成功能性陷阱）。已修，验证 1→0。
+
+顺带发现（**未改，等确认**）：深色 `.opaque.dark --bar = #111111`，实测顶栏处真实桌面为
+`#000000`，SOLID 档下会浮出 17 级亮带；建议改 `#000000`，但会触及已验收的深色观感。
+
+D1-04 之后仍需：实现 REDUCED 档（先补 `--glass-blur` / `--glass-saturate`）、
+在 Electron 内重跑 perf2、Windows 复跑——三项都阻塞 D2-01。
+
 ### 待验证（沿用）
 
-首个交付平台、局域网服务部署方式、Adobe 版本兼容性、具体 MCP 安装与授权要求，以及 Spectrum 动效组件与最终桌面技术方案的适配。
+首个交付平台、局域网服务部署方式、Adobe 版本兼容性、具体 MCP 安装与授权要求。
+（Spectrum 适配一项已在 D1-04 结案：REFERENCE ONLY，不再列为待验证。）
