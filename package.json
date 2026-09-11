@@ -10,7 +10,8 @@
     "build": "tsc --noEmit && vite build",
     "test": "node --test tests/*.test.mjs",
     "test:native": "node tests/native-view.mjs",
-    "test:desktop": "npm run build && node tests/desktop.mjs"
+    "test:desktop": "npm run build && node tests/desktop.mjs",
+    "test:security": "node experiments/d1-05/run-all.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
