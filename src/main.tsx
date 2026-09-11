@@ -1,17 +1,23 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
+  ArrowLeft,
   ArrowRight,
+  ArrowUpDown,
   Bot,
   Clock,
   Folder,
   LayoutGrid,
+  List,
   Lock,
   LogOut,
   Monitor,
   Package,
+  Search,
+  Share,
   Sliders,
   Store,
+  Tag,
   User,
   Wand2,
 } from "lucide-react";
@@ -97,6 +103,18 @@ function Switch({ label, checked, onChange }: { label: string; checked: boolean;
   );
 }
 
+/** 文件夹窗口的浏览状态（按 windowId 存）：当前文件夹 / 查看方式 / 搜索 / 排序 / 前进后退历史。
+ *  这些是**窗口内的浏览状态**，不进窗口域 —— 窗口域只管窗口本身。 */
+type FolderUI = {
+  folderId: string;
+  view: "grid" | "list";
+  query: string;
+  sort: "name" | "date" | "size";
+  group: boolean;
+  history: string[];
+  at: number;
+};
+
 function App() {
   const identity = useIdentity();
   /**
@@ -143,6 +161,8 @@ function App() {
   const [settingsTab, setSettingsTab] = useState<"appearance" | "model">("appearance");
   const [appTab, setAppTab] = useState<"all" | "pro" | "recent">("all");
   const [skillTab, setSkillTab] = useState<"market" | "mine" | "installed">("market");
+  const [folderUI, setFolderUI] = useState<Record<string, FolderUI>>({});
+  const [paneMenu, setPaneMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
 
   /**
    * 唯一的命令入口。**组件与未来的 AI 都只能经由它改窗口状态**（§20 / §21）。
@@ -281,37 +301,138 @@ function App() {
   const content = (id: string) => {
     const w = domain.byId(state, id);
     const folder = folderOf(id);
-    if (folder)
+    if (folder) {
+      const ui: FolderUI =
+        folderUI[id] ?? {
+          folderId: folder.id,
+          view: "grid",
+          query: "",
+          sort: "name",
+          group: true,
+          history: [folder.id],
+          at: 0,
+        };
+      const patch = (p: Partial<FolderUI>) => setFolderUI((m) => ({ ...m, [id]: { ...ui, ...p } }));
+      /** 同一窗口内切换文件夹（不新建窗口）：历史栈支持前进/后退。 */
+      const go = (fid: string) => {
+        if (fid === ui.folderId) return;
+        const history = [...ui.history.slice(0, ui.at + 1), fid];
+        patch({ folderId: fid, history, at: history.length - 1, query: "" });
+      };
+      const shown = folders.find((f) => f.id === ui.folderId) ?? folder;
+      /**
+       * 文件服务（D3-04）接入前文件夹里没有真实条目，因此条目集恒为空。
+       * 搜索 / 排序的**代码路径是真实的**，只是当前没有数据可筛 —— 不放假文件。
+       */
+      const q = ui.query.trim().toLowerCase();
+      const openPaneMenu = (x: number, y: number, which: "sort" | "content") => {
+        const sortItems: MenuItem[] = [
+          { id: "s-name", label: "名称", onSelect: () => patch({ sort: "name" }) },
+          { id: "s-date", label: "日期", onSelect: () => patch({ sort: "date" }) },
+          { id: "s-size", label: "大小", onSelect: () => patch({ sort: "size" }) },
+        ];
+        const contentItems: MenuItem[] = [
+          { id: "nf", label: "新建文件夹", disabled: true, onSelect: () => {} },
+          { id: "info", label: "显示简介", disabled: true, onSelect: () => {} },
+          { separator: true },
+          { id: "group", label: ui.group ? "关闭群组" : "使用群组", onSelect: () => patch({ group: !ui.group }) },
+          { id: "s-name", label: "排序方式：名称", onSelect: () => patch({ sort: "name" }) },
+          { id: "s-date", label: "排序方式：日期", onSelect: () => patch({ sort: "date" }) },
+          { id: "s-size", label: "排序方式：大小", onSelect: () => patch({ sort: "size" }) },
+          { separator: true },
+          { id: "vo", label: "查看显示选项", disabled: true, onSelect: () => {} },
+        ];
+        setPaneMenu({ x, y, items: which === "sort" ? sortItems : contentItems });
+      };
       return (
         <div className="split">
           <nav className="split-side" aria-label="桌面文件夹">
             <div className="split-section">桌面</div>
             {folders.map((f) => (
-              <button
-                key={f.id}
-                className="split-nav"
-                aria-current={f.id === folder.id}
-                onClick={() => openFolder(f)}
-              >
+              <button key={f.id} className="split-nav" aria-current={f.id === shown.id} onClick={() => go(f.id)}>
                 <Folder size={16} /> {f.name}
               </button>
             ))}
           </nav>
           <div className="split-main">
             <div className="pane-toolbar">
-              <strong>{folder.name}</strong>
+              <button
+                className="icon-button"
+                aria-label="后退"
+                disabled={ui.at <= 0}
+                onClick={() => patch({ folderId: ui.history[ui.at - 1], at: ui.at - 1, query: "" })}
+              >
+                <ArrowLeft size={15} />
+              </button>
+              <button
+                className="icon-button"
+                aria-label="前进"
+                disabled={ui.at >= ui.history.length - 1}
+                onClick={() => patch({ folderId: ui.history[ui.at + 1], at: ui.at + 1, query: "" })}
+              >
+                <ArrowRight size={15} />
+              </button>
+              <strong className="pane-title">{shown.name}</strong>
+              <div className="toolbar-spacer" />
+              <label className="search-field">
+                <Search size={13} />
+                <input
+                  aria-label="搜索此文件夹"
+                  placeholder="搜索"
+                  value={ui.query}
+                  onChange={(e) => patch({ query: e.target.value })}
+                />
+              </label>
+              <div className="segmented" role="group" aria-label="查看方式">
+                <button aria-pressed={ui.view === "grid"} aria-label="图标" onClick={() => patch({ view: "grid" })}>
+                  <LayoutGrid size={15} />
+                </button>
+                <button aria-pressed={ui.view === "list"} aria-label="列表" onClick={() => patch({ view: "list" })}>
+                  <List size={15} />
+                </button>
+              </div>
+              <button
+                className="icon-button"
+                aria-label="排序方式"
+                aria-haspopup="menu"
+                onClick={(e) => {
+                  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  openPaneMenu(r.left, r.bottom + 4, "sort");
+                }}
+              >
+                <ArrowUpDown size={15} />
+              </button>
+              <button className="icon-button" aria-label="共享" disabled title="文件服务接入后可用">
+                <Share size={15} />
+              </button>
+              <button className="icon-button" aria-label="标签" disabled title="文件服务接入后可用">
+                <Tag size={15} />
+              </button>
             </div>
-            <div className="empty-content">
-              <img className="large-icon" src={icon("folder")} alt="" draggable={false} />
-              <span className="badge">暂无内容</span>
-              <p>
-                文件夹已创建，可重命名、移动和删除。文件本体与跨设备存储属于 D3
-                文件服务范围，本版不显示模拟文件。
-              </p>
+            <div
+              className="folder-body"
+              onContextMenu={(e) => {
+                e.preventDefault();
+                openPaneMenu(e.clientX, e.clientY, "content");
+              }}
+            >
+              <div className="empty-content">
+                <img className="large-icon" src={icon("folder")} alt="" draggable={false} />
+                <span className="badge">{q ? "无匹配项" : "暂无内容"}</span>
+                {q ? (
+                  <p>没有匹配「{ui.query}」的项目。</p>
+                ) : (
+                  <p>
+                    文件夹已创建，可重命名、移动和删除。文件本体与跨设备存储属于 D3
+                    文件服务范围，本版不显示模拟文件。
+                  </p>
+                )}
+              </div>
             </div>
           </div>
         </div>
       );
+    }
     if (w?.appId === "home")
       return (
         <div className="split">
@@ -862,6 +983,15 @@ function App() {
         </div>
       ) : null}
 
+      {paneMenu ? (
+        <ContextMenu
+          x={paneMenu.x}
+          y={paneMenu.y}
+          items={paneMenu.items}
+          onClose={() => setPaneMenu(null)}
+          label="文件夹菜单"
+        />
+      ) : null}
       {menu ? (
         <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} label="桌面菜单" />
       ) : null}

@@ -232,10 +232,10 @@ export function TitleBar({ id, maximized, onCommand, onDragStart }: TitleBarProp
     <div className="window-title" onPointerDown={onDragStart} onDoubleClick={toggleMax}>
       <div className="traffic">
         <button className="close" aria-label={`关闭${id}`} onClick={() => onCommand({ type: "window/close", id })}>
-          <X size={10} />
+          <X size={8} />
         </button>
         <button className="minimize" aria-label={`最小化${id}`} onClick={() => onCommand({ type: "window/minimize", id })}>
-          <Minus size={10} />
+          <Minus size={8} />
         </button>
         <button className="maximize" aria-label={`${maximized ? "还原" : "最大化"}${id}`} onClick={toggleMax}>
           {/* macOS 原生绿色按钮的"双三角"缩放符号，而不是对角箭头 */}
