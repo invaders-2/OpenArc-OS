@@ -1084,6 +1084,9 @@ function App() {
       data-identity-gate={gate}
       onContextMenu={(e) => {
         if (!showDesktop) return;
+        // 只有"桌面本身"才弹桌面菜单（含"新建文件夹"）。
+        // 窗口内部的右键由各窗口自己决定：文件夹有内容菜单，其余窗口不弹。
+        if ((e.target as HTMLElement).closest(".window")) return;
         e.preventDefault();
         setMenu({ x: e.clientX, y: e.clientY });
       }}

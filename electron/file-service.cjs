@@ -68,11 +68,48 @@ function createFileService({ userDataDir }) {
     }
   }
 
+  /** 索引里记录的物理文件名（老数据只有 id）。 */
+  const fileOf = (e) => e.file || String(e.id);
+
   function list(folderId) {
     const dir = dirOf(folderId);
     if (!dir) return { ok: false, error: "INVALID_INPUT" };
     return { ok: true, entries: readIndex(dir) };
   }
+
+  /**
+   * 兼容早期数据：那时把文件存成无扩展名的 <id>，缩略图会退化成系统通用文档图标。
+   * 这里给物理文件补上扩展名并写回索引（幂等、失败不影响读取）。
+   */
+  function migrateLegacyFiles() {
+    let dirs = [];
+    try {
+      dirs = fs.readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory());
+    } catch {
+      return;
+    }
+    for (const d of dirs) {
+      const dir = path.join(root, d.name);
+      const entries = readIndex(dir);
+      let changed = false;
+      for (const e of entries) {
+        if (e.file) continue;
+        const plain = path.join(dir, String(e.id));
+        const target = e.ext ? path.join(dir, e.id + "." + e.ext) : plain;
+        try {
+          if (e.ext && fs.existsSync(plain) && !fs.existsSync(target)) fs.renameSync(plain, target);
+        } catch {
+          /* 迁移失败保持旧路径：读/删仍可用，只是缩略图仍是图标 */
+        }
+        if (fs.existsSync(target)) {
+          e.file = path.basename(target);
+          changed = true;
+        }
+      }
+      if (changed) writeIndex(dir, entries);
+    }
+  }
+  migrateLegacyFiles();
 
   function importPaths(folderId, paths) {
     const dir = dirOf(folderId);
@@ -85,8 +122,12 @@ function createFileService({ userDataDir }) {
         if (!st.isFile()) continue; // 目录暂不支持（需要递归，留给后续）
         const id = "e" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
         const name = uniqueName(entries, path.basename(String(p)));
-        fs.copyFileSync(String(p), path.join(dir, id));
-        const entry = { id, name, ext: extOf(name), size: st.size, mtime: Date.now() };
+        const ext = extOf(name);
+        // **必须带扩展名落盘**：macOS 的 createThumbnailFromPath 靠扩展名判断类型，
+        // 无扩展名时它只返回"通用文档图标"（缩略图就会变成一个白页图标）。
+        const file = id + (ext ? "." + ext : "");
+        fs.copyFileSync(String(p), path.join(dir, file));
+        const entry = { id, name, ext, size: st.size, mtime: Date.now(), file };
         entries.push(entry);
         added.push(entry);
       } catch {
@@ -114,9 +155,10 @@ function createFileService({ userDataDir }) {
     const dir = dirOf(folderId);
     if (!dir) return { ok: false, error: "INVALID_INPUT" };
     const entries = readIndex(dir);
-    if (entries.some((e) => e.id === id)) {
+    const victim = entries.find((e) => e.id === id);
+    if (victim) {
       try {
-        fs.unlinkSync(path.join(dir, String(id)));
+        fs.unlinkSync(path.join(dir, fileOf(victim)));
       } catch {
         /* 文件已不存在也算删除成功 */
       }
@@ -147,11 +189,12 @@ function createFileService({ userDataDir }) {
     const entry = readIndex(dir).find((e) => e.id === id);
     if (!entry) return { ok: false, error: "NOT_FOUND" };
     try {
-      const file = path.join(dir, String(id));
+      const file = path.join(dir, fileOf(entry));
       const st = fs.statSync(file);
       if (st.size > MAX_READ) return { ok: false, error: "TOO_LARGE", entry };
       const buf = fs.readFileSync(file);
-      const mime = MIME[entry.ext] || "application/octet-stream";
+      // MIME 以**物理扩展名**为准（改名不该改变文件真实类型），显示名仅作回退
+      const mime = MIME[extOf(fileOf(entry))] || MIME[entry.ext] || "application/octet-stream";
       const kind = mime.startsWith("image/")
         ? "image"
         : mime.startsWith("video/")
@@ -180,7 +223,7 @@ function createFileService({ userDataDir }) {
     if (!dir) return null;
     const entry = readIndex(dir).find((e) => e.id === id);
     if (!entry) return null;
-    return { path: path.join(dir, String(id)), entry };
+    return { path: path.join(dir, fileOf(entry)), entry };
   }
 
   return { importPaths, list, rename, remove, read, resolve };
