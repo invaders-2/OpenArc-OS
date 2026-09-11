@@ -31,8 +31,6 @@ import {
 // styles.css 全部是消费方。顺序颠倒会让组件拿到未定义的 var()。
 import "./design-system/tokens.css";
 import "./styles.css";
-// 最后引：Tailwind utilities 的优先级要能覆盖被接入的 Spectrum 组件
-import "./tailwind.css";
 import domain from "../electron/window-domain.cjs";
 import type { WindowCommand } from "../electron/window-domain.cjs";
 import { useDesktop } from "./desktop/useDesktop";

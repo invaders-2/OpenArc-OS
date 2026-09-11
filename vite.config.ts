@@ -1,13 +1,10 @@
 import { defineConfig } from "vite";
-import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 
 export default defineConfig({
   base: "./",
-  // Spectrum / shadcn 源码的 Tailwind 通道（见 src/tailwind.css：只上 utilities，不上 preflight）。
-  plugins: [tailwindcss()],
   build: {
     rollupOptions: {
       // 两个入口：
