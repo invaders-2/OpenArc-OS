@@ -1,0 +1,5 @@
+{
+  "name": "oa-d3-02-authz-ui-probe",
+  "private": true,
+  "main": "main.cjs"
+}

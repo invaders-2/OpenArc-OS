@@ -25,6 +25,7 @@ import type { MenuItem } from "./desktop/components";
 import { Dialog } from "./desktop/Dialog";
 import { useIdentity } from "./identity/useIdentity";
 import { BootSurface, LockScreen, LoginScreen, SetupScreen } from "./identity/AuthScreens";
+import { ProtectedResourceFixture } from "./authorization/ProtectedResourceFixture";
 
 type DisplayInfo = {
   id: number;
@@ -44,6 +45,9 @@ declare global {
       identity?: {
         command: (cmd: Record<string, unknown>) => Promise<Record<string, unknown>>;
         onEvent: (cb: (e: { event: string; snapshot?: unknown }) => void) => () => void;
+      };
+      authorization?: {
+        command: (cmd: Record<string, unknown>) => Promise<Record<string, unknown>>;
       };
     };
   }
@@ -628,6 +632,8 @@ function App() {
             bounce("__ai");
           }}
         />
+        {/* D3-02：最小 Protected Resource Fixture。未注入 resourceRef 时返回 null。 */}
+        <ProtectedResourceFixture />
       </div>
 
       {overlays.ai ? (
