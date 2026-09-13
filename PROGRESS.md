@@ -1,6 +1,6 @@
 # OpenArc OS 进度
 
-更新日期：2026-09-12
+更新日期：2026-09-14
 
 最新确认：产品为运行在 Windows/macOS 上的完整独立桌面系统。UI 全局采用 Apple 半透明磨砂玻璃质感，组件与交互动效遵循 https://ui.spectrumhq.in/ 参考方向，覆盖登录、桌面、应用、文件、AI、Skill 和设置。详细要求已写入 PRODUCT.md。
 
@@ -235,7 +235,7 @@ credential store 产品化（API Key / OAuth Token → credentialRef）。
 |---|---|---|
 | **macOS Object Authorization Core** | **PASS** | DEFAULT DENY、Session Gate、Super Admin 治理、Department Membership、Department Admin 边界、No Self Escalation、Delegation Ceiling、稳定 Resource Identity、Resource Scope、Grant/Revoke、App Principal、User∩App 交集、resource.useByAgent、Query Filtering、Anti Enumeration、Stale Capability DENY、Migration Integrity、Unauthorized UI、Manual/AI parity —— 全部实测成立 |
 | **overall** | **PARTIAL** | Windows OS enforcement / Named Pipe / DPAPI / Windows App Identity **NOT VERIFIED**；第三方 App Identity Integrity **NOT VERIFIED**（属 D5） |
-| **Resource Library Planning** | **PLANNED / NOT IMPLEMENTED** | 规划已纳入 PRODUCT.md / docs/plans/LOCAL_RESOURCE_LIBRARY.md；D3-02 只实现 Authorization Core，**资源库本身不得写 PASS** |
+| **Resource Library Planning** | **PLANNED / NOT IMPLEMENTED**（D3-02 时点；当前状态见 # D3-04A） | 规划已纳入 PRODUCT.md / docs/plans/LOCAL_RESOURCE_LIBRARY.md；D3-02 只实现 Authorization Core |
 
 **不得写 Resource Library PASS。不得写双平台 COMPLETE。**
 
@@ -297,7 +297,7 @@ D1-05 OS filesystem sandbox blocker 仍在，D3-02 不关闭。
 |---|---|---|
 | **macOS Device Identity Core** | **PASS** | DeviceId、Registry、状态机、Organization 绑定、Pairing（短时/单次/绑组织/验 Service Identity）、Pairing race（恰好一台）、Replay DENY、到期边界、真 mTLS（12 场景）、证书有效 ≠ 设备授权（两层）、Revocation 立即生效、Disable/Enable 区分、Credential Rotation（版本单调）、跨组织拒绝、冒充防护、Heartbeat 身份绑定、Audit（含 secret 0 命中）、v2→v3 迁移（原子回滚）、Renderer 边界（暴露面 5 → 6 已显式登记）—— 全部真实执行 |
 | **overall** | **PARTIAL** | Windows（Named Pipe ACL / DPAPI / 证书存储 / 设备运行时）**NOT VERIFIED**；Device Agent 生产凭据存储**未实现**（本轮只有测试原型）；X.509 级吊销（CRL/OCSP）未做 |
-| **Resource Library** | **PLANNED / NOT IMPLEMENTED** | D3-03 只交付 `ResourceLocation` 契约与"资源×设备交集"证明，**不得写 Resource Library implemented** |
+| **Resource Library** | **PARTIAL / IMPLEMENTATION IN PROGRESS**（D3-03 时点为 PLANNED；D3-04A 已交付 Store Core） | D3-03 交付 ResourceLocation 契约与"资源×设备交集"证明；D3-04A 交付 Resource Object & Local Store，但完整资源库仍未完成 |
 
 **不得写双平台 COMPLETE。不得写 Resource Library PASS。**
 
@@ -343,6 +343,59 @@ D3-04 才能表达"这个资源在哪里 / 当前用户能不能让这台机器�
 Windows 全部（Named Pipe / DPAPI / 证书存储 / 设备运行时）、Device Agent 生产凭据存储、
 X.509 级吊销（CRL/OCSP）、多级证书链 / IPv6 / wildcard SAN、
 Department Admin 的设备管理（DEFERRED TO POLICY EXTENSION）。
+
+---
+
+# D3-04A 当前状态（唯一口径 · 2026-09-14）
+
+## 1. Task Status
+
+| 口径 | Task Status | 说明 |
+|---|---|---|
+| **macOS Resource Store Core** | **PASS** | Stable ResourceRef、Managed Store、Linked Resource、Content-addressed objects、Dedupe、Import State Machine + Crash Recovery、Large streaming、Version、Version conflict、Trash、Restore、Permanent Delete、GC safety、Integrity、Resource+App authorization、Resource+Device authorization、Restart persistence、Migration、Renderer boundary —— 全部真实执行 |
+| **overall** | **PARTIAL** | Windows 路径语义 / 文件锁 / NTFS / userData **NOT VERIFIED**；远程 Device LINKED content transport 未实现 |
+| **Resource Library** | **PARTIAL / IMPLEMENTATION IN PROGRESS** | D3-04A 只完成 Resource Object & Local Store；CRUD/Collection/Tag、Memory UI、Search/Index/Preview、File/Project/App/Picker 属 D3-04B/C/D，**不得写 COMPLETE** |
+
+**不得写 Resource Library COMPLETE。不得写双平台 COMPLETE。**
+
+## 2. 关键证据（真实执行）
+
+| 入口 | 结果 |
+|---|---|
+| npm test | **307 / 307**（D3-03 基线 248 + D3-04A 新增 59） |
+| npm run build | PASS |
+| npm run test:d3-04a | **4 探针：PASS 4 / PARTIAL 0 / FAIL 0（34 条用例）** |
+| npm run test:resource-ui | **10 / 10 UI checks PASS**（真实 Electron：Import / Link、safe descriptor、绝对路径不泄漏） |
+| large streaming | 10MB external 增量约 11MB / 100MB 约 13MB，均远小于文件大小（无整文件 Buffer） |
+| npm run test:d3-01 / test:d3-02 / test:d3-03 | 见回归证据 |
+
+分支 feature/d3-04a-resource-store，基线 feature/d3-03-device-identity @ 7a94757，未 merge main。
+ADR：docs/decisions/D3-04A-resource-store.md。
+
+## 3. 本轮冻结（不可随意改）
+
+1. **resource_registry 继续是唯一逻辑身份 / 授权权威**；library_resources 只承载存储语义，1:1 共享 resourceId。
+2. **Content Object dedupe ≠ Resource Entry dedupe**：同一内容可以对应多个 Resource（不同 name/Collection/Owner/权限）。
+3. **object 路径只由 checksum 生成**（objects/sha256/ab/<hash>）；用户文件名永不参与最终路径。
+4. **DB 与 FS 之间没有真正 ACID**：Import 用显式状态机 + 可重放 recovery，不写 "atomic transaction"。
+5. **默认 Trash（软删除）**，ResourceRef 保持；restore 同一个 ref。
+6. **Version 单调递增**：replace 产生新版本；restoreVersion 产生更高新版本，不倒退。
+7. **乐观并发**：expectedVersion 不匹配 -> VERSION_CONFLICT，不静默覆盖。
+8. **GC 只在 refs=0 时删 object**；共享内容不得被误删。
+9. **Create 对 target container/scope 授权**（authorizeCreate），不是拿不存在的 resourceId 授权。
+10. **内置 App 也要真实 app grant**（system:builtin-policy）；全局 grant 不覆盖 memory。
+11. **Renderer 无 raw fs**：只有 resource.command；文件选择在主进程 dialog，路径不回渲染进程。
+12. **LINKED 与 Device 是交集**：Device Offline/Revoked 时 metadata 可显示，content 不可读。
+
+## 4. D3-04B 准入
+
+**D3-04B = CONDITIONAL GO。** D3-04A 的 ResourceStore / ResourceService / Import State Machine / Version / Trash / GC / authorizeCreate 已就绪。
+D3-04B 必须复用这些能力，不得重建第二套 ACL 或身份系统。D3-04C Search/Index/Preview、D3-04D Integration 保持 BLOCK，直到 D3-04B 完成。
+
+## 5. 主要缺口
+
+Windows 全部（路径 / 文件锁 / NTFS / userData）；MANAGED symlink TOCTOU 未消除；LINKED symlink 第一版拒绝；
+远程 Device content transport 未实现；完整 Resource Library UI / CRUD / Search / Preview；block-level dedupe；DB 加密-at-rest。
 
 ---
 
