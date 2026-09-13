@@ -23,8 +23,12 @@
 | `/Users/.../OpenArc OS-d3-04a` | `feature/d3-04a-resource-store` | 对话 C | D3-04A 资源存储 | 干净 |
 | `/Users/.../OpenArc OS-d3-04b` | `feature/d3-04b-resource-library` | 对话 D | D3-04B 资源库 CRUD | 有未提交改动 |
 
-> 备注：`/tmp/oa-wt` 里当前有 **不属于对话 A** 的改动（`src/desktop/components.tsx` + 新增
-> `src/desktop/useDockMagnify.ts`）。对话 A 未提交也未回退它们；请归属方认领后再决定去留。
+> 备注（已解决）：`/tmp/oa-wt` 曾出现两份**不属于对话 A** 的文件（`src/desktop/components.tsx` 改动 +
+> 新增 `src/desktop/useDockMagnify.ts`）。经查它们是**同一改动的另一半**：已提交的 `main.tsx`
+> 早已传 `reduced` 给 `<Dock>`，缺了这半份分支 HEAD **编译不过**。
+> 对话 A 按原样提交（`f9660ef`，无代码改动、注明来源），该 worktree 现已干净、该分支可从未提交状态之外干净构建。
+> **教训**：半边提交必须当场补完 —— 否则"别人的 WIP"其实是"自己分支坏了"。
+> 由 `npm run oa:status` 自动检查（干净工作目录 + 干净检出构建）可提前发现。
 
 ## 3. 两个入口
 
