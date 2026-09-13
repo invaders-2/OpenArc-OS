@@ -91,9 +91,10 @@ app.whenReady().then(() => {
       // 灯组 y 的三次实测口径（顶栏 38px，DOM 内容中心实测 = 19）：
       //   y=16 → 灯心 22（偏低 3px，用户第一次反馈"没居中"）
       //   y=13 → 灯心 19（几何正中，用户第二次反馈"有点偏上"）
-      //   y=15 → 灯心 21（低 2px，用户仍觉偏高）
-      //   y=17 → 灯心 23（低 4px）—— 当前值，用户口径优先于几何中心。
-      ? { titleBarStyle: "hidden", trafficLightPosition: { x: 20, y: 17 } }
+      //   y=15 → 低 2px；y=17 → **实测偏低 5px**（用户截图量出：彩点中心 41.5 vs 图标 31.5 @2x）
+      //   y=12 → 反推回正（= macOS 14px 按钮框的几何值 (38-14)/2）—— 当前值。
+      // 教训：这类"看起来正不正"的问题必须用**用户真实窗口的截图**量，不能靠几何推算。
+      ? { titleBarStyle: "hidden", trafficLightPosition: { x: 20, y: 12 } }
       : { frame: false }),
     ...glass,
     webPreferences: {
