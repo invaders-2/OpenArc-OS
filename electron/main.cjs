@@ -91,8 +91,9 @@ app.whenReady().then(() => {
       // 灯组 y 的三次实测口径（顶栏 38px，DOM 内容中心实测 = 19）：
       //   y=16 → 灯心 22（偏低 3px，用户第一次反馈"没居中"）
       //   y=13 → 灯心 19（几何正中，用户第二次反馈"有点偏上"）
-      //   y=15 → 灯心 21（比几何中心低 2px）—— 两次反馈的中间值，用户口径优先。
-      ? { titleBarStyle: "hidden", trafficLightPosition: { x: 20, y: 15 } }
+      //   y=15 → 灯心 21（低 2px，用户仍觉偏高）
+      //   y=17 → 灯心 23（低 4px）—— 当前值，用户口径优先于几何中心。
+      ? { titleBarStyle: "hidden", trafficLightPosition: { x: 20, y: 17 } }
       : { frame: false }),
     ...glass,
     webPreferences: {
