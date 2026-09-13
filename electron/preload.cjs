@@ -44,4 +44,16 @@ contextBridge.exposeInMainWorld("openarc", {
       return () => ipcRenderer.removeListener("identity:event", listener);
     },
   },
+
+  /**
+   * D3-02 对象授权桥。
+   *
+   * **只有一条只读能力**：下发授权查询命令。治理写操作（grant / revoke）不在桥上。
+   * 这里没有暴露任何 Resource DB、Grant DB、SQL 或 session token ——
+   * 渲染进程能拿到的只有本次授权的 decision / capabilities / safe metadata。
+   * sessionRef 由主进程从 IdentityService 注入，渲染进程无法伪造身份。
+   */
+  authorization: {
+    command: (command) => ipcRenderer.invoke("authorization:command", command),
+  },
 });

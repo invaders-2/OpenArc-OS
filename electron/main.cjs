@@ -93,6 +93,7 @@ app.whenReady().then(() => {
   registerIdentityIpc({
     ipcMain,
     service: identity.service,
+    authorization: identity.authorization,
     isTrusted: trusted,
     send: (event) => {
       if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return;

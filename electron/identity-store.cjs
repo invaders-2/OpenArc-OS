@@ -44,8 +44,14 @@ const passwords = require("./password.cjs");
 
 const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domain;
 
-/** 当前 schema 版本。**第一版就是 1**（§29）：不留"先上线后补版本号"的债。 */
-const SCHEMA_VERSION = 1;
+/**
+ * 当前 schema 版本。
+ *
+ * D3-01 = v1（identity）；D3-02 = v2（object authorization）。
+ * 迁移按版本逐级前进，每一级各自是一个原子事务：任何一级失败只回滚该级，
+ * 不会留下"user_version 已升级但表不完整"的半状态（§55）。
+ */
+const SCHEMA_VERSION = 2;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -136,6 +142,175 @@ CREATE TABLE audit_log (
 CREATE INDEX idx_audit_at ON audit_log(at);
 `;
 
+/**
+ * D3-02 v2：对象授权 schema。
+ *
+ * 这里只保存**授权所需的身份信息**（Resource Registry），不是 Resource Library
+ * 内容数据库：内容、文件路径、thumbnail、媒体 metadata 属 D3-04。
+ *
+ * 数据库级约束（§56）：
+ *   · resource_registry.resource_id PRIMARY KEY      → 稳定 ResourceRef 唯一
+ *   · departments (organization_id, name) UNIQUE      → 部门身份唯一
+ *   · department_memberships (department_id, user_id) UNIQUE → 成员唯一
+ *   · resource_grants / app_resource_grants 多列 UNIQUE → Grant 不产生不可解释重复
+ *   · departments (id, organization_id) UNIQUE + 复合外键 → organization consistency
+ *   · 目标字段一律 NOT NULL DEFAULT ''（不用 NULL）→ UNIQUE 在 SQLite 里才对 NULL 生效
+ */
+const SCHEMA_V2_SQL = `
+CREATE TABLE departments (
+  id              TEXT PRIMARY KEY,
+  organization_id TEXT NOT NULL,
+  name            TEXT NOT NULL,
+  description     TEXT NOT NULL DEFAULT '',
+  status          TEXT NOT NULL CHECK (status IN ('ACTIVE','DISABLED')) DEFAULT 'ACTIVE',
+  created_by      TEXT,
+  created_at      INTEGER NOT NULL,
+  updated_at      INTEGER NOT NULL,
+  UNIQUE (organization_id, name),
+  UNIQUE (id, organization_id)
+);
+
+CREATE TABLE department_memberships (
+  id              TEXT PRIMARY KEY,
+  department_id   TEXT NOT NULL,
+  organization_id TEXT NOT NULL,
+  user_id         TEXT NOT NULL REFERENCES users(id),
+  membership_role TEXT NOT NULL CHECK (membership_role IN ('department-admin','member')),
+  status          TEXT NOT NULL CHECK (status IN ('ACTIVE','DISABLED')) DEFAULT 'ACTIVE',
+  created_at      INTEGER NOT NULL,
+  updated_at      INTEGER NOT NULL,
+  UNIQUE (department_id, user_id),
+  FOREIGN KEY (department_id, organization_id) REFERENCES departments(id, organization_id)
+);
+CREATE INDEX idx_dept_members_user ON department_memberships(user_id);
+CREATE INDEX idx_dept_members_dept ON department_memberships(department_id);
+
+CREATE TABLE collections (
+  id              TEXT PRIMARY KEY,
+  organization_id TEXT NOT NULL,
+  department_id   TEXT,
+  owner_user_id   TEXT,
+  name            TEXT NOT NULL,
+  description     TEXT NOT NULL DEFAULT '',
+  scope           TEXT NOT NULL CHECK (scope IN ('PERSONAL','DEPARTMENT','ORGANIZATION')),
+  status          TEXT NOT NULL CHECK (status IN ('active','disabled','deleted')) DEFAULT 'active',
+  created_at      INTEGER NOT NULL,
+  updated_at      INTEGER NOT NULL
+);
+CREATE INDEX idx_collections_org ON collections(organization_id);
+
+CREATE TABLE resource_registry (
+  resource_id        TEXT PRIMARY KEY,
+  resource_type      TEXT NOT NULL,
+  owner_user_id      TEXT,
+  organization_id    TEXT NOT NULL,
+  department_id      TEXT,
+  collection_id      TEXT,
+  scope              TEXT NOT NULL CHECK (scope IN ('PERSONAL','DEPARTMENT','ORGANIZATION')),
+  parent_resource_id TEXT,
+  name               TEXT NOT NULL DEFAULT '',
+  description        TEXT NOT NULL DEFAULT '',
+  tags               TEXT NOT NULL DEFAULT '[]',
+  version            INTEGER NOT NULL DEFAULT 1,
+  status             TEXT NOT NULL CHECK (status IN ('active','disabled','deleted')) DEFAULT 'active',
+  created_at         INTEGER NOT NULL,
+  updated_at         INTEGER NOT NULL,
+  FOREIGN KEY (department_id, organization_id) REFERENCES departments(id, organization_id),
+  FOREIGN KEY (collection_id) REFERENCES collections(id)
+);
+CREATE INDEX idx_registry_org ON resource_registry(organization_id);
+CREATE INDEX idx_registry_dept ON resource_registry(department_id);
+CREATE INDEX idx_registry_collection ON resource_registry(collection_id);
+CREATE INDEX idx_registry_type ON resource_registry(resource_type);
+CREATE INDEX idx_registry_owner ON resource_registry(owner_user_id);
+
+CREATE TABLE resource_grants (
+  id              TEXT PRIMARY KEY,
+  principal_type  TEXT NOT NULL CHECK (principal_type IN ('USER','DEPARTMENT')),
+  principal_id    TEXT NOT NULL,
+  resource_id     TEXT NOT NULL DEFAULT '',
+  collection_id   TEXT NOT NULL DEFAULT '',
+  resource_type   TEXT NOT NULL DEFAULT '',
+  department_id   TEXT NOT NULL DEFAULT '',
+  scope           TEXT NOT NULL DEFAULT '',
+  actions         TEXT NOT NULL,
+  permission_set  TEXT,
+  granted_by      TEXT,
+  organization_id TEXT NOT NULL,
+  created_at      INTEGER NOT NULL,
+  updated_at      INTEGER NOT NULL,
+  UNIQUE (principal_type, principal_id, resource_id, collection_id, resource_type, department_id, scope)
+);
+CREATE INDEX idx_rgrants_principal ON resource_grants(principal_type, principal_id);
+CREATE INDEX idx_rgrants_resource ON resource_grants(resource_id);
+CREATE INDEX idx_rgrants_collection ON resource_grants(collection_id);
+
+CREATE TABLE app_principals (
+  app_id     TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
+  publisher  TEXT NOT NULL DEFAULT 'openarc-builtin',
+  status     TEXT NOT NULL CHECK (status IN ('enabled','disabled')) DEFAULT 'enabled',
+  built_in   INTEGER NOT NULL DEFAULT 1 CHECK (built_in IN (0,1)),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE app_resource_grants (
+  id              TEXT PRIMARY KEY,
+  app_id          TEXT NOT NULL REFERENCES app_principals(app_id),
+  resource_id     TEXT NOT NULL DEFAULT '',
+  collection_id   TEXT NOT NULL DEFAULT '',
+  resource_type   TEXT NOT NULL DEFAULT '',
+  department_id   TEXT NOT NULL DEFAULT '',
+  scope           TEXT NOT NULL DEFAULT '',
+  actions         TEXT NOT NULL,
+  granted_by      TEXT,
+  organization_id TEXT NOT NULL,
+  created_at      INTEGER NOT NULL,
+  expires_at      INTEGER,
+  UNIQUE (app_id, resource_id, collection_id, resource_type, department_id, scope)
+);
+CREATE INDEX idx_agrants_app ON app_resource_grants(app_id);
+
+CREATE TABLE authorization_audit (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  at                INTEGER NOT NULL,
+  actor_user_id     TEXT,
+  target_user_id    TEXT,
+  app_id            TEXT,
+  department_id     TEXT,
+  resource_ref      TEXT,
+  action            TEXT NOT NULL,
+  decision          TEXT NOT NULL,
+  reason_code       TEXT,
+  permission_source TEXT,
+  request_id        TEXT,
+  old_permissions   TEXT,
+  new_permissions   TEXT
+);
+CREATE INDEX idx_authz_audit_at ON authorization_audit(at);
+CREATE INDEX idx_authz_audit_actor ON authorization_audit(actor_user_id);
+
+INSERT INTO app_principals (app_id, name, publisher, status, built_in, created_at, updated_at)
+VALUES
+  ('resource-library','资源库','openarc-builtin','enabled',1,0,0),
+  ('canvas','无限画布','openarc-builtin','enabled',1,0,0),
+  ('browser','浏览器','openarc-builtin','enabled',1,0,0),
+  ('ai','全局 AI','openarc-builtin','enabled',1,0,0),
+  ('image-generator','图像生成','openarc-builtin','enabled',1,0,0),
+  ('video-generator','视频生成','openarc-builtin','enabled',1,0,0),
+  ('photoshop','Photoshop','openarc-builtin','enabled',1,0,0),
+  ('illustrator','Illustrator','openarc-builtin','enabled',1,0,0),
+  ('mcp-center','MCP 中心','openarc-builtin','enabled',1,0,0),
+  ('skill-runtime','技能运行时','openarc-builtin','enabled',1,0,0);
+`;
+
+/** 迁移阶梯。新增 version 时把新 schema 追加在末尾，不改旧条目。 */
+const MIGRATIONS = Object.freeze([
+  { version: 1, sql: SCHEMA_SQL },
+  { version: 2, sql: SCHEMA_V2_SQL },
+]);
+
 const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000; // 12h 绝对上限
 const DEFAULT_IDLE_MS = 2 * 60 * 60 * 1000; //  2h 空闲上限
 const BUSY_RETRY = { attempts: 5, baseDelayMs: 15 };
@@ -220,13 +395,18 @@ class IdentityStore {
   #migrate() {
     const current = this.schemaVersion;
     if (current > SCHEMA_VERSION)
-      throw new Error(`身份库 schema_version=${current} 高于本程序支持的 ${SCHEMA_VERSION}，拒绝打开。`);
+      throw new Error("身份库 schema_version=" + current + " 高于本程序支持的 " + SCHEMA_VERSION + "，拒绝打开。");
     if (current === SCHEMA_VERSION) return;
-    this.transactSync(() => {
-      this.db.exec(SCHEMA_SQL);
-      // user_version 不能用占位符，只能整句拼；值是本文件常量，无注入面。
-      this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
-    });
+    for (const migration of MIGRATIONS) {
+      if (migration.version <= current) continue;
+      this.transactSync(() => {
+        this.db.exec(migration.sql);
+        // 失败注入点：测试用它制造"DDL 已执行、版本尚未 bump"的崩溃，验证整级回滚。
+        if (this.hooks.onMigration) this.hooks.onMigration(migration.version, this.db);
+        // user_version 不能用占位符，只能整句拼；值是本文件常量，无注入面。
+        this.db.exec("PRAGMA user_version = " + migration.version);
+      });
+    }
   }
 
   /** 同步事务：只给迁移用（迁移里没有任何 await）。 */
@@ -258,9 +438,17 @@ class IdentityStore {
     const run = async () => {
       this.db.exec("BEGIN IMMEDIATE");
       try {
-        const out = await fn();
+        // 关键：同步事务体绝不在 BEGIN 与 COMMIT 之间 yield。
+        // 否则另一条连接执行 BEGIN IMMEDIATE 会同步阻塞在 busy_timeout 上，
+        // 事件循环被占住，第一条连接永远无法 COMMIT —— 两连接互等 5s 后 SQLITE_BUSY。
+        // 只有真正返回 Promise 的体（或 hook）才 await。
+        let out = fn();
+        if (out && typeof out.then === "function") out = await out;
         // 测试注入点：在 COMMIT 之前 yield，用来制造真实的交错窗口（§5）
-        if (this.hooks.beforeCommit) await this.hooks.beforeCommit(this);
+        if (this.hooks.beforeCommit) {
+          const gate = this.hooks.beforeCommit(this);
+          if (gate && typeof gate.then === "function") await gate;
+        }
         this.db.exec("COMMIT");
         return out;
       } catch (e) {
@@ -510,6 +698,99 @@ class IdentityStore {
       this.audit("initialize", { result: "ERROR", errorCode: ERROR.INTERNAL_ERROR });
       return domain.fail(ERROR.INTERNAL_ERROR, isBusy(e) ? "busy" : "transaction-failed");
     }
+  }
+
+  /**
+   * D3-02：由 Super Admin governance 层调用，创建子用户。
+   *
+   * 与 initialize 同一原则：KDF 在事务之前算完；identifier 唯一性由 DB 约束兜底，
+   * 事务内再查一次只是为了给出可读错误码。disable / enable 复用 D3-01 的 setUserStatus。
+   */
+  async createUser({ identifier, password, displayName, role = "MEMBER", teamId = null } = {}) {
+    const started = this.clock();
+    const idCheck = domain.validateIdentifier(identifier);
+    if (!idCheck.ok) {
+      this.audit("create-user", { result: "DENY", errorCode: idCheck.error });
+      return idCheck;
+    }
+    const nameCheck = domain.validateDisplayName(displayName);
+    if (!nameCheck.ok) {
+      this.audit("create-user", { result: "DENY", errorCode: nameCheck.error });
+      return nameCheck;
+    }
+    const pwCheck = passwords.validatePassword(password);
+    if (!pwCheck.ok) {
+      this.audit("create-user", { result: "DENY", errorCode: pwCheck.error });
+      return domain.fail(pwCheck.code, pwCheck.reason);
+    }
+    const inst = this.installation();
+    if (!inst || inst.status !== INIT.READY) return domain.fail(ERROR.NOT_INITIALIZED);
+    const userRole = role === "ADMIN" ? "ADMIN" : "MEMBER";
+    let verifier;
+    try {
+      verifier = await passwords.createVerifier(password);
+    } catch {
+      this.audit("create-user", { result: "ERROR", errorCode: ERROR.INTERNAL_ERROR });
+      return domain.fail(ERROR.INTERNAL_ERROR, "kdf-failed");
+    }
+    try {
+      return await this.#withBusyRetry(() =>
+        this.transact(() => {
+          if (this.userByIdentifier(idCheck.identifier)) {
+            this.audit("create-user", { result: "DENY", errorCode: ERROR.INVALID_INPUT });
+            return domain.fail(ERROR.INVALID_INPUT, "identifier-taken");
+          }
+          const targetTeam = teamId || this.db.prepare("SELECT id FROM teams WHERE root = 1").get()?.id;
+          if (!targetTeam) return domain.fail(ERROR.INTERNAL_ERROR, "no-team");
+          const now = this.clock();
+          const userId = domain.newId("USER");
+          this.db
+            .prepare(
+              `INSERT INTO users (id, installation_id, team_id, identifier, display_name, role, status,
+                                  auth_version, password_algo, password_params, password_salt, password_hash,
+                                  password_version, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE', 1, ?, ?, ?, ?, 1, ?, ?)`,
+            )
+            .run(
+              userId,
+              inst.id,
+              targetTeam,
+              idCheck.identifier,
+              nameCheck.displayName,
+              userRole,
+              verifier.algo,
+              JSON.stringify(verifier.params),
+              verifier.salt,
+              passwords.encodeVerifier(verifier),
+              now,
+              now,
+            );
+          this.audit("create-user", { userId, result: "OK", durationMs: this.clock() - started });
+          return domain.ok({ userId, identifier: idCheck.identifier, teamId: targetTeam, role: userRole });
+        }),
+      );
+    } catch (e) {
+      this.audit("create-user", { result: "ERROR", errorCode: ERROR.INTERNAL_ERROR });
+      return domain.fail(ERROR.INTERNAL_ERROR, isBusy(e) ? "busy" : "transaction-failed");
+    }
+  }
+
+  /** Super Admin 调整用户角色。角色变化下一请求即刻生效（authorize 每次重读 user 行）。 */
+  setUserRole(userId, role) {
+    const r = String(role || "").toUpperCase();
+    if (r !== USER_ROLE.ADMIN && r !== USER_ROLE.MEMBER) return domain.fail(ERROR.INVALID_INPUT, "role-unknown");
+    const user = this.userById(userId);
+    if (!user) return domain.fail(ERROR.INVALID_INPUT, "user-not-found");
+    if (user.role === r) return domain.ok({ user, changed: false });
+    this.transactSync(() => {
+      this.db.prepare("UPDATE users SET role = ?, updated_at = ? WHERE id = ?").run(r, this.clock(), userId);
+    });
+    return domain.ok({ user: this.userById(userId), changed: true });
+  }
+
+  /** 暴露底层连接：AuthorizationStore 与 IdentityStore 共享**同一个**数据库权威。 */
+  get connection() {
+    return this.db;
   }
 
   // -------------------------------------------------------------------------
@@ -1119,9 +1400,11 @@ class IdentityStore {
 }
 
 module.exports = {
-  IdentityStore,
   SCHEMA_VERSION,
   SCHEMA_SQL,
+  SCHEMA_V2_SQL,
+  MIGRATIONS,
+  IdentityStore,
   DEFAULT_TTL_MS,
   DEFAULT_IDLE_MS,
   openDatabase,
