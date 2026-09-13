@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, safeStorage, screen, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, safeStorage, screen, dialog, protocol, nativeImage } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const { pathToFileURL } = require("node:url");
@@ -12,6 +12,12 @@ let controller;
 let identity;
 
 const uiURL = pathToFileURL(path.join(__dirname, "../dist/index.html")).href;
+
+// D3-04C：安全预览自定义协议。**必须在 app ready 之前**注册 privileges。
+// Renderer 只能拿到 openarc-resource:// 短时 capability URL，绝不接触本地路径。
+protocol.registerSchemesAsPrivileged([
+  { scheme: "openarc-resource", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: false } },
+]);
 
 /** 只接受来自本应用外壳页的调用。
  * 双重条件（sender + senderFrame.url）在 D1-05 冻结，本阶段不放宽。
@@ -86,6 +92,7 @@ app.whenReady().then(() => {
   identity = createIdentityService({
     userDataDir: app.getPath("userData"),
     safeStorage,
+    nativeImage,
     // admin / 测试夹具命令默认关闭：产品 UI 里没有入口，也不该有。
     // 只有显式置 OPENARC_IDENTITY_ADMIN=1 才放行（探针与未来的管理端用）。
     allowAdmin: process.env.OPENARC_IDENTITY_ADMIN === "1",
@@ -100,6 +107,8 @@ app.whenReady().then(() => {
     device: identity.deviceService,
     // D3-04A：资源命令。导入/链接的文件选择在主进程完成，路径不回渲染进程。
     resource: identity.resourceService,
+    resourceSearch: identity.searchService,
+    resourcePreview: identity.previewService,
     dialog,
     BrowserWindow,
     isTrusted: trusted,
@@ -108,6 +117,9 @@ app.whenReady().then(() => {
       win.webContents.send("identity:event", event);
     },
   });
+
+  // D3-04C：注册安全预览协议 handler（每次请求重新授权 + Range 流式返回）。
+  protocol.handle("openarc-resource", (request) => identity.previewService.handleProtocolRequest(request));
 
   // ---------------------------------------------------------------------------
   // 原生视图控制器。它不拥有任何 Window domain 业务规则 ——
