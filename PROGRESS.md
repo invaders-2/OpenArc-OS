@@ -1,6 +1,6 @@
 # OpenArc OS 进度
 
-更新日期：2026-09-11
+更新日期：2026-09-12
 
 最新确认：产品为运行在 Windows/macOS 上的完整独立桌面系统。UI 全局采用 Apple 半透明磨砂玻璃质感，组件与交互动效遵循 https://ui.spectrumhq.in/ 参考方向，覆盖登录、桌面、应用、文件、AI、Skill 和设置。详细要求已写入 PRODUCT.md。
 
@@ -67,7 +67,7 @@
 | --- | --- |
 | D2-01 设计规范 | **CONDITIONAL GO** |
 | D2-02 窗口系统 | **CONDITIONAL GO**（仅 macOS；须同时出架构 ADR） |
-| D2-03 搜索与通知 | **BLOCK**（前置 D3-02 不存在） |
+| D2-03 搜索与通知 | **CONDITIONAL GO**（D3-02 授权契约已就绪；尚未执行） |
 | D2-04 页面状态 | **CONDITIONAL GO**（无权态留待 D3-02） |
 | D3-01 初始化与身份 | **CONDITIONAL GO** |
 | D3-02 对象授权 | **CONDITIONAL GO** |
@@ -224,6 +224,68 @@ D3-01 只回答「你是谁 / session 是否有效」。D3-02 的对象权限必
 
 Windows 真机（credential backend + UI + DPAPI）、身份库备份/迁移/恢复策略、admin UI、
 credential store 产品化（API Key / OAuth Token → credentialRef）。
+
+---
+
+# D3-02 当前状态（唯一口径 · 2026-09-12）
+
+## 1. Task Status
+
+| 口径 | Task Status | 说明 |
+|---|---|---|
+| **macOS Object Authorization Core** | **PASS** | DEFAULT DENY、Session Gate、Super Admin 治理、Department Membership、Department Admin 边界、No Self Escalation、Delegation Ceiling、稳定 Resource Identity、Resource Scope、Grant/Revoke、App Principal、User∩App 交集、resource.useByAgent、Query Filtering、Anti Enumeration、Stale Capability DENY、Migration Integrity、Unauthorized UI、Manual/AI parity —— 全部实测成立 |
+| **overall** | **PARTIAL** | Windows OS enforcement / Named Pipe / DPAPI / Windows App Identity **NOT VERIFIED**；第三方 App Identity Integrity **NOT VERIFIED**（属 D5） |
+| **Resource Library Planning** | **PLANNED / NOT IMPLEMENTED** | 规划已纳入 PRODUCT.md / docs/plans/LOCAL_RESOURCE_LIBRARY.md；D3-02 只实现 Authorization Core，**资源库本身不得写 PASS** |
+
+**不得写 Resource Library PASS。不得写双平台 COMPLETE。**
+
+## 2. 关键证据（真实执行）
+
+| 入口 | 结果 |
+|---|---|
+| npm test | **193 / 193**（D3-01 基线 96 + D3-02 新增 97） |
+| npm run build | PASS |
+| npm run test:d3-02 | **6 探针：PASS 6 / PARTIAL 0 / FAIL 0（56 条用例）** |
+| npm run test:authorization-ui | **14 / 14**（真实 Electron 44.3.0：Viewer 只读 / 无权限 Unauthorized / bridge 防枚举） |
+| npm run test:d3-01 | D3-01 回归（12 探针） |
+| npm run test:identity-ui | **24 / 24**（真实 Electron） |
+| npm run test:d2-02 | PASS（security-surface 暴露面 6 → 7 已显式登记） |
+| npm run test:design-system | 与基线一致 |
+| npm run test:theme-baseline | 与基线一致 |
+| npm run test:security | 与基线一致（未扩大 Credential / IPC / Renderer 暴露面） |
+
+分支 feature/d3-02-object-authorization，基线 8b46eb4（feature/resource-library-planning），未 merge main。
+ADR：docs/decisions/D3-02-object-authorization.md。
+
+## 3. 本轮冻结（不可随意改）
+
+1. **DEFAULT DENY + ADDITIVE ALLOW**；Policy Version = d3-02-v1，暂不引入 Explicit Deny。
+2. **Principal = USER / DEPARTMENT / APP**；DEVICE 属 D3-03，本轮不实现。
+3. **User ∩ App 铁律**：User ALLOW + App DENY → DENY；User DENY + App ALLOW → DENY；两者同时 ALLOW → ALLOW。
+4. **resource.useByAgent 必须独立授予**，不包含在任何常规 Permission Set 中。
+5. **source（manual/ui/agent/system）只进 Audit，不参与提权**；Agent 语义只由 agentSessionId / agent 标记触发。
+6. **Resource 身份 = resourceId / ResourceRef**，绝不用文件名 / 路径 / 显示名 / 下标。
+7. **Memory 默认高敏**：普通第三方 App 默认 DENY，全局 App grant 也不覆盖 memory。
+8. **授权无进程内缓存**：Revoke 下一请求立即生效，不需重登 / 重启。
+9. **Super Admin ≠ Credential Secret**：治理权限与原始凭据完全分开。
+10. **迁移逐级原子**：v1 → v2 任一级失败整级回滚，不留半状态。
+
+## 4. D2-03 准入
+
+D3-02 已交付 authorize / getCapabilities / searchAuthorizedResources / listAuthorizedResources /
+resolveResourceRef / notificationReauthorize。D2-03 搜索与通知的授权契约前置已满足 →
+**D2-03 = CONDITIONAL GO（尚未执行）**；但 D2-03 仍须复用这些服务端接口，不得在 Renderer 重新过滤。
+
+## 5. 下一步（不自动执行）
+
+D3-03 Device Identity / TLS → D3-04A/B/C/D Resource Library → D3-05 → D4-02 → D4-03 → D5。
+**不跳过 D3-02 直接开发资源库。**
+
+## 6. 主要缺口
+
+Windows OS enforcement / Named Pipe / DPAPI / App Identity；第三方 App Integrity（D5）；
+Resource Library 内容与 CRUD（D3-04）；Embedding；Department / Super Admin 权限管理 UI（本轮只交付服务层 + 最小 Unauthorized fixture）；
+D1-05 OS filesystem sandbox blocker 仍在，D3-02 不关闭。
 
 ---
 
