@@ -288,6 +288,34 @@ class AuthorizationService {
   }
 
   /**
+   * D3-04C：一次 prepare，批量判定多个 Resource 的同一 action。
+   *
+   * 用于搜索候选的**服务端授权过滤**：不把 FTS 全量结果交给 Renderer/Agent 再过滤，
+   * 也不为每个候选单独 prepare。返回每个 resourceId 的 decision/reasonCode。
+   * 普通搜索不逐条写安全 Audit（§97）；敏感动作仍走 authorize()。
+   */
+  authorizeMany({ context, application, resources = [], action = ACTION.SEARCH, agent } = {}) {
+    const act = String(action || ACTION.SEARCH);
+    const prepared = this.#prepare(context, application);
+    if (!prepared.ok) return { ok: false, error: externalReason(prepared.reason), challenge: prepared.challenge || null, results: [] };
+    if (!RESOURCE_ACTIONS.includes(act)) return { ok: false, error: REASON.INVALID_INPUT, results: [] };
+    const results = (resources || []).map((input) => {
+      const row = this.#resourceFromInput(input);
+      if (!row) return { resourceId: null, decision: DECISION.DENY, reasonCode: REASON.NOT_FOUND_OR_FORBIDDEN };
+      const d = this.#decide(prepared, row, act, { agent });
+      return {
+        resourceId: row.resource_id,
+        decision: d.decision,
+        reasonCode: d.decision === DECISION.ALLOW ? "ALLOW" : externalReason(d.reasonCode),
+        userActions: d.userActions || [],
+        appActions: d.appActions || [],
+        effectivePermissions: d.effectivePermissions || [],
+      };
+    });
+    return { ok: true, policyVersion: POLICY_VERSION, action: act, results };
+  }
+
+  /**
    * D3-04B Inspector：分别给出 User 侧 / App 侧 / 有效交集的能力集合。
    * 与 getCapabilities 不同，这里**即使当前离线也返回两侧集合**，用于权限说明展示。
    */

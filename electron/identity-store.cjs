@@ -51,7 +51,7 @@ const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domai
  * 迁移按版本逐级前进，每一级各自是一个原子事务：任何一级失败只回滚该级，
  * 不会留下"user_version 已升级但表不完整"的半状态（§55）。
  */
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -578,6 +578,74 @@ ALTER TABLE library_resources ADD COLUMN language TEXT;
 ALTER TABLE library_resources ADD COLUMN attributes TEXT NOT NULL DEFAULT '{}';
 `;
 
+/**
+ * D3-04C v6：本地授权搜索 / 索引 / 预览缓存。
+ *
+ * resource_search_docs + resource_search_fts + resource_index_jobs + resource_preview_cache 都是**派生数据**，
+ * 不是 Resource Identity 权威；它们可以随时从 resource_registry / library_resources / resource_versions 重建。
+ * CJK 由 JS 控制的分词（unigram + bigram）写入 token 列，unicode61 只做分词容器。
+ */
+const SCHEMA_V6_SQL = `
+CREATE TABLE resource_search_docs (
+  resource_id       TEXT PRIMARY KEY REFERENCES resource_registry(resource_id) ON DELETE CASCADE,
+  resource_version  INTEGER NOT NULL,
+  content_checksum  TEXT,
+  index_version     INTEGER NOT NULL DEFAULT 1,
+  index_status      TEXT NOT NULL CHECK (index_status IN ('PENDING','INDEXING','READY','STALE','NO_TEXT','UNAVAILABLE','FAILED')) DEFAULT 'PENDING',
+  name              TEXT NOT NULL DEFAULT '',
+  description       TEXT NOT NULL DEFAULT '',
+  tags_text         TEXT NOT NULL DEFAULT '',
+  collection_name   TEXT NOT NULL DEFAULT '',
+  content_text      TEXT NOT NULL DEFAULT '',
+  content_truncated INTEGER NOT NULL DEFAULT 0,
+  indexed_at        INTEGER,
+  error_code        TEXT,
+  updated_at        INTEGER NOT NULL
+);
+CREATE INDEX idx_search_docs_status ON resource_search_docs(index_status);
+CREATE INDEX idx_search_docs_version ON resource_search_docs(resource_id, resource_version);
+
+CREATE VIRTUAL TABLE resource_search_fts USING fts5(
+  resource_id UNINDEXED,
+  index_version UNINDEXED,
+  name_tokens,
+  description_tokens,
+  tag_tokens,
+  collection_tokens,
+  content_tokens,
+  tokenize = 'unicode61'
+);
+
+CREATE TABLE resource_index_jobs (
+  id               TEXT PRIMARY KEY,
+  resource_id      TEXT NOT NULL,
+  resource_version INTEGER NOT NULL,
+  state            TEXT NOT NULL CHECK (state IN ('QUEUED','RUNNING','DONE','FAILED','CANCELLED')) DEFAULT 'QUEUED',
+  attempts         INTEGER NOT NULL DEFAULT 0,
+  error_code       TEXT,
+  created_at       INTEGER NOT NULL,
+  updated_at       INTEGER NOT NULL,
+  UNIQUE (resource_id, resource_version)
+);
+CREATE INDEX idx_index_jobs_state ON resource_index_jobs(state);
+
+CREATE TABLE resource_preview_cache (
+  cache_key        TEXT PRIMARY KEY,
+  resource_id      TEXT NOT NULL REFERENCES resource_registry(resource_id) ON DELETE CASCADE,
+  resource_version INTEGER NOT NULL,
+  content_checksum TEXT,
+  preview_kind     TEXT NOT NULL,
+  preview_version  INTEGER NOT NULL DEFAULT 1,
+  storage_key      TEXT NOT NULL,
+  size             INTEGER,
+  mime_type        TEXT,
+  status           TEXT NOT NULL CHECK (status IN ('READY','FAILED','UNSUPPORTED')) DEFAULT 'READY',
+  created_at       INTEGER NOT NULL,
+  updated_at       INTEGER NOT NULL
+);
+CREATE INDEX idx_preview_cache_resource ON resource_preview_cache(resource_id);
+`;
+
 /** 迁移阶梯。新增 version 时把新 schema 追加在末尾，不改旧条目。 */
 const MIGRATIONS = Object.freeze([
   { version: 1, sql: SCHEMA_SQL },
@@ -585,6 +653,7 @@ const MIGRATIONS = Object.freeze([
   { version: 3, sql: SCHEMA_V3_SQL },
   { version: 4, sql: SCHEMA_V4_SQL },
   { version: 5, sql: SCHEMA_V5_SQL },
+  { version: 6, sql: SCHEMA_V6_SQL },
 ]);
 
 const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000; // 12h 绝对上限
@@ -1682,6 +1751,7 @@ module.exports = {
   SCHEMA_V3_SQL,
   SCHEMA_V4_SQL,
   SCHEMA_V5_SQL,
+  SCHEMA_V6_SQL,
   MIGRATIONS,
   IdentityStore,
   DEFAULT_TTL_MS,
