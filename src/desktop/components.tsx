@@ -94,8 +94,7 @@ export function TopBar({
 }: TopBarProps) {
   return (
     <header className="topbar">
-      {/* 用户口径：**顶栏不用 logo**，保留原来的文字字标。 */}
-      <strong className="wordmark">◈ OpenArc</strong>
+      {/* 用户口径：**顶栏不要品牌字标**（logo 与 "OpenArc" 都不要），只留红绿灯与最近窗口。 */}
       <div className="topbar-recent" aria-label="最近打开的窗口">
         {recent.map((w) => {
           const AppIcon = appLineIcon[w.appId] || LayoutGrid;

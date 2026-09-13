@@ -1,5 +1,17 @@
 # 计划修订记录
 
+## 2026-09-12：顶栏品牌字标整块移除
+
+用户口径："顶部的这个 openarc 去掉"（截图里是红绿灯 + `◈ OpenArc`）。
+
+- `components.tsx` 顶栏里的 `<strong className="wordmark">◈ OpenArc</strong>` **整行删除**；
+- 顶栏左侧保留为 **macOS 原生红绿灯**预留的空位（`.topbar` 的 `padding-left`，未动）；
+- 顶栏现在只剩：左侧空位 → 最近窗口图标 → 右侧功能按钮 / 本机标签 / 日期；
+- `.wordmark` 类**保留**（设计系统画廊仍在用）。
+
+实测：`.topbar .wordmark` 数量 **0**；顶栏文本仅 `本机 · D1`（右侧标签），深浅色各验一遍；
+`npm run build` PASS；`npm test` 96/96。
+
 ## 2026-09-12：按用户澄清重新启用品牌 mark（登录界面 + 应用图标）
 
 用户澄清：**只去掉顶栏那个**；其它地方仍用他给的矢量，但**只取圆形 mark，不要 "OpenArc OS" 字母**。
