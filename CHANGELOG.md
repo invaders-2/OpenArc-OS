@@ -1,5 +1,21 @@
 # 计划修订记录
 
+## 2026-09-12：接入真实品牌 logo（深浅色自动取色）
+
+用户提供了 `OpenArc_OS_4x3_vector.svg`（1024×768，**黑底白字**）并要求"logo 用这个，深浅色注意颜色"。
+
+- **素材处理**：从原矢量里**去掉黑底 `<rect>`**，只保留字母与圆形 mark，
+  viewBox 收紧到图形实际范围 `191 307 645 155`（实测 `getBBox()` 得到），存为 `public/openarc-os.svg`；
+- **取色方式**：用 **CSS mask + `background-color: currentColor`**（不是 `<img>`）——
+  于是 logo 颜色**自动等于当前文字色**：深色主题 = 白、浅色主题 = 深，**不需要两份素材**；
+- **接入位置**：应用顶栏原来的占位文字 `◈ OpenArc` → 真实 logo（84×20）；
+  启动态 `BootSurface` 与 `BootRetry` 两处 `OpenArc` 文字 → 大号 logo（126×30）；
+- 旧的 `.wordmark` 类**保留**（设计系统画廊仍在用，避免动到 D2-01 的品牌字体断言）。
+
+实测（worktree 构建 + 独立预览端口 4291）：
+深色 `color: rgb(245,245,247)` / 浅色 `color: rgb(29,29,31)`，尺寸 84×20；
+`npm run build` PASS；`npm test` 96/96；`public/openarc-os.svg` 已随构建进入 `dist/`。
+
 ## 2026-09-12：桌面背景去掉 OpenArc 字标与装饰圆
 
 用户口径：桌面背景上的 "OpenArc" 字标、副标题和那个大圆去掉。

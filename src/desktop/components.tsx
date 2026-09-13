@@ -94,7 +94,8 @@ export function TopBar({
 }: TopBarProps) {
   return (
     <header className="topbar">
-      <strong className="wordmark">◈ OpenArc</strong>
+      {/* 真实 logo：CSS mask + currentColor，所以深浅色各自取当前文字色（深色=白 / 浅色=深）。 */}
+      <span className="brand-logo" role="img" aria-label="OpenArc OS" />
       <div className="topbar-recent" aria-label="最近打开的窗口">
         {recent.map((w) => {
           const AppIcon = appLineIcon[w.appId] || LayoutGrid;
