@@ -55,13 +55,13 @@ async function seedV2(dbPath) {
   return { instId, teamId, userId, deptId, resId };
 }
 
-test("v2 → v3 迁移：版本推进、新表建立、既有身份与授权数据全部保留", async () => {
+test("v2 → 最新 schema 迁移：版本推进、v3 表建立、既有身份与授权数据全部保留", async () => {
   const dbPath = tempDbPath("openarc-d3-03-mig");
   const seeded = await seedV2(dbPath);
 
   const identity = new IdentityStore({ path: dbPath }).open();
-  assert.equal(identity.schemaVersion, 3);
-  assert.equal(SCHEMA_VERSION, 3);
+  assert.equal(identity.schemaVersion, SCHEMA_VERSION);
+  assert.equal(SCHEMA_VERSION, 4);
   for (const t of ["devices", "device_pairing_credentials", "device_credentials", "device_access", "device_audit"]) {
     assert.equal(hasTable(identity.connection, t), true, "缺少 v3 表 " + t);
   }
@@ -121,10 +121,10 @@ test("迁移幂等：重复 open 不重复执行、数据不翻倍", async () =>
   const dbPath = tempDbPath("openarc-d3-03-mig4");
   await seedV2(dbPath);
   const a = new IdentityStore({ path: dbPath }).open();
-  assert.equal(a.schemaVersion, 3);
+  assert.equal(a.schemaVersion, SCHEMA_VERSION);
   a.close();
   const b = new IdentityStore({ path: dbPath }).open();
-  assert.equal(b.schemaVersion, 3);
+  assert.equal(b.schemaVersion, SCHEMA_VERSION);
   assert.equal(b.connection.prepare("SELECT COUNT(*) c FROM departments").get().c, 1);
   b.close();
 });

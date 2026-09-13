@@ -47,11 +47,11 @@ const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domai
 /**
  * 当前 schema 版本。
  *
- * D3-01 = v1（identity）；D3-02 = v2（object authorization）。
+ * D3-01 = v1（identity）；D3-02 = v2（object authorization）；D3-03 = v3（device）；D3-04A = v4（resource store）。
  * 迁移按版本逐级前进，每一级各自是一个原子事务：任何一级失败只回滚该级，
  * 不会留下"user_version 已升级但表不完整"的半状态（§55）。
  */
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -405,11 +405,125 @@ CREATE INDEX idx_device_audit_at ON device_audit(at);
 CREATE INDEX idx_device_audit_device ON device_audit(device_id);
 `;
 
+/**
+ * D3-04A v4：本地资源对象与存储。
+ *
+ * 关键分层：resource_registry（D3-02）继续是**逻辑身份 / 授权权威**；
+ * library_resources 只承载存储语义（mime / storageMode / contentObject / version / trash）。
+ * 二者共享 resourceId，不从新建第二身份系统。
+ *
+ * DB 与文件系统之间**没有真正的 ACID**：import 用显式状态机 + 可重放的 recovery，
+ * 不允许写成 "DB + filesystem atomic transaction"。
+ */
+const SCHEMA_V4_SQL = `
+CREATE TABLE content_objects (
+  content_id         TEXT PRIMARY KEY,
+  checksum_algorithm TEXT    NOT NULL DEFAULT 'sha256',
+  checksum           TEXT    NOT NULL,
+  size               INTEGER NOT NULL,
+  internal_key       TEXT    NOT NULL,
+  ref_count          INTEGER NOT NULL DEFAULT 0,
+  status             TEXT    NOT NULL CHECK (status IN ('OBJECT_READY','GC_PENDING','DELETED')) DEFAULT 'OBJECT_READY',
+  organization_id    TEXT    NOT NULL,
+  created_at         INTEGER NOT NULL,
+  updated_at         INTEGER NOT NULL,
+  UNIQUE (checksum_algorithm, checksum, size)
+);
+CREATE INDEX idx_content_objects_checksum ON content_objects(checksum);
+CREATE INDEX idx_content_objects_status ON content_objects(status);
+
+CREATE TABLE library_resources (
+  resource_id            TEXT PRIMARY KEY REFERENCES resource_registry(resource_id) ON DELETE CASCADE,
+  resource_type          TEXT    NOT NULL,
+  mime_type              TEXT    NOT NULL DEFAULT 'application/octet-stream',
+  name                   TEXT    NOT NULL DEFAULT '',
+  description            TEXT    NOT NULL DEFAULT '',
+  storage_mode           TEXT    NOT NULL CHECK (storage_mode IN ('MANAGED','LINKED')),
+  content_object_id      TEXT REFERENCES content_objects(content_id),
+  checksum               TEXT,
+  size                   INTEGER,
+  source                 TEXT    NOT NULL DEFAULT 'user',
+  version                INTEGER NOT NULL DEFAULT 1,
+  storage_device_id      TEXT,
+  source_locator         TEXT,
+  source_identity        TEXT,
+  observed_size          INTEGER,
+  observed_mtime         INTEGER,
+  generated_source_task_id TEXT,
+  generated_source_call_id TEXT,
+  generated_source_model   TEXT,
+  index_status           TEXT    NOT NULL DEFAULT 'NOT_INDEXED',
+  trash_state            TEXT    NOT NULL CHECK (trash_state IN ('ACTIVE','TRASHED')) DEFAULT 'ACTIVE',
+  deleted_at             INTEGER,
+  deleted_by             TEXT,
+  created_at             INTEGER NOT NULL,
+  updated_at             INTEGER NOT NULL
+);
+CREATE INDEX idx_library_resources_mode ON library_resources(storage_mode);
+CREATE INDEX idx_library_resources_content ON library_resources(content_object_id);
+CREATE INDEX idx_library_resources_device ON library_resources(storage_device_id);
+CREATE INDEX idx_library_resources_trash ON library_resources(trash_state);
+CREATE INDEX idx_library_resources_type ON library_resources(resource_type);
+
+CREATE TABLE resource_versions (
+  id                TEXT PRIMARY KEY,
+  resource_id       TEXT    NOT NULL REFERENCES resource_registry(resource_id) ON DELETE CASCADE,
+  version           INTEGER NOT NULL,
+  content_object_id TEXT REFERENCES content_objects(content_id),
+  checksum          TEXT,
+  size              INTEGER,
+  storage_mode      TEXT    NOT NULL CHECK (storage_mode IN ('MANAGED','LINKED')),
+  storage_device_id TEXT,
+  source_locator    TEXT,
+  source            TEXT    NOT NULL DEFAULT 'user',
+  created_by        TEXT,
+  created_at        INTEGER NOT NULL,
+  UNIQUE (resource_id, version)
+);
+CREATE INDEX idx_resource_versions_resource ON resource_versions(resource_id);
+CREATE INDEX idx_resource_versions_content ON resource_versions(content_object_id);
+
+CREATE TABLE resource_relations (
+  id               TEXT PRIMARY KEY,
+  organization_id  TEXT    NOT NULL,
+  from_resource_id TEXT    NOT NULL REFERENCES resource_registry(resource_id) ON DELETE CASCADE,
+  to_resource_id   TEXT    NOT NULL REFERENCES resource_registry(resource_id) ON DELETE CASCADE,
+  relation_type    TEXT    NOT NULL CHECK (relation_type IN ('references','derived-from','generated-from')),
+  created_by       TEXT,
+  created_at       INTEGER NOT NULL,
+  UNIQUE (from_resource_id, to_resource_id, relation_type)
+);
+CREATE INDEX idx_resource_relations_from ON resource_relations(from_resource_id);
+CREATE INDEX idx_resource_relations_to ON resource_relations(to_resource_id);
+
+CREATE TABLE resource_import_jobs (
+  id              TEXT PRIMARY KEY,
+  organization_id TEXT    NOT NULL,
+  actor_user_id   TEXT,
+  app_id          TEXT,
+  storage_mode    TEXT    NOT NULL CHECK (storage_mode IN ('MANAGED','LINKED')),
+  phase           TEXT    NOT NULL CHECK (phase IN ('STAGING','HASHED','OBJECT_READY','COMMITTING','AVAILABLE','FAILED','CANCELLED','ORPHANED')),
+  staging_key     TEXT,
+  source_locator  TEXT,
+  checksum        TEXT,
+  size            INTEGER,
+  bytes_total     INTEGER,
+  bytes_processed INTEGER NOT NULL DEFAULT 0,
+  resource_id     TEXT,
+  error_code      TEXT,
+  created_at      INTEGER NOT NULL,
+  updated_at      INTEGER NOT NULL
+);
+CREATE INDEX idx_resource_import_jobs_phase ON resource_import_jobs(phase);
+CREATE INDEX idx_resource_import_jobs_resource ON resource_import_jobs(resource_id);
+`;
+
 /** 迁移阶梯。新增 version 时把新 schema 追加在末尾，不改旧条目。 */
 const MIGRATIONS = Object.freeze([
   { version: 1, sql: SCHEMA_SQL },
   { version: 2, sql: SCHEMA_V2_SQL },
   { version: 3, sql: SCHEMA_V3_SQL },
+  { version: 4, sql: SCHEMA_V4_SQL },
 ]);
 
 const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000; // 12h 绝对上限
@@ -1505,6 +1619,7 @@ module.exports = {
   SCHEMA_SQL,
   SCHEMA_V2_SQL,
   SCHEMA_V3_SQL,
+  SCHEMA_V4_SQL,
   MIGRATIONS,
   IdentityStore,
   DEFAULT_TTL_MS,

@@ -38,15 +38,15 @@ async function seedV1(dbPath) {
   return { instId, teamId, userId };
 }
 
-test("schema 版本已推进到 v3（D3-03 在 v2 之上追加设备域）", () => {
-  assert.equal(SCHEMA_VERSION, 3);
+test("schema 版本已推进到 v4（D3-04A 在 v3 之上追加资源存储域）", () => {
+  assert.equal(SCHEMA_VERSION, 4);
 });
 
-test("全新数据库直接建到 v3，identity login 成立（v2 + v3 表都在）", async () => {
+test("全新数据库直接建到 v4，identity login 成立（v2 + v3 + v4 表都在）", async () => {
   const { dir, dbPath } = tempDbPath();
   try {
     const store = new IdentityStore({ path: dbPath }).open();
-    assert.equal(store.schemaVersion, 3);
+    assert.equal(store.schemaVersion, SCHEMA_VERSION);
     assert.ok(hasTable(store.connection, "departments"));
     assert.ok(hasTable(store.connection, "resource_registry"));
     assert.ok(hasTable(store.connection, "app_resource_grants"));
@@ -56,6 +56,10 @@ test("全新数据库直接建到 v3，identity login 成立（v2 + v3 表都在
     assert.ok(hasTable(store.connection, "device_credentials"));
     assert.ok(hasTable(store.connection, "device_access"));
     assert.ok(hasTable(store.connection, "device_audit"));
+    assert.ok(hasTable(store.connection, "library_resources"));
+    assert.ok(hasTable(store.connection, "content_objects"));
+    assert.ok(hasTable(store.connection, "resource_versions"));
+    assert.ok(hasTable(store.connection, "resource_import_jobs"));
     const init = await store.initialize({ identifier: ADMIN_ID, password: ADMIN_PW, displayName: "Admin" });
     assert.equal(init.ok, true);
     const login = await store.login({ identifier: ADMIN_ID, password: ADMIN_PW });
@@ -71,7 +75,7 @@ test("v1 → v3：迁移后 login / lock / unlock 全部成立，身份数据不
   try {
     const seeded = await seedV1(dbPath);
     const store = new IdentityStore({ path: dbPath }).open();
-    assert.equal(store.schemaVersion, 3);
+    assert.equal(store.schemaVersion, SCHEMA_VERSION);
     assert.equal(store.userById(seeded.userId).identifier, ADMIN_ID);
     assert.ok(hasTable(store.connection, "departments"));
     assert.ok(hasTable(store.connection, "devices"), "v3 表必须一并建立");
@@ -109,7 +113,7 @@ test("迁移失败 → 整级回滚：user_version 保持 1，v2/v3 表不存在
 
     // 修复后可以正常迁移，之前的数据仍在
     const ok = new IdentityStore({ path: dbPath }).open();
-    assert.equal(ok.schemaVersion, 3);
+    assert.equal(ok.schemaVersion, SCHEMA_VERSION);
     const login = await ok.login({ identifier: ADMIN_ID, password: ADMIN_PW });
     assert.equal(login.ok, true);
     ok.close();
@@ -125,7 +129,7 @@ test("重复 open 幂等，不会重复迁移或丢数据", async () => {
     await a.initialize({ identifier: ADMIN_ID, password: ADMIN_PW, displayName: "Admin" });
     a.close();
     const b = new IdentityStore({ path: dbPath }).open();
-    assert.equal(b.schemaVersion, 3);
+    assert.equal(b.schemaVersion, SCHEMA_VERSION);
     assert.equal(b.userCount(), 1);
     b.close();
   } finally {
@@ -138,8 +142,9 @@ test("v3 级迁移失败 → user_version 停在 2，设备表不残留（§55 �
     const store = new IdentityStore({ path: dbPath }).open();
     await store.initialize({ identifier: ADMIN_ID, password: ADMIN_PW, displayName: "Admin" });
     store.close();
-    // 手工降回 v2 并删掉 v3 表，模拟"已有 v2 库、正要升 v3"
+    // 手工降回 v2 并删掉 v3 + v4 表，模拟"已有 v2 库、正要升 v3"
     const raw = new DatabaseSync(dbPath);
+    raw.exec("DROP TABLE resource_relations; DROP TABLE resource_versions; DROP TABLE library_resources; DROP TABLE resource_import_jobs; DROP TABLE content_objects;");
     raw.exec("DROP TABLE device_audit; DROP TABLE device_access; DROP TABLE device_credentials; DROP TABLE device_pairing_credentials; DROP TABLE devices;");
     raw.exec("PRAGMA user_version = 2");
     raw.close();
@@ -152,11 +157,12 @@ test("v3 级迁移失败 → user_version 停在 2，设备表不残留（§55 �
     assert.equal(check.prepare("PRAGMA user_version").get().user_version, 2);
     assert.equal(hasTable(check, "devices"), false);
     assert.equal(hasTable(check, "device_audit"), false);
+    assert.equal(hasTable(check, "content_objects"), false);
     assert.ok(check.prepare("SELECT identifier FROM users LIMIT 1").get());
     check.close();
 
     const recovered = new IdentityStore({ path: dbPath }).open();
-    assert.equal(recovered.schemaVersion, 3);
+    assert.equal(recovered.schemaVersion, SCHEMA_VERSION);
     assert.ok(hasTable(recovered.connection, "devices"));
     recovered.close();
   } finally {
