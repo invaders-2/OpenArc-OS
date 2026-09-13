@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import domain from "../../electron/window-domain.cjs";
 import type { Window as WinDomain, WindowCommand } from "../../electron/window-domain.cjs";
+import { useDockMagnify } from "./useDockMagnify";
 
 const icon = (name: string) => "./icons/" + name + ".png";
 
@@ -182,7 +183,8 @@ type DockProps = {
   /** `appId → windowIds[]`。Dock 消费 Window Manager，不自己数窗口。 */
   runningApps: ReadonlySet<string>;
   bouncing: string | null;
-  dockRef: React.RefObject<HTMLElement | null>;
+  /** 减少动效：关闭波浪放大（与材质档位解耦）。 */
+  reduced: boolean;
   /**
    * 激活一个 App。**Dock 不自己决定要派发哪条窗口命令** ——
    * "聚焦已有窗口 / 恢复最小化的窗口 / 新建"这个判断需要看 `appId → windowIds[]`，
@@ -195,7 +197,10 @@ type DockProps = {
   onPointerLeave?: () => void;
 };
 
-export function Dock({ apps, runningApps, bouncing, dockRef, onActivate, onToggleAI, hidden, onPointerLeave }: DockProps) {
+export function Dock({ apps, runningApps, bouncing, reduced, onActivate, onToggleAI, hidden, onPointerLeave }: DockProps) {
+  // 放大行为由 Dock 自己持有：它只在身份门通过后挂载，父层的 useEffect
+  // 拿不到这一刻（详见 useDockMagnify 顶部注释）。
+  const dockRef = useDockMagnify(reduced);
   return (
     <nav
       className={`dock ${hidden ? "hidden" : ""}`}
