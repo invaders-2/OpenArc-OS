@@ -512,16 +512,16 @@ p {
   left: 50%;
   transform: translateX(-50%) translateY(6px);
   white-space: nowrap;
-  /* 用户口径："改成第一版那样" —— 恢复第一版的**纯气泡**外观（玻璃材质 / 小圆角 / 11px），
-     并且**不要尾巴**：三种尾巴（三角 / 菱形 / 楔形）都被否掉了，本体就是那个圆角气泡。 */
-  padding: 4px 9px;
-  border-radius: var(--radius-sm);
+  /* macOS 口径：接近半高的圆角 + 底部一个小尾巴（见 ::after） */
+  padding: 4px 10px;
+  border-radius: 7px;
   font-size: 11px;
-  /* --text 随主题翻转：深色=近白字，浅色=深字 —— 与 macOS 提示的明暗跟随一致 */
   color: var(--text);
-  /* 第一版的材质：与其它浮层同一套磨砂 token（用户曾确认"是磨砂玻璃质感"）。 */
-  background: rgb(var(--surface-rgb) / var(--surface-alpha));
-  backdrop-filter: var(--glass-filter-tip);
+  /**
+   * 用**接近实色**的材质：尾巴要和气泡颜色完全一致才能看不出接缝，
+   * 而带模糊的半透明材质没法复制到 border 三角上。macOS 的提示本来也基本是不透明的。
+   */
+  background: rgb(var(--surface-rgb) / 0.96);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
   opacity: 0;
   pointer-events: none;
@@ -529,6 +529,19 @@ p {
     opacity var(--quick) var(--ease),
     transform var(--quick) var(--ease);
   z-index: 300;
+}
+/* 指向图标的小尾巴（macOS 提示的辨识特征）。 */
+.dock-tooltip::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border: 5px solid transparent;
+  border-bottom: 0;
+  border-top-color: rgb(var(--surface-rgb) / 0.96);
 }
 .dock-item:hover .dock-tooltip,
 .dock-item:focus-visible .dock-tooltip {
