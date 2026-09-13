@@ -24,7 +24,10 @@
     "test:d3-04a": "node experiments/d3-04a/run-all.mjs",
     "test:resource-ui": "npm run build && node tests/resource-ui.mjs",
     "test:resource-library-ui": "npm run build && node tests/resource-library-ui.mjs",
-    "test:d3-04b": "node experiments/d3-04b/run-all.mjs"
+    "test:d3-04b": "node experiments/d3-04b/run-all.mjs",
+    "test:d3-04c": "node experiments/d3-04c/run-all.mjs",
+    "test:resource-search-ui": "npm run build && node tests/resource-search-ui.mjs",
+    "test:resource-preview-ui": "npm run build && node tests/resource-preview-ui.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

@@ -19,8 +19,12 @@ const { DeviceService } = require("../electron/device-service.cjs");
 const { ResourceStore } = require("../electron/resource-store.cjs");
 const { ManagedStore } = require("../electron/resource-fs.cjs");
 const { ResourceService } = require("../electron/resource-service.cjs");
+const { SearchStore } = require("../electron/search-store.cjs");
+const { SearchService } = require("../electron/search-service.cjs");
+const { PreviewService } = require("../electron/preview-service.cjs");
 
 export const resourceDomain = require("../electron/resource-domain.cjs");
+export const searchDomain = require("../electron/search-domain.cjs");
 export { pw, SERVICE_IDENTITY };
 
 export function tempRoot(prefix = "oa-d3-04a") {
@@ -50,6 +54,9 @@ export async function createResourceFixture({ dbPath = ":memory:", storeRoot = n
     deviceService: fx.deviceService,
     clock: fx.clock,
   });
+  const searchStore = new SearchStore({ identity: fx.identity, clock: fx.clock });
+  const searchService = new SearchService({ identity: fx.identity, resourceStore, searchStore, managedStore, authService: fx.authService, authStore: fx.store, deviceService: fx.deviceService, clock: fx.clock });
+  const previewService = new PreviewService({ identity: fx.identity, resourceStore, searchStore, managedStore, authService: fx.authService, deviceService: fx.deviceService, clock: fx.clock, nativeImage: null });
   const sourceDir = tempRoot("oa-d3-04a-src");
   const writeSource = (name, content) => {
     const p = path.join(sourceDir, name);
@@ -61,6 +68,9 @@ export async function createResourceFixture({ dbPath = ":memory:", storeRoot = n
     resourceStore,
     managedStore,
     resourceService,
+    searchStore,
+    searchService,
+    previewService,
     storeRoot: root,
     sourceDir,
     writeSource,
@@ -109,5 +119,8 @@ export function reopenResourceRuntime({ dbPath, storeRoot }) {
     authStore: runtime.authStore,
     deviceService: runtime.deviceService,
   });
-  return { identity, managedStore, resourceStore, resourceService, ...runtime };
+  const searchStore = new SearchStore({ identity });
+  const searchService = new SearchService({ identity, resourceStore, searchStore, managedStore, authService: runtime.authService, authStore: runtime.authStore, deviceService: runtime.deviceService });
+  const previewService = new PreviewService({ identity, resourceStore, searchStore, managedStore, authService: runtime.authService, deviceService: runtime.deviceService, nativeImage: null });
+  return { identity, managedStore, resourceStore, resourceService, searchStore, searchService, previewService, ...runtime };
 }

@@ -1,0 +1,6 @@
+{
+  "name": "openarc-d3-04c-preview-ui-probe",
+  "private": true,
+  "version": "1.0.0",
+  "main": "main.cjs"
+}

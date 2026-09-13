@@ -13,6 +13,7 @@ const require = createRequire(import.meta.url);
 const { IdentityStore, SCHEMA_VERSION } = require("../electron/identity-store.cjs");
 const { DatabaseSync } = require("node:sqlite");
 
+const V6_TABLES = ["resource_search_docs", "resource_search_fts", "resource_index_jobs", "resource_preview_cache"];
 const V5_TABLES = ["resource_recent", "resource_favorites", "resource_tags", "tags"];
 const V4_TABLES = ["resource_relations", "resource_versions", "library_resources", "resource_import_jobs", "content_objects"];
 const hasTable = (db, name) => !!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(name);
@@ -27,6 +28,7 @@ async function makeV3Db() {
   const snapshot = { users: fx.identity.allUsers().length, departments: fx.store.departmentsOfOrg(fx.orgId).length, devices: fx.deviceStore.allDevices().length, orgId: fx.orgId };
   fx.identity.close();
   const raw = new DatabaseSync(dbPath);
+  for (const table of V6_TABLES) raw.exec("DROP TABLE IF EXISTS " + table);
   for (const table of V5_TABLES) raw.exec("DROP TABLE IF EXISTS " + table);
   for (const col of ["memory_subtype", "language", "attributes"]) raw.exec("ALTER TABLE library_resources DROP COLUMN " + col);
   for (const table of V4_TABLES) raw.exec("DROP TABLE IF EXISTS " + table);
@@ -56,7 +58,7 @@ test("v3 -> v4：升级成功且 identity / department / device 数据完整", (
     assert.equal(reopened.identity.allUsers().length, snapshot.users);
     assert.equal(reopened.authStore.departmentsOfOrg(snapshot.orgId).length, snapshot.departments);
     assert.equal(reopened.deviceStore.allDevices().length, snapshot.devices);
-    for (const table of [...V4_TABLES, ...V5_TABLES]) assert.equal(hasTable(reopened.identity.connection, table), true, table + " 应存在");
+    for (const table of [...V4_TABLES, ...V5_TABLES, ...V6_TABLES]) assert.equal(hasTable(reopened.identity.connection, table), true, table + " 应存在");
     reopened.identity.close();
   })();
 });

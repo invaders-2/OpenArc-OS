@@ -1,0 +1,5 @@
+{
+  "name": "oa-fts-probe",
+  "private": true,
+  "main": "main.cjs"
+}

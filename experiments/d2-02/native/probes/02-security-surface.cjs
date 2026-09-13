@@ -37,6 +37,18 @@ const path = require("node:path");
 
 const ROOT = path.join(__dirname, "..", "..", "..", "..");
 
+// D3-04C：electron/main.cjs 现在在**模块加载期**调用 protocol.registerSchemesAsPrivileged
+// （Electron 要求必须在 app ready 之前）。因此探针必须在 require 阶段就加载真实主进程入口，
+// 不能等 app ready 之后再 require —— 否则 Electron 抛 "should be called before app is ready"。
+let mainLoaded = false;
+let mainLoadError = null;
+try {
+  require(path.join(ROOT, "electron", "main.cjs"));
+  mainLoaded = true;
+} catch (err) {
+  mainLoadError = err;
+}
+
 /** 冻结清单 —— 与 electron/preload.cjs 的现状逐字对应（D3-04A 后为 9 个）。 */
 const FROZEN_BRIDGE_KEYS = ["action", "authorization", "device", "identity", "navigate", "onDisplay", "onNativeState", "resource", "sync"];
 /**
@@ -143,7 +155,7 @@ exports.run = async function run({ report, sleep, add, out }) {
 
   // ─────────────── ② 运行时（真实主进程） ───────────────
   const uiURL = require("node:url").pathToFileURL(path.join(ROOT, "dist", "index.html")).href;
-  require(path.join(ROOT, "electron", "main.cjs"));
+  if (!mainLoaded) throw new Error("加载 electron/main.cjs 失败：" + String(mainLoadError && mainLoadError.message));
   await sleep(300);
   const win = await waitFor(() => BrowserWindow.getAllWindows()[0], 8000, sleep, "外壳窗口");
   await waitFor(() => win.webContents.getURL() === uiURL && !win.webContents.isLoading(), 15000, sleep, "外壳页加载完成");
