@@ -354,7 +354,7 @@ Department Admin 的设备管理（DEFERRED TO POLICY EXTENSION）。
 |---|---|---|
 | **macOS Resource Store Core** | **PASS** | Stable ResourceRef、Managed Store、Linked Resource、Content-addressed objects、Dedupe、Import State Machine + Crash Recovery、Large streaming、Version、Version conflict、Trash、Restore、Permanent Delete、GC safety、Integrity、Resource+App authorization、Resource+Device authorization、Restart persistence、Migration、Renderer boundary —— 全部真实执行 |
 | **overall** | **PARTIAL** | Windows 路径语义 / 文件锁 / NTFS / userData **NOT VERIFIED**；远程 Device LINKED content transport 未实现 |
-| **Resource Library** | **PARTIAL / IMPLEMENTATION IN PROGRESS**（当前状态见 # D3-04B） | D3-04A 完成 Resource Object & Local Store；CRUD/UI 已由 D3-04B 交付；Search/Index/Preview（D3-04C）与 Integration（D3-04D）仍未完成，**不得写 COMPLETE** |
+| **Resource Library** | **PARTIAL / IMPLEMENTATION IN PROGRESS**（当前状态见 # D3-04C） | D3-04A 完成 Resource Object & Local Store；CRUD/UI 已由 D3-04B 交付；Search/Index/Preview 已由 D3-04C 交付；Integration（D3-04D）仍未完成，**不得写 COMPLETE** |
 
 **不得写 Resource Library COMPLETE。不得写双平台 COMPLETE。**
 
@@ -411,8 +411,8 @@ Windows 全部（路径 / 文件锁 / NTFS / userData）；MANAGED symlink TOCTO
 | 口径 | Task Status | 说明 |
 |---|---|---|
 | **macOS Resource Library CRUD Core** | **PASS** | Resource Library App 三栏、Authorized listing、Import / Link、Create Resource、Memory CRUD、Text/Code/Prompt editing、Version-aware save + VERSION_CONFLICT、Collection CRUD、Tag CRUD、Favorite、Recent、Trash UI、Restore、Permanent Delete、Inspector、Structured filtering、Restart persistence、Authorization、App permission、Personal Memory isolation、v4→v5 Migration、Accessibility —— 全部真实执行 |
-| **overall** | **PARTIAL** | Windows Resource Library UI / file picker / drag-drop / clipboard **NOT VERIFIED**；D3-04C Search/Index/Preview 与 D3-04D Integration 未完成 |
-| **Resource Library** | **PARTIAL / IMPLEMENTATION IN PROGRESS** | 仍缺 D3-04C Search / Index / Preview 与 D3-04D Department / App / Files / Projects Integration；**不得写 COMPLETE** |
+| **overall** | **PARTIAL** | Windows Resource Library UI / file picker / drag-drop / clipboard **NOT VERIFIED**；D3-04C Search/Index/Preview 已完成；D3-04D Integration 未完成 |
+| **Resource Library** | **PARTIAL / IMPLEMENTATION IN PROGRESS** | Search / Index / Preview 已由 D3-04C 交付；仍缺 D3-04D Department / App / Files / Projects Integration；**不得写 COMPLETE** |
 
 **不得写 Resource Library COMPLETE。不得写双平台 COMPLETE。**
 
@@ -459,7 +459,57 @@ D3-04C 必须替换 Name filter 为真正的 FTS / Authorized Search Provider，
 
 ## 6. 主要缺口
 
-Windows UI / picker / drag-drop / clipboard NOT VERIFIED；Paste 与 Drag&Drop 未实现（DEFERRED，未伪造）；全文搜索 / 缩略图 / 预览 / 转写 / Embedding（D3-04C）；Department / App Picker / Files / Projects / Canvas（D3-04D）；批量操作；Store 加密-at-rest。
+Windows UI / picker / drag-drop / clipboard NOT VERIFIED；Paste 与 Drag&Drop 未实现（DEFERRED，未伪造）；全文搜索 / 缩略图 / 预览 已由 D3-04C 交付；转写 / Embedding 仍不实现（需用户显式允许）；Department / App Picker / Files / Projects / Canvas（D3-04D）；批量操作；Store 加密-at-rest。
+
+---
+
+# D3-04C 当前状态（唯一口径 · 2026-09-15）
+
+## 1. Task Status
+
+| 口径 | Task Status | 说明 |
+|---|---|---|
+| **macOS Authorized Search / Local Index / Secure Preview** | **PASS** | Authorized Search Provider、本地 FTS5 索引、CJK 中文检索（鞋子 / 详情页 / 生成提示）、结构化 snippet、排序、Index Lifecycle（惰性 reconcile / 作业恢复 / 从权威表重建）、Text Extraction、Preview（text / image / pdf / video / audio）、缩略图、capability + Range 安全交付、v5→v6 迁移、真实 Electron UI 探针 —— 全部真实执行 |
+| **overall** | **PARTIAL** | Windows scheme / 媒体解码 / 文件选择器 **NOT VERIFIED**；远程 Embedding / 语义检索 / OCR / 转写 **明确不实现**（未伪造） |
+| **Resource Library** | **PARTIAL / IMPLEMENTATION IN PROGRESS** | Search / Index / Preview 已交付；仍缺 D3-04D Department / App / Files / Projects Integration；**不得写 COMPLETE** |
+
+**不得写 Resource Library COMPLETE。不得写双平台 COMPLETE。**
+
+## 2. 关键证据（真实执行）
+
+| 入口 | 结果 |
+|---|---|
+| npm test | **403 / 403**（D3-04B 基线 348 + D3-04C 新增 55） |
+| npm run build | PASS |
+| npm run test:d3-04c | **5 探针：PASS 5 / FAIL 0（60 条用例）** |
+| npm run test:resource-search-ui | **16 / 16 UI checks PASS**（真实 Electron：中文全文搜索 / snippet / 索引状态） |
+| npm run test:resource-preview-ui | **19 / 19 UI checks PASS**（真实 Electron：text / image+thumbnail / pdf / audio / video、Range、无路径泄漏、Trash 拒绝） |
+| npm run test:d3-04b | PASS 2/2（未回归） |
+| npm run test:d3-04a / d3-04b-ui / resource-ui | PASS（未回归） |
+
+分支 feature/d3-04c-resource-search-preview，基线 feature/d3-04b-resource-library @ b0c2a96，未 merge main。
+ADR：docs/decisions/D3-04C-search-index-preview.md。
+
+## 3. 本轮冻结（不可随意改）
+
+1. **LOCAL FIRST**：搜索 / 索引 / 抽取 / 缩略图全部本机完成，不调用远程 Embedding / Vision / OCR / Transcription。
+2. **DEFAULT DENY**：FTS 只产候选，每个候选都要经 D3-02 Authorization；未授权资源 0 结果、不计入 total、无任何存在性提示。
+3. **索引是派生数据，不是第二数据库**：可随时从 resource_registry / library_resources / resource_versions 重建，不参与授权判定。
+4. **授权永远在服务端**：Renderer 只收已授权结果；禁止 load-all → Renderer filter；新增 authorizeMany 做批量候选过滤。
+5. **CJK 策略**：受控本地 n-gram（unigram + 相邻 bigram）；FTS5 unicode61 只作分词容器；trigram 不用于 2 字中文。
+6. **PDF 只做 metadata-only**：正文抽取记 UNSUPPORTED_TEXT_EXTRACTION，不做 OCR，不伪造正文。
+7. **Preview 只经 capability**：openarc-resource:// 短时 capability（60s），每次协议请求重新授权，支持 Range/206。
+8. **Trash 不交付内容**：已删除资源 preview 默认拒绝且无 includeTrashed 绕过。
+9. **snippet 结构化**：返回 spans 数组，绝不返回 HTML；UI 不使用 dangerouslySetInnerHTML。
+10. **Renderer 无 raw fs**：只有受控 Resource Commands，本地路径 / internalKey / checksum 目录不回渲染进程。
+
+## 4. D3-04D 准入
+
+**BLOCK**，直到 D3-04C 完成。D3-04D 负责 Department / Super Admin 权限 UI、App Resource Picker、Files / Projects / Canvas 集成、Ownership / Scope 治理编辑；必须复用本轮冻结的 search / index / preview 语义与 capability 交付。
+
+## 5. 主要缺口
+
+Windows scheme / 媒体解码 / picker NOT VERIFIED；PDF OCR / 转写 / 远程 Embedding 明确不实现；video poster 帧 DEFERRED；预览缓存无后台 GC 定时器；>10k 数据集与超长文档基准未覆盖。
 
 ---
 
