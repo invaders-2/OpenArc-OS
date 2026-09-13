@@ -522,7 +522,10 @@ p {
    * （0.96→1.0 肉眼无差别，所以能调的方向只有更透）。尾巴必须用**同一个数值**，
    * 否则 border 三角与气泡之间会出现色差。
    */
-  background: rgb(var(--surface-rgb) / 0.88);
+  background: rgb(var(--surface-rgb) / 0.6);
+  /* 0.6 的底色若没有模糊，就只是"半透明色块"（背后的图标会透上来）——补回磨砂。
+     只加在气泡上：之前"分成两块"是**两层各自 backdrop-filter** 造成的，单层不会有接缝。 */
+  backdrop-filter: var(--glass-filter-tip);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
   opacity: 0;
   pointer-events: none;
@@ -542,7 +545,7 @@ p {
   height: 0;
   border: 5px solid transparent;
   border-bottom: 0;
-  border-top-color: rgb(var(--surface-rgb) / 0.88);
+  border-top-color: rgb(var(--surface-rgb) / 0.6);
 }
 .dock-item:hover .dock-tooltip,
 .dock-item:focus-visible .dock-tooltip {
