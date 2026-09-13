@@ -1,5 +1,19 @@
 # 计划修订记录
 
+## 2026-09-12：logo 全部撤掉（顶栏 + 启动界面 + 素材与样式）
+
+用户口径："都去掉吧"。
+
+- 启动界面 `BootSurface` / `BootRetry` 恢复 `<strong>OpenArc</strong>` 文字；
+- 删除 `.brand-logo` / `.brand-logo-lg` 样式；
+- 删除 `public/openarc-os.svg`（构建后 `dist/` 里也不再出现）；
+- 顶栏此前已恢复 `◈ OpenArc` 文字。
+
+实测：`.brand-logo` 数量 **0**、顶栏 `.wordmark` 文本 `◈ OpenArc`、`dist/openarc-os.svg` 不存在；
+`npm run build` PASS；`npm test` 96/96。
+
+> 用户提供的原始矢量仍在附件里（`OpenArc_OS_4x3_vector.svg`），需要再启用时随时可重新提取。
+
 ## 2026-09-12：顶栏撤掉 logo，恢复文字字标
 
 用户口径："顶部标题栏不需要用这个 logo"。

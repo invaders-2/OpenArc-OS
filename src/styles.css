@@ -117,22 +117,6 @@
      交互元素（按钮等）在下面用 no-drag 退出，否则点不到。 */
   -webkit-app-region: drag;
 }
-/* 品牌 logo：用 CSS mask 挂在 currentColor 上 —— 于是**深浅色自动取当前文字色**
-   （深色主题 = 白，浅色主题 = 深），不需要两份素材。
-   素材为 public/openarc-os.svg（从用户提供的 4x3 矢量里去掉黑底矩形后提取）。 */
-.brand-logo {
-  display: inline-block;
-  width: 84px;
-  height: 20px;
-  background-color: currentColor;
-  -webkit-mask: url("/openarc-os.svg") no-repeat left center / contain;
-  mask: url("/openarc-os.svg") no-repeat left center / contain;
-  -webkit-app-region: no-drag;
-}
-.brand-logo-lg {
-  width: 126px;
-  height: 30px;
-}
 .wordmark {
   font-size: 14px;
   letter-spacing: -0.4px;
