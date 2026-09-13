@@ -12,6 +12,9 @@ const path = require("node:path");
 const { ResourceStore } = require("./resource-store.cjs");
 const { ManagedStore } = require("./resource-fs.cjs");
 const { ResourceService } = require("./resource-service.cjs");
+const { SearchStore } = require("./search-store.cjs");
+const { SearchService } = require("./search-service.cjs");
+const { PreviewService } = require("./preview-service.cjs");
 
 /** 渲染进程可下发的资源命令白名单。新增能力必须在此显式登记。 */
 const RENDERER_COMMANDS = Object.freeze([
@@ -51,12 +54,17 @@ const RENDERER_COMMANDS = Object.freeze([
   "resource/listVersions",
   "resource/replaceText",
   "resource/restoreVersion",
+  "resource/search",
+  "resource/indexStatus",
+  "resource/reindex",
+  "resource/preview",
+  "resource/thumbnail",
 ]);
 
 /**
  * @param opts.storeRoot  <userData>/library（由主进程按平台规范给出）
  */
-function createResourceBundle({ identityStore, authorization, authStore = null, deviceService = null, storeRoot, logger = null, clock = null } = {}) {
+function createResourceBundle({ identityStore, authorization, authStore = null, deviceService = null, storeRoot, logger = null, clock = null, nativeImage = null } = {}) {
   if (!identityStore) throw new Error("createResourceBundle 需要 identityStore");
   if (!storeRoot) throw new Error("createResourceBundle 需要 storeRoot");
   const managedStore = new ManagedStore({ root: path.resolve(storeRoot) });
@@ -72,7 +80,31 @@ function createResourceBundle({ identityStore, authorization, authStore = null, 
     logger,
     clock,
   });
-  return { resourceService, resourceStore, managedStore };
+  // D3-04C：本地索引与安全预览（派生数据，复用同一连接）。
+  const searchStore = new SearchStore({ identity: identityStore, clock });
+  const searchService = new SearchService({
+    identity: identityStore,
+    resourceStore,
+    searchStore,
+    managedStore,
+    authService: authorization,
+    authStore,
+    deviceService,
+    clock,
+    logger,
+  });
+  const previewService = new PreviewService({
+    identity: identityStore,
+    resourceStore,
+    searchStore,
+    managedStore,
+    authService: authorization,
+    deviceService,
+    clock,
+    nativeImage,
+    logger,
+  });
+  return { resourceService, resourceStore, managedStore, searchStore, searchService, previewService };
 }
 
 const pickerArgs = (command) => ({
@@ -89,7 +121,7 @@ const pickerArgs = (command) => ({
  * 注册 resource:command。
  * 通道名必须是**字面量**（安全回归探针按字面量扫描 IPC 暴露面）。
  */
-function registerResourceIpc({ ipcMain, service, identity, isTrusted, dialog = null, BrowserWindow = null }) {
+function registerResourceIpc({ ipcMain, service, search = null, preview = null, identity, isTrusted, dialog = null, BrowserWindow = null }) {
   ipcMain.handle("resource:command", async (e, command) => {
     if (isTrusted && !isTrusted(e)) throw Error("Forbidden");
     if (!service) return { ok: false, error: "INTERNAL_ERROR", detail: "resource-not-ready" };
@@ -219,6 +251,29 @@ function registerResourceIpc({ ipcMain, service, identity, isTrusted, dialog = n
           });
         case "resource/restoreVersion":
           return service.restoreVersion({ context, resourceRef, version: Number(command.version), expectedVersion: command.expectedVersion == null ? null : Number(command.expectedVersion) });
+        case "resource/search":
+          if (!search) return { ok: false, error: "SEARCH_UNAVAILABLE", items: [], total: 0 };
+          return search.search({
+            context,
+            query: typeof command.query === "string" ? command.query : "",
+            filter: command.filter || {},
+            agent: !!command.agentSessionId,
+            limit: Number(command.limit) || undefined,
+            offset: Number(command.offset) || 0,
+          });
+        case "resource/indexStatus":
+          if (!search) return { ok: false, error: "SEARCH_UNAVAILABLE" };
+          return search.indexStatus({ context, resourceRef });
+        case "resource/reindex":
+          if (!search) return { ok: false, error: "SEARCH_UNAVAILABLE" };
+          if (command.mode === "all") return search.reindexAll({ context, limit: Number(command.limit) || undefined });
+          return search.reindex({ context, resourceRef });
+        case "resource/preview":
+          if (!preview) return { ok: false, error: "PREVIEW_UNAVAILABLE" };
+          return preview.preview({ context, resourceRef });
+        case "resource/thumbnail":
+          if (!preview) return { ok: false, error: "PREVIEW_UNAVAILABLE" };
+          return preview.thumbnail({ context, resourceRef });
         default:
           return { ok: false, error: "INVALID_INPUT" };
       }
