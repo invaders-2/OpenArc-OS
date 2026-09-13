@@ -33,6 +33,22 @@ type Descriptor = {
   createdAt: number;
   updatedAt: number;
   source?: { label?: string };
+  snippet?: { text: string; spans: { text: string; match: boolean }[]; truncated: boolean; matched: boolean };
+  matchedFields?: string[];
+  indexStatus?: string;
+};
+
+type PreviewState = {
+  kind: string;
+  availability: string;
+  mimeType?: string;
+  size?: number | null;
+  version?: number;
+  text?: string;
+  truncated?: boolean;
+  url?: string;
+  error?: string;
+  thumbnailUrl?: string;
 };
 
 type CollectionView = { collectionId: string; name: string; description: string; resourceCount: number; editable: boolean; scope: string };
@@ -116,6 +132,10 @@ export function ResourceLibraryApp() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [searchMode, setSearchMode] = useState(false);
+  const [preview, setPreview] = useState<PreviewState | null>(null);
+  const [indexStatus, setIndexStatus] = useState<{ indexStatus: string; stale: boolean; documentVersion: number | null; resourceVersion: number | null; indexedAt: number | null } | null>(null);
+  const [reindexing, setReindexing] = useState<{ processed: number; remaining: number; total: number } | null>(null);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [collectionOpen, setCollectionOpen] = useState(false);
@@ -141,16 +161,20 @@ export function ResourceLibraryApp() {
       if (!bridge) return;
       setBusy(true);
       const filter: Record<string, unknown> = {};
-      if (query.trim()) filter.name = query.trim();
       if (filterCollection) filter.collectionId = filterCollection;
       if (filterTag) filter.tagId = filterTag;
-      const res = await cmd({ type: "resource/query", category, filter, sort, direction, limit: 60, offset: nextOffset });
+      const q = query.trim();
+      setSearchMode(!!q);
+      if (q) filter.category = category;
+      const res = q
+        ? await cmd({ type: "resource/search", query: q, filter, limit: 60, offset: nextOffset })
+        : await cmd({ type: "resource/query", category, filter, sort, direction, limit: 60, offset: nextOffset });
       if (res && res.ok) {
         setItems((prev) => (nextOffset === 0 ? res.items : [...prev, ...res.items]));
         setTotal(res.total);
-        setHasMore(res.hasMore);
+        setHasMore(!!res.hasMore);
         setOffset(nextOffset);
-        setError(null);
+        setError(q && res.totalIsLowerBound ? "结果可能不完整（索引扫描达到上限）" : null);
       } else {
         setError(String((res && res.error) || "INTERNAL_ERROR"));
       }
@@ -158,6 +182,47 @@ export function ResourceLibraryApp() {
     },
     [bridge, cmd, category, query, filterCollection, filterTag, sort, direction],
   );
+
+  const loadPreview = useCallback(
+    async (resourceRef: string) => {
+      setPreview(null);
+      const res = await cmd({ type: "resource/preview", resourceRef });
+      if (res && res.ok) {
+        setPreview(res as PreviewState);
+        if (res.kind === "image") {
+          const th = await cmd({ type: "resource/thumbnail", resourceRef });
+          if (th && th.ok && th.url) setPreview((prev) => (prev ? { ...prev, thumbnailUrl: th.url } : prev));
+        }
+      } else {
+        setPreview({ kind: "error", availability: String((res && res.error) || "ERROR"), error: String((res && res.error) || "ERROR") });
+      }
+    },
+    [cmd],
+  );
+
+  const loadIndexStatus = useCallback(
+    async (resourceRef: string) => {
+      const res = await cmd({ type: "resource/indexStatus", resourceRef });
+      if (res && res.ok) setIndexStatus(res);
+      else setIndexStatus(null);
+    },
+    [cmd],
+  );
+
+  const rebuildIndex = useCallback(async () => {
+    setReindexing({ processed: 0, remaining: 1, total: 0 });
+    for (let i = 0; i < 500; i += 1) {
+      const res = await cmd({ type: "resource/reindex", mode: "all", limit: 200 });
+      if (!res || !res.ok) {
+        setError(String((res && res.error) || "INDEX_FAILED"));
+        break;
+      }
+      setReindexing({ processed: res.processed, remaining: res.remaining, total: res.total });
+      if (res.remaining <= 0) break;
+    }
+    if (selectedId) void loadIndexStatus(selectedId);
+    await reload(0);
+  }, [cmd, selectedId, loadIndexStatus, reload]);
 
   const loadCollections = useCallback(async () => {
     const res = await cmd({ type: "resource/listCollections" });
@@ -186,8 +251,10 @@ export function ResourceLibraryApp() {
       if (res && res.ok) setInspector(res as Inspector);
       else setInspector(null);
       if (touch) void cmd({ type: "resource/touchRecent", resourceRef: resourceId });
+      void loadPreview(resourceId);
+      void loadIndexStatus(resourceId);
     },
-    [cmd],
+    [cmd, loadPreview, loadIndexStatus],
   );
 
   const afterMutation = useCallback(
@@ -351,7 +418,7 @@ export function ResourceLibraryApp() {
 
       <section className="rl-content" aria-label="资源列表">
         <div className="rl-toolbar">
-          <SearchField value={query} onValueChange={setQuery} placeholder="按名称过滤（全文搜索属 D3-04C）" label="按名称过滤" />
+          <SearchField value={query} onValueChange={setQuery} placeholder="全文搜索（本地索引，中文可用）" label="全文搜索" />
           <div className="rl-toolbar-actions">
             <Button variant="secondary" size="sm" data-d3-04a-action="import" onClick={doImport}>导入</Button>
             <Button variant="secondary" size="sm" data-d3-04a-action="link" onClick={doLink}>链接文件</Button>
@@ -375,6 +442,8 @@ export function ResourceLibraryApp() {
 
         {error ? <p className="rl-error" data-d3-04b-error role="alert">{error}</p> : null}
         {notice ? <p className="rl-notice" data-d3-04b-notice role="status">{notice}</p> : null}
+        {reindexing ? <p className="rl-notice" data-d3-04c-reindex role="status">索引重建：{reindexing.processed} 已处理 / 剩余 {reindexing.remaining}</p> : null}
+        {searchMode ? <p className="rl-searchmode" data-d3-04c-search-mode role="status">全文搜索：{total} 条授权结果</p> : null}
 
         {items.length === 0 && !busy ? (
           <p className="rl-empty" data-d3-04a-empty>{currentNav ? currentNav.empty : "暂无资源。"}</p>
@@ -398,6 +467,13 @@ export function ResourceLibraryApp() {
                 {r.favorite ? <span className="rl-fav" aria-label="已收藏">★</span> : null}
               </div>
               <div className="rl-card-name">{r.name}</div>
+              {r.snippet && r.snippet.matched ? (
+                <div className="rl-card-snippet" data-d3-04c-snippet>
+                  {r.snippet.spans.map((s, i) => (s.match ? <mark key={i}>{s.text}</mark> : <span key={i}>{s.text}</span>))}
+                  {r.snippet.truncated ? "…" : ""}
+                </div>
+              ) : null}
+              {r.matchedFields && r.matchedFields.length ? <div className="rl-card-fields" data-d3-04c-fields>命中：{r.matchedFields.join(" / ")}</div> : null}
               <div className="rl-card-meta">{r.storageMode} · {r.availability === "AVAILABLE" ? "可用" : AVAILABILITY_LABEL[r.availability]}</div>
               <div className="rl-card-foot">
                 <span>{fmtSize(r.size)}</span>
@@ -445,6 +521,23 @@ export function ResourceLibraryApp() {
                 </>
               )}
             </div>
+
+            <section className="rl-block" aria-label="预览" data-d3-04c-preview={preview ? preview.kind : "none"}>
+              <h3>Preview</h3>
+              {!preview ? <p className="rl-note">加载中…</p> : preview.kind === "text" ? (
+                <pre className="rl-preview-text" data-d3-04c-preview-text>{preview.text}{preview.truncated ? "\n…（已截断）" : ""}</pre>
+              ) : preview.kind === "image" && preview.url ? (
+                <img className="rl-preview-media" data-d3-04c-preview-image src={preview.thumbnailUrl || preview.url} alt={inspector.resource.name} />
+              ) : preview.kind === "video" && preview.url ? (
+                <video className="rl-preview-media" data-d3-04c-preview-video controls preload="metadata" src={preview.url} />
+              ) : preview.kind === "audio" && preview.url ? (
+                <audio data-d3-04c-preview-audio controls src={preview.url} />
+              ) : preview.kind === "pdf" && preview.url ? (
+                <iframe className="rl-preview-pdf" data-d3-04c-preview-pdf title="PDF Preview" src={preview.url} />
+              ) : (
+                <p className="rl-note" data-d3-04c-preview-error>{preview.error || preview.availability || "预览不可用"}</p>
+              )}
+            </section>
 
             <dl className="rl-meta">
               <div><dt>Description</dt><dd>{(inspector.resource as any).description || "-"}</dd></div>
@@ -534,6 +627,17 @@ export function ResourceLibraryApp() {
             <section className="rl-block" aria-label="引用关系">
               <h3>Relations</h3>
               <p>引用：{inspector.relations.incoming} incoming · {inspector.relations.outgoing} outgoing</p>
+            </section>
+
+            <section className="rl-block" aria-label="索引">
+              <h3>Index</h3>
+              <p className="rl-cap" data-d3-04c-index-status>Index Status: {indexStatus ? indexStatus.indexStatus + (indexStatus.stale ? "（STALE）" : "") : "-"}</p>
+              <p className="rl-cap" data-d3-04c-index-version>Indexed Version: {indexStatus && indexStatus.documentVersion != null ? "v" + indexStatus.documentVersion : "-"} / Resource Version: {indexStatus && indexStatus.resourceVersion != null ? "v" + indexStatus.resourceVersion : "-"}</p>
+              <div className="rl-inline">
+                <Button variant="secondary" size="sm" data-d3-04c-action="reindex" disabled={!!reindexing} onClick={() => void cmd({ type: "resource/reindex", resourceRef: inspector.resource.resourceId }).then(() => { void loadIndexStatus(inspector.resource.resourceId); void reload(0); })}>重新索引</Button>
+                <Button variant="ghost" size="sm" data-d3-04c-action="rebuild-index" disabled={!!reindexing} onClick={() => void rebuildIndex()}>重建全部索引</Button>
+              </div>
+              <p className="rl-cap-note">索引是派生数据；Authorization 每次搜索实时检查，不依赖索引。</p>
             </section>
           </div>
         )}
