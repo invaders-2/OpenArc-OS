@@ -89,11 +89,15 @@ app.whenReady().then(() => {
     // admin / 测试夹具命令默认关闭：产品 UI 里没有入口，也不该有。
     // 只有显式置 OPENARC_IDENTITY_ADMIN=1 才放行（探针与未来的管理端用）。
     allowAdmin: process.env.OPENARC_IDENTITY_ADMIN === "1",
+    // Control Service 身份（§60）：New Device 配对此前必须先能确认"这是我要加入的服务"。
+    // 未配置时配对会因 SERVICE_IDENTITY_MISMATCH 被拒 —— 失败关闭，不做 TOFU。
+    serviceIdentity: process.env.OPENARC_SERVICE_IDENTITY || null,
   });
   registerIdentityIpc({
     ipcMain,
     service: identity.service,
     authorization: identity.authorization,
+    device: identity.deviceService,
     isTrusted: trusted,
     send: (event) => {
       if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return;

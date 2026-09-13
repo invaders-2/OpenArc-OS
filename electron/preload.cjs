@@ -56,4 +56,17 @@ contextBridge.exposeInMainWorld("openarc", {
   authorization: {
     command: (command) => ipcRenderer.invoke("authorization:command", command),
   },
+  /**
+   * D3-03 设备桥。
+   *
+   * 这是本版本**唯一带写操作**的渲染进程桥（Start Pairing / Disable / Enable / Revoke，§49）。
+   * 安全性不依赖"桥里只有读"，而是：
+   *   ① sessionRef 由主进程从 IdentityService 注入，渲染进程无法伪造身份；
+   *   ② 每个动作在 DeviceService 里都要过 SUPER_ADMIN + 动作授权；
+   *   ③ 返回对象恒为 publicDevice —— 私钥 / 凭据 / pairing secret 永不出现（§48）。
+   * 这里没有暴露任何 SQL、证书对象、device_credentials 或 device_access 表。
+   */
+  device: {
+    command: (command) => ipcRenderer.invoke("device:command", command),
+  },
 });

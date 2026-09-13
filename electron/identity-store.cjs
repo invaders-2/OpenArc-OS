@@ -51,7 +51,7 @@ const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domai
  * 迁移按版本逐级前进，每一级各自是一个原子事务：任何一级失败只回滚该级，
  * 不会留下"user_version 已升级但表不完整"的半状态（§55）。
  */
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -305,10 +305,111 @@ VALUES
   ('skill-runtime','技能运行时','openarc-builtin','enabled',1,0,0);
 `;
 
+/**
+ * D3-03 = v3（device identity / registry / pairing / TLS）。
+ *
+ * 四张表 + 一张审计表，边界刻意划清：
+ *   devices                      —— Registry 唯一权威（状态、组织、当前 credentialVersion）
+ *   device_pairing_credentials   —— bootstrap 专用，**只存 secret 的 sha256**，不存明文（§47）
+ *   device_credentials           —— 凭据历史，支撑轮换（§28）与"旧版本必须失效"（§25 §29）
+ *   device_access                —— Organization / Department / Explicit User 三种主体（§11）
+ *   device_audit                 —— 与 authorization_audit 同风格，字段按 §46
+ *
+ * 为什么 devices.certificate_identity 与 device_credentials.fingerprint 都要有唯一索引：
+ * 证书身份是**运行时热路径**的查找键（TLS 握手后拿 fingerprint 反查设备），
+ * 一旦出现两行同 fingerprint，"这个连接是谁"就没有唯一答案了 —— 那是安全漏洞，不是数据质量问题。
+ */
+const SCHEMA_V3_SQL = `
+CREATE TABLE devices (
+  id                   TEXT PRIMARY KEY,
+  organization_id      TEXT    NOT NULL,
+  display_name         TEXT    NOT NULL,
+  platform             TEXT    NOT NULL DEFAULT 'unknown',
+  architecture         TEXT    NOT NULL DEFAULT 'unknown',
+  status               TEXT    NOT NULL CHECK (status IN ('PENDING','ACTIVE','DISABLED','REVOKED')),
+  registered_at        INTEGER,
+  registered_by        TEXT,
+  last_seen_at         INTEGER,
+  certificate_identity TEXT,
+  credential_version   INTEGER NOT NULL DEFAULT 0 CHECK (credential_version >= 0),
+  agent_version        TEXT,
+  metadata_version     INTEGER NOT NULL DEFAULT 1,
+  department_id        TEXT,
+  connectivity         TEXT    NOT NULL DEFAULT 'UNKNOWN' CHECK (connectivity IN ('ONLINE','OFFLINE','UNKNOWN')),
+  created_at           INTEGER NOT NULL,
+  updated_at           INTEGER NOT NULL
+);
+CREATE INDEX idx_devices_org ON devices(organization_id);
+CREATE INDEX idx_devices_status ON devices(status);
+CREATE UNIQUE INDEX idx_devices_cert ON devices(certificate_identity) WHERE certificate_identity IS NOT NULL;
+
+CREATE TABLE device_pairing_credentials (
+  id                   TEXT PRIMARY KEY,
+  organization_id      TEXT    NOT NULL,
+  secret_hash          TEXT    NOT NULL UNIQUE,
+  status               TEXT    NOT NULL CHECK (status IN ('ISSUED','CONSUMED','EXPIRED','REVOKED')),
+  issued_by            TEXT    NOT NULL,
+  issued_at            INTEGER NOT NULL,
+  expires_at           INTEGER NOT NULL,
+  consumed_at          INTEGER,
+  consumed_by_device_id TEXT,
+  department_id        TEXT,
+  created_at           INTEGER NOT NULL
+);
+CREATE INDEX idx_pairing_org ON device_pairing_credentials(organization_id);
+CREATE INDEX idx_pairing_status ON device_pairing_credentials(status);
+
+CREATE TABLE device_credentials (
+  id                 TEXT PRIMARY KEY,
+  device_id          TEXT    NOT NULL REFERENCES devices(id),
+  organization_id    TEXT    NOT NULL,
+  credential_version INTEGER NOT NULL,
+  subject            TEXT    NOT NULL,
+  fingerprint        TEXT    NOT NULL,
+  status             TEXT    NOT NULL CHECK (status IN ('ACTIVE','ROTATED','REVOKED')),
+  not_before         INTEGER NOT NULL,
+  not_after          INTEGER NOT NULL,
+  issued_at          INTEGER NOT NULL,
+  rotated_at         INTEGER,
+  UNIQUE (device_id, credential_version)
+);
+CREATE UNIQUE INDEX idx_devcred_fingerprint ON device_credentials(fingerprint);
+CREATE INDEX idx_devcred_device ON device_credentials(device_id, status);
+
+CREATE TABLE device_access (
+  id              TEXT PRIMARY KEY,
+  device_id       TEXT    NOT NULL REFERENCES devices(id),
+  organization_id TEXT    NOT NULL,
+  principal_type  TEXT    NOT NULL CHECK (principal_type IN ('ORGANIZATION','DEPARTMENT','USER')),
+  principal_id    TEXT    NOT NULL DEFAULT '',
+  actions         TEXT    NOT NULL,
+  granted_by      TEXT,
+  created_at      INTEGER NOT NULL,
+  expires_at      INTEGER,
+  UNIQUE (device_id, principal_type, principal_id)
+);
+CREATE INDEX idx_daccess_device ON device_access(device_id);
+
+CREATE TABLE device_audit (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  at              INTEGER NOT NULL,
+  actor_user_id   TEXT,
+  device_id       TEXT,
+  organization_id TEXT,
+  event           TEXT    NOT NULL,
+  reason_code     TEXT,
+  request_id      TEXT,
+  detail          TEXT
+);
+CREATE INDEX idx_device_audit_at ON device_audit(at);
+CREATE INDEX idx_device_audit_device ON device_audit(device_id);
+`;
+
 /** 迁移阶梯。新增 version 时把新 schema 追加在末尾，不改旧条目。 */
 const MIGRATIONS = Object.freeze([
   { version: 1, sql: SCHEMA_SQL },
   { version: 2, sql: SCHEMA_V2_SQL },
+  { version: 3, sql: SCHEMA_V3_SQL },
 ]);
 
 const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000; // 12h 绝对上限
@@ -1403,6 +1504,7 @@ module.exports = {
   SCHEMA_VERSION,
   SCHEMA_SQL,
   SCHEMA_V2_SQL,
+  SCHEMA_V3_SQL,
   MIGRATIONS,
   IdentityStore,
   DEFAULT_TTL_MS,

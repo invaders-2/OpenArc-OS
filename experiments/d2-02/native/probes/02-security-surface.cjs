@@ -42,10 +42,12 @@ const FROZEN_BRIDGE_KEYS = ["action", "authorization", "identity", "navigate", "
  * （与 UI 探针共用同一份装配），不在 main.cjs 里。只扫 main.cjs 会漏掉它，
  * 等于"新增通道不再受这条断言约束"——因此两个文件都要扫。
  */
-const FROZEN_IPC_CHANNELS = ["authorization:command", "browser:action", "browser:navigate", "identity:command", "windows:sync"];
-const IPC_SCAN_FILES = ["main.cjs", "identity-bootstrap.cjs", "authorization-bootstrap.cjs"];
-/** D3-01 冻结的上一版清单（6 个），用于把"发生了什么变化"讲清楚。 */
-const PREV_BRIDGE_KEYS = ["action", "identity", "navigate", "onDisplay", "onNativeState", "sync"];
+const FROZEN_IPC_CHANNELS = ["authorization:command", "browser:action", "browser:navigate", "device:command", "identity:command", "windows:sync"];
+const IPC_SCAN_FILES = ["main.cjs", "identity-bootstrap.cjs", "authorization-bootstrap.cjs", "device-bootstrap.cjs"];
+/** D3-02 冻结的上一版清单（6 个），用于把"发生了什么变化"讲清楚。 */
+const PREV_BRIDGE_KEYS = ["action", "authorization", "identity", "navigate", "onDisplay", "onNativeState", "sync"];
+/** D3-03 之前那一版（不含 device）。 */
+const D3_02_IPC_CHANNELS = ["authorization:command", "browser:action", "browser:navigate", "identity:command", "windows:sync"];
 /** D2-02 冻结的更早版本，仅作历史留痕。 */
 const PREV_PREV_BRIDGE_KEYS = ["action", "navigate", "onDisplay", "onNativeState", "sync"];
 /** D1-05 冻结的再上一版，仅作历史留痕。 */

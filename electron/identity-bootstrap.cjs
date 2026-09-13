@@ -15,6 +15,7 @@ const { IdentityService } = require("./identity-service.cjs");
 const { IdentityLogger } = require("./identity-log.cjs");
 const { SessionSecretStore, safeStorageBackend, plainFileBackend } = require("./session-secret-store.cjs");
 const { createAuthorizationService, registerAuthorizationIpc } = require("./authorization-bootstrap.cjs");
+const { createDeviceBundle, registerDeviceIpc } = require("./device-bootstrap.cjs");
 
 /**
  * @param opts.userDataDir 数据目录（identity.db 与受保护存储落在这里）
@@ -22,7 +23,7 @@ const { createAuthorizationService, registerAuthorizationIpc } = require("./auth
  * @param opts.allowAdmin  是否放行 admin / 测试夹具命令
  * @param opts.logger      可选，注入外部 logger（探针用）
  */
-function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, logger } = {}) {
+function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, logger, serviceIdentity = null } = {}) {
   fs.mkdirSync(userDataDir, { recursive: true, mode: 0o700 });
   const log = logger || new IdentityLogger();
   const store = new IdentityStore({
@@ -42,7 +43,9 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
   const service = new IdentityService({ store, secrets, logger: log, allowAdmin });
   // D3-02：对象授权与身份共用同一条 SQLite 连接与同一套命令接线。
   const { authorization, authStore } = createAuthorizationService({ identityStore: store, logger: log });
-  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore };
+  // D3-03：设备域挂在**同一条** SQLite 连接与事务队列上（迁移 v3 已在 open() 里完成）。
+  const { deviceService, deviceStore } = createDeviceBundle({ identityStore: store, authorization, logger: log, serviceIdentity });
+  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore };
 }
 
 /**
@@ -51,7 +54,7 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
  * @param opts.isTrusted (event) => boolean —— 与 windows:sync 同一条信任判据
  * @param opts.send      (payload) => void —— 把身份事件推给渲染进程
  */
-function registerIdentityIpc({ ipcMain, service, authorization, isTrusted, send }) {
+function registerIdentityIpc({ ipcMain, service, authorization, device, isTrusted, send }) {
   ipcMain.handle("identity:command", async (e, command) => {
     if (isTrusted && !isTrusted(e)) throw Error("Forbidden");
     if (!service) return { ok: false, error: "INTERNAL_ERROR", detail: "identity-not-ready" };
@@ -66,6 +69,8 @@ function registerIdentityIpc({ ipcMain, service, authorization, isTrusted, send 
   if (send) service.onEvent((event) => send(event));
   // D3-02：同一处注册对象授权只读命令（sessionRef 取自 IdentityService 当前会话）。
   if (authorization) registerAuthorizationIpc({ ipcMain, service: authorization, identity: service, isTrusted });
+  // D3-03：设备域（含管理写操作；授权判断在 DeviceService 内，见 device-bootstrap 顶部注释）。
+  if (device) registerDeviceIpc({ ipcMain, service: device, identity: service, isTrusted });
 }
 
 module.exports = { createIdentityService, registerIdentityIpc };
