@@ -27,6 +27,30 @@ const RENDERER_COMMANDS = Object.freeze([
   "resource/job",
   "resource/pickImport",
   "resource/pickLink",
+  "resource/query",
+  "resource/inspector",
+  "resource/create",
+  "resource/updateMetadata",
+  "resource/setCollection",
+  "resource/listCollections",
+  "resource/createCollection",
+  "resource/updateCollection",
+  "resource/deleteCollection",
+  "resource/getCollection",
+  "resource/listTags",
+  "resource/createTag",
+  "resource/assignTag",
+  "resource/removeTag",
+  "resource/renameTag",
+  "resource/deleteTag",
+  "resource/listResourceTags",
+  "resource/setFavorite",
+  "resource/listFavorites",
+  "resource/touchRecent",
+  "resource/listRecent",
+  "resource/listVersions",
+  "resource/replaceText",
+  "resource/restoreVersion",
 ]);
 
 /**
@@ -112,6 +136,89 @@ function registerResourceIpc({ ipcMain, service, identity, isTrusted, dialog = n
           if (!picked || picked.canceled || !picked.filePaths || !picked.filePaths.length) return { ok: false, error: "CANCELLED" };
           return service.createLinked({ context, sourcePath: picked.filePaths[0], ...pickerArgs(command) });
         }
+        case "resource/query":
+          return service.queryResources({
+            context,
+            category: command.category ? String(command.category) : "all",
+            filter: command.filter || {},
+            sort: command.sort ? String(command.sort) : "updated",
+            direction: command.direction ? String(command.direction) : "desc",
+            limit: Number(command.limit) || undefined,
+            offset: Number(command.offset) || 0,
+          });
+        case "resource/inspector":
+          return service.getInspector({ context, resourceRef });
+        case "resource/create":
+          return service.createResource({
+            context,
+            resourceType: command.resourceType ? String(command.resourceType) : "text",
+            name: command.name ? String(command.name) : undefined,
+            description: command.description ? String(command.description) : "",
+            content: typeof command.content === "string" ? command.content : "",
+            memorySubtype: command.memorySubtype ? String(command.memorySubtype) : null,
+            language: command.language ? String(command.language) : null,
+            attributes: command.attributes || null,
+            tags: Array.isArray(command.tags) ? command.tags.map(String) : [],
+            collectionId: command.collectionId ? String(command.collectionId) : null,
+          });
+        case "resource/updateMetadata":
+          return service.updateMetadata({
+            context,
+            resourceRef,
+            name: command.name,
+            description: command.description,
+            collectionId: command.collectionId,
+            memorySubtype: command.memorySubtype,
+            language: command.language,
+            attributes: command.attributes,
+          });
+        case "resource/setCollection":
+          return service.setCollection({ context, resourceRef, collectionId: command.collectionId == null ? null : String(command.collectionId) });
+        case "resource/listCollections":
+          return service.listCollections({ context });
+        case "resource/createCollection":
+          return service.createCollection({ context, name: command.name, description: command.description });
+        case "resource/updateCollection":
+          return service.updateCollection({ context, collectionId: command.collectionId, name: command.name, description: command.description });
+        case "resource/deleteCollection":
+          return service.deleteCollection({ context, collectionId: command.collectionId });
+        case "resource/getCollection":
+          return service.getCollection({ context, collectionId: command.collectionId });
+        case "resource/listTags":
+          return service.listTags({ context });
+        case "resource/createTag":
+          return service.createTag({ context, name: command.name });
+        case "resource/assignTag":
+          return service.assignTag({ context, resourceRef, name: command.name, tagId: command.tagId });
+        case "resource/removeTag":
+          return service.removeTag({ context, resourceRef, tagId: command.tagId });
+        case "resource/renameTag":
+          return service.renameTag({ context, tagId: command.tagId, name: command.name });
+        case "resource/deleteTag":
+          return service.deleteTag({ context, tagId: command.tagId });
+        case "resource/listResourceTags":
+          return service.listResourceTags({ context, resourceRef });
+        case "resource/setFavorite":
+          return service.setFavorite({ context, resourceRef, favorite: command.favorite !== false });
+        case "resource/listFavorites":
+          return service.listFavorites({ context });
+        case "resource/touchRecent":
+          return service.touchRecent({ context, resourceRef });
+        case "resource/listRecent":
+          return service.listRecent({ context, limit: Number(command.limit) || undefined });
+        case "resource/listVersions":
+          return service.listVersions({ context, resourceRef });
+        case "resource/replaceText":
+          return service.replaceText({
+            context,
+            resourceRef,
+            text: typeof command.content === "string" ? command.content : "",
+            expectedVersion: command.expectedVersion == null ? null : Number(command.expectedVersion),
+            language: command.language,
+            mimeType: command.mimeType ? String(command.mimeType) : "text/plain",
+          });
+        case "resource/restoreVersion":
+          return service.restoreVersion({ context, resourceRef, version: Number(command.version), expectedVersion: command.expectedVersion == null ? null : Number(command.expectedVersion) });
         default:
           return { ok: false, error: "INVALID_INPUT" };
       }

@@ -16,7 +16,7 @@ const path = require("node:path");
 const domain = require("./resource-domain.cjs");
 const authz = require("./authorization-domain.cjs");
 
-const { ok, fail, REASON, STORAGE_MODE, AVAILABILITY, IMPORT_PHASE, TRASH_STATE, CONTENT_STATUS, SOURCE, INDEX_STATUS, LOCAL_DEVICE_ID } = domain;
+const { ok, fail, REASON, STORAGE_MODE, AVAILABILITY, IMPORT_PHASE, TRASH_STATE, CONTENT_STATUS, SOURCE, INDEX_STATUS, LOCAL_DEVICE_ID, TAG_SOURCE, CATEGORY } = domain;
 
 /**
  * 内置 App 的默认 Resource 权限清单（显式系统策略）。
@@ -223,9 +223,9 @@ class ResourceService {
     return { availability: AVAILABILITY.AVAILABLE, reason: null };
   }
 
-  #descriptor(row, context) {
+  #descriptor(row, context, extras = {}) {
     const avail = this.#availability(row, context);
-    const descriptor = domain.descriptorProjection(row, { availability: avail.availability });
+    const descriptor = domain.descriptorProjection(row, { availability: avail.availability, favorite: extras.favorite, recentAt: extras.recentAt });
     descriptor.source = domain.presentSource({ storageMode: row.storage_mode, storageDeviceId: row.storage_device_id });
     descriptor.remoteContent = !!avail.remote;
     return descriptor;
@@ -329,7 +329,7 @@ class ResourceService {
     }
   }
 
-  async importText({ context, text, name = "untitled.txt", description = "", resourceType = "text", scope = "PERSONAL", departmentId = null, collectionId = null, tags = [], source = SOURCE.USER, generated = null, onProgress = null } = {}) {
+  async importText({ context, text, name = "untitled.txt", description = "", resourceType = "text", memorySubtype = null, language = null, attributes = null, scope = "PERSONAL", departmentId = null, collectionId = null, tags = [], source = SOURCE.USER, generated = null, onProgress = null } = {}) {
     this.#ensureBuiltinPolicy(context);
     const actor = this.#actor(context);
     if (!actor.ok) return actor;
@@ -358,6 +358,7 @@ class ResourceService {
         context, jobId, user, resourceType: resType, mimeType: "text/plain", name, description,
         storageMode: STORAGE_MODE.MANAGED, checksum: staged.checksum, size: staged.size, storageDeviceId: LOCAL_DEVICE_ID,
         sourceLabel: source, ownerUserId: user.id, scope, departmentId, collectionId, tags, generated, version: 1,
+        memorySubtype: resType === "memory" ? memorySubtype : null, language, attributes,
       });
       if (!committed.ok) throw Object.assign(new Error(committed.error), { code: committed.error });
       this.fs.removeStaging(jobId);
@@ -399,6 +400,9 @@ class ResourceService {
           generatedSourceTaskId: generated ? generated.taskId || null : null,
           generatedSourceCallId: generated ? generated.callId || null : null,
           generatedSourceModel: generated ? generated.model || null : null,
+          memorySubtype: args.memorySubtype || null,
+          language: args.language || null,
+          attributes: args.attributes || null,
           indexStatus: INDEX_STATUS.NOT_INDEXED,
         });
         this.store.insertVersion({ resourceId: registry.resource_id, version, contentObjectId: content ? content.content_id : null, checksum, size, storageMode, storageDeviceId, sourceLocator, source: sourceLabel || SOURCE.USER, createdBy: user.id, createdAt: now });
@@ -446,7 +450,9 @@ class ResourceService {
     const trashed = row.trash_state === TRASH_STATE.TRASHED;
     const caps = this.authService.getCapabilities({ context, resource: row.resource_id, allowInactiveResource: trashed });
     if (!caps.ok) return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
-    return ok({ resource: this.#descriptor(row, context), location: this.#location(row, context) });
+    const actor = this.#actor(context);
+    const favorite = actor.ok ? this.store.isFavorite(actor.user.id, row.resource_id) : false;
+    return ok({ resource: this.#descriptor(row, context, { favorite }), location: this.#location(row, context) });
   }
 
   read({ context, resourceRef, version = null } = {}) {
@@ -530,6 +536,41 @@ class ResourceService {
       this.store.transactSync(() => this.store.updateImportJob(jobId, { phase: cancelled ? IMPORT_PHASE.CANCELLED : IMPORT_PHASE.FAILED, errorCode: cancelled ? REASON.IMPORT_CANCELLED : (err && err.code) || REASON.IMPORT_FAILED }));
       this.#finishJob(jobId);
       return fail(cancelled ? REASON.IMPORT_CANCELLED : (err && err.code) || REASON.IMPORT_FAILED);
+    }
+  }
+
+  /** D3-04B：文本内容编辑（Memory / Text / Code / Prompt）。同样走 version + expectedVersion。 */
+  async replaceText({ context, resourceRef, text, expectedVersion = null, language = undefined, mimeType = "text/plain" } = {}) {
+    this.#ensureBuiltinPolicy(context);
+    const load = this.#load({ context, resourceRef, action: authz.ACTION.EDIT, opaque: true });
+    if (!load.ok) return load;
+    const row = load.row;
+    if (row.trash_state === TRASH_STATE.TRASHED) return fail(REASON.RESOURCE_TRASHED);
+    const conflict = domain.evaluateVersionConflict({ expectedVersion, currentVersion: row.version });
+    if (!conflict.ok) return conflict;
+    const actor = this.#actor(context);
+    if (!actor.ok) return actor;
+    const buf = Buffer.from(String(text == null ? "" : text), "utf8");
+    const job = this.store.transactSync(() => this.store.createImportJob({ organizationId: row.organization_id, actorUserId: actor.user.id, appId: (context && context.appId) || "resource-library", storageMode: STORAGE_MODE.MANAGED, bytesTotal: buf.length }));
+    const jobId = job.id;
+    try {
+      const staged = await this.fs.stageFromBuffer(jobId, buf, {});
+      this.store.transactSync(() => this.store.updateImportJob(jobId, { phase: IMPORT_PHASE.HASHED, checksum: staged.checksum, size: staged.size, stagingKey: domain.stagingKeyFor(jobId) }));
+      const promote = await this.fs.promoteStaging(jobId, staged.checksum);
+      if (!promote.ok) throw Object.assign(new Error(promote.error), { code: promote.error });
+      this.store.transactSync(() => this.#ensureContentObject(staged.checksum, staged.size, row.organization_id));
+      this.store.transactSync(() => this.store.updateImportJob(jobId, { phase: IMPORT_PHASE.OBJECT_READY }));
+      const committed = this.#commitNewVersion({ row, user: actor.user, checksum: staged.checksum, size: staged.size, mimeType, jobId });
+      if (!committed.ok) throw Object.assign(new Error(committed.error), { code: committed.error });
+      if (language !== undefined) this.store.transactSync(() => this.store.updateLibraryResource(row.resource_id, { language: language == null ? null : String(language) }));
+      this.fs.removeStaging(jobId);
+      this.#finishJob(jobId);
+      return ok({ resource: this.#descriptor(this.store.resourceRowById(row.resource_id), context) });
+    } catch (err) {
+      this.fs.removeStaging(jobId);
+      this.store.transactSync(() => this.store.updateImportJob(jobId, { phase: IMPORT_PHASE.FAILED, errorCode: (err && err.code) || REASON.IMPORT_FAILED }));
+      this.#finishJob(jobId);
+      return fail((err && err.code) || REASON.IMPORT_FAILED);
     }
   }
 
@@ -787,6 +828,430 @@ class ResourceService {
       removed.push(content.content_id);
     }
     return ok({ removed, count: removed.length });
+  }
+
+  // -------------------------------------------------------------------------
+  // D3-04B · Create / Metadata / Collection / Tag / Favorite / Recent / Query
+  // -------------------------------------------------------------------------
+
+  /** 新建 Memory / Text / Code / Prompt。内容真实走 importText（形成 v1）。 */
+  async createResource({ context, resourceType = "text", name, description = "", content = "", memorySubtype = null, language = null, attributes = null, tags = [], collectionId = null, scope = "PERSONAL", departmentId = null } = {}) {
+    const type = String(resourceType || "text");
+    if (!["memory", "text", "code", "prompt"].includes(type)) return fail(REASON.INVALID_INPUT, "create-type");
+    if (type === "memory") {
+      const check = domain.validateMemorySubtype(memorySubtype);
+      if (!check.ok) return check;
+    }
+    const created = await this.importText({
+      context, text: content, name, description, resourceType: type,
+      memorySubtype: type === "memory" ? memorySubtype : null, language, attributes,
+      scope, departmentId, collectionId: null, tags: [], source: SOURCE.USER,
+    });
+    if (!created.ok) return created;
+    const resourceId = created.resource.resourceId;
+    if (collectionId) this.setCollection({ context, resourceRef: resourceId, collectionId });
+    for (const t of Array.isArray(tags) ? tags : []) {
+      if (typeof t === "string" && t.trim()) this.assignTag({ context, resourceRef: resourceId, name: t });
+    }
+    return this.get({ context, resourceRef: resourceId });
+  }
+
+  /** Metadata 修改（name / description / collection / memory subtype / language / attributes）。不产生内容 version。 */
+  updateMetadata({ context, resourceRef, name, description, collectionId, memorySubtype, language, attributes } = {}) {
+    this.#ensureBuiltinPolicy(context);
+    const load = this.#load({ context, resourceRef, action: authz.ACTION.EDIT, opaque: true });
+    if (!load.ok) return load;
+    const row = load.row;
+    if (row.trash_state === TRASH_STATE.TRASHED) return fail(REASON.RESOURCE_TRASHED);
+    if (collectionId !== undefined && collectionId !== null) {
+      const col = this.authStore ? this.authStore.collectionById(collectionId) : null;
+      if (!col || col.organization_id !== row.organization_id || col.status !== "active") return fail(REASON.INVALID_INPUT, "collection");
+    }
+    let sub;
+    if (memorySubtype !== undefined) {
+      const check = domain.validateMemorySubtype(memorySubtype);
+      if (!check.ok) return check;
+      sub = check.memorySubtype;
+    }
+    const patch = {};
+    if (name !== undefined) patch.name = String(name);
+    if (description !== undefined) patch.description = String(description);
+    if (sub !== undefined) patch.memory_subtype = sub;
+    if (language !== undefined) patch.language = language == null ? null : String(language);
+    if (attributes !== undefined) patch.attributes = JSON.stringify(attributes && typeof attributes === "object" ? attributes : {});
+    this.store.transactSync(() => {
+      this.store.updateRegistryMetadata(row.resource_id, { name, description, collectionId });
+      if (Object.keys(patch).length) this.store.updateLibraryResource(row.resource_id, patch);
+    });
+    return this.get({ context, resourceRef: row.resource_id });
+  }
+
+  /** 移动 Resource 到 Collection（primary Collection）。null = Unfiled。 */
+  setCollection({ context, resourceRef, collectionId = null } = {}) {
+    this.#ensureBuiltinPolicy(context);
+    const load = this.#load({ context, resourceRef, action: authz.ACTION.MOVE, opaque: true });
+    if (!load.ok) return load;
+    const row = load.row;
+    if (collectionId != null) {
+      const col = this.authStore ? this.authStore.collectionById(collectionId) : null;
+      if (!col || col.organization_id !== row.organization_id || col.status !== "active") return fail(REASON.INVALID_INPUT, "collection");
+    }
+    this.store.transactSync(() => this.store.updateRegistryMetadata(row.resource_id, { collectionId: collectionId == null ? null : String(collectionId) }));
+    return this.get({ context, resourceRef: row.resource_id });
+  }
+
+  // --- Collections ----------------------------------------------------------
+
+  #collectionView(col, userId) {
+    return {
+      collectionId: col.id,
+      name: col.name,
+      description: col.description,
+      scope: col.scope,
+      ownerUserId: col.owner_user_id,
+      departmentId: col.department_id ?? null,
+      status: col.status,
+      resourceCount: this.store.countCollectionResources(col.id),
+      editable: col.owner_user_id === userId,
+      createdAt: col.created_at,
+      updatedAt: col.updated_at,
+    };
+  }
+
+  #authorizeCollection({ context, collection }) {
+    const actor = this.#actor(context);
+    if (!actor.ok) return actor;
+    if (!collection || collection.organization_id !== actor.user.team_id) return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
+    if (actor.user.role === "ADMIN") return ok({ user: actor.user, source: "SUPER_ADMIN" });
+    if (collection.owner_user_id === actor.user.id) return ok({ user: actor.user, source: "OWNER_POLICY" });
+    if (collection.scope === "DEPARTMENT" && collection.department_id && this.authStore) {
+      const m = this.authStore.membershipByPair(collection.department_id, actor.user.id);
+      if (m && m.status === "ACTIVE" && m.membership_role === "department-admin") return ok({ user: actor.user, source: "DEPARTMENT_ADMIN" });
+    }
+    return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
+  }
+
+  createCollection({ context, name, description = "" } = {}) {
+    this.#ensureBuiltinPolicy(context);
+    const actor = this.#actor(context);
+    if (!actor.ok) return actor;
+    const nm = String(name || "").trim();
+    if (!nm) return fail(REASON.INVALID_INPUT, "collection-name");
+    const create = this.authService.authorizeCreate({ context, application: { appId: (context && context.appId) || "resource-library" }, scope: "PERSONAL", resourceType: "collection" });
+    if (create.decision !== "ALLOW") return fail(create.reasonCode || REASON.NOT_FOUND_OR_FORBIDDEN);
+    const col = this.store.transactSync(() =>
+      this.authStore.insertCollection({ organizationId: actor.user.team_id, ownerUserId: actor.user.id, name: nm, description: String(description || ""), scope: "PERSONAL" }),
+    );
+    return ok({ collection: this.#collectionView(col, actor.user.id) });
+  }
+
+  listCollections({ context } = {}) {
+    const actor = this.#actor(context);
+    if (!actor.ok) return actor;
+    const deptIds = new Set(this.authStore.membershipsOfUser(actor.user.id).filter((m) => m.status === "ACTIVE").map((m) => m.department_id));
+    const cols = this.authStore
+      .collectionsOfOrg(actor.user.team_id)
+      .filter((c) => c.status === "active" && (c.owner_user_id === actor.user.id || c.scope === "ORGANIZATION" || (c.scope === "DEPARTMENT" && deptIds.has(c.department_id))));
+    const items = cols.map((c) => this.#collectionView(c, actor.user.id));
+    return ok({ items, count: items.length });
+  }
+
+  updateCollection({ context, collectionId, name, description } = {}) {
+    const col = this.authStore ? this.authStore.collectionById(collectionId) : null;
+    const auth = this.#authorizeCollection({ context, collection: col });
+    if (!auth.ok) return auth;
+    if (name != null && !String(name).trim()) return fail(REASON.INVALID_INPUT, "collection-name");
+    const updated = this.store.transactSync(() => this.authStore.updateCollection(col.id, { name, description }));
+    return ok({ collection: this.#collectionView(updated.collection || this.authStore.collectionById(col.id), auth.user.id) });
+  }
+
+  /** 删除 Collection：Resource 绝不级联删除，统一回 Unfiled。 */
+  deleteCollection({ context, collectionId } = {}) {
+    const col = this.authStore ? this.authStore.collectionById(collectionId) : null;
+    const auth = this.#authorizeCollection({ context, collection: col });
+    if (!auth.ok) return auth;
+    const count = this.store.countCollectionResources(col.id);
+    this.store.transactSync(() => {
+      this.store.clearCollection(col.id);
+      this.authStore.setCollectionStatus(col.id, "deleted");
+    });
+    return ok({ deleted: true, collectionId: col.id, movedToUnfiled: count });
+  }
+
+  getCollection({ context, collectionId } = {}) {
+    const col = this.authStore ? this.authStore.collectionById(collectionId) : null;
+    const auth = this.#authorizeCollection({ context, collection: col });
+    if (!auth.ok) return auth;
+    return ok({ collection: this.#collectionView(col, auth.user.id) });
+  }
+
+  // --- Tags -----------------------------------------------------------------
+
+  createTag({ context, name } = {}) {
+    this.#ensureBuiltinPolicy(context);
+    const actor = this.#actor(context);
+    if (!actor.ok) return actor;
+    const norm = domain.normalizeTagName(name);
+    if (!norm.ok) return norm;
+    const create = this.authService.authorizeCreate({ context, application: { appId: (context && context.appId) || "resource-library" }, scope: "PERSONAL", resourceType: "other", action: authz.ACTION.TAG });
+    if (create.decision !== "ALLOW") return fail(create.reasonCode || REASON.NOT_FOUND_OR_FORBIDDEN);
+    const existing = this.store.tagByNormalized(actor.user.team_id, norm.normalizedName);
+    let tag;
+    this.store.transactSync(() => {
+      if (existing) {
+        if (existing.status !== "active") this.store.setTagStatus(existing.id, "active");
+        if (existing.name !== norm.name) this.store.updateTagName(existing.id, norm.name, norm.normalizedName);
+        tag = this.store.tagById(existing.id);
+      } else {
+        tag = this.store.insertTag({ organizationId: actor.user.team_id, name: norm.name, normalizedName: norm.normalizedName, source: TAG_SOURCE.USER, createdBy: actor.user.id });
+      }
+    });
+    return ok({ tag, created: !existing });
+  }
+
+  listTags({ context } = {}) {
+    const actor = this.#actor(context);
+    if (!actor.ok) return actor;
+    const items = this.store.tagsOfOrg(actor.user.team_id).map((t) => ({ tagId: t.id, name: t.name, normalizedName: t.normalized_name, source: t.source, createdBy: t.created_by, createdAt: t.created_at }));
+    return ok({ items, count: items.length });
+  }
+
+  #refreshRegistryTags(resourceId) {
+    const names = this.store.tagsOfResource(resourceId).map((t) => t.name);
+    this.store.setRegistryTags(resourceId, names);
+    return names;
+  }
+
+  assignTag({ context, resourceRef, name, tagId } = {}) {
+    this.#ensureBuiltinPolicy(context);
+    const load = this.#load({ context, resourceRef, action: authz.ACTION.TAG, opaque: true });
+    if (!load.ok) return load;
+    const row = load.row;
+    if (this.store.countResourceTags(row.resource_id) >= domain.MAX_TAG_COUNT_PER_RESOURCE) return fail(REASON.INVALID_INPUT, "tag-limit");
+    let tag = tagId ? this.store.tagById(tagId) : null;
+    if (!tag && name) {
+      const norm = domain.normalizeTagName(name);
+      if (!norm.ok) return norm;
+      tag = this.store.tagByNormalized(row.organization_id, norm.normalizedName);
+      if (!tag) {
+        const actor = this.#actor(context);
+        tag = this.store.transactSync(() => this.store.insertTag({ organizationId: row.organization_id, name: norm.name, normalizedName: norm.normalizedName, source: TAG_SOURCE.USER, createdBy: actor.ok ? actor.user.id : null }));
+      }
+    }
+    if (!tag || tag.organization_id !== row.organization_id) return fail(REASON.INVALID_INPUT, "tag");
+    const actor = this.#actor(context);
+    this.store.transactSync(() => {
+      this.store.insertResourceTag({ resourceId: row.resource_id, tagId: tag.id, organizationId: row.organization_id, source: TAG_SOURCE.USER, assignedBy: actor.ok ? actor.user.id : null });
+      this.#refreshRegistryTags(row.resource_id);
+    });
+    return ok({ tags: this.store.tagsOfResource(row.resource_id) });
+  }
+
+  removeTag({ context, resourceRef, tagId } = {}) {
+    this.#ensureBuiltinPolicy(context);
+    const load = this.#load({ context, resourceRef, action: authz.ACTION.TAG, opaque: true });
+    if (!load.ok) return load;
+    const row = load.row;
+    this.store.transactSync(() => {
+      this.store.deleteResourceTag(row.resource_id, tagId);
+      this.#refreshRegistryTags(row.resource_id);
+    });
+    return ok({ tags: this.store.tagsOfResource(row.resource_id) });
+  }
+
+  listResourceTags({ context, resourceRef } = {}) {
+    const load = this.#load({ context, resourceRef, action: authz.ACTION.VIEW, opaque: true });
+    if (!load.ok) return load;
+    return ok({ items: this.store.tagsOfResource(load.row.resource_id) });
+  }
+
+  renameTag({ context, tagId, name } = {}) {
+    const actor = this.#actor(context);
+    if (!actor.ok) return actor;
+    const tag = this.store.tagById(tagId);
+    if (!tag || tag.organization_id !== actor.user.team_id) return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
+    if (tag.source !== TAG_SOURCE.USER && actor.user.role !== "ADMIN") return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
+    const norm = domain.normalizeTagName(name);
+    if (!norm.ok) return norm;
+    const clash = this.store.tagByNormalized(actor.user.team_id, norm.normalizedName);
+    if (clash && clash.id !== tag.id) return fail(REASON.INVALID_INPUT, "tag-duplicate");
+    this.store.transactSync(() => {
+      this.store.updateTagName(tag.id, norm.name, norm.normalizedName);
+      for (const r of this.store.resourcesOfTag(tag.id)) this.#refreshRegistryTags(r.resource_id);
+    });
+    return ok({ tag: this.store.tagById(tag.id) });
+  }
+
+  deleteTag({ context, tagId } = {}) {
+    const actor = this.#actor(context);
+    if (!actor.ok) return actor;
+    const tag = this.store.tagById(tagId);
+    if (!tag || tag.organization_id !== actor.user.team_id) return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
+    if (tag.source !== TAG_SOURCE.USER && actor.user.role !== "ADMIN") return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
+    const affected = this.store.resourcesOfTag(tag.id).map((r) => r.resource_id);
+    this.store.transactSync(() => {
+      this.store.setTagStatus(tag.id, "deleted");
+      for (const rid of affected) this.#refreshRegistryTags(rid);
+    });
+    return ok({ deleted: true, tagId: tag.id, affectedResources: affected.length });
+  }
+
+  // --- Favorites / Recent ---------------------------------------------------
+
+  setFavorite({ context, resourceRef, favorite = true } = {}) {
+    this.#ensureBuiltinPolicy(context);
+    const load = this.#load({ context, resourceRef, action: authz.ACTION.VIEW, opaque: true });
+    if (!load.ok) return load;
+    const actor = this.#actor(context);
+    if (!actor.ok) return actor;
+    const res = this.store.transactSync(() => this.store.setFavorite({ userId: actor.user.id, resourceId: load.row.resource_id, organizationId: load.row.organization_id, favorite: !!favorite }));
+    return ok({ favorite: res.favorite, resourceRef: authz.toResourceRef(load.row.resource_id) });
+  }
+
+  listFavorites({ context } = {}) {
+    this.#ensureBuiltinPolicy(context);
+    const actor = this.#actor(context);
+    if (!actor.ok) return actor;
+    const items = [];
+    for (const fav of this.store.favoritesOfUser(actor.user.id)) {
+      const row = this.store.resourceRowById(fav.resource_id);
+      if (!row || row.trash_state === TRASH_STATE.TRASHED) continue;
+      const caps = this.authService.getCapabilities({ context, resource: row.resource_id });
+      if (!caps.ok) continue;
+      items.push(this.#descriptor(row, context, { favorite: true }));
+    }
+    return ok({ items, count: items.length });
+  }
+
+  touchRecent({ context, resourceRef } = {}) {
+    this.#ensureBuiltinPolicy(context);
+    const load = this.#load({ context, resourceRef, action: authz.ACTION.VIEW, opaque: true });
+    if (!load.ok) return load;
+    const actor = this.#actor(context);
+    if (!actor.ok) return actor;
+    this.store.transactSync(() => this.store.touchRecent({ userId: actor.user.id, resourceId: load.row.resource_id, organizationId: load.row.organization_id }));
+    return ok({ touched: true });
+  }
+
+  listRecent({ context, limit = 60 } = {}) {
+    this.#ensureBuiltinPolicy(context);
+    const actor = this.#actor(context);
+    if (!actor.ok) return actor;
+    const items = [];
+    for (const rec of this.store.recentOfUser(actor.user.id, limit)) {
+      const row = this.store.resourceRowById(rec.resource_id);
+      if (!row || row.trash_state === TRASH_STATE.TRASHED) continue;
+      const caps = this.authService.getCapabilities({ context, resource: row.resource_id });
+      if (!caps.ok) continue;
+      items.push(this.#descriptor(row, context, { recentAt: rec.last_opened_at }));
+    }
+    return ok({ items, count: items.length });
+  }
+
+  // --- Authorized query (structured filter / sort / pagination) -------------
+
+  queryResources({ context, category = CATEGORY.ALL, filter = {}, sort = "updated", direction = "desc", limit = domain.DEFAULT_PAGE_LIMIT, offset = 0 } = {}) {
+    this.#ensureBuiltinPolicy(context);
+    const actor = this.#actor(context);
+    if (!actor.ok) return { ok: false, error: REASON.NOT_FOUND_OR_FORBIDDEN, items: [], total: 0 };
+    const page = domain.normalizePage({ limit, offset });
+    if (!page.ok) return page;
+    const sortSpec = domain.normalizeSort({ sort, direction });
+    if (!sortSpec.ok) return sortSpec;
+    const cat = String(category || CATEGORY.ALL);
+    const includeTrashed = cat === CATEGORY.TRASH;
+    const types = domain.categoryTypes(cat);
+    const favorites = new Map(this.store.favoritesOfUser(actor.user.id).map((f) => [f.resource_id, f.created_at]));
+    const recent = new Map(this.store.recentOfUser(actor.user.id, 1000).map((r) => [r.resource_id, r.last_opened_at]));
+    let tagFilterIds = null;
+    if (filter.tagId) {
+      tagFilterIds = new Set(this.store.resourcesOfTag(filter.tagId).map((r) => r.resource_id));
+    }
+    let rows = this.store.resourceRowsByOrg(actor.user.team_id);
+    rows = rows.filter((row) => {
+      const trashed = row.trash_state === TRASH_STATE.TRASHED;
+      if (includeTrashed ? !trashed : trashed) return false;
+      if (types && !types.includes(row.resource_type)) return false;
+      if (cat === CATEGORY.FAVORITES && !favorites.has(row.resource_id)) return false;
+      if (cat === CATEGORY.RECENT && !recent.has(row.resource_id)) return false;
+      if (filter.resourceType && row.resource_type !== filter.resourceType) return false;
+      if (filter.memorySubtype && row.memory_subtype !== filter.memorySubtype) return false;
+      if (filter.storageMode && row.storage_mode !== filter.storageMode) return false;
+      if (filter.departmentId && row.department_id !== filter.departmentId) return false;
+      if (filter.collectionId === "unfiled" ? !!row.collection_id : filter.collectionId && row.collection_id !== filter.collectionId) return false;
+      if (filter.tagId && (!tagFilterIds || !tagFilterIds.has(row.resource_id))) return false;
+      if (filter.favorite === true && !favorites.has(row.resource_id)) return false;
+      if (filter.name && !String(row.name || "").toLowerCase().includes(String(filter.name).toLowerCase())) return false;
+      if (filter.availability && this.#availability(row, context).availability !== filter.availability) return false;
+      const caps = this.authService.getCapabilities({ context, resource: row.resource_id, allowInactiveResource: includeTrashed });
+      return !!caps.ok;
+    });
+    const dir = sortSpec.direction === "asc" ? 1 : -1;
+    if (cat === CATEGORY.RECENT) {
+      rows.sort((a, b) => (recent.get(b.resource_id) || 0) - (recent.get(a.resource_id) || 0));
+    } else {
+      rows.sort((a, b) => {
+        if (sortSpec.sort === "name") return dir * String(a.name || "").localeCompare(String(b.name || ""));
+        if (sortSpec.sort === "size") return dir * ((Number(a.size) || 0) - (Number(b.size) || 0));
+        if (sortSpec.sort === "created") return dir * ((Number(a.created_at) || 0) - (Number(b.created_at) || 0));
+        return dir * ((Number(a.updated_at) || 0) - (Number(b.updated_at) || 0));
+      });
+    }
+    const total = rows.length;
+    const pageRows = rows.slice(page.offset, page.offset + page.limit);
+    const items = pageRows.map((row) => this.#descriptor(row, context, { favorite: favorites.has(row.resource_id), recentAt: recent.get(row.resource_id) || null }));
+    return { ok: true, items, total, offset: page.offset, limit: page.limit, hasMore: page.offset + page.limit < total, category: cat, sort: sortSpec.sort, direction: sortSpec.direction };
+  }
+
+  // --- Inspector / Versions -------------------------------------------------
+
+  getInspector({ context, resourceRef } = {}) {
+    this.#ensureBuiltinPolicy(context);
+    const id = this.#parseRef(resourceRef);
+    const row = id ? this.store.resourceRowById(id) : null;
+    if (!row) return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
+    const trashed = row.trash_state === TRASH_STATE.TRASHED;
+    const caps = this.authService.getCapabilities({ context, resource: row.resource_id, allowInactiveResource: trashed });
+    if (!caps.ok) return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
+    const actor = this.#actor(context);
+    const breakdown = this.authService.getCapabilityBreakdown({ context, resource: row.resource_id });
+    const favorite = actor.ok ? this.store.isFavorite(actor.user.id, row.resource_id) : false;
+    const recentRow = actor.ok ? this.store.recentOfUser(actor.user.id, 1).find((r) => r.resource_id === row.resource_id) : null;
+    const collection = row.collection_id && this.authStore ? this.authStore.collectionById(row.collection_id) : null;
+    const versions = this.store.versionsOf(row.resource_id).map((v) => ({ version: v.version, size: v.size, checksum: v.checksum, storageMode: v.storage_mode, createdBy: v.created_by, createdAt: v.created_at }));
+    return ok({
+      resource: this.#descriptor(row, context, { favorite, recentAt: recentRow ? recentRow.last_opened_at : null }),
+      location: this.#location(row, context),
+      capabilities: {
+        effective: caps.capabilities,
+        effectiveActions: caps.allowedActions,
+        userActions: breakdown.ok ? breakdown.userActions : [],
+        appActions: breakdown.ok ? breakdown.appActions : [],
+        userDenied: breakdown.ok ? breakdown.userDenied : null,
+        appDenied: breakdown.ok ? breakdown.appDenied : null,
+      },
+      tags: this.store.tagsOfResource(row.resource_id).map((t) => ({ tagId: t.id, name: t.name, source: t.assignment_source })),
+      collection: collection ? this.#collectionView(collection, actor.ok ? actor.user.id : null) : null,
+      versions,
+      relations: { outgoing: this.store.relationsFrom(row.resource_id).length, incoming: this.store.relationsTo(row.resource_id).length },
+      provenance: {
+        source: row.source,
+        generatedSourceTaskId: row.generated_source_task_id ?? null,
+        generatedSourceCallId: row.generated_source_call_id ?? null,
+        generatedSourceModel: row.generated_source_model ?? null,
+        memorySubtype: row.memory_subtype ?? null,
+        language: row.language ?? null,
+      },
+      trashed,
+      favorite,
+    });
+  }
+
+  listVersions({ context, resourceRef } = {}) {
+    const load = this.#load({ context, resourceRef, action: authz.ACTION.VIEW, opaque: true });
+    if (!load.ok) return load;
+    const items = this.store.versionsOf(load.row.resource_id).map((v) => ({ version: v.version, size: v.size, storageMode: v.storage_mode, source: v.source, createdBy: v.created_by, createdAt: v.created_at }));
+    return ok({ items, count: items.length, currentVersion: Number(load.row.version || 1) });
   }
 }
 

@@ -287,6 +287,31 @@ class AuthorizationService {
     return { ...base, ...policy, reasonCode };
   }
 
+  /**
+   * D3-04B Inspector：分别给出 User 侧 / App 侧 / 有效交集的能力集合。
+   * 与 getCapabilities 不同，这里**即使当前离线也返回两侧集合**，用于权限说明展示。
+   */
+  getCapabilityBreakdown({ context, application, resource, agent } = {}) {
+    const prepared = this.#prepare(context, application);
+    if (!prepared.ok) return { ok: false, error: domain.externalReason(prepared.reason), challenge: prepared.challenge || null };
+    const row = this.#resourceFromInput(resource);
+    if (!row) return { ok: false, error: REASON.NOT_FOUND_OR_FORBIDDEN };
+    const userResult = domain.evaluateUserAuthorization({ resource: row, user: prepared.user, memberships: prepared.memberships, grants: prepared.grants });
+    const appResult = domain.evaluateAppAuthorization({ resource: row, app: prepared.app, grants: prepared.appGrants });
+    const effective = [...userResult.actions].filter((a) => appResult.actions.has(a));
+    return {
+      ok: true,
+      policyVersion: POLICY_VERSION,
+      resourceRef: domain.toResourceRef(row.resource_id),
+      userActions: [...userResult.actions].sort(),
+      appActions: [...appResult.actions].sort(),
+      effectivePermissions: effective.sort(),
+      agent: agent === undefined ? prepared.agent : !!agent,
+      userDenied: userResult.denied ? domain.externalReason(userResult.denied) : null,
+      appDenied: appResult.denied || null,
+    };
+  }
+
   // -------------------------------------------------------------------------
   // getCapabilities()（§61）
   // -------------------------------------------------------------------------
@@ -441,7 +466,19 @@ class AuthorizationService {
 
   #governanceGate(context, action) {
     const appId = context?.appId || "resource-library";
-    const prepared = this.#prepare(context, { appId });
+    let prepared = this.#prepare(context, { appId });
+    // 治理动作的授权主体是 User role，不是调用方 App 的资源权限。
+    // 若调用方 App 正好处于 disabled（例如资源库 App 被停用后要重新启用），
+    // 仍必须允许 Super Admin 管理 —— 否则会"禁用后无法再启用"。资源操作仍严格要求 App enabled。
+    if (!prepared.ok && prepared.reason === REASON.APP_DISABLED && prepared.user) {
+      prepared = {
+        ...prepared,
+        ok: true,
+        memberships: this.store.membershipsOfUser(prepared.user.id).filter((m) => m.status === "ACTIVE"),
+        organizationId: prepared.user.team_id,
+        appDisabled: true,
+      };
+    }
     if (!prepared.ok) return { ok: false, error: externalReason(prepared.reason), challenge: prepared.challenge, prepared, status: 401 };
     const user = prepared.user;
     const isSuper = user.role === "ADMIN";
