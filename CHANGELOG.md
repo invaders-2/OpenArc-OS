@@ -1,5 +1,16 @@
 # 计划修订记录
 
+## 2026-09-12：顶栏撤掉 logo，恢复文字字标
+
+用户口径："顶部标题栏不需要用这个 logo"。
+
+- `components.tsx` 顶栏恢复 `<strong className="wordmark">◈ OpenArc</strong>`；
+- **logo 仍留在启动/登录界面**（`BootSurface` / `BootRetry` 两处 126×30）；
+- `public/openarc-os.svg` 与 `.brand-logo` / `.brand-logo-lg` 样式保留（启动界面仍在用）；
+- 未触碰其它任何地方。
+
+实测：顶栏文本恢复为 `◈ OpenArc`（浅色/深色都验证过）；`npm run build` PASS；`npm test` 96/96。
+
 ## 2026-09-12：接入真实品牌 logo（深浅色自动取色）
 
 用户提供了 `OpenArc_OS_4x3_vector.svg`（1024×768，**黑底白字**）并要求"logo 用这个，深浅色注意颜色"。
