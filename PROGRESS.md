@@ -289,6 +289,64 @@ D1-05 OS filesystem sandbox blocker 仍在，D3-02 不关闭。
 
 ---
 
+# D3-03 当前状态（唯一口径 · 2026-09-13）
+
+## 1. Task Status
+
+| 口径 | Task Status | 说明 |
+|---|---|---|
+| **macOS Device Identity Core** | **PASS** | DeviceId、Registry、状态机、Organization 绑定、Pairing（短时/单次/绑组织/验 Service Identity）、Pairing race（恰好一台）、Replay DENY、到期边界、真 mTLS（12 场景）、证书有效 ≠ 设备授权（两层）、Revocation 立即生效、Disable/Enable 区分、Credential Rotation（版本单调）、跨组织拒绝、冒充防护、Heartbeat 身份绑定、Audit（含 secret 0 命中）、v2→v3 迁移（原子回滚）、Renderer 边界（暴露面 5 → 6 已显式登记）—— 全部真实执行 |
+| **overall** | **PARTIAL** | Windows（Named Pipe ACL / DPAPI / 证书存储 / 设备运行时）**NOT VERIFIED**；Device Agent 生产凭据存储**未实现**（本轮只有测试原型）；X.509 级吊销（CRL/OCSP）未做 |
+| **Resource Library** | **PLANNED / NOT IMPLEMENTED** | D3-03 只交付 `ResourceLocation` 契约与"资源×设备交集"证明，**不得写 Resource Library implemented** |
+
+**不得写双平台 COMPLETE。不得写 Resource Library PASS。**
+
+## 2. 关键证据（真实执行）
+
+| 入口 | 结果 |
+|---|---|
+| npm test | **262 / 262**（D3-02 基线 243 + D3-03 新增 19；含更新到 v3 的 D3-02 迁移测试） |
+| npm run build | PASS |
+| npm run test:d3-03 | **TLS 矩阵 12 / 12 场景通过，exit 0** |
+| node --test tests/device-tls.test.mjs | **12 / 12** |
+| node --test tests/device-*.test.mjs | 覆盖 registry / pairing / race / replay / revocation / disable / rotation / cross-org / impersonation / session-auth / audit / migration / resource∩device / agent |
+| npm run test:security | **FAIL 0 / PARTIAL 3 / PASS 6**（= D3-01 基线；D1-05 TLS 探针需先跑 gen-test-certs.sh，属环境前置） |
+| npm run test:d3-01 / test:d3-02 / test:authorization-ui / test:identity-ui | 见 docs/D3-03-RESULT.md |
+
+分支 feature/d3-03-device-identity，基线 feature/d3-02-object-authorization @ 9119f85，未 merge main。
+ADR：docs/decisions/D3-03-device-identity.md；结果：docs/D3-03-RESULT.md。
+
+## 3. 本轮冻结（不可随意改）
+
+1. **UserId ≠ DeviceId**，四个身份域（User / App / Resource / Device）互相独立。
+2. **TLS Certificate Validity ≠ Device Authorization**：`authenticateConnection`（第一层）
+   与 `authorizeDevice`（第二层）必须**同时**通过。
+3. **Pairing Credential 只用于 bootstrap**：单次、短时、绑组织、只存 sha256；注册后换成设备专属身份。
+4. **设备属于 Organization，不默认属于某个 User**；ownership 不写死成个人机器模型。
+5. **REVOKED 是终态**：重新启用必须重新 Pair / 换新凭据（Disable 才是可恢复的管理动作）。
+6. **OFFLINE ≠ REVOKED**：连接状态与授权状态是两根轴，禁止混成一个 "Unavailable"。
+7. **撤销/禁用/轮换立即生效**：关闭已建立连接 **且** 下一条受保护消息拒绝；心跳不改变状态。
+8. **private key 不得越过 Device Agent / 受信服务边界**：Renderer、localStorage、审计、
+   日志、Harness、Prompt 全都不得出现；审计有显式字段黑名单。
+9. **不采用 TOFU**：Service Identity 必须可确认，未配置则拒绝配对（fail closed）。
+10. **本地 IPC 与 LAN TLS 是不同边界**：`127.0.0.1` 同样要过 mTLS。
+11. **UNKNOWN_EFFECT 契约继续有效**：设备断开不等于结果未知可自动重发。
+
+## 4. D3-04 交接
+
+`deviceId` / Device Registry / Device Authorization / `ResourceLocation.deviceId` /
+Online-Offline / Revoked-Disabled / 安全 metadata / 跨设备边界。
+D3-04 才能表达"这个资源在哪里 / 当前用户能不能让这台机器读取 / 是否必须 transfer"。
+
+## 5. 主要缺口
+
+Windows 全部（Named Pipe / DPAPI / 证书存储 / 设备运行时）、Device Agent 生产凭据存储、
+X.509 级吊销（CRL/OCSP）、多级证书链 / IPv6 / wildcard SAN、
+Department Admin 的设备管理（DEFERRED TO POLICY EXTENSION）。
+
+---
+
+
 # 历史记录（过程与失败证据，保留不删）
 
 > 以下各节按当时实际状态书写，**不作为当前口径**。当前状态以 `# D1 当前状态` 一节为准。

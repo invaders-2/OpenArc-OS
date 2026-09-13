@@ -34,12 +34,14 @@ async function seedV1(dbPath) {
   db.close();
 }
 
-// 1. 全新库 → v2
+// 1. 全新库 → 当前 schema（D3-03 起为 v3：v2 表 + 设备域表都要在）
 {
   const { dir, dbPath } = tempDbPath("oa-d3-02-probe-");
   try {
     const s = new IdentityStore({ path: dbPath }).open();
-    p.assert("全新库 schemaVersion = 2", s.schemaVersion === 2, String(s.schemaVersion));
+    const v3Tables = ["devices", "device_pairing_credentials", "device_credentials", "device_access", "device_audit"];
+    const hasV3 = v3Tables.every((t) => !!s.connection.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(t));
+    p.assert("全新库 schemaVersion = 3（D3-03 在 v2 之上追加设备域）", s.schemaVersion === 3 && hasV3, String(s.schemaVersion) + " v3tables=" + hasV3);
     const init = await s.initialize({ identifier: ADMIN_ID, password: ADMIN_PW, displayName: "Admin" });
     const login = await s.login({ identifier: ADMIN_ID, password: ADMIN_PW });
     p.assert("v2 上 identity initialize/login 成立", init.ok === true && login.ok === true, "");
@@ -58,7 +60,7 @@ async function seedV1(dbPath) {
     const login = await s.login({ identifier: ADMIN_ID, password: ADMIN_PW });
     const lock = s.lock(login.session.ref);
     const unlocked = await s.unlock(login.session.ref, ADMIN_PW);
-    p.assert("v1 → v2 后 login/lock/unlock 成立", s.schemaVersion === 2 && login.ok && lock.ok && unlocked.ok, "");
+    p.assert("v1 → v3 后 login/lock/unlock 成立", s.schemaVersion === 3 && login.ok && lock.ok && unlocked.ok, "");
     s.close();
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
