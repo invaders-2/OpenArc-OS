@@ -117,6 +117,16 @@
      交互元素（按钮等）在下面用 no-drag 退出，否则点不到。 */
   -webkit-app-region: drag;
 }
+/* 品牌 mark（用户提供的矢量里**只有圆形那段**，不含字母）：
+   CSS mask + currentColor → 深色主题白、浅色主题深，无需两份素材。 */
+.brand-mark {
+  display: inline-block;
+  width: 46px;
+  height: 51px;
+  background-color: currentColor;
+  -webkit-mask: url("/openarc-mark.svg") no-repeat center / contain;
+  mask: url("/openarc-mark.svg") no-repeat center / contain;
+}
 .wordmark {
   font-size: 14px;
   letter-spacing: -0.4px;

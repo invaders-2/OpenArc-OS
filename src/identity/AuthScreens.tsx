@@ -45,7 +45,8 @@ export function BootSurface() {
   return (
     <div className="auth-screen" data-d3-id="boot-surface" aria-busy="true">
       <div className="auth-boot">
-        <strong>OpenArc</strong>
+        {/* 用户口径：品牌位只放**圆形 mark**，不要 "OpenArc OS" 字。深浅色由 currentColor 决定。 */}
+        <span className="brand-mark" role="img" aria-label="OpenArc" />
         <span className="muted">正在确认本机身份…</span>
       </div>
     </div>
@@ -60,7 +61,8 @@ export function BootRetry({ message, onRetry }: { message: string; onRetry: () =
   return (
     <div className="auth-screen" data-d3-id="boot-retry">
       <div className="auth-boot">
-        <strong>OpenArc</strong>
+        {/* 用户口径：品牌位只放**圆形 mark**，不要 "OpenArc OS" 字。深浅色由 currentColor 决定。 */}
+        <span className="brand-mark" role="img" aria-label="OpenArc" />
         <span className="muted">{message}</span>
         <button className="control-button" onClick={onRetry}>
           重试

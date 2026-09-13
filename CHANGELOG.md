@@ -1,5 +1,21 @@
 # 计划修订记录
 
+## 2026-09-12：按用户澄清重新启用品牌 mark（登录界面 + 应用图标）
+
+用户澄清：**只去掉顶栏那个**；其它地方仍用他给的矢量，但**只取圆形 mark，不要 "OpenArc OS" 字母**。
+
+- **素材**：从原矢量切出**前两段子路径**（实测 `getBBox()` = `194,659,138×154` 正是那个圆），
+  存为 `public/openarc-mark.svg`；字母部分丢掉。
+- **登录 / 启动界面**（`BootSurface` / `BootRetry`）：`<strong>OpenArc</strong>` → `.brand-mark`
+  （CSS mask + `currentColor`）。实测深色 `rgb(245,245,247)` / 浅色 `rgb(29,29,31)`，尺寸 **46×51**。
+- **应用图标**（桌面 / Dock 上看到的那个）：此前是 **Electron 默认图标** ——
+  现生成"黑底圆角 + 白色 mark"的 1024 图，`iconutil` 打包为 `build/icon.icns`，
+  安装到 `.app/Contents/Resources/electron.icns`（`CFBundleIconFile` 本来就是它），
+  再 `touch` + `lsregister -f` 刷新图标缓存。实测安装前后 sha256 一致：`e61be32e402f3944…`。
+- 顶栏保持文字 `◈ OpenArc`，未动。
+
+验证：`npm run build` PASS；`npm test` 96/96。
+
 ## 2026-09-12：logo 全部撤掉（顶栏 + 启动界面 + 素材与样式）
 
 用户口径："都去掉吧"。

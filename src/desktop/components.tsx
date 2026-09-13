@@ -94,7 +94,7 @@ export function TopBar({
 }: TopBarProps) {
   return (
     <header className="topbar">
-      {/* 用户口径：**顶栏不用 logo**，恢复原来的文字字标（logo 只用在启动/登录界面）。 */}
+      {/* 用户口径：**顶栏不用 logo**，保留原来的文字字标。 */}
       <strong className="wordmark">◈ OpenArc</strong>
       <div className="topbar-recent" aria-label="最近打开的窗口">
         {recent.map((w) => {
