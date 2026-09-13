@@ -518,10 +518,11 @@ p {
   font-size: 11px;
   color: var(--text);
   /**
-   * 用**接近实色**的材质：尾巴要和气泡颜色完全一致才能看不出接缝，
-   * 而带模糊的半透明材质没法复制到 border 三角上。macOS 的提示本来也基本是不透明的。
+   * 材质：0.96 近乎不透明。用户口径"透明度降低一点" → 取**可感知**的方向降到 0.88
+   * （0.96→1.0 肉眼无差别，所以能调的方向只有更透）。尾巴必须用**同一个数值**，
+   * 否则 border 三角与气泡之间会出现色差。
    */
-  background: rgb(var(--surface-rgb) / 0.96);
+  background: rgb(var(--surface-rgb) / 0.88);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
   opacity: 0;
   pointer-events: none;
@@ -541,7 +542,7 @@ p {
   height: 0;
   border: 5px solid transparent;
   border-bottom: 0;
-  border-top-color: rgb(var(--surface-rgb) / 0.96);
+  border-top-color: rgb(var(--surface-rgb) / 0.88);
 }
 .dock-item:hover .dock-tooltip,
 .dock-item:focus-visible .dock-tooltip {
