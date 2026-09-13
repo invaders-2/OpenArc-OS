@@ -530,22 +530,24 @@ p {
     transform var(--quick) var(--ease);
   z-index: 300;
 }
-/* 指向图标的小尾巴（macOS 提示的辨识特征）。
-   **整块只允许一个 backdrop-filter**：气泡和尾巴若各自模糊、各自合成，接缝处必然出现一条
-   可见的界线，看起来就是"分成两块"（用户实测）。所以尾巴只复制同一份底色，不做模糊 ——
-   12×6 的三角下没有值得模糊的细节，肉眼与气泡是连成一块的（用户口径：气泡要连在一起）。 */
+/* 指向图标的小尾巴。
+   用户口径："上面是圆角下面是三角，这样不好看" —— 硬三角是从底边"长出来的一块"。
+   macOS 的尾巴其实是从气泡底边**平滑流出的圆角楔形**，所以这里不用三角形，而是：
+     ① 一个 12×12 的方块旋转 45°（露出下面那个角做尖）；
+     ② 只把露出来的那个角圆化（border-radius 打在旋转后的对应角上）→ 圆头楔形；
+     ③ 上半段**压进气泡里**（top: calc(100% - 5px)），于是它与气泡底边没有接缝；
+     ④ 同一份底色、不做第二次 backdrop-filter（两层模糊各自合成一定会露缝）。
+   0.92 的底色在 5px 重叠处只有约 0.7% 的加深，肉眼不可见。 */
 .dock-tooltip::after {
   content: "";
   position: absolute;
-  top: 100%;
+  top: calc(100% - 5px);
   left: 50%;
-  transform: translateX(-50%);
-  /* macOS 参考图的尾巴更宽、更短，与气泡底边整段连在一起 */
-  width: 18px;
-  height: 7px;
+  width: 12px;
+  height: 12px;
   background: rgb(var(--content-rgb) / 0.92);
-  -webkit-clip-path: polygon(50% 100%, 0 0, 100% 0);
-  clip-path: polygon(50% 100%, 0 0, 100% 0);
+  border-radius: 2px 0 4px 0;
+  transform: translateX(-50%) rotate(45deg);
 }
 .dock-item:hover .dock-tooltip,
 .dock-item:focus-visible .dock-tooltip {
