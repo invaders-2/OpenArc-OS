@@ -334,7 +334,9 @@ app.whenReady().then(async () => {
     const secretShown = await waitSel("[data-device-pairing-secret]");
     const secretValue = secretShown ? (await text("[data-device-pairing-secret]")).trim() : "";
     check("A8 · 发起配对后出现 join code", secretShown && secretValue.length >= 20, "len=" + secretValue.length);
-    check("A9 · 明确标注只显示一次", (await text("[data-device-pairing-panel]")).includes("只显示这一次"), await text("[data-device-pairing-panel]"));
+    // 注意：detail 里**不打印** join code 本体，避免探针日志成为 secret 的第二落点（§47）。
+    const oneTimeNote = (await text("[data-device-pairing-panel]")).includes("只显示这一次");
+    check("A9 · 明确标注只显示一次", oneTimeNote, "one-time-note=" + oneTimeNote);
     const expires1 = await text("[data-device-pairing-expires]");
     check("A10 · 显示有效期倒计时 / 到期时间", expires1.includes("剩余") && expires1.includes("到期"), expires1);
     await sleep(1600);
