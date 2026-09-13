@@ -254,7 +254,13 @@ D3-04B 必须复用本轮的 ResourceStore / ResourceService / Import State Mach
 | npm run build | PASS |
 | npm run test:d3-04a | 4 探针 PASS / PARTIAL 0 / FAIL 0（34 条用例） |
 | npm run test:resource-ui | 10 / 10 UI checks PASS（真实 Electron） |
-| npm run test:d3-01 / d3-02 / d3-03 | 待回归确认 |
+| npm run test:d3-01 | PASS 12 / PARTIAL 0 / FAIL 0 |
+| npm run test:d3-02 | PASS 6 / PARTIAL 0 / FAIL 0 |
+| npm run test:d3-03 | TLS 矩阵 12/12，exit 0 |
+| npm run test:d2-02 | PASS 7/7（含 security-surface 15/15；暴露面 8 → 9 已显式登记） |
+| npm run test:identity-ui / authorization-ui / device-ui | 24/24 / 14/14 / PASS（device-ui 2 项 NOT VERIFIED 属 D3-03 既有缺口） |
+| npm run test:security | FAIL 0 / PARTIAL 2 / PASS 6 |
+| npm run test:design-system / theme-baseline | 与基线一致 |
 
 产物：artifacts/d3-04a/*.json。
 

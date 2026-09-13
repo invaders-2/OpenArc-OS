@@ -367,7 +367,12 @@ Department Admin 的设备管理（DEFERRED TO POLICY EXTENSION）。
 | npm run test:d3-04a | **4 探针：PASS 4 / PARTIAL 0 / FAIL 0（34 条用例）** |
 | npm run test:resource-ui | **10 / 10 UI checks PASS**（真实 Electron：Import / Link、safe descriptor、绝对路径不泄漏） |
 | large streaming | 10MB external 增量约 11MB / 100MB 约 13MB，均远小于文件大小（无整文件 Buffer） |
-| npm run test:d3-01 / test:d3-02 / test:d3-03 | 见回归证据 |
+| npm run test:d3-01 | PASS 12 / FAIL 0 |
+| npm run test:d3-02 | PASS 6 / FAIL 0 |
+| npm run test:d3-03 | TLS 12/12，exit 0 |
+| npm run test:d2-02 | PASS 7/7（security-surface 15/15，暴露面 8 → 9 已登记） |
+| npm run test:identity-ui / test:authorization-ui / test:device-ui | 24/24 / 14/14 / PASS（device-ui 2 项 NOT VERIFIED） |
+| npm run test:security / test:design-system / test:theme-baseline | FAIL 0 / 与基线一致 / 通过 |
 
 分支 feature/d3-04a-resource-store，基线 feature/d3-03-device-identity @ 7a94757，未 merge main。
 ADR：docs/decisions/D3-04A-resource-store.md。
