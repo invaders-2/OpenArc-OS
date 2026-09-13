@@ -354,7 +354,7 @@ Department Admin 的设备管理（DEFERRED TO POLICY EXTENSION）。
 |---|---|---|
 | **macOS Resource Store Core** | **PASS** | Stable ResourceRef、Managed Store、Linked Resource、Content-addressed objects、Dedupe、Import State Machine + Crash Recovery、Large streaming、Version、Version conflict、Trash、Restore、Permanent Delete、GC safety、Integrity、Resource+App authorization、Resource+Device authorization、Restart persistence、Migration、Renderer boundary —— 全部真实执行 |
 | **overall** | **PARTIAL** | Windows 路径语义 / 文件锁 / NTFS / userData **NOT VERIFIED**；远程 Device LINKED content transport 未实现 |
-| **Resource Library** | **PARTIAL / IMPLEMENTATION IN PROGRESS** | D3-04A 只完成 Resource Object & Local Store；CRUD/Collection/Tag、Memory UI、Search/Index/Preview、File/Project/App/Picker 属 D3-04B/C/D，**不得写 COMPLETE** |
+| **Resource Library** | **PARTIAL / IMPLEMENTATION IN PROGRESS**（当前状态见 # D3-04B） | D3-04A 完成 Resource Object & Local Store；CRUD/UI 已由 D3-04B 交付；Search/Index/Preview（D3-04C）与 Integration（D3-04D）仍未完成，**不得写 COMPLETE** |
 
 **不得写 Resource Library COMPLETE。不得写双平台 COMPLETE。**
 
@@ -401,6 +401,63 @@ D3-04B 必须复用这些能力，不得重建第二套 ACL 或身份系统。D3
 
 Windows 全部（路径 / 文件锁 / NTFS / userData）；MANAGED symlink TOCTOU 未消除；LINKED symlink 第一版拒绝；
 远程 Device content transport 未实现；完整 Resource Library UI / CRUD / Search / Preview；block-level dedupe；DB 加密-at-rest。
+
+---
+
+# D3-04B 当前状态（唯一口径 · 2026-09-14）
+
+## 1. Task Status
+
+| 口径 | Task Status | 说明 |
+|---|---|---|
+| **macOS Resource Library CRUD Core** | **PASS** | Resource Library App 三栏、Authorized listing、Import / Link、Create Resource、Memory CRUD、Text/Code/Prompt editing、Version-aware save + VERSION_CONFLICT、Collection CRUD、Tag CRUD、Favorite、Recent、Trash UI、Restore、Permanent Delete、Inspector、Structured filtering、Restart persistence、Authorization、App permission、Personal Memory isolation、v4→v5 Migration、Accessibility —— 全部真实执行 |
+| **overall** | **PARTIAL** | Windows Resource Library UI / file picker / drag-drop / clipboard **NOT VERIFIED**；D3-04C Search/Index/Preview 与 D3-04D Integration 未完成 |
+| **Resource Library** | **PARTIAL / IMPLEMENTATION IN PROGRESS** | 仍缺 D3-04C Search / Index / Preview 与 D3-04D Department / App / Files / Projects Integration；**不得写 COMPLETE** |
+
+**不得写 Resource Library COMPLETE。不得写双平台 COMPLETE。**
+
+## 2. 关键证据（真实执行）
+
+| 入口 | 结果 |
+|---|---|
+| npm test | **348 / 348**（D3-04A 基线 307 + D3-04B 新增 41） |
+| npm run build | PASS |
+| npm run test:d3-04b | **2 探针：PASS 2 / FAIL 0（25 条用例）** |
+| npm run test:resource-library-ui | **24 / 24 UI checks PASS**（真实 Electron：open / import / create memory / edit / version conflict / collection / move / tag / favorite / delete / trash / restore / capabilities） |
+| npm run test:d3-04a / resource-ui | 待回归 |
+| npm run test:d3-01 / d3-02 / d3-03 | 待回归 |
+| npm run test:d2-02 / security / design-system / theme-baseline | 待回归 |
+
+分支 feature/d3-04b-resource-library，基线 feature/d3-04a-resource-store @ 469f78b，未 merge main。
+ADR：docs/decisions/D3-04B-resource-library.md。
+
+## 3. 本轮冻结（不可随意改）
+
+1. **复用 D3-04A 存储层**：不重建 Resource Registry / ACL / App Grant / Device Identity / Resource Store。
+2. **Collection = primary organization；Tag = 多对多**：一个 Resource 一个 primary Collection（registry.collection_id），不实现无限多 Collection。
+3. **删除 Collection 绝不级联删除 Resource**：Resource → Unfiled。
+4. **Tag 规范化**：显示名保留大小写，比较用 normalized（小写），同组织唯一（Shoes == shoes）。
+5. **Metadata 修改不产生内容 version**：tag / favorite / collection / description / name 属 Metadata Revision。
+6. **Favorite / Recent 是 per-user**，且 Recent 只在真实打开时更新。
+7. **Pr ivate Memory 默认 PERSONAL + OWNER_POLICY**：加入 Department 不自动共享。
+8. **Version-aware save**：expectedVersion 冲突必须 VERSION_CONFLICT，UI 不覆盖；restoreVersion 继续 vN → vN+1。
+9. **授权在服务端**：Renderer 的 canEdit 只控制 UX，真实 command 再次 authorize。
+10. **Renderer 无 raw fs**：只有受控 Resource Commands，路径不回渲染进程。
+11. **治理不依赖目标 App enabled**：禁用某 App 后 Super Admin 仍能重新启用（本轮修复的真实缺陷）。
+12. **不做全文搜索**：本轮 Name filter，D3-04C 替换为 FTS / Authorized Search Provider。
+
+## 4. D3-04C 准入
+
+**D3-04C = CONDITIONAL GO。** D3-04B 已交付 authorized listing / structured filter / inspector / FTS 接入点。
+D3-04C 必须替换 Name filter 为真正的 FTS / Authorized Search Provider，并复用服务端授权边界；不得在 Renderer 重建索引或过滤。
+
+## 5. D3-04D 准入
+
+**BLOCK**，直到 D3-04C 完成。D3-04D 负责 Department / Super Admin 权限 UI、App Resource Picker、Files / Projects / Canvas 集成、Ownership / Scope 治理编辑。
+
+## 6. 主要缺口
+
+Windows UI / picker / drag-drop / clipboard NOT VERIFIED；Paste 与 Drag&Drop 未实现（DEFERRED，未伪造）；全文搜索 / 缩略图 / 预览 / 转写 / Embedding（D3-04C）；Department / App Picker / Files / Projects / Canvas（D3-04D）；批量操作；Store 加密-at-rest。
 
 ---
 
