@@ -512,47 +512,23 @@ p {
   left: 50%;
   transform: translateX(-50%) translateY(6px);
   white-space: nowrap;
-  /* 用户口径：对齐 macOS 参考图 —— 更大的圆角 / 字号 / 内距，更宽的尾巴（见 ::after）。 */
-  padding: 5px 11px;
-  border-radius: 9px;
-  font-size: 12px;
+  /* 用户口径："改成第一版那样" —— 恢复第一版的**纯气泡**外观（玻璃材质 / 小圆角 / 11px），
+     并且**不要尾巴**：三种尾巴（三角 / 菱形 / 楔形）都被否掉了，本体就是那个圆角气泡。 */
+  padding: 4px 9px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
   /* --text 随主题翻转：深色=近白字，浅色=深字 —— 与 macOS 提示的明暗跟随一致 */
   color: var(--text);
-  /* macOS 参考图里这个气泡**几乎是实心的**（不是我们那层 0.5 的玻璃）：content 色 0.92
-     + 一层 vibrancy 模糊。0.92 让形状在浅底/深底上都读得出来，同时仍留一点材质感。 */
-  background: rgb(var(--content-rgb) / 0.92);
+  /* 第一版的材质：与其它浮层同一套磨砂 token（用户曾确认"是磨砂玻璃质感"）。 */
+  background: rgb(var(--surface-rgb) / var(--surface-alpha));
   backdrop-filter: var(--glass-filter-tip);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
   opacity: 0;
   pointer-events: none;
   transition:
     opacity var(--quick) var(--ease),
     transform var(--quick) var(--ease);
   z-index: 300;
-}
-/* 指向图标的小尾巴。
-   用户口径："上面是圆角下面是三角，这样不好看" —— 硬三角是从底边"长出来的一块"。
-   macOS 的尾巴其实是从气泡底边**平滑流出的圆角楔形**，所以这里不用三角形，而是：
-     ① 一个 12×12 的方块旋转 45°（露出下面那个角做尖）；
-     ② 只把露出来的那个角圆化（border-radius 打在旋转后的对应角上）→ 圆头楔形；
-     ③ 上半段**压进气泡里**（top: calc(100% - 5px)），于是它与气泡底边没有接缝；
-     ④ 同一份底色、不做第二次 backdrop-filter（两层模糊各自合成一定会露缝）。
-   0.92 的底色在 5px 重叠处只有约 0.7% 的加深，肉眼不可见。 */
-.dock-tooltip::after {
-  content: "";
-  position: absolute;
-  /**
-   * 埋得足够深：14×14 的方块旋转后外接框约 19.8px，中心落在气泡下沿之上 4px（top = 100% − 11px）。
-   * 于是**露出来的那一截从 11.8px 宽单调收窄到尖**（真楔形），而不是"上宽下宽的菱形" ——
-   * 上一版只埋 5px，露出的正好是菱形最宽处，用户看到的自然是菱形。
-   */
-  top: calc(100% - 11px);
-  left: 50%;
-  width: 14px;
-  height: 14px;
-  background: rgb(var(--content-rgb) / 0.92);
-  border-radius: 2px 0 3px 0;
-  transform: translateX(-50%) rotate(45deg);
 }
 .dock-item:hover .dock-tooltip,
 .dock-item:focus-visible .dock-tooltip {
