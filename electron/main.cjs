@@ -88,9 +88,11 @@ app.whenReady().then(() => {
     // 它们操作 OpenArc 窗口本身（关闭/最小化/缩放），DOM 顶栏左侧相应留出位置。
     // Windows 没有等价"保留控件"的方式，直接 frame:false（Windows 尚未验证）。
     ...(isMac
-      // y = (顶栏 38px − 灯组 12px) / 2 = 13：与顶栏内容**垂直居中**对齐
-      // （原来是 16，比中心低 3px —— 用户口径："居中对齐红绿灯"）。
-      ? { titleBarStyle: "hidden", trafficLightPosition: { x: 20, y: 13 } }
+      // 灯组 y 的三次实测口径（顶栏 38px，DOM 内容中心实测 = 19）：
+      //   y=16 → 灯心 22（偏低 3px，用户第一次反馈"没居中"）
+      //   y=13 → 灯心 19（几何正中，用户第二次反馈"有点偏上"）
+      //   y=15 → 灯心 21（比几何中心低 2px）—— 两次反馈的中间值，用户口径优先。
+      ? { titleBarStyle: "hidden", trafficLightPosition: { x: 20, y: 15 } }
       : { frame: false }),
     ...glass,
     webPreferences: {
