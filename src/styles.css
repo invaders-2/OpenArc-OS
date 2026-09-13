@@ -413,16 +413,34 @@ p {
   left: 50%;
   transform: translateX(-50%);
   transition: transform var(--standard) var(--ease), opacity var(--standard) var(--ease);
-  background: rgb(var(--bar-rgb) / var(--bar-alpha));
-  backdrop-filter: var(--glass-filter-dock);
-  /* D2-02 保留：Dock 的大圆角；最近刻度 16px 差 4px，属可见变化 */
-  border-radius: 20px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.15);
   display: flex;
   align-items: center;
   padding: 9px 10px 2px;
   gap: 5px;
   z-index: 85;
+}
+/* 底板单独一层：Apple Dock 放大时整块玻璃随图标向两侧撑开、位置跟着指针走，
+   所以不能画在 .dock 自己身上（本体的盒子是静止的，自动隐藏的 transform 照旧）。
+   --bg-left / --bg-width 由 useDockMagnify 逐帧写入；静止时回落到 0 / 100%。 */
+.dock::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  /* D2-02 保留：Dock 的大圆角；最近刻度 16px 差 4px，属可见变化。
+     横向半径按 1/k 预补偿，scaleX 之后仍是正圆角。 */
+  border-radius: calc(20px / var(--bg-k, 1)) / 20px;
+  background: rgb(var(--bar-rgb) / var(--bar-alpha));
+  backdrop-filter: var(--glass-filter-dock);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.15);
+  /* 只走合成器：每帧不再改 width/left，避免主线程 layout 与背景重新栅格化 */
+  transform: translateX(var(--bg-tx, 0px)) scaleX(var(--bg-k, 1));
+  transform-origin: center;
+  will-change: transform;
+  z-index: -1;
+  pointer-events: none;
 }
 /* 全屏时 Dock 自动隐藏：底部 8px 的 hover 带把它唤回来 */
 .dock.hidden {
@@ -441,6 +459,7 @@ p {
 .dock-item {
   --s: 1;
   position: relative;
+  flex: none;
   padding: 0 5px;
   display: flex;
   flex-direction: column;
@@ -448,13 +467,39 @@ p {
   gap: 5px;
 }
 .dock-icon {
-  width: 47px;
-  height: 47px;
+  width: var(--dock-icon, 47px);
+  height: var(--dock-icon, 47px);
   object-fit: contain;
   user-select: none;
   transform: scale(var(--s));
   transform-origin: bottom center;
-  transition: transform var(--quick) var(--ease);
+  /* 提前升层：首次悬停时才升层会产生一次可见的卡顿。 */
+  will-change: transform;
+  /* 离开 Dock 时从当前倍率弹性回位（MOTION_SYSTEM §4 Dock 悬停）。 */
+  transition: transform var(--dur-standard) var(--ease-spring);
+}
+/* 悬停期间必须**跟手**：--s / translate / 底板都由 rAF 逐帧写入，这里若仍保留
+   transition，整排就会慢半拍地"追"指针。只在 magnifying 期间关掉过渡。 */
+.dock.magnifying .dock-icon,
+.dock.magnifying .dock-item,
+.dock.magnifying .dock-divider,
+.dock.magnifying::before {
+  transition: none;
+}
+.dock.magnifying .dock-item,
+.dock.magnifying .dock-divider {
+  will-change: translate;
+}
+/* 离开：撑开量、缩放、底板一起从当前值弹性回位（MOTION_SYSTEM §4 Dock 悬停） */
+.dock.settling .dock-item,
+.dock.settling .dock-divider {
+  transition: translate var(--dur-standard) var(--ease-spring);
+}
+.dock.settling .dock-icon {
+  transition: transform var(--dur-standard) var(--ease-spring);
+}
+.dock.settling::before {
+  transition: transform var(--dur-standard) var(--ease-spring);
 }
 .dock-tooltip {
   position: absolute;
@@ -517,10 +562,19 @@ p {
   background: var(--text);
 }
 .dock-divider {
+  flex: none;
+  width: 25px;
   height: 35px;
+  margin: 0 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.dock-divider::before {
+  content: "";
   width: 1px;
+  height: 100%;
   background: var(--line);
-  margin: 0 12px 10px;
 }
 .resize {
   position: absolute;
@@ -535,7 +589,24 @@ p {
 .setting-row {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   padding: 15px 0;
+}
+.setting-range-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.setting-range {
+  width: 190px;
+  accent-color: var(--accent);
+}
+.setting-range-value {
+  min-width: 38px;
+  text-align: right;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 /* D1-04B 材质档位选择器：无边框（分层不靠发丝线），靠 --sunken 底表达可操作 */
 .material-select {
@@ -1423,6 +1494,24 @@ input[type="checkbox"] {
 }
 .desktop-file:hover {
   background: rgb(var(--text-rgb) / 0.06);
+}
+/* 桌面磁贴的选中/焦点**不要线框**（用户口径：不要线框或发丝线框；与菜单项同一口径）。
+   浏览器默认的 focus ring 是 outline 方框 —— 它在桌面图标上会画出一个明显黑框，
+   所以这里显式去掉 outline，改用**填充高亮**表达"选中/获得键盘焦点"：
+   既不出现任何线，又保留可见反馈与键盘可达性。 */
+.desktop-folder:focus,
+.desktop-file:focus,
+.desktop-folder:focus-visible,
+.desktop-file:focus-visible {
+  outline: none;
+}
+.desktop-folder:focus,
+.desktop-file:focus {
+  background: rgb(var(--text-rgb) / 0.1);
+}
+.dark .desktop-folder:focus,
+.dark .desktop-file:focus {
+  background: rgba(255, 255, 255, 0.14);
 }
 /* 只有"松手落格"这一段有过渡：拖动过程必须 1:1 跟手（reduced motion 下 token 为 0ms） */
 .desktop-file.settling,
