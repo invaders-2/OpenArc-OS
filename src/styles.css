@@ -503,16 +503,25 @@ p {
 }
 .dock-tooltip {
   position: absolute;
-  bottom: calc(100% + 4px);
+  /**
+   * 关键：悬停时图标以 **bottom center 为原点**放大约 --s 倍，顶端因此上移
+   * `icon * (s - 1)`。提示若只按 .dock-item 的盒子定位，就会被放大的图标压住 ——
+   * 用户实测："上面的应用名称都被挡住了"。所以要把这段位移补进来。
+   */
+  bottom: calc(100% + 7px + (var(--s) - 1) * var(--dock-icon, 47px));
   left: 50%;
   transform: translateX(-50%) translateY(6px);
   white-space: nowrap;
-  padding: 4px 9px;
-  border-radius: var(--radius-sm);
+  /* macOS 口径：接近半高的圆角 + 底部一个小尾巴（见 ::after） */
+  padding: 4px 10px;
+  border-radius: 7px;
   font-size: 11px;
   color: var(--text);
-  background: rgb(var(--surface-rgb) / var(--surface-alpha));
-  backdrop-filter: var(--glass-filter-tip);
+  /**
+   * 用**接近实色**的材质：尾巴要和气泡颜色完全一致才能看不出接缝，
+   * 而带模糊的半透明材质没法复制到 border 三角上。macOS 的提示本来也基本是不透明的。
+   */
+  background: rgb(var(--surface-rgb) / 0.96);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
   opacity: 0;
   pointer-events: none;
@@ -520,6 +529,19 @@ p {
     opacity var(--quick) var(--ease),
     transform var(--quick) var(--ease);
   z-index: 300;
+}
+/* 指向图标的小尾巴（macOS 提示的辨识特征）。 */
+.dock-tooltip::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border: 5px solid transparent;
+  border-bottom: 0;
+  border-top-color: rgb(var(--surface-rgb) / 0.96);
 }
 .dock-item:hover .dock-tooltip,
 .dock-item:focus-visible .dock-tooltip {
