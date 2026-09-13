@@ -24,6 +24,7 @@ import {
 import type { MenuItem } from "./desktop/components";
 import { Dialog } from "./desktop/Dialog";
 import { useIdentity } from "./identity/useIdentity";
+import { ResourceLibraryPlaceholder } from "./resource/ResourceLibraryPlaceholder";
 import { BootSurface, LockScreen, LoginScreen, SetupScreen } from "./identity/AuthScreens";
 import { ProtectedResourceFixture } from "./authorization/ProtectedResourceFixture";
 import { SettingsContent } from "./settings/SettingsContent";
@@ -53,6 +54,9 @@ declare global {
       device?: {
         command: (cmd: Record<string, unknown>) => Promise<Record<string, unknown>>;
       };
+      resource?: {
+        command: (cmd: Record<string, unknown>) => Promise<Record<string, unknown>>;
+      };
     };
   }
 }
@@ -69,6 +73,7 @@ const apps = [
   { id: "home", name: "应用中心", icon: "apps" },
   { id: "browser", name: "浏览器", icon: "safari" },
   { id: "files", name: "文件", icon: "finder" },
+  { id: "resource-library", name: "资源库", icon: "finder" },
   { id: "canvas", name: "无限画布", icon: "freeform" },
   { id: "skills", name: "Skill 中心", icon: "shortcuts" },
   { id: "settings", name: "系统设置", icon: "settings" },
@@ -281,7 +286,7 @@ function App() {
             {apps
               .filter((a) => a.id !== "home")
               .map((a) => (
-                <button className="app-card" key={a.id} onClick={() => activateApp(a.id)}>
+                <button className="app-card" key={a.id} data-app-id={a.id} onClick={() => activateApp(a.id)}>
                   <img className="app-icon" src={icon(a.icon)} alt="" draggable={false} />
                   <strong>{a.name}</strong>
                   <small>
@@ -340,6 +345,7 @@ function App() {
         </div>
       );
     }
+    if (w?.appId === "resource-library") return <ResourceLibraryPlaceholder />;
     if (w?.appId === "settings")
       return (
         <SettingsContent
