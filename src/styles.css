@@ -517,11 +517,11 @@ p {
   border-radius: 7px;
   font-size: 11px;
   color: var(--text);
-  /**
-   * 用**接近实色**的材质：尾巴要和气泡颜色完全一致才能看不出接缝，
-   * 而带模糊的半透明材质没法复制到 border 三角上。macOS 的提示本来也基本是不透明的。
-   */
-  background: rgb(var(--surface-rgb) / 0.96);
+  /* 磨砂玻璃：与其它浮层同一套材质 token（用户口径：是磨砂玻璃质感）。
+     尾巴也用同一套（见 ::after）—— 用 clip-path 把模糊面裁成三角形即可，
+     否则 backdrop-filter 会把 5px 的 border 三角外面的方块也糊出来。 */
+  background: rgb(var(--surface-rgb) / var(--surface-alpha));
+  backdrop-filter: var(--glass-filter-tip);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
   opacity: 0;
   pointer-events: none;
@@ -530,18 +530,21 @@ p {
     transform var(--quick) var(--ease);
   z-index: 300;
 }
-/* 指向图标的小尾巴（macOS 提示的辨识特征）。 */
+/* 指向图标的小尾巴（macOS 提示的辨识特征）—— 与气泡**共用同一套磨砂材质**：
+   把 12×6 的盒子用 clip-path 裁成三角形，backdrop-filter 才会只糊三角形那一块。
+   盒子紧贴气泡下沿（top:100%），不重叠 —— 半透明层若重叠会在接缝处出现双倍底色。 */
 .dock-tooltip::after {
   content: "";
   position: absolute;
   top: 100%;
   left: 50%;
   transform: translateX(-50%);
-  width: 0;
-  height: 0;
-  border: 5px solid transparent;
-  border-bottom: 0;
-  border-top-color: rgb(var(--surface-rgb) / 0.96);
+  width: 12px;
+  height: 6px;
+  background: rgb(var(--surface-rgb) / var(--surface-alpha));
+  backdrop-filter: var(--glass-filter-tip);
+  -webkit-clip-path: polygon(50% 100%, 0 0, 100% 0);
+  clip-path: polygon(50% 100%, 0 0, 100% 0);
 }
 .dock-item:hover .dock-tooltip,
 .dock-item:focus-visible .dock-tooltip {
