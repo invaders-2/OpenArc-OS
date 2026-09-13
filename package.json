@@ -17,6 +17,7 @@
     "test:d2-02": "npm run build && node experiments/d2-02/run-all.mjs",
     "test:d3-01": "npm run build && node experiments/d3-01/run-all.mjs",
     "test:d3-02": "npm run build && node experiments/d3-02/run-all.mjs",
+    "test:d3-03": "npm run build && node experiments/d3-03/run-all.mjs",
     "test:identity-ui": "npm run build && node tests/identity-ui.mjs",
     "test:authorization-ui": "npm run build && node tests/authorization-ui.mjs"
   },
