@@ -69,4 +69,14 @@ contextBridge.exposeInMainWorld("openarc", {
   device: {
     command: (command) => ipcRenderer.invoke("device:command", command),
   },
+  /**
+   * D3-04A 资源桥。
+   *
+   * **只有受控 Resource Commands**：没有 readFile(path) / writeFile(path) /
+   * deleteFile(path) 这类通用 fs 能力（§64）。手动导入 / 链接由主进程 dialog 选择文件，
+   * 路径从不回到渲染进程（§14 §66）；返回值恒为 safe descriptor。
+   */
+  resource: {
+    command: (command) => ipcRenderer.invoke("resource:command", command),
+  },
 });

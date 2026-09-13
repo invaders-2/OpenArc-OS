@@ -24,7 +24,11 @@
  *   resource / resolve / notification / list / search）；治理写操作不在桥上，
  *   sessionRef 由主进程从 IdentityService 注入，渲染进程无法伪造身份。
  *   仍然没有任何 fs / shell / webContents / BrowserWindow / Resource DB / Grant DB 能力。
- * 清单随之前移：现在的"上一版基线"是 D3-01 的 6 个成员。
+ * **D3-04A 变更（显式登记）**：暴露面 8 → 9，新增 resource 与通道 resource:command。
+ *   新增内容 = **一个受控 Resource Command 方法** resource.command(cmd)；
+ *   没有 readFile(path) / writeFile(path) / deleteFile(path) 之类通用 fs 能力，
+ *   导入/链接的文件选择在主进程 dialog 完成，路径不回渲染进程。
+ * 清单随之前移：现在的"上一版基线"是 D3-03 的 8 个成员。
  */
 const { BrowserWindow, WebContentsView, session, app } = require("electron");
 const http = require("node:http");
@@ -33,21 +37,23 @@ const path = require("node:path");
 
 const ROOT = path.join(__dirname, "..", "..", "..", "..");
 
-/** 冻结清单 —— 与 electron/preload.cjs 的现状逐字对应（D3-01 后为 6 个）。 */
-const FROZEN_BRIDGE_KEYS = ["action", "authorization", "identity", "navigate", "onDisplay", "onNativeState", "sync"];
+/** 冻结清单 —— 与 electron/preload.cjs 的现状逐字对应（D3-04A 后为 9 个）。 */
+const FROZEN_BRIDGE_KEYS = ["action", "authorization", "device", "identity", "navigate", "onDisplay", "onNativeState", "resource", "sync"];
 /**
  * 冻结的 IPC 通道。
  *
- * 注意扫描范围：`identity:command` 注册在 **electron/identity-bootstrap.cjs**
- * （与 UI 探针共用同一份装配），不在 main.cjs 里。只扫 main.cjs 会漏掉它，
- * 等于"新增通道不再受这条断言约束"——因此两个文件都要扫。
+ * 注意扫描范围：identity:command / authorization:command / device:command / resource:command
+ * 分别注册在各自的 *-bootstrap.cjs（与 UI 探针共用同一份装配），不在 main.cjs 里。
+ * 只扫 main.cjs 会漏掉它们 —— 因此全部 bootstrap 都要扫。
  */
-const FROZEN_IPC_CHANNELS = ["authorization:command", "browser:action", "browser:navigate", "device:command", "identity:command", "windows:sync"];
-const IPC_SCAN_FILES = ["main.cjs", "identity-bootstrap.cjs", "authorization-bootstrap.cjs", "device-bootstrap.cjs"];
-/** D3-02 冻结的上一版清单（6 个），用于把"发生了什么变化"讲清楚。 */
-const PREV_BRIDGE_KEYS = ["action", "authorization", "identity", "navigate", "onDisplay", "onNativeState", "sync"];
-/** D3-03 之前那一版（不含 device）。 */
-const D3_02_IPC_CHANNELS = ["authorization:command", "browser:action", "browser:navigate", "identity:command", "windows:sync"];
+const FROZEN_IPC_CHANNELS = ["authorization:command", "browser:action", "browser:navigate", "device:command", "identity:command", "resource:command", "windows:sync"];
+const IPC_SCAN_FILES = ["main.cjs", "identity-bootstrap.cjs", "authorization-bootstrap.cjs", "device-bootstrap.cjs", "resource-bootstrap.cjs"];
+/** D3-03 冻结的上一版清单（8 个，含 device），用于把"发生了什么变化"讲清楚。 */
+const PREV_BRIDGE_KEYS = ["action", "authorization", "device", "identity", "navigate", "onDisplay", "onNativeState", "sync"];
+/** D3-02 冻结的版本（7 个，仅作历史留痕）。 */
+const D3_02_BRIDGE_KEYS = ["action", "authorization", "identity", "navigate", "onDisplay", "onNativeState", "sync"];
+/** D3-01 冻结的版本（6 个，仅作历史留痕）。 */
+const D3_01_BRIDGE_KEYS = ["action", "identity", "navigate", "onDisplay", "onNativeState", "sync"];
 /** D2-02 冻结的更早版本，仅作历史留痕。 */
 const PREV_PREV_BRIDGE_KEYS = ["action", "navigate", "onDisplay", "onNativeState", "sync"];
 /** D1-05 冻结的再上一版，仅作历史留痕。 */
@@ -93,9 +99,9 @@ exports.run = async function run({ report, sleep, add, out }) {
     `preload 暴露 ${JSON.stringify(bridgeKeys)}；冻结清单 ${JSON.stringify(FROZEN_BRIDGE_KEYS)}`,
   );
   add(
-    "sec.bridgeExpandedOnlyByAuthorization",
+    "sec.bridgeExpandedOnlyByResource",
     bridgeKeys.length === PREV_BRIDGE_KEYS.length + 1 &&
-      bridgeKeys.filter((k) => !PREV_BRIDGE_KEYS.includes(k)).join() === "authorization" &&
+      bridgeKeys.filter((k) => !PREV_BRIDGE_KEYS.includes(k)).join() === "resource" &&
       PREV_BRIDGE_KEYS.every((k) => bridgeKeys.includes(k)),
     `上一版冻结 ${PREV_BRIDGE_KEYS.length} 个成员，现在 ${bridgeKeys.length} 个` +
       `（新增 ${JSON.stringify(bridgeKeys.filter((k) => !PREV_BRIDGE_KEYS.includes(k)))}，` +

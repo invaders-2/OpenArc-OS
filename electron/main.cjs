@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, safeStorage, screen } = require("electron");
+const { app, BrowserWindow, ipcMain, safeStorage, screen, dialog } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const { pathToFileURL } = require("node:url");
@@ -98,6 +98,10 @@ app.whenReady().then(() => {
     service: identity.service,
     authorization: identity.authorization,
     device: identity.deviceService,
+    // D3-04A：资源命令。导入/链接的文件选择在主进程完成，路径不回渲染进程。
+    resource: identity.resourceService,
+    dialog,
+    BrowserWindow,
     isTrusted: trusted,
     send: (event) => {
       if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return;

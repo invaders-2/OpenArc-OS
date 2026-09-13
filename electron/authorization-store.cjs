@@ -76,6 +76,7 @@ const SQL = {
   appGrantsForApp: "SELECT * FROM app_resource_grants WHERE app_id = ? ORDER BY created_at, id",
   allAppGrants: "SELECT * FROM app_resource_grants ORDER BY created_at, id",
   deleteAppGrant: "DELETE FROM app_resource_grants WHERE id = ?",
+  deleteAppGrantsForResource: "DELETE FROM app_resource_grants WHERE resource_id = ? OR collection_id = ?",
 
   insertAuthzAudit:
     "INSERT INTO authorization_audit (at, actor_user_id, target_user_id, app_id, department_id, resource_ref, action, decision, reason_code, permission_source, request_id, old_permissions, new_permissions) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -388,6 +389,12 @@ class AuthorizationStore {
 
   allAppGrants() {
     return this.db.prepare(SQL.allAppGrants).all();
+  }
+
+  /** 永久删除资源时清理其 App Grant（§44）；与 deleteGrantsForResource 成对使用。 */
+  deleteAppGrantsForResource(resourceId) {
+    const res = this.db.prepare(SQL.deleteAppGrantsForResource).run(String(resourceId || ""), String(resourceId || ""));
+    return { changed: res.changes > 0 };
   }
 
   revokeAppGrant(grantId) {

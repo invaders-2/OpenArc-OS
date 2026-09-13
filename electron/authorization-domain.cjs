@@ -539,7 +539,7 @@ function evaluateAppAuthorization({ resource, app, grants = [] }) {
  *
  * @returns { decision, reasonCode, effectivePermissions, userActions, appActions, allowSources }
  */
-function evaluatePolicy({ resource, user, memberships = [], grants = [], app, appGrants = [], action, agent = false }) {
+function evaluatePolicy({ resource, user, memberships = [], grants = [], app, appGrants = [], action, agent = false, allowInactiveResource = false }) {
   const deny = (reasonCode, extra = {}) => ({
     decision: DECISION.DENY,
     reasonCode,
@@ -550,7 +550,9 @@ function evaluatePolicy({ resource, user, memberships = [], grants = [], app, ap
     ...extra,
   });
 
-  if (!resource || resource.status !== RESOURCE_STATUS.ACTIVE) {
+  // §46：生命周期动作（restore / permanentDelete）需要能在 trashed 资源上重新求值。
+  // 普通调用方不传这个开关，默认仍是 DEFAULT DENY。
+  if (!resource || (resource.status !== RESOURCE_STATUS.ACTIVE && !allowInactiveResource)) {
     return deny(REASON.RESOURCE_NOT_AVAILABLE);
   }
 

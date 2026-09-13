@@ -16,6 +16,7 @@ const { IdentityLogger } = require("./identity-log.cjs");
 const { SessionSecretStore, safeStorageBackend, plainFileBackend } = require("./session-secret-store.cjs");
 const { createAuthorizationService, registerAuthorizationIpc } = require("./authorization-bootstrap.cjs");
 const { createDeviceBundle, registerDeviceIpc } = require("./device-bootstrap.cjs");
+const { createResourceBundle, registerResourceIpc } = require("./resource-bootstrap.cjs");
 
 /**
  * @param opts.userDataDir 数据目录（identity.db 与受保护存储落在这里）
@@ -45,7 +46,17 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
   const { authorization, authStore } = createAuthorizationService({ identityStore: store, logger: log });
   // D3-03：设备域挂在**同一条** SQLite 连接与事务队列上（迁移 v3 已在 open() 里完成）。
   const { deviceService, deviceStore } = createDeviceBundle({ identityStore: store, authorization, logger: log, serviceIdentity });
-  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore };
+  // D3-04A：本地资源对象与 Managed Store（<userData>/library）。启动时做可解释 recovery。
+  const { resourceService, resourceStore, managedStore } = createResourceBundle({
+    identityStore: store,
+    authorization,
+    authStore,
+    deviceService,
+    storeRoot: path.join(userDataDir, "library"),
+    logger: log,
+  });
+  resourceService.recoverStartup();
+  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore };
 }
 
 /**
@@ -54,7 +65,7 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
  * @param opts.isTrusted (event) => boolean —— 与 windows:sync 同一条信任判据
  * @param opts.send      (payload) => void —— 把身份事件推给渲染进程
  */
-function registerIdentityIpc({ ipcMain, service, authorization, device, isTrusted, send }) {
+function registerIdentityIpc({ ipcMain, service, authorization, device, resource, dialog, BrowserWindow, isTrusted, send }) {
   ipcMain.handle("identity:command", async (e, command) => {
     if (isTrusted && !isTrusted(e)) throw Error("Forbidden");
     if (!service) return { ok: false, error: "INTERNAL_ERROR", detail: "identity-not-ready" };
@@ -71,6 +82,8 @@ function registerIdentityIpc({ ipcMain, service, authorization, device, isTruste
   if (authorization) registerAuthorizationIpc({ ipcMain, service: authorization, identity: service, isTrusted });
   // D3-03：设备域（含管理写操作；授权判断在 DeviceService 内，见 device-bootstrap 顶部注释）。
   if (device) registerDeviceIpc({ ipcMain, service: device, identity: service, isTrusted });
+  // D3-04A：资源命令（无 raw fs；导入/链接经主进程 dialog）。
+  if (resource) registerResourceIpc({ ipcMain, service: resource, identity: service, isTrusted, dialog: dialog || null, BrowserWindow: BrowserWindow || null });
 }
 
 module.exports = { createIdentityService, registerIdentityIpc };

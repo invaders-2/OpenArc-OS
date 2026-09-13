@@ -121,7 +121,7 @@ class AuthorizationService {
   }
 
   /** 纯策略求值 + 统一结果封装。 */
-  #decide(prepared, resource, action, { agent } = {}) {
+  #decide(prepared, resource, action, { agent, allowInactiveResource = false } = {}) {
     if (!prepared.ok) {
       return {
         decision: DECISION.DENY,
@@ -152,6 +152,7 @@ class AuthorizationService {
       appGrants: prepared.appGrants,
       action,
       agent: agent === undefined ? prepared.agent : !!agent,
+      allowInactiveResource: !!allowInactiveResource,
     });
     return policy;
   }
@@ -188,7 +189,7 @@ class AuthorizationService {
   /**
    * @returns decision / reasonCode / effectivePermissions / policyVersion
    */
-  authorize({ actor, application, action, resource, context } = {}) {
+  authorize({ actor, application, action, resource, context, allowInactiveResource = false } = {}) {
     const act = String(action || "");
     const prepared = this.#prepare(context, application || actor?.application);
     const base = {
@@ -208,7 +209,7 @@ class AuthorizationService {
     }
     const row = this.#resourceFromInput(resource);
     if (row) base.resourceRef = domain.toResourceRef(row.resource_id);
-    const decision = this.#decide(prepared, row, act);
+    const decision = this.#decide(prepared, row, act, { allowInactiveResource });
     if (!prepared.ok) {
       // 会话级拒绝也要留审计（不含任何 Resource metadata）
       this.#audit({ prepared, resource: null, action: act, decision: DECISION.DENY, reasonCode: decision.reasonCode });
@@ -227,6 +228,65 @@ class AuthorizationService {
     };
   }
 
+  /**
+   * D3-04A §23：创建必须先针对 **target container / scope** 授权，而不是拿一个
+   * 还不存在的 resourceId 去 authorize。
+   *
+   *   · PERSONAL     → 显式 Personal Library Owner Policy（owner_user_id = 当前用户），
+   *                     不是"没有 ACL 行 → allow"
+   *   · DEPARTMENT   → 必须是该部门 ACTIVE 成员，且目标（scope / collection / type）有 create grant
+   *   · ORGANIZATION → 需要显式 grant；Super Admin 走治理策略
+   *
+   * 仍然要求 App Authorization 同时成立（§26）：系统内置 App 也不例外。
+   */
+  authorizeCreate({ context, application, actor, scope, departmentId = null, collectionId = null, resourceType = "other", action = ACTION.CREATE, agent } = {}) {
+    const prepared = this.#prepare(context, application || actor?.application);
+    const target = {
+      resource_id: null,
+      resource_type: String(resourceType || "other"),
+      owner_user_id: scope === SCOPE.PERSONAL ? prepared.user?.id ?? null : null,
+      organization_id: prepared.user?.team_id ?? null,
+      department_id: scope === SCOPE.DEPARTMENT ? departmentId : null,
+      collection_id: collectionId || null,
+      scope,
+      status: "active",
+    };
+    const base = {
+      policyVersion: POLICY_VERSION,
+      action,
+      appId: prepared.app?.app_id ?? null,
+      userId: prepared.user?.id ?? null,
+      requestId: prepared.requestId ?? null,
+      source: prepared.source ?? domain.SOURCE.MANUAL,
+      targetScope: scope,
+      targetDepartmentId: departmentId || null,
+      targetCollectionId: collectionId || null,
+    };
+    if (!RESOURCE_ACTIONS.includes(action)) {
+      return { ...base, decision: DECISION.DENY, reasonCode: REASON.INVALID_INPUT, effectivePermissions: [], allowSources: [] };
+    }
+    if (!prepared.ok) {
+      this.#audit({ prepared, resource: null, action, decision: DECISION.DENY, reasonCode: prepared.reason });
+      return { ...base, decision: DECISION.DENY, reasonCode: domain.externalReason(prepared.reason), effectivePermissions: [], allowSources: [], challenge: prepared.challenge || null };
+    }
+    // Super Admin 的治理能力集中在 Policy 中表达：允许组织内创建，但仍必须过 App 授权。
+    if (prepared.user.role === "ADMIN") {
+      const appActions = new Set();
+      for (const g of prepared.appGrants || []) {
+        if (!domain.appGrantCoversResource(g, target)) continue;
+        for (const a of domain.grantActions(g)) appActions.add(a);
+      }
+      const allowed = appActions.has(action);
+      const source = allowed ? [ALLOW_SOURCE.SUPER_ADMIN, ALLOW_SOURCE.APP_GRANT] : [];
+      this.#audit({ prepared, resource: null, action, decision: allowed ? DECISION.ALLOW : DECISION.DENY, reasonCode: allowed ? "ALLOW" : REASON.APP_ACTION_NOT_GRANTED, allowSources: source });
+      return { ...base, decision: allowed ? DECISION.ALLOW : DECISION.DENY, reasonCode: allowed ? "ALLOW" : REASON.APP_ACTION_NOT_GRANTED, effectivePermissions: [...appActions].sort(), allowSources: source };
+    }
+    const policy = this.#decide(prepared, target, action, { agent, allowInactiveResource: true });
+    const reasonCode = policy.decision === DECISION.ALLOW ? "ALLOW" : domain.externalReason(policy.reasonCode);
+    this.#audit({ prepared, resource: null, action, decision: policy.decision, reasonCode, allowSources: policy.allowSources || [] });
+    return { ...base, ...policy, reasonCode };
+  }
+
   // -------------------------------------------------------------------------
   // getCapabilities()（§61）
   // -------------------------------------------------------------------------
@@ -235,7 +295,7 @@ class AuthorizationService {
    * UI projection：canRead / canEdit / ... 只用于画界面。
    * 最终 command 必须重新 authorize(action)，不能把这里的 true 当授权凭据。
    */
-  getCapabilities({ actor, application, resource, context, agent } = {}) {
+  getCapabilities({ actor, application, resource, context, agent, allowInactiveResource = false } = {}) {
     const prepared = this.#prepare(context, application || actor?.application);
     if (!prepared.ok) {
       return { ok: false, error: externalReason(prepared.reason), challenge: prepared.challenge || null, policyVersion: POLICY_VERSION };
@@ -247,7 +307,7 @@ class AuthorizationService {
     const allowedActions = [];
     let viewReason = null;
     for (const [key, act] of Object.entries(CAPABILITY_ACTIONS)) {
-      const d = this.#decide(prepared, row, act, { agent: useAgent });
+      const d = this.#decide(prepared, row, act, { agent: useAgent, allowInactiveResource });
       capabilities[key] = d.decision === DECISION.ALLOW;
       if (capabilities[key]) allowedActions.push(act);
       if (act === ACTION.VIEW) viewReason = d.reasonCode;
