@@ -512,17 +512,17 @@ p {
   left: 50%;
   transform: translateX(-50%) translateY(6px);
   white-space: nowrap;
-  /* macOS 口径：接近半高的圆角 + 底部一个小尾巴（见 ::after） */
-  padding: 4px 10px;
-  border-radius: 7px;
-  font-size: 11px;
+  /* 用户口径：对齐 macOS 参考图 —— 更大的圆角 / 字号 / 内距，更宽的尾巴（见 ::after）。 */
+  padding: 5px 11px;
+  border-radius: 9px;
+  font-size: 12px;
+  /* --text 随主题翻转：深色=近白字，浅色=深字 —— 与 macOS 提示的明暗跟随一致 */
   color: var(--text);
-  /* 磨砂玻璃：与其它浮层同一套材质 token（用户口径：是磨砂玻璃质感）。
-     尾巴也用同一套（见 ::after）—— 用 clip-path 把模糊面裁成三角形即可，
-     否则 backdrop-filter 会把 5px 的 border 三角外面的方块也糊出来。 */
-  background: rgb(var(--surface-rgb) / var(--surface-alpha));
+  /* macOS 参考图里这个气泡**几乎是实心的**（不是我们那层 0.5 的玻璃）：content 色 0.92
+     + 一层 vibrancy 模糊。0.92 让形状在浅底/深底上都读得出来，同时仍留一点材质感。 */
+  background: rgb(var(--content-rgb) / 0.92);
   backdrop-filter: var(--glass-filter-tip);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
   opacity: 0;
   pointer-events: none;
   transition:
@@ -540,9 +540,10 @@ p {
   top: 100%;
   left: 50%;
   transform: translateX(-50%);
-  width: 12px;
-  height: 6px;
-  background: rgb(var(--surface-rgb) / var(--surface-alpha));
+  /* macOS 参考图的尾巴更宽、更短，与气泡底边整段连在一起 */
+  width: 18px;
+  height: 7px;
+  background: rgb(var(--content-rgb) / 0.92);
   -webkit-clip-path: polygon(50% 100%, 0 0, 100% 0);
   clip-path: polygon(50% 100%, 0 0, 100% 0);
 }
