@@ -541,12 +541,17 @@ p {
 .dock-tooltip::after {
   content: "";
   position: absolute;
-  top: calc(100% - 5px);
+  /**
+   * 埋得足够深：14×14 的方块旋转后外接框约 19.8px，中心落在气泡下沿之上 4px（top = 100% − 11px）。
+   * 于是**露出来的那一截从 11.8px 宽单调收窄到尖**（真楔形），而不是"上宽下宽的菱形" ——
+   * 上一版只埋 5px，露出的正好是菱形最宽处，用户看到的自然是菱形。
+   */
+  top: calc(100% - 11px);
   left: 50%;
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   background: rgb(var(--content-rgb) / 0.92);
-  border-radius: 2px 0 4px 0;
+  border-radius: 2px 0 3px 0;
   transform: translateX(-50%) rotate(45deg);
 }
 .dock-item:hover .dock-tooltip,
