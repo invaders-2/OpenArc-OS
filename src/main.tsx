@@ -24,7 +24,7 @@ import {
 import type { MenuItem } from "./desktop/components";
 import { Dialog } from "./desktop/Dialog";
 import { useIdentity } from "./identity/useIdentity";
-import { ResourceLibraryPlaceholder } from "./resource/ResourceLibraryPlaceholder";
+import { ResourceLibraryApp } from "./resource/ResourceLibraryApp";
 import { BootSurface, LockScreen, LoginScreen, SetupScreen } from "./identity/AuthScreens";
 import { ProtectedResourceFixture } from "./authorization/ProtectedResourceFixture";
 import { SettingsContent } from "./settings/SettingsContent";
@@ -345,7 +345,7 @@ function App() {
         </div>
       );
     }
-    if (w?.appId === "resource-library") return <ResourceLibraryPlaceholder />;
+    if (w?.appId === "resource-library") return <ResourceLibraryApp />;
     if (w?.appId === "settings")
       return (
         <SettingsContent
