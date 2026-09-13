@@ -424,9 +424,11 @@ Windows 全部（路径 / 文件锁 / NTFS / userData）；MANAGED symlink TOCTO
 | npm run build | PASS |
 | npm run test:d3-04b | **2 探针：PASS 2 / FAIL 0（25 条用例）** |
 | npm run test:resource-library-ui | **24 / 24 UI checks PASS**（真实 Electron：open / import / create memory / edit / version conflict / collection / move / tag / favorite / delete / trash / restore / capabilities） |
-| npm run test:d3-04a / resource-ui | 待回归 |
-| npm run test:d3-01 / d3-02 / d3-03 | 待回归 |
-| npm run test:d2-02 / security / design-system / theme-baseline | 待回归 |
+| npm run test:d3-04a / resource-ui | PASS 4/4 / 10/10 |
+| npm run test:d3-01 / d3-02 / d3-03 | 12/12 / 6/6 / TLS 12/12 |
+| npm run test:d2-02 | PASS 7/7（含 security-surface 15/15） |
+| npm run test:identity-ui / authorization-ui / device-ui | 24/24 / 14/14 / PASS（device-ui 2 NOT VERIFIED 属 D3-03） |
+| npm run test:security / design-system / theme-baseline | FAIL 0 / PASS 4 / 与基线一致 |
 
 分支 feature/d3-04b-resource-library，基线 feature/d3-04a-resource-store @ 469f78b，未 merge main。
 ADR：docs/decisions/D3-04B-resource-library.md。
@@ -439,7 +441,7 @@ ADR：docs/decisions/D3-04B-resource-library.md。
 4. **Tag 规范化**：显示名保留大小写，比较用 normalized（小写），同组织唯一（Shoes == shoes）。
 5. **Metadata 修改不产生内容 version**：tag / favorite / collection / description / name 属 Metadata Revision。
 6. **Favorite / Recent 是 per-user**，且 Recent 只在真实打开时更新。
-7. **Pr ivate Memory 默认 PERSONAL + OWNER_POLICY**：加入 Department 不自动共享。
+7. **Private Memory 默认 PERSONAL + OWNER_POLICY**：加入 Department 不自动共享。
 8. **Version-aware save**：expectedVersion 冲突必须 VERSION_CONFLICT，UI 不覆盖；restoreVersion 继续 vN → vN+1。
 9. **授权在服务端**：Renderer 的 canEdit 只控制 UX，真实 command 再次 authorize。
 10. **Renderer 无 raw fs**：只有受控 Resource Commands，路径不回渲染进程。

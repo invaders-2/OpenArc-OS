@@ -189,9 +189,11 @@ D3-04D 负责 Department / Super Admin 权限管理 UI、App Resource Picker、F
 | npm run build | PASS |
 | npm run test:d3-04b | 2 探针 PASS / FAIL 0（25 用例） |
 | npm run test:resource-library-ui | 24 / 24 UI checks PASS |
-| npm run test:d3-04a / resource-ui | 待回归 |
-| npm run test:d3-01 / d3-02 / d3-03 | 待回归 |
-| npm run test:d2-02 / security / design-system / theme-baseline | 待回归 |
+| npm run test:d3-04a / resource-ui | PASS 4/4 / 10/10 |
+| npm run test:d3-01 / d3-02 / d3-03 | 12/12 / 6/6 / TLS 12/12 |
+| npm run test:d2-02 | PASS 7/7（含 security-surface 15/15） |
+| npm run test:identity-ui / authorization-ui / device-ui | 24/24 / 14/14 / PASS（device-ui 2 NOT VERIFIED 属 D3-03） |
+| npm run test:security / design-system / theme-baseline | FAIL 0 / PASS 4 / 与基线一致 |
 
 产物：artifacts/d3-04b/*.json。
 
