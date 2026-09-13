@@ -240,7 +240,6 @@ function App() {
   const [menu, setMenu] = useState<{ x: number; y: number; folder?: string; file?: string } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const dockRef = useRef<HTMLElement>(null);
   const searchPanel = useRef<HTMLDivElement>(null);
   const searchTrigger = useRef<HTMLElement | null>(null);
   /** 右键菜单的来源元素。对话框关闭后焦点要回到它 —— 菜单本身届时已卸载。 */
@@ -251,6 +250,11 @@ function App() {
     const v = localStorage.getItem("oa-glass");
     if (v === "full" || v === "reduced" || v === "solid") return v;
     return localStorage.getItem("oa-opaque") === "true" ? "solid" : "full";
+  });
+  /** Dock 图标尺寸（px）。范围 / 默认值对齐 macOS 的"大小"滑块。 */
+  const [dockSize, setDockSize] = useState(() => {
+    const v = Number(localStorage.getItem("oa-dock-size"));
+    return Number.isFinite(v) && v >= 32 && v <= 80 ? v : 47;
   });
   /**
    * 外观：跟随系统 / 浅色 / 深色（默认跟随系统）。
@@ -669,40 +673,13 @@ function App() {
       ["motion", reduced],
       ["glass", glass],
       ["dark", dark],
+      ["dock-size", dockSize],
     ])
       localStorage.setItem("oa-" + k, String(v));
-  }, [reduced, glass, dark]);
+  }, [reduced, glass, dark, dockSize]);
   useEffect(() => {
     localStorage.setItem("oa-folders", JSON.stringify(folders));
   }, [folders]);
-
-  // Dock 波浪放大（纯视觉，与窗口状态无关）
-  useEffect(() => {
-    const dock = dockRef.current;
-    if (!dock) return;
-    const items = Array.from(dock.querySelectorAll<HTMLElement>(".dock-item"));
-    const RANGE = 135;
-    const reset = () => items.forEach((el) => el.style.setProperty("--s", "1"));
-    if (reduced) {
-      reset();
-      return;
-    }
-    const apply = (x: number) =>
-      items.forEach((el) => {
-        const r = el.getBoundingClientRect();
-        const distance = Math.abs(r.left + r.width / 2 - x);
-        const t = Math.max(0, 1 - distance / RANGE);
-        el.style.setProperty("--s", (1 + 0.62 * t * t * (3 - 2 * t)).toFixed(3));
-      });
-    const move = (e: PointerEvent) => apply(e.clientX);
-    dock.addEventListener("pointermove", move);
-    dock.addEventListener("pointerleave", reset);
-    return () => {
-      dock.removeEventListener("pointermove", move);
-      dock.removeEventListener("pointerleave", reset);
-      reset();
-    };
-  }, [reduced]);
 
   // 搜索面板的焦点进出（焦点陷阱由 Dialog 原语承担；这里是搜索自己的开关语义）
   useEffect(() => {
@@ -1486,6 +1463,25 @@ function App() {
                 </div>
                 <div className="setting-row">
                   <span>
+                    程序坞图标大小
+                    <span className="footnote"> 拖动滑块调整 Dock 图标尺寸</span>
+                  </span>
+                  <span className="setting-range-wrap">
+                    <input
+                      className="setting-range"
+                      type="range"
+                      min={32}
+                      max={80}
+                      step={1}
+                      value={dockSize}
+                      onChange={(e) => setDockSize(Number(e.target.value))}
+                      aria-label="程序坞图标大小"
+                    />
+                    <span className="setting-range-value">{dockSize}px</span>
+                  </span>
+                </div>
+                <div className="setting-row">
+                  <span>
                     壁纸
                   </span>
                   <label className="control-button">
@@ -1861,6 +1857,7 @@ function App() {
       data-glass={glass}
       data-identity-gate={gate}
       data-wallpaper={wallpaper}
+      style={{ "--dock-icon": `${dockSize}px` } as React.CSSProperties}
       onDragOver={(e) => {
         // 桌面磁贴要能接住内部拖拽；不 preventDefault 的话浏览器直接拒绝 drop
         if (!hasInternalDrag(e)) return;
@@ -1984,7 +1981,10 @@ function App() {
               e.dataTransfer.dropEffect = e.altKey ? "copy" : "move";
             }}
             onDrop={(e) => void handleInternalDrop(e, f.id)}
-            onPointerDown={(e) => dragFolder(e, f)}
+            onPointerDown={(e) => {
+              (e.currentTarget as HTMLElement).focus(); // 键盘路径（Enter/F2）依赖焦点
+              dragFolder(e, f);
+            }}
             onDoubleClick={() => openFolder(f)}
             onKeyDown={(e) => {
               // 事件必须来自磁贴自身：重命名输入框里的 Enter 会冒泡上来，
@@ -2029,8 +2029,24 @@ function App() {
               style={{ left: p.x, top: p.y }}
               data-entry-id={f.id}
               tabIndex={0}
-              onPointerDown={(e) => dragDesktopIcon(e, f.id)}
+              onPointerDown={(e) => {
+                // 先给磁贴焦点：键盘路径（空格 Quick Look / Enter 打开）依赖它。
+                // 不这样做时，dragDesktopIcon 里的 preventDefault 会让点击不产生焦点，
+                // 于是"点一下文件再按空格"不会生效（用户口径：桌面文件也要支持空格查看）。
+                (e.currentTarget as HTMLElement).focus();
+                dragDesktopIcon(e, f.id);
+              }}
               onDoubleClick={() => void openPreview(DESKTOP_ID, f.id)}
+              onKeyDown={(e) => {
+                // 与文件夹窗口内的口径一致：空格 = Quick Look，Enter = 打开。
+                if (e.target !== e.currentTarget) return;
+                if (e.code === "Space" || e.key === " " || e.key === "Enter") {
+                  e.preventDefault();
+                  // 全局空格处理器（document 级）不再重复触发一次
+                  e.stopPropagation();
+                  void openPreview(DESKTOP_ID, f.id);
+                }
+              }}
               onContextMenu={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -2079,7 +2095,7 @@ function App() {
           apps={apps}
           runningApps={runningApps}
           bouncing={bouncing}
-          dockRef={dockRef}
+          reduced={reduced}
           hidden={anyMaximized && !dockPeek}
           onPointerLeave={() => setDockPeek(false)}
           onActivate={activateApp}
