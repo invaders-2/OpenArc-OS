@@ -5,6 +5,8 @@
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
+    "oa:status": "node scripts/oa-status.mjs",
+    "oa:app": "node scripts/sync-app.mjs",
     "dev": "vite --host 127.0.0.1",
     "desktop": "npm run build && electron .",
     "build": "tsc --noEmit && vite build",
