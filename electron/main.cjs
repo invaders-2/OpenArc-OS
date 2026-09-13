@@ -88,7 +88,9 @@ app.whenReady().then(() => {
     // 它们操作 OpenArc 窗口本身（关闭/最小化/缩放），DOM 顶栏左侧相应留出位置。
     // Windows 没有等价"保留控件"的方式，直接 frame:false（Windows 尚未验证）。
     ...(isMac
-      ? { titleBarStyle: "hidden", trafficLightPosition: { x: 20, y: 16 } }
+      // y = (顶栏 38px − 灯组 12px) / 2 = 13：与顶栏内容**垂直居中**对齐
+      // （原来是 16，比中心低 3px —— 用户口径："居中对齐红绿灯"）。
+      ? { titleBarStyle: "hidden", trafficLightPosition: { x: 20, y: 13 } }
       : { frame: false }),
     ...glass,
     webPreferences: {
