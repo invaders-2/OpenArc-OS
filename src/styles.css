@@ -530,9 +530,10 @@ p {
     transform var(--quick) var(--ease);
   z-index: 300;
 }
-/* 指向图标的小尾巴（macOS 提示的辨识特征）—— 与气泡**共用同一套磨砂材质**：
-   把 12×6 的盒子用 clip-path 裁成三角形，backdrop-filter 才会只糊三角形那一块。
-   盒子紧贴气泡下沿（top:100%），不重叠 —— 半透明层若重叠会在接缝处出现双倍底色。 */
+/* 指向图标的小尾巴（macOS 提示的辨识特征）。
+   **整块只允许一个 backdrop-filter**：气泡和尾巴若各自模糊、各自合成，接缝处必然出现一条
+   可见的界线，看起来就是"分成两块"（用户实测）。所以尾巴只复制同一份底色，不做模糊 ——
+   12×6 的三角下没有值得模糊的细节，肉眼与气泡是连成一块的（用户口径：气泡要连在一起）。 */
 .dock-tooltip::after {
   content: "";
   position: absolute;
@@ -542,7 +543,6 @@ p {
   width: 12px;
   height: 6px;
   background: rgb(var(--surface-rgb) / var(--surface-alpha));
-  backdrop-filter: var(--glass-filter-tip);
   -webkit-clip-path: polygon(50% 100%, 0 0, 100% 0);
   clip-path: polygon(50% 100%, 0 0, 100% 0);
 }
