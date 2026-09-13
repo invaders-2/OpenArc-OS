@@ -570,6 +570,167 @@ input[type="checkbox"] {
   font-size: 12px;
   color: var(--muted);
 }
+
+/* ── D3-03 设置分栏 ───────────────────────────────────────────────────────
+   分层只靠 --sunken / --row-hover，**不使用 border / hairline**；
+   颜色、圆角、间距、时长全部取自 tokens.css，没有字面值。 */
+.settings-layout {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: var(--space-6);
+  align-items: start;
+}
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.settings-nav button {
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  font-size: var(--fs-secondary);
+  color: var(--muted);
+  transition:
+    background var(--quick) var(--ease),
+    color var(--quick) var(--ease);
+}
+.settings-nav button:hover {
+  background: var(--row-hover);
+  color: var(--text);
+}
+.settings-nav button[aria-current="true"] {
+  background: var(--sunken);
+  color: var(--text);
+}
+.settings-pane {
+  min-width: 0;
+}
+
+/* ── D3-03 设备 pane ───────────────────────────────────────────────────── */
+.device-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+.device-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.device-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.device-section-head h3 {
+  margin: 0;
+}
+.device-meta,
+.device-note {
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+.device-error {
+  display: block;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: rgb(var(--failed-rgb) / 0.12);
+  color: var(--failed);
+  font-size: var(--fs-caption);
+}
+.device-list,
+.device-pairing-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.device-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  background: var(--sunken);
+}
+.device-row__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.device-row__main strong {
+  font-size: var(--fs-body);
+  font-weight: var(--fw-medium);
+}
+.device-row__badges {
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.device-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+}
+.device-rename {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+.device-rename-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: rgb(var(--content-rgb) / var(--content-alpha));
+  color: var(--text);
+}
+.device-pairing-secret {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  background: var(--sunken);
+}
+.device-secret {
+  font-family: var(--font-mono);
+  font-size: var(--fs-secondary);
+  word-break: break-all;
+  user-select: all;
+}
+.device-pairing-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+}
+.device-pairing-row > :last-child {
+  margin-left: auto;
+}
+.device-audit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.device-audit-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-1) 0;
+  font-size: var(--fs-caption);
+}
 .empty-content {
   height: 100%;
   display: flex;

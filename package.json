@@ -19,7 +19,8 @@
     "test:d3-02": "npm run build && node experiments/d3-02/run-all.mjs",
     "test:d3-03": "npm run build && node experiments/d3-03/run-all.mjs",
     "test:identity-ui": "npm run build && node tests/identity-ui.mjs",
-    "test:authorization-ui": "npm run build && node tests/authorization-ui.mjs"
+    "test:authorization-ui": "npm run build && node tests/authorization-ui.mjs",
+    "test:device-ui": "npm run build && node tests/device-ui.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

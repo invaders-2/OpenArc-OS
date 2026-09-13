@@ -26,6 +26,7 @@ import { Dialog } from "./desktop/Dialog";
 import { useIdentity } from "./identity/useIdentity";
 import { BootSurface, LockScreen, LoginScreen, SetupScreen } from "./identity/AuthScreens";
 import { ProtectedResourceFixture } from "./authorization/ProtectedResourceFixture";
+import { SettingsContent } from "./settings/SettingsContent";
 
 type DisplayInfo = {
   id: number;
@@ -47,6 +48,9 @@ declare global {
         onEvent: (cb: (e: { event: string; snapshot?: unknown }) => void) => () => void;
       };
       authorization?: {
+        command: (cmd: Record<string, unknown>) => Promise<Record<string, unknown>>;
+      };
+      device?: {
         command: (cmd: Record<string, unknown>) => Promise<Record<string, unknown>>;
       };
     };
@@ -338,45 +342,19 @@ function App() {
     }
     if (w?.appId === "settings")
       return (
-        <div className="settings-content">
-          <div className="eyebrow">SYSTEM PREFERENCES</div>
-          <h1>系统设置</h1>
-          <p className="subtitle">整个工作空间，遵循你的习惯。</p>
-          <h3>外观与交互</h3>
-          {([
-            ["深色外观", dark, setDark],
-            ["减少动态效果", reduced, setReduced],
-          ] as const).map(([label, value, set]) => (
-            <label className="setting-row" key={label}>
-              <span>{label}</span>
-              <input type="checkbox" checked={value} onChange={(e) => (set as (v: boolean) => void)(e.target.checked)} />
-            </label>
-          ))}
-          <label className="setting-row">
-            <span>
-              材质
-              <span className="footnote"> 玻璃合成成本，与动效互不影响</span>
-            </span>
-            <select className="material-select" value={glass} onChange={(e) => setGlass(e.target.value as GlassMode)}>
-              <option value="full">完整玻璃</option>
-              <option value="reduced">降低材质</option>
-              <option value="solid">实色</option>
-            </select>
-          </label>
-          <h3>
-            全局模型服务 <span className="badge">尚未连接</span>
-          </h3>
-          <p className="muted">这里将统一配置所有应用使用的模型。当前字段仅保留在内存，不保存、不发送。</p>
-          <label className="field">
-            API 地址
-            <input placeholder="https://api.example.com/v1" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} />
-          </label>
-          <label className="field">
-            模型名称
-            <input placeholder="填写自定义模型名" value={model} onChange={(e) => setModel(e.target.value)} />
-          </label>
-          <p className="footnote">密钥保管后端尚未接入，本版不收集 API 密钥。</p>
-        </div>
+        <SettingsContent
+          dark={dark}
+          setDark={setDark}
+          reduced={reduced}
+          setReduced={setReduced}
+          glass={glass}
+          setGlass={setGlass}
+          endpoint={endpoint}
+          setEndpoint={setEndpoint}
+          model={model}
+          setModel={setModel}
+          role={identity.snapshot.role}
+        />
       );
     return (
       <div className="empty-content">
