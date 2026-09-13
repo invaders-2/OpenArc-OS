@@ -30,7 +30,7 @@
 :root {
   /* ── Typography ─────────────────────────────────────────────────────────
      系统 UI 字体栈。**不打包字体、不把品牌字体扩散到系统 UI**。
-     Space Grotesk 等品牌字体只允许出现在品牌展示位（desktop-brand 一类），
+     品牌字体只允许出现在品牌展示位；桌面背景上的字标与装饰圆已按用户口径移除，
      不属于 Design System 的 UI 字体面。 */
   font-family:
     -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",

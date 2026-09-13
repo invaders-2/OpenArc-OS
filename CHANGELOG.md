@@ -1,5 +1,21 @@
 # 计划修订记录
 
+## 2026-09-12：桌面背景去掉 OpenArc 字标与装饰圆
+
+用户口径：桌面背景上的 "OpenArc" 字标、副标题和那个大圆去掉。
+
+- 删掉 `main.tsx` 里的 `.desktop-brand` 区块（字标 + "A space for everything you create."）；
+- 删掉 `styles.css` 里的 `.desktop::before`（1050×1200、`border-radius: 48%`、`rotate(-32deg)` 的装饰圆）
+  以及 `.desktop-brand` 的全部样式；
+- 更新 `tokens.css` 里"品牌字体只允许出现在品牌展示位"的注释：该展示位已按用户口径移除，约束仍有效。
+
+实测：`.desktop-brand` 数量 **0**、`.desktop::before` 计算内容 **none**；
+`npm run build` PASS；`npm test` 96/96。
+
+> 注：本次在独立 worktree（`/tmp/oa-wt`，分支 `fix/ui-window-chrome`）完成 ——
+> 因为主工作区当时被另一个会话切到了 `feature/d3-02-object-authorization`，
+> 为避免在两边的未提交改动里互相污染。
+
 ## 2026-09-12：移除顶部磨砂渐变 + 窗口阴影调小调浅
 
 用户口径：① 窗口阴影不要那么大那么深；② 深浅色下顶部出现"角"，穿帮；③ 模糊渐变去掉；

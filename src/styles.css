@@ -25,20 +25,6 @@
       rgba(237, 237, 240, 0.58)
     );
 }
-.desktop::before {
-  content: "";
-  position: absolute;
-  width: 1050px;
-  height: 1200px;
-  right: -520px;
-  top: 45px;
-  border-radius: 48%;
-  transform: rotate(-32deg);
-  background: linear-gradient(130deg, rgba(255, 255, 255, 0.56), rgba(200, 200, 205, 0.5));
-  box-shadow:
-    -35px 12px 90px rgba(255, 255, 255, 0.4),
-    inset 25px 0 80px rgba(255, 255, 255, 0.47);
-}
 .dark {
   /* 主题原料与主题作用域合成见 src/design-system/tokens.css（.dark）。
      这里只放深色专属的**桌面环境光**——它不是 token，是桌面背景的一部分。 */
@@ -156,22 +142,6 @@
   align-items: center;
   gap: 6px;
   color: var(--muted);
-}
-.desktop-brand {
-  position: absolute;
-  right: 7%;
-  top: 37%;
-  color: #fff9;
-  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.1);
-}
-.desktop-brand div {
-  font-size: 65px;
-  font-weight: 400;
-  letter-spacing: -4px;
-}
-.desktop-brand p {
-  font-size: 13px;
-  letter-spacing: 1px;
 }
 .assistant-pill {
   position: absolute;

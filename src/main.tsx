@@ -1968,10 +1968,6 @@ function App() {
                 }
           }
         />
-        <div className="desktop-brand">
-          <div>OpenArc</div>
-          <p>A space for everything you create.</p>
-        </div>
         {folders
           .filter((f) => !f.parentId)
           .map((f) => (
