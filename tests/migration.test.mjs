@@ -38,11 +38,11 @@ async function seedV1(dbPath) {
   return { instId, teamId, userId };
 }
 
-test("schema 版本已推进到 v4（D3-04A 在 v3 之上追加资源存储域）", () => {
-  assert.equal(SCHEMA_VERSION, 4);
+test("schema 版本已推进到 v5（D3-04B 在 v4 之上追加分类与 per-user 状态）", () => {
+  assert.equal(SCHEMA_VERSION, 5);
 });
 
-test("全新数据库直接建到 v4，identity login 成立（v2 + v3 + v4 表都在）", async () => {
+test("全新数据库直接建到 v5，identity login 成立（v2 + v3 + v4 + v5 表都在）", async () => {
   const { dir, dbPath } = tempDbPath();
   try {
     const store = new IdentityStore({ path: dbPath }).open();
@@ -60,6 +60,10 @@ test("全新数据库直接建到 v4，identity login 成立（v2 + v3 + v4 表�
     assert.ok(hasTable(store.connection, "content_objects"));
     assert.ok(hasTable(store.connection, "resource_versions"));
     assert.ok(hasTable(store.connection, "resource_import_jobs"));
+    assert.ok(hasTable(store.connection, "tags"));
+    assert.ok(hasTable(store.connection, "resource_tags"));
+    assert.ok(hasTable(store.connection, "resource_favorites"));
+    assert.ok(hasTable(store.connection, "resource_recent"));
     const init = await store.initialize({ identifier: ADMIN_ID, password: ADMIN_PW, displayName: "Admin" });
     assert.equal(init.ok, true);
     const login = await store.login({ identifier: ADMIN_ID, password: ADMIN_PW });
@@ -142,8 +146,10 @@ test("v3 级迁移失败 → user_version 停在 2，设备表不残留（§55 �
     const store = new IdentityStore({ path: dbPath }).open();
     await store.initialize({ identifier: ADMIN_ID, password: ADMIN_PW, displayName: "Admin" });
     store.close();
-    // 手工降回 v2 并删掉 v3 + v4 表，模拟"已有 v2 库、正要升 v3"
+    // 手工降回 v2 并删掉 v3 + v4 + v5 表，模拟"已有 v2 库、正要升 v3"
     const raw = new DatabaseSync(dbPath);
+    raw.exec("DROP TABLE resource_recent; DROP TABLE resource_favorites; DROP TABLE resource_tags; DROP TABLE tags;");
+    raw.exec("ALTER TABLE library_resources DROP COLUMN memory_subtype; ALTER TABLE library_resources DROP COLUMN language; ALTER TABLE library_resources DROP COLUMN attributes;");
     raw.exec("DROP TABLE resource_relations; DROP TABLE resource_versions; DROP TABLE library_resources; DROP TABLE resource_import_jobs; DROP TABLE content_objects;");
     raw.exec("DROP TABLE device_audit; DROP TABLE device_access; DROP TABLE device_credentials; DROP TABLE device_pairing_credentials; DROP TABLE devices;");
     raw.exec("PRAGMA user_version = 2");
@@ -158,6 +164,7 @@ test("v3 级迁移失败 → user_version 停在 2，设备表不残留（§55 �
     assert.equal(hasTable(check, "devices"), false);
     assert.equal(hasTable(check, "device_audit"), false);
     assert.equal(hasTable(check, "content_objects"), false);
+    assert.equal(hasTable(check, "tags"), false);
     assert.ok(check.prepare("SELECT identifier FROM users LIMIT 1").get());
     check.close();
 

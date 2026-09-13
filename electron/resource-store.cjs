@@ -25,7 +25,8 @@ const LIB_SELECT =
   "l.observed_size AS observed_size, l.observed_mtime AS observed_mtime, l.index_status AS index_status, " +
   "l.trash_state AS trash_state, l.deleted_at AS deleted_at, l.deleted_by AS deleted_by, " +
   "l.generated_source_task_id AS generated_source_task_id, l.generated_source_call_id AS generated_source_call_id, " +
-  "l.generated_source_model AS generated_source_model, l.created_at AS library_created_at, l.updated_at AS library_updated_at " +
+  "l.generated_source_model AS generated_source_model, l.memory_subtype AS memory_subtype, l.language AS language, l.attributes AS attributes, " +
+  "l.created_at AS library_created_at, l.updated_at AS library_updated_at " +
   "FROM resource_registry r LEFT JOIN library_resources l ON l.resource_id = r.resource_id";
 
 const SQL = {
@@ -43,8 +44,8 @@ const SQL = {
     "AND NOT EXISTS (SELECT 1 FROM resource_versions v WHERE v.content_object_id = c.content_id)",
 
   insertLibrary:
-    "INSERT INTO library_resources (resource_id, resource_type, mime_type, name, description, storage_mode, content_object_id, checksum, size, source, version, storage_device_id, source_locator, source_identity, observed_size, observed_mtime, generated_source_task_id, generated_source_call_id, generated_source_model, index_status, trash_state, deleted_at, deleted_by, created_at, updated_at) " +
-    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    "INSERT INTO library_resources (resource_id, resource_type, mime_type, name, description, storage_mode, content_object_id, checksum, size, source, version, storage_device_id, source_locator, source_identity, observed_size, observed_mtime, generated_source_task_id, generated_source_call_id, generated_source_model, memory_subtype, language, attributes, index_status, trash_state, deleted_at, deleted_by, created_at, updated_at) " +
+    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
   libraryById: "SELECT * FROM library_resources WHERE resource_id = ?",
   deleteLibrary: "DELETE FROM library_resources WHERE resource_id = ?",
   nextVersionNumber: "SELECT COALESCE(MAX(version), 0) AS max_version FROM resource_versions WHERE resource_id = ?",
@@ -75,6 +76,38 @@ const SQL = {
   updateRegistryName: "UPDATE resource_registry SET name = ?, description = ?, updated_at = ? WHERE resource_id = ?",
   setRegistryStatus: "UPDATE resource_registry SET status = ?, updated_at = ? WHERE resource_id = ?",
   deleteRegistry: "DELETE FROM resource_registry WHERE resource_id = ?",
+  updateRegistryMetadata: "UPDATE resource_registry SET name = ?, description = ?, collection_id = ?, updated_at = ? WHERE resource_id = ?",
+  setRegistryTags: "UPDATE resource_registry SET tags = ?, updated_at = ? WHERE resource_id = ?",
+
+  insertTag:
+    "INSERT INTO tags (id, organization_id, name, normalized_name, source, created_by, status, created_at, updated_at) VALUES (?,?,?,?,?,?, 'active', ?,?)",
+  tagById: "SELECT * FROM tags WHERE id = ?",
+  tagByNormalized: "SELECT * FROM tags WHERE organization_id = ? AND normalized_name = ?",
+  tagsOfOrg: "SELECT * FROM tags WHERE organization_id = ? AND status = 'active' ORDER BY normalized_name, id",
+  updateTagName: "UPDATE tags SET name = ?, normalized_name = ?, updated_at = ? WHERE id = ?",
+  setTagStatus: "UPDATE tags SET status = ?, updated_at = ? WHERE id = ?",
+
+  insertResourceTag:
+    "INSERT OR IGNORE INTO resource_tags (id, resource_id, tag_id, organization_id, source, assigned_by, created_at) VALUES (?,?,?,?,?,?,?)",
+  deleteResourceTag: "DELETE FROM resource_tags WHERE resource_id = ? AND tag_id = ?",
+  tagsOfResource:
+    "SELECT t.*, rt.source AS assignment_source, rt.assigned_by, rt.created_at AS assigned_at FROM resource_tags rt JOIN tags t ON t.id = rt.tag_id WHERE rt.resource_id = ? ORDER BY t.normalized_name, t.id",
+  resourcesOfTag: "SELECT resource_id FROM resource_tags WHERE tag_id = ?",
+  countResourceTags: "SELECT COUNT(*) AS c FROM resource_tags WHERE resource_id = ?",
+
+  upsertFavorite: "INSERT OR IGNORE INTO resource_favorites (user_id, resource_id, organization_id, created_at) VALUES (?,?,?,?)",
+  deleteFavorite: "DELETE FROM resource_favorites WHERE user_id = ? AND resource_id = ?",
+  favoriteOf: "SELECT * FROM resource_favorites WHERE user_id = ? AND resource_id = ?",
+  favoritesOfUser: "SELECT resource_id, created_at FROM resource_favorites WHERE user_id = ? ORDER BY created_at DESC",
+
+  upsertRecent:
+    "INSERT INTO resource_recent (user_id, resource_id, organization_id, last_opened_at, open_count) VALUES (?,?,?,?,1) ON CONFLICT(user_id, resource_id) DO UPDATE SET last_opened_at = excluded.last_opened_at, open_count = resource_recent.open_count + 1",
+  recentOfUser: "SELECT resource_id, last_opened_at, open_count FROM resource_recent WHERE user_id = ? ORDER BY last_opened_at DESC LIMIT ?",
+  deleteRecent: "DELETE FROM resource_recent WHERE user_id = ? AND resource_id = ?",
+
+  clearCollectionForResources: "UPDATE resource_registry SET collection_id = NULL, updated_at = ? WHERE collection_id = ?",
+  countCollectionResources: "SELECT COUNT(*) AS c FROM resource_registry WHERE collection_id = ? AND status <> 'deleted'",
+  resourcesInCollection: "SELECT resource_id FROM resource_registry WHERE collection_id = ?",
 };
 
 const UPDATABLE_LIBRARY_COLUMNS = Object.freeze([
@@ -91,6 +124,9 @@ const UPDATABLE_LIBRARY_COLUMNS = Object.freeze([
   "observed_size",
   "observed_mtime",
   "index_status",
+  "memory_subtype",
+  "language",
+  "attributes",
   "version",
   "trash_state",
   "deleted_at",
@@ -187,6 +223,9 @@ class ResourceStore {
         row.generatedSourceTaskId ?? null,
         row.generatedSourceCallId ?? null,
         row.generatedSourceModel ?? null,
+        row.memorySubtype ?? null,
+        row.language ?? null,
+        JSON.stringify(row.attributes && typeof row.attributes === "object" ? row.attributes : {}),
         row.indexStatus || "NOT_INDEXED",
         row.trashState || "ACTIVE",
         row.deletedAt ?? null,
@@ -355,6 +394,121 @@ class ResourceStore {
 
   allImportJobs() {
     return this.db.prepare(SQL.allJobs).all();
+  }
+
+  // --- D3-04B · metadata / tags / favorites / recent -----------------------
+
+  updateRegistryMetadata(resourceId, { name, description, collectionId } = {}) {
+    const current = this.identity.connection.prepare("SELECT * FROM resource_registry WHERE resource_id = ?").get(String(resourceId)) || null;
+    if (!current) return { changed: false };
+    const nextName = name == null ? current.name : String(name);
+    const nextDesc = description == null ? current.description : String(description);
+    const nextCollection = collectionId === undefined ? current.collection_id : collectionId;
+    const res = this.db
+      .prepare(SQL.updateRegistryMetadata)
+      .run(nextName, nextDesc, nextCollection == null ? null : String(nextCollection), this.clock(), String(resourceId));
+    return { changed: res.changes > 0 };
+  }
+
+  setRegistryTags(resourceId, tags) {
+    const res = this.db.prepare(SQL.setRegistryTags).run(JSON.stringify(tags || []), this.clock(), String(resourceId));
+    return { changed: res.changes > 0 };
+  }
+
+  insertTag({ tagId = null, organizationId, name, normalizedName, source = "user", createdBy = null }) {
+    const id = tagId || authz.newId("GRANT").replace("grant_", "tag_");
+    const now = this.clock();
+    this.db.prepare(SQL.insertTag).run(id, String(organizationId), String(name), String(normalizedName), String(source), createdBy, now, now);
+    return this.tagById(id);
+  }
+
+  tagById(id) {
+    return this.db.prepare(SQL.tagById).get(String(id || "")) || null;
+  }
+
+  tagByNormalized(organizationId, normalizedName) {
+    return this.db.prepare(SQL.tagByNormalized).get(String(organizationId || ""), String(normalizedName || "")) || null;
+  }
+
+  tagsOfOrg(organizationId) {
+    return this.db.prepare(SQL.tagsOfOrg).all(String(organizationId || ""));
+  }
+
+  updateTagName(tagId, name, normalizedName) {
+    const res = this.db.prepare(SQL.updateTagName).run(String(name), String(normalizedName), this.clock(), String(tagId));
+    return { changed: res.changes > 0 };
+  }
+
+  setTagStatus(tagId, status) {
+    const res = this.db.prepare(SQL.setTagStatus).run(String(status), this.clock(), String(tagId));
+    return { changed: res.changes > 0 };
+  }
+
+  insertResourceTag({ resourceId, tagId, organizationId, source = "user", assignedBy = null }) {
+    const id = "rtag_" + require("node:crypto").randomBytes(12).toString("base64url");
+    const res = this.db.prepare(SQL.insertResourceTag).run(id, String(resourceId), String(tagId), String(organizationId), String(source), assignedBy, this.clock());
+    return { changed: res.changes > 0, id };
+  }
+
+  deleteResourceTag(resourceId, tagId) {
+    const res = this.db.prepare(SQL.deleteResourceTag).run(String(resourceId), String(tagId));
+    return { changed: res.changes > 0 };
+  }
+
+  tagsOfResource(resourceId) {
+    return this.db.prepare(SQL.tagsOfResource).all(String(resourceId || ""));
+  }
+
+  resourcesOfTag(tagId) {
+    return this.db.prepare(SQL.resourcesOfTag).all(String(tagId || ""));
+  }
+
+  countResourceTags(resourceId) {
+    return Number(this.db.prepare(SQL.countResourceTags).get(String(resourceId || "")).c || 0);
+  }
+
+  setFavorite({ userId, resourceId, organizationId, favorite }) {
+    if (favorite) {
+      const res = this.db.prepare(SQL.upsertFavorite).run(String(userId), String(resourceId), String(organizationId), this.clock());
+      return { changed: res.changes > 0, favorite: true };
+    }
+    const res = this.db.prepare(SQL.deleteFavorite).run(String(userId), String(resourceId));
+    return { changed: res.changes > 0, favorite: false };
+  }
+
+  isFavorite(userId, resourceId) {
+    return !!this.db.prepare(SQL.favoriteOf).get(String(userId), String(resourceId));
+  }
+
+  favoritesOfUser(userId) {
+    return this.db.prepare(SQL.favoritesOfUser).all(String(userId || ""));
+  }
+
+  touchRecent({ userId, resourceId, organizationId }) {
+    this.db.prepare(SQL.upsertRecent).run(String(userId), String(resourceId), String(organizationId), this.clock());
+    return this.db.prepare(SQL.recentOfUser).get(String(userId), 1);
+  }
+
+  recentOfUser(userId, limit = 60) {
+    return this.db.prepare(SQL.recentOfUser).all(String(userId || ""), Math.max(1, Number(limit) || 60));
+  }
+
+  deleteRecent(userId, resourceId) {
+    const res = this.db.prepare(SQL.deleteRecent).run(String(userId), String(resourceId));
+    return { changed: res.changes > 0 };
+  }
+
+  clearCollection(collectionId) {
+    const res = this.db.prepare(SQL.clearCollectionForResources).run(this.clock(), String(collectionId || ""));
+    return { changed: res.changes > 0 };
+  }
+
+  countCollectionResources(collectionId) {
+    return Number(this.db.prepare(SQL.countCollectionResources).get(String(collectionId || "")).c || 0);
+  }
+
+  resourcesInCollection(collectionId) {
+    return this.db.prepare(SQL.resourcesInCollection).all(String(collectionId || ""));
   }
 }
 

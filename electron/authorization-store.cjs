@@ -34,6 +34,8 @@ const SQL = {
     "INSERT INTO collections (id, organization_id, department_id, owner_user_id, name, description, scope, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
   collectionById: "SELECT * FROM collections WHERE id = ?",
   collectionsOfOrg: "SELECT * FROM collections WHERE organization_id = ? ORDER BY created_at, id",
+  updateCollection: "UPDATE collections SET name = ?, description = ?, updated_at = ? WHERE id = ?",
+  setCollectionStatus: "UPDATE collections SET status = ?, updated_at = ? WHERE id = ?",
 
   insertResource:
     "INSERT INTO resource_registry (resource_id, resource_type, owner_user_id, organization_id, department_id, collection_id, scope, parent_resource_id, name, description, tags, version, status, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -204,6 +206,22 @@ class AuthorizationStore {
 
   collectionsOfOrg(organizationId) {
     return this.db.prepare(SQL.collectionsOfOrg).all(String(organizationId || ""));
+  }
+
+  /** D3-04B：Collection metadata 更新（不触碰 Resource）。 */
+  updateCollection(id, { name, description } = {}) {
+    const current = this.collectionById(id);
+    if (!current) return { changed: false };
+    const res = this.db
+      .prepare(SQL.updateCollection)
+      .run(name == null ? current.name : String(name), description == null ? current.description : String(description), this.clock(), String(id));
+    return { changed: res.changes > 0, collection: this.collectionById(id) };
+  }
+
+  /** 软删除 Collection：Resource 归属由 ResourceService 重分配为 Unfiled，绝不级联删除。 */
+  setCollectionStatus(id, status) {
+    const res = this.db.prepare(SQL.setCollectionStatus).run(String(status), this.clock(), String(id));
+    return { changed: res.changes > 0 };
   }
 
   // -------------------------------------------------------------------------

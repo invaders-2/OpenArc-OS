@@ -51,7 +51,7 @@ const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domai
  * 迁移按版本逐级前进，每一级各自是一个原子事务：任何一级失败只回滚该级，
  * 不会留下"user_version 已升级但表不完整"的半状态（§55）。
  */
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -518,12 +518,73 @@ CREATE INDEX idx_resource_import_jobs_phase ON resource_import_jobs(phase);
 CREATE INDEX idx_resource_import_jobs_resource ON resource_import_jobs(resource_id);
 `;
 
+/**
+ * D3-04B v5：Resource Library 分类与 per-user 状态。
+ *
+ * 复用 D3-02 已存在的 collections 表作为 primary Collection 关系（记录在 resource_registry.collection_id），
+ * 不创建第二套 Collection identity。新增 tags / resource_tags（多对多）与 resource_favorites / resource_recent（per-user）。
+ * memory_subtype / language / attributes 是 Resource 级 metadata，不产生内容 version。
+ */
+const SCHEMA_V5_SQL = `
+CREATE TABLE tags (
+  id              TEXT PRIMARY KEY,
+  organization_id TEXT NOT NULL,
+  name            TEXT NOT NULL,
+  normalized_name TEXT NOT NULL,
+  source          TEXT NOT NULL CHECK (source IN ('user','system','agent')) DEFAULT 'user',
+  created_by      TEXT,
+  status          TEXT NOT NULL CHECK (status IN ('active','deleted')) DEFAULT 'active',
+  created_at      INTEGER NOT NULL,
+  updated_at      INTEGER NOT NULL,
+  UNIQUE (organization_id, normalized_name)
+);
+CREATE INDEX idx_tags_org ON tags(organization_id);
+CREATE INDEX idx_tags_normalized ON tags(organization_id, normalized_name);
+
+CREATE TABLE resource_tags (
+  id              TEXT PRIMARY KEY,
+  resource_id     TEXT NOT NULL REFERENCES resource_registry(resource_id) ON DELETE CASCADE,
+  tag_id          TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+  organization_id TEXT NOT NULL,
+  source          TEXT NOT NULL CHECK (source IN ('user','system','agent')) DEFAULT 'user',
+  assigned_by     TEXT,
+  created_at      INTEGER NOT NULL,
+  UNIQUE (resource_id, tag_id)
+);
+CREATE INDEX idx_resource_tags_resource ON resource_tags(resource_id);
+CREATE INDEX idx_resource_tags_tag ON resource_tags(tag_id);
+
+CREATE TABLE resource_favorites (
+  user_id         TEXT NOT NULL,
+  resource_id     TEXT NOT NULL REFERENCES resource_registry(resource_id) ON DELETE CASCADE,
+  organization_id TEXT NOT NULL,
+  created_at      INTEGER NOT NULL,
+  PRIMARY KEY (user_id, resource_id)
+);
+CREATE INDEX idx_favorites_user ON resource_favorites(user_id, created_at);
+
+CREATE TABLE resource_recent (
+  user_id        TEXT NOT NULL,
+  resource_id    TEXT NOT NULL REFERENCES resource_registry(resource_id) ON DELETE CASCADE,
+  organization_id TEXT NOT NULL,
+  last_opened_at INTEGER NOT NULL,
+  open_count     INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (user_id, resource_id)
+);
+CREATE INDEX idx_recent_user ON resource_recent(user_id, last_opened_at);
+
+ALTER TABLE library_resources ADD COLUMN memory_subtype TEXT;
+ALTER TABLE library_resources ADD COLUMN language TEXT;
+ALTER TABLE library_resources ADD COLUMN attributes TEXT NOT NULL DEFAULT '{}';
+`;
+
 /** 迁移阶梯。新增 version 时把新 schema 追加在末尾，不改旧条目。 */
 const MIGRATIONS = Object.freeze([
   { version: 1, sql: SCHEMA_SQL },
   { version: 2, sql: SCHEMA_V2_SQL },
   { version: 3, sql: SCHEMA_V3_SQL },
   { version: 4, sql: SCHEMA_V4_SQL },
+  { version: 5, sql: SCHEMA_V5_SQL },
 ]);
 
 const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000; // 12h 绝对上限
@@ -1620,6 +1681,7 @@ module.exports = {
   SCHEMA_V2_SQL,
   SCHEMA_V3_SQL,
   SCHEMA_V4_SQL,
+  SCHEMA_V5_SQL,
   MIGRATIONS,
   IdentityStore,
   DEFAULT_TTL_MS,

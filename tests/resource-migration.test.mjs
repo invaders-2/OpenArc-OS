@@ -1,5 +1,5 @@
 /**
- * D3-04A · resource-migration.test —— v3 -> v4 / 迁移失败回滚 / 重启持久化。
+ * D3-04A/04B · resource-migration.test —— v3 -> current schema / 迁移失败回滚 / 重启持久化。
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -10,9 +10,10 @@ import { createResourceFixture, reopenResourceRuntime, tempRoot } from "./resour
 import { pairDevice, pw } from "./device-fixtures.mjs";
 
 const require = createRequire(import.meta.url);
-const { IdentityStore } = require("../electron/identity-store.cjs");
+const { IdentityStore, SCHEMA_VERSION } = require("../electron/identity-store.cjs");
 const { DatabaseSync } = require("node:sqlite");
 
+const V5_TABLES = ["resource_recent", "resource_favorites", "resource_tags", "tags"];
 const V4_TABLES = ["resource_relations", "resource_versions", "library_resources", "resource_import_jobs", "content_objects"];
 const hasTable = (db, name) => !!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(name);
 
@@ -26,6 +27,8 @@ async function makeV3Db() {
   const snapshot = { users: fx.identity.allUsers().length, departments: fx.store.departmentsOfOrg(fx.orgId).length, devices: fx.deviceStore.allDevices().length, orgId: fx.orgId };
   fx.identity.close();
   const raw = new DatabaseSync(dbPath);
+  for (const table of V5_TABLES) raw.exec("DROP TABLE IF EXISTS " + table);
+  for (const col of ["memory_subtype", "language", "attributes"]) raw.exec("ALTER TABLE library_resources DROP COLUMN " + col);
   for (const table of V4_TABLES) raw.exec("DROP TABLE IF EXISTS " + table);
   raw.exec("PRAGMA user_version = 3");
   assert.equal(raw.prepare("PRAGMA user_version").get().user_version, 3);
@@ -49,11 +52,11 @@ test("v3 -> v4：升级成功且 identity / department / device 数据完整", (
     const { root, dbPath, storeRoot, snapshot } = await makeV3Db();
     cleanups.push(root);
     const reopened = reopenResourceRuntime({ dbPath, storeRoot });
-    assert.equal(reopened.identity.schemaVersion, 4);
+    assert.equal(reopened.identity.schemaVersion, SCHEMA_VERSION);
     assert.equal(reopened.identity.allUsers().length, snapshot.users);
     assert.equal(reopened.authStore.departmentsOfOrg(snapshot.orgId).length, snapshot.departments);
     assert.equal(reopened.deviceStore.allDevices().length, snapshot.devices);
-    for (const table of V4_TABLES) assert.equal(hasTable(reopened.identity.connection, table), true, table + " 应存在");
+    for (const table of [...V4_TABLES, ...V5_TABLES]) assert.equal(hasTable(reopened.identity.connection, table), true, table + " 应存在");
     reopened.identity.close();
   })();
 });
@@ -69,12 +72,13 @@ test("迁移失败 -> 整级回滚：user_version 保持 3，v4 表不存在，�
     const raw = new DatabaseSync(dbPath);
     assert.equal(raw.prepare("PRAGMA user_version").get().user_version, 3);
     assert.equal(hasTable(raw, "content_objects"), false);
+    assert.equal(hasTable(raw, "tags"), false);
     assert.equal(raw.prepare("SELECT COUNT(*) AS c FROM users").get().c, snapshot.users);
     assert.equal(raw.prepare("SELECT COUNT(*) AS c FROM devices").get().c, snapshot.devices);
     raw.close();
 
     const ok = reopenResourceRuntime({ dbPath, storeRoot });
-    assert.equal(ok.identity.schemaVersion, 4);
+    assert.equal(ok.identity.schemaVersion, SCHEMA_VERSION);
     assert.equal(ok.identity.allUsers().length, snapshot.users);
     ok.identity.close();
   })();

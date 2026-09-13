@@ -60,6 +60,56 @@ const RELATION_TYPE = Object.freeze({
 });
 const RELATION_TYPES = Object.freeze(Object.values(RELATION_TYPE));
 
+/** Tag 来源：user / system / agent。系统 Tag 语义普通用户不得随意修改。 */
+const TAG_SOURCE = Object.freeze({ USER: "user", SYSTEM: "system", AGENT: "agent" });
+const TAG_SOURCES = Object.freeze(Object.values(TAG_SOURCE));
+const MAX_TAG_LENGTH = 64;
+const MAX_TAG_COUNT_PER_RESOURCE = 64;
+
+/**
+ * Memory subtype 是 Resource metadata 分类，**不是** Resource Type。
+ * Resource Type 仍是 memory；这里只细分用途。
+ */
+const MEMORY_SUBTYPE = Object.freeze({
+  PERSONAL_PREFERENCE: "personal-preference",
+  PROJECT_MEMORY: "project-memory",
+  DECISION_MEMORY: "decision-memory",
+  CONVERSATION_MEMORY: "conversation-memory",
+  AGENT_MEMORY: "agent-memory",
+});
+const MEMORY_SUBTYPES = Object.freeze(Object.values(MEMORY_SUBTYPE));
+
+/** 导航分类 → resourceType 集合。分类映射在 Domain 冻结，Renderer 不按扩展名猜。 */
+const CATEGORY = Object.freeze({
+  ALL: "all",
+  MEMORY: "memory",
+  DOCUMENTS: "documents",
+  IMAGES: "images",
+  VIDEOS: "videos",
+  AUDIO: "audio",
+  CODE: "code",
+  PROMPTS: "prompts",
+  GENERATED: "generated",
+  FAVORITES: "favorites",
+  RECENT: "recent",
+  TRASH: "trash",
+});
+const CATEGORY_TYPES = Object.freeze({
+  [CATEGORY.MEMORY]: Object.freeze(["memory"]),
+  [CATEGORY.DOCUMENTS]: Object.freeze(["text", "document", "file"]),
+  [CATEGORY.IMAGES]: Object.freeze(["image"]),
+  [CATEGORY.VIDEOS]: Object.freeze(["video"]),
+  [CATEGORY.AUDIO]: Object.freeze(["audio"]),
+  [CATEGORY.CODE]: Object.freeze(["code"]),
+  [CATEGORY.PROMPTS]: Object.freeze(["prompt"]),
+  [CATEGORY.GENERATED]: Object.freeze(["generated-artifact"]),
+});
+
+const SORT_FIELDS = Object.freeze(["name", "created", "updated", "size"]);
+const SORT_DIRECTIONS = Object.freeze(["asc", "desc"]);
+const DEFAULT_PAGE_LIMIT = 60;
+const MAX_PAGE_LIMIT = 500;
+
 /**
  * 资源可用性。**必须诚实**：源文件丢了就是 SOURCE_MISSING，设备离线就是 DEVICE_OFFLINE，
  * 不允许伪装成 AVAILABLE。
@@ -287,8 +337,14 @@ function sniffMime(head, filename) {
  * 渲染进程可见的 descriptor。**白名单**，不含 source_locator / 绝对路径 / 内部 key。
  * 需要显示来源时由 presentSource 给一句人话，而不是把路径发出去。
  */
-function descriptorProjection(row, { availability = null } = {}) {
+function descriptorProjection(row, { availability = null, favorite = false, recentAt = null } = {}) {
   if (!row) return null;
+  let attributes = {};
+  try {
+    attributes = typeof row.attributes === "string" ? JSON.parse(row.attributes || "{}") : row.attributes || {};
+  } catch {
+    attributes = {};
+  }
   return {
     resourceId: row.resource_id,
     resourceRef: authz.toResourceRef(row.resource_id),
@@ -303,7 +359,13 @@ function descriptorProjection(row, { availability = null } = {}) {
     scope: row.scope ?? null,
     departmentId: row.department_id ?? null,
     collectionId: row.collection_id ?? null,
+    ownerUserId: row.owner_user_id ?? null,
     storageDeviceId: row.storage_device_id ?? null,
+    memorySubtype: row.memory_subtype ?? null,
+    language: row.language ?? null,
+    attributes,
+    favorite: !!favorite,
+    recentAt: recentAt == null ? null : Number(recentAt),
     indexStatus: row.index_status || INDEX_STATUS.NOT_INDEXED,
     trashed: row.trash_state === TRASH_STATE.TRASHED,
     createdAt: row.created_at,
@@ -346,6 +408,61 @@ function availabilityFromDevice(location) {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// D3-04B · Tag / Memory / 分类 / 排序 校验（纯函数）
+// ---------------------------------------------------------------------------
+
+/**
+ * Tag 规范化（冻结）：
+ *   - trim + 连续空白折叠为单个空格；显示名保留大小写；
+ *   - 比较使用 normalized form（小写），因此 Shoes == shoes；
+ *   - 空 / 超长 / 控制字符拒绝。
+ */
+function normalizeTagName(raw) {
+  const name = String(raw == null ? "" : raw)
+    .trim()
+    .replace(/\s+/g, " ");
+  if (!name) return fail(REASON.INVALID_INPUT, "tag-empty");
+  if (name.length > MAX_TAG_LENGTH) return fail(REASON.INVALID_INPUT, "tag-too-long");
+  if (/[\u0000-\u001f\u007f]/.test(name)) return fail(REASON.INVALID_INPUT, "tag-control-char");
+  return ok({ name, normalizedName: name.toLowerCase() });
+}
+
+function validateTagSource(source) {
+  const s = String(source == null ? TAG_SOURCE.USER : source);
+  if (!TAG_SOURCES.includes(s)) return fail(REASON.INVALID_INPUT, "tag-source");
+  return ok({ source: s });
+}
+
+/** memory subtype 可空；非空必须是冻结集合之一。 */
+function validateMemorySubtype(value) {
+  if (value == null || value === "") return ok({ memorySubtype: null });
+  const v = String(value);
+  if (!MEMORY_SUBTYPES.includes(v)) return fail(REASON.INVALID_INPUT, "memory-subtype");
+  return ok({ memorySubtype: v });
+}
+
+function normalizeSort({ sort = "updated", direction = "desc" } = {}) {
+  const field = String(sort || "updated");
+  const dir = String(direction || "desc").toLowerCase();
+  if (!SORT_FIELDS.includes(field)) return fail(REASON.INVALID_INPUT, "sort-field");
+  if (!SORT_DIRECTIONS.includes(dir)) return fail(REASON.INVALID_INPUT, "sort-direction");
+  return ok({ sort: field, direction: dir });
+}
+
+function normalizePage({ limit = DEFAULT_PAGE_LIMIT, offset = 0 } = {}) {
+  const l = Number(limit);
+  const o = Number(offset);
+  if (!Number.isInteger(l) || l < 1) return fail(REASON.INVALID_INPUT, "limit");
+  if (!Number.isFinite(o) || o < 0) return fail(REASON.INVALID_INPUT, "offset");
+  return ok({ limit: Math.min(l, MAX_PAGE_LIMIT), offset: Math.floor(o) });
+}
+
+/** 分类 → resourceType 集合；ALL/FAVORITES/RECENT/TRASH 返回 null（由查询语义处理）。 */
+function categoryTypes(category) {
+  return CATEGORY_TYPES[String(category || "")] || null;
+}
+
 module.exports = {
   STORAGE_MODE,
   STORAGE_MODES,
@@ -357,6 +474,18 @@ module.exports = {
   INDEX_STATUS,
   RELATION_TYPE,
   RELATION_TYPES,
+  TAG_SOURCE,
+  TAG_SOURCES,
+  MAX_TAG_LENGTH,
+  MAX_TAG_COUNT_PER_RESOURCE,
+  MEMORY_SUBTYPE,
+  MEMORY_SUBTYPES,
+  CATEGORY,
+  CATEGORY_TYPES,
+  SORT_FIELDS,
+  SORT_DIRECTIONS,
+  DEFAULT_PAGE_LIMIT,
+  MAX_PAGE_LIMIT,
   AVAILABILITY,
   LOCAL_DEVICE_ID,
   REASON,
@@ -384,6 +513,12 @@ module.exports = {
   extensionOf,
   sniffMime,
   descriptorProjection,
+  normalizeTagName,
+  validateTagSource,
+  validateMemorySubtype,
+  normalizeSort,
+  normalizePage,
+  categoryTypes,
   presentSource,
   sanitizeMetadata,
   availabilityFromDevice,
