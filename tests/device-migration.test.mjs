@@ -61,7 +61,7 @@ test("v2 → 最新 schema 迁移：版本推进、v3 表建立、既有身份�
 
   const identity = new IdentityStore({ path: dbPath }).open();
   assert.equal(identity.schemaVersion, SCHEMA_VERSION);
-  assert.equal(SCHEMA_VERSION, 10); // D4-02C 在 v9 之上追加 HarnessRun / Artifact / Verification
+  assert.equal(SCHEMA_VERSION, 11); // D4-03A 在 v10 之上追加 Tool Proposal / Decision
   for (const t of ["devices", "device_pairing_credentials", "device_credentials", "device_access", "device_audit"]) {
     assert.equal(hasTable(identity.connection, t), true, "缺少 v3 表 " + t);
   }

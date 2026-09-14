@@ -34,6 +34,7 @@
     "test:d4-02a": "node experiments/d4-02a/run-all.mjs",
     "test:d4-02b": "node experiments/d4-02b/run-all.mjs",
     "test:d4-02c": "node experiments/d4-02c/run-all.mjs",
+    "test:d4-03a": "node experiments/d4-03a/run-all.mjs",
     "test:model-ipc-ui": "npm run build && node tests/model-ipc-ui.mjs",
     "test:model-keychain-restart": "node tests/model-keychain-restart.mjs",
     "test:model-isolation-ui": "npm run build && node tests/model-isolation-ui.mjs",
