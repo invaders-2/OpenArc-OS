@@ -1,8 +1,16 @@
 # D4-01 · Model Service / Model Proxy / Credential Boundary
 
-- **状态**：macOS Model Service Core（Provider / Credential Boundary / Registry / Resolution / Authorization / Chat）**PASS**；**Model Proxy / Harness child credential isolation / Streaming / Settings UI = NOT IMPLEMENTED / NOT VERIFIED**；overall **PARTIAL**
+- **状态**：macOS Model Service Core（Provider / Credential Boundary / Registry / Resolution / Authorization / Chat）**PASS**；**Model Proxy / Scoped Capability / Child Credential Isolation / Streaming = PASS**；**Settings UI / \`model.command\` IPC / 真实 Keychain restart / 完整 secret scan = NOT VERIFIED**；overall **PARTIAL**
 - **分支**：feature/d4-01-model-service，基线 feature/d3-05-identity-data-gate @ `00c079a`（`488a9cf` + D3-05 标准测试入口），未 merge main
 - **日期**：2026-09-15
+
+> **Closure update（本轮）**：Model Proxy / Scoped Capability / Per-call Reauthorization / Independent Child Credential Isolation / Provider-neutral Streaming **已实现并真实通过**：
+> - `tests/model-proxy.test.mjs` 6/6（无 token/无效 token、maxCalls 原子消费、clock 过期、disable User/App/Model、revoke access、config version 变化、revokeCapability）
+> - `tests/model-proxy-child.test.mjs` 2/2（真实 OS child process：Fake Provider 收到 Provider key；child env/argv/stdout/stderr 0 hit）
+> - `tests/model-service-stream.test.mjs` 4/4（真实 SSE 分段 text.delta、cancel、timeout、disconnect→PARTIAL_RESPONSE）
+> - `npm run test:d4-01` **22/22**；`npm test` **485/485**
+>
+> **仍未实现**：Settings → Models UI、`model.command` IPC/preload、真实 Keychain restart、完整 secret scan（DB/log/audit/artifacts/renderer/Resource/Search）、性能基线、Windows。因此 **D4-02 仍 BLOCK**。
 
 ## Scope
 Provider 管理、Endpoint 策略、Credential 安全保存、Model Registry、Capability、Personal/Organization 默认、Config Resolution、Authorization、单次 Chat、Usage、Error Normalization、secret 脱敏、schema v8 迁移。**不实现** Task 调度 / Harness Task Loop / Tool 执行 / Model Proxy HTTP transport（本轮未完成）。
