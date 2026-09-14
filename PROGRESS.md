@@ -671,8 +671,9 @@ Windows（Credential Backend / Proxy Runtime / Firewall / Settings UI）NOT VERI
 | 口径 | Task Status | 说明 |
 |---|---|---|
 | **D4-02A Task Domain / Persistent Authority** | **PASS** | schema v9：tasks/task_steps/task_model_calls/task_events；显式状态机 + revision 乐观并发 + append-only events（与 state 同一事务）；D3 授权 + owner+app 隔离；model snapshot 冻结 + `MODEL_CONFIG_CHANGED`；cancel 持久化；重启 RUNNING→BLOCKED/`RECOVERY_REQUIRED`；AUTO_RETRY=0；tool execution=0 |
-| **D4-02B ACP Harness Adapter** | **NOT STARTED** | 下一阶段 |
-| **D4-02 overall** | **PARTIAL** | A PASS；B 未开始 |
+| **D4-02B Official ACP Harness Adapter** | **PASS** | 官方 `@deepseek-ai/dsh@0.1.5-rc.2` + ACP v1 + `@agentclientprotocol/sdk@1.4.0` stdio；Harness → OpenArc Model Adapter → Model Proxy → Provider；隔离 DSH_HOME + env scrub；工具/MCP/直连/retry 全关；permission 一律 reject；`test:d4-02b` **16/16** |
+| **D4-02C Task ↔ Harness Orchestration** | **NOT STARTED** | 下一阶段 |
+| **D4-02 overall** | **PARTIAL** | A/B PASS；C 未开始 |
 | **D4-03 Controlled Tool Proxy** | **BLOCK** | 直到 D4-02 自身 PASS |
 
 ## 2. 关键证据（真实执行）
@@ -680,8 +681,9 @@ Windows（Credential Backend / Proxy Runtime / Firewall / Settings UI）NOT VERI
 | 入口 | 结果 |
 |---|---|
 | test:d4-02a | **22 / 22 PASS** |
+| test:d4-02b | **16 / 16 PASS**（dsh 0.1.5-rc.2 / ACP SDK 1.4.0 / protocol 1） |
 | test:d4-01 | **59 / 59 PASS** |
-| npm test | **544 / 544 PASS** |
+| npm test | **560 / 560 PASS** |
 | migration（含 v8→v9 + rollback） | **18 / 18 PASS** |
 | npm run build | PASS |
 | test:security（D1-05） | FAIL 0 / PARTIAL 2 / PASS 6 |
@@ -701,14 +703,18 @@ ADR：docs/decisions/D4-02-task-authority.md；报告：docs/D4-02A-RESULT.md。
 6. `TOOL_EXECUTION = FORBIDDEN`；D4-02A side effect execution = 0。
 7. `UNKNOWN EFFECT → VERIFY / BLOCK`：重启 RUNNING → BLOCKED / `RECOVERY_REQUIRED`，0 replay / 0 retry。
 8. 无第二套权限系统：禁止 `task_acl` / `task_role` / `task_permissions`；复用 D3 Identity/Authorization。
+9. Harness 只经官方 ACP v1 over stdio 接入；`HARNESS_RAW_PROVIDER_KEY = FORBIDDEN`；Harness 只经 OpenArc Model Proxy（Harness Model Adapter），只接收 endpoint + scoped capability + safe snapshot。
+10. 每次 Harness run = disposable 隔离 DSH_HOME（绝不用真实 `~/.dsh`）；显式 env allowlist + secret scrub。
+11. 官方 managed profile：工具 / MCP / 直连 Provider / retry / interactive login 全关；permission 一律 reject；production tool execution = 0。
+12. Harness session persistence 非权威：OpenArc 恢复只认 Task DB / TaskEvent / revision / `RECOVERY_REQUIRED`。
 
 ## 4. 主要缺口
 
-D4-02B ACP Harness Adapter（NOT STARTED）；Windows NOT VERIFIED（继承 D4-01）。
+D4-02C Task ↔ Harness Orchestration（NOT STARTED）；OS-level network isolation NOT VERIFIED；Windows NOT VERIFIED（继承 D4-01）。
 
-## 5. D4-02B 准入
+## 5. D4-02C 准入
 
-**CONDITIONAL GO**：ACP ONLY；`HARNESS_RAW_PROVIDER_KEY = FORBIDDEN`；Harness 只与 OpenArc Model Proxy 通信；只接收 Proxy endpoint + scoped capability + safe model snapshot；不拥有 persistent task queue/state/step/retry/tool/lease/permission authority。**D4-03 = BLOCK**。
+**CONDITIONAL GO**：ACP ONLY；`HARNESS_RAW_PROVIDER_KEY = FORBIDDEN`；Harness 只与 OpenArc Model Proxy 通信；只接收 Proxy endpoint + scoped capability + safe model snapshot；不拥有 persistent task queue/state/step/retry/tool/lease/permission authority；ACP event 只在 D4-02C 显式映射为 TaskEvent。**D4-03 = BLOCK**。
 
 ---
 
