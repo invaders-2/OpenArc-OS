@@ -19,6 +19,7 @@ const { createDeviceBundle, registerDeviceIpc } = require("./device-bootstrap.cj
 const { createResourceBundle, registerResourceIpc } = require("./resource-bootstrap.cjs");
 const { createGovernanceBundle, registerGovernanceIpc } = require("./governance-bootstrap.cjs");
 const { createModelBundle, registerModelIpc } = require("./model-bootstrap.cjs");
+const { createTaskBundle } = require("./task-bootstrap.cjs");
 
 /**
  * @param opts.userDataDir 数据目录（identity.db 与受保护存储落在这里）
@@ -79,7 +80,15 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
     safeStorage,
     logger: log,
   });
-  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, modelStore, credentialStore, modelService, modelProxy };
+  // D4-02A：Task Runtime 持久权威（复用同一连接与 AuthorizationService；启动即 recovery）。
+  const { taskStore, taskService, taskRecovery } = createTaskBundle({
+    identityStore: store,
+    authorization,
+    authStore,
+    modelService,
+    logger: log,
+  });
+  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, modelStore, credentialStore, modelService, modelProxy, taskStore, taskService, taskRecovery };
 }
 
 /**

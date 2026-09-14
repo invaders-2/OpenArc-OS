@@ -51,7 +51,7 @@ const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domai
  * 迁移按版本逐级前进，每一级各自是一个原子事务：任何一级失败只回滚该级，
  * 不会留下"user_version 已升级但表不完整"的半状态（§55）。
  */
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -800,6 +800,80 @@ CREATE TABLE model_call_records (
 CREATE INDEX idx_model_call_records_at ON model_call_records(started_at);
 `;
 
+
+/**
+ * v9（D4-02A）· Task Runtime 持久权威。
+ *
+ * 只落 Task / TaskStep / ModelCall / TaskEvent 四张表 + 索引；
+ * ToolProposal / Artifact / Verification 需要时再单独迁一级。
+ * 无 task_acl / task_role / task_permissions —— 权限复用 D3 Identity / Authorization。
+ */
+const SCHEMA_V9_SQL = `
+CREATE TABLE tasks (
+  task_id                TEXT PRIMARY KEY,
+  user_id                TEXT NOT NULL,
+  session_ref            TEXT,
+  app_id                 TEXT NOT NULL,
+  status                 TEXT NOT NULL CHECK (status IN ('PENDING','RUNNING','WAITING','SUCCEEDED','FAILED','CANCELLED','BLOCKED')),
+  goal                   TEXT NOT NULL,
+  created_at             INTEGER NOT NULL,
+  updated_at             INTEGER NOT NULL,
+  started_at             INTEGER,
+  completed_at           INTEGER,
+  model_config_id        TEXT,
+  model_config_version   INTEGER,
+  current_step_id        TEXT,
+  revision               INTEGER NOT NULL DEFAULT 1,
+  cancel_requested       INTEGER NOT NULL DEFAULT 0,
+  budget_snapshot        TEXT,
+  permission_snapshot_ref TEXT
+);
+CREATE INDEX idx_tasks_user_status ON tasks(user_id, status);
+CREATE INDEX idx_tasks_app ON tasks(app_id);
+
+CREATE TABLE task_steps (
+  step_id      TEXT PRIMARY KEY,
+  task_id      TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
+  sequence     INTEGER NOT NULL,
+  kind         TEXT NOT NULL,
+  status       TEXT NOT NULL CHECK (status IN ('PENDING','RUNNING','SUCCEEDED','FAILED','CANCELLED','BLOCKED')),
+  input        TEXT,
+  output_ref   TEXT,
+  started_at   INTEGER,
+  completed_at INTEGER,
+  attempt      INTEGER NOT NULL DEFAULT 1,
+  max_attempts INTEGER NOT NULL DEFAULT 1,
+  UNIQUE (task_id, sequence)
+);
+CREATE INDEX idx_task_steps_task_seq ON task_steps(task_id, sequence);
+
+CREATE TABLE task_model_calls (
+  call_id              TEXT PRIMARY KEY,
+  task_id              TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
+  step_id              TEXT,
+  model_config_id      TEXT,
+  model_config_version INTEGER,
+  request_id           TEXT,
+  status               TEXT NOT NULL CHECK (status IN ('STARTED','SUCCEEDED','FAILED','CANCELLED')),
+  started_at           INTEGER NOT NULL,
+  completed_at         INTEGER,
+  usage                TEXT,
+  provider_error_code  TEXT
+);
+CREATE INDEX idx_task_model_calls_task_step ON task_model_calls(task_id, step_id);
+
+CREATE TABLE task_events (
+  event_id     TEXT PRIMARY KEY,
+  task_id      TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
+  sequence     INTEGER NOT NULL,
+  event_type   TEXT NOT NULL,
+  created_at   INTEGER NOT NULL,
+  safe_payload TEXT,
+  UNIQUE (task_id, sequence)
+);
+CREATE INDEX idx_task_events_task_seq ON task_events(task_id, sequence);
+`;
+
 const MIGRATIONS = Object.freeze([
   { version: 1, sql: SCHEMA_SQL },
   { version: 2, sql: SCHEMA_V2_SQL },
@@ -809,6 +883,7 @@ const MIGRATIONS = Object.freeze([
   { version: 6, sql: SCHEMA_V6_SQL },
   { version: 7, sql: SCHEMA_V7_SQL },
   { version: 8, sql: SCHEMA_V8_SQL },
+  { version: 9, sql: SCHEMA_V9_SQL },
 ]);
 
 const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000; // 12h 绝对上限
@@ -1964,6 +2039,7 @@ module.exports = {
   SCHEMA_V6_SQL,
   SCHEMA_V7_SQL,
   SCHEMA_V8_SQL,
+  SCHEMA_V9_SQL,
   MIGRATIONS,
   IdentityStore,
   DEFAULT_TTL_MS,
