@@ -11,6 +11,7 @@ const { DatabaseSync } = require("node:sqlite");
 
 const V10_TABLES = ["task_harness_runs", "task_artifacts", "task_verifications"];
 const V11_TABLES = ["task_tool_proposals", "tool_decisions"];
+const V12_TABLES = ["tool_executions"];
 const hasTable = (db, name) => !!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(name);
 
 async function makeV9Db() {
@@ -21,6 +22,7 @@ async function makeV9Db() {
   const snapshot = { users: fx.identity.allUsers().length };
   fx.identity.close();
   const raw = new DatabaseSync(dbPath);
+  for (const t of V12_TABLES) raw.exec("DROP TABLE IF EXISTS " + t);
   for (const t of V11_TABLES) raw.exec("DROP TABLE IF EXISTS " + t);
   for (const t of V10_TABLES) raw.exec("DROP TABLE IF EXISTS " + t);
   raw.exec("PRAGMA user_version = 9");
@@ -33,9 +35,9 @@ test("v9 -> v10：HarnessRun / Artifact / Verification 表建立，旧数据完�
   const { root, dbPath, storeRoot, snapshot } = await makeV9Db();
   try {
     const reopened = reopenResourceRuntime({ dbPath, storeRoot });
-    assert.equal(SCHEMA_VERSION, 11);
+    assert.equal(SCHEMA_VERSION, 12);
     assert.equal(reopened.identity.schemaVersion, SCHEMA_VERSION);
-    for (const t of [...V10_TABLES, ...V11_TABLES]) assert.equal(hasTable(reopened.identity.connection, t), true, t + " 应存在");
+    for (const t of [...V10_TABLES, ...V11_TABLES, ...V12_TABLES]) assert.equal(hasTable(reopened.identity.connection, t), true, t + " 应存在");
     assert.equal(reopened.identity.allUsers().length, snapshot.users);
     reopened.identity.close();
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
@@ -53,8 +55,8 @@ test("v10 迁移失败 -> 整级回滚：user_version 停 9，v10 表不残留",
     assert.equal(raw.prepare("SELECT COUNT(*) AS c FROM users").get().c, snapshot.users);
     raw.close();
     const repaired = reopenResourceRuntime({ dbPath, storeRoot });
-    assert.equal(repaired.identity.schemaVersion, 11);
-    for (const t of [...V10_TABLES, ...V11_TABLES]) assert.equal(hasTable(repaired.identity.connection, t), true, t + " 修复后应存在");
+    assert.equal(repaired.identity.schemaVersion, 12);
+    for (const t of [...V10_TABLES, ...V11_TABLES, ...V12_TABLES]) assert.equal(hasTable(repaired.identity.connection, t), true, t + " 修复后应存在");
     repaired.identity.close();
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

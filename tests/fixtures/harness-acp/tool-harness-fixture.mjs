@@ -5,6 +5,7 @@ const require = createRequire(import.meta.url);
 const { ToolStore } = require("../../../electron/tool-store.cjs");
 const { ToolRegistry } = require("../../../electron/tool-registry.cjs");
 const { ControlledToolProxy } = require("../../../electron/controlled-tool-proxy.cjs");
+const { createToolAdapters } = require("../../../electron/tool-adapters.cjs");
 const { TaskHarnessOrchestrator } = require("../../../electron/task-harness-orchestrator.cjs");
 
 export { APPS, EXACT };
@@ -14,9 +15,11 @@ export async function createToolHarnessFixture(opts = {}) {
   const base = await createTaskHarnessFixture(opts);
   const toolStore = new ToolStore({ identity: base.f.identity, clock: base.f.clock });
   const toolRegistry = new ToolRegistry();
-  const toolProxy = new ControlledToolProxy({ registry: toolRegistry, toolStore, authService: base.f.authService, taskStore: base.taskStore, clock: base.f.clock });
+  // withAdapters=true 才允许真实 READ_ONLY 执行（D4-03B）；默认保持 D4-03A gate 语义。
+  const adapters = opts.withAdapters ? createToolAdapters({ resourceService: base.f.resourceService, searchService: base.f.searchService }) : null;
+  const toolProxy = new ControlledToolProxy({ registry: toolRegistry, toolStore, authService: base.f.authService, taskStore: base.taskStore, adapters, clock: base.f.clock });
   return {
-    ...base, toolStore, toolRegistry, toolProxy,
+    ...base, toolStore, toolRegistry, toolProxy, adapters,
     /** 用 synthetic ACP tool proposal fixture 充当 Harness。*/
     makeToolOrchestrator(agentFile = "tool-proposal-agent.mjs", extra = {}) {
       return new TaskHarnessOrchestrator({ taskService: base.taskService, adapterFactory: base.agentFactory(agentFile), toolProxy, clock: base.f.clock, ...extra });

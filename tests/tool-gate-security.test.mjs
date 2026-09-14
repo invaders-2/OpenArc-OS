@@ -67,7 +67,7 @@ test("toolId 注入 / version 注入 / 路径注入", async () => {
   } finally { await fx.close(); }
 });
 
-test("Provider Secret / proxy capability 0 forbidden persistence；无 tool_executions 表", async () => {
+test("Provider Secret / proxy capability 0 forbidden persistence；tool_executions 0 行", async () => {
   const fx = await createToolHarnessFixture({ behavior: "exact" });
   try {
     const ctx = fx.ctx();
@@ -79,7 +79,8 @@ test("Provider Secret / proxy capability 0 forbidden persistence；无 tool_exec
     const dump = dumpDb(fx.f.identity);
     assert.ok(!dump.includes(PROVIDER_SECRET), "Provider Secret 不得落 Task/Tool DB");
     assert.ok(!dump.includes("mpx_"), "proxy capability 不得落库");
-    assert.equal(hasTable(fx.f.identity, "tool_executions"), false, "D4-03A 不应有 tool_executions 表");
+    assert.equal(hasTable(fx.f.identity, "tool_executions"), true, "v12 起应有 tool_executions 表");
+    assert.equal(fx.f.identity.connection.prepare("SELECT COUNT(*) AS c FROM tool_executions").get().c, 0, "D4-03A gate 路径 0 execution");
     const decs = fx.toolStore.decisionsOfTask(t2.task.taskId);
     assert.equal(decs[0].decision, "ALLOWED");
   } finally { await fx.close(); }
