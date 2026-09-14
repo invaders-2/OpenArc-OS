@@ -2,8 +2,9 @@
 import http from "node:http";
 
 export async function startFakeProvider({ behavior = "success", secretEcho = null } = {}) {
-  const state = { requests: 0, authHeaders: [], bodies: [], behavior };
+  const state = { requests: 0, authHeaders: [], bodies: [], behavior, closed: 0 };
   const server = http.createServer((req, res) => {
+    res.on("close", () => { if (!res.writableEnded) state.closed += 1; });
     let raw = "";
     req.on("data", (d) => (raw += d));
     req.on("end", () => {
