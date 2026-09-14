@@ -64,6 +64,9 @@ declare global {
       governance?: {
         command: (cmd: Record<string, unknown>) => Promise<Record<string, unknown>>;
       };
+      model?: {
+        command: (cmd: Record<string, unknown>) => Promise<Record<string, unknown>>;
+      };
     };
   }
 }

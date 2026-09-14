@@ -31,6 +31,7 @@
     "test:d3-04d": "node experiments/d3-04d/run-all.mjs",
     "test:d3-05": "node experiments/d3-05/run-all.mjs",
     "test:d4-01": "node experiments/d4-01/run-all.mjs",
+    "test:model-ipc-ui": "npm run build && node tests/model-ipc-ui.mjs",
     "test:governance-ui": "npm run build && node tests/governance-ui.mjs",
     "test:resource-picker-ui": "npm run build && node tests/resource-picker-ui.mjs",
     "test:canvas-resource-ui": "npm run build && node tests/canvas-resource-ui.mjs"

@@ -90,4 +90,14 @@ contextBridge.exposeInMainWorld("openarc", {
   governance: {
     command: (command) => ipcRenderer.invoke("governance:command", command),
   },
+  /**
+   * D4-01 模型桥。
+   *
+   * 唯一入口 model.command(...)；**不暴露** raw credential / credentialRef /
+   * Model Proxy capability / raw HTTP / raw SQL。sessionRef 与 appId 由主进程注入，
+   * Renderer 自报的 userId/appId/role 一律忽略。
+   */
+  model: {
+    command: (command) => ipcRenderer.invoke("model:command", command),
+  },
 });

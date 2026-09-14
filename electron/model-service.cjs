@@ -123,6 +123,15 @@ class ModelService {
     if (!actor.ok) return { ok: false, error: domain.ERROR_CODE.PROXY_UNAUTHORIZED, items: [] };
     return { ok: true, items: this.store.configsOfOrg(actor.organizationId).filter((c) => c.scope === "ORGANIZATION" || c.owner_user_id === actor.user.id).map((c) => this.#safeConfig(c)) };
   }
+  updateModel({ context, configId, displayName, capabilities } = {}) {
+    const config = this.store.configById(configId);
+    if (!config) return { ok: false, error: domain.ERROR_CODE.INVALID_INPUT };
+    const auth = this.#authorize({ context, action: domain.MODEL_ACTIONS.MANAGE, config });
+    if (!auth.ok) return auth;
+    const caps = capabilities == null ? null : domain.validateCapabilities(capabilities);
+    return { ok: true, model: this.#safeConfig(this.store.transactSync(() => this.store.updateConfig(configId, { displayName, capabilities: caps }))) };
+  }
+
   setModelStatus({ context, configId, status }) {
     const config = this.store.configById(configId);
     if (!config) return { ok: false, error: domain.ERROR_CODE.INVALID_INPUT };
@@ -257,6 +266,64 @@ class ModelService {
       return { ok: false, error: code };
     }
   }
+
+
+  // ---- Settings UI 管理入口（Renderer 只经 model:command 白名单） ----
+  getDefaults({ context } = {}) {
+    const actor = this.#actor(context);
+    if (!actor.ok) return actor;
+    const caps = ["chat", "tool-calling", "image-generation", "video-generation", "embedding", "vision-input"];
+    const personal = {}; const organization = {};
+    for (const c of caps) {
+      const p = this.store.defaultOf({ organizationId: actor.organizationId, ownerUserId: actor.user.id, capability: c });
+      if (p) personal[c] = p.config_id;
+      const o = this.store.defaultOf({ organizationId: actor.organizationId, ownerUserId: "", capability: c });
+      if (o) organization[c] = o.config_id;
+    }
+    return { ok: true, personal, organization, canManageOrganization: actor.isSuper };
+  }
+  setProviderStatus({ context, providerId, status } = {}) { return this.updateProvider({ context, providerId, status }); }
+  credentialStatusForProvider({ context, providerId } = {}) {
+    const provider = this.store.providerById(providerId);
+    if (!provider) return { ok: false, error: domain.ERROR_CODE.INVALID_INPUT };
+    const actor = this.#actor(context);
+    if (!actor.ok) return actor;
+    const meta = provider.credential_ref ? this.store.credentialByRef(provider.credential_ref) : null;
+    return { ok: true, configured: !!(meta && meta.status === "CONFIGURED" && this.credentials.available()), status: meta ? meta.status : "MISSING", storeAvailable: this.credentials.available(), credentialVersion: meta ? meta.credential_version : null };
+  }
+  setProviderCredential({ context, providerId, secret } = {}) {
+    const provider = this.store.providerById(providerId);
+    if (!provider) return { ok: false, error: domain.ERROR_CODE.INVALID_INPUT };
+    const auth = this.#authorize({ context, action: domain.MODEL_ACTIONS.MANAGE, provider });
+    if (!auth.ok) return auth;
+    const cred = this.credentials.createSync({ ownerUserId: auth.actor.user.id, organizationId: auth.actor.organizationId, scope: provider.scope, providerOrigin: provider.base_url, providerConfigId: providerId, secret });
+    if (!cred.ok) return cred;
+    this.store.transactSync(() => this.store.setProviderCredential(providerId, cred.credentialRef));
+    this.authStore.auditAuthorization({ actorUserId: auth.actor.user.id, targetUserId: null, appId: context.appId, departmentId: null, resourceRef: null, action: "model.credentialCreated", decision: "ALLOW", reasonCode: "ALLOW", permissionSource: "SUPER_ADMIN", oldPermissions: [], newPermissions: [] });
+    return { ok: true, credentialVersion: cred.credentialVersion, configured: true };
+  }
+  replaceProviderCredential({ context, providerId, secret } = {}) {
+    const provider = this.store.providerById(providerId);
+    if (!provider) return { ok: false, error: domain.ERROR_CODE.INVALID_INPUT };
+    const auth = this.#authorize({ context, action: domain.MODEL_ACTIONS.MANAGE, provider });
+    if (!auth.ok) return auth;
+    if (!provider.credential_ref) return this.setProviderCredential({ context, providerId, secret });
+    const rep = this.credentials.replaceSync({ credentialRef: provider.credential_ref, secret });
+    if (!rep.ok) return rep;
+    this.authStore.auditAuthorization({ actorUserId: auth.actor.user.id, targetUserId: null, appId: context.appId, departmentId: null, resourceRef: null, action: "model.credentialReplaced", decision: "ALLOW", reasonCode: "ALLOW", permissionSource: "SUPER_ADMIN", oldPermissions: [], newPermissions: [] });
+    return { ok: true, credentialVersion: rep.credentialVersion, configured: true };
+  }
+  deleteProviderCredential({ context, providerId } = {}) {
+    const provider = this.store.providerById(providerId);
+    if (!provider) return { ok: false, error: domain.ERROR_CODE.INVALID_INPUT };
+    const auth = this.#authorize({ context, action: domain.MODEL_ACTIONS.MANAGE, provider });
+    if (!auth.ok) return auth;
+    if (!provider.credential_ref) return { ok: true, changed: false, configured: false };
+    this.credentials.deleteSync({ credentialRef: provider.credential_ref });
+    this.authStore.auditAuthorization({ actorUserId: auth.actor.user.id, targetUserId: null, appId: context.appId, departmentId: null, resourceRef: null, action: "model.credentialDeleted", decision: "ALLOW", reasonCode: "ALLOW", permissionSource: "SUPER_ADMIN", oldPermissions: [], newPermissions: [] });
+    return { ok: true, changed: true, configured: false };
+  }
+  recentCalls(limit = 50) { return this.store.recentCalls(limit); }
 
   async testConnection({ context, configId }) {
     const resolved = this.resolveModel({ context, configId, capability: "chat" });

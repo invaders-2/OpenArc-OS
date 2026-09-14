@@ -18,6 +18,7 @@ const { createAuthorizationService, registerAuthorizationIpc } = require("./auth
 const { createDeviceBundle, registerDeviceIpc } = require("./device-bootstrap.cjs");
 const { createResourceBundle, registerResourceIpc } = require("./resource-bootstrap.cjs");
 const { createGovernanceBundle, registerGovernanceIpc } = require("./governance-bootstrap.cjs");
+const { createModelBundle, registerModelIpc } = require("./model-bootstrap.cjs");
 
 /**
  * @param opts.userDataDir 数据目录（identity.db 与受保护存储落在这里）
@@ -69,7 +70,16 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
     searchService,
     logger: log,
   });
-  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService };
+  // D4-01：模型 Provider / Credential / Config / Default（复用同一连接与 AuthorizationService）。
+  const { modelStore, credentialStore, modelService, modelProxy } = createModelBundle({
+    identityStore: store,
+    authorization,
+    authStore,
+    userDataDir,
+    safeStorage,
+    logger: log,
+  });
+  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, modelStore, credentialStore, modelService, modelProxy };
 }
 
 /**
@@ -78,7 +88,7 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
  * @param opts.isTrusted (event) => boolean —— 与 windows:sync 同一条信任判据
  * @param opts.send      (payload) => void —— 把身份事件推给渲染进程
  */
-function registerIdentityIpc({ ipcMain, service, authorization, device, resource, resourceSearch, resourcePreview, governance, governanceService, projects, canvas, picker, dialog, BrowserWindow, shell = null, isTrusted, send }) {
+function registerIdentityIpc({ ipcMain, service, authorization, device, resource, resourceSearch, resourcePreview, governance, governanceService, projects, canvas, picker, model, dialog, BrowserWindow, shell = null, isTrusted, send }) {
   ipcMain.handle("identity:command", async (e, command) => {
     if (isTrusted && !isTrusted(e)) throw Error("Forbidden");
     if (!service) return { ok: false, error: "INTERNAL_ERROR", detail: "identity-not-ready" };
@@ -99,6 +109,8 @@ function registerIdentityIpc({ ipcMain, service, authorization, device, resource
   if (resource) registerResourceIpc({ ipcMain, service: resource, search: resourceSearch || null, preview: resourcePreview || null, projects: projects || null, canvas: canvas || null, picker: picker || null, identity: service, isTrusted, dialog: dialog || null, BrowserWindow: BrowserWindow || null, shell });
   // D3-04D：治理命令（Users / Departments / Apps / Audit / Scope / Ownership / Bulk）。
   if (governance || governanceService) registerGovernanceIpc({ ipcMain, service: governance || governanceService, authorization, identity: service, isTrusted });
+  // D4-01：模型管理命令（actor sessionRef / appId 由主进程决定；无 raw credential / proxy capability）。
+  if (model) registerModelIpc({ ipcMain, service: model, identity: service, isTrusted });
 }
 
 module.exports = { createIdentityService, registerIdentityIpc };

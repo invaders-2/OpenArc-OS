@@ -114,6 +114,8 @@ app.whenReady().then(() => {
     projects: identity.projectService,
     canvas: identity.canvasService,
     picker: identity.pickerService,
+    // D4-01：模型命令（Settings → Models；无 raw credential / proxy capability）。
+    model: identity.modelService,
     dialog,
     shell,
     BrowserWindow,
