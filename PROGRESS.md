@@ -672,9 +672,10 @@ Windows（Credential Backend / Proxy Runtime / Firewall / Settings UI）NOT VERI
 |---|---|---|
 | **D4-02A Task Domain / Persistent Authority** | **PASS** | schema v9：tasks/task_steps/task_model_calls/task_events；显式状态机 + revision 乐观并发 + append-only events（与 state 同一事务）；D3 授权 + owner+app 隔离；model snapshot 冻结 + `MODEL_CONFIG_CHANGED`；cancel 持久化；重启 RUNNING→BLOCKED/`RECOVERY_REQUIRED`；AUTO_RETRY=0；tool execution=0 |
 | **D4-02B Official ACP Harness Adapter** | **PASS** | 官方 `@deepseek-ai/dsh@0.1.5-rc.2` + ACP v1 + `@agentclientprotocol/sdk@1.4.0` stdio；Harness → OpenArc Model Adapter → Model Proxy → Provider；隔离 DSH_HOME + env scrub；工具/MCP/直连/retry 全关；permission 一律 reject；`test:d4-02b` **16/16** |
-| **D4-02C Task ↔ Harness Orchestration** | **NOT STARTED** | 下一阶段 |
-| **D4-02 overall** | **PARTIAL** | A/B PASS；C 未开始 |
-| **D4-03 Controlled Tool Proxy** | **BLOCK** | 直到 D4-02 自身 PASS |
+| **D4-02C Task ↔ Harness Orchestration** | **PASS** | 真实垂直链路 Task→Step→Harness→ACP→Model Proxy→Fake Provider→Artifact→Verification→SUCCEEDED；schema v10（task_harness_runs/task_artifacts/task_verifications）；ACP→TaskEvent 显式 mapping；成功必须 Artifact+Verification PASS 且同一事务；cancel 两阶段 + race 唯一解；crash/timeout/restart→BLOCKED/RECOVERY_REQUIRED 0 replay；tool 0 execute；permission reject；MCP=0；capability executionBinding + 立即 revoke；test:d4-02c **22/22** |
+| **D4-02 macOS Task / Harness Core** | **PASS** | A/B/C PASS |
+| **D4-02 cross-platform overall** | **PARTIAL** | Windows NOT VERIFIED |
+| **D4-03 Controlled Tool Proxy** | **BLOCK（C PASS 后 CONDITIONAL GO，不自动开始）** | 直到 D4-02 自身 PASS |
 
 ## 2. 关键证据（真实执行）
 
@@ -682,9 +683,10 @@ Windows（Credential Backend / Proxy Runtime / Firewall / Settings UI）NOT VERI
 |---|---|
 | test:d4-02a | **22 / 22 PASS** |
 | test:d4-02b | **16 / 16 PASS**（dsh 0.1.5-rc.2 / ACP SDK 1.4.0 / protocol 1） |
+| test:d4-02c | **22 / 22 PASS**（schema v10；e2e/cancel/recovery/security/migration） |
 | test:d4-01 | **59 / 59 PASS** |
-| npm test | **560 / 560 PASS** |
-| migration（含 v8→v9 + rollback） | **18 / 18 PASS** |
+| npm test | **582 / 582 PASS** |
+| migration（含 v9→v10 + rollback） | PASS |
 | npm run build | PASS |
 | test:security（D1-05） | FAIL 0 / PARTIAL 2 / PASS 6 |
 | security-surface（D2-02 A13） | 15 / 15 PASS |
@@ -707,14 +709,20 @@ ADR：docs/decisions/D4-02-task-authority.md；报告：docs/D4-02A-RESULT.md。
 10. 每次 Harness run = disposable 隔离 DSH_HOME（绝不用真实 `~/.dsh`）；显式 env allowlist + secret scrub。
 11. 官方 managed profile：工具 / MCP / 直连 Provider / retry / interactive login 全关；permission 一律 reject；production tool execution = 0。
 12. Harness session persistence 非权威：OpenArc 恢复只认 Task DB / TaskEvent / revision / `RECOVERY_REQUIRED`。
+13. Orchestrator 不是第二 authority：不保存 task/step status、revision、queue、retry、permission state；所有持久 mutation 经 TaskService，绝不直写 SQLite。
+14. ACP event 只经显式 mapping 落 safe TaskEvent；Harness event 不能改 Task/Step status；终态只由 Orchestrator 决定。
+15. 成功必须有 `Artifact persisted + Verification PASS`，且 Artifact/Verification/Step/Task/Events 同一事务；assistant says done != Task succeeded。
+16. Cancel 两阶段：先持久 `cancel_requested=1` → ACP cancel → revoke capability → finalize；race 用 revision 保证唯一解，禁止 `Task CANCELLED + Step SUCCEEDED`。
+17. tool proposal = 0 execute → `BLOCKED/TOOL_EXECUTION_NOT_AVAILABLE`；permission 一律 reject → `BLOCKED/PERMISSION_NOT_AVAILABLE`；`mcpServers=[]`。
+18. capability 加 executionBinding（task/step/run）+ turn 结束立即 revoke，不等 TTL；A run token 不能用于 B run。
 
 ## 4. 主要缺口
 
-D4-02C Task ↔ Harness Orchestration（NOT STARTED）；OS-level network isolation NOT VERIFIED；Windows NOT VERIFIED（继承 D4-01）。
+D4-02B 遗留继续挂账：OS-level network isolation NOT VERIFIED；external workspace read audit NOT VERIFIED；independent malformed ACP injection NOT VERIFIED；Windows NOT VERIFIED；External Provider NOT VERIFIED。OS sandbox/network 属 D1-05，不因 C PASS 自动关闭。Explicit Resume = DEFERRED（不阻塞核心 PASS）。
 
-## 5. D4-02C 准入
+## 5. D4-03 准入
 
-**CONDITIONAL GO**：ACP ONLY；`HARNESS_RAW_PROVIDER_KEY = FORBIDDEN`；Harness 只与 OpenArc Model Proxy 通信；只接收 Proxy endpoint + scoped capability + safe model snapshot；不拥有 persistent task queue/state/step/retry/tool/lease/permission authority；ACP event 只在 D4-02C 显式映射为 TaskEvent。**D4-03 = BLOCK**。
+**CONDITIONAL GO**（D4-02C PASS 后），但**不自动开始**：在 D4-03 之前 production tool execution = 0、MCP = 0。**D4-03 Controlled Tool Proxy = BLOCK**，直到人工开启。
 
 ---
 

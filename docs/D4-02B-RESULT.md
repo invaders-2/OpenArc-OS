@@ -30,7 +30,7 @@ ACP over stdio：OpenArc Main → exclusive child → stdin/stdout NDJSON JSON-R
 唯一链路：Harness → OpenArc Harness Model Adapter → **OpenArc Model Proxy** → Provider。managed profile 关闭 `llm-deepseek`，Harness 无直连 Provider 出口。Adapter 不实现 Provider auth/routing/retry/SSRF/Credential Store。
 
 ## 10. Credential Isolation
-Fake Provider **收到正确 Provider Authorization**（`Bearer FAKE_PROVIDER_SECRET_...`）；Harness 侧 Provider Secret hits = **0**（env / argv / stdout / stderr / DSH_HOME / workspace / ACP messages / artifacts）。
+Fake Provider **收到正确 Provider Authorization**（`Bearer FAKE_PROVIDER_SECRET…`）；Harness 侧 Provider Secret hits = **0**（env / argv / stdout / stderr / DSH_HOME / workspace / ACP messages / artifacts）。
 
 ## 11. Proxy Capability
 每次 Harness run 申请独立 scoped capability（绑定 user/session/app/modelConfig/modelConfigVersion/allowed capability/maxCalls/expiry/nonce），`maxCalls` 显式 bounded（探针 4）。capability 经 env 注入 → 作为 Bearer 发到 Adapter → 转发给 Model Proxy。**不落盘**（DSH_HOME/workspace/profile/日志均 0）；跨 proxy 复用 DENY（401），`maxCalls=1` 第二次 429。
