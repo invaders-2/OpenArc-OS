@@ -1,6 +1,6 @@
 # D4-03B · Controlled Read-only Tool Execution（macOS）
 
-- **状态**：**D4-03B 执行引擎 = PASS**；**D4-03B overall = PARTIAL**（official dsh read-tool E2E = NOT VERIFIED）；**D4-03C = BLOCK**
+- **状态**：**D4-03B 执行引擎 = PASS**；**official dsh 工具暴露 = VERIFIED**（managed openarc-acp profile + OpenArc plugin 注册 exactly 2 READ_ONLY tool）；**D4-03B overall = PARTIAL**（official dsh 工具执行 E2E = NOT VERIFIED）；**D4-03C = BLOCK**
 - **分支**：feature/d4-03-tool-proxy，基线 b411651，未 merge main
 - **日期**：2026-09-15
 

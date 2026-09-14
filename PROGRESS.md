@@ -733,7 +733,7 @@ D4-02B 遗留继续挂账：OS-level network isolation NOT VERIFIED；external w
 | 口径 | Task Status | 说明 |
 |---|---|---|
 | **D4-03A Tool Contract / Registry / Authorization Gate** | **PASS** | Registry 权威（test.echo / test.write / resource.read.metadata，无 shell/mcp）；Tool Proposal + Decision 持久（schema v11）；D3 授权复用（含 useByAgent）；ResourceRef 强制；risk 来自 Registry；READ_ONLY → ALLOWED、WRITE → APPROVAL_REQUIRED；ExecutionPlan dry-run；production tool execution = 0；test:d4-03a **32/32** |
-| **D4-03B Controlled Read-only Execution（执行引擎）** | **PASS / overall = PARTIAL** | 真实 READ_ONLY 执行：resource.search + resource.read.metadata 经真实 Resource/Search Domain；reauthorize-before-execute；tool_executions（schema v12）；duplicate 0 二次执行；cancel/revoke/delete race PASS；outputSchema + redaction；0 mutation；test:d4-03b **33/33**。**official dsh read-tool E2E = NOT VERIFIED**（managed profile 不开放工具）→ overall PARTIAL |
+| **D4-03B Controlled Read-only Execution（执行引擎 + official dsh 暴露）** | **PASS / overall = PARTIAL** | 真实 READ_ONLY 执行：resource.search + resource.read.metadata 经真实 Resource/Search Domain；reauthorize-before-execute；tool_executions（schema v12）；duplicate 0 二次执行；cancel/revoke/delete race PASS；outputSchema + redaction；0 mutation；test:d4-03b **33/33**。official dsh 工具暴露 **VERIFIED**（openarc-acp profile + plugin 注册 exactly 2 tool）；**official dsh 工具执行 E2E = NOT VERIFIED**（Facade Bridge 未完成）→ overall PARTIAL |
 | **D4-03 overall** | **PARTIAL** | A PASS；B 执行引擎 PASS / overall PARTIAL；C/D 未开始 |
 | **D4-03C Side-effect Lease / Approval / Idempotency / Unknown Effect** | **BLOCK** | 未开启（需先解决 official dsh read-tool E2E 或人工接受边界） |
 
@@ -742,17 +742,18 @@ D4-02B 遗留继续挂账：OS-level network isolation NOT VERIFIED；external w
 | 入口 | 结果 |
 |---|---|
 | test:d4-03a | **32 / 32 PASS** |
-| test:d4-03b | **33 / 33 PASS**（schema 12） |
+| test:d4-03b | **36 / 36 PASS**（schema 12；含 official dsh 工具暴露 3 项） |
 | test:d4-02c | **22 / 22 PASS** |
 | test:d4-02b | **16 / 16 PASS** |
 | test:d4-02a | **22 / 22 PASS** |
 | test:d4-01 | **59 / 59 PASS** |
-| npm test | **647 / 647 PASS** |
+| npm test | **650 / 650 PASS** |
 | npm run build | PASS |
 | test:security | FAIL 0 / PARTIAL 2 / PASS 6 |
 | security-surface（A13） | **15 / 15 PASS**（未新增 Renderer IPC） |
 | READ_ONLY 真实执行 | search + read，real Domain，EXACT verification PASS；authorized 1 / unauthorized 0 Domain call |
-| official dsh read-tool E2E | **NOT VERIFIED** |
+| official dsh 工具暴露 | **VERIFIED**：managed openarc-acp profile 加载 OpenArc plugin，注册 exactly 2 tool（resource_search / resource_read_metadata）|
+| official dsh 工具执行 E2E | **NOT VERIFIED**（Tool Facade Bridge + provider tool-call loop 未完成） |
 
 分支 feature/d4-03-tool-proxy，基线 feature/d4-02-task-harness @ 5d37d64，未 merge main。
 ADR：docs/decisions/D4-03-controlled-tool-proxy.md；报告：docs/D4-03A-RESULT.md。
@@ -776,7 +777,7 @@ ADR：docs/decisions/D4-03-controlled-tool-proxy.md；报告：docs/D4-03A-RESUL
 
 ## 4. 主要缺口
 
-OS-level network isolation NOT VERIFIED；external workspace read audit NOT VERIFIED；independent malformed ACP injection NOT VERIFIED；Windows NOT VERIFIED；External Provider NOT VERIFIED；Explicit Resume = DEFERRED；**official dsh read-tool E2E = NOT VERIFIED**（managed profile 不开放工具；本轮用 official ACP v1 受控 test agent）。不因 D4-03B 关闭。
+OS-level network isolation NOT VERIFIED；external workspace read audit NOT VERIFIED；independent malformed ACP injection NOT VERIFIED；Windows NOT VERIFIED；External Provider NOT VERIFIED；Explicit Resume = DEFERRED；official dsh 工具暴露 = VERIFIED；**official dsh 工具执行 E2E = NOT VERIFIED**（Tool Facade Bridge + provider tool-call loop 未完成）。不因 D4-03B 关闭。
 
 ## 5. D4-03C 准入
 
