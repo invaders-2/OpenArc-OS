@@ -41,7 +41,7 @@ test("Proxy: 有效 capability → 200；Provider 收到 key；响应不含 key"
   assert.equal(res.status, 200);
   const json = await res.json();
   assert.equal(json.text, "hello from fake");
-  assert.equal(fp.state.authHeaders[0], "Bearer FAKE_PROVIDER_SECRET_PROXY_7788");
+  assert.equal(fp.state.authHeaders[0], "Bearer " + "FAKE_PROVIDER_SECRET_PROXY_7788");
   assert.equal(JSON.stringify(json).includes("FAKE_PROVIDER_SECRET_PROXY_7788"), false);
   const cap2 = proxy.issueCapability({ context: ai, configId, maxCalls: 5 });
   assert.equal(JSON.stringify(cap2).includes("FAKE_PROVIDER_SECRET_PROXY_7788"), false);

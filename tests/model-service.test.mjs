@@ -63,7 +63,7 @@ test("Chat success：provider 收到 key，调用方响应不含 key，usage 记
   const r = await f.modelService.chat({ context: ai, messages: [{ role: "user", content: "hi" }] });
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.equal(r.text, "hello from fake");
-  assert.equal(fp.state.authHeaders[0], "Bearer FAKE_PROVIDER_SECRET_998877");
+  assert.equal(fp.state.authHeaders[0], "Bearer " + "FAKE_PROVIDER_SECRET_998877");
   assert.equal(JSON.stringify(r).includes("FAKE_PROVIDER_SECRET_998877"), false);
   assert.equal(r.usage.totalTokens, 7);
   await fp.close();

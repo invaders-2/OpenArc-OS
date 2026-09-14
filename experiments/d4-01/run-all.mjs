@@ -7,7 +7,7 @@ const ROOT = path.resolve(HERE, "../..");
 const ART = path.join(ROOT, "artifacts", "d4-01");
 fs.rmSync(ART, { recursive: true, force: true });
 fs.mkdirSync(ART, { recursive: true });
-const FILES = ["tests/model-service.test.mjs", "tests/model-proxy.test.mjs", "tests/model-proxy-child.test.mjs", "tests/model-service-stream.test.mjs"];
+const FILES = ["tests/model-service.test.mjs", "tests/model-proxy.test.mjs", "tests/model-proxy-child.test.mjs", "tests/model-service-stream.test.mjs", "tests/model-bootstrap.test.mjs"];
 const child = spawn(process.execPath, ["--test", ...FILES], { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"] });
 let out = "";
 child.stdout.on("data", (d) => { out += d; process.stdout.write(d); });
