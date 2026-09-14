@@ -505,11 +505,59 @@ ADR：docs/decisions/D3-04C-search-index-preview.md。
 
 ## 4. D3-04D 准入
 
-**BLOCK**，直到 D3-04C 完成。D3-04D 负责 Department / Super Admin 权限 UI、App Resource Picker、Files / Projects / Canvas 集成、Ownership / Scope 治理编辑；必须复用本轮冻结的 search / index / preview 语义与 capability 交付。
+**DONE（macOS PASS）**，见 # D3-04D 当前状态。D3-04D 已交付 Department / Super Admin 权限 UI、App Resource Picker、Files / Projects / Canvas 集成、Ownership / Scope 治理，并复用本轮冻结的 search / index / preview 语义与 capability 交付。
 
 ## 5. 主要缺口
 
 Windows scheme / 媒体解码 / picker NOT VERIFIED；PDF OCR / 转写 / 远程 Embedding 明确不实现；video poster 帧 DEFERRED；预览缓存无后台 GC 定时器；>10k 数据集与超长文档基准未覆盖。
+
+---
+
+# D3-04D 当前状态（唯一口径 · 2026-09-15）
+
+## 1. Task Status
+
+| 口径 | Task Status | 说明 |
+|---|---|---|
+| **macOS Resource Governance & Integration Core** | **PASS** | Super Admin 治理、子用户管理、Department CRUD 与 Department Admin 边界、Resource / Collection / App 权限管理、Agent useByAgent、系统 Resource Picker、Files / Projects / Canvas ResourceRef 集成、Scope / Ownership 治理、Audit、v6→v7 迁移 —— 全部真实执行 |
+| **overall** | **PARTIAL** | Windows 治理 UI / Picker / File / Canvas **NOT VERIFIED**；Organization Memory Audit Policy DEFERRED |
+| **Resource Library** | **macOS 首版核心 PASS**（D3-04A/B/C/D 全部 PASS） | Windows 未验，跨平台 overall 仍 PARTIAL；**不得写 Resource System COMPLETE** |
+
+## 2. 关键证据（真实执行）
+
+| 入口 | 结果 |
+|---|---|
+| npm test | 见下方回归（全部通过） |
+| npm run build | PASS |
+| npm run test:d3-04d | **5 探针 PASS / FAIL 0** |
+| npm run test:governance-ui | **10 / 10 UI checks** |
+| npm run test:resource-picker-ui | **8 / 8 UI checks** |
+| npm run test:canvas-resource-ui | **8 / 8 UI checks** |
+| D2-02 security-surface | **15 / 15**（桥接 10 键 / IPC 8 通道显式登记） |
+| d3-04a / d3-04b / d3-04c / d3-01 / d3-02 / d3-03 + 既有 UI 探针 | 见最终 Result（未回归） |
+
+分支 feature/d3-04d-resource-governance-integration，基线 feature/d3-04c-resource-search-preview @ eb90223，未 merge main。
+ADR：docs/decisions/D3-04D-resource-governance-integration.md。
+
+## 3. 本轮冻结（不可随意改）
+
+1. **不建第二 ACL**：治理 / Picker / Files / Projects / Canvas 全部复用 D3-02 AuthorizationService；新增表只存引用关系。
+2. **Super Admin 有治理权、无秘密读取权**：内容读取仍按用户侧策略；Personal Memory 默认不可读。
+3. **Picker 只显示交集**：User ∩ App ∩ Type ∩ Action；只返回 ResourceRef；复用 D3-04C Search / Preview。
+4. **Picker token 不是授权绕过**：每次 validate 重新 authorize；撤权 / 停用 / disable 立即失效。
+5. **Canvas 默认 PIN_VERSION**：不静默跟随资源新版本；显式 Update to latest；Trash/UNAUTHORIZED/DELETED 显示真实状态。
+6. **Project 不复制 Resource metadata，也不自动越权**：逐资源重新授权。
+7. **Explicit USER / APP grant 在 Scope / Department 变更后保留并重新求值**；旧 Department 继承 grant 立即移除。
+8. **治理写操作全部 Audit**：不写 body / memory / password / token / device key。
+9. **治理命令受控白名单**：governance:command + resource 桥新命令；无 raw SQL / raw ACL / 凭据读取入口。
+
+## 4. D3-05 准入
+
+**D3-05 Identity & Data Gate = GO（建议）**：D3-04A/B/C/D 在 macOS 全部 PASS，可统一验证 Identity / Authorization / Device / Resource / Department / App / Search / Preview / Governance，然后进入 D4。Windows 仍 NOT VERIFIED。
+
+## 5. 主要缺口
+
+Windows 治理 / Picker / File / Canvas NOT VERIFIED；Organization Memory Audit Policy DEFERRED；完整 Subject×Permission 矩阵可视化未做（Domain 能力已具备）；App / Agent usage history 属 D4；批量操作 UI 未做（服务层已具备）。
 
 ---
 
