@@ -28,7 +28,8 @@ class ModelService {
       const canApp = grants.some((g) => domain.modelGrantActions(g).includes(action));
       if (!canApp) return { ok: false, error: domain.ERROR_CODE.PROXY_UNAUTHORIZED };
     }
-    if (action === domain.MODEL_ACTIONS.MANAGE && config && config.scope === "ORGANIZATION" && !actor.isSuper) {
+    // Organization 资源的 manage 需要 Super Admin（provider 与 config 同一判据）
+    if (action === domain.MODEL_ACTIONS.MANAGE && !actor.isSuper && ((config && config.scope === "ORGANIZATION") || (provider && provider.scope === "ORGANIZATION"))) {
       return { ok: false, error: domain.ERROR_CODE.PROXY_UNAUTHORIZED };
     }
     if (config && config.scope === "PERSONAL" && config.owner_user_id && config.owner_user_id !== actor.user.id) {
@@ -291,8 +292,12 @@ class ModelService {
     if (!provider) return { ok: false, error: domain.ERROR_CODE.INVALID_INPUT };
     const actor = this.#actor(context);
     if (!actor.ok) return actor;
+    // 只有能 manage 该 provider 的人才能看到 credential / secure backend metadata；
+    // 否则只回安全空值，不泄漏"是否已配置 / version / status"。
+    const authorized = this.#authorize({ context, action: domain.MODEL_ACTIONS.MANAGE, provider });
+    if (!authorized.ok) return { ok: true, configured: false, status: "MISSING", storeAvailable: this.credentials.available(), credentialVersion: null, manageable: false };
     const meta = provider.credential_ref ? this.store.credentialByRef(provider.credential_ref) : null;
-    return { ok: true, configured: !!(meta && meta.status === "CONFIGURED" && this.credentials.available()), status: meta ? meta.status : "MISSING", storeAvailable: this.credentials.available(), credentialVersion: meta ? meta.credential_version : null };
+    return { ok: true, configured: !!(meta && meta.status === "CONFIGURED" && this.credentials.available()), status: meta ? meta.status : "MISSING", storeAvailable: this.credentials.available(), credentialVersion: meta ? meta.credential_version : null, manageable: true };
   }
   setProviderCredential({ context, providerId, secret } = {}) {
     const provider = this.store.providerById(providerId);

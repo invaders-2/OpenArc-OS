@@ -77,7 +77,7 @@ export function ModelSettings({ role }: { role: string | null }) {
   };
   const setModelStatus = async (configId: string, status: string) => { const r = await cmd("model/setStatus", { configId, status }); if (!r.ok) setError(r.error); await load(); };
   const setDefault = async (capability: string, configId: string, scope: string) => { if (!configId) return; const r = await cmd("defaults/set", { capability, configId, scope }); if (!r.ok) setError(r.error); else { setNotice("Default saved"); await load(); } };
-  const credLabel = (providerId: string) => { const c = credStatus[providerId]; if (!c) return "..."; if (!c.storeAvailable) return "Unavailable"; return c.configured ? "Configured" : "Missing"; };
+  const credLabel = (providerId: string) => { const c = credStatus[providerId]; if (!c) return "..."; if (c.manageable === false) return "—"; if (!c.storeAvailable) return "Unavailable"; return c.configured ? "Configured" : "Missing"; };
   const opts = (cap: string) => models.filter((m) => m.capabilities.includes(cap)).map((m) => <option key={m.configId} value={m.configId}>{m.displayName || m.remoteModelId}</option>);
 
   return (
@@ -97,13 +97,13 @@ export function ModelSettings({ role }: { role: string | null }) {
       {tab === "providers" ? (
         <section data-d4-01-pane="providers">
           <div className="d401-form">
-            <input data-d4-01-provider-name placeholder="Display Name" value={pForm.displayName} onChange={(e) => setPForm({ ...pForm, displayName: e.target.value })} />
-            <input data-d4-01-provider-url placeholder="Base URL" value={pForm.baseUrl} onChange={(e) => setPForm({ ...pForm, baseUrl: e.target.value })} />
-            <select data-d4-01-provider-scope value={pForm.scope} onChange={(e) => setPForm({ ...pForm, scope: e.target.value })}>
+            <input data-d4-01-provider-name aria-label="Provider display name" placeholder="Display Name" value={pForm.displayName} onChange={(e) => setPForm({ ...pForm, displayName: e.target.value })} />
+            <input data-d4-01-provider-url aria-label="Provider base URL" placeholder="Base URL" value={pForm.baseUrl} onChange={(e) => setPForm({ ...pForm, baseUrl: e.target.value })} />
+            <select data-d4-01-provider-scope aria-label="Provider scope" value={pForm.scope} onChange={(e) => setPForm({ ...pForm, scope: e.target.value })}>
               <option value="PERSONAL">PERSONAL</option>
               <option value="ORGANIZATION">ORGANIZATION</option>
             </select>
-            <input data-d4-01-provider-secret type="password" placeholder="API Key" value={pForm.credentialSecret} onChange={(e) => setPForm({ ...pForm, credentialSecret: e.target.value })} />
+            <input data-d4-01-provider-secret aria-label="Provider API key" type="password" placeholder="API Key" value={pForm.credentialSecret} onChange={(e) => setPForm({ ...pForm, credentialSecret: e.target.value })} />
             <Button variant="primary" size="sm" data-d4-01-provider-create onClick={() => void createProvider()}>创建 Provider</Button>
           </div>
           {providers.length === 0 ? <p className="muted" data-d4-01-providers-empty>No model providers configured</p> : null}
@@ -114,7 +114,7 @@ export function ModelSettings({ role }: { role: string | null }) {
                 <span className="d401-meta">{p.adapterType} | {p.baseUrl} | {p.endpointScope} | {p.scope}</span>
                 <span className="d401-meta" data-d4-01-provider-status>{p.status}</span>
                 <span className="d401-meta" data-d4-01-cred-status={p.providerId}>{credLabel(p.providerId)}</span>
-                <input data-d4-01-cred-input={p.providerId} type="password" placeholder="API Key" value={credDraft[p.providerId] || ""} onChange={(e) => setCredDraft({ ...credDraft, [p.providerId]: e.target.value })} />
+                <input data-d4-01-cred-input={p.providerId} aria-label={"API key for " + p.displayName} type="password" placeholder="API Key" value={credDraft[p.providerId] || ""} onChange={(e) => setCredDraft({ ...credDraft, [p.providerId]: e.target.value })} />
                 <Button variant="secondary" size="sm" data-d4-01-cred-set={p.providerId} onClick={() => void saveCred(p.providerId, false)}>保存</Button>
                 <Button variant="secondary" size="sm" data-d4-01-cred-replace={p.providerId} onClick={() => void saveCred(p.providerId, true)}>替换</Button>
                 <Button variant="ghost" size="sm" data-d4-01-cred-delete={p.providerId} onClick={() => void deleteCred(p.providerId)}>删除密钥</Button>
@@ -132,13 +132,13 @@ export function ModelSettings({ role }: { role: string | null }) {
       {tab === "models" ? (
         <section data-d4-01-pane="models">
           <div className="d401-form">
-            <select data-d4-01-model-provider value={mForm.providerId} onChange={(e) => setMForm({ ...mForm, providerId: e.target.value })}>
+            <select data-d4-01-model-provider aria-label="Model provider" value={mForm.providerId} onChange={(e) => setMForm({ ...mForm, providerId: e.target.value })}>
               <option value="">选择 Provider</option>
               {providers.map((p) => <option key={p.providerId} value={p.providerId}>{p.displayName}</option>)}
             </select>
-            <input data-d4-01-model-remote placeholder="Remote Model ID" value={mForm.remoteModelId} onChange={(e) => setMForm({ ...mForm, remoteModelId: e.target.value })} />
-            <input data-d4-01-model-name placeholder="Display Name" value={mForm.displayName} onChange={(e) => setMForm({ ...mForm, displayName: e.target.value })} />
-            <select data-d4-01-model-scope value={mForm.scope} onChange={(e) => setMForm({ ...mForm, scope: e.target.value })}>
+            <input data-d4-01-model-remote aria-label="Remote model ID" placeholder="Remote Model ID" value={mForm.remoteModelId} onChange={(e) => setMForm({ ...mForm, remoteModelId: e.target.value })} />
+            <input data-d4-01-model-name aria-label="Model display name" placeholder="Display Name" value={mForm.displayName} onChange={(e) => setMForm({ ...mForm, displayName: e.target.value })} />
+            <select data-d4-01-model-scope aria-label="Model scope" value={mForm.scope} onChange={(e) => setMForm({ ...mForm, scope: e.target.value })}>
               <option value="PERSONAL">PERSONAL</option>
               <option value="ORGANIZATION">ORGANIZATION</option>
             </select>
