@@ -619,20 +619,24 @@ Windows；D2-02 5-run 归因；完整 Subject×Permission 矩阵 UI；Browser �
 | **`model.command` IPC / Settings UI** | **PASS** | 单通道白名单 + 静态 dispatch；write-only credential；`model-ipc-ui` 10/10、`model-settings-ui` 16/16 |
 | **真实 macOS secure backend 重启边界（Closure D）** | **PASS** | `model-keychain-restart` **64/64**：4 独立 Electron 进程共享 userData；重启后 credential 可用；replace/delete 跨重启生效；旧 capability DENY / 新 PASS；missing secure item → `CREDENTIAL_MISSING`；无安全后端 → `CREDENTIAL_STORE_UNAVAILABLE` |
 | **Full Secret Scan + 性能基线（Closure E）** | **PASS** | `model-secret-scan` 13/13 checks（SQLite/audit/call records/logs/Resource/Search/FTS/Preview/child/源码/生成文件/artifact 全 0 hit）；`model-secret-ui` **20/20**（真实 Electron DOM/preload/加密 blob/userData）；`model-performance` 10/10（resolution/proxy/streaming/RSS/open-handle 基线）；Provider error echo 已脱敏；capability token 不落盘 |
-| **D4-01 overall** | **PARTIAL** | A–E PASS；仍缺 Closure F（全量回归终局门）；Windows NOT VERIFIED |
+| **最终验收（Closure F）** | **PASS** | `model-isolation` 10/10 + `model-isolation-ui` **26/26**（User B logout/login、Organization 边界、Models a11y smoke）；D3 8 个标准入口、14 个 Electron UI probe、migration 18/18 全 PASS；修复真实越权（非 Super Admin 可改 ORGANIZATION Provider / credential status 泄漏） |
+| **D4-01 macOS Core** | **PASS** | A–F 全部真实通过 |
+| **D4-01 cross-platform overall** | **PARTIAL** | Windows NOT VERIFIED；External Provider NOT VERIFIED |
 
 ## 2. 关键证据（真实执行）
 
 | 入口 | 结果 |
 |---|---|
-| npm test | **512 / 512 PASS** |
+| npm test | **522 / 522 PASS** |
 | npm run build | PASS |
-| test:d4-01 | **49 / 49 PASS**（含 secret-scan + performance） |
-| test:d3-05 | **13 / 13 PASS** |
+| test:d4-01 | **59 / 59 PASS**（含 secret-scan + performance + isolation） |
+| D3 标准入口（d3-01..d3-05） | 全 PASS（d3-05 **13 / 13**） |
+| Electron UI probes（14 个） | 全 PASS（device 32/32 内含 2 NOT VERIFIED 声明） |
 | test:security（D1-05） | FAIL 0 / PARTIAL 2 / PASS 6 |
 | security-surface（D2-02 A13） | **15 / 15 PASS** |
+| dialog-a11y（D2-02） | **33 / 33 PASS** |
 | model-ipc-ui / model-settings-ui / model-keychain-restart | **10/10 · 16/16 · 64/64 PASS** |
-| model-secret-ui（真实 Electron） | **20 / 20 PASS** |
+| model-secret-ui / model-isolation-ui | **20/20 · 26/26 PASS** |
 | model-secret-scan / model-performance | **13/13 checks · 10/10 checks PASS** |
 | migration（含 v8） | 18 / 18 PASS |
 
@@ -648,14 +652,15 @@ ADR：docs/decisions/D4-01-model-service.md；报告：docs/D4-01-RESULT.md。
 5. 默认 0 次隐藏 retry；tool-call 仅数据、0 执行。
 6. Provider 原始响应体/错误体不原样回传；错误只归一化为安全错误码（Closure E error echo 攻击 0 raw hit）。
 7. Proxy capability 完整 bearer 不落盘（DB/audit/logs/Renderer/Resource/model_call_records/artifact），只活在进程内存或可信 child env。
+8. `MANAGE` 对 `ORGANIZATION` 的 provider 与 config 都要求 Super Admin；`credential/status` 只对 manager 返回 secure backend metadata（Closure F 修复）。
 
 ## 4. 主要缺口
 
-Closure F（全量 D3/UI 终局回归门 + 最终 PASS 判定）；Windows；External Provider 真机接入。
+Windows（Credential Backend / Proxy Runtime / Firewall / Settings UI）NOT VERIFIED；External Provider 真机接入（带入 D4-02 / D4-04，最晚 Vertical Smoke 前关闭）。
 
 ## 5. D4-02 准入
 
-**BLOCK**，直到 D4-01 完成 Closure F（全量回归终局门）。之后 `CONDITIONAL GO`（Harness raw key forbidden / ACP only / Model Proxy only / no production tool execution）。
+**CONDITIONAL GO**：ACP ONLY；`HARNESS_RAW_PROVIDER_KEY = FORBIDDEN`；Harness 只与 OpenArc Model Proxy 通信；只接收 Proxy endpoint + scoped capability + safe model snapshot；不拥有 persistent task queue / persistent task state / side-effect retry / tool authorization / production tool execution。**D4-03 = BLOCK**，直到 D4-02 自身 PASS。
 
 ---
 

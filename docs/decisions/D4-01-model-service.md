@@ -1,6 +1,6 @@
 # D4-01 · Model Service / Model Proxy / Credential Boundary
 
-- **状态**：macOS Model Service Core（Provider / Credential Boundary / Registry / Resolution / Authorization / Chat）**PASS**；**Model Proxy / Scoped Capability / Child Credential Isolation / Streaming = PASS**；**`model.command` IPC/preload + Settings UI = PASS**；**真实 Keychain 重启边界（Closure D）= PASS**；**Full Secret Scan + 性能基线（Closure E）= PASS**；**Closure F（全量回归终局门）/ Windows / External Provider = NOT VERIFIED**；overall **PARTIAL**
+- **状态**：**D4-01 macOS Model Service / Model Proxy Core = PASS**（A Model IPC/Renderer Boundary、B Security Surface、C Settings→Models UI、D Secure Credential Restart、E Secret/Performance、F 全量回归终局门 全部真实通过）；**D4-01 cross-platform overall = PARTIAL**（Windows = NOT VERIFIED；External Provider = NOT VERIFIED）；**D4-02 = CONDITIONAL GO**；**D4-03 = BLOCK**
 - **分支**：feature/d4-01-model-service，基线 feature/d3-05-identity-data-gate @ `00c079a`（`488a9cf` + D3-05 标准测试入口），未 merge main
 - **日期**：2026-09-15
 
@@ -10,9 +10,10 @@
 > - `tests/model-settings-ui.mjs` 16/16。
 > - `tests/model-keychain-restart.mjs` **64/64**：4 个独立 Electron 主进程共享同一 userData + 真实 `safeStorage`；重启后 credential 仍可用；replace→v2 / delete→DELETED 跨重启生效；旧 proxy capability 重启后 DENY、新 capability PASS；DB 有 credentialRef 而 secure item 缺失 → `CREDENTIAL_MISSING` 安全失败；无安全后端 → `CREDENTIAL_STORE_UNAVAILABLE`，无明文 fallback。
 > - **E** Full Secret Scan + 性能基线：`tests/model-secret-scan.test.mjs` 12/12（13 checks, 10 surfaces 0 hit）、`tests/model-secret-ui.mjs` **20/20**（真实 Electron DOM/preload/safeStorage blob/userData）、`tests/model-performance.test.mjs` 6/6（10 checks）。Provider Secret 在 DB/audit/call records/logs/Renderer/preload/Resource/Search/Preview/child/源码/生成文件/artifact 全部 0 hit；Provider error echo 已脱敏；capability token 不落盘。
-> - 回归：`npm test` **512/512**、`npm run build` PASS、`test:d4-01` **49/49**、`test:d3-05` **13/13**、`test:security` FAIL 0/PARTIAL 2/PASS 6、security-surface **15/15**。
+> - **F** 最终验收：`tests/model-isolation.test.mjs` 10/10、`tests/model-isolation-ui.mjs` **26/26**（真实 Electron logout/login + Models a11y smoke）；D3 8 个标准入口、14 个 Electron UI probe、migration 18/18 全 PASS；安全修复：非 Super Admin 不能修改/删除 ORGANIZATION Provider，`credential/status` 只对 manager 返回 secure backend metadata。
+> - 回归：`npm test` **522/522**、`npm run build` PASS、`test:d4-01` **59/59**、`test:d3-05` **13/13**、`test:security` FAIL 0/PARTIAL 2/PASS 6、security-surface **15/15**、dialog-a11y **33/33**。
 >
-> **仍未完成**：**Closure F（全量 D3/UI 终局回归门）**、Windows、External Provider。因此 **D4-01 overall 仍 PARTIAL，D4-02 仍 BLOCK**。
+> **仍未完成**：Windows、External Provider。因此 **D4-01 cross-platform overall = PARTIAL**，但 **macOS Core = PASS，D4-02 = CONDITIONAL GO**。
 
 ## Scope
 Provider 管理、Endpoint 策略、Credential 安全保存、Model Registry、Capability、Personal/Organization 默认、Config Resolution、Authorization、单次 Chat、Usage、Error Normalization、secret 脱敏、schema v8 迁移、Model Proxy + scoped capability、IPC/preload、Settings UI、真实 Keychain 重启边界。**不实现** Task 调度 / Harness Task Loop / Tool 执行。
@@ -60,7 +61,7 @@ Personal explicit/default → Authorized Organization default → `MODEL_CONFIG_
 `resolveModel` 返回 `{modelConfigId, modelConfigVersion, providerId, modelId, capabilities, source, scope}`（credentialRef 只内部可见）。
 
 ## Authorization
-复用 D3 Identity（`resolveActor`）+ App Principal + 同一张 App Grant 表（`resource_type='model'`，action namespace `model.view/use/manage/test`）；App Grant 默认 DENY；无第二套 Model ACL。
+复用 D3 Identity（`resolveActor`）+ App Principal + 同一张 App Grant 表（`resource_type='model'`，action namespace `model.view/use/manage/test`）；App Grant 默认 DENY；无第二套 Model ACL。resource scope 硬判据：`MANAGE` 对 `scope='ORGANIZATION'` 的 provider **与** config 都要求 Super Admin；`scope='PERSONAL'` 只允许 owner。`credentialStatusForProvider` 只对能 manage 该 provider 的人返回 credential / version / status，否则回安全空值（`manageable:false`）。
 
 ## App Context
 `context.appId` 必须是 enabled App 且持有对应 model action；disable App 后下一请求 DENY。
@@ -111,17 +112,20 @@ Provider 返回 `tool_calls` 只作为结构化数据返回，**0 执行**（硬
 ## Migration
 `SCHEMA_VERSION = 8`；v1→current … v7→current、current→current、失败回滚由迁移套件覆盖（18/18）。
 
+## Closure F（最终验收）
+真实执行：D3 标准入口 `d3-01..d3-05` 全 PASS（d3-05 13/13）；14 个 Electron UI probe 全 PASS（identity 24/24、authorization 14/14、device 32/32、resource 10/10、resource-library 24/24、resource-search 16/16、resource-preview 19/19、governance 10/10、resource-picker 8/8、canvas-resource 8/8、model-ipc 10/10、model-settings 16/16、model-secret 20/20、model-isolation 26/26）；`npm test` **522/522**；migration **18/18**；security FAIL 0 / PARTIAL 2 / PASS 6；security-surface 15/15；dialog-a11y 33/33。**发现并修复真实越权**：`#authorize` 的 ORGANIZATION MANAGE 判据原来只看 `config` 不看 `provider`，导致非 Super Admin 可改/删 ORGANIZATION Provider（含换 credential）；修复后 `model-isolation` 与全部 Gate 重跑通过。
+
 ## macOS
-`npm test` **512/512**；`provider-adapter` 真实 localhost fake provider；proxy/capability/child/streaming/IPC/UI/keychain-restart/secret-scan/performance 全部真实执行 PASS；`test:security` FAIL 0 / PARTIAL 2 / PASS 6。
+**D4-01 macOS Model Service / Model Proxy Core = PASS**。`npm test` **522/522**；`provider-adapter` 真实 localhost fake provider；proxy/capability/child/streaming/IPC/UI/keychain-restart/secret-scan/performance/isolation 全部真实执行 PASS；`test:security` FAIL 0 / PARTIAL 2 / PASS 6。
 
 ## Windows
 **NOT VERIFIED**（DPAPI / proxy / firewall / UI 未验）。
 
 ## D4-02 Handoff
-D4-01 已交付 Model Config / Credential / Registry / Resolution / Chat / Proxy + capability / child isolation / IPC / Settings UI / 真实 Keychain 重启边界 / Full Secret Scan + 性能基线。**D4-02 = BLOCK，直到 D4-01 完成 Closure F（全量回归终局门）**。Harness raw key forbidden / ACP only / Model Proxy only / no production tool execution 约束不变。
+D4-01 macOS Core 已交付 Model Config / Credential / Registry / Resolution / Chat / Proxy + capability / child isolation / IPC / Settings UI / 真实 Keychain 重启边界 / Full Secret Scan + 性能基线 / User B 隔离与 Organization 边界。**D4-02 Task / Harness Adapter = CONDITIONAL GO**，冻结条件：ACP ONLY；`HARNESS_RAW_PROVIDER_KEY = FORBIDDEN`；Harness 只与 OpenArc Model Proxy 通信；只接收 Proxy endpoint + scoped capability + safe model snapshot；不拥有 persistent task queue / persistent task state / side-effect retry / tool authorization / production tool execution。**D4-03 Controlled Tool Proxy = BLOCK**，直到 D4-02 自身 PASS。
 
 ## Evidence
 见 `docs/D4-01-RESULT.md`。
 
 ## Remaining Gaps
-Closure F（全量 D3/UI 终局回归门 + 最终 PASS 判定）；Windows；External Provider 真机接入。
+Windows（Credential Backend / Proxy Runtime / Firewall / Settings UI）NOT VERIFIED；External Provider 真机接入带入 D4-02 / D4-04，最晚 Vertical Smoke 前关闭；完整 WCAG certification 不在 D4-01 范围。
