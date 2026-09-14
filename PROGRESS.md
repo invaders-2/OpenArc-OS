@@ -608,6 +608,47 @@ Windows；D2-02 5-run 归因；完整 Subject×Permission 矩阵 UI；Browser �
 
 ---
 
+# D4-01 当前状态（唯一口径 · 2026-09-15）
+
+## 1. Task Status
+
+| 口径 | Task Status | 说明 |
+|---|---|---|
+| **macOS Model Service Core** | **PASS** | Provider/Endpoint 策略、Credential Boundary（无明文 fallback）、Model Registry、Capabilities、Defaults/Resolution、Authorization（D3 + App Grant model.*）、单次 Chat、tool-call proposal（0 执行）、cancel/timeout、无隐藏 retry、真实 localhost fake provider、schema v8 迁移 |
+| **Model Proxy / Harness 隔离 / Streaming / Settings UI** | **NOT VERIFIED / NOT IMPLEMENTED** | loopback proxy transport、scoped capability、独立 child credential-isolation 探针、streaming 事件模型、Settings → Models UI、`model.command` IPC/preload，本轮未做 |
+| **D4-01 overall** | **PARTIAL** | Model Service Core PASS；Proxy / child isolation / UI 未完成；Windows NOT VERIFIED |
+
+## 2. 关键证据（真实执行）
+
+| 入口 | 结果 |
+|---|---|
+| npm test | **473 / 473 PASS** |
+| npm run build | PASS |
+| model-service.test | **10 / 10 PASS**（真实 localhost fake provider） |
+| migration（含 v8） | 18 / 18 PASS |
+| D3 全量回归 | d3-01..d3-05 + security FAIL 0（见 Result） |
+
+分支 feature/d4-01-model-service，基线 feature/d3-05-identity-data-gate @ 00c079a，未 merge main。
+ADR：docs/decisions/D4-01-model-service.md；报告：docs/D4-01-RESULT.md。
+
+## 3. 本轮冻结
+
+1. `HARNESS_RAW_PROVIDER_KEY = FORBIDDEN`；Provider key 不进 env/argv/ACP/prompt/tool schema/logs/audit/renderer。
+2. Credential 只存 credentialRef；raw secret 只进 OS 安全后端；**无 plaintext fallback**。
+3. Model 配置权威在 OpenArc；复用 D3 Identity/App Principal/App Grant，无第二套 Model ACL。
+4. Endpoint：远程必须 HTTPS、拒绝危险协议/metadata/URL 凭据；redirect 不转发凭据。
+5. 默认 0 次隐藏 retry；tool-call 仅数据、0 执行。
+
+## 4. 主要缺口
+
+Model Proxy + capability + proxy auth matrix；child credential isolation；streaming；Settings UI/IPC；完整 secret scan；真实 Keychain restart；性能；Windows。
+
+## 5. D4-02 准入
+
+**BLOCK**，直到 D4-01 补齐 Model Proxy / scoped capability / child isolation / Settings UI。补齐后 `CONDITIONAL GO`（Harness raw key forbidden / ACP only / Model Proxy only / no production tool execution）。
+
+---
+
 # 历史记录（过程与失败证据，保留不删）
 
 > 以下各节按当时实际状态书写，**不作为当前口径**。当前状态以 `# D1 当前状态` 一节为准。
