@@ -28,6 +28,10 @@ import { ResourceLibraryApp } from "./resource/ResourceLibraryApp";
 import { BootSurface, LockScreen, LoginScreen, SetupScreen } from "./identity/AuthScreens";
 import { ProtectedResourceFixture } from "./authorization/ProtectedResourceFixture";
 import { SettingsContent } from "./settings/SettingsContent";
+import { GovernanceApp } from "./governance/GovernanceApp";
+import { FilesApp } from "./governance/FilesApp";
+import { CanvasApp } from "./governance/CanvasApp";
+import { ProjectsApp } from "./governance/ProjectsApp";
 
 type DisplayInfo = {
   id: number;
@@ -57,6 +61,9 @@ declare global {
       resource?: {
         command: (cmd: Record<string, unknown>) => Promise<Record<string, unknown>>;
       };
+      governance?: {
+        command: (cmd: Record<string, unknown>) => Promise<Record<string, unknown>>;
+      };
     };
   }
 }
@@ -75,6 +82,8 @@ const apps = [
   { id: "files", name: "文件", icon: "finder" },
   { id: "resource-library", name: "资源库", icon: "finder" },
   { id: "canvas", name: "无限画布", icon: "freeform" },
+  { id: "projects", name: "项目", icon: "folder" },
+  { id: "organization", name: "组织治理", icon: "settings" },
   { id: "skills", name: "Skill 中心", icon: "shortcuts" },
   { id: "settings", name: "系统设置", icon: "settings" },
 ] as const;
@@ -346,6 +355,10 @@ function App() {
       );
     }
     if (w?.appId === "resource-library") return <ResourceLibraryApp />;
+    if (w?.appId === "files") return <FilesApp />;
+    if (w?.appId === "canvas") return <CanvasApp />;
+    if (w?.appId === "projects") return <ProjectsApp />;
+    if (w?.appId === "organization") return <GovernanceApp />;
     if (w?.appId === "settings")
       return (
         <SettingsContent
