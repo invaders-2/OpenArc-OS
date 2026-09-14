@@ -10,6 +10,11 @@
 // 用法：npm run test:d2-02
 // 退出码：任一探针 FAIL → 1；全部 PASS / PARTIAL → 0。
 //
+// ⚠️ 可视化 Gate 默认不跑（D3-04D 后加入，避免打扰正在使用电脑的人）：
+//   D2-02A Gate 会创建 **show:true** 的真实窗口（遮挡 / 合成 / 点击路由 / 圆角 / 多视图），
+//   必然出现在屏幕上并可能抢焦点。默认只跑产品侧的非可视探针；
+//   需要复验 Gate 时显式设置：OPENARC_RUN_VISUAL_PROBES=1 npm run test:d2-02
+//
 // 不在本入口内的永久回归基线（必须继续独立可跑）：
 //   npm test                  —— 纯逻辑单测（domain / manager / focus / zorder / persistence）
 //   npm run test:design-system —— D2-01 设计系统探针
@@ -81,14 +86,31 @@ function classifyGate() {
   return { real, photo, blocked };
 }
 
+/** 可视化 Gate 需显式 opt-in：它创建 show:true 窗口，会打扰正在用电脑的人。 */
+const RUN_VISUAL_GATE = process.env.OPENARC_RUN_VISUAL_PROBES === "1";
+if (!RUN_VISUAL_GATE) {
+  console.log(
+    "ℹ️  已跳过 D2-02A 可视化 Gate（它会创建 show:true 的真实窗口并可能抢焦点）。\n" +
+      "    默认只跑产品侧非可视探针；需要复验 Gate 时：\n" +
+      "    OPENARC_RUN_VISUAL_PROBES=1 npm run test:d2-02",
+  );
+}
+
+/** 会创建 show:true 窗口的探针：默认跳过，OPENARC_RUN_VISUAL_PROBES=1 时运行。 */
+const VISUAL_PROBES = RUN_VISUAL_GATE
+  ? [
+      { file: "experiments/d2-02-gate/run-all.mjs", label: "D2-02A Gate（架构前提）", gate: true },
+      { file: "experiments/d2-02/native-view-lifecycle.mjs", label: "原生视图生命周期（show:true 窗口）" },
+    ]
+  : [];
+
 const PROBES = [
-  { file: "experiments/d2-02-gate/run-all.mjs", label: "D2-02A Gate（架构前提）", gate: true },
+  ...VISUAL_PROBES,
   { file: "experiments/d2-02/security-surface.mjs", label: "A13 安全回归 · 桥接暴露面（§38）" },
   { file: "experiments/d2-02/dialog-a11y.mjs", label: "Dialog 无障碍" },
   { file: "experiments/d2-02/motion-parity.mjs", label: "Reduce Motion 三路径一致性（§28）" },
   { file: "experiments/d2-02/window-stress.mjs", label: "窗口压力 · DOM↔域 差分" },
   { file: "experiments/d2-02/two-browser.mjs", label: "双 Browser 独立性" },
-  { file: "experiments/d2-02/native-view-lifecycle.mjs", label: "原生视图生命周期" },
 ];
 
 /**
