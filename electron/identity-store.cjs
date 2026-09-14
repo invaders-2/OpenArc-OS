@@ -51,7 +51,7 @@ const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domai
  * 迁移按版本逐级前进，每一级各自是一个原子事务：任何一级失败只回滚该级，
  * 不会留下"user_version 已升级但表不完整"的半状态（§55）。
  */
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -718,6 +718,88 @@ CREATE INDEX idx_canvas_nodes_resource ON canvas_resource_nodes(resource_id);
 `;
 
 /** 迁移阶梯。新增 version 时把新 schema 追加在末尾，不改旧条目。 */
+/**
+ * D4-01 v8：Model Provider / Model Config / Default / Credential metadata / Call records。
+ * 只存 credentialRef；raw secret 永不在库中。
+ */
+const SCHEMA_V8_SQL = `
+CREATE TABLE model_providers (
+  provider_id     TEXT PRIMARY KEY,
+  organization_id TEXT NOT NULL,
+  owner_user_id   TEXT,
+  scope           TEXT NOT NULL CHECK (scope IN ('PERSONAL','ORGANIZATION')) DEFAULT 'PERSONAL',
+  display_name    TEXT NOT NULL,
+  adapter_type    TEXT NOT NULL DEFAULT 'openai-compatible',
+  base_url        TEXT NOT NULL,
+  endpoint_scope  TEXT NOT NULL CHECK (endpoint_scope IN ('REMOTE_HTTPS','LOCALHOST','LAN_EXPLICIT')) DEFAULT 'REMOTE_HTTPS',
+  status          TEXT NOT NULL CHECK (status IN ('enabled','disabled')) DEFAULT 'enabled',
+  credential_ref  TEXT,
+  version         INTEGER NOT NULL DEFAULT 1,
+  created_at      INTEGER NOT NULL,
+  updated_at      INTEGER NOT NULL
+);
+CREATE INDEX idx_model_providers_org ON model_providers(organization_id, scope);
+
+CREATE TABLE model_configs (
+  config_id            TEXT PRIMARY KEY,
+  provider_id          TEXT NOT NULL REFERENCES model_providers(provider_id) ON DELETE CASCADE,
+  organization_id      TEXT NOT NULL,
+  owner_user_id        TEXT,
+  scope                TEXT NOT NULL CHECK (scope IN ('PERSONAL','ORGANIZATION')) DEFAULT 'PERSONAL',
+  display_name         TEXT NOT NULL DEFAULT '',
+  remote_model_id      TEXT NOT NULL,
+  capabilities         TEXT NOT NULL DEFAULT '[]',
+  verified_capabilities TEXT NOT NULL DEFAULT '[]',
+  status               TEXT NOT NULL CHECK (status IN ('enabled','disabled')) DEFAULT 'enabled',
+  version              INTEGER NOT NULL DEFAULT 1,
+  created_at           INTEGER NOT NULL,
+  updated_at           INTEGER NOT NULL
+);
+CREATE INDEX idx_model_configs_provider ON model_configs(provider_id);
+CREATE INDEX idx_model_configs_owner ON model_configs(owner_user_id, scope);
+
+CREATE TABLE model_defaults (
+  organization_id TEXT NOT NULL,
+  owner_user_id   TEXT NOT NULL DEFAULT '',
+  capability      TEXT NOT NULL,
+  config_id       TEXT NOT NULL,
+  updated_at      INTEGER NOT NULL,
+  PRIMARY KEY (organization_id, owner_user_id, capability)
+);
+
+CREATE TABLE model_credentials (
+  credential_ref    TEXT PRIMARY KEY,
+  owner_user_id     TEXT NOT NULL,
+  organization_id   TEXT NOT NULL,
+  scope             TEXT NOT NULL CHECK (scope IN ('PERSONAL','ORGANIZATION')) DEFAULT 'PERSONAL',
+  provider_origin   TEXT NOT NULL,
+  provider_config_id TEXT,
+  credential_version INTEGER NOT NULL DEFAULT 1,
+  status            TEXT NOT NULL CHECK (status IN ('CONFIGURED','MISSING','DELETED')) DEFAULT 'CONFIGURED',
+  created_at        INTEGER NOT NULL,
+  updated_at        INTEGER NOT NULL
+);
+CREATE INDEX idx_model_credentials_owner ON model_credentials(owner_user_id);
+
+CREATE TABLE model_call_records (
+  id             TEXT PRIMARY KEY,
+  request_id     TEXT,
+  user_id        TEXT,
+  app_id         TEXT,
+  provider_id    TEXT,
+  model_id       TEXT,
+  config_version INTEGER,
+  started_at     INTEGER NOT NULL,
+  duration_ms    INTEGER,
+  status         TEXT NOT NULL,
+  error_code     TEXT,
+  input_tokens   INTEGER,
+  output_tokens  INTEGER,
+  total_tokens   INTEGER
+);
+CREATE INDEX idx_model_call_records_at ON model_call_records(started_at);
+`;
+
 const MIGRATIONS = Object.freeze([
   { version: 1, sql: SCHEMA_SQL },
   { version: 2, sql: SCHEMA_V2_SQL },
@@ -726,6 +808,7 @@ const MIGRATIONS = Object.freeze([
   { version: 5, sql: SCHEMA_V5_SQL },
   { version: 6, sql: SCHEMA_V6_SQL },
   { version: 7, sql: SCHEMA_V7_SQL },
+  { version: 8, sql: SCHEMA_V8_SQL },
 ]);
 
 const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000; // 12h 绝对上限
@@ -1880,6 +1963,7 @@ module.exports = {
   SCHEMA_V5_SQL,
   SCHEMA_V6_SQL,
   SCHEMA_V7_SQL,
+  SCHEMA_V8_SQL,
   MIGRATIONS,
   IdentityStore,
   DEFAULT_TTL_MS,
