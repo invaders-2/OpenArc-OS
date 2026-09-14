@@ -733,23 +733,26 @@ D4-02B 遗留继续挂账：OS-level network isolation NOT VERIFIED；external w
 | 口径 | Task Status | 说明 |
 |---|---|---|
 | **D4-03A Tool Contract / Registry / Authorization Gate** | **PASS** | Registry 权威（test.echo / test.write / resource.read.metadata，无 shell/mcp）；Tool Proposal + Decision 持久（schema v11）；D3 授权复用（含 useByAgent）；ResourceRef 强制；risk 来自 Registry；READ_ONLY → ALLOWED、WRITE → APPROVAL_REQUIRED；ExecutionPlan dry-run；production tool execution = 0；test:d4-03a **32/32** |
-| **D4-03 overall** | **PARTIAL** | 仅 A；B/C/D 未开始 |
-| **D4-03B Controlled Read-only Execution** | **BLOCK（A PASS 后 CONDITIONAL GO，不自动开始）** | 未开启 |
+| **D4-03B Controlled Read-only Execution（执行引擎）** | **PASS / overall = PARTIAL** | 真实 READ_ONLY 执行：resource.search + resource.read.metadata 经真实 Resource/Search Domain；reauthorize-before-execute；tool_executions（schema v12）；duplicate 0 二次执行；cancel/revoke/delete race PASS；outputSchema + redaction；0 mutation；test:d4-03b **33/33**。**official dsh read-tool E2E = NOT VERIFIED**（managed profile 不开放工具）→ overall PARTIAL |
+| **D4-03 overall** | **PARTIAL** | A PASS；B 执行引擎 PASS / overall PARTIAL；C/D 未开始 |
+| **D4-03C Side-effect Lease / Approval / Idempotency / Unknown Effect** | **BLOCK** | 未开启（需先解决 official dsh read-tool E2E 或人工接受边界） |
 
 ## 2. 关键证据（真实执行）
 
 | 入口 | 结果 |
 |---|---|
-| test:d4-03a | **32 / 32 PASS**（schema 11） |
+| test:d4-03a | **32 / 32 PASS** |
+| test:d4-03b | **33 / 33 PASS**（schema 12） |
 | test:d4-02c | **22 / 22 PASS** |
 | test:d4-02b | **16 / 16 PASS** |
 | test:d4-02a | **22 / 22 PASS** |
 | test:d4-01 | **59 / 59 PASS** |
-| npm test | **614 / 614 PASS** |
+| npm test | **647 / 647 PASS** |
 | npm run build | PASS |
 | test:security | FAIL 0 / PARTIAL 2 / PASS 6 |
 | security-surface（A13） | **15 / 15 PASS**（未新增 Renderer IPC） |
-| Tool Proposal E2E | Task→Harness→Proxy→Registry→Authorization→Decision；0 execution |
+| READ_ONLY 真实执行 | search + read，real Domain，EXACT verification PASS；authorized 1 / unauthorized 0 Domain call |
+| official dsh read-tool E2E | **NOT VERIFIED** |
 
 分支 feature/d4-03-tool-proxy，基线 feature/d4-02-task-harness @ 5d37d64，未 merge main。
 ADR：docs/decisions/D4-03-controlled-tool-proxy.md；报告：docs/D4-03A-RESULT.md。
@@ -763,16 +766,21 @@ ADR：docs/decisions/D4-03-controlled-tool-proxy.md；报告：docs/D4-03A-RESUL
 5. riskClass 来自 Registry（带 side-effect 语义），Harness 自报 risk 无效。
 6. 复用 D3 AuthorizationService；Tool 权限 namespace 与 resource.action 同级，不建第二权限系统。
 7. Agent proposal 强制 useByAgent；资源型 Tool 只接受 ResourceRef；禁止 credential / absolute path 字段。
-8. READ_ONLY 可 ALLOWED；WRITE/EXTERNAL/PRIVILEGED 必须 APPROVAL_REQUIRED；A 阶段 0 执行。
+8. READ_ONLY 可执行；WRITE/EXTERNAL/PRIVILEGED 必须 APPROVAL_REQUIRED，本阶段仍 0 执行。
 9. 未来人工 UI 与 Agent 复用 same domain command / authorization / lock / audit，不为 AI 建后门。
+10. execute 前必须 reauthorize（session/user/app/task/step/run/revision/tool/version/resource/useByAgent）；decision 不是长期授权。
+11. Tool Adapter 只能静态 allowlist + 既有 Domain（ResourceService/SearchService）；禁止动态 require / raw SQL；inputSchema + outputSchema 双向验证 + redaction。
+12. 同一 proposal 0 二次执行；AUTO_RETRY=0；timeout/失败 0 retry。
+13. READ_ONLY 执行期间 Task/Step 保持 RUNNING；Tool result 才交回 Harness，Harness 不能伪造。
+14. 人工 UI 与 Agent 复用同一 Domain。
 
 ## 4. 主要缺口
 
-OS-level network isolation NOT VERIFIED；external workspace read audit NOT VERIFIED；independent malformed ACP injection NOT VERIFIED；Windows NOT VERIFIED；External Provider NOT VERIFIED；Explicit Resume = DEFERRED。真实 dsh 工具开启后的 proposal NOT VERIFIED（managed profile 工具全关）。不因 D4-03A 关闭。
+OS-level network isolation NOT VERIFIED；external workspace read audit NOT VERIFIED；independent malformed ACP injection NOT VERIFIED；Windows NOT VERIFIED；External Provider NOT VERIFIED；Explicit Resume = DEFERRED；**official dsh read-tool E2E = NOT VERIFIED**（managed profile 不开放工具；本轮用 official ACP v1 受控 test agent）。不因 D4-03B 关闭。
 
-## 5. D4-03B 准入
+## 5. D4-03C 准入
 
-**CONDITIONAL GO**（D4-03A PASS 后），但**不自动开始**。D4-03B 才允许第一批真正执行 READ_ONLY Tool（resource.read.metadata / resource.search），仍不允许写；C 处理 side effects / lease / idempotency / ambiguous result / unknown effect / explicit approval；D 才是 full Tool Proxy Gate。在此之前 production tool execution = 0、MCP = 0、Shell = 0。
+**BLOCK**。D4-03C 才允许第一次 REVERSIBLE_WRITE，并处理 approval / lease / idempotency / side-effect call id / ambiguous result / unknown effect / no blind retry。开启前提：解决或人工接受 official dsh read-tool E2E = NOT VERIFIED。在此之前 production WRITE execution = 0、MCP = 0、Shell = 0、Browser automation = 0。
 
 ---
 

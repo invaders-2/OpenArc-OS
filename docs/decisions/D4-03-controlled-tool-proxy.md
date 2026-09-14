@@ -1,6 +1,6 @@
 # D4-03 · Controlled Tool Proxy（macOS）
 
-- **状态**：**D4-03A Tool Contract / Registry / Authorization Gate = PASS**；**D4-03 overall = PARTIAL**；**D4-03B Controlled Read-only Execution = BLOCK（A PASS 后 CONDITIONAL GO，不自动开始）**
+- **状态**：**D4-03A = PASS**；**D4-03B 执行引擎 = PASS / overall = PARTIAL**（official dsh read-tool E2E NOT VERIFIED）；**D4-03 overall = PARTIAL**；**D4-03C = BLOCK**
 - **分支**：feature/d4-03-tool-proxy，基线 feature/d4-02-task-harness @ 5d37d64，未 merge main
 - **日期**：2026-09-15
 
