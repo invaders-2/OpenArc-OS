@@ -176,6 +176,7 @@ const RESOURCE_ACTIONS = Object.freeze(Object.values(ACTION));
 const TOOL_ACTION = Object.freeze({
   TEST_ECHO: "tool.test.echo",
   RESOURCE_READ_METADATA: "tool.resource.readMetadata",
+  RESOURCE_SEARCH: "tool.resource.search",
 });
 const TOOL_ACTIONS = Object.freeze(Object.values(TOOL_ACTION));
 function isToolAction(action) { return TOOL_ACTIONS.includes(String(action)); }

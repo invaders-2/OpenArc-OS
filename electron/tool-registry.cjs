@@ -91,7 +91,7 @@ const BUILTIN_CONTRACTS = Object.freeze([
     displayName: "Read Resource Metadata",
     description: "读取 Resource metadata（D4-03A 只做 dry-run ExecutionPlan，不执行）。",
     inputSchema: { type: "object", additionalProperties: false, properties: { resourceRef: { type: "string", pattern: "^resource://[A-Za-z0-9_-]+$" } }, required: ["resourceRef"] },
-    outputSchema: { type: "object", additionalProperties: true, properties: { resourceRef: { type: "string" }, name: { type: "string" } }, required: ["resourceRef"] },
+    outputSchema: { type: "object", additionalProperties: false, properties: { resourceRef: { type: "string" }, name: { type: "string" }, resourceType: { type: "string" }, mimeType: { type: "string" }, version: { type: "integer" }, updatedAt: { type: "integer" }, size: { type: "number" }, scope: { type: "string" } }, required: ["resourceRef", "name", "resourceType", "mimeType", "version", "updatedAt"] },
     riskClass: RISK_CLASS.READ_ONLY,
     sideEffect: SIDE_EFFECT.READ,
     requiresApproval: false,
@@ -99,7 +99,23 @@ const BUILTIN_CONTRACTS = Object.freeze([
     resourceActions: ["resource.read"],
     executionProvider: "ResourceService",
     enabled: true,
-    expectedSideEffects: ["reads resource metadata (dry-run only in D4-03A)"],
+    expectedSideEffects: ["reads resource metadata"],
+  },
+  {
+    toolId: "resource.search",
+    version: 1,
+    displayName: "Search Resources",
+    description: "在已授权范围内搜索 Resource（READ_ONLY，D4-03B 真实执行，服务端授权过滤）。",
+    inputSchema: { type: "object", additionalProperties: false, properties: { query: { type: "string", minLength: 1, maxLength: 200 }, limit: { type: "integer", minimum: 1, maximum: 20 }, kind: { type: "string", maxLength: 40 } }, required: ["query"] },
+    outputSchema: { type: "object", additionalProperties: false, properties: { items: { type: "array", maxItems: 20, items: { type: "object", additionalProperties: false, properties: { resourceRef: { type: "string" }, name: { type: "string" }, resourceType: { type: "string" }, mimeType: { type: "string" }, version: { type: "integer" }, snippet: { type: "string" } }, required: ["resourceRef", "name", "resourceType", "version"] } }, count: { type: "integer" }, truncated: { type: "boolean" }, maxLimit: { type: "integer" } }, required: ["items", "count", "truncated"] },
+    riskClass: RISK_CLASS.READ_ONLY,
+    sideEffect: SIDE_EFFECT.READ,
+    requiresApproval: false,
+    requiredPermissions: ["tool.resource.search"],
+    resourceActions: [],
+    executionProvider: "SearchService",
+    enabled: true,
+    expectedSideEffects: ["reads authorized resource index (no mutation)"],
   },
 ]);
 
@@ -146,6 +162,7 @@ class ToolRegistry {
     return { ok: true, contract };
   }
   validateInput(contract, args) { return validateSchema(contract.inputSchema, args); }
+  validateOutput(contract, result) { return validateSchema(contract.outputSchema, result); }
   /** dry-run：只生成 ExecutionPlan，绝不执行。*/
   buildExecutionPlan(contract, args, resourceRefs = []) {
     return Object.freeze({

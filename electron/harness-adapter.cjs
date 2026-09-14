@@ -259,13 +259,16 @@ class HarnessAdapter {
     if (!this.conn || !this.sessionId) throw harnessError(HARNESS_ERROR.NOT_STARTED);
     if (this.processExited) throw harnessError(HARNESS_ERROR.PROCESS_EXITED);
     this.turnCancelled = false;
+    // D4-03B：每次 prompt 只返回本 turn 产生的事件/文本，支持多 turn tool loop（不重复处理旧事件）。
+    const from = this.events.length;
     try {
       const res = await this.#withTimeout(
         this.conn.prompt({ sessionId: this.sessionId, prompt: [{ type: "text", text: String(text) }] }),
         timeoutMs, HARNESS_ERROR.TURN_TIMEOUT
       );
       this.assertAlive();
-      return { ok: true, stopReason: res.stopReason, text: this.#collectedText(), events: this.events.slice() };
+      const turnEvents = this.events.slice(from);
+      return { ok: true, stopReason: res.stopReason, text: this.#collectedText(turnEvents), events: turnEvents };
     } catch (e) {
       if (e.code === HARNESS_ERROR.TURN_TIMEOUT) { try { await this.cancel(); } catch { /* ignore */ } throw e; }
       // child 被杀时 SDK 可能先报 "connection closed"，等一个 bounded 窗口再判定进程已退出。
@@ -277,7 +280,7 @@ class HarnessAdapter {
     }
   }
 
-  #collectedText() { return this.events.filter((e) => e.type === "text.delta").map((e) => e.text).join(""); }
+  #collectedText(events = this.events) { return events.filter((e) => e.type === "text.delta").map((e) => e.text).join(""); }
 
   assertAlive() {
     if (this.processExited) throw harnessError(HARNESS_ERROR.PROCESS_EXITED);

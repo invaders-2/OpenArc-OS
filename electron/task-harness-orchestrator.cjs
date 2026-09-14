@@ -23,6 +23,7 @@ const DEFAULT_TURN_TIMEOUT_MS = 180000;
 const DEFAULT_START_TIMEOUT_MS = 30000;
 const DEFAULT_MAX_PERSISTED_EVENTS = 64;
 const DEFAULT_MAX_CALLS = 4;
+const MAX_TOOL_ROUNDS = 4;
 
 const ORCHESTRATOR_ERROR = Object.freeze({
   NO_ADAPTER: "ORCHESTRATOR_NO_ADAPTER",
@@ -178,21 +179,42 @@ class TaskHarnessOrchestrator {
         return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: code, event: TASK_EVENT.HARNESS_RUN_UNKNOWN_EFFECT, expectedRevision: failRev });
       }
 
-      const rawEvents = Array.isArray(res.events) ? res.events : [];
-      const mapped = mapAcpEvents(rawEvents, { maxPersisted: this.maxPersistedHarnessEvents });
-      const hasTool = rawEvents.some((e) => e && e.type === "tool.proposed");
-      const hasPermission = rawEvents.some((e) => e && (e.type === "permission.requested" || e.type === "permission.rejected"));
-      const usage = summarizeUsage(rawEvents);
-      const callDone = svc.completeModelCall({ context, taskId, callId, usage: usage || null, requestId: modelRequestId, expectedRevision: task.revision });
-      if (callDone.ok) task = callDone.task;
+      let rawEvents = Array.isArray(res.events) ? res.events : [];
+      let mapped = mapAcpEvents(rawEvents, { maxPersisted: this.maxPersistedHarnessEvents });
+      let usage = summarizeUsage(rawEvents);
+      const hasToolEvents = () => rawEvents.some((e) => e && e.type === "tool.proposed");
+      const executableProxy = !!(this.toolProxy && this.toolProxy.adapterFor);
 
-      const latest = svc.getTask({ context, taskId });
-      const cancelled = (latest.ok && latest.task.cancelRequested) || res.stopReason === "cancelled";
-      if (cancelled) return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: task.revision });
-
-      // §71/§19 Tool proposal：进入 Controlled Tool Proxy（Registry→Authorization→Decision）；
-      // 本阶段 execute() = forbidden，绝不执行。
-      if (hasTool) {
+      // §33/§34/§63/§65/§89：READ_ONLY Tool 执行循环。每个 proposal 都重新 propose→decide→reauthorize→execute→verify；
+      // 结果经 bounded 后续 prompt 交回 Harness 继续推理。无 adapter（D4-03A gate / 无 proxy）维持 gate 语义。
+      if (executableProxy) {
+        let round = 0;
+        while (hasToolEvents() && round < MAX_TOOL_ROUNDS) {
+          round += 1;
+          const handled = await this.#handleToolTurn({ context, taskId, stepId, runId: run.runId, rawEvents, mappedEvents: mapped.events, task, expectedRevision: task.revision });
+          if (handled.terminal) return handled.terminal;
+          task = handled.task;
+          let next;
+          try {
+            next = await adapter.prompt(handled.followupPrompt, { timeoutMs: turnTimeoutMs });
+          } catch (e) {
+            const code = classifyHarnessError(e);
+            const failedCall = svc.failModelCall({ context, taskId, callId, providerErrorCode: code, requestId: modelRequestId, expectedRevision: task.revision });
+            const failRev = failedCall.ok ? failedCall.task.revision : task.revision;
+            if (code === ERROR.HARNESS_CANCELLED) return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: failRev });
+            return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: code, event: TASK_EVENT.HARNESS_RUN_UNKNOWN_EFFECT, expectedRevision: failRev });
+          }
+          res = next;
+          rawEvents = Array.isArray(next.events) ? next.events : [];
+          mapped = mapAcpEvents(rawEvents, { maxPersisted: this.maxPersistedHarnessEvents });
+          usage = summarizeUsage(rawEvents) || usage;
+          const latestTask = svc.getTask({ context, taskId });
+          if (latestTask.ok) task = latestTask.task;
+          if (latestTask.ok && latestTask.task.cancelRequested) return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: task.revision });
+        }
+        if (hasToolEvents()) return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: ERROR.TOOL_EXECUTION_NOT_AVAILABLE, event: TASK_EVENT.TOOL_EXECUTION_BLOCKED, expectedRevision: task.revision });
+      } else if (hasToolEvents()) {
+        // D4-03A gate：proposal 已 ALLOWED 但执行未开放 → 0 execution + BLOCKED / WAITING。
         await this.#recordEvents({ context, taskId, runId: run.runId, events: mapped.events, expectedRevision: task.revision, task });
         const fresh = svc.getTask({ context, taskId });
         const rev = fresh.ok ? fresh.task.revision : task.revision;
@@ -204,18 +226,22 @@ class TaskHarnessOrchestrator {
         const decision = this.toolProxy.propose({ context, taskId, stepId, runId: run.runId, toolId: spec.toolId, toolVersion: spec.toolVersion, arguments: spec.arguments, proposalId: spec.proposalId });
         const decisionStatus = decision && decision.decisionStatus ? decision.decisionStatus : "BLOCKED";
         const reasonCode = decision && decision.reasonCode ? decision.reasonCode : ERROR.TOOL_FORBIDDEN;
-        const toolEvents = [{ eventType: TASK_EVENT.TOOL_PROPOSED, safePayload: { toolId: spec.toolId, toolVersion: spec.toolVersion, proposalId: decision?.proposal?.proposalId || null } },
-          { eventType: decisionStatus === "APPROVAL_REQUIRED" ? TASK_EVENT.TOOL_APPROVAL_REQUIRED : decisionStatus === "ALLOWED" ? TASK_EVENT.TOOL_VALIDATED : decisionStatus === "DENIED" || decisionStatus === "INVALID" ? TASK_EVENT.TOOL_DENIED : TASK_EVENT.TOOL_EXECUTION_BLOCKED, safePayload: { proposalId: decision?.proposal?.proposalId || null, decision: decisionStatus, reasonCode, riskClass: decision?.decision?.riskClass || null } }];
+        const toolEvents = [{ eventType: TASK_EVENT.TOOL_PROPOSED, safePayload: { toolId: spec.toolId, toolVersion: spec.toolVersion, proposalId: decision && decision.proposal ? decision.proposal.proposalId : null } },
+          { eventType: decisionStatus === "APPROVAL_REQUIRED" ? TASK_EVENT.TOOL_APPROVAL_REQUIRED : decisionStatus === "ALLOWED" ? TASK_EVENT.TOOL_VALIDATED : decisionStatus === "DENIED" || decisionStatus === "INVALID" ? TASK_EVENT.TOOL_DENIED : TASK_EVENT.TOOL_EXECUTION_BLOCKED, safePayload: { proposalId: decision && decision.proposal ? decision.proposal.proposalId : null, decision: decisionStatus, reasonCode, riskClass: decision && decision.decision ? decision.decision.riskClass : null } }];
         await this.#recordEvents({ context, taskId, runId: run.runId, events: toolEvents, expectedRevision: rev });
         const fresh2 = svc.getTask({ context, taskId });
         const rev2 = fresh2.ok ? fresh2.task.revision : rev;
-        if (decisionStatus === "APPROVAL_REQUIRED") {
-          return await this.#waitForApproval({ context, taskId, stepId, runId: run.runId, reason: reasonCode, expectedRevision: rev2 });
-        }
+        if (decisionStatus === "APPROVAL_REQUIRED") return await this.#waitForApproval({ context, taskId, stepId, runId: run.runId, reason: reasonCode, expectedRevision: rev2 });
         const reason = decisionStatus === "ALLOWED" ? ERROR.TOOL_EXECUTION_NOT_AVAILABLE : reasonCode;
         return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason, event: TASK_EVENT.TOOL_EXECUTION_BLOCKED, expectedRevision: rev2, alreadyRecorded: true });
       }
-      // §22/§72 Permission request：一律 reject，Step BLOCKED。
+
+      const hasPermission = rawEvents.some((e) => e && (e.type === "permission.requested" || e.type === "permission.rejected"));
+      const callDone = svc.completeModelCall({ context, taskId, callId, usage: usage || null, requestId: modelRequestId, expectedRevision: task.revision });
+      if (callDone.ok) task = callDone.task;
+      const latest = svc.getTask({ context, taskId });
+      const cancelled = (latest.ok && latest.task.cancelRequested) || res.stopReason === "cancelled";
+      if (cancelled) return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: task.revision });
       if (hasPermission) {
         await this.#recordEvents({ context, taskId, runId: run.runId, events: mapped.events, expectedRevision: task.revision, task });
         const fresh = svc.getTask({ context, taskId });
@@ -282,6 +308,52 @@ class TaskHarnessOrchestrator {
     }
     if (!text || !text.trim()) return { ok: false, type: VERIFICATION_TYPE.SCHEMA_VALID, detail: { reason: "EMPTY_RESULT" } };
     return { ok: true, type: VERIFICATION_TYPE.SCHEMA_VALID };
+  }
+
+  #rev(context, taskId, fallback) { const t = this.#service().getTask({ context, taskId }); return t.ok ? t.task.revision : fallback; }
+
+  /** 一个 Harness turn 内的全部 tool proposals：逐个 propose→decide→(READ_ONLY) execute→verify。*/
+  async #handleToolTurn({ context, taskId, stepId, runId, rawEvents, mappedEvents, task, expectedRevision }) {
+    const svc = this.#service();
+    await this.#recordEvents({ context, taskId, runId, events: mappedEvents, expectedRevision });
+    let rev = this.#rev(context, taskId, expectedRevision);
+    const toolEvents = rawEvents.filter((e) => e && e.type === "tool.proposed");
+    const results = [];
+    for (const ev of toolEvents) {
+      const spec = this.#toolSpec(ev);
+      const decision = this.toolProxy.propose({ context, taskId, stepId, runId, toolId: spec.toolId, toolVersion: spec.toolVersion, arguments: spec.arguments, proposalId: spec.proposalId });
+      const decisionStatus = decision && decision.decisionStatus ? decision.decisionStatus : "BLOCKED";
+      const reasonCode = decision && decision.reasonCode ? decision.reasonCode : ERROR.TOOL_FORBIDDEN;
+      const proposalId = decision && decision.proposal ? decision.proposal.proposalId : spec.proposalId;
+      const decisionEvent = decisionStatus === "APPROVAL_REQUIRED" ? TASK_EVENT.TOOL_APPROVAL_REQUIRED : decisionStatus === "ALLOWED" ? TASK_EVENT.TOOL_VALIDATED : decisionStatus === "DENIED" || decisionStatus === "INVALID" ? TASK_EVENT.TOOL_DENIED : TASK_EVENT.TOOL_EXECUTION_BLOCKED;
+      await this.#recordEvents({ context, taskId, runId, events: [
+        { eventType: TASK_EVENT.TOOL_PROPOSED, safePayload: { toolId: spec.toolId, toolVersion: spec.toolVersion, proposalId } },
+        { eventType: decisionEvent, safePayload: { proposalId, decision: decisionStatus, reasonCode, riskClass: decision && decision.decision ? decision.decision.riskClass : null } },
+      ], expectedRevision: rev });
+      rev = this.#rev(context, taskId, rev);
+
+      if (decisionStatus === "APPROVAL_REQUIRED") return { terminal: await this.#waitForApproval({ context, taskId, stepId, runId, reason: reasonCode, expectedRevision: rev }) };
+      if (decisionStatus !== "ALLOWED") return { terminal: await this.#blockStep({ context, taskId, stepId, runId, reason: reasonCode, event: TASK_EVENT.TOOL_EXECUTION_BLOCKED, expectedRevision: rev, alreadyRecorded: true }) };
+
+      // §32：执行前先落 started event（与 execution record 分离）。
+      await this.#recordEvents({ context, taskId, runId, events: [{ eventType: TASK_EVENT.TOOL_EXECUTION_STARTED, safePayload: { proposalId, toolId: spec.toolId } }], expectedRevision: rev });
+      rev = this.#rev(context, taskId, rev);
+      const exec = await this.toolProxy.executeReadOnly({ context, taskId, stepId, runId, proposalId, expectedRevision: rev });
+      const executionId = exec.execution ? exec.execution.executionId : null;
+      if (exec.ok) {
+        await this.#recordEvents({ context, taskId, runId, events: [{ eventType: TASK_EVENT.TOOL_EXECUTION_SUCCEEDED, safePayload: { proposalId, executionId, toolId: exec.execution.toolId, resultHash: exec.execution.resultHash, verificationStatus: exec.verificationStatus } }], expectedRevision: rev });
+        rev = this.#rev(context, taskId, rev);
+        results.push({ toolId: exec.execution.toolId, result: exec.result });
+      } else {
+        const failEvent = exec.verificationStatus === "FAIL" ? TASK_EVENT.TOOL_VERIFICATION_FAILED : TASK_EVENT.TOOL_EXECUTION_FAILED;
+        await this.#recordEvents({ context, taskId, runId, events: [{ eventType: failEvent, safePayload: { proposalId, executionId, errorCode: exec.error } }], expectedRevision: rev });
+        rev = this.#rev(context, taskId, rev);
+        return { terminal: await this.#blockStep({ context, taskId, stepId, runId, reason: exec.error || ERROR.TOOL_EXECUTION_FAILED, event: null, expectedRevision: rev, alreadyRecorded: true }) };
+      }
+    }
+    const followupPrompt = "Tool result (OpenArc-controlled, verified):\n" + JSON.stringify(results.map((r) => ({ toolId: r.toolId, result: r.result }))).slice(0, 4000) + "\nContinue the task.";
+    const fresh = svc.getTask({ context, taskId });
+    return { terminal: null, task: fresh.ok ? fresh.task : task, followupPrompt };
   }
 
   /** 从 ACP tool.proposed event 抽取 OpenArc 合同字段（测试约定：title=toolId，rawInput={ toolVersion, arguments }）。*/

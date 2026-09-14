@@ -16,6 +16,11 @@ const SQL = {
   decisionById: "SELECT * FROM tool_decisions WHERE decision_id = ?",
   decisionByProposal: "SELECT * FROM tool_decisions WHERE proposal_id = ?",
   decisionsOfTask: "SELECT d.* FROM tool_decisions d JOIN task_tool_proposals p ON p.proposal_id = d.proposal_id WHERE p.task_id = ? ORDER BY d.created_at",
+  insertExecution: "INSERT INTO tool_executions (execution_id, proposal_id, decision_id, task_id, step_id, run_id, tool_id, tool_version, status, started_at, completed_at, result_ref, result_hash, verification_status, error_code) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+  executionById: "SELECT * FROM tool_executions WHERE execution_id = ?",
+  executionByProposal: "SELECT * FROM tool_executions WHERE proposal_id = ?",
+  executionsOfTask: "SELECT * FROM tool_executions WHERE task_id = ? ORDER BY started_at",
+  updateExecution: "UPDATE tool_executions SET status = ?, completed_at = ?, result_ref = ?, result_hash = ?, verification_status = ?, error_code = ? WHERE execution_id = ?",
   insertAudit: "INSERT INTO authorization_audit (at, actor_user_id, target_user_id, app_id, department_id, resource_ref, action, decision, reason_code, permission_source, request_id, old_permissions, new_permissions) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
 };
 const PROPOSAL_STATUS_ALL = new Set(["PROPOSED", "VALIDATED", "DENIED", "APPROVAL_REQUIRED", "INVALID", "BLOCKED"]);
@@ -54,6 +59,23 @@ class ToolStore {
   decisionById(id) { return this.db.prepare(SQL.decisionById).get(String(id || "")) || null; }
   decisionByProposal(proposalId) { return this.db.prepare(SQL.decisionByProposal).get(String(proposalId || "")) || null; }
   decisionsOfTask(taskId) { return this.db.prepare(SQL.decisionsOfTask).all(String(taskId || "")); }
+
+  // ------------------------------------------------------- Tool Execution（D4-03B）
+  insertExecution({ executionId = null, proposalId, decisionId = null, taskId, stepId = null, runId = null, toolId, toolVersion, status = "PENDING", startedAt = null, completedAt = null, resultRef = null, resultHash = null, verificationStatus = null, errorCode = null }) {
+    const id = executionId || newId("texec");
+    const now = this.clock();
+    this.db.prepare(SQL.insertExecution).run(id, String(proposalId), decisionId, String(taskId), stepId, runId, String(toolId), Number(toolVersion), String(status), Number(startedAt == null ? now : startedAt), completedAt, resultRef, resultHash, verificationStatus, errorCode);
+    return this.executionById(id);
+  }
+  executionById(id) { return this.db.prepare(SQL.executionById).get(String(id || "")) || null; }
+  executionByProposal(proposalId) { return this.db.prepare(SQL.executionByProposal).get(String(proposalId || "")) || null; }
+  executionsOfTask(taskId) { return this.db.prepare(SQL.executionsOfTask).all(String(taskId || "")); }
+  updateExecution(id, patch = {}) {
+    const cur = this.executionById(id);
+    if (!cur) return null;
+    this.db.prepare(SQL.updateExecution).run(String(patch.status == null ? cur.status : patch.status), patch.completedAt == null ? cur.completed_at : Number(patch.completedAt), patch.resultRef == null ? cur.result_ref : patch.resultRef, patch.resultHash == null ? cur.result_hash : patch.resultHash, patch.verificationStatus == null ? cur.verification_status : patch.verificationStatus, patch.errorCode == null ? cur.error_code : patch.errorCode, String(id));
+    return this.executionById(id);
+  }
 
   /** Tool audit 走 D3 authorization_audit；只记录 action/decision/reason，不含 arguments。*/
   insertToolAudit({ at = null, actorUserId = null, appId = null, toolRef = null, action, decision, reasonCode = null, requestId = null, permissionSource = null }) {

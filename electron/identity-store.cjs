@@ -51,7 +51,7 @@ const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domai
  * 迁移按版本逐级前进，每一级各自是一个原子事务：任何一级失败只回滚该级，
  * 不会留下"user_version 已升级但表不完整"的半状态（§55）。
  */
-const SCHEMA_VERSION = 11;
+const SCHEMA_VERSION = 12;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -957,6 +957,35 @@ CREATE UNIQUE INDEX idx_tool_decisions_proposal ON tool_decisions(proposal_id);
 CREATE INDEX idx_tool_decisions_decision ON tool_decisions(decision, created_at);
 `;
 
+/**
+ * v12（D4-03B）· Controlled Read-only Tool Execution。
+ *
+ * tool_executions 每 proposal 至多一条（§10 duplicate execute 幂等）。
+ * 只存 status / timing / safe result ref+hash / verification / error_code；
+ * **绝不存完整敏感输出 / raw credential / proxy token / absolute path**。
+ */
+const SCHEMA_V12_SQL = `
+CREATE TABLE tool_executions (
+  execution_id        TEXT PRIMARY KEY,
+  proposal_id         TEXT NOT NULL REFERENCES task_tool_proposals(proposal_id) ON DELETE CASCADE,
+  decision_id         TEXT,
+  task_id             TEXT NOT NULL,
+  step_id             TEXT,
+  run_id              TEXT,
+  tool_id             TEXT NOT NULL,
+  tool_version        INTEGER NOT NULL,
+  status              TEXT NOT NULL CHECK (status IN ('PENDING','RUNNING','SUCCEEDED','FAILED','CANCELLED','BLOCKED')),
+  started_at          INTEGER NOT NULL,
+  completed_at        INTEGER,
+  result_ref          TEXT,
+  result_hash         TEXT,
+  verification_status TEXT,
+  error_code          TEXT
+);
+CREATE UNIQUE INDEX idx_tool_executions_proposal ON tool_executions(proposal_id);
+CREATE INDEX idx_tool_executions_task ON tool_executions(task_id, started_at);
+`;
+
 const MIGRATIONS = Object.freeze([
   { version: 1, sql: SCHEMA_SQL },
   { version: 2, sql: SCHEMA_V2_SQL },
@@ -969,6 +998,7 @@ const MIGRATIONS = Object.freeze([
   { version: 9, sql: SCHEMA_V9_SQL },
   { version: 10, sql: SCHEMA_V10_SQL },
   { version: 11, sql: SCHEMA_V11_SQL },
+  { version: 12, sql: SCHEMA_V12_SQL },
 ]);
 
 const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000; // 12h 绝对上限

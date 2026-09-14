@@ -1,0 +1,93 @@
+/**
+ * D4-03B · Tool Adapters（静态 allowlist）。
+ *
+ * 只通过 Registry 的 executionProvider 映射到这里的受信任 adapter；
+ * **禁止动态 require / import(arguments.path) / eval / new Function**。
+ * Adapter 只能调用既有 Domain（ResourceService / SearchService），绝不直接 SQL。
+ *
+ * 接口：prepare(context, args) / execute(context, args, signal) / verify(context, args, result)。
+ */
+"use strict";
+const domain = require("./tool-domain.cjs");
+
+const MAX_SEARCH_LIMIT = 20;
+const MAX_STRING = 200;
+const SAFE_METADATA_FIELDS = ["resourceRef", "name", "resourceType", "mimeType", "version", "updatedAt", "size", "scope"];
+const SEARCH_ITEM_FIELDS = ["resourceRef", "name", "resourceType", "mimeType", "version", "snippet"];
+
+function clip(value, max = MAX_STRING) {
+  if (typeof value !== "string") return value;
+  return value.length > max ? value.slice(0, max) + "…" : value;
+}
+/** 只保留 allowlist 字段；null/undefined 省略；字符串 bounded。 */
+function projectFields(source, fields, { maxString = MAX_STRING } = {}) {
+  const out = {};
+  for (const key of fields) {
+    const v = source == null ? undefined : source[key];
+    if (v === undefined || v === null) continue;
+    out[key] = typeof v === "string" ? clip(v, maxString) : v;
+  }
+  return out;
+}
+
+/** 静态 allowlist：provider → adapter（绝不从 arguments 解析 module/path）。*/
+function createToolAdapters({ resourceService = null, searchService = null, extra = {} } = {}) {
+  const providers = {};
+
+  providers.test = {
+    toolIds: ["test.echo"],
+    async prepare() { return { plan: { dryRun: false, provider: "test" } }; },
+    async execute({ args }) { return { ok: true, result: { echo: clip(String((args && args.message) || ""), MAX_STRING) } }; },
+    async verify({ result }) { return { ok: !!(result && typeof result.echo === "string"), detail: { echoLength: result && result.echo ? result.echo.length : 0 } }; },
+  };
+
+  if (resourceService) {
+    providers.ResourceService = {
+      toolIds: ["resource.read.metadata"],
+      async prepare({ args }) { return { plan: { provider: "ResourceService", resourceRefs: [String(args.resourceRef)] } }; },
+      async execute({ context, args }) {
+        if (typeof resourceService.get !== "function") return { ok: false, error: "TOOL_EXECUTION_FAILED" };
+        const res = await resourceService.get({ context, resourceRef: String(args.resourceRef) });
+        if (!res || !res.ok) return { ok: false, error: (res && res.error) || "RESOURCE_NOT_AVAILABLE" };
+        const d = res.resource || {};
+        return { ok: true, result: projectFields({ resourceRef: d.resourceRef, name: d.name, resourceType: d.resourceType, mimeType: d.mimeType, version: d.version, updatedAt: d.updatedAt, size: d.size, scope: d.scope }, SAFE_METADATA_FIELDS) };
+      },
+      async verify({ args, result }) {
+        return { ok: !!(result && result.resourceRef && result.resourceRef === String(args.resourceRef)), detail: { resourceRefMatches: !!(result && result.resourceRef === String(args.resourceRef)) } };
+      },
+    };
+  }
+
+  if (searchService) {
+    providers.SearchService = {
+      toolIds: ["resource.search"],
+      async prepare({ args }) { return { plan: { provider: "SearchService", query: clip(String(args.query), MAX_STRING) } }; },
+      async execute({ context, args }) {
+        if (typeof searchService.search !== "function") return { ok: false, error: "TOOL_EXECUTION_FAILED" };
+        const limit = Math.min(MAX_SEARCH_LIMIT, Math.max(1, Number(args.limit) || 5));
+        const filter = args.kind ? { resourceType: clip(String(args.kind), 40) } : {};
+        const res = await searchService.search({ context, query: clip(String(args.query), MAX_STRING), filter, agent: true, limit });
+        if (!res || !res.ok) return { ok: false, error: (res && res.error) || "TOOL_EXECUTION_FAILED" };
+        const items = (res.items || []).slice(0, limit).map((it) => projectFields({ resourceRef: it.resourceRef, name: it.name, resourceType: it.resourceType, mimeType: it.mimeType, version: it.version, snippet: it.snippet && typeof it.snippet === "object" ? it.snippet.text : it.snippet }, SEARCH_ITEM_FIELDS, { maxString: 160 }));
+        const total = Number(res.total || items.length);
+        return { ok: true, result: { items, count: total, truncated: !!res.hasMore || total > items.length, maxLimit: MAX_SEARCH_LIMIT } };
+      },
+      async verify({ args, result }) {
+        if (!result || !Array.isArray(result.items)) return { ok: false, detail: { reason: "NO_ITEMS" } };
+        return { ok: result.items.every((it) => it && typeof it.resourceRef === "string") && result.maxLimit === MAX_SEARCH_LIMIT && result.count >= result.items.length, detail: { count: result.count, items: result.items.length } };
+      },
+    };
+  }
+
+  Object.assign(providers, extra);
+  /** provider 必须声明 toolIds；providerFor 只按 executionProvider + static allowlist 解析。*/
+  function adapterFor({ executionProvider, toolId }) {
+    const provider = providers[String(executionProvider)];
+    if (!provider) return null;
+    if (!Array.isArray(provider.toolIds) || !provider.toolIds.includes(String(toolId))) return null;
+    return provider;
+  }
+  return { providers, adapterFor, MAX_SEARCH_LIMIT };
+}
+
+module.exports = { createToolAdapters, projectFields, MAX_SEARCH_LIMIT, SAFE_METADATA_FIELDS, SEARCH_ITEM_FIELDS };
