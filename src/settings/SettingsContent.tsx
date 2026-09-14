@@ -10,6 +10,7 @@
  */
 import { useState } from "react";
 import { DevicePane } from "../device/DevicePane";
+import { ModelSettings } from "./ModelSettings";
 
 type GlassMode = "full" | "reduced" | "solid";
 type Pane = "appearance" | "model" | "devices";
@@ -37,17 +38,13 @@ export function SettingsContent({
   setReduced,
   glass,
   setGlass,
-  endpoint,
-  setEndpoint,
-  model,
-  setModel,
   role,
 }: SettingsContentProps) {
   const [pane, setPane] = useState<Pane>("appearance");
 
   const panes: { id: Pane; label: string }[] = [
     { id: "appearance", label: "外观与交互" },
-    { id: "model", label: "全局模型服务" },
+    { id: "model", label: "模型 / AI" },
     { id: "devices", label: "设备" },
   ];
 
@@ -99,23 +96,7 @@ export function SettingsContent({
             </>
           ) : null}
 
-          {pane === "model" ? (
-            <>
-              <h3>
-                全局模型服务 <span className="badge">尚未连接</span>
-              </h3>
-              <p className="muted">这里将统一配置所有应用使用的模型。当前字段仅保留在内存，不保存、不发送。</p>
-              <label className="field">
-                API 地址
-                <input placeholder="https://api.example.com/v1" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} />
-              </label>
-              <label className="field">
-                模型名称
-                <input placeholder="填写自定义模型名" value={model} onChange={(e) => setModel(e.target.value)} />
-              </label>
-              <p className="footnote">密钥保管后端尚未接入，本版不收集 API 密钥。</p>
-            </>
-          ) : null}
+          {pane === "model" ? <ModelSettings role={role} /> : null}
 
           {pane === "devices" ? <DevicePane role={role} /> : null}
         </div>

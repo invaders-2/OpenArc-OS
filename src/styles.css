@@ -1375,3 +1375,20 @@ input[type="checkbox"] {
 .picker-list button.is-selected { border-color: rgba(120,180,255,0.6); background: rgba(120,180,255,0.16); }
 .picker-foot { display: flex; justify-content: flex-end; gap: 6px; }
 
+/* ── D4-01 Closure C · Settings → Models ─────────────────────────────────── */
+.d401-settings { display: flex; flex-direction: column; gap: 10px; }
+.d401-tabs { display: flex; gap: 6px; }
+.d401-tabs button { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: inherit; border-radius: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+.d401-tabs button[aria-selected="true"] { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.4); }
+.d401-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.d401-form input, .d401-defaults select { background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.14); color: inherit; border-radius: 8px; padding: 5px 8px; font-size: 12px; }
+.d401-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.d401-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; background: rgba(255,255,255,0.04); }
+.d401-name { font-size: 12px; font-weight: 600; }
+.d401-meta { font-size: 11px; opacity: .6; }
+.d401-row input[type="password"] { background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.14); color: inherit; border-radius: 8px; padding: 4px 8px; font-size: 12px; }
+.d401-error { color: #ff8a8a; font-size: 12px; margin: 0; }
+.d401-notice { color: #8fe3a0; font-size: 12px; margin: 0; }
+.d401-defaults { display: flex; flex-direction: column; gap: 6px; }
+.d401-test { font-size: 11px; opacity: .8; }
+
