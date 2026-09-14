@@ -14,6 +14,7 @@ const { IdentityStore, SCHEMA_VERSION } = require("../electron/identity-store.cj
 const { DatabaseSync } = require("node:sqlite");
 
 const V8_TABLES = ["model_providers", "model_configs", "model_defaults", "model_credentials", "model_call_records"];
+const V9_TABLES = ["task_events", "task_model_calls", "task_steps", "tasks"];
 const V7_TABLES = ["projects", "project_members", "project_resources", "canvas_boards", "canvas_resource_nodes"];
 const V6_TABLES = ["resource_search_docs", "resource_search_fts", "resource_index_jobs", "resource_preview_cache"];
 const V5_TABLES = ["resource_recent", "resource_favorites", "resource_tags", "tags"];
@@ -30,6 +31,7 @@ async function makeV3Db() {
   const snapshot = { users: fx.identity.allUsers().length, departments: fx.store.departmentsOfOrg(fx.orgId).length, devices: fx.deviceStore.allDevices().length, orgId: fx.orgId };
   fx.identity.close();
   const raw = new DatabaseSync(dbPath);
+  for (const table of V9_TABLES) raw.exec("DROP TABLE IF EXISTS " + table);
   for (const table of V8_TABLES) raw.exec("DROP TABLE IF EXISTS " + table);
   for (const table of V7_TABLES) raw.exec("DROP TABLE IF EXISTS " + table);
   for (const table of V6_TABLES) raw.exec("DROP TABLE IF EXISTS " + table);

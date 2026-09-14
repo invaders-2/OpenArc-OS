@@ -14,6 +14,7 @@ const V5_TABLES = ["resource_recent", "resource_favorites", "resource_tags", "ta
 const V6_TABLES = ["resource_search_docs", "resource_search_fts", "resource_index_jobs", "resource_preview_cache"];
 const V7_TABLES = ["projects", "project_members", "project_resources", "canvas_boards", "canvas_resource_nodes"];
 const V8_TABLES = ["model_providers", "model_configs", "model_defaults", "model_credentials", "model_call_records"];
+const V9_TABLES = ["task_events", "task_model_calls", "task_steps", "tasks"];
 const hasTable = (db, name) => !!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(name);
 const hasColumn = (db, table, col) => db.prepare("PRAGMA table_info(" + table + ")").all().some((c) => c.name === col);
 
@@ -40,6 +41,7 @@ async function makeV4Db() {
   const snapshot = { orgId: fx.orgId, users: fx.identity.allUsers().length, departments: fx.store.departmentsOfOrg(fx.orgId).length, resourceId: imp.resource.resourceId, ref: imp.resource.resourceRef };
   fx.identity.close();
   const raw = new DatabaseSync(dbPath);
+  for (const t of V9_TABLES) raw.exec("DROP TABLE IF EXISTS " + t);
   for (const t of V7_TABLES) raw.exec("DROP TABLE IF EXISTS " + t);
   for (const t of V8_TABLES) raw.exec("DROP TABLE IF EXISTS " + t);
   for (const t of V6_TABLES) raw.exec("DROP TABLE IF EXISTS " + t);

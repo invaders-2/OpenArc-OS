@@ -13,6 +13,7 @@ const { DatabaseSync } = require("node:sqlite");
 const V6_TABLES = ["resource_search_docs", "resource_search_fts", "resource_index_jobs", "resource_preview_cache"];
 const V7_TABLES = ["projects", "project_members", "project_resources", "canvas_boards", "canvas_resource_nodes"];
 const V8_TABLES = ["model_providers", "model_configs", "model_defaults", "model_credentials", "model_call_records"];
+const V9_TABLES = ["task_events", "task_model_calls", "task_steps", "tasks"];
 const hasTable = (db, name) => !!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(name);
 const isVirtual = (db, name) => String(db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(name)?.sql || "").includes("VIRTUAL TABLE");
 
@@ -37,7 +38,7 @@ async function makeV5Db() {
   fx.identity.close();
 
   const raw = new DatabaseSync(dbPath);
-  for (const t of [...V6_TABLES, ...V7_TABLES, ...V8_TABLES]) raw.exec("DROP TABLE IF EXISTS " + t);
+  for (const t of [...V9_TABLES, ...V6_TABLES, ...V7_TABLES, ...V8_TABLES]) raw.exec("DROP TABLE IF EXISTS " + t);
   raw.exec("PRAGMA user_version = 5");
   assert.equal(raw.prepare("PRAGMA user_version").get().user_version, 5);
   assert.equal(hasTable(raw, "resource_search_docs"), false);
