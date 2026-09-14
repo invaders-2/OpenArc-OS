@@ -561,6 +561,52 @@ Windows 治理 / Picker / File / Canvas NOT VERIFIED；Organization Memory Audit
 
 ---
 
+# D3-05 当前状态（唯一口径 · 2026-09-15）
+
+## 1. Task Status
+
+| 口径 | Task Status | 说明 |
+|---|---|---|
+| **D3-05 macOS Identity & Data Gate** | **PASS** | Fresh install E2E、Identity/Session/Lock/Disable/Reset、Authorization、Department isolation、App ∩ User、Agent useByAgent、Device gate、Resource lifecycle、Search zero-leak、Preview revoke、Picker revoke、Project/Canvas reauthorization、Personal Memory privacy、Governance、Audit、Migration matrix、Concurrency、Restart/Recovery、Renderer/IPC boundary —— 全部真实通过，新增 Security FAIL = 0 |
+| **D3 overall (macOS)** | **PASS** | D3-01 / D3-02 / D3-03 / D3-04A / D3-04B / D3-04C / D3-04D / D3-05 全部 macOS PASS |
+| **D3 overall (cross-platform)** | **PARTIAL** | Windows NOT VERIFIED；**不得写双平台 COMPLETE** |
+
+## 2. Gate-blocking fixes（本轮真实缺陷）
+
+1. **Re-enable 不恢复旧 session**（`identity-store.setUserStatus`）：停用后重新启用时 authVersion++ 并撤销全部旧 session，用户必须重新认证（原行为会静默恢复旧 session）。
+2. **资源 owner 可撤销 PERSONAL 资源的显式授权**（`authorization-service.revokeResourcePermission`）：原实现只按 department 判断，导致非 Super Admin 的资源 owner 撤不掉自己个人资源上的 grant。
+
+两处均有回归覆盖；`tests/authorization-policy.test.mjs` 的 disable 用例已更新为新的冻结语义。
+
+## 3. 关键证据（真实执行）
+
+| 入口 | 结果 |
+|---|---|
+| npm test | **463 / 463 PASS** |
+| npm run build | PASS |
+| D3-05 Gate 测试 | d3-05-gate 6/6 + d3-05-data-gate 7/7 |
+| d3-01 / d3-02 / d3-03 | 12/12 / 6/6 / TLS 12/12 |
+| d3-04a / d3-04b / d3-04c / d3-04d | 4/4 / 2/2 / 5/5 / 5/5 |
+| D2-02 security-surface（直接） | 15 / 15 |
+| test:security | FAIL 0 / PARTIAL 2 / PASS 6 |
+| 既有 UI 探针 | identity 24 / authorization 14 / device 32（2 NOT VERIFIED 属 D3-03）/ resource 10 / resource-library 24 / resource-search 16 / resource-preview 19 / governance 10 / picker 8 / canvas 8 |
+
+分支 feature/d3-05-identity-data-gate，基线 feature/d3-04d-resource-governance-integration @ b5a9b49，未 merge main。
+ADR：docs/decisions/D3-05-identity-data-gate.md；报告：docs/D3-05-RESULT.md。
+
+## 4. Known Flakes / NOT VERIFIED
+
+D2-02A 可视 Gate 的 occlusion/input 在本机环境性 flaky；**按用户明确要求未运行 5 次**（会显示真实窗口打扰桌面），§56 归因记 NOT VERIFIED。可视探针默认 opt-in（`OPENARC_RUN_VISUAL_PROBES=1`）；D2-02 `security-surface.mjs` 直接运行 15/15。
+
+## 5. D4-01 准入
+
+**D4-01 Model Service / Model Proxy / Credential Boundary = CONDITIONAL GO**，受 D1-02 Harness 条件与 D1-05 Security Freeze 约束。D4 不自动获得工具执行权；严格 D4-01→D4-02→D4-03→D4-04→D4-05。Harness raw provider key = FORBIDDEN，走 OpenArc Model Proxy；Agent Resource 只用受控接口 + ResourceRef。
+
+## 6. 主要缺口
+
+Windows；D2-02 5-run 归因；完整 Subject×Permission 矩阵 UI；Browser 网页上传 Picker bridge；Organization Memory Audit Policy；Drag&Drop / Paste；App/Agent usage history；产品化 Backup/Restore（D6）。
+
+---
 
 # 历史记录（过程与失败证据，保留不删）
 
