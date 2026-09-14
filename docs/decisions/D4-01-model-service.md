@@ -1,19 +1,20 @@
 # D4-01 · Model Service / Model Proxy / Credential Boundary
 
-- **状态**：macOS Model Service Core（Provider / Credential Boundary / Registry / Resolution / Authorization / Chat）**PASS**；**Model Proxy / Scoped Capability / Child Credential Isolation / Streaming = PASS**；**Settings UI / \`model.command\` IPC / 真实 Keychain restart / 完整 secret scan = NOT VERIFIED**；overall **PARTIAL**
+- **状态**：macOS Model Service Core（Provider / Credential Boundary / Registry / Resolution / Authorization / Chat）**PASS**；**Model Proxy / Scoped Capability / Child Credential Isolation / Streaming = PASS**；**`model.command` IPC/preload + Settings UI = PASS**；**真实 Keychain 重启边界（Closure D）= PASS**；**跨 Resource/Search/Renderer 的完整 secret scan + 性能基线 = NOT VERIFIED**；overall **PARTIAL**
 - **分支**：feature/d4-01-model-service，基线 feature/d3-05-identity-data-gate @ `00c079a`（`488a9cf` + D3-05 标准测试入口），未 merge main
 - **日期**：2026-09-15
 
-> **Closure update（本轮）**：Model Proxy / Scoped Capability / Per-call Reauthorization / Independent Child Credential Isolation / Provider-neutral Streaming **已实现并真实通过**：
-> - `tests/model-proxy.test.mjs` 6/6（无 token/无效 token、maxCalls 原子消费、clock 过期、disable User/App/Model、revoke access、config version 变化、revokeCapability）
-> - `tests/model-proxy-child.test.mjs` 2/2（真实 OS child process：Fake Provider 收到 Provider key；child env/argv/stdout/stderr 0 hit）
-> - `tests/model-service-stream.test.mjs` 4/4（真实 SSE 分段 text.delta、cancel、timeout、disconnect→PARTIAL_RESPONSE）
-> - `npm run test:d4-01` **22/22**；`npm test` **485/485**
+> **Closure A–D（已真实通过）**：Model Proxy / Scoped Capability / Per-call Reauthorization / Independent Child Credential Isolation / Provider-neutral Streaming / `model.command` IPC + preload / Settings → Models UI / 真实 Keychain 重启边界。
+> - `tests/model-proxy.test.mjs` 6/6、`tests/model-proxy-child.test.mjs` 2/2（真实 OS child process，child env/argv/stdout/stderr 0 hit）、`tests/model-service-stream.test.mjs` 4/4（真实 SSE）。
+> - `tests/model-ipc-ui.mjs` 10/10、`tests/model-bootstrap.test.mjs` 9/9（未知命令 DENY、write-only credential、actor/app 伪造无效、Confused Deputy DENY）。
+> - `tests/model-settings-ui.mjs` 16/16。
+> - `tests/model-keychain-restart.mjs` **64/64**：4 个独立 Electron 主进程共享同一 userData + 真实 `safeStorage`；重启后 credential 仍可用；replace→v2 / delete→DELETED 跨重启生效；旧 proxy capability 重启后 DENY、新 capability PASS；DB 有 credentialRef 而 secure item 缺失 → `CREDENTIAL_MISSING` 安全失败；无安全后端 → `CREDENTIAL_STORE_UNAVAILABLE`，无明文 fallback。
+> - 回归：`npm test` **494/494**、`npm run build` PASS、`test:d4-01` **31/31**、`test:d3-05` **13/13**、`test:security` FAIL 0/PARTIAL 2/PASS 6、security-surface **15/15**。
 >
-> **仍未实现**：Settings → Models UI、`model.command` IPC/preload、真实 Keychain restart、完整 secret scan（DB/log/audit/artifacts/renderer/Resource/Search）、性能基线、Windows。因此 **D4-02 仍 BLOCK**。
+> **仍未完成（Closure E/F）**：跨 DB/search/log/audit/renderer/Resource 的完整 secret scan、性能基线、Windows。因此 **D4-01 overall 仍 PARTIAL，D4-02 仍 BLOCK**。
 
 ## Scope
-Provider 管理、Endpoint 策略、Credential 安全保存、Model Registry、Capability、Personal/Organization 默认、Config Resolution、Authorization、单次 Chat、Usage、Error Normalization、secret 脱敏、schema v8 迁移。**不实现** Task 调度 / Harness Task Loop / Tool 执行 / Model Proxy HTTP transport（本轮未完成）。
+Provider 管理、Endpoint 策略、Credential 安全保存、Model Registry、Capability、Personal/Organization 默认、Config Resolution、Authorization、单次 Chat、Usage、Error Normalization、secret 脱敏、schema v8 迁移、Model Proxy + scoped capability、IPC/preload、Settings UI、真实 Keychain 重启边界。**不实现** Task 调度 / Harness Task Loop / Tool 执行。
 
 ## Trust Boundaries
 Renderer / App → Model Service → Authorization → Resolver → Credential Boundary → Provider Adapter → Provider。**Provider API Key 永不进入 Renderer / DB / search / preview / audit**。
@@ -28,7 +29,7 @@ Renderer / App → Model Service → Authorization → Resolver → Credential B
 `safeStorageCredentialBackend({safeStorage, dir})` 写 `<userData>/credentials/<ref>.bin`（OS 加密，0600）；`memoryCredentialBackend()` 仅测试注入。
 
 ## No Plaintext Fallback
-无后端时 `createSync` 返回 `CREDENTIAL_STORE_UNAVAILABLE`；测试断言不写明文、不返回 raw secret。
+无后端时 `createSync` 返回 `CREDENTIAL_STORE_UNAVAILABLE`；Closure D 断言无安全后端时不创建 credentials 目录、不返回 raw secret。
 
 ## Provider Adapter
 `chat({baseUrl, apiKey, model, messages, tools, params, stream, signal, timeoutMs})`，`redirect: "error"`（跨域带凭据重定向直接失败）。
@@ -64,13 +65,13 @@ Personal explicit/default → Authorized Organization default → `MODEL_CONFIG_
 `context.appId` 必须是 enabled App 且持有对应 model action；disable App 后下一请求 DENY。
 
 ## Model Proxy
-**NOT IMPLEMENTED / NOT VERIFIED**：loopback HTTP transport、scoped capability、proxy auth matrix、child-process credential isolation 探针本轮未实现。
+`electron/model-proxy.cjs`：loopback `127.0.0.1:0`、唯一 `POST /v1/chat/completions`、scoped capability、每次请求重新 authorize。`tests/model-proxy.test.mjs` 6/6 + `tests/model-proxy-child.test.mjs` 2/2。
 
 ## Proxy Transport / Proxy Capability / Harness Boundary
-**NOT VERIFIED**。方向仍冻结为 127.0.0.1 + short-lived scoped bearer capability + 每次请求重新 authorize；`HARNESS_RAW_PROVIDER_KEY = FORBIDDEN` 不变。
+127.0.0.1 + short-lived scoped bearer capability + 每次请求重新 authorize；capability 只活在进程内存，restart 后旧 capability 必然 DENY（Closure D：未过期仍 401）。独立 child process 探针证明 child env/argv/stdout/stderr 0 hit；`HARNESS_RAW_PROVIDER_KEY = FORBIDDEN` 不变。
 
 ## Streaming
-**NOT IMPLEMENTED / NOT VERIFIED**（非流式 chat 已实现）。
+`provider-adapter.chatStream` 真实 SSE → 统一事件模型；`tests/model-service-stream.test.mjs` 4/4。
 
 ## Cancellation / Timeout
 AbortSignal 取消 → `CANCELLED`；3s 超时 → `MODEL_TIMEOUT`；测试断言请求被终止。
@@ -82,10 +83,10 @@ AbortSignal 取消 → `CANCELLED`；3s 超时 → `MODEL_TIMEOUT`；测试断�
 AUTH_FAILED / RATE_LIMITED / MODEL_NOT_FOUND / CAPABILITY_UNAVAILABLE / MODEL_TIMEOUT / PROVIDER_UNAVAILABLE / PROVIDER_PROTOCOL_ERROR / CANCELLED / PARTIAL_RESPONSE / CREDENTIAL_UNAVAILABLE / CREDENTIAL_MISSING / CREDENTIAL_STORE_UNAVAILABLE / ENDPOINT_BLOCKED / MODEL_CONFIG_UNAVAILABLE。
 
 ## Usage
-`model_call_records` 只存安全 metadata（requestId / user / app / provider / model / configVersion / 时间 / status / tokens），不存 prompt/response。
+`model_call_records` 只存安全 metadata（requestId / user / app / provider / model / configVersion / 时间 / status / tokens），不存 prompt/response，也不含 raw secret（Closure D）。
 
 ## Logging / Privacy
-secret 脱敏 `redactSecrets`；响应 / 库内不出现 raw key（测试断言）。
+secret 脱敏 `redactSecrets`；响应 / 库内不出现 raw key（测试断言）。Closure D 在真实重启流程中扫描整个 userData + artifact，raw secret 0 hit；跨 Resource/Search/Renderer 的完整扫描仍属 Closure E。
 
 ## Tool-call Proposal
 Provider 返回 `tool_calls` 只作为结构化数据返回，**0 执行**（硬 Gate 测试）。
@@ -94,22 +95,22 @@ Provider 返回 `tool_calls` 只作为结构化数据返回，**0 执行**（硬
 未调用任何 Device / MCP / Shell / File / Resource Mutation。
 
 ## Renderer Boundary
-**NOT IMPLEMENTED / NOT VERIFIED**：`model.command` 桥、Settings UI、preload 白名单本轮未做。
+`window.openarc.model.command` 单通道 + preload 白名单；主进程命令白名单（16 条）+ 静态 switch dispatch；actor/app 取自信任宿主，忽略 Renderer 自报。Settings UI 经此通道；`tests/model-ipc-ui.mjs` 10/10、`tests/model-settings-ui.mjs` 16/16。
 
 ## Migration
 `SCHEMA_VERSION = 8`；v1→current … v7→current、current→current、失败回滚由迁移套件覆盖（18/18）。
 
 ## macOS
-`npm test` **473/473**（含 10 个 D4-01 测试）；`provider-adapter` 真实 localhost fake provider。
+`npm test` **494/494**；`provider-adapter` 真实 localhost fake provider；proxy/capability/child/streaming/IPC/UI/keychain-restart 全部真实执行 PASS；`test:security` FAIL 0 / PARTIAL 2 / PASS 6。
 
 ## Windows
 **NOT VERIFIED**（DPAPI / proxy / firewall / UI 未验）。
 
 ## D4-02 Handoff
-D4-01 只交付 Model Config / Credential / Registry / Resolution / 单次 Chat 核心；Model Proxy 与 Harness 隔离接口仍未交付，**D4-02 = BLOCK，直到 D4-01 补齐 Proxy + child isolation**。Harness raw key forbidden / ACP only / Model Proxy only / no production tool execution 约束不变。
+D4-01 已交付 Model Config / Credential / Registry / Resolution / Chat / Proxy + capability / child isolation / IPC / Settings UI / 真实 Keychain 重启边界。**D4-02 = BLOCK，直到 D4-01 完成 Closure E（完整 secret scan + 性能基线）与 Closure F（全量回归终局门）**。Harness raw key forbidden / ACP only / Model Proxy only / no production tool execution 约束不变。
 
 ## Evidence
 见 `docs/D4-01-RESULT.md`。
 
 ## Remaining Gaps
-Model Proxy HTTP transport + scoped capability + proxy auth matrix；独立 child credential-isolation 探针；Streaming 事件模型；Settings → Models UI；IPC/preload model.command；secret scan 跨 DB/search/log/audit/renderer/child env/argv；restart 用真实 Keychain 验证；Windows。
+跨 DB/search/log/audit/renderer/Resource 的完整 secret scan；resolve/proxy 性能基线；Windows；External Provider 真机接入。

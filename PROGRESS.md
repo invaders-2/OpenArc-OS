@@ -615,18 +615,23 @@ Windows；D2-02 5-run 归因；完整 Subject×Permission 矩阵 UI；Browser �
 | 口径 | Task Status | 说明 |
 |---|---|---|
 | **macOS Model Service Core** | **PASS** | Provider/Endpoint 策略、Credential Boundary（无明文 fallback）、Model Registry、Capabilities、Defaults/Resolution、Authorization（D3 + App Grant model.*）、单次 Chat、tool-call proposal（0 执行）、cancel/timeout、无隐藏 retry、真实 localhost fake provider、schema v8 迁移 |
-| **Model Proxy / Harness 隔离 / Streaming / Settings UI** | **NOT VERIFIED / NOT IMPLEMENTED** | loopback proxy transport、scoped capability、独立 child credential-isolation 探针、streaming 事件模型、Settings → Models UI、`model.command` IPC/preload，本轮未做 |
-| **D4-01 overall** | **PARTIAL** | Model Service Core PASS；Proxy / child isolation / UI 未完成；Windows NOT VERIFIED |
+| **Model Proxy / Scoped Capability / Child Isolation / Streaming** | **PASS** | loopback `127.0.0.1:0` + capability + per-call reauthorize；独立 OS child 探针（env/argv/stdout/stderr 0 hit）；真实 SSE 事件模型 |
+| **`model.command` IPC / Settings UI** | **PASS** | 单通道白名单 + 静态 dispatch；write-only credential；`model-ipc-ui` 10/10、`model-settings-ui` 16/16 |
+| **真实 macOS secure backend 重启边界（Closure D）** | **PASS** | `model-keychain-restart` **64/64**：4 独立 Electron 进程共享 userData；重启后 credential 可用；replace/delete 跨重启生效；旧 capability DENY / 新 PASS；missing secure item → `CREDENTIAL_MISSING`；无安全后端 → `CREDENTIAL_STORE_UNAVAILABLE` |
+| **D4-01 overall** | **PARTIAL** | A–D PASS；仍缺 Closure E（完整 secret scan + 性能）与 F（终局门）；Windows NOT VERIFIED |
 
 ## 2. 关键证据（真实执行）
 
 | 入口 | 结果 |
 |---|---|
-| npm test | **473 / 473 PASS** |
+| npm test | **494 / 494 PASS** |
 | npm run build | PASS |
-| model-service.test | **10 / 10 PASS**（真实 localhost fake provider） |
+| test:d4-01 | **31 / 31 PASS** |
+| test:d3-05 | **13 / 13 PASS** |
+| test:security（D1-05） | FAIL 0 / PARTIAL 2 / PASS 6 |
+| security-surface（D2-02 A13） | **15 / 15 PASS** |
+| model-ipc-ui / model-settings-ui / model-keychain-restart | **10/10 · 16/16 · 64/64 PASS** |
 | migration（含 v8） | 18 / 18 PASS |
-| D3 全量回归 | d3-01..d3-05 + security FAIL 0（见 Result） |
 
 分支 feature/d4-01-model-service，基线 feature/d3-05-identity-data-gate @ 00c079a，未 merge main。
 ADR：docs/decisions/D4-01-model-service.md；报告：docs/D4-01-RESULT.md。
@@ -641,11 +646,11 @@ ADR：docs/decisions/D4-01-model-service.md；报告：docs/D4-01-RESULT.md。
 
 ## 4. 主要缺口
 
-Model Proxy + capability + proxy auth matrix；child credential isolation；streaming；Settings UI/IPC；完整 secret scan；真实 Keychain restart；性能；Windows。
+完整 secret scan（跨 DB/search/log/audit/renderer/Resource 全表面，Closure E）；resolve/proxy 性能基线（Closure E）；Windows；External Provider 真机接入。
 
 ## 5. D4-02 准入
 
-**BLOCK**，直到 D4-01 补齐 Model Proxy / scoped capability / child isolation / Settings UI。补齐后 `CONDITIONAL GO`（Harness raw key forbidden / ACP only / Model Proxy only / no production tool execution）。
+**BLOCK**，直到 D4-01 完成 Closure E（完整 secret scan + 性能基线）与 Closure F（全量回归终局门）。之后 `CONDITIONAL GO`（Harness raw key forbidden / ACP only / Model Proxy only / no production tool execution）。
 
 ---
 
