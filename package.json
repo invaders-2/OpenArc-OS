@@ -29,6 +29,7 @@
     "test:resource-search-ui": "npm run build && node tests/resource-search-ui.mjs",
     "test:resource-preview-ui": "npm run build && node tests/resource-preview-ui.mjs",
     "test:d3-04d": "node experiments/d3-04d/run-all.mjs",
+    "test:d3-05": "node experiments/d3-05/run-all.mjs",
     "test:governance-ui": "npm run build && node tests/governance-ui.mjs",
     "test:resource-picker-ui": "npm run build && node tests/resource-picker-ui.mjs",
     "test:canvas-resource-ui": "npm run build && node tests/canvas-resource-ui.mjs"
