@@ -492,6 +492,30 @@ class AuthorizationService {
   // Governance 闸门
   // -------------------------------------------------------------------------
 
+  /**
+   * D3-04D：治理 / 集成服务复用的**只读上下文解析**。
+   * 只做 Session → User + memberships 的解析，不要求 App、不做动作授权；
+   * 调用方仍必须对具体资源动作走 authorize()/getCapabilities()。
+   */
+  resolveActor({ context } = {}) {
+    const ctx = domain.normalizeContext(context || {});
+    const gate = this.#sessionGate(ctx);
+    if (!gate.ok) {
+      return { ok: false, error: externalReason(gate.reason), challenge: gate.challenge || null };
+    }
+    const user = gate.user;
+    const memberships = this.store.membershipsOfUser(user.id).filter((m) => m.status === "ACTIVE");
+    return {
+      ok: true,
+      user,
+      memberships,
+      organizationId: user.team_id,
+      isSuper: user.role === "ADMIN",
+      adminDeptIds: memberships.filter((m) => m.membership_role === domain.MEMBERSHIP_ROLE.DEPARTMENT_ADMIN).map((m) => m.department_id),
+      departmentIds: memberships.map((m) => m.department_id),
+    };
+  }
+
   #governanceGate(context, action) {
     const appId = context?.appId || "resource-library";
     let prepared = this.#prepare(context, { appId });
@@ -795,6 +819,64 @@ class AuthorizationService {
       this.store.deleteDepartmentGrantsForResource(resourceId, oldCollectionId);
     });
     this.#audit({ prepared, resource, action: "resource.reparent", decision: DECISION.ALLOW, reasonCode: "ALLOW", departmentId: dept.id, oldPermissions: [resource.department_id || ""], newPermissions: [dept.id] });
+    return { ok: true, resource: this.#safeMetadata(this.store.resourceById(resourceId)) };
+  }
+
+  /**
+   * D3-04D：Resource Scope 治理（PERSONAL / DEPARTMENT / ORGANIZATION 互转）。
+   *
+   * - Super Admin 或拥有 resource.manageAccess 的 manager 可执行；
+   * - 变更后**旧 Department 继承权限立即移除**（下一请求重新计算）；
+   * - 显式 USER / APP grant 保留，由 D3-02 的冻结规则重新求值（按 scope 边界判断是否仍合法）。
+   */
+  changeResourceScope({ context, resourceId, scope, departmentId = null, collectionId = null } = {}) {
+    const prepared = this.#prepare(context, context?.application || { appId: context?.appId || "resource-library" });
+    if (!prepared.ok) return { ok: false, error: externalReason(prepared.reason) };
+    const user = prepared.user;
+    const isSuper = user.role === "ADMIN";
+    const resource = this.store.resourceById(resourceId);
+    if (!resource) return { ok: false, error: REASON.NOT_FOUND_OR_FORBIDDEN };
+    const scopeCheck = domain.validateScope(scope);
+    if (!scopeCheck.ok) return { ok: false, error: REASON.INVALID_INPUT };
+    if (!isSuper) {
+      const d = this.#decide(prepared, resource, ACTION.MANAGE_ACCESS);
+      if (d.decision !== DECISION.ALLOW) return { ok: false, error: externalReason(d.reasonCode) };
+    }
+    if (scope === SCOPE.ORGANIZATION && !isSuper) return { ok: false, error: REASON.NOT_SUPER_ADMIN };
+    let targetDeptId = null;
+    if (scope === SCOPE.DEPARTMENT) {
+      const dept = this.store.departmentById(departmentId);
+      if (!dept || dept.organization_id !== user.team_id) return { ok: false, error: REASON.CROSS_DEPARTMENT_DENIED };
+      if (!isSuper) {
+        const adminDeptIds = prepared.memberships.filter((m) => m.membership_role === domain.MEMBERSHIP_ROLE.DEPARTMENT_ADMIN).map((m) => m.department_id);
+        if (!adminDeptIds.includes(dept.id)) return { ok: false, error: REASON.CROSS_DEPARTMENT_DENIED };
+      }
+      targetDeptId = dept.id;
+    }
+    if (scope === SCOPE.PERSONAL && !isSuper && resource.owner_user_id !== user.id) {
+      return { ok: false, error: REASON.NOT_FOUND_OR_FORBIDDEN };
+    }
+    const oldCollectionId = resource.collection_id;
+    this.store.transactSync(() => {
+      this.store.reparentResource(resourceId, {
+        departmentId: targetDeptId,
+        organizationId: user.team_id,
+        scope,
+        collectionId: scope === SCOPE.DEPARTMENT ? collectionId : null,
+      });
+      // 旧 Department / Collection inherited grant 不得残留（显式 USER / APP grant 不在删除范围内）。
+      this.store.deleteDepartmentGrantsForResource(resourceId, oldCollectionId || "");
+    });
+    this.#audit({
+      prepared,
+      resource,
+      action: "resource.scope.change",
+      decision: DECISION.ALLOW,
+      reasonCode: "ALLOW",
+      departmentId: targetDeptId,
+      oldPermissions: [resource.scope, resource.department_id || ""],
+      newPermissions: [scope, targetDeptId || ""],
+    });
     return { ok: true, resource: this.#safeMetadata(this.store.resourceById(resourceId)) };
   }
 

@@ -51,7 +51,7 @@ const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domai
  * 迁移按版本逐级前进，每一级各自是一个原子事务：任何一级失败只回滚该级，
  * 不会留下"user_version 已升级但表不完整"的半状态（§55）。
  */
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -647,6 +647,77 @@ CREATE INDEX idx_preview_cache_resource ON resource_preview_cache(resource_id);
 `;
 
 /** 迁移阶梯。新增 version 时把新 schema 追加在末尾，不改旧条目。 */
+/**
+ * D3-04D v7：Projects / Canvas Resource 集成。
+ *
+ * 只新增真正需要的集成表；**不建第二套 ACL**：
+ * - projects / project_members / project_resources 只表达"项目引用了哪个 ResourceRef"，
+ *   资源访问权限仍逐资源走 D3-02 Authorization。
+ * - canvas_boards / canvas_resource_nodes 保存 ResourceRef + version_mode（PIN_VERSION / FOLLOW_LATEST），
+ *   绝不保存绝对路径。
+ * 所有权转移 / 治理策略沿用 authorization_audit，不额外造表。
+ */
+const SCHEMA_V7_SQL = `
+CREATE TABLE projects (
+  id              TEXT PRIMARY KEY,
+  organization_id TEXT NOT NULL,
+  department_id   TEXT,
+  owner_user_id   TEXT NOT NULL,
+  name            TEXT NOT NULL,
+  description     TEXT NOT NULL DEFAULT '',
+  status          TEXT NOT NULL CHECK (status IN ('active','archived')) DEFAULT 'active',
+  scope           TEXT NOT NULL CHECK (scope IN ('PERSONAL','DEPARTMENT','ORGANIZATION')) DEFAULT 'PERSONAL',
+  created_at      INTEGER NOT NULL,
+  updated_at      INTEGER NOT NULL
+);
+CREATE INDEX idx_projects_org ON projects(organization_id, status);
+CREATE INDEX idx_projects_dept ON projects(department_id);
+
+CREATE TABLE project_members (
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  user_id    TEXT NOT NULL,
+  role       TEXT NOT NULL CHECK (role IN ('viewer','editor','manager')) DEFAULT 'viewer',
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (project_id, user_id)
+);
+CREATE INDEX idx_project_members_user ON project_members(user_id);
+
+CREATE TABLE project_resources (
+  project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  resource_id TEXT NOT NULL,
+  added_by    TEXT,
+  created_at  INTEGER NOT NULL,
+  PRIMARY KEY (project_id, resource_id)
+);
+CREATE INDEX idx_project_resources_resource ON project_resources(resource_id);
+
+CREATE TABLE canvas_boards (
+  id              TEXT PRIMARY KEY,
+  organization_id TEXT NOT NULL,
+  owner_user_id   TEXT NOT NULL,
+  name            TEXT NOT NULL,
+  created_at      INTEGER NOT NULL,
+  updated_at      INTEGER NOT NULL
+);
+CREATE INDEX idx_canvas_boards_org ON canvas_boards(organization_id);
+
+CREATE TABLE canvas_resource_nodes (
+  id               TEXT PRIMARY KEY,
+  board_id         TEXT NOT NULL REFERENCES canvas_boards(id) ON DELETE CASCADE,
+  resource_id      TEXT NOT NULL,
+  resource_version INTEGER NOT NULL,
+  version_mode     TEXT NOT NULL CHECK (version_mode IN ('PIN_VERSION','FOLLOW_LATEST')) DEFAULT 'PIN_VERSION',
+  x                REAL NOT NULL DEFAULT 0,
+  y                REAL NOT NULL DEFAULT 0,
+  created_by       TEXT,
+  created_at       INTEGER NOT NULL,
+  updated_at       INTEGER NOT NULL
+);
+CREATE INDEX idx_canvas_nodes_board ON canvas_resource_nodes(board_id);
+CREATE INDEX idx_canvas_nodes_resource ON canvas_resource_nodes(resource_id);
+`;
+
+/** 迁移阶梯。新增 version 时把新 schema 追加在末尾，不改旧条目。 */
 const MIGRATIONS = Object.freeze([
   { version: 1, sql: SCHEMA_SQL },
   { version: 2, sql: SCHEMA_V2_SQL },
@@ -654,6 +725,7 @@ const MIGRATIONS = Object.freeze([
   { version: 4, sql: SCHEMA_V4_SQL },
   { version: 5, sql: SCHEMA_V5_SQL },
   { version: 6, sql: SCHEMA_V6_SQL },
+  { version: 7, sql: SCHEMA_V7_SQL },
 ]);
 
 const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000; // 12h 绝对上限
@@ -1673,6 +1745,50 @@ class IdentityStore {
     return domain.ok({ user: this.userById(user.id) });
   }
 
+  /**
+   * D3-04D：Super Admin 发起的口令重置（设置一次性临时口令）。
+   *
+   * 只允许**写入**新 verifier：绝不读取/返回旧口令或 verifier。
+   * 与 changePassword 同一冻结语义：auth_version++ 且撤销该用户全部 session。
+   */
+  async adminSetPassword({ userId, newPassword } = {}) {
+    const started = this.clock();
+    const user = this.userById(userId);
+    if (!user) {
+      this.audit("admin-set-password", { result: "DENY", errorCode: ERROR.INVALID_INPUT });
+      return domain.fail(ERROR.INVALID_INPUT, "user-missing");
+    }
+    const pwCheck = passwords.validatePassword(newPassword);
+    if (!pwCheck.ok) {
+      this.audit("admin-set-password", { userId: user.id, result: "DENY", errorCode: pwCheck.error });
+      return domain.fail(pwCheck.code, pwCheck.reason);
+    }
+    let verifier;
+    try {
+      verifier = await passwords.createVerifier(newPassword);
+    } catch {
+      this.audit("admin-set-password", { userId: user.id, result: "ERROR", errorCode: ERROR.INTERNAL_ERROR });
+      return domain.fail(ERROR.INTERNAL_ERROR, "kdf-failed");
+    }
+    const now = this.clock();
+    const nextVersion = user.auth_version + 1;
+    await this.#withBusyRetry(() =>
+      this.transact(() => {
+        this.db
+          .prepare(
+            `UPDATE users SET password_algo = ?, password_params = ?, password_salt = ?, password_hash = ?,
+                              password_version = ?, auth_version = ?, updated_at = ?
+             WHERE id = ?`,
+          )
+          .run(verifier.algo, JSON.stringify(verifier.params), verifier.salt, passwords.encodeVerifier(verifier), verifier.version, nextVersion, now, user.id);
+        this.#revokeAllForUser(user.id, REVOKE_REASON.ADMIN, now);
+        return true;
+      }),
+    );
+    this.audit("admin-set-password", { userId: user.id, result: "OK", durationMs: this.clock() - started });
+    return domain.ok({ userId: user.id, authVersion: nextVersion, revokedSessions: this.sessionsOf(user.id).length });
+  }
+
   // -------------------------------------------------------------------------
   // Installation Reset（§20 / §22）
   // -------------------------------------------------------------------------
@@ -1752,6 +1868,7 @@ module.exports = {
   SCHEMA_V4_SQL,
   SCHEMA_V5_SQL,
   SCHEMA_V6_SQL,
+  SCHEMA_V7_SQL,
   MIGRATIONS,
   IdentityStore,
   DEFAULT_TTL_MS,
