@@ -5,17 +5,19 @@ import { createModelFixture } from "./model-fixtures.mjs";
 import { startFakeProvider } from "./model-fake-provider.mjs";
 
 const f = await createModelFixture();
-after(() => f.close());
+const _providers = [];
+after(async () => { for (const fp of _providers) { try { await fp.close(); } catch { /* ignore */ } } f.close(); });
 const admin = f.adminCtx();
 const ai = { sessionRef: admin.sessionRef, appId: "ai" };
-f.authService.grantAppResourcePermission({ context: admin, appId: "ai", resourceType: "model", actions: ["model.view", "model.use", "model.manage", "model.test"] });
+f.modelService.grantAppModelAccess({ context: admin, appId: "ai", actions: ["model.view", "model.use", "model.manage", "model.test"] });
 
-async function makeProvider(behavior = "success") {
+async function makeProvider(behavior = "success", scope = "PERSONAL") {
   const fp = await startFakeProvider({ behavior, secretEcho: "FAKE_PROVIDER_SECRET_998877" });
-  const p = f.modelService.createProvider({ context: ai, displayName: "Fake", baseUrl: fp.baseUrl, allowLan: false, credentialSecret: "FAKE_PROVIDER_SECRET_998877" });
+  _providers.push(fp);
+  const p = f.modelService.createProvider({ context: ai, displayName: "Fake-" + scope, baseUrl: fp.baseUrl, allowLan: false, scope, credentialSecret: "FAKE_PROVIDER_SECRET_998877" });
   assert.equal(p.ok, true, JSON.stringify(p));
-  const m = f.modelService.createModel({ context: ai, providerId: p.provider.providerId, remoteModelId: "fake-1", capabilities: ["chat", "tool-calling"] });
-  assert.equal(m.ok, true);
+  const m = f.modelService.createModel({ context: ai, providerId: p.provider.providerId, remoteModelId: "fake-1", capabilities: ["chat", "tool-calling"], scope });
+  assert.equal(m.ok, true, JSON.stringify(m));
   return { fp, providerId: p.provider.providerId, configId: m.model.configId };
 }
 
@@ -132,23 +134,24 @@ test("Authorization：App ∩ User；disable App / disable User / provider disab
 });
 
 test("Resolution：Personal 优先于 Team；显式 Personal 失败不 fallback", async () => {
-  const { fp: fpA, configId: cA } = await makeProvider("success");
-  const { fp: fpB, configId: cB } = await makeProvider("success");
+  const { configId: cA } = await makeProvider("success", "PERSONAL");
+  const { configId: cB } = await makeProvider("success", "ORGANIZATION");
   f.modelService.setDefault({ context: ai, capability: "chat", configId: cB, scope: "ORGANIZATION" });
   f.modelService.setDefault({ context: ai, capability: "chat", configId: cA, scope: "PERSONAL" });
   const personal = f.modelService.resolveModel({ context: ai, capability: "chat" });
+  assert.equal(personal.ok, true, "personal resolve: " + JSON.stringify(personal));
   assert.equal(personal.snapshot.modelConfigId, cA);
   assert.equal(personal.snapshot.source, "PERSONAL_DEFAULT");
   // 另一个用户解析到 Organization default
   const dana = { ...f.ctx("dana"), appId: "ai" };
   const org = f.modelService.resolveModel({ context: dana, capability: "chat" });
+  assert.equal(org.ok, true, "org resolve: " + JSON.stringify(org));
   assert.equal(org.snapshot.modelConfigId, cB);
   assert.equal(org.snapshot.source, "ORGANIZATION_DEFAULT");
   // 显式 personal config 的 credential 删除后不 fallback
-  const provA = f.modelStore.providerById(fpA.baseUrl ? f.modelStore.providerById(personal.snapshot.providerId).provider_id : null);
+  const provA = f.modelStore.providerById(f.modelStore.configById(cA).provider_id);
   f.modelService.deleteCredential({ credentialRef: provA.credential_ref });
   assert.equal((await f.modelService.chat({ context: ai, configId: cA, messages: [] })).error, "CREDENTIAL_MISSING");
-  // capability 未验证/未声明
+  // 未声明 capability 不可解析
   assert.equal(f.modelService.resolveModel({ context: ai, capability: "embedding" }).error, "MODEL_CONFIG_UNAVAILABLE");
-  await fpA.close(); await fpB.close();
 });

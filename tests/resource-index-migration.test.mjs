@@ -12,6 +12,7 @@ const { DatabaseSync } = require("node:sqlite");
 
 const V6_TABLES = ["resource_search_docs", "resource_search_fts", "resource_index_jobs", "resource_preview_cache"];
 const V7_TABLES = ["projects", "project_members", "project_resources", "canvas_boards", "canvas_resource_nodes"];
+const V8_TABLES = ["model_providers", "model_configs", "model_defaults", "model_credentials", "model_call_records"];
 const hasTable = (db, name) => !!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(name);
 const isVirtual = (db, name) => String(db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(name)?.sql || "").includes("VIRTUAL TABLE");
 
@@ -36,7 +37,7 @@ async function makeV5Db() {
   fx.identity.close();
 
   const raw = new DatabaseSync(dbPath);
-  for (const t of [...V6_TABLES, ...V7_TABLES]) raw.exec("DROP TABLE IF EXISTS " + t);
+  for (const t of [...V6_TABLES, ...V7_TABLES, ...V8_TABLES]) raw.exec("DROP TABLE IF EXISTS " + t);
   raw.exec("PRAGMA user_version = 5");
   assert.equal(raw.prepare("PRAGMA user_version").get().user_version, 5);
   assert.equal(hasTable(raw, "resource_search_docs"), false);
@@ -50,7 +51,7 @@ test("v5 -> v6：派生表建立，FTS 为 virtual table，资源可重新索引
     cleanups.push(root);
     const reopened = reopenResourceRuntime({ dbPath, storeRoot });
     assert.equal(reopened.identity.schemaVersion, SCHEMA_VERSION);
-    for (const t of [...V6_TABLES, ...V7_TABLES]) assert.equal(hasTable(reopened.identity.connection, t), true, t + " 应存在");
+    for (const t of [...V6_TABLES, ...V7_TABLES, ...V8_TABLES]) assert.equal(hasTable(reopened.identity.connection, t), true, t + " 应存在");
     assert.equal(isVirtual(reopened.identity.connection, "resource_search_fts"), true, "FTS 必须是 virtual table");
 
     const login = await reopened.identity.login({ identifier: "alice@openarc.test", password: pw("alice") });
@@ -78,14 +79,14 @@ test("v5 -> v6 迁移失败 -> 整级回滚：user_version 保持 5 且派生表
 
     const raw = new DatabaseSync(dbPath);
     assert.equal(raw.prepare("PRAGMA user_version").get().user_version, 5);
-    for (const t of [...V6_TABLES, ...V7_TABLES]) assert.equal(hasTable(raw, t), false, t + " 不应存在");
+    for (const t of [...V6_TABLES, ...V7_TABLES, ...V8_TABLES]) assert.equal(hasTable(raw, t), false, t + " 不应存在");
     assert.equal(raw.prepare("SELECT COUNT(*) AS c FROM users").get().c, snapshot.users);
     assert.equal(raw.prepare("SELECT COUNT(*) AS c FROM resource_registry").get().c, snapshot.resources);
     raw.close();
 
     const ok = reopenResourceRuntime({ dbPath, storeRoot });
     assert.equal(ok.identity.schemaVersion, SCHEMA_VERSION);
-    for (const t of [...V6_TABLES, ...V7_TABLES]) assert.equal(hasTable(ok.identity.connection, t), true);
+    for (const t of [...V6_TABLES, ...V7_TABLES, ...V8_TABLES]) assert.equal(hasTable(ok.identity.connection, t), true);
     ok.identity.close();
   })();
 });

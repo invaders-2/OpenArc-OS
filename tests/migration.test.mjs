@@ -38,11 +38,11 @@ async function seedV1(dbPath) {
   return { instId, teamId, userId };
 }
 
-test("schema 版本已推进到 v7（D3-04D 在 v6 之上追加 Projects / Canvas 集成表）", () => {
-  assert.equal(SCHEMA_VERSION, 7);
+test("schema 版本已推进到 v8（D4-01 在 v7 之上追加 Model Provider / Config / Credential metadata）", () => {
+  assert.equal(SCHEMA_VERSION, 8);
 });
 
-test("全新数据库直接建到 v7，identity login 成立（v2 + v3 + v4 + v5 + v6 + v7 表都在）", async () => {
+test("全新数据库直接建到 v8，identity login 成立", async () => {
   const { dir, dbPath } = tempDbPath();
   try {
     const store = new IdentityStore({ path: dbPath }).open();
@@ -69,6 +69,9 @@ test("全新数据库直接建到 v7，identity login 成立（v2 + v3 + v4 + v5
     }
     for (const t of ["projects", "project_members", "project_resources", "canvas_boards", "canvas_resource_nodes"]) {
       assert.ok(hasTable(store.connection, t), "缺少 v7 表 " + t);
+    }
+    for (const t of ["model_providers", "model_configs", "model_defaults", "model_credentials", "model_call_records"]) {
+      assert.ok(hasTable(store.connection, t), "缺少 v8 表 " + t);
     }
     const init = await store.initialize({ identifier: ADMIN_ID, password: ADMIN_PW, displayName: "Admin" });
     assert.equal(init.ok, true);
@@ -156,6 +159,7 @@ test("v3 级迁移失败 → user_version 停在 2，设备表不残留（§55 �
     const raw = new DatabaseSync(dbPath);
     raw.exec("DROP TABLE resource_search_fts; DROP TABLE resource_search_docs; DROP TABLE resource_index_jobs; DROP TABLE resource_preview_cache;");
     raw.exec("DROP TABLE project_members; DROP TABLE project_resources; DROP TABLE projects; DROP TABLE canvas_resource_nodes; DROP TABLE canvas_boards;");
+    raw.exec("DROP TABLE model_call_records; DROP TABLE model_credentials; DROP TABLE model_defaults; DROP TABLE model_configs; DROP TABLE model_providers;");
     raw.exec("DROP TABLE resource_recent; DROP TABLE resource_favorites; DROP TABLE resource_tags; DROP TABLE tags;");
     raw.exec("ALTER TABLE library_resources DROP COLUMN memory_subtype; ALTER TABLE library_resources DROP COLUMN language; ALTER TABLE library_resources DROP COLUMN attributes;");
     raw.exec("DROP TABLE resource_relations; DROP TABLE resource_versions; DROP TABLE library_resources; DROP TABLE resource_import_jobs; DROP TABLE content_objects;");
