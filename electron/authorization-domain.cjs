@@ -168,6 +168,28 @@ const ACTION = Object.freeze({
 const RESOURCE_ACTIONS = Object.freeze(Object.values(ACTION));
 
 /**
+ * D4-03A · Tool 权限 namespace。与 resource.action 同级，**复用同一 App Principal /
+ * App Grant / AuthorizationService**，不是第二权限系统。
+ *
+ * tool action 有意不被 grantActions() 收集，因此不会参与 Resource 求值、不会意外提权 Resource。
+ */
+const TOOL_ACTION = Object.freeze({
+  TEST_ECHO: "tool.test.echo",
+  RESOURCE_READ_METADATA: "tool.resource.readMetadata",
+});
+const TOOL_ACTIONS = Object.freeze(Object.values(TOOL_ACTION));
+function isToolAction(action) { return TOOL_ACTIONS.includes(String(action)); }
+/** 从 App Grant 的 actions 中只提取 tool actions。*/
+function toolGrantActions(grant) {
+  if (!grant) return [];
+  const raw = grant.actions;
+  const list = Array.isArray(raw)
+    ? raw
+    : (() => { try { const p = JSON.parse(raw || "[]"); return Array.isArray(p) ? p : []; } catch { return []; } })();
+  return list.filter((a) => TOOL_ACTIONS.includes(a));
+}
+
+/**
  * Permission Set 只是**动作集合的命名映射**。
  *
  * 有意把 resource.useByAgent **排除在所有常规集合之外**：Agent 使用必须单独授予，
@@ -296,6 +318,8 @@ const REASON = Object.freeze({
   APP_UNKNOWN: "APP_UNKNOWN",
   APP_DISABLED: "APP_DISABLED",
   APP_ACTION_NOT_GRANTED: "APP_ACTION_NOT_GRANTED",
+  APP_TOOL_NOT_GRANTED: "APP_TOOL_NOT_GRANTED",
+  TOOL_ACTION_UNKNOWN: "TOOL_ACTION_UNKNOWN",
   APP_PERMISSION_UPGRADE_REQUIRES_APPROVAL: "APP_PERMISSION_UPGRADE_REQUIRES_APPROVAL",
   RESOURCE_NOT_FOUND: "RESOURCE_NOT_FOUND",
   RESOURCE_NOT_AVAILABLE: "RESOURCE_NOT_AVAILABLE",
@@ -702,6 +726,10 @@ module.exports = {
   SENSITIVE_RESOURCE_TYPES,
   ACTION,
   RESOURCE_ACTIONS,
+  TOOL_ACTION,
+  TOOL_ACTIONS,
+  isToolAction,
+  toolGrantActions,
   PERMISSION_SET,
   PERMISSION_SET_NAMES,
   OWNER_ACTIONS,

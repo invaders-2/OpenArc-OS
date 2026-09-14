@@ -236,7 +236,14 @@ class HarnessAdapter {
     const ev = { type: raw, at: this.clock(), raw };
     if (raw === "agent_message_chunk" && u.content && typeof u.content.text === "string") { ev.type = "text.delta"; ev.text = u.content.text; }
     else if (raw === "agent_thought_chunk" && u.content && typeof u.content.text === "string") { ev.type = "reasoning.delta"; ev.text = u.content.text; }
-    else if (raw === "tool_call" || raw === "tool_call_update") { ev.type = "tool.proposed"; ev.toolCallId = u.toolCallId || null; }
+    else if (raw === "tool_call" || raw === "tool_call_update") {
+      ev.type = "tool.proposed";
+      ev.toolCallId = u.toolCallId || null;
+      // OpenArc 测试约定：toolId 走 ACP title，version/arguments 走 rawInput。原始 rawInput 只交给 Tool Proxy，不落 TaskEvent。
+      ev.title = typeof u.title === "string" ? u.title.slice(0, 160) : null;
+      ev.kind = u.kind || null;
+      ev.rawInput = u.rawInput && typeof u.rawInput === "object" ? u.rawInput : null;
+    }
     else if (raw === "plan") { ev.type = "plan"; }
     else if (raw === "usage_update") { ev.type = "usage"; ev.usage = u.usage || null; }
     this.events.push(ev);

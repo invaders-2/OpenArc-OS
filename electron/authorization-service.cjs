@@ -341,6 +341,55 @@ class AuthorizationService {
   }
 
   // -------------------------------------------------------------------------
+  // Tool permission（D4-03A）
+  // -------------------------------------------------------------------------
+
+  /**
+   * Tool 权限：与 Resource action 同级，仍复用 Session Gate + App Principal + App Grant。
+   * 只检查 App Principal 的 TOOL-scope grant；不建第二权限系统。
+   */
+  authorizeTool({ context, action, application } = {}) {
+    const act = String(action || "");
+    const prepared = this.#prepare(context, application || { appId: context && context.appId });
+    const base = {
+      policyVersion: POLICY_VERSION,
+      action: act,
+      appId: prepared.app?.app_id ?? null,
+      userId: prepared.user?.id ?? null,
+      requestId: prepared.requestId ?? null,
+      source: prepared.source ?? domain.SOURCE.MANUAL,
+      challenge: prepared.challenge || null,
+    };
+    if (!domain.TOOL_ACTIONS.includes(act)) {
+      return { ...base, decision: DECISION.DENY, reasonCode: REASON.TOOL_ACTION_UNKNOWN, effectivePermissions: [], appActions: [], allowSources: [] };
+    }
+    if (!prepared.ok) {
+      this.#audit({ prepared, resource: null, action: act, decision: DECISION.DENY, reasonCode: prepared.reason });
+      return { ...base, decision: DECISION.DENY, reasonCode: externalReason(prepared.reason), effectivePermissions: [], appActions: [], allowSources: [], challenge: prepared.challenge || null };
+    }
+    const appActions = new Set();
+    for (const grant of prepared.appGrants || []) for (const a of domain.toolGrantActions(grant)) appActions.add(a);
+    const allowed = appActions.has(act);
+    const allowSources = allowed ? [ALLOW_SOURCE.APP_GRANT] : [];
+    this.#audit({ prepared, resource: null, action: act, decision: allowed ? DECISION.ALLOW : DECISION.DENY, reasonCode: allowed ? "ALLOW" : REASON.APP_TOOL_NOT_GRANTED, allowSources });
+    return { ...base, decision: allowed ? DECISION.ALLOW : DECISION.DENY, reasonCode: allowed ? "ALLOW" : REASON.APP_TOOL_NOT_GRANTED, effectivePermissions: [...appActions].sort(), appActions: [...appActions].sort(), allowSources };
+  }
+
+  /** 授予 App Principal Tool 权限（仅 Super Admin；写入同一 app_resource_grants，scope=TOOL）。*/
+  grantAppToolPermission({ context, appId, actions = [], expiresAt = null } = {}) {
+    const prepared = this.#prepare(context, { appId });
+    if (!prepared.ok) return { ok: false, error: externalReason(prepared.reason) };
+    if (prepared.user.role !== "ADMIN") return { ok: false, error: REASON.NOT_SUPER_ADMIN };
+    const list = (Array.isArray(actions) ? actions : [actions]).map((a) => String(a)).filter((a) => domain.TOOL_ACTIONS.includes(a));
+    if (!list.length) return { ok: false, error: REASON.INVALID_INPUT };
+    const app = this.store.appById(appId);
+    if (!app) return { ok: false, error: REASON.NOT_FOUND_OR_FORBIDDEN };
+    const res = this.store.transactSync(() => this.store.upsertAppGrant({ appId, scope: "TOOL", resourceType: "tool", actions: list, grantedBy: prepared.user.id, organizationId: prepared.user.team_id, expiresAt }));
+    this.#audit({ prepared, resource: null, action: "tool.grant", decision: DECISION.ALLOW, reasonCode: "ALLOW", allowSources: [ALLOW_SOURCE.SUPER_ADMIN] });
+    return { ok: true, grant: { grantId: res.grant.id, appId, actions: list, scope: "TOOL" } };
+  }
+
+  // -------------------------------------------------------------------------
   // getCapabilities()（§61）
   // -------------------------------------------------------------------------
 

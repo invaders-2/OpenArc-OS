@@ -466,6 +466,35 @@ class TaskService {
     });
   }
 
+  /** D4-03A：Tool 需要审批 → Step BLOCKED + Task WAITING（比 BLOCKED 语义更准确）。*/
+  waitForApproval({ context, taskId, stepId, runId = null, reason = null, expectedRevision } = {}) {
+    const guard = this.#guard(context);
+    if (!guard.ok) return guard;
+    return this.store.transactSync(() => {
+      const load = this.#load(guard, taskId);
+      if (!load.ok) return load;
+      const task = load.task;
+      const conflict = this.#conflict(task, expectedRevision);
+      if (conflict) return conflict;
+      const step = this.store.stepById(stepId);
+      if (!step || step.task_id !== task.task_id) return { ok: false, error: ERROR.TASK_NOT_FOUND };
+      const now = this.#now();
+      let updatedStep = step;
+      if (step.status === STEP_STATUS.BLOCKED) { /* idempotent */ }
+      else if (canTransitionStep(step.status, STEP_STATUS.BLOCKED)) updatedStep = this.store.updateStep(step.step_id, { status: STEP_STATUS.BLOCKED, completed_at: now });
+      else return { ok: false, error: ERROR.TASK_INVALID_STATE, from: step.status, to: STEP_STATUS.BLOCKED };
+      this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.TOOL_APPROVAL_REQUIRED, safePayload: sanitizeEventPayload({ stepId: step.step_id, runId, reason }), at: now });
+      this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.STEP_BLOCKED, safePayload: sanitizeEventPayload({ stepId: step.step_id, reason }), at: now });
+      const taskPatch = { updated_at: now, revision: task.revision + 1 };
+      if (task.current_step_id === step.step_id) taskPatch.current_step_id = null;
+      let waiting = false;
+      if (canTransitionTask(task.status, TASK_STATUS.WAITING)) { taskPatch.status = TASK_STATUS.WAITING; waiting = true; }
+      const updatedTask = this.store.updateTask(task.task_id, taskPatch);
+      if (waiting) this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.TASK_WAITING, safePayload: sanitizeEventPayload({ reason, stepId: step.step_id }), at: now });
+      return { ok: true, step: safeStep(updatedStep), task: safeTask(updatedTask) };
+    });
+  }
+
   /** 两阶段 cancel：先持久 cancel_requested=1（供 race 判定），再 finalize。*/
   requestCancel({ context, taskId, expectedRevision } = {}) {
     const guard = this.#guard(context);

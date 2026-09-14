@@ -51,7 +51,7 @@ const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domai
  * 迁移按版本逐级前进，每一级各自是一个原子事务：任何一级失败只回滚该级，
  * 不会留下"user_version 已升级但表不完整"的半状态（§55）。
  */
-const SCHEMA_VERSION = 10;
+const SCHEMA_VERSION = 11;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -922,6 +922,41 @@ CREATE TABLE task_verifications (
 CREATE INDEX idx_task_verifications_task ON task_verifications(task_id, created_at);
 `;
 
+/**
+ * v11（D4-03A）· Controlled Tool Proxy 持久化。
+ *
+ * task_tool_proposals 只存安全 projection + arguments_hash，**绝不存完整 raw arguments /
+ * credential / absolute path**；tool_decisions 每个 proposal 至多一条（§39 幂等）。
+ * 无 tool_executions —— D4-03A 不存在真实执行。
+ */
+const SCHEMA_V11_SQL = `
+CREATE TABLE task_tool_proposals (
+  proposal_id     TEXT PRIMARY KEY,
+  task_id         TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
+  step_id         TEXT,
+  run_id          TEXT,
+  tool_id         TEXT NOT NULL,
+  tool_version    INTEGER NOT NULL,
+  arguments_safe  TEXT,
+  arguments_hash  TEXT,
+  status          TEXT NOT NULL CHECK (status IN ('PROPOSED','VALIDATED','DENIED','APPROVAL_REQUIRED','INVALID','BLOCKED')),
+  created_at      INTEGER NOT NULL
+);
+CREATE INDEX idx_task_tool_proposals_task ON task_tool_proposals(task_id, created_at);
+
+CREATE TABLE tool_decisions (
+  decision_id        TEXT PRIMARY KEY,
+  proposal_id        TEXT NOT NULL REFERENCES task_tool_proposals(proposal_id) ON DELETE CASCADE,
+  decision           TEXT NOT NULL CHECK (decision IN ('ALLOWED','DENIED','APPROVAL_REQUIRED','INVALID','BLOCKED')),
+  reason_code        TEXT,
+  risk_class         TEXT,
+  approval_required  INTEGER NOT NULL DEFAULT 0,
+  created_at         INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX idx_tool_decisions_proposal ON tool_decisions(proposal_id);
+CREATE INDEX idx_tool_decisions_decision ON tool_decisions(decision, created_at);
+`;
+
 const MIGRATIONS = Object.freeze([
   { version: 1, sql: SCHEMA_SQL },
   { version: 2, sql: SCHEMA_V2_SQL },
@@ -933,6 +968,7 @@ const MIGRATIONS = Object.freeze([
   { version: 8, sql: SCHEMA_V8_SQL },
   { version: 9, sql: SCHEMA_V9_SQL },
   { version: 10, sql: SCHEMA_V10_SQL },
+  { version: 11, sql: SCHEMA_V11_SQL },
 ]);
 
 const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000; // 12h 绝对上限

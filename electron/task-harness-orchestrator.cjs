@@ -88,10 +88,12 @@ function classifyHarnessError(e) {
 }
 
 class TaskHarnessOrchestrator {
-  constructor({ taskService, adapterFactory = null, clock = null, logger = null, turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS, startTimeoutMs = DEFAULT_START_TIMEOUT_MS, maxPersistedHarnessEvents = DEFAULT_MAX_PERSISTED_EVENTS } = {}) {
+  constructor({ taskService, adapterFactory = null, toolProxy = null, clock = null, logger = null, turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS, startTimeoutMs = DEFAULT_START_TIMEOUT_MS, maxPersistedHarnessEvents = DEFAULT_MAX_PERSISTED_EVENTS } = {}) {
     if (!taskService) throw new Error("TaskHarnessOrchestrator 需要 TaskService");
     this.taskService = taskService;
     this.adapterFactory = adapterFactory;
+    // D4-03A：可选 Controlled Tool Proxy。无 proxy 时 tool proposal 仍 0 执行。
+    this.toolProxy = toolProxy;
     this.clock = typeof clock === "function" ? clock : () => Date.now();
     this.logger = logger;
     this.turnTimeoutMs = turnTimeoutMs;
@@ -188,11 +190,30 @@ class TaskHarnessOrchestrator {
       const cancelled = (latest.ok && latest.task.cancelRequested) || res.stopReason === "cancelled";
       if (cancelled) return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: task.revision });
 
-      // §71 Tool proposal：0 execute，Step BLOCKED（绝不 SUCCEEDED）。
+      // §71/§19 Tool proposal：进入 Controlled Tool Proxy（Registry→Authorization→Decision）；
+      // 本阶段 execute() = forbidden，绝不执行。
       if (hasTool) {
         await this.#recordEvents({ context, taskId, runId: run.runId, events: mapped.events, expectedRevision: task.revision, task });
         const fresh = svc.getTask({ context, taskId });
-        return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: ERROR.TOOL_EXECUTION_NOT_AVAILABLE, event: TASK_EVENT.HARNESS_TOOL_PROPOSED, expectedRevision: (fresh.ok ? fresh.task.revision : task.revision), alreadyRecorded: true });
+        const rev = fresh.ok ? fresh.task.revision : task.revision;
+        if (!this.toolProxy) {
+          return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: ERROR.TOOL_EXECUTION_NOT_AVAILABLE, event: TASK_EVENT.HARNESS_TOOL_PROPOSED, expectedRevision: rev, alreadyRecorded: true });
+        }
+        const toolEvent = rawEvents.find((e) => e && e.type === "tool.proposed") || {};
+        const spec = this.#toolSpec(toolEvent);
+        const decision = this.toolProxy.propose({ context, taskId, stepId, runId: run.runId, toolId: spec.toolId, toolVersion: spec.toolVersion, arguments: spec.arguments, proposalId: spec.proposalId });
+        const decisionStatus = decision && decision.decisionStatus ? decision.decisionStatus : "BLOCKED";
+        const reasonCode = decision && decision.reasonCode ? decision.reasonCode : ERROR.TOOL_FORBIDDEN;
+        const toolEvents = [{ eventType: TASK_EVENT.TOOL_PROPOSED, safePayload: { toolId: spec.toolId, toolVersion: spec.toolVersion, proposalId: decision?.proposal?.proposalId || null } },
+          { eventType: decisionStatus === "APPROVAL_REQUIRED" ? TASK_EVENT.TOOL_APPROVAL_REQUIRED : decisionStatus === "ALLOWED" ? TASK_EVENT.TOOL_VALIDATED : decisionStatus === "DENIED" || decisionStatus === "INVALID" ? TASK_EVENT.TOOL_DENIED : TASK_EVENT.TOOL_EXECUTION_BLOCKED, safePayload: { proposalId: decision?.proposal?.proposalId || null, decision: decisionStatus, reasonCode, riskClass: decision?.decision?.riskClass || null } }];
+        await this.#recordEvents({ context, taskId, runId: run.runId, events: toolEvents, expectedRevision: rev });
+        const fresh2 = svc.getTask({ context, taskId });
+        const rev2 = fresh2.ok ? fresh2.task.revision : rev;
+        if (decisionStatus === "APPROVAL_REQUIRED") {
+          return await this.#waitForApproval({ context, taskId, stepId, runId: run.runId, reason: reasonCode, expectedRevision: rev2 });
+        }
+        const reason = decisionStatus === "ALLOWED" ? ERROR.TOOL_EXECUTION_NOT_AVAILABLE : reasonCode;
+        return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason, event: TASK_EVENT.TOOL_EXECUTION_BLOCKED, expectedRevision: rev2, alreadyRecorded: true });
       }
       // §22/§72 Permission request：一律 reject，Step BLOCKED。
       if (hasPermission) {
@@ -261,6 +282,24 @@ class TaskHarnessOrchestrator {
     }
     if (!text || !text.trim()) return { ok: false, type: VERIFICATION_TYPE.SCHEMA_VALID, detail: { reason: "EMPTY_RESULT" } };
     return { ok: true, type: VERIFICATION_TYPE.SCHEMA_VALID };
+  }
+
+  /** 从 ACP tool.proposed event 抽取 OpenArc 合同字段（测试约定：title=toolId，rawInput={ toolVersion, arguments }）。*/
+  #toolSpec(ev) {
+    const raw = ev && ev.rawInput && typeof ev.rawInput === "object" ? ev.rawInput : {};
+    const toolId = String((ev && (ev.toolId || ev.title)) || "").trim();
+    const toolVersion = Number(raw.toolVersion != null ? raw.toolVersion : (ev && ev.toolVersion != null ? ev.toolVersion : 1));
+    const toolArguments = raw.arguments && typeof raw.arguments === "object" ? raw.arguments : (raw.args && typeof raw.args === "object" ? raw.args : raw);
+    return { toolId, toolVersion, arguments: toolArguments, proposalId: (ev && ev.toolCallId) || null };
+  }
+
+  /** Tool 需要审批：Step BLOCKED + Task WAITING（reason 冻结 = TOOL_APPROVAL_REQUIRED）。*/
+  async #waitForApproval({ context, taskId, stepId, runId, reason, expectedRevision }) {
+    const svc = this.#service();
+    const waited = svc.waitForApproval({ context, taskId, stepId, runId, reason, expectedRevision });
+    if (!waited.ok) return waited;
+    const runApproval = svc.blockHarnessRun({ context, taskId, runId, errorCode: reason, stopReason: "approval_required", expectedRevision: waited.task.revision });
+    return { ok: false, error: reason, approvalRequired: true, step: waited.step, task: runApproval.ok ? runApproval.task : waited.task, run: runApproval.ok ? runApproval.run : null };
   }
 
   async #recordEvents({ context, taskId, runId, events, expectedRevision }) {
