@@ -1040,9 +1040,19 @@ class AuthorizationService {
     const grant = this.store.resourceGrantById(grantId);
     if (!grant) return { ok: true, changed: false, reasonCode: REASON.NO_CHANGE };
     if (!isSuper) {
-      const scopedDept = grant.department_id || (grant.resource_id ? this.store.resourceById(grant.resource_id)?.department_id : null);
-      if (!scopedDept || !adminDeptIds.includes(scopedDept)) return { ok: false, error: REASON.CROSS_DEPARTMENT_DENIED };
-      if (grant.principal_type === PRINCIPAL.DEPARTMENT && grant.principal_id !== scopedDept && !adminDeptIds.includes(grant.principal_id)) {
+      const resource = grant.resource_id ? this.store.resourceById(grant.resource_id) : null;
+      // D3-05 修复：**资源 owner** 或拥有该资源 resource.manageAccess 的 manager 可以撤销授权，
+      // 包括 PERSONAL 资源（原先只按 department 判断，导致 owner 撤不掉自己个人资源的显式授权）。
+      const isOwner = !!(resource && resource.owner_user_id === user.id);
+      let canManage = isOwner;
+      if (!canManage && resource) {
+        const d = this.#decide(prepared, resource, ACTION.MANAGE_ACCESS);
+        canManage = d.decision === DECISION.ALLOW;
+      }
+      const scopedDept = grant.department_id || (resource ? resource.department_id : null);
+      const isDeptAdminForScope = !!scopedDept && adminDeptIds.includes(scopedDept);
+      if (!canManage && !isDeptAdminForScope) return { ok: false, error: REASON.CROSS_DEPARTMENT_DENIED };
+      if (grant.principal_type === PRINCIPAL.DEPARTMENT && scopedDept && grant.principal_id !== scopedDept && !adminDeptIds.includes(grant.principal_id) && !canManage) {
         return { ok: false, error: REASON.CROSS_DEPARTMENT_DENIED };
       }
     }

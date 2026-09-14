@@ -4,11 +4,11 @@
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { createFixture } from "./authorization-fixtures.mjs";
+import { createFixture, pw } from "./authorization-fixtures.mjs";
 
 const f = await createFixture();
 after(() => f.close());
-const { svc, ctx, resources, domain } = f;
+const { svc, ctx, resources, domain, sessions } = f;
 
 test("valid user + allowed action → ALLOW", () => {
   const r = svc.authorize({ context: ctx("erin", "resource-library"), action: domain.ACTION.READ, resource: resources.designHero.resourceId });
@@ -44,12 +44,17 @@ test("missing sessionRef → DENY", () => {
   assert.equal(r.decision, "DENY");
 });
 
-test("disabled user → DENY USER_DISABLED", () => {
+test("disabled user → DENY USER_DISABLED；Re-enable 后旧 session 失效（D3-05 §9）", async () => {
   f.identity.setUserStatus(f.created.erin, "DISABLED");
   const r = svc.authorize({ context: ctx("erin", "resource-library"), action: domain.ACTION.READ, resource: resources.designHero.resourceId });
   assert.equal(r.decision, "DENY");
   assert.equal(r.reasonCode, "USER_DISABLED");
   f.identity.setUserStatus(f.created.erin, "ACTIVE");
+  // D3-05：Re-enable 不静默恢复旧 session —— 必须重新登录
+  assert.equal(f.identity.validateSession(sessions.erin, { sensitive: true }).ok, false);
+  const relogin = await f.identity.login({ identifier: "erin@openarc.test", password: pw("erin") });
+  assert.equal(relogin.ok, true);
+  sessions.erin = relogin.session.ref;
 });
 
 test("unknown app → DENY APP_UNKNOWN；缺 appId → DENY APP_REQUIRED", () => {

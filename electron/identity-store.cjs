@@ -1736,7 +1736,18 @@ class IdentityStore {
       this.audit("set-user-status", { result: "DENY", errorCode: ERROR.INVALID_INPUT });
       return domain.fail(ERROR.INVALID_INPUT, "user-missing");
     }
-    this.db.prepare("UPDATE users SET status = ?, updated_at = ? WHERE id = ?").run(status, this.clock(), user.id);
+    const now = this.clock();
+    const reEnabling = user.status === USER_STATUS.DISABLED && status === USER_STATUS.ACTIVE;
+    this.transactSync(() => {
+      this.db.prepare("UPDATE users SET status = ?, updated_at = ? WHERE id = ?").run(status, now, user.id);
+      if (reEnabling) {
+        // D3-05 §9：Re-enable **不得静默恢复旧 session**。
+        // 停用期间保留 session 行（这样错误码是 USER_DISABLED 而不是 SESSION_REVOKED）；
+        // 但重新启用时抬高 authVersion 并撤销全部旧 session，用户必须重新认证。
+        this.db.prepare("UPDATE users SET auth_version = auth_version + 1, updated_at = ? WHERE id = ?").run(now, user.id);
+        this.#revokeAllForUser(user.id, REVOKE_REASON.ADMIN, now);
+      }
+    });
     this.audit("set-user-status", {
       userId: user.id,
       result: "OK",
