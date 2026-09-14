@@ -1,0 +1,5 @@
+{
+  "name": "model-secret-ui-probe",
+  "private": true,
+  "main": "main.cjs"
+}
