@@ -664,6 +664,54 @@ Windows（Credential Backend / Proxy Runtime / Firewall / Settings UI）NOT VERI
 
 ---
 
+# D4-02 当前状态（唯一口径 · 2026-09-15）
+
+## 1. Task Status
+
+| 口径 | Task Status | 说明 |
+|---|---|---|
+| **D4-02A Task Domain / Persistent Authority** | **PASS** | schema v9：tasks/task_steps/task_model_calls/task_events；显式状态机 + revision 乐观并发 + append-only events（与 state 同一事务）；D3 授权 + owner+app 隔离；model snapshot 冻结 + `MODEL_CONFIG_CHANGED`；cancel 持久化；重启 RUNNING→BLOCKED/`RECOVERY_REQUIRED`；AUTO_RETRY=0；tool execution=0 |
+| **D4-02B ACP Harness Adapter** | **NOT STARTED** | 下一阶段 |
+| **D4-02 overall** | **PARTIAL** | A PASS；B 未开始 |
+| **D4-03 Controlled Tool Proxy** | **BLOCK** | 直到 D4-02 自身 PASS |
+
+## 2. 关键证据（真实执行）
+
+| 入口 | 结果 |
+|---|---|
+| test:d4-02a | **22 / 22 PASS** |
+| test:d4-01 | **59 / 59 PASS** |
+| npm test | **544 / 544 PASS** |
+| migration（含 v8→v9 + rollback） | **18 / 18 PASS** |
+| npm run build | PASS |
+| test:security（D1-05） | FAIL 0 / PARTIAL 2 / PASS 6 |
+| security-surface（D2-02 A13） | 15 / 15 PASS |
+| perf smoke（本机，非 SLA） | create100 ≈27.1ms / append1000 ≈18.5ms / load ≈0.113ms / list100 ≈0.367ms |
+
+分支 feature/d4-02-task-harness，基线 feature/d4-01-model-service @ 5afece6，未 merge main。
+ADR：docs/decisions/D4-02-task-authority.md；报告：docs/D4-02A-RESULT.md。
+
+## 3. 本轮冻结
+
+1. `OpenArc = Task Authority；Harness = Reasoning Runtime`。Harness 永不拥有 persistent queue/state/step/retry/tool/lease/permission authority。
+2. Task 状态机固定 7 个状态；终态不可变。
+3. 所有 mutation 必须带 `expectedRevision`；冲突返回 `TASK_REVISION_CONFLICT`；禁止 silent last-write-wins。
+4. state mutation 与 TaskEvent 同一事务；event sequence 每 task 严格递增。
+5. `AUTO_RETRY = 0`；`attempt = 1`；`maxAttempts = 1`。
+6. `TOOL_EXECUTION = FORBIDDEN`；D4-02A side effect execution = 0。
+7. `UNKNOWN EFFECT → VERIFY / BLOCK`：重启 RUNNING → BLOCKED / `RECOVERY_REQUIRED`，0 replay / 0 retry。
+8. 无第二套权限系统：禁止 `task_acl` / `task_role` / `task_permissions`；复用 D3 Identity/Authorization。
+
+## 4. 主要缺口
+
+D4-02B ACP Harness Adapter（NOT STARTED）；Windows NOT VERIFIED（继承 D4-01）。
+
+## 5. D4-02B 准入
+
+**CONDITIONAL GO**：ACP ONLY；`HARNESS_RAW_PROVIDER_KEY = FORBIDDEN`；Harness 只与 OpenArc Model Proxy 通信；只接收 Proxy endpoint + scoped capability + safe model snapshot；不拥有 persistent task queue/state/step/retry/tool/lease/permission authority。**D4-03 = BLOCK**。
+
+---
+
 # 历史记录（过程与失败证据，保留不删）
 
 > 以下各节按当时实际状态书写，**不作为当前口径**。当前状态以 `# D1 当前状态` 一节为准。
