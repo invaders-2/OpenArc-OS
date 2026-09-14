@@ -231,6 +231,33 @@ class ModelService {
     }
   }
 
+
+  /** Provider-neutral streaming（统一事件模型）；usage/错误归一化与 chat 一致。 */
+  async chatStream({ context, configId = null, messages = [], tools = null, params = {}, signal = null, requestId = null, capability = "chat", onEvent = () => {} } = {}) {
+    const resolved = this.resolveModel({ context, capability, configId });
+    if (!resolved.ok) return resolved;
+    const snapshot = resolved.snapshot;
+    const cred = this.credentials.resolveInternalSync({ credentialRef: snapshot.credentialRef });
+    if (!cred.ok) return { ok: false, error: domain.ERROR_CODE.CREDENTIAL_MISSING };
+    if (cred.providerOrigin !== new URL(snapshot.baseUrl).origin) return { ok: false, error: domain.ERROR_CODE.ENDPOINT_BLOCKED };
+    const start = this.#now(); const rid = requestId || "mreq_" + crypto.randomBytes(8).toString("base64url");
+    try {
+      const out = await adapter.chatStream({ baseUrl: snapshot.baseUrl, apiKey: cred.secret, model: snapshot.modelId, messages, tools, params: domain.sanitizeParams(params), signal, timeoutMs: this.timeoutMs, fetchImpl: this.fetchImpl, onEvent });
+      await this.#record({ requestId: rid, context, snapshot, startedAt: start, status: "ALLOW", usage: out.usage });
+      return { ok: true, requestId: rid, text: out.text, toolCalls: out.toolCalls, usage: out.usage, snapshot: this.#safeSnapshot(snapshot) };
+    } catch (err) {
+      let kind;
+      if (signal && signal.aborted) kind = "cancelled";
+      else if (String(err && err.name) === "PartialError") kind = "partial";
+      else if (String(err && err.name) === "TimeoutError" || String(err && err.name) === "AbortError") kind = "timeout";
+      else if (String(err && err.name) === "ProviderHttpError") { const code = domain.normalizeError({ status: err.status }); await this.#record({ requestId: rid, context, snapshot, startedAt: start, status: "DENY", errorCode: code }); return { ok: false, error: code }; }
+      else kind = "network";
+      const code = domain.normalizeError({ kind });
+      await this.#record({ requestId: rid, context, snapshot, startedAt: start, status: "ERROR", errorCode: code });
+      return { ok: false, error: code };
+    }
+  }
+
   async testConnection({ context, configId }) {
     const resolved = this.resolveModel({ context, configId, capability: "chat" });
     if (!resolved.ok) return resolved;

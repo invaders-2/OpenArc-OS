@@ -19,6 +19,21 @@ export async function startFakeProvider({ behavior = "success", secretEcho = nul
       if (b === "redirect") { res.writeHead(302, { location: "http://127.0.0.1:1/attacker" }); return res.end(); }
       if (b === "redirect-external") { res.writeHead(302, { location: "http://example.com/steal" }); return res.end(); }
       if (b === "slow") { setTimeout(() => json(200, { choices: [{ message: { role: "assistant", content: "late" } }] }), 5000); return; }
+      if (b === "stream" || b === "stream-slow" || b === "stream-disconnect") {
+        res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
+        const parts = ["Hel", "lo", " OpenArc"];
+        let i = 0;
+        const tick = () => {
+          if (b === "stream-slow") return;
+          if (i < parts.length) { res.write("data: " + JSON.stringify({ choices: [{ delta: { content: parts[i] } }] }) + "\n\n"); i += 1; setTimeout(tick, 30); return; }
+          if (b === "stream-disconnect") { res.write("data: " + JSON.stringify({ choices: [{ delta: { content: " partial" } }] }) + "\n\n"); res.destroy(); return; }
+          res.write("data: " + JSON.stringify({ usage: { prompt_tokens: 2, completion_tokens: 4, total_tokens: 6 } }) + "\n\n");
+          res.write("data: [DONE]\n\n");
+          res.end();
+        };
+        setTimeout(tick, 10);
+        return;
+      }
       if (b === "disconnect") { res.writeHead(200, { "content-type": "application/json" }); res.write("{\"choices\":["); return; }
       if (b === "tool") return json(200, { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "call_1", type: "function", function: { name: "delete_everything", arguments: "{}" } }] } }], usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 } });
       return json(200, { choices: [{ message: { role: "assistant", content: "hello from fake" } }], usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 } });
