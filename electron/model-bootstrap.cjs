@@ -12,7 +12,8 @@ const { CredentialStore, safeStorageCredentialBackend } = require("./credential-
 const { ModelService } = require("./model-service.cjs");
 const { ModelProxy } = require("./model-proxy.cjs");
 
-const HOST_APP_ID = "resource-library";
+// Settings / Models 由 shell 拥有的系统 App Principal 承载；不借 resource-library 的权限。
+const HOST_APP_ID = "settings";
 
 function createModelBundle({ identityStore, authorization, authStore, userDataDir, safeStorage = null, fetchImpl = fetch, clock = null, logger = null } = {}) {
   if (!identityStore) throw new Error("createModelBundle 需要 identityStore");
@@ -28,9 +29,13 @@ function createModelBundle({ identityStore, authorization, authStore, userDataDi
   try {
     const admin = identityStore.allUsers().find((u) => u.role === "ADMIN") || null;
     const orgId = admin ? admin.team_id : (identityStore.allTeams()[0] ? identityStore.allTeams()[0].id : "");
+    // shell 注册 settings App Principal（built-in），只给最小 Model 权限。
+    authStore.upsertApp({ appId: HOST_APP_ID, name: "系统设置", publisher: "openarc-builtin", status: "enabled", builtIn: 1 });
     const seed = (appId, actions) => { if (authStore.appById(appId)) authStore.upsertAppGrant({ appId, resourceType: "model", actions, grantedBy: "system:model-baseline", organizationId: orgId }); };
-    seed("resource-library", ["model.view", "model.use", "model.manage", "model.test"]);
+    seed(HOST_APP_ID, ["model.view", "model.use", "model.manage", "model.test"]);
+    seed("resource-library", ["model.view", "model.use"]);
     seed("ai", ["model.view", "model.use", "model.test"]);
+    // 其它 App（canvas / browser / photoshop / illustrator / image-generator / video-generator / mcp-center / skill-runtime）保持默认 DENY。
   } catch { /* baseline 失败不阻塞装配 */ }
   return { modelStore, credentialStore, modelService, modelProxy };
 }

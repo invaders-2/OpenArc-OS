@@ -9,7 +9,8 @@ const { registerModelIpc, disposeModelIpc, MODEL_COMMANDS, MODEL_COMMAND_NOT_ALL
 const f = await createModelFixture();
 after(() => f.close());
 const admin = f.adminCtx();
-f.modelService.grantAppModelAccess({ context: admin, appId: "resource-library", actions: ["model.view", "model.use", "model.manage", "model.test"] });
+f.store.upsertApp({ appId: "settings", name: "系统设置", publisher: "openarc-builtin", status: "enabled", builtIn: 1 });
+f.modelService.grantAppModelAccess({ context: admin, appId: "settings", actions: ["model.view", "model.use", "model.manage", "model.test"] });
 
 function makeIpc() {
   const handlers = new Map();
@@ -72,13 +73,21 @@ test("A4 · credential write-only：set/replace/delete 不回显 secret，DB 不
   assert.equal(del.configured, false);
 });
 
-test("A5 · actor/app 伪造被忽略（host app = resource-library）", async () => {
+test("A5 · actor/app 伪造被忽略 + Confused Deputy（host app = settings）", async () => {
   // Renderer 伪造 appId=canvas / userId=admin / role=ADMIN：host 仍是 resource-library，命令正常
   const r = await invoke({ command: "provider/list", payload: { userId: "admin", appId: "canvas", role: "ADMIN" } });
   assert.equal(r.ok, true);
   // canvas 自身没有 model.manage App Grant，但伪造也不改变 host app
   const created = await invoke({ command: "provider/create", payload: { displayName: "Spoof", baseUrl: "http://127.0.0.1:9", appId: "canvas", credentialSecret: "FAKE_MODEL_IPC_SECRET_D401_5" } });
   assert.equal(created.ok, true);
+  // Confused Deputy：真实 host=settings 无 manage 时，payload.appId=resource-library 也不能提权
+  const settingsGrant = f.store.appGrantsForApp("settings").find((g) => g.resource_type === "model");
+  f.authService.revokeAppResourcePermission ? null : null;
+  f.modelService.revokeAppModelAccess({ context: admin, grantId: settingsGrant.id });
+  const denied = await invoke({ command: "provider/create", payload: { displayName: "Deputy", baseUrl: "http://127.0.0.1:9", appId: "resource-library", credentialSecret: "FAKE_MODEL_IPC_SECRET_D401_5" } });
+  assert.equal(denied.ok, false);
+  assert.equal(denied.error, "PROXY_UNAUTHORIZED");
+  f.modelService.grantAppModelAccess({ context: admin, appId: "settings", actions: ["model.view", "model.use", "model.manage", "model.test"] });
 });
 
 test("A6 · model safe projection：declared/verified/version，无内部 secret", async () => {

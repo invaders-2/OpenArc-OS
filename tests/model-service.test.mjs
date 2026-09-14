@@ -23,7 +23,10 @@ async function makeProvider(behavior = "success", scope = "PERSONAL") {
 
 test("Credential: 无安全后端 → CREDENTIAL_STORE_UNAVAILABLE，不降级明文", async () => {
   const g = await createModelFixture({ backend: { available: () => false, put() {}, get() { return null; }, delete() {} } });
-  const res = g.modelService.createProvider({ context: g.adminCtx(), displayName: "x", baseUrl: "http://127.0.0.1:1", credentialSecret: "FAKE_PROVIDER_SECRET_ABC123" });
+  // Provider mutation 现在要求 App 持有 model.manage（Security 修复）；用授权过的 settings host。
+  g.store.upsertApp({ appId: "settings", name: "系统设置", publisher: "openarc-builtin", status: "enabled", builtIn: 1 });
+  g.modelService.grantAppModelAccess({ context: g.adminCtx(), appId: "settings", actions: ["model.view", "model.use", "model.manage", "model.test"] });
+  const res = g.modelService.createProvider({ context: { ...g.adminCtx(), appId: "settings" }, displayName: "x", baseUrl: "http://127.0.0.1:1", credentialSecret: "FAKE_PROVIDER_SECRET_ABC123" });
   assert.equal(res.ok, false);
   assert.equal(res.error, "CREDENTIAL_STORE_UNAVAILABLE");
   assert.equal(JSON.stringify(g.modelStore.recentCalls(5)).includes("FAKE_PROVIDER_SECRET_ABC123"), false);

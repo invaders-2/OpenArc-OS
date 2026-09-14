@@ -64,6 +64,9 @@ class ModelService {
   createProvider({ context, displayName, baseUrl, adapterType = "openai-compatible", endpointScope, allowLan = false, scope = "PERSONAL", credentialSecret = null }) {
     const actor = this.#actor(context);
     if (!actor.ok) return { ok: false, error: domain.ERROR_CODE.PROXY_UNAUTHORIZED };
+    // App 必须持有 model.manage（不是只校验 User）；否则 Provider mutation DENY。
+    const appAuth = this.#authorize({ context, action: domain.MODEL_ACTIONS.MANAGE, provider: null });
+    if (!appAuth.ok) return appAuth;
     if (scope === "ORGANIZATION" && !actor.isSuper) return { ok: false, error: domain.ERROR_CODE.PROXY_UNAUTHORIZED };
     const ep = domain.validateEndpoint(baseUrl, { allowLan: allowLan || endpointScope === domain.ENDPOINT_SCOPE.LAN_EXPLICIT });
     if (!ep.ok) return ep;
