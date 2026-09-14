@@ -33,6 +33,7 @@
     "test:d4-01": "node experiments/d4-01/run-all.mjs",
     "test:model-ipc-ui": "npm run build && node tests/model-ipc-ui.mjs",
     "test:model-keychain-restart": "node tests/model-keychain-restart.mjs",
+    "test:model-isolation-ui": "npm run build && node tests/model-isolation-ui.mjs",
     "test:model-secret-ui": "npm run build && node tests/model-secret-ui.mjs",
     "test:model-settings-ui": "npm run build && node tests/model-settings-ui.mjs",
     "test:governance-ui": "npm run build && node tests/governance-ui.mjs",

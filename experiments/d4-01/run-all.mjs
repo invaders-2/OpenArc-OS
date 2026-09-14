@@ -7,7 +7,7 @@ const ROOT = path.resolve(HERE, "../..");
 const ART = path.join(ROOT, "artifacts", "d4-01");
 fs.rmSync(ART, { recursive: true, force: true });
 fs.mkdirSync(ART, { recursive: true });
-const FILES = ["tests/model-service.test.mjs", "tests/model-proxy.test.mjs", "tests/model-proxy-child.test.mjs", "tests/model-service-stream.test.mjs", "tests/model-bootstrap.test.mjs", "tests/model-secret-scan.test.mjs", "tests/model-performance.test.mjs"];
+const FILES = ["tests/model-service.test.mjs", "tests/model-proxy.test.mjs", "tests/model-proxy-child.test.mjs", "tests/model-service-stream.test.mjs", "tests/model-bootstrap.test.mjs", "tests/model-secret-scan.test.mjs", "tests/model-performance.test.mjs", "tests/model-isolation.test.mjs"];
 // --test-concurrency=1：performance baseline 不能被并行的其他测试文件污染
 const child = spawn(process.execPath, ["--test", "--test-concurrency=1", ...FILES], { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"] });
 let out = "";

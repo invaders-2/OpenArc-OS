@@ -246,6 +246,9 @@ app.whenReady().then(async () => {
       service: identity.service,
       authorization: identity.authorization,
       device: identity.deviceService,
+      // D4-01 Closure C 起 Settings 的「模型 / AI」pane 是真实实现，会走 model:command；
+      // 不注册会让该 pane 报 "No handler registered for 'model:command'"。
+      model: identity.modelService,
       isTrusted: (e) => e.sender === win.webContents && e.senderFrame?.url === uiURL,
       send: (event) => {
         if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("identity:event", event);
@@ -300,8 +303,8 @@ app.whenReady().then(async () => {
     );
     await click('[data-settings-pane="model"]');
     check(
-      "A1c · 既有「全局模型服务」pane 仍可切换且字段完整",
-      (await attr("[data-settings-active]", "data-settings-active")) === "model" && (await text(".settings-pane")).includes("全局模型服务") && (await text(".settings-pane")).includes("API 地址") && (await text(".settings-pane")).includes("模型名称"),
+      "A1c · 「模型 / AI」pane 仍可切换且是 D4-01 真实实现",
+      (await attr("[data-settings-active]", "data-settings-active")) === "model" && (await has('[data-d4-01="settings"]')) && (await text(".settings-pane")).includes("模型 / AI"),
       "active=" + (await attr("[data-settings-active]", "data-settings-active")),
     );
     await click('[data-settings-pane="devices"]');
