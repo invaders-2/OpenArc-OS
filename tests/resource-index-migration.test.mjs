@@ -14,6 +14,7 @@ const V6_TABLES = ["resource_search_docs", "resource_search_fts", "resource_inde
 const V7_TABLES = ["projects", "project_members", "project_resources", "canvas_boards", "canvas_resource_nodes"];
 const V8_TABLES = ["model_providers", "model_configs", "model_defaults", "model_credentials", "model_call_records"];
 const V9_TABLES = ["task_events", "task_model_calls", "task_steps", "tasks"];
+const V10_TABLES = ["task_harness_runs", "task_artifacts", "task_verifications"];
 const hasTable = (db, name) => !!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(name);
 const isVirtual = (db, name) => String(db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get(name)?.sql || "").includes("VIRTUAL TABLE");
 
@@ -38,7 +39,7 @@ async function makeV5Db() {
   fx.identity.close();
 
   const raw = new DatabaseSync(dbPath);
-  for (const t of [...V9_TABLES, ...V6_TABLES, ...V7_TABLES, ...V8_TABLES]) raw.exec("DROP TABLE IF EXISTS " + t);
+  for (const t of [...V10_TABLES, ...V9_TABLES, ...V6_TABLES, ...V7_TABLES, ...V8_TABLES]) raw.exec("DROP TABLE IF EXISTS " + t);
   raw.exec("PRAGMA user_version = 5");
   assert.equal(raw.prepare("PRAGMA user_version").get().user_version, 5);
   assert.equal(hasTable(raw, "resource_search_docs"), false);
@@ -52,7 +53,7 @@ test("v5 -> v6：派生表建立，FTS 为 virtual table，资源可重新索引
     cleanups.push(root);
     const reopened = reopenResourceRuntime({ dbPath, storeRoot });
     assert.equal(reopened.identity.schemaVersion, SCHEMA_VERSION);
-    for (const t of [...V6_TABLES, ...V7_TABLES, ...V8_TABLES]) assert.equal(hasTable(reopened.identity.connection, t), true, t + " 应存在");
+    for (const t of [...V6_TABLES, ...V7_TABLES, ...V8_TABLES, ...V9_TABLES, ...V10_TABLES]) assert.equal(hasTable(reopened.identity.connection, t), true, t + " 应存在");
     assert.equal(isVirtual(reopened.identity.connection, "resource_search_fts"), true, "FTS 必须是 virtual table");
 
     const login = await reopened.identity.login({ identifier: "alice@openarc.test", password: pw("alice") });

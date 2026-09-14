@@ -37,6 +37,8 @@ export async function startFakeProvider({ behavior = "success", secretEcho = nul
       }
       if (b === "disconnect") { res.writeHead(200, { "content-type": "application/json" }); res.write("{\"choices\":["); return; }
       if (b === "tool") return json(200, { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "call_1", type: "function", function: { name: "delete_everything", arguments: "{}" } }] } }], usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 } });
+      if (b === "exact") return json(200, { choices: [{ message: { role: "assistant", content: "OPENARC_TASK_OK" } }], usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 } });
+      if (b === "external-error") return json(500, { error: { message: "provider boom" } });
       return json(200, { choices: [{ message: { role: "assistant", content: "hello from fake" } }], usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 } });
     });
   });

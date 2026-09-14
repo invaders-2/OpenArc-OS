@@ -150,7 +150,7 @@ test("TS4 · performance smoke：create 100 tasks / append 1000 events / load / 
   }
 });
 
-test("TS5 · migration v8 → v9：只加 Task 表；v9 级失败回滚到 8", () => {
+test("TS5 · migration v8 → v10：追加 Task 与 Harness/Artifact 表；v9 级失败回滚到 8", () => {
   const { dir, dbPath } = tempDbPath("oa-d4-02a-v8");
   cleanup.push(dir);
   // 造一个真实 v8 库
@@ -159,11 +159,11 @@ test("TS5 · migration v8 → v9：只加 Task 表；v9 级失败回滚到 8", (
   for (const sql of [SCHEMA_SQL, SCHEMA_V2_SQL, SCHEMA_V3_SQL, SCHEMA_V4_SQL, SCHEMA_V5_SQL, SCHEMA_V6_SQL, SCHEMA_V7_SQL, SCHEMA_V8_SQL]) raw.exec(sql);
   raw.exec("PRAGMA user_version = 8");
   raw.close();
-  assert.equal(SCHEMA_VERSION, 9);
+  assert.equal(SCHEMA_VERSION, 10);
   const store = new (require("../electron/identity-store.cjs").IdentityStore)({ path: dbPath }).open();
-  assert.equal(store.schemaVersion, 9);
+  assert.equal(store.schemaVersion, 10);
   const tables = store.connection.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name);
-  for (const t of ["tasks", "task_steps", "task_model_calls", "task_events"]) assert.ok(tables.includes(t), "缺少 v9 表 " + t);
+  for (const t of ["tasks", "task_steps", "task_model_calls", "task_events", "task_harness_runs", "task_artifacts", "task_verifications"]) assert.ok(tables.includes(t), "缺少表 " + t);
   store.close();
 
   // v9 级失败 → 整级回滚，user_version 保持 8，task 表不残留
