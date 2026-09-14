@@ -17,6 +17,7 @@ const FILES = [
   "tests/tool-execution-cancel.test.mjs",
   "tests/tool-execution-security.test.mjs",
   "tests/tool-execution-migration.test.mjs",
+  "tests/tool-dsh-facade.test.mjs",
 ];
 let versions = {};
 try {
