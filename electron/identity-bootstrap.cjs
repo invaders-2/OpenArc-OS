@@ -81,14 +81,15 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
     logger: log,
   });
   // D4-02A：Task Runtime 持久权威（复用同一连接与 AuthorizationService；启动即 recovery）。
-  const { taskStore, taskService, taskRecovery } = createTaskBundle({
+  const { taskStore, taskService, taskRecovery, orchestrator } = createTaskBundle({
     identityStore: store,
     authorization,
     authStore,
     modelService,
+    modelProxy,
     logger: log,
   });
-  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, modelStore, credentialStore, modelService, modelProxy, taskStore, taskService, taskRecovery };
+  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, modelStore, credentialStore, modelService, modelProxy, taskStore, taskService, taskRecovery, orchestrator };
 }
 
 /**

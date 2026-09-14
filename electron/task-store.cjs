@@ -25,6 +25,16 @@ const SQL = {
   eventById: "SELECT * FROM task_events WHERE event_id = ?",
   eventsOfTask: "SELECT * FROM task_events WHERE task_id = ? ORDER BY sequence",
   maxEventSequence: "SELECT COALESCE(MAX(sequence),0) AS s FROM task_events WHERE task_id = ?",
+  insertRun: "INSERT INTO task_harness_runs (run_id, task_id, step_id, status, harness_version, acp_version, model_config_id, model_config_version, started_at, completed_at, stop_reason, error_code) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+  runById: "SELECT * FROM task_harness_runs WHERE run_id = ?",
+  runsOfTask: "SELECT * FROM task_harness_runs WHERE task_id = ? ORDER BY started_at",
+  insertArtifact: "INSERT INTO task_artifacts (artifact_id, task_id, step_id, run_id, type, safe_content, checksum, created_at) VALUES (?,?,?,?,?,?,?,?)",
+  artifactById: "SELECT * FROM task_artifacts WHERE artifact_id = ?",
+  artifactsOfTask: "SELECT * FROM task_artifacts WHERE task_id = ? ORDER BY created_at",
+  insertVerification: "INSERT INTO task_verifications (verification_id, artifact_id, task_id, type, status, safe_details, created_at) VALUES (?,?,?,?,?,?,?)",
+  verificationById: "SELECT * FROM task_verifications WHERE verification_id = ?",
+  verificationsOfArtifact: "SELECT * FROM task_verifications WHERE artifact_id = ? ORDER BY created_at",
+  verificationsOfTask: "SELECT * FROM task_verifications WHERE task_id = ? ORDER BY created_at",
 };
 
 const TASK_COLUMNS = new Set(["status", "updated_at", "started_at", "completed_at", "current_step_id", "revision", "cancel_requested", "model_config_id", "model_config_version", "budget_snapshot", "permission_snapshot_ref"]);
@@ -33,6 +43,7 @@ const CALL_COLUMNS = new Set(["status", "completed_at", "usage", "provider_error
 const TASK_JSON = new Set(["budget_snapshot"]);
 const STEP_JSON = new Set(["input"]);
 const CALL_JSON = new Set(["usage"]);
+const RUN_COLUMNS = new Set(["status", "completed_at", "stop_reason", "error_code", "step_id"]);
 
 const newId = (prefix) => prefix + "_" + crypto.randomBytes(10).toString("base64url");
 
@@ -100,6 +111,38 @@ class TaskStore {
   eventById(id) { return this.db.prepare(SQL.eventById).get(String(id || "")) || null; }
   eventsOfTask(taskId) { return this.db.prepare(SQL.eventsOfTask).all(String(taskId || "")); }
   maxEventSequence(taskId) { return Number(this.db.prepare(SQL.maxEventSequence).get(String(taskId || "")).s); }
+
+  // ------------------------------------------------------- Harness Run（D4-02C）
+  insertHarnessRun({ runId = null, taskId, stepId = null, status = "STARTING", harnessVersion = null, acpVersion = null, modelConfigId = null, modelConfigVersion = null, startedAt = null, completedAt = null, stopReason = null, errorCode = null }) {
+    const id = runId || newId("hrun");
+    const now = this.clock();
+    this.db.prepare(SQL.insertRun).run(id, String(taskId), stepId, String(status), harnessVersion, acpVersion, modelConfigId, modelConfigVersion == null ? null : Number(modelConfigVersion), Number(startedAt == null ? now : startedAt), completedAt, stopReason, errorCode);
+    return this.harnessRunById(id);
+  }
+  harnessRunById(id) { return this.db.prepare(SQL.runById).get(String(id || "")) || null; }
+  harnessRunsOfTask(taskId) { return this.db.prepare(SQL.runsOfTask).all(String(taskId || "")); }
+  updateHarnessRun(id, patch) { this.#update("task_harness_runs", "run_id", id, RUN_COLUMNS, new Set(), patch); return this.harnessRunById(id); }
+
+  // ------------------------------------------------------- Artifact（D4-02C）
+  insertArtifact({ artifactId = null, taskId, stepId = null, runId = null, type = "text", safeContent = null, checksum = null, createdAt = null }) {
+    const id = artifactId || newId("art");
+    const now = this.clock();
+    this.db.prepare(SQL.insertArtifact).run(id, String(taskId), stepId, runId, String(type), safeContent, checksum, Number(createdAt == null ? now : createdAt));
+    return this.artifactById(id);
+  }
+  artifactById(id) { return this.db.prepare(SQL.artifactById).get(String(id || "")) || null; }
+  artifactsOfTask(taskId) { return this.db.prepare(SQL.artifactsOfTask).all(String(taskId || "")); }
+
+  // ------------------------------------------------------- Verification（D4-02C）
+  insertVerification({ verificationId = null, artifactId, taskId, type, status = "PASS", safeDetails = null, createdAt = null }) {
+    const id = verificationId || newId("ver");
+    const now = this.clock();
+    this.db.prepare(SQL.insertVerification).run(id, String(artifactId), String(taskId), String(type), String(status), safeDetails == null ? null : JSON.stringify(safeDetails), Number(createdAt == null ? now : createdAt));
+    return this.verificationById(id);
+  }
+  verificationById(id) { return this.db.prepare(SQL.verificationById).get(String(id || "")) || null; }
+  verificationsOfArtifact(artifactId) { return this.db.prepare(SQL.verificationsOfArtifact).all(String(artifactId || "")); }
+  verificationsOfTask(taskId) { return this.db.prepare(SQL.verificationsOfTask).all(String(taskId || "")); }
 }
 
 module.exports = { TaskStore, SQL };

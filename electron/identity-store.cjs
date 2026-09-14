@@ -51,7 +51,7 @@ const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domai
  * 迁移按版本逐级前进，每一级各自是一个原子事务：任何一级失败只回滚该级，
  * 不会留下"user_version 已升级但表不完整"的半状态（§55）。
  */
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -874,6 +874,54 @@ CREATE TABLE task_events (
 CREATE INDEX idx_task_events_task_seq ON task_events(task_id, sequence);
 `;
 
+/**
+ * v10（D4-02C）· Task ↔ Harness Orchestration 持久权威。
+ *
+ * 只落 HarnessRun / Artifact / Verification 三张表；**不存 proxy token /
+ * provider key / 完整 ACP transcript / 完整 reasoning**。Task artifact 是
+ * Task Runtime 内部产物，不等于 Resource Library。
+ */
+const SCHEMA_V10_SQL = `
+CREATE TABLE task_harness_runs (
+  run_id                TEXT PRIMARY KEY,
+  task_id               TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
+  step_id               TEXT,
+  status                TEXT NOT NULL CHECK (status IN ('STARTING','RUNNING','SUCCEEDED','BLOCKED','CANCELLED','FAILED')),
+  harness_version       TEXT,
+  acp_version           TEXT,
+  model_config_id       TEXT,
+  model_config_version  INTEGER,
+  started_at            INTEGER NOT NULL,
+  completed_at          INTEGER,
+  stop_reason           TEXT,
+  error_code            TEXT
+);
+CREATE INDEX idx_task_harness_runs_task ON task_harness_runs(task_id, started_at);
+
+CREATE TABLE task_artifacts (
+  artifact_id  TEXT PRIMARY KEY,
+  task_id      TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
+  step_id      TEXT,
+  run_id       TEXT,
+  type         TEXT NOT NULL CHECK (type IN ('text','json')),
+  safe_content TEXT,
+  checksum     TEXT,
+  created_at   INTEGER NOT NULL
+);
+CREATE INDEX idx_task_artifacts_task ON task_artifacts(task_id, created_at);
+
+CREATE TABLE task_verifications (
+  verification_id TEXT PRIMARY KEY,
+  artifact_id     TEXT NOT NULL REFERENCES task_artifacts(artifact_id) ON DELETE CASCADE,
+  task_id         TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
+  type            TEXT NOT NULL,
+  status          TEXT NOT NULL CHECK (status IN ('PASS','FAIL')),
+  safe_details    TEXT,
+  created_at      INTEGER NOT NULL
+);
+CREATE INDEX idx_task_verifications_task ON task_verifications(task_id, created_at);
+`;
+
 const MIGRATIONS = Object.freeze([
   { version: 1, sql: SCHEMA_SQL },
   { version: 2, sql: SCHEMA_V2_SQL },
@@ -884,6 +932,7 @@ const MIGRATIONS = Object.freeze([
   { version: 7, sql: SCHEMA_V7_SQL },
   { version: 8, sql: SCHEMA_V8_SQL },
   { version: 9, sql: SCHEMA_V9_SQL },
+  { version: 10, sql: SCHEMA_V10_SQL },
 ]);
 
 const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000; // 12h 绝对上限

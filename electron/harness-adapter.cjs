@@ -160,14 +160,15 @@ class HarnessAdapter {
   }
 
   /** Harness 只能拿到 Proxy endpoint + scoped capability + safe model metadata。 */
-  async start({ context, modelConfigId, maxCalls = 4, ttlMs = 120000, workspace = null, startTimeoutMs = 30000 } = {}) {
+  async start({ context, modelConfigId, maxCalls = 4, ttlMs = 120000, workspace = null, startTimeoutMs = 30000, requestId = null } = {}) {
     if (!this.bin) throw harnessError(HARNESS_ERROR.NOT_STARTED, "dsh executable not found");
     if (!this.sdkPath) throw harnessError(HARNESS_ERROR.NOT_STARTED, "ACP SDK not found");
     const cap = this.modelProxy.issueCapability({ context, configId: modelConfigId, allowedCapabilities: ["chat"], maxCalls, ttlMs });
     if (!cap.ok) { const e = harnessError(cap.error === "MODEL_CONFIG_UNAVAILABLE" ? HARNESS_ERROR.NOT_STARTED : cap.error); throw e; }
     this.capability = { capabilityId: cap.capability.capabilityId, token: cap.capability.token, maxCalls: cap.capability.maxCalls, modelConfigId: cap.capability.modelConfigId, modelConfigVersion: cap.capability.modelConfigVersion };
 
-    this.bridge = new HarnessModelAdapter({ modelProxy: this.modelProxy, logger: this.logger, clock: this.clock });
+    this.bridge = new HarnessModelAdapter({ modelProxy: this.modelProxy, logger: this.logger, clock: this.clock, expectedToken: this.capability.token, requestId });
+    this.modelRequestId = requestId;
     await this.bridge.start();
 
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "oa-d4-02b-"));
@@ -281,6 +282,14 @@ class HarnessAdapter {
     this.turnCancelled = true;
     await this.conn.cancel({ sessionId: this.sessionId });
     return { ok: true };
+  }
+
+  /** Harness turn 一结束（success/failure/cancel/timeout/crash/conflict/blocked）立即 revoke，不等 TTL。*/
+  revokeModelCapability() {
+    if (!this.capability || !this.capability.token) return { ok: true, changed: false };
+    const r = this.modelProxy.revokeCapability(this.capability.token);
+    this.capability = null;
+    return r;
   }
 
   async closeSession() {

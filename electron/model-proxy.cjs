@@ -31,7 +31,7 @@ class ModelProxy {
   }
   #now() { return this.clock ? this.clock() : Date.now(); }
 
-  issueCapability({ context, configId, allowedCapabilities = ["chat"], maxCalls = 1, ttlMs = this.ttlMs } = {}) {
+  issueCapability({ context, configId, allowedCapabilities = ["chat"], maxCalls = 1, ttlMs = this.ttlMs, binding = null } = {}) {
     const resolved = this.modelService.resolveModel({ context, configId, capability: allowedCapabilities[0] || "chat" });
     if (!resolved.ok) return resolved;
     const token = "mpx_" + crypto.randomBytes(24).toString("base64url");
@@ -50,12 +50,17 @@ class ModelProxy {
       state: CAP_STATE.ISSUED,
       issuedAt: this.#now(),
       expiresAt: this.#now() + Math.max(1, Number(ttlMs) || this.ttlMs),
+      // executionBinding 不进 Provider 权限合同，只做 run 级执行绑定；不落盘。
+      binding: binding && typeof binding === "object" ? { taskId: binding.taskId || null, stepId: binding.stepId || null, runId: binding.runId || null } : null,
     };
     this.capabilities.set(token, cap);
-    return { ok: true, capability: { capabilityId: cap.capabilityId, token, expiresAt: cap.expiresAt, maxCalls: cap.maxCalls, modelConfigId: cap.modelConfigId, modelConfigVersion: cap.modelConfigVersion } };
+    return { ok: true, capability: { capabilityId: cap.capabilityId, token, expiresAt: cap.expiresAt, maxCalls: cap.maxCalls, modelConfigId: cap.modelConfigId, modelConfigVersion: cap.modelConfigVersion, executionBinding: cap.binding } };
   }
 
   revokeCapability(token) { const c = this.capabilities.get(String(token || "")); if (!c) return { ok: true, changed: false }; c.state = CAP_STATE.REVOKED; return { ok: true, changed: true }; }
+
+  /** 只回安全状态，供执行绑定断言；绝不暴露 token。*/
+  capabilityState(token) { const c = this.capabilities.get(String(token || "")); if (!c) return null; return { capabilityId: c.capabilityId, state: c.state, remaining: c.remaining, binding: c.binding || null }; }
 
   #check(req) {
     const auth = String((req.headers && req.headers.authorization) || "");

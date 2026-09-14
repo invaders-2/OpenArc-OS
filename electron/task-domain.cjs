@@ -43,10 +43,25 @@ const TASK_EVENT = Object.freeze({
   STEP_STARTED: "step.started",
   STEP_SUCCEEDED: "step.succeeded",
   STEP_FAILED: "step.failed",
+  STEP_CANCELLED: "step.cancelled",
+  STEP_BLOCKED: "step.blocked",
   STEP_RECOVERY_BLOCKED: "step.recovery_blocked",
+  TASK_BLOCKED: "task.blocked",
   MODEL_CALL_STARTED: "model.call.started",
   MODEL_CALL_COMPLETED: "model.call.completed",
   MODEL_CALL_FAILED: "model.call.failed",
+  HARNESS_RUN_STARTED: "harness.run.started",
+  HARNESS_RUN_SUCCEEDED: "harness.run.succeeded",
+  HARNESS_RUN_BLOCKED: "harness.run.blocked",
+  HARNESS_RUN_UNKNOWN_EFFECT: "harness.run.unknown_effect",
+  HARNESS_TEXT_DELTA: "harness.text.delta",
+  HARNESS_PLAN: "harness.plan",
+  HARNESS_USAGE: "harness.usage",
+  HARNESS_TOOL_PROPOSED: "harness.tool_proposed",
+  HARNESS_PERMISSION_REQUESTED: "harness.permission_requested",
+  HARNESS_PERMISSION_REJECTED: "harness.permission_rejected",
+  ARTIFACT_CREATED: "artifact.created",
+  VERIFICATION_COMPLETED: "verification.completed",
 });
 const TASK_EVENT_ALL = Object.freeze(Object.values(TASK_EVENT));
 
@@ -60,7 +75,57 @@ const ERROR = Object.freeze({
   RECOVERY_REQUIRED: "RECOVERY_REQUIRED",
   INVALID_INPUT: "INVALID_INPUT",
   INTERNAL_ERROR: "INTERNAL_ERROR",
+  // D4-02C orchestration-level classifications（OpenArc 自己决定，不由 Harness 自报）
+  HARNESS_PROCESS_EXITED: "HARNESS_PROCESS_EXITED",
+  HARNESS_TURN_TIMEOUT: "HARNESS_TURN_TIMEOUT",
+  HARNESS_CANCELLED: "HARNESS_CANCELLED",
+  TOOL_EXECUTION_NOT_AVAILABLE: "TOOL_EXECUTION_NOT_AVAILABLE",
+  PERMISSION_NOT_AVAILABLE: "PERMISSION_NOT_AVAILABLE",
+  AUTHORIZATION_REVOKED: "AUTHORIZATION_REVOKED",
+  MODEL_CONFIG_CHANGED: "MODEL_CONFIG_CHANGED",
+  STALE_CAPABILITY: "STALE_CAPABILITY",
+  ARTIFACT_PERSIST_FAILED: "ARTIFACT_PERSIST_FAILED",
+  VERIFICATION_FAILED: "VERIFICATION_FAILED",
+  MCP_NOT_AVAILABLE: "MCP_NOT_AVAILABLE",
 });
+
+/** D4-02C 第一版编排只允许 reasoning step；绝不申请 tool/shell/browser/mcp step。 */
+const ORCHESTRATION_KIND = "reasoning";
+
+const HARNESS_RUN_STATUS = Object.freeze({
+  STARTING: "STARTING",
+  RUNNING: "RUNNING",
+  SUCCEEDED: "SUCCEEDED",
+  BLOCKED: "BLOCKED",
+  CANCELLED: "CANCELLED",
+  FAILED: "FAILED",
+});
+const HARNESS_RUN_STATUS_ALL = Object.freeze(Object.values(HARNESS_RUN_STATUS));
+const HARNESS_RUN_TERMINAL = Object.freeze([HARNESS_RUN_STATUS.SUCCEEDED, HARNESS_RUN_STATUS.BLOCKED, HARNESS_RUN_STATUS.CANCELLED, HARNESS_RUN_STATUS.FAILED]);
+
+const ARTIFACT_TYPE = Object.freeze({ TEXT: "text", JSON: "json" });
+const ARTIFACT_TYPE_ALL = Object.freeze(Object.values(ARTIFACT_TYPE));
+const VERIFICATION_TYPE = Object.freeze({ EXACT_TEXT: "EXACT_TEXT", SCHEMA_VALID: "SCHEMA_VALID" });
+const VERIFICATION_STATUS = Object.freeze({ PASS: "PASS", FAIL: "FAIL" });
+
+/**
+ * ACP v1 session/update → safe TaskEvent mapping。
+ *
+ * 真类型来自 ACP v1（agent_message_chunk / agent_thought_chunk / tool_call /
+ * tool_call_update / plan / usage_update）；Adapter 已在 #onUpdate 归一到
+ * text.delta / reasoning.delta / tool.proposed / plan / usage。这里只做
+ * "内层类型 → TaskEvent" 的显式映射；未列出的一律不落库。
+ */
+const ACP_EVENT_MAP = Object.freeze({
+  "text.delta": TASK_EVENT.HARNESS_TEXT_DELTA,
+  "reasoning.delta": null, // §50 reasoning privacy：不默认持久化
+  "tool.proposed": TASK_EVENT.HARNESS_TOOL_PROPOSED,
+  "plan": TASK_EVENT.HARNESS_PLAN,
+  "usage": TASK_EVENT.HARNESS_USAGE,
+});
+
+function isKnownHarnessRunStatus(s) { return HARNESS_RUN_STATUS_ALL.includes(String(s)); }
+function isTerminalHarnessRun(s) { return HARNESS_RUN_TERMINAL.includes(String(s)); }
 
 /** 显式 transition table。未列出的边一律禁止。 */
 const TASK_TRANSITIONS = Object.freeze({
@@ -161,6 +226,9 @@ module.exports = {
   CALL_STATUS, CALL_STATUS_ALL, TASK_EVENT, TASK_EVENT_ALL, ERROR,
   TASK_TRANSITIONS, STEP_TRANSITIONS,
   AUTO_RETRY, DEFAULT_MAX_ATTEMPTS, TOOL_EXECUTION,
+  ORCHESTRATION_KIND, HARNESS_RUN_STATUS, HARNESS_RUN_STATUS_ALL, HARNESS_RUN_TERMINAL,
+  ARTIFACT_TYPE, ARTIFACT_TYPE_ALL, VERIFICATION_TYPE, VERIFICATION_STATUS, ACP_EVENT_MAP,
   canTransitionTask, canTransitionStep, isTerminalTask, isKnownTaskStatus, isKnownStepStatus, isKnownEventType,
+  isKnownHarnessRunStatus, isTerminalHarnessRun,
   sanitizeEventPayload, safeTask, safeStep, safeCall, safeEvent,
 };

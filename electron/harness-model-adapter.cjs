@@ -19,9 +19,13 @@ const ERROR = Object.freeze({
 });
 
 class HarnessModelAdapter {
-  constructor({ modelProxy, logger = null, clock = null } = {}) {
+  constructor({ modelProxy, logger = null, clock = null, expectedToken = null, requestId = null } = {}) {
     if (!modelProxy) throw new Error("HarnessModelAdapter 需要 ModelProxy");
     this.modelProxy = modelProxy;
+    // run 级执行绑定：只接受本 run 签发的 capability，Harness A 的 token 不能用于 Harness B。
+    this.expectedToken = expectedToken;
+    // OpenArc 生成的 correlation id：与 taskId/stepId/runId 绑定，不由 Harness 自报。
+    this.requestId = requestId;
     this.logger = logger;
     this.clock = typeof clock === "function" ? clock : () => Date.now();
     this.server = null;
@@ -55,6 +59,7 @@ class HarnessModelAdapter {
     let body = {};
     try { body = JSON.parse(raw || "{}"); } catch { return send(400, { error: { message: "invalid json" } }); }
     const auth = req.headers.authorization || "";
+    if (this.expectedToken && auth !== "Bearer " + this.expectedToken) { this.stats.failed += 1; return send(401, { error: { message: "CAPABILITY_NOT_BOUND" } }); }
     const proxyUrl = this.modelProxy && this.modelProxy.baseUrl;
     if (!proxyUrl) { this.stats.failed += 1; return send(503, { error: { message: ERROR.NO_PROXY } }); }
     // 客户端（Harness）断开 → 取消对 Model Proxy 的在途请求，进而取消 Provider 调用；不 retry。
@@ -65,7 +70,7 @@ class HarnessModelAdapter {
       upstream = await fetch(proxyUrl + "/v1/chat/completions", {
         method: "POST",
         headers: { "content-type": "application/json", authorization: auth },
-        body: JSON.stringify({ messages: Array.isArray(body.messages) ? body.messages : [], tools: body.tools || null, params: body.params || {}, requestId: body.requestId || null }),
+        body: JSON.stringify({ messages: Array.isArray(body.messages) ? body.messages : [], tools: body.tools || null, params: body.params || {}, requestId: this.requestId || body.requestId || null }),
         signal: controller.signal,
       });
     } catch {
