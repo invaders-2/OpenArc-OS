@@ -61,7 +61,7 @@ test("v2 → 最新 schema 迁移：版本推进、v3 表建立、既有身份�
 
   const identity = new IdentityStore({ path: dbPath }).open();
   assert.equal(identity.schemaVersion, SCHEMA_VERSION);
-  assert.equal(SCHEMA_VERSION, 6); // D3-04C 在 v5 之上追加本地搜索 / 索引 / 预览派生表
+  assert.equal(SCHEMA_VERSION, 7); // D3-04D 在 v6 之上追加 Projects / Canvas 集成表
   for (const t of ["devices", "device_pairing_credentials", "device_credentials", "device_access", "device_audit"]) {
     assert.equal(hasTable(identity.connection, t), true, "缺少 v3 表 " + t);
   }

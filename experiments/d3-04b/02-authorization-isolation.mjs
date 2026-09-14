@@ -54,6 +54,7 @@ try {
     const raw = new DatabaseSync(dbPath);
     // D3-04C 引入 v6：降级到 v4 时必须同时移除 v6 派生表，否则重开会重复 CREATE
     for (const t of ["resource_search_fts", "resource_search_docs", "resource_index_jobs", "resource_preview_cache"]) raw.exec("DROP TABLE IF EXISTS " + t);
+    for (const t of ["projects", "project_members", "project_resources", "canvas_boards", "canvas_resource_nodes"]) raw.exec("DROP TABLE IF EXISTS " + t);
     for (const t of ["resource_recent", "resource_favorites", "resource_tags", "tags"]) raw.exec("DROP TABLE IF EXISTS " + t);
     for (const col of ["memory_subtype", "language", "attributes"]) raw.exec("ALTER TABLE library_resources DROP COLUMN " + col);
     raw.exec("PRAGMA user_version = 4");

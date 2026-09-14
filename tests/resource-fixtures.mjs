@@ -22,6 +22,10 @@ const { ResourceService } = require("../electron/resource-service.cjs");
 const { SearchStore } = require("../electron/search-store.cjs");
 const { SearchService } = require("../electron/search-service.cjs");
 const { PreviewService } = require("../electron/preview-service.cjs");
+const { IntegrationStore } = require("../electron/integration-store.cjs");
+const { ProjectService, CanvasService } = require("../electron/integration-service.cjs");
+const { GovernanceService } = require("../electron/governance-service.cjs");
+const { ResourcePickerService } = require("../electron/picker-service.cjs");
 
 export const resourceDomain = require("../electron/resource-domain.cjs");
 export const searchDomain = require("../electron/search-domain.cjs");
@@ -57,6 +61,11 @@ export async function createResourceFixture({ dbPath = ":memory:", storeRoot = n
   const searchStore = new SearchStore({ identity: fx.identity, clock: fx.clock });
   const searchService = new SearchService({ identity: fx.identity, resourceStore, searchStore, managedStore, authService: fx.authService, authStore: fx.store, deviceService: fx.deviceService, clock: fx.clock });
   const previewService = new PreviewService({ identity: fx.identity, resourceStore, searchStore, managedStore, authService: fx.authService, deviceService: fx.deviceService, clock: fx.clock, nativeImage: null });
+  const integrationStore = new IntegrationStore({ identity: fx.identity, clock: fx.clock });
+  const projectService = new ProjectService({ identity: fx.identity, integrationStore, authService: fx.authService, resourceStore });
+  const canvasService = new CanvasService({ identity: fx.identity, integrationStore, authService: fx.authService, resourceStore });
+  const governanceService = new GovernanceService({ identity: fx.identity, authService: fx.authService, authStore: fx.store, resourceStore, integrationStore });
+  const pickerService = new ResourcePickerService({ identity: fx.identity, authService: fx.authService, searchService, resourceStore, clock: fx.clock });
   const sourceDir = tempRoot("oa-d3-04a-src");
   const writeSource = (name, content) => {
     const p = path.join(sourceDir, name);
@@ -71,6 +80,11 @@ export async function createResourceFixture({ dbPath = ":memory:", storeRoot = n
     searchStore,
     searchService,
     previewService,
+    integrationStore,
+    projectService,
+    canvasService,
+    governanceService,
+    pickerService,
     storeRoot: root,
     sourceDir,
     writeSource,
@@ -122,5 +136,10 @@ export function reopenResourceRuntime({ dbPath, storeRoot }) {
   const searchStore = new SearchStore({ identity });
   const searchService = new SearchService({ identity, resourceStore, searchStore, managedStore, authService: runtime.authService, authStore: runtime.authStore, deviceService: runtime.deviceService });
   const previewService = new PreviewService({ identity, resourceStore, searchStore, managedStore, authService: runtime.authService, deviceService: runtime.deviceService, nativeImage: null });
-  return { identity, managedStore, resourceStore, resourceService, searchStore, searchService, previewService, ...runtime };
+  const integrationStore = new IntegrationStore({ identity });
+  const projectService = new ProjectService({ identity, integrationStore, authService: runtime.authService, resourceStore });
+  const canvasService = new CanvasService({ identity, integrationStore, authService: runtime.authService, resourceStore });
+  const governanceService = new GovernanceService({ identity, authService: runtime.authService, authStore: runtime.authStore, resourceStore, integrationStore });
+  const pickerService = new ResourcePickerService({ identity, authService: runtime.authService, searchService, resourceStore });
+  return { identity, managedStore, resourceStore, resourceService, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, ...runtime };
 }

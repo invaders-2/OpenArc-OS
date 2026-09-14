@@ -38,11 +38,11 @@ async function seedV1(dbPath) {
   return { instId, teamId, userId };
 }
 
-test("schema 版本已推进到 v6（D3-04C 在 v5 之上追加本地搜索 / 索引 / 预览派生表）", () => {
-  assert.equal(SCHEMA_VERSION, 6);
+test("schema 版本已推进到 v7（D3-04D 在 v6 之上追加 Projects / Canvas 集成表）", () => {
+  assert.equal(SCHEMA_VERSION, 7);
 });
 
-test("全新数据库直接建到 v6，identity login 成立（v2 + v3 + v4 + v5 + v6 表都在）", async () => {
+test("全新数据库直接建到 v7，identity login 成立（v2 + v3 + v4 + v5 + v6 + v7 表都在）", async () => {
   const { dir, dbPath } = tempDbPath();
   try {
     const store = new IdentityStore({ path: dbPath }).open();
@@ -66,6 +66,9 @@ test("全新数据库直接建到 v6，identity login 成立（v2 + v3 + v4 + v5
     assert.ok(hasTable(store.connection, "resource_recent"));
     for (const t of ["resource_search_docs", "resource_search_fts", "resource_index_jobs", "resource_preview_cache"]) {
       assert.ok(hasTable(store.connection, t), "缺少 v6 表 " + t);
+    }
+    for (const t of ["projects", "project_members", "project_resources", "canvas_boards", "canvas_resource_nodes"]) {
+      assert.ok(hasTable(store.connection, t), "缺少 v7 表 " + t);
     }
     const init = await store.initialize({ identifier: ADMIN_ID, password: ADMIN_PW, displayName: "Admin" });
     assert.equal(init.ok, true);
@@ -152,6 +155,7 @@ test("v3 级迁移失败 → user_version 停在 2，设备表不残留（§55 �
     // 手工降回 v2 并删掉 v3 + v4 + v5 + v6 表，模拟"已有 v2 库、正要升 v3"
     const raw = new DatabaseSync(dbPath);
     raw.exec("DROP TABLE resource_search_fts; DROP TABLE resource_search_docs; DROP TABLE resource_index_jobs; DROP TABLE resource_preview_cache;");
+    raw.exec("DROP TABLE project_members; DROP TABLE project_resources; DROP TABLE projects; DROP TABLE canvas_resource_nodes; DROP TABLE canvas_boards;");
     raw.exec("DROP TABLE resource_recent; DROP TABLE resource_favorites; DROP TABLE resource_tags; DROP TABLE tags;");
     raw.exec("ALTER TABLE library_resources DROP COLUMN memory_subtype; ALTER TABLE library_resources DROP COLUMN language; ALTER TABLE library_resources DROP COLUMN attributes;");
     raw.exec("DROP TABLE resource_relations; DROP TABLE resource_versions; DROP TABLE library_resources; DROP TABLE resource_import_jobs; DROP TABLE content_objects;");

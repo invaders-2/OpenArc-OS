@@ -50,7 +50,7 @@ try {
 }
 
 /** 冻结清单 —— 与 electron/preload.cjs 的现状逐字对应（D3-04A 后为 9 个）。 */
-const FROZEN_BRIDGE_KEYS = ["action", "authorization", "device", "identity", "navigate", "onDisplay", "onNativeState", "resource", "sync"];
+const FROZEN_BRIDGE_KEYS = ["action", "authorization", "device", "governance", "identity", "navigate", "onDisplay", "onNativeState", "resource", "sync"];
 /**
  * 冻结的 IPC 通道。
  *
@@ -58,10 +58,10 @@ const FROZEN_BRIDGE_KEYS = ["action", "authorization", "device", "identity", "na
  * 分别注册在各自的 *-bootstrap.cjs（与 UI 探针共用同一份装配），不在 main.cjs 里。
  * 只扫 main.cjs 会漏掉它们 —— 因此全部 bootstrap 都要扫。
  */
-const FROZEN_IPC_CHANNELS = ["authorization:command", "browser:action", "browser:navigate", "device:command", "identity:command", "resource:command", "windows:sync"];
-const IPC_SCAN_FILES = ["main.cjs", "identity-bootstrap.cjs", "authorization-bootstrap.cjs", "device-bootstrap.cjs", "resource-bootstrap.cjs"];
-/** D3-03 冻结的上一版清单（8 个，含 device），用于把"发生了什么变化"讲清楚。 */
-const PREV_BRIDGE_KEYS = ["action", "authorization", "device", "identity", "navigate", "onDisplay", "onNativeState", "sync"];
+const FROZEN_IPC_CHANNELS = ["authorization:command", "browser:action", "browser:navigate", "device:command", "governance:command", "identity:command", "resource:command", "windows:sync"];
+const IPC_SCAN_FILES = ["main.cjs", "identity-bootstrap.cjs", "authorization-bootstrap.cjs", "device-bootstrap.cjs", "resource-bootstrap.cjs", "governance-bootstrap.cjs"];
+/** D3-04A/B/C 冻结的上一版清单（9 个，含 resource），用于把"发生了什么变化"讲清楚。 */
+const PREV_BRIDGE_KEYS = ["action", "authorization", "device", "identity", "navigate", "onDisplay", "onNativeState", "resource", "sync"];
 /** D3-02 冻结的版本（7 个，仅作历史留痕）。 */
 const D3_02_BRIDGE_KEYS = ["action", "authorization", "identity", "navigate", "onDisplay", "onNativeState", "sync"];
 /** D3-01 冻结的版本（6 个，仅作历史留痕）。 */
@@ -111,9 +111,9 @@ exports.run = async function run({ report, sleep, add, out }) {
     `preload 暴露 ${JSON.stringify(bridgeKeys)}；冻结清单 ${JSON.stringify(FROZEN_BRIDGE_KEYS)}`,
   );
   add(
-    "sec.bridgeExpandedOnlyByResource",
+    "sec.bridgeExpandedOnlyByGovernance",
     bridgeKeys.length === PREV_BRIDGE_KEYS.length + 1 &&
-      bridgeKeys.filter((k) => !PREV_BRIDGE_KEYS.includes(k)).join() === "resource" &&
+      bridgeKeys.filter((k) => !PREV_BRIDGE_KEYS.includes(k)).join() === "governance" &&
       PREV_BRIDGE_KEYS.every((k) => bridgeKeys.includes(k)),
     `上一版冻结 ${PREV_BRIDGE_KEYS.length} 个成员，现在 ${bridgeKeys.length} 个` +
       `（新增 ${JSON.stringify(bridgeKeys.filter((k) => !PREV_BRIDGE_KEYS.includes(k)))}，` +
