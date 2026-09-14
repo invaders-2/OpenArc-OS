@@ -618,19 +618,22 @@ Windows；D2-02 5-run 归因；完整 Subject×Permission 矩阵 UI；Browser �
 | **Model Proxy / Scoped Capability / Child Isolation / Streaming** | **PASS** | loopback `127.0.0.1:0` + capability + per-call reauthorize；独立 OS child 探针（env/argv/stdout/stderr 0 hit）；真实 SSE 事件模型 |
 | **`model.command` IPC / Settings UI** | **PASS** | 单通道白名单 + 静态 dispatch；write-only credential；`model-ipc-ui` 10/10、`model-settings-ui` 16/16 |
 | **真实 macOS secure backend 重启边界（Closure D）** | **PASS** | `model-keychain-restart` **64/64**：4 独立 Electron 进程共享 userData；重启后 credential 可用；replace/delete 跨重启生效；旧 capability DENY / 新 PASS；missing secure item → `CREDENTIAL_MISSING`；无安全后端 → `CREDENTIAL_STORE_UNAVAILABLE` |
-| **D4-01 overall** | **PARTIAL** | A–D PASS；仍缺 Closure E（完整 secret scan + 性能）与 F（终局门）；Windows NOT VERIFIED |
+| **Full Secret Scan + 性能基线（Closure E）** | **PASS** | `model-secret-scan` 13/13 checks（SQLite/audit/call records/logs/Resource/Search/FTS/Preview/child/源码/生成文件/artifact 全 0 hit）；`model-secret-ui` **20/20**（真实 Electron DOM/preload/加密 blob/userData）；`model-performance` 10/10（resolution/proxy/streaming/RSS/open-handle 基线）；Provider error echo 已脱敏；capability token 不落盘 |
+| **D4-01 overall** | **PARTIAL** | A–E PASS；仍缺 Closure F（全量回归终局门）；Windows NOT VERIFIED |
 
 ## 2. 关键证据（真实执行）
 
 | 入口 | 结果 |
 |---|---|
-| npm test | **494 / 494 PASS** |
+| npm test | **512 / 512 PASS** |
 | npm run build | PASS |
-| test:d4-01 | **31 / 31 PASS** |
+| test:d4-01 | **49 / 49 PASS**（含 secret-scan + performance） |
 | test:d3-05 | **13 / 13 PASS** |
 | test:security（D1-05） | FAIL 0 / PARTIAL 2 / PASS 6 |
 | security-surface（D2-02 A13） | **15 / 15 PASS** |
 | model-ipc-ui / model-settings-ui / model-keychain-restart | **10/10 · 16/16 · 64/64 PASS** |
+| model-secret-ui（真实 Electron） | **20 / 20 PASS** |
+| model-secret-scan / model-performance | **13/13 checks · 10/10 checks PASS** |
 | migration（含 v8） | 18 / 18 PASS |
 
 分支 feature/d4-01-model-service，基线 feature/d3-05-identity-data-gate @ 00c079a，未 merge main。
@@ -643,14 +646,16 @@ ADR：docs/decisions/D4-01-model-service.md；报告：docs/D4-01-RESULT.md。
 3. Model 配置权威在 OpenArc；复用 D3 Identity/App Principal/App Grant，无第二套 Model ACL。
 4. Endpoint：远程必须 HTTPS、拒绝危险协议/metadata/URL 凭据；redirect 不转发凭据。
 5. 默认 0 次隐藏 retry；tool-call 仅数据、0 执行。
+6. Provider 原始响应体/错误体不原样回传；错误只归一化为安全错误码（Closure E error echo 攻击 0 raw hit）。
+7. Proxy capability 完整 bearer 不落盘（DB/audit/logs/Renderer/Resource/model_call_records/artifact），只活在进程内存或可信 child env。
 
 ## 4. 主要缺口
 
-完整 secret scan（跨 DB/search/log/audit/renderer/Resource 全表面，Closure E）；resolve/proxy 性能基线（Closure E）；Windows；External Provider 真机接入。
+Closure F（全量 D3/UI 终局回归门 + 最终 PASS 判定）；Windows；External Provider 真机接入。
 
 ## 5. D4-02 准入
 
-**BLOCK**，直到 D4-01 完成 Closure E（完整 secret scan + 性能基线）与 Closure F（全量回归终局门）。之后 `CONDITIONAL GO`（Harness raw key forbidden / ACP only / Model Proxy only / no production tool execution）。
+**BLOCK**，直到 D4-01 完成 Closure F（全量回归终局门）。之后 `CONDITIONAL GO`（Harness raw key forbidden / ACP only / Model Proxy only / no production tool execution）。
 
 ---
 

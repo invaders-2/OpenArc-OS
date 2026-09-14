@@ -1,6 +1,6 @@
 # D4-01 · Model Service / Model Proxy / Credential Boundary
 
-- **状态**：macOS Model Service Core（Provider / Credential Boundary / Registry / Resolution / Authorization / Chat）**PASS**；**Model Proxy / Scoped Capability / Child Credential Isolation / Streaming = PASS**；**`model.command` IPC/preload + Settings UI = PASS**；**真实 Keychain 重启边界（Closure D）= PASS**；**跨 Resource/Search/Renderer 的完整 secret scan + 性能基线 = NOT VERIFIED**；overall **PARTIAL**
+- **状态**：macOS Model Service Core（Provider / Credential Boundary / Registry / Resolution / Authorization / Chat）**PASS**；**Model Proxy / Scoped Capability / Child Credential Isolation / Streaming = PASS**；**`model.command` IPC/preload + Settings UI = PASS**；**真实 Keychain 重启边界（Closure D）= PASS**；**Full Secret Scan + 性能基线（Closure E）= PASS**；**Closure F（全量回归终局门）/ Windows / External Provider = NOT VERIFIED**；overall **PARTIAL**
 - **分支**：feature/d4-01-model-service，基线 feature/d3-05-identity-data-gate @ `00c079a`（`488a9cf` + D3-05 标准测试入口），未 merge main
 - **日期**：2026-09-15
 
@@ -9,9 +9,10 @@
 > - `tests/model-ipc-ui.mjs` 10/10、`tests/model-bootstrap.test.mjs` 9/9（未知命令 DENY、write-only credential、actor/app 伪造无效、Confused Deputy DENY）。
 > - `tests/model-settings-ui.mjs` 16/16。
 > - `tests/model-keychain-restart.mjs` **64/64**：4 个独立 Electron 主进程共享同一 userData + 真实 `safeStorage`；重启后 credential 仍可用；replace→v2 / delete→DELETED 跨重启生效；旧 proxy capability 重启后 DENY、新 capability PASS；DB 有 credentialRef 而 secure item 缺失 → `CREDENTIAL_MISSING` 安全失败；无安全后端 → `CREDENTIAL_STORE_UNAVAILABLE`，无明文 fallback。
-> - 回归：`npm test` **494/494**、`npm run build` PASS、`test:d4-01` **31/31**、`test:d3-05` **13/13**、`test:security` FAIL 0/PARTIAL 2/PASS 6、security-surface **15/15**。
+> - **E** Full Secret Scan + 性能基线：`tests/model-secret-scan.test.mjs` 12/12（13 checks, 10 surfaces 0 hit）、`tests/model-secret-ui.mjs` **20/20**（真实 Electron DOM/preload/safeStorage blob/userData）、`tests/model-performance.test.mjs` 6/6（10 checks）。Provider Secret 在 DB/audit/call records/logs/Renderer/preload/Resource/Search/Preview/child/源码/生成文件/artifact 全部 0 hit；Provider error echo 已脱敏；capability token 不落盘。
+> - 回归：`npm test` **512/512**、`npm run build` PASS、`test:d4-01` **49/49**、`test:d3-05` **13/13**、`test:security` FAIL 0/PARTIAL 2/PASS 6、security-surface **15/15**。
 >
-> **仍未完成（Closure E/F）**：跨 DB/search/log/audit/renderer/Resource 的完整 secret scan、性能基线、Windows。因此 **D4-01 overall 仍 PARTIAL，D4-02 仍 BLOCK**。
+> **仍未完成**：**Closure F（全量 D3/UI 终局回归门）**、Windows、External Provider。因此 **D4-01 overall 仍 PARTIAL，D4-02 仍 BLOCK**。
 
 ## Scope
 Provider 管理、Endpoint 策略、Credential 安全保存、Model Registry、Capability、Personal/Organization 默认、Config Resolution、Authorization、单次 Chat、Usage、Error Normalization、secret 脱敏、schema v8 迁移、Model Proxy + scoped capability、IPC/preload、Settings UI、真实 Keychain 重启边界。**不实现** Task 调度 / Harness Task Loop / Tool 执行。
@@ -86,7 +87,17 @@ AUTH_FAILED / RATE_LIMITED / MODEL_NOT_FOUND / CAPABILITY_UNAVAILABLE / MODEL_TI
 `model_call_records` 只存安全 metadata（requestId / user / app / provider / model / configVersion / 时间 / status / tokens），不存 prompt/response，也不含 raw secret（Closure D）。
 
 ## Logging / Privacy
-secret 脱敏 `redactSecrets`；响应 / 库内不出现 raw key（测试断言）。Closure D 在真实重启流程中扫描整个 userData + artifact，raw secret 0 hit；跨 Resource/Search/Renderer 的完整扫描仍属 Closure E。
+secret 脱敏 `redactSecrets`；响应 / 库内不出现 raw key（测试断言）。Closure D 在真实重启流程中扫描整个 userData + artifact。**Closure E 完成全表面扫描**：SQLite（逻辑 + 文件字节）、authorization_audit、model_call_records、IdentityLogger、Resource Library、Search Index + FTS、Preview metadata、child env/argv/stdout/stderr、源码 + 生成文件、artifact、Renderer DOM/input/dataset/data-*、preload responses、真实 `credentials/*.bin`、整个 userData —— Provider Secret 全部 0 unauthorized hit；Proxy capability 完整 bearer 不落盘。provider error echo（错误体回显 raw secret）被归一化为安全错误码。
+
+## Secret Scan（Closure E）
+允许 raw secret 出现的位置只有：测试 setup 内存 / secure backend 加密前输入 / outgoing Provider Authorization header / fake Provider 收到的 Authorization header。硬 Gate：任一非允许位置命中 → Closure E = BLOCKED（不允许标 PARTIAL）。Provider Secret 与 Proxy Capability 分开：Provider Secret 绝不进 child；Capability 可进可信 child，但不进 logs/audit/Renderer/Resource/model_call_records/artifact（最多 capabilityId/hash/fingerprint 语义）。
+
+## Performance Baseline（Closure E）
+本机 macOS arm64（Apple M3 Pro / Node v22.22.3 / Electron 44.3.0），**非产品 SLA**：
+- Resolution（100 次/run ×3，真实授权）：Personal p50 0.12–0.14ms / p95 0.15–0.27ms；Organization p50 0.14–0.16ms / p95 0.15–0.22ms。
+- Proxy（10 并发/run ×3）：proxy p50 8.3–11.6ms；direct 3.4–6.2ms；近似 overhead 2.7–8.2ms（粗估，非精确拆分）；success 10/10、Provider 恰好 10 次请求、第 11 次 429。
+- Streaming TTFB 13.0ms；Memory smoke RSS +3.2MB / 30 loops（非 leak certification）；无 open handle。
+- 本轮**不实现** Task/Token/Cost Budget、Global Rate Limiter、Agent Scheduler。
 
 ## Tool-call Proposal
 Provider 返回 `tool_calls` 只作为结构化数据返回，**0 执行**（硬 Gate 测试）。
@@ -101,16 +112,16 @@ Provider 返回 `tool_calls` 只作为结构化数据返回，**0 执行**（硬
 `SCHEMA_VERSION = 8`；v1→current … v7→current、current→current、失败回滚由迁移套件覆盖（18/18）。
 
 ## macOS
-`npm test` **494/494**；`provider-adapter` 真实 localhost fake provider；proxy/capability/child/streaming/IPC/UI/keychain-restart 全部真实执行 PASS；`test:security` FAIL 0 / PARTIAL 2 / PASS 6。
+`npm test` **512/512**；`provider-adapter` 真实 localhost fake provider；proxy/capability/child/streaming/IPC/UI/keychain-restart/secret-scan/performance 全部真实执行 PASS；`test:security` FAIL 0 / PARTIAL 2 / PASS 6。
 
 ## Windows
 **NOT VERIFIED**（DPAPI / proxy / firewall / UI 未验）。
 
 ## D4-02 Handoff
-D4-01 已交付 Model Config / Credential / Registry / Resolution / Chat / Proxy + capability / child isolation / IPC / Settings UI / 真实 Keychain 重启边界。**D4-02 = BLOCK，直到 D4-01 完成 Closure E（完整 secret scan + 性能基线）与 Closure F（全量回归终局门）**。Harness raw key forbidden / ACP only / Model Proxy only / no production tool execution 约束不变。
+D4-01 已交付 Model Config / Credential / Registry / Resolution / Chat / Proxy + capability / child isolation / IPC / Settings UI / 真实 Keychain 重启边界 / Full Secret Scan + 性能基线。**D4-02 = BLOCK，直到 D4-01 完成 Closure F（全量回归终局门）**。Harness raw key forbidden / ACP only / Model Proxy only / no production tool execution 约束不变。
 
 ## Evidence
 见 `docs/D4-01-RESULT.md`。
 
 ## Remaining Gaps
-跨 DB/search/log/audit/renderer/Resource 的完整 secret scan；resolve/proxy 性能基线；Windows；External Provider 真机接入。
+Closure F（全量 D3/UI 终局回归门 + 最终 PASS 判定）；Windows；External Provider 真机接入。
