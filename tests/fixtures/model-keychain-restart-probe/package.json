@@ -1,0 +1,6 @@
+{
+  "name": "openarc-d4-01-keychain-restart-probe",
+  "private": true,
+  "version": "1.0.0",
+  "main": "main.cjs"
+}
