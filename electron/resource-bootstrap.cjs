@@ -59,6 +59,27 @@ const RENDERER_COMMANDS = Object.freeze([
   "resource/reindex",
   "resource/preview",
   "resource/thumbnail",
+  // D3-04D：集成 / Picker / Export
+  "resource/export",
+  "resource/revealSource",
+  "resource/pickerQuery",
+  "resource/pickerChoose",
+  "resource/pickerValidate",
+  "resource/listProjects",
+  "resource/getProject",
+  "resource/createProject",
+  "resource/addProjectMember",
+  "resource/removeProjectMember",
+  "resource/addProjectResource",
+  "resource/removeProjectResource",
+  "resource/listProjectResources",
+  "resource/listBoards",
+  "resource/createBoard",
+  "resource/getBoard",
+  "resource/addCanvasResource",
+  "resource/updateCanvasNode",
+  "resource/moveCanvasNode",
+  "resource/deleteCanvasNode",
 ]);
 
 /**
@@ -121,7 +142,7 @@ const pickerArgs = (command) => ({
  * 注册 resource:command。
  * 通道名必须是**字面量**（安全回归探针按字面量扫描 IPC 暴露面）。
  */
-function registerResourceIpc({ ipcMain, service, search = null, preview = null, identity, isTrusted, dialog = null, BrowserWindow = null }) {
+function registerResourceIpc({ ipcMain, service, search = null, preview = null, projects = null, canvas = null, picker = null, identity, isTrusted, dialog = null, BrowserWindow = null, shell = null }) {
   ipcMain.handle("resource:command", async (e, command) => {
     if (isTrusted && !isTrusted(e)) throw Error("Forbidden");
     if (!service) return { ok: false, error: "INTERNAL_ERROR", detail: "resource-not-ready" };
@@ -274,6 +295,80 @@ function registerResourceIpc({ ipcMain, service, search = null, preview = null, 
         case "resource/thumbnail":
           if (!preview) return { ok: false, error: "PREVIEW_UNAVAILABLE" };
           return preview.thumbnail({ context, resourceRef });
+        // ---- D3-04D：Resource Picker ----
+        case "resource/pickerQuery":
+          if (!picker) return { ok: false, error: "PICKER_UNAVAILABLE", items: [] };
+          return picker.query({ context, appId: command.pickerAppId || command.appId, resourceTypes: command.resourceTypes, requestedActions: command.requestedActions, collectionId: command.collectionId, departmentId: command.departmentId, query: typeof command.query === "string" ? command.query : "", limit: Number(command.limit) || undefined, offset: Number(command.offset) || 0 });
+        case "resource/pickerChoose":
+          if (!picker) return { ok: false, error: "PICKER_UNAVAILABLE" };
+          return picker.choose({ context, appId: command.pickerAppId || command.appId, resourceRef, requestedActions: command.requestedActions });
+        case "resource/pickerValidate":
+          if (!picker) return { ok: false, error: "PICKER_UNAVAILABLE" };
+          return picker.validateSelection({ context, selectionToken: command.selectionToken, action: command.action });
+        // ---- D3-04D：Projects ----
+        case "resource/listProjects":
+          if (!projects) return { ok: false, error: "INTEGRATION_UNAVAILABLE", items: [] };
+          return projects.listProjects({ context });
+        case "resource/getProject":
+          if (!projects) return { ok: false, error: "INTEGRATION_UNAVAILABLE" };
+          return projects.getProject({ context, projectId: command.projectId });
+        case "resource/createProject":
+          if (!projects) return { ok: false, error: "INTEGRATION_UNAVAILABLE" };
+          return projects.createProject({ context, name: command.name, description: command.description, departmentId: command.departmentId, scope: command.scope });
+        case "resource/addProjectMember":
+          if (!projects) return { ok: false, error: "INTEGRATION_UNAVAILABLE" };
+          return projects.addMember({ context, projectId: command.projectId, userId: command.userId, role: command.role });
+        case "resource/removeProjectMember":
+          if (!projects) return { ok: false, error: "INTEGRATION_UNAVAILABLE" };
+          return projects.removeMember({ context, projectId: command.projectId, userId: command.userId });
+        case "resource/addProjectResource":
+          if (!projects) return { ok: false, error: "INTEGRATION_UNAVAILABLE" };
+          return projects.addResource({ context, projectId: command.projectId, resourceRef });
+        case "resource/removeProjectResource":
+          if (!projects) return { ok: false, error: "INTEGRATION_UNAVAILABLE" };
+          return projects.removeResource({ context, projectId: command.projectId, resourceRef });
+        case "resource/listProjectResources":
+          if (!projects) return { ok: false, error: "INTEGRATION_UNAVAILABLE", items: [] };
+          return projects.listProjectResources({ context, projectId: command.projectId });
+        // ---- D3-04D：Canvas ----
+        case "resource/listBoards":
+          if (!canvas) return { ok: false, error: "INTEGRATION_UNAVAILABLE", items: [] };
+          return canvas.listBoards({ context });
+        case "resource/createBoard":
+          if (!canvas) return { ok: false, error: "INTEGRATION_UNAVAILABLE" };
+          return canvas.createBoard({ context, name: command.name });
+        case "resource/getBoard":
+          if (!canvas) return { ok: false, error: "INTEGRATION_UNAVAILABLE" };
+          return canvas.getBoard({ context, boardId: command.boardId });
+        case "resource/addCanvasResource":
+          if (!canvas) return { ok: false, error: "INTEGRATION_UNAVAILABLE" };
+          return canvas.addResourceNode({ context, boardId: command.boardId, resourceRef, versionMode: command.versionMode, x: command.x, y: command.y });
+        case "resource/updateCanvasNode":
+          if (!canvas) return { ok: false, error: "INTEGRATION_UNAVAILABLE" };
+          return canvas.updateNodeToLatest({ context, nodeId: command.nodeId });
+        case "resource/moveCanvasNode":
+          if (!canvas) return { ok: false, error: "INTEGRATION_UNAVAILABLE" };
+          return canvas.moveNode({ context, nodeId: command.nodeId, x: command.x, y: command.y });
+        case "resource/deleteCanvasNode":
+          if (!canvas) return { ok: false, error: "INTEGRATION_UNAVAILABLE" };
+          return canvas.deleteNode({ context, nodeId: command.nodeId });
+        // ---- D3-04D：Export / Reveal（路径只经主进程 dialog / OS action） ----
+        case "resource/export": {
+          if (!dialog || typeof dialog.showSaveDialog !== "function") return { ok: false, error: "EXPORT_UNAVAILABLE" };
+          const meta = service.get({ context, resourceRef });
+          const suggested = meta && meta.ok && meta.resource ? String(meta.resource.name || "resource") : "resource";
+          const parent = BrowserWindow && e && e.sender ? BrowserWindow.fromWebContents(e.sender) : null;
+          const picked = parent ? await dialog.showSaveDialog(parent, { defaultPath: suggested }) : await dialog.showSaveDialog({ defaultPath: suggested });
+          if (!picked || picked.canceled || !picked.filePath) return { ok: false, error: "CANCELLED" };
+          return service.exportToFile({ context, resourceRef, targetPath: picked.filePath });
+        }
+        case "resource/revealSource": {
+          if (!shell || typeof shell.showItemInFolder !== "function") return { ok: false, error: "REVEAL_UNAVAILABLE" };
+          const resolved = service.resolveRevealPath({ context, resourceRef });
+          if (!resolved.ok) return resolved;
+          shell.showItemInFolder(resolved.path);
+          return { ok: true, revealed: true };
+        }
         default:
           return { ok: false, error: "INVALID_INPUT" };
       }

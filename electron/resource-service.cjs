@@ -483,6 +483,51 @@ class ResourceService {
     return ok({ stream, size: effective.size, mimeType: row.mime_type, checksum: null, storageMode: STORAGE_MODE.LINKED, deviceId: effective.storage_device_id || LOCAL_DEVICE_ID });
   }
 
+  /**
+   * D3-04D：受控 Export。**同时**要求 resource.export 与 canRead（read() 内校验），
+   * 因此 App 不能借 Export 绕过 read 权限。targetPath 只能来自主进程 dialog，不来自 Renderer。
+   */
+  async exportToFile({ context, resourceRef, targetPath } = {}) {
+    this.#ensureBuiltinPolicy(context);
+    const id = this.#parseRef(resourceRef);
+    const row = id ? this.store.resourceRowById(id) : null;
+    if (!row) return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
+    const exportAuth = this.authService.authorize({ context, action: authz.ACTION.EXPORT, resource: id });
+    if (exportAuth.decision !== "ALLOW") return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
+    if (!targetPath) return fail(REASON.INVALID_INPUT, "target");
+    const r = this.read({ context, resourceRef });
+    if (!r.ok) return r;
+    const { pipeline } = require("node:stream/promises");
+    const { Transform } = require("node:stream");
+    let bytes = 0;
+    try {
+      await pipeline(
+        r.stream,
+        new Transform({ transform(chunk, _enc, cb) { bytes += chunk.length; cb(null, chunk); } }),
+        fs.createWriteStream(String(targetPath)),
+      );
+    } catch {
+      return fail(REASON.INTERNAL_ERROR, "export-failed");
+    }
+    return ok({ bytes, mimeType: r.mimeType, size: bytes });
+  }
+
+  /** D3-04D：LINKED Resource 的受控 Reveal Source（路径只在本方法内返回给主进程，绝不回 Renderer）。 */
+  resolveRevealPath({ context, resourceRef } = {}) {
+    this.#ensureBuiltinPolicy(context);
+    const id = this.#parseRef(resourceRef);
+    const row = id ? this.store.resourceRowById(id) : null;
+    if (!row) return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
+    const auth = this.authService.authorize({ context, action: authz.ACTION.READ, resource: id });
+    if (auth.decision !== "ALLOW") return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
+    if (row.storage_mode !== STORAGE_MODE.LINKED) return fail(REASON.PREVIEW_UNSUPPORTED, "not-linked");
+    if ((row.storage_device_id || LOCAL_DEVICE_ID) !== LOCAL_DEVICE_ID) return fail(REASON.REMOTE_DEVICE_CONTENT_UNSUPPORTED);
+    const avail = this.#availability(row, context);
+    if (avail.availability !== AVAILABILITY.AVAILABLE) return fail(avail.reason || avail.availability);
+    if (!row.source_locator) return fail(REASON.SOURCE_MISSING);
+    return ok({ path: row.source_locator });
+  }
+
   async readText({ context, resourceRef, maxBytes = domain.MAX_READ_TEXT_BYTES } = {}) {
     const res = this.read({ context, resourceRef });
     if (!res.ok) return res;

@@ -79,4 +79,15 @@ contextBridge.exposeInMainWorld("openarc", {
   resource: {
     command: (command) => ipcRenderer.invoke("resource:command", command),
   },
+  /**
+   * D3-04D 治理桥。
+   *
+   * 治理写操作（用户 / 部门 / 权限 / App / Ownership / Scope）现在有了正式管理端，
+   * 但仍**不暴露** raw SQL / raw ACL 表 / 凭据读取：只有受控治理命令；
+   * sessionRef 由主进程注入，每个动作在 GovernanceService / AuthorizationService 内再次校验。
+   * 返回对象是 safe projection —— password hash / salt / session token / device key 永不出现。
+   */
+  governance: {
+    command: (command) => ipcRenderer.invoke("governance:command", command),
+  },
 });

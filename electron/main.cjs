@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, safeStorage, screen, dialog, protocol, nativeImage } = require("electron");
+const { app, BrowserWindow, ipcMain, safeStorage, screen, dialog, protocol, nativeImage, shell } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const { pathToFileURL } = require("node:url");
@@ -109,7 +109,13 @@ app.whenReady().then(() => {
     resource: identity.resourceService,
     resourceSearch: identity.searchService,
     resourcePreview: identity.previewService,
+    // D3-04D：治理 / Projects / Canvas / Picker。
+    governance: identity.governanceService,
+    projects: identity.projectService,
+    canvas: identity.canvasService,
+    picker: identity.pickerService,
     dialog,
+    shell,
     BrowserWindow,
     isTrusted: trusted,
     send: (event) => {
