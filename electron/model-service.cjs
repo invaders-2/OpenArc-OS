@@ -183,7 +183,7 @@ class ModelService {
       const auth = this.#authorize({ context, action: domain.MODEL_ACTIONS.USE, config, provider });
       if (!auth.ok) return auth;
     }
-    return { ok: true, snapshot: { modelConfigId: config.config_id, modelConfigVersion: config.version, providerId: provider.provider_id, modelId: config.remote_model_id, capabilities: caps, verifiedCapabilities: JSON.parse(config.verified_capabilities || "[]"), baseUrl: provider.base_url, endpointScope: provider.endpoint_scope, adapterType: provider.adapter_type, credentialRef: provider.credential_ref, source, scope: config.scope } };
+    return { ok: true, snapshot: { userId: actor.user.id, modelConfigId: config.config_id, modelConfigVersion: config.version, providerId: provider.provider_id, modelId: config.remote_model_id, capabilities: caps, verifiedCapabilities: JSON.parse(config.verified_capabilities || "[]"), baseUrl: provider.base_url, endpointScope: provider.endpoint_scope, adapterType: provider.adapter_type, credentialRef: provider.credential_ref, source, scope: config.scope } };
   }
 
   // ---- Credentials (write-only) ----
