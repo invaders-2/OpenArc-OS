@@ -82,7 +82,7 @@ class ModelProxy {
   async stop() { if (!this.server) return; const s = this.server; this.server = null; this.baseUrl = null; this.capabilities.clear(); await new Promise((r) => s.close(r)); }
 
   async #handle(req, res) {
-    const send = (status, obj) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(obj)); };
+    const send = (status, obj) => { if (res.writableEnded || res.destroyed) return; res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(obj)); };
     if (req.method !== "POST" || req.url !== "/v1/chat/completions") return send(404, { ok: false, error: "NOT_FOUND" });
     const check = this.#check(req);
     if (!check.ok) return send(check.status, { ok: false, error: check.error, detail: check.detail || null });
@@ -102,7 +102,10 @@ class ModelProxy {
     if (!resolved.ok) return send(403, { ok: false, error: resolved.error });
     // config version 变化 → 旧 capability 不再继续请求
     if (cap.modelConfigVersion != null && resolved.snapshot.modelConfigVersion !== cap.modelConfigVersion) return send(403, { ok: false, error: domain.ERROR_CODE.MODEL_CONFIG_UNAVAILABLE, detail: "STALE_CAPABILITY" });
-    const result = await this.modelService.chat({ context, configId: cap.modelConfigId, capability, messages: Array.isArray(body.messages) ? body.messages : [], tools: body.tools || null, params: body.params || {}, stream: false, requestId: body.requestId || null });
+    // 客户端断开（D4-02B cancel）→ 取消在途 Provider 调用，关闭上游连接；不 retry。
+    const controller = new AbortController();
+    res.on("close", () => { if (!res.writableEnded) controller.abort(new Error("client-cancelled")); });
+    const result = await this.modelService.chat({ context, configId: cap.modelConfigId, capability, messages: Array.isArray(body.messages) ? body.messages : [], tools: body.tools || null, params: body.params || {}, stream: false, requestId: body.requestId || null, signal: controller.signal });
     if (!result.ok) return send(403, { ok: false, error: result.error });
     return send(200, { ok: true, requestId: result.requestId, text: result.text, toolCalls: result.toolCalls, usage: result.usage, snapshot: result.snapshot });
   }
