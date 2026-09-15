@@ -1706,6 +1706,11 @@ input[type="checkbox"] {
   background: rgba(255, 255, 255, 0.14);
 }
 /* 只有"松手落格"这一段有过渡：拖动过程必须 1:1 跟手（reduced motion 下 token 为 0ms） */
+/* 拖拽中的落点提示：只加底色，不画线框（与选中态同一口径） */
+[data-drop-folder].drop-target,
+.file-cell.drop-target {
+  background: rgb(var(--text-rgb) / 0.14);
+}
 /* 桌面框选 / 多选后的选中态：**只有填充、没有线框** ——
    与上面 focus 那条同一口径（用户口径：选择时不要出现线框，底色再淡一点）。 */
 .desktop-folder.selected,

@@ -670,6 +670,11 @@ function App() {
       setFolders((fs) => fs.map((v) => (v.id === id ? { ...v, x: p.x, y: p.y } : v)));
     else setDesktopIcons((m) => ({ ...m, [id]: p }));
   };
+  /** 桌面图标的坐标夹取（不越出可视区、不压住顶栏与程序坞）。 */
+  const clampDeskPos = (p: { x: number; y: number }) => ({
+    x: Math.max(0, Math.min(innerWidth - 96, p.x)),
+    y: Math.max(52, Math.min(innerHeight - 140, p.y)),
+  });
   /** 落格：把条目动画到栅格（只有这一步用过渡，所以看起来是"轻轻吸过去"而不是跳）。 */
   const settleEntry = (id: string, pos: { x: number; y: number }) => {
     setDeskEntryPos(id, pos);
@@ -750,26 +755,77 @@ function App() {
     const x0 = e.clientX;
     const y0 = e.clientY;
     const starts = ids.map((x) => [x, deskEntryPos(x)] as const);
+    /**
+     * 松手 / 悬停时"会落进哪个文件夹"。三条判据，从严到宽：
+     *   1. 指针底下就是文件夹（窗口里的小文件夹格子优先于它所在的窗口）；
+     *   2. 指针压在"正在拖的这个图标"上时，用图标真实矩形与文件夹求交；
+     *   3. 重叠面积要盖住图标的三成 —— 路过蹭一下不算，摆上去才算。
+     * 用户口径：「移动文件到文件夹，自动放进文件夹里」。
+     */
+    const dropRef = { el: null as HTMLElement | null };
+    const asTarget = (node: Element | null): { el: HTMLElement; id: string } | null => {
+      if (!node) return null;
+      const cell = node.closest<HTMLElement>(".file-cell[data-entry-id]");
+      const cellId = cell?.dataset.entryId;
+      // 窗口里显示的"子文件夹格子"优先：拖到哪个文件夹上就进哪个
+      if (cell && cellId && folders.some((v) => v.id === cellId) && !ids.includes(cellId))
+        return { el: cell, id: cellId };
+      const holder = node.closest<HTMLElement>("[data-drop-folder]");
+      const holderId = holder?.dataset.dropFolder;
+      if (holder && holderId && holderId !== DESKTOP_ID && !ids.includes(holderId))
+        return { el: holder, id: holderId };
+      return null;
+    };
+    // 被拖图标的矩形用**状态里的位置**算，不读 DOM —— DOM 慢一帧，高亮会晚一步
+    // （实测：松手时能进文件夹，拖动过程中却不亮）
+    const rectAt = (dx: number, dy: number) => {
+      const found = starts.find(([x]) => x === id);
+      const s = found ? found[1] : { x: 0, y: 0 };
+      const p = clampDeskPos({ x: s.x + dx, y: s.y + dy });
+      return { left: p.x, top: p.y, right: p.x + el.offsetWidth, bottom: p.y + el.offsetHeight };
+    };
+    const resolveTarget = (clientX: number, clientY: number, rect: { left: number; top: number; right: number; bottom: number }) => {
+      const under = asTarget(document.elementFromPoint(clientX, clientY));
+      if (under) return under;
+      let best: { el: HTMLElement; id: string } | null = null;
+      let bestArea = 0;
+      document.querySelectorAll<HTMLElement>("[data-drop-folder]").forEach((c) => {
+        const hit = asTarget(c);
+        if (!hit || hit.el !== c) return;
+        const r = c.getBoundingClientRect();
+        const w = Math.min(r.right, rect.right) - Math.max(r.left, rect.left);
+        const h = Math.min(r.bottom, rect.bottom) - Math.max(r.top, rect.top);
+        const area = w > 0 && h > 0 ? w * h : 0;
+        if (area > bestArea) {
+          bestArea = area;
+          best = hit;
+        }
+      });
+      return best && bestArea >= (rect.right - rect.left) * (rect.bottom - rect.top) * 0.3 ? best : null;
+    };
+    const markTarget = (node: HTMLElement | null) => {
+      const ref = dropRef as { el: HTMLElement | null };
+      if (ref.el === node) return;
+      ref.el?.classList.remove("drop-target");
+      ref.el = node;
+      node?.classList.add("drop-target");
+    };
     el.setPointerCapture(e.pointerId);
     const move = (ev: Event) => {
       const p = ev as PointerEvent;
       const dx = p.clientX - x0;
       const dy = p.clientY - y0;
-      for (const [x, s] of starts)
-        setDeskEntryPos(x, {
-          x: Math.max(0, Math.min(innerWidth - 96, s.x + dx)),
-          y: Math.max(52, Math.min(innerHeight - 140, s.y + dy)),
-        });
+      for (const [x, s] of starts) setDeskEntryPos(x, clampDeskPos({ x: s.x + dx, y: s.y + dy }));
+      markTarget(resolveTarget(p.clientX, p.clientY, rectAt(dx, dy))?.el ?? null);
     };
     const end = (ev?: PointerEvent) => {
       el.removeEventListener("pointermove", move);
       el.removeEventListener("pointerup", end);
       el.removeEventListener("pointercancel", end);
-      const dropped = ev ? (document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null) : null;
-      const targetId = dropped?.closest<HTMLElement>("[data-drop-folder]")?.dataset.dropFolder;
-      // 拖动中的图标本身就在指针下，不能把自己当目标
-      if (targetId && targetId !== DESKTOP_ID && !ids.includes(targetId)) {
-        void moveInto(targetId, DESKTOP_ID, ids).then(() => {
+      const hit = ev ? resolveTarget(ev.clientX, ev.clientY, rectAt(ev.clientX - x0, ev.clientY - y0)) : null;
+      markTarget(null);
+      if (hit) {
+        void moveInto(hit.id, DESKTOP_ID, ids).then(() => {
           setDesktopIcons((m) => {
             const out = { ...m };
             for (const x of ids) delete out[x];
