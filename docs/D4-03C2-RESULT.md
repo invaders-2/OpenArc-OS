@@ -99,14 +99,15 @@ dispatch 后调用真实 Domain verifier（重新读取 Resource Domain，`trash
 | Gate | 结果 |
 |---|---|
 | `npm run test:d4-03c2` | **29 / 29 PASS** |
-| `npm run test:d4-03c2-closure` | **39 / 39 PASS** |
+| `npm run test:d4-03c2-closure` | **38 / 38 PASS** |
+| `npm run test:d4-03c2-closure2` | **45 / 45 PASS** |
 | `npm run test:d4-03c1` | 46 / 46 PASS |
 | `npm run test:d4-03c1-closure` | 50 / 50 PASS |
 | `npm run test:d4-03b` | 59 / 59 PASS |
 | `npm run test:d4-03a` | 32 / 32 PASS |
 | `npm run test:d4-02a / b / c` | 22 / 16 / 22 PASS |
 | `npm run test:d4-01` | 59 / 59 PASS |
-| `npm test` | **762 / 762 PASS** |
+| `npm test` | **768 / 768 PASS** |
 | `npm run build` | PASS |
 | `npm run test:security` | FAIL 0 / PARTIAL 2 / PASS 6（无新增 FAIL / PARTIAL） |
 

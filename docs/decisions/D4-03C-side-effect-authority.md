@@ -1,6 +1,6 @@
 # D4-03C1 · Side-effect Authority / Approval / Lease Contract（macOS）
 
-- **状态**：**D4-03C1 = PASS candidate**；**D4-03C2 = PASS candidate**、**D4-03C2 Closure = PASS candidate**（1 条受控真实 REVERSIBLE_WRITE + execution ownership 强制 + 真实 duplicate claim contention + eligibility→claim TOCTOU fail closed，待 ChatGPT 审计）；**D4-03C overall = PARTIAL**；**D4-03C3 = 未开始**
+- **状态**：**D4-03C1 = PASS candidate**；**D4-03C2 = PASS candidate**、**D4-03C2 Closure = PASS candidate**、**D4-03C2 Closure-2 = PASS candidate**（1 条受控真实 REVERSIBLE_WRITE + runtime-owned instance identity + exact leaseId claim authority + 真实 claim contention/TOCTOU fail closed，待 ChatGPT 审计）；**D4-03C overall = PARTIAL**；**D4-03C3 = 未开始**
 - **分支**：feature/d4-03-tool-proxy，基线 809e8fa，未 merge main
 - **日期**：2026-09-15
 
@@ -68,13 +68,22 @@ Approval/Lease 都持久化。`recoverOnStartup()` 是 fail-safe contract：**�
 
 本阶段唯一 production write tool：`resource.trash` v1，riskClass = REVERSIBLE_WRITE，executionProvider = ResourceService，resourceActions = [`resource.delete`]，requiredPermissions = [`tool.resource.trash`]，verificationStrategy = READ_AFTER_WRITE，idempotencySupport = true，executionPolicy = **CONTROLLED_REVERSIBLE_WRITE**。输入只允许 `resourceRef`；`expectedVersion` / expectedEffects 由 adapter.plan() 从真实 Domain state 生成。真实 mutation 只能经 **ResourceService.delete()**，绝不直接 SQL。
 
-## Execution ownership（mandatory）
+## Execution ownership（mandatory，runtime-owned）
 
-`ACTIVE Lease ownership = callId + leaseId + holderId + holderInstanceId`。production `executeSideEffect` 必须携带完整 trusted executor identity；缺少任一字段 → `SIDE_EFFECT_LEASE_NOT_HELD` / 0 Domain invocation。禁止 `if (holderInstanceId) { check }` 这种 optional authority：`lease.holderInstanceId === holderInstanceId` 是继续执行的硬条件。Harness 永远不能提供这些字段。eligibility 的 lease snapshot 也带 `holder_instance_id`，同时校验 holder + instance。
+`ACTIVE Lease ownership = callId + exact leaseId + holderId + runtime instance (SideEffectAuthority.instanceId)`。
+
+- **runtime identity 是 OpenArc 自身事实**：production `executeSideEffect({ callId, leaseId, holderId })` 不再接受 caller 提供的 `holderInstanceId`（即使传入也**完全忽略**）；判断一律为 `lease.holderInstanceId === this.instanceId`。调用方无法声明"我是哪个 runtime"，跨进程 Runtime B 即使知道 `instA` 字符串也不能伪装。
+- `acquireLease` 同样把 lease 绑定到 `this.instanceId`；只有明确的 test-only seam `_testInstanceId` 可覆盖（不得进入 production API）。
+- 缺少 callId / leaseId / holderId → `SIDE_EFFECT_LEASE_NOT_HELD` / 0 Domain invocation。
+- eligibility 的 lease snapshot 带 `lease_id + call_id + holder_id + holder_instance_id + expires_at`，同时校验 exact leaseId + holder + runtime instance。
 
 ## Execution claim（exactly once + TOCTOU-safe）
 
-`executeSideEffect` 先同步完成 gate（tool/version、eligibility、holder/instance、leaseId），再在**一个 BEGIN IMMEDIATE 事务内**重新读取 persisted authority state（Task RUNNING/未 cancel、Step RUNNING、run 仍 current、session/auth 有效、app enabled、tool permission + resource permission/useByAgent 有效、Approval 有效、Lease ACTIVE + holder/instance 匹配、precondition/version 未变）并**原子 claim** `LEASED → RUNNING`——只有唯一 claim 成功者能 dispatch Domain mutation。`Eligibility snapshot != execution authority forever`：Eligibility(T1) 后任一 state 变化都必须 fail closed。跨连接 SQLite contention 收敛为 `SIDE_EFFECT_EXECUTION_CLAIM_LOST`，不暴露可 retry 语义。
+`executeSideEffect` 先同步完成 gate（tool/version、eligibility、exact leaseId + holder + runtime instance），再在**一个 BEGIN IMMEDIATE 事务内**重新读取 persisted authority state（Task RUNNING/未 cancel、Step RUNNING、run 仍 current、session/auth 有效、app enabled、tool permission + resource permission/useByAgent 有效、Approval 有效、**exact Lease ACTIVE + expectedLeaseId + holder + runtime instance 匹配**、precondition/version 未变）并**原子 claim** `LEASED → RUNNING`——只有唯一 claim 成功者能 dispatch Domain mutation。
+
+- **exact leaseId 是 claim authority**：即使同一 holderId + 同一 runtime，只要 ACTIVE lease 已换成 `lease_B`，携带 `lease_A` 的旧 invocation 一律 `SIDE_EFFECT_LEASE_NOT_HELD`；只有携带 `lease_B` 且重新通过完整 gate 的全新 invocation 才可执行。
+- **claim-time approval binding 不得比 Eligibility 更弱**：planHash / argumentsHash / toolId / toolVersion / effectClass / decision / expiry / revoke 全部精确匹配。
+- `Eligibility snapshot != execution authority forever`；跨连接 SQLite contention 收敛为 `SIDE_EFFECT_EXECUTION_CLAIM_LOST`，不暴露可 retry 语义。
 
 ## Verification（Execution != Verified Effect）
 

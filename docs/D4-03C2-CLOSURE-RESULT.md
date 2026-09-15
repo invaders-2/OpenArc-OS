@@ -1,6 +1,7 @@
 # D4-03C2 Closure · Execution Ownership / Atomic Claim（macOS）
 
-- **状态**：**D4-03C2 Closure = PASS candidate**（待 ChatGPT 审计）；**D4-03C2 = PASS candidate**；**D4-03C overall = PARTIAL**；**D4-03C3 = NOT STARTED**（禁止自动进入）
+- **状态**：**D4-03C2 Closure = PASS candidate**、**D4-03C2 Closure-2 = PASS candidate**（待 ChatGPT 审计）；**D4-03C2 = PASS candidate**；**D4-03C overall = PARTIAL**；**D4-03C3 = NOT STARTED**（禁止自动进入）
+- **Closure-2 详情**：见 `docs/D4-03C2-CLOSURE2-RESULT.md`（runtime-owned instance identity + exact leaseId claim authority）
 - **分支**：feature/d4-03-tool-proxy
 - **Schema**：保持 **v13**（未新增字段 / 未升版本）
 - **机器**：macOS arm64 Apple M3 Pro / Node v22.22.3
@@ -67,13 +68,14 @@ resource.trash production contract、REVERSIBLE_WRITE only、Proposal→Decision
 | Gate | 结果 |
 |---|---|
 | `npm run test:d4-03c2` | **29 / 29 PASS** |
-| `npm run test:d4-03c2-closure` | **39 / 39 PASS** |
+| `npm run test:d4-03c2-closure` | **38 / 38 PASS**（Closure-2 起，原 cross-process identity-sharing contention 用例被 §9 判定无效并移除） |
+| `npm run test:d4-03c2-closure2` | **45 / 45 PASS** |
 | `npm run test:d4-03c1` | 46 / 46 PASS |
 | `npm run test:d4-03c1-closure` | 50 / 50 PASS |
 | `npm run test:d4-03b` / `test:d4-03a` | 59 / 59；32 / 32 PASS |
 | `npm run test:d4-02a / b / c` | 22 / 16 / 22 PASS |
 | `npm run test:d4-01` | 59 / 59 PASS |
-| `npm test` | **762 / 762 PASS** |
+| `npm test` | **768 / 768 PASS** |
 | `npm run build` | PASS |
 | `npm run test:security` | FAIL 0 / PARTIAL 2 / PASS 6（无新增 FAIL / PARTIAL） |
 
