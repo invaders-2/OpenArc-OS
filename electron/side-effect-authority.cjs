@@ -5,11 +5,12 @@
  * 六层合同落成受信任的 OpenArc Authority。
  * D4-03C1 只判定 eligibility，不执行；D4-03C2 新增**唯一**受控真实写入入口
  * `executeSideEffect`：只有显式声明 executionPolicy = CONTROLLED_REVERSIBLE_WRITE 的
- * contract（本阶段仅 resource.trash）才可能执行。execution ownership = callId + leaseId +
- * holderId + holderInstanceId，四者缺一即 DENY；再在同一 BEGIN IMMEDIATE 事务内重校验
- * authority snapshot（Task/Step/Run/session/app/tool/resource permission/approval/lease/
- * precondition）并原子 claim LEASED → RUNNING，只有唯一 claim 成功者 dispatch 真实 Domain，
- * 最后经真实 Domain verifier PASS 才置 SUCCEEDED。
+ * contract（本阶段仅 resource.trash）才可能执行。
+ * execution ownership = callId + exact leaseId + holderId + runtime instance，其中 runtime
+ * instance 只来自 OpenArc 自身（this.instanceId），execute caller 无权声明；缺少任一字段即 DENY。
+ * 再在同一 BEGIN IMMEDIATE 事务内重校验 authority snapshot（Task/Step/Run/session/app/tool/
+ * resource permission/approval/exact lease/precondition）并原子 claim LEASED → RUNNING，
+ * 只有唯一 claim 成功者 dispatch 真实 Domain，最后经真实 Domain verifier PASS 才置 SUCCEEDED。
  *
  * 永久冻结：
  * - callId / idempotencyKey / effectClass / expectedEffects 一律 OpenArc 生成，
@@ -303,7 +304,7 @@ class SideEffectAuthority {
   }
 
   /** 每个 call 至多一个 ACTIVE lease；同一 holder 重复 acquire 幂等返回既有 lease。 */
-  acquireLease({ context = {}, callId, holderId, instanceId = null, ttlMs = DEFAULT_LEASE_TTL_MS, _leaseId = null } = {}) {
+  acquireLease({ context = {}, callId, holderId, ttlMs = DEFAULT_LEASE_TTL_MS, _leaseId = null, _testInstanceId = null } = {}) {
     if (!holderId) return { ok: false, error: SIDE_EFFECT_ERROR.INVALID_INPUT };
     const call = this.store.callById(callId);
     if (!call) return { ok: false, error: SIDE_EFFECT_ERROR.CALL_NOT_FOUND };
@@ -329,7 +330,8 @@ class SideEffectAuthority {
             : SIDE_EFFECT_ERROR.PLAN_STALE;
           return { ok: false, error: reason };
         }
-        const lease = this.store.insertLease({ leaseId: _leaseId || undefined, callId, holderId, holderInstanceId: instanceId || this.instanceId, status: LEASE_STATUS.ACTIVE, issuedAt: now, expiresAt: now + Math.max(1, Number(ttlMs) || DEFAULT_LEASE_TTL_MS) });
+        // production：lease 绑定 OpenArc runtime 自身 identity；_testInstanceId 是明确的 test-only seam。
+        const lease = this.store.insertLease({ leaseId: _leaseId || undefined, callId, holderId, holderInstanceId: _testInstanceId || this.instanceId, status: LEASE_STATUS.ACTIVE, issuedAt: now, expiresAt: now + Math.max(1, Number(ttlMs) || DEFAULT_LEASE_TTL_MS) });
         this.store.updateCall(callId, { status: CALL_STATUS.LEASED, leased_at: now });
         return { ok: true, duplicate: false, lease };
       });
@@ -368,7 +370,7 @@ class SideEffectAuthority {
   }
 
   /** 完整 Execution Eligibility（只读；不执行任何 mutation）。 */
-  evaluateExecutionEligibility({ context = {}, callId, holderId = null, holderInstanceId = null, requestArgumentsHash = null } = {}) {
+  evaluateExecutionEligibility({ context = {}, callId, holderId = null, leaseId = null, holderInstanceId = null, requestArgumentsHash = null } = {}) {
     const raw = this.store.rawCallById(callId);
     const call = this.store.callById(callId);
     if (!call) return { ok: false, status: ELIGIBILITY.DENIED, reasonCode: SIDE_EFFECT_ERROR.CALL_NOT_FOUND, call: null };
@@ -398,8 +400,9 @@ class SideEffectAuthority {
       tool,
       authorization,
       approval,
-      lease: lease ? { call_id: lease.callId, status: lease.status, holder_id: lease.holderId, holder_instance_id: lease.holderInstanceId, expires_at: lease.expiresAt } : null,
+      lease: lease ? { call_id: lease.callId, lease_id: lease.leaseId, status: lease.status, holder_id: lease.holderId, holder_instance_id: lease.holderInstanceId, expires_at: lease.expiresAt } : null,
       holderId,
+      leaseId,
       holderInstanceId,
       planHash: call.planHash,
       argumentsHash: call.argumentsHash,
@@ -544,7 +547,7 @@ class SideEffectAuthority {
    * permission/useByAgent/approval/lease/precondition）都必须在同一 BEGIN IMMEDIATE 事务内
    * 重新读取并拒绝，0 Domain invocation / 0 mutation。绝不建第二套权限或 execution state。
    */
-  #verifyAuthoritySnapshot({ callId, call, holderId = null, holderInstanceId = null, now }) {
+  #verifyAuthoritySnapshot({ callId, call, expectedLeaseId = null, holderId = null, runtimeInstanceId = null, now }) {
     const failWith = (reason) => ({ ok: false, reason });
     const task = this.taskStore.taskById(call.taskId);
     if (!task) return failWith(SIDE_EFFECT_ERROR.TASK_NOT_FOUND);
@@ -567,7 +570,14 @@ class SideEffectAuthority {
     if (!authorization.ok) return failWith(SIDE_EFFECT_ERROR.AUTHORIZATION_REVOKED);
     if (!this.#preconditionsOk(call)) return failWith(SIDE_EFFECT_ERROR.PRECONDITION_CHANGED);
     const approval = this.store.latestApprovalOfCall(callId);
-    const approvalOk = approval && approval.decision === APPROVAL_DECISION.APPROVED && approval.revokedAt == null && (approval.expiresAt == null || now < Number(approval.expiresAt)) && approval.planHash === call.planHash && (approval.approvedArgumentsHash == null || approval.approvedArgumentsHash === call.argumentsHash);
+    // claim-time approval binding 不得比 Eligibility 更弱：plan/args/tool/version/effectClass 全部精确匹配。
+    const approvalOk = approval && approval.decision === APPROVAL_DECISION.APPROVED && approval.revokedAt == null
+      && (approval.expiresAt == null || now < Number(approval.expiresAt))
+      && approval.planHash === call.planHash
+      && approval.approvedArgumentsHash === call.argumentsHash
+      && approval.approvedToolId === call.toolId
+      && Number(approval.approvedToolVersion) === Number(call.toolVersion)
+      && approval.approvedEffectClass === call.effectClass;
     if (!approvalOk) {
       const reason = !approval ? SIDE_EFFECT_ERROR.APPROVAL_REQUIRED
         : approval.decision === APPROVAL_DECISION.REVOKED ? SIDE_EFFECT_ERROR.APPROVAL_REVOKED
@@ -575,12 +585,14 @@ class SideEffectAuthority {
         : SIDE_EFFECT_ERROR.PLAN_STALE;
       return failWith(reason);
     }
+    // exact lease authority：active lease 必须就是 expectedLeaseId，且 holder + runtime instance 全匹配。
     const lease = this.store.activeLeaseOfCall(callId);
     if (!lease || String(lease.status) !== LEASE_STATUS.ACTIVE) return failWith(SIDE_EFFECT_ERROR.LEASE_REQUIRED);
     if (lease.callId !== callId) return failWith(SIDE_EFFECT_ERROR.LEASE_REQUIRED);
-    if (lease.expiresAt != null && now >= Number(lease.expiresAt)) return failWith(SIDE_EFFECT_ERROR.LEASE_EXPIRED);
+    if (expectedLeaseId != null && lease.leaseId !== expectedLeaseId) return failWith(SIDE_EFFECT_ERROR.LEASE_NOT_HELD);
     if (holderId != null && lease.holderId !== holderId) return failWith(SIDE_EFFECT_ERROR.LEASE_NOT_HELD);
-    if (holderInstanceId != null && lease.holderInstanceId !== holderInstanceId) return failWith(SIDE_EFFECT_ERROR.LEASE_NOT_HELD);
+    if (runtimeInstanceId != null && lease.holderInstanceId !== runtimeInstanceId) return failWith(SIDE_EFFECT_ERROR.LEASE_NOT_HELD);
+    if (lease.expiresAt != null && now >= Number(lease.expiresAt)) return failWith(SIDE_EFFECT_ERROR.LEASE_EXPIRED);
     return { ok: true, leaseId: lease.leaseId };
   }
 
@@ -592,8 +604,11 @@ class SideEffectAuthority {
    * 就自动获得执行能力。dispatch Domain mutation 前先原子 claim LEASED → RUNNING，
    * 只有唯一 claim 成功的 executor 才能调用真实 Domain。
    */
-  executeSideEffect({ context = {}, callId = null, leaseId = null, holderId = null, holderInstanceId = null, timeoutMs = 15000 } = {}) {
+  executeSideEffect({ callId = null, leaseId = null, holderId = null, timeoutMs = 15000 } = {}) {
     const want = (error, extra = {}) => ({ ok: false, executed: false, duplicate: false, mutationCount: 0, call: this.store.callById(callId), error, ...extra });
+    // runtime identity 只来自 OpenArc 自身（this.instanceId）。调用方提供的任何 holderInstanceId
+    // 一律被忽略（本方法不再接受该参数），绝不能用来声明"我是哪个 runtime"。
+    const runtimeInstanceId = this.instanceId;
     // 保留 C1 语义：无 authority call 时任何 write 执行入口一律 WRITE_EXECUTION_DISABLED。
     if (!callId) return want(SIDE_EFFECT_ERROR.WRITE_EXECUTION_DISABLED);
     const call = this.store.callById(callId);
@@ -601,10 +616,8 @@ class SideEffectAuthority {
     const tool = this.#toolFor(call);
     if (!tool.ok) return want(tool.error === "TOOL_DISABLED" ? SIDE_EFFECT_ERROR.TOOL_DISABLED : tool.error);
     if (tool.contract.executionPolicy !== EXECUTION_POLICY.CONTROLLED_REVERSIBLE_WRITE) return want(SIDE_EFFECT_ERROR.WRITE_EXECUTION_DISABLED);
-    // §3/§4：production execution ownership = callId + leaseId + holderId + holderInstanceId。
-    // 缺少任一 execution ownership 字段一律 DENY（0 Domain invocation / 0 mutation），
-    // 绝不允许 omit holderInstanceId 就跳过 instance ownership。
-    if (!leaseId || !holderId || !holderInstanceId) return want(SIDE_EFFECT_ERROR.LEASE_NOT_HELD, { detail: "EXECUTOR_IDENTITY_REQUIRED" });
+    // execution ownership = callId + exact leaseId + holderId + this.instanceId。
+    if (!leaseId || !holderId) return want(SIDE_EFFECT_ERROR.LEASE_NOT_HELD, { detail: "EXECUTOR_IDENTITY_REQUIRED" });
     if (call.status === CALL_STATUS.SUCCEEDED) return { ok: true, executed: false, duplicate: true, mutationCount: 0, call, result: null, verificationStatus: call.verificationStatus, error: null };
     if (call.status === CALL_STATUS.RUNNING) return want(SIDE_EFFECT_ERROR.EXECUTION_CLAIM_LOST, { duplicate: true });
     if (call.status !== CALL_STATUS.LEASED) return want(SIDE_EFFECT_ERROR.CALL_STATE);
@@ -616,7 +629,7 @@ class SideEffectAuthority {
     if (!adapter || typeof adapter.execute !== "function" || typeof adapter.verify !== "function") return want(SIDE_EFFECT_ERROR.WRITE_EXECUTION_DISABLED);
 
     // 执行前完整 eligibility（tool/run/authorization/approval/lease/precondition 全部实时重查）。
-    const elig = this.evaluateExecutionEligibility({ context: execCtx, callId, holderId, holderInstanceId });
+    const elig = this.evaluateExecutionEligibility({ context: execCtx, callId, holderId, leaseId, holderInstanceId: runtimeInstanceId });
     if (elig.status !== ELIGIBILITY.ELIGIBLE) {
       this.#audit({ toolRef: call.toolId, action: "side_effect.blocked", decision: "BLOCKED", reasonCode: elig.reasonCode });
       this.#event(call.taskId, "tool.side_effect.execution_blocked", { callId, toolId: call.toolId, reasonCode: elig.reasonCode });
@@ -626,11 +639,11 @@ class SideEffectAuthority {
     if (!active) return want(SIDE_EFFECT_ERROR.LEASE_REQUIRED);
     if (active.leaseId !== leaseId) return want(SIDE_EFFECT_ERROR.LEASE_NOT_HELD);
     if (active.holderId !== holderId) return want(SIDE_EFFECT_ERROR.LEASE_NOT_HELD);
-    if (active.holderInstanceId !== holderInstanceId) return want(SIDE_EFFECT_ERROR.LEASE_NOT_HELD);
+    if (active.holderInstanceId !== runtimeInstanceId) return want(SIDE_EFFECT_ERROR.LEASE_NOT_HELD);
 
     // test-only seam：在 eligibility 与 claim 之间注入真实 authority state 变化（production 为 null）。
     if (this.testHooks && typeof this.testHooks.afterEligibilityBeforeClaim === "function") {
-      this.testHooks.afterEligibilityBeforeClaim({ callId, holderId, holderInstanceId, leaseId });
+      this.testHooks.afterEligibilityBeforeClaim({ callId, holderId, leaseId, runtimeInstanceId });
     }
 
     // 原子 claim：LEASED → RUNNING，并在同一 BEGIN IMMEDIATE 事务内重校验 authority snapshot。
@@ -644,7 +657,7 @@ class SideEffectAuthority {
           return { claimed: false, reason: (st === CALL_STATUS.RUNNING || st === CALL_STATUS.SUCCEEDED) ? SIDE_EFFECT_ERROR.EXECUTION_CLAIM_LOST : SIDE_EFFECT_ERROR.CALL_STATE };
         }
         const freshCall = this.store.callById(callId);
-        const snap = this.#verifyAuthoritySnapshot({ callId, call: freshCall, holderId, holderInstanceId, now });
+        const snap = this.#verifyAuthoritySnapshot({ callId, call: freshCall, expectedLeaseId: leaseId, holderId, runtimeInstanceId, now });
         if (!snap.ok) return { claimed: false, reason: snap.reason };
         this.store.updateCall(callId, { status: CALL_STATUS.RUNNING, started_at: now });
         return { claimed: true, leaseId: snap.leaseId };
