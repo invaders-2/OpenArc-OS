@@ -1,6 +1,7 @@
 # D4-03C2 · Controlled Reversible Write（第一条真实 production REVERSIBLE_WRITE）
 
-- **状态**：**D4-03C2 = PASS candidate**（待 ChatGPT 审计）；**D4-03C overall = PARTIAL**；**D4-03C3 = NOT STARTED**（禁止自动进入）
+- **状态**：**D4-03C2 = PASS candidate**、**D4-03C2 Closure = PASS candidate**（execution ownership mandatory + real duplicate claim contention + eligibility→claim TOCTOU，待 ChatGPT 审计）；**D4-03C overall = PARTIAL**；**D4-03C3 = NOT STARTED**（禁止自动进入）
+- **Closure 详情**：见 `docs/D4-03C2-CLOSURE-RESULT.md`
 - **分支**：feature/d4-03-tool-proxy
 - **机器**：macOS arm64 Apple M3 Pro / Node v22.22.3
 - **Schema**：保持 **v13**（现有字段已足够，未机械升版本）
@@ -97,14 +98,15 @@ dispatch 后调用真实 Domain verifier（重新读取 Resource Domain，`trash
 
 | Gate | 结果 |
 |---|---|
-| `npm run test:d4-03c2` | **30 / 30 PASS** |
+| `npm run test:d4-03c2` | **29 / 29 PASS** |
+| `npm run test:d4-03c2-closure` | **39 / 39 PASS** |
 | `npm run test:d4-03c1` | 46 / 46 PASS |
 | `npm run test:d4-03c1-closure` | 50 / 50 PASS |
 | `npm run test:d4-03b` | 59 / 59 PASS |
 | `npm run test:d4-03a` | 32 / 32 PASS |
 | `npm run test:d4-02a / b / c` | 22 / 16 / 22 PASS |
 | `npm run test:d4-01` | 59 / 59 PASS |
-| `npm test` | **753 / 753 PASS** |
+| `npm test` | **762 / 762 PASS** |
 | `npm run build` | PASS |
 | `npm run test:security` | FAIL 0 / PARTIAL 2 / PASS 6（无新增 FAIL / PARTIAL） |
 

@@ -1,6 +1,6 @@
 # D4-03C1 · Side-effect Authority / Approval / Lease Contract（macOS）
 
-- **状态**：**D4-03C1 = PASS candidate**（合同 + fail-safe recovery + 真实 contention / persisted restart）；**D4-03C2 = PASS candidate**（1 条受控真实 REVERSIBLE_WRITE：resource.trash，待 ChatGPT 审计）；**D4-03C overall = PARTIAL**；**D4-03C3 = 未开始**
+- **状态**：**D4-03C1 = PASS candidate**；**D4-03C2 = PASS candidate**、**D4-03C2 Closure = PASS candidate**（1 条受控真实 REVERSIBLE_WRITE + execution ownership 强制 + 真实 duplicate claim contention + eligibility→claim TOCTOU fail closed，待 ChatGPT 审计）；**D4-03C overall = PARTIAL**；**D4-03C3 = 未开始**
 - **分支**：feature/d4-03-tool-proxy，基线 809e8fa，未 merge main
 - **日期**：2026-09-15
 
@@ -68,9 +68,13 @@ Approval/Lease 都持久化。`recoverOnStartup()` 是 fail-safe contract：**�
 
 本阶段唯一 production write tool：`resource.trash` v1，riskClass = REVERSIBLE_WRITE，executionProvider = ResourceService，resourceActions = [`resource.delete`]，requiredPermissions = [`tool.resource.trash`]，verificationStrategy = READ_AFTER_WRITE，idempotencySupport = true，executionPolicy = **CONTROLLED_REVERSIBLE_WRITE**。输入只允许 `resourceRef`；`expectedVersion` / expectedEffects 由 adapter.plan() 从真实 Domain state 生成。真实 mutation 只能经 **ResourceService.delete()**，绝不直接 SQL。
 
-## Execution claim（exactly once）
+## Execution ownership（mandatory）
 
-`executeSideEffect` 先同步完成全部 gate（tool/version、eligibility、lease holder、leaseId），再在**一个 BEGIN IMMEDIATE 事务内**原子 claim `LEASED → RUNNING`——只有唯一 claim 成功的 executor 能 dispatch Domain mutation。未进入 RUNNING 前，approval revoke / lease revoke / task cancel / permission revoke / tool disable / version change / precondition change 全部阻止执行。
+`ACTIVE Lease ownership = callId + leaseId + holderId + holderInstanceId`。production `executeSideEffect` 必须携带完整 trusted executor identity；缺少任一字段 → `SIDE_EFFECT_LEASE_NOT_HELD` / 0 Domain invocation。禁止 `if (holderInstanceId) { check }` 这种 optional authority：`lease.holderInstanceId === holderInstanceId` 是继续执行的硬条件。Harness 永远不能提供这些字段。eligibility 的 lease snapshot 也带 `holder_instance_id`，同时校验 holder + instance。
+
+## Execution claim（exactly once + TOCTOU-safe）
+
+`executeSideEffect` 先同步完成 gate（tool/version、eligibility、holder/instance、leaseId），再在**一个 BEGIN IMMEDIATE 事务内**重新读取 persisted authority state（Task RUNNING/未 cancel、Step RUNNING、run 仍 current、session/auth 有效、app enabled、tool permission + resource permission/useByAgent 有效、Approval 有效、Lease ACTIVE + holder/instance 匹配、precondition/version 未变）并**原子 claim** `LEASED → RUNNING`——只有唯一 claim 成功者能 dispatch Domain mutation。`Eligibility snapshot != execution authority forever`：Eligibility(T1) 后任一 state 变化都必须 fail closed。跨连接 SQLite contention 收敛为 `SIDE_EFFECT_EXECUTION_CLAIM_LOST`，不暴露可 retry 语义。
 
 ## Verification（Execution != Verified Effect）
 
