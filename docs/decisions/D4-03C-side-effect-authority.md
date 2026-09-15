@@ -1,6 +1,6 @@
 # D4-03C1 · Side-effect Authority / Approval / Lease Contract（macOS）
 
-- **状态**：**D4-03C1 = PASS**（合同 + 测试）；**D4-03C overall = PARTIAL**（未真实写）；**D4-03C2 Controlled Reversible Write = 下一阶段**
+- **状态**：**D4-03C1 = PASS candidate**（合同 + fail-safe recovery + 真实 contention / persisted restart，待 ChatGPT 审计）；**D4-03C overall = PARTIAL**（未真实写）；**D4-03C2 Controlled Reversible Write = 下一阶段**
 - **分支**：feature/d4-03-tool-proxy，基线 809e8fa，未 merge main
 - **日期**：2026-09-15
 
@@ -51,9 +51,18 @@ SideEffectCall 只存 `preconditions_safe`（resourceRef/expectedVersion/expecte
 
 仅当执行已发出但无法可靠判断是否发生时进入。`UNKNOWN_EFFECT` 永不自动 retry；`RUNNING` + crash → `UNKNOWN_EFFECT`（不是 FAILED）。`verifyUnknownEffect` 接口保留；无 verifier → `VERIFICATION_NOT_AVAILABLE` 且保持 BLOCKED。
 
-## Restart semantics
+## Restart semantics（fail closed）
 
-Approval/Lease 都持久化。重启后：旧进程 ACTIVE lease → `EXPIRED`（不可继承 execution ownership）；`RUNNING` call → `UNKNOWN_EFFECT` + event；0 respawn / 0 replay。
+Approval/Lease 都持久化。`recoverOnStartup()` 是 fail-safe contract：**没有 production 开关**（旧 `blockTask` 参数已删除）。发现 `RUNNING` call 时无条件：
+1. SideEffectCall → `UNKNOWN_EFFECT`（绝不回退 LEASED/APPROVED/FAILED）；
+2. 通过 Task Authority `TaskService.recoverRunning()` 将 Step/Task → `BLOCKED`（RECOVERY_REQUIRED）+ event；
+3. 非本进程 ACTIVE lease → `EXPIRED`（execution ownership 不可继承）。
+
+若 TaskService/Task/Step 不可用或无法安全 block → 记录安全事件、保持 UNKNOWN_EFFECT、fail closed；不得 replay / retry / respawn。真实 persisted restart（关闭 DB handle、Runtime B 新 instanceId 重开同一 disk DB）已验证 0 replay / 0 retry / 0 execution。
+
+## Lease contention（真实）
+
+两个独立 child executor（独立 DB connection / 独立 instanceId）通过 barrier 同时 `acquireLease` 同一 APPROVED call：check+insert 在同一 `BEGIN IMMEDIATE` 事务内，结果恰好 1 ACTIVE / 1 success / 1 `SIDE_EFFECT_LEASE_CONFLICT`；SQLite contention 收敛为安全业务语义，不暴露裸 `SQLITE_BUSY`。
 
 ## WRITE execution boundary
 

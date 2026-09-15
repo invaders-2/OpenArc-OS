@@ -734,7 +734,7 @@ D4-02B 遗留继续挂账：OS-level network isolation NOT VERIFIED；external w
 |---|---|---|
 | **D4-03A Tool Contract / Registry / Authorization Gate** | **PASS** | Registry 权威（test.echo / test.write / resource.read.metadata，无 shell/mcp）；Tool Proposal + Decision 持久（schema v11）；D3 授权复用（含 useByAgent）；ResourceRef 强制；risk 来自 Registry；READ_ONLY → ALLOWED、WRITE → APPROVAL_REQUIRED；ExecutionPlan dry-run；production tool execution = 0；test:d4-03a **32/32** |
 | **D4-03B Controlled Read-only Execution（执行引擎 + official dsh 暴露 + 真实执行 E2E）** | **PASS** | 真实 READ_ONLY 执行：resource.search + resource.read.metadata 经真实 Resource/Search Domain；reauthorize-before-execute；tool_executions（schema v12）；duplicate 0 二次执行；cancel/revoke/delete race PASS；outputSchema + redaction；0 mutation。official dsh 工具暴露 **VERIFIED**（openarc-acp profile + plugin 注册 exactly 2 tool）；**official dsh 真实 tool_call 执行 E2E = PASS**（Tool Facade Bridge → ControlledToolProxy → Domain → dsh Tool Runtime → Task SUCCEEDED）；test:d4-03b **59/59** |
-| **D4-03C1 Side-effect Authority / Approval / Lease Contract** | **PASS** | Proposal→Decision→Plan→Approval→Lease→Execution Eligibility 六层合同；schema v13（side_effect_calls / tool_approvals / side_effect_leases）；UNIQUE(call_id)+UNIQUE(idempotency_key)；Approval 只来自 trusted user、精确绑定 planHash/tool/version/argsHash/effectClass；每 call 至多 1 ACTIVE lease；RUNNING-after-crash → UNKNOWN_EFFECT（0 retry）；WRITE execution = 0；test:d4-03c1 **46/46** |
+| **D4-03C1 Side-effect Authority / Approval / Lease Contract** | **PASS candidate** | Proposal→Decision→Plan→Approval→Lease→Execution Eligibility 六层合同；schema v13（side_effect_calls / tool_approvals / side_effect_leases）；UNIQUE(call_id)+UNIQUE(idempotency_key)；Approval 只来自 trusted user、精确绑定 planHash/tool/version/argsHash/effectClass；每 call 至多 1 ACTIVE lease；**recoverOnStartup fail closed（删除 blockTask，RUNNING→UNKNOWN_EFFECT + Step/Task BLOCKED + 旧 lease EXPIRED，0 replay/retry）**；**真实 lease contention（2 child executor 同 DB → 1 winner / 1 CONFLICT / 1 ACTIVE）**；真实 persisted restart；WRITE execution = 0；test:d4-03c1 **46/46**、test:d4-03c1-closure **50/50** |
 | **D4-03 overall** | **PARTIAL** | A PASS；B PASS；C1 PASS；C2（real REVERSIBLE_WRITE）未开始 |
 | **D4-03C2 Controlled Reversible Write** | **下一阶段** | C2 才第一次允许真实 REVERSIBLE_WRITE（Proposal→…→Lease→Execute exactly once→Verify→Release） |
 
@@ -743,6 +743,7 @@ D4-02B 遗留继续挂账：OS-level network isolation NOT VERIFIED；external w
 | 入口 | 结果 |
 |---|---|
 | test:d4-03c1 | **46 / 46 PASS**（schema 13） |
+| test:d4-03c1-closure | **50 / 50 PASS**（real contention + persisted restart + recovery fail-closed） |
 | test:d4-03a | **32 / 32 PASS** |
 | test:d4-03b | **59 / 59 PASS**（schema 12；facade + official dsh e2e/security/cancel/lifecycle） |
 | test:d4-02c | **22 / 22 PASS** |
