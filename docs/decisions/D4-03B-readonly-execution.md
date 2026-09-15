@@ -1,6 +1,6 @@
 # D4-03B · Controlled Read-only Tool Execution（macOS）
 
-- **状态**：**D4-03B 执行引擎 = PASS**；**official dsh 工具暴露 = VERIFIED**（managed openarc-acp profile + OpenArc plugin 注册 exactly 2 READ_ONLY tool）；**D4-03B overall = PARTIAL**（official dsh 工具执行 E2E = NOT VERIFIED）；**D4-03C = BLOCK**
+- **状态**：**D4-03B 执行引擎 = PASS**；**official dsh 工具暴露 = VERIFIED**；**official dsh 真实 tool_call 执行 E2E = PASS**（Tool Facade Bridge → ControlledToolProxy → Domain → dsh Tool Runtime → Task SUCCEEDED）；**D4-03B overall = PASS**；**D4-03C = CONDITIONAL GO**
 - **分支**：feature/d4-03-tool-proxy，基线 b411651，未 merge main
 - **日期**：2026-09-15
 
@@ -44,9 +44,11 @@ resource.search 复用服务端授权搜索（FTS 只给候选，authorizeMany �
 
 READ_ONLY 执行期间 Task/Step 保持 RUNNING；TaskEvent：tool.execution.started / succeeded / failed、tool.verification.failed。Event 只放 executionId/result hash/error code，不 dump 完整 result。Audit：tool.execution_started / succeeded / failed / verification_failed，只存安全投影。
 
-## Harness 结果回传（诚实边界）
+## Harness 结果回传（Final Closure）
 
-ACP 没有标准 client→agent tool-result 消息。OpenArc 执行并 verify 后，把 bounded 安全结果作为**后续 ACP prompt** 交回 Harness 继续推理；Harness 不能自己伪造 tool result。本轮垂直链使用 official ACP v1 协议的受控 test agent（openarc-readonly-tool-probe），**official dsh 自身 read-tool E2E = NOT VERIFIED**：managed profile 工具全关，未启用任何 shell/filesystem/web 或自定义 dsh tool facade。因此按规格 §90，D4-03B overall = PARTIAL。
+official dsh 路径：model tool_call → dsh Tool Runtime → OpenArc Tool Plugin execute() → **Tool Facade Bridge**（127.0.0.1 随机端口，tpx_ capability）→ ControlledToolProxy.propose/executeReadOnly → Resource/Search Domain → safe result → plugin 返回 → dsh 内部 tool result → 同一 ACP session 内下一 model turn。OpenArc **不再**把 tool result 拼成新的 ACP prompt 作为 final evidence（该方式仅保留给 synthetic ACP 夹具做 deterministic test）。
+
+Tool Facade capability 与 Model Proxy capability（mpx_）完全分离；capability 只活 bridge 进程内存，只经 trusted child env + Authorization header 传递，绝不落 SQLite/TaskEvent/Audit/Artifact/DSH_HOME/profile/manifest/logs。official dsh 只有 2 个 READ_ONLY tool，禁用全部生产工具与 plan-mode。
 
 ## 冻结
 
@@ -64,4 +66,4 @@ SCHEMA_VERSION = 12；v1→current … v11→current 与 v12 级失败整级回�
 
 ## 下一步
 
-D4-03C 才允许 REVERSIBLE_WRITE 与 approval/lease/idempotency/unknown-effect。D4-03C = BLOCK，直到人工开启（并解决 official dsh read-tool E2E）。
+D4-03C 才允许 REVERSIBLE_WRITE 与 approval/lease/idempotency/unknown-effect。D4-03B overall = PASS → D4-03C = CONDITIONAL GO（仍需人工开启后才实施）。

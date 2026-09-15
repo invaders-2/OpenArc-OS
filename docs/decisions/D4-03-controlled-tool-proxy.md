@@ -1,6 +1,6 @@
 # D4-03 · Controlled Tool Proxy（macOS）
 
-- **状态**：**D4-03A = PASS**；**D4-03B 执行引擎 = PASS / overall = PARTIAL**（official dsh read-tool E2E NOT VERIFIED）；**D4-03 overall = PARTIAL**；**D4-03C = BLOCK**
+- **状态**：**D4-03A = PASS**；**D4-03B 执行引擎 = PASS / overall = PASS**（official dsh tool 暴露 + 真实执行 E2E 均 VERIFIED）；**D4-03 overall = PASS**；**D4-03C = CONDITIONAL GO**
 - **分支**：feature/d4-03-tool-proxy，基线 feature/d4-02-task-harness @ 5d37d64，未 merge main
 - **日期**：2026-09-15
 
@@ -30,9 +30,11 @@ ToolProposal != ToolExecution。proposal 的 taskId/stepId/runId/user/session/ap
 
 资源动作复用 AuthorizationService.authorize：Session ∩ User ∩ App ∩ Tool permission ∩ Resource action ∩ Department policy，Agent 追加 useByAgent。Tool 权限 namespace 与 resource.action 同级（tool.test.echo / tool.resource.readMetadata），存于同一 app_resource_grants（scope=TOOL），由 authorizeTool / grantAppToolPermission 管理。资源型 Tool 只接受 ResourceRef；禁止 absolutePath / rawPath / filesystemPath / credential / apiKey。
 
-## Persistence（schema v11）
+## Persistence（schema v11 → v12）
 
-task_tool_proposals（proposal_id/task_id/step_id/run_id/tool_id/tool_version/arguments_safe/arguments_hash/status/created_at）与 tool_decisions（decision_id/proposal_id/decision/reason_code/risk_class/approval_required/created_at）。UNIQUE(proposal_id) 保证同一 proposalId 幂等，不生成第二个 decision。**无 tool_executions 表**（D4-03A 不存在真实执行）。arguments_safe 只存 schema 声明字段的安全 projection；绝不存完整 raw arguments。
+v11：task_tool_proposals（proposal_id/task_id/step_id/run_id/tool_id/tool_version/arguments_safe/arguments_hash/status/created_at）与 tool_decisions（decision_id/proposal_id/decision/reason_code/risk_class/approval_required/created_at）。UNIQUE(proposal_id) 保证同一 proposalId 幂等，不生成第二个 decision。arguments_safe 只存 schema 声明字段的安全 projection；绝不存完整 raw arguments。
+
+v12（D4-03B）：tool_executions（execution_id/proposal_id/decision_id/task_id/step_id/run_id/tool_id/tool_version/status/started_at/completed_at/result_ref/result_hash/verification_status/error_code，UNIQUE(proposal_id)）。Tool Facade capability / Model Proxy capability 都不落库。
 
 ## Stale / Terminal / Cancel
 
@@ -56,4 +58,4 @@ SCHEMA_VERSION = 11，v10 之上加 task_tool_proposals / tool_decisions。v1→
 
 ## Remaining
 
-D4-03B Controlled Read-only Execution = BLOCK，直到人工开启。D4-02B 遗留（OS-level network isolation / external workspace read audit / malformed ACP injection / Windows / External Provider）继续挂账，不因 D4-03A 关闭。
+D4-03B Controlled Read-only Execution = PASS（official dsh tool 暴露 + 真实 tool_call 执行 E2E）。D4-03C Side-effect Lease / Approval / Idempotency / Unknown Effect = CONDITIONAL GO（人工开启后实施）。D4-02B 遗留（OS-level network isolation / external workspace read audit / malformed ACP injection / Windows / External Provider）继续挂账，不因 D4-03 关闭。
