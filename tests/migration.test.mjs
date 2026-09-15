@@ -39,7 +39,7 @@ async function seedV1(dbPath) {
 }
 
 test("schema 版本已推进到 v10（D4-02C 在 v9 之上追加 HarnessRun / Artifact / Verification）", () => {
-  assert.equal(SCHEMA_VERSION, 13);
+  assert.equal(SCHEMA_VERSION, 14);
 });
 
 test("全新数据库直接建到 v8，identity login 成立", async () => {

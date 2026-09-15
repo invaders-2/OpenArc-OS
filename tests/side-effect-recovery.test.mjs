@@ -75,17 +75,36 @@ test("verifyUnknownEffect：无 verifier → VERIFICATION_NOT_AVAILABLE 且保�
   } finally { await fx.fx.close(); }
 });
 
-test("verifyUnknownEffect：注入 verifier 后可以收敛为 SUCCEEDED / FAILED（不自动 retry）", async () => {
+test("verifyUnknownEffect：走 allowlisted adapter 的 read-only recovery verifier（APPLIED → SUCCEEDED，NOT_APPLIED + quiesced → FAILED）", async () => {
   const { fx, call } = await leased("instA");
   try {
     fx.store.transactSync(() => fx.store.updateCall(call.callId, { status: "RUNNING" }));
-    fx.authority.recoverOnStartup();
-    const verifier = new SideEffectAuthority({ registry: fx.toolRegistry, sideEffectStore: fx.store, taskStore: fx.taskStore, toolStore: fx.toolStore, authService: fx.authService, adapters: fx.adapters, clock: () => 1_000_000, unknownEffectVerifier: async () => ({ ok: true, effectApplied: true }) });
-    const v = await verifier.verifyUnknownEffect({ callId: call.callId });
+    fx.authority.recoverOnStartup(); // 冷启动 → recovery_safe.quiesced = true
+    let outcome = "APPLIED";
+    fx.adapters.providers.test.recoveryVerify = async () => ({ outcome, reason: "TEST_PROVIDER_" + outcome });
+    const v = await fx.authority.verifyUnknownEffect({ callId: call.callId });
     assert.equal(v.ok, true, JSON.stringify(v));
+    assert.equal(v.outcome, "APPLIED");
     assert.equal(fx.store.callById(call.callId).status, "SUCCEEDED");
     assert.equal(fx.store.callById(call.callId).verificationStatus, "PASS");
     assert.equal(fx.toolStore.executionsOfTask(call.taskId).length, 0);
+    // terminal duplicate：再次 verify 不产生第二次状态副作用。
+    const again = await fx.authority.verifyUnknownEffect({ callId: call.callId });
+    assert.equal(again.duplicate, true);
+    assert.equal(fx.store.callById(call.callId).status, "SUCCEEDED");
+    // NOT_APPLIED + quiesced → FAILED（另一个 call）。
+    const second = await leased("instA");
+    try {
+      second.fx.store.transactSync(() => second.fx.store.updateCall(second.call.callId, { status: "RUNNING" }));
+      second.fx.authority.recoverOnStartup();
+      second.fx.adapters.providers.test.recoveryVerify = async () => ({ outcome: "NOT_APPLIED", reason: "TEST_NOT_APPLIED" });
+      const r = await second.fx.authority.verifyUnknownEffect({ callId: second.call.callId });
+      assert.equal(r.outcome, "NOT_APPLIED");
+      assert.equal(r.resolved, true);
+      assert.equal(second.fx.store.callById(second.call.callId).status, "FAILED");
+      assert.equal(second.fx.store.callById(second.call.callId).verificationStatus, "FAIL");
+    } finally { await second.fx.fx.close(); }
+    void outcome;
   } finally { await fx.fx.close(); }
 });
 
