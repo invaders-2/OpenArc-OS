@@ -1355,7 +1355,7 @@ input[type="checkbox"] {
 }
 .desktop-folder {
   position: absolute;
-  width: 88px;
+  width: calc(var(--desk-icon, 58px) + 30px);
   z-index: 2;
   display: flex;
   flex-direction: column;
@@ -1377,7 +1377,7 @@ input[type="checkbox"] {
 }
 .folder-name {
   font-size: 11px;
-  max-width: 82px;
+  max-width: 100%;
   text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1677,7 +1677,7 @@ input[type="checkbox"] {
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  width: 96px;
+  width: calc(var(--desk-icon, 58px) + 38px);
   padding: 7px 4px 5px;
   border-radius: var(--radius-md);
   text-align: center;
@@ -1728,8 +1728,8 @@ input[type="checkbox"] {
     top var(--dur-standard) var(--ease-standard);
 }
 .desktop-thumb {
-  width: 52px;
-  height: 52px;
+  width: calc(var(--desk-icon, 58px) * 0.9);
+  height: calc(var(--desk-icon, 58px) * 0.9);
   object-fit: cover;
   border-radius: var(--radius-sm);
   background: var(--sunken);
@@ -1738,8 +1738,8 @@ input[type="checkbox"] {
 .desktop-glyph {
   display: grid;
   place-items: center;
-  width: 52px;
-  height: 52px;
+  width: calc(var(--desk-icon, 58px) * 0.9);
+  height: calc(var(--desk-icon, 58px) * 0.9);
   color: var(--text);
   pointer-events: none;
 }

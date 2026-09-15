@@ -154,9 +154,24 @@ const WEB_IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif
 
 /** 桌面本身也是一个真实的存储文件夹：拖到桌面的文件就存在这里。 */
 const DESKTOP_ID = "desktop";
-/** 桌面图标栅格：整理与"网格吸附"共用同一套数。 */
-// 初始落位放在右侧空白区：左侧/中部会被默认窗口与品牌区压住
-const DESK_GRID = { x0: 1150, y0: 88, dx: 108, dy: 118, cols: 2 };
+/**
+ * 桌面栅格：整理与"网格吸附"共用同一套数，**格子尺寸跟着图标大小走**
+ * （用户口径：网格吸附按文件夹/文件大小排列，间距照 macOS 桌面）。
+ *
+ * 间距 = 图标 × 0.35：图标越大间距越大，比例上跟 macOS 桌面一致（图标越大不会显得越挤）。
+ * 磁贴比图标本身宽/高一点（留出标签与内边距），这里按最宽的那种磁贴算，保证两种磁贴都不挤。
+ */
+const DESK_LATTICE = { tileW: 38, tileH: 37, gapRatio: 0.35, right: 20, top: 8 };
+const deskLattice = (icon: number, hostW = innerWidth, hostH = innerHeight) => {
+  const tileW = icon + DESK_LATTICE.tileW;
+  const tileH = icon + DESK_LATTICE.tileH;
+  const gap = Math.round(icon * DESK_LATTICE.gapRatio);
+  const dx = tileW + gap;
+  const dy = tileH + gap;
+  // 首格在最右上角，往下排满一列再往左一列 —— 与 macOS 桌面同序
+  const rows = Math.max(1, Math.floor((hostH - DESK_BOUND.top - DESK_BOUND.bottom) / dy));
+  return { x0: hostW - DESK_LATTICE.right - tileW, y0: DESK_BOUND.top + DESK_LATTICE.top, dx, dy, rows, tileW, tileH };
+};
 /** 桌面图标的禁入边距：**顶栏那一条不许压**（用户口径：桌面顶部那边不可越界），
     右侧与底部也各留一点，别让图标一半挂在屏幕外。 */
 const DESK_BOUND = { top: 52, right: 96, bottom: 140 };
@@ -248,7 +263,7 @@ function App() {
    * DOM z-index 对它无效，因此 lock 必须一路传到主进程的 overlayOpen。
    */
   const locked = identity.phase === "locked";
-  const { state, dispatch, overlays, setOverlays, snapshotLayers, nativeVisibleOf, browserEvents, clearBrowserEvent } =
+  const { state, dispatch, hostSize, overlays, setOverlays, snapshotLayers, nativeVisibleOf, browserEvents, clearBrowserEvent } =
     useDesktop({ locked });
 
   // ---------------------------------------------------------------------------
@@ -301,6 +316,11 @@ function App() {
   const [dockSize, setDockSize] = useState(() => {
     const v = Number(localStorage.getItem("oa-dock-size"));
     return Number.isFinite(v) && v >= 32 && v <= 80 ? v : 47;
+  });
+  /** 桌面图标尺寸（px）：桌面上的文件夹与文件共用这一个大小（用户口径：支持自定义大小）。 */
+  const [deskIcon, setDeskIcon] = useState(() => {
+    const v = Number(localStorage.getItem("oa-desk-icon"));
+    return Number.isFinite(v) && v >= 40 && v <= 96 ? v : 58;
   });
   /**
    * 程序坞的成员与顺序。**这个数组就是唯一真值**：顺序即顺序，缺谁就是谁被移除。
@@ -665,16 +685,19 @@ function App() {
     else list.sort((a, b) => a.name.localeCompare(b.name, "zh"));
     return list;
   }, [filesByFolder, deskSort]);
+  /** 当前桌面栅格：跟着图标大小与窗口尺寸走（窗口变了要重算行数）。 */
+  const deskGrid = useMemo(() => deskLattice(deskIcon, hostSize.width, hostSize.height), [deskIcon, hostSize]);
   const gridPos = (index: number) =>
     clampDeskPos({
-      x: DESK_GRID.x0 + (index % DESK_GRID.cols) * DESK_GRID.dx,
-      y: DESK_GRID.y0 + Math.floor(index / DESK_GRID.cols) * DESK_GRID.dy,
+      // 首格在右上角，往下排满 rows 行再往左一列（macOS 桌面的顺序）
+      x: deskGrid.x0 - Math.floor(index / deskGrid.rows) * deskGrid.dx,
+      y: deskGrid.y0 + (index % deskGrid.rows) * deskGrid.dy,
     });
   /** 落格坐标必须夹一次：在顶栏上方松手时，向上取整会算出负的格位（实测会被甩到 -30）。 */
   const snapPos = (x: number, y: number) =>
     clampDeskPos({
-      x: DESK_GRID.x0 + Math.round((x - DESK_GRID.x0) / DESK_GRID.dx) * DESK_GRID.dx,
-      y: DESK_GRID.y0 + Math.round((y - DESK_GRID.y0) / DESK_GRID.dy) * DESK_GRID.dy,
+      x: deskGrid.x0 - Math.round((deskGrid.x0 - x) / deskGrid.dx) * deskGrid.dx,
+      y: deskGrid.y0 + Math.round((y - deskGrid.y0) / deskGrid.dy) * deskGrid.dy,
     });
   const deskPos = (id: string, index: number) => desktopIcons[id] ?? gridPos(index);
   /** 一个桌面条目的当前位置：文件夹读 folders，文件读落格记录。 */
@@ -956,7 +979,7 @@ function App() {
     const folder: Folder = {
       id: "f" + Date.now().toString(36),
       name,
-      x: Math.max(0, Math.round(first.x + DESK_GRID.dx)),
+      x: Math.max(0, Math.round(first.x + deskGrid.dx)),
       y: Math.max(52, Math.round(first.y)),
     };
     setFolders((fs) => [...fs, folder]);
@@ -970,20 +993,28 @@ function App() {
     setRenaming(folder.id);
   };
 
-  /** 整理：按指定（或当前）排列顺序把桌面文件重新落到栅格上。 */
+  /**
+   * 整理：把桌面上的**文件夹与文件一起**重新落到栅格上。
+   * 文件夹在前、文件在后，与文件夹窗口里的分组同一口径；栅格本身跟着图标大小走（见 deskLattice）。
+   */
   const arrangeDesktop = (sort?: "name" | "date" | "size") => {
     const key = sort ?? deskSort;
     const list = [...(filesByFolder[DESKTOP_ID] ?? [])];
     if (key === "date") list.sort((a, b) => b.mtime - a.mtime);
     else if (key === "size") list.sort((a, b) => b.size - a.size);
     else list.sort((a, b) => a.name.localeCompare(b.name, "zh"));
-    setDesktopIcons((m) => {
-      const next = { ...m };
-      list.forEach((f, i) => {
-        next[f.id] = gridPos(i);
+    const deskFolders = folders.filter((v) => !v.parentId).sort((a, b) => a.name.localeCompare(b.name, "zh"));
+    const order = [...deskFolders.map((v) => v.id), ...list.map((v) => v.id)];
+    const at = (id: string) => order.indexOf(id);
+    setFolders((fs) => fs.map((v) => (at(v.id) >= 0 ? { ...v, ...gridPos(at(v.id)) } : v)));
+    setDesktopIcons(() => {
+      const next: Record<string, { x: number; y: number }> = {};
+      list.forEach((v) => {
+        next[v.id] = gridPos(at(v.id));
       });
       return next;
     });
+    setDeskSel([]);
   };
 
   // ---------------------------------------------------------------------------
@@ -1160,9 +1191,10 @@ function App() {
       ["glass", glass],
       ["dark", dark],
       ["dock-size", dockSize],
+      ["desk-icon", deskIcon],
     ])
       localStorage.setItem("oa-" + k, String(v));
-  }, [reduced, glass, dark, dockSize]);
+  }, [reduced, glass, dark, dockSize, deskIcon]);
   useEffect(() => {
     localStorage.setItem("oa-dock", JSON.stringify(dockIds));
   }, [dockIds]);
@@ -1968,6 +2000,25 @@ function App() {
                   </span>
                 </div>
                 <div className="setting-row">
+                  <span>
+                    桌面图标大小
+                    <span className="footnote"> 拖动滑块调整桌面文件夹与文件的尺寸</span>
+                  </span>
+                  <span className="setting-range-wrap">
+                    <input
+                      className="setting-range"
+                      type="range"
+                      min={40}
+                      max={96}
+                      step={1}
+                      value={deskIcon}
+                      onChange={(e) => setDeskIcon(Number(e.target.value))}
+                      aria-label="桌面图标大小"
+                    />
+                    <span className="setting-range-value">{deskIcon}px</span>
+                  </span>
+                </div>
+                <div className="setting-row">
                   <span>壁纸</span>
                   <span className="wallpaper-actions">
                     {wallpaperItems.length > WALLPAPER_ROW ? (
@@ -2404,7 +2455,7 @@ function App() {
       data-glass={glass}
       data-identity-gate={gate}
       data-wallpaper={wallpaper}
-      style={{ "--dock-icon": `${dockSize}px` } as React.CSSProperties}
+      style={{ "--dock-icon": `${dockSize}px`, "--desk-icon": `${deskIcon}px` } as React.CSSProperties}
       onDragOver={(e) => {
         // 桌面磁贴要能接住内部拖拽；不 preventDefault 的话浏览器直接拒绝 drop
         if (!hasInternalDrag(e)) return;
@@ -2570,7 +2621,7 @@ function App() {
               );
             }}
           >
-            <FolderIcon size={58} />
+            <FolderIcon size={deskIcon} />
             {renaming === f.id ? (
               <input
                 className="folder-rename"
@@ -2637,7 +2688,7 @@ function App() {
                 />
               ) : (
                 <span className="desktop-glyph">
-                  <FileGlyph ext={f.ext} size={44} />
+                  <FileGlyph ext={f.ext} size={Math.round(deskIcon * 0.76)} />
                 </span>
               )}
               <span className="desktop-file-name">{f.name}</span>
