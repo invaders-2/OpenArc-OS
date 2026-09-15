@@ -84,6 +84,11 @@ class SideEffectAuthority {
   }
 
   #now() { return this.clock(); }
+  /** SQLite 竞争错误识别：只用于把 contention 收敛为安全业务语义，绝不重试 side effect。 */
+  #isBusy(e) {
+    const s = String((e && (e.errstr || e.message)) || e || "");
+    return s.includes("SQLITE_BUSY") || s.includes("SQLITE_LOCKED") || s.includes("database is locked") || s.includes("database table is locked");
+  }
   #trusted(context = {}, { user = false } = {}) {
     return { sessionRef: context.sessionRef, appId: context.appId, source: user ? "user" : "agent", agent: !user, requestId: context.requestId || null };
   }
@@ -298,26 +303,35 @@ class SideEffectAuthority {
       return { ok: false, error: call.status === CALL_STATUS.AWAITING_APPROVAL ? SIDE_EFFECT_ERROR.APPROVAL_REQUIRED : SIDE_EFFECT_ERROR.CALL_STATE };
     }
     const now = this.#now();
-    const result = this.store.transactSync(() => {
+    let result;
+    try {
+      result = this.store.transactSync(() => {
+        const active = this.store.activeLeaseOfCall(callId);
+        if (active) {
+          if (active.expiresAt != null && now >= Number(active.expiresAt)) this.store.updateLease(active.leaseId, { status: LEASE_STATUS.EXPIRED });
+          else if (active.holderId === holderId) return { ok: true, duplicate: true, lease: active };
+          else return { ok: false, error: SIDE_EFFECT_ERROR.LEASE_CONFLICT, lease: active };
+        }
+        const approval = this.store.latestApprovalOfCall(callId);
+        const valid = approval && approval.decision === APPROVAL_DECISION.APPROVED && approval.revokedAt == null && (approval.expiresAt == null || now < Number(approval.expiresAt)) && approval.planHash === call.planHash && approval.approvedArgumentsHash === call.argumentsHash && approval.approvedToolId === call.toolId && Number(approval.approvedToolVersion) === Number(call.toolVersion);
+        if (!valid) {
+          const reason = !approval ? SIDE_EFFECT_ERROR.APPROVAL_REQUIRED
+            : approval.decision === APPROVAL_DECISION.REVOKED ? SIDE_EFFECT_ERROR.APPROVAL_REVOKED
+            : (approval.expiresAt != null && now >= Number(approval.expiresAt)) ? SIDE_EFFECT_ERROR.APPROVAL_EXPIRED
+            : SIDE_EFFECT_ERROR.PLAN_STALE;
+          return { ok: false, error: reason };
+        }
+        const lease = this.store.insertLease({ leaseId: _leaseId || undefined, callId, holderId, holderInstanceId: instanceId || this.instanceId, status: LEASE_STATUS.ACTIVE, issuedAt: now, expiresAt: now + Math.max(1, Number(ttlMs) || DEFAULT_LEASE_TTL_MS) });
+        this.store.updateCall(callId, { status: CALL_STATUS.LEASED, leased_at: now });
+        return { ok: true, duplicate: false, lease };
+      });
+    } catch (e) {
+      // §12：SQLite contention 不得把裸 SQLITE_BUSY 暴露成"可重试执行"语义；收敛为 LEASE_CONFLICT（fail closed）。
+      if (!this.#isBusy(e)) throw e;
       const active = this.store.activeLeaseOfCall(callId);
-      if (active) {
-        if (active.expiresAt != null && now >= Number(active.expiresAt)) this.store.updateLease(active.leaseId, { status: LEASE_STATUS.EXPIRED });
-        else if (active.holderId === holderId) return { ok: true, duplicate: true, lease: active };
-        else return { ok: false, error: SIDE_EFFECT_ERROR.LEASE_CONFLICT, lease: active };
-      }
-      const approval = this.store.latestApprovalOfCall(callId);
-      const valid = approval && approval.decision === APPROVAL_DECISION.APPROVED && approval.revokedAt == null && (approval.expiresAt == null || now < Number(approval.expiresAt)) && approval.planHash === call.planHash && approval.approvedArgumentsHash === call.argumentsHash && approval.approvedToolId === call.toolId && Number(approval.approvedToolVersion) === Number(call.toolVersion);
-      if (!valid) {
-        const reason = !approval ? SIDE_EFFECT_ERROR.APPROVAL_REQUIRED
-          : approval.decision === APPROVAL_DECISION.REVOKED ? SIDE_EFFECT_ERROR.APPROVAL_REVOKED
-          : (approval.expiresAt != null && now >= Number(approval.expiresAt)) ? SIDE_EFFECT_ERROR.APPROVAL_EXPIRED
-          : SIDE_EFFECT_ERROR.PLAN_STALE;
-        return { ok: false, error: reason };
-      }
-      const lease = this.store.insertLease({ leaseId: _leaseId || undefined, callId, holderId, holderInstanceId: instanceId || this.instanceId, status: LEASE_STATUS.ACTIVE, issuedAt: now, expiresAt: now + Math.max(1, Number(ttlMs) || DEFAULT_LEASE_TTL_MS) });
-      this.store.updateCall(callId, { status: CALL_STATUS.LEASED, leased_at: now });
-      return { ok: true, duplicate: false, lease };
-    });
+      result = active ? { ok: false, error: SIDE_EFFECT_ERROR.LEASE_CONFLICT, lease: active } : { ok: false, error: SIDE_EFFECT_ERROR.LEASE_CONFLICT, detail: "SQLITE_CONTENTION" };
+      this.#audit({ toolRef: call.toolId, action: "side_effect.lease_contention", decision: "CONFLICT", reasonCode: SIDE_EFFECT_ERROR.LEASE_CONFLICT });
+    }
     if (result.ok) this.#audit({ toolRef: call.toolId, action: "side_effect.lease_acquired", decision: LEASE_STATUS.ACTIVE, reasonCode: null });
     if (result.ok && !result.duplicate) this.#event(call.taskId, "tool.lease_acquired", { callId, leaseId: result.lease.leaseId, holderId });
     return result;
@@ -388,20 +402,45 @@ class SideEffectAuthority {
     return { ok: result.status === ELIGIBILITY.ELIGIBLE, ...result, call };
   }
 
-  /** Crash recovery：RUNNING → UNKNOWN_EFFECT；旧进程 ACTIVE lease → EXPIRED。 */
-  recoverOnStartup({ instanceId = this.instanceId, blockTask = false } = {}) {
-    const now = this.#now();
+  /**
+   * Crash recovery（fail closed）。
+   * RUNNING SideEffectCall → UNKNOWN_EFFECT；并通过 Task Authority 将 Step/Task
+   * → BLOCKED / RECOVERY_REQUIRED。**没有 production 开关能跳过 blocking**：
+   * blockTask 参数已删除，调用方无法关闭安全策略。
+   * 若 TaskService/Task/Step 不可用或状态无法安全 block → 记录安全事件、保持
+   * UNKNOWN_EFFECT、禁止 replay/retry，绝不回退成 LEASED/APPROVED/FAILED。
+   */
+  recoverOnStartup({ instanceId = this.instanceId } = {}) {
     const running = this.store.callsByStatus(CALL_STATUS.RUNNING);
     const unknown = [];
+    const errors = [];
+    let recoveredTaskIds = [];
+    if (running.length) {
+      if (this.taskService && typeof this.taskService.recoverRunning === "function") {
+        try {
+          const rr = this.taskService.recoverRunning();
+          if (rr && rr.ok) recoveredTaskIds = rr.taskIds || [];
+          else errors.push({ error: SIDE_EFFECT_ERROR.RECOVERY_REQUIRED, detail: "TASK_RECOVERY_FAILED" });
+        } catch {
+          errors.push({ error: SIDE_EFFECT_ERROR.RECOVERY_REQUIRED, detail: "TASK_RECOVERY_FAILED" });
+        }
+      } else {
+        errors.push({ error: SIDE_EFFECT_ERROR.RECOVERY_REQUIRED, detail: "TASK_SERVICE_UNAVAILABLE" });
+      }
+    }
     for (const call of running) {
+      // 先无条件进入 UNKNOWN_EFFECT（fail closed）。
       this.store.transactSync(() => this.store.updateCall(call.callId, { status: CALL_STATUS.UNKNOWN_EFFECT, error_code: SIDE_EFFECT_ERROR.UNKNOWN_EFFECT, verification_status: null }));
       this.#audit({ toolRef: call.toolId, action: "side_effect.unknown_effect", decision: CALL_STATUS.UNKNOWN_EFFECT, reasonCode: SIDE_EFFECT_ERROR.UNKNOWN_EFFECT });
       this.#event(call.taskId, "tool.side_effect.unknown_effect", { callId: call.callId, toolId: call.toolId });
-      if (blockTask && this.taskService) {
-        try {
-          const task = this.taskStore.taskById(call.taskId);
-          if (task && call.stepId) this.taskService.blockStep({ context: { sessionRef: task.session_ref, appId: task.app_id }, taskId: call.taskId, stepId: call.stepId, runId: call.runId, reason: SIDE_EFFECT_ERROR.UNKNOWN_EFFECT, expectedRevision: task.revision });
-        } catch { /* recovery 阻塞失败不吞掉 call 状态 */ }
+      const task = this.taskStore.taskById(call.taskId);
+      const step = call.stepId ? this.taskStore.stepById(call.stepId) : null;
+      const blocked = !!task && String(task.status) === "BLOCKED" && (!step || String(step.status) === "BLOCKED");
+      if (!blocked) {
+        const detail = !task ? "TASK_MISSING" : (!step ? "STEP_MISSING" : "TASK_NOT_BLOCKED");
+        errors.push({ callId: call.callId, taskId: call.taskId, error: SIDE_EFFECT_ERROR.RECOVERY_REQUIRED, detail });
+        this.#audit({ toolRef: call.toolId, action: "side_effect.recovery_blocked", decision: "BLOCKED", reasonCode: detail });
+        this.#event(call.taskId, "tool.execution_blocked", { callId: call.callId, reason: SIDE_EFFECT_ERROR.RECOVERY_REQUIRED, detail });
       }
       unknown.push(this.store.callById(call.callId));
     }
@@ -411,9 +450,9 @@ class SideEffectAuthority {
       this.store.transactSync(() => this.store.updateLease(lease.leaseId, { status: LEASE_STATUS.EXPIRED }));
       expiredLeases.push(lease.leaseId);
     }
-    void now;
     this.lastUnknownEffect = unknown;
-    return { ok: true, unknownEffectCalls: unknown, expiredLeases, instanceId };
+    this.lastRecoveryErrors = errors;
+    return { ok: errors.length === 0, unknownEffectCalls: unknown, expiredLeases, recoveredTaskIds, errors, instanceId };
   }
 
   /** C1 只定义接口：无 verifier → VERIFICATION_NOT_AVAILABLE，保持 BLOCKED。 */
