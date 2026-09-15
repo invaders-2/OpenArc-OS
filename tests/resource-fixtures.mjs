@@ -43,7 +43,7 @@ function buildRuntime({ identity, clock = null }) {
   return { authStore, authService, deviceStore, deviceService };
 }
 
-export async function createResourceFixture({ dbPath = ":memory:", storeRoot = null } = {}) {
+export async function createResourceFixture({ dbPath = ":memory:", storeRoot = null, keepData = false } = {}) {
   const fx = await createDeviceFixture({ dbPath });
   const root = storeRoot || tempRoot("oa-d3-04a-store");
   const managedStore = new ManagedStore({ root });
@@ -97,6 +97,8 @@ export async function createResourceFixture({ dbPath = ":memory:", storeRoot = n
       } catch {
         /* ignore */
       }
+      // keepData：restart / contention 用例需要保留 disk DB 供第二个 runtime 重开。
+      if (keepData) return;
       try {
         fs.rmSync(root, { recursive: true, force: true });
       } catch {
