@@ -1,6 +1,6 @@
 # D4-03C1 · Side-effect Authority / Approval / Lease Contract（macOS）
 
-- **状态**：**D4-03C1 = PASS candidate**；**D4-03C2 = PASS candidate**、**D4-03C2 Closure = PASS candidate**、**D4-03C2 Closure-2 = PASS candidate**、**D4-03C2 Closure-3 = PASS candidate**（1 条受控真实 REVERSIBLE_WRITE + runtime identity final seal：acquire/recovery 零 override + runtime-aware duplicate + exact leaseId claim，待 ChatGPT 审计）；**D4-03C overall = PARTIAL**；**D4-03C3 = 未开始**
+- **状态**：**D4-03C1 = PASS**、**D4-03C2 = PASS**（含 Closure/Closure-2/Closure-3，已由 ChatGPT 审计）；**D4-03C3 = PASS candidate**（Ambiguous Result / Idempotency / Crash Recovery）；**D4-03C overall = PARTIAL**；**D4-03C4 = 未开始**
 - **分支**：feature/d4-03-tool-proxy，基线 809e8fa，未 merge main
 - **日期**：2026-09-15
 
@@ -47,9 +47,24 @@ READ_ONLY 继续走 D4-03B（不是 side effect）。C1 只研究 REVERSIBLE_WRI
 
 SideEffectCall 只存 `preconditions_safe`（resourceRef/expectedVersion/expectedHash/targetRef…），绝不复制业务对象。target version 变化 → `SIDE_EFFECT_PRECONDITION_CHANGED`，必须重新 proposal/approval。
 
-## Unknown Effect
+## Unknown Effect / Ambiguous Result（C3 生产合同）
 
-仅当执行已发出但无法可靠判断是否发生时进入。`UNKNOWN_EFFECT` 永不自动 retry；`RUNNING` + crash → `UNKNOWN_EFFECT`（不是 FAILED）。`verifyUnknownEffect` 接口保留；无 verifier → `VERIFICATION_NOT_AVAILABLE` 且保持 BLOCKED。
+仅当执行已发出但无法可靠判断是否发生时进入。`UNKNOWN_EFFECT` 永不自动 retry；`AUTO_RETRY = 0`（不因 `idempotencySupport = true` 就擅自重试）。`RUNNING` + crash → `UNKNOWN_EFFECT`（不是 FAILED）。
+
+`verifyUnknownEffect()` 是**真实 production recovery path**（不再依赖 test-only verifier）：
+```
+SideEffectCall → exact historical Tool Contract（toolId + toolVersion + effectClass）
+→ allowlisted adapter → read-only Domain verifier（mutation = 0）
+```
+三态 outcome：**APPLIED** / **NOT_APPLIED** / **INDETERMINATE**。`resource.trash` 用 `ResourceService` 只读 `sideEffectPrecondition` 判定。
+
+- **APPLIED**（trashed = true + registryStatus = deleted）→ `UNKNOWN_EFFECT → SUCCEEDED`，`verificationStatus = PASS`，0 retry / 0 second Domain execution。
+- **NOT_APPLIED** 只有在 **executionQuiesced = true**（OpenArc trusted fact）时才 → `FAILED` / `verificationStatus = FAIL`。
+- **INDETERMINATE**（resource missing / version changed / state 矛盾 / read failed / verifier unavailable）→ 保持 `UNKNOWN_EFFECT`，不猜。
+
+**Late Result / Timeout Rule**：`"现在没看到 effect" != "effect 永远不会发生"`。live timeout（同 runtime）时 `quiesced = false`，即使 verifier 看到 NOT_APPLIED 也保持 UNKNOWN_EFFECT；只有真实 process crash/restart（旧 runtime 已死 + 新 runtime + 旧 lease 失效）才认定 quiesced。verification 只读，绝不 `execute / retry / restore / delete / repair`，也绝不受当前 session / app / tool disabled 影响（exact historical contract lookup）。Tool disabled ≠ verification disabled。
+
+UNKNOWN_EFFECT 不能 `acquireLease` / `executeSideEffect`；recovery 收敛后 Task/Step **保持 BLOCKED**（Explicit Resume = DEFERRED，禁止自动 resume/restart/rerun）。
 
 ## Restart semantics（fail closed）
 
@@ -73,7 +88,7 @@ Approval/Lease 都持久化。`recoverOnStartup()` 是 fail-safe contract：**�
 `ACTIVE Lease ownership = callId + exact leaseId + holderId + runtime instance (SideEffectAuthority.instanceId)`。
 
 - **runtime identity 是 OpenArc 自身事实**：production `executeSideEffect({ callId, leaseId, holderId })` 不再接受 caller 提供的 `holderInstanceId`（即使传入也**完全忽略**）；判断一律为 `lease.holderInstanceId === this.instanceId`。调用方无法声明"我是哪个 runtime"，跨进程 Runtime B 即使知道 `instA` 字符串也不能伪装。
-- `acquireLease` 同样把 lease 绑定到 `this.instanceId`；只有明确的 test-only seam `_testInstanceId` 可覆盖（不得进入 production API）。
+- `acquireLease` 同样把 lease 绑定到 `this.instanceId`（后续 Closure-3 已彻底删除任何 test-only runtime override，见下）。
 - 缺少 callId / leaseId / holderId → `SIDE_EFFECT_LEASE_NOT_HELD` / 0 Domain invocation。
 - eligibility 的 lease snapshot 带 `lease_id + call_id + holder_id + holder_instance_id + expires_at`，同时校验 exact leaseId + holder + runtime instance。
 
@@ -113,13 +128,15 @@ Lease ≠ business lock。`ResourceService.delete({ expectedVersion })` 在**真
 
 只有声明 `executionPolicy = CONTROLLED_REVERSIBLE_WRITE` 的 contract 可执行；其余 write contract（`test.write` / `test.noverify` 等）仍 `WRITE_EXECUTION_DISABLED`，`executeReadOnly` 遇 write 一律 `WRITE_EXECUTION_DISABLED`，mutationCount = 0。IRREVERSIBLE_WRITE / EXTERNAL_SIDE_EFFECT / PRIVILEGED / Shell / Terminal / filesystem generic mutation / MCP / Browser automation / Device Agent / Canvas / App Center mutation 全部 BLOCKED。
 
-## Persistence（schema v13）
+## Persistence（schema v14）
 
 `side_effect_calls` / `tool_approvals` / `side_effect_leases`。只存 safe refs + hash + 状态机；禁止 credential / proxy capability / tool facade capability / raw Authorization / full unsafe payload。
 
+v14（D4-03C3）新增 **non-authoritative** `side_effect_calls.recovery_safe`（JSON）：保存 `{ outcome, reason, quiesced, verifiedAt, resourceRef, expectedVersion, currentVersion }` 安全投影。**最终状态仍由 `status` 决定**；未新增第二套 execution/retry authority。
+
 ## Audit / Task Events
 
-Audit：`side_effect.planned / approval_requested / approved / denied / approval_revoked / lease_acquired / lease_released / lease_revoked / blocked / unknown_effect / execution_started / verification_passed / verification_failed / succeeded`。TaskEvent：`tool.side_effect.planned / tool.approval_required / tool.approved / tool.denied / tool.lease_acquired / tool.execution_eligible / tool.execution_blocked / tool.side_effect.unknown_effect / tool.side_effect.execution_started / tool.side_effect.verification_passed / tool.side_effect.succeeded`。只存安全投影，无 raw arguments / content / secret / credential / capability / 绝对路径。Audit **不是** execution authority；SideEffectCall 仍是唯一 authoritative execution state（不建第二套真值）。
+Audit：`side_effect.planned / approval_requested / approved / denied / approval_revoked / lease_acquired / lease_released / lease_revoked / blocked / unknown_effect / execution_started / verification_passed / verification_failed / succeeded / verification_started / verification_applied / verification_not_applied / verification_indeterminate / recovery_resolved`。TaskEvent：`tool.side_effect.planned / tool.approval_required / tool.approved / tool.denied / tool.lease_acquired / tool.execution_eligible / tool.execution_blocked / tool.side_effect.unknown_effect / tool.side_effect.execution_started / tool.side_effect.verification_passed / tool.side_effect.succeeded / tool.side_effect.verification_started / tool.side_effect.verification_applied / tool.side_effect.verification_not_applied / tool.side_effect.verification_indeterminate / tool.side_effect.recovery_resolved`。只存安全投影，无 raw arguments / content / secret / credential / capability / 绝对路径。Audit **不是** execution authority；SideEffectCall 仍是唯一 authoritative execution state（不建第二套真值）。
 
 ## 冻结
 
@@ -133,4 +150,4 @@ Audit：`side_effect.planned / approval_requested / approved / denied / approval
 
 ## 下一步
 
-`D4-03C2` 已完成第一条受控真实 REVERSIBLE_WRITE。**`D4-03C3 Ambiguous Result / Idempotency / Crash Recovery` = 未开始**，由 ChatGPT 审计后决定，禁止自动进入；`D4-03D Full Tool Proxy Gate` 之后才 D4-04。
+`D4-03C3` 已建立真实 ambiguous-result / crash recovery / idempotency 收敛。**`D4-03C4` = 未开始**，由 ChatGPT 审计后决定，禁止自动进入。
