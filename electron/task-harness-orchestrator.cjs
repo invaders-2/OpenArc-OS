@@ -13,7 +13,7 @@
 const crypto = require("node:crypto");
 const domain = require("./task-domain.cjs");
 const { ToolFacadeBridge } = require("./tool-facade-bridge.cjs");
-const { buildToolManifest } = require("./tool-registry.cjs");
+const { buildBridgeManifest } = require("./tool-registry.cjs");
 
 const {
   TASK_STATUS, STEP_STATUS, TASK_EVENT, ERROR, ORCHESTRATION_KIND,
@@ -93,12 +93,15 @@ function classifyHarnessError(e) {
 }
 
 class TaskHarnessOrchestrator {
-  constructor({ taskService, adapterFactory = null, toolProxy = null, clock = null, logger = null, turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS, startTimeoutMs = DEFAULT_START_TIMEOUT_MS, maxPersistedHarnessEvents = DEFAULT_MAX_PERSISTED_EVENTS, toolFacade = null } = {}) {
+  constructor({ taskService, adapterFactory = null, toolProxy = null, sideEffectRuntime = null, clock = null, logger = null, turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS, startTimeoutMs = DEFAULT_START_TIMEOUT_MS, maxPersistedHarnessEvents = DEFAULT_MAX_PERSISTED_EVENTS, toolFacade = null } = {}) {
     if (!taskService) throw new Error("TaskHarnessOrchestrator 需要 TaskService");
     this.taskService = taskService;
     this.adapterFactory = adapterFactory;
     // D4-03A：可选 Controlled Tool Proxy。无 proxy 时 tool proposal 仍 0 执行。
     this.toolProxy = toolProxy;
+    // D4-03C4：唯一 side-effect 装配。仅用于 orchestrate「审批 → 受监督执行 → verified result」，
+    // 绝不持有第二份 approval / lease / execution state。
+    this.sideEffectRuntime = sideEffectRuntime;
     // D4-03B Closure：official dsh Tool Facade（显式 opt-in；synthetic ACP 路径保持 D4-03B loop）。
     this.toolFacade = toolFacade;
     this.clock = typeof clock === "function" ? clock : () => Date.now();
@@ -107,6 +110,8 @@ class TaskHarnessOrchestrator {
     this.startTimeoutMs = startTimeoutMs;
     this.maxPersistedHarnessEvents = maxPersistedHarnessEvents;
     this.registry = new Map(); // runId -> { taskId, stepId, capabilityId, adapter }
+    // runId -> Set<callId>：已经作为 verified result 交回过 Harness 的 side-effect call。
+    this.resolvedSideEffectCalls = new Map();
     this.lastEvidence = null;
   }
 
@@ -249,6 +254,52 @@ class TaskHarnessOrchestrator {
         return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason, event: TASK_EVENT.TOOL_EXECUTION_BLOCKED, expectedRevision: rev2, alreadyRecorded: true });
       }
 
+      // D4-03C4 · official dsh WRITE proposal → trusted approval → 受监督执行 → verified result。
+      // official dsh 只能提出 proposal；OpenArc 在这里等待 trusted user decision，
+      // 绝不由 Harness / model text / timer 自动批准，也绝不把 unverified success 交回 Harness。
+      if (facadeMode && this.sideEffectRuntime) {
+        let sideRounds = 0;
+        while (sideRounds < MAX_TOOL_ROUNDS) {
+          sideRounds += 1;
+          const pending = this.#sideEffectCallsToOrchestrate(stepId, run.runId);
+          if (!pending.length) break;
+          await this.#recordEvents({ context, taskId, runId: run.runId, events: mapped.events, expectedRevision: task.revision });
+          let rev = this.#rev(context, taskId, task.revision);
+          const resolution = await this.sideEffectRuntime.resolvePendingForStep({ taskId, stepId, runId: run.runId, callIds: pending.map((c) => c.callId) });
+          const freshTask = svc.getTask({ context, taskId });
+          const needCancel = resolution.decision === "CANCELLED" || (freshTask.ok && freshTask.task.cancelRequested);
+          if (!resolution.ok) {
+            if (needCancel) return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: freshTask.ok ? freshTask.task.revision : rev });
+            // UNKNOWN_EFFECT / FAILED / DENIED / TIMEOUT：0 retry，Harness 必须 STOP。
+            return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: resolution.error || ERROR.TOOL_EXECUTION_NOT_AVAILABLE, event: TASK_EVENT.TOOL_SIDE_EFFECT_EXECUTION_BLOCKED, expectedRevision: freshTask.ok ? freshTask.task.revision : rev, alreadyRecorded: true });
+          }
+          const consumed = this.resolvedSideEffectCalls.get(run.runId) || new Set();
+          consumed.add(resolution.callId);
+          this.resolvedSideEffectCalls.set(run.runId, consumed);
+          // 只有 Verified Effect 才允许回给 Harness；绝不回 unverified success。
+          const follow = "OpenArc verified side-effect result (do not re-issue the write):\n" + JSON.stringify(resolution.safeResult).slice(0, 2000) + "\nContinue the task.";
+          let next;
+          try {
+            next = await adapter.prompt(follow, { timeoutMs: turnTimeoutMs });
+          } catch (e) {
+            const code = classifyHarnessError(e);
+            const failedCall = svc.failModelCall({ context, taskId, callId, providerErrorCode: code, requestId: modelRequestId, expectedRevision: task.revision });
+            const failRev = failedCall.ok ? failedCall.task.revision : task.revision;
+            if (code === ERROR.HARNESS_CANCELLED) return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: failRev });
+            return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: code, event: TASK_EVENT.HARNESS_RUN_UNKNOWN_EFFECT, expectedRevision: failRev });
+          }
+          res = next;
+          rawEvents = Array.isArray(next.events) ? next.events : [];
+          mapped = mapAcpEvents(rawEvents, { maxPersisted: this.maxPersistedHarnessEvents });
+          usage = summarizeUsage(rawEvents) || usage;
+          const latestTask = svc.getTask({ context, taskId });
+          if (latestTask.ok) task = latestTask.task;
+          if (latestTask.ok && latestTask.task.cancelRequested) return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: task.revision });
+        }
+        const leftover = this.#sideEffectCallsToOrchestrate(stepId, run.runId);
+        if (leftover.length) return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: "SIDE_EFFECT_APPROVAL_UNRESOLVED", event: TASK_EVENT.TOOL_SIDE_EFFECT_EXECUTION_BLOCKED, expectedRevision: task.revision, alreadyRecorded: true });
+      }
+
       const hasPermission = rawEvents.some((e) => e && (e.type === "permission.requested" || e.type === "permission.rejected"));
       const callDone = svc.completeModelCall({ context, taskId, callId, usage: usage || null, requestId: modelRequestId, expectedRevision: task.revision });
       if (callDone.ok) task = callDone.task;
@@ -311,7 +362,15 @@ class TaskHarnessOrchestrator {
       try { await adapter.dispose(); } catch { /* ignore */ }
       if (facade) { try { await facade.bridge.stop(); } catch { /* ignore */ } }
       this.registry.delete(run.runId);
+      this.resolvedSideEffectCalls.delete(run.runId);
     }
+  }
+
+  /** 本 step/run 上尚未作为 verified result 交回 Harness 的 side-effect call（任何状态）。 */
+  #sideEffectCallsToOrchestrate(stepId, runId) {
+    if (!this.sideEffectRuntime || !stepId) return [];
+    const done = this.resolvedSideEffectCalls.get(runId) || new Set();
+    return this.sideEffectRuntime.sideEffectCallsOfStep({ stepId, runId }).filter((c) => !done.has(c.callId));
   }
 
   #verify({ text, verify }) {
@@ -334,9 +393,11 @@ class TaskHarnessOrchestrator {
     const proxy = this.toolProxy;
     if (!proxy || typeof proxy.executeReadOnly !== "function" || !proxy.adapterFor) return null;
     const toolIds = cfg.toolIds && cfg.toolIds.length ? cfg.toolIds : ["resource.read.metadata", "resource.search"];
-    const manifest = buildToolManifest(proxy.registry, { toolIds });
+    // D4-03C4：WRITE proposal tools 只能走 SIDE_EFFECT_PROPOSAL route；未装配 sideEffectRuntime 时绝不暴露。
+    const writeToolIds = cfg.writeToolIds && cfg.writeToolIds.length && this.sideEffectRuntime ? cfg.writeToolIds : [];
+    const manifest = buildBridgeManifest(proxy.registry, { readToolIds: toolIds, writeToolIds });
     const make = typeof cfg.bridgeFactory === "function" ? cfg.bridgeFactory : (o) => new ToolFacadeBridge(o);
-    const bridge = make({ toolProxy: proxy, manifest, clock: this.clock, logger: this.logger, ttlMs: cfg.ttlMs, execTimeoutMs: cfg.execTimeoutMs });
+    const bridge = make({ toolProxy: proxy, manifest, sideEffectRuntime: this.sideEffectRuntime, clock: this.clock, logger: this.logger, ttlMs: cfg.ttlMs, execTimeoutMs: cfg.execTimeoutMs });
     await bridge.start();
     return { bridge, manifest, taskId, stepId, runId, maxCalls: cfg.maxCalls, ttlMs: cfg.ttlMs };
   }

@@ -100,4 +100,20 @@ contextBridge.exposeInMainWorld("openarc", {
   model: {
     command: (command) => ipcRenderer.invoke("model:command", command),
   },
+  /**
+   * D4-03C4 Trusted Approval Gateway 桥。
+   *
+   * **只有两条能力**：提交一个 approval decision、订阅 approval 请求事件。
+   * Renderer 不能指定 userId / role / appId / sessionRef / risk / planHash / effectClass /
+   * argumentsHash —— 这些都由主进程从当前 authenticated session + SideEffectCall +
+   * Tool Registry + Resource Domain 推导。返回值恒为 safe 投影。
+   */
+  sideEffect: {
+    command: (command) => ipcRenderer.invoke("sideeffect:command", command),
+    onEvent: (callback) => {
+      const listener = (_, event) => callback(event);
+      ipcRenderer.on("sideeffect:event", listener);
+      return () => ipcRenderer.removeListener("sideeffect:event", listener);
+    },
+  },
 });

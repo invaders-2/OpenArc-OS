@@ -13,7 +13,7 @@ const http = require("node:http");
 const crypto = require("node:crypto");
 const domain = require("./tool-domain.cjs");
 const { isWellFormedToolId } = domain;
-const { buildToolManifest } = require("./tool-registry.cjs");
+const { buildBridgeManifest, ROUTE } = require("./tool-registry.cjs");
 
 const CAP_STATE = Object.freeze({ ACTIVE: "ACTIVE", REVOKED: "REVOKED", EXPIRED: "EXPIRED", EXHAUSTED: "EXHAUSTED" });
 const TOOL_CAPABILITY_PREFIX = "tpx_";
@@ -30,6 +30,9 @@ const BRIDGE_ERROR = Object.freeze({
   SCOPE_INVALID: "TOOL_CAPABILITY_SCOPE_INVALID",
   DENIED: "TOOL_DENIED",
   EXECUTION_FAILED: "TOOL_EXECUTION_FAILED",
+  // D4-03C4：WRITE proposal 的唯一对外语义。Harness 拿不到执行权。
+  APPROVAL_REQUIRED: "SIDE_EFFECT_APPROVAL_REQUIRED",
+  SIDE_EFFECT_ROUTE_UNAVAILABLE: "SIDE_EFFECT_ROUTE_UNAVAILABLE",
 });
 
 /** 工具结果不得携带绝对路径 / store root / credential 形态。 */
@@ -45,10 +48,12 @@ function redactUnsafe(value, depth = 0) {
 }
 
 class ToolFacadeBridge {
-  constructor({ toolProxy, manifest = null, clock = null, logger = null, ttlMs = DEFAULT_TTL_MS, execTimeoutMs = 15000 } = {}) {
+  constructor({ toolProxy, manifest = null, sideEffectRuntime = null, clock = null, logger = null, ttlMs = DEFAULT_TTL_MS, execTimeoutMs = 15000 } = {}) {
     if (!toolProxy) throw new Error("ToolFacadeBridge 需要 ControlledToolProxy");
     this.toolProxy = toolProxy;
     this.manifest = manifest;
+    // D4-03C4：受控 WRITE proposal route（唯一 side-effect 装配）。绝不在本文件里建立第二套 authority。
+    this.sideEffectRuntime = sideEffectRuntime;
     this.clock = typeof clock === "function" ? clock : () => Date.now();
     this.logger = logger;
     this.ttlMs = Math.max(1, Number(ttlMs) || DEFAULT_TTL_MS);
@@ -56,15 +61,19 @@ class ToolFacadeBridge {
     this.capabilities = new Map();
     this.server = null;
     this.baseUrl = null;
-    this.stats = { calls: 0, allowed: 0, denied: 0, domainExecutions: 0 };
+    this.stats = { calls: 0, allowed: 0, denied: 0, domainExecutions: 0, sideEffectProposals: 0 };
   }
 
   #now() { return this.clock(); }
 
   /** official dsh boot 前确认 manifest contractHash == 当前 Registry。 */
   currentManifestHash() {
-    const toolIds = this.manifest ? this.manifest.toolIds : this.toolProxy.registry.ids();
-    return buildToolManifest(this.toolProxy.registry, { toolIds }).contractHash;
+    const m = this.manifest;
+    if (!m) return buildBridgeManifest(this.toolProxy.registry, { readToolIds: this.toolProxy.registry.ids() }).contractHash;
+    const routes = m.routes || {};
+    const readIds = m.toolIds.filter((id) => routes[id] !== ROUTE.SIDE_EFFECT_PROPOSAL);
+    const writeIds = m.toolIds.filter((id) => routes[id] === ROUTE.SIDE_EFFECT_PROPOSAL);
+    return buildBridgeManifest(this.toolProxy.registry, { readToolIds: readIds, writeToolIds: writeIds }).contractHash;
   }
   contractFresh() { return !this.manifest || this.manifest.contractHash === this.currentManifestHash(); }
 
@@ -173,8 +182,41 @@ class ToolFacadeBridge {
     return send(200, outcome);
   }
 
+  /**
+   * Route 由 Tool Registry 权威决定（Harness 不能自报）：
+   *   READ_ONLY            → propose → reauthorize → executeReadOnly → verify
+   *   SIDE_EFFECT_PROPOSAL → propose → decision → SideEffectPlan(AWAITING_APPROVAL)
+   * 两条路由的权限语义**不合并**；WRITE 绝不经过 READ_ONLY execution。
+   */
+  #routeFor(toolId) {
+    const versions = this.toolProxy.registry.versionsOf(toolId);
+    const version = versions.length ? versions[versions.length - 1] : null;
+    const contract = version == null ? null : this.toolProxy.registry.get(toolId, version);
+    if (!contract) return ROUTE.READ_ONLY;
+    return contract.riskClass === "READ_ONLY" ? ROUTE.READ_ONLY : ROUTE.SIDE_EFFECT_PROPOSAL;
+  }
+
+  /** WRITE proposal route：只生成 SideEffectCall（AWAITING_APPROVAL）。0 mutation / 0 lease / 0 execute。 */
+  async #proposeSideEffect(cap, toolId, args) {
+    if (!this.sideEffectRuntime) return { ok: false, error: BRIDGE_ERROR.SIDE_EFFECT_ROUTE_UNAVAILABLE };
+    const versions = this.toolProxy.registry.versionsOf(toolId);
+    const toolVersion = versions.length ? versions[versions.length - 1] : 1;
+    const context = { sessionRef: cap.sessionRef, appId: cap.appId, requestId: "treq_" + cap.capabilityId };
+    let planned;
+    try {
+      planned = await this.sideEffectRuntime.proposeWrite({ context, taskId: cap.taskId, stepId: cap.stepId, runId: cap.runId, toolId, toolVersion, arguments: args && typeof args === "object" ? args : {} });
+    } catch {
+      return { ok: false, error: BRIDGE_ERROR.DENIED };
+    }
+    if (!planned || !planned.ok) return { ok: false, error: (planned && planned.error) || BRIDGE_ERROR.DENIED };
+    this.stats.sideEffectProposals += 1;
+    // 绝不返回 success：Harness 只能看到 bounded "approval required"，绝不看到 unverified success。
+    return { ok: false, error: BRIDGE_ERROR.APPROVAL_REQUIRED, approvalRequired: true, approvalRequestId: planned.approvalRequestId };
+  }
+
   /** 唯一执行路径：ControlledToolProxy.propose → executeReadOnly。绝不直调 Domain。 */
   async #execute(cap, toolId, args, signal = null) {
+    if (this.#routeFor(toolId) === ROUTE.SIDE_EFFECT_PROPOSAL) return this.#proposeSideEffect(cap, toolId, args);
     const context = { sessionRef: cap.sessionRef, appId: cap.appId, requestId: "treq_" + cap.capabilityId };
     const versions = this.toolProxy.registry.versionsOf(toolId);
     const toolVersion = versions.length ? versions[versions.length - 1] : 1;

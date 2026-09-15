@@ -116,6 +116,8 @@ app.whenReady().then(() => {
     picker: identity.pickerService,
     // D4-01：模型命令（Settings → Models；无 raw credential / proxy capability）。
     model: identity.modelService,
+    // D4-03C4：Trusted Approval Gateway（只暴露安全 approval 投影 + trusted user decision）。
+    sideEffect: identity.sideEffectGateway,
     dialog,
     shell,
     BrowserWindow,
@@ -123,6 +125,10 @@ app.whenReady().then(() => {
     send: (event) => {
       if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return;
       win.webContents.send("identity:event", event);
+    },
+    sendSideEffect: (event) => {
+      if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return;
+      win.webContents.send("sideeffect:event", event);
     },
   });
 

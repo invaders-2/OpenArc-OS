@@ -20,6 +20,7 @@ const { createResourceBundle, registerResourceIpc } = require("./resource-bootst
 const { createGovernanceBundle, registerGovernanceIpc } = require("./governance-bootstrap.cjs");
 const { createModelBundle, registerModelIpc } = require("./model-bootstrap.cjs");
 const { createTaskBundle } = require("./task-bootstrap.cjs");
+const { createSideEffectGateway, registerSideEffectIpc } = require("./side-effect-bootstrap.cjs");
 
 /**
  * @param opts.userDataDir 数据目录（identity.db 与受保护存储落在这里）
@@ -81,15 +82,23 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
     logger: log,
   });
   // D4-02A：Task Runtime 持久权威（复用同一连接与 AuthorizationService；启动即 recovery）。
-  const { taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, orchestrator } = createTaskBundle({
+  // D4-03C4：唯一 side-effect production assembly（Registry → Proxy → Authority → Supervisor → Runtime）。
+  const { taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, orchestrator } = createTaskBundle({
     identityStore: store,
     authorization,
     authStore,
     modelService,
     modelProxy,
     logger: log,
+    resourceService,
+    searchService,
+    dbPath: path.join(userDataDir, "identity.db"),
+    storeRoot: path.join(userDataDir, "library"),
+    runtimeDir: path.join(userDataDir, "runtime", "side-effects"),
   });
-  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, modelStore, credentialStore, modelService, modelProxy, taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, orchestrator };
+  // Trusted Approval Gateway：Renderer 只能经此通道看到安全投影并提交 decision。
+  const sideEffectGateway = createSideEffectGateway({ sideEffectRuntime });
+  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, modelStore, credentialStore, modelService, modelProxy, taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, sideEffectGateway, orchestrator };
 }
 
 /**
@@ -98,7 +107,7 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
  * @param opts.isTrusted (event) => boolean —— 与 windows:sync 同一条信任判据
  * @param opts.send      (payload) => void —— 把身份事件推给渲染进程
  */
-function registerIdentityIpc({ ipcMain, service, authorization, device, resource, resourceSearch, resourcePreview, governance, governanceService, projects, canvas, picker, model, dialog, BrowserWindow, shell = null, isTrusted, send }) {
+function registerIdentityIpc({ ipcMain, service, authorization, device, resource, resourceSearch, resourcePreview, governance, governanceService, projects, canvas, picker, model, sideEffect = null, dialog, BrowserWindow, shell = null, isTrusted, send, sendSideEffect = null }) {
   ipcMain.handle("identity:command", async (e, command) => {
     if (isTrusted && !isTrusted(e)) throw Error("Forbidden");
     if (!service) return { ok: false, error: "INTERNAL_ERROR", detail: "identity-not-ready" };
@@ -121,6 +130,13 @@ function registerIdentityIpc({ ipcMain, service, authorization, device, resource
   if (governance || governanceService) registerGovernanceIpc({ ipcMain, service: governance || governanceService, authorization, identity: service, isTrusted });
   // D4-01：模型管理命令（actor sessionRef / appId 由主进程决定；无 raw credential / proxy capability）。
   if (model) registerModelIpc({ ipcMain, service: model, identity: service, isTrusted });
+  // D4-03C4：Trusted Approval Gateway（唯一 approval 通道；sessionRef 由主进程注入）。
+  if (sideEffect) {
+    if (typeof sideEffect === "object" && typeof sendSideEffect === "function" && sideEffect.runtime) {
+      sideEffect.runtime.onApprovalRequested = (request) => sendSideEffect({ type: "sideEffect/approvalRequested", request });
+    }
+    registerSideEffectIpc({ ipcMain, service: sideEffect, identity: service, isTrusted, send: sendSideEffect });
+  }
 }
 
 module.exports = { createIdentityService, registerIdentityIpc };

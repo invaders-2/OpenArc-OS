@@ -264,6 +264,14 @@ class SideEffectAuthority {
     if (!task) return { ok: false, error: SIDE_EFFECT_ERROR.TASK_NOT_FOUND };
     if (task.user_id !== actor.user.id && actor.user.role !== "ADMIN") return { ok: false, error: SIDE_EFFECT_ERROR.APPROVAL_FORBIDDEN };
     if (call.status !== CALL_STATUS.AWAITING_APPROVAL && call.status !== CALL_STATUS.APPROVED) return { ok: false, error: SIDE_EFFECT_ERROR.CALL_STATE };
+    // §36 concurrent approval click：同一绑定下重复 Approve 是幂等的，
+    // 只产生一个 authoritative approval transition，绝不第二次 approve。
+    if (call.status === CALL_STATUS.APPROVED) {
+      const prior = this.store.latestApprovalOfCall(callId);
+      if (prior && prior.decision === APPROVAL_DECISION.APPROVED && prior.revokedAt == null && prior.planHash === call.planHash) {
+        return { ok: true, duplicate: true, call, approval: prior };
+      }
+    }
     const now = this.#now();
     const expiresAt = now + Math.max(1, Number(ttlMs) || DEFAULT_APPROVAL_TTL_MS);
     const approval = this.store.transactSync(() => this.store.insertApproval({
@@ -594,6 +602,50 @@ class SideEffectAuthority {
       this.#event(call.taskId, "tool.side_effect.recovery_resolved", { callId: call.callId, toolId: call.toolId, outcome, resolvedStatus: terminal.status });
     }
     return { ok: true, outcome, resolved, quiesced, reason, call: updated, status: updated ? updated.status : null, verificationStatus: terminal ? terminal.verificationStatus : null };
+  }
+
+  /**
+   * D4-03C4 · 受监督 executor runtime 真实退出后的**单条** call 收敛。
+   *
+   * 与 recoverOnStartup() 的关键区别：它只处理这一条 call，绝不触碰其它 runtime 的 lease
+   * （后者只有在真实 cold restart 时才是正确的）。
+   *   · RUNNING（该 executor 已 claim）→ UNKNOWN_EFFECT + trusted quiescence evidence；
+   *   · LEASED（该 executor 未 claim 即退出）→ known no effect → FAILED + revoke 自己的 lease。
+   * 调用方必须先证明 active lease 属于**自己 spawn 的 executor instance**，否则无权收敛。
+   */
+  recoverAfterExecutorExit({ callId, executorInstanceId = null } = {}) {
+    const call = this.store.callById(callId);
+    if (!call) return { ok: false, error: SIDE_EFFECT_ERROR.CALL_NOT_FOUND };
+    const active = this.store.activeLeaseOfCall(callId);
+    if (call.status === CALL_STATUS.LEASED) {
+      if (!active || (executorInstanceId && active.holderInstanceId !== executorInstanceId)) return { ok: false, error: SIDE_EFFECT_ERROR.LEASE_NOT_HELD, status: call.status };
+      this.#finalizeLease(callId, active.leaseId, LEASE_STATUS.REVOKED, call.toolId);
+      const updated = this.store.transactSync(() => this.store.updateCall(callId, { status: CALL_STATUS.FAILED, error_code: SIDE_EFFECT_ERROR.DOMAIN_WRITE_FAILED, completed_at: this.#now() }));
+      this.#audit({ toolRef: call.toolId, action: "side_effect.blocked", decision: CALL_STATUS.FAILED, reasonCode: SIDE_EFFECT_ERROR.DOMAIN_WRITE_FAILED });
+      this.#event(call.taskId, "tool.side_effect.execution_blocked", { callId, toolId: call.toolId, reasonCode: SIDE_EFFECT_ERROR.DOMAIN_WRITE_FAILED });
+      return { ok: true, status: CALL_STATUS.FAILED, knownNoEffect: true, call: updated };
+    }
+    if (call.status !== CALL_STATUS.RUNNING) return { ok: true, status: call.status, call };
+
+    const originRuntimeInstanceId = (active && active.holderInstanceId) || (call.recoverySafe && call.recoverySafe.originRuntimeInstanceId) || executorInstanceId || null;
+    const originLeaseId = (active && active.leaseId) || (call.recoverySafe && call.recoverySafe.originLeaseId) || null;
+    const q = this.#quiescenceProof(originRuntimeInstanceId);
+    const recovery = { quiesced: q.quiesced, source: q.quiesced ? "executor_exit_confirmed" : "unproven", originRuntimeInstanceId, originLeaseId, proof: q.proof, reason: q.reason, recordedAt: this.#now() };
+    const updated = this.store.transactSync(() => this.store.updateCall(callId, { status: CALL_STATUS.UNKNOWN_EFFECT, error_code: SIDE_EFFECT_ERROR.UNKNOWN_EFFECT, completed_at: this.#now(), verification_status: null, recovery_safe: recovery }));
+    this.#finalizeLease(callId, originLeaseId, LEASE_STATUS.REVOKED, call.toolId);
+    this.#audit({ toolRef: call.toolId, action: "side_effect.quiescence_checked", decision: q.quiesced ? "CONFIRMED" : "UNPROVEN", reasonCode: q.reason });
+    this.#audit({ toolRef: call.toolId, action: "side_effect.unknown_effect", decision: CALL_STATUS.UNKNOWN_EFFECT, reasonCode: SIDE_EFFECT_ERROR.UNKNOWN_EFFECT });
+    this.#event(call.taskId, "tool.side_effect.unknown_effect", { callId, toolId: call.toolId, originRuntimeInstanceId, quiesced: q.quiesced, proofType: q.proof ? q.proof.type : null });
+    this.#event(call.taskId, q.quiesced ? "tool.side_effect.quiescence_confirmed" : "tool.side_effect.quiescence_unproven", { callId, originRuntimeInstanceId, reason: q.reason });
+    const step = call.stepId ? this.taskStore.stepById(call.stepId) : null;
+    if (this.taskService && typeof this.taskService.blockStep === "function" && call.stepId) {
+      const freshTask = this.taskStore.taskById(call.taskId);
+      if (freshTask) {
+        try { this.taskService.blockStep({ context: this.#executionContext(freshTask), taskId: call.taskId, stepId: call.stepId, runId: call.runId, reason: SIDE_EFFECT_ERROR.UNKNOWN_EFFECT, event: "tool.side_effect.unknown_effect", expectedRevision: freshTask.revision }); } catch { /* fail closed：call 已是 UNKNOWN_EFFECT */ }
+      }
+    }
+    void step;
+    return { ok: true, status: CALL_STATUS.UNKNOWN_EFFECT, call: updated, quiesced: q.quiesced };
   }
 
   /**

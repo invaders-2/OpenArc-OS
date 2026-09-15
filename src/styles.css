@@ -1392,3 +1392,17 @@ input[type="checkbox"] {
 .d401-defaults { display: flex; flex-direction: column; gap: 6px; }
 .d401-test { font-size: 11px; opacity: .8; }
 
+/* ── D4-03C4 · Trusted Approval UI ───────────────────────────────────────── */
+.approval { display: flex; flex-direction: column; gap: 10px; }
+.approval-grid { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
+.approval-grid dt { font-size: var(--fs-caption, 12px); color: rgba(var(--muted-rgb, 255 255 255), 0.62); }
+.approval-grid dd { margin: 0; font-size: var(--fs-secondary, 13px); display: flex; flex-direction: column; gap: 2px; }
+.approval-ref { font-family: var(--font-mono, ui-monospace); font-size: var(--fs-micro, 11px); opacity: 0.6; word-break: break-all; }
+.approval-risk { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: var(--fs-caption, 12px); background: rgba(255, 196, 0, 0.16); color: #ffd479; }
+.approval-risk[data-approval-risk="REVERSIBLE_WRITE"] { background: rgba(120, 180, 255, 0.18); color: #9ecbff; }
+.approval-risk[data-approval-risk="IRREVERSIBLE_WRITE"],
+.approval-risk[data-approval-risk="PRIVILEGED"] { background: rgba(255, 90, 90, 0.18); color: #ff9a9a; }
+.approval-note { margin: 0; font-size: var(--fs-micro, 11px); opacity: 0.68; line-height: var(--lh-relaxed, 1.5); }
+.approval-notice { margin: 0; font-size: var(--fs-caption, 12px); color: #ff8a8a; }
+
+

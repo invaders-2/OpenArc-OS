@@ -32,6 +32,7 @@ import { GovernanceApp } from "./governance/GovernanceApp";
 import { FilesApp } from "./governance/FilesApp";
 import { CanvasApp } from "./governance/CanvasApp";
 import { ProjectsApp } from "./governance/ProjectsApp";
+import { ApprovalPrompt } from "./approval/ApprovalPrompt";
 
 type DisplayInfo = {
   id: number;
@@ -66,6 +67,10 @@ declare global {
       };
       model?: {
         command: (cmd: Record<string, unknown>) => Promise<Record<string, unknown>>;
+      };
+      sideEffect?: {
+        command: (cmd: Record<string, unknown>) => Promise<Record<string, unknown>>;
+        onEvent: (cb: (e: { type?: string; request?: unknown }) => void) => () => void;
       };
     };
   }
@@ -691,6 +696,9 @@ function App() {
       {menu ? (
         <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} label="桌面菜单" />
       ) : null}
+
+      {/* D4-03C4：Trusted Approval UI。打开时与 Dialog 同一条规则 —— 原生视图整块让位。 */}
+      <ApprovalPrompt onOpenChange={(open) => setOverlays((o) => (o.dialog === open ? o : { ...o, dialog: open }))} />
 
       {/* 真实产品消费：删除文件夹前的确认。Dialog 由产品自身使用，
           而不是只在 gallery 里存在 —— 这是 §41 能标 CLOSED BY D2-02 的前提。 */}

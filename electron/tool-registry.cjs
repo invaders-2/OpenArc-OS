@@ -215,6 +215,52 @@ function buildToolManifest(registry, { toolIds = null } = {}) {
   return Object.freeze({ contractHash, toolIds: Object.freeze(ids), tools: Object.freeze(tools) });
 }
 
+/**
+ * D4-03C4 · Side-effect proposal manifest（WRITE route）。
+ *
+ * **与 READ_ONLY facade 显式分离**：WRITE tool 只暴露 schema metadata，供 official dsh
+ * 提出 Tool Proposal；它绝不能走 READ_ONLY execution route。只有显式声明
+ * executionPolicy = CONTROLLED_REVERSIBLE_WRITE 的 REVERSIBLE_WRITE contract 才允许进入。
+ */
+function buildWriteToolManifest(registry, { toolIds = null } = {}) {
+  const ids = (toolIds && toolIds.length ? toolIds : registry.ids()).slice().sort();
+  const tools = [];
+  for (const id of ids) {
+    const versions = registry.versionsOf(id);
+    const version = versions.length ? versions[versions.length - 1] : null;
+    if (version == null) throw new Error("write manifest tool not registered: " + id);
+    const c = registry.get(id, version);
+    if (c.riskClass !== RISK_CLASS.REVERSIBLE_WRITE) throw new Error("write manifest 只允许 REVERSIBLE_WRITE tool: " + id);
+    if (c.executionPolicy !== "CONTROLLED_REVERSIBLE_WRITE") throw new Error("write manifest 只允许受控 executionPolicy: " + id);
+    tools.push({ toolId: c.toolId, version: c.version, name: toolDefinitionName(c.toolId), displayName: c.displayName, description: String(c.description || "").slice(0, 300), inputSchema: projectJsonSchema(c.inputSchema), outputSchema: projectJsonSchema(c.outputSchema), riskClass: c.riskClass });
+  }
+  const hashInput = tools.map((t) => ({ toolId: t.toolId, version: t.version, inputSchema: t.inputSchema, outputSchema: t.outputSchema, riskClass: t.riskClass }));
+  const contractHash = crypto.createHash("sha256").update(JSON.stringify(hashInput)).digest("hex");
+  return Object.freeze({ contractHash, toolIds: Object.freeze(ids), tools: Object.freeze(tools) });
+}
+
+const ROUTE = Object.freeze({ READ_ONLY: "READ_ONLY", SIDE_EFFECT_PROPOSAL: "SIDE_EFFECT_PROPOSAL" });
+
+/**
+ * official dsh Tool Runtime 的**组合** manifest：READ_ONLY tools + 受控 WRITE proposal tools，
+ * 并给每个 toolId 标注唯一 route。route 由 Tool Registry 的 riskClass 推导，
+ * Harness 无法自行声明 route。
+ */
+function buildBridgeManifest(registry, { readToolIds = [], writeToolIds = [] } = {}) {
+  const readIds = [...readToolIds].map(String).filter(Boolean).sort();
+  const writeIds = [...writeToolIds].map(String).filter(Boolean).sort();
+  const read = readIds.length ? buildToolManifest(registry, { toolIds: readIds }) : { tools: [], toolIds: [] };
+  const write = writeIds.length ? buildWriteToolManifest(registry, { toolIds: writeIds }) : { tools: [], toolIds: [] };
+  const tools = [...read.tools, ...write.tools];
+  const routes = {};
+  for (const t of read.tools) routes[t.toolId] = ROUTE.READ_ONLY;
+  for (const t of write.tools) routes[t.toolId] = ROUTE.SIDE_EFFECT_PROPOSAL;
+  const toolIds = [...read.toolIds, ...write.toolIds].sort();
+  const hashInput = tools.map((t) => ({ toolId: t.toolId, version: t.version, inputSchema: t.inputSchema, outputSchema: t.outputSchema, riskClass: t.riskClass }));
+  const contractHash = crypto.createHash("sha256").update(JSON.stringify(hashInput)).digest("hex");
+  return Object.freeze({ contractHash, toolIds: Object.freeze(toolIds), tools: Object.freeze(tools), routes: Object.freeze(routes) });
+}
+
 function frozenContract(c) {
   return Object.freeze({ ...c, requiredPermissions: Object.freeze([...(c.requiredPermissions || [])]), resourceActions: Object.freeze([...(c.resourceActions || [])]), expectedSideEffects: Object.freeze([...(c.expectedSideEffects || [])]) });
 }
@@ -287,4 +333,4 @@ class ToolRegistry {
   }
 }
 
-module.exports = { ToolRegistry, validateSchema, BUILTIN_CONTRACTS, CONTRACT_FIELDS, buildToolManifest, toolDefinitionName, projectJsonSchema };
+module.exports = { ToolRegistry, validateSchema, BUILTIN_CONTRACTS, CONTRACT_FIELDS, buildToolManifest, buildWriteToolManifest, buildBridgeManifest, ROUTE, toolDefinitionName, projectJsonSchema };
