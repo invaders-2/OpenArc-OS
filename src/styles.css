@@ -1706,6 +1706,16 @@ input[type="checkbox"] {
   background: rgba(255, 255, 255, 0.14);
 }
 /* 只有"松手落格"这一段有过渡：拖动过程必须 1:1 跟手（reduced motion 下 token 为 0ms） */
+/* 桌面框选 / 多选后的选中态：与文件夹窗口的 .file-cell.selected 同一套语言 */
+.desktop-folder.selected,
+.desktop-file.selected {
+  background: rgb(var(--text-rgb) / 0.12);
+  box-shadow: inset 0 0 0 1.5px rgb(var(--text-rgb) / 0.32);
+}
+/* 桌面橡皮筋：图标之上（z 2）、窗口之下（z 10+） */
+.desktop > .marquee {
+  z-index: 3;
+}
 .desktop-file.settling,
 .desktop-folder.settling {
   transition:

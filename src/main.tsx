@@ -139,6 +139,16 @@ const THUMB_EXTS = [...FILE_KINDS.image, ...FILE_KINDS.video, ...FILE_KINDS.doc]
 /** 后缀 → 类别（渲染层用，和 FileGlyph 同一份表）。 */
 const kindOfExt = (ext: string) => Object.keys(FILE_KINDS).find((k) => FILE_KINDS[k].includes(ext)) ?? "other";
 
+/** 字节数给人看（文件夹窗口与桌面「显示简介」共用一份口径）。 */
+const fmtSize = (n?: number) =>
+  n === undefined
+    ? "—"
+    : n < 1024
+      ? n + " B"
+      : n < 1048576
+        ? (n / 1024).toFixed(1) + " KB"
+        : (n / 1048576).toFixed(1) + " MB";
+
 /** 浏览器**自己**能渲染的图片格式；其余的（psd/ai/eps/tiff…）请主进程出一张位图。 */
 const WEB_IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif"];
 
@@ -259,6 +269,8 @@ function App() {
     dockSurface?: boolean;
     /** 右键的是哪张上传的壁纸。 */
     wallpaper?: string;
+    /** 桌面多选（框选或 ⌘ 点）后右键：整组操作。 */
+    deskGroup?: string[];
     /** 菜单底边贴在 (x, y) 上方并水平居中 —— 程序坞右键用，避免菜单掉出屏幕。 */
     above?: boolean;
   } | null>(null);
@@ -349,6 +361,11 @@ function App() {
   const [selected, setSelected] = useState<Record<string, string[]>>({});
   /** 框选矩形（windowId + 相对 folder-body 的矩形）与「显示简介」浮层。 */
   const [marquee, setMarquee] = useState<{ winId: string; x: number; y: number; w: number; h: number } | null>(null);
+  /** 刚刚发生过一次真正的框选拖动 —— 用来吃掉浏览器补发的那个 click。 */
+  const marqueeDrag = useRef(false);
+  /** 桌面框选：选中的桌面条目（文件夹与文件同一个集合）+ 橡皮筋矩形。 */
+  const [deskSel, setDeskSel] = useState<string[]>([]);
+  const [deskMarquee, setDeskMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [info, setInfo] = useState<{ title: string; subtitle?: string; rows: { k: string; v: string }[] } | null>(null);
   /** 应用内剪贴板（复制 / 剪切），粘贴进当前文件夹。 */
   const [clip, setClip] = useState<{ mode: "copy" | "cut"; folderId: string; ids: string[] } | null>(null);
@@ -642,59 +659,248 @@ function App() {
     y: DESK_GRID.y0 + Math.round((y - DESK_GRID.y0) / DESK_GRID.dy) * DESK_GRID.dy,
   });
   const deskPos = (id: string, index: number) => desktopIcons[id] ?? gridPos(index);
-  /** 落格：把图标动画到栅格（只有这一步用过渡，所以看起来是"轻轻吸过去"而不是跳）。 */
-  const settleTo = (id: string, pos: { x: number; y: number }) => {
-    setDesktopIcons((m) => ({ ...m, [id]: pos }));
+  /** 一个桌面条目的当前位置：文件夹读 folders，文件读落格记录。 */
+  const deskEntryPos = (id: string): { x: number; y: number } => {
+    const f = folders.find((v) => v.id === id);
+    if (f) return { x: f.x, y: f.y };
+    return deskPos(id, Math.max(0, desktopFiles.findIndex((v) => v.id === id)));
+  };
+  const setDeskEntryPos = (id: string, p: { x: number; y: number }) => {
+    if (folders.some((v) => v.id === id))
+      setFolders((fs) => fs.map((v) => (v.id === id ? { ...v, x: p.x, y: p.y } : v)));
+    else setDesktopIcons((m) => ({ ...m, [id]: p }));
+  };
+  /** 落格：把条目动画到栅格（只有这一步用过渡，所以看起来是"轻轻吸过去"而不是跳）。 */
+  const settleEntry = (id: string, pos: { x: number; y: number }) => {
+    setDeskEntryPos(id, pos);
     setSettling(id);
     window.setTimeout(() => setSettling((cur) => (cur === id ? null : cur)), 280);
   };
   /**
-   * 拖桌面图标：**拖动过程 1:1 跟手、不吸附**，松手时才用一段过渡落到栅格。
-   * （之前边拖边吸附，指针动一像素图标就跳一格，手感很生硬。）
+   * 桌面框选（用户口径：桌面支持鼠标按住框选）。
+   *
+   * 只在"点到的就是桌面本身"时启动 —— 图标、窗口、程序坞、顶栏都有自己的指针语义，
+   * 抢它们的指针等于把它们全部弄坏。命中判定用图标与橡皮筋的真实矩形求交。
    */
-  const dragDesktopIcon = (e: React.PointerEvent, id: string) => {
-    // ⌘ + 按下 = 拖到系统（Finder / 桌面）：直接走原生 startDrag。
+  const startDesktopMarquee = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    const el = e.target as HTMLElement;
+    if (el !== e.currentTarget && !el.classList.contains("desktop-wallpaper")) return;
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const x0 = e.clientX - rect.left;
+    const y0 = e.clientY - rect.top;
+    const keep = e.shiftKey ? deskSel : [];
+    if (!e.shiftKey) setDeskSel([]); // 空白处按下 = 先取消选择（与 Finder 一致）
+    const move = (ev: PointerEvent) => {
+      const x1 = ev.clientX - rect.left;
+      const y1 = ev.clientY - rect.top;
+      const box = {
+        left: Math.min(x0, x1),
+        top: Math.min(y0, y1),
+        right: Math.max(x0, x1),
+        bottom: Math.max(y0, y1),
+      };
+      setDeskMarquee({ x: box.left, y: box.top, w: box.right - box.left, h: box.bottom - box.top });
+      const hitting: string[] = [];
+      document
+        .querySelectorAll<HTMLElement>(".desktop-folder[data-folder-id], .desktop-file[data-entry-id]")
+        .forEach((tile) => {
+          const r = tile.getBoundingClientRect();
+          const cx = r.left - rect.left;
+          const cy = r.top - rect.top;
+          if (cx < box.right && cx + r.width > box.left && cy < box.bottom && cy + r.height > box.top)
+            hitting.push(tile.dataset.folderId || tile.dataset.entryId || "");
+        });
+      setDeskSel([...new Set([...keep, ...hitting.filter(Boolean)])]);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      setDeskMarquee(null);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  /**
+   * 桌面图标按下：先定选中集合，再**整组**跟手拖（用户口径：框选后能拖拽移动）。
+   * 拖动过程 1:1 不吸附，松手才落格；松手落在文件夹磁贴或**打开的文件夹窗口**上 = 整组搬进去。
+   */
+  const dragDesktopSelection = (e: React.PointerEvent, id: string) => {
+    // ⌘ + 按下 = 拖到系统（Finder / 桌面）：走原生 startDrag。
     // 桌面图标**不能**再挂 HTML5 draggable —— 那样浏览器会把"按下+移动"判成 HTML5 拖拽，
     // 指针事件被吞掉，位置就再也拖不动了（实测如此）。
     if (e.metaKey) {
       window.openarc?.files?.startDrag(DESKTOP_ID, id);
       return;
     }
-    const start = deskPos(id, desktopFiles.findIndex((f) => f.id === id));
+    const el = e.currentTarget as HTMLElement;
+    el.focus(); // 键盘路径（空格 Quick Look / Enter 打开）依赖焦点
+    // 点在已选中的图标上 = 保持整组；点在其他图标上 = 先变成单选（Shift / Ctrl 是增删）
+    const wasSelected = deskSel.includes(id);
+    const next =
+      e.shiftKey || e.ctrlKey
+        ? wasSelected
+          ? deskSel.filter((x) => x !== id)
+          : [...deskSel, id]
+        : wasSelected
+          ? deskSel
+          : [id];
+    setDeskSel(next);
+    const ids = next.includes(id) ? next : [id];
     const x0 = e.clientX;
     const y0 = e.clientY;
-    const el = e.currentTarget as HTMLElement;
+    const starts = ids.map((x) => [x, deskEntryPos(x)] as const);
     el.setPointerCapture(e.pointerId);
-    let last = start;
     const move = (ev: Event) => {
       const p = ev as PointerEvent;
-      const nx = Math.max(0, Math.min(window.innerWidth - 96, start.x + p.clientX - x0));
-      const ny = Math.max(52, Math.min(window.innerHeight - 140, start.y + p.clientY - y0));
-      last = { x: nx, y: ny };
-      setDesktopIcons((m) => ({ ...m, [id]: last }));
+      const dx = p.clientX - x0;
+      const dy = p.clientY - y0;
+      for (const [x, s] of starts)
+        setDeskEntryPos(x, {
+          x: Math.max(0, Math.min(innerWidth - 96, s.x + dx)),
+          y: Math.max(52, Math.min(innerHeight - 140, s.y + dy)),
+        });
     };
     const end = (ev?: PointerEvent) => {
       el.removeEventListener("pointermove", move);
       el.removeEventListener("pointerup", end);
       el.removeEventListener("pointercancel", end);
-      // 松手时若落在桌面上的某个文件夹磁贴里 → 搬进那个文件夹
       const dropped = ev ? (document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null) : null;
-      const into = dropped?.closest("[data-folder-id]") as HTMLElement | null;
-      if (into?.dataset.folderId) {
-        void moveInto(into.dataset.folderId, DESKTOP_ID, [id]);
-        setDesktopIcons((m) => {
-          const next = { ...m };
-          delete next[id];
-          return next;
+      const targetId = dropped?.closest<HTMLElement>("[data-drop-folder]")?.dataset.dropFolder;
+      // 拖动中的图标本身就在指针下，不能把自己当目标
+      if (targetId && targetId !== DESKTOP_ID && !ids.includes(targetId)) {
+        void moveInto(targetId, DESKTOP_ID, ids).then(() => {
+          setDesktopIcons((m) => {
+            const out = { ...m };
+            for (const x of ids) delete out[x];
+            return out;
+          });
+          setDeskSel([]);
         });
         return;
       }
-      if (snap) settleTo(id, snapPos(last.x, last.y));
+      if (snap) {
+        const dx = ev ? ev.clientX - x0 : 0;
+        const dy = ev ? ev.clientY - y0 : 0;
+        for (const [x, s] of starts) settleEntry(x, snapPos(s.x + dx, s.y + dy));
+      }
     };
     el.addEventListener("pointermove", move);
     el.addEventListener("pointerup", end);
     el.addEventListener("pointercancel", end);
   };
+  /**
+   * 「显示简介」的唯一实现：桌面与文件夹窗口共用同一份字段口径。
+   * 位置名与 folderId 由调用方给 —— 同一个条目在桌面和在窗口里都要说清"它在哪"。
+   */
+  const describeEntry = async (row: Row, location: string, folderId: string) => {
+    setInfo({
+      title: row.name,
+      subtitle: row.kind === "folder" ? "文件夹" : row.ext ? row.ext.toUpperCase() + " 文件" : "文件",
+      rows:
+        row.kind === "folder"
+          ? [
+              { k: "种类", v: "文件夹" },
+              { k: "包含", v: String(folders.filter((f) => f.parentId === row.id).length) + " 个子文件夹" },
+              { k: "位置", v: location },
+            ]
+          : [
+              { k: "种类", v: row.ext ? row.ext.toUpperCase() + " 文件" : "文件" },
+              { k: "大小", v: fmtSize(row.size) },
+              { k: "修改时间", v: row.mtime ? new Date(row.mtime).toLocaleString("zh-CN") : "—" },
+              { k: "所在", v: location },
+            ],
+    });
+    // 图片再补一行真实分辨率（读不出来就不编）
+    if (row.kind === "file" && window.openarc?.files && kindOfExt(row.ext ?? "") === "image") {
+      const inf = await window.openarc.files.info(folderId, row.id);
+      if (inf?.ok && inf.width) {
+        setInfo((cur) =>
+          cur && cur.title === row.name
+            ? { ...cur, rows: [...cur.rows, { k: "分辨率", v: `${inf.width} × ${inf.height}` }] }
+            : cur,
+        );
+      }
+    }
+  };
+  /** 桌面条目的「显示简介」（用户口径：桌面选择文件右键要能看简介）。 */
+  const showDesktopInfo = async (entryId: string) => {
+    const f = folders.find((v) => v.id === entryId);
+    if (f) return describeEntry({ id: f.id, name: f.name, kind: "folder" }, "桌面", DESKTOP_ID);
+    const file = desktopFiles.find((v) => v.id === entryId);
+    if (file)
+      return describeEntry(
+        { id: file.id, name: file.name, kind: "file", ext: file.ext, size: file.size, mtime: file.mtime },
+        "桌面",
+        DESKTOP_ID,
+      );
+  };
+  const deskEntryName = (entryId: string) =>
+    folders.find((f) => f.id === entryId)?.name ?? desktopFiles.find((f) => f.id === entryId)?.name ?? entryId;
+  const copyDeskNames = (ids: string[]) => {
+    void navigator.clipboard?.writeText(ids.map(deskEntryName).join("\n"));
+  };
+  /** 多选时的「显示简介」：说清整组有多少文件夹/文件、总大小（用户口径里的"群组"）。 */
+  const showSelectionInfo = (ids: string[]) => {
+    const files = ids
+      .filter((x) => !folders.some((v) => v.id === x))
+      .map((x) => desktopFiles.find((v) => v.id === x))
+      .filter((v): v is FileEntry => !!v);
+    const folderCount = ids.length - files.length;
+    setInfo({
+      title: `${ids.length} 项`,
+      subtitle: "多选",
+      rows: [
+        {
+          k: "包含",
+          v:
+            [folderCount ? `${folderCount} 个文件夹` : "", files.length ? `${files.length} 个文件` : ""]
+              .filter(Boolean)
+              .join("、") || "—",
+        },
+        { k: "总大小", v: fmtSize(files.reduce((n, v) => n + (v.size ?? 0), 0)) },
+        { k: "位置", v: "桌面" },
+      ],
+    });
+  };
+  /** 删除桌面选中项：文件走文件服务，虚拟文件夹连带子文件夹与它的窗口。 */
+  const deleteDesktopSelection = async (ids: string[]) => {
+    for (const x of ids) {
+      if (folders.some((f) => f.id === x)) removeFolder(x);
+      else await window.openarc?.files?.remove(DESKTOP_ID, x);
+    }
+    setDesktopIcons((m) => {
+      const out = { ...m };
+      for (const x of ids) delete out[x];
+      return out;
+    });
+    setDeskSel([]);
+    await refreshFiles(DESKTOP_ID);
+  };
+  /** 「用所选 N 项新建文件夹」= 用户口径里的"编组"：新文件夹吃下整组，随即进入改名。 */
+  const newFolderFromSelection = async (ids: string[]) => {
+    if (!ids.length) return;
+    const first = deskEntryPos(ids[0]);
+    const used = new Set(folders.filter((v) => !v.parentId).map((v) => v.name));
+    let name = "新建文件夹";
+    for (let i = 2; used.has(name); i += 1) name = `新建文件夹 ${i}`;
+    const folder: Folder = {
+      id: "f" + Date.now().toString(36),
+      name,
+      x: Math.max(0, Math.round(first.x + DESK_GRID.dx)),
+      y: Math.max(52, Math.round(first.y)),
+    };
+    setFolders((fs) => [...fs, folder]);
+    await moveInto(folder.id, DESKTOP_ID, ids);
+    setDesktopIcons((m) => {
+      const out = { ...m };
+      for (const x of ids) delete out[x];
+      return out;
+    });
+    setDeskSel([]);
+    setRenaming(folder.id);
+  };
+
   /** 整理：按指定（或当前）排列顺序把桌面文件重新落到栅格上。 */
   const arrangeDesktop = (sort?: "name" | "date" | "size") => {
     const key = sort ?? deskSort;
@@ -1077,6 +1283,7 @@ function App() {
         const rect = body.getBoundingClientRect();
         const x0 = e.clientX - rect.left;
         const y0 = e.clientY - rect.top;
+        marqueeDrag.current = false; // 每次按下先归零：只有这次真的拖动过才置位
         const move = (ev: PointerEvent) => {
           const x1 = ev.clientX - rect.left;
           const y1 = ev.clientY - rect.top;
@@ -1086,6 +1293,7 @@ function App() {
             right: Math.max(x0, x1),
             bottom: Math.max(y0, y1),
           };
+          if (box.right - box.left > 3 || box.bottom - box.top > 3) marqueeDrag.current = true;
           setMarquee({ winId: id, x: box.left, y: box.top, w: box.right - box.left, h: box.bottom - box.top });
           const hitting: string[] = [];
           body.querySelectorAll<HTMLElement>(".file-cell[data-entry-id]").forEach((cell) => {
@@ -1105,46 +1313,10 @@ function App() {
         window.addEventListener("pointermove", move);
         window.addEventListener("pointerup", up);
       };
-      const fmtSize = (n?: number) =>
-        n === undefined
-          ? "—"
-          : n < 1024
-            ? n + " B"
-            : n < 1048576
-              ? (n / 1024).toFixed(1) + " KB"
-              : (n / 1048576).toFixed(1) + " MB";
-      /** 显示简介：全部是真实数据（子项数 / 类型 / 大小 / 修改时间）。 */
+      /** 显示简介：与桌面共用同一份实现（describeEntry），字段口径不会两头漂移。 */
       const showInfo = async (row: Row) => {
         setPaneMenu(null);
-        const rowsOut: { k: string; v: string }[] =
-          row.kind === "folder"
-            ? [
-                { k: "种类", v: "文件夹" },
-                { k: "包含", v: String(folders.filter((f) => f.parentId === row.id).length) + " 个子文件夹" },
-                { k: "位置", v: shown.name },
-              ]
-            : [
-                { k: "种类", v: row.ext ? row.ext.toUpperCase() + " 文件" : "文件" },
-                { k: "大小", v: fmtSize(row.size) },
-                { k: "修改时间", v: row.mtime ? new Date(row.mtime).toLocaleString("zh-CN") : "—" },
-                { k: "所在", v: shown.name },
-              ];
-        setInfo({
-          title: row.name,
-          subtitle: row.kind === "folder" ? "文件夹" : row.ext ? row.ext.toUpperCase() + " 文件" : "文件",
-          rows: rowsOut,
-        });
-        // 图片再补一行真实分辨率（读不出来就不编）
-        if (row.kind === "file" && window.openarc?.files && kindOfExt(row.ext ?? "") === "image") {
-          const inf = await window.openarc.files.info(shown.id, row.id);
-          if (inf?.ok && inf.width) {
-            setInfo((cur) =>
-              cur && cur.title === row.name
-                ? { ...cur, rows: [...cur.rows, { k: "分辨率", v: `${inf.width} × ${inf.height}` }] }
-                : cur,
-            );
-          }
-        }
+        await describeEntry(row, shown.name, shown.id);
       };
       const copyNames = (ids: string[]) => {
         setPaneMenu(null);
@@ -1244,6 +1416,15 @@ function App() {
               ]
           : [
               { id: "open", label: "打开", disabled: true, onSelect: () => {} },
+              {
+                id: "group",
+                label: `用所选 ${picked.length} 项新建文件夹`,
+                onSelect: () => {
+                  const fid = createSubfolder(shown.id);
+                  void moveInto(fid, shown.id, ids);
+                  setSelected((m) => ({ ...m, [id]: [] }));
+                },
+              },
               { id: "copy", label: "拷贝 " + picked.length + " 项名称", onSelect: () => copyNames(ids) },
               { separator: true },
               { id: "copy", label: "拷贝 " + picked.length + " 项", onSelect: doCopy },
@@ -1326,6 +1507,11 @@ function App() {
           <div
             className="split-main"
             onClick={(e) => {
+              // 框选松手后浏览器还会补一个 click。不挡掉它，"框选完选择就没了"（实测真的这样）。
+              if (marqueeDrag.current) {
+                marqueeDrag.current = false;
+                return;
+              }
               // 整块内容区（含工具栏下方的空白）点一下 = 取消选择；点条目由条目自己设选择
               if (!(e.target as HTMLElement).closest(".file-cell")) setSelected((m) => ({ ...m, [id]: [] }));
             }}
@@ -1386,6 +1572,7 @@ function App() {
             </div>
             <div
               className="folder-body"
+              data-drop-folder={shown.id}
               onPointerDown={startMarquee}
               onContextMenu={(e) => {
                 e.preventDefault();
@@ -1894,7 +2081,40 @@ function App() {
                 onSelect: () => void deleteWallpaper(menu.wallpaper!),
               },
             ]
-          : menu.folder
+          : menu.deskGroup
+            ? [
+                { id: "open", label: "打开", disabled: true, onSelect: () => {} },
+                { id: "info", label: "显示简介", onSelect: () => showSelectionInfo(menu.deskGroup!) },
+                {
+                  id: "group",
+                  label: `用所选 ${menu.deskGroup.length} 项新建文件夹`,
+                  onSelect: () => void newFolderFromSelection(menu.deskGroup!),
+                },
+                {
+                  id: "copy-name",
+                  label: `拷贝 ${menu.deskGroup.length} 项名称`,
+                  onSelect: () => copyDeskNames(menu.deskGroup!),
+                },
+                { separator: true },
+                {
+                  id: "copy",
+                  label: `拷贝 ${menu.deskGroup.length} 项`,
+                  onSelect: () => setClip({ mode: "copy", folderId: DESKTOP_ID, ids: menu.deskGroup! }),
+                },
+                {
+                  id: "cut",
+                  label: `剪切 ${menu.deskGroup.length} 项`,
+                  onSelect: () => setClip({ mode: "cut", folderId: DESKTOP_ID, ids: menu.deskGroup! }),
+                },
+                { separator: true },
+                {
+                  id: "delete",
+                  label: `删除 ${menu.deskGroup.length} 项`,
+                  danger: true,
+                  onSelect: () => void deleteDesktopSelection(menu.deskGroup!),
+                },
+              ]
+            : menu.folder
       ? [
           {
             id: "open",
@@ -1904,6 +2124,7 @@ function App() {
               if (f) openFolder(f);
             },
           },
+          { id: "info", label: "显示简介", onSelect: () => void showDesktopInfo(menu.folder!) },
           { id: "rename", label: "重命名", onSelect: () => window.setTimeout(() => setRenaming(menu.folder!), 0) },
           { separator: true },
           {
@@ -1921,6 +2142,7 @@ function App() {
       : menu.file
         ? [
             { id: "open", label: "打开", onSelect: () => void openPreview(DESKTOP_ID, menu.file!) },
+            { id: "info", label: "显示简介", onSelect: () => void showDesktopInfo(menu.file!) },
             {
               id: "copy-name",
               label: "拷贝名称",
@@ -2089,37 +2311,6 @@ function App() {
     setRenaming(null);
   }
 
-  const dragFolder = (e: React.PointerEvent, f: Folder) => {
-    if (renaming === f.id) return;
-    const x = e.clientX;
-    const y = e.clientY;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    const el = e.currentTarget as HTMLElement;
-    let last = { x: f.x, y: f.y };
-    const move = (ev: Event) => {
-      const p = ev as PointerEvent;
-      const nx = Math.max(0, Math.min(innerWidth - 88, f.x + p.clientX - x));
-      const ny = Math.max(52, Math.min(innerHeight - 160, f.y + p.clientY - y));
-      last = { x: nx, y: ny };
-      // 拖动过程同样不吸附，松手才落格
-      setFolders((fs) => fs.map((v) => (v.id === f.id ? { ...v, x: nx, y: ny } : v)));
-    };
-    const end = () => {
-      el.removeEventListener("pointermove", move);
-      el.removeEventListener("pointerup", end);
-      el.removeEventListener("pointercancel", end);
-      if (snap) {
-        const target = snapPos(last.x, last.y);
-        setFolders((fs) => fs.map((v) => (v.id === f.id ? { ...v, x: target.x, y: target.y } : v)));
-        setSettling(f.id);
-        window.setTimeout(() => setSettling((cur) => (cur === f.id ? null : cur)), 280);
-      }
-    };
-    el.addEventListener("pointermove", move);
-    el.addEventListener("pointerup", end);
-    el.addEventListener("pointercancel", end);
-  };
-
   const deleteTarget = pendingDelete ? folders.find((f) => f.id === pendingDelete) : null;
 
   /**
@@ -2167,6 +2358,7 @@ function App() {
           }
         })();
       }}
+      onPointerDown={startDesktopMarquee}
       onContextMenu={(e) => {
         if (!showDesktop) return;
         // 只有"桌面本身"才弹桌面菜单（含"新建文件夹"）。
@@ -2176,6 +2368,15 @@ function App() {
         setMenu({ x: e.clientX, y: e.clientY });
       }}
     >
+      {/* 桌面框选：与指针 1:1 的橡皮筋（图标之上、窗口之下） */}
+      {deskMarquee ? (
+        <div
+          className="marquee"
+          aria-hidden="true"
+          style={{ left: deskMarquee.x, top: deskMarquee.y, width: deskMarquee.w, height: deskMarquee.h }}
+        />
+      ) : null}
+
       {/* 壁纸层：内置主题色由 data-wallpaper 提供；自定义壁纸画在这里 */}
       <div className="desktop-wallpaper" aria-hidden="true">
         {customEntry ? (
@@ -2263,10 +2464,13 @@ function App() {
           .map((f) => (
           <div
             key={f.id}
-            className={"desktop-folder" + (settling === f.id ? " settling" : "")}
+            className={
+              "desktop-folder" + (settling === f.id ? " settling" : "") + (deskSel.includes(f.id) ? " selected" : "")
+            }
             style={{ left: f.x, top: f.y }}
             tabIndex={0}
             data-folder-id={f.id}
+            data-drop-folder={f.id}
             onDragOver={(e) => {
               if (!hasInternalDrag(e)) return;
               e.preventDefault();
@@ -2274,10 +2478,7 @@ function App() {
               e.dataTransfer.dropEffect = e.altKey ? "copy" : "move";
             }}
             onDrop={(e) => void handleInternalDrop(e, f.id)}
-            onPointerDown={(e) => {
-              (e.currentTarget as HTMLElement).focus(); // 键盘路径（Enter/F2）依赖焦点
-              dragFolder(e, f);
-            }}
+            onPointerDown={(e) => dragDesktopSelection(e, f.id)}
             onDoubleClick={() => openFolder(f)}
             onKeyDown={(e) => {
               // 事件必须来自磁贴自身：重命名输入框里的 Enter 会冒泡上来，
@@ -2290,7 +2491,14 @@ function App() {
               e.preventDefault();
               e.stopPropagation();
               menuTrigger.current = e.currentTarget as HTMLElement;
-              setMenu({ x: e.clientX, y: e.clientY, folder: f.id });
+              // 右键落在未选中的图标上 → 先把它设为唯一选中；落在选中集合内 → 对整组操作
+              const ids = deskSel.includes(f.id) ? deskSel : [f.id];
+              if (!deskSel.includes(f.id)) setDeskSel([f.id]);
+              setMenu(
+                ids.length > 1
+                  ? { x: e.clientX, y: e.clientY, deskGroup: ids }
+                  : { x: e.clientX, y: e.clientY, folder: f.id },
+              );
             }}
           >
             <FolderIcon size={58} />
@@ -2318,17 +2526,15 @@ function App() {
           return (
             <div
               key={f.id}
-              className={"desktop-file" + (settling === f.id ? " settling" : "")}
+              className={
+                "desktop-file" + (settling === f.id ? " settling" : "") + (deskSel.includes(f.id) ? " selected" : "")
+              }
               style={{ left: p.x, top: p.y }}
               data-entry-id={f.id}
               tabIndex={0}
-              onPointerDown={(e) => {
-                // 先给磁贴焦点：键盘路径（空格 Quick Look / Enter 打开）依赖它。
-                // 不这样做时，dragDesktopIcon 里的 preventDefault 会让点击不产生焦点，
-                // 于是"点一下文件再按空格"不会生效（用户口径：桌面文件也要支持空格查看）。
-                (e.currentTarget as HTMLElement).focus();
-                dragDesktopIcon(e, f.id);
-              }}
+              // focus 与选中都在 dragDesktopSelection 里：不这样做时点击不产生焦点，
+              // "点一下文件再按空格"就不会生效（用户口径：桌面文件也要支持空格查看）。
+              onPointerDown={(e) => dragDesktopSelection(e, f.id)}
               onDoubleClick={() => void openPreview(DESKTOP_ID, f.id)}
               onKeyDown={(e) => {
                 // 与文件夹窗口内的口径一致：空格 = Quick Look，Enter = 打开。
@@ -2344,7 +2550,13 @@ function App() {
                 e.preventDefault();
                 e.stopPropagation();
                 menuTrigger.current = e.currentTarget as HTMLElement;
-                setMenu({ x: e.clientX, y: e.clientY, file: f.id });
+                const ids = deskSel.includes(f.id) ? deskSel : [f.id];
+                if (!deskSel.includes(f.id)) setDeskSel([f.id]);
+                setMenu(
+                  ids.length > 1
+                    ? { x: e.clientX, y: e.clientY, deskGroup: ids }
+                    : { x: e.clientX, y: e.clientY, file: f.id },
+                );
               }}
             >
               {thumbs[DESKTOP_ID + "/" + f.id] ? (
