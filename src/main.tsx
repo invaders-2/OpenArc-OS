@@ -1073,10 +1073,37 @@ function App() {
         await window.openarc.files.copy(srcFolderId, fileIds, toFolderId);
         await refreshFiles(toFolderId);
       }
-      for (const x of folderIds) await cloneFolder(x, toFolderId, folders);
+      // 返回克隆出来的文件夹 id：调用方要把它们摆到鼠标旁边
+      const cloned: string[] = [];
+      for (const x of folderIds) cloned.push(await cloneFolder(x, toFolderId, folders));
+      return cloned;
     },
     [folders, refreshFiles],
   );
+  /**
+   * 落到桌面的东西摆在**鼠标旁边**（用户口径：「按住移动到桌面，落脚点在鼠标旁边」）。
+   * 多个条目按 22px 递进错开，像 macOS 那样一小叠，而不是全压在一个点上。
+   */
+  const placeAtDrop = (clientX: number, clientY: number, ids: string[]) => {
+    const wanted = ids.filter(Boolean);
+    if (!wanted.length) return;
+    const base = clampDeskPos({ x: clientX - deskGrid.tileW / 2, y: clientY - 14 });
+    const spot = (i: number) => clampDeskPos({ x: base.x + i * 22, y: base.y + i * 22 });
+    const folderIds = wanted.filter((x) => folders.some((v) => v.id === x));
+    if (folderIds.length)
+      setFolders((fs) =>
+        fs.map((v) => (folderIds.includes(v.id) ? { ...v, ...spot(folderIds.indexOf(v.id)) } : v)),
+      );
+    const fileIds = wanted.filter((x) => !folderIds.includes(x));
+    if (fileIds.length)
+      setDesktopIcons((m) => {
+        const next = { ...m };
+        fileIds.forEach((x, i) => {
+          next[x] = spot(folderIds.length + i);
+        });
+        return next;
+      });
+  };
   /** 拖拽载荷（内部搬运专用 MIME，不会和"从电脑拖入文件"混淆）。 */
   const INTERNAL_DND = "application/x-openarc";
   const hasInternalDrag = (e: React.DragEvent) => e.dataTransfer.types.includes(INTERNAL_DND);
@@ -2471,8 +2498,19 @@ function App() {
           try {
             const p = JSON.parse(e.dataTransfer.getData(INTERNAL_DND)) as { folderId: string; ids: string[] };
             if (!p?.ids?.length || p.folderId === DESKTOP_ID) return;
-            if (e.altKey) await copyInto(DESKTOP_ID, p.folderId, p.ids);
-            else await moveInto(DESKTOP_ID, p.folderId, p.ids);
+            // 落点在鼠标那儿，不是栅格另一头：先把鼠标坐标接住，再等搬运完成
+            const dropX = e.clientX;
+            const dropY = e.clientY;
+            if (e.altKey) {
+              const before = new Set((filesByFolder[DESKTOP_ID] ?? []).map((v) => v.id));
+              const cloned = await copyInto(DESKTOP_ID, p.folderId, p.ids);
+              const res = await window.openarc?.files?.list(DESKTOP_ID);
+              const added = (res?.entries ?? []).map((v) => v.id).filter((id) => !before.has(id));
+              placeAtDrop(dropX, dropY, [...added, ...cloned]);
+            } else {
+              await moveInto(DESKTOP_ID, p.folderId, p.ids);
+              placeAtDrop(dropX, dropY, p.ids);
+            }
           } catch {
             /* 载荷损坏就当作没有拖拽 */
           }
