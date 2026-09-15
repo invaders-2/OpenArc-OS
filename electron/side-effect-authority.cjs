@@ -18,7 +18,10 @@
  * - Approval 只来自 trusted user action，绝不来自 Harness / ACP permission / model text；
  * - Approval 与 Lease 是两个独立 authority；有 Approval 无 Lease 不能执行，
  *   有 Lease 无有效 Approval 也不能执行；
- * - Lease 是 side-effect 执行资格，不是业务 Domain 锁（业务 version/lock 另行遵守）。
+ * - Lease 是 side-effect 执行资格，不是业务 Domain 锁（业务 version/lock 另行遵守）；
+ * - Runtime identity = this.instanceId，覆盖 acquireLease / evaluateExecutionEligibility /
+ *   executeSideEffect / recoverOnStartup：production API 不接受任何 caller runtime override，
+ *   同 holderId 不同 runtime instance 的 acquire 一律 LEASE_CONFLICT。
  */
 "use strict";
 const crypto = require("node:crypto");
@@ -304,7 +307,7 @@ class SideEffectAuthority {
   }
 
   /** 每个 call 至多一个 ACTIVE lease；同一 holder 重复 acquire 幂等返回既有 lease。 */
-  acquireLease({ context = {}, callId, holderId, ttlMs = DEFAULT_LEASE_TTL_MS, _leaseId = null, _testInstanceId = null } = {}) {
+  acquireLease({ context = {}, callId, holderId, ttlMs = DEFAULT_LEASE_TTL_MS, _leaseId = null } = {}) {
     if (!holderId) return { ok: false, error: SIDE_EFFECT_ERROR.INVALID_INPUT };
     const call = this.store.callById(callId);
     if (!call) return { ok: false, error: SIDE_EFFECT_ERROR.CALL_NOT_FOUND };
@@ -318,7 +321,8 @@ class SideEffectAuthority {
         const active = this.store.activeLeaseOfCall(callId);
         if (active) {
           if (active.expiresAt != null && now >= Number(active.expiresAt)) this.store.updateLease(active.leaseId, { status: LEASE_STATUS.EXPIRED });
-          else if (active.holderId === holderId) return { ok: true, duplicate: true, lease: active };
+          // duplicate 必须同时匹配 holderId 与 runtime instance；同 holder 不同 runtime = 不同 executor → CONFLICT。
+          else if (active.holderId === holderId && active.holderInstanceId === this.instanceId) return { ok: true, duplicate: true, lease: active };
           else return { ok: false, error: SIDE_EFFECT_ERROR.LEASE_CONFLICT, lease: active };
         }
         const approval = this.store.latestApprovalOfCall(callId);
@@ -330,8 +334,8 @@ class SideEffectAuthority {
             : SIDE_EFFECT_ERROR.PLAN_STALE;
           return { ok: false, error: reason };
         }
-        // production：lease 绑定 OpenArc runtime 自身 identity；_testInstanceId 是明确的 test-only seam。
-        const lease = this.store.insertLease({ leaseId: _leaseId || undefined, callId, holderId, holderInstanceId: _testInstanceId || this.instanceId, status: LEASE_STATUS.ACTIVE, issuedAt: now, expiresAt: now + Math.max(1, Number(ttlMs) || DEFAULT_LEASE_TTL_MS) });
+        // production：lease 永远绑定 OpenArc runtime 自身 identity，caller 无法修改。
+        const lease = this.store.insertLease({ leaseId: _leaseId || undefined, callId, holderId, holderInstanceId: this.instanceId, status: LEASE_STATUS.ACTIVE, issuedAt: now, expiresAt: now + Math.max(1, Number(ttlMs) || DEFAULT_LEASE_TTL_MS) });
         this.store.updateCall(callId, { status: CALL_STATUS.LEASED, leased_at: now });
         return { ok: true, duplicate: false, lease };
       });
@@ -370,7 +374,9 @@ class SideEffectAuthority {
   }
 
   /** 完整 Execution Eligibility（只读；不执行任何 mutation）。 */
-  evaluateExecutionEligibility({ context = {}, callId, holderId = null, leaseId = null, holderInstanceId = null, requestArgumentsHash = null } = {}) {
+  evaluateExecutionEligibility({ context = {}, callId, holderId = null, leaseId = null, requestArgumentsHash = null } = {}) {
+    // runtime identity 由 Authority 注入（this.instanceId），普通 caller 不能自报当前 runtime。
+    const holderInstanceId = this.instanceId;
     const raw = this.store.rawCallById(callId);
     const call = this.store.callById(callId);
     if (!call) return { ok: false, status: ELIGIBILITY.DENIED, reasonCode: SIDE_EFFECT_ERROR.CALL_NOT_FOUND, call: null };
@@ -422,7 +428,9 @@ class SideEffectAuthority {
    * 若 TaskService/Task/Step 不可用或状态无法安全 block → 记录安全事件、保持
    * UNKNOWN_EFFECT、禁止 replay/retry，绝不回退成 LEASED/APPROVED/FAILED。
    */
-  recoverOnStartup({ instanceId = this.instanceId } = {}) {
+  recoverOnStartup() {
+    // runtime identity 只来自 OpenArc 自身；production API 不接受 caller override。
+    const instanceId = this.instanceId;
     const running = this.store.callsByStatus(CALL_STATUS.RUNNING);
     const unknown = [];
     const errors = [];
@@ -458,6 +466,7 @@ class SideEffectAuthority {
     }
     const expiredLeases = [];
     for (const lease of this.store.activeLeases()) {
+      // 只有当前 runtime 自己持有的 lease 才保留；其它 instance 的 lease 一律 EXPIRED。
       if (lease.holderInstanceId && lease.holderInstanceId === instanceId) continue;
       this.store.transactSync(() => this.store.updateLease(lease.leaseId, { status: LEASE_STATUS.EXPIRED }));
       expiredLeases.push(lease.leaseId);
@@ -629,7 +638,7 @@ class SideEffectAuthority {
     if (!adapter || typeof adapter.execute !== "function" || typeof adapter.verify !== "function") return want(SIDE_EFFECT_ERROR.WRITE_EXECUTION_DISABLED);
 
     // 执行前完整 eligibility（tool/run/authorization/approval/lease/precondition 全部实时重查）。
-    const elig = this.evaluateExecutionEligibility({ context: execCtx, callId, holderId, leaseId, holderInstanceId: runtimeInstanceId });
+    const elig = this.evaluateExecutionEligibility({ context: execCtx, callId, holderId, leaseId });
     if (elig.status !== ELIGIBILITY.ELIGIBLE) {
       this.#audit({ toolRef: call.toolId, action: "side_effect.blocked", decision: "BLOCKED", reasonCode: elig.reasonCode });
       this.#event(call.taskId, "tool.side_effect.execution_blocked", { callId, toolId: call.toolId, reasonCode: elig.reasonCode });
