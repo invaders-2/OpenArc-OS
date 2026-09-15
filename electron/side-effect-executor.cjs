@@ -31,7 +31,14 @@ async function main() {
   const { runtimeDir, dbPath, storeRoot, instanceId, callId, holderId, timeoutMs } = args;
   const clock = args.now != null ? () => args.now : null;
   const socketPath = path.join(runtimeDir, "executors", String(instanceId) + ".sock");
-  const server = await bindLifetimeSocket(socketPath);
+  let server;
+  try {
+    server = await bindLifetimeSocket(socketPath);
+  } catch (e) {
+    // 不能发布自己的 lifetime endpoint 时**绝不执行 write**：否则 quiescence 归属无法成立。
+    await emit({ type: "endpoint_bind_failed", instanceId, reason: String((e && e.code) || "BIND_FAILED") });
+    process.exit(3);
+  }
   await emit({ type: "ready", instanceId });
   let bundle = null;
   let result = null;

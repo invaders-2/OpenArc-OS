@@ -11,9 +11,18 @@
  * OpenArc production 代码。这两个入口不导出给 Renderer / IPC / ACP / Harness / Tool Facade；
  * 调用只由真实 runtime lifecycle event 驱动：
  *   · child process 'exit' 事件（同一 supervisor lifetime）；
- *   · cold restart 后对持久 executor record 的 OS-backed liveness probe
- *     （每个 executor runtime 在自己的整个生命周期内独占 bind 一个 unix socket；
- *      bind 成功 / connect 被拒 = 该 runtime 的进程已不存在）。
+ *   · cold restart 后对持久 executor record 的 **tri-state** OS-backed liveness probe
+ *     （每个 executor runtime 在自己的整个生命周期内独占 bind 一个 unix socket）。
+ *
+ * 永久规则（D4-03C4 Closure）：
+ *   **Probe failure is not death proof.**
+ *   Liveness probe 永远是三态 ALIVE / DEFINITELY_GONE / UNKNOWN：
+ *     · ALIVE            → runtime ACTIVE，绝不 quiesced；
+ *     · DEFINITELY_GONE  → 唯一允许 observeExit 的结果；
+ *     · UNKNOWN          → fail closed：绝不 observeExit，quiesced 保持 false。
+ *   timeout、EACCES/EMFILE/ENFILE/ENOBUFS 等任意意外 errno、probe 自身异常一律归入 UNKNOWN。
+ *   probe uncertainty != death proof；timeout != death proof；
+ *   arbitrary socket error != death proof。
  *
  * 绝不使用 heartbeat / timer / instanceId 差异 / lease 状态推测死亡。
  * 只保存 safe identifier；绝不保存 PID secret / absolute path（除运行目录）/ token / credential。
@@ -32,16 +41,77 @@ const EXECUTOR_STATUS = Object.freeze({ ACTIVE: "ACTIVE", EXITED: "EXITED" });
 
 const newId = (prefix) => prefix + "_" + crypto.randomBytes(6).toString("base64url");
 
-/** OC-backed liveness probe：connect 成功 = 仍存活；ENOENT / ECONNREFUSED = 进程已不存在。 */
-function probeUnixSocket(socketPath, timeoutMs = 1500) {
+/** Liveness 三态。只有 DEFINITELY_GONE 允许生成 trusted quiescence。 */
+const LIVENESS = Object.freeze({ ALIVE: "ALIVE", DEFINITELY_GONE: "DEFINITELY_GONE", UNKNOWN: "UNKNOWN" });
+
+/**
+ * 只有这些 errno 能**明确证明**"没有任何 live listener 拥有该 executor lifetime endpoint"。
+ *
+ * ENOENT = endpoint 文件根本不存在 → 没有 listener 可以拥有它。
+ *
+ * 刻意**不**把 ECONNREFUSED 视为 DEFINITELY_GONE：在 Unix domain socket 上它可能由
+ * backlog / 资源耗尽 / 权限等条件伪装（本机无法给出跨平台的可靠性证明），
+ * 因此按 fail closed 归入 UNKNOWN。见 ADR 的 tri-state liveness 一节。
+ */
+const DEFINITELY_GONE_ERRNOS = Object.freeze(new Set(["ENOENT"]));
+
+/** 归一化任意 probe 返回值；未知形态一律 fail closed 成 UNKNOWN。 */
+function normalizeProbeResult(raw) {
+  if (raw === true) return { state: LIVENESS.ALIVE, reason: "CONNECTED", errno: null };
+  if (raw && typeof raw === "object" && LIVENESS[String(raw.state)] === String(raw.state)) {
+    return { state: String(raw.state), reason: typeof raw.reason === "string" ? raw.reason.slice(0, 64) : null, errno: raw.errno == null ? null : String(raw.errno) };
+  }
+  if (typeof raw === "string" && LIVENESS[raw] === raw) return { state: raw, reason: null, errno: null };
+  // 任何非三态结果（含 legacy boolean false）都不得被当作死亡证明。
+  return { state: LIVENESS.UNKNOWN, reason: "PROBE_RESULT_UNRECOGNIZED", errno: null };
+}
+
+/** 归一化为 safe reason，绝不含绝对路径。 */
+function safeProbeReason(code) {
+  const c = String(code || "");
+  return c ? c.replace(/[^A-Za-z0-9_.:-]/g, "_").slice(0, 48) : "UNEXPECTED_OS_ERROR";
+}
+
+/**
+ * Tri-state OS-backed liveness probe。
+ *
+ * · connect 成功            → ALIVE
+ * · ENOENT                  → DEFINITELY_GONE
+ * · timeout                 → UNKNOWN
+ * · 其它任何 errno（EACCES / EMFILE / ENFILE / ENOBUFS / ECONNREFUSED / …）→ UNKNOWN
+ * · probe 自身抛异常        → UNKNOWN
+ *
+ * @param opts.connectImpl test-only socket factory seam（production 默认 net.connect）。
+ *                         它不导出给 Renderer / IPC / ACP / Harness / Tool Facade，也不落盘。
+ */
+function probeUnixSocket(socketPath, { timeoutMs = 1500, connectImpl = null } = {}) {
   return new Promise((resolve) => {
     let settled = false;
-    const done = (v) => { if (settled) return; settled = true; try { socket.destroy(); } catch { /* ignore */ } resolve(v); };
-    const socket = net.connect(socketPath);
-    socket.setTimeout(timeoutMs);
-    socket.on("connect", () => done(true));
-    socket.on("timeout", () => done(false));
-    socket.on("error", () => done(false));
+    let socket = null;
+    const finish = (state, reason, errno = null) => {
+      if (settled) return;
+      settled = true;
+      try { socket && socket.destroy && socket.destroy(); } catch { /* ignore */ }
+      resolve({ state, reason, errno });
+    };
+    try {
+      socket = (typeof connectImpl === "function" ? connectImpl : net.connect)(socketPath);
+    } catch {
+      return finish(LIVENESS.UNKNOWN, "PROBE_EXCEPTION");
+    }
+    if (!socket || typeof socket.on !== "function" || typeof socket.setTimeout !== "function") {
+      return finish(LIVENESS.UNKNOWN, "PROBE_EXCEPTION");
+    }
+    try { socket.setTimeout(Math.max(1, Number(timeoutMs) || 1500)); } catch { return finish(LIVENESS.UNKNOWN, "PROBE_EXCEPTION"); }
+    socket.on("connect", () => finish(LIVENESS.ALIVE, "CONNECTED"));
+    // timeout 永远不能成为 death proof。
+    socket.on("timeout", () => finish(LIVENESS.UNKNOWN, "PROBE_TIMEOUT"));
+    socket.on("error", (err) => {
+      const code = err && err.code != null ? String(err.code) : "";
+      if (code && DEFINITELY_GONE_ERRNOS.has(code)) return finish(LIVENESS.DEFINITELY_GONE, "ENDPOINT_ABSENT", code);
+      // 默认分支必须是 UNKNOWN —— 不得把任意 socket error 统一映射成 dead。
+      return finish(LIVENESS.UNKNOWN, "UNCERTAIN_LIVENESS:" + safeProbeReason(code), code || null);
+    });
   });
 }
 
@@ -51,8 +121,10 @@ class RuntimeSupervisor {
   #children = new Map();
   #rehydratePromise = null;
   #rehydrated = false;
+  /** instanceId -> safe probe reason：liveness 未定（UNKNOWN）的既有 executor runtime。 */
+  #uncertain = new Map();
 
-  constructor({ runtimeDir, lifecycle = null, clock = null, logger = null, executorEntry = null, nodePath = null, spawnImpl = null } = {}) {
+  constructor({ runtimeDir, lifecycle = null, clock = null, logger = null, executorEntry = null, nodePath = null, spawnImpl = null, probeImpl = null, probeTimeoutMs = 1500 } = {}) {
     if (!runtimeDir) throw new Error("RuntimeSupervisor 需要 runtimeDir");
     this.runtimeDir = String(runtimeDir);
     this.executorDir = path.join(this.runtimeDir, "executors");
@@ -61,6 +133,9 @@ class RuntimeSupervisor {
     this.executorEntry = executorEntry || EXECUTOR_ENTRY;
     this.nodePath = nodePath || process.execPath;
     this.spawnImpl = typeof spawnImpl === "function" ? spawnImpl : spawn;
+    // test-only seam：默认（null）用真实 OS probe；不做 IPC / Renderer / Harness 暴露，也不落盘。
+    this.probeImpl = typeof probeImpl === "function" ? probeImpl : null;
+    this.probeTimeoutMs = Math.max(1, Number(probeTimeoutMs) || 1500);
     // 唯一 trusted lifecycle authority（私有）：外部只能经 isQuiesced() 查询。
     this.#lifecycle = lifecycle && typeof lifecycle.registerRuntime === "function"
       ? lifecycle
@@ -70,6 +145,14 @@ class RuntimeSupervisor {
   }
 
   #now() { return this.clock(); }
+  /** 真实 OS probe（production 默认）；probeImpl 仅测试注入。 */
+  #probe(socketPath) {
+    if (this.probeImpl) {
+      try { return Promise.resolve(this.probeImpl(socketPath)).then((r) => normalizeProbeResult(r)); }
+      catch { return Promise.resolve({ state: LIVENESS.UNKNOWN, reason: "PROBE_EXCEPTION", errno: null }); }
+    }
+    return probeUnixSocket(socketPath, { timeoutMs: this.probeTimeoutMs });
+  }
   #recordPath(instanceId) { return path.join(this.executorDir, String(instanceId) + ".json"); }
   socketPath(instanceId) { return path.join(this.executorDir, String(instanceId) + ".sock"); }
 
@@ -95,6 +178,7 @@ class RuntimeSupervisor {
     const id = String(instanceId || "");
     if (!id) return { ok: false, error: "INVALID_INPUT" };
     const startedAt = this.#now();
+    this.#uncertain.delete(id);
     this.#lifecycle.registerRuntime(id, { self: false, startedAt });
     const rec = { instanceId: id, status: EXECUTOR_STATUS.ACTIVE, socketPath: this.socketPath(id), startedAt, callId, holderId, endedAt: null, exitCode: null, signal: null, reason: null };
     this.#records.set(id, rec);
@@ -173,34 +257,56 @@ class RuntimeSupervisor {
     if (this.#rehydratePromise) return this.#rehydratePromise;
     this.#rehydratePromise = (async () => {
       const records = this.#load();
-      let alive = 0; let dead = 0;
+      let alive = 0; let dead = 0; let unknown = 0;
       for (const rec of records) {
         if (!rec || !rec.instanceId) continue;
         this.#records.set(rec.instanceId, rec);
-        if (rec.status !== EXECUTOR_STATUS.EXITED) {
-          const stillAlive = await probeUnixSocket(rec.socketPath || this.socketPath(rec.instanceId));
-          if (stillAlive) { this.#lifecycle.registerRuntime(rec.instanceId, { self: false, startedAt: rec.startedAt }); alive += 1; continue; }
-          this.#lifecycle.registerRuntime(rec.instanceId, { self: false, startedAt: rec.startedAt });
-          this.#observeExit(rec.instanceId, { exitCode: rec.exitCode, signal: rec.signal, reason: "OS_EXECUTOR_SOCKET_GONE" });
+        this.#lifecycle.registerRuntime(rec.instanceId, { self: false, startedAt: rec.startedAt });
+        if (rec.status === EXECUTOR_STATUS.EXITED) {
+          // 上一次进程已经用真实 lifecycle event 观测到退出：直接沿用已持久化的死亡证据。
+          this.#lifecycle.observeExit(rec.instanceId, { exitCode: rec.exitCode, signal: rec.signal });
           dead += 1;
           continue;
         }
-        this.#lifecycle.registerRuntime(rec.instanceId, { self: false, startedAt: rec.startedAt });
-        this.#lifecycle.observeExit(rec.instanceId, { exitCode: rec.exitCode, signal: rec.signal });
+        const probe = await this.#probe(rec.socketPath || this.socketPath(rec.instanceId));
+        if (probe.state === LIVENESS.ALIVE) {
+          // 立即上报 unknown（不写 EXITED / 不改 persisted record / 不 observeExit）。
+          alive += 1;
+          continue;
+        }
+        if (probe.state === LIVENESS.DEFINITELY_GONE) {
+          // 唯一允许 observeExit 的 probe 结果。
+          this.#observeExit(rec.instanceId, { exitCode: rec.exitCode, signal: rec.signal, reason: "OS_EXECUTOR_ENDPOINT_ABSENT" });
+          dead += 1;
+          continue;
+        }
+        // UNKNOWN：fail closed。runtime 保持 ACTIVE、persisted record 保持原样，
+        // 绝不生成退出证据、绝不 quiesced。只记录 safe 事件 + probe reason。
+        unknown += 1;
+        this.#uncertain.set(rec.instanceId, probe.reason || "UNKNOWN");
+        this.logger?.log?.({ event: "runtime-supervisor", result: "BLOCK", error_code: null, detail: "runtime_liveness_unknown", instanceId: rec.instanceId, reason: safeProbeReason(probe.reason) });
       }
       this.#rehydrated = true;
-      return { ok: true, records: records.length, alive, dead };
+      return { ok: true, records: records.length, alive, dead, unknown };
     })();
     return this.#rehydratePromise;
   }
   whenReady() { return this.rehydrate(); }
 
-  /** 唯一对外 quiescence 查询入口（SideEffectAuthority.lifecycle 就是本对象）。 */
+  /**
+   * 唯一对外 quiescence 查询入口（SideEffectAuthority.lifecycle 就是本对象）。
+   * 只有 RuntimeLifecycleAuthority 观测到 EXITED 才 quiesced=true；
+   * 其余一律 false —— 其中 liveness 未定的 runtime 额外报告 LIVENESS_UNKNOWN。
+   */
   isQuiesced(instanceId) {
     const id = instanceId ? String(instanceId) : "";
     if (!id) return { quiesced: false, reason: "NO_ORIGIN_RUNTIME", proof: { type: "NO_ORIGIN_RUNTIME" } };
     if (!this.#rehydrated) return { quiesced: false, reason: "LIFECYCLE_NOT_READY", proof: { type: "LIFECYCLE_NOT_READY", instanceId: id } };
-    return this.#lifecycle.isQuiesced(id);
+    const verdict = this.#lifecycle.isQuiesced(id);
+    if (verdict.quiesced === true) return verdict;
+    const uncertain = this.#uncertain.get(id);
+    if (uncertain) return { quiesced: false, reason: "LIVENESS_UNKNOWN", proof: { type: "PROBE_UNCERTAIN", instanceId: id, probeReason: uncertain } };
+    return verdict;
   }
 
   stopExecutor(instanceId) {
@@ -217,4 +323,4 @@ class RuntimeSupervisor {
   snapshot() { return [...this.#records.values()].map((r) => this.#safeRecord(r)); }
 }
 
-module.exports = { RuntimeSupervisor, EXECUTOR_STATUS, EXECUTOR_ENTRY, probeUnixSocket };
+module.exports = { RuntimeSupervisor, EXECUTOR_STATUS, EXECUTOR_ENTRY, probeUnixSocket, normalizeProbeResult, LIVENESS, DEFINITELY_GONE_ERRNOS };
