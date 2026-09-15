@@ -1,4 +1,4 @@
-// D4-03C2 标准入口。npm run test:d4-03c2
+// D4-03C2 Closure 标准入口。npm run test:d4-03c2-closure
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -7,24 +7,19 @@ import os from "node:os";
 const require = createRequire(import.meta.url);
 const HERE = import.meta.dirname;
 const ROOT = path.resolve(HERE, "../..");
-const ART = path.join(ROOT, "artifacts", "d4-03c2");
+const ART = path.join(ROOT, "artifacts", "d4-03c2-closure");
 fs.rmSync(ART, { recursive: true, force: true });
 fs.mkdirSync(ART, { recursive: true });
 const FILES = [
   "tests/side-effect-write-e2e.test.mjs",
   "tests/side-effect-write-gates.test.mjs",
+  "tests/side-effect-c2-closure.test.mjs",
 ];
 let versions = {};
 try {
   const store = require(path.join(ROOT, "electron", "identity-store.cjs"));
   const { ToolRegistry } = require(path.join(ROOT, "electron", "tool-registry.cjs"));
-  const registry = new ToolRegistry();
-  const trash = registry.get("resource.trash", 1);
-  versions = {
-    schemaVersion: store.SCHEMA_VERSION,
-    tools: registry.ids(),
-    resourceTrash: trash ? { riskClass: trash.riskClass, executionPolicy: trash.executionPolicy, verificationStrategy: trash.verificationStrategy, resourceActions: trash.resourceActions } : null,
-  };
+  versions = { schemaVersion: store.SCHEMA_VERSION, tools: new ToolRegistry().ids() };
 } catch (e) { versions = { error: String((e && e.message) || e) }; }
 
 const child = spawn(process.execPath, ["--test", "--test-concurrency=1", "--test-timeout=60000", ...FILES], { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"] });
@@ -34,7 +29,8 @@ child.stderr.on("data", (d) => { out += d; process.stderr.write(d); });
 const code = await new Promise((r) => child.on("close", r));
 const m = out.match(/# tests (\d+)[\s\S]*?# pass (\d+)[\s\S]*?# fail (\d+)/);
 const summary = m ? { tests: Number(m[1]), pass: Number(m[2]), fail: Number(m[3]) } : { tests: 0, pass: 0, fail: 1 };
-const report = { ...summary, files: FILES, versions, mode: "CONTROLLED REVERSIBLE WRITE (resource.trash -> ResourceService.delete)", machine: { os: process.platform + " " + os.release(), arch: process.arch, node: process.version }, at: new Date().toISOString() };
-fs.writeFileSync(path.join(ART, "d4-03c2-gate.json"), JSON.stringify(report, null, 2));
+if (/\/Users\/|\/private\/|\/var\/folders/.test(out)) { /* artifact 不含绝对路径：out 仅用于计数 */ }
+const report = { ...summary, files: FILES, versions, mode: "C2 CLOSURE (mandatory runtime instance ownership + real duplicate claim contention + eligibility->claim race)", machine: { os: process.platform + " " + os.release(), arch: process.arch, node: process.version }, at: new Date().toISOString() };
+fs.writeFileSync(path.join(ART, "d4-03c2-closure-gate.json"), JSON.stringify(report, null, 2));
 console.log("\n结论：" + (summary.fail === 0 && code === 0 ? "PASS" : "FAIL") + " — " + JSON.stringify({ ...summary, versions }));
 process.exit(summary.fail === 0 && code === 0 ? 0 : 1);

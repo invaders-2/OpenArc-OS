@@ -21,7 +21,18 @@ export async function createSideEffectFixture(opts = {}) {
   const deny = (callId, o = {}) => authority.denySideEffect({ context: o.context || userCtx(), callId });
   const revokeApproval = (callId, o = {}) => authority.revokeApproval({ context: o.context || userCtx(), callId });
   const lease = (callId, o = {}) => authority.acquireLease({ context: fx.ctx(), callId, holderId: o.holderId || "exec_1", ...(o.ttlMs ? { ttlMs: o.ttlMs } : {}), ...(o.instanceId ? { instanceId: o.instanceId } : {}), ...(o._leaseId ? { _leaseId: o._leaseId } : {}) });
-  const elig = (callId, o = {}) => authority.evaluateExecutionEligibility({ context: o.context || fx.ctx(), callId, holderId: o.holderId === undefined ? "exec_1" : o.holderId, requestArgumentsHash: o.requestArgumentsHash || null });
+  const elig = (callId, o = {}) => {
+    // D4-03C2 Closure：默认取当前 ACTIVE lease 的 runtime instance（与真实 execution 一致）；
+    // 用 o.holderInstanceId: "x" 可显式测试不匹配，o.holderInstanceId: null 可测试缺失。
+    const activeLease = authority.store.activeLeaseOfCall(callId);
+    return authority.evaluateExecutionEligibility({
+      context: o.context || fx.ctx(),
+      callId,
+      holderId: o.holderId === undefined ? "exec_1" : o.holderId,
+      holderInstanceId: o.holderInstanceId === undefined ? (activeLease ? activeLease.holderInstanceId : authority.instanceId) : o.holderInstanceId,
+      requestArgumentsHash: o.requestArgumentsHash || null,
+    });
+  };
   /** 注册 C1 测试专用 REVERSIBLE_WRITE contract + plan-only adapter（绝不 execute）。 */
   function registerResourceWriteTool({ toolId = "test.resourcewrite", requiredPermissions = ["tool.resource.readMetadata"], resourceActions = ["resource.edit"], verificationStrategy = "READ_AFTER_WRITE", idempotencySupport = true } = {}) {
     const contract = {

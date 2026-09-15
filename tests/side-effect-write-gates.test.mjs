@@ -2,6 +2,7 @@
  * D4-03C2 · Negative E2E / Cancel-Revoke-Expiry-Stale Gates。
  *
  * 每一条 gate 失败都必须：0 Domain mutation、call 不 SUCCEEDED、lease ownership 不泄漏。
+ * D4-03C2 Closure：execute 必须携带完整 executor identity（leaseId + holderId + holderInstanceId）。
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -24,7 +25,9 @@ async function attempt({ now = null, ttlMs = undefined, leaseTtlMs = undefined, 
   assert.equal(plan.ok, true, JSON.stringify(plan));
   const approval = skipApprove ? null : fx.approve(plan.call.callId, ttlMs ? { ttlMs } : {});
   const lease = skipLease ? null : fx.lease(plan.call.callId, { holderId, ...(leaseTtlMs ? { ttlMs: leaseTtlMs } : {}) });
-  return { fx, sc, dc, prop, plan, approval, lease, callId: plan.call.callId };
+  const l = lease && lease.ok ? lease.lease : null;
+  const execId = { callId: plan.call.callId, leaseId: l ? l.leaseId : "slease_missing", holderId: (l && l.holderId) || holderId, holderInstanceId: l ? l.holderInstanceId : fx.authority.instanceId };
+  return { fx, sc, dc, prop, plan, approval, lease, execId, callId: plan.call.callId };
 }
 
 async function expectZeroMutation(ctx, exec, expectedError) {
@@ -33,13 +36,13 @@ async function expectZeroMutation(ctx, exec, expectedError) {
   assert.notEqual(exec.call && exec.call.status, "SUCCEEDED");
   if (expectedError) assert.ok(String(exec.error).includes(expectedError), "expected " + expectedError + " got " + exec.error);
 }
+const runExec = (ctx, override = {}) => ctx.fx.authority.executeSideEffect({ ...ctx.execId, ...override });
 
 test("No approval → 0 mutation", async () => {
   const ctx = await attempt({ skipApprove: true });
   try {
     assert.equal(ctx.lease.ok, false, "无 approval 不能 acquire lease");
-    const exec = await ctx.fx.authority.executeSideEffect({ callId: ctx.callId, holderId: "exec_1" });
-    await expectZeroMutation(ctx, exec, "SIDE_EFFECT_CALL_STATE");
+    await expectZeroMutation(ctx, runExec(ctx), "SIDE_EFFECT_CALL_STATE");
   } finally { await ctx.fx.fx.close(); }
 });
 
@@ -49,8 +52,7 @@ test("Approval expired → 0 mutation", async () => {
   try {
     assert.equal(ctx.lease.ok, true, JSON.stringify(ctx.lease));
     now.value += 60_000;
-    const exec = await ctx.fx.authority.executeSideEffect({ callId: ctx.callId, holderId: "exec_1" });
-    await expectZeroMutation(ctx, exec, "SIDE_EFFECT_APPROVAL_EXPIRED");
+    await expectZeroMutation(ctx, runExec(ctx), "SIDE_EFFECT_APPROVAL_EXPIRED");
   } finally { await ctx.fx.fx.close(); }
 });
 
@@ -58,24 +60,21 @@ test("Approval revoke → 0 mutation", async () => {
   const ctx = await attempt();
   try {
     assert.equal(ctx.fx.revokeApproval(ctx.callId).ok, true);
-    const exec = await ctx.fx.authority.executeSideEffect({ callId: ctx.callId, holderId: "exec_1" });
-    await expectZeroMutation(ctx, exec, "SIDE_EFFECT_APPROVAL_REVOKED");
+    await expectZeroMutation(ctx, runExec(ctx), "SIDE_EFFECT_APPROVAL_REVOKED");
   } finally { await ctx.fx.fx.close(); }
 });
 
 test("No lease → 0 mutation", async () => {
   const ctx = await attempt({ skipLease: true });
   try {
-    const exec = await ctx.fx.authority.executeSideEffect({ callId: ctx.callId, holderId: "exec_1" });
-    await expectZeroMutation(ctx, exec, "SIDE_EFFECT_CALL_STATE");
+    await expectZeroMutation(ctx, runExec(ctx), "SIDE_EFFECT_CALL_STATE");
   } finally { await ctx.fx.fx.close(); }
 });
 
 test("Wrong holder → 0 mutation", async () => {
   const ctx = await attempt({ holderId: "exec_1" });
   try {
-    const exec = await ctx.fx.authority.executeSideEffect({ callId: ctx.callId, holderId: "exec_other" });
-    await expectZeroMutation(ctx, exec, "SIDE_EFFECT_LEASE_NOT_HELD");
+    await expectZeroMutation(ctx, runExec(ctx, { holderId: "exec_other" }), "SIDE_EFFECT_LEASE_NOT_HELD");
   } finally { await ctx.fx.fx.close(); }
 });
 
@@ -84,9 +83,8 @@ test("Lease expire → 0 mutation", async () => {
   const ctx = await attempt({ now, leaseTtlMs: 1000 });
   try {
     assert.equal(ctx.lease.ok, true, JSON.stringify(ctx.lease));
-    now.value += 5000; // lease TTL 1s 已过。
-    const exec = await ctx.fx.authority.executeSideEffect({ callId: ctx.callId, holderId: "exec_1" });
-    await expectZeroMutation(ctx, exec, "SIDE_EFFECT_LEASE_EXPIRED");
+    now.value += 5000;
+    await expectZeroMutation(ctx, runExec(ctx), "SIDE_EFFECT_LEASE_EXPIRED");
   } finally { await ctx.fx.fx.close(); }
 });
 
@@ -94,16 +92,14 @@ test("Lease revoke → 0 mutation", async () => {
   const ctx = await attempt();
   try {
     assert.equal(ctx.fx.authority.revokeLease({ callId: ctx.callId, leaseId: ctx.lease.lease.leaseId }).ok, true);
-    const exec = await ctx.fx.authority.executeSideEffect({ callId: ctx.callId, holderId: "exec_1" });
-    await expectZeroMutation(ctx, exec, "SIDE_EFFECT_LEASE_REQUIRED");
+    await expectZeroMutation(ctx, runExec(ctx), "SIDE_EFFECT_LEASE_REQUIRED");
   } finally { await ctx.fx.fx.close(); }
 });
 
-test("Wrong leaseId（同一 ACTIVE lease 之外的 lease）→ 0 mutation", async () => {
+test("Wrong leaseId → 0 mutation", async () => {
   const ctx = await attempt();
   try {
-    const exec = await ctx.fx.authority.executeSideEffect({ callId: ctx.callId, leaseId: "slease_does_not_exist", holderId: "exec_1" });
-    await expectZeroMutation(ctx, exec, "SIDE_EFFECT_LEASE_NOT_HELD");
+    await expectZeroMutation(ctx, runExec(ctx, { leaseId: "slease_does_not_exist" }), "SIDE_EFFECT_LEASE_NOT_HELD");
   } finally { await ctx.fx.fx.close(); }
 });
 
@@ -111,10 +107,8 @@ test("Task cancelled → 0 mutation", async () => {
   const ctx = await attempt();
   try {
     const t = ctx.fx.taskService.getTask({ context: ctx.fx.ctx(), taskId: ctx.sc.run.taskId }).task;
-    const c = ctx.fx.taskService.cancelTask({ context: ctx.fx.ctx(), taskId: ctx.sc.run.taskId, expectedRevision: t.revision });
-    assert.equal(c.ok, true, JSON.stringify(c));
-    const exec = await ctx.fx.authority.executeSideEffect({ callId: ctx.callId, holderId: "exec_1" });
-    await expectZeroMutation(ctx, exec, "TASK_CANCELLED");
+    assert.equal(ctx.fx.taskService.cancelTask({ context: ctx.fx.ctx(), taskId: ctx.sc.run.taskId, expectedRevision: t.revision }).ok, true);
+    await expectZeroMutation(ctx, runExec(ctx), "TASK_CANCELLED");
   } finally { await ctx.fx.fx.close(); }
 });
 
@@ -122,8 +116,7 @@ test("Session revoked → 0 mutation", async () => {
   const ctx = await attempt();
   try {
     ctx.fx.fx.f.identity.logout(ctx.fx.fx.f.sessions.admin);
-    const exec = await ctx.fx.authority.executeSideEffect({ callId: ctx.callId, holderId: "exec_1" });
-    await expectZeroMutation(ctx, exec, "SIDE_EFFECT_AUTHORIZATION_REVOKED");
+    await expectZeroMutation(ctx, runExec(ctx), "SIDE_EFFECT_AUTHORIZATION_REVOKED");
   } finally { await ctx.fx.fx.close(); }
 });
 
@@ -131,8 +124,7 @@ test("App disable → 0 mutation", async () => {
   const ctx = await attempt();
   try {
     ctx.fx.fx.f.store.setAppStatus("ai", "disabled");
-    const exec = await ctx.fx.authority.executeSideEffect({ callId: ctx.callId, holderId: "exec_1" });
-    await expectZeroMutation(ctx, exec, "SIDE_EFFECT_APP_DISABLED");
+    await expectZeroMutation(ctx, runExec(ctx), "SIDE_EFFECT_APP_DISABLED");
   } finally { await ctx.fx.fx.close(); }
 });
 
@@ -141,8 +133,7 @@ test("Tool permission revoke → 0 mutation", async () => {
   try {
     const rev = ctx.fx.fx.f.authService.revokeAppResourcePermission({ context: ctx.fx.fx.f.adminCtx(), grantId: ctx.sc.toolGrant.grant.grantId });
     assert.equal(rev.ok, true, JSON.stringify(rev));
-    const exec = await ctx.fx.authority.executeSideEffect({ callId: ctx.callId, holderId: "exec_1" });
-    await expectZeroMutation(ctx, exec, "SIDE_EFFECT_AUTHORIZATION_REVOKED");
+    await expectZeroMutation(ctx, runExec(ctx), "SIDE_EFFECT_AUTHORIZATION_REVOKED");
   } finally { await ctx.fx.fx.close(); }
 });
 
@@ -159,11 +150,13 @@ test("Resource permission revoked（USER grant, non-admin）→ 0 mutation", asy
     const plan = await fx.authority.planSideEffect({ context: aliceCtx, taskId: run.taskId, stepId: run.stepId, runId: run.runId, toolId: TRASH_TOOL, arguments: { resourceRef: sc.resourceRef }, proposalId: prop.proposal.proposalId, decisionId: prop.decision.decisionId });
     assert.equal(plan.ok, true, JSON.stringify(plan));
     assert.equal(fx.authority.approveSideEffect({ context: { sessionRef: fx.fx.f.sessions.alice, appId: "ai", source: "user" }, callId: plan.call.callId }).ok, true);
-    assert.equal(fx.authority.acquireLease({ context: aliceCtx, callId: plan.call.callId, holderId: "exec_1" }).ok, true);
-    assert.equal(fx.authority.evaluateExecutionEligibility({ context: aliceCtx, callId: plan.call.callId, holderId: "exec_1" }).status, "ELIGIBLE");
+    const lease = fx.authority.acquireLease({ context: aliceCtx, callId: plan.call.callId, holderId: "exec_1" });
+    assert.equal(lease.ok, true, JSON.stringify(lease));
+    const execId = { callId: plan.call.callId, leaseId: lease.lease.leaseId, holderId: "exec_1", holderInstanceId: lease.lease.holderInstanceId };
+    assert.equal(fx.authority.evaluateExecutionEligibility({ context: aliceCtx, callId: plan.call.callId, holderId: "exec_1", holderInstanceId: lease.lease.holderInstanceId }).status, "ELIGIBLE");
     const rev = fx.fx.f.authService.revokeResourcePermission({ context: fx.fx.f.adminCtx(), grantId: ag.grant.id });
     assert.equal(rev.ok, true, JSON.stringify(rev));
-    const exec = await fx.authority.executeSideEffect({ callId: plan.call.callId, holderId: "exec_1" });
+    const exec = await fx.authority.executeSideEffect({ ...execId });
     assert.equal(dc.calls, 0);
     assert.equal(exec.ok, false);
     assert.ok(String(exec.error).includes("SIDE_EFFECT_AUTHORIZATION_REVOKED"), JSON.stringify(exec));
@@ -173,11 +166,8 @@ test("Resource permission revoked（USER grant, non-admin）→ 0 mutation", asy
 test("Tool disabled → 0 mutation", async () => {
   const ctx = await attempt();
   try {
-    const key = TRASH_TOOL + "@1";
-    ctx.fx.toolRegistry.tools.set(key, { ...ctx.fx.toolRegistry.get(TRASH_TOOL, 1), enabled: false });
-    const exec = ctx.fx.authority.executeSideEffect({ callId: ctx.callId, holderId: "exec_1" });
-    assert.equal(exec.ok, false);
-    await expectZeroMutation(ctx, exec, "SIDE_EFFECT_TOOL_DISABLED");
+    ctx.fx.toolRegistry.tools.set(TRASH_TOOL + "@1", { ...ctx.fx.toolRegistry.get(TRASH_TOOL, 1), enabled: false });
+    await expectZeroMutation(ctx, runExec(ctx), "SIDE_EFFECT_TOOL_DISABLED");
   } finally { await ctx.fx.fx.close(); }
 });
 
@@ -185,8 +175,7 @@ test("Tool version change → 0 mutation", async () => {
   const ctx = await attempt();
   try {
     ctx.fx.toolRegistry.register({ ...ctx.fx.toolRegistry.get(TRASH_TOOL, 1), version: 2 });
-    const exec = ctx.fx.authority.executeSideEffect({ callId: ctx.callId, holderId: "exec_1" });
-    await expectZeroMutation(ctx, exec, "SIDE_EFFECT_TOOL_VERSION_CHANGED");
+    await expectZeroMutation(ctx, runExec(ctx), "SIDE_EFFECT_TOOL_VERSION_CHANGED");
   } finally { await ctx.fx.fx.close(); }
 });
 
@@ -197,10 +186,8 @@ test("Stale run → 0 mutation", async () => {
     const task = ctx.fx.taskStore.taskById(ctx.sc.run.taskId);
     const step = ctx.fx.taskService.createStep({ context: c, taskId: ctx.sc.run.taskId, kind: "reasoning", input: null, expectedRevision: task.revision });
     const ss = ctx.fx.taskService.startStep({ context: c, taskId: ctx.sc.run.taskId, stepId: step.step.stepId, expectedRevision: step.task.revision });
-    const nr = ctx.fx.taskService.startHarnessRun({ context: c, taskId: ctx.sc.run.taskId, stepId: step.step.stepId, expectedRevision: ss.task.revision });
-    assert.equal(nr.ok, true, JSON.stringify(nr));
-    const exec = await ctx.fx.authority.executeSideEffect({ callId: ctx.callId, holderId: "exec_1" });
-    await expectZeroMutation(ctx, exec, "SIDE_EFFECT_STALE_RUN");
+    assert.equal(ctx.fx.taskService.startHarnessRun({ context: c, taskId: ctx.sc.run.taskId, stepId: step.step.stepId, expectedRevision: ss.task.revision }).ok, true);
+    await expectZeroMutation(ctx, runExec(ctx), "SIDE_EFFECT_STALE_RUN");
   } finally { await ctx.fx.fx.close(); }
 });
 
@@ -209,8 +196,7 @@ test("Plan / approval binding changed（planHash 不匹配）→ 0 mutation", as
   try {
     const far = Date.now() + 100_000;
     ctx.fx.store.transactSync(() => ctx.fx.store.insertApproval({ callId: ctx.callId, actorUserId: "u", sessionRef: ctx.fx.fx.f.sessions.admin, decision: "APPROVED", planHash: "tampered", createdAt: far, expiresAt: far + 100_000 }));
-    const exec = await ctx.fx.authority.executeSideEffect({ callId: ctx.callId, holderId: "exec_1" });
-    await expectZeroMutation(ctx, exec, "SIDE_EFFECT_PLAN_STALE");
+    await expectZeroMutation(ctx, runExec(ctx), "SIDE_EFFECT_PLAN_STALE");
   } finally { await ctx.fx.fx.close(); }
 });
 
@@ -219,8 +205,7 @@ test("Resource version / precondition changed → 0 mutation", async () => {
   try {
     const bumped = await ctx.fx.fx.f.resourceService.replaceText({ context: ctx.fx.fx.f.adminCtx(), resourceRef: ctx.sc.resourceRef, text: "edited", expectedVersion: 1 });
     assert.equal(bumped.ok, true, JSON.stringify(bumped));
-    const exec = await ctx.fx.authority.executeSideEffect({ callId: ctx.callId, holderId: "exec_1" });
-    await expectZeroMutation(ctx, exec, "SIDE_EFFECT_PRECONDITION_CHANGED");
+    await expectZeroMutation(ctx, runExec(ctx), "SIDE_EFFECT_PRECONDITION_CHANGED");
   } finally { await ctx.fx.fx.close(); }
 });
 
@@ -231,7 +216,7 @@ test("Unsupported effectClass（IRREVERSIBLE / EXTERNAL / PRIVILEGED）→ 0 cal
     const dc = countDeleteCalls(fx);
     for (const [i, risk] of ["IRREVERSIBLE_WRITE", "EXTERNAL_SIDE_EFFECT", "PRIVILEGED"].entries()) {
       const toolId = "test.c2blocked" + i;
-      fx.toolRegistry.register({ ...fx.toolRegistry.get(TRASH_TOOL, 1), toolId, version: 1, riskClass: risk, requiredPermissions: [], resourceActions: ["resource.delete"] });
+      fx.toolRegistry.register({ ...fx.toolRegistry.get(TRASH_TOOL, 1), toolId, version: 1, riskClass: risk, requiredPermissions: [], resourceActions: ["resource.delete"], executionPolicy: null });
       const p = await fx.plan(toolId, { resourceRef: "resource://abc" }, run);
       assert.equal(p.ok, false, risk);
       assert.equal(p.error, "SIDE_EFFECT_EFFECT_CLASS_BLOCKED");
@@ -246,7 +231,7 @@ test("Harness spoof on resource.trash → TOOL_ARGUMENT_INVALID / 0 call / 0 mut
   try {
     const sc = await fx.setupTrash();
     const dc = countDeleteCalls(fx);
-    for (const spoof of [{ resourceRef: sc.resourceRef, approved: true }, { resourceRef: sc.resourceRef, approvalId: "x" }, { resourceRef: sc.resourceRef, leaseId: "x" }, { resourceRef: sc.resourceRef, callId: "x" }, { resourceRef: sc.resourceRef, idempotencyKey: "x" }, { resourceRef: sc.resourceRef, expectedVersion: 1 }, { resourceRef: sc.resourceRef, effectClass: "REVERSIBLE_WRITE" }, { resourceRef: sc.resourceRef, expectedEffects: ["x"] }]) {
+    for (const spoof of [{ resourceRef: sc.resourceRef, approved: true }, { resourceRef: sc.resourceRef, approvalId: "x" }, { resourceRef: sc.resourceRef, leaseId: "x" }, { resourceRef: sc.resourceRef, callId: "x" }, { resourceRef: sc.resourceRef, idempotencyKey: "x" }, { resourceRef: sc.resourceRef, expectedVersion: 1 }, { resourceRef: sc.resourceRef, holderInstanceId: "x" }, { resourceRef: sc.resourceRef, effectClass: "REVERSIBLE_WRITE" }]) {
       const p = await fx.authority.planSideEffect({ context: fx.ctx(), taskId: sc.run.taskId, stepId: sc.run.stepId, runId: sc.run.runId, toolId: TRASH_TOOL, arguments: spoof });
       assert.equal(p.ok, false, JSON.stringify(p));
       assert.equal(p.error, "TOOL_ARGUMENT_INVALID");
