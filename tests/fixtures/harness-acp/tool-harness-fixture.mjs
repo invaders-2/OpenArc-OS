@@ -7,6 +7,8 @@ const { ToolRegistry } = require("../../../electron/tool-registry.cjs");
 const { ControlledToolProxy } = require("../../../electron/controlled-tool-proxy.cjs");
 const { createToolAdapters } = require("../../../electron/tool-adapters.cjs");
 const { TaskHarnessOrchestrator } = require("../../../electron/task-harness-orchestrator.cjs");
+const { SideEffectStore } = require("../../../electron/side-effect-store.cjs");
+const { SideEffectAuthority } = require("../../../electron/side-effect-authority.cjs");
 
 export { APPS, EXACT };
 export const PROVIDER_SECRET = "FAKE_PROVIDER_SECRET_D4_03A_PROBE";
@@ -18,8 +20,11 @@ export async function createToolHarnessFixture(opts = {}) {
   // withAdapters=true 才允许真实 READ_ONLY 执行（D4-03B）；默认保持 D4-03A gate 语义。
   const adapters = opts.withAdapters ? createToolAdapters({ resourceService: base.f.resourceService, searchService: base.f.searchService }) : null;
   const toolProxy = new ControlledToolProxy({ registry: toolRegistry, toolStore, authService: base.f.authService, taskStore: base.taskStore, adapters, clock: base.f.clock });
+  const sideEffectClock = typeof opts.sideEffectClock === "function" ? opts.sideEffectClock : base.f.clock;
+  const sideEffectStore = new SideEffectStore({ identity: base.f.identity, clock: sideEffectClock });
+  const sideEffectAuthority = new SideEffectAuthority({ registry: toolRegistry, sideEffectStore, taskStore: base.taskStore, toolStore, authService: base.f.authService, adapters, clock: sideEffectClock, taskService: base.taskService, instanceId: opts.sideEffectInstanceId || "inst_test" });
   return {
-    ...base, toolStore, toolRegistry, toolProxy, adapters,
+    ...base, toolStore, toolRegistry, toolProxy, adapters, sideEffectStore, sideEffectAuthority,
     /** 用 synthetic ACP tool proposal fixture 充当 Harness。*/
     makeToolOrchestrator(agentFile = "tool-proposal-agent.mjs", extra = {}) {
       return new TaskHarnessOrchestrator({ taskService: base.taskService, adapterFactory: base.agentFactory(agentFile), toolProxy, clock: base.f.clock, ...extra });

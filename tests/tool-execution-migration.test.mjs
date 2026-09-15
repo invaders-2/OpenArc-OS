@@ -10,6 +10,7 @@ const { IdentityStore, SCHEMA_VERSION } = require("../electron/identity-store.cj
 const { DatabaseSync } = require("node:sqlite");
 
 const V12_TABLES = ["tool_executions"];
+const V13_TABLES = ["side_effect_calls", "tool_approvals", "side_effect_leases"];
 const hasTable = (db, name) => !!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(name);
 
 async function makeV11Db() {
@@ -20,7 +21,7 @@ async function makeV11Db() {
   const snapshot = { users: fx.identity.allUsers().length };
   fx.identity.close();
   const raw = new DatabaseSync(dbPath);
-  for (const t of V12_TABLES) raw.exec("DROP TABLE IF EXISTS " + t);
+  for (const t of [...V12_TABLES, ...V13_TABLES]) raw.exec("DROP TABLE IF EXISTS " + t);
   raw.exec("PRAGMA user_version = 11");
   assert.equal(raw.prepare("PRAGMA user_version").get().user_version, 11);
   raw.close();
@@ -31,9 +32,9 @@ test("v11 -> v12：tool_executions 建立，旧数据完整", async () => {
   const { root, dbPath, storeRoot, snapshot } = await makeV11Db();
   try {
     const reopened = reopenResourceRuntime({ dbPath, storeRoot });
-    assert.equal(SCHEMA_VERSION, 12);
+    assert.equal(SCHEMA_VERSION, 13);
     assert.equal(reopened.identity.schemaVersion, SCHEMA_VERSION);
-    for (const t of V12_TABLES) assert.equal(hasTable(reopened.identity.connection, t), true, t + " 应存在");
+    for (const t of [...V12_TABLES, ...V13_TABLES]) assert.equal(hasTable(reopened.identity.connection, t), true, t + " 应存在");
     assert.equal(reopened.identity.allUsers().length, snapshot.users);
     reopened.identity.close();
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
@@ -47,12 +48,12 @@ test("v12 迁移失败 -> 整级回滚：user_version 停 11，v12 表不残留"
     failing.close();
     const raw = new DatabaseSync(dbPath);
     assert.equal(raw.prepare("PRAGMA user_version").get().user_version, 11);
-    for (const t of V12_TABLES) assert.equal(hasTable(raw, t), false, t + " 不应残留");
+    for (const t of [...V12_TABLES, ...V13_TABLES]) assert.equal(hasTable(raw, t), false, t + " 不应残留");
     assert.equal(raw.prepare("SELECT COUNT(*) AS c FROM users").get().c, snapshot.users);
     raw.close();
     const repaired = reopenResourceRuntime({ dbPath, storeRoot });
-    assert.equal(repaired.identity.schemaVersion, 12);
-    for (const t of V12_TABLES) assert.equal(hasTable(repaired.identity.connection, t), true, t + " 修复后应存在");
+    assert.equal(repaired.identity.schemaVersion, 13);
+    for (const t of [...V12_TABLES, ...V13_TABLES]) assert.equal(hasTable(repaired.identity.connection, t), true, t + " 修复后应存在");
     repaired.identity.close();
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

@@ -159,11 +159,11 @@ test("TS5 · migration v8 → v10：追加 Task 与 Harness/Artifact 表；v9 �
   for (const sql of [SCHEMA_SQL, SCHEMA_V2_SQL, SCHEMA_V3_SQL, SCHEMA_V4_SQL, SCHEMA_V5_SQL, SCHEMA_V6_SQL, SCHEMA_V7_SQL, SCHEMA_V8_SQL]) raw.exec(sql);
   raw.exec("PRAGMA user_version = 8");
   raw.close();
-  assert.equal(SCHEMA_VERSION, 12);
+  assert.equal(SCHEMA_VERSION, 13);
   const store = new (require("../electron/identity-store.cjs").IdentityStore)({ path: dbPath }).open();
-  assert.equal(store.schemaVersion, 12);
+  assert.equal(store.schemaVersion, 13);
   const tables = store.connection.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name);
-  for (const t of ["tasks", "task_steps", "task_model_calls", "task_events", "task_harness_runs", "task_artifacts", "task_verifications", "task_tool_proposals", "tool_decisions", "tool_executions"]) assert.ok(tables.includes(t), "缺少表 " + t);
+  for (const t of ["tasks", "task_steps", "task_model_calls", "task_events", "task_harness_runs", "task_artifacts", "task_verifications", "task_tool_proposals", "tool_decisions", "tool_executions", "side_effect_calls", "tool_approvals", "side_effect_leases"]) assert.ok(tables.includes(t), "缺少表 " + t);
   store.close();
 
   // v9 级失败 → 整级回滚，user_version 保持 8，task 表不残留

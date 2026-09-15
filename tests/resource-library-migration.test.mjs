@@ -18,6 +18,7 @@ const V9_TABLES = ["task_events", "task_model_calls", "task_steps", "tasks"];
 const V10_TABLES = ["task_harness_runs", "task_artifacts", "task_verifications"];
 const V11_TABLES = ["task_tool_proposals", "tool_decisions"];
 const V12_TABLES = ["tool_executions"];
+const V13_TABLES = ["side_effect_calls", "tool_approvals", "side_effect_leases"];
 const hasTable = (db, name) => !!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(name);
 const hasColumn = (db, table, col) => db.prepare("PRAGMA table_info(" + table + ")").all().some((c) => c.name === col);
 
@@ -44,7 +45,7 @@ async function makeV4Db() {
   const snapshot = { orgId: fx.orgId, users: fx.identity.allUsers().length, departments: fx.store.departmentsOfOrg(fx.orgId).length, resourceId: imp.resource.resourceId, ref: imp.resource.resourceRef };
   fx.identity.close();
   const raw = new DatabaseSync(dbPath);
-  for (const t of V12_TABLES) raw.exec("DROP TABLE IF EXISTS " + t);
+  for (const t of [...V12_TABLES, ...V13_TABLES]) raw.exec("DROP TABLE IF EXISTS " + t);
   for (const t of V11_TABLES) raw.exec("DROP TABLE IF EXISTS " + t);
   for (const t of V10_TABLES) raw.exec("DROP TABLE IF EXISTS " + t);
   for (const t of V9_TABLES) raw.exec("DROP TABLE IF EXISTS " + t);
@@ -66,7 +67,7 @@ test("v4 -> v5：升级成功，v5 表建立，identity/authorization/resource �
   assert.equal(reopened.identity.schemaVersion, SCHEMA_VERSION);
   assert.equal(reopened.identity.allUsers().length, snapshot.users);
   assert.equal(reopened.authStore.departmentsOfOrg(snapshot.orgId).length, snapshot.departments);
-  for (const t of [...V5_TABLES, ...V6_TABLES, ...V7_TABLES, ...V8_TABLES, ...V9_TABLES, ...V10_TABLES, ...V11_TABLES, ...V12_TABLES]) assert.equal(hasTable(reopened.identity.connection, t), true, t + " 应存在");
+  for (const t of [...V5_TABLES, ...V6_TABLES, ...V7_TABLES, ...V8_TABLES, ...V9_TABLES, ...V10_TABLES, ...V11_TABLES, ...V12_TABLES, ...V13_TABLES]) assert.equal(hasTable(reopened.identity.connection, t), true, t + " 应存在");
   for (const col of ["memory_subtype", "language", "attributes"]) assert.equal(hasColumn(reopened.identity.connection, "library_resources", col), true, col + " 应存在");
   const login = await reopened.identity.login({ identifier: "alice@openarc.test", password: "alice-password-1" });
   const read = await reopened.resourceService.readText({ context: { sessionRef: login.session.ref, appId: "resource-library" }, resourceRef: snapshot.ref });

@@ -18,6 +18,7 @@ const V9_TABLES = ["task_events", "task_model_calls", "task_steps", "tasks"];
 const V10_TABLES = ["task_harness_runs", "task_artifacts", "task_verifications"];
 const V11_TABLES = ["task_tool_proposals", "tool_decisions"];
 const V12_TABLES = ["tool_executions"];
+const V13_TABLES = ["side_effect_calls", "tool_approvals", "side_effect_leases"];
 const V7_TABLES = ["projects", "project_members", "project_resources", "canvas_boards", "canvas_resource_nodes"];
 const V6_TABLES = ["resource_search_docs", "resource_search_fts", "resource_index_jobs", "resource_preview_cache"];
 const V5_TABLES = ["resource_recent", "resource_favorites", "resource_tags", "tags"];
@@ -34,7 +35,7 @@ async function makeV3Db() {
   const snapshot = { users: fx.identity.allUsers().length, departments: fx.store.departmentsOfOrg(fx.orgId).length, devices: fx.deviceStore.allDevices().length, orgId: fx.orgId };
   fx.identity.close();
   const raw = new DatabaseSync(dbPath);
-  for (const table of V12_TABLES) raw.exec("DROP TABLE IF EXISTS " + table);
+  for (const table of [...V12_TABLES, ...V13_TABLES]) raw.exec("DROP TABLE IF EXISTS " + table);
   for (const table of V11_TABLES) raw.exec("DROP TABLE IF EXISTS " + table);
   for (const table of V10_TABLES) raw.exec("DROP TABLE IF EXISTS " + table);
   for (const table of V9_TABLES) raw.exec("DROP TABLE IF EXISTS " + table);
@@ -70,7 +71,7 @@ test("v3 -> v4：升级成功且 identity / department / device 数据完整", (
     assert.equal(reopened.identity.allUsers().length, snapshot.users);
     assert.equal(reopened.authStore.departmentsOfOrg(snapshot.orgId).length, snapshot.departments);
     assert.equal(reopened.deviceStore.allDevices().length, snapshot.devices);
-    for (const table of [...V4_TABLES, ...V5_TABLES, ...V6_TABLES, ...V7_TABLES, ...V8_TABLES, ...V9_TABLES, ...V10_TABLES, ...V11_TABLES, ...V12_TABLES]) assert.equal(hasTable(reopened.identity.connection, table), true, table + " 应存在");
+    for (const table of [...V4_TABLES, ...V5_TABLES, ...V6_TABLES, ...V7_TABLES, ...V8_TABLES, ...V9_TABLES, ...V10_TABLES, ...V11_TABLES, ...V12_TABLES, ...V13_TABLES]) assert.equal(hasTable(reopened.identity.connection, table), true, table + " 应存在");
     reopened.identity.close();
   })();
 });

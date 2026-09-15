@@ -39,7 +39,7 @@ async function seedV1(dbPath) {
 }
 
 test("schema 版本已推进到 v10（D4-02C 在 v9 之上追加 HarnessRun / Artifact / Verification）", () => {
-  assert.equal(SCHEMA_VERSION, 12);
+  assert.equal(SCHEMA_VERSION, 13);
 });
 
 test("全新数据库直接建到 v8，identity login 成立", async () => {
@@ -167,6 +167,7 @@ test("v3 级迁移失败 → user_version 停在 2，设备表不残留（§55 �
     raw.exec("DROP TABLE task_verifications; DROP TABLE task_artifacts; DROP TABLE task_harness_runs;");
     raw.exec("DROP TABLE tool_decisions; DROP TABLE task_tool_proposals;");
     raw.exec("DROP TABLE tool_executions;");
+    raw.exec("DROP TABLE side_effect_leases; DROP TABLE tool_approvals; DROP TABLE side_effect_calls;");
     raw.exec("DROP TABLE resource_recent; DROP TABLE resource_favorites; DROP TABLE resource_tags; DROP TABLE tags;");
     raw.exec("ALTER TABLE library_resources DROP COLUMN memory_subtype; ALTER TABLE library_resources DROP COLUMN language; ALTER TABLE library_resources DROP COLUMN attributes;");
     raw.exec("DROP TABLE resource_relations; DROP TABLE resource_versions; DROP TABLE library_resources; DROP TABLE resource_import_jobs; DROP TABLE content_objects;");
