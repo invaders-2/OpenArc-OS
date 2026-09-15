@@ -20,20 +20,26 @@ export async function createSideEffectFixture(opts = {}) {
   const approve = (callId, o = {}) => authority.approveSideEffect({ context: o.context || userCtx(), callId, ...(o.ttlMs ? { ttlMs: o.ttlMs } : {}) });
   const deny = (callId, o = {}) => authority.denySideEffect({ context: o.context || userCtx(), callId });
   const revokeApproval = (callId, o = {}) => authority.revokeApproval({ context: o.context || userCtx(), callId });
-  const lease = (callId, o = {}) => authority.acquireLease({ context: fx.ctx(), callId, holderId: o.holderId || "exec_1", ...(o.ttlMs ? { ttlMs: o.ttlMs } : {}), ...(o.instanceId ? { _testInstanceId: o.instanceId } : {}), ...(o._leaseId ? { _leaseId: o._leaseId } : {}) });
-  const elig = (callId, o = {}) => {
-    // D4-03C2 Closure：默认取当前 ACTIVE lease 的 runtime instance（与真实 execution 一致）；
-    // 用 o.holderInstanceId: "x" 可显式测试不匹配，o.holderInstanceId: null 可测试缺失。
-    const activeLease = authority.store.activeLeaseOfCall(callId);
-    return authority.evaluateExecutionEligibility({
-      context: o.context || fx.ctx(),
-      callId,
-      holderId: o.holderId === undefined ? "exec_1" : o.holderId,
-      ...(o.leaseId !== undefined ? { leaseId: o.leaseId } : {}),
-      holderInstanceId: o.holderInstanceId === undefined ? (activeLease ? activeLease.holderInstanceId : authority.instanceId) : o.holderInstanceId,
-      requestArgumentsHash: o.requestArgumentsHash || null,
-    });
+  const SideEffectAuthority = authority.constructor;
+  /**
+   * lease（测试夹具）：
+   * - 默认由当前 fixture authority 获取（holderInstanceId = authority.instanceId）。
+   * - 需要"另一个 runtime instance 拥有 lease"时，按 §5 创建 new SideEffectAuthority({instanceId})，
+   *   绝不给 production acquireLease 增加 runtime override 参数。
+   */
+  const lease = (callId, o = {}) => {
+    const owner = o.instanceId && o.instanceId !== authority.instanceId
+      ? new SideEffectAuthority({ registry: fx.toolRegistry, sideEffectStore: store, taskStore: fx.taskStore, toolStore: fx.toolStore, authService: fx.f.authService, adapters: fx.adapters, clock: authority.clock, taskService: fx.taskService, instanceId: o.instanceId })
+      : authority;
+    return owner.acquireLease({ context: fx.ctx(), callId, holderId: o.holderId || "exec_1", ...(o.ttlMs ? { ttlMs: o.ttlMs } : {}), ...(o._leaseId ? { _leaseId: o._leaseId } : {}) });
   };
+  const elig = (callId, o = {}) => authority.evaluateExecutionEligibility({
+    context: o.context || fx.ctx(),
+    callId,
+    holderId: o.holderId === undefined ? "exec_1" : o.holderId,
+    ...(o.leaseId !== undefined ? { leaseId: o.leaseId } : {}),
+    requestArgumentsHash: o.requestArgumentsHash || null,
+  });
   /** 注册 C1 测试专用 REVERSIBLE_WRITE contract + plan-only adapter（绝不 execute）。 */
   function registerResourceWriteTool({ toolId = "test.resourcewrite", requiredPermissions = ["tool.resource.readMetadata"], resourceActions = ["resource.edit"], verificationStrategy = "READ_AFTER_WRITE", idempotencySupport = true } = {}) {
     const contract = {
@@ -78,7 +84,7 @@ export async function createSideEffectFixture(opts = {}) {
     const prop = fx.toolProxy.propose({ context: fx.ctx(), taskId: run.taskId, stepId: run.stepId, runId: run.runId, toolId: TRASH_TOOL, toolVersion: 1, arguments: args });
     const p = await authority.planSideEffect({ context: fx.ctx(), taskId: run.taskId, stepId: run.stepId, runId: run.runId, toolId: TRASH_TOOL, arguments: args, proposalId: prop.proposal ? prop.proposal.proposalId : null, decisionId: prop.decision ? prop.decision.decisionId : null });
     const a = p.ok ? authority.approveSideEffect({ context: userCtx(), callId: p.call.callId, ...(ttlMs ? { ttlMs } : {}) }) : null;
-    const l = p.ok ? authority.acquireLease({ context: fx.ctx(), callId: p.call.callId, holderId, ...(instanceId ? { _testInstanceId: instanceId } : {}) }) : null;
+    const l = p.ok ? lease(p.call.callId, { holderId, ...(instanceId ? { instanceId } : {}) }) : null;
     return { prop, plan: p, approval: a, lease: l, callId: p.ok ? p.call.callId : null };
   }
   return { fx, harness: fx, authority, store, toolStore: fx.toolStore, toolRegistry: fx.toolRegistry, taskStore: fx.taskStore, authService: fx.f.authService, adapters: fx.adapters, toolProxy: fx.toolProxy, taskService: fx.taskService, identity: fx.f.identity, grantTool: fx.grantTool, grantUserResource: fx.grantUserResource, createResource: fx.createResource, ctx, userCtx, aliceUserCtx, setupRun, plan, approve, deny, revokeApproval, lease, elig, registerResourceWriteTool, setupTrash, precondition, restoreTrash, trashFlow };

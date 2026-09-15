@@ -20,16 +20,16 @@ const events = (fx, taskId) => fx.taskStore.eventsOfTask(taskId).map((e) => e.ev
 test("restart：旧进程 ACTIVE lease → EXPIRED，旧 holder 不能执行，必须重新 acquire", async () => {
   const { fx, call } = await leased("instA");
   try {
-    const r = fx.authority.recoverOnStartup({ instanceId: "instB" });
+    const r = fx.authority.recoverOnStartup();
     assert.equal(r.ok, true);
     assert.equal(r.expiredLeases.length, 1);
     const old = fx.store.activeLeaseOfCall(call.callId);
     assert.equal(old, null, "旧 lease 不再 ACTIVE");
     const e = fx.elig(call.callId, { holderId: "exec_1" });
     assert.equal(e.status, "LEASE_REQUIRED");
-    const re = fx.lease(call.callId, { holderId: "exec_1", instanceId: "instB" });
+    const re = fx.lease(call.callId, { holderId: "exec_1" });
     assert.equal(re.ok, true, JSON.stringify(re));
-    assert.equal(re.lease.holderInstanceId, "instB");
+    assert.equal(re.lease.holderInstanceId, fx.authority.instanceId, "re-acquire 绑定当前 runtime identity");
     assert.equal(fx.elig(call.callId, { holderId: "exec_1" }).status, "ELIGIBLE");
   } finally { await fx.fx.close(); }
 });
@@ -40,7 +40,7 @@ test("RUNNING-after-crash → UNKNOWN_EFFECT（不是 FAILED/PLANNED/RUNNING）+
     fx.store.transactSync(() => fx.store.updateCall(call.callId, { status: "RUNNING", started_at: 1_000_000 }));
     assert.equal(fx.store.callById(call.callId).status, "RUNNING");
     const before = fx.store.callsOfTask(run.taskId).length;
-    const r = fx.authority.recoverOnStartup({ instanceId: "instB" });
+    const r = fx.authority.recoverOnStartup();
     assert.equal(r.unknownEffectCalls.length, 1);
     const after = fx.store.callById(call.callId);
     assert.equal(after.status, "UNKNOWN_EFFECT");
@@ -55,10 +55,10 @@ test("RUNNING-after-crash → UNKNOWN_EFFECT（不是 FAILED/PLANNED/RUNNING）+
 test("Crash before RUNNING：APPROVED/LEASED 不进入 UNKNOWN_EFFECT，可安全 release/reacquire", async () => {
   const { fx, call } = await leased("instA");
   try {
-    const r = fx.authority.recoverOnStartup({ instanceId: "instB" });
+    const r = fx.authority.recoverOnStartup();
     assert.equal(r.unknownEffectCalls.length, 0);
     assert.equal(fx.store.callById(call.callId).status, "LEASED");
-    const re = fx.lease(call.callId, { holderId: "exec_2", instanceId: "instB" });
+    const re = fx.lease(call.callId, { holderId: "exec_2" });
     assert.equal(re.ok, true, JSON.stringify(re));
   } finally { await fx.fx.close(); }
 });
@@ -67,7 +67,7 @@ test("verifyUnknownEffect：无 verifier → VERIFICATION_NOT_AVAILABLE 且保�
   const { fx, call } = await leased("instA");
   try {
     fx.store.transactSync(() => fx.store.updateCall(call.callId, { status: "RUNNING" }));
-    fx.authority.recoverOnStartup({ instanceId: "instB" });
+    fx.authority.recoverOnStartup();
     const v = await fx.authority.verifyUnknownEffect({ callId: call.callId });
     assert.equal(v.ok, false);
     assert.equal(v.error, "SIDE_EFFECT_VERIFICATION_NOT_AVAILABLE");
@@ -79,7 +79,7 @@ test("verifyUnknownEffect：注入 verifier 后可以收敛为 SUCCEEDED / FAILE
   const { fx, call } = await leased("instA");
   try {
     fx.store.transactSync(() => fx.store.updateCall(call.callId, { status: "RUNNING" }));
-    fx.authority.recoverOnStartup({ instanceId: "instB" });
+    fx.authority.recoverOnStartup();
     const verifier = new SideEffectAuthority({ registry: fx.toolRegistry, sideEffectStore: fx.store, taskStore: fx.taskStore, toolStore: fx.toolStore, authService: fx.authService, adapters: fx.adapters, clock: () => 1_000_000, unknownEffectVerifier: async () => ({ ok: true, effectApplied: true }) });
     const v = await verifier.verifyUnknownEffect({ callId: call.callId });
     assert.equal(v.ok, true, JSON.stringify(v));
@@ -94,8 +94,8 @@ test("no auto retry：recovery 不得产生第二次 authority / execution", asy
   try {
     fx.store.transactSync(() => fx.store.updateCall(call.callId, { status: "RUNNING" }));
     const proposalsBefore = fx.toolStore.proposalsOfTask(run.taskId).length;
-    fx.authority.recoverOnStartup({ instanceId: "instB" });
-    fx.authority.recoverOnStartup({ instanceId: "instB" });
+    fx.authority.recoverOnStartup();
+    fx.authority.recoverOnStartup();
     assert.equal(fx.store.callsOfTask(run.taskId).length, 1, "只应存在 1 个 side effect call");
     assert.equal(fx.toolStore.proposalsOfTask(run.taskId).length, proposalsBefore, "不得新建 proposal");
     assert.equal(fx.toolStore.executionsOfTask(run.taskId).length, 0, "0 execution invocation");

@@ -40,7 +40,9 @@ async function runtimeA({ status }) {
   assert.equal(p.ok, true, JSON.stringify(p));
   const userCtx = { sessionRef: fx.f.sessions.admin, appId: "ai", source: "user" };
   assert.equal(fx.sideEffectAuthority.approveSideEffect({ context: userCtx, callId: p.call.callId }).ok, true);
-  assert.equal(fx.sideEffectAuthority.acquireLease({ context: fx.ctx(), callId: p.call.callId, holderId: "exec_A", _testInstanceId: "instA", ttlMs: 60000 }).ok, true);
+  // §5：旧 runtime instance 的 lease 必须通过 new SideEffectAuthority({instanceId}) 创建。
+  const authorityA = new SideEffectAuthority({ registry: fx.toolRegistry, sideEffectStore: fx.sideEffectStore, taskStore: fx.taskStore, toolStore: fx.toolStore, authService: fx.f.authService, adapters: fx.adapters, clock: fx.f.clock, taskService: fx.taskService, instanceId: "instA" });
+  assert.equal(authorityA.acquireLease({ context: fx.ctx(), callId: p.call.callId, holderId: "exec_A", ttlMs: 60000 }).ok, true);
   if (status) fx.sideEffectStore.transactSync(() => fx.sideEffectStore.updateCall(p.call.callId, { status, started_at: 1700000000000 }));
   const baseline = {
     calls: fx.sideEffectStore.callsOfTask(run.taskId).length,
@@ -64,7 +66,7 @@ test("真实 restart：RUNNING → UNKNOWN_EFFECT，Step/Task BLOCKED，旧 leas
     const b = reopenRuntimeB(a.dbPath, "instB", a.now);
     try {
       assert.equal(b.identity.schemaVersion, SCHEMA_VERSION);
-      const r = b.authority.recoverOnStartup({ instanceId: "instB" });
+      const r = b.authority.recoverOnStartup();
       assert.equal(r.ok, true, JSON.stringify(r));
       assert.equal(r.errors.length, 0, JSON.stringify(r.errors));
       assert.equal(r.unknownEffectCalls.length, 1);
@@ -103,12 +105,12 @@ test("Crash-before-RUNNING：APPROVED/LEASED 不进入 UNKNOWN_EFFECT，旧 leas
   try {
     const b = reopenRuntimeB(a.dbPath, "instB", a.now);
     try {
-      const r = b.authority.recoverOnStartup({ instanceId: "instB" });
+      const r = b.authority.recoverOnStartup();
       assert.equal(r.ok, true, JSON.stringify(r));
       assert.equal(r.unknownEffectCalls.length, 0);
       assert.equal(b.sideEffectStore.callById(a.callId).status, "LEASED");
       assert.equal(b.sideEffectStore.leasesOfCall(a.callId).filter((l) => l.status === "ACTIVE").length, 0);
-      const re = b.authority.acquireLease({ context: {}, callId: a.callId, holderId: "exec_B", _testInstanceId: "instB", ttlMs: 60000 });
+      const re = b.authority.acquireLease({ context: {}, callId: a.callId, holderId: "exec_B", ttlMs: 60000 });
       assert.equal(re.ok, true, JSON.stringify(re));
       assert.equal(re.lease.holderInstanceId, "instB");
       assert.equal(b.toolStore.executionsOfTask(a.taskId).length, 0);
@@ -125,7 +127,7 @@ test("Recovery fail closed：TaskService 不可用时仍保持 UNKNOWN_EFFECT，
       // test-only seam：构造没有 TaskService 的 authority；生产路径始终注入 TaskService，
       // 且 recoverOnStartup 已删除 blockTask 开关，不存在 production bypass。
       const orphan = new SideEffectAuthority({ registry: b.registry, sideEffectStore: b.sideEffectStore, taskStore: b.taskStore, toolStore: b.toolStore, authService: {}, adapters: null, clock: () => Date.now(), taskService: null, instanceId: "instB" });
-      const r = orphan.recoverOnStartup({ instanceId: "instB" });
+      const r = orphan.recoverOnStartup();
       assert.equal(r.ok, false);
       assert.ok(r.errors.some((e) => e.detail === "TASK_SERVICE_UNAVAILABLE"), JSON.stringify(r.errors));
       assert.equal(b.sideEffectStore.callById(a.callId).status, "UNKNOWN_EFFECT");
