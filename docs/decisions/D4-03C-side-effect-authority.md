@@ -1,6 +1,6 @@
 # D4-03C1 · Side-effect Authority / Approval / Lease Contract（macOS）
 
-- **状态**：**D4-03C1 = PASS candidate**（合同 + fail-safe recovery + 真实 contention / persisted restart，待 ChatGPT 审计）；**D4-03C overall = PARTIAL**（未真实写）；**D4-03C2 Controlled Reversible Write = 下一阶段**
+- **状态**：**D4-03C1 = PASS candidate**（合同 + fail-safe recovery + 真实 contention / persisted restart）；**D4-03C2 = PASS candidate**（1 条受控真实 REVERSIBLE_WRITE：resource.trash，待 ChatGPT 审计）；**D4-03C overall = PARTIAL**；**D4-03C3 = 未开始**
 - **分支**：feature/d4-03-tool-proxy，基线 809e8fa，未 merge main
 - **日期**：2026-09-15
 
@@ -14,7 +14,7 @@ ToolDecision = ALLOWED
 != Verified Effect
 ```
 
-五层 authority 彻底分开。**Harness proposes. OpenArc decides. OpenArc executes. OpenArc verifies.** 本阶段 production WRITE execution = 0。
+五层 authority 彻底分开。**Harness proposes. OpenArc decides. OpenArc executes. OpenArc verifies.** D4-03C1 production WRITE execution = 0；D4-03C2 只开放**一条**受控真实 REVERSIBLE_WRITE（resource.trash → ResourceService.delete），不扩大成通用 WRITE Runtime。
 
 ## 六层合同
 
@@ -29,7 +29,7 @@ Proposal → Decision → Plan → Approval → Lease → Execution Eligibility
 
 ## SideEffectCall
 
-OpenArc 生成 `callId`（`scall_`）、`idempotencyKey`（`idem_`）、`planHash`；`UNIQUE(call_id)` + `UNIQUE(idempotency_key)`。状态机：PLANNED / AWAITING_APPROVAL / APPROVED / LEASED / RUNNING / SUCCEEDED / FAILED / CANCELLED / BLOCKED / UNKNOWN_EFFECT；C1 最多到 LEASED/ELIGIBLE。
+OpenArc 生成 `callId`（`scall_`）、`idempotencyKey`（`idem_`）、`planHash`；`UNIQUE(call_id)` + `UNIQUE(idempotency_key)`。状态机：PLANNED / AWAITING_APPROVAL / APPROVED / LEASED / RUNNING / SUCCEEDED / FAILED / CANCELLED / BLOCKED / UNKNOWN_EFFECT。C1 最多到 LEASED/ELIGIBLE；C2 对 resource.trash 可走到 SUCCEEDED（必须先 claim RUNNING + verifier PASS）。
 
 ## effectClass
 
@@ -64,9 +64,32 @@ Approval/Lease 都持久化。`recoverOnStartup()` 是 fail-safe contract：**�
 
 两个独立 child executor（独立 DB connection / 独立 instanceId）通过 barrier 同时 `acquireLease` 同一 APPROVED call：check+insert 在同一 `BEGIN IMMEDIATE` 事务内，结果恰好 1 ACTIVE / 1 success / 1 `SIDE_EFFECT_LEASE_CONFLICT`；SQLite contention 收敛为安全业务语义，不暴露裸 `SQLITE_BUSY`。
 
+## Production WRITE tool（D4-03C2）
+
+本阶段唯一 production write tool：`resource.trash` v1，riskClass = REVERSIBLE_WRITE，executionProvider = ResourceService，resourceActions = [`resource.delete`]，requiredPermissions = [`tool.resource.trash`]，verificationStrategy = READ_AFTER_WRITE，idempotencySupport = true，executionPolicy = **CONTROLLED_REVERSIBLE_WRITE**。输入只允许 `resourceRef`；`expectedVersion` / expectedEffects 由 adapter.plan() 从真实 Domain state 生成。真实 mutation 只能经 **ResourceService.delete()**，绝不直接 SQL。
+
+## Execution claim（exactly once）
+
+`executeSideEffect` 先同步完成全部 gate（tool/version、eligibility、lease holder、leaseId），再在**一个 BEGIN IMMEDIATE 事务内**原子 claim `LEASED → RUNNING`——只有唯一 claim 成功的 executor 能 dispatch Domain mutation。未进入 RUNNING 前，approval revoke / lease revoke / task cancel / permission revoke / tool disable / version change / precondition change 全部阻止执行。
+
+## Verification（Execution != Verified Effect）
+
+dispatch 后必须调用真实 Domain verifier（重新读取 Resource Domain，`trashed == true`）：
+- verifier PASS → `RUNNING → SUCCEEDED`，`verificationStatus = PASS`，lease `RELEASED`；
+- Domain 明确 known no-effect / version conflict / precondition changed → `FAILED`（0 retry），lease RELEASED；
+- exception / timeout / verifier unavailable / 无法判断 → `UNKNOWN_EFFECT`，lease `REVOKED`，Step/Task → BLOCKED，绝不 retry。
+
+## Business optimistic concurrency
+
+Lease ≠ business lock。`ResourceService.delete({ expectedVersion })` 在**真实 mutation transaction 内**重新读取并校验 resource 存在 / version == expectedVersion / 当前 active，不匹配即 `VERSION_CONFLICT`（映射为 `SIDE_EFFECT_PRECONDITION_CHANGED`），0 mutation / 0 retry，无 TOCTOU。
+
+## Reversibility
+
+`resource.trash` 是 REVERSIBLE_WRITE，用真实 `ResourceService.restore()` 证明效果可恢复；**restore proof ≠ AI 获得绕过 SideEffect Authority 的 production restore 权限**，本阶段不开放 `resource.restore` Tool。
+
 ## WRITE execution boundary
 
-所有 write 执行入口（`executeReadOnly` / `executeSideEffect`）在 C1 一律 `WRITE_EXECUTION_DISABLED`，mutationCount = 0。
+只有声明 `executionPolicy = CONTROLLED_REVERSIBLE_WRITE` 的 contract 可执行；其余 write contract（`test.write` / `test.noverify` 等）仍 `WRITE_EXECUTION_DISABLED`，`executeReadOnly` 遇 write 一律 `WRITE_EXECUTION_DISABLED`，mutationCount = 0。IRREVERSIBLE_WRITE / EXTERNAL_SIDE_EFFECT / PRIVILEGED / Shell / Terminal / filesystem generic mutation / MCP / Browser automation / Device Agent / Canvas / App Center mutation 全部 BLOCKED。
 
 ## Persistence（schema v13）
 
@@ -74,7 +97,7 @@ Approval/Lease 都持久化。`recoverOnStartup()` 是 fail-safe contract：**�
 
 ## Audit / Task Events
 
-Audit：`side_effect.planned / approval_requested / approved / denied / approval_revoked / lease_acquired / lease_released / blocked / unknown_effect`。TaskEvent：`tool.side_effect.planned / tool.approval_required / tool.approved / tool.denied / tool.lease_acquired / tool.execution_eligible / tool.execution_blocked / tool.side_effect.unknown_effect`。Audit 不是 execution authority。
+Audit：`side_effect.planned / approval_requested / approved / denied / approval_revoked / lease_acquired / lease_released / lease_revoked / blocked / unknown_effect / execution_started / verification_passed / verification_failed / succeeded`。TaskEvent：`tool.side_effect.planned / tool.approval_required / tool.approved / tool.denied / tool.lease_acquired / tool.execution_eligible / tool.execution_blocked / tool.side_effect.unknown_effect / tool.side_effect.execution_started / tool.side_effect.verification_passed / tool.side_effect.succeeded`。只存安全投影，无 raw arguments / content / secret / credential / capability / 绝对路径。Audit **不是** execution authority；SideEffectCall 仍是唯一 authoritative execution state（不建第二套真值）。
 
 ## 冻结
 
@@ -88,4 +111,4 @@ Audit：`side_effect.planned / approval_requested / approved / denied / approval
 
 ## 下一步
 
-`D4-03C2 Controlled Reversible Write` 才第一次允许真实 REVERSIBLE_WRITE，必须走 Proposal → Decision → Plan → Approval → Lease → Execute exactly once → Verify → Release。`D4-03D Full Tool Proxy Gate` 之后才 D4-04。
+`D4-03C2` 已完成第一条受控真实 REVERSIBLE_WRITE。**`D4-03C3 Ambiguous Result / Idempotency / Crash Recovery` = 未开始**，由 ChatGPT 审计后决定，禁止自动进入；`D4-03D Full Tool Proxy Gate` 之后才 D4-04。
