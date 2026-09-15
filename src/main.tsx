@@ -157,6 +157,13 @@ const DESKTOP_ID = "desktop";
 /** 桌面图标栅格：整理与"网格吸附"共用同一套数。 */
 // 初始落位放在右侧空白区：左侧/中部会被默认窗口与品牌区压住
 const DESK_GRID = { x0: 1150, y0: 88, dx: 108, dy: 118, cols: 2 };
+/** 桌面图标的禁入边距：**顶栏那一条不许压**（用户口径：桌面顶部那边不可越界），
+    右侧与底部也各留一点，别让图标一半挂在屏幕外。 */
+const DESK_BOUND = { top: 52, right: 96, bottom: 140 };
+const clampDeskPos = (p: { x: number; y: number }) => ({
+  x: Math.max(0, Math.min(innerWidth - DESK_BOUND.right, p.x)),
+  y: Math.max(DESK_BOUND.top, Math.min(innerHeight - DESK_BOUND.bottom, p.y)),
+});
 /** 内置壁纸只保留两种：浅色 / 深色主题色（其余预设与动态 Aurora 已按用户口径删除）。 */
 const WALLPAPERS = [
   { id: "theme-light", name: "浅色主题色" },
@@ -251,7 +258,10 @@ function App() {
     try {
       const raw = localStorage.getItem("oa-folders");
       const parsed = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) ? parsed : [];
+      // 同一层夹取：桌面文件夹的位置同样不许压到顶栏
+      return Array.isArray(parsed)
+        ? parsed.map((v) => ({ ...v, ...clampDeskPos({ x: v?.x ?? 0, y: v?.y ?? 0 }) }))
+        : [];
     } catch {
       return [];
     }
@@ -455,7 +465,12 @@ function App() {
   // ---------------------------------------------------------------------------
   const [desktopIcons, setDesktopIcons] = useState<Record<string, { x: number; y: number }>>(() => {
     try {
-      return JSON.parse(localStorage.getItem("oa-desktop-icons") || "{}");
+      const parsed = JSON.parse(localStorage.getItem("oa-desktop-icons") || "{}") as Record<string, { x: number; y: number }>;
+      if (!parsed || typeof parsed !== "object") return {};
+      // 旧版本在顶栏上方松手会算出负坐标，载入时先夹回可视区
+      return Object.fromEntries(
+        Object.entries(parsed).map(([k, v]) => [k, clampDeskPos({ x: v?.x ?? 0, y: v?.y ?? 0 })]),
+      );
     } catch {
       return {};
     }
@@ -650,14 +665,17 @@ function App() {
     else list.sort((a, b) => a.name.localeCompare(b.name, "zh"));
     return list;
   }, [filesByFolder, deskSort]);
-  const gridPos = (index: number) => ({
-    x: DESK_GRID.x0 + (index % DESK_GRID.cols) * DESK_GRID.dx,
-    y: DESK_GRID.y0 + Math.floor(index / DESK_GRID.cols) * DESK_GRID.dy,
-  });
-  const snapPos = (x: number, y: number) => ({
-    x: DESK_GRID.x0 + Math.round((x - DESK_GRID.x0) / DESK_GRID.dx) * DESK_GRID.dx,
-    y: DESK_GRID.y0 + Math.round((y - DESK_GRID.y0) / DESK_GRID.dy) * DESK_GRID.dy,
-  });
+  const gridPos = (index: number) =>
+    clampDeskPos({
+      x: DESK_GRID.x0 + (index % DESK_GRID.cols) * DESK_GRID.dx,
+      y: DESK_GRID.y0 + Math.floor(index / DESK_GRID.cols) * DESK_GRID.dy,
+    });
+  /** 落格坐标必须夹一次：在顶栏上方松手时，向上取整会算出负的格位（实测会被甩到 -30）。 */
+  const snapPos = (x: number, y: number) =>
+    clampDeskPos({
+      x: DESK_GRID.x0 + Math.round((x - DESK_GRID.x0) / DESK_GRID.dx) * DESK_GRID.dx,
+      y: DESK_GRID.y0 + Math.round((y - DESK_GRID.y0) / DESK_GRID.dy) * DESK_GRID.dy,
+    });
   const deskPos = (id: string, index: number) => desktopIcons[id] ?? gridPos(index);
   /** 一个桌面条目的当前位置：文件夹读 folders，文件读落格记录。 */
   const deskEntryPos = (id: string): { x: number; y: number } => {
@@ -670,14 +688,9 @@ function App() {
       setFolders((fs) => fs.map((v) => (v.id === id ? { ...v, x: p.x, y: p.y } : v)));
     else setDesktopIcons((m) => ({ ...m, [id]: p }));
   };
-  /** 桌面图标的坐标夹取（不越出可视区、不压住顶栏与程序坞）。 */
-  const clampDeskPos = (p: { x: number; y: number }) => ({
-    x: Math.max(0, Math.min(innerWidth - 96, p.x)),
-    y: Math.max(52, Math.min(innerHeight - 140, p.y)),
-  });
   /** 落格：把条目动画到栅格（只有这一步用过渡，所以看起来是"轻轻吸过去"而不是跳）。 */
   const settleEntry = (id: string, pos: { x: number; y: number }) => {
-    setDeskEntryPos(id, pos);
+    setDeskEntryPos(id, clampDeskPos(pos));
     setSettling(id);
     window.setTimeout(() => setSettling((cur) => (cur === id ? null : cur)), 280);
   };
