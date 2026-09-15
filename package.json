@@ -44,6 +44,8 @@
     "test:d4-03c2-closure3": "node experiments/d4-03c2-closure3/run-all.mjs",
     "test:d4-03c3": "node experiments/d4-03c3/run-all.mjs",
     "test:d4-03c3-closure": "node experiments/d4-03c3-closure/run-all.mjs",
+    "test:d4-03c4": "node experiments/d4-03c4/run-all.mjs",
+    "test:d4-03c4-ui": "npm run build && node tests/side-effect-approval-ui.mjs",
     "test:d4-03b-dsh": "node --test --test-concurrency=1 tests/tool-dsh-facade.test.mjs tests/tool-dsh-e2e.test.mjs tests/tool-dsh-security.test.mjs tests/tool-dsh-cancel.test.mjs tests/tool-dsh-lifecycle.test.mjs",
     "test:model-ipc-ui": "npm run build && node tests/model-ipc-ui.mjs",
     "test:model-keychain-restart": "node tests/model-keychain-restart.mjs",

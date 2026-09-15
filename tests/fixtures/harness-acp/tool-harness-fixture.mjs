@@ -1,7 +1,13 @@
 /** D4-03A 夹具：在 D4-02C Task/Harness 夹具之上叠加 ToolStore / ToolRegistry / ControlledToolProxy。 */
 import { createRequire } from "node:module";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { createTaskHarnessFixture, APPS, EXACT, PROVIDER_SECRET as TASK_PROVIDER_SECRET } from "./task-harness-fixture.mjs";
+import { reopenResourceRuntime } from "../../resource-fixtures.mjs";
 const require = createRequire(import.meta.url);
+const { TaskStore } = require("../../../electron/task-store.cjs");
+const { TaskService } = require("../../../electron/task-service.cjs");
 const { ToolStore } = require("../../../electron/tool-store.cjs");
 const { ToolRegistry } = require("../../../electron/tool-registry.cjs");
 const { ControlledToolProxy } = require("../../../electron/controlled-tool-proxy.cjs");
@@ -9,9 +15,37 @@ const { createToolAdapters } = require("../../../electron/tool-adapters.cjs");
 const { TaskHarnessOrchestrator } = require("../../../electron/task-harness-orchestrator.cjs");
 const { SideEffectStore } = require("../../../electron/side-effect-store.cjs");
 const { SideEffectAuthority } = require("../../../electron/side-effect-authority.cjs");
+const { SideEffectRuntime } = require("../../../electron/side-effect-runtime.cjs");
+const { RuntimeSupervisor } = require("../../../electron/runtime-supervisor.cjs");
 
 export { APPS, EXACT };
 export const PROVIDER_SECRET = "FAKE_PROVIDER_SECRET_D4_03A_PROBE";
+
+/**
+ * D4-03C4 · 在同一 disk DB / store 上重开 production side-effect runtime（真实 restart）。
+ * 不重建用户 / model config，只重建 authority 链 —— 与 production bootstrap 的顺序一致：
+ *   recover() = TaskService.recoverRunning() → SideEffectRuntime.recoverOnStartup()
+ */
+export async function reopenToolHarnessRuntime({ dbPath, storeRoot, runtimeDir, executorEntry = null, approvalWaitMs = 400, instanceId = "inst_restart" } = {}) {
+  const base = reopenResourceRuntime({ dbPath, storeRoot });
+  const toolStore = new ToolStore({ identity: base.identity });
+  const toolRegistry = new ToolRegistry();
+  const adapters = createToolAdapters({ resourceService: base.resourceService, searchService: base.searchService });
+  const taskStore = new TaskStore({ identity: base.identity });
+  const taskService = new TaskService({ identity: base.identity, authService: base.authService, authStore: base.authStore, taskStore });
+  const toolProxy = new ControlledToolProxy({ registry: toolRegistry, toolStore, authService: base.authService, taskStore, adapters });
+  const sideEffectStore = new SideEffectStore({ identity: base.identity });
+  const supervisor = new RuntimeSupervisor({ runtimeDir, executorEntry });
+  await supervisor.rehydrate();
+  const sideEffectAuthority = new SideEffectAuthority({ registry: toolRegistry, sideEffectStore, taskStore, toolStore, authService: base.authService, adapters, taskService, instanceId, lifecycle: supervisor });
+  const sideEffectRuntime = new SideEffectRuntime({ authority: sideEffectAuthority, supervisor, store: sideEffectStore, taskStore, taskService, toolProxy, registry: toolRegistry, resourceStore: base.resourceStore, authService: base.authService, dbPath, storeRoot, approvalWaitMs });
+  return {
+    ...base, toolStore, toolRegistry, toolProxy, adapters, taskStore, taskService, sideEffectStore, sideEffectAuthority, supervisor, sideEffectRuntime,
+    /** production 顺序的两段 recovery。 */
+    recover() { const taskRecovery = taskService.recoverRunning(); const sideEffect = sideEffectRuntime.recoverOnStartup(); return { taskRecovery, sideEffect }; },
+    close() { try { supervisor.stop(); } catch { /* ignore */ } try { base.identity.close(); } catch { /* ignore */ } },
+  };
+}
 
 export async function createToolHarnessFixture(opts = {}) {
   const base = await createTaskHarnessFixture(opts);
@@ -22,9 +56,24 @@ export async function createToolHarnessFixture(opts = {}) {
   const toolProxy = new ControlledToolProxy({ registry: toolRegistry, toolStore, authService: base.f.authService, taskStore: base.taskStore, adapters, clock: base.f.clock });
   const sideEffectClock = typeof opts.sideEffectClock === "function" ? opts.sideEffectClock : base.f.clock;
   const sideEffectStore = new SideEffectStore({ identity: base.f.identity, clock: sideEffectClock });
-  const sideEffectAuthority = new SideEffectAuthority({ registry: toolRegistry, sideEffectStore, taskStore: base.taskStore, toolStore, authService: base.f.authService, adapters, clock: sideEffectClock, taskService: base.taskService, instanceId: opts.sideEffectInstanceId || "inst_test", lifecycle: opts.sideEffectLifecycle || null, testHooks: opts.sideEffectTestHooks || null });
+  // D4-03C4：唯一 production side-effect 装配（test 只注入参数，不自己拼 authority 链）。
+  const sideEffectRuntimeDir = opts.sideEffectRuntimeDir || fs.mkdtempSync(path.join(os.tmpdir(), "oa-c4-runtime-"));
+  const supervisor = new RuntimeSupervisor({ runtimeDir: sideEffectRuntimeDir, clock: sideEffectClock, executorEntry: opts.sideEffectExecutorEntry || null });
+  // 测试夹具必须等 production supervisor 完成 rehydrate，否则 quiescence 一律 fail closed。
+  await supervisor.rehydrate();
+  // 默认 lifecycle = production supervisor；需要精确控制时由测试显式注入 sideEffectLifecycle。
+  const sideEffectAuthority = new SideEffectAuthority({ registry: toolRegistry, sideEffectStore, taskStore: base.taskStore, toolStore, authService: base.f.authService, adapters, clock: sideEffectClock, taskService: base.taskService, instanceId: opts.sideEffectInstanceId || "inst_test", lifecycle: opts.sideEffectLifecycle || supervisor, testHooks: opts.sideEffectTestHooks || null });
+  const sideEffectRuntime = new SideEffectRuntime({
+    authority: sideEffectAuthority, supervisor, store: sideEffectStore,
+    taskStore: base.taskStore, taskService: base.taskService, toolProxy,
+    registry: toolRegistry, resourceStore: base.f.resourceStore, authService: base.f.authService,
+    dbPath: opts.dbPath && opts.dbPath !== ":memory:" ? opts.dbPath : null,
+    storeRoot: base.f.storeRoot, clock: sideEffectClock, logger: null,
+    ...(opts.sideEffectApprovalWaitMs ? { approvalWaitMs: opts.sideEffectApprovalWaitMs } : {}),
+    ...(opts.sideEffectExecutorTimeoutMs ? { executorTimeoutMs: opts.sideEffectExecutorTimeoutMs } : {}),
+  });
   return {
-    ...base, toolStore, toolRegistry, toolProxy, adapters, sideEffectStore, sideEffectAuthority,
+    ...base, toolStore, toolRegistry, toolProxy, adapters, sideEffectStore, sideEffectAuthority, supervisor, sideEffectRuntime, sideEffectRuntimeDir,
     /** 用 synthetic ACP tool proposal fixture 充当 Harness。*/
     makeToolOrchestrator(agentFile = "tool-proposal-agent.mjs", extra = {}) {
       return new TaskHarnessOrchestrator({ taskService: base.taskService, adapterFactory: base.agentFactory(agentFile), toolProxy, clock: base.f.clock, ...extra });
@@ -35,8 +84,9 @@ export async function createToolHarnessFixture(opts = {}) {
         taskService: base.taskService,
         adapterFactory: base.realAgentFactory(),
         toolProxy,
+        sideEffectRuntime,
         clock: base.f.clock,
-        toolFacade: { enabled: true, toolIds: opts.facadeToolIds || ["resource.read.metadata", "resource.search"], maxCalls: opts.facadeMaxCalls || 4, ttlMs: opts.facadeTtlMs || 120000, execTimeoutMs: opts.facadeExecTimeoutMs, bridgeFactory: opts.facadeBridgeFactory },
+        toolFacade: { enabled: true, toolIds: opts.facadeToolIds || ["resource.read.metadata", "resource.search"], writeToolIds: opts.facadeWriteToolIds || [], maxCalls: opts.facadeMaxCalls || 4, ttlMs: opts.facadeTtlMs || 120000, execTimeoutMs: opts.facadeExecTimeoutMs, bridgeFactory: opts.facadeBridgeFactory },
         ...extra,
       });
     },
@@ -70,6 +120,6 @@ export async function createToolHarnessFixture(opts = {}) {
     grantUserResource(resourceId, userId, actions) {
       return base.f.authService.grantResourcePermission({ context: base.f.adminCtx(), principalType: "USER", principalId: userId, resourceId, actions });
     },
-    async close() { await base.close(); },
+    async close() { try { supervisor.stop(); } catch { /* ignore */ } await base.close(); },
   };
 }

@@ -15,8 +15,8 @@ export const APPS = { A: "ai", B: "canvas" };
 export const EXACT = "OPENARC_TASK_OK";
 export const AGENT_DIR = path.join(import.meta.dirname);
 
-export async function createTaskHarnessFixture({ behavior = "exact", dbPath = ":memory:", hooks = null, delayMs = 0, keepData = false } = {}) {
-  const f = await createModelFixture({ dbPath, keepData });
+export async function createTaskHarnessFixture({ behavior = "exact", dbPath = ":memory:", hooks = null, delayMs = 0, keepData = false, storeRoot = null } = {}) {
+  const f = await createModelFixture({ dbPath, storeRoot, keepData });
   for (const appId of [APPS.A, APPS.B]) f.store.upsertApp({ appId, name: appId, publisher: "test", status: "enabled", builtIn: 0 });
   f.modelService.grantAppModelAccess({ context: f.adminCtx(), appId: APPS.A, actions: ["model.view", "model.use", "model.manage", "model.test"] });
   const ctx = (key = "admin", appId = APPS.A) => ({ sessionRef: f.sessions[key], appId, source: "test" });

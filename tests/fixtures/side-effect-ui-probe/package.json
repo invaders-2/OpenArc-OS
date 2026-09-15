@@ -1,0 +1,5 @@
+{
+  "name": "openarc-side-effect-ui-probe",
+  "private": true,
+  "main": "main.cjs"
+}
