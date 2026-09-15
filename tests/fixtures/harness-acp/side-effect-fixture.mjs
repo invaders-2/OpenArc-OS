@@ -20,7 +20,7 @@ export async function createSideEffectFixture(opts = {}) {
   const approve = (callId, o = {}) => authority.approveSideEffect({ context: o.context || userCtx(), callId, ...(o.ttlMs ? { ttlMs: o.ttlMs } : {}) });
   const deny = (callId, o = {}) => authority.denySideEffect({ context: o.context || userCtx(), callId });
   const revokeApproval = (callId, o = {}) => authority.revokeApproval({ context: o.context || userCtx(), callId });
-  const lease = (callId, o = {}) => authority.acquireLease({ context: fx.ctx(), callId, holderId: o.holderId || "exec_1", ...(o.ttlMs ? { ttlMs: o.ttlMs } : {}), ...(o.instanceId ? { instanceId: o.instanceId } : {}), ...(o._leaseId ? { _leaseId: o._leaseId } : {}) });
+  const lease = (callId, o = {}) => authority.acquireLease({ context: fx.ctx(), callId, holderId: o.holderId || "exec_1", ...(o.ttlMs ? { ttlMs: o.ttlMs } : {}), ...(o.instanceId ? { _testInstanceId: o.instanceId } : {}), ...(o._leaseId ? { _leaseId: o._leaseId } : {}) });
   const elig = (callId, o = {}) => {
     // D4-03C2 Closure：默认取当前 ACTIVE lease 的 runtime instance（与真实 execution 一致）；
     // 用 o.holderInstanceId: "x" 可显式测试不匹配，o.holderInstanceId: null 可测试缺失。
@@ -29,6 +29,7 @@ export async function createSideEffectFixture(opts = {}) {
       context: o.context || fx.ctx(),
       callId,
       holderId: o.holderId === undefined ? "exec_1" : o.holderId,
+      ...(o.leaseId !== undefined ? { leaseId: o.leaseId } : {}),
       holderInstanceId: o.holderInstanceId === undefined ? (activeLease ? activeLease.holderInstanceId : authority.instanceId) : o.holderInstanceId,
       requestArgumentsHash: o.requestArgumentsHash || null,
     });
@@ -77,7 +78,7 @@ export async function createSideEffectFixture(opts = {}) {
     const prop = fx.toolProxy.propose({ context: fx.ctx(), taskId: run.taskId, stepId: run.stepId, runId: run.runId, toolId: TRASH_TOOL, toolVersion: 1, arguments: args });
     const p = await authority.planSideEffect({ context: fx.ctx(), taskId: run.taskId, stepId: run.stepId, runId: run.runId, toolId: TRASH_TOOL, arguments: args, proposalId: prop.proposal ? prop.proposal.proposalId : null, decisionId: prop.decision ? prop.decision.decisionId : null });
     const a = p.ok ? authority.approveSideEffect({ context: userCtx(), callId: p.call.callId, ...(ttlMs ? { ttlMs } : {}) }) : null;
-    const l = p.ok ? authority.acquireLease({ context: fx.ctx(), callId: p.call.callId, holderId, ...(instanceId ? { instanceId } : {}) }) : null;
+    const l = p.ok ? authority.acquireLease({ context: fx.ctx(), callId: p.call.callId, holderId, ...(instanceId ? { _testInstanceId: instanceId } : {}) }) : null;
     return { prop, plan: p, approval: a, lease: l, callId: p.ok ? p.call.callId : null };
   }
   return { fx, harness: fx, authority, store, toolStore: fx.toolStore, toolRegistry: fx.toolRegistry, taskStore: fx.taskStore, authService: fx.f.authService, adapters: fx.adapters, toolProxy: fx.toolProxy, taskService: fx.taskService, identity: fx.f.identity, grantTool: fx.grantTool, grantUserResource: fx.grantUserResource, createResource: fx.createResource, ctx, userCtx, aliceUserCtx, setupRun, plan, approve, deny, revokeApproval, lease, elig, registerResourceWriteTool, setupTrash, precondition, restoreTrash, trashFlow };

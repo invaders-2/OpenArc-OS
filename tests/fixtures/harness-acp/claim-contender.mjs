@@ -60,7 +60,8 @@ rl.on("line", async (line) => {
   if (String(line).trim() !== "GO") return;
   let result;
   try {
-    result = await authority.executeSideEffect({ callId: args.callId, leaseId: args.leaseId, holderId: args.holderId, holderInstanceId: args.holderInstanceId, timeoutMs: 20000 });
+    // holderInstanceId 是调用方自报值：故意传入以证明它被完全忽略（runtime identity 只用 this.instanceId）。
+    result = await authority.executeSideEffect({ callId: args.callId, leaseId: args.leaseId, holderId: args.holderId, holderInstanceId: args.attemptInstanceId, timeoutMs: 20000 });
   } catch (e) {
     result = { ok: false, error: "THREW", detail: String((e && (e.errstr || e.message)) || e) };
   }

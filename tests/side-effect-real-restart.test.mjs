@@ -40,7 +40,7 @@ async function runtimeA({ status }) {
   assert.equal(p.ok, true, JSON.stringify(p));
   const userCtx = { sessionRef: fx.f.sessions.admin, appId: "ai", source: "user" };
   assert.equal(fx.sideEffectAuthority.approveSideEffect({ context: userCtx, callId: p.call.callId }).ok, true);
-  assert.equal(fx.sideEffectAuthority.acquireLease({ context: fx.ctx(), callId: p.call.callId, holderId: "exec_A", instanceId: "instA", ttlMs: 60000 }).ok, true);
+  assert.equal(fx.sideEffectAuthority.acquireLease({ context: fx.ctx(), callId: p.call.callId, holderId: "exec_A", _testInstanceId: "instA", ttlMs: 60000 }).ok, true);
   if (status) fx.sideEffectStore.transactSync(() => fx.sideEffectStore.updateCall(p.call.callId, { status, started_at: 1700000000000 }));
   const baseline = {
     calls: fx.sideEffectStore.callsOfTask(run.taskId).length,
@@ -108,7 +108,7 @@ test("Crash-before-RUNNING：APPROVED/LEASED 不进入 UNKNOWN_EFFECT，旧 leas
       assert.equal(r.unknownEffectCalls.length, 0);
       assert.equal(b.sideEffectStore.callById(a.callId).status, "LEASED");
       assert.equal(b.sideEffectStore.leasesOfCall(a.callId).filter((l) => l.status === "ACTIVE").length, 0);
-      const re = b.authority.acquireLease({ context: {}, callId: a.callId, holderId: "exec_B", instanceId: "instB", ttlMs: 60000 });
+      const re = b.authority.acquireLease({ context: {}, callId: a.callId, holderId: "exec_B", _testInstanceId: "instB", ttlMs: 60000 });
       assert.equal(re.ok, true, JSON.stringify(re));
       assert.equal(re.lease.holderInstanceId, "instB");
       assert.equal(b.toolStore.executionsOfTask(a.taskId).length, 0);

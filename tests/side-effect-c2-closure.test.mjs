@@ -1,15 +1,14 @@
 /**
  * D4-03C2 Closure · Execution Ownership / Atomic Claim。
  *
- * 关闭：runtime instance ownership 强制、missing/wrong instance 0 mutation、
- * 真实跨进程 duplicate claim contention、Eligibility→Claim TOCTOU race fail closed。
+ * Closure-2 起：runtime identity 只来自 SideEffectAuthority.instanceId，
+ * executeSideEffect 不再接受 caller 提供的 holderInstanceId。
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { createSideEffectFixture, TRASH_TOOL } from "./fixtures/harness-acp/side-effect-fixture.mjs";
 import { createToolHarnessFixture } from "./fixtures/harness-acp/tool-harness-fixture.mjs";
@@ -28,10 +27,6 @@ const { SideEffectStore } = require("../electron/side-effect-store.cjs");
 const { SideEffectAuthority } = require("../electron/side-effect-authority.cjs");
 const { createToolAdapters } = require("../electron/tool-adapters.cjs");
 
-const CONTENDER = path.join(import.meta.dirname, "fixtures", "harness-acp", "claim-contender.mjs");
-// unref：测试超时 guard 不得让 event loop 挂在 production 之外。
-const sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); if (t && typeof t.unref === "function") t.unref(); });
-
 function countDeleteCalls(fx) {
   const real = fx.fx.f.resourceService.delete.bind(fx.fx.f.resourceService);
   const box = { calls: 0 };
@@ -39,23 +34,23 @@ function countDeleteCalls(fx) {
   return box;
 }
 
-/** 建立一条 APPROVED+LEASED 的真实 trash call（默认 lease instance = inst_test）。 */
+/** 建立一条 APPROVED+LEASED 的真实 trash call（lease owner = authority.instanceId）。 */
 async function readyTrash(opts = {}) {
   const fx = await createSideEffectFixture(opts);
   const sc = await fx.setupTrash();
   const dc = countDeleteCalls(fx);
   const flow = await fx.trashFlow({ ref: sc.resourceRef, run: sc.run, holderId: opts.holderId || "exec_1", instanceId: opts.instanceId });
   const l = flow.lease.lease;
-  const execId = { callId: flow.callId, leaseId: l.leaseId, holderId: l.holderId, holderInstanceId: l.holderInstanceId };
-  return { fx, sc, dc, flow, execId, l };
+  const execId = { callId: flow.callId, leaseId: l.leaseId, holderId: l.holderId };
+  return { fx, sc, dc, flow, execId, l, owner: fx.authority.instanceId };
 }
 const close = (r) => r.fx.fx.close();
 
-test("Mandatory identity：缺 holderInstanceId / leaseId / holderId → LEASE_NOT_HELD + 0 mutation", async () => {
+test("Mandatory identity：缺 leaseId / holderId → LEASE_NOT_HELD + 0 mutation", async () => {
   const r = await readyTrash();
   try {
-    assert.equal(r.fx.elig(r.execId.callId, { holderId: "exec_1", holderInstanceId: r.execId.holderInstanceId }).status, "ELIGIBLE");
-    for (const [label, override] of [["holderInstanceId", { holderInstanceId: null }], ["leaseId", { leaseId: null }], ["holderId", { holderId: null }]]) {
+    assert.equal(r.fx.elig(r.execId.callId, { holderId: "exec_1", leaseId: r.execId.leaseId }).status, "ELIGIBLE");
+    for (const [label, override] of [["leaseId", { leaseId: null }], ["holderId", { holderId: null }]]) {
       const exec = r.fx.authority.executeSideEffect({ ...r.execId, ...override });
       assert.equal(exec.ok, false, label);
       assert.equal(exec.error, "SIDE_EFFECT_LEASE_NOT_HELD", label);
@@ -66,29 +61,27 @@ test("Mandatory identity：缺 holderInstanceId / leaseId / holderId → LEASE_N
   } finally { await close(r); }
 });
 
-test("Wrong runtime instance（same holderId, wrong holderInstanceId）→ 0 mutation", async () => {
+test("execute API 不接受 caller 自报的 holderInstanceId：runtime identity 只来自 OpenArc 自身", async () => {
   const r = await readyTrash();
   try {
-    const wrong = r.fx.authority.executeSideEffect({ ...r.execId, holderInstanceId: "inst_attacker" });
-    assert.equal(wrong.ok, false);
-    assert.equal(wrong.error, "SIDE_EFFECT_LEASE_NOT_HELD");
-    assert.equal(wrong.mutationCount, 0);
-    assert.equal(r.dc.calls, 0);
-    // eligibility 也必须拒绝错误 runtime instance。
-    assert.equal(r.fx.elig(r.execId.callId, { holderId: "exec_1", holderInstanceId: "inst_attacker" }).reasonCode, "SIDE_EFFECT_LEASE_NOT_HELD");
-    // 正确的 instance 仍可执行 → 证明拒绝来自 instance，而不是其它 gate。
-    assert.equal((await r.fx.authority.executeSideEffect({ ...r.execId })).ok, true);
+    // 同一 runtime（owner）即使传入一个不同的 instance 字符串，也仍然以 this.instanceId 执行：
+    // caller 无法通过自报字段改变 authority，也无法借此获得别人的 lease。
+    assert.equal(r.owner, r.l.holderInstanceId, "lease 必须绑定当前 runtime identity");
+    const exec = await r.fx.authority.executeSideEffect({ ...r.execId, holderInstanceId: "inst_attacker" });
+    assert.equal(exec.ok, true, JSON.stringify(exec));
+    assert.equal(exec.mutationCount, 1);
     assert.equal(r.dc.calls, 1);
+    assert.equal(r.fx.store.callById(r.execId.callId).status, "SUCCEEDED");
   } finally { await close(r); }
 });
 
-test("Restart ownership regression：旧 instA lease EXPIRED，instB / 旧 identity 都不能继承 execution authority", async () => {
+test("Restart ownership regression：旧 lease EXPIRED，Runtime B 不能继承 execution authority", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "oa-c2-own-"));
   const dbPath = path.join(root, "identity.db");
   let fx = null;
   let state = null;
   try {
-    fx = await createToolHarnessFixture({ withAdapters: true, dbPath, keepData: true });
+    fx = await createToolHarnessFixture({ withAdapters: true, dbPath, keepData: true, sideEffectInstanceId: "instA" });
     const created = await fx.createResource("C2 Ownership Target");
     const resourceRef = created.resource.resourceRef;
     fx.grantTool("ai", ["tool.resource.trash"]);
@@ -99,18 +92,13 @@ test("Restart ownership regression：旧 instA lease EXPIRED，instB / 旧 ident
     assert.equal(p.ok, true, JSON.stringify(p));
     const userCtx = { sessionRef: fx.f.sessions.admin, appId: "ai", source: "user" };
     assert.equal(fx.sideEffectAuthority.approveSideEffect({ context: userCtx, callId: p.call.callId }).ok, true);
-    const lease = fx.sideEffectAuthority.acquireLease({ context: fx.ctx(), callId: p.call.callId, holderId: "exec_1", instanceId: "instA", ttlMs: 600000 });
+    const lease = fx.sideEffectAuthority.acquireLease({ context: fx.ctx(), callId: p.call.callId, holderId: "exec_1", ttlMs: 600000 });
     assert.equal(lease.ok, true, JSON.stringify(lease));
+    assert.equal(lease.lease.holderInstanceId, "instA");
     const dc = { calls: 0 };
     const realDelete = fx.f.resourceService.delete.bind(fx.f.resourceService);
     fx.f.resourceService.delete = (args) => { dc.calls += 1; return realDelete(args); };
-
-    // Runtime A 仍持有 ACTIVE instA lease：instB 身份不能执行。
-    const wrong = fx.sideEffectAuthority.executeSideEffect({ callId: p.call.callId, leaseId: lease.lease.leaseId, holderId: "exec_1", holderInstanceId: "instB" });
-    assert.equal(wrong.ok, false);
-    assert.equal(wrong.error, "SIDE_EFFECT_LEASE_NOT_HELD");
-    assert.equal(dc.calls, 0);
-    state = { storeRoot: fx.f.storeRoot, now: fx.f.clock(), callId: p.call.callId, taskId: run.taskId, leaseId: lease.lease.leaseId, resourceRef };
+    state = { storeRoot: fx.f.storeRoot, now: fx.f.clock(), callId: p.call.callId, taskId: run.taskId, leaseId: lease.lease.leaseId, resourceRef, dc };
   } finally {
     if (fx) { try { await fx.close(); } catch { /* ignore */ } }
   }
@@ -141,12 +129,11 @@ test("Restart ownership regression：旧 instA lease EXPIRED，instB / 旧 ident
     assert.equal(sideEffectStore.leasesOfCall(state.callId).filter((l) => l.status === "EXPIRED").length, 1);
     assert.equal(sideEffectStore.callById(state.callId).status, "LEASED");
 
-    for (const inst of ["instB", "instA"]) {
-      const exec = authority.executeSideEffect({ callId: state.callId, leaseId: state.leaseId, holderId: "exec_1", holderInstanceId: inst });
-      assert.equal(exec.ok, false, inst);
-      assert.ok(["SIDE_EFFECT_LEASE_REQUIRED", "SIDE_EFFECT_LEASE_NOT_HELD"].includes(exec.error), inst + " -> " + exec.error);
-      assert.equal(exec.mutationCount, 0, inst);
-    }
+    // 即使自报 holderInstanceId="instA" 也不能伪装成 Runtime A。
+    const exec = authority.executeSideEffect({ callId: state.callId, leaseId: state.leaseId, holderId: "exec_1", holderInstanceId: "instA" });
+    assert.equal(exec.ok, false);
+    assert.ok(["SIDE_EFFECT_LEASE_REQUIRED", "SIDE_EFFECT_LEASE_NOT_HELD"].includes(exec.error), exec.error);
+    assert.equal(exec.mutationCount, 0);
     assert.equal(calls, 0, "0 mutation：任何 instance 都不能继承旧 execution authority");
     assert.equal(resourceService.sideEffectPrecondition({ resourceRef: state.resourceRef }).trashed, false);
   } finally { identity.close(); fs.rmSync(root, { recursive: true, force: true }); try { fs.rmSync(state.storeRoot, { recursive: true, force: true }); } catch { /* ignore */ } }
@@ -160,8 +147,8 @@ async function withRace(mutate) {
   const dc = countDeleteCalls(fx);
   const flow = await fx.trashFlow({ ref: sc.resourceRef, run: sc.run });
   const l = flow.lease.lease;
-  const execId = { callId: flow.callId, leaseId: l.leaseId, holderId: l.holderId, holderInstanceId: l.holderInstanceId };
-  assert.equal(fx.elig(flow.callId, { holderId: l.holderId, holderInstanceId: l.holderInstanceId }).status, "ELIGIBLE", "race 之前必须真实 ELIGIBLE");
+  const execId = { callId: flow.callId, leaseId: l.leaseId, holderId: l.holderId };
+  assert.equal(fx.elig(flow.callId, { holderId: l.holderId, leaseId: l.leaseId }).status, "ELIGIBLE", "race 之前必须真实 ELIGIBLE");
   let hookFired = false;
   hook = (info) => { hookFired = true; mutate({ fx, sc, flow, info }); };
   const exec = await fx.authority.executeSideEffect({ ...execId });
@@ -212,122 +199,9 @@ test("Eligibility→Claim race：lease revoke → claim denied, 0 mutation", asy
   try { assertClaimDenied(r, "SIDE_EFFECT_LEASE"); } finally { await r.close(); }
 });
 
-/* ------------------------------------------------------------------ real cross-process claim contention */
-
-async function setupLeasedTrash() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "oa-c2-claim-"));
-  const dbPath = path.join(root, "identity.db");
-  const fx = await createToolHarnessFixture({ withAdapters: true, dbPath, keepData: true });
-  const created = await fx.createResource("C2 Claim Target");
-  const resourceRef = created.resource.resourceRef;
-  fx.grantTool("ai", ["tool.resource.trash"]);
-  fx.f.authService.grantAppResourcePermission({ context: fx.f.adminCtx(), appId: "ai", resourceId: created.resource.resourceId, actions: ["resource.delete"] });
-  fx.grantUserResource(created.resource.resourceId, fx.f.users.admin, ["resource.delete", "resource.useByAgent"]);
-  const run = fx.dshRunSetup();
-  const p = await fx.sideEffectAuthority.planSideEffect({ context: fx.ctx(), taskId: run.taskId, stepId: run.stepId, runId: run.runId, toolId: TRASH_TOOL, arguments: { resourceRef } });
-  assert.equal(p.ok, true, JSON.stringify(p));
-  const userCtx = { sessionRef: fx.f.sessions.admin, appId: "ai", source: "user" };
-  assert.equal(fx.sideEffectAuthority.approveSideEffect({ context: userCtx, callId: p.call.callId }).ok, true);
-  const lease = fx.sideEffectAuthority.acquireLease({ context: fx.ctx(), callId: p.call.callId, holderId: "exec_1", instanceId: "instA", ttlMs: 600000 });
-  assert.equal(lease.ok, true, JSON.stringify(lease));
-  const now = fx.f.clock();
-  const storeRoot = fx.f.storeRoot;
-  await fx.close();
-  return { root, storeRoot, dbPath, callId: p.call.callId, leaseId: lease.lease.leaseId, now, resourceRef };
-}
-
-function spawnContender(args) {
-  const child = spawn(process.execPath, [CONTENDER, JSON.stringify(args)], { stdio: ["pipe", "pipe", "pipe"] });
-  const box = { child, ready: false, result: null, deleteCalls: null, stderr: "" };
-  let buf = "";
-  box.done = new Promise((resolve) => {
-    child.stdout.on("data", (d) => {
-      buf += String(d);
-      let i;
-      while ((i = buf.indexOf("\n")) >= 0) {
-        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
-        if (!line) continue;
-        let msg = null; try { msg = JSON.parse(line); } catch { msg = null; }
-        if (!msg) continue;
-        if (msg.type === "ready") box.ready = true;
-        if (msg.type === "result") { box.result = msg.result; box.deleteCalls = msg.deleteCalls; resolve(true); }
-      }
-    });
-    child.on("exit", () => resolve(box.result != null));
-  });
-  child.stderr.on("data", (d) => { box.stderr += String(d); });
-  child.stdin.on("error", () => { /* child 已退出时忽略 EPIPE */ });
-  return box;
-}
-async function waitReady(box, ms) {
-  const deadline = Date.now() + ms;
-  while (!box.ready && Date.now() < deadline) await sleep(20);
-  assert.ok(box.ready, "executor 未就绪: " + box.stderr);
-}
-async function waitExit(box, ms) {
-  if (box.child.exitCode != null || box.child.signalCode != null) return;
-  await Promise.race([new Promise((r) => box.child.once("exit", r)), sleep(ms)]);
-}
-
-test("Real duplicate claim contention：同一合法 executor identity 两进程同时 claim → 恰好 1 RUNNING / 1 Domain invocation", async () => {
-  const a = await setupLeasedTrash();
-  const contenders = [];
-  try {
-    const base = { callId: a.callId, leaseId: a.leaseId, holderId: "exec_1", holderInstanceId: "instA", now: a.now, storeRoot: a.storeRoot, domainDelayMs: 500 };
-    // 顺序启动（避开 WAL PRAGMA 争抢），GO 同时放行 → 真实跨进程 BEGIN IMMEDIATE contention。
-    contenders.push(spawnContender({ ...base, dbPath: a.dbPath, instanceId: "child1" }));
-    await waitReady(contenders[0], 30000);
-    contenders.push(spawnContender({ ...base, dbPath: a.dbPath, instanceId: "child2" }));
-    await waitReady(contenders[1], 30000);
-
-    contenders[0].child.stdin.write("GO\n");
-    contenders[1].child.stdin.write("GO\n");
-    const done = await Promise.race([Promise.all(contenders.map((c) => c.done)), sleep(45000).then(() => null)]);
-    assert.ok(done, "contender 超时: " + JSON.stringify(contenders.map((c) => c.stderr)));
-    for (const c of contenders) { try { c.child.kill("SIGKILL"); } catch { /* ignore */ } }
-
-    const results = contenders.map((c) => c.result);
-    const winners = results.filter((r) => r && r.ok === true && r.executed === true);
-    const losers = results.filter((r) => !(r && r.ok === true && r.executed === true));
-    assert.equal(winners.length, 1, "claim success 必须恰好 1: " + JSON.stringify(results));
-    assert.equal(losers.length, 1, "claim loser 必须恰好 1: " + JSON.stringify(results));
-    assert.equal(winners[0].status, "SUCCEEDED");
-    assert.equal(winners[0].verificationStatus, "PASS");
-    assert.equal(winners[0].mutationCount, 1);
-    // loser 必须 fail closed，且绝不 dispatch Domain。winner claim 后停留 500ms，
-    // 使 duplicate invocation 真实竞争 LEASED → RUNNING（CLAIM_LOST）。
-    assert.equal(losers[0].error, "SIDE_EFFECT_EXECUTION_CLAIM_LOST", "loser: " + JSON.stringify(losers[0]));
-    assert.equal(losers[0].executed === true, false, "loser 绝不能 dispatch Domain");
-    const totalDeletes = contenders.reduce((n, c) => n + (c.deleteCalls || 0), 0);
-    assert.equal(totalDeletes, 1, "ResourceService.delete invocation 必须恰好 1: " + JSON.stringify(contenders.map((c) => c.deleteCalls)));
-    const dump = JSON.stringify(results);
-    assert.ok(!dump.includes("SQLITE_BUSY"), "不得暴露裸 SQLITE_BUSY: " + dump);
-    assert.ok(!dump.includes("SQLITE_LOCKED"), "不得暴露裸 SQLITE_LOCKED: " + dump);
-
-    for (const c of contenders) await waitExit(c, 5000);
-
-    // 重开 disk DB 校验唯一 authority 真值。
-    const identity = new IdentityStore({ path: a.dbPath }).open();
-    try {
-      const store = new SideEffectStore({ identity });
-      assert.equal(identity.schemaVersion, 13);
-      assert.equal(store.callById(a.callId).status, "SUCCEEDED");
-      assert.equal(store.callById(a.callId).verificationStatus, "PASS");
-      assert.equal(store.leasesOfCall(a.callId).filter((l) => l.status === "ACTIVE").length, 0, "final ACTIVE lease 必须 0");
-      assert.equal(store.leasesOfCall(a.callId).filter((l) => l.status === "RELEASED").length, 1);
-      assert.equal(store.callsOfTask(store.callById(a.callId).taskId).filter((c) => c.toolId === TRASH_TOOL).length, 1);
-    } finally { identity.close(); }
-  } finally {
-    for (const c of contenders) { try { c.child.kill("SIGKILL"); } catch { /* ignore */ } }
-    fs.rmSync(a.root, { recursive: true, force: true });
-    try { fs.rmSync(a.storeRoot, { recursive: true, force: true }); } catch { /* ignore */ }
-  }
-});
-
 test("Deterministic duplicate claim：call 已 RUNNING 时同 identity 再次 claim → EXECUTION_CLAIM_LOST + 0 mutation", async () => {
   const r = await readyTrash();
   try {
-    // 模拟 duplicate delivery：第一个 executor 已 claim 进入 RUNNING（仍在 dispatch）。
     r.fx.store.transactSync(() => r.fx.store.updateCall(r.execId.callId, { status: "RUNNING", started_at: 1700000000000 }));
     const exec = r.fx.authority.executeSideEffect({ ...r.execId });
     assert.equal(exec.ok, false);

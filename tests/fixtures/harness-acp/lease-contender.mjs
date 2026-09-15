@@ -20,7 +20,8 @@ rl.on("line", (line) => {
   if (String(line).trim() !== "GO") return;
   let result;
   try {
-    result = authority.acquireLease({ context: {}, callId: args.callId, holderId: args.holderId, instanceId: args.instanceId, ttlMs: 60000 });
+    // runtime identity 来自 authority 自身（instanceId 构造参数）；production 不接受 caller 覆盖。
+    result = authority.acquireLease({ context: {}, callId: args.callId, holderId: args.holderId, ttlMs: 60000 });
   } catch (e) {
     result = { ok: false, error: "THREW", detail: String((e && (e.errstr || e.message)) || e) };
   }
