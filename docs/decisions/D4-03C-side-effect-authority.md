@@ -165,6 +165,115 @@ Audit：`side_effect.planned / approval_requested / approved / denied / approval
 6. UNKNOWN_EFFECT → VERIFY → BLOCK；禁止 retry。
 7. 人工 UI 与 Agent 复用同一侧 Domain 命令，不为 AI 建后门。
 
+## 下一步（D4-03C3 时点）
+
+`D4-03C3` 已建立真实 ambiguous-result / crash recovery / idempotency 收敛，并由 trusted Runtime Quiescence Authority 保证"不同 runtime instance 不等于已死证明"。
+
+## D4-03C4 · Production Side-effect Runtime / Trusted Approval / Official dsh WRITE
+
+C4 不发明新的 side-effect architecture，只把 C1 Authority + C2 Controlled Write + C3 Ambiguous Recovery
+收敛成一条**真实、不可绕过**的 production contract：
+
+\`\`\`
+official dsh → Harness Tool Proposal → OpenArc Tool Registry → Schema Validation
+→ Authorization → Risk Classification → SideEffectPlan → AWAITING_APPROVAL
+→ Trusted OpenArc User Approval → SideEffectLease → Execution Claim
+→ 受监督 Executor Runtime 执行 exactly once → Verification → Safe Tool Result → dsh 继续
+\`\`\`
+
+### 唯一 production 装配（§5）
+
+新增 \`electron/side-effect-runtime.cjs\`（\`SideEffectRuntime\`）+ \`electron/task-bootstrap.cjs\` 装配：
+ToolRegistry → ControlledToolProxy → SideEffectAuthority → RuntimeSupervisor → SideEffectRuntime。
+不新增第二套 Task / permission / approval / Resource ACL / execution state machine。
+
+### 谁真正拥有 resource.trash execution（§8）
+
+**受监督的 executor runtime 子进程**（\`electron/side-effect-executor.cjs\`）。
+主进程从不 in-process 执行 write：
+
+- \`acquireLease\` + \`executeSideEffect\`（claim \`LEASED → RUNNING\`）+ 真实 \`ResourceService.delete\` + 真实 Domain verification **全部发生在 executor runtime**；
+- 主进程只做：plan / approve / spawn / 读取收敛结果 / read-only recovery verification；
+- 因此 mutation **真实归属于该 executor 的 lifetime**。
+
+### Trusted Supervisor 与 liveness proof 模型（§6 / §7 / §31 / §32）
+
+\`electron/runtime-supervisor.cjs\`（\`RuntimeSupervisor\`）是**唯一**调用
+\`RuntimeLifecycleAuthority.registerRuntime / observeExit\` 的 production 代码：
+
+1. **同一 supervisor lifetime**：真实 \`child.on("exit")\` → 自动 \`observeExit\`（测试不得自行调用）；
+2. **cross-restart**：每个 executor runtime 在自己的整个生命周期内独占 bind
+   \`<runtimeDir>/executors/<instanceId>.sock\`；cold restart 后新 supervisor 用 **OS-backed
+   liveness probe** 重新判定（connect 成功 = 存活；ECONNREFUSED / ENOENT = 该 runtime 进程已不存在）。
+   **绝不使用内存中的旧 authority 自我证明。**
+
+精度纠正：\`RuntimeLifecycleAuthority.isQuiesced()\` 本身只返回 \`UNKNOWN→false / ACTIVE→false / EXITED→true\`；
+\`SELF_RUNTIME_ACTIVE\` 是 \`SideEffectAuthority.#quiescenceProof()\` 层的额外保护，不是 authority 自身语义。
+
+\`observeExit\` / \`registerRuntime\` 不导出给 Renderer / IPC / ACP / Harness / Tool Facade；
+\`SideEffectAuthority.lifecycle\` 只拿到 supervisor 的 \`{ isQuiesced }\` 面。
+
+### 两条写入路径显式分离（§11）
+
+\`buildBridgeManifest\` 给每个 toolId 标注唯一 route（由 Tool Registry 的 riskClass 推导）：
+
+- \`READ_ONLY\` → \`propose → reauthorize → executeReadOnly → verify\`；
+- \`SIDE_EFFECT_PROPOSAL\` → \`propose → decision → SideEffectPlan(AWAITING_APPROVAL)\`，
+  **立即返回 \`SIDE_EFFECT_APPROVAL_REQUIRED\`，0 mutation / 0 lease / 0 execution**。
+
+\`buildWriteToolManifest\` 只接受 \`riskClass === REVERSIBLE_WRITE\` 且
+\`executionPolicy === CONTROLLED_REVERSIBLE_WRITE\` 的 contract。WRITE 不经过 READ_ONLY execution route。
+
+### Trusted Approval Gateway（§13 / §43 / §44 / §45）
+
+\`electron/side-effect-bootstrap.cjs\`：唯一 \`sideeffect:command\` 通道。
+
+- Renderer 只能发送 \`{ type, approvalRequestId, decision }\`；
+- \`sessionRef\` 由 main process 从 IdentityService 当前 authenticated session 注入；
+- \`userId / role / appId / risk / planHash / argumentsHash / effectClass\` Renderer 自报一律忽略；
+- appId 由 SideEffectRuntime 从 call 绑定的真实 Task 反推；
+- 快照只含 safe 投影，且只在同一 session 时返回。
+
+### Approval UI（§14）
+
+\`src/approval/ApprovalPrompt.tsx\` + preload \`sideEffect\` 桥：显示 App/Agent、Tool、Risk、Target、
+Expected Effect、Precondition version，只提供 批准 / 拒绝。全部字段来自 Tool Registry + SideEffectPlan +
+Resource Domain，**绝不展示也不相信 Harness 文案**。
+
+### Harness 续接规则（§25 / §27 / §28）
+
+只有**未经 UNKNOWN_EFFECT** 的 direct verified success 才允许把 safe tool result 交回同一个 dsh session。
+一旦经过 UNKNOWN_EFFECT（含最终 APPLIED），\`executeApproved\` 返回 \`recovered=true\`，
+Orchestrator 必须 BLOCK Step/Task，绝不自动续接 Harness（Explicit Resume = DEFERRED）。
+
+### Harness 单次 propose（§12 / §19 / §35）
+
+Orchestrator 用 \`SideEffectRuntime.sideEffectCallsOfStep()\`（任何状态）判断"这一轮是否产生过 write proposal"，
+而不是只看 pending —— 否则 turn 期间已被 Deny / timeout / crash 收敛的 call 会被漏掉，
+导致 unverified 结果被当成功提交。同一 step + tool/version + argumentsHash 的重复送达
+收敛为同一条 SideEffectCall（\`side_effect.duplicate_delivery\`）。
+
+### Concurrent approval / executor（§36 / §37）
+
+- 同一绑定下重复 Approve 幂等（\`duplicate: true\`），只产生一个 authoritative approval transition；
+- 同一条 call 的第二个 executor 抢不到 execution authority（\`LEASE_CONFLICT\` / \`CALL_STATE\`），
+  且 **loser 绝不触碰 winner 的 lease**：只有本 runtime 自己 spawn 的 executor instance 才允许对
+  该 call 做 \`recoverAfterExecutorExit\` 收敛（\`SIDE_EFFECT_EXECUTION_CLAIM_LOST\`）。
+
+### 重启语义（§53 – §56）
+
+\`SideEffectRuntime.recoverOnStartup()\` = 既有 authority recovery + pending（\`AWAITING_APPROVAL / APPROVED / LEASED\`）
+在 Task 已非 RUNNING 时一律明确 \`BLOCKED\`（\`SIDE_EFFECT_APPROVAL_ABANDONED\`）。
+**绝不自动 approve / lease / execute / replay / 重启 dsh。**
+
+### 边界不变
+
+WRITE surface 仍只有 \`resource.trash\`；\`AUTO_RETRY = 0\`；IRREVERSIBLE_WRITE / EXTERNAL_SIDE_EFFECT /
+PRIVILEGED / Shell / Terminal / filesystem generic mutation / MCP / Browser automation / Device Agent /
+Canvas mutation / App Center mutation / Adobe control 全部 BLOCKED。
+
 ## 下一步
 
-`D4-03C3` 已建立真实 ambiguous-result / crash recovery / idempotency 收敛，并由 trusted Runtime Quiescence Authority 保证"不同 runtime instance 不等于已死证明"。**`D4-03C4` = 未开始**，由 ChatGPT 审计后决定，禁止自动进入。
+\`D4-03C4 = PASS candidate\`（DeepSeek 无权封板，由 ChatGPT 审计后决定 \`D4-03C = PASS\`）。
+**\`D4-03D\` = NOT STARTED**；禁止自动进入 D4-03D / D4-04 / D4-05 / D5 / D6。
+

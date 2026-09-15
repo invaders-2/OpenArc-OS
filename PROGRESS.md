@@ -739,10 +739,10 @@ D4-02B 遗留继续挂账：OS-level network isolation NOT VERIFIED；external w
 | **D4-03C2 Closure Execution Ownership / Atomic Claim** | **PASS candidate** | **runtime instance ownership 强制**：execution ownership = callId + leaseId + holderId + holderInstanceId，缺任一 → LEASE_NOT_HELD / 0 mutation（禁止 optional authority）；**claim 事务内重校验 authority snapshot（eligibility→claim TOCTOU fix）**：Task/Step/Run/session/app/tool permission/resource permission/useByAgent/approval/lease/precondition 全部重新读取，任一变化 fail closed；**真实跨进程 duplicate claim contention**（2 child、同一合法 executor identity、同一 disk-backed DB → 恰好 1 winner / 1 CLAIM_LOST / 1 Domain invocation / 1 RUNNING transition）；真实 persisted restart 下旧 instA ACTIVE lease → EXPIRED，instB / 旧 identity 均不能继承；0 raw SQLITE_BUSY；schema 保持 v13；test:d4-03c2-closure **38/38** |
 | **D4-03C2 Closure-2 Runtime Instance Authority / Exact Lease Binding** | **PASS candidate** | **runtime identity 是 OpenArc 自身事实**：production `executeSideEffect({callId, leaseId, holderId})` 不再接受 caller 的 `holderInstanceId`（传入也完全忽略），判断一律 `lease.holderInstanceId === this.instanceId`；`acquireLease` 绑定 `this.instanceId`（仅 `_testInstanceId` test-only seam）；**exact leaseId 是 claim authority**：eligibility 与 claim 事务内都重新校验 `leaseId + holderId + runtime instance + ACTIVE + expiry`；**lease replacement race**（同 holder/同 runtime，lease_A revoke + lease_B acquire → 旧 lease_A invocation DENY，fresh lease_B 才可执行）；**same-runtime duplicate delivery**（同 runtime 两次 invocation → 1 claim / 1 CLAIM_LOST / 1 Domain invocation）；**cross-process impersonation**（Runtime B 知道 instA 也 DENY / 0 mutation）；**claim-time approval exact binding**（planHash/argsHash/toolId/version/effectClass）；schema 保持 v13；test:d4-03c2-closure2 **45/45** |
 | **D4-03C2 Closure-3 Runtime Identity Final Seal** | **PASS candidate** | **runtime identity 零 caller override**：删除 `acquireLease._testInstanceId`，lease 永远 `holderInstanceId = this.instanceId`（异 runtime lease 必须 `new SideEffectAuthority({instanceId})` 创建）；`recoverOnStartup()` 不再接受 `instanceId`，只用 `this.instanceId`（自己的 lease 保留、其它 instance 一律 EXPIRED）；**同 holderId 不同 runtime acquire → `SIDE_EFFECT_LEASE_CONFLICT`**（不再误判 duplicate）；Authority `evaluateExecutionEligibility` 注入 `this.instanceId`，caller 只能提供 callId/leaseId/holderId；disk-backed restart impersonation（Runtime B 知道 instA 也无法保留旧 lease）；exact lease claim / lease replacement / same-runtime duplicate execution 无回归；schema 保持 v13；test:d4-03c2-closure3 **51/51** |
-| **D4-03 overall** | **PARTIAL** | A PASS；B PASS；C1 PASS；C2 PASS；C3 PASS candidate（含 Closure）；C4 未开始 |
+| **D4-03 overall** | **PASS candidate** | A PASS；B PASS；C1 PASS；C2 PASS；C3 PASS candidate（含 Closure）；C4 PASS candidate。DeepSeek 无权封板，由 ChatGPT 审计后决定 |
 | **D4-03C3 Ambiguous Result / Idempotency / Crash Recovery** | **PASS candidate** | **真实 production UNKNOWN_EFFECT verification path**（不再依赖 test-only verifier）：SideEffectCall → exact historical Tool Contract（toolId+toolVersion+effectClass）→ allowlisted adapter → **read-only** Domain verifier（mutation=0）；三态 **APPLIED / NOT_APPLIED / INDETERMINATE**；**APPLIED** → SUCCEEDED(PASS)，**NOT_APPLIED 且 executionQuiesced=true** → FAILED(FAIL)，其它保持 UNKNOWN_EFFECT；**Late Result Rule**：live timeout quiesced=false，即使 verifier 看到 NOT_APPLIED 也不得提前 FAILED；**cold restart**（旧 runtime 死 + 新 runtime + 旧 lease EXPIRED）才 quiesced=true；真实 crash matrix（claim 前 / mutation 后 / verification 后 / SUCCEEDED 后，disk-backed child process）、late applied result、INDETERMINATE、concurrent verification 单一收敛、historical contract、tool disabled / session revoked 仍可 verification、UNKNOWN_EFFECT 不能 reacquire/execute、Task/Step 恢复后保持 BLOCKED、AUTO_RETRY=0、idempotencyKey 跨 restart 不变；**schema v14**（non-authoritative recovery_safe，新增 migration + 整级回滚）；test:d4-03c3 **56/56** |
 | **D4-03C3 Closure Trusted Quiescence Authority** | **PASS candidate** | 永久规则 **different runtime instance != proof previous runtime is dead**；新增 trusted `RuntimeLifecycleAuthority`（supervisor-level 真实进程退出证明），`quiesced=true` 只能来自真实观测到的 runtime 退出；Lease EXPIRED/REVOKED/RELEASED 与 instanceId mismatch 单独**都不构成** quiescence；live UNKNOWN_EFFECT 持久化 `originRuntimeInstanceId/originLeaseId/source`；`recoverOnStartup()` reconcile 已持久化 `UNKNOWN_EFFECT(quiesced=false)`，仅在 trusted proof 成立时升级 `quiesced=true`（Call 仍 UNKNOWN_EFFECT，不推断 effect）；**two-live-runtime gate**（A live 时 B 不得声明 quiesced，早到 NOT_APPLIED 绝不 FAILED，A late mutation 后 APPLIED→SUCCEEDED）；timeout→真实进程死亡→NOT_APPLIED→FAILED；timeout→late applied→restart→APPLIED→SUCCEEDED；APPLIED 不依赖 quiescence；AUTO_RETRY=0；Task/Step 保持 BLOCKED；schema 保持 v14；test:d4-03c3-closure **63/63** |
-| **D4-03C4** | **未开始** | ChatGPT 审计后决定（禁止自动进入） |
+| **D4-03C4 Side-effect Final Gate（production runtime + trusted approval + official dsh WRITE）** | **PASS candidate** | 唯一 production 装配 `SideEffectRuntime`（ToolRegistry → ControlledToolProxy → SideEffectAuthority → RuntimeSupervisor → SideEffectRuntime，不建第二套 authority）；**真实 mutation 只发生在受监督 executor runtime 子进程**（acquireLease + claim + ResourceService.delete + Domain verify），主进程 0 in-process write；trusted `RuntimeSupervisor` 是唯一 `registerRuntime/observeExit` 调用方（真实 child 'exit' 自动 observation；cross-restart 用 OS-backed socket liveness probe，绝不用内存旧 authority 自我证明）；`observeExit/registerRuntime` 不导出给 Renderer/IPC/ACP/Harness/Facade；**READ_ONLY 与 SIDE_EFFECT_PROPOSAL 两条 route 显式分离**（WRITE 绝不经 READ_ONLY execution；bridge 只回 `SIDE_EFFECT_APPROVAL_REQUIRED`）；**Trusted Approval Gateway**（Renderer 只能发 `{approvalRequestId, decision}`；sessionRef/appId/risk/planHash 全部主进程推导）；**Approval UI = IMPLEMENTED / VERIFIED**（真实 Electron probe 22/22，无绝对路径/store root/secret 泄漏）；**official dsh WRITE E2E**（proposal → AWAITING_APPROVAL → trusted approve → 受监督 exactly-once → verified → dsh 继续 → Task SUCCEEDED）；Deny / timeout / cancel / session·app·permission·useByAgent revoke / precondition race / double approve / duplicate delivery / concurrent executor / approval revoke race / task cancel race 全部 0 mutation；UNKNOWN_EFFECT 绝不把 unverified 结果交给 Harness（Task/Step BLOCKED）；**经 UNKNOWN_EFFECT 的 APPLIED 也不得自动续接 Harness**；restart 不给 pending WRITE 任何自动执行权；No Direct Domain Bypass 静态审计 PASS；schema 保持 v14；AUTO_RETRY=0；test:d4-03c4 **35/35** + UI **22/22** |
 
 ## 2. 关键证据（真实执行）
 
@@ -756,7 +756,8 @@ D4-02B 遗留继续挂账：OS-level network isolation NOT VERIFIED；external w
 | test:d4-02b | **16 / 16 PASS** |
 | test:d4-02a | **22 / 22 PASS** |
 | test:d4-01 | **59 / 59 PASS** |
-| npm test | **PASS（0 failed）** |
+| test:d4-03c4 | **35 / 35 PASS**（+ Approval UI probe **22 / 22**） |
+| npm test | **835 / 835 PASS** |
 | npm run build | PASS |
 | test:security | FAIL 0 / PARTIAL 2 / PASS 6 |
 | security-surface（A13） | **15 / 15 PASS**（未新增 Renderer IPC） |
@@ -764,6 +765,10 @@ D4-02B 遗留继续挂账：OS-level network isolation NOT VERIFIED；external w
 | official dsh 工具暴露 | **VERIFIED**：managed openarc-acp profile 加载 OpenArc plugin，注册 exactly 2 tool（resource_search / resource_read_metadata）|
 | official dsh 真实 tool_call 执行 E2E | **PASS**：3 model calls / 2 tool calls / 2 executions / Artifact + Verification PASS + Task SUCCEEDED；official dsh hidden search 0 leak；official dsh useByAgent DENY |
 | Tool Facade 安全边界 | session/app/permission revoke / resource delete / cancel / crash / timeout / duplicate / contract stale / 跨域 / maxCalls / expiry 全部 DENY 正确 |
+| production side-effect runtime | executor runtime **只由 RuntimeSupervisor 拥有**；主进程 0 in-process write；bridge WRITE route 0 execution row / 0 mutation |
+| official dsh WRITE waiting/approval E2E | **VERIFIED**：proposal → AWAITING_APPROVAL（0 mutation/lease/execution）→ trusted approve → 受监督 exactly-once → verified → dsh 继续 → Task SUCCEEDED；3 model requests / 1 write tool call / 1 lease / 0 hidden retry |
+| Approval UI | **IMPLEMENTED / VERIFIED**：真实 Electron probe 22/22；显示 Registry/Domain 推导字段；0 绝对路径 / store root / capability 泄漏；批准 / 拒绝都经 IPC 且不注入 actor |
+| No Direct Domain Bypass | 静态审计 PASS：resourceService.delete 唯一调用点在 allowlisted adapter + 受控执行路径；Bridge / Runtime / Supervisor / Preload / ACP plugin / Approval UI 均不持有 Domain write |
 
 分支 feature/d4-03-tool-proxy，基线 feature/d4-02-task-harness @ 5d37d64，未 merge main。
 ADR：docs/decisions/D4-03-controlled-tool-proxy.md / docs/decisions/D4-03B-readonly-execution.md；报告：docs/D4-03B-CLOSURE-RESULT.md。
@@ -784,14 +789,22 @@ ADR：docs/decisions/D4-03-controlled-tool-proxy.md / docs/decisions/D4-03B-read
 12. 同一 proposal 0 二次执行；AUTO_RETRY=0；timeout/失败 0 retry。
 13. READ_ONLY 执行期间 Task/Step 保持 RUNNING；Tool result 才交回 Harness，Harness 不能伪造。
 14. 人工 UI 与 Agent 复用同一 Domain。
+15. 真实 mutation 只发生在**受监督 executor runtime 子进程**内；主进程绝不 in-process 执行 write。
+16. `RuntimeSupervisor` 是唯一 `registerRuntime/observeExit` 调用方；quiescence 只能来自真实进程退出或 OS-backed socket 消失，绝不来自 instanceId 差异 / lease 状态 / 时间流逝。
+17. READ_ONLY 与 SIDE_EFFECT_PROPOSAL 是两条不合并权限语义的 route；WRITE 绝不经 READ_ONLY execution。
+18. Approval 只来自 trusted OpenArc user action（main process 注入的 authenticated session）；Renderer 只能提交 `{approvalRequestId, decision}`。
+19. 只有未经 UNKNOWN_EFFECT 的 direct verified success 才允许回到 Harness；经 UNKNOWN_EFFECT（含 APPLIED）一律 BLOCK，Explicit Resume = DEFERRED。
 
 ## 4. 主要缺口
 
-OS-level network isolation NOT VERIFIED；external workspace read audit NOT VERIFIED；independent malformed ACP injection NOT VERIFIED；Windows NOT VERIFIED；External Provider NOT VERIFIED；Explicit Resume = DEFERRED；official dsh 工具暴露 = VERIFIED；official dsh 真实 tool_call 执行 E2E = PASS；**Final Approval UI = NOT IMPLEMENTED**（D4-03C1 只有 Domain）；**official dsh 发起 test.write → WAITING 的 official-dsh 变体 NOT VERIFIED**（C1 facade manifest 仅 READ_ONLY）。上述项不因 D4-03C1 关闭。
+OS-level network isolation NOT VERIFIED；external workspace read audit NOT VERIFIED；independent malformed ACP injection NOT VERIFIED；Windows NOT VERIFIED；External Provider NOT VERIFIED；Explicit Resume = DEFERRED；broader Domain verifiers NOT VERIFIED。
+**已由 D4-03C4 关闭**：Final Approval UI = IMPLEMENTED / VERIFIED（真实 Electron probe）；official dsh WRITE waiting/approval E2E = VERIFIED。
+其余项**不因 D4-03C4 关闭**。
 
 ## 5. D4-03C 准入
 
-D4-03C1 = **PASS**；**D4-03C2 = PASS**；**D4-03C3 = PASS candidate**、**D4-03C3 Closure = PASS candidate**（真实 ambiguous-result / crash recovery / idempotency + trusted Runtime Quiescence Authority；schema v14）；**D4-03C overall = PARTIAL**。**D4-03C4 = 未开始**，由 ChatGPT 审计后决定，禁止自动进入。C2 只开放 resource.trash 一条 REVERSIBLE_WRITE：IRREVERSIBLE_WRITE / EXTERNAL_SIDE_EFFECT / PRIVILEGED / Shell / Terminal / filesystem generic mutation / MCP / Browser automation / Device Agent mutation / Canvas mutation / App Center mutation / Adobe control 仍全部 BLOCKED；Final Approval UI 仍 NOT IMPLEMENTED。
+D4-03C1 = **PASS**；**D4-03C2 = PASS**；**D4-03C3 = PASS candidate**、**D4-03C3 Closure = PASS candidate**；**D4-03C4 = PASS candidate**、**D4-03C overall = PASS candidate**；**D4-03D = NOT STARTED**，由 ChatGPT 审计后决定，禁止自动进入。
+C2/C4 只开放 resource.trash 一条 REVERSIBLE_WRITE：IRREVERSIBLE_WRITE / EXTERNAL_SIDE_EFFECT / PRIVILEGED / Shell / Terminal / filesystem generic mutation / MCP / Browser automation / Device Agent mutation / Canvas mutation / App Center mutation / Adobe control 仍全部 BLOCKED；AUTO_RETRY = 0；Explicit Resume = DEFERRED。Final Approval UI = IMPLEMENTED / VERIFIED。
 
 ---
 
