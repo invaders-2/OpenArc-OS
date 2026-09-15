@@ -204,7 +204,8 @@ ToolRegistry → ControlledToolProxy → SideEffectAuthority → RuntimeSupervis
 1. **同一 supervisor lifetime**：真实 \`child.on("exit")\` → 自动 \`observeExit\`（测试不得自行调用）；
 2. **cross-restart**：每个 executor runtime 在自己的整个生命周期内独占 bind
    \`<runtimeDir>/executors/<instanceId>.sock\`；cold restart 后新 supervisor 用 **OS-backed
-   liveness probe** 重新判定（connect 成功 = 存活；ECONNREFUSED / ENOENT = 该 runtime 进程已不存在）。
+   liveness probe** 重新判定（tri-state ALIVE / DEFINITELY_GONE / UNKNOWN，见下方
+   "Tri-state liveness probe（D4-03C4 Closure · 永久）"）。
    **绝不使用内存中的旧 authority 自我证明。**
 
 精度纠正：\`RuntimeLifecycleAuthority.isQuiesced()\` 本身只返回 \`UNKNOWN→false / ACTIVE→false / EXITED→true\`；
@@ -212,6 +213,44 @@ ToolRegistry → ControlledToolProxy → SideEffectAuthority → RuntimeSupervis
 
 \`observeExit\` / \`registerRuntime\` 不导出给 Renderer / IPC / ACP / Harness / Tool Facade；
 \`SideEffectAuthority.lifecycle\` 只拿到 supervisor 的 \`{ isQuiesced }\` 面。
+
+### Tri-state liveness probe（D4-03C4 Closure · 永久）
+
+**Probe failure is not death proof.**
+
+Socket liveness probe 永远是三态，禁止退化成 boolean：
+
+| probe 结果 | 分类 | 后果 |
+|---|---|---|
+| connect() 成功 | ALIVE | runtime ACTIVE；绝不 quiesced |
+| ENOENT | DEFINITELY_GONE | **唯一**允许 observeExit() / trusted quiescence 的结果 |
+| timeout | UNKNOWN | 不 observeExit；quiesced=false |
+| EACCES / EMFILE / ENFILE / ENOBUFS / ENOMEM | UNKNOWN | 不 observeExit；quiesced=false |
+| ECONNREFUSED | UNKNOWN | 不 observeExit；quiesced=false |
+| 任意其它 errno / 无 code | UNKNOWN | 不 observeExit；quiesced=false |
+| probe 自身抛异常 / 返回不可信形态（含旧 boolean） | UNKNOWN | 不 observeExit；quiesced=false |
+
+为什么 ECONNREFUSED 不是 DEFINITELY_GONE：在 Unix domain socket 上无法跨平台证明它不是
+timeout / backlog / 权限 / 资源耗尽的别名，因此按"安全优先、不追求自动 recovery 成功率"
+一律 fail closed。白名单 DEFINITELY_GONE_ERRNOS 当前只含 ENOENT，匹配必须显式，默认分支必须是 UNKNOWN。
+
+后果（有意接受）：被 SIGKILL 的 executor 会留下 stale socket 文件 → 新 runtime 的 probe 为 UNKNOWN →
+该 UNKNOWN_EFFECT 不会被判成 FAILED，而是保持 UNKNOWN_EFFECT + Task/Step BLOCKED；只有 APPLIED
+（authoritative read-only Domain verifier 可靠观察到 desired effect）才允许
+UNKNOWN_EFFECT → SUCCEEDED，且该路径不依赖 quiescence。
+
+rehydrate() 的 tri-state 契约：
+
+    ALIVE           → register ACTIVE；alive++
+    DEFINITELY_GONE → register ACTIVE；trusted observeExit；dead++
+    UNKNOWN         → register ACTIVE；no observeExit；unknown++（persisted record 保持 ACTIVE）
+
+UNKNOWN 必须单独计数，不得归入 dead；persisted executor record 不得被改写成 EXITED /
+OS_EXECUTOR_ENDPOINT_ABSENT。UNKNOWN liveness 只记录 safe 事件
+（runtime_liveness_unknown + instanceId + 归一化 reason），绝不记录绝对路径。
+
+静态 + 动态 Gate：timeout callback 与任意 socket.on("error") 都不得调用 observeExit /
+#observeExit（tests/side-effect-c4-closure.test.mjs 的 Static Gate 解析源码断言）。
 
 ### 两条写入路径显式分离（§11）
 
