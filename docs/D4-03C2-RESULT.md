@@ -107,7 +107,7 @@ dispatch 后调用真实 Domain verifier（重新读取 Resource Domain，`trash
 | `npm run test:d4-03a` | 32 / 32 PASS |
 | `npm run test:d4-02a / b / c` | 22 / 16 / 22 PASS |
 | `npm run test:d4-01` | 59 / 59 PASS |
-| `npm test` | **768 / 768 PASS** |
+| `npm test` | **774 / 774 PASS** |
 | `npm run build` | PASS |
 | `npm run test:security` | FAIL 0 / PARTIAL 2 / PASS 6（无新增 FAIL / PARTIAL） |
 

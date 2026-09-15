@@ -1,6 +1,6 @@
 # D4-03C1 · Side-effect Authority / Approval / Lease Contract（macOS）
 
-- **状态**：**D4-03C1 = PASS candidate**；**D4-03C2 = PASS candidate**、**D4-03C2 Closure = PASS candidate**、**D4-03C2 Closure-2 = PASS candidate**（1 条受控真实 REVERSIBLE_WRITE + runtime-owned instance identity + exact leaseId claim authority + 真实 claim contention/TOCTOU fail closed，待 ChatGPT 审计）；**D4-03C overall = PARTIAL**；**D4-03C3 = 未开始**
+- **状态**：**D4-03C1 = PASS candidate**；**D4-03C2 = PASS candidate**、**D4-03C2 Closure = PASS candidate**、**D4-03C2 Closure-2 = PASS candidate**、**D4-03C2 Closure-3 = PASS candidate**（1 条受控真实 REVERSIBLE_WRITE + runtime identity final seal：acquire/recovery 零 override + runtime-aware duplicate + exact leaseId claim，待 ChatGPT 审计）；**D4-03C overall = PARTIAL**；**D4-03C3 = 未开始**
 - **分支**：feature/d4-03-tool-proxy，基线 809e8fa，未 merge main
 - **日期**：2026-09-15
 
@@ -76,6 +76,15 @@ Approval/Lease 都持久化。`recoverOnStartup()` 是 fail-safe contract：**�
 - `acquireLease` 同样把 lease 绑定到 `this.instanceId`；只有明确的 test-only seam `_testInstanceId` 可覆盖（不得进入 production API）。
 - 缺少 callId / leaseId / holderId → `SIDE_EFFECT_LEASE_NOT_HELD` / 0 Domain invocation。
 - eligibility 的 lease snapshot 带 `lease_id + call_id + holder_id + holder_instance_id + expires_at`，同时校验 exact leaseId + holder + runtime instance。
+
+## Runtime identity surface（Closure-3 final seal）
+
+`Runtime Identity = SideEffectAuthority.instanceId` 覆盖 Lease acquire / Execution eligibility / Execution claim / Startup recovery / Lease recovery，**零 caller override**：
+
+- `acquireLease({ context, callId, holderId, ttlMs })`：不再有 `_testInstanceId`；lease 永远 `holderInstanceId = this.instanceId`。需要"别的 runtime 拥有 lease"时，测试必须 `new SideEffectAuthority({ instanceId })`（§5），不新增任何 `instanceIdOverride / runtimeIdOverride` 参数。
+- `acquireLease` duplicate 语义：`holderId === holderId **AND** holderInstanceId === this.instanceId` 才是 duplicate；**同 holderId 不同 runtime instance → `SIDE_EFFECT_LEASE_CONFLICT`**，绝不返回 duplicate。
+- `recoverOnStartup()`：不再接受 `instanceId` 参数，内部只用 `this.instanceId`。当前 runtime 自己的 ACTIVE lease 保留；其它 instance 的 lease 一律 `EXPIRED`（真实 restart 必然是新 runtime → 旧 lease 必 EXPIRED）。
+- Authority `evaluateExecutionEligibility({ callId, leaseId, holderId })`：runtime identity 由 Authority 注入（`this.instanceId`），普通 caller 不能自报当前 runtime；底层纯函数 `side-effect-domain.evaluateExecutionEligibility(snapshot)` 仍接收 `holder_instance_id`（纯 snapshot evaluator）。
 
 ## Execution claim（exactly once + TOCTOU-safe）
 
