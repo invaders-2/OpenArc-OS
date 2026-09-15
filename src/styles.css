@@ -224,6 +224,52 @@
   opacity: 0;
   pointer-events: none;
 }
+/* 用户口径：红灯默认最小化（只有系统设置真关闭），动效对齐 macOS ——
+   窗口被"吸"进它在程序坞上的图标。目标点由 components.tsx 在状态翻转那一帧
+   量出来写进 --min-tx / --min-ty。动画类加上后不清掉（换回另一个即可重放）：
+   清掉会立刻恢复 .window 的 appear 动画，恢复窗口时会闪一下。 */
+.window.min-out {
+  transform-origin: center;
+  /* 对齐 macOS 的"缩放效果"：**等比**缩到 Dock 图标，全程保持不透明，
+     只在最后一小段淡出。等比的缩放读起来是"窗口被收走"；
+     一旦压扁（scaleX ≠ scaleY）再配一条线性的路径，就会像一块被揉掉的纸。 */
+  animation: window-suck-out var(--dur-slow) cubic-bezier(0.4, 0, 0.25, 1) forwards;
+}
+.window.min-in {
+  transform-origin: center;
+  animation: window-suck-in var(--dur-slow) cubic-bezier(0.2, 0, 0.25, 1) forwards;
+}
+@keyframes window-suck-out {
+  0% {
+    transform: none;
+    opacity: 1;
+    visibility: visible;
+  }
+  72% {
+    /* 到 72% 仍然完全不透明：提前淡出会变成"溶解"，不像被收进 Dock */
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--min-tx, 0px), var(--min-ty, 0px)) scale(0.05);
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+@keyframes window-suck-in {
+  0% {
+    transform: translate(var(--min-tx, 0px), var(--min-ty, 0px)) scale(0.05);
+    opacity: 0;
+    visibility: visible;
+  }
+  28% {
+    opacity: 1;
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+    visibility: visible;
+  }
+}
 .window-title {
   height: 44px;
   flex-shrink: 0;
@@ -422,25 +468,41 @@ p {
 /* 底板单独一层：Apple Dock 放大时整块玻璃随图标向两侧撑开、位置跟着指针走，
    所以不能画在 .dock 自己身上（本体的盒子是静止的，自动隐藏的 transform 照旧）。
    --bg-left / --bg-width 由 useDockMagnify 逐帧写入；静止时回落到 0 / 100%。 */
-.dock::before {
-  content: "";
+/* 底板拆成两层（顺序即层级：阴影在下、玻璃在上）：
+   · .dock-shadow 只画投影，跟着底板撑开 —— 纯 transform，合成器就能干；
+   · .dock-glass 是**尺寸静止**的整块玻璃，每帧只改 clip-path 把它裁成底板那一段。
+
+   为什么玻璃不能跟着 scaleX：backdrop-filter 是在元素的**本地坐标**里对背景取样的，
+   transform 作用在结果上 —— 也就是 scaleX 会把"已经糊好的背景"一起横向拉伸，
+   指针一动背景就在玻璃后面滑。静止尺寸 + 裁切则完全不碰取样区域
+   （Chromium 也能复用那块栅格化结果：实测每帧一次 RendererRasterWorker 就是这么来的）。 */
+.dock-shadow,
+.dock-glass {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 0;
-  width: 100%;
-  /* D2-02 保留：Dock 的大圆角；最近刻度 16px 差 4px，属可见变化。
-     横向半径按 1/k 预补偿，scaleX 之后仍是正圆角。 */
-  border-radius: calc(20px / var(--bg-k, 1)) / 20px;
-  background: rgb(var(--bar-rgb) / var(--bar-alpha));
-  backdrop-filter: var(--glass-filter-dock);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.15);
-  /* 只走合成器：每帧不再改 width/left，避免主线程 layout 与背景重新栅格化 */
-  transform: translateX(var(--bg-tx, 0px)) scaleX(var(--bg-k, 1));
-  transform-origin: center;
-  will-change: transform;
   z-index: -1;
   pointer-events: none;
+}
+.dock-shadow {
+  left: 0;
+  width: 100%;
+  /* 圆角与缩放都按 1/k 预补偿（scaleX 之后仍是正圆角），值由 useDockMagnify 逐帧写 */
+  border-radius: 20px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.15);
+  transform-origin: center;
+  will-change: transform;
+}
+.dock-glass {
+  /* 与 useDockMagnify 里的 SLACK 必须一致：底板撑开时最大会越过本体多少 */
+  --dock-slack: 90px;
+  left: calc(-1 * var(--dock-slack));
+  right: calc(-1 * var(--dock-slack));
+  border-radius: 20px;
+  background: rgb(var(--bar-rgb) / var(--bar-alpha));
+  backdrop-filter: var(--glass-filter-dock);
+  /* 静止时正好露出 .dock 本体那一段 */
+  clip-path: inset(0 var(--dock-slack) 0 var(--dock-slack) round 20px);
 }
 /* 全屏时 Dock 自动隐藏：底部 8px 的 hover 带把它唤回来 */
 .dock.hidden {
@@ -483,8 +545,14 @@ p {
 .dock.magnifying .dock-icon,
 .dock.magnifying .dock-item,
 .dock.magnifying .dock-divider,
-.dock.magnifying::before {
+.dock.magnifying .dock-glass,
+.dock.magnifying .dock-shadow {
   transition: none;
+}
+/* 撑开期间提示只过渡 opacity：它的 transform 现在跟着 --s 逐帧变，
+   再叠一条 transform 过渡就会慢半拍地追。 */
+.dock.magnifying .dock-tooltip {
+  transition: opacity var(--quick) var(--ease);
 }
 .dock.magnifying .dock-item,
 .dock.magnifying .dock-divider {
@@ -498,8 +566,13 @@ p {
 .dock.settling .dock-icon {
   transition: transform var(--dur-standard) var(--ease-spring);
 }
-.dock.settling::before {
-  transition: transform var(--dur-standard) var(--ease-spring);
+.dock.settling .dock-shadow {
+  transition:
+    transform var(--dur-standard) var(--ease-spring),
+    border-radius var(--dur-standard) var(--ease-spring);
+}
+.dock.settling .dock-glass {
+  transition: clip-path var(--dur-standard) var(--ease-spring);
 }
 .dock-tooltip {
   position: absolute;
@@ -508,9 +581,17 @@ p {
    * `icon * (s - 1)`。提示若只按 .dock-item 的盒子定位，就会被放大的图标压住 ——
    * 用户实测："上面的应用名称都被挡住了"。所以要把这段位移补进来。
    */
-  bottom: calc(100% + 7px + (var(--s) - 1) * var(--dock-icon, 47px));
+  bottom: calc(100% + 7px);
   left: 50%;
-  transform: translateX(-50%) translateY(6px);
+  /**
+   * 悬停时图标以 bottom center 为原点放大约 --s 倍，顶端因此上移 icon * (s - 1)。
+   * 提示若只按 .dock-item 的盒子定位，就会被放大的图标压住（用户实测："上面的应用名称都被挡住了"）。
+   *
+   * 这段位移必须走 **transform**，不能走 bottom：bottom 是布局属性，每帧改它会让
+   * **所有**提示重新布局 + 重新栅格化 —— 而提示带 backdrop-filter，实测这一笔
+   * 占了整轮扫描 raster 的 43%、主线程帧时间的 22%。
+   */
+  transform: translateX(-50%) translateY(calc((1 - var(--s, 1)) * var(--dock-icon, 47px) + 6px));
   white-space: nowrap;
   /* macOS 口径：接近半高的圆角 + 底部一个小尾巴（见 ::after） */
   padding: 4px 10px;
@@ -550,7 +631,7 @@ p {
 .dock-item:hover .dock-tooltip,
 .dock-item:focus-visible .dock-tooltip {
   opacity: 1;
-  transform: translateX(-50%) translateY(0);
+  transform: translateX(-50%) translateY(calc((1 - var(--s, 1)) * var(--dock-icon, 47px)));
 }
 @keyframes dock-bounce {
   0% {
@@ -601,6 +682,37 @@ p {
   width: 1px;
   height: 100%;
   background: var(--line);
+}
+/* ── 整理态（长按 Dock 图标）─────────────────────────────────────────────
+   拖动项跟手（transform 由 useDockArrange 直接写），兄弟项 200ms 让位；
+   抖动挂在**独立的 rotate 属性**上，避免和 --s 的 scale 抢同一个 transform。 */
+.dock.arranging .dock-item {
+  cursor: grabbing;
+  transition: transform 200ms var(--ease-spring);
+}
+.dock.arranging .dock-icon {
+  transition: none;
+}
+.dock.arranging .dock-tooltip {
+  opacity: 0;
+}
+.dock-item[data-dragging="true"] {
+  z-index: 5;
+}
+.dock-item[data-dragging="true"] .dock-icon {
+  filter: drop-shadow(0 10px 16px rgba(0, 0, 0, 0.3));
+}
+@keyframes dock-jiggle {
+  0%,
+  100% {
+    rotate: -1.6deg;
+  }
+  50% {
+    rotate: 1.6deg;
+  }
+}
+.dock.arranging .dock-item[data-dock-id]:not([data-dragging="true"]) .dock-icon {
+  animation: dock-jiggle 340ms ease-in-out infinite;
 }
 .resize {
   position: absolute;
@@ -1263,12 +1375,6 @@ input[type="checkbox"] {
 .dark .desktop-folder:hover {
   background: rgba(255, 255, 255, 0.08);
 }
-.desktop-folder-icon {
-  width: 58px;
-  height: 46px;
-  object-fit: contain;
-  user-select: none;
-}
 .folder-name {
   font-size: 11px;
   max-width: 82px;
@@ -1292,6 +1398,26 @@ input[type="checkbox"] {
   position: absolute;
   inset: 0;
   z-index: 199;
+}
+/* 程序坞右键菜单：浮在图标上方的一个气泡（位置由 ContextMenu 按真实高度算），
+   带一个指向图标的小尾巴 —— 口径与 dock-tooltip 一致。 */
+.context-menu.dock-menu {
+  border-radius: 12px;
+  background: rgb(var(--surface-rgb) / 0.62);
+  backdrop-filter: var(--glass-filter-tip);
+  padding: 6px;
+}
+.context-menu.dock-menu::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border: 7px solid transparent;
+  border-bottom: 0;
+  border-top-color: rgb(var(--surface-rgb) / 0.62);
 }
 .context-menu {
   position: absolute;
@@ -1419,6 +1545,19 @@ input[type="checkbox"] {
   background: #f2f2f4;
 }
 /* 设置页：壁纸选择 */
+/* 壁纸行右上角的两颗胶囊 */
+.wallpaper-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* 「查看更多」的方向提示：展开时箭头翻过来 */
+.wallpaper-actions .control-button svg {
+  transition: transform var(--quick) var(--ease);
+}
+.wallpaper-actions .control-button[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
 .control-button {
   display: inline-flex;
   align-items: center;
@@ -1458,9 +1597,31 @@ input[type="checkbox"] {
 }
 .wallpaper-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
+  /* 一排 5 张；第 6 张起由「查看更多」就地展开 */
+  grid-template-columns: repeat(5, 1fr);
   gap: 10px;
   margin-top: 14px;
+}
+.wallpaper-more {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0 0 5px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity var(--quick) var(--ease);
+}
+.wallpaper-cell:hover .wallpaper-more,
+.wallpaper-more:focus-visible {
+  opacity: 1;
 }
 .wallpaper-option {
   position: relative;
@@ -1489,8 +1650,13 @@ input[type="checkbox"] {
 }
 .wallpaper-option > span {
   position: relative;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   text-shadow: 0 1px 8px rgba(0, 0, 0, 0.55);
 }
+
 /* 内置壁纸色板：就是主题基色（浅色 / 深色） */
 .wallpaper-option[data-wallpaper="theme-light"] {
   background: #f2f2f4;
@@ -1737,15 +1903,6 @@ input[type="checkbox"] {
   justify-content: flex-start;
   text-align: left;
   padding: 7px 10px;
-}
-.file-icon {
-  width: 46px;
-  height: 46px;
-  object-fit: contain;
-}
-.file-list .file-icon {
-  width: 22px;
-  height: 22px;
 }
 /* 文件条目的线性图标（图片/视频/音频/文档/压缩包/其它） */
 .file-glyph {
@@ -2060,4 +2217,92 @@ input[type="checkbox"] {
 }
 .lock-panel form {
   width: 100%;
+}
+
+/* ── 文件夹图标 ──────────────────────────────────────────────────────────────
+   移植 React Bits 的 Folder（reactbits.dev/components/folder）的**合上态**：
+   悬停时整体上浮、两片前板向外 skew 张开，里面的纸张探出一点。
+   几何照抄原组件（100×80 底板 + 三张纸 + 两片前板），整体用 --folder-w 缩放，
+   所以内部尺寸一律用 em（1em = 文件夹宽度）。 */
+.rb-folder {
+  --folder-w: 58px;
+  --folder-color: #278fff;
+  --folder-back: color-mix(in srgb, var(--folder-color) 92%, #000);
+  --paper-1: color-mix(in srgb, #fff 90%, #000);
+  --paper-2: color-mix(in srgb, #fff 95%, #000);
+  --paper-3: #fff;
+  position: relative;
+  display: block;
+  font-size: var(--folder-w);
+  width: 1em;
+  height: 0.8em;
+}
+.dark .rb-folder {
+  --folder-color: #3f96ff;
+}
+.rb-folder-inner {
+  position: absolute;
+  inset: 0;
+  background: var(--folder-back);
+  border-radius: 0 0.1em 0.1em 0.1em;
+  transition: transform 200ms ease-in;
+  cursor: pointer;
+}
+/* 左上那个小"舌头" */
+.rb-folder-tab {
+  position: absolute;
+  left: 0;
+  bottom: 97%;
+  width: 0.3em;
+  height: 0.1em;
+  background: var(--folder-back);
+  border-radius: 0.05em 0.05em 0 0;
+}
+/* 三张纸：合上时缩在前板后面，悬停时各往上探 10% */
+.rb-folder-paper {
+  position: absolute;
+  left: 50%;
+  bottom: 10%;
+  z-index: 20;
+  border-radius: 0.1em;
+  transform: translate(-50%, 10%);
+  transition: transform 300ms ease-in-out;
+}
+.rb-paper-1 {
+  width: 70%;
+  height: 80%;
+  background: var(--paper-1);
+}
+.rb-paper-2 {
+  width: 80%;
+  height: 70%;
+  background: var(--paper-2);
+}
+.rb-paper-3 {
+  width: 90%;
+  height: 60%;
+  background: var(--paper-3);
+}
+/* 两片前板：合上时叠在一起盖住纸张，悬停时向两侧 skew 张开成"开口" */
+.rb-folder-front {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  background: var(--folder-color);
+  border-radius: 0.05em 0.1em 0.1em 0.1em;
+  transform-origin: bottom;
+  transition: transform 300ms ease-in-out;
+}
+/* 悬停来源：桌面磁贴、访达里的条目、或文件夹自己 */
+:is(.desktop-folder, .file-cell, .rb-folder):hover .rb-folder-inner {
+  transform: translateY(-0.08em);
+}
+:is(.desktop-folder, .file-cell, .rb-folder):hover .rb-front-a {
+  transform: skew(15deg) scaleY(0.6);
+}
+:is(.desktop-folder, .file-cell, .rb-folder):hover .rb-front-b {
+  transform: skew(-15deg) scaleY(0.6);
+}
+:is(.desktop-folder, .file-cell, .rb-folder):hover .rb-folder-paper {
+  transform: translate(-50%, 0);
 }

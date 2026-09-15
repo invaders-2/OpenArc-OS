@@ -6,6 +6,7 @@ import {
   ArrowRight,
   ArrowUpDown,
   Bot,
+  ChevronDown,
   Clock,
   File as FileIcon,
   FileText,
@@ -42,6 +43,7 @@ import {
   AssistantPill,
   ContextMenu,
   Dock,
+  FolderIcon,
   TopBar,
   WebViewport,
   Window as DesktopWindow,
@@ -173,16 +175,25 @@ function FileGlyph({ ext, size }: { ext: string; size: number }) {
 type GlassMode = "full" | "reduced" | "solid";
 type Folder = { id: string; name: string; x: number; y: number; parentId?: string };
 
+/** 上传壁纸的显示方式（填充 / 适应 / 拉伸 + 自定义缩放与位置）。**不改原图**，只改画法。 */
+type WallpaperStyle = { fit: "cover" | "contain" | "fill"; zoom: number; x: number; y: number };
+const WALLPAPER_STYLE: WallpaperStyle = { fit: "cover", zoom: 1, x: 0, y: 0 };
+/** 壁纸选择器默认只铺一排：5 张，第 6 张起由「查看更多」展开。 */
+const WALLPAPER_ROW = 5;
+
 const FOLDER_PREFIX = domain.FOLDER_PREFIX;
 const icon = (name: string) => "./icons/" + name + ".png";
 const apps = [
   { id: "home", name: "应用中心", icon: "apps" },
   { id: "browser", name: "浏览器", icon: "safari" },
-  { id: "files", name: "文件", icon: "finder" },
+  { id: "files", name: "访达", icon: "finder" },
   { id: "canvas", name: "无限画布", icon: "freeform" },
   { id: "skills", name: "Skill 中心", icon: "shortcuts" },
   { id: "settings", name: "系统设置", icon: "settings" },
 ] as const;
+
+/** 程序坞的默认成员与顺序；"还原默认程序坞"就是回到它。 */
+const DOCK_DEFAULT = apps.map((a) => a.id);
 
 /** 胶囊开关（role=switch）：设置页与控制中心共用，受控、无内部状态。 */
 function Switch({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
@@ -237,7 +248,20 @@ function App() {
   });
   const [renaming, setRenaming] = useState<string | null>(null);
   const [bouncing, setBouncing] = useState<string | null>(null);
-  const [menu, setMenu] = useState<{ x: number; y: number; folder?: string; file?: string } | null>(null);
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    folder?: string;
+    file?: string;
+    /** 右键的是哪个 Dock 图标。 */
+    dock?: string;
+    /** 右键的是程序坞空白。 */
+    dockSurface?: boolean;
+    /** 右键的是哪张上传的壁纸。 */
+    wallpaper?: string;
+    /** 菜单底边贴在 (x, y) 上方并水平居中 —— 程序坞右键用，避免菜单掉出屏幕。 */
+    above?: boolean;
+  } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const searchPanel = useRef<HTMLDivElement>(null);
@@ -256,6 +280,27 @@ function App() {
     const v = Number(localStorage.getItem("oa-dock-size"));
     return Number.isFinite(v) && v >= 32 && v <= 80 ? v : 47;
   });
+  /**
+   * 程序坞的成员与顺序。**这个数组就是唯一真值**：顺序即顺序，缺谁就是谁被移除。
+   * 读取时不自动补回缺失的 app —— 补回来的话用户永远删不掉任何一个。
+   */
+  const [dockIds, setDockIds] = useState<string[]>(() => {
+    try {
+      const raw: unknown = JSON.parse(localStorage.getItem("oa-dock") || "null");
+      if (Array.isArray(raw)) {
+        const known = new Set<string>(DOCK_DEFAULT);
+        const kept = raw.filter((v): v is string => typeof v === "string" && known.has(v));
+        if (kept.length) return kept;
+      }
+    } catch {
+      /* 存储损坏就回默认 */
+    }
+    return [...DOCK_DEFAULT];
+  });
+  const dockApps = useMemo(
+    () => dockIds.map((id) => apps.find((a) => a.id === id)).filter((a): a is (typeof apps)[number] => !!a),
+    [dockIds],
+  );
   /**
    * 外观：跟随系统 / 浅色 / 深色（默认跟随系统）。
    * 旧键 oa-dark（布尔）保留写入以兼容既有数据；读取优先 oa-theme。
@@ -359,8 +404,7 @@ function App() {
   quickLookRef.current = () => {
     const fid = state.focused;
     if (!fid) return;
-    const folderId =
-      folderUI[fid]?.folderId ?? (fid.startsWith(FOLDER_PREFIX) ? fid.slice(FOLDER_PREFIX.length) : null);
+    const folderId = windowFolderId({ id: fid, appId: domain.byId(state, fid)?.appId ?? "" });
     const entryId = (selected[fid] ?? [])[0];
     if (!folderId || !entryId) return;
     void openPreview(folderId, entryId);
@@ -372,8 +416,7 @@ function App() {
     if (!bridge?.thumb) return;
     const folderIds = new Set<string>();
     for (const win of state.windows) {
-      if (!win.appId.startsWith(FOLDER_PREFIX)) continue;
-      const fid = folderUI[win.id]?.folderId ?? win.appId.slice(FOLDER_PREFIX.length);
+      const fid = windowFolderId(win);
       if (fid) folderIds.add(fid);
     }
     // 桌面上的文件也要缩略图
@@ -402,6 +445,19 @@ function App() {
   });
   const [snap, setSnap] = useState(() => localStorage.getItem("oa-snap") !== "0");
   const [wallpaper, setWallpaper] = useState(() => localStorage.getItem("oa-wallpaper") || "theme-dark");
+  /** 每张上传壁纸各自的显示方式（key = 存储条目 id）。 */
+  const [wallpaperStyle, setWallpaperStyle] = useState<Record<string, WallpaperStyle>>(() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem("oa-wallpaper-style") || "{}");
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
+  /** 壁纸选择器是否已点「查看更多」（默认只铺一排 5 张）。 */
+  const [wallpapersOpen, setWallpapersOpen] = useState(false);
+  /** 正在调整尺寸的上传条目 id（null = 对话框关着）。 */
+  const [styleTarget, setStyleTarget] = useState<string | null>(null);
   /** 正在"落格"的图标 id：只有松手后的这一段才用过渡，拖动过程严格 1:1。 */
   const [settling, setSettling] = useState<string | null>(null);
   const [deskSort, setDeskSort] = useState<"name" | "date" | "size">("name");
@@ -414,6 +470,9 @@ function App() {
   useEffect(() => {
     localStorage.setItem("oa-wallpaper", wallpaper);
   }, [wallpaper]);
+  useEffect(() => {
+    localStorage.setItem("oa-wallpaper-style", JSON.stringify(wallpaperStyle));
+  }, [wallpaperStyle]);
   /** 桌面上的文件来自真实存储（folderId = desktop），缩略图与文件夹里同一套。 */
   useEffect(() => {
     void refreshFiles(DESKTOP_ID);
@@ -426,11 +485,34 @@ function App() {
   const customEntry = wallpaper.startsWith("custom:")
     ? (customWallpapers.find((e) => e.id === wallpaper.slice(7)) ?? null)
     : null;
+  /** 选择器里的壁纸全集：内置主题色在前，上传的在后 —— 尺寸一律相同。 */
+  const wallpaperItems = [
+    ...WALLPAPERS.map((wp) => ({ kind: "preset" as const, id: wp.id, name: wp.name, ext: "" })),
+    ...customWallpapers.map((e) => ({ kind: "custom" as const, id: e.id, name: e.name, ext: e.ext })),
+  ];
+  const styleEntry = styleTarget ? (customWallpapers.find((e) => e.id === styleTarget) ?? null) : null;
+  const styleOf = (id: string) => wallpaperStyle[id] ?? WALLPAPER_STYLE;
+  /** 同一套显示方式同时喂给桌面壁纸和它的预览图，所见即所得。 */
+  const mediaStyle = (st: WallpaperStyle): React.CSSProperties => ({
+    objectFit: st.fit,
+    transform: `scale(${st.zoom}) translate(${st.x}%, ${st.y}%)`,
+  });
+  const patchStyle = (id: string, p: Partial<WallpaperStyle>) =>
+    setWallpaperStyle((m) => ({ ...m, [id]: { ...WALLPAPER_STYLE, ...m[id], ...p } }));
+  const replaceInput = useRef<HTMLInputElement>(null);
+  const replaceTarget = useRef<string | null>(null);
   /** 上传壁纸：拷进 wallpapers 存储文件夹，然后把它设为当前壁纸。 */
   /** 删除自定义壁纸（真实删存储条目）；删掉的正好是当前壁纸就退回内置极光。 */
   const deleteWallpaper = async (entryId: string) => {
     if (!window.openarc?.files) return;
     await window.openarc.files.remove(WALLPAPER_ID, entryId);
+    // 条目没了，它的显示设置也不该留在 localStorage 里
+    setWallpaperStyle((m) => {
+      if (!(entryId in m)) return m;
+      const next = { ...m };
+      delete next[entryId];
+      return next;
+    });
     await refreshFiles(WALLPAPER_ID);
     if (wallpaper === "custom:" + entryId) setWallpaper("theme-dark");
   };
@@ -443,6 +525,107 @@ function App() {
     const added = res?.added?.[res.added.length - 1];
     if (added) setWallpaper("custom:" + added.id);
   };
+  /**
+   * 替换上传的壁纸：新图先入库，**显示设置跟着搬到新条目**，再删掉旧条目 ——
+   * 对用户来说就是"同一张壁纸换了张图"，位置与大小不变。
+   */
+  const replaceWallpaper = async (file: File | undefined) => {
+    const target = replaceTarget.current;
+    replaceTarget.current = null;
+    if (!file || !target || !window.openarc?.files) return;
+    const p = window.openarc.files.pathFor(file);
+    if (!p) return;
+    const res = await window.openarc.files.import(WALLPAPER_ID, [p]);
+    const added = res?.added?.[res.added.length - 1];
+    if (!added) return;
+    setWallpaperStyle((m) => {
+      if (!(target in m)) return m;
+      const next = { ...m, [added.id]: m[target] };
+      delete next[target];
+      return next;
+    });
+    if (wallpaper === "custom:" + target) setWallpaper("custom:" + added.id);
+    await window.openarc.files.remove(WALLPAPER_ID, target);
+    await refreshFiles(WALLPAPER_ID);
+  };
+  /** 上传壁纸的右键 / ⋯ 菜单；触发元素交回去，菜单卸载后焦点不丢。 */
+  const openWallpaperMenu = (x: number, y: number, entryId: string, trigger?: HTMLElement) => {
+    menuTrigger.current = trigger ?? (document.activeElement as HTMLElement);
+    setMenu({ x, y, wallpaper: entryId });
+  };
+  /**
+   * 调整尺寸的对话框。走 overlays.dialog 是硬要求：原生网页视图据它整块让位，
+   * 桌面也要真的 inert —— 少了这一步就是"对话框开着但键盘还在桌面"。
+   */
+  const openStyleDialog = (entryId: string) => {
+    setStyleTarget(entryId);
+    setOverlays((o) => ({ ...o, dialog: true }));
+  };
+  const closeStyleDialog = () => {
+    setStyleTarget(null);
+    setOverlays((o) => ({ ...o, dialog: false }));
+  };
+  /**
+   * 一张壁纸格子 —— 选择器与「显示全部」下拉共用同一份。
+   * 用户口径就是"不管内置还是上传，预览图尺寸要一样"，两份实现迟早会漂移。
+   */
+  const wallpaperTile = (it: (typeof wallpaperItems)[number]) =>
+    it.kind === "preset" ? (
+      <button
+        key={it.id}
+        className={"wallpaper-option" + (wallpaper === it.id ? " on" : "")}
+        data-wallpaper={it.id}
+        aria-pressed={wallpaper === it.id}
+        onClick={() => setWallpaper(it.id)}
+      >
+        <span>{it.name}</span>
+      </button>
+    ) : (
+      <div className="wallpaper-cell" key={it.id}>
+        <button
+          className={"wallpaper-option" + (wallpaper === "custom:" + it.id ? " on" : "")}
+          aria-pressed={wallpaper === "custom:" + it.id}
+          onClick={() => setWallpaper("custom:" + it.id)}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            openWallpaperMenu(e.clientX, e.clientY, it.id, e.currentTarget);
+          }}
+        >
+          {kindOfExt(it.ext) === "video" ? (
+            <video
+              src={fileUrl(WALLPAPER_ID, it.id)}
+              style={mediaStyle(styleOf(it.id))}
+              muted
+              loop
+              autoPlay
+              playsInline
+            />
+          ) : (
+            <img src={fileUrl(WALLPAPER_ID, it.id)} style={mediaStyle(styleOf(it.id))} alt="" />
+          )}
+          <span>{it.name}</span>
+        </button>
+        <button
+          className="wallpaper-more"
+          aria-label="壁纸选项"
+          title="壁纸选项"
+          onClick={(e) => {
+            const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            openWallpaperMenu(r.left, r.bottom + 4, it.id, e.currentTarget);
+          }}
+        >
+          ⋯
+        </button>
+        <button
+          className="wallpaper-del"
+          aria-label="删除壁纸"
+          title="删除壁纸"
+          onClick={() => void deleteWallpaper(it.id)}
+        >
+          ✕
+        </button>
+      </div>
+    );
   const desktopFiles = useMemo(() => {
     const list = [...(filesByFolder[DESKTOP_ID] ?? [])];
     if (deskSort === "date") list.sort((a, b) => b.mtime - a.mtime);
@@ -620,6 +803,34 @@ function App() {
 
   const folderOf = (id: string) =>
     id.startsWith(FOLDER_PREFIX) ? folders.find((f) => f.id === id.slice(FOLDER_PREFIX.length)) : undefined;
+
+  /**
+   * 窗口此刻在浏览哪个 folderId。
+   *
+   * 文件夹窗口把它写在 appId 里；**访达窗口没有 appId 前缀，默认落在桌面** ——
+   * 用户口径："文件 app 改为访达，跟 Apple 一个逻辑，打开就是打开文件夹的意思。"
+   */
+  const windowFolderId = (win: { id: string; appId: string }) =>
+    folderUI[win.id]?.folderId ??
+    (win.appId.startsWith(FOLDER_PREFIX)
+      ? win.appId.slice(FOLDER_PREFIX.length)
+      : win.appId === "files"
+        ? DESKTOP_ID
+        : null);
+
+  /**
+   * 顶栏"最近应用"的身份：**文件夹窗口属于访达**。
+   *
+   * 文件夹窗口的 appId 是 `folder:<id>`（见 openFolder），在顶栏对不上任何线性图标，
+   * 于是每打开一个文件夹就多一个占位方块。用户口径："打开文件夹上方不需要显示 icon，
+   * 全部统一到访达里面" —— 它们在这里折成访达这一个身份。
+   */
+  const appIdentity = (w: { appId: string }) =>
+    w.appId === "files" || w.appId.startsWith(FOLDER_PREFIX) ? "files" : w.appId;
+
+  /** 一个 App 的全部窗口 id。访达把文件夹窗口算在内 —— 它们就是访达的窗口。 */
+  const appWindowIds = (appId: string) => state.windows.filter((w) => appIdentity(w) === appId).map((w) => w.id);
+
   const titleOf = (id: string) => domain.byId(state, id)?.meta.title || folderOf(id)?.name || id;
   const iconOf = (id: string) => domain.byId(state, id)?.meta.icon || (folderOf(id) ? "folder" : "apps");
 
@@ -678,6 +889,9 @@ function App() {
       localStorage.setItem("oa-" + k, String(v));
   }, [reduced, glass, dark, dockSize]);
   useEffect(() => {
+    localStorage.setItem("oa-dock", JSON.stringify(dockIds));
+  }, [dockIds]);
+  useEffect(() => {
     localStorage.setItem("oa-folders", JSON.stringify(folders));
   }, [folders]);
 
@@ -731,6 +945,18 @@ function App() {
   }, [setOverlays]);
 
   const runningApps = useMemo(() => new Set(state.windows.map((w) => w.appId)), [state.windows]);
+  /** 顶栏的最近应用：**一个 App 一个图标**（文件夹折进访达），保留每个身份最新的那个窗口。 */
+  const recentApps = useMemo(() => {
+    const seen = new Set<string>();
+    const out: { id: string; title: string; appId: string }[] = [];
+    for (const w of [...state.windows].reverse()) {
+      const appId = appIdentity(w);
+      if (seen.has(appId)) continue;
+      seen.add(appId);
+      out.push({ id: w.id, title: w.meta.title, appId });
+    }
+    return out;
+  }, [state.windows]);
   /** 任一窗口全屏 → Dock 自动隐藏；指针碰到底部才唤回。 */
   const anyMaximized = state.windows.some((w) => w.state === domain.WSTATE.MAXIMIZED);
   const [dockPeek, setDockPeek] = useState(false);
@@ -740,8 +966,7 @@ function App() {
     if (!window.openarc?.files) return;
     const ids = new Set<string>();
     for (const win of state.windows) {
-      if (!win.appId.startsWith(FOLDER_PREFIX)) continue;
-      const fid = folderUI[win.id]?.folderId ?? win.appId.slice(FOLDER_PREFIX.length);
+      const fid = windowFolderId(win);
       if (fid) ids.add(fid);
     }
     for (const fid of ids) if (!(fid in filesByFolder)) void refreshFiles(fid);
@@ -759,7 +984,8 @@ function App() {
   // ---------------------------------------------------------------------------
   const content = (id: string) => {
     const w = domain.byId(state, id);
-    const folder = folderOf(id);
+    // 访达 = 打开"桌面"这个文件夹本身（Apple 的口径：访达打开的是一个文件夹）
+    const folder = folderOf(id) ?? (w?.appId === "files" ? { id: DESKTOP_ID, name: "桌面", x: 0, y: 0 } : undefined);
     if (folder) {
       const ui: FolderUI =
         folderUI[id] ?? {
@@ -786,7 +1012,10 @@ function App() {
       const q = ui.query.trim().toLowerCase();
       /** 子文件夹 + 文件服务条目，统一成 Row 后再排序 / 分组。 */
       const rows: Row[] = [
-        ...folders.filter((f) => f.parentId === shown.id).map((f) => ({ id: f.id, name: f.name, kind: "folder" as const })),
+        // 根目录（访达打开的桌面）下的文件夹 parentId 是 undefined，统一按 DESKTOP_ID 归一
+        ...folders
+          .filter((f) => (f.parentId ?? DESKTOP_ID) === shown.id)
+          .map((f) => ({ id: f.id, name: f.name, kind: "folder" as const })),
         ...(filesByFolder[shown.id] ?? []).map((f) => ({
           id: f.id,
           name: f.name,
@@ -1251,7 +1480,7 @@ function App() {
                             }}
                           >
                             {r.kind === "folder" ? (
-                              <img className="file-icon" src={icon("folder")} alt="" draggable={false} />
+                              <FolderIcon size={ui.view === "grid" ? 46 : 24} />
                             ) : renaming === r.id ? null : thumbs[shown.id + "/" + r.id] ? (
                               <img
                                 className="file-thumb"
@@ -1335,7 +1564,9 @@ function App() {
                             ? "真实网页 · 隔离运行"
                             : a.id === "settings"
                               ? "外观与全局模型"
-                              : "规划中 · 查看说明"}
+                              : a.id === "files"
+                                ? "本地文件 · 真实存储"
+                                : "规划中 · 查看说明"}
                         </small>
                       </button>
                     ))}
@@ -1481,58 +1712,46 @@ function App() {
                   </span>
                 </div>
                 <div className="setting-row">
-                  <span>
-                    壁纸
+                  <span>壁纸</span>
+                  <span className="wallpaper-actions">
+                    {wallpaperItems.length > WALLPAPER_ROW ? (
+                      <button
+                        className="control-button"
+                        aria-expanded={wallpapersOpen}
+                        onClick={() => setWallpapersOpen((v) => !v)}
+                      >
+                        {wallpapersOpen ? "收起" : "查看更多"}
+                        <ChevronDown size={13} />
+                      </button>
+                    ) : null}
+                    <label className="control-button">
+                      上传壁纸
+                      <input
+                        type="file"
+                        accept="image/*,video/*"
+                        hidden
+                        onChange={(e) => {
+                          void uploadWallpaper(e.target.files?.[0]);
+                          e.currentTarget.value = "";
+                        }}
+                      />
+                    </label>
                   </span>
-                  <label className="control-button">
-                    上传壁纸
-                    <input
-                      type="file"
-                      accept="image/*,video/*"
-                      hidden
-                      onChange={(e) => {
-                        void uploadWallpaper(e.target.files?.[0]);
-                        e.currentTarget.value = "";
-                      }}
-                    />
-                  </label>
                 </div>
+                <input
+                  ref={replaceInput}
+                  type="file"
+                  accept="image/*,video/*"
+                  aria-label="替换壁纸图片"
+                  hidden
+                  onChange={(e) => {
+                    void replaceWallpaper(e.target.files?.[0]);
+                    e.currentTarget.value = "";
+                  }}
+                />
                 <div className="wallpaper-grid">
-                  {WALLPAPERS.map((wp) => (
-                    <button
-                      key={wp.id}
-                      className={"wallpaper-option" + (wallpaper === wp.id ? " on" : "")}
-                      data-wallpaper={wp.id}
-                      aria-pressed={wallpaper === wp.id}
-                      onClick={() => setWallpaper(wp.id)}
-                    >
-                      <span>{wp.name}</span>
-                    </button>
-                  ))}
-                  {customWallpapers.map((e) => (
-                    <div className="wallpaper-cell" key={e.id}>
-                      <button
-                        className={"wallpaper-option" + (wallpaper === "custom:" + e.id ? " on" : "")}
-                        aria-pressed={wallpaper === "custom:" + e.id}
-                        onClick={() => setWallpaper("custom:" + e.id)}
-                      >
-                        {kindOfExt(e.ext) === "video" ? (
-                          <video src={fileUrl(WALLPAPER_ID, e.id)} muted loop autoPlay playsInline />
-                        ) : (
-                          <img src={fileUrl(WALLPAPER_ID, e.id)} alt="" />
-                        )}
-                        <span>{e.name}</span>
-                      </button>
-                      <button
-                        className="wallpaper-del"
-                        aria-label="删除壁纸"
-                        title="删除壁纸"
-                        onClick={() => void deleteWallpaper(e.id)}
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
+                  {/* 默认只有一排 5 张，第 6 张起藏起来；点「查看更多」就地展开（不是弹窗） */}
+                  {(wallpapersOpen ? wallpaperItems : wallpaperItems.slice(0, WALLPAPER_ROW)).map(wallpaperTile)}
                 </div>
               </>
             ) : (
@@ -1606,8 +1825,76 @@ function App() {
     );
   };
 
+  const missingDockApps = apps.filter((a) => !dockIds.includes(a.id));
+  const restoreDock = {
+    id: "reset",
+    label: "还原默认程序坞",
+    disabled: dockIds.join("|") === DOCK_DEFAULT.join("|"),
+    onSelect: () => setDockIds([...DOCK_DEFAULT]),
+  };
   const menuItems: MenuItem[] = menu
-    ? menu.folder
+    ? menu.dock
+      ? [
+          { id: "open", label: "打开", onSelect: () => activateApp(menu.dock!) },
+          {
+            id: "quit",
+            label: "关闭应用",
+            // 没有窗口可关时不做无效动作；文件夹窗口算访达的窗口，一起关掉
+            disabled: appWindowIds(menu.dock).length === 0,
+            onSelect: () => {
+              for (const id of appWindowIds(menu.dock!)) onCommand({ type: "window/close", id });
+            },
+          },
+          { separator: true },
+          {
+            id: "remove",
+            label: "从程序坞中移除",
+            // 至少留一个：全删光会让程序坞只剩"全局 AI"，用户就再没有入口把它加回来
+            disabled: dockIds.length <= 1,
+            onSelect: () => setDockIds((ids) => ids.filter((v) => v !== menu.dock)),
+          },
+          { separator: true },
+          restoreDock,
+        ]
+      : menu.dockSurface
+        ? [
+            ...(missingDockApps.length
+              ? ([
+                  {
+                    id: "add",
+                    label: "添加到程序坞",
+                    submenu: missingDockApps.map((a) => ({
+                      id: "add-" + a.id,
+                      label: a.name,
+                      onSelect: () => setDockIds((ids) => (ids.includes(a.id) ? ids : [...ids, a.id])),
+                    })),
+                    onSelect: () => {},
+                  },
+                ] as MenuItem[])
+              : []),
+            { separator: true },
+            restoreDock,
+          ]
+        : menu.wallpaper
+          ? [
+              { id: "size", label: "调整尺寸…", onSelect: () => openStyleDialog(menu.wallpaper!) },
+              {
+                id: "replace",
+                label: "替换图片…",
+                onSelect: () => {
+                  replaceTarget.current = menu.wallpaper!;
+                  replaceInput.current?.click();
+                },
+              },
+              { separator: true },
+              {
+                id: "delete-wallpaper",
+                label: "删除",
+                danger: true,
+                onSelect: () => void deleteWallpaper(menu.wallpaper!),
+              },
+            ]
+          : menu.folder
       ? [
           {
             id: "open",
@@ -1896,13 +2183,19 @@ function App() {
             <video
               className="wallpaper-media"
               src={fileUrl(WALLPAPER_ID, customEntry.id)}
+              style={mediaStyle(styleOf(customEntry.id))}
               autoPlay
               muted
               loop
               playsInline
             />
           ) : (
-            <img className="wallpaper-media" src={fileUrl(WALLPAPER_ID, customEntry.id)} alt="" />
+            <img
+              className="wallpaper-media"
+              src={fileUrl(WALLPAPER_ID, customEntry.id)}
+              style={mediaStyle(styleOf(customEntry.id))}
+              alt=""
+            />
           )
         ) : null}
       </div>
@@ -1946,7 +2239,7 @@ function App() {
           searchOpen={overlays.search}
           controlOpen={overlays.control}
           onToggleControl={() => setOverlays((o) => ({ ...o, control: !o.control }))}
-          recent={[...state.windows].reverse().map((w) => ({ id: w.id, title: w.meta.title, appId: w.appId }))}
+          recent={recentApps}
           onFocusWindow={(id) => onCommand({ type: "window/focus", id })}
           onCommand={onCommand}
           onToggleSearch={() => setOverlays((o) => ({ ...o, search: !o.search }))}
@@ -2000,7 +2293,7 @@ function App() {
               setMenu({ x: e.clientX, y: e.clientY, folder: f.id });
             }}
           >
-            <img className="desktop-folder-icon" src={icon("folder")} alt="" draggable={false} />
+            <FolderIcon size={58} />
             {renaming === f.id ? (
               <input
                 className="folder-rename"
@@ -2092,12 +2385,29 @@ function App() {
           <div className="dock-hint" onPointerEnter={() => setDockPeek(true)} aria-hidden="true" />
         ) : null}
         <Dock
-          apps={apps}
+          apps={dockApps}
           runningApps={runningApps}
           bouncing={bouncing}
           reduced={reduced}
           hidden={anyMaximized && !dockPeek}
           onPointerLeave={() => setDockPeek(false)}
+          onReorder={(next) => setDockIds(next)}
+          onItemMenu={(appId, e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const el = e.currentTarget as HTMLElement;
+            menuTrigger.current = el;
+            // 锚在图标**上方**：Dock 贴着屏幕底边，菜单从光标往下展开会掉出屏幕
+            const r = el.getBoundingClientRect();
+            setMenu({ x: r.left + r.width / 2, y: r.top, dock: appId, above: true });
+          }}
+          onSurfaceMenu={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const el = e.currentTarget as HTMLElement;
+            menuTrigger.current = el;
+            setMenu({ x: e.clientX, y: el.getBoundingClientRect().top, dockSurface: true, above: true });
+          }}
           onActivate={activateApp}
           onToggleAI={() => {
             setOverlays((o) => ({ ...o, ai: !o.ai }));
@@ -2265,13 +2575,108 @@ function App() {
         />
       ) : null}
       {menu ? (
-        <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={() => setMenu(null)} label="桌面菜单" />
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={menuItems}
+          onClose={() => setMenu(null)}
+          label={menu.dock || menu.dockSurface ? "程序坞菜单" : menu.wallpaper ? "壁纸菜单" : "桌面菜单"}
+          anchorAbove={menu.above}
+          className={menu.dock || menu.dockSurface ? "dock-menu" : undefined}
+        />
       ) : null}
+
+      {/* 上传壁纸的尺寸：填充/适应/拉伸 + 自定义缩放与位置。改动即时生效（所见即所得）。 */}
+      <Dialog
+        open={styleTarget !== null}
+        title={styleEntry ? "调整「" + styleEntry.name + "」" : "调整壁纸尺寸"}
+        returnFocusTo={menuTrigger.current}
+        onClose={closeStyleDialog}
+        footer={
+          <>
+            <button className="ghost" onClick={() => styleTarget && patchStyle(styleTarget, WALLPAPER_STYLE)}>
+              恢复默认
+            </button>
+            <button className="primary" onClick={closeStyleDialog}>
+              完成
+            </button>
+          </>
+        }
+      >
+        {styleTarget ? (
+          <>
+            <div className="setting-row">
+              <span>显示方式</span>
+              <div className="segmented text" role="group" aria-label="显示方式">
+                {(
+                  [
+                    ["cover", "填充"],
+                    ["contain", "适应"],
+                    ["fill", "拉伸"],
+                  ] as const
+                ).map(([fit, label]) => (
+                  <button
+                    key={fit}
+                    aria-pressed={styleOf(styleTarget).fit === fit}
+                    onClick={() => patchStyle(styleTarget, { fit })}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="setting-row">
+              <span>
+                缩放
+                <span className="footnote"> 只改画法，不动原图</span>
+              </span>
+              <span className="setting-range-wrap">
+                <input
+                  className="setting-range"
+                  type="range"
+                  min={50}
+                  max={200}
+                  step={1}
+                  value={Math.round(styleOf(styleTarget).zoom * 100)}
+                  onChange={(e) => patchStyle(styleTarget, { zoom: Number(e.target.value) / 100 })}
+                  aria-label="壁纸缩放"
+                />
+                <span className="setting-range-value">{Math.round(styleOf(styleTarget).zoom * 100)}%</span>
+              </span>
+            </div>
+            {(
+              [
+                ["x", "水平位置"],
+                ["y", "垂直位置"],
+              ] as const
+            ).map(([axis, label]) => (
+              <div className="setting-row" key={axis}>
+                <span>{label}</span>
+                <span className="setting-range-wrap">
+                  <input
+                    className="setting-range"
+                    type="range"
+                    min={-50}
+                    max={50}
+                    step={1}
+                    value={styleOf(styleTarget)[axis]}
+                    onChange={(e) => patchStyle(styleTarget, { [axis]: Number(e.target.value) })}
+                    aria-label={label}
+                  />
+                  <span className="setting-range-value">{styleOf(styleTarget)[axis]}%</span>
+                </span>
+              </div>
+            ))}
+          </>
+        ) : null}
+      </Dialog>
 
       {/* 真实产品消费：删除文件夹前的确认。Dialog 由产品自身使用，
           而不是只在 gallery 里存在 —— 这是 §41 能标 CLOSED BY D2-02 的前提。 */}
+      {/* open 认 pendingDelete 而不是 overlays.dialog：后者现在是"有对话框开着"的聚合开关，
+          两个对话框（删除确认 / 调整壁纸尺寸）各自有真值，否则会互相把对方一起打开。 */}
       <Dialog
-        open={overlays.dialog}
+        open={pendingDelete !== null}
         title="删除文件夹"
         returnFocusTo={menuTrigger.current}
         onClose={closeDialog}

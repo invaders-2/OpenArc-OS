@@ -9,7 +9,7 @@
  * 视觉完全沿用既有 styles.css 类名 —— 组件化的目的是**换掉状态所有权**，
  * 不是换外观。所以这里没有一处新增的视觉样式。
  */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import domain from "../../electron/window-domain.cjs";
 import type { Window as WinDomain, WindowCommand } from "../../electron/window-domain.cjs";
+import { useDockArrange } from "./useDockArrange";
 import { useDockMagnify } from "./useDockMagnify";
 
 const icon = (name: string) => "./icons/" + name + ".png";
@@ -156,20 +157,40 @@ export function DockTooltip({ label }: DockTooltipProps) {
 }
 
 type DockItemProps = {
+  /** 程序坞上的 app id。分隔线之后那个固定的"全局 AI"没有 id，也不参与排序。 */
+  id?: string;
   label: string;
   iconName: string;
   /** 该 App 是否有存活窗口（§32：按 appId 查询，而不是按 windowId）。 */
   running: boolean;
   bouncing: boolean;
+  /** 正被长按拖动 —— 用来抬层级、关掉提示、盖住兄弟项的抖动。 */
+  dragging?: boolean;
   onActivate: () => void;
+  onPointerDown?: (e: React.PointerEvent) => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
 };
 
-export function DockItem({ label, iconName, running, bouncing, onActivate }: DockItemProps) {
+export function DockItem({
+  id,
+  label,
+  iconName,
+  running,
+  bouncing,
+  dragging,
+  onActivate,
+  onPointerDown,
+  onContextMenu,
+}: DockItemProps) {
   return (
     <button
       className={`dock-item ${bouncing ? "bouncing" : ""}`}
       aria-label={`打开${label}`}
+      data-dock-id={id}
+      data-dragging={dragging ? "true" : undefined}
       onClick={onActivate}
+      onPointerDown={onPointerDown}
+      onContextMenu={onContextMenu}
     >
       <img className="dock-icon" src={icon(iconName)} alt="" draggable={false} />
       <DockTooltip label={label} />
@@ -195,32 +216,92 @@ type DockProps = {
   /** 全屏时自动隐藏（底部留一条 hover 带把它唤回来）。 */
   hidden?: boolean;
   onPointerLeave?: () => void;
+  /** 长按拖动排序的结果。顺序的真值在 App（它负责持久化），Dock 只上报。 */
+  onReorder: (next: string[]) => void;
+  /** 右键某个图标 / 右键程序坞空白。菜单由 App 渲染（只有它拿得到 App 清单）。 */
+  onItemMenu: (appId: string, e: React.MouseEvent) => void;
+  onSurfaceMenu: (e: React.MouseEvent) => void;
 };
 
-export function Dock({ apps, runningApps, bouncing, reduced, onActivate, onToggleAI, hidden, onPointerLeave }: DockProps) {
-  // 放大行为由 Dock 自己持有：它只在身份门通过后挂载，父层的 useEffect
-  // 拿不到这一刻（详见 useDockMagnify 顶部注释）。
-  const dockRef = useDockMagnify(reduced);
+export function Dock({
+  apps,
+  runningApps,
+  bouncing,
+  reduced,
+  onActivate,
+  onToggleAI,
+  hidden,
+  onPointerLeave,
+  onReorder,
+  onItemMenu,
+  onSurfaceMenu,
+}: DockProps) {
+  // 放大与整理都由 Dock 自己持有：它只在身份门通过后挂载，父层的 useEffect
+  // 拿不到这一刻（详见 useDockMagnify 顶部注释）。两个 hook 共用同一个 ref ——
+  // 整理期间放大必须让位（槽位由拖动手势接管）。
+  const dockRef = useRef<HTMLElement>(null);
+  const order = apps.map((a) => a.id);
+  const arrange = useDockArrange(dockRef, { ids: order, onReorder, onActivate });
+  useDockMagnify(dockRef, reduced || arrange.arranging, order.join(","));
   return (
     <nav
-      className={`dock ${hidden ? "hidden" : ""}`}
+      className={`dock ${hidden ? "hidden" : ""} ${arrange.arranging ? "arranging" : ""}`}
       aria-label="应用栏"
       ref={dockRef}
       onPointerLeave={onPointerLeave}
+      onContextMenu={onSurfaceMenu}
     >
+      {/* 底板两层：阴影在下、静止玻璃在上（为什么这么拆见 styles.css 里的说明） */}
+      <span className="dock-shadow" aria-hidden="true" />
+      <span className="dock-glass" aria-hidden="true" />
       {apps.map((a) => (
         <DockItem
           key={a.id}
+          id={a.id}
           label={a.name}
           iconName={a.icon}
           running={runningApps.has(a.id)}
           bouncing={bouncing === a.id}
-          onActivate={() => onActivate(a.id)}
+          dragging={arrange.dragId === a.id}
+          onActivate={() => arrange.activate(a.id)}
+          onPointerDown={(e) => arrange.press(a.id, e)}
+          onContextMenu={(e) => onItemMenu(a.id, e)}
         />
       ))}
       <div className="dock-divider" />
       <DockItem label="全局 AI" iconName="siri" running={false} bouncing={bouncing === "__ai"} onActivate={onToggleAI} />
     </nav>
+  );
+}
+
+// ===========================================================================
+// 5b. FolderIcon（桌面与访达共用的文件夹图标）
+// ===========================================================================
+
+/**
+ * 文件夹图标。移植 React Bits 的 Folder（reactbits.dev/components/folder）的**合上态**：
+ * 悬停时整体上浮、两片前板向外 skew 张开，里面的纸张探出一点 —— 像文件夹被轻轻掀开。
+ *
+ * 用户口径：**不播展开动画**（双击仍然直接打开文件夹窗口），因此这里没有 open 状态、
+ * 没有纸张飞出、也没有纸张跟鼠标的视差。几何照抄原组件（100×80 底板 + 三张纸 + 两片前板），
+ * 用 --folder-w 整体缩放，内部一律用 em（1em = 文件夹宽度），尺寸由调用点传进来。
+ */
+export function FolderIcon({ size = 58, className }: { size?: number; className?: string }) {
+  return (
+    <span
+      className={"rb-folder" + (className ? " " + className : "")}
+      style={{ "--folder-w": size + "px" } as React.CSSProperties}
+      aria-hidden="true"
+    >
+      <span className="rb-folder-inner">
+        <span className="rb-folder-tab" />
+        <span className="rb-folder-paper rb-paper-1" />
+        <span className="rb-folder-paper rb-paper-2" />
+        <span className="rb-folder-paper rb-paper-3" />
+        <span className="rb-folder-front rb-front-a" />
+        <span className="rb-folder-front rb-front-b" />
+      </span>
+    </span>
   );
 }
 
@@ -232,11 +313,16 @@ type TitleBarProps = {
   id: string;
   /** 是否已最大化 —— 决定"最大化"按钮与双击是放大还是还原。 */
   maximized: boolean;
+  /**
+   * 红灯的语义。用户口径：**App 窗口不真的关闭，一律最小化**（收进 Dock），
+   * 只有系统设置例外（它没有常驻意义，关掉才是用户预期）。
+   */
+  closeAction: "close" | "minimize";
   onCommand: (c: WindowCommand) => void;
   onDragStart: (e: React.PointerEvent) => void;
 };
 
-export function TitleBar({ id, maximized, onCommand, onDragStart }: TitleBarProps) {
+export function TitleBar({ id, maximized, closeAction, onCommand, onDragStart }: TitleBarProps) {
   // 双向切换：双击/按钮在"放大"与"还原"之间切。只发 maximize 会让
   // window/unmaximize 成为不可达命令，用户放大后无法恢复（D2-02B 审出的缺陷）。
   const toggleMax = () =>
@@ -244,7 +330,13 @@ export function TitleBar({ id, maximized, onCommand, onDragStart }: TitleBarProp
   return (
     <div className="window-title" onPointerDown={onDragStart} onDoubleClick={toggleMax}>
       <div className="traffic">
-        <button className="close" aria-label={`关闭${id}`} onClick={() => onCommand({ type: "window/close", id })}>
+        <button
+          className="close"
+          aria-label={`${closeAction === "close" ? "关闭" : "最小化"}${id}`}
+          onClick={() =>
+            onCommand(closeAction === "close" ? { type: "window/close", id } : { type: "window/minimize", id })
+          }
+        >
           <X size={8} strokeWidth={3} />
         </button>
         <button className="minimize" aria-label={`最小化${id}`} onClick={() => onCommand({ type: "window/minimize", id })}>
@@ -280,8 +372,40 @@ type WindowProps = {
 export function Window({ window: w, focused, onCommand, snapshots, onResizeStart, children }: WindowProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLElement>(null);
+  const wasVisible = useRef(w.visible);
+
+  /**
+   * 最小化 / 恢复的动效几何。
+   *
+   * 目标点就是该 App 在 Dock 上的图标中心 —— **在状态翻转的那一帧量一次**，
+   * 之后整个动画期间 Dock 自己怎么放大都不影响（动画吃的是写死的 --min-tx/--min-ty）。
+   * 量不到图标（文件夹窗口之类）时退化成"向下收走"。
+   */
+  useLayoutEffect(() => {
+    if (wasVisible.current === w.visible) return;
+    wasVisible.current = w.visible;
+    const el = rootRef.current;
+    if (!el) return;
+    const icon = document.querySelector<HTMLElement>(`.dock-item[data-dock-id="${w.appId}"]`);
+    const target = icon?.getBoundingClientRect();
+    // 用 bounds 算中心而不是 getBoundingClientRect()：最小化态带着 min-out 的缩放，
+    // 量出来的是那个缩到 0.05 的小方块，恢复时会从错的地方展开。
+    const centerX = w.bounds.x + w.bounds.w / 2;
+    const centerY = w.bounds.y + w.bounds.h / 2;
+    const tx = target ? target.left + target.width / 2 - centerX : 0;
+    const ty = target ? target.top + target.height / 2 - centerY : w.bounds.h / 2 + 60;
+    el.style.setProperty("--min-tx", `${Math.round(tx)}px`);
+    el.style.setProperty("--min-ty", `${Math.round(ty)}px`);
+    // 动画类一旦加上就留着：换回另一个即可重放。若在这里移除，.window 的
+    // appear 动画会立刻被重新触发（恢复时闪一下）。
+    el.classList.toggle("min-out", !w.visible);
+    el.classList.toggle("min-in", w.visible);
+  }, [w.visible, w.appId]);
+
   return (
     <section
+      ref={rootRef}
       aria-label={`${w.meta.title}窗口`}
       className={`window ${focused ? "active" : ""} ${w.visible ? "" : "minimized"}`}
       style={{ left: w.bounds.x, top: w.bounds.y, width: w.bounds.w, height: w.bounds.h, zIndex: 10 + w.z }}
@@ -290,6 +414,7 @@ export function Window({ window: w, focused, onCommand, snapshots, onResizeStart
       <TitleBar
         id={w.id}
         maximized={w.state === domain.WSTATE.MAXIMIZED}
+        closeAction={w.appId === "settings" ? "close" : "minimize"}
         onCommand={onCommand}
         onDragStart={(e) => startDrag(e, w, onCommand)}
       />
@@ -547,6 +672,12 @@ type ContextMenuProps = {
   items: MenuItem[];
   onClose: () => void;
   label?: string;
+  /**
+   * 把菜单**底边**贴在 (x, y) 上方、并水平居中于 x —— 程序坞右键用它，
+   * 菜单要浮在 Dock 上方（macOS 的位置），而不是从光标往下展开（会掉出屏幕）。
+   */
+  anchorAbove?: boolean;
+  className?: string;
 };
 
 /**
@@ -560,11 +691,40 @@ type ContextMenuProps = {
  * 关闭时把焦点还回去是硬要求：否则用户按 Esc 之后焦点会掉到 body，
  * 键盘用户等于"迷失位置"（这条在 D2-01 登记为 NOT VERIFIED，本轮补上）。
  */
-export function ContextMenu({ x, y, items, onClose, label = "桌面菜单" }: ContextMenuProps) {
+export function ContextMenu({
+  x,
+  y,
+  items,
+  onClose,
+  label = "桌面菜单",
+  anchorAbove = false,
+  className,
+}: ContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
   /** 当前展开的子菜单（悬停或键盘触发）。 */
   const [openSub, setOpenSub] = useState<{ id: string; top: number; items: MenuItem[] } | null>(null);
   const returnTo = useRef<HTMLElement | null>(null);
+
+  /**
+   * 用**真实高度**决定位置，再夹进视口。
+   *
+   * 旧的写法只按 `innerHeight - 150` 估算，菜单比 150px 高时就伸到屏幕外面去了；
+   * 更糟的是当时还会 focus 面板本身 —— 焦点移动会把最近的滚动容器滚过去，
+   * 而 `.desktop` 是 `overflow: hidden`（仍然允许程序化滚动），
+   * 于是整个桌面（含 Dock）被顶上去。这里在 paint 之前一次性算好，不产生第二帧跳动。
+   */
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const pad = 8;
+    const wantLeft = anchorAbove ? x - r.width / 2 : x;
+    const wantTop = anchorAbove ? y - r.height - 12 : y;
+    const left = Math.max(pad, Math.min(wantLeft, innerWidth - r.width - pad));
+    const top = Math.max(pad, Math.min(wantTop, innerHeight - r.height - pad));
+    el.style.left = Math.round(left) + "px";
+    el.style.top = Math.round(top) + "px";
+  }, [anchorAbove, x, y, items]);
 
   const selectable = useMemo(
     () => items.map((it, i) => ({ it, i })).filter(({ it }) => !("separator" in it) && !it.disabled).map(({ i }) => i),
@@ -575,8 +735,9 @@ export function ContextMenu({ x, y, items, onClose, label = "桌面菜单" }: Co
     returnTo.current = document.activeElement as HTMLElement;
     // 打开时**不高亮第一项**（macOS 菜单只有悬停/键盘导航时才高亮）。
     // 焦点给面板本身，方向键仍然能从第一项开始走。
-    ref.current?.focus();
-    return () => returnTo.current?.focus?.();
+    // preventScroll 是硬要求：没有它，贴边打开的菜单会把桌面滚走，Dock 跟着被顶上去。
+    ref.current?.focus({ preventScroll: true });
+    return () => returnTo.current?.focus?.({ preventScroll: true });
   }, []);
 
   const move = useCallback(
@@ -616,12 +777,12 @@ export function ContextMenu({ x, y, items, onClose, label = "桌面菜单" }: Co
     <>
       <div className="menu-shade" onPointerDown={onClose} onContextMenu={(e) => { e.preventDefault(); onClose(); }} />
       <div
-        className="context-menu"
+        className={"context-menu" + (className ? " " + className : "")}
         role="menu"
         tabIndex={-1}
         aria-label={label}
         ref={ref}
-        style={{ left: Math.min(x, innerWidth - 190), top: Math.min(y, innerHeight - 150) }}
+        style={{ left: x, top: y }}
       >
         {items.map((it, i) =>
           "separator" in it ? (

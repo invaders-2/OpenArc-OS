@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
+import type { RefObject } from "react";
 
 /**
  * Apple Dock 鱼眼放大 —— 复刻 macOS，而不是"原地放大"。
@@ -14,14 +15,20 @@ import { useEffect, useRef } from "react";
  *
  * 每帧只写合成器属性（translate / --s / --bg-tx / --bg-k），主线程不做布局；
  * 离开时交回 CSS 过渡（.settling）。
+ *
+ * **跟随是 1:1 的，中间不插弹簧。** 原生 Dock 不做阻尼平滑：指针在哪，放大就在哪，
+ * 中途插一条弹簧会变成"整排追着指针跑"（那是 React Bits 的观感，不是原生的）。
+ * 唯一有动画的是**离开**那一下 —— 交回 CSS 过渡从当前撑开量弹回。
+ *
+ * ref 由 Dock 自己持有并同时交给 useDockArrange；suspended 在"整理"期间为真
+ * （那时槽位由拖动手势接管）；signature 变化表示成员/顺序变了，缓存的测量作废。
  */
-export function useDockMagnify(reduced: boolean) {
-  const ref = useRef<HTMLElement>(null);
-
+export function useDockMagnify(ref: RefObject<HTMLElement | null>, suspended: boolean, signature: string) {
   useEffect(() => {
     const dock = ref.current;
     if (!dock) return;
     const slots = Array.from(dock.querySelectorAll<HTMLElement>(".dock-item, .dock-divider"));
+    const iconEls = slots.map((el) => el.querySelector<HTMLElement>(".dock-icon"));
     const n = slots.length;
     if (!n) return;
 
@@ -43,13 +50,30 @@ export function useDockMagnify(reduced: boolean) {
     let dockW = 0;
     let dirty = false; // 是否写过内联样式（决定测量前要不要强制 reflow）
 
+    /** 底板两层：玻璃**只改裁切**（尺寸静止，背景不会被拉变形），阴影跟着撑开。 */
+    const glass = dock.querySelector<HTMLElement>(".dock-glass");
+    const shadow = dock.querySelector<HTMLElement>(".dock-shadow");
+    /** 必须与 .dock-glass 的 --dock-slack 一致。实测全程所需 ≤61px，留到 90。 */
+    const SLACK = 90;
+    /** 指针当前覆盖的槽位（夹在 0..n-1）。提示气泡只给它写 --s，见 paint 里的说明。 */
+    let hoverIdx = -1;
+
+    /**
+     * 把所有逐帧内联值清掉，回到 CSS 的静止态。
+     *
+     * **一个自定义属性都不写**：自定义属性会沿继承树失效（写在 .dock 上等于让整排
+     * 重新算一遍样式，实测 UpdateLayoutTree 0.52 ms/帧）；能直接写内联就写内联。
+     */
     const clearInline = () => {
-      for (const el of slots) {
-        el.style.removeProperty("translate");
-        el.style.removeProperty("--s");
+      for (let i = 0; i < n; i++) {
+        slots[i].style.removeProperty("translate");
+        slots[i].style.removeProperty("--s");
+        iconEls[i]?.style.removeProperty("transform");
       }
-      dock.style.removeProperty("--bg-tx");
-      dock.style.removeProperty("--bg-k");
+      hoverIdx = -1;
+      glass?.style.removeProperty("clip-path");
+      shadow?.style.removeProperty("transform");
+      shadow?.style.removeProperty("border-radius");
       dirty = false;
     };
 
@@ -74,7 +98,7 @@ export function useDockMagnify(reduced: boolean) {
       }
     };
 
-    if (reduced) {
+    if (suspended) {
       clearInline();
       return;
     }
@@ -102,6 +126,7 @@ export function useDockMagnify(reduced: boolean) {
       let g = 0;
       let gp = 0;
       let gpDone = false;
+      let hovered = -1;
       for (let i = 0; i < n; i++) {
         const sw = baseWidth[i] * scale[i];
         const pitch = sw + (i < n - 1 ? gap : 0);
@@ -109,24 +134,55 @@ export function useDockMagnify(reduced: boolean) {
         const bs = baseCenter[i] - baseWidth[i] / 2 - baseRowLeft;
         const be = bs + baseWidth[i];
         if (!gpDone) {
-          if (p <= bs) gpDone = true;
-          else if (p < be) {
+          if (p <= bs) {
+            gpDone = true;
+            hovered = i;
+          } else if (p < be) {
             gp += (p - bs) * scale[i];
             gpDone = true;
+            hovered = i;
           } else gp += pitch;
         }
         g += pitch;
       }
+      if (hovered < 0) hovered = p <= 0 ? 0 : n - 1;
 
-      // 3) 写回：撑开用 translate，缩放用 --s，底板用 transform（合成器属性）
+      // 3) 写回：撑开用 translate、缩放直接写内联 transform —— 两者都是合成器属性，
+      //    而且都是"写在用它的那个元素上"，不会连累整棵子树重算样式。
       for (let i = 0; i < n; i++) {
         slots[i].style.translate = (x + gCenter[i] - gp - baseCenter[i]).toFixed(2) + "px";
-        slots[i].style.setProperty("--s", scale[i].toFixed(4));
+        const icon = iconEls[i];
+        if (icon) icon.style.transform = scale[i] === 1 ? "" : `scale(${scale[i].toFixed(4)})`;
       }
+      /**
+       * 只有**指针下那一个**图标的提示需要跟着抬高。
+       *
+       * 提示的 --s 是给气泡定位用的；如果每个槽位每帧都写 --s，7 个带 backdrop-filter
+       * 的气泡会一起被失效并重新栅格化 —— 实测那是整轮扫描里最大的一笔开销
+       * （关掉提示：raster -43%、BeginMainFrame -22%）。其余槽位的 --s 保持默认 1 即可，
+       * 它们的气泡本来就不可见。
+       */
+      if (hovered !== hoverIdx) {
+        if (hoverIdx >= 0) slots[hoverIdx].style.removeProperty("--s");
+        hoverIdx = hovered;
+      }
+      if (hoverIdx >= 0) slots[hoverIdx].style.setProperty("--s", scale[hoverIdx].toFixed(4));
       const k = (g + 2 * PAD) / dockW; // 底板宽度倍率
       const tx = x - gp - PAD - dockLeft - (dockW * (1 - k)) / 2; // 左缘对齐
-      dock.style.setProperty("--bg-k", k.toFixed(4));
-      dock.style.setProperty("--bg-tx", tx.toFixed(2) + "px");
+      const pillLeft = x - gp - PAD;
+      const pillRight = pillLeft + g + 2 * PAD;
+      if (shadow) {
+        shadow.style.transform = `translateX(${tx.toFixed(2)}px) scaleX(${k.toFixed(4)})`;
+        shadow.style.borderRadius = `${(20 / k).toFixed(2)}px / 20px`;
+      }
+      if (glass) {
+        // 相对那块静止玻璃的左缘裁；SLACK 不够时宁可切平也不让它溢出
+        const boxLeft = dockLeft - SLACK;
+        const boxRight = dockLeft + dockW + SLACK;
+        const l = Math.max(0, Math.min(boxRight - boxLeft, pillLeft - boxLeft));
+        const r = Math.max(0, Math.min(boxRight - boxLeft, boxRight - pillRight));
+        glass.style.clipPath = `inset(0 ${r.toFixed(1)}px 0 ${l.toFixed(1)}px round 20px)`;
+      }
       dirty = true;
     };
     const schedule = () => {
@@ -179,7 +235,5 @@ export function useDockMagnify(reduced: boolean) {
       dock.classList.remove("magnifying", "settling");
       clearInline();
     };
-  }, [reduced]);
-
-  return ref;
+  }, [suspended, signature]);
 }
