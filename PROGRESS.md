@@ -733,7 +733,7 @@ D4-02B 遗留继续挂账：OS-level network isolation NOT VERIFIED；external w
 | 口径 | Task Status | 说明 |
 |---|---|---|
 | **D4-03A Tool Contract / Registry / Authorization Gate** | **PASS** | Registry 权威（test.echo / test.write / resource.read.metadata，无 shell/mcp）；Tool Proposal + Decision 持久（schema v11）；D3 授权复用（含 useByAgent）；ResourceRef 强制；risk 来自 Registry；READ_ONLY → ALLOWED、WRITE → APPROVAL_REQUIRED；ExecutionPlan dry-run；production tool execution = 0；test:d4-03a **32/32** |
-| **D4-03B Controlled Read-only Execution（执行引擎 + official dsh 暴露 + 真实执行 E2E）** | **PASS** | 真实 READ_ONLY 执行：resource.search + resource.read.metadata 经真实 Resource/Search Domain；reauthorize-before-execute；tool_executions（schema v12）；duplicate 0 二次执行；cancel/revoke/delete race PASS；outputSchema + redaction；0 mutation。official dsh 工具暴露 **VERIFIED**（openarc-acp profile + plugin 注册 exactly 2 tool）；**official dsh 真实 tool_call 执行 E2E = PASS**（Tool Facade Bridge → ControlledToolProxy → Domain → dsh Tool Runtime → Task SUCCEEDED）；test:d4-03b **57/57** |
+| **D4-03B Controlled Read-only Execution（执行引擎 + official dsh 暴露 + 真实执行 E2E）** | **PASS** | 真实 READ_ONLY 执行：resource.search + resource.read.metadata 经真实 Resource/Search Domain；reauthorize-before-execute；tool_executions（schema v12）；duplicate 0 二次执行；cancel/revoke/delete race PASS；outputSchema + redaction；0 mutation。official dsh 工具暴露 **VERIFIED**（openarc-acp profile + plugin 注册 exactly 2 tool）；**official dsh 真实 tool_call 执行 E2E = PASS**（Tool Facade Bridge → ControlledToolProxy → Domain → dsh Tool Runtime → Task SUCCEEDED）；test:d4-03b **59/59** |
 | **D4-03 overall** | **PASS** | A PASS；B PASS；C/D 未开始 |
 | **D4-03C Side-effect Lease / Approval / Idempotency / Unknown Effect** | **CONDITIONAL GO** | 人工开启后实施；本轮不开始 |
 
@@ -742,7 +742,7 @@ D4-02B 遗留继续挂账：OS-level network isolation NOT VERIFIED；external w
 | 入口 | 结果 |
 |---|---|
 | test:d4-03a | **32 / 32 PASS** |
-| test:d4-03b | **57 / 57 PASS**（schema 12；facade + official dsh e2e/security/cancel/lifecycle） |
+| test:d4-03b | **59 / 59 PASS**（schema 12；facade + official dsh e2e/security/cancel/lifecycle） |
 | test:d4-02c | **22 / 22 PASS** |
 | test:d4-02b | **16 / 16 PASS** |
 | test:d4-02a | **22 / 22 PASS** |
@@ -753,7 +753,8 @@ D4-02B 遗留继续挂账：OS-level network isolation NOT VERIFIED；external w
 | security-surface（A13） | **15 / 15 PASS**（未新增 Renderer IPC） |
 | READ_ONLY 真实执行 | search + read，real Domain，EXACT verification PASS；authorized 1 / unauthorized 0 Domain call |
 | official dsh 工具暴露 | **VERIFIED**：managed openarc-acp profile 加载 OpenArc plugin，注册 exactly 2 tool（resource_search / resource_read_metadata）|
-| official dsh 真实 tool_call 执行 E2E | **PASS**：3 model calls / 2 tool calls / 2 executions / Artifact + Verification PASS + Task SUCCEEDED；hidden resource 0 leak；useByAgent / session / app / permission / delete / cancel / crash / timeout / duplicate / 跨域全部 DENY 正确 |
+| official dsh 真实 tool_call 执行 E2E | **PASS**：3 model calls / 2 tool calls / 2 executions / Artifact + Verification PASS + Task SUCCEEDED；official dsh hidden search 0 leak；official dsh useByAgent DENY |
+| Tool Facade 安全边界 | session/app/permission revoke / resource delete / cancel / crash / timeout / duplicate / contract stale / 跨域 / maxCalls / expiry 全部 DENY 正确 |
 
 分支 feature/d4-03-tool-proxy，基线 feature/d4-02-task-harness @ 5d37d64，未 merge main。
 ADR：docs/decisions/D4-03-controlled-tool-proxy.md / docs/decisions/D4-03B-readonly-execution.md；报告：docs/D4-03B-CLOSURE-RESULT.md。

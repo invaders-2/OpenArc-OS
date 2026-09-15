@@ -45,10 +45,10 @@ EXACT_TEXT 校验 PASS（verification.completed PASS）。只有 artifact 持久
 Step SUCCEEDED + Task SUCCEEDED + harness.run.succeeded；真实 model 请求 = 3（无 hidden retry），provider 无额外调用。
 
 ## 15. Hidden Resource
-alice 搜 admin 的 HIDDEN resource → 0 items / count 0，tool result 不含 HIDDEN 名称，无法知道其存在。official dsh 主链已 PASS；该隐私 probe 在 Tool Facade 层（同一 ControlledToolProxy + SearchService 授权路径）验证。
+**official dsh 路径 PASS**。alice（ORGANIZATION 级 model config）通过 official dsh 搜 admin 的 HIDDEN resource → 0 items / count 0，tool result 不含 HIDDEN 名称，无法知道其存在。另有 Tool Facade 层同路径 probe。
 
 ## 16. useByAgent
-alice 有 resource.read 但无 resource.useByAgent → resource_read_metadata DENY（TOOL_FORBIDDEN / TOOL_AGENT_USE_NOT_AUTHORIZED）+ 0 Domain call + 0 execution。Facade 层验证。
+**official dsh 路径 PASS**。alice 有 resource.read 但无 resource.useByAgent → official dsh 发起 resource_read_metadata → DENY（TOOL_FORBIDDEN / TOOL_AGENT_USE_NOT_AUTHORIZED）+ 0 Domain call + 0 execution。
 
 ## 17. Session Revocation
 Tool 1 成功后 logout(sessionRef) → Tool 2 DENY + 0 Domain call。
@@ -87,7 +87,7 @@ Tool DB / TaskEvent / Audit / Artifact / Verification / Harness stderr / ACP upd
 2 个 Task 使用独立 dsh / DSH_HOME / model capability / tool capability / runId；跨 bridge token cross-use → 401。
 
 ## 29. D4-03B Regression
-npm run test:d4-03b = **57/57 PASS**（原 36 + Closure 21：facade / e2e / security / cancel / lifecycle）。
+npm run test:d4-03b = **59/59 PASS**（原 36 + Closure 23：facade / e2e / security / cancel / lifecycle）。
 
 ## 30. D4-03A Regression
 npm run test:d4-03a = 32/32 PASS。
@@ -102,7 +102,7 @@ npm run test:d4-01 = 59/59 PASS。
 npm run test:security = FAIL 0 / PARTIAL 2 / PASS 6；npm test = PASS；npm run build = PASS。Renderer IPC 未新增（15/15）。
 
 ## 34. Tests
-新增 tests/tool-dsh-e2e.test.mjs（official dsh 垂直 E2E）、tests/tool-dsh-security.test.mjs（capability/撤销/隐私/跨域/重复/contract stale）、tests/tool-dsh-cancel.test.mjs（cancel/timeout/crash）、tests/tool-dsh-lifecycle.test.mjs（cleanup/5-run/2-run isolation）；tests/tool-dsh-facade.test.mjs 保留。standard entry npm run test:d4-03b（57）与 npm run test:d4-03b-dsh。
+新增 tests/tool-dsh-e2e.test.mjs（official dsh 垂直 E2E + official dsh hidden/useByAgent，3）、tests/tool-dsh-security.test.mjs（capability/撤销/隐私/跨域/重复/contract stale，14）、tests/tool-dsh-cancel.test.mjs（cancel/timeout/crash，4）、tests/tool-dsh-lifecycle.test.mjs（cleanup/5-run/2-run isolation，2）；tests/tool-dsh-facade.test.mjs 保留（3）。standard entry npm run test:d4-03b（59）与 npm run test:d4-03b-dsh。
 
 ## 35. Files Changed
 见最终报告第 35 节的 git diff 真实输出。
