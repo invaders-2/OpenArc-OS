@@ -24,9 +24,32 @@ export async function createToolHarnessFixture(opts = {}) {
     makeToolOrchestrator(agentFile = "tool-proposal-agent.mjs", extra = {}) {
       return new TaskHarnessOrchestrator({ taskService: base.taskService, adapterFactory: base.agentFactory(agentFile), toolProxy, clock: base.f.clock, ...extra });
     },
+    /** D4-03B Closure：真实 official dsh + managed openarc-acp profile + Tool Facade Bridge。*/
+    makeDshOrchestrator(extra = {}) {
+      return new TaskHarnessOrchestrator({
+        taskService: base.taskService,
+        adapterFactory: base.realAgentFactory(),
+        toolProxy,
+        clock: base.f.clock,
+        toolFacade: { enabled: true, toolIds: opts.facadeToolIds || ["resource.read.metadata", "resource.search"], maxCalls: opts.facadeMaxCalls || 4, ttlMs: opts.facadeTtlMs || 120000, execTimeoutMs: opts.facadeExecTimeoutMs, bridgeFactory: opts.facadeBridgeFactory },
+        ...extra,
+      });
+    },
+    makeDshAdapter() { return base.realAgentFactory()(); },
     grantTool(appId, actions) { return base.f.authService.grantAppToolPermission({ context: base.ctx("admin"), appId, actions }); },
     async createResource(name = "Tool Target") {
       return base.f.resourceService.createResource({ context: base.f.adminCtx(), resourceType: "text", name, content: "tool-target-body" });
+    },
+    /** D4-03B Closure：为 Tool Facade 直接调用准备 RUNNING task/step/run（不启动 official dsh）。 */
+    dshRunSetup(context = null) {
+      const c = context || base.ctx();
+      const t = base.taskService.createTask({ context: c, goal: "bridge probe" });
+      const st = base.taskService.startTask({ context: c, taskId: t.task.taskId, expectedRevision: t.task.revision });
+      const step = base.taskService.createStep({ context: c, taskId: t.task.taskId, kind: "reasoning", input: null, expectedRevision: st.task.revision });
+      const ss = base.taskService.startStep({ context: c, taskId: t.task.taskId, stepId: step.step.stepId, expectedRevision: step.task.revision });
+      const run = base.taskService.startHarnessRun({ context: c, taskId: t.task.taskId, stepId: step.step.stepId, expectedRevision: ss.task.revision });
+      const mr = base.taskService.markHarnessRunRunning({ context: c, taskId: t.task.taskId, runId: run.run.runId, expectedRevision: run.task.revision });
+      return { context: c, taskId: t.task.taskId, stepId: step.step.stepId, runId: run.run.runId, revision: mr.ok ? mr.task.revision : ss.task.revision };
     },
     grantUserResource(resourceId, userId, actions) {
       return base.f.authService.grantResourcePermission({ context: base.f.adminCtx(), principalType: "USER", principalId: userId, resourceId, actions });

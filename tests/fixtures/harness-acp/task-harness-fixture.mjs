@@ -15,12 +15,12 @@ export const APPS = { A: "ai", B: "canvas" };
 export const EXACT = "OPENARC_TASK_OK";
 export const AGENT_DIR = path.join(import.meta.dirname);
 
-export async function createTaskHarnessFixture({ behavior = "exact", dbPath = ":memory:", hooks = null } = {}) {
+export async function createTaskHarnessFixture({ behavior = "exact", dbPath = ":memory:", hooks = null, delayMs = 0 } = {}) {
   const f = await createModelFixture({ dbPath });
   for (const appId of [APPS.A, APPS.B]) f.store.upsertApp({ appId, name: appId, publisher: "test", status: "enabled", builtIn: 0 });
   f.modelService.grantAppModelAccess({ context: f.adminCtx(), appId: APPS.A, actions: ["model.view", "model.use", "model.manage", "model.test"] });
   const ctx = (key = "admin", appId = APPS.A) => ({ sessionRef: f.sessions[key], appId, source: "test" });
-  const fp = await startFakeProvider({ behavior, secretEcho: null });
+  const fp = await startFakeProvider({ behavior, secretEcho: null, delayMs });
   const p = f.modelService.createProvider({ context: ctx(), displayName: "D402CProbe", baseUrl: fp.baseUrl, credentialSecret: PROVIDER_SECRET });
   if (!p.ok) throw new Error("createProvider failed " + JSON.stringify(p));
   const m = f.modelService.createModel({ context: ctx(), providerId: p.provider.providerId, remoteModelId: "remote-fake-1", capabilities: ["chat"] });
@@ -40,6 +40,8 @@ export async function createTaskHarnessFixture({ behavior = "exact", dbPath = ":
     makeOrchestrator(adapterFactory, extra = {}) { return new TaskHarnessOrchestrator({ taskService, adapterFactory, clock: f.clock, ...extra }); },
     /** 用最小 ACP agent（tool / permission probe）充当 Harness 进程。 */
     agentFactory(agentFile) { return () => new HarnessAdapter({ modelProxy: proxy, dshBin: process.execPath, dshArgs: [path.join(AGENT_DIR, agentFile)] }); },
+    /** D4-03B Closure：真实 official dsh（managed openarc-acp profile + Tool Facade）。 */
+    realAgentFactory() { return () => new HarnessAdapter({ modelProxy: proxy }); },
     async close() { try { await orchestrator.dispose(); } catch { /* ignore */ } try { await proxy.stop(); } catch { /* ignore */ } try { await fp.close(); } catch { /* ignore */ } f.close(); },
   };
 }

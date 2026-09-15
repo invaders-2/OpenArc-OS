@@ -18,6 +18,10 @@ const FILES = [
   "tests/tool-execution-security.test.mjs",
   "tests/tool-execution-migration.test.mjs",
   "tests/tool-dsh-facade.test.mjs",
+  "tests/tool-dsh-e2e.test.mjs",
+  "tests/tool-dsh-security.test.mjs",
+  "tests/tool-dsh-cancel.test.mjs",
+  "tests/tool-dsh-lifecycle.test.mjs",
 ];
 let versions = {};
 try {
