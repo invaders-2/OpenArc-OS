@@ -177,6 +177,8 @@ const TOOL_ACTION = Object.freeze({
   TEST_ECHO: "tool.test.echo",
   RESOURCE_READ_METADATA: "tool.resource.readMetadata",
   RESOURCE_SEARCH: "tool.resource.search",
+  // D4-03C2：第一条受控真实写入（resource.trash）的 Tool 权限。
+  RESOURCE_TRASH: "tool.resource.trash",
 });
 const TOOL_ACTIONS = Object.freeze(Object.values(TOOL_ACTION));
 function isToolAction(action) { return TOOL_ACTIONS.includes(String(action)); }

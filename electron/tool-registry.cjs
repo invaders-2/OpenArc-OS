@@ -15,7 +15,9 @@ const { RISK_CLASS, SIDE_EFFECT, TOOL_ERROR, isWellFormedToolId, approvalRequire
 
 const CONTRACT_FIELDS = ["toolId", "version", "displayName", "description", "inputSchema", "outputSchema", "riskClass", "sideEffect", "requiresApproval", "requiredPermissions", "resourceActions", "executionProvider", "enabled", "expectedSideEffects",
   // D4-03C1：write contract 必须显式声明 side-effect authority 合同。
-  "idempotencySupport", "verificationStrategy", "approvalPolicy", "leasePolicy"];
+  "idempotencySupport", "verificationStrategy", "approvalPolicy", "leasePolicy",
+  // D4-03C2：只有显式声明 executionPolicy 的 contract 才允许真实受控写入。
+  "executionPolicy"];
 
 /** 极简 JSON Schema 子集校验器：object/string/integer/number/boolean/array + additionalProperties:false。*/
 function validateSchema(schema, value, path = "$") {
@@ -144,6 +146,27 @@ const BUILTIN_CONTRACTS = Object.freeze([
     enabled: true,
     expectedSideEffects: ["reads authorized resource index (no mutation)"],
   },
+  {
+    toolId: "resource.trash",
+    version: 1,
+    displayName: "Trash Resource",
+    description: "D4-03C2 第一条受控真实 REVERSIBLE_WRITE：把 Resource 移入 Trash（ResourceService.delete）。",
+    inputSchema: { type: "object", additionalProperties: false, properties: { resourceRef: { type: "string", pattern: "^resource://[A-Za-z0-9_-]+$" } }, required: ["resourceRef"] },
+    outputSchema: { type: "object", additionalProperties: false, properties: { resourceRef: { type: "string" }, trashed: { type: "boolean" }, version: { type: "integer" } }, required: ["resourceRef", "trashed"] },
+    riskClass: RISK_CLASS.REVERSIBLE_WRITE,
+    sideEffect: SIDE_EFFECT.WRITE,
+    requiresApproval: true,
+    requiredPermissions: ["tool.resource.trash"],
+    resourceActions: ["resource.delete"],
+    executionProvider: "ResourceService",
+    enabled: true,
+    expectedSideEffects: ["resource.trash_state -> TRASHED (reversible via ResourceService.restore)"],
+    idempotencySupport: true,
+    verificationStrategy: "READ_AFTER_WRITE",
+    approvalPolicy: "ONE_CALL",
+    leasePolicy: "SINGLE_ACTIVE",
+    executionPolicy: "CONTROLLED_REVERSIBLE_WRITE",
+  },
 ]);
 
 /** dsh tool 名必须是合法标识符：resource.search → resource_search。 */
@@ -219,6 +242,7 @@ class ToolRegistry {
       verificationStrategy: contract.verificationStrategy || null,
       approvalPolicy: contract.approvalPolicy || (contract.riskClass === RISK_CLASS.READ_ONLY ? "NONE" : "ONE_CALL"),
       leasePolicy: contract.leasePolicy || (contract.riskClass === RISK_CLASS.READ_ONLY ? "NONE" : "SINGLE_ACTIVE"),
+      executionPolicy: contract.executionPolicy || null,
       ...contract, toolId, version,
     });
     this.tools.set(this.key(toolId, version), normalized);

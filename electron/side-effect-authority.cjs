@@ -1,9 +1,12 @@
 /**
- * D4-03C1 · Side-effect Authority。
+ * D4-03C1/C2 · Side-effect Authority。
  *
  * 唯一职责：把 **Proposal → Decision → Plan → Approval → Lease → Eligibility**
- * 六层合同落成受信任的 OpenArc Authority。执行本身仍然禁止：
- * `evaluateExecutionEligibility` 最多返回 ELIGIBLE，绝不调用任何 Domain mutation。
+ * 六层合同落成受信任的 OpenArc Authority。
+ * D4-03C1 只判定 eligibility，不执行；D4-03C2 新增**唯一**受控真实写入入口
+ * `executeSideEffect`：只有显式声明 executionPolicy = CONTROLLED_REVERSIBLE_WRITE 的
+ * contract（本阶段仅 resource.trash）才可能执行，且必须先原子 claim LEASED → RUNNING，
+ * 再 dispatch 真实 Domain，最后经真实 Domain verifier PASS 才置 SUCCEEDED。
  *
  * 永久冻结：
  * - callId / idempotencyKey / effectClass / expectedEffects 一律 OpenArc 生成，
@@ -19,7 +22,7 @@ const domain = require("./side-effect-domain.cjs");
 const toolDomain = require("./tool-domain.cjs");
 const {
   CALL_STATUS, APPROVAL_DECISION, LEASE_STATUS, ELIGIBILITY, SIDE_EFFECT_ERROR,
-  DEFAULT_APPROVAL_TTL_MS, DEFAULT_LEASE_TTL_MS,
+  EXECUTION_POLICY, DEFAULT_APPROVAL_TTL_MS, DEFAULT_LEASE_TTL_MS,
   effectClassForRisk, isC1EffectClass, planHashOf, idempotencyKeyOf, fingerprint,
   evaluateExecutionEligibility,
 } = domain;
@@ -471,8 +474,168 @@ class SideEffectAuthority {
     return { ok: true, call: updated, effectApplied: !!verdict.effectApplied };
   }
 
-  /** §75：任何 write 执行入口在本阶段一律 WRITE_EXECUTION_DISABLED。 */
-  executeSideEffect() { return { ok: false, error: SIDE_EFFECT_ERROR.WRITE_EXECUTION_DISABLED, executed: false, mutationCount: 0 }; }
+  /**
+   * trusted execution context：user / session / app 全部来自 SideEffectCall 绑定的真实 Task，
+   * 绝不重新信任 Harness 或调用方 payload（§11）。
+   */
+  #executionContext(task) {
+    return { sessionRef: task.session_ref, appId: task.app_id, source: "agent", agent: true, requestId: null, actorUserId: task.user_id };
+  }
+
+  /** 只结束 lease（release / revoke），不改 call 状态；execution ownership 必须唯一失效。 */
+  #finalizeLease(callId, leaseId, status, toolRef = null) {
+    if (!leaseId) return null;
+    const lease = this.store.leaseById(leaseId);
+    if (!lease || lease.callId !== callId || lease.status !== LEASE_STATUS.ACTIVE) return null;
+    const now = this.#now();
+    const patch = status === LEASE_STATUS.REVOKED ? { status: LEASE_STATUS.REVOKED, revoked_at: now } : { status: LEASE_STATUS.RELEASED, released_at: now };
+    const updated = this.store.transactSync(() => this.store.updateLease(leaseId, patch));
+    this.#audit({ toolRef, action: status === LEASE_STATUS.REVOKED ? "side_effect.lease_revoked" : "side_effect.lease_released", decision: status, reasonCode: null });
+    return updated;
+  }
+
+  /** known no-effect：Domain 明确拒绝 / precondition 变化 / verifier 明确未生效 → FAILED，0 retry。 */
+  #finishKnownNoEffect({ call, leaseId, error, verificationStatus = null, knownNoEffect = true }) {
+    const now = this.#now();
+    const status = knownNoEffect ? CALL_STATUS.FAILED : CALL_STATUS.BLOCKED;
+    const updated = this.store.transactSync(() => this.store.updateCall(call.callId, { status, error_code: error, completed_at: now, verification_status: verificationStatus }));
+    this.#finalizeLease(call.callId, leaseId, LEASE_STATUS.RELEASED, call.toolId);
+    this.#audit({ toolRef: call.toolId, action: "side_effect.blocked", decision: status, reasonCode: error });
+    this.#event(call.taskId, "tool.side_effect.execution_blocked", { callId: call.callId, toolId: call.toolId, reasonCode: error });
+    if (verificationStatus === "FAIL") this.#audit({ toolRef: call.toolId, action: "side_effect.verification_failed", decision: "FAIL", reasonCode: error });
+    return { ok: false, executed: true, duplicate: false, mutationCount: 0, call: updated, result: null, verificationStatus, error, knownNoEffect: status === CALL_STATUS.FAILED };
+  }
+
+  /**
+   * mutation 已 dispatch 但结果无法可靠确认 → UNKNOWN_EFFECT（≠FAILED，绝不 retry）。
+   * execution ownership 立即失效（lease REVOKED），Step/Task → BLOCKED / RECOVERY_REQUIRED。
+   */
+  #finishUnknownEffect({ call, leaseId, detail }) {
+    const now = this.#now();
+    const updated = this.store.transactSync(() => this.store.updateCall(call.callId, { status: CALL_STATUS.UNKNOWN_EFFECT, error_code: SIDE_EFFECT_ERROR.UNKNOWN_EFFECT, completed_at: now }));
+    this.#finalizeLease(call.callId, leaseId, LEASE_STATUS.REVOKED, call.toolId);
+    let taskBlocked = false;
+    if (this.taskService && typeof this.taskService.blockStep === "function" && call.stepId) {
+      const freshTask = this.taskStore.taskById(call.taskId);
+      if (freshTask) {
+        try {
+          const res = this.taskService.blockStep({ context: this.#executionContext(freshTask), taskId: call.taskId, stepId: call.stepId, runId: call.runId, reason: SIDE_EFFECT_ERROR.UNKNOWN_EFFECT, event: "tool.side_effect.unknown_effect", expectedRevision: freshTask.revision });
+          taskBlocked = !!(res && res.ok);
+        } catch { taskBlocked = false; }
+      }
+    }
+    this.#audit({ toolRef: call.toolId, action: "side_effect.unknown_effect", decision: CALL_STATUS.UNKNOWN_EFFECT, reasonCode: detail || SIDE_EFFECT_ERROR.UNKNOWN_EFFECT });
+    this.#event(call.taskId, "tool.side_effect.unknown_effect", { callId: call.callId, toolId: call.toolId, reason: detail || SIDE_EFFECT_ERROR.UNKNOWN_EFFECT });
+    if (!taskBlocked) this.#event(call.taskId, "tool.side_effect.execution_blocked", { callId: call.callId, reason: SIDE_EFFECT_ERROR.RECOVERY_REQUIRED });
+    return { ok: false, executed: true, duplicate: false, mutationCount: null, call: updated, result: null, verificationStatus: null, error: SIDE_EFFECT_ERROR.UNKNOWN_EFFECT, taskBlocked };
+  }
+
+  /**
+   * D4-03C2 · 受控真实 REVERSIBLE_WRITE 执行入口（只由 OpenArc trusted code 调用，Harness 无权）。
+   *
+   * 只有显式声明 executionPolicy = CONTROLLED_REVERSIBLE_WRITE 的 contract 才可能执行；
+   * 其余 write contract（含 test.write）一律 WRITE_EXECUTION_DISABLED，绝不因为本方法存在
+   * 就自动获得执行能力。dispatch Domain mutation 前先原子 claim LEASED → RUNNING，
+   * 只有唯一 claim 成功的 executor 才能调用真实 Domain。
+   */
+  executeSideEffect({ context = {}, callId = null, leaseId = null, holderId = null, holderInstanceId = null, timeoutMs = 15000 } = {}) {
+    const want = (error, extra = {}) => ({ ok: false, executed: false, duplicate: false, mutationCount: 0, call: this.store.callById(callId), error, ...extra });
+    // 保留 C1 语义：无 authority call 时任何 write 执行入口一律 WRITE_EXECUTION_DISABLED。
+    if (!callId) return want(SIDE_EFFECT_ERROR.WRITE_EXECUTION_DISABLED);
+    const call = this.store.callById(callId);
+    if (!call) return want(SIDE_EFFECT_ERROR.CALL_NOT_FOUND);
+    const tool = this.#toolFor(call);
+    if (!tool.ok) return want(tool.error === "TOOL_DISABLED" ? SIDE_EFFECT_ERROR.TOOL_DISABLED : tool.error);
+    if (tool.contract.executionPolicy !== EXECUTION_POLICY.CONTROLLED_REVERSIBLE_WRITE) return want(SIDE_EFFECT_ERROR.WRITE_EXECUTION_DISABLED);
+    if (call.status === CALL_STATUS.SUCCEEDED) return { ok: true, executed: false, duplicate: true, mutationCount: 0, call, result: null, verificationStatus: call.verificationStatus, error: null };
+    if (call.status === CALL_STATUS.RUNNING) return want(SIDE_EFFECT_ERROR.EXECUTION_CLAIM_LOST, { duplicate: true });
+    if (call.status !== CALL_STATUS.LEASED) return want(SIDE_EFFECT_ERROR.CALL_STATE);
+
+    const task = this.taskStore.taskById(call.taskId);
+    if (!task) return want(SIDE_EFFECT_ERROR.TASK_NOT_FOUND);
+    const execCtx = this.#executionContext(task);
+    const adapter = this.adapterFor ? this.adapterFor({ executionProvider: tool.contract.executionProvider, toolId: tool.contract.toolId }) : null;
+    if (!adapter || typeof adapter.execute !== "function" || typeof adapter.verify !== "function") return want(SIDE_EFFECT_ERROR.WRITE_EXECUTION_DISABLED);
+
+    // 执行前完整 eligibility（tool/run/authorization/approval/lease/precondition 全部实时重查）。
+    const elig = this.evaluateExecutionEligibility({ context: execCtx, callId, holderId });
+    if (elig.status !== ELIGIBILITY.ELIGIBLE) {
+      this.#audit({ toolRef: call.toolId, action: "side_effect.blocked", decision: "BLOCKED", reasonCode: elig.reasonCode });
+      this.#event(call.taskId, "tool.side_effect.execution_blocked", { callId, toolId: call.toolId, reasonCode: elig.reasonCode });
+      return want(elig.reasonCode || SIDE_EFFECT_ERROR.CALL_STATE, { eligibility: elig.status });
+    }
+    const active = this.store.activeLeaseOfCall(callId);
+    if (!active) return want(SIDE_EFFECT_ERROR.LEASE_REQUIRED);
+    if (leaseId && active.leaseId !== leaseId) return want(SIDE_EFFECT_ERROR.LEASE_NOT_HELD);
+    if (holderId && active.holderId !== holderId) return want(SIDE_EFFECT_ERROR.LEASE_NOT_HELD);
+    if (holderInstanceId && active.holderInstanceId !== holderInstanceId) return want(SIDE_EFFECT_ERROR.LEASE_NOT_HELD);
+
+    // 原子 claim：LEASED → RUNNING。唯一成功者才拥有 execution ownership。
+    const now = this.#now();
+    let claim;
+    try {
+      claim = this.store.transactSync(() => {
+        const fresh = this.store.rawCallById(callId);
+        if (!fresh || fresh.status !== CALL_STATUS.LEASED) return { claimed: false, reason: fresh && fresh.status === CALL_STATUS.RUNNING ? SIDE_EFFECT_ERROR.EXECUTION_CLAIM_LOST : SIDE_EFFECT_ERROR.CALL_STATE };
+        const lease = this.store.activeLeaseOfCall(callId);
+        if (!lease || lease.status !== LEASE_STATUS.ACTIVE) return { claimed: false, reason: SIDE_EFFECT_ERROR.LEASE_REQUIRED };
+        if (leaseId && lease.leaseId !== leaseId) return { claimed: false, reason: SIDE_EFFECT_ERROR.LEASE_NOT_HELD };
+        if (holderId && lease.holderId !== holderId) return { claimed: false, reason: SIDE_EFFECT_ERROR.LEASE_NOT_HELD };
+        if (lease.expiresAt != null && now >= Number(lease.expiresAt)) return { claimed: false, reason: SIDE_EFFECT_ERROR.LEASE_EXPIRED };
+        const approval = this.store.latestApprovalOfCall(callId);
+        const approvalOk = approval && approval.decision === APPROVAL_DECISION.APPROVED && approval.revokedAt == null && (approval.expiresAt == null || now < Number(approval.expiresAt)) && approval.planHash === fresh.plan_hash && approval.approvedArgumentsHash === fresh.arguments_hash;
+        if (!approvalOk) return { claimed: false, reason: SIDE_EFFECT_ERROR.APPROVAL_REQUIRED };
+        this.store.updateCall(callId, { status: CALL_STATUS.RUNNING, started_at: now });
+        return { claimed: true, leaseId: lease.leaseId };
+      });
+    } catch (e) {
+      if (!this.#isBusy(e)) throw e;
+      claim = { claimed: false, reason: SIDE_EFFECT_ERROR.EXECUTION_CLAIM_LOST };
+    }
+    if (!claim.claimed) {
+      this.#audit({ toolRef: call.toolId, action: "side_effect.blocked", decision: "BLOCKED", reasonCode: claim.reason });
+      this.#event(call.taskId, "tool.side_effect.execution_blocked", { callId, toolId: call.toolId, reasonCode: claim.reason });
+      return want(claim.reason);
+    }
+    this.#audit({ toolRef: call.toolId, action: "side_effect.execution_started", decision: CALL_STATUS.RUNNING, reasonCode: null });
+    this.#event(call.taskId, "tool.side_effect.execution_started", { callId, toolId: call.toolId, leaseId: claim.leaseId });
+
+    // claim 之后（execution ownership 唯一）才 dispatch Domain mutation。
+    return this.#dispatchControlledWrite({ call, tool, execCtx, adapter, leaseId: claim.leaseId, timeoutMs });
+  }
+
+  /** claim 成功后的唯一 Domain dispatch + verify + finalize（异步）。 */
+  async #dispatchControlledWrite({ call, tool, execCtx, adapter, leaseId, timeoutMs }) {
+    // args 只来自持久化的 trusted plan（preconditionsSafe），不来自 Harness。
+    const args = call.preconditionsSafe && call.preconditionsSafe.resourceRef ? { resourceRef: call.preconditionsSafe.resourceRef } : {};
+    let execResult;
+    try {
+      const timeout = Number(timeoutMs) > 0 ? Number(timeoutMs) : 15000;
+      let timer = null;
+      const guard = new Promise((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error("SIDE_EFFECT_TIMEOUT"), { code: "SIDE_EFFECT_TIMEOUT" })), timeout); });
+      execResult = await Promise.race([adapter.execute({ context: execCtx, args, contract: tool.contract, preconditions: call.preconditionsSafe }), guard]).finally(() => clearTimeout(timer));
+    } catch (e) {
+      return this.#finishUnknownEffect({ call, leaseId, detail: (e && e.code) || "SIDE_EFFECT_DISPATCH_ERROR" });
+    }
+    if (!execResult || execResult.ambiguous === true) return this.#finishUnknownEffect({ call, leaseId, detail: (execResult && execResult.error) || SIDE_EFFECT_ERROR.UNKNOWN_EFFECT });
+    if (!execResult.ok) return this.#finishKnownNoEffect({ call, leaseId, error: execResult.error || SIDE_EFFECT_ERROR.DOMAIN_WRITE_FAILED, knownNoEffect: execResult.knownNoEffect !== false });
+
+    // Execution != Verified Effect：必须真实 Domain verification 通过才允许 SUCCEEDED。
+    let verdict;
+    try { verdict = await adapter.verify({ context: execCtx, args, result: execResult.result, contract: tool.contract }); }
+    catch { return this.#finishUnknownEffect({ call, leaseId, detail: "VERIFIER_UNAVAILABLE" }); }
+    if (!verdict || verdict.ok !== true) return this.#finishUnknownEffect({ call, leaseId, detail: "VERIFIER_UNAVAILABLE" });
+    if (verdict.applied !== true) return this.#finishKnownNoEffect({ call, leaseId, error: SIDE_EFFECT_ERROR.VERIFICATION_FAILED, verificationStatus: "FAIL", knownNoEffect: true });
+
+    const completedAt = this.#now();
+    const updated = this.store.transactSync(() => this.store.updateCall(call.callId, { status: CALL_STATUS.SUCCEEDED, verification_status: "PASS", completed_at: completedAt, error_code: null }));
+    this.#finalizeLease(call.callId, leaseId, LEASE_STATUS.RELEASED, call.toolId);
+    this.#audit({ toolRef: call.toolId, action: "side_effect.verification_passed", decision: "PASS", reasonCode: null });
+    this.#event(call.taskId, "tool.side_effect.verification_passed", { callId: call.callId, toolId: call.toolId, verificationStatus: "PASS" });
+    this.#audit({ toolRef: call.toolId, action: "side_effect.succeeded", decision: CALL_STATUS.SUCCEEDED, reasonCode: null });
+    this.#event(call.taskId, "tool.side_effect.succeeded", { callId: call.callId, toolId: call.toolId });
+    return { ok: true, executed: true, duplicate: false, mutationCount: 1, call: updated, result: execResult.result, verificationStatus: "PASS", error: null };
+  }
 
   getCall(callId) { return this.store.callById(callId); }
   listApprovals(callId) { return this.store.approvalsOfCall(callId); }

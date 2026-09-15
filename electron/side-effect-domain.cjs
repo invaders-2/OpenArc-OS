@@ -5,7 +5,9 @@
  * 五层 authority 彻底分开；Harness 不能提供 approval / lease / callId / idempotencyKey /
  * effectClass / expectedEffects。
  *
- * 本阶段：production WRITE execution = 0。状态机最多走到 LEASED / ELIGIBLE。
+ * D4-03C1：production WRITE execution = 0，状态机最多走到 LEASED / ELIGIBLE。
+ * D4-03C2：只开放一条受控 REVERSIBLE_WRITE（resource.trash → ResourceService.delete），
+ * 由 SideEffectAuthority 原子 claim 后执行，并经真实 Domain verifier 通过才算 SUCCEEDED。
  */
 "use strict";
 const crypto = require("node:crypto");
@@ -21,6 +23,14 @@ const EFFECT_CLASS = Object.freeze({
 const EFFECT_CLASS_ALL = Object.freeze(Object.values(EFFECT_CLASS));
 /** D4-03C1 只研究 REVERSIBLE_WRITE 合同；其余一律 BLOCKED。 */
 const C1_ALLOWED_EFFECT = Object.freeze([EFFECT_CLASS.REVERSIBLE_WRITE]);
+/**
+ * D4-03C2：真实写入必须由 contract 显式声明该 executionPolicy，
+ * 否则一律 WRITE_EXECUTION_DISABLED。绝不因为 execute path 存在就自动获得执行能力。
+ */
+const EXECUTION_POLICY = Object.freeze({
+  CONTROLLED_REVERSIBLE_WRITE: "CONTROLLED_REVERSIBLE_WRITE",
+});
+const EXECUTION_POLICY_ALL = Object.freeze(Object.values(EXECUTION_POLICY));
 
 const CALL_STATUS = Object.freeze({
   PLANNED: "PLANNED",
@@ -90,6 +100,10 @@ const SIDE_EFFECT_ERROR = Object.freeze({
   RECOVERY_REQUIRED: "SIDE_EFFECT_RECOVERY_REQUIRED",
   VERIFICATION_NOT_AVAILABLE: "SIDE_EFFECT_VERIFICATION_NOT_AVAILABLE",
   UNKNOWN_EFFECT: "SIDE_EFFECT_UNKNOWN_EFFECT",
+  // D4-03C2 controlled reversible write
+  VERIFICATION_FAILED: "SIDE_EFFECT_VERIFICATION_FAILED",
+  DOMAIN_WRITE_FAILED: "SIDE_EFFECT_DOMAIN_WRITE_FAILED",
+  EXECUTION_CLAIM_LOST: "SIDE_EFFECT_EXECUTION_CLAIM_LOST",
 });
 
 /** 产品合同冻结 TTL：Approval 默认 10 分钟；Lease 默认 60 秒。都有限期，绝不永久。 */
@@ -237,7 +251,7 @@ function evaluateExecutionEligibility(snapshot = {}) {
 }
 
 module.exports = {
-  EFFECT_CLASS, EFFECT_CLASS_ALL, C1_ALLOWED_EFFECT,
+  EFFECT_CLASS, EFFECT_CLASS_ALL, C1_ALLOWED_EFFECT, EXECUTION_POLICY, EXECUTION_POLICY_ALL,
   CALL_STATUS, CALL_STATUS_ALL, CALL_TERMINAL, C1_MAX_STATUS,
   APPROVAL_DECISION, APPROVAL_DECISION_ALL, LEASE_STATUS, LEASE_STATUS_ALL,
   ELIGIBILITY, ELIGIBILITY_ALL, SIDE_EFFECT_ERROR,

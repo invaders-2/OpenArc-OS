@@ -78,6 +78,11 @@ const TASK_EVENT = Object.freeze({
   TOOL_LEASE_ACQUIRED: "tool.lease_acquired",
   TOOL_EXECUTION_ELIGIBLE: "tool.execution_eligible",
   TOOL_SIDE_EFFECT_UNKNOWN_EFFECT: "tool.side_effect.unknown_effect",
+  // D4-03C2 controlled reversible write
+  TOOL_SIDE_EFFECT_EXECUTION_STARTED: "tool.side_effect.execution_started",
+  TOOL_SIDE_EFFECT_VERIFICATION_PASSED: "tool.side_effect.verification_passed",
+  TOOL_SIDE_EFFECT_SUCCEEDED: "tool.side_effect.succeeded",
+  TOOL_SIDE_EFFECT_EXECUTION_BLOCKED: "tool.side_effect.execution_blocked",
 });
 const TASK_EVENT_ALL = Object.freeze(Object.values(TASK_EVENT));
 

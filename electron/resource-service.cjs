@@ -455,6 +455,21 @@ class ResourceService {
     return ok({ resource: this.#descriptor(row, context, { favorite }), location: this.#location(row, context) });
   }
 
+  /**
+   * D4-03C2：受信任 adapter 专用的只读 precondition 快照（0 mutation，无 IPC / preload 暴露）。
+   * 只返回 safe ref / version / trash 状态，绝不复制业务对象或绝对路径。
+   */
+  sideEffectPrecondition({ resourceRef } = {}) {
+    const row = this.#resolveRow(resourceRef);
+    if (!row) return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
+    return ok({
+      resourceRef: authz.toResourceRef(row.resource_id),
+      expectedVersion: Number(row.version),
+      trashed: row.trash_state === TRASH_STATE.TRASHED,
+      registryStatus: String(row.registry_status || row.status || ""),
+    });
+  }
+
   read({ context, resourceRef, version = null } = {}) {
     this.#ensureBuiltinPolicy(context);
     const id = this.#parseRef(resourceRef);
@@ -664,19 +679,40 @@ class ResourceService {
     return ok({ resource: this.#descriptor(this.store.resourceRowById(row.resource_id), context), restoredFrom: Number(version) });
   }
 
-  delete({ context, resourceRef } = {}) {
+  /**
+   * D4-03C2 · Trash 一个 Resource（REVERSIBLE_WRITE，可通过 restore 恢复）。
+   * expectedVersion 只由 trusted adapter 从 SideEffectPlan 提供，绝不是 Harness 参数；
+   * 真实 mutation transaction 内重新读取并校验，避免 read → check → later write 的 TOCTOU。
+   */
+  delete({ context, resourceRef, expectedVersion = null } = {}) {
     this.#ensureBuiltinPolicy(context);
     const load = this.#load({ context, resourceRef, action: authz.ACTION.DELETE });
     if (!load.ok) return load;
     const row = load.row;
     if (row.trash_state === TRASH_STATE.TRASHED) return ok({ changed: false, reasonCode: REASON.NO_CHANGE });
+    const conflict = domain.evaluateVersionConflict({ expectedVersion, currentVersion: row.version });
+    if (!conflict.ok) return conflict;
     const actor = this.#actor(context);
     if (!actor.ok) return actor;
-    this.store.transactSync(() => {
-      this.store.setTrashState(row.resource_id, { trashed: true, by: actor.user.id });
-      this.store.setRegistryStatus(row.resource_id, "deleted");
-    });
-    return ok({ changed: true, resource: this.#descriptor(this.store.resourceRowById(row.resource_id), context) });
+    let outcome;
+    try {
+      outcome = this.store.transactSync(() => {
+        const fresh = this.store.resourceRowById(row.resource_id);
+        if (!fresh) return { ok: false, error: REASON.NOT_FOUND_OR_FORBIDDEN };
+        if (fresh.trash_state === TRASH_STATE.TRASHED) return { ok: true, changed: false, reasonCode: REASON.NO_CHANGE };
+        const inTx = domain.evaluateVersionConflict({ expectedVersion, currentVersion: fresh.version });
+        if (!inTx.ok) return inTx;
+        const status = String(fresh.registry_status || fresh.status || "");
+        if (status && status !== "active") return { ok: false, error: REASON.NOT_FOUND_OR_FORBIDDEN };
+        this.store.setTrashState(fresh.resource_id, { trashed: true, by: actor.user.id });
+        this.store.setRegistryStatus(fresh.resource_id, "deleted");
+        return { ok: true, changed: true };
+      });
+    } catch (err) {
+      return fail(REASON.INTERNAL_ERROR, err && err.message);
+    }
+    if (!outcome.ok) return fail(outcome.error);
+    return ok({ changed: outcome.changed, reasonCode: outcome.reasonCode || null, resource: this.#descriptor(this.store.resourceRowById(row.resource_id), context) });
   }
 
   restore({ context, resourceRef } = {}) {
