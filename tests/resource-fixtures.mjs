@@ -121,12 +121,13 @@ export async function createResourceFixture({ dbPath = ":memory:", storeRoot = n
 }
 
 /** 在同一 DB / store 上重开运行时（重启持久化用例）。 */
-export function reopenResourceRuntime({ dbPath, storeRoot }) {
-  const identity = new IdentityStore({ path: dbPath }).open();
-  const runtime = buildRuntime({ identity });
+export function reopenResourceRuntime({ dbPath, storeRoot, clock = null }) {
+  const clk = typeof clock === "function" ? clock : null;
+  const identity = new IdentityStore({ path: dbPath, clock: clk || undefined }).open();
+  const runtime = buildRuntime({ identity, clock: clk });
   const managedStore = new ManagedStore({ root: storeRoot });
   managedStore.ensureLayout();
-  const resourceStore = new ResourceStore({ identity });
+  const resourceStore = new ResourceStore({ identity, clock: clk });
   const resourceService = new ResourceService({
     identity,
     resourceStore,
@@ -134,11 +135,12 @@ export function reopenResourceRuntime({ dbPath, storeRoot }) {
     authService: runtime.authService,
     authStore: runtime.authStore,
     deviceService: runtime.deviceService,
+    clock: clk,
   });
-  const searchStore = new SearchStore({ identity });
-  const searchService = new SearchService({ identity, resourceStore, searchStore, managedStore, authService: runtime.authService, authStore: runtime.authStore, deviceService: runtime.deviceService });
-  const previewService = new PreviewService({ identity, resourceStore, searchStore, managedStore, authService: runtime.authService, deviceService: runtime.deviceService, nativeImage: null });
-  const integrationStore = new IntegrationStore({ identity });
+  const searchStore = new SearchStore({ identity, clock: clk });
+  const searchService = new SearchService({ identity, resourceStore, searchStore, managedStore, authService: runtime.authService, authStore: runtime.authStore, deviceService: runtime.deviceService, clock: clk });
+  const previewService = new PreviewService({ identity, resourceStore, searchStore, managedStore, authService: runtime.authService, deviceService: runtime.deviceService, nativeImage: null, clock: clk });
+  const integrationStore = new IntegrationStore({ identity, clock: clk });
   const projectService = new ProjectService({ identity, integrationStore, authService: runtime.authService, resourceStore });
   const canvasService = new CanvasService({ identity, integrationStore, authService: runtime.authService, resourceStore });
   const governanceService = new GovernanceService({ identity, authService: runtime.authService, authStore: runtime.authStore, resourceStore, integrationStore });

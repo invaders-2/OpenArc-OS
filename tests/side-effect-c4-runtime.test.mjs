@@ -13,6 +13,7 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { createToolHarnessFixture, reopenToolHarnessRuntime } from "./fixtures/harness-acp/tool-harness-fixture.mjs";
 import { createRequire } from "node:module";
 
@@ -231,39 +232,77 @@ test("Cold restart rehydrate：绝不用内存中的旧 authority 自我证明�
     const execDir = path.join(root, "executors");
     fs.mkdirSync(execDir, { recursive: true });
 
-    // (a) probe 语义：不存在的 socket / 已关闭的 stale socket → 进程已不存在。
-    assert.equal(await probeUnixSocket(path.join(execDir, "missing.sock")), false);
-    const livePath = path.join(execDir, "live.sock");
-    const server = net.createServer((s) => { try { s.end(); } catch { /* ignore */ } });
-    await new Promise((r) => server.listen(livePath, r));
-    assert.equal(await probeUnixSocket(livePath), true, "真实 bind 的 socket 被视为存活");
-    await new Promise((r) => server.close(r));
-    assert.equal(await probeUnixSocket(livePath), false, "listener 消失后 stale socket 不得视为存活");
+    /** 真实持有一个 unix socket 的 child；SIGKILL 后 socket 文件仍在 = 真实 stale endpoint。 */
+    const holdSocket = async (sockPath) => {
+      const child = spawn(process.execPath, ["-e", "const net=require('node:net');const s=net.createServer(()=>{});s.listen(process.argv[1],()=>process.stdout.write('ready'));", sockPath], { stdio: ["ignore", "pipe", "pipe"] });
+      let out = "";
+      child.stdout.on("data", (d) => { out += d; });
+      const t0 = Date.now();
+      while (!out.includes("ready") && Date.now() - t0 < 15000) await sleep(20);
+      assert.ok(out.includes("ready"), "socket holder 未就绪：" + out);
+      return child;
+    };
+    const killHolder = async (child) => {
+      const done = new Promise((r) => child.on("exit", r));
+      child.kill("SIGKILL");
+      await done;
+    };
 
-    // (b) 上一次进程持久化的 ACTIVE record + socket 已消失 → 新 supervisor 判定 EXITED（OS fact）。
+    // (a) tri-state probe 语义：只有 ENOENT / connect 成功给出确定结论。
+    assert.equal((await probeUnixSocket(path.join(execDir, "missing.sock"))).state, "DEFINITELY_GONE", "endpoint 文件不存在 = definitely gone");
+    const livePath = path.join(execDir, "live.sock");
+    const holder1 = await holdSocket(livePath);
+    assert.equal((await probeUnixSocket(livePath)).state, "ALIVE", "真实 bind 的 socket 被视为存活");
+    await killHolder(holder1);
+    assert.equal(fs.existsSync(livePath), true, "SIGKILL 后 socket 文件仍在（真实 stale endpoint）");
+    assert.equal((await probeUnixSocket(livePath)).state, "UNKNOWN", "listener 被 kill 但 endpoint 文件仍在 → probe 不确定，绝不是 death proof");
+    fs.unlinkSync(livePath);
+    assert.equal((await probeUnixSocket(livePath)).state, "DEFINITELY_GONE", "endpoint 文件不存在才是 definitely gone");
+
+    // (b) 上一次进程持久化的 ACTIVE record + endpoint 文件不存在 → 新 supervisor 判定 EXITED（OS fact）。
     const deadId = "exe_dead0001";
     fs.writeFileSync(path.join(execDir, deadId + ".json"), JSON.stringify({ instanceId: deadId, status: "ACTIVE", socketPath: path.join(execDir, deadId + ".sock"), startedAt: 1, callId: "scall_x", holderId: "e", endedAt: null, exitCode: null, signal: null, reason: null }));
     const fresh = new RuntimeSupervisor({ runtimeDir: root });
-    await fresh.rehydrate();
+    const stats1 = await fresh.rehydrate();
     const verdict = fresh.isQuiesced(deadId);
     assert.equal(verdict.quiesced, true, JSON.stringify(verdict));
     assert.equal(fresh.snapshot().find((r) => r.instanceId === deadId).status, "EXITED");
+    assert.equal(stats1.dead, 1);
+    assert.equal(stats1.unknown, 0);
 
     // (c) 上一次进程遗留的 record + socket 仍存活 → 只能 ACTIVE，绝不 quiesced。
     const aliveId = "exe_alive001";
     const aliveSock = path.join(execDir, aliveId + ".sock");
-    const aliveServer = net.createServer((s) => { try { s.end(); } catch { /* ignore */ } });
-    await new Promise((r) => aliveServer.listen(aliveSock, r));
+    const holder2 = await holdSocket(aliveSock);
     fs.writeFileSync(path.join(execDir, aliveId + ".json"), JSON.stringify({ instanceId: aliveId, status: "ACTIVE", socketPath: aliveSock, startedAt: 1, callId: "scall_y", holderId: "e", endedAt: null, exitCode: null, signal: null, reason: null }));
     const fresh2 = new RuntimeSupervisor({ runtimeDir: root });
-    await fresh2.rehydrate();
+    const stats2 = await fresh2.rehydrate();
     const alive = fresh2.isQuiesced(aliveId);
     assert.equal(alive.quiesced, false, "存活的上一次 executor 绝不能被声明 quiesced");
     assert.equal(alive.reason, "RUNTIME_STILL_ACTIVE");
-    await new Promise((r) => aliveServer.close(r));
+    assert.equal(stats2.alive, 1);
+
+    // (d) holder 被 SIGKILL、endpoint 文件仍在 → probe UNKNOWN → fail closed（绝不 quiesced / 绝不 observeExit）。
+    await killHolder(holder2);
     const fresh3 = new RuntimeSupervisor({ runtimeDir: root });
-    await fresh3.rehydrate();
-    assert.equal(fresh3.isQuiesced(aliveId).quiesced, true, "listener 真实消失后才允许 quiesced");
+    const stats3 = await fresh3.rehydrate();
+    const afterKill = fresh3.isQuiesced(aliveId);
+    assert.equal(afterKill.quiesced, false, "probe 不确定时绝不允许 quiesced");
+    assert.equal(afterKill.reason, "LIVENESS_UNKNOWN");
+    assert.equal(stats3.unknown, 1, "UNKNOWN 必须单独计数，不得归入 dead");
+    assert.equal(stats3.dead, 1, "只有 ENOENT 的 deadId 计入 dead");
+    // persisted record 不得被改写成 EXITED。
+    const persisted = JSON.parse(fs.readFileSync(path.join(execDir, aliveId + ".json"), "utf8"));
+    assert.equal(persisted.status, "ACTIVE", "UNKNOWN probe 不得改写 persisted executor record");
+    assert.notEqual(persisted.reason, "OS_EXECUTOR_ENDPOINT_ABSENT");
+
+    // (e) endpoint 文件真实不存在（ENOENT）→ DEFINITELY_GONE → 才允许 observeExit。
+    fs.unlinkSync(aliveSock);
+    const fresh4 = new RuntimeSupervisor({ runtimeDir: root });
+    const stats4 = await fresh4.rehydrate();
+    assert.equal(fresh4.isQuiesced(aliveId).quiesced, true, "ENOENT 明确证明 endpoint 不存在");
+    assert.equal(stats4.dead, 2);
+    assert.equal(stats4.unknown, 0);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 

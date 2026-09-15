@@ -26,19 +26,20 @@ export const PROVIDER_SECRET = "FAKE_PROVIDER_SECRET_D4_03A_PROBE";
  * 不重建用户 / model config，只重建 authority 链 —— 与 production bootstrap 的顺序一致：
  *   recover() = TaskService.recoverRunning() → SideEffectRuntime.recoverOnStartup()
  */
-export async function reopenToolHarnessRuntime({ dbPath, storeRoot, runtimeDir, executorEntry = null, approvalWaitMs = 400, instanceId = "inst_restart" } = {}) {
-  const base = reopenResourceRuntime({ dbPath, storeRoot });
-  const toolStore = new ToolStore({ identity: base.identity });
+export async function reopenToolHarnessRuntime({ dbPath, storeRoot, runtimeDir, executorEntry = null, approvalWaitMs = 400, instanceId = "inst_restart", clock = null, probeImpl = null } = {}) {
+  const clk = typeof clock === "function" ? clock : null;
+  const base = reopenResourceRuntime({ dbPath, storeRoot, clock: clk });
+  const toolStore = new ToolStore({ identity: base.identity, clock: clk });
   const toolRegistry = new ToolRegistry();
   const adapters = createToolAdapters({ resourceService: base.resourceService, searchService: base.searchService });
-  const taskStore = new TaskStore({ identity: base.identity });
-  const taskService = new TaskService({ identity: base.identity, authService: base.authService, authStore: base.authStore, taskStore });
-  const toolProxy = new ControlledToolProxy({ registry: toolRegistry, toolStore, authService: base.authService, taskStore, adapters });
-  const sideEffectStore = new SideEffectStore({ identity: base.identity });
-  const supervisor = new RuntimeSupervisor({ runtimeDir, executorEntry });
+  const taskStore = new TaskStore({ identity: base.identity, clock: clk });
+  const taskService = new TaskService({ identity: base.identity, authService: base.authService, authStore: base.authStore, taskStore, clock: clk });
+  const toolProxy = new ControlledToolProxy({ registry: toolRegistry, toolStore, authService: base.authService, taskStore, adapters, clock: clk });
+  const sideEffectStore = new SideEffectStore({ identity: base.identity, clock: clk });
+  const supervisor = new RuntimeSupervisor({ runtimeDir, executorEntry, clock: clk, probeImpl });
   await supervisor.rehydrate();
-  const sideEffectAuthority = new SideEffectAuthority({ registry: toolRegistry, sideEffectStore, taskStore, toolStore, authService: base.authService, adapters, taskService, instanceId, lifecycle: supervisor });
-  const sideEffectRuntime = new SideEffectRuntime({ authority: sideEffectAuthority, supervisor, store: sideEffectStore, taskStore, taskService, toolProxy, registry: toolRegistry, resourceStore: base.resourceStore, authService: base.authService, dbPath, storeRoot, approvalWaitMs });
+  const sideEffectAuthority = new SideEffectAuthority({ registry: toolRegistry, sideEffectStore, taskStore, toolStore, authService: base.authService, adapters, taskService, instanceId, lifecycle: supervisor, clock: clk });
+  const sideEffectRuntime = new SideEffectRuntime({ authority: sideEffectAuthority, supervisor, store: sideEffectStore, taskStore, taskService, toolProxy, registry: toolRegistry, resourceStore: base.resourceStore, authService: base.authService, dbPath, storeRoot, approvalWaitMs, clock: clk });
   return {
     ...base, toolStore, toolRegistry, toolProxy, adapters, taskStore, taskService, sideEffectStore, sideEffectAuthority, supervisor, sideEffectRuntime,
     /** production 顺序的两段 recovery。 */
