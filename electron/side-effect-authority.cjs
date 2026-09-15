@@ -77,7 +77,7 @@ function sanitizePreconditions(pre) {
 }
 
 class SideEffectAuthority {
-  constructor({ registry, sideEffectStore, taskStore, toolStore, authService, adapters = null, clock = null, audit = null, taskService = null, instanceId = null, testHooks = null } = {}) {
+  constructor({ registry, sideEffectStore, taskStore, toolStore, authService, adapters = null, clock = null, audit = null, taskService = null, instanceId = null, lifecycle = null, testHooks = null } = {}) {
     if (!registry) throw new Error("SideEffectAuthority 需要 ToolRegistry");
     if (!sideEffectStore) throw new Error("SideEffectAuthority 需要 SideEffectStore");
     if (!taskStore) throw new Error("SideEffectAuthority 需要 TaskStore");
@@ -91,6 +91,8 @@ class SideEffectAuthority {
     this.clock = typeof clock === "function" ? clock : () => Date.now();
     this.audit = typeof audit === "function" ? audit : null;
     this.taskService = taskService || null;
+    // trusted Runtime Quiescence / Liveness Authority：唯一能证明"旧 runtime 已死"的来源。
+    this.lifecycle = lifecycle && typeof lifecycle.isQuiesced === "function" ? lifecycle : null;
     this.instanceId = instanceId || "runtime_" + crypto.randomBytes(6).toString("base64url");
     // test-only seam（构造注入）：绝不由 Renderer / Harness 控制，默认 null，不改变 production 语义。
     this.testHooks = testHooks && typeof testHooks === "object" ? testHooks : null;
@@ -423,6 +425,22 @@ class SideEffectAuthority {
   }
 
   /**
+   * D4-03C3 Closure · trusted quiescence proof。
+   * 只有 RuntimeLifecycleAuthority 真正观测到 origin runtime 退出才 quiesced=true；
+   * 不同 instanceId / 旧 lease EXPIRED / 新进程启动 / 时间流逝 / caller 自报 一律不构成证明。
+   */
+  #quiescenceProof(originRuntimeInstanceId) {
+    const id = originRuntimeInstanceId ? String(originRuntimeInstanceId) : null;
+    if (!id) return { quiesced: false, reason: "NO_ORIGIN_RUNTIME", proof: { type: "NO_ORIGIN_RUNTIME" } };
+    if (id === this.instanceId) return { quiesced: false, reason: "SELF_RUNTIME_ACTIVE", proof: { type: "SELF_RUNTIME_ACTIVE", instanceId: id } };
+    if (!this.lifecycle || typeof this.lifecycle.isQuiesced !== "function") return { quiesced: false, reason: "NO_LIVENESS_AUTHORITY", proof: { type: "NO_LIVENESS_AUTHORITY", instanceId: id } };
+    let verdict = null;
+    try { verdict = this.lifecycle.isQuiesced(id); } catch { verdict = null; }
+    if (!verdict) return { quiesced: false, reason: "LIVENESS_AUTHORITY_UNAVAILABLE", proof: { type: "LIVENESS_AUTHORITY_UNAVAILABLE", instanceId: id } };
+    return { quiesced: verdict.quiesced === true, reason: verdict.reason || null, proof: verdict.proof || { type: "UNKNOWN", instanceId: id } };
+  }
+
+  /**
    * Crash recovery（fail closed）。
    * RUNNING SideEffectCall → UNKNOWN_EFFECT；并通过 Task Authority 将 Step/Task
    * → BLOCKED / RECOVERY_REQUIRED。**没有 production 开关能跳过 blocking**：
@@ -450,16 +468,37 @@ class SideEffectAuthority {
         errors.push({ error: SIDE_EFFECT_ERROR.RECOVERY_REQUIRED, detail: "TASK_SERVICE_UNAVAILABLE" });
       }
     }
+    // D4-03C3 Closure：已持久化 UNKNOWN_EFFECT(quiesced=false) 在真实 cold restart 后，
+    // 只有当 trusted RuntimeLifecycleAuthority 能证明 origin runtime 已死，才升级
+    // non-authoritative recovery evidence（quiesced=false → true）；Call 状态仍保持 UNKNOWN_EFFECT。
+    // 它只回答"旧 execution 是否还可能 late-arrive"，绝不推断 APPLIED / NOT_APPLIED。
+    const unresolved = this.store.callsByStatus(CALL_STATUS.UNKNOWN_EFFECT).filter((c) => c.recoverySafe && c.recoverySafe.quiesced === false);
+    for (const call of unresolved) {
+      const origin = call.recoverySafe.originRuntimeInstanceId || null;
+      const q = this.#quiescenceProof(origin);
+      this.#audit({ toolRef: call.toolId, action: "side_effect.quiescence_checked", decision: q.quiesced ? "CONFIRMED" : "UNPROVEN", reasonCode: q.reason });
+      if (!q.quiesced) {
+        this.store.transactSync(() => this.store.updateCall(call.callId, { recovery_safe: { ...call.recoverySafe, quiescenceReason: q.reason, quiescenceProofType: q.proof ? q.proof.type : null, quiescenceCheckedAt: this.#now() } }));
+        this.#event(call.taskId, "tool.side_effect.quiescence_unproven", { callId: call.callId, originRuntimeInstanceId: origin, reason: q.reason });
+        continue;
+      }
+      this.store.transactSync(() => this.store.updateCall(call.callId, { recovery_safe: { ...call.recoverySafe, quiesced: true, source: "cold_restart_confirmed", proof: q.proof, quiescenceReason: null, confirmedAt: this.#now() } }));
+      this.#audit({ toolRef: call.toolId, action: "side_effect.unknown_effect_quiescence_upgraded", decision: "CONFIRMED", reasonCode: null });
+      this.#event(call.taskId, "tool.side_effect.unknown_effect_quiescence_upgraded", { callId: call.callId, originRuntimeInstanceId: origin, proofType: q.proof ? q.proof.type : null });
+    }
+
     for (const call of running) {
-      // 冷启动：旧 runtime 已死 → 其 in-process execution 不可能 late-arrive（无 detached external worker）。
-      // 同一 runtime 自己 recover（非重启）时旧 lease holder 仍是本 instance → 不视为 quiesced。
       const oldLease = this.store.activeLeaseOfCall(call.callId);
-      const quiesced = !(oldLease && oldLease.holderInstanceId === this.instanceId);
-      const recovery = { quiesced, source: "restart", previousInstanceId: oldLease ? oldLease.holderInstanceId : null, reason: SIDE_EFFECT_ERROR.UNKNOWN_EFFECT, recordedAt: this.#now() };
+      const originRuntimeInstanceId = (oldLease && oldLease.holderInstanceId) || (call.recoverySafe && call.recoverySafe.originRuntimeInstanceId) || null;
+      const originLeaseId = oldLease ? oldLease.leaseId : (call.recoverySafe && call.recoverySafe.originLeaseId) || null;
+      const q = this.#quiescenceProof(originRuntimeInstanceId);
+      const recovery = { quiesced: q.quiesced, source: q.quiesced ? "cold_restart_confirmed" : "unproven", originRuntimeInstanceId, originLeaseId, proof: q.proof, reason: q.reason, recordedAt: this.#now() };
       // 先无条件进入 UNKNOWN_EFFECT（fail closed）。
       this.store.transactSync(() => this.store.updateCall(call.callId, { status: CALL_STATUS.UNKNOWN_EFFECT, error_code: SIDE_EFFECT_ERROR.UNKNOWN_EFFECT, verification_status: null, recovery_safe: recovery }));
+      this.#audit({ toolRef: call.toolId, action: "side_effect.quiescence_checked", decision: q.quiesced ? "CONFIRMED" : "UNPROVEN", reasonCode: q.reason });
       this.#audit({ toolRef: call.toolId, action: "side_effect.unknown_effect", decision: CALL_STATUS.UNKNOWN_EFFECT, reasonCode: SIDE_EFFECT_ERROR.UNKNOWN_EFFECT });
-      this.#event(call.taskId, "tool.side_effect.unknown_effect", { callId: call.callId, toolId: call.toolId });
+      this.#event(call.taskId, "tool.side_effect.unknown_effect", { callId: call.callId, toolId: call.toolId, originRuntimeInstanceId, quiesced: q.quiesced, proofType: q.proof ? q.proof.type : null });
+      this.#event(call.taskId, q.quiesced ? "tool.side_effect.quiescence_confirmed" : "tool.side_effect.quiescence_unproven", { callId: call.callId, originRuntimeInstanceId, reason: q.reason, proofType: q.proof ? q.proof.type : null });
       const task = this.taskStore.taskById(call.taskId);
       const step = call.stepId ? this.taskStore.stepById(call.stepId) : null;
       const blocked = !!task && String(task.status) === "BLOCKED" && (!step || String(step.status) === "BLOCKED");
@@ -539,8 +578,10 @@ class SideEffectAuthority {
     this.store.transactSync(() => {
       const fresh = this.store.callById(callId);
       if (!fresh || fresh.status !== CALL_STATUS.UNKNOWN_EFFECT) { lost = true; updated = fresh; return; }
-      if (terminal) updated = this.store.updateCall(callId, { status: terminal.status, verification_status: terminal.verificationStatus, completed_at: now, error_code: terminal.status === CALL_STATUS.SUCCEEDED ? null : reason, recovery_safe: evidence });
-      else updated = this.store.updateCall(callId, { recovery_safe: evidence });
+      // 保留 origin runtime attribution 等 recovery evidence，只合并 verification outcome。
+      const merged = { ...(call.recoverySafe || {}), ...evidence };
+      if (terminal) updated = this.store.updateCall(callId, { status: terminal.status, verification_status: terminal.verificationStatus, completed_at: now, error_code: terminal.status === CALL_STATUS.SUCCEEDED ? null : reason, recovery_safe: merged });
+      else updated = this.store.updateCall(callId, { recovery_safe: merged });
     });
     if (lost) return { ok: true, duplicate: true, resolved: true, outcome: updated && updated.recoverySafe ? updated.recoverySafe.outcome : null, call: updated };
 
@@ -594,7 +635,15 @@ class SideEffectAuthority {
   #finishUnknownEffect({ call, leaseId, detail }) {
     const now = this.#now();
     // live timeout / ambiguous：底层 operation 可能仍会 late-arrive → quiesced=false。
-    const recovery = { quiesced: false, source: "live", reason: detail || SIDE_EFFECT_ERROR.UNKNOWN_EFFECT, recordedAt: now };
+    // 记录 safe runtime attribution，供后续 cold restart 用 trusted liveness proof 升级（绝不自动推断 effect）。
+    const recovery = {
+      quiesced: false,
+      source: detail === "SIDE_EFFECT_TIMEOUT" ? "live_timeout" : "live_ambiguous",
+      originRuntimeInstanceId: this.instanceId,
+      originLeaseId: leaseId || null,
+      reason: detail || SIDE_EFFECT_ERROR.UNKNOWN_EFFECT,
+      recordedAt: now,
+    };
     const updated = this.store.transactSync(() => this.store.updateCall(call.callId, { status: CALL_STATUS.UNKNOWN_EFFECT, error_code: SIDE_EFFECT_ERROR.UNKNOWN_EFFECT, completed_at: now, recovery_safe: recovery }));
     this.#finalizeLease(call.callId, leaseId, LEASE_STATUS.REVOKED, call.toolId);
     let taskBlocked = false;

@@ -89,6 +89,11 @@ const TASK_EVENT = Object.freeze({
   TOOL_SIDE_EFFECT_VERIFICATION_NOT_APPLIED: "tool.side_effect.verification_not_applied",
   TOOL_SIDE_EFFECT_VERIFICATION_INDETERMINATE: "tool.side_effect.verification_indeterminate",
   TOOL_SIDE_EFFECT_RECOVERY_RESOLVED: "tool.side_effect.recovery_resolved",
+  // D4-03C3 Closure trusted quiescence authority（safe projection only）
+  TOOL_SIDE_EFFECT_QUIESCENCE_CHECKED: "tool.side_effect.quiescence_checked",
+  TOOL_SIDE_EFFECT_QUIESCENCE_CONFIRMED: "tool.side_effect.quiescence_confirmed",
+  TOOL_SIDE_EFFECT_QUIESCENCE_UNPROVEN: "tool.side_effect.quiescence_unproven",
+  TOOL_SIDE_EFFECT_QUIESCENCE_UPGRADED: "tool.side_effect.unknown_effect_quiescence_upgraded",
 });
 const TASK_EVENT_ALL = Object.freeze(Object.values(TASK_EVENT));
 
