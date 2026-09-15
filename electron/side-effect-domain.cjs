@@ -242,6 +242,8 @@ function evaluateExecutionEligibility(snapshot = {}) {
   if (String(lease.status) !== LEASE_STATUS.ACTIVE) return fail(ELIGIBILITY.LEASE_REQUIRED, SIDE_EFFECT_ERROR.LEASE_REQUIRED);
   if (lease.expires_at != null && now >= Number(lease.expires_at)) return fail(ELIGIBILITY.LEASE_REQUIRED, SIDE_EFFECT_ERROR.LEASE_EXPIRED);
   if (s.holderId != null && lease.holder_id !== s.holderId) return fail(ELIGIBILITY.DENIED, SIDE_EFFECT_ERROR.LEASE_NOT_HELD);
+  // D4-03C2 Closure：execution ownership = callId + leaseId + holderId + holderInstanceId。
+  if (s.holderInstanceId != null && lease.holder_instance_id !== s.holderInstanceId) return fail(ELIGIBILITY.DENIED, SIDE_EFFECT_ERROR.LEASE_NOT_HELD);
   pass("lease");
 
   if (s.preconditionsOk === false) return fail(ELIGIBILITY.STALE, SIDE_EFFECT_ERROR.PRECONDITION_CHANGED);

@@ -5,8 +5,11 @@
  * 六层合同落成受信任的 OpenArc Authority。
  * D4-03C1 只判定 eligibility，不执行；D4-03C2 新增**唯一**受控真实写入入口
  * `executeSideEffect`：只有显式声明 executionPolicy = CONTROLLED_REVERSIBLE_WRITE 的
- * contract（本阶段仅 resource.trash）才可能执行，且必须先原子 claim LEASED → RUNNING，
- * 再 dispatch 真实 Domain，最后经真实 Domain verifier PASS 才置 SUCCEEDED。
+ * contract（本阶段仅 resource.trash）才可能执行。execution ownership = callId + leaseId +
+ * holderId + holderInstanceId，四者缺一即 DENY；再在同一 BEGIN IMMEDIATE 事务内重校验
+ * authority snapshot（Task/Step/Run/session/app/tool/resource permission/approval/lease/
+ * precondition）并原子 claim LEASED → RUNNING，只有唯一 claim 成功者 dispatch 真实 Domain，
+ * 最后经真实 Domain verifier PASS 才置 SUCCEEDED。
  *
  * 永久冻结：
  * - callId / idempotencyKey / effectClass / expectedEffects 一律 OpenArc 生成，
@@ -67,7 +70,7 @@ function sanitizePreconditions(pre) {
 }
 
 class SideEffectAuthority {
-  constructor({ registry, sideEffectStore, taskStore, toolStore, authService, adapters = null, clock = null, audit = null, taskService = null, instanceId = null, unknownEffectVerifier = null } = {}) {
+  constructor({ registry, sideEffectStore, taskStore, toolStore, authService, adapters = null, clock = null, audit = null, taskService = null, instanceId = null, unknownEffectVerifier = null, testHooks = null } = {}) {
     if (!registry) throw new Error("SideEffectAuthority 需要 ToolRegistry");
     if (!sideEffectStore) throw new Error("SideEffectAuthority 需要 SideEffectStore");
     if (!taskStore) throw new Error("SideEffectAuthority 需要 TaskStore");
@@ -83,6 +86,8 @@ class SideEffectAuthority {
     this.taskService = taskService || null;
     this.instanceId = instanceId || "runtime_" + crypto.randomBytes(6).toString("base64url");
     this.unknownEffectVerifier = typeof unknownEffectVerifier === "function" ? unknownEffectVerifier : null;
+    // test-only seam（构造注入）：绝不由 Renderer / Harness 控制，默认 null，不改变 production 语义。
+    this.testHooks = testHooks && typeof testHooks === "object" ? testHooks : null;
     this.lastUnknownEffect = null;
   }
 
@@ -363,7 +368,7 @@ class SideEffectAuthority {
   }
 
   /** 完整 Execution Eligibility（只读；不执行任何 mutation）。 */
-  evaluateExecutionEligibility({ context = {}, callId, holderId = null, requestArgumentsHash = null } = {}) {
+  evaluateExecutionEligibility({ context = {}, callId, holderId = null, holderInstanceId = null, requestArgumentsHash = null } = {}) {
     const raw = this.store.rawCallById(callId);
     const call = this.store.callById(callId);
     if (!call) return { ok: false, status: ELIGIBILITY.DENIED, reasonCode: SIDE_EFFECT_ERROR.CALL_NOT_FOUND, call: null };
@@ -393,8 +398,9 @@ class SideEffectAuthority {
       tool,
       authorization,
       approval,
-      lease: lease ? { call_id: lease.callId, status: lease.status, holder_id: lease.holderId, expires_at: lease.expiresAt } : null,
+      lease: lease ? { call_id: lease.callId, status: lease.status, holder_id: lease.holderId, holder_instance_id: lease.holderInstanceId, expires_at: lease.expiresAt } : null,
       holderId,
+      holderInstanceId,
       planHash: call.planHash,
       argumentsHash: call.argumentsHash,
       requestArgumentsHash,
@@ -531,6 +537,54 @@ class SideEffectAuthority {
   }
 
   /**
+   * D4-03C2 Closure · claim 事务内的真实 authority snapshot 重校验（TOCTOU → fail closed）。
+   *
+   * Eligibility(T1) = ELIGIBLE 不是永久 execution authority。Eligibility 与真正 dispatch 之间
+   * 任何 persisted authority state 变化（Task/Step/Run/session/app/tool permission/resource
+   * permission/useByAgent/approval/lease/precondition）都必须在同一 BEGIN IMMEDIATE 事务内
+   * 重新读取并拒绝，0 Domain invocation / 0 mutation。绝不建第二套权限或 execution state。
+   */
+  #verifyAuthoritySnapshot({ callId, call, holderId = null, holderInstanceId = null, now }) {
+    const failWith = (reason) => ({ ok: false, reason });
+    const task = this.taskStore.taskById(call.taskId);
+    if (!task) return failWith(SIDE_EFFECT_ERROR.TASK_NOT_FOUND);
+    if (task.cancel_requested || String(task.status) === "CANCELLED") return failWith(SIDE_EFFECT_ERROR.TASK_CANCELLED);
+    if (String(task.status) !== "RUNNING") return failWith(SIDE_EFFECT_ERROR.TASK_NOT_RUNNING);
+    const actor = this.#resolveAgent(this.#executionContext(task));
+    if (!actor.ok) return failWith(SIDE_EFFECT_ERROR.AUTHORIZATION_REVOKED);
+    if (task.user_id !== actor.user.id) return failWith(SIDE_EFFECT_ERROR.TASK_FORBIDDEN);
+    const app = this.authService.store && typeof this.authService.store.appById === "function" ? this.authService.store.appById(task.app_id) : null;
+    if (!app || String(app.status).toLowerCase() !== "enabled") return failWith(SIDE_EFFECT_ERROR.APP_DISABLED);
+    const step = call.stepId ? this.taskStore.stepById(call.stepId) : null;
+    if (!step || step.task_id !== call.taskId || String(step.status) !== "RUNNING") return failWith(SIDE_EFFECT_ERROR.STEP_NOT_RUNNING);
+    const runs = this.taskStore.harnessRunsOfTask(call.taskId);
+    const latestRunId = runs.length ? runs[runs.length - 1].run_id : null;
+    if (!call.runId || !latestRunId || call.runId !== latestRunId) return failWith(SIDE_EFFECT_ERROR.STALE_RUN);
+    const tool = this.#toolFor(call);
+    if (!tool.ok) return failWith(tool.error === "TOOL_DISABLED" ? SIDE_EFFECT_ERROR.TOOL_DISABLED : tool.error);
+    if (effectClassForRisk(tool.contract.riskClass) !== String(call.effectClass)) return failWith(SIDE_EFFECT_ERROR.TOOL_VERSION_CHANGED);
+    const authorization = this.#authorizeLive({ sessionRef: task.session_ref, appId: task.app_id, preconditions: call.preconditionsSafe }, tool.contract, actor.user.id);
+    if (!authorization.ok) return failWith(SIDE_EFFECT_ERROR.AUTHORIZATION_REVOKED);
+    if (!this.#preconditionsOk(call)) return failWith(SIDE_EFFECT_ERROR.PRECONDITION_CHANGED);
+    const approval = this.store.latestApprovalOfCall(callId);
+    const approvalOk = approval && approval.decision === APPROVAL_DECISION.APPROVED && approval.revokedAt == null && (approval.expiresAt == null || now < Number(approval.expiresAt)) && approval.planHash === call.planHash && (approval.approvedArgumentsHash == null || approval.approvedArgumentsHash === call.argumentsHash);
+    if (!approvalOk) {
+      const reason = !approval ? SIDE_EFFECT_ERROR.APPROVAL_REQUIRED
+        : approval.decision === APPROVAL_DECISION.REVOKED ? SIDE_EFFECT_ERROR.APPROVAL_REVOKED
+        : (approval.expiresAt != null && now >= Number(approval.expiresAt)) ? SIDE_EFFECT_ERROR.APPROVAL_EXPIRED
+        : SIDE_EFFECT_ERROR.PLAN_STALE;
+      return failWith(reason);
+    }
+    const lease = this.store.activeLeaseOfCall(callId);
+    if (!lease || String(lease.status) !== LEASE_STATUS.ACTIVE) return failWith(SIDE_EFFECT_ERROR.LEASE_REQUIRED);
+    if (lease.callId !== callId) return failWith(SIDE_EFFECT_ERROR.LEASE_REQUIRED);
+    if (lease.expiresAt != null && now >= Number(lease.expiresAt)) return failWith(SIDE_EFFECT_ERROR.LEASE_EXPIRED);
+    if (holderId != null && lease.holderId !== holderId) return failWith(SIDE_EFFECT_ERROR.LEASE_NOT_HELD);
+    if (holderInstanceId != null && lease.holderInstanceId !== holderInstanceId) return failWith(SIDE_EFFECT_ERROR.LEASE_NOT_HELD);
+    return { ok: true, leaseId: lease.leaseId };
+  }
+
+  /**
    * D4-03C2 · 受控真实 REVERSIBLE_WRITE 执行入口（只由 OpenArc trusted code 调用，Harness 无权）。
    *
    * 只有显式声明 executionPolicy = CONTROLLED_REVERSIBLE_WRITE 的 contract 才可能执行；
@@ -547,6 +601,10 @@ class SideEffectAuthority {
     const tool = this.#toolFor(call);
     if (!tool.ok) return want(tool.error === "TOOL_DISABLED" ? SIDE_EFFECT_ERROR.TOOL_DISABLED : tool.error);
     if (tool.contract.executionPolicy !== EXECUTION_POLICY.CONTROLLED_REVERSIBLE_WRITE) return want(SIDE_EFFECT_ERROR.WRITE_EXECUTION_DISABLED);
+    // §3/§4：production execution ownership = callId + leaseId + holderId + holderInstanceId。
+    // 缺少任一 execution ownership 字段一律 DENY（0 Domain invocation / 0 mutation），
+    // 绝不允许 omit holderInstanceId 就跳过 instance ownership。
+    if (!leaseId || !holderId || !holderInstanceId) return want(SIDE_EFFECT_ERROR.LEASE_NOT_HELD, { detail: "EXECUTOR_IDENTITY_REQUIRED" });
     if (call.status === CALL_STATUS.SUCCEEDED) return { ok: true, executed: false, duplicate: true, mutationCount: 0, call, result: null, verificationStatus: call.verificationStatus, error: null };
     if (call.status === CALL_STATUS.RUNNING) return want(SIDE_EFFECT_ERROR.EXECUTION_CLAIM_LOST, { duplicate: true });
     if (call.status !== CALL_STATUS.LEASED) return want(SIDE_EFFECT_ERROR.CALL_STATE);
@@ -558,7 +616,7 @@ class SideEffectAuthority {
     if (!adapter || typeof adapter.execute !== "function" || typeof adapter.verify !== "function") return want(SIDE_EFFECT_ERROR.WRITE_EXECUTION_DISABLED);
 
     // 执行前完整 eligibility（tool/run/authorization/approval/lease/precondition 全部实时重查）。
-    const elig = this.evaluateExecutionEligibility({ context: execCtx, callId, holderId });
+    const elig = this.evaluateExecutionEligibility({ context: execCtx, callId, holderId, holderInstanceId });
     if (elig.status !== ELIGIBILITY.ELIGIBLE) {
       this.#audit({ toolRef: call.toolId, action: "side_effect.blocked", decision: "BLOCKED", reasonCode: elig.reasonCode });
       this.#event(call.taskId, "tool.side_effect.execution_blocked", { callId, toolId: call.toolId, reasonCode: elig.reasonCode });
@@ -566,29 +624,33 @@ class SideEffectAuthority {
     }
     const active = this.store.activeLeaseOfCall(callId);
     if (!active) return want(SIDE_EFFECT_ERROR.LEASE_REQUIRED);
-    if (leaseId && active.leaseId !== leaseId) return want(SIDE_EFFECT_ERROR.LEASE_NOT_HELD);
-    if (holderId && active.holderId !== holderId) return want(SIDE_EFFECT_ERROR.LEASE_NOT_HELD);
-    if (holderInstanceId && active.holderInstanceId !== holderInstanceId) return want(SIDE_EFFECT_ERROR.LEASE_NOT_HELD);
+    if (active.leaseId !== leaseId) return want(SIDE_EFFECT_ERROR.LEASE_NOT_HELD);
+    if (active.holderId !== holderId) return want(SIDE_EFFECT_ERROR.LEASE_NOT_HELD);
+    if (active.holderInstanceId !== holderInstanceId) return want(SIDE_EFFECT_ERROR.LEASE_NOT_HELD);
 
-    // 原子 claim：LEASED → RUNNING。唯一成功者才拥有 execution ownership。
+    // test-only seam：在 eligibility 与 claim 之间注入真实 authority state 变化（production 为 null）。
+    if (this.testHooks && typeof this.testHooks.afterEligibilityBeforeClaim === "function") {
+      this.testHooks.afterEligibilityBeforeClaim({ callId, holderId, holderInstanceId, leaseId });
+    }
+
+    // 原子 claim：LEASED → RUNNING，并在同一 BEGIN IMMEDIATE 事务内重校验 authority snapshot。
     const now = this.#now();
     let claim;
     try {
       claim = this.store.transactSync(() => {
         const fresh = this.store.rawCallById(callId);
-        if (!fresh || fresh.status !== CALL_STATUS.LEASED) return { claimed: false, reason: fresh && fresh.status === CALL_STATUS.RUNNING ? SIDE_EFFECT_ERROR.EXECUTION_CLAIM_LOST : SIDE_EFFECT_ERROR.CALL_STATE };
-        const lease = this.store.activeLeaseOfCall(callId);
-        if (!lease || lease.status !== LEASE_STATUS.ACTIVE) return { claimed: false, reason: SIDE_EFFECT_ERROR.LEASE_REQUIRED };
-        if (leaseId && lease.leaseId !== leaseId) return { claimed: false, reason: SIDE_EFFECT_ERROR.LEASE_NOT_HELD };
-        if (holderId && lease.holderId !== holderId) return { claimed: false, reason: SIDE_EFFECT_ERROR.LEASE_NOT_HELD };
-        if (lease.expiresAt != null && now >= Number(lease.expiresAt)) return { claimed: false, reason: SIDE_EFFECT_ERROR.LEASE_EXPIRED };
-        const approval = this.store.latestApprovalOfCall(callId);
-        const approvalOk = approval && approval.decision === APPROVAL_DECISION.APPROVED && approval.revokedAt == null && (approval.expiresAt == null || now < Number(approval.expiresAt)) && approval.planHash === fresh.plan_hash && approval.approvedArgumentsHash === fresh.arguments_hash;
-        if (!approvalOk) return { claimed: false, reason: SIDE_EFFECT_ERROR.APPROVAL_REQUIRED };
+        if (!fresh || fresh.status !== CALL_STATUS.LEASED) {
+          const st = fresh && fresh.status;
+          return { claimed: false, reason: (st === CALL_STATUS.RUNNING || st === CALL_STATUS.SUCCEEDED) ? SIDE_EFFECT_ERROR.EXECUTION_CLAIM_LOST : SIDE_EFFECT_ERROR.CALL_STATE };
+        }
+        const freshCall = this.store.callById(callId);
+        const snap = this.#verifyAuthoritySnapshot({ callId, call: freshCall, holderId, holderInstanceId, now });
+        if (!snap.ok) return { claimed: false, reason: snap.reason };
         this.store.updateCall(callId, { status: CALL_STATUS.RUNNING, started_at: now });
-        return { claimed: true, leaseId: lease.leaseId };
+        return { claimed: true, leaseId: snap.leaseId };
       });
     } catch (e) {
+      // 真实 cross-connection contention 绝不暴露为可 retry 语义；收敛为 CLAIM_LOST。
       if (!this.#isBusy(e)) throw e;
       claim = { claimed: false, reason: SIDE_EFFECT_ERROR.EXECUTION_CLAIM_LOST };
     }
