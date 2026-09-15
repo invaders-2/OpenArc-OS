@@ -1,6 +1,6 @@
 # D4-03C1 · Side-effect Authority / Approval / Lease Contract（macOS）
 
-- **状态**：**D4-03C1 = PASS**、**D4-03C2 = PASS**（含 Closure/Closure-2/Closure-3，已由 ChatGPT 审计）；**D4-03C3 = PASS candidate**（Ambiguous Result / Idempotency / Crash Recovery）；**D4-03C overall = PARTIAL**；**D4-03C4 = 未开始**
+- **状态**：**D4-03C1 = PASS**、**D4-03C2 = PASS**（已由 ChatGPT 审计）；**D4-03C3 = PASS candidate**、**D4-03C3 Closure = PASS candidate**（Ambiguous Result / Idempotency / Crash Recovery + Trusted Quiescence Authority）；**D4-03C overall = PARTIAL**；**D4-03C4 = 未开始**
 - **分支**：feature/d4-03-tool-proxy，基线 809e8fa，未 merge main
 - **日期**：2026-09-15
 
@@ -62,7 +62,24 @@ SideEffectCall → exact historical Tool Contract（toolId + toolVersion + effec
 - **NOT_APPLIED** 只有在 **executionQuiesced = true**（OpenArc trusted fact）时才 → `FAILED` / `verificationStatus = FAIL`。
 - **INDETERMINATE**（resource missing / version changed / state 矛盾 / read failed / verifier unavailable）→ 保持 `UNKNOWN_EFFECT`，不猜。
 
-**Late Result / Timeout Rule**：`"现在没看到 effect" != "effect 永远不会发生"`。live timeout（同 runtime）时 `quiesced = false`，即使 verifier 看到 NOT_APPLIED 也保持 UNKNOWN_EFFECT；只有真实 process crash/restart（旧 runtime 已死 + 新 runtime + 旧 lease 失效）才认定 quiesced。verification 只读，绝不 `execute / retry / restore / delete / repair`，也绝不受当前 session / app / tool disabled 影响（exact historical contract lookup）。Tool disabled ≠ verification disabled。
+**Late Result / Timeout Rule**：`"现在没看到 effect" != "effect 永远不会发生"`。live timeout（同 runtime）时 `quiesced = false`，即使 verifier 看到 NOT_APPLIED 也保持 UNKNOWN_EFFECT；只有 **trusted Runtime Quiescence Authority** 真实观测到 origin runtime 进程退出，才认定 quiesced（见下）。verification 只读，绝不 `execute / retry / restore / delete / repair`，也绝不受当前 session / app / tool disabled 影响（exact historical contract lookup）。Tool disabled ≠ verification disabled。
+
+## Trusted Quiescence Authority（C3 Closure final seal）
+
+永久规则：**different runtime instance != proof that the previous runtime is dead**。
+
+`RuntimeLifecycleAuthority`（trusted，supervisor-level）是唯一能回答
+`"Can an operation owned by <previousRuntimeInstanceId> still produce a late effect?"` 的组件。
+它只在**真实观测到进程退出**（waitpid / child `exit`）后写 `status = EXITED`；`isQuiesced()` 只对 EXITED 返回 true。
+
+- `quiesced` 只能来自该 Authority 的 proof；**禁止**由 Harness / ACP / Model / Tool args / Renderer / IPC / ordinary caller / `holderId` / different instanceId / 旧 lease EXPIRED|REVOKED|RELEASED / time elapsed 单独推导。
+- ***Lease state is not liveness proof***；***Runtime instance mismatch is not liveness proof***。
+- fail closed：无法确认旧 runtime 是否仍活着 → `quiesced = false` → 保持 UNKNOWN_EFFECT / Task BLOCKED / Step BLOCKED，绝不为了让状态“好看”而收敛成 FAILED。
+- live UNKNOWN_EFFECT 持久化 safe runtime attribution：`originRuntimeInstanceId + originLeaseId + source(live_timeout|live_ambiguous) + recordedAt`。
+- `recoverOnStartup()` 额外 reconcile 已持久化的 `UNKNOWN_EFFECT(quiesced=false)`：只有 trusted proof 成立时，才升级 non-authoritative `recovery_safe.quiesced = true`（`source = cold_restart_confirmed`），**Call 状态仍保持 UNKNOWN_EFFECT**。它只回答"旧 execution 是否还可能 late-arrive"，绝不推断 APPLIED / NOT_APPLIED。
+- **Multiple live runtime safety**：Runtime A 仍 live 时，Runtime B 的 recovery 不得声明 quiesced，也不得把早到的 NOT_APPLIED 收敛成 FAILED；A 的 late mutation 到达后仍可 APPLIED → SUCCEEDED。
+- APPLIED 不依赖 quiescence：只要 read-only verifier 可靠看到 desired effect 已存在，即允许 `UNKNOWN_EFFECT → SUCCEEDED`。
+- `AUTO_RETRY = 0`；不因 NOT_APPLIED / cold restart / runtime death proof 而 retry 或自动重新 acquire lease。
 
 UNKNOWN_EFFECT 不能 `acquireLease` / `executeSideEffect`；recovery 收敛后 Task/Step **保持 BLOCKED**（Explicit Resume = DEFERRED，禁止自动 resume/restart/rerun）。
 
@@ -150,4 +167,4 @@ Audit：`side_effect.planned / approval_requested / approved / denied / approval
 
 ## 下一步
 
-`D4-03C3` 已建立真实 ambiguous-result / crash recovery / idempotency 收敛。**`D4-03C4` = 未开始**，由 ChatGPT 审计后决定，禁止自动进入。
+`D4-03C3` 已建立真实 ambiguous-result / crash recovery / idempotency 收敛，并由 trusted Runtime Quiescence Authority 保证"不同 runtime instance 不等于已死证明"。**`D4-03C4` = 未开始**，由 ChatGPT 审计后决定，禁止自动进入。
