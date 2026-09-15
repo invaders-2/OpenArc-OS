@@ -1,6 +1,6 @@
 # D4-03 · Controlled Tool Proxy（macOS）
 
-- **状态**：**D4-03A = PASS**；**D4-03B 执行引擎 = PASS / overall = PASS**（official dsh tool 暴露 + 真实执行 E2E 均 VERIFIED）；**D4-03 overall = PASS**；**D4-03C = CONDITIONAL GO**
+- **状态**：**D4-03A = PASS**；**D4-03B = PASS**（official dsh tool 暴露 + 真实执行 E2E）；**D4-03C1 = PASS**（side-effect authority / approval / lease contract，0 real WRITE）；**D4-03 overall = PARTIAL**（C2 未做）；**D4-03C2 = 下一阶段**
 - **分支**：feature/d4-03-tool-proxy，基线 feature/d4-02-task-harness @ 5d37d64，未 merge main
 - **日期**：2026-09-15
 
@@ -36,6 +36,8 @@ v11：task_tool_proposals（proposal_id/task_id/step_id/run_id/tool_id/tool_vers
 
 v12（D4-03B）：tool_executions（execution_id/proposal_id/decision_id/task_id/step_id/run_id/tool_id/tool_version/status/started_at/completed_at/result_ref/result_hash/verification_status/error_code，UNIQUE(proposal_id)）。Tool Facade capability / Model Proxy capability 都不落库。
 
+v13（D4-03C1）：side_effect_calls（call_id/proposal_id/decision_id/task_id/step_id/run_id/tool_id/tool_version/arguments_hash/plan_hash/idempotency_key/effect_class/status/preconditions_safe/expected_effects_safe/timestamps/verification_status/error_code，UNIQUE(call_id)+UNIQUE(idempotency_key)）、tool_approvals、side_effect_leases。只存 safe refs + hash + 状态机。
+
 ## Stale / Terminal / Cancel
 
 proposal 属于旧 run → BLOCKED TOOL_PROPOSAL_STALE。Task 已 SUCCEEDED/FAILED → DENIED TASK_TERMINAL；CANCELLED / cancel_requested → BLOCKED TASK_CANCELLED。decision 绑定 taskRevision；revision 变化必须重新授权，不复用旧 decision。
@@ -58,4 +60,4 @@ SCHEMA_VERSION = 11，v10 之上加 task_tool_proposals / tool_decisions。v1→
 
 ## Remaining
 
-D4-03B Controlled Read-only Execution = PASS（official dsh tool 暴露 + 真实 tool_call 执行 E2E）。D4-03C Side-effect Lease / Approval / Idempotency / Unknown Effect = CONDITIONAL GO（人工开启后实施）。D4-02B 遗留（OS-level network isolation / external workspace read audit / malformed ACP injection / Windows / External Provider）继续挂账，不因 D4-03 关闭。
+D4-03B = PASS；D4-03C1 Side-effect Authority / Approval / Lease Contract = PASS（0 real WRITE）。D4-03C overall = PARTIAL；D4-03C2 Controlled Reversible Write 才第一次允许真实 REVERSIBLE_WRITE。D4-02B 遗留（OS-level network isolation / external workspace read audit / malformed ACP injection / Windows / External Provider）继续挂账，不因 D4-03 关闭。
