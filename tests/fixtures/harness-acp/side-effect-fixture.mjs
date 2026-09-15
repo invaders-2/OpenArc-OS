@@ -20,6 +20,7 @@ export async function createSideEffectFixture(opts = {}) {
   const approve = (callId, o = {}) => authority.approveSideEffect({ context: o.context || userCtx(), callId, ...(o.ttlMs ? { ttlMs: o.ttlMs } : {}) });
   const deny = (callId, o = {}) => authority.denySideEffect({ context: o.context || userCtx(), callId });
   const revokeApproval = (callId, o = {}) => authority.revokeApproval({ context: o.context || userCtx(), callId });
+  const lifecycle = authority.lifecycle || null;
   const SideEffectAuthority = authority.constructor;
   /**
    * lease（测试夹具）：
@@ -87,5 +88,5 @@ export async function createSideEffectFixture(opts = {}) {
     const l = p.ok ? lease(p.call.callId, { holderId, ...(instanceId ? { instanceId } : {}) }) : null;
     return { prop, plan: p, approval: a, lease: l, callId: p.ok ? p.call.callId : null };
   }
-  return { fx, harness: fx, authority, store, toolStore: fx.toolStore, toolRegistry: fx.toolRegistry, taskStore: fx.taskStore, authService: fx.f.authService, adapters: fx.adapters, toolProxy: fx.toolProxy, taskService: fx.taskService, identity: fx.f.identity, grantTool: fx.grantTool, grantUserResource: fx.grantUserResource, createResource: fx.createResource, ctx, userCtx, aliceUserCtx, setupRun, plan, approve, deny, revokeApproval, lease, elig, registerResourceWriteTool, setupTrash, precondition, restoreTrash, trashFlow };
+  return { fx, harness: fx, authority, lifecycle, store, toolStore: fx.toolStore, toolRegistry: fx.toolRegistry, taskStore: fx.taskStore, authService: fx.f.authService, adapters: fx.adapters, toolProxy: fx.toolProxy, taskService: fx.taskService, identity: fx.f.identity, grantTool: fx.grantTool, grantUserResource: fx.grantUserResource, createResource: fx.createResource, ctx, userCtx, aliceUserCtx, setupRun, plan, approve, deny, revokeApproval, lease, elig, registerResourceWriteTool, setupTrash, precondition, restoreTrash, trashFlow };
 }

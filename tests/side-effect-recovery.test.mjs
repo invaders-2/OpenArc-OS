@@ -5,9 +5,18 @@ import { createRequire } from "node:module";
 import { createSideEffectFixture, WRITE_TOOL } from "./fixtures/harness-acp/side-effect-fixture.mjs";
 const require = createRequire(import.meta.url);
 const { SideEffectAuthority } = require("../electron/side-effect-authority.cjs");
+const { RuntimeLifecycleAuthority } = require("../electron/runtime-lifecycle-authority.cjs");
 
-async function leased(instanceId = "instA") {
-  const fx = await createSideEffectFixture();
+/** trusted liveness proof：origin runtime 的进程退出被 supervisor 真实观测到。 */
+function exitedLifecycle(instanceId = "instA") {
+  const lifecycle = new RuntimeLifecycleAuthority();
+  lifecycle.registerRuntime(instanceId);
+  lifecycle.observeExit(instanceId, { exitCode: 0 });
+  return lifecycle;
+}
+
+async function leased(instanceId = "instA", opts = {}) {
+  const fx = await createSideEffectFixture(opts);
   const run = fx.setupRun();
   const p = await fx.plan(WRITE_TOOL, { target: "doc-1" }, run);
   assert.equal(p.ok, true, JSON.stringify(p));
@@ -76,7 +85,7 @@ test("verifyUnknownEffect：无 verifier → VERIFICATION_NOT_AVAILABLE 且保�
 });
 
 test("verifyUnknownEffect：走 allowlisted adapter 的 read-only recovery verifier（APPLIED → SUCCEEDED，NOT_APPLIED + quiesced → FAILED）", async () => {
-  const { fx, call } = await leased("instA");
+  const { fx, call } = await leased("instA", { sideEffectLifecycle: exitedLifecycle("instA") });
   try {
     fx.store.transactSync(() => fx.store.updateCall(call.callId, { status: "RUNNING" }));
     fx.authority.recoverOnStartup(); // 冷启动 → recovery_safe.quiesced = true
@@ -93,7 +102,7 @@ test("verifyUnknownEffect：走 allowlisted adapter 的 read-only recovery verif
     assert.equal(again.duplicate, true);
     assert.equal(fx.store.callById(call.callId).status, "SUCCEEDED");
     // NOT_APPLIED + quiesced → FAILED（另一个 call）。
-    const second = await leased("instA");
+    const second = await leased("instA", { sideEffectLifecycle: exitedLifecycle("instA") });
     try {
       second.fx.store.transactSync(() => second.fx.store.updateCall(second.call.callId, { status: "RUNNING" }));
       second.fx.authority.recoverOnStartup();

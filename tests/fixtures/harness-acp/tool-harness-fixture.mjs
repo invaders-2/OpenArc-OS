@@ -22,7 +22,7 @@ export async function createToolHarnessFixture(opts = {}) {
   const toolProxy = new ControlledToolProxy({ registry: toolRegistry, toolStore, authService: base.f.authService, taskStore: base.taskStore, adapters, clock: base.f.clock });
   const sideEffectClock = typeof opts.sideEffectClock === "function" ? opts.sideEffectClock : base.f.clock;
   const sideEffectStore = new SideEffectStore({ identity: base.f.identity, clock: sideEffectClock });
-  const sideEffectAuthority = new SideEffectAuthority({ registry: toolRegistry, sideEffectStore, taskStore: base.taskStore, toolStore, authService: base.f.authService, adapters, clock: sideEffectClock, taskService: base.taskService, instanceId: opts.sideEffectInstanceId || "inst_test", testHooks: opts.sideEffectTestHooks || null });
+  const sideEffectAuthority = new SideEffectAuthority({ registry: toolRegistry, sideEffectStore, taskStore: base.taskStore, toolStore, authService: base.f.authService, adapters, clock: sideEffectClock, taskService: base.taskService, instanceId: opts.sideEffectInstanceId || "inst_test", lifecycle: opts.sideEffectLifecycle || null, testHooks: opts.sideEffectTestHooks || null });
   return {
     ...base, toolStore, toolRegistry, toolProxy, adapters, sideEffectStore, sideEffectAuthority,
     /** 用 synthetic ACP tool proposal fixture 充当 Harness。*/

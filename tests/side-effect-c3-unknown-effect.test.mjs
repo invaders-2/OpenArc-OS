@@ -7,8 +7,19 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { createSideEffectFixture, TRASH_TOOL } from "./fixtures/harness-acp/side-effect-fixture.mjs";
 import { PROVIDER_SECRET } from "./fixtures/harness-acp/task-harness-fixture.mjs";
+const require = createRequire(import.meta.url);
+const { RuntimeLifecycleAuthority } = require("../electron/runtime-lifecycle-authority.cjs");
+
+/** trusted liveness proof：instA 的进程退出被 supervisor 真实观测到。 */
+function exitedLifecycle(instanceId = "instA") {
+  const lifecycle = new RuntimeLifecycleAuthority();
+  lifecycle.registerRuntime(instanceId);
+  lifecycle.observeExit(instanceId, { exitCode: 0 });
+  return lifecycle;
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const TABLES = ["side_effect_calls", "tool_approvals", "side_effect_leases", "task_tool_proposals", "tool_decisions", "tool_executions", "task_events", "authorization_audit", "resource_registry", "library_resources"];
@@ -22,7 +33,8 @@ function patchDelete(fx, impl) {
 
 /** 冷启动 UNKNOWN_EFFECT：lease 属于 instA，当前 runtime(inst_test) 恢复 → quiesced=true。 */
 async function coldUnknown() {
-  const fx = await createSideEffectFixture();
+  // cold restart：origin runtime(instA) 必须由 trusted lifecycle authority 证明已退出。
+  const fx = await createSideEffectFixture({ sideEffectLifecycle: exitedLifecycle("instA") });
   const sc = await fx.setupTrash();
   const flow = await fx.trashFlow({ ref: sc.resourceRef, run: sc.run, instanceId: "instA" });
   const l = flow.lease.lease;
@@ -93,7 +105,7 @@ test("NOT_APPLIED + quiesced（cold restart）→ FAILED；Task/Step 保持 BLOC
 });
 
 test("APPLIED（cold restart，mutation 已提交）→ SUCCEEDED，0 replay / 0 retry", async () => {
-  const fx = await createSideEffectFixture();
+  const fx = await createSideEffectFixture({ sideEffectLifecycle: exitedLifecycle("instA") });
   try {
     const sc = await fx.setupTrash();
     const flow = await fx.trashFlow({ ref: sc.resourceRef, run: sc.run, instanceId: "instA" });

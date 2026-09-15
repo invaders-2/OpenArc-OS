@@ -27,6 +27,15 @@ const { ToolRegistry } = require("../electron/tool-registry.cjs");
 const { SideEffectStore } = require("../electron/side-effect-store.cjs");
 const { SideEffectAuthority } = require("../electron/side-effect-authority.cjs");
 const { createToolAdapters } = require("../electron/tool-adapters.cjs");
+const { RuntimeLifecycleAuthority } = require("../electron/runtime-lifecycle-authority.cjs");
+
+/** trusted liveness proof：child runtime 的进程退出被 supervisor 真实观测到。 */
+function exitedLifecycle(instanceId = "instA") {
+  const lifecycle = new RuntimeLifecycleAuthority();
+  lifecycle.registerRuntime(instanceId);
+  lifecycle.observeExit(instanceId, { exitCode: 7 });
+  return lifecycle;
+}
 
 const CRASH_EXECUTOR = path.join(import.meta.dirname, "fixtures", "harness-acp", "crash-executor.mjs");
 
@@ -64,7 +73,7 @@ function spawnCrash(args) {
   box.messages = () => box.stdout.trim().split("\n").filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
   return box;
 }
-function reopenRuntimeFull(s, instanceId) {
+function reopenRuntimeFull(s, instanceId, lifecycle = null) {
   const identity = new IdentityStore({ path: s.dbPath, clock: () => s.now }).open();
   const authStore = new AuthorizationStore({ identity, clock: () => s.now });
   const authService = new AuthorizationService({ identity, authStore });
@@ -80,7 +89,7 @@ function reopenRuntimeFull(s, instanceId) {
   const registry = new ToolRegistry();
   const toolStore = new ToolStore({ identity });
   const sideEffectStore = new SideEffectStore({ identity });
-  const authority = new SideEffectAuthority({ registry, sideEffectStore, taskStore, toolStore, authService, adapters: createToolAdapters({ resourceService }), clock: () => s.now, taskService, instanceId });
+  const authority = new SideEffectAuthority({ registry, sideEffectStore, taskStore, toolStore, authService, adapters: createToolAdapters({ resourceService }), clock: () => s.now, taskService, instanceId, lifecycle });
   return { identity, authority, sideEffectStore, taskStore, toolStore, resourceService, deleteCalls: () => calls, close: () => identity.close() };
 }
 async function runCrash(s, crashPoint) {
@@ -97,7 +106,7 @@ test("Crash before dispatch：restart → UNKNOWN_EFFECT → NOT_APPLIED + quies
   try {
     const crashMsg = await runCrash(s, "before_dispatch");
     assert.equal(crashMsg.deleteCalls, 0);
-    const B = reopenRuntimeFull(s, "instB");
+    const B = reopenRuntimeFull(s, "instB", exitedLifecycle("instA"));
     try {
       const rec = B.authority.recoverOnStartup();
       assert.equal(rec.unknownEffectCalls.length, 1, JSON.stringify(rec));
@@ -122,7 +131,7 @@ test("Crash after real mutation（C3 关键 E2E）→ restart → UNKNOWN_EFFECT
   try {
     const crashMsg = await runCrash(s, "after_mutation");
     assert.equal(crashMsg.deleteCalls, 1, "mutation 已提交");
-    const B = reopenRuntimeFull(s, "instB");
+    const B = reopenRuntimeFull(s, "instB", exitedLifecycle("instA"));
     try {
       B.authority.recoverOnStartup();
       assert.equal(B.sideEffectStore.callById(s.callId).status, "UNKNOWN_EFFECT");
@@ -147,7 +156,7 @@ test("Crash after verification before final persist → APPLIED → SUCCEEDED，
   try {
     const crashMsg = await runCrash(s, "after_verification");
     assert.equal(crashMsg.deleteCalls, 1);
-    const B = reopenRuntimeFull(s, "instB");
+    const B = reopenRuntimeFull(s, "instB", exitedLifecycle("instA"));
     try {
       B.authority.recoverOnStartup();
       const v = await B.authority.verifyUnknownEffect({ callId: s.callId });
@@ -164,7 +173,7 @@ test("Crash after SUCCEEDED before lease finalize → Call remains SUCCEEDED，�
   try {
     const crashMsg = await runCrash(s, "after_succeeded");
     assert.equal(crashMsg.deleteCalls, 1);
-    const B = reopenRuntimeFull(s, "instB");
+    const B = reopenRuntimeFull(s, "instB", exitedLifecycle("instA"));
     try {
       B.authority.recoverOnStartup();
       const call = B.sideEffectStore.callById(s.callId);
@@ -182,7 +191,7 @@ test("Idempotency across restart：same callId / idempotencyKey，无第二个 c
   const s = await setupTrashCall();
   try {
     await runCrash(s, "after_mutation");
-    const B = reopenRuntimeFull(s, "instB");
+    const B = reopenRuntimeFull(s, "instB", exitedLifecycle("instA"));
     try {
       B.authority.recoverOnStartup();
       const v = await B.authority.verifyUnknownEffect({ callId: s.callId });
