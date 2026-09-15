@@ -72,6 +72,12 @@ const TASK_EVENT = Object.freeze({
   TOOL_EXECUTION_SUCCEEDED: "tool.execution.succeeded",
   TOOL_EXECUTION_FAILED: "tool.execution.failed",
   TOOL_VERIFICATION_FAILED: "tool.verification.failed",
+  // D4-03C1 side-effect authority
+  TOOL_SIDE_EFFECT_PLANNED: "tool.side_effect.planned",
+  TOOL_APPROVED: "tool.approved",
+  TOOL_LEASE_ACQUIRED: "tool.lease_acquired",
+  TOOL_EXECUTION_ELIGIBLE: "tool.execution_eligible",
+  TOOL_SIDE_EFFECT_UNKNOWN_EFFECT: "tool.side_effect.unknown_effect",
 });
 const TASK_EVENT_ALL = Object.freeze(Object.values(TASK_EVENT));
 

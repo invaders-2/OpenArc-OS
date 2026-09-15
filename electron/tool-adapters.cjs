@@ -35,8 +35,17 @@ function createToolAdapters({ resourceService = null, searchService = null, extr
   const providers = {};
 
   providers.test = {
-    toolIds: ["test.echo"],
+    toolIds: ["test.echo", "test.write", "test.noverify"],
     async prepare() { return { plan: { dryRun: false, provider: "test" } }; },
+    /** D4-03C1：side-effect 只读 plan，生成 targets/preconditions/expectedEffects；mutation = 0。 */
+    async plan({ args }) {
+      const target = clip(String((args && args.target) || ""), 100);
+      return {
+        targets: [target],
+        preconditions: { targetRef: target, targetType: "test-target" },
+        expectedEffects: [{ action: "update", target, description: "Update test target '" + target + "'" }],
+      };
+    },
     async execute({ args }) { return { ok: true, result: { echo: clip(String((args && args.message) || ""), MAX_STRING) } }; },
     async verify({ result }) { return { ok: !!(result && typeof result.echo === "string"), detail: { echoLength: result && result.echo ? result.echo.length : 0 } }; },
   };

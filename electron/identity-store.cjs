@@ -51,7 +51,7 @@ const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domai
  * 迁移按版本逐级前进，每一级各自是一个原子事务：任何一级失败只回滚该级，
  * 不会留下"user_version 已升级但表不完整"的半状态（§55）。
  */
-const SCHEMA_VERSION = 12;
+const SCHEMA_VERSION = 13;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -986,6 +986,77 @@ CREATE UNIQUE INDEX idx_tool_executions_proposal ON tool_executions(proposal_id)
 CREATE INDEX idx_tool_executions_task ON tool_executions(task_id, started_at);
 `;
 
+/**
+ * v13（D4-03C1）· Side-effect Authority / Approval / Lease Contract。
+ *
+ * side_effect_calls / tool_approvals / side_effect_leases。只存 safe refs + hash +
+ * 状态机；**绝不存 credential / proxy capability / tool facade capability /
+ * raw Authorization / full unsafe tool payload**。C1 只到 LEASED/ELIGIBLE，不真实写。
+ */
+const SCHEMA_V13_SQL = `
+CREATE TABLE side_effect_calls (
+  call_id                 TEXT PRIMARY KEY,
+  proposal_id             TEXT,
+  decision_id             TEXT,
+  task_id                 TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
+  step_id                 TEXT,
+  run_id                  TEXT,
+  tool_id                 TEXT NOT NULL,
+  tool_version            INTEGER NOT NULL,
+  arguments_hash          TEXT,
+  plan_hash               TEXT,
+  idempotency_key         TEXT,
+  effect_class            TEXT NOT NULL CHECK (effect_class IN ('REVERSIBLE_WRITE','IRREVERSIBLE_WRITE','EXTERNAL_SIDE_EFFECT','PRIVILEGED')),
+  status                  TEXT NOT NULL CHECK (status IN ('PLANNED','AWAITING_APPROVAL','APPROVED','LEASED','RUNNING','SUCCEEDED','FAILED','CANCELLED','BLOCKED','UNKNOWN_EFFECT')),
+  preconditions_safe      TEXT,
+  expected_effects_safe   TEXT,
+  created_at              INTEGER NOT NULL,
+  updated_at              INTEGER NOT NULL,
+  authorized_at           INTEGER,
+  approved_at             INTEGER,
+  leased_at               INTEGER,
+  started_at              INTEGER,
+  completed_at            INTEGER,
+  verification_status     TEXT,
+  error_code              TEXT
+);
+CREATE UNIQUE INDEX idx_side_effect_calls_idempotency ON side_effect_calls(idempotency_key) WHERE idempotency_key IS NOT NULL;
+CREATE INDEX idx_side_effect_calls_task ON side_effect_calls(task_id, created_at);
+CREATE INDEX idx_side_effect_calls_status ON side_effect_calls(status, updated_at);
+
+CREATE TABLE tool_approvals (
+  approval_id               TEXT PRIMARY KEY,
+  call_id                   TEXT NOT NULL REFERENCES side_effect_calls(call_id) ON DELETE CASCADE,
+  actor_user_id             TEXT,
+  session_ref               TEXT,
+  decision                  TEXT NOT NULL CHECK (decision IN ('APPROVED','DENIED','REVOKED','EXPIRED')),
+  plan_hash                 TEXT,
+  approved_tool_id          TEXT,
+  approved_tool_version     INTEGER,
+  approved_arguments_hash   TEXT,
+  approved_effect_class     TEXT,
+  approved_expected_effects TEXT,
+  created_at                INTEGER NOT NULL,
+  expires_at                INTEGER,
+  revoked_at                INTEGER
+);
+CREATE INDEX idx_tool_approvals_call ON tool_approvals(call_id, created_at);
+
+CREATE TABLE side_effect_leases (
+  lease_id            TEXT PRIMARY KEY,
+  call_id             TEXT NOT NULL REFERENCES side_effect_calls(call_id) ON DELETE CASCADE,
+  holder_id           TEXT NOT NULL,
+  holder_instance_id  TEXT,
+  status              TEXT NOT NULL CHECK (status IN ('ACTIVE','RELEASED','EXPIRED','REVOKED')),
+  issued_at           INTEGER NOT NULL,
+  expires_at          INTEGER,
+  released_at         INTEGER,
+  revoked_at          INTEGER
+);
+CREATE INDEX idx_side_effect_leases_call ON side_effect_leases(call_id, status);
+CREATE INDEX idx_side_effect_leases_holder ON side_effect_leases(holder_id, status);
+`;
+
 const MIGRATIONS = Object.freeze([
   { version: 1, sql: SCHEMA_SQL },
   { version: 2, sql: SCHEMA_V2_SQL },
@@ -999,6 +1070,7 @@ const MIGRATIONS = Object.freeze([
   { version: 10, sql: SCHEMA_V10_SQL },
   { version: 11, sql: SCHEMA_V11_SQL },
   { version: 12, sql: SCHEMA_V12_SQL },
+  { version: 13, sql: SCHEMA_V13_SQL },
 ]);
 
 const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000; // 12h 绝对上限

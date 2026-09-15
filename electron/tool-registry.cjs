@@ -13,7 +13,9 @@ const crypto = require("node:crypto");
 const domain = require("./tool-domain.cjs");
 const { RISK_CLASS, SIDE_EFFECT, TOOL_ERROR, isWellFormedToolId, approvalRequiredForRisk, sideEffectForRisk } = domain;
 
-const CONTRACT_FIELDS = ["toolId", "version", "displayName", "description", "inputSchema", "outputSchema", "riskClass", "sideEffect", "requiresApproval", "requiredPermissions", "resourceActions", "executionProvider", "enabled", "expectedSideEffects"];
+const CONTRACT_FIELDS = ["toolId", "version", "displayName", "description", "inputSchema", "outputSchema", "riskClass", "sideEffect", "requiresApproval", "requiredPermissions", "resourceActions", "executionProvider", "enabled", "expectedSideEffects",
+  // D4-03C1：write contract 必须显式声明 side-effect authority 合同。
+  "idempotencySupport", "verificationStrategy", "approvalPolicy", "leasePolicy"];
 
 /** 极简 JSON Schema 子集校验器：object/string/integer/number/boolean/array + additionalProperties:false。*/
 function validateSchema(schema, value, path = "$") {
@@ -85,6 +87,30 @@ const BUILTIN_CONTRACTS = Object.freeze([
     executionProvider: "test",
     enabled: true,
     expectedSideEffects: ["writes test target (dry-run only in D4-03A; never executed)"],
+    idempotencySupport: true,
+    verificationStrategy: "READ_AFTER_WRITE",
+    approvalPolicy: "ONE_CALL",
+    leasePolicy: "SINGLE_ACTIVE",
+  },
+  {
+    toolId: "test.noverify",
+    version: 1,
+    displayName: "Test Write without verification (C1 boundary probe)",
+    description: "测试专用：REVERSIBLE_WRITE 但无 verificationStrategy → 永久 SIDE_EFFECT_VERIFICATION_UNAVAILABLE。",
+    inputSchema: { type: "object", additionalProperties: false, properties: { target: { type: "string", minLength: 1, maxLength: 100 } }, required: ["target"] },
+    outputSchema: { type: "object", additionalProperties: false, properties: { ok: { type: "boolean" } }, required: ["ok"] },
+    riskClass: RISK_CLASS.REVERSIBLE_WRITE,
+    sideEffect: SIDE_EFFECT.WRITE,
+    requiresApproval: true,
+    requiredPermissions: [],
+    resourceActions: [],
+    executionProvider: "test",
+    enabled: true,
+    expectedSideEffects: ["never executed: no verification strategy"],
+    idempotencySupport: true,
+    verificationStrategy: null,
+    approvalPolicy: "ONE_CALL",
+    leasePolicy: "SINGLE_ACTIVE",
   },
   {
     toolId: "resource.read.metadata",
@@ -186,7 +212,15 @@ class ToolRegistry {
     if (contract.sideEffect && !domain.SIDE_EFFECT_ALL.includes(contract.sideEffect)) throw new Error("invalid sideEffect: " + contract.sideEffect);
     if (contract.inputSchema && contract.inputSchema.type !== "object") throw new Error("inputSchema must be object");
     if (this.tools.has(this.key(toolId, version))) throw new Error("duplicate tool contract: " + this.key(toolId, version));
-    const normalized = frozenContract({ sideEffect: sideEffectForRisk(contract.riskClass), requiresApproval: approvalRequiredForRisk(contract.riskClass), ...contract, toolId, version });
+    const normalized = frozenContract({
+      sideEffect: sideEffectForRisk(contract.riskClass),
+      requiresApproval: approvalRequiredForRisk(contract.riskClass),
+      idempotencySupport: contract.idempotencySupport !== undefined ? !!contract.idempotencySupport : false,
+      verificationStrategy: contract.verificationStrategy || null,
+      approvalPolicy: contract.approvalPolicy || (contract.riskClass === RISK_CLASS.READ_ONLY ? "NONE" : "ONE_CALL"),
+      leasePolicy: contract.leasePolicy || (contract.riskClass === RISK_CLASS.READ_ONLY ? "NONE" : "SINGLE_ACTIVE"),
+      ...contract, toolId, version,
+    });
     this.tools.set(this.key(toolId, version), normalized);
     return normalized;
   }
