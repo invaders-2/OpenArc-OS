@@ -5,6 +5,8 @@ const require = createRequire(import.meta.url);
 
 export const WRITE_TOOL = "test.write";
 export const NOVERIFY_TOOL = "test.noverify";
+// D4-03C2：第一条 production REVERSIBLE_WRITE tool（真实 Resource Domain）。
+export const TRASH_TOOL = "resource.trash";
 
 export async function createSideEffectFixture(opts = {}) {
   const fx = await createToolHarnessFixture({ withAdapters: true, ...opts });
@@ -44,5 +46,28 @@ export async function createSideEffectFixture(opts = {}) {
     };
     return contract;
   }
-  return { fx, harness: fx, authority, store, toolStore: fx.toolStore, toolRegistry: fx.toolRegistry, taskStore: fx.taskStore, authService: fx.f.authService, adapters: fx.adapters, toolProxy: fx.toolProxy, taskService: fx.taskService, identity: fx.f.identity, grantTool: fx.grantTool, grantUserResource: fx.grantUserResource, createResource: fx.createResource, ctx, userCtx, aliceUserCtx, setupRun, plan, approve, deny, revokeApproval, lease, elig, registerResourceWriteTool };
+  /** D4-03C2：给 app/user 授予 resource.delete + tool.resource.trash，建立真实 trash 场景。 */
+  async function setupTrash({ resourceName = "C2 Trash Target", context = null } = {}) {
+    const created = await fx.createResource(resourceName);
+    const resourceRef = created.resource.resourceRef;
+    const resourceId = created.resource.resourceId;
+    const toolGrant = fx.grantTool("ai", ["tool.resource.trash"]);
+    const appGrant = fx.f.authService.grantAppResourcePermission({ context: fx.f.adminCtx(), appId: "ai", resourceId, actions: ["resource.delete"] });
+    const userGrant = fx.grantUserResource(resourceId, fx.f.users.admin, ["resource.delete", "resource.useByAgent"]);
+    return { created, resourceRef, resourceId, toolGrant, appGrant, userGrant, run: fx.dshRunSetup(context) };
+  }
+  /** 只读真实 Domain precondition 快照（测试验证用）。 */
+  const precondition = (resourceRef) => fx.f.resourceService.sideEffectPrecondition({ resourceRef });
+  /** trusted Domain restore：仅用于证明 trash 可逆，不开放 resource.restore Tool。 */
+  const restoreTrash = (resourceRef) => fx.f.resourceService.restore({ context: fx.f.adminCtx(), resourceRef });
+  /** 真实 trash authority 流程：proposal → plan → approve → lease。 */
+  async function trashFlow({ ref, run, ttlMs = undefined, holderId = "exec_1", instanceId = undefined, proposeArguments = undefined } = {}) {
+    const args = proposeArguments || { resourceRef: ref };
+    const prop = fx.toolProxy.propose({ context: fx.ctx(), taskId: run.taskId, stepId: run.stepId, runId: run.runId, toolId: TRASH_TOOL, toolVersion: 1, arguments: args });
+    const p = await authority.planSideEffect({ context: fx.ctx(), taskId: run.taskId, stepId: run.stepId, runId: run.runId, toolId: TRASH_TOOL, arguments: args, proposalId: prop.proposal ? prop.proposal.proposalId : null, decisionId: prop.decision ? prop.decision.decisionId : null });
+    const a = p.ok ? authority.approveSideEffect({ context: userCtx(), callId: p.call.callId, ...(ttlMs ? { ttlMs } : {}) }) : null;
+    const l = p.ok ? authority.acquireLease({ context: fx.ctx(), callId: p.call.callId, holderId, ...(instanceId ? { instanceId } : {}) }) : null;
+    return { prop, plan: p, approval: a, lease: l, callId: p.ok ? p.call.callId : null };
+  }
+  return { fx, harness: fx, authority, store, toolStore: fx.toolStore, toolRegistry: fx.toolRegistry, taskStore: fx.taskStore, authService: fx.f.authService, adapters: fx.adapters, toolProxy: fx.toolProxy, taskService: fx.taskService, identity: fx.f.identity, grantTool: fx.grantTool, grantUserResource: fx.grantUserResource, createResource: fx.createResource, ctx, userCtx, aliceUserCtx, setupRun, plan, approve, deny, revokeApproval, lease, elig, registerResourceWriteTool, setupTrash, precondition, restoreTrash, trashFlow };
 }
