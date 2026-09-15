@@ -171,6 +171,40 @@ type DockItemProps = {
   onContextMenu?: (e: React.MouseEvent) => void;
 };
 
+/**
+ * 动态 AI 球（用户口径：找一版动态的）。
+ *
+ * 纯 CSS 实现：球体底色 + 两层反向旋转的流彩（screen 叠加）+ 一颗会呼吸的高光核 + 静态玻璃边。
+ * 只动 transform / opacity（走合成器，不参与主线程），尺寸全靠 font-size 的 em 缩放；
+ * 减少动态效果（.reduced 或系统级 prefers-reduced-motion）会由既有规则整体停掉动画，
+ * 停掉后仍是完整的静态球 —— 不会留下空壳。
+ *
+ * 为什么不直接拿现成的：GitHub 上那几版 Siri 复刻（GLSL）都没写 license，不能抄；这版是按观感自己写的。
+ */
+export function OrbIcon({
+  size,
+  squircle = false,
+  className = "",
+}: {
+  size?: number;
+  squircle?: boolean;
+  className?: string;
+}) {
+  return (
+    <span
+      className={`orb${squircle ? " orb-app" : ""}${className ? " " + className : ""}`}
+      style={size ? ({ width: size, height: size, fontSize: size } as React.CSSProperties) : undefined}
+      aria-hidden="true"
+      draggable={false}
+    >
+      <span className="orb-ball">
+        <span className="orb-layer orb-layer-a" />
+        <span className="orb-layer orb-layer-b" />
+        <span className="orb-core" />
+      </span>
+    </span>
+  );
+}
 export function DockItem({
   id,
   label,
@@ -192,7 +226,11 @@ export function DockItem({
       onPointerDown={onPointerDown}
       onContextMenu={onContextMenu}
     >
-      <img className="dock-icon" src={icon(iconName)} alt="" draggable={false} />
+      {iconName === "siri" ? (
+        <OrbIcon squircle className="dock-icon" />
+      ) : (
+        <img className="dock-icon" src={icon(iconName)} alt="" draggable={false} />
+      )}
       <DockTooltip label={label} />
       <span className={`running-dot ${running ? "running" : ""}`} />
     </button>
@@ -609,7 +647,7 @@ type AssistantPillProps = { onActivate: () => void };
 export function AssistantPill({ onActivate }: AssistantPillProps) {
   return (
     <button className="assistant-pill" onClick={onActivate}>
-      <img className="pill-icon" src={icon("siri")} alt="" />
+      <OrbIcon size={19} className="pill-icon" />
       <span>全局 AI</span>
       <span className="pill-status">未连接</span>
     </button>
@@ -622,14 +660,14 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
   return (
     <aside className="ai-panel" aria-label="AI 助手">
       <div className="panel-heading">
-        <img className="heading-icon" src={icon("siri")} alt="" />
+        <OrbIcon size={24} className="heading-icon" />
         <strong>全局 AI 助手</strong>
         <button aria-label="关闭AI面板" onClick={onClose}>
           <X size={19} />
         </button>
       </div>
       <div className="ai-intro">
-        <img className="ai-orb" src={icon("siri")} alt="" draggable={false} />
+        <OrbIcon size={82} className="ai-orb" />
         <h2>从一个想法开始</h2>
         <p>连接模型与工具后，AI 将在授权范围内协调你的应用。</p>
       </div>

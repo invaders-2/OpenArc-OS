@@ -1544,6 +1544,110 @@ input[type="checkbox"] {
 .desktop:not(.dark)[data-wallpaper="custom"] {
   background: #f2f2f4;
 }
+/* ── 动态 AI 球（.orb）：纯 CSS 的流彩玻璃球 ─────────────────────────────
+   尺寸 = 1em，靠 font-size 缩放；只动 transform / opacity，走合成器。
+   减少动态效果由 .reduced / prefers-reduced-motion 的既有兜底整体停掉（停掉后仍是完整的静态球）。 */
+.orb {
+  position: relative;
+  display: block;
+  width: 1em;
+  height: 1em;
+  font-size: 47px;
+  user-select: none;
+  transform-origin: bottom center;
+}
+/* Dock 里那一版跟着程序坞图标大小走（--dock-icon 由 .desktop 下发） */
+.orb.dock-icon {
+  width: var(--dock-icon, 47px);
+  height: var(--dock-icon, 47px);
+  font-size: var(--dock-icon, 47px);
+}
+.orb-ball {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  overflow: hidden;
+  isolation: isolate;
+  /* 球体：深蓝底 + 两块饱和色域 + 核心高光（静态就好看，动画停掉也不塌） */
+  background:
+    radial-gradient(circle at 50% 48%, rgba(255, 255, 255, 0.95) 0%, rgba(198, 236, 255, 0.5) 10%, transparent 24%),
+    radial-gradient(circle at 30% 66%, #ff4aa2 0%, rgba(255, 74, 162, 0) 52%),
+    radial-gradient(circle at 74% 36%, #38d7ff 0%, rgba(56, 215, 255, 0) 50%),
+    radial-gradient(circle at 60% 78%, #22ffc4 0%, rgba(34, 255, 196, 0) 46%),
+    radial-gradient(circle at 50% 50%, #2a6ad8 0%, #17439c 52%, #0b2060 80%, #081238 100%);
+}
+/* 玻璃边：上缘反光 + 底部内阴影（静态，不参与动画） */
+.orb-ball::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background:
+    /* 里层玻璃球的边界（那圈"球中球"的高光边） */
+    radial-gradient(circle at 50% 48%, transparent 33%, rgba(255, 255, 255, 0.18) 36%, transparent 41%),
+    radial-gradient(circle at 34% 20%, rgba(255, 255, 255, 0.3), transparent 34%),
+    radial-gradient(circle at 52% 118%, rgba(255, 255, 255, 0.14), transparent 44%);
+  box-shadow:
+    inset 0 0 0.06em rgba(255, 255, 255, 0.5),
+    inset 0 -0.08em 0.2em rgba(6, 14, 40, 0.45);
+  pointer-events: none;
+}
+.orb-layer {
+  position: absolute;
+  inset: -28%;
+  border-radius: 50%;
+  mix-blend-mode: screen;
+  will-change: transform;
+}
+/* 两层"绕着球心慢慢转的发光斑"：只加光晕、不动底色，球不会被 screen 冲白 */
+.orb-layer-a {
+  background: radial-gradient(circle at 32% 36%, rgba(255, 130, 205, 0.44), transparent 38%);
+  filter: blur(0.05em);
+  animation: orb-spin 9s linear infinite;
+}
+.orb-layer-b {
+  background: radial-gradient(circle at 70% 66%, rgba(130, 245, 255, 0.38), transparent 40%);
+  filter: blur(0.07em);
+  animation: orb-spin 15s linear infinite reverse;
+}
+.orb-core {
+  position: absolute;
+  left: 50%;
+  top: 43%;
+  width: 0.3em;
+  height: 0.3em;
+  margin: -0.15em 0 0 -0.15em;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0.35) 44%, transparent 72%);
+  mix-blend-mode: screen;
+  animation: orb-breathe 3.6s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+/* App 图标版：外圈浅色 squircle，球内缩一点（Dock 里的观感与原来那张 PNG 一致） */
+.orb-app {
+  border-radius: 23%;
+  background: linear-gradient(160deg, #fdfdfd, #e8ecf5);
+  box-shadow: 0 0.02em 0.06em rgba(0, 0, 0, 0.18);
+}
+.orb-app .orb-ball {
+  inset: 0.13em;
+}
+@keyframes orb-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+@keyframes orb-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.88;
+  }
+  50% {
+    transform: scale(1.22);
+    opacity: 1;
+  }
+}
 /* 设置页：壁纸选择 */
 /* 壁纸行右上角的两颗胶囊 */
 .wallpaper-actions {
