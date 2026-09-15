@@ -51,7 +51,7 @@ const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domai
  * 迁移按版本逐级前进，每一级各自是一个原子事务：任何一级失败只回滚该级，
  * 不会留下"user_version 已升级但表不完整"的半状态（§55）。
  */
-const SCHEMA_VERSION = 13;
+const SCHEMA_VERSION = 14;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -1057,6 +1057,16 @@ CREATE INDEX idx_side_effect_leases_call ON side_effect_leases(call_id, status);
 CREATE INDEX idx_side_effect_leases_holder ON side_effect_leases(holder_id, status);
 `;
 
+/**
+ * v14（D4-03C3）· UNKNOWN_EFFECT recovery / verification evidence。
+ *
+ * **non-authoritative**：只保存 safe 的 recovery/verification 证据投影；
+ * 最终状态仍由 side_effect_calls.status 决定。绝不存 raw data / 绝对路径 / secret。
+ */
+const SCHEMA_V14_SQL = `
+ALTER TABLE side_effect_calls ADD COLUMN recovery_safe TEXT;
+`;
+
 const MIGRATIONS = Object.freeze([
   { version: 1, sql: SCHEMA_SQL },
   { version: 2, sql: SCHEMA_V2_SQL },
@@ -1071,6 +1081,7 @@ const MIGRATIONS = Object.freeze([
   { version: 11, sql: SCHEMA_V11_SQL },
   { version: 12, sql: SCHEMA_V12_SQL },
   { version: 13, sql: SCHEMA_V13_SQL },
+  { version: 14, sql: SCHEMA_V14_SQL },
 ]);
 
 const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000; // 12h 绝对上限

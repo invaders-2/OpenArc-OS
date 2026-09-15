@@ -91,6 +91,28 @@ function createToolAdapters({ resourceService = null, searchService = null, extr
       if (pre.trashed === true) return { ok: true, applied: true, detail: { resourceRef: pre.resourceRef, trashed: true } };
       return { ok: true, applied: false, confidence: "KNOWN_NO_EFFECT", detail: { resourceRef: pre.resourceRef, trashed: false } };
     }
+    /**
+     * D4-03C3 · read-only recovery verifier：按历史 SideEffectPlan 重读真实 Resource Domain，
+     * 返回三态 APPLIED / NOT_APPLIED / INDETERMINATE。绝不 mutation / execute / retry / restore。
+     */
+    function trashRecoveryVerify({ preconditions }) {
+      const ref = String((preconditions && preconditions.resourceRef) || "");
+      const expectedVersion = preconditions && preconditions.expectedVersion != null ? Number(preconditions.expectedVersion) : null;
+      if (!ref) return { outcome: "INDETERMINATE", reason: "NO_RESOURCE_REF" };
+      if (typeof resourceService.sideEffectPrecondition !== "function") return { outcome: "INDETERMINATE", reason: "VERIFIER_UNAVAILABLE" };
+      const cur = resourceService.sideEffectPrecondition({ resourceRef: ref });
+      if (!cur || !cur.ok) return { outcome: "INDETERMINATE", reason: "RESOURCE_READ_FAILED", detail: { resourceRef: ref } };
+      const currentVersion = Number(cur.expectedVersion);
+      const status = String(cur.registryStatus || "");
+      if (cur.trashed === true) {
+        if (status === "deleted") return { outcome: "APPLIED", reason: "TRASHED_AND_DELETED", detail: { resourceRef: cur.resourceRef, currentVersion } };
+        return { outcome: "INDETERMINATE", reason: "TRASHED_BUT_STATUS_INCONSISTENT", detail: { resourceRef: cur.resourceRef, currentVersion, registryStatus: status } };
+      }
+      if (status === "active" && (expectedVersion == null || currentVersion === expectedVersion)) {
+        return { outcome: "NOT_APPLIED", reason: "STILL_ACTIVE_AT_EXPECTED_VERSION", detail: { resourceRef: cur.resourceRef, expectedVersion, currentVersion } };
+      }
+      return { outcome: "INDETERMINATE", reason: "STATE_OR_VERSION_CHANGED", detail: { resourceRef: cur.resourceRef, expectedVersion, currentVersion, registryStatus: status } };
+    }
     providers.ResourceService = {
       toolIds: ["resource.read.metadata", "resource.trash"],
       async prepare({ args }) { return { plan: { provider: "ResourceService", resourceRefs: [String(args.resourceRef)] } }; },
@@ -110,6 +132,11 @@ function createToolAdapters({ resourceService = null, searchService = null, extr
       async verify({ args, result, contract }) {
         if (contract && contract.toolId === "resource.trash") return trashVerify({ args, result });
         return { ok: !!(result && result.resourceRef && result.resourceRef === String(args.resourceRef)), detail: { resourceRefMatches: !!(result && result.resourceRef === String(args.resourceRef)) } };
+      },
+      /** D4-03C3：UNKNOWN_EFFECT read-only recovery verification（三态）。 */
+      async recoveryVerify({ call, preconditions }) {
+        if (call && call.toolId === "resource.trash") return trashRecoveryVerify({ preconditions });
+        return { outcome: "INDETERMINATE", reason: "RECOVERY_VERIFIER_UNAVAILABLE" };
       },
     };
   }

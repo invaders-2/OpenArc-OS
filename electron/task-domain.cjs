@@ -83,6 +83,12 @@ const TASK_EVENT = Object.freeze({
   TOOL_SIDE_EFFECT_VERIFICATION_PASSED: "tool.side_effect.verification_passed",
   TOOL_SIDE_EFFECT_SUCCEEDED: "tool.side_effect.succeeded",
   TOOL_SIDE_EFFECT_EXECUTION_BLOCKED: "tool.side_effect.execution_blocked",
+  // D4-03C3 ambiguous result / recovery verification（safe projection only）
+  TOOL_SIDE_EFFECT_VERIFICATION_STARTED: "tool.side_effect.verification_started",
+  TOOL_SIDE_EFFECT_VERIFICATION_APPLIED: "tool.side_effect.verification_applied",
+  TOOL_SIDE_EFFECT_VERIFICATION_NOT_APPLIED: "tool.side_effect.verification_not_applied",
+  TOOL_SIDE_EFFECT_VERIFICATION_INDETERMINATE: "tool.side_effect.verification_indeterminate",
+  TOOL_SIDE_EFFECT_RECOVERY_RESOLVED: "tool.side_effect.recovery_resolved",
 });
 const TASK_EVENT_ALL = Object.freeze(Object.values(TASK_EVENT));
 

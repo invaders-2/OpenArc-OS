@@ -13,7 +13,7 @@ const SQL = {
   callByIdempotencyKey: "SELECT * FROM side_effect_calls WHERE idempotency_key = ?",
   callsOfTask: "SELECT * FROM side_effect_calls WHERE task_id = ? ORDER BY created_at, call_id",
   callsByStatus: "SELECT * FROM side_effect_calls WHERE status = ? ORDER BY created_at",
-  updateCall: "UPDATE side_effect_calls SET status = ?, updated_at = ?, authorized_at = ?, approved_at = ?, leased_at = ?, started_at = ?, completed_at = ?, verification_status = ?, error_code = ? WHERE call_id = ?",
+  updateCall: "UPDATE side_effect_calls SET status = ?, updated_at = ?, authorized_at = ?, approved_at = ?, leased_at = ?, started_at = ?, completed_at = ?, verification_status = ?, error_code = ?, recovery_safe = ? WHERE call_id = ?",
   insertApproval: "INSERT INTO tool_approvals (approval_id, call_id, actor_user_id, session_ref, decision, plan_hash, approved_tool_id, approved_tool_version, approved_arguments_hash, approved_effect_class, approved_expected_effects, created_at, expires_at, revoked_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
   approvalById: "SELECT * FROM tool_approvals WHERE approval_id = ?",
   approvalsOfCall: "SELECT * FROM tool_approvals WHERE call_id = ? ORDER BY created_at",
@@ -29,7 +29,7 @@ const SQL = {
 const CALL_COLUMNS = new Set(["status", "updated_at", "authorized_at", "approved_at", "leased_at", "started_at", "completed_at", "verification_status", "error_code"]);
 const APPROVAL_COLUMNS = new Set(["decision", "revoked_at", "expires_at"]);
 const LEASE_COLUMNS = new Set(["status", "released_at", "revoked_at"]);
-const CALL_JSON = new Set(["preconditions_safe", "expected_effects_safe"]);
+const CALL_JSON = new Set(["preconditions_safe", "expected_effects_safe", "recovery_safe"]);
 
 const newId = (prefix) => prefix + "_" + crypto.randomBytes(10).toString("base64url");
 
@@ -62,6 +62,7 @@ function safeCall(row) {
     completedAt: row.completed_at == null ? null : row.completed_at,
     verificationStatus: row.verification_status || null,
     errorCode: row.error_code || null,
+    recoverySafe: parseJson(row.recovery_safe),
   };
 }
 function safeApproval(row) {
@@ -134,9 +135,9 @@ class SideEffectStore {
       pick("completed_at") == null ? null : Number(pick("completed_at")),
       pick("verification_status") == null ? null : String(pick("verification_status")),
       pick("error_code") == null ? null : String(pick("error_code")),
+      json("recovery_safe"),
       String(id),
     );
-    void json;
     return this.callById(id);
   }
 

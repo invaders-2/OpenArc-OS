@@ -21,7 +21,10 @@
  * - Lease 是 side-effect 执行资格，不是业务 Domain 锁（业务 version/lock 另行遵守）；
  * - Runtime identity = this.instanceId，覆盖 acquireLease / evaluateExecutionEligibility /
  *   executeSideEffect / recoverOnStartup：production API 不接受任何 caller runtime override，
- *   同 holderId 不同 runtime instance 的 acquire 一律 LEASE_CONFLICT。
+ *   同 holderId 不同 runtime instance 的 acquire 一律 LEASE_CONFLICT；
+ * - UNKNOWN_EFFECT 只允许 VERIFY → BLOCK：真实 read-only 历史合同 Domain verifier 给
+ *   APPLIED / NOT_APPLIED / INDETERMINATE；只有 APPLIED 或 (NOT_APPLIED + executionQuiesced)
+ *   才 authoritative 收敛，AUTO_RETRY 永远为 0。
  */
 "use strict";
 const crypto = require("node:crypto");
@@ -74,7 +77,7 @@ function sanitizePreconditions(pre) {
 }
 
 class SideEffectAuthority {
-  constructor({ registry, sideEffectStore, taskStore, toolStore, authService, adapters = null, clock = null, audit = null, taskService = null, instanceId = null, unknownEffectVerifier = null, testHooks = null } = {}) {
+  constructor({ registry, sideEffectStore, taskStore, toolStore, authService, adapters = null, clock = null, audit = null, taskService = null, instanceId = null, testHooks = null } = {}) {
     if (!registry) throw new Error("SideEffectAuthority 需要 ToolRegistry");
     if (!sideEffectStore) throw new Error("SideEffectAuthority 需要 SideEffectStore");
     if (!taskStore) throw new Error("SideEffectAuthority 需要 TaskStore");
@@ -89,7 +92,6 @@ class SideEffectAuthority {
     this.audit = typeof audit === "function" ? audit : null;
     this.taskService = taskService || null;
     this.instanceId = instanceId || "runtime_" + crypto.randomBytes(6).toString("base64url");
-    this.unknownEffectVerifier = typeof unknownEffectVerifier === "function" ? unknownEffectVerifier : null;
     // test-only seam（构造注入）：绝不由 Renderer / Harness 控制，默认 null，不改变 production 语义。
     this.testHooks = testHooks && typeof testHooks === "object" ? testHooks : null;
     this.lastUnknownEffect = null;
@@ -449,8 +451,13 @@ class SideEffectAuthority {
       }
     }
     for (const call of running) {
+      // 冷启动：旧 runtime 已死 → 其 in-process execution 不可能 late-arrive（无 detached external worker）。
+      // 同一 runtime 自己 recover（非重启）时旧 lease holder 仍是本 instance → 不视为 quiesced。
+      const oldLease = this.store.activeLeaseOfCall(call.callId);
+      const quiesced = !(oldLease && oldLease.holderInstanceId === this.instanceId);
+      const recovery = { quiesced, source: "restart", previousInstanceId: oldLease ? oldLease.holderInstanceId : null, reason: SIDE_EFFECT_ERROR.UNKNOWN_EFFECT, recordedAt: this.#now() };
       // 先无条件进入 UNKNOWN_EFFECT（fail closed）。
-      this.store.transactSync(() => this.store.updateCall(call.callId, { status: CALL_STATUS.UNKNOWN_EFFECT, error_code: SIDE_EFFECT_ERROR.UNKNOWN_EFFECT, verification_status: null }));
+      this.store.transactSync(() => this.store.updateCall(call.callId, { status: CALL_STATUS.UNKNOWN_EFFECT, error_code: SIDE_EFFECT_ERROR.UNKNOWN_EFFECT, verification_status: null, recovery_safe: recovery }));
       this.#audit({ toolRef: call.toolId, action: "side_effect.unknown_effect", decision: CALL_STATUS.UNKNOWN_EFFECT, reasonCode: SIDE_EFFECT_ERROR.UNKNOWN_EFFECT });
       this.#event(call.taskId, "tool.side_effect.unknown_effect", { callId: call.callId, toolId: call.toolId });
       const task = this.taskStore.taskById(call.taskId);
@@ -476,20 +483,76 @@ class SideEffectAuthority {
     return { ok: errors.length === 0, unknownEffectCalls: unknown, expiredLeases, recoveredTaskIds, errors, instanceId };
   }
 
-  /** C1 只定义接口：无 verifier → VERIFICATION_NOT_AVAILABLE，保持 BLOCKED。 */
+  /**
+   * D4-03C3 · production UNKNOWN_EFFECT verification path（只读；0 mutation / 0 execute / 0 retry）。
+   *
+   * SideEffectCall → exact historical Tool Contract → allowlisted adapter → read-only Domain verifier。
+   * 三态 APPLIED / NOT_APPLIED / INDETERMINATE：
+   *  - APPLIED → SUCCEEDED（desired effect 已存在）；
+   *  - NOT_APPLIED **且** executionQuiesced（OpenArc trusted fact）→ FAILED；
+   *  - 其它（含 NOT_APPLIED 但未 quiesced、INDETERMINATE、verifier 不可用）→ 保持 UNKNOWN_EFFECT。
+   * 绝不依赖 test-only verifier，也绝不因当前 session / tool 失效就跳过 reconciliation。
+   */
   async verifyUnknownEffect({ callId } = {}) {
     const call = this.store.callById(callId);
     if (!call) return { ok: false, error: SIDE_EFFECT_ERROR.CALL_NOT_FOUND };
-    if (call.status !== CALL_STATUS.UNKNOWN_EFFECT) return { ok: false, error: SIDE_EFFECT_ERROR.CALL_STATE };
-    const tool = this.#toolFor(call);
-    if (!tool.ok || !tool.contract.verificationStrategy) return { ok: false, error: SIDE_EFFECT_ERROR.VERIFICATION_NOT_AVAILABLE, call };
-    if (!this.unknownEffectVerifier) return { ok: false, error: SIDE_EFFECT_ERROR.VERIFICATION_NOT_AVAILABLE, call };
-    let verdict;
-    try { verdict = await this.unknownEffectVerifier({ call, contract: tool.contract }); } catch { verdict = { ok: false }; }
-    if (!verdict || !verdict.ok) return { ok: false, error: SIDE_EFFECT_ERROR.VERIFICATION_NOT_AVAILABLE, call };
-    const status = verdict.effectApplied ? CALL_STATUS.SUCCEEDED : CALL_STATUS.FAILED;
-    const updated = this.store.transactSync(() => this.store.updateCall(callId, { status, verification_status: verdict.effectApplied ? "PASS" : "FAIL", error_code: null }));
-    return { ok: true, call: updated, effectApplied: !!verdict.effectApplied };
+    // 已终态：terminal duplicate，绝不产生第二次状态副作用。
+    if (call.status === CALL_STATUS.SUCCEEDED || call.status === CALL_STATUS.FAILED) {
+      return { ok: true, duplicate: true, resolved: true, outcome: call.recoverySafe ? call.recoverySafe.outcome : null, call };
+    }
+    if (call.status !== CALL_STATUS.UNKNOWN_EFFECT) return { ok: false, error: SIDE_EFFECT_ERROR.CALL_STATE, call };
+
+    // exact historical contract：不使用 latest version，也不受 disabled / 当前 session 影响。
+    const contract = this.registry.get(call.toolId, call.toolVersion);
+    if (!contract || !contract.verificationStrategy) return { ok: false, error: SIDE_EFFECT_ERROR.VERIFICATION_NOT_AVAILABLE, call };
+    if (effectClassForRisk(contract.riskClass) !== String(call.effectClass)) return { ok: false, error: SIDE_EFFECT_ERROR.VERIFICATION_NOT_AVAILABLE, call };
+    const adapter = this.adapterFor ? this.adapterFor({ executionProvider: contract.executionProvider, toolId: contract.toolId }) : null;
+    if (!adapter || typeof adapter.recoveryVerify !== "function") return { ok: false, error: SIDE_EFFECT_ERROR.VERIFICATION_NOT_AVAILABLE, call };
+
+    this.#audit({ toolRef: call.toolId, action: "side_effect.verification_started", decision: "RUNNING", reasonCode: null });
+    this.#event(call.taskId, "tool.side_effect.verification_started", { callId: call.callId, toolId: call.toolId });
+
+    let verdict = null;
+    try { verdict = await adapter.recoveryVerify({ call, contract, preconditions: call.preconditionsSafe, expectedEffects: call.expectedEffectsSafe }); }
+    catch { verdict = null; }
+    const outcome = verdict && ["APPLIED", "NOT_APPLIED", "INDETERMINATE"].includes(verdict.outcome) ? verdict.outcome : "INDETERMINATE";
+    const reason = (verdict && verdict.reason) || "VERIFIER_UNAVAILABLE";
+    const detail = (verdict && verdict.detail) || {};
+
+    const recovery = call.recoverySafe || {};
+    // executionQuiesced 只能来自 OpenArc trusted evidence（live timeout=false；cold restart=true）。
+    const quiesced = recovery.quiesced === true;
+    const now = this.#now();
+    const terminal = outcome === "APPLIED" ? { status: CALL_STATUS.SUCCEEDED, verificationStatus: "PASS" }
+      : (outcome === "NOT_APPLIED" && quiesced) ? { status: CALL_STATUS.FAILED, verificationStatus: "FAIL" } : null;
+
+    const evidence = {
+      outcome, reason, quiesced, verifiedAt: now,
+      resourceRef: detail.resourceRef || (call.preconditionsSafe && call.preconditionsSafe.resourceRef) || null,
+      expectedVersion: call.preconditionsSafe && call.preconditionsSafe.expectedVersion != null ? call.preconditionsSafe.expectedVersion : null,
+      currentVersion: detail.currentVersion != null ? detail.currentVersion : null,
+    };
+
+    // 单一 authoritative transition：并发 read-only verifier 只会有一个 commit，另一方看到终态。
+    let updated = null;
+    let lost = false;
+    this.store.transactSync(() => {
+      const fresh = this.store.callById(callId);
+      if (!fresh || fresh.status !== CALL_STATUS.UNKNOWN_EFFECT) { lost = true; updated = fresh; return; }
+      if (terminal) updated = this.store.updateCall(callId, { status: terminal.status, verification_status: terminal.verificationStatus, completed_at: now, error_code: terminal.status === CALL_STATUS.SUCCEEDED ? null : reason, recovery_safe: evidence });
+      else updated = this.store.updateCall(callId, { recovery_safe: evidence });
+    });
+    if (lost) return { ok: true, duplicate: true, resolved: true, outcome: updated && updated.recoverySafe ? updated.recoverySafe.outcome : null, call: updated };
+
+    const resolved = !!terminal;
+    const eventByOutcome = { APPLIED: "tool.side_effect.verification_applied", NOT_APPLIED: "tool.side_effect.verification_not_applied", INDETERMINATE: "tool.side_effect.verification_indeterminate" };
+    this.#audit({ toolRef: call.toolId, action: resolved ? (terminal.status === CALL_STATUS.SUCCEEDED ? "side_effect.verification_applied" : "side_effect.verification_not_applied") : "side_effect.verification_indeterminate", decision: updated ? updated.status : CALL_STATUS.UNKNOWN_EFFECT, reasonCode: reason });
+    this.#event(call.taskId, eventByOutcome[outcome], { callId: call.callId, toolId: call.toolId, outcome, reason, quiesced });
+    if (resolved) {
+      this.#audit({ toolRef: call.toolId, action: "side_effect.recovery_resolved", decision: terminal.status, reasonCode: reason });
+      this.#event(call.taskId, "tool.side_effect.recovery_resolved", { callId: call.callId, toolId: call.toolId, outcome, resolvedStatus: terminal.status });
+    }
+    return { ok: true, outcome, resolved, quiesced, reason, call: updated, status: updated ? updated.status : null, verificationStatus: terminal ? terminal.verificationStatus : null };
   }
 
   /**
@@ -530,7 +593,9 @@ class SideEffectAuthority {
    */
   #finishUnknownEffect({ call, leaseId, detail }) {
     const now = this.#now();
-    const updated = this.store.transactSync(() => this.store.updateCall(call.callId, { status: CALL_STATUS.UNKNOWN_EFFECT, error_code: SIDE_EFFECT_ERROR.UNKNOWN_EFFECT, completed_at: now }));
+    // live timeout / ambiguous：底层 operation 可能仍会 late-arrive → quiesced=false。
+    const recovery = { quiesced: false, source: "live", reason: detail || SIDE_EFFECT_ERROR.UNKNOWN_EFFECT, recordedAt: now };
+    const updated = this.store.transactSync(() => this.store.updateCall(call.callId, { status: CALL_STATUS.UNKNOWN_EFFECT, error_code: SIDE_EFFECT_ERROR.UNKNOWN_EFFECT, completed_at: now, recovery_safe: recovery }));
     this.#finalizeLease(call.callId, leaseId, LEASE_STATUS.REVOKED, call.toolId);
     let taskBlocked = false;
     if (this.taskService && typeof this.taskService.blockStep === "function" && call.stepId) {
@@ -685,6 +750,7 @@ class SideEffectAuthority {
     this.#event(call.taskId, "tool.side_effect.execution_started", { callId, toolId: call.toolId, leaseId: claim.leaseId });
 
     // claim 之后（execution ownership 唯一）才 dispatch Domain mutation。
+    if (this.testHooks && typeof this.testHooks.afterClaimBeforeDispatch === "function") this.testHooks.afterClaimBeforeDispatch({ callId, leaseId: claim.leaseId, holderId });
     return this.#dispatchControlledWrite({ call, tool, execCtx, adapter, leaseId: claim.leaseId, timeoutMs });
   }
 
@@ -703,6 +769,7 @@ class SideEffectAuthority {
     }
     if (!execResult || execResult.ambiguous === true) return this.#finishUnknownEffect({ call, leaseId, detail: (execResult && execResult.error) || SIDE_EFFECT_ERROR.UNKNOWN_EFFECT });
     if (!execResult.ok) return this.#finishKnownNoEffect({ call, leaseId, error: execResult.error || SIDE_EFFECT_ERROR.DOMAIN_WRITE_FAILED, knownNoEffect: execResult.knownNoEffect !== false });
+    if (this.testHooks && typeof this.testHooks.afterDomainResultBeforeVerification === "function") this.testHooks.afterDomainResultBeforeVerification({ callId: call.callId, execResult });
 
     // Execution != Verified Effect：必须真实 Domain verification 通过才允许 SUCCEEDED。
     let verdict;
@@ -710,9 +777,11 @@ class SideEffectAuthority {
     catch { return this.#finishUnknownEffect({ call, leaseId, detail: "VERIFIER_UNAVAILABLE" }); }
     if (!verdict || verdict.ok !== true) return this.#finishUnknownEffect({ call, leaseId, detail: "VERIFIER_UNAVAILABLE" });
     if (verdict.applied !== true) return this.#finishKnownNoEffect({ call, leaseId, error: SIDE_EFFECT_ERROR.VERIFICATION_FAILED, verificationStatus: "FAIL", knownNoEffect: true });
+    if (this.testHooks && typeof this.testHooks.afterVerificationBeforeFinalPersist === "function") this.testHooks.afterVerificationBeforeFinalPersist({ callId: call.callId, verdict });
 
     const completedAt = this.#now();
     const updated = this.store.transactSync(() => this.store.updateCall(call.callId, { status: CALL_STATUS.SUCCEEDED, verification_status: "PASS", completed_at: completedAt, error_code: null }));
+    if (this.testHooks && typeof this.testHooks.afterSucceededBeforeLeaseFinalize === "function") this.testHooks.afterSucceededBeforeLeaseFinalize({ callId: call.callId });
     this.#finalizeLease(call.callId, leaseId, LEASE_STATUS.RELEASED, call.toolId);
     this.#audit({ toolRef: call.toolId, action: "side_effect.verification_passed", decision: "PASS", reasonCode: null });
     this.#event(call.taskId, "tool.side_effect.verification_passed", { callId: call.callId, toolId: call.toolId, verificationStatus: "PASS" });
