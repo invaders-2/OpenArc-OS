@@ -1,6 +1,6 @@
 /** D4-03A 夹具：在 D4-02C Task/Harness 夹具之上叠加 ToolStore / ToolRegistry / ControlledToolProxy。 */
 import { createRequire } from "node:module";
-import { createTaskHarnessFixture, APPS, EXACT } from "./task-harness-fixture.mjs";
+import { createTaskHarnessFixture, APPS, EXACT, PROVIDER_SECRET as TASK_PROVIDER_SECRET } from "./task-harness-fixture.mjs";
 const require = createRequire(import.meta.url);
 const { ToolStore } = require("../../../electron/tool-store.cjs");
 const { ToolRegistry } = require("../../../electron/tool-registry.cjs");
@@ -50,6 +50,17 @@ export async function createToolHarnessFixture(opts = {}) {
       const run = base.taskService.startHarnessRun({ context: c, taskId: t.task.taskId, stepId: step.step.stepId, expectedRevision: ss.task.revision });
       const mr = base.taskService.markHarnessRunRunning({ context: c, taskId: t.task.taskId, runId: run.run.runId, expectedRevision: run.task.revision });
       return { context: c, taskId: t.task.taskId, stepId: step.step.stepId, runId: run.run.runId, revision: mr.ok ? mr.task.revision : ss.task.revision };
+    },
+    /** D4-03B Closure：建立 ORGANIZATION 级 model config + default，使非 admin 用户也能走 official dsh。 */
+    enableOrgModel() {
+      const admin = base.ctx();
+      const prov = base.f.modelService.createProvider({ context: admin, displayName: "OrgModelProbe", baseUrl: base.fp.baseUrl, credentialSecret: TASK_PROVIDER_SECRET, scope: "ORGANIZATION" });
+      if (!prov.ok) return { ok: false, error: prov.error };
+      const model = base.f.modelService.createModel({ context: admin, providerId: prov.provider.providerId, remoteModelId: "remote-fake-1", capabilities: ["chat"], scope: "ORGANIZATION" });
+      if (!model.ok) return { ok: false, error: model.error };
+      const def = base.f.modelService.setDefault({ context: admin, capability: "chat", configId: model.model.configId, scope: "ORGANIZATION" });
+      if (!def.ok) return { ok: false, error: def.error };
+      return { ok: true, configId: model.model.configId, providerId: prov.provider.providerId };
     },
     grantUserResource(resourceId, userId, actions) {
       return base.f.authService.grantResourcePermission({ context: base.f.adminCtx(), principalType: "USER", principalId: userId, resourceId, actions });

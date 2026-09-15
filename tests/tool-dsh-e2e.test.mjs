@@ -73,3 +73,52 @@ test("Official dsh E2E：tool_call → Tool Facade → Proxy → Search/Resource
     assert.ok(!/\/Users\/|\/private\/|\/var\/folders/.test(r.artifact.content), "artifact 不得含绝对路径");
   } finally { await fx.close(); }
 });
+
+test("Official dsh search privacy：alice 搜 admin HIDDEN resource → 0 items / 0 leak", async () => {
+  const { fx } = await visibleFixture();
+  try {
+    const hidden = await fx.createResource(HIDDEN);
+    await fx.f.searchService.indexResource(hidden.resource.resourceId);
+    const org = fx.enableOrgModel();
+    assert.equal(org.ok, true, JSON.stringify(org));
+    fx.fp.state.toolLoopPlan = [{ name: "resource_search", args: { query: HIDDEN, limit: 5 } }];
+    const alice = { sessionRef: fx.f.sessions.alice, appId: "ai" };
+    const t = fx.taskService.createTask({ context: alice, goal: "hidden probe", modelConfigId: org.configId });
+    assert.equal(t.ok, true, JSON.stringify(t));
+    const orch = fx.makeDshOrchestrator();
+    const r = await orch.runTask({ context: alice, taskId: t.task.taskId, expectedRevision: t.task.revision, verify: { type: "EXACT_TEXT", expected: "OPENARC_DSH_TOOL_OK" } });
+    assert.equal(r.ok, true, JSON.stringify(r));
+    const second = JSON.parse(String(fx.fp.state.toolLoopBodies[1] || "{}"));
+    const resultText = (second.messages || []).filter((m) => m && m.role === "tool").map((m) => String(m.content || "")).join("\n");
+    assert.ok(resultText.includes('"items":[]'), "hidden search 必须 0 items: " + resultText);
+    assert.ok(!resultText.includes(HIDDEN), "tool result 不得泄漏 HIDDEN 资源存在: " + resultText);
+    const execs = fx.toolStore.executionsOfTask(t.task.taskId);
+    assert.equal(execs.length, 1);
+    assert.equal(execs[0].tool_id, "resource.search");
+  } finally { await fx.close(); }
+});
+
+test("Official dsh useByAgent=false：alice 可 read 但无 useByAgent → tool DENY + 0 Domain read", async () => {
+  const { fx, created } = await visibleFixture();
+  try {
+    const org = fx.enableOrgModel();
+    assert.equal(org.ok, true, JSON.stringify(org));
+    const alice = { sessionRef: fx.f.sessions.alice, appId: "ai" };
+    const grant = fx.grantUserResource(created.resource.resourceId, fx.f.users.alice, ["resource.read"]);
+    assert.equal(grant.ok, true, JSON.stringify(grant));
+    fx.fp.state.toolLoopPlan = [{ name: "resource_read_metadata", args: { resourceRef: created.resource.resourceRef } }];
+    let reads = 0;
+    const r0 = fx.f.resourceService.get.bind(fx.f.resourceService);
+    fx.f.resourceService.get = (...a) => { reads += 1; return r0(...a); };
+    const t = fx.taskService.createTask({ context: alice, goal: "agent use deny", modelConfigId: org.configId });
+    assert.equal(t.ok, true, JSON.stringify(t));
+    const orch = fx.makeDshOrchestrator();
+    const r = await orch.runTask({ context: alice, taskId: t.task.taskId, expectedRevision: t.task.revision, verify: { type: "EXACT_TEXT", expected: "OPENARC_DSH_TOOL_OK" } });
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.equal(reads, 0, "useByAgent=false → 0 Domain read");
+    assert.equal(fx.toolStore.executionsOfTask(t.task.taskId).length, 0, "DENY 不应产生 execution");
+    const dec = fx.toolStore.decisionsOfTask(t.task.taskId)[0];
+    assert.equal(dec.decision, "DENIED");
+    assert.ok(["TOOL_FORBIDDEN", "TOOL_AGENT_USE_NOT_AUTHORIZED"].includes(dec.reason_code), dec.reason_code);
+  } finally { await fx.close(); }
+});
