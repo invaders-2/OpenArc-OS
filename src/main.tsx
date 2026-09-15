@@ -820,12 +820,29 @@ function App() {
       const p = clampDeskPos({ x: s.x + dx, y: s.y + dy });
       return { left: p.x, top: p.y, right: p.x + el.offsetWidth, bottom: p.y + el.offsetHeight };
     };
+    /**
+     * 指针底下是什么就按什么判（和 macOS 一样，只认指针位置）。
+     * 用 elementsFromPoint 取整摞：正在拖的图标永远压在指针下，跳过它看下面那一层，
+     * 不然"把图标挪到文件夹上"永远判不出来。
+     */
+    const underPointer = (clientX: number, clientY: number) => {
+      for (const node of document.elementsFromPoint(clientX, clientY)) {
+        const tile = (node as HTMLElement).closest?.("[data-entry-id],[data-folder-id]") as HTMLElement | null;
+        const tileId = tile?.dataset.entryId || tile?.dataset.folderId;
+        if (tileId && ids.includes(tileId)) continue;
+        const hit = asTarget(node as HTMLElement);
+        if (hit) return hit;
+      }
+      return null;
+    };
     const resolveTarget = (clientX: number, clientY: number, rect: { left: number; top: number; right: number; bottom: number }) => {
-      const under = asTarget(document.elementFromPoint(clientX, clientY));
+      const under = underPointer(clientX, clientY);
       if (under) return under;
       let best: { el: HTMLElement; id: string } | null = null;
       let bestArea = 0;
-      document.querySelectorAll<HTMLElement>("[data-drop-folder]").forEach((c) => {
+      // 兜底只认**桌面上的文件夹磁贴**（用户口径：叠到文件夹上就自动放进去）。
+      // 窗口正文不参与兜底 —— 桌面大半被窗口盖着，靠矩形求交会把图标误吞进"某个文件夹"（用户实测：拖一下就消失）。
+      document.querySelectorAll<HTMLElement>(".desktop-folder[data-drop-folder]").forEach((c) => {
         const hit = asTarget(c);
         if (!hit || hit.el !== c) return;
         const r = c.getBoundingClientRect();
