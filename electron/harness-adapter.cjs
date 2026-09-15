@@ -69,7 +69,7 @@ const SECRET_DENYLIST = [
   "AZURE_OPENAI_API_KEY", "AZURE_API_KEY",
   "GITHUB_TOKEN", "GH_TOKEN", "NPM_TOKEN", "SSH_AUTH_SOCK",
 ];
-function buildHarnessEnv({ dshHome, bridgeBaseUrl, capability, workspace, extra = {} } = {}) {
+function buildHarnessEnv({ dshHome, bridgeBaseUrl, capability, workspace, toolFacadeUrl = null, toolFacadeCapability = null, toolFacadeManifest = null, extra = {} } = {}) {
   const env = {};
   for (const k of ENV_ALLOWLIST) if (process.env[k] != null) env[k] = process.env[k];
   for (const k of SECRET_DENYLIST) delete env[k];
@@ -80,8 +80,31 @@ function buildHarnessEnv({ dshHome, bridgeBaseUrl, capability, workspace, extra 
   if (bridgeBaseUrl) env.OPENARC_HARNESS_BRIDGE = bridgeBaseUrl;
   if (capability) env.OPENARC_MODEL_PROXY_CAPABILITY = capability;
   if (workspace) env.OPENARC_HARNESS_WORKSPACE = workspace;
+  // §8/§9：Tool Facade capability 只经 trusted child env 交给 dsh；不落盘。
+  if (toolFacadeUrl) env.OPENARC_TOOL_FACADE_URL = toolFacadeUrl;
+  if (toolFacadeCapability) env.OPENARC_TOOL_FACADE_CAPABILITY = toolFacadeCapability;
+  if (toolFacadeManifest) env.OPENARC_TOOL_FACADE_MANIFEST = toolFacadeManifest;
   for (const [k, v] of Object.entries(extra)) env[k] = v;
   return env;
+}
+
+const MANAGED_TOOL_PROFILE = "openarc-acp";
+const TOOL_FACADE_BUNDLE = path.join(__dirname, "dsh-openarc-read-tools");
+
+/**
+ * D4-03B Closure · 每个 run 生成隔离的 openarc-acp profile（DSH_HOME 内），
+ * 经 official bundle 机制加载 OpenArc Tool Plugin。绝不触碰真实 ~/.dsh。
+ */
+function buildManagedToolProfile({ dshHome, manifest }) {
+  const profileDir = path.join(dshHome, "profiles", MANAGED_TOOL_PROFILE);
+  fs.mkdirSync(path.join(profileDir, "node_modules"), { recursive: true, mode: 0o700 });
+  fs.cpSync(TOOL_FACADE_BUNDLE, path.join(profileDir, "node_modules", "dsh-openarc-read-tools"), { recursive: true });
+  fs.writeFileSync(path.join(profileDir, "package.json"), JSON.stringify({ name: "dsh-profile-openarc-acp", private: true, dependencies: {}, dsh: { profile: { bundles: ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-acp-app", "dsh-openarc-read-tools"], patchReload: "startup" } } }, null, 2), { mode: 0o600 });
+  fs.writeFileSync(path.join(profileDir, "cordis.patch.yml"), "[]\n", { mode: 0o600 });
+  fs.writeFileSync(path.join(profileDir, "pnpm-workspace.yaml"), "packages:\n  - .\n\nnodeLinker: hoisted\nautoInstallPeers: false\n");
+  const manifestPath = path.join(profileDir, "openarc-read-tools.manifest.json");
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), { mode: 0o600 });
+  return { profileDir, manifestPath };
 }
 
 /** OpenArc 管理的 ACP profile patch：ACP stdio ON，模型走 OpenArc，其它全部关。 */
@@ -143,6 +166,8 @@ class HarnessAdapter {
     this.sdkVersion = this.sdkPath ? sdkVersion(this.sdkPath) : null;
     this.protocolVersion = ACP_PROTOCOL_VERSION;
     this.bridge = null;
+    this.toolFacade = null;
+    this.toolCapability = null;
     this.child = null;
     this.conn = null;
     this.sessionId = null;
@@ -160,7 +185,7 @@ class HarnessAdapter {
   }
 
   /** Harness 只能拿到 Proxy endpoint + scoped capability + safe model metadata。 */
-  async start({ context, modelConfigId, maxCalls = 4, ttlMs = 120000, workspace = null, startTimeoutMs = 30000, requestId = null } = {}) {
+  async start({ context, modelConfigId, maxCalls = 4, ttlMs = 120000, workspace = null, startTimeoutMs = 30000, requestId = null, toolFacade = null } = {}) {
     if (!this.bin) throw harnessError(HARNESS_ERROR.NOT_STARTED, "dsh executable not found");
     if (!this.sdkPath) throw harnessError(HARNESS_ERROR.NOT_STARTED, "ACP SDK not found");
     const cap = this.modelProxy.issueCapability({ context, configId: modelConfigId, allowedCapabilities: ["chat"], maxCalls, ttlMs });
@@ -179,13 +204,25 @@ class HarnessAdapter {
     fs.mkdirSync(path.join(this.dshHome, "home"), { recursive: true, mode: 0o700 });
     fs.mkdirSync(this.workspace, { recursive: true });
 
-    const env = buildHarnessEnv({ dshHome: this.dshHome, bridgeBaseUrl: this.bridge.baseUrl, capability: this.capability.token, workspace: this.workspace });
+    // D4-03B Closure：official dsh Tool Facade —— 隔离 profile + official bundle + run 级 tpx_ capability。
+    let facadeEnv = {}; let profileArgs = null;
+    if (toolFacade) {
+      if (!toolFacade.bridge || !toolFacade.manifest) throw harnessError(HARNESS_ERROR.NOT_STARTED, "toolFacade 需要 bridge + manifest");
+      this.toolFacade = toolFacade;
+      const profile = buildManagedToolProfile({ dshHome: this.dshHome, manifest: toolFacade.manifest });
+      const cap = toolFacade.bridge.issueCapability({ context, taskId: toolFacade.taskId, stepId: toolFacade.stepId, runId: toolFacade.runId, allowedTools: toolFacade.manifest.toolIds, maxCalls: toolFacade.maxCalls, ttlMs: toolFacade.ttlMs });
+      if (!cap.ok) throw harnessError(HARNESS_ERROR.NOT_STARTED, "tool capability: " + cap.error);
+      this.toolCapability = cap.capability;
+      facadeEnv = { toolFacadeUrl: toolFacade.bridge.baseUrl, toolFacadeCapability: cap.capability.token, toolFacadeManifest: profile.manifestPath };
+      profileArgs = ["--profile", MANAGED_TOOL_PROFILE];
+    }
+    const env = buildHarnessEnv({ dshHome: this.dshHome, bridgeBaseUrl: this.bridge.baseUrl, capability: this.capability.token, workspace: this.workspace, ...facadeEnv });
     this.childEnv = env;
     let args = this.dshArgs;
     if (!args) {
       const patchPath = path.join(root, "openarc-acp.yml");
       fs.writeFileSync(patchPath, buildAcpPatch(), { mode: 0o600 });
-      args = ["--profile", "acp", "--patch", patchPath];
+      args = profileArgs ? [...profileArgs, "--patch", patchPath] : ["--profile", "acp", "--patch", patchPath];
     }
     this.child = spawn(this.bin, args, { env, cwd: this.workspace, stdio: ["pipe", "pipe", "pipe"] });
     this.started = true;
@@ -221,6 +258,8 @@ class HarnessAdapter {
       sdkVersion: this.sdkVersion,
       protocolVersion: init.protocolVersion,
       agentInfo: this.agentInfo,
+      toolExecutionMode: toolFacade ? "facade" : "openarc",
+      toolCapabilityId: this.toolCapability ? this.toolCapability.capabilityId : null,
     };
   }
 
@@ -302,6 +341,14 @@ class HarnessAdapter {
     return r;
   }
 
+  /** §18/§55：run 一结束（success/failure/cancel/crash/timeout/blocked）立即 revoke Tool capability，不等 TTL。 */
+  revokeToolCapability() {
+    if (!this.toolCapability || !this.toolCapability.token || !this.toolFacade) return { ok: true, changed: false };
+    const r = this.toolFacade.bridge.revokeCapability(this.toolCapability.token);
+    this.toolCapability = null;
+    return r;
+  }
+
   async closeSession() {
     if (!this.conn || !this.sessionId) return { ok: true, changed: false };
     try { await this.#withTimeout(this.conn.closeSession({ sessionId: this.sessionId }), 10000, HARNESS_ERROR.TURN_TIMEOUT); } catch { /* best effort */ }
@@ -316,6 +363,7 @@ class HarnessAdapter {
 
   /** bounded shutdown：closeSession → stdin close → SIGTERM → bounded SIGKILL。 */
   async dispose() {
+    try { this.revokeToolCapability(); } catch { /* ignore */ }
     try { await this.closeSession(); } catch { /* ignore */ }
     const child = this.child;
     if (child && !this.processExited) {
@@ -334,4 +382,4 @@ class HarnessAdapter {
   }
 }
 
-module.exports = { HarnessAdapter, HARNESS_ERROR, ACP_PROTOCOL_VERSION, resolveDshRuntime, resolveDshBin, resolveAcpSdk, dshVersion, buildHarnessEnv, buildAcpPatch };
+module.exports = { HarnessAdapter, HARNESS_ERROR, ACP_PROTOCOL_VERSION, resolveDshRuntime, resolveDshBin, resolveAcpSdk, dshVersion, buildHarnessEnv, buildAcpPatch, buildManagedToolProfile, MANAGED_TOOL_PROFILE, TOOL_FACADE_BUNDLE };

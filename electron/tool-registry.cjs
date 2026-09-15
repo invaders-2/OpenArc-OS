@@ -9,6 +9,7 @@
  * filesystem.write / process.spawn / MCP / browser side-effect。
  */
 "use strict";
+const crypto = require("node:crypto");
 const domain = require("./tool-domain.cjs");
 const { RISK_CLASS, SIDE_EFFECT, TOOL_ERROR, isWellFormedToolId, approvalRequiredForRisk, sideEffectForRisk } = domain;
 
@@ -119,6 +120,52 @@ const BUILTIN_CONTRACTS = Object.freeze([
   },
 ]);
 
+/** dsh tool 名必须是合法标识符：resource.search → resource_search。 */
+function toolDefinitionName(toolId) { return String(toolId).replace(/[^A-Za-z0-9]+/g, "_"); }
+
+/**
+ * official dsh Tool Runtime 只接受 JSON Schema 子集
+ * （type/oneOf/properties/required/additionalProperties/items/enum/const + annotations）。
+ * Manifest 里的 model-facing schema 是该子集的投影；完整约束仍由 OpenArc Registry 权威校验。
+ */
+const DSH_SCHEMA_KEYS = ["type", "oneOf", "properties", "required", "additionalProperties", "items", "enum", "const", "description", "title", "default"];
+function projectJsonSchema(schema) {
+  if (schema == null || typeof schema !== "object") return schema;
+  if (Array.isArray(schema)) return schema.map((s) => projectJsonSchema(s));
+  const out = {};
+  for (const key of DSH_SCHEMA_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(schema, key)) continue;
+    const v = schema[key];
+    if (key === "properties" && v && typeof v === "object") { out.properties = {}; for (const [k, sub] of Object.entries(v)) out.properties[k] = projectJsonSchema(sub); }
+    else if (key === "items") out.items = projectJsonSchema(v);
+    else if (key === "oneOf" && Array.isArray(v)) out.oneOf = v.map((s) => projectJsonSchema(s));
+    else out[key] = v;
+  }
+  return out;
+}
+
+/**
+ * D4-03B Closure · Safe Tool Manifest。
+ * 只暴露 READ_ONLY contract 的 schema metadata；WRITE / EXTERNAL / PRIVILEGED 一律拒绝。
+ * contractHash 覆盖 toolId/version/input/output/risk，dsh 侧旧 manifest 与 Registry 不一致时
+ * 必须 TOOL_CONTRACT_STALE，绝不静默继续。
+ */
+function buildToolManifest(registry, { toolIds = null } = {}) {
+  const ids = (toolIds && toolIds.length ? toolIds : registry.ids()).slice().sort();
+  const tools = [];
+  for (const id of ids) {
+    const versions = registry.versionsOf(id);
+    const version = versions.length ? versions[versions.length - 1] : null;
+    if (version == null) throw new Error("manifest tool not registered: " + id);
+    const c = registry.get(id, version);
+    if (c.riskClass !== RISK_CLASS.READ_ONLY) throw new Error("manifest 只允许 READ_ONLY tool: " + id);
+    tools.push({ toolId: c.toolId, version: c.version, name: toolDefinitionName(c.toolId), displayName: c.displayName, description: String(c.description || "").slice(0, 300), inputSchema: projectJsonSchema(c.inputSchema), outputSchema: projectJsonSchema(c.outputSchema), riskClass: c.riskClass });
+  }
+  const hashInput = tools.map((t) => ({ toolId: t.toolId, version: t.version, inputSchema: t.inputSchema, outputSchema: t.outputSchema, riskClass: t.riskClass }));
+  const contractHash = crypto.createHash("sha256").update(JSON.stringify(hashInput)).digest("hex");
+  return Object.freeze({ contractHash, toolIds: Object.freeze(ids), tools: Object.freeze(tools) });
+}
+
 function frozenContract(c) {
   return Object.freeze({ ...c, requiredPermissions: Object.freeze([...(c.requiredPermissions || [])]), resourceActions: Object.freeze([...(c.resourceActions || [])]), expectedSideEffects: Object.freeze([...(c.expectedSideEffects || [])]) });
 }
@@ -182,4 +229,4 @@ class ToolRegistry {
   }
 }
 
-module.exports = { ToolRegistry, validateSchema, BUILTIN_CONTRACTS, CONTRACT_FIELDS };
+module.exports = { ToolRegistry, validateSchema, BUILTIN_CONTRACTS, CONTRACT_FIELDS, buildToolManifest, toolDefinitionName, projectJsonSchema };

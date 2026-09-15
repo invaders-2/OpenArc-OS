@@ -12,6 +12,8 @@
 "use strict";
 const crypto = require("node:crypto");
 const domain = require("./task-domain.cjs");
+const { ToolFacadeBridge } = require("./tool-facade-bridge.cjs");
+const { buildToolManifest } = require("./tool-registry.cjs");
 
 const {
   TASK_STATUS, STEP_STATUS, TASK_EVENT, ERROR, ORCHESTRATION_KIND,
@@ -33,9 +35,11 @@ const ORCHESTRATOR_ERROR = Object.freeze({
 function sha256(text) { return crypto.createHash("sha256").update(String(text)).digest("hex"); }
 
 /** §16/§17 安全 prompt：只放 goal + safe step input + 可选 prior artifact；绝不塞 DB dump / credentials / 全历史。*/
-function buildPrompt({ goal, stepInput = null, priorArtifactText = null } = {}) {
+function buildPrompt({ goal, stepInput = null, priorArtifactText = null, toolsEnabled = false } = {}) {
   const lines = [];
-  lines.push("You are an OpenArc reasoning runtime. Tools are disabled; answer in text only.");
+  lines.push(toolsEnabled
+    ? "You are an OpenArc reasoning runtime. Only the OpenArc-controlled read-only tools exposed to you may be used; never assume shell, filesystem or network access."
+    : "You are an OpenArc reasoning runtime. Tools are disabled; answer in text only.");
   lines.push("Task goal: " + String(goal == null ? "" : goal));
   if (stepInput != null) lines.push("Step input: " + (typeof stepInput === "string" ? stepInput : JSON.stringify(stepInput)).slice(0, 4000));
   if (priorArtifactText != null) lines.push("Prior artifact: " + String(priorArtifactText).slice(0, 2000));
@@ -89,12 +93,14 @@ function classifyHarnessError(e) {
 }
 
 class TaskHarnessOrchestrator {
-  constructor({ taskService, adapterFactory = null, toolProxy = null, clock = null, logger = null, turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS, startTimeoutMs = DEFAULT_START_TIMEOUT_MS, maxPersistedHarnessEvents = DEFAULT_MAX_PERSISTED_EVENTS } = {}) {
+  constructor({ taskService, adapterFactory = null, toolProxy = null, clock = null, logger = null, turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS, startTimeoutMs = DEFAULT_START_TIMEOUT_MS, maxPersistedHarnessEvents = DEFAULT_MAX_PERSISTED_EVENTS, toolFacade = null } = {}) {
     if (!taskService) throw new Error("TaskHarnessOrchestrator 需要 TaskService");
     this.taskService = taskService;
     this.adapterFactory = adapterFactory;
     // D4-03A：可选 Controlled Tool Proxy。无 proxy 时 tool proposal 仍 0 执行。
     this.toolProxy = toolProxy;
+    // D4-03B Closure：official dsh Tool Facade（显式 opt-in；synthetic ACP 路径保持 D4-03B loop）。
+    this.toolFacade = toolFacade;
     this.clock = typeof clock === "function" ? clock : () => Date.now();
     this.logger = logger;
     this.turnTimeoutMs = turnTimeoutMs;
@@ -134,7 +140,8 @@ class TaskHarnessOrchestrator {
     if (!step) return { ok: false, error: ERROR.TASK_NOT_FOUND };
 
     const effectiveInput = stepInput == null ? step.input : stepInput;
-    const promptText = buildPrompt({ goal: task.goal, stepInput: effectiveInput });
+    const toolsEnabled = !!(this.toolFacade && this.toolFacade.enabled && this.toolProxy && this.toolProxy.adapterFor);
+    const promptText = buildPrompt({ goal: task.goal, stepInput: effectiveInput, toolsEnabled });
 
     const runRes = svc.startHarnessRun({ context, taskId, stepId, expectedRevision: task.revision });
     if (!runRes.ok) return runRes;
@@ -143,14 +150,17 @@ class TaskHarnessOrchestrator {
 
     let adapter = null;
     let info = null;
+    let facade = null;
     try {
+      facade = await this.#startToolFacade({ context, taskId, stepId, runId: run.runId });
       adapter = this.#makeAdapter({ context, taskId, stepId, runId: run.runId, modelConfigId: task.modelConfigId, modelConfigVersion: task.modelConfigVersion });
-      info = await adapter.start({ context, modelConfigId: task.modelConfigId, maxCalls: DEFAULT_MAX_CALLS, startTimeoutMs: this.startTimeoutMs, requestId: "mreq_" + run.runId });
+      info = await adapter.start({ context, modelConfigId: task.modelConfigId, maxCalls: DEFAULT_MAX_CALLS, startTimeoutMs: this.startTimeoutMs, requestId: "mreq_" + run.runId, toolFacade: facade });
     } catch (e) {
-      if (adapter) { try { adapter.revokeModelCapability(); } catch { /* ignore */ } try { await adapter.dispose(); } catch { /* ignore */ } }
+      if (adapter) { try { adapter.revokeToolCapability(); } catch { /* ignore */ } try { adapter.revokeModelCapability(); } catch { /* ignore */ } try { await adapter.dispose(); } catch { /* ignore */ } }
+      if (facade) { try { await facade.bridge.stop(); } catch { /* ignore */ } }
       return this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: classifyHarnessError(e), event: TASK_EVENT.HARNESS_RUN_UNKNOWN_EFFECT, expectedRevision: task.revision });
     }
-    this.registry.set(run.runId, { taskId, stepId, capabilityId: info.capabilityId, adapter });
+    this.registry.set(run.runId, { taskId, stepId, capabilityId: info.capabilityId, adapter, bridge: facade ? facade.bridge : null });
 
     try {
       // §59/§60：config 变化绝不启动 / 绝不 fallback。
@@ -184,10 +194,13 @@ class TaskHarnessOrchestrator {
       let usage = summarizeUsage(rawEvents);
       const hasToolEvents = () => rawEvents.some((e) => e && e.type === "tool.proposed");
       const executableProxy = !!(this.toolProxy && this.toolProxy.adapterFor);
+      // D4-03B Closure：official dsh 已由 Tool Runtime 执行 plugin.execute() → Tool Facade Bridge；
+      // OpenArc 在这里绝不重复执行，只记录 safe ACP events 并等 turn 完成。
+      const facadeMode = info.toolExecutionMode === "facade";
 
       // §33/§34/§63/§65/§89：READ_ONLY Tool 执行循环。每个 proposal 都重新 propose→decide→reauthorize→execute→verify；
       // 结果经 bounded 后续 prompt 交回 Harness 继续推理。无 adapter（D4-03A gate / 无 proxy）维持 gate 语义。
-      if (executableProxy) {
+      if (!facadeMode && executableProxy) {
         let round = 0;
         while (hasToolEvents() && round < MAX_TOOL_ROUNDS) {
           round += 1;
@@ -213,7 +226,7 @@ class TaskHarnessOrchestrator {
           if (latestTask.ok && latestTask.task.cancelRequested) return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: task.revision });
         }
         if (hasToolEvents()) return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: ERROR.TOOL_EXECUTION_NOT_AVAILABLE, event: TASK_EVENT.TOOL_EXECUTION_BLOCKED, expectedRevision: task.revision });
-      } else if (hasToolEvents()) {
+      } else if (!facadeMode && hasToolEvents()) {
         // D4-03A gate：proposal 已 ALLOWED 但执行未开放 → 0 execution + BLOCKED / WAITING。
         await this.#recordEvents({ context, taskId, runId: run.runId, events: mapped.events, expectedRevision: task.revision, task });
         const fresh = svc.getTask({ context, taskId });
@@ -293,8 +306,10 @@ class TaskHarnessOrchestrator {
       };
       return { ok: true, task: finalTask, step: commit.step, artifact: commit.artifact, verification: commit.verification, run: done.ok ? done.run : null, stopReason: res.stopReason, usage: usage || null, events: mapped.events };
     } finally {
+      try { adapter.revokeToolCapability(); } catch { /* ignore */ }
       try { adapter.revokeModelCapability(); } catch { /* ignore */ }
       try { await adapter.dispose(); } catch { /* ignore */ }
+      if (facade) { try { await facade.bridge.stop(); } catch { /* ignore */ } }
       this.registry.delete(run.runId);
     }
   }
@@ -311,6 +326,20 @@ class TaskHarnessOrchestrator {
   }
 
   #rev(context, taskId, fallback) { const t = this.#service().getTask({ context, taskId }); return t.ok ? t.task.revision : fallback; }
+
+  /** D4-03B Closure：official dsh run 启动前建 Tool Facade Bridge（随机 loopback port）+ Safe Manifest。*/
+  async #startToolFacade({ context, taskId, stepId, runId }) {
+    const cfg = this.toolFacade;
+    if (!cfg || cfg.enabled !== true) return null;
+    const proxy = this.toolProxy;
+    if (!proxy || typeof proxy.executeReadOnly !== "function" || !proxy.adapterFor) return null;
+    const toolIds = cfg.toolIds && cfg.toolIds.length ? cfg.toolIds : ["resource.read.metadata", "resource.search"];
+    const manifest = buildToolManifest(proxy.registry, { toolIds });
+    const make = typeof cfg.bridgeFactory === "function" ? cfg.bridgeFactory : (o) => new ToolFacadeBridge(o);
+    const bridge = make({ toolProxy: proxy, manifest, clock: this.clock, logger: this.logger, ttlMs: cfg.ttlMs, execTimeoutMs: cfg.execTimeoutMs });
+    await bridge.start();
+    return { bridge, manifest, taskId, stepId, runId, maxCalls: cfg.maxCalls, ttlMs: cfg.ttlMs };
+  }
 
   /** 一个 Harness turn 内的全部 tool proposals：逐个 propose→decide→(READ_ONLY) execute→verify。*/
   async #handleToolTurn({ context, taskId, stepId, runId, rawEvents, mappedEvents, task, expectedRevision }) {
@@ -408,6 +437,7 @@ class TaskHarnessOrchestrator {
     for (const [runId, entry] of this.registry) {
       if (entry.taskId !== taskId) continue;
       try { await entry.adapter.cancel(); } catch { /* ignore */ }
+      try { entry.adapter.revokeToolCapability(); } catch { /* ignore */ }
       try { entry.adapter.revokeModelCapability(); } catch { /* ignore */ }
       const cr = svc.cancelHarnessRun({ context, taskId, runId, expectedRevision: rev });
       if (cr.ok) rev = cr.task.revision;
@@ -431,6 +461,7 @@ class TaskHarnessOrchestrator {
 
   async dispose() {
     for (const entry of this.registry.values()) {
+      try { entry.adapter.revokeToolCapability(); } catch { /* ignore */ }
       try { entry.adapter.revokeModelCapability(); } catch { /* ignore */ }
       try { await entry.adapter.dispose(); } catch { /* ignore */ }
     }

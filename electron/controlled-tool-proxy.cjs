@@ -146,9 +146,18 @@ class ControlledToolProxy {
       const ref = args && (args.resourceRef || (Array.isArray(args.resourceRefs) ? args.resourceRefs[0] : null));
       if (!ref) return finalize({ decision: DECISION_STATUS.DENIED, reasonCode: TOOL_ERROR.TOOL_RESOURCE_REF_REQUIRED, contract });
       resourceRefs.push(String(ref));
+      // §99：propose 时 Resource 已删除/trash → RESOURCE_NOT_AVAILABLE，绝不进入执行。
+      const resourceStore = this.authService.store;
+      if (resourceStore && typeof resourceStore.resourceByRef === "function") {
+        const row = resourceStore.resourceByRef(String(ref));
+        const status = row ? String(row.registry_status || row.status || "") : "";
+        if (!row || (status && status !== "active")) return finalize({ decision: DECISION_STATUS.DENIED, reasonCode: TOOL_ERROR.RESOURCE_NOT_AVAILABLE, contract });
+      }
       const authz = this.authService.authorize({ context: trusted, application: { appId: task.app_id }, action, resource: String(ref) });
       if (authz.decision !== "ALLOW") {
-        const reasonCode = authz.reasonCode === "AGENT_USE_NOT_AUTHORIZED" ? TOOL_ERROR.TOOL_AGENT_USE_NOT_AUTHORIZED : TOOL_ERROR.TOOL_FORBIDDEN;
+        const reasonCode = authz.reasonCode === "AGENT_USE_NOT_AUTHORIZED" ? TOOL_ERROR.TOOL_AGENT_USE_NOT_AUTHORIZED
+          : authz.reasonCode === "RESOURCE_NOT_AVAILABLE" ? TOOL_ERROR.RESOURCE_NOT_AVAILABLE
+          : TOOL_ERROR.TOOL_FORBIDDEN;
         return finalize({ decision: DECISION_STATUS.DENIED, reasonCode, contract });
       }
     }
