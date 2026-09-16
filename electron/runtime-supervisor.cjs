@@ -318,6 +318,11 @@ class RuntimeSupervisor {
    */
   spawnExecutor({ instanceId = null, callId, holderId, dbPath, storeRoot = null, timeoutMs = 15000, now = null } = {}) {
     const id = instanceId || newId("exe");
+    // Electron main 里 utilityProcess 不可用时 launcher 会显式不可用：这里绝不回退到
+    // spawn(process.execPath, ...)，直接 fail closed（0 runtime / 0 lease / 0 mutation）。
+    if (this.launcher && this.launcher.available === false) {
+      return { ok: false, error: "EXECUTOR_LAUNCHER_UNAVAILABLE", detail: this.launcher.reason || null };
+    }
     const reg = this.registerExecutor(id, { callId, holderId });
     if (!reg.ok) return { ok: false, error: reg.error };
     const hook = typeof this.executorTestHook === "function" ? this.executorTestHook() : this.executorTestHook;

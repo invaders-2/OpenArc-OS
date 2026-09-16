@@ -229,7 +229,13 @@ class SideEffectRuntime {
       timeoutMs: Number(timeoutMs) || this.executorTimeoutMs,
       now: this.#now(),
     });
-    if (!box.ok) return { ok: false, error: box.error };
+    if (!box.ok) {
+      // executor admission 失败（launcher unavailable / spawn 失败）：明确收敛 pending call 为 BLOCKED，
+      // 绝不留一条仍可被再次触发的 APPROVED call；0 lease / 0 mutation / 0 retry。
+      const afterFail = this.store.callById(callId);
+      if (afterFail && !CALL_TERMINAL.includes(String(afterFail.status))) this.#blockPending(callId, box.error || SIDE_EFFECT_ERROR.CALL_STATE);
+      return { ok: false, error: box.error || SIDE_EFFECT_ERROR.CALL_STATE, call: this.store.callById(callId) };
+    }
     // spawn != entered executor：只有真实 ready handshake 之后才允许把这次 spawn 当成执行 runtime。
     // 未 ready 即退出 → EXECUTOR_START_FAILED（fail closed：0 lease / 0 mutation / 0 retry）。
     const ready = box.ready ? await box.ready : { ok: true };

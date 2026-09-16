@@ -8,9 +8,10 @@ const os = require("node:os");
 const { pathToFileURL } = require("node:url");
 
 const ROOT = path.resolve(__dirname, "../../..");
-const { createIdentityService, registerIdentityIpc } = require(path.join(ROOT, "electron/identity-bootstrap.cjs"));
+const { registerIdentityIpc } = require(path.join(ROOT, "electron/identity-bootstrap.cjs"));
 const { registerTaskIpc } = require(path.join(ROOT, "electron/task-bootstrap.cjs"));
 const { createDefaultExecutorLauncher } = require(path.join(ROOT, "electron/executor-launcher.cjs"));
+const { createOpenArcRuntime } = require(path.join(ROOT, "electron/runtime-boot.cjs"));
 
 const uiURL = pathToFileURL(path.join(ROOT, "dist/index.html")).href;
 const ADMIN = "admin@openarc.test";
@@ -26,7 +27,7 @@ const out = (line) => process.stdout.write(line + "\n");
 const check = (name, ok, detail) => { report.checks.push({ name, ok: !!ok, detail: String(detail === undefined ? "" : detail) }); out((ok ? "PASS" : "FAIL") + " " + name + (detail ? " :: " + detail : "")); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-let win; let userData = null; let identity = null;
+let win; let userData = null; let identity = null; let runtimeBoot = null;
 const mainErrors = []; const consoleErrors = [];
 const js = (code) => win.webContents.executeJavaScript("(async () => { " + code + " })()");
 const has = (sel) => js("return !!document.querySelector(" + JSON.stringify(sel) + ")");
@@ -88,14 +89,16 @@ app.whenReady().then(async () => {
     out("VERSIONS " + JSON.stringify(report.versions));
 
     userData = fs.mkdtempSync(path.join(os.tmpdir(), "oa-d4-04-"));
-    identity = createIdentityService({
+    // §5/§7/§17：probe 与真实 electron/main.cjs 调用**同一个** production boot helper，
+    // 保证 identity 创建 → Model Proxy start 的顺序与装配完全一致。
+    runtimeBoot = await createOpenArcRuntime({
       userDataDir: userData,
       safeStorage,
       allowAdmin: true,
       executorLauncher: createDefaultExecutorLauncher(),
       executorTestHook: () => executorSeam.fault,
     });
-    await identity.modelProxy.start();
+    identity = runtimeBoot.identity;
     await identity.store.initialize({ identifier: ADMIN, password: PW, displayName: "Admin" });
     for (const appId of ["ai", "resource-library", "settings"]) if (!identity.authStore.appById(appId)) identity.authStore.upsertApp({ appId, name: appId, publisher: "openarc-builtin", status: "enabled", builtIn: 1 });
     identity.authStore.upsertAppGrant({ appId: "ai", resourceType: "model", actions: ["model.view", "model.use", "model.test"], grantedBy: "system:model-baseline", organizationId: adminUser().team_id });
@@ -145,6 +148,14 @@ app.whenReady().then(async () => {
     check("A4 · Renderer 拿不到 Task Runtime / Domain", await js("return typeof window.openarc.taskService === 'undefined' && typeof window.openarc.resourceService === 'undefined'"), "");
     await click(".assistant-pill");
     check("A5 · 打开 AI 面板", await waitSel(".ai-panel"), "");
+
+    // §9/§10：真实 product boot evidence（safe；绝不含 proxy token / absolute path / credential）。
+    const admission = runtimeBoot.noteTaskAdmission();
+    report.productRuntime = {
+      ...runtimeBoot.snapshot(),
+      taskAdmissionAfterProxyStart: admission.afterProxyStartAttempt === true && admission.afterRuntimeReady === true,
+    };
+    check("A6 · Real product runtime boot assembly", report.productRuntime.identityCreated === true && report.productRuntime.modelProxyStartAttempted === true && report.productRuntime.modelProxyStarted === true && report.productRuntime.modelProxyListening === true && report.productRuntime.taskAdmissionAfterProxyStart === true, JSON.stringify({ started: report.productRuntime.modelProxyStarted, listening: report.productRuntime.modelProxyListening, order: report.productRuntime.bootOrder }));
 
     // Vertical Smoke A — READ
     await setPlan("read", resourceRef);

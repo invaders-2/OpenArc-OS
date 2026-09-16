@@ -71,6 +71,7 @@ class NodeChildProcessLauncher {
   constructor({ nodePath = process.execPath, spawnImpl = spawn } = {}) {
     this.nodePath = nodePath;
     this.spawnImpl = typeof spawnImpl === "function" ? spawnImpl : spawn;
+    this.available = true;
   }
   launch({ entry, args = [], env = {} } = {}) {
     const child = this.spawnImpl(this.nodePath, [entry, ...args], { stdio: ["pipe", "pipe", "pipe"], env: sanitizeEnv(env) });
@@ -114,6 +115,7 @@ class ElectronUtilityProcessLauncher {
   constructor({ utilityProcess = null, serviceName = "openarc-side-effect-executor" } = {}) {
     this.utilityProcess = utilityProcess || require("electron").utilityProcess;
     this.serviceName = serviceName;
+    this.available = true;
   }
   launch({ entry, args = [], env = {} } = {}) {
     const handle = createHandle();
@@ -175,19 +177,45 @@ class ElectronUtilityProcessLauncher {
 }
 
 /**
- * production 默认 launcher：
- *   · 真实 Electron product main（process.type === "browser"）→ utility process；
- *   · 纯 Node（tests / fixtures）→ 既有 node child launcher。
- * Renderer / Harness / ACP / Tool args 一律无法选择或替换 launcher。
+ * Electron main 里 utilityProcess 不可用时的 fail-closed launcher。
+ *
+ * 绝不回退到 `spawn(process.execPath, ...)`：Electron executable 不是普通 Node contract，
+ * 用 Node child 语义启动它只是在"碰巧能跑"，不构成 production 保证。
+ * 这里让 spawn 失败关闭：0 lease / 0 mutation，明确报 EXECUTOR_LAUNCHER_UNAVAILABLE。
  */
-function createDefaultExecutorLauncher() {
-  if (process.versions.electron && process.type === "browser") {
-    try {
-      const { utilityProcess } = require("electron");
-      if (utilityProcess && typeof utilityProcess.fork === "function") return new ElectronUtilityProcessLauncher({ utilityProcess });
-    } catch { /* 无法取得 utilityProcess 时 fail closed 到 node launcher */ }
+class UnavailableExecutorLauncher {
+  constructor(reason = "EXECUTOR_LAUNCHER_UNAVAILABLE") {
+    this.available = false;
+    this.reason = reason;
   }
-  return new NodeChildProcessLauncher();
+  launch() {
+    const err = new Error(this.reason);
+    err.code = this.reason;
+    throw err;
+  }
 }
 
-module.exports = { NodeChildProcessLauncher, ElectronUtilityProcessLauncher, createDefaultExecutorLauncher, sanitizeEnv };
+/**
+ * launcher 选择（可注入，便于回归测试证明 fail-closed 分支）：
+ *   · Electron main + utilityProcess.fork 可用 → ElectronUtilityProcessLauncher；
+ *   · Electron main + 不可用               → UnavailableExecutorLauncher（fail closed）；
+ *   · 纯 Node（tests / fixtures）           → NodeChildProcessLauncher。
+ * Renderer / Harness / ACP / Tool args 一律无法选择或替换 launcher。
+ */
+function selectExecutorLauncher({ isElectronMain = false, utilityProcess = null } = {}) {
+  if (!isElectronMain) return new NodeChildProcessLauncher();
+  if (utilityProcess && typeof utilityProcess.fork === "function") return new ElectronUtilityProcessLauncher({ utilityProcess });
+  return new UnavailableExecutorLauncher("EXECUTOR_LAUNCHER_UNAVAILABLE");
+}
+
+/** production 默认 launcher：由真实运行时事实决定（不做任何 env / Renderer 可影响的选择）。 */
+function createDefaultExecutorLauncher() {
+  const isElectronMain = !!(process.versions.electron && process.type === "browser");
+  let utilityProcess = null;
+  if (isElectronMain) {
+    try { utilityProcess = require("electron").utilityProcess || null; } catch { utilityProcess = null; }
+  }
+  return selectExecutorLauncher({ isElectronMain, utilityProcess });
+}
+
+module.exports = { NodeChildProcessLauncher, ElectronUtilityProcessLauncher, UnavailableExecutorLauncher, selectExecutorLauncher, createDefaultExecutorLauncher, sanitizeEnv };

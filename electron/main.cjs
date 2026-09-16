@@ -5,9 +5,10 @@ const { pathToFileURL } = require("node:url");
 const { safeURL } = require("./policy.cjs");
 const geometry = require("./geometry.cjs");
 const { NativeViewController } = require("./native-view-controller.cjs");
-const { createIdentityService, registerIdentityIpc } = require("./identity-bootstrap.cjs");
+const { registerIdentityIpc } = require("./identity-bootstrap.cjs");
 const { registerTaskIpc } = require("./task-bootstrap.cjs");
 const { createDefaultExecutorLauncher } = require("./executor-launcher.cjs");
+const { createOpenArcRuntime } = require("./runtime-boot.cjs");
 
 let win;
 let controller;
@@ -34,9 +35,28 @@ const glass = isMac
   : { backgroundMaterial: "mica", backgroundColor: "#00000000" };
 
 app.whenReady().then(async () => {
-  // D4-04：Model Proxy 是 Harness Model Adapter 的上游；必须在任何 Task 之前启动。
-  // 否则 Harness 会得到 HARNESS_MODEL_PROXY_UNAVAILABLE（fail closed）。
-  try { await identity.modelProxy.start(); } catch { /* proxy 启动失败时 Harness fail closed */ }
+  // ---------------------------------------------------------------------------
+  // D4-04 Closure-2 · 唯一 production runtime boot（与 D4-04 probe 共享同一 helper）。
+  //
+  // 永久规则：No Task admission before Model Proxy boot has been attempted
+  // against the actual created identity runtime.
+  // identity 必须先于 modelProxy.start() 创建；顺序错误一律 loud fail，绝不静默吞掉。
+  // ---------------------------------------------------------------------------
+  const runtime = await createOpenArcRuntime({
+    userDataDir: app.getPath("userData"),
+    safeStorage,
+    nativeImage,
+    // production executor 由 Electron utilityProcess.fork 启动（Node-enabled child，
+    // 不依赖 ELECTRON_RUN_AS_NODE / runAsNode fuse）；生命周期权威仍是 RuntimeSupervisor。
+    executorLauncher: createDefaultExecutorLauncher(),
+    // admin / 测试夹具命令默认关闭：产品 UI 里没有入口，也不该有。
+    // 只有显式置 OPENARC_IDENTITY_ADMIN=1 才放行（探针与未来的管理端用）。
+    allowAdmin: process.env.OPENARC_IDENTITY_ADMIN === "1",
+    // Control Service 身份（§60）：未配置时配对会因 SERVICE_IDENTITY_MISMATCH 被拒 —— 失败关闭。
+    serviceIdentity: process.env.OPENARC_SERVICE_IDENTITY || null,
+  });
+  identity = runtime.identity;
+
   win = new BrowserWindow({
     width: 1440,
     height: 940,
@@ -89,25 +109,10 @@ app.whenReady().then(async () => {
   });
 
   // ---------------------------------------------------------------------------
-  // D3-01 · 身份服务（唯一权威，§25）
-  //
-  // 它住在**主进程**：渲染进程只能通过 `identity:command` 派发命令，
+  // D3-01 · 身份服务（唯一权威，§25）已在 runtime boot 中创建；
+  // 接下来只注册 IPC：渲染进程只能通过 `identity:command` 派发命令，
   // 拿回 sanitize 过的快照。session token 从未越过这条边界。
   // ---------------------------------------------------------------------------
-  identity = createIdentityService({
-    userDataDir: app.getPath("userData"),
-    safeStorage,
-    nativeImage,
-    // D4-04 Closure：production executor 由 Electron utilityProcess.fork 启动（Node-enabled child，
-    // 不依赖 ELECTRON_RUN_AS_NODE / runAsNode fuse）；生命周期权威仍是 RuntimeSupervisor。
-    executorLauncher: createDefaultExecutorLauncher(),
-    // admin / 测试夹具命令默认关闭：产品 UI 里没有入口，也不该有。
-    // 只有显式置 OPENARC_IDENTITY_ADMIN=1 才放行（探针与未来的管理端用）。
-    allowAdmin: process.env.OPENARC_IDENTITY_ADMIN === "1",
-    // Control Service 身份（§60）：New Device 配对此前必须先能确认"这是我要加入的服务"。
-    // 未配置时配对会因 SERVICE_IDENTITY_MISMATCH 被拒 —— 失败关闭，不做 TOFU。
-    serviceIdentity: process.env.OPENARC_SERVICE_IDENTITY || null,
-  });
   registerIdentityIpc({
     ipcMain,
     service: identity.service,

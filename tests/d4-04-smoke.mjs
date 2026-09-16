@@ -55,6 +55,7 @@ const gate = {
   officialDsh: true,
   dshVersion: "0.1.5-rc.2",
   acpVersion: "1.4.0",
+  productRuntimeBoot: passed("A6 · Real product runtime boot assembly"),
   readSmoke: passed("B1 · READ vertical smoke → Task SUCCEEDED"),
   writeApproveSmoke: passed("C6 · WRITE → Task SUCCEEDED + mutation exactly 1") && passed("C7 · SideEffectCall=1 / approval=1 / lease=1 / verification PASS") && passed("C9 · WRITE 恰好 1 个 lease 且 RELEASED"),
   executorReady: passed("C8 · production executor spawned + ready + real child exit"),
@@ -75,6 +76,7 @@ const gate = {
   hiddenRetries: 0,
   maxToolCallsPerTask: report.stats.maxToolCallsPerTask || 0,
   executor: report.executor || null,
+  productRuntime: report.productRuntime || null,
   rendererConsoleErrors: report.secrets.consoleErrors || 0,
   mainUnhandledErrors: report.secrets.mainErrors || 0,
   secretHits: report.secrets.secretHits || 0,
@@ -91,5 +93,5 @@ if (failed.length) console.log("FAILED: " + failed.map((f) => f.name + " (" + f.
 if (stderr.trim()) console.log("stderr:\n" + stderr.trim().slice(0, 1200));
 console.log("GATE: " + JSON.stringify(gate));
 
-const gateOk = failed.length === 0 && exitCode === 0 && gate.readSmoke && gate.writeApproveSmoke && gate.executorReady && gate.writeDenySmoke && gate.cancelSmoke && gate.unknownEffectSmoke && gate.uiBusyReset && gate.rendererSpoof && gate.rendererReload && gate.rendererConsoleErrors === 0 && gate.mainUnhandledErrors === 0 && gate.secretHits === 0;
+const gateOk = failed.length === 0 && exitCode === 0 && gate.productRuntimeBoot && gate.readSmoke && gate.writeApproveSmoke && gate.executorReady && gate.writeDenySmoke && gate.cancelSmoke && gate.unknownEffectSmoke && gate.uiBusyReset && gate.rendererSpoof && gate.rendererReload && gate.rendererConsoleErrors === 0 && gate.mainUnhandledErrors === 0 && gate.secretHits === 0;
 process.exit(gateOk ? 0 : 1);
