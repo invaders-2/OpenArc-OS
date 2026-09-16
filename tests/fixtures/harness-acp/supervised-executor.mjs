@@ -40,6 +40,8 @@ const bundle = createSideEffectExecutorBundle({
       await gate;
       const out = await real(a);
       process.stdout.write(JSON.stringify({ type: "mutation_done", deleteCalls }) + "\n");
+      // Closure-2：真实 late mutation 已落盘后保持挂起，便于观测"尚未 finalize 的旧 executor"。
+      if (args.holdAfterMutation) await new Promise(() => {});
       return out;
     };
     return svc;

@@ -1,11 +1,12 @@
 /**
  * D4-03C4 Closure · Cold-restart Runtime Quiescence Probe must fail closed。
  *
- * 永久规则：
- *   **Probe failure is not death proof.**
- *   Liveness probe 是三态 ALIVE / DEFINITELY_GONE / UNKNOWN；
- *   只有 DEFINITELY_GONE 允许 RuntimeLifecycleAuthority.observeExit()；
- *   timeout / 任意意外 OS error / probe 自身异常一律 UNKNOWN → quiesced=false。
+ * 永久规则（D4-03C4 Closure-2 收紧）：
+ *   **Probe failure is not death proof.**  **Unix socket pathname existence != process lifetime.**
+ *   filesystem unix-socket probe 只回答 ALIVE / UNKNOWN（reachability），没有 PROCESS_DEAD 结论；
+ *   ENOENT / stale endpoint / timeout / 任意 OS error / probe 自身异常一律 UNKNOWN → quiesced=false。
+ *   只有“同一 supervisor lifetime 的真实 child 'exit'”或“上一次 production supervisor 持久化的
+ *   trusted EXITED proof”允许 RuntimeLifecycleAuthority.observeExit()。
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -18,7 +19,7 @@ import { createRequire } from "node:module";
 import { createToolHarnessFixture, reopenToolHarnessRuntime } from "./fixtures/harness-acp/tool-harness-fixture.mjs";
 
 const require = createRequire(import.meta.url);
-const { RuntimeSupervisor, probeUnixSocket, normalizeProbeResult, LIVENESS, DEFINITELY_GONE_ERRNOS } = require("../electron/runtime-supervisor.cjs");
+const { RuntimeSupervisor, probeUnixSocket, normalizeProbeResult, LIVENESS } = require("../electron/runtime-supervisor.cjs");
 const { RuntimeLifecycleAuthority } = require("../electron/runtime-lifecycle-authority.cjs");
 const { ToolRegistry } = require("../electron/tool-registry.cjs");
 
@@ -60,7 +61,7 @@ function errorSocket(code) {
 /** 立刻 connect 成功的假 socket。 */
 function connectSocket() { return { setTimeout() { return this; }, on(ev, fn) { if (ev === "connect") setImmediate(() => fn()); return this; }, destroy() { /* ignore */ } }; }
 
-test("Tri-state probe：real ALIVE / real DEFINITELY_GONE（ENOENT）/ 真实 stale endpoint（SIGKILL）→ UNKNOWN", async () => {
+test("Reachability probe：real ALIVE；真实 stale endpoint（SIGKILL）/ ENOENT 一律 UNKNOWN（pathname 无死亡权威）", async () => {
   const root = tmpDir("oa-c4c-probe-");
   try {
     const livePath = path.join(root, "live.sock");
@@ -69,12 +70,12 @@ test("Tri-state probe：real ALIVE / real DEFINITELY_GONE（ENOENT）/ 真实 st
     await holder.kill();
     assert.equal(fs.existsSync(livePath), true, "SIGKILL 后 socket 文件仍在（真实 stale endpoint）");
     const stale = await probeUnixSocket(livePath);
-    assert.equal(stale.state, LIVENESS.UNKNOWN, "stale endpoint 不得被当作 definite death：" + JSON.stringify(stale));
+    assert.equal(stale.state, LIVENESS.UNKNOWN, "stale endpoint 不得被当作 death proof：" + JSON.stringify(stale));
     assert.notEqual(stale.reason, "ENDPOINT_ABSENT");
     fs.unlinkSync(livePath);
-    assert.equal((await probeUnixSocket(livePath)).state, LIVENESS.DEFINITELY_GONE, "ENOENT = DEFINITELY_GONE");
-    assert.equal((await probeUnixSocket(path.join(root, "never.sock"))).state, LIVENESS.DEFINITELY_GONE);
-    assert.deepEqual([...DEFINITELY_GONE_ERRNOS], ["ENOENT"], "只有 ENOENT 能证明 endpoint 不存在");
+    assert.equal((await probeUnixSocket(livePath)).state, LIVENESS.UNKNOWN, "ENOENT（pathname 消失）不是 process death proof");
+    assert.equal((await probeUnixSocket(path.join(root, "never.sock"))).state, LIVENESS.UNKNOWN);
+    assert.deepEqual(Object.values(LIVENESS), ["ALIVE", "UNKNOWN"], "pathname probe 只有 ALIVE / UNKNOWN 两态");
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -150,24 +151,25 @@ test("UNKNOWN probe 绝不 observeExit / 绝不 quiesced / 绝不改写 persiste
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-test("DEFINITELY_GONE probe → 恰好一次 observeExit → quiesced=true；ALIVE probe → 0 observeExit", async () => {
+test("pathname probe 无权 observeExit：自称 DEFINITELY_GONE / legacy boolean 一律 UNKNOWN；ALIVE → 0 observeExit", async () => {
   const root = tmpDir("oa-c4c-gone-");
   try {
-    const gone = "exe_gone1";
+    const claim = "exe_gone1";
     const live = "exe_live1";
-    persistRecord(root, { ...activeRecord(gone), socketPath: path.join(root, "executors", gone + ".sock") });
+    persistRecord(root, { ...activeRecord(claim), socketPath: path.join(root, "executors", claim + ".sock") });
     persistRecord(root, { ...activeRecord(live), socketPath: path.join(root, "executors", live + ".sock") });
     const { lifecycle, box } = countingLifecycle();
-    const supervisor = new RuntimeSupervisor({ runtimeDir: root, lifecycle, probeImpl: (p) => ({ state: String(p).includes(live) ? LIVENESS.ALIVE : LIVENESS.DEFINITELY_GONE, reason: null, errno: "ENOENT" }) });
+    // 即使 probe 自称 "DEFINITELY_GONE" / 旧 boolean false，也绝不是死亡证明。
+    const supervisor = new RuntimeSupervisor({ runtimeDir: root, lifecycle, probeImpl: (p) => (String(p).includes(live) ? { state: LIVENESS.ALIVE, reason: "CONNECTED" } : false) });
     const stats = await supervisor.rehydrate();
-    assert.equal(box.observeExit, 1, "只有 DEFINITELY_GONE 允许 observeExit");
-    assert.equal(supervisor.isQuiesced(gone).quiesced, true);
-    assert.equal(supervisor.isQuiesced(gone).proof.type, "SUPERVISOR_OBSERVED_EXIT");
+    assert.equal(box.observeExit, 0, "pathname probe 绝不产生 observeExit");
+    assert.equal(supervisor.isQuiesced(claim).quiesced, false, "pathname probe 不得 quiesce");
+    assert.equal(supervisor.isQuiesced(claim).reason, "LIVENESS_UNKNOWN");
     assert.equal(supervisor.isQuiesced(live).quiesced, false);
     assert.equal(supervisor.isQuiesced(live).reason, "RUNTIME_STILL_ACTIVE");
-    assert.equal(stats.dead, 1);
+    assert.equal(stats.dead, 0);
     assert.equal(stats.alive, 1);
-    assert.equal(stats.unknown, 0);
+    assert.equal(stats.unknown, 1);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -221,9 +223,9 @@ test("LIFECYCLE_NOT_READY：rehydrate 完成前 quiesced 必须 false（fail clo
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-/* ================================================================== 3. static gates（timeout / arbitrary error 不得成为 death proof） */
+/* ================================================================== 3. static gates（timeout / arbitrary error / pathname 消失都不得成为 death proof） */
 
-test("Static Gate：probe 的 timeout / 默认 error 分支绝不调用 observeExit；rehydrate 的 UNKNOWN 分支同样不调用", async () => {
+test("Static Gate：probe 只回答 ALIVE / UNKNOWN（不存在死亡结论）；rehydrate 的 UNKNOWN 分支不调用 observeExit", async () => {
   const src = fs.readFileSync(SUPERVISOR_SRC, "utf8");
   const probeStart = src.indexOf("function probeUnixSocket(");
   const probeEnd = src.indexOf("class RuntimeSupervisor");
@@ -233,10 +235,16 @@ test("Static Gate：probe 的 timeout / 默认 error 分支绝不调用 observeE
   assert.ok(!/registerRuntime/.test(probeSrc), "probe 内部绝不允许出现 registerRuntime");
   assert.ok(/socket\.on\("timeout", \(\) => finish\(LIVENESS\.UNKNOWN/.test(probeSrc), "timeout handler 必须解析为 UNKNOWN");
   assert.ok(/socket\.on\("error", \(err\) => \{/.test(probeSrc), "error handler 必须显式分类，而不是统一映射成 dead");
-  assert.ok(/DEFINITELY_GONE_ERRNOS\.has\(code\)/.test(probeSrc), "DEFINITELY_GONE 必须由白名单 errno 决定");
-  assert.ok(/return finish\(LIVENESS\.UNKNOWN, "UNCERTAIN_LIVENESS:/.test(probeSrc), "默认分支必须是 UNKNOWN");
+  assert.ok(/return finish\(LIVENESS\.UNKNOWN, "UNCERTAIN_LIVENESS:/.test(probeSrc), "任意 OS error（含 ENOENT）必须解析为 UNKNOWN");
+  // 去掉注释后的纯代码里不得再有任何 pathname death authority。
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, "").split("\n").map((l) => l.replace(/\/\/.*$/, "")).join("\n");
+  assert.ok(!/DEFINITELY_GONE/.test(code), "pathname probe 不得再存在 DEFINITELY_GONE 死亡结论");
+  assert.ok(!/ENDPOINT_ABSENT/.test(code), "不得存在 endpoint-absent death authority");
   assert.ok(!/done\(/.test(src), "不得存在旧 boolean probe 收敛（done(true/false)）语义");
   assert.ok(!/probeUnixSocket\([^)]*\)\.then\(|state === "DEAD"/.test(src), "不得存在 boolean / DEAD 别名映射");
+  // probe path 必须从 validated instanceId 重新派生，绝不信任 persisted record 的 socketPath。
+  assert.ok(/this\.#probe\(this\.socketPath\(instanceId\)\)/.test(src), "rehydrate 必须用 this.socketPath(validated instanceId)");
+  assert.ok(!/rec\.socketPath/.test(code), "persisted socketPath 绝不作为 probe 输入");
   // rehydrate：UNKNOWN 分支不得调用 observeExit（避免改名规避）。
   const marker = src.indexOf("// UNKNOWN：fail closed");
   assert.ok(marker > 0, "rehydrate 必须有显式 UNKNOWN 分支");
@@ -274,7 +282,8 @@ async function scenario(socketMode, { crashAfterMutation = false } = {}) {
   assert.equal(fx.sideEffectRuntime.decideApproval({ context: { sessionRef: fx.f.sessions.admin, source: "user" }, approvalRequestId: planned.approvalRequestId, decision: "APPROVE" }).ok, true);
   const callId = planned.approvalRequestId;
 
-  const execId = "e" + seq + Math.random().toString(36).slice(2, 6);
+  // production instanceId 形态：probe path 由它派生，因此必须可校验。
+  const execId = "exe_c4c" + seq + Math.random().toString(36).slice(2, 5);
   const socketPath = path.join(runtimeDir, "executors", execId + ".sock");
   const box = spawn(process.execPath, [GATED_EXECUTOR, JSON.stringify({ runtimeDir, dbPath, storeRoot, instanceId: execId, callId, holderId: "exec_1", timeoutMs: 120000, now: fx.f.clock() })], { stdio: ["pipe", "pipe", "pipe"] });
   let out = ""; let err = "";
@@ -288,17 +297,24 @@ async function scenario(socketMode, { crashAfterMutation = false } = {}) {
   assert.equal(fx.f.resourceService.sideEffectPrecondition({ resourceRef }).trashed, crashAfterMutation);
 
   // 模拟"上一次 supervisor 进程已死"：它本来会写的 persisted ACTIVE record 留在盘上，且没有任何人 observeExit。
+  // socketPath 是 legacy 字段，必须被新 supervisor 完全忽略（probe path 从 instanceId 重新派生）。
   fs.mkdirSync(path.join(runtimeDir, "executors"), { recursive: true });
-  fs.writeFileSync(path.join(runtimeDir, "executors", execId + ".json"), JSON.stringify({ instanceId: execId, status: "ACTIVE", socketPath, startedAt: 1, callId, holderId: "exec_1", endedAt: null, exitCode: null, signal: null, reason: null }));
+  const recordPath = path.join(runtimeDir, "executors", execId + ".json");
+  fs.writeFileSync(recordPath, JSON.stringify({ instanceId: execId, status: "ACTIVE", socketPath, startedAt: 1, callId, holderId: "exec_1", endedAt: null, exitCode: null, signal: null, reason: null }));
 
   let keepAlive = false;
-  if (socketMode === "alive") {
-    keepAlive = true; // 旧 runtime 仍存活：socket 仍被 bind。
+  if (socketMode === "alive" || socketMode === "live_unlinked") {
+    keepAlive = true; // 旧 runtime 仍存活：它就是 late mutation 的真实来源。
+    if (socketMode === "live_unlinked") fs.unlinkSync(socketPath); // pathname 消失 != 进程死亡
   } else {
     box.kill("SIGKILL");
     await exited;
-    if (socketMode === "gone") { try { fs.unlinkSync(socketPath); } catch { /* endpoint 已不存在同样等价于 ENOENT */ } }
-    else assert.equal(fs.existsSync(socketPath), true, "stale endpoint 文件必须仍在");
+    assert.equal(fs.existsSync(socketPath), true, "SIGKILL 后 stale endpoint 文件必须仍在");
+    if (socketMode === "trusted_exited") {
+      // 模拟"上一次 production supervisor 在真实 child 'exit' 后持久化了 trusted EXITED proof"。
+      // death authority 只能来自这个已发生的 trusted observation，绝不再从 pathname 消失制造。
+      fs.writeFileSync(recordPath, JSON.stringify({ instanceId: execId, status: "EXITED", startedAt: 1, callId, holderId: "exec_1", endedAt: 2, exitCode: null, signal: "SIGKILL", reason: "SUPERVISOR_OBSERVED_EXIT" }));
+    }
   }
   const fixedNow = fx.f.clock();
   await fx.close();
@@ -361,8 +377,8 @@ test("Late Effect Safety · probe UNKNOWN：early NOT_APPLIED 绝不 false-negat
   } finally { await cleanup(s); }
 });
 
-test("E2E · cold restart + probe DEFINITELY_GONE（ENOENT）：quiesced=true → NOT_APPLIED → FAILED + BLOCK，0 retry", async () => {
-  const s = await scenario("gone");
+test("E2E · cold restart + persisted trusted EXITED proof：quiesced=true → NOT_APPLIED → FAILED + BLOCK，0 retry", async () => {
+  const s = await scenario("trusted_exited");
   try {
     s.rt.recover();
     assert.equal(callOf(s).recoverySafe.quiesced, true, JSON.stringify(callOf(s).recoverySafe));

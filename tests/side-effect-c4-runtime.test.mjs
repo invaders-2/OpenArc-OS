@@ -3,8 +3,10 @@
  *
  * 永久规则：
  *   · 真实 mutation 只发生在 RuntimeSupervisor 拥有并监督的 executor runtime 里；
- *   · 只有 supervisor 真实观测到进程退出（child 'exit'）或 OS-backed socket 消失，
- *     才允许 quiesced=true；进入内存的 diff / lease 状态 / 时间流逝都不是证明；
+ *   · 只有 supervisor 真实观测到 child 'exit'（或恢复上一次 production supervisor
+ *     已持久化的 trusted EXITED proof）才允许 quiesced=true；
+ *     OS-backed socket probe 只回答 reachability（ALIVE / UNKNOWN），pathname 消失不是死亡证明；
+ *     进入内存的 diff / lease 状态 / 时间流逝都不是证明；
  *   · observeExit / registerRuntime 不导出给 Renderer / IPC / ACP / Harness / Tool Facade。
  */
 import { test } from "node:test";
@@ -226,7 +228,7 @@ test("Restart After Claim：RUNNING cold crash → UNKNOWN_EFFECT → verify →
 
 /* ------------------------------------------------------------------ 4. cross-restart OS-backed rehydrate */
 
-test("Cold restart rehydrate：绝不用内存中的旧 authority 自我证明；OS-backed socket 判定才是 proof", async () => {
+test("Cold restart rehydrate：pathname probe 只回答 reachability；只有 persisted trusted EXITED proof 才 quiesce", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "oa-c4-rehydrate-"));
   try {
     const execDir = path.join(root, "executors");
@@ -247,62 +249,86 @@ test("Cold restart rehydrate：绝不用内存中的旧 authority 自我证明�
       child.kill("SIGKILL");
       await done;
     };
+    const writeRecord = (id, rec) => fs.writeFileSync(path.join(execDir, id + ".json"), JSON.stringify(rec));
 
-    // (a) tri-state probe 语义：只有 ENOENT / connect 成功给出确定结论。
-    assert.equal((await probeUnixSocket(path.join(execDir, "missing.sock"))).state, "DEFINITELY_GONE", "endpoint 文件不存在 = definitely gone");
+    // (a) pathname probe 只有 ALIVE / UNKNOWN：ENOENT / stale 都绝不是 death proof。
+    assert.equal((await probeUnixSocket(path.join(execDir, "missing.sock"))).state, "UNKNOWN", "endpoint 文件不存在也不能证明 process 死亡");
     const livePath = path.join(execDir, "live.sock");
     const holder1 = await holdSocket(livePath);
     assert.equal((await probeUnixSocket(livePath)).state, "ALIVE", "真实 bind 的 socket 被视为存活");
     await killHolder(holder1);
     assert.equal(fs.existsSync(livePath), true, "SIGKILL 后 socket 文件仍在（真实 stale endpoint）");
-    assert.equal((await probeUnixSocket(livePath)).state, "UNKNOWN", "listener 被 kill 但 endpoint 文件仍在 → probe 不确定，绝不是 death proof");
+    assert.equal((await probeUnixSocket(livePath)).state, "UNKNOWN", "listener 被 kill 但 endpoint 文件仍在 → reachability 不确定");
     fs.unlinkSync(livePath);
-    assert.equal((await probeUnixSocket(livePath)).state, "DEFINITELY_GONE", "endpoint 文件不存在才是 definitely gone");
+    assert.equal((await probeUnixSocket(livePath)).state, "UNKNOWN", "pathname 被 unlink 也不能证明 process 死亡");
 
-    // (b) 上一次进程持久化的 ACTIVE record + endpoint 文件不存在 → 新 supervisor 判定 EXITED（OS fact）。
-    const deadId = "exe_dead0001";
-    fs.writeFileSync(path.join(execDir, deadId + ".json"), JSON.stringify({ instanceId: deadId, status: "ACTIVE", socketPath: path.join(execDir, deadId + ".sock"), startedAt: 1, callId: "scall_x", holderId: "e", endedAt: null, exitCode: null, signal: null, reason: null }));
-    const fresh = new RuntimeSupervisor({ runtimeDir: root });
-    const stats1 = await fresh.rehydrate();
-    const verdict = fresh.isQuiesced(deadId);
-    assert.equal(verdict.quiesced, true, JSON.stringify(verdict));
-    assert.equal(fresh.snapshot().find((r) => r.instanceId === deadId).status, "EXITED");
-    assert.equal(stats1.dead, 1);
-    assert.equal(stats1.unknown, 0);
+    // (b) persisted ACTIVE record + 派生 endpoint 不存在 → 仍然 UNKNOWN（ENOENT 不是 death proof）。
+    const activeId = "exe_active01";
+    writeRecord(activeId, { instanceId: activeId, status: "ACTIVE", socketPath: path.join(execDir, "spoofed-elsewhere.sock"), startedAt: 1, callId: "scall_x", holderId: "e", endedAt: null, exitCode: null, signal: null, reason: null });
+    const b = new RuntimeSupervisor({ runtimeDir: root });
+    const statsB = await b.rehydrate();
+    const vB = b.isQuiesced(activeId);
+    assert.equal(vB.quiesced, false, JSON.stringify(vB));
+    assert.equal(vB.reason, "LIVENESS_UNKNOWN");
+    assert.equal(b.snapshot().find((r) => r.instanceId === activeId).status, "ACTIVE");
+    assert.equal(statsB.dead, 0, "pathname probe 绝不产生 dead");
+    assert.equal(statsB.unknown, 1);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(execDir, activeId + ".json"), "utf8")).status, "ACTIVE");
 
-    // (c) 上一次进程遗留的 record + socket 仍存活 → 只能 ACTIVE，绝不 quiesced。
+    // (c) persisted ACTIVE record + socket 仍存活 → ALIVE，绝不 quiesced。
     const aliveId = "exe_alive001";
     const aliveSock = path.join(execDir, aliveId + ".sock");
     const holder2 = await holdSocket(aliveSock);
-    fs.writeFileSync(path.join(execDir, aliveId + ".json"), JSON.stringify({ instanceId: aliveId, status: "ACTIVE", socketPath: aliveSock, startedAt: 1, callId: "scall_y", holderId: "e", endedAt: null, exitCode: null, signal: null, reason: null }));
-    const fresh2 = new RuntimeSupervisor({ runtimeDir: root });
-    const stats2 = await fresh2.rehydrate();
-    const alive = fresh2.isQuiesced(aliveId);
-    assert.equal(alive.quiesced, false, "存活的上一次 executor 绝不能被声明 quiesced");
-    assert.equal(alive.reason, "RUNTIME_STILL_ACTIVE");
-    assert.equal(stats2.alive, 1);
+    writeRecord(aliveId, { instanceId: aliveId, status: "ACTIVE", socketPath: aliveSock, startedAt: 1, callId: "scall_y", holderId: "e", endedAt: null, exitCode: null, signal: null, reason: null });
+    const c = new RuntimeSupervisor({ runtimeDir: root });
+    const statsC = await c.rehydrate();
+    assert.equal(c.isQuiesced(aliveId).quiesced, false, "存活的上一次 executor 绝不能被声明 quiesced");
+    assert.equal(c.isQuiesced(aliveId).reason, "RUNTIME_STILL_ACTIVE");
+    assert.equal(statsC.alive, 1);
+    assert.equal(statsC.unknown, 1);
+
+    // (c2) legacy socketPath spoof：record 指向真实 live socket，但派生 endpoint 不存在 → 只能 UNKNOWN。
+    const spoofId = "exe_spoof001";
+    writeRecord(spoofId, { instanceId: spoofId, status: "ACTIVE", socketPath: aliveSock, startedAt: 1, callId: "scall_s", holderId: "e", endedAt: null, exitCode: null, signal: null, reason: null });
+    const c2 = new RuntimeSupervisor({ runtimeDir: root });
+    const statsC2 = await c2.rehydrate();
+    assert.equal(c2.isQuiesced(spoofId).quiesced, false);
+    assert.equal(c2.isQuiesced(spoofId).reason, "LIVENESS_UNKNOWN", "persisted socketPath 绝不被采信");
+    assert.equal(statsC2.alive, 1, "只有真身 aliveId 是 ALIVE");
+    assert.equal(statsC2.unknown, 2);
 
     // (d) holder 被 SIGKILL、endpoint 文件仍在 → probe UNKNOWN → fail closed（绝不 quiesced / 绝不 observeExit）。
     await killHolder(holder2);
-    const fresh3 = new RuntimeSupervisor({ runtimeDir: root });
-    const stats3 = await fresh3.rehydrate();
-    const afterKill = fresh3.isQuiesced(aliveId);
+    const d = new RuntimeSupervisor({ runtimeDir: root });
+    const statsD = await d.rehydrate();
+    const afterKill = d.isQuiesced(aliveId);
     assert.equal(afterKill.quiesced, false, "probe 不确定时绝不允许 quiesced");
     assert.equal(afterKill.reason, "LIVENESS_UNKNOWN");
-    assert.equal(stats3.unknown, 1, "UNKNOWN 必须单独计数，不得归入 dead");
-    assert.equal(stats3.dead, 1, "只有 ENOENT 的 deadId 计入 dead");
-    // persisted record 不得被改写成 EXITED。
+    assert.equal(statsD.unknown, 3, "UNKNOWN 必须单独计数，不得归入 dead");
+    assert.equal(statsD.dead, 0, "pathname probe 绝不产生 dead");
     const persisted = JSON.parse(fs.readFileSync(path.join(execDir, aliveId + ".json"), "utf8"));
     assert.equal(persisted.status, "ACTIVE", "UNKNOWN probe 不得改写 persisted executor record");
-    assert.notEqual(persisted.reason, "OS_EXECUTOR_ENDPOINT_ABSENT");
 
-    // (e) endpoint 文件真实不存在（ENOENT）→ DEFINITELY_GONE → 才允许 observeExit。
-    fs.unlinkSync(aliveSock);
-    const fresh4 = new RuntimeSupervisor({ runtimeDir: root });
-    const stats4 = await fresh4.rehydrate();
-    assert.equal(fresh4.isQuiesced(aliveId).quiesced, true, "ENOENT 明确证明 endpoint 不存在");
-    assert.equal(stats4.dead, 2);
-    assert.equal(stats4.unknown, 0);
+    // (e) persisted trusted EXITED proof（由 production supervisor 真实 'exit' 后写）→ 允许恢复 quiesced=true。
+    const exitedId = "exe_exited01";
+    writeRecord(exitedId, { instanceId: exitedId, status: "EXITED", startedAt: 1, callId: "scall_z", holderId: "e", endedAt: 9, exitCode: 0, signal: null, reason: "SUPERVISOR_OBSERVED_EXIT" });
+    const e = new RuntimeSupervisor({ runtimeDir: root });
+    const statsE = await e.rehydrate();
+    const vE = e.isQuiesced(exitedId);
+    assert.equal(vE.quiesced, true, JSON.stringify(vE));
+    assert.equal(vE.proof.type, "SUPERVISOR_OBSERVED_EXIT");
+    assert.equal(statsE.dead, 1);
+    assert.equal(statsE.unknown, 3);
+
+    // (f) persisted EXITED 但 reason 不是 trusted transition → fail closed，绝不 quiesce。
+    const untrustedId = "exe_untrust01";
+    writeRecord(untrustedId, { instanceId: untrustedId, status: "EXITED", startedAt: 1, endedAt: 9, exitCode: 0, signal: null, reason: "OS_EXECUTOR_ENDPOINT_ABSENT" });
+    const f2 = new RuntimeSupervisor({ runtimeDir: root });
+    const statsF = await f2.rehydrate();
+    assert.equal(f2.isQuiesced(untrustedId).quiesced, false, "非 trusted reason 的 EXITED 绝不许 quiesce");
+    assert.equal(f2.isQuiesced(untrustedId).reason, "LIVENESS_UNKNOWN");
+    assert.equal(statsF.dead, 1, "只有 trusted EXITED 计入 dead");
+    assert.equal(statsF.unknown, 4);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
