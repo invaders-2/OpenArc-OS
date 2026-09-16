@@ -1,5 +1,7 @@
 # D4-03C4 Closure-2 · 结果记录（Cold-Restart Death Proof）
 
+> **已被 D4-03C4 Closure-3 收紧（supersedes）**：本文把"persisted trusted EXITED proof"当成 cold restart 的 death authority。Closure-3 证明 **persisted runtime lifecycle record 不是 process-death authority**（"SUPERVISOR_OBSERVED_EXIT" 字符串 != 真实观测），因此 \`TRUSTED_EXIT_REASONS\` 白名单 authority 已彻底删除。文中 "persisted trusted EXITED → quiesced=true" 陈述均为**历史记录**，已被取代；当前永久规则见 \`docs/D4-03C4-CLOSURE3-RESULT.md\` 与 ADR "Persisted Exit Proof Authority（D4-03C4 Closure-3 · 永久）"。pathname 语义（Closure-2）仍然有效。
+
 Base HEAD：\`291d51c7db2e1a7c1e7cbea297f22dc8dc2e0085\`
 入口：\`npm run test:d4-03c4-closure2\`
 

@@ -203,10 +203,10 @@ ToolRegistry → ControlledToolProxy → SideEffectAuthority → RuntimeSupervis
 
 1. **同一 supervisor lifetime**：真实 \`child.on("exit")\` → 自动 \`observeExit\`（测试不得自行调用）；
 2. **cross-restart**：每个 executor runtime 在自己的整个生命周期内独占 bind
-   \`<runtimeDir>/executors/<instanceId>.sock\`；cold restart 后新 supervisor 用 **OS-backed
-   liveness probe** 重新判定（reachability：ALIVE / UNKNOWN，见下方
-   "Unix socket pathname 语义 / Reachability probe（D4-03C4 Closure-2 · 永久）"）。
-   **绝不使用内存中的旧 authority 自我证明，也绝不把 pathname 消失当成死亡证明。**
+   \`<runtimeDir>/executors/<instanceId>.sock\`；cold restart 后新 supervisor 只能对 persisted
+   record 做 **reachability probe**（ALIVE / UNKNOWN，见下方 Closure-2 一节），**绝不 observeExit**。
+   persisted runtime record 只是 recovery/audit hint，不是 death authority
+   （见下方 "Persisted Exit Proof Authority（D4-03C4 Closure-3 · 永久）"）。
 
 精度纠正：\`RuntimeLifecycleAuthority.isQuiesced()\` 本身只返回 \`UNKNOWN→false / ACTIVE→false / EXITED→true\`；
 \`SELF_RUNTIME_ACTIVE\` 是 \`SideEffectAuthority.#quiescenceProof()\` 层的额外保护，不是 authority 自身语义。
@@ -236,27 +236,51 @@ ToolRegistry → ControlledToolProxy → SideEffectAuthority → RuntimeSupervis
 `OS_EXECUTOR_ENDPOINT_ABSENT` 已从代码中彻底删除：ENOENT 曾被视为"endpoint 不存在 → 进程已死"，
 但它只证明 pathname 不存在，不证明持有该 endpoint 的进程已死。
 
-### Trusted death proof（D4-03C4 Closure-2 · 永久）
+### Persisted Exit Proof Authority（D4-03C4 Closure-3 · 永久）
 
-当前阶段允许 `quiesced=true` 的可信来源只有两个：
+    Persisted runtime lifecycle records are not security authority for process death.
+    A trusted-looking reason string is not a trusted proof.
+    Only a live OpenArc-owned supervisor observation may establish quiescence
+    in the current implementation.
+    Cold restart without authenticated durable lifecycle proof fails closed.
 
-1. **同一 supervisor lifetime**：production `RuntimeSupervisor` 自己观测到的真实
-   `child.on("exit")` → reason `SUPERVISOR_OBSERVED_EXIT`；
-2. **persisted prior proof**：上一次 production supervisor 在真实 `exit` 后持久化的
-   `status=EXITED` 且 reason 属于 trusted transition（`SUPERVISOR_OBSERVED_EXIT` /
-   `EXECUTOR_SPAWN_FAILED`）。
+普通 durable JSON 字段（`status` / `reason` / `exitCode` / `signal` / `endedAt`）本身没有资格让
+`quiesced=true`；字符串 `SUPERVISOR_OBSERVED_EXIT`（或任何白名单字符串）都不是 trusted proof。
+代码中**刻意不保留任何 reason 白名单**：命中字符串不得让 quiesced=true。
 
-cold restart **只能恢复这个已经发生过的 trusted observation**，绝不从 socket pathname 的消失
-重新创造 death proof。`status=EXITED` 但 reason 不可信的 record 与 ACTIVE 一样 fail closed
-（不 observeExit、不 quiesced、persisted record 不被改写）。
+当前阶段唯一允许产生 trusted death proof 的来源：
+**同一个仍然活着的 production `RuntimeSupervisor` 真实观测到的 `child.on("exit")`。**
 
-### rehydrate() 契约（D4-03C4 Closure-2）
+cold restart 对 persisted `status=EXITED`（任何 reason）一律：
 
-    invalid instanceId   → ignore；不 probe / 不 persist / 不 observeExit / 不 quiesce
-    trusted EXITED       → register + trusted observeExit；dead++
-    否则                 → 用 this.socketPath(validatedInstanceId) 做 reachability probe
-      ALIVE              → alive++（persisted record 保持 ACTIVE）
-      UNKNOWN            → no observeExit；unknown++（persisted record 保持 ACTIVE）
+    UNVERIFIED_PERSISTED_EXIT → 不 observeExit → quiesced=false
+
+persisted record 不被改写；内存视图按 fail-closed 的 ACTIVE 处理。
+
+### Authenticated durable cross-restart proof = DEFERRED / NOT VERIFIED（D4-03C4 Closure-3）
+
+如果未来需要 "cold restart → trusted death proof"，必须另做真正 **authenticated /
+integrity-protected** 的 durable lifecycle proof（安全 MAC / OS-backed proof / 等价的 trusted
+authority）。**本阶段不实现。**
+
+禁止用以下任何一种冒充 authenticated proof（它们仍然可伪造）：
+
+    reason string whitelist / magic field / trusted=true / source=supervisor /
+    checksum without secret / filename convention
+
+在真正的 durable proof 存在之前，cold restart 一律 fail closed。该缺口不是 safety blocker：
+当前行为 fail closed 到 UNKNOWN_EFFECT。
+
+### rehydrate() 契约（D4-03C4 Closure-3）
+
+    invalid instanceId    → ignore；不 probe / 不 persist / 不 observeExit / 不 quiesce
+    EXITED（任何 reason） → register ACTIVE + UNVERIFIED_PERSISTED_EXIT；no observeExit；
+                            unknown++ / unverifiedExit++
+    ACTIVE                → 用 this.socketPath(validatedInstanceId) 做 reachability probe
+      ALIVE               → alive++（persisted record 保持 ACTIVE）
+      UNKNOWN             → no observeExit；unknown++（persisted record 保持 ACTIVE）
+
+`dead` 在 rehydrate 里恒为 0：cold restart 没有能力产生 death proof。
 
 UNKNOWN 必须单独计数，不得归入 dead；UNKNOWN 只记录 safe 事件
 （`runtime_liveness_unknown` + instanceId + 归一化 reason），绝不记录绝对路径。
@@ -278,8 +302,10 @@ implementation detail，不是 durable authority。`rehydrate()` 永远使用
 （record 是 JSON 文件，不是 SQLite authority schema）；`SCHEMA_VERSION` 保持 14。
 
 静态 + 动态 Gate：`tests/side-effect-c4-closure2.test.mjs`（Adversarial Live-Unlink、
-persisted record contract、path traversal / legacy socketPath spoof、trusted vs untrusted EXITED、
-real same-supervisor child exit、live-unlink late-mutation E2E）。
+persisted record contract、path traversal / legacy socketPath spoof）、
+`tests/side-effect-c4-closure3.test.mjs`（real same-supervisor child exit vs forged persisted
+EXITED 对照、任何 reason 都无 authority、源码里不得有 reason 白名单、live-unlink /
+persisted-EXITED 两条 E2E）。
 
 ### 两条写入路径显式分离（§11）
 
