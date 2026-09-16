@@ -424,7 +424,7 @@ test("Tool Facade Bridge WRITE route：只产生 SideEffect Proposal；WRITE 绝
     const res = await fetch(bridge.baseUrl + "/tool-call", {
       method: "POST",
       headers: { "content-type": "application/json", authorization: "Bearer " + cap.capability.token },
-      body: JSON.stringify({ toolId: TRASH, arguments: { resourceRef: ctx.resourceRef } }),
+      body: JSON.stringify({ toolId: TRASH, arguments: { resourceRef: ctx.resourceRef }, callId: "c4gate_write_1" }),
     });
     const json = await res.json();
     assert.equal(json.ok, false, JSON.stringify(json));

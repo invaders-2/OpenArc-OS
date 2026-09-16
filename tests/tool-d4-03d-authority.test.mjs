@@ -223,13 +223,13 @@ test("§27 malformed Tool Facade body：invalid JSON / oversized / missing / bad
     let oversized = null;
     try { oversized = (await call(s.bridge, t, JSON.stringify({ toolId: "resource.search", arguments: { query: "x".repeat(300000) } }), true)).status; } catch { oversized = "aborted"; }
     assert.ok(oversized === 413 || oversized === 400 || oversized === "aborted", "oversized body 必须被拒绝：" + oversized);
-    assert.equal((await call(s.bridge, t, { arguments: { query: "x" } })).status, 403);
-    assert.equal((await call(s.bridge, t, { toolId: "../../shell", arguments: {} })).status, 403);
-    assert.equal((await call(s.bridge, t, { toolId: "test.write", arguments: { target: "x" } })).status, 403);
-    assert.equal((await call(s.bridge, t, { toolId: "resource.search", arguments: { query: 123 } })).json.ok, false);
-    assert.equal((await call(s.bridge, t, { toolId: "resource.search", arguments: {} })).json.ok, false);
-    assert.equal((await call(s.bridge, t, { toolId: "resource.search", arguments: { query: "x", command: "rm -rf /" } })).json.ok, false);
-    assert.equal((await call(s.bridge, t, { toolId: "resource.search", arguments: { query: "x", resourceRef: "/Users/secret" } })).json.ok, false);
+    assert.equal((await call(s.bridge, t, { callId: "mal_no_tool", arguments: { query: "x" } })).status, 403);
+    assert.equal((await call(s.bridge, t, { callId: "mal_bad_tool", toolId: "../../shell", arguments: {} })).status, 403);
+    assert.equal((await call(s.bridge, t, { callId: "mal_not_allowed", toolId: "test.write", arguments: { target: "x" } })).status, 403);
+    assert.equal((await call(s.bridge, t, { callId: "mal_type", toolId: "resource.search", arguments: { query: 123 } })).json.ok, false);
+    assert.equal((await call(s.bridge, t, { callId: "mal_schema", toolId: "resource.search", arguments: {} })).json.ok, false);
+    assert.equal((await call(s.bridge, t, { callId: "mal_forbidden", toolId: "resource.search", arguments: { query: "x", command: "rm -rf /" } })).json.ok, false);
+    assert.equal((await call(s.bridge, t, { callId: "mal_path", toolId: "resource.search", arguments: { query: "x", resourceRef: "/Users/secret" } })).json.ok, false);
     assert.equal(s.fx.toolStore.executionsOfTask(run.taskId).length, 0, "malformed 一律 0 Domain execution");
   } finally { await teardown(s); }
 });
