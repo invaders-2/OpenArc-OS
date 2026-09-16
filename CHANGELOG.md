@@ -1,5 +1,51 @@
 # 计划修订记录
 
+## 2026-09-16（八）：换成系统原生的 Siri Blob —— dock 的球不再用 orb-ui
+
+用户口径：「orb-ui 那颗球不好看，我要苹果原生的 Siri 动态图标」。
+
+素材就在系统里：`/System/Library/PrivateFrameworks/SiriUI.framework/Versions/A/Resources/Siri Blob.mov`
+（256×255 / h264 / 60fps / 34.283s / 2057 帧，纯黑底）。**只在运行时从该绝对路径读取，不复制进仓库、dist 或安装包**
+—— 它是 Apple 的版权素材。
+
+### 做了什么
+
+1. **主进程**（`electron/main.cjs`）：`openarc-file` 协议加 `native` 分支，模块级白名单
+   `NATIVE_RESOURCES{ "siri-blob": 绝对路径 }`；渲染进程只能报逻辑名、拿不到路径，未知名/文件不存在回 404。
+   media 分支一行未动。
+2. **渲染层**（新增 `src/desktop/SiriBlob.tsx`）：`<video muted loop playsInline preload="auto" crossorigin>`
+   留在渲染树里（`display:none` 会挂起解码），逐帧上传 GPU 纹理，片元着色器按
+   `a = smoothstep(0, 0.06, max(r,g,b))`、`rgb/a` 未预乘把黑底抠掉。画布 backing = `round(size × 1.45 × dpr)`、
+   CSS = 槽位，1.45 是裁掉黑边让球填满槽位。`OrbIcon` 里只留**一个开关**：`native ? <SiriBlob/> : <OrbUiFallback/>`
+   （原 orb-ui 渲染整块挪进 `OrbUiFallback`，以后换兜底只改那个组件）。
+3. **减少动态效果**：暂停并 seek 到 8s 画一帧（0s 是纯黑，不能取）。
+4. **兜底**：video error / WebGL 起不来 / `webglcontextlost` / 8s 看门狗 → 退回 orb-ui，不新增 IPC 通道。
+
+### 两处代价（老实记）
+
+- **给协议加了 CORS**：`openarc-file` scheme 加 `corsEnabled: true`，且**只在那一条 native 分支**回
+  `Access-Control-Allow-Origin: *`（media 分支没有任何 CORS 头）。原因是跨源视频画进 canvas 后读像素
+  （`getImageData` / `texImage2D`）会被判污染并抛 `SecurityError`，不加这个头画面根本进不了 canvas。
+- **老 macOS 上没有这个资源**：会退回 orb-ui 那颗球，也就是用户觉得「不好看」的那颗在这些机器上仍然存在；
+  后续用程序化替代版解决（本次不动兜底视觉）。
+
+### 被否决的方案（实测数字）
+
+先按 2D canvas 做（下采样 → `getImageData` → 亮度抠黑 → `putImageData`）：
+`ctx.drawImage(video)` 把硬件解码帧写进 CPU 画布要 **5.7~11.4 ms/帧**（画布 38/48/94/164px 四种），
+主线程直接超预算 5~7 倍；抠黑本身只有 0.05~0.18 ms/帧。于是改 WebGL（纹理上传无回读）。
+
+### 实测
+
+- 真实 Electron 44.3.0 / Chromium 152.0.7977.78，`deviceScaleFactor=2`，remote-debugging + `connectOverCDP`：
+  `readyState=4`、`currentTime` 两次采样 1.648617 → 3.172019、`videoSize[256,255]`、`duration 34.283333`、
+  `error=null`；`seekable=[0, 34.283333]`；WebGL `readPixels` 四角 alpha 全 0、中心 255，两帧像素不同。
+- **每帧成本**（主线程，包裹 `texImage2D`/`drawArrays`）：dock 单球 **0.128 ms/帧**（136px backing）、
+  胶囊 0.151 ms/帧；AI 面板四球合计 **约 0.48 ms/帧**（55/136/70/238）。对照 2D 方案 5.7~11.4 ms/帧。
+- 减少动态效果：`paused=true`、`currentTime=8`、900ms 后仍为 8。
+- 兜底：把主进程 map 指向不存在路径 → `.orb-siri=0`、orb-ui canvas 正常，球不变空白。
+- 门禁：`npx tsc --noEmit` clean、`npm test` 96/96；`preload` 暴露面未动（`exposeInMainWorld` 仍只有 `openarc`）。
+
 ## 2026-09-16（七）：球改成「散发式柔光」——外圈直接羽化掉
 
 用户澄清：「不是这样的，我说的是那种柔光，散发出来的，越往外越看不清」。

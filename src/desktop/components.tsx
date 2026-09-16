@@ -13,6 +13,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { Orb } from "orb-ui";
 import type { OrbAdapter } from "orb-ui";
 import { useMicSignal } from "./useMicLevel";
+import { SiriBlob } from "./SiriBlob";
 import {
   ArrowLeft,
   ArrowRight,
@@ -197,8 +198,49 @@ const ORB_THEME = {
 };
 
 /**
- * 动态 AI 球 —— 球本身来自 **orb-ui**（MIT，© Alexander Chen，https://orb-ui.com），
- * 我们只负责外面这一层壳：尺寸，以及"减少动态效果"时的静态回退（不再套 App 图标底板 —— 用户口径：底部这边去掉边框）。
+ * 兜底球：现有 orb-ui 的 WebGL 球（减少动态效果时退回同一张静态帧 siri.png）。
+ * 球本身来自 **orb-ui**（MIT，© Alexander Chen，https://orb-ui.com）。
+ *
+ * 它只被 OrbIcon 里那**一个**开关选中 —— 以后要换兜底观感，改这个组件（或换掉它）即可，
+ * 调用方（DockItem / AssistantPill / AIPanel）一行都不用动。
+ */
+function OrbUiFallback({
+  size,
+  boost,
+  animated,
+  adapter,
+}: {
+  size: number;
+  boost: number;
+  animated: boolean;
+  adapter?: OrbAdapter;
+}) {
+  const render = Math.max(8, Math.round(size * boost));
+  // orb-ui 的球只画到 size 的 ~69%（实测：47px 槽位里球 32.4px）。
+  // 这里不再把球顶满槽位，而是留一圈给光晕（用户口径：「跟他一样，加一个光晕」）：
+  // 球占槽位 ~78%，外面一圈 .orb::after 的柔和光晕正好盖住球那条硬边（锯齿）。
+  const fill = 1.3;
+  return (
+    <span
+      className="orb-scale"
+      style={{ width: render, height: render, transform: `translate(-50%, -50%) scale(${(size * fill) / render})` }}
+    >
+      {animated ? (
+        adapter ? (
+          <Orb size={render} theme={ORB_THEME} adapter={adapter} interactive={false} className="orb-canvas" />
+        ) : (
+          <Orb size={render} theme={ORB_THEME} state="thinking" interactive={false} className="orb-canvas" />
+        )
+      ) : (
+        <img className="orb-static" src={"./icons/siri.png"} alt="" width={render} height={render} draggable={false} />
+      )}
+    </span>
+  );
+}
+
+/**
+ * AI 球。这里是**唯一的切换点**：主路径用系统里那颗 Apple 原生 Siri Blob（见 SiriBlob.tsx），
+ * 素材/解码出问题（别的 macOS 版本没有这个资源、协议 404）就切到 OrbUiFallback —— 球绝不能变空白。
  *
  * 为什么减少动态效果要在这里判：orb-ui 只认系统级 `prefers-reduced-motion`，认不到产品内的开关；
  * 所以产品开关打开时**干脆不挂 WebGL**，退回同一张静态帧 siri.png（既省 GPU，也不会留空壳）。
@@ -223,32 +265,19 @@ export function OrbIcon({
    */
   boost?: number;
 }) {
-  const render = Math.max(8, Math.round(size * boost));
-  // orb-ui 的球只画到 size 的 ~69%（实测：47px 槽位里球 32.4px）。
-  // 这里不再把球顶满槽位，而是留一圈给光晕（用户口径：「跟他一样，加一个光晕」）：
-  // 球占槽位 ~78%，外面一圈 .orb::after 的柔和光晕正好盖住球那条硬边（锯齿）。
-  const fill = 1.3;
+  const [native, setNative] = useState(true);
   return (
     <span
-      className={`orb${className ? " " + className : ""}`}
+      className={`orb${native ? " orb-native" : ""}${className ? " " + className : ""}`}
       style={{ width: size, height: size }}
       aria-hidden="true"
       draggable={false}
     >
-      <span
-        className="orb-scale"
-        style={{ width: render, height: render, transform: `translate(-50%, -50%) scale(${(size * fill) / render})` }}
-      >
-        {animated ? (
-          adapter ? (
-            <Orb size={render} theme={ORB_THEME} adapter={adapter} interactive={false} className="orb-canvas" />
-          ) : (
-            <Orb size={render} theme={ORB_THEME} state="thinking" interactive={false} className="orb-canvas" />
-          )
-        ) : (
-          <img className="orb-static" src={"./icons/siri.png"} alt="" width={render} height={render} draggable={false} />
-        )}
-      </span>
+      {native ? (
+        <SiriBlob size={size} animated={animated} adapter={adapter} onError={() => setNative(false)} />
+      ) : (
+        <OrbUiFallback size={size} boost={boost} animated={animated} adapter={adapter} />
+      )}
     </span>
   );
 }

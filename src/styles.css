@@ -1586,6 +1586,33 @@ input[type="checkbox"] {
   width: var(--dock-icon, 47px);
   height: var(--dock-icon, 47px);
 }
+/* 原生 Siri Blob：黑底视频逐帧抠黑后画进这块画布。视频本身必须留在渲染树里
+   （见 SiriBlob.tsx），所以缩到 1px、压到几乎全透明地藏在画布下面。 */
+.orb-siri {
+  position: relative;
+  display: block;
+  transform-origin: center center;
+  will-change: transform, filter;
+}
+.orb-siri > video {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0.001;
+  pointer-events: none;
+}
+.orb-siri > canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+}
+/* 原生 Siri Blob 自带发光；再叠 orb-ui 那圈蓝柔光会变成一颗大灰球，所以原生时关掉。 */
+.orb-native::after {
+  display: none;
+}
 /* 球外的柔光（用户口径：「那种柔光，散发出来的，越往外越看不清」）。
    不是一圈亮边，而是从球面往**外**一路衰减到看不见：范围开到 ±26%，
    球面（约 55% 半径）最亮，之后 60/70/82/100% 逐级变淡，最外圈归零。

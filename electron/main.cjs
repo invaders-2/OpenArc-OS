@@ -12,6 +12,7 @@ const {
 } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
+const { Readable } = require("node:stream");
 const { pathToFileURL } = require("node:url");
 const { safeURL } = require("./policy.cjs");
 const geometry = require("./geometry.cjs");
@@ -27,8 +28,10 @@ let files;
 /**
  * 只读文件协议（Quick Look 的流式媒体源）。
  * 必须在 app ready **之前**登记为 privileged —— 否则 <video> 不能 seek/stream，
- * 大视频只能塞 data URL（内存爆）。它只服务 openarc-file://media/<folderId>/<id>，
- * 路径解析走 file-service 的白名单，且只注册在默认 session：
+ * 大视频只能塞 data URL（内存爆）。它服务两个来源：
+ *   openarc-file://media/<folderId>/<id>   路径解析走 file-service 的白名单
+ *   openarc-file://native/<name>           只认下面 NATIVE_RESOURCES 里写死的逻辑名
+ * 两个来源都拿不到任意路径。且只注册在默认 session：
  * 原生网页视图用的是独立 partition，**够不到这个协议**。
  */
 // 真实启动路径：本模块在 app ready 之前被 require，注册一定生效。
@@ -36,11 +39,22 @@ let files;
 // 探针本身不测这个协议（它测的是 preload 暴露面与 IPC 通道）。
 if (!app.isReady()) {
   protocol.registerSchemesAsPrivileged([
-    { scheme: "openarc-file", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+    // corsEnabled：渲染层要把原生视频画进 canvas 再读像素（抠黑），不走 CORS 的话画布会被污染。
+    { scheme: "openarc-file", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } },
   ]);
 }
 
 const uiURL = pathToFileURL(path.join(__dirname, "../dist/index.html")).href;
+
+/**
+ * 本机原生资源白名单（逻辑名 → 绝对路径）。渲染进程只能报名字，报不出路径 ——
+ * 任意路径读取仍然没有入口。Siri Blob 是 Apple 的版权素材，只在运行时从系统读取，
+ * 不随仓库 / dist / 安装包分发。
+ */
+const NATIVE_RESOURCES = {
+  "siri-blob": "/System/Library/PrivateFrameworks/SiriUI.framework/Versions/A/Resources/Siri Blob.mov",
+};
+const NATIVE_TYPES = { ".mov": "video/quicktime", ".mp4": "video/mp4", ".m4v": "video/x-m4v" };
 
 /** 只接受来自本应用外壳页的调用。
  * 双重条件（sender + senderFrame.url）在 D1-05 冻结，本阶段不放宽。
@@ -194,6 +208,27 @@ app.whenReady().then(() => {
   protocol.handle("openarc-file", async (request) => {
     try {
       const url = new URL(request.url);
+      if (url.hostname === "native") {
+        const abs = NATIVE_RESOURCES[url.pathname.replace(/^\/+/, "")];
+        if (!abs || !fs.existsSync(abs)) return new Response("Not Found", { status: 404 });
+        // 自己回 Range：net.fetch(file://) 既不认 Range 也不给 Content-Length，
+        // 媒体因此不可 seek（实测 <video>.seekable 恒为 [0,0]），"减少动态效果"就取不到非黑帧。
+        const size = fs.statSync(abs).size;
+        const range = /^bytes=(\d*)-(\d*)$/.exec(request.headers.get("range") || "");
+        const start = range?.[1] ? Number(range[1]) : 0;
+        const end = range?.[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+        if (start > end) return new Response("Range Not Satisfiable", { status: 416 });
+        const headers = {
+          "Content-Type": NATIVE_TYPES[path.extname(abs).toLowerCase()] || "application/octet-stream",
+          "Accept-Ranges": "bytes",
+          "Content-Length": String(end - start + 1),
+          // <video crossorigin="anonymous"> 下跨源媒体要能读像素，必须带这个头。
+          "Access-Control-Allow-Origin": "*",
+        };
+        if (range) headers["Content-Range"] = `bytes ${start}-${end}/${size}`;
+        const body = Readable.toWeb(fs.createReadStream(abs, { start, end }));
+        return new Response(body, { status: range ? 206 : 200, headers });
+      }
       const parts = url.pathname.split("/").filter(Boolean);
       const hit = files.resolve(decodeURIComponent(parts[0] || ""), decodeURIComponent(parts[1] || ""));
       if (!hit) return new Response("Not Found", { status: 404 });
