@@ -7,7 +7,7 @@
  *
  * 生命周期契约（runtime-supervisor.cjs 依赖它）：
  *   · 在本进程整个生命周期内独占 bind <runtimeDir>/executors/<instanceId>.sock；
- *     Supervisor 的 cross-restart liveness probe 只依据这个 OS 事实，绝不猜死亡。
+ *     它是 reachability 端点，不是 death proof（pathname unlink != process death）。
  *   · 结束前绝不 unlink socket（由下一次同 instanceId 启动或 OS 回收处理）。
  *   · 只从 argv 读取 safe binding；绝不读 arg 之外的 authority 输入。
  */

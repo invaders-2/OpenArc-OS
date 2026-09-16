@@ -58,10 +58,11 @@ function createTaskBundle({ identityStore, authorization, authStore, modelServic
     ...(sideEffectApprovalWaitMs ? { approvalWaitMs: sideEffectApprovalWaitMs } : {}),
   });
   // 启动恢复（第一段，fail closed）：pending approval 一律明确 BLOCKED；
-  // RUNNING → UNKNOWN_EFFECT，quiescence 在 OS-backed rehydrate 完成前一律 unproven。
+  // RUNNING → UNKNOWN_EFFECT，quiescence 在 rehydrate 完成前一律 unproven。
   const sideEffectRecovery = sideEffectRuntime.recoverOnStartup();
-  // 第二段：production supervisor 用 OS-backed liveness probe 重建上一次进程的 executor 记录，
-  // 只有它真实判定某个 executor runtime 已不存在，recoverOnStartup 才允许把 quiesced 升级为 true。
+  // 第二段：production supervisor 重建上一次进程的 executor 记录。
+  // 只有已持久化的 trusted EXITED proof（或本进程真实 child 'exit'）才允许 recoverOnStartup
+  // 把 quiesced 升级为 true；pathname probe 只回答 reachability，绝不产生 death proof。
   const sideEffectReady = supervisor.rehydrate()
     .then(() => sideEffectRuntime.recoverOnStartup())
     .catch(() => null);
