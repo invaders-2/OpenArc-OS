@@ -24,7 +24,7 @@ import { createRequire } from "node:module";
 import { createToolHarnessFixture, reopenToolHarnessRuntime } from "./fixtures/harness-acp/tool-harness-fixture.mjs";
 
 const require = createRequire(import.meta.url);
-const { RuntimeSupervisor, probeUnixSocket, normalizeProbeResult, LIVENESS, TRUSTED_EXIT_REASONS, isValidInstanceId } = require("../electron/runtime-supervisor.cjs");
+const { RuntimeSupervisor, probeUnixSocket, normalizeProbeResult, LIVENESS, UNVERIFIED_PERSISTED_EXIT, isValidInstanceId } = require("../electron/runtime-supervisor.cjs");
 const { RuntimeLifecycleAuthority } = require("../electron/runtime-lifecycle-authority.cjs");
 
 const SUPERVISOR_SRC = path.join(import.meta.dirname, "..", "electron", "runtime-supervisor.cjs");
@@ -150,7 +150,7 @@ test("Adversarial Live-Unlink Gate：Runtime A 仍存活时 unlink 它自己的 
 
 /* ================================================================== 3. same-supervisor exit proof */
 
-test("Same-supervisor exit proof：真实 child 'exit' → trusted EXITED；cold restart 只恢复该已发生的 observation", async () => {
+test("Same-supervisor exit proof：真实 child 'exit' → trusted EXITED；cold restart 不再恢复（persisted record 非 authority）", async () => {
   const root = tmpDir("oa-c4c2-exit-");
   let box = null;
   try {
@@ -179,13 +179,16 @@ test("Same-supervisor exit proof：真实 child 'exit' → trusted EXITED；cold
     assert.ok(!raw.includes(root), "persisted record 不得含 runtimeDir");
     assert.ok(!raw.includes("/"), "persisted record 不得含任何路径");
 
-    // cold restart：恢复这个已经发生过的 trusted observation。
+    // cold restart：persisted EXITED 不再是 authority，绝不再生成 trusted proof。
     const supervisor2 = new RuntimeSupervisor({ runtimeDir: root });
     const stats = await supervisor2.rehydrate();
-    assert.equal(supervisor2.isQuiesced(box.instanceId).quiesced, true);
-    assert.equal(supervisor2.isQuiesced(box.instanceId).proof.type, "SUPERVISOR_OBSERVED_EXIT");
-    assert.equal(stats.dead, 1);
-    assert.equal(stats.unknown, 0);
+    const cold = supervisor2.isQuiesced(box.instanceId);
+    assert.equal(cold.quiesced, false, "persisted EXITED 不得在 cold restart 变成 trusted death proof");
+    assert.equal(cold.reason, "LIVENESS_UNKNOWN");
+    assert.equal(cold.proof.probeReason, "UNVERIFIED_PERSISTED_EXIT");
+    assert.equal(stats.dead, 0);
+    assert.equal(stats.unverifiedExit, 1);
+    assert.equal(stats.unknown, 1);
   } finally {
     try { if (box && box.child) box.child.kill("SIGKILL"); } catch { /* ignore */ }
     fs.rmSync(root, { recursive: true, force: true });
@@ -299,29 +302,31 @@ test("ENOENT without prior EXIT proof → UNKNOWN；ACTIVE cold-restart record �
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-test("Trusted Death Proof：只有 SUPERVISOR_OBSERVED_EXIT / EXECUTOR_SPAWN_FAILED 允许 quiesce；其它 EXITED 一律 fail closed", async () => {
+test("Persisted EXITED 无 death authority：任何 reason（含 SUPERVISOR_OBSERVED_EXIT / EXECUTOR_SPAWN_FAILED）一律 quiesced=false", async () => {
   const root = tmpDir("oa-c4c2-trusted-");
   try {
-    assert.deepEqual([...TRUSTED_EXIT_REASONS].sort(), ["EXECUTOR_SPAWN_FAILED", "SUPERVISOR_OBSERVED_EXIT"]);
-    const okId = "exe_trusted1";
-    const spawnFailId = "exe_trusted2";
-    const legacyId = "exe_untrusted1";
-    const forgedId = "exe_untrusted2";
-    writeRecord(root, exitedRecord(okId, "SUPERVISOR_OBSERVED_EXIT"));
+    assert.equal(UNVERIFIED_PERSISTED_EXIT, "UNVERIFIED_PERSISTED_EXIT");
+    const observedId = "exe_persisted1";
+    const spawnFailId = "exe_persisted2";
+    const legacyId = "exe_persisted3";
+    const forgedId = "exe_persisted4";
+    writeRecord(root, exitedRecord(observedId, "SUPERVISOR_OBSERVED_EXIT"));
     writeRecord(root, exitedRecord(spawnFailId, "EXECUTOR_SPAWN_FAILED"));
     writeRecord(root, exitedRecord(legacyId, "OS_EXECUTOR_ENDPOINT_ABSENT"));
-    // trusted reason 是唯一 authority；伪造 socketPath 既不被采信也不改变判定。
     writeRecord(root, { ...exitedRecord(forgedId, "SUPERVISOR_OBSERVED_EXIT"), endedAt: null, exitCode: null, socketPath: "/tmp/forged.sock" });
-    const supervisor = new RuntimeSupervisor({ runtimeDir: root });
+    const { lifecycle, box } = countingLifecycle();
+    const supervisor = new RuntimeSupervisor({ runtimeDir: root, lifecycle });
     const stats = await supervisor.rehydrate();
-    assert.equal(supervisor.isQuiesced(okId).quiesced, true);
-    assert.equal(supervisor.isQuiesced(okId).proof.type, "SUPERVISOR_OBSERVED_EXIT");
-    assert.equal(supervisor.isQuiesced(spawnFailId).quiesced, true);
-    assert.equal(supervisor.isQuiesced(legacyId).quiesced, false, "legacy endpoint-absent reason 绝不许 quiesce");
-    assert.equal(supervisor.isQuiesced(legacyId).reason, "LIVENESS_UNKNOWN");
-    assert.equal(supervisor.isQuiesced(forgedId).quiesced, true, "reason 是唯一 authority；socketPath 最多只是被忽略的 legacy 字段");
-    assert.equal(stats.dead, 3, "3 条 trusted EXITED 计入 dead");
-    assert.equal(stats.unknown, 1, "legacy untrusted EXITED 计入 unknown，绝不 quiesce");
+    for (const id of [observedId, spawnFailId, legacyId, forgedId]) {
+      assert.equal(supervisor.isQuiesced(id).quiesced, false, id + " persisted EXITED 绝不许 quiesce");
+      assert.equal(supervisor.isQuiesced(id).reason, "LIVENESS_UNKNOWN", id);
+      assert.equal(supervisor.isQuiesced(id).proof.probeReason, "UNVERIFIED_PERSISTED_EXIT", id);
+      assert.equal(supervisor.snapshot().find((r) => r.instanceId === id).status, "ACTIVE", id + " 内存视图必须 fail closed");
+    }
+    assert.equal(box.observeExit, 0, "persisted EXITED 绝不调用 observeExit");
+    assert.equal(stats.dead, 0);
+    assert.equal(stats.unverifiedExit, 4);
+    assert.equal(stats.unknown, 4);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -333,6 +338,7 @@ test("Static Gate：源码不存在 pathname death authority；registerExecutor 
   assert.ok(!/DEFINITELY_GONE/.test(code), "不得存在 DEFINITELY_GONE 死亡结论");
   assert.ok(!/ENDPOINT_ABSENT/.test(code), "不得存在 endpoint-absent death authority");
   assert.ok(!/rec\.socketPath/.test(code), "persisted socketPath 绝不作为 probe 输入");
+  assert.ok(!/TRUSTED_EXIT_REASONS/.test(code), "reason 白名单不得作为 death authority");
   assert.ok(/this\.#probe\(this\.socketPath\(instanceId\)\)/.test(code), "probe path 必须由 validated instanceId 派生");
   const regStart = code.indexOf("registerExecutor(");
   const regEnd = code.indexOf("#observeExit(");
@@ -469,26 +475,28 @@ test("E2E · live-unlink + UNKNOWN_EFFECT：A 仍存活 → 绝不 FAILED；late
   } finally { await cleanupScenario(s); }
 });
 
-test("E2E · trusted EXITED proof 对照：真实退出 + persisted trusted EXITED → quiesced=true → NOT_APPLIED → FAILED + BLOCK（0 retry / 0 replay）", async () => {
+test("E2E · persisted EXITED（真实退出 + trusted-looking reason）：cold restart 仍 fail closed → NOT_APPLIED 保持 UNKNOWN_EFFECT / BLOCK（0 retry / 0 replay）", async () => {
   const s = await liveScenario("trusted_exited");
   try {
     const call = () => s.rt.sideEffectStore.callById(s.callId);
     assert.equal(s.box.exitCode !== null || s.box.signalCode !== null, true, "A 已真实退出");
-    assert.equal(s.rt.supervisor.isQuiesced(s.execId).quiesced, true, "trusted EXITED proof 允许 quiesce");
-    assert.equal(s.rt.supervisor.isQuiesced(s.execId).proof.type, "SUPERVISOR_OBSERVED_EXIT");
+    assert.equal(s.rt.supervisor.isQuiesced(s.execId).quiesced, false, "persisted EXITED 不是 authority");
+    assert.equal(s.rt.supervisor.isQuiesced(s.execId).proof.probeReason, "UNVERIFIED_PERSISTED_EXIT");
     const rec = s.rt.recover();
     assert.ok(rec.sideEffect);
     assert.equal(call().status, "UNKNOWN_EFFECT");
-    assert.equal(call().recoverySafe.quiesced, true, JSON.stringify(call().recoverySafe));
+    assert.equal(call().recoverySafe.quiesced, false, JSON.stringify(call().recoverySafe));
     assert.equal(s.rt.taskStore.taskById(s.run.taskId).status, "BLOCKED");
     assert.equal(s.rt.taskStore.stepById(s.run.stepId).status, "BLOCKED");
+    const leaseBefore = s.rt.sideEffectStore.leasesOfCall(s.callId).length;
+    const callsBefore = s.rt.sideEffectStore.callsOfTask(s.run.taskId).length;
     const v = await s.rt.sideEffectRuntime.verifyUnknownEffect({ callId: s.callId });
     assert.equal(v.outcome, "NOT_APPLIED", JSON.stringify(v));
-    assert.equal(v.resolved, true);
-    assert.equal(call().status, "FAILED");
-    assert.equal(call().verificationStatus, "FAIL");
+    assert.equal(v.resolved, false, "NOT_APPLIED + 未证明 quiescence 绝不 resolve");
+    assert.equal(call().status, "UNKNOWN_EFFECT", "绝不 FAILED");
     assert.equal(s.rt.resourceService.sideEffectPrecondition({ resourceRef: s.resourceRef }).trashed, false, "0 Domain replay");
-    assert.equal(s.rt.sideEffectStore.callsOfTask(s.run.taskId).length, 1, "0 second call / 0 retry");
+    assert.equal(s.rt.sideEffectStore.callsOfTask(s.run.taskId).length, callsBefore, "0 second call / 0 retry");
+    assert.equal(s.rt.sideEffectStore.leasesOfCall(s.callId).length, leaseBefore, "0 lease reacquire");
     assert.equal(s.rt.sideEffectStore.leasesOfCall(s.callId).filter((l) => l.status === "ACTIVE").length, 0);
   } finally { await cleanupScenario(s); }
 });

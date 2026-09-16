@@ -23,7 +23,7 @@ try {
     schemaVersion: store.SCHEMA_VERSION,
     tools: new ToolRegistry().ids(),
     liveness: supervisor.LIVENESS,
-    trustedExitReasons: [...supervisor.TRUSTED_EXIT_REASONS],
+    unverifiedPersistedExit: supervisor.UNVERIFIED_PERSISTED_EXIT,
     instanceIdValidation: { acceptsProduction: supervisor.isValidInstanceId("exe_abc123"), rejectsTraversal: !supervisor.isValidInstanceId("../../outside") },
   };
 } catch (e) { versions = { error: String((e && e.message) || e) }; }
@@ -38,8 +38,8 @@ const summary = m ? { tests: Number(m[1]), pass: Number(m[2]), fail: Number(m[3]
 const report = {
   ...summary,
   files: FILES,
-  mode: "C4 CLOSURE-2 (Unix socket pathname existence != process lifetime; only a real same-supervisor child exit or a persisted trusted EXITED proof may observeExit; persisted record has no socketPath; probe path re-derived from validated instanceId)",
-  contract: { pathnameHasNoDeathAuthority: true, onlyTrustedExitMayObserveExit: true, persistedRecordHasNoSocketPath: true, instanceIdValidated: true, schemaBumped: false },
+  mode: "C4 CLOSURE-2 (Unix socket pathname existence != process lifetime; only a real same-supervisor child exit may observeExit; persisted record has no socketPath; probe path re-derived from validated instanceId)",
+  contract: { pathnameHasNoDeathAuthority: true, persistedRecordHasNoDeathAuthority: true, persistedRecordHasNoSocketPath: true, instanceIdValidated: true, schemaBumped: false },
   versions,
   machine: { os: process.platform + " " + os.release(), arch: process.arch, node: process.version },
   at: new Date().toISOString(),

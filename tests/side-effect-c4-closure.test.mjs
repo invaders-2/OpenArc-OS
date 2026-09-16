@@ -377,17 +377,17 @@ test("Late Effect Safety · probe UNKNOWN：early NOT_APPLIED 绝不 false-negat
   } finally { await cleanup(s); }
 });
 
-test("E2E · cold restart + persisted trusted EXITED proof：quiesced=true → NOT_APPLIED → FAILED + BLOCK，0 retry", async () => {
+test("E2E · cold restart + persisted EXITED（reason=SUPERVISOR_OBSERVED_EXIT）：不是 death authority → quiesced=false → NOT_APPLIED 保持 UNKNOWN_EFFECT + BLOCK，0 retry", async () => {
   const s = await scenario("trusted_exited");
   try {
     s.rt.recover();
-    assert.equal(callOf(s).recoverySafe.quiesced, true, JSON.stringify(callOf(s).recoverySafe));
-    assert.equal(s.rt.supervisor.isQuiesced(s.execId).quiesced, true);
+    assert.equal(callOf(s).recoverySafe.quiesced, false, JSON.stringify(callOf(s).recoverySafe));
+    assert.equal(s.rt.supervisor.isQuiesced(s.execId).quiesced, false, "persisted EXITED 绝不许 quiesce");
+    assert.equal(s.rt.supervisor.isQuiesced(s.execId).proof.probeReason, "UNVERIFIED_PERSISTED_EXIT");
     const v = await s.rt.sideEffectRuntime.verifyUnknownEffect({ callId: s.callId });
     assert.equal(v.outcome, "NOT_APPLIED", JSON.stringify(v));
-    assert.equal(v.resolved, true);
-    assert.equal(callOf(s).status, "FAILED");
-    assert.equal(callOf(s).verificationStatus, "FAIL");
+    assert.equal(v.resolved, false, "NOT_APPLIED + 未证明 quiescence 绝不 resolve");
+    assert.equal(callOf(s).status, "UNKNOWN_EFFECT", "绝不 FAILED");
     assert.equal(s.rt.taskStore.taskById(s.run.taskId).status, "BLOCKED");
     assert.equal(s.rt.taskStore.stepById(s.run.stepId).status, "BLOCKED");
     assert.equal(s.rt.sideEffectStore.callsOfTask(s.run.taskId).length, 1, "0 second call / 0 retry");
