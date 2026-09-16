@@ -16,11 +16,16 @@
  *   因此 filesystem unix-socket probe 只回答 ALIVE / UNKNOWN，绝不回答 PROCESS_DEAD；
  *   ENOENT 也不是 executor death proof。
  *
+ * 永久规则（D4-03C4 Closure-3）：
+ *   **persisted runtime lifecycle record 不是 process-death authority。**
+ *   普通 durable JSON 字段（status / reason / exitCode / signal / endedAt）本身没有资格让
+ *   quiesced=true；字符串 "SUPERVISOR_OBSERVED_EXIT" 只是一条 audit label，不是 trusted proof。
+ *   cold restart 只能把 persisted record 当 safe recovery/audit hint，**绝不 observeExit**。
+ *   真正的 cross-restart authenticated durable lifecycle proof = DEFERRED / NOT VERIFIED；
+ *   在它存在之前，cold restart 一律 fail closed（quiesced=false）。
+ *
  * 当前阶段唯一允许产生 trusted death proof 的来源：
- *   1. 本 supervisor lifetime 内真实的 child process 'exit' event；
- *   2. 上一次 production supervisor 在真实 'exit' 后持久化的 trusted EXITED record
- *      （status=EXITED + trusted reason）。cold restart 只能**恢复这个已经发生过的 observation**，
- *      绝不从 socket pathname 的消失重新创造 death proof。
+ *   **本 supervisor lifetime 内真实的 child process 'exit' event**。
  *
  * 因此 persisted executor record 只保存 safe binding（instanceId / status / timestamps /
  * exitCode / signal / reason / callId / holderId），**不保存 socketPath**：
@@ -52,11 +57,10 @@ const newId = (prefix) => prefix + "_" + crypto.randomBytes(6).toString("base64u
 const LIVENESS = Object.freeze({ ALIVE: "ALIVE", UNKNOWN: "UNKNOWN" });
 
 /**
- * 只有由 production supervisor 真实观测后写入的 reason 才算 trusted death proof。
- * 其它任何 reason 的 EXITED record（含 legacy / 手工伪造 / 旧代码写的 endpoint-absent）
- * 一律 fail closed，绝不 quiesce。
+ * persisted record 的 EXITED / reason 只是 audit hint，没有任何 death authority：
+ * 这里刻意不保留 reason 白名单 —— 命中任何字符串都不得让 quiesced=true。
  */
-const TRUSTED_EXIT_REASONS = Object.freeze(new Set(["SUPERVISOR_OBSERVED_EXIT", "EXECUTOR_SPAWN_FAILED"]));
+const UNVERIFIED_PERSISTED_EXIT = "UNVERIFIED_PERSISTED_EXIT";
 
 /** 真实 production executor instanceId 形态（newId("exe")）——probe path 由它派生。 */
 const INSTANCE_ID_RE = /^exe_[A-Za-z0-9_-]{1,64}$/;
@@ -289,16 +293,16 @@ class RuntimeSupervisor {
 
   /**
    * Cold restart rehydrate：**绝不用内存中的旧 authority 自我证明**。
-   * 逐条读取上一次进程持久化的 executor record：
+   * 逐条读取上一次进程持久化的 executor record（全部只是 hint）：
    *   · invalid instanceId → ignore（绝不参与 probe / persist / observeExit）；
-   *   · trusted EXITED record → 恢复已发生的 trusted observation；
-   *   · 其余 → 用从 validated instanceId 重新派生的 path 做 reachability probe。
+   *   · EXITED → 绝不 observeExit；quiesced=false（UNVERIFIED_PERSISTED_EXIT）；
+   *   · ACTIVE → 用从 validated instanceId 重新派生的 path 做 reachability probe。
    */
   rehydrate() {
     if (this.#rehydratePromise) return this.#rehydratePromise;
     this.#rehydratePromise = (async () => {
       const records = this.#load();
-      let alive = 0; let dead = 0; let unknown = 0; let invalid = 0;
+      let alive = 0; let dead = 0; let unknown = 0; let invalid = 0; let unverifiedExit = 0;
       for (const raw of records) {
         const instanceId = raw && raw.instanceId != null ? String(raw.instanceId) : "";
         if (!isValidInstanceId(instanceId)) {
@@ -310,17 +314,12 @@ class RuntimeSupervisor {
         const safe = this.#sanitize(raw, instanceId);
         this.#lifecycle.registerRuntime(instanceId, { self: false, startedAt: safe.startedAt });
         if (safe.status === EXECUTOR_STATUS.EXITED) {
-          if (!TRUSTED_EXIT_REASONS.has(String(safe.reason || ""))) {
-            // EXITED 但 proof 不可信 → 与 ACTIVE 一样 fail closed，绝不 observeExit。
-            this.#records.set(instanceId, { ...safe, status: EXECUTOR_STATUS.ACTIVE, endedAt: null, exitCode: null, signal: null });
-            unknown += 1;
-            this.#noteUnknown(instanceId, "UNTRUSTED_EXIT_PROOF");
-            continue;
-          }
-          // 上一次进程已经用真实 lifecycle event 观测到退出：沿用已持久化的 trusted 死亡证据。
-          this.#records.set(instanceId, safe);
-          this.#lifecycle.observeExit(instanceId, { exitCode: safe.exitCode, signal: safe.signal });
-          dead += 1;
+          // persisted EXITED（含 reason=SUPERVISOR_OBSERVED_EXIT）没有 death authority：
+          // 绝不 observeExit / 绝不 quiesced，只在内存里当作 fail-closed 的 ACTIVE。
+          this.#records.set(instanceId, { ...safe, status: EXECUTOR_STATUS.ACTIVE, endedAt: null, exitCode: null, signal: null });
+          unknown += 1;
+          unverifiedExit += 1;
+          this.#noteUnknown(instanceId, UNVERIFIED_PERSISTED_EXIT);
           continue;
         }
         this.#records.set(instanceId, safe);
@@ -337,7 +336,7 @@ class RuntimeSupervisor {
         this.#noteUnknown(instanceId, probe.reason);
       }
       this.#rehydrated = true;
-      return { ok: true, records: records.length, alive, dead, unknown, invalid };
+      return { ok: true, records: records.length, alive, dead, unknown, invalid, unverifiedExit };
     })();
     return this.#rehydratePromise;
   }
@@ -373,4 +372,4 @@ class RuntimeSupervisor {
   snapshot() { return [...this.#records.values()].map((r) => this.#safeRecord(r)); }
 }
 
-module.exports = { RuntimeSupervisor, EXECUTOR_STATUS, EXECUTOR_ENTRY, probeUnixSocket, normalizeProbeResult, LIVENESS, TRUSTED_EXIT_REASONS, isValidInstanceId };
+module.exports = { RuntimeSupervisor, EXECUTOR_STATUS, EXECUTOR_ENTRY, probeUnixSocket, normalizeProbeResult, LIVENESS, UNVERIFIED_PERSISTED_EXIT, isValidInstanceId };
