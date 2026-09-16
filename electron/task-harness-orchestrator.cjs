@@ -24,7 +24,10 @@ const PROMPT_SCHEMA_VERSION = 1;
 const DEFAULT_TURN_TIMEOUT_MS = 180000;
 const DEFAULT_START_TIMEOUT_MS = 30000;
 const DEFAULT_MAX_PERSISTED_EVENTS = 64;
-const DEFAULT_MAX_CALLS = 4;
+// D4-03D：一个 Harness run 内的 bounded 模型调用预算。混合 READ + WRITE turn 需要
+// tool calls + 1 次 final + 1 次 verified-continuation，4 会误伤合法流程；仍然 bounded，
+// 且绝不引入 hidden retry（0 retry 由 AUTO_RETRY/failModelCall 语义保证）。
+const DEFAULT_MAX_CALLS = 8;
 const MAX_TOOL_ROUNDS = 4;
 
 const ORCHESTRATOR_ERROR = Object.freeze({
