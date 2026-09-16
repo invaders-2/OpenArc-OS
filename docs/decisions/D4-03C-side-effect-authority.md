@@ -441,8 +441,73 @@ forbidden tool count = 0；WRITE surface 仍只有 `resource.trash`；`AUTO_RETR
 independent malformed ACP injection / Windows / External Provider / Explicit Resume /
 broader Domain verifiers / authenticated durable cross-restart process-death proof）继续挂账。
 
+## D4-03D Closure · Tool-call Identity Seal（§1 – §39 · 永久）
+
+### Tool Call Identity（永久冻结）
+
+    Tool Call Identity
+      = runId
+      + callId
+      + toolId
+      + canonical arguments fingerprint
+
+`runId + callId` 定位一次 logical Tool call；`toolId + canonical arguments fingerprint`
+证明 duplicate delivery 确实是同一请求。canonical serialization 用项目现有 `fingerprint/kanon`
+（递归 key sort），**不依赖 JSON.stringify 的对象 key insertion order**。
+
+### callId Mandatory（§3 / §4 / §5）
+
+Harness-visible `POST /tool-call` 必须带 non-empty bounded `callId`：
+
+    typeof callId === "string" && trim().length >= 1 && length <= 256 && 无 NUL / C0 / C1 控制字符
+
+missing / invalid → `400 TOOL_CALL_ID_REQUIRED`，且发生在 `cap.calls++` / ToolProposal /
+ToolExecution / SideEffectCall / Approval / Lease / Domain call **之前**：0 budget / 0 authority。
+official dsh plugin 缺失 `exec.callId` 时本地 fail closed，**0 Tool Facade request**
+（plugin fail closed + Bridge authority fail closed 双层）。
+
+### 顺序冻结（§21）
+
+    authenticate capability → TTL/state → parse body → validate toolId → validate callId →
+    contract freshness → compute request fingerprint → identity binding（duplicate / conflict）→
+    reserve call budget（原子）→ execute route
+
+绝不 execute first → dedupe later。
+
+### Duplicate / Conflict（§8 / §9 / §10 – §12）
+
+`callsById: callId → { requestFingerprint, toolId, pending, outcome }`（run/facade 内存级，只存 safe identity）。
+
+- exact duplicate（same callId + toolId + arguments fingerprint）→ await 同 pending / 返回同 outcome；
+  0 second execution / 0 extra budget；
+- callId conflict（same callId 但 toolId 或 canonical arguments fingerprint 不同）→
+  `409 TOOL_CALL_ID_CONFLICT`；0 Domain execution / 0 SideEffectCall / 0 mutation / 0 approval /
+  0 lease / 0 extra budget；**绝不返回旧请求 result，也绝不覆盖原 binding**；
+- READ→WRITE / WRITE→READ / WRITE A→WRITE B 全部走同一 conflict gate。
+
+### Budget Contract（§19 / §20）
+
+    invalid callId  = 0 budget
+    callId conflict = 0 extra budget
+    exact duplicate = 0 extra budget
+    first valid unique call = +1
+
+`cap.calls >= cap.maxCalls` 检查与 `cap.calls += 1` 在同一同步块内完成（之间无 await），
+maxCalls=1 的并发 unique call 恰好一个成功、另一个 `TOOL_CAPABILITY_EXHAUSTED`。
+
+### Harness callId != OpenArc authority ID（§22 / §23）
+
+Harness `callId` 只是 external logical delivery identity；`SideEffectCall.callId` / `idempotencyKey` /
+approval / lease 继续由 OpenArc generator 生成（`newId("scall")`），
+即使 dsh 自报 `callId="scall_fake"` 也不得成为 authority id。
+
+### No New Persistent Authority（§25 / §26）
+
+不新增 DB table；`callsById` 仍是 run/facade 内存级 delivery dedupe。
+cross-restart Tool-call replay 继续受既有 Task recovery contract 控制；`SCHEMA_VERSION` 保持 14。
+
 ## 下一步
 
-\`D4-03D = PASS candidate\`（DeepSeek 无权封板，由 ChatGPT 审计后决定 \`D4-03 = PASS\`）。
+\`D4-03D Closure = PASS candidate\`、\`D4-03D = PASS candidate\`、\`D4-03 overall = PASS candidate\`（DeepSeek 无权封板，由 ChatGPT 审计后决定 \`D4-03 = PASS\`）。
 **\`D4-04\` = NOT STARTED**；禁止自动进入 D4-04 / D4-05 / D5 / D6。
 
