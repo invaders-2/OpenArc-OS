@@ -1545,7 +1545,7 @@ input[type="checkbox"] {
   background: #f2f2f4;
 }
 /* ── 动态 AI 球：球体来自 orb-ui（MIT，© Alexander Chen，https://orb-ui.com）────────────
-   这一层只负责外框：尺寸、App 图标版的浅色 squircle、以及静态回退用的图。
+   这一层只负责外框：尺寸与静态回退用的图（用户口径：底部这边去掉边框，所以不再套 App 图标底板）。
    球本身的 WebGL 画布由 orb-ui 渲染在 .orb-canvas 上，这里只保证它是圆的、铺满外框。 */
 .orb {
   display: grid;
@@ -1569,14 +1569,6 @@ input[type="checkbox"] {
   display: block;
   border-radius: 50%;
   object-fit: contain;
-}
-/* App 图标版：外圈浅色 squircle（球体由组件按 74% 画，位置靠 grid 居中） */
-.orb-app {
-  /* App 图标版必须裁：底板是 squircle，球不能凸出去 */
-  overflow: hidden;
-  border-radius: 23%;
-  background: linear-gradient(160deg, #fdfdfd, #e8ecf5);
-  box-shadow: 0 0.02em 0.06em rgba(0, 0, 0, 0.18);
 }
 
 /* 设置页：壁纸选择 */

@@ -196,28 +196,25 @@ const ORB_THEME = {
 
 /**
  * 动态 AI 球 —— 球本身来自 **orb-ui**（MIT，© Alexander Chen，https://orb-ui.com），
- * 我们只负责外面这一层壳：尺寸、App 图标版的浅色 squircle 底板、以及"减少动态效果"时的静态回退。
+ * 我们只负责外面这一层壳：尺寸，以及"减少动态效果"时的静态回退（不再套 App 图标底板 —— 用户口径：底部这边去掉边框）。
  *
  * 为什么减少动态效果要在这里判：orb-ui 只认系统级 `prefers-reduced-motion`，认不到产品内的开关；
  * 所以产品开关打开时**干脆不挂 WebGL**，退回同一张静态帧 siri.png（既省 GPU，也不会留空壳）。
  */
 export function OrbIcon({
   size = 47,
-  squircle = false,
   className = "",
   animated = true,
 }: {
   size?: number;
-  squircle?: boolean;
   className?: string;
   animated?: boolean;
 }) {
-  // 球体占外框的比例由主题的 diameterRatio（0.92）决定；
-  // squircle（Dock）版再缩到 0.8 —— 球占外框 ~74%，与原来那张 PNG 的比例一致。
-  const inner = Math.round(size * (squircle ? 0.8 : 1));
+  // 球体占外框的比例由主题的 diameterRatio（0.92）决定。
+  const inner = size;
   return (
     <span
-      className={`orb${squircle ? " orb-app" : ""}${className ? " " + className : ""}`}
+      className={`orb${className ? " " + className : ""}`}
       style={{ width: size, height: size }}
       aria-hidden="true"
       draggable={false}
@@ -254,7 +251,7 @@ export function DockItem({
       onContextMenu={onContextMenu}
     >
       {iconName === "siri" ? (
-        <OrbIcon squircle className="dock-icon" size={iconSize} animated={orbAnimated} />
+        <OrbIcon className="dock-icon" size={iconSize} animated={orbAnimated} />
       ) : (
         <img className="dock-icon" src={icon(iconName)} alt="" draggable={false} />
       )}
