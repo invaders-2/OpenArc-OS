@@ -366,8 +366,83 @@ WRITE surface 仍只有 \`resource.trash\`；\`AUTO_RETRY = 0\`；IRREVERSIBLE_W
 PRIVILEGED / Shell / Terminal / filesystem generic mutation / MCP / Browser automation / Device Agent /
 Canvas mutation / App Center mutation / Adobe control 全部 BLOCKED。
 
+## D4-03D · Full Tool Proxy Gate（§1 – §62）
+
+D4-03D 不新增工具、不改 side-effect architecture；它把已经 PASS 的 D4-03A / D4-03B / D4-03C
+收敛成一个**最终、统一、不可绕过**的 Tool Proxy：
+
+    official Harness (dsh)
+      → ACP v1
+      → OpenArc Tool Plugin（官方 profile bundle）
+      → Tool Facade Bridge（每 run 随机 loopback + 一个 tpx_ capability）
+      → 按 Registry contract 决定 route
+          · READ_ONLY            → ControlledToolProxy.executeReadOnly → Domain → verified safe result
+          · SIDE_EFFECT_PROPOSAL → SideEffectRuntime.proposeWrite → Approval → Lease → executor → verified
+      → safe result 交回 Harness
+
+### Full Route Matrix（§6 · 永久）
+
+| Route | Contract |
+|---|---|
+| `READ_ONLY` | Proposal → Decision → Reauthorization → Controlled Execution → Verification |
+| `SIDE_EFFECT_PROPOSAL` | Proposal → Decision → SideEffectPlan → Approval → Lease → Controlled Execution → Verification |
+| unknown / unsupported | BLOCK |
+| irreversible / external / privileged | BLOCK |
+
+不存在第三条隐藏 execution route。READ 绝不创建 SideEffectCall / Approval / Lease；
+WRITE 绝不经过 `executeReadOnly`。
+
+### 单 Facade / 单 Registry projection（§11）
+
+同一个 run 只有一个 `ToolFacadeBridge`、一个 Registry projection、一个 `tpx_` capability；
+route 由 Registry contract 的 riskClass 决定，Harness 不能自报 route。
+
+### tpx capability scope（§12 / §13 / §15 · 永久）
+
+每个 Tool Facade capability 绑定 `session / app / taskId / stepId / runId / allowedTools / maxCalls / expiry`；
+Harness / body 自报的 `taskId / stepId / runId / appId / sessionRef / userId / role` 一律忽略。
+capability 只活进程内存，**绝不落 SQLite / TaskEvent / Audit / Artifact / DSH_HOME / manifest / logs**。
+
+    Tool Proxy capability (tpx_) != Model Proxy capability (mpx_)
+
+tpx_ 打 Model Proxy → 401；mpx_ 打 Tool Facade → 401；cross-domain 0 privilege gain。
+Capability lifecycle：issued → ACTIVE；TTL → EXPIRED；maxCalls → EXHAUSTED；revoke / run 结束 / cancel /
+bridge stop → REVOKED。cross-run / cross-task / cross-step replay 一律 DENY。
+
+### Duplicate 语义与 maxCalls（§24 / §41）
+
+同一 `callId` 的重复送达返回既有结果，**不消耗 call budget**；
+READ duplicate → 0 第二次 Domain execution；WRITE duplicate → 0 第二个 SideEffectCall；
+并发 duplicate 由 in-flight promise / proposeWrite binding 收敛为一次 effect。
+
+### Loopback-only（§40）
+
+Tool Facade 只监听 `127.0.0.1`（应用层防线）。这**不是** OS-level network sandbox，
+后者继续 `NOT VERIFIED`。
+
+### bounded model budget（§10 支持）
+
+`DEFAULT_MAX_CALLS` 由 4 提升为 8：混合 READ + WRITE 的一个 turn 需要 tool calls + 1 次 final +
+1 次 verified-continuation。它仍是 bounded budget，且 `AUTO_RETRY = 0`（无 hidden retry）。
+
+### Official dsh 混合 E2E（§10 · 永久）
+
+真实 `@deepseek-ai/dsh` + `@agentclientprotocol/sdk` ACP v1：一条 Task 内
+`resource.search`（READ）→ `resource.read.metadata`（READ）→ `resource.trash`（WRITE proposal）
+→ trusted user approve → 受监督 exactly-once → read-only verification PASS → `resource.trash` 最终 SUCCEEDED，
+Task/Step SUCCEEDED；1 个 Task / 1 个 Step / 1 个 Harness Run / 1 个 Facade；
+READ 只经 ControlledToolProxy，WRITE 只经 SideEffectAuthority；`AUTO_RETRY = 0`。
+
+### 边界不变（§4 / §22 / §57）
+
+Harness-visible tools 仍精确为 `resource.search / resource.read.metadata / resource.trash`；
+forbidden tool count = 0；WRITE surface 仍只有 `resource.trash`；`AUTO_RETRY = 0`；
+既有 D4-03 remaining gaps（OS-level network sandbox / external workspace read audit /
+independent malformed ACP injection / Windows / External Provider / Explicit Resume /
+broader Domain verifiers / authenticated durable cross-restart process-death proof）继续挂账。
+
 ## 下一步
 
-\`D4-03C4 = PASS candidate\`（DeepSeek 无权封板，由 ChatGPT 审计后决定 \`D4-03C = PASS\`）。
-**\`D4-03D\` = NOT STARTED**；禁止自动进入 D4-03D / D4-04 / D4-05 / D5 / D6。
+\`D4-03D = PASS candidate\`（DeepSeek 无权封板，由 ChatGPT 审计后决定 \`D4-03 = PASS\`）。
+**\`D4-04\` = NOT STARTED**；禁止自动进入 D4-04 / D4-05 / D5 / D6。
 
