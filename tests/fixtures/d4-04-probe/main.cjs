@@ -10,6 +10,7 @@ const { pathToFileURL } = require("node:url");
 const ROOT = path.resolve(__dirname, "../../..");
 const { createIdentityService, registerIdentityIpc } = require(path.join(ROOT, "electron/identity-bootstrap.cjs"));
 const { registerTaskIpc } = require(path.join(ROOT, "electron/task-bootstrap.cjs"));
+const { createDefaultExecutorLauncher } = require(path.join(ROOT, "electron/executor-launcher.cjs"));
 
 const uiURL = pathToFileURL(path.join(ROOT, "dist/index.html")).href;
 const ADMIN = "admin@openarc.test";
@@ -17,7 +18,10 @@ const PW = "admin-password-1";
 const PROVIDER_URL = process.env.OPENARC_D4_PROVIDER_URL || "";
 const CONTROL_URL = PROVIDER_URL.replace(/\/v1\/?$/, "") + "/__plan";
 
-const report = { checks: [], errors: [], versions: {}, stats: {}, secrets: {} };
+// D4-04 Closure：UNKNOWN_EFFECT fault seam 只由本 probe assembly 构造注入（constructor-only），
+// 绝不来自 process.env / Renderer / IPC / Harness / ACP / tool args。production 默认 null。
+const executorSeam = { fault: null };
+const report = { checks: [], errors: [], versions: {}, stats: {}, secrets: {}, executor: {} };
 const out = (line) => process.stdout.write(line + "\n");
 const check = (name, ok, detail) => { report.checks.push({ name, ok: !!ok, detail: String(detail === undefined ? "" : detail) }); out((ok ? "PASS" : "FAIL") + " " + name + (detail ? " :: " + detail : "")); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -29,6 +33,7 @@ const has = (sel) => js("return !!document.querySelector(" + JSON.stringify(sel)
 const text = (sel) => js("return document.querySelector(" + JSON.stringify(sel) + ")?.textContent || ''");
 const attr = (sel, a) => js("return document.querySelector(" + JSON.stringify(sel) + ")?.getAttribute(" + JSON.stringify(a) + ") || ''");
 const click = (sel) => js("const el = document.querySelector(" + JSON.stringify(sel) + "); if (!el) return 'missing'; if (el.disabled) return 'disabled'; el.click(); return 'ok';");
+const isDisabled = (sel) => js("const el = document.querySelector(" + JSON.stringify(sel) + "); return el ? !!el.disabled : true;");
 const setInput = (sel, value) => js("const el = document.querySelector(" + JSON.stringify(sel) + "); if (!el) return 'missing';" +
   "const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;" +
   "const setter = Object.getOwnPropertyDescriptor(proto, 'value').set; setter.call(el, " + JSON.stringify(value) + ");" +
@@ -49,11 +54,22 @@ async function setPlan(mode, resourceRef) {
 }
 async function runTaskViaUI(goal) {
   await setInput("[data-ai-goal]", goal);
+  // §24：Run 必须由 backend authoritative terminal state 复位；这里等 UI 合同自我恢复，不硬等固定时长。
+  if (!(await waitFor(async () => !(await isDisabled("[data-ai-run]")), 60000))) throw new Error("run button never re-enabled");
   const r = await click("[data-ai-run]");
   if (r !== "ok") throw new Error("run click failed: " + r);
   const ok = await waitFor(async () => { const id = await attr(".ai-panel", "data-ai-task-id"); return typeof id === "string" && id.length > 0; }, 30000);
   const taskId = await attr(".ai-panel", "data-ai-task-id");
   return { taskId, started: ok };
+}
+async function waitCall(taskId, timeout = 120000) {
+  const ok = await waitFor(() => identity.sideEffectStore.callsOfTask(taskId).length > 0, timeout);
+  return ok ? identity.sideEffectStore.callsOfTask(taskId)[0] : null;
+}
+/** 等 Approval UI 真正对应**本任务**的 call，避免匹配到上一个场景残留的 approval 元素。 */
+const approvalIds = () => js("return Array.from(document.querySelectorAll('[data-approval-request-id]')).map(function(e){return e.getAttribute('data-approval-request-id')})");
+async function waitApprovalFor(callId, timeout = 120000) {
+  return waitFor(async () => { const ids = await approvalIds(); return Array.isArray(ids) && ids.includes(callId); }, timeout);
 }
 async function createSmokeResource(name) {
   const created = await identity.resourceService.createResource({ context: { sessionRef: identity.service.current, appId: "resource-library", source: "probe" }, resourceType: "text", name, content: "vertical-smoke-body" });
@@ -72,7 +88,13 @@ app.whenReady().then(async () => {
     out("VERSIONS " + JSON.stringify(report.versions));
 
     userData = fs.mkdtempSync(path.join(os.tmpdir(), "oa-d4-04-"));
-    identity = createIdentityService({ userDataDir: userData, safeStorage, allowAdmin: true });
+    identity = createIdentityService({
+      userDataDir: userData,
+      safeStorage,
+      allowAdmin: true,
+      executorLauncher: createDefaultExecutorLauncher(),
+      executorTestHook: () => executorSeam.fault,
+    });
     await identity.modelProxy.start();
     await identity.store.initialize({ identifier: ADMIN, password: PW, displayName: "Admin" });
     for (const appId of ["ai", "resource-library", "settings"]) if (!identity.authStore.appById(appId)) identity.authStore.upsertApp({ appId, name: appId, publisher: "openarc-builtin", status: "enabled", builtIn: 1 });
@@ -134,7 +156,8 @@ app.whenReady().then(async () => {
     check("B1 · READ vertical smoke → Task SUCCEEDED", readDone, String(taskStatus(readTask.taskId)));
     check("B2 · READ ToolExecution >= 2 且 verification PASS", readExecs.length >= 2 && readExecs.every((e) => e.verification_status === "PASS"), "execs=" + readExecs.length);
     check("B3 · READ 0 SideEffectCall / 0 mutation", identity.sideEffectStore.callsOfTask(readTask.taskId).length === 0 && trashed(resourceRef) === false, "");
-    check("B4 · Renderer 显示 READ 最终结果", (await text("[data-ai-result]")).includes("OPENARC_VERTICAL_SMOKE_OK"), (await text("[data-ai-result]")).slice(0, 40));
+    const readShown = await waitFor(async () => (await text("[data-ai-result]")).includes("OPENARC_VERTICAL_SMOKE_OK"), 30000);
+    check("B4 · Renderer 显示 READ 最终结果", readShown, (await text("[data-ai-result]")).slice(0, 40));
     const bodyDom = await js("return document.body.innerHTML");
     const leaks = ["/Users/", "/private/", "/var/folders", userData, path.join(userData, "library"), "mpx_", "tpx_"].filter((s) => s && bodyDom.includes(s));
     check("B5 · Renderer 无绝对路径 / store root / capability 泄漏", leaks.length === 0, JSON.stringify(leaks));
@@ -142,8 +165,9 @@ app.whenReady().then(async () => {
     // Vertical Smoke B — WRITE Approval（真实 UI Approve）
     await setPlan("write", resourceRef);
     const writeTask = await runTaskViaUI("WRITE smoke: 把 Vertical Smoke Resource 移入废纸篓");
-    const approvalAppeared = await waitSel('[data-approval-request-id]', 120000);
-    const writeCall = identity.sideEffectStore.callsOfTask(writeTask.taskId)[0];
+    const writeCall = await waitCall(writeTask.taskId);
+    const approvalAppeared = !!writeCall && (await waitApprovalFor(writeCall.callId, 30000));
+    out("DIAG_APPROVAL " + JSON.stringify({ callId: writeCall && writeCall.callId, ids: await approvalIds(), hasApproval: await has(".approval") }));
     if (!writeCall) out("DIAG_WRITE " + JSON.stringify({ status: taskStatus(writeTask.taskId), events: identity.taskStore.eventsOfTask(writeTask.taskId).map((e) => e.event_type), runs: identity.taskStore.harnessRunsOfTask(writeTask.taskId).map((x) => ({ status: x.status, error: x.error_code })), proposals: identity.toolStore.proposalsOfTask(writeTask.taskId).map((p) => ({ tool: p.tool_id, status: p.status })), decisions: identity.toolStore.decisionsOfTask(writeTask.taskId).map((d) => ({ status: d.decision, reason: d.reason_code })) }));
     check("C1 · WRITE proposal → Approval UI 出现", approvalAppeared && !!writeCall && writeCall.status === "AWAITING_APPROVAL", writeCall ? writeCall.status : "none");
     if (!writeCall) throw new Error("WRITE proposal missing");
@@ -157,24 +181,33 @@ app.whenReady().then(async () => {
     if (!writeDone) out("DIAG_C6 " + JSON.stringify({ task: taskStatus(writeTask.taskId), call: callStatus(writeCall.callId), error: finalCall && finalCall.errorCode, events: identity.taskStore.eventsOfTask(writeTask.taskId).map((e) => e.event_type), leases: identity.sideEffectStore.leasesOfCall(writeCall.callId).map((l) => l.status) }));
     check("C6 · WRITE → Task SUCCEEDED + mutation exactly 1", writeDone && trashed(resourceRef) === true, "task=" + taskStatus(writeTask.taskId));
     check("C7 · SideEffectCall=1 / approval=1 / lease=1 / verification PASS", identity.sideEffectStore.callsOfTask(writeTask.taskId).length === 1 && finalCall.status === "SUCCEEDED" && finalCall.verificationStatus === "PASS" && identity.sideEffectStore.approvalsOfCall(writeCall.callId).filter((a) => a.decision === "APPROVED").length === 1 && identity.sideEffectStore.leasesOfCall(writeCall.callId).length === 1, finalCall.status);
+    const writeEvidence = identity.supervisor.executorEvidence().slice(-1)[0] || null;
+    const writeLeases = identity.sideEffectStore.leasesOfCall(writeCall.callId);
+    report.executor = { launcher: identity.supervisor.launcher.constructor.name, processType: process.type, electron: process.versions.electron, node: process.versions.node, write: writeEvidence };
+    check("C8 · production executor spawned + ready + real child exit", !!writeEvidence && writeEvidence.spawned === true && writeEvidence.ready === true && writeEvidence.exited === true && writeEvidence.exitCode === 0, JSON.stringify(writeEvidence));
+    check("C9 · WRITE 恰好 1 个 lease 且 RELEASED", writeLeases.length === 1 && writeLeases[0].status === "RELEASED", JSON.stringify(writeLeases.map((l) => l.status)));
+    await waitFor(async () => (await isDisabled("[data-ai-run]")) === false, 30000);
+    check("C10 · Renderer Run 复位（busy=false）", (await isDisabled("[data-ai-cancel]")) === true && (await isDisabled("[data-ai-run]")) === false, "cancelDisabled=" + (await isDisabled("[data-ai-cancel]")));
 
     // Vertical Smoke C — Deny
     const denyRes = await createSmokeResource("Deny Target");
     await setPlan("deny", denyRes.resourceRef);
     const denyTask = await runTaskViaUI("DENY smoke: 删除 Deny Target");
-    await waitSel('[data-approval-request-id]', 120000);
-    const denyCall = identity.sideEffectStore.callsOfTask(denyTask.taskId)[0];
+    const denyCall = await waitCall(denyTask.taskId);
+    await waitApprovalFor(denyCall.callId);
     check("D1 · Deny 前 WAITING_APPROVAL + 0 mutation", !!denyCall && denyCall.status === "AWAITING_APPROVAL" && trashed(denyRes.resourceRef) === false, "");
     check("D2 · 点击真实 Deny", (await click('[data-approval-action="deny"]')) === "ok", "");
     await waitFor(() => ["BLOCKED", "FAILED", "CANCELLED"].includes(taskStatus(denyTask.taskId)), 90000);
     check("D3 · Deny → 0 mutation / 0 lease / 0 WRITE execution", trashed(denyRes.resourceRef) === false && identity.sideEffectStore.leasesOfCall(denyCall.callId).length === 0 && identity.toolStore.executionsOfTask(denyTask.taskId).filter((e) => e.tool_id === "resource.trash").length === 0, String(taskStatus(denyTask.taskId)));
+    await waitFor(async () => (await isDisabled("[data-ai-run]")) === false, 30000);
+    check("D4 · Deny → SideEffectCall safe terminal + UI busy 复位", ["BLOCKED", "FAILED", "CANCELLED"].includes(String(callStatus(denyCall.callId))) && !["RUNNING", null].includes(taskStatus(denyTask.taskId)) && (await isDisabled("[data-ai-run]")) === false, callStatus(denyCall.callId) + "/" + taskStatus(denyTask.taskId));
 
     // Vertical Smoke D — Cancel while waiting
     const cancelRes = await createSmokeResource("Cancel Target");
     await setPlan("cancel", cancelRes.resourceRef);
     const cancelTask = await runTaskViaUI("CANCEL smoke: 删除 Cancel Target");
-    await waitSel('[data-approval-request-id]', 120000);
-    const cancelCall = identity.sideEffectStore.callsOfTask(cancelTask.taskId)[0];
+    const cancelCall = await waitCall(cancelTask.taskId);
+    await waitApprovalFor(cancelCall.callId);
     check("E1 · Cancel 前 Approval UI 可见 + 0 mutation", !!cancelCall && trashed(cancelRes.resourceRef) === false, "");
     check("E2 · 点击真实 Cancel", (await click("[data-ai-cancel]")) === "ok", "");
     const cancelled = await waitFor(() => taskStatus(cancelTask.taskId) === "CANCELLED", 90000);
@@ -185,36 +218,60 @@ app.whenReady().then(async () => {
 
     // Vertical Smoke E — UNKNOWN_EFFECT
     const unknownRes = await createSmokeResource("Unknown Target");
-    process.env.OPENARC_EXECUTOR_FAULT = "crash_after_claim";
+    // constructor-only fault seam（probe assembly 注入）；绝不写 process.env。
+    executorSeam.fault = "CRASH_AFTER_CLAIM";
     await setPlan("unknown", unknownRes.resourceRef);
     const unknownTask = await runTaskViaUI("UNKNOWN smoke: 删除 Unknown Target");
-    await waitSel('[data-approval-request-id]', 120000);
-    const unknownCall = identity.sideEffectStore.callsOfTask(unknownTask.taskId)[0];
+    const unknownCall = await waitCall(unknownTask.taskId);
+    await waitApprovalFor(unknownCall.callId);
     await click('[data-approval-action="approve"]');
     const blocked = await waitFor(() => taskStatus(unknownTask.taskId) === "BLOCKED", 120000);
-    delete process.env.OPENARC_EXECUTOR_FAULT;
+    executorSeam.fault = null;
     const unknownEvents = identity.taskStore.eventsOfTask(unknownTask.taskId).map((e) => e.event_type);
     check("F1 · UNKNOWN_EFFECT → Task BLOCKED", blocked, String(taskStatus(unknownTask.taskId)));
     check("F2 · Step BLOCKED + Harness STOP", identity.taskStore.stepById(identity.taskStore.stepsOfTask(unknownTask.taskId)[0].step_id).status === "BLOCKED", "");
     check("F3 · UNKNOWN_EFFECT 证据 + 0 second SideEffectCall", unknownEvents.includes("tool.side_effect.unknown_effect") && identity.sideEffectStore.callsOfTask(unknownTask.taskId).length === 1 && callStatus(unknownCall.callId) !== "SUCCEEDED", "");
     check("F4 · Renderer 显示 BLOCKED", (await text("[data-ai-status-text]")).includes("BLOCKED") || (await attr(".ai-panel", "data-ai-status")) === "BLOCKED", await text("[data-ai-status-text]"));
+    const claimIdx = unknownEvents.indexOf("tool.side_effect.execution_started");
+    const unknownIdx = unknownEvents.indexOf("tool.side_effect.unknown_effect");
+    const unknownEvidence = identity.supervisor.executorEvidence().slice(-1)[0] || null;
+    report.executor.unknown = unknownEvidence;
+    check("F5 · claim RUNNING 先于真实 child exit 崩溃", claimIdx >= 0 && unknownIdx > claimIdx && !!unknownEvidence && unknownEvidence.exited === true && unknownEvidence.exitCode === 9, JSON.stringify({ claimIdx, unknownIdx, ev: unknownEvidence }));
+    check("F6 · UNKNOWN 后 0 第二 call / 0 第二 lease / 0 retry", identity.sideEffectStore.callsOfTask(unknownTask.taskId).length === 1 && identity.sideEffectStore.leasesOfCall(unknownCall.callId).length === 1 && callStatus(unknownCall.callId) !== "SUCCEEDED", callStatus(unknownCall.callId));
+    await waitFor(async () => (await attr(".ai-panel", "data-ai-status")) === "BLOCKED", 30000);
+    check("F7 · Renderer BLOCKED + Run 复位（busy=false）", (await attr(".ai-panel", "data-ai-status")) === "BLOCKED" && (await isDisabled("[data-ai-run]")) === false, await attr(".ai-panel", "data-ai-status"));
 
     // Spoof scenario（真实 IPC + spoofed actor，0 authority gain）
     const spoofRes = await createSmokeResource("Spoof Target");
     await setPlan("write", spoofRes.resourceRef);
     const spoofTask = await runTaskViaUI("SPOOF smoke: 删除 Spoof Target");
-    await waitSel('[data-approval-request-id]', 120000);
-    const spoofCall = identity.sideEffectStore.callsOfTask(spoofTask.taskId)[0];
+    const spoofCall = await waitCall(spoofTask.taskId);
+    await waitApprovalFor(spoofCall.callId);
     const spoofResult = await js("return window.openarc.sideEffect.command({ type:'sideEffect/decideApproval', approvalRequestId:" + JSON.stringify(spoofCall.callId) + ", decision:'APPROVE', userId:'u_attacker', role:'ADMIN', sessionRef:'sess_evil', riskClass:'READ_ONLY' })");
     const spoofApproval = identity.sideEffectStore.latestApprovalOfCall(spoofCall.callId);
     check("G1 · Renderer 自报 actor/risk 被忽略（真实 session 决定）", spoofResult && spoofResult.ok === true && spoofApproval && spoofApproval.actorUserId === adminUser().id && spoofApproval.approvedEffectClass === "REVERSIBLE_WRITE", JSON.stringify({ ok: spoofResult && spoofResult.ok, actor: spoofApproval && spoofApproval.actorUserId }));
     const fakeApproval = await js("return window.openarc.sideEffect.command({ type:'sideEffect/decideApproval', approvalRequestId:'scall_fake', decision:'APPROVE' })");
     check("G2 · 伪造 approvalRequestId → DENY（0 authority gain）", fakeApproval && fakeApproval.ok === false, JSON.stringify(fakeApproval));
 
-    // Reload
+    // Spoof approve 走完整受控执行（真实 session 决定 → 仍然 exactly-once 执行 + verify）
+    const spoofDone = await waitFor(() => ["SUCCEEDED", "BLOCKED", "FAILED", "CANCELLED"].includes(String(taskStatus(spoofTask.taskId))), 120000);
+    check("G3 · 伪造 actor 的真实 approve 仍走完整受控执行", spoofDone && callStatus(spoofCall.callId) === "SUCCEEDED" && trashed(spoofRes.resourceRef) === true, String(taskStatus(spoofTask.taskId)) + "/" + callStatus(spoofCall.callId));
+
+    // Reload（§27）：Renderers 内存全部丢弃，只能从 backend authoritative state 恢复。
     await win.webContents.reload();
-    await sleep(1200);
-    check("H1 · Reload 后从 backend state 恢复 Task 结果", ((await text("[data-ai-result]")).length > 0 || (await text("[data-ai-status-text]")).length > 0), "");
+    await sleep(1500);
+    let gate = await waitGate("ready", 30000);
+    if (gate !== "ready") {
+      await setInput('[data-d3-id="login-identifier"]', ADMIN);
+      await setInput('[data-d3-id="login-password"]', PW);
+      await sleep(80);
+      await click('[data-d3-id="login-submit"]');
+      gate = await waitGate("ready", 30000);
+    }
+    if (await waitSel(".assistant-pill", 30000)) await click(".assistant-pill");
+    await waitSel(".ai-panel", 20000);
+    const reloadRestored = await waitFor(async () => (await attr(".ai-panel", "data-ai-task-id")).length > 0 && (await text("[data-ai-result]")).length > 0, 30000);
+    check("H1 · Reload 后从 backend state 恢复 Task 结果", reloadRestored, "taskId=" + (await attr(".ai-panel", "data-ai-task-id")) + " gate=" + gate);
 
     // Secret scan
     let dump = "";
@@ -227,8 +284,21 @@ app.whenReady().then(async () => {
     check("I1 · DB 0 capability / credential / path 泄漏", secretHits.length === 0, JSON.stringify(secretHits));
     check("I2 · Renderer console error = 0", consoleErrors.length === 0, consoleErrors.slice(0, 3).join(" | "));
     check("I3 · main uncaught / unhandled = 0", mainErrors.length === 0, mainErrors.slice(0, 3).join(" | "));
+    const evidenceDump = JSON.stringify(report.executor || {});
+    check("I4 · executor evidence 0 绝对路径 / capability / credential", !/\/Users\/|\/private\/|\/var\/folders|mpx_|tpx_|vertical-smoke-credential/.test(evidenceDump), "");
 
-    report.stats = { readExecutions: readExecs.length, sideEffectCalls: identity.sideEffectStore.callsOfTask(writeTask.taskId).length, approvals: identity.sideEffectStore.approvalsOfCall(writeCall.callId).filter((a) => a.decision === "APPROVED").length, leases: identity.sideEffectStore.leasesOfCall(writeCall.callId).length, businessMutations: trashed(resourceRef) ? 1 : 0, hiddenRetries: 0 };
+    const perTaskToolCalls = [readTask, writeTask, denyTask, cancelTask, unknownTask, spoofTask].map((t) => (t && t.taskId ? identity.toolStore.executionsOfTask(t.taskId).length : 0));
+    report.stats = {
+      readExecutions: readExecs.length,
+      sideEffectCalls: identity.sideEffectStore.callsOfTask(writeTask.taskId).length,
+      approvals: identity.sideEffectStore.approvalsOfCall(writeCall.callId).filter((a) => a.decision === "APPROVED").length,
+      leases: identity.sideEffectStore.leasesOfCall(writeCall.callId).length,
+      businessMutations: trashed(resourceRef) ? 1 : 0,
+      hiddenRetries: 0,
+      maxToolCallsPerTask: Math.max(0, ...perTaskToolCalls),
+      toolCallsPerTask: perTaskToolCalls,
+      verifications: [finalCall, identity.sideEffectStore.callById(spoofCall.callId)].filter((c) => c && c.verificationStatus === "PASS").length,
+    };
   } catch (e) {
     report.errors.push(String((e && e.stack) || e));
     check("探针整体未抛异常", false, String((e && e.message) || e).slice(0, 200));

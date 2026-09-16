@@ -230,6 +230,20 @@ class SideEffectRuntime {
       now: this.#now(),
     });
     if (!box.ok) return { ok: false, error: box.error };
+    // spawn != entered executor：只有真实 ready handshake 之后才允许把这次 spawn 当成执行 runtime。
+    // 未 ready 即退出 → EXECUTOR_START_FAILED（fail closed：0 lease / 0 mutation / 0 retry）。
+    const ready = box.ready ? await box.ready : { ok: true };
+    if (ready.ok !== true) {
+      await box.done;
+      const spawnLease = this.store.activeLeaseOfCall(callId);
+      if (spawnLease && spawnLease.holderInstanceId === box.instanceId) {
+        this.authority.recoverAfterExecutorExit({ callId, executorInstanceId: box.instanceId });
+      } else {
+        const afterSpawn = this.store.callById(callId);
+        if (afterSpawn && !CALL_TERMINAL.includes(String(afterSpawn.status))) this.#blockPending(callId, SIDE_EFFECT_ERROR.EXECUTOR_START_FAILED);
+      }
+      return { ok: false, error: SIDE_EFFECT_ERROR.EXECUTOR_START_FAILED, call: this.store.callById(callId) };
+    }
     await box.done;
     const message = RuntimeSupervisor.parseExecutorMessage(box.stdout, "result");
     let after = this.store.callById(callId);

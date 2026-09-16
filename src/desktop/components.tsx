@@ -476,6 +476,9 @@ export function AssistantPill({ onActivate }: AssistantPillProps) {
   );
 }
 
+/** backend authoritative terminal 状态：到达其中一个就必须复位 UI busy 合同。 */
+const TASK_TERMINAL = ["SUCCEEDED", "FAILED", "BLOCKED", "CANCELLED"];
+
 type AIPanelProps = { onClose: () => void; onOpenSettings: () => void };
 /**
  * D4-04：全局 AI 助手 = 真实 Task Runtime 入口。
@@ -503,12 +506,41 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
       if (!latest) return;
       const got = await command({ type: "task/get", taskId: latest.taskId });
       if (!got || !got.ok) return;
+      const restored = (got.task && got.task.status) || latest.status || "idle";
       setTaskId(latest.taskId);
-      setStatus((got.task && got.task.status) || latest.status || "idle");
+      setStatus(restored);
+      // §24：恢复时 backend 仍在 RUNNING 说明任务未收敛，Cancel 必须可用、Run 必须保持禁用。
+      setBusy(!TASK_TERMINAL.includes(restored));
       const artifact = Array.isArray(got.artifacts) && got.artifacts.length ? got.artifacts[got.artifacts.length - 1] : null;
       setResult((artifact && artifact.content) || "");
     })();
   }, []);
+
+  // §24：busy 不能只依赖 happy-path task/result。以 backend authoritative task/get 为准，
+  // 任何 terminal 状态都复位 Run / Cancel，并同步最终状态与 artifact。
+  useEffect(() => {
+    if (!busy || !taskId) return;
+    const bridge = (window as unknown as { openarc?: { task?: { command?: (c: unknown) => Promise<any> } } }).openarc?.task;
+    if (!bridge || typeof bridge.command !== "function") return;
+    const command = bridge.command;
+    let cancelled = false;
+    const timer = setInterval(() => {
+      void (async () => {
+        try {
+          const got = await command({ type: "task/get", taskId });
+          if (cancelled || !got || !got.ok || !got.task) return;
+          const next = String(got.task.status || "");
+          if (!TASK_TERMINAL.includes(next)) return;
+          setBusy(false);
+          setStatus(next);
+          const artifacts = Array.isArray(got.artifacts) ? got.artifacts : [];
+          const artifact = artifacts.length ? artifacts[artifacts.length - 1] : null;
+          if (artifact && typeof artifact.content === "string") setResult(artifact.content);
+        } catch { /* 下一轮再试 */ }
+      })();
+    }, 1000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [busy, taskId]);
 
   useEffect(() => {
     const bridge = (window as unknown as { openarc?: { task?: { onEvent?: (cb: (e: unknown) => void) => () => void } } }).openarc?.task;
@@ -567,7 +599,7 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
       </div>
       <div className="ai-state" data-ai-state>
         <strong>状态：</strong>
-        <span data-ai-status-text>{status}</span>
+        <span data-ai-status-text>{status === "BLOCKED" ? "BLOCKED · Recovery Required" : status}</span>
         {error ? <span data-ai-error> · {error}</span> : null}
       </div>
       <div className="ai-result" data-ai-result>

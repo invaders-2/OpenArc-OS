@@ -19,6 +19,15 @@ const { createSideEffectExecutorBundle } = require("./side-effect-executor-bundl
 
 function emit(obj) { return new Promise((resolve) => { process.stdout.write(JSON.stringify(obj) + "\n", () => resolve()); }); }
 
+/**
+ * test-only fault seam：只接受 assembly 经 spawn args 显式注入的固定值，
+ * 绝不读取 process.env / IPC / Harness / tool args。production 默认 null。
+ */
+function testHooksFor(hook) {
+  if (String(hook || "") === "CRASH_AFTER_CLAIM") return { afterClaimBeforeDispatch: () => process.exit(9) };
+  return null;
+}
+
 async function bindLifetimeSocket(socketPath) {
   fs.mkdirSync(path.dirname(socketPath), { recursive: true, mode: 0o700 });
   const server = net.createServer((socket) => { try { socket.end(); } catch { /* ignore */ } });
@@ -30,7 +39,9 @@ async function main() {
   const args = JSON.parse(process.argv[2] || "{}");
   const { runtimeDir, dbPath, storeRoot, instanceId, callId, holderId, timeoutMs } = args;
   const clock = args.now != null ? () => args.now : null;
-  const socketPath = path.join(runtimeDir, "executors", String(instanceId) + ".sock");
+  // supervisor 是 socket path 的唯一派生者（runtimeDir 过长时它会做长度归一）；
+  // child 只用它注入的 path，绝不自行换一套规则。
+  const socketPath = args.socketPath || path.join(runtimeDir, "executors", String(instanceId) + ".sock");
   let server;
   try {
     server = await bindLifetimeSocket(socketPath);
@@ -43,7 +54,7 @@ async function main() {
   let bundle = null;
   let result = null;
   try {
-    bundle = createSideEffectExecutorBundle({ dbPath, storeRoot, instanceId, clock });
+    bundle = createSideEffectExecutorBundle({ dbPath, storeRoot, instanceId, clock, testHooks: testHooksFor(args.executorTestHook) });
     const lease = bundle.authority.acquireLease({ context: {}, callId, holderId, ttlMs: 600000 });
     if (!lease.ok) {
       result = { ok: false, error: lease.error, stage: "acquire_lease" };

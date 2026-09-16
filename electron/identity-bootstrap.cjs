@@ -28,7 +28,7 @@ const { createSideEffectGateway, registerSideEffectIpc } = require("./side-effec
  * @param opts.allowAdmin  是否放行 admin / 测试夹具命令
  * @param opts.logger      可选，注入外部 logger（探针用）
  */
-function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, logger, serviceIdentity = null, nativeImage = null } = {}) {
+function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, logger, serviceIdentity = null, nativeImage = null, executorLauncher = null, executorTestHook = null } = {}) {
   fs.mkdirSync(userDataDir, { recursive: true, mode: 0o700 });
   const log = logger || new IdentityLogger();
   const store = new IdentityStore({
@@ -95,6 +95,10 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
     dbPath: path.join(userDataDir, "identity.db"),
     storeRoot: path.join(userDataDir, "library"),
     runtimeDir: path.join(userDataDir, "runtime", "side-effects"),
+    // D4-04 Closure：executor launcher 与 test-only fault seam 由 host 注入；
+    // Renderer / Harness / ACP / Tool args 一律无法选择 launcher。
+    executorLauncher,
+    executorTestHook,
   });
   // Trusted Approval Gateway：Renderer 只能经此通道看到安全投影并提交 decision。
   const sideEffectGateway = createSideEffectGateway({ sideEffectRuntime });

@@ -40,13 +40,27 @@
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const net = require("node:net");
+const os = require("node:os");
 const path = require("node:path");
-const { spawn } = require("node:child_process");
 const { RuntimeLifecycleAuthority } = require("./runtime-lifecycle-authority.cjs");
+const { NodeChildProcessLauncher, createDefaultExecutorLauncher } = require("./executor-launcher.cjs");
 
 const EXECUTOR_ENTRY = path.join(__dirname, "side-effect-executor.cjs");
 
 const EXECUTOR_STATUS = Object.freeze({ ACTIVE: "ACTIVE", EXITED: "EXITED" });
+
+/**
+ * macOS 的 unix socket pathname 上限约 104 字节：超过后 bind 直接失败。
+ * production runtimeDir 形如 <userData>/runtime/side-effects，在长 HOME / 长临时目录下
+ * <runtimeDir>/executors/<instanceId>.sock 会越界，executor 就无法发布自己的 lifetime endpoint。
+ * 因此 socket path 必须在越界时退化到一个短而私有的基目录（record 仍留在 runtimeDir）。
+ */
+const UNIX_SOCKET_PATH_MAX_BYTES = 100;
+const SOCKET_DIR_PREFIX = "oart-sock-";
+
+/** executor 在进入 runtime 成功 bind lifetime endpoint 后会发出的 handshake。 */
+const EXECUTOR_READY = "ready";
+const EXECUTOR_START_FAILED = "SIDE_EFFECT_EXECUTOR_START_FAILED";
 
 const newId = (prefix) => prefix + "_" + crypto.randomBytes(6).toString("base64url");
 
@@ -136,18 +150,29 @@ class RuntimeSupervisor {
   #children = new Map();
   #rehydratePromise = null;
   #rehydrated = false;
+  /** runtimeDir 过长时使用的短 socket 基目录（懒创建）。 */
+  #shortSocketDir = null;
+  /** 本 lifetime 内 spawn 的 executor 安全证据（spawned / ready / exited），供 gate 审计，不含路径。 */
+  #executorEvidence = [];
   /** instanceId -> safe probe reason：liveness 未定（UNKNOWN）的既有 executor runtime。 */
   #uncertain = new Map();
 
-  constructor({ runtimeDir, lifecycle = null, clock = null, logger = null, executorEntry = null, nodePath = null, spawnImpl = null, probeImpl = null, probeTimeoutMs = 1500 } = {}) {
+  constructor({ runtimeDir, lifecycle = null, clock = null, logger = null, executorEntry = null, nodePath = null, spawnImpl = null, launcher = null, executorTestHook = null, socketPathMaxBytes = UNIX_SOCKET_PATH_MAX_BYTES, probeImpl = null, probeTimeoutMs = 1500 } = {}) {
     if (!runtimeDir) throw new Error("RuntimeSupervisor 需要 runtimeDir");
     this.runtimeDir = String(runtimeDir);
     this.executorDir = path.join(this.runtimeDir, "executors");
     this.clock = typeof clock === "function" ? clock : () => Date.now();
     this.logger = logger;
     this.executorEntry = executorEntry || EXECUTOR_ENTRY;
-    this.nodePath = nodePath || process.execPath;
-    this.spawnImpl = typeof spawnImpl === "function" ? spawnImpl : spawn;
+    this.socketPathMaxBytes = Math.max(1, Number(socketPathMaxBytes) || UNIX_SOCKET_PATH_MAX_BYTES);
+    // launcher 是唯一的 spawn 抽象；Node 测试默认 node child，Electron main 默认 utility process。
+    // 显式传入 spawnImpl / nodePath 时仍走 Node launcher（既有 test seam）。
+    this.launcher = launcher && typeof launcher.launch === "function"
+      ? launcher
+      : (spawnImpl || nodePath ? new NodeChildProcessLauncher({ nodePath: nodePath || process.execPath, spawnImpl: spawnImpl || undefined }) : createDefaultExecutorLauncher());
+    // test-only seam（constructor-only）：production 默认 null；绝不来自 env / IPC / Harness / ACP / tool args。
+    this.executorTestHook = executorTestHook;
+    this.#shortSocketDir = null;
     // test-only seam：默认（null）用真实 OS probe；不做 IPC / Renderer / Harness 暴露，也不落盘。
     this.probeImpl = typeof probeImpl === "function" ? probeImpl : null;
     this.probeTimeoutMs = Math.max(1, Number(probeTimeoutMs) || 1500);
@@ -160,6 +185,24 @@ class RuntimeSupervisor {
   }
 
   #now() { return this.clock(); }
+
+  /** runtimeDir 可能过长导致 unix socket bind 失败；此时退化到一个短而私有的基目录。 */
+  #shortSocketBaseDir() {
+    if (this.#shortSocketDir) return this.#shortSocketDir;
+    const digest = crypto.createHash("sha256").update(String(this.runtimeDir)).digest("hex").slice(0, 16);
+    for (const base of [os.tmpdir(), "/tmp"]) {
+      const dir = path.join(base, SOCKET_DIR_PREFIX + digest);
+      try {
+        fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+        this.#shortSocketDir = dir;
+        return dir;
+      } catch { /* 换下一个候选 */ }
+    }
+    // 都不可用：保持原路径（bind 会失败，executor fail closed，绝不静默换权威）。
+    this.#shortSocketDir = this.executorDir;
+    return this.#shortSocketDir;
+  }
+
   /** 真实 OS probe（production 默认）；probeImpl 仅测试注入。 */
   #probe(socketPath) {
     if (this.probeImpl) {
@@ -169,8 +212,17 @@ class RuntimeSupervisor {
     return probeUnixSocket(socketPath, { timeoutMs: this.probeTimeoutMs });
   }
   #recordPath(instanceId) { return path.join(this.executorDir, String(instanceId) + ".json"); }
-  /** probe path 永远从 validated instanceId 重新派生；persisted record 里的 socketPath 一律忽略。 */
-  socketPath(instanceId) { return path.join(this.executorDir, String(instanceId) + ".sock"); }
+  /**
+   * probe path 永远从 validated instanceId 重新派生；persisted record 里的 socketPath 一律忽略。
+   * 自然路径越过 unix socket 上限时退化到短基目录 —— 派生规则仍然是"runtimeDir + instanceId"，
+   * 只是基目录做了长度归一，且 supervisor 与 executor 使用同一路径。
+   */
+  socketPath(instanceId) {
+    const id = String(instanceId);
+    const natural = path.join(this.executorDir, id + ".sock");
+    if (Buffer.byteLength(natural) <= this.socketPathMaxBytes) return natural;
+    return path.join(this.#shortSocketBaseDir(), id + ".sock");
+  }
 
   #persist(rec) {
     try { fs.writeFileSync(this.#recordPath(rec.instanceId), JSON.stringify(rec), { mode: 0o600 }); } catch { /* record 只用于 cross-restart liveness，写失败不改变安全语义（fail closed） */ }
@@ -206,6 +258,20 @@ class RuntimeSupervisor {
   #safeRecord(rec) {
     return { instanceId: rec.instanceId, status: rec.status, startedAt: rec.startedAt == null ? null : rec.startedAt, endedAt: rec.endedAt == null ? null : rec.endedAt, exitCode: rec.exitCode == null ? null : rec.exitCode, signal: rec.signal || null, reason: rec.reason || null, callId: rec.callId || null };
   }
+  /** 只记 safe executor evidence（instanceId / 布尔 / exit code），绝不记录 executable path / pid / env。 */
+  #recordEvidence(instanceId, patch) {
+    let row = this.#executorEvidence.find((e) => e.instanceId === instanceId);
+    if (!row) {
+      row = { instanceId, spawned: false, ready: false, exited: false, exitCode: null, signal: null, launchError: false };
+      this.#executorEvidence.push(row);
+      if (this.#executorEvidence.length > 64) this.#executorEvidence.shift();
+    }
+    Object.assign(row, patch);
+  }
+
+  /** gate / audit 可见的 executor 证据（safe，无路径 / 无 secret）。 */
+  executorEvidence() { return this.#executorEvidence.map((e) => ({ ...e })); }
+
   /** liveness 未定的 runtime：只记 safe 事件（instanceId + 归一化 reason），绝不记录路径。 */
   #noteUnknown(instanceId, reason) {
     this.#uncertain.set(instanceId, reason || "UNKNOWN");
@@ -254,27 +320,50 @@ class RuntimeSupervisor {
     const id = instanceId || newId("exe");
     const reg = this.registerExecutor(id, { callId, holderId });
     if (!reg.ok) return { ok: false, error: reg.error };
-    const args = { runtimeDir: this.runtimeDir, dbPath, storeRoot, instanceId: id, callId, holderId, timeoutMs, now };
+    const hook = typeof this.executorTestHook === "function" ? this.executorTestHook() : this.executorTestHook;
+    const args = { runtimeDir: this.runtimeDir, dbPath, storeRoot, instanceId: id, callId, holderId, timeoutMs, now, socketPath: this.socketPath(id) };
+    if (hook) args.executorTestHook = String(hook).slice(0, 64);
     let child;
     try {
-      child = this.spawnImpl(this.nodePath, [this.executorEntry, JSON.stringify(args)], { stdio: ["pipe", "pipe", "pipe"], env: { PATH: process.env.PATH, TMPDIR: process.env.TMPDIR, LANG: process.env.LANG, HOME: process.env.HOME, ...(process.env.OPENARC_EXECUTOR_FAULT ? { OPENARC_EXECUTOR_FAULT: process.env.OPENARC_EXECUTOR_FAULT } : {}) } });
+      // child env 只保留运行必需的几个变量：绝不携带 credential / token / capability / session secret。
+      child = this.launcher.launch({ entry: this.executorEntry, args: [JSON.stringify(args)], env: { PATH: process.env.PATH, TMPDIR: process.env.TMPDIR, LANG: process.env.LANG, HOME: process.env.HOME } });
     } catch (e) {
+      this.#recordEvidence(id, { spawned: false, launchError: true });
       this.#observeExit(id, { reason: "EXECUTOR_SPAWN_FAILED" });
       return { ok: false, error: "EXECUTOR_SPAWN_FAILED", detail: String((e && e.message) || e).slice(0, 120) };
     }
-    const box = { instanceId: id, child, stdout: "", stderr: "" };
-    child.stdout.on("data", (d) => { box.stdout += String(d); });
-    child.stderr.on("data", (d) => { box.stderr += String(d); });
+    const box = {
+      instanceId: id,
+      child,
+      ready: null,
+      get stdout() { return child.stdout; },
+      get stderr() { return child.stderr; },
+    };
+    this.#recordEvidence(id, { spawned: true, ready: false, exited: false, exitCode: null, signal: null, launchError: false });
     this.#children.set(id, child);
-    box.exited = new Promise((resolve) => {
+    // ready handshake：spawned != entered executor。只有真实收到 {"type":"ready"} 才算进入 runtime；
+    // spawn 后未 ready 就退出 = EXECUTOR_START_FAILED（fail closed，调用方必须 0 lease / 0 mutation）。
+    box.ready = new Promise((resolve) => {
+      let settled = false;
+      const settle = (verdict) => { if (settled) return; settled = true; resolve(verdict); };
+      const scan = () => {
+        const msg = RuntimeSupervisor.parseExecutorMessage(child.stdout, EXECUTOR_READY);
+        if (msg) { this.#recordEvidence(id, { ready: true }); settle({ ok: true, instanceId: id }); }
+      };
+      child.on("stdout", scan);
       child.on("exit", (code, signal) => {
-        this.#children.delete(id);
-        // 真实 child lifecycle event 驱动的自动 observation —— 测试不得自行调用 observeExit。
-        this.#observeExit(id, { exitCode: code, signal, reason: "SUPERVISOR_OBSERVED_EXIT" });
-        resolve({ code, signal });
+        this.#recordEvidence(id, { exited: true, exitCode: code == null ? null : Number(code), signal: signal || null });
+        settle({ ok: false, error: EXECUTOR_START_FAILED, exitCode: code == null ? null : Number(code), signal: signal || null });
       });
+      scan();
     });
-    // done 等到 stdio 全部关闭，保证 box.stdout 已完整；observeExit 已在 'exit' 时完成。
+    child.on("error", () => this.#recordEvidence(id, { launchError: true }));
+    // 真实 child lifecycle event 驱动的自动 observation —— 测试不得自行调用 observeExit。
+    child.on("exit", (code, signal) => {
+      this.#children.delete(id);
+      this.#observeExit(id, { exitCode: code, signal, reason: "SUPERVISOR_OBSERVED_EXIT" });
+    });
+    // done 等到 stdout / stderr 全部关闭，保证 box.stdout 已完整；observeExit 已在 'exit' 时完成。
     box.done = new Promise((resolve) => { child.on("close", (code, signal) => resolve({ code, signal })); });
     // 必须返回同一个对象：spread 会复制 stdout 快照，导致后续 data 事件写不回调用方。
     box.ok = true;

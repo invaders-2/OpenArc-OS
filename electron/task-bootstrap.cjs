@@ -27,7 +27,7 @@ const { SideEffectRuntime } = require("./side-effect-runtime.cjs");
 const { RuntimeSupervisor } = require("./runtime-supervisor.cjs");
 const { WRITE_TOOL_IDS } = require("./dsh-tool-profile.cjs");
 
-function createTaskBundle({ identityStore, authorization, authStore, modelService = null, modelProxy = null, logger = null, clock = null, adapterFactory = null, resourceService = null, searchService = null, dbPath = null, storeRoot = null, runtimeDir = null, sideEffectApprovalWaitMs = null } = {}) {
+function createTaskBundle({ identityStore, authorization, authStore, modelService = null, modelProxy = null, logger = null, clock = null, adapterFactory = null, resourceService = null, searchService = null, dbPath = null, storeRoot = null, runtimeDir = null, sideEffectApprovalWaitMs = null, executorLauncher = null, executorTestHook = null } = {}) {
   if (!identityStore) throw new Error("createTaskBundle 需要 identityStore");
   if (!authorization || !authStore) throw new Error("createTaskBundle 需要 D3 Authorization");
   const taskStore = new TaskStore({ identity: identityStore, clock });
@@ -43,6 +43,10 @@ function createTaskBundle({ identityStore, authorization, authStore, modelServic
   const supervisor = new RuntimeSupervisor({
     runtimeDir: runtimeDir || path.join(path.dirname(String(dbPath || "openarc.db")), "runtime", "side-effects"),
     clock, logger,
+    // production：Electron main 注入 utility process launcher；纯 Node 测试默认 node child launcher。
+    // executorTestHook 是 constructor-only test seam（production 默认 null），不经 env / IPC / Harness。
+    ...(executorLauncher ? { launcher: executorLauncher } : {}),
+    ...(executorTestHook ? { executorTestHook } : {}),
   });
   const sideEffectStore = new SideEffectStore({ identity: identityStore, clock });
   const sideEffectAuthority = new SideEffectAuthority({
@@ -61,8 +65,11 @@ function createTaskBundle({ identityStore, authorization, authStore, modelServic
   // RUNNING → UNKNOWN_EFFECT，quiescence 在 rehydrate 完成前一律 unproven。
   const sideEffectRecovery = sideEffectRuntime.recoverOnStartup();
   // 第二段：production supervisor 重建上一次进程的 executor 记录。
-  // 只有已持久化的 trusted EXITED proof（或本进程真实 child 'exit'）才允许 recoverOnStartup
-  // 把 quiesced 升级为 true；pathname probe 只回答 reachability，绝不产生 death proof。
+  // 口径（D4-03C4 Closure-3，本 Closure 仅修文案）：
+  //   · persisted lifecycle record 只是 hint，不是 process-death authority；
+  //   · cold restart **不会**因此获得 death authority（quiesced 仍为 false）；
+  //   · 只有同一 live supervisor lifetime 内真实 child 'exit' 才可能建立 quiescence；
+  //   · pathname probe 只回答 reachability，绝不产生 death proof。
   const sideEffectReady = supervisor.rehydrate()
     .then(() => sideEffectRuntime.recoverOnStartup())
     .catch(() => null);
@@ -71,9 +78,9 @@ function createTaskBundle({ identityStore, authorization, authStore, modelServic
     const factory = typeof adapterFactory === "function" ? adapterFactory : () => new HarnessAdapter({ modelProxy, logger, clock });
     orchestrator = new TaskHarnessOrchestrator({
       taskService, adapterFactory: factory, toolProxy, sideEffectRuntime, clock, logger,
-      // D4-04：混合 READ + WRITE turn 需要多次受控 tool call；capability 必须有合理 bounded 预算
-      // （此前未设置 maxCalls 会退化成 1，第二次 tool call 直接 TOOL_CAPABILITY_EXHAUSTED）。
-      toolFacade: { enabled: true, toolIds: ["resource.search", "resource.read.metadata"], writeToolIds: WRITE_TOOL_IDS, maxCalls: 16, ttlMs: 300000 },
+      // D4-04：真实观测到每任务最多 2 次受控 tool call（READ: search+read；WRITE: search+trash）。
+      // 预算回到 D4-03D 冻结默认 8（bounded，且 AUTO_RETRY 恒为 0）。
+      toolFacade: { enabled: true, toolIds: ["resource.search", "resource.read.metadata"], writeToolIds: WRITE_TOOL_IDS, maxCalls: 8, ttlMs: 300000 },
     });
   }
   return { taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, orchestrator };

@@ -7,6 +7,7 @@ const geometry = require("./geometry.cjs");
 const { NativeViewController } = require("./native-view-controller.cjs");
 const { createIdentityService, registerIdentityIpc } = require("./identity-bootstrap.cjs");
 const { registerTaskIpc } = require("./task-bootstrap.cjs");
+const { createDefaultExecutorLauncher } = require("./executor-launcher.cjs");
 
 let win;
 let controller;
@@ -97,6 +98,9 @@ app.whenReady().then(async () => {
     userDataDir: app.getPath("userData"),
     safeStorage,
     nativeImage,
+    // D4-04 Closure：production executor 由 Electron utilityProcess.fork 启动（Node-enabled child，
+    // 不依赖 ELECTRON_RUN_AS_NODE / runAsNode fuse）；生命周期权威仍是 RuntimeSupervisor。
+    executorLauncher: createDefaultExecutorLauncher(),
     // admin / 测试夹具命令默认关闭：产品 UI 里没有入口，也不该有。
     // 只有显式置 OPENARC_IDENTITY_ADMIN=1 才放行（探针与未来的管理端用）。
     allowAdmin: process.env.OPENARC_IDENTITY_ADMIN === "1",

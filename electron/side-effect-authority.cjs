@@ -851,9 +851,8 @@ class SideEffectAuthority {
     this.#event(call.taskId, "tool.side_effect.execution_started", { callId, toolId: call.toolId, leaseId: claim.leaseId });
 
     // claim 之后（execution ownership 唯一）才 dispatch Domain mutation。
-    // D4-04：受控 fault 注入（默认关闭）。只用于"最小真实 UNKNOWN_EFFECT 垂直 smoke"：
-    // claim 已提交、mutation 未发生、executor 进程真实死亡 → 真实 ambiguous execution。
-    if (process.env.OPENARC_EXECUTOR_FAULT === "crash_after_claim") process.exit(9);
+    // D4-04：fault 注入只允许 constructor-only testHooks（production 默认 null），
+    // 绝不读 process.env / IPC / Harness / tool args。
     if (this.testHooks && typeof this.testHooks.afterClaimBeforeDispatch === "function") this.testHooks.afterClaimBeforeDispatch({ callId, leaseId: claim.leaseId, holderId });
     return this.#dispatchControlledWrite({ call, tool, execCtx, adapter, leaseId: claim.leaseId, timeoutMs });
   }

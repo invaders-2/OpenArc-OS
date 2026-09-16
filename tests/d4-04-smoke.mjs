@@ -56,11 +56,13 @@ const gate = {
   dshVersion: "0.1.5-rc.2",
   acpVersion: "1.4.0",
   readSmoke: passed("B1 · READ vertical smoke → Task SUCCEEDED"),
-  writeApproveSmoke: passed("C6 · WRITE → Task SUCCEEDED + mutation exactly 1"),
-  writeDenySmoke: passed("D3 · Deny → 0 mutation / 0 lease / 0 execution"),
+  writeApproveSmoke: passed("C6 · WRITE → Task SUCCEEDED + mutation exactly 1") && passed("C7 · SideEffectCall=1 / approval=1 / lease=1 / verification PASS") && passed("C9 · WRITE 恰好 1 个 lease 且 RELEASED"),
+  executorReady: passed("C8 · production executor spawned + ready + real child exit"),
+  writeDenySmoke: passed("D3 · Deny → 0 mutation / 0 lease / 0 WRITE execution") && passed("D4 · Deny → SideEffectCall safe terminal + UI busy 复位"),
   cancelSmoke: passed("E3 · Cancel → Task CANCELLED / 0 mutation / 0 lease"),
-  unknownEffectSmoke: passed("F1 · UNKNOWN_EFFECT → Task BLOCKED") && passed("F3 · UNKNOWN_EFFECT 证据 + 0 second SideEffectCall"),
-  rendererSpoof: passed("G1 · Renderer 自报 actor/risk 被忽略（真实 session 决定）") && passed("G2 · 伪造 approvalRequestId → DENY（0 authority gain）"),
+  unknownEffectSmoke: passed("F1 · UNKNOWN_EFFECT → Task BLOCKED") && passed("F3 · UNKNOWN_EFFECT 证据 + 0 second SideEffectCall") && passed("F5 · claim RUNNING 先于真实 child exit 崩溃") && passed("F6 · UNKNOWN 后 0 第二 call / 0 第二 lease / 0 retry"),
+  uiBusyReset: passed("C10 · Renderer Run 复位（busy=false）") && passed("D4 · Deny → SideEffectCall safe terminal + UI busy 复位") && passed("F7 · Renderer BLOCKED + Run 复位（busy=false）"),
+  rendererSpoof: passed("G1 · Renderer 自报 actor/risk 被忽略（真实 session 决定）") && passed("G2 · 伪造 approvalRequestId → DENY（0 authority gain）") && passed("G3 · 伪造 actor 的真实 approve 仍走完整受控执行"),
   rendererReload: passed("H1 · Reload 后从 backend state 恢复 Task 结果"),
   modelRequests: provider.state.requests,
   providerToolCalls: provider.state.toolCalls.slice(),
@@ -71,6 +73,8 @@ const gate = {
   businessMutations: report.stats.businessMutations || 0,
   verifications: report.stats.verifications || (report.stats.sideEffectCalls ? 1 : 0),
   hiddenRetries: 0,
+  maxToolCallsPerTask: report.stats.maxToolCallsPerTask || 0,
+  executor: report.executor || null,
   rendererConsoleErrors: report.secrets.consoleErrors || 0,
   mainUnhandledErrors: report.secrets.mainErrors || 0,
   secretHits: report.secrets.secretHits || 0,
@@ -87,5 +91,5 @@ if (failed.length) console.log("FAILED: " + failed.map((f) => f.name + " (" + f.
 if (stderr.trim()) console.log("stderr:\n" + stderr.trim().slice(0, 1200));
 console.log("GATE: " + JSON.stringify(gate));
 
-const gateOk = failed.length === 0 && exitCode === 0 && gate.readSmoke && gate.writeApproveSmoke && gate.writeDenySmoke && gate.cancelSmoke && gate.unknownEffectSmoke && gate.rendererSpoof && gate.rendererReload && gate.rendererConsoleErrors === 0 && gate.mainUnhandledErrors === 0 && gate.secretHits === 0;
+const gateOk = failed.length === 0 && exitCode === 0 && gate.readSmoke && gate.writeApproveSmoke && gate.executorReady && gate.writeDenySmoke && gate.cancelSmoke && gate.unknownEffectSmoke && gate.uiBusyReset && gate.rendererSpoof && gate.rendererReload && gate.rendererConsoleErrors === 0 && gate.mainUnhandledErrors === 0 && gate.secretHits === 0;
 process.exit(gateOk ? 0 : 1);

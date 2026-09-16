@@ -107,6 +107,9 @@ const SIDE_EFFECT_ERROR = Object.freeze({
   VERIFICATION_FAILED: "SIDE_EFFECT_VERIFICATION_FAILED",
   DOMAIN_WRITE_FAILED: "SIDE_EFFECT_DOMAIN_WRITE_FAILED",
   EXECUTION_CLAIM_LOST: "SIDE_EFFECT_EXECUTION_CLAIM_LOST",
+  // D4-04 Closure：supervisor 真实 spawn 了 child，但 child 在进入 runtime 之前退出
+  // （lifetime endpoint bind 失败 / runtime 装配失败 / 启动即崩）—— fail closed，绝不当作业务失败。
+  EXECUTOR_START_FAILED: "SIDE_EFFECT_EXECUTOR_START_FAILED",
 });
 
 /** 产品合同冻结 TTL：Approval 默认 10 分钟；Lease 默认 60 秒。都有限期，绝不永久。 */
