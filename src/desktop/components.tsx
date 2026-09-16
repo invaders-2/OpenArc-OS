@@ -178,7 +178,7 @@ type DockItemProps = {
 /**
  * AI 球的观感参数：orb-ui 的 cloud 主题 + 我们自己的一版调色 / 几何。
  *
- * 调色是照用户给的那张 Apple 图配的（上青、下品红、白高光、深蓝底）；几何里 diameterRatio 0.92 让球基本填满框。
+ * 调色就是 orb-ui cloud 的默认那套蓝紫：用户口径「颜色我想要这样的」，给的是那颗柔和的蓝紫云球图；之前的青/品红是我自己配的，已撤掉。
  *
  * `state="thinking"` 只取它的**动效**：orb-ui 的 idle 是静止的（实测两帧像素完全一样），
  * 而用户口径要的就是"动态的"。等真接上后端，这里换成真实状态即可。
@@ -186,10 +186,10 @@ type DockItemProps = {
 const ORB_THEME = {
   name: "cloud" as const,
   appearance: {
-    deepColor: "#1b2f7a",
-    upperColor: "#35d6ff",
-    lowerColor: "#ff4fa3",
-    highlightColor: "#ffffff",
+    deepColor: "#5c63fb",
+    upperColor: "#7a8ffb",
+    lowerColor: "#b8c7f9",
+    highlightColor: "#e3eafa",
   },
   geometry: { diameterRatio: 0.92 },
 };
