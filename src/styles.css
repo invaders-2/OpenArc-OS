@@ -1586,6 +1586,14 @@ input[type="checkbox"] {
   width: var(--dock-icon, 47px);
   height: var(--dock-icon, 47px);
 }
+.orb-scale {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: grid;
+  place-items: center;
+  transform-origin: center center;
+}
 .orb-canvas {
   display: block;
   border-radius: 50%;

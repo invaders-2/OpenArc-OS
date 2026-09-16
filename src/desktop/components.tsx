@@ -208,15 +208,24 @@ export function OrbIcon({
   className = "",
   animated = true,
   adapter,
+  boost = 2,
 }: {
   size?: number;
   className?: string;
   animated?: boolean;
   /** 有真实信号源（例如麦克风）就用它驱动；没有就退回装饰性的 thinking 动效。 */
   adapter?: OrbAdapter;
+  /**
+   * 超采样倍数：球按 size×boost 画、再用 CSS 缩回去。
+   * 为什么要这样（用户口径：图标有锯齿）：orb-ui 的圆是**片元里直接切**出来的硬边，
+   * 即使画布按 devicePixelRatio（它内部 min(dpr,2)）放大，边缘仍然是台阶；
+   * 画大一号再缩回等于做了一次超采样，台阶被平均掉（实测 1.5 倍超采样）。
+   */
+  boost?: number;
 }) {
-  // 球体占外框的比例由主题的 diameterRatio（0.92）决定。
-  const inner = size;
+  const render = Math.max(8, Math.round(size * boost));
+  // orb-ui 的球只画到 size 的 ~69%（实测：47px 槽位里球 32.4px）；乘 1.33 才填满槽位（与左右图标同量级）。
+  const fill = 1.33;
   return (
     <span
       className={`orb${className ? " " + className : ""}`}
@@ -224,15 +233,20 @@ export function OrbIcon({
       aria-hidden="true"
       draggable={false}
     >
-      {animated ? (
-        adapter ? (
-          <Orb size={inner} theme={ORB_THEME} adapter={adapter} interactive={false} className="orb-canvas" />
+      <span
+        className="orb-scale"
+        style={{ width: render, height: render, transform: `translate(-50%, -50%) scale(${(size * fill) / render})` }}
+      >
+        {animated ? (
+          adapter ? (
+            <Orb size={render} theme={ORB_THEME} adapter={adapter} interactive={false} className="orb-canvas" />
+          ) : (
+            <Orb size={render} theme={ORB_THEME} state="thinking" interactive={false} className="orb-canvas" />
+          )
         ) : (
-          <Orb size={inner} theme={ORB_THEME} state="thinking" interactive={false} className="orb-canvas" />
-        )
-      ) : (
-        <img className="orb-static" src={"./icons/siri.png"} alt="" width={inner} height={inner} draggable={false} />
-      )}
+          <img className="orb-static" src={"./icons/siri.png"} alt="" width={render} height={render} draggable={false} />
+        )}
+      </span>
     </span>
   );
 }
