@@ -7,10 +7,28 @@ const SRC = "openarc-file://native/siri-blob";
 const STATIC_TIME = 8;
 /** 本地文件读不出来时的兜底时限（ms）。 */
 const LOAD_TIMEOUT = 8000;
-/** 视频里球只占画面 ~62% 宽；把画布渲染大这么多再缩回槽位，等于裁掉黑边、球填满槽位。 */
+/** 视频里球体直径实测 ≈0.73 画面宽；画布渲染大 1.45 倍再缩回槽位，等于裁掉黑边、球填满槽位。 */
 const ZOOM = 1.45;
 /** 亮度键控阈值：低于它的黑底完全透明。 */
 const KEY = 0.06;
+/**
+ * 分母下限。h264 在球体边缘只有 1~5/255，a 落在 0~0.5，`c/a` 会把压缩噪声放大十几倍；
+ * 夹到 0.35 后 a 很小时颜色不再被放大。成本为零。
+ */
+const ALPHA_FLOOR = 0.35;
+/**
+ * 球体几何 + 圆底色，全部实测（抽帧脚本见 /tmp/oa-probe/sphere）：
+ *   · ffmpeg 抽 t=2/8/16/24 四帧，取亮色光带（max(r,g,b)≥20）的强度加权质心当球心，
+ *     得 (122.55, 122.47) —— 比画面正中偏左 ~5px、偏上 ~5px，所以圆底跟着偏；
+ *   · 从球心做角向**中位数**亮度曲线：球体边缘（中位亮度掉到 1/255）在半径 ~92px，
+ *     最外毛刺到 ~96px，故圆底取 94px、外沿 12px 羽化盖住这圈噪声；
+ *   · 圆底色 = 球体环带 0.6R..0.85R 的 RGB 中位 (1,5,6)/255 —— 近黑带一点冷色，避免垫出死黑。
+ * 前三个常数单位是视频像素；SPHERE_CENTER_UV 换算成 uv（v 自下而上，配合 UNPACK_FLIP_Y_WEBGL）。
+ */
+const SPHERE_CENTER_UV = { x: 122.55 / 256, y: (255 - 122.47) / 255 };
+const SPHERE_RADIUS = 94;
+const DISC_FEATHER = 12;
+const DISC_COLOR = [1 / 255, 5 / 255, 6 / 255];
 
 const VERT = `
 attribute vec2 aPos;
@@ -20,7 +38,10 @@ void main() {
   gl_Position = vec4(aPos, 0.0, 1.0);
 }`;
 
-/** 在 GPU 上按亮度抠黑：a = smoothstep(0, KEY, max(r,g,b))，颜色用未预乘的 rgb/a。 */
+/**
+ * GPU 抠黑 + 同心近黑圆底。圆底垫在抠黑层**之下**（标准的 over 合成），只在球内，
+ * 球外的柔光完全不受影响；它盖住的是球体边缘那圈被放大的压缩噪声。
+ */
 const FRAG = `
 precision highp float;
 varying vec2 vUv;
@@ -30,7 +51,12 @@ void main() {
   float m = max(c.r, max(c.g, c.b));
   float t = clamp(m / ${KEY}, 0.0, 1.0);
   float a = t * t * (3.0 - 2.0 * t);
-  gl_FragColor = vec4(c / max(a, 0.0001), a);
+  vec3 keyed = c / max(a, ${ALPHA_FLOOR});
+  vec2 p = (vUv - vec2(${SPHERE_CENTER_UV.x}, ${SPHERE_CENTER_UV.y})) * vec2(256.0, 255.0);
+  float disc = 1.0 - smoothstep(${SPHERE_RADIUS - DISC_FEATHER}.0, ${SPHERE_RADIUS}.0, length(p));
+  float outA = a + disc * (1.0 - a);
+  vec3 outC = (keyed * a + vec3(${DISC_COLOR[0]}, ${DISC_COLOR[1]}, ${DISC_COLOR[2]}) * disc * (1.0 - a)) / max(outA, 0.0001);
+  gl_FragColor = vec4(outC, outA);
 }`;
 
 function compile(gl: WebGLRenderingContext, type: number, src: string) {
