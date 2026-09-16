@@ -12,7 +12,7 @@
 const http = require("node:http");
 const crypto = require("node:crypto");
 const domain = require("./tool-domain.cjs");
-const { isWellFormedToolId } = domain;
+const { isWellFormedToolId, fingerprint } = domain;
 const { buildBridgeManifest, ROUTE } = require("./tool-registry.cjs");
 
 const CAP_STATE = Object.freeze({ ACTIVE: "ACTIVE", REVOKED: "REVOKED", EXPIRED: "EXPIRED", EXHAUSTED: "EXHAUSTED" });
@@ -27,6 +27,9 @@ const BRIDGE_ERROR = Object.freeze({
   NOT_ALLOWED: "TOOL_NOT_ALLOWED_BY_CAPABILITY",
   EXHAUSTED: "TOOL_CAPABILITY_EXHAUSTED",
   STALE_CONTRACT: "TOOL_CONTRACT_STALE",
+  // D4-03D Closure：logical Tool-call identity。
+  CALL_ID_REQUIRED: "TOOL_CALL_ID_REQUIRED",
+  CALL_ID_CONFLICT: "TOOL_CALL_ID_CONFLICT",
   SCOPE_INVALID: "TOOL_CAPABILITY_SCOPE_INVALID",
   DENIED: "TOOL_DENIED",
   EXECUTION_FAILED: "TOOL_EXECUTION_FAILED",
@@ -38,6 +41,20 @@ const BRIDGE_ERROR = Object.freeze({
 /** 工具结果不得携带绝对路径 / store root / credential 形态。 */
 const UNSAFE_STRING_RE = /(^|\s)(\/Users\/|\/private\/|\/var\/folders|C:\\|\\\\[^\\]+\\)/;
 const UNSAFE_KEY_RE = domain.FORBIDDEN_ARGUMENT_KEY;
+
+/**
+ * D4-03D Closure · logical Tool-call identity 的 callId contract（Harness 不可绕过）。
+ * non-empty bounded string，无 NUL / C0 / C1 控制字符；刻意不限制合法 ID 的字符集。
+ */
+const CALL_ID_MAX = 256;
+const CALL_ID_CONTROL_RE = /[\u0000-\u001f\u007f-\u009f]/;
+function isValidCallId(value) {
+  if (typeof value !== "string") return false;
+  if (value.length < 1 || value.length > CALL_ID_MAX) return false;
+  if (value.trim().length < 1) return false;
+  if (CALL_ID_CONTROL_RE.test(value)) return false;
+  return true;
+}
 function redactUnsafe(value, depth = 0) {
   if (typeof value === "string") return UNSAFE_STRING_RE.test(value) ? "[REDACTED_PATH]" : (value.length > 2048 ? value.slice(0, 2048) + "…" : value);
   if (value == null || typeof value !== "object" || depth > 6) return value;
@@ -61,7 +78,7 @@ class ToolFacadeBridge {
     this.capabilities = new Map();
     this.server = null;
     this.baseUrl = null;
-    this.stats = { calls: 0, allowed: 0, denied: 0, domainExecutions: 0, sideEffectProposals: 0 };
+    this.stats = { calls: 0, allowed: 0, denied: 0, conflicts: 0, domainExecutions: 0, sideEffectProposals: 0 };
   }
 
   #now() { return this.clock(); }
@@ -136,6 +153,13 @@ class ToolFacadeBridge {
     return { ok: true, changed: true };
   }
 
+  /**
+   * 顺序冻结（D4-03D Closure §21）：
+   *   authenticate capability → TTL/state → parse body → validate toolId → validate callId →
+   *   contract freshness → compute request fingerprint → identity binding（duplicate / conflict）→
+   *   reserve call budget（原子）→ execute route。
+   * 绝不 execute first → dedupe later。
+   */
   async #handle(req, res) {
     const send = (status, obj) => { if (res.writableEnded || res.destroyed) return; res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(obj)); };
     if (req.method !== "POST" || req.url !== "/tool-call") return send(404, { ok: false, error: BRIDGE_ERROR.NOT_FOUND });
@@ -148,26 +172,42 @@ class ToolFacadeBridge {
     const cap = this.capabilities.get(token);
     if (!cap || cap.state === CAP_STATE.REVOKED) return send(401, { ok: false, error: BRIDGE_ERROR.UNAUTHORIZED });
     if (this.#now() >= cap.expiresAt) { cap.state = CAP_STATE.EXPIRED; return send(401, { ok: false, error: BRIDGE_ERROR.UNAUTHORIZED }); }
-    if (cap.calls >= cap.maxCalls) { cap.state = CAP_STATE.EXHAUSTED; return send(429, { ok: false, error: BRIDGE_ERROR.EXHAUSTED }); }
 
     let body;
     try { body = JSON.parse(raw || "{}"); } catch { return send(400, { ok: false, error: BRIDGE_ERROR.BAD_REQUEST }); }
     const toolId = body && typeof body.toolId === "string" ? body.toolId : "";
     if (!isWellFormedToolId(toolId) || !cap.allowedTools.includes(toolId)) return send(403, { ok: false, error: BRIDGE_ERROR.NOT_ALLOWED });
+
+    // callId 是 mandatory logical Tool-call identity：missing / invalid 在任何 budget / proposal / execution 之前 fail closed。
+    const callId = body && typeof body.callId === "string" ? body.callId : "";
+    if (!isValidCallId(callId)) return send(400, { ok: false, error: BRIDGE_ERROR.CALL_ID_REQUIRED });
     if (!this.contractFresh()) return send(409, { ok: false, error: BRIDGE_ERROR.STALE_CONTRACT });
 
-    // §14 duplicate ACP call：runId + toolCallId 只产生一次 Domain execution。
-    const dedupeKey = body.callId ? cap.runId + "|" + String(body.callId) : null;
-    if (dedupeKey && cap.callsById.has(dedupeKey)) {
-      const entry = cap.callsById.get(dedupeKey);
-      const prior = entry && entry.__pending ? await entry.__pending : entry;
+    // Tool-call identity = runId + callId + toolId + canonical arguments fingerprint。
+    const requestFingerprint = fingerprint({ toolId, arguments: body && body.arguments && typeof body.arguments === "object" && !Array.isArray(body.arguments) ? body.arguments : {} });
+    const existing = cap.callsById.get(callId);
+    if (existing) {
+      if (existing.requestFingerprint !== requestFingerprint || existing.toolId !== toolId) {
+        // 同一个 callId 不能改变 toolId / canonical arguments：绝不返回旧请求结果，也绝不覆盖原 binding。
+        this.stats.conflicts += 1;
+        this.stats.denied += 1;
+        this.logger?.log?.({ event: "tool-facade-bridge", result: "DENY", error_code: BRIDGE_ERROR.CALL_ID_CONFLICT, tool: toolId });
+        return send(409, { ok: false, error: BRIDGE_ERROR.CALL_ID_CONFLICT });
+      }
+      // exact duplicate：还回同一 safe outcome / await 同一 pending；0 second execution / 0 extra budget。
+      const prior = existing.outcome ? existing.outcome : (existing.pending ? await existing.pending : { ok: false, error: BRIDGE_ERROR.EXECUTION_FAILED });
       return send(200, prior || { ok: false, error: BRIDGE_ERROR.EXECUTION_FAILED });
     }
-    let settle = null;
-    if (dedupeKey) cap.callsById.set(dedupeKey, { __pending: new Promise((r) => { settle = r; }) });
 
+    // 新的 logical call：原子 reserve call budget（check + increment 之间无 await）。
+    if (cap.calls >= cap.maxCalls) { cap.state = CAP_STATE.EXHAUSTED; return send(429, { ok: false, error: BRIDGE_ERROR.EXHAUSTED }); }
     cap.calls += 1;
     this.stats.calls += 1;
+    let settle = null;
+    const pending = new Promise((r) => { settle = r; });
+    const binding = { requestFingerprint, toolId, pending, outcome: null };
+    cap.callsById.set(callId, binding);
+
     // §41：客户端（dsh）断开 → 中止在途 Domain 执行，不返回 stale 数据。
     const controller = new AbortController();
     const onClose = () => { if (!res.writableEnded) controller.abort(); };
@@ -177,7 +217,8 @@ class ToolFacadeBridge {
     catch { outcome = { ok: false, error: BRIDGE_ERROR.EXECUTION_FAILED }; }
     finally { res.removeListener("close", onClose); }
     if (outcome.ok) this.stats.allowed += 1; else this.stats.denied += 1;
-    if (dedupeKey) { cap.callsById.set(dedupeKey, outcome); if (settle) settle(outcome); }
+    binding.outcome = outcome;
+    if (settle) settle(outcome);
     this.logger?.log?.({ event: "tool-facade-bridge", result: outcome.ok ? "ALLOW" : "DENY", error_code: outcome.error || null, tool: toolId });
     return send(200, outcome);
   }
@@ -232,4 +273,4 @@ class ToolFacadeBridge {
   }
 }
 
-module.exports = { ToolFacadeBridge, BRIDGE_ERROR, CAP_STATE, TOOL_CAPABILITY_PREFIX, redactUnsafe };
+module.exports = { ToolFacadeBridge, BRIDGE_ERROR, CAP_STATE, TOOL_CAPABILITY_PREFIX, redactUnsafe, isValidCallId };

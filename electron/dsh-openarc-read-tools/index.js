@@ -21,7 +21,10 @@ function apply(ctx, config) {
       output: { schema: t.outputSchema, render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }] },
       timeoutMs: 20000,
       async execute(args, exec) {
-        const callId = exec && exec.callId != null ? String(exec.callId) : null;
+        // D4-03D Closure：callId 是 logical Tool-call identity；缺失时 fail closed，
+        // 绝不把 callId:null 发给 Bridge，也绝不产生任何 Tool Facade request。
+        const callId = exec && typeof exec.callId === "string" && exec.callId.trim().length > 0 ? exec.callId : null;
+        if (!callId) throw new Error("[" + t.name + "] OpenArc Tool Facade requires a callId");
         let res;
         try {
           res = await fetch(endpoint, { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + config.capability }, body: JSON.stringify({ toolId: t.toolId, arguments: args, callId }) });
