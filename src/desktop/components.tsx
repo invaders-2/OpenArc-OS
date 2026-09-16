@@ -14,6 +14,7 @@ import { Orb } from "orb-ui";
 import type { OrbAdapter } from "orb-ui";
 import { useMicSignal } from "./useMicLevel";
 import { SiriBlob } from "./SiriBlob";
+import { SiriOrbProcedural, type SiriOrbHandle } from "./SiriOrbProcedural";
 import {
   ArrowLeft,
   ArrowRight,
@@ -238,12 +239,22 @@ function OrbUiFallback({
   );
 }
 
+/** AI 球的三个来源：native = 系统原生素材；procedural = 程序化近似；orb-ui = 最后兜底。 */
+type OrbSource = "native" | "procedural" | "orb-ui";
+
 /**
- * AI 球。这里是**唯一的切换点**：主路径用系统里那颗 Apple 原生 Siri Blob（见 SiriBlob.tsx），
- * 素材/解码出问题（别的 macOS 版本没有这个资源、协议 404）就切到 OrbUiFallback —— 球绝不能变空白。
+ * AI 球。这里是**唯一的切换点**，三级：
+ *
+ *     native(SiriBlob) --素材/解码出问题--> procedural(SiriOrbProcedural) --WebGL 起不来--> orb-ui
+ *
+ * 为什么要三级：主路径是系统里那颗 Apple 原生 Siri Blob（见 SiriBlob.tsx），但它**只在部分
+ * macOS 版本里有**；老系统上协议直接 404，那些机器就得靠程序化球 —— 而不是用户说「不好看」的
+ * orb-ui 那颗。orb-ui 退到最后一级只负责「球绝不能空白」。
+ * 调用方（DockItem / AssistantPill / AIPanel）一行都不用动。
  *
  * 为什么减少动态效果要在这里判：orb-ui 只认系统级 `prefers-reduced-motion`，认不到产品内的开关；
- * 所以产品开关打开时**干脆不挂 WebGL**，退回同一张静态帧 siri.png（既省 GPU，也不会留空壳）。
+ * 所以产品开关打开时**干脆不挂 WebGL**（原生那条暂停视频 seek 到静态帧，程序化那条只画一帧），
+ * 既省 GPU，也不会留空壳。
  */
 export function OrbIcon({
   size = 47,
@@ -265,16 +276,36 @@ export function OrbIcon({
    */
   boost?: number;
 }) {
-  const [native, setNative] = useState(true);
+  const [source, setSource] = useState<OrbSource>("native");
+  const proceduralRef = useRef<SiriOrbHandle>(null);
+  /**
+   * 语音联动：上游给的是 orb-ui 的 adapter（回调里是 signal.inputVolume）。这里**命令式**推给
+   * 程序化球的 setLevel —— 逐帧 setState 会让 AI 面板整块玻璃每帧重渲染（真机上会闪）。
+   * 原生那条由 SiriBlob 自己订阅，走的是同一份 adapter。
+   */
+  useEffect(() => {
+    if (source !== "procedural" || !adapter) return undefined;
+    return adapter.subscribe((signal) => {
+      proceduralRef.current?.setLevel(signal.inputVolume ?? 0);
+    });
+  }, [source, adapter]);
+  const sourceClass = source === "native" ? " orb-native" : source === "procedural" ? " orb-procedural" : "";
   return (
     <span
-      className={`orb${native ? " orb-native" : ""}${className ? " " + className : ""}`}
+      className={`orb${sourceClass}${className ? " " + className : ""}`}
       style={{ width: size, height: size }}
       aria-hidden="true"
       draggable={false}
     >
-      {native ? (
-        <SiriBlob size={size} animated={animated} adapter={adapter} onError={() => setNative(false)} />
+      {source === "native" ? (
+        <SiriBlob size={size} animated={animated} adapter={adapter} onError={() => setSource("procedural")} />
+      ) : source === "procedural" ? (
+        <SiriOrbProcedural
+          ref={proceduralRef}
+          size={size}
+          animated={animated}
+          onError={() => setSource("orb-ui")}
+        />
       ) : (
         <OrbUiFallback size={size} boost={boost} animated={animated} adapter={adapter} />
       )}

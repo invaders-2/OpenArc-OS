@@ -1609,8 +1609,10 @@ input[type="checkbox"] {
   height: 100%;
   border-radius: 50%;
 }
-/* 原生 Siri Blob 自带发光；再叠 orb-ui 那圈蓝柔光会变成一颗大灰球，所以原生时关掉。 */
-.orb-native::after {
+/* 原生 Siri Blob 和程序化球都自带发光；再叠 orb-ui 那圈蓝柔光会变成一颗大灰球，
+   所以**自发光的两级**都关掉（只有退到最后一级 orb-ui 时才让那圈柔光上场）。 */
+.orb-native::after,
+.orb-procedural::after {
   display: none;
 }
 /* 球外的柔光（用户口径：「那种柔光，散发出来的，越往外越看不清」）。
