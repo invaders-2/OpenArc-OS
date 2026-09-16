@@ -224,8 +224,10 @@ export function OrbIcon({
   boost?: number;
 }) {
   const render = Math.max(8, Math.round(size * boost));
-  // orb-ui 的球只画到 size 的 ~69%（实测：47px 槽位里球 32.4px）；乘 1.33 才填满槽位（与左右图标同量级）。
-  const fill = 1.33;
+  // orb-ui 的球只画到 size 的 ~69%（实测：47px 槽位里球 32.4px）。
+  // 这里不再把球顶满槽位，而是留一圈给光晕（用户口径：「跟他一样，加一个光晕」）：
+  // 球占槽位 ~78%，外面一圈 .orb::after 的柔和光晕正好盖住球那条硬边（锯齿）。
+  const fill = 1.3;
   return (
     <span
       className={`orb${className ? " " + className : ""}`}

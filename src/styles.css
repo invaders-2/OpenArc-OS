@@ -1586,6 +1586,25 @@ input[type="checkbox"] {
   width: var(--dock-icon, 47px);
   height: var(--dock-icon, 47px);
 }
+/* 球外的一圈光晕（用户口径：跟参考那样加光晕）。
+   两层作用：①看起来像发光的球；②光带落在球边缘上，把片元硬边的锯齿盖掉。
+   静态渐变、不参与动画，所以不增加逐帧成本。 */
+.orb::after {
+  content: "";
+  position: absolute;
+  inset: -8%;
+  border-radius: 50%;
+  z-index: 2;
+  pointer-events: none;
+  background: radial-gradient(
+    circle,
+    transparent 46%,
+    rgba(160, 190, 255, 0.55) 58%,
+    rgba(120, 145, 251, 0.34) 68%,
+    rgba(92, 99, 251, 0.14) 79%,
+    transparent 90%
+  );
+}
 .orb-scale {
   position: absolute;
   left: 50%;
