@@ -1,22 +1,35 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+/** 推给 AI 球的一帧信号：要么在听（带真实音量），要么只是待机的装饰动效。 */
+export type OrbLevel = { state: "listening" | "thinking"; level: number };
 
 /**
  * 麦克风电平（给 AI 球"跟着声音动"用）。
  *
- * 三条纪律，缺一不可：
- *   1. **只在本机算一个 RMS 电平** —— 不录音、不缓存、不发送：音频帧出了这个函数就没了；
- *   2. **停下来必须把 track 停掉**（`track.stop()`），否则 macOS 的麦克风指示灯会一直亮；
- *   3. 采样走 rAF、约 30fps，平滑一点点（指数衰减），否则球会抖得像频谱而不是"呼吸"。
+ * 设计要点：**逐帧的东西一律不进 React state**。
+ * 30fps 的 setState 会让 AI 面板（还是玻璃层）每帧重渲染一遍 —— 实测在真机上会**闪屏**，
+ * 而且完全是白烧。所以这里只暴露一个订阅：电平在 rAF 里算好，直接推给订阅者（球、电平条），
+ * React 只在"开/关麦克风""出错"这种真状态变化时重渲染。
  *
- * 返回的 level 是 0..1（已经过平滑），error 是"为什么没开成"的人话原因。
+ * 三条纪律：
+ *   1. 只在本机算一个 dB 电平 —— 不录音、不缓存、不发送；
+ *   2. 停下来必须把 track 停掉（`track.stop()`），否则 macOS 的麦克风指示灯会一直亮；
+ *   3. 约 30fps、指数平滑；dB 映射（−60..0dB → 0..1）而不是线性 RMS —— 麦克风读数天然很小，
+ *      线性要么几乎不动、要么一下顶满（实测线性版两档音量都读到 1.0）。
  */
-export function useMicLevel(active: boolean, smoothing = 0.25) {
-  const [level, setLevel] = useState(0);
+export function useMicSignal(active: boolean, smoothing = 0.3) {
   const [error, setError] = useState<string | null>(null);
+  const listeners = useRef(new Set<(v: OrbLevel) => void>());
+  const current = useRef<OrbLevel>({ state: "thinking", level: 0 });
+
+  const emit = (v: OrbLevel) => {
+    current.current = v;
+    listeners.current.forEach((fn) => fn(v));
+  };
 
   useEffect(() => {
     if (!active) {
-      setLevel(0);
+      emit({ state: "thinking", level: 0 });
       return;
     }
     let raf = 0;
@@ -28,24 +41,23 @@ export function useMicLevel(active: boolean, smoothing = 0.25) {
     let buf: Uint8Array<ArrayBuffer> | null = null;
 
     const tick = () => {
-      if (!analyser || !buf) return;
-      analyser.getByteTimeDomainData(buf);
-      let sum = 0;
-      for (let i = 0; i < buf.length; i += 1) {
-        const v = (buf[i] - 128) / 128;
-        sum += v * v;
+      if (analyser && buf) {
+        analyser.getByteTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i += 1) {
+          const v = (buf[i] - 128) / 128;
+          sum += v * v;
+        }
+        const rms = Math.sqrt(sum / buf.length);
+        const db = 20 * Math.log10(Math.max(rms, 1e-6));
+        const target = Math.min(1, Math.max(0, (db + 60) / 60));
+        smoothed = smoothed + (target - smoothed) * smoothing;
+        emit({ state: "listening", level: smoothed });
       }
-      const rms = Math.sqrt(sum / buf.length);
-      // 用 dB 而不是线性 RMS：麦克风读数天然很小（说话 ~0.02-0.15），线性乘以系数要么几乎不动、
-      // 要么一下就顶满；按 -60dB..0dB 映射到 0..1，说话/喊/静音三档才分得开（与真实调音表一致）。
-      const db = 20 * Math.log10(Math.max(rms, 1e-6));
-      const target = Math.min(1, Math.max(0, (db + 60) / 60));
-      smoothed = smoothed + (target - smoothed) * smoothing;
-      setLevel(smoothed);
       raf = requestAnimationFrame(tick);
     };
 
-    const start = async () => {
+    void (async () => {
       try {
         const md = navigator.mediaDevices;
         if (!md?.getUserMedia) throw new Error("no-media-devices");
@@ -68,8 +80,7 @@ export function useMicLevel(active: boolean, smoothing = 0.25) {
               : "麦克风打不开：" + (e instanceof Error ? e.message : String(e)),
         );
       }
-    };
-    void start();
+    })();
 
     return () => {
       cancelAnimationFrame(raf);
@@ -81,9 +92,21 @@ export function useMicLevel(active: boolean, smoothing = 0.25) {
       }
       void ctx?.close().catch(() => {});
       stream?.getTracks().forEach((t) => t.stop());
-      setLevel(0);
+      emit({ state: "thinking", level: 0 });
     };
   }, [active, smoothing]);
 
-  return { level, error };
+  /** 订阅电平（返回退订函数）。订阅时立刻收到当前值，订阅者不用自己初始化。 */
+  const subscribe = useMemo(
+    () => (fn: (v: OrbLevel) => void) => {
+      listeners.current.add(fn);
+      fn(current.current);
+      return () => {
+        listeners.current.delete(fn);
+      };
+    },
+    [],
+  );
+
+  return { error, subscribe };
 }

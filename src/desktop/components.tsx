@@ -11,8 +11,8 @@
  */
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Orb } from "orb-ui";
-import type { OrbSignal } from "orb-ui";
-import { useMicLevel } from "./useMicLevel";
+import type { OrbAdapter } from "orb-ui";
+import { useMicSignal } from "./useMicLevel";
 import {
   ArrowLeft,
   ArrowRight,
@@ -207,13 +207,13 @@ export function OrbIcon({
   size = 47,
   className = "",
   animated = true,
-  signal,
+  adapter,
 }: {
   size?: number;
   className?: string;
   animated?: boolean;
-  /** 有真实信号（例如麦克风音量）就用它驱动；没有就退回装饰性的 thinking 动效。 */
-  signal?: OrbSignal;
+  /** 有真实信号源（例如麦克风）就用它驱动；没有就退回装饰性的 thinking 动效。 */
+  adapter?: OrbAdapter;
 }) {
   // 球体占外框的比例由主题的 diameterRatio（0.92）决定。
   const inner = size;
@@ -225,8 +225,8 @@ export function OrbIcon({
       draggable={false}
     >
       {animated ? (
-        signal ? (
-          <Orb size={inner} theme={ORB_THEME} signal={signal} interactive={false} className="orb-canvas" />
+        adapter ? (
+          <Orb size={inner} theme={ORB_THEME} adapter={adapter} interactive={false} className="orb-canvas" />
         ) : (
           <Orb size={inner} theme={ORB_THEME} state="thinking" interactive={false} className="orb-canvas" />
         )
@@ -703,25 +703,47 @@ export function AIPanel({ onClose, onOpenSettings, animated = true }: AIPanelPro
   const [note, setNote] = useState("");
   /** 只在面板开着时听：关掉面板 = 组件卸载 = 钩子清理 = 麦克风 track 停掉（灯灭）。 */
   const [micOn, setMicOn] = useState(false);
-  const mic = useMicLevel(micOn);
+  const mic = useMicSignal(micOn);
+  const subscribeMic = mic.subscribe;
   // 开不起来（没权限/没设备）就把开关弹回去，并把原因写在下面那行小字里
   useEffect(() => {
     if (mic.error) setMicOn(false);
   }, [mic.error]);
-  const orbSignal: OrbSignal | undefined = animated
-    ? { state: micOn ? "listening" : "thinking", inputVolume: micOn ? mic.level : undefined, outputVolume: undefined }
-    : undefined;
+  /**
+   * 电平条走**命令式**：每帧直接改 transform，不经过 React ——
+   * 30fps 的 setState 会让这块玻璃面板每帧重渲染（真机上会闪），纯属白烧。
+   */
+  const meterRef = useRef<HTMLSpanElement>(null);
+  useEffect(
+    () =>
+      subscribeMic((v) => {
+        if (meterRef.current) meterRef.current.style.transform = `scaleX(${v.level})`;
+      }),
+    [subscribeMic],
+  );
+  /**
+   * 球也一样：用 orb-ui 的 adapter 把电平**推**进去，而不是每帧换一个 signal 对象。
+   * 传 undefined（减少动态效果）时 OrbIcon 会走静态帧。
+   */
+  const orbAdapter = useMemo<OrbAdapter>(
+    () => ({
+      subscribe: (listener) => subscribeMic((v) => listener({ state: v.state, inputVolume: v.level })),
+      start: async () => {},
+      stop: async () => {},
+    }),
+    [subscribeMic],
+  );
   return (
     <aside className="ai-panel" aria-label="AI 助手">
       <div className="panel-heading">
-        <OrbIcon size={24} className="heading-icon" animated={animated} signal={orbSignal} />
+        <OrbIcon size={24} className="heading-icon" animated={animated} adapter={orbAdapter} />
         <strong>全局 AI 助手</strong>
         <button aria-label="关闭AI面板" onClick={onClose}>
           <X size={19} />
         </button>
       </div>
       <div className="ai-intro">
-        <OrbIcon size={82} className="ai-orb" animated={animated} signal={orbSignal} />
+        <OrbIcon size={82} className="ai-orb" animated={animated} adapter={orbAdapter} />
         <h2>从一个想法开始</h2>
         <p>连接模型与工具后，AI 将在授权范围内协调你的应用。</p>
       </div>
@@ -730,7 +752,7 @@ export function AIPanel({ onClose, onOpenSettings, animated = true }: AIPanelPro
           {micOn ? "停止聆听" : "开始聆听"}
         </button>
         <span className="mic-meter" aria-hidden="true">
-          <span className="mic-meter-fill" style={{ transform: `scaleX(${micOn ? mic.level : 0})` }} />
+          <span className="mic-meter-fill" ref={meterRef} />
         </span>
       </div>
       <p className="muted mic-note">
