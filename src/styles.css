@@ -1586,23 +1586,27 @@ input[type="checkbox"] {
   width: var(--dock-icon, 47px);
   height: var(--dock-icon, 47px);
 }
-/* 球外的一圈光晕（用户口径：跟参考那样加光晕）。
-   两层作用：①看起来像发光的球；②光带落在球边缘上，把片元硬边的锯齿盖掉。
-   静态渐变、不参与动画，所以不增加逐帧成本。 */
+/* 球外的柔光（用户口径：「那种柔光，散发出来的，越往外越看不清」）。
+   不是一圈亮边，而是从球面往**外**一路衰减到看不见：范围开到 ±26%，
+   球面（约 55% 半径）最亮，之后 60/70/82/100% 逐级变淡，最外圈归零。
+   两个作用：①发光的球；②柔光压住球边缘那条片元硬边，锯齿就看不见了。
+   静态渐变、不参与动画，逐帧成本为零。 */
 .orb::after {
   content: "";
   position: absolute;
-  inset: -8%;
+  inset: -26%;
   border-radius: 50%;
   z-index: 2;
   pointer-events: none;
   background: radial-gradient(
     circle,
-    transparent 46%,
-    rgba(160, 190, 255, 0.55) 58%,
-    rgba(120, 145, 251, 0.34) 68%,
-    rgba(92, 99, 251, 0.14) 79%,
-    transparent 90%
+    rgba(160, 190, 255, 0) 0%,
+    rgba(160, 190, 255, 0) 42%,
+    rgba(168, 196, 255, 0.32) 54%,
+    rgba(140, 170, 255, 0.26) 63%,
+    rgba(118, 146, 251, 0.14) 73%,
+    rgba(100, 124, 251, 0.06) 84%,
+    rgba(100, 124, 251, 0) 100%
   );
 }
 .orb-scale {
@@ -1613,14 +1617,42 @@ input[type="checkbox"] {
   place-items: center;
   transform-origin: center center;
 }
-.orb-canvas {
+/*
+ * 球体本身**不用一圈边**收尾，而是把外圈羽化掉：越往外越透明，最后融进背景 ——
+ * 用户口径就是「那种柔光，散发出来的，越往外越看不清」。
+ * 这同时消掉了 orb-ui 片元硬边的锯齿（没有边可看，自然没有台阶）。
+ *
+ * 关键：mask 必须作用在**画布本身**上（.orb-canvas 只是 orb-ui 的根 div，
+ * 它比球大一圈，closest-side 会算错 —— 实测这样 mask 完全落在球内部，等于没羽化）。
+ * mask 是静态的，逐帧成本为零。
+ */
+.orb-canvas canvas {
   display: block;
   border-radius: 50%;
+  -webkit-mask-image: radial-gradient(
+    circle closest-side,
+    #000 0 74%,
+    rgba(0, 0, 0, 0.8) 84%,
+    rgba(0, 0, 0, 0.45) 92%,
+    rgba(0, 0, 0, 0.16) 97%,
+    transparent 100%
+  );
+  mask-image: radial-gradient(
+    circle closest-side,
+    #000 0 74%,
+    rgba(0, 0, 0, 0.8) 84%,
+    rgba(0, 0, 0, 0.45) 92%,
+    rgba(0, 0, 0, 0.16) 97%,
+    transparent 100%
+  );
 }
+/* 减少动态效果时的静态帧：把 siri.png 自带的底板裁掉，只留球（与动态版观感一致） */
 .orb-static {
   display: block;
   border-radius: 50%;
   object-fit: contain;
+  -webkit-mask-image: radial-gradient(circle closest-side, #000 0 70%, transparent 78%);
+  mask-image: radial-gradient(circle closest-side, #000 0 70%, transparent 78%);
 }
 
 /* 设置页：壁纸选择 */
