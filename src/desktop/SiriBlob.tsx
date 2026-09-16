@@ -32,6 +32,12 @@ const SPHERE_RADIUS = 96;
 const DISC_FEATHER = 2;
 const DISC_COLOR = [1 / 255, 5 / 255, 6 / 255];
 /**
+ * 球体本体（暗玻璃）的不透明度。用户口径「做成玻璃球、但不要太透明」，取 0.80 偏实。
+ * 亮光带 / 白核不受影响：那里 ka=1，outA=max(1,·)=1，仍然完全不透明。
+ * 注意：它会让（十一）里「R-2px 圆周 alpha 全 255」变成 ~205 —— 预期变化，不是回归。
+ */
+const DISC_ALPHA = 0.8;
+/**
  * 圆外的去留阈值（按视频像素的 max(r,g,b)）。圆外暗的一律按圆裁掉（那条灰尾巴、压缩噪声）；
  * 但如果整圆硬裁，偶尔伸到球外的**亮光带尖角**会被切成生硬的圆弧，所以圆外只放行够亮的。
  * 实测 m≥0.2 的内容最外只到 ~91px（在 R=96 以内），这道门实际上几乎不触发——留着是给
@@ -49,8 +55,8 @@ void main() {
 }`;
 
 /**
- * GPU 抠黑 + 同心近黑圆底。圆底垫在抠黑层**之下**（标准 over 合成）：实心到 R、2px 羽化；
- * 圆外只留够亮的（KEEP_*），暗的按圆裁掉。
+ * GPU 抠黑 + 同心近黑圆底：实心到 R、2px 羽化，圆外只留够亮的（KEEP_*）、暗的按圆裁掉。
+ * 圆底本体半透明（DISC_ALPHA），颜色与 alpha 一起按 over 合成算，避免只改 alpha 导致发白/发灰。
  */
 const FRAG = `
 precision highp float;
@@ -66,8 +72,9 @@ void main() {
   float inside = 1.0 - smoothstep(${SPHERE_RADIUS}.0, ${SPHERE_RADIUS + DISC_FEATHER}.0, length(p));
   float bright = smoothstep(${KEEP_LO}, ${KEEP_HI}, m);
   float ka = a * max(inside, bright);
-  float outA = ka + inside * (1.0 - ka);
-  vec3 outC = (keyed * ka + vec3(${DISC_COLOR[0]}, ${DISC_COLOR[1]}, ${DISC_COLOR[2]}) * inside * (1.0 - ka)) / max(outA, 0.0001);
+  float discA = ${DISC_ALPHA} * inside;
+  float outA = max(ka, discA);
+  vec3 outC = (keyed * ka + vec3(${DISC_COLOR[0]}, ${DISC_COLOR[1]}, ${DISC_COLOR[2]}) * discA * (1.0 - ka)) / max(outA, 0.0001);
   gl_FragColor = vec4(outC, outA);
 }`;
 
