@@ -11,6 +11,8 @@
  */
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Orb } from "orb-ui";
+import type { OrbSignal } from "orb-ui";
+import { useMicLevel } from "./useMicLevel";
 import {
   ArrowLeft,
   ArrowRight,
@@ -205,10 +207,13 @@ export function OrbIcon({
   size = 47,
   className = "",
   animated = true,
+  signal,
 }: {
   size?: number;
   className?: string;
   animated?: boolean;
+  /** 有真实信号（例如麦克风音量）就用它驱动；没有就退回装饰性的 thinking 动效。 */
+  signal?: OrbSignal;
 }) {
   // 球体占外框的比例由主题的 diameterRatio（0.92）决定。
   const inner = size;
@@ -220,7 +225,11 @@ export function OrbIcon({
       draggable={false}
     >
       {animated ? (
-        <Orb size={inner} theme={ORB_THEME} state="thinking" interactive={false} className="orb-canvas" />
+        signal ? (
+          <Orb size={inner} theme={ORB_THEME} signal={signal} interactive={false} className="orb-canvas" />
+        ) : (
+          <Orb size={inner} theme={ORB_THEME} state="thinking" interactive={false} className="orb-canvas" />
+        )
       ) : (
         <img className="orb-static" src={"./icons/siri.png"} alt="" width={inner} height={inner} draggable={false} />
       )}
@@ -692,20 +701,45 @@ export function AssistantPill({ onActivate, animated = true }: AssistantPillProp
 type AIPanelProps = { onClose: () => void; onOpenSettings: () => void; animated?: boolean };
 export function AIPanel({ onClose, onOpenSettings, animated = true }: AIPanelProps) {
   const [note, setNote] = useState("");
+  /** 只在面板开着时听：关掉面板 = 组件卸载 = 钩子清理 = 麦克风 track 停掉（灯灭）。 */
+  const [micOn, setMicOn] = useState(false);
+  const mic = useMicLevel(micOn);
+  // 开不起来（没权限/没设备）就把开关弹回去，并把原因写在下面那行小字里
+  useEffect(() => {
+    if (mic.error) setMicOn(false);
+  }, [mic.error]);
+  const orbSignal: OrbSignal | undefined = animated
+    ? { state: micOn ? "listening" : "thinking", inputVolume: micOn ? mic.level : undefined, outputVolume: undefined }
+    : undefined;
   return (
     <aside className="ai-panel" aria-label="AI 助手">
       <div className="panel-heading">
-        <OrbIcon size={24} className="heading-icon" animated={animated} />
+        <OrbIcon size={24} className="heading-icon" animated={animated} signal={orbSignal} />
         <strong>全局 AI 助手</strong>
         <button aria-label="关闭AI面板" onClick={onClose}>
           <X size={19} />
         </button>
       </div>
       <div className="ai-intro">
-        <OrbIcon size={82} className="ai-orb" animated={animated} />
+        <OrbIcon size={82} className="ai-orb" animated={animated} signal={orbSignal} />
         <h2>从一个想法开始</h2>
         <p>连接模型与工具后，AI 将在授权范围内协调你的应用。</p>
       </div>
+      <div className="mic-row">
+        <button className="control-button" aria-pressed={micOn} onClick={() => setMicOn((v) => !v)}>
+          {micOn ? "停止聆听" : "开始聆听"}
+        </button>
+        <span className="mic-meter" aria-hidden="true">
+          <span className="mic-meter-fill" style={{ transform: `scaleX(${micOn ? mic.level : 0})` }} />
+        </span>
+      </div>
+      <p className="muted mic-note">
+        {mic.error
+          ? mic.error
+          : micOn
+            ? "球正跟着你的声音动；音频只在本机算一个音量值，不录音、不上传。识别与回答要等模型服务接入。"
+            : "开启后球会跟着你的声音变化（只在本机算音量，不外发）。"}
+      </p>
       <div className="connection-card">
         <span className="badge">后端未接入</span>
         <h3>准备你的全局助手</h3>

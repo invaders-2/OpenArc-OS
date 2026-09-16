@@ -141,6 +141,27 @@ app.whenReady().then(() => {
     if (url !== uiURL) e.preventDefault();
   });
 
+  /**
+   * 权限边界：**只有本应用自己的页面**能要麦克风，而且只要 audio（不要 video）。
+   *
+   * 不写这张表的话 Electron 默认放行一切 —— 浏览器窗口里那些不受信网页也能顺手开麦
+   * （A13 的反面：不可信网页不得拿到系统能力）。其余权限维持原有行为，不额外扩张。
+   */
+  const appDir = pathToFileURL(path.join(__dirname, "..", "dist")).toString();
+  const isAppPage = (url) => typeof url === "string" && url.startsWith(appDir);
+  const micOnly = (url, mediaTypes) => {
+    const types = Array.isArray(mediaTypes) && mediaTypes.length ? mediaTypes : ["audio"];
+    return isAppPage(url) && types.includes("audio") && !types.includes("video");
+  };
+  win.webContents.session.setPermissionRequestHandler((wc, permission, callback, details) => {
+    if (permission !== "media") return callback(true);
+    callback(micOnly(details?.requestingUrl || wc?.getURL?.(), details?.mediaTypes));
+  });
+  win.webContents.session.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => {
+    if (permission !== "media") return true;
+    return micOnly(details?.requestingUrl || requestingOrigin || wc?.getURL?.(), details?.mediaTypes);
+  });
+
   // ---------------------------------------------------------------------------
   // D3-01 · 身份服务（唯一权威，§25）
   //

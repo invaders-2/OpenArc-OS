@@ -1247,6 +1247,31 @@ input[type="checkbox"] {
   margin-left: auto;
   display: flex;
 }
+/* AI 面板：聆听开关 + 电平条（电平只改 transform，逐帧不触发布局） */
+.mic-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 0;
+}
+.mic-meter {
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--sunken);
+  overflow: hidden;
+}
+.mic-meter-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform-origin: left center;
+  transform: scaleX(0);
+  background: linear-gradient(90deg, #7a8ffb, #5c63fb);
+}
+.mic-note {
+  margin-top: 8px;
+}
 .ai-intro {
   text-align: center;
   padding: 35px 8px 22px;
