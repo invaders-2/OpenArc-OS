@@ -20,15 +20,25 @@ const ALPHA_FLOOR = 0.35;
  * 球体几何 + 圆底色，全部实测（抽帧脚本见 /tmp/oa-probe/sphere）：
  *   · ffmpeg 抽 t=2/8/16/24 四帧，取亮色光带（max(r,g,b)≥20）的强度加权质心当球心，
  *     得 (122.55, 122.47) —— 比画面正中偏左 ~5px、偏上 ~5px，所以圆底跟着偏；
- *   · 从球心做角向**中位数**亮度曲线：球体边缘（中位亮度掉到 1/255）在半径 ~92px，
- *     最外毛刺到 ~96px，故圆底取 94px、外沿 12px 羽化盖住这圈噪声；
+ *   · 角向**中位数**亮度曲线：球体边缘（中位亮度掉到 1/255）在半径 ~92px；
+ *     再量「够亮的内容伸到哪」：m≥0.2 的最外只到 ~91px，m≥0.03 的毛刺到 ~97px。
+ *     所以 R 取 96px（整颗玻璃球都在圆内），外沿再留 2px 羽化（96→98）—— 轮廓才收成一个正圆，
+ *     且 R 以内是实心的（R-2 处 alpha 仍是满的）。
  *   · 圆底色 = 球体环带 0.6R..0.85R 的 RGB 中位 (1,5,6)/255 —— 近黑带一点冷色，避免垫出死黑。
  * 前三个常数单位是视频像素；SPHERE_CENTER_UV 换算成 uv（v 自下而上，配合 UNPACK_FLIP_Y_WEBGL）。
  */
 const SPHERE_CENTER_UV = { x: 122.55 / 256, y: (255 - 122.47) / 255 };
-const SPHERE_RADIUS = 94;
-const DISC_FEATHER = 12;
+const SPHERE_RADIUS = 96;
+const DISC_FEATHER = 2;
 const DISC_COLOR = [1 / 255, 5 / 255, 6 / 255];
+/**
+ * 圆外的去留阈值（按视频像素的 max(r,g,b)）。圆外暗的一律按圆裁掉（那条灰尾巴、压缩噪声）；
+ * 但如果整圆硬裁，偶尔伸到球外的**亮光带尖角**会被切成生硬的圆弧，所以圆外只放行够亮的。
+ * 实测 m≥0.2 的内容最外只到 ~91px（在 R=96 以内），这道门实际上几乎不触发——留着是给
+ * 没抽到的帧兜底，而不是靠它出观感。（试过直接整圆裁：与带门几乎无差别，故按更稳的带门。）
+ */
+const KEEP_LO = 0.16;
+const KEEP_HI = 0.3;
 
 const VERT = `
 attribute vec2 aPos;
@@ -39,8 +49,8 @@ void main() {
 }`;
 
 /**
- * GPU 抠黑 + 同心近黑圆底。圆底垫在抠黑层**之下**（标准的 over 合成），只在球内，
- * 球外的柔光完全不受影响；它盖住的是球体边缘那圈被放大的压缩噪声。
+ * GPU 抠黑 + 同心近黑圆底。圆底垫在抠黑层**之下**（标准 over 合成）：实心到 R、2px 羽化；
+ * 圆外只留够亮的（KEEP_*），暗的按圆裁掉。
  */
 const FRAG = `
 precision highp float;
@@ -53,9 +63,11 @@ void main() {
   float a = t * t * (3.0 - 2.0 * t);
   vec3 keyed = c / max(a, ${ALPHA_FLOOR});
   vec2 p = (vUv - vec2(${SPHERE_CENTER_UV.x}, ${SPHERE_CENTER_UV.y})) * vec2(256.0, 255.0);
-  float disc = 1.0 - smoothstep(${SPHERE_RADIUS - DISC_FEATHER}.0, ${SPHERE_RADIUS}.0, length(p));
-  float outA = a + disc * (1.0 - a);
-  vec3 outC = (keyed * a + vec3(${DISC_COLOR[0]}, ${DISC_COLOR[1]}, ${DISC_COLOR[2]}) * disc * (1.0 - a)) / max(outA, 0.0001);
+  float inside = 1.0 - smoothstep(${SPHERE_RADIUS}.0, ${SPHERE_RADIUS + DISC_FEATHER}.0, length(p));
+  float bright = smoothstep(${KEEP_LO}, ${KEEP_HI}, m);
+  float ka = a * max(inside, bright);
+  float outA = ka + inside * (1.0 - ka);
+  vec3 outC = (keyed * ka + vec3(${DISC_COLOR[0]}, ${DISC_COLOR[1]}, ${DISC_COLOR[2]}) * inside * (1.0 - ka)) / max(outA, 0.0001);
   gl_FragColor = vec4(outC, outA);
 }`;
 

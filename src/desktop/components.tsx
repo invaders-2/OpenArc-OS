@@ -31,7 +31,6 @@ import {
   Search,
   Settings,
   SlidersHorizontal,
-  Sparkles,
   X,
 } from "lucide-react";
 import domain from "../../electron/window-domain.cjs";
@@ -76,6 +75,8 @@ type TopBarProps = {
   onFocusWindow: (id: string) => void;
   onToggleSearch: () => void;
   onToggleAI: () => void;
+  /** 顶栏那颗球动不动：跟 Dock / 胶囊共用同一条"减少动态效果"开关，不新引状态。 */
+  animated?: boolean;
   /**
    * 身份投影（D3-01）。**可选**：没有主进程时门禁不参与，顶栏保持原样。
    * 顶栏不持有任何身份状态，只显示快照并回调命令 —— 与 §25 的单一权威一致。
@@ -97,6 +98,7 @@ export function TopBar({
   onFocusWindow,
   onToggleSearch,
   onToggleAI,
+  animated = true,
   identity,
 }: TopBarProps) {
   return (
@@ -123,7 +125,7 @@ export function TopBar({
           <Search size={15} />
         </button>
         <button onClick={onToggleAI} aria-label="全局 AI">
-          <Sparkles size={15} />
+          <OrbIcon size={18} className="topbar-orb" animated={animated} />
         </button>
         {identity ? (
           <>

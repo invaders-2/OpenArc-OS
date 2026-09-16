@@ -2623,6 +2623,7 @@ function App() {
             setOverlays((o) => ({ ...o, ai: !o.ai }));
             bounce("__ai");
           }}
+          animated={!reduced}
           identity={
             gate === "unavailable"
               ? null
