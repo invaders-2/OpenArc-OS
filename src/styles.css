@@ -810,6 +810,12 @@ input[type="checkbox"] {
   align-self: flex-start;
   width: 208px;
 }
+/* 没有工具条的分栏窗口（系统设置 / 应用中心 / Skill 中心）：右栏顶部只有
+   64px 的内边距、没有任何控件需要露出，所以标题栏铺满整窗，顶栏整条都能按住拖动。
+   有 .pane-toolbar 的文件夹窗口不进这条，仍保持 208px（右栏工具条要可点可输入）。 */
+.window:has(.split):not(:has(.pane-toolbar)) .window-title {
+  width: 100%;
+}
 .window:has(.split) .split-main {
   /* 普通分栏内容（系统设置 / 应用中心 / Skill 中心）：让开标题栏，再留出呼吸空间 */
   padding-top: 64px;
