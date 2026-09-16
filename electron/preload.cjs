@@ -101,6 +101,21 @@ contextBridge.exposeInMainWorld("openarc", {
     command: (command) => ipcRenderer.invoke("model:command", command),
   },
   /**
+   * D4-04 Task 桥。
+   *
+   * **只有两条能力**：派发受控 task 命令、订阅 task 进度事件。
+   * Renderer 不能指定 userId / role / appId / sessionRef / modelConfig / verification ——
+   * 这些都由主进程从当前 authenticated session + 真实 Task Runtime 推导。
+   */
+  task: {
+    command: (command) => ipcRenderer.invoke("task:command", command),
+    onEvent: (callback) => {
+      const listener = (_, event) => callback(event);
+      ipcRenderer.on("task:event", listener);
+      return () => ipcRenderer.removeListener("task:event", listener);
+    },
+  },
+  /**
    * D4-03C4 Trusted Approval Gateway 桥。
    *
    * **只有两条能力**：提交一个 approval decision、订阅 approval 请求事件。

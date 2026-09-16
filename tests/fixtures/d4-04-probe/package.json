@@ -1,0 +1,5 @@
+{
+  "name": "openarc-d4-04-probe",
+  "private": true,
+  "main": "main.cjs"
+}

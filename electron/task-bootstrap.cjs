@@ -71,10 +71,76 @@ function createTaskBundle({ identityStore, authorization, authStore, modelServic
     const factory = typeof adapterFactory === "function" ? adapterFactory : () => new HarnessAdapter({ modelProxy, logger, clock });
     orchestrator = new TaskHarnessOrchestrator({
       taskService, adapterFactory: factory, toolProxy, sideEffectRuntime, clock, logger,
-      toolFacade: { enabled: true, toolIds: ["resource.search", "resource.read.metadata"], writeToolIds: WRITE_TOOL_IDS },
+      // D4-04：混合 READ + WRITE turn 需要多次受控 tool call；capability 必须有合理 bounded 预算
+      // （此前未设置 maxCalls 会退化成 1，第二次 tool call 直接 TOOL_CAPABILITY_EXHAUSTED）。
+      toolFacade: { enabled: true, toolIds: ["resource.search", "resource.read.metadata"], writeToolIds: WRITE_TOOL_IDS, maxCalls: 16, ttlMs: 300000 },
     });
   }
   return { taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, orchestrator };
 }
 
-module.exports = { createTaskBundle };
+/** D4-04：Renderer 可用的 Task 命令白名单（trusted sender + main-process session 注入）。 */
+const TASK_COMMANDS = Object.freeze(["task/run", "task/get", "task/list", "task/cancel"]);
+
+function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrusted, send = null, hostAppId = "ai" } = {}) {
+  if (typeof ipcMain.removeHandler === "function") { try { ipcMain.removeHandler("task:command"); } catch { /* not registered */ } }
+  ipcMain.handle("task:command", async (e, raw) => {
+    if (isTrusted && !isTrusted(e)) throw Error("Forbidden");
+    if (!taskService || !orchestrator) return { ok: false, error: "INTERNAL_ERROR", detail: "task-not-ready" };
+    if (!raw || typeof raw !== "object") return { ok: false, error: "INVALID_INPUT" };
+    const command = String(raw.command != null ? raw.command : raw.type == null ? "" : raw.type);
+    if (!TASK_COMMANDS.includes(command)) return { ok: false, error: "TASK_COMMAND_NOT_ALLOWED" };
+    const payload = raw.payload && typeof raw.payload === "object" ? raw.payload : raw;
+    // sessionRef / appId 一律来自可信宿主，忽略 Renderer 自报的 userId / role / appId / sessionRef。
+    const context = { sessionRef: (identity && identity.current) || null, appId: hostAppId, source: "ui", requestId: typeof payload.requestId === "string" ? payload.requestId.slice(0, 80) : null };
+    try {
+      switch (command) {
+        case "task/run": {
+          const goal = typeof payload.goal === "string" ? payload.goal.slice(0, 2000) : "";
+          if (!goal.trim()) return { ok: false, error: "INVALID_INPUT" };
+          const created = taskService.createTask({ context, goal });
+          if (!created.ok) return created;
+          const taskId = created.task.taskId;
+          // 不等待整条 Harness 链：立即返回，进度经 send 推送；approval 由 sideeffect:event 推送。
+          const running = orchestrator.runTask({ context, taskId, expectedRevision: created.task.revision, verify: { type: "SCHEMA_VALID" } });
+          running.then((r) => {
+            if (!send) return;
+            send({
+              type: "task/result", taskId,
+              ok: !!(r && r.ok),
+              status: r && r.task ? r.task.status : null,
+              stepStatus: r && r.step ? r.step.status : null,
+              artifact: r && r.artifact ? { type: r.artifact.type, content: String(r.artifact.content == null ? "" : r.artifact.content).slice(0, 4000), checksum: r.artifact.checksum || null } : null,
+              verification: r && r.verification ? { type: r.verification.type, status: r.verification.status } : null,
+              error: r && r.error ? String(r.error).slice(0, 120) : null,
+            });
+          }).catch(() => { try { send({ type: "task/result", taskId, ok: false, status: null, error: "INTERNAL_ERROR" }); } catch { /* ignore */ } });
+          return { ok: true, taskId, status: created.task.status };
+        }
+        case "task/get": {
+          const taskId = String(payload.taskId == null ? "" : payload.taskId);
+          const got = taskService.getTask({ context, taskId });
+          if (!got.ok) return got;
+          const steps = taskService.getSteps({ context, taskId });
+          const artifacts = taskService.getArtifacts({ context, taskId });
+          return { ok: true, task: got.task, steps: steps.ok ? steps.items : [], artifacts: artifacts.ok ? artifacts.items : [] };
+        }
+        case "task/list": {
+          const list = taskService.listTasks({ context });
+          return list.ok ? { ok: true, items: list.items } : list;
+        }
+        case "task/cancel": {
+          const taskId = String(payload.taskId == null ? "" : payload.taskId);
+          const got = taskService.getTask({ context, taskId });
+          if (!got.ok) return got;
+          return orchestrator.cancel({ context, taskId, expectedRevision: got.task.revision });
+        }
+        default: return { ok: false, error: "TASK_COMMAND_NOT_ALLOWED" };
+      }
+    } catch {
+      return { ok: false, error: "INTERNAL_ERROR" };
+    }
+  });
+}
+
+module.exports = { createTaskBundle, registerTaskIpc, TASK_COMMANDS };

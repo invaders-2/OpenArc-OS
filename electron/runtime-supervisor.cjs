@@ -257,7 +257,7 @@ class RuntimeSupervisor {
     const args = { runtimeDir: this.runtimeDir, dbPath, storeRoot, instanceId: id, callId, holderId, timeoutMs, now };
     let child;
     try {
-      child = this.spawnImpl(this.nodePath, [this.executorEntry, JSON.stringify(args)], { stdio: ["pipe", "pipe", "pipe"], env: { PATH: process.env.PATH, TMPDIR: process.env.TMPDIR, LANG: process.env.LANG, HOME: process.env.HOME } });
+      child = this.spawnImpl(this.nodePath, [this.executorEntry, JSON.stringify(args)], { stdio: ["pipe", "pipe", "pipe"], env: { PATH: process.env.PATH, TMPDIR: process.env.TMPDIR, LANG: process.env.LANG, HOME: process.env.HOME, ...(process.env.OPENARC_EXECUTOR_FAULT ? { OPENARC_EXECUTOR_FAULT: process.env.OPENARC_EXECUTOR_FAULT } : {}) } });
     } catch (e) {
       this.#observeExit(id, { reason: "EXECUTOR_SPAWN_FAILED" });
       return { ok: false, error: "EXECUTOR_SPAWN_FAILED", detail: String((e && e.message) || e).slice(0, 120) };

@@ -6,6 +6,7 @@ const { safeURL } = require("./policy.cjs");
 const geometry = require("./geometry.cjs");
 const { NativeViewController } = require("./native-view-controller.cjs");
 const { createIdentityService, registerIdentityIpc } = require("./identity-bootstrap.cjs");
+const { registerTaskIpc } = require("./task-bootstrap.cjs");
 
 let win;
 let controller;
@@ -31,7 +32,10 @@ const glass = isMac
   ? { transparent: true, vibrancy: "under-window", backgroundColor: "#00000000" }
   : { backgroundMaterial: "mica", backgroundColor: "#00000000" };
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // D4-04：Model Proxy 是 Harness Model Adapter 的上游；必须在任何 Task 之前启动。
+  // 否则 Harness 会得到 HARNESS_MODEL_PROXY_UNAVAILABLE（fail closed）。
+  try { await identity.modelProxy.start(); } catch { /* proxy 启动失败时 Harness fail closed */ }
   win = new BrowserWindow({
     width: 1440,
     height: 940,
@@ -132,6 +136,17 @@ app.whenReady().then(() => {
     },
   });
 
+  // D4-04：Renderer 可发起真实 AI Task（Task Runtime + official dsh + Tool Facade），
+  // sessionRef/appId 由主进程注入；进度经 task:event 推送。
+  registerTaskIpc({
+    ipcMain,
+    taskService: identity.taskService,
+    orchestrator: identity.orchestrator,
+    identity: identity.service,
+    isTrusted: trusted,
+    send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("task:event", event); },
+  });
+
   // D3-04C：注册安全预览协议 handler（每次请求重新授权 + Range 流式返回）。
   protocol.handle("openarc-resource", (request) => identity.previewService.handleProtocolRequest(request));
 
@@ -199,6 +214,11 @@ app.on("window-all-closed", () => app.quit());
 
 // SQLite 的连接必须在进程退出前关闭，否则 WAL 里未 checkpoint 的事务会丢
 app.on("will-quit", () => {
+  try {
+    identity?.modelProxy?.stop();
+  } catch {
+    /* 已关闭 */
+  }
   try {
     identity?.store?.close();
   } catch {

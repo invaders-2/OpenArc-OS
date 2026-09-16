@@ -477,10 +477,71 @@ export function AssistantPill({ onActivate }: AssistantPillProps) {
 }
 
 type AIPanelProps = { onClose: () => void; onOpenSettings: () => void };
+/**
+ * D4-04：全局 AI 助手 = 真实 Task Runtime 入口。
+ *
+ * 它只经窄桥 window.openarc.task.command 发起任务；Renderer 不能指定 userId / role /
+ * appId / sessionRef / modelConfig / verification —— 那些由主进程从 authenticated session
+ * 与真实 Task Runtime 推导。工具调用仍由受控 Tool Proxy 执行。
+ */
 export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
-  const [note, setNote] = useState("");
+  const [goal, setGoal] = useState("");
+  const [taskId, setTaskId] = useState<string | null>(null);
+  const [status, setStatus] = useState("idle");
+  const [result, setResult] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    // §41：Reload 后必须从 backend state 恢复最新 Task 的权威结果，而不是依赖 Renderer memory。
+    const bridge = (window as unknown as { openarc?: { task?: { command?: (c: unknown) => Promise<any> } } }).openarc?.task;
+    if (!bridge || typeof bridge.command !== "function") return;
+    const command = bridge.command;
+    void (async () => {
+      const list = await command({ type: "task/list" });
+      const latest = list && list.ok && Array.isArray(list.items) && list.items.length ? list.items[list.items.length - 1] : null;
+      if (!latest) return;
+      const got = await command({ type: "task/get", taskId: latest.taskId });
+      if (!got || !got.ok) return;
+      setTaskId(latest.taskId);
+      setStatus((got.task && got.task.status) || latest.status || "idle");
+      const artifact = Array.isArray(got.artifacts) && got.artifacts.length ? got.artifacts[got.artifacts.length - 1] : null;
+      setResult((artifact && artifact.content) || "");
+    })();
+  }, []);
+
+  useEffect(() => {
+    const bridge = (window as unknown as { openarc?: { task?: { onEvent?: (cb: (e: unknown) => void) => () => void } } }).openarc?.task;
+    if (!bridge || typeof bridge.onEvent !== "function") return;
+    const off = bridge.onEvent((event) => {
+      const ev = event as { type?: string; taskId?: string; status?: string; ok?: boolean; artifact?: { content?: string }; error?: string } | null;
+      if (!ev || ev.type !== "task/result") return;
+      setBusy(false);
+      if (ev.taskId !== taskId) return; // 非当前任务的 result 只用于解除 busy，不覆盖当前显示
+      setStatus(ev.status || (ev.ok ? "SUCCEEDED" : "FAILED"));
+      setResult((ev.artifact && ev.artifact.content) || "");
+      setError(ev.error || "")
+    });
+    return () => { try { off(); } catch { /* ignore */ } };
+  }, [taskId]);
+
+  const run = async () => {
+    const bridge = (window as unknown as { openarc?: { task?: { command?: (c: unknown) => Promise<{ ok?: boolean; taskId?: string; error?: string }> } } }).openarc?.task;
+    if (!bridge || typeof bridge.command !== "function" || busy || !goal.trim()) return;
+    setBusy(true); setStatus("running"); setResult(""); setError("");
+    const res = await bridge.command({ type: "task/run", goal });
+    if (res && res.ok) { setTaskId(res.taskId || null); setStatus("running"); }
+    else { setBusy(false); setStatus("error"); setError((res && res.error) || "TASK_FAILED"); }
+  };
+  const cancel = async () => {
+    const bridge = (window as unknown as { openarc?: { task?: { command?: (c: unknown) => Promise<unknown> } } }).openarc?.task;
+    if (!bridge || typeof bridge.command !== "function" || !taskId) return;
+    await bridge.command({ type: "task/cancel", taskId });
+    setStatus("cancelling");
+  };
+
   return (
-    <aside className="ai-panel" aria-label="AI 助手">
+    <aside className="ai-panel" aria-label="AI 助手" data-ai-status={status} data-ai-task-id={taskId || ""}>
       <div className="panel-heading">
         <img className="heading-icon" src={icon("siri")} alt="" />
         <strong>全局 AI 助手</strong>
@@ -490,20 +551,33 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
       </div>
       <div className="ai-intro">
         <img className="ai-orb" src={icon("siri")} alt="" draggable={false} />
-        <h2>从一个想法开始</h2>
-        <p>连接模型与工具后，AI 将在授权范围内协调你的应用。</p>
+        <h2>让 AI 在授权范围内执行任务</h2>
+        <p>OpenArc 决定、执行并验证；工具调用只在受控 Tool Proxy 内发生。</p>
+      </div>
+      <div className="composer">
+        <textarea data-ai-goal aria-label="任务目标" placeholder="描述你想完成的工作…" value={goal} onChange={(e) => setGoal(e.target.value)} />
+        <div className="ai-actions">
+          <button data-ai-run onClick={run} disabled={busy || !goal.trim()}>
+            运行任务
+          </button>
+          <button data-ai-cancel onClick={cancel} disabled={!taskId || !busy}>
+            取消
+          </button>
+        </div>
+      </div>
+      <div className="ai-state" data-ai-state>
+        <strong>状态：</strong>
+        <span data-ai-status-text>{status}</span>
+        {error ? <span data-ai-error> · {error}</span> : null}
+      </div>
+      <div className="ai-result" data-ai-result>
+        {result}
       </div>
       <div className="connection-card">
-        <span className="badge">后端未接入</span>
-        <h3>准备你的全局助手</h3>
-        <p>DeepSeek Harness 正在验证。当前不会发送消息或执行任务。</p>
+        <p>受控工具：resource.search / resource.read.metadata / resource.trash。</p>
         <button onClick={onOpenSettings}>
           查看统一设置 <ArrowRight size={15} />
         </button>
-      </div>
-      <div className="composer">
-        <textarea aria-label="任务草稿" placeholder="先记下你想完成的工作…" value={note} onChange={(e) => setNote(e.target.value)} />
-        <span>仅本次会话草稿 · 未发送</span>
       </div>
     </aside>
   );
