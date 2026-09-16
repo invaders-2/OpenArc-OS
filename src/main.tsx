@@ -2751,6 +2751,7 @@ function App() {
           );
         })}
         <AssistantPill
+          animated={!reduced}
           onActivate={() => {
             setOverlays((o) => ({ ...o, ai: !o.ai }));
             bounce("__ai");
@@ -2776,6 +2777,7 @@ function App() {
           runningApps={runningApps}
           bouncing={bouncing}
           reduced={reduced}
+          iconSize={dockSize}
           hidden={anyMaximized && !dockPeek}
           onPointerLeave={() => setDockPeek(false)}
           onReorder={(next) => setDockIds(next)}
@@ -2805,6 +2807,7 @@ function App() {
 
       {overlays.ai ? (
         <AIPanel
+          animated={!reduced}
           onClose={() => setOverlays((o) => ({ ...o, ai: false }))}
           onOpenSettings={() => {
             setOverlays((o) => ({ ...o, ai: false }));

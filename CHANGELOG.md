@@ -1,5 +1,39 @@
 # 计划修订记录
 
+## 2026-09-15（十一）：AI 球改用 orb-ui（接管上一轮手写的那颗）
+
+用户口径：「你不要自己写，看看其他这种 ai 动态前端 ui 的有没有网站」→ 选定 https://orb-ui.com/ 。
+
+### 调研结论（网站与许可）
+
+| 站点 / 库 | 是什么 | 许可 | 代价 |
+| --- | --- | --- | --- |
+| [orb-ui](https://orb-ui.com)（npm `orb-ui`） | 专做语音 Agent 的球，WebGL + rAF，`<Orb/>` 一行接入，零运行时依赖 | **MIT** | 59KB，**已采用** |
+| [ElevenLabs UI](https://ui.elevenlabs.io) | 语音 Agent 组件库（Orb / 波形 / 会话），Orb 是 three + R3F + GLSL | MIT | three 三件套 ≈600KB+，备选 |
+| [magicui.design](https://magicui.design) | 动画组件合集 | MIT | Tailwind/shadcn 生态，要手工搬 |
+| [21st.dev](https://21st.dev) | 组件注册表聚合站（含社区 Siri Orb/Wave） | ⚠️ 抽样的几个**无 license** | 不可用 |
+| [reactbits.dev](https://reactbits.dev) | 动画组件合集（项目里文件夹图标来自这里） | ⚠️ MIT + Commons Clause | 可用于产品，不能转卖组件本身 |
+| 项目自带 Spectrum UI 注册表 | AI 分类有 voice-input / thinking-dots 等 | 项目内 | **没有 orb 类组件** |
+
+### 这一版做了什么
+
+- `npm i orb-ui`（`^0.8.0`，MIT，© Alexander Chen）；`OrbIcon` 里手写的那颗 CSS 球整块删掉，换成它的 `<Orb/>`；
+- 观感参数（`ORB_THEME`）：`cloud` 主题 + 照用户那张图配的调色（上青 `#35d6ff` / 下品红 `#ff4fa3` / 白高光 / 深蓝底 `#1b2f7a`），
+  `diameterRatio: 0.92` 让球基本填满框；
+- **`state="thinking"` 只取它的动效**：实测 orb-ui 的 `idle` 两帧像素完全一致（静止），而用户口径要的就是"动态的"；
+  代码里写明了这一条 —— 真接上后端后换成真实状态即可；
+- 四处都换：Dock（保留浅色 squircle，球占外框 ~74%，与原来那张 PNG 比例一致）、助手胶囊、面板标题、面板大球（82px）；
+- **减少动态效果**（产品内开关）下**不挂 WebGL**，退回同一张静态帧 `siri.png`（orb-ui 只认系统级 `prefers-reduced-motion`，认不到产品开关）；
+- 静态 `siri.png` 只在这个回退路径里用，不再出现在正常路径。
+
+### 实测（Playwright + 真实 dist，6/6）
+
+Dock 的全局 AI 挂的是 orb-ui 的 canvas（外框 47px、球 35px）、两帧像素不同（真的在动）；
+胶囊 / 面板标题 / 面板大球也都是它的 canvas；产品内「减少动态效果」下不挂 WebGL、退回静态帧；
+**悬停扫过程序坞时帧间隔 p50 8.3ms / p95 9.1ms**（120Hz 满帧，dock + 胶囊两处 WebGL 一起跑都没拖累）。
+主包体积 108KB → **159KB**（+51KB，orb-ui 的 59KB 压进去了）。
+回归：桌面 24/24、拖拽落点 7/7、鼠标旁边 7/7、越界 6/6、图标大小 13/13、壁纸 16/16、`npm test` 96/96。
+
 ## 2026-09-15（十）：全局 AI 换成动态球
 
 用户口径：「这个图标，你找找有没有动态的」。（给的是现在 Dock 里那颗静态 siri.png）

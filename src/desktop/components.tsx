@@ -10,6 +10,7 @@
  * 不是换外观。所以这里没有一处新增的视觉样式。
  */
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Orb } from "orb-ui";
 import {
   ArrowLeft,
   ArrowRight,
@@ -166,42 +167,66 @@ type DockItemProps = {
   bouncing: boolean;
   /** 正被长按拖动 —— 用来抬层级、关掉提示、盖住兄弟项的抖动。 */
   dragging?: boolean;
+  /** 程序坞图标尺寸（px）与动效开关：AI 球按它画画布，减少动态效果时换成静态帧。 */
+  iconSize?: number;
+  orbAnimated?: boolean;
   onActivate: () => void;
   onPointerDown?: (e: React.PointerEvent) => void;
   onContextMenu?: (e: React.MouseEvent) => void;
 };
 
 /**
- * 动态 AI 球（用户口径：找一版动态的）。
+ * AI 球的观感参数：orb-ui 的 cloud 主题 + 我们自己的一版调色 / 几何。
  *
- * 纯 CSS 实现：球体底色 + 两层反向旋转的流彩（screen 叠加）+ 一颗会呼吸的高光核 + 静态玻璃边。
- * 只动 transform / opacity（走合成器，不参与主线程），尺寸全靠 font-size 的 em 缩放；
- * 减少动态效果（.reduced 或系统级 prefers-reduced-motion）会由既有规则整体停掉动画，
- * 停掉后仍是完整的静态球 —— 不会留下空壳。
+ * 调色是照用户给的那张 Apple 图配的（上青、下品红、白高光、深蓝底）；几何里 diameterRatio 0.92 让球基本填满框。
  *
- * 为什么不直接拿现成的：GitHub 上那几版 Siri 复刻（GLSL）都没写 license，不能抄；这版是按观感自己写的。
+ * `state="thinking"` 只取它的**动效**：orb-ui 的 idle 是静止的（实测两帧像素完全一样），
+ * 而用户口径要的就是"动态的"。等真接上后端，这里换成真实状态即可。
+ */
+const ORB_THEME = {
+  name: "cloud" as const,
+  appearance: {
+    deepColor: "#1b2f7a",
+    upperColor: "#35d6ff",
+    lowerColor: "#ff4fa3",
+    highlightColor: "#ffffff",
+  },
+  geometry: { diameterRatio: 0.92 },
+};
+
+/**
+ * 动态 AI 球 —— 球本身来自 **orb-ui**（MIT，© Alexander Chen，https://orb-ui.com），
+ * 我们只负责外面这一层壳：尺寸、App 图标版的浅色 squircle 底板、以及"减少动态效果"时的静态回退。
+ *
+ * 为什么减少动态效果要在这里判：orb-ui 只认系统级 `prefers-reduced-motion`，认不到产品内的开关；
+ * 所以产品开关打开时**干脆不挂 WebGL**，退回同一张静态帧 siri.png（既省 GPU，也不会留空壳）。
  */
 export function OrbIcon({
-  size,
+  size = 47,
   squircle = false,
   className = "",
+  animated = true,
 }: {
   size?: number;
   squircle?: boolean;
   className?: string;
+  animated?: boolean;
 }) {
+  // 球体占外框的比例由主题的 diameterRatio（0.92）决定；
+  // squircle（Dock）版再缩到 0.8 —— 球占外框 ~74%，与原来那张 PNG 的比例一致。
+  const inner = Math.round(size * (squircle ? 0.8 : 1));
   return (
     <span
       className={`orb${squircle ? " orb-app" : ""}${className ? " " + className : ""}`}
-      style={size ? ({ width: size, height: size, fontSize: size } as React.CSSProperties) : undefined}
+      style={{ width: size, height: size }}
       aria-hidden="true"
       draggable={false}
     >
-      <span className="orb-ball">
-        <span className="orb-layer orb-layer-a" />
-        <span className="orb-layer orb-layer-b" />
-        <span className="orb-core" />
-      </span>
+      {animated ? (
+        <Orb size={inner} theme={ORB_THEME} state="thinking" interactive={false} className="orb-canvas" />
+      ) : (
+        <img className="orb-static" src={"./icons/siri.png"} alt="" width={inner} height={inner} draggable={false} />
+      )}
     </span>
   );
 }
@@ -212,6 +237,8 @@ export function DockItem({
   running,
   bouncing,
   dragging,
+  iconSize = 47,
+  orbAnimated = true,
   onActivate,
   onPointerDown,
   onContextMenu,
@@ -227,7 +254,7 @@ export function DockItem({
       onContextMenu={onContextMenu}
     >
       {iconName === "siri" ? (
-        <OrbIcon squircle className="dock-icon" />
+        <OrbIcon squircle className="dock-icon" size={iconSize} animated={orbAnimated} />
       ) : (
         <img className="dock-icon" src={icon(iconName)} alt="" draggable={false} />
       )}
@@ -244,6 +271,8 @@ type DockProps = {
   bouncing: string | null;
   /** 减少动效：关闭波浪放大（与材质档位解耦）。 */
   reduced: boolean;
+  /** 程序坞图标尺寸（px，来自设置里的滑块）：AI 球要按它画画布。 */
+  iconSize?: number;
   /**
    * 激活一个 App。**Dock 不自己决定要派发哪条窗口命令** ——
    * "聚焦已有窗口 / 恢复最小化的窗口 / 新建"这个判断需要看 `appId → windowIds[]`，
@@ -266,6 +295,7 @@ export function Dock({
   runningApps,
   bouncing,
   reduced,
+  iconSize = 47,
   onActivate,
   onToggleAI,
   hidden,
@@ -307,7 +337,15 @@ export function Dock({
         />
       ))}
       <div className="dock-divider" />
-      <DockItem label="全局 AI" iconName="siri" running={false} bouncing={bouncing === "__ai"} onActivate={onToggleAI} />
+      <DockItem
+        label="全局 AI"
+        iconName="siri"
+        running={false}
+        bouncing={bouncing === "__ai"}
+        iconSize={iconSize}
+        orbAnimated={!reduced}
+        onActivate={onToggleAI}
+      />
     </nav>
   );
 }
@@ -643,31 +681,31 @@ export function AddressBar({ url, onUrlChange, onNavigate, onAction }: AddressBa
 // 11-12. AssistantPill / AIPanel
 // ===========================================================================
 
-type AssistantPillProps = { onActivate: () => void };
-export function AssistantPill({ onActivate }: AssistantPillProps) {
+type AssistantPillProps = { onActivate: () => void; animated?: boolean };
+export function AssistantPill({ onActivate, animated = true }: AssistantPillProps) {
   return (
     <button className="assistant-pill" onClick={onActivate}>
-      <OrbIcon size={19} className="pill-icon" />
+      <OrbIcon size={19} className="pill-icon" animated={animated} />
       <span>全局 AI</span>
       <span className="pill-status">未连接</span>
     </button>
   );
 }
 
-type AIPanelProps = { onClose: () => void; onOpenSettings: () => void };
-export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
+type AIPanelProps = { onClose: () => void; onOpenSettings: () => void; animated?: boolean };
+export function AIPanel({ onClose, onOpenSettings, animated = true }: AIPanelProps) {
   const [note, setNote] = useState("");
   return (
     <aside className="ai-panel" aria-label="AI 助手">
       <div className="panel-heading">
-        <OrbIcon size={24} className="heading-icon" />
+        <OrbIcon size={24} className="heading-icon" animated={animated} />
         <strong>全局 AI 助手</strong>
         <button aria-label="关闭AI面板" onClick={onClose}>
           <X size={19} />
         </button>
       </div>
       <div className="ai-intro">
-        <OrbIcon size={82} className="ai-orb" />
+        <OrbIcon size={82} className="ai-orb" animated={animated} />
         <h2>从一个想法开始</h2>
         <p>连接模型与工具后，AI 将在授权范围内协调你的应用。</p>
       </div>
