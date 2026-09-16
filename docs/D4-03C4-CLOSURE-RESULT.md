@@ -1,5 +1,7 @@
 # D4-03C4 Closure · 结果记录（Cold-restart Runtime Quiescence Probe must fail closed）
 
+> **已被 D4-03C4 Closure-2 收紧（supersedes）**：本文记录 Closure-1 阶段的 tri-state 规则（\`ALIVE / DEFINITELY_GONE / UNKNOWN\`）。Closure-2 证明 **ENOENT / pathname absence 也不是 executor death proof**（Unix socket pathname existence != process lifetime），因此 \`DEFINITELY_GONE\` / \`DEFINITELY_GONE_ERRNOS\` / \`ENDPOINT_ABSENT\` 已彻底删除。文中所有 "ENOENT → DEFINITELY_GONE → observeExit" 陈述均为**历史记录**，已被取代；当前永久规则见 \`docs/D4-03C4-CLOSURE2-RESULT.md\` 与 ADR "Unix socket pathname 语义（D4-03C4 Closure-2 · 永久）"。
+
 Base HEAD：\`55e0cacb9862857eb57d4e77f9d848b06cab1d81\`
 入口：\`npm run test:d4-03c4-closure\`
 

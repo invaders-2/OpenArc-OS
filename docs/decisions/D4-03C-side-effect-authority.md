@@ -204,9 +204,9 @@ ToolRegistry → ControlledToolProxy → SideEffectAuthority → RuntimeSupervis
 1. **同一 supervisor lifetime**：真实 \`child.on("exit")\` → 自动 \`observeExit\`（测试不得自行调用）；
 2. **cross-restart**：每个 executor runtime 在自己的整个生命周期内独占 bind
    \`<runtimeDir>/executors/<instanceId>.sock\`；cold restart 后新 supervisor 用 **OS-backed
-   liveness probe** 重新判定（tri-state ALIVE / DEFINITELY_GONE / UNKNOWN，见下方
-   "Tri-state liveness probe（D4-03C4 Closure · 永久）"）。
-   **绝不使用内存中的旧 authority 自我证明。**
+   liveness probe** 重新判定（reachability：ALIVE / UNKNOWN，见下方
+   "Unix socket pathname 语义 / Reachability probe（D4-03C4 Closure-2 · 永久）"）。
+   **绝不使用内存中的旧 authority 自我证明，也绝不把 pathname 消失当成死亡证明。**
 
 精度纠正：\`RuntimeLifecycleAuthority.isQuiesced()\` 本身只返回 \`UNKNOWN→false / ACTIVE→false / EXITED→true\`；
 \`SELF_RUNTIME_ACTIVE\` 是 \`SideEffectAuthority.#quiescenceProof()\` 层的额外保护，不是 authority 自身语义。
@@ -214,43 +214,72 @@ ToolRegistry → ControlledToolProxy → SideEffectAuthority → RuntimeSupervis
 \`observeExit\` / \`registerRuntime\` 不导出给 Renderer / IPC / ACP / Harness / Tool Facade；
 \`SideEffectAuthority.lifecycle\` 只拿到 supervisor 的 \`{ isQuiesced }\` 面。
 
-### Tri-state liveness probe（D4-03C4 Closure · 永久）
+### Unix socket pathname 语义（D4-03C4 Closure-2 · 永久）
 
-**Probe failure is not death proof.**
+    Unix socket pathname existence != process lifetime
+    pathname has been unlinked != bound/open socket process is dead
 
-Socket liveness probe 永远是三态，禁止退化成 boolean：
+因此 filesystem unix-socket probe **只回答 reachability**，没有 PROCESS_DEAD 结论
+（endpoint unreachable != execution quiesced）：
 
 | probe 结果 | 分类 | 后果 |
 |---|---|---|
 | connect() 成功 | ALIVE | runtime ACTIVE；绝不 quiesced |
-| ENOENT | DEFINITELY_GONE | **唯一**允许 observeExit() / trusted quiescence 的结果 |
-| timeout | UNKNOWN | 不 observeExit；quiesced=false |
-| EACCES / EMFILE / ENFILE / ENOBUFS / ENOMEM | UNKNOWN | 不 observeExit；quiesced=false |
+| ENOENT（pathname 根本不存在） | UNKNOWN | 不 observeExit；quiesced=false |
+| stale endpoint（listener 已死但文件仍在） | UNKNOWN | 不 observeExit；quiesced=false |
 | ECONNREFUSED | UNKNOWN | 不 observeExit；quiesced=false |
-| 任意其它 errno / 无 code | UNKNOWN | 不 observeExit；quiesced=false |
-| probe 自身抛异常 / 返回不可信形态（含旧 boolean） | UNKNOWN | 不 observeExit；quiesced=false |
+| timeout | UNKNOWN | 不 observeExit；quiesced=false |
+| EACCES / EMFILE / ENFILE / ENOBUFS / ENOMEM / 任意其它 errno / 无 code | UNKNOWN | 不 observeExit；quiesced=false |
+| probe 自身抛异常 / 不可信形态（含旧 boolean / 旧 DEFINITELY_GONE） | UNKNOWN | 不 observeExit；quiesced=false |
 
-为什么 ECONNREFUSED 不是 DEFINITELY_GONE：在 Unix domain socket 上无法跨平台证明它不是
-timeout / backlog / 权限 / 资源耗尽的别名，因此按"安全优先、不追求自动 recovery 成功率"
-一律 fail closed。白名单 DEFINITELY_GONE_ERRNOS 当前只含 ENOENT，匹配必须显式，默认分支必须是 UNKNOWN。
+**Probe failure is not death proof。** `DEFINITELY_GONE` / `DEFINITELY_GONE_ERRNOS` /
+`OS_EXECUTOR_ENDPOINT_ABSENT` 已从代码中彻底删除：ENOENT 曾被视为"endpoint 不存在 → 进程已死"，
+但它只证明 pathname 不存在，不证明持有该 endpoint 的进程已死。
 
-后果（有意接受）：被 SIGKILL 的 executor 会留下 stale socket 文件 → 新 runtime 的 probe 为 UNKNOWN →
+### Trusted death proof（D4-03C4 Closure-2 · 永久）
+
+当前阶段允许 `quiesced=true` 的可信来源只有两个：
+
+1. **同一 supervisor lifetime**：production `RuntimeSupervisor` 自己观测到的真实
+   `child.on("exit")` → reason `SUPERVISOR_OBSERVED_EXIT`；
+2. **persisted prior proof**：上一次 production supervisor 在真实 `exit` 后持久化的
+   `status=EXITED` 且 reason 属于 trusted transition（`SUPERVISOR_OBSERVED_EXIT` /
+   `EXECUTOR_SPAWN_FAILED`）。
+
+cold restart **只能恢复这个已经发生过的 trusted observation**，绝不从 socket pathname 的消失
+重新创造 death proof。`status=EXITED` 但 reason 不可信的 record 与 ACTIVE 一样 fail closed
+（不 observeExit、不 quiesced、persisted record 不被改写）。
+
+### rehydrate() 契约（D4-03C4 Closure-2）
+
+    invalid instanceId   → ignore；不 probe / 不 persist / 不 observeExit / 不 quiesce
+    trusted EXITED       → register + trusted observeExit；dead++
+    否则                 → 用 this.socketPath(validatedInstanceId) 做 reachability probe
+      ALIVE              → alive++（persisted record 保持 ACTIVE）
+      UNKNOWN            → no observeExit；unknown++（persisted record 保持 ACTIVE）
+
+UNKNOWN 必须单独计数，不得归入 dead；UNKNOWN 只记录 safe 事件
+（`runtime_liveness_unknown` + instanceId + 归一化 reason），绝不记录绝对路径。
+
+后果（有意接受）：被 SIGKILL 的 executor / 被 unlink 的 pathname 都会让 probe 停在 UNKNOWN →
 该 UNKNOWN_EFFECT 不会被判成 FAILED，而是保持 UNKNOWN_EFFECT + Task/Step BLOCKED；只有 APPLIED
 （authoritative read-only Domain verifier 可靠观察到 desired effect）才允许
-UNKNOWN_EFFECT → SUCCEEDED，且该路径不依赖 quiescence。
+UNKNOWN_EFFECT → SUCCEEDED，且该路径不依赖 quiescence。这是"宁可长期 UNKNOWN_EFFECT，
+也不牺牲 correctness"的有意取舍。
 
-rehydrate() 的 tri-state 契约：
+### Persisted Runtime Record Contract（D4-03C4 Closure-2 · 永久）
 
-    ALIVE           → register ACTIVE；alive++
-    DEFINITELY_GONE → register ACTIVE；trusted observeExit；dead++
-    UNKNOWN         → register ACTIVE；no observeExit；unknown++（persisted record 保持 ACTIVE）
+persisted executor record 只保存 safe binding：`instanceId / status / startedAt / endedAt /
+exitCode / signal / reason / callId / holderId`。**不保存 `socketPath`** —— 它是 derived runtime
+implementation detail，不是 durable authority。`rehydrate()` 永远使用
+`this.socketPath(validatedInstanceId)` 重新派生 probe path；旧 record 中的 legacy `socketPath`
+一律忽略。`instanceId` 必须匹配 production 形态 `^exe_[A-Za-z0-9_-]{1,64}$`，否则整条 record
+被忽略，绝不参与 probe / persist / observeExit。该契约不需要 SQLite migration
+（record 是 JSON 文件，不是 SQLite authority schema）；`SCHEMA_VERSION` 保持 14。
 
-UNKNOWN 必须单独计数，不得归入 dead；persisted executor record 不得被改写成 EXITED /
-OS_EXECUTOR_ENDPOINT_ABSENT。UNKNOWN liveness 只记录 safe 事件
-（runtime_liveness_unknown + instanceId + 归一化 reason），绝不记录绝对路径。
-
-静态 + 动态 Gate：timeout callback 与任意 socket.on("error") 都不得调用 observeExit /
-#observeExit（tests/side-effect-c4-closure.test.mjs 的 Static Gate 解析源码断言）。
+静态 + 动态 Gate：`tests/side-effect-c4-closure2.test.mjs`（Adversarial Live-Unlink、
+persisted record contract、path traversal / legacy socketPath spoof、trusted vs untrusted EXITED、
+real same-supervisor child exit、live-unlink late-mutation E2E）。
 
 ### 两条写入路径显式分离（§11）
 
