@@ -1,8 +1,8 @@
 {
   "phase": "D4-06",
   "title": "关联链完整性 + 预算到限停止",
-  "testedCommit": "207f9462e03e204594be5dc6e313041afda8efdb",
-  "workspaceState": "",
+  "testedCommit": "83baad6f5ba56ebb415bfdd754357151381f371f",
+  "workspaceState": "M docs/D4-04-GATE-EVIDENCE.json\n M docs/D4-05-GATE-EVIDENCE.json",
   "command": "npm run test:d4-06",
   "env": {
     "electron": "44.3.0",
@@ -27,7 +27,7 @@
       "pass": 94,
       "fail": 0
     },
-    "artifactSha256": "0bd21e72be12ab6cfac5a2e77d11a5469ae08d28bed49c059af2449c2becdf34"
+    "artifactSha256": "ddf5498c18af23222ab07536fc658049eef267f35ab3b93dfe3c9842d00ce93f"
   },
   "budgetRun": {
     "exitCode": 0,
@@ -90,11 +90,11 @@
   "sourceArtifacts": [
     {
       "path": "artifacts/d4-04/vertical-smoke-gate.json",
-      "sha256": "88f7f887670605fea976d942c45d3ae8a2069671418c559dc706e1bb32044bfc"
+      "sha256": "a2fe4cb39f53698537e43ec972ed62cb4944d443104ee2f356be558501dee174"
     },
     {
       "path": "artifacts/d4-06/budget-tests.tap",
-      "sha256": "60cff8f417cc69d523799ecadbba3cfadb6fbc6d26f8bd291956441c451c4164"
+      "sha256": "1b32febd08438c00a845af9c71ce7b659d0cb7b78d7f7657fbcb38909c837228"
     }
   ],
   "checks": [
@@ -179,7 +179,7 @@
     {
       "name": "C3 · Approval UI 显示 tool / risk / target / effect",
       "expected": null,
-      "actual": "应用 / AgentAI 助手（本机会话）工具Trash Resource（resource.trash）风险可逆写入目标Vertical Smoke Resourceresource://res_eSdDJLrundmGRw_CeYXRR",
+      "actual": "应用 / AgentAI 助手（本机会话）工具Trash Resource（resource.trash）风险可逆写入目标Vertical Smoke Resourceresource://res_mK7v9Lq_x3J0l7I3LecG-",
       "ok": true
     },
     {
@@ -209,7 +209,7 @@
     {
       "name": "C8 · production executor spawned + ready + real child exit",
       "expected": null,
-      "actual": "{\"instanceId\":\"exe_efC1k_yk\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":0,\"signal\":null,\"launchError\":false}",
+      "actual": "{\"instanceId\":\"exe_95ihgXTk\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":0,\"signal\":null,\"launchError\":false}",
       "ok": true
     },
     {
@@ -299,7 +299,7 @@
     {
       "name": "F5 · claim RUNNING 先于真实 child exit 崩溃",
       "expected": null,
-      "actual": "{\"claimIdx\":20,\"unknownIdx\":21,\"ev\":{\"instanceId\":\"exe_QEpWMsSh\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":9,\"signal\":null,\"launchError\":false}}",
+      "actual": "{\"claimIdx\":20,\"unknownIdx\":21,\"ev\":{\"instanceId\":\"exe_7fDJIsBi\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":9,\"signal\":null,\"launchError\":false}}",
       "ok": true
     },
     {
@@ -317,7 +317,7 @@
     {
       "name": "G1 · Renderer 自报 actor/risk 被忽略（真实 session 决定）",
       "expected": null,
-      "actual": "{\"ok\":true,\"actor\":\"usr_Qwm87XHUw2dSN2jZB_wUhrD6Ij2Lgcd-\"}",
+      "actual": "{\"ok\":true,\"actor\":\"usr_oES6QBWUe3YqIuEwpqFmsw_NnoPqln3H\"}",
       "ok": true
     },
     {
@@ -335,7 +335,7 @@
     {
       "name": "H1 · Reload 后从 backend state 恢复 Task 结果",
       "expected": null,
-      "actual": "taskId=task_4wPqKI4NTrwxdw gate=ready",
+      "actual": "taskId=task_vKflqQblbx88Jg gate=ready",
       "ok": true
     },
     {
@@ -740,7 +740,7 @@
     "pass": 106,
     "fail": 0
   },
-  "at": "2026-09-17T03:35:18.939Z",
+  "at": "2026-09-17T04:45:49.918Z",
   "artifactSha256Coverage": "sha256 of canonical JSON (2-space indent) excluding the artifactSha256 field",
-  "artifactSha256": "a8d8150c873145682b88998c0b6a2b47709bdc06d00e8a0de52277c434b951e7"
+  "artifactSha256": "bf1b7f414cf6202e5df6c1c17a039dc68ef17fe2b4052c2ad5cdcbc909ee39c3"
 }

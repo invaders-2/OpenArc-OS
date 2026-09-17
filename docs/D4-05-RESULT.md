@@ -1,8 +1,9 @@
-# D4-05 执行关卡 · 结果记录（草稿，父级定稿）
+# D4-05 执行关卡 · 结果记录（父级定稿）
 
 - 工作树：`/Users/wepingli/Desktop/OpenArc OS-d4-01`；分支：`feature/d4-03-tool-proxy`
 - Base HEAD（本轮起点，干净）：`a7faf060bb4b2371fdfa379118b2d9011ba7b412`
-- 被测 commit：`a7faf060bb4b2371fdfa379118b2d9011ba7b412`（**未 commit**，改动全部在工作树；`docs/D4-05-GATE-EVIDENCE.json` 的 `workspaceState` 完整列出）
+- **被测 commit**（代码与测试提交）：`83baad6f5ba56ebb415bfdd754357151381f371f`
+- Final HEAD：本轮报告/证据提交（见文末）
 - 范围：只补齐 PLAN.md §41 的 D4-05 四场景（产物不符 / 结果未知 / 用量到限 / 记忆越权）；第二轮按父级指示补齐 S2 的**最小人工确认入口**以闭合 §384。不扩展真实工具面、不放宽既有检查、不 commit、不 push。
 
 ## 1. 要求对应表
@@ -66,6 +67,6 @@
 ## 6. 证据
 
 - `docs/D4-05-GATE-EVIDENCE.json`（tracked、脱敏）：`testedCommit` / 运行前 `workspaceState` / `command` / `env` / 逐条 `{name,expected,actual,ok}`（125 条）/ `scenarioStatus` / `gaps` / `sourceArtifacts`（含 SHA-256）/ `artifactSha256`。
-- `artifactSha256 = c17d83528d5df93b9a3c55e4d708678b4cedab7cb953e513af37c7215e316c63`。
-- 原始 artifact（gitignored）SHA-256：`artifacts/d4-04/vertical-smoke-gate.json=65164eadc52ff0146ebbc2360345ac2cf3b13df22c2c4c166fa75c7b11bccd66`；`artifacts/d4-05/node-tests.tap=ebcce67afb832d7fd1dc9fa0047cea6b3c49fe9f8366daf81d07709d2d96549a`；`artifacts/d4-05-recovery/recovery-ui-gate.json=4c3c10135290d2b9d35f6b23794333931d5a699c704ffc28e376b801c6be9e8c`。
+- `artifactSha256 = 2f4bc11f056f4ac8e9b7d6b6bb0abfe7ad122e1c0bdad78a5da91b5d6ce2403f`（testedCommit `83baad6`，运行前 `workspaceState=""`）。
+- 原始 artifact（gitignored）SHA-256：`artifacts/d4-04/vertical-smoke-gate.json=85c9b08780cffe0ba77a69edd05d71f929bc8e1f8c53abb958ed07093a64365f`；`artifacts/d4-05/node-tests.tap=450ac905ba7b577cdc3abbf0e4fdb0d4a823d11424bb94a01b12f2177972b260`；`artifacts/d4-05-recovery/recovery-ui-gate.json=f692cf436e7406b627c1ab73e4701c3d2d3e69a15fc4857db5edd6e0819aca80`。
 - 已脱敏：无 `/Users`、`/private`、`/var/folders`、`mpx_`、`tpx_`、`credential`。
