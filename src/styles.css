@@ -2398,7 +2398,7 @@ input[type="checkbox"] {
   font-weight: var(--fw-regular);
   letter-spacing: var(--tracking-wide);
   line-height: var(--lh-tight);
-  color: var(--muted);
+  color: var(--placeholder);
 }
 .lock-time {
   margin-top: 0;
@@ -2445,7 +2445,7 @@ input[type="checkbox"] {
   margin-top: var(--space-1);
   font-size: var(--fs-caption);
   letter-spacing: 0.02em;
-  color: var(--muted);
+  color: var(--placeholder);
 }
 .lock-form {
   width: 100%;
@@ -2532,7 +2532,7 @@ input[type="checkbox"] {
   margin-top: var(--space-4);
   font-size: var(--fs-micro);
   line-height: var(--lh-normal);
-  color: var(--muted);
+  color: var(--placeholder);
 }
 
 /* ── 文件夹图标 ──────────────────────────────────────────────────────────────
