@@ -18,6 +18,10 @@ function planFor(mode, resourceRefs = [], followSeen = false) {
   // 保证"先完成 refA 真实 WRITE，再对 refB 等待批准"的顺序。
   if (mode === "revoke2") return followSeen ? [search, trash(refs[0]), trash(refs[1])] : [search, trash(refs[0])];
   if (mode === "write" || mode === "deny" || mode === "cancel" || mode === "unknown") return [search, trash(refs[0])];
+  // D4-06 执行异常：真实 WRITE proposal，但 execution 前 Domain version 已变化 → 受控执行失败。
+  if (mode === "conflict") return [search, trash(refs[0])];
+  // D4-06 预算到限：14 次受控 READ，超过 Model Proxy(8) / Tool Facade(8) bounded 预算，逼出真实预算停止。
+  if (mode === "budget") return Array.from({ length: 14 }, (_, i) => ({ name: "resource_search", args: () => ({ query: "Budget Probe " + (i + 1), limit: 5 }) }));
   return [search, read];
 }
 

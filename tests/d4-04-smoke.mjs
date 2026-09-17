@@ -121,9 +121,10 @@ const artifactDir = path.join(ROOT, "artifacts", "d4-04");
 fs.mkdirSync(artifactDir, { recursive: true });
 fs.writeFileSync(path.join(artifactDir, "vertical-smoke-gate.json"), gateText);
 // artifacts/ 被 ignore：同一份脱敏证据另写一份纳入版本管理。
+// D4-06 复用本运行时可用 OPENARC_D4_SMOKE_GATE_OUT 指定输出，避免覆盖 tracked 的 D4-04 文档。
 const docsDir = path.join(ROOT, "docs");
 fs.mkdirSync(docsDir, { recursive: true });
-fs.writeFileSync(path.join(docsDir, "D4-04-GATE-EVIDENCE.json"), gateText);
+fs.writeFileSync(process.env.OPENARC_D4_SMOKE_GATE_OUT || path.join(docsDir, "D4-04-GATE-EVIDENCE.json"), gateText);
 
 console.log("\n" + (report.checks.length - failed.length) + "/" + report.checks.length + " vertical smoke checks passed");
 if (report.errors.length) console.log("PROBE ERRORS:\n" + report.errors.join("\n").slice(0, 2000));

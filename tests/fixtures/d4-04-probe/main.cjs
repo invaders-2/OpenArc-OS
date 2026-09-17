@@ -5,6 +5,7 @@ const { app, BrowserWindow, ipcMain, safeStorage } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const os = require("node:os");
+const crypto = require("node:crypto");
 const { pathToFileURL } = require("node:url");
 
 const ROOT = path.resolve(__dirname, "../../..");
@@ -30,6 +31,7 @@ const check = (name, ok, detail, expected) => {
   out((ok ? "PASS" : "FAIL") + " " + name + (detail ? " :: " + detail : ""));
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const sha256 = (t) => crypto.createHash("sha256").update(String(t)).digest("hex");
 
 let win; let userData = null; let identity = null; let runtimeBoot = null;
 const mainErrors = []; const consoleErrors = [];
@@ -371,6 +373,150 @@ app.whenReady().then(async () => {
     await waitFor(async () => (await isDisabled("[data-ai-run]")) === false, 30000);
     check("R2.12 · UI 最终 BLOCKED 且 Run 复位（busy=false）", (await attr(".ai-panel", "data-ai-status")) === "BLOCKED" && (await isDisabled("[data-ai-run]")) === false, await attr(".ai-panel", "data-ai-status"), "BLOCKED + run enabled");
 
+    // D4-06 · 执行异常：受控 WRITE 在 execution 前 Domain version 已变化 → 真实受控执行失败。
+    const regrantD406 = identity.authorization.grantAppToolPermission({ context: aiCtx(), appId: "ai", actions: ["tool.resource.search", "tool.resource.readMetadata", "tool.resource.trash"] });
+    if (regrantD406 && regrantD406.ok && regrantD406.grant) toolGrantId = regrantD406.grant.grantId;
+    const conflictRes = await createSmokeResource("Exec Fail Target");
+    await setPlan("conflict", conflictRes.resourceRef);
+    const conflictTask = await runTaskViaUI("EXEC-FAIL smoke: 把 Exec Fail Target 移入废纸篓");
+    const conflictCall = await waitCall(conflictTask.taskId);
+    const conflictApprovalShown = !!conflictCall && (await waitApprovalFor(conflictCall.callId, 60000));
+    const bumpCtx = { sessionRef: identity.service.current, appId: "resource-library", source: "probe" };
+    const conflictBump = await identity.resourceService.replaceText({ context: bumpCtx, resourceRef: conflictRes.resourceRef, text: "exec-fail-version-bump" });
+    check("X1 · 执行异常前置：proposal 到 AWAITING_APPROVAL 且 execute 前 Domain version 已变化", conflictApprovalShown && !!conflictCall && conflictCall.status === "AWAITING_APPROVAL" && !!conflictBump && conflictBump.ok === true, JSON.stringify({ call: conflictCall ? conflictCall.status : "none", bumpOk: conflictBump && conflictBump.ok, bumpErr: conflictBump && conflictBump.error }), "AWAITING_APPROVAL + version bumped");
+    if (!conflictCall) throw new Error("EXEC-FAIL proposal missing");
+    const conflictExecBefore = identity.supervisor.executorEvidence().length;
+    check("X2 · 点击真实 Approve（进入受控执行）", (await click('[data-approval-action="approve"]')) === "ok", "", "ok");
+    const conflictBlocked = await waitFor(() => taskStatus(conflictTask.taskId) === "BLOCKED", 120000);
+    const conflictFinal = identity.sideEffectStore.callById(conflictCall.callId);
+    const conflictStep = identity.taskStore.stepsOfTask(conflictTask.taskId)[0] || null;
+    const conflictRun = identity.taskStore.harnessRunsOfTask(conflictTask.taskId).slice(-1)[0] || null;
+    const conflictArtifacts = identity.taskStore.artifactsOfTask(conflictTask.taskId).length;
+    const conflictVerifs = identity.taskStore.verificationsOfTask(conflictTask.taskId).length;
+    const conflictExecAfter = identity.supervisor.executorEvidence().length;
+    const conflictEvidence = identity.supervisor.executorEvidence().slice(-1)[0] || null;
+    report.executor.conflict = conflictEvidence;
+    check("X3 · 执行异常 → Task/Step BLOCKED，Run 停止（不是 RUNNING）", conflictBlocked && taskStatus(conflictTask.taskId) === "BLOCKED" && !!conflictStep && conflictStep.status === "BLOCKED" && (!conflictRun || conflictRun.status !== "RUNNING"), JSON.stringify({ task: taskStatus(conflictTask.taskId), step: conflictStep ? conflictStep.status : "none", run: conflictRun ? conflictRun.status : "none" }), "Task/Step BLOCKED + Run 非 RUNNING");
+    check("X4 · 执行异常 → 0 Artifact / 0 Verification（不适用：该路径无 artifact 提交）", conflictArtifacts === 0 && conflictVerifs === 0, JSON.stringify({ artifacts: conflictArtifacts, verifications: conflictVerifs }), "0 / 0");
+    check("X5 · 执行异常 → 受控执行确实发生且失败：0 mutation / call 非 SUCCEEDED / 恰好 1 次执行（无重试）/ 0 active lease", trashed(conflictRes.resourceRef) === false && !!conflictFinal && conflictFinal.status !== "SUCCEEDED" && conflictExecAfter === conflictExecBefore + 1 && identity.sideEffectStore.leasesOfCall(conflictCall.callId).filter((l) => l.status === "ACTIVE").length === 0, JSON.stringify({ trashed: trashed(conflictRes.resourceRef), call: conflictFinal ? conflictFinal.status : "none", errorCode: conflictFinal ? conflictFinal.errorCode : null, exec: conflictExecBefore + "→" + conflictExecAfter, leaseActive: identity.sideEffectStore.leasesOfCall(conflictCall.callId).filter((l) => l.status === "ACTIVE").length }), "0 mutation + call 非 SUCCEEDED + 恰好 1 次受控执行 + 0 active lease");
+    check("X6 · 执行异常 → 无自动重试（恰好 1 条 call）", identity.sideEffectStore.callsOfTask(conflictTask.taskId).length === 1, String(identity.sideEffectStore.callsOfTask(conflictTask.taskId).length), "1");
+    await waitFor(async () => (await isDisabled("[data-ai-run]")) === false, 30000);
+    check("X7 · 执行异常 → Renderer BLOCKED 且 Run 复位（busy=false）", (await attr(".ai-panel", "data-ai-status")) === "BLOCKED" && (await isDisabled("[data-ai-run]")) === false, await attr(".ai-panel", "data-ai-status"), "BLOCKED + run enabled");
+
+    // D4-06 · 预算到限停止（真实产品调度链）：受控 READ 超过 Model Proxy / Tool Facade bounded 预算。
+    await setPlan("budget");
+    const budgetTask = await runTaskViaUI("BUDGET smoke: 连续读取直至预算到限");
+    const budgetBlocked = await waitFor(() => taskStatus(budgetTask.taskId) === "BLOCKED", 180000);
+    const budgetStep = identity.taskStore.stepsOfTask(budgetTask.taskId)[0] || null;
+    const budgetRun = identity.taskStore.harnessRunsOfTask(budgetTask.taskId).slice(-1)[0] || null;
+    const budgetArtifacts = identity.taskStore.artifactsOfTask(budgetTask.taskId).length;
+    const budgetVerifs = identity.taskStore.verificationsOfTask(budgetTask.taskId).length;
+    const budgetExecs = identity.toolStore.executionsOfTask(budgetTask.taskId);
+    const budgetCalls = identity.taskStore.callsOfTask(budgetTask.taskId);
+    const budgetSxc = identity.sideEffectStore.callsOfTask(budgetTask.taskId);
+    check("Y1 · 预算到限 → Task/Step BLOCKED + Run 停止（不是 RUNNING）", budgetBlocked && taskStatus(budgetTask.taskId) === "BLOCKED" && !!budgetStep && budgetStep.status === "BLOCKED" && (!budgetRun || budgetRun.status !== "RUNNING"), JSON.stringify({ task: taskStatus(budgetTask.taskId), step: budgetStep ? budgetStep.status : "none", run: budgetRun ? budgetRun.status : "none" }), "BLOCKED/BLOCKED/非 RUNNING");
+    check("Y2 · 预算到限 → 0 Artifact / 0 Verification（不适用：该路径无 artifact 提交）", budgetArtifacts === 0 && budgetVerifs === 0, JSON.stringify({ artifacts: budgetArtifacts, verifications: budgetVerifs }), "0 / 0");
+    check("Y3 · 预算到限 → 只发生 bounded 受控 READ（>0 且 <=8），无 WRITE execution", budgetExecs.length > 0 && budgetExecs.length <= 8 && budgetExecs.every((e) => e.tool_id === "resource.search" && e.task_id === budgetTask.taskId), JSON.stringify({ execs: budgetExecs.length, tools: [...new Set(budgetExecs.map((e) => e.tool_id))], modelCalls: budgetCalls.length }), "1..8 次 resource.search（provider 请求 14 次被预算截断）");
+    check("Y4 · 预算到限 → 0 SideEffectCall / 0 mutation / 无自动重试", budgetSxc.length === 0 && budgetExecs.filter((e) => e.tool_id === "resource.trash").length === 0, JSON.stringify({ sideEffectCalls: budgetSxc.length }), "0 SideEffectCall");
+    await waitFor(async () => (await isDisabled("[data-ai-run]")) === false, 30000);
+    check("Y5 · 预算到限 → Renderer BLOCKED 且 Run 复位（busy=false）", (await attr(".ai-panel", "data-ai-status")) === "BLOCKED" && (await isDisabled("[data-ai-run]")) === false, await attr(".ai-panel", "data-ai-status"), "BLOCKED + run enabled");
+
+    // ---------------------------------------------------------------- D4-06 关联链审计（对本次运行所有 task 逐项 check）
+    const d406conn = identity.store.connection || identity.store.db;
+    const rawRows = (sql) => d406conn.prepare(sql).all();
+    const allAuditTasks = identity.taskStore.allTasks();
+    const auditTaskIds = new Set(allAuditTasks.map((t) => t.task_id));
+    const stepRows = rawRows("SELECT step_id, task_id FROM task_steps");
+    const stepOwner = new Map(stepRows.map((s) => [s.step_id, s.task_id]));
+    const runRows = rawRows("SELECT run_id, task_id, step_id FROM task_harness_runs");
+    const runOwner = new Map(runRows.map((r) => [r.run_id, r.task_id]));
+    const callRows = rawRows("SELECT call_id, task_id, step_id FROM task_model_calls");
+    const execRows = rawRows("SELECT execution_id, task_id, step_id, run_id FROM tool_executions");
+    const sxcRows = rawRows("SELECT call_id, task_id, step_id, run_id FROM side_effect_calls");
+    const artRows = rawRows("SELECT artifact_id, task_id, step_id, run_id, checksum, safe_content FROM task_artifacts");
+    const verRows = rawRows("SELECT verification_id, artifact_id, task_id FROM task_verifications");
+    const artifactOwner = new Map(artRows.map((a) => [a.artifact_id, a.task_id]));
+    const stepOrphans = stepRows.filter((s) => !auditTaskIds.has(s.task_id)).map((s) => s.step_id);
+    const callViolations = callRows.filter((c) => !auditTaskIds.has(c.task_id) || (c.step_id && stepOwner.get(c.step_id) !== c.task_id)).map((c) => c.call_id);
+    const execViolations = execRows.filter((e) => !auditTaskIds.has(e.task_id) || (e.step_id && stepOwner.get(e.step_id) !== e.task_id) || (e.run_id && runOwner.get(e.run_id) !== e.task_id)).map((e) => e.execution_id);
+    const runViolations = runRows.filter((r) => !auditTaskIds.has(r.task_id) || (r.step_id && stepOwner.get(r.step_id) !== r.task_id)).map((r) => r.run_id);
+    const sxcViolations = sxcRows.filter((c) => !auditTaskIds.has(c.task_id) || (c.step_id && stepOwner.get(c.step_id) !== c.task_id) || (c.run_id && runOwner.get(c.run_id) !== c.task_id)).map((c) => c.call_id);
+    const artViolations = artRows.filter((a) => !auditTaskIds.has(a.task_id) || (a.step_id && stepOwner.get(a.step_id) !== a.task_id) || (a.run_id && runOwner.get(a.run_id) !== a.task_id)).map((a) => a.artifact_id);
+    const verViolations = verRows.filter((v) => !auditTaskIds.has(v.task_id) || artifactOwner.get(v.artifact_id) !== v.task_id).map((v) => v.verification_id);
+    check("L1 · 每个 step 归属存在的 task（无孤立 step）", stepOrphans.length === 0, JSON.stringify(stepOrphans), "[]");
+    check("L2 · 每个 model call 的 task/step 归属正确（无跨任务串联）", callViolations.length === 0, JSON.stringify(callViolations), "[]");
+    check("L3 · 每个 tool execution 的 task/step/run 同属一个 task", execViolations.length === 0, JSON.stringify(execViolations), "[]");
+    check("L4 · 每个 side-effect call 的 task/step/run 同属一个 task", sxcViolations.length === 0, JSON.stringify(sxcViolations), "[]");
+    check("L5 · 每个 harness run 的 task/step 归属正确（无孤立 run）", runViolations.length === 0, JSON.stringify(runViolations), "[]");
+    check("L6 · 每个 artifact 的 task/step/run 同属一个 task", artViolations.length === 0, JSON.stringify(artViolations), "[]");
+    check("L7 · 每个 verification 与 artifact 同属一个 task", verViolations.length === 0, JSON.stringify(verViolations), "[]");
+
+    const scenarioTasks = [
+      { kind: "READ_SUCCESS", id: readTask && readTask.taskId },
+      { kind: "WRITE_APPROVE_SUCCESS", id: writeTask && writeTask.taskId },
+      { kind: "DENY", id: denyTask && denyTask.taskId },
+      { kind: "CANCEL", id: cancelTask && cancelTask.taskId },
+      { kind: "UNKNOWN", id: unknownTask && unknownTask.taskId },
+      { kind: "SPOOF_APPROVE_SUCCESS", id: spoofTask && spoofTask.taskId },
+      { kind: "REVOKE_PENDING", id: r1Task && r1Task.taskId },
+      { kind: "REVOKE_MID", id: r2Task && r2Task.taskId },
+      { kind: "EXECUTION_EXCEPTION", id: conflictTask && conflictTask.taskId },
+      { kind: "BUDGET_STOP", id: budgetTask && budgetTask.taskId },
+    ];
+    const enumerated = new Set(scenarioTasks.map((s) => s.id).filter(Boolean));
+    const unenumerated = allAuditTasks.map((t) => t.task_id).filter((id) => !enumerated.has(id));
+    check("L8 · 本次运行所有 task 均被场景枚举（无遗漏 task）", unenumerated.length === 0, JSON.stringify({ total: allAuditTasks.length, unenumerated }), "0 unenumerated");
+
+    const commitKinds = new Set(["READ_SUCCESS", "WRITE_APPROVE_SUCCESS", "SPOOF_APPROVE_SUCCESS"]);
+    const commitViolations2 = [];
+    for (const s of scenarioTasks.filter((x) => commitKinds.has(x.kind) && x.id)) {
+      const taskRow = identity.taskStore.taskById(s.id);
+      const steps = identity.taskStore.stepsOfTask(s.id);
+      const arts = identity.taskStore.artifactsOfTask(s.id);
+      const vers = identity.taskStore.verificationsOfTask(s.id);
+      if (!taskRow || taskRow.status !== "SUCCEEDED") commitViolations2.push(s.kind + ":task_status=" + (taskRow ? taskRow.status : "missing"));
+      for (const st of steps.filter((x) => x.status === "SUCCEEDED")) {
+        const a = arts.find((x) => x.step_id === st.step_id);
+        if (!a) { commitViolations2.push(s.kind + ":success_step_without_artifact:" + st.step_id); continue; }
+        if (a.checksum !== sha256(a.safe_content)) commitViolations2.push(s.kind + ":checksum_mismatch:" + a.artifact_id);
+        if (!vers.find((v) => v.artifact_id === a.artifact_id)) commitViolations2.push(s.kind + ":artifact_without_verification:" + a.artifact_id);
+      }
+    }
+    check("L9 · 成功 step 必有 Artifact 且 checksum==sha256(content)；每个 Artifact 必有同 task Verification；成功任务收敛 SUCCEEDED", commitViolations2.length === 0, JSON.stringify(commitViolations2), "[]");
+
+    const noCommitKinds = new Set(["DENY", "CANCEL", "UNKNOWN", "REVOKE_PENDING", "REVOKE_MID", "EXECUTION_EXCEPTION", "BUDGET_STOP"]);
+    const noCommitDetails = [];
+    const noCommitBad = [];
+    for (const s of scenarioTasks.filter((x) => noCommitKinds.has(x.kind) && x.id)) {
+      const taskRow = identity.taskStore.taskById(s.id);
+      const arts = identity.taskStore.artifactsOfTask(s.id).length;
+      const vers = identity.taskStore.verificationsOfTask(s.id).length;
+      const status = taskRow ? taskRow.status : "missing";
+      const ok = arts === 0 && vers === 0 && status !== "SUCCEEDED";
+      const detail = s.kind + " 不适用（该路径无 artifact 提交）: status=" + status + " artifacts=" + arts + " verifications=" + vers;
+      noCommitDetails.push(detail);
+      if (!ok) noCommitBad.push(s.kind);
+    }
+    check("L10 · 拒绝/取消/撤权/UNKNOWN/执行异常/预算停止路径如实 0 Artifact / 0 Verification（明细标注不适用原因）", noCommitBad.length === 0, JSON.stringify(noCommitDetails), "all artifacts=0 verifications=0 且非 SUCCEEDED");
+
+    const dupCallTasks = [];
+    for (const t of allAuditTasks) {
+      const ids = identity.sideEffectStore.callsOfTask(t.task_id).map((c) => c.callId);
+      if (new Set(ids).size !== ids.length) dupCallTasks.push(t.task_id);
+    }
+    check("L11 · 同一 task 内 SideEffectCall callId 唯一（无重复副作用）", dupCallTasks.length === 0, JSON.stringify(dupCallTasks), "[]");
+
+    const writeCalls = identity.sideEffectStore.callsOfTask(writeTask.taskId);
+    const spoofCalls = identity.sideEffectStore.callsOfTask(spoofTask.taskId);
+    check("L12 · 成功 WRITE 恰好 1 次 mutation（各 1 条 SUCCEEDED call + 目标 trashed）", writeCalls.length === 1 && writeCalls[0].status === "SUCCEEDED" && spoofCalls.length === 1 && spoofCalls[0].status === "SUCCEEDED" && trashed(resourceRef) === true && trashed(spoofRes.resourceRef) === true, JSON.stringify({ writeCalls: writeCalls.map((c) => c.status), spoofCalls: spoofCalls.map((c) => c.status), baseTrashed: trashed(resourceRef), spoofTrashed: trashed(spoofRes.resourceRef) }), "各 1 SUCCEEDED + 均已 trashed");
+
+    const r2Calls = identity.sideEffectStore.callsOfTask(r2Task.taskId);
+    check("L13 · R2 撤权中任务恰好 2 条 call（A SUCCEEDED / B BLOCKED）", r2Calls.length === 2 && r2Calls.some((c) => c.status === "SUCCEEDED") && r2Calls.some((c) => c.status === "BLOCKED"), JSON.stringify(r2Calls.map((c) => c.status)), "2 条：1 SUCCEEDED + 1 BLOCKED");
+
+    const runningTasks = allAuditTasks.filter((t) => t.status === "RUNNING" || t.status === "PENDING").map((t) => t.task_id + "=" + t.status);
+    check("L14 · 所有 task 收敛终态（无 RUNNING / PENDING）", runningTasks.length === 0, JSON.stringify(runningTasks), "[]");
+    check("L15 · 预算停止 task：bounded 受控 READ execution 保留且归属正确，0 Artifact", budgetExecs.length > 0 && budgetExecs.length <= 8 && budgetExecs.every((e) => e.task_id === budgetTask.taskId && e.step_id === budgetStep.step_id) && budgetArtifacts === 0, JSON.stringify({ execs: budgetExecs.length, artifacts: budgetArtifacts }), "1..8 exec + 0 artifact");
+    report.linkage = { taskCount: allAuditTasks.length, scenarioKinds: scenarioTasks.map((s) => s.kind), noCommit: noCommitDetails };
 
     // Secret scan
     let dump = "";
