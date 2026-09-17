@@ -1,5 +1,99 @@
 # 计划修订记录
 
+## 2026-09-16（十四）：箭头换成实心无描边大圆角样式，并全局启用
+
+用户口径：「箭头光标换成用户指定的这种样式，并且 app 全局都用它」——参考图是**实心、没有白色描边、
+顶点大圆角、比 macOS 那只更饱满**的箭头。只重画箭头，其它光标形状先不动。
+
+### 改了什么
+
+- **重画箭头** `public/cursors/arrow-light.svg` / `arrow-dark.svg`（`viewBox="0 0 32 32"`、
+  `width/height="32"` 不变）：把参考图（512×512 位图）阈值化取轮廓，量出「4 个角 + 1 个凹口」的
+  几何——三个外角圆角半径约 16 / 16 / 15.5（512 坐标），凹口很小；用「4 条边线 + 3 个圆角弧 +
+  1 个小凹口弧」还原成**一条 `<path>`**。再缩放/平移，让**尖端顶点精确落在 (2,2)**，热点仍是 `2 2`。
+  浅色 = 纯黑填充，深色 = 纯白填充，**两种都不描边、也不加阴影**（与参考图一致）。与参考图位图
+  归一化 IoU = **0.992**（`/tmp/oa-probe/arrow/` 下的分析脚本与渲染对照）。
+- **全局应用**（`src/styles.css` 末尾「自绘光标」块）：真正的根是 `.desktop`（`height:100vh`，铺满视口；
+  桌面 / 窗口内部 / 侧栏 / 程序坞 / 顶栏 / 弹层全在它里面），所以只在根上设一次 cursor：
+  `.desktop { --cursor-arrow: url("/cursors/arrow-light.svg") 2 2, default; cursor: var(--cursor-arrow); }`，
+  `.desktop.dark` 把变量换成 `arrow-dark.svg`。**没有**用 `* { cursor }`，也不逐个组件声明。
+- 把原先 4 处显式 `cursor: default` 全部换成 `var(--cursor-arrow)`：`.traffic button:disabled`、
+  `.icon-button:disabled`、`.desktop-folder`、`.file-cell`（它们本来就显示系统箭头）。
+- **显式保住 I 型**：`.desktop textarea`、`[contenteditable="true"]`、以及文本类 `input`（排除
+  `range / file / checkbox / radio / button / submit / reset / color`）写 `cursor: text`。选**原生 `text`**
+  而不是自绘 `text-*.svg`：原生 I 型在每个 DPI / 缩放下都清晰，位图那根 1px 线在 32 网格里最脆。
+  另外，Chromium 的 UA 样式给 `range / file / checkbox` 声明了 `cursor: default`、会盖过继承，
+  也一并显式换成 `var(--cursor-arrow)`（按钮类保持 `pointer`，与 `<button>` 一致）。
+- **没有改**缩放 / 框选 / 拖拽 / 禁止 / 拷贝这五条语义光标的规则；但把 `copy` / `not-allowed` 两只里嵌的
+  底箭头同步成了新形状（见下一条）。
+- **同步 `copy` / `not-allowed` 的底箭头**：这两只原来内嵌的是旧尖角箭头，按住 ⌘ 拖拽 / 拖到非法落点时
+  箭头会肉眼可见地变回旧版。现在把里面的箭头换成与 `arrow-*` 完全相同的新 path（实心、无描边、无阴影），
+  **绿加号 / 禁止圈等其余部分原样不动**。两只的放大对照：`/tmp/oa-probe/compare-badges.png`。
+
+### 实测 · 全局生效（`getComputedStyle(el).cursor` 原样字符串）
+
+探针在**真实 Electron 44**（`dist`）与真实 Chromium（`dist` + 静态服务）里各读一遍，浅色 / 深色都命中
+我们的 SVG（不是系统关键字）。下表是 Electron 里的实测（`file://` 前缀略为 `…`）：
+
+| 取的元素 | 浅色实测 | 深色实测 |
+| --- | --- | --- |
+| `.desktop`（桌面 / 根） | `url("…/cursors/arrow-light.svg") 2 2, default` | `url("…/cursors/arrow-dark.svg") 2 2, default` |
+| `.topbar`（顶栏） | 同上 `arrow-light` | 同上 `arrow-dark` |
+| `.dock`（程序坞） | 同上 `arrow-light` | 同上 `arrow-dark` |
+| `.window` / `.window-body`（窗口内部） | 同上 `arrow-light` | 同上 `arrow-dark` |
+| `.split-side`（侧栏） | 同上 `arrow-light` | 同上 `arrow-dark` |
+| `.dialog` / `.dialog-body`（对话框） | 同上 `arrow-light` | 同上 `arrow-dark` |
+| `.window .resize`（缩放手柄） | `url("…/cursors/resize-se-light.svg") 16 16, nwse-resize` | `url("…/cursors/resize-se-dark.svg") 16 16, nwse-resize` |
+| `.window input`（文本框） | `text` | `text` |
+| 桌面 / 文件区框选 `[data-marquee]` | `url("…/cursors/crosshair-light.svg") 16 16, crosshair` | `…/crosshair-dark.svg` |
+| 程序坞整理 `.dock.arranging .dock-item` | `url("…/cursors/grab-light.svg") 16 17, grabbing` | `…/grab-dark.svg` |
+| 非法落点 `[data-drop-invalid="1"]` | `url("…/cursors/not-allowed-light.svg") 2 2, not-allowed` | `…/not-allowed-dark.svg` |
+| ⌘ 拷贝 `[data-cmd="1"]` | `url("…/cursors/copy-light.svg") 2 2, copy` | `…/copy-dark.svg` |
+| `.dock-item` / `.split-nav`（按钮） | `pointer`（手型，见下「保留」） | `pointer` |
+
+### 实测 · 真实 Electron 实拍（`screencapture -C`，光标已拍入）
+
+- 浅色主题桌面：`/tmp/oa-probe/cursor-light-with.png`（放大图 `cursor-light-zoom.png`）。
+- 深色主题桌面：`/tmp/oa-probe/cursor-dark-with.png`（放大图 `cursor-dark-zoom.png`）。
+- 浅色主题 + 深壁纸（风险态）：`/tmp/oa-probe/cursor-light-darkwp-with.png`（放大图 `cursor-light-darkwp-zoom.png`）。
+- 每张都同时拍了「无光标」版（`cursor-<tag>-without.png`）用来定位光标像素。
+- 热点落点：实拍反推尖端相对指针的位置为 `(0,-1)`、`(0,-3)`、`(0,0)` 设备像素（2× Retina），
+  即**尖端落在热点 ±1.5 CSS px 内**，与 CSS 的 `2 2` 一致。
+
+### 实测 · 深色背景对比度（箭头像素 vs 周围背景，WCAG 相对亮度与对比度）
+
+| 场景 | 箭头像素 RGB | 背景像素 RGB | Δ相对亮度 | WCAG 对比度 | 结论 |
+| --- | --- | --- | --- | --- | --- |
+| 浅色主题 + 浅壁纸（`#f2f2f4`） | (0, 0, 0) | (244, 242, 242) | 0.8915 | **18.83** | 清晰 |
+| 深色主题 + 深壁纸（`#171717`） | (255, 255, 255) | (23, 23, 23) | 0.9914 | **17.93** | 清晰 |
+| 浅色主题 + 深壁纸（`#171717`，错配） | (0, 0, 0) | (23, 23, 23) | 0.0086 | **1.17** | **几乎不可见** |
+
+> 注意：app 的默认壁纸就是 `theme-dark`（`#171717`），系统浅色时默认走到第三行——黑箭头压在深色桌面上
+> 对比度只有 1.17，这是真实风险，不是假想。按用户口径**没有偷偷加描边**，照交付；建议见下。
+- 同一张实拍（`cursor-light-darkwp-with.png`）的局部分辨率数据（2× Retina，单位为设备像素灰阶）：
+  光标足印 **61×61 px / 1468 像素**；实心区（腐蚀后深核 1001 px）灰阶 **0**，周围背景均匀 **23**，
+  原差 **23 / 255（≈9%）**；箭头**最亮像素 16**，其周围 **8 邻域平均 12.88**，差 **3.12**；
+  足印内单点相对自身 8 邻域平均的**最大局部分差 9.25**（出现在边缘）；足印内 **1468/1468（100%）**
+  像素比背景暗 ≥1 灰阶、**1369/1468（93.3%）** 暗 ≥20 灰阶；足印内出现的灰阶为 **0–16（共 17 级）**。
+
+- 对照图（全部光标放大，浅底 / 深底各一张，箭头格已是新样式）：
+  `/tmp/oa-probe/compare-light.png`、`/tmp/oa-probe/compare-dark.png`。
+
+### 门禁
+
+`npx tsc --noEmit` clean、`npm test` 96/96。
+
+### 保留 / 没做（等用户拍板）
+
+- **手型仍在**：`src/design-system/tokens.css` 的 `button { cursor: pointer }` 让**所有 `<button>`** 都是手型——
+  顶栏按钮、程序坞图标、侧栏 `.split-nav`、对话框 / 右键菜单按钮、窗口红绿灯、`.control-button`、
+  以及 `.rb-folder-inner`。按用户口径「保持现状」，**没改成箭头**。macOS 里按钮不显示手型、只有链接显示。
+- **无描边箭头 vs 其余有描边**：浅底上白描边本来就看不见，差异不大；深底上白色箭头没有其余形状那圈
+  黑描边，边缘相对没那么锐。可选项：(a) 给深色版箭头加 1px 黑描边；(b) 其余形状也去描边；(c) 维持现状。
+- **可见性风险（最重要）**：黑箭头在深壁纸 / 深色界面上会看不见（实测 1.17）。建议二选一：
+  ① 只给**浅色版**箭头加 1px `rgba(255,255,255,0.3)` 描边（浅底上依然看不到描边，深底上能救回来）；
+  ② 箭头按**背景 / 壁纸**而不是主题切换（深壁纸就用白箭头）。当前按主题切换，`light + 深壁纸` 会错配。
+
 ## 2026-09-16（十三）：自绘一套 OpenArc 光标（照原生形状，不拷文件）
 
 用户口径：「为 OpenArc 自绘一套自己的鼠标光标（照着 macOS 原生光标的形状，但不是拷贝文件），接进 app 里」。

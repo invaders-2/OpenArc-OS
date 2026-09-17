@@ -312,7 +312,7 @@
 }
 .traffic button:disabled {
   background: rgba(125, 125, 125, 0.5);
-  cursor: default;
+  cursor: var(--cursor-arrow);
 }
 .traffic button:disabled svg {
   opacity: 0;
@@ -912,7 +912,7 @@ input[type="checkbox"] {
 }
 .icon-button:disabled {
   opacity: var(--disabled-opacity);
-  cursor: default;
+  cursor: var(--cursor-arrow);
 }
 .search-field {
   display: flex;
@@ -1395,7 +1395,7 @@ input[type="checkbox"] {
   padding: 8px 4px;
   /* D2-02 保留：桌面文件夹磁贴；最近刻度 8/12px 差 2px */
   border-radius: 10px;
-  cursor: default;
+  cursor: var(--cursor-arrow);
   user-select: none;
   touch-action: none;
   transition: background var(--quick) var(--ease);
@@ -2049,7 +2049,7 @@ input[type="checkbox"] {
   color: var(--text);
   font-size: var(--fs-caption);
   text-align: center;
-  cursor: default;
+  cursor: var(--cursor-arrow);
   user-select: none;
   transition: background var(--quick) var(--ease);
 }
@@ -2472,13 +2472,51 @@ input[type="checkbox"] {
 /* ── 自绘光标（OpenArc 光标套装）────────────────────────────────────────
    形状照着系统自带的 cursors 目录（ApplicationServices / HIServices framework 的
    Resources/cursors）的轮廓重画 —— 只做形状参考，**没有拷贝或引用任何系统文件**。
-   32×32、1px 描边、圆角线帽/连接；阴影是 (0,-1) 的低透明度偏移副本（不用 SVG filter，
-   光标位图里 filter 不稳）。两套外观按 .dark 切换：浅色 UI = 黑填充+白描边，
-   深色 UI = 白填充+黑描边（与 macOS 一致）。
+   32×32；缩放 / 十字 / 手 / 禁止 / 拷贝这些线描形状沿用 1px 描边 + 圆角线帽/连接，
+   阴影是 (0,-1) 的低透明度偏移副本（不用 SVG filter，光标位图里 filter 不稳）。
+   默认箭头按用户给的参考图重画：**实心、无描边、顶点大圆角、比系统那只更饱满**
+   （浅色 UI 黑填充，深色 UI 白填充；两种都不描边）。
+   两套外观按 .dark 切换：浅色 UI = 黑填充+白描边，深色 UI = 白填充+黑描边（线描形状；
+   箭头是黑 / 白实心、无描边）。
    路径用 public/ 根的绝对写法（与 /openarc-mark.svg 同一路子），构建时 Vite 会重写成
    ../cursors/…，正好落在 dist/cursors/。每条都带原生关键字兜底 —— 光标图一旦加载失败
    就退回系统光标，不会退化成箭头。
    热点 = 指针真正"点"的位置：箭头尖端 2,2；十字 / 双箭头中心 16,16；手型 16,17。 */
+
+/* 全局默认指针：整个 app 的根是 .desktop（height:100vh，铺满视口），在根上设一次
+   cursor，桌面 / 窗口 / 侧栏 / 程序坞 / 顶栏 / 各种弹层靠继承全覆盖 —— 不用 `* {}`，
+   也不用逐个组件声明。显式声明 cursor 的语义处优先级更高，不会被这里覆盖。 */
+.desktop {
+  --cursor-arrow: url("/cursors/arrow-light.svg") 2 2, default;
+  cursor: var(--cursor-arrow);
+}
+.desktop.dark {
+  --cursor-arrow: url("/cursors/arrow-dark.svg") 2 2, default;
+  cursor: var(--cursor-arrow);
+}
+
+/* 文本 / 可编辑区显式保住 I 型：cursor 会继承，不写就拿到箭头了。
+   这里用原生 `text` 而不是自绘 text-*.svg —— 原生 I 型在每个 DPI / 缩放下都清晰，
+   位图版那根 1px 线在 32 网格里最容易糊。 */
+.desktop textarea,
+.desktop [contenteditable="true"],
+.desktop input:not([type="range"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="color"]) {
+  cursor: text;
+}
+/* 非文本表单控件：Chromium 的 UA 样式给 range / file / checkbox 声明了 cursor:default，
+   会盖过继承，所以这里必须显式换成我们的箭头；按钮类跟 <button> 一样是手型。 */
+.desktop input[type="range"],
+.desktop input[type="file"],
+.desktop input[type="checkbox"],
+.desktop input[type="radio"],
+.desktop input[type="color"] {
+  cursor: var(--cursor-arrow);
+}
+.desktop input[type="button"],
+.desktop input[type="submit"],
+.desktop input[type="reset"] {
+  cursor: pointer;
+}
 
 /* 窗口右下角缩放手柄（原生 nwse-resize；双箭头中心即热点） */
 .resize {
