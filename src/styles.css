@@ -2366,6 +2366,18 @@ input[type="checkbox"] {
   /* 壁纸要清晰，不再磨砂（去掉 backdrop-filter）；底座取主题基色，
      保证不透明、能盖住桌面窗口。内置「浅色 / 深色主题色」由下面的属性规则接管。 */
   background-color: rgb(var(--base-rgb));
+  /* 文字明暗与 scrim 跟随壁纸（下方按 data-lock-tone 覆盖），不再跟随 App 主题。
+     这三个是舞台局部变量，不是 token（token 名由 tokens.css 独占）。 */
+  --lock-fg: #1d1d1f;
+  --lock-fg-soft: #58585d;
+  --lock-scrim-rgb: 245 245 247;
+}
+
+/* 深色壁纸：浅色文字 + 深色 scrim。 */
+.lock-stage[data-lock-tone="light"] {
+  --lock-fg: #f5f5f7;
+  --lock-fg-soft: #c7c7cc;
+  --lock-scrim-rgb: 0 0 0;
 }
 
 /* 内置「浅色 / 深色主题色」锁屏壁纸：字面值与桌面壁纸规则一致，不新增 color token。 */
@@ -2385,11 +2397,10 @@ input[type="checkbox"] {
   pointer-events: none;
 }
 
-/* 文字保护 scrim：三层同色叠加，全部取 --base-rgb（浅色主题即浅、深色主题即深），
-   任意亮度/色相的壁纸上文字都落在一层与主题同向的底色上。
-   顶部托时钟、底部托脚注与身份块下沿，中间那条身份块 scrim 用人像位径向补上——
-   身份块正落在上下两条 linear 都够不到的中间带，只靠 linear 时深色壁纸下小字读不出。
-   最上面那层很淡，只兜底极端画面；30%-52% 一带尽量少铺，壁纸保持清晰。 */
+/* 文字保护 scrim：四层同色叠加，颜色取 --lock-scrim-rgb（tone dark 即浅、tone light 即深）。
+   文字色已经跟壁纸走，scrim 不再需要"扛住反向文字色"，只做局部压暗/提亮：
+   顶部托时钟、底部托脚注与身份块下沿、身份块那圈用人像位径向补上，全局那层极淡兜底。
+   强度克制，中间带（约 30%-52%）看不到明显色块，壁纸保持清晰。 */
 .lock-stage::before {
   content: "";
   position: absolute;
@@ -2397,10 +2408,10 @@ input[type="checkbox"] {
   z-index: 1;
   pointer-events: none;
   background:
-    linear-gradient(180deg, rgb(var(--base-rgb) / 0.62) 0%, rgb(var(--base-rgb) / 0.3) 24%, transparent 44%),
-    radial-gradient(560px 380px at 50% 64%, rgb(var(--base-rgb) / 0.72), transparent 72%),
-    linear-gradient(0deg, rgb(var(--base-rgb) / 0.68) 0%, rgb(var(--base-rgb) / 0.42) 30%, transparent 70%),
-    rgb(var(--base-rgb) / 0.12);
+    linear-gradient(180deg, rgb(var(--lock-scrim-rgb) / 0.3) 0%, rgb(var(--lock-scrim-rgb) / 0.16) 24%, transparent 44%),
+    radial-gradient(560px 380px at 50% 64%, rgb(var(--lock-scrim-rgb) / 0.34), transparent 72%),
+    linear-gradient(0deg, rgb(var(--lock-scrim-rgb) / 0.36) 0%, rgb(var(--lock-scrim-rgb) / 0.2) 30%, transparent 70%),
+    rgb(var(--lock-scrim-rgb) / 0.08);
   background-repeat: no-repeat;
 }
 
@@ -2433,7 +2444,7 @@ input[type="checkbox"] {
   font-weight: var(--fw-regular);
   letter-spacing: var(--tracking-wide);
   line-height: var(--lh-tight);
-  color: var(--placeholder);
+  color: var(--lock-fg-soft);
 }
 .lock-time {
   margin-top: 0;
@@ -2442,7 +2453,7 @@ input[type="checkbox"] {
   line-height: 1;
   letter-spacing: var(--tracking-tight);
   font-variant-numeric: tabular-nums;
-  color: var(--text);
+  color: var(--lock-fg);
 }
 .lock-panel {
   position: relative;
@@ -2472,23 +2483,31 @@ input[type="checkbox"] {
   box-shadow: inset 0 1px 0 var(--material-top-highlight), var(--elevation-2);
   user-select: none;
 }
+/* 深色壁纸下 --accent 近黑，贴背景容易糊掉；补一条极轻的边缘高光，不改结构。 */
+.lock-stage[data-lock-tone="light"] .lock-avatar {
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.16),
+    inset 0 1px 0 var(--material-top-highlight),
+    var(--elevation-2);
+}
 .lock-name {
   font-size: var(--fs-title);
   font-weight: var(--fw-medium);
   letter-spacing: var(--tracking-tight);
   line-height: var(--lh-tight);
+  color: var(--lock-fg);
 }
-/* 时钟与名字补一层极淡的辉光（主题基色）：scrim 为主，它只在极端壁纸上兜底。 */
+/* 时钟与名字补一层极淡的辉光（scrim 同色）：与文字明暗反向，极端壁纸上兜底。 */
 .lock-date,
 .lock-time,
 .lock-name {
-  text-shadow: 0 1px 14px rgb(var(--base-rgb) / 0.45);
+  text-shadow: 0 1px 14px rgb(var(--lock-scrim-rgb) / 0.45);
 }
 .lock-identifier {
   margin-top: var(--space-1);
   font-size: var(--fs-caption);
   letter-spacing: 0.02em;
-  color: var(--placeholder);
+  color: var(--lock-fg-soft);
 }
 .lock-form {
   width: 100%;
@@ -2575,7 +2594,7 @@ input[type="checkbox"] {
   margin-top: var(--space-4);
   font-size: var(--fs-micro);
   line-height: var(--lh-normal);
-  color: var(--placeholder);
+  color: var(--lock-fg-soft);
 }
 
 /* ── 文件夹图标 ──────────────────────────────────────────────────────────────

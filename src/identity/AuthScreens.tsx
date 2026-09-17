@@ -28,15 +28,65 @@ export type LockWallpaper = {
   style?: React.CSSProperties;
 } | null;
 
+/** 锁屏文字明暗：dark = 深色文字 + 浅 scrim，light = 浅色文字 + 深 scrim。 */
+type LockTone = "dark" | "light";
+
+/** 单个 sRGB 通道 → 线性值（相对亮度公式的前半段）。 */
+function srgbChannel(byte: number) {
+  const c = byte / 255;
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+}
+
+/** 把图片缩到 16×16 采样，返回平均相对亮度；采样失败按深色壁纸兜底。 */
+function wallpaperTone(img: HTMLImageElement): LockTone {
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = 16;
+    canvas.height = 16;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return "light";
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    let sum = 0;
+    let counted = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] === 0) continue;
+      sum += 0.2126 * srgbChannel(data[i]) + 0.7152 * srgbChannel(data[i + 1]) + 0.0722 * srgbChannel(data[i + 2]);
+      counted += 1;
+    }
+    if (!counted) return "light";
+    return sum / counted < 0.5 ? "light" : "dark";
+  } catch {
+    // 跨源图会污染画布，读不出来时按深色壁纸兜底（浅字 + 深 scrim）。
+    return "light";
+  }
+}
+
+/** 主题色壁纸明暗已知；自定义图片等 onLoad 采样，视频无法采样按深色兜底。 */
+function useLockTone(wallpaper?: LockWallpaper) {
+  const [tone, setTone] = useState<LockTone>(() => (wallpaper?.id === "theme-light" ? "dark" : "light"));
+  useEffect(() => {
+    setTone(wallpaper?.id === "theme-light" ? "dark" : "light");
+  }, [wallpaper?.id, wallpaper?.src]);
+  const onMediaLoad = (event: React.SyntheticEvent<HTMLImageElement>) => setTone(wallpaperTone(event.currentTarget));
+  return { tone, onMediaLoad };
+}
+
 /** 壁纸层：清晰显示，不磨砂；文字可读性交给 .lock-stage::before 的 scrim。 */
-function LockStageWallpaper({ wallpaper }: { wallpaper?: LockWallpaper }) {
+function LockStageWallpaper({
+  wallpaper,
+  onMediaLoad,
+}: {
+  wallpaper?: LockWallpaper;
+  onMediaLoad?: (event: React.SyntheticEvent<HTMLImageElement>) => void;
+}) {
   return (
     <div className="lock-wallpaper" aria-hidden="true">
       {wallpaper?.src ? (
         wallpaper.kind === "video" ? (
           <video className="wallpaper-media" src={wallpaper.src} style={wallpaper.style} autoPlay muted loop playsInline />
         ) : (
-          <img className="wallpaper-media" src={wallpaper.src} style={wallpaper.style} alt="" />
+          <img className="wallpaper-media" src={wallpaper.src} style={wallpaper.style} alt="" onLoad={onMediaLoad} />
         )
       ) : null}
     </div>
@@ -238,14 +288,15 @@ export function LoginScreen({ busy, error, defaultIdentifier = "", onSubmit, wal
   const [identifier, setIdentifier] = useState(defaultIdentifier);
   const [password, setPassword] = useState("");
   const first = useRef<HTMLInputElement>(null);
+  const { tone, onMediaLoad } = useLockTone(wallpaper);
 
   useEffect(() => {
     first.current?.focus();
   }, []);
 
   return (
-    <div className="auth-screen lock-stage" data-d3-id="auth-screen" data-lock-wallpaper={wallpaper?.id ?? "same"}>
-      <LockStageWallpaper wallpaper={wallpaper} />
+    <div className="auth-screen lock-stage" data-d3-id="auth-screen" data-lock-wallpaper={wallpaper?.id ?? "same"} data-lock-tone={tone}>
+      <LockStageWallpaper wallpaper={wallpaper} onMediaLoad={onMediaLoad} />
       <LockClock />
       {/* 登录页没有 session，改资料只能从已登录状态发起；这里只做展示。 */}
       <div className="lock-panel" role="main">
@@ -305,14 +356,15 @@ export function LockScreen({ snapshot, busy, error, onUnlock, onLogout, wallpape
   const [password, setPassword] = useState("");
   const panel = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
+  const { tone, onMediaLoad } = useLockTone(wallpaper);
 
   useEffect(() => {
     input.current?.focus();
   }, []);
 
   return (
-    <div className="lock-shade lock-stage" data-d3-id="lock-shade" data-lock-wallpaper={wallpaper?.id ?? "same"}>
-      <LockStageWallpaper wallpaper={wallpaper} />
+    <div className="lock-shade lock-stage" data-d3-id="lock-shade" data-lock-wallpaper={wallpaper?.id ?? "same"} data-lock-tone={tone}>
+      <LockStageWallpaper wallpaper={wallpaper} onMediaLoad={onMediaLoad} />
       <LockClock />
       {/* 头像只做展示：锁屏不提供任何改资料的入口（改资料收敛到系统设置）。 */}
       <div className="lock-panel" ref={panel} role="dialog" aria-modal="true" aria-label="屏幕已锁定">
