@@ -54,6 +54,7 @@
     "test:d4-05": "npm run build && node tests/d4-05-smoke.mjs",
     "test:d4-06": "npm run build && node tests/d4-06-smoke.mjs",
     "test:d4-06-resume": "npm run build && node tests/d4-06-resume-ui.mjs",
+    "test:d4-08-verification-ui": "npm run build && node tests/d4-08-verification-ui.mjs",
     "test:d4-08": "node --test --test-concurrency=1 tests/d4-08-budget-carryover.test.mjs",
     "test:d4-04-closure2": "node --test tests/d4-04-closure2-boot.test.mjs",
     "test:d4-03c4-ui": "npm run build && node tests/side-effect-approval-ui.mjs",
