@@ -30,7 +30,7 @@ function planFor(mode, resourceRefs = [], followSeen = false) {
 }
 
 export async function startD4Provider() {
-  const state = { requests: 0, mode: "read", resourceRef: null, resourceRefs: [], toolCalls: [], names: [], authHeaders: [], history: [], finalText: null };
+  const state = { requests: 0, mode: "read", resourceRef: null, resourceRefs: [], toolCalls: [], names: [], authHeaders: [], history: [], finalText: null, bodies: [] };
   const server = http.createServer((req, res) => {
     const send = (code, obj) => { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(obj)); };
     let raw = "";
@@ -44,14 +44,17 @@ export async function startD4Provider() {
           if (Array.isArray(b.resourceRefs)) { state.resourceRefs = b.resourceRefs.filter((r) => typeof r === "string"); state.resourceRef = state.resourceRefs[0] || null; }
           if (typeof b.finalText === "string") state.finalText = b.finalText;
         } catch { /* ignore */ }
-        state.requests = 0; state.toolCalls = []; state.names = [];
+        state.requests = 0; state.toolCalls = []; state.names = []; state.bodies = [];
         return send(200, { ok: true });
       }
+      if (req.method === "GET" && req.url === "/__bodies") return send(200, { ok: true, bodies: state.bodies });
       if (req.method === "POST" && req.url === "/v1/chat/completions") {
         state.requests += 1;
         state.authHeaders.push(req.headers.authorization || null);
         let parsed = {}; try { parsed = JSON.parse(raw || "{}"); } catch { parsed = {}; }
         const msgs = Array.isArray(parsed.messages) ? parsed.messages : [];
+        // test-only：请求体只留在本进程内存，供 probe 经 /__bodies 读取断言；provider 本身绝不落盘。
+        state.bodies.push({ messages: msgs, tools: parsed.tools || null });
         const names = [];
         for (const m of msgs) if (m && Array.isArray(m.tool_calls)) for (const tc of m.tool_calls) if (tc && tc.function && tc.function.name) names.push(String(tc.function.name));
         state.names = names.slice();

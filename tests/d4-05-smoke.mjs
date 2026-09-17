@@ -102,6 +102,17 @@ const recoveryChecks = recoveryGate && Array.isArray(recoveryGate.checks)
   ? recoveryGate.checks.map((c) => ({ scenario: "S2", source: "electron:d4-05-recovery-ui", name: c.name, expected: c.expected == null ? null : c.expected, actual: c.actual == null ? null : c.actual, ok: c.ok === true }))
   : [];
 
+// ---------------------------------------------------------------- ④ S4 记忆隔离（真实 Electron UI）
+const memoryUiRun = await run(process.execPath, [path.join(here, "d4-05-memory-ui.mjs")]);
+const memoryUiArtifactPath = path.join(ROOT, "artifacts", "d4-05-memory-ui", "memory-ui-gate.json");
+let memoryUiGate = null;
+try { memoryUiGate = JSON.parse(fs.readFileSync(memoryUiArtifactPath, "utf8")); } catch { memoryUiGate = null; }
+const memoryUiRaw = fs.existsSync(memoryUiArtifactPath) ? fs.readFileSync(memoryUiArtifactPath) : Buffer.from("");
+const memoryUiChecks = memoryUiGate && Array.isArray(memoryUiGate.checks)
+  ? memoryUiGate.checks.map((c) => ({ scenario: "S4", source: "electron:d4-05-memory-ui", name: c.name, expected: c.expected == null ? null : c.expected, actual: c.actual == null ? null : c.actual, ok: c.ok === true }))
+  : [];
+const memoryUiOk = memoryUiRun.code === 0 && memoryUiChecks.length > 0 && memoryUiChecks.every((c) => c.ok) && memoryUiGate && memoryUiGate.secretHits === 0;
+
 // ---------------------------------------------------------------- 汇总 checks
 const innerChecks = (inner && Array.isArray(inner.checks) ? inner.checks : []).map((c) => ({
   scenario: /^F\d/.test(String(c.name)) ? "S2" : "REUSE_D4_04",
@@ -110,7 +121,7 @@ const innerChecks = (inner && Array.isArray(inner.checks) ? inner.checks : []).m
   actual: c.actual == null ? (c.detail == null ? null : c.detail) : c.actual, ok: c.ok === true,
 }));
 const nodeChecks = nodeTap.tests.map((t) => ({ scenario: scenarioFor(t.name), source: "node:tap", name: t.name, expected: "pass", actual: t.ok ? "pass" : "fail", ok: t.ok }));
-const checks = [...nodeChecks, ...recoveryChecks, ...innerChecks];
+const checks = [...nodeChecks, ...recoveryChecks, ...memoryUiChecks, ...innerChecks];
 const recoveryOk = recoveryRun.code === 0 && recoveryChecks.length > 0 && recoveryChecks.every((c) => c.ok) && recoveryGate && recoveryGate.secretHits === 0;
 
 const gaps = [
@@ -124,7 +135,7 @@ const gaps = [
     scenario: "S4", status: "RESOLVED",
     name: "S4 · memory → 任务上下文的正向注入",
     expected: "PLAN §41 A36：用户删除个人记忆并切换账号，检索与新任务上下文均不出现已删或他人内容。",
-    actual: "已接入受控装配入口 electron/memory-context.cjs，并在唯一出站口 electron/harness-model-adapter.cjs 注入（BEGIN/END_OPENARC_AUTHORIZED_MEMORY reference-data 标记块，明确非系统指令）。每次 assemble 重新 validateSession → SearchService 授权检索（agent=true）→ 逐条 getCapabilities + readText 最后检查；无缓存。真实 provider 请求体正负对照：授权/部门成员注入，无显式 grant（§25）、他人 personal、删除、撤权、同组织非成员、未接线均不注入；残缺标记 403 不转发。证据见 tests/d4-05-s4-memory-context.test.mjs（11/11）。",
+    actual: "已接入受控装配入口 electron/memory-context.cjs，并在唯一出站口 electron/harness-model-adapter.cjs 注入（BEGIN/END_OPENARC_AUTHORIZED_MEMORY reference-data 标记块，明确非系统指令）。每次 assemble 重新 validateSession → SearchService 授权检索（agent=true）→ 逐条 getCapabilities + readText 最后检查；无缓存。真实 provider 请求体正负对照：授权/部门成员注入，无显式 grant（§25）、他人 personal、删除、撤权、同组织非成员、未接线均不注入；残缺标记 403 不转发。证据见 tests/d4-05-s4-memory-context.test.mjs（11/11）。真实 Electron UI 链路证据见 tests/d4-05-memory-ui.mjs：真实产品 boot 自动装配 MemoryContext → 真实 Renderer 登录 alice → 真实 UI task/run 注入（BEGIN/END reference-data + 唯一 secret + system 在 messages 最前）→ 产品 API 删除（trash+permanentDelete）→ 后续请求不含 marker/secret → 真实 UI 切账号 dana 不含 alice secret 且读 alice task=TASK_FORBIDDEN；DB/DOM 0 正文 secret 留存。",
     reason: null,
   },
 ];
@@ -133,8 +144,9 @@ const scenarioStatus = {
   S1: checks.some((c) => c.scenario === "S1") && checks.filter((c) => c.scenario === "S1").every((c) => c.ok) ? "PASS" : "FAIL",
   S2: checks.some((c) => c.scenario === "S2") && checks.filter((c) => c.scenario === "S2").every((c) => c.ok) && recoveryOk ? "PASS" : "PARTIAL",
   S3: checks.some((c) => c.scenario === "S3") && checks.filter((c) => c.scenario === "S3").every((c) => c.ok) ? "PASS" : "FAIL",
-  // S4 功能 checks 全 PASS，但存在 PARTIAL gap（上下文链未接入/空验证）→ 场景整体 PARTIAL，不冒充 PASS。
-  S4: checks.some((c) => c.scenario === "S4") && checks.filter((c) => c.scenario === "S4").every((c) => c.ok)
+  // S4 功能 checks 全 PASS，但存在 PARTIAL gap（上下文链未接入/空验证）→ 场景整体 PARTIAL，不冒充 PASS；
+  // 真实 Electron UI 记忆隔离 gate 失败则 S4 一律不得 PASS。
+  S4: checks.some((c) => c.scenario === "S4") && checks.filter((c) => c.scenario === "S4").every((c) => c.ok) && memoryUiOk
     ? (gaps.some((g) => g.scenario === "S4" && g.status === "PARTIAL") ? "PARTIAL" : "PASS")
     : "FAIL",
 };
@@ -144,7 +156,7 @@ const rendererConsoleErrors = inner ? inner.rendererConsoleErrors : null;
 const mainUnhandledErrors = inner ? inner.mainUnhandledErrors : null;
 const secretHits = inner ? inner.secretHits : null;
 const checksSummary = { total: checks.length, pass: checks.filter((c) => c.ok).length, fail: checks.filter((c) => !c.ok).length };
-const functionalOk = checksSummary.fail === 0 && d4Run.code === 0 && tapRun.code === 0 && recoveryRun.code === 0 && rendererConsoleErrors === 0 && mainUnhandledErrors === 0 && secretHits === 0 && recoveryGate && recoveryGate.secretHits === 0;
+const functionalOk = checksSummary.fail === 0 && d4Run.code === 0 && tapRun.code === 0 && recoveryRun.code === 0 && rendererConsoleErrors === 0 && mainUnhandledErrors === 0 && secretHits === 0 && recoveryGate && recoveryGate.secretHits === 0 && memoryUiOk;
 const overallStatus = !functionalOk ? "FAIL" : (gaps.some((g) => g.status === "PARTIAL") ? "PARTIAL" : "PASS");
 
 let evidence = {
@@ -161,9 +173,11 @@ let evidence = {
   gaps,
   reusedElectronRun: "tests/d4-04-smoke.mjs（共享真实链路，含 S2 UNKNOWN_EFFECT F1/F3/F5/F6/F7）",
   recoveryUiRun: "tests/d4-05-recovery-ui.mjs（真实 Electron UI：recovery 投影 + 人工确认）",
+  memoryUiRun: "tests/d4-05-memory-ui.mjs（真实 Electron UI：授权记忆生效 / 删除隔离 / 切账号隔离）",
   nodeTests: NODE_FILES,
   electronRun: { exitCode: d4Run.code, checksSummary: inner ? inner.checksSummary : null, artifactSha256: inner ? inner.artifactSha256 : null },
   recoveryRun: { exitCode: recoveryRun.code, checksSummary: recoveryGate ? recoveryGate.checksSummary : null, artifactSha256: recoveryGate ? recoveryGate.artifactSha256 : null },
+  memoryUiElectronRun: { exitCode: memoryUiRun.code, checksSummary: memoryUiGate ? memoryUiGate.checksSummary : null, artifactSha256: memoryUiGate ? memoryUiGate.artifactSha256 : null, secretHits: memoryUiGate ? memoryUiGate.secretHits : null },
   nodeRun: { exitCode: tapRun.code, counts: { pass: nodeTap.pass, fail: nodeTap.fail, tests: nodeTap.tests.length } },
   rendererConsoleErrors,
   mainUnhandledErrors,
@@ -173,6 +187,7 @@ let evidence = {
     { path: "artifacts/d4-04/vertical-smoke-gate.json", sha256: sha256(d4Raw) },
     { path: "artifacts/d4-05/node-tests.tap", sha256: sha256(fs.readFileSync(tapPath)) },
     { path: "artifacts/d4-05-recovery/recovery-ui-gate.json", sha256: sha256(recoveryRaw) },
+    { path: "artifacts/d4-05-memory-ui/memory-ui-gate.json", sha256: sha256(memoryUiRaw) },
   ],
   checks,
   at: new Date().toISOString(),
@@ -184,14 +199,15 @@ evidence.artifactSha256 = sha256(Buffer.from(JSON.stringify(evidence, null, 2)))
 fs.mkdirSync(path.join(ROOT, "docs"), { recursive: true });
 fs.writeFileSync(process.env.OPENARC_D4_05_GATE_OUT || path.join(ROOT, "docs", "D4-05-GATE-EVIDENCE.json"), JSON.stringify(evidence, null, 2));
 
-console.log("D4-05 electron exit=" + d4Run.code + " recoveryUI exit=" + recoveryRun.code + " node exit=" + tapRun.code);
+console.log("D4-05 electron exit=" + d4Run.code + " recoveryUI exit=" + recoveryRun.code + " memoryUI exit=" + memoryUiRun.code + " node exit=" + tapRun.code);
 if (d4Run.code !== 0) console.log("ELECTRON TAIL:\n" + String(d4Run.out).slice(-2000));
 if (recoveryRun.code !== 0) console.log("RECOVERY UI TAIL:\n" + String(recoveryRun.out).slice(-2000));
+if (memoryUiRun.code !== 0) console.log("MEMORY UI TAIL:\n" + String(memoryUiRun.out).slice(-2000));
 if (tapRun.code !== 0) console.log("NODE TAIL:\n" + String(tapRun.out).slice(-2000));
 const failed = checks.filter((c) => !c.ok);
 if (failed.length) console.log("FAILED: " + failed.map((c) => c.name).join(" | "));
 for (const g of gaps) console.log("GAP [" + g.status + "] " + g.name);
 console.log("D4-05 checks " + checksSummary.pass + "/" + checksSummary.total + " passed; scenarios " + JSON.stringify(scenarioStatus));
 console.log("OVERALL: " + overallStatus);
-console.log("GATE: " + JSON.stringify({ testedCommit, overallStatus, checks: checksSummary, scenarioStatus, electronExit: d4Run.code, recoveryUIExit: recoveryRun.code, nodeExit: tapRun.code, artifactSha256: evidence.artifactSha256 }));
+console.log("GATE: " + JSON.stringify({ testedCommit, overallStatus, checks: checksSummary, scenarioStatus, electronExit: d4Run.code, recoveryUIExit: recoveryRun.code, memoryUIExit: memoryUiRun.code, nodeExit: tapRun.code, artifactSha256: evidence.artifactSha256 }));
 process.exit(functionalOk ? 0 : 1);

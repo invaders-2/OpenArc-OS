@@ -1,0 +1,5 @@
+{
+  "name": "openarc-d4-05-memory-ui-probe",
+  "private": true,
+  "main": "main.cjs"
+}
