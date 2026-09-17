@@ -219,6 +219,43 @@ test("迁移：真实的 v1 库升级到 v2，补齐 avatar_ref 且不丢数据"
   store.close();
 });
 
+test("初始化：avatarRef 落库并在登录快照中读回；非法头像被拒且不建安装", async () => {
+  const fx = fixture();
+
+  // 非法头像在服务层就被拒，不能留下半个安装 / 半个用户
+  const bad = await fx.service.dispatch({
+    type: "identity/initialize",
+    identifier: "a@b.local",
+    password: PW,
+    displayName: "A",
+    avatarRef: "preset:nope",
+  });
+  assert.equal(bad.error, "INVALID_INPUT");
+  assert.equal(bad.type, "identity/initialize");
+  assert.equal(fx.store.status().initialized, false, "非法头像不得留下安装");
+  assert.equal(fx.store.userCount(), 0);
+
+  // 合法头像随初始化一次落库
+  const ok = await fx.service.dispatch({
+    type: "identity/initialize",
+    identifier: "a@b.local",
+    password: PW,
+    displayName: "A",
+    avatarRef: "preset:arc",
+  });
+  assert.equal(ok.ok, true);
+  assert.equal(fx.store.allUsers()[0].avatar_ref, "preset:arc", "初始化写入 users.avatar_ref");
+
+  // 登录快照读回同一头像
+  const login = await fx.service.dispatch({ type: "identity/login", identifier: "a@b.local", password: PW });
+  assert.equal(login.snapshot.avatarRef, "preset:arc", "快照必须反映落库的头像");
+
+  // 不提供 avatarRef → NULL
+  const fx2 = fixture();
+  await fx2.service.dispatch({ type: "identity/initialize", identifier: "c@d.local", password: PW, displayName: "C" });
+  assert.equal(fx2.store.allUsers()[0].avatar_ref, null, "未提供头像时落 NULL");
+});
+
 test("资料：store.updateProfile 落库，只在提供字段时更新", async () => {
   const fx = fixture();
   await fx.service.dispatch({ type: "identity/initialize", identifier: "a@b.local", password: PW, displayName: "A" });
@@ -243,7 +280,7 @@ test("资料：store.updateProfile 落库，只在提供字段时更新", async 
   assert.equal(fx.store.updateProfile({ userId: "usr_missing", displayName: "X" }).error, "INVALID_INPUT");
 });
 
-test("资料：identity/update-profile 必须重新验证口令，且不撤销 session", async () => {
+test("资料：identity/update-profile 免密码、只认活跃 session，且不撤销 session", async () => {
   const fx = fixture();
   await fx.service.dispatch({ type: "identity/initialize", identifier: "a@b.local", password: PW, displayName: "A" });
   const ref = (await fx.service.dispatch({ type: "identity/login", identifier: "a@b.local", password: PW })).snapshot.sessionRef;
@@ -251,23 +288,13 @@ test("资料：identity/update-profile 必须重新验证口令，且不撤销 s
   const events = [];
   fx.service.onEvent((e) => events.push(e));
 
-  // 错口令 → DENY，且没有任何写入
-  const bad = await fx.service.dispatch({ type: "identity/update-profile", sessionRef: ref, password: "wrong-password-9", displayName: "Hacked" });
-  assert.equal(bad.error, "INVALID_CREDENTIALS");
-  assert.equal(fx.store.userById(uid).display_name, "A");
-  assert.ok(
-    fx.store.auditLog().some((r) => r.event === "update-profile" && r.result === "DENY" && r.error_code === "INVALID_CREDENTIALS"),
-    "验证失败也必须留 DENY 审计",
-  );
+  // 非法头像 → INVALID_INPUT（全程不需要任何口令）
+  assert.equal((await fx.service.dispatch({ type: "identity/update-profile", sessionRef: ref, avatarRef: "preset:nope" })).error, "INVALID_INPUT");
 
-  // 非法头像 → INVALID_INPUT
-  assert.equal((await fx.service.dispatch({ type: "identity/update-profile", sessionRef: ref, password: PW, avatarRef: "preset:nope" })).error, "INVALID_INPUT");
-
-  // 正口令 → 成功，snapshot 是更新后的值
+  // 免密码：只给 sessionRef 与要改的字段即可成功，snapshot 是更新后的值
   const ok = await fx.service.dispatch({
     type: "identity/update-profile",
     sessionRef: ref,
-    password: PW,
     displayName: "Alice",
     avatarRef: "preset:orbit",
   });
@@ -283,20 +310,23 @@ test("资料：identity/update-profile 必须重新验证口令，且不撤销 s
   assert.equal((await fx.service.dispatch({ type: "identity/validate", sessionRef: ref })).ok, true);
 });
 
-test("资料：登录页场景用 identifier 定位用户，两者都拿不到就明确失败", async () => {
+test("资料：无 session 的 update-profile 一律拒绝，identifier 不再是旁路", async () => {
   const fx = fixture();
   await fx.service.dispatch({ type: "identity/initialize", identifier: "a@b.local", password: PW, displayName: "A" });
   const uid = fx.store.allUsers()[0].id;
 
-  const ok = await fx.service.dispatch({ type: "identity/update-profile", identifier: "A@B.local", password: PW, displayName: "FromLogin" });
-  assert.equal(ok.ok, true);
-  assert.equal(fx.store.userById(uid).display_name, "FromLogin");
-  assert.equal(ok.snapshot, null, "没有 session 时不伪造快照");
-
-  // 没有 session 也没有可用 identifier → INVALID_INPUT，不静默
-  assert.equal((await fx.service.dispatch({ type: "identity/update-profile", password: PW, displayName: "X" })).error, "INVALID_INPUT");
-  assert.equal(
-    (await fx.service.dispatch({ type: "identity/update-profile", identifier: "nobody@b.local", password: PW, displayName: "X" })).error,
-    "INVALID_INPUT",
+  // 从未登录：就算带上正确的 identifier 也不能改 —— identifier 参数已被彻底忽略
+  const noSession = await fx.service.dispatch({ type: "identity/update-profile", identifier: "a@b.local", displayName: "FromLogin" });
+  assert.equal(noSession.error, "SESSION_REVOKED");
+  assert.equal(fx.store.userById(uid).display_name, "A", "无 session 时不得有任何写入");
+  assert.ok(
+    fx.store.auditLog().some((r) => r.event === "update-profile" && r.result === "DENY" && r.error_code === "SESSION_REVOKED"),
+    "无 session 拒绝也必须留 DENY 审计",
   );
+
+  // 已登出：旧 ref 也不再可用
+  const ref = (await fx.service.dispatch({ type: "identity/login", identifier: "a@b.local", password: PW })).snapshot.sessionRef;
+  await fx.service.dispatch({ type: "identity/logout", sessionRef: ref });
+  assert.equal((await fx.service.dispatch({ type: "identity/update-profile", sessionRef: ref, displayName: "X" })).error, "SESSION_REVOKED");
+  assert.equal(fx.store.userById(uid).display_name, "A");
 });

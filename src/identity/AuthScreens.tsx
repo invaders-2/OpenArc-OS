@@ -12,7 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowRight } from "lucide-react";
 import { errorText } from "./types";
 import type { IdentitySnapshot } from "./types";
-import { Avatar } from "./Avatar";
+import { AVATAR_PRESET_IDS, Avatar, PRESET_NODES } from "./Avatar";
 import { ProfileEditor } from "./ProfileEditor";
 
 type AuthError = { code: string; detail?: string } | null;
@@ -100,12 +100,13 @@ type SetupProps = {
   busy: boolean;
   error: AuthError;
   defaultIdentifier?: string;
-  onSubmit: (input: { identifier: string; password: string; displayName: string }) => Promise<unknown>;
+  onSubmit: (input: { identifier: string; password: string; displayName: string; avatarRef?: string }) => Promise<unknown>;
 };
 
 export function SetupScreen({ busy, error, defaultIdentifier = "", onSubmit }: SetupProps) {
   const [identifier, setIdentifier] = useState(defaultIdentifier);
   const [displayName, setDisplayName] = useState("");
+  const [avatarRef, setAvatarRef] = useState<string | null>(null);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [local, setLocal] = useState<string | null>(null);
@@ -124,7 +125,7 @@ export function SetupScreen({ busy, error, defaultIdentifier = "", onSubmit }: S
       setLocal("INVALID_INPUT");
       return;
     }
-    await onSubmit({ identifier, password, displayName });
+    await onSubmit({ identifier, password, displayName, avatarRef: avatarRef ?? undefined });
   };
 
   return (
@@ -145,6 +146,26 @@ export function SetupScreen({ busy, error, defaultIdentifier = "", onSubmit }: S
             data-d3-id="setup-name"
           />
         </label>
+        <div className="field">
+          <span>头像</span>
+          <div className="profile-presets" role="group" aria-label="预设头像">
+            {AVATAR_PRESET_IDS.map((id) => (
+              <button
+                key={id}
+                type="button"
+                className="profile-preset"
+                aria-pressed={avatarRef === "preset:" + id}
+                aria-label={"预设头像 " + id}
+                onClick={() => setAvatarRef("preset:" + id)}
+                data-d3-id={"setup-avatar-" + id}
+              >
+                <svg className="avatar-preset" viewBox="0 0 24 24" aria-hidden="true">
+                  {PRESET_NODES[id]}
+                </svg>
+              </button>
+            ))}
+          </div>
+        </div>
         <label className="field">
           账号
           <input
@@ -200,19 +221,11 @@ type LoginProps = {
   error: AuthError;
   defaultIdentifier?: string;
   onSubmit: (input: { identifier: string; password: string }) => Promise<unknown>;
-  onUpdateProfile: (input: { password: string; displayName?: string; avatarRef?: string; identifier?: string }) => Promise<unknown>;
 };
 
-export function LoginScreen({ busy, error, defaultIdentifier = "", onSubmit, onUpdateProfile }: LoginProps) {
+export function LoginScreen({ busy, error, defaultIdentifier = "", onSubmit }: LoginProps) {
   const [identifier, setIdentifier] = useState(defaultIdentifier);
   const [password, setPassword] = useState("");
-  /**
-   * 登录页没有 session：主进程 updateProfile 成功也不返回 snapshot，
-   * 所以刚保存的新头像 / 新名字只能在这里自己记住，否则界面立刻退回旧值。
-   */
-  const [profileAvatar, setProfileAvatar] = useState<string | null>(null);
-  const [profileName, setProfileName] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
   const first = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -222,18 +235,12 @@ export function LoginScreen({ busy, error, defaultIdentifier = "", onSubmit, onU
   return (
     <div className="auth-screen lock-stage" data-d3-id="auth-screen">
       <LockClock />
-      {/* 编辑器打开时把背后表单 inert：覆盖层只管点击，键盘与焦点由这里语义化挡住。 */}
-      <div className="lock-panel" role="main" inert={editing || undefined}>
-        <button
-          type="button"
-          className="lock-avatar"
-          aria-label="修改头像与用户名"
-          onClick={() => setEditing(true)}
-          data-d3-id="login-avatar"
-        >
-          <Avatar avatarRef={profileAvatar} name="OpenArc" />
-        </button>
-        <strong className="lock-name">{profileName || "OpenArc"}</strong>
+      {/* 登录页没有 session，改资料只能从已登录状态发起；这里只做展示。 */}
+      <div className="lock-panel" role="main">
+        <span className="lock-avatar" aria-hidden="true">
+          <Avatar avatarRef={null} name="OpenArc" />
+        </span>
+        <strong className="lock-name">OpenArc</strong>
         <span className="lock-identifier">使用初始化时创建的管理员凭据</span>
         <form
           className="lock-form"
@@ -256,28 +263,6 @@ export function LoginScreen({ busy, error, defaultIdentifier = "", onSubmit, onU
         </form>
         <p className="lock-footnote">账号不存在与密码错误返回同一个错误，不透露账号是否存在。</p>
       </div>
-      {editing ? (
-        <ProfileEditor
-          mode="login"
-          identifier={identifier}
-          displayName={null}
-          avatarRef={profileAvatar}
-          busy={busy}
-          error={error}
-          onSubmit={async (input) => {
-            const res = await onUpdateProfile(input);
-            if (res && (res as { ok?: boolean }).ok !== false) {
-              // 无 session 拿不到 snapshot：把刚保存的值回填到登录页本地状态
-              if (input.identifier) setIdentifier(input.identifier);
-              if (input.displayName !== undefined) setProfileName(input.displayName);
-              if (input.avatarRef !== undefined) setProfileAvatar(input.avatarRef);
-              setEditing(false);
-            }
-            return res;
-          }}
-          onClose={() => setEditing(false)}
-        />
-      ) : null}
     </div>
   );
 }
@@ -292,7 +277,7 @@ type LockProps = {
   error: AuthError;
   onUnlock: (password: string) => Promise<unknown>;
   onLogout: () => Promise<unknown>;
-  onUpdateProfile: (input: { password: string; displayName?: string; avatarRef?: string; identifier?: string }) => Promise<unknown>;
+  onUpdateProfile: (input: { displayName?: string; avatarRef?: string }) => Promise<unknown>;
 };
 
 /**
@@ -363,7 +348,6 @@ export function LockScreen({ snapshot, busy, error, onUnlock, onLogout, onUpdate
       </div>
       {editing ? (
         <ProfileEditor
-          mode="lock"
           identifier={snapshot.identifier ?? ""}
           displayName={snapshot.displayName}
           avatarRef={snapshot.avatarRef}

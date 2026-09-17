@@ -203,7 +203,7 @@ export function useIdentity() {
         setPhase("checking");
         setAttempt((n) => n + 1);
       },
-      initialize: (input: { identifier: string; password: string; displayName: string }) =>
+      initialize: (input: { identifier: string; password: string; displayName: string; avatarRef?: string }) =>
         run({ type: "identity/initialize", ...input }, "unauthenticated"),
       login: (input: { identifier: string; password: string }) => run({ type: "identity/login", ...input }, "unauthenticated"),
       logout: () => run({ type: "identity/logout" }, "unauthenticated"),
@@ -212,13 +212,12 @@ export function useIdentity() {
       changePassword: (currentPassword: string, newPassword: string) =>
         run({ type: "identity/change-password", currentPassword, newPassword }, "unauthenticated"),
       /**
-       * 改资料（显示名 / 头像）。锁定态仍走 "locked"：口令本身就是再认证，
-       * 失败时 absorb 只允许停在原地，绝不会把锁屏推回桌面。
-       * 登录页没有 session，主进程按 identifier 找用户且**不返回 snapshot**，
-       * 所以 fallback 是 "unauthenticated"。
+       * 改资料（显示名 / 头像）。**免密码，但必须有活跃 session**：
+       * 服务层不再接受 identifier，也不再要求口令，所以这条命令只能从
+       * 已登录（或锁定但 session 仍有效）的状态发起，不会把锁屏推回桌面。
        */
-      updateProfile: (input: { password: string; displayName?: string; avatarRef?: string; identifier?: string }) =>
-        run({ type: "identity/update-profile", ...input }, phase === "locked" ? "locked" : "unauthenticated"),
+      updateProfile: (input: { displayName?: string; avatarRef?: string }) =>
+        run({ type: "identity/update-profile", ...input }, phase === "locked" ? "locked" : "ready"),
     }),
     [phase, snapshot, installation, error, busy, bootError, bridge, run],
   );

@@ -2603,7 +2603,6 @@ function App() {
           error={identity.error}
           defaultIdentifier={identity.snapshot.identifier || ""}
           onSubmit={(input) => identity.login(input)}
-          onUpdateProfile={(input) => identity.updateProfile(input)}
         />
       ) : null}
 

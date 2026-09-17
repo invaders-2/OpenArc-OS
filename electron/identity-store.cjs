@@ -417,7 +417,7 @@ class IdentityStore {
    * `INITIALIZING` **永不落盘**：它只是事务内的一个瞬时值——
    * 事务一回滚，这个状态连同半个用户一起消失（§27）。
    */
-  async initialize({ identifier, password, displayName, source = "local" } = {}) {
+  async initialize({ identifier, password, displayName, avatarRef = null, source = "local" } = {}) {
     const started = this.clock();
     const idCheck = domain.validateIdentifier(identifier);
     if (!idCheck.ok) {
@@ -476,10 +476,10 @@ class IdentityStore {
           const userId = domain.newId("USER");
           this.db
             .prepare(
-              `INSERT INTO users (id, installation_id, team_id, identifier, display_name, role, status,
+              `INSERT INTO users (id, installation_id, team_id, identifier, display_name, role, status, avatar_ref,
                                   auth_version, password_algo, password_params, password_salt, password_hash,
                                   password_version, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, 'ADMIN', 'ACTIVE', 1, ?, ?, ?, ?, 1, ?, ?)`,
+               VALUES (?, ?, ?, ?, ?, 'ADMIN', 'ACTIVE', ?, 1, ?, ?, ?, ?, 1, ?, ?)`,
             )
             .run(
               userId,
@@ -487,6 +487,7 @@ class IdentityStore {
               teamId,
               idCheck.identifier,
               nameCheck.displayName,
+              avatarRef ?? null,
               verifier.algo,
               JSON.stringify(verifier.params),
               verifier.salt,
@@ -1043,7 +1044,7 @@ class IdentityStore {
    * `avatarRef: null` 表示"清除头像"——两者语义不同，不能混。
    * 一项都没有 → INVALID_INPUT，避免空更新把 updated_at 白推一格。
    *
-   * 凭据校验不在这里：service 层已用 password 重新验证过目标用户，
+   * 鉴权不在这里：service 层已确认调用方持有活跃 session，
    * store 只负责落库与审计，避免把"认证"和"存储"搅成一件事。
    */
   updateProfile({ userId, displayName, avatarRef } = {}) {

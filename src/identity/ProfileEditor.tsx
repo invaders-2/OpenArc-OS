@@ -1,21 +1,23 @@
 /**
- * D3-01 · 资料编辑面板（登录页 / 锁屏共用）。
+ * D3-01 · 资料编辑面板（锁屏 / 系统设置共用）。
  *
- * 为什么不做成桌面 Dialog：登录与锁屏本身就是整个门禁的覆盖层，
+ * 为什么不做成桌面 Dialog：锁屏本身就是整个门禁的覆盖层，
  * 再叠一层全局 Dialog 会把"门禁层序"与"桌面浮层"搅在一起。
  * 这里只做 .lock-stage 内部的一张自有覆盖层，层序与锁屏一致。
  *
- * 面板是受控草稿：名字 / 头像 / 账号都先留在本地，保存时只交"确实改动过"的字段 ——
+ * **改资料不需要口令**，但必须持有活跃 session —— 面板只收集字段，
+ * 鉴权由主进程的 update-profile 命令完成；账号（identifier）不在这里改。
+ *
+ * 面板是受控草稿：名字 / 头像先留在本地，保存时只交"确实改动过"的字段 ——
  * 主进程按 undefined 区分"不改"，一旦传了就一定会被写成新值。
  */
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { errorText } from "./types";
 import { AVATAR_PRESET_IDS, Avatar, PRESET_NODES } from "./Avatar";
 
-type ProfileDraft = { password: string; displayName?: string; avatarRef?: string; identifier?: string };
+type ProfileDraft = { displayName?: string; avatarRef?: string };
 
 type ProfileEditorProps = {
-  mode: "lock" | "login";
   identifier: string;
   displayName: string | null;
   avatarRef: string | null;
@@ -66,43 +68,25 @@ function fileToAvatarDataUrl(file: File): Promise<string> {
   });
 }
 
-export function ProfileEditor({ mode, identifier, displayName, avatarRef, busy, error, onSubmit, onClose }: ProfileEditorProps) {
-  // lock 预填当前显示名；login 没有 session，按约定留空，只有用户主动填写才提交。
-  const [name, setName] = useState(mode === "lock" ? displayName ?? "" : "");
+export function ProfileEditor({ identifier, displayName, avatarRef, busy, error, onSubmit, onClose }: ProfileEditorProps) {
+  const [name, setName] = useState(displayName ?? "");
   const [avatar, setAvatar] = useState<string | null>(avatarRef);
-  const [account, setAccount] = useState(identifier);
-  const [password, setPassword] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
   const card = useRef<HTMLFormElement>(null);
-  const passwordInput = useRef<HTMLInputElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    passwordInput.current?.focus();
-  }, []);
 
   // 显示名不允许为空（主进程 validateDisplayName 会拒），所以"清空"不算改动。
   const nameChanged = name.trim().length > 0 && name.trim() !== (displayName ?? "");
   const avatarChanged = avatar !== null && avatar !== (avatarRef ?? null);
-  const accountChanged = mode === "login" && account.trim() !== identifier.trim();
-  /**
-   * login 模式没有 session，账号是定位目标用户的唯一线索：没有账号就无法保存。
-   * 把它放进禁用条件，避免明知必败还打一次主进程。
-   */
-  const canSubmit =
-    !busy &&
-    password.length > 0 &&
-    (mode === "lock" || account.trim().length > 0) &&
-    (nameChanged || avatarChanged || accountChanged);
+  const canSubmit = !busy && (nameChanged || avatarChanged);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSubmit) return;
     setLocalError(null);
-    const input: ProfileDraft = { password };
+    const input: ProfileDraft = {};
     if (nameChanged) input.displayName = name.trim();
     if (avatarChanged && avatar) input.avatarRef = avatar;
-    if (accountChanged) input.identifier = account.trim();
     await onSubmit(input);
   };
 
@@ -185,46 +169,21 @@ export function ProfileEditor({ mode, identifier, displayName, avatarRef, busy, 
           从本机选择图片…
         </button>
         <input ref={fileInput} type="file" accept="image/*" hidden onChange={pickFile} data-d3-id="profile-file" />
-        {mode === "lock" ? (
-          <div className="profile-account">
-            <span className="muted">账号</span>
-            <span>{identifier}</span>
-          </div>
-        ) : (
-          <label className="field">
-            账号
-            <input
-              value={account}
-              onChange={(e) => setAccount(e.target.value)}
-              placeholder="账号"
-              autoComplete="username"
-              data-d3-id="profile-identifier"
-            />
-          </label>
-        )}
+        <div className="profile-account">
+          <span className="muted">账号</span>
+          <span>{identifier}</span>
+        </div>
         <label className="field">
           用户名
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder={mode === "lock" ? "显示名" : "新的用户名（不改可不填）"}
+            placeholder="显示名"
             autoComplete="off"
             data-d3-id="profile-name"
           />
         </label>
-        <label className="field">
-          密码
-          <input
-            ref={passwordInput}
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="输入密码以确认修改"
-            autoComplete="current-password"
-            data-d3-id="profile-password"
-          />
-        </label>
-        <p className="profile-hint">修改资料需要验证密码</p>
+        <p className="profile-hint">保存后立即生效，不需要输入密码。</p>
         {shown ? (
           <p className="auth-error" role="alert" data-d3-id="profile-error">
             {errorText(shown.code, shown.detail)}
