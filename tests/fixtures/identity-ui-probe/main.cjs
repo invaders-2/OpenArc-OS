@@ -39,7 +39,7 @@ let userData = null;
 const js = (code) => win.webContents.executeJavaScript(`(async () => { ${code} })()`);
 const gate = () => js(`return document.querySelector('.desktop')?.getAttribute('data-identity-gate') || 'no-root'`);
 const has = (sel) => js(`return !!document.querySelector(${JSON.stringify(sel)})`);
-const text = (sel) => js(`return document.querySelector(${JSON.stringify(sel)})?.textContent || ''`);
+const text = (sel) => js(`return (document.querySelector(${JSON.stringify(sel)})?.textContent || '').trim()`);
 
 async function waitGate(want, timeout = 30000) {
   const wantList = Array.isArray(want) ? want : [want];
@@ -63,6 +63,16 @@ async function waitEnabled(sel, timeout = 8000) {
     const disabled = await js(`return !!document.querySelector(${JSON.stringify(sel)})?.disabled`);
     if (disabled === false) return true;
     await sleep(80);
+  }
+  return false;
+}
+
+// 分步向导里下一步的元素是挂载出来的，必须轮询存在性而不是假设它已在 DOM
+async function waitFor(sel, timeout = 8000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeout) {
+    if (await has(sel)) return true;
+    await sleep(60);
   }
   return false;
 }
@@ -132,13 +142,27 @@ app.whenReady().then(async () => {
     check("U1 · 首次启动进入初始化界面", g === "uninitialized", `gate=${g}`);
     check("U2 · 只有初始化表单，没有桌面", (await has('[data-d3-id="setup-form"]')) && !(await has(".topbar")), "桌面内容未渲染");
 
-    // ── 2. 初始化 ────────────────────────────────────────────────────────
+    // ── 2. 初始化（引导式三步）───────────────────────────────────────────
+    check(
+      "U2b · 引导式：第一步只呈现显示名",
+      (await has('[data-d3-id="setup-name"]')) && !(await has('[data-d3-id="setup-identifier"]')),
+      "",
+    );
     await setInput('[data-d3-id="setup-name"]', NAME);
+    await waitEnabled('[data-d3-id="setup-next"]');
+    await click('[data-d3-id="setup-next"]');
+
+    await waitFor('[data-d3-id="setup-identifier"]');
     await setInput('[data-d3-id="setup-identifier"]', IDENT);
+    await waitEnabled('[data-d3-id="setup-next"]');
+    await click('[data-d3-id="setup-next"]');
+
+    await waitFor('[data-d3-id="setup-password"]');
     await setInput('[data-d3-id="setup-password"]', PW);
     await setInput('[data-d3-id="setup-confirm"]', PW);
     await waitEnabled('[data-d3-id="setup-submit"]');
     check("U3 · 填完表单后提交按钮可用", (await js(`return !document.querySelector('[data-d3-id="setup-submit"]').disabled`)) === true, "");
+    check("U3b · 步骤指示器不可点击（disableStepIndicators）", (await js(`return document.querySelectorAll('.setup-steps button').length`)) === 0, "");
     await click('[data-d3-id="setup-submit"]');
 
     g = await waitGate("unauthenticated");

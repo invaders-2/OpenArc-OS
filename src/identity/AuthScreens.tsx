@@ -179,6 +179,13 @@ type SetupProps = {
   onSubmit: (input: { identifier: string; password: string; displayName: string; avatarRef?: string }) => Promise<unknown>;
 };
 
+/** 三步向导的静态文案；数组顺序即引导顺序，索引与 step 一一对应。 */
+const SETUP_STEPS = [
+  { title: "先起个名字", desc: "这个显示名会出现在顶栏和锁屏上，之后可以改。" },
+  { title: "设置登录账号", desc: "登录时使用，形如 name@openarc.local，创建后不可更改。" },
+  { title: "设置管理员密码", desc: "至少 8 位，明文不落盘。" },
+];
+
 export function SetupScreen({ busy, error, defaultIdentifier = "", onSubmit }: SetupProps) {
   const [identifier, setIdentifier] = useState(defaultIdentifier);
   const [displayName, setDisplayName] = useState("");
@@ -186,23 +193,38 @@ export function SetupScreen({ busy, error, defaultIdentifier = "", onSubmit }: S
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [local, setLocal] = useState<string | null>(null);
-  const first = useRef<HTMLInputElement>(null);
+  const [step, setStep] = useState(0);
+  const [direction, setDirection] = useState<1 | -1>(1);
+  const stepBody = useRef<HTMLDivElement>(null);
 
+  // 切步后把焦点交给新步骤的第一个输入框；只在 step 变化时跑，不抢输入
   useEffect(() => {
-    first.current?.focus();
-  }, []);
+    stepBody.current?.querySelector<HTMLInputElement>("input")?.focus();
+  }, [step]);
 
-  const mismatch = confirm.length > 0 && confirm !== password;
-
+  const last = step === SETUP_STEPS.length - 1;
+  // 末步才真正提交；前面几步的回车只是"下一步"，符合引导预期
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLocal(null);
+    if (!last) {
+      setDirection(1);
+      setStep((s) => s + 1);
+      return;
+    }
     if (password !== confirm) {
       setLocal("INVALID_INPUT");
       return;
     }
     await onSubmit({ identifier, password, displayName, avatarRef: avatarRef ?? undefined });
   };
+
+  const goBack = () => {
+    setDirection(-1);
+    setStep((s) => Math.max(s - 1, 0));
+  };
+
+  const nextDisabled = step === 0 ? !displayName : !identifier;
 
   return (
     <AuthShell
@@ -211,58 +233,112 @@ export function SetupScreen({ busy, error, defaultIdentifier = "", onSubmit }: S
       subtitle="创建本机的第一个管理员。初始化只能成功一次。"
     >
       <form onSubmit={submit} data-d3-id="setup-form">
-        <label className="field">
-          管理员显示名
-          <input
-            ref={first}
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="例如：Weping"
-            autoComplete="off"
-            data-d3-id="setup-name"
-          />
-        </label>
-        <div className="field">
-          <span>头像</span>
-          <AvatarPicker avatarRef={avatarRef} onChange={setAvatarRef} idPrefix="setup-avatar" />
+        {/* 被动进度：disableStepIndicators 语义，容器内不放任何可点元素 */}
+        <ol className="setup-steps" aria-label="初始化步骤">
+          {SETUP_STEPS.map((s, i) => (
+            <li
+              key={s.title}
+              className={`setup-step${i < step ? " setup-step--done" : i === step ? " setup-step--active" : ""}`}
+              aria-current={i === step ? "step" : undefined}
+              aria-label={`第 ${i + 1} 步：${s.title}`}
+            >
+              {i > 0 && (
+                <span
+                  className={`setup-step-connector${i <= step ? " setup-step-connector--done" : ""}`}
+                  aria-hidden="true"
+                />
+              )}
+              <span className="setup-step-dot" aria-hidden="true">{i + 1}</span>
+            </li>
+          ))}
+        </ol>
+
+        <div className="setup-step-body" ref={stepBody}>
+          <div key={step} className={`setup-step-pane setup-step-pane--${direction === 1 ? "forward" : "back"}`}>
+            <h2 className="setup-step-title">{SETUP_STEPS[step].title}</h2>
+            <p className="setup-step-desc">{SETUP_STEPS[step].desc}</p>
+            {step === 0 && (
+              <>
+                <label className="field">
+                  管理员显示名
+                  <input
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    placeholder="例如：Weping"
+                    autoComplete="off"
+                    data-d3-id="setup-name"
+                  />
+                </label>
+                <div className="field">
+                  <span>头像</span>
+                  <AvatarPicker avatarRef={avatarRef} onChange={setAvatarRef} idPrefix="setup-avatar" />
+                </div>
+              </>
+            )}
+            {step === 1 && (
+              <label className="field">
+                账号
+                <input
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value)}
+                  placeholder="name@openarc.local"
+                  autoComplete="username"
+                  data-d3-id="setup-identifier"
+                />
+              </label>
+            )}
+            {step === 2 && (
+              <>
+                <label className="field">
+                  密码
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="至少 8 位"
+                    autoComplete="new-password"
+                    data-d3-id="setup-password"
+                  />
+                </label>
+                <label className="field">
+                  确认密码
+                  <input
+                    type="password"
+                    value={confirm}
+                    onChange={(e) => setConfirm(e.target.value)}
+                    placeholder="再输入一次"
+                    autoComplete="new-password"
+                    data-d3-id="setup-confirm"
+                  />
+                </label>
+              </>
+            )}
+          </div>
         </div>
-        <label className="field">
-          账号
-          <input
-            value={identifier}
-            onChange={(e) => setIdentifier(e.target.value)}
-            placeholder="name@openarc.local"
-            autoComplete="username"
-            data-d3-id="setup-identifier"
-          />
-        </label>
-        <label className="field">
-          密码
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="至少 8 位"
-            autoComplete="new-password"
-            data-d3-id="setup-password"
-          />
-        </label>
-        <label className="field">
-          确认密码
-          <input
-            type="password"
-            value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
-            placeholder="再输入一次"
-            autoComplete="new-password"
-            data-d3-id="setup-confirm"
-          />
-        </label>
-        <AuthErrorLine error={local ? { code: local, detail: "password-mismatch" } : error} />
+
+        <AuthErrorLine error={local ? { code: local, detail: "两次输入的密码不一致" } : error} />
         <div className="auth-actions">
-          <button className="primary" type="submit" disabled={busy || !identifier || !displayName || !password} data-d3-id="setup-submit">
-            {busy ? "正在初始化…" : "创建管理员"}
-          </button>
+          {step > 0 && (
+            <button className="ghost" type="button" onClick={goBack} disabled={busy} data-d3-id="setup-back">
+              上一步
+            </button>
+          )}
+          {!last && (
+            <button
+              className="primary"
+              type="button"
+              onClick={() => { setDirection(1); setStep((s) => s + 1); }}
+              disabled={nextDisabled}
+              data-d3-id="setup-next"
+            >
+              下一步
+            </button>
+          )}
+          {last && (
+            <button className="primary" type="submit" disabled={busy || !password || !confirm} data-d3-id="setup-submit">
+              {busy ? "正在初始化…" : "创建管理员"}
+            </button>
+          )}
         </div>
         <p className="footnote">
           密码使用 scrypt 派生后存储，明文不落盘、不进入界面状态。初始化成功后需再用该密码登录一次。

@@ -198,8 +198,16 @@ app.whenReady().then(async () => {
     check("S1 · 首次启动进入初始化（未创建账户前不进桌面）", g === "uninitialized", `gate=${g}`);
     await shot("01-setup");
 
+    // 引导式三步：显示名 → 账号 → 密码
     await setInput('[data-d3-id="setup-name"]', NAME);
+    await waitFor('[data-d3-id="setup-next"]');
+    await sleep(150);
+    await click('[data-d3-id="setup-next"]');
+    await waitFor('[data-d3-id="setup-identifier"]');
     await setInput('[data-d3-id="setup-identifier"]', IDENT);
+    await sleep(150);
+    await click('[data-d3-id="setup-next"]');
+    await waitFor('[data-d3-id="setup-password"]');
     await setInput('[data-d3-id="setup-password"]', PW);
     await setInput('[data-d3-id="setup-confirm"]', PW);
     await sleep(300);

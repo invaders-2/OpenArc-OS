@@ -62,6 +62,14 @@ async function waitFn(expr, timeout = 10000) {
   }
   return false;
 }
+async function waitEnabled(sel, timeout = 8000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeout) {
+    if ((await js("return !!document.querySelector(" + JSON.stringify(sel) + ")?.disabled")) === false) return true;
+    await sleep(80);
+  }
+  return false;
+}
 const setValue = (sel, value) =>
   js(
     "const el = document.querySelector(" + JSON.stringify(sel) + ");" +
@@ -110,7 +118,8 @@ app.whenReady().then(async () => {
     check("B1 · 登录页", g === "unauthenticated", "gate=" + g);
     await setValue('[data-d3-id="login-identifier"]', ADMIN);
     await setValue('[data-d3-id="login-password"]', PW);
-    await sleep(80);
+    // 固定 sleep 在负载下会早于 React 提交状态（按钮仍 disabled），改为轮询按钮可用再点
+    await waitEnabled('[data-d3-id="login-submit"]');
     await click('[data-d3-id="login-submit"]');
     g = await waitGate("ready");
     check("B2 · 登录进入桌面", g === "ready", "gate=" + g);
@@ -137,17 +146,24 @@ app.whenReady().then(async () => {
 
     // Edit content -> v2
     await click('[data-d3-04b-action="edit"]');
-    await sleep(200);
+    // 打开编辑器要等两个 IPC（get + readText）回来，固定 sleep 会偶发早于 textarea 挂载
+    await waitSel('[data-d3-04b-editor]');
     await setValue('[data-d3-04b-editor]', "secret memory v2");
     await click('[data-d3-04b-save]');
-    check("B8 · 编辑内容保存为新版本", await waitFn("document.body.innerText.indexOf('v2')>=0"), "");
+    // textarea 自身的 value 也在 body.innerText 里，单看 'v2' 会在保存落地前就为真；
+    // 等编辑器关闭（保存成功）且 DOM 出现 v2，才是真的写完了
+    check(
+      "B8 · 编辑内容保存为新版本",
+      await waitFn("!document.querySelector('[data-d3-04b-editor]') && document.body.innerText.indexOf('v2')>=0"),
+      "",
+    );
     const ref = await js("const el=document.querySelector('[data-d3-04b-item]'); return el ? el.getAttribute('data-d3-04b-item') : null");
     const rr = identity.resourceStore.resourceRowById(ref);
     check("B9 · 主进程 version = 2", rr && rr.version === 2, rr ? "v" + rr.version : "missing");
 
     // Version conflict: open editor (expected v2), bump externally to v3, save -> conflict dialog
     await click('[data-d3-04b-action="edit"]');
-    await sleep(200);
+    await waitSel('[data-d3-04b-editor]');
     await setValue('[data-d3-04b-editor]', "draft from stale editor");
     await identity.resourceService.replaceText({ context: { sessionRef: identity.service.current, appId: "resource-library" }, resourceRef: ref, text: "external v3", expectedVersion: 2 });
     await click('[data-d3-04b-save]');

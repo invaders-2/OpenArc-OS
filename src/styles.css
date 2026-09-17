@@ -2498,6 +2498,99 @@ input[type="checkbox"] {
 .auth-error:empty {
   display: none;
 }
+.auth-actions .primary:disabled,
+.auth-actions .ghost:disabled {
+  opacity: var(--disabled-opacity);
+  cursor: not-allowed;
+}
+
+/* ── 初始化向导（Stepper；指示器被动不可点，disableStepIndicators 语义）──────
+   只消费 token：分档靠 --sunken / --accent 的明度差，不加描边。
+   用固定 min-height 锁住卡片高度；滑步方向由 --forward / --back 决定。 */
+.setup-steps {
+  display: flex;
+  align-items: center;
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.setup-step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+}
+.setup-step:first-child {
+  flex: 0 0 auto;
+}
+.setup-step-connector {
+  position: relative;
+  flex: 1;
+  height: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--line);
+  overflow: hidden;
+}
+.setup-step-connector::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: rgb(var(--accent-rgb));
+  transition: width var(--dur-standard) var(--ease-standard);
+}
+.setup-step-connector--done::after {
+  width: 100%;
+}
+.setup-step-dot {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-6);
+  height: var(--space-6);
+  border-radius: var(--radius-pill);
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  font-weight: var(--fw-medium);
+  transition: background var(--dur-standard) var(--ease-standard), color var(--dur-standard) var(--ease-standard);
+}
+.setup-step--active .setup-step-dot,
+.setup-step--done .setup-step-dot {
+  background: rgb(var(--accent-rgb));
+  color: var(--on-accent);
+}
+.setup-step-body {
+  margin-top: var(--space-5);
+  min-height: calc(var(--space-8) * 6);
+}
+.setup-step-title {
+  margin: 0;
+  font-size: var(--fs-heading);
+  font-weight: var(--fw-medium);
+}
+.setup-step-desc {
+  margin: var(--space-1) 0 0;
+  font-size: var(--fs-caption);
+  line-height: var(--lh-normal);
+  color: var(--muted);
+}
+.setup-step-pane--forward {
+  animation: setup-slide-forward var(--dur-standard) var(--ease-standard);
+}
+.setup-step-pane--back {
+  animation: setup-slide-back var(--dur-standard) var(--ease-standard);
+}
+@keyframes setup-slide-forward {
+  from { transform: translateX(var(--space-5)); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@keyframes setup-slide-back {
+  from { transform: translateX(calc(var(--space-5) * -1)); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
 .auth-boot {
   display: flex;
   flex-direction: column;
