@@ -77,7 +77,7 @@
 | D4-01 模型服务 | **CONDITIONAL GO（受限）** |
 | D4-02 任务与适配 | **CONDITIONAL GO** |
 | D4-03 工具门与租约 | **CONDITIONAL GO（A PASS）** |
-| D4-04 纵向冒烟 | **BLOCK** |
+| D4-04 纵向冒烟 | **PASS（限定当前验收范围）** |
 | D5-03 MCP 中心 | **CONDITIONAL GO（受限）** |
 | D5-04 PS 完整接入 | **BLOCK** |
 | D5-05 Illustrator 接入 | **BLOCK** |
@@ -829,8 +829,36 @@ D4-03D **不关闭**任何既有 remaining gap：OS-level network sandbox / exte
 
 ## 5. D4-03C 准入
 
-D4-03C1 = **PASS**；**D4-03C2 = PASS**；**D4-03C3 = PASS candidate**、**D4-03C3 Closure = PASS candidate**；**D4-03C4 = PASS candidate**、**D4-03C4 Closure = PASS candidate**（cold-restart quiescence probe fail closed）、**D4-03C4 Closure-2 = PASS candidate**（cold-restart death proof；pathname != process lifetime；persisted record 无 socketPath）、**D4-03C4 Closure-3 = PASS candidate**（persisted EXITED 无 death authority；只有 live supervisor child exit 能 quiesce）、**D4-03D = PASS candidate**（Full Tool Proxy Gate；official dsh 混合 READ+WRITE verified；tpx scope / revoke / non-persistence；AUTO_RETRY=0）、**D4-03D Closure = PASS candidate**（Tool-call Identity Seal：mandatory callId + canonical arguments fingerprint binding；conflict fail closed）、**D4-03 overall = PASS candidate**（由 ChatGPT 审计后决定 `D4-03 = PASS`）；**D4-04 = NOT STARTED**，禁止自动进入 D4-04 / D4-05 / D5 / D6。
+D4-03C1 = **PASS**；**D4-03C2 = PASS**；**D4-03C3 = PASS candidate**、**D4-03C3 Closure = PASS candidate**；**D4-03C4 = PASS candidate**、**D4-03C4 Closure = PASS candidate**（cold-restart quiescence probe fail closed）、**D4-03C4 Closure-2 = PASS candidate**（cold-restart death proof；pathname != process lifetime；persisted record 无 socketPath）、**D4-03C4 Closure-3 = PASS candidate**（persisted EXITED 无 death authority；只有 live supervisor child exit 能 quiesce）、**D4-03D = PASS candidate**（Full Tool Proxy Gate；official dsh 混合 READ+WRITE verified；tpx scope / revoke / non-persistence；AUTO_RETRY=0）、**D4-03D Closure = PASS candidate**（Tool-call Identity Seal：mandatory callId + canonical arguments fingerprint binding；conflict fail closed）、**D4-03 overall = PASS candidate**（由 ChatGPT 审计后决定 `D4-03 = PASS`）；**D4-04 = PASS（限定当前验收范围）**（真实 Electron probe vertical smoke 67/67：READ / WRITE / Deny / Cancel / UNKNOWN_EFFECT / renderer spoof / reload + **真实撤权 R1/R2** + executor-unavailable；被测 commit `e989842`；真实 `main.cjs` 未端到端实测，其余 NOT VERIFIED / DEFERRED 保持原状）。**D4-05 / D4-06 = NOT STARTED**，禁止自动进入 D4-05 / D5 / D6。
 C2/C4 只开放 resource.trash 一条 REVERSIBLE_WRITE：IRREVERSIBLE_WRITE / EXTERNAL_SIDE_EFFECT / PRIVILEGED / Shell / Terminal / filesystem generic mutation / MCP / Browser automation / Device Agent mutation / Canvas mutation / App Center mutation / Adobe control 仍全部 BLOCKED；AUTO_RETRY = 0；Explicit Resume = DEFERRED。Final Approval UI = IMPLEMENTED / VERIFIED。
+
+# D4-04 当前状态（唯一口径 · 2026-09-17）
+
+## 1. Task Status
+
+**D4-04 纵向冒烟 = PASS（限定当前验收范围）**。`PLAN.md` 对 D4-04 的原始验收（一工具真实流程记录；真实产物、停止、**撤权可核查**）在当前验收范围内全部成立。
+**D4-05 执行关卡 / D4-06 = NOT STARTED**，禁止自动进入 D4-05 / D5 / D6。
+真实 `electron/main.cjs` 全流程端到端 = **NOT VERIFIED**；其余 `NOT VERIFIED` / `DEFERRED` 项保持原状。
+
+## 2. 关键证据（真实执行）
+
+| 入口 | 结果 |
+|---|---|
+| `npm run test:d4-04`（被测 commit `e989842`，干净工作区） | **67 / 67 PASS**；12 gate 全 true（含 `revokePendingApproval` / `revokeMidTask`）；rendererConsoleErrors / mainUnhandledErrors / secretHits = 0 |
+| `tests/d4-04-executor-unavailable.test.mjs` | **1 / 1 PASS**（产品 `executeApproved` + `UnavailableExecutorLauncher`：0 spawn / 0 lease / 0 mutation / task BLOCKED） |
+| `test:d4-04-closure2` | **9 / 9 PASS**（shared boot + launcher fail-closed） |
+| 受影响回归 | `test:d4-03c4` 35/35 + UI 22/22、`test:d4-03c4-closure2` 12/12、`test:d4-03c4-closure3` 9/9、`test:d4-03d` 52/52、`test:d4-03d-closure` 62/62 全部 PASS |
+
+- 撤权场景（真实 Electron probe + 真实 UI + 产品 governance API）：R1 待批准时撤权后旧批准不可执行（call BLOCKED / `SIDE_EFFECT_AUTHORIZATION_REVOKED` / 0 mutation / 0 lease / 0 新 executor）；R2 任务进行中撤权（refA 已有副作用保留、refB 被拒绝、Task/Step/Harness run BLOCKED、无自动重试）。
+- 证据可追溯：artifact 记录 `testedCommit=e989842` / `workspaceState=""` / `command` / `env` / 逐条脱敏 checks / 原始 artifact SHA-256 `01baf7ef...6e71b`；脱敏证据纳入版本管理 `docs/D4-04-GATE-EVIDENCE.json`。
+
+## 3. 详细记录
+
+`docs/D4-04-CLOSURE3-RESULT.md`（本轮缺口补齐）、`docs/D4-04-CLOSURE2-RESULT.md`（Closure-2）、`docs/D4-04-RESULT.md`（Closure-1）、`docs/D4-04-ACCEPTANCE-RESULT.md`（验收报告）。
+
+## 4. 主要缺口（D4-04 范围内未关闭）
+
+真实 `electron/main.cjs` 全流程端到端 NOT VERIFIED（Gate 用 probe host + 共享 production 装配）。其余仓库级缺口不受 D4-04 影响：OS-level network sandbox / external workspace read audit / independent malformed ACP injection / Windows / External Provider = NOT VERIFIED；Explicit Resume = DEFERRED；broader Domain verifiers = NOT VERIFIED；authenticated durable cross-restart process-death proof = DEFERRED / NOT VERIFIED。
 
 ---
 
