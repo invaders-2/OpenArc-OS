@@ -4,7 +4,7 @@
     <path d="M23.5 20.4 V26.6 M20.4 23.5 H26.6" fill="none" stroke="rgba(0,0,0,0.30)" stroke-width="1.6"/>
   </g>
   <g fill="none" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M3.07 1.78 A0.96 0.96 0 0 0 1.78 3.07 L13.83 31.28 A0.94 0.94 0 0 0 15.62 31.27 L20.13 20.13 A0.12 0.12 0 0 1 20.07 20.19 L31.18 15.66 A0.92 0.92 0 0 0 31.2 13.88 Z" fill="#ffffff"/>
+    <path d="M3.07 1.78 A0.96 0.96 0 0 0 1.78 3.07 L13.83 31.28 A0.94 0.94 0 0 0 15.62 31.27 L20.13 20.13 A0.12 0.12 0 0 1 20.07 20.19 L31.18 15.66 A0.92 0.92 0 0 0 31.2 13.88 Z" fill="#ffffff" stroke="rgba(0,0,0,0.3)" stroke-width="1" paint-order="stroke fill"/>
     <path d="M23.5 16 A7.5 7.5 0 1 0 23.5 31 A7.5 7.5 0 1 0 23.5 16 Z" fill="#34c759" stroke="rgba(0,0,0,0.0)" stroke-width="0"/>
     <path d="M23.5 20.4 V26.6 M20.4 23.5 H26.6" fill="none" stroke="#ffffff" stroke-width="1.6"/>
   </g>
