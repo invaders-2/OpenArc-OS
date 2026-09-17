@@ -43,6 +43,7 @@ async function makeV5Db() {
 
   const raw = new DatabaseSync(dbPath);
   for (const t of [...V12_TABLES, ...V13_TABLES, ...V11_TABLES, ...V10_TABLES, ...V9_TABLES, ...V6_TABLES, ...V7_TABLES, ...V8_TABLES]) raw.exec("DROP TABLE IF EXISTS " + t);
+  raw.exec("DROP TABLE IF EXISTS task_budgets");
   raw.exec("PRAGMA user_version = 5");
   assert.equal(raw.prepare("PRAGMA user_version").get().user_version, 5);
   assert.equal(hasTable(raw, "resource_search_docs"), false);

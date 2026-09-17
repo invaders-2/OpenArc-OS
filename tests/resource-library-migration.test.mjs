@@ -53,6 +53,7 @@ async function makeV4Db() {
   for (const t of V8_TABLES) raw.exec("DROP TABLE IF EXISTS " + t);
   for (const t of V6_TABLES) raw.exec("DROP TABLE IF EXISTS " + t);
   for (const t of V5_TABLES) raw.exec("DROP TABLE IF EXISTS " + t);
+  raw.exec("DROP TABLE IF EXISTS task_budgets");
   for (const col of ["memory_subtype", "language", "attributes"]) raw.exec("ALTER TABLE library_resources DROP COLUMN " + col);
   raw.exec("PRAGMA user_version = 4");
   assert.equal(raw.prepare("PRAGMA user_version").get().user_version, 4);

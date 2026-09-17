@@ -43,6 +43,7 @@ async function makeV3Db() {
   for (const table of V7_TABLES) raw.exec("DROP TABLE IF EXISTS " + table);
   for (const table of V6_TABLES) raw.exec("DROP TABLE IF EXISTS " + table);
   for (const table of V5_TABLES) raw.exec("DROP TABLE IF EXISTS " + table);
+  raw.exec("DROP TABLE IF EXISTS task_budgets");
   for (const col of ["memory_subtype", "language", "attributes"]) raw.exec("ALTER TABLE library_resources DROP COLUMN " + col);
   for (const table of V4_TABLES) raw.exec("DROP TABLE IF EXISTS " + table);
   raw.exec("PRAGMA user_version = 3");
