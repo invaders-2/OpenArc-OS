@@ -2,7 +2,7 @@
 
 - 工作树：`/Users/wepingli/Desktop/OpenArc OS-d4-01`；分支：`feature/d4-03-tool-proxy`
 - Base HEAD（本轮起点，干净）：`a7faf060bb4b2371fdfa379118b2d9011ba7b412`
-- **被测 commit**（代码与测试提交）：`83baad6f5ba56ebb415bfdd754357151381f371f`
+- **被测 commit**（D4-05 实现 + D4 收口审查补测/结论修正）：`431395dfe79afec8b4d9370a51b147b46b3e695c`（实现提交为 `83baad6f5ba56ebb415bfdd754357151381f371f`）
 - Final HEAD：本轮报告/证据提交（见文末）
 - 范围：只补齐 PLAN.md §41 的 D4-05 四场景（产物不符 / 结果未知 / 用量到限 / 记忆越权）；第二轮按父级指示补齐 S2 的**最小人工确认入口**以闭合 §384。不扩展真实工具面、不放宽既有检查、不 commit、不 push。
 - **结论：`D4-05 = PARTIAL`**——S1/S2/S3 = PASS；**S4 = PARTIAL**（检索链 PASS、上下文链 NOT VERIFIED：无 memory→任务上下文装配入口，A36 的上下文链为空验证，见 §3/§5）。其余场景 PASS 结论不变。
@@ -68,6 +68,6 @@
 ## 6. 证据
 
 - `docs/D4-05-GATE-EVIDENCE.json`（tracked、脱敏）：`testedCommit` / 运行前 `workspaceState` / `command` / `env` / 逐条 `{name,expected,actual,ok}`（128 条：S1 3 / S2 22 / S3 14 / S4 2 / REUSE_D4_04 87）/ `scenarioStatus` / `gaps` / `sourceArtifacts`（含 SHA-256）/ `artifactSha256`。
-- `artifactSha256 = a4247283f41612c736a4dba3c3f92da566e9ced0b333b84653aae42d075a91a6`（testedCommit `6fb68377`；本工作树未 commit，运行前 `workspaceState` = `M docs/D4-05-RESULT.md` / `M tests/d4-05-s1-output-size.test.mjs` / `M tests/d4-05-s2-recovery.test.mjs` / `M tests/d4-05-s3-budget-ledger.test.mjs` / `M tests/d4-05-smoke.mjs`）。
-- 原始 artifact（gitignored）SHA-256：`artifacts/d4-04/vertical-smoke-gate.json=41a00420282f247fa6f1dbce98f109430d88e92ef01fd02cbbe621d8604fcdcb`；`artifacts/d4-05/node-tests.tap=7c8ec4ca933b0aeae2326988cfb969377032022874dba2b2f6afa08d856fdc4e`；`artifacts/d4-05-recovery/recovery-ui-gate.json=4f78bc521e38ff6b15339d5f4b41b0c247d993e6b14c9030df2da68e3eddb210`。
+- `artifactSha256 = 17abacca03b965979b67f042e9aea6a925fbe2cf0fcc48be318fcdb79220945b`（testedCommit `431395d`，运行前 `workspaceState=""`；Node 23 / D4-04 Electron 94 / recovery UI 11 = 128，全 true）。
+- 原始 artifact（gitignored）SHA-256：`artifacts/d4-04/vertical-smoke-gate.json=9d8a1fd57225a04b2eed8f9d351d42184f3f40b43e2e7dca09936ee9d45ba255`；`artifacts/d4-05/node-tests.tap=7efe9ebae169864dbe9510d6ca66448e73a62a536e0e274f9e01373e5eb0122f`；`artifacts/d4-05-recovery/recovery-ui-gate.json=874c8ca3eaf4806ea7b7a9a8ab70194e1be07677d7581dac7917adf06c3a49f8`。
 - 已脱敏：无 `/Users`、`/private`、`/var/folders`、`mpx_`、`tpx_`、`credential`。
