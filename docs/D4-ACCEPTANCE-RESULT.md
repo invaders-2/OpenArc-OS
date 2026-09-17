@@ -11,11 +11,12 @@
 
 **D4 = PARTIAL（macOS 核心基本完成，非整体完成）**。
 
-- D4-01 macOS Core、D4-02 macOS Task/Harness Core、D4-03（PASS candidate）、D4-04、D4-06 在各自声明范围内通过；D4-05 = **PARTIAL**（S1/S2/S3 PASS、S4 上下文链 NOT VERIFIED）。
-- 阻塞“整体 PASS”的项：D4-05 S4 依赖尚不存在的 memory→任务上下文装配能力（空验证）；D4-01/D4-02 的 Windows / External Provider = NOT VERIFIED；D4-03 待外部审计封板。
-- 本轮（D4-06 Closure）已修复：① 任务层跨 run 累计预算（续接只补被批准 kind，其他种类继承剩余）；② 失败验证 UI 的 Electron 实测。**D4-06 恢复 PASS**；D4-05/D4 仍为 PARTIAL（memory 上下文缺口不变）。
-- **D4-05 Closure（代码/测试被测 commit `70eb0b12167e513bb4eb7fa1cb4efb9ca70e509d`）**：修复 A33 正式链假成功——official dsh facade 下 READ_ONLY 必需产物验证失败不再被 final text 成功掩盖（`TaskService.getUnresolvedRequiredVerificationFailures` + orchestrator 提交前闸门）。**S1 结论以正式链证据为准**；**D4-05 / D4 仍为 PARTIAL**（S4 memory 上下文缺口不变），**D4-06 通过范围不扩大**。详见 `docs/D4-05-CLOSURE-RESULT.md`。
+- D4-01 macOS Core、D4-02 macOS Task/Harness Core、D4-03（PASS candidate）、D4-04、D4-05、D4-06 在各自声明范围内通过；**D4-05 = PASS**（D4-05 Closure-3：S1/S2/S3/S4 全 PASS，A36 正负对照满足）。
+- 阻塞“整体 PASS”的项（`D4 = PARTIAL`，不自动升级）：D4-01/D4-02 的 Windows / External Provider = NOT VERIFIED；D4-03 待外部审计封板；真实 `electron/main.cjs` 全流程 = NOT VERIFIED。D4-05 S4 memory 上下文缺口已由 D4-05 Closure-3 闭合。
+- 本轮（D4-06 Closure）已修复：① 任务层跨 run 累计预算（续接只补被批准 kind，其他种类继承剩余）；② 失败验证 UI 的 Electron 实测。**D4-06 恢复 PASS**；当时 D4-05/D4 仍为 PARTIAL（该 memory 上下文缺口后由 D4-05 Closure-3 闭合）。
+- **D4-05 Closure（代码/测试被测 commit `70eb0b12167e513bb4eb7fa1cb4efb9ca70e509d`）**：修复 A33 正式链假成功——official dsh facade 下 READ_ONLY 必需产物验证失败不再被 final text 成功掩盖（`TaskService.getUnresolvedRequiredVerificationFailures` + orchestrator 提交前闸门）。**S1 结论以正式链证据为准**；当时 **D4-05 / D4 仍为 PARTIAL**（该 S4 memory 上下文缺口后由 D4-05 Closure-3 闭合），**D4-06 通过范围不扩大**。详见 `docs/D4-05-CLOSURE-RESULT.md`。
 - **D4-05 Closure-2（代码/测试被测 commit `77b6e857f3d5a9781ea2c218e89069b1802aaab4`）**：修正失败验证的**解决关联**——关联键从裸 `tool_id` 改为 `(tool_id, canonical arguments)`，无关对象/无关验证要求/无关 Step 的 PASS 不再误清除对应 FAIL；只有同对象+同要求的真实复验 PASS 才算解决，旧 FAIL 与解决关系均可追溯；缺失关联的旧数据保守保持未解决。详见 `docs/D4-05-CLOSURE2-RESULT.md`。
+- **D4-05 Closure-3（代码/测试被测 commit `9691348ebf52b4854aafcb2e343e32ee2d2d608b` + `ac9af8e502c5285b7bcf06c8fc0b8e0ecc52e9f0`）**：实现受控记忆装配与任务上下文隔离（A36）——受控装配入口 + 唯一出站口逐请求注入（reference-data 标记、与系统指令分离）、发送前重新授权/重新读取、删除/撤权/切账号/跨范围隔离、无缓存、正文不落盘；真实 Electron UI 流程 15/15。**S4 与 D4-05 升为 PASS**；**D4 仍为 PARTIAL**（剩余既有未验证项不变）。详见 `docs/D4-05-CLOSURE3-RESULT.md`。
 
 ## 1. D4 原始要求 → 实现 → 证据 → 限制 → 结论
 
@@ -25,7 +26,7 @@
 | **D4-02 任务与适配**：任务版本固定且权限实时有效 | `task-domain/store/service.cjs`、`harness-adapter.cjs`、`task-harness-orchestrator.cjs` | `test:d4-02a` 22/22、`test:d4-02b` 16/16、`test:d4-02c` 22/22（schema v15）；MODEL_CONFIG_CHANGED 真实测试 | Windows NOT VERIFIED | macOS Core **PASS**；cross-platform overall **PARTIAL** |
 | **D4-03 工具门与租约**：授权执行及回报；重复调用与离线结果处理正确 | `tool-registry.cjs`、`controlled-tool-proxy.cjs`、`tool-facade-bridge.cjs`、`side-effect-authority/store/runtime.cjs`、`runtime-supervisor.cjs` | A 32/32；B 59/59；C1 46/46+50/50；C2 29/29 + closure 38/38/45/45/51/51；C3 56/56、closure 63/63；C4 35/35 + UI 22/22 + closure 15/15/12/12/9/9；D 52/52、closure 62/62 | **PASS candidate，待外部审计封板**；OS 网络沙箱/独立 malformed ACP/跨重启 durable death proof NOT VERIFIED/DEFERRED | **PASS candidate** |
 | **D4-04 纵向冒烟**：一工具真实流程记录；真实产物、停止、撤权可核查 | `tests/fixtures/d4-04-probe/main.cjs`、`tests/d4-04-smoke.mjs`、`runtime-boot.cjs`、`executor-launcher.cjs`、`side-effect-*.cjs` | `test:d4-04` **94/94**；Closure-3 **67/67**（`e989842`）；撤权 R1/R2；executor-unavailable | Gate 宿主 = probe host（非真实 `electron/main.cjs`） | **PASS（限定范围）** |
-| **D4-05 执行关卡**：门控验收，未通过禁止扩展真实工具面 | `task-service.cjs`（recovery/resume/ledger）、`task-bootstrap.cjs`、AI 面板 | `test:d4-05` **139/139 functional**（D4-05 Closure-2 `77b6e85`；S1 以 official dsh facade 正式链为准，含关联修复），`overallStatus=PARTIAL`，S1/S2/S3 PASS、S4 PARTIAL | S4 上下文链 NOT VERIFIED（无 memory 装配入口）；见 §2 | **PARTIAL** |
+| **D4-05 执行关卡**：门控验收，未通过禁止扩展真实工具面 | `task-service.cjs`、`task-bootstrap.cjs`、`memory-context.cjs`、`harness-model-adapter.cjs`、AI 面板 | `test:d4-05` **165/165 functional**（D4-05 Closure-3 `ac9af8e`；S1 正式链 A33、S2/S3、S4 记忆装配），`overallStatus=PASS`，S1/S2/S3/S4 全 PASS；真实 Electron 记忆 UI 15/15 | 真实 `main.cjs` 全流程 NOT VERIFIED；见 §2/§9 | **PASS** |
 | **D4-06 关联链与预算停止**（§41） | `task-service.cjs`、`task-harness-orchestrator.cjs`、`task-store.cjs`、D4-05 recovery | `test:d4-06` **119/119**；`test:d4-06-resume` **21/21**；失败验证 UI `test:d4-08-verification-ui` **22/22**；`test:d4-08` **13/13** | 上层收敛为 TaskService 合同验证；失败验证 UI 已由 D4-05 Closure 切到 official dsh facade 正式链（见 §2.5）；真实 main.cjs 未端到端 | **PASS** |
 | **A14–A19** | 见审查轮报告 | D4-01/02/03 真实证据；A15 复用 | Windows / External Provider | **PASS**（复用） |
 
@@ -40,8 +41,8 @@
 ### 2.2 D4-05 S2 人工确认（结果未知）—— 含义与入口（审查轮结论不变）
 - 用户能找到待核查对象（`task/get.recovery`/`task/recovery`：callId/toolId/status/errorCode/核查结论/关联产物，脱敏）；“确认”= “我已人工核查”，只追加 safe event，**不表示成功、不解除 UNKNOWN_EFFECT、不授权重试/续接**；非 owner（真实用户 dana）读写均 `TASK_FORBIDDEN`；重复确认幂等；无产物时显示“无”。
 
-### 2.3 D4-05 S4 记忆越权（A36）—— PARTIAL（本轮不变）
-- **检索链 = PASS（正负对照）**；**上下文链 = NOT VERIFIED**：`buildPrompt` 无 memory 检索/装配入口，“请求体不含记忆”属空验证——只能说明当前无泄漏路径，不能声称已验证记忆注入时的隔离。故 S4 与 D4-05 = **PARTIAL**；最小后续方案见 §7。
+### 2.3 D4-05 S4 记忆越权（A36）—— PASS（D4-05 Closure-3 闭合）
+- **检索链 = PASS（正负对照）**；**上下文链 = PASS**：新增 `electron/memory-context.cjs` 受控装配 + `HarnessModelAdapter` 唯一出站口逐请求注入（`BEGIN/END_OPENARC_AUTHORIZED_MEMORY` reference-data、明确非系统指令）；每次发送前 `validateSession`→授权检索（agent）→逐条 `getCapabilities`+`readText` 最后检查；无缓存、无权限不注入、删除/撤权/切账号/跨范围皆隔离、恶意正文无副作用、续接重检、残缺标记 403。故 **S4 与 D4-05 = PASS**。详见 `docs/D4-05-CLOSURE3-RESULT.md`。
 
 ### 2.4 预算实际值 / 停止原因 / 追加账本
 - 根因：① `getBudgetLedger().base` 硬编码 `BUDGET_BASE`，忽略实际配置；② `HarnessAdapter.budgetExhausted()` 先判 MODEL_CALLS，工具预算真实耗尽被掩盖；③ 成功 prompt 后即使 TOOL_CALLS 已 EXHAUSTED 仍会 commit success。
@@ -65,7 +66,7 @@
 
 | 能力 | 状态 | 对 D4 收口的影响 |
 | --- | --- | --- |
-| memory→任务上下文装配与隔离（A36 上下文链） | NOT VERIFIED | **阻塞 D4-05/D4 整体 PASS** |
+| memory→任务上下文装配与隔离（A36 上下文链） | **PASS（D4-05 Closure-3）** | 已闭合；不再阻塞 D4-05（D4 整体仍因 Windows/External/D4-03 审计等保持 PARTIAL） |
 | D4-03 外部审计封板 | PASS candidate | 影响“D4-03 = PASS”的正式性 |
 | Windows / External Provider | NOT VERIFIED | D4-01/D4-02 overall = PARTIAL |
 | OS 级网络沙箱 / external workspace read audit / independent malformed ACP injection | NOT VERIFIED | 安全纵深挂账，不属 D4-05 四场景 |
@@ -74,7 +75,7 @@
 
 ## 4. 唯一推荐的下一阶段任务
 
-**D4-05 Closure · 受控 memory 检索/装配与上下文隔离**（建议；见 §7 方案）。范围/前置/完成标准见审查轮（不变）；完成并通过后 S4 与 D4-05 方可升 PASS。路线图下一个正式阶段为 **D5-01 浏览器**（不受 D4-05 门控）；D5-02/03/06/08 以 D4-05 通过为前置。
+**D4-05 Closure-3 已完成：受控 memory 检索/装配与上下文隔离已实现并验证，S4 与 D4-05 = PASS**（见 §2.3/§2.6 与 `docs/D4-05-CLOSURE3-RESULT.md`）。路线图下一个正式阶段为 **D5-01 浏览器**（不受 D4-05 门控）；D5-02/03/06/08 以 D4-05 通过为前置。D4 整体仍为 **PARTIAL**：D4-01/D4-02 Windows / External Provider NOT VERIFIED、D4-03 待外部审计封板、真实 `main.cjs` 全流程 NOT VERIFIED。
 
 ## 5. 修改文件与实际检查
 
@@ -89,10 +90,10 @@
 
 - 本轮**只修两个既有缺口**，未新增 memory 装配、未进入 D5/D6、未扩展工具面、未放宽检查。
 - **未把“一次续接只补一个 kind”写成已满足**：账本层面成立，运行时 per-run capability 仍会重新签发其他 kind，已如实标为 OPEN 并交裁决。
-- D4-05/D4 保持 **PARTIAL**；不因两个缺口修复而升级（记忆上下文缺口不变）。
+- 当时 D4-05/D4 保持 **PARTIAL**；不因两个缺口修复而升级（该记忆上下文缺口后由 D4-05 Closure-3 闭合）。
 - “测试环境等价”不等于“真实 `electron/main.cjs` 全流程已实测”。
 
-## 7. 受控 memory 装配最小方案（仅方案，未实施）
+## 7. 受控 memory 装配最小方案（**已由 D4-05 Closure-3 实施**；以下为当时方案）
 
 - **记忆来源**：`Resource type=memory`（D3-04B），subtype = personal-preference / project-memory / decision-memory / conversation-memory / agent-memory；只取用户本人或被授权项目的记忆，不取跨组织/他人记忆。
 - **检索范围**：经 `SearchService`/`ResourceService` 的**授权过滤**查询（同 D3-05 Gate-Search），限定 task 的 user + app + project/department；按相关性 + 上限条数/字符数取最小必要片段。

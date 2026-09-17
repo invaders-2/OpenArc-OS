@@ -22,6 +22,8 @@ const { registerIdentityIpc } = require(path.join(ROOT, "electron/identity-boots
 const { registerTaskIpc } = require(path.join(ROOT, "electron/task-bootstrap.cjs"));
 const { createDefaultExecutorLauncher } = require(path.join(ROOT, "electron/executor-launcher.cjs"));
 const { createOpenArcRuntime } = require(path.join(ROOT, "electron/runtime-boot.cjs"));
+// Closure-4：信任分层结构（固定规则 system + 低信任 reference user），断言与产品实现同源。
+const { OPENARC_RULES_TEXT, RULES_NAME, REFERENCE_NAME } = require(path.join(ROOT, "electron/harness-model-adapter.cjs"));
 
 const uiURL = pathToFileURL(path.join(ROOT, "dist/index.html")).href;
 const ADMIN = "admin@openarc.test";
@@ -36,8 +38,6 @@ const SECRET = String(process.env.OPENARC_D4_05_SECRET || "SECRET_INJECT_MEM_UI_
 const SECRET_PREFIX = "SECRET_INJECT_MEM_UI_";
 const GOAL = "project alpha";
 const FINAL = "OPENARC_D4_05_MEMORY_UI_OK";
-const BEGIN = "BEGIN_OPENARC_AUTHORIZED_MEMORY";
-const END = "END_OPENARC_AUTHORIZED_MEMORY";
 
 const report = {
   checks: [], errors: [], versions: {}, stats: {}, secrets: {},
@@ -106,16 +106,26 @@ async function readBodies() {
   const json = await res.json();
   return Array.isArray(json.bodies) ? json.bodies : [];
 }
-function bodyText(body) {
-  const msgs = body && Array.isArray(body.messages) ? body.messages : [];
-  return msgs.map((m) => {
-    if (!m) return "";
-    if (typeof m.content === "string") return m.content;
-    if (Array.isArray(m.content)) return m.content.map((p) => (p && typeof p.text === "string" ? p.text : "")).join("");
-    return "";
-  }).join("\n");
+function messagesOf(body) { return body && Array.isArray(body.messages) ? body.messages : []; }
+function messageContentText(message) {
+  if (!message) return "";
+  if (typeof message.content === "string") return message.content;
+  if (Array.isArray(message.content)) return message.content.map((p) => (p && typeof p.text === "string" ? p.text : "")).join("");
+  return "";
 }
-function firstMessage(body) { return body && Array.isArray(body.messages) ? body.messages[0] : null; }
+function bodyText(body) { return messagesOf(body).map(messageContentText).join("\n"); }
+function messageByName(body, name) { return messagesOf(body).find((m) => m && m.name === name) || null; }
+/** 一次请求中记忆正文是否只落在低信任 reference 消息内（高信任 system/developer 绝不含 secret/标题）。 */
+function referenceIsLowTrust(body, memName) {
+  const ref = messageByName(body, REFERENCE_NAME);
+  if (!ref || ref.role !== "user") return false;
+  for (const m of messagesOf(body)) {
+    if (!m || (m.role !== "system" && m.role !== "developer") || m === ref) continue;
+    const text = messageContentText(m);
+    if (text.includes(SECRET) || text.includes(memName)) return false;
+  }
+  return true;
+}
 
 async function runGoalViaUI(goal) {
   await openPanel();
@@ -230,11 +240,26 @@ app.whenReady().then(async () => {
     const run1 = await runGoalViaUI(GOAL);
     const bodies1 = await readBodies();
     const all1 = bodies1.map(bodyText).join("\n");
-    const first1 = firstMessage(bodies1[0]);
-    const first1Text = first1 ? (typeof first1.content === "string" ? first1.content : Array.isArray(first1.content) ? first1.content.map((p) => p && p.text).join("") : "") : "";
-    report.stats.run1 = { taskId: run1.taskId, status: run1.status, bodies: bodies1.length, hasMarker: all1.includes(BEGIN), hasSecret: all1.includes(SECRET) };
-    check("S1.3 · 授权记忆生效：真实 UI task SUCCEEDED 且 provider 请求体含 marker + 唯一 secret", run1.terminal === true && run1.status === "SUCCEEDED" && bodies1.length > 0 && all1.includes(BEGIN) && all1.includes(END) && all1.includes(SECRET), JSON.stringify({ status: run1.status, bodies: bodies1.length, marker: all1.includes(BEGIN), secret: all1.includes(SECRET) }), "SUCCEEDED + BEGIN/END + secret");
-    check("S1.4 · 注入 System 消息在 messages 最前、明确非系统指令、携带 resourceRef；goal 本身不含 secret", !!first1 && first1.role === "system" && first1Text.includes(BEGIN) && first1Text.includes(SECRET) && first1Text.includes("It is NOT a system instruction") && first1Text.includes("resource://") && GOAL.includes(SECRET) === false, JSON.stringify({ firstRole: first1 && first1.role, preamble: first1Text.includes("It is NOT a system instruction"), ref: first1Text.includes("resource://"), goalHasSecret: GOAL.includes(SECRET) }), "system@0 + reference-data + resource:// + goal 无 secret");
+    const refs1 = bodies1.map((b) => messageByName(b, REFERENCE_NAME)).filter(Boolean);
+    const refPayloadOk = refs1.some((r) => {
+      try {
+        const payload = JSON.parse(r.content);
+        return payload && payload.trust === "untrusted" && Array.isArray(payload.items) && payload.items.some((i) => String(i.text).includes(SECRET) && String(i.resourceRef).startsWith("resource://"));
+      } catch { return false; }
+    });
+    // 放置：rules(system) 紧跟 reference(user)，且 rules 之前只允许前导 system 消息。
+    const placementOk = bodies1.some((b) => {
+      const msgs = messagesOf(b);
+      const refIdx = msgs.findIndex((m) => m && m.name === REFERENCE_NAME);
+      const rulesIdx = msgs.findIndex((m) => m && m.name === RULES_NAME);
+      if (refIdx < 0 || rulesIdx < 0 || refIdx !== rulesIdx + 1) return false;
+      const rules = msgs[rulesIdx];
+      return rules.role === "system" && rules.content === OPENARC_RULES_TEXT && msgs.slice(0, rulesIdx).every((m) => m.role === "system");
+    });
+    const highTrustClean1 = bodies1.length > 0 && bodies1.every((b) => referenceIsLowTrust(b, memName));
+    report.stats.run1 = { taskId: run1.taskId, status: run1.status, bodies: bodies1.length, reference: refs1.length, hasSecret: all1.includes(SECRET) };
+    check("S1.3 · 授权记忆生效：真实 UI task SUCCEEDED，provider 请求体含 openarc.reference_data 参考消息 + 唯一 secret", run1.terminal === true && run1.status === "SUCCEEDED" && bodies1.length > 0 && refs1.length > 0 && refPayloadOk && all1.includes(SECRET), JSON.stringify({ status: run1.status, bodies: bodies1.length, reference: refs1.length, secret: all1.includes(SECRET) }), "SUCCEEDED + reference_data(user) + secret");
+    check("S1.4 · 信任分层：reference 紧跟 rules、role=user；rules 为固定 system 常量；任何 system/developer 消息不含 secret/memory 标题", placementOk && highTrustClean1 && GOAL.includes(SECRET) === false, JSON.stringify({ placement: placementOk, highTrustClean: highTrustClean1, goalHasSecret: GOAL.includes(SECRET) }), "rules(system) + reference(user) + 高信任角色无 secret");
 
     // ---------------------------------------------------------------- 删除（产品 API trash + permanentDelete）
     const del = identity.resourceService.delete({ context: libCtx(), resourceRef: memoryRef });
@@ -246,8 +271,9 @@ app.whenReady().then(async () => {
     const run2 = await runGoalViaUI(GOAL);
     const bodies2 = await readBodies();
     const all2 = bodies2.map(bodyText).join("\n");
-    report.stats.run2 = { taskId: run2.taskId, status: run2.status, bodies: bodies2.length, marker: all2.includes(BEGIN), secret: all2.includes(SECRET) };
-    check("S2.2 · 删除后同一 goal 真实 UI 任务：provider 请求体不再含 marker 与 secret", run2.terminal === true && bodies2.length > 0 && !all2.includes(BEGIN) && !all2.includes(END) && !all2.includes(SECRET), JSON.stringify({ status: run2.status, bodies: bodies2.length, marker: all2.includes(BEGIN), secret: all2.includes(SECRET) }), "absent");
+    const struct2 = bodies2.filter((b) => messageByName(b, REFERENCE_NAME) || messageByName(b, RULES_NAME));
+    report.stats.run2 = { taskId: run2.taskId, status: run2.status, bodies: bodies2.length, injected: struct2.length, secret: all2.includes(SECRET) };
+    check("S2.2 · 删除后同一 goal 真实 UI 任务：provider 请求体不再含 memory 注入结构（rules/reference）与 secret", run2.terminal === true && bodies2.length > 0 && struct2.length === 0 && !all2.includes(SECRET), JSON.stringify({ status: run2.status, bodies: bodies2.length, injected: struct2.length, secret: all2.includes(SECRET) }), "absent");
 
     // ---------------------------------------------------------------- 切账号 dana
     const logoutGate = await logout();
@@ -256,8 +282,9 @@ app.whenReady().then(async () => {
     const run3 = await runGoalViaUI(GOAL);
     const bodies3 = await readBodies();
     const all3 = bodies3.map(bodyText).join("\n");
-    report.stats.run3 = { taskId: run3.taskId, status: run3.status, bodies: bodies3.length, marker: all3.includes(BEGIN), secret: all3.includes(SECRET) };
-    check("S3.1 · 真实 UI 切账号 dana：同一 goal 请求体不含 alice 的 secret / 注入块", logoutGate === "unauthenticated" && danaReady === "ready" && run3.terminal === true && bodies3.length > 0 && !all3.includes(SECRET) && !all3.includes(BEGIN), JSON.stringify({ logout: logoutGate, login: danaReady, status: run3.status, secret: all3.includes(SECRET) }), "absent");
+    const struct3 = bodies3.filter((b) => messageByName(b, REFERENCE_NAME) || messageByName(b, RULES_NAME));
+    report.stats.run3 = { taskId: run3.taskId, status: run3.status, bodies: bodies3.length, injected: struct3.length, secret: all3.includes(SECRET) };
+    check("S3.1 · 真实 UI 切账号 dana：同一 goal 请求体不含 alice 的 secret / memory 注入结构", logoutGate === "unauthenticated" && danaReady === "ready" && run3.terminal === true && bodies3.length > 0 && struct3.length === 0 && !all3.includes(SECRET), JSON.stringify({ logout: logoutGate, login: danaReady, status: run3.status, injected: struct3.length, secret: all3.includes(SECRET) }), "absent");
 
     // dana 的 session 读 alice 的 task → TASK_FORBIDDEN
     const danaRef = identity.service.current;

@@ -82,7 +82,7 @@
 | D4-03 工具门与租约 | **CONDITIONAL GO（A PASS）** |
 | D4-04 纵向冒烟 | **PASS（限定当前验收范围）** |
 | D4-06 关联链与预算停止 | **PASS（含任务层跨 run 累计预算续接；仅解除“预算耗尽→用户显式续接”）** |
-| D4-05 执行关卡 | **PARTIAL（S1/S2/S3 PASS；S4 上下文链 NOT VERIFIED）** |
+| D4-05 执行关卡 | **PASS（限定当前验收范围；S1/S2/S3/S4 全 PASS，Closure-3 闭合 S4）** |
 | D5-03 MCP 中心 | **CONDITIONAL GO（受限）** |
 | D5-04 PS 完整接入 | **BLOCK** |
 | D5-05 Illustrator 接入 | **BLOCK** |
@@ -834,7 +834,7 @@ D4-03D **不关闭**任何既有 remaining gap：OS-level network sandbox / exte
 
 ## 5. D4-03C 准入
 
-D4-03C1 = **PASS**；**D4-03C2 = PASS**；**D4-03C3 = PASS candidate**、**D4-03C3 Closure = PASS candidate**；**D4-03C4 = PASS candidate**、**D4-03C4 Closure = PASS candidate**（cold-restart quiescence probe fail closed）、**D4-03C4 Closure-2 = PASS candidate**（cold-restart death proof；pathname != process lifetime；persisted record 无 socketPath）、**D4-03C4 Closure-3 = PASS candidate**（persisted EXITED 无 death authority；只有 live supervisor child exit 能 quiesce）、**D4-03D = PASS candidate**（Full Tool Proxy Gate；official dsh 混合 READ+WRITE verified；tpx scope / revoke / non-persistence；AUTO_RETRY=0）、**D4-03D Closure = PASS candidate**（Tool-call Identity Seal：mandatory callId + canonical arguments fingerprint binding；conflict fail closed）、**D4-03 overall = PASS candidate**（由 ChatGPT 审计后决定 `D4-03 = PASS`）；**D4-04 = PASS（限定当前验收范围）**（真实 Electron probe vertical smoke：Closure-3 轮 67/67 被测 commit `e989842`；当前共享 probe 在 `83baad6` 干净运行 94/94 = 原 67 + D4-06 新增 27；真实 `main.cjs` 未端到端实测，其余 NOT VERIFIED / DEFERRED 保持原状）。**D4-06 = PASS（限定当前验收范围）**（关联链 L1–L15 与预算到限停止通过；A35 “明确续接入口”由 D4-06 Closure 满足——仅解除“预算耗尽→用户显式续接”，有界 ≤3 次）。**D4-05 = PARTIAL（限定当前验收范围）**（S1 产物不符 A33 / S2 结果未知 / S3 用量到限 A35 = PASS；S4 记忆越权 A36 = PARTIAL：检索链 PASS、上下文链 NOT VERIFIED，无 memory 装配入口）；**A33 正式链闸门由 D4-05 Closure `70eb0b1` 补齐（S1 结论以 official dsh facade 正式链为准）**；**解决关联由 D4-05 Closure-2 `77b6e85` 修正为 (tool_id, canonical arguments)**；禁止自动进入 D5 / D6。
+D4-03C1 = **PASS**；**D4-03C2 = PASS**；**D4-03C3 = PASS candidate**、**D4-03C3 Closure = PASS candidate**；**D4-03C4 = PASS candidate**、**D4-03C4 Closure = PASS candidate**（cold-restart quiescence probe fail closed）、**D4-03C4 Closure-2 = PASS candidate**（cold-restart death proof；pathname != process lifetime；persisted record 无 socketPath）、**D4-03C4 Closure-3 = PASS candidate**（persisted EXITED 无 death authority；只有 live supervisor child exit 能 quiesce）、**D4-03D = PASS candidate**（Full Tool Proxy Gate；official dsh 混合 READ+WRITE verified；tpx scope / revoke / non-persistence；AUTO_RETRY=0）、**D4-03D Closure = PASS candidate**（Tool-call Identity Seal：mandatory callId + canonical arguments fingerprint binding；conflict fail closed）、**D4-03 overall = PASS candidate**（由 ChatGPT 审计后决定 `D4-03 = PASS`）；**D4-04 = PASS（限定当前验收范围）**（真实 Electron probe vertical smoke：Closure-3 轮 67/67 被测 commit `e989842`；当前共享 probe 在 `83baad6` 干净运行 94/94 = 原 67 + D4-06 新增 27；真实 `main.cjs` 未端到端实测，其余 NOT VERIFIED / DEFERRED 保持原状）。**D4-06 = PASS（限定当前验收范围）**（关联链 L1–L15 与预算到限停止通过；A35 “明确续接入口”由 D4-06 Closure 满足——仅解除“预算耗尽→用户显式续接”，有界 ≤3 次）。**D4-05 = PASS（限定当前验收范围）**（S1 产物不符 A33 / S2 结果未知 / S3 用量到限 A35 / S4 记忆越权 A36 全 PASS；受控记忆装配与逐请求发送前隔离由 D4-05 Closure-3 `9691348`+`ac9af8e` 补齐）；**A33 正式链闸门由 Closure `70eb0b1` 补齐**；**解决关联由 Closure-2 `77b6e85` 修正为 (tool_id, canonical arguments)**；禁止自动进入 D5 / D6。
 C2/C4 只开放 resource.trash 一条 REVERSIBLE_WRITE：IRREVERSIBLE_WRITE / EXTERNAL_SIDE_EFFECT / PRIVILEGED / Shell / Terminal / filesystem generic mutation / MCP / Browser automation / Device Agent mutation / Canvas mutation / App Center mutation / Adobe control 仍全部 BLOCKED；AUTO_RETRY = 0；Explicit Resume = DEFERRED。Final Approval UI = IMPLEMENTED / VERIFIED。
 
 # D4-04 当前状态（唯一口径 · 2026-09-17）
@@ -842,7 +842,7 @@ C2/C4 只开放 resource.trash 一条 REVERSIBLE_WRITE：IRREVERSIBLE_WRITE / EX
 ## 1. Task Status
 
 **D4-04 纵向冒烟 = PASS（限定当前验收范围）**。`PLAN.md` 对 D4-04 的原始验收（一工具真实流程记录；真实产物、停止、**撤权可核查**）在当前验收范围内全部成立。
-**D4-06 = PASS（限定当前验收范围）**（见下节 `# D4-06 当前状态`）；**D4-05 执行关卡 = PARTIAL（限定当前验收范围）**（见下节 `# D4-05 当前状态`）；禁止自动进入 D5 / D6。
+**D4-06 = PASS（限定当前验收范围）**（见下节 `# D4-06 当前状态`）；**D4-05 执行关卡 = PASS（限定当前验收范围）**（见下节 `# D4-05 当前状态`）；禁止自动进入 D5 / D6。
 真实 `electron/main.cjs` 全流程端到端 = **NOT VERIFIED**；其余 `NOT VERIFIED` / `DEFERRED` 项保持原状。
 
 ## 2. 关键证据（真实执行）
@@ -874,7 +874,7 @@ C2/C4 只开放 resource.trash 一条 REVERSIBLE_WRITE：IRREVERSIBLE_WRITE / EX
 - 关联链（Task→Step→Call→Artifact→Verification）真实产品链路 **L1–L15 全 PASS**；成功 step 必有 Artifact 且 checksum 匹配、必有同 task Verification；拒绝/取消/撤权/UNKNOWN/执行异常/预算停止路径如实 0 Artifact/0 Verification，逐条标注“不适用（该路径无 artifact 提交）”。
 - 预算到限停止：三类既有 bounded 预算（Model Proxy `maxCalls=8` / Tool Facade `maxCalls` / `MAX_TOOL_ROUNDS=4`）在真实产品 orchestrator 下停止收敛；Electron UI 一致性 Y1/Y5 PASS；预算 Node 测试 6/6；AUTO_RETRY=0；不手工 `blockStep`；不回滚已发生副作用。
 - **A35 “明确续接入口” 已满足（D4-06 Closure）**：Boss 批准仅本范围解除延期；预算耗尽 → 后端判定 → 用户显式续接 → 新 bounded step/run（有界 ≤3 次、保留历史、不重放、不自动重做）；其他恢复场景仍 `EXPLICIT_RESUME_DEFERRED`。
-**D4-05 执行关卡 = PARTIAL（限定当前验收范围）**（见下节 `# D4-05 当前状态`）；禁止自动进入 D5 / D6。
+**D4-05 执行关卡 = PASS（限定当前验收范围）**（见下节 `# D4-05 当前状态`）；禁止自动进入 D5 / D6。
 
 ## 2. 关键证据（真实执行，D4-06 Closure 被测 commit `7b53458`）
 
@@ -899,14 +899,14 @@ C2/C4 只开放 resource.trash 一条 REVERSIBLE_WRITE：IRREVERSIBLE_WRITE / EX
 
 ## 1. Task Status
 
-**D4-05 执行关卡 = PARTIAL（限定当前验收范围）**。`PLAN.md` §41 四场景中 S1/S2/S3 = PASS、S4 = PARTIAL：
+**D4-05 执行关卡 = PASS（限定当前验收范围）**（D4-05 Closure-3 升级）。`PLAN.md` §41 四场景 S1/S2/S3/S4 = PASS：
 - **S1 产物不符（A33）**：工具报告成功但产物尺寸不符（test-only `test.sized`，生产零改动）→ execution `FAILED` / `TOOL_VERIFICATION_FAILED` / `verification_status=FAIL` / Task·Step BLOCKED / 0 Artifact / **1 条 FAIL Verification（v15：method/expected/actual/证据引用，跨重开可查，不造假产物）** / 无第 2 次 proposal；正对照尺寸相符 → SUCCEEDED + 1 Artifact（归属 + `checksum==sha256(content)`）+ 1 PASS Verification。**D4-05 Closure（`70eb0b1`）起，S1 结论以 official dsh facade 正式链为准**：正式链下同样拒绝假成功（`TaskService.getUnresolvedRequiredVerificationFailures` + orchestrator 提交前闸门），旧 fallback 断言保留不删；有限纠错需同 tool 真实复验 PASS 才成功。**D4-05 Closure-2（`77b6e85`）修正解决关联**：关联键从裸 `tool_id` 改为 `(tool_id, canonical arguments)`，无关对象/无关验证要求/无关 Step 的 PASS 不再误清除对应 FAIL（正式链已复现旧漏洞：对象 A FAIL 被对象 B 的 PASS 误清除 → 假成功）；缺 `arguments_hash` 的旧数据保守保持未解决；`resolved` 关系可追溯。
 - **S2 结果未知（§383/384）**：真实受控 WRITE + 真实存活 executor（quiescence 不可证）→ Call `UNKNOWN_EFFECT`、Task/Step BLOCKED、0 第二 call/lease/retry、UI 不显示成功；不自动续接（`RESUME_UNKNOWN_EFFECT_PRESENT`）；**本轮补齐只读 recovery 投影 + 人工确认入口**（`task/recovery`/`task/get.recovery` + `task/acknowledgeUnknownEffect` + `data-ai-recovery`/`data-ai-acknowledge`；确认只追加 safe event，不改 authority、不授权 retry/resume）。
 - **S3 用量到限（A35）**：真实 orchestrator bounded 预算停止 + 保留产物 + 用户显式续接（有界 ≤3）；`additions.amount == 新一轮真实 capability`、原消耗保留、`base=实际配置`（本轮修复）；一次续接账本只补一个 kind，但新 run 会重新签发 per-run Model/Tool capability（“跨 run 不重置其他 kind”= **OPEN**，见 `docs/D4-ACCEPTANCE-RESULT.md` §2.4）。
-- **S4 记忆越权（A36）= PARTIAL**：**检索链 PASS**（删除前可见 / 删除后不可见 + 索引移除 / 跨账号不可见，正负对照）；**上下文链 NOT VERIFIED**——`buildPrompt` 无 memory 检索/装配入口，“请求体不含记忆”属空验证，只能说明当前无泄漏路径，**不得**声称已验证记忆注入时的隔离（最小后续方案：先加受控 memory 装配入口再验证）。
+- **S4 记忆越权（A36）= PASS（Closure-3）**：**检索链 PASS** + **上下文链 PASS**——受控装配入口 `electron/memory-context.cjs`（validateSession → TaskService.getTask → SearchService 授权检索 agent=true → test-only 同步点 → 逐条 getCapabilities(agent)+readText 最后检查；有界、无缓存）在唯一出站口 `harness-model-adapter.cjs` 逐请求注入为 reference-data system 块；正负对照（授权注入 / §25 无显式 grant·他人·删除·撤权·跨范围不注入 / 续接重检 / 同步点最后检查 / 恶意正文无副作用 / 残缺标记 403）与真实 Electron UI 15/15 全通过。
 **禁止自动进入 D5 / D6。**
 
-## 2. 关键证据（真实执行，D4 收口修复被测 commit `ec7a732`；**D4-05 Closure `70eb0b1` / Closure-2 `77b6e85`**）
+## 2. 关键证据（真实执行，D4 收口修复被测 commit `ec7a732`；**D4-05 Closure `70eb0b1` / Closure-2 `77b6e85` / Closure-3 `9691348`+`ac9af8e`**）
 
 | 入口 | 结果 |
 |---|---|
@@ -918,13 +918,17 @@ C2/C4 只开放 resource.trash 一条 REVERSIBLE_WRITE：IRREVERSIBLE_WRITE / EX
 | `npm run test:d4-05`（Closure-2 `77b6e85`） | **139 / 139 functional**，S1/S2/S3=PASS、S4=PARTIAL，`workspaceState=""` |
 | `node --test tests/d4-05-s1-facade-association.test.mjs`（Closure-2 `77b6e85`） | **6 / 6 PASS**（无关对象/无关要求/无关 Step 不误清除；有效纠错 + resolved 关联；DB 重开一致；普通错误语义不变） |
 | `npm run test:d4-08-verification-ui` / `test:d4-04` / `test:d4-06` / `test:d4-06-resume`（Closure-2 `77b6e85`） | 22/22、94/94、119/119、21/21 全部 PASS |
+| `npm run test:d4-05`（Closure-3 `ac9af8e`） | **165 / 165 functional**，**S1/S2/S3/S4 全 PASS**，`overallStatus=PASS`，`workspaceState=""` |
+| `node --test tests/d4-05-s4-memory-context.test.mjs`（Closure-3 `9691348`） | **11 / 11 PASS**（正向注入/§25 负向/删除/撤权/切账号/部门范围/同步点最后检查/恶意正文/续接重检/未接线/残缺 403） |
+| `npm run test:d4-05-memory-ui`（Closure-3 `ac9af8e`） | **15 / 15 PASS**（真实 Electron UI：授权生效 → 删除隔离 → 切账号隔离 + 读旧 task TASK_FORBIDDEN） |
+| `npm test`（Closure-3 `ac9af8e`） | **980 / 980 PASS** |
 | 说明 | D4-01/02/03/04/06 复用各自阶段证据，未机械重跑全部 |
 
-- 证据：`docs/D4-05-GATE-EVIDENCE.json`（Closure-2：**139 条**，`artifactSha256=aa47302b…e731`）、`docs/D4-ACCEPTANCE-RESULT.md`（D4 阶段收口 + 修复 + memory 方案）。详细记录：`docs/D4-05-RESULT.md`、`docs/D4-05-CLOSURE-RESULT.md`、`docs/D4-05-CLOSURE2-RESULT.md`。
+- 证据：`docs/D4-05-GATE-EVIDENCE.json`（Closure-3：**165 条**，`artifactSha256=cd33fed2…0bc4`；S4 共 28 条 = Node 13 + 真实 Electron UI 15）、`docs/D4-ACCEPTANCE-RESULT.md`。详细记录：`docs/D4-05-RESULT.md`、`docs/D4-05-CLOSURE-RESULT.md`、`docs/D4-05-CLOSURE2-RESULT.md`、`docs/D4-05-CLOSURE3-RESULT.md`。
 
 ## 3. 主要缺口 / 后续
 
-1. **S4 上下文链 NOT VERIFIED**（无 memory 检索/装配入口）→ D4-05 = PARTIAL；最小后续方案见 `docs/D4-ACCEPTANCE-RESULT.md` §4。
+1. ~~S4 上下文链 NOT VERIFIED（无 memory 检索/装配入口）~~ **已闭合（D4-05 Closure-3 `9691348`+`ac9af8e`）**：受控记忆装配 + 逐请求发送前隔离；S4 与 D4-05 = PASS。残留：记忆装配以 task goal 为相关性 query、上限 5 条，属限定范围；`memories[].checksum` 恒 null。
 2. ~~A33 失败路径无独立 `task_verifications` 记录~~ **已修复（schema v15）**：失败写 FAIL Verification（method/expected/actual/证据引用，脱敏有界，不建 Artifact），跨重开可查；见 `docs/D4-ACCEPTANCE-RESULT.md` §2.1。
 3. ~~TOOL_CALLS 真实耗尽被 MODEL_CALLS 兜底 / `base.TOOL_CALLS` 名义值 / 续接新 run 顺带恢复其他预算~~ **已修复（D4-06 Closure，schema v16 `task_budgets`）**：`budgetExhausted()` TOOL_CALLS 优先 + 工具预算耗尽即停止；`base` 用实际配置；**任务层跨 run 累计预算**——续接只抬升被批准 kind，其他种类继承剩余；新 run capability 额度=该类 remaining；run 结束一次性扣减；某类 remaining==0 不建 run 直接 `BUDGET_EXHAUSTED`。
 4. A37 / A38 不在 PLAN §41 的 D4-05 四场景内，未纳入。
@@ -932,15 +936,16 @@ C2/C4 只开放 resource.trash 一条 REVERSIBLE_WRITE：IRREVERSIBLE_WRITE / EX
 
 # D4 阶段总结（唯一口径 · 2026-09-17）
 
-**D4 = PARTIAL**（macOS 核心基本完成，非整体完成）。D4-01 macOS Core、D4-02 macOS Core、D4-03（PASS candidate）、D4-04、D4-06 在声明范围内通过；**D4-05 = PARTIAL**。
+**D4 = PARTIAL**（macOS 核心基本完成，非整体完成）。D4-01 macOS Core、D4-02 macOS Core、D4-03（PASS candidate）、D4-04、**D4-05**、D4-06 在声明范围内通过；**D4-05 = PASS**（Closure-3 闭合 S4）。D4 整体仍 PARTIAL：剩余为既有项（Windows / External Provider、D4-03 审计、真实 main 全流程）。
 - 收口修复（`ec7a732`）：① 预算实际值/停止原因/追加账本；② 失败 Verification 持久化（schema v15）。
 - **D4-06 Closure（`7b53458`，test-seed `fbbc002`）：任务层跨 run 累计预算（schema v16）+ 失败验证 UI Electron 实测（22/22）；D4-06 恢复 PASS**。D4-05/D4 保持 PARTIAL（memory 上下文缺口不变）。
 - **D4-05 Closure（`70eb0b1`）：A33 正式链假成功修复**——official dsh facade 下 READ_ONLY 必需产物验证失败不再被 final text 成功掩盖（`getUnresolvedRequiredVerificationFailures` + orchestrator 闸门）；S1 结论以正式链证据为准（Node 5/5 + UI 22/22）。D4-05/D4 仍 PARTIAL（S4 memory 上下文缺口不变）；D4-06 通过范围不扩大。
-- **D4-05 Closure-2（`77b6e85`）：失败验证的解决关联修正**——关联键从裸 `tool_id` 改为 `(tool_id, canonical arguments)`；无关对象/无关要求/无关 Step 的 PASS 不误清除对应 FAIL，有效纠错可成功并保留 `resolved` 追溯；缺失关联的旧数据保守保持未解决。新增正式链 6/6、`test:d4-05` 139/139。D4-05/D4 仍 PARTIAL（S4 memory 缺口不变）。
-- `docs/D4-ACCEPTANCE-RESULT.md` 含受控 memory 装配最小方案（仅方案，未实施）与需裁决的续接跨 run 预算 OPEN 项。
-- 阻塞整体 PASS：D4-05 S4 上下文链 NOT VERIFIED（无 memory 装配入口）；D4-01/D4-02 的 Windows / External Provider NOT VERIFIED；D4-03 待外部审计封板。
+- **D4-05 Closure-2（`77b6e85`）：失败验证的解决关联修正**——关联键从裸 `tool_id` 改为 `(tool_id, canonical arguments)`；无关对象/无关要求/无关 Step 的 PASS 不误清除对应 FAIL，有效纠错可成功并保留 `resolved` 追溯；缺失关联的旧数据保守保持未解决。新增正式链 6/6、`test:d4-05` 139/139。
+- **D4-05 Closure-3（`9691348` + `ac9af8e`）：受控记忆装配与任务上下文隔离（A36）**——受控装配 `memory-context.cjs` + 唯一出站口逐请求注入（reference-data 标记、与系统指令分离）、发送前重新授权/重新读取、删除/撤权/切账号/跨范围隔离、无缓存、正文不落盘；Node 正式链 11/11 + 真实 Electron UI 15/15；`test:d4-05` **165/165（S1–S4 全 PASS，overallStatus=PASS）**；`npm test` 980/980。**S4 与 D4-05 升 PASS**；D4 整体仍 PARTIAL（剩余既有未验证项）。
+- `docs/D4-ACCEPTANCE-RESULT.md` 含受控 memory 装配最小方案（**已由 D4-05 Closure-3 实施**，见 §2.3）与需裁决的续接跨 run 预算 OPEN 项。
+- 阻塞整体 PASS：D4-01/D4-02 的 Windows / External Provider NOT VERIFIED；D4-03 待外部审计封板；真实 `electron/main.cjs` 全流程 NOT VERIFIED。（D4-05 S4 上下文链已由 Closure-3 闭合，不再阻塞。）
 - 已验范围（macOS）：模型服务隔离/撤权、任务版本固定与实时权限、工具门/租约/审批/受控写入、纵向冒烟（真实产物/停止/撤权）、关联链与预算停止、结果未知处置均在各自范围内真实通过。
-- 唯一推荐的下一阶段任务：**D4-05 Closure · 受控 memory 检索/装配与上下文隔离**（建议；见 `docs/D4-ACCEPTANCE-RESULT.md` §4）。
+- 下一阶段任务：**D5-01 浏览器**（D4-05 Closure-3 已完成受控 memory 检索/装配与上下文隔离，路线图下一步见 `docs/D4-ACCEPTANCE-RESULT.md` §4）。
 
 ---
 
