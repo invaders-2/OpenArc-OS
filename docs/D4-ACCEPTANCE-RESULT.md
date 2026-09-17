@@ -14,6 +14,7 @@
 - D4-01 macOS Core、D4-02 macOS Task/Harness Core、D4-03（PASS candidate）、D4-04、D4-06 在各自声明范围内通过；D4-05 = **PARTIAL**（S1/S2/S3 PASS、S4 上下文链 NOT VERIFIED）。
 - 阻塞“整体 PASS”的项：D4-05 S4 依赖尚不存在的 memory→任务上下文装配能力（空验证）；D4-01/D4-02 的 Windows / External Provider = NOT VERIFIED；D4-03 待外部审计封板。
 - 本轮（D4-06 Closure）已修复：① 任务层跨 run 累计预算（续接只补被批准 kind，其他种类继承剩余）；② 失败验证 UI 的 Electron 实测。**D4-06 恢复 PASS**；D4-05/D4 仍为 PARTIAL（memory 上下文缺口不变）。
+- **D4-05 Closure（代码/测试被测 commit `70eb0b12167e513bb4eb7fa1cb4efb9ca70e509d`）**：修复 A33 正式链假成功——official dsh facade 下 READ_ONLY 必需产物验证失败不再被 final text 成功掩盖（`TaskService.getUnresolvedRequiredVerificationFailures` + orchestrator 提交前闸门）。**S1 结论以正式链证据为准**；**D4-05 / D4 仍为 PARTIAL**（S4 memory 上下文缺口不变），**D4-06 通过范围不扩大**。详见 `docs/D4-05-CLOSURE-RESULT.md`。
 
 ## 1. D4 原始要求 → 实现 → 证据 → 限制 → 结论
 
@@ -23,8 +24,8 @@
 | **D4-02 任务与适配**：任务版本固定且权限实时有效 | `task-domain/store/service.cjs`、`harness-adapter.cjs`、`task-harness-orchestrator.cjs` | `test:d4-02a` 22/22、`test:d4-02b` 16/16、`test:d4-02c` 22/22（schema v15）；MODEL_CONFIG_CHANGED 真实测试 | Windows NOT VERIFIED | macOS Core **PASS**；cross-platform overall **PARTIAL** |
 | **D4-03 工具门与租约**：授权执行及回报；重复调用与离线结果处理正确 | `tool-registry.cjs`、`controlled-tool-proxy.cjs`、`tool-facade-bridge.cjs`、`side-effect-authority/store/runtime.cjs`、`runtime-supervisor.cjs` | A 32/32；B 59/59；C1 46/46+50/50；C2 29/29 + closure 38/38/45/45/51/51；C3 56/56、closure 63/63；C4 35/35 + UI 22/22 + closure 15/15/12/12/9/9；D 52/52、closure 62/62 | **PASS candidate，待外部审计封板**；OS 网络沙箱/独立 malformed ACP/跨重启 durable death proof NOT VERIFIED/DEFERRED | **PASS candidate** |
 | **D4-04 纵向冒烟**：一工具真实流程记录；真实产物、停止、撤权可核查 | `tests/fixtures/d4-04-probe/main.cjs`、`tests/d4-04-smoke.mjs`、`runtime-boot.cjs`、`executor-launcher.cjs`、`side-effect-*.cjs` | `test:d4-04` **94/94**；Closure-3 **67/67**（`e989842`）；撤权 R1/R2；executor-unavailable | Gate 宿主 = probe host（非真实 `electron/main.cjs`） | **PASS（限定范围）** |
-| **D4-05 执行关卡**：门控验收，未通过禁止扩展真实工具面 | `task-service.cjs`（recovery/resume/ledger）、`task-bootstrap.cjs`、AI 面板 | `test:d4-05` **128/128 functional**，`overallStatus=PARTIAL`，S1/S2/S3 PASS、S4 PARTIAL | S4 上下文链 NOT VERIFIED（无 memory 装配入口）；见 §2 | **PARTIAL** |
-| **D4-06 关联链与预算停止**（§41） | `task-service.cjs`、`task-harness-orchestrator.cjs`、`task-store.cjs`、D4-05 recovery | `test:d4-06` **119/119**；`test:d4-06-resume` **21/21**；失败验证 UI `test:d4-08-verification-ui` **22/22**；`test:d4-08` **13/13** | 上层收敛为 TaskService 合同验证；失败验证 UI 走产品 orchestrator/proxy + test-only ACP agent（非 official dsh facade）；真实 main.cjs 未端到端 | **PASS** |
+| **D4-05 执行关卡**：门控验收，未通过禁止扩展真实工具面 | `task-service.cjs`（recovery/resume/ledger）、`task-bootstrap.cjs`、AI 面板 | `test:d4-05` **133/133 functional**（D4-05 Closure `70eb0b1`；S1 以 official dsh facade 正式链为准），`overallStatus=PARTIAL`，S1/S2/S3 PASS、S4 PARTIAL | S4 上下文链 NOT VERIFIED（无 memory 装配入口）；见 §2 | **PARTIAL** |
+| **D4-06 关联链与预算停止**（§41） | `task-service.cjs`、`task-harness-orchestrator.cjs`、`task-store.cjs`、D4-05 recovery | `test:d4-06` **119/119**；`test:d4-06-resume` **21/21**；失败验证 UI `test:d4-08-verification-ui` **22/22**；`test:d4-08` **13/13** | 上层收敛为 TaskService 合同验证；失败验证 UI 已由 D4-05 Closure 切到 official dsh facade 正式链（见 §2.5）；真实 main.cjs 未端到端 | **PASS** |
 | **A14–A19** | 见审查轮报告 | D4-01/02/03 真实证据；A15 复用 | Windows / External Provider | **PASS**（复用） |
 
 ## 2. 重点审查发现与本轮修复
@@ -51,7 +52,7 @@
 
 ### 2.5 失败 Verification 的 Electron UI 实测（D4-06 Closure 补齐）
 - 新增 `tests/d4-08-verification-ui.mjs` + 真实 Electron probe：test-only 尺寸探针经**产品 TaskHarnessOrchestrator + 产品 ControlledToolProxy + 真实 TaskService/DB** 触发 `ADAPTER_VERIFY` 失败 → Task/Step BLOCKED、0 Artifact、1 条 FAIL verification；真实 Renderer 显示 `data-ai-verification`（检查方法 ADAPTER_VERIFY / 预期 / 实际 / 证据 executionId，**不显示成功**）；Reload 后从 `task/get` 恢复一致；非 owner（第二真实用户）读写均 `TASK_FORBIDDEN`、UI 不可见。实测 **22/22**。
-- **限制**：该 UI 探针走产品 orchestrator/proxy 链 + test-only synthetic ACP agent，未走 official dsh facade、工具调用非由 deterministic provider 发出（facade 模式下 READ_ONLY 验证失败不回落到 Step/Task BLOCK，无法确定性得到“验证失败→BLOCKED”）。
+- **D4-05 Closure 更新（限制已消除）**：该 UI 探针现已走 **official dsh facade 正式链**（产品 TaskHarnessOrchestrator + 产品 ControlledToolProxy + deterministic provider `mode=sized`），不再使用 synthetic ACP fallback；新增 A33 闸门后，READ_ONLY 必需产物验证失败确定性地 → Task/Step BLOCKED + 0 Artifact + 1 FAIL Verification（`test:d4-08-verification-ui` 22/22，`officialDshFacade=true`）。
 
 ## 3. 仍未验证的能力及其对收口的影响
 
@@ -62,7 +63,7 @@
 | Windows / External Provider | NOT VERIFIED | D4-01/D4-02 overall = PARTIAL |
 | OS 级网络沙箱 / external workspace read audit / independent malformed ACP injection | NOT VERIFIED | 安全纵深挂账，不属 D4-05 四场景 |
 | 跨重启 authenticated durable process-death proof | DEFERRED / NOT VERIFIED | 当前 fail closed 到 UNKNOWN_EFFECT |
-| 失败 Verification 的 Electron UI | 已实测 22/22（fallback 链） | 已满足；链路限制见 §2.5 |
+| 失败 Verification 的 Electron UI | 已实测 22/22（**official dsh facade 正式链**，D4-05 Closure `70eb0b1`） | 已满足；原 fallback 链路限制已消除（见 §2.5） |
 
 ## 4. 唯一推荐的下一阶段任务
 

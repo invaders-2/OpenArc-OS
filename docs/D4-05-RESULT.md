@@ -3,9 +3,10 @@
 - 工作树：`/Users/wepingli/Desktop/OpenArc OS-d4-01`；分支：`feature/d4-03-tool-proxy`
 - Base HEAD（本轮起点，干净）：`a7faf060bb4b2371fdfa379118b2d9011ba7b412`
 - **被测 commit**（D4 收口修复后重跑）：`ec7a732aa78ffc52e8e0ce3b4d1e09108f604dc4`（D4-05 实现 `83baad6`、审查补测 `431395d`）
+- **D4-05 Closure 代码与测试被测 commit**：`70eb0b12167e513bb4eb7fa1cb4efb9ca70e509d`（A33 正式 official dsh facade 链闸门；详见 `docs/D4-05-CLOSURE-RESULT.md`）
 - Final HEAD：本轮报告/证据提交（见文末）
 - 范围：只补齐 PLAN.md §41 的 D4-05 四场景（产物不符 / 结果未知 / 用量到限 / 记忆越权）；第二轮按父级指示补齐 S2 的**最小人工确认入口**以闭合 §384。不扩展真实工具面、不放宽既有检查、不 commit、不 push。
-- **结论：`D4-05 = PARTIAL`**——S1/S2/S3 = PASS；**S4 = PARTIAL**（检索链 PASS、上下文链 NOT VERIFIED：无 memory→任务上下文装配入口，A36 的上下文链为空验证，见 §3/§5）。其余场景 PASS 结论不变。
+- **结论：`D4-05 = PARTIAL`**——S1/S2/S3 = PASS；**S4 = PARTIAL**（检索链 PASS、上下文链 NOT VERIFIED：无 memory→任务上下文装配入口，A36 的上下文链为空验证，见 §3/§5）。其余场景 PASS 结论不变。**S1（A33）结论以 D4-05 Closure 的 official dsh facade 正式链证据为准**（见 §7 与 `docs/D4-05-CLOSURE-RESULT.md`）。
 
 ## 1. 要求对应表
 
@@ -71,3 +72,12 @@
 - `artifactSha256 = 01e3d3ef01fcf0cfd2968addf7031af2105d6c24ad207b624ca62371f392e78a`（testedCommit `ec7a732`，运行前 `workspaceState=""`；Node 23 / D4-04 Electron 94 / recovery UI 11 = 128，全 true）。
 - 原始 artifact（gitignored）SHA-256：`artifacts/d4-04/vertical-smoke-gate.json=2276cd72ac47d075483bb8d8cca4649bbb2c78d4faf5bfbf4842d75c103edbee`；`artifacts/d4-05/node-tests.tap=b46cee10418e0c4d258e41a4f248abc95165a3cb1916de1a63db558cecb097d3`；`artifacts/d4-05-recovery/recovery-ui-gate.json=2353b8af9eef75adf358bd3e8fd64b9d6c763b20a08f02af51ddf9eec05427f0`。
 - 已脱敏：无 `/Users`、`/private`、`/var/folders`、`mpx_`、`tpx_`、`credential`。
+
+## 7. D4-05 Closure · A33 正式链（本 Closure 更新，取代 S1 的 fallback 限定）
+
+- **代码与测试被测 commit**：`70eb0b12167e513bb4eb7fa1cb4efb9ca70e509d`（Base HEAD `f481ffe`，干净）。
+- 根因：`task-harness-orchestrator.cjs` 的 facade 分支只处理 WRITE proposal 与 final text verification，不检查 dsh 进程内经 `ToolFacadeBridge → ControlledToolProxy` 落下的 `verification_status=FAIL` 记录 → 模型输出“完成”即可假成功。
+- 修复：`TaskService.getUnresolvedRequiredVerificationFailures`（只读、按 `tool_id` 最近一次验证结论判定、旧 FAIL 不删改、后续真实 PASS 即解决）+ orchestrator 在 `commitStepSuccess` 前插入 A33 闸门（未解决即 `#blockStep(TOOL_VERIFICATION_FAILED)`、0 Artifact、无自动重试）。普通工具调用错误（`verification_status` 为空）不参与判定。
+- 正式链证据：`tests/d4-05-s1-facade-a33.test.mjs` **5/5**（真实 official dsh，负例/正对照/有限纠错/普通 READ 错误/跨重开持久化）；`npm run test:d4-08-verification-ui` **22/22**（`officialDshFacade=true` 的真实 Electron UI：BLOCKED/0 Artifact/1 FAIL Verification、刷新一致、非 owner 不可读）。
+- 回归：`npm run test:d4-05` **133/133 functional（S1/S2/S3=PASS、S4=PARTIAL）**；`test:d4-04` 94/94、`test:d4-06` 119/119、`test:d4-06-resume` 21/21、`test:d4-03b-dsh` 26/26、`npm test` 963/963。
+- 详细根因/改动/逐条检查/限制见 `docs/D4-05-CLOSURE-RESULT.md`。

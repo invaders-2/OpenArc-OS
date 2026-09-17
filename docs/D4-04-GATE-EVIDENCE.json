@@ -10,8 +10,8 @@
     "arch": "arm64"
   },
   "commit": null,
-  "testedCommit": "7b53458ef1611c08ab96679eab6377d1c4d0e342",
-  "workspaceState": "M docs/D4-05-GATE-EVIDENCE.json\n M docs/D4-06-GATE-EVIDENCE.json",
+  "testedCommit": "70eb0b12167e513bb4eb7fa1cb4efb9ca70e509d",
+  "workspaceState": "M docs/D4-05-GATE-EVIDENCE.json",
   "command": "npm run test:d4-04",
   "officialDsh": true,
   "dshVersion": "0.1.5-rc.2",
@@ -53,7 +53,7 @@
     "electron": "44.3.0",
     "node": "24.20.0",
     "write": {
-      "instanceId": "exe_6EVIJV3k",
+      "instanceId": "exe_8C8GEWP5",
       "spawned": true,
       "ready": true,
       "exited": true,
@@ -62,7 +62,7 @@
       "launchError": false
     },
     "unknown": {
-      "instanceId": "exe_2FLLj5dc",
+      "instanceId": "exe__vK0DgIu",
       "spawned": true,
       "ready": true,
       "exited": true,
@@ -71,7 +71,7 @@
       "launchError": false
     },
     "conflict": {
-      "instanceId": "exe_p8t8VYb1",
+      "instanceId": "exe_tfgbxknC",
       "spawned": true,
       "ready": true,
       "exited": true,
@@ -184,7 +184,7 @@
     {
       "name": "C3 · Approval UI 显示 tool / risk / target / effect",
       "expected": null,
-      "actual": "应用 / AgentAI 助手（本机会话）工具Trash Resource（resource.trash）风险可逆写入目标Vertical Smoke Resourceresource://res_uDUy-yQgGy6Mi0qtn0k82",
+      "actual": "应用 / AgentAI 助手（本机会话）工具Trash Resource（resource.trash）风险可逆写入目标Vertical Smoke Resourceresource://res_TmJnx59ZlihL8H1B5ufCf",
       "ok": true
     },
     {
@@ -214,7 +214,7 @@
     {
       "name": "C8 · production executor spawned + ready + real child exit",
       "expected": null,
-      "actual": "{\"instanceId\":\"exe_6EVIJV3k\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":0,\"signal\":null,\"launchError\":false}",
+      "actual": "{\"instanceId\":\"exe_8C8GEWP5\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":0,\"signal\":null,\"launchError\":false}",
       "ok": true
     },
     {
@@ -304,7 +304,7 @@
     {
       "name": "F5 · claim RUNNING 先于真实 child exit 崩溃",
       "expected": null,
-      "actual": "{\"claimIdx\":20,\"unknownIdx\":21,\"ev\":{\"instanceId\":\"exe_2FLLj5dc\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":9,\"signal\":null,\"launchError\":false}}",
+      "actual": "{\"claimIdx\":20,\"unknownIdx\":21,\"ev\":{\"instanceId\":\"exe__vK0DgIu\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":9,\"signal\":null,\"launchError\":false}}",
       "ok": true
     },
     {
@@ -322,7 +322,7 @@
     {
       "name": "G1 · Renderer 自报 actor/risk 被忽略（真实 session 决定）",
       "expected": null,
-      "actual": "{\"ok\":true,\"actor\":\"usr_SMntE_-CJn4VCi5dvH3dFS-L5XND3LA4\"}",
+      "actual": "{\"ok\":true,\"actor\":\"usr_n2-HjErq4WU2ZzhX2x8IfBiqbz1MBCqy\"}",
       "ok": true
     },
     {
@@ -340,7 +340,7 @@
     {
       "name": "H1 · Reload 后从 backend state 恢复 Task 结果",
       "expected": null,
-      "actual": "taskId=task_3d27TIcpe33sHA gate=ready",
+      "actual": "taskId=task_mU2sWMbXv5qa-w gate=ready",
       "ok": true
     },
     {
@@ -669,7 +669,7 @@
     }
   ],
   "providerRequests": 8,
-  "at": "2026-09-17T07:29:06.528Z",
+  "at": "2026-09-17T08:14:57.822Z",
   "artifactSha256Coverage": "sha256 of canonical JSON (2-space indent) excluding the artifactSha256 field",
-  "artifactSha256": "4b07e9c94d06dce081698e3a38a4f658e333024f94ad59946ea6f8ede41b3a1b"
+  "artifactSha256": "8872c9574390de1c263ee4ebf25ece8d902d944b7434deac1a31017020097b27"
 }
