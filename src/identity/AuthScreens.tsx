@@ -17,6 +17,32 @@ import { AvatarPicker } from "./AvatarPicker";
 
 type AuthError = { code: string; detail?: string } | null;
 
+/**
+ * 锁屏/登录壁纸。identity 层只消费纯数据，不碰 files 服务：
+ * id 恒有（same 已被上游解析成桌面当前壁纸），自定义图才有 src/kind/style。
+ */
+export type LockWallpaper = {
+  id: string;
+  src?: string;
+  kind?: "image" | "video";
+  style?: React.CSSProperties;
+} | null;
+
+/** 壁纸层：清晰显示，不磨砂；文字可读性交给 .lock-stage::before 的 scrim。 */
+function LockStageWallpaper({ wallpaper }: { wallpaper?: LockWallpaper }) {
+  return (
+    <div className="lock-wallpaper" aria-hidden="true">
+      {wallpaper?.src ? (
+        wallpaper.kind === "video" ? (
+          <video className="wallpaper-media" src={wallpaper.src} style={wallpaper.style} autoPlay muted loop playsInline />
+        ) : (
+          <img className="wallpaper-media" src={wallpaper.src} style={wallpaper.style} alt="" />
+        )
+      ) : null}
+    </div>
+  );
+}
+
 function AuthErrorLine({ error }: { error: AuthError }) {
   if (!error) return null;
   return (
@@ -205,9 +231,10 @@ type LoginProps = {
   error: AuthError;
   defaultIdentifier?: string;
   onSubmit: (input: { identifier: string; password: string }) => Promise<unknown>;
+  wallpaper?: LockWallpaper;
 };
 
-export function LoginScreen({ busy, error, defaultIdentifier = "", onSubmit }: LoginProps) {
+export function LoginScreen({ busy, error, defaultIdentifier = "", onSubmit, wallpaper }: LoginProps) {
   const [identifier, setIdentifier] = useState(defaultIdentifier);
   const [password, setPassword] = useState("");
   const first = useRef<HTMLInputElement>(null);
@@ -217,7 +244,8 @@ export function LoginScreen({ busy, error, defaultIdentifier = "", onSubmit }: L
   }, []);
 
   return (
-    <div className="auth-screen lock-stage" data-d3-id="auth-screen">
+    <div className="auth-screen lock-stage" data-d3-id="auth-screen" data-lock-wallpaper={wallpaper?.id ?? "same"}>
+      <LockStageWallpaper wallpaper={wallpaper} />
       <LockClock />
       {/* 登录页没有 session，改资料只能从已登录状态发起；这里只做展示。 */}
       <div className="lock-panel" role="main">
@@ -263,6 +291,7 @@ type LockProps = {
   error: AuthError;
   onUnlock: (password: string) => Promise<unknown>;
   onLogout: () => Promise<unknown>;
+  wallpaper?: LockWallpaper;
 };
 
 /**
@@ -272,7 +301,7 @@ type LockProps = {
  * 但被 `inert` 挡住，且原生视图已通过 overlayOpen 隐藏。
  * 焦点陷阱与搜索面板用同一套"首尾循环"实现，不引入第三个焦点方案。
  */
-export function LockScreen({ snapshot, busy, error, onUnlock, onLogout }: LockProps) {
+export function LockScreen({ snapshot, busy, error, onUnlock, onLogout, wallpaper }: LockProps) {
   const [password, setPassword] = useState("");
   const panel = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -282,7 +311,8 @@ export function LockScreen({ snapshot, busy, error, onUnlock, onLogout }: LockPr
   }, []);
 
   return (
-    <div className="lock-shade lock-stage" data-d3-id="lock-shade">
+    <div className="lock-shade lock-stage" data-d3-id="lock-shade" data-lock-wallpaper={wallpaper?.id ?? "same"}>
+      <LockStageWallpaper wallpaper={wallpaper} />
       <LockClock />
       {/* 头像只做展示：锁屏不提供任何改资料的入口（改资料收敛到系统设置）。 */}
       <div className="lock-panel" ref={panel} role="dialog" aria-modal="true" aria-label="屏幕已锁定">

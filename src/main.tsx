@@ -539,6 +539,8 @@ function App() {
   });
   const [snap, setSnap] = useState(() => localStorage.getItem("oa-snap") !== "0");
   const [wallpaper, setWallpaper] = useState(() => localStorage.getItem("oa-wallpaper") || "theme-dark");
+  /** 锁屏/登录壁纸独立于桌面：same = 跟随桌面当前壁纸。 */
+  const [lockWallpaper, setLockWallpaper] = useState(() => localStorage.getItem("oa-lock-wallpaper") || "same");
   /** 每张上传壁纸各自的显示方式（key = 存储条目 id）。 */
   const [wallpaperStyle, setWallpaperStyle] = useState<Record<string, WallpaperStyle>>(() => {
     try {
@@ -564,6 +566,9 @@ function App() {
   useEffect(() => {
     localStorage.setItem("oa-wallpaper", wallpaper);
   }, [wallpaper]);
+  useEffect(() => {
+    localStorage.setItem("oa-lock-wallpaper", lockWallpaper);
+  }, [lockWallpaper]);
   useEffect(() => {
     localStorage.setItem("oa-wallpaper-style", JSON.stringify(wallpaperStyle));
   }, [wallpaperStyle]);
@@ -591,6 +596,17 @@ function App() {
     objectFit: st.fit,
     transform: `scale(${st.zoom}) translate(${st.x}%, ${st.y}%)`,
   });
+  /** 锁屏/登录要用的壁纸：same 跟随桌面；自定义条目解析成纯数据，identity 层不碰 files 服务。 */
+  const effectiveLockWallpaper = lockWallpaper === "same" ? wallpaper : lockWallpaper;
+  const lockWallpaperEntry = effectiveLockWallpaper.startsWith("custom:")
+    ? (customWallpapers.find((e) => e.id === effectiveLockWallpaper.slice(7)) ?? null)
+    : null;
+  const lockWallpaperProp = {
+    id: effectiveLockWallpaper,
+    src: lockWallpaperEntry ? fileUrl(WALLPAPER_ID, lockWallpaperEntry.id) : undefined,
+    kind: lockWallpaperEntry ? (kindOfExt(lockWallpaperEntry.ext) === "video" ? ("video" as const) : ("image" as const)) : undefined,
+    style: lockWallpaperEntry ? mediaStyle(styleOf(lockWallpaperEntry.id)) : undefined,
+  };
   const patchStyle = (id: string, p: Partial<WallpaperStyle>) =>
     setWallpaperStyle((m) => ({ ...m, [id]: { ...WALLPAPER_STYLE, ...m[id], ...p } }));
   const replaceInput = useRef<HTMLInputElement>(null);
@@ -609,6 +625,7 @@ function App() {
     });
     await refreshFiles(WALLPAPER_ID);
     if (wallpaper === "custom:" + entryId) setWallpaper("theme-dark");
+    if (lockWallpaper === "custom:" + entryId) setLockWallpaper("same");
   };
   const uploadWallpaper = async (file: File | undefined) => {
     if (!file || !window.openarc?.files) return;
@@ -618,6 +635,16 @@ function App() {
     await refreshFiles(WALLPAPER_ID);
     const added = res?.added?.[res.added.length - 1];
     if (added) setWallpaper("custom:" + added.id);
+  };
+  /** 锁屏区块的上传：同一份存储与画法，上传成功即选中为锁屏壁纸。 */
+  const uploadLockWallpaper = async (file: File | undefined) => {
+    if (!file || !window.openarc?.files) return;
+    const p = window.openarc.files.pathFor(file);
+    if (!p) return;
+    const res = await window.openarc.files.import(WALLPAPER_ID, [p]);
+    await refreshFiles(WALLPAPER_ID);
+    const added = res?.added?.[res.added.length - 1];
+    if (added) setLockWallpaper("custom:" + added.id);
   };
   /**
    * 替换上传的壁纸：新图先入库，**显示设置跟着搬到新条目**，再删掉旧条目 ——
@@ -639,6 +666,8 @@ function App() {
       return next;
     });
     if (wallpaper === "custom:" + target) setWallpaper("custom:" + added.id);
+    // 锁屏壁纸也指着这条就一起搬到新条目，否则会留下一个悬空的 custom id
+    if (lockWallpaper === "custom:" + target) setLockWallpaper("custom:" + added.id);
     await window.openarc.files.remove(WALLPAPER_ID, target);
     await refreshFiles(WALLPAPER_ID);
   };
@@ -719,6 +748,34 @@ function App() {
           ✕
         </button>
       </div>
+    );
+  /** 锁屏壁纸格子：复用桌面那套网格/格子样式，但选中态绑 lockWallpaper。 */
+  const lockWallpaperTile = (it: (typeof wallpaperItems)[number]) =>
+    it.kind === "preset" ? (
+      <button
+        key={it.id}
+        className={"wallpaper-option" + (lockWallpaper === it.id ? " on" : "")}
+        data-lock-wallpaper={it.id}
+        aria-pressed={lockWallpaper === it.id}
+        onClick={() => setLockWallpaper(it.id)}
+      >
+        <span>{it.name}</span>
+      </button>
+    ) : (
+      <button
+        key={it.id}
+        className={"wallpaper-option" + (lockWallpaper === "custom:" + it.id ? " on" : "")}
+        data-lock-wallpaper={"custom:" + it.id}
+        aria-pressed={lockWallpaper === "custom:" + it.id}
+        onClick={() => setLockWallpaper("custom:" + it.id)}
+      >
+        {kindOfExt(it.ext) === "video" ? (
+          <video src={fileUrl(WALLPAPER_ID, it.id)} style={mediaStyle(styleOf(it.id))} muted loop autoPlay playsInline />
+        ) : (
+          <img src={fileUrl(WALLPAPER_ID, it.id)} style={mediaStyle(styleOf(it.id))} alt="" />
+        )}
+        <span>{it.name}</span>
+      </button>
     );
   const desktopFiles = useMemo(() => {
     const list = [...(filesByFolder[DESKTOP_ID] ?? [])];
@@ -2147,6 +2204,41 @@ function App() {
                   {(wallpapersOpen ? wallpaperItems : wallpaperItems.slice(0, WALLPAPER_ROW)).map(wallpaperTile)}
                 </div>
 
+                <h3>锁屏壁纸</h3>
+                <div className="setting-row">
+                  <span>
+                    锁屏壁纸
+                    <span className="footnote"> 登录界面与锁屏共用同一张，独立于桌面</span>
+                  </span>
+                  <span className="wallpaper-actions">
+                    <label className="control-button" data-d3-id="settings-lock-wallpaper-upload">
+                      上传壁纸
+                      <input
+                        type="file"
+                        accept="image/*,video/*"
+                        hidden
+                        onChange={(e) => {
+                          void uploadLockWallpaper(e.target.files?.[0]);
+                          e.currentTarget.value = "";
+                        }}
+                      />
+                    </label>
+                  </span>
+                </div>
+                <div className="wallpaper-grid">
+                  {/* 第一格是「同桌面」：跟随桌面当前壁纸，不复制它的选择 */}
+                  <button
+                    className={"wallpaper-option" + (lockWallpaper === "same" ? " on" : "")}
+                    data-lock-wallpaper="same"
+                    data-d3-id="settings-lock-wallpaper-same"
+                    aria-pressed={lockWallpaper === "same"}
+                    onClick={() => setLockWallpaper("same")}
+                  >
+                    <span>同桌面</span>
+                  </button>
+                  {wallpaperItems.map(lockWallpaperTile)}
+                </div>
+
                 <h3>个人资料</h3>
                 <div className="setting-row">
                   <span>头像</span>
@@ -2692,6 +2784,7 @@ function App() {
           error={identity.error}
           defaultIdentifier={identity.snapshot.identifier || ""}
           onSubmit={(input) => identity.login(input)}
+          wallpaper={lockWallpaperProp}
         />
       ) : null}
 
@@ -3191,6 +3284,7 @@ function App() {
           error={identity.error}
           onUnlock={(password) => identity.unlock(password)}
           onLogout={() => identity.logout()}
+          wallpaper={lockWallpaperProp}
         />
       ) : null}
     </div>

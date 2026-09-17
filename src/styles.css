@@ -1815,6 +1815,17 @@ input[type="checkbox"] {
 .wallpaper-option[data-wallpaper="theme-dark"] {
   background: #171717;
 }
+/* 锁屏区块的内置色板与桌面同值（属性名不同，故各写一条；不新增 token） */
+.wallpaper-option[data-lock-wallpaper="theme-light"] {
+  background: #f2f2f4;
+}
+.wallpaper-option[data-lock-wallpaper="theme-light"] > span {
+  color: #171717;
+  text-shadow: none;
+}
+.wallpaper-option[data-lock-wallpaper="theme-dark"] {
+  background: #171717;
+}
 
 /* 桌面上的文件（与文件夹里同一套真实数据，同样显示缩略图） */
 .desktop-file {
@@ -2352,29 +2363,45 @@ input[type="checkbox"] {
   justify-content: flex-end;
   /* Apple 锁屏：身份块落在下半屏，不居中 */
   padding: var(--space-8) var(--space-8) clamp(48px, 15vh, 150px);
-  /* 多层纵深，全部取中性 token：底座 → 顶部柔光 → 上下文字保护 scrim → 时钟后方一圈极淡高光。
-     两条 scrim 与底座同取 --base-rgb，所以浅色主题即浅、深色主题即深，自动跟随主题；
-     它们只负责把时钟、身份块与脚注从透出的壁纸质感里"托"起来，不引入新颜色，
-     也不靠发丝线或重投影分层（DESIGN_SYSTEM §3.2）。 */
-  background:
-    radial-gradient(
-      560px 300px at 50% clamp(48px, 15vh, 132px),
-      color-mix(in srgb, var(--material-top-highlight) 30%, transparent),
-      transparent 68%
-    ),
-    linear-gradient(180deg, rgb(var(--base-rgb) / 0.34), transparent 34%),
-    linear-gradient(0deg, rgb(var(--base-rgb) / 0.46), transparent 50%),
-    linear-gradient(180deg, rgb(var(--surface-rgb) / 0.08), transparent 42%),
-    rgb(var(--base-rgb) / 0.72);
-  background-repeat: no-repeat;
-  backdrop-filter: var(--glass-filter);
-  -webkit-backdrop-filter: var(--glass-filter);
+  /* 壁纸要清晰，不再磨砂（去掉 backdrop-filter）；底座取主题基色，
+     保证不透明、能盖住桌面窗口。内置「浅色 / 深色主题色」由下面的属性规则接管。 */
+  background-color: rgb(var(--base-rgb));
 }
 
-/* 登录页背后是纯深色壁纸（没有桌面透出），同样的底座 alpha 下次级文案不足 4.5:1。
-   只覆盖底色长写属性，保留 .lock-stage 全部渐变层，锁屏的壁纸透出感不受影响。 */
-.auth-screen.lock-stage {
-  background-color: rgb(var(--base-rgb) / 0.86);
+/* 内置「浅色 / 深色主题色」锁屏壁纸：字面值与桌面壁纸规则一致，不新增 color token。 */
+.lock-stage[data-lock-wallpaper="theme-light"] {
+  background-color: #f2f2f4;
+}
+.lock-stage[data-lock-wallpaper="theme-dark"] {
+  background-color: #171717;
+}
+
+/* 壁纸层：清晰显示，压在 scrim 之下、内容之上。 */
+.lock-wallpaper {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* 文字保护 scrim：三层同色叠加，全部取 --base-rgb（浅色主题即浅、深色主题即深），
+   任意亮度/色相的壁纸上文字都落在一层与主题同向的底色上。
+   顶部托时钟、底部托脚注与身份块下沿，中间那条身份块 scrim 用人像位径向补上——
+   身份块正落在上下两条 linear 都够不到的中间带，只靠 linear 时深色壁纸下小字读不出。
+   最上面那层很淡，只兜底极端画面；30%-52% 一带尽量少铺，壁纸保持清晰。 */
+.lock-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgb(var(--base-rgb) / 0.62) 0%, rgb(var(--base-rgb) / 0.3) 24%, transparent 44%),
+    radial-gradient(560px 380px at 50% 64%, rgb(var(--base-rgb) / 0.72), transparent 72%),
+    linear-gradient(0deg, rgb(var(--base-rgb) / 0.68) 0%, rgb(var(--base-rgb) / 0.42) 30%, transparent 70%),
+    rgb(var(--base-rgb) / 0.12);
+  background-repeat: no-repeat;
 }
 
 /* 入场：时钟与身份块各做一次轻微上浮 + 淡入。
@@ -2394,6 +2421,8 @@ input[type="checkbox"] {
   top: clamp(48px, 15vh, 132px);
   right: 0;
   left: 0;
+  /* 内容必须压在壁纸与 scrim 之上 */
+  z-index: 2;
   text-align: center;
   pointer-events: none;
   animation: lock-rise var(--dur-slow) var(--ease-standard) both;
@@ -2416,6 +2445,8 @@ input[type="checkbox"] {
   color: var(--text);
 }
 .lock-panel {
+  position: relative;
+  z-index: 2;
   width: 100%;
   max-width: 340px;
   display: flex;
@@ -2446,6 +2477,12 @@ input[type="checkbox"] {
   font-weight: var(--fw-medium);
   letter-spacing: var(--tracking-tight);
   line-height: var(--lh-tight);
+}
+/* 时钟与名字补一层极淡的辉光（主题基色）：scrim 为主，它只在极端壁纸上兜底。 */
+.lock-date,
+.lock-time,
+.lock-name {
+  text-shadow: 0 1px 14px rgb(var(--base-rgb) / 0.45);
 }
 .lock-identifier {
   margin-top: var(--space-1);
