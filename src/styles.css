@@ -2337,11 +2337,17 @@ input[type="checkbox"] {
 
 /* 锁屏：覆盖在最上层，且必须挡住原生网页视图的键盘与指针。
    原生视图的隐藏由主进程 overlayOpen 完成（DOM z-index 对 WebContentsView 无效）。 */
-.lock-shade {
+/* ── Apple 锁屏布局：登录与锁屏共用同一套舞台 ──────────────────────────────
+   舞台 = 一整屏磨砂壁纸；内容只有两件：顶部居中的时钟，和居中的身份块。
+   身份块不再是卡片 —— 唯一的面是口令输入槽（DESIGN_SYSTEM 0.2：分层靠明度差，不靠边框）。 */
+.lock-stage {
   position: absolute;
   inset: 0;
-  z-index: 80;
+  /* 系统锁屏是逻辑层序的最上层（DESIGN_SYSTEM §7）：必须压过 Dock(85)、
+     模态对话框(300) 与通知(400)。低于 Dock 时锁屏下方会露出程序坞。 */
+  z-index: 500;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: var(--space-8);
@@ -2349,36 +2355,114 @@ input[type="checkbox"] {
   backdrop-filter: var(--glass-filter);
   -webkit-backdrop-filter: var(--glass-filter);
 }
+.lock-clock {
+  position: absolute;
+  top: clamp(48px, 15vh, 132px);
+  right: 0;
+  left: 0;
+  text-align: center;
+  pointer-events: none;
+}
+.lock-date {
+  font-size: var(--fs-title);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--tracking-tight);
+  color: var(--muted);
+}
+.lock-time {
+  margin-top: var(--space-1);
+  font-size: var(--fs-clock);
+  font-weight: var(--fw-medium);
+  line-height: 1;
+  letter-spacing: var(--tracking-tight);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
 .lock-panel {
   width: 100%;
-  max-width: 380px;
-  padding: var(--space-8);
-  border-radius: var(--radius-xl);
-  background: rgb(var(--surface-rgb) / var(--surface-alpha));
-  box-shadow: var(--elevation-5);
+  max-width: 340px;
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
 }
 .lock-avatar {
-  width: 56px;
-  height: 56px;
+  width: 64px;
+  height: 64px;
   border-radius: var(--radius-pill);
   background: var(--accent);
   color: var(--on-accent);
   font-size: var(--fs-title);
+  font-weight: var(--fw-medium);
   display: flex;
   align-items: center;
   justify-content: center;
   margin-bottom: var(--space-3);
+  box-shadow: var(--elevation-2);
+  user-select: none;
 }
 .lock-name {
-  font-size: var(--fs-heading);
+  font-size: var(--fs-title);
   font-weight: var(--fw-medium);
+  letter-spacing: var(--tracking-tight);
 }
-.lock-panel form {
+.lock-identifier {
+  margin-top: var(--space-1);
+  font-size: var(--fs-secondary);
+  color: var(--muted);
+}
+.lock-form {
   width: 100%;
+  margin-top: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.lock-input {
+  position: relative;
+  width: 100%;
+}
+.lock-input input {
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: rgb(var(--content-rgb) / var(--content-alpha));
+  text-align: left;
+}
+.lock-input--act input {
+  padding-right: calc(var(--space-8) + var(--space-3));
+}
+.lock-submit {
+  position: absolute;
+  top: 50%;
+  right: var(--space-1);
+  width: var(--space-8);
+  height: var(--space-8);
+  transform: translateY(-50%);
+  border-radius: var(--radius-pill);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.lock-submit:disabled {
+  opacity: var(--disabled-opacity);
+  cursor: default;
+}
+.lock-alt {
+  align-self: center;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--fs-secondary);
+  color: var(--muted);
+}
+.lock-footnote {
+  max-width: 300px;
+  margin-top: var(--space-4);
+  font-size: var(--fs-caption);
+  line-height: var(--lh-normal);
+  color: var(--muted);
 }
 
 /* ── 文件夹图标 ──────────────────────────────────────────────────────────────

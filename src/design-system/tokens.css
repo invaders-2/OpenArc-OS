@@ -52,6 +52,7 @@
   --fs-caption: 12px; /* 说明文字、标签 */
   --fs-micro: 11px; /* 元信息、状态、tooltip */
   --fs-eyebrow: 10px; /* 全大写眉标（配 --tracking-wide） */
+  --fs-clock: clamp(40px, 8vh, 72px); /* 锁屏时钟：随窗口高度收敛，小窗不溢出 */
 
   --fw-regular: 400;
   --fw-medium: 500; /* 标题与强调统一 500；**禁止 700 bold** */

@@ -9,6 +9,7 @@
  *      原生网页视图的让位由 `useDesktop({ locked })` 的 overlayOpen 完成（§15 / §40）。
  */
 import { useEffect, useRef, useState } from "react";
+import { ArrowRight } from "lucide-react";
 import { errorText } from "./types";
 import type { IdentitySnapshot } from "./types";
 
@@ -20,6 +21,23 @@ function AuthErrorLine({ error }: { error: AuthError }) {
     <p className="auth-error" role="alert" data-d3-id="auth-error">
       {errorText(error.code, error.detail)}
     </p>
+  );
+}
+
+function LockClock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  const date = now.toLocaleDateString("zh-CN", { month: "long", day: "numeric" });
+  const weekday = now.toLocaleDateString("zh-CN", { weekday: "long" });
+  const time = now.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+  return (
+    <div className="lock-clock" aria-hidden="true">
+      <div className="lock-date">{date} {weekday}</div>
+      <div className="lock-time">{time}</div>
+    </div>
   );
 }
 
@@ -192,43 +210,34 @@ export function LoginScreen({ busy, error, defaultIdentifier = "", onSubmit }: L
   }, []);
 
   return (
-    <AuthShell eyebrow="SIGN IN" title="登录 OpenArc" subtitle="使用初始化时创建的管理员凭据。">
-      <form
-        onSubmit={async (e) => {
-          e.preventDefault();
-          await onSubmit({ identifier, password });
-        }}
-        data-d3-id="login-form"
-      >
-        <label className="field">
-          登录标识符
-          <input
-            ref={first}
-            value={identifier}
-            onChange={(e) => setIdentifier(e.target.value)}
-            autoComplete="username"
-            data-d3-id="login-identifier"
-          />
-        </label>
-        <label className="field">
-          口令
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-            data-d3-id="login-password"
-          />
-        </label>
-        <AuthErrorLine error={error} />
-        <div className="auth-actions">
-          <button className="primary" type="submit" disabled={busy || !identifier || !password} data-d3-id="login-submit">
-            {busy ? "正在验证…" : "登录"}
-          </button>
-        </div>
-        <p className="footnote">标识符不存在与口令错误返回同一个错误，不透露账号是否存在。</p>
-      </form>
-    </AuthShell>
+    <div className="auth-screen lock-stage" data-d3-id="auth-screen">
+      <LockClock />
+      <div className="lock-panel" role="main">
+        <div className="lock-avatar" aria-hidden="true">OA</div>
+        <strong className="lock-name">OpenArc</strong>
+        <span className="lock-identifier">使用初始化时创建的管理员凭据</span>
+        <form
+          className="lock-form"
+          onSubmit={async (e) => { e.preventDefault(); await onSubmit({ identifier, password }); }}
+          data-d3-id="login-form"
+        >
+          <div className="lock-input">
+            <input ref={first} value={identifier} onChange={(e) => setIdentifier(e.target.value)}
+              placeholder="登录标识符" aria-label="登录标识符" autoComplete="username" data-d3-id="login-identifier" />
+          </div>
+          <div className="lock-input lock-input--act">
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+              placeholder="口令" aria-label="口令" autoComplete="current-password" data-d3-id="login-password" />
+            <button className="lock-submit" type="submit" disabled={busy || !identifier || !password}
+              aria-label="登录" data-d3-id="login-submit">
+              <ArrowRight size={16} />
+            </button>
+          </div>
+          <AuthErrorLine error={error} />
+        </form>
+        <p className="lock-footnote">标识符不存在与口令错误返回同一个错误，不透露账号是否存在。</p>
+      </div>
+    </div>
   );
 }
 
@@ -261,33 +270,23 @@ export function LockScreen({ snapshot, busy, error, onUnlock, onLogout }: LockPr
   }, []);
 
   return (
-    <div className="lock-shade" data-d3-id="lock-shade">
+    <div className="lock-shade lock-stage" data-d3-id="lock-shade">
+      <LockClock />
       <div className="lock-panel" ref={panel} role="dialog" aria-modal="true" aria-label="屏幕已锁定">
         <div className="lock-avatar" aria-hidden="true">
           {(snapshot.displayName || "?").slice(0, 1).toUpperCase()}
         </div>
         <strong className="lock-name">{snapshot.displayName || "本地用户"}</strong>
-        <span className="muted">{snapshot.identifier}</span>
+        <span className="lock-identifier">{snapshot.identifier}</span>
         <form
-          onSubmit={async (e) => {
-            e.preventDefault();
-            const value = password;
-            setPassword("");
-            await onUnlock(value);
-          }}
+          className="lock-form"
+          onSubmit={async (e) => { e.preventDefault(); const value = password; setPassword(""); await onUnlock(value); }}
           data-d3-id="unlock-form"
         >
-          <label className="field">
-            口令
-            <input
-              ref={input}
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
-              placeholder="输入口令以解锁"
-              data-d3-id="unlock-password"
-              onKeyDown={(e) => {
+          <div className="lock-input lock-input--act">
+            <input ref={input} type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password" placeholder="输入口令以解锁" aria-label="口令"
+              data-d3-id="unlock-password" onKeyDown={(e) => {
                 if (e.key !== "Tab") return;
                 const items = Array.from(panel.current?.querySelectorAll<HTMLElement>("button,input") || []);
                 if (!items.length) return;
@@ -300,22 +299,17 @@ export function LockScreen({ snapshot, busy, error, onUnlock, onLogout }: LockPr
                   e.preventDefault();
                   firstEl.focus();
                 }
-              }}
-            />
-          </label>
-          <AuthErrorLine error={error} />
-          <div className="auth-actions">
-            <button className="primary" type="submit" disabled={busy || !password} data-d3-id="unlock-submit">
-              {busy ? "正在验证…" : "解锁"}
-            </button>
-            <button className="ghost" type="button" disabled={busy} onClick={() => void onLogout()} data-d3-id="lock-logout">
-              退出登录
+              }} />
+            <button className="lock-submit" type="submit" disabled={busy || !password}
+              aria-label="解锁" data-d3-id="unlock-submit">
+              <ArrowRight size={16} />
             </button>
           </div>
+          <AuthErrorLine error={error} />
+          <button className="lock-alt" type="button" disabled={busy} onClick={() => void onLogout()}
+            data-d3-id="lock-logout">退出登录</button>
         </form>
-        <p className="footnote">
-          锁定不等于退出登录：会话仍然有效，但受保护的操作会被拒绝，必须重新验证口令。
-        </p>
+        <p className="lock-footnote">锁定不等于退出登录：会话仍然有效，但受保护的操作会被拒绝，必须重新验证口令。</p>
       </div>
     </div>
   );
