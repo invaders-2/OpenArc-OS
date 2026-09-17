@@ -1713,7 +1713,7 @@ input[type="checkbox"] {
   background: var(--sunken);
   color: var(--text);
   font-size: var(--fs-caption);
-  cursor: pointer;
+  cursor: var(--cursor-arrow);
 }
 .control-button:hover {
   background: var(--row-hover);
@@ -2408,7 +2408,7 @@ input[type="checkbox"] {
   background: var(--folder-back);
   border-radius: 0 0.1em 0.1em 0.1em;
   transition: transform 200ms ease-in;
-  cursor: pointer;
+  cursor: var(--cursor-arrow);
 }
 /* 左上那个小"舌头" */
 .rb-folder-tab {
@@ -2472,27 +2472,39 @@ input[type="checkbox"] {
 /* ── 自绘光标（OpenArc 光标套装）────────────────────────────────────────
    形状照着系统自带的 cursors 目录（ApplicationServices / HIServices framework 的
    Resources/cursors）的轮廓重画 —— 只做形状参考，**没有拷贝或引用任何系统文件**。
-   32×32；缩放 / 十字 / 手 / 禁止 / 拷贝这些线描形状沿用 1px 描边 + 圆角线帽/连接，
-   阴影是 (0,-1) 的低透明度偏移副本（不用 SVG filter，光标位图里 filter 不稳）。
-   默认箭头按用户给的参考图重画：**实心、无描边、顶点大圆角、比系统那只更饱满**
-   （浅色 UI 黑填充，深色 UI 白填充；两种都不描边）。
-   两套外观按 .dark 切换：浅色 UI = 黑填充+白描边，深色 UI = 白填充+黑描边（线描形状；
-   箭头是黑 / 白实心、无描边）。
+   32×32；整套统一为**实心填充（浅色 #000 / 深色 #fff）+ 1px 30% 对比色描边**，
+   描边用 paint-order="stroke fill"（压在填充下面，只露外面半条），**没有阴影副本**；
+   圆角端点 / 连接，多边形转角统一倒圆（不用 SVG filter —— 光标位图里 filter 不稳）。
+   两套外观按 .dark 切换：浅色 = 黑填充 + rgba(255,255,255,0.3) 描边，
+   深色 = 白填充 + rgba(0,0,0,0.3) 描边。
    路径用 public/ 根的绝对写法（与 /openarc-mark.svg 同一路子），构建时 Vite 会重写成
    ../cursors/…，正好落在 dist/cursors/。每条都带原生关键字兜底 —— 光标图一旦加载失败
    就退回系统光标，不会退化成箭头。
    热点 = 指针真正"点"的位置：箭头尖端 2,2；十字 / 双箭头中心 16,16；手型 16,17。 */
 
-/* 全局默认指针：整个 app 的根是 .desktop（height:100vh，铺满视口），在根上设一次
-   cursor，桌面 / 窗口 / 侧栏 / 程序坞 / 顶栏 / 各种弹层靠继承全覆盖 —— 不用 `* {}`，
-   也不用逐个组件声明。显式声明 cursor 的语义处优先级更高，不会被这里覆盖。 */
-.desktop {
+/* 全局默认指针：变量定义在**真正的根** `:root`（html）上，`cursor` 也只在根上设一次，
+   整个文档（含登录 / 锁屏 / 初始化那几屏，它们都在 .desktop 里）靠继承全覆盖 —— 不用 `* {}`。
+   深色覆盖落在**同一个根**上：`:root:has(.dark)`（.dark 挂在 .desktop 上，用 :has 反查到 html），
+   这样深色模式拿到的仍是深色版箭头，不会退回浅色版。
+   显式声明 cursor 的语义处（文本 / 缩放 / 框选 / 抓取 / 禁止 / 拷贝）优先级更高，不会被这里覆盖。 */
+:root {
   --cursor-arrow: url("/cursors/arrow-light.svg") 2 2, default;
   cursor: var(--cursor-arrow);
 }
-.desktop.dark {
+:root:has(.dark) {
   --cursor-arrow: url("/cursors/arrow-dark.svg") 2 2, default;
+}
+
+/* 按钮 / 可点条目一律拿箭头（macOS 口味：按钮不显示手型，只有链接显示手型）。
+   以前 `button { cursor: pointer }` 会把手型带给所有按钮，并经继承扩散到它们的所有子节点；
+   这里连同可能挂在 label 上的 `.control-button`、挂在 span 上的 `.rb-folder-inner` 一起改成箭头。 */
+button {
   cursor: var(--cursor-arrow);
+}
+/* 真正的链接保留手型 */
+a[href],
+[role="link"] {
+  cursor: pointer;
 }
 
 /* 文本 / 可编辑区显式保住 I 型：cursor 会继承，不写就拿到箭头了。
@@ -2504,7 +2516,7 @@ input[type="checkbox"] {
   cursor: text;
 }
 /* 非文本表单控件：Chromium 的 UA 样式给 range / file / checkbox 声明了 cursor:default，
-   会盖过继承，所以这里必须显式换成我们的箭头；按钮类跟 <button> 一样是手型。 */
+   会盖过继承，所以这里必须显式换成我们的箭头；按钮类跟 <button> 一样是箭头。 */
 .desktop input[type="range"],
 .desktop input[type="file"],
 .desktop input[type="checkbox"],
@@ -2515,7 +2527,7 @@ input[type="checkbox"] {
 .desktop input[type="button"],
 .desktop input[type="submit"],
 .desktop input[type="reset"] {
-  cursor: pointer;
+  cursor: var(--cursor-arrow);
 }
 
 /* 窗口右下角缩放手柄（原生 nwse-resize；双箭头中心即热点） */

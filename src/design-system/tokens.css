@@ -412,7 +412,6 @@ select {
   font: inherit;
 }
 button {
-  cursor: pointer;
   color: inherit;
   border: 0;
   background: transparent;

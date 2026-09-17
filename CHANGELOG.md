@@ -1,5 +1,63 @@
 # 计划修订记录
 
+## 2026-09-16（十六）：按钮 / 可点条目改成箭头，只有链接保留手型（macOS 规矩）
+
+用户口径：「手型改成箭头（按 macOS 的规矩 —— 按钮显示箭头，只有链接才显示手型）」。
+
+### 清单 · 改前
+
+声明层（改后全没了，只剩给真链接的一条）：
+- `src/design-system/tokens.css`：`button { cursor: pointer }`（最广的一条，把手型带给所有 `<button>`）。
+- `src/styles.css`：`.control-button`、`.rb-folder-inner`（span）、`input[type="button"/"submit"/"reset"]`。
+
+运行时（探针 `document.querySelectorAll('*')` 筛 `getComputedStyle().cursor === 'pointer'`，浅色，7 个状态）：
+- 命中元素数：桌面 116 / 设置窗口 162 / AI 面板 171 / 右键菜单 175 / 对话框 177 / 文件窗口 216。
+- 真正的「源头」（父节点不是 pointer 的）约 20 类，其余全是这些控件的后代继承：
+  `button.bar-app`、无名 `button`（顶栏 / 分段 / 菜单项）、`span.rb-folder-inner`、`button.assistant-pill`、
+  `button.close / .minimize / .maximize`（红绿灯）、`button.split-nav`（侧栏）、`button.app-card`、
+  `button.dock-item`（程序坞）、`button.switch`、`label.control-button`、`button.wallpaper-option`、
+  `button.control-button`、`button.icon-button`、`button.ghost / .danger / .primary.danger` 等。
+
+### 改了什么
+
+- `button` 的 `cursor` 从 `pointer` 改成 `var(--cursor-arrow)`；`.control-button`、`.rb-folder-inner`、
+  `input[type=button/submit/reset]` 同样改成 `var(--cursor-arrow)`。**不再有任何 `cursor: pointer` 声明**
+  （除了下一条给真链接的）。
+- 新增 `a[href], [role="link"] { cursor: pointer }` —— 真链接保留手型。仓库里目前没有任何 `<a>` / `[role=link]`，
+  所以这条现在没有命中对象，只是把规矩固定下来。
+- **「查看统一设置 →」是 `<button>`**（`src/desktop/components.tsx:847`），不是 `<a>`，所以现在显示箭头；
+  用户口径允许，这里明确说明。
+
+### 变量作用域 · 谁覆盖谁
+
+- 确认：`main.tsx` 的根 return 就是 `<div class="desktop dark?">`，`BootSurface`（启动）/ `SetupScreen`（初始化）/
+  `LoginScreen`（登录）/ `LockScreen`（锁屏）都渲染在它内部 —— 所以它们本来就能拿到自绘箭头。
+- 按要求仍把变量提到**真正的根**：`:root { --cursor-arrow: 浅色版; cursor: var(--cursor-arrow); }`。
+- 深色覆盖落在**同一个根**上：`:root:has(.dark) { --cursor-arrow: 深色版; }`（`.dark` 挂在 `.desktop` 上，
+  `:has()` 反查到 html）。旧 `.desktop` / `.desktop.dark` 的定义删掉。
+- 覆盖关系：`:root:has(.dark)`（特指度 0,2,0）> `:root`（0,1,0）；两处都在同一个根上，深色模式不会退回浅色箭头。
+- 语义光标仍各自显式声明、优先级更高：文本 `text`、缩放 `resize-se`、框选 `crosshair`、抓取 `grabbing`、
+  禁止 `not-allowed`、拷贝 `copy`，以及禁用的 `.traffic button:disabled` / `.ds-btn:disabled` 等。
+
+### 实测
+
+- 探针（改后）：**`pointer` 源头 = 0 个**（仓库里没有真链接）；抽查全部命中自绘箭头：
+  `.desktop` / `.window` / `.split-nav` / `.traffic .close|.minimize|.maximize` / `label.control-button` /
+  `.wallpaper-option` / `.file-cell` / `.rb-folder-inner` / `.context-menu button` / `.dialog-footer button`
+  = `url("…/cursors/arrow-light.svg") 2 2, default`（深色为 `arrow-dark.svg`）；
+  `.window .resize` = `resize-se-light.svg`；`.search-input input` 与设置里的文本输入 = `text`；
+  临时注入 `a[href]` / `[role="link"]` = `pointer`。
+- 真实 Electron 实拍（`screencapture -C`，抢回前台 + 校验落点后拍）：程序坞图标、侧栏导航项、窗口红绿灯、
+  对话框按钮（浅色）+ 深色程序坞 / 对话框：`/tmp/oa-probe/ptr-{dock,sidebar,traffic,dialog}-{light,dark}.png`，
+  合成图 `/tmp/oa-probe/pointer-states-composite.png` —— 全部是自绘箭头（浅色黑、深色白），没有手型。
+
+### 门禁
+
+`npx tsc --noEmit` clean、`npm test` 96/96。
+
+### 没做
+
+- 文本 I 型、缩放、框选、抓取、禁止、拷贝一律没动。
 ## 2026-09-16（十五）：其余光标全部改成同一套实心圆角风格，凑成一套
 
 用户口径：「深色模式用白、浅色模式用黑这个做法对了，现在要把其余的光标也照这个风格重画，凑成一套」——
