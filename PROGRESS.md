@@ -78,7 +78,7 @@
 | D4-02 任务与适配 | **CONDITIONAL GO** |
 | D4-03 工具门与租约 | **CONDITIONAL GO（A PASS）** |
 | D4-04 纵向冒烟 | **PASS（限定当前验收范围）** |
-| D4-06 关联链与预算停止 | **PASS（限定当前验收范围；仅解除“预算耗尽→用户显式续接”）** |
+| D4-06 关联链与预算停止 | **PASS（含任务层跨 run 累计预算续接；仅解除“预算耗尽→用户显式续接”）** |
 | D4-05 执行关卡 | **PARTIAL（S1/S2/S3 PASS；S4 上下文链 NOT VERIFIED）** |
 | D5-03 MCP 中心 | **CONDITIONAL GO（受限）** |
 | D5-04 PS 完整接入 | **BLOCK** |
@@ -873,16 +873,17 @@ C2/C4 只开放 resource.trash 一条 REVERSIBLE_WRITE：IRREVERSIBLE_WRITE / EX
 - **A35 “明确续接入口” 已满足（D4-06 Closure）**：Boss 批准仅本范围解除延期；预算耗尽 → 后端判定 → 用户显式续接 → 新 bounded step/run（有界 ≤3 次、保留历史、不重放、不自动重做）；其他恢复场景仍 `EXPLICIT_RESUME_DEFERRED`。
 **D4-05 执行关卡 = PARTIAL（限定当前验收范围）**（见下节 `# D4-05 当前状态`）；禁止自动进入 D5 / D6。
 
-## 2. 关键证据（真实执行，Closure 被测 commit `207f946`）
+## 2. 关键证据（真实执行，D4-06 Closure 被测 commit `7b53458`）
 
 | 入口 | 结果 |
 |---|---|
-| `npm run test:d4-06` | **106 / 106 PASS**（Electron 94 + 预算 Node 6 + 续接 Node 6），exit 0，`workspaceState=""` |
-| `npm run test:d4-06-resume` | **19 / 19 PASS**（真实 Electron UI：刷新恢复 → 点击续接 → SUCCEEDED） |
+| `npm run test:d4-06` | **119 / 119 PASS**（Electron 94 + 预算/续接/d4-08 Node 25），exit 0，`workspaceState=""` |
+| `npm run test:d4-06-resume` | **21 / 21 PASS**（真实 Electron UI：刷新恢复 → 点击续接 → SUCCEEDED + UI==账本==运行时） |
+| `npm run test:d4-08-verification-ui` | **22 / 22 PASS**（失败验证 UI：显示/刷新恢复/跨用户） |
 | `npm run test:d4-04`（共享 probe） | **94 / 94 PASS**，无回归 |
-| 受影响回归 | `test:d4-02c` 22/22、`test:d4-03d` 52/52、`test:d4-03d-closure` 62/62、`test:d4-03c4` 35/35 + UI 22/22 全 PASS |
+| 受影响回归 | `test:d4-02c` 22/22、`test:d4-03c4` 35/35 + UI 22/22、`npm test` 958/958 |
 
-- 证据：`docs/D4-06-GATE-EVIDENCE.json`（106 条，`artifactSha256=a8d8150c…51e7`）、`docs/D4-06-RESUME-UI-EVIDENCE.json`（19 条，`22bb2087…e5c4`）、`docs/D4-04-GATE-EVIDENCE.json`（94 条）。详细记录：`docs/D4-06-RESULT.md`、`docs/D4-06-CLOSURE-RESULT.md`。
+- 证据：`docs/D4-06-GATE-EVIDENCE.json`（119 条）、`docs/D4-04-GATE-EVIDENCE.json`（94 条）。详细记录：`docs/D4-06-RESULT.md`、`docs/D4-06-CLOSURE-RESULT.md`、`docs/D4-ACCEPTANCE-RESULT.md`。
 
 ## 3. 主要缺口 / 后续
 
@@ -916,14 +917,15 @@ C2/C4 只开放 resource.trash 一条 REVERSIBLE_WRITE：IRREVERSIBLE_WRITE / EX
 
 1. **S4 上下文链 NOT VERIFIED**（无 memory 检索/装配入口）→ D4-05 = PARTIAL；最小后续方案见 `docs/D4-ACCEPTANCE-RESULT.md` §4。
 2. ~~A33 失败路径无独立 `task_verifications` 记录~~ **已修复（schema v15）**：失败写 FAIL Verification（method/expected/actual/证据引用，脱敏有界，不建 Artifact），跨重开可查；见 `docs/D4-ACCEPTANCE-RESULT.md` §2.1。
-3. ~~TOOL_CALLS 真实耗尽被 MODEL_CALLS 兜底 / `base.TOOL_CALLS` 名义值~~ **已修复**：`budgetExhausted()` TOOL_CALLS 优先 + orchestrator 工具预算耗尽即停止；`base` 用实际配置。**新增 OPEN**：续接新 run 会重新签发 per-run Model/Tool capability（“不重置其他 kind”未满足），需裁决。
+3. ~~TOOL_CALLS 真实耗尽被 MODEL_CALLS 兜底 / `base.TOOL_CALLS` 名义值 / 续接新 run 顺带恢复其他预算~~ **已修复（D4-06 Closure，schema v16 `task_budgets`）**：`budgetExhausted()` TOOL_CALLS 优先 + 工具预算耗尽即停止；`base` 用实际配置；**任务层跨 run 累计预算**——续接只抬升被批准 kind，其他种类继承剩余；新 run capability 额度=该类 remaining；run 结束一次性扣减；某类 remaining==0 不建 run 直接 `BUDGET_EXHAUSTED`。
 4. A37 / A38 不在 PLAN §41 的 D4-05 四场景内，未纳入。
 5. 真实 `electron/main.cjs` 全流程 / 真实外部 provider / 真实凭据 / Windows / OS 级网络沙箱 = 继承 `NOT VERIFIED`，不扩大。
 
 # D4 阶段总结（唯一口径 · 2026-09-17）
 
 **D4 = PARTIAL**（macOS 核心基本完成，非整体完成）。D4-01 macOS Core、D4-02 macOS Core、D4-03（PASS candidate）、D4-04、D4-06 在声明范围内通过；**D4-05 = PARTIAL**。
-- 本轮（被测 commit `ec7a732`）已修复审查发现的两个既有缺口：① 预算实际值/停止原因/追加账本；② 失败 Verification 持久化（schema v15）；**未**据此升级 D4/D4-05。
+- 收口修复（`ec7a732`）：① 预算实际值/停止原因/追加账本；② 失败 Verification 持久化（schema v15）。
+- **D4-06 Closure（`7b53458`，test-seed `fbbc002`）：任务层跨 run 累计预算（schema v16）+ 失败验证 UI Electron 实测（22/22）；D4-06 恢复 PASS**。D4-05/D4 保持 PARTIAL（memory 上下文缺口不变）。
 - `docs/D4-ACCEPTANCE-RESULT.md` 含受控 memory 装配最小方案（仅方案，未实施）与需裁决的续接跨 run 预算 OPEN 项。
 - 阻塞整体 PASS：D4-05 S4 上下文链 NOT VERIFIED（无 memory 装配入口）；D4-01/D4-02 的 Windows / External Provider NOT VERIFIED；D4-03 待外部审计封板。
 - 已验范围（macOS）：模型服务隔离/撤权、任务版本固定与实时权限、工具门/租约/审批/受控写入、纵向冒烟（真实产物/停止/撤权）、关联链与预算停止、结果未知处置均在各自范围内真实通过。

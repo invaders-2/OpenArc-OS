@@ -1,8 +1,8 @@
 {
   "phase": "D4-06",
   "title": "关联链完整性 + 预算到限停止",
-  "testedCommit": "ec7a732aa78ffc52e8e0ce3b4d1e09108f604dc4",
-  "workspaceState": "M docs/D4-04-GATE-EVIDENCE.json\n M docs/D4-05-GATE-EVIDENCE.json",
+  "testedCommit": "7b53458ef1611c08ab96679eab6377d1c4d0e342",
+  "workspaceState": "",
   "command": "npm run test:d4-06",
   "env": {
     "electron": "44.3.0",
@@ -15,6 +15,7 @@
     "electronRun": "tests/d4-04-smoke.mjs (同一份 Electron 运行，含 linkageAudit L1..L15 与 X/Y 场景)",
     "budgetTests": "tests/d4-06-budget.test.mjs",
     "resumeTests": "tests/d4-06-resume.test.mjs",
+    "carryoverTests": "tests/d4-08-budget-carryover.test.mjs",
     "duplicateBudgetUnitEvidence": [
       "tests/tool-d4-03d-closure.test.mjs (maxCalls 原子 reserve)",
       "tests/tool-dsh-security.test.mjs (第 3 次 TOOL_CAPABILITY_EXHAUSTED + 0 Domain call)"
@@ -27,14 +28,14 @@
       "pass": 94,
       "fail": 0
     },
-    "artifactSha256": "1660732251da60f78e8fb99e9f286fdf085869b6dbc424e863ecbd5aac82f3ff"
+    "artifactSha256": "471484f14e6c9b142c1d622d72577799c5daf199197eefb5d122ff2238f1c70e"
   },
   "budgetRun": {
     "exitCode": 0,
     "counts": {
-      "pass": 12,
+      "pass": 25,
       "fail": 0,
-      "tests": 12
+      "tests": 25
     },
     "tests": [
       {
@@ -84,17 +85,69 @@
       {
         "name": "D4-06 Closure E · 真实 live-unlinked 崩溃遗留 UNKNOWN_EFFECT call → 后端拒绝续接（RESUME_UNKNOWN_EFFECT_PRESENT）",
         "ok": true
+      },
+      {
+        "name": "D4-08 ① MODEL_CALLS 消耗后追加 → TOOL_CALLS / TOOL_ROUNDS remaining 完全保留",
+        "ok": true
+      },
+      {
+        "name": "D4-08 ① TOOL_CALLS 消耗后追加 → MODEL_CALLS / TOOL_ROUNDS remaining 完全保留",
+        "ok": true
+      },
+      {
+        "name": "D4-08 ① TOOL_ROUNDS 消耗后追加 → MODEL_CALLS / TOOL_CALLS remaining 完全保留",
+        "ok": true
+      },
+      {
+        "name": "D4-08 ② TOOL_CALLS：部分消耗后的新 run 实际受 remaining 约束（capability 额度 == remaining）",
+        "ok": true
+      },
+      {
+        "name": "D4-08 ② MODEL_CALLS：部分消耗后的新 run 实际受 remaining 约束（无第 remaining+1 次真实请求）",
+        "ok": true
+      },
+      {
+        "name": "D4-08 ② TOOL_ROUNDS：部分消耗后的新 run 实际轮数受 remaining 约束",
+        "ok": true
+      },
+      {
+        "name": "D4-08 ③ MODEL_CALLS 与 TOOL_CALLS 同时耗尽 → 停因/nextGrant 明确；只追加一种，其他不被补齐",
+        "ok": true
+      },
+      {
+        "name": "D4-08 ④ 并发续接 → 只追加一次、只产生一个有效运行",
+        "ok": true
+      },
+      {
+        "name": "D4-08 ⑤ 续接后再次耗尽 → 正确停止；已成功副作用恰好一次、不重放",
+        "ok": true
+      },
+      {
+        "name": "D4-08 ⑥ grant 返回值 == 账本 nextGrant/additions == 运行时 capability 额度",
+        "ok": true
+      },
+      {
+        "name": "D4-08 ⑦ 正：合法最后一次 tool call 后完成 → SUCCEEDED，不得误杀",
+        "ok": true
+      },
+      {
+        "name": "D4-08 ⑦ 反：仍需下一次调用但额度不足 → BUDGET_EXHAUSTED{TOOL_CALLS}，0 Artifact",
+        "ok": true
+      },
+      {
+        "name": "D4-08 旧任务首次建账本：不伪造历史精确余额，落 safe baseline 事件；新任务 consumed=0",
+        "ok": true
       }
     ]
   },
   "sourceArtifacts": [
     {
       "path": "artifacts/d4-04/vertical-smoke-gate.json",
-      "sha256": "d79a2398867e1d575f87dbb907fa3dae798327b4efb020f326134582f5cc460a"
+      "sha256": "dce4ee5d3ebb6de9d18489be77721831b1dfc3ce9ce31e31b5958b9207ad91b1"
     },
     {
       "path": "artifacts/d4-06/budget-tests.tap",
-      "sha256": "ace4d6d89cb8d2db859de9b597f8af3edbd93222a31921bef381766b5562e0e3"
+      "sha256": "bca48bff7da1da2bced3c25f51af9e60d72c93b5fdf9421b902f65bf25fe6b5e"
     }
   ],
   "checks": [
@@ -179,7 +232,7 @@
     {
       "name": "C3 · Approval UI 显示 tool / risk / target / effect",
       "expected": null,
-      "actual": "应用 / AgentAI 助手（本机会话）工具Trash Resource（resource.trash）风险可逆写入目标Vertical Smoke Resourceresource://res_KLifLvot306-p20qpjUPQ",
+      "actual": "应用 / AgentAI 助手（本机会话）工具Trash Resource（resource.trash）风险可逆写入目标Vertical Smoke Resourceresource://res_VZXYeLjLWSooSbhw0jSSX",
       "ok": true
     },
     {
@@ -209,7 +262,7 @@
     {
       "name": "C8 · production executor spawned + ready + real child exit",
       "expected": null,
-      "actual": "{\"instanceId\":\"exe_mRgsurVv\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":0,\"signal\":null,\"launchError\":false}",
+      "actual": "{\"instanceId\":\"exe_QKxzQxre\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":0,\"signal\":null,\"launchError\":false}",
       "ok": true
     },
     {
@@ -299,7 +352,7 @@
     {
       "name": "F5 · claim RUNNING 先于真实 child exit 崩溃",
       "expected": null,
-      "actual": "{\"claimIdx\":20,\"unknownIdx\":21,\"ev\":{\"instanceId\":\"exe_uklDsPlk\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":9,\"signal\":null,\"launchError\":false}}",
+      "actual": "{\"claimIdx\":20,\"unknownIdx\":21,\"ev\":{\"instanceId\":\"exe_7p_voGDu\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":9,\"signal\":null,\"launchError\":false}}",
       "ok": true
     },
     {
@@ -317,7 +370,7 @@
     {
       "name": "G1 · Renderer 自报 actor/risk 被忽略（真实 session 决定）",
       "expected": null,
-      "actual": "{\"ok\":true,\"actor\":\"usr_bhx5TR4QXa4UtaFVxoQNl1vtc2Jm041M\"}",
+      "actual": "{\"ok\":true,\"actor\":\"usr_RcrsAs8udncFwYxC5a5sybYjd2LiFZQK\"}",
       "ok": true
     },
     {
@@ -335,7 +388,7 @@
     {
       "name": "H1 · Reload 后从 backend state 恢复 Task 结果",
       "expected": null,
-      "actual": "taskId=task_-s8GOJO7ADKoKw gate=ready",
+      "actual": "taskId=task_oUBZJ4pHaHzN0w gate=ready",
       "ok": true
     },
     {
@@ -733,14 +786,92 @@
       "expected": "pass",
       "actual": "pass",
       "ok": true
+    },
+    {
+      "name": "BUDGET · D4-08 ① MODEL_CALLS 消耗后追加 → TOOL_CALLS / TOOL_ROUNDS remaining 完全保留",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "name": "BUDGET · D4-08 ① TOOL_CALLS 消耗后追加 → MODEL_CALLS / TOOL_ROUNDS remaining 完全保留",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "name": "BUDGET · D4-08 ① TOOL_ROUNDS 消耗后追加 → MODEL_CALLS / TOOL_CALLS remaining 完全保留",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "name": "BUDGET · D4-08 ② TOOL_CALLS：部分消耗后的新 run 实际受 remaining 约束（capability 额度 == remaining）",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "name": "BUDGET · D4-08 ② MODEL_CALLS：部分消耗后的新 run 实际受 remaining 约束（无第 remaining+1 次真实请求）",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "name": "BUDGET · D4-08 ② TOOL_ROUNDS：部分消耗后的新 run 实际轮数受 remaining 约束",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "name": "BUDGET · D4-08 ③ MODEL_CALLS 与 TOOL_CALLS 同时耗尽 → 停因/nextGrant 明确；只追加一种，其他不被补齐",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "name": "BUDGET · D4-08 ④ 并发续接 → 只追加一次、只产生一个有效运行",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "name": "BUDGET · D4-08 ⑤ 续接后再次耗尽 → 正确停止；已成功副作用恰好一次、不重放",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "name": "BUDGET · D4-08 ⑥ grant 返回值 == 账本 nextGrant/additions == 运行时 capability 额度",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "name": "BUDGET · D4-08 ⑦ 正：合法最后一次 tool call 后完成 → SUCCEEDED，不得误杀",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "name": "BUDGET · D4-08 ⑦ 反：仍需下一次调用但额度不足 → BUDGET_EXHAUSTED{TOOL_CALLS}，0 Artifact",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "name": "BUDGET · D4-08 旧任务首次建账本：不伪造历史精确余额，落 safe baseline 事件；新任务 consumed=0",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
     }
   ],
   "checksSummary": {
-    "total": 106,
-    "pass": 106,
+    "total": 119,
+    "pass": 119,
     "fail": 0
   },
-  "at": "2026-09-17T06:21:49.410Z",
+  "at": "2026-09-17T07:25:37.037Z",
   "artifactSha256Coverage": "sha256 of canonical JSON (2-space indent) excluding the artifactSha256 field",
-  "artifactSha256": "30ea3754493abe3e0cea529cc4963dc502b227564f7750b81094c473ea97b379"
+  "artifactSha256": "26a6f1484014251f58a93f5e9df6427da26ee7ef624e8e28d1bdc86826cfb6c7"
 }

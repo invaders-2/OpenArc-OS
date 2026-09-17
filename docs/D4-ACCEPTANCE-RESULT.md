@@ -2,7 +2,8 @@
 
 - 审查 Base HEAD：`6fb68377dfe5d1eefae6b951cd89c540f2abaa51`
 - 审查轮被测 commit：`431395dfe79afec8b4d9370a51b147b46b3e695c`
-- **收口修复被测 commit：`ec7a732aa78ffc52e8e0ce3b4d1e09108f604dc4`**
+- 收口修复（预算/失败验证）被测 commit：`ec7a732aa78ffc52e8e0ce3b4d1e09108f604dc4`
+- **D4-06 Closure 被测 commit（跨 run 累计预算 + 失败验证 UI）：`7b53458ef1611c08ab96679eab6377d1c4d0e342`（test-seed 修复 `fbbc002d1103b459b46f55172cd139345176b098`）**
 - Final HEAD：本轮报告/证据提交（见文末）
 - 分支：`feature/d4-03-tool-proxy`；工作树：`/Users/wepingli/Desktop/OpenArc OS-d4-01`；未 push、未合并 main；默认 d3-02 工作区未触碰
 
@@ -11,8 +12,8 @@
 **D4 = PARTIAL（macOS 核心基本完成，非整体完成）**。
 
 - D4-01 macOS Core、D4-02 macOS Task/Harness Core、D4-03（PASS candidate）、D4-04、D4-06 在各自声明范围内通过；D4-05 = **PARTIAL**（S1/S2/S3 PASS、S4 上下文链 NOT VERIFIED）。
-- 阻塞“整体 PASS”的项：D4-05 S4 依赖尚不存在的 memory→任务上下文装配能力（空验证）；D4-01/D4-02 的 Windows / External Provider = NOT VERIFIED；D4-03 待外部审计封板；**续接预算的跨 run 语义存在需裁决的开放项（见 §2.4）**。
-- 本轮已修复审查发现的两个既有功能缺口（预算实际值/停因/账本；失败 Verification 持久化），**未**因此升级 D4-05/D4（memory 上下文缺口不变）。
+- 阻塞“整体 PASS”的项：D4-05 S4 依赖尚不存在的 memory→任务上下文装配能力（空验证）；D4-01/D4-02 的 Windows / External Provider = NOT VERIFIED；D4-03 待外部审计封板。
+- 本轮（D4-06 Closure）已修复：① 任务层跨 run 累计预算（续接只补被批准 kind，其他种类继承剩余）；② 失败验证 UI 的 Electron 实测。**D4-06 恢复 PASS**；D4-05/D4 仍为 PARTIAL（memory 上下文缺口不变）。
 
 ## 1. D4 原始要求 → 实现 → 证据 → 限制 → 结论
 
@@ -23,7 +24,7 @@
 | **D4-03 工具门与租约**：授权执行及回报；重复调用与离线结果处理正确 | `tool-registry.cjs`、`controlled-tool-proxy.cjs`、`tool-facade-bridge.cjs`、`side-effect-authority/store/runtime.cjs`、`runtime-supervisor.cjs` | A 32/32；B 59/59；C1 46/46+50/50；C2 29/29 + closure 38/38/45/45/51/51；C3 56/56、closure 63/63；C4 35/35 + UI 22/22 + closure 15/15/12/12/9/9；D 52/52、closure 62/62 | **PASS candidate，待外部审计封板**；OS 网络沙箱/独立 malformed ACP/跨重启 durable death proof NOT VERIFIED/DEFERRED | **PASS candidate** |
 | **D4-04 纵向冒烟**：一工具真实流程记录；真实产物、停止、撤权可核查 | `tests/fixtures/d4-04-probe/main.cjs`、`tests/d4-04-smoke.mjs`、`runtime-boot.cjs`、`executor-launcher.cjs`、`side-effect-*.cjs` | `test:d4-04` **94/94**；Closure-3 **67/67**（`e989842`）；撤权 R1/R2；executor-unavailable | Gate 宿主 = probe host（非真实 `electron/main.cjs`） | **PASS（限定范围）** |
 | **D4-05 执行关卡**：门控验收，未通过禁止扩展真实工具面 | `task-service.cjs`（recovery/resume/ledger）、`task-bootstrap.cjs`、AI 面板 | `test:d4-05` **128/128 functional**，`overallStatus=PARTIAL`，S1/S2/S3 PASS、S4 PARTIAL | S4 上下文链 NOT VERIFIED（无 memory 装配入口）；见 §2 | **PARTIAL** |
-| **D4-06 关联链与预算停止**（§41） | `task-service.cjs`、`task-harness-orchestrator.cjs`、`task-store.cjs`、D4-05 recovery | `test:d4-06` **106/106**；`test:d4-06-resume` **19/19** | 上层收敛为 TaskService 合同验证；**续接跨 run 预算语义 OPEN（见 §2.4）**；真实 main.cjs 未端到端 | **PASS（仅限原 §41 范围）**；若裁决“一次续接只补一个 kind”为必需，须降为 PARTIAL |
+| **D4-06 关联链与预算停止**（§41） | `task-service.cjs`、`task-harness-orchestrator.cjs`、`task-store.cjs`、D4-05 recovery | `test:d4-06` **119/119**；`test:d4-06-resume` **21/21**；失败验证 UI `test:d4-08-verification-ui` **22/22**；`test:d4-08` **13/13** | 上层收敛为 TaskService 合同验证；失败验证 UI 走产品 orchestrator/proxy + test-only ACP agent（非 official dsh facade）；真实 main.cjs 未端到端 | **PASS** |
 | **A14–A19** | 见审查轮报告 | D4-01/02/03 真实证据；A15 复用 | Windows / External Provider | **PASS**（复用） |
 
 ## 2. 重点审查发现与本轮修复
@@ -44,22 +45,24 @@
 - 根因：① `getBudgetLedger().base` 硬编码 `BUDGET_BASE`，忽略实际配置；② `HarnessAdapter.budgetExhausted()` 先判 MODEL_CALLS，工具预算真实耗尽被掩盖；③ 成功 prompt 后即使 TOOL_CALLS 已 EXHAUSTED 仍会 commit success。
 - 修复：`TaskService.attachBudgetConfig({modelMaxCalls,toolMaxCalls,maxToolRounds})`（缺失回退默认），`base`/`nextGrant.amount` 用实际额度；`budgetExhausted()` 改为 **TOOL_CALLS 优先** 并返回只读脱敏 `observed{model,tool}`；orchestrator 每次 prompt 成功后若 TOOL_CALLS EXHAUSTED 立即 `BUDGET_EXHAUSTED{TOOL_CALLS}` + `task.budget_exhausted{observed}`（0 成功提交、0 后续调度）。
 - 实测：`tests/d4-07-budget-consistency.test.mjs` **3/3**；`d4-05-s3` 四类预算 **4/4**（`base={8,1,4}`、`nextGrant={TOOL_CALLS,1}`、additions 仅 1 条同 kind）。**①②③ 已修复**。
-- **OPEN（需裁决，本轮未改）**：授权账本/事件确实**只追加一个 kind**；但续接会新开 Harness run，按**冻结的 per-run 设计**重新签发 Model 与 Tool capability（bounded 默认额度）。因此“**新建 step/run/capability 不得顺带恢复其他预算**”**未满足**——这不是账本记多类，而是 per-run 预算重置。修复需新增跨 run 记账（`base+additions−consumed` 逐 kind carry-over），会改变 D4-01/D4-03D 冻结的 per-run 语义并影响续接可用性（某些场景新 run 会 0 额度）。**列为开放项**：若裁决该语义为 D4-06 必需，则 D4-06 应从“原 §41 PASS”降为 PARTIAL 并另立修复。
+- **已修复（D4-06 Closure，schema v16 `task_budgets`）**：保留 capability 按 run 签发，任务层维护跨 run 累计预算（每类 `authorized/consumed/remaining`）。一次续接**只抬升被批准 kind** 的 authorized，其他种类继承剩余；新 run 的 model/tool capability 额度 = 该类 remaining、轮次上界 = `min(MAX_TOOL_ROUNDS, remaining.TOOL_ROUNDS)`；run 结束一次性按真实计量扣减（失败/重复/在途不重不漏）；某类 remaining==0 → 不创建 run、直接 `BUDGET_EXHAUSTED`（不偷补）。旧任务无可靠消耗证据 → 保守基线（consumed=authorized 或 0）并落 safe baseline 事件，不反推历史。
+- **before → after（真实链路）**：MODEL_CALLS M{8,8,0} T{100,7,93} R{4,0,4} → grant M+8 → M{16,8,8}（T/R 不变）；TOOL_CALLS M{100,10,90} T{2,2,0} R{4,0,4} → grant T+2 → T{4,2,2}（M/R 不变）；TOOL_ROUNDS M{8,0,8} T{8,0,8} R{4,4,0} → grant R+4 → R{8,4,4}（M/T 不变）。
+- 实测：`tests/d4-08-budget-carryover.test.mjs` **13/13**（三类各自 before/after、实际调用次数受 remaining 约束、并发续接只一次、再耗尽/撤权/UNKNOWN、UI==账本==运行时、TOOL_CALLS 正反对照）。
 
-### 2.5 UI：失败 Verification 渲染
-- `src/desktop/components.tsx` 已实现 BLOCKED+FAIL 时 `data-ai-verification`（检查方法/预期/实际/证据），`npm run build`（tsc+vite）通过；**现有 Electron probe 无确定性 FAIL-verification 场景，该渲染未经 Electron 门控实测**（列为限制）。
+### 2.5 失败 Verification 的 Electron UI 实测（D4-06 Closure 补齐）
+- 新增 `tests/d4-08-verification-ui.mjs` + 真实 Electron probe：test-only 尺寸探针经**产品 TaskHarnessOrchestrator + 产品 ControlledToolProxy + 真实 TaskService/DB** 触发 `ADAPTER_VERIFY` 失败 → Task/Step BLOCKED、0 Artifact、1 条 FAIL verification；真实 Renderer 显示 `data-ai-verification`（检查方法 ADAPTER_VERIFY / 预期 / 实际 / 证据 executionId，**不显示成功**）；Reload 后从 `task/get` 恢复一致；非 owner（第二真实用户）读写均 `TASK_FORBIDDEN`、UI 不可见。实测 **22/22**。
+- **限制**：该 UI 探针走产品 orchestrator/proxy 链 + test-only synthetic ACP agent，未走 official dsh facade、工具调用非由 deterministic provider 发出（facade 模式下 READ_ONLY 验证失败不回落到 Step/Task BLOCK，无法确定性得到“验证失败→BLOCKED”）。
 
 ## 3. 仍未验证的能力及其对收口的影响
 
 | 能力 | 状态 | 对 D4 收口的影响 |
 | --- | --- | --- |
 | memory→任务上下文装配与隔离（A36 上下文链） | NOT VERIFIED | **阻塞 D4-05/D4 整体 PASS** |
-| 续接跨 run 预算语义（“不重置其他 kind”） | **OPEN（需裁决）** | 影响 D4-06 续接预算子项；若必需则 D4-06 降 PARTIAL |
 | D4-03 外部审计封板 | PASS candidate | 影响“D4-03 = PASS”的正式性 |
 | Windows / External Provider | NOT VERIFIED | D4-01/D4-02 overall = PARTIAL |
 | OS 级网络沙箱 / external workspace read audit / independent malformed ACP injection | NOT VERIFIED | 安全纵深挂账，不属 D4-05 四场景 |
 | 跨重启 authenticated durable process-death proof | DEFERRED / NOT VERIFIED | 当前 fail closed 到 UNKNOWN_EFFECT |
-| 失败 Verification 的 Electron UI 实测 | 限制 | UI 已实现未 Electron 门控；查询/持久化已 Node 验证 |
+| 失败 Verification 的 Electron UI | 已实测 22/22（fallback 链） | 已满足；链路限制见 §2.5 |
 
 ## 4. 唯一推荐的下一阶段任务
 
@@ -69,8 +72,9 @@
 
 - **审查轮被测提交 `431395d`**（产品零改动）：`tests/d4-05-s1/s2/s3*.test.mjs`、`tests/d4-05-smoke.mjs`、`docs/D4-05-RESULT.md`、`docs/D4-05-GATE-EVIDENCE.json`。
 - **收口修复被测提交 `ec7a732`**：`electron/{controlled-tool-proxy,harness-adapter,identity-store,side-effect-executor-bundle,task-bootstrap,task-harness-orchestrator,task-service,task-store}.cjs`、`src/desktop/components.tsx`、`tests/{d4-05-s1-output-size,d4-05-s3-budget-ledger,migration,device-migration,side-effect-migration,task-orchestration-migration,task-store,tool-execution-migration,tool-migration}.test.mjs`、`tests/fixtures/harness-acp/tool-harness-fixture.mjs`、新增 `tests/d4-07-budget-consistency.test.mjs`、`tests/d4-07-verification-persistence.test.mjs`。
+- **D4-06 Closure 被测 commit `7b53458`**：`electron/{identity-store,task-domain,task-store,task-service,task-harness-orchestrator,tool-facade-bridge,harness-adapter}.cjs`、`src/desktop/components.tsx`、`package.json`、`tests/d4-08-budget-carryover.test.mjs`（新）、`tests/d4-08-verification-ui.mjs` + `tests/fixtures/d4-08-verification-ui/*`（新）及 migration/fixture 断言更新；`fbbc002` 仅修 3 个 resource-* migration seed（DROP task_budgets）。
 - **报告提交**：`docs/D4-ACCEPTANCE-RESULT.md`、`docs/D4-05-RESULT.md`、`docs/D4-04/05/06-GATE-EVIDENCE.json`、`PROGRESS.md`。
-- **实际执行（被测 commit `ec7a732`，干净工作区）**：`npm run test:d4-05` → 128/128 functional、overallStatus=PARTIAL、`workspaceState=""`；`test:d4-04` 94/94、`test:d4-06` 106/106、`test:d4-06-resume` 19/19、`test:d4-02c` 22/22（schema v15）、`test:d4-03c4` 35/35+UI 22/22；`npm test` = **944/944 PASS**（含 d4-07 与 migration）。未机械重跑未受影响证据。
+- **实际执行（D4-06 Closure，被测 commit `7b53458`，干净工作区）**：`test:d4-06` **119/119**、`test:d4-06-resume` **21/21**、`test:d4-08-verification-ui` **22/22**、`test:d4-05` **128/128（PARTIAL）**、`test:d4-04` 94/94、`test:d4-02c` 22/22（schema v16）、`test:d4-03c4` 35/35+UI 22/22；`npm test` **958/958 PASS**（`fbbc002` 修 3 个 resource-* migration seed 后）。
 - 证据脱敏：无 `/Users`、`/private`、`/var/folders`、`mpx_`、`tpx_`、credential。
 
 ## 6. 诚实边界
