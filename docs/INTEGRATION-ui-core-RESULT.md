@@ -126,6 +126,7 @@ npm ci          → added 105 packages，exit 0
 
 - 主工作区 `/Users/wepingli/Desktop/OpenArc OS` 的未提交改动**从未被读取以外地触碰**：未 add / commit / stash / clean / checkout。
 - 其含「初始化向导步骤化」关键字 `setup-step-pane` / `SETUP_STEPS`：集成分支**只包含 `LockClock`，不含 `SETUP_STEPS` / `setup-step-pane`**（已用 grep 双向核对）。即 **主工作区这部分未提交改动未被集成分支覆盖**，后续若要保留，需要由该工作区另行提交后再并一次。
+- 附注：本会话期间，该主工作区的未提交集合出现过变化（会话开始时的 `git status` 未列 `tests/fixtures/identity-ui-probe/main.cjs`，会话结束时它已带「引导式三步」用例改动；文件 mtime 为 17:22，早于本会话）。这些变动不是本集成工程师所为（我在该工作区只做过读取类命令），也未被我 stage/commit/stash/clean。
 
 ## 7. 剩余问题与建议
 
