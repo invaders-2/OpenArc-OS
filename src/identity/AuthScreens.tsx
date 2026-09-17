@@ -144,7 +144,7 @@ export function SetupScreen({ busy, error, defaultIdentifier = "", onSubmit }: S
           />
         </label>
         <label className="field">
-          登录标识符
+          账号
           <input
             value={identifier}
             onChange={(e) => setIdentifier(e.target.value)}
@@ -154,7 +154,7 @@ export function SetupScreen({ busy, error, defaultIdentifier = "", onSubmit }: S
           />
         </label>
         <label className="field">
-          口令
+          密码
           <input
             type="password"
             value={password}
@@ -165,7 +165,7 @@ export function SetupScreen({ busy, error, defaultIdentifier = "", onSubmit }: S
           />
         </label>
         <label className="field">
-          确认口令
+          确认密码
           <input
             type="password"
             value={confirm}
@@ -182,7 +182,7 @@ export function SetupScreen({ busy, error, defaultIdentifier = "", onSubmit }: S
           </button>
         </div>
         <p className="footnote">
-          口令使用 scrypt 派生后存储，明文不落盘、不进入界面状态。初始化成功后需再用该口令登录一次。
+          密码使用 scrypt 派生后存储，明文不落盘、不进入界面状态。初始化成功后需再用该密码登录一次。
         </p>
       </form>
     </AuthShell>
@@ -223,11 +223,11 @@ export function LoginScreen({ busy, error, defaultIdentifier = "", onSubmit }: L
         >
           <div className="lock-input">
             <input ref={first} value={identifier} onChange={(e) => setIdentifier(e.target.value)}
-              placeholder="登录标识符" aria-label="登录标识符" autoComplete="username" data-d3-id="login-identifier" />
+              placeholder="账号" aria-label="账号" autoComplete="username" data-d3-id="login-identifier" />
           </div>
           <div className="lock-input lock-input--act">
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-              placeholder="口令" aria-label="口令" autoComplete="current-password" data-d3-id="login-password" />
+              placeholder="密码" aria-label="密码" autoComplete="current-password" data-d3-id="login-password" />
             <button className="lock-submit" type="submit" disabled={busy || !identifier || !password}
               aria-label="登录" data-d3-id="login-submit">
               <ArrowRight size={16} />
@@ -235,7 +235,7 @@ export function LoginScreen({ busy, error, defaultIdentifier = "", onSubmit }: L
           </div>
           <AuthErrorLine error={error} />
         </form>
-        <p className="lock-footnote">标识符不存在与口令错误返回同一个错误，不透露账号是否存在。</p>
+        <p className="lock-footnote">账号不存在与密码错误返回同一个错误，不透露账号是否存在。</p>
       </div>
     </div>
   );
@@ -285,7 +285,7 @@ export function LockScreen({ snapshot, busy, error, onUnlock, onLogout }: LockPr
         >
           <div className="lock-input lock-input--act">
             <input ref={input} type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password" placeholder="输入口令以解锁" aria-label="口令"
+              autoComplete="current-password" placeholder="输入密码以解锁" aria-label="密码"
               data-d3-id="unlock-password" onKeyDown={(e) => {
                 if (e.key !== "Tab") return;
                 const items = Array.from(panel.current?.querySelectorAll<HTMLElement>("button,input") || []);
@@ -309,7 +309,7 @@ export function LockScreen({ snapshot, busy, error, onUnlock, onLogout }: LockPr
           <button className="lock-alt" type="button" disabled={busy} onClick={() => void onLogout()}
             data-d3-id="lock-logout">退出登录</button>
         </form>
-        <p className="lock-footnote">锁定不等于退出登录：会话仍然有效，但受保护的操作会被拒绝，必须重新验证口令。</p>
+        <p className="lock-footnote">锁定不等于退出登录：会话仍然有效，但受保护的操作会被拒绝，必须重新验证密码。</p>
       </div>
     </div>
   );

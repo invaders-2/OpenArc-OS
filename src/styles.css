@@ -2349,8 +2349,9 @@ input[type="checkbox"] {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: var(--space-8);
+  justify-content: flex-end;
+  /* Apple 锁屏：身份块落在下半屏，不居中 */
+  padding: var(--space-8) var(--space-8) clamp(48px, 15vh, 150px);
   background: rgb(var(--base-rgb) / 0.55);
   backdrop-filter: var(--glass-filter);
   -webkit-backdrop-filter: var(--glass-filter);
@@ -2364,7 +2365,7 @@ input[type="checkbox"] {
   pointer-events: none;
 }
 .lock-date {
-  font-size: var(--fs-title);
+  font-size: var(--fs-display);
   font-weight: var(--fw-medium);
   letter-spacing: var(--tracking-tight);
   color: var(--muted);
@@ -2425,7 +2426,6 @@ input[type="checkbox"] {
 .lock-input input {
   width: 100%;
   padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--line);
   border-radius: var(--radius-pill);
   background: rgb(var(--content-rgb) / var(--content-alpha));
   text-align: left;
