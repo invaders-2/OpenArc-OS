@@ -29,7 +29,8 @@ test("Official dsh E2E：tool_call → Tool Facade → Proxy → Search/Resource
 
     const ctx = fx.ctx();
     const t = fx.createTask();
-    const orch = fx.makeDshOrchestrator();
+    // A36 记忆装配复用同一 SearchService.search；本用例只度量 tool→Domain 路径，显式隔离 memory。
+    const orch = fx.makeDshOrchestrator({ memoryContext: null });
     const r = await orch.runTask({ context: ctx, taskId: t.task.taskId, expectedRevision: t.task.revision, verify: { type: "EXACT_TEXT", expected: "OPENARC_DSH_TOOL_OK" } });
 
     assert.equal(r.ok, true, JSON.stringify(r));

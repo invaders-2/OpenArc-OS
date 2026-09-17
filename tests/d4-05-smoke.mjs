@@ -83,6 +83,7 @@ const NODE_FILES = [
   "d4-05-s2-recovery.test.mjs",
   "d4-05-s3-budget-ledger.test.mjs",
   "d4-05-s4-memory.test.mjs",
+  "d4-05-s4-memory-context.test.mjs",
   "d4-06-budget.test.mjs",
   "d4-06-resume.test.mjs",
 ];
@@ -120,11 +121,11 @@ const gaps = [
     actual: "已实现只读 recovery 投影（task/get.recovery + task/recovery：call/status/errorCode/recoveryResult/关联产物/resumable=false）+ task/acknowledgeUnknownEffect + UI data-ai-recovery/data-ai-acknowledge；ack 只追加一条 safe task event，绝不改 call/step/task 状态、绝不授权 resume/retry。真实 Electron UI 11/11 通过。",
   },
   {
-    scenario: "S4", status: "PARTIAL",
+    scenario: "S4", status: "RESOLVED",
     name: "S4 · memory → 任务上下文的正向注入",
     expected: "PLAN §41 A36：用户删除个人记忆并切换账号，检索与新任务上下文均不出现已删或他人内容。",
-    actual: "检索链正负对照 PASS（alice 删除前可见 / 删除后不可见 + 派生索引移除；切账号 dana 检索不到他人或已删内容）；无 memory→任务上下文装配入口，上下文链未接入/空验证（buildPrompt 只含 goal + safe step input + prior artifact，不含 memory 检索/注入），当前无泄漏路径但不得声称已验证记忆注入隔离。",
-    reason: "最小后续方案（不改产品）：先新增受控 memory 检索/装配入口，再以正负对照验证上下文隔离（授权记忆可见且注入；已删/他人记忆不出现），通过后 S4 才可从 PARTIAL 升为 PASS。",
+    actual: "已接入受控装配入口 electron/memory-context.cjs，并在唯一出站口 electron/harness-model-adapter.cjs 注入（BEGIN/END_OPENARC_AUTHORIZED_MEMORY reference-data 标记块，明确非系统指令）。每次 assemble 重新 validateSession → SearchService 授权检索（agent=true）→ 逐条 getCapabilities + readText 最后检查；无缓存。真实 provider 请求体正负对照：授权/部门成员注入，无显式 grant（§25）、他人 personal、删除、撤权、同组织非成员、未接线均不注入；残缺标记 403 不转发。证据见 tests/d4-05-s4-memory-context.test.mjs（11/11）。",
+    reason: null,
   },
 ];
 

@@ -7,8 +7,9 @@
  *   · 切换账号 dana/新 session → 检索不到该内容，也检索不到 alice 的其他 memory；
  *   · 真实 orchestrator 起任务，捕获实际 model 请求体，断言 prompt/上下文不含已删或他人 memory 内容。
  *
- * 诚实说明：本版本 buildPrompt 只含 goal + safe step input + prior artifact，**没有** memory→任务
- * 上下文的正向注入；因此“新任务上下文不出现已删/他人内容”是负向要求成立，而正向记忆检索能力不存在。
+ * 说明：本文件断言“已删/他人内容不出现在任务上下文”，与 buildPrompt 无关，负向要求仍然成立。
+ * 正向“授权记忆注入任务上下文”的受控装配入口见 electron/memory-context.cjs；正负对照与逐请求
+ * 重新授权/最后检查的证据见 tests/d4-05-s4-memory-context.test.mjs（本文件断言未被削弱）。
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";

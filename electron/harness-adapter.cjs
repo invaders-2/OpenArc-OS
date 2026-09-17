@@ -185,14 +185,14 @@ class HarnessAdapter {
   }
 
   /** Harness 只能拿到 Proxy endpoint + scoped capability + safe model metadata。 */
-  async start({ context, modelConfigId, maxCalls = 4, ttlMs = 120000, workspace = null, startTimeoutMs = 30000, requestId = null, toolFacade = null } = {}) {
+  async start({ context, modelConfigId, maxCalls = 4, ttlMs = 120000, workspace = null, startTimeoutMs = 30000, requestId = null, toolFacade = null, memory = null } = {}) {
     if (!this.bin) throw harnessError(HARNESS_ERROR.NOT_STARTED, "dsh executable not found");
     if (!this.sdkPath) throw harnessError(HARNESS_ERROR.NOT_STARTED, "ACP SDK not found");
     const cap = this.modelProxy.issueCapability({ context, configId: modelConfigId, allowedCapabilities: ["chat"], maxCalls, ttlMs });
     if (!cap.ok) { const e = harnessError(cap.error === "MODEL_CONFIG_UNAVAILABLE" ? HARNESS_ERROR.NOT_STARTED : cap.error); throw e; }
     this.capability = { capabilityId: cap.capability.capabilityId, token: cap.capability.token, maxCalls: cap.capability.maxCalls, modelConfigId: cap.capability.modelConfigId, modelConfigVersion: cap.capability.modelConfigVersion };
 
-    this.bridge = new HarnessModelAdapter({ modelProxy: this.modelProxy, logger: this.logger, clock: this.clock, expectedToken: this.capability.token, requestId });
+    this.bridge = new HarnessModelAdapter({ modelProxy: this.modelProxy, logger: this.logger, clock: this.clock, expectedToken: this.capability.token, requestId, memory });
     this.modelRequestId = requestId;
     await this.bridge.start();
 

@@ -13,6 +13,7 @@ const { ToolRegistry } = require("../../../electron/tool-registry.cjs");
 const { ControlledToolProxy } = require("../../../electron/controlled-tool-proxy.cjs");
 const { createToolAdapters } = require("../../../electron/tool-adapters.cjs");
 const { TaskHarnessOrchestrator } = require("../../../electron/task-harness-orchestrator.cjs");
+const { MemoryContext } = require("../../../electron/memory-context.cjs");
 const { SideEffectStore } = require("../../../electron/side-effect-store.cjs");
 const { SideEffectAuthority } = require("../../../electron/side-effect-authority.cjs");
 const { SideEffectRuntime } = require("../../../electron/side-effect-runtime.cjs");
@@ -84,11 +85,20 @@ export async function createToolHarnessFixture(opts = {}) {
     ...(opts.sideEffectApprovalWaitMs ? { approvalWaitMs: opts.sideEffectApprovalWaitMs } : {}),
     ...(opts.sideEffectExecutorTimeoutMs ? { executorTimeoutMs: opts.sideEffectExecutorTimeoutMs } : {}),
   });
+  // D4-05 S4 / A36：与 production bootstrap 同源，装配受控记忆（SearchService + ResourceService）。
+  const memoryContext = new MemoryContext({
+    searchService: base.f.searchService,
+    resourceService: base.f.resourceService,
+    taskService: base.taskService,
+    authService: base.f.authService,
+    identity: base.f.identity,
+    clock: base.f.clock,
+  });
   return {
-    ...base, toolStore, toolRegistry, toolProxy, adapters, sideEffectStore, sideEffectAuthority, supervisor, sideEffectRuntime, sideEffectRuntimeDir,
+    ...base, toolStore, toolRegistry, toolProxy, adapters, sideEffectStore, sideEffectAuthority, supervisor, sideEffectRuntime, sideEffectRuntimeDir, memoryContext,
     /** 用 synthetic ACP tool proposal fixture 充当 Harness。*/
     makeToolOrchestrator(agentFile = "tool-proposal-agent.mjs", extra = {}) {
-      return new TaskHarnessOrchestrator({ taskService: base.taskService, adapterFactory: base.agentFactory(agentFile), toolProxy, clock: base.f.clock, ...extra });
+      return new TaskHarnessOrchestrator({ taskService: base.taskService, adapterFactory: base.agentFactory(agentFile), toolProxy, memoryContext, clock: base.f.clock, ...extra });
     },
     /** D4-03B Closure：真实 official dsh + managed openarc-acp profile + Tool Facade Bridge。*/
     makeDshOrchestrator(extra = {}) {
@@ -97,6 +107,7 @@ export async function createToolHarnessFixture(opts = {}) {
         adapterFactory: base.realAgentFactory(),
         toolProxy,
         sideEffectRuntime,
+        memoryContext,
         clock: base.f.clock,
         toolFacade: { enabled: true, toolIds: opts.facadeToolIds || ["resource.read.metadata", "resource.search"], writeToolIds: opts.facadeWriteToolIds || [], maxCalls: opts.facadeMaxCalls || 4, ttlMs: opts.facadeTtlMs || 120000, execTimeoutMs: opts.facadeExecTimeoutMs, bridgeFactory: opts.facadeBridgeFactory },
         ...extra,
@@ -131,6 +142,13 @@ export async function createToolHarnessFixture(opts = {}) {
     },
     grantUserResource(resourceId, userId, actions) {
       return base.f.authService.grantResourcePermission({ context: base.f.adminCtx(), principalType: "USER", principalId: userId, resourceId, actions });
+    },
+    /** D4-05 S4 / A36：给 App 对 memory 的**显式** grant（§25：全局 grant 不覆盖 memory）。 */
+    grantMemoryAppAccess(appId = "ai", actions = ["resource.search", "resource.read"]) {
+      return base.f.authService.grantAppResourcePermission({ context: base.f.adminCtx(), appId, resourceType: "memory", actions });
+    },
+    revokeMemoryAppAccess(grantId) {
+      return base.f.authService.revokeAppResourcePermission({ context: base.f.adminCtx(), grantId });
     },
     async close() { try { supervisor.stop(); } catch { /* ignore */ } await base.close(); },
   };

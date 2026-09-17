@@ -17,6 +17,7 @@ const { TaskStore } = require("./task-store.cjs");
 const { TaskService } = require("./task-service.cjs");
 const { TaskHarnessOrchestrator } = require("./task-harness-orchestrator.cjs");
 const { HarnessAdapter } = require("./harness-adapter.cjs");
+const { MemoryContext } = require("./memory-context.cjs");
 const { ToolStore } = require("./tool-store.cjs");
 const { ToolRegistry } = require("./tool-registry.cjs");
 const { ControlledToolProxy } = require("./controlled-tool-proxy.cjs");
@@ -81,6 +82,10 @@ function createTaskBundle({ identityStore, authorization, authStore, modelServic
   const sideEffectReady = supervisor.rehydrate()
     .then(() => sideEffectRuntime.recoverOnStartup())
     .catch(() => null);
+  // D4-05 S4 / A36：有 SearchService + ResourceService 才装配受控记忆；否则 null（行为不变）。
+  const memoryContext = searchService && resourceService
+    ? new MemoryContext({ searchService, resourceService, taskService, authService: authorization, identity: identityStore, clock, logger })
+    : null;
   let orchestrator = null;
   if (modelProxy) {
     const factory = typeof adapterFactory === "function" ? adapterFactory : () => new HarnessAdapter({ modelProxy, logger, clock });
@@ -89,9 +94,10 @@ function createTaskBundle({ identityStore, authorization, authStore, modelServic
       // D4-04：真实观测到每任务最多 2 次受控 tool call（READ: search+read；WRITE: search+trash）。
       // 预算回到 D4-03D 冻结默认 8（bounded，且 AUTO_RETRY 恒为 0）。
       toolFacade: TOOL_FACADE_CONFIG,
+      memoryContext,
     });
   }
-  return { taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, orchestrator };
+  return { taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, memoryContext, orchestrator };
 }
 
 /** D4-04：Renderer 可用的 Task 命令白名单（trusted sender + main-process session 注入）。 */

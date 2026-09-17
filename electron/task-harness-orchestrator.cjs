@@ -97,9 +97,11 @@ function classifyHarnessError(e) {
 }
 
 class TaskHarnessOrchestrator {
-  constructor({ taskService, adapterFactory = null, toolProxy = null, sideEffectRuntime = null, clock = null, logger = null, turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS, startTimeoutMs = DEFAULT_START_TIMEOUT_MS, maxPersistedHarnessEvents = DEFAULT_MAX_PERSISTED_EVENTS, toolFacade = null } = {}) {
+  constructor({ taskService, adapterFactory = null, toolProxy = null, sideEffectRuntime = null, clock = null, logger = null, turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS, startTimeoutMs = DEFAULT_START_TIMEOUT_MS, maxPersistedHarnessEvents = DEFAULT_MAX_PERSISTED_EVENTS, toolFacade = null, memoryContext = null } = {}) {
     if (!taskService) throw new Error("TaskHarnessOrchestrator 需要 TaskService");
     this.taskService = taskService;
+    // D4-05 S4 / A36：可选受控记忆装配。null → 不接线，行为完全不变。
+    this.memoryContext = memoryContext;
     this.adapterFactory = adapterFactory;
     // D4-03A：可选 Controlled Tool Proxy。无 proxy 时 tool proposal 仍 0 执行。
     this.toolProxy = toolProxy;
@@ -124,6 +126,15 @@ class TaskHarnessOrchestrator {
   #makeAdapter({ context, taskId, stepId, runId, modelConfigId, modelConfigVersion = null }) {
     if (typeof this.adapterFactory !== "function") throw Object.assign(new Error(ORCHESTRATOR_ERROR.NO_ADAPTER), { code: ORCHESTRATOR_ERROR.NO_ADAPTER });
     return this.adapterFactory({ context, taskId, stepId, runId, modelConfigId, modelConfigVersion });
+  }
+
+  /**
+   * D4-05 S4 / A36：为**每一次 run**（含 resumeBudgetExhausted 的新 run）独立创建装配闭包。
+   * 闭包按当前 context/taskId/goal 重新 assemble，绝不跨 run 复用旧结果。
+   */
+  #memoryFor({ context, taskId, goal }) {
+    if (!this.memoryContext || typeof this.memoryContext.assemble !== "function") return null;
+    return { assemble: () => this.memoryContext.assemble({ context, taskId, goal }) };
   }
 
   /** 全链路入口：createTask 之后调用；严格 PENDING→RUNNING→Step RUNNING→Harness。*/
@@ -185,7 +196,7 @@ class TaskHarnessOrchestrator {
     try {
       facade = await this.#startToolFacade({ context, taskId, stepId, runId: run.runId, maxCalls: toolQuota });
       adapter = this.#makeAdapter({ context, taskId, stepId, runId: run.runId, modelConfigId: task.modelConfigId, modelConfigVersion: task.modelConfigVersion });
-      info = await adapter.start({ context, modelConfigId: task.modelConfigId, maxCalls: modelQuota, startTimeoutMs: this.startTimeoutMs, requestId: "mreq_" + run.runId, toolFacade: facade });
+      info = await adapter.start({ context, modelConfigId: task.modelConfigId, maxCalls: modelQuota, startTimeoutMs: this.startTimeoutMs, requestId: "mreq_" + run.runId, toolFacade: facade, memory: this.#memoryFor({ context, taskId, goal: task.goal }) });
     } catch (e) {
       if (adapter) { try { adapter.revokeToolCapability(); } catch { /* ignore */ } try { adapter.revokeModelCapability(); } catch { /* ignore */ } try { await adapter.dispose(); } catch { /* ignore */ } }
       if (facade) { try { await facade.bridge.stop(); } catch { /* ignore */ } }
