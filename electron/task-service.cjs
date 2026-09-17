@@ -15,6 +15,7 @@ const { safeTask, safeStep, safeCall, safeEvent, sanitizeEventPayload } = domain
 const {
   TASK_STATUS, STEP_STATUS, TASK_EVENT, ERROR, DEFAULT_MAX_ATTEMPTS, AUTO_RETRY, TOOL_EXECUTION,
   HARNESS_RUN_STATUS, HARNESS_RUN_TERMINAL, ARTIFACT_TYPE, ARTIFACT_TYPE_ALL, VERIFICATION_TYPE, VERIFICATION_STATUS,
+  BUDGET_BASE, RESUME_GRANT_AMOUNT, MAX_BUDGET_RESUMES, RESUME_REASON, ORCHESTRATION_KIND,
   canTransitionTask, canTransitionStep, isKnownEventType,
 } = domain;
 
@@ -34,7 +35,7 @@ function safeVerification(row) {
 function parseMaybeJson(text) { if (text == null) return null; try { return JSON.parse(text); } catch { return text; } }
 
 class TaskService {
-  constructor({ identity, authService, authStore, taskStore, modelService = null, clock = null, logger = null, hooks = null } = {}) {
+  constructor({ identity, authService, authStore, taskStore, toolStore = null, sideEffectStore = null, modelService = null, clock = null, logger = null, hooks = null } = {}) {
     if (!identity) throw new Error("TaskService 需要 IdentityStore");
     if (!authService || !authStore) throw new Error("TaskService 需要 D3 Authorization");
     if (!taskStore) throw new Error("TaskService 需要 TaskStore");
@@ -42,6 +43,10 @@ class TaskService {
     this.authService = authService;
     this.authStore = authStore;
     this.store = taskStore;
+    // D4-06 Closure：只读领域账本（tool executions / side-effect calls / leases），
+    // 用于 resume eligibility 与 budget ledger。late attach 见 attachBudgetStores。
+    this.toolStore = toolStore;
+    this.sideEffectStore = sideEffectStore;
     this.modelService = modelService;
     this.clock = typeof clock === "function" ? clock : identity.clock;
     this.logger = logger;
@@ -83,6 +88,13 @@ class TaskService {
     const access = this.#access(guard, task);
     if (!access.ok) return access;
     return { ok: true, task };
+  }
+
+  /** D4-06 Closure：late attach 只读账本 store（bootstrap / 测试夹具在装配完成后注入）。 */
+  attachBudgetStores({ toolStore = null, sideEffectStore = null } = {}) {
+    if (toolStore) this.toolStore = toolStore;
+    if (sideEffectStore) this.sideEffectStore = sideEffectStore;
+    return { ok: true };
   }
 
   // ------------------------------------------------------------------ Task
@@ -438,7 +450,7 @@ class TaskService {
   }
 
   /** Step BLOCKED：仅 Orchestrator 在 crash/timeout/tool/permission/authz 下调用。*/
-  blockStep({ context, taskId, stepId, runId = null, reason = null, event = null, expectedRevision } = {}) {
+  blockStep({ context, taskId, stepId, runId = null, reason = null, event = null, payload = null, expectedRevision } = {}) {
     const guard = this.#guard(context);
     if (!guard.ok) return guard;
     return this.store.transactSync(() => {
@@ -454,7 +466,7 @@ class TaskService {
       if (step.status === STEP_STATUS.BLOCKED) { /* idempotent */ }
       else if (canTransitionStep(step.status, STEP_STATUS.BLOCKED)) updatedStep = this.store.updateStep(step.step_id, { status: STEP_STATUS.BLOCKED, completed_at: now });
       else return { ok: false, error: ERROR.TASK_INVALID_STATE, from: step.status, to: STEP_STATUS.BLOCKED };
-      if (event) this.store.appendEvent({ taskId: task.task_id, eventType: event, safePayload: sanitizeEventPayload({ stepId: step.step_id, runId, reason }), at: now });
+      if (event) this.store.appendEvent({ taskId: task.task_id, eventType: event, safePayload: sanitizeEventPayload(Object.assign({ stepId: step.step_id, runId, reason }, payload || {})), at: now });
       this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.STEP_BLOCKED, safePayload: sanitizeEventPayload({ stepId: step.step_id, reason }), at: now });
       const taskPatch = { updated_at: now, revision: task.revision + 1 };
       if (task.current_step_id === step.step_id) taskPatch.current_step_id = null;
@@ -539,6 +551,156 @@ class TaskService {
       this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.TASK_CANCELLED, safePayload: sanitizeEventPayload({ revision: updated.revision }), at: now });
       this.#audit(guard, context, "task.cancelFinalize", task.task_id);
       return { ok: true, changed: true, task: safeTask(updated) };
+    });
+  }
+
+  // -------------------------------------------- D4-06 Closure 预算续接（唯一解禁场景）
+  #budgetEvents(taskId, eventType) {
+    return this.store.eventsOfTask(taskId).filter((e) => e.event_type === eventType).map((e) => {
+      let payload = null;
+      try { payload = e.safe_payload ? JSON.parse(e.safe_payload) : null; } catch { payload = null; }
+      return Object.assign({ eventId: e.event_id, at: e.created_at }, payload || {});
+    });
+  }
+  #budgetGrantEvents(taskId) { return this.#budgetEvents(taskId, TASK_EVENT.TASK_BUDGET_GRANTED); }
+  #budgetExhaustEvents(taskId) { return this.#budgetEvents(taskId, TASK_EVENT.TASK_BUDGET_EXHAUSTED); }
+
+  /**
+   * D4-06 Closure 后端可续接判定（不信 renderer）。
+   * 只有「BLOCKED + last run error_code=BUDGET_EXHAUSTED + 无未决副作用/UNKNOWN_EFFECT/active lease
+   * + 存在可续接的已完成产物 + 未达续接上限」才 resumable。其余一律带显式 reason 拒绝。
+   */
+  #resumeAssessment(task) {
+    const base = {
+      resumable: false, reason: null, stopReason: null, kind: null,
+      fromStepId: null, fromRunId: null,
+      resumeIndex: 1, resumeCount: 0, maxResumes: MAX_BUDGET_RESUMES, remainingResumes: MAX_BUDGET_RESUMES,
+    };
+    if (!task) return Object.assign(base, { reason: RESUME_REASON.NOT_BLOCKED });
+    const runs = this.store.harnessRunsOfTask(task.task_id);
+    const steps = this.store.stepsOfTask(task.task_id);
+    const grants = this.#budgetGrantEvents(task.task_id);
+    const lastRun = runs.length ? runs[runs.length - 1] : null;
+    const lastStep = steps.length ? steps[steps.length - 1] : null;
+    base.resumeCount = grants.length;
+    base.resumeIndex = grants.length + 1;
+    base.remainingResumes = Math.max(0, MAX_BUDGET_RESUMES - grants.length);
+    base.stopReason = lastRun ? (lastRun.error_code || lastRun.stop_reason || null) : null;
+    base.fromStepId = lastStep ? lastStep.step_id : null;
+    base.fromRunId = lastRun ? lastRun.run_id : null;
+
+    if (task.cancel_requested) return Object.assign(base, { reason: RESUME_REASON.CANCELLED });
+    if (task.status !== TASK_STATUS.BLOCKED) return Object.assign(base, { reason: RESUME_REASON.NOT_BLOCKED });
+    if (runs.some((r) => r.status === HARNESS_RUN_STATUS.STARTING || r.status === HARNESS_RUN_STATUS.RUNNING)) return Object.assign(base, { reason: RESUME_REASON.IN_FLIGHT });
+    if (steps.some((s) => s.status === STEP_STATUS.RUNNING || s.status === STEP_STATUS.PENDING)) return Object.assign(base, { reason: RESUME_REASON.IN_FLIGHT });
+    // 安全优先：未决/未知副作用与 active lease 无条件阻断续接，先于停止原因判定。
+    if (!this.sideEffectStore) return Object.assign(base, { reason: RESUME_REASON.EFFECT_STATE_UNAVAILABLE });
+    const calls = this.sideEffectStore.callsOfTask(task.task_id);
+    if (calls.some((c) => String(c.status) === "UNKNOWN_EFFECT")) return Object.assign(base, { reason: RESUME_REASON.UNKNOWN_EFFECT_PRESENT });
+    if (calls.some((c) => ["AWAITING_APPROVAL", "APPROVED", "LEASED", "RUNNING"].includes(String(c.status)))) return Object.assign(base, { reason: RESUME_REASON.SIDE_EFFECT_PENDING });
+    const callIds = new Set(calls.map((c) => c.callId));
+    if (this.sideEffectStore.activeLeases().some((l) => callIds.has(l.callId))) return Object.assign(base, { reason: RESUME_REASON.ACTIVE_LEASE });
+
+    if (!lastRun) return Object.assign(base, { reason: RESUME_REASON.NO_HARNESS_RUN });
+    if (String(lastRun.error_code) !== ERROR.BUDGET_EXHAUSTED) return Object.assign(base, { reason: RESUME_REASON.NOT_BUDGET_STOP });
+    const exhaust = this.#budgetExhaustEvents(task.task_id);
+    const lastExhaust = exhaust.length ? exhaust[exhaust.length - 1] : null;
+    base.kind = lastExhaust ? (lastExhaust.kind || null) : null;
+    if (!base.kind || !RESUME_GRANT_AMOUNT[base.kind]) return Object.assign(base, { reason: RESUME_REASON.UNKNOWN_BUDGET_KIND });
+    if (grants.length >= MAX_BUDGET_RESUMES) return Object.assign(base, { reason: RESUME_REASON.LIMIT_REACHED });
+    if (!this.store.artifactsOfTask(task.task_id).length) return Object.assign(base, { reason: RESUME_REASON.NO_SAFE_CONTINUATION });
+
+    base.resumable = true;
+    return base;
+  }
+
+  getResumeEligibility({ context, taskId } = {}) {
+    const guard = this.#guard(context);
+    if (!guard.ok) return guard;
+    const load = this.#load(guard, taskId);
+    if (!load.ok) return load;
+    return Object.assign({ ok: true, taskId: load.task.task_id }, this.#resumeAssessment(load.task));
+  }
+
+  /** 只读预算账本：base + additions + resumeCount + consumed（绝不更新/清零历史计数）。 */
+  getBudgetLedger({ context, taskId } = {}) {
+    const guard = this.#guard(context);
+    if (!guard.ok) return guard;
+    const load = this.#load(guard, taskId);
+    if (!load.ok) return load;
+    const id = load.task.task_id;
+    const assessment = this.#resumeAssessment(load.task);
+    const additions = this.#budgetGrantEvents(id).map((g) => ({
+      resumeIndex: g.resumeIndex == null ? null : g.resumeIndex, kind: g.kind || null, amount: g.amount == null ? null : g.amount,
+      operatorUserId: g.operatorUserId || null, grantedAt: g.at, consumedAtGrant: g.consumedAtGrant || null,
+    }));
+    const budgetStops = this.#budgetExhaustEvents(id).map((s) => ({ kind: s.kind || null, consumed: s.consumed == null ? null : s.consumed, at: s.at }));
+    return {
+      ok: true,
+      ledger: {
+        taskId: id,
+        base: Object.assign({}, BUDGET_BASE),
+        additions,
+        resumeCount: additions.length,
+        maxResumes: MAX_BUDGET_RESUMES,
+        remainingResumes: Math.max(0, MAX_BUDGET_RESUMES - additions.length),
+        consumed: {
+          modelCalls: this.store.callsOfTask(id).length,
+          toolExecutions: this.toolStore ? this.toolStore.executionsOfTask(id).length : null,
+          budgetStops,
+        },
+        nextGrant: assessment.resumable ? { kind: assessment.kind, amount: RESUME_GRANT_AMOUNT[assessment.kind] } : null,
+        resumable: assessment.resumable,
+        stopReason: assessment.stopReason,
+        reason: assessment.reason,
+      },
+    };
+  }
+
+  /**
+   * 原子追加一次 bounded 预算并开启续接 step：单事务内重新判定 → 写 budget.granted 账本
+   * → 新建 reasoning step（携带 continuation 上下文，绝不携带旧 tool 请求）→ BLOCKED→RUNNING。
+   * expectedRevision + 状态/在途守卫保证同一 task 只成功续接一次。
+   */
+  grantBudgetResume({ context, taskId, expectedRevision, kind = null, amount = null } = {}) {
+    const guard = this.#guard(context);
+    if (!guard.ok) return guard;
+    return this.store.transactSync(() => {
+      const load = this.#load(guard, taskId);
+      if (!load.ok) return load;
+      const task = load.task;
+      if (task.cancel_requested) return { ok: false, error: ERROR.TASK_CANCELLED };
+      const conflict = this.#conflict(task, expectedRevision);
+      if (conflict) return conflict;
+      const assessment = this.#resumeAssessment(task);
+      if (!assessment.resumable) return { ok: false, error: assessment.reason || "RESUME_NOT_ELIGIBLE", resumable: false, stopReason: assessment.stopReason || null };
+      const useKind = kind || assessment.kind;
+      if (!useKind || !RESUME_GRANT_AMOUNT[useKind] || (kind && kind !== assessment.kind)) return { ok: false, error: RESUME_REASON.UNKNOWN_BUDGET_KIND };
+
+      const now = this.#now();
+      const priorArtifacts = this.store.artifactsOfTask(task.task_id).slice(-3).map((a) => ({
+        artifactId: a.artifact_id, type: a.type, content: String(a.safe_content == null ? "" : a.safe_content).slice(0, 2000),
+      }));
+      const continuation = {
+        continuation: true,
+        fromStepId: assessment.fromStepId, fromRunId: assessment.fromRunId,
+        stopReason: ERROR.BUDGET_EXHAUSTED, budgetKind: useKind, resumeIndex: assessment.resumeIndex,
+        priorArtifacts,
+        instruction: "Continue from the verified prior results. Do not re-issue any previous tool request and do not repeat already completed operations.",
+      };
+      const sequence = this.store.nextStepSequence(task.task_id);
+      const step = this.store.insertStep({ taskId: task.task_id, sequence, kind: ORCHESTRATION_KIND, status: STEP_STATUS.PENDING, input: continuation, attempt: 1, maxAttempts: DEFAULT_MAX_ATTEMPTS });
+      const consumedAtGrant = {
+        modelCalls: this.store.callsOfTask(task.task_id).length,
+        toolExecutions: this.toolStore ? this.toolStore.executionsOfTask(task.task_id).length : null,
+        budgetStops: this.#budgetExhaustEvents(task.task_id).length,
+      };
+      this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.TASK_BUDGET_GRANTED, at: now, safePayload: sanitizeEventPayload({ amount: Number(amount) || RESUME_GRANT_AMOUNT[useKind], operatorUserId: guard.actor.user.id, resumeIndex: assessment.resumeIndex, kind: useKind, consumedAtGrant }) });
+      this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.STEP_CREATED, at: now, safePayload: sanitizeEventPayload({ stepId: step.step_id, sequence, kind: ORCHESTRATION_KIND, maxAttempts: DEFAULT_MAX_ATTEMPTS, resumeIndex: assessment.resumeIndex }) });
+      const updatedTask = this.store.updateTask(task.task_id, { status: TASK_STATUS.RUNNING, updated_at: now, revision: task.revision + 1 });
+      this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.TASK_STARTED, at: now, safePayload: sanitizeEventPayload({ revision: updatedTask.revision, resumed: true, resumeIndex: assessment.resumeIndex, kind: useKind }) });
+      this.#audit(guard, context, "task.resume", task.task_id);
+      return { ok: true, task: safeTask(updatedTask), step: safeStep(step), resumeIndex: assessment.resumeIndex, kind: useKind };
     });
   }
 

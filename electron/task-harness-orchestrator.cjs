@@ -18,6 +18,7 @@ const { buildBridgeManifest } = require("./tool-registry.cjs");
 const {
   TASK_STATUS, STEP_STATUS, TASK_EVENT, ERROR, ORCHESTRATION_KIND,
   ARTIFACT_TYPE, VERIFICATION_TYPE, ACP_EVENT_MAP, sanitizeEventPayload,
+  BUDGET_KIND, DEFAULT_MAX_CALLS, MAX_TOOL_ROUNDS, RESUME_GRANT_AMOUNT,
 } = domain;
 
 const PROMPT_SCHEMA_VERSION = 1;
@@ -27,8 +28,8 @@ const DEFAULT_MAX_PERSISTED_EVENTS = 64;
 // D4-03D：一个 Harness run 内的 bounded 模型调用预算。混合 READ + WRITE turn 需要
 // tool calls + 1 次 final + 1 次 verified-continuation，4 会误伤合法流程；仍然 bounded，
 // 且绝不引入 hidden retry（0 retry 由 AUTO_RETRY/failModelCall 语义保证）。
-const DEFAULT_MAX_CALLS = 8;
-const MAX_TOOL_ROUNDS = 4;
+// D4-06 Closure：bounded 预算常量统一由 task-domain 纯领域层冻结（DEFAULT_MAX_CALLS=8 /
+// MAX_TOOL_ROUNDS=4）；本文件只消费，不再各自定义，避免漂移。
 
 const ORCHESTRATOR_ERROR = Object.freeze({
   NO_ADAPTER: "ORCHESTRATOR_NO_ADAPTER",
@@ -190,11 +191,11 @@ class TaskHarnessOrchestrator {
       try {
         res = await adapter.prompt(promptText, { timeoutMs: turnTimeoutMs });
       } catch (e) {
-        const code = classifyHarnessError(e);
-        const failedCall = svc.failModelCall({ context, taskId, callId, providerErrorCode: code, requestId: modelRequestId, expectedRevision: task.revision });
+        const failure = this.#promptFailure(adapter, e);
+        const failedCall = svc.failModelCall({ context, taskId, callId, providerErrorCode: failure.code, requestId: modelRequestId, expectedRevision: task.revision });
         const failRev = failedCall.ok ? failedCall.task.revision : task.revision;
-        if (code === ERROR.HARNESS_CANCELLED) return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: failRev });
-        return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: code, event: TASK_EVENT.HARNESS_RUN_UNKNOWN_EFFECT, expectedRevision: failRev });
+        if (failure.code === ERROR.HARNESS_CANCELLED) return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: failRev });
+        return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: failure.code, event: failure.event, payload: failure.payload, expectedRevision: failRev });
       }
 
       let rawEvents = Array.isArray(res.events) ? res.events : [];
@@ -219,11 +220,11 @@ class TaskHarnessOrchestrator {
           try {
             next = await adapter.prompt(handled.followupPrompt, { timeoutMs: turnTimeoutMs });
           } catch (e) {
-            const code = classifyHarnessError(e);
-            const failedCall = svc.failModelCall({ context, taskId, callId, providerErrorCode: code, requestId: modelRequestId, expectedRevision: task.revision });
+            const failure = this.#promptFailure(adapter, e);
+            const failedCall = svc.failModelCall({ context, taskId, callId, providerErrorCode: failure.code, requestId: modelRequestId, expectedRevision: task.revision });
             const failRev = failedCall.ok ? failedCall.task.revision : task.revision;
-            if (code === ERROR.HARNESS_CANCELLED) return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: failRev });
-            return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: code, event: TASK_EVENT.HARNESS_RUN_UNKNOWN_EFFECT, expectedRevision: failRev });
+            if (failure.code === ERROR.HARNESS_CANCELLED) return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: failRev });
+            return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: failure.code, event: failure.event, payload: failure.payload, expectedRevision: failRev });
           }
           res = next;
           rawEvents = Array.isArray(next.events) ? next.events : [];
@@ -233,7 +234,7 @@ class TaskHarnessOrchestrator {
           if (latestTask.ok) task = latestTask.task;
           if (latestTask.ok && latestTask.task.cancelRequested) return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: task.revision });
         }
-        if (hasToolEvents()) return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: ERROR.TOOL_EXECUTION_NOT_AVAILABLE, event: TASK_EVENT.TOOL_EXECUTION_BLOCKED, expectedRevision: task.revision });
+        if (hasToolEvents()) return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: ERROR.BUDGET_EXHAUSTED, event: TASK_EVENT.TASK_BUDGET_EXHAUSTED, payload: { kind: BUDGET_KIND.TOOL_ROUNDS, consumed: round, maxRounds: MAX_TOOL_ROUNDS }, expectedRevision: task.revision });
       } else if (!facadeMode && hasToolEvents()) {
         // D4-03A gate：proposal 已 ALLOWED 但执行未开放 → 0 execution + BLOCKED / WAITING。
         await this.#recordEvents({ context, taskId, runId: run.runId, events: mapped.events, expectedRevision: task.revision, task });
@@ -285,11 +286,11 @@ class TaskHarnessOrchestrator {
           try {
             next = await adapter.prompt(follow, { timeoutMs: turnTimeoutMs });
           } catch (e) {
-            const code = classifyHarnessError(e);
-            const failedCall = svc.failModelCall({ context, taskId, callId, providerErrorCode: code, requestId: modelRequestId, expectedRevision: task.revision });
+            const failure = this.#promptFailure(adapter, e);
+            const failedCall = svc.failModelCall({ context, taskId, callId, providerErrorCode: failure.code, requestId: modelRequestId, expectedRevision: task.revision });
             const failRev = failedCall.ok ? failedCall.task.revision : task.revision;
-            if (code === ERROR.HARNESS_CANCELLED) return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: failRev });
-            return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: code, event: TASK_EVENT.HARNESS_RUN_UNKNOWN_EFFECT, expectedRevision: failRev });
+            if (failure.code === ERROR.HARNESS_CANCELLED) return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: failRev });
+            return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: failure.code, event: failure.event, payload: failure.payload, expectedRevision: failRev });
           }
           res = next;
           rawEvents = Array.isArray(next.events) ? next.events : [];
@@ -389,6 +390,28 @@ class TaskHarnessOrchestrator {
 
   #rev(context, taskId, fallback) { const t = this.#service().getTask({ context, taskId }); return t.ok ? t.task.revision : fallback; }
 
+  /**
+   * D4-06 Closure：只有 Harness 自报的失败 + 真实 capability 预算状态才能得出 BUDGET_EXHAUSTED。
+   * cancel 优先；其余只有 Model Proxy / Tool Facade capability 真实进入 EXHAUSTED 才算预算停止。
+   */
+  #promptFailure(adapter, e) {
+    const code = classifyHarnessError(e);
+    if (code === ERROR.HARNESS_CANCELLED) return { code, event: TASK_EVENT.HARNESS_RUN_UNKNOWN_EFFECT, payload: null };
+    const budget = adapter && typeof adapter.budgetExhausted === "function" ? adapter.budgetExhausted() : null;
+    if (budget && budget.exhausted) {
+      return { code: ERROR.BUDGET_EXHAUSTED, event: TASK_EVENT.TASK_BUDGET_EXHAUSTED, payload: { kind: budget.kind, consumed: budget.consumed, maxCalls: budget.maxCalls } };
+    }
+    return { code, event: TASK_EVENT.HARNESS_RUN_UNKNOWN_EFFECT, payload: null };
+  }
+
+  /** 本次续接实际追加的预算量（沿用既有预算种类；有界默认值）。 */
+  #grantAmount(kind) {
+    if (kind === BUDGET_KIND.MODEL_CALLS) return DEFAULT_MAX_CALLS;
+    if (kind === BUDGET_KIND.TOOL_CALLS) return (this.toolFacade && Number(this.toolFacade.maxCalls)) || RESUME_GRANT_AMOUNT.TOOL_CALLS;
+    if (kind === BUDGET_KIND.TOOL_ROUNDS) return MAX_TOOL_ROUNDS;
+    return null;
+  }
+
   /** D4-03B Closure：official dsh run 启动前建 Tool Facade Bridge（随机 loopback port）+ Safe Manifest。*/
   async #startToolFacade({ context, taskId, stepId, runId }) {
     const cfg = this.toolFacade;
@@ -472,10 +495,10 @@ class TaskHarnessOrchestrator {
     return this.#service().recordHarnessEvents({ context, taskId, runId, events, expectedRevision, maxEvents: this.maxPersistedHarnessEvents });
   }
 
-  async #blockStep({ context, taskId, stepId, runId, reason, event = null, expectedRevision, alreadyRecorded = false }) {
+  async #blockStep({ context, taskId, stepId, runId, reason, event = null, payload = null, expectedRevision, alreadyRecorded = false }) {
     void alreadyRecorded;
     const svc = this.#service();
-    const blocked = svc.blockStep({ context, taskId, stepId, runId, reason, event, expectedRevision });
+    const blocked = svc.blockStep({ context, taskId, stepId, runId, reason, event, payload, expectedRevision });
     if (!blocked.ok) return blocked;
     const runBlocked = svc.blockHarnessRun({ context, taskId, runId, errorCode: reason, stopReason: "blocked", expectedRevision: blocked.task.revision });
     return { ok: false, error: reason, blocked: true, step: blocked.step, task: runBlocked.ok ? runBlocked.task : blocked.task, run: runBlocked.ok ? runBlocked.run : null };
@@ -520,7 +543,28 @@ class TaskHarnessOrchestrator {
     return { ok: true, cancelled: true, task: fin.task };
   }
 
-  /** 显式 resume：第一版 DEFERRED；接口保留但不实现自动 replay。*/
+  /**
+   * D4-06 Closure · 唯一被解禁的 Explicit Resume：**因 bounded 预算耗尽而停止**、
+   * 且**不存在未决副作用**的 task，由用户显式触发。
+   *
+   * 边界（其他 resume 场景仍 DEFERRED）：
+   *   · 后端 TaskService 重新判定 actor/app/owner/stop-reason/side-effect/lease/次数；
+   *   · 只新增一个 bounded reasoning step + 一次新 run（新 capability），绝不 replay 旧 tool 请求；
+   *   · 旧 step / call / artifact / verification / 副作用全部保留；AUTO_RETRY 恒为 0。
+   */
+  async resumeBudgetExhausted({ context, taskId, expectedRevision, verify = null, turnTimeoutMs = this.turnTimeoutMs } = {}) {
+    const svc = this.#service();
+    const eligibility = svc.getResumeEligibility({ context, taskId });
+    if (!eligibility.ok) return eligibility;
+    if (!eligibility.resumable) return { ok: false, error: eligibility.reason || "RESUME_NOT_ELIGIBLE", resumable: false, stopReason: eligibility.stopReason || null };
+    const granted = svc.grantBudgetResume({ context, taskId, expectedRevision, kind: eligibility.kind, amount: this.#grantAmount(eligibility.kind) });
+    if (!granted.ok) return granted;
+    const stepStarted = svc.startStep({ context, taskId, stepId: granted.step.stepId, expectedRevision: granted.task.revision });
+    if (!stepStarted.ok) return stepStarted;
+    return this.runStep({ context, taskId, stepId: granted.step.stepId, expectedRevision: stepStarted.task.revision, stepInput: granted.step.input, verify, turnTimeoutMs });
+  }
+
+  /** 显式 resume（非预算场景）：第一版仍 DEFERRED；接口保留但不实现自动 replay。*/
   async resume() { return { ok: false, error: "EXPLICIT_RESUME_DEFERRED" }; }
 
   async dispose() {
@@ -533,4 +577,4 @@ class TaskHarnessOrchestrator {
   }
 }
 
-module.exports = { TaskHarnessOrchestrator, ORCHESTRATOR_ERROR, PROMPT_SCHEMA_VERSION, buildPrompt, mapAcpEvents, classifyHarnessError, sha256 };
+module.exports = { TaskHarnessOrchestrator, ORCHESTRATOR_ERROR, PROMPT_SCHEMA_VERSION, buildPrompt, mapAcpEvents, classifyHarnessError, sha256, DEFAULT_MAX_CALLS, MAX_TOOL_ROUNDS };

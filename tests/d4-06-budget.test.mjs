@@ -5,7 +5,7 @@
  *   ① Model Proxy capability maxCalls = DEFAULT_MAX_CALLS = 8（每个 Harness run 的 bounded 模型调用）
  *   ② Tool Facade capability maxCalls（atomic reserve；exact duplicate 不二次消耗）
  *   ③ 编排层 MAX_TOOL_ROUNDS = 4（自动 READ tool loop 上界）
- * 停止语义：orchestrator 自己走 blockStep + blockHarnessRun（reason TOOL_EXECUTION_NOT_AVAILABLE），
+ * 停止语义：orchestrator 自己走 blockStep + blockHarnessRun（reason BUDGET_EXHAUSTED + kind），
  * 绝不手工调用 blockStep/blockHarnessRun；已发生的 tool execution / Artifact / Verification / 副作用保留。
  */
 import { test } from "node:test";
@@ -54,12 +54,15 @@ test("D4-06 · 轮次预算停止：proposeSequence>=5 → 恰好 MAX_TOOL_ROUND
     assert.equal(step.status, "BLOCKED");
     assert.ok(runs.length >= 1 && runs.every((x) => x.status !== "RUNNING" && x.status !== "STARTING"), "Harness run 必须收敛：" + JSON.stringify(runs.map((x) => x.status)));
     assert.equal(runs[runs.length - 1].status, "BLOCKED");
-    assert.ok(runs.some((x) => x.error_code === "TOOL_EXECUTION_NOT_AVAILABLE"), "停因 = TOOL_EXECUTION_NOT_AVAILABLE");
+    assert.equal(r.error, "BUDGET_EXHAUSTED", "预算停止 reason = BUDGET_EXHAUSTED：" + JSON.stringify(r.error));
+    assert.ok(runs.some((x) => x.error_code === "BUDGET_EXHAUSTED"), "停因 = BUDGET_EXHAUSTED");
+    const stopEv = fx.taskStore.eventsOfTask(taskId).map((e) => ({ t: e.event_type, p: e.safe_payload ? JSON.parse(e.safe_payload) : null })).find((e) => e.t === "task.budget_exhausted");
+    assert.ok(stopEv && stopEv.p && stopEv.p.kind === "TOOL_ROUNDS", "task.budget_exhausted kind=TOOL_ROUNDS：" + JSON.stringify(stopEv));
     assert.equal(TaskService.policy.autoRetry, 0, "AUTO_RETRY 必须为 0");
     // 已发生的 tool execution 仍可查询且归属正确。
     assert.ok(execs.every((e) => e.task_id === taskId && e.step_id === step.step_id && e.status === "SUCCEEDED"), "已发生 execution 保留且归属正确");
     const events = fx.taskStore.eventsOfTask(taskId).map((e) => e.event_type);
-    for (const ev of ["tool.execution_blocked", "step.blocked", "task.blocked", "harness.run.blocked"]) assert.ok(events.includes(ev), "缺事件 " + ev + "：" + JSON.stringify(events));
+    for (const ev of ["task.budget_exhausted", "step.blocked", "task.blocked", "harness.run.blocked"]) assert.ok(events.includes(ev), "缺事件 " + ev + "：" + JSON.stringify(events));
     // 预算停止路径 0 Artifact / 0 Verification（如实“不适用”，不造假记录）。
     assert.equal(fx.taskStore.artifactsOfTask(taskId).length, 0);
     assert.equal(fx.taskStore.verificationsOfTask(taskId).length, 0);
@@ -166,7 +169,7 @@ test("D4-06 · 保留产物：step1 成功后 step2 预算停止 → step1 Artif
     const toolOrch = fx.makeToolOrchestrator();
     const r2 = await toolOrch.runStep({ context: ctx, taskId: t.task.taskId, stepId: s2.step.stepId, expectedRevision: ss2.task.revision, stepInput: s2.step.input, verify: { type: "EXACT_TEXT", expected: "OPENARC_TASK_OK" } });
     assert.equal(r2.ok, false);
-    assert.equal(r2.error, "TOOL_EXECUTION_NOT_AVAILABLE");
+    assert.equal(r2.error, "BUDGET_EXHAUSTED");
 
     const step2 = fx.taskStore.stepsOfTask(t.task.taskId).find((s) => s.step_id === s2.step.stepId);
     assert.equal(step2.status, "BLOCKED");

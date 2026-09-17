@@ -97,6 +97,9 @@ const TASK_EVENT = Object.freeze({
   TOOL_SIDE_EFFECT_QUIESCENCE_CONFIRMED: "tool.side_effect.quiescence_confirmed",
   TOOL_SIDE_EFFECT_QUIESCENCE_UNPROVEN: "tool.side_effect.quiescence_unproven",
   TOOL_SIDE_EFFECT_QUIESCENCE_UPGRADED: "tool.side_effect.unknown_effect_quiescence_upgraded",
+  // D4-06 Closure · bounded 预算到限 → 用户显式续接（safe projection only）
+  TASK_BUDGET_EXHAUSTED: "task.budget_exhausted",
+  TASK_BUDGET_GRANTED: "task.budget.granted",
 });
 const TASK_EVENT_ALL = Object.freeze(Object.values(TASK_EVENT));
 
@@ -108,6 +111,8 @@ const ERROR = Object.freeze({
   TASK_CANCELLED: "TASK_CANCELLED",
   MODEL_CONFIG_CHANGED: "MODEL_CONFIG_CHANGED",
   RECOVERY_REQUIRED: "RECOVERY_REQUIRED",
+  // D4-06 Closure：唯一可被用户显式续接的停止原因（bounded 预算用尽）。
+  BUDGET_EXHAUSTED: "BUDGET_EXHAUSTED",
   INVALID_INPUT: "INVALID_INPUT",
   INTERNAL_ERROR: "INTERNAL_ERROR",
   // D4-02C orchestration-level classifications（OpenArc 自己决定，不由 Harness 自报）
@@ -210,6 +215,36 @@ const DEFAULT_MAX_ATTEMPTS = 1;
 /** 本阶段不存在 side effect execution；ToolProposal 即使建表也只有 proposal。 */
 const TOOL_EXECUTION = "FORBIDDEN";
 
+/**
+ * D4-06 Closure · bounded 预算与显式续接策略（沿用既有三类预算，不发明新预算体系）。
+ *   MODEL_CALLS  = 每个 Harness run 的 Model Proxy capability maxCalls
+ *   TOOL_CALLS   = 每个 Harness run 的 Tool Facade capability maxCalls
+ *   TOOL_ROUNDS  = 编排层自动 tool loop 轮数上界
+ * base 与 grant 都是通用默认值；续接总次数有硬上界，绝不无限追加。
+ */
+const BUDGET_KIND = Object.freeze({ MODEL_CALLS: "MODEL_CALLS", TOOL_CALLS: "TOOL_CALLS", TOOL_ROUNDS: "TOOL_ROUNDS" });
+const DEFAULT_MAX_CALLS = 8;
+const MAX_TOOL_ROUNDS = 4;
+const BUDGET_BASE = Object.freeze({ MODEL_CALLS: DEFAULT_MAX_CALLS, TOOL_CALLS: DEFAULT_MAX_CALLS, TOOL_ROUNDS: MAX_TOOL_ROUNDS });
+const RESUME_GRANT_AMOUNT = Object.freeze({ MODEL_CALLS: DEFAULT_MAX_CALLS, TOOL_CALLS: DEFAULT_MAX_CALLS, TOOL_ROUNDS: MAX_TOOL_ROUNDS });
+const MAX_BUDGET_RESUMES = 3;
+
+/** 续接拒绝原因：一律显式，绝不模糊成 INTERNAL_ERROR。 */
+const RESUME_REASON = Object.freeze({
+  NOT_BLOCKED: "RESUME_NOT_BLOCKED",
+  CANCELLED: "RESUME_CANCELLED",
+  IN_FLIGHT: "RESUME_IN_FLIGHT",
+  NO_HARNESS_RUN: "RESUME_NO_HARNESS_RUN",
+  NOT_BUDGET_STOP: "RESUME_NOT_BUDGET_STOP",
+  UNKNOWN_BUDGET_KIND: "RESUME_UNKNOWN_BUDGET_KIND",
+  UNKNOWN_EFFECT_PRESENT: "RESUME_UNKNOWN_EFFECT_PRESENT",
+  SIDE_EFFECT_PENDING: "RESUME_SIDE_EFFECT_PENDING",
+  ACTIVE_LEASE: "RESUME_ACTIVE_LEASE",
+  NO_SAFE_CONTINUATION: "RESUME_NO_SAFE_CONTINUATION",
+  LIMIT_REACHED: "RESUME_LIMIT_REACHED",
+  EFFECT_STATE_UNAVAILABLE: "RESUME_EFFECT_STATE_UNAVAILABLE",
+});
+
 function canTransitionTask(from, to) { return (TASK_TRANSITIONS[String(from)] || []).includes(String(to)); }
 function canTransitionStep(from, to) { return (STEP_TRANSITIONS[String(from)] || []).includes(String(to)); }
 function isTerminalTask(status) { return TERMINAL_TASK_STATUS.includes(String(status)); }
@@ -284,6 +319,7 @@ module.exports = {
   CALL_STATUS, CALL_STATUS_ALL, TASK_EVENT, TASK_EVENT_ALL, ERROR,
   TASK_TRANSITIONS, STEP_TRANSITIONS,
   AUTO_RETRY, DEFAULT_MAX_ATTEMPTS, TOOL_EXECUTION,
+  BUDGET_KIND, BUDGET_BASE, DEFAULT_MAX_CALLS, MAX_TOOL_ROUNDS, RESUME_GRANT_AMOUNT, MAX_BUDGET_RESUMES, RESUME_REASON,
   ORCHESTRATION_KIND, HARNESS_RUN_STATUS, HARNESS_RUN_STATUS_ALL, HARNESS_RUN_TERMINAL,
   ARTIFACT_TYPE, ARTIFACT_TYPE_ALL, VERIFICATION_TYPE, VERIFICATION_STATUS, ACP_EVENT_MAP,
   canTransitionTask, canTransitionStep, isTerminalTask, isKnownTaskStatus, isKnownStepStatus, isKnownEventType,

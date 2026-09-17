@@ -1,0 +1,5 @@
+{
+  "name": "openarc-d4-06-resume-probe",
+  "private": true,
+  "main": "main.cjs"
+}

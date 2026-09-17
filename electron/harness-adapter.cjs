@@ -349,6 +349,24 @@ class HarnessAdapter {
     return r;
   }
 
+  /**
+   * D4-06 Closure · 只读预算状态。
+   * 只有当 Model Proxy / Tool Facade capability 因预算被真实拒绝（429）进入 EXHAUSTED
+   * 时才返回 exhausted；耗尽后 orchestrator 才有资格归为 BUDGET_EXHAUSTED（kind）。
+   * 绝不改变任何 capability state，也绝不消耗预算。
+   */
+  budgetExhausted() {
+    if (this.capability && this.capability.token) {
+      const state = this.modelProxy.capabilityState(this.capability.token);
+      if (state && state.state === "EXHAUSTED") return { exhausted: true, kind: "MODEL_CALLS", consumed: this.capability.maxCalls, maxCalls: this.capability.maxCalls };
+    }
+    if (this.toolCapability && this.toolCapability.token && this.toolFacade) {
+      const state = this.toolFacade.bridge.capabilityState(this.toolCapability.token);
+      if (state && state.state === "EXHAUSTED") return { exhausted: true, kind: "TOOL_CALLS", consumed: state.calls, maxCalls: state.maxCalls };
+    }
+    return { exhausted: false, kind: null, consumed: null, maxCalls: null };
+  }
+
   async closeSession() {
     if (!this.conn || !this.sessionId) return { ok: true, changed: false };
     try { await this.#withTimeout(this.conn.closeSession({ sessionId: this.sessionId }), 10000, HARNESS_ERROR.TURN_TIMEOUT); } catch { /* best effort */ }

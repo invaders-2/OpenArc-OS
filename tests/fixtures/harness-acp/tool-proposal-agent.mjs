@@ -45,7 +45,9 @@ rl.on("line", (line) => {
 
     if (turn === 0) {
       const spec = readSpec(prompt) || {};
-      sequence = Array.isArray(spec.proposeSequence) ? spec.proposeSequence.slice() : (spec.proposeTool ? [spec.proposeTool] : [{ toolId: "test.echo", toolVersion: 1, arguments: { message: "hi" }, proposalId: "tc_default" }]);
+      const isContinuation = spec.continuation === true;
+      sequence = Array.isArray(spec.proposeSequence) ? spec.proposeSequence.slice()
+        : (isContinuation ? [] : (spec.proposeTool ? [spec.proposeTool] : [{ toolId: "test.echo", toolVersion: 1, arguments: { message: "hi" }, proposalId: "tc_default" }]));
       finalText = typeof spec.finalText === "string" ? spec.finalText : "OPENARC_TASK_OK";
       turn = 1;
       if (sequence.length) { emitTool(sequence.shift()); return endTurn(); }

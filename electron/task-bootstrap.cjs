@@ -49,6 +49,8 @@ function createTaskBundle({ identityStore, authorization, authStore, modelServic
     ...(executorTestHook ? { executorTestHook } : {}),
   });
   const sideEffectStore = new SideEffectStore({ identity: identityStore, clock });
+  // D4-06 Closure：TaskService 只读续接账本（tool executions / side-effect calls / active leases）。
+  taskService.attachBudgetStores({ toolStore, sideEffectStore });
   const sideEffectAuthority = new SideEffectAuthority({
     registry: toolRegistry, sideEffectStore, taskStore, toolStore,
     authService: authorization, adapters, clock, taskService,
@@ -87,7 +89,7 @@ function createTaskBundle({ identityStore, authorization, authStore, modelServic
 }
 
 /** D4-04：Renderer 可用的 Task 命令白名单（trusted sender + main-process session 注入）。 */
-const TASK_COMMANDS = Object.freeze(["task/run", "task/get", "task/list", "task/cancel"]);
+const TASK_COMMANDS = Object.freeze(["task/run", "task/get", "task/list", "task/cancel", "task/resume"]);
 
 function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrusted, send = null, hostAppId = "ai" } = {}) {
   if (typeof ipcMain.removeHandler === "function") { try { ipcMain.removeHandler("task:command"); } catch { /* not registered */ } }
@@ -100,6 +102,18 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
     const payload = raw.payload && typeof raw.payload === "object" ? raw.payload : raw;
     // sessionRef / appId 一律来自可信宿主，忽略 Renderer 自报的 userId / role / appId / sessionRef。
     const context = { sessionRef: (identity && identity.current) || null, appId: hostAppId, source: "ui", requestId: typeof payload.requestId === "string" ? payload.requestId.slice(0, 80) : null };
+    const emitResult = (taskId, r) => {
+      if (!send) return;
+      send({
+        type: "task/result", taskId,
+        ok: !!(r && r.ok),
+        status: r && r.task ? r.task.status : null,
+        stepStatus: r && r.step ? r.step.status : null,
+        artifact: r && r.artifact ? { type: r.artifact.type, content: String(r.artifact.content == null ? "" : r.artifact.content).slice(0, 4000), checksum: r.artifact.checksum || null } : null,
+        verification: r && r.verification ? { type: r.verification.type, status: r.verification.status } : null,
+        error: r && r.error ? String(r.error).slice(0, 120) : null,
+      });
+    };
     try {
       switch (command) {
         case "task/run": {
@@ -110,18 +124,7 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
           const taskId = created.task.taskId;
           // 不等待整条 Harness 链：立即返回，进度经 send 推送；approval 由 sideeffect:event 推送。
           const running = orchestrator.runTask({ context, taskId, expectedRevision: created.task.revision, verify: { type: "SCHEMA_VALID" } });
-          running.then((r) => {
-            if (!send) return;
-            send({
-              type: "task/result", taskId,
-              ok: !!(r && r.ok),
-              status: r && r.task ? r.task.status : null,
-              stepStatus: r && r.step ? r.step.status : null,
-              artifact: r && r.artifact ? { type: r.artifact.type, content: String(r.artifact.content == null ? "" : r.artifact.content).slice(0, 4000), checksum: r.artifact.checksum || null } : null,
-              verification: r && r.verification ? { type: r.verification.type, status: r.verification.status } : null,
-              error: r && r.error ? String(r.error).slice(0, 120) : null,
-            });
-          }).catch(() => { try { send({ type: "task/result", taskId, ok: false, status: null, error: "INTERNAL_ERROR" }); } catch { /* ignore */ } });
+          running.then((r) => emitResult(taskId, r)).catch(() => { try { send({ type: "task/result", taskId, ok: false, status: null, error: "INTERNAL_ERROR" }); } catch { /* ignore */ } });
           return { ok: true, taskId, status: created.task.status };
         }
         case "task/get": {
@@ -130,7 +133,16 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
           if (!got.ok) return got;
           const steps = taskService.getSteps({ context, taskId });
           const artifacts = taskService.getArtifacts({ context, taskId });
-          return { ok: true, task: got.task, steps: steps.ok ? steps.items : [], artifacts: artifacts.ok ? artifacts.items : [] };
+          // D4-06 Closure：可续接状态与预算账本一律后端判定（renderer 自报无效）。
+          const eligibility = taskService.getResumeEligibility({ context, taskId });
+          const ledger = taskService.getBudgetLedger({ context, taskId });
+          return {
+            ok: true, task: got.task, steps: steps.ok ? steps.items : [], artifacts: artifacts.ok ? artifacts.items : [],
+            resumable: !!(eligibility.ok && eligibility.resumable),
+            stopReason: eligibility.ok ? (eligibility.stopReason || null) : null,
+            resumeReason: eligibility.ok ? (eligibility.reason || null) : (eligibility.error || null),
+            budgetLedger: ledger.ok ? ledger.ledger : null,
+          };
         }
         case "task/list": {
           const list = taskService.listTasks({ context });
@@ -141,6 +153,16 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
           const got = taskService.getTask({ context, taskId });
           if (!got.ok) return got;
           return orchestrator.cancel({ context, taskId, expectedRevision: got.task.revision });
+        }
+        case "task/resume": {
+          const taskId = String(payload.taskId == null ? "" : payload.taskId);
+          const got = taskService.getTask({ context, taskId });
+          if (!got.ok) return got;
+          // expectedRevision 只是乐观并发 token；身份 / 预算 / 可续接状态一律由主进程判定。
+          const expectedRevision = payload.expectedRevision == null ? got.task.revision : Number(payload.expectedRevision);
+          const running = orchestrator.resumeBudgetExhausted({ context, taskId, expectedRevision, verify: { type: "SCHEMA_VALID" } });
+          running.then((r) => emitResult(taskId, r)).catch(() => { try { send({ type: "task/result", taskId, ok: false, status: null, error: "INTERNAL_ERROR" }); } catch { /* ignore */ } });
+          return { ok: true, taskId, status: got.task.status };
         }
         default: return { ok: false, error: "TASK_COMMAND_NOT_ALLOWED" };
       }

@@ -40,6 +40,7 @@ export async function reopenToolHarnessRuntime({ dbPath, storeRoot, runtimeDir, 
   await supervisor.rehydrate();
   const sideEffectAuthority = new SideEffectAuthority({ registry: toolRegistry, sideEffectStore, taskStore, toolStore, authService: base.authService, adapters, taskService, instanceId, lifecycle: supervisor, clock: clk });
   const sideEffectRuntime = new SideEffectRuntime({ authority: sideEffectAuthority, supervisor, store: sideEffectStore, taskStore, taskService, toolProxy, registry: toolRegistry, resourceStore: base.resourceStore, authService: base.authService, dbPath, storeRoot, approvalWaitMs, clock: clk });
+  taskService.attachBudgetStores({ toolStore, sideEffectStore });
   return {
     ...base, toolStore, toolRegistry, toolProxy, adapters, taskStore, taskService, sideEffectStore, sideEffectAuthority, supervisor, sideEffectRuntime,
     /** production 顺序的两段 recovery。 */
@@ -57,6 +58,8 @@ export async function createToolHarnessFixture(opts = {}) {
   const toolProxy = new ControlledToolProxy({ registry: toolRegistry, toolStore, authService: base.f.authService, taskStore: base.taskStore, adapters, clock: base.f.clock });
   const sideEffectClock = typeof opts.sideEffectClock === "function" ? opts.sideEffectClock : base.f.clock;
   const sideEffectStore = new SideEffectStore({ identity: base.f.identity, clock: sideEffectClock });
+  // D4-06 Closure：把只读预算账本 store 接到同一 TaskService（与 production bootstrap 一致）。
+  base.taskService.attachBudgetStores({ toolStore, sideEffectStore });
   // D4-03C4：唯一 production side-effect 装配（test 只注入参数，不自己拼 authority 链）。
   const sideEffectRuntimeDir = opts.sideEffectRuntimeDir || fs.mkdtempSync(path.join(os.tmpdir(), "oa-c4-runtime-"));
   const supervisor = new RuntimeSupervisor({ runtimeDir: sideEffectRuntimeDir, clock: sideEffectClock, executorEntry: opts.sideEffectExecutorEntry || null });

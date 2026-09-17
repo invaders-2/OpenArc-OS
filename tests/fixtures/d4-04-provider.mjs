@@ -13,6 +13,8 @@ function planFor(mode, resourceRefs = [], followSeen = false) {
   const search = { name: "resource_search", args: () => ({ query: "Vertical Smoke Resource", limit: 5 }) };
   const read = { name: "resource_read_metadata", args: () => ({ resourceRef: refs[0] ?? null }) };
   const trash = (ref) => ({ name: "resource_trash", args: () => ({ resourceRef: ref ?? null }) });
+  // D4-06 Closure：续接成功后立即收尾（0 tool call → 直接 final text），证明不重放旧 tool 请求。
+  if (mode === "final") return [];
   if (mode === "read") return [search, read];
   // revoke2：第二次 trash 只在 A 的 verified result 回给 Harness 之后才发出，
   // 保证"先完成 refA 真实 WRITE，再对 refB 等待批准"的顺序。

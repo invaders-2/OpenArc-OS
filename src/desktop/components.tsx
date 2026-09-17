@@ -494,6 +494,25 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
   const [result, setResult] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  // D4-06 Closure：预算停止后的显式续接；resumable / 账本一律来自后端 task/get。
+  const [revision, setRevision] = useState<number | null>(null);
+  const [stopReason, setStopReason] = useState<string | null>(null);
+  const [resumeLedger, setResumeLedger] = useState<{ resumeCount?: number; maxResumes?: number; remainingResumes?: number; nextGrant?: { kind?: string; amount?: number } | null } | null>(null);
+  const [resumable, setResumable] = useState(false);
+
+  const applyTaskState = (got: any) => {
+    if (!got || !got.ok || !got.task) return;
+    const next = String(got.task.status || "");
+    setRevision(typeof got.task.revision === "number" ? got.task.revision : null);
+    setStatus(next);
+    if (TASK_TERMINAL.includes(next)) setBusy(false);
+    const artifacts = Array.isArray(got.artifacts) ? got.artifacts : [];
+    const artifact = artifacts.length ? artifacts[artifacts.length - 1] : null;
+    if (artifact && typeof artifact.content === "string") setResult(artifact.content);
+    setResumable(got.resumable === true);
+    setStopReason(got.stopReason || null);
+    setResumeLedger(got.budgetLedger || null);
+  };
 
   useEffect(() => {
     // §41：Reload 后必须从 backend state 恢复最新 Task 的权威结果，而不是依赖 Renderer memory。
@@ -504,15 +523,13 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
       const list = await command({ type: "task/list" });
       const latest = list && list.ok && Array.isArray(list.items) && list.items.length ? list.items[list.items.length - 1] : null;
       if (!latest) return;
+      setTaskId(latest.taskId);
       const got = await command({ type: "task/get", taskId: latest.taskId });
       if (!got || !got.ok) return;
       const restored = (got.task && got.task.status) || latest.status || "idle";
-      setTaskId(latest.taskId);
-      setStatus(restored);
       // §24：恢复时 backend 仍在 RUNNING 说明任务未收敛，Cancel 必须可用、Run 必须保持禁用。
       setBusy(!TASK_TERMINAL.includes(restored));
-      const artifact = Array.isArray(got.artifacts) && got.artifacts.length ? got.artifacts[got.artifacts.length - 1] : null;
-      setResult((artifact && artifact.content) || "");
+      applyTaskState(got);
     })();
   }, []);
 
@@ -531,11 +548,7 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
           if (cancelled || !got || !got.ok || !got.task) return;
           const next = String(got.task.status || "");
           if (!TASK_TERMINAL.includes(next)) return;
-          setBusy(false);
-          setStatus(next);
-          const artifacts = Array.isArray(got.artifacts) ? got.artifacts : [];
-          const artifact = artifacts.length ? artifacts[artifacts.length - 1] : null;
-          if (artifact && typeof artifact.content === "string") setResult(artifact.content);
+          applyTaskState(got);
         } catch { /* 下一轮再试 */ }
       })();
     }, 1000);
@@ -543,8 +556,9 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
   }, [busy, taskId]);
 
   useEffect(() => {
-    const bridge = (window as unknown as { openarc?: { task?: { onEvent?: (cb: (e: unknown) => void) => () => void } } }).openarc?.task;
+    const bridge = (window as unknown as { openarc?: { task?: { command?: (c: unknown) => Promise<any>; onEvent?: (cb: (e: unknown) => void) => () => void } } }).openarc?.task;
     if (!bridge || typeof bridge.onEvent !== "function") return;
+    const command = bridge.command;
     const off = bridge.onEvent((event) => {
       const ev = event as { type?: string; taskId?: string; status?: string; ok?: boolean; artifact?: { content?: string }; error?: string } | null;
       if (!ev || ev.type !== "task/result") return;
@@ -552,7 +566,9 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
       if (ev.taskId !== taskId) return; // 非当前任务的 result 只用于解除 busy，不覆盖当前显示
       setStatus(ev.status || (ev.ok ? "SUCCEEDED" : "FAILED"));
       setResult((ev.artifact && ev.artifact.content) || "");
-      setError(ev.error || "")
+      setError(ev.error || "");
+      // D4-06：terminal result 后从 backend 刷新 stopReason / resumable / budgetLedger。
+      void (async () => { try { if (typeof command === "function") applyTaskState(await command({ type: "task/get", taskId })); } catch { /* ignore */ } })();
     });
     return () => { try { off(); } catch { /* ignore */ } };
   }, [taskId]);
@@ -570,6 +586,13 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
     if (!bridge || typeof bridge.command !== "function" || !taskId) return;
     await bridge.command({ type: "task/cancel", taskId });
     setStatus("cancelling");
+  };
+  const resume = async () => {
+    const bridge = (window as unknown as { openarc?: { task?: { command?: (c: unknown) => Promise<{ ok?: boolean; error?: string }> } } }).openarc?.task;
+    if (!bridge || typeof bridge.command !== "function" || !taskId || busy || !resumable) return;
+    setBusy(true); setStatus("running"); setError("");
+    const res = await bridge.command({ type: "task/resume", taskId, expectedRevision: revision });
+    if (!res || !res.ok) { setBusy(false); setError((res && res.error) || "RESUME_REJECTED"); }
   };
 
   return (
@@ -599,9 +622,19 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
       </div>
       <div className="ai-state" data-ai-state>
         <strong>状态：</strong>
-        <span data-ai-status-text>{status === "BLOCKED" ? "BLOCKED · Recovery Required" : status}</span>
+        <span data-ai-status-text>{status === "BLOCKED" ? (resumable ? "BLOCKED · Budget Exhausted" : "BLOCKED · Recovery Required") : status}</span>
         {error ? <span data-ai-error> · {error}</span> : null}
       </div>
+      {resumable ? (
+        <div className="ai-resume" data-ai-resume-block>
+          <p data-ai-stop-reason>停止原因：{stopReason || "BUDGET_EXHAUSTED"}</p>
+          <p data-ai-resume-budget>
+            本次追加预算：{resumeLedger && resumeLedger.nextGrant ? resumeLedger.nextGrant.kind + " +" + resumeLedger.nextGrant.amount : "bounded step"}
+            {resumeLedger ? "（第 " + ((resumeLedger.resumeCount || 0) + 1) + "/" + (resumeLedger.maxResumes || 3) + " 次续接）" : ""}
+          </p>
+          <button data-ai-resume onClick={resume} disabled={busy}>续接任务</button>
+        </div>
+      ) : null}
       <div className="ai-result" data-ai-result>
         {result}
       </div>
