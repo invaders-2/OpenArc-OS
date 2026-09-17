@@ -2605,12 +2605,12 @@ input[type="checkbox"] {
 }
 .profile-card {
   width: 100%;
-  max-width: 340px;
+  max-width: 360px;
   max-height: 100%;
   overflow: auto;
   padding: var(--space-6);
   border-radius: var(--radius-xl);
-  background: rgb(var(--surface-rgb) / var(--surface-alpha));
+  background: rgb(var(--surface-rgb) / var(--toast-alpha));
   box-shadow: var(--elevation-4);
   display: flex;
   flex-direction: column;
@@ -2635,15 +2635,14 @@ input[type="checkbox"] {
   box-shadow: var(--elevation-2);
 }
 .profile-presets {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
   gap: var(--space-2);
+  width: 100%;
 }
 .profile-preset {
-  width: 44px;
-  height: 44px;
+  width: 100%;
+  aspect-ratio: 1 / 1;
   padding: 0;
   overflow: hidden;
   border-radius: var(--radius-pill);
@@ -2695,5 +2694,9 @@ input[type="checkbox"] {
 .profile-actions .ghost {
   background: transparent;
   color: var(--muted);
+}
+.profile-actions .primary:disabled {
+  opacity: var(--disabled-opacity);
+  cursor: default;
 }
 
