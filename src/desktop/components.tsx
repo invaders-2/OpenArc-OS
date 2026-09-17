@@ -479,6 +479,13 @@ export function AssistantPill({ onActivate }: AssistantPillProps) {
 /** backend authoritative terminal 状态：到达其中一个就必须复位 UI busy 合同。 */
 const TASK_TERMINAL = ["SUCCEEDED", "FAILED", "BLOCKED", "CANCELLED"];
 
+/** D4 收口：失败 Verification 证据的可读投影（只展示 safe 字段）。 */
+function formatVerificationEvidence(v: any): string {
+  const fmt = (x: unknown) => (x == null ? "—" : typeof x === "string" ? x : JSON.stringify(x));
+  const body = "检查方法：" + String(v.method || v.type || "UNKNOWN") + " · 预期：" + fmt(v.expected) + " · 实际：" + fmt(v.actual);
+  return body.length > 400 ? body.slice(0, 400) + "…" : body;
+}
+
 type AIPanelProps = { onClose: () => void; onOpenSettings: () => void };
 /**
  * D4-04：全局 AI 助手 = 真实 Task Runtime 入口。
@@ -501,6 +508,8 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
   const [resumable, setResumable] = useState(false);
   // D4-05 S2：结果未知的只读恢复投影（仅后端判定；renderer 不自报）。
   const [recovery, setRecovery] = useState<any>(null);
+  // D4 收口：失败 Verification 证据（safe；只如实展示，绝不据此显示成功）。
+  const [verifications, setVerifications] = useState<any[]>([]);
 
   const applyTaskState = (got: any) => {
     if (!got || !got.ok || !got.task) return;
@@ -515,6 +524,7 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
     setStopReason(got.stopReason || null);
     setResumeLedger(got.budgetLedger || null);
     setRecovery(got.recovery || null);
+    setVerifications(Array.isArray(got.verifications) ? got.verifications : []);
   };
 
   useEffect(() => {
@@ -610,6 +620,8 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
     }
   };
 
+  const failVerifications = (verifications || []).filter((v: any) => v && v.status === "FAIL");
+
   return (
     <aside className="ai-panel" aria-label="AI 助手" data-ai-status={status} data-ai-task-id={taskId || ""}>
       <div className="panel-heading">
@@ -662,6 +674,17 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
             </div>
           ))}
           <p data-ai-recovery-note>该结果未知：不会自动重试，也不会自动续接；请核对实际应用与关联产物后人工确认。</p>
+        </div>
+      ) : null}
+      {status === "BLOCKED" && failVerifications.length ? (
+        <div className="ai-verification" data-ai-verification>
+          <p data-ai-verification-fail>验证失败</p>
+          {failVerifications.map((v: any) => (
+            <div key={v.verificationId} data-ai-verification-item={v.verificationId}>
+              <p data-ai-verification-detail>{formatVerificationEvidence(v)}</p>
+              {v.executionId ? <p data-ai-verification-evidence>证据引用：{v.executionId}</p> : null}
+            </div>
+          ))}
         </div>
       ) : null}
       <div className="ai-result" data-ai-result>

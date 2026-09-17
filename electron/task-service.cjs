@@ -28,11 +28,51 @@ function safeArtifact(row) {
   if (!row) return null;
   return { artifactId: row.artifact_id, taskId: row.task_id, stepId: row.step_id || null, runId: row.run_id || null, type: row.type, content: parseMaybeJson(row.safe_content), checksum: row.checksum || null, createdAt: row.created_at };
 }
+/** D4 收口：失败 Verification 的 safe projection（新列 step/run/execution + expected/actual）。 */
 function safeVerification(row) {
   if (!row) return null;
-  return { verificationId: row.verification_id, artifactId: row.artifact_id, taskId: row.task_id, type: row.type, status: row.status, details: parseMaybeJson(row.safe_details), createdAt: row.created_at };
+  const details = parseMaybeJson(row.safe_details);
+  const d = details && typeof details === "object" && !Array.isArray(details) ? details : {};
+  const evidence = d.evidence && typeof d.evidence === "object" ? d.evidence : {};
+  return {
+    verificationId: row.verification_id,
+    artifactId: row.artifact_id == null ? null : row.artifact_id,
+    taskId: row.task_id,
+    stepId: row.step_id == null ? null : row.step_id,
+    runId: row.run_id == null ? null : row.run_id,
+    executionId: row.execution_id == null ? (evidence.executionId == null ? null : evidence.executionId) : row.execution_id,
+    type: row.type,
+    status: row.status,
+    method: d.method == null ? row.type : d.method,
+    expected: d.expected === undefined ? null : d.expected,
+    actual: d.actual === undefined ? null : d.actual,
+    details,
+    createdAt: row.created_at,
+  };
 }
 function parseMaybeJson(text) { if (text == null) return null; try { return JSON.parse(text); } catch { return text; } }
+
+/** 失败 Verification 的 expected/actual 只允许安全扁平证据：截断 / 去敏键 / 去私有路径与 capability 前缀。 */
+const EVIDENCE_SENSITIVE_KEY = /(secret|token|authorization|api[_-]?key|credential|password|bearer)/i;
+const EVIDENCE_PATH_RE = /\/Users\/[^\s"']*|\/private\/[^\s"']*|\/var\/folders\/[^\s"']*/g;
+const EVIDENCE_CAPABILITY_RE = /mpx_[A-Za-z0-9_-]+|tpx_[A-Za-z0-9_-]+/g;
+function sanitizeEvidenceValue(value, depth = 0) {
+  if (value == null) return null;
+  if (typeof value === "string") {
+    const s = value.replace(EVIDENCE_PATH_RE, "[REDACTED_PATH]").replace(EVIDENCE_CAPABILITY_RE, "[REDACTED_CAPABILITY]");
+    return s.length > 200 ? s.slice(0, 200) + "…[truncated]" : s;
+  }
+  if (typeof value === "number") return Number.isFinite(value) ? value : String(value).slice(0, 40);
+  if (typeof value === "boolean") return value;
+  if (depth >= 2) { try { return JSON.stringify(value).slice(0, 200); } catch { return "[unserializable]"; } }
+  if (Array.isArray(value)) return value.slice(0, 16).map((v) => sanitizeEvidenceValue(v, depth + 1));
+  if (typeof value === "object") {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) out[k] = EVIDENCE_SENSITIVE_KEY.test(k) ? "[REDACTED]" : sanitizeEvidenceValue(v, depth + 1);
+    return out;
+  }
+  return String(value).slice(0, 200);
+}
 
 class TaskService {
   constructor({ identity, authService, authStore, taskStore, toolStore = null, sideEffectStore = null, modelService = null, clock = null, logger = null, hooks = null } = {}) {
@@ -51,6 +91,8 @@ class TaskService {
     this.clock = typeof clock === "function" ? clock : identity.clock;
     this.logger = logger;
     this.hooks = hooks || {};
+    // D4 收口：实际生效额度由装配层注入；默认回退冻结默认值，保证旧调用不破坏。
+    this.budgetConfig = Object.assign({}, BUDGET_BASE);
   }
   #now() { return this.clock(); }
   #actor(context) { return this.authService.resolveActor({ context }); }
@@ -95,6 +137,20 @@ class TaskService {
     if (toolStore) this.toolStore = toolStore;
     if (sideEffectStore) this.sideEffectStore = sideEffectStore;
     return { ok: true };
+  }
+
+  /**
+   * D4 收口 · 注入实际生效额度（bootstrap / executor bundle 传真实配置）。
+   * 只影响账本 base / nextGrant；任一缺失回退 BUDGET_BASE，绝不把缺省当成无限。
+   */
+  attachBudgetConfig({ modelMaxCalls = null, toolMaxCalls = null, maxToolRounds = null } = {}) {
+    const pick = (v, fallback) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : fallback);
+    this.budgetConfig = {
+      MODEL_CALLS: pick(modelMaxCalls, BUDGET_BASE.MODEL_CALLS),
+      TOOL_CALLS: pick(toolMaxCalls, BUDGET_BASE.TOOL_CALLS),
+      TOOL_ROUNDS: pick(maxToolRounds, BUDGET_BASE.TOOL_ROUNDS),
+    };
+    return { ok: true, base: Object.assign({}, this.budgetConfig) };
   }
 
   // ------------------------------------------------------------------ Task
@@ -639,7 +695,8 @@ class TaskService {
       ok: true,
       ledger: {
         taskId: id,
-        base: Object.assign({}, BUDGET_BASE),
+        // D4 收口：base 必须是**实际生效额度**（装配层注入），而不是硬编码冻结默认值。
+        base: Object.assign({}, this.budgetConfig),
         additions,
         resumeCount: additions.length,
         maxResumes: MAX_BUDGET_RESUMES,
@@ -651,7 +708,8 @@ class TaskService {
           toolExecutions: this.toolStore ? this.toolStore.executionsOfTask(id).length : null,
           budgetStops,
         },
-        nextGrant: assessment.resumable ? { kind: assessment.kind, amount: RESUME_GRANT_AMOUNT[assessment.kind] } : null,
+        // nextGrant.amount 与实际续接额度同源（budgetConfig），避免 UI 显示与真实 capability 漂移。
+        nextGrant: assessment.resumable ? { kind: assessment.kind, amount: this.budgetConfig[assessment.kind] != null ? this.budgetConfig[assessment.kind] : RESUME_GRANT_AMOUNT[assessment.kind] } : null,
         resumable: assessment.resumable,
         stopReason: assessment.stopReason,
         reason: assessment.reason,
@@ -821,6 +879,42 @@ class TaskService {
       const updatedTask = this.store.updateTask(task.task_id, taskPatch);
       if (completedTask) this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.TASK_SUCCEEDED, safePayload: sanitizeEventPayload({ revision: updatedTask.revision }), at: now });
       return { ok: true, artifact: safeArtifact(savedArtifact), verification: safeVerification(savedVerification), step: safeStep(updatedStep), task: safeTask(updatedTask), completedTask };
+    });
+  }
+
+  /**
+   * D4 收口 · 失败 Verification 持久化（PLAN §39）。
+   *
+   * 只追加一条 status=FAIL 的 task_verifications（artifact_id=null）+ 一条 safe task event；
+   * **绝不创建 Artifact**、**绝不改变 Step/Task 终态**、**绝不授权 resume/retry**。
+   * expected/actual 一律经 sanitizeEvidenceValue（截断 / 去敏键 / 去私有路径与 capability 前缀）。
+   */
+  recordVerificationFailure({ context, taskId, stepId = null, runId = null, executionId = null, type = null, expected = null, actual = null } = {}) {
+    const guard = this.#guard(context);
+    if (!guard.ok) return guard;
+    const failureType = String(type == null ? "" : type).trim().slice(0, 80);
+    if (!failureType) return { ok: false, error: ERROR.INVALID_INPUT, detail: "type is required" };
+    return this.store.transactSync(() => {
+      const load = this.#load(guard, taskId);
+      if (!load.ok) return load;
+      const task = load.task;
+      const now = this.#now();
+      const safeExecutionId = executionId == null ? null : String(executionId).slice(0, 120);
+      const safeDetails = {
+        method: failureType,
+        expected: sanitizeEvidenceValue(expected),
+        actual: sanitizeEvidenceValue(actual),
+        evidence: { executionId: safeExecutionId },
+      };
+      const saved = this.store.insertVerification({
+        artifactId: null, taskId: task.task_id,
+        stepId: stepId == null ? null : String(stepId).slice(0, 120),
+        runId: runId == null ? null : String(runId).slice(0, 120),
+        executionId: safeExecutionId,
+        type: failureType, status: VERIFICATION_STATUS.FAIL, safeDetails, createdAt: now,
+      });
+      this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.VERIFICATION_COMPLETED, safePayload: sanitizeEventPayload({ verificationId: saved.verification_id, artifactId: null, executionId: safeExecutionId, stepId: stepId == null ? null : String(stepId).slice(0, 120), runId, type: failureType, status: "FAIL" }), at: now });
+      return { ok: true, verification: safeVerification(saved) };
     });
   }
 

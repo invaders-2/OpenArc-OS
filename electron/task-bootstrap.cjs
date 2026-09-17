@@ -26,6 +26,10 @@ const { SideEffectAuthority } = require("./side-effect-authority.cjs");
 const { SideEffectRuntime } = require("./side-effect-runtime.cjs");
 const { RuntimeSupervisor } = require("./runtime-supervisor.cjs");
 const { WRITE_TOOL_IDS } = require("./dsh-tool-profile.cjs");
+const { DEFAULT_MAX_CALLS, MAX_TOOL_ROUNDS } = require("./task-domain.cjs");
+
+/** D4-04 / D4-06：官方 dsh Tool Facade 的 run 级预算（与 orchestrator 实际使用同一份配置）。 */
+const TOOL_FACADE_CONFIG = Object.freeze({ enabled: true, toolIds: ["resource.search", "resource.read.metadata"], writeToolIds: WRITE_TOOL_IDS, maxCalls: 8, ttlMs: 300000 });
 
 function createTaskBundle({ identityStore, authorization, authStore, modelService = null, modelProxy = null, logger = null, clock = null, adapterFactory = null, resourceService = null, searchService = null, dbPath = null, storeRoot = null, runtimeDir = null, sideEffectApprovalWaitMs = null, executorLauncher = null, executorTestHook = null } = {}) {
   if (!identityStore) throw new Error("createTaskBundle 需要 identityStore");
@@ -33,12 +37,14 @@ function createTaskBundle({ identityStore, authorization, authStore, modelServic
   const taskStore = new TaskStore({ identity: identityStore, clock });
   const taskService = new TaskService({ identity: identityStore, authService: authorization, authStore, taskStore, modelService, clock, logger });
   const taskRecovery = taskService.recoverRunning();
+  // D4 收口：账本 base 用实际生效额度（model=DEFAULT_MAX_CALLS / tool=facade maxCalls / rounds=MAX_TOOL_ROUNDS）。
+  taskService.attachBudgetConfig({ modelMaxCalls: DEFAULT_MAX_CALLS, toolMaxCalls: TOOL_FACADE_CONFIG.maxCalls, maxToolRounds: MAX_TOOL_ROUNDS });
   // D4-03A：Controlled Tool Proxy（Registry 权威 + D3 授权 + decision）。
   const toolStore = new ToolStore({ identity: identityStore, clock });
   const toolRegistry = new ToolRegistry();
   // D4-03B/C2：静态 allowlist adapter（executionProvider → 既有 Domain）。
   const adapters = createToolAdapters({ resourceService, searchService });
-  const toolProxy = new ControlledToolProxy({ registry: toolRegistry, toolStore, authService: authorization, taskStore, adapters, clock, logger });
+  const toolProxy = new ControlledToolProxy({ registry: toolRegistry, toolStore, authService: authorization, taskStore, taskService, adapters, clock, logger });
   // D4-03C4：trusted runtime supervisor（唯一 observeExit / registerRuntime 调用方）。
   const supervisor = new RuntimeSupervisor({
     runtimeDir: runtimeDir || path.join(path.dirname(String(dbPath || "openarc.db")), "runtime", "side-effects"),
@@ -82,7 +88,7 @@ function createTaskBundle({ identityStore, authorization, authStore, modelServic
       taskService, adapterFactory: factory, toolProxy, sideEffectRuntime, clock, logger,
       // D4-04：真实观测到每任务最多 2 次受控 tool call（READ: search+read；WRITE: search+trash）。
       // 预算回到 D4-03D 冻结默认 8（bounded，且 AUTO_RETRY 恒为 0）。
-      toolFacade: { enabled: true, toolIds: ["resource.search", "resource.read.metadata"], writeToolIds: WRITE_TOOL_IDS, maxCalls: 8, ttlMs: 300000 },
+      toolFacade: TOOL_FACADE_CONFIG,
     });
   }
   return { taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, orchestrator };
@@ -133,6 +139,8 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
           if (!got.ok) return got;
           const steps = taskService.getSteps({ context, taskId });
           const artifacts = taskService.getArtifacts({ context, taskId });
+          // D4 收口：失败 Verification 如实返回（safe，含 FAIL 的 type/expected/actual/executionId/stepId/runId）。
+          const verifications = taskService.getVerifications({ context, taskId });
           // D4-06 Closure：可续接状态与预算账本一律后端判定（renderer 自报无效）。
           const eligibility = taskService.getResumeEligibility({ context, taskId });
           const ledger = taskService.getBudgetLedger({ context, taskId });
@@ -140,6 +148,7 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
           const recovery = taskService.getRecoveryState({ context, taskId });
           return {
             ok: true, task: got.task, steps: steps.ok ? steps.items : [], artifacts: artifacts.ok ? artifacts.items : [],
+            verifications: verifications.ok ? verifications.items : [],
             resumable: !!(eligibility.ok && eligibility.resumable),
             stopReason: eligibility.ok ? (eligibility.stopReason || null) : null,
             resumeReason: eligibility.ok ? (eligibility.reason || null) : (eligibility.error || null),

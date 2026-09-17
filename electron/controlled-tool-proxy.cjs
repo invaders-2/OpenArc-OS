@@ -37,8 +37,19 @@ function safeDecision(row) {
   return { decisionId: row.decision_id, proposalId: row.proposal_id, status: row.decision, reasonCode: row.reason_code || null, riskClass: row.risk_class || null, approvalRequired: !!row.approval_required, createdAt: row.created_at };
 }
 
+/** D4 收口：失败 Verification 的 expected 摘要（只保留 type/required/properties 名，绝不 dump 完整 schema）。 */
+function summarizeOutputSchema(schema) {
+  if (!schema || typeof schema !== "object") return null;
+  const out = {};
+  if (schema.type != null) out.type = schema.type;
+  if (Array.isArray(schema.required)) out.required = schema.required.slice(0, 16);
+  if (schema.properties && typeof schema.properties === "object") out.properties = Object.keys(schema.properties).slice(0, 32);
+  if (typeof schema.additionalProperties === "boolean") out.additionalProperties = schema.additionalProperties;
+  return out;
+}
+
 class ControlledToolProxy {
-  constructor({ registry, toolStore, authService, taskStore, adapters = null, clock = null, logger = null } = {}) {
+  constructor({ registry, toolStore, authService, taskStore, taskService = null, adapters = null, clock = null, logger = null } = {}) {
     if (!registry) throw new Error("ControlledToolProxy 需要 ToolRegistry");
     if (!toolStore) throw new Error("ControlledToolProxy 需要 ToolStore");
     if (!authService) throw new Error("ControlledToolProxy 需要 AuthorizationService");
@@ -47,6 +58,8 @@ class ControlledToolProxy {
     this.toolStore = toolStore;
     this.authService = authService;
     this.taskStore = taskStore;
+    // D4 收口：可选注入 TaskService，只用于把验证失败如实落一条 FAIL task_verifications；绝不改变执行语义。
+    this.taskService = taskService;
     // §22/§23：executionProvider → 静态 allowlist adapter；绝不从 arguments 解析 module/path。
     this.adapterFor = adapters && typeof adapters.adapterFor === "function" ? adapters.adapterFor : null;
     this.lastExecution = null;
@@ -213,6 +226,17 @@ class ControlledToolProxy {
     this.#audit({ actorUserId: null, appId: null, toolRef: contract.toolId, action: "tool.execution_blocked", decision: "BLOCKED", reasonCode: error, requestId: null });
     return { ok: false, duplicate: false, executed: false, executionStatus: "BLOCKED", execution: this.#safeExecution(execution), result: null, verificationStatus: null, error };
   }
+  /** D4 收口：失败 Verification 只追加证据，不改变 execution 的 FAILED/verification_status=FAIL 语义。 */
+  #recordVerificationFailure({ trusted, taskId, stepId, runId, executionId, type, expected, actual }) {
+    const svc = this.taskService;
+    if (!svc || typeof svc.recordVerificationFailure !== "function") return null;
+    try {
+      return svc.recordVerificationFailure({ context: trusted, taskId, stepId, runId, executionId, type, expected, actual });
+    } catch {
+      return null;
+    }
+  }
+
   #finishExecution({ execution, error, status, verificationStatus = null, auditAction = null }) {
     const updated = this.toolStore.transactSync(() => this.toolStore.updateExecution(execution.execution_id, { status, completedAt: this.#now(), verificationStatus, errorCode: error }));
     this.#audit({ actorUserId: null, appId: null, toolRef: execution.tool_id, action: auditAction || (status === "BLOCKED" ? "tool.execution_blocked" : "tool.execution_failed"), decision: status, reasonCode: error, requestId: null });
@@ -279,9 +303,15 @@ class ControlledToolProxy {
 
     // §24/§26/§77：output schema + adapter verify。
     const schemaCheck = this.registry.validateOutput(contract, execResult.result);
-    if (!schemaCheck.ok) return this.#finishExecution({ execution, error: TOOL_ERROR.TOOL_OUTPUT_INVALID, status: "FAILED", verificationStatus: "FAIL", auditAction: "tool.verification_failed" });
+    if (!schemaCheck.ok) {
+      this.#recordVerificationFailure({ trusted, taskId, stepId, runId, executionId: execution.execution_id, type: "OUTPUT_SCHEMA", expected: summarizeOutputSchema(contract.outputSchema), actual: execResult.result });
+      return this.#finishExecution({ execution, error: TOOL_ERROR.TOOL_OUTPUT_INVALID, status: "FAILED", verificationStatus: "FAIL", auditAction: "tool.verification_failed" });
+    }
     const vres = await adapter.verify({ context: trusted, args, result: execResult.result });
-    if (!vres || !vres.ok) return this.#finishExecution({ execution, error: TOOL_ERROR.TOOL_VERIFICATION_FAILED, status: "FAILED", verificationStatus: "FAIL", auditAction: "tool.verification_failed" });
+    if (!vres || !vres.ok) {
+      this.#recordVerificationFailure({ trusted, taskId, stepId, runId, executionId: execution.execution_id, type: "ADAPTER_VERIFY", expected: vres && vres.detail != null ? vres.detail : null, actual: execResult.result });
+      return this.#finishExecution({ execution, error: TOOL_ERROR.TOOL_VERIFICATION_FAILED, status: "FAILED", verificationStatus: "FAIL", auditAction: "tool.verification_failed" });
+    }
 
     // §39/§41/§42/§43 commit gate：revision / cancel / session / app 任一变化都不得返回数据。
     const freshActor = this.authService.resolveActor({ context: trusted });

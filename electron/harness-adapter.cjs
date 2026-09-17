@@ -356,15 +356,28 @@ class HarnessAdapter {
    * 绝不改变任何 capability state，也绝不消耗预算。
    */
   budgetExhausted() {
+    // D4 收口：TOOL_CALLS 优先于 MODEL_CALLS。Tool Facade 与 Model Proxy 同时耗尽时，
+    // 必须归因到真实先触发的工具预算，绝不让 MODEL_CALLS 掩盖 TOOL_CALLS。
+    const observed = { model: null, tool: null };
     if (this.capability && this.capability.token) {
       const state = this.modelProxy.capabilityState(this.capability.token);
-      if (state && state.state === "EXHAUSTED") return { exhausted: true, kind: "MODEL_CALLS", consumed: this.capability.maxCalls, maxCalls: this.capability.maxCalls };
+      const maxCalls = this.capability.maxCalls == null ? null : this.capability.maxCalls;
+      const remaining = state && state.remaining != null ? state.remaining : null;
+      observed.model = { maxCalls, calls: maxCalls != null && remaining != null ? Math.max(0, maxCalls - remaining) : null, state: state ? state.state : null, remaining };
     }
     if (this.toolCapability && this.toolCapability.token && this.toolFacade) {
       const state = this.toolFacade.bridge.capabilityState(this.toolCapability.token);
-      if (state && state.state === "EXHAUSTED") return { exhausted: true, kind: "TOOL_CALLS", consumed: state.calls, maxCalls: state.maxCalls };
+      const maxCalls = state && state.maxCalls != null ? state.maxCalls : null;
+      const calls = state && state.calls != null ? state.calls : null;
+      observed.tool = { maxCalls, calls, state: state ? state.state : null, remaining: maxCalls != null && calls != null ? Math.max(0, maxCalls - calls) : null };
     }
-    return { exhausted: false, kind: null, consumed: null, maxCalls: null };
+    if (observed.tool && observed.tool.state === "EXHAUSTED") {
+      return { exhausted: true, kind: "TOOL_CALLS", consumed: observed.tool.calls, maxCalls: observed.tool.maxCalls, observed };
+    }
+    if (observed.model && observed.model.state === "EXHAUSTED") {
+      return { exhausted: true, kind: "MODEL_CALLS", consumed: observed.model.calls, maxCalls: observed.model.maxCalls, observed };
+    }
+    return { exhausted: false, kind: null, consumed: null, maxCalls: null, observed };
   }
 
   async closeSession() {

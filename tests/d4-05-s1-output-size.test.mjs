@@ -8,7 +8,7 @@
  *
  * 负例：adapter.execute 报告成功（ok:true）但产物尺寸不符 → verify FAIL
  *       → execution FAILED / TOOL_VERIFICATION_FAILED / verification_status=FAIL
- *       → Task/Step BLOCKED、0 Artifact、0 Verification、无第 2 次 proposal/execution。
+ *       → Task/Step BLOCKED、0 Artifact、**1 条 FAIL Verification（type/expected/actual/executionId）**、无第 2 次 proposal/execution。
  * 正对照：同一工具/同一调用，仅实际尺寸相符 → Task SUCCEEDED、1 Artifact + 1 Verification。
  */
 import { test } from "node:test";
@@ -105,7 +105,17 @@ test("D4-05 S1 A33 · 工具报告成功但产物尺寸不符 → TOOL_VERIFICAT
     assert.equal(out.proposals.length, 1, "不产生第 2 个 proposal：" + out.proposals.length);
 
     assert.equal(out.artifacts.length, 0, "验证失败 → 0 Artifact");
-    assert.equal(out.verifications.length, 0, "验证失败 → 0 Verification");
+    // D4 收口新契约：验证失败如实落 1 条 FAIL Verification（不含 Artifact），绝不伪造 PASS。
+    assert.equal(out.verifications.length, 1, "验证失败 → 1 条 FAIL Verification：" + out.verifications.length);
+    const failVer = out.verifications[0];
+    assert.equal(failVer.status, "FAIL");
+    assert.equal(failVer.type, "ADAPTER_VERIFY", "检查方法 = ADAPTER_VERIFY：" + failVer.type);
+    assert.equal(failVer.artifact_id, null, "失败 Verification 不得绑定 Artifact");
+    assert.equal(failVer.task_id, out.taskId);
+    assert.equal(failVer.step_id, out.steps[0].step_id, "失败 Verification 关联 step");
+    assert.ok(failVer.run_id, "失败 Verification 关联 run");
+    assert.equal(failVer.execution_id, out.execs[0].execution_id, "失败 Verification 关联 execution");
+    assert.notEqual(failVer.safe_details, null, "safe_details 必须是证据投影");
     assert.ok(out.events.includes("tool.verification.failed"), "必须记录 tool.verification.failed：" + JSON.stringify(out.events));
     assert.ok(!out.events.includes("tool.execution_succeeded"), "绝不记录 execution_succeeded");
     assert.ok(!out.events.includes("artifact.created"), "绝不产生 Artifact 事件");
@@ -147,7 +157,7 @@ test("D4-05 S1 A33 正对照 · 产物尺寸符合 → Task SUCCEEDED + 1 Artifa
 });
 
 
-test("D4-05 S1 A33 持久化 · 同一 disk DB 重开后失败证据仍可追溯（execution FAILED / tool.verification.failed / Task·Step BLOCKED / 0 独立 Verification）", async () => {
+test("D4-05 S1 A33 持久化 · 同一 disk DB 重开后失败证据仍可追溯（execution FAILED / tool.verification.failed / 1 条 FAIL Verification / Task·Step BLOCKED）", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "oa5s1-"));
   const dbPath = path.join(root, "identity.db");
   const storeRoot = path.join(root, "library");
@@ -188,8 +198,17 @@ test("D4-05 S1 A33 持久化 · 同一 disk DB 重开后失败证据仍可追溯
     assert.ok(events.includes("tool.verification.failed"), "持久化的 tool.verification.failed 事件仍可查询：" + JSON.stringify(events));
     assert.ok(!events.includes("tool.execution_succeeded"), "重开后仍不得出现 execution_succeeded");
 
-    // 如实记录：失败路径没有独立 Verification 记录（不伪造）。
-    assert.equal(rt.taskStore.verificationsOfTask(taskId).length, 0, "失败路径 task_verifications = 0");
+    // D4 收口：失败路径如实持久化 1 条 FAIL Verification，重开后证据完整可查（不伪造 PASS）。
+    const persistedVers = rt.taskStore.verificationsOfTask(taskId);
+    assert.equal(persistedVers.length, 1, "失败路径 task_verifications = 1 FAIL：" + persistedVers.length);
+    assert.equal(persistedVers[0].status, "FAIL");
+    assert.equal(persistedVers[0].type, "ADAPTER_VERIFY");
+    assert.equal(persistedVers[0].artifact_id, null);
+    assert.equal(persistedVers[0].task_id, taskId);
+    assert.equal(persistedVers[0].step_id, stepId, "重开后 FAIL Verification step 归属保留");
+    assert.equal(persistedVers[0].run_id, runId, "重开后 FAIL Verification run 归属保留");
+    assert.equal(persistedVers[0].execution_id, exec0.execution_id, "重开后 FAIL Verification execution 归属保留");
+    assert.notEqual(persistedVers[0].safe_details, null, "重开后 safe_details 仍可查");
 
     assert.equal(rt.taskStore.taskById(taskId).status, "BLOCKED", "重开后 Task 仍 BLOCKED：" + rt.taskStore.taskById(taskId).status);
     assert.equal(rt.taskStore.stepById(stepId).status, "BLOCKED", "重开后 Step 仍 BLOCKED：" + rt.taskStore.stepById(stepId).status);

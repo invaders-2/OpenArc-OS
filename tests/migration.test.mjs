@@ -9,7 +9,8 @@ import { createRequire } from "node:module";
 import { tempDbPath } from "./authorization-fixtures.mjs";
 
 const require = createRequire(import.meta.url);
-const { IdentityStore, SCHEMA_SQL, SCHEMA_VERSION } = require("../electron/identity-store.cjs");
+const { IdentityStore, SCHEMA_SQL, SCHEMA_VERSION, MIGRATIONS } = require("../electron/identity-store.cjs");
+const { TaskStore } = require("../electron/task-store.cjs");
 const passwords = require("../electron/password.cjs");
 const { DatabaseSync } = require("node:sqlite");
 
@@ -38,8 +39,8 @@ async function seedV1(dbPath) {
   return { instId, teamId, userId };
 }
 
-test("schema 版本已推进到 v10（D4-02C 在 v9 之上追加 HarnessRun / Artifact / Verification）", () => {
-  assert.equal(SCHEMA_VERSION, 14);
+test("schema 版本已推进到 v15（D4 收口在 v14 之上重建 task_verifications 支持失败证据）", () => {
+  assert.equal(SCHEMA_VERSION, 15);
 });
 
 test("全新数据库直接建到 v8，identity login 成立", async () => {
@@ -196,3 +197,46 @@ test("v3 级迁移失败 → user_version 停在 2，设备表不残留（§55 �
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("v14 → v15：重建 task_verifications 保留旧 PASS 行，新列可用（失败证据可持久化）", () => {
+  const { dir, dbPath } = tempDbPath();
+  try {
+    const seed = new DatabaseSync(dbPath);
+    seed.exec("PRAGMA foreign_keys = ON");
+    for (const m of MIGRATIONS) { if (m.version > 14) continue; seed.exec(m.sql); }
+    seed.exec("PRAGMA user_version = 14");
+    const now = 1700000000000;
+    seed.prepare("INSERT INTO tasks (task_id,user_id,app_id,status,goal,created_at,updated_at) VALUES (?,?,?,?,?,?,?)").run("task_v14", "usr_v14", "ai", "SUCCEEDED", "legacy", now, now);
+    seed.prepare("INSERT INTO task_artifacts (artifact_id,task_id,type,safe_content,checksum,created_at) VALUES (?,?,?,?,?,?)").run("art_v14", "task_v14", "text", "legacy-body", "deadbeef", now);
+    seed.prepare("INSERT INTO task_verifications (verification_id,artifact_id,task_id,type,status,safe_details,created_at) VALUES (?,?,?,?,?,?,?)").run("ver_v14", "art_v14", "task_v14", "EXACT_TEXT", "PASS", JSON.stringify({ legacy: true }), now);
+    seed.close();
+
+    const store = new IdentityStore({ path: dbPath }).open();
+    assert.equal(store.schemaVersion, 15);
+    const rows = store.connection.prepare("SELECT * FROM task_verifications").all();
+    assert.equal(rows.length, 1, "旧 PASS 行必须保留");
+    assert.equal(rows[0].verification_id, "ver_v14");
+    assert.equal(rows[0].artifact_id, "art_v14", "旧 artifact_id 原样保留");
+    assert.equal(rows[0].status, "PASS");
+    assert.equal(rows[0].step_id, null);
+    assert.equal(rows[0].run_id, null);
+    assert.equal(rows[0].execution_id, null);
+    const info = store.connection.prepare("PRAGMA table_info(task_verifications)").all();
+    const cols = info.map((c) => c.name);
+    for (const c of ["step_id", "run_id", "execution_id"]) assert.ok(cols.includes(c), "新列存在 " + c);
+    assert.equal(info.find((c) => c.name === "artifact_id").notnull, 0, "artifact_id 必须可空");
+    assert.ok(hasTable(store.connection, "task_verifications"), "重建后表存在");
+
+    const ts = new TaskStore({ identity: store });
+    const saved = ts.insertVerification({ artifactId: null, taskId: "task_v14", stepId: "step_x", runId: "run_x", executionId: "exec_x", type: "ADAPTER_VERIFY", status: "FAIL", safeDetails: { method: "ADAPTER_VERIFY" } });
+    assert.equal(saved.artifact_id, null);
+    assert.equal(saved.step_id, "step_x");
+    assert.equal(saved.run_id, "run_x");
+    assert.equal(saved.execution_id, "exec_x");
+    assert.equal(ts.verificationsOfTask("task_v14").length, 2, "旧行 + 新 FAIL 行");
+    store.close();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+

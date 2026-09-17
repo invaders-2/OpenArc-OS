@@ -31,7 +31,7 @@ const SQL = {
   insertArtifact: "INSERT INTO task_artifacts (artifact_id, task_id, step_id, run_id, type, safe_content, checksum, created_at) VALUES (?,?,?,?,?,?,?,?)",
   artifactById: "SELECT * FROM task_artifacts WHERE artifact_id = ?",
   artifactsOfTask: "SELECT * FROM task_artifacts WHERE task_id = ? ORDER BY created_at",
-  insertVerification: "INSERT INTO task_verifications (verification_id, artifact_id, task_id, type, status, safe_details, created_at) VALUES (?,?,?,?,?,?,?)",
+  insertVerification: "INSERT INTO task_verifications (verification_id, artifact_id, task_id, step_id, run_id, execution_id, type, status, safe_details, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
   verificationById: "SELECT * FROM task_verifications WHERE verification_id = ?",
   verificationsOfArtifact: "SELECT * FROM task_verifications WHERE artifact_id = ? ORDER BY created_at",
   verificationsOfTask: "SELECT * FROM task_verifications WHERE task_id = ? ORDER BY created_at",
@@ -134,10 +134,10 @@ class TaskStore {
   artifactsOfTask(taskId) { return this.db.prepare(SQL.artifactsOfTask).all(String(taskId || "")); }
 
   // ------------------------------------------------------- Verification（D4-02C）
-  insertVerification({ verificationId = null, artifactId, taskId, type, status = "PASS", safeDetails = null, createdAt = null }) {
+  insertVerification({ verificationId = null, artifactId = null, taskId, stepId = null, runId = null, executionId = null, type, status = "PASS", safeDetails = null, createdAt = null }) {
     const id = verificationId || newId("ver");
     const now = this.clock();
-    this.db.prepare(SQL.insertVerification).run(id, String(artifactId), String(taskId), String(type), String(status), safeDetails == null ? null : JSON.stringify(safeDetails), Number(createdAt == null ? now : createdAt));
+    this.db.prepare(SQL.insertVerification).run(id, artifactId == null ? null : String(artifactId), String(taskId), stepId == null ? null : String(stepId), runId == null ? null : String(runId), executionId == null ? null : String(executionId), String(type), String(status), safeDetails == null ? null : JSON.stringify(safeDetails), Number(createdAt == null ? now : createdAt));
     return this.verificationById(id);
   }
   verificationById(id) { return this.db.prepare(SQL.verificationById).get(String(id || "")) || null; }

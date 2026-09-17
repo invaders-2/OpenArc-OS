@@ -51,7 +51,7 @@ const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domai
  * 迁移按版本逐级前进，每一级各自是一个原子事务：任何一级失败只回滚该级，
  * 不会留下"user_version 已升级但表不完整"的半状态（§55）。
  */
-const SCHEMA_VERSION = 14;
+const SCHEMA_VERSION = 15;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -1067,6 +1067,33 @@ const SCHEMA_V14_SQL = `
 ALTER TABLE side_effect_calls ADD COLUMN recovery_safe TEXT;
 `;
 
+/**
+ * v15（D4 收口）· 失败 Verification 持久化。
+ *
+ * 原表 artifact_id NOT NULL 只允许「Artifact 提交时」的 PASS 记录，验证失败（schema / adapter verify）
+ * 没有任何可追溯证据。v15 重建为 artifact_id 可空，并新增 step_id/run_id/execution_id；
+ * 原行原样复制（step/run/execution 置空），索引重建。绝不改 status 语义、绝不丢旧数据。
+ */
+const SCHEMA_V15_SQL = `
+CREATE TABLE task_verifications_v15 (
+  verification_id TEXT PRIMARY KEY,
+  artifact_id     TEXT REFERENCES task_artifacts(artifact_id) ON DELETE CASCADE,
+  task_id         TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
+  step_id         TEXT,
+  run_id          TEXT,
+  execution_id    TEXT,
+  type            TEXT NOT NULL,
+  status          TEXT NOT NULL CHECK (status IN ('PASS','FAIL')),
+  safe_details    TEXT,
+  created_at      INTEGER NOT NULL
+);
+INSERT INTO task_verifications_v15 (verification_id, artifact_id, task_id, step_id, run_id, execution_id, type, status, safe_details, created_at)
+  SELECT verification_id, artifact_id, task_id, NULL, NULL, NULL, type, status, safe_details, created_at FROM task_verifications;
+DROP TABLE task_verifications;
+ALTER TABLE task_verifications_v15 RENAME TO task_verifications;
+CREATE INDEX idx_task_verifications_task ON task_verifications(task_id, created_at);
+`;
+
 const MIGRATIONS = Object.freeze([
   { version: 1, sql: SCHEMA_SQL },
   { version: 2, sql: SCHEMA_V2_SQL },
@@ -1082,6 +1109,7 @@ const MIGRATIONS = Object.freeze([
   { version: 12, sql: SCHEMA_V12_SQL },
   { version: 13, sql: SCHEMA_V13_SQL },
   { version: 14, sql: SCHEMA_V14_SQL },
+  { version: 15, sql: SCHEMA_V15_SQL },
 ]);
 
 const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000; // 12h 绝对上限

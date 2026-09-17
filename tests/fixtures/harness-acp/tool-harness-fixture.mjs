@@ -34,7 +34,7 @@ export async function reopenToolHarnessRuntime({ dbPath, storeRoot, runtimeDir, 
   const adapters = createToolAdapters({ resourceService: base.resourceService, searchService: base.searchService });
   const taskStore = new TaskStore({ identity: base.identity, clock: clk });
   const taskService = new TaskService({ identity: base.identity, authService: base.authService, authStore: base.authStore, taskStore, clock: clk });
-  const toolProxy = new ControlledToolProxy({ registry: toolRegistry, toolStore, authService: base.authService, taskStore, adapters, clock: clk });
+  const toolProxy = new ControlledToolProxy({ registry: toolRegistry, toolStore, authService: base.authService, taskStore, taskService, adapters, clock: clk });
   const sideEffectStore = new SideEffectStore({ identity: base.identity, clock: clk });
   const supervisor = new RuntimeSupervisor({ runtimeDir, executorEntry, clock: clk, probeImpl });
   await supervisor.rehydrate();
@@ -55,7 +55,7 @@ export async function createToolHarnessFixture(opts = {}) {
   const toolRegistry = new ToolRegistry();
   // withAdapters=true 才允许真实 READ_ONLY 执行（D4-03B）；默认保持 D4-03A gate 语义。
   const adapters = opts.withAdapters ? createToolAdapters({ resourceService: base.f.resourceService, searchService: base.f.searchService }) : null;
-  const toolProxy = new ControlledToolProxy({ registry: toolRegistry, toolStore, authService: base.f.authService, taskStore: base.taskStore, adapters, clock: base.f.clock });
+  const toolProxy = new ControlledToolProxy({ registry: toolRegistry, toolStore, authService: base.f.authService, taskStore: base.taskStore, taskService: base.taskService, adapters, clock: base.f.clock });
   const sideEffectClock = typeof opts.sideEffectClock === "function" ? opts.sideEffectClock : base.f.clock;
   const sideEffectStore = new SideEffectStore({ identity: base.f.identity, clock: sideEffectClock });
   // D4-06 Closure：把只读预算账本 store 接到同一 TaskService（与 production bootstrap 一致）。

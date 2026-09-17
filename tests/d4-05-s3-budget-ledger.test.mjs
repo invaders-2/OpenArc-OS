@@ -67,7 +67,9 @@ async function setupModelCallsStop(fx) {
 }
 
 test("D4-05 S3 A35 · 预算到限停止保留产物；续接追加额度 == 新一轮真实 capability 预算、历史保留、base 不重置", async () => {
-  const fx = await createToolHarnessFixture({ withAdapters: true, behavior: "tool-loop" });
+  // D4 收口：TOOL_CALLS 优先于 MODEL_CALLS。要隔离 MODEL_CALLS，必须让 tool facade 额度高于模型额度，
+  // 否则工具预算会先耗尽（这正是收口修复要暴露的真实归因）。
+  const fx = await createToolHarnessFixture({ withAdapters: true, behavior: "tool-loop", facadeMaxCalls: 20 });
   try {
     const issued = [];
     const origIssue = fx.proxy.issueCapability.bind(fx.proxy);
@@ -139,7 +141,8 @@ test("D4-05 S3 A35 · 预算到限停止保留产物；续接追加额度 == 新
 });
 
 test("D4-05 S3 A35 · 续接总数有界：MAX_BUDGET_RESUMES=3，第 4 次 RESUME_LIMIT_REACHED、绝不追加", async () => {
-  const fx = await createToolHarnessFixture({ withAdapters: true, behavior: "tool-loop" });
+  // 同前：facade 额度高于模型额度，使每次停止都真实归因 MODEL_CALLS。
+  const fx = await createToolHarnessFixture({ withAdapters: true, behavior: "tool-loop", facadeMaxCalls: 20 });
   try {
     const h = await setupModelCallsStop(fx);
     let extraStops = 0;

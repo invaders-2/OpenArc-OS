@@ -22,6 +22,7 @@ const { ToolRegistry } = require("./tool-registry.cjs");
 const { SideEffectStore } = require("./side-effect-store.cjs");
 const { SideEffectAuthority } = require("./side-effect-authority.cjs");
 const { createToolAdapters } = require("./tool-adapters.cjs");
+const { DEFAULT_MAX_CALLS, MAX_TOOL_ROUNDS } = require("./task-domain.cjs");
 
 function createSideEffectExecutorBundle({ dbPath, storeRoot, instanceId, clock = null, lifecycle = null, testHooks = null, registry = null, resourceServiceWrapper = null } = {}) {
   if (!dbPath) throw new Error("createSideEffectExecutorBundle 需要 dbPath");
@@ -31,6 +32,8 @@ function createSideEffectExecutorBundle({ dbPath, storeRoot, instanceId, clock =
   const authService = new AuthorizationService({ identity, authStore });
   const taskStore = new TaskStore({ identity, clock });
   const taskService = new TaskService({ identity, authService, authStore, taskStore, clock });
+  // D4 收口：executor bundle 无独立 facade 配置，账本 base 用冻结默认实际额度。
+  taskService.attachBudgetConfig({ modelMaxCalls: DEFAULT_MAX_CALLS, toolMaxCalls: DEFAULT_MAX_CALLS, maxToolRounds: MAX_TOOL_ROUNDS });
   let resourceService = null;
   if (storeRoot) {
     const managedStore = new ManagedStore({ root: storeRoot });

@@ -199,6 +199,11 @@ class TaskHarnessOrchestrator {
       }
 
       let rawEvents = Array.isArray(res.events) ? res.events : [];
+      // D4 收口：首个 prompt 成功后工具预算真实耗尽 → 立即停止，绝不当成成功收敛。
+      const toolBudgetFirst = this.#toolBudgetExhausted(adapter);
+      if (toolBudgetFirst) {
+        return await this.#haltForToolBudget({ context, taskId, stepId, runId: run.runId, callId, modelRequestId, rawEvents, budget: toolBudgetFirst, fallbackRevision: task.revision });
+      }
       let mapped = mapAcpEvents(rawEvents, { maxPersisted: this.maxPersistedHarnessEvents });
       let usage = summarizeUsage(rawEvents);
       const hasToolEvents = () => rawEvents.some((e) => e && e.type === "tool.proposed");
@@ -228,6 +233,8 @@ class TaskHarnessOrchestrator {
           }
           res = next;
           rawEvents = Array.isArray(next.events) ? next.events : [];
+          const toolBudgetLoop = this.#toolBudgetExhausted(adapter);
+          if (toolBudgetLoop) return await this.#haltForToolBudget({ context, taskId, stepId, runId: run.runId, callId, modelRequestId, rawEvents, budget: toolBudgetLoop, fallbackRevision: this.#rev(context, taskId, task.revision) });
           mapped = mapAcpEvents(rawEvents, { maxPersisted: this.maxPersistedHarnessEvents });
           usage = summarizeUsage(rawEvents) || usage;
           const latestTask = svc.getTask({ context, taskId });
@@ -294,6 +301,8 @@ class TaskHarnessOrchestrator {
           }
           res = next;
           rawEvents = Array.isArray(next.events) ? next.events : [];
+          const toolBudgetSide = this.#toolBudgetExhausted(adapter);
+          if (toolBudgetSide) return await this.#haltForToolBudget({ context, taskId, stepId, runId: run.runId, callId, modelRequestId, rawEvents, budget: toolBudgetSide, fallbackRevision: this.#rev(context, taskId, task.revision) });
           mapped = mapAcpEvents(rawEvents, { maxPersisted: this.maxPersistedHarnessEvents });
           usage = summarizeUsage(rawEvents) || usage;
           const latestTask = svc.getTask({ context, taskId });
@@ -399,9 +408,42 @@ class TaskHarnessOrchestrator {
     if (code === ERROR.HARNESS_CANCELLED) return { code, event: TASK_EVENT.HARNESS_RUN_UNKNOWN_EFFECT, payload: null };
     const budget = adapter && typeof adapter.budgetExhausted === "function" ? adapter.budgetExhausted() : null;
     if (budget && budget.exhausted) {
-      return { code: ERROR.BUDGET_EXHAUSTED, event: TASK_EVENT.TASK_BUDGET_EXHAUSTED, payload: { kind: budget.kind, consumed: budget.consumed, maxCalls: budget.maxCalls } };
+      return { code: ERROR.BUDGET_EXHAUSTED, event: TASK_EVENT.TASK_BUDGET_EXHAUSTED, payload: this.#budgetPayload(budget.kind, budget) };
     }
     return { code, event: TASK_EVENT.HARNESS_RUN_UNKNOWN_EFFECT, payload: null };
+  }
+
+  /** safe 停因 payload：保留实际观测证据（observed 只含 maxCalls/calls/state/remaining，绝无 token）。 */
+  #budgetPayload(kind, budget) {
+    const payload = { kind, consumed: budget && budget.consumed != null ? budget.consumed : null, maxCalls: budget && budget.maxCalls != null ? budget.maxCalls : null };
+    if (budget && budget.observed) payload.observed = budget.observed;
+    return payload;
+  }
+
+  /** 只读判定：Tool Facade capability 真实 EXHAUSTED（不消耗、不改状态）。 */
+  #toolBudgetExhausted(adapter) {
+    if (!adapter || typeof adapter.budgetExhausted !== "function") return null;
+    const budget = adapter.budgetExhausted();
+    return budget && budget.exhausted === true && budget.kind === BUDGET_KIND.TOOL_CALLS ? budget : null;
+  }
+
+  /**
+   * D4 收口：一次成功 prompt 之后若 TOOL_CALLS 已真实耗尽，立即 BUDGET_EXHAUSTED{TOOL_CALLS} 停止，
+   * 0 后续调度、0 成功提交，并写 task.budget_exhausted 事件。模型调用信封如实 complete（非成功提交）。
+   */
+  async #haltForToolBudget({ context, taskId, stepId, runId, callId = null, modelRequestId = null, rawEvents = [], budget, fallbackRevision }) {
+    const svc = this.#service();
+    let rev = fallbackRevision;
+    if (callId) {
+      const usage = summarizeUsage(rawEvents);
+      const done = svc.completeModelCall({ context, taskId, callId, usage: usage || null, requestId: modelRequestId, expectedRevision: rev });
+      if (done.ok) rev = done.task.revision;
+      else rev = this.#rev(context, taskId, rev);
+    }
+    const mapped = mapAcpEvents(rawEvents, { maxPersisted: this.maxPersistedHarnessEvents });
+    await this.#recordEvents({ context, taskId, runId, events: mapped.events, expectedRevision: rev });
+    rev = this.#rev(context, taskId, rev);
+    return await this.#blockStep({ context, taskId, stepId, runId, reason: ERROR.BUDGET_EXHAUSTED, event: TASK_EVENT.TASK_BUDGET_EXHAUSTED, payload: this.#budgetPayload(BUDGET_KIND.TOOL_CALLS, budget), expectedRevision: rev, alreadyRecorded: true });
   }
 
   /** 本次续接实际追加的预算量（沿用既有预算种类；有界默认值）。 */
