@@ -1,5 +1,533 @@
 # 计划修订记录
 
+## 2026-09-17（十九）：光标缩小 + 全用自绘 + 设置里的「光标」两行
+
+用户口径（三条一起做）：
+1. 光标太大，要小一点。
+2. app 内所有光标都用我们自己内置的，不要再出现系统光标 —— 凡是 CSS 能控制的地方一律命中自绘 SVG。
+3. 设置「外观与交互」栏加「光标」设置：药丸开关（开/关）+ 光标大小调节。
+
+### 改了什么
+
+- **全部改成运行时 data URL 的 CSS 变量**（新增 `src/desktop/cursors.ts`）：
+  `public/cursors/*.svg` 仍是唯一来源，用 Vite 的 `?raw` 把源文件内联进 bundle
+  （CSP 是 `connect-src 'none'`，不能在运行时 fetch），按 size 改写 SVG 的 width/height，
+  并按 size/32 同步缩放热点，生成 `data:image/svg+xml,…` 写到根上的
+  `--cursor-arrow / --cursor-text / --cursor-resize-se / --cursor-crosshair / --cursor-grab /
+  --cursor-not-allowed / --cursor-copy / --cursor-pointer`。理由：CSS 的 cursor 没有尺寸参数，
+  "大小"和"开关"都只能在运行时重组这条声明。
+- **CSS 只负责"哪个元素用哪个变量"**（`src/styles.css` / `primitives.css`），每条都保留关键字兜底
+  （`var(--cursor-resize-se, nwse-resize)` 这种）。等价于一个总开关：变量写成 data URL 就是自绘，
+  写成关键字就是系统光标。
+  - 文本 / 可编辑区从**系统 text** 换成自绘 `text-*.svg`（本轮重点口径）。
+  - `a[href] / [role="link"]` 从系统 pointer 换成自绘手型（新增 `--cursor-pointer`；不在用户列的
+    变量清单里，但不加就会在链接上漏出系统手型）。
+  - 非文本表单控件在原有 range / file / checkbox / radio / color 上**补 select**（Chromium 的 UA
+    样式会盖过继承）。
+  - 探针抓到一个真实漏点：Chromium 的 UA 样式给 `<label>` 声明了 `cursor:default`，
+    文件窗口的 `label.search-field`（含它的 svg/circle/path，共 4 个元素）因此漏出系统箭头。
+    加 `label { cursor: inherit; }` 修掉。
+- **设置两行**（`src/main.tsx`，appearance 分支，照现有 Switch / setting-range 写法）：
+  - 「使用自绘光标」药丸开关：关掉后整套变量写成关键字，全部退回系统光标。
+  - 「光标大小」滑块 16–40px，默认 **18px**；**关闭时禁用（变暗）而不是隐藏** —— 保留位置、不产生
+    布局跳动，并明确表达"该设置当前不可用"。
+  - 持久化沿用 `oa-` 前缀 localStorage：`oa-cursor-custom` / `oa-cursor-size`，重启后仍生效。
+
+### 尺寸是怎么定的（先量系统箭头）
+
+用**一次性**全屏纯色背板（#808080，拍完即退）+ cliclick 移指针 + screencapture -C（含光标）与
+无光标帧做差集，量系统箭头在 2× Retina 下的实际足印：
+
+| 阈值 | 系统箭头足印（设备像素） | CSS 像素 |
+|---|---|---|
+| ≥48（实体） | 21×34 | 10.5×17 |
+| ≥16 | 22×37 | 11×18.5 |
+| ≥6（含 1px 阴影） | 25×38 | 12.5×19 |
+
+自绘箭头（从**生产构建**里读出的真实 data URL）同法实测，并用无头 SVG 解码复核：
+
+| 档位 | screencapture 足印 | 无头 SVG 解码（实体） | CSS 像素 |
+|---|---|---|---|
+| 默认 18px | 34×34 设备 | 17×17 | 17×17 |
+| 20px | 38×38 设备 | 19×19 | 19×19 |
+| 40px | 76×76 设备 | 38×38 | 38×38 |
+| 旧 32px（改前） | 61×61 设备 | — | 30.5×30.5 |
+
+→ 默认 18px 的足印（17 CSS）与系统箭头实体高度（17 CSS）齐平、略小于其含阴影足印（19 CSS），
+线性尺寸只有旧值的约 56%。I 型（text@18）实测 12×29 设备 = 6×14.5 CSS，无头解码实体 6×16；
+热点取竖笔中点略偏上（16,15 / 32 网格 → 18px 时 9,8），实测热点比字形中心高 1 CSS 像素。
+其它热点（18px）：箭头 1,1；缩放 9,9；十字 9,9；握紧手 9,10；禁止 1,1；拷贝 1,1；手型指尖 6,3。
+
+### 无系统光标 · 探针清单（无头：mock 桥 + 本地静态服务跑生产构建）
+
+开关打开时，遍历全部元素，computed cursor 不以 `url(` 开头的一律列出 —— **清单为空**：
+
+| 状态 | 元素总数 | 命中自绘 url( | 漏出系统光标 |
+|---|---|---|---|
+| 桌面 | 169 | 169 | 0 |
+| 设置窗口 | 262 | 262 | 0 |
+| 文件窗口 | 373 | 373 | 0 |
+| AI 面板 | 403 | 403 | 0 |
+| 右键菜单 | 380 | 380 | 0 |
+| 删除确认对话框 | 387 | 387 | 0 |
+
+开关关闭后，同一份清单 url( 命中 **0**，全部是系统关键字：default（大多数）、
+nwse-resize（3 个缩放手柄）、text（1–2 个文本输入）；「光标大小」滑块 disabled=true。
+再打开又全部回到 data URL。
+
+### 持久化实测
+
+用**无窗口**持久化 profile 跑生产构建：设成 `oa-cursor-custom=false` / `oa-cursor-size=40`，
+**关掉进程再重开** →
+before {custom:"false", size:"40"} / after {custom:"false", size:"40", --cursor-arrow="default",
+root cursor="default"}。两个值都留在磁盘 profile 里，重开后仍生效（关闭态下根光标就是关键字 default）。
+
+### 门禁
+
+`npx tsc --noEmit` clean、`npm test` 96/96；`npx vite build` 通过（?raw 从 public/ 内联，
+不产生额外产物）。
+
+### 不能控制的两处（如实说明）
+
+- **拖到系统**：把文件从 app 里 ⌘ 拖到 Finder / 桌面时，那一帧的拖拽光标由 macOS / Electron 画，
+  不走 CSS。
+- **原生网页视图里的第三方页面**：浏览器 App 用 WebContentsView，里面站点的光标由该页面自己的
+  CSS 决定，我们控制不到。
+
+### 实测截图
+
+- 设置两行（生产构建、无头实拍）：/tmp/oa-probe/cursor-headless/settings-cursor-light-on.png、
+  …-dark-on.png、…-light-off.png（关闭态滑块变暗）。
+- 系统箭头 + 18/20/40 + I 型并排：/tmp/oa-cursor-probe/cursor-compare.png。
+- 开/关两种状态的真实 screencapture -C：/tmp/oa-cursor-probe/cursor-onoff-compare.png
+  （原始帧 cursor-on-arrow18-with.png、cursor-off-default-with.png、cursor-on-text18-with.png）。
+- 探针原始报告：/tmp/oa-probe/cursor-headless/report.json。
+
+### 说明
+
+- 早前一轮曾在 `npm run dev:app` 上取过 computed cursor / 尺寸结论；按用户口径"实时预览影响正常用机"，
+  该实例已停用。上面的清单与尺寸已改用**无窗口无头探针**（mock 桥 + 本地静态服务 + 生产构建）重跑，
+  像素证据用**一次性**背板（拍完即退，独立 userData）。当前无任何残留 vite / Electron 进程。
+
+## 2026-09-17（十八）：实时更新预览（`npm run dev:app`）
+
+用户口径：「改代码后 app 窗口自己就更新，不用每次重新构建 + 重启。」
+
+### 做了什么
+
+- `scripts/dev-app.mjs` + `npm run dev:app`：一条命令起 Vite dev server，并用**仓库里的**
+  Electron（`node_modules/electron`，44.3.0）打开它。Ctrl+C 同时收掉 Vite 与 Electron 两个进程组。
+- userData 默认隔离到 `~/Library/Application Support/openarc-os-preview`（产品是 `openarc-os`），
+  可用 `--user-data` 换；`--port` / `--no-watch` 见脚本头注释，其余参数原样转给 Electron。
+- `electron/main.cjs`：**只在显式设了 `OA_DEV_SERVER` 时**把 `uiURL` 指向 dev server；
+  信任判据 `trusted()`、`will-navigate`、麦克风 `isAppPage()` 同步按 dev 来源放行。
+  没设变量时 `devURL` / `devOrigin` 恒为 `null`，所有分支原样短路 —— 产品路径逐字节不变。
+- `vite.config.ts`（三个 dev-only 插件，`vite build` 一个都不执行）：
+  - `devCsp()`：把 dev 下 index.html 的 CSP 放宽到 `script-src 'self' 'unsafe-inline'`、
+    `connect-src 'self' ws://127.0.0.1:*`（React Refresh 内联脚本 + HMR WebSocket）。
+  - `devCjs()`：渲染层从 electron/ 直接 import 的 `.cjs` 领域模块，dev 下用 esbuild 打成 ESM
+    （不这么做会 "does not provide an export named 'default'"，已实测）。
+  - `react()`（`@vitejs/plugin-react`，**只在 serve 挂**）：真 Fast Refresh；build 路径不挂，产物不动。
+- 主进程没有 HMR：`scripts/dev-app.mjs` 监听 `electron/`，改动后**等旧进程真正退出**再重启 Electron
+  （同一 userData 不能两个实例同开），`src/` 的 HMR 不受影响。
+
+### 实测（macOS 26.6.2 / Electron 44.3.0 / Vite 7.3.6，真实窗口 + CDP 截图）
+
+- 改 `src/styles.css` 的 `.auth-card` 圆角（16px → 48px）：3 次 **30 / 33 / 193 ms（中位 33 ms）**。
+  同窗口前/后截图：`/tmp/oa-hmr/css-card-before.png`、`/tmp/oa-hmr/css-card-after.png`
+  （整窗 `css-before.png` / `css-after.png`）。
+- 改 `src/identity/AuthScreens.tsx` 一句文案（React Fast Refresh，文档未重载）：3 次
+  **81 / 145 / 147 ms（中位 145 ms）**；截图 `/tmp/oa-hmr/tsx-card-before.png`、`/tmp/oa-hmr/tsx-card-after.png`。
+- dev 下能力：`window.openarc` 在；`files.list("desktop")`、`sync({intents:[]})` 走桥成功
+  （说明 `trusted()` 已按 dev 来源放行）；自绘光标 =
+  `url("http://127.0.0.1:5173/cursors/arrow-light.svg") 2 2, default`。
+- 主进程自动重启：改 `electron/` 后打印「自动重启主进程」，Vite 仍 200、新窗口重新加载 dev URL（两次触发都验过）。
+- 产品路径：`npm run oa:app -- HEAD --no-restart` 构建成功；`dist/index.html` 的 CSP 与 HEAD 干净构建
+  **逐字节相同**（两边都是 `default-src 'self'; script-src 'self'; … connect-src 'none'`），
+  index.html 唯一差异是 hash 化的资源文件名（来自本轮其它源改动）。
+- 门禁：`npx tsc --noEmit` clean、`npm test` 96/96。
+
+### 边界（哪些改动需要重启）
+
+- `src/**`：不重启，HMR 毫秒级（CSS ≈30ms、TSX ≈145ms）。
+- `electron/**`：自动重启主进程（约 1–2s）。
+- `index.html` / `vite.config.ts`：需要重启 `dev:app`（dev CSP 与页面加载方式在这里）。
+- 依赖变化：需要 `npm install` 后重启。
+
+### 依赖新增
+
+`@vitejs/plugin-react@^5.2.0`（devDependency；只在 `vite dev` 挂，生产构建不引用）。
+
+## 2026-09-17（十七）：身份库打不开导致整片空白 —— 改成「初始化失败 + 原因 + 重试」
+
+**现象**：启动时身份库拒绝打开，应用窗口正常出现（菜单栏 / 红绿灯都在），但渲染层整片空白 ——
+顶部栏、程序坞、任何提示都没有。用户看到的等价于「软件坏了」。
+
+**根因**：`electron/identity-store.cjs` 的 `#migrate` 在 `schema_version=2 > 1` 时抛错，
+经 `createIdentityService`（`identity-bootstrap.cjs:30`）冒到 `electron/main.cjs` 的
+`app.whenReady().then(...)` 回调里。回调是**同步**的，异常变成**未处理的 Promise rejection**，
+并在 `win.loadURL(uiURL)` **之前**中断 —— 窗口创建了，页面永远没加载。
+这不是「加载慢」，是**启动失败没有出口**：主进程没有 catch，渲染层也没有收到任何失败信号。
+
+**改法**（只补这一条路，不动用户数据）：
+
+- `electron/main.cjs`：
+  - `createIdentityService` 用 `try/catch` 兜住；失败原因登记到**已有的**身份命令通道 ——
+    下面的 `registerIdentityIpc` 照常装配，把 `{ ok:false, error:"BOOT_FAILED", detail } ` 交回渲染层。
+    catch 之后装配继续走完（文件服务 / 原生视图 / `win.loadURL` 都照常），界面因此正常加载。
+  - `app.whenReady().then(...)` 整链再加 `.catch(recoverFromStartupFailure)`：
+    其它启动期 rejection（safeStorage / 钥匙串被拒、其它装配异常）走同一条出口，不再白屏。
+  - `describeStartupFailure` 把结构化原因翻成人话；schema 过新时**不迁移、不降级、不重置**，
+    只说清楚「本机数据未被改动」。
+- `electron/identity-bootstrap.cjs`：`registerIdentityIpc` 支持 `bootError`；
+  `service` 为空且有 `bootError` 时返回 `BOOT_FAILED`，没有时维持原来的 `INTERNAL_ERROR/identity-not-ready`；
+  事件订阅加 `send && service` 守卫（service 为空时不再对 null 调 `onEvent`）。
+- `electron/identity-store.cjs`：schema 过高改成结构化 `SchemaTooNewError`（`code=SCHEMA_TOO_NEW`、
+  `found/supported`），异常原文不变；主进程不必猜文本。
+- `src/identity/useIdentity.ts`：启动询问 `identity/status` 返回 `!ok` 时（含 `BOOT_FAILED`）
+  走已有的 `bootError → BootRetry`，**不再往下落到登录页**；启动询问本身 reject（主进程没响应 / 握手被拒）
+  也兜到 `bootError` —— 原来 `finally` 会清掉超时计时器，导致永久停在 BootSurface（同样是一片空白）。
+
+**实测**（探针 `/tmp/oa-probe/probe`，真实 Electron + 产品 `electron/main.cjs`；
+临时 userData + 预置一份 `user_version=2` 的 identity.db 复现，`OA_PROBE_ROOT` 指向 HEAD 版 electron 做对照）：
+
+- 修复前（HEAD=ff86248）失败注入：`UnhandledPromiseRejectionWarning: 身份库 schema_version=2 …`
+  抛在 `identity-store #migrate` → `main.cjs:185`；DOM 无 `.desktop`、`capturePage` 尺寸 `0x0`（全白）——
+  `/tmp/oa-probe/shots/boot-failure-before.png`（0 字节）、`/tmp/oa-probe/logs/before.log`。
+- 修复后同一注入：`gate=checking`、`[data-d3-id="boot-retry"]` 在、`[boot-surface]` 不在，
+  文案 = 「本机身份库版本（schema 2）高于当前程序支持的版本（1），这个构建打不开它。本机数据未被改动。」
+  并有「重试」按钮；截图 `/tmp/oa-probe/shots/boot-failure.png`（capturePage 全窗）、
+  `boot-failure-center.png`（放大）、`boot-failure-screen.png`（`screencapture` 实拍，含原生红绿灯）。
+- 正常路径：空 userData 启动 `gate=uninitialized`，照常进入初始化界面，截图 `/tmp/oa-probe/shots/boot-normal.png`。
+- 真实用户数据 `~/Library/Application Support/openarc-os/identity.db` **未被读写**（探针全程用临时目录；
+  sha256 前后一致：`d4d6bb6c…`）。
+
+**补充（同日 · 父级验收）**：启动失败界面的对比度 —— 浅色主题下「重试」几乎不可见。
+
+- 现象：BootRetry 直接压在桌面基底上（内置壁纸默认 `theme-dark` = `#171717`，**不随主题变**），
+  而全局 `.control-button` 是 `--sunken` 底 + `--text` 字，浅色主题下就是「深字压深底」。
+  实测浅色：按钮文字 / 按钮底 **1.08:1**、说明文字 / 屏底 **3.54:1**；深色主题反而是好的（17.34 / 6.24）。
+- 改法：只在 `[data-d3-id="boot-retry"]` 作用域里加一块跟随主题的实底面板
+  （`background: rgb(var(--surface-rgb) / 0.96)`），面板内说明文字改用 `--text`、
+  按钮改用 `--accent` / `--on-accent` 配对。**没有改 `.control-button` 的全局样式**，
+  也没有碰 `[data-d3-id="boot-surface"]`（启动中态）。
+- 实测（探针像素级 WCAG，浅 / 深各一组；同一条注入，只替换 dist 的 CSS）：
+
+  | 对比项 | 浅色 改前 | 浅色 改后 | 深色 改前 | 深色 改后 |
+  | --- | --- | --- | --- | --- |
+  | 按钮文字 vs 按钮底 | 1.08 | 16.83 | 17.34 | 19.29 |
+  | 按钮底 vs 所在底 | 1.01 | 15.57 | 1.05 | 16.47 |
+  | 说明文字 vs 所在底 | 3.54 | 15.57 | 6.24 | 16.47 |
+
+  「所在底」= 元素实际压着的表面（改前 = 壁纸底 `#171717`，改后 = BootRetry 面板）。
+  截图：`/tmp/oa-probe/shots/contrast-{before,after}-light.png`、
+  `contrast-{before,after}-dark.png`（各带 `-center` 放大图），日志 `/tmp/oa-probe/logs/contrast-*.log`。
+
+**门禁**：`npx tsc --noEmit` clean、`npm test` 96/96。
+
+## 2026-09-16（十六）：按钮 / 可点条目改成箭头，只有链接保留手型（macOS 规矩）
+
+用户口径：「手型改成箭头（按 macOS 的规矩 —— 按钮显示箭头，只有链接才显示手型）」。
+
+### 清单 · 改前
+
+声明层（改后全没了，只剩给真链接的一条）：
+- `src/design-system/tokens.css`：`button { cursor: pointer }`（最广的一条，把手型带给所有 `<button>`）。
+- `src/styles.css`：`.control-button`、`.rb-folder-inner`（span）、`input[type="button"/"submit"/"reset"]`。
+
+运行时（探针 `document.querySelectorAll('*')` 筛 `getComputedStyle().cursor === 'pointer'`，浅色，7 个状态）：
+- 命中元素数：桌面 116 / 设置窗口 162 / AI 面板 171 / 右键菜单 175 / 对话框 177 / 文件窗口 216。
+- 真正的「源头」（父节点不是 pointer 的）约 20 类，其余全是这些控件的后代继承：
+  `button.bar-app`、无名 `button`（顶栏 / 分段 / 菜单项）、`span.rb-folder-inner`、`button.assistant-pill`、
+  `button.close / .minimize / .maximize`（红绿灯）、`button.split-nav`（侧栏）、`button.app-card`、
+  `button.dock-item`（程序坞）、`button.switch`、`label.control-button`、`button.wallpaper-option`、
+  `button.control-button`、`button.icon-button`、`button.ghost / .danger / .primary.danger` 等。
+
+### 改了什么
+
+- `button` 的 `cursor` 从 `pointer` 改成 `var(--cursor-arrow)`；`.control-button`、`.rb-folder-inner`、
+  `input[type=button/submit/reset]` 同样改成 `var(--cursor-arrow)`。**不再有任何 `cursor: pointer` 声明**
+  （除了下一条给真链接的）。
+- 新增 `a[href], [role="link"] { cursor: pointer }` —— 真链接保留手型。仓库里目前没有任何 `<a>` / `[role=link]`，
+  所以这条现在没有命中对象，只是把规矩固定下来。
+- **「查看统一设置 →」是 `<button>`**（`src/desktop/components.tsx:847`），不是 `<a>`，所以现在显示箭头；
+  用户口径允许，这里明确说明。
+
+### 变量作用域 · 谁覆盖谁
+
+- 确认：`main.tsx` 的根 return 就是 `<div class="desktop dark?">`，`BootSurface`（启动）/ `SetupScreen`（初始化）/
+  `LoginScreen`（登录）/ `LockScreen`（锁屏）都渲染在它内部 —— 所以它们本来就能拿到自绘箭头。
+- 按要求仍把变量提到**真正的根**：`:root { --cursor-arrow: 浅色版; cursor: var(--cursor-arrow); }`。
+- 深色覆盖落在**同一个根**上：`:root:has(.dark) { --cursor-arrow: 深色版; }`（`.dark` 挂在 `.desktop` 上，
+  `:has()` 反查到 html）。旧 `.desktop` / `.desktop.dark` 的定义删掉。
+- 覆盖关系：`:root:has(.dark)`（特指度 0,2,0）> `:root`（0,1,0）；两处都在同一个根上，深色模式不会退回浅色箭头。
+- 语义光标仍各自显式声明、优先级更高：文本 `text`、缩放 `resize-se`、框选 `crosshair`、抓取 `grabbing`、
+  禁止 `not-allowed`、拷贝 `copy`，以及禁用的 `.traffic button:disabled` / `.ds-btn:disabled` 等。
+
+### 实测
+
+- 探针（改后）：**`pointer` 源头 = 0 个**（仓库里没有真链接）；抽查全部命中自绘箭头：
+  `.desktop` / `.window` / `.split-nav` / `.traffic .close|.minimize|.maximize` / `label.control-button` /
+  `.wallpaper-option` / `.file-cell` / `.rb-folder-inner` / `.context-menu button` / `.dialog-footer button`
+  = `url("…/cursors/arrow-light.svg") 2 2, default`（深色为 `arrow-dark.svg`）；
+  `.window .resize` = `resize-se-light.svg`；`.search-input input` 与设置里的文本输入 = `text`；
+  临时注入 `a[href]` / `[role="link"]` = `pointer`。
+- 真实 Electron 实拍（`screencapture -C`，抢回前台 + 校验落点后拍）：程序坞图标、侧栏导航项、窗口红绿灯、
+  对话框按钮（浅色）+ 深色程序坞 / 对话框：`/tmp/oa-probe/ptr-{dock,sidebar,traffic,dialog}-{light,dark}.png`，
+  合成图 `/tmp/oa-probe/pointer-states-composite.png` —— 全部是自绘箭头（浅色黑、深色白），没有手型。
+
+### 门禁
+
+`npx tsc --noEmit` clean、`npm test` 96/96。
+
+### 没做
+
+- 文本 I 型、缩放、框选、抓取、禁止、拷贝一律没动。
+## 2026-09-16（十五）：其余光标全部改成同一套实心圆角风格，凑成一套
+
+用户口径：「深色模式用白、浅色模式用黑这个做法对了，现在要把其余的光标也照这个风格重画，凑成一套」——
+之前只有箭头（含 copy / not-allowed 里嵌的那只）是新风格，其余 15 只还是旧的「1px 白/黑描边 + 尖角 +
+(0,-1) 阴影副本」，摆在一起不搭。这次只画形状，不接新状态。
+
+### 统一风格（和箭头同一套参数）
+
+- **实心填充**：浅色 `#000000`、深色 `#ffffff`，100% 不透明。
+- **描边**：`1px` 的 30% 对比色（浅 `rgba(255,255,255,0.3)` / 深 `rgba(0,0,0,0.3)`），一律
+  `paint-order="stroke fill"`（描边压在填充下面，只露外面半条）。
+- **没有阴影**：删掉所有 `(0,-1)` 阴影副本（仓库里已 0 命中）。
+- **圆角**：线状形状用「粗线 + 圆头圆角」的轮廓，多边形用 Shapely `buffer(r).buffer(-r)` 统一倒圆角，
+  转角都是圆角、不留尖角。
+- `viewBox="0 0 32 32"` 不变，**文件名一个没改**、**CSS 热点值没动**（resize 16 16、crosshair 16 16、
+  grab 16 17、copy / not-allowed 2 2）。
+
+### 各形状怎么重画（语义照旧，只换画风）
+
+- `crosshair`：细而长的实心十字（臂宽 2.4、圆角端），不再是 1px 描线。
+- `text`：带衬线端的实心 I 型（顶/底横杠 + 竖笔，圆角）。
+- `move`：实心四向箭头（十字 + 四个圆角箭头）。
+- `resize-n/s/e/w/ne/nw/se/sw`：实心双向箭头、箭头圆角（n 与 s、e 与 w 本来就是同形的对称双箭头）。
+- `pointer` / `open-hand`：**保留原手指轮廓**，只把「描线稿」换成实心 + 淡描边。
+- `grab`：拳头实心，三条指缝改成**负空间镂空槽**（`fill-rule="evenodd"` 挖 3 个圆角槽），不靠描边分缝 ——
+  1× 下分缝仍然看得见（下方有真实实拍）。
+- `copy` / `not-allowed`：徽标（绿加号 / 灰禁止圈）**保留**，继续压在箭头右下；徽标阴影也一并去掉。
+
+### 实测
+
+- **全套对照图**（4×，浅底 / 深底各一张，一眼能看出是一套）：
+  `/tmp/oa-probe/compare-light.png`、`/tmp/oa-probe/compare-dark.png`。
+- **1× 对照图**（原始 32px 大小；另附最近邻 6× 放大方便看像素）：
+  `/tmp/oa-probe/compare-1x-light.png`、`compare-1x-dark.png`，放大 `compare-1x-*-zoom6.png`。
+- **徽标对照**：`/tmp/oa-probe/compare-badges.png`（arrow / copy / not-allowed 三只同形状）。
+- **真实 Electron 实拍**（`screencapture -C`；先 `osascript` 抢回前台 + 校验指针落点，确认焦点与落点后再拍）：
+  缩放手柄 / 框选十字 / 程序坞整理握紧手，浅色与深色主题各一遍，浅色主题 + 默认深壁纸再各一遍：
+  `/tmp/oa-probe/state-{resize,crosshair,grab}-{L,D,LDW}.png`，放大 `…-zoom.png`。实测分别是：自绘的
+  黑色双向斜箭头（深色主题为白）、细长实心十字、实心拳头带镂空指缝。
+- **深壁纸档描边读数**（浅色主题 + 默认深壁纸 `#171717`，背景灰阶 23；把每只经真实 Electron 光标画在深色
+  壁纸上量，2× 设备像素灰阶）：`arrow` halo max 89 / median 61（落差 66 / 38）；`crosshair` 93 / 56
+  （70 / 33）；`text` 93 / 93（70 / 70）；`move` 93 / 56（70 / 33）；`resize-ne` 93 / 59（70 / 36）；
+  `pointer` 93 / 56（70 / 33）；`open-hand` 93 / 76.5（70 / 53.5）；`grab` 93 / 58（70 / 35）。
+  轮廓都能读出来（halo 最大 89–93，已接近 0.3 alpha 的理论上限 ≈93）。
+- **手型 1× 分缝**（真实实拍放大）：`/tmp/oa-probe/halo-pointer-zoom.png`、`halo-open-hand-zoom.png`、
+  `halo-grab-zoom.png` —— 手指轮廓与拳头三条镂空指缝在 1× 下都清楚。
+
+### 门禁
+
+`npx tsc --noEmit` clean、`npm test` 96/96。
+
+### 没做 / 备注
+
+- 手型「要不要在按钮上全局启用」是另一个问题，这次**没动**（只画）。
+- 文本框仍用**原生 `text`** 做 I 型；自绘 `text-*.svg` 只进套装、没接进 CSS。
+- 本 worktree 的 `node_modules/electron` 的 `dist` 曾丢失，实拍用隔壁 worktree 同版本 Electron 44.3.0 完成，
+  仓库不受影响。
+## 2026-09-16（十四）：箭头换成实心大圆角样式（+淡描边），并全局启用
+
+用户口径：「箭头光标换成用户指定的这种样式，并且 app 全局都用它」——参考图是**实心、没有白色描边、
+顶点大圆角、比 macOS 那只更饱满**的箭头。只重画箭头，其它光标形状先不动。
+后续拍板（可见性实测之后）选「方案①」：给箭头补一条**很淡的描边**来救深色背景（详见新增的一条）。
+
+### 改了什么
+
+- **重画箭头** `public/cursors/arrow-light.svg` / `arrow-dark.svg`（`viewBox="0 0 32 32"`、
+  `width/height="32"` 不变）：把参考图（512×512 位图）阈值化取轮廓，量出「4 个角 + 1 个凹口」的
+  几何——三个外角圆角半径约 16 / 16 / 15.5（512 坐标），凹口很小；用「4 条边线 + 3 个圆角弧 +
+  1 个小凹口弧」还原成**一条 `<path>`**。再缩放/平移，让**尖端顶点精确落在 (2,2)**，热点仍是 `2 2`。
+  浅色 = 纯黑填充，深色 = 纯白填充，**初始交付两种都不描边、也不加阴影**（与参考图一致）；后来按
+  可见性拍板补了淡描边（见下一段）。与参考图位图归一化 IoU = **0.992**（`/tmp/oa-probe/arrow/` 下的分析脚本与渲染对照）。
+- **全局应用**（`src/styles.css` 末尾「自绘光标」块）：真正的根是 `.desktop`（`height:100vh`，铺满视口；
+  桌面 / 窗口内部 / 侧栏 / 程序坞 / 顶栏 / 弹层全在它里面），所以只在根上设一次 cursor：
+  `.desktop { --cursor-arrow: url("/cursors/arrow-light.svg") 2 2, default; cursor: var(--cursor-arrow); }`，
+  `.desktop.dark` 把变量换成 `arrow-dark.svg`。**没有**用 `* { cursor }`，也不逐个组件声明。
+- 把原先 4 处显式 `cursor: default` 全部换成 `var(--cursor-arrow)`：`.traffic button:disabled`、
+  `.icon-button:disabled`、`.desktop-folder`、`.file-cell`（它们本来就显示系统箭头）。
+- **显式保住 I 型**：`.desktop textarea`、`[contenteditable="true"]`、以及文本类 `input`（排除
+  `range / file / checkbox / radio / button / submit / reset / color`）写 `cursor: text`。选**原生 `text`**
+  而不是自绘 `text-*.svg`：原生 I 型在每个 DPI / 缩放下都清晰，位图那根 1px 线在 32 网格里最脆。
+  另外，Chromium 的 UA 样式给 `range / file / checkbox` 声明了 `cursor: default`、会盖过继承，
+  也一并显式换成 `var(--cursor-arrow)`（按钮类保持 `pointer`，与 `<button>` 一致）。
+- **没有改**缩放 / 框选 / 拖拽 / 禁止 / 拷贝这五条语义光标的规则；但把 `copy` / `not-allowed` 两只里嵌的
+  底箭头同步成了新形状（见下一条）。
+- **同步 `copy` / `not-allowed` 的底箭头**：这两只原来内嵌的是旧尖角箭头，按住 ⌘ 拖拽 / 拖到非法落点时
+  箭头会肉眼可见地变回旧版。现在把里面的箭头换成与 `arrow-*` 完全相同的新 path（描边见下一条同步补上），
+  **绿加号 / 禁止圈等其余部分原样不动**。两只的放大对照：`/tmp/oa-probe/compare-badges.png`。
+- **补一条淡描边**（可见性拍板后的追加改动）：`arrow-light.svg` 黑箭头 + **1px rgba(255,255,255,0.3)**，
+  `arrow-dark.svg` 白箭头 + **1px rgba(0,0,0,0.3)**；两者都用 **`paint-order="stroke fill"`**（描边压在填充
+  **下面**，只露出外面一半，不会把箭头啃瘦）。**同时同步进 `copy-light/dark`、`not-allowed-light/dark` 里嵌的
+  那只箭头**，三只状态切换时形状与描边完全一致（按 ⌘ / 拖到非法落点不会变细）。**最终选 1px**（不是 1.5px）：
+  下面实测最亮描边已接近 0.3 alpha 的理论上限，1px 就足够读出轮廓。
+
+### 实测 · 全局生效（`getComputedStyle(el).cursor` 原样字符串）
+
+探针在**真实 Electron 44**（`dist`）与真实 Chromium（`dist` + 静态服务）里各读一遍，浅色 / 深色都命中
+我们的 SVG（不是系统关键字）。下表是 Electron 里的实测（`file://` 前缀略为 `…`）：
+
+| 取的元素 | 浅色实测 | 深色实测 |
+| --- | --- | --- |
+| `.desktop`（桌面 / 根） | `url("…/cursors/arrow-light.svg") 2 2, default` | `url("…/cursors/arrow-dark.svg") 2 2, default` |
+| `.topbar`（顶栏） | 同上 `arrow-light` | 同上 `arrow-dark` |
+| `.dock`（程序坞） | 同上 `arrow-light` | 同上 `arrow-dark` |
+| `.window` / `.window-body`（窗口内部） | 同上 `arrow-light` | 同上 `arrow-dark` |
+| `.split-side`（侧栏） | 同上 `arrow-light` | 同上 `arrow-dark` |
+| `.dialog` / `.dialog-body`（对话框） | 同上 `arrow-light` | 同上 `arrow-dark` |
+| `.window .resize`（缩放手柄） | `url("…/cursors/resize-se-light.svg") 16 16, nwse-resize` | `url("…/cursors/resize-se-dark.svg") 16 16, nwse-resize` |
+| `.window input`（文本框） | `text` | `text` |
+| 桌面 / 文件区框选 `[data-marquee]` | `url("…/cursors/crosshair-light.svg") 16 16, crosshair` | `…/crosshair-dark.svg` |
+| 程序坞整理 `.dock.arranging .dock-item` | `url("…/cursors/grab-light.svg") 16 17, grabbing` | `…/grab-dark.svg` |
+| 非法落点 `[data-drop-invalid="1"]` | `url("…/cursors/not-allowed-light.svg") 2 2, not-allowed` | `…/not-allowed-dark.svg` |
+| ⌘ 拷贝 `[data-cmd="1"]` | `url("…/cursors/copy-light.svg") 2 2, copy` | `…/copy-dark.svg` |
+| `.dock-item` / `.split-nav`（按钮） | `pointer`（手型，见下「保留」） | `pointer` |
+
+### 实测 · 真实 Electron 实拍（`screencapture -C`，光标已拍入）
+
+- 浅色主题桌面：`/tmp/oa-probe/cursor-light-with.png`（放大图 `cursor-light-zoom.png`）。
+- 深色主题桌面：`/tmp/oa-probe/cursor-dark-with.png`（放大图 `cursor-dark-zoom.png`）。
+- 浅色主题 + 深壁纸（风险态）：`/tmp/oa-probe/cursor-light-darkwp-with.png`（放大图 `cursor-light-darkwp-zoom.png`）。
+- 每张都同时拍了「无光标」版（`cursor-<tag>-without.png`）用来定位光标像素。
+- 热点落点：实拍反推尖端相对指针的位置为 `(0,-1)`、`(0,-3)`、`(0,0)` 设备像素（2× Retina），
+  即**尖端落在热点 ±1.5 CSS px 内**，与 CSS 的 `2 2` 一致。
+
+### 实测 · 深色背景对比度（箭头像素 vs 周围背景，WCAG 相对亮度与对比度）
+
+| 场景 | 箭头像素 RGB | 背景像素 RGB | Δ相对亮度 | WCAG 对比度 | 结论 |
+| --- | --- | --- | --- | --- | --- |
+| 浅色主题 + 浅壁纸（`#f2f2f4`） | (0, 0, 0) | (244, 242, 242) | 0.8915 | **18.83** | 清晰 |
+| 深色主题 + 深壁纸（`#171717`） | (255, 255, 255) | (23, 23, 23) | 0.9914 | **17.93** | 清晰 |
+| 浅色主题 + 深壁纸（`#171717`，错配） | (0, 0, 0) | (23, 23, 23) | 0.0086 | **1.17** | **几乎不可见** |
+
+> 注意：app 的默认壁纸就是 `theme-dark`（`#171717`），系统浅色时默认走到第三行——黑箭头压在深色桌面上
+> 对比度只有 1.17，这是真实风险，不是假想。**后来用户拍板选「方案①」给箭头加了淡描边**，重测见下。
+- 同一张实拍（`cursor-light-darkwp-with.png`）的局部分辨率数据（2× Retina，单位为设备像素灰阶）：
+  光标足印 **61×61 px / 1468 像素**；实心区（腐蚀后深核 1001 px）灰阶 **0**，周围背景均匀 **23**，
+  原差 **23 / 255（≈9%）**；箭头**最亮像素 16**，其周围 **8 邻域平均 12.88**，差 **3.12**；
+  足印内单点相对自身 8 邻域平均的**最大局部分差 9.25**（出现在边缘）；足印内 **1468/1468（100%）**
+  像素比背景暗 ≥1 灰阶、**1369/1468（93.3%）** 暗 ≥20 灰阶；足印内出现的灰阶为 **0–16（共 17 级）**。
+- **加淡描边后的重测**（浅色主题 + 深壁纸，`cursor-s-light-darkwp-with2.png`，2× Retina 设备像素灰阶）：
+  沿箭头轮廓共 **298** 个描边像素；灰阶 min **26** / max **89** / median **61**（背景 23）。
+  **描边最亮像素 89，比背景高 66 灰阶；中位描边 61，比背景高 38 灰阶**；WCAG 对比度 max **2.56** / 中位 **1.65**，
+  轮廓可读（放大图 `cursor-s-light-darkwp-zoom.png`）。**最终选 1px**：最亮描边已接近 0.3 alpha 的理论上限
+  （0.3×255 + 0.7×23 ≈ 93），1px 就够读出轮廓，不需要 1.5px。
+- **浅色壁纸档「几乎看不出来」**（同机浅色主题 + 浅壁纸；加描边前 `cursor-light-with.png` vs 加描边后
+  `cursor-s-light-with2.png`）：箭头足印**内**像素灰阶差 max **4 / 255**、mean **0.234**；足印**外**（≤3px 带）
+  max **4 / 255**、mean **0.461**（放大图 `cursor-s-light-zoom.png`）。视觉上可忽略。
+- **对称那半**（深色主题 + 浅色壁纸，白箭头 + `rgba(0,0,0,0.3)`，`cursor-s-dark-lightwp-zoom.png`）：
+  描边最暗 **172**、背景 244、落差 **72 灰阶**、WCAG **1.76**——与浅色版救深色背景同一量级。
+
+- 对照图（全部光标放大，浅底 / 深底各一张，箭头格已是新样式）：
+  `/tmp/oa-probe/compare-light.png`、`/tmp/oa-probe/compare-dark.png`。
+
+### 门禁
+
+`npx tsc --noEmit` clean、`npm test` 96/96。
+
+### 保留 / 没做（等用户拍板）
+
+- **手型仍在**：`src/design-system/tokens.css` 的 `button { cursor: pointer }` 让**所有 `<button>`** 都是手型——
+  顶栏按钮、程序坞图标、侧栏 `.split-nav`、对话框 / 右键菜单按钮、窗口红绿灯、`.control-button`、
+  以及 `.rb-folder-inner`。按用户口径「保持现状」，**没改成箭头**。macOS 里按钮不显示手型、只有链接显示。
+- **箭头淡描边 vs 其余形状的 1px 不透明描边**：箭头是「约 0.5px 可见的淡色描边」，其余形状是 1px 不透明
+  描边，观感上箭头那条更轻；浅底上箭头描边几乎不可见（实测差 ≤4/255），深底上能读出轮廓。可选项：
+  (a) 箭头也用不透明描边（会明显改变参考图观感）；(b) 其余形状也改淡描边；(c) 维持现状。
+- **可见性风险（已按用户拍板处理）**：黑箭头在深壁纸 / 深色界面上原本看不见（实测 1.17，见上表）。用户选
+  「方案①」：浅色版加 1px `rgba(255,255,255,0.3)` 描边，对称地深色版加 1px `rgba(0,0,0,0.3)`；实测见上。方案②
+  （按背景 / 壁纸切换）**未做**，仍按主题切换。
+
+## 2026-09-16（十三）：自绘一套 OpenArc 光标（照原生形状，不拷文件）
+
+用户口径：「为 OpenArc 自绘一套自己的鼠标光标（照着 macOS 原生光标的形状，但不是拷贝文件），接进 app 里」。
+
+### 形状来源 · 只做参考，仓库不放系统文件
+
+形状对着系统自带的
+`/System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks/HIServices.framework/Versions/A/Resources/cursors/`
+（40 只，每只 `cursor.pdf` + `info.plist`，plist 里有热点 `hotx/hoty` 与阴影 `shadowcolor/shadowoffset/blur`）
+用 `sips` 转成 PNG 后**照着轮廓重画**（`pointinghand` / `openhand` / `closedhand` / `cross` / `move` /
+`copy` / `notallowed` / `ibeamvertical` / `resize*` 逐只放大看比例与热点）。**没有拷贝、嵌入或引用任何
+系统 PDF/PNG/plist**，仓库里只有我们自己的 SVG。
+
+### 交付 · `public/cursors/`（构建后 → `dist/cursors/`）
+
+17 种形状 × 2 套外观 = **34 个 SVG**：
+
+- 形状：`arrow`、`text`、`pointer`、`open-hand`、`grab`、`crosshair`、`move`、`copy`、
+  `not-allowed`、`resize-n/s/e/w/ne/nw/se/sw`。
+- 外观：浅色 UI = 黑填充 + 白描边（`-light`），深色 UI = 白填充 + 黑描边（`-dark`），跟 macOS 一样；
+  纯线条字形（`text` / `crosshair`）用「描边色 3px 垫底 + 填充色 1px 芯」，否则白线画在浅底上等于隐形。
+- 规格：`viewBox="0 0 32 32"` 且**显式写 `width="32" height="32"`**（Chromium 对光标图有尺寸上限，32 安全）；
+  1px 描边、`stroke-linecap/linejoin="round"`；阴影是 `(0,-1)` 方向的低透明度偏移副本，
+  **不用 SVG filter**（光标位图里 filter 不稳）。
+- 热点（写进 CSS 的 `url(...) X Y`）：箭头尖端 `2,2`；十字 / 双箭头中心 `16,16`；手型 `16,17`。
+
+### 接入（`src/styles.css`，每条都带原生兜底）
+
+```css
+.resize { cursor: url("/cursors/resize-se-light.svg") 16 16, nwse-resize; }
+```
+
+- `.resize` 窗口右下角缩放手柄 → `resize-se`（`nwse-resize` 兜底）。
+- 桌面 / 文件区按住框选 → `crosshair`：新增 `data-marquee` 状态（桌面 `desk`、文件夹 `.folder-body` `files`）。
+- 拖拽进行中（程序坞整理 `.dock.arranging`）→ `grab`（`grabbing` 兜底）。
+- 拖到非法落点（桌面图标跟手拖到程序坞 / 顶栏）→ `not-allowed`：`dragDesktopSelection` 的 move 里
+  用 `elementsFromPoint` 判「指针下是不是 `.dock` / `.topbar`」，新增 `data-drop-invalid`。
+- ⌘ 按住（拖到系统 = 拷贝 / 别名）→ `copy`：新增 `data-cmd`（keydown/keyup 读 `e.metaKey`）。
+- 路径用 public/ 根的绝对写法（与 `/openarc-mark.svg` 同一路子），Vite 构建时重写成 `../cursors/…`。
+- **没有** `* { cursor }` 一类的全局覆盖：`arrow` / `text` / `pointer` 只画进套装、先不全局启用
+  （macOS 辅助功能里用户能调大光标 / 提高对比度，固定 32px 的 SVG 全局盖掉会破坏它）。
+
+### 实测
+
+探针：`dist` + 本地静态服务 + 真实 Chromium，逐一触发真实状态后读 `getComputedStyle(el).cursor`
+（探针与产物在 `/tmp/oa-probe/`，不进仓库）：
+
+| 接入点 | 浅色实测 | 深色实测 |
+| --- | --- | --- |
+| `.resize` 缩放手柄 | `url("…/cursors/resize-se-light.svg") 16 16, nwse-resize` | `…/resize-se-dark.svg` |
+| 桌面框选（`data-marquee=desk`） | `url("…/cursors/crosshair-light.svg") 16 16, crosshair` | `…/crosshair-dark.svg` |
+| 文件区框选（`data-marquee=files`） | `url("…/cursors/crosshair-light.svg") 16 16, crosshair` | `…/crosshair-dark.svg` |
+| 程序坞整理（`.dock.arranging`） | `url("…/cursors/grab-light.svg") 16 17, grabbing` | `…/grab-dark.svg` |
+| 非法落点（`data-drop-invalid=1`） | `url("…/cursors/not-allowed-light.svg") 2 2, not-allowed` | `…/not-allowed-dark.svg` |
+| ⌘ 拷贝（`data-cmd=1`） | `url("…/cursors/copy-light.svg") 2 2, copy` | `…/copy-dark.svg` |
+
+- 6 个接入点命中的都是我们的 SVG 文件名（不是系统关键字）；探针同时看到 Chromium 真实发起了这些
+  SVG 的请求，且 `Image` 解码 `ok / 32×32`。
+- 对照图（全部光标放大 4×，浅底 / 深底各一张）：`/tmp/oa-probe/compare-light.png`、`compare-dark.png`。
+- 真实 Electron 44（`dist` + `--no-sandbox`）用 `screencapture -C` 实拍：
+  `/tmp/oa-probe/resize-final.png`（最上层窗口右下角手柄上是自绘的黑色双向斜箭头）、
+  `/tmp/oa-probe/real-test.png`（把 `.window-body` 临时改成 `not-allowed`，验证灰色禁止符号确实由 OS 绘出）。
+- 实测位置取的是**最上层窗口**的 `.resize`：用 `document.elementFromPoint` 确认命中的就是它本身
+  （`hit===el` 为真），不是被内容盖住。
+
+### 门禁
+
+`npx tsc --noEmit` clean、`npm test` 96/96。
+
+### 未做 / 已知
+
+- ⌘ 拖动一旦进入 Electron 原生 `startDrag`，光标由 macOS / Electron 接管，页面 CSS 不再生效；
+  `data-cmd` 只覆盖「按住 ⌘ 悬停在可拖条目上」这一段。
+- 非法落点目前只覆盖「桌面图标跟手拖到程序坞 / 顶栏」这一路（CSS 可控的那一路）；
+  页面内 HTML5 拖拽（拖到文件夹）的落点光标由 Chromium 的拖拽层决定，CSS 改不了。
+- `arrow` / `text` / `pointer` / `open-hand` / `move` / `resize-n/s/e/w/ne/nw/sw` 已入套装，暂未接线。
+
 ## 2026-09-16（十二）：系统设置 / Skill 中心 / 应用中心 —— 顶栏整条都能拖
 
 用户口径：「系统设置 / Skill 中心 / 应用中心这三个窗口，顶栏只有左边一条能拖，

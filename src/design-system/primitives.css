@@ -115,7 +115,7 @@
 
 .ds-btn:disabled {
   opacity: var(--disabled-opacity);
-  cursor: not-allowed;
+  cursor: var(--cursor-not-allowed, not-allowed);
 }
 
 /* ── IconButton ─────────────────────────────────────────────────────────── */
@@ -162,7 +162,7 @@
 }
 .ds-iconbtn:disabled {
   opacity: var(--disabled-opacity);
-  cursor: not-allowed;
+  cursor: var(--cursor-not-allowed, not-allowed);
 }
 
 /* ── TextField ──────────────────────────────────────────────────────────── */
@@ -245,7 +245,7 @@
   box-shadow: none;
 }
 .ds-field__input:disabled {
-  cursor: not-allowed;
+  cursor: var(--cursor-not-allowed, not-allowed);
   opacity: var(--disabled-opacity);
 }
 

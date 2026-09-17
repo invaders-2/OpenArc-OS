@@ -110,11 +110,16 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
  *
  * @param opts.isTrusted (event) => boolean —— 与 windows:sync 同一条信任判据
  * @param opts.send      (payload) => void —— 把身份事件推给渲染进程
+ * @param opts.bootError 身份服务创建失败时的人话原因；有它时 service 必须为 null，
+ *                       启动询问会拿到 BOOT_FAILED，渲染层据此走已有的 BootRetry
  */
-function registerIdentityIpc({ ipcMain, service, authorization, device, resource, resourceSearch, resourcePreview, governance, governanceService, projects, canvas, picker, model, sideEffect = null, dialog, BrowserWindow, shell = null, isTrusted, send, sendSideEffect = null }) {
+function registerIdentityIpc({ ipcMain, service, authorization, device, resource, resourceSearch, resourcePreview, governance, governanceService, projects, canvas, picker, model, sideEffect = null, dialog, BrowserWindow, shell = null, isTrusted, send, sendSideEffect = null, bootError = null }) {
   ipcMain.handle("identity:command", async (e, command) => {
     if (isTrusted && !isTrusted(e)) throw Error("Forbidden");
-    if (!service) return { ok: false, error: "INTERNAL_ERROR", detail: "identity-not-ready" };
+    if (!service)
+      return bootError
+        ? { ok: false, error: "BOOT_FAILED", detail: String(bootError) }
+        : { ok: false, error: "INTERNAL_ERROR", detail: "identity-not-ready" };
     if (!command || typeof command !== "object") return { ok: false, error: "INVALID_INPUT" };
     try {
       return await service.dispatch(command);
@@ -123,7 +128,7 @@ function registerIdentityIpc({ ipcMain, service, authorization, device, resource
       return { ok: false, error: "INTERNAL_ERROR" };
     }
   });
-  if (send) service.onEvent((event) => send(event));
+  if (send && service) service.onEvent((event) => send(event));
   // D3-02：同一处注册对象授权只读命令（sessionRef 取自 IdentityService 当前会话）。
   if (authorization) registerAuthorizationIpc({ ipcMain, service: authorization, identity: service, isTrusted });
   // D3-03：设备域（含管理写操作；授权判断在 DeviceService 内，见 device-bootstrap 顶部注释）。

@@ -28,6 +28,8 @@ let win;
 let controller;
 let identity;
 let files;
+/** 身份服务创建失败时的人话原因；渲染层经 identity:command 的既有通道拿到它。 */
+let identityBootFailure = null;
 
 /**
  * 只读文件协议（Quick Look 的流式媒体源）。
@@ -48,7 +50,18 @@ if (!app.isReady()) {
   ]);
 }
 
-const uiURL = pathToFileURL(path.join(__dirname, "../dist/index.html")).href;
+/**
+ * 外壳页地址。
+ *
+ * 只认显式给出的 `OA_DEV_SERVER`：设了才加载 Vite dev server（实时预览用），
+ * 没设就是原来的构建产物 file:// 路径 —— 产品构建 / `npm run oa:app` 的行为逐字节不变。
+ * 归一化成 URL.href（补尾斜杠），与 senderFrame.url / will-navigate 报的形态对齐。
+ */
+const devURL = process.env.OA_DEV_SERVER ? new URL(process.env.OA_DEV_SERVER).href : null;
+const devOrigin = devURL ? new URL(devURL).origin : null;
+const uiURL = devURL || pathToFileURL(path.join(__dirname, "../dist/index.html")).href;
+
+if (devURL) console.log("[openarc] 开发预览：加载 " + devURL + "（OA_DEV_SERVER 已设置）");
 
 // D3-04C：安全预览自定义协议。**必须在 app ready 之前**注册 privileges。
 // Renderer 只能拿到 openarc-resource:// 短时 capability URL，绝不接触本地路径。
@@ -70,7 +83,12 @@ const NATIVE_TYPES = { ".mov": "video/quicktime", ".mp4": "video/mp4", ".m4v": "
  * 双重条件（sender + senderFrame.url）在 D1-05 冻结，本阶段不放宽。
  */
 function trusted(event) {
-  return event.sender === win?.webContents && event.senderFrame?.url === uiURL;
+  if (event.sender !== win?.webContents) return false;
+  const url = event.senderFrame?.url;
+  if (url === uiURL) return true;
+  // 开发预览：HMR 可能把文档地址带上 query/hash，按来源放行整棵同源页面。
+  // devOrigin 只在 OA_DEV_SERVER 显式开启时才非空，所以产品路径上这段永远不成立。
+  return devOrigin !== null && typeof url === "string" && url.startsWith(devOrigin + "/");
 }
 
 const isMac = process.platform === "darwin";
@@ -98,6 +116,38 @@ function installApplicationMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
+/**
+ * 启动失败 → 渲染层文案。
+ *
+ * schema 高于支持版本是**明确的、用户能理解的故障**：不迁移、不降级、不重置，
+ * 只如实说明。其它失败原因照抄异常文本（它是主进程自己抛的，不含用户数据）。
+ */
+function describeStartupFailure(error) {
+  if (error && error.code === "SCHEMA_TOO_NEW")
+    return `本机身份库版本（schema ${error.found}）高于当前程序支持的版本（${error.supported}），这个构建打不开它。本机数据未被改动。`;
+  return `启动失败：${String((error && error.message) || error || "未知错误")}`;
+}
+
+/**
+ * 启动链兜底：`app.whenReady()` 回调里任何抛出都会变成未处理的 rejection，
+ * 窗口就停在「已打开、页面没加载」的空白态。这里保证界面照常加载，
+ * 并把原因登记到身份命令通道 —— 渲染层因此走的是**已有的** BootRetry 界面。
+ */
+function recoverFromStartupFailure(error) {
+  identityBootFailure = describeStartupFailure(error);
+  console.error("[openarc] 启动失败：" + identityBootFailure);
+  try {
+    ipcMain.removeHandler("identity:command");
+  } catch {
+    /* 尚未注册 */
+  }
+  registerIdentityIpc({ ipcMain, service: null, isTrusted: trusted, bootError: identityBootFailure });
+  if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
+    const current = win.webContents.getURL();
+    if (!current || current === "about:blank") win.loadURL(uiURL);
+  }
+}
+
 app.whenReady().then(async () => {
   installApplicationMenu();
   // ---------------------------------------------------------------------------
@@ -107,20 +157,29 @@ app.whenReady().then(async () => {
   // against the actual created identity runtime.
   // identity 必须先于 modelProxy.start() 创建；顺序错误一律 loud fail，绝不静默吞掉。
   // ---------------------------------------------------------------------------
-  const runtime = await createOpenArcRuntime({
-    userDataDir: app.getPath("userData"),
-    safeStorage,
-    nativeImage,
-    // production executor 由 Electron utilityProcess.fork 启动（Node-enabled child，
-    // 不依赖 ELECTRON_RUN_AS_NODE / runAsNode fuse）；生命周期权威仍是 RuntimeSupervisor。
-    executorLauncher: createDefaultExecutorLauncher(),
-    // admin / 测试夹具命令默认关闭：产品 UI 里没有入口，也不该有。
-    // 只有显式置 OPENARC_IDENTITY_ADMIN=1 才放行（探针与未来的管理端用）。
-    allowAdmin: process.env.OPENARC_IDENTITY_ADMIN === "1",
-    // Control Service 身份（§60）：未配置时配对会因 SERVICE_IDENTITY_MISMATCH 被拒 —— 失败关闭。
-    serviceIdentity: process.env.OPENARC_SERVICE_IDENTITY || null,
-  });
-  identity = runtime.identity;
+  try {
+    const runtime = await createOpenArcRuntime({
+      userDataDir: app.getPath("userData"),
+      safeStorage,
+      nativeImage,
+      // production executor 由 Electron utilityProcess.fork 启动（Node-enabled child，
+      // 不依赖 ELECTRON_RUN_AS_NODE / runAsNode fuse）；生命周期权威仍是 RuntimeSupervisor。
+      executorLauncher: createDefaultExecutorLauncher(),
+      // admin / 测试夹具命令默认关闭：产品 UI 里没有入口，也不该有。
+      // 只有显式置 OPENARC_IDENTITY_ADMIN=1 才放行（探针与未来的管理端用）。
+      allowAdmin: process.env.OPENARC_IDENTITY_ADMIN === "1",
+      // Control Service 身份（§60）：未配置时配对会因 SERVICE_IDENTITY_MISMATCH 被拒 —— 失败关闭。
+      serviceIdentity: process.env.OPENARC_SERVICE_IDENTITY || null,
+    });
+    identity = runtime.identity;
+  } catch (error) {
+    // 打不开身份库（schema 过新 / 钥匙串被拒 …）不是崩溃，而是**要说出来的启动失败**：
+    // 记下原因后继续把窗口与只读能力装配完，registerIdentityIpc 以 service:null + bootError
+    // 交回渲染层，界面走已有的 BootRetry。
+    identityBootFailure = describeStartupFailure(error);
+    console.error("[openarc] 身份服务启动失败：" + identityBootFailure);
+  }
+
 
 
   win = new BrowserWindow({
@@ -185,7 +244,9 @@ app.whenReady().then(async () => {
 
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   win.webContents.on("will-navigate", (e, url) => {
-    if (url !== uiURL) e.preventDefault();
+    if (url === uiURL) return;
+    if (devOrigin !== null && url.startsWith(devOrigin + "/")) return;
+    e.preventDefault();
   });
 
   /**
@@ -195,7 +256,12 @@ app.whenReady().then(async () => {
    * （A13 的反面：不可信网页不得拿到系统能力）。其余权限维持原有行为，不额外扩张。
    */
   const appDir = pathToFileURL(path.join(__dirname, "..", "dist")).toString();
-  const isAppPage = (url) => typeof url === "string" && url.startsWith(appDir);
+  const isAppPage = (url) => {
+    if (typeof url !== "string") return false;
+    if (url.startsWith(appDir)) return true;
+    // 开发预览下外壳页是 dev server 同源页面，麦克风权限同样只给这一来源。
+    return devOrigin !== null && url.startsWith(devOrigin + "/");
+  };
   const micOnly = (url, mediaTypes) => {
     const types = Array.isArray(mediaTypes) && mediaTypes.length ? mediaTypes : ["audio"];
     return isAppPage(url) && types.includes("audio") && !types.includes("video");
@@ -216,26 +282,27 @@ app.whenReady().then(async () => {
   // ---------------------------------------------------------------------------
   registerIdentityIpc({
     ipcMain,
-    service: identity.service,
-    authorization: identity.authorization,
-    device: identity.deviceService,
+    service: identity?.service,
+    authorization: identity?.authorization,
+    device: identity?.deviceService,
     // D3-04A：资源命令。导入/链接的文件选择在主进程完成，路径不回渲染进程。
-    resource: identity.resourceService,
-    resourceSearch: identity.searchService,
-    resourcePreview: identity.previewService,
+    resource: identity?.resourceService,
+    resourceSearch: identity?.searchService,
+    resourcePreview: identity?.previewService,
     // D3-04D：治理 / Projects / Canvas / Picker。
-    governance: identity.governanceService,
-    projects: identity.projectService,
-    canvas: identity.canvasService,
-    picker: identity.pickerService,
+    governance: identity?.governanceService,
+    projects: identity?.projectService,
+    canvas: identity?.canvasService,
+    picker: identity?.pickerService,
     // D4-01：模型命令（Settings → Models；无 raw credential / proxy capability）。
-    model: identity.modelService,
+    model: identity?.modelService,
     // D4-03C4：Trusted Approval Gateway（只暴露安全 approval 投影 + trusted user decision）。
-    sideEffect: identity.sideEffectGateway,
+    sideEffect: identity?.sideEffectGateway ?? null,
     dialog,
     shell,
     BrowserWindow,
     isTrusted: trusted,
+    bootError: identityBootFailure,
     send: (event) => {
       if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return;
       win.webContents.send("identity:event", event);
@@ -246,19 +313,22 @@ app.whenReady().then(async () => {
     },
   });
 
-  // D4-04：Renderer 可发起真实 AI Task（Task Runtime + official dsh + Tool Facade），
-  // sessionRef/appId 由主进程注入；进度经 task:event 推送。
-  registerTaskIpc({
-    ipcMain,
-    taskService: identity.taskService,
-    orchestrator: identity.orchestrator,
-    identity: identity.service,
-    isTrusted: trusted,
-    send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("task:event", event); },
-  });
+  // 身份 runtime 存在时才注册依赖它的能力；boot 失败时窗口仍照常加载并走 BootRetry。
+  if (identity) {
+    // D4-04：Renderer 可发起真实 AI Task（Task Runtime + official dsh + Tool Facade），
+    // sessionRef/appId 由主进程注入；进度经 task:event 推送。
+    registerTaskIpc({
+      ipcMain,
+      taskService: identity.taskService,
+      orchestrator: identity.orchestrator,
+      identity: identity.service,
+      isTrusted: trusted,
+      send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("task:event", event); },
+    });
 
-  // D3-04C：注册安全预览协议 handler（每次请求重新授权 + Range 流式返回）。
-  protocol.handle("openarc-resource", (request) => identity.previewService.handleProtocolRequest(request));
+    // D3-04C：注册安全预览协议 handler（每次请求重新授权 + Range 流式返回）。
+    protocol.handle("openarc-resource", (request) => identity.previewService.handleProtocolRequest(request));
+  }
 
   // ---------------------------------------------------------------------------
   // D3-04 · 本地文件服务。和身份服务同一原则：能力在**主进程**，
@@ -493,7 +563,7 @@ app.whenReady().then(async () => {
   win.webContents.once("did-finish-load", () => {
     if (win && !win.isDestroyed()) win.webContents.send("display:changed", displayInfo());
   });
-});
+}).catch(recoverFromStartupFailure);
 
 app.on("window-all-closed", () => app.quit());
 

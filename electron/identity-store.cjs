@@ -1155,6 +1155,20 @@ function isBusy(err) {
   return s.includes("SQLITE_BUSY") || s.includes("database is locked");
 }
 
+/**
+ * schema 高于本程序支持：**不迁移、不降级、不重置**，只把原因结构化地说清楚。
+ * 主进程据此生成渲染层文案，不必去猜异常文本。
+ */
+class SchemaTooNewError extends Error {
+  constructor(found, supported) {
+    super(`身份库 schema_version=${found} 高于本程序支持的 ${supported}，拒绝打开。`);
+    this.name = "SchemaTooNewError";
+    this.code = "SCHEMA_TOO_NEW";
+    this.found = found;
+    this.supported = supported;
+  }
+}
+
 /** 只包一层，把 node:sqlite 的缺失变成一句能行动的报错。 */
 function openDatabase(path) {
   let sqlite;
@@ -1228,8 +1242,7 @@ class IdentityStore {
    */
   #migrate() {
     const current = this.schemaVersion;
-    if (current > SCHEMA_VERSION)
-      throw new Error("身份库 schema_version=" + current + " 高于本程序支持的 " + SCHEMA_VERSION + "，拒绝打开。");
+    if (current > SCHEMA_VERSION) throw new SchemaTooNewError(current, SCHEMA_VERSION);
     if (current === SCHEMA_VERSION) return;
     for (const migration of MIGRATIONS) {
       if (migration.version <= current) continue;
@@ -2334,6 +2347,8 @@ class IdentityStore {
 }
 
 module.exports = {
+  IdentityStore,
+  SchemaTooNewError,
   SCHEMA_VERSION,
   SCHEMA_SQL,
   SCHEMA_V2_SQL,

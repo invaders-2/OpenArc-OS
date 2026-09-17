@@ -312,7 +312,7 @@
 }
 .traffic button:disabled {
   background: rgba(125, 125, 125, 0.5);
-  cursor: default;
+  cursor: var(--cursor-arrow, default);
 }
 .traffic button:disabled svg {
   opacity: 0;
@@ -687,7 +687,7 @@ p {
    拖动项跟手（transform 由 useDockArrange 直接写），兄弟项 200ms 让位；
    抖动挂在**独立的 rotate 属性**上，避免和 --s 的 scale 抢同一个 transform。 */
 .dock.arranging .dock-item {
-  cursor: grabbing;
+  cursor: var(--cursor-grab, grabbing);
   transition: transform 200ms var(--ease-spring);
 }
 .dock.arranging .dock-icon {
@@ -718,7 +718,7 @@ p {
   position: absolute;
   right: 0;
   bottom: 0;
-  cursor: nwse-resize;
+  cursor: var(--cursor-resize-se, nwse-resize);
   width: 22px;
   height: 22px;
   touch-action: none;
@@ -738,6 +738,9 @@ p {
 .setting-range {
   width: 190px;
   accent-color: var(--accent);
+}
+.setting-range:disabled {
+  opacity: var(--disabled-opacity);
 }
 .setting-range-value {
   min-width: 38px;
@@ -912,7 +915,7 @@ input[type="checkbox"] {
 }
 .icon-button:disabled {
   opacity: var(--disabled-opacity);
-  cursor: default;
+  cursor: var(--cursor-arrow, default);
 }
 .search-field {
   display: flex;
@@ -1556,7 +1559,7 @@ input[type="checkbox"] {
   padding: 8px 4px;
   /* D2-02 保留：桌面文件夹磁贴；最近刻度 8/12px 差 2px */
   border-radius: 10px;
-  cursor: default;
+  cursor: var(--cursor-arrow, default);
   user-select: none;
   touch-action: none;
   transition: background var(--quick) var(--ease);
@@ -1874,7 +1877,7 @@ input[type="checkbox"] {
   background: var(--sunken);
   color: var(--text);
   font-size: var(--fs-caption);
-  cursor: pointer;
+  cursor: var(--cursor-arrow, default);
 }
 .control-button:hover {
   background: var(--row-hover);
@@ -2221,7 +2224,7 @@ input[type="checkbox"] {
   color: var(--text);
   font-size: var(--fs-caption);
   text-align: center;
-  cursor: default;
+  cursor: var(--cursor-arrow, default);
   user-select: none;
   transition: background var(--quick) var(--ease);
 }
@@ -2505,6 +2508,34 @@ input[type="checkbox"] {
   font-size: var(--fs-title);
   font-weight: var(--fw-medium);
   letter-spacing: var(--tracking-tight);
+}
+
+/* 启动失败兜底（BootRetry，见 AuthScreens.tsx）。
+   此刻桌面基底是内置壁纸色（默认 theme-dark = #171717，**不随主题变**），
+   内容直接落在它上面：全局 .control-button 用 --sunken 底 + --text 字，
+   浅色主题下等于"深字压深底"，整块按钮糊掉。这里只在 boot-retry 作用域里
+   给一块跟随主题的实底面板 + 成对前景（accent / on-accent），
+   不碰 .control-button 本体，也不需要去猜主题。 */
+[data-d3-id="boot-retry"] .auth-boot {
+  max-width: 560px;
+  padding: var(--space-6) var(--space-8);
+  border-radius: var(--radius-xl);
+  background: rgb(var(--surface-rgb) / 0.96);
+  box-shadow: var(--elevation-4);
+}
+[data-d3-id="boot-retry"] .auth-boot .muted {
+  color: var(--text);
+  text-align: center;
+  line-height: var(--lh-normal);
+}
+[data-d3-id="boot-retry"] .control-button {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: var(--fw-medium);
+}
+[data-d3-id="boot-retry"] .control-button:hover {
+  background: var(--accent);
+  filter: brightness(1.12);
 }
 
 /* 锁屏：覆盖在最上层，且必须挡住原生网页视图的键盘与指针。
@@ -2906,7 +2937,7 @@ input[type="checkbox"] {
   background: var(--folder-back);
   border-radius: 0 0.1em 0.1em 0.1em;
   transition: transform 200ms ease-in;
-  cursor: pointer;
+  cursor: var(--cursor-arrow, default);
 }
 /* 左上那个小"舌头" */
 .rb-folder-tab {
@@ -3058,5 +3089,108 @@ input[type="checkbox"] {
 .profile-actions .primary:disabled {
   opacity: var(--disabled-opacity);
   cursor: default;
+}
+
+/* ── 自绘光标（OpenArc 光标套装）────────────────────────────────────────
+   形状照着系统自带的 cursors 目录（ApplicationServices / HIServices framework 的
+   Resources/cursors）的轮廓重画 —— 只做形状参考，**没有拷贝或引用任何系统文件**。
+   32×32；整套统一为**实心填充（浅色 #000 / 深色 #fff）+ 1px 30% 对比色描边**，
+   描边用 paint-order="stroke fill"（压在填充下面，只露外面半条），**没有阴影副本**；
+   圆角端点 / 连接，多边形转角统一倒圆（不用 SVG filter —— 光标位图里 filter 不稳）。
+   两套外观按主题切换：浅色 = 黑填充 + rgba(255,255,255,0.3) 描边，
+   深色 = 白填充 + rgba(0,0,0,0.3) 描边。
+
+   public/cursors/*.svg 仍是唯一来源：渲染层（src/desktop/cursors.ts）把它们用 Vite 的
+   ?raw 内联进 bundle，运行时生成 data URL 写到根上的 --cursor-* 变量 —— CSS 的 cursor
+   没有尺寸参数，"光标大小"与"开关"都只能在运行时重组这条声明。这里只负责"哪个元素用哪个
+   变量"，并在 var() 里保留原生关键字兜底：变量还没写进来、或用户关掉自绘光标时，拿到的
+   就是那些关键字。
+   热点（32 网格，缩放时按 size/32 同步缩放）：箭头尖端 2,2；I 型竖笔中点略偏上 16,15；
+   十字 / 双箭头中心 16,16；握紧手 16,17；禁止 / 拷贝 2,2；链接手型指尖 10,5。 */
+
+/* 全局默认指针：`cursor` 只在真正的根 `:root`（html）上设一次，整个文档（含登录 / 锁屏 /
+   初始化那几屏，它们都在 .desktop 里）靠继承全覆盖 —— 不用 `* {}`。主题切换由渲染层重写
+   --cursor-* 变量完成，这里不再需要 :root:has(.dark)。
+   显式声明 cursor 的语义处（文本 / 缩放 / 框选 / 抓取 / 禁止 / 拷贝）优先级更高，不会被这里覆盖。 */
+:root {
+  cursor: var(--cursor-arrow, default);
+}
+
+/* 按钮 / 可点条目一律拿箭头（macOS 口味：按钮不显示手型，只有链接显示手型）。
+   以前 `button { cursor: pointer }` 会把手型带给所有按钮，并经继承扩散到它们的所有子节点；
+   这里连同可能挂在 label 上的 `.control-button`、挂在 span 上的 `.rb-folder-inner` 一起改成箭头。 */
+button {
+  cursor: var(--cursor-arrow, default);
+}
+/* 真正的链接换成自绘手型（不再落回系统 pointer） */
+a[href],
+[role="link"] {
+  cursor: var(--cursor-pointer, pointer);
+}
+/* Chromium 的 UA 样式给 <label> 声明了 cursor:default，会盖过继承（实测：
+   文件窗口搜索框那层 label.search-field）。label 本身只是点击热区，
+   让它继续跟随父节点即可；里面的文本输入仍有自己的 I 型。 */
+label {
+  cursor: inherit;
+}
+
+/* 文本 / 可编辑区用自绘 I 型（text-*.svg）。热点在竖笔中点略偏上（16,15 / 32 网格）。 */
+.desktop textarea,
+.desktop [contenteditable="true"],
+.desktop input:not([type="range"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="color"]) {
+  cursor: var(--cursor-text, text);
+}
+/* 非文本表单控件：Chromium 的 UA 样式给 range / file / checkbox / select 声明了
+   cursor:default 或 auto，会盖过继承，所以这里必须显式换成我们的箭头 ——
+   这样"凡 CSS 能控制的地方都命中自绘光标"。按钮类跟 <button> 一样是箭头。 */
+.desktop input[type="range"],
+.desktop input[type="file"],
+.desktop input[type="checkbox"],
+.desktop input[type="radio"],
+.desktop input[type="color"],
+.desktop select {
+  cursor: var(--cursor-arrow, default);
+}
+.desktop input[type="button"],
+.desktop input[type="submit"],
+.desktop input[type="reset"] {
+  cursor: var(--cursor-arrow, default);
+}
+
+/* 窗口右下角缩放手柄（双箭头中心即热点） */
+.resize {
+  cursor: var(--cursor-resize-se, nwse-resize);
+}
+
+/* 桌面 / 文件区按住框选：十字（原生 crosshair） */
+.desktop[data-marquee="desk"],
+.desktop[data-marquee="desk"] .desktop-folder,
+.desktop[data-marquee="desk"] .desktop-file {
+  cursor: var(--cursor-crosshair, crosshair);
+}
+.folder-body[data-marquee="files"],
+.folder-body[data-marquee="files"] .file-cell {
+  cursor: var(--cursor-crosshair, crosshair);
+}
+
+/* 拖拽进行中（程序坞整理）：握紧手 */
+.dock.arranging .dock-item {
+  cursor: var(--cursor-grab, grabbing);
+}
+
+/* 拖到非法落点（程序坞 / 顶栏不接受桌面拖拽）：禁止（原生 not-allowed） */
+.desktop[data-drop-invalid="1"],
+.desktop[data-drop-invalid="1"] .dock,
+.desktop[data-drop-invalid="1"] .dock *,
+.desktop[data-drop-invalid="1"] .topbar,
+.desktop[data-drop-invalid="1"] .topbar * {
+  cursor: var(--cursor-not-allowed, not-allowed);
+}
+
+/* ⌘ 按住（拖到系统 = 拷贝 / 别名）：拷贝 */
+.desktop[data-cmd="1"] .desktop-file,
+.desktop[data-cmd="1"] .desktop-folder,
+.desktop[data-cmd="1"] .file-cell {
+  cursor: var(--cursor-copy, copy);
 }
 

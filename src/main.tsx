@@ -35,6 +35,7 @@ import "./styles.css";
 import domain from "../electron/window-domain.cjs";
 import type { WindowCommand } from "../electron/window-domain.cjs";
 import { useDesktop } from "./desktop/useDesktop";
+import { applyCursors, CURSOR_SIZE_DEFAULT, CURSOR_SIZE_MAX, CURSOR_SIZE_MIN } from "./desktop/cursors";
 // 别名导入：本模块里有 `declare global { interface Window }`，
 // 直接叫 Window 会在类型位置与全局 Window 撞名。
 import {
@@ -355,6 +356,12 @@ function App() {
     const v = Number(localStorage.getItem("oa-desk-icon"));
     return Number.isFinite(v) && v >= 40 && v <= 96 ? v : 58;
   });
+  /** 自绘光标：开关（false = 整套退回系统关键字）与尺寸（px）。 */
+  const [cursorCustom, setCursorCustom] = useState(() => localStorage.getItem("oa-cursor-custom") !== "false");
+  const [cursorSize, setCursorSize] = useState(() => {
+    const v = Number(localStorage.getItem("oa-cursor-size"));
+    return Number.isFinite(v) && v >= CURSOR_SIZE_MIN && v <= CURSOR_SIZE_MAX ? v : CURSOR_SIZE_DEFAULT;
+  });
   /**
    * 程序坞的成员与顺序。**这个数组就是唯一真值**：顺序即顺序，缺谁就是谁被移除。
    * 读取时不自动补回缺失的 app —— 补回来的话用户永远删不掉任何一个。
@@ -468,6 +475,10 @@ function App() {
   /** 桌面框选：选中的桌面条目（文件夹与文件同一个集合）+ 橡皮筋矩形。 */
   const [deskSel, setDeskSel] = useState<string[]>([]);
   const [deskMarquee, setDeskMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  /** 桌面拖拽悬停在"不接受落点"的区域（程序坞 / 顶栏）：自绘禁止光标。 */
+  const [deskDropInvalid, setDeskDropInvalid] = useState(false);
+  /** 按住 ⌘（拖到系统 = 拷贝/别名）：可拖拽条目换成自绘拷贝光标。 */
+  const [cmdDown, setCmdDown] = useState(false);
   const [info, setInfo] = useState<{ title: string; subtitle?: string; rows: { k: string; v: string }[] } | null>(null);
   /** 应用内剪贴板（复制 / 剪切），粘贴进当前文件夹。 */
   const [clip, setClip] = useState<{ mode: "copy" | "cut"; folderId: string; ids: string[] } | null>(null);
@@ -999,6 +1010,17 @@ function App() {
       const dy = p.clientY - y0;
       for (const [x, s] of starts) setDeskEntryPos(x, clampDeskPos({ x: s.x + dx, y: s.y + dy }));
       markTarget(resolveTarget(p.clientX, p.clientY, rectAt(dx, dy))?.el ?? null);
+      // 落点无效（程序坞 / 顶栏不吃桌面拖拽）时才换禁止光标：跳过跟手的图标本身再看下一层
+      let invalid = false;
+      for (const node of document.elementsFromPoint(p.clientX, p.clientY)) {
+        const el = node as HTMLElement;
+        const tile = el.closest?.("[data-entry-id],[data-folder-id]") as HTMLElement | null;
+        const tileId = tile?.dataset.entryId || tile?.dataset.folderId;
+        if (tileId && ids.includes(tileId)) continue;
+        invalid = !!(el.closest?.(".dock") || el.closest?.(".topbar"));
+        break;
+      }
+      setDeskDropInvalid((cur) => (cur === invalid ? cur : invalid));
     };
     const end = (ev?: PointerEvent) => {
       el.removeEventListener("pointermove", move);
@@ -1006,6 +1028,7 @@ function App() {
       el.removeEventListener("pointercancel", end);
       const hit = ev ? resolveTarget(ev.clientX, ev.clientY, rectAt(ev.clientX - x0, ev.clientY - y0)) : null;
       markTarget(null);
+      setDeskDropInvalid(false);
       if (hit) {
         void moveInto(hit.id, DESKTOP_ID, ids).then(() => {
           setDesktopIcons((m) => {
@@ -1365,9 +1388,16 @@ function App() {
       ["dark", dark],
       ["dock-size", dockSize],
       ["desk-icon", deskIcon],
+      ["cursor-custom", cursorCustom],
+      ["cursor-size", cursorSize],
     ])
       localStorage.setItem("oa-" + k, String(v));
-  }, [reduced, glass, dark, dockSize, deskIcon]);
+  }, [reduced, glass, dark, dockSize, deskIcon, cursorCustom, cursorSize]);
+
+  // 自绘光标：尺寸 / 开关 / 深浅色任一变化都重写根上的 --cursor-* 变量。
+  useEffect(() => {
+    applyCursors({ enabled: cursorCustom, size: cursorSize, dark });
+  }, [cursorCustom, cursorSize, dark]);
   useEffect(() => {
     localStorage.setItem("oa-dock", JSON.stringify(dockIds));
   }, [dockIds]);
@@ -1423,6 +1453,20 @@ function App() {
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, [setOverlays]);
+
+  /** ⌘ 的按下/抬起只改指针外观；拖拽行为仍在各自的手势里决定。 */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => setCmdDown(e.metaKey);
+    const off = () => setCmdDown(false);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKey);
+    window.addEventListener("blur", off);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKey);
+      window.removeEventListener("blur", off);
+    };
+  }, []);
 
   const runningApps = useMemo(() => new Set(state.windows.map((w) => w.appId)), [state.windows]);
   /** 顶栏的最近应用：**一个 App 一个图标**（文件夹折进访达），保留每个身份最新的那个窗口。 */
@@ -1847,6 +1891,7 @@ function App() {
             <div
               className="folder-body"
               data-drop-folder={shown.id}
+              data-marquee={marquee?.winId === id ? "files" : undefined}
               onPointerDown={startMarquee}
               onContextMenu={(e) => {
                 e.preventDefault();
@@ -2174,6 +2219,27 @@ function App() {
                       aria-label="桌面图标大小"
                     />
                     <span className="setting-range-value">{deskIcon}px</span>
+                  </span>
+                </div>
+                <Switch label="使用自绘光标" checked={cursorCustom} onChange={setCursorCustom} />
+                <div className="setting-row">
+                  <span>
+                    光标大小
+                    <span className="footnote"> 拖动滑块调整自绘光标尺寸</span>
+                  </span>
+                  <span className="setting-range-wrap">
+                    <input
+                      className="setting-range"
+                      type="range"
+                      min={CURSOR_SIZE_MIN}
+                      max={CURSOR_SIZE_MAX}
+                      step={1}
+                      value={cursorSize}
+                      disabled={!cursorCustom}
+                      onChange={(e) => setCursorSize(Number(e.target.value))}
+                      aria-label="光标大小"
+                    />
+                    <span className="setting-range-value">{cursorSize}px</span>
                   </span>
                 </div>
                 <div className="setting-row">
@@ -2672,6 +2738,9 @@ function App() {
   return (
     <div
       className={`desktop ${dark ? "dark" : ""} ${reduced ? "reduced" : ""}`}
+      data-marquee={deskMarquee ? "desk" : undefined}
+      data-drop-invalid={deskDropInvalid ? "1" : undefined}
+      data-cmd={cmdDown ? "1" : undefined}
       data-glass={glass}
       data-identity-gate={gate}
       data-wallpaper={wallpaper}
