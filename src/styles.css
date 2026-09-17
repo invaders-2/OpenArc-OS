@@ -2352,16 +2352,20 @@ input[type="checkbox"] {
   justify-content: flex-end;
   /* Apple 锁屏：身份块落在下半屏，不居中 */
   padding: var(--space-8) var(--space-8) clamp(48px, 15vh, 150px);
-  /* 三层纵深，全部取中性 token：底座 → 顶部柔光 → 时钟后方一圈极淡高光。
-     不引入新颜色，也不靠发丝线或重投影分层（DESIGN_SYSTEM §3.2）。 */
+  /* 多层纵深，全部取中性 token：底座 → 顶部柔光 → 上下文字保护 scrim → 时钟后方一圈极淡高光。
+     两条 scrim 与底座同取 --base-rgb，所以浅色主题即浅、深色主题即深，自动跟随主题；
+     它们只负责把时钟、身份块与脚注从透出的壁纸质感里"托"起来，不引入新颜色，
+     也不靠发丝线或重投影分层（DESIGN_SYSTEM §3.2）。 */
   background:
     radial-gradient(
       560px 300px at 50% clamp(48px, 15vh, 132px),
       color-mix(in srgb, var(--material-top-highlight) 30%, transparent),
       transparent 68%
     ),
+    linear-gradient(180deg, rgb(var(--base-rgb) / 0.34), transparent 34%),
+    linear-gradient(0deg, rgb(var(--base-rgb) / 0.46), transparent 50%),
     linear-gradient(180deg, rgb(var(--surface-rgb) / 0.08), transparent 42%),
-    rgb(var(--base-rgb) / 0.55);
+    rgb(var(--base-rgb) / 0.72);
   background-repeat: no-repeat;
   backdrop-filter: var(--glass-filter);
   -webkit-backdrop-filter: var(--glass-filter);
