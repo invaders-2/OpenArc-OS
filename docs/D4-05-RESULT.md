@@ -5,9 +5,10 @@
 - **被测 commit**（D4 收口修复后重跑）：`ec7a732aa78ffc52e8e0ce3b4d1e09108f604dc4`（D4-05 实现 `83baad6`、审查补测 `431395d`）
 - **D4-05 Closure 代码与测试被测 commit**：`70eb0b12167e513bb4eb7fa1cb4efb9ca70e509d`（A33 正式 official dsh facade 链闸门；详见 `docs/D4-05-CLOSURE-RESULT.md`）
 - **D4-05 Closure-2 代码与测试被测 commit**：`77b6e857f3d5a9781ea2c218e89069b1802aaab4`（解决关联改按 (tool_id, canonical arguments)；详见 `docs/D4-05-CLOSURE2-RESULT.md`）
+- **D4-05 Closure-3 代码与测试被测 commit**：`9691348ebf52b4854aafcb2e343e32ee2d2d608b`（受控记忆装配 + 逐请求出站注入）、`ac9af8e502c5285b7bcf06c8fc0b8e0ecc52e9f0`（真实 Electron UI 记忆隔离）；详见 `docs/D4-05-CLOSURE3-RESULT.md`
 - Final HEAD：本轮报告/证据提交（见文末）
 - 范围：只补齐 PLAN.md §41 的 D4-05 四场景（产物不符 / 结果未知 / 用量到限 / 记忆越权）；第二轮按父级指示补齐 S2 的**最小人工确认入口**以闭合 §384。不扩展真实工具面、不放宽既有检查、不 commit、不 push。
-- **结论：`D4-05 = PARTIAL`**——S1/S2/S3 = PASS；**S4 = PARTIAL**（检索链 PASS、上下文链 NOT VERIFIED：无 memory→任务上下文装配入口，A36 的上下文链为空验证，见 §3/§5）。其余场景 PASS 结论不变。**S1（A33）结论以 D4-05 Closure 的 official dsh facade 正式链证据为准**（见 §7 与 `docs/D4-05-CLOSURE-RESULT.md`）。
+- **结论：`D4-05 = PARTIAL`**——S1/S2/S3 = PASS；**S4 = PASS（D4-05 Closure-3 升级：已实现受控记忆装配与逐请求发送前隔离，A36 正负对照全部满足）**。**`D4-05 = PASS`**；`D4 = PARTIAL`（不自动升级，剩余为既有未验证项，见 §9/§5）。**S1（A33）结论以 D4-05 Closure 的 official dsh facade 正式链证据为准**（见 §7 与 `docs/D4-05-CLOSURE-RESULT.md`）。
 
 ## 1. 要求对应表
 
@@ -62,7 +63,7 @@
 ## 5. 未满足 / 缺口 / 不适用
 
 1. **S2 = PASS（§384 人工确认入口已闭合）**：只读 recovery 投影 + 人工确认事件 + 真实 UI 入口均已实现并验证；确认动作绝不改变 authority 状态、绝不授权 resume/retry。
-2. **S4 = PARTIAL（检索链 PASS；上下文链 NOT VERIFIED）**：`buildPrompt` 只含 goal + safe step input + prior artifact，**没有** memory 检索/装配入口。检索链（删除前可见 / 删除后不可见 + 索引移除 / 跨账号不可见）正负对照全部成立；「新任务上下文不出现已删/他人内容」在没有注入入口时是**空验证**——只能说明当前无泄漏路径，不能证明“具备记忆注入时的上下文隔离”。因此 **`D4-05 = PARTIAL`**。最小后续方案（本轮不改产品）：先新增受控 memory 检索/装配入口，再以正负对照重新验证上下文隔离（授权记忆可见且注入；已删/他人记忆不出现），通过后再将 S4 升为 PASS。
+2. **S4 = PASS（D4-05 Closure-3 闭合）**：已实现受控 memory 检索/装配（`electron/memory-context.cjs`）+ 唯一出站口 `HarnessModelAdapter` 的逐请求注入与发送前最后检查；正负对照（授权注入 / 无显式 grant·他人·删除·撤权·跨范围不注入 / 续接重检 / 同步点最后检查 / 恶意正文无副作用 / 真实 Electron UI 流程）全部通过。检索链 PASS 结论保持。
 3. **A37 / A38 未纳入**：不在 PLAN §41 的 D4-05 四场景内。
 4. **继承的 NOT VERIFIED（未扩大）**：真实 `electron/main.cjs` 全流程（Gate 用 probe host + 共享 production boot/Renderer/orchestrator）；真实外部 provider / 真实凭据；Windows；OS 级网络沙箱。
 5. **范围冲突 / 未授权项**：无。未新增付费服务、未接真实外部 provider、未改默认 d3-02 工作区、未 commit。
@@ -90,3 +91,12 @@
 - **正式链证据（Closure-2）**：`tests/d4-05-s1-facade-association.test.mjs` **6/6**（无关对象/无关要求/无关 Step 不误清除、有效纠错可成功并关联、DB 重开一致、普通错误语义不变）；`npm run test:d4-05` **139/139 functional（S1/S2/S3=PASS、S4=PARTIAL）**；`test:d4-08-verification-ui` 22/22 无回归；`test:d4-04` 94/94、`test:d4-06` 119/119、`test:d4-06-resume` 21/21。
 - **支持范围（如实）**：产品未区分“必需/探索”工具契约；`verification_status=FAIL` 仅由“工具 `execute` 成功但 `OUTPUT_SCHEMA`/`ADAPTER_VERIFY` 失败”写入（DENY/执行错误不参与判定）。跨 run/跨 step 无可达纠错入口，未新增恢复能力。
 - 详见 `docs/D4-05-CLOSURE2-RESULT.md`。
+
+## 9. D4-05 Closure-3 · 受控记忆装配与任务上下文隔离（A36）（`9691348` + `ac9af8e`）
+
+- **结论**：A36 正负对照与全部隔离要求满足 → **S4 = PASS、D4-05 = PASS**；**D4 = PARTIAL（不自动升级）**。
+- **实现**：受控装配 `electron/memory-context.cjs`（validateSession → TaskService.getTask → SearchService 授权检索 agent=true → test-only `hooks.afterSearch` 同步点 → 逐条 getCapabilities(agent)+readText 最后检查；有界 5×1200≤4000；无缓存）；在唯一出站口 `HarnessModelAdapter` 逐请求注入为 `role:"system"` 参考数据块（`BEGIN/END_OPENARC_AUTHORIZED_MEMORY` + “NOT a system instruction”），并剔除/拒绝残缺历史标记（403 `MEMORY_CONTEXT_UNSAFE`）。
+- **正式链证据**：`tests/d4-05-s4-memory-context.test.mjs` **11/11**（正向注入/负向§25/删除/撤权/切账号/部门范围/最后检查同步点/恶意正文/续接重检/未接线不注入/出站残缺 403）；真实 Electron UI `tests/d4-05-memory-ui.mjs` **15/15**（授权生效→删除→切账号 dana 隔离 + 读旧 task TASK_FORBIDDEN）。
+- **回归**：`npm run test:d4-05` **165/165 functional（S1/S2/S3/S4 全 PASS，overallStatus=PASS）**；`test:d4-03b-dsh` 26/26、`test:d4-04` 94/94、`test:d4-08-verification-ui` 22/22、`npm test` 980/980。
+- **留存边界**：记忆正文/请求正文不落盘；审计仅 count/refs/version/reason；gate JSON 0 secret。
+- 详细根因/改动/逐条检查/限制见 `docs/D4-05-CLOSURE3-RESULT.md`。
