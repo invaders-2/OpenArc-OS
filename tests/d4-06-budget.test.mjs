@@ -184,7 +184,9 @@ test("D4-06 · 保留产物：step1 成功后 step2 预算停止 → step1 Artif
     assert.equal(fx.taskStore.artifactsOfTask(t.task.taskId).filter((a) => a.step_id === s2.step.stepId).length, 0, "step2 必须 0 Artifact");
     assert.equal(fx.taskStore.verificationsOfTask(t.task.taskId).filter((v) => v.task_id === t.task.taskId).length, 1);
     const step2Execs = fx.toolStore.executionsOfTask(t.task.taskId).filter((e) => e.step_id === s2.step.stepId);
-    assert.equal(step2Execs.length, MAX_TOOL_ROUNDS, "step2 恰好 4 次 execution");
+    // D4-06 Closure：TOOL_ROUNDS 是任务级跨 run 累计。step1 的 side-effect loop 已消耗 1 轮，
+    // step2 的 READ loop 上界 = min(MAX_TOOL_ROUNDS, 任务剩余 3) = 3（不再自动清零成 4）。
+    assert.equal(step2Execs.length, MAX_TOOL_ROUNDS - 1, "step2 恰好 3 次 execution（任务剩余轮次）");
     // 停止不回滚已发生的副作用；也不产生补偿动作。
     assert.equal(fx.f.resourceService.sideEffectPrecondition({ resourceRef }).trashed, true, "预算停止不得回滚已发生的已提交副作用（不声称回滚）");
     assert.equal(fx.sideEffectStore.callById(call.callId).status, "SUCCEEDED", "已完成的 SideEffectCall 保持 SUCCEEDED");

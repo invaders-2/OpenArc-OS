@@ -60,6 +60,13 @@ export async function createToolHarnessFixture(opts = {}) {
   const sideEffectStore = new SideEffectStore({ identity: base.f.identity, clock: sideEffectClock });
   // D4-06 Closure：把只读预算账本 store 接到同一 TaskService（与 production bootstrap 一致）。
   base.taskService.attachBudgetStores({ toolStore, sideEffectStore });
+  // D4-06 Closure：任务级账本 base 必须与本次运行的 facade 额度同源（production bootstrap 也是这样），
+  // 否则 runtime capability quota 与 ledger remaining 会漂移。
+  base.taskService.attachBudgetConfig({
+    modelMaxCalls: opts.modelMaxCalls,
+    toolMaxCalls: opts.facadeMaxCalls != null ? opts.facadeMaxCalls : opts.toolMaxCalls,
+    maxToolRounds: opts.maxToolRounds,
+  });
   // D4-03C4：唯一 production side-effect 装配（test 只注入参数，不自己拼 authority 链）。
   const sideEffectRuntimeDir = opts.sideEffectRuntimeDir || fs.mkdtempSync(path.join(os.tmpdir(), "oa-c4-runtime-"));
   // sideEffectExecutorTestHook 是 test-only fault seam（production 默认 null），只经 spawn args 传给受监督 executor。

@@ -18,7 +18,7 @@ const { buildBridgeManifest } = require("./tool-registry.cjs");
 const {
   TASK_STATUS, STEP_STATUS, TASK_EVENT, ERROR, ORCHESTRATION_KIND,
   ARTIFACT_TYPE, VERIFICATION_TYPE, ACP_EVENT_MAP, sanitizeEventPayload,
-  BUDGET_KIND, DEFAULT_MAX_CALLS, MAX_TOOL_ROUNDS, RESUME_GRANT_AMOUNT,
+  BUDGET_KIND, DEFAULT_MAX_CALLS, MAX_TOOL_ROUNDS,
 } = domain;
 
 const PROMPT_SCHEMA_VERSION = 1;
@@ -150,7 +150,28 @@ class TaskHarnessOrchestrator {
 
     const effectiveInput = stepInput == null ? step.input : stepInput;
     const toolsEnabled = !!(this.toolFacade && this.toolFacade.enabled && this.toolProxy && this.toolProxy.adapterFor);
+    const executableProxy = !!(this.toolProxy && this.toolProxy.adapterFor);
+    // D4-06 Closure：本 run 会绑定哪些预算种类（只有真正会用到的 kind 才参与 remaining 门控）。
+    const readLoopUsed = !toolsEnabled && executableProxy;
+    const sideEffectLoopUsed = toolsEnabled && !!this.sideEffectRuntime;
+    const usedKinds = [BUDGET_KIND.MODEL_CALLS];
+    if (toolsEnabled) usedKinds.push(BUDGET_KIND.TOOL_CALLS);
+    if (readLoopUsed || sideEffectLoopUsed) usedKinds.push(BUDGET_KIND.TOOL_ROUNDS);
     const promptText = buildPrompt({ goal: task.goal, stepInput: effectiveInput, toolsEnabled });
+
+    // D4-06 Closure：新 capability 额度 ≤ 任务剩余。任一 "会用到的" kind remaining==0 →
+    // 不创建 run、不消耗，直接 BUDGET_EXHAUSTED（保持停止，用户需显式追加该 kind）。
+    const budgetRes = svc.getTaskBudget({ context, taskId });
+    if (!budgetRes.ok) return budgetRes;
+    const remaining = budgetRes.remaining;
+    const budgetPriority = [BUDGET_KIND.TOOL_CALLS, BUDGET_KIND.MODEL_CALLS, BUDGET_KIND.TOOL_ROUNDS];
+    const blockingKind = budgetPriority.find((k) => usedKinds.includes(k) && remaining[k] <= 0) || null;
+    if (blockingKind) {
+      return await this.#haltForTaskBudget({ context, taskId, stepId, kind: blockingKind, budget: budgetRes, expectedRevision: task.revision });
+    }
+    const modelQuota = remaining[BUDGET_KIND.MODEL_CALLS];
+    const toolQuota = toolsEnabled ? remaining[BUDGET_KIND.TOOL_CALLS] : null;
+    const roundsQuota = Math.max(0, Math.min(MAX_TOOL_ROUNDS, remaining[BUDGET_KIND.TOOL_ROUNDS]));
 
     const runRes = svc.startHarnessRun({ context, taskId, stepId, expectedRevision: task.revision });
     if (!runRes.ok) return runRes;
@@ -160,10 +181,11 @@ class TaskHarnessOrchestrator {
     let adapter = null;
     let info = null;
     let facade = null;
+    let toolRoundsUsed = 0;
     try {
-      facade = await this.#startToolFacade({ context, taskId, stepId, runId: run.runId });
+      facade = await this.#startToolFacade({ context, taskId, stepId, runId: run.runId, maxCalls: toolQuota });
       adapter = this.#makeAdapter({ context, taskId, stepId, runId: run.runId, modelConfigId: task.modelConfigId, modelConfigVersion: task.modelConfigVersion });
-      info = await adapter.start({ context, modelConfigId: task.modelConfigId, maxCalls: DEFAULT_MAX_CALLS, startTimeoutMs: this.startTimeoutMs, requestId: "mreq_" + run.runId, toolFacade: facade });
+      info = await adapter.start({ context, modelConfigId: task.modelConfigId, maxCalls: modelQuota, startTimeoutMs: this.startTimeoutMs, requestId: "mreq_" + run.runId, toolFacade: facade });
     } catch (e) {
       if (adapter) { try { adapter.revokeToolCapability(); } catch { /* ignore */ } try { adapter.revokeModelCapability(); } catch { /* ignore */ } try { await adapter.dispose(); } catch { /* ignore */ } }
       if (facade) { try { await facade.bridge.stop(); } catch { /* ignore */ } }
@@ -207,7 +229,6 @@ class TaskHarnessOrchestrator {
       let mapped = mapAcpEvents(rawEvents, { maxPersisted: this.maxPersistedHarnessEvents });
       let usage = summarizeUsage(rawEvents);
       const hasToolEvents = () => rawEvents.some((e) => e && e.type === "tool.proposed");
-      const executableProxy = !!(this.toolProxy && this.toolProxy.adapterFor);
       // D4-03B Closure：official dsh 已由 Tool Runtime 执行 plugin.execute() → Tool Facade Bridge；
       // OpenArc 在这里绝不重复执行，只记录 safe ACP events 并等 turn 完成。
       const facadeMode = info.toolExecutionMode === "facade";
@@ -216,8 +237,9 @@ class TaskHarnessOrchestrator {
       // 结果经 bounded 后续 prompt 交回 Harness 继续推理。无 adapter（D4-03A gate / 无 proxy）维持 gate 语义。
       if (!facadeMode && executableProxy) {
         let round = 0;
-        while (hasToolEvents() && round < MAX_TOOL_ROUNDS) {
+        while (hasToolEvents() && round < roundsQuota) {
           round += 1;
+          toolRoundsUsed = round;
           const handled = await this.#handleToolTurn({ context, taskId, stepId, runId: run.runId, rawEvents, mappedEvents: mapped.events, task, expectedRevision: task.revision });
           if (handled.terminal) return handled.terminal;
           task = handled.task;
@@ -241,7 +263,7 @@ class TaskHarnessOrchestrator {
           if (latestTask.ok) task = latestTask.task;
           if (latestTask.ok && latestTask.task.cancelRequested) return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: task.revision });
         }
-        if (hasToolEvents()) return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: ERROR.BUDGET_EXHAUSTED, event: TASK_EVENT.TASK_BUDGET_EXHAUSTED, payload: { kind: BUDGET_KIND.TOOL_ROUNDS, consumed: round, maxRounds: MAX_TOOL_ROUNDS }, expectedRevision: task.revision });
+        if (hasToolEvents()) return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: ERROR.BUDGET_EXHAUSTED, event: TASK_EVENT.TASK_BUDGET_EXHAUSTED, payload: { kind: BUDGET_KIND.TOOL_ROUNDS, consumed: round, maxRounds: roundsQuota, observed: { remaining: this.#remainingEvidence(context, taskId) } }, expectedRevision: task.revision });
       } else if (!facadeMode && hasToolEvents()) {
         // D4-03A gate：proposal 已 ALLOWED 但执行未开放 → 0 execution + BLOCKED / WAITING。
         await this.#recordEvents({ context, taskId, runId: run.runId, events: mapped.events, expectedRevision: task.revision, task });
@@ -270,10 +292,11 @@ class TaskHarnessOrchestrator {
       // 绝不由 Harness / model text / timer 自动批准，也绝不把 unverified success 交回 Harness。
       if (facadeMode && this.sideEffectRuntime) {
         let sideRounds = 0;
-        while (sideRounds < MAX_TOOL_ROUNDS) {
+        while (sideRounds < roundsQuota) {
           sideRounds += 1;
           const pending = this.#sideEffectCallsToOrchestrate(stepId, run.runId);
           if (!pending.length) break;
+          toolRoundsUsed = sideRounds;
           await this.#recordEvents({ context, taskId, runId: run.runId, events: mapped.events, expectedRevision: task.revision });
           let rev = this.#rev(context, taskId, task.revision);
           const resolution = await this.sideEffectRuntime.resolvePendingForStep({ taskId, stepId, runId: run.runId, callIds: pending.map((c) => c.callId) });
@@ -310,7 +333,11 @@ class TaskHarnessOrchestrator {
           if (latestTask.ok && latestTask.task.cancelRequested) return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: task.revision });
         }
         const leftover = this.#sideEffectCallsToOrchestrate(stepId, run.runId);
-        if (leftover.length) return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: "SIDE_EFFECT_APPROVAL_UNRESOLVED", event: TASK_EVENT.TOOL_SIDE_EFFECT_EXECUTION_BLOCKED, expectedRevision: task.revision, alreadyRecorded: true });
+        if (leftover.length) {
+          // D4-06 Closure：轮次上界耗尽且有未解决 side-effect → 归因 TOOL_ROUNDS（不伪装成审批未决）。
+          if (sideRounds >= roundsQuota) return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: ERROR.BUDGET_EXHAUSTED, event: TASK_EVENT.TASK_BUDGET_EXHAUSTED, payload: { kind: BUDGET_KIND.TOOL_ROUNDS, consumed: sideRounds, maxRounds: roundsQuota, observed: { remaining: this.#remainingEvidence(context, taskId) } }, expectedRevision: task.revision });
+          return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: "SIDE_EFFECT_APPROVAL_UNRESOLVED", event: TASK_EVENT.TOOL_SIDE_EFFECT_EXECUTION_BLOCKED, expectedRevision: task.revision, alreadyRecorded: true });
+        }
       }
 
       const hasPermission = rawEvents.some((e) => e && (e.type === "permission.requested" || e.type === "permission.rejected"));
@@ -370,6 +397,12 @@ class TaskHarnessOrchestrator {
       };
       return { ok: true, task: finalTask, step: commit.step, artifact: commit.artifact, verification: commit.verification, run: done.ok ? done.run : null, stopReason: res.stopReason, usage: usage || null, events: mapped.events };
     } finally {
+      // D4-06 Closure：run 结束（成功/失败/block/cancel 都恰好一次）时把真实消耗记入任务级账本。
+      // 必须先读 capability 观测（revoke 后就拿不到），失败绝不影响 run 收敛。
+      try {
+        const consumption = this.#measureConsumption(adapter, toolRoundsUsed);
+        if (consumption) svc.recordBudgetConsumption({ context, taskId, consumption });
+      } catch { /* ignore */ }
       try { adapter.revokeToolCapability(); } catch { /* ignore */ }
       try { adapter.revokeModelCapability(); } catch { /* ignore */ }
       try { await adapter.dispose(); } catch { /* ignore */ }
@@ -420,11 +453,72 @@ class TaskHarnessOrchestrator {
     return payload;
   }
 
-  /** 只读判定：Tool Facade capability 真实 EXHAUSTED（不消耗、不改状态）。 */
+  /**
+   * D4-06 Closure：run 内真实消耗。model/tool calls 来自 capability 真实计量；
+   * 轮次数来自本次 run 实际执行的 READ / side-effect loop 轮数。绝不估算、绝不重复。
+   */
+  #measureConsumption(adapter, rounds) {
+    if (!adapter || typeof adapter !== "object") return null;
+    let model = 0; let tool = 0;
+    try {
+      const budget = typeof adapter.budgetExhausted === "function" ? adapter.budgetExhausted() : null;
+      if (budget && budget.observed) {
+        if (budget.observed.model && Number.isFinite(Number(budget.observed.model.calls))) model = Math.max(0, Number(budget.observed.model.calls));
+        if (budget.observed.tool && Number.isFinite(Number(budget.observed.tool.calls))) tool = Math.max(0, Number(budget.observed.tool.calls));
+      }
+    } catch { /* ignore */ }
+    return { MODEL_CALLS: model, TOOL_CALLS: tool, TOOL_ROUNDS: Math.max(0, Number(rounds) || 0) };
+  }
+
+  /** 只读任务剩余证据（safe：只有三类整数 remaining，绝无 capability/token）。 */
+  #remainingEvidence(context, taskId) {
+    try {
+      const b = this.#service().getTaskBudget({ context, taskId });
+      return b.ok ? b.remaining : null;
+    } catch { return null; }
+  }
+
+  /**
+   * D4-06 Closure：run 开始前 remaining==0 → 不创建 run、不消耗，直接 BUDGET_EXHAUSTED。
+   * 停因 kind 沿用 TOOL_CALLS > MODEL_CALLS > TOOL_ROUNDS 的确定优先级，并保留三类剩余证据。
+   */
+  async #haltForTaskBudget({ context, taskId, stepId, kind, budget, expectedRevision }) {
+    const kinds = budget && budget.kinds ? budget.kinds : null;
+    const observed = {
+      kinds,
+      remaining: budget ? budget.remaining : null,
+      authorized: budget ? budget.authorized : null,
+      consumed: budget ? budget.consumed : null,
+    };
+    return await this.#blockStep({
+      context, taskId, stepId, runId: null, reason: ERROR.BUDGET_EXHAUSTED,
+      event: TASK_EVENT.TASK_BUDGET_EXHAUSTED,
+      payload: {
+        kind,
+        consumed: budget && budget.consumed ? budget.consumed[kind] : null,
+        maxCalls: kinds && kinds[kind] ? kinds[kind].authorized : null,
+        maxRounds: kind === BUDGET_KIND.TOOL_ROUNDS && kinds && kinds[kind] ? kinds[kind].authorized : null,
+        remaining: 0,
+        observed,
+      },
+      expectedRevision,
+    });
+  }
+
+  /**
+   * 只读判定：Tool Facade capability 真实 EXHAUSTED（不消耗、不改状态）。
+   *
+   * D4-06 Closure 正反对照：恰好用尽**最后一次合法调用**（capability 达到 maxCalls 但从未拒绝
+   * 新调用）不算失败——模型仍可基于已完成的工具结果收尾；只有真实发生"预算不足拒绝"
+   * （exhaustedRejections > 0，即仍有未完成的工具意图）才归为 BUDGET_EXHAUSTED{TOOL_CALLS}。
+   */
   #toolBudgetExhausted(adapter) {
     if (!adapter || typeof adapter.budgetExhausted !== "function") return null;
     const budget = adapter.budgetExhausted();
-    return budget && budget.exhausted === true && budget.kind === BUDGET_KIND.TOOL_CALLS ? budget : null;
+    if (!budget || budget.exhausted !== true || budget.kind !== BUDGET_KIND.TOOL_CALLS) return null;
+    const rejected = budget.observed && budget.observed.tool && budget.observed.tool.exhaustedRejections;
+    if (!(Number(rejected) > 0)) return null;
+    return budget;
   }
 
   /**
@@ -446,16 +540,8 @@ class TaskHarnessOrchestrator {
     return await this.#blockStep({ context, taskId, stepId, runId, reason: ERROR.BUDGET_EXHAUSTED, event: TASK_EVENT.TASK_BUDGET_EXHAUSTED, payload: this.#budgetPayload(BUDGET_KIND.TOOL_CALLS, budget), expectedRevision: rev, alreadyRecorded: true });
   }
 
-  /** 本次续接实际追加的预算量（沿用既有预算种类；有界默认值）。 */
-  #grantAmount(kind) {
-    if (kind === BUDGET_KIND.MODEL_CALLS) return DEFAULT_MAX_CALLS;
-    if (kind === BUDGET_KIND.TOOL_CALLS) return (this.toolFacade && Number(this.toolFacade.maxCalls)) || RESUME_GRANT_AMOUNT.TOOL_CALLS;
-    if (kind === BUDGET_KIND.TOOL_ROUNDS) return MAX_TOOL_ROUNDS;
-    return null;
-  }
-
   /** D4-03B Closure：official dsh run 启动前建 Tool Facade Bridge（随机 loopback port）+ Safe Manifest。*/
-  async #startToolFacade({ context, taskId, stepId, runId }) {
+  async #startToolFacade({ context, taskId, stepId, runId, maxCalls = null }) {
     const cfg = this.toolFacade;
     if (!cfg || cfg.enabled !== true) return null;
     const proxy = this.toolProxy;
@@ -467,7 +553,9 @@ class TaskHarnessOrchestrator {
     const make = typeof cfg.bridgeFactory === "function" ? cfg.bridgeFactory : (o) => new ToolFacadeBridge(o);
     const bridge = make({ toolProxy: proxy, manifest, sideEffectRuntime: this.sideEffectRuntime, clock: this.clock, logger: this.logger, ttlMs: cfg.ttlMs, execTimeoutMs: cfg.execTimeoutMs });
     await bridge.start();
-    return { bridge, manifest, taskId, stepId, runId, maxCalls: cfg.maxCalls, ttlMs: cfg.ttlMs };
+    // D4-06 Closure：capability 额度 = 任务剩余（不再用固定的 cfg.maxCalls，避免跨 run 顺带恢复预算）。
+    const quota = Number.isFinite(Number(maxCalls)) && Number(maxCalls) > 0 ? Number(maxCalls) : cfg.maxCalls;
+    return { bridge, manifest, taskId, stepId, runId, maxCalls: quota, ttlMs: cfg.ttlMs };
   }
 
   /** 一个 Harness turn 内的全部 tool proposals：逐个 propose→decide→(READ_ONLY) execute→verify。*/
@@ -599,7 +687,8 @@ class TaskHarnessOrchestrator {
     const eligibility = svc.getResumeEligibility({ context, taskId });
     if (!eligibility.ok) return eligibility;
     if (!eligibility.resumable) return { ok: false, error: eligibility.reason || "RESUME_NOT_ELIGIBLE", resumable: false, stopReason: eligibility.stopReason || null };
-    const granted = svc.grantBudgetResume({ context, taskId, expectedRevision, kind: eligibility.kind, amount: this.#grantAmount(eligibility.kind) });
+    // 追加额度由 TaskService 依该类实际生效额度单事务决定；orchestrator 绝不自报金额。
+    const granted = svc.grantBudgetResume({ context, taskId, expectedRevision, kind: eligibility.kind });
     if (!granted.ok) return granted;
     const stepStarted = svc.startStep({ context, taskId, stepId: granted.step.stepId, expectedRevision: granted.task.revision });
     if (!stepStarted.ok) return stepStarted;

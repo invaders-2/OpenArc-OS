@@ -15,7 +15,7 @@ const { safeTask, safeStep, safeCall, safeEvent, sanitizeEventPayload } = domain
 const {
   TASK_STATUS, STEP_STATUS, TASK_EVENT, ERROR, DEFAULT_MAX_ATTEMPTS, AUTO_RETRY, TOOL_EXECUTION,
   HARNESS_RUN_STATUS, HARNESS_RUN_TERMINAL, ARTIFACT_TYPE, ARTIFACT_TYPE_ALL, VERIFICATION_TYPE, VERIFICATION_STATUS,
-  BUDGET_BASE, RESUME_GRANT_AMOUNT, MAX_BUDGET_RESUMES, RESUME_REASON, ORCHESTRATION_KIND,
+  BUDGET_BASE, BUDGET_KIND, BUDGET_KIND_ALL, RESUME_GRANT_AMOUNT, MAX_BUDGET_RESUMES, RESUME_REASON, ORCHESTRATION_KIND,
   canTransitionTask, canTransitionStep, isKnownEventType,
 } = domain;
 
@@ -621,6 +621,57 @@ class TaskService {
   #budgetGrantEvents(taskId) { return this.#budgetEvents(taskId, TASK_EVENT.TASK_BUDGET_GRANTED); }
   #budgetExhaustEvents(taskId) { return this.#budgetEvents(taskId, TASK_EVENT.TASK_BUDGET_EXHAUSTED); }
 
+  /** 该 kind 的一次追加额度 = 装配层注入的实际生效额度（与 capability 同源）；缺失回退冻结默认。 */
+  #grantBase(kind) {
+    const v = this.budgetConfig[kind];
+    if (Number.isFinite(Number(v)) && Number(v) > 0) return Number(v);
+    return RESUME_GRANT_AMOUNT[kind];
+  }
+
+  #budgetKinds(taskId) {
+    const out = {};
+    for (const row of this.store.taskBudgetsOfTask(taskId)) {
+      const authorized = Math.max(0, Number(row.authorized) || 0);
+      const consumed = Math.max(0, Math.min(authorized, Number(row.consumed) || 0));
+      out[row.kind] = { authorized, consumed, remaining: Math.max(0, authorized - consumed), updatedAt: row.updated_at == null ? null : Number(row.updated_at) };
+    }
+    for (const kind of BUDGET_KIND_ALL) if (!out[kind]) out[kind] = { authorized: 0, consumed: 0, remaining: 0, updatedAt: null };
+    return out;
+  }
+
+  /**
+   * D4-06 Closure · 任务首次触及时惰性建立任务级账本（**只写一次**）。
+   *
+   * 新任务没有历史消耗 → consumed=0 是精确值。
+   * 旧任务（首次触及时已有 run / model call / budget 事件）缺少可靠消耗证据：
+   * 采用**保守基线** consumed=authorized（不伪造精确历史余额、不由旧数据反推），
+   * 并落一条 task.budget_baseline_created safe event 说明该基线不精确。
+   * 调用方必须已处于事务内。
+   */
+  #ensureBudgetRows(task, now) {
+    const existing = this.store.taskBudgetsOfTask(task.task_id);
+    const known = new Set(existing.map((r) => r.kind));
+    const legacy = this.store.harnessRunsOfTask(task.task_id).length > 0
+      || this.store.callsOfTask(task.task_id).length > 0
+      || this.#budgetExhaustEvents(task.task_id).length > 0;
+    const authorizedByKind = {};
+    const consumedByKind = {};
+    let created = false;
+    for (const kind of BUDGET_KIND_ALL) {
+      const authorized = this.#grantBase(kind);
+      const consumed = legacy ? authorized : 0;
+      authorizedByKind[kind] = authorized;
+      consumedByKind[kind] = consumed;
+      if (known.has(kind)) continue;
+      this.store.upsertTaskBudget({ taskId: task.task_id, kind, authorized, consumed, updatedAt: now });
+      created = true;
+    }
+    if (created && legacy) {
+      this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.TASK_BUDGET_BASELINE_CREATED, at: now, safePayload: sanitizeEventPayload({ precise: false, reason: "LEGACY_TASK_CONSERVATIVE_BASELINE", authorized: authorizedByKind, consumed: consumedByKind }) });
+    }
+    return this.#budgetKinds(task.task_id);
+  }
+
   /**
    * D4-06 Closure 后端可续接判定（不信 renderer）。
    * 只有「BLOCKED + last run error_code=BUDGET_EXHAUSTED + 无未决副作用/UNKNOWN_EFFECT/active lease
@@ -670,51 +721,110 @@ class TaskService {
     return base;
   }
 
+  #remainingOf(kinds) {
+    const out = {};
+    for (const kind of BUDGET_KIND_ALL) out[kind] = kinds[kind].remaining;
+    return out;
+  }
+
+  /** D4-06 Closure：调度层读任务剩余额度的唯一入口（惰性建账本，只读 projection）。 */
+  getTaskBudget({ context, taskId } = {}) {
+    const guard = this.#guard(context);
+    if (!guard.ok) return guard;
+    const load = this.#load(guard, taskId);
+    if (!load.ok) return load;
+    return this.store.transactSync(() => {
+      const kinds = this.#ensureBudgetRows(load.task, this.#now());
+      const authorized = {}; const consumed = {};
+      for (const kind of BUDGET_KIND_ALL) { authorized[kind] = kinds[kind].authorized; consumed[kind] = kinds[kind].consumed; }
+      return { ok: true, taskId: load.task.task_id, kinds, remaining: this.#remainingOf(kinds), authorized, consumed };
+    });
+  }
+
+  /**
+   * D4-06 Closure · 原子、单调的任务级消耗计量（run 结束时调用一次）。
+   * clamp 到 authorized，绝不回退既有 consumed，绝不重复扣减同一次消耗。
+   */
+  recordBudgetConsumption({ context, taskId, consumption = {} } = {}) {
+    const guard = this.#guard(context);
+    if (!guard.ok) return guard;
+    const load = this.#load(guard, taskId);
+    if (!load.ok) return load;
+    return this.store.transactSync(() => {
+      const now = this.#now();
+      this.#ensureBudgetRows(load.task, now);
+      const applied = {};
+      for (const kind of BUDGET_KIND_ALL) {
+        const row = this.store.taskBudgetById(load.task.task_id, kind);
+        const delta = Math.max(0, Number(consumption[kind]) || 0);
+        const nextConsumed = Math.min(row.authorized, row.consumed + delta);
+        applied[kind] = nextConsumed - row.consumed;
+        if (nextConsumed !== row.consumed) this.store.upsertTaskBudget({ taskId: load.task.task_id, kind, authorized: row.authorized, consumed: nextConsumed, updatedAt: now });
+      }
+      const kinds = this.#budgetKinds(load.task.task_id);
+      return { ok: true, applied, kinds, remaining: this.#remainingOf(kinds) };
+    });
+  }
+
   getResumeEligibility({ context, taskId } = {}) {
     const guard = this.#guard(context);
     if (!guard.ok) return guard;
     const load = this.#load(guard, taskId);
     if (!load.ok) return load;
-    return Object.assign({ ok: true, taskId: load.task.task_id }, this.#resumeAssessment(load.task));
+    return this.store.transactSync(() => {
+      const kinds = this.#ensureBudgetRows(load.task, this.#now());
+      const assessment = this.#resumeAssessment(load.task);
+      // nextGrant 即**当前阻塞 kind** 与它的一次追加额度；绝不补齐其他种类。
+      const nextGrant = assessment.kind ? { kind: assessment.kind, amount: this.#grantBase(assessment.kind) } : null;
+      return Object.assign({ ok: true, taskId: load.task.task_id, kinds, remaining: this.#remainingOf(kinds), nextGrant }, assessment);
+    });
   }
 
-  /** 只读预算账本：base + additions + resumeCount + consumed（绝不更新/清零历史计数）。 */
+  /** 只读预算账本：每类 authorized/consumed/remaining + base + additions + nextGrant（绝不更新/清零历史计数）。 */
   getBudgetLedger({ context, taskId } = {}) {
     const guard = this.#guard(context);
     if (!guard.ok) return guard;
     const load = this.#load(guard, taskId);
     if (!load.ok) return load;
     const id = load.task.task_id;
-    const assessment = this.#resumeAssessment(load.task);
-    const additions = this.#budgetGrantEvents(id).map((g) => ({
-      resumeIndex: g.resumeIndex == null ? null : g.resumeIndex, kind: g.kind || null, amount: g.amount == null ? null : g.amount,
-      operatorUserId: g.operatorUserId || null, grantedAt: g.at, consumedAtGrant: g.consumedAtGrant || null,
-    }));
-    const budgetStops = this.#budgetExhaustEvents(id).map((s) => ({ kind: s.kind || null, consumed: s.consumed == null ? null : s.consumed, at: s.at }));
-    return {
-      ok: true,
-      ledger: {
-        taskId: id,
-        // D4 收口：base 必须是**实际生效额度**（装配层注入），而不是硬编码冻结默认值。
-        base: Object.assign({}, this.budgetConfig),
-        additions,
-        resumeCount: additions.length,
-        maxResumes: MAX_BUDGET_RESUMES,
-        remainingResumes: Math.max(0, MAX_BUDGET_RESUMES - additions.length),
-        consumed: {
-          // task_model_calls 是「每个 step/run 一个模型调用信封」，不是逐 provider 请求；
-          // 逐请求的真实 bounded 消耗只由 Model Proxy capability 计量，停止时记录在 budgetStops。
-          modelCallEnvelopes: this.store.callsOfTask(id).length,
-          toolExecutions: this.toolStore ? this.toolStore.executionsOfTask(id).length : null,
-          budgetStops,
+    return this.store.transactSync(() => {
+      const kinds = this.#ensureBudgetRows(load.task, this.#now());
+      const assessment = this.#resumeAssessment(load.task);
+      const additions = this.#budgetGrantEvents(id).map((g) => ({
+        resumeIndex: g.resumeIndex == null ? null : g.resumeIndex, kind: g.kind || null, amount: g.amount == null ? null : g.amount,
+        operatorUserId: g.operatorUserId || null, grantedAt: g.at, consumedAtGrant: g.consumedAtGrant || null,
+      }));
+      const budgetStops = this.#budgetExhaustEvents(id).map((s) => ({ kind: s.kind || null, consumed: s.consumed == null ? null : s.consumed, at: s.at }));
+      const nextGrant = assessment.kind ? { kind: assessment.kind, amount: this.#grantBase(assessment.kind) } : null;
+      return {
+        ok: true,
+        ledger: {
+          taskId: id,
+          // D4 收口：base 必须是**实际生效额度**（装配层注入），而不是硬编码冻结默认值。
+          base: Object.assign({}, this.budgetConfig),
+          // D4-06 Closure：任务级跨 run 累计账本（每类 authorized/consumed/remaining）。
+          kinds,
+          authorized: { MODEL_CALLS: kinds.MODEL_CALLS.authorized, TOOL_CALLS: kinds.TOOL_CALLS.authorized, TOOL_ROUNDS: kinds.TOOL_ROUNDS.authorized },
+          remaining: this.#remainingOf(kinds),
+          additions,
+          resumeCount: additions.length,
+          maxResumes: MAX_BUDGET_RESUMES,
+          remainingResumes: Math.max(0, MAX_BUDGET_RESUMES - additions.length),
+          consumed: {
+            // task_model_calls 是「每个 step/run 一个模型调用信封」，不是逐 provider 请求；
+            // 逐请求的真实 bounded 消耗由任务级 task_budgets 记录（kinds[kind].consumed）。
+            modelCallEnvelopes: this.store.callsOfTask(id).length,
+            toolExecutions: this.toolStore ? this.toolStore.executionsOfTask(id).length : null,
+            budgetStops,
+          },
+          // nextGrant 明确指向当前阻塞 kind；amount 与 grantBudgetResume 实际追加、capability 签发同源。
+          nextGrant,
+          resumable: assessment.resumable,
+          stopReason: assessment.stopReason,
+          reason: assessment.reason,
         },
-        // nextGrant.amount 与实际续接额度同源（budgetConfig），避免 UI 显示与真实 capability 漂移。
-        nextGrant: assessment.resumable ? { kind: assessment.kind, amount: this.budgetConfig[assessment.kind] != null ? this.budgetConfig[assessment.kind] : RESUME_GRANT_AMOUNT[assessment.kind] } : null,
-        resumable: assessment.resumable,
-        stopReason: assessment.stopReason,
-        reason: assessment.reason,
-      },
-    };
+      };
+    });
   }
 
   /**
@@ -810,12 +920,20 @@ class TaskService {
       if (task.cancel_requested) return { ok: false, error: ERROR.TASK_CANCELLED };
       const conflict = this.#conflict(task, expectedRevision);
       if (conflict) return conflict;
+      const now = this.#now();
+      const kinds = this.#ensureBudgetRows(task, now);
       const assessment = this.#resumeAssessment(task);
       if (!assessment.resumable) return { ok: false, error: assessment.reason || "RESUME_NOT_ELIGIBLE", resumable: false, stopReason: assessment.stopReason || null };
       const useKind = kind || assessment.kind;
       if (!useKind || !RESUME_GRANT_AMOUNT[useKind] || (kind && kind !== assessment.kind)) return { ok: false, error: RESUME_REASON.UNKNOWN_BUDGET_KIND };
+      // 只允许追加**当前真实阻塞 kind**；该 kind 仍充足（remaining>0）时拒绝循环追加。
+      const row = this.store.taskBudgetById(task.task_id, useKind);
+      if (!row) return { ok: false, error: RESUME_REASON.UNKNOWN_BUDGET_KIND };
+      if (kinds[useKind].remaining > 0) return { ok: false, error: RESUME_REASON.BUDGET_REMAINING, resumable: false, kind: useKind, remaining: kinds[useKind].remaining };
+      const addAmount = Number.isFinite(Number(amount)) && Number(amount) > 0 ? Number(amount) : this.#grantBase(useKind);
+      // 单事务内只抬升该 kind 的 authorized；其他 kind 的 authorized/consumed 原样不动。
+      this.store.upsertTaskBudget({ taskId: task.task_id, kind: useKind, authorized: row.authorized + addAmount, consumed: row.consumed, updatedAt: now });
 
-      const now = this.#now();
       const priorArtifacts = this.store.artifactsOfTask(task.task_id).slice(-3).map((a) => ({
         artifactId: a.artifact_id, type: a.type, content: String(a.safe_content == null ? "" : a.safe_content).slice(0, 2000),
       }));
@@ -833,12 +951,12 @@ class TaskService {
         toolExecutions: this.toolStore ? this.toolStore.executionsOfTask(task.task_id).length : null,
         budgetStops: this.#budgetExhaustEvents(task.task_id).length,
       };
-      this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.TASK_BUDGET_GRANTED, at: now, safePayload: sanitizeEventPayload({ amount: Number(amount) || RESUME_GRANT_AMOUNT[useKind], operatorUserId: guard.actor.user.id, resumeIndex: assessment.resumeIndex, kind: useKind, consumedAtGrant }) });
+      this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.TASK_BUDGET_GRANTED, at: now, safePayload: sanitizeEventPayload({ amount: addAmount, operatorUserId: guard.actor.user.id, resumeIndex: assessment.resumeIndex, kind: useKind, consumedAtGrant }) });
       this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.STEP_CREATED, at: now, safePayload: sanitizeEventPayload({ stepId: step.step_id, sequence, kind: ORCHESTRATION_KIND, maxAttempts: DEFAULT_MAX_ATTEMPTS, resumeIndex: assessment.resumeIndex }) });
       const updatedTask = this.store.updateTask(task.task_id, { status: TASK_STATUS.RUNNING, updated_at: now, revision: task.revision + 1 });
       this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.TASK_STARTED, at: now, safePayload: sanitizeEventPayload({ revision: updatedTask.revision, resumed: true, resumeIndex: assessment.resumeIndex, kind: useKind }) });
       this.#audit(guard, context, "task.resume", task.task_id);
-      return { ok: true, task: safeTask(updatedTask), step: safeStep(step), resumeIndex: assessment.resumeIndex, kind: useKind };
+      return { ok: true, task: safeTask(updatedTask), step: safeStep(step), resumeIndex: assessment.resumeIndex, kind: useKind, amount: addAmount, remaining: this.#budgetKinds(task.task_id) };
     });
   }
 

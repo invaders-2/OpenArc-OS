@@ -35,6 +35,9 @@ const SQL = {
   verificationById: "SELECT * FROM task_verifications WHERE verification_id = ?",
   verificationsOfArtifact: "SELECT * FROM task_verifications WHERE artifact_id = ? ORDER BY created_at",
   verificationsOfTask: "SELECT * FROM task_verifications WHERE task_id = ? ORDER BY created_at",
+  budgetsOfTask: "SELECT * FROM task_budgets WHERE task_id = ? ORDER BY kind",
+  budgetByKind: "SELECT * FROM task_budgets WHERE task_id = ? AND kind = ?",
+  upsertBudget: "INSERT INTO task_budgets (task_id, kind, authorized, consumed, updated_at) VALUES (?,?,?,?,?) ON CONFLICT(task_id, kind) DO UPDATE SET authorized = excluded.authorized, consumed = excluded.consumed, updated_at = excluded.updated_at",
 };
 
 const TASK_COLUMNS = new Set(["status", "updated_at", "started_at", "completed_at", "current_step_id", "revision", "cancel_requested", "model_config_id", "model_config_version", "budget_snapshot", "permission_snapshot_ref"]);
@@ -143,6 +146,19 @@ class TaskStore {
   verificationById(id) { return this.db.prepare(SQL.verificationById).get(String(id || "")) || null; }
   verificationsOfArtifact(artifactId) { return this.db.prepare(SQL.verificationsOfArtifact).all(String(artifactId || "")); }
   verificationsOfTask(taskId) { return this.db.prepare(SQL.verificationsOfTask).all(String(taskId || "")); }
+
+  // -------------------------------------------- D4-06 Closure 任务级预算账本（v16）
+  /**
+   * upsert 是**唯一**写入口：authorized/consumed 都由调用方在事务内算好后整行写入；
+   * 绝不在 SQL 里做 read-modify-write（事务体已在 BEGIN IMMEDIATE 内串行）。
+   */
+  upsertTaskBudget({ taskId, kind, authorized, consumed, updatedAt = null }) {
+    const now = Number(updatedAt == null ? this.clock() : updatedAt);
+    this.db.prepare(SQL.upsertBudget).run(String(taskId), String(kind), Math.max(0, Number(authorized) || 0), Math.max(0, Number(consumed) || 0), now);
+    return this.taskBudgetById(taskId, kind);
+  }
+  taskBudgetById(taskId, kind) { return this.db.prepare(SQL.budgetByKind).get(String(taskId || ""), String(kind || "")) || null; }
+  taskBudgetsOfTask(taskId) { return this.db.prepare(SQL.budgetsOfTask).all(String(taskId || "")); }
 }
 
 module.exports = { TaskStore, SQL };

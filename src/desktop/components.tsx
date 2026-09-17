@@ -504,7 +504,7 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
   // D4-06 Closure：预算停止后的显式续接；resumable / 账本一律来自后端 task/get。
   const [revision, setRevision] = useState<number | null>(null);
   const [stopReason, setStopReason] = useState<string | null>(null);
-  const [resumeLedger, setResumeLedger] = useState<{ resumeCount?: number; maxResumes?: number; remainingResumes?: number; nextGrant?: { kind?: string; amount?: number } | null } | null>(null);
+  const [resumeLedger, setResumeLedger] = useState<{ resumeCount?: number; maxResumes?: number; remainingResumes?: number; kinds?: Record<string, { authorized?: number; consumed?: number; remaining?: number }>; remaining?: Record<string, number>; nextGrant?: { kind?: string; amount?: number } | null } | null>(null);
   const [resumable, setResumable] = useState(false);
   // D4-05 S2：结果未知的只读恢复投影（仅后端判定；renderer 不自报）。
   const [recovery, setRecovery] = useState<any>(null);
@@ -657,7 +657,11 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
           <p data-ai-stop-reason>停止原因：{stopReason || "BUDGET_EXHAUSTED"}</p>
           <p data-ai-resume-budget>
             本次追加预算：{resumeLedger && resumeLedger.nextGrant ? resumeLedger.nextGrant.kind + " +" + resumeLedger.nextGrant.amount : "bounded step"}
+            {resumeLedger && resumeLedger.nextGrant && resumeLedger.nextGrant.kind ? "（该 kind 任务剩余 " + ((resumeLedger.remaining && resumeLedger.remaining[resumeLedger.nextGrant.kind]) ?? 0) + "）" : ""}
             {resumeLedger ? "（第 " + ((resumeLedger.resumeCount || 0) + 1) + "/" + (resumeLedger.maxResumes || 3) + " 次续接）" : ""}
+          </p>
+          <p data-ai-resume-remaining>
+            三类剩余：MODEL_CALLS {resumeLedger && resumeLedger.remaining ? (resumeLedger.remaining.MODEL_CALLS ?? 0) : "—"} / TOOL_CALLS {resumeLedger && resumeLedger.remaining ? (resumeLedger.remaining.TOOL_CALLS ?? 0) : "—"} / TOOL_ROUNDS {resumeLedger && resumeLedger.remaining ? (resumeLedger.remaining.TOOL_ROUNDS ?? 0) : "—"}
           </p>
           <button data-ai-resume onClick={resume} disabled={busy}>续接任务</button>
         </div>

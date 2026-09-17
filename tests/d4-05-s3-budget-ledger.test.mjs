@@ -87,19 +87,22 @@ test("D4-05 S3 A35 · 预算到限停止保留产物；续接追加额度 == 新
     const stops = budgetStopsOf(fx, h.taskId);
     assert.equal(stops.length, 1);
     assert.equal(stops[0].kind, "MODEL_CALLS", JSON.stringify(stops[0]));
-    assert.equal(stops[0].consumed, 8, "task.budget_exhausted{consumed} = 真实 capability 消耗 8：" + JSON.stringify(stops[0]));
-    assert.equal(stops[0].maxCalls, 8);
+    // D4-06 Closure：任务级跨 run 累计。step0 已消耗 1 次 model call，step1 的 capability 额度
+    // 是任务剩余 7（不再每个 run 重置成 8），停止时如实记录 7。
+    assert.equal(stops[0].consumed, 7, "task.budget_exhausted{consumed} = 本轮真实 capability 消耗（任务剩余）7：" + JSON.stringify(stops[0]));
+    assert.equal(stops[0].maxCalls, 7);
     assert.equal(TaskService.policy.autoRetry, 0, "AUTO_RETRY 必须为 0");
 
     const ledger0 = fx.taskService.getBudgetLedger({ context: h.ctx, taskId: h.taskId }).ledger;
     assert.equal(ledger0.base.MODEL_CALLS, 8);
-    assert.equal(ledger0.base.TOOL_CALLS, 8);
+    // D4-06 Closure：base 是装配层注入的实际生效额度（本用例为隔离 MODEL_CALLS 注入 20）。
+    assert.equal(ledger0.base.TOOL_CALLS, 20);
     assert.equal(ledger0.base.TOOL_ROUNDS, 4);
     assert.equal(ledger0.additions.length, 0);
     assert.equal(ledger0.resumeCount, 0);
     assert.equal(ledger0.remainingResumes, 3);
     assert.equal(ledger0.consumed.budgetStops.length, 1, "原停止记录保留");
-    assert.equal(ledger0.consumed.budgetStops[0].consumed, 8);
+    assert.equal(ledger0.consumed.budgetStops[0].consumed, 7);
     assert.equal(ledger0.consumed.modelCallEnvelopes, fx.taskStore.callsOfTask(h.taskId).length, "modelCallEnvelopes 语义明确（每 step/run 一个信封）");
     assert.ok(!("modelCalls" in ledger0.consumed), "不再暴露语义模糊的 consumed.modelCalls");
     assert.equal(ledger0.resumable, true);
@@ -141,8 +144,10 @@ test("D4-05 S3 A35 · 预算到限停止保留产物；续接追加额度 == 新
 });
 
 test("D4-05 S3 A35 · 续接总数有界：MAX_BUDGET_RESUMES=3，第 4 次 RESUME_LIMIT_REACHED、绝不追加", async () => {
-  // 同前：facade 额度高于模型额度，使每次停止都真实归因 MODEL_CALLS。
-  const fx = await createToolHarnessFixture({ withAdapters: true, behavior: "tool-loop", facadeMaxCalls: 20 });
+  // 同前：facade 额度必须显著高于模型额度，保证每一轮停止都真实归因 MODEL_CALLS。
+  // D4-06 Closure：任务级跨 run 累计后，重复 4 轮会累计消耗 tool calls，20 已不足；
+  // 用 100 隔离出 MODEL_CALLS（工具额度本身由 S3 的 TOOL_CALLS 用例覆盖）。
+  const fx = await createToolHarnessFixture({ withAdapters: true, behavior: "tool-loop", facadeMaxCalls: 100 });
   try {
     const h = await setupModelCallsStop(fx);
     let extraStops = 0;
@@ -281,7 +286,8 @@ test("D4-05 S3 A35 · TOOL_CALLS 续接账本：additions 只补 TOOL_CALLS/amou
     assert.equal(ledger.additions[ledger.additions.length - 1].kind, "TOOL_CALLS");
     assert.equal(ledger.additions[ledger.additions.length - 1].amount, 1, "additions.amount == 该类实际生效额度（facade maxCalls）：" + JSON.stringify(ledger.additions[0]));
     assert.ok(ledger.additions.every((a) => a.kind === "TOOL_CALLS"), "账本只含该一个 kind（不遗漏、不混类）：" + JSON.stringify(ledger.additions));
-    assert.equal(ledger.base.TOOL_CALLS, 8, "base 仍是冻结默认值 8（不因 facade 配置漂移）");
+    // D4-06 Closure：账本 base 必须是**实际生效额度**（与 capability 同源），不再假装冻结默认 8。
+    assert.equal(ledger.base.TOOL_CALLS, 1, "base.TOOL_CALLS == 注入的实际生效额度（facade maxCalls）");
     assert.equal(ledger.consumed.budgetStops.length, 2, "两次停止都留痕");
     assert.equal(grantEventsOf(fx, t.task.taskId).length, 1, "只追加一次预算");
     assert.equal(TaskService.policy.autoRetry, 0);

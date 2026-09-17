@@ -39,8 +39,8 @@ async function seedV1(dbPath) {
   return { instId, teamId, userId };
 }
 
-test("schema 版本已推进到 v15（D4 收口在 v14 之上重建 task_verifications 支持失败证据）", () => {
-  assert.equal(SCHEMA_VERSION, 15);
+test("schema 版本已推进到 v16（D4-06 Closure 在 v15 之上新增 task_budgets 任务级账本）", () => {
+  assert.equal(SCHEMA_VERSION, 16);
 });
 
 test("全新数据库直接建到 v8，identity login 成立", async () => {
@@ -165,6 +165,7 @@ test("v3 级迁移失败 → user_version 停在 2，设备表不残留（§55 �
     raw.exec("DROP TABLE project_members; DROP TABLE project_resources; DROP TABLE projects; DROP TABLE canvas_resource_nodes; DROP TABLE canvas_boards;");
     raw.exec("DROP TABLE model_call_records; DROP TABLE model_credentials; DROP TABLE model_defaults; DROP TABLE model_configs; DROP TABLE model_providers;");
     raw.exec("DROP TABLE task_events; DROP TABLE task_model_calls; DROP TABLE task_steps; DROP TABLE tasks;");
+    raw.exec("DROP TABLE task_budgets;");
     raw.exec("DROP TABLE task_verifications; DROP TABLE task_artifacts; DROP TABLE task_harness_runs;");
     raw.exec("DROP TABLE tool_decisions; DROP TABLE task_tool_proposals;");
     raw.exec("DROP TABLE tool_executions;");
@@ -212,7 +213,7 @@ test("v14 → v15：重建 task_verifications 保留旧 PASS 行，新列可用�
     seed.close();
 
     const store = new IdentityStore({ path: dbPath }).open();
-    assert.equal(store.schemaVersion, 15);
+    assert.equal(store.schemaVersion, 16);
     const rows = store.connection.prepare("SELECT * FROM task_verifications").all();
     assert.equal(rows.length, 1, "旧 PASS 行必须保留");
     assert.equal(rows[0].verification_id, "ver_v14");
@@ -234,6 +235,37 @@ test("v14 → v15：重建 task_verifications 保留旧 PASS 行，新列可用�
     assert.equal(saved.run_id, "run_x");
     assert.equal(saved.execution_id, "exec_x");
     assert.equal(ts.verificationsOfTask("task_v14").length, 2, "旧行 + 新 FAIL 行");
+    store.close();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("v15 → v16：新增 task_budgets 任务级账本表，保留旧任务数据，kind 受 CHECK 约束", () => {
+  const { dir, dbPath } = tempDbPath();
+  try {
+    const seed = new DatabaseSync(dbPath);
+    seed.exec("PRAGMA foreign_keys = ON");
+    for (const m of MIGRATIONS) { if (m.version > 15) continue; seed.exec(m.sql); }
+    seed.exec("PRAGMA user_version = 15");
+    const now = 1700000000000;
+    seed.prepare("INSERT INTO tasks (task_id,user_id,app_id,status,goal,created_at,updated_at) VALUES (?,?,?,?,?,?,?)").run("task_v15", "usr_v15", "ai", "BLOCKED", "legacy-budget", now, now);
+    seed.close();
+
+    const store = new IdentityStore({ path: dbPath }).open();
+    assert.equal(store.schemaVersion, 16);
+    assert.ok(hasTable(store.connection, "task_budgets"), "v16 必须建立 task_budgets");
+    assert.equal(store.connection.prepare("SELECT * FROM tasks WHERE task_id = 'task_v15'").all().length, 1, "旧任务数据保留");
+
+    const ts = new TaskStore({ identity: store });
+    assert.deepEqual(ts.taskBudgetsOfTask("task_v15"), [], "迁移不伪造任何账本行");
+    ts.upsertTaskBudget({ taskId: "task_v15", kind: "MODEL_CALLS", authorized: 8, consumed: 3, updatedAt: now });
+    ts.upsertTaskBudget({ taskId: "task_v15", kind: "MODEL_CALLS", authorized: 16, consumed: 3, updatedAt: now + 1 });
+    const rows = ts.taskBudgetsOfTask("task_v15");
+    assert.equal(rows.length, 1, "(task_id, kind) 唯一键 upsert");
+    assert.equal(rows[0].authorized, 16);
+    assert.equal(rows[0].consumed, 3);
+    assert.throws(() => ts.upsertTaskBudget({ taskId: "task_v15", kind: "NOT_A_KIND", authorized: 1, consumed: 0, updatedAt: now }), /CHECK/, "kind 必须受 CHECK 约束");
     store.close();
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

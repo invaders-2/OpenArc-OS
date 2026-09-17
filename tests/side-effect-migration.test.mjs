@@ -22,6 +22,7 @@ async function makeV12Db() {
   fx.identity.close();
   const raw = new DatabaseSync(dbPath);
   for (const t of V13_TABLES) raw.exec("DROP TABLE IF EXISTS " + t);
+  raw.exec("DROP TABLE IF EXISTS task_budgets");
   raw.exec("PRAGMA user_version = 12");
   assert.equal(raw.prepare("PRAGMA user_version").get().user_version, 12);
   raw.close();
@@ -38,6 +39,7 @@ async function makeV13Db() {
   fx.identity.close();
   const raw = new DatabaseSync(dbPath);
   raw.exec("ALTER TABLE side_effect_calls DROP COLUMN recovery_safe");
+  raw.exec("DROP TABLE IF EXISTS task_budgets");
   raw.exec("PRAGMA user_version = 13");
   assert.equal(raw.prepare("PRAGMA user_version").get().user_version, 13);
   assert.ok(!colsOf(raw, "side_effect_calls").includes("recovery_safe"), "v13 不应有 recovery_safe");
@@ -49,7 +51,7 @@ test("v12 -> current：side_effect_calls / tool_approvals / side_effect_leases �
   const { root, dbPath, storeRoot, snapshot } = await makeV12Db();
   try {
     const reopened = reopenResourceRuntime({ dbPath, storeRoot });
-    assert.equal(SCHEMA_VERSION, 15);
+    assert.equal(SCHEMA_VERSION, 16);
     assert.equal(reopened.identity.schemaVersion, SCHEMA_VERSION);
     for (const t of V13_TABLES) assert.equal(hasTable(reopened.identity.connection, t), true, t + " 应存在");
     assert.ok(colsOf(reopened.identity.connection, "side_effect_calls").includes("recovery_safe"), "v14 应有 recovery_safe");
@@ -80,7 +82,7 @@ test("v13 -> v14：recovery_safe 列建立，旧数据完整", async () => {
   const { root, dbPath, storeRoot, snapshot } = await makeV13Db();
   try {
     const reopened = reopenResourceRuntime({ dbPath, storeRoot });
-    assert.equal(reopened.identity.schemaVersion, 15);
+    assert.equal(reopened.identity.schemaVersion, 16);
     assert.ok(colsOf(reopened.identity.connection, "side_effect_calls").includes("recovery_safe"), "v14 应补上 recovery_safe");
     assert.equal(reopened.identity.allUsers().length, snapshot.users);
     reopened.identity.close();
@@ -100,7 +102,7 @@ test("v14 迁移失败 -> 整级回滚：user_version 停 13，recovery_safe 不
     raw.close();
     // 修复：去掉失败 hook 后可正常升到 14。
     const repaired = reopenResourceRuntime({ dbPath, storeRoot });
-    assert.equal(repaired.identity.schemaVersion, 15);
+    assert.equal(repaired.identity.schemaVersion, 16);
     assert.ok(colsOf(repaired.identity.connection, "side_effect_calls").includes("recovery_safe"));
     repaired.identity.close();
   } finally { fs.rmSync(root, { recursive: true, force: true }); }

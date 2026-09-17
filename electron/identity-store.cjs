@@ -51,7 +51,7 @@ const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domai
  * 迁移按版本逐级前进，每一级各自是一个原子事务：任何一级失败只回滚该级，
  * 不会留下"user_version 已升级但表不完整"的半状态（§55）。
  */
-const SCHEMA_VERSION = 15;
+const SCHEMA_VERSION = 16;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -1094,6 +1094,26 @@ ALTER TABLE task_verifications_v15 RENAME TO task_verifications;
 CREATE INDEX idx_task_verifications_task ON task_verifications(task_id, created_at);
 `;
 
+/**
+ * v16（D4-06 Closure）· 任务层跨 run 累计预算账本。
+ *
+ * task_budgets 以 (task_id, kind) 为唯一键保存**任务级**授权与已消耗；capability 仍按 run
+ * 签发，但每 run 的额度不得超过任务剩余。行在任务首次触及时惰性建立；旧任务缺少可靠消耗
+ * 证据时只写保守基线（不伪造历史精确余额），并落一条 task.budget_baseline_created safe event。
+ * 只存整数额度，绝不存 capability / token / provider secret。
+ */
+const SCHEMA_V16_SQL = `
+CREATE TABLE task_budgets (
+  task_id    TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
+  kind       TEXT NOT NULL CHECK (kind IN ('MODEL_CALLS','TOOL_CALLS','TOOL_ROUNDS')),
+  authorized INTEGER NOT NULL,
+  consumed   INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER,
+  PRIMARY KEY (task_id, kind)
+);
+CREATE INDEX idx_task_budgets_task ON task_budgets(task_id);
+`;
+
 const MIGRATIONS = Object.freeze([
   { version: 1, sql: SCHEMA_SQL },
   { version: 2, sql: SCHEMA_V2_SQL },
@@ -1110,6 +1130,7 @@ const MIGRATIONS = Object.freeze([
   { version: 13, sql: SCHEMA_V13_SQL },
   { version: 14, sql: SCHEMA_V14_SQL },
   { version: 15, sql: SCHEMA_V15_SQL },
+  { version: 16, sql: SCHEMA_V16_SQL },
 ]);
 
 const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000; // 12h 绝对上限

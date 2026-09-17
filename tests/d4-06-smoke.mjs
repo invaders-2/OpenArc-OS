@@ -59,7 +59,7 @@ try { fs.rmSync(tmpGate, { force: true }); } catch { /* ignore */ }
 const innerRaw = fs.existsSync(artifactPath) ? fs.readFileSync(artifactPath) : Buffer.from("");
 
 // ② 预算 Node 测试。
-const btRun = await run(process.execPath, ["--test", "--test-concurrency=1", path.join(here, "d4-06-budget.test.mjs"), path.join(here, "d4-06-resume.test.mjs")]);
+const btRun = await run(process.execPath, ["--test", "--test-concurrency=1", path.join(here, "d4-06-budget.test.mjs"), path.join(here, "d4-06-resume.test.mjs"), path.join(here, "d4-08-budget-carryover.test.mjs")]);
 const budgetTapPath = path.join(ROOT, "artifacts", "d4-06", "budget-tests.tap");
 fs.mkdirSync(path.dirname(budgetTapPath), { recursive: true });
 fs.writeFileSync(budgetTapPath, btRun.out + btRun.err);
@@ -81,6 +81,7 @@ let evidence = {
     electronRun: "tests/d4-04-smoke.mjs (同一份 Electron 运行，含 linkageAudit L1..L15 与 X/Y 场景)",
     budgetTests: "tests/d4-06-budget.test.mjs",
     resumeTests: "tests/d4-06-resume.test.mjs",
+    carryoverTests: "tests/d4-08-budget-carryover.test.mjs",
     duplicateBudgetUnitEvidence: ["tests/tool-d4-03d-closure.test.mjs (maxCalls 原子 reserve)", "tests/tool-dsh-security.test.mjs (第 3 次 TOOL_CAPABILITY_EXHAUSTED + 0 Domain call)"],
   },
   electronRun: { exitCode: d4Run.code, checksSummary: inner ? inner.checksSummary : null, artifactSha256: inner ? inner.artifactSha256 : null },

@@ -180,7 +180,22 @@ app.whenReady().then(async () => {
     check("R2.2 · 刷新后从 task/get 恢复续接入口", resumeShown && panelTaskId === t.task.taskId && (await attr(".ai-panel", "data-ai-status")) === "BLOCKED", JSON.stringify({ resumeShown, panelTaskId, status: await attr(".ai-panel", "data-ai-status") }), "resume visible + BLOCKED");
     check("R2.3 · UI 显示停止原因 / 本次追加预算 / 已完成结果", stopText.includes("BUDGET_EXHAUSTED") && budgetText.includes("MODEL_CALLS") && resultText.length > 0, JSON.stringify({ stopText: stopText.slice(0, 60), budgetText: budgetText.slice(0, 80), resultLen: resultText.length }), "BUDGET_EXHAUSTED + MODEL_CALLS +Δ + prior result");
 
+    // D4-06 Closure：UI 追加值必须与后端账本 nextGrant（kind/amount/该 kind 剩余）一致，且不遗漏其他种类。
+    const remainingText = await text("[data-ai-resume-remaining]");
+    const nextGrant = ledger0.nextGrant || null;
+    const nextKindRemaining = nextGrant && ledger0.remaining ? ledger0.remaining[nextGrant.kind] : null;
+    check("R2.4 · UI 追加值 == 账本 nextGrant（kind/amount/该 kind 剩余）+ 三类剩余不遗漏",
+      !!nextGrant && budgetText.includes(nextGrant.kind) && budgetText.includes("+" + nextGrant.amount) && budgetText.includes("剩余 " + nextKindRemaining)
+        && remainingText.includes("MODEL_CALLS") && remainingText.includes("TOOL_CALLS") && remainingText.includes("TOOL_ROUNDS"),
+      JSON.stringify({ budgetText: budgetText.slice(0, 140), remainingText: remainingText.slice(0, 140), nextGrant, remaining: ledger0.remaining }),
+      "budget text == ledger nextGrant + all-kind remaining");
+
     // 点击真实 UI 续接按钮；provider 切到 final（0 tool call → 直接收尾，证明不重放）。
+    // D4-06 Closure：记录续接 run 实际签发的 model capability 额度，用于运行时 == 账本剩余。
+    const resumeModelCaps = [];
+    const origIssueCap = identity.modelProxy.issueCapability.bind(identity.modelProxy);
+    identity.modelProxy.issueCapability = (args) => { const res = origIssueCap(args); if (res && res.ok) resumeModelCaps.push(res.capability.maxCalls); return res; };
+    const preResumeLedger = identity.taskService.getBudgetLedger({ context: ctx, taskId: t.task.taskId }).ledger;
     await setPlan("final");
     const clicks = await click("[data-ai-resume]");
     check("R3.1 · 点击真实续接按钮", clicks === "ok", clicks, "ok");
@@ -193,6 +208,13 @@ app.whenReady().then(async () => {
     check("R3.3 · 新 step 携带 continuation(prior artifact) 且不含旧 tool 请求", !!continuation && continuation.continuation === true && continuation.priorArtifacts.some((a) => a.artifactId === step1Artifact.artifact_id) && !("proposeSequence" in continuation), JSON.stringify({ kind: continuation && continuation.budgetKind, prior: continuation && continuation.priorArtifacts.length }), "continuation + prior artifact");
     check("R4.1 · 已成功副作用恰好一次 / 不重放", identity.sideEffectStore.callsOfTask(t.task.taskId).length === 1 && identity.sideEffectStore.callById(sxc.callId).status === "SUCCEEDED" && trashed(r1.resourceRef) === true, JSON.stringify({ calls: identity.sideEffectStore.callsOfTask(t.task.taskId).length, call: identity.sideEffectStore.callById(sxc.callId).status }), "1 SUCCEEDED call + trashed");
     check("R4.2 · 只追加一次预算 + 账本保留历史", grantEvents.length === 1 && (() => { const l = identity.taskService.getBudgetLedger({ context: ctx, taskId: t.task.taskId }).ledger; return l.resumeCount === 1 && l.additions[0].kind === "MODEL_CALLS" && !!l.additions[0].consumedAtGrant; })(), JSON.stringify({ grants: grantEvents.length }), "1 grant + consumedAtGrant");
+    const ledgerAfterResume = identity.taskService.getBudgetLedger({ context: ctx, taskId: t.task.taskId }).ledger;
+    check("R4.4 · 运行时 capability 额度 == 账本 remaining（追加值一致）",
+      resumeModelCaps.length === 1
+        && resumeModelCaps[0] === preResumeLedger.remaining.MODEL_CALLS + preResumeLedger.nextGrant.amount
+        && ledgerAfterResume.kinds.MODEL_CALLS.authorized - preResumeLedger.kinds.MODEL_CALLS.authorized === preResumeLedger.nextGrant.amount,
+      JSON.stringify({ caps: resumeModelCaps, preRemaining: preResumeLedger.remaining, grantAmount: preResumeLedger.nextGrant && preResumeLedger.nextGrant.amount, postAuthorized: ledgerAfterResume.kinds.MODEL_CALLS.authorized }),
+      "runtime cap == ledger remaining + granted amount");
     check("R4.3 · Task/Step/Artifact/Verification 关联链一致", (() => {
       const arts = identity.taskStore.artifactsOfTask(t.task.taskId);
       const vers = identity.taskStore.verificationsOfTask(t.task.taskId);

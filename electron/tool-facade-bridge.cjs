@@ -114,6 +114,9 @@ class ToolFacadeBridge {
       allowedTools: tools,
       maxCalls: Math.max(1, Number(maxCalls) || 1),
       calls: 0,
+      // D4-06 Closure：因任务/capability 预算不足被拒绝的新 logical call 数。
+      // 用于区分"最后一次合法调用完成"（0）与"仍需下一次调用但额度不足"（>0）。
+      exhaustedRejections: 0,
       callsById: new Map(),
       issuedAt: this.#now(), expiresAt: this.#now() + Math.max(1, Number(ttlMs) || this.ttlMs),
       state: CAP_STATE.ACTIVE,
@@ -132,7 +135,7 @@ class ToolFacadeBridge {
   capabilityState(token) {
     const cap = this.capabilities.get(String(token || ""));
     if (!cap) return null;
-    return { capabilityId: cap.capabilityId, state: cap.state, calls: cap.calls, maxCalls: cap.maxCalls, taskId: cap.taskId, stepId: cap.stepId, runId: cap.runId, sessionRef: cap.sessionRef, appId: cap.appId };
+    return { capabilityId: cap.capabilityId, state: cap.state, calls: cap.calls, maxCalls: cap.maxCalls, exhaustedRejections: cap.exhaustedRejections || 0, taskId: cap.taskId, stepId: cap.stepId, runId: cap.runId, sessionRef: cap.sessionRef, appId: cap.appId };
   }
 
   async start() {
@@ -200,7 +203,7 @@ class ToolFacadeBridge {
     }
 
     // 新的 logical call：原子 reserve call budget（check + increment 之间无 await）。
-    if (cap.calls >= cap.maxCalls) { cap.state = CAP_STATE.EXHAUSTED; return send(429, { ok: false, error: BRIDGE_ERROR.EXHAUSTED }); }
+    if (cap.calls >= cap.maxCalls) { cap.state = CAP_STATE.EXHAUSTED; cap.exhaustedRejections = (cap.exhaustedRejections || 0) + 1; return send(429, { ok: false, error: BRIDGE_ERROR.EXHAUSTED }); }
     cap.calls += 1;
     this.stats.calls += 1;
     let settle = null;

@@ -369,7 +369,7 @@ class HarnessAdapter {
       const state = this.toolFacade.bridge.capabilityState(this.toolCapability.token);
       const maxCalls = state && state.maxCalls != null ? state.maxCalls : null;
       const calls = state && state.calls != null ? state.calls : null;
-      observed.tool = { maxCalls, calls, state: state ? state.state : null, remaining: maxCalls != null && calls != null ? Math.max(0, maxCalls - calls) : null };
+      observed.tool = { maxCalls, calls, state: state ? state.state : null, remaining: maxCalls != null && calls != null ? Math.max(0, maxCalls - calls) : null, exhaustedRejections: state && state.exhaustedRejections != null ? state.exhaustedRejections : null };
     }
     if (observed.tool && observed.tool.state === "EXHAUSTED") {
       return { exhausted: true, kind: "TOOL_CALLS", consumed: observed.tool.calls, maxCalls: observed.tool.maxCalls, observed };
