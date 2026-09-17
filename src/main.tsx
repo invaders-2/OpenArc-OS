@@ -53,6 +53,9 @@ import {
 import type { MenuItem } from "./desktop/components";
 import { Dialog } from "./desktop/Dialog";
 import { useIdentity } from "./identity/useIdentity";
+import { errorText } from "./identity/types";
+import { Avatar } from "./identity/Avatar";
+import { AvatarPicker } from "./identity/AvatarPicker";
 import { BootRetry, BootSurface, LockScreen, LoginScreen, SetupScreen } from "./identity/AuthScreens";
 
 type DisplayInfo = {
@@ -371,6 +374,45 @@ function App() {
   const [model, setModel] = useState("");
   /** 左右分栏的当前页（设置 / 应用中心 / Skill 中心各一份，互不影响）。 */
   const [settingsTab, setSettingsTab] = useState<"appearance" | "model">("appearance");
+  /**
+   * 个人资料草稿（改资料免密码，入口只在系统设置）。
+   * 草稿自身份快照，保存时才把"确实改动过的字段"交给主进程（undefined = 不改）。
+   */
+  const [profileName, setProfileName] = useState("");
+  const [profileAvatar, setProfileAvatar] = useState<string | null>(null);
+  const [profileSaved, setProfileSaved] = useState(false);
+  const savedFlash = useRef<number | null>(null);
+
+  useEffect(() => {
+    setProfileName(identity.snapshot.displayName ?? "");
+    setProfileAvatar(identity.snapshot.avatarRef);
+  }, [identity.snapshot.displayName, identity.snapshot.avatarRef]);
+
+  useEffect(
+    () => () => {
+      if (savedFlash.current) window.clearTimeout(savedFlash.current);
+    },
+    [],
+  );
+
+  const profileNameDirty = profileName.trim() !== (identity.snapshot.displayName ?? "");
+  const profileAvatarDirty = profileAvatar !== null && profileAvatar !== identity.snapshot.avatarRef;
+  // 显示名不允许为空，清空不算一次可提交的改动。
+  const profileCanSave = !identity.busy && profileName.trim().length > 0 && (profileNameDirty || profileAvatarDirty);
+
+  const saveProfile = async () => {
+    if (!profileCanSave) return;
+    setProfileSaved(false);
+    const input: { displayName?: string; avatarRef?: string } = {};
+    if (profileNameDirty) input.displayName = profileName.trim();
+    if (profileAvatarDirty && profileAvatar) input.avatarRef = profileAvatar;
+    const res = await identity.updateProfile(input);
+    if (res && (res as { ok?: boolean }).ok !== false) {
+      setProfileSaved(true);
+      if (savedFlash.current) window.clearTimeout(savedFlash.current);
+      savedFlash.current = window.setTimeout(() => setProfileSaved(false), 2000);
+    }
+  };
   const [appTab, setAppTab] = useState<"all" | "pro" | "recent">("all");
   const [skillTab, setSkillTab] = useState<"market" | "mine" | "installed">("market");
   const [folderUI, setFolderUI] = useState<Record<string, FolderUI>>({});
@@ -2104,6 +2146,53 @@ function App() {
                   {/* 默认只有一排 5 张，第 6 张起藏起来；点「查看更多」就地展开（不是弹窗） */}
                   {(wallpapersOpen ? wallpaperItems : wallpaperItems.slice(0, WALLPAPER_ROW)).map(wallpaperTile)}
                 </div>
+
+                <h3>个人资料</h3>
+                <div className="setting-row">
+                  <span>头像</span>
+                  <span className="profile-avatar" data-d3-id="settings-avatar">
+                    <Avatar avatarRef={profileAvatar} name={profileName} />
+                  </span>
+                </div>
+                <AvatarPicker
+                  avatarRef={profileAvatar}
+                  onChange={(next) => {
+                    setProfileAvatar(next);
+                    setProfileSaved(false);
+                  }}
+                  disabled={identity.busy}
+                  idPrefix="settings-avatar"
+                />
+                <label className="field">
+                  显示名
+                  <input
+                    value={profileName}
+                    onChange={(e) => {
+                      setProfileName(e.target.value);
+                      setProfileSaved(false);
+                    }}
+                    placeholder="显示名"
+                    autoComplete="off"
+                    data-d3-id="settings-name"
+                  />
+                </label>
+                <div className="profile-actions">
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={!profileCanSave}
+                    onClick={() => void saveProfile()}
+                    data-d3-id="settings-save"
+                  >
+                    {identity.busy ? "正在保存…" : profileSaved ? "已保存" : "保存"}
+                  </button>
+                </div>
+                <p className="profile-hint">保存后立即生效，不需要输入密码。</p>
+                {identity.error ? (
+                  <p className="auth-error" role="alert" data-d3-id="settings-error">
+                    {errorText(identity.error.code, identity.error.detail)}
+                  </p>
+                ) : null}
               </>
             ) : (
               <>
@@ -3102,7 +3191,6 @@ function App() {
           error={identity.error}
           onUnlock={(password) => identity.unlock(password)}
           onLogout={() => identity.logout()}
-          onUpdateProfile={(input) => identity.updateProfile(input)}
         />
       ) : null}
     </div>

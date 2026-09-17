@@ -12,8 +12,8 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowRight } from "lucide-react";
 import { errorText } from "./types";
 import type { IdentitySnapshot } from "./types";
-import { AVATAR_PRESET_IDS, Avatar, PRESET_NODES } from "./Avatar";
-import { ProfileEditor } from "./ProfileEditor";
+import { Avatar } from "./Avatar";
+import { AvatarPicker } from "./AvatarPicker";
 
 type AuthError = { code: string; detail?: string } | null;
 
@@ -148,23 +148,7 @@ export function SetupScreen({ busy, error, defaultIdentifier = "", onSubmit }: S
         </label>
         <div className="field">
           <span>头像</span>
-          <div className="profile-presets" role="group" aria-label="预设头像">
-            {AVATAR_PRESET_IDS.map((id) => (
-              <button
-                key={id}
-                type="button"
-                className="profile-preset"
-                aria-pressed={avatarRef === "preset:" + id}
-                aria-label={"预设头像 " + id}
-                onClick={() => setAvatarRef("preset:" + id)}
-                data-d3-id={"setup-avatar-" + id}
-              >
-                <svg className="avatar-preset" viewBox="0 0 24 24" aria-hidden="true">
-                  {PRESET_NODES[id]}
-                </svg>
-              </button>
-            ))}
-          </div>
+          <AvatarPicker avatarRef={avatarRef} onChange={setAvatarRef} idPrefix="setup-avatar" />
         </div>
         <label className="field">
           账号
@@ -277,7 +261,6 @@ type LockProps = {
   error: AuthError;
   onUnlock: (password: string) => Promise<unknown>;
   onLogout: () => Promise<unknown>;
-  onUpdateProfile: (input: { displayName?: string; avatarRef?: string }) => Promise<unknown>;
 };
 
 /**
@@ -287,9 +270,8 @@ type LockProps = {
  * 但被 `inert` 挡住，且原生视图已通过 overlayOpen 隐藏。
  * 焦点陷阱与搜索面板用同一套"首尾循环"实现，不引入第三个焦点方案。
  */
-export function LockScreen({ snapshot, busy, error, onUnlock, onLogout, onUpdateProfile }: LockProps) {
+export function LockScreen({ snapshot, busy, error, onUnlock, onLogout }: LockProps) {
   const [password, setPassword] = useState("");
-  const [editing, setEditing] = useState(false);
   const panel = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
 
@@ -300,17 +282,11 @@ export function LockScreen({ snapshot, busy, error, onUnlock, onLogout, onUpdate
   return (
     <div className="lock-shade lock-stage" data-d3-id="lock-shade">
       <LockClock />
-      {/* 编辑器打开时把背后表单 inert：覆盖层只管点击，键盘与焦点由这里语义化挡住。 */}
-      <div className="lock-panel" ref={panel} role="dialog" aria-modal="true" aria-label="屏幕已锁定" inert={editing || undefined}>
-        <button
-          type="button"
-          className="lock-avatar"
-          aria-label="修改头像与用户名"
-          onClick={() => setEditing(true)}
-          data-d3-id="lock-avatar"
-        >
+      {/* 头像只做展示：锁屏不提供任何改资料的入口（改资料收敛到系统设置）。 */}
+      <div className="lock-panel" ref={panel} role="dialog" aria-modal="true" aria-label="屏幕已锁定">
+        <span className="lock-avatar" aria-hidden="true">
           <Avatar avatarRef={snapshot.avatarRef} name={snapshot.displayName} />
-        </button>
+        </span>
         <strong className="lock-name">{snapshot.displayName || "本地用户"}</strong>
         <span className="lock-identifier">{snapshot.identifier}</span>
         <form
@@ -346,22 +322,6 @@ export function LockScreen({ snapshot, busy, error, onUnlock, onLogout, onUpdate
         </form>
         <p className="lock-footnote">锁定不等于退出登录：会话仍然有效，但受保护的操作会被拒绝，必须重新验证密码。</p>
       </div>
-      {editing ? (
-        <ProfileEditor
-          identifier={snapshot.identifier ?? ""}
-          displayName={snapshot.displayName}
-          avatarRef={snapshot.avatarRef}
-          busy={busy}
-          error={error}
-          onSubmit={async (input) => {
-            const res = await onUpdateProfile(input);
-            // 成功后关闭；快照由 useIdentity 的 absorb 更新，头像与名字随之变化
-            if (res && (res as { ok?: boolean }).ok !== false) setEditing(false);
-            return res;
-          }}
-          onClose={() => setEditing(false)}
-        />
-      ) : null}
     </div>
   );
 }
