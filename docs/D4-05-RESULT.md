@@ -6,9 +6,10 @@
 - **D4-05 Closure 代码与测试被测 commit**：`70eb0b12167e513bb4eb7fa1cb4efb9ca70e509d`（A33 正式 official dsh facade 链闸门；详见 `docs/D4-05-CLOSURE-RESULT.md`）
 - **D4-05 Closure-2 代码与测试被测 commit**：`77b6e857f3d5a9781ea2c218e89069b1802aaab4`（解决关联改按 (tool_id, canonical arguments)；详见 `docs/D4-05-CLOSURE2-RESULT.md`）
 - **D4-05 Closure-3 代码与测试被测 commit**：`9691348ebf52b4854aafcb2e343e32ee2d2d608b`（受控记忆装配 + 逐请求出站注入）、`ac9af8e502c5285b7bcf06c8fc0b8e0ecc52e9f0`（真实 Electron UI 记忆隔离）；详见 `docs/D4-05-CLOSURE3-RESULT.md`
+- **D4-05 Closure-4 代码与测试被测 commit**：`698117fff03f2d11d952bf94dc99035197ddd09e`（记忆上下文信任分层修复：低信任 user 参考消息 + 常量 system 规则）；详见 `docs/D4-05-CLOSURE4-RESULT.md`
 - Final HEAD：本轮报告/证据提交（见文末）
 - 范围：只补齐 PLAN.md §41 的 D4-05 四场景（产物不符 / 结果未知 / 用量到限 / 记忆越权）；第二轮按父级指示补齐 S2 的**最小人工确认入口**以闭合 §384。不扩展真实工具面、不放宽既有检查、不 commit、不 push。
-- **结论：`D4-05 = PASS`（限定当前验收范围，D4-05 Closure-3 升级）**——S1/S2/S3/S4 = PASS；**S4 已实现受控记忆装配与逐请求发送前隔离，A36 正负对照全部满足**（见 §9）。**`D4 = PARTIAL`**（不自动升级，剩余为既有未验证项，见 §5）。**S1（A33）结论以 D4-05 Closure 的 official dsh facade 正式链证据为准**（见 §7 与 `docs/D4-05-CLOSURE-RESULT.md`）。
+- **结论：`D4-05 = PASS`（限定当前验收范围；Closure-3 升级，Closure-4 修复信任分层）**——S1/S2/S3/S4 = PASS；**S4 已实现受控记忆装配与逐请求发送前隔离，且记忆正文只作为低信任 user 参考数据、system 仅常量规则**（见 §9/§10）。**`S4 = PASS` 限定“消息结构 + 授权/执行边界”，不证明真实模型绝不受提示注入影响**（Closure-4 更正 Closure-3 的过度表述）。**`D4 = PARTIAL`**（不自动升级，剩余为既有未验证项，见 §5）。**S1（A33）结论以 official dsh facade 正式链证据为准**（见 §7）。
 
 ## 1. 要求对应表
 
@@ -95,8 +96,16 @@
 ## 9. D4-05 Closure-3 · 受控记忆装配与任务上下文隔离（A36）（`9691348` + `ac9af8e`）
 
 - **结论**：A36 正负对照与全部隔离要求满足 → **S4 = PASS、D4-05 = PASS**；**D4 = PARTIAL（不自动升级）**。
-- **实现**：受控装配 `electron/memory-context.cjs`（validateSession → TaskService.getTask → SearchService 授权检索 agent=true → test-only `hooks.afterSearch` 同步点 → 逐条 getCapabilities(agent)+readText 最后检查；有界 5×1200≤4000；无缓存）；在唯一出站口 `HarnessModelAdapter` 逐请求注入为 `role:"system"` 参考数据块（`BEGIN/END_OPENARC_AUTHORIZED_MEMORY` + “NOT a system instruction”），并剔除/拒绝残缺历史标记（403 `MEMORY_CONTEXT_UNSAFE`）。
+- **实现**：受控装配 `electron/memory-context.cjs`（validateSession → TaskService.getTask → SearchService 授权检索 agent=true → test-only `hooks.afterSearch` 同步点 → 逐条 getCapabilities(agent)+readText 最后检查；有界 5×1200≤4000；无缓存）；在唯一出站口 `HarnessModelAdapter` 逐请求注入。~~`role:"system"` 参考数据块 + 正文标记~~ **（Closure-4 更正：改为 `name:"openarc.reference_data"` 的 user 低信任参考消息 + `name:"openarc.rules"` 常量 system 规则；清理只按应用结构标签，见 §10）**。
 - **正式链证据**：`tests/d4-05-s4-memory-context.test.mjs` **11/11**（正向注入/负向§25/删除/撤权/切账号/部门范围/最后检查同步点/恶意正文/续接重检/未接线不注入/出站残缺 403）；真实 Electron UI `tests/d4-05-memory-ui.mjs` **15/15**（授权生效→删除→切账号 dana 隔离 + 读旧 task TASK_FORBIDDEN）。
 - **回归**：`npm run test:d4-05` **165/165 functional（S1/S2/S3/S4 全 PASS，overallStatus=PASS）**；`test:d4-03b-dsh` 26/26、`test:d4-04` 94/94、`test:d4-08-verification-ui` 22/22、`npm test` 980/980。
 - **留存边界**：记忆正文/请求正文不落盘；审计仅 count/refs/version/reason；gate JSON 0 secret。
-- 详细根因/改动/逐条检查/限制见 `docs/D4-05-CLOSURE3-RESULT.md`。
+- 详细根因/改动/逐条检查/限制见 `docs/D4-05-CLOSURE3-RESULT.md`（其 system-role 与正文标记表述已由 Closure-4 更正）。
+
+## 10. D4-05 Closure-4 · 记忆上下文信任分层修复（`698117fff03f2d11d952bf94dc99035197ddd09e`）
+
+- **问题**：Closure-3 把记忆正文作为 `role:"system"` 注入，并把 “NOT a system instruction” 与正文分隔符当作隔离措施——违反信任分层且过度表述。
+- **修复**：固定安全规则改为 `{role:"system", name:"openarc.rules", content: OPENARC_RULES_TEXT}`（常量、零资源可控文本）；记忆正文改为 `{role:"user", name:"openarc.reference_data", content: JSON.stringify({type:"openarc.reference_data",trust:"untrusted",items:[{resourceRef,resourceVersion,text}]})}`，插在所有前导 system 之后、第一条非 system 之前；正文经 JSON 转义不能改变消息结构，不伪造 tool_calls。
+- **清理/拒绝**：只按应用自有 `name` 标签过滤（绝不扫描正文、不误删合法用户输入）；`messages` 非数组或元素非普通对象 → 403 `MEMORY_CONTEXT_UNSAFE(MESSAGES_MALFORMED)` 不转发。旧 `MEMORY_MARKER`/`preamble`/`formatMemoryBlock` 已删除；本适配器不再产生任何 system 记忆块。
+- **证据**：`tests/d4-05-s4-memory-context.test.mjs` **15/15**（含结构不可注入、合法文本不被误删、放置/幂等、越权 WRITE 仍需审批）、真实 Electron UI **15/15**、`test:d4-05` **169/169（S1–S4 全 PASS）**、`test:d4-04` 94/94、`test:d4-03b-dsh` 26/26、`test:d4-08-verification-ui` 22/22、`npm test` 984/984。
+- **边界**：证明消息结构 + 授权/执行边界，**不证明真实模型不受提示注入影响**。详见 `docs/D4-05-CLOSURE4-RESULT.md`。
