@@ -2430,6 +2430,10 @@ input[type="checkbox"] {
   background: rgb(var(--content-rgb) / var(--content-alpha));
   text-align: left;
 }
+.lock-input input:focus-visible {
+  outline: none;
+  background: rgb(var(--text-rgb) / 0.08);
+}
 .lock-input--act input {
   padding-right: calc(var(--space-8) + var(--space-3));
 }
