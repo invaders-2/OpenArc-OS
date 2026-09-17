@@ -2335,6 +2335,34 @@ input[type="checkbox"] {
   letter-spacing: var(--tracking-tight);
 }
 
+/* 启动失败兜底（BootRetry，见 AuthScreens.tsx）。
+   此刻桌面基底是内置壁纸色（默认 theme-dark = #171717，**不随主题变**），
+   内容直接落在它上面：全局 .control-button 用 --sunken 底 + --text 字，
+   浅色主题下等于"深字压深底"，整块按钮糊掉。这里只在 boot-retry 作用域里
+   给一块跟随主题的实底面板 + 成对前景（accent / on-accent），
+   不碰 .control-button 本体，也不需要去猜主题。 */
+[data-d3-id="boot-retry"] .auth-boot {
+  max-width: 560px;
+  padding: var(--space-6) var(--space-8);
+  border-radius: var(--radius-xl);
+  background: rgb(var(--surface-rgb) / 0.96);
+  box-shadow: var(--elevation-4);
+}
+[data-d3-id="boot-retry"] .auth-boot .muted {
+  color: var(--text);
+  text-align: center;
+  line-height: var(--lh-normal);
+}
+[data-d3-id="boot-retry"] .control-button {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: var(--fw-medium);
+}
+[data-d3-id="boot-retry"] .control-button:hover {
+  background: var(--accent);
+  filter: brightness(1.12);
+}
+
 /* 锁屏：覆盖在最上层，且必须挡住原生网页视图的键盘与指针。
    原生视图的隐藏由主进程 overlayOpen 完成（DOM z-index 对 WebContentsView 无效）。 */
 .lock-shade {

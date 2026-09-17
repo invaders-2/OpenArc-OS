@@ -24,6 +24,8 @@ let win;
 let controller;
 let identity;
 let files;
+/** 身份服务创建失败时的人话原因；渲染层经 identity:command 的既有通道拿到它。 */
+let identityBootFailure = null;
 
 /**
  * 只读文件协议（Quick Look 的流式媒体源）。
@@ -102,6 +104,38 @@ function installApplicationMenu() {
     });
   }
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+/**
+ * 启动失败 → 渲染层文案。
+ *
+ * schema 高于支持版本是**明确的、用户能理解的故障**：不迁移、不降级、不重置，
+ * 只如实说明。其它失败原因照抄异常文本（它是主进程自己抛的，不含用户数据）。
+ */
+function describeStartupFailure(error) {
+  if (error && error.code === "SCHEMA_TOO_NEW")
+    return `本机身份库版本（schema ${error.found}）高于当前程序支持的版本（${error.supported}），这个构建打不开它。本机数据未被改动。`;
+  return `启动失败：${String((error && error.message) || error || "未知错误")}`;
+}
+
+/**
+ * 启动链兜底：`app.whenReady()` 回调里任何抛出都会变成未处理的 rejection，
+ * 窗口就停在「已打开、页面没加载」的空白态。这里保证界面照常加载，
+ * 并把原因登记到身份命令通道 —— 渲染层因此走的是**已有的** BootRetry 界面。
+ */
+function recoverFromStartupFailure(error) {
+  identityBootFailure = describeStartupFailure(error);
+  console.error("[openarc] 启动失败：" + identityBootFailure);
+  try {
+    ipcMain.removeHandler("identity:command");
+  } catch {
+    /* 尚未注册 */
+  }
+  registerIdentityIpc({ ipcMain, service: null, isTrusted: trusted, bootError: identityBootFailure });
+  if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
+    const current = win.webContents.getURL();
+    if (!current || current === "about:blank") win.loadURL(uiURL);
+  }
 }
 
 app.whenReady().then(() => {
@@ -205,17 +239,25 @@ app.whenReady().then(() => {
   // 它住在**主进程**：渲染进程只能通过 `identity:command` 派发命令，
   // 拿回 sanitize 过的快照。session token 从未越过这条边界。
   // ---------------------------------------------------------------------------
-  identity = createIdentityService({
-    userDataDir: app.getPath("userData"),
-    safeStorage,
-    // admin / 测试夹具命令默认关闭：产品 UI 里没有入口，也不该有。
-    // 只有显式置 OPENARC_IDENTITY_ADMIN=1 才放行（探针与未来的管理端用）。
-    allowAdmin: process.env.OPENARC_IDENTITY_ADMIN === "1",
-  });
+  try {
+    identity = createIdentityService({
+      userDataDir: app.getPath("userData"),
+      safeStorage,
+      // admin / 测试夹具命令默认关闭：产品 UI 里没有入口，也不该有。
+      // 只有显式置 OPENARC_IDENTITY_ADMIN=1 才放行（探针与未来的管理端用）。
+      allowAdmin: process.env.OPENARC_IDENTITY_ADMIN === "1",
+    });
+  } catch (error) {
+    // 打不开身份库（schema 过新 / 钥匙串被拒 …）不是崩溃，而是**要说出来的启动失败**。
+    // 记下原因后装配照常走完：下面的 registerIdentityIpc 把 BOOT_FAILED 交回渲染层。
+    identityBootFailure = describeStartupFailure(error);
+    console.error("[openarc] 身份服务启动失败：" + identityBootFailure);
+  }
   registerIdentityIpc({
     ipcMain,
-    service: identity.service,
+    service: identity?.service,
     isTrusted: trusted,
+    bootError: identityBootFailure,
     send: (event) => {
       if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return;
       win.webContents.send("identity:event", event);
@@ -455,7 +497,7 @@ app.whenReady().then(() => {
   win.webContents.once("did-finish-load", () => {
     if (win && !win.isDestroyed()) win.webContents.send("display:changed", displayInfo());
   });
-});
+}).catch(recoverFromStartupFailure);
 
 app.on("window-all-closed", () => app.quit());
 

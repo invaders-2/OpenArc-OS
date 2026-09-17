@@ -13,6 +13,7 @@
  *   3. **错误只认 code。** UI 分支一律 `switch (result.error)`，不解析文本（§26）。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { errorText } from "./types";
 import type { IdentityPhase, IdentitySnapshot, InstallationStatus } from "./types";
 
 type Result = {
@@ -44,6 +45,17 @@ const EMPTY: IdentitySnapshot = {
   installationId: null,
   initialized: false,
 };
+
+/**
+ * 启动询问失败 → 一句人话。
+ * `BOOT_FAILED` 的原因由主进程给出（schema 过新 / 钥匙串被拒 …），必须原样展示；
+ * 其余错误码仍走集中文案，避免把内部枚举或异常文本直接糊给用户。
+ */
+function bootFailureText(result: Result): string {
+  if (result.error === "BOOT_FAILED")
+    return result.detail ? String(result.detail) : "身份服务启动失败，本机身份暂时无法使用。";
+  return errorText(result.error, result.detail) || "身份服务启动失败，本机身份暂时无法使用。";
+}
 
 export function useIdentity() {
   const bridge = typeof window !== "undefined" ? window.openarc?.identity : undefined;
@@ -124,12 +136,18 @@ export function useIdentity() {
       try {
         const st = await send({ type: "identity/status" });
         if (cancelled) return;
-        if (st.ok && st.initialized === false) {
+        // 身份服务没起来（schema 过新 / 钥匙串被拒 …）：**不能**继续往下落到登录页，
+        // 更不能停在 BootSurface。走已有的 bootError → BootRetry。
+        if (!st.ok) {
+          setBootError(bootFailureText(st));
+          return;
+        }
+        if (st.initialized === false) {
           setInstallation(st.installation as InstallationStatus);
           setPhase("uninitialized");
           return;
         }
-        if (st.ok) setInstallation(st.installation as InstallationStatus);
+        setInstallation(st.installation as InstallationStatus);
         const restore = await send({ type: "identity/restore" });
         if (cancelled) return;
         if (restore.ok && restore.snapshot) {
@@ -139,6 +157,9 @@ export function useIdentity() {
           setSnapshot(EMPTY);
           setPhase("unauthenticated");
         }
+      } catch {
+        // 主进程没响应 / 握手被拒：同样不能白屏。原超时兜底会因 finally 清掉计时器而失效。
+        if (!cancelled) setBootError("身份服务没有响应，启动没有完成。可以点「重试」再试一次。");
       } finally {
         window.clearTimeout(timer);
       }

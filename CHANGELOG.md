@@ -1,5 +1,121 @@
 # 计划修订记录
 
+## 2026-09-17（十八）：实时更新预览（`npm run dev:app`）
+
+用户口径：「改代码后 app 窗口自己就更新，不用每次重新构建 + 重启。」
+
+### 做了什么
+
+- `scripts/dev-app.mjs` + `npm run dev:app`：一条命令起 Vite dev server，并用**仓库里的**
+  Electron（`node_modules/electron`，44.3.0）打开它。Ctrl+C 同时收掉 Vite 与 Electron 两个进程组。
+- userData 默认隔离到 `~/Library/Application Support/openarc-os-preview`（产品是 `openarc-os`），
+  可用 `--user-data` 换；`--port` / `--no-watch` 见脚本头注释，其余参数原样转给 Electron。
+- `electron/main.cjs`：**只在显式设了 `OA_DEV_SERVER` 时**把 `uiURL` 指向 dev server；
+  信任判据 `trusted()`、`will-navigate`、麦克风 `isAppPage()` 同步按 dev 来源放行。
+  没设变量时 `devURL` / `devOrigin` 恒为 `null`，所有分支原样短路 —— 产品路径逐字节不变。
+- `vite.config.ts`（三个 dev-only 插件，`vite build` 一个都不执行）：
+  - `devCsp()`：把 dev 下 index.html 的 CSP 放宽到 `script-src 'self' 'unsafe-inline'`、
+    `connect-src 'self' ws://127.0.0.1:*`（React Refresh 内联脚本 + HMR WebSocket）。
+  - `devCjs()`：渲染层从 electron/ 直接 import 的 `.cjs` 领域模块，dev 下用 esbuild 打成 ESM
+    （不这么做会 "does not provide an export named 'default'"，已实测）。
+  - `react()`（`@vitejs/plugin-react`，**只在 serve 挂**）：真 Fast Refresh；build 路径不挂，产物不动。
+- 主进程没有 HMR：`scripts/dev-app.mjs` 监听 `electron/`，改动后**等旧进程真正退出**再重启 Electron
+  （同一 userData 不能两个实例同开），`src/` 的 HMR 不受影响。
+
+### 实测（macOS 26.6.2 / Electron 44.3.0 / Vite 7.3.6，真实窗口 + CDP 截图）
+
+- 改 `src/styles.css` 的 `.auth-card` 圆角（16px → 48px）：3 次 **30 / 33 / 193 ms（中位 33 ms）**。
+  同窗口前/后截图：`/tmp/oa-hmr/css-card-before.png`、`/tmp/oa-hmr/css-card-after.png`
+  （整窗 `css-before.png` / `css-after.png`）。
+- 改 `src/identity/AuthScreens.tsx` 一句文案（React Fast Refresh，文档未重载）：3 次
+  **81 / 145 / 147 ms（中位 145 ms）**；截图 `/tmp/oa-hmr/tsx-card-before.png`、`/tmp/oa-hmr/tsx-card-after.png`。
+- dev 下能力：`window.openarc` 在；`files.list("desktop")`、`sync({intents:[]})` 走桥成功
+  （说明 `trusted()` 已按 dev 来源放行）；自绘光标 =
+  `url("http://127.0.0.1:5173/cursors/arrow-light.svg") 2 2, default`。
+- 主进程自动重启：改 `electron/` 后打印「自动重启主进程」，Vite 仍 200、新窗口重新加载 dev URL（两次触发都验过）。
+- 产品路径：`npm run oa:app -- HEAD --no-restart` 构建成功；`dist/index.html` 的 CSP 与 HEAD 干净构建
+  **逐字节相同**（两边都是 `default-src 'self'; script-src 'self'; … connect-src 'none'`），
+  index.html 唯一差异是 hash 化的资源文件名（来自本轮其它源改动）。
+- 门禁：`npx tsc --noEmit` clean、`npm test` 96/96。
+
+### 边界（哪些改动需要重启）
+
+- `src/**`：不重启，HMR 毫秒级（CSS ≈30ms、TSX ≈145ms）。
+- `electron/**`：自动重启主进程（约 1–2s）。
+- `index.html` / `vite.config.ts`：需要重启 `dev:app`（dev CSP 与页面加载方式在这里）。
+- 依赖变化：需要 `npm install` 后重启。
+
+### 依赖新增
+
+`@vitejs/plugin-react@^5.2.0`（devDependency；只在 `vite dev` 挂，生产构建不引用）。
+
+## 2026-09-17（十七）：身份库打不开导致整片空白 —— 改成「初始化失败 + 原因 + 重试」
+
+**现象**：启动时身份库拒绝打开，应用窗口正常出现（菜单栏 / 红绿灯都在），但渲染层整片空白 ——
+顶部栏、程序坞、任何提示都没有。用户看到的等价于「软件坏了」。
+
+**根因**：`electron/identity-store.cjs` 的 `#migrate` 在 `schema_version=2 > 1` 时抛错，
+经 `createIdentityService`（`identity-bootstrap.cjs:30`）冒到 `electron/main.cjs` 的
+`app.whenReady().then(...)` 回调里。回调是**同步**的，异常变成**未处理的 Promise rejection**，
+并在 `win.loadURL(uiURL)` **之前**中断 —— 窗口创建了，页面永远没加载。
+这不是「加载慢」，是**启动失败没有出口**：主进程没有 catch，渲染层也没有收到任何失败信号。
+
+**改法**（只补这一条路，不动用户数据）：
+
+- `electron/main.cjs`：
+  - `createIdentityService` 用 `try/catch` 兜住；失败原因登记到**已有的**身份命令通道 ——
+    下面的 `registerIdentityIpc` 照常装配，把 `{ ok:false, error:"BOOT_FAILED", detail } ` 交回渲染层。
+    catch 之后装配继续走完（文件服务 / 原生视图 / `win.loadURL` 都照常），界面因此正常加载。
+  - `app.whenReady().then(...)` 整链再加 `.catch(recoverFromStartupFailure)`：
+    其它启动期 rejection（safeStorage / 钥匙串被拒、其它装配异常）走同一条出口，不再白屏。
+  - `describeStartupFailure` 把结构化原因翻成人话；schema 过新时**不迁移、不降级、不重置**，
+    只说清楚「本机数据未被改动」。
+- `electron/identity-bootstrap.cjs`：`registerIdentityIpc` 支持 `bootError`；
+  `service` 为空且有 `bootError` 时返回 `BOOT_FAILED`，没有时维持原来的 `INTERNAL_ERROR/identity-not-ready`；
+  事件订阅加 `send && service` 守卫（service 为空时不再对 null 调 `onEvent`）。
+- `electron/identity-store.cjs`：schema 过高改成结构化 `SchemaTooNewError`（`code=SCHEMA_TOO_NEW`、
+  `found/supported`），异常原文不变；主进程不必猜文本。
+- `src/identity/useIdentity.ts`：启动询问 `identity/status` 返回 `!ok` 时（含 `BOOT_FAILED`）
+  走已有的 `bootError → BootRetry`，**不再往下落到登录页**；启动询问本身 reject（主进程没响应 / 握手被拒）
+  也兜到 `bootError` —— 原来 `finally` 会清掉超时计时器，导致永久停在 BootSurface（同样是一片空白）。
+
+**实测**（探针 `/tmp/oa-probe/probe`，真实 Electron + 产品 `electron/main.cjs`；
+临时 userData + 预置一份 `user_version=2` 的 identity.db 复现，`OA_PROBE_ROOT` 指向 HEAD 版 electron 做对照）：
+
+- 修复前（HEAD=ff86248）失败注入：`UnhandledPromiseRejectionWarning: 身份库 schema_version=2 …`
+  抛在 `identity-store #migrate` → `main.cjs:185`；DOM 无 `.desktop`、`capturePage` 尺寸 `0x0`（全白）——
+  `/tmp/oa-probe/shots/boot-failure-before.png`（0 字节）、`/tmp/oa-probe/logs/before.log`。
+- 修复后同一注入：`gate=checking`、`[data-d3-id="boot-retry"]` 在、`[boot-surface]` 不在，
+  文案 = 「本机身份库版本（schema 2）高于当前程序支持的版本（1），这个构建打不开它。本机数据未被改动。」
+  并有「重试」按钮；截图 `/tmp/oa-probe/shots/boot-failure.png`（capturePage 全窗）、
+  `boot-failure-center.png`（放大）、`boot-failure-screen.png`（`screencapture` 实拍，含原生红绿灯）。
+- 正常路径：空 userData 启动 `gate=uninitialized`，照常进入初始化界面，截图 `/tmp/oa-probe/shots/boot-normal.png`。
+- 真实用户数据 `~/Library/Application Support/openarc-os/identity.db` **未被读写**（探针全程用临时目录；
+  sha256 前后一致：`d4d6bb6c…`）。
+
+**补充（同日 · 父级验收）**：启动失败界面的对比度 —— 浅色主题下「重试」几乎不可见。
+
+- 现象：BootRetry 直接压在桌面基底上（内置壁纸默认 `theme-dark` = `#171717`，**不随主题变**），
+  而全局 `.control-button` 是 `--sunken` 底 + `--text` 字，浅色主题下就是「深字压深底」。
+  实测浅色：按钮文字 / 按钮底 **1.08:1**、说明文字 / 屏底 **3.54:1**；深色主题反而是好的（17.34 / 6.24）。
+- 改法：只在 `[data-d3-id="boot-retry"]` 作用域里加一块跟随主题的实底面板
+  （`background: rgb(var(--surface-rgb) / 0.96)`），面板内说明文字改用 `--text`、
+  按钮改用 `--accent` / `--on-accent` 配对。**没有改 `.control-button` 的全局样式**，
+  也没有碰 `[data-d3-id="boot-surface"]`（启动中态）。
+- 实测（探针像素级 WCAG，浅 / 深各一组；同一条注入，只替换 dist 的 CSS）：
+
+  | 对比项 | 浅色 改前 | 浅色 改后 | 深色 改前 | 深色 改后 |
+  | --- | --- | --- | --- | --- |
+  | 按钮文字 vs 按钮底 | 1.08 | 16.83 | 17.34 | 19.29 |
+  | 按钮底 vs 所在底 | 1.01 | 15.57 | 1.05 | 16.47 |
+  | 说明文字 vs 所在底 | 3.54 | 15.57 | 6.24 | 16.47 |
+
+  「所在底」= 元素实际压着的表面（改前 = 壁纸底 `#171717`，改后 = BootRetry 面板）。
+  截图：`/tmp/oa-probe/shots/contrast-{before,after}-light.png`、
+  `contrast-{before,after}-dark.png`（各带 `-center` 放大图），日志 `/tmp/oa-probe/logs/contrast-*.log`。
+
+**门禁**：`npx tsc --noEmit` clean、`npm test` 96/96。
+
 ## 2026-09-16（十六）：按钮 / 可点条目改成箭头，只有链接保留手型（macOS 规矩）
 
 用户口径：「手型改成箭头（按 macOS 的规矩 —— 按钮显示箭头，只有链接才显示手型）」。
