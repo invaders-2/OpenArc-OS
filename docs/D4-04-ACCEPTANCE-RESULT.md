@@ -72,7 +72,7 @@
 ## 5. 证据可追溯性（本轮已闭合）
 
 - Gate：`npm run test:d4-04`（= `npm run build && node tests/d4-04-smoke.mjs`）；Closure-3 轮被测 commit `e989842`，运行前 `workspaceState=""`（67/67）。
-- **后续（D4-06 复用）**：同一 probe 被 D4-06 复用并增量加入执行异常/预算到限/关联链检查；当前共享 probe 在 `17df98e` 干净运行 **94/94**（原 67 项不变 + 新增 27），`docs/D4-04-GATE-EVIDENCE.json` 已刷新为 94 项。D4-04 结论不受影响。
+- **后续（D4-06 复用）**：同一 probe 被 D4-06 复用并增量加入执行异常/预算到限/关联链检查；当前共享 probe 在 `207f946` 干净运行 **94/94**（原 67 项不变 + 新增 27），`docs/D4-04-GATE-EVIDENCE.json` 已刷新为 94 项。D4-04 结论不受影响。
 - artifact `artifacts/d4-04/vertical-smoke-gate.json`（gitignored）与**版本管理**的 `docs/D4-04-GATE-EVIDENCE.json` 内容一致：`testedCommit` / `workspaceState` / `command` / `env` / 逐条脱敏 `checks={name,expected,actual,ok}` / `artifactSha256`。
 - 原始 artifact SHA-256：`01baf7ef3da3f86424e306d5266eaa828d51cf94d57f65040d1c997ff5d6e71b`（覆盖去掉该字段的 canonical JSON；stored == recomputed）。
 - 证据文件已实测无绝对路径 / `mpx_` / `tpx_` / credential 泄漏。

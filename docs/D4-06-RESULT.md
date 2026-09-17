@@ -8,11 +8,11 @@
 
 ## 1. 结论
 
-**`D4-06 = PARTIAL`**。
+**`D4-06 = PASS（限定当前验收范围）`**（由 D4-06 Closure 升级，见 `docs/D4-06-CLOSURE-RESULT.md`）。
 
 - 关联链完整性（Task→Step→Call→Artifact→Verification）在真实产品链路通过（L1–L15 全 PASS）。
 - 预算到限停止在真实产品 orchestrator + 确定性 provider 下通过（Y1–Y5 含 Electron UI 一致性；预算 Node 测试 6/6）。
-- **未满足项：A35 的“明确续接入口”**。产品 `resume()` 仍为 `EXPLICIT_RESUME_DEFERRED`、命令白名单无 resume、Renderer 无任何续接入口 → 与既有 `Explicit Resume = DEFERRED` 决定**冲突**。按本轮指令，这属于**范围冲突**，不由本代理判定通过；因此 D4-06 不能记 PASS。
+- **A35 的“明确续接入口”已由 D4-06 Closure 满足**：Boss 批准仅在本范围解除 Explicit Resume 延期；预算耗尽 → 用户显式续接 → 成功（Electron UI 19/19、Node 续接 6/6，bounded ≤3 次）。其他恢复场景仍 `EXPLICIT_RESUME_DEFERRED`。
 
 ## 2. 预算种类 / 计量 / 作用范围 / 停止时机（依现有契约，未发明新预算）
 
@@ -20,7 +20,7 @@
 | --- | --- | --- | --- | --- | --- |
 | ① | Model Proxy capability `maxCalls = DEFAULT_MAX_CALLS = 8` | 每 Harness run 一条 capability；每次 prompt 原子消费；用尽 429 `CAPABILITY_EXHAUSTED` | 单个 Harness run | 下一次 prompt 被拒 → `adapter.prompt` 抛错 → orchestrator `#blockStep` | `electron/task-harness-orchestrator.cjs:30,165`；`electron/model-proxy.cjs #check` |
 | ② | Tool Facade capability `maxCalls`（production=8） | 原子 reserve：`cap.calls >= cap.maxCalls` → 429 `TOOL_CAPABILITY_EXHAUSTED`；exact duplicate 不二次消耗 | 每个 run 独立 bridge / 独立 `tpx_` capability | 超限的受控 tool call 被拒（**执行前**），Domain 不执行 | `electron/task-bootstrap.cjs`；`electron/tool-facade-bridge.cjs:203` |
-| ③ | 编排层 `MAX_TOOL_ROUNDS = 4` | 自动 tool loop 轮数上界 | 非 facade（openarc）READ tool loop，每个 run | 第 4 轮后仍有 proposal → orchestrator 自己 `#blockStep`+`blockHarnessRun`（reason `TOOL_EXECUTION_NOT_AVAILABLE`） | `electron/task-harness-orchestrator.cjs:31,213,236` |
+| ③ | 编排层 `MAX_TOOL_ROUNDS = 4` | 自动 tool loop 轮数上界 | 非 facade（openarc）READ tool loop，每个 run | 第 4 轮后仍有 proposal → orchestrator 自己 `#blockStep`+`blockHarnessRun`（reason `BUDGET_EXHAUSTED{TOOL_ROUNDS}`） | `electron/task-harness-orchestrator.cjs:31,213,236` |
 
 `task.budget_snapshot` 仅是信息快照、**未被强制执行**，未当作预算使用。
 

@@ -1,0 +1,151 @@
+{
+  "phase": "D4-06-Closure",
+  "title": "预算停止后的显式续接（真实 UI 路径）",
+  "testedCommit": "207f9462e03e204594be5dc6e313041afda8efdb",
+  "workspaceState": "M docs/D4-04-GATE-EVIDENCE.json\n M docs/D4-06-GATE-EVIDENCE.json",
+  "command": "npm run test:d4-06-resume",
+  "env": {
+    "electron": "44.3.0",
+    "node": "24.20.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "officialDsh": true,
+  "productRuntimeBoot": true,
+  "checks": [
+    {
+      "name": "R0.1 · 真实 UI 登录进入桌面",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "name": "R0.2 · 真实产品 boot + tool 授权就绪",
+      "expected": "model proxy listening + tool grant ok",
+      "actual": "{\"listening\":true}",
+      "ok": true
+    },
+    {
+      "name": "R1.1 · step1 真实 WRITE 成功且产生 Artifact",
+      "expected": "ok + artifact + trashed",
+      "actual": "{\"ok\":true,\"artifact\":true,\"trashed\":true}",
+      "ok": true
+    },
+    {
+      "name": "R1.2 · step2 bounded 预算停止 → BUDGET_EXHAUSTED",
+      "expected": "BUDGET_EXHAUSTED",
+      "actual": "{\"err\":\"BUDGET_EXHAUSTED\",\"run\":\"BUDGET_EXHAUSTED\"}",
+      "ok": true
+    },
+    {
+      "name": "R1.3 · Task/Step BLOCKED + 旧 Artifact 保留",
+      "expected": "BLOCKED + step1 artifact",
+      "actual": "BLOCKED",
+      "ok": true
+    },
+    {
+      "name": "R2.1 · 后端判定可续接 + 账本",
+      "expected": "resumable=true + resumeCount=0",
+      "actual": "{\"resumable\":true,\"kind\":\"MODEL_CALLS\",\"resumeCount\":0}",
+      "ok": true
+    },
+    {
+      "name": "R2.2 · 刷新后从 task/get 恢复续接入口",
+      "expected": "resume visible + BLOCKED",
+      "actual": "{\"resumeShown\":true,\"panelTaskId\":\"task_fLCd-UrcWtXBSg\",\"status\":\"BLOCKED\"}",
+      "ok": true
+    },
+    {
+      "name": "R2.3 · UI 显示停止原因 / 本次追加预算 / 已完成结果",
+      "expected": "BUDGET_EXHAUSTED + MODEL_CALLS +Δ + prior result",
+      "actual": "{\"stopText\":\"停止原因：BUDGET_EXHAUSTED\",\"budgetText\":\"本次追加预算：MODEL_CALLS +8（第 1/3 次续接）\",\"resultLen\":25}",
+      "ok": true
+    },
+    {
+      "name": "R3.1 · 点击真实续接按钮",
+      "expected": "ok",
+      "actual": "ok",
+      "ok": true
+    },
+    {
+      "name": "R3.2 · 续接成功 → Task SUCCEEDED + 新 step",
+      "expected": "SUCCEEDED + 3 steps",
+      "actual": "{\"task\":\"SUCCEEDED\",\"steps\":[\"SUCCEEDED\",\"BLOCKED\",\"SUCCEEDED\"]}",
+      "ok": true
+    },
+    {
+      "name": "R3.3 · 新 step 携带 continuation(prior artifact) 且不含旧 tool 请求",
+      "expected": "continuation + prior artifact",
+      "actual": "{\"kind\":\"MODEL_CALLS\",\"prior\":1}",
+      "ok": true
+    },
+    {
+      "name": "R4.1 · 已成功副作用恰好一次 / 不重放",
+      "expected": "1 SUCCEEDED call + trashed",
+      "actual": "{\"calls\":1,\"call\":\"SUCCEEDED\"}",
+      "ok": true
+    },
+    {
+      "name": "R4.2 · 只追加一次预算 + 账本保留历史",
+      "expected": "1 grant + consumedAtGrant",
+      "actual": "{\"grants\":1}",
+      "ok": true
+    },
+    {
+      "name": "R4.3 · Task/Step/Artifact/Verification 关联链一致",
+      "expected": "2 artifacts + 2 verifications + checksum",
+      "actual": "{\"arts\":2}",
+      "ok": true
+    },
+    {
+      "name": "R5.1 · 非预算停止（真实 UNKNOWN/crash 恢复）→ Task BLOCKED 且后端显式拒绝续接",
+      "expected": "BLOCKED + RESUME_* 显式原因",
+      "actual": "{\"task\":\"BLOCKED\",\"call\":\"FAILED\",\"callError\":\"STILL_ACTIVE_AT_EXPECTED_VERSION\",\"runError\":\"STILL_ACTIVE_AT_EXPECTED_VERSION\",\"reason\":\"RESUME_NOT_BUDGET_STOP\"}",
+      "ok": true
+    },
+    {
+      "name": "R5.2 · 非 resumable 时 UI 不显示续接入口",
+      "expected": "no resume entry + BLOCKED",
+      "actual": "{\"panel\":\"task_jnq3Q3embC4scw\",\"expected\":\"task_jnq3Q3embC4scw\",\"match\":true,\"status\":\"BLOCKED\",\"reason\":\"RESUME_NOT_BUDGET_STOP\",\"resume\":false}",
+      "ok": true
+    },
+    {
+      "name": "I1 · DB / UI 0 capability / [REDACTED] / 绝对路径泄漏",
+      "expected": "[]",
+      "actual": "[]",
+      "ok": true
+    },
+    {
+      "name": "I2 · Renderer console error = 0",
+      "expected": "0",
+      "actual": "",
+      "ok": true
+    },
+    {
+      "name": "I3 · main uncaught / unhandled = 0",
+      "expected": "0",
+      "actual": "",
+      "ok": true
+    }
+  ],
+  "stats": {
+    "taskId": "task_fLCd-UrcWtXBSg",
+    "unknownTaskId": "task_jnq3Q3embC4scw",
+    "budgetStops": 1,
+    "grants": 1,
+    "artifacts": 2,
+    "sideEffectCalls": 1,
+    "executorEvidence": 2
+  },
+  "rendererConsoleErrors": 0,
+  "mainUnhandledErrors": 0,
+  "secretHits": 0,
+  "checksSummary": {
+    "total": 19,
+    "pass": 19,
+    "fail": 0
+  },
+  "at": "2026-09-17T03:36:15.803Z",
+  "artifactSha256Coverage": "sha256 of canonical JSON (2-space indent) excluding the artifactSha256 field",
+  "artifactSha256": "22bb20873543a6683c8504a272db1c194269005344c1a0c2515334cfd5c2e5c4"
+}
