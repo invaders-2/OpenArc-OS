@@ -396,6 +396,10 @@ function App() {
   /** 桌面框选：选中的桌面条目（文件夹与文件同一个集合）+ 橡皮筋矩形。 */
   const [deskSel, setDeskSel] = useState<string[]>([]);
   const [deskMarquee, setDeskMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  /** 桌面拖拽悬停在"不接受落点"的区域（程序坞 / 顶栏）：自绘禁止光标。 */
+  const [deskDropInvalid, setDeskDropInvalid] = useState(false);
+  /** 按住 ⌘（拖到系统 = 拷贝/别名）：可拖拽条目换成自绘拷贝光标。 */
+  const [cmdDown, setCmdDown] = useState(false);
   const [info, setInfo] = useState<{ title: string; subtitle?: string; rows: { k: string; v: string }[] } | null>(null);
   /** 应用内剪贴板（复制 / 剪切），粘贴进当前文件夹。 */
   const [clip, setClip] = useState<{ mode: "copy" | "cut"; folderId: string; ids: string[] } | null>(null);
@@ -870,6 +874,17 @@ function App() {
       const dy = p.clientY - y0;
       for (const [x, s] of starts) setDeskEntryPos(x, clampDeskPos({ x: s.x + dx, y: s.y + dy }));
       markTarget(resolveTarget(p.clientX, p.clientY, rectAt(dx, dy))?.el ?? null);
+      // 落点无效（程序坞 / 顶栏不吃桌面拖拽）时才换禁止光标：跳过跟手的图标本身再看下一层
+      let invalid = false;
+      for (const node of document.elementsFromPoint(p.clientX, p.clientY)) {
+        const el = node as HTMLElement;
+        const tile = el.closest?.("[data-entry-id],[data-folder-id]") as HTMLElement | null;
+        const tileId = tile?.dataset.entryId || tile?.dataset.folderId;
+        if (tileId && ids.includes(tileId)) continue;
+        invalid = !!(el.closest?.(".dock") || el.closest?.(".topbar"));
+        break;
+      }
+      setDeskDropInvalid((cur) => (cur === invalid ? cur : invalid));
     };
     const end = (ev?: PointerEvent) => {
       el.removeEventListener("pointermove", move);
@@ -877,6 +892,7 @@ function App() {
       el.removeEventListener("pointercancel", end);
       const hit = ev ? resolveTarget(ev.clientX, ev.clientY, rectAt(ev.clientX - x0, ev.clientY - y0)) : null;
       markTarget(null);
+      setDeskDropInvalid(false);
       if (hit) {
         void moveInto(hit.id, DESKTOP_ID, ids).then(() => {
           setDesktopIcons((m) => {
@@ -1294,6 +1310,20 @@ function App() {
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, [setOverlays]);
+
+  /** ⌘ 的按下/抬起只改指针外观；拖拽行为仍在各自的手势里决定。 */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => setCmdDown(e.metaKey);
+    const off = () => setCmdDown(false);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKey);
+    window.addEventListener("blur", off);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKey);
+      window.removeEventListener("blur", off);
+    };
+  }, []);
 
   const runningApps = useMemo(() => new Set(state.windows.map((w) => w.appId)), [state.windows]);
   /** 顶栏的最近应用：**一个 App 一个图标**（文件夹折进访达），保留每个身份最新的那个窗口。 */
@@ -1718,6 +1748,7 @@ function App() {
             <div
               className="folder-body"
               data-drop-folder={shown.id}
+              data-marquee={marquee?.winId === id ? "files" : undefined}
               onPointerDown={startMarquee}
               onContextMenu={(e) => {
                 e.preventDefault();
@@ -2496,6 +2527,9 @@ function App() {
   return (
     <div
       className={`desktop ${dark ? "dark" : ""} ${reduced ? "reduced" : ""}`}
+      data-marquee={deskMarquee ? "desk" : undefined}
+      data-drop-invalid={deskDropInvalid ? "1" : undefined}
+      data-cmd={cmdDown ? "1" : undefined}
       data-glass={glass}
       data-identity-gate={gate}
       data-wallpaper={wallpaper}

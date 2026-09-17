@@ -2468,3 +2468,79 @@ input[type="checkbox"] {
 :is(.desktop-folder, .file-cell, .rb-folder):hover .rb-folder-paper {
   transform: translate(-50%, 0);
 }
+
+/* ── 自绘光标（OpenArc 光标套装）────────────────────────────────────────
+   形状照着系统自带的 cursors 目录（ApplicationServices / HIServices framework 的
+   Resources/cursors）的轮廓重画 —— 只做形状参考，**没有拷贝或引用任何系统文件**。
+   32×32、1px 描边、圆角线帽/连接；阴影是 (0,-1) 的低透明度偏移副本（不用 SVG filter，
+   光标位图里 filter 不稳）。两套外观按 .dark 切换：浅色 UI = 黑填充+白描边，
+   深色 UI = 白填充+黑描边（与 macOS 一致）。
+   路径用 public/ 根的绝对写法（与 /openarc-mark.svg 同一路子），构建时 Vite 会重写成
+   ../cursors/…，正好落在 dist/cursors/。每条都带原生关键字兜底 —— 光标图一旦加载失败
+   就退回系统光标，不会退化成箭头。
+   热点 = 指针真正"点"的位置：箭头尖端 2,2；十字 / 双箭头中心 16,16；手型 16,17。 */
+
+/* 窗口右下角缩放手柄（原生 nwse-resize；双箭头中心即热点） */
+.resize {
+  cursor: url("/cursors/resize-se-light.svg") 16 16, nwse-resize;
+}
+.dark .resize {
+  cursor: url("/cursors/resize-se-dark.svg") 16 16, nwse-resize;
+}
+
+/* 桌面 / 文件区按住框选：十字（原生 crosshair） */
+.desktop[data-marquee="desk"],
+.desktop[data-marquee="desk"] .desktop-folder,
+.desktop[data-marquee="desk"] .desktop-file {
+  cursor: url("/cursors/crosshair-light.svg") 16 16, crosshair;
+}
+.desktop.dark[data-marquee="desk"],
+.desktop.dark[data-marquee="desk"] .desktop-folder,
+.desktop.dark[data-marquee="desk"] .desktop-file {
+  cursor: url("/cursors/crosshair-dark.svg") 16 16, crosshair;
+}
+.folder-body[data-marquee="files"],
+.folder-body[data-marquee="files"] .file-cell {
+  cursor: url("/cursors/crosshair-light.svg") 16 16, crosshair;
+}
+.dark .folder-body[data-marquee="files"],
+.dark .folder-body[data-marquee="files"] .file-cell {
+  cursor: url("/cursors/crosshair-dark.svg") 16 16, crosshair;
+}
+
+/* 拖拽进行中（程序坞整理）：握紧手（原生 grabbing） */
+.dock.arranging .dock-item {
+  cursor: url("/cursors/grab-light.svg") 16 17, grabbing;
+}
+.dark .dock.arranging .dock-item {
+  cursor: url("/cursors/grab-dark.svg") 16 17, grabbing;
+}
+
+/* 拖到非法落点（程序坞 / 顶栏不接受桌面拖拽）：禁止（原生 not-allowed） */
+.desktop[data-drop-invalid="1"],
+.desktop[data-drop-invalid="1"] .dock,
+.desktop[data-drop-invalid="1"] .dock *,
+.desktop[data-drop-invalid="1"] .topbar,
+.desktop[data-drop-invalid="1"] .topbar * {
+  cursor: url("/cursors/not-allowed-light.svg") 2 2, not-allowed;
+}
+.desktop.dark[data-drop-invalid="1"],
+.desktop.dark[data-drop-invalid="1"] .dock,
+.desktop.dark[data-drop-invalid="1"] .dock *,
+.desktop.dark[data-drop-invalid="1"] .topbar,
+.desktop.dark[data-drop-invalid="1"] .topbar * {
+  cursor: url("/cursors/not-allowed-dark.svg") 2 2, not-allowed;
+}
+
+/* ⌘ 按住（拖到系统 = 拷贝 / 别名）：拷贝（原生 copy） */
+.desktop[data-cmd="1"] .desktop-file,
+.desktop[data-cmd="1"] .desktop-folder,
+.desktop[data-cmd="1"] .file-cell {
+  cursor: url("/cursors/copy-light.svg") 2 2, copy;
+}
+.desktop.dark[data-cmd="1"] .desktop-file,
+.desktop.dark[data-cmd="1"] .desktop-folder,
+.desktop.dark[data-cmd="1"] .file-cell {
+  cursor: url("/cursors/copy-dark.svg") 2 2, copy;
+}
+

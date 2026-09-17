@@ -1,5 +1,82 @@
 # 计划修订记录
 
+## 2026-09-16（十三）：自绘一套 OpenArc 光标（照原生形状，不拷文件）
+
+用户口径：「为 OpenArc 自绘一套自己的鼠标光标（照着 macOS 原生光标的形状，但不是拷贝文件），接进 app 里」。
+
+### 形状来源 · 只做参考，仓库不放系统文件
+
+形状对着系统自带的
+`/System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks/HIServices.framework/Versions/A/Resources/cursors/`
+（40 只，每只 `cursor.pdf` + `info.plist`，plist 里有热点 `hotx/hoty` 与阴影 `shadowcolor/shadowoffset/blur`）
+用 `sips` 转成 PNG 后**照着轮廓重画**（`pointinghand` / `openhand` / `closedhand` / `cross` / `move` /
+`copy` / `notallowed` / `ibeamvertical` / `resize*` 逐只放大看比例与热点）。**没有拷贝、嵌入或引用任何
+系统 PDF/PNG/plist**，仓库里只有我们自己的 SVG。
+
+### 交付 · `public/cursors/`（构建后 → `dist/cursors/`）
+
+17 种形状 × 2 套外观 = **34 个 SVG**：
+
+- 形状：`arrow`、`text`、`pointer`、`open-hand`、`grab`、`crosshair`、`move`、`copy`、
+  `not-allowed`、`resize-n/s/e/w/ne/nw/se/sw`。
+- 外观：浅色 UI = 黑填充 + 白描边（`-light`），深色 UI = 白填充 + 黑描边（`-dark`），跟 macOS 一样；
+  纯线条字形（`text` / `crosshair`）用「描边色 3px 垫底 + 填充色 1px 芯」，否则白线画在浅底上等于隐形。
+- 规格：`viewBox="0 0 32 32"` 且**显式写 `width="32" height="32"`**（Chromium 对光标图有尺寸上限，32 安全）；
+  1px 描边、`stroke-linecap/linejoin="round"`；阴影是 `(0,-1)` 方向的低透明度偏移副本，
+  **不用 SVG filter**（光标位图里 filter 不稳）。
+- 热点（写进 CSS 的 `url(...) X Y`）：箭头尖端 `2,2`；十字 / 双箭头中心 `16,16`；手型 `16,17`。
+
+### 接入（`src/styles.css`，每条都带原生兜底）
+
+```css
+.resize { cursor: url("/cursors/resize-se-light.svg") 16 16, nwse-resize; }
+```
+
+- `.resize` 窗口右下角缩放手柄 → `resize-se`（`nwse-resize` 兜底）。
+- 桌面 / 文件区按住框选 → `crosshair`：新增 `data-marquee` 状态（桌面 `desk`、文件夹 `.folder-body` `files`）。
+- 拖拽进行中（程序坞整理 `.dock.arranging`）→ `grab`（`grabbing` 兜底）。
+- 拖到非法落点（桌面图标跟手拖到程序坞 / 顶栏）→ `not-allowed`：`dragDesktopSelection` 的 move 里
+  用 `elementsFromPoint` 判「指针下是不是 `.dock` / `.topbar`」，新增 `data-drop-invalid`。
+- ⌘ 按住（拖到系统 = 拷贝 / 别名）→ `copy`：新增 `data-cmd`（keydown/keyup 读 `e.metaKey`）。
+- 路径用 public/ 根的绝对写法（与 `/openarc-mark.svg` 同一路子），Vite 构建时重写成 `../cursors/…`。
+- **没有** `* { cursor }` 一类的全局覆盖：`arrow` / `text` / `pointer` 只画进套装、先不全局启用
+  （macOS 辅助功能里用户能调大光标 / 提高对比度，固定 32px 的 SVG 全局盖掉会破坏它）。
+
+### 实测
+
+探针：`dist` + 本地静态服务 + 真实 Chromium，逐一触发真实状态后读 `getComputedStyle(el).cursor`
+（探针与产物在 `/tmp/oa-probe/`，不进仓库）：
+
+| 接入点 | 浅色实测 | 深色实测 |
+| --- | --- | --- |
+| `.resize` 缩放手柄 | `url("…/cursors/resize-se-light.svg") 16 16, nwse-resize` | `…/resize-se-dark.svg` |
+| 桌面框选（`data-marquee=desk`） | `url("…/cursors/crosshair-light.svg") 16 16, crosshair` | `…/crosshair-dark.svg` |
+| 文件区框选（`data-marquee=files`） | `url("…/cursors/crosshair-light.svg") 16 16, crosshair` | `…/crosshair-dark.svg` |
+| 程序坞整理（`.dock.arranging`） | `url("…/cursors/grab-light.svg") 16 17, grabbing` | `…/grab-dark.svg` |
+| 非法落点（`data-drop-invalid=1`） | `url("…/cursors/not-allowed-light.svg") 2 2, not-allowed` | `…/not-allowed-dark.svg` |
+| ⌘ 拷贝（`data-cmd=1`） | `url("…/cursors/copy-light.svg") 2 2, copy` | `…/copy-dark.svg` |
+
+- 6 个接入点命中的都是我们的 SVG 文件名（不是系统关键字）；探针同时看到 Chromium 真实发起了这些
+  SVG 的请求，且 `Image` 解码 `ok / 32×32`。
+- 对照图（全部光标放大 4×，浅底 / 深底各一张）：`/tmp/oa-probe/compare-light.png`、`compare-dark.png`。
+- 真实 Electron 44（`dist` + `--no-sandbox`）用 `screencapture -C` 实拍：
+  `/tmp/oa-probe/resize-final.png`（最上层窗口右下角手柄上是自绘的黑色双向斜箭头）、
+  `/tmp/oa-probe/real-test.png`（把 `.window-body` 临时改成 `not-allowed`，验证灰色禁止符号确实由 OS 绘出）。
+- 实测位置取的是**最上层窗口**的 `.resize`：用 `document.elementFromPoint` 确认命中的就是它本身
+  （`hit===el` 为真），不是被内容盖住。
+
+### 门禁
+
+`npx tsc --noEmit` clean、`npm test` 96/96。
+
+### 未做 / 已知
+
+- ⌘ 拖动一旦进入 Electron 原生 `startDrag`，光标由 macOS / Electron 接管，页面 CSS 不再生效；
+  `data-cmd` 只覆盖「按住 ⌘ 悬停在可拖条目上」这一段。
+- 非法落点目前只覆盖「桌面图标跟手拖到程序坞 / 顶栏」这一路（CSS 可控的那一路）；
+  页面内 HTML5 拖拽（拖到文件夹）的落点光标由 Chromium 的拖拽层决定，CSS 改不了。
+- `arrow` / `text` / `pointer` / `open-hand` / `move` / `resize-n/s/e/w/ne/nw/sw` 已入套装，暂未接线。
+
 ## 2026-09-16（十二）：系统设置 / Skill 中心 / 应用中心 —— 顶栏整条都能拖
 
 用户口径：「系统设置 / Skill 中心 / 应用中心这三个窗口，顶栏只有左边一条能拖，
