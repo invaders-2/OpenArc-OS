@@ -2425,6 +2425,7 @@ input[type="checkbox"] {
 }
 .lock-input input {
   width: 100%;
+  border: 0;
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-pill);
   background: rgb(var(--content-rgb) / var(--content-alpha));
