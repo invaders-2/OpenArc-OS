@@ -4,6 +4,7 @@
 - Base HEAD（本轮起点，干净）：`a7faf060bb4b2371fdfa379118b2d9011ba7b412`
 - **被测 commit**（D4 收口修复后重跑）：`ec7a732aa78ffc52e8e0ce3b4d1e09108f604dc4`（D4-05 实现 `83baad6`、审查补测 `431395d`）
 - **D4-05 Closure 代码与测试被测 commit**：`70eb0b12167e513bb4eb7fa1cb4efb9ca70e509d`（A33 正式 official dsh facade 链闸门；详见 `docs/D4-05-CLOSURE-RESULT.md`）
+- **D4-05 Closure-2 代码与测试被测 commit**：`77b6e857f3d5a9781ea2c218e89069b1802aaab4`（解决关联改按 (tool_id, canonical arguments)；详见 `docs/D4-05-CLOSURE2-RESULT.md`）
 - Final HEAD：本轮报告/证据提交（见文末）
 - 范围：只补齐 PLAN.md §41 的 D4-05 四场景（产物不符 / 结果未知 / 用量到限 / 记忆越权）；第二轮按父级指示补齐 S2 的**最小人工确认入口**以闭合 §384。不扩展真实工具面、不放宽既有检查、不 commit、不 push。
 - **结论：`D4-05 = PARTIAL`**——S1/S2/S3 = PASS；**S4 = PARTIAL**（检索链 PASS、上下文链 NOT VERIFIED：无 memory→任务上下文装配入口，A36 的上下文链为空验证，见 §3/§5）。其余场景 PASS 结论不变。**S1（A33）结论以 D4-05 Closure 的 official dsh facade 正式链证据为准**（见 §7 与 `docs/D4-05-CLOSURE-RESULT.md`）。
@@ -81,3 +82,11 @@
 - 正式链证据：`tests/d4-05-s1-facade-a33.test.mjs` **5/5**（真实 official dsh，负例/正对照/有限纠错/普通 READ 错误/跨重开持久化）；`npm run test:d4-08-verification-ui` **22/22**（`officialDshFacade=true` 的真实 Electron UI：BLOCKED/0 Artifact/1 FAIL Verification、刷新一致、非 owner 不可读）。
 - 回归：`npm run test:d4-05` **133/133 functional（S1/S2/S3=PASS、S4=PARTIAL）**；`test:d4-04` 94/94、`test:d4-06` 119/119、`test:d4-06-resume` 21/21、`test:d4-03b-dsh` 26/26、`npm test` 963/963。
 - 详细根因/改动/逐条检查/限制见 `docs/D4-05-CLOSURE-RESULT.md`。
+
+## 8. D4-05 Closure-2 · 失败验证的解决关联修正（`77b6e857f3d5a9781ea2c218e89069b1802aaab4`）
+
+- **漏洞**：Closure-1 的 `getUnresolvedRequiredVerificationFailures` 按裸 `tool_id` 的“最近一次验证结论”判定解决——同一工具对象 A FAIL、对象 B PASS 时，B 的无关 PASS 会误清除 A 的 FAIL，导致假成功（正式链已复现：Task SUCCEEDED + 1 Artifact，同时 A 的 FAIL 未解决）。
+- **修复**：关联键改为 `(tool_id, canonical arguments)`（`task_tool_proposals.arguments_hash`）；只有**同一操作对象 + 同一验证要求**的真实复验 PASS 才算解决；顺序敏感（FAIL→PASS→FAIL 仍未解决）；缺 `arguments_hash` 的旧数据用 execution 唯一键保守保持未解决；返回 `resolved` 关联证据；原始 FAIL 绝不删改。
+- **正式链证据（Closure-2）**：`tests/d4-05-s1-facade-association.test.mjs` **6/6**（无关对象/无关要求/无关 Step 不误清除、有效纠错可成功并关联、DB 重开一致、普通错误语义不变）；`npm run test:d4-05` **139/139 functional（S1/S2/S3=PASS、S4=PARTIAL）**；`test:d4-08-verification-ui` 22/22 无回归；`test:d4-04` 94/94、`test:d4-06` 119/119、`test:d4-06-resume` 21/21。
+- **支持范围（如实）**：产品未区分“必需/探索”工具契约；`verification_status=FAIL` 仅由“工具 `execute` 成功但 `OUTPUT_SCHEMA`/`ADAPTER_VERIFY` 失败”写入（DENY/执行错误不参与判定）。跨 run/跨 step 无可达纠错入口，未新增恢复能力。
+- 详见 `docs/D4-05-CLOSURE2-RESULT.md`。
