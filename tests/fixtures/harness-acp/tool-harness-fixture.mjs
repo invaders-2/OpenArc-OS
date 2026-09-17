@@ -62,7 +62,8 @@ export async function createToolHarnessFixture(opts = {}) {
   base.taskService.attachBudgetStores({ toolStore, sideEffectStore });
   // D4-03C4：唯一 production side-effect 装配（test 只注入参数，不自己拼 authority 链）。
   const sideEffectRuntimeDir = opts.sideEffectRuntimeDir || fs.mkdtempSync(path.join(os.tmpdir(), "oa-c4-runtime-"));
-  const supervisor = new RuntimeSupervisor({ runtimeDir: sideEffectRuntimeDir, clock: sideEffectClock, executorEntry: opts.sideEffectExecutorEntry || null });
+  // sideEffectExecutorTestHook 是 test-only fault seam（production 默认 null），只经 spawn args 传给受监督 executor。
+  const supervisor = new RuntimeSupervisor({ runtimeDir: sideEffectRuntimeDir, clock: sideEffectClock, executorEntry: opts.sideEffectExecutorEntry || null, ...(opts.sideEffectExecutorTestHook ? { executorTestHook: opts.sideEffectExecutorTestHook } : {}) });
   // 测试夹具必须等 production supervisor 完成 rehydrate，否则 quiescence 一律 fail closed。
   await supervisor.rehydrate();
   // 默认 lifecycle = production supervisor；需要精确控制时由测试显式注入 sideEffectLifecycle。

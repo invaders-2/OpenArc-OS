@@ -645,7 +645,9 @@ class TaskService {
         maxResumes: MAX_BUDGET_RESUMES,
         remainingResumes: Math.max(0, MAX_BUDGET_RESUMES - additions.length),
         consumed: {
-          modelCalls: this.store.callsOfTask(id).length,
+          // task_model_calls 是「每个 step/run 一个模型调用信封」，不是逐 provider 请求；
+          // 逐请求的真实 bounded 消耗只由 Model Proxy capability 计量，停止时记录在 budgetStops。
+          modelCallEnvelopes: this.store.callsOfTask(id).length,
           toolExecutions: this.toolStore ? this.toolStore.executionsOfTask(id).length : null,
           budgetStops,
         },
@@ -655,6 +657,84 @@ class TaskService {
         reason: assessment.reason,
       },
     };
+  }
+
+  /**
+   * D4-05 S2 · 结果未知的只读恢复投影（PLAN §384：检查实际应用 / 关联产物 / 人工确认入口）。
+   *
+   * 只读：不改变 call / step / task 状态，不 retry、不 execute、不授权 resume。
+   * 仅当 task BLOCKED 且存在 UNKNOWN_EFFECT call 时 applicable=true；投影一律 safe（无绝对路径 / secret）。
+   */
+  getRecoveryState({ context, taskId } = {}) {
+    const guard = this.#guard(context);
+    if (!guard.ok) return guard;
+    const load = this.#load(guard, taskId);
+    if (!load.ok) return load;
+    const task = load.task;
+    const assessment = this.#resumeAssessment(task);
+    const base = {
+      ok: true, taskId: task.task_id, taskStatus: task.status, applicable: false,
+      stopReason: assessment.stopReason || null, resumable: !!assessment.resumable,
+      reason: assessment.reason || null, calls: [],
+    };
+    if (!this.sideEffectStore) return Object.assign(base, { reason: "RECOVERY_STATE_UNAVAILABLE" });
+    const unknown = this.sideEffectStore.callsOfTask(task.task_id).filter((c) => String(c.status) === "UNKNOWN_EFFECT");
+    if (task.status !== TASK_STATUS.BLOCKED || unknown.length === 0) return base;
+    const artifacts = this.store.artifactsOfTask(task.task_id).slice(0, 20).map((a) => ({
+      artifactId: a.artifact_id, stepId: a.step_id || null, type: a.type, checksum: a.checksum || null, createdAt: a.created_at,
+    }));
+    const acks = new Map();
+    for (const e of this.store.eventsOfTask(task.task_id)) {
+      if (e.event_type !== TASK_EVENT.TOOL_SIDE_EFFECT_UNKNOWN_EFFECT_ACKNOWLEDGED) continue;
+      let p = null; try { p = e.safe_payload ? JSON.parse(e.safe_payload) : null; } catch { p = null; }
+      if (p && p.callId) acks.set(String(p.callId), { at: e.created_at, operatorUserId: p.operatorUserId || null });
+    }
+    const calls = unknown.slice(0, 20).map((c) => {
+      const rec = c.recoverySafe || null;
+      const outcome = rec && ["APPLIED", "NOT_APPLIED", "INDETERMINATE"].includes(String(rec.outcome)) ? String(rec.outcome) : null;
+      const ack = acks.get(String(c.callId)) || null;
+      return {
+        callId: c.callId, toolId: c.toolId, toolVersion: c.toolVersion, status: c.status,
+        errorCode: c.errorCode || null, stepId: c.stepId || null, runId: c.runId || null,
+        resourceRef: (c.preconditionsSafe && c.preconditionsSafe.resourceRef) || null,
+        recoveryResult: outcome || "NO_CONCLUSION", recoveryReason: (rec && rec.reason) || null,
+        quiesced: rec && typeof rec.quiesced === "boolean" ? rec.quiesced : null,
+        associatedArtifacts: artifacts.map((a) => Object.assign({ sameStepAsCall: a.stepId === c.stepId }, a)),
+        acknowledged: !!ack, acknowledgedAt: ack ? ack.at : null, acknowledgedBy: ack ? ack.operatorUserId : null,
+      };
+    });
+    return Object.assign(base, { applicable: true, reason: assessment.reason || RESUME_REASON.UNKNOWN_EFFECT_PRESENT, calls });
+  }
+
+  /**
+   * D4-05 S2 · 人工确认“已核查结果未知的副作用”。
+   *
+   * 只追加一条 safe task event；绝不改 call / step / task 状态，绝不授权 resume / retry / replay，
+   * 也绝不显示成功。仅允许对属于本 task 的 UNKNOWN_EFFECT call 确认；重复确认幂等（不追加第二条）。
+   */
+  acknowledgeUnknownEffect({ context, taskId, callId } = {}) {
+    const guard = this.#guard(context);
+    if (!guard.ok) return guard;
+    const id = String(callId == null ? "" : callId);
+    if (!id) return { ok: false, error: ERROR.INVALID_INPUT };
+    return this.store.transactSync(() => {
+      const load = this.#load(guard, taskId);
+      if (!load.ok) return load;
+      const task = load.task;
+      if (!this.sideEffectStore) return { ok: false, error: "RECOVERY_STATE_UNAVAILABLE" };
+      const call = this.sideEffectStore.callById(id);
+      if (!call || call.taskId !== task.task_id) return { ok: false, error: ERROR.TASK_NOT_FOUND };
+      if (String(call.status) !== "UNKNOWN_EFFECT") return { ok: false, error: "RECOVERY_NOT_APPLICABLE" };
+      const already = this.store.eventsOfTask(task.task_id).some((e) => {
+        if (e.event_type !== TASK_EVENT.TOOL_SIDE_EFFECT_UNKNOWN_EFFECT_ACKNOWLEDGED) return false;
+        let p = null; try { p = e.safe_payload ? JSON.parse(e.safe_payload) : null; } catch { p = null; }
+        return !!(p && String(p.callId) === id);
+      });
+      if (already) return { ok: true, changed: false, acknowledged: true, taskId: task.task_id, callId: id };
+      this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.TOOL_SIDE_EFFECT_UNKNOWN_EFFECT_ACKNOWLEDGED, safePayload: sanitizeEventPayload({ callId: id, toolId: call.toolId, operatorUserId: guard.actor.user.id }), at: this.#now() });
+      this.#audit(guard, context, "task.acknowledge_unknown_effect", task.task_id);
+      return { ok: true, changed: true, acknowledged: true, taskId: task.task_id, callId: id };
+    });
   }
 
   /**
@@ -691,7 +771,7 @@ class TaskService {
       const sequence = this.store.nextStepSequence(task.task_id);
       const step = this.store.insertStep({ taskId: task.task_id, sequence, kind: ORCHESTRATION_KIND, status: STEP_STATUS.PENDING, input: continuation, attempt: 1, maxAttempts: DEFAULT_MAX_ATTEMPTS });
       const consumedAtGrant = {
-        modelCalls: this.store.callsOfTask(task.task_id).length,
+        modelCallEnvelopes: this.store.callsOfTask(task.task_id).length,
         toolExecutions: this.toolStore ? this.toolStore.executionsOfTask(task.task_id).length : null,
         budgetStops: this.#budgetExhaustEvents(task.task_id).length,
       };

@@ -89,7 +89,7 @@ function createTaskBundle({ identityStore, authorization, authStore, modelServic
 }
 
 /** D4-04：Renderer 可用的 Task 命令白名单（trusted sender + main-process session 注入）。 */
-const TASK_COMMANDS = Object.freeze(["task/run", "task/get", "task/list", "task/cancel", "task/resume"]);
+const TASK_COMMANDS = Object.freeze(["task/run", "task/get", "task/list", "task/cancel", "task/resume", "task/recovery", "task/acknowledgeUnknownEffect"]);
 
 function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrusted, send = null, hostAppId = "ai" } = {}) {
   if (typeof ipcMain.removeHandler === "function") { try { ipcMain.removeHandler("task:command"); } catch { /* not registered */ } }
@@ -136,12 +136,15 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
           // D4-06 Closure：可续接状态与预算账本一律后端判定（renderer 自报无效）。
           const eligibility = taskService.getResumeEligibility({ context, taskId });
           const ledger = taskService.getBudgetLedger({ context, taskId });
+          // D4-05 S2：结果未知的只读恢复投影（仅 BLOCKED + UNKNOWN_EFFECT 时 applicable）。
+          const recovery = taskService.getRecoveryState({ context, taskId });
           return {
             ok: true, task: got.task, steps: steps.ok ? steps.items : [], artifacts: artifacts.ok ? artifacts.items : [],
             resumable: !!(eligibility.ok && eligibility.resumable),
             stopReason: eligibility.ok ? (eligibility.stopReason || null) : null,
             resumeReason: eligibility.ok ? (eligibility.reason || null) : (eligibility.error || null),
             budgetLedger: ledger.ok ? ledger.ledger : null,
+            recovery: recovery.ok ? recovery : null,
           };
         }
         case "task/list": {
@@ -163,6 +166,16 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
           const running = orchestrator.resumeBudgetExhausted({ context, taskId, expectedRevision, verify: { type: "SCHEMA_VALID" } });
           running.then((r) => emitResult(taskId, r)).catch(() => { try { send({ type: "task/result", taskId, ok: false, status: null, error: "INTERNAL_ERROR" }); } catch { /* ignore */ } });
           return { ok: true, taskId, status: got.task.status };
+        }
+        case "task/recovery": {
+          const taskId = String(payload.taskId == null ? "" : payload.taskId);
+          return taskService.getRecoveryState({ context, taskId });
+        }
+        case "task/acknowledgeUnknownEffect": {
+          const taskId = String(payload.taskId == null ? "" : payload.taskId);
+          // callId 由 renderer 指定目标，但身份 / owner / app 与 call 归属一律由 taskService 校验。
+          const callId = String(payload.callId == null ? "" : payload.callId);
+          return taskService.acknowledgeUnknownEffect({ context, taskId, callId });
         }
         default: return { ok: false, error: "TASK_COMMAND_NOT_ALLOWED" };
       }

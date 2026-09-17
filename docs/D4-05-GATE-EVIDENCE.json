@@ -1,0 +1,1102 @@
+{
+  "phase": "D4-05",
+  "title": "执行关卡：产物不符 / 结果未知 / 用量到限 / 记忆越权",
+  "testedCommit": "a7faf060bb4b2371fdfa379118b2d9011ba7b412",
+  "workspaceState": "M electron/task-bootstrap.cjs\n M electron/task-domain.cjs\n M electron/task-service.cjs\n M package.json\n M src/desktop/components.tsx\n M tests/fixtures/harness-acp/tool-harness-fixture.mjs\n?? docs/D4-05-GATE-EVIDENCE.json\n?? docs/D4-05-RESULT.md\n?? tests/d4-05-recovery-ui.mjs\n?? tests/d4-05-s1-output-size.test.mjs\n?? tests/d4-05-s2-recovery.test.mjs\n?? tests/d4-05-s3-budget-ledger.test.mjs\n?? tests/d4-05-s4-memory.test.mjs\n?? tests/d4-05-smoke.mjs\n?? tests/fixtures/d4-05-recovery-probe/",
+  "command": "npm run test:d4-05",
+  "env": {
+    "electron": "44.3.0",
+    "node": "24.20.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "officialDsh": true,
+  "overallStatus": "PASS",
+  "functionalStatus": "PASS",
+  "scenarioStatus": {
+    "S1": "PASS",
+    "S2": "PASS",
+    "S3": "PASS",
+    "S4": "PASS"
+  },
+  "gaps": [
+    {
+      "scenario": "S2",
+      "status": "RESOLVED",
+      "name": "S2 · 结果未知的人工确认入口",
+      "expected": "PLAN §384：结果未知提供检查实际应用、关联产物和人工确认入口，不能直接显示成功或安全重试",
+      "actual": "已实现只读 recovery 投影（task/get.recovery + task/recovery：call/status/errorCode/recoveryResult/关联产物/resumable=false）+ task/acknowledgeUnknownEffect + UI data-ai-recovery/data-ai-acknowledge；ack 只追加一条 safe task event，绝不改 call/step/task 状态、绝不授权 resume/retry。真实 Electron UI 11/11 通过。"
+    },
+    {
+      "scenario": "S4",
+      "status": "NOT_IN_SCOPE",
+      "name": "S4 · memory → 任务上下文的正向注入",
+      "expected": "若存在记忆检索能力，则应在授权范围内注入新任务上下文",
+      "actual": "不存在：buildPrompt 只含 goal + safe step input + prior artifact，没有 memory 检索/注入；A36 的负向要求（不出现已删/他人内容）成立，正向记忆检索能力未实现",
+      "reason": "如实记录能力缺口；A36 原文为负向要求，按原文判定满足"
+    }
+  ],
+  "reusedElectronRun": "tests/d4-04-smoke.mjs（共享真实链路，含 S2 UNKNOWN_EFFECT F1/F3/F5/F6/F7）",
+  "recoveryUiRun": "tests/d4-05-recovery-ui.mjs（真实 Electron UI：recovery 投影 + 人工确认）",
+  "nodeTests": [
+    "d4-05-s1-output-size.test.mjs",
+    "d4-05-s2-recovery.test.mjs",
+    "d4-05-s3-budget-ledger.test.mjs",
+    "d4-05-s4-memory.test.mjs",
+    "d4-06-budget.test.mjs",
+    "d4-06-resume.test.mjs"
+  ],
+  "electronRun": {
+    "exitCode": 0,
+    "checksSummary": {
+      "total": 94,
+      "pass": 94,
+      "fail": 0
+    },
+    "artifactSha256": "bf02b710fa1ce1457fd804b105051f285d94fa5fa37b7444ac8f26c57498956a"
+  },
+  "recoveryRun": {
+    "exitCode": 0,
+    "checksSummary": {
+      "total": 11,
+      "pass": 11,
+      "fail": 0
+    },
+    "artifactSha256": "fe05c2f302df1a724fc6ff6dfe842211450343030832834639d5dfbdc56dcad7"
+  },
+  "nodeRun": {
+    "exitCode": 0,
+    "counts": {
+      "pass": 20,
+      "fail": 0,
+      "tests": 20
+    }
+  },
+  "rendererConsoleErrors": 0,
+  "mainUnhandledErrors": 0,
+  "secretHits": 0,
+  "checksSummary": {
+    "total": 125,
+    "pass": 125,
+    "fail": 0
+  },
+  "sourceArtifacts": [
+    {
+      "path": "artifacts/d4-04/vertical-smoke-gate.json",
+      "sha256": "65164eadc52ff0146ebbc2360345ac2cf3b13df22c2c4c166fa75c7b11bccd66"
+    },
+    {
+      "path": "artifacts/d4-05/node-tests.tap",
+      "sha256": "ebcce67afb832d7fd1dc9fa0047cea6b3c49fe9f8366daf81d07709d2d96549a"
+    },
+    {
+      "path": "artifacts/d4-05-recovery/recovery-ui-gate.json",
+      "sha256": "4c3c10135290d2b9d35f6b23794333931d5a699c704ffc28e376b801c6be9e8c"
+    }
+  ],
+  "checks": [
+    {
+      "scenario": "S1",
+      "source": "node:tap",
+      "name": "D4-05 S1 A33 · 工具报告成功但产物尺寸不符 → TOOL_VERIFICATION_FAILED / Task BLOCKED / 0 Artifact / 无自动重试",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "scenario": "S1",
+      "source": "node:tap",
+      "name": "D4-05 S1 A33 正对照 · 产物尺寸符合 → Task SUCCEEDED + 1 Artifact + 1 Verification（同一链路，非一概判失败）",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "scenario": "S2",
+      "source": "node:tap",
+      "name": "D4-05 S2 · recovery 只读投影：含 UNKNOWN_EFFECT call 与关联产物，且 resumable=false",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "scenario": "S2",
+      "source": "node:tap",
+      "name": "D4-05 S2 · 人工确认只追加 safe event：call 仍 UNKNOWN_EFFECT / Task 仍 BLOCKED / 0 第二 call·lease·retry",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "scenario": "S3",
+      "source": "node:tap",
+      "name": "D4-05 S3 A35 · 预算到限停止保留产物；续接追加额度 == 新一轮真实 capability 预算、历史保留、base 不重置",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "scenario": "S3",
+      "source": "node:tap",
+      "name": "D4-05 S3 A35 · 续接总数有界：MAX_BUDGET_RESUMES=3，第 4 次 RESUME_LIMIT_REACHED、绝不追加",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "scenario": "S4",
+      "source": "node:tap",
+      "name": "D4-05 S4 A36 · alice 个人 memory 检索可见 → 删除后不可见 + 索引移除 → 切账号不可见",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "scenario": "S4",
+      "source": "node:tap",
+      "name": "D4-05 S4 A36 · 切账号新任务：捕获真实 model 请求体，prompt/上下文不含已删或他人 memory 内容",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "scenario": "S3",
+      "source": "node:tap",
+      "name": "D4-06 · 轮次预算停止：proposeSequence>=5 → 恰好 MAX_TOOL_ROUNDS=4 次执行，Task/Step/Run BLOCKED，AUTO_RETRY=0",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "scenario": "S3",
+      "source": "node:tap",
+      "name": "D4-06 · 调用预算边界：facade maxCalls=2 → 第 3 个受控 tool call TOOL_CAPABILITY_EXHAUSTED，Domain 执行数<=maxCalls",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "scenario": "S3",
+      "source": "node:tap",
+      "name": "D4-06 · 保留产物：step1 成功后 step2 预算停止 → step1 Artifact/Verification/副作用保留，step2 无 Artifact",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "scenario": "S3",
+      "source": "node:tap",
+      "name": "D4-06 · 执行异常：受控 tool Domain 抛错 → execution FAILED → Step/Task BLOCKED，0 Artifact，无自动重试",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "scenario": "S3",
+      "source": "node:tap",
+      "name": "D4-06 · 执行异常：READ 目标不存在 → proposal DENIED → Step/Task BLOCKED，0 Artifact，0 mutation",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "scenario": "S3",
+      "source": "node:tap",
+      "name": "D4-06 · A35 续接入口现状：orchestrator.resume() 仍返回 EXPLICIT_RESUME_DEFERRED（Explicit Resume = DEFERRED）",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "scenario": "S3",
+      "source": "node:tap",
+      "name": "D4-06 Closure A/F · 预算停止 → 后端判定可续接 → 新 step 续接成功；副作用恰好一次、不重放、账本/关联链正确",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "scenario": "S3",
+      "source": "node:tap",
+      "name": "D4-06 Closure B · 续接后再次达到预算 → 再次停止，无额外调度、只追加一次预算",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "scenario": "S3",
+      "source": "node:tap",
+      "name": "D4-06 Closure C · 重复点击 / 并发请求 → 一次有效续接、一次预算追加",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "scenario": "S3",
+      "source": "node:tap",
+      "name": "D4-06 Closure D · 续接过程中撤权 → 受保护执行被拒绝并收敛；旧 approval/capability 不复活",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "scenario": "S2",
+      "source": "node:tap",
+      "name": "D4-06 Closure E · 非预算停止 / 伪造身份 / 伪造预算 / stale revision → 后端显式拒绝",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "scenario": "S2",
+      "source": "node:tap",
+      "name": "D4-06 Closure E · 真实 live-unlinked 崩溃遗留 UNKNOWN_EFFECT call → 后端拒绝续接（RESUME_UNKNOWN_EFFECT_PRESENT）",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "scenario": "S2",
+      "source": "electron:d4-05-recovery-ui",
+      "name": "S2-UI-0 · 真实 UI 登录进入桌面",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "scenario": "S2",
+      "source": "electron:d4-05-recovery-ui",
+      "name": "S2-UI-1 · step0 Artifact 锚点就绪",
+      "expected": null,
+      "actual": "{\"ok\":true,\"artifacts\":1}",
+      "ok": true
+    },
+    {
+      "scenario": "S2",
+      "source": "electron:d4-05-recovery-ui",
+      "name": "S2-UI-2 · 真实存活 executor claim RUNNING（quiescence 不可证）",
+      "expected": null,
+      "actual": "{\"claimed\":true,\"err\":\"\"}",
+      "ok": true
+    },
+    {
+      "scenario": "S2",
+      "source": "electron:d4-05-recovery-ui",
+      "name": "S2-UI-3 · recoverOnStartup → Call 持久化 UNKNOWN_EFFECT / Task BLOCKED",
+      "expected": null,
+      "actual": "{\"call\":\"UNKNOWN_EFFECT\",\"task\":\"BLOCKED\"}",
+      "ok": true
+    },
+    {
+      "scenario": "S2",
+      "source": "electron:d4-05-recovery-ui",
+      "name": "S2-UI-4 · UI recovery 区块可见并显示实际状态/核查结论/关联产物",
+      "expected": null,
+      "actual": "{\"recoveryShown\":true,\"stateText\":\"实际状态：UNKNOWN_EFFECT · 核查结论：尚无结论\",\"artifactsText\":\"关联产物：art_SOKiQSfWXjvtMQ（text）\",\"reasonText\":\"结果未知 · 停止原因：RECOVERY_REQUIRED\"}",
+      "ok": true
+    },
+    {
+      "scenario": "S2",
+      "source": "electron:d4-05-recovery-ui",
+      "name": "S2-UI-5 · 不显示成功 / 重试 / 续接入口",
+      "expected": null,
+      "actual": "{\"panelStatus\":\"BLOCKED\",\"resume\":false,\"retryButton\":false}",
+      "ok": true
+    },
+    {
+      "scenario": "S2",
+      "source": "electron:d4-05-recovery-ui",
+      "name": "S2-UI-6 · 点击人工确认 → UI 显示已人工确认",
+      "expected": null,
+      "actual": "{\"ackVisible\":true,\"clicks\":\"ok\",\"acked\":true,\"ackedText\":\"已人工确认\"}",
+      "ok": true
+    },
+    {
+      "scenario": "S2",
+      "source": "electron:d4-05-recovery-ui",
+      "name": "S2-UI-7 · ack 后 event=1 / call 仍 UNKNOWN_EFFECT / Task 仍 BLOCKED / 仍不可续接 / 0 第二 call",
+      "expected": null,
+      "actual": "{\"ackEventCount\":1,\"call\":\"UNKNOWN_EFFECT\",\"task\":\"BLOCKED\",\"reason\":\"RESUME_UNKNOWN_EFFECT_PRESENT\",\"calls\":1}",
+      "ok": true
+    },
+    {
+      "scenario": "S2",
+      "source": "electron:d4-05-recovery-ui",
+      "name": "I1 · DB / UI 0 capability / [REDACTED] / 绝对路径泄漏",
+      "expected": "[]",
+      "actual": "[]",
+      "ok": true
+    },
+    {
+      "scenario": "S2",
+      "source": "electron:d4-05-recovery-ui",
+      "name": "I2 · Renderer console error = 0",
+      "expected": "0",
+      "actual": "",
+      "ok": true
+    },
+    {
+      "scenario": "S2",
+      "source": "electron:d4-05-recovery-ui",
+      "name": "I3 · main uncaught / unhandled = 0",
+      "expected": "0",
+      "actual": "",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "A1 · production Electron + Renderer 启动",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "A2 · 真实 UI 登录进入桌面",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "A3 · preload Task 桥只有 command,onEvent",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "A4 · Renderer 拿不到 Task Runtime / Domain",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "A5 · 打开 AI 面板",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "A6 · Real product runtime boot assembly",
+      "expected": null,
+      "actual": "{\"started\":true,\"listening\":true,\"order\":[\"identity_created\",\"model_proxy_start_attempted\",\"model_proxy_started\",\"runtime_ready\"]}",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "B1 · READ vertical smoke → Task SUCCEEDED",
+      "expected": null,
+      "actual": "SUCCEEDED",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "B2 · READ ToolExecution >= 2 且 verification PASS",
+      "expected": null,
+      "actual": "execs=2",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "B3 · READ 0 SideEffectCall / 0 mutation",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "B4 · Renderer 显示 READ 最终结果",
+      "expected": null,
+      "actual": "OPENARC_VERTICAL_SMOKE_OK",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "B5 · Renderer 无绝对路径 / store root / capability 泄漏",
+      "expected": null,
+      "actual": "[]",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "C1 · WRITE proposal → Approval UI 出现",
+      "expected": null,
+      "actual": "AWAITING_APPROVAL",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "C2 · 审批前 0 mutation / 0 lease / 0 WRITE execution",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "C3 · Approval UI 显示 tool / risk / target / effect",
+      "expected": null,
+      "actual": "应用 / AgentAI 助手（本机会话）工具Trash Resource（resource.trash）风险可逆写入目标Vertical Smoke Resourceresource://res_2fwe0v4kuKiR7FZ0L0Jag",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "C4 · Approval UI 无路径 / token",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "C5 · 点击真实 Approve",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "C6 · WRITE → Task SUCCEEDED + mutation exactly 1",
+      "expected": null,
+      "actual": "task=SUCCEEDED",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "C7 · SideEffectCall=1 / approval=1 / lease=1 / verification PASS",
+      "expected": null,
+      "actual": "SUCCEEDED",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "C8 · production executor spawned + ready + real child exit",
+      "expected": null,
+      "actual": "{\"instanceId\":\"exe_SA4lKPk-\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":0,\"signal\":null,\"launchError\":false}",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "C9 · WRITE 恰好 1 个 lease 且 RELEASED",
+      "expected": null,
+      "actual": "[\"RELEASED\"]",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "C10 · Renderer Run 复位（busy=false）",
+      "expected": null,
+      "actual": "cancelDisabled=true",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "D1 · Deny 前 WAITING_APPROVAL + 0 mutation",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "D2 · 点击真实 Deny",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "D3 · Deny → 0 mutation / 0 lease / 0 WRITE execution",
+      "expected": null,
+      "actual": "BLOCKED",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "D4 · Deny → SideEffectCall safe terminal + UI busy 复位",
+      "expected": null,
+      "actual": "BLOCKED/BLOCKED",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "E1 · Cancel 前 Approval UI 可见 + 0 mutation",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "E2 · 点击真实 Cancel",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "E3 · Cancel → Task CANCELLED / 0 mutation / 0 lease",
+      "expected": null,
+      "actual": "CANCELLED",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "E4 · Cancel 后旧 Approval 点击不得执行",
+      "expected": null,
+      "actual": "{\"ok\":false,\"error\":\"SIDE_EFFECT_CALL_STATE\"}",
+      "ok": true
+    },
+    {
+      "scenario": "S2",
+      "source": "electron:d4-04-smoke",
+      "name": "F1 · UNKNOWN_EFFECT → Task BLOCKED",
+      "expected": null,
+      "actual": "BLOCKED",
+      "ok": true
+    },
+    {
+      "scenario": "S2",
+      "source": "electron:d4-04-smoke",
+      "name": "F2 · Step BLOCKED + Harness STOP",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "scenario": "S2",
+      "source": "electron:d4-04-smoke",
+      "name": "F3 · UNKNOWN_EFFECT 证据 + 0 second SideEffectCall",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "scenario": "S2",
+      "source": "electron:d4-04-smoke",
+      "name": "F4 · Renderer 显示 BLOCKED",
+      "expected": null,
+      "actual": "BLOCKED · Recovery Required",
+      "ok": true
+    },
+    {
+      "scenario": "S2",
+      "source": "electron:d4-04-smoke",
+      "name": "F5 · claim RUNNING 先于真实 child exit 崩溃",
+      "expected": null,
+      "actual": "{\"claimIdx\":20,\"unknownIdx\":21,\"ev\":{\"instanceId\":\"exe_eVlMamLg\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":9,\"signal\":null,\"launchError\":false}}",
+      "ok": true
+    },
+    {
+      "scenario": "S2",
+      "source": "electron:d4-04-smoke",
+      "name": "F6 · UNKNOWN 后 0 第二 call / 0 第二 lease / 0 retry",
+      "expected": null,
+      "actual": "FAILED",
+      "ok": true
+    },
+    {
+      "scenario": "S2",
+      "source": "electron:d4-04-smoke",
+      "name": "F7 · Renderer BLOCKED + Run 复位（busy=false）",
+      "expected": null,
+      "actual": "BLOCKED",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "G1 · Renderer 自报 actor/risk 被忽略（真实 session 决定）",
+      "expected": null,
+      "actual": "{\"ok\":true,\"actor\":\"usr_0AKkq6j5YoUeeavnD_h1HPU9GWY4ak_k\"}",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "G2 · 伪造 approvalRequestId → DENY（0 authority gain）",
+      "expected": null,
+      "actual": "{\"ok\":false,\"error\":\"SIDE_EFFECT_CALL_NOT_FOUND\"}",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "G3 · 伪造 actor 的真实 approve 仍走完整受控执行",
+      "expected": null,
+      "actual": "SUCCEEDED/SUCCEEDED",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "H1 · Reload 后从 backend state 恢复 Task 结果",
+      "expected": null,
+      "actual": "taskId=task_wAjV7DqPUUqKYA gate=ready",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "R1.1 · 撤权前 proposal 到 AWAITING_APPROVAL 且 Approval UI 可见",
+      "expected": "AWAITING_APPROVAL + UI 可见",
+      "actual": "AWAITING_APPROVAL/ui=true",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "R1.2 · 产品 governance API 撤销 app tool 权限（changed=true）",
+      "expected": "ok=true, changed=true",
+      "actual": "{\"ok\":true,\"changed\":true,\"reasonCode\":\"ALLOW\"}",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "R1.3 · 撤权只针对 tool 权限：resource grant 仍在",
+      "expected": "true",
+      "actual": "true",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "R1.4 · 使用旧批准（真实 UI Approve）",
+      "expected": "ok",
+      "actual": "ok",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "R1.5 · 撤权后旧批准不得执行：call 终态 BLOCKED",
+      "expected": "BLOCKED",
+      "actual": "BLOCKED",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "R1.6 · call error_code = SIDE_EFFECT_AUTHORIZATION_REVOKED",
+      "expected": "SIDE_EFFECT_AUTHORIZATION_REVOKED",
+      "actual": "SIDE_EFFECT_AUTHORIZATION_REVOKED",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "R1.7 · 0 mutation（resource 未 trashed）",
+      "expected": "false",
+      "actual": "false",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "R1.8 · 0 lease",
+      "expected": "0",
+      "actual": "0",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "R1.9 · 0 新 executor（preflight 在 spawn 之前 fail closed）",
+      "expected": "数量不变",
+      "actual": "3→3",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "R1.10 · Task 非 SUCCEEDED 且终态 + AUTO_RETRY=0（1 条 call）",
+      "expected": "终态非 SUCCEEDED + calls=1",
+      "actual": "BLOCKED/calls=1",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "R1.11 · 场景结束后重新授予 tool 权限（恢复后续场景前置）",
+      "expected": "ok=true",
+      "actual": "{\"ok\":true}",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "R2.1 · refA 的 trash 到 AWAITING_APPROVAL（真实 UI）",
+      "expected": "AWAITING_APPROVAL + UI 可见",
+      "actual": "AWAITING_APPROVAL/ui=true",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "R2.2 · 批准并执行 refA 的真实 WRITE",
+      "expected": "ok",
+      "actual": "ok",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "R2.3 · refA SUCCEEDED 且 trashed（撤权前已有真实副作用）",
+      "expected": "SUCCEEDED + trashedA=true",
+      "actual": "SUCCEEDED/trashedA=true",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "R2.4 · refB 的 trash 到 AWAITING_APPROVAL（撤权同步点）",
+      "expected": "AWAITING_APPROVAL + UI 可见",
+      "actual": "AWAITING_APPROVAL/ui=true",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "R2.5 · 任务进行中经产品 governance API 撤权（changed=true）",
+      "expected": "ok=true, changed=true",
+      "actual": "{\"ok\":true,\"changed\":true,\"reasonCode\":\"ALLOW\"}",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "R2.6 · 已发生副作用保留：refA trashed=true（不宣称撤权回滚）",
+      "expected": "true",
+      "actual": "true",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "R2.7 · 使用旧批准（真实 UI Approve refB）",
+      "expected": "ok",
+      "actual": "ok",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "R2.8 · refB 未 trashed（撤权后 fail closed，0 mutation）",
+      "expected": "false",
+      "actual": "false",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "R2.9 · 第二个 call 终态 BLOCKED + 0 lease + 0 新 executor",
+      "expected": "BLOCKED + 0 lease + 0 新 executor",
+      "actual": "BLOCKED/leases=0/exec=4→4",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "R2.10 · 无自动重试：任务只有 2 条 call（refA/refB 各 1）",
+      "expected": "2",
+      "actual": "2",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "R2.11 · Task/Step BLOCKED + Harness run 停止（不是 RUNNING）",
+      "expected": "BLOCKED/BLOCKED/非 RUNNING",
+      "actual": "BLOCKED/step=BLOCKED/run=BLOCKED",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "R2.12 · UI 最终 BLOCKED 且 Run 复位（busy=false）",
+      "expected": "BLOCKED + run enabled",
+      "actual": "BLOCKED",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "X1 · 执行异常前置：proposal 到 AWAITING_APPROVAL 且 execute 前 Domain version 已变化",
+      "expected": "AWAITING_APPROVAL + version bumped",
+      "actual": "{\"call\":\"AWAITING_APPROVAL\",\"bumpOk\":true}",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "X2 · 点击真实 Approve（进入受控执行）",
+      "expected": "ok",
+      "actual": "",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "X3 · 执行异常 → Task/Step BLOCKED，Run 停止（不是 RUNNING）",
+      "expected": "Task/Step BLOCKED + Run 非 RUNNING",
+      "actual": "{\"task\":\"BLOCKED\",\"step\":\"BLOCKED\",\"run\":\"BLOCKED\"}",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "X4 · 执行异常 → 0 Artifact / 0 Verification（不适用：该路径无 artifact 提交）",
+      "expected": "0 / 0",
+      "actual": "{\"artifacts\":0,\"verifications\":0}",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "X5 · 执行异常 → 受控执行确实发生且失败：0 mutation / call 非 SUCCEEDED / 恰好 1 次执行（无重试）/ 0 active lease",
+      "expected": "0 mutation + call 非 SUCCEEDED + 恰好 1 次受控执行 + 0 active lease",
+      "actual": "{\"trashed\":false,\"call\":\"FAILED\",\"errorCode\":\"SIDE_EFFECT_DOMAIN_WRITE_FAILED\",\"exec\":\"4→5\",\"leaseActive\":0}",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "X6 · 执行异常 → 无自动重试（恰好 1 条 call）",
+      "expected": "1",
+      "actual": "1",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "X7 · 执行异常 → Renderer BLOCKED 且 Run 复位（busy=false）",
+      "expected": "BLOCKED + run enabled",
+      "actual": "BLOCKED",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "Y1 · 预算到限 → Task/Step BLOCKED + Run 停止（不是 RUNNING）",
+      "expected": "BLOCKED/BLOCKED/非 RUNNING",
+      "actual": "{\"task\":\"BLOCKED\",\"step\":\"BLOCKED\",\"run\":\"BLOCKED\"}",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "Y2 · 预算到限 → 0 Artifact / 0 Verification（不适用：该路径无 artifact 提交）",
+      "expected": "0 / 0",
+      "actual": "{\"artifacts\":0,\"verifications\":0}",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "Y3 · 预算到限 → 只发生 bounded 受控 READ（>0 且 <=8），无 WRITE execution",
+      "expected": "1..8 次 resource.search（provider 请求 14 次被预算截断）",
+      "actual": "{\"execs\":8,\"tools\":[\"resource.search\"],\"modelCalls\":1}",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "Y4 · 预算到限 → 0 SideEffectCall / 0 mutation / 无自动重试",
+      "expected": "0 SideEffectCall",
+      "actual": "{\"sideEffectCalls\":0}",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "Y5 · 预算到限 → Renderer BLOCKED 且 Run 复位（busy=false）",
+      "expected": "BLOCKED + run enabled",
+      "actual": "BLOCKED",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "L1 · 每个 step 归属存在的 task（无孤立 step）",
+      "expected": "[]",
+      "actual": "[]",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "L2 · 每个 model call 的 task/step 归属正确（无跨任务串联）",
+      "expected": "[]",
+      "actual": "[]",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "L3 · 每个 tool execution 的 task/step/run 同属一个 task",
+      "expected": "[]",
+      "actual": "[]",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "L4 · 每个 side-effect call 的 task/step/run 同属一个 task",
+      "expected": "[]",
+      "actual": "[]",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "L5 · 每个 harness run 的 task/step 归属正确（无孤立 run）",
+      "expected": "[]",
+      "actual": "[]",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "L6 · 每个 artifact 的 task/step/run 同属一个 task",
+      "expected": "[]",
+      "actual": "[]",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "L7 · 每个 verification 与 artifact 同属一个 task",
+      "expected": "[]",
+      "actual": "[]",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "L8 · 本次运行所有 task 均被场景枚举（无遗漏 task）",
+      "expected": "0 unenumerated",
+      "actual": "{\"total\":10,\"unenumerated\":[]}",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "L9 · 成功 step 必有 Artifact 且 checksum==sha256(content)；每个 Artifact 必有同 task Verification；成功任务收敛 SUCCEEDED",
+      "expected": "[]",
+      "actual": "[]",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "L10 · 拒绝/取消/撤权/UNKNOWN/执行异常/预算停止路径如实 0 Artifact / 0 Verification（明细标注不适用原因）",
+      "expected": "all artifacts=0 verifications=0 且非 SUCCEEDED",
+      "actual": "[\"DENY 不适用（该路径无 artifact 提交）: status=BLOCKED artifacts=0 verifications=0\",\"CANCEL 不适用（该路径无 artifact 提交）: status=CANCELLED artifacts=0 verifications=0\",\"UNKNOWN 不适用（该路径无 artifact 提交）: status=BLOCKED artifacts=0 verifications=0\",\"REVOKE_PENDING 不适用（该路径无 artifact 提交）: status=BLOCKED artifacts=0 verifications=0\",\"REVOKE_MID 不适用（该路径无 artifact 提交）: status=BLOCKED artifacts=0 verifications=0\",\"EXECUTION_EXCEPTION 不适用（该路径无 artifact 提交）: status=BLOCKED artifacts=0 verifications=0\",\"BUDGET_STOP 不适用（该路径无 artifact 提交）: status=BLOCKED artifacts=0 verifications=0\"]",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "L11 · 同一 task 内 SideEffectCall callId 唯一（无重复副作用）",
+      "expected": "[]",
+      "actual": "[]",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "L12 · 成功 WRITE 恰好 1 次 mutation（各 1 条 SUCCEEDED call + 目标 trashed）",
+      "expected": "各 1 SUCCEEDED + 均已 trashed",
+      "actual": "{\"writeCalls\":[\"SUCCEEDED\"],\"spoofCalls\":[\"SUCCEEDED\"],\"baseTrashed\":true,\"spoofTrashed\":true}",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "L13 · R2 撤权中任务恰好 2 条 call（A SUCCEEDED / B BLOCKED）",
+      "expected": "2 条：1 SUCCEEDED + 1 BLOCKED",
+      "actual": "[\"SUCCEEDED\",\"BLOCKED\"]",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "L14 · 所有 task 收敛终态（无 RUNNING / PENDING）",
+      "expected": "[]",
+      "actual": "[]",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "L15 · 预算停止 task：bounded 受控 READ execution 保留且归属正确，0 Artifact",
+      "expected": "1..8 exec + 0 artifact",
+      "actual": "{\"execs\":8,\"artifacts\":0}",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "I1 · DB 0 capability / [REDACTED] / path 泄漏",
+      "expected": null,
+      "actual": "[]",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "I2 · Renderer console error = 0",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "I3 · main uncaught / unhandled = 0",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "scenario": "REUSE_D4_04",
+      "source": "electron:d4-04-smoke",
+      "name": "I4 · executor evidence 0 绝对路径 / capability / [REDACTED]",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    }
+  ],
+  "at": "2026-09-17T04:38:55.153Z",
+  "artifactSha256Coverage": "sha256 of canonical JSON (2-space indent) excluding the artifactSha256 field",
+  "artifactSha256": "c17d83528d5df93b9a3c55e4d708678b4cedab7cb953e513af37c7215e316c63"
+}

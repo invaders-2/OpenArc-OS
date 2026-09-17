@@ -499,6 +499,8 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
   const [stopReason, setStopReason] = useState<string | null>(null);
   const [resumeLedger, setResumeLedger] = useState<{ resumeCount?: number; maxResumes?: number; remainingResumes?: number; nextGrant?: { kind?: string; amount?: number } | null } | null>(null);
   const [resumable, setResumable] = useState(false);
+  // D4-05 S2：结果未知的只读恢复投影（仅后端判定；renderer 不自报）。
+  const [recovery, setRecovery] = useState<any>(null);
 
   const applyTaskState = (got: any) => {
     if (!got || !got.ok || !got.task) return;
@@ -512,6 +514,7 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
     setResumable(got.resumable === true);
     setStopReason(got.stopReason || null);
     setResumeLedger(got.budgetLedger || null);
+    setRecovery(got.recovery || null);
   };
 
   useEffect(() => {
@@ -594,6 +597,18 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
     const res = await bridge.command({ type: "task/resume", taskId, expectedRevision: revision });
     if (!res || !res.ok) { setBusy(false); setError((res && res.error) || "RESUME_REJECTED"); }
   };
+  // D4-05 S2：只追加“已人工核查”事件；绝不改 call/step/task 状态，绝不授权 resume/retry。
+  const acknowledge = async (callId: string) => {
+    const bridge = (window as unknown as { openarc?: { task?: { command?: (c: unknown) => Promise<{ ok?: boolean; error?: string }> } } }).openarc?.task;
+    if (!bridge || typeof bridge.command !== "function" || !taskId || !callId) return;
+    const res = await bridge.command({ type: "task/acknowledgeUnknownEffect", taskId, callId });
+    if (!res || !res.ok) { setError((res && res.error) || "ACKNOWLEDGE_FAILED"); return; }
+    const gotBridge = (window as unknown as { openarc?: { task?: { command?: (c: unknown) => Promise<any> } } }).openarc?.task;
+    if (gotBridge && typeof gotBridge.command === "function") {
+      const got = await gotBridge.command({ type: "task/get", taskId });
+      if (got && got.ok) applyTaskState(got);
+    }
+  };
 
   return (
     <aside className="ai-panel" aria-label="AI 助手" data-ai-status={status} data-ai-task-id={taskId || ""}>
@@ -633,6 +648,20 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
             {resumeLedger ? "（第 " + ((resumeLedger.resumeCount || 0) + 1) + "/" + (resumeLedger.maxResumes || 3) + " 次续接）" : ""}
           </p>
           <button data-ai-resume onClick={resume} disabled={busy}>续接任务</button>
+        </div>
+      ) : null}
+      {status === "BLOCKED" && recovery && recovery.applicable ? (
+        <div className="ai-recovery" data-ai-recovery>
+          <p data-ai-recovery-reason>结果未知 · 停止原因：{recovery.stopReason || "UNKNOWN_EFFECT"}</p>
+          {(recovery.calls || []).map((c: any) => (
+            <div key={c.callId} data-ai-recovery-call={c.callId}>
+              <p data-ai-recovery-state>实际状态：{c.status} · 核查结论：{c.recoveryResult === "NO_CONCLUSION" ? "尚无结论" : c.recoveryResult}</p>
+              <p data-ai-recovery-tool>工具：{c.toolId}{c.resourceRef ? " · 目标：" + c.resourceRef : ""}</p>
+              <p data-ai-recovery-artifacts>关联产物：{(c.associatedArtifacts || []).length ? c.associatedArtifacts.map((a: any) => a.artifactId + "（" + a.type + "）").join("、") : "无"}</p>
+              {c.acknowledged ? <p data-ai-acknowledged>已人工确认</p> : <button data-ai-acknowledge onClick={() => acknowledge(c.callId)} disabled={busy}>我已人工核查</button>}
+            </div>
+          ))}
+          <p data-ai-recovery-note>该结果未知：不会自动重试，也不会自动续接；请核对实际应用与关联产物后人工确认。</p>
         </div>
       ) : null}
       <div className="ai-result" data-ai-result>

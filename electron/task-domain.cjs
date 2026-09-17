@@ -100,6 +100,8 @@ const TASK_EVENT = Object.freeze({
   // D4-06 Closure · bounded 预算到限 → 用户显式续接（safe projection only）
   TASK_BUDGET_EXHAUSTED: "task.budget_exhausted",
   TASK_BUDGET_GRANTED: "task.budget.granted",
+  // D4-05 · 结果未知的人工确认（只追加 safe event；绝不改 call/step/task 状态，绝不授权 resume/retry）
+  TOOL_SIDE_EFFECT_UNKNOWN_EFFECT_ACKNOWLEDGED: "tool.side_effect.unknown_effect.acknowledged",
 });
 const TASK_EVENT_ALL = Object.freeze(Object.values(TASK_EVENT));
 
