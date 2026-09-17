@@ -44,8 +44,12 @@ const passwords = require("./password.cjs");
 
 const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domain;
 
-/** 当前 schema 版本。**第一版就是 1**（§29）：不留"先上线后补版本号"的债。 */
-const SCHEMA_VERSION = 1;
+/**
+ * 当前 schema 版本。
+ *   v1 → v2：users 增加 avatar_ref TEXT（可空），承载显示名之外的资料字段。
+ * 版本号从这里起就要有真实的迁移路径，不允许"空库建表"冒充升级（§29）。
+ */
+const SCHEMA_VERSION = 2;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -83,6 +87,7 @@ CREATE TABLE users (
   display_name      TEXT    NOT NULL,
   role              TEXT    NOT NULL CHECK (role IN ('ADMIN','MEMBER')),
   status            TEXT    NOT NULL CHECK (status IN ('ACTIVE','DISABLED')),
+  avatar_ref        TEXT,
   auth_version      INTEGER NOT NULL DEFAULT 1,
   password_algo     TEXT    NOT NULL,
   password_params   TEXT    NOT NULL,
@@ -214,8 +219,10 @@ class IdentityStore {
   }
 
   /**
-   * 迁移。**第一版就把迁移框架立起来**（§29）：
-   * 现在只有一个 migration，但"以后补版本号"的债从今天起就不存在了。
+   * 迁移。**每一步都真的执行**，不是"空库建表"冒充升级（§29）：
+   *   v0 → v2：空库，直接建到当前 schema；
+   *   v1 → v2：已有 v1 库，执行 ALTER TABLE users ADD COLUMN avatar_ref TEXT。
+   * 整段仍在 transactSync 内：ALTER 与 user_version 要么一起生效，要么一起回滚。
    */
   #migrate() {
     const current = this.schemaVersion;
@@ -223,7 +230,15 @@ class IdentityStore {
       throw new Error(`身份库 schema_version=${current} 高于本程序支持的 ${SCHEMA_VERSION}，拒绝打开。`);
     if (current === SCHEMA_VERSION) return;
     this.transactSync(() => {
-      this.db.exec(SCHEMA_SQL);
+      if (current === 0) {
+        this.db.exec(SCHEMA_SQL);
+      } else {
+        // v1 库没有 avatar_ref 列。列已存在时跳过，避免重复 ALTER 直接抛错。
+        const cols = this.db.prepare("PRAGMA table_info(users)").all();
+        if (!cols.some((c) => c.name === "avatar_ref")) {
+          this.db.exec("ALTER TABLE users ADD COLUMN avatar_ref TEXT");
+        }
+      }
       // user_version 不能用占位符，只能整句拼；值是本文件常量，无注入面。
       this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     });
@@ -1015,6 +1030,49 @@ class IdentityStore {
       durationMs: this.clock() - started,
     });
     return domain.ok({ userId: user.id, authVersion: nextVersion, revokedSessions: this.sessionsOf(user.id).length });
+  }
+
+  // -------------------------------------------------------------------------
+  // 资料（displayName / avatarRef）
+  // -------------------------------------------------------------------------
+
+  /**
+   * 更新资料。
+   *
+   * 只在字段真的提供时才更新：`undefined` 表示"这次不改这一项"，
+   * `avatarRef: null` 表示"清除头像"——两者语义不同，不能混。
+   * 一项都没有 → INVALID_INPUT，避免空更新把 updated_at 白推一格。
+   *
+   * 凭据校验不在这里：service 层已用 password 重新验证过目标用户，
+   * store 只负责落库与审计，避免把"认证"和"存储"搅成一件事。
+   */
+  updateProfile({ userId, displayName, avatarRef } = {}) {
+    const started = this.clock();
+    const user = this.userById(userId);
+    if (!user) {
+      this.audit("update-profile", { result: "DENY", errorCode: ERROR.INVALID_INPUT });
+      return domain.fail(ERROR.INVALID_INPUT, "user-missing");
+    }
+    const sets = [];
+    const args = [];
+    if (displayName !== undefined) {
+      sets.push("display_name = ?");
+      args.push(displayName);
+    }
+    if (avatarRef !== undefined) {
+      sets.push("avatar_ref = ?");
+      args.push(avatarRef);
+    }
+    if (sets.length === 0) {
+      this.audit("update-profile", { userId: user.id, result: "DENY", errorCode: ERROR.INVALID_INPUT });
+      return domain.fail(ERROR.INVALID_INPUT, "nothing-to-update");
+    }
+    sets.push("updated_at = ?");
+    args.push(this.clock());
+    args.push(user.id);
+    this.db.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).run(...args);
+    this.audit("update-profile", { userId: user.id, result: "OK", durationMs: this.clock() - started });
+    return domain.ok({ user: this.userById(user.id) });
   }
 
   // -------------------------------------------------------------------------

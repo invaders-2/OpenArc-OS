@@ -19,6 +19,7 @@
 
 const domain = require("./identity-domain.cjs");
 const { IdentityStore } = require("./identity-store.cjs");
+const passwords = require("./password.cjs");
 
 const { ERROR, EVENT } = domain;
 
@@ -129,6 +130,9 @@ class IdentityService {
         break;
       case "identity/change-password":
         result = await this.#changePassword(command);
+        break;
+      case "identity/update-profile":
+        result = await this.#updateProfile(command);
         break;
       case "identity/validate":
         result = this.#validate(command);
@@ -311,6 +315,109 @@ class IdentityService {
       revokedAllSessions: true,
       requiresLogin: true,
     });
+  }
+
+  /**
+   * 资料更新（displayName / avatarRef）。
+   *
+   * 与 change-password 的关键区别：**这不是凭据变更**——不撤销 session、
+   * 不要求重新登录；但正因为如此，必须用 password 当场重新验证目标用户，
+   * 否则拿到 renderer 内存里 ref 的人就能改资料。
+   *
+   * 目标用户两条来源：
+   *   · 有 session（sessionRef 或本进程 current）→ 用 session 的 user
+   *   · 没有 session（登录页场景）              → 用 identifier 查
+   * 两条都拿不到就明确失败，不静默。locked session 仍可用口令完成这次更新，
+   * 因为口令本身就是这次操作的再认证。
+   */
+  async #updateProfile({ sessionRef, identifier, password, displayName, avatarRef }) {
+    const started = this.store.clock();
+    const ref = sessionRef || this.current;
+
+    let user = null;
+    let session = null;
+    if (ref) {
+      const res = this.store.validateSession(ref, { sensitive: false });
+      if (!res.ok) {
+        this.store.audit("update-profile", { sessionRef: ref, result: "DENY", errorCode: res.error });
+        return { ...res, type: "identity/update-profile" };
+      }
+      user = res.user;
+      session = res.session;
+    } else {
+      const idCheck = domain.validateIdentifier(identifier);
+      if (!idCheck.ok) {
+        this.store.audit("update-profile", { result: "DENY", errorCode: idCheck.error });
+        return { ...idCheck, type: "identity/update-profile" };
+      }
+      user = this.store.userByIdentifier(idCheck.identifier);
+      if (!user) {
+        this.store.audit("update-profile", { result: "DENY", errorCode: ERROR.INVALID_INPUT });
+        return domain.fail(ERROR.INVALID_INPUT, "target-missing");
+      }
+    }
+
+    let verified = false;
+    try {
+      verified = await passwords.verifyPassword(String(password ?? ""), user.password_hash);
+    } catch {
+      this.store.audit("update-profile", { userId: user.id, result: "ERROR", errorCode: ERROR.INTERNAL_ERROR });
+      return domain.fail(ERROR.INTERNAL_ERROR, "kdf-failed");
+    }
+    if (!verified) {
+      this.store.audit("update-profile", {
+        userId: user.id,
+        sessionRef: session?.ref || null,
+        result: "DENY",
+        errorCode: ERROR.INVALID_CREDENTIALS,
+        durationMs: this.store.clock() - started,
+      });
+      return domain.fail(ERROR.INVALID_CREDENTIALS);
+    }
+    if (user.status === domain.USER_STATUS.DISABLED) {
+      this.store.audit("update-profile", {
+        userId: user.id,
+        sessionRef: session?.ref || null,
+        result: "DENY",
+        errorCode: ERROR.USER_DISABLED,
+      });
+      return domain.fail(ERROR.USER_DISABLED);
+    }
+
+    let nextDisplayName;
+    if (displayName !== undefined && displayName !== null) {
+      const check = domain.validateDisplayName(displayName);
+      if (!check.ok) {
+        this.store.audit("update-profile", { userId: user.id, sessionRef: session?.ref || null, result: "DENY", errorCode: check.error });
+        return { ...check, type: "identity/update-profile" };
+      }
+      nextDisplayName = check.displayName;
+    }
+    let nextAvatarRef;
+    if (avatarRef !== undefined) {
+      const check = domain.validateAvatarRef(avatarRef);
+      if (!check.ok) {
+        this.store.audit("update-profile", { userId: user.id, sessionRef: session?.ref || null, result: "DENY", errorCode: check.error });
+        return { ...check, type: "identity/update-profile" };
+      }
+      nextAvatarRef = check.avatarRef;
+    }
+
+    const updated = this.store.updateProfile({ userId: user.id, displayName: nextDisplayName, avatarRef: nextAvatarRef });
+    if (!updated.ok) return { ...updated, type: "identity/update-profile" };
+
+    // 重新从 store 读，保证下发的快照是落库后的值，而不是内存里的旧行。
+    const freshUser = this.store.userById(user.id);
+    let snapshot = null;
+    if (session) {
+      snapshot = domain.identitySnapshot({
+        user: freshUser,
+        session: this.store.sessionByRef(session.ref),
+        initialized: true,
+      });
+    }
+    this.#emit(EVENT.PROFILE_UPDATED, { userId: freshUser.id, snapshot });
+    return domain.ok({ type: "identity/update-profile", snapshot });
   }
 
   #validate({ sessionRef, sensitive = true }) {
