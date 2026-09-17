@@ -10,7 +10,7 @@
     "arch": "arm64"
   },
   "commit": null,
-  "testedCommit": "e989842a3f1c4df16ea70b8352d618f5d7a1cfad",
+  "testedCommit": "17df98e95e258995070e499a7970f465aa276a07",
   "workspaceState": "",
   "command": "npm run test:d4-04",
   "officialDsh": true,
@@ -28,11 +28,16 @@
   "rendererReload": true,
   "revokePendingApproval": true,
   "revokeMidTask": true,
-  "modelRequests": 5,
+  "modelRequests": 8,
   "providerToolCalls": [
     "resource_search",
-    "resource_trash",
-    "resource_trash"
+    "resource_search",
+    "resource_search",
+    "resource_search",
+    "resource_search",
+    "resource_search",
+    "resource_search",
+    "resource_search"
   ],
   "readExecutions": 2,
   "sideEffectCalls": 1,
@@ -48,7 +53,7 @@
     "electron": "44.3.0",
     "node": "24.20.0",
     "write": {
-      "instanceId": "exe_W1XuJ5iD",
+      "instanceId": "exe_8yMfjdvi",
       "spawned": true,
       "ready": true,
       "exited": true,
@@ -57,11 +62,20 @@
       "launchError": false
     },
     "unknown": {
-      "instanceId": "exe_ZGSJYt4A",
+      "instanceId": "exe_VLhY9jRz",
       "spawned": true,
       "ready": true,
       "exited": true,
       "exitCode": 9,
+      "signal": null,
+      "launchError": false
+    },
+    "conflict": {
+      "instanceId": "exe_Sv_R70mA",
+      "spawned": true,
+      "ready": true,
+      "exited": true,
+      "exitCode": 0,
       "signal": null,
       "launchError": false
     }
@@ -84,8 +98,8 @@
   "mainUnhandledErrors": 0,
   "secretHits": 0,
   "checksSummary": {
-    "total": 67,
-    "pass": 67,
+    "total": 94,
+    "pass": 94,
     "fail": 0
   },
   "checks": [
@@ -170,7 +184,7 @@
     {
       "name": "C3 · Approval UI 显示 tool / risk / target / effect",
       "expected": null,
-      "actual": "应用 / AgentAI 助手（本机会话）工具Trash Resource（resource.trash）风险可逆写入目标Vertical Smoke Resourceresource://res_OPMkqmiOQBZB1CcmDQKiz",
+      "actual": "应用 / AgentAI 助手（本机会话）工具Trash Resource（resource.trash）风险可逆写入目标Vertical Smoke Resourceresource://res_HhXlxTj5Tyf8Ws2mK1z3Y",
       "ok": true
     },
     {
@@ -200,7 +214,7 @@
     {
       "name": "C8 · production executor spawned + ready + real child exit",
       "expected": null,
-      "actual": "{\"instanceId\":\"exe_W1XuJ5iD\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":0,\"signal\":null,\"launchError\":false}",
+      "actual": "{\"instanceId\":\"exe_8yMfjdvi\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":0,\"signal\":null,\"launchError\":false}",
       "ok": true
     },
     {
@@ -290,7 +304,7 @@
     {
       "name": "F5 · claim RUNNING 先于真实 child exit 崩溃",
       "expected": null,
-      "actual": "{\"claimIdx\":20,\"unknownIdx\":21,\"ev\":{\"instanceId\":\"exe_ZGSJYt4A\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":9,\"signal\":null,\"launchError\":false}}",
+      "actual": "{\"claimIdx\":20,\"unknownIdx\":21,\"ev\":{\"instanceId\":\"exe_VLhY9jRz\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":9,\"signal\":null,\"launchError\":false}}",
       "ok": true
     },
     {
@@ -308,7 +322,7 @@
     {
       "name": "G1 · Renderer 自报 actor/risk 被忽略（真实 session 决定）",
       "expected": null,
-      "actual": "{\"ok\":true,\"actor\":\"usr_KttYLmBhsJPYSzydaRpv6_VS8BRtTNKF\"}",
+      "actual": "{\"ok\":true,\"actor\":\"usr_kKGpX-arJFltwGXle3nzNI3IUaMQnfev\"}",
       "ok": true
     },
     {
@@ -326,7 +340,7 @@
     {
       "name": "H1 · Reload 后从 backend state 恢复 Task 结果",
       "expected": null,
-      "actual": "taskId=task_vkQ_F9MBSsQj7Q gate=ready",
+      "actual": "taskId=task_FwtfpyhWLmbbbA gate=ready",
       "ok": true
     },
     {
@@ -468,6 +482,168 @@
       "ok": true
     },
     {
+      "name": "X1 · 执行异常前置：proposal 到 AWAITING_APPROVAL 且 execute 前 Domain version 已变化",
+      "expected": "AWAITING_APPROVAL + version bumped",
+      "actual": "{\"call\":\"AWAITING_APPROVAL\",\"bumpOk\":true}",
+      "ok": true
+    },
+    {
+      "name": "X2 · 点击真实 Approve（进入受控执行）",
+      "expected": "ok",
+      "actual": "",
+      "ok": true
+    },
+    {
+      "name": "X3 · 执行异常 → Task/Step BLOCKED，Run 停止（不是 RUNNING）",
+      "expected": "Task/Step BLOCKED + Run 非 RUNNING",
+      "actual": "{\"task\":\"BLOCKED\",\"step\":\"BLOCKED\",\"run\":\"BLOCKED\"}",
+      "ok": true
+    },
+    {
+      "name": "X4 · 执行异常 → 0 Artifact / 0 Verification（不适用：该路径无 artifact 提交）",
+      "expected": "0 / 0",
+      "actual": "{\"artifacts\":0,\"verifications\":0}",
+      "ok": true
+    },
+    {
+      "name": "X5 · 执行异常 → 受控执行确实发生且失败：0 mutation / call 非 SUCCEEDED / 恰好 1 次执行（无重试）/ 0 active lease",
+      "expected": "0 mutation + call 非 SUCCEEDED + 恰好 1 次受控执行 + 0 active lease",
+      "actual": "{\"trashed\":false,\"call\":\"FAILED\",\"errorCode\":\"SIDE_EFFECT_DOMAIN_WRITE_FAILED\",\"exec\":\"4→5\",\"leaseActive\":0}",
+      "ok": true
+    },
+    {
+      "name": "X6 · 执行异常 → 无自动重试（恰好 1 条 call）",
+      "expected": "1",
+      "actual": "1",
+      "ok": true
+    },
+    {
+      "name": "X7 · 执行异常 → Renderer BLOCKED 且 Run 复位（busy=false）",
+      "expected": "BLOCKED + run enabled",
+      "actual": "BLOCKED",
+      "ok": true
+    },
+    {
+      "name": "Y1 · 预算到限 → Task/Step BLOCKED + Run 停止（不是 RUNNING）",
+      "expected": "BLOCKED/BLOCKED/非 RUNNING",
+      "actual": "{\"task\":\"BLOCKED\",\"step\":\"BLOCKED\",\"run\":\"BLOCKED\"}",
+      "ok": true
+    },
+    {
+      "name": "Y2 · 预算到限 → 0 Artifact / 0 Verification（不适用：该路径无 artifact 提交）",
+      "expected": "0 / 0",
+      "actual": "{\"artifacts\":0,\"verifications\":0}",
+      "ok": true
+    },
+    {
+      "name": "Y3 · 预算到限 → 只发生 bounded 受控 READ（>0 且 <=8），无 WRITE execution",
+      "expected": "1..8 次 resource.search（provider 请求 14 次被预算截断）",
+      "actual": "{\"execs\":8,\"tools\":[\"resource.search\"],\"modelCalls\":1}",
+      "ok": true
+    },
+    {
+      "name": "Y4 · 预算到限 → 0 SideEffectCall / 0 mutation / 无自动重试",
+      "expected": "0 SideEffectCall",
+      "actual": "{\"sideEffectCalls\":0}",
+      "ok": true
+    },
+    {
+      "name": "Y5 · 预算到限 → Renderer BLOCKED 且 Run 复位（busy=false）",
+      "expected": "BLOCKED + run enabled",
+      "actual": "BLOCKED",
+      "ok": true
+    },
+    {
+      "name": "L1 · 每个 step 归属存在的 task（无孤立 step）",
+      "expected": "[]",
+      "actual": "[]",
+      "ok": true
+    },
+    {
+      "name": "L2 · 每个 model call 的 task/step 归属正确（无跨任务串联）",
+      "expected": "[]",
+      "actual": "[]",
+      "ok": true
+    },
+    {
+      "name": "L3 · 每个 tool execution 的 task/step/run 同属一个 task",
+      "expected": "[]",
+      "actual": "[]",
+      "ok": true
+    },
+    {
+      "name": "L4 · 每个 side-effect call 的 task/step/run 同属一个 task",
+      "expected": "[]",
+      "actual": "[]",
+      "ok": true
+    },
+    {
+      "name": "L5 · 每个 harness run 的 task/step 归属正确（无孤立 run）",
+      "expected": "[]",
+      "actual": "[]",
+      "ok": true
+    },
+    {
+      "name": "L6 · 每个 artifact 的 task/step/run 同属一个 task",
+      "expected": "[]",
+      "actual": "[]",
+      "ok": true
+    },
+    {
+      "name": "L7 · 每个 verification 与 artifact 同属一个 task",
+      "expected": "[]",
+      "actual": "[]",
+      "ok": true
+    },
+    {
+      "name": "L8 · 本次运行所有 task 均被场景枚举（无遗漏 task）",
+      "expected": "0 unenumerated",
+      "actual": "{\"total\":10,\"unenumerated\":[]}",
+      "ok": true
+    },
+    {
+      "name": "L9 · 成功 step 必有 Artifact 且 checksum==sha256(content)；每个 Artifact 必有同 task Verification；成功任务收敛 SUCCEEDED",
+      "expected": "[]",
+      "actual": "[]",
+      "ok": true
+    },
+    {
+      "name": "L10 · 拒绝/取消/撤权/UNKNOWN/执行异常/预算停止路径如实 0 Artifact / 0 Verification（明细标注不适用原因）",
+      "expected": "all artifacts=0 verifications=0 且非 SUCCEEDED",
+      "actual": "[\"DENY 不适用（该路径无 artifact 提交）: status=BLOCKED artifacts=0 verifications=0\",\"CANCEL 不适用（该路径无 artifact 提交）: status=CANCELLED artifacts=0 verifications=0\",\"UNKNOWN 不适用（该路径无 artifact 提交）: status=BLOCKED artifacts=0 verifications=0\",\"REVOKE_PENDING 不适用（该路径无 artifact 提交）: status=BLOCKED artifacts=0 verifications=0\",\"REVOKE_MID 不适用（该路径无 artifact 提交）: status=BLOCKED artifacts=0 verifications=0\",\"EXECUTION_EXCEPTION 不适用（该路径无 artifact 提交）: status=BLOCKED artifacts=0 verifications=0\",\"BUDGET_STOP 不适用（该路径无 artifact 提交）: status=BLOCKED artifacts=0 verifications=0\"]",
+      "ok": true
+    },
+    {
+      "name": "L11 · 同一 task 内 SideEffectCall callId 唯一（无重复副作用）",
+      "expected": "[]",
+      "actual": "[]",
+      "ok": true
+    },
+    {
+      "name": "L12 · 成功 WRITE 恰好 1 次 mutation（各 1 条 SUCCEEDED call + 目标 trashed）",
+      "expected": "各 1 SUCCEEDED + 均已 trashed",
+      "actual": "{\"writeCalls\":[\"SUCCEEDED\"],\"spoofCalls\":[\"SUCCEEDED\"],\"baseTrashed\":true,\"spoofTrashed\":true}",
+      "ok": true
+    },
+    {
+      "name": "L13 · R2 撤权中任务恰好 2 条 call（A SUCCEEDED / B BLOCKED）",
+      "expected": "2 条：1 SUCCEEDED + 1 BLOCKED",
+      "actual": "[\"SUCCEEDED\",\"BLOCKED\"]",
+      "ok": true
+    },
+    {
+      "name": "L14 · 所有 task 收敛终态（无 RUNNING / PENDING）",
+      "expected": "[]",
+      "actual": "[]",
+      "ok": true
+    },
+    {
+      "name": "L15 · 预算停止 task：bounded 受控 READ execution 保留且归属正确，0 Artifact",
+      "expected": "1..8 exec + 0 artifact",
+      "actual": "{\"execs\":8,\"artifacts\":0}",
+      "ok": true
+    },
+    {
       "name": "I1 · DB 0 capability / [REDACTED] / path 泄漏",
       "expected": null,
       "actual": "[]",
@@ -492,8 +668,8 @@
       "ok": true
     }
   ],
-  "providerRequests": 5,
-  "at": "2026-09-17T02:14:14.486Z",
+  "providerRequests": 8,
+  "at": "2026-09-17T02:47:51.261Z",
   "artifactSha256Coverage": "sha256 of canonical JSON (2-space indent) excluding the artifactSha256 field",
-  "artifactSha256": "01baf7ef3da3f86424e306d5266eaa828d51cf94d57f65040d1c997ff5d6e71b"
+  "artifactSha256": "5c0dcc5bafe14ec967452a964510889fa4149a2be299a9cb59e4e756e6bbf37a"
 }
