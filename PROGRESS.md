@@ -79,7 +79,7 @@
 | D4-03 工具门与租约 | **CONDITIONAL GO（A PASS）** |
 | D4-04 纵向冒烟 | **PASS（限定当前验收范围）** |
 | D4-06 关联链与预算停止 | **PASS（含任务层跨 run 累计预算续接；仅解除“预算耗尽→用户显式续接”）** |
-| D4-05 执行关卡 | **PARTIAL（S1/S2/S3 PASS；S4 上下文链 NOT VERIFIED）** |
+| D4-05 执行关卡 | **PASS（限定当前验收范围；S1/S2/S3/S4 全 PASS，Closure-3 闭合 S4）** |
 | D5-03 MCP 中心 | **CONDITIONAL GO（受限）** |
 | D5-04 PS 完整接入 | **BLOCK** |
 | D5-05 Illustrator 接入 | **BLOCK** |
@@ -939,10 +939,10 @@ C2/C4 只开放 resource.trash 一条 REVERSIBLE_WRITE：IRREVERSIBLE_WRITE / EX
 - **D4-05 Closure（`70eb0b1`）：A33 正式链假成功修复**——official dsh facade 下 READ_ONLY 必需产物验证失败不再被 final text 成功掩盖（`getUnresolvedRequiredVerificationFailures` + orchestrator 闸门）；S1 结论以正式链证据为准（Node 5/5 + UI 22/22）。D4-05/D4 仍 PARTIAL（S4 memory 上下文缺口不变）；D4-06 通过范围不扩大。
 - **D4-05 Closure-2（`77b6e85`）：失败验证的解决关联修正**——关联键从裸 `tool_id` 改为 `(tool_id, canonical arguments)`；无关对象/无关要求/无关 Step 的 PASS 不误清除对应 FAIL，有效纠错可成功并保留 `resolved` 追溯；缺失关联的旧数据保守保持未解决。新增正式链 6/6、`test:d4-05` 139/139。
 - **D4-05 Closure-3（`9691348` + `ac9af8e`）：受控记忆装配与任务上下文隔离（A36）**——受控装配 `memory-context.cjs` + 唯一出站口逐请求注入（reference-data 标记、与系统指令分离）、发送前重新授权/重新读取、删除/撤权/切账号/跨范围隔离、无缓存、正文不落盘；Node 正式链 11/11 + 真实 Electron UI 15/15；`test:d4-05` **165/165（S1–S4 全 PASS，overallStatus=PASS）**；`npm test` 980/980。**S4 与 D4-05 升 PASS**；D4 整体仍 PARTIAL（剩余既有未验证项）。
-- `docs/D4-ACCEPTANCE-RESULT.md` 含受控 memory 装配最小方案（仅方案，未实施）与需裁决的续接跨 run 预算 OPEN 项。
-- 阻塞整体 PASS：D4-05 S4 上下文链 NOT VERIFIED（无 memory 装配入口）；D4-01/D4-02 的 Windows / External Provider NOT VERIFIED；D4-03 待外部审计封板。
+- `docs/D4-ACCEPTANCE-RESULT.md` 含受控 memory 装配最小方案（**已由 D4-05 Closure-3 实施**，见 §2.3）与需裁决的续接跨 run 预算 OPEN 项。
+- 阻塞整体 PASS：D4-01/D4-02 的 Windows / External Provider NOT VERIFIED；D4-03 待外部审计封板；真实 `electron/main.cjs` 全流程 NOT VERIFIED。（D4-05 S4 上下文链已由 Closure-3 闭合，不再阻塞。）
 - 已验范围（macOS）：模型服务隔离/撤权、任务版本固定与实时权限、工具门/租约/审批/受控写入、纵向冒烟（真实产物/停止/撤权）、关联链与预算停止、结果未知处置均在各自范围内真实通过。
-- 唯一推荐的下一阶段任务：**D4-05 Closure · 受控 memory 检索/装配与上下文隔离**（建议；见 `docs/D4-ACCEPTANCE-RESULT.md` §4）。
+- 下一阶段任务：**D5-01 浏览器**（D4-05 Closure-3 已完成受控 memory 检索/装配与上下文隔离，路线图下一步见 `docs/D4-ACCEPTANCE-RESULT.md` §4）。
 
 ---
 

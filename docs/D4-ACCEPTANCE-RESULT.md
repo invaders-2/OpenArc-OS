@@ -13,8 +13,8 @@
 
 - D4-01 macOS Core、D4-02 macOS Task/Harness Core、D4-03（PASS candidate）、D4-04、D4-05、D4-06 在各自声明范围内通过；**D4-05 = PASS**（D4-05 Closure-3：S1/S2/S3/S4 全 PASS，A36 正负对照满足）。
 - 阻塞“整体 PASS”的项（`D4 = PARTIAL`，不自动升级）：D4-01/D4-02 的 Windows / External Provider = NOT VERIFIED；D4-03 待外部审计封板；真实 `electron/main.cjs` 全流程 = NOT VERIFIED。D4-05 S4 memory 上下文缺口已由 D4-05 Closure-3 闭合。
-- 本轮（D4-06 Closure）已修复：① 任务层跨 run 累计预算（续接只补被批准 kind，其他种类继承剩余）；② 失败验证 UI 的 Electron 实测。**D4-06 恢复 PASS**；D4-05/D4 仍为 PARTIAL（memory 上下文缺口不变）。
-- **D4-05 Closure（代码/测试被测 commit `70eb0b12167e513bb4eb7fa1cb4efb9ca70e509d`）**：修复 A33 正式链假成功——official dsh facade 下 READ_ONLY 必需产物验证失败不再被 final text 成功掩盖（`TaskService.getUnresolvedRequiredVerificationFailures` + orchestrator 提交前闸门）。**S1 结论以正式链证据为准**；**D4-05 / D4 仍为 PARTIAL**（S4 memory 上下文缺口不变），**D4-06 通过范围不扩大**。详见 `docs/D4-05-CLOSURE-RESULT.md`。
+- 本轮（D4-06 Closure）已修复：① 任务层跨 run 累计预算（续接只补被批准 kind，其他种类继承剩余）；② 失败验证 UI 的 Electron 实测。**D4-06 恢复 PASS**；当时 D4-05/D4 仍为 PARTIAL（该 memory 上下文缺口后由 D4-05 Closure-3 闭合）。
+- **D4-05 Closure（代码/测试被测 commit `70eb0b12167e513bb4eb7fa1cb4efb9ca70e509d`）**：修复 A33 正式链假成功——official dsh facade 下 READ_ONLY 必需产物验证失败不再被 final text 成功掩盖（`TaskService.getUnresolvedRequiredVerificationFailures` + orchestrator 提交前闸门）。**S1 结论以正式链证据为准**；当时 **D4-05 / D4 仍为 PARTIAL**（该 S4 memory 上下文缺口后由 D4-05 Closure-3 闭合），**D4-06 通过范围不扩大**。详见 `docs/D4-05-CLOSURE-RESULT.md`。
 - **D4-05 Closure-2（代码/测试被测 commit `77b6e857f3d5a9781ea2c218e89069b1802aaab4`）**：修正失败验证的**解决关联**——关联键从裸 `tool_id` 改为 `(tool_id, canonical arguments)`，无关对象/无关验证要求/无关 Step 的 PASS 不再误清除对应 FAIL；只有同对象+同要求的真实复验 PASS 才算解决，旧 FAIL 与解决关系均可追溯；缺失关联的旧数据保守保持未解决。详见 `docs/D4-05-CLOSURE2-RESULT.md`。
 - **D4-05 Closure-3（代码/测试被测 commit `9691348ebf52b4854aafcb2e343e32ee2d2d608b` + `ac9af8e502c5285b7bcf06c8fc0b8e0ecc52e9f0`）**：实现受控记忆装配与任务上下文隔离（A36）——受控装配入口 + 唯一出站口逐请求注入（reference-data 标记、与系统指令分离）、发送前重新授权/重新读取、删除/撤权/切账号/跨范围隔离、无缓存、正文不落盘；真实 Electron UI 流程 15/15。**S4 与 D4-05 升为 PASS**；**D4 仍为 PARTIAL**（剩余既有未验证项不变）。详见 `docs/D4-05-CLOSURE3-RESULT.md`。
 
@@ -90,10 +90,10 @@
 
 - 本轮**只修两个既有缺口**，未新增 memory 装配、未进入 D5/D6、未扩展工具面、未放宽检查。
 - **未把“一次续接只补一个 kind”写成已满足**：账本层面成立，运行时 per-run capability 仍会重新签发其他 kind，已如实标为 OPEN 并交裁决。
-- D4-05/D4 保持 **PARTIAL**；不因两个缺口修复而升级（记忆上下文缺口不变）。
+- 当时 D4-05/D4 保持 **PARTIAL**；不因两个缺口修复而升级（该记忆上下文缺口后由 D4-05 Closure-3 闭合）。
 - “测试环境等价”不等于“真实 `electron/main.cjs` 全流程已实测”。
 
-## 7. 受控 memory 装配最小方案（仅方案，未实施）
+## 7. 受控 memory 装配最小方案（**已由 D4-05 Closure-3 实施**；以下为当时方案）
 
 - **记忆来源**：`Resource type=memory`（D3-04B），subtype = personal-preference / project-memory / decision-memory / conversation-memory / agent-memory；只取用户本人或被授权项目的记忆，不取跨组织/他人记忆。
 - **检索范围**：经 `SearchService`/`ResourceService` 的**授权过滤**查询（同 D3-05 Gate-Search），限定 task 的 user + app + project/department；按相关性 + 上限条数/字符数取最小必要片段。
