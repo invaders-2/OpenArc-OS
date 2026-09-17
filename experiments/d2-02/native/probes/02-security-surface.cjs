@@ -151,10 +151,9 @@ exports.run = async function run({ report, sleep, add, out }) {
     JSON.stringify(bridgeKeys) === JSON.stringify(FROZEN_BRIDGE_KEYS),
     `preload 暴露 ${JSON.stringify(bridgeKeys)}；冻结清单 ${JSON.stringify(FROZEN_BRIDGE_KEYS)}`,
   );
-  // 暴露面的每一次扩张都必须在这里**显式登记**（D3-01 identity、D3-04 files）。
-  // 断言的是"新增的键恰好是登记过的这两个、且 D2-02 的键一个没少"，
+  // 暴露面的每一次扩张都必须在这里**显式登记**（登记表见文件顶部 REGISTERED_EXPANSIONS）。
+  // 断言的是"新增的键恰好是登记过的那些、且 D2-02 的键一个没少"，
   // 因此任何未经登记的扩张都会让这条 FAIL。
-  const REGISTERED_EXPANSIONS = ["files", "identity"];
   add(
     "sec.bridgeExpansionRegistered",
     REGISTERED_EXPANSIONS.every((k) => bridgeKeys.includes(k)) &&
