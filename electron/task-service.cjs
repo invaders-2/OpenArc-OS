@@ -1059,6 +1059,33 @@ class TaskService {
     return { ok: true, items: this.store.verificationsOfTask(taskId).map(safeVerification) };
   }
 
+  /**
+   * D4-05 Closure · A33：只读列出「必需产物验证失败且尚未被后续真实验证 PASS 解决」的工具。
+   *
+   * 判据来自后端记录（tool_executions），不信任模型自述：同一 tool_id 以**最近一次验证结论**为准，
+   * 后续出现 verification_status=PASS 的 execution 即视为已解决。旧 FAIL 记录绝不删除、绝不改写。
+   * 普通工具调用错误（verification_status 为空）不参与判定。无副作用。
+   */
+  getUnresolvedRequiredVerificationFailures({ context, taskId } = {}) {
+    const guard = this.#guard(context);
+    if (!guard.ok) return guard;
+    const load = this.#load(guard, taskId);
+    if (!load.ok) return load;
+    if (!this.toolStore || typeof this.toolStore.executionsOfTask !== "function") return { ok: true, unresolved: [] };
+    const methodOf = (errorCode) => errorCode === ERROR.TOOL_OUTPUT_INVALID ? "OUTPUT_SCHEMA" : errorCode === ERROR.TOOL_VERIFICATION_FAILED ? "ADAPTER_VERIFY" : null;
+    const latest = new Map();
+    for (const exec of this.toolStore.executionsOfTask(load.task.task_id)) {
+      const status = exec && exec.verification_status;
+      if (status !== "FAIL" && status !== "PASS") continue;
+      latest.set(String(exec.tool_id), { status, executionId: exec.execution_id, errorCode: exec.error_code || null, method: methodOf(exec.error_code) });
+    }
+    const unresolved = [];
+    for (const [toolId, rec] of latest) {
+      if (rec.status === "FAIL") unresolved.push({ toolId, executionId: rec.executionId, errorCode: rec.errorCode, method: rec.method });
+    }
+    return { ok: true, unresolved };
+  }
+
   // 供 ADR / 测试断言：第一版永久冻结
   static get policy() { return Object.freeze({ autoRetry: AUTO_RETRY, defaultMaxAttempts: DEFAULT_MAX_ATTEMPTS, toolExecution: TOOL_EXECUTION }); }
 }

@@ -78,6 +78,7 @@ const d4Raw = fs.existsSync(d4ArtifactPath) ? fs.readFileSync(d4ArtifactPath) : 
 // ---------------------------------------------------------------- ② Node 真实链路测试
 const NODE_FILES = [
   "d4-05-s1-output-size.test.mjs",
+  "d4-05-s1-facade-a33.test.mjs",
   "d4-05-s2-recovery.test.mjs",
   "d4-05-s3-budget-ledger.test.mjs",
   "d4-05-s4-memory.test.mjs",

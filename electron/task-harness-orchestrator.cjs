@@ -364,6 +364,23 @@ class TaskHarnessOrchestrator {
         return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: ERROR.VERIFICATION_FAILED, event: TASK_EVENT.HARNESS_RUN_UNKNOWN_EFFECT, expectedRevision: (fresh2.ok ? fresh2.task.revision : task.revision), alreadyRecorded: true });
       }
 
+      // D4-05 Closure · A33：facade 模式下 READ_ONLY 产物验证在 dsh 进程内由 Bridge 完成，
+      // orchestrator 必须以后端记录为准，拒绝「验证失败未解决但 final text 通过」的假成功。
+      if (typeof svc.getUnresolvedRequiredVerificationFailures === "function") {
+        const unresolvedRes = svc.getUnresolvedRequiredVerificationFailures({ context, taskId });
+        if (unresolvedRes && unresolvedRes.ok && Array.isArray(unresolvedRes.unresolved) && unresolvedRes.unresolved.length) {
+          const first = unresolvedRes.unresolved[0];
+          return await this.#blockStep({
+            context, taskId, stepId, runId: run.runId,
+            reason: ERROR.TOOL_VERIFICATION_FAILED,
+            event: TASK_EVENT.TOOL_VERIFICATION_FAILED,
+            payload: { toolId: first.toolId, executionId: first.executionId, errorCode: first.errorCode, method: first.method, unresolvedCount: unresolvedRes.unresolved.length },
+            expectedRevision: this.#rev(context, taskId, task.revision),
+            alreadyRecorded: true,
+          });
+        }
+      }
+
       const fresh = svc.getTask({ context, taskId });
       const rev = fresh.ok ? fresh.task.revision : task.revision;
       let commit;

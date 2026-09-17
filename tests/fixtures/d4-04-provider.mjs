@@ -24,11 +24,13 @@ function planFor(mode, resourceRefs = [], followSeen = false) {
   if (mode === "conflict") return [search, trash(refs[0])];
   // D4-06 预算到限：14 次受控 READ，超过 Model Proxy(8) / Tool Facade(8) bounded 预算，逼出真实预算停止。
   if (mode === "budget") return Array.from({ length: 14 }, (_, i) => ({ name: "resource_search", args: () => ({ query: "Budget Probe " + (i + 1), limit: 5 }) }));
+  // D4-08：official dsh facade 下的确定性尺寸探针（test-only test.sized）。
+  if (mode === "sized") return [{ name: "test_sized", args: () => ({ expectedSize: 10, label: "box" }) }];
   return [search, read];
 }
 
 export async function startD4Provider() {
-  const state = { requests: 0, mode: "read", resourceRef: null, resourceRefs: [], toolCalls: [], names: [], authHeaders: [], history: [] };
+  const state = { requests: 0, mode: "read", resourceRef: null, resourceRefs: [], toolCalls: [], names: [], authHeaders: [], history: [], finalText: null };
   const server = http.createServer((req, res) => {
     const send = (code, obj) => { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(obj)); };
     let raw = "";
@@ -40,6 +42,7 @@ export async function startD4Provider() {
           if (typeof b.mode === "string") state.mode = b.mode;
           if (typeof b.resourceRef === "string") { state.resourceRef = b.resourceRef; state.resourceRefs = [b.resourceRef]; }
           if (Array.isArray(b.resourceRefs)) { state.resourceRefs = b.resourceRefs.filter((r) => typeof r === "string"); state.resourceRef = state.resourceRefs[0] || null; }
+          if (typeof b.finalText === "string") state.finalText = b.finalText;
         } catch { /* ignore */ }
         state.requests = 0; state.toolCalls = []; state.names = [];
         return send(200, { ok: true });
@@ -67,7 +70,7 @@ export async function startD4Provider() {
           state.toolCalls.push(step.name);
           return send(200, { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "call_" + state.toolCalls.length, type: "function", function: { name: step.name, arguments: JSON.stringify(step.args()) } }] }, finish_reason: "tool_calls" }], usage });
         }
-        return send(200, { choices: [{ message: { role: "assistant", content: FINAL_TEXT } }], usage });
+        return send(200, { choices: [{ message: { role: "assistant", content: state.finalText || FINAL_TEXT } }], usage });
       }
       return send(404, { error: { message: "not found" } });
     });

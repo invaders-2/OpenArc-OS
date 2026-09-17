@@ -1,18 +1,16 @@
 /**
  * D4-08 · 失败验证 UI 的 Electron 真实探针（真实 Electron + 真实产品 Renderer/preload）。
  *
- * 实际链路（fallback，见报告）：probe host 内以 test-only 方式注册尺寸探针 tool test.sized
- * 与对应 adapter → 产品 TaskHarnessOrchestrator + 产品 ControlledToolProxy（真实执行链）
+ * 正式链路：probe host 内以 test-only 方式注册尺寸探针 tool test.sized 与对应 adapter
+ * → 产品 TaskHarnessOrchestrator（official dsh facade）+ 产品 ControlledToolProxy
+ * → official dsh 经 ACP 提出 tool call → ToolFacadeBridge → ControlledToolProxy.executeReadOnly
  * → registry.validateOutput / adapter.verify 真实报告验证失败
  * → 产品 TaskService.recordVerificationFailure 落 1 条 FAIL verification
- * → Task/Step BLOCKED、0 Artifact
+ * → orchestrator 以**后端记录**为准（A33 闸门）→ Task/Step BLOCKED、0 Artifact
  * → 真实 Renderer 经产品 registerTaskIpc 的 task/get 展示 data-ai-verification。
  *
- * 为什么不用 official dsh facade：orchestrator 的 facade 分支在 toolExecutionMode= facade 时
- * 跳过 READ_ONLY read-loop 与 D4-03A gate（task-harness-orchestrator.cjs 238-353），只编排
- * side-effect proposal；READ_ONLY 工具的 verification failure 由 bridge 回给 dsh，但不会翻译成
- * Step/Task BLOCK。因此无法确定性得到「验证失败 → BLOCKED」，按任务授权退化为产品
- * TaskHarnessOrchestrator + ControlledToolProxy 链路。
+ * 确定性 provider（tests/fixtures/d4-04-provider.mjs mode=sized）只替代最后一跳 provider network；
+ * 不替代 Model Proxy / Harness Adapter / ACP / official dsh / ControlledToolProxy。
  *
  * 绝不直写 DB、绝不手工调 blockStep/终态方法、绝不伪造 PASS。
  */
@@ -20,7 +18,6 @@ const { app, BrowserWindow, ipcMain, safeStorage } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const os = require("node:os");
-const crypto = require("node:crypto");
 const { pathToFileURL } = require("node:url");
 
 const ROOT = path.resolve(__dirname, "../../..");
@@ -38,7 +35,8 @@ const OUTSIDER = "d4-08-outsider@openarc.test";
 const PW2 = "d4-08-outsider-password-1";
 const PROVIDER_URL = process.env.OPENARC_D4_PROVIDER_URL || "";
 const NODE_BIN = process.env.OPENARC_D4_NODE_BIN || process.execPath;
-const PROBE_AGENT = path.join(ROOT, "tests/fixtures/harness-acp/tool-proposal-agent.mjs");
+// 确定性 provider 的 plan 控制端点（只替代最后一跳 provider network）。
+const CONTROL_URL = PROVIDER_URL.replace(/\/v1\/?$/, "") + "/__plan";
 const EXPECTED_SIZE = 10;
 const ACTUAL_SIZE = 7;
 const FINAL = "OPENARC_D4_08_OK";
@@ -47,11 +45,11 @@ const CREDENTIAL_SECRET = "d4-08-verification-credential";
 const report = {
   checks: [], errors: [], versions: {}, stats: {}, secrets: {},
   chain: {
-    mode: "fallback-product-orchestrator+controlled-tool-proxy",
-    officialDshFacade: false,
+    mode: "official-dsh-facade+product-orchestrator+controlled-tool-proxy",
+    officialDshFacade: true,
     toolId: "test.sized",
-    toolCallIssuer: "test-only synthetic ACP agent (tests/fixtures/harness-acp/tool-proposal-agent.mjs)",
-    reason: "official dsh facade branch does not translate READ_ONLY verification failure into Step/Task BLOCK",
+    toolCallIssuer: "deterministic provider (tests/fixtures/d4-04-provider.mjs mode=sized) via official dsh",
+    reason: null,
   },
 };
 const out = (line) => process.stdout.write(line + "\n");
@@ -173,7 +171,7 @@ app.whenReady().then(async () => {
     check("R0.1 · 真实 UI 登录进入桌面", (await loginAs(ADMIN, PW)) === "ready", "");
     out("DIAG logged-in");
 
-    // 真实 provider edge + model config（synthetic ACP agent 不吃 model，但 run 启动需要 chat capability）。
+    // 真实 provider edge + model config（official dsh 经 Model Proxy 消费 chat capability）。
     const setupCtx = { sessionRef: identity.service.current, appId: "settings", source: "probe" };
     const prov = identity.modelService.createProvider({ context: setupCtx, displayName: "D4-08 Verification Provider", baseUrl: PROVIDER_URL, endpointScope: "LOCALHOST", scope: "ORGANIZATION", credentialSecret: CREDENTIAL_SECRET });
     if (!prov.ok) throw new Error("createProvider failed: " + JSON.stringify(prov));
@@ -185,20 +183,22 @@ app.whenReady().then(async () => {
     check("R0.2 · 真实产品 boot + model proxy listening", runtimeBoot.snapshot().modelProxyListening === true, JSON.stringify(runtimeBoot.snapshot()), "model proxy listening");
 
     // ------------------------------------------------------------- 真实产品执行链跑出 FAIL verification
+    // 先确定性设置 provider plan：调一次 test_sized（actual 7 != expected 10）后收尾 final。
+    const planRes = await fetch(CONTROL_URL, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "sized", finalText: FINAL }) });
+    if (!planRes.ok) throw new Error("provider /__plan failed: " + planRes.status);
     const sized = installSizedProbe();
     const probeOrch = new TaskHarnessOrchestrator({
       taskService: identity.taskService,
-      adapterFactory: () => new HarnessAdapter({ modelProxy: identity.modelProxy, dshBin: NODE_BIN, dshArgs: [PROBE_AGENT] }),
+      adapterFactory: () => new HarnessAdapter({ modelProxy: identity.modelProxy }),
       toolProxy: identity.toolProxy,
+      toolFacade: { enabled: true, toolIds: ["test.sized"], writeToolIds: [], maxCalls: 4, ttlMs: 120000 },
     });
     const ctx = aiCtx();
     const t = identity.taskService.createTask({ context: ctx, goal: "D4-08 verification failure probe (deterministic)" });
     const started = identity.taskService.startTask({ context: ctx, taskId: t.task.taskId, expectedRevision: t.task.revision });
     const s1 = identity.taskService.createStep({ context: ctx, taskId: t.task.taskId, kind: "reasoning", input: null, expectedRevision: started.task.revision });
     const ss = identity.taskService.startStep({ context: ctx, taskId: t.task.taskId, stepId: s1.step.stepId, expectedRevision: s1.task.revision });
-    const proposalId = "tc_d4_08_" + crypto.randomBytes(4).toString("hex");
-    const stepInput = { proposeSequence: [{ toolId: "test.sized", toolVersion: 1, arguments: { expectedSize: EXPECTED_SIZE, label: "box" }, proposalId }], finalText: FINAL };
-    const run = await probeOrch.runStep({ context: ctx, taskId: t.task.taskId, stepId: s1.step.stepId, expectedRevision: ss.task.revision, stepInput, verify: { type: "EXACT_TEXT", expected: FINAL } });
+    const run = await probeOrch.runStep({ context: ctx, taskId: t.task.taskId, stepId: s1.step.stepId, expectedRevision: ss.task.revision, verify: { type: "EXACT_TEXT", expected: FINAL } });
 
     out("DIAG run-step-done");
     const taskId = t.task.taskId;

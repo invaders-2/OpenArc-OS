@@ -2,7 +2,7 @@
  * D4-08 · 失败验证 UI Gate 启动器（真实 Electron + deterministic provider）。
  *
  * 主证据来自真实 Renderer UI（data-ai-verification 可见 / Reload 恢复 / 第二用户不可见），
- * 执行链为产品 TaskHarnessOrchestrator + 产品 ControlledToolProxy（fallback，见 probe 注释）。
+ * 执行链为 official dsh facade + 产品 TaskHarnessOrchestrator + 产品 ControlledToolProxy（真实正式链）。
  * 输出 artifacts/d4-08-verification-ui/verification-ui-gate.json（ignored）；不覆盖 docs/*。
  */
 import { spawn, execFileSync } from "node:child_process";
@@ -61,7 +61,7 @@ let gate = sanitize({
   workspaceState: git(["status", "--porcelain"]) || "",
   command: COMMAND,
   env: { electron: report.versions.electron, node: report.versions.node, platform: report.versions.platform, arch: report.versions.arch },
-  officialDsh: false,
+  officialDsh: true,
   productRuntimeBoot: true,
   chain: report.chain,
   checks: (report.checks || []).map((c) => ({ name: c.name, expected: c.expected == null ? null : c.expected, actual: c.actual == null ? (c.detail == null ? null : c.detail) : c.actual, ok: c.ok === true })),
