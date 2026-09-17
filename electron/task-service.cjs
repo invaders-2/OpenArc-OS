@@ -1060,30 +1060,53 @@ class TaskService {
   }
 
   /**
-   * D4-05 Closure · A33：只读列出「必需产物验证失败且尚未被后续真实验证 PASS 解决」的工具。
+   * D4-05 Closure · A33：只读列出「必需产物验证失败且尚未被后续真实验证 PASS 解决」的操作。
    *
-   * 判据来自后端记录（tool_executions），不信任模型自述：同一 tool_id 以**最近一次验证结论**为准，
-   * 后续出现 verification_status=PASS 的 execution 即视为已解决。旧 FAIL 记录绝不删除、绝不改写。
-   * 普通工具调用错误（verification_status 为空）不参与判定。无副作用。
+   * 判据来自后端记录（tool_executions + task_tool_proposals.arguments_hash），不信任模型自述。
+   * 关联键是 **(tool_id, canonical arguments)**，不是裸 tool_id：同一工具对**同一对象 + 同一验证要求**
+   * （同 arguments_hash）的后续真实 PASS 才算解决；对象/要求不同（如 label 或 expectedSize 不同）的
+   * PASS 绝不误清除别的对象的 FAIL。
+   *   · 只有 verification_status ∈ {FAIL, PASS} 的 execution 参与；普通工具调用错误（为空）不参与。
+   *   · arguments_hash 缺失/为空（旧数据/无法可靠关联）→ 以 execution_id 生成唯一键，保守地永不清除。
+   *   · 顺序敏感：FAIL、PASS、FAIL → 仍未解决；旧 FAIL 记录绝不删除、绝不改写。无副作用。
    */
   getUnresolvedRequiredVerificationFailures({ context, taskId } = {}) {
     const guard = this.#guard(context);
     if (!guard.ok) return guard;
     const load = this.#load(guard, taskId);
     if (!load.ok) return load;
-    if (!this.toolStore || typeof this.toolStore.executionsOfTask !== "function") return { ok: true, unresolved: [] };
+    if (!this.toolStore || typeof this.toolStore.executionsOfTask !== "function") return { ok: true, unresolved: [], resolved: [] };
     const methodOf = (errorCode) => errorCode === ERROR.TOOL_OUTPUT_INVALID ? "OUTPUT_SCHEMA" : errorCode === ERROR.TOOL_VERIFICATION_FAILED ? "ADAPTER_VERIFY" : null;
-    const latest = new Map();
+    const proposalById = typeof this.toolStore.proposalById === "function" ? (id) => this.toolStore.proposalById(id) : null;
+    const states = new Map();
     for (const exec of this.toolStore.executionsOfTask(load.task.task_id)) {
       const status = exec && exec.verification_status;
       if (status !== "FAIL" && status !== "PASS") continue;
-      latest.set(String(exec.tool_id), { status, executionId: exec.execution_id, errorCode: exec.error_code || null, method: methodOf(exec.error_code) });
+      const proposal = proposalById ? proposalById(exec.proposal_id) : null;
+      const argsHash = proposal && typeof proposal.arguments_hash === "string" && proposal.arguments_hash ? proposal.arguments_hash : null;
+      const toolId = String(exec.tool_id);
+      // 无可靠关联键时退回 execution 唯一键：绝不与其他 execution 共享解决关系（保守保持未解决）。
+      const key = argsHash ? toolId + "::" + argsHash : toolId + "::exec:" + String(exec.execution_id);
+      let rec = states.get(key);
+      if (!rec) { rec = { toolId, argsHash, linked: !!argsHash, lastFail: null, resolvedBy: null }; states.set(key, rec); }
+      if (status === "FAIL") {
+        rec.lastFail = { executionId: exec.execution_id, errorCode: exec.error_code || null, method: methodOf(exec.error_code), stepId: exec.step_id || null, runId: exec.run_id || null };
+        rec.resolvedBy = null;
+      } else if (rec.lastFail) {
+        rec.resolvedBy = { executionId: exec.execution_id, stepId: exec.step_id || null, runId: exec.run_id || null };
+      }
     }
     const unresolved = [];
-    for (const [toolId, rec] of latest) {
-      if (rec.status === "FAIL") unresolved.push({ toolId, executionId: rec.executionId, errorCode: rec.errorCode, method: rec.method });
+    const resolved = [];
+    for (const rec of states.values()) {
+      if (!rec.lastFail) continue;
+      if (rec.resolvedBy) {
+        resolved.push({ toolId: rec.toolId, argsHash: rec.argsHash, failedExecutionId: rec.lastFail.executionId, resolvedByExecutionId: rec.resolvedBy.executionId, method: rec.lastFail.method });
+      } else {
+        unresolved.push({ toolId: rec.toolId, executionId: rec.lastFail.executionId, errorCode: rec.lastFail.errorCode, method: rec.lastFail.method, argsHash: rec.argsHash, linked: rec.linked, stepId: rec.lastFail.stepId, runId: rec.lastFail.runId });
+      }
     }
-    return { ok: true, unresolved };
+    return { ok: true, unresolved, resolved };
   }
 
   // 供 ADR / 测试断言：第一版永久冻结

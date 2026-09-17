@@ -19,7 +19,8 @@ const SQL = {
   insertExecution: "INSERT INTO tool_executions (execution_id, proposal_id, decision_id, task_id, step_id, run_id, tool_id, tool_version, status, started_at, completed_at, result_ref, result_hash, verification_status, error_code) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
   executionById: "SELECT * FROM tool_executions WHERE execution_id = ?",
   executionByProposal: "SELECT * FROM tool_executions WHERE proposal_id = ?",
-  executionsOfTask: "SELECT * FROM tool_executions WHERE task_id = ? ORDER BY started_at",
+  // 同毫秒可能并列：验证 FAIL/PASS 判定顺序敏感，必须以插入顺序(rowid)作稳定次序。
+  executionsOfTask: "SELECT * FROM tool_executions WHERE task_id = ? ORDER BY started_at, rowid",
   updateExecution: "UPDATE tool_executions SET status = ?, completed_at = ?, result_ref = ?, result_hash = ?, verification_status = ?, error_code = ? WHERE execution_id = ?",
   insertAudit: "INSERT INTO authorization_audit (at, actor_user_id, target_user_id, app_id, department_id, resource_ref, action, decision, reason_code, permission_source, request_id, old_permissions, new_permissions) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
 };
