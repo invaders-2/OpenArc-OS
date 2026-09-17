@@ -1,5 +1,114 @@
 # 计划修订记录
 
+## 2026-09-17（十九）：光标缩小 + 全用自绘 + 设置里的「光标」两行
+
+用户口径（三条一起做）：
+1. 光标太大，要小一点。
+2. app 内所有光标都用我们自己内置的，不要再出现系统光标 —— 凡是 CSS 能控制的地方一律命中自绘 SVG。
+3. 设置「外观与交互」栏加「光标」设置：药丸开关（开/关）+ 光标大小调节。
+
+### 改了什么
+
+- **全部改成运行时 data URL 的 CSS 变量**（新增 `src/desktop/cursors.ts`）：
+  `public/cursors/*.svg` 仍是唯一来源，用 Vite 的 `?raw` 把源文件内联进 bundle
+  （CSP 是 `connect-src 'none'`，不能在运行时 fetch），按 size 改写 SVG 的 width/height，
+  并按 size/32 同步缩放热点，生成 `data:image/svg+xml,…` 写到根上的
+  `--cursor-arrow / --cursor-text / --cursor-resize-se / --cursor-crosshair / --cursor-grab /
+  --cursor-not-allowed / --cursor-copy / --cursor-pointer`。理由：CSS 的 cursor 没有尺寸参数，
+  "大小"和"开关"都只能在运行时重组这条声明。
+- **CSS 只负责"哪个元素用哪个变量"**（`src/styles.css` / `primitives.css`），每条都保留关键字兜底
+  （`var(--cursor-resize-se, nwse-resize)` 这种）。等价于一个总开关：变量写成 data URL 就是自绘，
+  写成关键字就是系统光标。
+  - 文本 / 可编辑区从**系统 text** 换成自绘 `text-*.svg`（本轮重点口径）。
+  - `a[href] / [role="link"]` 从系统 pointer 换成自绘手型（新增 `--cursor-pointer`；不在用户列的
+    变量清单里，但不加就会在链接上漏出系统手型）。
+  - 非文本表单控件在原有 range / file / checkbox / radio / color 上**补 select**（Chromium 的 UA
+    样式会盖过继承）。
+  - 探针抓到一个真实漏点：Chromium 的 UA 样式给 `<label>` 声明了 `cursor:default`，
+    文件窗口的 `label.search-field`（含它的 svg/circle/path，共 4 个元素）因此漏出系统箭头。
+    加 `label { cursor: inherit; }` 修掉。
+- **设置两行**（`src/main.tsx`，appearance 分支，照现有 Switch / setting-range 写法）：
+  - 「使用自绘光标」药丸开关：关掉后整套变量写成关键字，全部退回系统光标。
+  - 「光标大小」滑块 16–40px，默认 **18px**；**关闭时禁用（变暗）而不是隐藏** —— 保留位置、不产生
+    布局跳动，并明确表达"该设置当前不可用"。
+  - 持久化沿用 `oa-` 前缀 localStorage：`oa-cursor-custom` / `oa-cursor-size`，重启后仍生效。
+
+### 尺寸是怎么定的（先量系统箭头）
+
+用**一次性**全屏纯色背板（#808080，拍完即退）+ cliclick 移指针 + screencapture -C（含光标）与
+无光标帧做差集，量系统箭头在 2× Retina 下的实际足印：
+
+| 阈值 | 系统箭头足印（设备像素） | CSS 像素 |
+|---|---|---|
+| ≥48（实体） | 21×34 | 10.5×17 |
+| ≥16 | 22×37 | 11×18.5 |
+| ≥6（含 1px 阴影） | 25×38 | 12.5×19 |
+
+自绘箭头（从**生产构建**里读出的真实 data URL）同法实测，并用无头 SVG 解码复核：
+
+| 档位 | screencapture 足印 | 无头 SVG 解码（实体） | CSS 像素 |
+|---|---|---|---|
+| 默认 18px | 34×34 设备 | 17×17 | 17×17 |
+| 20px | 38×38 设备 | 19×19 | 19×19 |
+| 40px | 76×76 设备 | 38×38 | 38×38 |
+| 旧 32px（改前） | 61×61 设备 | — | 30.5×30.5 |
+
+→ 默认 18px 的足印（17 CSS）与系统箭头实体高度（17 CSS）齐平、略小于其含阴影足印（19 CSS），
+线性尺寸只有旧值的约 56%。I 型（text@18）实测 12×29 设备 = 6×14.5 CSS，无头解码实体 6×16；
+热点取竖笔中点略偏上（16,15 / 32 网格 → 18px 时 9,8），实测热点比字形中心高 1 CSS 像素。
+其它热点（18px）：箭头 1,1；缩放 9,9；十字 9,9；握紧手 9,10；禁止 1,1；拷贝 1,1；手型指尖 6,3。
+
+### 无系统光标 · 探针清单（无头：mock 桥 + 本地静态服务跑生产构建）
+
+开关打开时，遍历全部元素，computed cursor 不以 `url(` 开头的一律列出 —— **清单为空**：
+
+| 状态 | 元素总数 | 命中自绘 url( | 漏出系统光标 |
+|---|---|---|---|
+| 桌面 | 169 | 169 | 0 |
+| 设置窗口 | 262 | 262 | 0 |
+| 文件窗口 | 373 | 373 | 0 |
+| AI 面板 | 403 | 403 | 0 |
+| 右键菜单 | 380 | 380 | 0 |
+| 删除确认对话框 | 387 | 387 | 0 |
+
+开关关闭后，同一份清单 url( 命中 **0**，全部是系统关键字：default（大多数）、
+nwse-resize（3 个缩放手柄）、text（1–2 个文本输入）；「光标大小」滑块 disabled=true。
+再打开又全部回到 data URL。
+
+### 持久化实测
+
+用**无窗口**持久化 profile 跑生产构建：设成 `oa-cursor-custom=false` / `oa-cursor-size=40`，
+**关掉进程再重开** →
+before {custom:"false", size:"40"} / after {custom:"false", size:"40", --cursor-arrow="default",
+root cursor="default"}。两个值都留在磁盘 profile 里，重开后仍生效（关闭态下根光标就是关键字 default）。
+
+### 门禁
+
+`npx tsc --noEmit` clean、`npm test` 96/96；`npx vite build` 通过（?raw 从 public/ 内联，
+不产生额外产物）。
+
+### 不能控制的两处（如实说明）
+
+- **拖到系统**：把文件从 app 里 ⌘ 拖到 Finder / 桌面时，那一帧的拖拽光标由 macOS / Electron 画，
+  不走 CSS。
+- **原生网页视图里的第三方页面**：浏览器 App 用 WebContentsView，里面站点的光标由该页面自己的
+  CSS 决定，我们控制不到。
+
+### 实测截图
+
+- 设置两行（生产构建、无头实拍）：/tmp/oa-probe/cursor-headless/settings-cursor-light-on.png、
+  …-dark-on.png、…-light-off.png（关闭态滑块变暗）。
+- 系统箭头 + 18/20/40 + I 型并排：/tmp/oa-cursor-probe/cursor-compare.png。
+- 开/关两种状态的真实 screencapture -C：/tmp/oa-cursor-probe/cursor-onoff-compare.png
+  （原始帧 cursor-on-arrow18-with.png、cursor-off-default-with.png、cursor-on-text18-with.png）。
+- 探针原始报告：/tmp/oa-probe/cursor-headless/report.json。
+
+### 说明
+
+- 早前一轮曾在 `npm run dev:app` 上取过 computed cursor / 尺寸结论；按用户口径"实时预览影响正常用机"，
+  该实例已停用。上面的清单与尺寸已改用**无窗口无头探针**（mock 桥 + 本地静态服务 + 生产构建）重跑，
+  像素证据用**一次性**背板（拍完即退，独立 userData）。当前无任何残留 vite / Electron 进程。
+
 ## 2026-09-17（十八）：实时更新预览（`npm run dev:app`）
 
 用户口径：「改代码后 app 窗口自己就更新，不用每次重新构建 + 重启。」

@@ -35,6 +35,7 @@ import "./styles.css";
 import domain from "../electron/window-domain.cjs";
 import type { WindowCommand } from "../electron/window-domain.cjs";
 import { useDesktop } from "./desktop/useDesktop";
+import { applyCursors, CURSOR_SIZE_DEFAULT, CURSOR_SIZE_MAX, CURSOR_SIZE_MIN } from "./desktop/cursors";
 // 别名导入：本模块里有 `declare global { interface Window }`，
 // 直接叫 Window 会在类型位置与全局 Window 撞名。
 import {
@@ -321,6 +322,12 @@ function App() {
   const [deskIcon, setDeskIcon] = useState(() => {
     const v = Number(localStorage.getItem("oa-desk-icon"));
     return Number.isFinite(v) && v >= 40 && v <= 96 ? v : 58;
+  });
+  /** 自绘光标：开关（false = 整套退回系统关键字）与尺寸（px）。 */
+  const [cursorCustom, setCursorCustom] = useState(() => localStorage.getItem("oa-cursor-custom") !== "false");
+  const [cursorSize, setCursorSize] = useState(() => {
+    const v = Number(localStorage.getItem("oa-cursor-size"));
+    return Number.isFinite(v) && v >= CURSOR_SIZE_MIN && v <= CURSOR_SIZE_MAX ? v : CURSOR_SIZE_DEFAULT;
   });
   /**
    * 程序坞的成员与顺序。**这个数组就是唯一真值**：顺序即顺序，缺谁就是谁被移除。
@@ -1252,9 +1259,16 @@ function App() {
       ["dark", dark],
       ["dock-size", dockSize],
       ["desk-icon", deskIcon],
+      ["cursor-custom", cursorCustom],
+      ["cursor-size", cursorSize],
     ])
       localStorage.setItem("oa-" + k, String(v));
-  }, [reduced, glass, dark, dockSize, deskIcon]);
+  }, [reduced, glass, dark, dockSize, deskIcon, cursorCustom, cursorSize]);
+
+  // 自绘光标：尺寸 / 开关 / 深浅色任一变化都重写根上的 --cursor-* 变量。
+  useEffect(() => {
+    applyCursors({ enabled: cursorCustom, size: cursorSize, dark });
+  }, [cursorCustom, cursorSize, dark]);
   useEffect(() => {
     localStorage.setItem("oa-dock", JSON.stringify(dockIds));
   }, [dockIds]);
@@ -2091,6 +2105,27 @@ function App() {
                       aria-label="桌面图标大小"
                     />
                     <span className="setting-range-value">{deskIcon}px</span>
+                  </span>
+                </div>
+                <Switch label="使用自绘光标" checked={cursorCustom} onChange={setCursorCustom} />
+                <div className="setting-row">
+                  <span>
+                    光标大小
+                    <span className="footnote"> 拖动滑块调整自绘光标尺寸</span>
+                  </span>
+                  <span className="setting-range-wrap">
+                    <input
+                      className="setting-range"
+                      type="range"
+                      min={CURSOR_SIZE_MIN}
+                      max={CURSOR_SIZE_MAX}
+                      step={1}
+                      value={cursorSize}
+                      disabled={!cursorCustom}
+                      onChange={(e) => setCursorSize(Number(e.target.value))}
+                      aria-label="光标大小"
+                    />
+                    <span className="setting-range-value">{cursorSize}px</span>
                   </span>
                 </div>
                 <div className="setting-row">
