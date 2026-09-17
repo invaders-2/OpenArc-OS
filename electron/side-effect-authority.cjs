@@ -433,6 +433,32 @@ class SideEffectAuthority {
   }
 
   /**
+   * D4-04 · spawn executor 之前的实时授权 preflight（只读）。
+   *
+   * executeApproved 若先 spawn，executor 内部 eligibility 才发现撤权，就已经产生
+   * 一次 runtime 启动和一个 lease。这里在 spawn 前用真实 AuthorizationService
+   * 重查 tool permission + resource action，撤权一律 fail closed（0 spawn / 0 lease / 0 mutation）。
+   */
+  preflightAuthorization({ callId } = {}) {
+    const call = this.store.callById(callId);
+    if (!call) return { ok: false, error: SIDE_EFFECT_ERROR.CALL_NOT_FOUND };
+    const task = this.taskStore.taskById(call.taskId);
+    if (!task) return { ok: false, error: SIDE_EFFECT_ERROR.TASK_NOT_FOUND };
+    const actor = this.#resolveAgent(this.#executionContext(task));
+    if (!actor.ok) return { ok: false, error: SIDE_EFFECT_ERROR.AUTHORIZATION_REVOKED };
+    const tool = this.#toolFor(call);
+    if (!tool.ok) {
+      const error = tool.error === "TOOL_DISABLED" ? SIDE_EFFECT_ERROR.TOOL_DISABLED
+        : tool.error === "SIDE_EFFECT_TOOL_VERSION_CHANGED" ? SIDE_EFFECT_ERROR.TOOL_VERSION_CHANGED
+        : SIDE_EFFECT_ERROR.TOOL_NOT_FOUND;
+      return { ok: false, error };
+    }
+    const authorization = this.#authorizeLive({ sessionRef: task.session_ref, appId: task.app_id, preconditions: call.preconditionsSafe }, tool.contract, actor.user.id);
+    if (!authorization.ok) return { ok: false, error: SIDE_EFFECT_ERROR.AUTHORIZATION_REVOKED };
+    return { ok: true };
+  }
+
+  /**
    * D4-03C3 Closure · trusted quiescence proof。
    * 只有 RuntimeLifecycleAuthority 真正观测到 origin runtime 退出才 quiesced=true；
    * 不同 instanceId / 旧 lease EXPIRED / 新进程启动 / 时间流逝 / caller 自报 一律不构成证明。

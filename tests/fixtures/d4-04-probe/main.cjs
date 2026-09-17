@@ -24,7 +24,11 @@ const CONTROL_URL = PROVIDER_URL.replace(/\/v1\/?$/, "") + "/__plan";
 const executorSeam = { fault: null };
 const report = { checks: [], errors: [], versions: {}, stats: {}, secrets: {}, executor: {} };
 const out = (line) => process.stdout.write(line + "\n");
-const check = (name, ok, detail) => { report.checks.push({ name, ok: !!ok, detail: String(detail === undefined ? "" : detail) }); out((ok ? "PASS" : "FAIL") + " " + name + (detail ? " :: " + detail : "")); };
+const check = (name, ok, detail, expected) => {
+  const actual = String(detail === undefined ? "" : detail);
+  report.checks.push({ name, ok: !!ok, detail: actual, expected: expected === undefined ? null : String(expected), actual });
+  out((ok ? "PASS" : "FAIL") + " " + name + (detail ? " :: " + detail : ""));
+};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let win; let userData = null; let identity = null; let runtimeBoot = null;
@@ -53,13 +57,20 @@ async function setPlan(mode, resourceRef) {
   const res = await fetch(CONTROL_URL, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode, resourceRef }) });
   return res.ok;
 }
+/** 同一条任务里对两个不同 resource 连续两次 trash（R2 用）。 */
+async function setPlanRefs(mode, resourceRefs) {
+  const res = await fetch(CONTROL_URL, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode, resourceRefs }) });
+  return res.ok;
+}
 async function runTaskViaUI(goal) {
+  // Reload / 连续场景后 panel 可能仍显示上一个 task；必须等一个**新的** taskId。
+  const previousTaskId = await attr(".ai-panel", "data-ai-task-id");
   await setInput("[data-ai-goal]", goal);
   // §24：Run 必须由 backend authoritative terminal state 复位；这里等 UI 合同自我恢复，不硬等固定时长。
   if (!(await waitFor(async () => !(await isDisabled("[data-ai-run]")), 60000))) throw new Error("run button never re-enabled");
   const r = await click("[data-ai-run]");
   if (r !== "ok") throw new Error("run click failed: " + r);
-  const ok = await waitFor(async () => { const id = await attr(".ai-panel", "data-ai-task-id"); return typeof id === "string" && id.length > 0; }, 30000);
+  const ok = await waitFor(async () => { const id = await attr(".ai-panel", "data-ai-task-id"); return typeof id === "string" && id.length > 0 && id !== previousTaskId; }, 30000);
   const taskId = await attr(".ai-panel", "data-ai-task-id");
   return { taskId, started: ok };
 }
@@ -143,7 +154,8 @@ app.whenReady().then(async () => {
     if (!def.ok) throw new Error("setDefault failed: " + JSON.stringify(def));
     const baseResource = await createSmokeResource("Vertical Smoke Resource");
     const resourceId = baseResource.resourceId; const resourceRef = baseResource.resourceRef;
-    identity.authorization.grantAppToolPermission({ context: aiCtx(), appId: "ai", actions: ["tool.resource.search", "tool.resource.readMetadata", "tool.resource.trash"] });
+    const toolGrant = identity.authorization.grantAppToolPermission({ context: aiCtx(), appId: "ai", actions: ["tool.resource.search", "tool.resource.readMetadata", "tool.resource.trash"] });
+    let toolGrantId = toolGrant && toolGrant.ok && toolGrant.grant ? toolGrant.grant.grantId : null;
     check("A3 · preload Task 桥只有 command,onEvent", (await js("return window.openarc && window.openarc.task ? Object.keys(window.openarc.task).sort().join(',') : 'missing'")) === "command,onEvent", "");
     check("A4 · Renderer 拿不到 Task Runtime / Domain", await js("return typeof window.openarc.taskService === 'undefined' && typeof window.openarc.resourceService === 'undefined'"), "");
     await click(".assistant-pill");
@@ -242,7 +254,8 @@ app.whenReady().then(async () => {
     check("F1 · UNKNOWN_EFFECT → Task BLOCKED", blocked, String(taskStatus(unknownTask.taskId)));
     check("F2 · Step BLOCKED + Harness STOP", identity.taskStore.stepById(identity.taskStore.stepsOfTask(unknownTask.taskId)[0].step_id).status === "BLOCKED", "");
     check("F3 · UNKNOWN_EFFECT 证据 + 0 second SideEffectCall", unknownEvents.includes("tool.side_effect.unknown_effect") && identity.sideEffectStore.callsOfTask(unknownTask.taskId).length === 1 && callStatus(unknownCall.callId) !== "SUCCEEDED", "");
-    check("F4 · Renderer 显示 BLOCKED", (await text("[data-ai-status-text]")).includes("BLOCKED") || (await attr(".ai-panel", "data-ai-status")) === "BLOCKED", await text("[data-ai-status-text]"));
+    const f4Shown = await waitFor(async () => (await text("[data-ai-status-text]")).includes("BLOCKED") || (await attr(".ai-panel", "data-ai-status")) === "BLOCKED", 30000);
+    check("F4 · Renderer 显示 BLOCKED", f4Shown, await text("[data-ai-status-text]"));
     const claimIdx = unknownEvents.indexOf("tool.side_effect.execution_started");
     const unknownIdx = unknownEvents.indexOf("tool.side_effect.unknown_effect");
     const unknownEvidence = identity.supervisor.executorEvidence().slice(-1)[0] || null;
@@ -283,6 +296,81 @@ app.whenReady().then(async () => {
     await waitSel(".ai-panel", 20000);
     const reloadRestored = await waitFor(async () => (await attr(".ai-panel", "data-ai-task-id")).length > 0 && (await text("[data-ai-result]")).length > 0, 30000);
     check("H1 · Reload 后从 backend state 恢复 Task 结果", reloadRestored, "taskId=" + (await attr(".ai-panel", "data-ai-task-id")) + " gate=" + gate);
+
+    // Vertical Smoke R1 — 待批准时撤权，再尝试使用旧批准（真实 UI + 产品 governance API）
+    const r1Res = await createSmokeResource("Revoke Pending Target");
+    await setPlan("write", r1Res.resourceRef);
+    const r1Task = await runTaskViaUI("REVOKE-PENDING smoke: 把 Revoke Pending Target 移入废纸篓");
+    const r1Call = await waitCall(r1Task.taskId);
+    const r1ApprovalShown = !!r1Call && (await waitApprovalFor(r1Call.callId, 30000));
+    check("R1.1 · 撤权前 proposal 到 AWAITING_APPROVAL 且 Approval UI 可见", r1ApprovalShown && r1Call.status === "AWAITING_APPROVAL", (r1Call ? r1Call.status : "none") + "/ui=" + r1ApprovalShown, "AWAITING_APPROVAL + UI 可见");
+    if (!r1Call) throw new Error("R1 proposal missing");
+    const r1ExecBefore = identity.supervisor.executorEvidence().length;
+    const r1Revoke = identity.authorization.revokeAppResourcePermission({ context: aiCtx(), grantId: toolGrantId });
+    const r1ResourceGrantKept = identity.authStore.appGrantsForApp("ai").some((g) => g.resource_id === r1Res.resourceId && String(g.actions || "").includes("resource.delete"));
+    check("R1.2 · 产品 governance API 撤销 app tool 权限（changed=true）", r1Revoke && r1Revoke.ok === true && r1Revoke.changed === true, JSON.stringify(r1Revoke), "ok=true, changed=true");
+    check("R1.3 · 撤权只针对 tool 权限：resource grant 仍在", r1ResourceGrantKept === true, String(r1ResourceGrantKept), "true");
+    const r1ApproveClick = await click('[data-approval-action="approve"]');
+    check("R1.4 · 使用旧批准（真实 UI Approve）", r1ApproveClick === "ok", r1ApproveClick, "ok");
+    const r1CallTerminal = await waitFor(() => ["BLOCKED", "FAILED", "CANCELLED"].includes(String(callStatus(r1Call.callId))), 120000);
+    const r1Final = identity.sideEffectStore.callById(r1Call.callId);
+    const r1TaskTerminal = await waitFor(() => ["BLOCKED", "FAILED", "CANCELLED"].includes(String(taskStatus(r1Task.taskId))), 120000);
+    const r1Leases = identity.sideEffectStore.leasesOfCall(r1Call.callId).length;
+    const r1ExecAfter = identity.supervisor.executorEvidence().length;
+    const r1Calls = identity.sideEffectStore.callsOfTask(r1Task.taskId).length;
+    check("R1.5 · 撤权后旧批准不得执行：call 终态 BLOCKED", r1CallTerminal && r1Final.status === "BLOCKED", String(r1Final.status), "BLOCKED");
+    check("R1.6 · call error_code = SIDE_EFFECT_AUTHORIZATION_REVOKED", r1Final.errorCode === "SIDE_EFFECT_AUTHORIZATION_REVOKED", String(r1Final.errorCode), "SIDE_EFFECT_AUTHORIZATION_REVOKED");
+    check("R1.7 · 0 mutation（resource 未 trashed）", trashed(r1Res.resourceRef) === false, String(trashed(r1Res.resourceRef)), "false");
+    check("R1.8 · 0 lease", r1Leases === 0, String(r1Leases), "0");
+    check("R1.9 · 0 新 executor（preflight 在 spawn 之前 fail closed）", r1ExecAfter === r1ExecBefore, r1ExecBefore + "→" + r1ExecAfter, "数量不变");
+    check("R1.10 · Task 非 SUCCEEDED 且终态 + AUTO_RETRY=0（1 条 call）", r1TaskTerminal && taskStatus(r1Task.taskId) !== "SUCCEEDED" && r1Calls === 1, taskStatus(r1Task.taskId) + "/calls=" + r1Calls, "终态非 SUCCEEDED + calls=1");
+    await waitFor(async () => (await isDisabled("[data-ai-run]")) === false, 30000);
+    const r1Regrant = identity.authorization.grantAppToolPermission({ context: aiCtx(), appId: "ai", actions: ["tool.resource.search", "tool.resource.readMetadata", "tool.resource.trash"] });
+    if (r1Regrant && r1Regrant.ok && r1Regrant.grant) toolGrantId = r1Regrant.grant.grantId;
+    check("R1.11 · 场景结束后重新授予 tool 权限（恢复后续场景前置）", !!(r1Regrant && r1Regrant.ok && r1Regrant.grant && r1Regrant.grant.grantId), JSON.stringify({ ok: r1Regrant && r1Regrant.ok }), "ok=true");
+
+    // Vertical Smoke R2 — 任务进行中撤权，已有副作用保留（不宣称撤权回滚）
+    const r2A = await createSmokeResource("Revoke Mid A");
+    const r2B = await createSmokeResource("Revoke Mid B");
+    await setPlanRefs("revoke2", [r2A.resourceRef, r2B.resourceRef]);
+    const r2Task = await runTaskViaUI("REVOKE-MID smoke: 依次把 Revoke Mid A / Revoke Mid B 移入废纸篓");
+    const r2CallFor = (ref) => identity.sideEffectStore.callsOfTask(r2Task.taskId).find((c) => c.preconditionsSafe && c.preconditionsSafe.resourceRef === ref) || null;
+    const r2ASeen = await waitFor(() => !!r2CallFor(r2A.resourceRef), 120000);
+    const r2CallA = r2ASeen ? r2CallFor(r2A.resourceRef) : null;
+    const r2AApprovalShown = !!r2CallA && (await waitApprovalFor(r2CallA.callId, 60000));
+    check("R2.1 · refA 的 trash 到 AWAITING_APPROVAL（真实 UI）", r2ASeen && !!r2CallA && r2CallA.status === "AWAITING_APPROVAL" && r2AApprovalShown, (r2CallA ? r2CallA.status : "none") + "/ui=" + r2AApprovalShown, "AWAITING_APPROVAL + UI 可见");
+    if (!r2CallA) throw new Error("R2 refA proposal missing");
+    const r2AApproveClick = await click('[data-approval-action="approve"]');
+    check("R2.2 · 批准并执行 refA 的真实 WRITE", r2AApproveClick === "ok", r2AApproveClick, "ok");
+    const r2ADone = await waitFor(() => callStatus(r2CallA.callId) === "SUCCEEDED" && trashed(r2A.resourceRef) === true, 120000);
+    check("R2.3 · refA SUCCEEDED 且 trashed（撤权前已有真实副作用）", r2ADone, callStatus(r2CallA.callId) + "/trashedA=" + trashed(r2A.resourceRef), "SUCCEEDED + trashedA=true");
+    const r2BSeen = await waitFor(() => { const c = r2CallFor(r2B.resourceRef); return !!c && c.status === "AWAITING_APPROVAL"; }, 120000);
+    const r2CallB = r2BSeen ? r2CallFor(r2B.resourceRef) : null;
+    const r2BApprovalShown = !!r2CallB && (await waitApprovalFor(r2CallB.callId, 60000));
+    check("R2.4 · refB 的 trash 到 AWAITING_APPROVAL（撤权同步点）", r2BSeen && !!r2CallB && r2CallB.status === "AWAITING_APPROVAL" && r2BApprovalShown, (r2CallB ? r2CallB.status : "none") + "/ui=" + r2BApprovalShown, "AWAITING_APPROVAL + UI 可见");
+    if (!r2CallB) throw new Error("R2 refB proposal missing");
+    const r2ExecBefore = identity.supervisor.executorEvidence().length;
+    const r2Revoke = identity.authorization.revokeAppResourcePermission({ context: aiCtx(), grantId: toolGrantId });
+    check("R2.5 · 任务进行中经产品 governance API 撤权（changed=true）", r2Revoke && r2Revoke.ok === true && r2Revoke.changed === true, JSON.stringify(r2Revoke), "ok=true, changed=true");
+    check("R2.6 · 已发生副作用保留：refA trashed=true（不宣称撤权回滚）", trashed(r2A.resourceRef) === true, String(trashed(r2A.resourceRef)), "true");
+    const r2ApproveClick = await click('[data-approval-action="approve"]');
+    check("R2.7 · 使用旧批准（真实 UI Approve refB）", r2ApproveClick === "ok", r2ApproveClick, "ok");
+    const r2CallTerminal = await waitFor(() => ["BLOCKED", "FAILED", "CANCELLED"].includes(String(callStatus(r2CallB.callId))), 120000);
+    const r2FinalB = identity.sideEffectStore.callById(r2CallB.callId);
+    const r2TaskTerminal = await waitFor(() => ["BLOCKED", "FAILED", "CANCELLED"].includes(String(taskStatus(r2Task.taskId))), 120000);
+    const r2CallsAfter = identity.sideEffectStore.callsOfTask(r2Task.taskId).length;
+    const r2LeasesB = identity.sideEffectStore.leasesOfCall(r2CallB.callId).length;
+    const r2ExecAfter = identity.supervisor.executorEvidence().length;
+    const r2Runs = identity.taskStore.harnessRunsOfTask(r2Task.taskId);
+    const r2LastRun = r2Runs.length ? r2Runs[r2Runs.length - 1] : null;
+    const r2Step = identity.taskStore.stepsOfTask(r2Task.taskId)[0] || null;
+    check("R2.8 · refB 未 trashed（撤权后 fail closed，0 mutation）", trashed(r2B.resourceRef) === false, String(trashed(r2B.resourceRef)), "false");
+    check("R2.9 · 第二个 call 终态 BLOCKED + 0 lease + 0 新 executor", r2CallTerminal && r2FinalB.status === "BLOCKED" && r2LeasesB === 0 && r2ExecAfter === r2ExecBefore, r2FinalB.status + "/leases=" + r2LeasesB + "/exec=" + r2ExecBefore + "→" + r2ExecAfter, "BLOCKED + 0 lease + 0 新 executor");
+    check("R2.10 · 无自动重试：任务只有 2 条 call（refA/refB 各 1）", r2CallsAfter === 2, String(r2CallsAfter), "2");
+    check("R2.11 · Task/Step BLOCKED + Harness run 停止（不是 RUNNING）", r2TaskTerminal && taskStatus(r2Task.taskId) === "BLOCKED" && !!r2Step && r2Step.status === "BLOCKED" && (!r2LastRun || r2LastRun.status !== "RUNNING"), taskStatus(r2Task.taskId) + "/step=" + (r2Step ? r2Step.status : "none") + "/run=" + (r2LastRun ? r2LastRun.status : "none"), "BLOCKED/BLOCKED/非 RUNNING");
+    await waitFor(async () => (await isDisabled("[data-ai-run]")) === false, 30000);
+    check("R2.12 · UI 最终 BLOCKED 且 Run 复位（busy=false）", (await attr(".ai-panel", "data-ai-status")) === "BLOCKED" && (await isDisabled("[data-ai-run]")) === false, await attr(".ai-panel", "data-ai-status"), "BLOCKED + run enabled");
+
 
     // Secret scan
     let dump = "";

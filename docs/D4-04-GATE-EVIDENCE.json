@@ -1,0 +1,499 @@
+{
+  "electronVersion": "44.3.0",
+  "platform": "darwin",
+  "arch": "arm64",
+  "node": "24.20.0",
+  "env": {
+    "electron": "44.3.0",
+    "node": "24.20.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "commit": null,
+  "testedCommit": "ce8ea9f765a319757b78748612392521641c6e11",
+  "workspaceState": "M electron/side-effect-authority.cjs\n M electron/side-effect-runtime.cjs\n M tests/d4-04-smoke.mjs\n M tests/fixtures/d4-04-probe/main.cjs\n M tests/fixtures/d4-04-provider.mjs\n?? docs/D4-04-GATE-EVIDENCE.json\n?? tests/d4-04-executor-unavailable.test.mjs",
+  "command": "npm run test:d4-04",
+  "officialDsh": true,
+  "dshVersion": "0.1.5-rc.2",
+  "acpVersion": "1.4.0",
+  "productRuntimeBoot": true,
+  "readSmoke": true,
+  "writeApproveSmoke": true,
+  "executorReady": true,
+  "writeDenySmoke": true,
+  "cancelSmoke": true,
+  "unknownEffectSmoke": true,
+  "uiBusyReset": true,
+  "rendererSpoof": true,
+  "rendererReload": true,
+  "revokePendingApproval": true,
+  "revokeMidTask": true,
+  "modelRequests": 5,
+  "providerToolCalls": [
+    "resource_search",
+    "resource_trash",
+    "resource_trash"
+  ],
+  "readExecutions": 2,
+  "sideEffectCalls": 1,
+  "approvals": 1,
+  "leases": 1,
+  "businessMutations": 1,
+  "verifications": 2,
+  "hiddenRetries": 0,
+  "maxToolCallsPerTask": 2,
+  "executor": {
+    "launcher": "ElectronUtilityProcessLauncher",
+    "processType": "browser",
+    "electron": "44.3.0",
+    "node": "24.20.0",
+    "write": {
+      "instanceId": "exe_9cgA_OgK",
+      "spawned": true,
+      "ready": true,
+      "exited": true,
+      "exitCode": 0,
+      "signal": null,
+      "launchError": false
+    },
+    "unknown": {
+      "instanceId": "exe_FQqQMYMW",
+      "spawned": true,
+      "ready": true,
+      "exited": true,
+      "exitCode": 9,
+      "signal": null,
+      "launchError": false
+    }
+  },
+  "productRuntime": {
+    "identityCreated": true,
+    "modelProxyStartAttempted": true,
+    "modelProxyStarted": true,
+    "modelProxyListening": true,
+    "modelProxyErrorCode": null,
+    "bootOrder": [
+      "identity_created",
+      "model_proxy_start_attempted",
+      "model_proxy_started",
+      "runtime_ready"
+    ],
+    "taskAdmissionAfterProxyStart": true
+  },
+  "rendererConsoleErrors": 0,
+  "mainUnhandledErrors": 0,
+  "secretHits": 0,
+  "checksSummary": {
+    "total": 67,
+    "pass": 67,
+    "fail": 0
+  },
+  "checks": [
+    {
+      "name": "A1 · production Electron + Renderer 启动",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "name": "A2 · 真实 UI 登录进入桌面",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "name": "A3 · preload Task 桥只有 command,onEvent",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "name": "A4 · Renderer 拿不到 Task Runtime / Domain",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "name": "A5 · 打开 AI 面板",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "name": "A6 · Real product runtime boot assembly",
+      "expected": null,
+      "actual": "{\"started\":true,\"listening\":true,\"order\":[\"identity_created\",\"model_proxy_start_attempted\",\"model_proxy_started\",\"runtime_ready\"]}",
+      "ok": true
+    },
+    {
+      "name": "B1 · READ vertical smoke → Task SUCCEEDED",
+      "expected": null,
+      "actual": "SUCCEEDED",
+      "ok": true
+    },
+    {
+      "name": "B2 · READ ToolExecution >= 2 且 verification PASS",
+      "expected": null,
+      "actual": "execs=2",
+      "ok": true
+    },
+    {
+      "name": "B3 · READ 0 SideEffectCall / 0 mutation",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "name": "B4 · Renderer 显示 READ 最终结果",
+      "expected": null,
+      "actual": "OPENARC_VERTICAL_SMOKE_OK",
+      "ok": true
+    },
+    {
+      "name": "B5 · Renderer 无绝对路径 / store root / capability 泄漏",
+      "expected": null,
+      "actual": "[]",
+      "ok": true
+    },
+    {
+      "name": "C1 · WRITE proposal → Approval UI 出现",
+      "expected": null,
+      "actual": "AWAITING_APPROVAL",
+      "ok": true
+    },
+    {
+      "name": "C2 · 审批前 0 mutation / 0 lease / 0 WRITE execution",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "name": "C3 · Approval UI 显示 tool / risk / target / effect",
+      "expected": null,
+      "actual": "应用 / AgentAI 助手（本机会话）工具Trash Resource（resource.trash）风险可逆写入目标Vertical Smoke Resourceresource://res_i_9Mg1dcNv_muDjsJlPeO",
+      "ok": true
+    },
+    {
+      "name": "C4 · Approval UI 无路径 / token",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "name": "C5 · 点击真实 Approve",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "name": "C6 · WRITE → Task SUCCEEDED + mutation exactly 1",
+      "expected": null,
+      "actual": "task=SUCCEEDED",
+      "ok": true
+    },
+    {
+      "name": "C7 · SideEffectCall=1 / approval=1 / lease=1 / verification PASS",
+      "expected": null,
+      "actual": "SUCCEEDED",
+      "ok": true
+    },
+    {
+      "name": "C8 · production executor spawned + ready + real child exit",
+      "expected": null,
+      "actual": "{\"instanceId\":\"exe_9cgA_OgK\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":0,\"signal\":null,\"launchError\":false}",
+      "ok": true
+    },
+    {
+      "name": "C9 · WRITE 恰好 1 个 lease 且 RELEASED",
+      "expected": null,
+      "actual": "[\"RELEASED\"]",
+      "ok": true
+    },
+    {
+      "name": "C10 · Renderer Run 复位（busy=false）",
+      "expected": null,
+      "actual": "cancelDisabled=true",
+      "ok": true
+    },
+    {
+      "name": "D1 · Deny 前 WAITING_APPROVAL + 0 mutation",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "name": "D2 · 点击真实 Deny",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "name": "D3 · Deny → 0 mutation / 0 lease / 0 WRITE execution",
+      "expected": null,
+      "actual": "BLOCKED",
+      "ok": true
+    },
+    {
+      "name": "D4 · Deny → SideEffectCall safe terminal + UI busy 复位",
+      "expected": null,
+      "actual": "BLOCKED/BLOCKED",
+      "ok": true
+    },
+    {
+      "name": "E1 · Cancel 前 Approval UI 可见 + 0 mutation",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "name": "E2 · 点击真实 Cancel",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "name": "E3 · Cancel → Task CANCELLED / 0 mutation / 0 lease",
+      "expected": null,
+      "actual": "CANCELLED",
+      "ok": true
+    },
+    {
+      "name": "E4 · Cancel 后旧 Approval 点击不得执行",
+      "expected": null,
+      "actual": "{\"ok\":false,\"error\":\"SIDE_EFFECT_CALL_STATE\"}",
+      "ok": true
+    },
+    {
+      "name": "F1 · UNKNOWN_EFFECT → Task BLOCKED",
+      "expected": null,
+      "actual": "BLOCKED",
+      "ok": true
+    },
+    {
+      "name": "F2 · Step BLOCKED + Harness STOP",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "name": "F3 · UNKNOWN_EFFECT 证据 + 0 second SideEffectCall",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "name": "F4 · Renderer 显示 BLOCKED",
+      "expected": null,
+      "actual": "BLOCKED · Recovery Required",
+      "ok": true
+    },
+    {
+      "name": "F5 · claim RUNNING 先于真实 child exit 崩溃",
+      "expected": null,
+      "actual": "{\"claimIdx\":20,\"unknownIdx\":21,\"ev\":{\"instanceId\":\"exe_FQqQMYMW\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":9,\"signal\":null,\"launchError\":false}}",
+      "ok": true
+    },
+    {
+      "name": "F6 · UNKNOWN 后 0 第二 call / 0 第二 lease / 0 retry",
+      "expected": null,
+      "actual": "FAILED",
+      "ok": true
+    },
+    {
+      "name": "F7 · Renderer BLOCKED + Run 复位（busy=false）",
+      "expected": null,
+      "actual": "BLOCKED",
+      "ok": true
+    },
+    {
+      "name": "G1 · Renderer 自报 actor/risk 被忽略（真实 session 决定）",
+      "expected": null,
+      "actual": "{\"ok\":true,\"actor\":\"usr_P_y9W2gEWRBD7CN7ZouFNUr17VWhUQ9I\"}",
+      "ok": true
+    },
+    {
+      "name": "G2 · 伪造 approvalRequestId → DENY（0 authority gain）",
+      "expected": null,
+      "actual": "{\"ok\":false,\"error\":\"SIDE_EFFECT_CALL_NOT_FOUND\"}",
+      "ok": true
+    },
+    {
+      "name": "G3 · 伪造 actor 的真实 approve 仍走完整受控执行",
+      "expected": null,
+      "actual": "SUCCEEDED/SUCCEEDED",
+      "ok": true
+    },
+    {
+      "name": "H1 · Reload 后从 backend state 恢复 Task 结果",
+      "expected": null,
+      "actual": "taskId=task_xq7-i6_OYxf94w gate=ready",
+      "ok": true
+    },
+    {
+      "name": "R1.1 · 撤权前 proposal 到 AWAITING_APPROVAL 且 Approval UI 可见",
+      "expected": "AWAITING_APPROVAL + UI 可见",
+      "actual": "AWAITING_APPROVAL/ui=true",
+      "ok": true
+    },
+    {
+      "name": "R1.2 · 产品 governance API 撤销 app tool 权限（changed=true）",
+      "expected": "ok=true, changed=true",
+      "actual": "{\"ok\":true,\"changed\":true,\"reasonCode\":\"ALLOW\"}",
+      "ok": true
+    },
+    {
+      "name": "R1.3 · 撤权只针对 tool 权限：resource grant 仍在",
+      "expected": "true",
+      "actual": "true",
+      "ok": true
+    },
+    {
+      "name": "R1.4 · 使用旧批准（真实 UI Approve）",
+      "expected": "ok",
+      "actual": "ok",
+      "ok": true
+    },
+    {
+      "name": "R1.5 · 撤权后旧批准不得执行：call 终态 BLOCKED",
+      "expected": "BLOCKED",
+      "actual": "BLOCKED",
+      "ok": true
+    },
+    {
+      "name": "R1.6 · call error_code = SIDE_EFFECT_AUTHORIZATION_REVOKED",
+      "expected": "SIDE_EFFECT_AUTHORIZATION_REVOKED",
+      "actual": "SIDE_EFFECT_AUTHORIZATION_REVOKED",
+      "ok": true
+    },
+    {
+      "name": "R1.7 · 0 mutation（resource 未 trashed）",
+      "expected": "false",
+      "actual": "false",
+      "ok": true
+    },
+    {
+      "name": "R1.8 · 0 lease",
+      "expected": "0",
+      "actual": "0",
+      "ok": true
+    },
+    {
+      "name": "R1.9 · 0 新 executor（preflight 在 spawn 之前 fail closed）",
+      "expected": "数量不变",
+      "actual": "3→3",
+      "ok": true
+    },
+    {
+      "name": "R1.10 · Task 非 SUCCEEDED 且终态 + AUTO_RETRY=0（1 条 call）",
+      "expected": "终态非 SUCCEEDED + calls=1",
+      "actual": "BLOCKED/calls=1",
+      "ok": true
+    },
+    {
+      "name": "R1.11 · 场景结束后重新授予 tool 权限（恢复后续场景前置）",
+      "expected": "ok=true",
+      "actual": "{\"ok\":true}",
+      "ok": true
+    },
+    {
+      "name": "R2.1 · refA 的 trash 到 AWAITING_APPROVAL（真实 UI）",
+      "expected": "AWAITING_APPROVAL + UI 可见",
+      "actual": "AWAITING_APPROVAL/ui=true",
+      "ok": true
+    },
+    {
+      "name": "R2.2 · 批准并执行 refA 的真实 WRITE",
+      "expected": "ok",
+      "actual": "ok",
+      "ok": true
+    },
+    {
+      "name": "R2.3 · refA SUCCEEDED 且 trashed（撤权前已有真实副作用）",
+      "expected": "SUCCEEDED + trashedA=true",
+      "actual": "SUCCEEDED/trashedA=true",
+      "ok": true
+    },
+    {
+      "name": "R2.4 · refB 的 trash 到 AWAITING_APPROVAL（撤权同步点）",
+      "expected": "AWAITING_APPROVAL + UI 可见",
+      "actual": "AWAITING_APPROVAL/ui=true",
+      "ok": true
+    },
+    {
+      "name": "R2.5 · 任务进行中经产品 governance API 撤权（changed=true）",
+      "expected": "ok=true, changed=true",
+      "actual": "{\"ok\":true,\"changed\":true,\"reasonCode\":\"ALLOW\"}",
+      "ok": true
+    },
+    {
+      "name": "R2.6 · 已发生副作用保留：refA trashed=true（不宣称撤权回滚）",
+      "expected": "true",
+      "actual": "true",
+      "ok": true
+    },
+    {
+      "name": "R2.7 · 使用旧批准（真实 UI Approve refB）",
+      "expected": "ok",
+      "actual": "ok",
+      "ok": true
+    },
+    {
+      "name": "R2.8 · refB 未 trashed（撤权后 fail closed，0 mutation）",
+      "expected": "false",
+      "actual": "false",
+      "ok": true
+    },
+    {
+      "name": "R2.9 · 第二个 call 终态 BLOCKED + 0 lease + 0 新 executor",
+      "expected": "BLOCKED + 0 lease + 0 新 executor",
+      "actual": "BLOCKED/leases=0/exec=4→4",
+      "ok": true
+    },
+    {
+      "name": "R2.10 · 无自动重试：任务只有 2 条 call（refA/refB 各 1）",
+      "expected": "2",
+      "actual": "2",
+      "ok": true
+    },
+    {
+      "name": "R2.11 · Task/Step BLOCKED + Harness run 停止（不是 RUNNING）",
+      "expected": "BLOCKED/BLOCKED/非 RUNNING",
+      "actual": "BLOCKED/step=BLOCKED/run=BLOCKED",
+      "ok": true
+    },
+    {
+      "name": "R2.12 · UI 最终 BLOCKED 且 Run 复位（busy=false）",
+      "expected": "BLOCKED + run enabled",
+      "actual": "BLOCKED",
+      "ok": true
+    },
+    {
+      "name": "I1 · DB 0 capability / [REDACTED] / path 泄漏",
+      "expected": null,
+      "actual": "[]",
+      "ok": true
+    },
+    {
+      "name": "I2 · Renderer console error = 0",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "name": "I3 · main uncaught / unhandled = 0",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    },
+    {
+      "name": "I4 · executor evidence 0 绝对路径 / capability / [REDACTED]",
+      "expected": null,
+      "actual": "",
+      "ok": true
+    }
+  ],
+  "providerRequests": 5,
+  "at": "2026-09-17T02:12:59.724Z",
+  "artifactSha256Coverage": "sha256 of canonical JSON (2-space indent) excluding the artifactSha256 field",
+  "artifactSha256": "fb1b8b28dbeed8bda0045df78fd39dcb0fb84a1d51905260fc7b97b0fe26d3ca"
+}

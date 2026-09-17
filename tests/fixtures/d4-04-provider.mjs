@@ -8,24 +8,33 @@ import http from "node:http";
 
 const FINAL_TEXT = "OPENARC_VERTICAL_SMOKE_OK";
 
-function planFor(mode) {
+function planFor(mode, resourceRefs = [], followSeen = false) {
+  const refs = Array.isArray(resourceRefs) ? resourceRefs : (resourceRefs == null ? [] : [resourceRefs]);
   const search = { name: "resource_search", args: () => ({ query: "Vertical Smoke Resource", limit: 5 }) };
-  const read = { name: "resource_read_metadata", args: (ref) => ({ resourceRef: ref }) };
-  const trash = { name: "resource_trash", args: (ref) => ({ resourceRef: ref }) };
+  const read = { name: "resource_read_metadata", args: () => ({ resourceRef: refs[0] ?? null }) };
+  const trash = (ref) => ({ name: "resource_trash", args: () => ({ resourceRef: ref ?? null }) });
   if (mode === "read") return [search, read];
-  if (mode === "write" || mode === "deny" || mode === "cancel" || mode === "unknown") return [search, trash];
+  // revoke2：第二次 trash 只在 A 的 verified result 回给 Harness 之后才发出，
+  // 保证"先完成 refA 真实 WRITE，再对 refB 等待批准"的顺序。
+  if (mode === "revoke2") return followSeen ? [search, trash(refs[0]), trash(refs[1])] : [search, trash(refs[0])];
+  if (mode === "write" || mode === "deny" || mode === "cancel" || mode === "unknown") return [search, trash(refs[0])];
   return [search, read];
 }
 
 export async function startD4Provider() {
-  const state = { requests: 0, mode: "read", resourceRef: null, toolCalls: [], names: [], authHeaders: [], history: [] };
+  const state = { requests: 0, mode: "read", resourceRef: null, resourceRefs: [], toolCalls: [], names: [], authHeaders: [], history: [] };
   const server = http.createServer((req, res) => {
     const send = (code, obj) => { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(obj)); };
     let raw = "";
     req.on("data", (d) => (raw += d));
     req.on("end", () => {
       if (req.method === "POST" && req.url === "/__plan") {
-        try { const b = JSON.parse(raw || "{}"); if (typeof b.mode === "string") state.mode = b.mode; if (typeof b.resourceRef === "string") state.resourceRef = b.resourceRef; } catch { /* ignore */ }
+        try {
+          const b = JSON.parse(raw || "{}");
+          if (typeof b.mode === "string") state.mode = b.mode;
+          if (typeof b.resourceRef === "string") { state.resourceRef = b.resourceRef; state.resourceRefs = [b.resourceRef]; }
+          if (Array.isArray(b.resourceRefs)) { state.resourceRefs = b.resourceRefs.filter((r) => typeof r === "string"); state.resourceRef = state.resourceRefs[0] || null; }
+        } catch { /* ignore */ }
         state.requests = 0; state.toolCalls = []; state.names = [];
         return send(200, { ok: true });
       }
@@ -37,13 +46,20 @@ export async function startD4Provider() {
         const names = [];
         for (const m of msgs) if (m && Array.isArray(m.tool_calls)) for (const tc of m.tool_calls) if (tc && tc.function && tc.function.name) names.push(String(tc.function.name));
         state.names = names.slice();
-        state.history.push({ mode: state.mode, n: names.length, names: names.slice() });
-        const plan = planFor(state.mode);
+        const isFollow = (m) => {
+          if (!m) return false;
+          if (typeof m.content === "string") return m.content.includes("OpenArc verified side-effect result");
+          if (Array.isArray(m.content)) return m.content.some((p) => p && typeof p.text === "string" && p.text.includes("OpenArc verified side-effect result"));
+          return false;
+        };
+        const followSeen = msgs.some(isFollow);
+        state.history.push({ mode: state.mode, n: names.length, names: names.slice(), followSeen });
+        const plan = planFor(state.mode, state.resourceRefs.length ? state.resourceRefs : state.resourceRef, followSeen);
         const usage = { prompt_tokens: 11 * state.requests, completion_tokens: 5, total_tokens: 11 * state.requests + 5 };
         if (names.length < plan.length) {
           const step = plan[names.length];
           state.toolCalls.push(step.name);
-          return send(200, { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "call_" + state.toolCalls.length, type: "function", function: { name: step.name, arguments: JSON.stringify(step.args(state.resourceRef)) } }] }, finish_reason: "tool_calls" }], usage });
+          return send(200, { choices: [{ message: { role: "assistant", content: null, tool_calls: [{ id: "call_" + state.toolCalls.length, type: "function", function: { name: step.name, arguments: JSON.stringify(step.args()) } }] }, finish_reason: "tool_calls" }], usage });
         }
         return send(200, { choices: [{ message: { role: "assistant", content: FINAL_TEXT } }], usage });
       }

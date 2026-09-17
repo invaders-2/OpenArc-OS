@@ -1,10 +1,14 @@
 /**
  * D4-04 Production Vertical Smoke 启动器（真实 Electron + deterministic provider edge）。
  *
- * 主证据来自 probes/ 里真实 Renderer UI 动作（Run / Approve / Deny / Cancel / Reload），
+ * 主证据来自 probes/ 里真实 Renderer UI 动作（Run / Approve / Deny / Cancel / Reload / 撤权），
  * 不是直接调用 service。
+ *
+ * Traceability：artifact（ignored）+ docs/D4-04-GATE-EVIDENCE.json（tracked）记录
+ * testedCommit / workspaceState / command / env / 逐条脱敏 checks / artifactSha256。
  */
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
+import crypto from "node:crypto";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -19,6 +23,18 @@ const probeDir = path.join(here, "fixtures", "d4-04-probe");
 const extraArgs = (process.env.ELECTRON_EXTRA_ARGS || "").split(" ").filter(Boolean);
 
 if (!fs.existsSync(path.join(ROOT, "dist", "index.html"))) { console.error("缺少 dist/index.html —— 请先执行 npm run build"); process.exit(1); }
+
+const COMMAND = process.env.npm_lifecycle_event ? "npm run " + process.env.npm_lifecycle_event : "node tests/d4-04-smoke.mjs";
+const git = (args) => { try { return execFileSync("git", ["-C", ROOT, ...args], { encoding: "utf8" }).trim(); } catch { return null; } };
+
+/** 证据脱敏：删除绝对路径 / capability 前缀 / credential 形态。 */
+const SECRET_RE = [/\/Users\/[^\s"']*/g, /\/private\/[^\s"']*/g, /\/var\/folders\/[^\s"']*/g, /mpx_[A-Za-z0-9_-]+/g, /tpx_[A-Za-z0-9_-]+/g, /credential[^\s"',}\]]*/gi];
+function sanitize(value) {
+  if (typeof value === "string") { let s = value; for (const re of SECRET_RE) s = s.replace(re, "[REDACTED]"); return s; }
+  if (Array.isArray(value)) return value.map(sanitize);
+  if (value && typeof value === "object") { const out = {}; for (const [k, v] of Object.entries(value)) out[k] = sanitize(v); return out; }
+  return value;
+}
 
 const provider = await startD4Provider();
 const env = { ...process.env, OPENARC_D4_PROVIDER_URL: provider.baseUrl, OPENARC_IDENTITY_ADMIN: "1" };
@@ -45,13 +61,19 @@ const report = JSON.parse(m[1]);
 const failed = report.checks.filter((c) => !c.ok);
 const names = new Set(report.checks.map((c) => c.name));
 const passed = (n) => names.has(n) && report.checks.find((c) => c.name === n).ok;
+/** 一个场景的全部逐条 check 全 PASS（且至少有一条）。 */
+const groupPassed = (prefix) => { const items = report.checks.filter((c) => c.name.startsWith(prefix)); return items.length > 0 && items.every((c) => c.ok); };
 
-const gate = {
+let gate = {
   electronVersion: report.versions.electron,
   platform: report.versions.platform,
   arch: report.versions.arch,
   node: report.versions.node,
+  env: { electron: report.versions.electron, node: report.versions.node, platform: report.versions.platform, arch: report.versions.arch },
   commit: process.env.OPENARC_COMMIT || null,
+  testedCommit: git(["rev-parse", "HEAD"]),
+  workspaceState: git(["status", "--porcelain"]) || "",
+  command: COMMAND,
   officialDsh: true,
   dshVersion: "0.1.5-rc.2",
   acpVersion: "1.4.0",
@@ -65,6 +87,8 @@ const gate = {
   uiBusyReset: passed("C10 · Renderer Run 复位（busy=false）") && passed("D4 · Deny → SideEffectCall safe terminal + UI busy 复位") && passed("F7 · Renderer BLOCKED + Run 复位（busy=false）"),
   rendererSpoof: passed("G1 · Renderer 自报 actor/risk 被忽略（真实 session 决定）") && passed("G2 · 伪造 approvalRequestId → DENY（0 authority gain）") && passed("G3 · 伪造 actor 的真实 approve 仍走完整受控执行"),
   rendererReload: passed("H1 · Reload 后从 backend state 恢复 Task 结果"),
+  revokePendingApproval: groupPassed("R1."),
+  revokeMidTask: groupPassed("R2."),
   modelRequests: provider.state.requests,
   providerToolCalls: provider.state.toolCalls.slice(),
   readExecutions: report.stats.readExecutions || 0,
@@ -80,12 +104,26 @@ const gate = {
   rendererConsoleErrors: report.secrets.consoleErrors || 0,
   mainUnhandledErrors: report.secrets.mainErrors || 0,
   secretHits: report.secrets.secretHits || 0,
-  checks: { total: report.checks.length, pass: report.checks.length - failed.length, fail: failed.length },
+  checksSummary: { total: report.checks.length, pass: report.checks.length - failed.length, fail: failed.length },
+  checks: (report.checks || []).map((c) => ({ name: c.name, expected: c.expected == null ? null : c.expected, actual: c.actual == null ? (c.detail == null ? null : c.detail) : c.actual, ok: c.ok === true })),
   providerRequests: provider.state.requests,
   at: new Date().toISOString(),
 };
-fs.mkdirSync(path.join(ROOT, "artifacts", "d4-04"), { recursive: true });
-fs.writeFileSync(path.join(ROOT, "artifacts", "d4-04", "vertical-smoke-gate.json"), JSON.stringify(gate, null, 2));
+
+// artifact 内容先脱敏；artifactSha256 覆盖「去掉该字段本身」的 canonical JSON（2 空格缩进）。
+gate = sanitize(gate);
+gate.artifactSha256Coverage = "sha256 of canonical JSON (2-space indent) excluding the artifactSha256 field";
+const canonicalForHash = JSON.stringify(gate, null, 2);
+gate.artifactSha256 = crypto.createHash("sha256").update(canonicalForHash).digest("hex");
+const gateText = JSON.stringify(gate, null, 2);
+
+const artifactDir = path.join(ROOT, "artifacts", "d4-04");
+fs.mkdirSync(artifactDir, { recursive: true });
+fs.writeFileSync(path.join(artifactDir, "vertical-smoke-gate.json"), gateText);
+// artifacts/ 被 ignore：同一份脱敏证据另写一份纳入版本管理。
+const docsDir = path.join(ROOT, "docs");
+fs.mkdirSync(docsDir, { recursive: true });
+fs.writeFileSync(path.join(docsDir, "D4-04-GATE-EVIDENCE.json"), gateText);
 
 console.log("\n" + (report.checks.length - failed.length) + "/" + report.checks.length + " vertical smoke checks passed");
 if (report.errors.length) console.log("PROBE ERRORS:\n" + report.errors.join("\n").slice(0, 2000));
@@ -93,5 +131,5 @@ if (failed.length) console.log("FAILED: " + failed.map((f) => f.name + " (" + f.
 if (stderr.trim()) console.log("stderr:\n" + stderr.trim().slice(0, 1200));
 console.log("GATE: " + JSON.stringify(gate));
 
-const gateOk = failed.length === 0 && exitCode === 0 && gate.productRuntimeBoot && gate.readSmoke && gate.writeApproveSmoke && gate.executorReady && gate.writeDenySmoke && gate.cancelSmoke && gate.unknownEffectSmoke && gate.uiBusyReset && gate.rendererSpoof && gate.rendererReload && gate.rendererConsoleErrors === 0 && gate.mainUnhandledErrors === 0 && gate.secretHits === 0;
+const gateOk = failed.length === 0 && exitCode === 0 && gate.productRuntimeBoot && gate.readSmoke && gate.writeApproveSmoke && gate.executorReady && gate.writeDenySmoke && gate.cancelSmoke && gate.unknownEffectSmoke && gate.uiBusyReset && gate.rendererSpoof && gate.rendererReload && gate.revokePendingApproval && gate.revokeMidTask && gate.rendererConsoleErrors === 0 && gate.mainUnhandledErrors === 0 && gate.secretHits === 0;
 process.exit(gateOk ? 0 : 1);

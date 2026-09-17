@@ -223,6 +223,15 @@ class SideEffectRuntime {
     const call = this.store.callById(callId);
     if (!call) return { ok: false, error: SIDE_EFFECT_ERROR.CALL_NOT_FOUND };
     if (call.status === CALL_STATUS.SUCCEEDED) return { ok: true, duplicate: true, call, safeResult: safeToolResult(call) };
+    // D4-04 撤权可核查：spawn executor 之前先做实时授权 preflight。
+    // 撤权必须在这里 fail closed，而不是先起 executor、先建 lease 再在 executor 内部发现。
+    const preflight = this.authority.preflightAuthorization({ callId });
+    if (!preflight || preflight.ok !== true) {
+      const reason = (preflight && preflight.error) || SIDE_EFFECT_ERROR.AUTHORIZATION_REVOKED;
+      const afterPreflight = this.store.callById(callId);
+      if (afterPreflight && !CALL_TERMINAL.includes(String(afterPreflight.status))) this.#blockPending(callId, reason);
+      return { ok: false, error: reason, call: this.store.callById(callId) };
+    }
     const box = this.supervisor.spawnExecutor({
       callId, holderId,
       dbPath: this.dbPath, storeRoot: this.storeRoot,
