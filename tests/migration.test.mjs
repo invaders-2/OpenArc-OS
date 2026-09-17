@@ -40,7 +40,7 @@ async function seedV1(dbPath) {
 }
 
 test("schema 版本已推进到 v16（D4-06 Closure 在 v15 之上新增 task_budgets 任务级账本）", () => {
-  assert.equal(SCHEMA_VERSION, 16);
+  assert.equal(SCHEMA_VERSION, 17);
 });
 
 test("全新数据库直接建到 v8，identity login 成立", async () => {
@@ -213,7 +213,7 @@ test("v14 → v15：重建 task_verifications 保留旧 PASS 行，新列可用�
     seed.close();
 
     const store = new IdentityStore({ path: dbPath }).open();
-    assert.equal(store.schemaVersion, 16);
+    assert.equal(store.schemaVersion, SCHEMA_VERSION);
     const rows = store.connection.prepare("SELECT * FROM task_verifications").all();
     assert.equal(rows.length, 1, "旧 PASS 行必须保留");
     assert.equal(rows[0].verification_id, "ver_v14");
@@ -253,7 +253,7 @@ test("v15 → v16：新增 task_budgets 任务级账本表，保留旧任务数�
     seed.close();
 
     const store = new IdentityStore({ path: dbPath }).open();
-    assert.equal(store.schemaVersion, 16);
+    assert.equal(store.schemaVersion, SCHEMA_VERSION);
     assert.ok(hasTable(store.connection, "task_budgets"), "v16 必须建立 task_budgets");
     assert.equal(store.connection.prepare("SELECT * FROM tasks WHERE task_id = 'task_v15'").all().length, 1, "旧任务数据保留");
 

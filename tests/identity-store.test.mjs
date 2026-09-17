@@ -13,7 +13,7 @@ import os from "node:os";
 import path from "node:path";
 
 const require = createRequire(import.meta.url);
-const { IdentityStore, SCHEMA_VERSION } = require("../electron/identity-store.cjs");
+const { IdentityStore, SCHEMA_VERSION, SCHEMA_SQL, openDatabase } = require("../electron/identity-store.cjs");
 const { IdentityService } = require("../electron/identity-service.cjs");
 const { IdentityLogger } = require("../electron/identity-log.cjs");
 const { SessionSecretStore, memoryBackend } = require("../electron/session-secret-store.cjs");
@@ -47,12 +47,14 @@ after(() => {
   for (const d of dirs) fs.rmSync(d, { recursive: true, force: true });
 });
 
-test("schema：第一版就有 user_version，且三张主表齐备", () => {
+test("schema：当前版本有 user_version 与 avatar_ref，且三张主表齐备", () => {
   const fx = fixture();
   assert.equal(fx.store.schemaVersion, SCHEMA_VERSION);
-  assert.equal(SCHEMA_VERSION >= 1, true);
+  assert.equal(SCHEMA_VERSION, 17);
   for (const t of ["installations", "users", "sessions"])
     assert.ok(fx.store.db.prepare(`SELECT 1 FROM ${t}`).get !== undefined);
+  const userCols = fx.store.db.prepare("PRAGMA table_info(users)").all().map((c) => c.name);
+  assert.ok(userCols.includes("avatar_ref"), "当前 users 必须带 avatar_ref");
 });
 
 test("初始化：一次性、原子、创建 admin + root team", async () => {
@@ -179,4 +181,152 @@ test("重置安装需要显式确认，且无从 UI 静默触发的路径", asyn
   assert.equal((await fx.service.dispatch({ type: "identity/reset-installation", confirm: "delete" })).error, "INVALID_INPUT");
   assert.equal((await fx.service.dispatch({ type: "identity/reset-installation", confirm: "DELETE-ALL-IDENTITY-DATA" })).ok, true);
   assert.equal(fx.store.status().initialized, false);
+});
+
+test("迁移：真实的 v1 库升级到当前版本，补齐 avatar_ref 且不丢数据", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "oa-d3-test-"));
+  dirs.push(dir);
+  const dbPath = path.join(dir, "identity.db");
+
+  // 用当前 SCHEMA_SQL 去掉 avatar_ref 行，得到一个真实 v1 形状的库（不是空库）
+  const v1Sql = SCHEMA_SQL.replace(/^\s*avatar_ref\s+TEXT[^\n]*\n/m, "");
+  assert.ok(!v1Sql.includes("avatar_ref"), "fixture 必须是 v1 形状");
+  const legacy = openDatabase(dbPath);
+  legacy.exec(v1Sql);
+  legacy.exec("PRAGMA user_version = 1");
+  legacy.exec("INSERT INTO installations (singleton, id, status, created_at, initialized_at) VALUES (1, 'inst_v1', 'READY', 1, 1)");
+  legacy.exec("INSERT INTO teams (id, name, root, created_at) VALUES ('team_v1', 'Primary', 1, 1)");
+  legacy.exec(
+    `INSERT INTO users (id, installation_id, team_id, identifier, display_name, role, status, auth_version,
+                         password_algo, password_params, password_salt, password_hash, password_version, created_at, updated_at)
+     VALUES ('usr_v1', 'inst_v1', 'team_v1', 'legacy@x', 'Legacy', 'ADMIN', 'ACTIVE', 1,
+             'scrypt', '{}', X'00', 'h', 1, 1, 1)`,
+  );
+  legacy.close();
+
+  const store = new IdentityStore({ path: dbPath }).open();
+  assert.equal(store.schemaVersion, SCHEMA_VERSION, "打开即升级到当前版本");
+  const cols = store.db.prepare("PRAGMA table_info(users)").all().map((c) => c.name);
+  assert.ok(cols.includes("avatar_ref"), "ALTER TABLE 必须真的加列");
+  const rows = store.allUsers();
+  assert.equal(rows.length, 1, "迁移不丢已有用户");
+  assert.equal(rows[0].display_name, "Legacy");
+  assert.equal(rows[0].avatar_ref, null, "老行新列为 NULL");
+
+  // 升级后的库可以正常改资料
+  assert.equal(store.updateProfile({ userId: "usr_v1", avatarRef: "preset:sun" }).ok, true);
+  assert.equal(store.userById("usr_v1").avatar_ref, "preset:sun");
+  store.close();
+});
+
+test("初始化：avatarRef 落库并在登录快照中读回；非法头像被拒且不建安装", async () => {
+  const fx = fixture();
+
+  // 非法头像在服务层就被拒，不能留下半个安装 / 半个用户
+  const bad = await fx.service.dispatch({
+    type: "identity/initialize",
+    identifier: "a@b.local",
+    password: PW,
+    displayName: "A",
+    avatarRef: "preset:nope",
+  });
+  assert.equal(bad.error, "INVALID_INPUT");
+  assert.equal(bad.type, "identity/initialize");
+  assert.equal(fx.store.status().initialized, false, "非法头像不得留下安装");
+  assert.equal(fx.store.userCount(), 0);
+
+  // 合法头像随初始化一次落库
+  const ok = await fx.service.dispatch({
+    type: "identity/initialize",
+    identifier: "a@b.local",
+    password: PW,
+    displayName: "A",
+    avatarRef: "preset:arc",
+  });
+  assert.equal(ok.ok, true);
+  assert.equal(fx.store.allUsers()[0].avatar_ref, "preset:arc", "初始化写入 users.avatar_ref");
+
+  // 登录快照读回同一头像
+  const login = await fx.service.dispatch({ type: "identity/login", identifier: "a@b.local", password: PW });
+  assert.equal(login.snapshot.avatarRef, "preset:arc", "快照必须反映落库的头像");
+
+  // 不提供 avatarRef → NULL
+  const fx2 = fixture();
+  await fx2.service.dispatch({ type: "identity/initialize", identifier: "c@d.local", password: PW, displayName: "C" });
+  assert.equal(fx2.store.allUsers()[0].avatar_ref, null, "未提供头像时落 NULL");
+});
+
+test("资料：store.updateProfile 落库，只在提供字段时更新", async () => {
+  const fx = fixture();
+  await fx.service.dispatch({ type: "identity/initialize", identifier: "a@b.local", password: PW, displayName: "A" });
+  const uid = fx.store.allUsers()[0].id;
+
+  const one = fx.store.updateProfile({ userId: uid, displayName: "Alice" });
+  assert.equal(one.ok, true);
+  assert.equal(fx.store.userById(uid).display_name, "Alice");
+  assert.equal(fx.store.userById(uid).avatar_ref, null, "未提供的 avatar 不动");
+
+  const two = fx.store.updateProfile({ userId: uid, avatarRef: "preset:arc" });
+  assert.equal(two.ok, true);
+  assert.equal(fx.store.userById(uid).display_name, "Alice", "未提供的 displayName 不动");
+  assert.equal(fx.store.userById(uid).avatar_ref, "preset:arc");
+
+  // avatarRef: null 是"清除头像"，与"未提供"不同
+  assert.equal(fx.store.updateProfile({ userId: uid, avatarRef: null }).ok, true);
+  assert.equal(fx.store.userById(uid).avatar_ref, null);
+
+  // 一项都没有 / 用户不存在 → INVALID_INPUT
+  assert.equal(fx.store.updateProfile({ userId: uid }).error, "INVALID_INPUT");
+  assert.equal(fx.store.updateProfile({ userId: "usr_missing", displayName: "X" }).error, "INVALID_INPUT");
+});
+
+test("资料：identity/update-profile 免密码、只认活跃 session，且不撤销 session", async () => {
+  const fx = fixture();
+  await fx.service.dispatch({ type: "identity/initialize", identifier: "a@b.local", password: PW, displayName: "A" });
+  const ref = (await fx.service.dispatch({ type: "identity/login", identifier: "a@b.local", password: PW })).snapshot.sessionRef;
+  const uid = fx.store.allUsers()[0].id;
+  const events = [];
+  fx.service.onEvent((e) => events.push(e));
+
+  // 非法头像 → INVALID_INPUT（全程不需要任何口令）
+  assert.equal((await fx.service.dispatch({ type: "identity/update-profile", sessionRef: ref, avatarRef: "preset:nope" })).error, "INVALID_INPUT");
+
+  // 免密码：只给 sessionRef 与要改的字段即可成功，snapshot 是更新后的值
+  const ok = await fx.service.dispatch({
+    type: "identity/update-profile",
+    sessionRef: ref,
+    displayName: "Alice",
+    avatarRef: "preset:orbit",
+  });
+  assert.equal(ok.ok, true);
+  assert.equal(ok.snapshot.displayName, "Alice");
+  assert.equal(ok.snapshot.avatarRef, "preset:orbit");
+  assert.equal(fx.store.userById(uid).display_name, "Alice");
+  assert.equal(fx.store.userById(uid).avatar_ref, "preset:orbit");
+  assert.ok(events.some((e) => e.event === "identity/profile-updated"), "应发出 PROFILE_UPDATED 事件");
+
+  // 不撤销 session、不要求重新登录
+  assert.equal(fx.store.sessionByRef(ref).revoked_at, null);
+  assert.equal((await fx.service.dispatch({ type: "identity/validate", sessionRef: ref })).ok, true);
+});
+
+test("资料：无 session 的 update-profile 一律拒绝，identifier 不再是旁路", async () => {
+  const fx = fixture();
+  await fx.service.dispatch({ type: "identity/initialize", identifier: "a@b.local", password: PW, displayName: "A" });
+  const uid = fx.store.allUsers()[0].id;
+
+  // 从未登录：就算带上正确的 identifier 也不能改 —— identifier 参数已被彻底忽略
+  const noSession = await fx.service.dispatch({ type: "identity/update-profile", identifier: "a@b.local", displayName: "FromLogin" });
+  assert.equal(noSession.error, "SESSION_REVOKED");
+  assert.equal(fx.store.userById(uid).display_name, "A", "无 session 时不得有任何写入");
+  assert.ok(
+    fx.store.auditLog().some((r) => r.event === "update-profile" && r.result === "DENY" && r.error_code === "SESSION_REVOKED"),
+    "无 session 拒绝也必须留 DENY 审计",
+  );
+
+  // 已登出：旧 ref 也不再可用
+  const ref = (await fx.service.dispatch({ type: "identity/login", identifier: "a@b.local", password: PW })).snapshot.sessionRef;
+  await fx.service.dispatch({ type: "identity/logout", sessionRef: ref });
+  assert.equal((await fx.service.dispatch({ type: "identity/update-profile", sessionRef: ref, displayName: "X" })).error, "SESSION_REVOKED");
+  assert.equal(fx.store.userById(uid).display_name, "A");
 });

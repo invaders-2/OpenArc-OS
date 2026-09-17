@@ -50,8 +50,9 @@ const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domai
  * D3-01 = v1（identity）；D3-02 = v2（object authorization）；D3-03 = v3（device）；D3-04A = v4（resource store）。
  * 迁移按版本逐级前进，每一级各自是一个原子事务：任何一级失败只回滚该级，
  * 不会留下"user_version 已升级但表不完整"的半状态（§55）。
+ * v17：users 增加 avatar_ref TEXT（可空），承载显示名之外的资料字段。
  */
-const SCHEMA_VERSION = 16;
+const SCHEMA_VERSION = 17;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -89,6 +90,7 @@ CREATE TABLE users (
   display_name      TEXT    NOT NULL,
   role              TEXT    NOT NULL CHECK (role IN ('ADMIN','MEMBER')),
   status            TEXT    NOT NULL CHECK (status IN ('ACTIVE','DISABLED')),
+  avatar_ref        TEXT,
   auth_version      INTEGER NOT NULL DEFAULT 1,
   password_algo     TEXT    NOT NULL,
   password_params   TEXT    NOT NULL,
@@ -1131,6 +1133,15 @@ const MIGRATIONS = Object.freeze([
   { version: 14, sql: SCHEMA_V14_SQL },
   { version: 15, sql: SCHEMA_V15_SQL },
   { version: 16, sql: SCHEMA_V16_SQL },
+  {
+    version: 17,
+    // avatar_ref 是 UI 线新增字段：空库由 SCHEMA_SQL 直接建齐，老库（v1..v16）在这里补列。
+    // SQLite 没有 ADD COLUMN IF NOT EXISTS，所以先查 PRAGMA 再决定，保证任何版本都幂等。
+    run: (db) => {
+      const cols = db.prepare("PRAGMA table_info(users)").all();
+      if (!cols.some((c) => c.name === "avatar_ref")) db.exec("ALTER TABLE users ADD COLUMN avatar_ref TEXT");
+    },
+  },
 ]);
 
 const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000; // 12h 绝对上限
@@ -1211,8 +1222,9 @@ class IdentityStore {
   }
 
   /**
-   * 迁移。**第一版就把迁移框架立起来**（§29）：
-   * 现在只有一个 migration，但"以后补版本号"的债从今天起就不存在了。
+   * 迁移。**每一步都真的执行**，不是"空库建表"冒充升级（§29）：
+   * 每一级是一个独立的原子事务，失败只回滚该级，不会留下"user_version 升了、表没补"的半状态。
+   * 迁移条目可以是 sql（整段 DDL）或 run(db)（需要条件判断时用，例如 v17 的 avatar_ref）。
    */
   #migrate() {
     const current = this.schemaVersion;
@@ -1222,7 +1234,8 @@ class IdentityStore {
     for (const migration of MIGRATIONS) {
       if (migration.version <= current) continue;
       this.transactSync(() => {
-        this.db.exec(migration.sql);
+        if (typeof migration.run === "function") migration.run(this.db);
+        else this.db.exec(migration.sql);
         // 失败注入点：测试用它制造"DDL 已执行、版本尚未 bump"的崩溃，验证整级回滚。
         if (this.hooks.onMigration) this.hooks.onMigration(migration.version, this.db);
         // user_version 不能用占位符，只能整句拼；值是本文件常量，无注入面。
@@ -1412,7 +1425,7 @@ class IdentityStore {
    * `INITIALIZING` **永不落盘**：它只是事务内的一个瞬时值——
    * 事务一回滚，这个状态连同半个用户一起消失（§27）。
    */
-  async initialize({ identifier, password, displayName, source = "local" } = {}) {
+  async initialize({ identifier, password, displayName, avatarRef = null, source = "local" } = {}) {
     const started = this.clock();
     const idCheck = domain.validateIdentifier(identifier);
     if (!idCheck.ok) {
@@ -1471,10 +1484,10 @@ class IdentityStore {
           const userId = domain.newId("USER");
           this.db
             .prepare(
-              `INSERT INTO users (id, installation_id, team_id, identifier, display_name, role, status,
+              `INSERT INTO users (id, installation_id, team_id, identifier, display_name, role, status, avatar_ref,
                                   auth_version, password_algo, password_params, password_salt, password_hash,
                                   password_version, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, 'ADMIN', 'ACTIVE', 1, ?, ?, ?, ?, 1, ?, ?)`,
+               VALUES (?, ?, ?, ?, ?, 'ADMIN', 'ACTIVE', ?, 1, ?, ?, ?, ?, 1, ?, ?)`,
             )
             .run(
               userId,
@@ -1482,6 +1495,7 @@ class IdentityStore {
               teamId,
               idCheck.identifier,
               nameCheck.displayName,
+              avatarRef ?? null,
               verifier.algo,
               JSON.stringify(verifier.params),
               verifier.salt,
@@ -2118,6 +2132,49 @@ class IdentityStore {
       durationMs: this.clock() - started,
     });
     return domain.ok({ userId: user.id, authVersion: nextVersion, revokedSessions: this.sessionsOf(user.id).length });
+  }
+
+  // -------------------------------------------------------------------------
+  // 资料（displayName / avatarRef）
+  // -------------------------------------------------------------------------
+
+  /**
+   * 更新资料。
+   *
+   * 只在字段真的提供时才更新：`undefined` 表示"这次不改这一项"，
+   * `avatarRef: null` 表示"清除头像"——两者语义不同，不能混。
+   * 一项都没有 → INVALID_INPUT，避免空更新把 updated_at 白推一格。
+   *
+   * 鉴权不在这里：service 层已确认调用方持有活跃 session，
+   * store 只负责落库与审计，避免把"认证"和"存储"搅成一件事。
+   */
+  updateProfile({ userId, displayName, avatarRef } = {}) {
+    const started = this.clock();
+    const user = this.userById(userId);
+    if (!user) {
+      this.audit("update-profile", { result: "DENY", errorCode: ERROR.INVALID_INPUT });
+      return domain.fail(ERROR.INVALID_INPUT, "user-missing");
+    }
+    const sets = [];
+    const args = [];
+    if (displayName !== undefined) {
+      sets.push("display_name = ?");
+      args.push(displayName);
+    }
+    if (avatarRef !== undefined) {
+      sets.push("avatar_ref = ?");
+      args.push(avatarRef);
+    }
+    if (sets.length === 0) {
+      this.audit("update-profile", { userId: user.id, result: "DENY", errorCode: ERROR.INVALID_INPUT });
+      return domain.fail(ERROR.INVALID_INPUT, "nothing-to-update");
+    }
+    sets.push("updated_at = ?");
+    args.push(this.clock());
+    args.push(user.id);
+    this.db.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).run(...args);
+    this.audit("update-profile", { userId: user.id, result: "OK", durationMs: this.clock() - started });
+    return domain.ok({ user: this.userById(user.id) });
   }
 
   // -------------------------------------------------------------------------

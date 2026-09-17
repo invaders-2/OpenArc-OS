@@ -52,6 +52,13 @@ export function useIdentity() {
   const [installation, setInstallation] = useState<InstallationStatus | null>(null);
   const [error, setError] = useState<{ code: string; detail?: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  /**
+   * 启动询问超时兜底：主进程若因为系统钥匙串授权而长时间不返回，
+   * 渲染层**不能**永远停在 BootSurface 上（用户看到的就是"整个软件空白"）。
+   * 超时后给一个可重试的界面。
+   */
+  const [bootError, setBootError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const alive = useRef(true);
 
   useEffect(() => {
@@ -109,29 +116,38 @@ export function useIdentity() {
   useEffect(() => {
     if (!bridge) return;
     let cancelled = false;
+    setBootError(null);
+    const timer = window.setTimeout(() => {
+      if (!cancelled) setBootError("本机身份确认超时：系统钥匙串可能在等待你的授权。授权后点「重试」。");
+    }, 10000);
     (async () => {
-      const st = await send({ type: "identity/status" });
-      if (cancelled) return;
-      if (st.ok && st.initialized === false) {
-        setInstallation(st.installation as InstallationStatus);
-        setPhase("uninitialized");
-        return;
-      }
-      if (st.ok) setInstallation(st.installation as InstallationStatus);
-      const restore = await send({ type: "identity/restore" });
-      if (cancelled) return;
-      if (restore.ok && restore.snapshot) {
-        setSnapshot(restore.snapshot);
-        setPhase(restore.snapshot.locked ? "locked" : "ready");
-      } else {
-        setSnapshot(EMPTY);
-        setPhase("unauthenticated");
+      try {
+        const st = await send({ type: "identity/status" });
+        if (cancelled) return;
+        if (st.ok && st.initialized === false) {
+          setInstallation(st.installation as InstallationStatus);
+          setPhase("uninitialized");
+          return;
+        }
+        if (st.ok) setInstallation(st.installation as InstallationStatus);
+        const restore = await send({ type: "identity/restore" });
+        if (cancelled) return;
+        if (restore.ok && restore.snapshot) {
+          setSnapshot(restore.snapshot);
+          setPhase(restore.snapshot.locked ? "locked" : "ready");
+        } else {
+          setSnapshot(EMPTY);
+          setPhase("unauthenticated");
+        }
+      } finally {
+        window.clearTimeout(timer);
       }
     })();
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
-  }, [bridge, send]);
+  }, [bridge, send, attempt]);
 
   /** 主进程推来的身份事件（§24）：登出 / 锁定 / 解锁 / 会话变更。 */
   useEffect(() => {
@@ -179,8 +195,15 @@ export function useIdentity() {
       installation,
       error,
       busy,
+      bootError,
       available: !!bridge,
-      initialize: (input: { identifier: string; password: string; displayName: string }) =>
+      /** 超时后重来一次启动询问（不再停在空白启动态）。 */
+      retry: () => {
+        setBootError(null);
+        setPhase("checking");
+        setAttempt((n) => n + 1);
+      },
+      initialize: (input: { identifier: string; password: string; displayName: string; avatarRef?: string }) =>
         run({ type: "identity/initialize", ...input }, "unauthenticated"),
       login: (input: { identifier: string; password: string }) => run({ type: "identity/login", ...input }, "unauthenticated"),
       logout: () => run({ type: "identity/logout" }, "unauthenticated"),
@@ -188,8 +211,15 @@ export function useIdentity() {
       unlock: (password: string) => run({ type: "identity/unlock", password }, "ready"),
       changePassword: (currentPassword: string, newPassword: string) =>
         run({ type: "identity/change-password", currentPassword, newPassword }, "unauthenticated"),
+      /**
+       * 改资料（显示名 / 头像）。**免密码，但必须有活跃 session**：
+       * 服务层不再接受 identifier，也不再要求口令，所以这条命令只能从
+       * 已登录（或锁定但 session 仍有效）的状态发起，不会把锁屏推回桌面。
+       */
+      updateProfile: (input: { displayName?: string; avatarRef?: string }) =>
+        run({ type: "identity/update-profile", ...input }, phase === "locked" ? "locked" : "ready"),
     }),
-    [phase, snapshot, installation, error, busy, bridge, run],
+    [phase, snapshot, installation, error, busy, bootError, bridge, run],
   );
 
   return api;

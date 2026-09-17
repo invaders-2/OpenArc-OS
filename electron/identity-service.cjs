@@ -19,6 +19,7 @@
 
 const domain = require("./identity-domain.cjs");
 const { IdentityStore } = require("./identity-store.cjs");
+const passwords = require("./password.cjs");
 
 const { ERROR, EVENT } = domain;
 
@@ -130,6 +131,9 @@ class IdentityService {
       case "identity/change-password":
         result = await this.#changePassword(command);
         break;
+      case "identity/update-profile":
+        result = await this.#updateProfile(command);
+        break;
       case "identity/validate":
         result = this.#validate(command);
         break;
@@ -166,8 +170,17 @@ class IdentityService {
     });
   }
 
-  async #initialize({ identifier, password, displayName }) {
-    const res = await this.store.initialize({ identifier, password, displayName });
+  async #initialize({ identifier, password, displayName, avatarRef }) {
+    let nextAvatarRef;
+    if (avatarRef !== undefined) {
+      const check = domain.validateAvatarRef(avatarRef);
+      if (!check.ok) {
+        this.store.audit("initialize", { result: "DENY", errorCode: check.error });
+        return { ...check, type: "identity/initialize" };
+      }
+      nextAvatarRef = check.avatarRef;
+    }
+    const res = await this.store.initialize({ identifier, password, displayName, avatarRef: nextAvatarRef });
     if (!res.ok) return { ...res, type: "identity/initialize" };
     // 初始化**不自动登录**：初始化与登录是两条独立命令，
     // 自动登录会把"初始口令是否正确"这件最重要的事跳过。
@@ -311,6 +324,60 @@ class IdentityService {
       revokedAllSessions: true,
       requiresLogin: true,
     });
+  }
+
+  /**
+   * 资料更新（displayName / avatarRef）。
+   *
+   * **只接受活跃 session**：资料不是凭据变更，不撤销 session、不要求重新登录，
+   * 所以目标用户只能由已认证的 session 定位。**没有 identifier 查找路径** ——
+   * 一旦去掉口令再认证，那条路径就等于"任何人无需认证即可改资料"。
+   * 拿不到 session 一律 SESSION_REVOKED，不静默、不降级。
+   */
+  async #updateProfile({ sessionRef, displayName, avatarRef }) {
+    const ref = sessionRef || this.current;
+    if (!ref) {
+      this.store.audit("update-profile", { result: "DENY", errorCode: ERROR.SESSION_REVOKED });
+      return domain.fail(ERROR.SESSION_REVOKED);
+    }
+    const res = this.store.validateSession(ref, { sensitive: false });
+    if (!res.ok) {
+      this.store.audit("update-profile", { sessionRef: ref, result: "DENY", errorCode: res.error });
+      return { ...res, type: "identity/update-profile" };
+    }
+    const { user, session } = res;
+
+    let nextDisplayName;
+    if (displayName !== undefined && displayName !== null) {
+      const check = domain.validateDisplayName(displayName);
+      if (!check.ok) {
+        this.store.audit("update-profile", { userId: user.id, sessionRef: session.ref, result: "DENY", errorCode: check.error });
+        return { ...check, type: "identity/update-profile" };
+      }
+      nextDisplayName = check.displayName;
+    }
+    let nextAvatarRef;
+    if (avatarRef !== undefined) {
+      const check = domain.validateAvatarRef(avatarRef);
+      if (!check.ok) {
+        this.store.audit("update-profile", { userId: user.id, sessionRef: session.ref, result: "DENY", errorCode: check.error });
+        return { ...check, type: "identity/update-profile" };
+      }
+      nextAvatarRef = check.avatarRef;
+    }
+
+    const updated = this.store.updateProfile({ userId: user.id, displayName: nextDisplayName, avatarRef: nextAvatarRef });
+    if (!updated.ok) return { ...updated, type: "identity/update-profile" };
+
+    // 重新从 store 读，保证下发的快照是落库后的值，而不是内存里的旧行。
+    const freshUser = this.store.userById(user.id);
+    const snapshot = domain.identitySnapshot({
+      user: freshUser,
+      session: this.store.sessionByRef(session.ref),
+      initialized: true,
+    });
+    this.#emit(EVENT.PROFILE_UPDATED, { userId: freshUser.id, snapshot });
+    return domain.ok({ type: "identity/update-profile", snapshot });
   }
 
   #validate({ sessionRef, sensitive = true }) {

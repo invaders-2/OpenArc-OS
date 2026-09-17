@@ -67,7 +67,12 @@ const snap = async (tag) => {
       cls: root.className,
       storedGlass: localStorage.getItem("oa-glass"),
       storedOpaque: localStorage.getItem("oa-opaque"),
-      select: document.querySelector(".material-select")?.value ?? null,
+      select: (() => {
+        const t = document
+          .querySelector('.segmented.text[aria-label="材质"] button[aria-pressed="true"]')
+          ?.textContent?.trim();
+        return t === "完整玻璃" ? "full" : t === "降低材质" ? "reduced" : t === "实色" ? "solid" : null;
+      })(),
       winCount: document.querySelectorAll(".window").length,
       viewports: document.querySelectorAll(".web-viewport").length,
       rects: [...document.querySelectorAll(".window")].map((w) => r(".window") && [
@@ -90,10 +95,11 @@ await openWindows();
 const baseline = await snap("base");
 console.log("基线窗口数:", baseline.winCount, "windows:", JSON.stringify(baseline.rects));
 
+const TIER_LABEL = { full: "完整玻璃", reduced: "降低材质", solid: "实色" };
 const SEQ = ["reduced", "solid", "full", "reduced", "solid", "full"];
 const steps = [];
 for (const target of SEQ) {
-  await page.selectOption(".material-select", target);
+  await page.click(`.segmented.text[aria-label="材质"] button:has-text("${TIER_LABEL[target]}")`);
   const burst = [];
   for (let i = 0; i < 4; i++) {
     burst.push(await snap(`t-${target}-${i}`));

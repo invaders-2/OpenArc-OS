@@ -167,7 +167,10 @@ test("MAXIMIZE：保存 restore 快照，重复最大化不吃掉快照", () => 
   const w = domain.byId(max, "home");
   assert.equal(w.state, WSTATE.MAXIMIZED);
   assert.deepEqual(w.restore, { x: 100, y: 100, w: 800, h: 600 });
-  assert.equal(w.bounds.w, HOST.width - 24);
+  // 新口径（2026-09-12）：全屏铺满宿主，只让开软件顶栏（38px），不再留 12/52 边距
+  assert.equal(w.bounds.w, HOST.width);
+  assert.equal(w.bounds.x, 0);
+  assert.equal(w.bounds.y, 38);
   // 幂等：第二次 maximize 不再覆盖快照（否则"还原"会被吃掉）
   const twice = manager.reduce(max, { type: "window/maximize", id: "home", host: HOST });
   assert.equal(twice, max);
@@ -210,7 +213,9 @@ test("system/reflow：复用 geometry.clampAll 把屏外窗口拉回可见工作
   // 最大化窗口按新 host 重算，而不是吃 clamp 结果
   const max = manager.reduce(state, { type: "window/maximize", id: "home", host: HOST });
   const r2 = manager.reduce(max, { type: "system/reflow", areas: [area], host: HOST });
-  assert.equal(domain.byId(r2, "home").bounds.w, HOST.width - 24);
+  // reflow 里最大化窗口也按新口径重算（铺满宿主、只让开顶栏）
+  assert.equal(domain.byId(r2, "home").bounds.w, HOST.width);
+  assert.equal(domain.byId(r2, "home").bounds.y, 38);
   assert.deepEqual(domain.invariants(r2), []);
 });
 
@@ -261,12 +266,13 @@ test("system/native-state：只写 meta，不触碰 bounds / order / focused", (
 
 test("areaOf / maximizedBounds：工作区公式只有一处", () => {
   const area = manager.areaOf({ width: 1440, height: 940 });
-  assert.deepEqual(area, { x: 0, y: 44, width: 1440, height: 940 - 44 - 114 });
+  assert.deepEqual(area, { x: 0, y: 38, width: 1440, height: 940 - 38 - 114 });
   // 退化 host 不能产出负高度
   const tiny = manager.areaOf({ width: 10, height: 10 });
   assert.ok(tiny.width >= domain.MIN_WINDOW_W);
   assert.ok(tiny.height >= domain.MIN_WINDOW_H);
-  assert.deepEqual(manager.maximizedBounds({ width: 1440, height: 940 }), { x: 12, y: 52, w: 1416, h: 782 });
+  // 2026-09-12：用户口径"全屏=铺满宿主、只让开软件顶栏"，TOPBAR_H = 38 与 .topbar 高度一致
+  assert.deepEqual(manager.maximizedBounds({ width: 1440, height: 940 }), { x: 0, y: 38, w: 1440, h: 902 });
 });
 
 test("nativeIntents：只有 browser kind 产出意图，且带上遮挡者与视口", () => {

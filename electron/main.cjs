@@ -1,6 +1,19 @@
-const { app, BrowserWindow, ipcMain, safeStorage, screen, dialog, protocol, nativeImage, shell } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  ipcMain,
+  safeStorage,
+  screen,
+  Menu,
+  nativeImage,
+  protocol,
+  net,
+  dialog,
+  shell,
+} = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
+const { Readable } = require("node:stream");
 const { pathToFileURL } = require("node:url");
 const { safeURL } = require("./policy.cjs");
 const geometry = require("./geometry.cjs");
@@ -9,10 +22,31 @@ const { registerIdentityIpc } = require("./identity-bootstrap.cjs");
 const { registerTaskIpc } = require("./task-bootstrap.cjs");
 const { createDefaultExecutorLauncher } = require("./executor-launcher.cjs");
 const { createOpenArcRuntime } = require("./runtime-boot.cjs");
+const { createFileService } = require("./file-service.cjs");
 
 let win;
 let controller;
 let identity;
+let files;
+
+/**
+ * 只读文件协议（Quick Look 的流式媒体源）。
+ * 必须在 app ready **之前**登记为 privileged —— 否则 <video> 不能 seek/stream，
+ * 大视频只能塞 data URL（内存爆）。它服务两个来源：
+ *   openarc-file://media/<folderId>/<id>   路径解析走 file-service 的白名单
+ *   openarc-file://native/<name>           只认下面 NATIVE_RESOURCES 里写死的逻辑名
+ * 两个来源都拿不到任意路径。且只注册在默认 session：
+ * 原生网页视图用的是独立 partition，**够不到这个协议**。
+ */
+// 真实启动路径：本模块在 app ready 之前被 require，注册一定生效。
+// 安全探针等 harness 会在 ready 之后才 require 本模块，那时再调会抛错 —— 显式跳过，
+// 探针本身不测这个协议（它测的是 preload 暴露面与 IPC 通道）。
+if (!app.isReady()) {
+  protocol.registerSchemesAsPrivileged([
+    // corsEnabled：渲染层要把原生视频画进 canvas 再读像素（抠黑），不走 CORS 的话画布会被污染。
+    { scheme: "openarc-file", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } },
+  ]);
+}
 
 const uiURL = pathToFileURL(path.join(__dirname, "../dist/index.html")).href;
 
@@ -21,6 +55,16 @@ const uiURL = pathToFileURL(path.join(__dirname, "../dist/index.html")).href;
 protocol.registerSchemesAsPrivileged([
   { scheme: "openarc-resource", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: false } },
 ]);
+
+/**
+ * 本机原生资源白名单（逻辑名 → 绝对路径）。渲染进程只能报名字，报不出路径 ——
+ * 任意路径读取仍然没有入口。Siri Blob 是 Apple 的版权素材，只在运行时从系统读取，
+ * 不随仓库 / dist / 安装包分发。
+ */
+const NATIVE_RESOURCES = {
+  "siri-blob": "/System/Library/PrivateFrameworks/SiriUI.framework/Versions/A/Resources/Siri Blob.mov",
+};
+const NATIVE_TYPES = { ".mov": "video/quicktime", ".mp4": "video/mp4", ".m4v": "video/x-m4v" };
 
 /** 只接受来自本应用外壳页的调用。
  * 双重条件（sender + senderFrame.url）在 D1-05 冻结，本阶段不放宽。
@@ -34,7 +78,28 @@ const glass = isMac
   ? { transparent: true, vibrancy: "under-window", backgroundColor: "#00000000" }
   : { backgroundMaterial: "mica", backgroundColor: "#00000000" };
 
+/**
+ * 应用菜单。Electron 默认菜单带 Reload / Toggle Developer Tools，属开发项、不属于产品；
+ * 这里换成最小产品菜单（必须保留 editMenu 角色，否则 macOS 上复制粘贴快捷键失效）。
+ * 开发期（electron . 未打包）额外挂 Developer 子菜单，打包后不出现。
+ */
+function installApplicationMenu() {
+  const template = [
+    isMac ? { role: "appMenu" } : { role: "fileMenu" },
+    { role: "editMenu" },
+    { role: "windowMenu" },
+  ];
+  if (!app.isPackaged) {
+    template.push({
+      label: "Developer",
+      submenu: [{ role: "reload" }, { role: "forceReload" }, { role: "toggleDevTools" }],
+    });
+  }
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 app.whenReady().then(async () => {
+  installApplicationMenu();
   // ---------------------------------------------------------------------------
   // D4-04 Closure-2 · 唯一 production runtime boot（与 D4-04 probe 共享同一 helper）。
   //
@@ -57,12 +122,27 @@ app.whenReady().then(async () => {
   });
   identity = runtime.identity;
 
+
   win = new BrowserWindow({
     width: 1440,
     height: 940,
     minWidth: 1000,
     minHeight: 700,
     title: "OpenArc OS",
+    // 自绘 chrome：产品顶栏与窗口标题栏都是 DOM，不能留原生标题栏 ——
+    // transparent 下它会变成一条透出后方的空带，并把内容整体下推 32px（实测 inset=32）。
+    // macOS 用 titleBarStyle:"hidden"：内容仍全屏铺满（实测 inset 0），但**保留原生红绿灯**，
+    // 它们操作 OpenArc 窗口本身（关闭/最小化/缩放），DOM 顶栏左侧相应留出位置。
+    // Windows 没有等价"保留控件"的方式，直接 frame:false（Windows 尚未验证）。
+    ...(isMac
+      // 灯组 y 的三次实测口径（顶栏 38px，DOM 内容中心实测 = 19）：
+      //   y=16 → 灯心 22（偏低 3px，用户第一次反馈"没居中"）
+      //   y=13 → 灯心 19（几何正中，用户第二次反馈"有点偏上"）
+      //   y=15 → 低 2px；y=17 → **实测偏低 5px**（用户截图量出：彩点中心 41.5 vs 图标 31.5 @2x）
+      //   y=12 → 反推回正（= macOS 14px 按钮框的几何值 (38-14)/2）—— 当前值。
+      // 教训：这类"看起来正不正"的问题必须用**用户真实窗口的截图**量，不能靠几何推算。
+      ? { titleBarStyle: "hidden", trafficLightPosition: { x: 20, y: 12 } }
+      : { frame: false }),
     ...glass,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -106,6 +186,27 @@ app.whenReady().then(async () => {
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   win.webContents.on("will-navigate", (e, url) => {
     if (url !== uiURL) e.preventDefault();
+  });
+
+  /**
+   * 权限边界：**只有本应用自己的页面**能要麦克风，而且只要 audio（不要 video）。
+   *
+   * 不写这张表的话 Electron 默认放行一切 —— 浏览器窗口里那些不受信网页也能顺手开麦
+   * （A13 的反面：不可信网页不得拿到系统能力）。其余权限维持原有行为，不额外扩张。
+   */
+  const appDir = pathToFileURL(path.join(__dirname, "..", "dist")).toString();
+  const isAppPage = (url) => typeof url === "string" && url.startsWith(appDir);
+  const micOnly = (url, mediaTypes) => {
+    const types = Array.isArray(mediaTypes) && mediaTypes.length ? mediaTypes : ["audio"];
+    return isAppPage(url) && types.includes("audio") && !types.includes("video");
+  };
+  win.webContents.session.setPermissionRequestHandler((wc, permission, callback, details) => {
+    if (permission !== "media") return callback(true);
+    callback(micOnly(details?.requestingUrl || wc?.getURL?.(), details?.mediaTypes));
+  });
+  win.webContents.session.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => {
+    if (permission !== "media") return true;
+    return micOnly(details?.requestingUrl || requestingOrigin || wc?.getURL?.(), details?.mediaTypes);
   });
 
   // ---------------------------------------------------------------------------
@@ -158,6 +259,181 @@ app.whenReady().then(async () => {
 
   // D3-04C：注册安全预览协议 handler（每次请求重新授权 + Range 流式返回）。
   protocol.handle("openarc-resource", (request) => identity.previewService.handleProtocolRequest(request));
+
+  // ---------------------------------------------------------------------------
+  // D3-04 · 本地文件服务。和身份服务同一原则：能力在**主进程**，
+  // 渲染进程只拿到"条目索引"，拿不到任意路径读写。
+  // ---------------------------------------------------------------------------
+  files = createFileService({ userDataDir: app.getPath("userData") });
+
+  protocol.handle("openarc-file", async (request) => {
+    try {
+      const url = new URL(request.url);
+      if (url.hostname === "native") {
+        const abs = NATIVE_RESOURCES[url.pathname.replace(/^\/+/, "")];
+        if (!abs || !fs.existsSync(abs)) return new Response("Not Found", { status: 404 });
+        // 自己回 Range：net.fetch(file://) 既不认 Range 也不给 Content-Length，
+        // 媒体因此不可 seek（实测 <video>.seekable 恒为 [0,0]），"减少动态效果"就取不到非黑帧。
+        const size = fs.statSync(abs).size;
+        const range = /^bytes=(\d*)-(\d*)$/.exec(request.headers.get("range") || "");
+        const start = range?.[1] ? Number(range[1]) : 0;
+        const end = range?.[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+        if (start > end) return new Response("Range Not Satisfiable", { status: 416 });
+        const headers = {
+          "Content-Type": NATIVE_TYPES[path.extname(abs).toLowerCase()] || "application/octet-stream",
+          "Accept-Ranges": "bytes",
+          "Content-Length": String(end - start + 1),
+          // <video crossorigin="anonymous"> 下跨源媒体要能读像素，必须带这个头。
+          "Access-Control-Allow-Origin": "*",
+        };
+        if (range) headers["Content-Range"] = `bytes ${start}-${end}/${size}`;
+        const body = Readable.toWeb(fs.createReadStream(abs, { start, end }));
+        return new Response(body, { status: range ? 206 : 200, headers });
+      }
+      const parts = url.pathname.split("/").filter(Boolean);
+      const hit = files.resolve(decodeURIComponent(parts[0] || ""), decodeURIComponent(parts[1] || ""));
+      if (!hit) return new Response("Not Found", { status: 404 });
+      return await net.fetch(pathToFileURL(hit.path).toString());
+    } catch {
+      return new Response("Error", { status: 500 });
+    }
+  });
+
+  // 图片信息（分辨率）：交给 Chromium 的图像解码器，读不出来就说读不出来。
+  ipcMain.handle("files:info", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    const hit = files.resolve(String(payload?.folderId ?? ""), String(payload?.id ?? ""));
+    if (!hit) return { ok: false, error: "NOT_FOUND" };
+    try {
+      const img = nativeImage.createFromPath(hit.path);
+      if (!img || img.isEmpty()) return { ok: false, error: "NO_INFO" };
+      const s = img.getSize();
+      return { ok: true, width: s.width, height: s.height };
+    } catch {
+      return { ok: false, error: "NO_INFO" };
+    }
+  });
+  // 拖出到系统（Finder / 桌面）：走 Electron 原生 startDrag，**不是** HTML5 拖拽。
+  // 说明：原生拖拽与页面内 HTML5 拖拽互斥，所以它挂在"按住 ⌘ 拖动"上（见渲染层）。
+  ipcMain.on("files:startDrag", async (event, payload) => {
+    if (!trusted(event)) return;
+    const hit = files.resolve(String(payload?.folderId ?? ""), String(payload?.id ?? ""));
+    if (!hit) return;
+    try {
+      const thumb = await nativeImage.createThumbnailFromPath(hit.path, { width: 64, height: 64 });
+      event.sender.startDrag({
+        file: hit.path,
+        icon: thumb && !thumb.isEmpty() ? thumb : nativeImage.createEmpty(),
+      });
+    } catch {
+      /* 拖拽启动失败就当作没有发生 */
+    }
+  });
+  ipcMain.handle("files:copy", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    return files.copy(String(payload?.folderId ?? ""), payload?.ids, String(payload?.toFolderId ?? ""));
+  });
+  ipcMain.handle("files:move", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    return files.move(String(payload?.folderId ?? ""), payload?.ids, String(payload?.toFolderId ?? ""));
+  });
+  // 导出到电脑：让用户挑一个**真实目录**，把条目复制出去（不动我们自己的存储）。
+  ipcMain.handle("files:export", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    const folderId = String(payload?.folderId ?? "");
+    const ids = Array.isArray(payload?.ids) ? payload.ids.map(String) : [];
+    const picks = ids.map((id) => files.resolve(folderId, id)).filter(Boolean);
+    if (!picks.length) return { ok: false, error: "NOT_FOUND" };
+    const host = BrowserWindow.fromWebContents(e.sender);
+    const res = await dialog.showOpenDialog(host, {
+      title: "导出到电脑",
+      buttonLabel: "导出到此处",
+      properties: ["openDirectory", "createDirectory"],
+    });
+    if (res.canceled || !res.filePaths?.[0]) return { ok: false, error: "CANCELED" };
+    const dest = res.filePaths[0];
+    const used = new Set();
+    let count = 0;
+    for (const hit of picks) {
+      try {
+        const base = path.basename(hit.path);
+        const dot = base.lastIndexOf(".");
+        const stem = dot > 0 ? base.slice(0, dot) : base;
+        const ext = dot > 0 ? base.slice(dot) : "";
+        let name = base;
+        // 不覆盖同名的既有文件：沿用" 2 / 3"的习惯
+        for (let i = 2; used.has(name) || fs.existsSync(path.join(dest, name)); i += 1) name = stem + " " + i + ext;
+        used.add(name);
+        fs.copyFileSync(hit.path, path.join(dest, name));
+        count += 1;
+      } catch {
+        /* 单个失败不影响整批 */
+      }
+    }
+    return { ok: true, count, dest };
+  });
+  ipcMain.handle("files:import", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    const folderId = String(payload && payload.folderId ? payload.folderId : "");
+    const paths = Array.isArray(payload && payload.paths) ? payload.paths.slice(0, 200) : [];
+    return files.importPaths(folderId, paths);
+  });
+  ipcMain.handle("files:list", async (e, folderId) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    return files.list(String(folderId ?? ""));
+  });
+  ipcMain.handle("files:rename", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    return files.rename(String(payload?.folderId ?? ""), String(payload?.id ?? ""), String(payload?.name ?? ""));
+  });
+  ipcMain.handle("files:remove", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    return files.remove(String(payload?.folderId ?? ""), String(payload?.id ?? ""));
+  });
+  ipcMain.handle("files:read", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    return files.read(String(payload?.folderId ?? ""), String(payload?.id ?? ""));
+  });
+  // 缩略图：用 Electron 原生缩略图（macOS/Windows 支持），只回 data URL。
+  // 路径解析在 file-service 内部完成，**渲染进程仍然拿不到任何路径**。
+  // 系统对"没有缩略器"的类型会返回**通用文档图标**（一张白页）。它不是内容，
+  // 渲染层宁愿用自己的线性图标，所以这里先生成一次通用图标做基准、逐次比对拦截。
+  let genericIconPng = null;
+  async function genericIcon() {
+    if (genericIconPng) return genericIconPng;
+    try {
+      const probe = path.join(app.getPath("temp"), "openarc-generic-probe.zzz");
+      fs.writeFileSync(probe, "x");
+      const img = await nativeImage.createThumbnailFromPath(probe, { width: 160, height: 160 });
+      genericIconPng = img.toPNG();
+      try {
+        fs.unlinkSync(probe);
+      } catch {
+        /* 清理失败无所谓 */
+      }
+    } catch {
+      genericIconPng = Buffer.alloc(0);
+    }
+    return genericIconPng;
+  }
+
+  ipcMain.handle("files:thumb", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    const hit = files.resolve(String(payload?.folderId ?? ""), String(payload?.id ?? ""));
+    if (!hit) return { ok: false, error: "NOT_FOUND" };
+    // size 可调：列表缩略图 160，psd/ai 这类浏览器渲染不了的格式在 Quick Look 里要 1024
+    const size = Math.min(1024, Math.max(32, Number(payload?.size) || 160));
+    try {
+      const img = await nativeImage.createThumbnailFromPath(hit.path, { width: size, height: size });
+      if (!img || img.isEmpty()) return { ok: false, error: "NO_THUMBNAIL" };
+      const png = img.toPNG();
+      const generic = await genericIcon();
+      if (generic.length && png.equals(generic)) return { ok: false, error: "GENERIC_ICON" };
+      return { ok: true, dataUrl: "data:image/png;base64," + png.toString("base64") };
+    } catch {
+      return { ok: false, error: "NO_THUMBNAIL" };
+    }
+  });
 
   // ---------------------------------------------------------------------------
   // 原生视图控制器。它不拥有任何 Window domain 业务规则 ——

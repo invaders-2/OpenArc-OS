@@ -8,7 +8,7 @@
  * 默认停在「外观与交互」：experiments/d1-04 的材质路径依赖 .material-select
  * 在设置窗口打开时就在 DOM 里，不能把它藏到需要额外点击的 tab 后面。
  */
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { DevicePane } from "../device/DevicePane";
 import { ModelSettings } from "./ModelSettings";
 
@@ -29,6 +29,9 @@ type SettingsContentProps = {
   /** 身份投影（D3-01）。渲染层用它决定是否出现 Super Admin 入口，
       但**它不是权限判据** —— 后端 DeviceService 才是（§51）。 */
   role: string | null;
+  /** UI 线（profile）的外观 / 壁纸 / 个人资料控件。由 main.tsx 组合进来，
+      使核心线的设置分栏与 UI 线的展示控件共存。 */
+  appearanceExtra?: ReactNode;
 };
 
 export function SettingsContent({
@@ -39,6 +42,7 @@ export function SettingsContent({
   glass,
   setGlass,
   role,
+  appearanceExtra,
 }: SettingsContentProps) {
   const [pane, setPane] = useState<Pane>("appearance");
 
@@ -73,8 +77,8 @@ export function SettingsContent({
           {pane === "appearance" ? (
             <>
               <h3>外观与交互</h3>
+              {appearanceExtra}
               {([
-                ["深色外观", dark, setDark],
                 ["减少动态效果", reduced, setReduced],
               ] as const).map(([label, value, set]) => (
                 <label className="setting-row" key={label}>

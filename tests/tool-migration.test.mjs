@@ -35,7 +35,7 @@ test("v10 -> v11：task_tool_proposals / tool_decisions 建立，旧数据完整
   const { root, dbPath, storeRoot, snapshot } = await makeV10Db();
   try {
     const reopened = reopenResourceRuntime({ dbPath, storeRoot });
-    assert.equal(SCHEMA_VERSION, 16);
+    assert.equal(SCHEMA_VERSION, 17);
     assert.equal(reopened.identity.schemaVersion, SCHEMA_VERSION);
     for (const t of [...V11_TABLES, ...V12_TABLES, ...V13_TABLES]) assert.equal(hasTable(reopened.identity.connection, t), true, t + " 应存在");
     assert.equal(hasTable(reopened.identity.connection, "tool_executions"), true, "v12 起应有 tool_executions");
@@ -56,7 +56,7 @@ test("v11 迁移失败 -> 整级回滚：user_version 停 10，v11 表不残留"
     assert.equal(raw.prepare("SELECT COUNT(*) AS c FROM users").get().c, snapshot.users);
     raw.close();
     const repaired = reopenResourceRuntime({ dbPath, storeRoot });
-    assert.equal(repaired.identity.schemaVersion, 16);
+    assert.equal(repaired.identity.schemaVersion, SCHEMA_VERSION);
     for (const t of [...V11_TABLES, ...V12_TABLES, ...V13_TABLES]) assert.equal(hasTable(repaired.identity.connection, t), true, t + " 修复后应存在");
     repaired.identity.close();
   } finally { fs.rmSync(root, { recursive: true, force: true }); }

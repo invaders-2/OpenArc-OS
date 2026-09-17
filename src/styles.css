@@ -25,20 +25,6 @@
       rgba(237, 237, 240, 0.58)
     );
 }
-.desktop::before {
-  content: "";
-  position: absolute;
-  width: 1050px;
-  height: 1200px;
-  right: -520px;
-  top: 45px;
-  border-radius: 48%;
-  transform: rotate(-32deg);
-  background: linear-gradient(130deg, rgba(255, 255, 255, 0.56), rgba(200, 200, 205, 0.5));
-  box-shadow:
-    -35px 12px 90px rgba(255, 255, 255, 0.4),
-    inset 25px 0 80px rgba(255, 255, 255, 0.47);
-}
 .dark {
   /* 主题原料与主题作用域合成见 src/design-system/tokens.css（.dark）。
      这里只放深色专属的**桌面环境光**——它不是 token，是桌面背景的一部分。 */
@@ -73,7 +59,10 @@
 .desktop[data-glass="reduced"] .window {
   background: transparent;
 }
-.desktop[data-glass="reduced"] .window-title {
+/* 注意：**分栏窗口要排除**。分栏窗口的标题条只有 208px 宽、正好压在侧栏那条上，
+   若它自己也上材质，就会在侧栏之上多出一块"底框"，红绿灯像浮在一块白板上
+   （用户实测：切到"降低材质"时红绿灯穿帮）。那块区域本来由侧栏负责。 */
+.desktop[data-glass="reduced"] .window:not(:has(.split)) .window-title {
   background: rgb(var(--surface-rgb) / var(--surface-alpha));
   backdrop-filter: var(--glass-filter-window);
 }
@@ -90,7 +79,7 @@
 }
 /* 窗口顶部 inset 高光原本打在 .window 上，会被标题条底色盖住；
    原样搬到标题条，保住材质厚度（同一条已有高光，不是新增装饰）。 */
-.dark.desktop[data-glass="reduced"] .window-title {
+.dark.desktop[data-glass="reduced"] .window:not(:has(.split)) .window-title {
   box-shadow: inset 0 1px 0 var(--material-top-highlight);
 }
 /* 实色面板上的行级 hover 不能再用"同色 + alpha"：
@@ -106,15 +95,37 @@
 .topbar {
   height: 38px;
   background: rgb(var(--bar-rgb) / var(--bar-alpha));
-  backdrop-filter: var(--glass-filter);
+  /**
+   * 刻意不加 backdrop-filter。
+   * 顶栏底色本来就是 0（--bar 0），这层 blur 几乎没有视觉产出；
+   * 但在"透明窗口 + app-region: drag + backdrop-filter"这个组合下，它的合成层会被错位残留 ——
+   * 表现为顶栏下沿多出一条横贯全宽的"小框"，而且只有开关覆盖层（例如全局 AI）才会刷掉/重现
+   * （用户实测：点开 AI 就没、关掉又出现）。去掉它即可根除这一类残留；
+   * 窗口顶部不设任何磨砂层（用户口径：全透明），所以这里也没有需要跟它配合的东西。
+   */
+  transform: translateZ(0);
   /* 顶栏无底色（--bar 0），不能再有投影，否则会在桌面留下一条幽灵暗边 */
   display: flex;
   align-items: center;
   gap: 26px;
-  padding: 0 23px;
+  /* 左侧留出系统原生红绿灯的位置（titleBarStyle:"hidden" + trafficLightPosition x=20） */
+  padding: 0 23px 0 92px;
   font-size: 12px;
   position: relative;
   z-index: 80;
+  /* frame:false 后原生窗口没有标题栏可抓：整个顶栏就是唯一拖动区。
+     交互元素（按钮等）在下面用 no-drag 退出，否则点不到。 */
+  -webkit-app-region: drag;
+}
+/* 品牌 mark（用户提供的矢量里**只有圆形那段**，不含字母）：
+   CSS mask + currentColor → 深色主题白、浅色主题深，无需两份素材。 */
+.brand-mark {
+  display: inline-block;
+  width: 46px;
+  height: 51px;
+  background-color: currentColor;
+  -webkit-mask: url("/openarc-mark.svg") no-repeat center / contain;
+  mask: url("/openarc-mark.svg") no-repeat center / contain;
 }
 .wordmark {
   font-size: 14px;
@@ -130,27 +141,17 @@
   display: flex;
   padding: 6px;
 }
+.topbar button,
+.topbar .bar-icon,
+.topbar a,
+.topbar input {
+  -webkit-app-region: no-drag;
+}
 .local-tag {
   display: flex;
   align-items: center;
   gap: 6px;
   color: var(--muted);
-}
-.desktop-brand {
-  position: absolute;
-  right: 7%;
-  top: 37%;
-  color: #fff9;
-  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.1);
-}
-.desktop-brand div {
-  font-size: 65px;
-  font-weight: 400;
-  letter-spacing: -4px;
-}
-.desktop-brand p {
-  font-size: 13px;
-  letter-spacing: 1px;
 }
 .assistant-pill {
   position: absolute;
@@ -180,7 +181,8 @@
   /* --glass-filter-large 是"大面积表面"开关：只在把大面积转实色的档位里被定义。
      未定义时回退到本面自己的完整玻璃（FULL 基线）。引用它的选择器即"大面积白名单"。 */
   backdrop-filter: var(--glass-filter-large, var(--glass-filter-window));
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+  /* 用户口径：窗口阴影不要那么大那么深。 */
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.07);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -190,19 +192,19 @@
   animation: appear var(--standard) var(--ease);
 }
 .window.active {
-  box-shadow: var(--shadow);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1);
 }
 /* 表面降到 #171717 50% 后合成值仅 #0C0C0C，与纯黑桌面明度差很小，
    因此顶部高光相应提高，让上边缘仍可辨识；外阴影在有环境光渐变的区域仍起作用。 */
 .dark .window {
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.12),
-    0 18px 46px rgba(0, 0, 0, 0.7);
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 8px 20px rgba(0, 0, 0, 0.35);
 }
 .dark .window.active {
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.18),
-    0 24px 60px rgba(0, 0, 0, 0.85);
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 10px 26px rgba(0, 0, 0, 0.45);
 }
 .dark .ai-panel,
 .dark .search-panel,
@@ -222,11 +224,60 @@
   opacity: 0;
   pointer-events: none;
 }
+/* 用户口径：红灯默认最小化（只有系统设置真关闭），动效对齐 macOS ——
+   窗口被"吸"进它在程序坞上的图标。目标点由 components.tsx 在状态翻转那一帧
+   量出来写进 --min-tx / --min-ty。动画类加上后不清掉（换回另一个即可重放）：
+   清掉会立刻恢复 .window 的 appear 动画，恢复窗口时会闪一下。 */
+.window.min-out {
+  transform-origin: center;
+  /* 对齐 macOS 的"缩放效果"：**等比**缩到 Dock 图标，全程保持不透明，
+     只在最后一小段淡出。等比的缩放读起来是"窗口被收走"；
+     一旦压扁（scaleX ≠ scaleY）再配一条线性的路径，就会像一块被揉掉的纸。 */
+  animation: window-suck-out var(--dur-slow) cubic-bezier(0.4, 0, 0.25, 1) forwards;
+}
+.window.min-in {
+  transform-origin: center;
+  animation: window-suck-in var(--dur-slow) cubic-bezier(0.2, 0, 0.25, 1) forwards;
+}
+@keyframes window-suck-out {
+  0% {
+    transform: none;
+    opacity: 1;
+    visibility: visible;
+  }
+  72% {
+    /* 到 72% 仍然完全不透明：提前淡出会变成"溶解"，不像被收进 Dock */
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--min-tx, 0px), var(--min-ty, 0px)) scale(0.05);
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+@keyframes window-suck-in {
+  0% {
+    transform: translate(var(--min-tx, 0px), var(--min-ty, 0px)) scale(0.05);
+    opacity: 0;
+    visibility: visible;
+  }
+  28% {
+    opacity: 1;
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+    visibility: visible;
+  }
+}
 .window-title {
   height: 44px;
   flex-shrink: 0;
   /* 标题栏无底色（用户指定透明度 0），与窗口外壳同值，不形成材质分区 */
   background: transparent;
+  /* 红绿灯（DOM 版）必须在最上层：否则会被侧栏卡片（z-index 2）与磨砂条（1）盖住 */
+  position: relative;
+  z-index: 3;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -239,34 +290,25 @@
   position: absolute;
   left: 14px;
   display: flex;
-  gap: 7px;
+  gap: 8px;
 }
 .traffic button {
-  width: 14px;
-  height: 14px;
+  /* 对齐 macOS 原生红绿灯：12pt 圆、8pt 间距、极细描边 */
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   display: grid;
   place-items: center;
   padding: 0;
-  border: 1px solid rgba(0, 0, 0, 0.12);
+  border: 0.5px solid rgba(0, 0, 0, 0.14);
 }
 .traffic svg {
   opacity: 0;
-  color: #252525;
+  color: rgba(0, 0, 0, 0.55);
 }
 .traffic:hover svg,
 .traffic button:focus-visible svg {
   opacity: 1;
-}
-/* 顶栏红绿灯：跟随文档流排在字标左侧，比窗口内的略小 */
-.traffic-bar {
-  position: static;
-  gap: 8px;
-  margin-right: -12px;
-}
-.traffic-bar button {
-  width: 12px;
-  height: 12px;
 }
 .traffic button:disabled {
   background: rgba(125, 125, 125, 0.5);
@@ -276,13 +318,13 @@
   opacity: 0;
 }
 .close {
-  background: #ff625b;
+  background: #ff5f57;
 }
 .minimize {
-  background: #ffbf3e;
+  background: #febc2e;
 }
 .maximize {
-  background: #2bc94e;
+  background: #28c840;
 }
 .title-meta {
   position: absolute;
@@ -416,20 +458,70 @@ p {
   bottom: 20px;
   left: 50%;
   transform: translateX(-50%);
-  background: rgb(var(--bar-rgb) / var(--bar-alpha));
-  backdrop-filter: var(--glass-filter-dock);
-  /* D2-02 保留：Dock 的大圆角；最近刻度 16px 差 4px，属可见变化 */
-  border-radius: 20px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.15);
+  transition: transform var(--standard) var(--ease), opacity var(--standard) var(--ease);
   display: flex;
   align-items: center;
   padding: 9px 10px 2px;
   gap: 5px;
   z-index: 85;
 }
+/* 底板单独一层：Apple Dock 放大时整块玻璃随图标向两侧撑开、位置跟着指针走，
+   所以不能画在 .dock 自己身上（本体的盒子是静止的，自动隐藏的 transform 照旧）。
+   --bg-left / --bg-width 由 useDockMagnify 逐帧写入；静止时回落到 0 / 100%。 */
+/* 底板拆成两层（顺序即层级：阴影在下、玻璃在上）：
+   · .dock-shadow 只画投影，跟着底板撑开 —— 纯 transform，合成器就能干；
+   · .dock-glass 是**尺寸静止**的整块玻璃，每帧只改 clip-path 把它裁成底板那一段。
+
+   为什么玻璃不能跟着 scaleX：backdrop-filter 是在元素的**本地坐标**里对背景取样的，
+   transform 作用在结果上 —— 也就是 scaleX 会把"已经糊好的背景"一起横向拉伸，
+   指针一动背景就在玻璃后面滑。静止尺寸 + 裁切则完全不碰取样区域
+   （Chromium 也能复用那块栅格化结果：实测每帧一次 RendererRasterWorker 就是这么来的）。 */
+.dock-shadow,
+.dock-glass {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+.dock-shadow {
+  left: 0;
+  width: 100%;
+  /* 圆角与缩放都按 1/k 预补偿（scaleX 之后仍是正圆角），值由 useDockMagnify 逐帧写 */
+  border-radius: 20px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.15);
+  transform-origin: center;
+  will-change: transform;
+}
+.dock-glass {
+  /* 与 useDockMagnify 里的 SLACK 必须一致：底板撑开时最大会越过本体多少 */
+  --dock-slack: 90px;
+  left: calc(-1 * var(--dock-slack));
+  right: calc(-1 * var(--dock-slack));
+  border-radius: 20px;
+  background: rgb(var(--bar-rgb) / var(--bar-alpha));
+  backdrop-filter: var(--glass-filter-dock);
+  /* 静止时正好露出 .dock 本体那一段 */
+  clip-path: inset(0 var(--dock-slack) 0 var(--dock-slack) round 20px);
+}
+/* 全屏时 Dock 自动隐藏：底部 8px 的 hover 带把它唤回来 */
+.dock.hidden {
+  transform: translateX(-50%) translateY(90px);
+  opacity: 0;
+  pointer-events: none;
+}
+.dock-hint {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 8px;
+  z-index: 86;
+}
 .dock-item {
   --s: 1;
   position: relative;
+  flex: none;
   padding: 0 5px;
   display: flex;
   flex-direction: column;
@@ -437,25 +529,83 @@ p {
   gap: 5px;
 }
 .dock-icon {
-  width: 47px;
-  height: 47px;
+  width: var(--dock-icon, 47px);
+  height: var(--dock-icon, 47px);
   object-fit: contain;
   user-select: none;
   transform: scale(var(--s));
   transform-origin: bottom center;
-  transition: transform var(--quick) var(--ease);
+  /* 提前升层：首次悬停时才升层会产生一次可见的卡顿。 */
+  will-change: transform;
+  /* 离开 Dock 时从当前倍率弹性回位（MOTION_SYSTEM §4 Dock 悬停）。 */
+  transition: transform var(--dur-standard) var(--ease-spring);
+}
+/* 悬停期间必须**跟手**：--s / translate / 底板都由 rAF 逐帧写入，这里若仍保留
+   transition，整排就会慢半拍地"追"指针。只在 magnifying 期间关掉过渡。 */
+.dock.magnifying .dock-icon,
+.dock.magnifying .dock-item,
+.dock.magnifying .dock-divider,
+.dock.magnifying .dock-glass,
+.dock.magnifying .dock-shadow {
+  transition: none;
+}
+/* 撑开期间提示只过渡 opacity：它的 transform 现在跟着 --s 逐帧变，
+   再叠一条 transform 过渡就会慢半拍地追。 */
+.dock.magnifying .dock-tooltip {
+  transition: opacity var(--quick) var(--ease);
+}
+.dock.magnifying .dock-item,
+.dock.magnifying .dock-divider {
+  will-change: translate;
+}
+/* 离开：撑开量、缩放、底板一起从当前值弹性回位（MOTION_SYSTEM §4 Dock 悬停） */
+.dock.settling .dock-item,
+.dock.settling .dock-divider {
+  transition: translate var(--dur-standard) var(--ease-spring);
+}
+.dock.settling .dock-icon {
+  transition: transform var(--dur-standard) var(--ease-spring);
+}
+.dock.settling .dock-shadow {
+  transition:
+    transform var(--dur-standard) var(--ease-spring),
+    border-radius var(--dur-standard) var(--ease-spring);
+}
+.dock.settling .dock-glass {
+  transition: clip-path var(--dur-standard) var(--ease-spring);
 }
 .dock-tooltip {
   position: absolute;
-  bottom: calc(100% + 4px);
+  /**
+   * 关键：悬停时图标以 **bottom center 为原点**放大约 --s 倍，顶端因此上移
+   * `icon * (s - 1)`。提示若只按 .dock-item 的盒子定位，就会被放大的图标压住 ——
+   * 用户实测："上面的应用名称都被挡住了"。所以要把这段位移补进来。
+   */
+  bottom: calc(100% + 7px);
   left: 50%;
-  transform: translateX(-50%) translateY(6px);
+  /**
+   * 悬停时图标以 bottom center 为原点放大约 --s 倍，顶端因此上移 icon * (s - 1)。
+   * 提示若只按 .dock-item 的盒子定位，就会被放大的图标压住（用户实测："上面的应用名称都被挡住了"）。
+   *
+   * 这段位移必须走 **transform**，不能走 bottom：bottom 是布局属性，每帧改它会让
+   * **所有**提示重新布局 + 重新栅格化 —— 而提示带 backdrop-filter，实测这一笔
+   * 占了整轮扫描 raster 的 43%、主线程帧时间的 22%。
+   */
+  transform: translateX(-50%) translateY(calc((1 - var(--s, 1)) * var(--dock-icon, 47px) + 6px));
   white-space: nowrap;
-  padding: 4px 9px;
-  border-radius: var(--radius-sm);
+  /* macOS 口径：接近半高的圆角 + 底部一个小尾巴（见 ::after） */
+  padding: 4px 10px;
+  border-radius: 7px;
   font-size: 11px;
   color: var(--text);
-  background: rgb(var(--surface-rgb) / var(--surface-alpha));
+  /**
+   * 材质：0.96 近乎不透明。用户口径"透明度降低一点" → 取**可感知**的方向降到 0.88
+   * （0.96→1.0 肉眼无差别，所以能调的方向只有更透）。尾巴必须用**同一个数值**，
+   * 否则 border 三角与气泡之间会出现色差。
+   */
+  background: rgb(var(--surface-rgb) / 0.6);
+  /* 0.6 的底色若没有模糊，就只是"半透明色块"（背后的图标会透上来）——补回磨砂。
+     只加在气泡上：之前"分成两块"是**两层各自 backdrop-filter** 造成的，单层不会有接缝。 */
   backdrop-filter: var(--glass-filter-tip);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
   opacity: 0;
@@ -465,10 +615,23 @@ p {
     transform var(--quick) var(--ease);
   z-index: 300;
 }
+/* 指向图标的小尾巴（macOS 提示的辨识特征）。 */
+.dock-tooltip::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border: 5px solid transparent;
+  border-bottom: 0;
+  border-top-color: rgb(var(--surface-rgb) / 0.6);
+}
 .dock-item:hover .dock-tooltip,
 .dock-item:focus-visible .dock-tooltip {
   opacity: 1;
-  transform: translateX(-50%) translateY(0);
+  transform: translateX(-50%) translateY(calc((1 - var(--s, 1)) * var(--dock-icon, 47px)));
 }
 @keyframes dock-bounce {
   0% {
@@ -506,10 +669,50 @@ p {
   background: var(--text);
 }
 .dock-divider {
+  flex: none;
+  width: 25px;
   height: 35px;
+  margin: 0 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.dock-divider::before {
+  content: "";
   width: 1px;
+  height: 100%;
   background: var(--line);
-  margin: 0 12px 10px;
+}
+/* ── 整理态（长按 Dock 图标）─────────────────────────────────────────────
+   拖动项跟手（transform 由 useDockArrange 直接写），兄弟项 200ms 让位；
+   抖动挂在**独立的 rotate 属性**上，避免和 --s 的 scale 抢同一个 transform。 */
+.dock.arranging .dock-item {
+  cursor: grabbing;
+  transition: transform 200ms var(--ease-spring);
+}
+.dock.arranging .dock-icon {
+  transition: none;
+}
+.dock.arranging .dock-tooltip {
+  opacity: 0;
+}
+.dock-item[data-dragging="true"] {
+  z-index: 5;
+}
+.dock-item[data-dragging="true"] .dock-icon {
+  filter: drop-shadow(0 10px 16px rgba(0, 0, 0, 0.3));
+}
+@keyframes dock-jiggle {
+  0%,
+  100% {
+    rotate: -1.6deg;
+  }
+  50% {
+    rotate: 1.6deg;
+  }
+}
+.dock.arranging .dock-item[data-dock-id]:not([data-dragging="true"]) .dock-icon {
+  animation: dock-jiggle 340ms ease-in-out infinite;
 }
 .resize {
   position: absolute;
@@ -524,7 +727,24 @@ p {
 .setting-row {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   padding: 15px 0;
+}
+.setting-range-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.setting-range {
+  width: 190px;
+  accent-color: var(--accent);
+}
+.setting-range-value {
+  min-width: 38px;
+  text-align: right;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 /* D1-04B 材质档位选择器：无边框（分层不靠发丝线），靠 --sunken 底表达可操作 */
 .material-select {
@@ -541,6 +761,380 @@ input[type="checkbox"] {
   height: 18px;
   accent-color: var(--accent);
 }
+/* ── 左右分栏（系统设置 / 应用中心 / Skill 中心） ─────────────────────────
+   分层不靠发丝线：侧栏用 --sunken 的底色差，选中项用 accent 胶囊。 */
+.split {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+.split-side {
+  flex: 0 0 192px;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  /* 浮窗侧栏：上下左右都离窗口一点距离，圆角 + 投影 + 玻璃材质。
+     因为 window-body 被上提盖住标题栏，这张卡片的顶边就在窗口顶部附近，
+     原生红绿灯正好落在卡片内部。 */
+  margin: 8px;
+  padding: 6px 8px 10px;
+  border-radius: var(--radius-lg);
+  /* 侧栏材质用设计语言里的 surface.content（比窗口外壳略实一档），
+     不再用 ad-hoc 的白色叠加。 */
+  background: rgb(var(--content-rgb) / var(--content-alpha));
+  backdrop-filter: var(--glass-filter-window);
+  box-shadow: var(--elevation-1);
+}
+.split-section {
+  padding: 14px 8px 5px;
+  font-size: var(--fs-micro);
+  line-height: 1.2;
+  color: var(--muted);
+}
+.split-side > .split-section:first-child {
+  padding-top: 5px;
+}
+/* ── 分栏窗口：侧栏顶到窗口最上沿，红绿灯落在侧栏这块浮层里 ──────────────
+   标题栏原本是 44px 的独立一层；这里把 window-body 上提 44px 盖住它，
+   再把标题栏提到上层保持可拖拽，于是侧栏材质向上一直铺到窗口顶边，
+   而红绿灯正好浮在侧栏内（Finder / 系统设置的口径）。 */
+.window:has(.split) .window-body {
+  margin-top: -44px;
+}
+.window:has(.split) .window-title {
+  position: relative;
+  z-index: 3;
+  /* 标题栏只盖住侧栏那一条，让右栏顶部的工具条与红绿灯同一行、且可点可输入 */
+  align-self: flex-start;
+  width: 208px;
+}
+/* 没有工具条的分栏窗口（系统设置 / 应用中心 / Skill 中心）：右栏顶部只有
+   64px 的内边距、没有任何控件需要露出，所以标题栏铺满整窗，顶栏整条都能按住拖动。
+   有 .pane-toolbar 的文件夹窗口不进这条，仍保持 208px（右栏工具条要可点可输入）。 */
+.window:has(.split):not(:has(.pane-toolbar)) .window-title {
+  width: 100%;
+}
+.window:has(.split) .split-main {
+  /* 普通分栏内容（系统设置 / 应用中心 / Skill 中心）：让开标题栏，再留出呼吸空间 */
+  padding-top: 64px;
+}
+.window:has(.split):has(.pane-toolbar) .split-main {
+  /* 文件夹：顶部就是工具条，它要与原生红绿灯同一行（红绿灯中心约 y=22，工具条 26px 高 → top≈10） */
+  padding-top: 10px;
+}
+.window:has(.split) .split-side {
+  padding-top: 44px;
+  /* 侧栏在磨砂条之上：磨砂条横跨整窗，但侧栏这块"卡片"始终盖在它上面 */
+  position: relative;
+  z-index: 2;
+}
+.split-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 20px 26px 26px;
+  display: flex;
+  flex-direction: column;
+}
+/* 内容区顶部工具条（Finder 口径：位置名在工具条里，而不是页面中央大标题） */
+.pane-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  min-height: 26px;
+  margin-bottom: 14px;
+  color: var(--text);
+  /* 不换行：窄窗口时靠下面的 @container 规则依次收起次要控件 */
+  flex-wrap: nowrap;
+}
+.split-nav {
+  min-width: 0;
+}
+/* 侧栏里的名字也截断，不换行（长文件夹名在窄窗口里会把条目撑成两行） */
+.split-nav-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.pane-title {
+  font-size: var(--fs-secondary);
+  font-weight: var(--fw-medium);
+  margin: 0 4px;
+  /* 用户实测：窗口缩到最小时标题被挤成一列字 —— 这里改为**截断**，永远单行 */
+  min-width: 0;
+  flex: 0 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 工具条按**窗口自身宽度**（容器查询）响应，而不是按屏幕宽度 */
+.window {
+  container-type: inline-size;
+}
+/* 搜索框**永不隐藏**（上一轮窄窗口直接 display:none，看起来就像"搜索被删了"）：
+   它自己会收缩，标题也早就改成单行截断，两者可以并存。 */
+.pane-toolbar .search-field {
+  flex: 1 1 auto;
+  min-width: 108px;
+  max-width: 240px;
+}
+.pane-toolbar .search-field input {
+  width: 100%;
+  min-width: 0;
+}
+@container (max-width: 780px) {
+  .pane-toolbar .icon-button[aria-label="共享"],
+  .pane-toolbar .icon-button[aria-label="标签"] {
+    display: none;
+  }
+}
+.toolbar-spacer {
+  margin-left: auto;
+}
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  transition: background var(--quick) var(--ease), color var(--quick) var(--ease);
+}
+.icon-button:hover:not(:disabled) {
+  background: var(--row-hover);
+  color: var(--text);
+}
+.icon-button:disabled {
+  opacity: var(--disabled-opacity);
+  cursor: default;
+}
+.search-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+  color: var(--muted);
+}
+.search-field input {
+  width: 118px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-caption);
+}
+.segmented {
+  display: flex;
+  gap: 1px;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+}
+.segmented button {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  /* 必须归零：全局 button 有 1px 6px 的内边距，会把图标在 22px 里挤得水平偏右 */
+  padding: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--muted);
+}
+.segmented button[aria-pressed="true"] {
+  background: rgb(var(--content-rgb) / var(--content-alpha));
+  color: var(--text);
+}
+/* 文字版分段控件（例如"外观"三态）：胶囊外形 + 文字，尺寸跟内容走 */
+.segmented.text button {
+  width: auto;
+  height: 26px;
+  padding: 0 12px;
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+  font-size: var(--fs-caption);
+}
+.folder-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.split-main .empty-content {
+  flex: 1;
+  height: auto;
+}
+/* 分栏内的页面标题按设计语言的"区块标题"（--fs-title），不再用页面主标题 27px */
+.split-main h1 {
+  font-size: var(--fs-title);
+  margin: 0 0 6px;
+}
+.split-main .subtitle {
+  margin-bottom: 20px;
+}
+.split-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+  font-size: var(--fs-secondary);
+  /* 对齐原生 Finder 实测：行高 31.5px、高亮左右各内缩 8px */
+  line-height: 1.2;
+  letter-spacing: -0.08px;
+  transition: background var(--quick) var(--ease), color var(--quick) var(--ease);
+}
+.split-nav:hover {
+  background: rgb(var(--text-rgb) / 0.06);
+}
+.split-nav[aria-current="true"] {
+  /* Finder 式选中态：灰色高亮，而不是彩色/高对比胶囊 */
+  background: rgb(var(--text-rgb) / 0.1);
+  color: var(--text);
+  font-weight: var(--fw-medium);
+}
+.split-nav svg {
+  flex: none;
+}
+/* 胶囊开关（role=switch）。设置与控制中心共用。 */
+.switch {
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 24px;
+  padding: 0;
+  border-radius: var(--radius-pill);
+  background: var(--sunken);
+  transition: background var(--quick) var(--ease);
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: var(--elevation-1);
+  transition: transform var(--quick) var(--ease);
+}
+.switch[aria-checked="true"] {
+  background: var(--accent);
+}
+.switch[aria-checked="true"]::after {
+  background: var(--on-accent);
+  transform: translateX(16px);
+}
+/* 简单列表（最近使用等） */
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: var(--radius-md);
+  background: transparent;
+  text-align: left;
+  font-size: var(--fs-secondary);
+  transition: background var(--quick) var(--ease);
+}
+.list-row:hover {
+  background: var(--row-hover);
+}
+.list-icon {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+/* 顶栏"最近应用"：线性图标按钮 */
+.topbar-recent {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 2px;
+}
+.bar-app {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  transition: background var(--quick) var(--ease), color var(--quick) var(--ease);
+}
+.bar-app:hover {
+  background: var(--row-hover);
+  color: var(--text);
+}
+/* 控制中心：右上角浮层，不压暗桌面（区别于搜索） */
+.cc-shade {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+}
+.control-center {
+  position: absolute;
+  top: 46px;
+  right: 14px;
+  z-index: 60;
+  width: 272px;
+  padding: 12px 14px 14px;
+  border-radius: var(--radius-xl);
+  background: rgb(var(--surface-rgb) / var(--surface-alpha));
+  backdrop-filter: var(--glass-filter);
+  box-shadow: var(--elevation-4);
+}
+.control-center .setting-row {
+  padding: 10px 0;
+}
+.cc-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 8px;
+  padding-top: 12px;
+  color: var(--muted);
+  font-size: var(--fs-caption);
+}
+.cc-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.cc-actions button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+  color: var(--text);
+  font-size: var(--fs-caption);
+}
+.cc-actions button:hover {
+  background: var(--row-hover);
+}
+
+
 .badge {
   display: inline-block;
   background: var(--sunken);
@@ -559,9 +1153,10 @@ input[type="checkbox"] {
 }
 .field input,
 .addressbar input {
-  border: 1px solid var(--line);
+  /* 输入框不用线框分层（设计语言禁止发丝线框）：用 --sunken 填充分区 */
+  border: 0;
   border-radius: var(--radius-md);
-  background: rgb(var(--content-rgb) / var(--content-alpha));
+  background: var(--sunken);
   padding: 9px 12px;
   width: 100%;
   min-width: 0;
@@ -739,7 +1334,7 @@ input[type="checkbox"] {
   justify-content: center;
   padding: 35px;
   text-align: center;
-  background: rgb(var(--content-rgb) / var(--content-alpha));
+  /* 空态直接落在内容面上，不再自带一块底色（会形成"右边一个框"） */
 }
 .empty-content p {
   max-width: 380px;
@@ -819,6 +1414,31 @@ input[type="checkbox"] {
   margin-left: auto;
   display: flex;
 }
+/* AI 面板：聆听开关 + 电平条（电平只改 transform，逐帧不触发布局） */
+.mic-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 0;
+}
+.mic-meter {
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--sunken);
+  overflow: hidden;
+}
+.mic-meter-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform-origin: left center;
+  transform: scaleX(0);
+  background: linear-gradient(90deg, #7a8ffb, #5c63fb);
+}
+.mic-note {
+  margin-top: 8px;
+}
 .ai-intro {
   text-align: center;
   padding: 35px 8px 22px;
@@ -865,10 +1485,9 @@ input[type="checkbox"] {
   width: 100%;
   height: 85px;
   resize: none;
-  background: rgb(var(--content-rgb) / var(--content-alpha));
-  border: 1px solid var(--line);
-  /* D2-02 保留：AI 面板输入框；最近刻度 8/12px 差 2px */
-  border-radius: 10px;
+  background: var(--sunken);
+  border: 0;
+  border-radius: var(--radius-md);
   padding: 12px;
 }
 .composer span {
@@ -928,7 +1547,7 @@ input[type="checkbox"] {
 }
 .desktop-folder {
   position: absolute;
-  width: 88px;
+  width: calc(var(--desk-icon, 58px) + 30px);
   z-index: 2;
   display: flex;
   flex-direction: column;
@@ -948,15 +1567,9 @@ input[type="checkbox"] {
 .dark .desktop-folder:hover {
   background: rgba(255, 255, 255, 0.08);
 }
-.desktop-folder-icon {
-  width: 58px;
-  height: 46px;
-  object-fit: contain;
-  user-select: none;
-}
 .folder-name {
   font-size: 11px;
-  max-width: 82px;
+  max-width: 100%;
   text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -967,7 +1580,7 @@ input[type="checkbox"] {
   width: 82px;
   font-size: 11px;
   text-align: center;
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: var(--radius-xs);
   background: rgb(var(--content-rgb) / var(--content-alpha));
   color: var(--text);
@@ -977,6 +1590,26 @@ input[type="checkbox"] {
   position: absolute;
   inset: 0;
   z-index: 199;
+}
+/* 程序坞右键菜单：浮在图标上方的一个气泡（位置由 ContextMenu 按真实高度算），
+   带一个指向图标的小尾巴 —— 口径与 dock-tooltip 一致。 */
+.context-menu.dock-menu {
+  border-radius: 12px;
+  background: rgb(var(--surface-rgb) / 0.62);
+  backdrop-filter: var(--glass-filter-tip);
+  padding: 6px;
+}
+.context-menu.dock-menu::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border: 7px solid transparent;
+  border-bottom: 0;
+  border-top-color: rgb(var(--surface-rgb) / 0.62);
 }
 .context-menu {
   position: absolute;
@@ -993,13 +1626,648 @@ input[type="checkbox"] {
   animation: appear var(--quick) var(--ease);
 }
 .context-menu button {
+  display: flex;
+  align-items: center;
+  gap: 2px;
   text-align: left;
   padding: 8px 11px;
   border-radius: var(--radius-sm);
   font-size: 13px;
 }
+/* 子菜单（悬停展开） */
+.context-submenu {
+  left: calc(100% - 6px);
+  min-width: 168px;
+}
+.menu-chevron {
+  margin-left: auto;
+  opacity: 0.55;
+}
+.menu-check {
+  display: inline-block;
+  width: 15px;
+  color: var(--text);
+}
 .context-menu button:hover {
   background: var(--sunken);
+}
+/* 菜单项的键盘焦点用同一种高亮，不要 outline 方框 */
+.context-menu button:focus-visible {
+  outline: none;
+  background: var(--sunken);
+}
+/* 全应用输入框：不用任何线框/焦点环 —— 焦点只靠填充深浅变化表达（仍可见，但不是框） */
+.field input:focus-visible,
+.addressbar input:focus-visible,
+.composer textarea:focus-visible,
+.folder-rename:focus-visible {
+  outline: none;
+  background: rgb(var(--text-rgb) / 0.08);
+}
+.search-field input:focus-visible,
+.search-input input:focus-visible {
+  outline: none;
+}
+.search-field:focus-within {
+  background: rgb(var(--text-rgb) / 0.08);
+}
+/* 玻璃档：窗口正文更透 —— 桌面/壁纸能透过来，侧栏的磨砂才有东西可"磨"。
+   （之前正文接近实色，侧栏背后是一块纯色，玻璃质感永远显不出来。） */
+/* **只在"完整玻璃"档生效**：降低材质 / 实色两档在设计系统（D1-04C）里的定义就是
+   "正文实色、只去掉模糊"，不能被这条透化破坏。 */
+.desktop[data-glass="full"] .window-body {
+  background: rgb(var(--content-rgb) / calc(var(--content-alpha) * 0.45));
+}
+/* 侧栏"材质"：比正文**略亮一档** + vibrancy（提饱和提亮）—— macOS 侧栏看起来"是另一种材料"，
+   靠的就是这个；同色同透明度只会像一块实心板。"实色"档仍不动。 */
+.desktop[data-glass="full"] .window:has(.split) .split-side {
+  /* 用户口径：侧栏再透一些（0.34 → 0.24），磨砂更厚（blur 36 → 46） */
+  background-color: rgb(var(--content-rgb) / 0.24);
+  background-image: linear-gradient(rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.06));
+  backdrop-filter: blur(46px) saturate(1.6);
+  -webkit-backdrop-filter: blur(46px) saturate(1.6);
+}
+.desktop[data-glass="full"]:not(.dark) .window:has(.split) .split-side {
+  background-image: linear-gradient(rgba(0, 0, 0, 0.035), rgba(0, 0, 0, 0.035));
+}
+/* 顶部磨砂已整层移除，因此工具条不再贴顶（没有磨砂兜着，贴顶会压在滚动内容上）。
+   工具条随内容一起滚，这也是移除该功能前原本的行为。 */
+/* 用户口径：滚动时**不要出现滚动条**（内容仍可正常滚动，只是不画那条轨道/滑块）。 */
+.desktop * {
+  scrollbar-width: none; /* Firefox 写法，Chromium 会忽略 */
+}
+.desktop *::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+/* 系统文字默认不可选中：拖拽 / 框选时误选文字是真实困扰；输入框与预格式文本除外 */
+.desktop {
+  user-select: none;
+  -webkit-user-select: none;
+}
+.desktop input,
+.desktop textarea,
+.desktop [contenteditable="true"],
+.desktop .quicklook-text,
+.desktop pre {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* 壁纸层：只有自定义壁纸画在这里；内置"浅色 / 深色主题色"由 .desktop[data-wallpaper] 提供 */
+.desktop-wallpaper {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.wallpaper-media {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* 自定义壁纸的底色（跟随主题的基色） */
+.desktop.dark[data-wallpaper="custom"] {
+  background: #171717;
+}
+.desktop:not(.dark)[data-wallpaper="custom"] {
+  background: #f2f2f4;
+}
+/* ── 动态 AI 球：球体来自 orb-ui（MIT，© Alexander Chen，https://orb-ui.com）────────────
+   这一层只负责外框：尺寸与静态回退用的图（用户口径：底部这边去掉边框，所以不再套 App 图标底板）。
+   球本身的 WebGL 画布由 orb-ui 渲染在 .orb-canvas 上，这里只保证它是圆的、铺满外框。 */
+.orb {
+  display: grid;
+  place-items: center;
+  position: relative;
+  border-radius: 50%;
+  /* 裸球不裁：orb-ui 的光晕会超出盒子，裁掉会变成硬边 */
+  overflow: visible;
+  transform-origin: bottom center;
+}
+/* Dock 里那一版跟着程序坞图标大小走（--dock-icon 由 .desktop 下发） */
+.orb.dock-icon {
+  width: var(--dock-icon, 47px);
+  height: var(--dock-icon, 47px);
+}
+/* 原生 Siri Blob：黑底视频逐帧抠黑后画进这块画布。视频本身必须留在渲染树里
+   （见 SiriBlob.tsx），所以缩到 1px、压到几乎全透明地藏在画布下面。 */
+.orb-siri {
+  position: relative;
+  display: block;
+  transform-origin: center center;
+  will-change: transform, filter;
+}
+.orb-siri > video {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0.001;
+  pointer-events: none;
+}
+.orb-siri > canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+}
+/* 原生 Siri Blob 和程序化球都自带发光；再叠 orb-ui 那圈蓝柔光会变成一颗大灰球，
+   所以**自发光的两级**都关掉（只有退到最后一级 orb-ui 时才让那圈柔光上场）。 */
+.orb-native::after,
+.orb-procedural::after {
+  display: none;
+}
+/* 球外的柔光（用户口径：「那种柔光，散发出来的，越往外越看不清」）。
+   不是一圈亮边，而是从球面往**外**一路衰减到看不见：范围开到 ±26%，
+   球面（约 55% 半径）最亮，之后 60/70/82/100% 逐级变淡，最外圈归零。
+   两个作用：①发光的球；②柔光压住球边缘那条片元硬边，锯齿就看不见了。
+   静态渐变、不参与动画，逐帧成本为零。 */
+.orb::after {
+  content: "";
+  position: absolute;
+  inset: -26%;
+  border-radius: 50%;
+  z-index: 2;
+  pointer-events: none;
+  background: radial-gradient(
+    circle,
+    rgba(160, 190, 255, 0) 0%,
+    rgba(160, 190, 255, 0) 42%,
+    rgba(168, 196, 255, 0.32) 54%,
+    rgba(140, 170, 255, 0.26) 63%,
+    rgba(118, 146, 251, 0.14) 73%,
+    rgba(100, 124, 251, 0.06) 84%,
+    rgba(100, 124, 251, 0) 100%
+  );
+}
+.orb-scale {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: grid;
+  place-items: center;
+  transform-origin: center center;
+}
+/*
+ * 球体本身**不用一圈边**收尾，而是把外圈羽化掉：越往外越透明，最后融进背景 ——
+ * 用户口径就是「那种柔光，散发出来的，越往外越看不清」。
+ * 这同时消掉了 orb-ui 片元硬边的锯齿（没有边可看，自然没有台阶）。
+ *
+ * 关键：mask 必须作用在**画布本身**上（.orb-canvas 只是 orb-ui 的根 div，
+ * 它比球大一圈，closest-side 会算错 —— 实测这样 mask 完全落在球内部，等于没羽化）。
+ * mask 是静态的，逐帧成本为零。
+ */
+.orb-canvas canvas {
+  display: block;
+  border-radius: 50%;
+  -webkit-mask-image: radial-gradient(
+    circle closest-side,
+    #000 0 74%,
+    rgba(0, 0, 0, 0.8) 84%,
+    rgba(0, 0, 0, 0.45) 92%,
+    rgba(0, 0, 0, 0.16) 97%,
+    transparent 100%
+  );
+  mask-image: radial-gradient(
+    circle closest-side,
+    #000 0 74%,
+    rgba(0, 0, 0, 0.8) 84%,
+    rgba(0, 0, 0, 0.45) 92%,
+    rgba(0, 0, 0, 0.16) 97%,
+    transparent 100%
+  );
+}
+/* 减少动态效果时的静态帧：把 siri.png 自带的底板裁掉，只留球（与动态版观感一致） */
+.orb-static {
+  display: block;
+  border-radius: 50%;
+  object-fit: contain;
+  -webkit-mask-image: radial-gradient(circle closest-side, #000 0 70%, transparent 78%);
+  mask-image: radial-gradient(circle closest-side, #000 0 70%, transparent 78%);
+}
+
+/* 设置页：壁纸选择 */
+/* 壁纸行右上角的两颗胶囊 */
+.wallpaper-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* 「查看更多」的方向提示：展开时箭头翻过来 */
+.wallpaper-actions .control-button svg {
+  transition: transform var(--quick) var(--ease);
+}
+.wallpaper-actions .control-button[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+.control-button {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--radius-pill);
+  background: var(--sunken);
+  color: var(--text);
+  font-size: var(--fs-caption);
+  cursor: pointer;
+}
+.control-button:hover {
+  background: var(--row-hover);
+}
+.wallpaper-cell {
+  position: relative;
+}
+.wallpaper-del {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 11px;
+  opacity: 0;
+  transition: opacity var(--quick) var(--ease);
+}
+.wallpaper-cell:hover .wallpaper-del,
+.wallpaper-del:focus-visible {
+  opacity: 1;
+}
+.wallpaper-grid {
+  display: grid;
+  /* 一排 5 张；第 6 张起由「查看更多」就地展开 */
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10px;
+  margin-top: 14px;
+}
+.wallpaper-more {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0 0 5px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity var(--quick) var(--ease);
+}
+.wallpaper-cell:hover .wallpaper-more,
+.wallpaper-more:focus-visible {
+  opacity: 1;
+}
+.wallpaper-option {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  display: grid;
+  align-items: end;
+  padding: 8px;
+  text-align: left;
+  color: var(--text);
+  font-size: var(--fs-caption);
+  background: var(--sunken);
+}
+.wallpaper-option.on {
+  box-shadow: inset 0 0 0 2px rgb(var(--text-rgb) / 0.5);
+}
+.wallpaper-option img,
+.wallpaper-option video,
+.wallpaper-option canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.wallpaper-option > span {
+  position: relative;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.55);
+}
+
+/* 内置壁纸色板：就是主题基色（浅色 / 深色） */
+.wallpaper-option[data-wallpaper="theme-light"] {
+  background: #f2f2f4;
+}
+/* 浅色色板上的标签要换深色字，否则白字看不清 */
+.wallpaper-option[data-wallpaper="theme-light"] > span {
+  color: #171717;
+  text-shadow: none;
+}
+.wallpaper-option[data-wallpaper="theme-dark"] {
+  background: #171717;
+}
+/* 锁屏区块的内置色板与桌面同值（属性名不同，故各写一条；不新增 token） */
+.wallpaper-option[data-lock-wallpaper="theme-light"] {
+  background: #f2f2f4;
+}
+.wallpaper-option[data-lock-wallpaper="theme-light"] > span {
+  color: #171717;
+  text-shadow: none;
+}
+.wallpaper-option[data-lock-wallpaper="theme-dark"] {
+  background: #171717;
+}
+
+/* 桌面上的文件（与文件夹里同一套真实数据，同样显示缩略图） */
+.desktop-file {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: calc(var(--desk-icon, 58px) + 38px);
+  padding: 7px 4px 5px;
+  border-radius: var(--radius-md);
+  text-align: center;
+  touch-action: none;
+  user-select: none;
+}
+.desktop-file:hover {
+  background: rgb(var(--text-rgb) / 0.06);
+}
+/* 桌面磁贴的选中/焦点**不要线框**（用户口径：不要线框或发丝线框；与菜单项同一口径）。
+   浏览器默认的 focus ring 是 outline 方框 —— 它在桌面图标上会画出一个明显黑框，
+   所以这里显式去掉 outline，改用**填充高亮**表达"选中/获得键盘焦点"：
+   既不出现任何线，又保留可见反馈与键盘可达性。 */
+.desktop-folder:focus,
+.desktop-file:focus,
+.desktop-folder:focus-visible,
+.desktop-file:focus-visible {
+  outline: none;
+}
+.desktop-folder:focus,
+.desktop-file:focus {
+  background: rgb(var(--text-rgb) / 0.1);
+}
+.dark .desktop-folder:focus,
+.dark .desktop-file:focus {
+  background: rgba(255, 255, 255, 0.14);
+}
+/* 只有"松手落格"这一段有过渡：拖动过程必须 1:1 跟手（reduced motion 下 token 为 0ms） */
+/* 拖拽中的落点提示：只加底色，不画线框（与选中态同一口径） */
+[data-drop-folder].drop-target,
+.file-cell.drop-target {
+  background: rgb(var(--text-rgb) / 0.14);
+}
+/* 桌面框选 / 多选后的选中态：**只有填充、没有线框** ——
+   与上面 focus 那条同一口径（用户口径：选择时不要出现线框，底色再淡一点）。 */
+.desktop-folder.selected,
+.desktop-file.selected {
+  background: rgb(var(--text-rgb) / 0.08);
+}
+/* 桌面橡皮筋：图标之上（z 2）、窗口之下（z 10+） */
+.desktop > .marquee {
+  z-index: 3;
+}
+.desktop-file.settling,
+.desktop-folder.settling {
+  transition:
+    left var(--dur-standard) var(--ease-standard),
+    top var(--dur-standard) var(--ease-standard);
+}
+.desktop-thumb {
+  width: calc(var(--desk-icon, 58px) * 0.9);
+  height: calc(var(--desk-icon, 58px) * 0.9);
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+  pointer-events: none;
+}
+.desktop-glyph {
+  display: grid;
+  place-items: center;
+  width: calc(var(--desk-icon, 58px) * 0.9);
+  height: calc(var(--desk-icon, 58px) * 0.9);
+  color: var(--text);
+  pointer-events: none;
+}
+.desktop-file-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-caption);
+}
+/* 内置壁纸：只保留"浅色 / 深色主题色"两种（其余预设已按用户口径删除） */
+.desktop[data-wallpaper="theme-light"] {
+  background: #f2f2f4;
+}
+.desktop[data-wallpaper="theme-dark"] {
+  background: #171717;
+}
+
+/* 文件夹：分组块 + 框选橡皮筋 */
+.file-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.file-group-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.file-group-block .split-section {
+  margin: 0;
+}
+/* 框选：与指针 1:1（不加过渡 —— 手势驱动的位移永远跟随当前值） */
+.marquee {
+  position: absolute;
+  border: 1px solid rgb(var(--text-rgb) / 0.42);
+  background: rgb(var(--text-rgb) / 0.1);
+  border-radius: 2px;
+  pointer-events: none;
+}
+.folder-body {
+  position: relative;
+  /* 框选时不要选中文字 */
+  user-select: none;
+}
+/* 显示简介 */
+.info-card {
+  min-width: 280px;
+  max-width: 360px;
+}
+.info-title {
+  margin: 0;
+  font-size: var(--fs-heading);
+  font-weight: 600;
+}
+.info-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+}
+.info-row {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  gap: 10px;
+  font-size: var(--fs-caption);
+}
+.info-row dt {
+  color: var(--muted);
+}
+.info-row dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Quick Look：空格预览（图片/视频/音频/文本） */
+.quicklook {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: grid;
+  place-items: center;
+  padding: 48px;
+  background: rgb(0 0 0 / 0.55);
+  backdrop-filter: blur(6px);
+}
+.quicklook-card {
+  max-width: min(920px, 82vw);
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: var(--radius-xl);
+  background: rgb(var(--surface-rgb) / var(--surface-alpha));
+  box-shadow: var(--elevation-4);
+}
+.quicklook-body {
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  overflow: auto;
+}
+.quicklook-body img,
+.quicklook-body video {
+  max-width: 100%;
+  max-height: 68vh;
+  border-radius: var(--radius-md);
+}
+.quicklook-text {
+  max-width: 780px;
+  max-height: 68vh;
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.quicklook-name {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: var(--fs-caption);
+}
+.file-cell.selected {
+  /* 与桌面选中同一档：只有填充、没有线框 */
+  background: rgb(var(--text-rgb) / 0.08);
+}
+/* 查看方式：胶囊形分段控件 */
+.segmented {
+  border-radius: var(--radius-pill);
+}
+.segmented button {
+  border-radius: var(--radius-pill);
+}
+
+/* 文件夹内容：图标网格 / 列表 */
+.file-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+}
+.file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.file-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 8px;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-caption);
+  text-align: center;
+  cursor: default;
+  user-select: none;
+  transition: background var(--quick) var(--ease);
+}
+.file-cell:focus-visible {
+  outline: none;
+  background: var(--row-hover);
+}
+.file-cell:hover {
+  background: var(--row-hover);
+}
+.file-list .file-cell {
+  flex-direction: row;
+  justify-content: flex-start;
+  text-align: left;
+  padding: 7px 10px;
+}
+/* 文件条目的线性图标（图片/视频/音频/文档/压缩包/其它） */
+.file-glyph {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  color: var(--muted);
+}
+.file-list .file-glyph {
+  width: 22px;
+  height: 22px;
+}
+.file-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 真实缩略图（图片/视频） */
+.file-thumb {
+  width: 46px;
+  height: 46px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+}
+.file-list .file-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-xs);
 }
 .context-menu .danger {
   color: var(--failed);
@@ -1241,47 +2509,176 @@ input[type="checkbox"] {
 
 /* 锁屏：覆盖在最上层，且必须挡住原生网页视图的键盘与指针。
    原生视图的隐藏由主进程 overlayOpen 完成（DOM z-index 对 WebContentsView 无效）。 */
-.lock-shade {
+/* ── Apple 锁屏布局：登录与锁屏共用同一套舞台 ──────────────────────────────
+   舞台 = 一整屏磨砂壁纸；内容只有两件：顶部居中的时钟，和居中的身份块。
+   身份块不再是卡片 —— 唯一的面是口令输入槽（DESIGN_SYSTEM 0.2：分层靠明度差，不靠边框）。 */
+.lock-stage {
   position: absolute;
   inset: 0;
-  z-index: 80;
+  /* 系统锁屏是逻辑层序的最上层（DESIGN_SYSTEM §7）：必须压过 Dock(85)、
+     模态对话框(300) 与通知(400)。低于 Dock 时锁屏下方会露出程序坞。 */
+  z-index: 500;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: var(--space-8);
-  background: rgb(var(--base-rgb) / 0.55);
-  backdrop-filter: var(--glass-filter);
-  -webkit-backdrop-filter: var(--glass-filter);
+  justify-content: flex-end;
+  /* Apple 锁屏：身份块落在下半屏，不居中 */
+  padding: var(--space-8) var(--space-8) clamp(48px, 15vh, 150px);
+  /* 壁纸要清晰，不再磨砂（去掉 backdrop-filter）；底座取主题基色，
+     保证不透明、能盖住桌面窗口。内置「浅色 / 深色主题色」由下面的属性规则接管。 */
+  background-color: rgb(var(--base-rgb));
+  /* 文字明暗与 scrim 跟随壁纸（下方按 data-lock-tone 覆盖），不再跟随 App 主题。
+     这三个是舞台局部变量，不是 token（token 名由 tokens.css 独占）。 */
+  --lock-fg: #1d1d1f;
+  --lock-fg-soft: #58585d;
+  --lock-scrim-rgb: 245 245 247;
+}
+
+/* 深色壁纸：浅色文字 + 深色 scrim。 */
+.lock-stage[data-lock-tone="light"] {
+  --lock-fg: #f5f5f7;
+  --lock-fg-soft: #c7c7cc;
+  --lock-scrim-rgb: 0 0 0;
+}
+
+/* 内置「浅色 / 深色主题色」锁屏壁纸：字面值与桌面壁纸规则一致，不新增 color token。 */
+.lock-stage[data-lock-wallpaper="theme-light"] {
+  background-color: #f2f2f4;
+}
+.lock-stage[data-lock-wallpaper="theme-dark"] {
+  background-color: #171717;
+}
+
+/* 壁纸层：清晰显示，压在 scrim 之下、内容之上。 */
+.lock-wallpaper {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* 文字保护 scrim：四层同色叠加，颜色取 --lock-scrim-rgb（tone dark 即浅、tone light 即深）。
+   文字色已经跟壁纸走，scrim 不再需要"扛住反向文字色"，只做局部压暗/提亮：
+   顶部托时钟、底部托脚注与身份块下沿、身份块那圈用人像位径向补上，全局那层极淡兜底。
+   强度克制，中间带（约 30%-52%）看不到明显色块，壁纸保持清晰。 */
+.lock-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgb(var(--lock-scrim-rgb) / 0.3) 0%, rgb(var(--lock-scrim-rgb) / 0.16) 24%, transparent 44%),
+    radial-gradient(560px 380px at 50% 64%, rgb(var(--lock-scrim-rgb) / 0.34), transparent 72%),
+    linear-gradient(0deg, rgb(var(--lock-scrim-rgb) / 0.36) 0%, rgb(var(--lock-scrim-rgb) / 0.2) 30%, transparent 70%),
+    rgb(var(--lock-scrim-rgb) / 0.08);
+  background-repeat: no-repeat;
+}
+
+/* 入场：时钟与身份块各做一次轻微上浮 + 淡入。
+   时长走 --dur-slow，reduced-motion 由 token 层的统一清零接管，不写死时长。 */
+@keyframes lock-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.lock-clock {
+  position: absolute;
+  top: clamp(48px, 15vh, 132px);
+  right: 0;
+  left: 0;
+  /* 内容必须压在壁纸与 scrim 之上 */
+  z-index: 2;
+  text-align: center;
+  pointer-events: none;
+  animation: lock-rise var(--dur-slow) var(--ease-standard) both;
+}
+/* date 是时间的从属行：小字号 + 宽字距，靠字重与颜色拉开层级，不加粗到 700。 */
+.lock-date {
+  font-size: var(--fs-secondary);
+  font-weight: var(--fw-regular);
+  letter-spacing: var(--tracking-wide);
+  line-height: var(--lh-tight);
+  color: var(--lock-fg-soft);
+}
+.lock-time {
+  margin-top: 0;
+  font-size: var(--fs-clock);
+  font-weight: var(--fw-medium);
+  line-height: 1;
+  letter-spacing: var(--tracking-tight);
+  font-variant-numeric: tabular-nums;
+  color: var(--lock-fg);
 }
 .lock-panel {
+  position: relative;
+  z-index: 2;
   width: 100%;
-  max-width: 380px;
-  padding: var(--space-8);
-  border-radius: var(--radius-xl);
-  background: rgb(var(--surface-rgb) / var(--surface-alpha));
-  box-shadow: var(--elevation-5);
+  max-width: 340px;
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
+  animation: lock-rise var(--dur-slow) var(--ease-standard) both;
 }
 .lock-avatar {
-  width: 56px;
-  height: 56px;
+  width: 72px;
+  height: 72px;
   border-radius: var(--radius-pill);
   background: var(--accent);
   color: var(--on-accent);
   font-size: var(--fs-title);
+  font-weight: var(--fw-medium);
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: var(--space-3);
+  margin-bottom: var(--space-2);
+  /* 阴影之外补一条内侧顶部高光。深色下 elevation 已含同款 inset，
+     显式叠加是为了浅色主题也能读出玻璃厚度（材质高光，不是描边）。 */
+  box-shadow: inset 0 1px 0 var(--material-top-highlight), var(--elevation-2);
+  user-select: none;
+}
+/* 深色壁纸下 --accent 近黑，贴背景容易糊掉；补一条极轻的边缘高光，不改结构。 */
+.lock-stage[data-lock-tone="light"] .lock-avatar {
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.16),
+    inset 0 1px 0 var(--material-top-highlight),
+    var(--elevation-2);
 }
 .lock-name {
-  font-size: var(--fs-heading);
+  font-size: var(--fs-title);
   font-weight: var(--fw-medium);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--lh-tight);
+  color: var(--lock-fg);
 }
-.lock-panel form {
+/* 时钟与名字补一层极淡的辉光（scrim 同色）：与文字明暗反向，极端壁纸上兜底。 */
+.lock-date,
+.lock-time,
+.lock-name {
+  text-shadow: 0 1px 14px rgb(var(--lock-scrim-rgb) / 0.45);
+}
+.lock-identifier {
+  margin-top: var(--space-1);
+  font-size: var(--fs-caption);
+  letter-spacing: 0.02em;
+  color: var(--lock-fg-soft);
+}
+.lock-form {
+  width: 100%;
+  margin-top: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.lock-input {
+  position: relative;
   width: 100%;
 }
 
@@ -1405,4 +2802,261 @@ input[type="checkbox"] {
 .approval-note { margin: 0; font-size: var(--fs-micro, 11px); opacity: 0.68; line-height: var(--lh-relaxed, 1.5); }
 .approval-notice { margin: 0; font-size: var(--fs-caption, 12px); color: #ff8a8a; }
 
+/* 口令槽是锁屏唯一的面：半透明玻璃 + 胶囊圆角，高度抬到 ~44px。
+   聚焦是"玻璃更亮"（surface alpha 抬升），不是压暗成灰块。 */
+.lock-input input {
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-pill);
+  background: rgb(var(--surface-rgb) / var(--surface-alpha));
+  backdrop-filter: var(--glass-filter-tip);
+  -webkit-backdrop-filter: var(--glass-filter-tip);
+  text-align: left;
+}
+.lock-input input::placeholder {
+  color: var(--placeholder);
+}
+.lock-input input:focus-visible {
+  outline: none;
+  background: rgb(var(--surface-rgb) / calc(var(--surface-alpha) + 0.14));
+  box-shadow: inset 0 1px 0 var(--material-top-highlight-active);
+}
+.lock-input--act input {
+  padding-right: calc(var(--space-8) + var(--space-3));
+}
+.lock-submit {
+  position: absolute;
+  top: 50%;
+  right: var(--space-1);
+  width: var(--space-8);
+  height: var(--space-8);
+  transform: translateY(-50%);
+  border-radius: var(--radius-pill);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: var(--on-accent);
+  transition:
+    transform var(--dur-quick) var(--ease-standard),
+    background-color var(--dur-quick) var(--ease-standard),
+    color var(--dur-quick) var(--ease-standard);
+}
+/* 禁用不再靠整体 opacity：淡底 + muted 箭头，仍读得出是"可提交位"。
+   定位用了 translateY(-50%)，按下反馈必须把它带上，否则会跳到中心线。 */
+.lock-submit:disabled {
+  background: var(--hover-tint);
+  color: var(--muted);
+  cursor: default;
+}
+.lock-submit:not(:disabled):active {
+  transform: translateY(-50%) scale(0.92);
+}
+/* 退出登录：低调胶囊，hover 用抬亮层，按下轻微内缩。 */
+.lock-alt {
+  align-self: center;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-secondary);
+  color: var(--muted);
+  transition:
+    background-color var(--dur-quick) var(--ease-standard),
+    transform var(--dur-quick) var(--ease-standard);
+}
+.lock-alt:hover:not(:disabled) {
+  background: var(--hover-tint);
+}
+.lock-alt:not(:disabled):active {
+  transform: scale(0.97);
+}
+.lock-footnote {
+  max-width: 300px;
+  margin-top: var(--space-4);
+  font-size: var(--fs-micro);
+  line-height: var(--lh-normal);
+  color: var(--lock-fg-soft);
+}
+
+/* ── 文件夹图标 ──────────────────────────────────────────────────────────────
+   移植 React Bits 的 Folder（reactbits.dev/components/folder）的**合上态**：
+   悬停时整体上浮、两片前板向外 skew 张开，里面的纸张探出一点。
+   几何照抄原组件（100×80 底板 + 三张纸 + 两片前板），整体用 --folder-w 缩放，
+   所以内部尺寸一律用 em（1em = 文件夹宽度）。 */
+.rb-folder {
+  --folder-w: 58px;
+  --folder-color: #278fff;
+  --folder-back: color-mix(in srgb, var(--folder-color) 92%, #000);
+  --paper-1: color-mix(in srgb, #fff 90%, #000);
+  --paper-2: color-mix(in srgb, #fff 95%, #000);
+  --paper-3: #fff;
+  position: relative;
+  display: block;
+  font-size: var(--folder-w);
+  width: 1em;
+  height: 0.8em;
+}
+.dark .rb-folder {
+  --folder-color: #3f96ff;
+}
+.rb-folder-inner {
+  position: absolute;
+  inset: 0;
+  background: var(--folder-back);
+  border-radius: 0 0.1em 0.1em 0.1em;
+  transition: transform 200ms ease-in;
+  cursor: pointer;
+}
+/* 左上那个小"舌头" */
+.rb-folder-tab {
+  position: absolute;
+  left: 0;
+  bottom: 97%;
+  width: 0.3em;
+  height: 0.1em;
+  background: var(--folder-back);
+  border-radius: 0.05em 0.05em 0 0;
+}
+/* 三张纸：合上时缩在前板后面，悬停时各往上探 10% */
+.rb-folder-paper {
+  position: absolute;
+  left: 50%;
+  bottom: 10%;
+  z-index: 20;
+  border-radius: 0.1em;
+  transform: translate(-50%, 10%);
+  transition: transform 300ms ease-in-out;
+}
+.rb-paper-1 {
+  width: 70%;
+  height: 80%;
+  background: var(--paper-1);
+}
+.rb-paper-2 {
+  width: 80%;
+  height: 70%;
+  background: var(--paper-2);
+}
+.rb-paper-3 {
+  width: 90%;
+  height: 60%;
+  background: var(--paper-3);
+}
+/* 两片前板：合上时叠在一起盖住纸张，悬停时向两侧 skew 张开成"开口" */
+.rb-folder-front {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  background: var(--folder-color);
+  border-radius: 0.05em 0.1em 0.1em 0.1em;
+  transform-origin: bottom;
+  transition: transform 300ms ease-in-out;
+}
+/* 悬停来源：桌面磁贴、访达里的条目、或文件夹自己 */
+:is(.desktop-folder, .file-cell, .rb-folder):hover .rb-folder-inner {
+  transform: translateY(-0.08em);
+}
+:is(.desktop-folder, .file-cell, .rb-folder):hover .rb-front-a {
+  transform: skew(15deg) scaleY(0.6);
+}
+:is(.desktop-folder, .file-cell, .rb-folder):hover .rb-front-b {
+  transform: skew(-15deg) scaleY(0.6);
+}
+:is(.desktop-folder, .file-cell, .rb-folder):hover .rb-folder-paper {
+  transform: translate(-50%, 0);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   D3-01 · 头像选择（初始化 / 系统设置共用）
+
+   只追加在文件末尾，不动上面任何既有 Apple 锁屏规则。
+   全部沿用既有 token：不引入新颜色 / 新圆角，组件层不重声明 token 名。
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* 头像容器：只负责"填满调用方并居中"，不设背景、不设固定尺寸 ——
+   64px 大头像与 44px 预设小圆因此能复用同一个组件，圆由调用方的 class 决定。 */
+.avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: inherit;
+}
+.avatar-preset {
+  width: 100%;
+  height: 100%;
+}
+.avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+/* 设置页的预览头像：尺寸与圆在这里定，Avatar 本身不带背景与尺寸。 */
+.profile-avatar {
+  align-self: center;
+  width: 72px;
+  height: 72px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--fs-title);
+  font-weight: var(--fw-medium);
+  box-shadow: var(--elevation-2);
+}
+.profile-presets {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: var(--space-2);
+  width: 100%;
+}
+.profile-preset {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  padding: 0;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--sunken);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.profile-preset[aria-pressed="true"] {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.profile-preset:disabled,
+.profile-upload:disabled {
+  opacity: var(--disabled-opacity);
+  cursor: default;
+}
+.profile-upload {
+  align-self: center;
+  font-size: var(--fs-secondary);
+  color: var(--muted);
+  text-decoration: underline;
+}
+.profile-hint {
+  margin: 0;
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+.profile-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.profile-actions .primary {
+  padding: 10px 18px;
+  font-size: var(--fs-secondary);
+}
+.profile-actions .primary:disabled {
+  opacity: var(--disabled-opacity);
+  cursor: default;
+}
 

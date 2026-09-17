@@ -13,6 +13,13 @@
  *   ② 运行时 —— 在真实外壳页里枚举 window.openarc；再挂一个不可信 http 视图，
  *      在里面确认桥接与 Node 能力都够不着，并且伪输入被策略挡掉。
  *
+ * **D3-04 变更（2026-09-12，显式登记）**：暴露面 6 → 7，新增 `files` 与通道
+ *   `files:import` / `files:list` / `files:rename` / `files:remove`。
+ *   新增内容 = `pathFor(file)`（Electron 44 起 File.path 已移除，必须由 webUtils 换路径）、
+ *   `import(folderId, paths)`（**拷贝进** userData/files/<folderId>/）、`list` / `rename` / `remove`。
+ *   **没有**暴露 fs / path / shell，也没有任意路径读取：folderId 白名单与固定根目录在
+ *   electron/file-service.cjs 里收口，渲染进程只拿到条目索引（不含磁盘路径）。
+ *
  * **D3-01 变更（2026-09-11，显式登记）**：暴露面 5 → 6，新增 `identity`
  * 与通道 `identity:command`。
  *   新增内容 = **两个方法**：`identity.command(cmd)` 派发领域命令、
@@ -49,8 +56,16 @@ try {
   mainLoadError = err;
 }
 
-/** 冻结清单 —— 与 electron/preload.cjs 的现状逐字对应（D3-04A 后为 9 个）。 */
-const FROZEN_BRIDGE_KEYS = ["action", "authorization", "device", "governance", "identity", "model", "navigate", "onDisplay", "onNativeState", "resource", "sync"];
+/**
+ * 冻结清单 —— 与 electron/preload.cjs 的现状逐字对应。
+ * 集成后 = 核心线（identity/authorization/device/resource/governance/model/task/sideEffect）
+ *        + UI 线文件桥 files，共 14 个。
+ */
+const FROZEN_BRIDGE_KEYS = ["action", "authorization", "device", "files", "governance", "identity", "model", "navigate", "onDisplay", "onNativeState", "resource", "sideEffect", "sync", "task"];
+/** D2-02 冻结的历史基线（5 个）：新增成员必须逐个登记在 REGISTERED_EXPANSIONS。 */
+const PREV_BRIDGE_KEYS = ["action", "navigate", "onDisplay", "onNativeState", "sync"];
+/** 相对 D2-02 基线的全部已登记扩张（顺序与 sorted bridgeKeys 的差集一致）。 */
+const REGISTERED_EXPANSIONS = ["authorization", "device", "files", "governance", "identity", "model", "resource", "sideEffect", "task"];
 /**
  * 冻结的 IPC 通道。
  *
@@ -58,10 +73,36 @@ const FROZEN_BRIDGE_KEYS = ["action", "authorization", "device", "governance", "
  * 分别注册在各自的 *-bootstrap.cjs（与 UI 探针共用同一份装配），不在 main.cjs 里。
  * 只扫 main.cjs 会漏掉它们 —— 因此全部 bootstrap 都要扫。
  */
-const FROZEN_IPC_CHANNELS = ["authorization:command", "browser:action", "browser:navigate", "device:command", "governance:command", "identity:command", "model:command", "resource:command", "windows:sync"];
-const IPC_SCAN_FILES = ["main.cjs", "identity-bootstrap.cjs", "authorization-bootstrap.cjs", "device-bootstrap.cjs", "resource-bootstrap.cjs", "governance-bootstrap.cjs", "model-bootstrap.cjs"];
-/** D3-04D 冻结的上一版清单（10 个，含 governance），用于把"发生了什么变化"讲清楚。 */
-const PREV_BRIDGE_KEYS = ["action", "authorization", "device", "governance", "identity", "navigate", "onDisplay", "onNativeState", "resource", "sync"];
+const FROZEN_IPC_CHANNELS = [
+  "authorization:command",
+  "browser:action",
+  "browser:navigate",
+  "device:command",
+  "files:copy",
+  "files:export",
+  "files:import",
+  "files:info",
+  "files:list",
+  "files:move",
+  "files:read",
+  "files:remove",
+  "files:rename",
+  "files:thumb",
+  "governance:command",
+  "identity:command",
+  "model:command",
+  "resource:command",
+  "sideeffect:command",
+  "task:command",
+  "windows:sync",
+];
+/**
+ * `ipcMain.on`（fire-and-forget）面：与 handle 分开冻结。
+ * 渲染层同样能打到它们，所以必须一起审 —— 不能因为"不是 invoke"就漏在清单外。
+ */
+const FROZEN_IPC_ON_CHANNELS = ["files:startDrag"];
+/** 扫描范围必须覆盖所有注册 handler 的 bootstrap，否则冻结清单可以靠"漏扫"骗过。 */
+const IPC_SCAN_FILES = ["main.cjs", "identity-bootstrap.cjs", "authorization-bootstrap.cjs", "device-bootstrap.cjs", "resource-bootstrap.cjs", "governance-bootstrap.cjs", "model-bootstrap.cjs", "task-bootstrap.cjs", "side-effect-bootstrap.cjs"];
 /** D3-02 冻结的版本（7 个，仅作历史留痕）。 */
 const D3_02_BRIDGE_KEYS = ["action", "authorization", "identity", "navigate", "onDisplay", "onNativeState", "sync"];
 /** D3-01 冻结的版本（6 个，仅作历史留痕）。 */
@@ -110,13 +151,18 @@ exports.run = async function run({ report, sleep, add, out }) {
     JSON.stringify(bridgeKeys) === JSON.stringify(FROZEN_BRIDGE_KEYS),
     `preload 暴露 ${JSON.stringify(bridgeKeys)}；冻结清单 ${JSON.stringify(FROZEN_BRIDGE_KEYS)}`,
   );
+  // 暴露面的每一次扩张都必须在这里**显式登记**（D3-01 identity、D3-04 files）。
+  // 断言的是"新增的键恰好是登记过的这两个、且 D2-02 的键一个没少"，
+  // 因此任何未经登记的扩张都会让这条 FAIL。
+  const REGISTERED_EXPANSIONS = ["files", "identity"];
   add(
-    "sec.bridgeExpandedOnlyByModel",
-    bridgeKeys.length === PREV_BRIDGE_KEYS.length + 1 &&
-      bridgeKeys.filter((k) => !PREV_BRIDGE_KEYS.includes(k)).join() === "model" &&
+    "sec.bridgeExpansionRegistered",
+    REGISTERED_EXPANSIONS.every((k) => bridgeKeys.includes(k)) &&
+      bridgeKeys.filter((k) => !PREV_BRIDGE_KEYS.includes(k)).join() === REGISTERED_EXPANSIONS.join() &&
       PREV_BRIDGE_KEYS.every((k) => bridgeKeys.includes(k)),
-    `上一版冻结 ${PREV_BRIDGE_KEYS.length} 个成员，现在 ${bridgeKeys.length} 个` +
+    `D2-02 冻结 ${PREV_BRIDGE_KEYS.length} 个成员，现在 ${bridgeKeys.length} 个` +
       `（新增 ${JSON.stringify(bridgeKeys.filter((k) => !PREV_BRIDGE_KEYS.includes(k)))}，` +
+      `登记为 ${JSON.stringify(REGISTERED_EXPANSIONS)}；` +
       `移除 ${JSON.stringify(PREV_BRIDGE_KEYS.filter((k) => !bridgeKeys.includes(k)))}）`,
   );
   add(
@@ -137,15 +183,34 @@ exports.run = async function run({ report, sleep, add, out }) {
   // 每个 handler 的第一件事都必须是信任校验。
   // 两条写法都要认：`!trusted(e)`（main.cjs）与 `isTrusted && !isTrusted(e)`（bootstrap，
   // 因为信任判据由调用方注入）。判据取"handler 开头 240 字符内出现 trusted(e)"。
+  // 注意：这里**不能**让匹配本身吃掉后面 240 个字符 —— matchAll 是不重叠的，
+  // 一旦吃掉，紧挨着的下一个 handler（比如 files:* 这组短 handler）会被整段跳过，
+  // 表现为"明明写了 trusted(e) 却判 FAIL"。改为记住位置、用 slice 看窗口。
   const guarded = sorted(
-    [...ipcSrc.matchAll(/ipcMain\.handle\(\s*"([^"]+)"\s*,[\s\S]{0,240}/g)]
-      .filter((m) => /trusted\(e\)|isTrusted\(e\)/.test(m[0]))
+    [...ipcSrc.matchAll(/ipcMain\.handle\(\s*"([^"]+)"/g)]
+      .filter((m) => /trusted\(e\)|isTrusted\(e\)/.test(ipcSrc.slice(m.index, m.index + 260)))
       .map((m) => m[1]),
   );
   add(
     "sec.everyChannelTrustsSender",
     JSON.stringify(sorted(guarded)) === JSON.stringify(FROZEN_IPC_CHANNELS),
     `过 trusted() 校验的 handler：${JSON.stringify(sorted(guarded))}，应为全部 ${JSON.stringify(FROZEN_IPC_CHANNELS)}`,
+  );
+  const onChannels = sorted([...ipcSrc.matchAll(/ipcMain\.on\(\s*"([^"]+)"/g)].map((m) => m[1]));
+  add(
+    "sec.ipcOnChannelsMatchFrozenList",
+    JSON.stringify(onChannels) === JSON.stringify(FROZEN_IPC_ON_CHANNELS),
+    `注册的 ipcMain.on 通道 ${JSON.stringify(onChannels)}；冻结清单 ${JSON.stringify(FROZEN_IPC_ON_CHANNELS)}`,
+  );
+  const onGuarded = sorted(
+    [...ipcSrc.matchAll(/ipcMain\.on\(\s*"([^"]+)"/g)]
+      .filter((m) => /trusted\(/.test(ipcSrc.slice(m.index, m.index + 260)))
+      .map((m) => m[1]),
+  );
+  add(
+    "sec.everyOnChannelTrustsSender",
+    JSON.stringify(onGuarded) === JSON.stringify(FROZEN_IPC_ON_CHANNELS),
+    `过 trusted() 校验的 on handler：${JSON.stringify(onGuarded)}，应为全部 ${JSON.stringify(FROZEN_IPC_ON_CHANNELS)}`,
   );
   add(
     "sec.shellWebPreferencesHardened",

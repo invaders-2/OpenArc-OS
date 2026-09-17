@@ -68,7 +68,12 @@ const READ = () => {
     cls: root.className,
     stored: localStorage.getItem("oa-glass"),
     legacy: localStorage.getItem("oa-opaque"),
-    select: document.querySelector(".material-select")?.value ?? null,
+    select: (() => {
+      const t = document
+        .querySelector('.segmented.text[aria-label="材质"] button[aria-pressed="true"]')
+        ?.textContent?.trim();
+      return t === "完整玻璃" ? "full" : t === "降低材质" ? "reduced" : t === "实色" ? "solid" : null;
+    })(),
     winCount: document.querySelectorAll(".window").length,
     viewports: document.querySelectorAll(".web-viewport").length,
     visibleWins: [...document.querySelectorAll(".window")].filter(
@@ -102,9 +107,10 @@ let switches = 0;
 let mismatch = 0;
 const burstSamples = [];
 
+const TIER_LABEL = { full: "完整玻璃", reduced: "降低材质", solid: "实色" };
 for (let c = 0; c < CYCLES; c++) {
   for (const target of ORDER) {
-    await page.selectOption(".material-select", target, { timeout: 5000 });
+    await page.click(`.segmented.text[aria-label="材质"] button:has-text("${TIER_LABEL[target]}")`, { timeout: 5000 });
     switches++;
     // 切换后立刻回读：data-glass / storage / select 是否三者一致
     const s = await page.evaluate(READ);

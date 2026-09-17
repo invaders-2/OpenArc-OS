@@ -110,6 +110,7 @@ const IDENTITY_COMMANDS = Object.freeze([
   "identity/unlock",
   "identity/change-password",
   "identity/validate",
+  "identity/update-profile",
 ]);
 
 /** 管理员 / 测试夹具命令。**不在产品 UI 里暴露**（§18 / §20）。 */
@@ -194,6 +195,48 @@ function validateDisplayName(raw) {
   return ok({ displayName: name });
 }
 
+/**
+ * 头像预设白名单。**服务端才是权威**：渲染层传来的 preset id 必须在这里命中，
+ * 否则一个拼错的 id 会变成库里一个永远渲染不出来的头像引用。
+ */
+const AVATAR_PRESETS = Object.freeze(["arc", "orbit", "wave", "grid", "sun", "moon"]);
+
+/**
+ * avatarRef 长度上限（字符数）。
+ *
+ * 上传头像允许 data:image/...;base64, 直接存引用，但**只存引用不存二进制**：
+ * 400k 字符约等于 300KB 图像，是降采样后的小图量级；再大就说明渲染层没有按
+ * 约定压缩。校验放服务端，避免把任意大字符串塞进身份库。
+ */
+const MAX_AVATAR_REF_LENGTH = 400_000;
+
+/** 只接受渲染层约定过的三种格式；jpeg / png / webp 之外一律拒。 */
+const AVATAR_DATA_URL_RE = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
+
+/**
+ * 校验头像引用。三态：
+ *   · null / undefined / ""  → ok({ avatarRef: null })，语义是清除头像
+ *   · preset:<id>            → id 必须来自 AVATAR_PRESETS
+ *   · data:image/...;base64, → 格式与长度校验（不解码 payload，服务端不处理像素）
+ * 其余一律 INVALID_INPUT，并带具体原因供 UI 与审计区分。
+ */
+function validateAvatarRef(raw) {
+  if (raw === null || raw === undefined) return ok({ avatarRef: null });
+  const ref = String(raw);
+  if (ref === "") return ok({ avatarRef: null });
+  if (ref.length > MAX_AVATAR_REF_LENGTH) return fail(ERROR.INVALID_INPUT, "avatar-ref-too-long");
+  if (ref.startsWith("preset:")) {
+    const id = ref.slice("preset:".length);
+    if (AVATAR_PRESETS.includes(id)) return ok({ avatarRef: ref });
+    return fail(ERROR.INVALID_INPUT, "avatar-preset-unknown");
+  }
+  if (ref.startsWith("data:")) {
+    if (!AVATAR_DATA_URL_RE.test(ref)) return fail(ERROR.INVALID_INPUT, "avatar-data-url-invalid");
+    return ok({ avatarRef: ref });
+  }
+  return fail(ERROR.INVALID_INPUT, "avatar-ref-invalid");
+}
+
 // ---------------------------------------------------------------------------
 // Identity Snapshot（§23）
 // ---------------------------------------------------------------------------
@@ -215,8 +258,8 @@ function identitySnapshot({ user, session, initialized } = {}) {
     role: user.role,
     status: user.status,
     teamId: user.team_id,
-    // avatarRef 是 D3 之后的事，字段先落位，恒为 null
-    avatarRef: null,
+    // avatarRef 来自 users.avatar_ref；从未设置过才是 null（不再是恒为 null）。
+    avatarRef: user.avatar_ref ?? null,
     sessionRef: session.ref,
     sessionId: session.id,
     createdAt: session.created_at,
@@ -307,6 +350,7 @@ const EVENT = Object.freeze({
   UNLOCKED: "identity/unlocked",
   LOGGED_OUT: "identity/logged-out",
   INITIALIZED: "identity/initialized",
+  PROFILE_UPDATED: "identity/profile-updated",
 });
 
 // ---------------------------------------------------------------------------
@@ -409,6 +453,9 @@ module.exports = {
   normalizeIdentifier,
   validateIdentifier,
   validateDisplayName,
+  AVATAR_PRESETS,
+  MAX_AVATAR_REF_LENGTH,
+  validateAvatarRef,
   identitySnapshot,
   emptySnapshot,
   installationSnapshot,

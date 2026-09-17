@@ -30,7 +30,7 @@
 :root {
   /* ── Typography ─────────────────────────────────────────────────────────
      系统 UI 字体栈。**不打包字体、不把品牌字体扩散到系统 UI**。
-     Space Grotesk 等品牌字体只允许出现在品牌展示位（desktop-brand 一类），
+     品牌字体只允许出现在品牌展示位；桌面背景上的字标与装饰圆已按用户口径移除，
      不属于 Design System 的 UI 字体面。 */
   font-family:
     -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
@@ -52,6 +52,7 @@
   --fs-caption: 12px; /* 说明文字、标签 */
   --fs-micro: 11px; /* 元信息、状态、tooltip */
   --fs-eyebrow: 10px; /* 全大写眉标（配 --tracking-wide） */
+  --fs-clock: clamp(58px, 12vh, 118px); /* 锁屏时钟：随窗口高度收敛，小窗不溢出 */
 
   --fw-regular: 400;
   --fw-medium: 500; /* 标题与强调统一 500；**禁止 700 bold** */

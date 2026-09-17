@@ -55,10 +55,9 @@ test("错误码集合包含 §26 要求的全部码", () => {
 });
 
 test("snapshot 白名单：禁止键被静态断言抓住，且受控反证成立", () => {
-  const snap = d.identitySnapshot({
-    user: { id: "usr_1", display_name: "A", identifier: "a@b", role: "ADMIN", status: "ACTIVE", team_id: "team_1" },
-    session: { id: "ses_1", ref: "sref_1", created_at: 1, last_seen_at: 1, expires_at: 2, locked_at: null },
-  });
+  const user = { id: "usr_1", display_name: "A", identifier: "a@b", role: "ADMIN", status: "ACTIVE", team_id: "team_1", avatar_ref: null };
+  const session = { id: "ses_1", ref: "sref_1", created_at: 1, last_seen_at: 1, expires_at: 2, locked_at: null };
+  const snap = d.identitySnapshot({ user, session });
   assert.equal(d.snapshotViolations(snap).length, 0);
   for (const bad of ["password", "password_hash", "salt", "token", "token_hash"]) {
     assert.equal(d.snapshotViolations({ ...snap, [bad]: "x" }).length, 1, `${bad} 应被抓到`);
@@ -66,7 +65,43 @@ test("snapshot 白名单：禁止键被静态断言抓住，且受控反证成�
   assert.ok(!("password_hash" in snap));
   assert.equal(snap.role, "ADMIN");
   assert.equal(snap.locked, false);
-  assert.equal(snap.avatarRef, null, "avatarRef 字段先落位，恒为 null");
+  assert.equal(snap.avatarRef, null, "从未设置过头像时为 null");
+  assert.equal(
+    d.identitySnapshot({ user: { ...user, avatar_ref: "preset:arc" }, session }).avatarRef,
+    "preset:arc",
+    "snapshot 反映落库的 avatarRef",
+  );
+});
+
+test("头像引用：预设白名单、data URL 格式与长度、清除语义", () => {
+  // null / undefined / "" 都表示清除头像
+  assert.deepEqual(d.validateAvatarRef(null), { ok: true, avatarRef: null });
+  assert.deepEqual(d.validateAvatarRef(undefined), { ok: true, avatarRef: null });
+  assert.deepEqual(d.validateAvatarRef(""), { ok: true, avatarRef: null });
+
+  // 预设：白名单内的全部合法，白名单外一律拒
+  for (const id of d.AVATAR_PRESETS) assert.equal(d.validateAvatarRef(`preset:${id}`).ok, true, id);
+  assert.equal(d.validateAvatarRef("preset:nope").error, "INVALID_INPUT");
+  assert.equal(d.validateAvatarRef("preset:").error, "INVALID_INPUT");
+
+  // data URL：只允许 png / jpeg / webp
+  for (const mime of ["png", "jpeg", "webp"])
+    assert.equal(d.validateAvatarRef(`data:image/${mime};base64,AAAA`).ok, true, mime);
+  assert.equal(d.validateAvatarRef("data:image/gif;base64,AAAA").error, "INVALID_INPUT");
+  assert.equal(d.validateAvatarRef("data:image/svg+xml;base64,AAAA").error, "INVALID_INPUT");
+  assert.equal(d.validateAvatarRef("data:image/png;base64,!!not-base64!!").error, "INVALID_INPUT");
+  assert.equal(d.validateAvatarRef("data:image/png,AAAA").error, "INVALID_INPUT");
+
+  // 长度：恰好到上限 ok，多一个字符 FAIL（防止大图塞库）
+  const prefix = "data:image/png;base64,";
+  const atLimit = prefix + "A".repeat(d.MAX_AVATAR_REF_LENGTH - prefix.length);
+  assert.equal(atLimit.length, d.MAX_AVATAR_REF_LENGTH);
+  assert.equal(d.validateAvatarRef(atLimit).ok, true);
+  assert.equal(d.validateAvatarRef(`${atLimit}A`).error, "INVALID_INPUT");
+
+  // 其它来源与非字符串
+  assert.equal(d.validateAvatarRef("https://example.com/a.png").error, "INVALID_INPUT");
+  assert.equal(d.validateAvatarRef(123).error, "INVALID_INPUT");
 });
 
 test("session 判定顺序：revoke > expiry > 用户禁用 > authVersion", () => {

@@ -97,8 +97,8 @@ const PW = "correct-horse-1";
   // 命令层：UI 与 AI 同一入口
   const cmds = (await import("../../electron/identity-domain.cjs")).default;
   cases.push({
-    name: "S11 · 命令集是白名单，共 9 条身份命令 + 3 条 admin 夹具",
-    status: cmds.IDENTITY_COMMANDS.length === 9 && cmds.ADMIN_COMMANDS.length === 3 ? VERDICT.PASS : VERDICT.FAIL,
+    name: "S11 · 命令集是白名单，共 10 条身份命令 + 3 条 admin 夹具",
+    status: cmds.IDENTITY_COMMANDS.length === 10 && cmds.ADMIN_COMMANDS.length === 3 ? VERDICT.PASS : VERDICT.FAIL,
     detail: `identity=${cmds.IDENTITY_COMMANDS.length}, admin=${cmds.ADMIN_COMMANDS.length}`,
   });
   cases.push({

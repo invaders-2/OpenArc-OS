@@ -57,7 +57,7 @@ export type IdentityErrorCode =
 export const IDENTITY_ERROR_TEXT: Record<IdentityErrorCode, string> = {
   NOT_INITIALIZED: "本机尚未完成初始化。",
   ALREADY_INITIALIZED: "本机已经初始化过了，不能重复创建管理员。",
-  INVALID_CREDENTIALS: "标识符或口令不正确。",
+  INVALID_CREDENTIALS: "账号或密码不正确。",
   SESSION_EXPIRED: "登录状态已过期，请重新登录。",
   SESSION_REVOKED: "登录状态已失效，请重新登录。",
   USER_DISABLED: "该账号已被停用，请联系管理员。",
