@@ -110,12 +110,6 @@ const nodeChecks = nodeTap.tests.map((t) => ({ scenario: scenarioFor(t.name), so
 const checks = [...nodeChecks, ...recoveryChecks, ...innerChecks];
 const recoveryOk = recoveryRun.code === 0 && recoveryChecks.length > 0 && recoveryChecks.every((c) => c.ok) && recoveryGate && recoveryGate.secretHits === 0;
 
-const scenarioStatus = {
-  S1: checks.some((c) => c.scenario === "S1") && checks.filter((c) => c.scenario === "S1").every((c) => c.ok) ? "PASS" : "FAIL",
-  S2: checks.some((c) => c.scenario === "S2") && checks.filter((c) => c.scenario === "S2").every((c) => c.ok) && recoveryOk ? "PASS" : "PARTIAL",
-  S3: checks.some((c) => c.scenario === "S3") && checks.filter((c) => c.scenario === "S3").every((c) => c.ok) ? "PASS" : "FAIL",
-  S4: checks.some((c) => c.scenario === "S4") && checks.filter((c) => c.scenario === "S4").every((c) => c.ok) ? "PASS" : "FAIL",
-};
 const gaps = [
   {
     scenario: "S2", status: "RESOLVED",
@@ -124,13 +118,23 @@ const gaps = [
     actual: "已实现只读 recovery 投影（task/get.recovery + task/recovery：call/status/errorCode/recoveryResult/关联产物/resumable=false）+ task/acknowledgeUnknownEffect + UI data-ai-recovery/data-ai-acknowledge；ack 只追加一条 safe task event，绝不改 call/step/task 状态、绝不授权 resume/retry。真实 Electron UI 11/11 通过。",
   },
   {
-    scenario: "S4", status: "NOT_IN_SCOPE",
+    scenario: "S4", status: "PARTIAL",
     name: "S4 · memory → 任务上下文的正向注入",
-    expected: "若存在记忆检索能力，则应在授权范围内注入新任务上下文",
-    actual: "不存在：buildPrompt 只含 goal + safe step input + prior artifact，没有 memory 检索/注入；A36 的负向要求（不出现已删/他人内容）成立，正向记忆检索能力未实现",
-    reason: "如实记录能力缺口；A36 原文为负向要求，按原文判定满足",
+    expected: "PLAN §41 A36：用户删除个人记忆并切换账号，检索与新任务上下文均不出现已删或他人内容。",
+    actual: "检索链正负对照 PASS（alice 删除前可见 / 删除后不可见 + 派生索引移除；切账号 dana 检索不到他人或已删内容）；无 memory→任务上下文装配入口，上下文链未接入/空验证（buildPrompt 只含 goal + safe step input + prior artifact，不含 memory 检索/注入），当前无泄漏路径但不得声称已验证记忆注入隔离。",
+    reason: "最小后续方案（不改产品）：先新增受控 memory 检索/装配入口，再以正负对照验证上下文隔离（授权记忆可见且注入；已删/他人记忆不出现），通过后 S4 才可从 PARTIAL 升为 PASS。",
   },
 ];
+
+const scenarioStatus = {
+  S1: checks.some((c) => c.scenario === "S1") && checks.filter((c) => c.scenario === "S1").every((c) => c.ok) ? "PASS" : "FAIL",
+  S2: checks.some((c) => c.scenario === "S2") && checks.filter((c) => c.scenario === "S2").every((c) => c.ok) && recoveryOk ? "PASS" : "PARTIAL",
+  S3: checks.some((c) => c.scenario === "S3") && checks.filter((c) => c.scenario === "S3").every((c) => c.ok) ? "PASS" : "FAIL",
+  // S4 功能 checks 全 PASS，但存在 PARTIAL gap（上下文链未接入/空验证）→ 场景整体 PARTIAL，不冒充 PASS。
+  S4: checks.some((c) => c.scenario === "S4") && checks.filter((c) => c.scenario === "S4").every((c) => c.ok)
+    ? (gaps.some((g) => g.scenario === "S4" && g.status === "PARTIAL") ? "PARTIAL" : "PASS")
+    : "FAIL",
+};
 
 const env = inner && inner.env ? inner.env : { electron: null, node: process.versions.node, platform: process.platform, arch: process.arch };
 const rendererConsoleErrors = inner ? inner.rendererConsoleErrors : null;

@@ -5,6 +5,7 @@
 - **被测 commit**（代码与测试提交）：`83baad6f5ba56ebb415bfdd754357151381f371f`
 - Final HEAD：本轮报告/证据提交（见文末）
 - 范围：只补齐 PLAN.md §41 的 D4-05 四场景（产物不符 / 结果未知 / 用量到限 / 记忆越权）；第二轮按父级指示补齐 S2 的**最小人工确认入口**以闭合 §384。不扩展真实工具面、不放宽既有检查、不 commit、不 push。
+- **结论：`D4-05 = PARTIAL`**——S1/S2/S3 = PASS；**S4 = PARTIAL**（检索链 PASS、上下文链 NOT VERIFIED：无 memory→任务上下文装配入口，A36 的上下文链为空验证，见 §3/§5）。其余场景 PASS 结论不变。
 
 ## 1. 要求对应表
 
@@ -13,7 +14,7 @@
 | S1 产物不符（A33） | 工具报告成功但产物尺寸不符，任务不得标成功，应有限纠错或报告验证失败 | `TaskHarnessOrchestrator.runTask` → `ControlledToolProxy.propose/executeReadOnly` → `registry.validateOutput` + `adapter.verify` | 负例：0 Artifact、0 Verification；正对照：1 Artifact + 1 Verification 且互相绑定 | execution `FAILED`/`TOOL_VERIFICATION_FAILED`、`verification_status=FAIL`、Step/Task `BLOCKED`、0 第 2 个 proposal/execution | `tests/d4-05-s1-output-size.test.mjs`（真实 registry/proxy/adapter 链，仅测试内注册 test-only `test.sized`） | `controlled-tool-proxy.cjs` 既有 verify 失败分支；D4-06 执行异常/0 重试语义 | 新增 test-only `test.sized`（期望尺寸 vs 实际尺寸）+ adapter，只在测试内注册 |
 | S2 结果未知（§383/384） | 目标应用不支持幂等时用可验证产物或操作状态核查；无法核查则标记结果未知；结果未知提供检查实际应用、关联产物和人工确认入口，不能直接显示成功或安全重试 | 真实受控 WRITE + 真实存活 executor（quiescence 不可证）→ `recoverOnStartup` 落 UNKNOWN_EFFECT；`TaskService.getRecoveryState` + `task/recovery`/`task/get.recovery` + `task/acknowledgeUnknownEffect` + AI 面板 `data-ai-recovery`/`data-ai-acknowledge` | Call 持久化 `UNKNOWN_EFFECT`；Task/Step `BLOCKED`；只读 recovery 投影含 call/status/errorCode/核查结论/关联产物/resumable=false；确认只追加一条 safe event | `RESUME_UNKNOWN_EFFECT_PRESENT` 拒绝续接；`AUTO_RETRY=0`；确认后 call/step/task 状态不变 | Node 真实 live-executor 路径 + `tests/d4-05-recovery-ui.mjs`（真实 Electron UI）+ `tests/d4-04-smoke.mjs` F1/F3/F5/F6/F7 | D4-03C3/C4 UNKNOWN_EFFECT；D4-06 Closure `RESUME_UNKNOWN_EFFECT_PRESENT` | **已补齐**：只读 recovery 投影 + acknowledge 命令 + UI（见 §2） |
 | S3 用量到限（A35） | 任务达到预算上限，停止自动循环并保留产物及明确续接入口 | 真实 orchestrator bounded 预算 + `TaskService.getResumeEligibility/getBudgetLedger/grantBudgetResume` | `task.budget_exhausted{kind,consumed}`；已发生 Artifact 保留；显式续接产生新 bounded step/run | `BUDGET_EXHAUSTED`；`AUTO_RETRY=0`；续接总数 ≤ `MAX_BUDGET_RESUMES=3` | `tests/d4-05-s3-budget-ledger.test.mjs` + `tests/d4-06-budget.test.mjs` + `tests/d4-06-resume.test.mjs` | D4-06 + D4-06 Closure | 修正 `ledger.consumed.modelCalls` 语义（→ `modelCallEnvelopes`） |
-| S4 记忆越权（A36） | 用户删除个人记忆并切换账号，检索与新任务上下文均不出现已删或他人内容 | `resourceService`（`memory` subtype）+ `searchService` + 真实 `TaskHarnessOrchestrator` | alice 可见自己的 memory；删除后不可见且索引文档移除；dana/新 session 检索不到他人内容；任务 model 请求体不含任何 memory token | 负向要求：不出现即满足 | `tests/d4-05-s4-memory.test.mjs` + 既有 `tests/d3-05-data-gate.test.mjs`、`tests/governance-memory.test.mjs` | `authorization-domain.cjs` §25；`search-service.cjs` 授权过滤与 `indexResource` 删除；d3-05 Gate-Search/Gate-Lifecycle | 无（新增端到端 body 捕获）；记录缺口：无正向 memory→任务上下文注入能力 |
+| S4 记忆越权（A36） | 用户删除个人记忆并切换账号，检索与新任务上下文均不出现已删或他人内容 | `resourceService`（`memory` subtype）+ `searchService` + 真实 `TaskHarnessOrchestrator` | 检索链：alice 可见自己的 memory；删除后不可见且索引文档移除；dana/新 session 检索不到他人内容。上下文链：任务 model 请求体不含任何 memory token（但 `buildPrompt` 无 memory 装配入口，属空验证） | 检索链负向要求满足；上下文链未接入 → **NOT VERIFIED**，不得据此声称记忆注入隔离 | `tests/d4-05-s4-memory.test.mjs` + 既有 `tests/d3-05-data-gate.test.mjs`、`tests/governance-memory.test.mjs` | `authorization-domain.cjs` §25；`search-service.cjs` 授权过滤与 `indexResource` 删除；d3-05 Gate-Search/Gate-Lifecycle | 无（检索链新增端到端 body 捕获）；**缺口**：无 memory→任务上下文装配入口，上下文链 **NOT VERIFIED**（S4 = PARTIAL） |
 | A37 / A38 | PS 部分完成 / 画布并发冲突 | — | — | — | — | — | **未纳入**：不在 PLAN §41 的 D4-05 四场景内，不自行替换进来 |
 
 ## 2. 被测行为与最小改动
@@ -38,13 +39,13 @@
 | S2 确认 | ack 只追加 safe event；call 仍 UNKNOWN_EFFECT、Task 仍 BLOCKED、仍不可续接、0 第二 call/lease/retry | event=1（含 callId+operatorUserId、脱敏）、call 仍 UNKNOWN_EFFECT、Task/Step 仍 BLOCKED、`RESUME_UNKNOWN_EFFECT_PRESENT`、0 第二 call/lease、幂等重复确认不追加 | **PASS** |
 | S2 UI | 真实 Electron：recovery 区块可见 + 人工确认 + 无 Success/Retry/Resume | `S2-UI-4` 显示「实际状态：UNKNOWN_EFFECT · 核查结论：尚无结论 / 关联产物：art_…（text）」；`S2-UI-5` 无 resume/retry；`S2-UI-6` 点击后显示「已人工确认」；`S2-UI-7` ack 后 call/task 状态不变、仍不可续接 | **PASS** |
 | S3 | 到限停止 + 保留产物 + 续接；additions.amount == 新一轮真实 capability；历史保留、base 不重置、总数 ≤3 | `task.budget_exhausted{consumed:8,maxCalls:8}`；additions.amount=8==新 capability maxCalls；base 恒 {8,8,4}；budgetStops 历史保留；第 4 次 `RESUME_LIMIT_REACHED` 且 0 追加 | **PASS** |
-| S4 | alice 可见 → 删除后不可见 + 索引移除；dana 检索不到他人/已删；任务 body 无 memory token | 断言全成立；dana 真实任务 body 不含已删/自己/他人 memory token | **PASS**（负向满足；正向 memory→上下文注入不存在，见 §5） |
+| S4 | 检索链：alice 可见 → 删除后不可见 + 索引移除；dana 检索不到他人/已删。上下文链：任务上下文不出现已删/他人 memory | 检索链正负对照全部成立；任务 body 无 memory token 属“无装配入口”的空验证（`buildPrompt` 只含 goal + safe step input + prior artifact），不能证明记忆注入隔离 | **PARTIAL**（检索链 PASS；上下文链 NOT VERIFIED——无 memory→上下文装配入口；当前无泄漏路径，见 §5） |
 
 ## 4. 实际命令与结果
 
 | 命令 | 结果 |
 | --- | --- |
-| `npm run test:d4-05` | **125 / 125 PASS**（Node 20 + D4-04 Electron 94 + S2 recovery UI 11），exit 0，`overallStatus=PASS`，四场景全 PASS |
+| `npm run test:d4-05` | **128 / 128 PASS**（Node 23 + D4-04 Electron 94 + S2 recovery UI 11），exit 0，`overallStatus=PARTIAL`（`functionalStatus=PASS`；S1/S2/S3=PASS、S4=PARTIAL） |
 | `node --test tests/d4-06-resume.test.mjs` | **6 / 6 PASS**（含真实 live-unlinked UNKNOWN_EFFECT → `RESUME_UNKNOWN_EFFECT_PRESENT`） |
 | `npm run test:d4-04` | **94 / 94 PASS** |
 | `npm run test:d4-06` | **106 / 106 PASS** |
@@ -59,14 +60,14 @@
 ## 5. 未满足 / 缺口 / 不适用
 
 1. **S2 = PASS（§384 人工确认入口已闭合）**：只读 recovery 投影 + 人工确认事件 + 真实 UI 入口均已实现并验证；确认动作绝不改变 authority 状态、绝不授权 resume/retry。
-2. **S4 正向能力缺口**：`buildPrompt` 只含 goal + safe step input + prior artifact，**没有** memory 检索/注入。A36 原文是负向要求，负向成立、判定满足；正向「把授权记忆用于任务上下文」的能力不存在，如需另立任务。
+2. **S4 = PARTIAL（检索链 PASS；上下文链 NOT VERIFIED）**：`buildPrompt` 只含 goal + safe step input + prior artifact，**没有** memory 检索/装配入口。检索链（删除前可见 / 删除后不可见 + 索引移除 / 跨账号不可见）正负对照全部成立；「新任务上下文不出现已删/他人内容」在没有注入入口时是**空验证**——只能说明当前无泄漏路径，不能证明“具备记忆注入时的上下文隔离”。因此 **`D4-05 = PARTIAL`**。最小后续方案（本轮不改产品）：先新增受控 memory 检索/装配入口，再以正负对照重新验证上下文隔离（授权记忆可见且注入；已删/他人记忆不出现），通过后再将 S4 升为 PASS。
 3. **A37 / A38 未纳入**：不在 PLAN §41 的 D4-05 四场景内。
 4. **继承的 NOT VERIFIED（未扩大）**：真实 `electron/main.cjs` 全流程（Gate 用 probe host + 共享 production boot/Renderer/orchestrator）；真实外部 provider / 真实凭据；Windows；OS 级网络沙箱。
 5. **范围冲突 / 未授权项**：无。未新增付费服务、未接真实外部 provider、未改默认 d3-02 工作区、未 commit。
 
 ## 6. 证据
 
-- `docs/D4-05-GATE-EVIDENCE.json`（tracked、脱敏）：`testedCommit` / 运行前 `workspaceState` / `command` / `env` / 逐条 `{name,expected,actual,ok}`（125 条）/ `scenarioStatus` / `gaps` / `sourceArtifacts`（含 SHA-256）/ `artifactSha256`。
-- `artifactSha256 = 2f4bc11f056f4ac8e9b7d6b6bb0abfe7ad122e1c0bdad78a5da91b5d6ce2403f`（testedCommit `83baad6`，运行前 `workspaceState=""`）。
-- 原始 artifact（gitignored）SHA-256：`artifacts/d4-04/vertical-smoke-gate.json=85c9b08780cffe0ba77a69edd05d71f929bc8e1f8c53abb958ed07093a64365f`；`artifacts/d4-05/node-tests.tap=450ac905ba7b577cdc3abbf0e4fdb0d4a823d11424bb94a01b12f2177972b260`；`artifacts/d4-05-recovery/recovery-ui-gate.json=f692cf436e7406b627c1ab73e4701c3d2d3e69a15fc4857db5edd6e0819aca80`。
+- `docs/D4-05-GATE-EVIDENCE.json`（tracked、脱敏）：`testedCommit` / 运行前 `workspaceState` / `command` / `env` / 逐条 `{name,expected,actual,ok}`（128 条：S1 3 / S2 22 / S3 14 / S4 2 / REUSE_D4_04 87）/ `scenarioStatus` / `gaps` / `sourceArtifacts`（含 SHA-256）/ `artifactSha256`。
+- `artifactSha256 = a4247283f41612c736a4dba3c3f92da566e9ced0b333b84653aae42d075a91a6`（testedCommit `6fb68377`；本工作树未 commit，运行前 `workspaceState` = `M docs/D4-05-RESULT.md` / `M tests/d4-05-s1-output-size.test.mjs` / `M tests/d4-05-s2-recovery.test.mjs` / `M tests/d4-05-s3-budget-ledger.test.mjs` / `M tests/d4-05-smoke.mjs`）。
+- 原始 artifact（gitignored）SHA-256：`artifacts/d4-04/vertical-smoke-gate.json=41a00420282f247fa6f1dbce98f109430d88e92ef01fd02cbbe621d8604fcdcb`；`artifacts/d4-05/node-tests.tap=7c8ec4ca933b0aeae2326988cfb969377032022874dba2b2f6afa08d856fdc4e`；`artifacts/d4-05-recovery/recovery-ui-gate.json=4f78bc521e38ff6b15339d5f4b41b0c247d993e6b14c9030df2da68e3eddb210`。
 - 已脱敏：无 `/Users`、`/private`、`/var/folders`、`mpx_`、`tpx_`、`credential`。

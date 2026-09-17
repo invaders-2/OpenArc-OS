@@ -14,8 +14,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { createRequire } from "node:module";
-import { createToolHarnessFixture } from "./fixtures/harness-acp/tool-harness-fixture.mjs";
+import { createToolHarnessFixture, reopenToolHarnessRuntime } from "./fixtures/harness-acp/tool-harness-fixture.mjs";
 
 const require = createRequire(import.meta.url);
 const { TaskService } = require("../electron/task-service.cjs");
@@ -142,3 +145,58 @@ test("D4-05 S1 A33 正对照 · 产物尺寸符合 → Task SUCCEEDED + 1 Artifa
     assert.equal(TaskService.policy.autoRetry, 0);
   } finally { await fx.close(); }
 });
+
+
+test("D4-05 S1 A33 持久化 · 同一 disk DB 重开后失败证据仍可追溯（execution FAILED / tool.verification.failed / Task·Step BLOCKED / 0 独立 Verification）", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "oa5s1-"));
+  const dbPath = path.join(root, "identity.db");
+  const storeRoot = path.join(root, "library");
+  const runtimeDir = path.join(root, "rt");
+  let fx = null; let rt = null;
+  try {
+    fx = await createToolHarnessFixture({ withAdapters: true, behavior: "tool-loop", dbPath, storeRoot, keepData: true, sideEffectRuntimeDir: runtimeDir });
+    installSizedProbe(fx, { actualSize: 7 });
+    const out = await runSized(fx, { expectedSize: 10 });
+
+    // 失败已真实发生，并已落盘：先记录归属，供重开后核对。
+    assert.equal(out.r.error, "TOOL_VERIFICATION_FAILED");
+    assert.equal(out.execs.length, 1);
+    const exec0 = out.execs[0];
+    assert.equal(exec0.status, "FAILED");
+    const taskId = out.taskId;
+    const stepId = out.steps[0].step_id;
+    const runId = exec0.run_id;
+    assert.ok(runId, "execution 必须归属一个 run：" + JSON.stringify(exec0));
+    assert.ok(fx.taskStore.harnessRunsOfTask(taskId).some((r) => r.run_id === runId), "run 归属正确");
+    assert.ok(out.events.includes("tool.verification.failed"), "失败事件已落盘：" + JSON.stringify(out.events));
+
+    // 关闭并用新的 TaskService / ToolStore 重开同一数据库（production 顺序 recovery）。
+    await fx.close(); fx = null;
+    rt = await reopenToolHarnessRuntime({ dbPath, storeRoot, runtimeDir });
+    rt.recover();
+
+    const execs = rt.toolStore.executionsOfTask(taskId);
+    assert.equal(execs.length, 1, "重开后 tool_executions 行仍在");
+    assert.equal(execs[0].task_id, taskId, "execution.task_id 归属正确");
+    assert.equal(execs[0].step_id, stepId, "execution.step_id 归属正确");
+    assert.equal(execs[0].run_id, runId, "execution.run_id 归属正确");
+    assert.equal(execs[0].status, "FAILED", "重开后 status 仍 FAILED：" + execs[0].status);
+    assert.equal(execs[0].verification_status, "FAIL", "重开后 verification_status 仍 FAIL：" + execs[0].verification_status);
+    assert.equal(execs[0].error_code, "TOOL_VERIFICATION_FAILED", "重开后 error_code 仍 TOOL_VERIFICATION_FAILED：" + execs[0].error_code);
+
+    const events = rt.taskStore.eventsOfTask(taskId).map((e) => e.event_type);
+    assert.ok(events.includes("tool.verification.failed"), "持久化的 tool.verification.failed 事件仍可查询：" + JSON.stringify(events));
+    assert.ok(!events.includes("tool.execution_succeeded"), "重开后仍不得出现 execution_succeeded");
+
+    // 如实记录：失败路径没有独立 Verification 记录（不伪造）。
+    assert.equal(rt.taskStore.verificationsOfTask(taskId).length, 0, "失败路径 task_verifications = 0");
+
+    assert.equal(rt.taskStore.taskById(taskId).status, "BLOCKED", "重开后 Task 仍 BLOCKED：" + rt.taskStore.taskById(taskId).status);
+    assert.equal(rt.taskStore.stepById(stepId).status, "BLOCKED", "重开后 Step 仍 BLOCKED：" + rt.taskStore.stepById(stepId).status);
+  } finally {
+    try { if (rt) await rt.close(); } catch { /* ignore */ }
+    try { if (fx) await fx.close(); } catch { /* ignore */ }
+    try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+});
+

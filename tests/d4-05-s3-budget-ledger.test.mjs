@@ -17,9 +17,33 @@ const require = createRequire(import.meta.url);
 const { TaskService } = require("../electron/task-service.cjs");
 
 const DSH_FINAL = "OPENARC_DSH_TOOL_OK";
+const SYNTH_FINAL = "OPENARC_TASK_OK";
 const exhaustPlan = () => Array.from({ length: 12 }, (_, i) => ({ id: "call_e" + i, name: "resource_search", args: { query: "e-" + i, limit: 5 } }));
+/** dsh / facade 路径：持久化 provider 计划（id+name+args）。 */
+const toolPlan = (n, prefix) => Array.from({ length: n }, (_, i) => ({ id: "call_" + prefix + i, name: "resource_search", args: { query: prefix + "-" + i, limit: 5 } }));
+/** synthetic ACP 路径：proposeSequence（toolId+arguments+proposalId）。 */
+const rounds = (n, prefix) => Array.from({ length: n }, (_, i) => ({ toolId: "resource.search", toolVersion: 1, arguments: { query: prefix + "-" + i, limit: 3 }, proposalId: "tc_" + prefix + "_" + i }));
 const budgetStopsOf = (fx, taskId) => fx.taskStore.eventsOfTask(taskId).filter((e) => e.event_type === "task.budget_exhausted").map((e) => JSON.parse(e.safe_payload));
 const grantEventsOf = (fx, taskId) => fx.taskStore.eventsOfTask(taskId).filter((e) => e.event_type === "task.budget.granted");
+
+/** 非 facade READ loop：step0 成功（Artifact 锚点）+ step1 轮次预算停止（TOOL_ROUNDS=4）。 */
+async function setupToolRoundsStop(fx) {
+  fx.grantTool("ai", ["tool.resource.search", "tool.resource.readMetadata"]);
+  const ctx = fx.ctx();
+  const t = fx.createTask();
+  const started = fx.taskService.startTask({ context: ctx, taskId: t.task.taskId, expectedRevision: t.task.revision });
+  const s0 = fx.taskService.createStep({ context: ctx, taskId: t.task.taskId, kind: "reasoning", input: { proposeSequence: [], finalText: SYNTH_FINAL }, expectedRevision: started.task.revision });
+  const s1 = fx.taskService.createStep({ context: ctx, taskId: t.task.taskId, kind: "reasoning", input: { proposeSequence: rounds(5, "round"), finalText: SYNTH_FINAL }, expectedRevision: s0.task.revision });
+  const ss0 = fx.taskService.startStep({ context: ctx, taskId: t.task.taskId, stepId: s0.step.stepId, expectedRevision: s1.task.revision });
+  const orch = fx.makeToolOrchestrator();
+  const r0 = await orch.runStep({ context: ctx, taskId: t.task.taskId, stepId: s0.step.stepId, expectedRevision: ss0.task.revision, stepInput: s0.step.input, verify: { type: "EXACT_TEXT", expected: SYNTH_FINAL } });
+  assert.equal(r0.ok, true, "step0 必须成功：" + JSON.stringify(r0.error));
+  const fresh = fx.taskStore.taskById(t.task.taskId);
+  const ss1 = fx.taskService.startStep({ context: ctx, taskId: t.task.taskId, stepId: s1.step.stepId, expectedRevision: fresh.revision });
+  const r1 = await orch.runStep({ context: ctx, taskId: t.task.taskId, stepId: s1.step.stepId, expectedRevision: ss1.task.revision, stepInput: s1.step.input, verify: { type: "EXACT_TEXT", expected: SYNTH_FINAL } });
+  assert.equal(r1.error, "BUDGET_EXHAUSTED", "step1 必须轮次预算停止：" + JSON.stringify(r1));
+  return { ctx, taskId: t.task.taskId, s0, s1, orch };
+}
 
 /** step0 成功（Artifact 锚点）+ step1 真实 MODEL_CALLS 预算停止。 */
 async function setupModelCallsStop(fx) {
@@ -149,3 +173,115 @@ test("D4-05 S3 A35 · 续接总数有界：MAX_BUDGET_RESUMES=3，第 4 次 RESU
     assert.equal(TaskService.policy.autoRetry, 0);
   } finally { await fx.close(); }
 });
+
+
+test("D4-05 S3 A35 · TOOL_ROUNDS 续接账本：additions 只补 TOOL_ROUNDS/amount=4，新一轮真实轮数上界一致", async () => {
+  const fx = await createToolHarnessFixture({ withAdapters: true, behavior: "tool-loop" });
+  try {
+    const h = await setupToolRoundsStop(fx);
+    const stops0 = budgetStopsOf(fx, h.taskId);
+    assert.equal(stops0.length, 1);
+    assert.equal(stops0[0].kind, "TOOL_ROUNDS", JSON.stringify(stops0[0]));
+    assert.equal(stops0[0].consumed, 4);
+    assert.equal(stops0[0].maxRounds, 4);
+
+    const elig = fx.taskService.getResumeEligibility({ context: h.ctx, taskId: h.taskId });
+    assert.equal(elig.resumable, true, JSON.stringify(elig));
+    assert.equal(elig.kind, "TOOL_ROUNDS");
+
+    // 直接 grant（等价 orchestrator 的额度来源）：新增一个 bounded step，然后以 5 个 proposal 验证新 run 的真实轮数上界。
+    const granted = fx.taskService.grantBudgetResume({ context: h.ctx, taskId: h.taskId, expectedRevision: fx.taskStore.taskById(h.taskId).revision, kind: "TOOL_ROUNDS" });
+    assert.equal(granted.ok, true, JSON.stringify(granted));
+    const started = fx.taskService.startStep({ context: h.ctx, taskId: h.taskId, stepId: granted.step.stepId, expectedRevision: granted.task.revision });
+    assert.equal(started.ok, true, JSON.stringify(started));
+
+    const r = await h.orch.runStep({ context: h.ctx, taskId: h.taskId, stepId: granted.step.stepId, expectedRevision: started.task.revision, stepInput: { proposeSequence: rounds(5, "resume"), finalText: SYNTH_FINAL }, verify: { type: "EXACT_TEXT", expected: SYNTH_FINAL } });
+    assert.equal(r.error, "BUDGET_EXHAUSTED", "新一轮同样达到轮次上界：" + JSON.stringify(r));
+    const resumedExecs = fx.toolStore.executionsOfTask(h.taskId).filter((e) => e.step_id === granted.step.stepId);
+    assert.equal(resumedExecs.length, 4, "新一轮真实轮数上界 == MAX_TOOL_ROUNDS=4：" + resumedExecs.length);
+
+    const stops = budgetStopsOf(fx, h.taskId);
+    assert.equal(stops.length, 2, "新一轮再次预算停止并留痕：" + JSON.stringify(stops));
+    assert.equal(stops[1].kind, "TOOL_ROUNDS");
+    assert.equal(stops[1].consumed, 4);
+    assert.equal(stops[1].maxRounds, 4, "新一轮实际限制与 additions.amount 一致");
+
+    const ledger = fx.taskService.getBudgetLedger({ context: h.ctx, taskId: h.taskId }).ledger;
+    assert.equal(ledger.additions.length, 1, "一次续接只追加一条：" + JSON.stringify(ledger.additions));
+    assert.equal(ledger.additions[ledger.additions.length - 1].kind, "TOOL_ROUNDS");
+    assert.equal(ledger.additions[ledger.additions.length - 1].amount, 4, "additions.amount == 该类实际生效额度 TOOL_ROUNDS=4");
+    assert.ok(ledger.additions.every((a) => a.kind === "TOOL_ROUNDS"), "账本只含该一个 kind（不遗漏、不混类）：" + JSON.stringify(ledger.additions));
+    assert.equal(ledger.base.MODEL_CALLS, 8);
+    assert.equal(ledger.base.TOOL_ROUNDS, 4);
+    assert.equal(grantEventsOf(fx, h.taskId).length, 1, "只追加一次预算");
+    assert.equal(TaskService.policy.autoRetry, 0);
+  } finally { await fx.close(); }
+});
+
+test("D4-05 S3 A35 · TOOL_CALLS 续接账本：additions 只补 TOOL_CALLS/amount=facade maxCalls，新一轮真实 capability 上界一致", async () => {
+  const { ToolFacadeBridge } = require("../electron/tool-facade-bridge.cjs");
+  const bridges = [];
+  const fx = await createToolHarnessFixture({
+    withAdapters: true, behavior: "tool-loop", facadeMaxCalls: 1,
+    facadeBridgeFactory: (o) => { const b = new ToolFacadeBridge(o); bridges.push(b); return b; },
+  });
+  try {
+    fx.grantTool("ai", ["tool.resource.search", "tool.resource.readMetadata"]);
+    const ctx = fx.ctx();
+    const t = fx.createTask();
+    const started = fx.taskService.startTask({ context: ctx, taskId: t.task.taskId, expectedRevision: t.task.revision });
+    const s0 = fx.taskService.createStep({ context: ctx, taskId: t.task.taskId, kind: "reasoning", input: null, expectedRevision: started.task.revision });
+    const s1 = fx.taskService.createStep({ context: ctx, taskId: t.task.taskId, kind: "reasoning", input: null, expectedRevision: s0.task.revision });
+    const ss0 = fx.taskService.startStep({ context: ctx, taskId: t.task.taskId, stepId: s0.step.stepId, expectedRevision: s1.task.revision });
+    const dsh = fx.makeDshOrchestrator();
+    fx.fp.state.toolLoopPlan = [];
+    const r0 = await dsh.runStep({ context: ctx, taskId: t.task.taskId, stepId: s0.step.stepId, expectedRevision: ss0.task.revision, stepInput: null, verify: { type: "EXACT_TEXT", expected: DSH_FINAL } });
+    assert.equal(r0.ok, true, "step0 必须成功：" + JSON.stringify(r0.error));
+
+    // test-only provider fault seam：真实 tool capability 真正 EXHAUSTED（第 2 次 tool call 被 429）后，
+    // 让下一次 prompt 失败，从而命中产品已存在的 TOOL_CALLS 归类分支
+    //（dsh 单独收到 429 不会中止，会继续到模型预算兜底成 MODEL_CALLS；见 docs/D4-06-CLOSURE-RESULT.md §6）。
+    let base = "tool-loop";
+    Object.defineProperty(fx.fp.state, "behavior", {
+      configurable: true,
+      get() { const rb = bridges[bridges.length - 1]; return rb && [...rb.capabilities.values()].some((c) => c.state === "EXHAUSTED") ? "500" : base; },
+      set(v) { base = v; },
+    });
+
+    const ss1 = fx.taskService.startStep({ context: ctx, taskId: t.task.taskId, stepId: s1.step.stepId, expectedRevision: fx.taskStore.taskById(t.task.taskId).revision });
+    fx.fp.state.toolLoopPlan = toolPlan(6, "q");
+    const r1 = await dsh.runStep({ context: ctx, taskId: t.task.taskId, stepId: s1.step.stepId, expectedRevision: ss1.task.revision, stepInput: null, verify: { type: "EXACT_TEXT", expected: DSH_FINAL } });
+    assert.equal(r1.error, "BUDGET_EXHAUSTED", "step1 必须预算停止：" + JSON.stringify(r1));
+    const stops0 = budgetStopsOf(fx, t.task.taskId);
+    assert.equal(stops0.length, 1);
+    assert.equal(stops0[0].kind, "TOOL_CALLS", JSON.stringify(stops0[0]));
+    assert.equal(stops0[0].consumed, 1, "真实 tool capability 消耗 = facade maxCalls：" + JSON.stringify(stops0[0]));
+    assert.equal(stops0[0].maxCalls, 1, "该类实际生效额度 = facade maxCalls：" + JSON.stringify(stops0[0]));
+
+    const elig = fx.taskService.getResumeEligibility({ context: ctx, taskId: t.task.taskId });
+    assert.equal(elig.resumable, true, JSON.stringify(elig));
+    assert.equal(elig.kind, "TOOL_CALLS");
+
+    // 续接：新 run / 新 tool capability，再次命中同一工具上界以证“新一轮实际限制与账本一致”。
+    fx.fp.state.behavior = "tool-loop";
+    fx.fp.state.toolLoopPlan = toolPlan(3, "r");
+    const res = await dsh.resumeBudgetExhausted({ context: ctx, taskId: t.task.taskId, expectedRevision: fx.taskStore.taskById(t.task.taskId).revision, verify: { type: "EXACT_TEXT", expected: DSH_FINAL } });
+    assert.equal(res.error, "BUDGET_EXHAUSTED", "新一轮仍受同一工具额度约束：" + JSON.stringify(res));
+    const stops = budgetStopsOf(fx, t.task.taskId);
+    assert.equal(stops.length, 2, "新一轮再次预算停止：" + JSON.stringify(stops));
+    assert.equal(stops[1].kind, "TOOL_CALLS");
+    assert.equal(stops[1].consumed, 1, "新一轮真实 tool capability 消耗 == maxCalls");
+    assert.equal(stops[1].maxCalls, 1, "新一轮真实 tool capability 上界 == facade maxCalls");
+
+    const ledger = fx.taskService.getBudgetLedger({ context: ctx, taskId: t.task.taskId }).ledger;
+    assert.equal(ledger.additions.length, 1, "一次续接只追加一条：" + JSON.stringify(ledger.additions));
+    assert.equal(ledger.additions[ledger.additions.length - 1].kind, "TOOL_CALLS");
+    assert.equal(ledger.additions[ledger.additions.length - 1].amount, 1, "additions.amount == 该类实际生效额度（facade maxCalls）：" + JSON.stringify(ledger.additions[0]));
+    assert.ok(ledger.additions.every((a) => a.kind === "TOOL_CALLS"), "账本只含该一个 kind（不遗漏、不混类）：" + JSON.stringify(ledger.additions));
+    assert.equal(ledger.base.TOOL_CALLS, 8, "base 仍是冻结默认值 8（不因 facade 配置漂移）");
+    assert.equal(ledger.consumed.budgetStops.length, 2, "两次停止都留痕");
+    assert.equal(grantEventsOf(fx, t.task.taskId).length, 1, "只追加一次预算");
+    assert.equal(TaskService.policy.autoRetry, 0);
+  } finally { await fx.close(); }
+});
+

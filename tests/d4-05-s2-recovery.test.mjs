@@ -117,6 +117,22 @@ test("D4-05 S2 · recovery 只读投影：含 UNKNOWN_EFFECT call 与关联产�
     assert.equal(fx.sideEffectStore.callById(h.callId).status, "UNKNOWN_EFFECT", "只读投影不改状态");
     assert.equal(fx.taskStore.taskById(h.taskId).status, "BLOCKED");
     assert.equal(ackEvents(fx, h.taskId).length, 0);
+
+    // 非 owner（dana：fixture 内真实用户/session，非该 task 的 owner）不得读取恢复详情。
+    const danaCtx = { sessionRef: fx.f.sessions.dana, appId: "ai", source: "ui" };
+    const danaProj = fx.taskService.getRecoveryState({ context: danaCtx, taskId: h.taskId });
+    assert.equal(danaProj.ok, false, "非 owner 读取恢复详情必须被拒：" + JSON.stringify(danaProj));
+    assert.equal(danaProj.error, "TASK_FORBIDDEN", "必须是显式 TASK_FORBIDDEN：" + JSON.stringify(danaProj));
+    assert.equal(danaProj.calls, undefined, "拒绝时绝不返回 recovery 详情（calls）");
+    assert.equal(danaProj.applicable, undefined, "拒绝时绝不返回 applicable");
+    assert.equal(ackEvents(fx, h.taskId).length, 0, "拒绝读取不追加任何 event");
+    assert.equal(fx.sideEffectStore.callById(h.callId).status, "UNKNOWN_EFFECT", "拒绝读取后 call 状态不变");
+    assert.equal(fx.taskStore.taskById(h.taskId).status, "BLOCKED", "拒绝读取后 Task 状态不变");
+
+    // 投影/语义不得暗示成功：call 仍 UNKNOWN_EFFECT、resumable=false、无 SUCCEEDED/success 字样。
+    assert.equal(call.status, "UNKNOWN_EFFECT");
+    assert.equal(proj.resumable, false, "结果未知绝不 resumable");
+    assert.equal(/SUCCEEDED|"success"|success/is.test(JSON.stringify(proj)), false, "恢复投影不得含成功语义：" + JSON.stringify(proj));
   } finally {
     try { if (h) { h.box.kill("SIGKILL"); await h.exited; } } catch { /* ignore */ }
     await fx.close(); try { fs.rmSync(paths.root, { recursive: true, force: true }); } catch { /* ignore */ }
@@ -171,6 +187,28 @@ test("D4-05 S2 · 人工确认只追加 safe event：call 仍 UNKNOWN_EFFECT / T
     assert.equal(fx.taskService.acknowledgeUnknownEffect({ context: { sessionRef: "sess_evil", appId: "ai", source: "ui" }, taskId: h.taskId, callId: h.callId }).ok, false, "伪造 session 被拒");
     assert.equal(fx.taskService.acknowledgeUnknownEffect({ context: h.ctx, taskId: h.taskId, callId: "scall_missing" }).error, "TASK_NOT_FOUND");
     assert.equal(ackEvents(fx, h.taskId).length, 1);
+
+    // 非 owner（dana：fixture 内真实用户/session，与该 task owner/admin 不同）不得确认，也不得读取恢复详情。
+    const danaCtx = { sessionRef: fx.f.sessions.dana, appId: "ai", source: "ui" };
+    const danaAck = fx.taskService.acknowledgeUnknownEffect({ context: danaCtx, taskId: h.taskId, callId: h.callId });
+    assert.equal(danaAck.ok, false, "非 owner 确认必须被拒：" + JSON.stringify(danaAck));
+    assert.equal(danaAck.error, "TASK_FORBIDDEN", "必须是显式 TASK_FORBIDDEN：" + JSON.stringify(danaAck));
+    assert.equal(danaAck.acknowledged, undefined, "拒绝确认时不返回确认语义");
+    const danaProj = fx.taskService.getRecoveryState({ context: danaCtx, taskId: h.taskId });
+    assert.equal(danaProj.ok, false, "非 owner 读取必须被拒：" + JSON.stringify(danaProj));
+    assert.equal(danaProj.error, "TASK_FORBIDDEN");
+    assert.equal(danaProj.calls, undefined, "拒绝时不返回 recovery 详情");
+    assert.equal(ackEvents(fx, h.taskId).length, 1, "非 owner 尝试不追加任何 event");
+    assert.equal(fx.sideEffectStore.callById(h.callId).status, "UNKNOWN_EFFECT", "非 owner 后 call 仍 UNKNOWN_EFFECT");
+    assert.equal(fx.taskStore.taskById(h.taskId).status, "BLOCKED", "非 owner 后 Task 仍 BLOCKED");
+
+    // 重复确认幂等（既有：again.changed=false 且仅 1 条 event）。
+    assert.equal(again.changed, false, "重复确认幂等");
+    assert.equal(ackEvents(fx, h.taskId).length, 1);
+    // 确认语义不暗示成功：call 仍 UNKNOWN_EFFECT、resumable=false、投影无 SUCCEEDED/success 字样。
+    assert.equal(fx.sideEffectStore.callById(h.callId).status, "UNKNOWN_EFFECT");
+    assert.equal(proj.resumable, false);
+    assert.equal(/SUCCEEDED|"success"|success/is.test(JSON.stringify(proj)), false, "确认后投影不得含成功语义：" + JSON.stringify(proj));
   } finally {
     try { if (h) { h.box.kill("SIGKILL"); await h.exited; } } catch { /* ignore */ }
     await fx.close(); try { fs.rmSync(paths.root, { recursive: true, force: true }); } catch { /* ignore */ }
