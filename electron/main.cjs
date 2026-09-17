@@ -44,7 +44,18 @@ if (!app.isReady()) {
   ]);
 }
 
-const uiURL = pathToFileURL(path.join(__dirname, "../dist/index.html")).href;
+/**
+ * 外壳页地址。
+ *
+ * 只认显式给出的 `OA_DEV_SERVER`：设了才加载 Vite dev server（实时预览用），
+ * 没设就是原来的构建产物 file:// 路径 —— 产品构建 / `npm run oa:app` 的行为逐字节不变。
+ * 归一化成 URL.href（补尾斜杠），与 senderFrame.url / will-navigate 报的形态对齐。
+ */
+const devURL = process.env.OA_DEV_SERVER ? new URL(process.env.OA_DEV_SERVER).href : null;
+const devOrigin = devURL ? new URL(devURL).origin : null;
+const uiURL = devURL || pathToFileURL(path.join(__dirname, "../dist/index.html")).href;
+
+if (devURL) console.log("[openarc] 开发预览：加载 " + devURL + "（OA_DEV_SERVER 已设置）");
 
 /**
  * 本机原生资源白名单（逻辑名 → 绝对路径）。渲染进程只能报名字，报不出路径 ——
@@ -60,7 +71,12 @@ const NATIVE_TYPES = { ".mov": "video/quicktime", ".mp4": "video/mp4", ".m4v": "
  * 双重条件（sender + senderFrame.url）在 D1-05 冻结，本阶段不放宽。
  */
 function trusted(event) {
-  return event.sender === win?.webContents && event.senderFrame?.url === uiURL;
+  if (event.sender !== win?.webContents) return false;
+  const url = event.senderFrame?.url;
+  if (url === uiURL) return true;
+  // 开发预览：HMR 可能把文档地址带上 query/hash，按来源放行整棵同源页面。
+  // devOrigin 只在 OA_DEV_SERVER 显式开启时才非空，所以产品路径上这段永远不成立。
+  return devOrigin !== null && typeof url === "string" && url.startsWith(devOrigin + "/");
 }
 
 const isMac = process.platform === "darwin";
@@ -152,7 +168,9 @@ app.whenReady().then(() => {
 
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   win.webContents.on("will-navigate", (e, url) => {
-    if (url !== uiURL) e.preventDefault();
+    if (url === uiURL) return;
+    if (devOrigin !== null && url.startsWith(devOrigin + "/")) return;
+    e.preventDefault();
   });
 
   /**
@@ -162,7 +180,12 @@ app.whenReady().then(() => {
    * （A13 的反面：不可信网页不得拿到系统能力）。其余权限维持原有行为，不额外扩张。
    */
   const appDir = pathToFileURL(path.join(__dirname, "..", "dist")).toString();
-  const isAppPage = (url) => typeof url === "string" && url.startsWith(appDir);
+  const isAppPage = (url) => {
+    if (typeof url !== "string") return false;
+    if (url.startsWith(appDir)) return true;
+    // 开发预览下外壳页是 dev server 同源页面，麦克风权限同样只给这一来源。
+    return devOrigin !== null && url.startsWith(devOrigin + "/");
+  };
   const micOnly = (url, mediaTypes) => {
     const types = Array.isArray(mediaTypes) && mediaTypes.length ? mediaTypes : ["audio"];
     return isAppPage(url) && types.includes("audio") && !types.includes("video");
