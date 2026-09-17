@@ -211,6 +211,14 @@ export function useIdentity() {
       unlock: (password: string) => run({ type: "identity/unlock", password }, "ready"),
       changePassword: (currentPassword: string, newPassword: string) =>
         run({ type: "identity/change-password", currentPassword, newPassword }, "unauthenticated"),
+      /**
+       * 改资料（显示名 / 头像）。锁定态仍走 "locked"：口令本身就是再认证，
+       * 失败时 absorb 只允许停在原地，绝不会把锁屏推回桌面。
+       * 登录页没有 session，主进程按 identifier 找用户且**不返回 snapshot**，
+       * 所以 fallback 是 "unauthenticated"。
+       */
+      updateProfile: (input: { password: string; displayName?: string; avatarRef?: string; identifier?: string }) =>
+        run({ type: "identity/update-profile", ...input }, phase === "locked" ? "locked" : "unauthenticated"),
     }),
     [phase, snapshot, installation, error, busy, bootError, bridge, run],
   );

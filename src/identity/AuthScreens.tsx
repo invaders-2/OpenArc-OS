@@ -12,6 +12,8 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowRight } from "lucide-react";
 import { errorText } from "./types";
 import type { IdentitySnapshot } from "./types";
+import { Avatar } from "./Avatar";
+import { ProfileEditor } from "./ProfileEditor";
 
 type AuthError = { code: string; detail?: string } | null;
 
@@ -198,11 +200,19 @@ type LoginProps = {
   error: AuthError;
   defaultIdentifier?: string;
   onSubmit: (input: { identifier: string; password: string }) => Promise<unknown>;
+  onUpdateProfile: (input: { password: string; displayName?: string; avatarRef?: string; identifier?: string }) => Promise<unknown>;
 };
 
-export function LoginScreen({ busy, error, defaultIdentifier = "", onSubmit }: LoginProps) {
+export function LoginScreen({ busy, error, defaultIdentifier = "", onSubmit, onUpdateProfile }: LoginProps) {
   const [identifier, setIdentifier] = useState(defaultIdentifier);
   const [password, setPassword] = useState("");
+  /**
+   * 登录页没有 session：主进程 updateProfile 成功也不返回 snapshot，
+   * 所以刚保存的新头像 / 新名字只能在这里自己记住，否则界面立刻退回旧值。
+   */
+  const [profileAvatar, setProfileAvatar] = useState<string | null>(null);
+  const [profileName, setProfileName] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
   const first = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -212,9 +222,18 @@ export function LoginScreen({ busy, error, defaultIdentifier = "", onSubmit }: L
   return (
     <div className="auth-screen lock-stage" data-d3-id="auth-screen">
       <LockClock />
-      <div className="lock-panel" role="main">
-        <div className="lock-avatar" aria-hidden="true">OA</div>
-        <strong className="lock-name">OpenArc</strong>
+      {/* 编辑器打开时把背后表单 inert：覆盖层只管点击，键盘与焦点由这里语义化挡住。 */}
+      <div className="lock-panel" role="main" inert={editing || undefined}>
+        <button
+          type="button"
+          className="lock-avatar"
+          aria-label="修改头像与用户名"
+          onClick={() => setEditing(true)}
+          data-d3-id="login-avatar"
+        >
+          <Avatar avatarRef={profileAvatar} name="OpenArc" />
+        </button>
+        <strong className="lock-name">{profileName || "OpenArc"}</strong>
         <span className="lock-identifier">使用初始化时创建的管理员凭据</span>
         <form
           className="lock-form"
@@ -237,6 +256,28 @@ export function LoginScreen({ busy, error, defaultIdentifier = "", onSubmit }: L
         </form>
         <p className="lock-footnote">账号不存在与密码错误返回同一个错误，不透露账号是否存在。</p>
       </div>
+      {editing ? (
+        <ProfileEditor
+          mode="login"
+          identifier={identifier}
+          displayName={null}
+          avatarRef={profileAvatar}
+          busy={busy}
+          error={error}
+          onSubmit={async (input) => {
+            const res = await onUpdateProfile(input);
+            if (res && (res as { ok?: boolean }).ok !== false) {
+              // 无 session 拿不到 snapshot：把刚保存的值回填到登录页本地状态
+              if (input.identifier) setIdentifier(input.identifier);
+              if (input.displayName !== undefined) setProfileName(input.displayName);
+              if (input.avatarRef !== undefined) setProfileAvatar(input.avatarRef);
+              setEditing(false);
+            }
+            return res;
+          }}
+          onClose={() => setEditing(false)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -251,6 +292,7 @@ type LockProps = {
   error: AuthError;
   onUnlock: (password: string) => Promise<unknown>;
   onLogout: () => Promise<unknown>;
+  onUpdateProfile: (input: { password: string; displayName?: string; avatarRef?: string; identifier?: string }) => Promise<unknown>;
 };
 
 /**
@@ -260,8 +302,9 @@ type LockProps = {
  * 但被 `inert` 挡住，且原生视图已通过 overlayOpen 隐藏。
  * 焦点陷阱与搜索面板用同一套"首尾循环"实现，不引入第三个焦点方案。
  */
-export function LockScreen({ snapshot, busy, error, onUnlock, onLogout }: LockProps) {
+export function LockScreen({ snapshot, busy, error, onUnlock, onLogout, onUpdateProfile }: LockProps) {
   const [password, setPassword] = useState("");
+  const [editing, setEditing] = useState(false);
   const panel = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
 
@@ -272,10 +315,17 @@ export function LockScreen({ snapshot, busy, error, onUnlock, onLogout }: LockPr
   return (
     <div className="lock-shade lock-stage" data-d3-id="lock-shade">
       <LockClock />
-      <div className="lock-panel" ref={panel} role="dialog" aria-modal="true" aria-label="屏幕已锁定">
-        <div className="lock-avatar" aria-hidden="true">
-          {(snapshot.displayName || "?").slice(0, 1).toUpperCase()}
-        </div>
+      {/* 编辑器打开时把背后表单 inert：覆盖层只管点击，键盘与焦点由这里语义化挡住。 */}
+      <div className="lock-panel" ref={panel} role="dialog" aria-modal="true" aria-label="屏幕已锁定" inert={editing || undefined}>
+        <button
+          type="button"
+          className="lock-avatar"
+          aria-label="修改头像与用户名"
+          onClick={() => setEditing(true)}
+          data-d3-id="lock-avatar"
+        >
+          <Avatar avatarRef={snapshot.avatarRef} name={snapshot.displayName} />
+        </button>
         <strong className="lock-name">{snapshot.displayName || "本地用户"}</strong>
         <span className="lock-identifier">{snapshot.identifier}</span>
         <form
@@ -311,6 +361,23 @@ export function LockScreen({ snapshot, busy, error, onUnlock, onLogout }: LockPr
         </form>
         <p className="lock-footnote">锁定不等于退出登录：会话仍然有效，但受保护的操作会被拒绝，必须重新验证密码。</p>
       </div>
+      {editing ? (
+        <ProfileEditor
+          mode="lock"
+          identifier={snapshot.identifier ?? ""}
+          displayName={snapshot.displayName}
+          avatarRef={snapshot.avatarRef}
+          busy={busy}
+          error={error}
+          onSubmit={async (input) => {
+            const res = await onUpdateProfile(input);
+            // 成功后关闭；快照由 useIdentity 的 absorb 更新，头像与名字随之变化
+            if (res && (res as { ok?: boolean }).ok !== false) setEditing(false);
+            return res;
+          }}
+          onClose={() => setEditing(false)}
+        />
+      ) : null}
     </div>
   );
 }
