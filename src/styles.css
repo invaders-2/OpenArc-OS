@@ -2371,6 +2371,12 @@ input[type="checkbox"] {
   -webkit-backdrop-filter: var(--glass-filter);
 }
 
+/* 登录页背后是纯深色壁纸（没有桌面透出），同样的底座 alpha 下次级文案不足 4.5:1。
+   只覆盖底色长写属性，保留 .lock-stage 全部渐变层，锁屏的壁纸透出感不受影响。 */
+.auth-screen.lock-stage {
+  background-color: rgb(var(--base-rgb) / 0.86);
+}
+
 /* 入场：时钟与身份块各做一次轻微上浮 + 淡入。
    时长走 --dur-slow，reduced-motion 由 token 层的统一清零接管，不写死时长。 */
 @keyframes lock-rise {
