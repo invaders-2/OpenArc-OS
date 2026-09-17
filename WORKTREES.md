@@ -22,6 +22,8 @@
 | `/private/tmp/oa-d303` | `feature/d3-03-device-identity` | 对话 A（D3-03） | 设备身份域（已完成、已推 origin） | 干净 |
 | `/Users/.../OpenArc OS-d3-04a` | `feature/d3-04a-resource-store` | 对话 C | D3-04A 资源存储 | 干净 |
 | `/Users/.../OpenArc OS-d3-04b` | `feature/d3-04b-resource-library` | 对话 D | D3-04B 资源库 CRUD | 有未提交改动 |
+| `/Users/wepingli/Desktop/OpenArc OS-integration` | `integration/ui-core` | 对话（集成） | UI 线并入 D3/D4 核心线的集成分支 | 干净 |
+| `/Users/wepingli/Desktop/OpenArc OS-d4-01` | `feature/d4-03-tool-proxy` | 对话 A（D4） | 核心线 D4-03/D4-05 | 见 oa:status |
 
 > 备注（已解决）：`/tmp/oa-wt` 曾出现两份**不属于对话 A** 的文件（`src/desktop/components.tsx` 改动 +
 > 新增 `src/desktop/useDockMagnify.ts`）。经查它们是**同一改动的另一半**：已提交的 `main.tsx`
