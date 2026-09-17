@@ -2,7 +2,7 @@
 
 - 工作树：`/Users/wepingli/Desktop/OpenArc OS-d4-01`；分支：`feature/d4-03-tool-proxy`
 - Base HEAD（本轮起点，干净）：`a7faf060bb4b2371fdfa379118b2d9011ba7b412`
-- **被测 commit**（D4-05 实现 + D4 收口审查补测/结论修正）：`431395dfe79afec8b4d9370a51b147b46b3e695c`（实现提交为 `83baad6f5ba56ebb415bfdd754357151381f371f`）
+- **被测 commit**（D4 收口修复后重跑）：`ec7a732aa78ffc52e8e0ce3b4d1e09108f604dc4`（D4-05 实现 `83baad6`、审查补测 `431395d`）
 - Final HEAD：本轮报告/证据提交（见文末）
 - 范围：只补齐 PLAN.md §41 的 D4-05 四场景（产物不符 / 结果未知 / 用量到限 / 记忆越权）；第二轮按父级指示补齐 S2 的**最小人工确认入口**以闭合 §384。不扩展真实工具面、不放宽既有检查、不 commit、不 push。
 - **结论：`D4-05 = PARTIAL`**——S1/S2/S3 = PASS；**S4 = PARTIAL**（检索链 PASS、上下文链 NOT VERIFIED：无 memory→任务上下文装配入口，A36 的上下文链为空验证，见 §3/§5）。其余场景 PASS 结论不变。
@@ -11,7 +11,7 @@
 
 | 场景 | 原文要求 | 产品入口 | 预期产物 | 停止条件 | 验证方式 | 复用的既有证据 | 需最小补齐项 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| S1 产物不符（A33） | 工具报告成功但产物尺寸不符，任务不得标成功，应有限纠错或报告验证失败 | `TaskHarnessOrchestrator.runTask` → `ControlledToolProxy.propose/executeReadOnly` → `registry.validateOutput` + `adapter.verify` | 负例：0 Artifact、0 Verification；正对照：1 Artifact + 1 Verification 且互相绑定 | execution `FAILED`/`TOOL_VERIFICATION_FAILED`、`verification_status=FAIL`、Step/Task `BLOCKED`、0 第 2 个 proposal/execution | `tests/d4-05-s1-output-size.test.mjs`（真实 registry/proxy/adapter 链，仅测试内注册 test-only `test.sized`） | `controlled-tool-proxy.cjs` 既有 verify 失败分支；D4-06 执行异常/0 重试语义 | 新增 test-only `test.sized`（期望尺寸 vs 实际尺寸）+ adapter，只在测试内注册 |
+| S1 产物不符（A33） | 工具报告成功但产物尺寸不符，任务不得标成功，应有限纠错或报告验证失败 | `TaskHarnessOrchestrator.runTask` → `ControlledToolProxy.propose/executeReadOnly` → `registry.validateOutput` + `adapter.verify` | 负例：0 Artifact、1 FAIL Verification（v15，含 method/expected/actual/证据）；正对照：1 Artifact + 1 PASS Verification 且互相绑定 | execution `FAILED`/`TOOL_VERIFICATION_FAILED`、`verification_status=FAIL`、Step/Task `BLOCKED`、0 第 2 个 proposal/execution | `tests/d4-05-s1-output-size.test.mjs`（真实 registry/proxy/adapter 链，仅测试内注册 test-only `test.sized`） | `controlled-tool-proxy.cjs` 既有 verify 失败分支；D4-06 执行异常/0 重试语义 | 新增 test-only `test.sized`（期望尺寸 vs 实际尺寸）+ adapter，只在测试内注册 |
 | S2 结果未知（§383/384） | 目标应用不支持幂等时用可验证产物或操作状态核查；无法核查则标记结果未知；结果未知提供检查实际应用、关联产物和人工确认入口，不能直接显示成功或安全重试 | 真实受控 WRITE + 真实存活 executor（quiescence 不可证）→ `recoverOnStartup` 落 UNKNOWN_EFFECT；`TaskService.getRecoveryState` + `task/recovery`/`task/get.recovery` + `task/acknowledgeUnknownEffect` + AI 面板 `data-ai-recovery`/`data-ai-acknowledge` | Call 持久化 `UNKNOWN_EFFECT`；Task/Step `BLOCKED`；只读 recovery 投影含 call/status/errorCode/核查结论/关联产物/resumable=false；确认只追加一条 safe event | `RESUME_UNKNOWN_EFFECT_PRESENT` 拒绝续接；`AUTO_RETRY=0`；确认后 call/step/task 状态不变 | Node 真实 live-executor 路径 + `tests/d4-05-recovery-ui.mjs`（真实 Electron UI）+ `tests/d4-04-smoke.mjs` F1/F3/F5/F6/F7 | D4-03C3/C4 UNKNOWN_EFFECT；D4-06 Closure `RESUME_UNKNOWN_EFFECT_PRESENT` | **已补齐**：只读 recovery 投影 + acknowledge 命令 + UI（见 §2） |
 | S3 用量到限（A35） | 任务达到预算上限，停止自动循环并保留产物及明确续接入口 | 真实 orchestrator bounded 预算 + `TaskService.getResumeEligibility/getBudgetLedger/grantBudgetResume` | `task.budget_exhausted{kind,consumed}`；已发生 Artifact 保留；显式续接产生新 bounded step/run | `BUDGET_EXHAUSTED`；`AUTO_RETRY=0`；续接总数 ≤ `MAX_BUDGET_RESUMES=3` | `tests/d4-05-s3-budget-ledger.test.mjs` + `tests/d4-06-budget.test.mjs` + `tests/d4-06-resume.test.mjs` | D4-06 + D4-06 Closure | 修正 `ledger.consumed.modelCalls` 语义（→ `modelCallEnvelopes`） |
 | S4 记忆越权（A36） | 用户删除个人记忆并切换账号，检索与新任务上下文均不出现已删或他人内容 | `resourceService`（`memory` subtype）+ `searchService` + 真实 `TaskHarnessOrchestrator` | 检索链：alice 可见自己的 memory；删除后不可见且索引文档移除；dana/新 session 检索不到他人内容。上下文链：任务 model 请求体不含任何 memory token（但 `buildPrompt` 无 memory 装配入口，属空验证） | 检索链负向要求满足；上下文链未接入 → **NOT VERIFIED**，不得据此声称记忆注入隔离 | `tests/d4-05-s4-memory.test.mjs` + 既有 `tests/d3-05-data-gate.test.mjs`、`tests/governance-memory.test.mjs` | `authorization-domain.cjs` §25；`search-service.cjs` 授权过滤与 `indexResource` 删除；d3-05 Gate-Search/Gate-Lifecycle | 无（检索链新增端到端 body 捕获）；**缺口**：无 memory→任务上下文装配入口，上下文链 **NOT VERIFIED**（S4 = PARTIAL） |
@@ -33,7 +33,7 @@
 
 | 场景 | expected | actual | 结果 |
 | --- | --- | --- | --- |
-| S1 负例 | execute 成功但尺寸 7≠10 → verify FAIL → execution FAILED/TOOL_VERIFICATION_FAILED、verification_status=FAIL、Task/Step BLOCKED、0 Artifact/0 Verification、恰 1 proposal/execution | 断言全成立 | **PASS** |
+| S1 负例 | execute 成功但尺寸 7≠10 → verify FAIL → execution FAILED/TOOL_VERIFICATION_FAILED、verification_status=FAIL、Task/Step BLOCKED、0 Artifact、**1 FAIL Verification（v15：method/expected/actual/executionId，跨重开可查）**、恰 1 proposal/execution | 断言全成立 | **PASS** |
 | S1 正对照 | 尺寸 10=10 → Task SUCCEEDED、1 Artifact（task/step/run 归属 + checksum==sha256(content)）+ 1 Verification 绑定同一 Artifact | 断言全成立 | **PASS** |
 | S2 投影 | UNKNOWN_EFFECT task 的 recovery 投影含 call 与关联产物，resumable=false | `applicable=true`、call status=UNKNOWN_EFFECT、errorCode 有值、recoveryResult 三态或「尚无结论」、关联产物含 Artifact、`resumable=false`/`RESUME_UNKNOWN_EFFECT_PRESENT`；只读不改状态 | **PASS** |
 | S2 确认 | ack 只追加 safe event；call 仍 UNKNOWN_EFFECT、Task 仍 BLOCKED、仍不可续接、0 第二 call/lease/retry | event=1（含 callId+operatorUserId、脱敏）、call 仍 UNKNOWN_EFFECT、Task/Step 仍 BLOCKED、`RESUME_UNKNOWN_EFFECT_PRESENT`、0 第二 call/lease、幂等重复确认不追加 | **PASS** |
@@ -68,6 +68,6 @@
 ## 6. 证据
 
 - `docs/D4-05-GATE-EVIDENCE.json`（tracked、脱敏）：`testedCommit` / 运行前 `workspaceState` / `command` / `env` / 逐条 `{name,expected,actual,ok}`（128 条：S1 3 / S2 22 / S3 14 / S4 2 / REUSE_D4_04 87）/ `scenarioStatus` / `gaps` / `sourceArtifacts`（含 SHA-256）/ `artifactSha256`。
-- `artifactSha256 = 17abacca03b965979b67f042e9aea6a925fbe2cf0fcc48be318fcdb79220945b`（testedCommit `431395d`，运行前 `workspaceState=""`；Node 23 / D4-04 Electron 94 / recovery UI 11 = 128，全 true）。
-- 原始 artifact（gitignored）SHA-256：`artifacts/d4-04/vertical-smoke-gate.json=9d8a1fd57225a04b2eed8f9d351d42184f3f40b43e2e7dca09936ee9d45ba255`；`artifacts/d4-05/node-tests.tap=7efe9ebae169864dbe9510d6ca66448e73a62a536e0e274f9e01373e5eb0122f`；`artifacts/d4-05-recovery/recovery-ui-gate.json=874c8ca3eaf4806ea7b7a9a8ab70194e1be07677d7581dac7917adf06c3a49f8`。
+- `artifactSha256 = 01e3d3ef01fcf0cfd2968addf7031af2105d6c24ad207b624ca62371f392e78a`（testedCommit `ec7a732`，运行前 `workspaceState=""`；Node 23 / D4-04 Electron 94 / recovery UI 11 = 128，全 true）。
+- 原始 artifact（gitignored）SHA-256：`artifacts/d4-04/vertical-smoke-gate.json=2276cd72ac47d075483bb8d8cca4649bbb2c78d4faf5bfbf4842d75c103edbee`；`artifacts/d4-05/node-tests.tap=b46cee10418e0c4d258e41a4f248abc95165a3cb1916de1a63db558cecb097d3`；`artifacts/d4-05-recovery/recovery-ui-gate.json=2353b8af9eef75adf358bd3e8fd64b9d6c763b20a08f02af51ddf9eec05427f0`。
 - 已脱敏：无 `/Users`、`/private`、`/var/folders`、`mpx_`、`tpx_`、`credential`。

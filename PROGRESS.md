@@ -896,13 +896,13 @@ C2/C4 只开放 resource.trash 一条 REVERSIBLE_WRITE：IRREVERSIBLE_WRITE / EX
 ## 1. Task Status
 
 **D4-05 执行关卡 = PARTIAL（限定当前验收范围）**。`PLAN.md` §41 四场景中 S1/S2/S3 = PASS、S4 = PARTIAL：
-- **S1 产物不符（A33）**：工具报告成功但产物尺寸不符（test-only `test.sized`，生产零改动）→ execution `FAILED` / `TOOL_VERIFICATION_FAILED` / `verification_status=FAIL` / Task·Step BLOCKED / 0 Artifact·0 Verification / 无第 2 次 proposal；正对照尺寸相符 → SUCCEEDED + 1 Artifact（归属 + `checksum==sha256(content)`）+ 1 Verification。
+- **S1 产物不符（A33）**：工具报告成功但产物尺寸不符（test-only `test.sized`，生产零改动）→ execution `FAILED` / `TOOL_VERIFICATION_FAILED` / `verification_status=FAIL` / Task·Step BLOCKED / 0 Artifact / **1 条 FAIL Verification（v15：method/expected/actual/证据引用，跨重开可查，不造假产物）** / 无第 2 次 proposal；正对照尺寸相符 → SUCCEEDED + 1 Artifact（归属 + `checksum==sha256(content)`）+ 1 PASS Verification。
 - **S2 结果未知（§383/384）**：真实受控 WRITE + 真实存活 executor（quiescence 不可证）→ Call `UNKNOWN_EFFECT`、Task/Step BLOCKED、0 第二 call/lease/retry、UI 不显示成功；不自动续接（`RESUME_UNKNOWN_EFFECT_PRESENT`）；**本轮补齐只读 recovery 投影 + 人工确认入口**（`task/recovery`/`task/get.recovery` + `task/acknowledgeUnknownEffect` + `data-ai-recovery`/`data-ai-acknowledge`；确认只追加 safe event，不改 authority、不授权 retry/resume）。
-- **S3 用量到限（A35）**：真实 orchestrator bounded 预算停止 + 保留产物 + 用户显式续接（有界 ≤3）；`additions.amount == 新一轮真实 capability`、原消耗保留、base 不重置。
+- **S3 用量到限（A35）**：真实 orchestrator bounded 预算停止 + 保留产物 + 用户显式续接（有界 ≤3）；`additions.amount == 新一轮真实 capability`、原消耗保留、`base=实际配置`（本轮修复）；一次续接账本只补一个 kind，但新 run 会重新签发 per-run Model/Tool capability（“跨 run 不重置其他 kind”= **OPEN**，见 `docs/D4-ACCEPTANCE-RESULT.md` §2.4）。
 - **S4 记忆越权（A36）= PARTIAL**：**检索链 PASS**（删除前可见 / 删除后不可见 + 索引移除 / 跨账号不可见，正负对照）；**上下文链 NOT VERIFIED**——`buildPrompt` 无 memory 检索/装配入口，“请求体不含记忆”属空验证，只能说明当前无泄漏路径，**不得**声称已验证记忆注入时的隔离（最小后续方案：先加受控 memory 装配入口再验证）。
 **禁止自动进入 D5 / D6。**
 
-## 2. 关键证据（真实执行，D4 收口审查被测 commit `431395d`）
+## 2. 关键证据（真实执行，D4 收口修复被测 commit `ec7a732`）
 
 | 入口 | 结果 |
 |---|---|
@@ -910,19 +910,21 @@ C2/C4 只开放 resource.trash 一条 REVERSIBLE_WRITE：IRREVERSIBLE_WRITE / EX
 | `node --test tests/d4-06-resume.test.mjs` | 6/6（无回归） |
 | 说明 | D4-01/02/03/04/06 复用各自阶段证据，未机械重跑全部 |
 
-- 证据：`docs/D4-05-GATE-EVIDENCE.json`（128 条，`artifactSha256=17abacca…945b`）、`docs/D4-ACCEPTANCE-RESULT.md`（D4 阶段收口）。详细记录：`docs/D4-05-RESULT.md`。
+- 证据：`docs/D4-05-GATE-EVIDENCE.json`（128 条，`artifactSha256=01e3d3ef…e78a`）、`docs/D4-ACCEPTANCE-RESULT.md`（D4 阶段收口 + 修复 + memory 方案）。详细记录：`docs/D4-05-RESULT.md`。
 
 ## 3. 主要缺口 / 后续
 
 1. **S4 上下文链 NOT VERIFIED**（无 memory 检索/装配入口）→ D4-05 = PARTIAL；最小后续方案见 `docs/D4-ACCEPTANCE-RESULT.md` §4。
-2. A33 失败路径无独立 `task_verifications` 记录（失败由 `tool_executions` + `task_events` 持久化，可追溯）；契约细化缺口，最小修复需 migration。
-3. TOOL_CALLS 真实耗尽常被 MODEL_CALLS 兜底（stop kind 无法区分真实工具边界）；`ledger.base.TOOL_CALLS` 名义 8 与实时 facade maxCalls 不一致。
+2. ~~A33 失败路径无独立 `task_verifications` 记录~~ **已修复（schema v15）**：失败写 FAIL Verification（method/expected/actual/证据引用，脱敏有界，不建 Artifact），跨重开可查；见 `docs/D4-ACCEPTANCE-RESULT.md` §2.1。
+3. ~~TOOL_CALLS 真实耗尽被 MODEL_CALLS 兜底 / `base.TOOL_CALLS` 名义值~~ **已修复**：`budgetExhausted()` TOOL_CALLS 优先 + orchestrator 工具预算耗尽即停止；`base` 用实际配置。**新增 OPEN**：续接新 run 会重新签发 per-run Model/Tool capability（“不重置其他 kind”未满足），需裁决。
 4. A37 / A38 不在 PLAN §41 的 D4-05 四场景内，未纳入。
 5. 真实 `electron/main.cjs` 全流程 / 真实外部 provider / 真实凭据 / Windows / OS 级网络沙箱 = 继承 `NOT VERIFIED`，不扩大。
 
 # D4 阶段总结（唯一口径 · 2026-09-17）
 
 **D4 = PARTIAL**（macOS 核心基本完成，非整体完成）。D4-01 macOS Core、D4-02 macOS Core、D4-03（PASS candidate）、D4-04、D4-06 在声明范围内通过；**D4-05 = PARTIAL**。
+- 本轮（被测 commit `ec7a732`）已修复审查发现的两个既有缺口：① 预算实际值/停止原因/追加账本；② 失败 Verification 持久化（schema v15）；**未**据此升级 D4/D4-05。
+- `docs/D4-ACCEPTANCE-RESULT.md` 含受控 memory 装配最小方案（仅方案，未实施）与需裁决的续接跨 run 预算 OPEN 项。
 - 阻塞整体 PASS：D4-05 S4 上下文链 NOT VERIFIED（无 memory 装配入口）；D4-01/D4-02 的 Windows / External Provider NOT VERIFIED；D4-03 待外部审计封板。
 - 已验范围（macOS）：模型服务隔离/撤权、任务版本固定与实时权限、工具门/租约/审批/受控写入、纵向冒烟（真实产物/停止/撤权）、关联链与预算停止、结果未知处置均在各自范围内真实通过。
 - 唯一推荐的下一阶段任务：**D4-05 Closure · 受控 memory 检索/装配与上下文隔离**（建议；见 `docs/D4-ACCEPTANCE-RESULT.md` §4）。

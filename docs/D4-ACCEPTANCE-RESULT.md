@@ -1,7 +1,8 @@
-# D4 阶段收口审查 · 结果记录（Acceptance Review）
+# D4 阶段收口审查与修复 · 结果记录（Acceptance Review + Closure Fix）
 
 - 审查 Base HEAD：`6fb68377dfe5d1eefae6b951cd89c540f2abaa51`
-- **被测 commit（本轮补测 + 结论修正）**：`431395dfe79afec8b4d9370a51b147b46b3e695c`
+- 审查轮被测 commit：`431395dfe79afec8b4d9370a51b147b46b3e695c`
+- **收口修复被测 commit：`ec7a732aa78ffc52e8e0ce3b4d1e09108f604dc4`**
 - Final HEAD：本轮报告/证据提交（见文末）
 - 分支：`feature/d4-03-tool-proxy`；工作树：`/Users/wepingli/Desktop/OpenArc OS-d4-01`；未 push、未合并 main；默认 d3-02 工作区未触碰
 
@@ -9,89 +10,81 @@
 
 **D4 = PARTIAL（macOS 核心基本完成，非整体完成）**。
 
-- D4-01 macOS Core、D4-02 macOS Task/Harness Core、D4-03（PASS candidate）、D4-04、D4-06 在各自声明范围内通过；D4-05 = **PARTIAL**（四场景中 S1/S2/S3 PASS、S4 上下文链 NOT VERIFIED）。
-- 阻塞“整体 PASS”的项：D4-05 S4 依赖尚不存在的 memory→任务上下文装配能力（空验证）；D4-01/D4-02 的 Windows / External Provider = NOT VERIFIED；D4-03 仍为 PASS candidate，待外部审计封板。
-- 不因远期无关缺口否定已完成范围：macOS 上 D4 的工具门/租约/审批/受控写入/纵向冒烟/关联链/预算停止/撤权/结果未知处置均已真实验证。
+- D4-01 macOS Core、D4-02 macOS Task/Harness Core、D4-03（PASS candidate）、D4-04、D4-06 在各自声明范围内通过；D4-05 = **PARTIAL**（S1/S2/S3 PASS、S4 上下文链 NOT VERIFIED）。
+- 阻塞“整体 PASS”的项：D4-05 S4 依赖尚不存在的 memory→任务上下文装配能力（空验证）；D4-01/D4-02 的 Windows / External Provider = NOT VERIFIED；D4-03 待外部审计封板；**续接预算的跨 run 语义存在需裁决的开放项（见 §2.4）**。
+- 本轮已修复审查发现的两个既有功能缺口（预算实际值/停因/账本；失败 Verification 持久化），**未**因此升级 D4-05/D4（memory 上下文缺口不变）。
 
 ## 1. D4 原始要求 → 实现 → 证据 → 限制 → 结论
 
 | 要求（PLAN.md） | 实现位置 | 验证证据 | 限制 | 结论 |
 | --- | --- | --- | --- | --- |
 | **D4-01 模型服务**：统一配置及用量；继承、隔离、并发、撤权通过 | `electron/model-*.cjs`、`model-proxy.cjs`、`credential-store.cjs`、Settings UI | `test:d4-01` 59/59；model-ipc-ui 10/10、model-settings-ui 16/16、model-keychain-restart 64/64、model-secret-scan 13/13、model-secret-ui 20/20、model-isolation 10/10 + UI 26/26、model-performance 10/10 | Windows（Credential/Proxy/Firewall/Settings）NOT VERIFIED；External Provider NOT VERIFIED | macOS Core **PASS**；cross-platform overall **PARTIAL** |
-| **D4-02 任务与适配**：任务版本固定且权限实时有效 | `task-domain/store/service.cjs`、`harness-adapter.cjs`、`task-harness-orchestrator.cjs` | `test:d4-02a` 22/22、`test:d4-02b` 16/16、`test:d4-02c` 22/22；schema v9/v10 migration；MODEL_CONFIG_CHANGED 真实测试 | Windows NOT VERIFIED | macOS Core **PASS**；cross-platform overall **PARTIAL** |
+| **D4-02 任务与适配**：任务版本固定且权限实时有效 | `task-domain/store/service.cjs`、`harness-adapter.cjs`、`task-harness-orchestrator.cjs` | `test:d4-02a` 22/22、`test:d4-02b` 16/16、`test:d4-02c` 22/22（schema v15）；MODEL_CONFIG_CHANGED 真实测试 | Windows NOT VERIFIED | macOS Core **PASS**；cross-platform overall **PARTIAL** |
 | **D4-03 工具门与租约**：授权执行及回报；重复调用与离线结果处理正确 | `tool-registry.cjs`、`controlled-tool-proxy.cjs`、`tool-facade-bridge.cjs`、`side-effect-authority/store/runtime.cjs`、`runtime-supervisor.cjs` | A 32/32；B 59/59；C1 46/46+50/50；C2 29/29 + closure 38/38/45/45/51/51；C3 56/56、closure 63/63；C4 35/35 + UI 22/22 + closure 15/15/12/12/9/9；D 52/52、closure 62/62 | **PASS candidate，待外部审计封板**；OS 网络沙箱/独立 malformed ACP/跨重启 durable death proof NOT VERIFIED/DEFERRED | **PASS candidate** |
-| **D4-04 纵向冒烟**：一工具真实流程记录；真实产物、停止、撤权可核查 | `tests/fixtures/d4-04-probe/main.cjs`、`tests/d4-04-smoke.mjs`、`runtime-boot.cjs`、`executor-launcher.cjs`、`side-effect-*.cjs` | `test:d4-04`（当前共享 probe）**94/94**；Closure-3 **67/67**（`e989842`）；真实撤权 R1/R2；executor-unavailable | Gate 宿主 = probe host（非真实 `electron/main.cjs`）；无 artifact 的预算停止不可续接 | **PASS（限定范围）** |
+| **D4-04 纵向冒烟**：一工具真实流程记录；真实产物、停止、撤权可核查 | `tests/fixtures/d4-04-probe/main.cjs`、`tests/d4-04-smoke.mjs`、`runtime-boot.cjs`、`executor-launcher.cjs`、`side-effect-*.cjs` | `test:d4-04` **94/94**；Closure-3 **67/67**（`e989842`）；撤权 R1/R2；executor-unavailable | Gate 宿主 = probe host（非真实 `electron/main.cjs`） | **PASS（限定范围）** |
 | **D4-05 执行关卡**：门控验收，未通过禁止扩展真实工具面 | `task-service.cjs`（recovery/resume/ledger）、`task-bootstrap.cjs`、AI 面板 | `test:d4-05` **128/128 functional**，`overallStatus=PARTIAL`，S1/S2/S3 PASS、S4 PARTIAL | S4 上下文链 NOT VERIFIED（无 memory 装配入口）；见 §2 | **PARTIAL** |
-| **D4-06 关联链与预算停止**（§41） | `task-service.cjs`、`task-harness-orchestrator.cjs`、`task-store.cjs`、D4-05 recovery | `test:d4-06` **106/106**；`test:d4-06-resume` **19/19** | 上层收敛为 TaskService 合同验证（非完整 orchestrator 实测）；真实 main.cjs 未端到端 | **PASS（限定范围）** |
-| **A14** 团队默认模型可用；个人覆盖再清除，本人切换、他人不变 | D4-01 Model Defaults/Resolution + App/User 隔离 | D4-01 model-isolation 10/10 + UI 26/26 | 同上 | **PASS**（macOS） |
-| **A15** 模型无图像能力；设为图像默认并测试 | D4-01 Capabilities 校验 | D4-01 Capabilities/默认解析 + model-service 测试 | 复用阶段证据，本审查未逐条重跑 | **PASS**（复用） |
-| **A16** 任务配置已快照；撤销模型权限后调用被拒 | D4-02A model snapshot 冻结 + `startModelCall` 实时 reauthorize；D4-02B per-call | D4-02A 真实 `MODEL_CONFIG_CHANGED`（expected=1/current=2，0 call/0 revision bump） | Windows | **PASS** |
-| **A17** 任务工具执行中停止；后续步骤停止、已发生据实展示 | D4-02C cancel 两阶段 + D4-03C4/03D cancel race | D4-03C4 UI 22/22、D4-04 E1–E4、D4-03D mixed cancel | — | **PASS** |
-| **A18** 执行端完成但回报丢失；不再次执行或进入结果未知核查 | D4-03C3/C4 UNKNOWN_EFFECT + recovery verification | D4-04 F1–F7、D4-03C3 closure 63/63、D4-05 S2 | 人工确认入口为本轮补齐 | **PASS** |
-| **A19** 租约过期且设备断线；不盲目换设备重发副作用 | D4-03C1/C4 lease + trusted quiescence authority | D4-03C4 closure 15/15、closure2 12/12、closure3 9/9 | 跨重启 **authenticated durable death proof = DEFERRED / NOT VERIFIED**（当前 fail closed 到 UNKNOWN_EFFECT） | **PASS**（fail closed；durable proof 挂账） |
+| **D4-06 关联链与预算停止**（§41） | `task-service.cjs`、`task-harness-orchestrator.cjs`、`task-store.cjs`、D4-05 recovery | `test:d4-06` **106/106**；`test:d4-06-resume` **19/19** | 上层收敛为 TaskService 合同验证；**续接跨 run 预算语义 OPEN（见 §2.4）**；真实 main.cjs 未端到端 | **PASS（仅限原 §41 范围）**；若裁决“一次续接只补一个 kind”为必需，须降为 PARTIAL |
+| **A14–A19** | 见审查轮报告 | D4-01/02/03 真实证据；A15 复用 | Windows / External Provider | **PASS**（复用） |
 
-## 2. 重点审查发现
+## 2. 重点审查发现与本轮修复
 
-### 2.1 D4-05 S1 失败证据（A33）—— 失败结论已持久化、跨重开可追溯
-- 新增同盘 DB 重开用例（`tests/d4-05-s1-output-size.test.mjs`）：负例（execute 成功但 size 7≠10）后 `close → reopenToolHarnessRuntime → recover() → 新 TaskService/ToolStore`，仍可追溯：
-  - `tool_executions` 行在（`task_id/step_id/run_id` 归属一致、`status=FAILED`、`verification_status=FAIL`、`error_code=TOOL_VERIFICATION_FAILED`）；
-  - 持久化 `tool.verification.failed` 事件在、无 `tool.execution_succeeded`；重开后 Task/Step 仍 BLOCKED；
-  - `task_verifications` 对失败路径 = 0（如实记录，不造假）。
-- **失败结论不依赖测试日志**：由 `tool_executions` + `task_events` 持久化承载（均可按 Task/Step/Call 查询）。
-- **潜在契约缺口（已报告，未改产品）**：PLAN §39 描述 Verification 保存“检查方法、预期、实际结果、证据引用及通过时间”，schema `task_verifications.status` 支持 FAIL，但代码只在成功提交时写 Verification；失败时 `adapter.verify` 的 `{expected,actual}` 被丢弃。最小修复：验证失败时插入 `status=FAIL` 的 `task_verifications`（`artifact_id` 需可空或新增 `execution_id`，需 migration）。
-- **A33 结论不变**：工具报告成功但产物不符 → Task 不得标成功（BLOCKED、0 Artifact、无重试）已成立；上述是 Verification 记录完整性的契约细化，不影响 A33 验收。
+### 2.1 D4-05 S1 失败证据（A33）—— 已修复：失败 Verification 持久化（v15）
+- 原缺口：`task_verifications.artifact_id NOT NULL` 只允许 Artifact 提交时的 PASS；schema/adapter verify 失败 0 记录，`verify` 的 `{expected,actual}` 被丢弃。
+- 修复：**schema v15 最小兼容迁移**（`task_verifications` 重建为 `artifact_id` 可空 + `step_id/run_id/execution_id`，旧行原样复制、索引重建）；`TaskService.recordVerificationFailure`（owner/app 隔离；`status=FAIL`、`artifact_id=null`、`safe_details{method,expected,actual,evidence.executionId}`；expected/actual 有界（≤200）且去敏键/私有路径/`mpx_`/`tpx_`；**不建 Artifact、不改 Step/Task 终态**）；`ControlledToolProxy` 注入 `taskService`，在 `OUTPUT_SCHEMA`/`ADAPTER_VERIFY` 失败时先落证据再 `#finishExecution`；`task/get` 返回 safe verifications；UI 在 BLOCKED+FAIL 时显示 `data-ai-verification`（检查方法/预期/实际/证据），绝不显示成功。
+- 实测：`tests/d4-07-verification-persistence.test.mjs` **5/5**（失败=1 FAIL/or Artifact=0/Step·Task BLOCKED；成功=1 Artifact+1 PASS 无回归；同盘重开证据完整；跨用户 `TASK_FORBIDDEN`；证据脱敏）；`tests/d4-05-s1-output-size.test.mjs` 失败断言更新为新契约（1 FAIL / 0 Artifact）；`tests/migration.test.mjs` 新增 v14→v15（旧 PASS 行保留 + 新列可用），migration 集合 **27/27**。
+- **A33 结论不变**：工具报告成功但产物不符 → Task 不得标成功（BLOCKED、0 Artifact、无重试）。
 
-### 2.2 D4-05 S2 人工确认（结果未知）—— 含义与入口
-- 用户能找到待核查对象：`task/get.recovery` / `task/recovery` 返回 UNKNOWN_EFFECT 的 `callId/toolId/status/errorCode`、核查结论（APPLIED/NOT_APPLIED/INDETERMINATE/尚无结论）、**关联产物**（artifactId/type/checksum，脱敏），UI 渲染 `data-ai-recovery`。
-- “确认”语义明确：按钮为“我已人工核查”，确认后显示“已人工确认”；仅追加一条 safe event `tool.side_effect.unknown_effect.acknowledged`，**绝不**表示执行成功、**不**解除 UNKNOWN_EFFECT、**不**授权重试/续接（`resumable=false`，无 Success/Retry/Resume 入口）。
-- 权限：非 owner（真实用户 dana）调 `getRecoveryState`/`acknowledgeUnknownEffect` → `TASK_FORBIDDEN`，不返回恢复详情、不追加 event、不改变状态；重复确认幂等（`changed=false`，仍 1 条 event）。
-- 缺少产物时投影显示“关联产物：无”，不制造关联。
+### 2.2 D4-05 S2 人工确认（结果未知）—— 含义与入口（审查轮结论不变）
+- 用户能找到待核查对象（`task/get.recovery`/`task/recovery`：callId/toolId/status/errorCode/核查结论/关联产物，脱敏）；“确认”= “我已人工核查”，只追加 safe event，**不表示成功、不解除 UNKNOWN_EFFECT、不授权重试/续接**；非 owner（真实用户 dana）读写均 `TASK_FORBIDDEN`；重复确认幂等；无产物时显示“无”。
 
-### 2.3 D4-05 S4 记忆越权（A36）—— 修正为 PARTIAL（排除空验证）
-- **检索链 = PASS（正负对照）**：alice 删除前可检索；删除后不可检索 + 派生索引文档移除；切账号 dana 检索不到已删或他人 memory。
-- **上下文链 = NOT VERIFIED**：`buildPrompt` 只含 goal + safe step input + prior artifact，**不存在真实 memory 检索/装配入口**；“真实任务 model 请求体不含 memory token”在此前提下是**空验证**——只能说明当前无泄漏路径，**不能**声称“具备记忆注入时的上下文隔离”。
-- 因此 **S4 = PARTIAL、D4-05 = PARTIAL**；最小后续方案（本轮不改产品）：先新增受控 memory 检索/装配入口，再用正负对照验证上下文隔离（授权记忆可见且注入；已删/他人记忆不出现），通过后 S4 才可升 PASS。
+### 2.3 D4-05 S4 记忆越权（A36）—— PARTIAL（本轮不变）
+- **检索链 = PASS（正负对照）**；**上下文链 = NOT VERIFIED**：`buildPrompt` 无 memory 检索/装配入口，“请求体不含记忆”属空验证——只能说明当前无泄漏路径，不能声称已验证记忆注入时的隔离。故 S4 与 D4-05 = **PARTIAL**；最小后续方案见 §7。
 
-### 2.4 预算追加的实际约束（MODEL_CALLS / TOOL_CALLS / TOOL_ROUNDS）
-- 三类停止均新增/复用账本断言：`task.budget_exhausted{kind,consumed,maxCalls/maxRounds}` 与 `getBudgetLedger().additions` 的最后一类 `kind`/`amount` 一致，且与**新一轮实际生效限制**一致：
-  - MODEL_CALLS：additions.amount=8 == 新 model capability maxCalls=8（复用 D4-05 S3 用例）；
-  - TOOL_ROUNDS：additions.amount=4 == `MAX_TOOL_ROUNDS`，新 run 实际只跑 4 轮并再次停止；
-  - TOOL_CALLS：additions.amount=1 == facade maxCalls=1，新 run 再次 `{TOOL_CALLS,1,1}`。
-- **一次续接只追加一个 kind**（additions 长度 1、kind 唯一），账本未遗漏其它类，UI 显示 `nextGrant.kind + amount`；未发现“补多类但只显示一种”的缺陷。
-- **两处产品缺口（已报告，未改产品）**：① TOOL_CALLS 真实耗尽后 dsh 不单独中止，`HarnessAdapter.budgetExhausted()` 先判 MODEL_CALLS，实测 kind 常记为 MODEL_CALLS（用户/账本无法区分真实工具边界；已记录最小建议：持久化“最早耗尽的 kind”）；② `ledger.base.TOOL_CALLS` 名义值 8 与实时 facade maxCalls 不一致（additions 承载真实额度，base 可能误导）。
+### 2.4 预算实际值 / 停止原因 / 追加账本
+- 根因：① `getBudgetLedger().base` 硬编码 `BUDGET_BASE`，忽略实际配置；② `HarnessAdapter.budgetExhausted()` 先判 MODEL_CALLS，工具预算真实耗尽被掩盖；③ 成功 prompt 后即使 TOOL_CALLS 已 EXHAUSTED 仍会 commit success。
+- 修复：`TaskService.attachBudgetConfig({modelMaxCalls,toolMaxCalls,maxToolRounds})`（缺失回退默认），`base`/`nextGrant.amount` 用实际额度；`budgetExhausted()` 改为 **TOOL_CALLS 优先** 并返回只读脱敏 `observed{model,tool}`；orchestrator 每次 prompt 成功后若 TOOL_CALLS EXHAUSTED 立即 `BUDGET_EXHAUSTED{TOOL_CALLS}` + `task.budget_exhausted{observed}`（0 成功提交、0 后续调度）。
+- 实测：`tests/d4-07-budget-consistency.test.mjs` **3/3**；`d4-05-s3` 四类预算 **4/4**（`base={8,1,4}`、`nextGrant={TOOL_CALLS,1}`、additions 仅 1 条同 kind）。**①②③ 已修复**。
+- **OPEN（需裁决，本轮未改）**：授权账本/事件确实**只追加一个 kind**；但续接会新开 Harness run，按**冻结的 per-run 设计**重新签发 Model 与 Tool capability（bounded 默认额度）。因此“**新建 step/run/capability 不得顺带恢复其他预算**”**未满足**——这不是账本记多类，而是 per-run 预算重置。修复需新增跨 run 记账（`base+additions−consumed` 逐 kind carry-over），会改变 D4-01/D4-03D 冻结的 per-run 语义并影响续接可用性（某些场景新 run 会 0 额度）。**列为开放项**：若裁决该语义为 D4-06 必需，则 D4-06 应从“原 §41 PASS”降为 PARTIAL 并另立修复。
+
+### 2.5 UI：失败 Verification 渲染
+- `src/desktop/components.tsx` 已实现 BLOCKED+FAIL 时 `data-ai-verification`（检查方法/预期/实际/证据），`npm run build`（tsc+vite）通过；**现有 Electron probe 无确定性 FAIL-verification 场景，该渲染未经 Electron 门控实测**（列为限制）。
 
 ## 3. 仍未验证的能力及其对收口的影响
 
 | 能力 | 状态 | 对 D4 收口的影响 |
 | --- | --- | --- |
-| memory→任务上下文装配与隔离（A36 上下文链） | NOT VERIFIED | **阻塞 D4-05/D4 整体 PASS**（D4-05 = PARTIAL） |
-| D4-03 外部审计封板 | PASS candidate（未封板） | 影响“D4-03 = PASS”的正式性；不影响 macOS 已验行为 |
-| Windows（模型服务/任务/工具门全链路） | NOT VERIFIED | D4-01/D4-02 cross-platform overall = PARTIAL |
-| External Provider（真实供应商接入） | NOT VERIFIED | 影响“统一配置及用量”在真实 provider 上的完整性 |
-| OS 级网络沙箱 / external workspace read audit / independent malformed ACP injection | NOT VERIFIED | 安全纵深挂账，不属 D4-05 四场景，不阻塞 macOS 核心收口 |
-| 跨重启 authenticated durable process-death proof | DEFERRED / NOT VERIFIED | 当前 fail closed 到 UNKNOWN_EFFECT；不阻塞 D4 |
-| 失败 Verification 独立记录（§39 契约细化） | 潜在缺口 | 不影响 A33 结论；建议后续最小修复 |
+| memory→任务上下文装配与隔离（A36 上下文链） | NOT VERIFIED | **阻塞 D4-05/D4 整体 PASS** |
+| 续接跨 run 预算语义（“不重置其他 kind”） | **OPEN（需裁决）** | 影响 D4-06 续接预算子项；若必需则 D4-06 降 PARTIAL |
+| D4-03 外部审计封板 | PASS candidate | 影响“D4-03 = PASS”的正式性 |
+| Windows / External Provider | NOT VERIFIED | D4-01/D4-02 overall = PARTIAL |
+| OS 级网络沙箱 / external workspace read audit / independent malformed ACP injection | NOT VERIFIED | 安全纵深挂账，不属 D4-05 四场景 |
+| 跨重启 authenticated durable process-death proof | DEFERRED / NOT VERIFIED | 当前 fail closed 到 UNKNOWN_EFFECT |
+| 失败 Verification 的 Electron UI 实测 | 限制 | UI 已实现未 Electron 门控；查询/持久化已 Node 验证 |
 
 ## 4. 唯一推荐的下一阶段任务
 
-**D4-05 Closure · 受控 memory 检索/装配与上下文隔离**（建议；若路线图认为 A36 上下文链须依赖 memory 能力，则这是解除 D4-05 门控的唯一前置；编号不是已批准的阶段编号，D5-* 才是路线图正式阶段）。
+**D4-05 Closure · 受控 memory 检索/装配与上下文隔离**（建议；见 §7 方案）。范围/前置/完成标准见审查轮（不变）；完成并通过后 S4 与 D4-05 方可升 PASS。路线图下一个正式阶段为 **D5-01 浏览器**（不受 D4-05 门控）；D5-02/03/06/08 以 D4-05 通过为前置。
 
-- **目标**：提供**受控**的 memory 检索→任务上下文装配入口（仅授权范围内的个人/项目记忆），使 A36 的上下文链成为可验证的正负对照，而非空验证。
-- **范围**：最小装配入口 + 授权过滤接入（复用 D3-02 §25 memory 授权语义）；不新增记忆类型/UI 功能、不扩大工具面。
-- **排除项**：D5-* 各阶段；真实外部 provider；Windows；不实现完整记忆产品。
-- **前置条件**：D4-05 检索链已 PASS；D3-02 memory 授权规则已冻结；D4-02C orchestrator prompt 构造点（`buildPrompt`）已存在。
-- **可检查的完成标准**：真实任务在授权范围内装配 memory 并可从持久化的 model 请求体追溯；**授权记忆可见且注入**（正对照）、**已删/他人记忆绝不出现**（负对照）、切换账号后一致、无未授权检索；通过后 S4 与 D4-05 方可从 PARTIAL 升 PASS。
-- **之后**：路线图下一个正式阶段为 **D5-01 浏览器**（前置 D2、D3-05、D1-01，不受 D4-05 门控的“扩展真实工具面”约束）；D5-02/03/06/08 均以 D4-05 通过为前置，须待上述门控关闭。
+## 5. 修改文件与实际检查
 
-## 5. 本轮修改文件与实际检查
-
-- **被测提交 `431395d`**：`tests/d4-05-s1-output-size.test.mjs`、`tests/d4-05-s2-recovery.test.mjs`、`tests/d4-05-s3-budget-ledger.test.mjs`（补测）、`tests/d4-05-smoke.mjs`（S4 gap → PARTIAL）、`docs/D4-05-RESULT.md`、`docs/D4-05-GATE-EVIDENCE.json`。**产品零改动。**
-- **报告提交**：`docs/D4-ACCEPTANCE-RESULT.md`、`docs/D4-05-RESULT.md`、`docs/D4-05-GATE-EVIDENCE.json`、`PROGRESS.md`。
-- **实际执行**（被测 commit `431395d`，干净工作区）：`npm run test:d4-05` → **128/128 functional**，`overallStatus=PARTIAL`，S1/S2/S3=PASS、S4=PARTIAL，`workspaceState=""`；`node --test tests/d4-06-resume.test.mjs` → **6/6**；补测单独运行 9/9。未机械重跑全部阶段测试；D4-01/02/03/04/06 结论复用各自阶段证据（见 §1）。
+- **审查轮被测提交 `431395d`**（产品零改动）：`tests/d4-05-s1/s2/s3*.test.mjs`、`tests/d4-05-smoke.mjs`、`docs/D4-05-RESULT.md`、`docs/D4-05-GATE-EVIDENCE.json`。
+- **收口修复被测提交 `ec7a732`**：`electron/{controlled-tool-proxy,harness-adapter,identity-store,side-effect-executor-bundle,task-bootstrap,task-harness-orchestrator,task-service,task-store}.cjs`、`src/desktop/components.tsx`、`tests/{d4-05-s1-output-size,d4-05-s3-budget-ledger,migration,device-migration,side-effect-migration,task-orchestration-migration,task-store,tool-execution-migration,tool-migration}.test.mjs`、`tests/fixtures/harness-acp/tool-harness-fixture.mjs`、新增 `tests/d4-07-budget-consistency.test.mjs`、`tests/d4-07-verification-persistence.test.mjs`。
+- **报告提交**：`docs/D4-ACCEPTANCE-RESULT.md`、`docs/D4-05-RESULT.md`、`docs/D4-04/05/06-GATE-EVIDENCE.json`、`PROGRESS.md`。
+- **实际执行（被测 commit `ec7a732`，干净工作区）**：`npm run test:d4-05` → 128/128 functional、overallStatus=PARTIAL、`workspaceState=""`；`test:d4-04` 94/94、`test:d4-06` 106/106、`test:d4-06-resume` 19/19、`test:d4-02c` 22/22（schema v15）、`test:d4-03c4` 35/35+UI 22/22；`npm test` = **944/944 PASS**（含 d4-07 与 migration）。未机械重跑未受影响证据。
 - 证据脱敏：无 `/Users`、`/private`、`/var/folders`、`mpx_`、`tpx_`、credential。
 
 ## 6. 诚实边界
 
-- 本轮是**只读审查 + 必要补测 + 结论修正**，未新增产品能力、未修产品缺陷（发现的缺口只给影响与最小修复建议）。
-- D4-05 的 PASS **已被主动修正为 PARTIAL**；不因此前已写 PASS 而回避。
-- “测试环境等价”不等于“真实 `electron/main.cjs` 全流程已实测”；D4 的 Electron 证据均为 probe host + 共享 production 装配。
+- 本轮**只修两个既有缺口**，未新增 memory 装配、未进入 D5/D6、未扩展工具面、未放宽检查。
+- **未把“一次续接只补一个 kind”写成已满足**：账本层面成立，运行时 per-run capability 仍会重新签发其他 kind，已如实标为 OPEN 并交裁决。
+- D4-05/D4 保持 **PARTIAL**；不因两个缺口修复而升级（记忆上下文缺口不变）。
+- “测试环境等价”不等于“真实 `electron/main.cjs` 全流程已实测”。
+
+## 7. 受控 memory 装配最小方案（仅方案，未实施）
+
+- **记忆来源**：`Resource type=memory`（D3-04B），subtype = personal-preference / project-memory / decision-memory / conversation-memory / agent-memory；只取用户本人或被授权项目的记忆，不取跨组织/他人记忆。
+- **检索范围**：经 `SearchService`/`ResourceService` 的**授权过滤**查询（同 D3-05 Gate-Search），限定 task 的 user + app + project/department；按相关性 + 上限条数/字符数取最小必要片段。
+- **权限检查时点**：**装配时**（task 启动/组装 prompt 前）与**每次受控读取时**都重新授权；memory 高敏——全局 grant 不覆盖（D3-02 §25），必须有显式 Resource-Type/Resource/Collection grant；无授权则 0 注入。
+- **删除与切账号处理**：删除仍走现有删除路径（资源删除 + 派生索引移除，已由检索链验证）；装配每次实时读取，不缓存跨会话 → 已删记忆下个任务即不可见；切账号后授权过滤使他人/已删内容不进入上下文。
+- **是否进入模型请求**：进入——但**仅授权且最小化的片段**（有界长度、脱敏、无凭据/绝对路径）；绝不 dump 全部记忆或完整文件。
+- **留存方式**：**不**为“证明隔离”而持久化完整私人记忆或模型请求正文；只保留 safe 引用（resourceRef/artifactId/checksum）与授权/审计记录；隔离用确定性 provider 的 test-only 唯一 token + 正负对照验证（授权可见且注入 / 已删·他人不出现）。
