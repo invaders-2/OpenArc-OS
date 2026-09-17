@@ -222,7 +222,9 @@ export function LoginScreen({ busy, error, defaultIdentifier = "", onSubmit }: L
       {/* 登录页没有 session，改资料只能从已登录状态发起；这里只做展示。 */}
       <div className="lock-panel" role="main">
         <span className="lock-avatar" aria-hidden="true">
-          <Avatar avatarRef={null} name="OpenArc" />
+          {/* 登录页没有 session，头像位放品牌 mark（与启动态同一个可复用元素），
+              不硬塞一个字母占位圆。 */}
+          <span className="brand-mark" />
         </span>
         <strong className="lock-name">OpenArc</strong>
         <span className="lock-identifier">使用初始化时创建的管理员凭据</span>

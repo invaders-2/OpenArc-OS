@@ -2352,9 +2352,32 @@ input[type="checkbox"] {
   justify-content: flex-end;
   /* Apple 锁屏：身份块落在下半屏，不居中 */
   padding: var(--space-8) var(--space-8) clamp(48px, 15vh, 150px);
-  background: rgb(var(--base-rgb) / 0.55);
+  /* 三层纵深，全部取中性 token：底座 → 顶部柔光 → 时钟后方一圈极淡高光。
+     不引入新颜色，也不靠发丝线或重投影分层（DESIGN_SYSTEM §3.2）。 */
+  background:
+    radial-gradient(
+      560px 300px at 50% clamp(48px, 15vh, 132px),
+      color-mix(in srgb, var(--material-top-highlight) 30%, transparent),
+      transparent 68%
+    ),
+    linear-gradient(180deg, rgb(var(--surface-rgb) / 0.08), transparent 42%),
+    rgb(var(--base-rgb) / 0.55);
+  background-repeat: no-repeat;
   backdrop-filter: var(--glass-filter);
   -webkit-backdrop-filter: var(--glass-filter);
+}
+
+/* 入场：时钟与身份块各做一次轻微上浮 + 淡入。
+   时长走 --dur-slow，reduced-motion 由 token 层的统一清零接管，不写死时长。 */
+@keyframes lock-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 .lock-clock {
   position: absolute;
@@ -2363,15 +2386,18 @@ input[type="checkbox"] {
   left: 0;
   text-align: center;
   pointer-events: none;
+  animation: lock-rise var(--dur-slow) var(--ease-standard) both;
 }
+/* date 是时间的从属行：小字号 + 宽字距，靠字重与颜色拉开层级，不加粗到 700。 */
 .lock-date {
-  font-size: var(--fs-display);
-  font-weight: var(--fw-medium);
-  letter-spacing: var(--tracking-tight);
+  font-size: var(--fs-secondary);
+  font-weight: var(--fw-regular);
+  letter-spacing: var(--tracking-wide);
+  line-height: var(--lh-tight);
   color: var(--muted);
 }
 .lock-time {
-  margin-top: var(--space-1);
+  margin-top: 0;
   font-size: var(--fs-clock);
   font-weight: var(--fw-medium);
   line-height: 1;
@@ -2386,10 +2412,11 @@ input[type="checkbox"] {
   flex-direction: column;
   align-items: center;
   text-align: center;
+  animation: lock-rise var(--dur-slow) var(--ease-standard) both;
 }
 .lock-avatar {
-  width: 64px;
-  height: 64px;
+  width: 72px;
+  height: 72px;
   border-radius: var(--radius-pill);
   background: var(--accent);
   color: var(--on-accent);
@@ -2398,18 +2425,22 @@ input[type="checkbox"] {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: var(--space-3);
-  box-shadow: var(--elevation-2);
+  margin-bottom: var(--space-2);
+  /* 阴影之外补一条内侧顶部高光。深色下 elevation 已含同款 inset，
+     显式叠加是为了浅色主题也能读出玻璃厚度（材质高光，不是描边）。 */
+  box-shadow: inset 0 1px 0 var(--material-top-highlight), var(--elevation-2);
   user-select: none;
 }
 .lock-name {
   font-size: var(--fs-title);
   font-weight: var(--fw-medium);
   letter-spacing: var(--tracking-tight);
+  line-height: var(--lh-tight);
 }
 .lock-identifier {
   margin-top: var(--space-1);
-  font-size: var(--fs-secondary);
+  font-size: var(--fs-caption);
+  letter-spacing: 0.02em;
   color: var(--muted);
 }
 .lock-form {
@@ -2423,17 +2454,26 @@ input[type="checkbox"] {
   position: relative;
   width: 100%;
 }
+/* 口令槽是锁屏唯一的面：半透明玻璃 + 胶囊圆角，高度抬到 ~44px。
+   聚焦是"玻璃更亮"（surface alpha 抬升），不是压暗成灰块。 */
 .lock-input input {
   width: 100%;
+  min-height: 44px;
   border: 0;
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-pill);
-  background: rgb(var(--content-rgb) / var(--content-alpha));
+  background: rgb(var(--surface-rgb) / var(--surface-alpha));
+  backdrop-filter: var(--glass-filter-tip);
+  -webkit-backdrop-filter: var(--glass-filter-tip);
   text-align: left;
+}
+.lock-input input::placeholder {
+  color: var(--placeholder);
 }
 .lock-input input:focus-visible {
   outline: none;
-  background: rgb(var(--text-rgb) / 0.08);
+  background: rgb(var(--surface-rgb) / calc(var(--surface-alpha) + 0.14));
+  box-shadow: inset 0 1px 0 var(--material-top-highlight-active);
 }
 .lock-input--act input {
   padding-right: calc(var(--space-8) + var(--space-3));
@@ -2451,21 +2491,42 @@ input[type="checkbox"] {
   justify-content: center;
   background: var(--accent);
   color: var(--on-accent);
+  transition:
+    transform var(--dur-quick) var(--ease-standard),
+    background-color var(--dur-quick) var(--ease-standard),
+    color var(--dur-quick) var(--ease-standard);
 }
+/* 禁用不再靠整体 opacity：淡底 + muted 箭头，仍读得出是"可提交位"。
+   定位用了 translateY(-50%)，按下反馈必须把它带上，否则会跳到中心线。 */
 .lock-submit:disabled {
-  opacity: var(--disabled-opacity);
+  background: var(--hover-tint);
+  color: var(--muted);
   cursor: default;
 }
+.lock-submit:not(:disabled):active {
+  transform: translateY(-50%) scale(0.92);
+}
+/* 退出登录：低调胶囊，hover 用抬亮层，按下轻微内缩。 */
 .lock-alt {
   align-self: center;
   padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-pill);
   font-size: var(--fs-secondary);
   color: var(--muted);
+  transition:
+    background-color var(--dur-quick) var(--ease-standard),
+    transform var(--dur-quick) var(--ease-standard);
+}
+.lock-alt:hover:not(:disabled) {
+  background: var(--hover-tint);
+}
+.lock-alt:not(:disabled):active {
+  transform: scale(0.97);
 }
 .lock-footnote {
   max-width: 300px;
   margin-top: var(--space-4);
-  font-size: var(--fs-caption);
+  font-size: var(--fs-micro);
   line-height: var(--lh-normal);
   color: var(--muted);
 }
