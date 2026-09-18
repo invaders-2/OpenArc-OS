@@ -372,6 +372,8 @@ type DockProps = {
   /** 右键某个图标 / 右键程序坞空白。菜单由 App 渲染（只有它拿得到 App 清单）。 */
   onItemMenu: (appId: string, e: React.MouseEvent) => void;
   onSurfaceMenu: (e: React.MouseEvent) => void;
+  /** 回收站是否有内容：macOS 行为 —— 空桶 trash.png / 满桶 trash-full.png。 */
+  trashFull?: boolean;
 };
 
 export function Dock({
@@ -387,6 +389,7 @@ export function Dock({
   onReorder,
   onItemMenu,
   onSurfaceMenu,
+  trashFull = false,
 }: DockProps) {
   // 放大与整理都由 Dock 自己持有：它只在身份门通过后挂载，父层的 useEffect
   // 拿不到这一刻（详见 useDockMagnify 顶部注释）。两个 hook 共用同一个 ref ——
@@ -434,10 +437,13 @@ export function Dock({
         orbAnimated={!reduced}
         onActivate={onToggleAI}
       />
+      {/* 回收站是系统级固定槽位（macOS 惯例：分隔线右侧、最右端），按内容切换空桶/满桶。
+          原生素材来源：/System/Library/CoreServices/Dock.app/Contents/Resources/
+          trashempty@2x.png（空桶）与 trashfull@2x.png（满桶），拷贝到 public/icons/ 供本机原型使用。 */}
       {trashApp ? (
         <DockItem
           label="回收站"
-          iconName="trash"
+          iconName={trashFull ? "trash-full" : "trash"}
           running={runningApps.has("trash")}
           bouncing={bouncing === "trash"}
           onActivate={() => onActivate("trash")}

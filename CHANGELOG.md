@@ -1,5 +1,47 @@
 # 计划修订记录
 
+## 2026-09-18（二十一）：回收站改原生图标（空桶/满桶）+ 虚拟文件夹进回收站 + 资源库分区合并
+
+用户口径：程序坞回收站改用 Apple macOS 原生图标；桌面虚拟文件夹也进回收站；资源库的应用内回收站合并进系统回收站。
+
+### 改了什么
+
+- **原生图标 + 空桶/满桶**（`public/icons/trash.png`、`public/icons/trash-full.png`）：直接拷自本机
+  `/System/Library/CoreServices/Dock.app/Contents/Resources/trashempty@2x.png` 与
+  `trashfull@2x.png`（256×256，**不加圆角方底板**，原生垃圾桶本体）。Dock 新增 `trashFull` 状态：
+  回收站为空显示 `trash`（空桶），任意来源有内容显示 `trash-full`（满桶）；应用中心回收站磁贴同一套。
+  尺寸 / 放大动效沿用 `DockItem` 现有 `<img className="dock-icon">`，与其它图标一致。
+  对照组图 `docs/snapshots/2026-09-18-trash-icon-native.png`。
+- **桌面虚拟文件夹软删除**（新增纯逻辑 `electron/folder-trash.cjs` + `.d.cts`，`src/main.tsx` 接线）：
+  删文件夹时 `collectSubtree` 收整棵子树（含嵌套），元数据存 `oa-folder-trash`（groupId / rootId /
+  name / deletedAt / 每个文件夹的 id·name·x·y·parentId）；内部每个文件夹里的**真实文件**走
+  `files.trash(folderId, id, groupId)` 打成同一组（`file-service.cjs` 索引新增可选 `groupId`，
+  仍走既有 `files:trash` 通道，**未新增 IPC**）。恢复 `planFolderRestore`：父级在就原位、原 id、
+  原坐标；**父级已被删 → 归到桌面根**；**重名 → 自动 " 2"/" 3"**；组内多文件一起回原 folderId。
+  永久删除 / 清空才真正销毁（组内文件一并物理删除）。删除确认 Dialog 文案改为「…一起移入回收站 / 可在回收站中恢复」。
+- **资源库分区**（`src/main.tsx` 回收站窗口）：新增独立分区「来自资源库」，通过既有
+  `resource/query`（`category: "trash"`）拉取；服务端按授权逐条过滤 —— **未授权的资源不会返回、
+  也不提示存在**，列表为空时该分区不出现。恢复 / 永久删除分别调既有 `resource/restore` /
+  `resource/permanentDelete`（既有 `resource:command`），**没有新增 IPC、没有扩暴露面**。
+- **三分区渲染**：回收站窗口按「文件夹 / 文件 / 来自资源库」分组（`.file-group-block` + `.split-section`），
+  条目带 `data-trash-kind`、资源分区带 `data-trash-section="resource"`；选中与键盘语义对三类共用。
+  切回回收站（Dock 激活）时重拉三个来源，Dock 空桶/满桶状态同步。
+
+### 验证（真实执行）
+
+- `npm test` **1015/1015 通过**：新增 `tests/folder-trash.test.mjs`（11 例：嵌套子树、原位恢复、
+  重名、父级已删归根、多条连续恢复、分区构建、孤儿组、groupId 落库 / 整体恢复 / 非法 groupId 丢弃）
+  与 `tests/trash-resource-section.test.mjs`（3 例：已授权 TRASHED 资源出现在 category="trash"、
+  同组织未授权 / 跨组织用户看不到且名字不出现、永久删除后消失）；回收站既有
+  `tests/file-service-trash.test.mjs` 11 例不回归。
+- `npm run build` 通过；`security-surface` **17/17 PASS**（暴露面成员数与通道清单均未变）。
+- `npm run test:trash-snapshots`（真实 Electron，**44/44 通过**）：空桶→删文件后满桶→恢复后空桶；
+  桌面文件删除→回收站→恢复；桌面虚拟文件夹（含内部文件）删除→回收站显示文件夹（组内文件不重复
+  出现）→恢复整组→再次永久删除（确认 Dialog）→组内文件物理销毁；资源创建→删除→「来自资源库」
+  分区出现→恢复→再次删除→永久删除；清空回收站；老 `oa-dock` 迁移。
+  截图：`docs/snapshots/2026-09-18-trash-{dock-empty,dock-full,empty,content,folder,resource}.png`。
+
+
 ## 2026-09-18（二十）：程序坞系统级「回收站」（软删除 / 恢复 / 永久删除 / 清空）
 
 用户口径：程序坞那边添加一个回收站。
@@ -12,8 +54,8 @@
   全局 AI 的行为与位置不变。老用户 `oa-dock` 不含 trash 时做**一次性合并迁移**（补到末尾 +
   写 `oa-dock-trash` 标记），之后用户自己移除不再补回 —— 与"数组即唯一真值"的既有语义一致。
 - **图标** `public/icons/trash.png`（256×256）：与 `public/icons` 同一套 Big Sur 风格（204px 圆角方底板
-  + 顶光渐变 + 投影 + 白色金属桶身）。`docs/snapshots/2026-09-18-trash-icon-compare.png` 是与
-  settings / finder / apps / freeform / folder 的同尺寸对照图。
+  + 顶光渐变 + 投影 + 白色金属桶身）。此自绘图标已在（二十一）按要求换成 macOS 原生
+  trashempty / trashfull，对照图见 `docs/snapshots/2026-09-18-trash-icon-native.png`。
 - **后端软删除**（`electron/file-service.cjs`）：新增 `<userData>/files/.trash/` 与索引
   `{ id, origId, folderId, name, ext, size, mtime, deletedAt, file }`，新增
   `trash / listTrash / restore / purge / empty`。索引沿用「先写 tmp 再 rename」，物理文件先移动再写索引；
@@ -43,7 +85,7 @@
   `window-stress` 单跑在**第一条**断言 `00.seededDesktopMatchesDomain`（窗口恢复/最小化基线）
   即失败，与回收站无关（该探针在集成分支从未跑过，原记 NOT VERIFIED）。
 - 真实 Electron 端到端 + 截图 `scripts/trash-snapshots.cjs`（`npm run test:trash-snapshots`，**19/19 通过**）：
-  `docs/snapshots/2026-09-18-trash-{dock,empty,content}.png`（程序坞含回收站 / 空态 / 删一个桌面文件后），
+  `docs/snapshots/2026-09-18-trash-{dock-empty,dock-full,empty,content,folder,resource}.png`（见（二十一）），
   并验证桌面右键「删除」→ 进回收站 → 恢复回桌面 → 永久删除必须过确认 Dialog，以及老 `oa-dock`
   刷新后自动出现回收站。
 

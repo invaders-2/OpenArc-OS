@@ -35,6 +35,8 @@ import "./design-system/tokens.css";
 import "./styles.css";
 import domain from "../electron/window-domain.cjs";
 import type { WindowCommand } from "../electron/window-domain.cjs";
+import folderTrashLib from "../electron/folder-trash.cjs";
+import type { FolderTrashRecord } from "../electron/folder-trash.cjs";
 import { useDesktop } from "./desktop/useDesktop";
 import { applyCursors, CURSOR_SIZE_DEFAULT, CURSOR_SIZE_MAX, CURSOR_SIZE_MIN } from "./desktop/cursors";
 // 别名导入：本模块里有 `declare global { interface Window }`，
@@ -115,11 +117,16 @@ declare global {
         list: (folderId: string) => Promise<{ ok?: boolean; entries?: FileEntry[]; error?: string }>;
         rename: (folderId: string, id: string, name: string) => Promise<{ ok?: boolean; entries?: FileEntry[]; error?: string }>;
         remove: (folderId: string, id: string) => Promise<{ ok?: boolean; entries?: FileEntry[]; error?: string }>;
-        /** 系统级回收站（软删除）。remove 仍是永久删除，回收站窗口里才用它。 */
-        trash: (folderId: string, id: string) => Promise<{ ok?: boolean; entries?: FileEntry[]; error?: string }>;
+        /** 系统级回收站（软删除）。remove 仍是永久删除，回收站窗口里才用它。
+         *  groupId：把一条虚拟文件夹子树里的多个文件打成同一组（见 electron/folder-trash.cjs）。 */
+        trash: (
+          folderId: string,
+          id: string,
+          groupId?: string,
+        ) => Promise<{ ok?: boolean; entries?: FileEntry[]; error?: string }>;
         trashList: () => Promise<{
           ok?: boolean;
-          entries?: (FileEntry & { folderId?: string; deletedAt?: number })[];
+          entries?: (FileEntry & { folderId?: string; deletedAt?: number; groupId?: string })[];
           error?: string;
         }>;
         trashRestore: (id: string) => Promise<{
@@ -168,8 +175,35 @@ declare global {
 /** 文件服务返回的条目（不含磁盘路径 —— 路径永不过桥）。 */
 type FileEntry = { id: string; name: string; ext: string; size: number; mtime: number };
 
-/** 系统回收站里的一条：文件条目 + 原文件夹与删除时间（恢复要用原夹去重名）。 */
-type TrashEntry = FileEntry & { folderId: string; deletedAt: number };
+/** 系统回收站里的一个真实文件条目 + 原文件夹 / 删除时间 /（可选）文件夹分组。 */
+type TrashEntry = FileEntry & { folderId: string; deletedAt: number; groupId?: string };
+
+/** 资源域回收站里的一条（只取渲染需要的字段）。 */
+type ResourceTrashItem = {
+  resourceRef: string;
+  name: string;
+  resourceType?: string;
+  mimeType?: string;
+  updatedAt?: number;
+};
+
+/** 回收站窗口里的一行：文件 / 虚拟文件夹 / 来自资源库。key 是稳定的行标识。 */
+type TrashRow =
+  | { key: string; kind: "folder"; name: string; deletedAt: number; groupId: string; fileCount: number }
+  | { key: string; kind: "file"; name: string; ext: string; deletedAt: number; trashId: string }
+  | { key: string; kind: "resource"; name: string; resourceRef: string; ext: string };
+
+/** 资源类型 → 线性文件图标用的扩展名（与文件列表同一套 FileGlyph 视觉）。 */
+const RESOURCE_EXT: Record<string, string> = {
+  image: "png",
+  video: "mp4",
+  audio: "mp3",
+  text: "txt",
+  code: "ts",
+  prompt: "md",
+  memory: "md",
+  document: "pdf",
+};
 
 /** 文件夹里的一行：子文件夹或文件服务里的文件，统一结构后再排序 / 分组。 */
 type Row = { id: string; name: string; kind: "folder" | "file"; ext?: string; size?: number; mtime?: number };
@@ -276,7 +310,8 @@ const apps = [
   { id: "organization", name: "组织治理", icon: "settings" },
   { id: "skills", name: "Skill 中心", icon: "shortcuts" },
   { id: "settings", name: "系统设置", icon: "settings" },
-  // 系统级回收站：与其它 App 不同，它在程序坞里固定在分隔线右侧（见 components.tsx 的 Dock）。
+  // 系统级回收站：固定在程序坞分隔线右侧（见 components.tsx 的 Dock）。
+  // 图标用 macOS 原生 trashempty / trashfull（见 public/icons/trash.png 与 trash-full.png）。
   { id: "trash", name: "回收站", icon: "trash" },
 ] as const;
 
@@ -489,12 +524,35 @@ function App() {
     }
   }, []);
   // ---------------------------------------------------------------------------
-  // 系统级回收站（软删除）。条目只在回收站窗口打开时拉取；恢复/删除后刷新。
+  // 系统级回收站（软删除）。三个来源：
+  //   · 文件：文件服务回收站里**未被文件夹分组**的条目
+  //   · 文件夹：桌面虚拟文件夹子树（localStorage oa-folder-trash）+ 组内文件
+  //   · 来自资源库：资源域里已授权、status=TRASHED 的资源（独立分区，只经既有 resource:command）
   // ---------------------------------------------------------------------------
   const [trashEntries, setTrashEntries] = useState<TrashEntry[]>([]);
+  const [folderTrash, setFolderTrash] = useState<FolderTrashRecord[]>(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem("oa-folder-trash") || "null");
+      return Array.isArray(raw) ? raw : [];
+    } catch {
+      return [];
+    }
+  });
+  const [resourceTrash, setResourceTrash] = useState<ResourceTrashItem[]>([]);
   const [trashSel, setTrashSel] = useState<string[]>([]);
   const [trashView, setTrashView] = useState<"grid" | "list">("grid");
-  const [trashConfirm, setTrashConfirm] = useState<{ kind: "purge" | "empty"; id?: string; name?: string } | null>(null);
+  const [trashConfirm, setTrashConfirm] = useState<
+    { kind: "purge"; keys: string[]; label: string } | { kind: "empty" } | null
+  >(null);
+  const resourceCmd = useCallback(async (payload: Record<string, unknown>) => {
+    const bridge = window.openarc?.resource;
+    if (!bridge) return { ok: false as const, error: "NO_BRIDGE" };
+    try {
+      return await bridge.command(payload);
+    } catch {
+      return { ok: false as const, error: "INTERNAL_ERROR" };
+    }
+  }, []);
   const refreshTrash = useCallback(async () => {
     const bridge = window.openarc?.files;
     if (!bridge?.trashList) return;
@@ -505,32 +563,145 @@ function App() {
       /* 主进程不可用时保持原样 */
     }
   }, []);
-  /** 恢复：刷新它原来所在的文件夹（原夹不存在时后端会重建），并清掉选择。 */
-  const restoreFromTrash = async (ids: string[]) => {
+  /** 资源域回收站列表：命令本身按授权过滤，未授权的资源不会返回、也不提示存在。 */
+  const refreshResourceTrash = useCallback(async () => {
+    const res = (await resourceCmd({
+      type: "resource/query",
+      category: "trash",
+      sort: "updated",
+      direction: "desc",
+      limit: 60,
+    })) as { ok?: boolean; items?: ResourceTrashItem[] };
+    setResourceTrash(res && res.ok && Array.isArray(res.items) ? res.items : []);
+  }, [resourceCmd]);
+  const refreshAllTrash = useCallback(async () => {
+    await Promise.all([refreshTrash(), refreshResourceTrash()]);
+  }, [refreshTrash, refreshResourceTrash]);
+  useEffect(() => {
+    localStorage.setItem("oa-folder-trash", JSON.stringify(folderTrash));
+  }, [folderTrash]);
+  // 开机 / 登录完成 / 打开的应用集合变化（资源库可能改了回收站）时刷新，保证 Dock 空桶·满桶状态正确。
+  const openAppsKey = useMemo(
+    () => [...new Set(state.windows.map((w) => w.appId))].sort().join(","),
+    [state.windows],
+  );
+  useEffect(() => {
+    if (identity.phase === "ready" || identity.phase === "unavailable") void refreshAllTrash();
+  }, [identity.phase, openAppsKey, refreshAllTrash]);
+
+  /** 三个分区 + 每行统一结构（纯函数在 electron/folder-trash.cjs 里，可被 Node 单测覆盖）。 */
+  const trashSections = useMemo(() => {
+    const sections = folderTrashLib.buildTrashSections({
+      fileEntries: trashEntries,
+      folderRecords: folderTrash,
+      resourceItems: resourceTrash,
+    });
+    const folderRows: TrashRow[] = sections.folders.map((r) => ({
+      key: "g:" + r.groupId,
+      kind: "folder",
+      name: r.name,
+      deletedAt: r.deletedAt,
+      groupId: r.groupId,
+      fileCount: r.fileCount,
+    }));
+    const fileRows: TrashRow[] = sections.files.map((e) => ({
+      key: "f:" + e.id,
+      kind: "file",
+      name: e.name,
+      ext: e.ext,
+      deletedAt: e.deletedAt ?? 0,
+      trashId: e.id,
+    }));
+    const resourceRows: TrashRow[] = sections.resources.map((it) => {
+      const item = it as ResourceTrashItem;
+      return {
+        key: "r:" + item.resourceRef,
+        kind: "resource",
+        name: item.name,
+        resourceRef: item.resourceRef,
+        ext: RESOURCE_EXT[String(item.resourceType ?? "")] ?? "",
+      };
+    });
+    return {
+      folderRows,
+      fileRows,
+      resourceRows,
+      all: [...folderRows, ...fileRows, ...resourceRows],
+      isEmpty: sections.isEmpty,
+    };
+  }, [trashEntries, folderTrash, resourceTrash]);
+  const trashRowByKey = useMemo(() => new Map(trashSections.all.map((r) => [r.key, r])), [trashSections]);
+  const trashHasContent = trashSections.all.length > 0;
+
+  /** 恢复文件夹分组：先把整组文件从文件服务回收站恢复回原 folderId，再把子树元数据放回原位。 */
+  const restoreFolderGroups = async (working: Folder[], keys: string[]): Promise<Folder[]> => {
     const bridge = window.openarc?.files;
-    if (!bridge?.trashRestore || !ids.length) return;
-    for (const id of ids) {
-      const res = await bridge.trashRestore(id);
+    let base = working;
+    for (const key of keys) {
+      const rec = folderTrash.find((r) => "g:" + r.groupId === key);
+      if (!rec) continue;
+      const plan = folderTrashLib.planFolderRestore(rec, base);
+      base = [...base, ...plan.added];
+      setFolders(base);
+      if (bridge?.trashRestore) {
+        for (const id of folderTrashLib.trashIdsOfGroup(trashEntries, rec.groupId)) await bridge.trashRestore(id);
+      }
+      for (const f of rec.folders) void refreshFiles(f.id);
+    }
+    await refreshFiles(DESKTOP_ID);
+    setFolderTrash((list) => list.filter((r) => !keys.includes("g:" + r.groupId)));
+    return base;
+  };
+  /** 恢复：按行类型分派（文件夹整组 / 文件 / 资源）。 */
+  const restoreTrash = async (keys: string[]) => {
+    if (!keys.length) return;
+    const bridge = window.openarc?.files;
+    const folderKeys = keys.filter((k) => trashRowByKey.get(k)?.kind === "folder");
+    const fileKeys = keys.filter((k) => trashRowByKey.get(k)?.kind === "file");
+    const resourceKeys = keys.filter((k) => trashRowByKey.get(k)?.kind === "resource");
+    if (folderKeys.length) await restoreFolderGroups(folders, folderKeys);
+    for (const k of fileKeys) {
+      const row = trashRowByKey.get(k);
+      if (row?.kind !== "file") continue;
+      const res = await bridge?.trashRestore?.(row.trashId);
       if (res?.ok && res.folderId) void refreshFiles(res.folderId);
     }
     await refreshFiles(DESKTOP_ID);
+    for (const k of resourceKeys) {
+      const row = trashRowByKey.get(k);
+      if (row?.kind === "resource") await resourceCmd({ type: "resource/restore", resourceRef: row.resourceRef });
+    }
     setTrashSel([]);
-    await refreshTrash();
+    await refreshAllTrash();
   };
-  const purgeFromTrash = async (ids: string[]) => {
+  /** 永久删除：文件夹分组连同组内文件一起销毁；资源走既有 resource/permanentDelete。 */
+  const purgeTrash = async (keys: string[]) => {
+    if (!keys.length) return;
     const bridge = window.openarc?.files;
-    if (!bridge?.trashPurge || !ids.length) return;
-    for (const id of ids) await bridge.trashPurge(id);
+    const folderKeys = keys.filter((k) => trashRowByKey.get(k)?.kind === "folder");
+    for (const k of folderKeys) {
+      const row = trashRowByKey.get(k);
+      if (row?.kind !== "folder") continue;
+      for (const id of folderTrashLib.trashIdsOfGroup(trashEntries, row.groupId)) await bridge?.trashPurge?.(id);
+    }
+    setFolderTrash((list) => list.filter((r) => !folderKeys.includes("g:" + r.groupId)));
+    for (const k of keys) {
+      const row = trashRowByKey.get(k);
+      if (row?.kind === "file") await bridge?.trashPurge?.(row.trashId);
+      if (row?.kind === "resource") await resourceCmd({ type: "resource/permanentDelete", resourceRef: row.resourceRef });
+    }
     setTrashSel([]);
-    await refreshTrash();
+    await refreshAllTrash();
   };
   const emptyTrash = async () => {
     await window.openarc?.files?.trashEmpty?.();
+    setFolderTrash([]);
+    for (const it of resourceTrash) await resourceCmd({ type: "resource/permanentDelete", resourceRef: it.resourceRef });
     setTrashSel([]);
-    await refreshTrash();
+    await refreshAllTrash();
   };
   /** 危险操作走既有 Dialog；overlays.dialog 让原生视图让位、背景 inert。 */
-  const openTrashConfirm = (c: { kind: "purge" | "empty"; id?: string; name?: string }) => {
+  const openTrashConfirm = (c: { kind: "purge"; keys: string[]; label: string } | { kind: "empty" }) => {
     setTrashConfirm(c);
     setOverlays((o) => ({ ...o, dialog: true }));
   };
@@ -539,8 +710,8 @@ function App() {
     setOverlays((o) => ({ ...o, dialog: false }));
   };
   useEffect(() => {
-    if (state.windows.some((w) => w.appId === "trash")) void refreshTrash();
-  }, [state.windows, refreshTrash]);
+    if (state.windows.some((w) => w.appId === "trash")) void refreshAllTrash();
+  }, [state.windows, refreshAllTrash]);
   /** 当前选中的条目（按 windowId），Quick Look 的目标。 */
   /** 当前选中的条目（按 windowId 存 **一组 id**，支持多选）。 */
   const [selected, setSelected] = useState<Record<string, string[]>>({});
@@ -1200,11 +1371,18 @@ function App() {
       ],
     });
   };
-  /** 删除桌面选中项：文件走文件服务，虚拟文件夹连带子文件夹与它的窗口。 */
+  /** 删除桌面选中项：文件走文件服务回收站；虚拟文件夹整棵子树软删除（含被选中祖先覆盖的子孙）。 */
   const deleteDesktopSelection = async (ids: string[]) => {
+    const folderIds = ids.filter((x) => folders.some((f) => f.id === x));
+    const covered = new Set<string>();
+    for (const fid of folderIds) {
+      if (covered.has(fid)) continue; // 已被选中祖先的子树覆盖，避免重复回收
+      for (const s of folderTrashLib.collectSubtree(folders, fid)) covered.add(s.id);
+      await removeFolder(fid);
+    }
     for (const x of ids) {
-      if (folders.some((f) => f.id === x)) removeFolder(x);
-      else await window.openarc?.files?.trash(DESKTOP_ID, x);
+      if (folderIds.includes(x)) continue;
+      await window.openarc?.files?.trash(DESKTOP_ID, x);
     }
     setDesktopIcons((m) => {
       const out = { ...m };
@@ -1213,7 +1391,7 @@ function App() {
     });
     setDeskSel([]);
     await refreshFiles(DESKTOP_ID);
-    await refreshTrash();
+    await refreshAllTrash();
   };
   /** 「用所选 N 项新建文件夹」= 用户口径里的"编组"：新文件夹吃下整组，随即进入改名。 */
   const newFolderFromSelection = async (ids: string[]) => {
@@ -1432,6 +1610,8 @@ function App() {
    */
   const activateApp = (appId: string) => {
     setOverlays((o) => ({ ...o, search: false }));
+    // 每次切回回收站都重拉一次三个来源：资源库可能在别处改了回收站（Dock 空桶/满桶状态也跟着这个走）。
+    if (appId === "trash") void refreshAllTrash();
     bounce(appId);
     const mine = domain.windowsOfApp(state, appId);
     // order 是自底向上的唯一真值，因此"最近的窗口"就是末尾那个
@@ -1801,7 +1981,7 @@ function App() {
                 { id: "copy", label: "拷贝", onSelect: doCopy },
                 { id: "cut", label: "剪切", onSelect: doCut },
                 { separator: true },
-                { id: "delete", label: "删除", danger: true, onSelect: () => removeFolder(one.id) },
+                { id: "delete", label: "删除", danger: true, onSelect: () => void removeFolder(one.id) },
               ]
             : [
                 { id: "open", label: "打开", onSelect: () => void openPreview(shown.id, one.id) },
@@ -1839,8 +2019,16 @@ function App() {
                 label: "删除 " + picked.length + " 项",
                 danger: true,
                 onSelect: () => {
-                  for (const r of picked) if (r.kind === "folder") removeFolder(r.id);
-                  for (const r of picked) if (r.kind === "file") removeFile(r.id);
+                  void (async () => {
+                    // 文件夹整棵子树进回收站；被选中祖先覆盖的子孙不再重复回收。
+                    const covered = new Set<string>();
+                    for (const r of picked) {
+                      if (r.kind !== "folder" || covered.has(r.id)) continue;
+                      for (const s of folderTrashLib.collectSubtree(folders, r.id)) covered.add(s.id);
+                      await removeFolder(r.id);
+                    }
+                    for (const r of picked) if (r.kind === "file") removeFile(r.id);
+                  })();
                 },
               },
             ];
@@ -2121,22 +2309,91 @@ function App() {
       );
     }
     if (w?.appId === "trash") {
+      const all = trashSections.all;
       const sel = trashSel;
       const any = sel.length > 0;
-      const nameOf = (entryId: string) => trashEntries.find((e) => e.id === entryId)?.name ?? entryId;
+      const labelOf = (key: string) => {
+        const row = trashRowByKey.get(key);
+        if (!row) return key;
+        return row.kind === "folder" && row.fileCount > 0 ? `${row.name}（${row.fileCount} 个文件）` : row.name;
+      };
       /** 与文件夹窗口同一套选择语义：单击单选、⌘/Ctrl 加减选、Shift 扩选。 */
-      const toggle = (entryId: string, e: React.MouseEvent) => {
+      const toggle = (key: string, e: React.MouseEvent) => {
         setTrashSel((cur) => {
-          if (e.metaKey || e.ctrlKey) return cur.includes(entryId) ? cur.filter((x) => x !== entryId) : [...cur, entryId];
+          if (e.metaKey || e.ctrlKey) return cur.includes(key) ? cur.filter((x) => x !== key) : [...cur, key];
           if (e.shiftKey && cur.length) {
-            const order = trashEntries.map((v) => v.id);
+            const order = all.map((v) => v.key);
             const a = order.indexOf(cur[cur.length - 1]);
-            const b = order.indexOf(entryId);
+            const b = order.indexOf(key);
             if (a >= 0 && b >= 0) return order.slice(Math.min(a, b), Math.max(a, b) + 1);
           }
-          return [entryId];
+          return [key];
         });
       };
+      const requestPurge = (keys: string[]) =>
+        openTrashConfirm({ kind: "purge", keys, label: keys.length > 1 ? keys.length + " 项" : labelOf(keys[0]) });
+      /** 一行回收站条目：文件夹 / 文件 / 来自资源库，共用同一套选中与键盘语义。 */
+      const renderCell = (row: TrashRow) => (
+        <div
+          key={row.key}
+          className={"file-cell " + (sel.includes(row.key) ? "selected" : "")}
+          role="button"
+          tabIndex={0}
+          title={row.name}
+          data-entry-id={row.key}
+          data-trash-kind={row.kind}
+          onClick={(ev) => toggle(row.key, ev)}
+          onDoubleClick={() => void restoreTrash([row.key])}
+          onKeyDown={(ev) => {
+            // 键盘可达：Enter / 空格 = 恢复，Delete = 永久删除（同样先确认）。
+            if (ev.key === "Enter" || ev.code === "Space") {
+              ev.preventDefault();
+              void restoreTrash([row.key]);
+            }
+            if (ev.key === "Delete" || ev.key === "Backspace") {
+              ev.preventDefault();
+              requestPurge([row.key]);
+            }
+          }}
+          onContextMenu={(ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            const keys = sel.includes(row.key) ? sel : [row.key];
+            if (!sel.includes(row.key)) setTrashSel([row.key]);
+            setPaneMenu({
+              x: ev.clientX,
+              y: ev.clientY,
+              items: [
+                { id: "restore", label: "恢复", onSelect: () => void restoreTrash(keys) },
+                { separator: true },
+                {
+                  id: "purge",
+                  label: keys.length > 1 ? `永久删除 ${keys.length} 项` : "永久删除",
+                  danger: true,
+                  onSelect: () => requestPurge(keys),
+                },
+              ],
+            });
+          }}
+        >
+          {row.kind === "folder" ? (
+            <FolderIcon size={trashView === "grid" ? 46 : 24} />
+          ) : (
+            <span className="file-glyph">
+              <FileGlyph ext={row.ext} size={trashView === "grid" ? 40 : 22} />
+            </span>
+          )}
+          <span className="file-name">{row.name}</span>
+        </div>
+      );
+      const gridClass = trashView === "grid" ? "file-grid" : "file-list";
+      const block = (label: string, rows: TrashRow[]) =>
+        rows.length ? (
+          <div className="file-group-block" key={label}>
+            <div className="split-section">{label}</div>
+            <div className={gridClass}>{rows.map(renderCell)}</div>
+          </div>
+        ) : null;
       return (
         <div className="split">
           <nav className="split-side" aria-label="回收站操作">
@@ -2145,19 +2402,13 @@ function App() {
               <Trash2 size={16} /> <span className="split-nav-label">全部项目</span>
             </button>
             <div className="split-section">操作</div>
-            <button className="split-nav" disabled={!any} onClick={() => void restoreFromTrash(sel)}>
+            <button className="split-nav" disabled={!any} onClick={() => void restoreTrash(sel)}>
               <RotateCcw size={16} /> <span className="split-nav-label">恢复</span>
             </button>
-            <button
-              className="split-nav"
-              disabled={!any}
-              onClick={() =>
-                openTrashConfirm({ kind: "purge", id: sel[0], name: sel.length > 1 ? sel.length + " 项" : nameOf(sel[0]) })
-              }
-            >
+            <button className="split-nav" disabled={!any} onClick={() => requestPurge(sel)}>
               <Trash2 size={16} /> <span className="split-nav-label">永久删除</span>
             </button>
-            <button className="split-nav" disabled={!trashEntries.length} onClick={() => openTrashConfirm({ kind: "empty" })}>
+            <button className="split-nav" disabled={!all.length} onClick={() => openTrashConfirm({ kind: "empty" })}>
               <Eraser size={16} /> <span className="split-nav-label">清空回收站</span>
             </button>
           </nav>
@@ -2165,7 +2416,7 @@ function App() {
             <div className="pane-toolbar">
               <strong className="pane-title">回收站</strong>
               <div className="toolbar-spacer" />
-              <span className="badge">{trashEntries.length} 项</span>
+              <span className="badge">{all.length} 项</span>
               <div className="segmented" role="group" aria-label="查看方式">
                 <button aria-pressed={trashView === "grid"} aria-label="图标" onClick={() => setTrashView("grid")}>
                   <LayoutGrid size={15} />
@@ -2181,66 +2432,22 @@ function App() {
                 if (!(e.target as HTMLElement).closest(".file-cell")) setTrashSel([]);
               }}
             >
-              {trashEntries.length === 0 ? (
+              {trashSections.isEmpty ? (
                 <div className="empty-content">
                   <img className="large-icon" src={icon("trash")} alt="" draggable={false} />
                   <p>回收站是空的。</p>
                 </div>
               ) : (
-                <div className={trashView === "grid" ? "file-grid" : "file-list"}>
-                  {trashEntries.map((e) => (
-                    <div
-                      key={e.id}
-                      className={"file-cell " + (sel.includes(e.id) ? "selected" : "")}
-                      role="button"
-                      tabIndex={0}
-                      title={e.name}
-                      data-entry-id={e.id}
-                      onClick={(ev) => toggle(e.id, ev)}
-                      onDoubleClick={() => void restoreFromTrash([e.id])}
-                      onKeyDown={(ev) => {
-                        // 键盘可达：Enter / 空格 = 恢复，Delete = 永久删除（同样先确认）。
-                        if (ev.key === "Enter" || ev.code === "Space") {
-                          ev.preventDefault();
-                          void restoreFromTrash([e.id]);
-                        }
-                        if (ev.key === "Delete" || ev.key === "Backspace") {
-                          ev.preventDefault();
-                          openTrashConfirm({ kind: "purge", id: e.id, name: e.name });
-                        }
-                      }}
-                      onContextMenu={(ev) => {
-                        ev.preventDefault();
-                        ev.stopPropagation();
-                        const ids = sel.includes(e.id) ? sel : [e.id];
-                        if (!sel.includes(e.id)) setTrashSel([e.id]);
-                        setPaneMenu({
-                          x: ev.clientX,
-                          y: ev.clientY,
-                          items: [
-                            { id: "restore", label: "恢复", onSelect: () => void restoreFromTrash(ids) },
-                            { separator: true },
-                            {
-                              id: "purge",
-                              label: ids.length > 1 ? `永久删除 ${ids.length} 项` : "永久删除",
-                              danger: true,
-                              onSelect: () =>
-                                openTrashConfirm({
-                                  kind: "purge",
-                                  id: ids[0],
-                                  name: ids.length > 1 ? ids.length + " 项" : nameOf(ids[0]),
-                                }),
-                            },
-                          ],
-                        });
-                      }}
-                    >
-                      <span className="file-glyph">
-                        <FileGlyph ext={e.ext} size={trashView === "grid" ? 40 : 22} />
-                      </span>
-                      <span className="file-name">{e.name}</span>
+                <div className="file-groups">
+                  {block("文件夹", trashSections.folderRows)}
+                  {block("文件", trashSections.fileRows)}
+                  {/* 来自资源库：独立分区，只列已授权 TRASHED 资源；空则不出现（无权限不提示存在）。 */}
+                  {trashSections.resourceRows.length ? (
+                    <div className="file-group-block" data-trash-section="resource">
+                      <div className="split-section">来自资源库</div>
+                      <div className={gridClass}>{trashSections.resourceRows.map(renderCell)}</div>
                     </div>
-                  ))}
+                  ) : null}
                 </div>
               )}
             </div>
@@ -2274,7 +2481,12 @@ function App() {
                     .filter((a) => a.id !== "home")
                     .map((a) => (
                       <button className="app-card" key={a.id} onClick={() => activateApp(a.id)}>
-                        <img className="app-icon" src={icon(a.icon)} alt="" draggable={false} />
+                        <img
+                          className="app-icon"
+                          src={icon(a.id === "trash" && trashHasContent ? "trash-full" : a.icon)}
+                          alt=""
+                          draggable={false}
+                        />
                         <strong>{a.name}</strong>
                         <small>
                           {a.id === "browser"
@@ -2925,23 +3137,32 @@ function App() {
     setPaneMenu(null);
     return folder.id;
   }
-  function removeFolder(id: string) {
-    setFolders((fs) => {
-      // 删文件夹要连带它的子文件夹，否则会留下无父的孤儿条目
-      const doomed = new Set([id]);
-      for (let changed = true; changed; ) {
-        changed = false;
-        for (const f of fs)
-          if (f.parentId && doomed.has(f.parentId) && !doomed.has(f.id)) {
-            doomed.add(f.id);
-            changed = true;
-          }
+  /**
+   * 删除桌面/访达里的虚拟文件夹 → **软删除进系统回收站**（可恢复，不再直接销毁）。
+   * 整棵子树（含内部文件与嵌套子文件夹）一起进：元数据存 oa-folder-trash，
+   * 内部真实文件走 files.trash(folderId, id, groupId) 打成同一组 —— 恢复时整组回原位。
+   */
+  async function removeFolder(id: string) {
+    const subtree = folderTrashLib.collectSubtree(folders, id);
+    if (!subtree.length) return;
+    const groupId = "g" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const record = folderTrashLib.buildFolderTrashRecord({ folders, rootId: id, groupId });
+    if (record) setFolderTrash((list) => [...list, record]);
+    const bridge = window.openarc?.files;
+    if (bridge?.trash) {
+      for (const f of subtree) {
+        const listed = await bridge.list(f.id);
+        for (const e of listed?.entries ?? []) await bridge.trash(f.id, e.id, groupId);
+        // 渲染层缓存清空：文件夹已不在桌面，窗口也一并关掉
+        setFilesByFolder((m) => ({ ...m, [f.id]: [] }));
       }
-      return fs.filter((f) => !doomed.has(f.id));
-    });
-    onCommand({ type: "window/close", id: FOLDER_PREFIX + id });
+    }
+    const doomed = new Set(subtree.map((f) => f.id));
+    setFolders((list) => list.filter((f) => !doomed.has(f.id)));
+    for (const f of subtree) onCommand({ type: "window/close", id: FOLDER_PREFIX + f.id });
     setMenu(null);
     closeDialog();
+    await refreshAllTrash();
   }
   function closeDialog() {
     setPendingDelete(null);
@@ -3262,6 +3483,7 @@ function App() {
           reduced={reduced}
           iconSize={dockSize}
           hidden={anyMaximized && !dockPeek}
+          trashFull={trashHasContent}
           onPointerLeave={() => setDockPeek(false)}
           onReorder={(next) =>
             setDockIds((ids) => {
@@ -3570,16 +3792,16 @@ function App() {
             <button className="ghost" onClick={closeDialog}>
               取消
             </button>
-            <button className="primary danger" onClick={() => deleteTarget && removeFolder(deleteTarget.id)}>
+            <button className="primary danger" onClick={() => deleteTarget && void removeFolder(deleteTarget.id)}>
               删除
             </button>
           </>
         }
       >
         <p>
-          确定删除「{deleteTarget?.name}」吗？该文件夹内的内容不会随之删除。
+          确定删除「{deleteTarget?.name}」吗？文件夹及其内部文件、子文件夹会一起移入回收站。
         </p>
-        <p className="muted">此操作不可撤销。</p>
+        <p className="muted">可在回收站中恢复。</p>
         </Dialog>
 
       {/* 回收站危险操作（永久删除 / 清空）的二次确认：复用同一个 Dialog 原语。
@@ -3600,7 +3822,7 @@ function App() {
                 closeTrashConfirm();
                 if (!c) return;
                 if (c.kind === "empty") void emptyTrash();
-                else if (c.id) void purgeFromTrash([c.id]);
+                else void purgeTrash(c.keys);
               }}
             >
               {trashConfirm?.kind === "empty" ? "清空" : "永久删除"}
@@ -3609,9 +3831,9 @@ function App() {
         }
       >
         {trashConfirm?.kind === "empty" ? (
-          <p>确定清空回收站吗？{trashEntries.length} 个项目将被永久删除。</p>
+          <p>确定清空回收站吗？{trashSections.all.length} 个项目将被永久删除。</p>
         ) : (
-          <p>确定永久删除「{trashConfirm?.name}」吗？</p>
+          <p>确定永久删除「{trashConfirm?.label}」吗？</p>
         )}
         <p className="muted">此操作不可撤销。</p>
       </Dialog>

@@ -150,7 +150,7 @@ contextBridge.exposeInMainWorld("openarc", {
     rename: (folderId, id, name) => ipcRenderer.invoke("files:rename", { folderId, id, name }),
     remove: (folderId, id) => ipcRenderer.invoke("files:remove", { folderId, id }),
     /** 系统级回收站（软删除）：删除入口走 trash，回收站窗口里才调 purge / empty。 */
-    trash: (folderId, id) => ipcRenderer.invoke("files:trash", { folderId, id }),
+    trash: (folderId, id, groupId) => ipcRenderer.invoke("files:trash", { folderId, id, groupId }),
     trashList: () => ipcRenderer.invoke("files:trashList"),
     trashRestore: (id) => ipcRenderer.invoke("files:trashRestore", { id }),
     trashPurge: (id) => ipcRenderer.invoke("files:trashPurge", { id }),

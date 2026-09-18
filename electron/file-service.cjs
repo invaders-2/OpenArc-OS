@@ -205,11 +205,13 @@ function createFileService({ userDataDir }) {
    * 顺序是**先移动物理文件 → 写回收站索引 → 最后才改原索引**：
    * 中间任何一步崩溃都只是"多出一条记录"，不会丢数据（与 remove 的永久删除语义完全分开）。
    */
-  function trash(folderId, id) {
+  function trash(folderId, id, groupId) {
     const dir = dirOf(folderId);
     if (!dir) return { ok: false, error: "INVALID_INPUT" };
     const victim = readIndex(dir).find((e) => e.id === id);
     if (!victim) return { ok: false, error: "NOT_FOUND" };
+    // 可选 groupId：把一条虚拟文件夹子树里的多个文件打成同一组（回收站窗口显示成一个文件夹条目）。
+    const group = safeId(groupId);
     const trashId = "t" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     const ext = extOf(victim.name);
     const file = trashId + (ext ? "." + ext : "");
@@ -244,6 +246,7 @@ function createFileService({ userDataDir }) {
       mtime: victim.mtime,
       deletedAt: Date.now(),
       file,
+      ...(group ? { groupId: group } : {}),
     });
     writeTrashIndex(tEntries);
     const next = readIndex(dir).filter((e) => e.id !== id);

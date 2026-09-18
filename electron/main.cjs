@@ -463,7 +463,7 @@ app.whenReady().then(async () => {
   // 系统级回收站（软删除）。与 remove 的永久删除分开：删除入口走这些通道。
   ipcMain.handle("files:trash", async (e, payload) => {
     if (!trusted(e)) throw Error("Forbidden");
-    return files.trash(String(payload?.folderId ?? ""), String(payload?.id ?? ""));
+    return files.trash(String(payload?.folderId ?? ""), String(payload?.id ?? ""), payload?.groupId);
   });
   ipcMain.handle("files:trashList", async (e) => {
     if (!trusted(e)) throw Error("Forbidden");
