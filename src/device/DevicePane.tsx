@@ -358,7 +358,7 @@ export function DevicePane({ role }: { role: string | null }) {
       {/* ── 设备列表（§6、§48）──────────────────────────────────────────── */}
       <section className="device-section" aria-label="设备列表">
         <div className="device-section-head">
-          <h3>设备</h3>
+          <h3>已注册设备</h3>
           <Button variant="ghost" size="sm" data-device-action="refresh" status={loading ? "loading" : "idle"} onClick={() => void refresh()}>
             刷新
           </Button>

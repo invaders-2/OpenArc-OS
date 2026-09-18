@@ -50,11 +50,13 @@ await page.evaluate(() => {
 await page.reload();
 await page.waitForSelector(".dock-item");
 
-// 窗口 0 / 3 是普通应用，窗口 5 是设置（.material-select 在里面）
-for (const i of [0, 3, 5]) {
+// 窗口 0 / 3 是普通应用；设置窗口按 id 打开（不依赖程序坞下标，新增应用会移动下标）
+for (const i of [0, 3]) {
   await page.locator(".dock-item").nth(i).click();
   await page.waitForTimeout(180);
 }
+await page.locator('.dock-item[data-dock-id="settings"]').click();
+await page.waitForTimeout(180);
 await page.waitForTimeout(400);
 
 const READ = () => {

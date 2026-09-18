@@ -1,107 +1,75 @@
 /**
- * D3-03 · 系统设置分栏。
+ * 系统设置分栏。
  *
- * 现有「外观与交互」pane 的**控件与行为原样保留**，只是改成"左栏选择 + 右侧 pane"。
- * 原「全局模型服务」占位 pane 已被 D4-01 的真实「模型 / AI」实现取代（./ModelSettings）。
- * 新增「设备」pane 与它们同级，内容见 ../device/DevicePane.tsx。
+ * 外壳严格沿用已确认的设计基线（fix/ui-window-chrome @ 50a3feb）：
+ *   split / split-side / split-section / split-nav / split-main。
+ * 「外观与交互」pane 的标题、副标题与控件顺序也按基线：
+ *   外观 → 减少动态效果 → 材质 → 程序坞图标大小 → 桌面图标大小 →
+ *   使用自绘光标 → 光标大小 → 壁纸 → 锁屏壁纸 → 个人资料。
  *
- * 默认停在「外观与交互」：experiments/d1-04 的材质路径依赖 .material-select
- * 在设置窗口打开时就在 DOM 里，不能把它藏到需要额外点击的 tab 后面。
+ * 外观正文（主题 / 动效 / 材质 / 壁纸 / 个人资料，状态都在 main.tsx）由
+ * appearanceBody 注入，让这个文件只是一层布局，不持有产品状态。
+ * 核心线新增的「模型 / AI」（D4-01）与「设备」（D3-03）是同级 pane，
+ * 导航、标题层级与控件样式沿用同一套设计语言。
+ *
+ * 默认停在「外观与交互」：device-ui 探针依赖 [data-settings-active="appearance"]、
+ * .settings-pane 文本与 .material-select 在设置打开时就在 DOM 里。
+ * .settings-content / .settings-pane 仅作为探针钩子保留。
  */
 import { useState, type ReactNode } from "react";
+import { Bot, Monitor, Sliders } from "lucide-react";
 import { DevicePane } from "../device/DevicePane";
 import { ModelSettings } from "./ModelSettings";
 
-type GlassMode = "full" | "reduced" | "solid";
 type Pane = "appearance" | "model" | "devices";
 
 type SettingsContentProps = {
-  dark: boolean;
-  setDark: (v: boolean) => void;
-  reduced: boolean;
-  setReduced: (v: boolean) => void;
-  glass: GlassMode;
-  setGlass: (v: GlassMode) => void;
-  endpoint: string;
-  setEndpoint: (v: string) => void;
-  model: string;
-  setModel: (v: string) => void;
-  /** 身份投影（D3-01）。渲染层用它决定是否出现 Super Admin 入口，
+  /** 身份投影（D3-01）：DevicePane 用它决定是否出现 Super Admin 入口，
       但**它不是权限判据** —— 后端 DeviceService 才是（§51）。 */
   role: string | null;
-  /** UI 线（profile）的外观 / 壁纸 / 个人资料控件。由 main.tsx 组合进来，
-      使核心线的设置分栏与 UI 线的展示控件共存。 */
-  appearanceExtra?: ReactNode;
+  /** 「外观与交互」pane 的正文（标题与副标题之下）。由 main.tsx 组合进来。 */
+  appearanceBody?: ReactNode;
 };
 
-export function SettingsContent({
-  dark,
-  setDark,
-  reduced,
-  setReduced,
-  glass,
-  setGlass,
-  role,
-  appearanceExtra,
-}: SettingsContentProps) {
+const PANES: { id: Pane; label: string; icon: ReactNode }[] = [
+  { id: "appearance", label: "外观与交互", icon: <Sliders size={16} /> },
+  { id: "model", label: "模型 / AI", icon: <Bot size={16} /> },
+  { id: "devices", label: "设备", icon: <Monitor size={16} /> },
+];
+
+const TITLES: Record<Pane, { title: string; subtitle: string }> = {
+  appearance: { title: "外观与交互", subtitle: "整个工作空间，遵循你的习惯。" },
+  model: { title: "模型 / AI", subtitle: "统一配置所有应用使用的模型服务。" },
+  devices: { title: "设备", subtitle: "管理已授权的设备、配对凭据与设备审计。" },
+};
+
+export function SettingsContent({ role, appearanceBody }: SettingsContentProps) {
   const [pane, setPane] = useState<Pane>("appearance");
 
-  const panes: { id: Pane; label: string }[] = [
-    { id: "appearance", label: "外观与交互" },
-    { id: "model", label: "模型 / AI" },
-    { id: "devices", label: "设备" },
-  ];
-
   return (
-    <div className="settings-content">
-      <div className="eyebrow">SYSTEM PREFERENCES</div>
-      <h1>系统设置</h1>
-      <p className="subtitle">整个工作空间，遵循你的习惯。</p>
+    <div className="split">
+      <nav className="split-side" aria-label="设置分类">
+        <div className="split-section">系统</div>
+        {PANES.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            className="split-nav"
+            data-settings-pane={p.id}
+            aria-current={pane === p.id ? "true" : undefined}
+            onClick={() => setPane(p.id)}
+          >
+            {p.icon} {p.label}
+          </button>
+        ))}
+      </nav>
 
-      <div className="settings-layout">
-        <nav className="settings-nav" aria-label="设置分栏">
-          {panes.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              data-settings-pane={p.id}
-              aria-current={pane === p.id ? "true" : undefined}
-              onClick={() => setPane(p.id)}
-            >
-              {p.label}
-            </button>
-          ))}
-        </nav>
-
-        <div className="settings-pane" data-settings-active={pane}>
-          {pane === "appearance" ? (
-            <>
-              <h3>外观与交互</h3>
-              {appearanceExtra}
-              {([
-                ["减少动态效果", reduced, setReduced],
-              ] as const).map(([label, value, set]) => (
-                <label className="setting-row" key={label}>
-                  <span>{label}</span>
-                  <input type="checkbox" checked={value} onChange={(e) => (set as (v: boolean) => void)(e.target.checked)} />
-                </label>
-              ))}
-              <label className="setting-row">
-                <span>
-                  材质
-                  <span className="footnote"> 玻璃合成成本，与动效互不影响</span>
-                </span>
-                <select className="material-select" value={glass} onChange={(e) => setGlass(e.target.value as GlassMode)}>
-                  <option value="full">完整玻璃</option>
-                  <option value="reduced">降低材质</option>
-                  <option value="solid">实色</option>
-                </select>
-              </label>
-            </>
-          ) : null}
-
+      <div className="split-main settings-content" data-settings-active={pane}>
+        <div className="settings-pane">
+          <h1>{TITLES[pane].title}</h1>
+          <p className="subtitle">{TITLES[pane].subtitle}</p>
+          {pane === "appearance" ? appearanceBody : null}
           {pane === "model" ? <ModelSettings role={role} /> : null}
-
           {pane === "devices" ? <DevicePane role={role} /> : null}
         </div>
       </div>

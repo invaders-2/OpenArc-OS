@@ -43,12 +43,15 @@ const setup = async (dark, motion) => {
   await page.waitForSelector(".dock-item");
 };
 
-// 开 3 个窗口，其中一个是设置（select 在里面）
+// 开 3 个窗口，其中一个是设置（材质分段控件在里面）
 const openWindows = async () => {
-  for (const i of [0, 3, 5]) {
+  for (const i of [0, 3]) {
     await page.locator(".dock-item").nth(i).click();
     await page.waitForTimeout(160);
   }
+  // 设置窗口按 id 打开：不依赖程序坞下标（新增应用会移动下标）
+  await page.locator('.dock-item[data-dock-id="settings"]').click();
+  await page.waitForTimeout(160);
 };
 
 const snap = async (tag) => {

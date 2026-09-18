@@ -5,7 +5,6 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUpDown,
-  Bot,
   ChevronDown,
   Clock,
   File as FileIcon,
@@ -22,7 +21,6 @@ import {
   Package,
   Search,
   Share,
-  Sliders,
   Store,
   Tag,
   User,
@@ -407,10 +405,6 @@ function App() {
     localStorage.setItem("oa-theme", theme);
     localStorage.setItem("oa-dark", String(dark));
   }, [theme, dark]);
-  const [endpoint, setEndpoint] = useState("");
-  const [model, setModel] = useState("");
-  /** 左右分栏的当前页（设置 / 应用中心 / Skill 中心各一份，互不影响）。 */
-  const [settingsTab, setSettingsTab] = useState<"appearance" | "model">("appearance");
   /**
    * 个人资料草稿（改资料免密码，入口只在系统设置）。
    * 草稿自身份快照，保存时才把"确实改动过的字段"交给主进程（undefined = 不改）。
@@ -2156,18 +2150,8 @@ function App() {
     if (w?.appId === "settings")
       return (
         <SettingsContent
-          dark={dark}
-          setDark={(v) => setTheme(v ? "dark" : "light")}
-          reduced={reduced}
-          setReduced={setReduced}
-          glass={glass}
-          setGlass={setGlass}
-          endpoint={endpoint}
-          setEndpoint={setEndpoint}
-          model={model}
-          setModel={setModel}
           role={identity.snapshot.role}
-          appearanceExtra={
+          appearanceBody={
             <>
                 <div className="setting-row">
                   <span>外观</span>
@@ -2182,6 +2166,35 @@ function App() {
                       深色
                     </button>
                   </div>
+                </div>
+                <Switch label="减少动态效果" checked={reduced} onChange={setReduced} />
+                <div className="setting-row">
+                  <span>材质</span>
+                  <div className="segmented text" role="group" aria-label="材质">
+                    <button aria-pressed={glass === "full"} onClick={() => setGlass("full")}>
+                      完整玻璃
+                    </button>
+                    <button aria-pressed={glass === "reduced"} onClick={() => setGlass("reduced")}>
+                      降低材质
+                    </button>
+                    <button aria-pressed={glass === "solid"} onClick={() => setGlass("solid")}>
+                      实色
+                    </button>
+                  </div>
+                  {/* 探针钩子：device-ui 依赖 .material-select 在设置打开时就在 DOM 里。
+                      可见控件已按设计基线改回分段控件，这里保留一个不可见镜像。 */}
+                  <select
+                    className="material-select"
+                    hidden
+                    aria-hidden="true"
+                    tabIndex={-1}
+                    value={glass}
+                    onChange={(e) => setGlass(e.target.value as GlassMode)}
+                  >
+                    <option value="full">完整玻璃</option>
+                    <option value="reduced">降低材质</option>
+                    <option value="solid">实色</option>
+                  </select>
                 </div>
                 <div className="setting-row">
                   <span>

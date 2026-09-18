@@ -82,7 +82,6 @@ export function ModelSettings({ role }: { role: string | null }) {
 
   return (
     <div className="d401-settings" data-d4-01="settings">
-      <h3>模型 / AI</h3>
       <nav className="d401-tabs" role="tablist" aria-label="模型设置分区">
         {(["providers", "models", "defaults"] as Tab[]).map((t) => (
           <button key={t} type="button" role="tab" aria-selected={tab === t} data-d4-01-tab={t} onClick={() => setTab(t)}>

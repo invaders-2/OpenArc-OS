@@ -337,8 +337,7 @@
   min-height: 0;
   overflow: auto;
 }
-.app-content,
-.settings-content {
+.app-content {
   padding: 31px 38px;
 }
 .eyebrow {
@@ -1169,38 +1168,9 @@ input[type="checkbox"] {
   color: var(--muted);
 }
 
-/* ── D3-03 设置分栏 ───────────────────────────────────────────────────────
-   分层只靠 --sunken / --row-hover，**不使用 border / hairline**；
-   颜色、圆角、间距、时长全部取自 tokens.css，没有字面值。 */
-.settings-layout {
-  display: grid;
-  grid-template-columns: 160px 1fr;
-  gap: var(--space-6);
-  align-items: start;
-}
-.settings-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.settings-nav button {
-  text-align: left;
-  padding: 8px 10px;
-  border-radius: var(--radius-md);
-  font-size: var(--fs-secondary);
-  color: var(--muted);
-  transition:
-    background var(--quick) var(--ease),
-    color var(--quick) var(--ease);
-}
-.settings-nav button:hover {
-  background: var(--row-hover);
-  color: var(--text);
-}
-.settings-nav button[aria-current="true"] {
-  background: var(--sunken);
-  color: var(--text);
-}
+/* ── 设置 pane（外壳见 .split / .split-side / .split-main）──────────────────
+   .settings-pane 是右侧 pane 的钩子：分层只靠 --sunken / --row-hover，
+   **不使用 border / hairline**；颜色、圆角、间距、时长全部取自 tokens.css。 */
 .settings-pane {
   min-width: 0;
 }
@@ -2896,22 +2866,27 @@ input[type="checkbox"] {
 .picker-list button.is-selected { border-color: rgba(120,180,255,0.6); background: rgba(120,180,255,0.16); }
 .picker-foot { display: flex; justify-content: flex-end; gap: 6px; }
 
-/* ── D4-01 Closure C · Settings → Models ─────────────────────────────────── */
-.d401-settings { display: flex; flex-direction: column; gap: 10px; }
-.d401-tabs { display: flex; gap: 6px; }
-.d401-tabs button { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: inherit; border-radius: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
-.d401-tabs button[aria-selected="true"] { background: rgba(255,255,255,0.18); border-color: rgba(255,255,255,0.4); }
-.d401-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.d401-form input, .d401-defaults select { background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.14); color: inherit; border-radius: 8px; padding: 5px 8px; font-size: 12px; }
-.d401-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.d401-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; background: rgba(255,255,255,0.04); }
-.d401-name { font-size: 12px; font-weight: 600; }
-.d401-meta { font-size: 11px; opacity: .6; }
-.d401-row input[type="password"] { background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.14); color: inherit; border-radius: 8px; padding: 4px 8px; font-size: 12px; }
-.d401-error { color: #ff8a8a; font-size: 12px; margin: 0; }
-.d401-notice { color: #8fe3a0; font-size: 12px; margin: 0; }
-.d401-defaults { display: flex; flex-direction: column; gap: 6px; }
-.d401-test { font-size: 11px; opacity: .8; }
+/* ── D4-01 · Settings →「模型 / AI」pane ─────────────────────────────────────
+   并入设置的设计语言：只用 token（--sunken / --content-rgb / --muted /
+   --radius-* / --fs-*），不再写死深浅色，浅色 / 深色 / 三档材质同一套观感。 */
+.d401-settings { display: flex; flex-direction: column; gap: var(--space-4); }
+.d401-tabs { display: flex; gap: 1px; padding: 2px; border-radius: var(--radius-pill); background: var(--sunken); align-self: flex-start; }
+.d401-tabs button { height: 26px; padding: 0 12px; border-radius: var(--radius-pill); background: transparent; color: var(--muted); font-size: var(--fs-caption); transition: background var(--quick) var(--ease), color var(--quick) var(--ease); }
+.d401-tabs button:hover { color: var(--text); }
+.d401-tabs button[aria-selected="true"] { background: rgb(var(--content-rgb) / var(--content-alpha)); color: var(--text); }
+.d401-form { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.d401-form input, .d401-form select, .d401-defaults select { background: var(--sunken); border: 0; color: var(--text); border-radius: var(--radius-md); padding: 6px 10px; font-size: var(--fs-caption); }
+.d401-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.d401-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); background: rgb(var(--content-rgb) / var(--content-alpha)); }
+.d401-name { font-size: var(--fs-caption); font-weight: var(--fw-medium); }
+.d401-meta { font-size: var(--fs-micro); color: var(--muted); }
+.d401-row input[type="password"] { background: var(--sunken); border: 0; color: var(--text); border-radius: var(--radius-md); padding: 4px 8px; font-size: var(--fs-micro); }
+.d401-error { color: var(--failed); font-size: var(--fs-caption); margin: 0; }
+.d401-notice { color: var(--muted); font-size: var(--fs-caption); margin: 0; }
+.d401-defaults { display: flex; flex-direction: column; gap: var(--space-2); }
+.d401-defaults h4 { margin: 0; font-size: var(--fs-heading); font-weight: var(--fw-medium); }
+.d401-defaults label { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); font-size: var(--fs-secondary); }
+.d401-test { font-size: var(--fs-micro); color: var(--muted); }
 
 /* ── D4-03C4 · Trusted Approval UI ───────────────────────────────────────── */
 .approval { display: flex; flex-direction: column; gap: 10px; }
