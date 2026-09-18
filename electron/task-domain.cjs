@@ -87,6 +87,8 @@ const TASK_EVENT = Object.freeze({
   TOOL_SIDE_EFFECT_EXECUTION_BLOCKED: "tool.side_effect.execution_blocked",
   // D4-03 状态完整性：迟到结果被抑制（效果已发生但状态权威不属于本 runtime；safe projection only）
   TOOL_SIDE_EFFECT_LATE_RESULT_SUPPRESSED: "tool.side_effect.late_result_suppressed",
+  // D4-03 状态完整性：call 已进入不可撤回执行阶段 / 终态，迟到 DENY 不改状态（safe projection only）
+  TOOL_SIDE_EFFECT_DENY_TOO_LATE: "tool.side_effect.deny_too_late",
   // D4-03C3 ambiguous result / recovery verification（safe projection only）
   TOOL_SIDE_EFFECT_VERIFICATION_STARTED: "tool.side_effect.verification_started",
   TOOL_SIDE_EFFECT_VERIFICATION_APPLIED: "tool.side_effect.verification_applied",

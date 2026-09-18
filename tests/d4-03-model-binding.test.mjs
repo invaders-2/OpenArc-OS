@@ -11,9 +11,9 @@
  * 旧任务懒绑定与"解析失败保持既有行为" / 两个确定性同步竞态窗口（含 startModelCall 路径）/
  * R-7 capability 签发同一同步点改版（期望冻结版本透传，绝不签发非冻结版本）/ R-9 绑定后被禁用
  * （配置解析类失败一律在签发前阻断，原因码明确）/ 未绑定旧任务（expected=null）正对照。
- * R-8：K/L/M/N/O 五组用例 —— 未绑定时四条真实入口 0 run / 0 capability / 0 请求 / 0 执行并收敛 BLOCKED、
+ * R-8：K/L/M/N/O/P 六组用例 —— 未绑定时四条真实入口 0 run / 0 capability / 0 请求 / 0 执行并收敛 BLOCKED、
  * 默认稍后出现才懒绑定并真实成功、并发只形成一种绑定、历史 run/call 逐字段不变且绝不回填、
- * modelService=null 的桩装配与 ad5e600 逐字一致。
+ * 解析抛出（损坏 capabilities 行）与解析失败完全同形、modelService=null 的桩装配与 ad5e600 逐字一致。
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -1102,6 +1102,72 @@ test("D4-03 N · R-8：历史保留 —— 未绑定的历史 run/call 行逐字
     assert.equal(freshCall.model_config_id, cid, "绑定之后的 call 才用绑定值");
     assert.equal(freshCall.model_config_version, 1);
     assert.equal(fx.taskStore.taskById(legacy.taskId).model_config_id, cid, "任务此时才绑定");
+  } finally { await fx.close(); }
+});
+
+test("D4-03 P · R-8：解析**抛出**（真实库行 capabilities 损坏 JSON）与解析失败完全同形 —— 0 run/0 capability/0 请求/0 执行，Step/Task BLOCKED，任务仍未绑定", async () => {
+  const fx = await createToolHarnessFixture({ withAdapters: true, behavior: "exact" });
+  try {
+    const ctx = fx.ctx();
+    const orch = fx.makeToolOrchestrator();
+    try {
+      // P0 对照 · 返回失败路径（既有 R-8 路径）：完全没有可用默认配置
+      const fail = fx.taskService.createTask({ context: ctx, goal: "unbound / resolve returns failure" });
+      const rFail = await orch.runTask({ context: ctx, taskId: fail.task.taskId, expectedRevision: fail.task.revision, verify: VERIFY });
+      assert.equal(rFail.ok, false, JSON.stringify(rFail));
+      assert.equal(rFail.error, "MODEL_CONFIG_UNAVAILABLE", JSON.stringify(rFail));
+      const failEvents = fx.taskStore.eventsOfTask(fail.task.taskId).map((e) => e.event_type);
+      const failTaskState = taskStatus(fx, fail.task.taskId);
+      const failStepStates = fx.taskStore.stepsOfTask(fail.task.taskId).map((s) => s.status);
+
+      // P1 · 真实库行损坏：把本夹具真实 model config 的 capabilities 写成非法 JSON 并设为默认，
+      // 让真实 ModelService.resolveModel 在 JSON.parse 处**抛出**（产品 API 写不出这种行，只有外部改库可达）。
+      const cid = fx.modelConfigId;
+      setChatDefault(fx, cid);
+      fx.f.modelStore.transactSync(() => { fx.f.modelStore.db.prepare("UPDATE model_configs SET capabilities = ? WHERE config_id = ?").run("{corrupt", cid); });
+      assert.throws(() => fx.f.modelService.resolveModel({ context: ctx, capability: "chat" }), "前置：损坏行必须让真实 resolveModel 抛出");
+
+      const issued = spyIssueCapability(fx);
+      const toolUsed = spyToolUsage(fx);
+      const throwTask = fx.taskService.createTask({ context: ctx, goal: "unbound / resolve throws" });
+      const before = execSurface(fx, throwTask.task.taskId);
+      const rThrow = await orch.runTask({ context: ctx, taskId: throwTask.task.taskId, expectedRevision: throwTask.task.revision, verify: VERIFY });
+
+      // 1) 绝不穿透异常：必须与返回失败路径同码同形
+      assert.equal(rThrow.ok, false, JSON.stringify(rThrow));
+      assert.equal(rThrow.error, rFail.error, "抛出路径与返回失败路径必须同码：" + JSON.stringify(rThrow));
+      assert.equal(rThrow.error, "MODEL_CONFIG_UNAVAILABLE", JSON.stringify(rThrow));
+      assert.equal(rThrow.blocked, true, JSON.stringify(rThrow));
+      // 2) 0 执行面
+      assertNoExecution(fx, throwTask.task.taskId, before, "P1");
+      assert.equal(issued.length, 0, "0 capability 签发：" + JSON.stringify(issued));
+      assert.deepEqual(toolUsed, [], "0 tool propose/execute");
+      assert.equal(fx.fp.state.requests, 0, "0 provider 请求");
+      // 3) 收敛 + 与返回失败路径逐项同形
+      assertConvergedBlocked(fx, throwTask.task.taskId, "P1");
+      assert.deepEqual(fx.taskStore.eventsOfTask(throwTask.task.taskId).map((e) => e.event_type), failEvents, "抛出路径必须与返回失败路径事件逐项同形");
+      assert.equal(taskStatus(fx, throwTask.task.taskId), failTaskState, "Task 终态必须同形");
+      assert.deepEqual(fx.taskStore.stepsOfTask(throwTask.task.taskId).map((s) => s.status), failStepStates, "Step 终态必须同形");
+      assert.equal(fx.taskStore.taskById(throwTask.task.taskId).model_config_id, null, "任务仍未绑定");
+      assert.equal(eventsOfType(fx, throwTask.task.taskId, "task.model_config_bound").length, 0, "抛出路径不得伪造绑定事件");
+
+      // P2 · 直接入口：绝不抛异常、绝不建 run，且真实抛出原因原样带出（不吞）
+      const direct = fx.taskService.createTask({ context: ctx, goal: "unbound / corrupt direct" });
+      const started = fx.taskService.startTask({ context: ctx, taskId: direct.task.taskId, expectedRevision: direct.task.revision });
+      const step = fx.taskService.createStep({ context: ctx, taskId: direct.task.taskId, kind: "reasoning", input: null, expectedRevision: started.task.revision });
+      const stepStarted = fx.taskService.startStep({ context: ctx, taskId: direct.task.taskId, stepId: step.step.stepId, expectedRevision: step.task.revision });
+      const res = fx.taskService.startHarnessRun({ context: ctx, taskId: direct.task.taskId, stepId: step.step.stepId, expectedRevision: stepStarted.task.revision });
+      assert.equal(res.ok, false, "直接入口绝不抛异常、绝不建 run：" + JSON.stringify(res));
+      assert.equal(res.error, "MODEL_CONFIG_UNAVAILABLE", JSON.stringify(res));
+      assert.equal(res.message, "任务未绑定模型配置，无法启动", JSON.stringify(res));
+      assert.match(String(res.detail || ""), /JSON/i, "真实抛出原因必须原样带出：" + JSON.stringify(res));
+      assert.equal(runsOf(fx, direct.task.taskId).length, 0, "0 条 harness run");
+      assert.equal(fx.taskStore.taskById(direct.task.taskId).model_config_id, null, "任务仍未绑定");
+      assert.equal(fx.taskStore.taskById(direct.task.taskId).revision, stepStarted.task.revision, "失败不得改 revision");
+      assert.equal(issued.length, 0, "直接入口也不得签发 capability");
+      assert.equal(fx.fp.state.requests, 0, "0 provider 请求");
+      assert.deepEqual(toolUsed, [], "0 tool propose/execute");
+    } finally { await orch.dispose(); }
   } finally { await fx.close(); }
 });
 

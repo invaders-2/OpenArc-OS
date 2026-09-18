@@ -505,8 +505,17 @@ class TaskService {
       // 签发前出现默认配置，就会以"当前默认"真实执行，而 task/run/call 归属全是 null。
       // 唯一例外：modelService 为 null 的 test-only / 桩装配没有真实模型服务可解析，保持既有建 run 行为不变。
       if (!task.model_config_id && this.modelService) {
-        const resolved = this.modelService.resolveModel({ context, capability: "chat" });
-        if (!resolved.ok) return Object.assign({}, resolved, { message: "任务未绑定模型配置，无法启动", taskId: task.task_id });
+        // 解析**抛出**（如库里的 capabilities 是损坏 JSON）与返回失败同等对待：绝不让异常穿透成
+        // task/step 停在 RUNNING 的悬挂，也不吞掉真实原因（原样带 detail）。
+        let resolved;
+        try {
+          resolved = this.modelService.resolveModel({ context, capability: "chat" });
+        } catch (e) {
+          resolved = { ok: false, error: "MODEL_CONFIG_UNAVAILABLE", detail: String((e && e.message) || e).slice(0, 120) };
+        }
+        if (!resolved || !resolved.ok) {
+          return Object.assign({}, resolved || null, { ok: false, error: (resolved && resolved.error) || "MODEL_CONFIG_UNAVAILABLE", message: "任务未绑定模型配置，无法启动", taskId: task.task_id });
+        }
         task = this.store.updateTask(task.task_id, { model_config_id: resolved.snapshot.modelConfigId, model_config_version: resolved.snapshot.modelConfigVersion, updated_at: now });
         this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.MODEL_CONFIG_BOUND, safePayload: sanitizeEventPayload({ modelConfigId: resolved.snapshot.modelConfigId, modelConfigVersion: resolved.snapshot.modelConfigVersion, source: resolved.snapshot.source, reason: "LEGACY_UNBOUND_LAZY_BIND" }), at: now });
       }

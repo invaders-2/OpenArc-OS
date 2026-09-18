@@ -22,12 +22,15 @@ import { createSideEffectFixture, TRASH_TOOL } from "./fixtures/harness-acp/side
 const require = createRequire(import.meta.url);
 const { createSideEffectGateway, registerSideEffectIpc } = require("../electron/side-effect-bootstrap.cjs");
 const { SIDE_EFFECT_ERROR } = require("../electron/side-effect-domain.cjs");
+const { TASK_EVENT, isKnownEventType } = require("../electron/task-domain.cjs");
 
 const CLAIM_GATE = path.join(import.meta.dirname, "fixtures", "harness-acp", "claim-contender.mjs");
 /** 迟到 DENY 的显式错误码（与 electron/side-effect-authority.cjs 的返回值逐字一致）。 */
 const TOO_LATE = "SIDE_EFFECT_APPROVAL_TOO_LATE";
 const TOO_LATE_AUDIT = "side_effect.deny_too_late";
-const TOO_LATE_EVENT = "tool.side_effect.deny_too_late";
+// 不复制字面量：迟到 DENY 事件的权威名称来自冻结清单 TASK_EVENT。
+const TOO_LATE_EVENT = TASK_EVENT.TOOL_SIDE_EFFECT_DENY_TOO_LATE;
+const LATE_SUPPRESSED_EVENT = TASK_EVENT.TOOL_SIDE_EFFECT_LATE_RESULT_SUPPRESSED;
 
 /** 统计真实 ResourceService.delete 的 Domain invocation。 */
 function countDeleteCalls(sf) {
@@ -87,8 +90,12 @@ function assertTooLate(deny, { callSnapshot, before, callId, status, tooLateEven
   const audit = auditRows(tooLateEvents.sf, TOO_LATE_AUDIT);
   assert.equal(audit.length, tooLateEvents.auditCount + 1, "必须落下 safe audit：" + JSON.stringify(audit));
   assert.equal(audit[audit.length - 1].reason_code, TOO_LATE);
+  // 冻结清单：authority 写入的真实字符串必须经 isKnownEventType，否则按已知类型过滤的通道会丢弃它。
+  assert.equal(isKnownEventType("tool.side_effect.deny_too_late"), true, "迟到 DENY 事件必须在冻结清单内");
+  assert.equal(isKnownEventType(LATE_SUPPRESSED_EVENT), true, "对照：late_result_suppressed 已登记");
   const events = eventsNamed(tooLateEvents.sf, tooLateEvents.taskId, TOO_LATE_EVENT);
   assert.equal(events.length, tooLateEvents.eventCount + 1, "必须落下 safe TaskEvent（审计用）");
+  assert.equal(events[events.length - 1].event_type, TASK_EVENT.TOOL_SIDE_EFFECT_DENY_TOO_LATE, "落库类型必须等于登记常量");
   assert.deepEqual(Object.keys(payloadOf(events[events.length - 1])).sort(), ["callId", "observedStatus", "toolId"]);
   assert.equal(payloadOf(events[events.length - 1]).observedStatus, status);
   assert.equal(JSON.stringify(payloadOf(events[events.length - 1])).includes("/"), false, "payload 不得含路径");
@@ -98,6 +105,28 @@ function assertTooLate(deny, { callSnapshot, before, callId, status, tooLateEven
 /** 迟到 DENY 的观察快照（audit/event 均为"追加"语义，不能只看有无）。 */
 function tooLateTracker(sf, taskId) {
   return { sf, taskId, auditCount: auditRows(sf, TOO_LATE_AUDIT).length, eventCount: eventsNamed(sf, taskId, TOO_LATE_EVENT).length };
+}
+
+/**
+ * 真实同步点（test-only 事务边界探针，同 d4-03-lease-state-integrity 的 trackTransactionBoundaries 手法）：
+ * 在 authority 对 callId 的**资格预读**（store.callById）之后、它开启第一个写入事务之前，
+ * 真实提交一次注入动作 —— 这就是 "读到可批准 → 期间被 DENY → 继续写" 的并发窗口，无需 sleep。
+ */
+function armRaceAfterPreRead(sf, callId, inject) {
+  const store = sf.store;
+  const originalTransact = store.transactSync;
+  const originalCallById = store.callById;
+  let armed = true; let preRead = false;
+  store.callById = (id) => {
+    const row = originalCallById.call(store, id);
+    if (armed && String(id) === String(callId)) preRead = true;
+    return row;
+  };
+  store.transactSync = function (fn) {
+    if (armed && preRead) { armed = false; preRead = false; inject(); }
+    return originalTransact.call(store, fn);
+  };
+  return { injected: () => !armed, restore() { store.callById = originalCallById; store.transactSync = originalTransact; } };
 }
 
 /* ============================================================ T1 AWAITING_APPROVAL */
@@ -294,6 +323,10 @@ test("T5 · UNKNOWN_EFFECT：DENY → TOO_LATE、call 与恢复证据逐字段�
     assert.equal(call.status, "UNKNOWN_EFFECT", "recovery 权威绝不被 DENY 覆盖");
     assert.equal(call.verificationStatus, null);
     assert.equal(exec.suppressed, true, "迟到结果不得覆盖 recovery 权威：" + JSON.stringify(exec));
+    // 对照（真实数据）：本用例真实落下的 late_result_suppressed 同样必须在冻结清单内。
+    const lateSuppressed = eventsNamed(sf, sc.run.taskId, LATE_SUPPRESSED_EVENT);
+    assert.equal(lateSuppressed.length, 1, "T5 必须真实落下 late_result_suppressed 事件：" + JSON.stringify(eventsOf(sf, sc.run.taskId).map((x) => x.event_type)));
+    assert.equal(isKnownEventType(lateSuppressed[0].event_type), true);
     assert.equal(exec.mutationCount, 1);
     assert.equal(counter.calls, 1, "Domain mutation 恰好 1 次，DENY 不产生第二次");
     assert.equal(sf.precondition(sc.resourceRef).trashed, true);
@@ -460,5 +493,111 @@ test("T8 · effectiveApproval：TTL 过期 → EXPIRED（行不变）；未过�
     assert.equal(againD.duplicate, true, "过期判据不得破坏重复 DENY 的幂等语义");
     assert.equal(counter.calls, 0, "全程 0 Domain mutation");
     console.log("T8 effectiveApproval: " + JSON.stringify({ expired: sf.authority.effectiveApproval(pA.call.callId).effectiveDecision, rowDecision: sf.store.latestApprovalOfCall(pA.call.callId).decision, acquire: leaseA.error, eligibility: eligA.reasonCode, claimSide: { ok: execB.ok, error: execB.error, mutationCount: execB.mutationCount, call: sf.store.callById(pB.call.callId).status }, revoked: sf.authority.effectiveApproval(pC.call.callId).effectiveDecision, denied: sf.authority.effectiveApproval(pD.call.callId).effectiveDecision, duplicate: againD.duplicate, mutation: counter.calls }));
+  } finally { await sf.fx.close(); }
+});
+
+/* ============================================================ T9 APPROVE 原子前置（与 DENY 对称） */
+test("T9 · 并发 DENY vs 在途 APPROVE：已被拒绝的 call 绝不能被 approve 复活（原子前置，fail closed）", async () => {
+  const sf = await createSideEffectFixture();
+  try {
+    const sc = await sf.setupTrash({ resourceName: "T9 Approve Race Target" });
+    const counter = countDeleteCalls(sf);
+    const p = await sf.plan(TRASH_TOOL, { resourceRef: sc.resourceRef }, sc.run);
+    const callId = p.call.callId;
+    assert.equal(sf.store.callById(callId).status, "AWAITING_APPROVAL");
+    let denyRes = null;
+    // approve 预读之后、写入之前：真实 DENY（走真实 authority + 真实事务）抢先提交。
+    const race = armRaceAfterPreRead(sf, callId, () => { denyRes = sf.deny(callId); });
+    let approved;
+    try { approved = sf.approve(callId); } finally { race.restore(); }
+    assert.equal(race.injected(), true, "探针必须在 approve 预读之后、写入之前真实触发");
+    assert.equal(denyRes.ok, true, JSON.stringify(denyRes));
+    // 修复前：approve 会在 DENY 之后继续写 APPROVED（复活）；这里必须 fail closed。
+    assert.equal(approved.ok, false, "已被 DENY 的 call 绝不能被在途 approve 复活：" + JSON.stringify(approved));
+    assert.equal(approved.error, SIDE_EFFECT_ERROR.CALL_STATE, "沿用既有错误码，不新造");
+    assert.equal(approved.duplicate, undefined, "这是拒绝，不是 duplicate");
+    const call = sf.store.callById(callId);
+    assert.equal(call.status, "BLOCKED", "终态仍必须是 DENY 的 BLOCKED");
+    assert.equal(call.errorCode, SIDE_EFFECT_ERROR.APPROVAL_DENIED);
+    assert.equal(sf.store.latestApprovalOfCall(callId).decision, "DENIED", "最新 approval 仍必须是 DENIED");
+    assert.deepEqual(decisionsOf(sf.store, callId), ["DENIED"], "不得出现第二行（尤其不得写 APPROVED）");
+    assert.deepEqual(activeLeasesOf(sf.store, callId), []);
+    assert.deepEqual(sf.store.leasesOfCall(callId), [], "0 lease");
+    // 执行侧仍拒绝：lease / eligibility 都拿不到 execution authority。
+    const lease = sf.lease(callId);
+    assert.equal(lease.ok, false, JSON.stringify(lease));
+    assert.equal(lease.error, SIDE_EFFECT_ERROR.CALL_STATE);
+    const elig = sf.elig(callId, { holderId: null });
+    assert.equal(elig.status, "BLOCKED", "BLOCKED call 的 eligibility 必须 fail closed");
+    assert.equal(elig.reasonCode, SIDE_EFFECT_ERROR.CALL_STATE);
+    assert.equal(counter.calls, 0, "0 mutation");
+    assert.equal(sf.precondition(sc.resourceRef).trashed, false);
+    // 无复活证据：既不落 tool.approved，也不落任何执行事件；DENY 自己的证据保留。
+    const types = eventsOf(sf, sc.run.taskId).map((e) => e.event_type);
+    assert.equal(types.includes(TASK_EVENT.TOOL_APPROVED), false, "复活路径不得落 tool.approved");
+    assert.equal(types.includes(TASK_EVENT.TOOL_EXECUTION_STARTED), false);
+    assert.equal(types.includes(TASK_EVENT.TOOL_SIDE_EFFECT_EXECUTION_STARTED), false);
+    assert.equal(types.includes(TASK_EVENT.TOOL_DENIED), true, "DENY 自己的证据必须保留");
+    assert.deepEqual(auditRows(sf, "side_effect.approved"), [], "复活路径不得落 side_effect.approved audit");
+    console.log("T9 race: " + JSON.stringify({ approve: { ok: approved.ok, error: approved.error }, deny: { ok: denyRes.ok, status: denyRes.call.status }, call: call.status, errorCode: call.errorCode, latestApproval: sf.store.latestApprovalOfCall(callId).decision, approvals: decisionsOf(sf.store, callId), lease: { ok: lease.ok, error: lease.error }, eligibility: elig.status, mutation: counter.calls, approvedEvents: types.filter((t) => t === TASK_EVENT.TOOL_APPROVED).length }));
+  } finally { await sf.fx.close(); }
+});
+
+test("T9-b · 正对照：无并发 DENY 时 approve 正常生效，双次 approve 幂等不变，lease 判据不变", async () => {
+  const sf = await createSideEffectFixture();
+  try {
+    const sc = await sf.setupTrash({ resourceName: "T9 Approve Control Target" });
+    const counter = countDeleteCalls(sf);
+    const p = await sf.plan(TRASH_TOOL, { resourceRef: sc.resourceRef }, sc.run);
+    const callId = p.call.callId;
+    const first = sf.approve(callId);
+    assert.equal(first.ok, true, JSON.stringify(first));
+    assert.equal(first.duplicate, undefined);
+    assert.equal(first.call.status, "APPROVED");
+    assert.equal(first.approval.decision, "APPROVED");
+    const second = sf.approve(callId);
+    assert.equal(second.ok, true, JSON.stringify(second));
+    assert.equal(second.duplicate, true, "双次 approve 必须是 duplicate");
+    assert.equal(second.approval.approvalId, first.approval.approvalId, "必须返回同一行 approval");
+    assert.equal(second.call.status, "APPROVED");
+    assert.deepEqual(decisionsOf(sf.store, callId), ["APPROVED"], "重复 approve 不得写第二行");
+    assert.equal(eventsNamed(sf, sc.run.taskId, TASK_EVENT.TOOL_APPROVED).length, 1, "重复 approve 不得重复落事件");
+    assert.equal(auditRows(sf, "side_effect.approved").length, 1, "重复 approve 不得重复落 audit");
+    // 既有 lease 判据不变：APPROVED 可正常租用；已租用（LEASED）不再是可批准状态。
+    const lease = sf.lease(callId);
+    assert.equal(lease.ok, true, JSON.stringify(lease));
+    assert.equal(sf.store.callById(callId).status, "LEASED");
+    const lateApprove = sf.approve(callId);
+    assert.equal(lateApprove.ok, false, JSON.stringify(lateApprove));
+    assert.equal(lateApprove.error, SIDE_EFFECT_ERROR.CALL_STATE, "LEASED 仍不可批准（既有语义）");
+    assert.equal(counter.calls, 0, "0 mutation");
+    console.log("T9-b control: " + JSON.stringify({ first: { ok: first.ok, status: first.call.status }, second: { ok: second.ok, duplicate: second.duplicate, approvalIdSame: second.approval.approvalId === first.approval.approvalId }, approvals: decisionsOf(sf.store, callId), approvedEvents: eventsNamed(sf, sc.run.taskId, TASK_EVENT.TOOL_APPROVED).length, approvedAudit: auditRows(sf, "side_effect.approved").length, lease: { ok: lease.ok, status: sf.store.callById(callId).status }, lateApprove: { ok: lateApprove.ok, error: lateApprove.error }, mutation: counter.calls }));
+  } finally { await sf.fx.close(); }
+});
+
+test("T9-c · 并发双次 APPROVE：同一绑定只允许一次 authoritative transition（原子事务内的 duplicate）", async () => {
+  const sf = await createSideEffectFixture();
+  try {
+    const sc = await sf.setupTrash({ resourceName: "T9 Approve Double Target" });
+    const counter = countDeleteCalls(sf);
+    const p = await sf.plan(TRASH_TOOL, { resourceRef: sc.resourceRef }, sc.run);
+    const callId = p.call.callId;
+    let concurrent = null;
+    // 第一个 approve 预读之后、写入之前，另一个 approve 抢先提交（同一 trusted 用户重复点击）。
+    const race = armRaceAfterPreRead(sf, callId, () => { concurrent = sf.approve(callId); });
+    let outer;
+    try { outer = sf.approve(callId); } finally { race.restore(); }
+    assert.equal(race.injected(), true, "探针必须真实触发");
+    assert.equal(concurrent.ok, true, JSON.stringify(concurrent));
+    assert.equal(concurrent.duplicate, undefined, "先到者是 authoritative transition");
+    assert.equal(outer.ok, true, JSON.stringify(outer));
+    assert.equal(outer.duplicate, true, "后到者必须收敛为 duplicate");
+    assert.equal(outer.approval.approvalId, concurrent.approval.approvalId, "两个调用必须返回同一行 approval");
+    assert.deepEqual(decisionsOf(sf.store, callId), ["APPROVED"], "不得写第二行 approval");
+    assert.equal(eventsNamed(sf, sc.run.taskId, TASK_EVENT.TOOL_APPROVED).length, 1, "只允许一次 tool.approved");
+    assert.equal(auditRows(sf, "side_effect.approved").length, 1, "只允许一次 side_effect.approved audit");
+    assert.equal(sf.store.callById(callId).status, "APPROVED");
+    assert.equal(counter.calls, 0, "0 mutation");
+    console.log("T9-c concurrent approve: " + JSON.stringify({ first: { ok: concurrent.ok, duplicate: !!concurrent.duplicate }, second: { ok: outer.ok, duplicate: !!outer.duplicate }, approvals: decisionsOf(sf.store, callId), approvedEvents: eventsNamed(sf, sc.run.taskId, TASK_EVENT.TOOL_APPROVED).length, approvedAudit: auditRows(sf, "side_effect.approved").length, call: sf.store.callById(callId).status, mutation: counter.calls }));
   } finally { await sf.fx.close(); }
 });

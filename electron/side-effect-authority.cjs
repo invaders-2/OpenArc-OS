@@ -276,26 +276,39 @@ class SideEffectAuthority {
     const task = this.taskStore.taskById(call.taskId);
     if (!task) return { ok: false, error: SIDE_EFFECT_ERROR.TASK_NOT_FOUND };
     if (task.user_id !== actor.user.id && actor.user.role !== "ADMIN") return { ok: false, error: SIDE_EFFECT_ERROR.APPROVAL_FORBIDDEN };
-    if (call.status !== CALL_STATUS.AWAITING_APPROVAL && call.status !== CALL_STATUS.APPROVED) return { ok: false, error: SIDE_EFFECT_ERROR.CALL_STATE };
-    // §36 concurrent approval click：同一绑定下重复 Approve 是幂等的，
-    // 只产生一个 authoritative approval transition，绝不第二次 approve。
-    if (call.status === CALL_STATUS.APPROVED) {
-      const prior = this.store.latestApprovalOfCall(callId);
-      if (prior && prior.decision === APPROVAL_DECISION.APPROVED && prior.revokedAt == null && prior.planHash === call.planHash) {
-        return { ok: true, duplicate: true, call, approval: prior };
-      }
-    }
     const now = this.#now();
     const expiresAt = now + Math.max(1, Number(ttlMs) || DEFAULT_APPROVAL_TTL_MS);
-    const approval = this.store.transactSync(() => this.store.insertApproval({
-      callId, actorUserId: actor.user.id, sessionRef: context.sessionRef, decision: APPROVAL_DECISION.APPROVED, planHash: call.planHash,
-      approvedToolId: call.toolId, approvedToolVersion: call.toolVersion, approvedArgumentsHash: call.argumentsHash,
-      approvedEffectClass: call.effectClass, approvedExpectedEffects: call.expectedEffectsSafe, createdAt: now, expiresAt,
-    }));
-    const updated = this.store.transactSync(() => this.store.updateCall(callId, { status: CALL_STATUS.APPROVED, approved_at: now }));
+    // 批准资格只能由事务内重读的 persisted status 决定：approve 与 deny 是两个并发写者，
+    // 事务外读取 + 分两次写会把已被拒绝的决定复活成 APPROVED（DENY 决定被改写）。
+    let outcome = null;
+    this.store.transactSync(() => {
+      const fresh = this.store.callById(callId);
+      const observedStatus = fresh ? String(fresh.status) : null;
+      if (observedStatus !== CALL_STATUS.AWAITING_APPROVAL && observedStatus !== CALL_STATUS.APPROVED) {
+        outcome = { failed: SIDE_EFFECT_ERROR.CALL_STATE, call: fresh };
+        return;
+      }
+      // §36 concurrent approval click：同一绑定下重复 Approve 是幂等的，
+      // 只产生一个 authoritative approval transition，绝不第二次 approve。
+      if (observedStatus === CALL_STATUS.APPROVED) {
+        const prior = this.store.latestApprovalOfCall(callId);
+        if (prior && prior.decision === APPROVAL_DECISION.APPROVED && prior.revokedAt == null && prior.planHash === fresh.planHash) {
+          outcome = { duplicate: true, call: fresh, approval: prior };
+          return;
+        }
+      }
+      const approval = this.store.insertApproval({
+        callId, actorUserId: actor.user.id, sessionRef: context.sessionRef, decision: APPROVAL_DECISION.APPROVED, planHash: fresh.planHash,
+        approvedToolId: fresh.toolId, approvedToolVersion: fresh.toolVersion, approvedArgumentsHash: fresh.argumentsHash,
+        approvedEffectClass: fresh.effectClass, approvedExpectedEffects: fresh.expectedEffectsSafe, createdAt: now, expiresAt,
+      });
+      outcome = { duplicate: false, call: this.store.updateCall(callId, { status: CALL_STATUS.APPROVED, approved_at: now }), approval };
+    });
+    if (outcome.failed) return { ok: false, error: outcome.failed };
+    if (outcome.duplicate) return { ok: true, duplicate: true, call: outcome.call, approval: outcome.approval };
     this.#audit({ actorUserId: actor.user.id, appId: context.appId, toolRef: call.toolId, action: "side_effect.approved", decision: APPROVAL_DECISION.APPROVED, reasonCode: null });
-    this.#event(call.taskId, "tool.approved", { callId, approvalId: approval.approvalId, expiresAt });
-    return { ok: true, call: updated, approval };
+    this.#event(call.taskId, "tool.approved", { callId, approvalId: outcome.approval.approvalId, expiresAt });
+    return { ok: true, call: outcome.call, approval: outcome.approval };
   }
 
   denySideEffect({ context = {}, callId } = {}) {
