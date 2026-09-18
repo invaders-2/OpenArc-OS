@@ -154,6 +154,11 @@ async function main() {
   const getToolAccess = () => gov({ type: "governance/getAppToolAccess", appId: "ai" });
   const grantToolsBridge = (actions) => gov({ type: "governance/grantAppToolAccess", appId: "ai", actions });
   async function waitTaskTerminal(taskId, timeout) { return waitFor(async () => { const got = await taskGet(taskId); const s = got && got.task && got.task.status; return ["SUCCEEDED", "FAILED", "BLOCKED", "CANCELLED"].includes(s); }, timeout || 120000); }
+  // UI 动作的确定性判据：点完 UI 后必须先用后端权威 state 确认该动作**已被产品入口接受**，再等终态。
+  // 追加/续接前任务本来就是终态（SUCCEEDED / BLOCKED），而 renderer 处理 task/result 与后端收敛存在先后差，
+  // 直接 waitTaskTerminal 会立刻读到旧终态 —— 那不是"等了失败"，是"根本没等"。
+  // 接受的确定性证据 = 产品桥 task/get 的 step 数已 +1（追加/续接都会先新增 step）。
+  const waitStepsAtLeast = (taskId, n, timeout = 30000) => waitFor(async () => { const g = await taskGet(taskId); return !!(g && g.ok && Array.isArray(g.steps) && g.steps.length >= n); }, timeout);
   async function openPanel() { if (await has(".ai-panel")) return true; if (await waitSel(".assistant-pill", 30000)) await click(".assistant-pill"); return waitSel(".ai-panel", 20000); }
   async function runTask(goal) {
     await openPanel();
@@ -709,14 +714,17 @@ async function main() {
     JSON.stringify({ ui: resumeRemainingUi, expected: expRemainingText }), "与三类 remaining 完全一致");
   await setPlan("final");
   const resumeReady = await waitFor(async () => !(await isDisabled("[data-ai-resume]")), 15000);
-  const resumeClicked = await click("[data-ai-resume]");
+  const resumeClicked = resumeReady ? await click("[data-ai-resume]") : "not-ready";
+  // 续接前该任务就是 BLOCKED（终态）：必须先用"续接 step 已新增"确认已被产品入口接受（第 3 个 step 存在），
+  // 再等终态；否则 waitTaskTerminal 会立刻读到旧的 BLOCKED（同 F6.11 的确定性判据，绝不用 sleep 猜测）。
+  const resumeAccepted = resumeClicked === "ok" ? await waitStepsAtLeast(heroRun.taskId, 3) : false;
   const heroFinalTerminal = await waitTaskTerminal(heroRun.taskId, 180000);
   const heroGetFinal = await taskGet(heroRun.taskId);
   const heroSnapFinal = dbSnapshot();
   const heroStepsFinal = stepsOfTask(heroSnapFinal, heroRun.taskId);
   record("flow4", "F4.43 · 点击 [data-ai-resume] 后最终 Task SUCCEEDED + 恰好 3 个 step（SUCCEEDED/BLOCKED/SUCCEEDED）",
-    resumeReady && resumeClicked === "ok" && heroFinalTerminal && heroGetFinal.task.status === "SUCCEEDED" && heroStepsFinal.length === 3 && heroStepsFinal.map((s) => s.status).join(",") === "SUCCEEDED,BLOCKED,SUCCEEDED",
-    JSON.stringify({ click: resumeClicked, task: heroGetFinal.task.status, steps: heroStepsFinal.map((s) => s.status) }), "SUCCEEDED + SUCCEEDED,BLOCKED,SUCCEEDED");
+    resumeReady && resumeClicked === "ok" && resumeAccepted === true && heroFinalTerminal && heroGetFinal.task.status === "SUCCEEDED" && heroStepsFinal.length === 3 && heroStepsFinal.map((s) => s.status).join(",") === "SUCCEEDED,BLOCKED,SUCCEEDED",
+    JSON.stringify({ ready: resumeReady, click: resumeClicked, accepted: resumeAccepted, task: heroGetFinal.task.status, steps: heroStepsFinal.map((s) => s.status) }), "SUCCEEDED + SUCCEEDED,BLOCKED,SUCCEEDED");
   const heroArtsFinal = artsOfTask(heroSnapFinal, heroRun.taskId);
   const heroVersFinal = versOfTask(heroSnapFinal, heroRun.taskId);
   const heroRunsFinal = runsOfTask(heroSnapFinal, heroRun.taskId);
@@ -898,6 +906,12 @@ async function main() {
     const row = modelRow(s, id);
     return !!row && ["SUCCEEDED", "FAILED", "BLOCKED", "CANCELLED"].includes(row.status);
   };
+  // 写追加入口必须确认"元素已在 + 写入生效"：面板尚未渲染出入口时 setInput 只会返回 'missing'。
+  const setAppendGoal = async (sel, value) => {
+    const set = await setInput(sel, value);
+    const took = set === "ok" && await waitFor(async () => (await inputValue(sel)) === value, 10000);
+    return { set, took };
+  };
 
   // 流程 5 结束时会话是 MEMBER（F2.9）：流程 6 必须回到真实 admin 会话。
   const logout6 = await logout();
@@ -947,10 +961,12 @@ async function main() {
   const artBefore6 = artsOfTask(snap6A1, run6A.taskId);
   const verBefore6 = versOfTask(snap6A1, run6A.taskId);
   const callBefore6 = calls6Of(snap6A1, run6A.taskId);
-  const appendBlock6 = await waitSel("[data-ai-append-block]", 30000);
-  await setInput("[data-ai-append-goal]", GOAL6_APPEND_A);
+  // 顺序：等面板真正渲染出追加入口 → 写目标并确认写入生效 → 点 → 确认已被产品入口接受（step 数 +1）→ 等终态。
+  const appendBlock6 = (await waitSel("[data-ai-append-block]", 30000)) && (await waitSel("[data-ai-append-goal]", 15000));
+  const appendGoal6 = await setAppendGoal("[data-ai-append-goal]", GOAL6_APPEND_A);
   const appendReady6 = await waitFor(async () => !(await isDisabled("[data-ai-append]")), 15000);
-  const appendClick6 = await click("[data-ai-append]");
+  const appendClick6 = appendReady6 ? await click("[data-ai-append]") : "not-ready";
+  const appendAccepted6 = appendClick6 === "ok" ? await waitStepsAtLeast(run6A.taskId, 2) : false;
   const appendTerm6 = await waitTaskTerminal(run6A.taskId, 180000);
   const get6A2 = await taskGet(run6A.taskId);
   const snap6A2 = dbSnapshot();
@@ -958,11 +974,11 @@ async function main() {
   const runs6A2 = runsOfTask(snap6A2, run6A.taskId);
   const appendRun6 = steps6A2.length > 1 ? runs6A2.filter((r) => r.step_id === steps6A2[1].step_id) : [];
   record("flow6", "F6.4 (i) · 改版后经真实 UI 追加步骤：Task/Step/新 run 全部收敛 BLOCKED，run.error_code=MODEL_CONFIG_CHANGED（绝不留 RUNNING 悬挂、绝不静默换模型）",
-    appendBlock6 && appendReady6 === true && appendClick6 === "ok" && appendTerm6 && get6A2.task.status === "BLOCKED"
+    appendBlock6 && appendGoal6.took === true && appendReady6 === true && appendClick6 === "ok" && appendAccepted6 === true && appendTerm6 && get6A2.task.status === "BLOCKED"
       && steps6A2.length === 2 && steps6A2[1].status === "BLOCKED"
       && appendRun6.length === 1 && appendRun6[0].status === "BLOCKED" && appendRun6[0].error_code === "MODEL_CONFIG_CHANGED"
       && Number(appendRun6[0].model_config_version) === frozen6,
-    JSON.stringify({ appendBlockVisible: appendBlock6, ready: appendReady6, click: appendClick6, task: get6A2.task.status, steps: steps6A2.map((s) => s.status), run: appendRun6[0] && { status: appendRun6[0].status, error: appendRun6[0].error_code, version: appendRun6[0].model_config_version } }),
+    JSON.stringify({ appendBlockVisible: appendBlock6, goal: appendGoal6, ready: appendReady6, click: appendClick6, accepted: appendAccepted6, task: get6A2.task.status, steps: steps6A2.map((s) => s.status), run: appendRun6[0] && { status: appendRun6[0].status, error: appendRun6[0].error_code, version: appendRun6[0].model_config_version } }),
     "BLOCKED/BLOCKED + run MODEL_CONFIG_CHANGED");
   record("flow6", "F6.5 (i) · 该拒绝 0 执行：0 新 model call / 0 新 Artifact / 0 新 provider 请求；旧 step/artifact/verification/call 行逐字段不变",
     calls6Of(snap6A2, run6A.taskId).length === callBefore6.length
@@ -992,10 +1008,10 @@ async function main() {
   const row6B = modelRow(snap6B, run6B.taskId);
   const runs6B = runsOfTask(snap6B, run6B.taskId);
   record("flow6", "F6.7 (j) · 改版后经真实 UI 新建任务：绑定**当前**版本并正常 SUCCEEDED（版本变化只拦绑定旧版本的任务）",
-    term6B && get6B.task.status === "SUCCEEDED" && get6B.task.modelConfigId === defaultChat6 && get6B.task.modelConfigVersion === bumped6
+    run6B.started && run6B.taskId !== run6A.taskId && term6B && get6B.task.status === "SUCCEEDED" && get6B.task.modelConfigId === defaultChat6 && get6B.task.modelConfigVersion === bumped6
       && !!row6B && Number(row6B.model_config_version) === bumped6
       && runs6B.length === 1 && Number(runs6B[0].model_config_version) === bumped6,
-    JSON.stringify({ task: get6B.task.status, binding: { id: get6B.task.modelConfigId, v: get6B.task.modelConfigVersion }, expected: { id: defaultChat6, v: bumped6 } }), "SUCCEEDED + 绑定当前版本");
+    JSON.stringify({ started: run6B.started, task: get6B.task.status, binding: { id: get6B.task.modelConfigId, v: get6B.task.modelConfigVersion }, expected: { id: defaultChat6, v: bumped6 } }), "SUCCEEDED + 绑定当前版本");
 
   /* ---------------- (k-2) 前置：绑定原 config 的任务先造出真实预算停止（此时默认尚未切换） ---------------- */
   const run6C = await runTask(GOAL6_C);
@@ -1003,21 +1019,27 @@ async function main() {
   const term6C = await waitTaskTerminal(run6C.taskId, 180000);
   const get6C = await taskGet(run6C.taskId);
   const budgetStep6 = stepsOfTask(dbSnapshot(), run6C.taskId).length;
+  // 预算计划必须先于该 step 真正启动生效；面板此刻可能还没处理完 task/result（产品桥读到终态早于 renderer 渲染），
+  // 因此先等 [data-ai-append-block] / [data-ai-append-goal] 真正渲染，再写目标、确认写入生效、点、确认已被接受，最后等终态。
   await setPlan("budget");
-  await setInput("[data-ai-append-goal]", GOAL6_APPEND_C);
+  const appendCBlock6 = (await waitSel("[data-ai-append-block]", 30000)) && (await waitSel("[data-ai-append-goal]", 15000));
+  const appendCGoal6 = await setAppendGoal("[data-ai-append-goal]", GOAL6_APPEND_C);
   const appendCReady6 = await waitFor(async () => !(await isDisabled("[data-ai-append]")), 15000);
   const appendCClick6 = appendCReady6 ? await click("[data-ai-append]") : "not-ready";
+  const appendCAccepted6 = appendCClick6 === "ok" ? await waitStepsAtLeast(run6C.taskId, 2) : false;
+  const appendCSteps6 = stepsOfTask(dbSnapshot(), run6C.taskId).length;
   const budgetStop6 = await waitTaskTerminal(run6C.taskId, 300000);
   const get6CStop = await taskGet(run6C.taskId);
   const resumeVisible6 = await waitSel("[data-ai-resume]", 30000);
   const stopReason6 = (await text("[data-ai-stop-reason]")).trim();
   const cRowStop6 = modelRow(dbSnapshot(), run6C.taskId);
   record("flow6", "F6.8 (k) · 默认切换前：绑定原 config 的任务造出真实预算停止（第二步 BUDGET_EXHAUSTED + [data-ai-resume] 可见），任务归属仍是原 config",
-    appendCReady6 === true && appendCClick6 === "ok" && budgetStop6 && term6C && get6C.task.status === "SUCCEEDED"
+    appendCBlock6 === true && appendCGoal6.took === true && appendCReady6 === true && appendCClick6 === "ok" && appendCAccepted6 === true
+      && appendCSteps6 === 2 && budgetStop6 && term6C && get6C.task.status === "SUCCEEDED"
       && get6CStop.task.status === "BLOCKED" && get6CStop.stopReason === "BUDGET_EXHAUSTED" && get6CStop.resumable === true
       && cRowStop6 && cRowStop6.model_config_id === defaultChat6 && Number(cRowStop6.model_config_version) === bumped6
       && resumeVisible6 && budgetStep6 === 1,
-    JSON.stringify({ first: get6C.task.status, stop: get6CStop.task.status, stopReason: get6CStop.stopReason, uiStopReason: stopReason6, resumable: get6CStop.resumable, resumeVisible: resumeVisible6, stepsBeforeBudget: budgetStep6, binding: cRowStop6 && { id: cRowStop6.model_config_id, v: cRowStop6.model_config_version } }), "BLOCKED + BUDGET_EXHAUSTED + resumable + 原 config");
+    JSON.stringify({ first: get6C.task.status, appendBlockVisible: appendCBlock6, goal: appendCGoal6, ready: appendCReady6, click: appendCClick6, accepted: appendCAccepted6, stepsAfterAccept: appendCSteps6, stop: get6CStop.task.status, stopReason: get6CStop.stopReason, uiStopReason: stopReason6, resumable: get6CStop.resumable, resumeVisible: resumeVisible6, stepsBeforeBudget: budgetStep6, binding: cRowStop6 && { id: cRowStop6.model_config_id, v: cRowStop6.model_config_version } }), "BLOCKED + BUDGET_EXHAUSTED + resumable + 原 config");
 
   /* ---------------- (k) 默认切到另一个 config（原 config 未变） ---------------- */
   const newCfg6 = await productModel({ type: "model/create", providerId: pid, remoteModelId: "main-e2e-local-2", displayName: "Main E2E Local 2", capabilities: ["chat"], scope: "ORGANIZATION" });
@@ -1040,7 +1062,8 @@ async function main() {
   await setPlan("final");
   const rev6B = (await taskGet(run6B.taskId)).task.revision;
   const appendB6 = await appendViaBridge(run6B.taskId, GOAL6_APPEND_B, rev6B);
-  const appendBClicked6 = appendB6 && appendB6.ok === true ? "ok" : "rejected";
+  // 产品桥 appendStep 的同步返回本身就是"已被接受"的证据（返回时后端已完成 step 新增 + task RUNNING）。
+  const appendBClicked6 = appendB6 && appendB6.ok === true && appendB6.status === "RUNNING" ? "ok" : "rejected";
   const term6B2 = await waitTaskTerminal(run6B.taskId, 180000);
   const get6B2 = await taskGet(run6B.taskId);
   const snap6B2 = dbSnapshot();
@@ -1060,7 +1083,9 @@ async function main() {
   // (k-2) 绑定原 config 的任务 resume：默认已切到新 config，显式续接仍必须成功
   await setPlan("final");
   const resumeReady6 = await waitFor(async () => !(await isDisabled("[data-ai-resume]")), 15000);
-  const resumeClick6 = await click("[data-ai-resume]");
+  const resumeClick6 = resumeReady6 ? await click("[data-ai-resume]") : "not-ready";
+  // 续接同理：任务点击前就是 BLOCKED（终态），必须先用"续接 step 已新增"确认被接受，再等终态。
+  const resumeAccepted6 = resumeClick6 === "ok" ? await waitStepsAtLeast(run6C.taskId, 3) : false;
   const term6C2 = await waitTaskTerminal(run6C.taskId, 180000);
   const get6C2 = await taskGet(run6C.taskId);
   const snap6C2 = dbSnapshot();
@@ -1068,11 +1093,11 @@ async function main() {
   const runs6C2 = runsOfTask(snap6C2, run6C.taskId);
   const calls6C2 = calls6Of(snap6C2, run6C.taskId);
   record("flow6", "F6.11 (k) · 默认已指向新 config，绑定原 config 的任务显式续接仍成功，且归属仍是原 config（不静默切换）",
-    resumeReady6 && resumeClick6 === "ok" && term6C2 && get6C2.task.status === "SUCCEEDED"
+    resumeReady6 === true && resumeClick6 === "ok" && resumeAccepted6 === true && term6C2 && get6C2.task.status === "SUCCEEDED"
       && !!row6C2 && row6C2.model_config_id === defaultChat6 && Number(row6C2.model_config_version) === bumped6
       && runs6C2.length >= 3 && runs6C2.every((r) => r.model_config_id === defaultChat6 && Number(r.model_config_version) === bumped6)
       && calls6C2.every((c) => c.model_config_id === defaultChat6 && Number(c.model_config_version) === bumped6),
-    JSON.stringify({ task: get6C2.task.status, runs: runs6C2.length, runBindings: runs6C2.map((r) => r.model_config_id + ":" + r.model_config_version), callBindings: calls6C2.map((c) => c.model_config_id + ":" + c.model_config_version), taskBinding: row6C2 && { id: row6C2.model_config_id, v: row6C2.model_config_version } }),
+    JSON.stringify({ ready: resumeReady6, click: resumeClick6, accepted: resumeAccepted6, task: get6C2.task.status, runs: runs6C2.length, runBindings: runs6C2.map((r) => r.model_config_id + ":" + r.model_config_version), callBindings: calls6C2.map((c) => c.model_config_id + ":" + c.model_config_version), taskBinding: row6C2 && { id: row6C2.model_config_id, v: row6C2.model_config_version } }),
     "SUCCEEDED + 全部归属原 config");
 
   const snap6Final = dbSnapshot();
