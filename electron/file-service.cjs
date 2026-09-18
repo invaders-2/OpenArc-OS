@@ -49,6 +49,38 @@ function createFileService({ userDataDir }) {
     fs.renameSync(tmp, file);
   }
 
+  /**
+   * 系统级回收站（软删除）。存储布局：
+   *   <userData>/files/.trash/<trashId>.<ext>   被移出的物理文件
+   *   <userData>/files/.trash/index.json        回收站索引
+   * 索引条目 = { id, origId, folderId, name, ext, size, mtime, deletedAt, file }。
+   *
+   * 为什么目录名是 `.trash`：folderId 白名单 ID_RE 不允许点号，因此渲染层
+   * **无法**把 .trash 当作一个普通文件夹访问 —— 回收站只能走它专属的通道。
+   */
+  const trashDir = path.join(root, ".trash");
+  fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
+  const trashIndexFile = path.join(trashDir, "index.json");
+
+  function readTrashIndex() {
+    try {
+      const raw = JSON.parse(fs.readFileSync(trashIndexFile, "utf8"));
+      return Array.isArray(raw && raw.entries) ? raw.entries : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** 与 writeIndex 同一套原子写法：先写 tmp，再 rename。 */
+  function writeTrashIndex(entries) {
+    const tmp = trashIndexFile + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify({ version: 1, entries }, null, 2));
+    fs.renameSync(tmp, trashIndexFile);
+  }
+
+  /** 只认索引里记录的物理文件名：就算索引被写坏，也走不出回收站目录。 */
+  const trashFileOf = (e) => path.basename(String(e.file || e.id));
+
   const extOf = (name) => {
     const i = name.lastIndexOf(".");
     return i > 0 ? name.slice(i + 1).toLowerCase() : "";
@@ -166,6 +198,142 @@ function createFileService({ userDataDir }) {
     const next = entries.filter((e) => e.id !== id);
     writeIndex(dir, next);
     return { ok: true, entries: next };
+  }
+
+  /**
+   * 软删除：条目从原文件夹移入回收站，索引里保留原 folderId / 原名 / 删除时间。
+   * 顺序是**先移动物理文件 → 写回收站索引 → 最后才改原索引**：
+   * 中间任何一步崩溃都只是"多出一条记录"，不会丢数据（与 remove 的永久删除语义完全分开）。
+   */
+  function trash(folderId, id) {
+    const dir = dirOf(folderId);
+    if (!dir) return { ok: false, error: "INVALID_INPUT" };
+    const victim = readIndex(dir).find((e) => e.id === id);
+    if (!victim) return { ok: false, error: "NOT_FOUND" };
+    const trashId = "t" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    const ext = extOf(victim.name);
+    const file = trashId + (ext ? "." + ext : "");
+    const src = path.join(dir, fileOf(victim));
+    const dst = path.join(trashDir, file);
+    let moved = false;
+    try {
+      fs.renameSync(src, dst);
+      moved = true;
+    } catch {
+      moved = false;
+    }
+    if (!moved) {
+      try {
+        fs.copyFileSync(src, dst);
+        fs.unlinkSync(src);
+        moved = true;
+      } catch {
+        moved = false;
+      }
+    }
+    // 物理文件不见了（外部删掉）也允许收进回收站，只保留元数据。
+    if (!moved && fs.existsSync(src)) return { ok: false, error: "FILE_IO" };
+    const tEntries = readTrashIndex();
+    tEntries.push({
+      id: trashId,
+      origId: victim.id,
+      folderId: String(folderId),
+      name: victim.name,
+      ext,
+      size: victim.size,
+      mtime: victim.mtime,
+      deletedAt: Date.now(),
+      file,
+    });
+    writeTrashIndex(tEntries);
+    const next = readIndex(dir).filter((e) => e.id !== id);
+    writeIndex(dir, next);
+    return { ok: true, entries: next, trashId };
+  }
+
+  /** 回收站内容：按删除时间倒序（最近删的在最前）。 */
+  function listTrash() {
+    const entries = readTrashIndex().slice().sort((a, b) => (b.deletedAt ?? 0) - (a.deletedAt ?? 0));
+    return { ok: true, entries };
+  }
+
+  /**
+   * 恢复：原文件夹不存在就重建它（dirOf 的既有行为），重名自动加后缀。
+   * 原条目 id 没被占用时**复用原 id** —— 桌面图标位置按 id 记录，换 id 会让文件"跳位置"。
+   */
+  function restore(id) {
+    const trashId = safeId(id);
+    if (!trashId) return { ok: false, error: "INVALID_INPUT" };
+    const tEntries = readTrashIndex();
+    const entry = tEntries.find((e) => e.id === trashId);
+    if (!entry) return { ok: false, error: "NOT_FOUND" };
+    const folderId = safeId(entry.folderId);
+    if (!folderId) return { ok: false, error: "INVALID_FOLDER" };
+    const recreated = !fs.existsSync(path.join(root, folderId));
+    const dir = dirOf(folderId);
+    if (!dir) return { ok: false, error: "INVALID_FOLDER" };
+    const dstEntries = readIndex(dir);
+    const name = uniqueName(dstEntries, entry.name);
+    const origId = safeId(entry.origId);
+    const canReuse = origId && !dstEntries.some((e) => e.id === origId);
+    const newId = canReuse ? origId : "e" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    const ext = extOf(name);
+    const file = newId + (ext ? "." + ext : "");
+    const src = path.join(trashDir, trashFileOf(entry));
+    const dst = path.join(dir, file);
+    let moved = false;
+    try {
+      fs.renameSync(src, dst);
+      moved = true;
+    } catch {
+      moved = false;
+    }
+    if (!moved) {
+      try {
+        fs.copyFileSync(src, dst);
+        fs.unlinkSync(src);
+        moved = true;
+      } catch {
+        moved = false;
+      }
+    }
+    if (!moved) return { ok: false, error: "FILE_MISSING" };
+    // 先落目标索引，再从回收站移除：崩溃时最多"两处都在"，不会"两边都没有"。
+    dstEntries.push({ id: newId, name, ext, size: entry.size, mtime: entry.mtime, file });
+    writeIndex(dir, dstEntries);
+    writeTrashIndex(tEntries.filter((e) => e.id !== trashId));
+    return { ok: true, folderId, recreated, id: newId, entries: dstEntries };
+  }
+
+  /** 永久删除单个回收站条目。 */
+  function purge(id) {
+    const trashId = safeId(id);
+    if (!trashId) return { ok: false, error: "INVALID_INPUT" };
+    const tEntries = readTrashIndex();
+    const entry = tEntries.find((e) => e.id === trashId);
+    if (!entry) return { ok: false, error: "NOT_FOUND" };
+    try {
+      fs.unlinkSync(path.join(trashDir, trashFileOf(entry)));
+    } catch {
+      /* 文件已不存在也算删除成功 */
+    }
+    const next = tEntries.filter((e) => e.id !== trashId);
+    writeTrashIndex(next);
+    return { ok: true, entries: next };
+  }
+
+  /** 清空回收站：删掉所有物理文件并写回空索引。 */
+  function empty() {
+    const tEntries = readTrashIndex();
+    for (const entry of tEntries) {
+      try {
+        fs.unlinkSync(path.join(trashDir, trashFileOf(entry)));
+      } catch {
+        /* 同上：文件不在不影响清空 */
+      }
+    }
+    writeTrashIndex([]);
+    return { ok: true, removed: tEntries.length };
   }
 
   /**
@@ -301,7 +469,7 @@ function createFileService({ userDataDir }) {
     return { path: path.join(dir, fileOf(entry)), entry };
   }
 
-  return { importPaths, list, rename, remove, read, resolve, copy, move };
+  return { importPaths, list, rename, remove, read, resolve, copy, move, trash, listTrash, restore, purge, empty };
 }
 
 module.exports = { createFileService };

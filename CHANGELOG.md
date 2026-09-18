@@ -1,5 +1,53 @@
 # 计划修订记录
 
+## 2026-09-18（二十）：程序坞系统级「回收站」（软删除 / 恢复 / 永久删除 / 清空）
+
+用户口径：程序坞那边添加一个回收站。
+
+### 改了什么
+
+- **程序坞条目**（`src/main.tsx` 的 apps + `src/desktop/components.tsx` 的 Dock）：
+  新增 `{ id: "trash", name: "回收站", icon: "trash" }` 并进 `DOCK_DEFAULT`；按 macOS 惯例固定在
+  `.dock-divider` 右侧、全局 AI 之后（最右端），不参与长按排序（`data-dock-id` 不挂，排序 ids 里排除）。
+  全局 AI 的行为与位置不变。老用户 `oa-dock` 不含 trash 时做**一次性合并迁移**（补到末尾 +
+  写 `oa-dock-trash` 标记），之后用户自己移除不再补回 —— 与"数组即唯一真值"的既有语义一致。
+- **图标** `public/icons/trash.png`（256×256）：与 `public/icons` 同一套 Big Sur 风格（204px 圆角方底板
+  + 顶光渐变 + 投影 + 白色金属桶身）。`docs/snapshots/2026-09-18-trash-icon-compare.png` 是与
+  settings / finder / apps / freeform / folder 的同尺寸对照图。
+- **后端软删除**（`electron/file-service.cjs`）：新增 `<userData>/files/.trash/` 与索引
+  `{ id, origId, folderId, name, ext, size, mtime, deletedAt, file }`，新增
+  `trash / listTrash / restore / purge / empty`。索引沿用「先写 tmp 再 rename」，物理文件先移动再写索引；
+  `.trash` 过不了 folderId 白名单，渲染层无法把它当普通文件夹访问。恢复处理重名（自动加 " 2"）、
+  原文件夹不存在（重建并回报 `recreated`）、原 id 空闲时复用（桌面图标位置不跳）。
+  `remove` 保持永久删除语义不变。
+- **IPC / preload / 暴露面**：`main.cjs` 新增 `files:trash / files:trashList / files:trashRestore /
+  files:trashPurge / files:trashEmpty`（全部 `trusted(e)`）；`preload.cjs` 的 `files` 桥新增对应 5 个方法。
+  暴露面**成员数不变**（回收站挂在既有 `files` 桥下），已在
+  `experiments/d2-02/native/probes/02-security-surface.cjs` 的冻结清单显式登记 5 条新通道。
+- **前端删除语义**：桌面单选/多选、访达（文件夹窗口）单选/多选的「删除」改走 `files.trash`；
+  **回收站窗口内**才是永久删除 / 清空。壁纸删除、虚拟桌面文件夹删除、资源库自带的应用内回收站未动。
+- **回收站窗口**（appId `"trash"`）：复用既有 `.split / .split-side / .pane-toolbar / .file-cell /
+  .file-grid|.file-list / .empty-content / Dialog`，无新增 CSS。侧栏与工具栏提供全部项目 / 恢复 /
+  永久删除 / 清空；网格与列表切换；⌘/Ctrl 加减选、Shift 扩选；Enter/空格恢复、Delete 永久删除、
+  右键菜单；空态文案「回收站是空的。」。永久删除 / 清空复用既有 Dialog 做二次确认
+  （`overlays.dialog` 让原生视图让位、背景 inert）。
+
+### 验证（真实执行）
+
+- 新增 `tests/file-service-trash.test.mjs`（11 例）：移入、列出倒序、恢复（正常 / 重名 / 原夹不存在 /
+  id 复用）、永久删除、清空、坏索引健壮性与无 `.tmp` 残留、非法 folderId 与路径穿越拒绝、
+  `remove` 仍为永久删除。`npm test` **1001/1001 通过**；`npm run build` 通过。
+- `npm run test:d2-02`：`security-surface` **17/17 PASS**（暴露面更新后）；`dialog-a11y`
+  25 PASS / 8 FAIL 与 `docs/INTEGRATION-ui-core-RESULT.md` 记录的集成分支既有基线逐项一致，
+  非本改动引入；其后 motion-parity / window-stress / two-browser 因前序 FAIL 中止。
+  `window-stress` 单跑在**第一条**断言 `00.seededDesktopMatchesDomain`（窗口恢复/最小化基线）
+  即失败，与回收站无关（该探针在集成分支从未跑过，原记 NOT VERIFIED）。
+- 真实 Electron 端到端 + 截图 `scripts/trash-snapshots.cjs`（`npm run test:trash-snapshots`，**19/19 通过**）：
+  `docs/snapshots/2026-09-18-trash-{dock,empty,content}.png`（程序坞含回收站 / 空态 / 删一个桌面文件后），
+  并验证桌面右键「删除」→ 进回收站 → 恢复回桌面 → 永久删除必须过确认 Dialog，以及老 `oa-dock`
+  刷新后自动出现回收站。
+
+
 ## 2026-09-17（十九）：光标缩小 + 全用自绘 + 设置里的「光标」两行
 
 用户口径（三条一起做）：

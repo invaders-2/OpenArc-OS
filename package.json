@@ -71,6 +71,7 @@
     "test:governance-ui": "npm run build && node tests/governance-ui.mjs",
     "test:resource-picker-ui": "npm run build && node tests/resource-picker-ui.mjs",
     "test:canvas-resource-ui": "npm run build && node tests/canvas-resource-ui.mjs",
+    "test:trash-snapshots": "npm run build && env -u ELECTRON_RUN_AS_NODE electron scripts/trash-snapshots.cjs --no-sandbox --disable-gpu-sandbox --in-process-gpu",
     "showcase": "npm run build && node tests/showcase.mjs"
   },
   "dependencies": {

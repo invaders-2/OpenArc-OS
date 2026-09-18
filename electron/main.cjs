@@ -460,6 +460,27 @@ app.whenReady().then(async () => {
     if (!trusted(e)) throw Error("Forbidden");
     return files.remove(String(payload?.folderId ?? ""), String(payload?.id ?? ""));
   });
+  // 系统级回收站（软删除）。与 remove 的永久删除分开：删除入口走这些通道。
+  ipcMain.handle("files:trash", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    return files.trash(String(payload?.folderId ?? ""), String(payload?.id ?? ""));
+  });
+  ipcMain.handle("files:trashList", async (e) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    return files.listTrash();
+  });
+  ipcMain.handle("files:trashRestore", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    return files.restore(String(payload?.id ?? ""));
+  });
+  ipcMain.handle("files:trashPurge", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    return files.purge(String(payload?.id ?? ""));
+  });
+  ipcMain.handle("files:trashEmpty", async (e) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    return files.empty();
+  });
   ipcMain.handle("files:read", async (e, payload) => {
     if (!trusted(e)) throw Error("Forbidden");
     return files.read(String(payload?.folderId ?? ""), String(payload?.id ?? ""));

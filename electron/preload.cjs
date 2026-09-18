@@ -138,7 +138,8 @@ contextBridge.exposeInMainWorld("openarc", {
    *   pathFor(file)            把拖进来的 File 换成磁盘路径（Electron 44 起 File.path 已移除）
    *   import(folderId, paths)  把外部文件**拷贝进** userData/files/<folderId>/
    *   list(folderId)           列出该文件夹的条目索引
-   *   rename/remove            改名 / 删除条目
+   *   rename/remove            改名 / 永久删除条目（remove 保留为永久删除）
+   *   trash/trashList/trashRestore/trashPurge/trashEmpty  系统回收站：软删除 / 列出 / 恢复 / 永久删除 / 清空
    * 没有暴露 fs / path / shell / 任意路径读取 —— 读写范围被 file-service.cjs
    * 的 folderId 白名单（[A-Za-z0-9_-]）与固定根目录锁死。
    */
@@ -148,6 +149,12 @@ contextBridge.exposeInMainWorld("openarc", {
     list: (folderId) => ipcRenderer.invoke("files:list", folderId),
     rename: (folderId, id, name) => ipcRenderer.invoke("files:rename", { folderId, id, name }),
     remove: (folderId, id) => ipcRenderer.invoke("files:remove", { folderId, id }),
+    /** 系统级回收站（软删除）：删除入口走 trash，回收站窗口里才调 purge / empty。 */
+    trash: (folderId, id) => ipcRenderer.invoke("files:trash", { folderId, id }),
+    trashList: () => ipcRenderer.invoke("files:trashList"),
+    trashRestore: (id) => ipcRenderer.invoke("files:trashRestore", { id }),
+    trashPurge: (id) => ipcRenderer.invoke("files:trashPurge", { id }),
+    trashEmpty: () => ipcRenderer.invoke("files:trashEmpty"),
     read: (folderId, id) => ipcRenderer.invoke("files:read", { folderId, id }),
     thumb: (folderId, id, size) => ipcRenderer.invoke("files:thumb", { folderId, id, size }),
     info: (folderId, id) => ipcRenderer.invoke("files:info", { folderId, id }),

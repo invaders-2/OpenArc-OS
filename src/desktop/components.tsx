@@ -392,7 +392,11 @@ export function Dock({
   // 拿不到这一刻（详见 useDockMagnify 顶部注释）。两个 hook 共用同一个 ref ——
   // 整理期间放大必须让位（槽位由拖动手势接管）。
   const dockRef = useRef<HTMLElement>(null);
-  const order = apps.map((a) => a.id);
+  // 回收站是系统级固定槽位（macOS 惯例在分隔线右侧、最右端）：不参与长按排序，
+  // 因此它从排序的 ids 里排除，只作为一个固定 DockItem 画出来。
+  const mainApps = apps.filter((a) => a.id !== "trash");
+  const trashApp = apps.find((a) => a.id === "trash");
+  const order = mainApps.map((a) => a.id);
   const arrange = useDockArrange(dockRef, { ids: order, onReorder, onActivate });
   useDockMagnify(dockRef, reduced || arrange.arranging, order.join(","));
   return (
@@ -406,7 +410,7 @@ export function Dock({
       {/* 底板两层：阴影在下、静止玻璃在上（为什么这么拆见 styles.css 里的说明） */}
       <span className="dock-shadow" aria-hidden="true" />
       <span className="dock-glass" aria-hidden="true" />
-      {apps.map((a) => (
+      {mainApps.map((a) => (
         <DockItem
           key={a.id}
           id={a.id}
@@ -430,6 +434,16 @@ export function Dock({
         orbAnimated={!reduced}
         onActivate={onToggleAI}
       />
+      {trashApp ? (
+        <DockItem
+          label="回收站"
+          iconName="trash"
+          running={runningApps.has("trash")}
+          bouncing={bouncing === "trash"}
+          onActivate={() => onActivate("trash")}
+          onContextMenu={(e) => onItemMenu("trash", e)}
+        />
+      ) : null}
     </nav>
   );
 }

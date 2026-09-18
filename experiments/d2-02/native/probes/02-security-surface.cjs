@@ -36,6 +36,14 @@
  *   没有 readFile(path) / writeFile(path) / deleteFile(path) 之类通用 fs 能力，
  *   导入/链接的文件选择在主进程 dialog 完成，路径不回渲染进程。
  * 清单随之前移：现在的"上一版基线"是 D3-03 的 8 个成员。
+ *
+ * **2026-09-18 变更（显式登记）**：暴露面的**成员数不变**（仍 14 个键，回收站挂在既有
+ *   `files` 桥下），但新增 5 条 IPC 通道：
+ *   `files:trash` / `files:trashList` / `files:trashRestore` / `files:trashPurge` / `files:trashEmpty`。
+ *   新增内容 = **软删除（移入回收站）/ 列出 / 恢复 / 永久删除 / 清空**。存储固定在
+ *   `<userData>/files/.trash/`，folderId 与 id 仍过 [A-Za-z0-9_-] 白名单；purge / restore
+ *   只认回收站索引里记录过的条目，渲染进程伪造 id 只会得到 NOT_FOUND。
+ *   仍然没有暴露 fs / path / shell，也没有任意路径删除。
  */
 const { BrowserWindow, WebContentsView, session, app } = require("electron");
 const http = require("node:http");
@@ -88,6 +96,11 @@ const FROZEN_IPC_CHANNELS = [
   "files:remove",
   "files:rename",
   "files:thumb",
+  "files:trash",
+  "files:trashEmpty",
+  "files:trashList",
+  "files:trashPurge",
+  "files:trashRestore",
   "governance:command",
   "identity:command",
   "model:command",
