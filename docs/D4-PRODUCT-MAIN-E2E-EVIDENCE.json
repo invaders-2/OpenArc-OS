@@ -1,5 +1,5 @@
 {
-  "testedCommit": "c7302dcbeaca58a904c9f31f70bada3b931187ec",
+  "testedCommit": "1594771e94d13a6a72dd49e473a7c90390c6efc8",
   "workspaceState": "",
   "command": "node tests/d4-main-e2e.mjs",
   "env": {
@@ -55,7 +55,7 @@
   },
   "flows": {
     "flow1": {
-      "taskId": "task_P8R0iPnnB6D5Tw",
+      "taskId": "task_nMDs8bru3fsxRg",
       "prerequisiteGrant": "product governance UI (grantAppToolAccess)",
       "status": "SUCCEEDED",
       "sideEffectCalls": 1,
@@ -67,7 +67,7 @@
       "executorSpawned": true
     },
     "flow2": {
-      "taskId": "task_nQGtGT44L5tLPA",
+      "taskId": "task_WiwrUJ6uVIGiJQ",
       "prerequisiteGrant": "product governance UI (grantAppToolAccess)",
       "revokeEntry": "product governance/revokeAppToolAccess",
       "callStatus": "BLOCKED",
@@ -77,7 +77,7 @@
       "nonAdminGrantDenied": true
     },
     "flow3": {
-      "taskId": "task_1zesd5lv2IhAkA",
+      "taskId": "task_XrCsUWNz-nWrAw",
       "prerequisiteGrant": "product entry grantAppToolAccess (search/readMetadata only)",
       "status": "BLOCKED",
       "sideEffectCalls": 0,
@@ -86,7 +86,7 @@
       "deniedUiVisible": true
     },
     "flow4": {
-      "taskId": "task_rS8Y1Y81Jrzvtg",
+      "taskId": "task_vu-BVf5KW6PmfQ",
       "entry": "真实 UI：task/run（plan write + 目标资源）→ Approve → [data-ai-append-goal] + [data-ai-append]（plan budget）→ 第二步真实预算停止 → [data-ai-resume]（plan final）→ 成功",
       "status": "SUCCEEDED",
       "appendAcceptedByUI": true,
@@ -179,15 +179,15 @@
       ],
       "artifactRefs": [
         {
-          "artifactId": "art_fup-RUKnPXoHAQ",
-          "stepId": "step_Ci6qr7nYMsgmfQ",
-          "runId": "hrun_fOu081ecuCIaww",
+          "artifactId": "art_0c2AIJ-T2C2D0A",
+          "stepId": "step_SIwfS2GQnubObQ",
+          "runId": "hrun_o2SpYv-5_KjIxg",
           "type": "text"
         },
         {
-          "artifactId": "art_IKKmwpbsTYYvqQ",
-          "stepId": "step_paVH3wA2ccj87Q",
-          "runId": "hrun_rCNjWUw8tnjKvg",
+          "artifactId": "art_jRLgmyIB0QspCg",
+          "stepId": "step_bFM4nKJ67I_f9w",
+          "runId": "hrun_hCoFAJDGNYsmpA",
           "type": "text"
         }
       ],
@@ -232,7 +232,7 @@
         ]
       },
       "revokeTask": {
-        "taskId": "task_lgkwct0UaaD4fQ",
+        "taskId": "task_rDslzvVg79UfsQ",
         "steps": 2,
         "artifacts": 1,
         "appendReason": "APPEND_NOT_SUCCEEDED",
@@ -256,14 +256,14 @@
     "flow6": {
       "entry": "真实 UI task/run（后端解析冻结默认模型）→ 产品桥 model/update 提升该 config 版本 → 真实 UI 追加步骤 → BLOCKED/MODEL_CONFIG_CHANGED → 新任务绑定新版本成功；产品桥 defaults/set 切默认后原 config 任务的 append/resume 仍成功",
       "taskIds": {
-        "taskA": "task_fNekI-QXXzx7ng",
-        "taskB": "task_eIIEY9EAQj9bKQ",
-        "taskC": "task_n_XGl-MiGXSvnw"
+        "taskA": "task_6Mnjy_ghVQGXvg",
+        "taskB": "task_Z9QXExpPNhL2kw",
+        "taskC": "task_Hw1Wfzl57E6qgQ"
       },
-      "defaultConfig": "mcf_W3zFyRo-lZP8Zw",
+      "defaultConfig": "mcf_3gv7xkS2iN-NaQ",
       "frozenVersion": 2,
       "bumpedVersion": 3,
-      "newDefaultConfig": "mcf_dXPTjLdNpcCBPg",
+      "newDefaultConfig": "mcf_9VExZNjsfParGA",
       "blockedAppend": {
         "status": "BLOCKED",
         "error": "MODEL_CONFIG_CHANGED",
@@ -341,7 +341,7 @@
   "observations": [
     {
       "name": "flow4-append-budget-resume",
-      "detail": "{\"taskId\":\"task_rS8Y1Y81Jrzvtg\",\"taskStatus\":\"SUCCEEDED\",\"steps\":[\"SUCCEEDED\",\"BLOCKED\",\"SUCCEEDED\"],\"artifacts\":2,\"verifications\":2,\"runs\":3,\"budget\":{\"before\":{\"MODEL_CALLS\":{\"authorized\":8,\"consumed\":4,\"remaining\":4},\"TOOL_CALLS\":{\"authorized\":8,\"consumed\":2,\"remaining\":6},\"TOOL_ROUNDS\":{\"authorized\":4,\"consumed\":1,\"remaining\":3}},\"stop\":{\"MODEL_CALLS\":{\"authorized\":8,\"consumed\":8,\"remaining\":0},\"TOOL_CALLS\":{\"authorized\":8,\"consumed\":6,\"remaining\":2},\"TOOL_ROUNDS\":{\"authorized\":4,\"consumed\":1,\"remaining\":3}},\"final\":{\"MODEL_CALLS\":{\"authorized\":16,\"consumed\":9,\"remaining\":7},\"TOOL_CALLS\":{\"authorized\":8,\"consumed\":6,\"remaining\":2},\"TOOL_ROUNDS\":{\"authorized\":4,\"consumed\":1,\"remaining\":3}},\"nextGrant\":{\"kind\":\"MODEL_CALLS\",\"amount\":8},\"additions\":1},\"calls\":{\"providerModelRequests\":9,\"providerToolCalls\":6,\"toolExecutions\":5,\"sideEffectCalls\":1}}"
+      "detail": "{\"taskId\":\"task_vu-BVf5KW6PmfQ\",\"taskStatus\":\"SUCCEEDED\",\"steps\":[\"SUCCEEDED\",\"BLOCKED\",\"SUCCEEDED\"],\"artifacts\":2,\"verifications\":2,\"runs\":3,\"budget\":{\"before\":{\"MODEL_CALLS\":{\"authorized\":8,\"consumed\":4,\"remaining\":4},\"TOOL_CALLS\":{\"authorized\":8,\"consumed\":2,\"remaining\":6},\"TOOL_ROUNDS\":{\"authorized\":4,\"consumed\":1,\"remaining\":3}},\"stop\":{\"MODEL_CALLS\":{\"authorized\":8,\"consumed\":8,\"remaining\":0},\"TOOL_CALLS\":{\"authorized\":8,\"consumed\":6,\"remaining\":2},\"TOOL_ROUNDS\":{\"authorized\":4,\"consumed\":1,\"remaining\":3}},\"final\":{\"MODEL_CALLS\":{\"authorized\":16,\"consumed\":9,\"remaining\":7},\"TOOL_CALLS\":{\"authorized\":8,\"consumed\":6,\"remaining\":2},\"TOOL_ROUNDS\":{\"authorized\":4,\"consumed\":1,\"remaining\":3}},\"nextGrant\":{\"kind\":\"MODEL_CALLS\",\"amount\":8},\"additions\":1},\"calls\":{\"providerModelRequests\":9,\"providerToolCalls\":6,\"toolExecutions\":5,\"sideEffectCalls\":1}}"
     }
   ],
   "rendererConsoleErrors": 0,
@@ -469,8 +469,8 @@
       "flow": "setup",
       "name": "S5 · 真实 UI 设置默认 chat model（personal + organization）",
       "ok": true,
-      "actual": "org=mcf_W3zFyRo-lZP8Zw",
-      "expected": "mcf_W3zFyRo-lZP8Zw"
+      "actual": "org=mcf_3gv7xkS2iN-NaQ",
+      "expected": "mcf_3gv7xkS2iN-NaQ"
     },
     {
       "flow": "setup",
@@ -532,7 +532,7 @@
       "flow": "flow1",
       "name": "F1.6 · Approval UI 显示 tool / risk / target",
       "ok": true,
-      "actual": "应用 / AgentAI 助手（本机会话）工具Trash Resource（resource.trash）风险可逆写入目标Main E2E Targetresource://res_B1hNjxdpqrhfEslYH3czt2PpX4FGEr4P预期效果把该资源移入废纸篓（可通过",
+      "actual": "应用 / AgentAI 助手（本机会话）工具Trash Resource（resource.trash）风险可逆写入目标Main E2E Targetresource://res_G3GjGzuLNgxVhcTKBWWFffpt3v9veZG0预期效果把该资源移入废纸篓（可通过",
       "expected": "tool+risk+target"
     },
     {
@@ -602,7 +602,7 @@
       "flow": "flow2",
       "name": "F2.2 · 经产品治理入口 revokeAppToolAccess 撤销 ai 的 TOOL grant（changed=true）",
       "ok": true,
-      "actual": "{\"ok\":true,\"changed\":true,\"grantId\":\"grant_OQCAevIlixBx_7FVXrLbB-OqBMIRhRCv\"}",
+      "actual": "{\"ok\":true,\"changed\":true,\"grantId\":\"grant_Cyjm8Hv_LR-0lCnmY9ope-FHSkYhEFlV\"}",
       "expected": "ok=true, changed=true"
     },
     {
@@ -644,7 +644,7 @@
       "flow": "flow3",
       "name": "F3.1 · 经产品治理入口只授予 search/readMetadata（显式不授予 trash）",
       "ok": true,
-      "actual": "{\"ok\":true,\"grantId\":\"grant_tU4MqlBtcTQV4ObSJtiVwIRjXafVTlXh\",\"appId\":\"ai\",\"actions\":[\"tool.resource.search\",\"tool.resource.readMetadata\"],\"scope\":\"TOOL\"}",
+      "actual": "{\"ok\":true,\"grantId\":\"grant_YAfU9FmfiejRvTkzC3rRmpJLLSzW_b-L\",\"appId\":\"ai\",\"actions\":[\"tool.resource.search\",\"tool.resource.readMetadata\"],\"scope\":\"TOOL\"}",
       "expected": "ok=true"
     },
     {
@@ -735,7 +735,7 @@
       "flow": "flow4",
       "name": "F4.5 · 14(a) 并发赢家同步返回 { ok:true, taskId 不变, status:RUNNING }；拒绝方同步拒绝且无 running 异步面",
       "ok": true,
-      "actual": "{\"winner\":{\"taskId\":\"task_pWnLErpAG1Qp9A\",\"status\":\"RUNNING\"},\"loser\":{\"error\":\"TASK_REVISION_CONFLICT\"}}",
+      "actual": "{\"winner\":{\"taskId\":\"task_cPDGsUs5oURpFw\",\"status\":\"RUNNING\"},\"loser\":{\"error\":\"TASK_REVISION_CONFLICT\"}}",
       "expected": "winner RUNNING + loser 同步拒绝"
     },
     {
@@ -791,7 +791,7 @@
       "flow": "flow4",
       "name": "F4.13 · 14(e) 真实追加一个 WRITE 类第二步：同步接受 ok=true / taskId 不变 / status=RUNNING",
       "ok": true,
-      "actual": "{\"ok\":true,\"taskId\":\"task_lgkwct0UaaD4fQ\",\"status\":\"RUNNING\"}",
+      "actual": "{\"ok\":true,\"taskId\":\"task_rDslzvVg79UfsQ\",\"status\":\"RUNNING\"}",
       "expected": "ok=true + 同一 taskId + RUNNING"
     },
     {
@@ -819,7 +819,7 @@
       "flow": "flow4",
       "name": "F4.17 · 14(e) 经产品治理入口 revokeAppToolAccess 撤销 ai 的 TOOL grant（changed=true）",
       "ok": true,
-      "actual": "{\"ok\":true,\"changed\":true,\"grantId\":\"grant_tU4MqlBtcTQV4ObSJtiVwIRjXafVTlXh\"}",
+      "actual": "{\"ok\":true,\"changed\":true,\"grantId\":\"grant_YAfU9FmfiejRvTkzC3rRmpJLLSzW_b-L\"}",
       "expected": "ok=true + changed=true"
     },
     {
@@ -917,7 +917,7 @@
       "flow": "flow4",
       "name": "F4.31 · 真实 UI 点击 [data-ai-append]：同一 Task（data-ai-task-id 不变）+ 同步接收（返回时已 2 steps / RUNNING）+ 输入框清空且无错误",
       "ok": true,
-      "actual": "{\"ready\":true,\"click\":\"ok\",\"syncAccepted\":true,\"panelTaskId\":\"task_rS8Y1Y81Jrzvtg\",\"goalClearedOrBlockGone\":true,\"appendBlockGone\":true,\"noErrorElement\":true}",
+      "actual": "{\"ready\":true,\"click\":\"ok\",\"syncAccepted\":true,\"panelTaskId\":\"task_vu-BVf5KW6PmfQ\",\"goalClearedOrBlockGone\":true,\"appendBlockGone\":true,\"noErrorElement\":true}",
       "expected": "ok + 同一 taskId + 同步 2 steps + 清空"
     },
     {
@@ -966,7 +966,7 @@
       "flow": "flow4",
       "name": "F4.38 · 第一步产物与副作用在预算停止后保持不变（step/artifact/verification 行逐字段不变 + 仍 1 条 SUCCEEDED call + 资源仍处于废纸篓 + 0 新 lease/executor）",
       "ok": true,
-      "actual": "{\"step1\":\"SUCCEEDED\",\"artifacts\":1,\"calls\":[\"SUCCEEDED\"],\"resource\":\"deleted\",\"trashState\":\"TRASHED\",\"resourceUpdatedAt\":\"1789722439235/1789722439235\",\"leases\":1,\"exec\":\"4->4\"}",
+      "actual": "{\"step1\":\"SUCCEEDED\",\"artifacts\":1,\"calls\":[\"SUCCEEDED\"],\"resource\":\"deleted\",\"trashState\":\"TRASHED\",\"resourceUpdatedAt\":\"1789740204218/1789740204218\",\"leases\":1,\"exec\":\"4->4\"}",
       "expected": "旧行不变 + 1 SUCCEEDED + trashed 未再变 + 0 新 lease/executor"
     },
     {
@@ -1001,7 +1001,7 @@
       "flow": "flow4",
       "name": "F4.43 · 点击 [data-ai-resume] 后最终 Task SUCCEEDED + 恰好 3 个 step（SUCCEEDED/BLOCKED/SUCCEEDED）",
       "ok": true,
-      "actual": "{\"click\":\"ok\",\"task\":\"SUCCEEDED\",\"steps\":[\"SUCCEEDED\",\"BLOCKED\",\"SUCCEEDED\"]}",
+      "actual": "{\"ready\":true,\"click\":\"ok\",\"accepted\":true,\"task\":\"SUCCEEDED\",\"steps\":[\"SUCCEEDED\",\"BLOCKED\",\"SUCCEEDED\"]}",
       "expected": "SUCCEEDED + SUCCEEDED,BLOCKED,SUCCEEDED"
     },
     {
@@ -1057,7 +1057,7 @@
       "flow": "flow4",
       "name": "F4.51 · 第一步副作用恰好一次：跨 step/跨 run 不重放（side_effect_calls==1、无第二次 trash execution、资源只 trash 一次、executor 不新增）",
       "ok": true,
-      "actual": "{\"sideEffectCalls\":1,\"callStatuses\":[\"SUCCEEDED\"],\"trashExecutions\":0,\"resource\":\"deleted\",\"trashState\":\"TRASHED\",\"trashedAt\":\"1789722439235==1789722439235\",\"exec\":\"4->4\"}",
+      "actual": "{\"sideEffectCalls\":1,\"callStatuses\":[\"SUCCEEDED\"],\"trashExecutions\":0,\"resource\":\"deleted\",\"trashState\":\"TRASHED\",\"trashedAt\":\"1789740204218==1789740204218\",\"exec\":\"4->4\"}",
       "expected": "1 SUCCEEDED + 0 重放 + 资源只 trash 一次"
     },
     {
@@ -1106,7 +1106,7 @@
       "flow": "flow5",
       "name": "F5.6 · 刷新后 AI 面板恢复到最新任务（= 流程 4 主任务）",
       "ok": true,
-      "actual": "{\"opened\":true,\"panelTaskId\":\"task_rS8Y1Y81Jrzvtg\",\"expected\":\"task_rS8Y1Y81Jrzvtg\"}",
+      "actual": "{\"opened\":true,\"panelTaskId\":\"task_vu-BVf5KW6PmfQ\",\"expected\":\"task_vu-BVf5KW6PmfQ\"}",
       "expected": "panel 指向流程 4 主任务"
     },
     {
@@ -1169,7 +1169,7 @@
       "flow": "boot",
       "name": "I2 · boot 观测写入早于首个任务接入",
       "ok": true,
-      "actual": "{\"bootMtime\":1789722429285.74,\"firstTask\":1789722431780}",
+      "actual": "{\"bootMtime\":1789740194037.2732,\"firstTask\":1789740196684}",
       "expected": "boot <= task"
     },
     {
@@ -1204,14 +1204,14 @@
       "flow": "flow6",
       "name": "F6.1 · 经产品桥读到 Settings 默认 chat model（configId/version，默认即 setup 经真实 UI 注册的模型）",
       "ok": true,
-      "actual": "{\"defaultChat\":\"mcf_W3zFyRo-lZP8Zw\",\"version\":2,\"setupModel\":\"mcf_W3zFyRo-lZP8Zw\"}",
+      "actual": "{\"defaultChat\":\"mcf_3gv7xkS2iN-NaQ\",\"version\":2,\"setupModel\":\"mcf_3gv7xkS2iN-NaQ\"}",
       "expected": "默认 == setup 模型"
     },
     {
       "flow": "flow6",
       "name": "F6.2 (h) · 真实 UI task/run 建的任务冻结了后端解析出的默认模型：task 行 / run 行 / call 行 modelConfigId+version 非空且与 Settings 默认逐项一致",
       "ok": true,
-      "actual": "{\"task\":\"SUCCEEDED\",\"artifacts\":1,\"taskBinding\":{\"id\":\"mcf_W3zFyRo-lZP8Zw\",\"v\":2},\"expected\":{\"id\":\"mcf_W3zFyRo-lZP8Zw\",\"v\":2},\"runBinding\":{\"id\":\"mcf_W3zFyRo-lZP8Zw\",\"v\":2},\"callBinding\":{\"id\":\"mcf_W3zFyRo-lZP8Zw\",\"v\":2}}",
+      "actual": "{\"task\":\"SUCCEEDED\",\"artifacts\":1,\"taskBinding\":{\"id\":\"mcf_3gv7xkS2iN-NaQ\",\"v\":2},\"expected\":{\"id\":\"mcf_3gv7xkS2iN-NaQ\",\"v\":2},\"runBinding\":{\"id\":\"mcf_3gv7xkS2iN-NaQ\",\"v\":2},\"callBinding\":{\"id\":\"mcf_3gv7xkS2iN-NaQ\",\"v\":2}}",
       "expected": "SUCCEEDED + task/run/call 三行绑定 == Settings 默认"
     },
     {
@@ -1225,7 +1225,7 @@
       "flow": "flow6",
       "name": "F6.4 (i) · 改版后经真实 UI 追加步骤：Task/Step/新 run 全部收敛 BLOCKED，run.error_code=MODEL_CONFIG_CHANGED（绝不留 RUNNING 悬挂、绝不静默换模型）",
       "ok": true,
-      "actual": "{\"appendBlockVisible\":true,\"ready\":true,\"click\":\"ok\",\"task\":\"BLOCKED\",\"steps\":[\"SUCCEEDED\",\"BLOCKED\"],\"run\":{\"status\":\"BLOCKED\",\"error\":\"MODEL_CONFIG_CHANGED\",\"version\":2}}",
+      "actual": "{\"appendBlockVisible\":true,\"goal\":{\"set\":\"ok\",\"took\":true},\"ready\":true,\"click\":\"ok\",\"accepted\":true,\"task\":\"BLOCKED\",\"steps\":[\"SUCCEEDED\",\"BLOCKED\"],\"run\":{\"status\":\"BLOCKED\",\"error\":\"MODEL_CONFIG_CHANGED\",\"version\":2}}",
       "expected": "BLOCKED/BLOCKED + run MODEL_CONFIG_CHANGED"
     },
     {
@@ -1246,46 +1246,46 @@
       "flow": "flow6",
       "name": "F6.7 (j) · 改版后经真实 UI 新建任务：绑定**当前**版本并正常 SUCCEEDED（版本变化只拦绑定旧版本的任务）",
       "ok": true,
-      "actual": "{\"task\":\"SUCCEEDED\",\"binding\":{\"id\":\"mcf_W3zFyRo-lZP8Zw\",\"v\":3},\"expected\":{\"id\":\"mcf_W3zFyRo-lZP8Zw\",\"v\":3}}",
+      "actual": "{\"started\":true,\"task\":\"SUCCEEDED\",\"binding\":{\"id\":\"mcf_3gv7xkS2iN-NaQ\",\"v\":3},\"expected\":{\"id\":\"mcf_3gv7xkS2iN-NaQ\",\"v\":3}}",
       "expected": "SUCCEEDED + 绑定当前版本"
     },
     {
       "flow": "flow6",
       "name": "F6.8 (k) · 默认切换前：绑定原 config 的任务造出真实预算停止（第二步 BUDGET_EXHAUSTED + [data-ai-resume] 可见），任务归属仍是原 config",
       "ok": true,
-      "actual": "{\"first\":\"SUCCEEDED\",\"stop\":\"BLOCKED\",\"stopReason\":\"BUDGET_EXHAUSTED\",\"uiStopReason\":\"停止原因：BUDGET_EXHAUSTED\",\"resumable\":true,\"resumeVisible\":true,\"stepsBeforeBudget\":1,\"binding\":{\"id\":\"mcf_W3zFyRo-lZP8Zw\",\"v\":3}}",
+      "actual": "{\"first\":\"SUCCEEDED\",\"appendBlockVisible\":true,\"goal\":{\"set\":\"ok\",\"took\":true},\"ready\":true,\"click\":\"ok\",\"accepted\":true,\"stepsAfterAccept\":2,\"stop\":\"BLOCKED\",\"stopReason\":\"BUDGET_EXHAUSTED\",\"uiStopReason\":\"停止原因：BUDGET_EXHAUSTED\",\"resumable\":true,\"resumeVisible\":true,\"stepsBeforeBudget\":1,\"binding\":{\"id\":\"mcf_3gv7xkS2iN-NaQ\",\"v\":3}}",
       "expected": "BLOCKED + BUDGET_EXHAUSTED + resumable + 原 config"
     },
     {
       "flow": "flow6",
       "name": "F6.9 (k) · 经真实产品入口新建第二个 config 并把默认切到它（原 config 自身版本未变）",
       "ok": true,
-      "actual": "{\"newConfig\":\"mcf_dXPTjLdNpcCBPg\",\"personalDefault\":\"mcf_dXPTjLdNpcCBPg\",\"originalConfig\":\"mcf_W3zFyRo-lZP8Zw\",\"originalVersion\":3,\"expectedOriginalVersion\":3}",
+      "actual": "{\"newConfig\":\"mcf_9VExZNjsfParGA\",\"personalDefault\":\"mcf_9VExZNjsfParGA\",\"originalConfig\":\"mcf_3gv7xkS2iN-NaQ\",\"originalVersion\":3,\"expectedOriginalVersion\":3}",
       "expected": "默认 = 新 config 且原 config version 不变"
     },
     {
       "flow": "flow6",
       "name": "F6.10 (k) · 默认已指向新 config，绑定原 config 的任务追加仍正常 SUCCEEDED，且 task/run/call 行归属仍是原 config（不静默切换）",
       "ok": true,
-      "actual": "{\"syncAccept\":{\"ok\":true,\"status\":\"RUNNING\"},\"task\":\"SUCCEEDED\",\"steps\":[\"SUCCEEDED\",\"SUCCEEDED\"],\"artifacts\":2,\"taskBinding\":{\"id\":\"mcf_W3zFyRo-lZP8Zw\",\"v\":3},\"runBindings\":[\"mcf_W3zFyRo-lZP8Zw:3\",\"mcf_W3zFyRo-lZP8Zw:3\"],\"callBindings\":[\"mcf_W3zFyRo-lZP8Zw:3\",\"mcf_W3zFyRo-lZP8Zw:3\"],\"newDefault\":\"mcf_dXPTjLdNpcCBPg\"}",
+      "actual": "{\"syncAccept\":{\"ok\":true,\"status\":\"RUNNING\"},\"task\":\"SUCCEEDED\",\"steps\":[\"SUCCEEDED\",\"SUCCEEDED\"],\"artifacts\":2,\"taskBinding\":{\"id\":\"mcf_3gv7xkS2iN-NaQ\",\"v\":3},\"runBindings\":[\"mcf_3gv7xkS2iN-NaQ:3\",\"mcf_3gv7xkS2iN-NaQ:3\"],\"callBindings\":[\"mcf_3gv7xkS2iN-NaQ:3\",\"mcf_3gv7xkS2iN-NaQ:3\"],\"newDefault\":\"mcf_9VExZNjsfParGA\"}",
       "expected": "SUCCEEDED + 全部归属原 config"
     },
     {
       "flow": "flow6",
       "name": "F6.11 (k) · 默认已指向新 config，绑定原 config 的任务显式续接仍成功，且归属仍是原 config（不静默切换）",
       "ok": true,
-      "actual": "{\"task\":\"SUCCEEDED\",\"runs\":3,\"runBindings\":[\"mcf_W3zFyRo-lZP8Zw:3\",\"mcf_W3zFyRo-lZP8Zw:3\",\"mcf_W3zFyRo-lZP8Zw:3\"],\"callBindings\":[\"mcf_W3zFyRo-lZP8Zw:3\",\"mcf_W3zFyRo-lZP8Zw:3\",\"mcf_W3zFyRo-lZP8Zw:3\"],\"taskBinding\":{\"id\":\"mcf_W3zFyRo-lZP8Zw\",\"v\":3}}",
+      "actual": "{\"ready\":true,\"click\":\"ok\",\"accepted\":true,\"task\":\"SUCCEEDED\",\"runs\":3,\"runBindings\":[\"mcf_3gv7xkS2iN-NaQ:3\",\"mcf_3gv7xkS2iN-NaQ:3\",\"mcf_3gv7xkS2iN-NaQ:3\"],\"callBindings\":[\"mcf_3gv7xkS2iN-NaQ:3\",\"mcf_3gv7xkS2iN-NaQ:3\",\"mcf_3gv7xkS2iN-NaQ:3\"],\"taskBinding\":{\"id\":\"mcf_3gv7xkS2iN-NaQ\",\"v\":3}}",
       "expected": "SUCCEEDED + 全部归属原 config"
     },
     {
       "flow": "flow6",
       "name": "F6.12 · 流程 6 全部任务收敛终态且原 config 未被改写（默认切换不回写历史任务）",
       "ok": true,
-      "actual": "{\"statuses\":[\"BLOCKED\",\"SUCCEEDED\",\"SUCCEEDED\"],\"bindings\":[\"mcf_W3zFyRo-lZP8Zw:2\",\"mcf_W3zFyRo-lZP8Zw:3\",\"mcf_W3zFyRo-lZP8Zw:3\"]}",
+      "actual": "{\"statuses\":[\"BLOCKED\",\"SUCCEEDED\",\"SUCCEEDED\"],\"bindings\":[\"mcf_3gv7xkS2iN-NaQ:2\",\"mcf_3gv7xkS2iN-NaQ:3\",\"mcf_3gv7xkS2iN-NaQ:3\"]}",
       "expected": "全部终态 + 绑定不回写"
     }
   ],
-  "at": "2026-09-18T09:07:28.792Z",
+  "at": "2026-09-18T14:03:34.020Z",
   "artifactSha256Coverage": "sha256 of canonical JSON (2-space indent) excluding artifactSha256 field",
-  "artifactSha256": "245f6cc1ff62d2b40aae65c51576111405726b4566e7c9b48dafe198733db9f1"
+  "artifactSha256": "99ddecee23ee1856773d73a8c4f25a410a812b5056e1a9a9a61aa3d7521ae739"
 }
