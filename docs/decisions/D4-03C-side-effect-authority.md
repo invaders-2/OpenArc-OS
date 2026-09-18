@@ -540,6 +540,15 @@ cross-restart Tool-call replay 继续受既有 Task recovery contract 控制；`
 - 本规则不改变既有 TTL / 内容绑定 / 执行主体实时权限检查，不改变 AUTO_RETRY=0、quiescence、S1/S1-b 迟到写回守卫与既有终态写回语义。
 - `sideEffect/listPending` 的响应为 **additive** 扩展（新增 `revocable`），`items` 语义与既有消费方逐字不变。
 
+## D4-03 CG-01 · 租约申请的事务状态保护（永久规则）
+
+- `acquireLease` 的资格判定与租约发放都在**同一个 `BEGIN IMMEDIATE` 事务内**完成：事务内**重读 persisted status**，只有 `APPROVED` / `LEASED`（尚未 claim）才可能发放租约。**有效 approval ≠ 调用仍可执行**。
+- `RUNNING` 与任何终态（`SUCCEEDED` / `FAILED` / `BLOCKED` / `CANCELLED` / `UNKNOWN_EFFECT`）**绝不被迟到申请改写成 `LEASED`**：拒绝并返回既有错误码（`AWAITING_APPROVAL` → `SIDE_EFFECT_APPROVAL_REQUIRED`，其余 → `SIDE_EFFECT_CALL_STATE`），**零写入**（不改 call 任何字段、不建 lease、不落 `side_effect.lease_acquired` audit / `tool.lease_acquired` event）。
+- 批准绑定（planHash / argumentsHash / toolId / toolVersion / expiresAt / revokedAt）逐项比对必须使用**事务内新快照**，不得沿用事务外的 call 读。
+- **拒绝路径零写入**：过期 lease 的 `EXPIRED` 终结只在"确认可发放新租约"之后、与新租约同一事务执行；被拒绝的申请绝不提前终结或改写已有租约。
+- 既有语义保留：`APPROVED` → 正常申请（call `LEASED` + 1 ACTIVE）；同 holder 同 runtime 的合法重复 → `{ ok:true, duplicate:true }`；同 holder 不同 runtime 的竞争 → `SIDE_EFFECT_LEASE_CONFLICT`，既有 lease 逐字不变；过期 lease → 新租约取代（旧 `EXPIRED`、新 `ACTIVE`，恰好 1 ACTIVE）。
+- 本规则只收敛 `acquireLease` 的判定与写入顺序，不改变 claim（`LEASED → RUNNING`）、eligibility、TTL、runtime identity、deny/revoke 迟到语义与 AUTO_RETRY=0。
+
 ## 下一步
 
 \`D4-03D Closure = PASS candidate\`、\`D4-03D = PASS candidate\`、\`D4-03 overall = PASS candidate\`（DeepSeek 无权封板，由 ChatGPT 审计后决定 \`D4-03 = PASS\`）。
