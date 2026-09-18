@@ -840,7 +840,7 @@ C2/C4 只开放 resource.trash 一条 REVERSIBLE_WRITE：IRREVERSIBLE_WRITE / EX
 
 **D4-04 纵向冒烟 = PASS（限定当前验收范围）**。`PLAN.md` 对 D4-04 的原始验收（一工具真实流程记录；真实产物、停止、**撤权可核查**）在当前验收范围内全部成立。
 **D4-06 = PASS（限定当前验收范围）**（见下节 `# D4-06 当前状态`）；**D4-05 执行关卡 = PASS（限定当前验收范围）**（见下节 `# D4-05 当前状态`）；禁止自动进入 D5 / D6。
-真实 `electron/main.cjs` 全流程端到端 = **部分验证（D4 Main-Entry E2E，被测 commit `89af97a`）**：真实 `electron .` 启动/boot 顺序、真实 UI 首启/登录、Settings provider/model、AI 任务 + 审批成功 WRITE、撤权停止、记忆信任分层与隔离已在真实 main 下通过；**产品 TOOL-scope 授权入口（缺失）与真实 UI 预算续接入口（缺失）= NOT VERIFIED**（见 `docs/D4-PRODUCT-MAIN-E2E-RESULT.md`）。其余 `NOT VERIFIED` / `DEFERRED` 项保持原状。
+真实 `electron/main.cjs` 全流程端到端 = **PARTIAL（D4 Main-Entry E2E Closure-5，真实 main 被测 commit `396e14c`）**：真实 `electron .` 启动/boot、真实 UI 首启/登录、Settings provider/model、**产品治理入口工具授权**、AI 任务 + 审批成功 WRITE、**撤权停止**、**明确 WRITE 被拒不再假成功**、刷新一致性 = PASS；**预算停止→UI 显式续接仍结构性不可达 → Gate PARTIAL 且退出码 1**（见 `docs/D4-PRODUCT-MAIN-E2E-RESULT.md`）。其余 `NOT VERIFIED` / `DEFERRED` 项保持原状。
 
 ## 2. 关键证据（真实执行）
 
@@ -861,7 +861,7 @@ C2/C4 只开放 resource.trash 一条 REVERSIBLE_WRITE：IRREVERSIBLE_WRITE / EX
 
 ## 4. 主要缺口（D4-04 范围内未关闭）
 
-真实 `electron/main.cjs` 全流程端到端 = **部分验证（D4 Main-Entry E2E `89af97a`：启动/boot/真实 UI provider/task/审批/撤权/记忆）；产品 TOOL-scope 授权入口与真实 UI 预算续接入口仍 NOT VERIFIED**（Gate 其余仍用 probe host + 共享 production 装配）。其余仓库级缺口不受 D4-04 影响：OS-level network sandbox / external workspace read audit / independent malformed ACP injection / Windows / External Provider = NOT VERIFIED；Explicit Resume = DEFERRED；broader Domain verifiers = NOT VERIFIED；authenticated durable cross-restart process-death proof = DEFERRED / NOT VERIFIED。
+真实 `electron/main.cjs` 全流程端到端 = **PARTIAL（D4 Main-Entry E2E Closure-5 `396e14c`：启动/boot/真实 UI provider/工具授权/task/审批/撤权/明确拒绝/刷新 经产品入口 PASS）；真实 UI 预算续接入口仍结构性 NOT VERIFIED → Gate `63/64`、PARTIAL、退出码 1**（Gate 其余仍用 probe host + 共享 production 装配）。其余仓库级缺口不受 D4-04 影响：OS-level network sandbox / external workspace read audit / independent malformed ACP injection / Windows / External Provider = NOT VERIFIED；Explicit Resume = DEFERRED；broader Domain verifiers = NOT VERIFIED；authenticated durable cross-restart process-death proof = DEFERRED / NOT VERIFIED。
 
 # D4-06 当前状态（唯一口径 · 2026-09-17）
 
@@ -890,7 +890,7 @@ C2/C4 只开放 resource.trash 一条 REVERSIBLE_WRITE：IRREVERSIBLE_WRITE / EX
 1. **已由 D4-06 Closure 关闭**：A35 “明确续接入口”（仅“预算耗尽 → 用户显式续接”，有界 ≤3 次；其他恢复场景仍 `EXPLICIT_RESUME_DEFERRED`）。
 2. facade 契约下“单次受控 tool 失败不直接阻断 Task”的产品语义观察（最小修复建议见 `docs/D4-06-RESULT.md` §7）。**D4-05 Closure `70eb0b1` 已按 A33 明确边界实现**：只对“工具报告成功但后端产物验证失败（`verification_status=FAIL`）”阻断 Step/Task；普通工具调用错误（DENY/执行异常，无验证结论）保持既有语义，不整体失败；未新增自动重试。
 3. 无 committed Artifact 的预算停止以 `RESUME_NO_SAFE_CONTINUATION` 拒绝；`RESUME_SIDE_EFFECT_PENDING` / `RESUME_ACTIVE_LEASE` 守卫已实现但未单独 e2e 命中。
-4. 真实 `electron/main.cjs` 全流程 = **部分验证（D4 Main-Entry E2E `89af97a`）；产品 TOOL-scope 授权入口 + 真实 UI 预算续接入口 = NOT VERIFIED**；executor-unavailable 上层 = **`TaskService` 合同验证**（非完整 orchestrator）。其余 NOT VERIFIED / DEFERRED 保持原状。
+4. 真实 `electron/main.cjs` 全流程 = **PARTIAL（D4 Main-Entry E2E Closure-5 `396e14c`；工具授权入口已补齐 `4e8c6c1`、明确拒绝假成功已修复 `81ced49`）；真实 UI 预算续接入口 = NOT VERIFIED（结构性）**；executor-unavailable 上层 = **`TaskService` 合同验证**（非完整 orchestrator）。其余 NOT VERIFIED / DEFERRED 保持原状。
 
 # D4-05 当前状态（唯一口径 · 2026-09-17）
 
@@ -933,20 +933,20 @@ C2/C4 只开放 resource.trash 一条 REVERSIBLE_WRITE：IRREVERSIBLE_WRITE / EX
 2. ~~A33 失败路径无独立 `task_verifications` 记录~~ **已修复（schema v15）**：失败写 FAIL Verification（method/expected/actual/证据引用，脱敏有界，不建 Artifact），跨重开可查；见 `docs/D4-ACCEPTANCE-RESULT.md` §2.1。
 3. ~~TOOL_CALLS 真实耗尽被 MODEL_CALLS 兜底 / `base.TOOL_CALLS` 名义值 / 续接新 run 顺带恢复其他预算~~ **已修复（D4-06 Closure，schema v16 `task_budgets`）**：`budgetExhausted()` TOOL_CALLS 优先 + 工具预算耗尽即停止；`base` 用实际配置；**任务层跨 run 累计预算**——续接只抬升被批准 kind，其他种类继承剩余；新 run capability 额度=该类 remaining；run 结束一次性扣减；某类 remaining==0 不建 run 直接 `BUDGET_EXHAUSTED`。
 4. A37 / A38 不在 PLAN §41 的 D4-05 四场景内，未纳入。
-5. 真实 `electron/main.cjs` 全流程 = **部分验证（D4 Main-Entry E2E `89af97a`）**；真实外部 provider / 真实凭据 / Windows / OS 级网络沙箱 = 继承 `NOT VERIFIED`，不扩大。新增 NOT VERIFIED：产品 TOOL-scope 授权入口（缺失）、真实 UI 预算续接入口（缺失）。
+5. 真实 `electron/main.cjs` 全流程 = **PARTIAL（D4 Main-Entry E2E Closure-5 `396e14c`）**；真实外部 provider / 真实凭据 / Windows / OS 级网络沙箱 = 继承 `NOT VERIFIED`，不扩大。Closure-5 已补：产品工具授权入口（`4e8c6c1`）、明确拒绝假成功修复（`81ced49`）；剩余 NOT VERIFIED：真实 UI 预算续接入口（结构性）。
 
 # D4 阶段总结（唯一口径 · 2026-09-17）
 
-**D4 = PARTIAL**（macOS 核心基本完成，非整体完成）。D4-01 macOS Core、D4-02 macOS Core、D4-03（PASS candidate）、D4-04、**D4-05**、D4-06 在声明范围内通过；**D4-05 = PASS**（Closure-3 闭合 S4；Closure-4 修复记忆信任分层，S4 结论收窄为“消息结构 + 授权/执行边界”）。D4 整体仍 PARTIAL：剩余为既有项（Windows / External Provider、D4-03 审计）与**真实 main 下尚未验证的产品入口缺口**（TOOL-scope 授权入口、预算续接入口）。
+**D4 = PARTIAL**（macOS 核心基本完成，非整体完成）。D4-01 macOS Core、D4-02 macOS Core、D4-03（PASS candidate）、D4-04、**D4-05**、D4-06 在声明范围内通过；**D4-05 = PASS**（Closure-3 闭合 S4；Closure-4 修复记忆信任分层，S4 结论收窄为“消息结构 + 授权/执行边界”）。D4 整体仍 PARTIAL：剩余为既有项（Windows / External Provider、D4-03 审计）与**真实 main 下的产品入口缺口**（真实 UI 预算续接入口；工具授权入口已由 Closure-5 补齐）。
 - 收口修复（`ec7a732`）：① 预算实际值/停止原因/追加账本；② 失败 Verification 持久化（schema v15）。
 - **D4-06 Closure（`7b53458`，test-seed `fbbc002`）：任务层跨 run 累计预算（schema v16）+ 失败验证 UI Electron 实测（22/22）；D4-06 恢复 PASS**。D4-05/D4 保持 PARTIAL（memory 上下文缺口不变）。
 - **D4-05 Closure（`70eb0b1`）：A33 正式链假成功修复**——official dsh facade 下 READ_ONLY 必需产物验证失败不再被 final text 成功掩盖（`getUnresolvedRequiredVerificationFailures` + orchestrator 闸门）；S1 结论以正式链证据为准（Node 5/5 + UI 22/22）。D4-05/D4 仍 PARTIAL（S4 memory 上下文缺口不变）；D4-06 通过范围不扩大。
 - **D4-05 Closure-2（`77b6e85`）：失败验证的解决关联修正**——关联键从裸 `tool_id` 改为 `(tool_id, canonical arguments)`；无关对象/无关要求/无关 Step 的 PASS 不误清除对应 FAIL，有效纠错可成功并保留 `resolved` 追溯；缺失关联的旧数据保守保持未解决。新增正式链 6/6、`test:d4-05` 139/139。
 - **D4-05 Closure-3（`9691348` + `ac9af8e`）：受控记忆装配与任务上下文隔离（A36）**——受控装配 `memory-context.cjs` + 唯一出站口逐请求注入（reference-data 标记、与系统指令分离）、发送前重新授权/重新读取、删除/撤权/切账号/跨范围隔离、无缓存、正文不落盘；Node 正式链 11/11 + 真实 Electron UI 15/15；`test:d4-05` **165/165（S1–S4 全 PASS，overallStatus=PASS）**；`npm test` 980/980。**S4 与 D4-05 升 PASS**；D4 整体仍 PARTIAL（剩余既有未验证项）。
 - **D4-05 Closure-4（`698117f`）：记忆上下文信任分层修复**——删除把记忆正文注入 `role:"system"` 及依赖 “NOT a system instruction”/正文标记的做法；改为 `name:"openarc.reference_data"` 的 user 低信任参考消息（JSON 转义、不伪造 tool_calls）+ `name:"openarc.rules"` 常量 system 规则（零资源文本）；清理只按应用结构标签；结构不安全 → 403。`test:d4-05` **169/169（S1–S4 全 PASS）**；`npm test` 984/984。**S4 结论收窄：只证明消息结构与授权/执行边界，不证明真实模型不受提示注入影响。**
-- **D4 Main-Entry E2E（`89af97a`）：真实 `electron/main.cjs` 产品入口端到端**——真实 `electron .` + 隔离 userData + CDP 真实 Renderer；boot 顺序 `identity_created→model_proxy_start_attempted→model_proxy_started→runtime_ready`、`modelProxyListening=true`；流程1（真实 UI provider + AI 任务 search→trash + 真实 Approve：mutation=1 / SideEffectCall=1 / approval=1 / lease=1 RELEASED / Artifact+Verification 绑定 / SUCCEEDED）PASS；流程2（产品入口撤 TOOL grant → 旧批准 → BLOCKED / `SIDE_EFFECT_AUTHORIZATION_REVOKED` / 0 mutation / 0 lease / 0 新 executor）PASS；流程4（低信任 `openarc.reference_data` 注入 + 信任分层 + 删除/刷新/切账号隔离）PASS；`56/58`，renderer/main 错误 0。**NOT VERIFIED（如实）**：产品无授予 App TOOL-scope 权限的 UI/IPC 入口（流程1/2/3 前置 grant 由默认关闭 test-only seam 代偿）；真实 UI 预算续接入口缺失（预算停止 PASS、续接 NOT VERIFIED）。**D4 不自动升级。** 详见 `docs/D4-PRODUCT-MAIN-E2E-RESULT.md` 与 `docs/D4-PRODUCT-MAIN-E2E-EVIDENCE.json`。
+- **D4 Main-Entry E2E Closure-5（`4e8c6c1` + `81ced49` + `396e14c`）：真实 `electron/main.cjs` 产品入口端到端**——真实 `electron .` + 隔离 userData + CDP 真实 Renderer；boot 顺序 `identity_created→model_proxy_start_attempted→model_proxy_started→runtime_ready`、`modelProxyListening=true`；**流程1**（产品治理 UI 授权 → AI 任务 search→trash → 真实 Approve：mutation=1 / SideEffectCall=1 / approval=1 / lease=1 RELEASED / Artifact+Verification 绑定 / SUCCEEDED）PASS；**流程2**（非管理员授权被拒 `NOT_SUPER_ADMIN`；产品入口撤 TOOL grant → 旧批准 → BLOCKED / `SIDE_EFFECT_AUTHORIZATION_REVOKED` / 0 mutation/0 lease/0 新 executor）PASS；**流程3**（无 trash 权限的明确 WRITE + finalText“完成” → Task/Step BLOCKED、0 mutation、`deniedOperations` + `data-ai-denied`，不再假成功）PASS；**流程5**（刷新一致）PASS；**流程4（预算→UI 续接）= NOT_VERIFIED**：真实 UI `task/run` 每次只建 1 step，预算耗尽 0 Artifact，`getResumeEligibility` 要求 `artifactsOfTask>0` → `RESUME_NO_SAFE_CONTINUATION`；不造多步/空产物、不放宽守卫。**Gate `63/64`、`overallStatus=PARTIAL`、退出码 1**，renderer/main 错误 0。**D4 不自动升级。** 详见 `docs/D4-PRODUCT-MAIN-E2E-RESULT.md` 与 `docs/D4-PRODUCT-MAIN-E2E-EVIDENCE.json`。
 - `docs/D4-ACCEPTANCE-RESULT.md` 含受控 memory 装配最小方案（**已由 D4-05 Closure-3 实施**，见 §2.3）与需裁决的续接跨 run 预算 OPEN 项。
-- 阻塞整体 PASS：D4-01/D4-02 的 Windows / External Provider NOT VERIFIED；D4-03 待外部审计封板；真实 `electron/main.cjs` 全流程 = **部分验证（D4 Main-Entry E2E `89af97a`：启动/boot/provider/task/审批/撤权/记忆 PASS）**，剩余 NOT VERIFIED 为**产品 TOOL-scope 授权入口（缺失）与真实 UI 预算续接入口（缺失）**。（D4-05 S4 上下文链已由 Closure-3 闭合，不再阻塞。）
+- 阻塞整体 PASS：D4-01/D4-02 的 Windows / External Provider NOT VERIFIED；D4-03 待外部审计封板；真实 `electron/main.cjs` 全流程 = **PARTIAL（D4 Main-Entry E2E Closure-5 `396e14c`：启动/boot/provider/task/审批/撤权/明确拒绝/刷新 经产品入口 PASS；工具授权入口已补齐 `4e8c6c1`、拒绝后假成功已修复 `81ced49`）**，剩余 NOT VERIFIED 为**真实 UI 预算续接入口（结构性缺失，Gate PARTIAL 退出码 1）**。（D4-05 S4 上下文链已由 Closure-3 闭合，不再阻塞。）
 - 已验范围（macOS）：模型服务隔离/撤权、任务版本固定与实时权限、工具门/租约/审批/受控写入、纵向冒烟（真实产物/停止/撤权）、关联链与预算停止、结果未知处置均在各自范围内真实通过。
 - 下一阶段任务：**D5-01 浏览器**（D4-05 Closure-3 已完成受控 memory 检索/装配与上下文隔离，路线图下一步见 `docs/D4-ACCEPTANCE-RESULT.md` §4）。
 

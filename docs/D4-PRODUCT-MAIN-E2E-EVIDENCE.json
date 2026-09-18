@@ -1,5 +1,5 @@
 {
-  "testedCommit": "89af97acf8c24f83c0c7d839a1f77bf33f530e1f",
+  "testedCommit": "396e14ca958ad6b5bba48a474a1dcfe8fa2d708f",
   "workspaceState": "",
   "command": "node tests/d4-main-e2e.mjs",
   "env": {
@@ -12,8 +12,7 @@
   "isolation": {
     "userData": "os.tmpdir mkdtemp (isolated)",
     "adminEnv": "OPENARC_IDENTITY_ADMIN=1",
-    "observeEnv": "OPENARC_E2E_OBSERVE=1",
-    "seedEnv": "OPENARC_E2E_SEED_TOOL_GRANTS=1"
+    "observeEnv": "OPENARC_E2E_OBSERVE=1"
   },
   "productSeams": [
     {
@@ -24,11 +23,15 @@
     },
     {
       "name": "test-only tool grant seeding",
+      "removed": true,
       "env": "OPENARC_E2E_SEED_TOOL_GRANTS=1",
-      "default": "off",
-      "effect": "admin 会话后调用真实 authorization.grantAppToolPermission 为 ai 授予 3 个 tool 动作；仅代偿缺失的产品入口"
+      "effect": "已从 electron/main.cjs 删除；工具权限一律经产品治理入口"
     }
   ],
+  "productEntries": {
+    "toolGrantUI": "组织治理（dock）→ App 权限 → 工具权限（data-gov-tool-*）；流程 1 经此真实 UI 授予",
+    "governanceBridge": "window.openarc.governance.command：getAppToolAccess / grantAppToolAccess / revokeAppToolAccess"
+  },
   "boot": {
     "snapshot": {
       "identityCreated": true,
@@ -48,8 +51,8 @@
   },
   "flows": {
     "flow1": {
-      "taskId": "task__FfmGtr2Pr81XA",
-      "prerequisiteGrant": "test-only seeded (OPENARC_E2E_SEED_TOOL_GRANTS)",
+      "taskId": "task_usYf5v9LtIS4Yg",
+      "prerequisiteGrant": "product governance UI (grantAppToolAccess)",
       "status": "SUCCEEDED",
       "sideEffectCalls": 1,
       "approvals": 1,
@@ -60,419 +63,522 @@
       "executorSpawned": true
     },
     "flow2": {
-      "taskId": "task_91fKLXwpuGKY_Q",
-      "prerequisiteGrant": "test-only seeded (OPENARC_E2E_SEED_TOOL_GRANTS)",
-      "revokeEntry": "product governance/revokeAppAccess",
+      "taskId": "task_FvbWa4f6-7N3gQ",
+      "prerequisiteGrant": "product governance UI (grantAppToolAccess)",
+      "revokeEntry": "product governance/revokeAppToolAccess",
       "callStatus": "BLOCKED",
       "errorCode": "SIDE_EFFECT_AUTHORIZATION_REVOKED",
       "leases": 0,
-      "mutation": 0
+      "mutation": 0,
+      "nonAdminGrantDenied": true
     },
     "flow3": {
-      "taskId": "task_9azkqI0KMRVjtA",
-      "prerequisiteGrant": "test-only seeded (OPENARC_E2E_SEED_TOOL_GRANTS)",
-      "budgetStatus": "BLOCKED",
-      "resumable": false,
-      "resumeEntry": false,
-      "resumed": false
-    },
-    "observation": {
-      "taskId": "task_4Xrzfb2vEBovNQ",
-      "detail": [
-        {
-          "name": "no-tool-grant 行为",
-          "detail": "{\"task\":\"SUCCEEDED\",\"proposals\":[\"resource.search\",\"resource.trash\"],\"denied\":true,\"sideEffectCalls\":0,\"mutation\":0}"
-        }
-      ]
+      "taskId": "task_YE31mYH50TysdQ",
+      "prerequisiteGrant": "product entry grantAppToolAccess (search/readMetadata only)",
+      "status": "BLOCKED",
+      "sideEffectCalls": 0,
+      "mutation": 0,
+      "deniedOperation": true,
+      "deniedUiVisible": true
     },
     "flow4": {
-      "injected": true,
-      "lowTrust": true,
-      "removed": true,
-      "reload": true,
-      "accountSwitch": true
+      "taskId": "task_oid8oXNrg-PAiA",
+      "observed": "{\"status\":\"BLOCKED\",\"artifacts\":0,\"resumable\":false,\"resumeReason\":\"RESUME_NO_SAFE_CONTINUATION\",\"resumeUi\":false}",
+      "resumable": false,
+      "uiResume": false
+    },
+    "flow5": {
+      "reloadGate": "ready",
+      "grantsRestored": true,
+      "flow1Restored": true,
+      "flow3Restored": true,
+      "budgetRestored": true
     }
   },
+  "requiredFlows": {
+    "boot": "PASS",
+    "setup": "PASS",
+    "flow1": "PASS",
+    "flow2": "PASS",
+    "flow3": "PASS",
+    "flow4": "NOT_VERIFIED",
+    "flow5": "PASS"
+  },
+  "overallStatus": "PARTIAL",
   "notVerified": [
     {
-      "name": "产品入口 · 授予 App TOOL-scope 权限（UI / IPC）",
-      "reason": "产品没有任何入口能创建 app TOOL-scope grant：authorization 桥只读；governance/grantAppAccess 经 normalizeGrantActions 只接受 RESOURCE_ACTIONS，tool.* 动作返回 INVALID_INPUT（本 run P0 实测）。流程 1/2/3 的前置 grant 由默认关闭的 test-only seam（OPENARC_E2E_SEED_TOOL_GRANTS=1，真实 grantAppToolPermission + SUPER_ADMIN 校验）代偿；该产品入口本身 = NOT VERIFIED / gap。"
-    },
-    {
-      "name": "F3.2/F3.3 · 预算停止后可续接并暴露账本 / UI 续接入口",
-      "reason": "真实 UI task/run 每次只创建一个 step；预算耗尽路径产出 0 Artifact，而 getResumeEligibility 要求 artifactsOfTask>0（否则 NO_SAFE_CONTINUATION），因此经产品入口拿不到可续接状态与续接 UI。d4-06-resume 是先经主进程 API 构造 2-step 任务（step1 成功 WRITE 出 Artifact，step2 预算停止）才触达；该构造不是产品入口。故本流程保留 NOT VERIFIED。"
-    },
-    {
-      "name": "F3.4/F3.5 · 真实 UI 续接成功 + 不重放 + 其他预算未重置",
-      "reason": "同上：不可续接故无续接按钮可点。"
+      "flow": "flow4",
+      "name": "F4.3 · 预算停止后经产品入口可达可续接状态 + UI 显式续接",
+      "reason": "结构冲突（本轮不可达）：真实 UI 的 task/run 每次只创建一个 step；预算耗尽发生在推理过程中，该 step 直接 BLOCKED 且 0 Artifact。而 getResumeEligibility 要求 artifactsOfTask>0（否则 RESUME_NO_SAFE_CONTINUATION），因此产品入口永远拿不到 resumable=true / 续接 UI。d4-06-resume 是先经主进程 API 构造 2-step 任务（step1 成功 WRITE 出 Artifact，step2 预算停止）才触达；该构造不是产品入口。本轮不通过测试 API 构造多步任务、不制造空产物/假成功、不放宽续接守卫。最小方案：需要一个产品级“分阶段/追加步骤”入口，使正常任务先完成一个带 Artifact 的真实步骤，再在后续步骤预算停止。"
     }
   ],
   "observations": [
     {
-      "name": "no-tool-grant 行为",
-      "detail": "{\"task\":\"SUCCEEDED\",\"proposals\":[\"resource.search\",\"resource.trash\"],\"denied\":true,\"sideEffectCalls\":0,\"mutation\":0}"
+      "name": "flow4-budget-stop",
+      "detail": "{\"status\":\"BLOCKED\",\"artifacts\":0,\"resumable\":false,\"resumeReason\":\"RESUME_NO_SAFE_CONTINUATION\",\"resumeUi\":false}"
     }
   ],
   "rendererConsoleErrors": 0,
   "mainUnhandledErrors": 0,
   "checksSummary": {
-    "total": 58,
-    "pass": 56,
-    "fail": 2
+    "total": 64,
+    "pass": 63,
+    "fail": 0,
+    "notVerified": 1
   },
   "checks": [
     {
+      "flow": "boot",
       "name": "M1 · 真实 electron .（electron/main.cjs）启动并暴露 CDP",
-      "expected": "CDP ready",
+      "ok": true,
       "actual": "Chrome/152.0.7977.78",
-      "ok": true
+      "expected": "CDP ready"
     },
     {
+      "flow": "boot",
       "name": "B0 · boot 观测文件存在且可解析（OPENARC_E2E_OBSERVE=1）",
-      "expected": "openarc-e2e-boot.json",
+      "ok": true,
       "actual": "parsed",
-      "ok": true
+      "expected": "openarc-e2e-boot.json"
     },
     {
+      "flow": "boot",
       "name": "B1 · bootOrder 严格有序",
-      "expected": "identity_created -> model_proxy_start_attempted -> model_proxy_started -> runtime_ready",
+      "ok": true,
       "actual": "[\"identity_created\",\"model_proxy_start_attempted\",\"model_proxy_started\",\"runtime_ready\"]",
-      "ok": true
+      "expected": "identity_created -> model_proxy_start_attempted -> model_proxy_started -> runtime_ready"
     },
     {
+      "flow": "boot",
       "name": "B2 · Model Proxy 任务接入前真实启动并监听",
-      "expected": "attempted+started+listening",
+      "ok": true,
       "actual": "{\"attempted\":true,\"started\":true,\"listening\":true}",
-      "ok": true
+      "expected": "attempted+started+listening"
     },
     {
+      "flow": "setup",
       "name": "A1 · 真实 UI 首次初始化（FIRST RUN）",
-      "expected": "present",
+      "ok": true,
       "actual": "setup-form",
-      "ok": true
+      "expected": "present"
     },
     {
+      "flow": "setup",
       "name": "A2 · 真实 UI 提交初始化",
-      "expected": "ok",
+      "ok": true,
       "actual": "clicked",
-      "ok": true
+      "expected": "ok"
     },
     {
+      "flow": "setup",
       "name": "A3 · 初始化后 gate=unauthenticated",
-      "expected": "unauthenticated",
+      "ok": true,
       "actual": "unauthenticated",
-      "ok": true
+      "expected": "unauthenticated"
     },
     {
+      "flow": "setup",
       "name": "A4 · 真实 UI 登录 admin",
-      "expected": "ok",
+      "ok": true,
       "actual": "clicked",
-      "ok": true
+      "expected": "ok"
     },
     {
+      "flow": "setup",
       "name": "A5 · 登录后 identity gate=ready",
-      "expected": "ready",
+      "ok": true,
       "actual": "ready",
-      "ok": true
+      "expected": "ready"
     },
     {
+      "flow": "setup",
       "name": "A6 · 真实 preload Task 桥只有 command,onEvent",
-      "expected": "command,onEvent",
+      "ok": true,
       "actual": "command,onEvent",
-      "ok": true
+      "expected": "command,onEvent"
     },
     {
+      "flow": "setup",
       "name": "A7 · Renderer 拿不到主进程 Domain",
-      "expected": "hidden",
+      "ok": true,
       "actual": "hidden",
-      "ok": true
+      "expected": "hidden"
     },
     {
-      "name": "P1 · test-only 播种在 admin 会话后真实 grantAppToolPermission（4 个 tool 动作）",
-      "expected": "[\"tool.resource.search\",\"tool.resource.readMetadata\",\"tool.resource.trash\"]",
-      "actual": "[\"tool.resource.search\",\"tool.resource.readMetadata\",\"tool.resource.trash\"]",
-      "ok": true
+      "flow": "setup",
+      "name": "A8 · 无 test-only 播种：起始 app TOOL grant 为 0",
+      "ok": true,
+      "actual": "0",
+      "expected": "0"
     },
     {
+      "flow": "setup",
       "name": "S1 · 打开 Settings → 模型 / AI（真实 UI）",
-      "expected": "open",
+      "ok": true,
       "actual": "open",
-      "ok": true
+      "expected": "open"
     },
     {
+      "flow": "setup",
       "name": "S2 · 真实 UI 创建本地确定性 Provider",
-      "expected": "created",
+      "ok": true,
       "actual": "created",
-      "ok": true
+      "expected": "created"
     },
     {
+      "flow": "setup",
       "name": "S3 · 保存后密钥输入框清空（write-only）",
-      "expected": "cleared",
+      "ok": true,
       "actual": "cleared",
-      "ok": true
+      "expected": "cleared"
     },
     {
+      "flow": "setup",
       "name": "S4 · 真实 UI 注册 Model",
-      "expected": "created",
+      "ok": true,
       "actual": "created",
-      "ok": true
+      "expected": "created"
     },
     {
+      "flow": "setup",
       "name": "S5 · 真实 UI 设置默认 chat model（personal + organization）",
-      "expected": "mcf_JQc16c6_00fz-A",
-      "actual": "org=mcf_JQc16c6_00fz-A",
-      "ok": true
+      "ok": true,
+      "actual": "org=mcf_w-m7fLkewdRP0g",
+      "expected": "mcf_w-m7fLkewdRP0g"
     },
     {
+      "flow": "setup",
       "name": "S6 · 真实 UI 连接测试 Inference:PASS",
-      "expected": "Inference:PASS",
+      "ok": true,
       "actual": "Endpoint:PASS [REDACTED] Model:PASS Inference:PASS Capabilities:NOT VERIFIED",
-      "ok": true
+      "expected": "Inference:PASS"
     },
     {
-      "name": "R1 · 经产品桥 resource/create 造目标资源",
-      "expected": "created",
+      "flow": "flow1",
+      "name": "F1.0a · 真实治理 UI 给 ai 授予三个 TOOL 动作",
+      "ok": true,
+      "actual": "{\"ok\":true,\"reason\":\"ui-granted\"}",
+      "expected": "ok=true"
+    },
+    {
+      "flow": "flow1",
+      "name": "F1.0b · getAppToolAccess 反映三个 TOOL 动作全部已授予",
+      "ok": true,
+      "actual": "[\"tool.resource.search\",\"tool.resource.readMetadata\",\"tool.resource.trash\"]",
+      "expected": "[\"tool.resource.search\",\"tool.resource.readMetadata\",\"tool.resource.trash\"]"
+    },
+    {
+      "flow": "flow1",
+      "name": "F1.1 · 经产品桥 resource/create 造目标资源",
+      "ok": true,
       "actual": "created",
-      "ok": true
+      "expected": "created"
     },
     {
-      "name": "R2 · 经产品桥 resource/reindex 建索引",
-      "expected": "ok",
+      "flow": "flow1",
+      "name": "F1.2 · 经产品桥 resource/reindex 建索引",
+      "ok": true,
       "actual": "ok",
-      "ok": true
+      "expected": "ok"
     },
     {
-      "name": "R3 · 经产品治理入口给 ai 授予资源级 read/delete/useByAgent",
-      "expected": "ok",
+      "flow": "flow1",
+      "name": "F1.3 · 经产品治理入口给 ai 授予资源级 read/delete/useByAgent",
+      "ok": true,
       "actual": "ok",
-      "ok": true
+      "expected": "ok"
     },
     {
-      "name": "F1.1 · 真实 UI 任务发起并进入 AWAITING_APPROVAL（Approval UI 出现）",
-      "expected": "started + approval visible",
+      "flow": "flow1",
+      "name": "F1.4 · 真实 UI 任务发起并进入 AWAITING_APPROVAL（Approval UI 出现）",
+      "ok": true,
       "actual": "{\"started\":true,\"approval\":true}",
-      "ok": true
+      "expected": "started + approval visible"
     },
     {
-      "name": "F1.2 · 审批前 0 mutation / 0 lease / 0 WRITE execution",
-      "expected": "AWAITING_APPROVAL + active + 0/0",
+      "flow": "flow1",
+      "name": "F1.5 · 审批前 0 mutation / 0 lease / 0 WRITE execution",
+      "ok": true,
       "actual": "{\"call\":\"AWAITING_APPROVAL\",\"resource\":\"active\"}",
-      "ok": true
+      "expected": "AWAITING_APPROVAL + active + 0/0"
     },
     {
-      "name": "F1.3 · Approval UI 显示 tool / risk / target",
-      "expected": "tool+risk+target",
-      "actual": "应用 / AgentAI 助手（本机会话）工具Trash Resource（resource.trash）风险可逆写入目标Main E2E Targetresource://res_Vp3S-eKL7I7tBc9Xi-KilecBE4H-sGN7预期效果把该资源移入废纸篓（可通过",
-      "ok": true
+      "flow": "flow1",
+      "name": "F1.6 · Approval UI 显示 tool / risk / target",
+      "ok": true,
+      "actual": "应用 / AgentAI 助手（本机会话）工具Trash Resource（resource.trash）风险可逆写入目标Main E2E Targetresource://res_VfuPP4waCL4dPMuv0MCazbqWxEXUW5w0预期效果把该资源移入废纸篓（可通过",
+      "expected": "tool+risk+target"
     },
     {
-      "name": "F1.4 · 点击真实 Approve",
-      "expected": "ok",
+      "flow": "flow1",
+      "name": "F1.7 · 点击真实 Approve",
+      "ok": true,
       "actual": "clicked",
-      "ok": true
+      "expected": "ok"
     },
     {
-      "name": "F1.5 · Task/Step SUCCEEDED",
-      "expected": "SUCCEEDED/SUCCEEDED",
+      "flow": "flow1",
+      "name": "F1.8 · Task/Step SUCCEEDED",
+      "ok": true,
       "actual": "{\"task\":\"SUCCEEDED\",\"step\":\"SUCCEEDED\"}",
-      "ok": true
+      "expected": "SUCCEEDED/SUCCEEDED"
     },
     {
-      "name": "F1.6 · 恰 1 次 mutation（目标资源已 trash）",
-      "expected": "1",
+      "flow": "flow1",
+      "name": "F1.9 · 恰 1 次 mutation（目标资源已 trash）",
+      "ok": true,
       "actual": "1",
-      "ok": true
+      "expected": "1"
     },
     {
-      "name": "F1.7 · SideEffectCall=1 / approval=1 / lease=1 / verification PASS",
-      "expected": "1/1/1/PASS",
+      "flow": "flow1",
+      "name": "F1.10 · SideEffectCall=1 / approval=1 / lease=1 / verification PASS",
+      "ok": true,
       "actual": "{\"calls\":1,\"call\":\"SUCCEEDED\",\"ver\":\"PASS\",\"approvals\":1,\"leases\":1}",
-      "ok": true
+      "expected": "1/1/1/PASS"
     },
     {
-      "name": "F1.8 · lease 状态 RELEASED",
-      "expected": "RELEASED",
+      "flow": "flow1",
+      "name": "F1.11 · lease 状态 RELEASED",
+      "ok": true,
       "actual": "RELEASED",
-      "ok": true
+      "expected": "RELEASED"
     },
     {
-      "name": "F1.9 · Artifact/Verification 齐全且相互绑定 + checksum 正确",
-      "expected": "1+1 绑定",
+      "flow": "flow1",
+      "name": "F1.12 · Artifact/Verification 齐全且相互绑定 + checksum 正确",
+      "ok": true,
       "actual": "{\"artifacts\":1,\"verifications\":1}",
-      "ok": true
+      "expected": "1+1 绑定"
     },
     {
-      "name": "F1.10 · 受控 READ execution 归属本任务 + WRITE 以 SideEffectCall 记录",
-      "expected": "search execution + trash sideEffectCall",
+      "flow": "flow1",
+      "name": "F1.13 · 受控 READ execution 归属本任务 + WRITE 以 SideEffectCall 记录",
+      "ok": true,
       "actual": "{\"reads\":[\"resource.search\"],\"writes\":[\"resource.trash\"]}",
-      "ok": true
+      "expected": "search execution + trash sideEffectCall"
     },
     {
-      "name": "F1.11 · production executor 真实 spawn（runtime/side-effects/executors 记录 >=1）",
-      "expected": ">=1",
+      "flow": "flow1",
+      "name": "F1.14 · production executor 真实 spawn（runtime/side-effects/executors 记录 >=1）",
+      "ok": true,
       "actual": "1",
-      "ok": true
+      "expected": ">=1"
     },
     {
-      "name": "F3.1 · bounded 预算任务在真实 main 下停止（BLOCKED）",
-      "expected": "BLOCKED",
-      "actual": "BLOCKED",
-      "ok": true
-    },
-    {
-      "name": "F3.2/F3.3 · 预算停止后可续接并暴露账本 / UI 续接入口",
-      "expected": "resumable=true + nextGrant + UI resume",
-      "actual": "{\"status\":\"BLOCKED\",\"stopReason\":\"BUDGET_EXHAUSTED\",\"resumable\":false,\"resumeReason\":\"RESUME_NO_SAFE_CONTINUATION\",\"resumeVisible\":false,\"artifacts\":0}",
-      "ok": false,
-      "gap": true
-    },
-    {
-      "name": "F3.4/F3.5 · 真实 UI 续接成功 + 不重放 + 其他预算未重置",
-      "expected": "resumed SUCCEEDED + no replay + ledger monotonic",
-      "actual": "{\"resumable\":false,\"resumeReason\":\"RESUME_NO_SAFE_CONTINUATION\",\"resumeVisible\":false}",
-      "ok": false,
-      "gap": true
-    },
-    {
+      "flow": "flow2",
       "name": "F2.1 · 待审批 call 就绪（Approval UI 可见）",
-      "expected": "AWAITING_APPROVAL",
+      "ok": true,
       "actual": "AWAITING_APPROVAL",
-      "ok": true
+      "expected": "AWAITING_APPROVAL"
     },
     {
-      "name": "F2.2 · 经产品治理入口撤权 ai 的 TOOL grant（changed=true）",
-      "expected": "ok=true, changed=true",
-      "actual": "{\"ok\":true,\"changed\":true,\"reasonCode\":\"ALLOW\"}",
-      "ok": true
+      "flow": "flow2",
+      "name": "F2.2 · 经产品治理入口 revokeAppToolAccess 撤销 ai 的 TOOL grant（changed=true）",
+      "ok": true,
+      "actual": "{\"ok\":true,\"changed\":true,\"grantId\":\"grant_ugdP6JQvz_W9EAE43w0Ao35_EHQMec3d\"}",
+      "expected": "ok=true, changed=true"
     },
     {
-      "name": "F2.3 · 使用旧批准（真实 UI Approve）",
-      "expected": "ok",
+      "flow": "flow2",
+      "name": "F2.3 · 撤权后 grantedActions 清空 / DB TOOL grant 为 0",
+      "ok": true,
+      "actual": "{\"granted\":[],\"rows\":0}",
+      "expected": "[] + 0"
+    },
+    {
+      "flow": "flow2",
+      "name": "F2.4 · 使用旧批准（真实 UI Approve）",
+      "ok": true,
       "actual": "clicked",
-      "ok": true
+      "expected": "ok"
     },
     {
-      "name": "F2.4 · 撤权后旧批准不得执行：Call BLOCKED + SIDE_EFFECT_AUTHORIZATION_REVOKED",
-      "expected": "BLOCKED + SIDE_EFFECT_AUTHORIZATION_REVOKED",
+      "flow": "flow2",
+      "name": "F2.5 · 撤权后旧批准不得执行：Call BLOCKED + SIDE_EFFECT_AUTHORIZATION_REVOKED",
+      "ok": true,
       "actual": "{\"call\":\"BLOCKED\",\"error\":\"SIDE_EFFECT_AUTHORIZATION_REVOKED\"}",
-      "ok": true
+      "expected": "BLOCKED + SIDE_EFFECT_AUTHORIZATION_REVOKED"
     },
     {
-      "name": "F2.5 · 0 mutation / 0 新 lease / 0 新 executor",
-      "expected": "active + 0 lease + exec 不变",
+      "flow": "flow2",
+      "name": "F2.6 · 0 mutation / 0 新 lease / 0 新 executor",
+      "ok": true,
       "actual": "{\"resource\":\"active\",\"leases\":0,\"exec\":\"1->1\"}",
-      "ok": true
+      "expected": "active + 0 lease + exec 不变"
     },
     {
-      "name": "F2.6 · Task/Step BLOCKED + UI busy 复位",
-      "expected": "BLOCKED/BLOCKED",
+      "flow": "flow2",
+      "name": "F2.7 · Task/Step BLOCKED + UI busy 复位",
+      "ok": true,
+      "actual": "{\"task\":\"BLOCKED\",\"step\":\"BLOCKED\",\"runEnabled\":true}",
+      "expected": "BLOCKED/BLOCKED + run enabled"
+    },
+    {
+      "flow": "flow3",
+      "name": "F3.1 · 经产品治理入口只授予 search/readMetadata（显式不授予 trash）",
+      "ok": true,
+      "actual": "{\"ok\":true,\"grantId\":\"grant_mY6g9jWVrDu-2UlM5D1WpCmIw6mJDdC4\",\"appId\":\"ai\",\"actions\":[\"tool.resource.search\",\"tool.resource.readMetadata\"],\"scope\":\"TOOL\"}",
+      "expected": "ok=true"
+    },
+    {
+      "flow": "flow3",
+      "name": "F3.2 · 前置：trash TOOL 权限未被授予",
+      "ok": true,
+      "actual": "[\"tool.resource.search\",\"tool.resource.readMetadata\"]",
+      "expected": "trash absent"
+    },
+    {
+      "flow": "flow3",
+      "name": "F3.3 · Task/Step BLOCKED（不得 SUCCEEDED）",
+      "ok": true,
       "actual": "{\"task\":\"BLOCKED\",\"step\":\"BLOCKED\"}",
-      "ok": true
+      "expected": "BLOCKED/BLOCKED"
     },
     {
-      "name": "F2.7 · [OBSERVE] 无 tool grant 时任务仍收敛 SUCCEEDED 但 0 mutation / 0 审批 / 0 副作用",
-      "expected": "denied + 0 副作用（不修）",
-      "actual": "{\"task\":\"SUCCEEDED\",\"proposals\":[\"resource.search\",\"resource.trash\"],\"denied\":true,\"sideEffectCalls\":0,\"mutation\":0}",
-      "ok": true
+      "flow": "flow3",
+      "name": "F3.4 · 0 mutation / 无 SideEffectCall",
+      "ok": true,
+      "actual": "{\"resource\":\"active\",\"sideEffectCalls\":0}",
+      "expected": "active + 0 call"
     },
     {
-      "name": "F4.1 · 经产品桥建立 personal memory",
-      "expected": "memory created",
-      "actual": "{\"ok\":true,\"type\":\"memory\"}",
-      "ok": true
+      "flow": "flow3",
+      "name": "F3.5 · task/get.deniedOperations 含 resource.trash + TOOL_APP_NOT_GRANTED",
+      "ok": true,
+      "actual": "[{\"tool\":\"resource.trash\",\"reason\":\"TOOL_APP_NOT_GRANTED\"}]",
+      "expected": "trash + TOOL_APP_NOT_GRANTED"
     },
     {
-      "name": "F4.2 · 经产品治理入口给 ai 授予 memory search/read",
-      "expected": "ok",
-      "actual": "ok",
-      "ok": true
+      "flow": "flow3",
+      "name": "F3.6 · AI 面板 data-ai-denied 可见（tool/target/reason），状态 BLOCKED",
+      "ok": true,
+      "actual": "{\"deniedVisible\":true,\"tool\":\"工具：resource.trash\",\"reason\":\"拒绝原因：TOOL_APP_NOT_GRANTED\",\"status\":\"BLOCKED · Operation Denied\"}",
+      "expected": "data-ai-denied + BLOCKED"
     },
     {
-      "name": "F4.3 · 授权检索命中该 memory",
-      "expected": "hit",
-      "actual": "hits=1",
-      "ok": true
+      "flow": "flow3",
+      "name": "F3.7 · 明确 WRITE 被拒不得假成功：无 SUCCEEDED 文案 / 无成功产物",
+      "ok": true,
+      "actual": "{\"status\":\"BLOCKED\",\"result\":\"\"}",
+      "expected": "not SUCCEEDED + empty result"
     },
     {
-      "name": "F4.4 · 授权 memory 进入 provider 请求体：reference_data(user, untrusted, JSON) + rules(system 常量) 相邻",
-      "expected": "reference_data + rules",
-      "actual": "{\"status\":true,\"reference\":1,\"refPayloadOk\":true,\"placementOk\":true}",
-      "ok": true
+      "flow": "flow3",
+      "name": "F3.8 · 后端记录：DENIED/TOOL_APP_NOT_GRANTED + 0 trash execution",
+      "ok": true,
+      "actual": "{\"decisions\":1,\"trashExecutions\":0}",
+      "expected": ">=1 decision + 0 execution"
     },
     {
-      "name": "F4.5 · 信任分层：高信任 system/developer 不含 secret / memory 标题",
-      "expected": "clean",
-      "actual": "{\"highTrustClean\":true}",
-      "ok": true
+      "flow": "flow4",
+      "name": "F4.1 · [OBSERVE] bounded 预算任务在真实 main 下停止",
+      "ok": true,
+      "actual": "BLOCKED",
+      "expected": "BLOCKED"
     },
     {
-      "name": "F4.6 · 经产品桥删除 memory（trash + permanentDelete）",
-      "expected": "ok/ok",
-      "actual": "{\"del\":true,\"perm\":true}",
-      "ok": true
+      "flow": "flow4",
+      "name": "F4.2 · [OBSERVE] 预算路径 0 Artifact（getResumeEligibility 前置不满足）",
+      "ok": true,
+      "actual": "0",
+      "expected": "0"
     },
     {
-      "name": "F4.7 · 删除后同一 goal 后续请求不含 memory 注入结构与 secret",
-      "expected": "absent",
-      "actual": "{\"bodies\":1,\"injected\":0,\"secret\":false}",
-      "ok": true
+      "flow": "flow4",
+      "name": "F4.3 · 预算停止后经产品入口可达可续接状态 + UI 显式续接",
+      "ok": false,
+      "notVerified": true,
+      "actual": "{\"status\":\"BLOCKED\",\"artifacts\":0,\"resumable\":false,\"resumeReason\":\"RESUME_NO_SAFE_CONTINUATION\",\"resumeUi\":false}",
+      "expected": "resumable=true + nextGrant + UI resume",
+      "reason": "结构冲突（本轮不可达）：真实 UI 的 task/run 每次只创建一个 step；预算耗尽发生在推理过程中，该 step 直接 BLOCKED 且 0 Artifact。而 getResumeEligibility 要求 artifactsOfTask>0（否则 RESUME_NO_SAFE_CONTINUATION），因此产品入口永远拿不到 resumable=true / 续接 UI。d4-06-resume 是先经主进程 API 构造 2-step 任务（step1 成功 WRITE 出 Artifact，step2 预算停止）才触达；该构造不是产品入口。本轮不通过测试 API 构造多步任务、不制造空产物/假成功、不放宽续接守卫。最小方案：需要一个产品级“分阶段/追加步骤”入口，使正常任务先完成一个带 Artifact 的真实步骤，再在后续步骤预算停止。"
     },
     {
-      "name": "F4.8 · 刷新后产品身份 / 桌面状态正确恢复（gate=ready）",
-      "expected": "ready",
+      "flow": "flow5",
+      "name": "F5.1 · 刷新后产品身份 / 桌面状态正确恢复（gate=ready）",
+      "ok": true,
       "actual": "ready",
-      "ok": true
+      "expected": "ready"
     },
     {
-      "name": "F4.9 · 经产品治理入口创建 MEMBER 账号",
-      "expected": "created",
+      "flow": "flow5",
+      "name": "F5.2 · 刷新后 TOOL 权限从后端一致恢复",
+      "ok": true,
+      "actual": "{\"before\":[\"tool.resource.search\",\"tool.resource.readMetadata\"],\"after\":[\"tool.resource.search\",\"tool.resource.readMetadata\"]}",
+      "expected": "unchanged"
+    },
+    {
+      "flow": "flow5",
+      "name": "F5.3 · 刷新后 flow1 任务/产物/验证从 task/get 权威恢复",
+      "ok": true,
+      "actual": "{\"status\":\"SUCCEEDED\",\"artifacts\":1,\"verifications\":1}",
+      "expected": "SUCCEEDED + 1 artifact + 1 verification"
+    },
+    {
+      "flow": "flow5",
+      "name": "F5.4 · 刷新后 flow3 BLOCKED + deniedOperations 一致",
+      "ok": true,
+      "actual": "{\"status\":\"BLOCKED\",\"denied\":[\"TOOL_APP_NOT_GRANTED\"]}",
+      "expected": "BLOCKED + denied"
+    },
+    {
+      "flow": "flow5",
+      "name": "F5.5 · 刷新后预算账本从后端一致恢复（非 renderer 自报）",
+      "ok": true,
+      "actual": "{\"before\":\"MODEL_CALLS,TOOL_CALLS,TOOL_ROUNDS\",\"after\":\"MODEL_CALLS,TOOL_CALLS,TOOL_ROUNDS\",\"resumable\":false}",
+      "expected": "unchanged"
+    },
+    {
+      "flow": "flow2",
+      "name": "F2.8 · 经产品治理入口创建 MEMBER 账号",
+      "ok": true,
       "actual": "created",
-      "ok": true
+      "expected": "created"
     },
     {
-      "name": "F4.10 · 真实 UI 登出并切换 MEMBER",
-      "expected": "logout + ready",
-      "actual": "{\"logout\":\"ok\",\"loggedOut\":true,\"memberReady\":true}",
-      "ok": true
+      "flow": "flow2",
+      "name": "F2.9 · 真实 MEMBER 会话调用治理 grant 被拒",
+      "ok": true,
+      "actual": "{\"loggedOut\":true,\"memberReady\":true,\"res\":{\"ok\":false,\"error\":\"NOT_SUPER_ADMIN\"}}",
+      "expected": "ok=false + NOT_SUPER_ADMIN"
     },
     {
-      "name": "F4.11 · 切账号后同一 goal 请求体不含之前账号的 memory 注入与 secret",
-      "expected": "absent",
-      "actual": "{\"status\":\"SUCCEEDED\",\"retried\":false,\"bodies\":1,\"injected\":0,\"secret\":false}",
-      "ok": true
-    },
-    {
-      "name": "I1 · 隔离 identity.db 只读快照 0 provider secret / memory 正文 / 私有路径泄漏",
-      "expected": "[]",
+      "flow": "setup",
+      "name": "I1 · 隔离 identity.db 只读快照 0 provider secret / 私有路径泄漏",
+      "ok": true,
       "actual": "[]",
-      "ok": true
+      "expected": "[]"
     },
     {
+      "flow": "boot",
       "name": "I2 · boot 观测写入早于首个任务接入",
-      "expected": "boot <= task",
-      "actual": "{\"bootMtime\":1789694728751.606,\"firstTask\":1789694730979}",
-      "ok": true
+      "ok": true,
+      "actual": "{\"bootMtime\":1789697470064.6877,\"firstTask\":1789697471615}",
+      "expected": "boot <= task"
     },
     {
+      "flow": "setup",
       "name": "I3 · 所有 task 收敛终态（无 RUNNING / PENDING）",
-      "expected": "all terminal",
-      "actual": "[\"SUCCEEDED\",\"BLOCKED\",\"BLOCKED\",\"SUCCEEDED\",\"SUCCEEDED\",\"SUCCEEDED\",\"SUCCEEDED\"]",
-      "ok": true
+      "ok": true,
+      "actual": "[\"SUCCEEDED\",\"BLOCKED\",\"BLOCKED\",\"BLOCKED\"]",
+      "expected": "all terminal"
     },
     {
+      "flow": "setup",
       "name": "I4 · Renderer console error = 0",
-      "expected": "0",
+      "ok": true,
       "actual": "",
-      "ok": true
+      "expected": "0"
     },
     {
+      "flow": "setup",
       "name": "I5 · main uncaught / unhandled = 0",
-      "expected": "0",
+      "ok": true,
       "actual": "",
-      "ok": true
+      "expected": "0"
     }
   ],
-  "at": "2026-09-18T01:25:40.941Z",
+  "at": "2026-09-18T02:11:18.540Z",
   "artifactSha256Coverage": "sha256 of canonical JSON (2-space indent) excluding artifactSha256 field",
-  "artifactSha256": "5e741dab7273f6eacd9f957b276875806045e21c6b2791af74886058921d9302"
+  "artifactSha256": "a1da89acced437312512d1c09c66120fa6c39179bbe86d77edf66a37797a7cc4"
 }
