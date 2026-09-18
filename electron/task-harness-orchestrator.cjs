@@ -207,7 +207,14 @@ class TaskHarnessOrchestrator {
     const roundsQuota = Math.max(0, Math.min(MAX_TOOL_ROUNDS, remaining[BUDGET_KIND.TOOL_ROUNDS]));
 
     const runRes = svc.startHarnessRun({ context, taskId, stepId, expectedRevision: task.revision });
-    if (!runRes.ok) return runRes;
+    if (!runRes.ok) {
+      // R-8：未绑定旧任务解析不出配置时 startHarnessRun 不建 run。必须与既有配置阻断走同一收敛路径，
+      // 否则 Step/Task 会停在 RUNNING 悬挂；runId=null 与预算停止路径同形（没有 run 可收敛）。
+      if (MODEL_CONFIG_PRECONDITION_ERRORS.includes(runRes.error)) {
+        return await this.#blockStep({ context, taskId, stepId, runId: null, reason: runRes.error, event: TASK_EVENT.HARNESS_RUN_UNKNOWN_EFFECT, expectedRevision: task.revision });
+      }
+      return runRes;
+    }
     task = runRes.task;
     const run = runRes.run;
 

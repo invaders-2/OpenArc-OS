@@ -121,12 +121,19 @@ export async function createToolHarnessFixture(opts = {}) {
     /** D4-03B Closure：为 Tool Facade 直接调用准备 RUNNING task/step/run（不启动 official dsh）。 */
     dshRunSetup(context = null) {
       const c = context || base.ctx();
-      const t = base.taskService.createTask({ context: c, goal: "bridge probe" });
-      const st = base.taskService.startTask({ context: c, taskId: t.task.taskId, expectedRevision: t.task.revision });
-      const step = base.taskService.createStep({ context: c, taskId: t.task.taskId, kind: "reasoning", input: null, expectedRevision: st.task.revision });
-      const ss = base.taskService.startStep({ context: c, taskId: t.task.taskId, stepId: step.step.stepId, expectedRevision: step.task.revision });
-      const run = base.taskService.startHarnessRun({ context: c, taskId: t.task.taskId, stepId: step.step.stepId, expectedRevision: ss.task.revision });
-      const mr = base.taskService.markHarnessRunRunning({ context: c, taskId: t.task.taskId, runId: run.run.runId, expectedRevision: run.task.revision });
+      // R-8：未绑定任务不得经真实 TaskService 启动 run。该 context 能使用本夹具的 config 就按 F-2 之后
+      // production 的样子绑定（后续测试还会用真实 TaskService 继续推进这个 run）；用不了（非 admin 对
+      // PERSONAL config 无 USE 权限）就退回契约允许的 test-only 桩装配 —— 那些调用者只走 Tool Facade /
+      // side-effect 路径，从不要求这个 run 能被真实 TaskService 继续推进。
+      const usable = base.f.modelService.resolveModel({ context: c, capability: "chat", configId: base.modelConfigId });
+      const svc = usable.ok ? base.taskService
+        : new TaskService({ identity: base.f.identity, authService: base.f.authService, authStore: base.f.store, taskStore: base.taskStore, clock: base.f.clock });
+      const t = svc.createTask({ context: c, goal: "bridge probe", ...(usable.ok ? { modelConfigId: base.modelConfigId } : {}) });
+      const st = svc.startTask({ context: c, taskId: t.task.taskId, expectedRevision: t.task.revision });
+      const step = svc.createStep({ context: c, taskId: t.task.taskId, kind: "reasoning", input: null, expectedRevision: st.task.revision });
+      const ss = svc.startStep({ context: c, taskId: t.task.taskId, stepId: step.step.stepId, expectedRevision: step.task.revision });
+      const run = svc.startHarnessRun({ context: c, taskId: t.task.taskId, stepId: step.step.stepId, expectedRevision: ss.task.revision });
+      const mr = svc.markHarnessRunRunning({ context: c, taskId: t.task.taskId, runId: run.run.runId, expectedRevision: run.task.revision });
       return { context: c, taskId: t.task.taskId, stepId: step.step.stepId, runId: run.run.runId, revision: mr.ok ? mr.task.revision : ss.task.revision };
     },
     /** D4-03B Closure：建立 ORGANIZATION 级 model config + default，使非 admin 用户也能走 official dsh。 */

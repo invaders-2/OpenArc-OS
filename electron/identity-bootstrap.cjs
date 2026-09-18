@@ -137,7 +137,14 @@ function registerIdentityIpc({ ipcMain, service, authorization, device, resource
   // D4-03C4：Trusted Approval Gateway（唯一 approval 通道；sessionRef 由主进程注入）。
   if (sideEffect) {
     if (typeof sideEffect === "object" && typeof sendSideEffect === "function" && sideEffect.runtime) {
-      sideEffect.runtime.onApprovalRequested = (request) => sendSideEffect({ type: "sideEffect/approvalRequested", request });
+      // §44 对推送同样成立：runtime 推来的快照没有 context，直接转发会把**别人任务**的
+      // approval 投影送进当前窗口，所以按当前 authenticated session 重新投影，不属于本会话就静默丢弃。
+      sideEffect.runtime.onApprovalRequested = (request) => {
+        const current = (service && service.current) || null;
+        if (!current) return;
+        const snapshot = sideEffect.runtime.approvalSnapshot({ approvalRequestId: request && request.approvalRequestId, context: { sessionRef: current } });
+        if (snapshot) sendSideEffect({ type: "sideEffect/approvalRequested", request: snapshot });
+      };
     }
     registerSideEffectIpc({ ipcMain, service: sideEffect, identity: service, isTrusted, send: sendSideEffect });
   }

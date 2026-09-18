@@ -154,8 +154,11 @@ class SideEffectRuntime {
     // 只有仍可被决定的 approval 才可投影：terminal / BLOCKED / UNKNOWN_EFFECT 一律不可 revive。
     const actionable = [CALL_STATUS.AWAITING_APPROVAL, CALL_STATUS.APPROVED, CALL_STATUS.LEASED];
     if (!call || !actionable.includes(String(call.status))) return null;
-    // §44：Renderer 不能指定 actor；快照只在请求来自该 call 所属 Task 的 session 时返回。
-    if (context && context.sessionRef) {
+    // §44：Renderer 不能指定 actor；只要调用方声明了 context，就必须给出真实 session 且与该 call 所属
+    // Task 的 session 一致。声明了 context 却没有 session（未登录窗口）一律不放行 —— 放行等于把全部
+    // pending 快照交给未认证的 Renderer。context == null 只留给内部投影，其 session 过滤在推送接线层。
+    if (context != null) {
+      if (!context.sessionRef) return null;
       const ownerTask = this.taskStore.taskById(call.taskId);
       if (!ownerTask || String(ownerTask.session_ref) !== String(context.sessionRef)) return null;
     }

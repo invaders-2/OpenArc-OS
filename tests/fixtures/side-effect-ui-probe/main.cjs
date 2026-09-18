@@ -61,10 +61,47 @@ async function waitFor(fn, timeout = 15000) {
   return false;
 }
 
+/**
+ * R-8/F-2 之后：未绑定 model config 的任务不再允许启动 harness run（production task/run 也是后端按可信
+ * context 解析默认配置后连同 version 一起冻结）。本探针不接真实模型，这里只做**test-only 夹具对齐**：
+ * 能解析就绑定既有默认配置，否则用桩装配建一条可解析的 ORGANIZATION 默认配置 —— 绝不改 production 语义，
+ * 也不削弱任何断言。
+ */
+const MODEL_PROBE_SECRET = "FAKE_APPROVAL_UI_PROBE_SECRET";
+function ensureChatModelConfig() {
+  const modelService = identity.modelService;
+  const ctx = { sessionRef: identity.service.current, appId: "ai", source: "ui" };
+  modelService.grantAppModelAccess({ context: ctx, appId: "ai", actions: ["model.view", "model.use", "model.manage", "model.test"] });
+  const resolved = modelService.resolveModel({ context: ctx, capability: "chat" });
+  if (resolved.ok) return { ok: true, configId: resolved.snapshot.modelConfigId, source: "RESOLVED" };
+  const prov = modelService.createProvider({ context: ctx, displayName: "ApprovalUIProbe", baseUrl: "http://127.0.0.1:1/v1", credentialSecret: MODEL_PROBE_SECRET, scope: "ORGANIZATION" });
+  if (prov.ok) {
+    const model = modelService.createModel({ context: ctx, providerId: prov.provider.providerId, remoteModelId: "probe-offline-1", capabilities: ["chat"], scope: "ORGANIZATION" });
+    if (model.ok) {
+      const def = modelService.setDefault({ context: ctx, capability: "chat", configId: model.model.configId, scope: "ORGANIZATION" });
+      if (def.ok) return { ok: true, configId: model.model.configId, source: "STUB_CONFIG" };
+    }
+  }
+  // 服务路径不可用时的最后兜底：直接写 model store 的 test-only 桩（探针不需要可调用模型，只需一条可解析绑定）。
+  try {
+    const actor = identity.authorization.resolveActor({ context: ctx });
+    if (!actor || !actor.ok) return { ok: false, error: "MODEL_CONFIG_UNAVAILABLE" };
+    const store = identity.modelStore;
+    const p = store.insertProvider({ organizationId: actor.organizationId, scope: "ORGANIZATION", displayName: "ApprovalUIProbe", baseUrl: "http://127.0.0.1:1/v1", endpointScope: "LOCALHOST" });
+    const c = store.insertConfig({ providerId: p.provider_id, organizationId: actor.organizationId, scope: "ORGANIZATION", displayName: "ApprovalUIProbe", remoteModelId: "probe-offline-1", capabilities: ["chat"] });
+    store.setDefault({ organizationId: actor.organizationId, ownerUserId: "", capability: "chat", configId: c.config_id });
+    return { ok: true, configId: c.config_id, source: "STORE_STUB" };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
 /** 用真实 OpenArc authority 建一条待批准 write proposal（等价于 dsh WRITE proposal 落地后）。 */
 async function planTrash(name) {
   const sessionRef = identity.service.current;
   const ctx = { sessionRef, appId: "ai", source: "ui" };
+  const cfg = ensureChatModelConfig();
+  if (!cfg.ok) throw new Error("approval ui probe：无法准备可解析的 model config（" + cfg.error + "）");
   // resource 创建走 resource-library 应用；WRITE 授权链走 "ai" 应用（与产品一致）。
   const created = await identity.resourceService.createResource({ context: { sessionRef, appId: "resource-library", source: "ui" }, resourceType: "text", name, content: "approval-ui-body" });
   if (!created.ok) throw new Error("createResource failed: " + JSON.stringify(created));
@@ -73,7 +110,7 @@ async function planTrash(name) {
   identity.authorization.grantAppToolPermission({ context: ctx, appId: "ai", actions: ["tool.resource.trash"] });
   identity.authorization.grantAppResourcePermission({ context: ctx, appId: "ai", resourceId, actions: ["resource.delete"] });
   identity.authorization.grantResourcePermission({ context: ctx, principalType: "USER", principalId: identity.service.snapshot.userId, resourceId, actions: ["resource.delete", "resource.useByAgent"] });
-  const t = identity.taskService.createTask({ context: ctx, goal: "approval ui probe" });
+  const t = identity.taskService.createTask({ context: ctx, goal: "approval ui probe", modelConfigId: cfg.configId });
   const s1 = identity.taskService.startTask({ context: ctx, taskId: t.task.taskId, expectedRevision: t.task.revision });
   const step = identity.taskService.createStep({ context: ctx, taskId: t.task.taskId, kind: "reasoning", input: null, expectedRevision: s1.task.revision });
   const s2 = identity.taskService.startStep({ context: ctx, taskId: t.task.taskId, stepId: step.step.stepId, expectedRevision: step.task.revision });
@@ -175,6 +212,44 @@ app.whenReady().then(async () => {
     const spoofed = await js("return window.openarc.sideEffect.command({ type: 'sideEffect/decideApproval', approvalRequestId: " + JSON.stringify(third.callId) + ", decision: 'APPROVE', userId: 'u_attacker', role: 'ADMIN', sessionRef: 'sess_evil', riskClass: 'READ_ONLY' })");
     const spoofApproval = identity.sideEffectStore.latestApprovalOfCall(third.callId);
     check("A22 · Renderer 自报 actor/risk 被忽略", spoofed && spoofed.ok === true && spoofApproval.actorUserId === identity.service.snapshot.userId && spoofApproval.approvedEffectClass === "REVERSIBLE_WRITE", JSON.stringify({ ok: spoofed && spoofed.ok, actor: spoofApproval && spoofApproval.actorUserId }));
+
+    // 迟到 DENY（真实 DOM 点击 → preload → IPC → gateway → runtime）：
+    // 点击那一刻 call 仍是 AWAITING_APPROVAL（面板必然还在），随后在 authority 处理 DENY **之前**
+    // 用同一条真实执行链把它收敛为 SUCCEEDED —— 已生效的执行绝不能被显示成"未执行 / 被拒绝"。
+    const fourth = await planTrash("Approval UI Late Deny Target");
+    const appeared4 = await waitSel('[data-approval-request-id="' + fourth.callId + '"]', 20000);
+    check("A23 · 第四条 Approval 请求出现（迟到 DENY 场景）", appeared4, fourth.callId);
+    const realDecide = identity.sideEffectRuntime.decideApproval.bind(identity.sideEffectRuntime);
+    let interleave = null;
+    identity.sideEffectRuntime.decideApproval = async (args) => {
+      const userCtx = { sessionRef: identity.service.current, appId: "ai", source: "user" };
+      const approved = identity.sideEffectAuthority.approveSideEffect({ context: userCtx, callId: fourth.callId });
+      const leased = approved.ok ? identity.sideEffectAuthority.acquireLease({ context: userCtx, callId: fourth.callId, holderId: "ui_exec" }) : null;
+      const exec = leased && leased.ok ? await identity.sideEffectAuthority.executeSideEffect({ callId: fourth.callId, leaseId: leased.lease.leaseId, holderId: "ui_exec" }) : null;
+      interleave = { approved: approved.ok, leased: !!(leased && leased.ok), executed: !!(exec && exec.ok), call: identity.sideEffectStore.callById(fourth.callId).status };
+      return realDecide(args);
+    };
+    // 同一时刻只有这一个 prompt（A23 已确认是第四条请求），deny 按钮在 Dialog footer 内。
+    const lateClick = await click('[data-approval-action="deny"]');
+    check("A24 · 点击 拒绝（真实 DOM）", lateClick === "ok", lateClick);
+    await waitFor(() => identity.sideEffectStore.callById(fourth.callId).status !== "AWAITING_APPROVAL", 15000);
+    identity.sideEffectRuntime.decideApproval = realDecide;
+    const lateCall = identity.sideEffectStore.callById(fourth.callId);
+    const lateDecisions = identity.sideEffectStore.approvalsOfCall(fourth.callId).map((a) => a.decision);
+    check("A25 · 迟到 DENY 不得改写已生效的执行：call 仍 SUCCEEDED/PASS、0 DENIED approval、Domain 已生效",
+      lateCall.status === "SUCCEEDED" && lateCall.verificationStatus === "PASS" && !lateDecisions.includes("DENIED") && identity.resourceService.sideEffectPrecondition({ resourceRef: fourth.resourceRef }).trashed === true,
+      JSON.stringify({ call: lateCall.status, verificationStatus: lateCall.verificationStatus, approvals: lateDecisions, interleave }));
+    const late = await js("return window.openarc.sideEffect.command({ type: 'sideEffect/decideApproval', approvalRequestId: " + JSON.stringify(fourth.callId) + ", decision: 'DENY' })");
+    check("A26 · Renderer 拿到显式稳定错误码（UI 可直接展示）", !!late && late.ok === false && late.error === "SIDE_EFFECT_APPROVAL_TOO_LATE", JSON.stringify(late));
+    const closed = await waitGone('[data-approval-request-id="' + fourth.callId + '"]', 12000);
+    const bodyText = await js("return document.body.textContent || ''");
+    const falseClaim = bodyText.includes("未执行") || bodyText.includes("已拒绝") || bodyText.includes("后端已拒绝");
+    const deniedPanel = await has("[data-ai-denied]");
+    check("A27 · 面板状态反映权威结果：请求面板关闭，且不显示未执行 / 已拒绝假象", closed && !falseClaim && !deniedPanel, JSON.stringify({ closed, falseClaim, deniedPanel, call: identity.sideEffectStore.callById(fourth.callId).status }));
+    const latePending = await js("return window.openarc.sideEffect.command({ type: 'sideEffect/listPending' })");
+    const revived = !!(latePending && latePending.items && latePending.items.some((i) => i.approvalRequestId === " + JSON.stringify(fourth.callId) + "));
+    const lateRequest = await js("return window.openarc.sideEffect.command({ type: 'sideEffect/getApprovalRequest', approvalRequestId: " + JSON.stringify(fourth.callId) + " })");
+    check("A28 · 终态不可 revive：不在待决列表、getApprovalRequest 拒绝", !!latePending && latePending.ok === true && !revived && !!lateRequest && lateRequest.ok === false, JSON.stringify({ pending: latePending && latePending.items ? latePending.items.length : null, revived, request: lateRequest }));
   } catch (e) {
     report.errors.push(String((e && e.stack) || e));
     check("探针整体未抛异常", false, String(e.message).slice(0, 200));

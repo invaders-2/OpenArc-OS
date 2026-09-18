@@ -44,6 +44,14 @@ const { isWellFormedToolId } = toolDomain;
 
 const newId = (prefix) => prefix + "_" + crypto.randomBytes(10).toString("base64url");
 const SAFE_EFFECT = /^(secret|token|authorization|api[_-]?key|credential|password|bearer)/i;
+/**
+ * DENY 只对"尚未进入不可撤回执行阶段"的 call 有资格：LEASED 表示 executor 可能已 spawn
+ * 但还没 commit claim，claim 事务会重读 persisted status，所以此刻仍可拒绝。
+ * RUNNING 与任何终态（SUCCEEDED / FAILED / BLOCKED / CANCELLED / UNKNOWN_EFFECT）一律迟到。
+ */
+const DENIABLE_CALL_STATUS = Object.freeze([CALL_STATUS.AWAITING_APPROVAL, CALL_STATUS.APPROVED, CALL_STATUS.LEASED]);
+/** 迟到 DENY 的显式错误码：只作为 trusted 用户动作的返回值与 audit reason，绝不写进 call.error_code。 */
+const DENY_TOO_LATE = "SIDE_EFFECT_APPROVAL_TOO_LATE";
 
 function safeString(value, max = 200) {
   const s = typeof value === "string" ? value : JSON.stringify(value);
@@ -135,7 +143,8 @@ class SideEffectAuthority {
   effectiveApproval(callId) {
     const row = this.store.latestApprovalOfCall(callId);
     if (!row) return null;
-    if (row.decision === APPROVAL_DECISION.APPROVED && row.expires_at != null && this.#now() >= Number(row.expires_at)) return { ...row, effectiveDecision: APPROVAL_DECISION.EXPIRED };
+    // latestApprovalOfCall 返回 store 的 safe 投影（camelCase）：读 expires_at 会让过期分支永不成立。
+    if (row.decision === APPROVAL_DECISION.APPROVED && row.expiresAt != null && this.#now() >= Number(row.expiresAt)) return { ...row, effectiveDecision: APPROVAL_DECISION.EXPIRED };
     return { ...row, effectiveDecision: row.decision };
   }
 
@@ -298,19 +307,41 @@ class SideEffectAuthority {
     if (!task) return { ok: false, error: SIDE_EFFECT_ERROR.TASK_NOT_FOUND };
     if (task.user_id !== actor.user.id && actor.user.role !== "ADMIN") return { ok: false, error: SIDE_EFFECT_ERROR.APPROVAL_FORBIDDEN };
     const now = this.#now();
-    const approval = this.store.transactSync(() => this.store.insertApproval({ callId, actorUserId: actor.user.id, sessionRef: context.sessionRef, decision: APPROVAL_DECISION.DENIED, planHash: call.planHash, createdAt: now }));
-    // A-4：BLOCKED 之后不可能再执行，其 ACTIVE lease 必须在同一事务内终结，
-    // 否则同一进程内 append/runTask 会被残留 ACTIVE_LEASE 永久拦住。
-    let revokedLease = null;
-    const updated = this.store.transactSync(() => {
+    // DENY 的资格只能由事务内重读的 persisted status 决定：DENY 与 claim 是两个并发写者，
+    // 事务外的 status 读取会让"执行已开始/已完成"的执行事实被一个用户动作改写。
+    let outcome = null;
+    this.store.transactSync(() => {
+      const fresh = this.store.callById(callId);
+      const observedStatus = fresh ? String(fresh.status) : null;
+      if (!DENIABLE_CALL_STATUS.includes(observedStatus)) {
+        const prior = this.effectiveApproval(callId);
+        // 幂等例外：此前同一 DENY 已生效（BLOCKED + DENIED）才是重复点击，其余迟到一律不写。
+        outcome = {
+          late: true, observedStatus, call: fresh,
+          duplicate: observedStatus === CALL_STATUS.BLOCKED && !!prior && prior.effectiveDecision === APPROVAL_DECISION.DENIED,
+        };
+        return;
+      }
+      const approval = this.store.insertApproval({ callId, actorUserId: actor.user.id, sessionRef: context.sessionRef, decision: APPROVAL_DECISION.DENIED, planHash: call.planHash, createdAt: now });
+      // A-4：BLOCKED 之后不可能再执行，其 ACTIVE lease 必须在同一事务内终结，
+      // 否则同一进程内 append/runTask 会被残留 ACTIVE_LEASE 永久拦住。
       const active = this.store.activeLeaseOfCall(callId);
-      if (active) revokedLease = this.#finalizeLeaseInTx(callId, active.leaseId, LEASE_STATUS.REVOKED);
-      return this.store.updateCall(callId, { status: CALL_STATUS.BLOCKED, error_code: SIDE_EFFECT_ERROR.APPROVAL_DENIED });
+      const revokedLease = active ? this.#finalizeLeaseInTx(callId, active.leaseId, LEASE_STATUS.REVOKED) : null;
+      outcome = { late: false, approval, revokedLease, call: this.store.updateCall(callId, { status: CALL_STATUS.BLOCKED, error_code: SIDE_EFFECT_ERROR.APPROVAL_DENIED }) };
     });
-    if (revokedLease) this.#auditLeaseFinalized(call.toolId, LEASE_STATUS.REVOKED);
+    if (outcome.late) {
+      // 幂等：绝不报错、绝不写第二行 approval、绝不再改状态。
+      if (outcome.duplicate) return { ok: true, duplicate: true, callStatus: outcome.observedStatus, callId, call: outcome.call };
+      // 迟到 DENY 绝不中止正在进行的执行、绝不动 lease，也不伪装成"已阻止执行"：
+      // 只落 safe audit + safe TaskEvent，供审计，并回显式、稳定、可直接展示的错误码。
+      this.#audit({ actorUserId: actor.user.id, appId: context.appId, toolRef: call.toolId, action: "side_effect.deny_too_late", decision: outcome.observedStatus, reasonCode: DENY_TOO_LATE });
+      this.#event(call.taskId, "tool.side_effect.deny_too_late", { callId, toolId: call.toolId, observedStatus: outcome.observedStatus });
+      return { ok: false, error: DENY_TOO_LATE, callStatus: outcome.observedStatus, callId, call: outcome.call };
+    }
+    if (outcome.revokedLease) this.#auditLeaseFinalized(call.toolId, LEASE_STATUS.REVOKED);
     this.#audit({ actorUserId: actor.user.id, appId: context.appId, toolRef: call.toolId, action: "side_effect.denied", decision: APPROVAL_DECISION.DENIED, reasonCode: null });
-    this.#event(call.taskId, "tool.denied", { callId, approvalId: approval.approvalId });
-    return { ok: true, call: updated, approval };
+    this.#event(call.taskId, "tool.denied", { callId, approvalId: outcome.approval.approvalId });
+    return { ok: true, call: outcome.call, approval: outcome.approval };
   }
 
   revokeApproval({ context = {}, callId } = {}) {
@@ -416,7 +447,9 @@ class SideEffectAuthority {
     const now = this.#now();
     const approvalRow = this.effectiveApproval(callId);
     let approval = null;
-    if (approvalRow) approval = { decision: approvalRow.effectiveDecision, plan_hash: approvalRow.planHash, approved_arguments_hash: approvalRow.approvedArgumentsHash, approved_tool_id: approvalRow.approvedToolId, approved_tool_version: approvalRow.approvedToolVersion, approved_effect_class: approvalRow.approvedEffectClass, expires_at: approvalRow.expiresAt, revoked_at: approvalRow.revokedAt };
+    // 这里刻意传 persisted decision + 显式 expires_at：纯函数按 (decision 绑定, 时间) 两段判定，
+    // 这样过期仍收敛为 APPROVAL_EXPIRED；effectiveDecision 只服务于展示 / 幂等判据，不参与执行判定。
+    if (approvalRow) approval = { decision: approvalRow.decision, plan_hash: approvalRow.planHash, approved_arguments_hash: approvalRow.approvedArgumentsHash, approved_tool_id: approvalRow.approvedToolId, approved_tool_version: approvalRow.approvedToolVersion, approved_effect_class: approvalRow.approvedEffectClass, expires_at: approvalRow.expiresAt, revoked_at: approvalRow.revokedAt };
     const lease = this.store.activeLeaseOfCall(callId);
     const result = evaluateExecutionEligibility({
       call: { ...call, call_id: call.callId, effect_class: call.effectClass, plan_hash: call.planHash, arguments_hash: call.argumentsHash, tool_id: call.toolId, tool_version: call.toolVersion, status: call.status },

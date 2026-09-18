@@ -3,13 +3,17 @@
  *
  * 冻结契约：任务创建时按**后端实际生效**的 model config 冻结 id + version，之后配置变化一律
  * 显式 MODEL_CONFIG_CHANGED —— 绝不静默切换、绝不用新版本签发 capability、绝不留下 RUNNING 悬挂。
- * 绑定前创建的旧任务在首个 run 上懒绑定一次（不伪造历史版本；解析不出来就保持未绑定且不报错）。
+ * 绑定前创建的旧任务在首个 run 上懒绑定一次（不伪造历史版本）；R-8：解析不出来时任务保持未绑定，
+ * 但**绝不建 run** —— 未绑定时绝不允许启动模型调用或工具执行。
  *
  * 覆盖：产品入口 task/run 绑定（renderer 自报被忽略）/ 无默认配置明确拒绝且不建任务 /
  * 改版后新 run 全量 BLOCKED 且 0 capability / 追加与显式续接同契约 / 默认切换不静默跟随 /
  * 旧任务懒绑定与"解析失败保持既有行为" / 两个确定性同步竞态窗口（含 startModelCall 路径）/
  * R-7 capability 签发同一同步点改版（期望冻结版本透传，绝不签发非冻结版本）/ R-9 绑定后被禁用
  * （配置解析类失败一律在签发前阻断，原因码明确）/ 未绑定旧任务（expected=null）正对照。
+ * R-8：K/L/M/N/O 五组用例 —— 未绑定时四条真实入口 0 run / 0 capability / 0 请求 / 0 执行并收敛 BLOCKED、
+ * 默认稍后出现才懒绑定并真实成功、并发只形成一种绑定、历史 run/call 逐字段不变且绝不回填、
+ * modelService=null 的桩装配与 ad5e600 逐字一致。
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -18,6 +22,8 @@ import { createToolHarnessFixture, EXACT } from "./fixtures/harness-acp/tool-har
 
 const require = createRequire(import.meta.url);
 const { registerTaskIpc } = require("../electron/task-bootstrap.cjs");
+// R-8：unbound 历史 run 只能由契约允许的 test-only 桩装配（modelService=null）构造，与 production 同一实现。
+const { TaskService } = require("../electron/task-service.cjs");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const waitFor = (fn, ms, detail) => (async () => { const end = Date.now() + ms; while (Date.now() < end) { if (await fn()) return true; await sleep(25); } assert.fail("waitFor 超时：" + detail); })();
@@ -378,7 +384,7 @@ test("D4-03 F1 · 绑定前创建的旧任务首个 run：同一事务懒绑定 
   } finally { await fx.close(); }
 });
 
-test("D4-03 F2 · 无可用默认配置的旧任务：startHarnessRun 行为与既有完全一致（保持未绑定且不报错）", async () => {
+test("D4-03 F2 · R-8：无可用默认配置的旧任务：保持未绑定且绝不建 run（明确 MODEL_CONFIG_UNAVAILABLE）", async () => {
   const fx = await createToolHarnessFixture({ withAdapters: true, behavior: "exact" });
   try {
     const ctx = fx.ctx();
@@ -389,28 +395,34 @@ test("D4-03 F2 · 无可用默认配置的旧任务：startHarnessRun 行为与�
     const stepStarted = fx.taskService.startStep({ context: ctx, taskId: t.task.taskId, stepId: step.step.stepId, expectedRevision: step.task.revision });
     const revBefore = fx.taskStore.taskById(t.task.taskId).revision;
     const run = fx.taskService.startHarnessRun({ context: ctx, taskId: t.task.taskId, stepId: step.step.stepId, expectedRevision: stepStarted.task.revision });
-    assert.equal(run.ok, true, "解析失败绝不能让原本可跑的装配失败：" + JSON.stringify(run));
-    assert.equal(run.run.modelConfigId, null);
-    assert.equal(run.run.modelConfigVersion, null);
+    assert.equal(run.ok, false, "未绑定且解析不出配置时绝不建 run：" + JSON.stringify(run));
+    assert.equal(run.error, "MODEL_CONFIG_UNAVAILABLE", JSON.stringify(run));
+    assert.equal(run.message, "任务未绑定模型配置，无法启动", JSON.stringify(run));
+    assert.equal(runsOf(fx, t.task.taskId).length, 0, "0 条 harness run");
     const row = fx.taskStore.taskById(t.task.taskId);
     assert.equal(row.model_config_id, null, "必须保持未绑定");
     assert.equal(row.model_config_version, null);
-    assert.equal(row.revision, revBefore + 1, "只保留既有的建 run revision 递增");
+    assert.equal(row.revision, revBefore, "失败不得改 revision");
     assert.equal(eventsOfType(fx, t.task.taskId, "task.model_config_bound").length, 0, "解析失败不得伪造绑定事件");
     const types = fx.taskStore.eventsOfTask(t.task.taskId).map((e) => e.event_type);
-    assert.deepEqual(types, ["task.created", "task.started", "step.created", "step.started", "harness.run.started"], "事件序列与既有行为一致（不新增任何事件）");
+    assert.deepEqual(types, ["task.created", "task.started", "step.created", "step.started"], "失败不得追加任何执行事件");
 
-    // 真实 Harness 路径：未绑定且解析不出默认配置的任务不可能悄悄跑成一次模型调用
-    // （capability 只能按 resolveModel 的结果签发，ModelProxy 与懒绑定同源解析 → fail closed）。
+    // 真实 Harness 路径：未绑定且解析不出默认配置的任务不可能悄悄跑成一次模型调用；
+    // 必须显式失败、0 run / 0 capability，并收敛 BLOCKED（绝不 RUNNING 悬挂）。
     const requestsBefore = fx.fp.state.requests;
+    const capsBefore = fx.proxy.capabilities.size;
     const t2 = fx.taskService.createTask({ context: ctx, goal: "unbound legacy through real harness" });
     const r2 = await fx.orchestrator.runTask({ context: ctx, taskId: t2.task.taskId, expectedRevision: t2.task.revision, verify: VERIFY });
     assert.equal(r2.ok, false, "解析不出配置时真实 run 必须显式失败：" + JSON.stringify(r2));
-    assert.equal(r2.error, "HARNESS_NOT_STARTED", JSON.stringify(r2));
-    assert.equal(taskStatus(fx, t2.task.taskId), "BLOCKED");
+    assert.equal(r2.error, "MODEL_CONFIG_UNAVAILABLE", JSON.stringify(r2));
+    assert.equal(r2.blocked, true, JSON.stringify(r2));
+    assert.equal(taskStatus(fx, t2.task.taskId), "BLOCKED", "必须收敛 BLOCKED");
+    assert.equal(fx.taskStore.stepsOfTask(t2.task.taskId)[0].status, "BLOCKED", "Step 必须收敛 BLOCKED");
+    assert.equal(runsOf(fx, t2.task.taskId).length, 0, "0 条 harness run");
     assert.equal(fx.taskStore.callsOfTask(t2.task.taskId).length, 0, "0 条 model call");
     assert.equal(fx.taskStore.artifactsOfTask(t2.task.taskId).length, 0, "0 Artifact");
     assert.equal(fx.fp.state.requests, requestsBefore, "0 provider 请求");
+    assert.equal(fx.proxy.capabilities.size, capsBefore, "0 capability 签发");
     assert.equal(fx.taskStore.taskById(t2.task.taskId).model_config_id, null, "依然未绑定，绝不静默选一个 config 跑");
   } finally { await fx.close(); }
 });
@@ -696,7 +708,8 @@ test("D4-03 J · 正对照：未绑定旧任务（expected=null）capability 签
     assert.equal(legacy.capability.modelConfigVersion, 2);
   } finally { await fx.close(); }
 
-  // J2：解析不出默认配置的未绑定旧任务 → expected 必须是 null（不校验），既有 HARNESS_NOT_STARTED 行为不变
+  // J2（R-8）：解析不出默认配置的未绑定旧任务根本走不到 capability 签发 —— 0 次签发尝试，
+  // 原因码是 MODEL_CONFIG_UNAVAILABLE（不再退化成 HARNESS_NOT_STARTED），step/task 收敛 BLOCKED。
   const fx2 = await createToolHarnessFixture({ withAdapters: true, behavior: "exact" });
   try {
     const ctx = fx2.ctx();
@@ -710,15 +723,413 @@ test("D4-03 J · 正对照：未绑定旧任务（expected=null）capability 签
       r2 = await fx2.orchestrator.runTask({ context: ctx, taskId: t2.task.taskId, expectedRevision: t2.task.revision, verify: VERIFY });
     } finally { probe.restore(); }
     assert.equal(r2.ok, false, JSON.stringify(r2));
-    assert.equal(r2.error, "HARNESS_NOT_STARTED", "既有兼容行为必须逐项不变：" + JSON.stringify(r2));
-    assert.equal(probe.calls.length, 1, JSON.stringify(probe.calls));
-    assert.equal(probe.calls[0].expectedModelConfigVersion, null, "未绑定旧任务必须传 null（不校验）：" + JSON.stringify(probe.calls));
-    assert.equal(probe.calls[0].ok, false, JSON.stringify(probe.calls));
-    assert.equal(probe.calls[0].error, "MODEL_CONFIG_UNAVAILABLE", "解析失败原因码由 Model Proxy 原样返回");
+    assert.equal(r2.error, "MODEL_CONFIG_UNAVAILABLE", JSON.stringify(r2));
+    assert.notEqual(r2.error, "HARNESS_NOT_STARTED", "对外原因码不得退化成 HARNESS_NOT_STARTED");
+    assert.equal(r2.blocked, true, JSON.stringify(r2));
+    assert.equal(probe.calls.length, 0, "没建 run 就绝不允许走到 capability 签发：" + JSON.stringify(probe.calls));
+    assert.equal(runsOf(fx2, t2.task.taskId).length, 0, "0 条 harness run");
     assert.equal(taskStatus(fx2, t2.task.taskId), "BLOCKED");
+    assert.equal(fx2.taskStore.stepsOfTask(t2.task.taskId)[0].status, "BLOCKED", "Step 绝不悬挂在 RUNNING");
     assert.equal(fx2.taskStore.taskById(t2.task.taskId).model_config_id, null, "绝不静默选一个 config 跑");
     assert.equal(fx2.taskStore.callsOfTask(t2.task.taskId).length, 0, "0 条 model call");
     assert.equal(fx2.fp.state.requests, requestsBefore, "0 provider 请求");
     assert.equal(fx2.proxy.capabilities.size, capsBefore, "解析失败不得生成 token");
   } finally { await fx2.close(); }
 });
+
+/* ============================================================ K R-8 未绑定不得启动执行 */
+
+const deferred = () => { let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise, resolve }; };
+/** R-8 唯一例外（test-only 桩装配）：没有真实模型服务，因此不参与懒绑定解析。 */
+const bareService = (fx) => new TaskService({ identity: fx.f.identity, authService: fx.f.authService, authStore: fx.f.store, taskStore: fx.taskStore, clock: fx.f.clock });
+/** 历史行逐字段快照：规范化后比较，任何回填/改写都会立刻暴露。 */
+const historyRows = (fx, taskId) => ({
+  runs: fx.taskStore.harnessRunsOfTask(taskId).map((r) => JSON.stringify(r)),
+  calls: fx.taskStore.callsOfTask(taskId).map((r) => JSON.stringify(r)),
+  artifacts: fx.taskStore.artifactsOfTask(taskId).map((r) => JSON.stringify(r)),
+  verifications: fx.taskStore.verificationsOfTask(taskId).map((r) => JSON.stringify(r)),
+});
+/** 一次入口调用前后的"执行面"计数：run/call/artifact/verification/tool 执行/工具提案/provider 请求/capability。 */
+const execSurface = (fx, taskId) => ({
+  runs: fx.taskStore.harnessRunsOfTask(taskId).length,
+  calls: fx.taskStore.callsOfTask(taskId).length,
+  artifacts: fx.taskStore.artifactsOfTask(taskId).length,
+  verifications: fx.taskStore.verificationsOfTask(taskId).length,
+  toolExecutions: fx.toolStore.executionsOfTask(taskId).length,
+  toolProposals: fx.toolStore.proposalsOfTask(taskId).length,
+  requests: fx.fp.state.requests,
+  capabilities: fx.proxy.capabilities.size,
+  tokens: [...fx.proxy.capabilities.keys()],
+});
+const assertNoExecution = (fx, taskId, before, label) => {
+  assert.deepEqual(execSurface(fx, taskId), before, label + "：run/call/artifact/verification/tool 执行/provider 请求/capability 必须逐项不变");
+};
+const assertConvergedBlocked = (fx, taskId, label) => {
+  assert.equal(taskStatus(fx, taskId), "BLOCKED", label + "：Task 必须收敛 BLOCKED（绝不 RUNNING 悬挂）");
+  const steps = fx.taskStore.stepsOfTask(taskId);
+  assert.equal(steps[steps.length - 1].status, "BLOCKED", label + "：最新 Step 必须收敛 BLOCKED");
+  for (const s of steps) assert.notEqual(s.status, "RUNNING", label + "：绝不允许悬挂在 RUNNING 的 step");
+  for (const r of runsOf(fx, taskId)) assert.equal(["STARTING", "RUNNING"].includes(r.status), false, label + "：绝不允许悬挂的 run：" + r.status);
+};
+/** 未绑定模型调用的 spy：只记录是否有任何一次 capability 签发真正落地。 */
+const spyToolUsage = (fx) => {
+  const used = [];
+  for (const m of ["propose", "executeReadOnly"]) {
+    const orig = fx.toolProxy[m].bind(fx.toolProxy);
+    fx.toolProxy[m] = (args) => { used.push(m); return orig(args); };
+  }
+  return used;
+};
+
+/**
+ * R-8 场景：绑定能力上线之前创建的旧任务 —— 未绑定的 task + 真实跑过的 run/call/artifact 历史。
+ * 历史行全部经任务域命令构造：未绑定 run 只能由契约允许的 test-only 桩装配（modelService=null）建出，
+ * 不直写 DB、不手工伪造终态。账本必须先于历史建立（TaskService 只在任务首次被触碰时建基线），
+ * 否则历史 run 会把任务判成 legacy → remaining=0 → 既有预算守卫先于本用例要验证的
+ * "未绑定不得启动"命中（预算守卫是既有语义，不在本次契约范围）。
+ */
+function legacyUnboundTask(fx, goal) {
+  const ctx = fx.ctx();
+  const bare = bareService(fx);
+  const created = fx.taskService.createTask({ context: ctx, goal });
+  const taskId = created.task.taskId;
+  fx.taskService.getTaskBudget({ context: ctx, taskId });
+  const started = bare.startTask({ context: ctx, taskId, expectedRevision: created.task.revision });
+  const step = bare.createStep({ context: ctx, taskId, kind: "reasoning", input: null, expectedRevision: started.task.revision });
+  const stepStarted = bare.startStep({ context: ctx, taskId, stepId: step.step.stepId, expectedRevision: step.task.revision });
+  const run = bare.startHarnessRun({ context: ctx, taskId, stepId: step.step.stepId, expectedRevision: stepStarted.task.revision });
+  assert.equal(run.ok, true, "桩装配必须照旧建 run（契约例外）：" + JSON.stringify(run));
+  assert.equal(run.run.modelConfigId, null, "历史 run 行必须保持未绑定");
+  const running = bare.markHarnessRunRunning({ context: ctx, taskId, runId: run.run.runId, expectedRevision: run.task.revision });
+  assert.equal(running.ok, true, JSON.stringify(running));
+  const call = bare.startModelCall({ context: ctx, taskId, stepId: step.step.stepId, requestId: "mreq_" + run.run.runId, expectedRevision: running.task.revision });
+  assert.equal(call.ok, true, JSON.stringify(call));
+  assert.equal(call.call.modelConfigId, null, "历史 call 行必须保持未绑定");
+  const callDone = bare.completeModelCall({ context: ctx, taskId, callId: call.call.callId, usage: { totalTokens: 7 }, requestId: "mreq_" + run.run.runId, expectedRevision: call.task.revision });
+  assert.equal(callDone.ok, true, JSON.stringify(callDone));
+  const committed = fx.taskService.commitStepSuccess({
+    context: ctx, taskId, stepId: step.step.stepId, runId: run.run.runId,
+    artifact: { type: "text", content: "legacy-unbound-artifact" },
+    verification: { type: "EXACT_TEXT", status: "PASS" },
+    expectedRevision: callDone.task.revision,
+  });
+  assert.equal(committed.ok, true, JSON.stringify(committed));
+  assert.equal(taskStatus(fx, taskId), "SUCCEEDED", "前置：旧任务历史必须真实收敛 SUCCEEDED");
+  const runDone = bare.completeHarnessRun({ context: ctx, taskId, runId: run.run.runId, stopReason: "end_turn", expectedRevision: committed.task.revision });
+  assert.equal(runDone.ok, true, JSON.stringify(runDone));
+  return { ctx, taskId, stepId: step.step.stepId, runId: run.run.runId, callId: call.call.callId };
+}
+
+test("D4-03 K · R-8：未绑定旧任务 + 无可用默认配置 —— 四条真实入口明确 MODEL_CONFIG_UNAVAILABLE；0 run/0 capability/0 call/0 请求/0 工具执行/0 artifact；Step/Task 收敛 BLOCKED", async () => {
+  const fx = await createToolHarnessFixture({ withAdapters: true, behavior: "exact" });
+  try {
+    const ctx = fx.ctx();
+    assert.equal(fx.f.modelService.resolveModel({ context: ctx, capability: "chat" }).ok, false, "前置：不得存在可用默认配置");
+    const issued = spyIssueCapability(fx);
+    const toolUsed = spyToolUsage(fx);
+    const capsBefore = fx.proxy.capabilities.size;
+
+    // K0 · 真实产品入口 task/run：同一前提下明确拒绝且绝不建任务（未绑定任务不可能从这里产生）
+    const ipc = installIpc(fx, fx.orchestrator);
+    const tasksBefore = fx.taskStore.allTasks().length;
+    const ipcRes = await ipc.command({}, { type: "task/run", goal: "没有默认模型也必须明确失败" });
+    assert.equal(ipcRes.ok, false, JSON.stringify(ipcRes));
+    assert.equal(ipcRes.error, "MODEL_CONFIG_UNAVAILABLE", JSON.stringify(ipcRes));
+    assert.equal(fx.taskStore.allTasks().length, tasksBefore, "task/run 解析失败绝不建任务");
+
+    const orch = fx.makeToolOrchestrator();
+    try {
+      // K1 · orchestrator.runTask
+      const k1 = fx.taskService.createTask({ context: ctx, goal: "legacy unbound / runTask" });
+      assert.equal(k1.task.modelConfigId, null, "前置：旧任务未绑定");
+      const before1 = execSurface(fx, k1.task.taskId);
+      const r1 = await orch.runTask({ context: ctx, taskId: k1.task.taskId, expectedRevision: k1.task.revision, verify: VERIFY });
+      assert.equal(r1.ok, false, JSON.stringify(r1));
+      assert.equal(r1.error, "MODEL_CONFIG_UNAVAILABLE", JSON.stringify(r1));
+      assert.equal(r1.blocked, true, JSON.stringify(r1));
+      assertNoExecution(fx, k1.task.taskId, before1, "K1");
+      assertConvergedBlocked(fx, k1.task.taskId, "K1");
+      assert.equal(fx.taskStore.taskById(k1.task.taskId).model_config_id, null, "K1：任务必须保持未绑定");
+      assert.equal(eventsOfType(fx, k1.task.taskId, "task.model_config_bound").length, 0, "K1：解析失败不得伪造绑定事件");
+
+      // K2 · appendStepCommand（真实"追加下一步"在途入口）
+      const k2 = legacyUnboundTask(fx, "legacy unbound / appendStep");
+      assert.equal(fx.taskService.getAppendEligibility({ context: ctx, taskId: k2.taskId }).appendable, true, "前置：必须是可追加的旧任务");
+      const before2 = execSurface(fx, k2.taskId);
+      const cmd = orch.appendStepCommand({ context: ctx, taskId: k2.taskId, goal: "追加一步", expectedRevision: fx.taskStore.taskById(k2.taskId).revision, verify: VERIFY });
+      assert.equal(cmd.ok, true, "入口同步接收（拒绝只可能来自 run 侧）：" + JSON.stringify(cmd));
+      const r2 = await cmd.running;
+      assert.equal(r2.ok, false, JSON.stringify(r2));
+      assert.equal(r2.error, "MODEL_CONFIG_UNAVAILABLE", JSON.stringify(r2));
+      assert.equal(r2.blocked, true, JSON.stringify(r2));
+      assertNoExecution(fx, k2.taskId, before2, "K2");
+      assertConvergedBlocked(fx, k2.taskId, "K2");
+      assert.equal(fx.taskStore.taskById(k2.taskId).model_config_id, null, "K2：任务必须保持未绑定");
+      assert.equal(eventsOfType(fx, k2.taskId, "task.model_config_bound").length, 0, "K2：解析失败不得伪造绑定事件");
+
+      // K3 · resumeBudgetExhausted（真实预算停止后的显式续接入口）
+      const k3 = legacyUnboundTask(fx, "legacy unbound / resume");
+      // 续接只允许追加"当前真实阻塞 kind"：先经 run 结束计量入口把 MODEL_CALLS 真实耗尽。
+      const consumed = fx.taskService.recordBudgetConsumption({ context: ctx, taskId: k3.taskId, consumption: { MODEL_CALLS: 8 } });
+      assert.equal(consumed.ok, true, JSON.stringify(consumed));
+      assert.equal(consumed.remaining.MODEL_CALLS, 0, "前置：MODEL_CALLS 必须已用尽");
+      const appended = fx.taskService.appendStep({ context: ctx, taskId: k3.taskId, goal: "预算停止", expectedRevision: fx.taskStore.taskById(k3.taskId).revision });
+      assert.equal(appended.ok, true, JSON.stringify(appended));
+      const stepStarted = fx.taskService.startStep({ context: ctx, taskId: k3.taskId, stepId: appended.step.stepId, expectedRevision: appended.task.revision });
+      assert.equal(stepStarted.ok, true, JSON.stringify(stepStarted));
+      const stopped = fx.taskService.blockStep({ context: ctx, taskId: k3.taskId, stepId: appended.step.stepId, reason: "BUDGET_EXHAUSTED", event: "task.budget_exhausted", payload: { kind: "MODEL_CALLS", remaining: 0 }, expectedRevision: stepStarted.task.revision });
+      assert.equal(stopped.ok, true, JSON.stringify(stopped));
+      const elig = fx.taskService.getResumeEligibility({ context: ctx, taskId: k3.taskId });
+      assert.equal(elig.resumable, true, "前置：必须可显式续接：" + JSON.stringify(elig));
+      const before3 = execSurface(fx, k3.taskId);
+      const r3 = await orch.resumeBudgetExhausted({ context: ctx, taskId: k3.taskId, expectedRevision: fx.taskStore.taskById(k3.taskId).revision, verify: VERIFY });
+      assert.equal(r3.ok, false, JSON.stringify(r3));
+      assert.equal(r3.error, "MODEL_CONFIG_UNAVAILABLE", JSON.stringify(r3));
+      assert.equal(r3.blocked, true, JSON.stringify(r3));
+      assertNoExecution(fx, k3.taskId, before3, "K3");
+      assertConvergedBlocked(fx, k3.taskId, "K3");
+      assert.equal(fx.taskStore.taskById(k3.taskId).model_config_id, null, "K3：任务必须保持未绑定");
+    } finally { await orch.dispose(); }
+
+    // 全局：0 capability 签发 / 0 tool 执行 / 0 provider 请求
+    assert.equal(issued.length, 0, "0 capability 签发：" + JSON.stringify(issued));
+    assert.equal(fx.proxy.capabilities.size, capsBefore, "不得新增 capability 记录");
+    assert.deepEqual(toolUsed, [], "0 tool propose/execute");
+    assert.equal(fx.fp.state.requests, 0, "0 provider 请求");
+    assert.equal(fx.taskStore.allTasks().length, tasksBefore + 3, "四条入口加起来只留下 3 条旧任务（task/run 一条都没建）");
+  } finally { await fx.close(); }
+});
+
+test("D4-03 L · R-8：默认配置稍后出现 —— 下一次显式运行重新解析并绑定（绑定事件 + run/call 归属 == 绑定值）并真实成功；绝不沿用未绑定的旧 run", async () => {
+  const fx = await createToolHarnessFixture({ withAdapters: true, behavior: "exact" });
+  try {
+    const ctx = fx.ctx();
+    const t = fx.taskService.createTask({ context: ctx, goal: "return exactly: " + EXACT });
+    // 第一次显式运行：无默认配置 → 明确失败，且绝不留任何 run（修复前会留下一条未绑定的 run）
+    const r1 = await fx.orchestrator.runTask({ context: ctx, taskId: t.task.taskId, expectedRevision: t.task.revision, verify: VERIFY });
+    assert.equal(r1.ok, false, JSON.stringify(r1));
+    assert.equal(r1.error, "MODEL_CONFIG_UNAVAILABLE", JSON.stringify(r1));
+    assert.equal(runsOf(fx, t.task.taskId).length, 0, "失败绝不留未绑定的 run");
+    assert.equal(fx.taskStore.callsOfTask(t.task.taskId).length, 0, "失败绝不留 model call");
+    assert.equal(fx.taskStore.taskById(t.task.taskId).model_config_id, null, "失败后仍然未绑定");
+    assert.equal(eventsOfType(fx, t.task.taskId, "task.model_config_bound").length, 0);
+
+    // 默认配置稍后出现（真实命令）
+    const cid = fx.modelConfigId;
+    setChatDefault(fx, cid);
+    const resolved = fx.f.modelService.resolveModel({ context: ctx, capability: "chat" });
+    assert.equal(resolved.ok, true, JSON.stringify(resolved));
+    assert.equal(resolved.snapshot.modelConfigId, cid);
+
+    const requestsBefore = fx.fp.state.requests;
+    const issued = spyIssueCapability(fx);
+    const r2 = await fx.orchestrator.runTask({ context: ctx, taskId: t.task.taskId, expectedRevision: fx.taskStore.taskById(t.task.taskId).revision, verify: VERIFY });
+    assert.equal(r2.ok, true, "默认出现后的显式运行必须真实成功：" + JSON.stringify(r2));
+    assert.equal(taskStatus(fx, t.task.taskId), "SUCCEEDED");
+
+    const row = fx.taskStore.taskById(t.task.taskId);
+    assert.equal(row.model_config_id, cid, "懒绑定到当前生效配置");
+    assert.equal(row.model_config_version, resolved.snapshot.modelConfigVersion);
+    const bound = eventsOfType(fx, t.task.taskId, "task.model_config_bound");
+    assert.equal(bound.length, 1, "恰好一条绑定事件（只绑定一次）");
+    assert.deepEqual(JSON.parse(bound[0].safe_payload), { modelConfigId: cid, modelConfigVersion: resolved.snapshot.modelConfigVersion, source: "PERSONAL_DEFAULT", reason: "LEGACY_UNBOUND_LAZY_BIND" });
+    const runs = runsOf(fx, t.task.taskId);
+    assert.equal(runs.length, 1, "恰好一个 run —— 绝不是失败时留下的未绑定 run");
+    assert.equal(runs[0].model_config_id, cid, "run 归属必须是绑定值");
+    assert.equal(runs[0].model_config_version, resolved.snapshot.modelConfigVersion);
+    const calls = fx.taskStore.callsOfTask(t.task.taskId);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].model_config_id, cid, "call 归属必须是绑定值");
+    assert.equal(calls[0].model_config_version, resolved.snapshot.modelConfigVersion);
+    assert.equal(fx.taskStore.artifactsOfTask(t.task.taskId).length, 1, "真实成功产出 artifact");
+    assert.equal(fx.taskStore.verificationsOfTask(t.task.taskId).length, 1);
+    assert.equal(fx.fp.state.requests, requestsBefore + 1, "恰好一次真实 provider 请求");
+    assert.equal(issued.length, 1, JSON.stringify(issued));
+    assert.equal(issued[0].modelConfigId, cid);
+    assert.equal(issued[0].modelConfigVersion, resolved.snapshot.modelConfigVersion, "capability 必须以绑定值签发");
+  } finally { await fx.close(); }
+});
+
+test("D4-03 M · R-8/并发：同一未绑定旧任务上的两个并发 run 只形成一种绑定（受控同步点，无 sleep 竞猜）；所有 run/call 归属一致，绝无第二配置", async () => {
+  const fx = await createToolHarnessFixture({ withAdapters: true, behavior: "exact" });
+  try {
+    const ctx = fx.ctx();
+    const cid1 = fx.modelConfigId;
+    setChatDefault(fx, cid1);
+    const cid2 = newConfig(fx, "remote-fake-race-2");
+
+    // 未绑定旧任务 + 两个 RUNNING step（两个并发 run 各自的 step）
+    const t = fx.taskService.createTask({ context: ctx, goal: "return exactly: " + EXACT });
+    const started = fx.taskService.startTask({ context: ctx, taskId: t.task.taskId, expectedRevision: t.task.revision });
+    const s1 = fx.taskService.createStep({ context: ctx, taskId: t.task.taskId, kind: "reasoning", input: null, expectedRevision: started.task.revision });
+    const s2 = fx.taskService.createStep({ context: ctx, taskId: t.task.taskId, kind: "reasoning", input: null, expectedRevision: s1.task.revision });
+    const ss1 = fx.taskService.startStep({ context: ctx, taskId: t.task.taskId, stepId: s1.step.stepId, expectedRevision: s2.task.revision });
+    assert.equal(ss1.ok, true, JSON.stringify(ss1));
+    const ss2 = fx.taskService.startStep({ context: ctx, taskId: t.task.taskId, stepId: s2.step.stepId, expectedRevision: ss1.task.revision });
+    assert.equal(ss2.ok, true, JSON.stringify(ss2));
+    const taskId = t.task.taskId;
+
+    // 懒绑定解析 spy：只统计"无 configId 的 chat 解析"（= 懒绑定），绝不接触 token。
+    const lazyResolves = [];
+    const origResolve = fx.f.modelService.resolveModel.bind(fx.f.modelService);
+    fx.f.modelService.resolveModel = (args = {}) => { if (args.capability === "chat" && args.configId == null) lazyResolves.push(args.capability); return origResolve(args); };
+
+    // 受控同步点：run A 的第一个 adapter.start 停在闸门上 —— 它必然发生在 startHarnessRun（懒绑定 + 建 run A）之后；
+    // B 的启动只由"A 已进闸"这一事实触发，闸门直到绑定一致性断言全部结束才释放，因此 B 的判定完全确定、无 sleep 竞猜。
+    const enteredA = deferred();
+    const gate = deferred();
+    let adapterSeq = 0;
+    const factory = () => {
+      adapterSeq += 1;
+      if (adapterSeq > 1) return fx.realAgentFactory()();
+      return {
+        start: async () => { enteredA.resolve(); await gate.promise; throw Object.assign(new Error("M gate"), { code: "HARNESS_NOT_STARTED" }); },
+        prompt: async () => ({ events: [], text: "" }), cancel: async () => { },
+        dispose: async () => { }, revokeModelCapability() { }, revokeToolCapability() { }, budgetExhausted: () => null,
+      };
+    };
+    const orch = fx.makeOrchestrator(factory);
+    try {
+      const pA = orch.runStep({ context: ctx, taskId, stepId: s1.step.stepId, expectedRevision: ss1.task.revision, stepInput: s1.step.input, verify: VERIFY });
+      await enteredA.promise;
+      // A 已经在 startHarnessRun 里完成懒绑定并建了 run A（后到者 B 看到的就是这个值）
+      assert.equal(fx.taskStore.taskById(taskId).model_config_id, cid1, "A 必须已完成懒绑定");
+      assert.equal(runsOf(fx, taskId).length, 1);
+      assert.equal(runsOf(fx, taskId)[0].model_config_id, cid1);
+      assert.equal(lazyResolves.length, 1, "懒绑定只解析一次：" + JSON.stringify(lazyResolves));
+
+      // 默认切到**另一个** config：后到者绝不能再解析、更不得绑到 cid2
+      setChatDefault(fx, cid2);
+      // 前置检查绕开 spy：spy 只统计被测代码路径的解析，不统计测试自己的断言查询。
+      assert.equal(origResolve({ context: ctx, capability: "chat" }).snapshot.modelConfigId, cid2, "前置：默认已指向第二个 config");
+
+      const pB = orch.runStep({ context: ctx, taskId, stepId: s2.step.stepId, expectedRevision: fx.taskStore.taskById(taskId).revision, stepInput: s2.step.input, verify: VERIFY });
+      const rB = await pB;
+      assert.equal(rB.ok, true, "并发中的后到者必须照旧真实跑成功：" + JSON.stringify(rB));
+
+      const row = fx.taskStore.taskById(taskId);
+      assert.equal(row.model_config_id, cid1, "任务只绑定一种配置");
+      assert.equal(row.model_config_version, 1);
+      const runs = runsOf(fx, taskId);
+      assert.equal(runs.length, 2, "两个并发 run 各一条 run 行");
+      for (const run of runs) {
+        assert.equal(run.model_config_id, cid1, "所有 run 行归属同一绑定值");
+        assert.equal(run.model_config_version, 1);
+        assert.notEqual(run.model_config_id, cid2, "绝不允许第二个 run 分裂到另一配置");
+      }
+      for (const call of fx.taskStore.callsOfTask(taskId)) {
+        assert.equal(call.model_config_id, cid1, "所有 call 行归属同一绑定值");
+        assert.equal(call.model_config_version, 1);
+        assert.notEqual(call.model_config_id, cid2, "绝不允许 call 行分裂到另一配置");
+      }
+      assert.equal(fx.taskStore.callsOfTask(taskId).length >= 1, true, "B 的真实推理必须留下一条 call 行");
+      const bound = eventsOfType(fx, taskId, "task.model_config_bound");
+      assert.equal(bound.length, 1, "只形成一次绑定：" + JSON.stringify(bound));
+      assert.equal(JSON.parse(bound[0].safe_payload).modelConfigId, cid1);
+      assert.equal(lazyResolves.length, 1, "后到者绝不重新解析（事务串行化后看到前者已绑定的值）：" + JSON.stringify(lazyResolves));
+      assert.equal(adapterSeq, 2, "两个并发 run 各自独立装配 adapter");
+
+      // 释放 A：它只会按既有语义收敛（不参与绑定一致性判定），随后仍必须保持"全量归属 cid1"。
+      gate.resolve();
+      await pA;
+      for (const run of runsOf(fx, taskId)) assert.equal(run.model_config_id, cid1, "收尾后 run 归属仍然一致");
+      for (const call of fx.taskStore.callsOfTask(taskId)) assert.equal(call.model_config_id, cid1, "收尾后 call 归属仍然一致");
+    } finally { await orch.dispose(); }
+  } finally { await fx.close(); }
+});
+
+test("D4-03 N · R-8：历史保留 —— 未绑定的历史 run/call 行逐字段不变、绝不回填；绑定之后的新 run 才用绑定值", async () => {
+  const fx = await createToolHarnessFixture({ withAdapters: true, behavior: "exact" });
+  try {
+    const ctx = fx.ctx();
+    const legacy = legacyUnboundTask(fx, "legacy unbound history");
+    const historyBefore = historyRows(fx, legacy.taskId);
+    assert.equal(historyBefore.runs.length, 1);
+    assert.equal(historyBefore.calls.length, 1);
+    assert.equal(JSON.parse(historyBefore.runs[0]).model_config_id, null, "前置：历史 run 未绑定");
+    assert.equal(JSON.parse(historyBefore.calls[0]).model_config_id, null, "前置：历史 call 未绑定");
+    assert.equal(fx.taskStore.taskById(legacy.taskId).model_config_id, null, "前置：任务未绑定");
+
+    // N1 · 无默认配置下的直接入口（真实任务域命令）：绝不建 run（修复前会再留一条未绑定 run，快照立刻变化）
+    const appended = fx.taskService.appendStep({ context: ctx, taskId: legacy.taskId, goal: "历史保留探针", expectedRevision: fx.taskStore.taskById(legacy.taskId).revision });
+    assert.equal(appended.ok, true, "前置：已成功的旧任务只能经 appendStep 进入新 run：" + JSON.stringify(appended));
+    const stepStarted = fx.taskService.startStep({ context: ctx, taskId: legacy.taskId, stepId: appended.step.stepId, expectedRevision: appended.task.revision });
+    assert.equal(stepStarted.ok, true, JSON.stringify(stepStarted));
+    const revoked = fx.taskService.startHarnessRun({ context: ctx, taskId: legacy.taskId, stepId: appended.step.stepId, expectedRevision: stepStarted.task.revision });
+    assert.equal(revoked.ok, false, "未绑定且解析不出配置时绝不建 run：" + JSON.stringify(revoked));
+    assert.equal(revoked.error, "MODEL_CONFIG_UNAVAILABLE", JSON.stringify(revoked));
+    assert.equal(revoked.message, "任务未绑定模型配置，无法启动", JSON.stringify(revoked));
+    assert.equal(historyRows(fx, legacy.taskId).runs.length, 1, "历史 run 数量不变");
+    assert.deepEqual(historyRows(fx, legacy.taskId), historyBefore, "历史 run/call/artifact/verification 行逐字段不变");
+    const blocked = fx.taskService.blockStep({ context: ctx, taskId: legacy.taskId, stepId: appended.step.stepId, reason: "MODEL_CONFIG_UNAVAILABLE", expectedRevision: fx.taskStore.taskById(legacy.taskId).revision });
+    assert.equal(blocked.ok, true, JSON.stringify(blocked));
+
+    // N2 · 默认出现后的真实入口：懒绑定 + 真实跑成功；历史行仍然逐字段不变、绝不回填
+    const cid = fx.modelConfigId;
+    setChatDefault(fx, cid);
+    const requestsBefore = fx.fp.state.requests;
+    const r2 = await fx.orchestrator.runTask({ context: ctx, taskId: legacy.taskId, expectedRevision: fx.taskStore.taskById(legacy.taskId).revision, verify: VERIFY });
+    assert.equal(r2.ok, true, "绑定后必须真实成功：" + JSON.stringify(r2));
+    assert.equal(taskStatus(fx, legacy.taskId), "SUCCEEDED");
+    assert.equal(fx.fp.state.requests, requestsBefore + 1, "恰好一次真实 provider 请求");
+
+    const after = historyRows(fx, legacy.taskId);
+    assert.equal(after.runs.length, 2, "只新增一条绑定之后的 run");
+    assert.equal(after.calls.length, 2, "只新增一条绑定之后的 call");
+    assert.equal(after.artifacts.length, 2, "只新增一个绑定之后的 artifact");
+    assert.equal(after.verifications.length, 2, "只新增一条绑定之后的 verification");
+    // 夹具时钟固定：run/call/artifact 按时间戳排序时历史行与新增行先后不稳定 —— 一律按主键定位，绝不靠数组下标。
+    const beforeArtifact = JSON.parse(historyBefore.artifacts[0]);
+    const beforeVerification = JSON.parse(historyBefore.verifications[0]);
+    const afterRuns = after.runs.map((r) => JSON.parse(r));
+    const afterCalls = after.calls.map((r) => JSON.parse(r));
+    const histRun = afterRuns.find((r) => r.run_id === legacy.runId);
+    const histCall = afterCalls.find((c) => c.call_id === legacy.callId);
+    const histArtifact = after.artifacts.map((r) => JSON.parse(r)).find((a) => a.artifact_id === beforeArtifact.artifact_id);
+    const histVerification = after.verifications.map((r) => JSON.parse(r)).find((v) => v.verification_id === beforeVerification.verification_id);
+    assert.equal(JSON.stringify(histRun), historyBefore.runs[0], "历史 run 行逐字段不变");
+    assert.equal(JSON.stringify(histCall), historyBefore.calls[0], "历史 call 行逐字段不变");
+    assert.equal(JSON.stringify(histArtifact), historyBefore.artifacts[0], "历史 artifact 行逐字段不变");
+    assert.equal(JSON.stringify(histVerification), historyBefore.verifications[0], "历史 verification 行逐字段不变");
+    assert.equal(histRun.model_config_id, null, "历史 run 的 null 归属绝不被回填");
+    assert.equal(histRun.model_config_version, null, "历史 run 的 null version 绝不被回填");
+    assert.equal(histCall.model_config_id, null, "历史 call 的 null 归属绝不被回填");
+    assert.equal(histCall.model_config_version, null, "历史 call 的 null version 绝不被回填");
+    const freshRun = afterRuns.find((r) => r.run_id !== legacy.runId);
+    const freshCall = afterCalls.find((c) => c.call_id !== legacy.callId);
+    assert.equal(freshRun.model_config_id, cid, "绑定之后的 run 才用绑定值");
+    assert.equal(freshRun.model_config_version, 1);
+    assert.equal(freshCall.model_config_id, cid, "绑定之后的 call 才用绑定值");
+    assert.equal(freshCall.model_config_version, 1);
+    assert.equal(fx.taskStore.taskById(legacy.taskId).model_config_id, cid, "任务此时才绑定");
+  } finally { await fx.close(); }
+});
+
+test("D4-03 O · 正对照：modelService 为 null 的 test-only 桩装配行为与 ad5e600 逐字一致", async () => {
+  const fx = await createToolHarnessFixture({ withAdapters: true, behavior: "exact" });
+  try {
+    const ctx = fx.ctx();
+    const bare = bareService(fx);
+    const t = bare.createTask({ context: ctx, goal: "stub assembly probe" });
+    const started = bare.startTask({ context: ctx, taskId: t.task.taskId, expectedRevision: t.task.revision });
+    const step = bare.createStep({ context: ctx, taskId: t.task.taskId, kind: "reasoning", input: null, expectedRevision: started.task.revision });
+    const stepStarted = bare.startStep({ context: ctx, taskId: t.task.taskId, stepId: step.step.stepId, expectedRevision: step.task.revision });
+    const revBefore = fx.taskStore.taskById(t.task.taskId).revision;
+    const run = bare.startHarnessRun({ context: ctx, taskId: t.task.taskId, stepId: step.step.stepId, expectedRevision: stepStarted.task.revision });
+    assert.equal(run.ok, true, "桩装配必须照旧建 run（契约例外）：" + JSON.stringify(run));
+    assert.equal(run.run.modelConfigId, null, "桩装配不绑定（与既有行为逐字一致）");
+    assert.equal(run.run.modelConfigVersion, null);
+    assert.equal(run.run.status, "STARTING");
+    assert.equal(run.task.modelConfigId, null);
+    assert.equal(run.task.modelConfigVersion, null);
+    const row = fx.taskStore.taskById(t.task.taskId);
+    assert.equal(row.model_config_id, null);
+    assert.equal(row.revision, revBefore + 1, "只保留既有的建 run revision 递增");
+    assert.deepEqual(fx.taskStore.eventsOfTask(t.task.taskId).map((e) => e.event_type), ["task.created", "task.started", "step.created", "step.started", "harness.run.started"], "事件序列与 ad5e600 逐字一致");
+    assert.deepEqual(Object.keys(JSON.parse(eventsOfType(fx, t.task.taskId, "harness.run.started")[0].safe_payload)).sort(), ["acpVersion", "harnessVersion", "modelConfigId", "modelConfigVersion", "runId", "stepId"]);
+    assert.equal(eventsOfType(fx, t.task.taskId, "task.model_config_bound").length, 0, "桩装配不得伪造绑定事件");
+    assert.equal(fx.fp.state.requests, 0, "桩装配本身 0 provider 请求");
+    assert.equal(fx.proxy.capabilities.size, 0, "桩装配本身 0 capability");
+  } finally { await fx.close(); }
+});
+

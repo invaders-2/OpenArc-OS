@@ -500,17 +500,20 @@ class TaskService {
         if (step.status !== STEP_STATUS.RUNNING) return { ok: false, error: ERROR.TASK_INVALID_STATE, from: step.status, to: "HARNESS_RUN_STARTED" };
       }
       const now = this.#now();
-      // D4-03：绑定前创建的旧任务从未冻结过版本，这里按**当前**生效配置懒绑定一次（同一事务内落事件），
-      // 使 run 行归属正确。解析失败一律保持未绑定且不报错：由既有 ModelProxy / Harness 启动路径显式失败，
-      // 绝不因为本改动让原本可跑的纯推理 / 桩装配失败，也绝不伪造历史版本。
+      // R-8：绑定前创建的旧任务从未冻结过版本，这里按**当前**生效配置懒绑定一次（同一事务内落事件），
+      // 使 run 行归属正确。解析失败一律保持未绑定 —— 但**绝不建 run**：未绑定的 run 一旦在 capability
+      // 签发前出现默认配置，就会以"当前默认"真实执行，而 task/run/call 归属全是 null。
+      // 唯一例外：modelService 为 null 的 test-only / 桩装配没有真实模型服务可解析，保持既有建 run 行为不变。
       if (!task.model_config_id && this.modelService) {
         const resolved = this.modelService.resolveModel({ context, capability: "chat" });
-        if (resolved.ok) {
-          task = this.store.updateTask(task.task_id, { model_config_id: resolved.snapshot.modelConfigId, model_config_version: resolved.snapshot.modelConfigVersion, updated_at: now });
-          this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.MODEL_CONFIG_BOUND, safePayload: sanitizeEventPayload({ modelConfigId: resolved.snapshot.modelConfigId, modelConfigVersion: resolved.snapshot.modelConfigVersion, source: resolved.snapshot.source, reason: "LEGACY_UNBOUND_LAZY_BIND" }), at: now });
-        }
+        if (!resolved.ok) return Object.assign({}, resolved, { message: "任务未绑定模型配置，无法启动", taskId: task.task_id });
+        task = this.store.updateTask(task.task_id, { model_config_id: resolved.snapshot.modelConfigId, model_config_version: resolved.snapshot.modelConfigVersion, updated_at: now });
+        this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.MODEL_CONFIG_BOUND, safePayload: sanitizeEventPayload({ modelConfigId: resolved.snapshot.modelConfigId, modelConfigVersion: resolved.snapshot.modelConfigVersion, source: resolved.snapshot.source, reason: "LEGACY_UNBOUND_LAZY_BIND" }), at: now });
       }
-      const run = this.store.insertHarnessRun({ taskId: task.task_id, stepId, status: HARNESS_RUN_STATUS.STARTING, harnessVersion, acpVersion, modelConfigId: modelConfigId || task.model_config_id, modelConfigVersion: modelConfigVersion == null ? task.model_config_version : modelConfigVersion, startedAt: now });
+      // 归属只认任务已冻结的值：已绑定的任务不接受 caller 传入的 id/version 覆盖；未绑定的桩装配才沿用 caller 实参。
+      const boundId = task.model_config_id || modelConfigId;
+      const boundVersion = task.model_config_id ? task.model_config_version : modelConfigVersion;
+      const run = this.store.insertHarnessRun({ taskId: task.task_id, stepId, status: HARNESS_RUN_STATUS.STARTING, harnessVersion, acpVersion, modelConfigId: boundId, modelConfigVersion: boundVersion, startedAt: now });
       const updated = this.store.updateTask(task.task_id, { updated_at: now, revision: task.revision + 1 });
       this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.HARNESS_RUN_STARTED, safePayload: sanitizeEventPayload({ runId: run.run_id, stepId, harnessVersion, acpVersion, modelConfigId: run.model_config_id, modelConfigVersion: run.model_config_version }), at: now });
       return { ok: true, run: safeRun(run), task: safeTask(updated) };
