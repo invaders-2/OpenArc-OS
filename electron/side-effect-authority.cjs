@@ -52,6 +52,10 @@ const SAFE_EFFECT = /^(secret|token|authorization|api[_-]?key|credential|passwor
 const DENIABLE_CALL_STATUS = Object.freeze([CALL_STATUS.AWAITING_APPROVAL, CALL_STATUS.APPROVED, CALL_STATUS.LEASED]);
 /** 迟到 DENY 的显式错误码：只作为 trusted 用户动作的返回值与 audit reason，绝不写进 call.error_code。 */
 const DENY_TOO_LATE = "SIDE_EFFECT_APPROVAL_TOO_LATE";
+/** 撤销与 DENY 共用同一个迟到错误码：claim 之后的 trusted 用户动作一律显式迟到。 */
+const REVOKE_TOO_LATE = DENY_TOO_LATE;
+/** 批准资格类失败：claim 之前发现即按"拒绝的等价物"收敛（BLOCKED），而不是留给运行时判 FAILED。 */
+const APPROVER_ERRORS = Object.freeze([SIDE_EFFECT_ERROR.APPROVER_INELIGIBLE, SIDE_EFFECT_ERROR.APPROVER_UNVERIFIED]);
 
 function safeString(value, max = 200) {
   const s = typeof value === "string" ? value : JSON.stringify(value);
@@ -146,6 +150,25 @@ class SideEffectAuthority {
     // latestApprovalOfCall 返回 store 的 safe 投影（camelCase）：读 expires_at 会让过期分支永不成立。
     if (row.decision === APPROVAL_DECISION.APPROVED && row.expiresAt != null && this.#now() >= Number(row.expiresAt)) return { ...row, effectiveDecision: APPROVAL_DECISION.EXPIRED };
     return { ...row, effectiveDecision: row.decision };
+  }
+
+  /**
+   * 批准人资格（唯一实现）：信任只来自持久化 approval 行的 actor_user_id。
+   * 只回答"这条批准此刻是否仍然成立"，因此**只看**身份是否存在 + ACTIVE + 批准范围（owner 或 ADMIN）；
+   * 登出 / 会话过期不撤销批准，也不要求批准人拥有执行主体的全部权限（那些由既有 authorization gate 判定）。
+   * 缺 actor 的历史批准一律保守拒绝，绝不伪造身份。
+   */
+  #approverEligibility({ approval, task }) {
+    const actorUserId = approval && approval.actorUserId != null ? String(approval.actorUserId) : "";
+    if (!actorUserId) return { ok: false, error: SIDE_EFFECT_ERROR.APPROVER_UNVERIFIED };
+    const identity = this.authService ? this.authService.identity : null;
+    const user = identity && typeof identity.userById === "function" ? identity.userById(actorUserId) : null;
+    if (!user) return { ok: false, error: SIDE_EFFECT_ERROR.APPROVER_INELIGIBLE };
+    if (String(user.status) !== "ACTIVE") return { ok: false, error: SIDE_EFFECT_ERROR.APPROVER_INELIGIBLE };
+    const stillOwner = !!task && String(user.id) === String(task.user_id);
+    const stillAdmin = String(user.role) === "ADMIN";
+    if (!stillOwner && !stillAdmin) return { ok: false, error: SIDE_EFFECT_ERROR.APPROVER_INELIGIBLE };
+    return { ok: true };
   }
 
   /** 实时重新授权（resource actions + app tool permissions），读取真实 AuthorizationService。 */
@@ -357,21 +380,60 @@ class SideEffectAuthority {
     return { ok: true, call: outcome.call, approval: outcome.approval };
   }
 
+  /**
+   * trusted user 撤销批准（与 DENY 同法的状态机）：资格判定 + 变更同一事务；
+   * 仍在"可拒绝、尚未进入不可撤回执行阶段"时撤销生效；claim 之后一律显式迟到、状态零变化。
+   */
   revokeApproval({ context = {}, callId } = {}) {
     const actor = this.#resolveTrustedUser(context);
     if (!actor.ok) return { ok: false, error: actor.error };
-    const approval = this.store.latestApprovalOfCall(callId);
-    if (!approval) return { ok: false, error: SIDE_EFFECT_ERROR.APPROVAL_REQUIRED };
-    const revokeCall = this.store.callById(callId);
-    const revokeTask = revokeCall ? this.taskStore.taskById(revokeCall.taskId) : null;
-    if (!revokeTask) return { ok: false, error: SIDE_EFFECT_ERROR.TASK_NOT_FOUND };
-    if (revokeTask.user_id !== actor.user.id && actor.user.role !== "ADMIN") return { ok: false, error: SIDE_EFFECT_ERROR.APPROVAL_FORBIDDEN };
-    const now = this.#now();
-    this.store.transactSync(() => this.store.updateApproval(approval.approvalId, { decision: APPROVAL_DECISION.REVOKED, revoked_at: now }));
     const call = this.store.callById(callId);
-    this.#audit({ actorUserId: actor.user.id, appId: context.appId, toolRef: call ? call.toolId : null, action: "side_effect.approval_revoked", decision: APPROVAL_DECISION.REVOKED, reasonCode: null });
-    if (call) this.#event(call.taskId, "tool.denied", { callId, approvalId: approval.approvalId, reason: SIDE_EFFECT_ERROR.APPROVAL_REVOKED });
-    return { ok: true, call, approval: this.store.approvalById(approval.approvalId) };
+    if (!call) return { ok: false, error: SIDE_EFFECT_ERROR.CALL_NOT_FOUND };
+    const task = this.taskStore.taskById(call.taskId);
+    if (!task) return { ok: false, error: SIDE_EFFECT_ERROR.TASK_NOT_FOUND };
+    if (task.user_id !== actor.user.id && actor.user.role !== "ADMIN") return { ok: false, error: SIDE_EFFECT_ERROR.APPROVAL_FORBIDDEN };
+    const now = this.#now();
+    // 撤销资格只能由事务内重读的 persisted status 决定：撤销与 claim / approve 是并发写者。
+    let outcome = null;
+    this.store.transactSync(() => {
+      const fresh = this.store.callById(callId);
+      const observedStatus = fresh ? String(fresh.status) : null;
+      if (observedStatus === CALL_STATUS.APPROVED || observedStatus === CALL_STATUS.LEASED) {
+        const latest = this.store.latestApprovalOfCall(callId);
+        const approval = latest && latest.decision !== APPROVAL_DECISION.REVOKED
+          ? this.store.updateApproval(latest.approvalId, { decision: APPROVAL_DECISION.REVOKED, revoked_at: now })
+          : latest;
+        // A-4：BLOCKED 之后不可能再执行，其 ACTIVE lease 必须在同一事务内终结。
+        const active = this.store.activeLeaseOfCall(callId);
+        const revokedLease = active ? this.#finalizeLeaseInTx(callId, active.leaseId, LEASE_STATUS.REVOKED) : null;
+        outcome = { revoked: true, revokedLease, approval, call: this.store.updateCall(callId, { status: CALL_STATUS.BLOCKED, error_code: SIDE_EFFECT_ERROR.APPROVAL_REVOKED, completed_at: now }) };
+        return;
+      }
+      if (observedStatus === CALL_STATUS.BLOCKED) {
+        const latest = this.store.latestApprovalOfCall(callId);
+        // 幂等：此前同一撤销已生效（BLOCKED + REVOKED）→ 零写入；其余 BLOCKED（DENY / 超时）不是撤销。
+        outcome = latest && latest.decision === APPROVAL_DECISION.REVOKED
+          ? { duplicate: true, observedStatus, call: fresh }
+          : { tooLate: true, observedStatus, call: fresh };
+        return;
+      }
+      if (observedStatus === CALL_STATUS.AWAITING_APPROVAL) { outcome = { required: true, observedStatus, call: fresh }; return; }
+      outcome = { tooLate: true, observedStatus, call: fresh };
+    });
+    if (outcome.revoked) {
+      if (outcome.revokedLease) this.#auditLeaseFinalized(call.toolId, LEASE_STATUS.REVOKED);
+      this.#audit({ actorUserId: actor.user.id, appId: context.appId, toolRef: call.toolId, action: "side_effect.approval_revoked", decision: APPROVAL_DECISION.REVOKED, reasonCode: null });
+      this.#event(call.taskId, "tool.denied", { callId, approvalId: outcome.approval ? outcome.approval.approvalId : null, reason: SIDE_EFFECT_ERROR.APPROVAL_REVOKED });
+      // 撤销 = 拒绝的等价物：Step/Task 与 DENY / 批准资格失效同口径收敛 BLOCKED。
+      this.#blockStepForRejectedCall(call, SIDE_EFFECT_ERROR.APPROVAL_REVOKED);
+      return { ok: true, revoked: true, callStatus: CALL_STATUS.BLOCKED, call: outcome.call, approval: outcome.approval };
+    }
+    if (outcome.duplicate) return { ok: true, duplicate: true, callStatus: outcome.observedStatus, callId, call: outcome.call };
+    if (outcome.required) return { ok: false, error: SIDE_EFFECT_ERROR.APPROVAL_REQUIRED, callStatus: outcome.observedStatus, callId, call: outcome.call };
+    // claim 之后的撤销绝不中止执行、不动 lease、不覆盖执行事实：只落 safe audit + safe TaskEvent。
+    this.#audit({ actorUserId: actor.user.id, appId: context.appId, toolRef: call.toolId, action: "side_effect.revoke_too_late", decision: outcome.observedStatus, reasonCode: REVOKE_TOO_LATE });
+    this.#event(call.taskId, "tool.side_effect.revoke_too_late", { callId, toolId: call.toolId, observedStatus: outcome.observedStatus });
+    return { ok: false, error: REVOKE_TOO_LATE, callStatus: outcome.observedStatus, callId, call: outcome.call };
   }
 
   /** 每个 call 至多一个 ACTIVE lease；同一 holder 重复 acquire 幂等返回既有 lease。 */
@@ -486,7 +548,13 @@ class SideEffectAuthority {
       preconditionsOk: this.#preconditionsOk(call),
       now,
     });
-    if (result.status === ELIGIBILITY.ELIGIBLE) this.#event(call.taskId, "tool.execution_eligible", { callId, toolId: call.toolId });
+    // 批准人资格只在整体 ELIGIBLE 之后追加判定：过期 / revoked / 绑定不符等既有码优先（纯函数已按序判定）；
+    // 通过前绝不落 execution_eligible 事件，避免"先报可执行、再拒绝"。
+    if (result.status === ELIGIBILITY.ELIGIBLE) {
+      const approver = this.#approverEligibility({ approval: approvalRow, task });
+      if (!approver.ok) return { ok: false, ...result, status: ELIGIBILITY.DENIED, reasonCode: approver.error, call };
+      this.#event(call.taskId, "tool.execution_eligible", { callId, toolId: call.toolId });
+    }
     return { ok: result.status === ELIGIBILITY.ELIGIBLE, ...result, call };
   }
 
@@ -777,6 +845,39 @@ class SideEffectAuthority {
   }
 
   /**
+   * 批准资格失效 = 拒绝的等价物：claim 之前（AWAITING_APPROVAL / APPROVED / LEASED）发现即收敛 ——
+   * call → BLOCKED + code + completed_at，其 ACTIVE lease 在同一事务内终结（A-4 语义），
+   * 再落既有 blocked audit/event 并把 Step/Task 收敛 BLOCKED。
+   * RUNNING / 任何终态一律不调用（进入执行后不追溯、不改写、不新增中止能力）。
+   */
+  #blockIneligibleApproval({ call, code }) {
+    const now = this.#now();
+    let revokedLease = null;
+    let updated = null;
+    this.store.transactSync(() => {
+      const fresh = this.store.callById(call.callId);
+      if (!fresh || !DENIABLE_CALL_STATUS.includes(String(fresh.status))) { updated = fresh; return; }
+      const active = this.store.activeLeaseOfCall(call.callId);
+      revokedLease = active ? this.#finalizeLeaseInTx(call.callId, active.leaseId, LEASE_STATUS.REVOKED) : null;
+      updated = this.store.updateCall(call.callId, { status: CALL_STATUS.BLOCKED, error_code: code, completed_at: now });
+    });
+    if (!updated || String(updated.status) !== CALL_STATUS.BLOCKED) return null;
+    if (revokedLease) this.#auditLeaseFinalized(call.toolId, LEASE_STATUS.REVOKED);
+    this.#audit({ toolRef: call.toolId, action: "side_effect.blocked", decision: CALL_STATUS.BLOCKED, reasonCode: code });
+    this.#event(call.taskId, "tool.side_effect.execution_blocked", { callId: call.callId, toolId: call.toolId, reasonCode: code });
+    this.#blockStepForRejectedCall(call, code);
+    return updated;
+  }
+
+  /** 拒绝类收敛的统一出口：Step/Task → BLOCKED（blockStep 自身落 STEP_BLOCKED / TASK_BLOCKED）。 */
+  #blockStepForRejectedCall(call, reason) {
+    if (!this.taskService || typeof this.taskService.blockStep !== "function" || !call.stepId) return;
+    const freshTask = this.taskStore.taskById(call.taskId);
+    if (!freshTask || String(freshTask.status) !== "RUNNING") return;
+    try { this.taskService.blockStep({ context: this.#executionContext(freshTask), taskId: call.taskId, stepId: call.stepId, runId: call.runId, reason, expectedRevision: freshTask.revision }); } catch { /* fail closed：call 已是不可执行状态 */ }
+  }
+
+  /**
    * S1：迟到结果抑制的唯一出口。效果已发生，但状态权威不属于本 runtime → 只落 safe 事实，
    * 绝不改任何持久化字段，绝不声称成功/终态迁移，也绝不 retry。
    */
@@ -909,6 +1010,10 @@ class SideEffectAuthority {
         : SIDE_EFFECT_ERROR.PLAN_STALE;
       return failWith(reason);
     }
+    // 批准人资格重判：claim 事务内重判就是执行分界 —— "判定资格后、claim 前失权"无法漏过；
+    // 进入 RUNNING 之后一律不追溯（本方法只在 claim 事务内被调用）。
+    const approver = this.#approverEligibility({ approval, task });
+    if (!approver.ok) return failWith(approver.error);
     // exact lease authority：active lease 必须就是 expectedLeaseId，且 holder + runtime instance 全匹配。
     const lease = this.store.activeLeaseOfCall(callId);
     if (!lease || String(lease.status) !== LEASE_STATUS.ACTIVE) return failWith(SIDE_EFFECT_ERROR.LEASE_REQUIRED);
@@ -955,8 +1060,12 @@ class SideEffectAuthority {
     // 执行前完整 eligibility（tool/run/authorization/approval/lease/precondition 全部实时重查）。
     const elig = this.evaluateExecutionEligibility({ context: execCtx, callId, holderId, leaseId });
     if (elig.status !== ELIGIBILITY.ELIGIBLE) {
-      this.#audit({ toolRef: call.toolId, action: "side_effect.blocked", decision: "BLOCKED", reasonCode: elig.reasonCode });
-      this.#event(call.taskId, "tool.side_effect.execution_blocked", { callId, toolId: call.toolId, reasonCode: elig.reasonCode });
+      // 批准资格失效由本方法收敛（BLOCKED + lease 终结 + Step/Task BLOCKED）；其余 gate 维持既有 fail-closed 语义。
+      const converged = APPROVER_ERRORS.includes(elig.reasonCode) ? this.#blockIneligibleApproval({ call, code: elig.reasonCode }) : null;
+      if (!converged) {
+        this.#audit({ toolRef: call.toolId, action: "side_effect.blocked", decision: "BLOCKED", reasonCode: elig.reasonCode });
+        this.#event(call.taskId, "tool.side_effect.execution_blocked", { callId, toolId: call.toolId, reasonCode: elig.reasonCode });
+      }
       return want(elig.reasonCode || SIDE_EFFECT_ERROR.CALL_STATE, { eligibility: elig.status });
     }
     const active = this.store.activeLeaseOfCall(callId);
@@ -992,8 +1101,12 @@ class SideEffectAuthority {
       claim = { claimed: false, reason: SIDE_EFFECT_ERROR.EXECUTION_CLAIM_LOST };
     }
     if (!claim.claimed) {
-      this.#audit({ toolRef: call.toolId, action: "side_effect.blocked", decision: "BLOCKED", reasonCode: claim.reason });
-      this.#event(call.taskId, "tool.side_effect.execution_blocked", { callId, toolId: call.toolId, reasonCode: claim.reason });
+      // claim 事务内重判失权：同样按"拒绝的等价物"收敛（此处 call 仍是 LEASED，绝不产生第二次 dispatch）。
+      const converged = APPROVER_ERRORS.includes(claim.reason) ? this.#blockIneligibleApproval({ call, code: claim.reason }) : null;
+      if (!converged) {
+        this.#audit({ toolRef: call.toolId, action: "side_effect.blocked", decision: "BLOCKED", reasonCode: claim.reason });
+        this.#event(call.taskId, "tool.side_effect.execution_blocked", { callId, toolId: call.toolId, reasonCode: claim.reason });
+      }
       return want(claim.reason);
     }
     this.#audit({ toolRef: call.toolId, action: "side_effect.execution_started", decision: CALL_STATUS.RUNNING, reasonCode: null });

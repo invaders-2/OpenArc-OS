@@ -74,17 +74,29 @@ test("expiry：approval 过期 → acquire APPROVAL_EXPIRED，eligibility APPROV
   } finally { await fx.fx.close(); }
 });
 
-test("revoke：approval REVOKED → eligibility DENIED APPROVAL_REVOKED", async () => {
+test("revoke：approval REVOKED → call BLOCKED/APPROVAL_REVOKED、lease 收敛；eligibility 由状态守卫拒绝（原因仍在 call 上）", async () => {
   const { fx, p } = await planned();
   try {
     assert.equal(fx.approve(p.call.callId).ok, true);
     const r = fx.revokeApproval(p.call.callId);
     assert.equal(r.ok, true, JSON.stringify(r));
+    assert.equal(r.revoked, true);
+    assert.equal(r.callStatus, "BLOCKED");
     assert.equal(r.approval.decision, "REVOKED");
     assert.ok(r.approval.revokedAt != null);
+    // Boss 裁决：撤销决定 + call 状态 + lease 收敛在同一事务内原子完成 → 原因码落在 call.error_code。
+    const call = fx.store.callById(p.call.callId);
+    assert.equal(call.status, "BLOCKED");
+    assert.equal(call.errorCode, "SIDE_EFFECT_APPROVAL_REVOKED");
+    assert.equal(fx.authority.effectiveApproval(p.call.callId).effectiveDecision, "REVOKED");
+    assert.equal(fx.store.activeLeaseOfCall(p.call.callId), null, "不得残留 ACTIVE lease");
+    // 旧批准不可再用：eligibility 由 status 守卫 fail closed（不再宣称可执行），acquire 也被拒。
     const e = fx.elig(p.call.callId, { holderId: null });
-    assert.equal(e.status, "DENIED");
-    assert.equal(e.reasonCode, "SIDE_EFFECT_APPROVAL_REVOKED");
+    assert.equal(e.status, "BLOCKED");
+    assert.equal(e.reasonCode, "SIDE_EFFECT_CALL_STATE");
+    const lease = fx.lease(p.call.callId);
+    assert.equal(lease.ok, false, JSON.stringify(lease));
+    assert.equal(lease.error, "SIDE_EFFECT_CALL_STATE");
   } finally { await fx.fx.close(); }
 });
 
