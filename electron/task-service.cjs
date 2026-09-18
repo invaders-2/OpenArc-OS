@@ -162,6 +162,21 @@ class TaskService {
     return { ok: true, task };
   }
 
+  /**
+   * 任务冻结的 model config 版本 vs 当前生效版本（真实 resolve，不是读快照）。
+   * 变化一律 MODEL_CONFIG_CHANGED：绝不静默升级、绝不用新版本签发 capability。
+   * 未绑定的旧任务（model_config_id 为空）在这里不判定版本。
+   */
+  #boundModelConfig(task, context) {
+    if (!this.modelService || !task.model_config_id) return { ok: true, bound: false };
+    const resolved = this.modelService.resolveModel({ context, configId: task.model_config_id });
+    if (!resolved.ok) return resolved;
+    if (resolved.snapshot.modelConfigVersion !== task.model_config_version) {
+      return { ok: false, error: ERROR.MODEL_CONFIG_CHANGED, expected: task.model_config_version, current: resolved.snapshot.modelConfigVersion };
+    }
+    return { ok: true, bound: true, snapshot: resolved.snapshot };
+  }
+
   /** D4-06 Closure：late attach 只读账本 store（bootstrap / 测试夹具在装配完成后注入）。 */
   attachBudgetStores({ toolStore = null, sideEffectStore = null } = {}) {
     if (toolStore) this.toolStore = toolStore;
@@ -338,6 +353,18 @@ class TaskService {
   }
 
   // ------------------------------------------------------------- Model call
+  /**
+   * Orchestrator 启动 Harness **之前**的绑定校验入口：capability 只允许用任务冻结的版本签发，
+   * 因此在 spawn Harness / issueCapability 之前必须先问这一句（失败时 run/step/task 全部 BLOCKED）。
+   */
+  checkModelConfig({ context, taskId } = {}) {
+    const guard = this.#guard(context);
+    if (!guard.ok) return guard;
+    const load = this.#load(guard, taskId);
+    if (!load.ok) return load;
+    return this.#boundModelConfig(load.task, context);
+  }
+
   startModelCall({ context, taskId, stepId = null, requestId = null, expectedRevision } = {}) {
     const guard = this.#guard(context);
     if (!guard.ok) return guard;
@@ -350,13 +377,8 @@ class TaskService {
       if (conflict) return conflict;
       if (task.status !== TASK_STATUS.RUNNING) return { ok: false, error: ERROR.TASK_INVALID_STATE, from: task.status, to: "MODEL_CALL_STARTED" };
       // 调用时重新 authorize + 重新检查 model/provider status；snapshot 变化不静默升级。
-      if (this.modelService && task.model_config_id) {
-        const resolved = this.modelService.resolveModel({ context, configId: task.model_config_id });
-        if (!resolved.ok) return resolved;
-        if (resolved.snapshot.modelConfigVersion !== task.model_config_version) {
-          return { ok: false, error: ERROR.MODEL_CONFIG_CHANGED, expected: task.model_config_version, current: resolved.snapshot.modelConfigVersion };
-        }
-      }
+      const binding = this.#boundModelConfig(task, context);
+      if (!binding.ok) return binding;
       const now = this.#now();
       const call = this.store.insertCall({ taskId: task.task_id, stepId, modelConfigId: task.model_config_id, modelConfigVersion: task.model_config_version, requestId, status: "STARTED", startedAt: now });
       const updated = this.store.updateTask(task.task_id, { updated_at: now, revision: task.revision + 1 });
@@ -467,7 +489,7 @@ class TaskService {
     return this.store.transactSync(() => {
       const load = this.#load(guard, taskId);
       if (!load.ok) return load;
-      const task = load.task;
+      let task = load.task;
       if (task.cancel_requested) return { ok: false, error: ERROR.TASK_CANCELLED };
       const conflict = this.#conflict(task, expectedRevision);
       if (conflict) return conflict;
@@ -478,6 +500,16 @@ class TaskService {
         if (step.status !== STEP_STATUS.RUNNING) return { ok: false, error: ERROR.TASK_INVALID_STATE, from: step.status, to: "HARNESS_RUN_STARTED" };
       }
       const now = this.#now();
+      // D4-03：绑定前创建的旧任务从未冻结过版本，这里按**当前**生效配置懒绑定一次（同一事务内落事件），
+      // 使 run 行归属正确。解析失败一律保持未绑定且不报错：由既有 ModelProxy / Harness 启动路径显式失败，
+      // 绝不因为本改动让原本可跑的纯推理 / 桩装配失败，也绝不伪造历史版本。
+      if (!task.model_config_id && this.modelService) {
+        const resolved = this.modelService.resolveModel({ context, capability: "chat" });
+        if (resolved.ok) {
+          task = this.store.updateTask(task.task_id, { model_config_id: resolved.snapshot.modelConfigId, model_config_version: resolved.snapshot.modelConfigVersion, updated_at: now });
+          this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.MODEL_CONFIG_BOUND, safePayload: sanitizeEventPayload({ modelConfigId: resolved.snapshot.modelConfigId, modelConfigVersion: resolved.snapshot.modelConfigVersion, source: resolved.snapshot.source, reason: "LEGACY_UNBOUND_LAZY_BIND" }), at: now });
+        }
+      }
       const run = this.store.insertHarnessRun({ taskId: task.task_id, stepId, status: HARNESS_RUN_STATUS.STARTING, harnessVersion, acpVersion, modelConfigId: modelConfigId || task.model_config_id, modelConfigVersion: modelConfigVersion == null ? task.model_config_version : modelConfigVersion, startedAt: now });
       const updated = this.store.updateTask(task.task_id, { updated_at: now, revision: task.revision + 1 });
       this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.HARNESS_RUN_STARTED, safePayload: sanitizeEventPayload({ runId: run.run_id, stepId, harnessVersion, acpVersion, modelConfigId: run.model_config_id, modelConfigVersion: run.model_config_version }), at: now });

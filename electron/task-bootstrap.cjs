@@ -131,7 +131,15 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
         case "task/run": {
           const goal = typeof payload.goal === "string" ? payload.goal.slice(0, 2000) : "";
           if (!goal.trim()) return { ok: false, error: "INVALID_INPUT" };
-          const created = taskService.createTask({ context, goal });
+          // D4-03：产品任务的 model config 一律由**后端**按可信 context 解析后冻结（createTask 内再按当时
+          // version 落库）；renderer 自报的 modelConfigId / modelConfigVersion 一概忽略。解析不出来就明确
+          // 拒绝，绝不静默回退、绝不建未绑定任务（旧任务的懒绑定见 TaskService.startHarnessRun）。
+          const modelService = taskService.modelService;
+          const resolved = modelService && typeof modelService.resolveModel === "function"
+            ? modelService.resolveModel({ context, capability: "chat" })
+            : { ok: false, error: "MODEL_CONFIG_UNAVAILABLE" };
+          if (!resolved.ok) return { ok: false, error: resolved.error };
+          const created = taskService.createTask({ context, goal, modelConfigId: resolved.snapshot.modelConfigId });
           if (!created.ok) return created;
           const taskId = created.task.taskId;
           // 不等待整条 Harness 链：立即返回，进度经 send 推送；approval 由 sideeffect:event 推送。

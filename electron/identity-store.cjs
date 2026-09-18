@@ -1231,7 +1231,11 @@ class IdentityStore {
     }
   }
 
-  /** 同步事务：只给迁移用（迁移里没有任何 await）。 */
+  /**
+   * 连接级同步事务：BEGIN IMMEDIATE 在 try 之外，且**没有连接内互斥** ——
+   * 因此事务体内绝不能有 await（一旦让出事件循环，另一条写路径会插进同一连接）。
+   * 全仓 electron/ 各 store 的主要写路径都走这里；迁移只是其中一个调用方。
+   */
   transactSync(fn) {
     const db = this.db;
     db.exec("BEGIN IMMEDIATE");

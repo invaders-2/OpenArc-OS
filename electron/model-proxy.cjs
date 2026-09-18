@@ -31,9 +31,13 @@ class ModelProxy {
   }
   #now() { return this.clock ? this.clock() : Date.now(); }
 
-  issueCapability({ context, configId, allowedCapabilities = ["chat"], maxCalls = 1, ttlMs = this.ttlMs, binding = null } = {}) {
+  issueCapability({ context, configId, allowedCapabilities = ["chat"], maxCalls = 1, ttlMs = this.ttlMs, binding = null, expectedModelConfigVersion = null } = {}) {
     const resolved = this.modelService.resolveModel({ context, configId, capability: allowedCapabilities[0] || "chat" });
     if (!resolved.ok) return resolved;
+    // 任务层冻结版本透传：版本已变绝不签发（token 生成之前判定），与 TaskService 同码同形状。
+    if (expectedModelConfigVersion != null && resolved.snapshot.modelConfigVersion !== expectedModelConfigVersion) {
+      return { ok: false, error: "MODEL_CONFIG_CHANGED", expected: expectedModelConfigVersion, current: resolved.snapshot.modelConfigVersion };
+    }
     const token = "mpx_" + crypto.randomBytes(24).toString("base64url");
     const cap = {
       capabilityId: "mcap_" + crypto.randomBytes(8).toString("base64url"),

@@ -21,6 +21,12 @@ const {
   BUDGET_KIND, DEFAULT_MAX_CALLS, MAX_TOOL_ROUNDS,
 } = domain;
 
+// §59/§60：checkModelConfig 的**配置解析类**失败一律在签发 capability / spawn Harness 之前显式阻断，
+// 并把原因码原样上报（绝不退化成 HARNESS_NOT_STARTED）。归属 / 不存在类错误不在此列，路径不变。
+const MODEL_CONFIG_PRECONDITION_ERRORS = Object.freeze([
+  ERROR.MODEL_CONFIG_CHANGED, "MODEL_CONFIG_UNAVAILABLE", "CAPABILITY_UNAVAILABLE", "PROXY_UNAUTHORIZED",
+]);
+
 const PROMPT_SCHEMA_VERSION = 1;
 const DEFAULT_TURN_TIMEOUT_MS = 180000;
 const DEFAULT_START_TIMEOUT_MS = 30000;
@@ -95,6 +101,8 @@ function classifyHarnessError(e) {
   if (code === "HARNESS_START_TIMEOUT") return ERROR.HARNESS_TURN_TIMEOUT;
   if (code === "HARNESS_PROTOCOL_ERROR" || code === "HARNESS_PROTOCOL_UNSUPPORTED") return code;
   if (code === "HARNESS_NOT_STARTED") return code;
+  // Model 冻结版本在签发窗口内被改版：adapter 拒绝签发后原样上报明确原因码，绝不退化成 INTERNAL_ERROR。
+  if (code === ERROR.MODEL_CONFIG_CHANGED) return code;
   return ERROR.INTERNAL_ERROR;
 }
 
@@ -203,6 +211,13 @@ class TaskHarnessOrchestrator {
     task = runRes.task;
     const run = runRes.run;
 
+    // §59/§60：capability 只能以任务冻结的 config version 签发。签发 / spawn Harness **之前**先问一次，
+    // 使版本已变的 run 在 0 capability、0 模型调用、0 子进程的前提下直接收敛 BLOCKED。
+    const binding = svc.checkModelConfig({ context, taskId });
+    if (!binding.ok && MODEL_CONFIG_PRECONDITION_ERRORS.includes(binding.error)) {
+      return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: binding.error, event: TASK_EVENT.HARNESS_RUN_UNKNOWN_EFFECT, expectedRevision: task.revision });
+    }
+
     let adapter = null;
     let info = null;
     let facade = null;
@@ -210,7 +225,7 @@ class TaskHarnessOrchestrator {
     try {
       facade = await this.#startToolFacade({ context, taskId, stepId, runId: run.runId, maxCalls: toolQuota });
       adapter = this.#makeAdapter({ context, taskId, stepId, runId: run.runId, modelConfigId: task.modelConfigId, modelConfigVersion: task.modelConfigVersion });
-      info = await adapter.start({ context, modelConfigId: task.modelConfigId, maxCalls: modelQuota, startTimeoutMs: this.startTimeoutMs, requestId: "mreq_" + run.runId, toolFacade: facade, memory: this.#memoryFor({ context, taskId, goal: task.goal }) });
+      info = await adapter.start({ context, modelConfigId: task.modelConfigId, modelConfigVersion: task.modelConfigVersion, maxCalls: modelQuota, startTimeoutMs: this.startTimeoutMs, requestId: "mreq_" + run.runId, toolFacade: facade, memory: this.#memoryFor({ context, taskId, goal: task.goal }) });
     } catch (e) {
       if (adapter) { try { adapter.revokeToolCapability(); } catch { /* ignore */ } try { adapter.revokeModelCapability(); } catch { /* ignore */ } try { await adapter.dispose(); } catch { /* ignore */ } }
       if (facade) { try { await facade.bridge.stop(); } catch { /* ignore */ } }
@@ -230,7 +245,15 @@ class TaskHarnessOrchestrator {
       // §55：OpenArc 生成 requestId，与 taskId/stepId/runId 绑定；不由 Harness 自报。
       const modelRequestId = "mreq_" + run.runId;
       const callRes = svc.startModelCall({ context, taskId, stepId, requestId: modelRequestId, expectedRevision: task.revision });
-      if (!callRes.ok) return callRes;
+      if (!callRes.ok) {
+        // 版本在 capability 签发与本次调用之间被改（真实竞态）：绝不留下 RUNNING 悬挂的 run，
+        // 也绝不静默换模型 —— 与既有 MODEL_CONFIG_CHANGED 阻断路径同事件、同终态。
+        if (callRes.error === ERROR.MODEL_CONFIG_CHANGED) {
+          const fresh = svc.getTask({ context, taskId });
+          return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: ERROR.MODEL_CONFIG_CHANGED, event: TASK_EVENT.HARNESS_RUN_UNKNOWN_EFFECT, expectedRevision: fresh.ok ? fresh.task.revision : task.revision });
+        }
+        return callRes;
+      }
       task = callRes.task;
       const callId = callRes.call.callId;
 

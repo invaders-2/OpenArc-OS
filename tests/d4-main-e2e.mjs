@@ -13,7 +13,7 @@
  * 或 window.openarc.governance.command 产品桥。已删除 OPENARC_E2E_SEED_TOOL_GRANTS test-only 播种。
  *
  * 必需流程与退出码契约：
- *   boot / setup / flow1 / flow2 / flow3 / flow4 / flow5 全部必需：任一 FAIL 或 renderer/main 错误 > 0 → overallStatus FAIL 且 exit 非零。
+ *   boot / setup / flow1 / flow2 / flow3 / flow4 / flow5 / flow6 全部必需：任一 FAIL 或 renderer/main 错误 > 0 → overallStatus FAIL 且 exit 非零。
  *   任一必需流程 NOT_VERIFIED → PARTIAL；全部 PASS → PASS 且 exitCode=0。
  *   绝不把 NOT_VERIFIED 当作通过。
  *
@@ -21,6 +21,11 @@
  * task/appendStep）在同一 Task 追加下一步目标 → 后续 step 真实耗尽预算停止 → UI 显式续接（[data-ai-resume]，
  * task/resume）→ 完成。拒绝矩阵（并发 / 重复 revision / 陈旧 revision / 不安全状态 / 非 owner / 执行前撤权）
  * 与本条主流程同源同入口，且每条拒绝都有「可追加时确实可追加」的正对照。
+ *
+ * 流程 6 本轮经**真实产品入口**验证"任务版本固定"：真实 UI 新建任务 → 后端解析并冻结默认 model config
+ * （renderer 自报无效）→ 经产品桥把该 config 提升版本 → 真实 UI 追加步骤必须明确 MODEL_CONFIG_CHANGED
+ * （Task/Step/run 全 BLOCKED、0 新 model call、0 新 Artifact、旧产物逐字段不变、UI 如实显示错误）→
+ * 新任务绑定新版本正常成功 → 默认切到另一个 config 后，绑定原 config 的任务 append/resume 仍成功且归属不变。
  */
 import { chromium } from "@playwright/test";
 import { spawn } from "node:child_process";
@@ -63,7 +68,7 @@ const sha256 = (t) => crypto.createHash("sha256").update(String(t)).digest("hex"
 const checks = [];
 const notVerified = [];
 const observations = [];
-const FLOW_BUCKETS = { boot: [], setup: [], flow1: [], flow2: [], flow3: [], flow4: [], flow5: [] };
+const FLOW_BUCKETS = { boot: [], setup: [], flow1: [], flow2: [], flow3: [], flow4: [], flow5: [], flow6: [] };
 const record = (flow, name, ok, actual, expected) => {
   const okv = !!ok;
   checks.push({ flow, name, ok: okv, actual: String(actual == null ? "" : actual), expected: expected === undefined ? "" : String(expected) });
@@ -270,7 +275,7 @@ async function main() {
   const testPassed = await waitFor(async () => (await text('[data-d4-01-test-result="' + pid + '"]')).indexOf("Inference:PASS") >= 0, 30000);
   record("setup", "S6 · 真实 UI 连接测试 Inference:PASS", testPassed, await text('[data-d4-01-test-result="' + pid + '"]'), "Inference:PASS");
 
-  const flowReached = { flow1: false, flow2: false, flow3: false, flow4: false, flow5: false };
+  const flowReached = { flow1: false, flow2: false, flow3: false, flow4: false, flow5: false, flow6: false };
 
   // ================================================================ 流程 1：管理员授权 → WRITE 审批 → 一次副作用 → 成功
   const uiGrant = await grantToolsViaUI(TOOL_ACTIONS);
@@ -875,6 +880,222 @@ async function main() {
   record("setup", "I4 · Renderer console error = 0", consoleErrors.length === 0, consoleErrors.slice(0, 3).join(" | "), "0");
   record("setup", "I5 · main uncaught / unhandled = 0", mainErrors.length === 0, mainErrors.slice(0, 3).join(" | "), "0");
 
+  // ================================================================ 流程 6：模型配置绑定（真实产品入口）
+  //
+  // 位置说明：流程 5 的既有断言包含"刷新后 AI 面板恢复的最新任务 = 流程 4 主任务"（F5.6）与
+  // gate.flows.flow5.latestTaskIsFlow4；流程 6 必然新建任务，因此它放在既有只读快照（I1-I5）之后独立运行，
+  // 不改任何既有断言，并由 flow6 自己的断言保证任务收敛终态、错误可见与归属不变。
+  const GOAL6_A = "MAIN-E2E FLOW6-A: 输出绑定后的结论";
+  const GOAL6_B = "MAIN-E2E FLOW6-B: 新版本绑定后的结论";
+  const GOAL6_C = "MAIN-E2E FLOW6-C: 先出产物再耗尽预算";
+  const GOAL6_APPEND_A = "MAIN-E2E FLOW6-A 改版后的追加（必须被明确拒绝）";
+  const GOAL6_APPEND_B = "MAIN-E2E FLOW6-B 默认切换后的追加";
+  const GOAL6_APPEND_C = "MAIN-E2E FLOW6-C 第二步：连续读取直至预算到限";
+  const productModel = (command) => bridge("model", command);
+  const modelRow = (s, id) => (s.tasks || []).find((t) => t.task_id === id) || null;
+  const calls6Of = (s, id) => byTask(s.modelCalls, id);
+  const terminal6 = (s, id) => {
+    const row = modelRow(s, id);
+    return !!row && ["SUCCEEDED", "FAILED", "BLOCKED", "CANCELLED"].includes(row.status);
+  };
+
+  // 流程 5 结束时会话是 MEMBER（F2.9）：流程 6 必须回到真实 admin 会话。
+  const logout6 = await logout();
+  const adminBack6 = await loginAs(ADMIN, PW);
+  record("flow6", "F6.0 · 前置：真实 UI 退出 MEMBER 会话并重新登录 admin（identity gate=ready）", logout6 && adminBack6, JSON.stringify({ logout: logout6, admin: adminBack6 }), "gate=ready");
+
+  const defaults6 = await productModel({ type: "defaults/get" });
+  const configs6 = await productModel({ type: "model/list" });
+  const defaultChat6 = defaults6 && defaults6.ok && defaults6.personal ? defaults6.personal.chat : null;
+  const defaultConfig6 = configs6 && configs6.ok && Array.isArray(configs6.items) ? configs6.items.find((m) => m.configId === defaultChat6) || null : null;
+  const frozen6 = defaultConfig6 ? defaultConfig6.version : null;
+  record("flow6", "F6.1 · 经产品桥读到 Settings 默认 chat model（configId/version，默认即 setup 经真实 UI 注册的模型）",
+    !!defaultConfig6 && defaultChat6 === cid && Number.isFinite(frozen6) && frozen6 >= 1,
+    JSON.stringify({ defaultChat: defaultChat6, version: frozen6, setupModel: cid }), "默认 == setup 模型");
+
+  /* ---------------- (h) 真实 UI 新建任务：后端解析并冻结当前默认配置 ---------------- */
+  await setPlan("final");
+  const run6A = await runTask(GOAL6_A);
+  R.taskIds.flow6 = run6A.taskId;
+  const term6A = await waitTaskTerminal(run6A.taskId, 180000);
+  const get6A = await taskGet(run6A.taskId);
+  const snap6A = dbSnapshot();
+  const row6A = modelRow(snap6A, run6A.taskId);
+  const runs6A = runsOfTask(snap6A, run6A.taskId);
+  const call6A = calls6Of(snap6A, run6A.taskId)[0];
+  const arts6A = artsOfTask(snap6A, run6A.taskId);
+  const vers6A = versOfTask(snap6A, run6A.taskId);
+  record("flow6", "F6.2 (h) · 真实 UI task/run 建的任务冻结了后端解析出的默认模型：task 行 / run 行 / call 行 modelConfigId+version 非空且与 Settings 默认逐项一致",
+    run6A.started && term6A && get6A.task.status === "SUCCEEDED" && arts6A.length === 1 && vers6A.length === 1
+      && !!get6A.task.modelConfigId && get6A.task.modelConfigId === defaultChat6 && get6A.task.modelConfigVersion === frozen6
+      && !!row6A && row6A.model_config_id === defaultChat6 && Number(row6A.model_config_version) === frozen6
+      && runs6A.length === 1 && runs6A[0].model_config_id === defaultChat6 && Number(runs6A[0].model_config_version) === frozen6
+      && !!call6A && call6A.model_config_id === defaultChat6 && Number(call6A.model_config_version) === frozen6,
+    JSON.stringify({ task: get6A.task.status, artifacts: arts6A.length, taskBinding: { id: get6A.task.modelConfigId, v: get6A.task.modelConfigVersion }, expected: { id: defaultChat6, v: frozen6 }, runBinding: runs6A[0] && { id: runs6A[0].model_config_id, v: runs6A[0].model_config_version }, callBinding: call6A && { id: call6A.model_config_id, v: call6A.model_config_version } }),
+    "SUCCEEDED + task/run/call 三行绑定 == Settings 默认");
+
+  /* ---------------- (i) 经产品入口把该任务绑定的 config 提升版本 → 追加步骤必须明确 MODEL_CONFIG_CHANGED ---------------- */
+  const bump6 = await productModel({ type: "model/update", configId: defaultChat6, displayName: "Main E2E Local (v2)" });
+  const bumped6 = bump6 && bump6.ok && bump6.model ? bump6.model.version : null;
+  record("flow6", "F6.3 (i) · 经真实产品入口 model/update 提升该任务绑定的 config 版本（真实 version bump，非 test-only 直改 DB）",
+    !!bump6 && bump6.ok === true && bumped6 === frozen6 + 1,
+    JSON.stringify({ entry: "window.openarc.model.command model/update", ok: bump6 && bump6.ok, version: bumped6, before: frozen6 }), "version = before + 1");
+
+  const snap6A1 = dbSnapshot();
+  const reqBefore6 = provider.state.requests;
+  const stepBefore6 = stepsOfTask(snap6A1, run6A.taskId);
+  const artBefore6 = artsOfTask(snap6A1, run6A.taskId);
+  const verBefore6 = versOfTask(snap6A1, run6A.taskId);
+  const callBefore6 = calls6Of(snap6A1, run6A.taskId);
+  const appendBlock6 = await waitSel("[data-ai-append-block]", 30000);
+  await setInput("[data-ai-append-goal]", GOAL6_APPEND_A);
+  const appendReady6 = await waitFor(async () => !(await isDisabled("[data-ai-append]")), 15000);
+  const appendClick6 = await click("[data-ai-append]");
+  const appendTerm6 = await waitTaskTerminal(run6A.taskId, 180000);
+  const get6A2 = await taskGet(run6A.taskId);
+  const snap6A2 = dbSnapshot();
+  const steps6A2 = stepsOfTask(snap6A2, run6A.taskId);
+  const runs6A2 = runsOfTask(snap6A2, run6A.taskId);
+  const appendRun6 = steps6A2.length > 1 ? runs6A2.filter((r) => r.step_id === steps6A2[1].step_id) : [];
+  record("flow6", "F6.4 (i) · 改版后经真实 UI 追加步骤：Task/Step/新 run 全部收敛 BLOCKED，run.error_code=MODEL_CONFIG_CHANGED（绝不留 RUNNING 悬挂、绝不静默换模型）",
+    appendBlock6 && appendReady6 === true && appendClick6 === "ok" && appendTerm6 && get6A2.task.status === "BLOCKED"
+      && steps6A2.length === 2 && steps6A2[1].status === "BLOCKED"
+      && appendRun6.length === 1 && appendRun6[0].status === "BLOCKED" && appendRun6[0].error_code === "MODEL_CONFIG_CHANGED"
+      && Number(appendRun6[0].model_config_version) === frozen6,
+    JSON.stringify({ appendBlockVisible: appendBlock6, ready: appendReady6, click: appendClick6, task: get6A2.task.status, steps: steps6A2.map((s) => s.status), run: appendRun6[0] && { status: appendRun6[0].status, error: appendRun6[0].error_code, version: appendRun6[0].model_config_version } }),
+    "BLOCKED/BLOCKED + run MODEL_CONFIG_CHANGED");
+  record("flow6", "F6.5 (i) · 该拒绝 0 执行：0 新 model call / 0 新 Artifact / 0 新 provider 请求；旧 step/artifact/verification/call 行逐字段不变",
+    calls6Of(snap6A2, run6A.taskId).length === callBefore6.length
+      && artsOfTask(snap6A2, run6A.taskId).length === artBefore6.length
+      && versOfTask(snap6A2, run6A.taskId).length === verBefore6.length
+      && provider.state.requests === reqBefore6
+      && JSON.stringify([steps6A2[0]]) === JSON.stringify(stepBefore6)
+      && JSON.stringify(artsOfTask(snap6A2, run6A.taskId)) === JSON.stringify(artBefore6)
+      && JSON.stringify(versOfTask(snap6A2, run6A.taskId)) === JSON.stringify(verBefore6)
+      && JSON.stringify(calls6Of(snap6A2, run6A.taskId)) === JSON.stringify(callBefore6),
+    JSON.stringify({ calls: callBefore6.length + "->" + calls6Of(snap6A2, run6A.taskId).length, artifacts: artBefore6.length + "->" + artsOfTask(snap6A2, run6A.taskId).length, providerRequests: reqBefore6 + "->" + provider.state.requests, rowsUnchanged: JSON.stringify([steps6A2[0]]) === JSON.stringify(stepBefore6) && JSON.stringify(artsOfTask(snap6A2, run6A.taskId)) === JSON.stringify(artBefore6) }),
+    "0 call + 0 artifact + 0 provider 请求 + 旧行不变");
+  const errVisible6 = await waitFor(async () => { const e = (await text("[data-ai-error]")) || ""; const stText = (await text("[data-ai-status-text]")) || ""; return e.includes("MODEL_CONFIG_CHANGED") || stText.includes("BLOCKED"); }, 30000);
+  const errText6 = (await text("[data-ai-error]")).trim().slice(0, 120);
+  const panelStatus6 = await attr(".ai-panel", "data-ai-status");
+  const statusText6 = (await text("[data-ai-status-text]")).trim();
+  record("flow6", "F6.6 (i) · 真实 UI 如实呈现该错误：状态 BLOCKED 且 [data-ai-error] 含 MODEL_CONFIG_CHANGED（不假成功、不静默换模型）",
+    errVisible6 && errText6.includes("MODEL_CONFIG_CHANGED") && panelStatus6 === "BLOCKED" && statusText6.includes("BLOCKED") && get6A2.task.status === "BLOCKED",
+    JSON.stringify({ error: errText6, panelStatus: panelStatus6, statusText: statusText6, task: get6A2.task.status }), "BLOCKED + data-ai-error 含 MODEL_CONFIG_CHANGED");
+
+  /* ---------------- (j) 同一时刻新建任务：绑定当前配置版本并正常成功 ---------------- */
+  const run6B = await runTask(GOAL6_B);
+  R.taskIds.flow6B = run6B.taskId;
+  const term6B = await waitTaskTerminal(run6B.taskId, 180000);
+  const get6B = await taskGet(run6B.taskId);
+  const snap6B = dbSnapshot();
+  const row6B = modelRow(snap6B, run6B.taskId);
+  const runs6B = runsOfTask(snap6B, run6B.taskId);
+  record("flow6", "F6.7 (j) · 改版后经真实 UI 新建任务：绑定**当前**版本并正常 SUCCEEDED（版本变化只拦绑定旧版本的任务）",
+    term6B && get6B.task.status === "SUCCEEDED" && get6B.task.modelConfigId === defaultChat6 && get6B.task.modelConfigVersion === bumped6
+      && !!row6B && Number(row6B.model_config_version) === bumped6
+      && runs6B.length === 1 && Number(runs6B[0].model_config_version) === bumped6,
+    JSON.stringify({ task: get6B.task.status, binding: { id: get6B.task.modelConfigId, v: get6B.task.modelConfigVersion }, expected: { id: defaultChat6, v: bumped6 } }), "SUCCEEDED + 绑定当前版本");
+
+  /* ---------------- (k-2) 前置：绑定原 config 的任务先造出真实预算停止（此时默认尚未切换） ---------------- */
+  const run6C = await runTask(GOAL6_C);
+  R.taskIds.flow6C = run6C.taskId;
+  const term6C = await waitTaskTerminal(run6C.taskId, 180000);
+  const get6C = await taskGet(run6C.taskId);
+  const budgetStep6 = stepsOfTask(dbSnapshot(), run6C.taskId).length;
+  await setPlan("budget");
+  await setInput("[data-ai-append-goal]", GOAL6_APPEND_C);
+  const appendCReady6 = await waitFor(async () => !(await isDisabled("[data-ai-append]")), 15000);
+  const appendCClick6 = appendCReady6 ? await click("[data-ai-append]") : "not-ready";
+  const budgetStop6 = await waitTaskTerminal(run6C.taskId, 300000);
+  const get6CStop = await taskGet(run6C.taskId);
+  const resumeVisible6 = await waitSel("[data-ai-resume]", 30000);
+  const stopReason6 = (await text("[data-ai-stop-reason]")).trim();
+  const cRowStop6 = modelRow(dbSnapshot(), run6C.taskId);
+  record("flow6", "F6.8 (k) · 默认切换前：绑定原 config 的任务造出真实预算停止（第二步 BUDGET_EXHAUSTED + [data-ai-resume] 可见），任务归属仍是原 config",
+    appendCReady6 === true && appendCClick6 === "ok" && budgetStop6 && term6C && get6C.task.status === "SUCCEEDED"
+      && get6CStop.task.status === "BLOCKED" && get6CStop.stopReason === "BUDGET_EXHAUSTED" && get6CStop.resumable === true
+      && cRowStop6 && cRowStop6.model_config_id === defaultChat6 && Number(cRowStop6.model_config_version) === bumped6
+      && resumeVisible6 && budgetStep6 === 1,
+    JSON.stringify({ first: get6C.task.status, stop: get6CStop.task.status, stopReason: get6CStop.stopReason, uiStopReason: stopReason6, resumable: get6CStop.resumable, resumeVisible: resumeVisible6, stepsBeforeBudget: budgetStep6, binding: cRowStop6 && { id: cRowStop6.model_config_id, v: cRowStop6.model_config_version } }), "BLOCKED + BUDGET_EXHAUSTED + resumable + 原 config");
+
+  /* ---------------- (k) 默认切到另一个 config（原 config 未变） ---------------- */
+  const newCfg6 = await productModel({ type: "model/create", providerId: pid, remoteModelId: "main-e2e-local-2", displayName: "Main E2E Local 2", capabilities: ["chat"], scope: "ORGANIZATION" });
+  const cid6b = newCfg6 && newCfg6.ok && newCfg6.model ? newCfg6.model.configId : null;
+  const setDef6 = cid6b ? await productModel({ type: "defaults/set", capability: "chat", configId: cid6b, scope: "PERSONAL" }) : null;
+  const setDefOrg6 = cid6b ? await productModel({ type: "defaults/set", capability: "chat", configId: cid6b, scope: "ORGANIZATION" }) : null;
+  const defaultsAfter6 = await productModel({ type: "defaults/get" });
+  const configsAfter6 = await productModel({ type: "model/list" });
+  const origConfigAfter6 = configsAfter6 && configsAfter6.ok ? configsAfter6.items.find((m) => m.configId === defaultChat6) : null;
+  record("flow6", "F6.9 (k) · 经真实产品入口新建第二个 config 并把默认切到它（原 config 自身版本未变）",
+    !!cid6b && cid6b !== defaultChat6 && !!setDef6 && setDef6.ok === true && !!setDefOrg6 && setDefOrg6.ok === true
+      && defaultsAfter6 && defaultsAfter6.ok && defaultsAfter6.personal && defaultsAfter6.personal.chat === cid6b
+      && !!origConfigAfter6 && Number(origConfigAfter6.version) === Number(bumped6),
+    JSON.stringify({ newConfig: cid6b, personalDefault: defaultsAfter6 && defaultsAfter6.personal && defaultsAfter6.personal.chat, originalConfig: defaultChat6, originalVersion: origConfigAfter6 && origConfigAfter6.version, expectedOriginalVersion: bumped6 }),
+    "默认 = 新 config 且原 config version 不变");
+
+  // (k-1) 绑定原 config 的任务 append：仍成功，且任务 / run / call 行归属仍是原 config
+  // 这里用产品桥（与 AI 面板 [data-ai-append] 同一条 IPC 命令 task/appendStep）；面板此刻停在任务 C 上，
+  // 以便 (k-2) 用真实 UI [data-ai-resume] 续接。
+  await setPlan("final");
+  const rev6B = (await taskGet(run6B.taskId)).task.revision;
+  const appendB6 = await appendViaBridge(run6B.taskId, GOAL6_APPEND_B, rev6B);
+  const appendBClicked6 = appendB6 && appendB6.ok === true ? "ok" : "rejected";
+  const term6B2 = await waitTaskTerminal(run6B.taskId, 180000);
+  const get6B2 = await taskGet(run6B.taskId);
+  const snap6B2 = dbSnapshot();
+  const row6B2 = modelRow(snap6B2, run6B.taskId);
+  const runs6B2 = runsOfTask(snap6B2, run6B.taskId);
+  const calls6B2 = calls6Of(snap6B2, run6B.taskId);
+  record("flow6", "F6.10 (k) · 默认已指向新 config，绑定原 config 的任务追加仍正常 SUCCEEDED，且 task/run/call 行归属仍是原 config（不静默切换）",
+    appendBClicked6 === "ok" && term6B2 && get6B2.task.status === "SUCCEEDED"
+      && stepsOfTask(snap6B2, run6B.taskId).length === 2 && stepsOfTask(snap6B2, run6B.taskId)[1].status === "SUCCEEDED"
+      && artsOfTask(snap6B2, run6B.taskId).length === 2
+      && !!row6B2 && row6B2.model_config_id === defaultChat6 && Number(row6B2.model_config_version) === bumped6
+      && runs6B2.length === 2 && runs6B2.every((r) => r.model_config_id === defaultChat6 && Number(r.model_config_version) === bumped6)
+      && calls6B2.length === 2 && calls6B2.every((c) => c.model_config_id === defaultChat6 && Number(c.model_config_version) === bumped6),
+    JSON.stringify({ syncAccept: appendB6 && { ok: appendB6.ok, status: appendB6.status }, task: get6B2.task.status, steps: stepsOfTask(snap6B2, run6B.taskId).map((s) => s.status), artifacts: artsOfTask(snap6B2, run6B.taskId).length, taskBinding: row6B2 && { id: row6B2.model_config_id, v: row6B2.model_config_version }, runBindings: runs6B2.map((r) => r.model_config_id + ":" + r.model_config_version), callBindings: calls6B2.map((c) => c.model_config_id + ":" + c.model_config_version), newDefault: defaultsAfter6 && defaultsAfter6.personal && defaultsAfter6.personal.chat }),
+    "SUCCEEDED + 全部归属原 config");
+
+  // (k-2) 绑定原 config 的任务 resume：默认已切到新 config，显式续接仍必须成功
+  await setPlan("final");
+  const resumeReady6 = await waitFor(async () => !(await isDisabled("[data-ai-resume]")), 15000);
+  const resumeClick6 = await click("[data-ai-resume]");
+  const term6C2 = await waitTaskTerminal(run6C.taskId, 180000);
+  const get6C2 = await taskGet(run6C.taskId);
+  const snap6C2 = dbSnapshot();
+  const row6C2 = modelRow(snap6C2, run6C.taskId);
+  const runs6C2 = runsOfTask(snap6C2, run6C.taskId);
+  const calls6C2 = calls6Of(snap6C2, run6C.taskId);
+  record("flow6", "F6.11 (k) · 默认已指向新 config，绑定原 config 的任务显式续接仍成功，且归属仍是原 config（不静默切换）",
+    resumeReady6 && resumeClick6 === "ok" && term6C2 && get6C2.task.status === "SUCCEEDED"
+      && !!row6C2 && row6C2.model_config_id === defaultChat6 && Number(row6C2.model_config_version) === bumped6
+      && runs6C2.length >= 3 && runs6C2.every((r) => r.model_config_id === defaultChat6 && Number(r.model_config_version) === bumped6)
+      && calls6C2.every((c) => c.model_config_id === defaultChat6 && Number(c.model_config_version) === bumped6),
+    JSON.stringify({ task: get6C2.task.status, runs: runs6C2.length, runBindings: runs6C2.map((r) => r.model_config_id + ":" + r.model_config_version), callBindings: calls6C2.map((c) => c.model_config_id + ":" + c.model_config_version), taskBinding: row6C2 && { id: row6C2.model_config_id, v: row6C2.model_config_version } }),
+    "SUCCEEDED + 全部归属原 config");
+
+  const snap6Final = dbSnapshot();
+  const flow6Ids = [run6A.taskId, run6B.taskId, run6C.taskId];
+  record("flow6", "F6.12 · 流程 6 全部任务收敛终态且原 config 未被改写（默认切换不回写历史任务）",
+    flow6Ids.every((id) => terminal6(snap6Final, id)) && flow6Ids.every((id) => { const r = modelRow(snap6Final, id); return r.model_config_id === defaultChat6 && Number(r.model_config_version) <= bumped6; }),
+    JSON.stringify({ statuses: flow6Ids.map((id) => (modelRow(snap6Final, id) || {}).status), bindings: flow6Ids.map((id) => { const r = modelRow(snap6Final, id) || {}; return r.model_config_id + ":" + r.model_config_version; }) }),
+    "全部终态 + 绑定不回写");
+  R.flow6 = {
+    taskA: run6A.taskId, taskB: run6B.taskId, taskC: run6C.taskId,
+    defaultConfig: defaultChat6, frozenVersion: frozen6, bumpedVersion: bumped6, newDefaultConfig: cid6b,
+    blockedAppend: { status: appendRun6[0] && appendRun6[0].status, error: appendRun6[0] && appendRun6[0].error_code, uiError: errText6 },
+    appendAfterDefaultSwitch: get6B2.task.status, resumeAfterDefaultSwitch: get6C2.task.status,
+    entries: [
+      "真实 UI task/run（任务 A/B/C 全部经真实 AI 面板发起）",
+      "真实 UI [data-ai-append-goal] + [data-ai-append]（任务 A 的改版后追加与任务 C 的预算停止追加）",
+      "真实 UI [data-ai-resume]（任务 C 的显式续接）",
+      "产品桥 task/appendStep（任务 B 在默认切换后的追加；与面板按钮同一条 IPC 命令）",
+      "产品桥 window.openarc.model.command: model/update（版本提升）、model/create、defaults/set、model/list、defaults/get",
+    ],
+  };
+  flowReached.flow6 = true;
+
   return { boot, snap, gateAfterReload };
 }
 
@@ -925,6 +1146,7 @@ const requiredFlows = {
   flow3: bucketStatus("flow3"),
   flow4: bucketStatus("flow4"),
   flow5: bucketStatus("flow5"),
+  flow6: bucketStatus("flow6"),
 };
 const anyRequiredFail = Object.entries(requiredFlows).some(([, s]) => s === "FAIL");
 const anyRequiredNV = Object.entries(requiredFlows).some(([, s]) => s === "NOT_VERIFIED");
@@ -948,6 +1170,7 @@ let gate = {
     appendStepEntry: "AI 面板 [data-ai-append-block] / [data-ai-append-goal] / [data-ai-append] → window.openarc.task.command task/appendStep（同一 taskId；拒绝同步返回，接收立即返回 RUNNING，结果经 task/result 推送）",
     resumeEntry: "AI 面板 [data-ai-resume] / [data-ai-stop-reason] / [data-ai-resume-budget] / [data-ai-resume-remaining] → window.openarc.task.command task/resume（预算续接）",
     stepsProjection: "AI 面板 [data-ai-steps] / [data-ai-step]（sequence 属性） / data-ai-step-status / data-ai-step-appended，全部来自后端 task/get",
+    modelConfigBinding: "任务 model config 由后端在 task/run 内按可信 context 解析并冻结 id+version（renderer 自报一律忽略）；Settings → 模型页只有注册 / 启停 / 默认设置，没有编辑入口，因此流程 6 的版本提升走产品桥 window.openarc.model.command { type: 'model/update' }（displayName 变更 → 真实 version bump），第二个 config 走 model/create，默认切换走 defaults/set（PERSONAL + ORGANIZATION），读取走 model/list + defaults/get",
   },
   boot: outcome.boot ? { snapshot: sanitize(outcome.boot, [PROVIDER_SECRET]), orderOk: checks.find((c) => c.name.startsWith("B1"))?.ok === true, listening: outcome.boot.modelProxyListening === true } : null,
   flows: {
@@ -985,6 +1208,19 @@ let gate = {
       grantsRestored: checks.find((c) => c.name.startsWith("F5.2"))?.ok === true, flow1Restored: checks.find((c) => c.name.startsWith("F5.3"))?.ok === true, flow3Restored: checks.find((c) => c.name.startsWith("F5.4"))?.ok === true, budgetRestored: checks.find((c) => c.name.startsWith("F5.5"))?.ok === true,
       flow4PanelRestored: checkOk("F5.6"), flow4StepsRestored: checkOk("F5.7"), flow4AppendStateRestored: checkOk("F5.8"), flow4LedgerRestored: checkOk("F5.9"), flow4RevokeTaskRestored: checkOk("F5.10"),
       latestTaskIsFlow4: (outcome.snap ? outcome.snap.tasks.slice().sort((a, b) => a.created_at - b.created_at).slice(-1)[0].task_id : null) === (R.taskIds.flow4 || null),
+    },
+    flow6: {
+      entry: "真实 UI task/run（后端解析冻结默认模型）→ 产品桥 model/update 提升该 config 版本 → 真实 UI 追加步骤 → BLOCKED/MODEL_CONFIG_CHANGED → 新任务绑定新版本成功；产品桥 defaults/set 切默认后原 config 任务的 append/resume 仍成功",
+      taskIds: R.taskIds.flow6 || R.flow6 ? { taskA: (R.flow6 && R.flow6.taskA) || R.taskIds.flow6 || null, taskB: (R.flow6 && R.flow6.taskB) || R.taskIds.flow6B || null, taskC: (R.flow6 && R.flow6.taskC) || R.taskIds.flow6C || null } : null,
+      defaultConfig: R.flow6 ? R.flow6.defaultConfig : null,
+      frozenVersion: R.flow6 ? R.flow6.frozenVersion : null,
+      bumpedVersion: R.flow6 ? R.flow6.bumpedVersion : null,
+      newDefaultConfig: R.flow6 ? R.flow6.newDefaultConfig : null,
+      blockedAppend: R.flow6 ? R.flow6.blockedAppend : null,
+      appendAfterDefaultSwitch: R.flow6 ? R.flow6.appendAfterDefaultSwitch : null,
+      resumeAfterDefaultSwitch: R.flow6 ? R.flow6.resumeAfterDefaultSwitch : null,
+      checks: ["F6.2", "F6.3", "F6.4", "F6.5", "F6.6", "F6.7", "F6.8", "F6.9", "F6.10", "F6.11", "F6.12"].map((id) => ({ check: id, ok: checkOk(id) })),
+      modelConfigEntries: R.flow6 ? R.flow6.entries : null,
     },
   },
   requiredFlows,

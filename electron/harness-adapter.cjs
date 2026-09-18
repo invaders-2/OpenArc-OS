@@ -185,10 +185,11 @@ class HarnessAdapter {
   }
 
   /** Harness 只能拿到 Proxy endpoint + scoped capability + safe model metadata。 */
-  async start({ context, modelConfigId, maxCalls = 4, ttlMs = 120000, workspace = null, startTimeoutMs = 30000, requestId = null, toolFacade = null, memory = null } = {}) {
+  /** modelConfigVersion = 本 run 的任务冻结版本；未绑定旧任务传 null（不校验，保持既有行为）。 */
+  async start({ context, modelConfigId, modelConfigVersion = null, maxCalls = 4, ttlMs = 120000, workspace = null, startTimeoutMs = 30000, requestId = null, toolFacade = null, memory = null } = {}) {
     if (!this.bin) throw harnessError(HARNESS_ERROR.NOT_STARTED, "dsh executable not found");
     if (!this.sdkPath) throw harnessError(HARNESS_ERROR.NOT_STARTED, "ACP SDK not found");
-    const cap = this.modelProxy.issueCapability({ context, configId: modelConfigId, allowedCapabilities: ["chat"], maxCalls, ttlMs });
+    const cap = this.modelProxy.issueCapability({ context, configId: modelConfigId, allowedCapabilities: ["chat"], maxCalls, ttlMs, expectedModelConfigVersion: modelConfigVersion });
     if (!cap.ok) { const e = harnessError(cap.error === "MODEL_CONFIG_UNAVAILABLE" ? HARNESS_ERROR.NOT_STARTED : cap.error); throw e; }
     this.capability = { capabilityId: cap.capability.capabilityId, token: cap.capability.token, maxCalls: cap.capability.maxCalls, modelConfigId: cap.capability.modelConfigId, modelConfigVersion: cap.capability.modelConfigVersion };
 

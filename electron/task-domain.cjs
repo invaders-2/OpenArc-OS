@@ -47,6 +47,8 @@ const TASK_EVENT = Object.freeze({
   STEP_BLOCKED: "step.blocked",
   STEP_RECOVERY_BLOCKED: "step.recovery_blocked",
   TASK_BLOCKED: "task.blocked",
+  // D4-03：绑定前创建的旧任务在首个 run 上懒绑定一次（绝不伪造历史版本）。
+  MODEL_CONFIG_BOUND: "task.model_config_bound",
   MODEL_CALL_STARTED: "model.call.started",
   MODEL_CALL_COMPLETED: "model.call.completed",
   MODEL_CALL_FAILED: "model.call.failed",
@@ -83,6 +85,8 @@ const TASK_EVENT = Object.freeze({
   TOOL_SIDE_EFFECT_VERIFICATION_PASSED: "tool.side_effect.verification_passed",
   TOOL_SIDE_EFFECT_SUCCEEDED: "tool.side_effect.succeeded",
   TOOL_SIDE_EFFECT_EXECUTION_BLOCKED: "tool.side_effect.execution_blocked",
+  // D4-03 状态完整性：迟到结果被抑制（效果已发生但状态权威不属于本 runtime；safe projection only）
+  TOOL_SIDE_EFFECT_LATE_RESULT_SUPPRESSED: "tool.side_effect.late_result_suppressed",
   // D4-03C3 ambiguous result / recovery verification（safe projection only）
   TOOL_SIDE_EFFECT_VERIFICATION_STARTED: "tool.side_effect.verification_started",
   TOOL_SIDE_EFFECT_VERIFICATION_APPLIED: "tool.side_effect.verification_applied",

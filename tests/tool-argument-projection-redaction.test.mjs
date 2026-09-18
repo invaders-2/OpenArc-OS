@@ -97,6 +97,25 @@ function scanDbText(db, needles) {
   return hits;
 }
 
+/** 只读全库正则扫描：以边界锚定的绝对路径形态（含裸单段）扫所有表文本列。 */
+function scanDbTextRe(db, re) {
+  const hits = [];
+  const rx = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name);
+  for (const table of tables) {
+    let rows;
+    try { rows = db.prepare('SELECT * FROM "' + table + '"').all(); } catch { continue; }
+    for (const row of rows) for (const [column, value] of Object.entries(row)) {
+      const text = typeof value === "string" ? value : Buffer.isBuffer(value) ? value.toString("utf8") : "";
+      if (!text) continue;
+      rx.lastIndex = 0;
+      const m = rx.exec(text);
+      if (m) hits.push({ table, column, match: m[0], sample: text.slice(0, 160) });
+    }
+  }
+  return hits;
+}
+
 test("a) 绝对路径参数仍 INVALID，但 arguments_safe 落库前已替换为 [REDACTED_PATH]", async () => {
   const { fx, bridge } = await setup();
   try {
@@ -498,5 +517,179 @@ test("r5b) 标记被 256 截断切断时：落库必含完整标记，冷缓存�
     const okLegacy = await proxy2.executeReadOnly({ context: run.context, taskId: run.taskId, stepId: run.stepId, runId: run.runId, proposalId: "tprop_r5b_legacy", expectedRevision: fx.taskStore.taskById(run.taskId).revision });
     assert.equal(okLegacy.ok, true, JSON.stringify(okLegacy));
     assert.equal(fx.toolStore.executionsOfTask(run.taskId).length, 1);
+  } finally { await fx.close(); }
+});
+
+/** f1bff21 冻结的拒绝判据字面量（D4-03B）：本文件逐字符断言其未变。 */
+const FROZEN_UNSAFE_STRING_SOURCE = "(^|\\s)(\\/Users\\/|\\/private\\/|\\/var\\/folders|C:\\\\|\\\\\\\\[^\\\\]+\\\\)";
+const FROZEN_ABSOLUTE_PATH_SOURCE = "(^\\/)|(^[A-Za-z]:[\\\\/])|(^\\\\\\\\[^\\\\]+[\\\\/])";
+const FROZEN_ABSOLUTE_PATH_RE = new RegExp(FROZEN_ABSOLUTE_PATH_SOURCE);
+
+test("r1b) 裸单段绝对路径绝不落库；search 形态仍 ALLOWED + 执行成功，adapter 收到原文", async () => {
+  const { fx, bridge } = await setup();
+  try {
+    assert.equal(fx.grantTool("ai", ["tool.resource.readMetadata", "tool.resource.search"]).ok, true);
+    const provider = fx.adapters.providers.SearchService;
+    const observed = [];
+    const origExecute = provider.execute;
+    provider.execute = async (ctx) => { observed.push(ctx.args); return origExecute(ctx); };
+    const { run, cap } = issue(bridge, fx, { maxCalls: 12 });
+    const token = cap.capability.token;
+    const bare = ["/x", "/data", "/secret-plan.txt", "/Users-bob"];
+    for (const [i, p] of bare.entries()) {
+      const r = await call(bridge, token, { toolId: "resource.read.metadata", callId: "r1b_ref_" + i, arguments: { resourceRef: p } });
+      assert.equal(r.json.ok, false, p + " 必须仍被拒（本次只改落库文本）");
+      assert.equal(r.json.error, "TOOL_ARGUMENT_INVALID", p);
+    }
+    const embedded = "notes about /secret-plan.txt";
+    const searched = await call(bridge, token, { toolId: "resource.search", callId: "r1b_search", arguments: { query: embedded, limit: 3 } });
+    assert.equal(searched.json.ok, true, JSON.stringify(searched.json));
+    const decisions = fx.toolStore.decisionsOfTask(run.taskId);
+    assert.equal(decisions.length, bare.length + 1);
+    assert.deepEqual([decisions[bare.length].decision, decisions[bare.length].reason_code], ["ALLOWED", "ALLOW"]);
+    assert.deepEqual(fx.toolStore.executionsOfTask(run.taskId).map((e) => e.status), ["SUCCEEDED"]);
+    assert.equal(observed.length, 1);
+    assert.equal(observed[0].query, embedded, "adapter 必须收到原文（落库去敏绝不回写执行入参）");
+    const rows = proposalRows(fx, "resource.search");
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].arguments_hash, domain.fingerprint({ query: embedded, limit: 3 }), "hash 仍取 raw args");
+    assert.equal(rows[0].arguments_safe, JSON.stringify({ query: "notes about [REDACTED_PATH]", limit: 3 }));
+    assert.equal(proposalRows(fx, "resource.read.metadata")[0].arguments_safe, JSON.stringify({ resourceRef: "[REDACTED_PATH]" }));
+    const blob = fx.f.identity.connection.prepare("SELECT arguments_safe FROM task_tool_proposals").all().map((r) => String(r.arguments_safe)).join("\n");
+    for (const p of bare) assert.ok(!blob.includes(p), p + " 明文落库：" + blob);
+    assert.ok(!blob.includes(embedded), blob);
+    assert.ok(blob.includes("[REDACTED_PATH]"), blob);
+  } finally { await fx.close(); }
+});
+
+test("r1c) 正对照逐字符不变：URL/相对词/日期/普通文本既不改写也不误报", async () => {
+  const { fx, bridge } = await setup();
+  try {
+    const positive = ["resource://res_keep", "s3://bucket/key", "a/b", "3/4 done", "2024/12/25", "Vertical Smoke Resource"];
+    for (const s of positive) {
+      const out = domain.redactProjectedArguments(domain.projectArguments({ query: s }, { query: { type: "string" } })).query;
+      assert.equal(out, s, "值级去敏改写了正对照：" + s);
+    }
+    assert.equal(fx.grantTool("ai", ["tool.resource.readMetadata", "tool.resource.search"]).ok, true);
+    const { cap } = issue(bridge, fx, { maxCalls: 12 });
+    const token = cap.capability.token;
+    const searched = ["s3://bucket/key", "a/b", "3/4 done", "2024/12/25", "Vertical Smoke Resource"];
+    for (const [i, q] of searched.entries()) {
+      const r = await call(bridge, token, { toolId: "resource.search", callId: "r1c_pos_" + i, arguments: { query: q } });
+      assert.equal(r.json.ok, true, q + " " + JSON.stringify(r.json));
+    }
+    const rows = proposalRows(fx, "resource.search");
+    for (const [i, q] of searched.entries()) assert.equal(rows[i].arguments_safe, JSON.stringify({ query: q }), q);
+    const read = await call(bridge, token, { toolId: "resource.read.metadata", callId: "r1c_ref", arguments: { resourceRef: "resource://res_keep" } });
+    assert.equal(read.json.ok, false, JSON.stringify(read.json));
+    assert.equal(proposalRows(fx, "resource.read.metadata")[0].arguments_safe, JSON.stringify({ resourceRef: "resource://res_keep" }));
+  } finally { await fx.close(); }
+});
+
+test("r1d) 拒绝语义逐字符不变：冻结判据 source 未动，决策与 f1bff21 一致", async () => {
+  assert.equal(domain.UNSAFE_STRING_RE.source, FROZEN_UNSAFE_STRING_SOURCE, "拒绝判据 UNSAFE_STRING_RE 被改动");
+  assert.equal(domain.ABSOLUTE_PATH_RE.source, FROZEN_ABSOLUTE_PATH_SOURCE, "拒绝判据 ABSOLUTE_PATH_RE 被改动");
+  const battery = ["/Users/a/b", "/etc/passwd", "/api/v2", "see /Users/x", "/secret-plan.txt", "/x", "resource://res_keep", "a/b", "2024/12/25", ""];
+  for (const v of battery) assert.equal(domain.containsAbsolutePath(v), FROZEN_ABSOLUTE_PATH_RE.test(v), "containsAbsolutePath 语义漂移：" + v);
+
+  const { fx, bridge } = await setup();
+  try {
+    assert.equal(fx.grantTool("ai", ["tool.resource.search"]).ok, true);
+    const { run, cap } = issue(bridge, fx, { maxCalls: 8 });
+    const token = cap.capability.token;
+    const cases = [["/Users/a/b", false], ["/etc/passwd", false], ["/api/v2", false], ["see /Users/x", true]];
+    for (const [i, [q, allowed]] of cases.entries()) {
+      const r = await call(bridge, token, { toolId: "resource.search", callId: "r1d_" + i, arguments: { query: q } });
+      assert.equal(r.json.ok, allowed, q + " " + JSON.stringify(r.json));
+      if (!allowed) assert.equal(r.json.error, "TOOL_ARGUMENT_INVALID", q);
+    }
+    assert.deepEqual(fx.toolStore.decisionsOfTask(run.taskId).map((d) => [d.decision, d.reason_code]), [
+      ["INVALID", "TOOL_ARGUMENT_INVALID"], ["INVALID", "TOOL_ARGUMENT_INVALID"], ["INVALID", "TOOL_ARGUMENT_INVALID"], ["ALLOWED", "ALLOW"],
+    ]);
+    assert.deepEqual(fx.toolStore.executionsOfTask(run.taskId).map((e) => e.status), ["SUCCEEDED"]);
+    const rows = proposalRows(fx, "resource.search");
+    assert.equal(rows[3].arguments_safe, JSON.stringify({ query: "see [REDACTED_PATH]" }));
+  } finally { await fx.close(); }
+});
+
+test("r1e) 投影长度上界 271 且绝不 clamp 回 256（完整去敏标记必须保住）", () => {
+  const worst = domain.redactProjectedArguments(domain.projectArguments({ message: "p".repeat(255) + "/z" }, { message: { type: "string" } })).message;
+  assert.equal(worst, "p".repeat(255) + "[REDACTED_PATH]…", worst.slice(-24));
+  assert.equal(worst.length, 271);
+  assert.equal(domain.REDACTION_MARKER_RE.test(worst), true);
+  let max = 0;
+  for (let n = 240; n <= 256; n += 1) for (const tail of ["/", "/x", "/" + "z".repeat(40), "/Users/alice", "/data/config"]) {
+    const safe = domain.redactProjectedArguments(domain.projectArguments({ message: "p".repeat(n) + tail }, { message: { type: "string" } })).message;
+    max = Math.max(max, safe.length);
+    assert.ok(safe.length <= 271, JSON.stringify(safe));
+  }
+  assert.equal(max, 271, "上界必须是 271（256 + 去敏标记余量），clamp 会切半完整标记");
+});
+
+test("r1f) 全库扫描：裸单段/多段绝对路径、tpx_/mpx_/credential 在所有表文本列 0 命中", async () => {
+  const { fx, bridge } = await setup();
+  try {
+    assert.equal(fx.grantTool("ai", ["tool.resource.readMetadata", "tool.resource.search"]).ok, true);
+    const { cap } = issue(bridge, fx, { maxCalls: 20 });
+    const token = cap.capability.token;
+    const bare = ["/x", "/data", "/secret-plan.txt", "/Users-bob"];
+    for (const [i, p] of bare.entries()) await call(bridge, token, { toolId: "resource.read.metadata", callId: "r1f_ref_" + i, arguments: { resourceRef: p } });
+    for (const [i, q] of ["notes about /secret-plan.txt", "keep /Users-bob safe", "see /data now"].entries()) {
+      await call(bridge, token, { toolId: "resource.search", callId: "r1f_q_" + i, arguments: { query: q } });
+    }
+    for (const [i, q] of ["//x", "//data", "///a/b", "see //notes/todo"].entries()) {
+      await call(bridge, token, { toolId: "resource.search", callId: "r1f_dslash_" + i, arguments: { query: q } });
+    }
+    await call(bridge, token, { toolId: "resource.search", callId: "r1f_cap", arguments: { query: "tpx_PROBE_" + token } });
+    await call(bridge, token, { toolId: "resource.search", callId: "r1f_mpx", arguments: { query: "mpx_" + "M".repeat(20) } });
+    await call(bridge, token, { toolId: "resource.search", callId: "r1f_secret", arguments: { query: "api_key=" + SECRET } });
+    // 边界锚定：绝不能用裸 /x 之类的子串扫描（resource://res_x 是合法文本）
+    const BARE_ABS_PATH_RE = /(?:^|[\s"'({=:,;\[\]<>])\/[\w.@+-]+(?![\w.@+-])/;
+    const DOUBLE_SLASH_ABS_PATH_RE = /(?<![\w:/])\/\/[\w.@+-]+/;
+    assert.deepEqual(scanDbText(fx.f.identity.connection, [...bare, "//notes/todo", "///a/b", "/Users/", "/private/", "/var/folders", "tpx_", "mpx_", SECRET, "Bearer "]), []);
+    assert.deepEqual(scanDbTextRe(fx.f.identity.connection, BARE_ABS_PATH_RE), []);
+    assert.deepEqual(scanDbTextRe(fx.f.identity.connection, DOUBLE_SLASH_ABS_PATH_RE), []);
+  } finally { await fx.close(); }
+});
+
+test("r1g) 双斜杠绝对路径（//x、///a/b、see //notes/todo）落库去敏；URL/相对词正对照零漂移", async () => {
+  const redactQuery = (s) => domain.redactProjectedArguments(domain.projectArguments({ query: s }, { query: { type: "string" } })).query;
+  for (const [raw, expected] of [["//x", "[REDACTED_PATH]"], ["//data", "[REDACTED_PATH]"], ["///a/b", "[REDACTED_PATH]"], ["see //notes/todo", "see [REDACTED_PATH]"], [String.raw`\\server\share`, "[REDACTED_PATH]"]]) {
+    assert.equal(redactQuery(raw), expected, raw);
+  }
+  for (const s of ["resource://res_keep", "http://x.io/a", "s3://bucket/key", "a//b", "notes/todo", "a/b", "3/4 done", "2024/12/25", "Vertical Smoke Resource"]) {
+    assert.equal(redactQuery(s), s, "双斜杠分支改写了正对照：" + s);
+  }
+  assert.equal(redactQuery("tpx_ABC123"), "[REDACTED_CAPABILITY]", "capability 不得被路径分支抢走");
+  assert.equal(redactQuery("mpx_" + "M".repeat(20)), "[REDACTED_CAPABILITY]");
+  // https://…/var/data 的改写来自 f1bff21 既有的系统根分支，双斜杠分支不得让它再变
+  assert.equal(redactQuery("https://x.io/var/data"), "https://x.io[REDACTED_PATH]");
+  // 拒绝判据（冻结）：双斜杠形态的判定与 f1bff21 逐例一致
+  for (const v of ["//x", "///a/b", "see //notes/todo", "resource://res_keep", "a//b"]) {
+    assert.equal(domain.containsAbsolutePath(v), FROZEN_ABSOLUTE_PATH_RE.test(v), "containsAbsolutePath 漂移：" + v);
+  }
+
+  const { fx, bridge } = await setup();
+  try {
+    assert.equal(fx.grantTool("ai", ["tool.resource.search"]).ok, true);
+    const provider = fx.adapters.providers.SearchService;
+    const observed = [];
+    const origExecute = provider.execute;
+    provider.execute = async (ctx) => { observed.push(ctx.args); return origExecute(ctx); };
+    const { run, cap } = issue(bridge, fx, { maxCalls: 8 });
+    const token = cap.capability.token;
+    const rejected = await call(bridge, token, { toolId: "resource.search", callId: "r1g_abs", arguments: { query: "//x" } });
+    assert.equal(rejected.json.ok, false);
+    assert.equal(rejected.json.error, "TOOL_ARGUMENT_INVALID");
+    const embedded = "see //notes/todo";
+    const searched = await call(bridge, token, { toolId: "resource.search", callId: "r1g_embed", arguments: { query: embedded } });
+    assert.equal(searched.json.ok, true, JSON.stringify(searched.json));
+    assert.equal(observed.length, 1);
+    assert.equal(observed[0].query, embedded, "adapter 必须收到原文");
+    assert.deepEqual(fx.toolStore.decisionsOfTask(run.taskId).map((d) => [d.decision, d.reason_code]), [["INVALID", "TOOL_ARGUMENT_INVALID"], ["ALLOWED", "ALLOW"]]);
+    assert.deepEqual(fx.toolStore.executionsOfTask(run.taskId).map((e) => e.status), ["SUCCEEDED"]);
+    const rows = proposalRows(fx, "resource.search");
+    assert.equal(rows[0].arguments_safe, JSON.stringify({ query: "[REDACTED_PATH]" }));
+    assert.equal(rows[1].arguments_safe, JSON.stringify({ query: "see [REDACTED_PATH]" }));
   } finally { await fx.close(); }
 });

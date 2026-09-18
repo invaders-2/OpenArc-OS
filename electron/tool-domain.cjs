@@ -98,7 +98,7 @@ const UNSAFE_PATH_SRC = /(\/Users\/|\/private\/|\/var\/folders|C:\\|\\\\[^\\]+\\
 const UNSAFE_STRING_RE = new RegExp("(^|\\s)" + UNSAFE_PATH_SRC.source);
 /**
  * 路径「落库/投影去敏」判据（比拒绝判据宽）：契约是 absolute path 绝不落库，
- * 故持久化侧必须覆盖常见系统根（macOS/Linux）、通用 POSIX 绝对路径、盘符（含裸盘符）/UNC/file://。
+ * 故持久化侧必须覆盖常见系统根（macOS/Linux）、通用 POSIX 绝对路径（多段 / 裸单段 / 双斜杠形态）、盘符（含裸盘符）/UNC/file://。
  * 收紧拒绝判据会改变工具门语义，所以只扩大持久化去敏面；两者用途不同，各自有名字、绝不互相替换。
  */
 const UNSAFE_PATH_TAIL_SRC = "(?:[^\\s\"'`|;,)\\]}&<>]|\\s(?=[^\\s\"'`|;,)\\]}&<>]*[\\\\/]))*";
@@ -108,6 +108,8 @@ const UNSAFE_PATH_PERSIST_SRC = "(?:" +
   "|(?<![\\w])(?:[A-Za-z]:[\\\\/]" + UNSAFE_PATH_TAIL_SRC + "|[A-Z]:(?![\\\\/\\w]))" +
   "|\\/(?:Users|private|var\\/folders|tmp|Volumes|Library|Applications|etc|opt|home|root|usr|var|mnt|media|srv|dev|proc|sys)(?![A-Za-z0-9_-])" + UNSAFE_PATH_TAIL_SRC +
   "|(?<=^|[\\s\"'({=:,;\\[\\]<>])\\/(?:[\\w.@+-]+\\/)+" + UNSAFE_PATH_TAIL_SRC +
+  "|(?<![\\w:/])\\/\\/[^\\s\"'\`|;,)\\]}&<>]" + UNSAFE_PATH_TAIL_SRC +
+  "|(?<=^|[\\s\"'({=:,;\\[\\]<>])\\/[\\w.@+-]+(?![\\w.@+-])" +
   ")";
 const UNSAFE_PATH_PERSIST_RE = new RegExp(UNSAFE_PATH_PERSIST_SRC, "g");
 /** 截断残留：截断面可能把路径切成裸前缀 / 半段目录（如 `/Users`、`/dat`、`C:`）。 */
@@ -127,7 +129,11 @@ const PROJECTION_MAX_STRING = 256;
 const PROJECTION_MAX_ITEMS = 32;
 const PROJECTION_MAX_DEPTH = 6;
 
-/** 值级去敏：命中片段就地替换（保持可读），再沿用既有的 256 字符截断。 */
+/**
+ * 值级去敏：命中片段就地替换（保持可读），再沿用既有的 256 字符截断。
+ * 投影字符串上界是 271 而非 256：截断面把裸路径前缀换成 15 字符标记最多净增 14，再加省略号。
+ * 这里刻意不 clamp 回 256 —— clamp 会切掉完整标记，破坏 R-5' 的 fail-closed 不变式。
+ */
 function redactArgumentString(value) {
   const s = String(value)
     .replace(UNSAFE_PATH_PERSIST_RE, "[REDACTED_PATH]")
