@@ -169,8 +169,15 @@ class TaskService {
    */
   #boundModelConfig(task, context) {
     if (!this.modelService || !task.model_config_id) return { ok: true, bound: false };
-    const resolved = this.modelService.resolveModel({ context, configId: task.model_config_id });
-    if (!resolved.ok) return resolved;
+    // 解析**抛出**（如已绑定 config 行的 capabilities 是损坏 JSON）与返回失败同等对待：
+    // 绝不穿透成 RUNNING 悬挂，也不吞掉真实原因（原样带 detail），且绝不写任何状态。
+    let resolved;
+    try {
+      resolved = this.modelService.resolveModel({ context, configId: task.model_config_id });
+    } catch (e) {
+      resolved = { ok: false, error: "MODEL_CONFIG_UNAVAILABLE", detail: String((e && e.message) || e).slice(0, 120) };
+    }
+    if (!resolved || !resolved.ok) return resolved || { ok: false, error: "MODEL_CONFIG_UNAVAILABLE" };
     if (resolved.snapshot.modelConfigVersion !== task.model_config_version) {
       return { ok: false, error: ERROR.MODEL_CONFIG_CHANGED, expected: task.model_config_version, current: resolved.snapshot.modelConfigVersion };
     }

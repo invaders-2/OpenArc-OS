@@ -255,9 +255,11 @@ class TaskHarnessOrchestrator {
       if (!callRes.ok) {
         // 版本在 capability 签发与本次调用之间被改（真实竞态）：绝不留下 RUNNING 悬挂的 run，
         // 也绝不静默换模型 —— 与既有 MODEL_CONFIG_CHANGED 阻断路径同事件、同终态。
-        if (callRes.error === ERROR.MODEL_CONFIG_CHANGED) {
+        // R-8 收口：**同一配置解析类集合**（含已绑定 config 行损坏导致的解析抛出）一律走这条收敛路径；
+        // 其它错误码逐字保持原样返回。
+        if (MODEL_CONFIG_PRECONDITION_ERRORS.includes(callRes.error)) {
           const fresh = svc.getTask({ context, taskId });
-          return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: ERROR.MODEL_CONFIG_CHANGED, event: TASK_EVENT.HARNESS_RUN_UNKNOWN_EFFECT, expectedRevision: fresh.ok ? fresh.task.revision : task.revision });
+          return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: callRes.error, event: TASK_EVENT.HARNESS_RUN_UNKNOWN_EFFECT, expectedRevision: fresh.ok ? fresh.task.revision : task.revision });
         }
         return callRes;
       }

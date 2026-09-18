@@ -11,9 +11,10 @@
  * 旧任务懒绑定与"解析失败保持既有行为" / 两个确定性同步竞态窗口（含 startModelCall 路径）/
  * R-7 capability 签发同一同步点改版（期望冻结版本透传，绝不签发非冻结版本）/ R-9 绑定后被禁用
  * （配置解析类失败一律在签发前阻断，原因码明确）/ 未绑定旧任务（expected=null）正对照。
- * R-8：K/L/M/N/O/P 六组用例 —— 未绑定时四条真实入口 0 run / 0 capability / 0 请求 / 0 执行并收敛 BLOCKED、
+ * R-8：K/L/M/N/O/P/Q 七组用例 —— 未绑定时四条真实入口 0 run / 0 capability / 0 请求 / 0 执行并收敛 BLOCKED、
  * 默认稍后出现才懒绑定并真实成功、并发只形成一种绑定、历史 run/call 逐字段不变且绝不回填、
- * 解析抛出（损坏 capabilities 行）与解析失败完全同形、modelService=null 的桩装配与 ad5e600 逐字一致。
+ * 未绑定懒绑定的解析抛出与解析失败完全同形、已绑定 config 行损坏在预检与 startModelCall 两个窗口
+ * 都收敛 BLOCKED（无 STARTING/RUNNING 悬挂）、modelService=null 的桩装配与 ad5e600 逐字一致。
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -1169,6 +1170,91 @@ test("D4-03 P · R-8：解析**抛出**（真实库行 capabilities 损坏 JSON�
       assert.deepEqual(toolUsed, [], "0 tool propose/execute");
     } finally { await orch.dispose(); }
   } finally { await fx.close(); }
+});
+
+test("D4-03 Q · R-8：已绑定 config 行损坏（解析抛出）—— 预检与 startModelCall 两个窗口都收敛 BLOCKED，绝无 STARTING/RUNNING 悬挂", async () => {
+  const fx = await createToolHarnessFixture({ withAdapters: true, behavior: "exact" });
+  try {
+    const ctx = fx.ctx();
+    const cid = fx.modelConfigId;
+    setChatDefault(fx, cid);
+    const corrupt = () => { fx.f.modelStore.transactSync(() => { fx.f.modelStore.db.prepare("UPDATE model_configs SET capabilities = ? WHERE config_id = ?").run("{corrupt", cid); }); };
+
+    // Q1 · 预检窗口（capability 签发之前）：真实库行损坏必须让 checkModelConfig 显式失败，而不是抛异常
+    const t1 = fx.taskService.createTask({ context: ctx, goal: "return exactly: " + EXACT, modelConfigId: cid });
+    assert.equal(t1.task.modelConfigVersion, 1, "前置：任务已绑定");
+    corrupt();
+    const svcRes = fx.taskService.checkModelConfig({ context: ctx, taskId: t1.task.taskId });
+    assert.equal(svcRes.ok, false, "服务层必须显式失败而不是抛异常：" + JSON.stringify(svcRes));
+    assert.equal(svcRes.error, "MODEL_CONFIG_UNAVAILABLE", JSON.stringify(svcRes));
+    assert.match(String(svcRes.detail || ""), /JSON/i, "真实抛出原因必须原样带出：" + JSON.stringify(svcRes));
+
+    const issued = spyIssueCapability(fx);
+    const toolUsed = spyToolUsage(fx);
+    const r1 = await fx.orchestrator.runTask({ context: ctx, taskId: t1.task.taskId, expectedRevision: t1.task.revision, verify: VERIFY });
+    assert.equal(r1.ok, false, JSON.stringify(r1));
+    assert.equal(r1.error, "MODEL_CONFIG_UNAVAILABLE", JSON.stringify(r1));
+    assert.equal(r1.blocked, true, JSON.stringify(r1));
+    assert.equal(taskStatus(fx, t1.task.taskId), "BLOCKED", "Task 必须收敛 BLOCKED");
+    assertConvergedBlocked(fx, t1.task.taskId, "Q1");
+    const runs1 = runsOf(fx, t1.task.taskId);
+    assert.equal(runs1.length, 1);
+    assert.equal(runs1[0].status, "BLOCKED", "run 绝不悬挂在 STARTING/RUNNING：" + JSON.stringify(runs1));
+    assert.equal(runs1[0].error_code, "MODEL_CONFIG_UNAVAILABLE");
+    assert.equal(runs1[0].model_config_id, cid, "已绑定 run 归属不变");
+    assert.equal(fx.taskStore.callsOfTask(t1.task.taskId).length, 0, "0 条 model call");
+    assert.equal(fx.taskStore.artifactsOfTask(t1.task.taskId).length, 0, "0 Artifact");
+    assert.equal(fx.proxy.capabilities.size, 0, "0 capability 签发");
+    assert.equal(fx.fp.state.requests, 0, "0 provider 请求");
+    assert.deepEqual(toolUsed, [], "0 tool propose/execute");
+    assert.equal(issued.length, 0, JSON.stringify(issued));
+    assert.equal(fx.taskStore.taskById(t1.task.taskId).model_config_id, cid, "已绑定任务不得被改写");
+    assert.equal(fx.taskStore.taskById(t1.task.taskId).model_config_version, 1);
+    assert.equal(eventsOfType(fx, t1.task.taskId, "task.model_config_bound").length, 0, "不得新增绑定事件");
+  } finally { await fx.close(); }
+
+  // Q2 · startModelCall 窗口（capability 已签发、startModelCall 之前损坏）：
+  //      沿用 G2 的受控同步点手法 —— 在 adapter.start 返回的同一同步点内损坏，不做 sleep 竞猜。
+  //      独立夹具：绑定任务必须在 config 行仍然健康时创建（createTask 自己也要 resolve）。
+  const fx2 = await createToolHarnessFixture({ withAdapters: true, behavior: "exact" });
+  try {
+    const ctx = fx2.ctx();
+    const cid = fx2.modelConfigId;
+    setChatDefault(fx2, cid);
+    const corrupt = () => { fx2.f.modelStore.transactSync(() => { fx2.f.modelStore.db.prepare("UPDATE model_configs SET capabilities = ? WHERE config_id = ?").run("{corrupt", cid); }); };
+    const t2 = fx2.taskService.createTask({ context: ctx, goal: "return exactly: " + EXACT, modelConfigId: cid });
+    const capsBefore2 = fx2.proxy.capabilities.size;
+    const baseFactory = fx2.realAgentFactory();
+    let corrupted = 0;
+    const racingFactory = () => {
+      const adapter = baseFactory();
+      const origStart = adapter.start.bind(adapter);
+      adapter.start = async (opts) => { const info = await origStart(opts); corrupted += 1; corrupt(); return info; };
+      return adapter;
+    };
+    const orch = fx2.makeOrchestrator(racingFactory);
+    try {
+      const r2 = await orch.runTask({ context: ctx, taskId: t2.task.taskId, expectedRevision: t2.task.revision, verify: VERIFY });
+      assert.equal(corrupted, 1, "前置：损坏必须真实发生在 capability 签发之后、startModelCall 之前");
+      assert.equal(fx2.proxy.capabilities.size, capsBefore2 + 1, "前置：本窗口内 capability 已真实签发");
+      assert.equal(r2.ok, false, JSON.stringify(r2));
+      assert.equal(r2.error, "MODEL_CONFIG_UNAVAILABLE", JSON.stringify(r2));
+      assert.equal(r2.blocked, true, JSON.stringify(r2));
+      assert.equal(taskStatus(fx2, t2.task.taskId), "BLOCKED", "Task 必须收敛 BLOCKED");
+      assertConvergedBlocked(fx2, t2.task.taskId, "Q2");
+      const runs2 = runsOf(fx2, t2.task.taskId);
+      assert.equal(runs2.length, 1);
+      assert.equal(runs2[0].status, "BLOCKED", "capability 已签发的 run 也必须收敛 BLOCKED：" + JSON.stringify(runs2));
+      assert.equal(runs2[0].error_code, "MODEL_CONFIG_UNAVAILABLE");
+      assert.equal(runs2[0].model_config_id, cid, "已绑定 run 归属不变");
+      assert.equal(fx2.taskStore.callsOfTask(t2.task.taskId).length, 0, "0 条 model call");
+      assert.equal(fx2.taskStore.artifactsOfTask(t2.task.taskId).length, 0, "0 Artifact");
+      assert.equal(fx2.fp.state.requests, 0, "0 provider 请求（绝不带病调用模型）");
+      assert.equal(fx2.taskStore.taskById(t2.task.taskId).model_config_id, cid, "已绑定任务不得被改写");
+      assert.equal(eventsOfType(fx2, t2.task.taskId, "task.model_config_bound").length, 0, "不得新增绑定事件");
+    } finally { await orch.dispose(); }
+    assert.equal(fx2.taskStore.allTasks().length, 1, "Q2 只新增自己那条任务");
+  } finally { await fx2.close(); }
 });
 
 test("D4-03 O · 正对照：modelService 为 null 的 test-only 桩装配行为与 ad5e600 逐字一致", async () => {
