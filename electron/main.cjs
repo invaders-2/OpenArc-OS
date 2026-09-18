@@ -162,24 +162,6 @@ app.whenReady().then(async () => {
     send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("task:event", event); },
   });
 
-  // D4 main-entry E2E：第二处、也是最后一处默认关闭的 test-only 播种（正常启动零影响）。
-  // 仅当 OPENARC_E2E_SEED_TOOL_GRANTS=1 时启用：在**真实 ADMIN 会话建立后**调用真实
-  // authorization.grantAppToolPermission（仍走 SUPER_ADMIN 校验，绝不直接写库 / 不绕过授权链），
-  // 只为 ai 授予本 gate 四条流程所需的 tool 动作。产品目前没有授予 App TOOL-scope 权限的
-  // UI / IPC 入口 —— 该入口本身记为 gap，由播种代偿。
-  if (process.env.OPENARC_E2E_SEED_TOOL_GRANTS === "1") {
-    const seedTimer = setInterval(() => {
-      const sessionRef = identity?.service?.current;
-      if (!sessionRef) return;
-      const seed = identity.authorization.grantAppToolPermission({
-        context: { sessionRef },
-        appId: "ai",
-        actions: ["tool.resource.search", "tool.resource.readMetadata", "tool.resource.trash"],
-      });
-      if (seed && seed.ok) clearInterval(seedTimer);
-    }, 500);
-  }
-
   // D3-04C：注册安全预览协议 handler（每次请求重新授权 + Range 流式返回）。
   protocol.handle("openarc-resource", (request) => identity.previewService.handleProtocolRequest(request));
 
