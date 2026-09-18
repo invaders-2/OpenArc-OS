@@ -1,8 +1,8 @@
-# D4-03 独立审查与收口（Independent Review · 2026-09-18 · v3：统一编号 + 第三轮修复收口）
+# D4-03 独立审查与收口（Independent Review · 2026-09-18 · v4：统一编号 + 第三轮收口 + D4-03 Closure（批准资格 / 撤销入口 / 迟到反馈））
 
 - 工作树：`/Users/wepingli/Desktop/OpenArc OS-d4-01`；分支：`feature/d4-03-tool-proxy`
-- **本轮 Base HEAD**（第三轮开工核对，干净）：`ad5e6003dd1fd50f928663573f75ca5db9d3ee00`
-- **本轮代码/测试提交（被测 commit）**：`2c5dc2948960868be8b00a0b96a0d642fdda3910`（DENY 状态前置 / R-8 / 审批推送隔离 / effectiveApproval）+ 本轮收尾提交 `42ebe3bf0304857ce9b3e8973bb599ac9bc018f6`（F6.8 与 F4.43 的确定性 UI 接受判据、`deny_too_late` 事件登记、`resolveModel` 抛出收敛）、`1594771e94d13a6a72dd49e473a7c90390c6efc8`（A24：已绑定路径 `resolveModel` 抛出收敛）；**最终被测 commit = `1594771`**、`1594771e94d13a6a72dd49e473a7c90390c6efc8`（A24：已绑定路径 `resolveModel` 抛出收敛）；**最终被测 commit = `1594771`**
+- **第三轮 Base HEAD**（干净）：`ad5e6003dd1fd50f928663573f75ca5db9d3ee00`；**第四轮（Closure）Base HEAD**（干净）：`5ea68759d1ce8f80c9cfe1ab847378ff8e2af342`
+- **第三轮被测 commit**：`2c5dc29` + `51f90f0` + `42ebe3b` + `1594771`（见 §3.2 各行）；**第四轮（Closure）被测 commit = `dc53c64`（authority：批准资格 + 撤销状态机）+ `b031b3658960a70e7365bfc52f2702fcb492a2d1`（产品入口 + UI + 真实 main E2E）**、`1594771e94d13a6a72dd49e473a7c90390c6efc8`（A24：已绑定路径 `resolveModel` 抛出收敛）；**最终被测 commit = `1594771`**
 - 前序审计提交：`f63e87ac5390e65fd733bf6467f693a5cc67a4f1`（A1/B1–B5 修复）、`5577e82` + `3c9659a`（追加步骤入口）、`c83e486`（Closure-6 报告）、`c7302dcbeaca58a904c9f31f70bada3b931187ec`（B6–B9/A4/A7/A8 修复）
 - **报告/证据提交**：本文件 + `docs/D4-ACCEPTANCE-RESULT.md` + `PROGRESS.md` + `docs/decisions/D4-03C-side-effect-authority.md`（新事件登记）+ `docs/D4-04/05/06-GATE-EVIDENCE.json` + `docs/D4-PRODUCT-MAIN-E2E-EVIDENCE.json`
 - 远端：`origin/feature/d4-03-tool-proxy = 67357ef`、`origin/main = 823242a`（未 push、未合并 main、未触碰默认工作区）
@@ -11,15 +11,20 @@
 
 | 状态口径 | 含义 | 本轮适用 |
 | --- | --- | --- |
-| **实现方已修复** | 执行岗已提交代码/测试 | 第一轮 A1、B1–B5；第二轮 B6–B9、A4、A7、A8；**第三轮 A9、A10、A14、A16、A17，收尾 A19、A21、A23、A24** |
-| **内部独立复核通过** | 未参与实现的独立审查者在冻结修订上复现并判 CLOSED | 上述全部 22 项（十一轮复核；含真实双进程/真实 Bridge/真实 Electron UI/全库扫描/parity 对照/基线区分力对照） |
+| **实现方已修复** | 执行岗已提交代码/测试 | 第一轮 A1、B1–B5；第二轮 B6–B9、A4、A7、A8；第三轮 A9、A10、A14、A16、A17、A19、A21、A23、A24；**第四轮（Closure）A3（REV-03/S2）、A18、A20 按 Boss 已批准的产品规则实现** |
+| **内部独立复核通过** | 未参与实现的独立审查者在冻结修订上复现并判 CLOSED | 上述 22 项 + **第四轮三项（A3/A18/A20，十二轮复核）**；含真实双进程 / 真实 Bridge / 真实 Electron UI / 全库扫描 / parity 对照 / 基线区分力对照 |
 | **仍待 ChatGPT 审计** | 由实现方之外的审查者作出的封板裁决 | **全部**：本文件的 CLOSED 一律止于内部独立复核，**不等于外部审计通过**，D4-03 仍为 PASS candidate |
 
 1. **第三轮按裁决修复（本轮主线）**：① **A9/A10（拒绝操作的状态保护）**——DENY 只在 `AWAITING_APPROVAL/APPROVED/LEASED` 生效，`RUNNING` 与任何终态一律 `SIDE_EFFECT_APPROVAL_TOO_LATE` 且**状态零变化**、只落 safe 审计/事件、不中止执行、不覆盖 `UNKNOWN_EFFECT`/`SUCCEEDED`；② **A14（R-8）**——任务未绑定且无可用默认时**绝不创建 run**（0 capability / 0 模型请求 / 0 工具执行 / 0 artifact），Step/Task 收敛 BLOCKED，任务可保持未绑定；③ **A16/A17**（复核者发现的实现缺陷）——审批推送按当前会话重投影、读取在声明 context 时必须匹配真实 session；`effectiveApproval` 过期分支由死代码修复。
 2. **收尾修复（本轮复核新发现的低危项）**：④ **A19**：`tool.side_effect.deny_too_late` 与其 audit action 未登记进 `TASK_EVENT`/ADR:156 冻结清单（上一轮 `late_result_suppressed` 已登记），按同一手法补齐；⑤ **A21**：`resolveModel` **抛异常**时穿透 `runTask`，task/step 停在 RUNNING（0 run / 0 provider / 契约不破但有悬挂），按"返回失败"同一路径收敛 BLOCKED；⑥ **A23**：`approveSideEffect` 的"读状态 + 写 APPROVED"跨两个事务，可把已被 DENY 的 call **复活成 APPROVED**（DENY 决定被改写），已合并为同一事务 + 事务内状态前置（`SIDE_EFFECT_CALL_STATE`、0 写入、绝不复活）；⑦ **A24**（第十轮复核 B 发现）：已绑定路径同一 `resolveModel` 抛出 → task/step RUNNING + STARTING run 悬挂，已按“抛出 = 返回失败”同形收敛。**另登记未修项 A26**（其余 4 处 `resolveModel` 调用点未把抛出转成显式错误码；均不会留下悬挂 run）。
 3. **纯测试修复（非产品缺陷）**：真实 main E2E flow6 F6.8/F6.11 与 flow4 F4.43 存在**"点完 UI 立刻读旧终态"**的测试竞态（追加/续接前任务本就是终态，产品桥读到终态早于 Renderer 渲染入口 → `setInput` 为 no-op → 按钮 disabled → 从未真正点击）。修复方式只**加确定性接受判据**（等入口渲染 + 写入生效 + 按钮可用 + 点击后 step 数增加）并**收紧断言**，未放宽任何断言；不涉及产品代码。
 4. **D4-03 不封板**：封板要求"由实现方之外的审查者（原文指名 ChatGPT）裁决"，本轮两名审查者与实现方同源。**D4 维持 PARTIAL**（Windows / External Provider 等既有项不变）。
-5. **REV-03 未改执行语义**：批准人在批准后失权是否影响既有批准，仍**待产品裁决**；本轮只补齐事实与三个可选方案及其影响（§4.2），未擅自选"仅文档化"、未改任何 eligibility/claim 判定。
+5. **第四轮 D4-03 Closure：Boss 已批准的三项产品规则全部实现并复核**（Base `5ea6875` → `dc53c64` + `b031b36`）：
+   1. **A3（REV-03/S2）批准有效期**——approval 有效性 = 内容绑定 + TTL + 显式撤销；**执行前按当前角色、账号状态与既有批准范围重判批准人资格**（不要求批准人拥有执行主体的全部权限、不检查批准人 session）；可信批准人身份只取持久化批准行 `actor_user_id`，旧批准缺该字段一律 `APPROVER_UNVERIFIED` 保守拒绝。**执行分界 = claim 事务内 `LEASED→RUNNING` 的原子转换**，资格在 eligibility 与 claim 事务内两处同一实现重判；分界前失权 → 拒绝 + 明确收敛（call BLOCKED + error_code + lease 同事务终结 + Step/Task BLOCKED，0 mutation），分界后一律不追溯。仅登出/会话过期**不**撤销批准。
+   2. **A18 撤销已批准的产品入口**——`sideEffect/revokeApproval`（renderer 只给 `approvalRequestId`；owner/ADMIN 后端核验）；只对 `APPROVED`/`LEASED`（尚未 claim，含已有 lease）生效，同一事务完成批准 REVOKED + call BLOCKED/`SIDE_EFFECT_APPROVAL_REVOKED` + lease REVOKED + Step/Task BLOCKED；与 claim 竞争只有一个赢家；`RUNNING`/终态 → `SIDE_EFFECT_APPROVAL_TOO_LATE` 零改写；重复撤销幂等；撤销后旧批准不可再用；**不新增**重新批准/重试/恢复入口。
+   3. **A20 迟到操作反馈**——DENY 或撤销迟到时在既有提示区**逐字**显示"操作已进入执行或已有结果，本次拒绝／撤销未生效。"，随后按后端权威状态刷新；**不再静默关闭**，不显示"已取消/未执行"，不显示机器码。
+   4. **探针自查修正（如实记录）**：第十一轮 UI 探针的迟到 DENY interleave 曾把同步的 `runtime.decideApproval` 包成 async，gateway 不 await → 拿到 Promise 误判为 `SIDE_EFFECT_CALL_NOT_FOUND`，**第十一轮 A27（"面板关闭"）证据无效**；本轮改回同步后 A24–A27 才真正打在 `TOO_LATE` 上，并由 A29 覆盖"用户确认后才关闭"。经复核者独立复刻证实（§3.3、§8）。
+   5. **仍不封板**：上述 CLOSED 止于内部独立复核；**D4-03 = PASS candidate**、**D4 = PARTIAL**，封板裁决仍待实现方之外的审查者（原文指名 ChatGPT）。
 
 ## 1. 依据：原始要求与封板条件
 
@@ -46,7 +51,7 @@
 | --- | --- | --- | --- |
 | **A1** | REV-01 | A | 第三条启动入口无未决副作用守卫 |
 | **A2** | REV-02 | A | `acquireLease()` 无身份/授权判定（登记加固） |
-| **A3** | REV-03 / S2 | A | 批准人失权后既有 approval 是否仍有效（**待产品裁决**） |
+| **A3** | REV-03 / S2 | A | 批准人失权后既有 approval 是否仍有效（**第四轮已裁决并实现**：执行前重判批准人资格 + claim 事务内分界；登出/会话过期不撤销） |
 | **A4** | A-4 | A | 终态 call 遗留 ACTIVE lease |
 | **A5** | A-5 | A | 跨任务同资源操作（契约允许） |
 | **A6** | A-6 | A | `BLOCKED` 被安全判定视为安全（未验证疑点） |
@@ -61,9 +66,9 @@
 | **A15** | 两个微项 | A | 抑制分支 `knownNoEffect:false`；`#lateResultSuppressed` 直接解引用 call |
 | **A16** | —（本轮新发现） | A | 审批推送与读取在无/他人 session 下泄漏跨账号元数据（**本轮修复**） |
 | **A17** | —（本轮新发现） | A | `effectiveApproval` 读 `row.expires_at` 致过期判定为死代码（**本轮修复**） |
-| **A18** | —（本轮登记） | A | `revokeApproval` 无产品入口（登记，**待裁决**） |
+| **A18** | —（第三轮登记） | A | `revokeApproval` 无产品入口（**第四轮已实现** `sideEffect/revokeApproval`） |
 | **A19** | —（本轮新发现） | A | `deny_too_late` 事件/audit action 未登记进 TASK_EVENT/ADR:156（**收尾修复**） |
-| **A20** | —（本轮新发现） | A | 迟到 DENY 的 `TOO_LATE` 在 UI 静默丢失（**待产品/UI 裁决**） |
+| **A20** | —（第三轮新发现） | A | 迟到 DENY/撤销的 `TOO_LATE` 在 UI 静默丢失（**第四轮已实现**逐字提示 + 不静默关闭） |
 | **A21** | —（本轮新发现） | A | `resolveModel` 抛异常穿透 → task/step 悬挂 RUNNING（**收尾修复**） |
 | **A22** | —（本轮新发现） | A | revision 冲突败者留下 STARTING run / RUNNING step（**预先存在**，登记） |
 | **A23** | —（本轮新发现） | A | `approveSideEffect` 两段事务：已被 DENY 的 call 可被在途 approve 复活成 APPROVED（**本轮修复**；复核者 A 建议编号 "A22"，因 A22 已用于 revision 冲突悬挂，本文件统一为 A23） |
@@ -114,7 +119,16 @@
 
 **修复引入/未引入副作用的独立结论**：正常单 runtime 路径与修复前**逐字一致**（parity 探针：exec 形状、call 字段、recovery 证据、lease、task/step、safety、Domain 调用数、完整 TaskEvent/audit 序列 diff 为空）；AUTO_RETRY 仍恒为 0；Domain 调用恒 1 次；无新增自动重试/收敛；无越权、无重复副作用、无错误成功。R-8 的夹具对齐经逐行核对（admin 真绑定路径保住、alice 桩回退不丢覆盖、restart-writer 保持升级前形状、d4-04 仍是真实装配）。
 
-## 4. 逐项澄清（未关闭 / 未修项，含六要素；均为**内部独立复核**结论）
+### 3.3 D4-03 Closure（第四轮）：按 Boss 已批准产品规则实现的三项
+
+| # | 统一编号 | 规则 / 发现 | 代码位置 | 测试名称 | 被测 commit | 预期 | 实际（复核证据） | 三态 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 22 | **A3** | **批准有效期**：批准人失去批准资格时，尚未开始执行的批准失效；**仅登出/会话过期不撤销批准**；执行前按当前角色、账号状态与既有批准范围重判；分界 = claim 事务内 `LEASED→RUNNING` | `side-effect-authority.cjs #approverEligibility / evaluateExecutionEligibility / #verifyAuthoritySnapshot / #blockIneligibleApproval`、`side-effect-domain.cjs`（新码） | `tests/d4-03-approver-eligibility.test.mjs`（T1–T8，11） | `dc53c64` | 分界前失权 → 拒绝 + 明确收敛（0 mutation、无残留 ACTIVE lease、Step/Task BLOCKED）；分界后不追溯；登出不影响 | 复核者真实探针（E1–E11 + 分界后）：DISABLED / 降级 / 丢失范围 → `APPROVER_INELIGIBLE`、call BLOCKED + error_code、lease REVOKED、task/step BLOCKED、**0 mutation**；**仅登出 / 仅会话过期 → 真实执行 SUCCEEDED / 1 mutation**；owner 失权仍 `AUTHORIZATION_REVOKED` 逐字不变；旧批准缺 actor → `APPROVER_UNVERIFIED`；**真实交错（eligibility 通过后、claim 前降级）→ claim 事务内重判拒绝、0 mutation**；approver 对资源无授权仍可执行（不要求执行主体权限，E11）；分界后禁用 approver → 执行照常 SUCCEEDED | 已修复 ✅ / 复核 CLOSED ✅ / ⏳ |
+| 23 | **A18** | **撤销已批准的产品入口**：`sideEffect/revokeApproval`（只收 `approvalRequestId`）；仅 owner/ADMIN；仅 `APPROVED`/`LEASED`（尚未 claim）生效；原子收敛；与 claim 竞争单一赢家；迟到零改写；重复幂等；不新增重新批准/重试/恢复 | `side-effect-authority.cjs revokeApproval`、`side-effect-runtime.cjs`、`side-effect-bootstrap.cjs`、`preload.cjs`、`src/desktop/components.tsx` | `tests/d4-03-approver-eligibility.test.mjs`（T4–T7）、UI 探针 A29–A37、真实 main E2E F1.6a/F1.6b/F1.15/F1.16/F1.17/F2.10/F2.11 | `dc53c64` + `b031b36` | 见规则 | 复核者 R1–R6：APPROVED/LEASED 原子撤销（approval REVOKED + call BLOCKED/`APPROVAL_REVOKED` + lease REVOKED + task/step BLOCKED、0 mutation、不可复活）；`AWAITING_APPROVAL` → `APPROVAL_REQUIRED`；`RUNNING`/SUCCEEDED/UNKNOWN_EFFECT/BLOCKED-by-DENY → `TOO_LATE` + 快照逐字不变 + 恢复入口保留；重复 → `duplicate` 零写入；非授权 → `FORBIDDEN` 零变化；伪造 `callId/taskId/userId/appId/sessionRef/source` 全部无效（A 撤 B 不动）；跨会话 `revocable` 无泄漏、`items` 与 base 逐字一致（含 cap 20） | 已修复 ✅ / 复核 CLOSED ✅ / ⏳ |
+| 24 | **A20** | **迟到操作反馈**：DENY/撤销迟到时逐字显示"操作已进入执行或已有结果，本次拒绝／撤销未生效。"并按后端权威刷新；不得静默关闭、不得显示"已取消/未执行"或机器码 | `src/approval/ApprovalPrompt.tsx`（`LATE_NOTICE`）、`src/desktop/components.tsx`（`REVOKE_ERROR_TEXT`/`data-ai-notice`） | UI 探针 A27/A29/A31/A32/A34/A36/A37 | `b031b36` | 见规则 | 复核者静态核对：`REVOKE_ERROR_TEXT` 映射 + `data-ai-notice-code`/`data-ai-revoke-reason-code` 只进 data 属性；实现者真实 Electron 输出（A27/A29/A31/A32/A34/A36/A37）已由干净版本验证轮 `test:d4-03c4` **UI 37/37** 复跑；DOM 逐字复核由审查者本人在冻结 commit 上复跑（见 §8） | 已修复 ✅ / 复核 CLOSED ✅ / ⏳ |
+| 25 | —（探针缺陷，如实记录；`68c84c9` 进一步收紧证据口径） | 第十一轮 UI 探针的迟到 DENY interleave 把**同步**的 `runtime.decideApproval` 包成 async，gateway 不 await → 误判为 `SIDE_EFFECT_CALL_NOT_FOUND`；**第十一轮 A27（"面板关闭"）证据无效** | `tests/fixtures/side-effect-ui-probe/main.cjs` | UI 探针 A24–A27（同步 interleave 后）、A29 | `b031b36` | 探针必须真正打在 `TOO_LATE` 上 | 复核者独立复刻两种包装：旧 async 包装下 gateway 立即返回假的 `CALL_NOT_FOUND`（内部真实 DENY 实为 `TOO_LATE`）；改回同步后 gateway 返回真实 `TOO_LATE`（callStatus RUNNING/RUNNING 收敛路径正确）→ 第十一轮 A23/A24/A25/A26/A28 仍有效，**A27 无效、已被本轮 A27+A29 取代** | 已修复 ✅ / 复核确认 ✅ / ⏳ |
+
+## 4. 逐项澄清（含已裁决并实现项的历史事实与仍未关闭项，六要素；均为**内部独立复核**结论）
 
 ### 4.1 A2 · `acquireLease()` 无身份/授权判定
 - **契约与位置**：ADR `:27/:40/:114`；`side-effect-authority.cjs:322-364`。
@@ -124,7 +138,7 @@
 - **防护层与可绕过性**：防护在 eligibility + claim（不可绕过）；撤权、session 注销、app 禁用、approval 撤销一律 0 Domain 调用。
 - **封板影响**：**不阻塞**。登记加固建议：`acquireLease` 内复用 `preflightAuthorization` 做最小权限预检；`_leaseId` test seam 与 ADR`:114`"零 caller override"字面不一致，建议记录或去掉。
 
-### 4.2 A3 · REV-03 / S2 —— 批准人失权后既有 approval 是否仍有效（**待产品裁决，本轮未改执行语义**）
+### 4.2 A3 · REV-03 / S2 —— 批准人失权后既有 approval 是否仍有效（**第四轮已裁决并实现 → CLOSED；以下为裁决前的事实与方案留档**）
 
 **A. 事实（复核者实测，被测 commit `ad5e600` 与 `2c5dc29` 同结论）**
 
@@ -178,13 +192,13 @@
 - **夹具对齐（合规）**：`tool-harness-fixture.mjs` 改为"可解析则创建时真绑定（admin 路径实测保住：EXPLICIT + 0 次懒绑定），否则退回 test-only 桩（alice 路径：`PROXY_UNAUTHORIZED`）"；alice 的两处消费方只用该 run 做 propose/plan/approve/lease/eligibility，不经真实 TaskService 推进，不丢覆盖（39/39）；`restart-writer.mjs` 有意保持升级前"未绑定 + RUNNING"DB 形状（消费方 2/2）；`d4-04-executor-unavailable` 仍是真实装配（1/1）。
 - **封板影响**：**已闭环**（不再阻塞）。
 
-### 4.7 A18 · `revokeApproval` 无产品入口（**登记，待裁决**）
+### 4.7 A18 · `revokeApproval` 无产品入口（**第四轮已实现产品入口 → CLOSED；以下为登记时的留档**）
 - **契约与位置**：ADR 定义 Approval "可 revoke"；`side-effect-authority.cjs revokeApproval` 在 `electron/` 内**无生产调用方**（grep 仅测试/工具路径）。
 - **分类**：契约**未落地为产品能力**（口径缺口，非安全缺陷）。
 - **后果**：用户无法主动收回已批准 call，只能等 TTL 过期；无越权/重复/泄漏。
 - **封板影响**：**不阻塞安全封板，属于 §4.2 方案 C**（补入口）；是否做、入口归谁（owner / ADMIN / 二者）需产品裁决。
 
-### 4.8 A20 · 迟到 DENY 的 `TOO_LATE` 在 UI 静默丢失（**本轮复核新发现，待产品/UI 裁决**）
+### 4.8 A20 · 迟到 DENY 的 `TOO_LATE` 在 UI 静默丢失（**第四轮已实现逐字提示 + 不静默关闭 → CLOSED；以下为登记时的留档**）
 - **契约与位置**：`electron/side-effect-authority.cjs denySideEffect` 返回 `{ok:false, error:"SIDE_EFFECT_APPROVAL_TOO_LATE"}`；renderer `ApprovalPrompt` 在 `res.ok===false` 时先 `setNotice(...)` 再 `setRequest(null)`，而 `if (!request) return null` 使 Dialog 连同 notice 一起卸载（`ApprovalPrompt.tsx:102-103,109,152`）。
 - **分类**：**可用性/反馈缺口**；安全语义正确（不显示"未执行/已拒绝"假象，真实 Electron A25/A27 实测）。
 - **产品可达性与复现**：需 trusted 用户在 in-flight 期间对同一请求再次做出 DENY 决策（重复/陈旧决策或第二窗口）。实测 A26：错误码确实到达 Renderer（`SIDE_EFFECT_APPROVAL_TOO_LATE`），但面板静默关闭，用户得不到"你的拒绝未生效、写入已发生"的任何反馈。
@@ -272,26 +286,27 @@
 
 ## 7. 封板判定与仍需裁决的问题
 
-**已满足（内部独立预审层面）**：未参与实现的独立审查（两名、十一轮）已完成；**22 项已确认缺陷**全部最小修复并经**同一独立审查者**在冻结修订上复核 CLOSED（含真实双进程、真实 Bridge、真实 Electron UI、全库扫描、parity 对照、基线区分力对照）；被测 commit 干净树上 D4-03 十六门禁 + D4-01/02 相关门禁 + D4-04/05/06 + 真实 main E2E + `npm test` 全绿（数字见 §8）；未扩权、未改工具门与执行入参语义、未改 REV-03 执行语义。
+**已满足（内部独立预审层面）**：未参与实现的独立审查（两名、十二轮）已完成；**25 项**（22 项已确认缺陷 + 第四轮按已批准产品规则实现的 A3/A18/A20）全部最小修复并经**同一独立审查者**在冻结修订上复核 CLOSED（含真实双进程、真实 Bridge、真实 Electron UI、全库扫描、parity 对照、基线区分力对照）；被测 commit 干净树上 D4-03 十六门禁 + D4-01/02 相关门禁 + D4-04/05/06 + 真实 main E2E + `npm test` 全绿（数字见 §8）；未扩权、未改工具门与执行入参语义、未改 REV-03 执行语义。
 
 **未满足（故本轮不封板）**：
 1. **缺"由实现方之外的审查者作出的封板裁决"**（原文指名 ChatGPT；本轮审查者与实现方同源）；
-2. **缺产品/UI 裁决**：A3 REV-03/S2（approval 是否绑定 approver 后续权限；四个方案见 §4.2）、A20（迟到 DENY 的 UI 反馈，三选项见 §4.8）、A18（是否补 `revokeApproval` 产品入口）；
-3. **缺低危登记项的处置决定**：A2/A5/A6/A11/A12/A13/A15/A22/A25/A26 与 B10/B11/B12/B13。
+2. **缺低危登记项的处置决定**：A2/A5/A6/A11/A12/A13/A15/A22/A25/A26 与 B10/B11/B12/B13；
+3. **本轮新登记的低危残留**（均不阻塞，产品侧）：① ${T}#blockStepForRejectedCall${T} 为 best-effort（revision 冲突时 catch 吞掉，由运行时/orchestrator 第二道收敛托底）；② ADMIN 判据为纯角色、无 org/department 范围，且 ADMIN 在他人会话看不到 ${T}revocable${T}（沿用既有 REV-03 口径，非本轮引入）；③ 任务级错误码本就无全局人话文案表（${T}APPROVER_*${T} 沿用既有展示约定，非漏登记）。
+4. **审查者登记的测试/证据口径项**（非产品缺陷；其中①②④已在 test-only 提交 ${T}68c84c9${T} 收紧）：① UI 探针 A25 的 ${T}interleave.executed${T} 曾由读 pending Promise 得出而失真 → 已改为权威 call 状态推导；② A31 机器码扫描曾只覆盖提示区 → 已扩到整面板可见文本；③ A32/A34 依赖 2s 轮询 + ${T}sleep(2600)${T} 的时序假设（慢机上会 **fail-safe 失败**、不会假通过），保持现状并登记；④ A36 曾含平凡合取项、${T}dbSnapshot${T} 口径曾写作"全库" → 已改为"17 张快照表（除 events）+ ${T}authorization_audit${T} 明确断言"；⑤ ${T}dbQuietWindow${T} 无法识别"内容与既有行完全相同的 no-op 写入"，且后台写者持续不断时会得到**假失败而非假通过**（回归判定安全）；⑥ reload/teardown 窗口出现良性 stderr ${T}No handler registered for 'task:command'${T}（不影响 37/37，留作排障线索）。
 
-**外部审查者需要的输入包（已备齐）**：本文件（§3 统一编号 + 逐项位置/测试/commit/预期/实际/三态 + §4 六要素澄清 + §8 命令与数字）+ 十一轮审查报告要点 + 探针清单（`/tmp/rev/**`、`/tmp/probe-*`、`/tmp/d403*`）+ 被测 commit `1594771e94d13a6a72dd49e473a7c90390c6efc8` + `docs/D4-PRODUCT-MAIN-E2E-EVIDENCE.json`。
+**外部审查者需要的输入包（已备齐）**：本文件（§3 统一编号 + 逐项位置/测试/commit/预期/实际/三态 + §3.3 Closure 四项 + §4 六要素 + §8 命令与数字）+ 十二轮审查报告要点 + 探针清单（`/tmp/rev/**`、`/tmp/probe-*`、`/tmp/d403*`）+ 被测 commit `b031b3658960a70e7365bfc52f2702fcb492a2d1`（+ `dc53c64`）+ `docs/D4-PRODUCT-MAIN-E2E-EVIDENCE.json`。
 
-## 8. 实际检查（最终被测 commit `1594771e94d13a6a72dd49e473a7c90390c6efc8`，干净树 `workspaceState=""`；门禁/证据均在该 commit 上重跑，`42ebe3b` 的同名数字仅作历史轮次记录）
+## 8. 实际检查（**产品代码被测 commit = `b031b3658960a70e7365bfc52f2702fcb492a2d1`** = authority `dc53c64` + 产品/UI/E2E；**最终 commit = `68c84c976eab15c360c71e14903abf47de5a7d12`（test-only：main E2E 证据标签/audit 断言 + UI 探针证据精确化）** —— 全部门禁与证据均在 `workspaceState=""` 的干净树上重跑，`b031b36` 与 `68c84c9` 的产品代码逐字节相同）
 
 | 检查 | 结果 |
 | --- | --- |
 | D4-03 十六门禁 | 全 **exit 0**（`testedCommit=1594771`）：A 32/32、B 59/59、C1 48/48+52/52、C2 29/29+38/38+45/45+51/51、C3 56/56+63/63、C4 35/35+**UI 28/28**+15/15+12/12+9/9、D 52/52+62/62 |
 | D4-01 / D4-02 相关 | `test:d4-01` 59/59、`test:d4-02a` 22/22、`test:d4-02b` 16/16、`test:d4-02c` 22/22（schema v16、dsh 0.1.5-rc.2、acp 1.4.0） |
 | 受影响回归 | D4-04 **94/94**、D4-05 **173/173（S1–S4 PASS）**、D4-06 **119/119**、d4-06-resume **21/21**、d4-08-verification-ui **22/22** |
-| 本轮新增/扩展测试 | `tests/d4-03-deny-state-protection.test.mjs` **12/12**（基线 `ad5e600` 上 8 用例仅 2 通过；收尾新增 T9/T9-b/T9-c）、`tests/d4-03-approval-push-isolation.test.mjs` **8/8**（基线 4/8）、`tests/d4-03-model-binding.test.mjs` **19/19**（含 `D4-03 P` 抛出同形、`D4-03 Q` 已绑定路径两窗口）、`tests/d4-03-lease-state-integrity.test.mjs` 10/10、`tests/d4-03-run-entry-guard.test.mjs` 7/7、`tests/tool-argument-projection-redaction.test.mjs` 21/21；本轮受影响 node 套件合计 **77/77** |
-| 真实 main E2E | `node tests/d4-main-e2e.mjs` 在**干净树**连续 2 次 → **133/133、七条必需流程（boot/setup/flow1–flow6）全 PASS、`overallStatus=PASS`、exit 0、`workspaceState=""`、`testedCommit=1594771`**；gate `artifactSha256` 分别 `20c74b54c4110c87ea77b4cd4cf7a58ff0ea53eda3fb7a98ee15c50ad6bba03f` / `99ddecee23ee1856773d73a8c4f25a410a812b5056e1a9a9a61aa3d7521ae739`（证据文件 `docs/D4-PRODUCT-MAIN-E2E-EVIDENCE.json` 自身 sha256 `c528ff7db9ad70b60dd9d24979a677f33c491313441d829cdad7d09e5da9b979`） |
-| 全量测试 | `npm test` **1088/1088**、exit 0；`npm run build` exit 0 |
-| 独立复核（冻结修订） | A9/A10：R7-a/R7-c/R6-C2/C3 反例全关 + 真实 Electron UI 探针 6/6（探针内第 23–28 条）；A23：修复前副本 12 用例 fail 2（真实复活证据）→ 修复后 12/12；A19：`isKnownEventType` false→true 且无其它未登记 TaskEvent；A21：抛出路径与返回失败路径逐项同形；A24：已绑定路径两窗口（预检/`startModelCall`）修复前 RUNNING+STARTING 悬挂 → 修复后 BLOCKED（真实探针四段，含 capability 回收 REVOKED + 直连 401），`MODEL_CONFIG_CHANGED` 原路径逐字未变；A16：owner/他人/未登录三态 + 基线区分力 4/8→8/8；A17：五路 parity 唯一差异为展示字段；A14：三入口 0/0/0/0/0/0 + 反例 8 条命中 0 + 夹具逐行核对 |
+| 本轮新增/扩展测试（Closure，`b031b36`） | `tests/d4-03-approver-eligibility.test.mjs` **11/11**（Base `5ea6875` 上仅 3/11）、`tests/d4-03-deny-state-protection.test.mjs` **12/12**、`tests/d4-03-approval-push-isolation.test.mjs` **8/8**、`tests/d4-03-model-binding.test.mjs` **19/19**、`tests/d4-03-lease-state-integrity.test.mjs` 10/10、`tests/d4-03-run-entry-guard.test.mjs` 7/7、`tests/tool-argument-projection-redaction.test.mjs` 21/21、`tests/side-effect-approval.test.mjs` 10/10、`tests/side-effect-write-gates.test.mjs` 20/20、`tests/side-effect-c2-closure.test.mjs`、`tests/side-effect-security.test.mjs` 11/11；受影响 node 套件合计 **138/138**；真实 Electron UI 探针 **37/37**（含 A29–A37） |
+| 真实 main E2E | `node tests/d4-main-e2e.mjs` 在**干净树**连续 2 次（`testedCommit=68c84c9`）→ **140/140、七条必需流程（boot/setup/flow1–flow6）全 PASS、`overallStatus=PASS`、exit 0、`workspaceState=""`**（新增 7 条：F1.6a/F1.6b 撤销门与零写入、F1.15/F1.16/F1.17 迟到零改写与可见文本、F2.10/F2.11 MEMBER 越权拒绝与列表隔离；`requiredFlows` 未变；F1.6b/F1.16 在 `68c84c9` 精确化为 **17 张快照表（除 events）+ `authorization_audit`** 断言：被拒撤销 audit 零新增、迟到撤销恰好 +1 条 `side_effect.revoke_too_late`）；gate `artifactSha256` 分别 `8582f7e422ac34de0d8a47618200ccba6046b465de77aba307750c5f15f02d86` / `48bc1c9f979124d5aa439bb5de12d649b1749b965ac157fce027a8fb1dee50b6`（证据文件 `docs/D4-PRODUCT-MAIN-E2E-EVIDENCE.json` 自身 sha256 `91db6c0bb83ebf627ce46ca78896598221c99d9606737e498297e9d28aa4aef1`） |
+| 全量测试 | `npm test` **1099/1099**、exit 0（`68c84c9` 上复跑）；`npm run build` exit 0 |
+| 独立复核（冻结修订，十二轮；Electron DOM 复跑已完成） | A3：批准人 DISABLED/降级/丢失范围/缺 actor + **真实交错（eligibility 通过后 claim 前失权）** → 0 mutation + BLOCKED 收敛；仅登出/会话过期 → 真实执行成功；A18：R1–R6 撤销状态机 + 入口伪造无效 + 跨会话无泄漏；A20/探针修正：旧 async 包装复现假 `CALL_NOT_FOUND`、同步后可打真实 `TOO_LATE`（第十一轮 A27 标注无效，A23/A24/A25/A26/A28 维持有效）；A9/A10：R7-a/R7-c/R6-C2/C3 反例全关 + 真实 Electron UI 探针 6/6（探针内第 23–28 条）；A23：修复前副本 12 用例 fail 2（真实复活证据）→ 修复后 12/12；A19：`isKnownEventType` false→true 且无其它未登记 TaskEvent；A21：抛出路径与返回失败路径逐项同形；A24：已绑定路径两窗口（预检/`startModelCall`）修复前 RUNNING+STARTING 悬挂 → 修复后 BLOCKED（真实探针四段，含 capability 回收 REVOKED + 直连 401），`MODEL_CONFIG_CHANGED` 原路径逐字未变；A16：owner/他人/未登录三态 + 基线区分力 4/8→8/8；A17：五路 parity 唯一差异为展示字段；A14：三入口 0/0/0/0/0/0 + 反例 8 条命中 0 + 夹具逐行核对 |
 
 ## 9. D4 的 macOS 已验证范围与整体状态
 
@@ -299,12 +314,12 @@
 | --- | --- | --- |
 | D4-01 模型服务（macOS Core） | PASS | `test:d4-01` 59/59 |
 | D4-02 任务与适配（macOS Core） | PASS | d4-02a 22/22、d4-02b 16/16、d4-02c 22/22；F-2 已修；**R-8 已按裁决收口（未绑定不得启动）** |
-| **D4-03 工具门与租约** | **PASS candidate（内部独立预审通过；本轮不封板）** | 十六门禁全绿 + 十一轮独立审查 + **22 项缺陷闭合**；封板待实现方之外的审查者（§7） |
-| D4-04 纵向冒烟 | PASS（限定范围） | 94/94（`testedCommit=1594771`、`workspaceState=""`；证据文件 sha256 `5dd08728db9222738483f999f8d10213bf2a282453188386866a5f2fc8e761d6`） |
-| D4-05 执行关卡 | PASS（S1–S4；S4 限定"消息结构 + 授权/执行边界"） | 173/173（`testedCommit=1594771`、`workspaceState=""`；证据文件 sha256 `a4f340fea7216ad508f0a365ae4dd49df2928cef34ffbdc16d33c6e11676cec5`） |
-| D4-06 关联链与预算停止 | PASS | 119/119 + resume 21/21 + 失败验证 UI 22/22（`testedCommit=1594771`、`workspaceState=""`；证据文件 sha256 `96b5a82aee61ef167873b2ff9de745adb1d2fdd09fa0d98a0972b0a7ca6414c5`） |
-| 真实 `electron/main.cjs` 产品入口 | PASS | 干净树连续 2 次 `133/133`、七条必需流程全 PASS、exit 0（`testedCommit=1594771`） |
-| **D4 整体** | **PARTIAL（不自动升级）** | 剩余：**Windows / External Provider = NOT VERIFIED**；**D4-03 待实现方之外的审查者封板**；产品/UI 裁决（REV-03/S2、迟到 DENY 反馈、revoke 入口）与低危登记项处置待决；OS 级网络沙箱 / 跨重启 durable death proof 等既有挂账不变 |
+| **D4-03 工具门与租约** | **PASS candidate（内部独立预审通过；本轮不封板）** | 十六门禁全绿 + 十二轮独立审查 + **25 项（含 A3/A18/A20）闭合**；封板待实现方之外的审查者（§7） |
+| D4-04 纵向冒烟 | PASS（限定范围） | 94/94（`testedCommit=68c84c9`、`workspaceState=""`；证据文件 sha256 `ff43a8f526ec8470ba868784c648f6b9a3313af0f5dbd7ffe4f588c3d66ce71f`） |
+| D4-05 执行关卡 | PASS（S1–S4；S4 限定"消息结构 + 授权/执行边界"） | 173/173（`testedCommit=68c84c9`、`workspaceState=""`；证据文件 sha256 `7fbebd92b4b6922c5253d9d0a2ddb178e77f70b512d0aa203452196c440331d6`） |
+| D4-06 关联链与预算停止 | PASS | 119/119 + resume 21/21 + 失败验证 UI 22/22（`testedCommit=68c84c9`、`workspaceState=""`；证据文件 sha256 `6515047102d182998c3c29e9137e2b2d27b07477f45ab0e13ce0d562a5eb79be`） |
+| 真实 `electron/main.cjs` 产品入口 | PASS | 干净树连续 2 次 `140/140`、七条必需流程全 PASS、exit 0（`testedCommit=68c84c9`）；真实 Electron UI 探针 `test:d4-03c4` = 35/35 + **UI 37/37**（A29–A37 由审查者在冻结 commit 上独立复跑确认） |
+| **D4 整体** | **PARTIAL（不自动升级）** | 剩余：**Windows / External Provider = NOT VERIFIED**；**D4-03 待实现方之外的审查者封板**（A3/A18/A20 已按已批准规则实现并复核 CLOSED）；低危登记项处置待决（A2/A5/A6/A11/A12/A13/A15/A22/A25/A26、B10–B13、§7 第 3 条三项新增登记）；OS 级网络沙箱 / 跨重启 durable death proof 等既有挂账不变 |
 
 Windows 与 External Provider 的限制**单独保留**，不因本轮任何结论被改写。
 
@@ -320,5 +335,7 @@ Windows 与 External Provider 的限制**单独保留**，不因本轮任何结�
 - **本轮测试提交 `51f90f0`（test-only）**：`tests/d4-main-e2e.mjs`（F6.4/F6.7/F6.8/F6.10/F6.11 与 F4.43 的确定性接受判据 + 断言收紧；**该提交不含任何产品代码**）。
 - **本轮收尾提交 `42ebe3bf0304857ce9b3e8973bb599ac9bc018f6`**：`electron/task-domain.cjs`（A19 事件登记）、`electron/task-service.cjs`（A21 抛出收敛）、`electron/side-effect-authority.cjs`（A23 approve 同一事务 + 状态前置）、`tests/d4-03-deny-state-protection.test.mjs`（A19/A23 断言与 T9/T9-b/T9-c）、`tests/d4-03-model-binding.test.mjs`（`D4-03 P`）。
 - **最终被测提交 `1594771e94d13a6a72dd49e473a7c90390c6efc8`**：`electron/task-service.cjs`（A24：`#boundModelConfig` 抛出收敛）、`electron/task-harness-orchestrator.cjs`（`startModelCall` 的 `callRes` 分支按 `MODEL_CONFIG_PRECONDITION_ERRORS` 收敛）、`tests/d4-03-model-binding.test.mjs`（`D4-03 Q`：预检窗口 + `startModelCall` 窗口）。
-- **报告/证据提交**：本文件、`docs/D4-ACCEPTANCE-RESULT.md`、`PROGRESS.md`、`docs/decisions/D4-03C-side-effect-authority.md`（Audit/TaskEvent 清单登记 `deny_too_late`）、`docs/D4-04/05/06-GATE-EVIDENCE.json`、`docs/D4-PRODUCT-MAIN-E2E-EVIDENCE.json`。
+- **第四轮 D4-03 Closure 测试提交（test-only）`68c84c976eab15c360c71e14903abf47de5a7d12`**：`tests/d4-main-e2e.mjs`（证据口径精确化 + `authorization_audit` 断言）、`tests/fixtures/side-effect-ui-probe/main.cjs`（A25 证据改为权威状态推导、A31 机器码扫描扩到整面板、A36 去掉平凡合取项）。
+- **第四轮 D4-03 Closure 代码/测试提交**：`dc53c64`（authority：`side-effect-authority.cjs`、`side-effect-domain.cjs`、`task-domain.cjs` + `tests/d4-03-approver-eligibility.test.mjs` 新建 + 3 处既有 side-effect 测试的期望码/形状对齐）、`b031b3658960a70e7365bfc52f2702fcb492a2d1`（`side-effect-runtime.cjs`、`side-effect-bootstrap.cjs`、`preload.cjs`、`src/approval/ApprovalPrompt.tsx`、`src/desktop/components.tsx`、`src/styles.css`、`tests/fixtures/side-effect-ui-probe/main.cjs`、`tests/d4-main-e2e.mjs`、`tests/d4-03-approval-push-isolation.test.mjs` 形状对齐）。
+- **报告/证据提交**：本文件、`docs/D4-ACCEPTANCE-RESULT.md`、`PROGRESS.md`、`docs/decisions/D4-03C-side-effect-authority.md`（Closure 规则 + Audit/TaskEvent 登记 `deny_too_late`/`revoke_too_late`）、`docs/D4-04/05/06-GATE-EVIDENCE.json`、`docs/D4-PRODUCT-MAIN-E2E-EVIDENCE.json`。
 - 审查者全程未修改仓库任何文件；探针只写 `/tmp`。
