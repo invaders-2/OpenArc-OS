@@ -28,7 +28,9 @@
  * - executor 落定任何收敛结果（SUCCEEDED / FAILED / BLOCKED / UNKNOWN_EFFECT）前必须在
  *   同一事务内重读 persisted status：另一个 runtime 已收敛（如 RUNNING → UNKNOWN_EFFECT）时，
  *   迟到结果绝不覆盖任何持久化字段，只落 safe 事件 tool.side_effect.late_result_suppressed；
- * - 收敛结果与自身 ACTIVE lease 的终结必在**同一事务**内，绝不留下"终态 + ACTIVE lease"。
+ * - 收敛结果与自身 ACTIVE lease 的终结必在**同一事务**内，绝不留下"终态 + ACTIVE lease"；
+ * - acquireLease 的状态判定与租约发放必在**同一事务**内：只对 persisted status ∈
+ *   {APPROVED, LEASED} 发放，RUNNING / 任何终态绝不因迟到申请被改写成 LEASED，拒绝路径零写入。
  */
 "use strict";
 const crypto = require("node:crypto");
@@ -50,6 +52,14 @@ const SAFE_EFFECT = /^(secret|token|authorization|api[_-]?key|credential|passwor
  * RUNNING 与任何终态（SUCCEEDED / FAILED / BLOCKED / CANCELLED / UNKNOWN_EFFECT）一律迟到。
  */
 const DENIABLE_CALL_STATUS = Object.freeze([CALL_STATUS.AWAITING_APPROVAL, CALL_STATUS.APPROVED, CALL_STATUS.LEASED]);
+/**
+ * acquireLease 的资格状态：只有尚未进入执行阶段（未 claim）的 call 才能发放租约。
+ * 判定必须与发放同事务并读 persisted status —— 有效 approval 不等于调用仍可执行，
+ * RUNNING / 任何终态绝不能被迟到申请改写回 LEASED。
+ */
+const isLeasableStatus = (status) => status === CALL_STATUS.APPROVED || status === CALL_STATUS.LEASED;
+/** 不可租用时保持既有错误码映射：AWAITING_APPROVAL → APPROVAL_REQUIRED，其余 → CALL_STATE。 */
+const leaseRejectError = (status) => (status === CALL_STATUS.AWAITING_APPROVAL ? SIDE_EFFECT_ERROR.APPROVAL_REQUIRED : SIDE_EFFECT_ERROR.CALL_STATE);
 /** 迟到 DENY 的显式错误码：只作为 trusted 用户动作的返回值与 audit reason，绝不写进 call.error_code。 */
 const DENY_TOO_LATE = "SIDE_EFFECT_APPROVAL_TOO_LATE";
 /** 撤销与 DENY 共用同一个迟到错误码：claim 之后的 trusted 用户动作一律显式迟到。 */
@@ -441,22 +451,28 @@ class SideEffectAuthority {
     if (!holderId) return { ok: false, error: SIDE_EFFECT_ERROR.INVALID_INPUT };
     const call = this.store.callById(callId);
     if (!call) return { ok: false, error: SIDE_EFFECT_ERROR.CALL_NOT_FOUND };
-    if (call.status !== CALL_STATUS.APPROVED && call.status !== CALL_STATUS.LEASED) {
-      return { ok: false, error: call.status === CALL_STATUS.AWAITING_APPROVAL ? SIDE_EFFECT_ERROR.APPROVAL_REQUIRED : SIDE_EFFECT_ERROR.CALL_STATE };
-    }
+    if (!isLeasableStatus(call.status)) return { ok: false, error: leaseRejectError(call.status) };
     const now = this.#now();
     let result;
     try {
       result = this.store.transactSync(() => {
+        // 事务内重读 persisted status：另一连接可能已把 call 推进到 RUNNING / 终态，
+        // 旧读不得继续作为发放租约的依据（有效 approval 不等于调用仍可执行）。
+        const fresh = this.store.callById(callId);
+        if (!fresh) return { ok: false, error: SIDE_EFFECT_ERROR.CALL_NOT_FOUND };
+        if (!isLeasableStatus(fresh.status)) return { ok: false, error: leaseRejectError(fresh.status) };
         const active = this.store.activeLeaseOfCall(callId);
+        // 过期 lease 的终结推迟到确认可发放新租约之后：任何拒绝路径都零写入，绝不提前改写已有租约。
+        let superseded = null;
         if (active) {
-          if (active.expiresAt != null && now >= Number(active.expiresAt)) this.store.updateLease(active.leaseId, { status: LEASE_STATUS.EXPIRED });
+          if (active.expiresAt != null && now >= Number(active.expiresAt)) superseded = active;
           // duplicate 必须同时匹配 holderId 与 runtime instance；同 holder 不同 runtime = 不同 executor → CONFLICT。
           else if (active.holderId === holderId && active.holderInstanceId === this.instanceId) return { ok: true, duplicate: true, lease: active };
           else return { ok: false, error: SIDE_EFFECT_ERROR.LEASE_CONFLICT, lease: active };
         }
         const approval = this.store.latestApprovalOfCall(callId);
-        const valid = approval && approval.decision === APPROVAL_DECISION.APPROVED && approval.revokedAt == null && (approval.expiresAt == null || now < Number(approval.expiresAt)) && approval.planHash === call.planHash && approval.approvedArgumentsHash === call.argumentsHash && approval.approvedToolId === call.toolId && Number(approval.approvedToolVersion) === Number(call.toolVersion);
+        // 批准绑定一律对事务内的新快照逐项比对。
+        const valid = approval && approval.decision === APPROVAL_DECISION.APPROVED && approval.revokedAt == null && (approval.expiresAt == null || now < Number(approval.expiresAt)) && approval.planHash === fresh.planHash && approval.approvedArgumentsHash === fresh.argumentsHash && approval.approvedToolId === fresh.toolId && Number(approval.approvedToolVersion) === Number(fresh.toolVersion);
         if (!valid) {
           const reason = !approval ? SIDE_EFFECT_ERROR.APPROVAL_REQUIRED
             : approval.decision === APPROVAL_DECISION.REVOKED ? SIDE_EFFECT_ERROR.APPROVAL_REVOKED
@@ -464,6 +480,7 @@ class SideEffectAuthority {
             : SIDE_EFFECT_ERROR.PLAN_STALE;
           return { ok: false, error: reason };
         }
+        if (superseded) this.store.updateLease(superseded.leaseId, { status: LEASE_STATUS.EXPIRED });
         // production：lease 永远绑定 OpenArc runtime 自身 identity，caller 无法修改。
         const lease = this.store.insertLease({ leaseId: _leaseId || undefined, callId, holderId, holderInstanceId: this.instanceId, status: LEASE_STATUS.ACTIVE, issuedAt: now, expiresAt: now + Math.max(1, Number(ttlMs) || DEFAULT_LEASE_TTL_MS) });
         this.store.updateCall(callId, { status: CALL_STATUS.LEASED, leased_at: now });

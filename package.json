@@ -50,6 +50,7 @@
     "test:d4-03c4-closure3": "node experiments/d4-03c4-closure3/run-all.mjs",
     "test:d4-03d": "node experiments/d4-03d/run-all.mjs",
     "test:d4-03d-closure": "node experiments/d4-03d-closure/run-all.mjs",
+    "test:d4-03-cg01": "node experiments/d4-03-cg01/run-all.mjs",
     "test:d4-04": "npm run build && node tests/d4-04-smoke.mjs",
     "test:d4-05": "npm run build && node tests/d4-05-smoke.mjs",
     "test:d4-05-memory-ui": "npm run build && node tests/d4-05-memory-ui.mjs",
