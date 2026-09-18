@@ -17,6 +17,7 @@ const SIDE_EFFECT_COMMANDS = Object.freeze([
   "sideEffect/listPending",
   "sideEffect/getApprovalRequest",
   "sideEffect/decideApproval",
+  "sideEffect/revokeApproval",
 ]);
 
 /** Renderer 只允许提交的两个 decision。 */
@@ -42,6 +43,13 @@ function createSideEffectGateway({ sideEffectRuntime, onApprovalRequested = null
       if (!res || !res.ok) return { ok: false, error: (res && res.error) || "SIDE_EFFECT_CALL_NOT_FOUND" };
       return { ok: true, approvalRequestId, decision: act, status: res.call ? res.call.status : null };
     },
+    /** 撤销"已批准、尚未执行"的操作；迟到（TOO_LATE）时把稳定错误码与 callStatus 一起交回 UI。 */
+    revokeApproval({ context = {}, approvalRequestId } = {}) {
+      const res = sideEffectRuntime.revokeApproval({ context, approvalRequestId });
+      const callStatus = (res && res.callStatus) || (res && res.call && res.call.status) || null;
+      if (!res || !res.ok) return { ok: false, error: (res && res.error) || "SIDE_EFFECT_CALL_NOT_FOUND", approvalRequestId, callStatus };
+      return { ok: true, approvalRequestId, revoked: true, duplicate: res.duplicate === true, status: callStatus };
+    },
   };
 }
 
@@ -59,6 +67,7 @@ function registerSideEffectIpc({ ipcMain, service, identity, isTrusted, send = n
         case "sideEffect/listPending": return service.listPendingApprovals({ context });
         case "sideEffect/getApprovalRequest": return service.getApprovalRequest({ context, approvalRequestId: command.approvalRequestId });
         case "sideEffect/decideApproval": return service.decideApproval({ context, approvalRequestId: command.approvalRequestId, decision: command.decision });
+        case "sideEffect/revokeApproval": return service.revokeApproval({ context, approvalRequestId: command.approvalRequestId });
         default: return { ok: false, error: "INVALID_INPUT" };
       }
     } catch {

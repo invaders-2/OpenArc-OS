@@ -151,6 +151,37 @@ async function main() {
   const bridge = (domain, command) => js("return window.openarc." + domain + ".command(" + JSON.stringify(command) + ")");
   const taskGet = (taskId) => bridge("task", { type: "task/get", taskId });
   const gov = (command) => bridge("governance", command);
+  // D4-03 Closure：撤销是**产品入口**（与 decideApproval 共用 sideeffect:command 桥面，preload 窄接口）；
+  // Renderer 只能给 approvalRequestId，callId / taskId / userId 由主进程从真实 call + 当前会话推导。
+  const sideEffectRevoke = (approvalRequestId) => js("return window.openarc.sideEffect.revokeApproval({ approvalRequestId: " + JSON.stringify(approvalRequestId) + " })");
+  const sideEffectPending = () => js("return window.openarc.sideEffect.command({ type: 'sideEffect/listPending' })");
+  // 可见文本：innerText 只含真正渲染给用户的字（机器码只允许存在于 data 属性里）。
+  const visibleText = (sel) => js("const el = " + (sel ? "document.querySelector(" + JSON.stringify(sel) + ")" : "document.body") + "; return el ? String(el.innerText || '') : ''");
+  const ILLUSION_WORDS = ["未执行", "已撤销", "已取消"];
+  const illusionHits = (t) => ILLUSION_WORDS.filter((w) => String(t).includes(w));
+  const dbStableSnapshot = (s) => { const c = Object.assign({}, s); delete c.events; return JSON.stringify(c); };
+  // 逐表 diff 作为**证据**（诊断后台无关写者；断言只覆盖被检查操作真实可能触及的行集）。
+  const dbTableDiff = (a, b) => {
+    const out = {};
+    for (const k of Object.keys(b)) {
+      if (k === "events") continue;
+      if (JSON.stringify(a[k]) !== JSON.stringify(b[k])) out[k] = ((a[k] || []).length + "->" + (b[k] || []).length);
+    }
+    return out;
+  };
+  // 在后台真正静止的窗口里执行一次探针（撤销类调用都是幂等的零写入/固定错误，重试安全）。
+  // 只用于"整库逐字段不变"这类会被无关后台写者干扰的断言；失败时返回 null，让断言显式失败并输出 diff。
+  const dbQuietWindow = async (probe, tries = 20) => {
+    for (let i = 1; i <= tries; i += 1) {
+      const before = dbSnapshot();
+      const res = await probe();
+      const after = dbSnapshot();
+      const tables = dbTableDiff(before, after);
+      if (Object.keys(tables).length === 0) return { attempt: i, res, before, after };
+      await sleep(120);
+    }
+    return null;
+  };
   const getToolAccess = () => gov({ type: "governance/getAppToolAccess", appId: "ai" });
   const grantToolsBridge = (actions) => gov({ type: "governance/grantAppToolAccess", appId: "ai", actions });
   async function waitTaskTerminal(taskId, timeout) { return waitFor(async () => { const got = await taskGet(taskId); const s = got && got.task && got.task.status; return ["SUCCEEDED", "FAILED", "BLOCKED", "CANCELLED"].includes(s); }, timeout || 120000); }
@@ -305,6 +336,41 @@ async function main() {
   record("flow1", "F1.5 · 审批前 0 mutation / 0 lease / 0 WRITE execution", !!preCall && preCall.status === "AWAITING_APPROVAL" && preResource && preResource.status === "active" && preWrite.leases.filter((l) => l.call_id === (preCall && preCall.call_id)).length === 0 && byTask(preWrite.executions, writeRun.taskId).filter((e) => e.tool_id === "resource.trash").length === 0, JSON.stringify({ call: preCall && preCall.status, resource: preResource && preResource.status }), "AWAITING_APPROVAL + active + 0/0");
   const approvalText = (await text(".approval")).replace(/\s+/g, " ").slice(0, 140);
   record("flow1", "F1.6 · Approval UI 显示 tool / risk / target", approvalText.includes("resource.trash") && approvalText.includes("可逆写入") && approvalText.includes("Main E2E Target"), approvalText, "tool+risk+target");
+  /* ---------------- D4-03 Closure：撤销门（真实产品桥 sideEffect/revokeApproval） ---------------- */
+  // 撤销一个仍在 AWAITING_APPROVAL 的请求不是"迟到"，而是明确 APPROVAL_REQUIRED；且必须**零写入**。
+  // 真实时序：UI 审批提示先于后端把该轮的 ACP 事件批落库（实测同一窗口 events 9->17、task 行被推进），
+  // 所以按"同窗口快照 A → 撤销 → 快照 B"重试，直到观察到一个后台真正静止的窗口。撤销对 AWAITING_APPROVAL
+  // 是显式零写入且幂等（不落事件、不写行），重复调用安全；第一次窗口看到的并发写入作为证据一并输出，绝不静默。
+  let gateRevoke = null;
+  let gateFirstWindow = null;
+  let gateClean = null;
+  for (let attempt = 1; attempt <= 20; attempt += 1) {
+    const before = dbSnapshot();
+    const res = await sideEffectRevoke(writeApprovalId);
+    const after = dbSnapshot();
+    const added = after.events.filter((e) => !before.events.some((b) => b.event_id === e.event_id));
+    const tables = dbTableDiff(before, after);
+    if (!gateRevoke) gateRevoke = res;
+    if (attempt === 1) gateFirstWindow = { tables, addedEvents: added.map((e) => e.event_type) };
+    if (res && res.ok === false && res.error !== "SIDE_EFFECT_APPROVAL_REQUIRED") { gateRevoke = res; break; }
+    if (Object.keys(tables).length === 0 && added.length === 0) { gateClean = { attempt, res, before, after }; break; }
+    await sleep(120);
+  }
+  const gateCallBefore = gateClean ? byTask(gateClean.before.sideEffectCalls, writeRun.taskId)[0] : null;
+  const gateCallAfter = gateClean ? byTask(gateClean.after.sideEffectCalls, writeRun.taskId)[0] : null;
+  record("flow1", "F1.6a · 撤销门：经真实产品桥 sideEffect/revokeApproval 撤销一个 AWAITING_APPROVAL 的请求 → 明确 SIDE_EFFECT_APPROVAL_REQUIRED（不是 TOO_LATE）",
+    !!gateRevoke && gateRevoke.ok === false && gateRevoke.error === "SIDE_EFFECT_APPROVAL_REQUIRED" && gateRevoke.callStatus === "AWAITING_APPROVAL" && gateRevoke.approvalRequestId === writeApprovalId,
+    JSON.stringify({ res: gateRevoke, quietWindowAttempt: gateClean ? gateClean.attempt : null }), "{ ok:false, error:SIDE_EFFECT_APPROVAL_REQUIRED, callStatus:AWAITING_APPROVAL }");
+  record("flow1", "F1.6b · 该拒绝零写入（静止窗口）：call 行逐字段不变仍 AWAITING_APPROVAL / 0 lease / approvals 行数不变 / 0 mutation / 0 新事件 / 全库（除 events）逐字段不变",
+    !!gateClean && !!gateCallAfter && gateCallAfter.status === "AWAITING_APPROVAL" && JSON.stringify(gateCallAfter) === JSON.stringify(gateCallBefore)
+      && gateClean.after.leases.filter((l) => l.call_id === writeApprovalId).length === 0
+      && gateClean.after.approvals.length === gateClean.before.approvals.length
+      && (gateClean.after.resources.find((r) => r.resource_id === target.id) || {}).status === "active"
+      && byTask(gateClean.after.executions, writeRun.taskId).filter((e) => e.tool_id === "resource.trash").length === 0
+      && gateClean.after.events.length === gateClean.before.events.length
+      && dbStableSnapshot(gateClean.after) === dbStableSnapshot(gateClean.before),
+    JSON.stringify({ quietWindowAttempt: gateClean ? gateClean.attempt : null, res: gateClean && gateClean.res, call: gateCallAfter && gateCallAfter.status, callRowUnchanged: !!gateCallAfter && JSON.stringify(gateCallAfter) === JSON.stringify(gateCallBefore), leases: gateClean ? gateClean.after.leases.filter((l) => l.call_id === writeApprovalId).length : null, approvals: gateClean ? gateClean.before.approvals.length + "->" + gateClean.after.approvals.length : null, resource: gateClean ? (gateClean.after.resources.find((r) => r.resource_id === target.id) || {}).status : null, trashExecutions: gateClean ? byTask(gateClean.after.executions, writeRun.taskId).filter((e) => e.tool_id === "resource.trash").length : null, events: gateClean ? gateClean.before.events.length + "->" + gateClean.after.events.length : null, dbUnchanged: !!gateClean && dbStableSnapshot(gateClean.after) === dbStableSnapshot(gateClean.before), firstWindowConcurrentWrites: gateFirstWindow }),
+    "静止窗口内 call 行不变 + 0 lease + approvals 不变 + active + 0 trash execution + 0 新事件 + 全库（除 events）不变");
   await waitFor(async () => !(await isDisabled('[data-approval-action="approve"]')), 15000);
   record("flow1", "F1.7 · 点击真实 Approve", (await clickApprove()) === "ok", "clicked", "ok");
   const writeTerminal = await waitTaskTerminal(writeRun.taskId, 180000);
@@ -329,6 +395,48 @@ async function main() {
   record("flow1", "F1.13 · 受控 READ execution 归属本任务 + WRITE 以 SideEffectCall 记录", writeExecs.some((e) => e.tool_id === "resource.search") && writeExecs.every((e) => e.task_id === writeRun.taskId) && byTask(postWrite.sideEffectCalls, writeRun.taskId).some((c) => c.tool_id === "resource.trash"), JSON.stringify({ reads: writeExecs.map((e) => e.tool_id), writes: byTask(postWrite.sideEffectCalls, writeRun.taskId).map((c) => c.tool_id) }), "search execution + trash sideEffectCall");
   R.exec.flow1Spawned = executorRecordCount();
   record("flow1", "F1.14 · production executor 真实 spawn（runtime/side-effects/executors 记录 >=1）", R.exec.flow1Spawned >= 1, R.exec.flow1Spawned, ">=1");
+  /* ---------------- D4-03 Closure：迟到撤销绝不改写执行事实 ---------------- */
+  const lateWindow = await dbQuietWindow(() => sideEffectRevoke(writeApprovalId));
+  const lateBefore = lateWindow ? lateWindow.before : dbSnapshot();
+  const lateAfter = lateWindow ? lateWindow.after : dbSnapshot();
+  const lateRevoke = lateWindow ? lateWindow.res : null;
+  const lateAddedEvents = lateAfter.events.filter((e) => !lateBefore.events.some((b) => b.event_id === e.event_id));
+  const lateCallBefore = byTask(lateBefore.sideEffectCalls, writeRun.taskId)[0];
+  const lateCallAfter = byTask(lateAfter.sideEffectCalls, writeRun.taskId)[0];
+  const lateApprovalsBefore = lateBefore.approvals.filter((a) => writeCallIds.includes(a.call_id));
+  const lateApprovalsAfter = lateAfter.approvals.filter((a) => writeCallIds.includes(a.call_id));
+  const lateLeasesBefore = lateBefore.leases.filter((l) => writeCallIds.includes(l.call_id));
+  const lateLeasesAfter = lateAfter.leases.filter((l) => writeCallIds.includes(l.call_id));
+  const lateResBefore = lateBefore.resources.find((r) => r.resource_id === target.id);
+  const lateResAfter = lateAfter.resources.find((r) => r.resource_id === target.id);
+  const lateMutation = lateResAfter && lateResAfter.status !== "active" ? 1 : 0;
+  const lateTablesUnchanged = JSON.stringify(lateCallAfter) === JSON.stringify(lateCallBefore)
+    && JSON.stringify(lateApprovalsAfter) === JSON.stringify(lateApprovalsBefore)
+    && JSON.stringify(lateLeasesAfter) === JSON.stringify(lateLeasesBefore)
+    && JSON.stringify(byTask(lateAfter.executions, writeRun.taskId)) === JSON.stringify(byTask(lateBefore.executions, writeRun.taskId))
+    && JSON.stringify(byTask(lateAfter.artifacts, writeRun.taskId)) === JSON.stringify(byTask(lateBefore.artifacts, writeRun.taskId))
+    && JSON.stringify(byTask(lateAfter.verifications, writeRun.taskId)) === JSON.stringify(byTask(lateBefore.verifications, writeRun.taskId))
+    && JSON.stringify(lateResAfter) === JSON.stringify(lateResBefore)
+    && dbStableSnapshot(lateAfter) === dbStableSnapshot(lateBefore);
+  record("flow1", "F1.15 · 迟到撤销（该 call 已 SUCCEEDED）：经真实产品桥 revokeApproval → SIDE_EFFECT_APPROVAL_TOO_LATE + callStatus:SUCCEEDED（绝不中止执行、绝不动 lease）",
+    !!lateRevoke && lateRevoke.ok === false && lateRevoke.error === "SIDE_EFFECT_APPROVAL_TOO_LATE" && lateRevoke.callStatus === "SUCCEEDED" && lateRevoke.approvalRequestId === writeApprovalId,
+    JSON.stringify(lateRevoke), "{ ok:false, error:SIDE_EFFECT_APPROVAL_TOO_LATE, callStatus:SUCCEEDED }");
+  record("flow1", "F1.16 · 迟到撤销零状态改写：call/approval/lease/execution/artifact/verification/资源 trash 逐字段不变（mutation 仍 1、lease 仍 RELEASED），除既有安全审计事件外无任何业务写入",
+    lateTablesUnchanged && lateMutation === 1 && lateCallAfter.status === "SUCCEEDED" && lateLeasesAfter.length === 1 && lateLeasesAfter[0].status === "RELEASED"
+      && lateAddedEvents.every((e) => e.event_type === "tool.side_effect.revoke_too_late"),
+    JSON.stringify({ quietWindowAttempt: lateWindow ? lateWindow.attempt : null, res: lateRevoke, call: lateCallAfter && lateCallAfter.status, leases: lateLeasesAfter.map((l) => l.status), mutation: lateMutation, resource: lateResAfter && lateResAfter.status, tablesUnchanged: lateTablesUnchanged, addedEvents: lateAddedEvents.map((e) => e.event_type) }),
+    "SUCCEEDED + RELEASED + mutation=1 + 全库（除 events）逐字段不变 + 仅安全审计事件");
+  // DOM 级（可见文本，不是 data 属性）：无机器码、无"未执行/已撤销/已取消"假象、已执行的 call 不再出现在撤销入口
+  const lateRevokeGoneUi = await waitFor(async () => !(await has('[data-ai-revoke-request="' + writeApprovalId + '"]')), 15000);
+  const lateBodyText = await visibleText("");
+  const latePanelText = await visibleText(".ai-panel");
+  const lateApprovalText = await visibleText(".approval");
+  const lateMachineHits = (String(lateBodyText).match(/SIDE_EFFECT_[A-Z_]+/g) || []);
+  const lateIllusionHits = illusionHits(latePanelText + " " + lateApprovalText);
+  record("flow1", "F1.17 · 迟到撤销后真实 UI 可见文本：全窗口无 SIDE_EFFECT_ 机器码；AI 面板/审批面不出现「未执行/已撤销/已取消」假象；已执行的 call 不再出现在任何撤销入口",
+    lateMachineHits.length === 0 && lateIllusionHits.length === 0 && lateRevokeGoneUi === true,
+    JSON.stringify({ machineCodes: lateMachineHits.slice(0, 3), illusionWords: lateIllusionHits, revokeEntryGone: lateRevokeGoneUi, panelText: String(latePanelText).replace(/s+/g, " ").slice(0, 90), approvalVisible: String(lateApprovalText).length > 0 }),
+    "0 机器码 + 0 假象措辞 + 撤销入口消失");
   flowReached.flow1 = true;
 
   // ================================================================ 流程 2：撤权停止（待批准时经产品入口撤销 ai 的 TOOL grant）
@@ -865,6 +973,41 @@ async function main() {
   const memberReady = await loginAs(MEMBER, MEMBER_PW);
   const grantAsMember = await gov({ type: "governance/grantAppToolAccess", appId: "ai", actions: [TOOL_TRASH] });
   record("flow2", "F2.9 · 真实 MEMBER 会话调用治理 grant 被拒", loggedOut && memberReady && grantAsMember && grantAsMember.ok === false && grantAsMember.error === "NOT_SUPER_ADMIN", JSON.stringify({ loggedOut, memberReady, res: grantAsMember }), "ok=false + NOT_SUPER_ADMIN");
+  /* ---------------- D4-03 Closure：撤销权限限制（真实 MEMBER 会话对他人 call） ---------------- */
+  const memberPending = await sideEffectPending();
+  const memberWindow = await dbQuietWindow(() => sideEffectRevoke(writeApprovalId));
+  const memberRevokeBefore = memberWindow ? memberWindow.before : dbSnapshot();
+  const memberRevokeAfter = memberWindow ? memberWindow.after : dbSnapshot();
+  const memberRevoke = memberWindow ? memberWindow.res : null;
+  const memberCallBefore = memberRevokeBefore.sideEffectCalls.find((c) => c.call_id === writeApprovalId);
+  const memberCallAfter = memberRevokeAfter.sideEffectCalls.find((c) => c.call_id === writeApprovalId);
+  const memberResBefore = memberRevokeBefore.resources.find((r) => r.resource_id === target.id);
+  const memberResAfter = memberRevokeAfter.resources.find((r) => r.resource_id === target.id);
+  const memberApprovalsBefore = memberRevokeBefore.approvals.filter((a) => a.call_id === writeApprovalId);
+  const memberApprovalsAfter = memberRevokeAfter.approvals.filter((a) => a.call_id === writeApprovalId);
+  const memberLeasesBefore = memberRevokeBefore.leases.filter((l) => l.call_id === writeApprovalId);
+  const memberLeasesAfter = memberRevokeAfter.leases.filter((l) => l.call_id === writeApprovalId);
+  const memberRevocableIds = memberPending && Array.isArray(memberPending.revocable) ? memberPending.revocable.map((r) => r.approvalRequestId) : null;
+  const memberItemIds = memberPending && Array.isArray(memberPending.items) ? memberPending.items.map((r) => r.approvalRequestId) : null;
+  // 正对照的另一半：admin 自己的会话在 F1.4/F1.6 能看到该请求（真实审批面板），而 MEMBER 会话连读都读不到 ——
+  // 证明 MEMBER 的空列表是真实会话过滤，不是"对谁都为空"。
+  const memberRequestProbe = await js("return window.openarc.sideEffect.command({ type: 'sideEffect/getApprovalRequest', approvalRequestId: " + JSON.stringify(writeApprovalId) + " })");
+  record("flow2", "F2.10 · 真实 MEMBER 会话经产品桥撤销 admin 的操作（他人 call）→ SIDE_EFFECT_APPROVAL_FORBIDDEN，且 call/approval/lease/资源状态零变化（mutation 仍 1、0 新事件）",
+    memberReady === true && !!memberRevoke && memberRevoke.ok === false && memberRevoke.error === "SIDE_EFFECT_APPROVAL_FORBIDDEN" && memberRevoke.approvalRequestId === writeApprovalId
+      && !!memberCallAfter && memberCallAfter.status === "SUCCEEDED" && JSON.stringify(memberCallAfter) === JSON.stringify(memberCallBefore)
+      && JSON.stringify(memberApprovalsAfter) === JSON.stringify(memberApprovalsBefore)
+      && JSON.stringify(memberLeasesAfter) === JSON.stringify(memberLeasesBefore)
+      && !!memberResAfter && memberResAfter.status === "deleted" && JSON.stringify(memberResAfter) === JSON.stringify(memberResBefore)
+      && memberRevokeAfter.events.length === memberRevokeBefore.events.length
+      && dbStableSnapshot(memberRevokeAfter) === dbStableSnapshot(memberRevokeBefore),
+    JSON.stringify({ session: memberReady, quietWindowAttempt: memberWindow ? memberWindow.attempt : null, res: memberRevoke, call: memberCallAfter && memberCallAfter.status, approvals: memberApprovalsAfter.map((a) => a.decision), leases: memberLeasesAfter.map((l) => l.status), resource: memberResAfter && memberResAfter.status, events: memberRevokeBefore.events.length + "->" + memberRevokeAfter.events.length }),
+    "SIDE_EFFECT_APPROVAL_FORBIDDEN + 零状态变化 + mutation 仍 1");
+  record("flow2", "F2.11 · 该 MEMBER 会话的 sideEffect/listPending 不把他人 call 当作可撤销（revocable 与 items 都不含 admin 的 callId），且连读都读不到该请求（正对照见 F1.4/F1.6：admin 自己的会话能看到它）",
+    !!(memberPending && memberPending.ok === true) && Array.isArray(memberRevocableIds) && Array.isArray(memberItemIds)
+      && !memberRevocableIds.includes(writeApprovalId) && !memberItemIds.includes(writeApprovalId)
+      && !!memberRequestProbe && memberRequestProbe.ok === false,
+    JSON.stringify({ revocable: memberRevocableIds, items: memberItemIds, otherCall: writeApprovalId, getApprovalRequest: memberRequestProbe, adminSawItViaUI: checks.find((c) => c.name.startsWith("F1.6 "))?.ok === true }),
+    "他人 call 既不在 revocable 也不在 items + 不可读");
   // 14(d) 非 owner：真实 MEMBER 会话对 admin 的流程 4 主任务发起 appendStep（携带真实 revision）→ TASK_FORBIDDEN
   const memberAppend = await appendViaBridge(R.taskIds.flow4, "MEMBER 对 admin 任务的追加", heroRevForMember);
   const heroStepsForMemberAfter = byTask(dbSnapshot().steps, R.taskIds.flow4).length;

@@ -13,6 +13,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ArrowLeft, ArrowRight, Maximize2, Minus, Monitor, RotateCw, X } from "lucide-react";
 import domain from "../../electron/window-domain.cjs";
 import type { Window as WinDomain, WindowCommand } from "../../electron/window-domain.cjs";
+import { LATE_NOTICE } from "../approval/ApprovalPrompt";
 
 const icon = (name: string) => "./icons/" + name + ".png";
 
@@ -518,6 +519,36 @@ function formatStepGoal(step: any): string {
   return goal || "—";
 }
 
+/** 后端 listPending.revocable 的安全投影：已批准、尚未开始执行的 call。 */
+type RevocableSideEffect = {
+  approvalRequestId: string;
+  status?: string;
+  toolId?: string;
+  toolDisplayName?: string;
+  targetDisplayName?: string | null;
+  resourceRef?: string | null;
+};
+
+type SideEffectBridge = {
+  command: (command: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  revokeApproval?: (input: { approvalRequestId: string }) => Promise<Record<string, unknown>>;
+};
+
+const sideEffectBridge = (): SideEffectBridge | null => {
+  const w = window as unknown as { openarc?: { sideEffect?: SideEffectBridge } };
+  return (w.openarc && w.openarc.sideEffect) || null;
+};
+
+/** 撤销失败一律给人话；机器码只进 data 属性，绝不显示给用户。 */
+const REVOKE_ERROR_TEXT: Record<string, string> = {
+  SIDE_EFFECT_APPROVAL_TOO_LATE: LATE_NOTICE,
+  SIDE_EFFECT_APPROVAL_FORBIDDEN: "你没有撤销该操作的权限。",
+  SIDE_EFFECT_APPROVAL_REQUIRED: "该操作已不在可撤销状态。",
+  SIDE_EFFECT_CALL_NOT_FOUND: "该操作已不在可撤销状态。",
+  SIDE_EFFECT_TASK_NOT_FOUND: "该操作所属的任务已不存在。",
+};
+const REVOKE_FALLBACK_TEXT = "撤销未生效，请稍后重试。";
+
 type AIPanelProps = { onClose: () => void; onOpenSettings: () => void };
 /**
  * D4-04：全局 AI 助手 = 真实 Task Runtime 入口。
@@ -549,6 +580,10 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
   const [appendable, setAppendable] = useState(false);
   const [appendReason, setAppendReason] = useState<string | null>(null);
   const [steps, setSteps] = useState<any[]>([]);
+  // D4-03 Closure：已批准、尚未执行的操作（撤销入口）。可见性只能来自后端 listPending.revocable。
+  const [revocable, setRevocable] = useState<RevocableSideEffect[]>([]);
+  const [revokeResult, setRevokeResult] = useState<{ approvalRequestId: string; text: string; code: string } | null>(null);
+  const [revoking, setRevoking] = useState<string | null>(null);
 
   const applyTaskState = (got: any) => {
     if (!got || !got.ok || !got.task) return;
@@ -628,6 +663,47 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
     });
     return () => { try { off(); } catch { /* ignore */ } };
   }, [taskId]);
+
+  /** 撤销块不缓存任何判断：每次（含页面刷新后）都从后端权威状态重建。 */
+  const refreshRevocable = useCallback(async () => {
+    const b = sideEffectBridge();
+    if (!b || typeof b.command !== "function") return;
+    try {
+      const res = await b.command({ type: "sideEffect/listPending" });
+      if (res && res.ok === true) setRevocable(Array.isArray(res.revocable) ? (res.revocable as RevocableSideEffect[]) : []);
+    } catch { /* 下一轮再试 */ }
+  }, []);
+
+  useEffect(() => {
+    void refreshRevocable();
+    const timer = window.setInterval(() => { void refreshRevocable(); }, 2000);
+    return () => window.clearInterval(timer);
+  }, [refreshRevocable]);
+
+  /** 撤销成功与否都以刷新后的后端状态为准；失败原因只用人话，机器码只进属性。 */
+  const revokeSideEffect = async (approvalRequestId: string) => {
+    if (!approvalRequestId || revoking) return;
+    const b = sideEffectBridge();
+    if (!b || typeof b.command !== "function") return;
+    setRevoking(approvalRequestId);
+    setRevokeResult(null);
+    try {
+      const res = typeof b.revokeApproval === "function"
+        ? await b.revokeApproval({ approvalRequestId })
+        : await b.command({ type: "sideEffect/revokeApproval", approvalRequestId });
+      const code = res && typeof res.error === "string" ? res.error : "";
+      if (!res || res.ok !== true) setRevokeResult({ approvalRequestId, code, text: REVOKE_ERROR_TEXT[code] || REVOKE_FALLBACK_TEXT });
+    } catch {
+      setRevokeResult({ approvalRequestId, code: "", text: REVOKE_FALLBACK_TEXT });
+    } finally {
+      setRevoking(null);
+      await refreshRevocable();
+      const tb = (window as unknown as { openarc?: { task?: { command?: (c: unknown) => Promise<any> } } }).openarc?.task;
+      if (taskId && tb && typeof tb.command === "function") {
+        try { const got = await tb.command({ type: "task/get", taskId }); if (got && got.ok) applyTaskState(got); } catch { /* 下一轮轮询再收敛 */ }
+      }
+    }
+  };
 
   const run = async () => {
     const bridge = (window as unknown as { openarc?: { task?: { command?: (c: unknown) => Promise<{ ok?: boolean; taskId?: string; error?: string }> } } }).openarc?.task;
@@ -815,6 +891,28 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
           ))}
           <p data-ai-denied-note>该操作未执行，不会自动重试。</p>
         </div>
+      ) : null}
+      {/* D4-03 Closure：已批准、尚未执行 —— 只在后端 revocable 里存在时渲染；撤销能力由后端判定。 */}
+      {revocable.length ? (
+        <div className="ai-revoke" data-ai-revoke-block>
+          {revocable.map((r) => (
+            <div className="ai-revoke-item" key={r.approvalRequestId} data-ai-revoke-request={r.approvalRequestId}>
+              <p data-ai-revoke-tool>工具：{r.toolDisplayName || r.toolId || "受控工具"}</p>
+              <p data-ai-revoke-target>目标：{r.targetDisplayName || r.resourceRef || "未命名资源"}</p>
+              <p data-ai-revoke-meaning>该操作已批准但还没开始执行；撤销后本次不会执行，旧批准作废。</p>
+              <button data-ai-revoke onClick={() => void revokeSideEffect(r.approvalRequestId)} disabled={revoking === r.approvalRequestId}>
+                撤销这次操作
+              </button>
+              {revokeResult && revokeResult.approvalRequestId === r.approvalRequestId ? (
+                <p data-ai-revoke-reason data-ai-revoke-reason-code={revokeResult.code}>{revokeResult.text}</p>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {/* 迟到提示必须活过撤销块的消失：放在块外的提示区。 */}
+      {revokeResult && revokeResult.code === "SIDE_EFFECT_APPROVAL_TOO_LATE" ? (
+        <p className="ai-notice" role="status" data-ai-notice data-ai-notice-code={revokeResult.code}>{revokeResult.text}</p>
       ) : null}
       <div className="ai-result" data-ai-result>
         {result}

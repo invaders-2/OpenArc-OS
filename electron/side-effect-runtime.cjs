@@ -208,6 +208,21 @@ class SideEffectRuntime {
     return { ok: false, error: SIDE_EFFECT_ERROR.INVALID_INPUT };
   }
 
+  /**
+   * Trusted user revocation。与 decideApproval 同一条信任路径：context 由 main process 从
+   * authenticated session 注入，appId 从 call 绑定的真实 Task 反推；Renderer 只能给
+   * approvalRequestId —— callId / taskId / userId 一律由这里从真实 call 推导。
+   * authority 的返回值原样透传（含 SIDE_EFFECT_APPROVAL_TOO_LATE + callStatus），本层不重复写状态。
+   */
+  revokeApproval({ context = {}, approvalRequestId } = {}) {
+    const call = this.store.callById(approvalRequestId);
+    if (!call) return { ok: false, error: SIDE_EFFECT_ERROR.CALL_NOT_FOUND };
+    const task = this.taskStore.taskById(call.taskId);
+    if (!task) return { ok: false, error: SIDE_EFFECT_ERROR.TASK_NOT_FOUND };
+    const trusted = { sessionRef: context.sessionRef, appId: task.app_id, source: "user", agent: false, requestId: context.requestId || null };
+    return this.authority.revokeApproval({ context: trusted, callId: call.callId });
+  }
+
   // ------------------------------------------------------------------ supervised execution
   /** 把 AWAITING_APPROVAL 的 call 明确收敛为 BLOCKED（超时 / 取消 / 放弃）。0 execute。 */
   #blockPending(callId, reason) {
@@ -354,17 +369,27 @@ class SideEffectRuntime {
   }
   async verifyUnknownEffect({ callId }) { return this.authority.verifyUnknownEffect({ callId }); }
 
-  /** 只返回当前 session 可见的 pending approval（安全投影，不含其它 session 的请求）。 */
+  /**
+   * 只返回当前 session 可见的 pending approval（安全投影，不含其它 session 的请求）。
+   * `revocable` 是 **additive** 的：已批准、尚未开始执行的 call（APPROVED / LEASED）—— 复用同一条
+   * approvalSnapshot 过滤，因此可见性与 items 完全一致，renderer 看不到别人的 call。
+   */
   listPendingApprovals({ context = {} } = {}) {
-    const out = [];
-    for (const status of [CALL_STATUS.AWAITING_APPROVAL]) {
+    const items = [];
+    for (const call of this.store.callsByStatus(CALL_STATUS.AWAITING_APPROVAL)) {
+      if (items.length >= 20) break;
+      const snap = this.approvalSnapshot({ approvalRequestId: call.callId, context });
+      if (snap) items.push(snap);
+    }
+    const revocable = [];
+    for (const status of [CALL_STATUS.APPROVED, CALL_STATUS.LEASED]) {
       for (const call of this.store.callsByStatus(status)) {
+        if (revocable.length >= 20) break;
         const snap = this.approvalSnapshot({ approvalRequestId: call.callId, context });
-        if (snap) out.push(snap);
-        if (out.length >= 20) return { ok: true, items: out };
+        if (snap) revocable.push(snap);
       }
     }
-    return { ok: true, items: out };
+    return { ok: true, items, revocable };
   }
 
   snapshot() {

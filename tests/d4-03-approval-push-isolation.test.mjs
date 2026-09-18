@@ -82,7 +82,7 @@ test("P1 · 当前会话 = B：A 任务进入 AWAITING_APPROVAL 时推送必须�
     assert.equal(planned.ok, true, JSON.stringify(planned));
     assert.equal(s.fx.sideEffectStore.callById(planned.approvalRequestId).status, "AWAITING_APPROVAL");
     assert.equal(s.pushes.length, 0, "B 的窗口不得收到 A 任务的推送：" + JSON.stringify(s.pushes));
-    assert.deepEqual(await s.ipc({ type: "sideEffect/listPending" }), { ok: true, items: [] });
+    assert.deepEqual(await s.ipc({ type: "sideEffect/listPending" }), { ok: true, items: [], revocable: [] });
     const gotB = await s.ipc({ type: "sideEffect/getApprovalRequest", approvalRequestId: planned.approvalRequestId });
     assert.equal(gotB.ok, false, JSON.stringify(gotB));
     assert.equal(gotB.error, "SIDE_EFFECT_CALL_NOT_FOUND");
@@ -172,12 +172,12 @@ test("P6 · 无 session：读路径空 / not-found，声明了 context 的投影
     // 声明了 context 却没有 session：等于未认证窗口，不得放行（修复前这里能拿到完整快照）
     assert.equal(s.fx.sideEffectRuntime.approvalSnapshot({ approvalRequestId: planned.approvalRequestId, context: {} }), null);
     assert.equal(s.fx.sideEffectRuntime.approvalSnapshot({ approvalRequestId: planned.approvalRequestId, context: { sessionRef: null } }), null);
-    assert.deepEqual(await s.ipc({ type: "sideEffect/listPending" }), { ok: true, items: [] });
+    assert.deepEqual(await s.ipc({ type: "sideEffect/listPending" }), { ok: true, items: [], revocable: [] });
     const got = await s.ipc({ type: "sideEffect/getApprovalRequest", approvalRequestId: planned.approvalRequestId });
     assert.equal(got.ok, false, JSON.stringify(got));
     assert.equal(got.error, "SIDE_EFFECT_CALL_NOT_FOUND");
     // gateway 默认 context（不传）同样不得放行
-    assert.deepEqual(s.fx.sideEffectRuntime.listPendingApprovals({}), { ok: true, items: [] });
+    assert.deepEqual(s.fx.sideEffectRuntime.listPendingApprovals({}), { ok: true, items: [], revocable: [] });
   } finally { await s.close(); }
 });
 
