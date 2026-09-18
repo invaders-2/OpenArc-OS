@@ -494,6 +494,22 @@ function formatDeniedTarget(args: any): string {
   try { const body = JSON.stringify(args); return body.length > 200 ? body.slice(0, 200) + "…" : body; } catch { return "—"; }
 }
 
+/** D4 Main-Entry Closure-6：appendReason 是后端机器码，只能做可读投影；原始码绝不进可见文本（gate 会把它当成"页面显示了成功"）。 */
+const APPEND_REASON_TEXT: Record<string, string> = {
+  APPEND_NOT_SUCCEEDED: "当前任务状态不支持追加步骤",
+  APPEND_NO_ARTIFACT: "任务还没有可用产物，暂不能追加步骤",
+  APPEND_IN_FLIGHT: "任务仍在运行中，暂不能追加步骤",
+  APPEND_SIDE_EFFECT_PENDING: "存在待处理的副作用，暂不能追加步骤",
+  APPEND_UNKNOWN_EFFECT: "存在结果未知的副作用，暂不能追加步骤",
+  APPEND_ACTIVE_LEASE: "存在未释放的执行租约，暂不能追加步骤",
+  APPEND_EFFECT_STATE_UNAVAILABLE: "副作用状态不可用，暂不能追加步骤",
+};
+
+function formatAppendReason(reason: string | null): string {
+  if (!reason) return "当前任务暂不支持追加步骤";
+  return APPEND_REASON_TEXT[reason] || "当前任务暂不支持追加步骤";
+}
+
 /** D4 Main-Entry Closure-6：step 目标的可读投影。被追加 step 的真实输入在 input.goal；初始 step 没有 input。 */
 function formatStepGoal(step: any): string {
   const input = step ? step.input : null;
@@ -720,8 +736,10 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
       ) : null}
       {taskId && !appendable && !busy && TASK_TERMINAL.includes(status) ? (
         <div className="ai-append ai-append-blocked" data-ai-append-blocked>
-          {/* 原样展示后端 appendReason，renderer 不解释、不改写 */}
-          <p data-ai-append-reason>{appendReason || "—"}</p>
+          {/* 可见文本一律人话；机器码只进属性，后端 task/get.appendReason 仍是权威 */}
+          <p data-ai-append-reason data-ai-append-reason-code={appendReason || ""}>
+            {formatAppendReason(appendReason)}
+          </p>
         </div>
       ) : null}
       {taskId && orderedSteps.length ? (
