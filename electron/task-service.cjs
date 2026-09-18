@@ -11,6 +11,8 @@
 "use strict";
 const crypto = require("node:crypto");
 const domain = require("./task-domain.cjs");
+// D4-03 收口：证据投影路径去敏复用 tool-domain 单一来源（tool-domain 是叶子模块，无环）。
+const toolDomain = require("./tool-domain.cjs");
 const { safeTask, safeStep, safeCall, safeEvent, sanitizeEventPayload } = domain;
 const {
   TASK_STATUS, STEP_STATUS, TASK_EVENT, ERROR, DEFAULT_MAX_ATTEMPTS, AUTO_RETRY, TOOL_EXECUTION,
@@ -52,19 +54,22 @@ function safeVerification(row) {
 }
 function parseMaybeJson(text) { if (text == null) return null; try { return JSON.parse(text); } catch { return text; } }
 
-/** 失败 Verification 的 expected/actual 只允许安全扁平证据：截断 / 去敏键 / 去私有路径与 capability 前缀。 */
+/** 失败 Verification 的 expected/actual 只允许安全扁平证据：截断 / 去敏键 / 去路径与 capability 前缀。 */
 const EVIDENCE_SENSITIVE_KEY = /(secret|token|authorization|api[_-]?key|credential|password|bearer)/i;
-const EVIDENCE_PATH_RE = /\/Users\/[^\s"']*|\/private\/[^\s"']*|\/var\/folders\/[^\s"']*/g;
+// 路径判据单一来源：tool-domain 的持久化去敏判据（bridge 的窄口径是「拒绝」判据，不适用于证据投影）。
+const EVIDENCE_PATH_RE = toolDomain.UNSAFE_PATH_PERSIST_RE;
 const EVIDENCE_CAPABILITY_RE = /mpx_[A-Za-z0-9_-]+|tpx_[A-Za-z0-9_-]+/g;
+/** 证据文本一律过同一份判据，含 depth>=2 的 JSON 兜底分支（那里也绝不能出现明文路径）。 */
+function redactEvidenceText(text) { return String(text).replace(EVIDENCE_PATH_RE, "[REDACTED_PATH]").replace(EVIDENCE_CAPABILITY_RE, "[REDACTED_CAPABILITY]"); }
 function sanitizeEvidenceValue(value, depth = 0) {
   if (value == null) return null;
   if (typeof value === "string") {
-    const s = value.replace(EVIDENCE_PATH_RE, "[REDACTED_PATH]").replace(EVIDENCE_CAPABILITY_RE, "[REDACTED_CAPABILITY]");
+    const s = redactEvidenceText(value);
     return s.length > 200 ? s.slice(0, 200) + "…[truncated]" : s;
   }
   if (typeof value === "number") return Number.isFinite(value) ? value : String(value).slice(0, 40);
   if (typeof value === "boolean") return value;
-  if (depth >= 2) { try { return JSON.stringify(value).slice(0, 200); } catch { return "[unserializable]"; } }
+  if (depth >= 2) { try { return redactEvidenceText(JSON.stringify(value).slice(0, 200)); } catch { return "[unserializable]"; } }
   if (Array.isArray(value)) return value.slice(0, 16).map((v) => sanitizeEvidenceValue(v, depth + 1));
   if (typeof value === "object") {
     const out = {};
@@ -81,6 +86,23 @@ function safeDeniedArguments(raw) {
   const safe = sanitizeEvidenceValue(parsed);
   return safe && typeof safe === "object" && !Array.isArray(safe) ? safe : {};
 }
+
+/**
+ * D4-03 · #sideEffectSafety code → 各入口既有拒绝原因。
+ * 逐字保持既有 RESUME_* / APPEND_* 字符串：收敛判定来源，绝不改写对外语义。
+ */
+const RESUME_SAFETY_REASON = Object.freeze({
+  EFFECT_STATE_UNAVAILABLE: RESUME_REASON.EFFECT_STATE_UNAVAILABLE,
+  UNKNOWN_EFFECT: RESUME_REASON.UNKNOWN_EFFECT_PRESENT,
+  SIDE_EFFECT_PENDING: RESUME_REASON.SIDE_EFFECT_PENDING,
+  ACTIVE_LEASE: RESUME_REASON.ACTIVE_LEASE,
+});
+const APPEND_SAFETY_REASON = Object.freeze({
+  EFFECT_STATE_UNAVAILABLE: APPEND_REASON.EFFECT_STATE_UNAVAILABLE,
+  UNKNOWN_EFFECT: APPEND_REASON.UNKNOWN_EFFECT,
+  SIDE_EFFECT_PENDING: APPEND_REASON.SIDE_EFFECT_PENDING,
+  ACTIVE_LEASE: APPEND_REASON.ACTIVE_LEASE,
+});
 
 class TaskService {
   constructor({ identity, authService, authStore, taskStore, toolStore = null, sideEffectStore = null, modelService = null, clock = null, logger = null, hooks = null } = {}) {
@@ -683,6 +705,23 @@ class TaskService {
   }
 
   /**
+   * D4-03 · 未决副作用安全判定**单一来源**。
+   *
+   * resume / append / runTask 三条"启动新执行"入口必须给出同一答案：存在 UNKNOWN_EFFECT /
+   * 待批准 / 已批准未执行 / LEASED / RUNNING 或 active lease 时一律阻断。任何一条入口各自
+   * 复制判定，都会漂移出"某个入口漏守卫"的缺口（runTask 曾经就是）。只读，绝不改状态。
+   */
+  #sideEffectSafety(taskId) {
+    if (!this.sideEffectStore) return { blocked: true, code: "EFFECT_STATE_UNAVAILABLE" };
+    const calls = this.sideEffectStore.callsOfTask(taskId);
+    if (calls.some((c) => String(c.status) === "UNKNOWN_EFFECT")) return { blocked: true, code: "UNKNOWN_EFFECT" };
+    if (calls.some((c) => ["AWAITING_APPROVAL", "APPROVED", "LEASED", "RUNNING"].includes(String(c.status)))) return { blocked: true, code: "SIDE_EFFECT_PENDING" };
+    const callIds = new Set(calls.map((c) => c.callId));
+    if (this.sideEffectStore.activeLeases().some((l) => callIds.has(l.callId))) return { blocked: true, code: "ACTIVE_LEASE" };
+    return { blocked: false, code: null };
+  }
+
+  /**
    * D4-06 Closure 后端可续接判定（不信 renderer）。
    * 只有「BLOCKED + last run error_code=BUDGET_EXHAUSTED + 无未决副作用/UNKNOWN_EFFECT/active lease
    * + 存在可续接的已完成产物 + 未达续接上限」才 resumable。其余一律带显式 reason 拒绝。
@@ -718,12 +757,8 @@ class TaskService {
     if (runs.some((r) => r.status === HARNESS_RUN_STATUS.STARTING || r.status === HARNESS_RUN_STATUS.RUNNING)) return Object.assign(base, { reason: RESUME_REASON.IN_FLIGHT });
     if (steps.some((s) => s.status === STEP_STATUS.RUNNING || s.status === STEP_STATUS.PENDING)) return Object.assign(base, { reason: RESUME_REASON.IN_FLIGHT });
     // 安全优先：未决/未知副作用与 active lease 无条件阻断续接，先于停止原因判定。
-    if (!this.sideEffectStore) return Object.assign(base, { reason: RESUME_REASON.EFFECT_STATE_UNAVAILABLE });
-    const calls = this.sideEffectStore.callsOfTask(task.task_id);
-    if (calls.some((c) => String(c.status) === "UNKNOWN_EFFECT")) return Object.assign(base, { reason: RESUME_REASON.UNKNOWN_EFFECT_PRESENT });
-    if (calls.some((c) => ["AWAITING_APPROVAL", "APPROVED", "LEASED", "RUNNING"].includes(String(c.status)))) return Object.assign(base, { reason: RESUME_REASON.SIDE_EFFECT_PENDING });
-    const callIds = new Set(calls.map((c) => c.callId));
-    if (this.sideEffectStore.activeLeases().some((l) => callIds.has(l.callId))) return Object.assign(base, { reason: RESUME_REASON.ACTIVE_LEASE });
+    const safety = this.#sideEffectSafety(task.task_id);
+    if (safety.blocked) return Object.assign(base, { reason: RESUME_SAFETY_REASON[safety.code] });
 
     if (!lastRun && !stepBudgetStop) return Object.assign(base, { reason: RESUME_REASON.NO_HARNESS_RUN });
     if (!runBudgetStop && !stepBudgetStop) return Object.assign(base, { reason: RESUME_REASON.NOT_BUDGET_STOP });
@@ -768,12 +803,8 @@ class TaskService {
     if (task.cancel_requested) return Object.assign(base, { reason: APPEND_REASON.NOT_SUCCEEDED });
     if (runs.some((r) => r.status === HARNESS_RUN_STATUS.STARTING || r.status === HARNESS_RUN_STATUS.RUNNING)) return Object.assign(base, { reason: APPEND_REASON.IN_FLIGHT });
     if (steps.some((s) => s.status === STEP_STATUS.RUNNING || s.status === STEP_STATUS.PENDING)) return Object.assign(base, { reason: APPEND_REASON.IN_FLIGHT });
-    if (!this.sideEffectStore) return Object.assign(base, { reason: APPEND_REASON.EFFECT_STATE_UNAVAILABLE });
-    const calls = this.sideEffectStore.callsOfTask(task.task_id);
-    if (calls.some((c) => String(c.status) === "UNKNOWN_EFFECT")) return Object.assign(base, { reason: APPEND_REASON.UNKNOWN_EFFECT });
-    if (calls.some((c) => ["AWAITING_APPROVAL", "APPROVED", "LEASED", "RUNNING"].includes(String(c.status)))) return Object.assign(base, { reason: APPEND_REASON.SIDE_EFFECT_PENDING });
-    const callIds = new Set(calls.map((c) => c.callId));
-    if (this.sideEffectStore.activeLeases().some((l) => callIds.has(l.callId))) return Object.assign(base, { reason: APPEND_REASON.ACTIVE_LEASE });
+    const safety = this.#sideEffectSafety(task.task_id);
+    if (safety.blocked) return Object.assign(base, { reason: APPEND_SAFETY_REASON[safety.code] });
     if (task.status !== TASK_STATUS.SUCCEEDED) return Object.assign(base, { reason: APPEND_REASON.NOT_SUCCEEDED });
     if (!this.store.artifactsOfTask(task.task_id).length) return Object.assign(base, { reason: APPEND_REASON.NO_ARTIFACT });
 
@@ -850,6 +881,21 @@ class TaskService {
       const assessment = this.#appendAssessment(load.task);
       return { ok: true, taskId: load.task.task_id, appendable: assessment.appendable, reason: assessment.reason };
     });
+  }
+
+  /**
+   * D4-03 · 未决副作用安全判定的唯一只读出口（与 command 同源的 owner/app 归属校验）。
+   *
+   * orchestrator.runTask 在任何状态变更之前调用它；绝不改任何状态、绝不写事件。
+   * !ok（TASK_FORBIDDEN / TASK_NOT_FOUND）原样回传，调用方保持既有错误语义，绝不吞掉改写。
+   */
+  getSideEffectSafety({ context, taskId } = {}) {
+    const guard = this.#guard(context);
+    if (!guard.ok) return guard;
+    const load = this.#load(guard, taskId);
+    if (!load.ok) return load;
+    const safety = this.#sideEffectSafety(load.task.task_id);
+    return { ok: true, taskId: load.task.task_id, blocked: safety.blocked, code: safety.code };
   }
 
   /** 只读预算账本：每类 authorized/consumed/remaining + base + additions + nextGrant（绝不更新/清零历史计数）。 */

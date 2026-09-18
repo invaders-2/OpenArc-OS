@@ -34,6 +34,8 @@ const DEFAULT_MAX_PERSISTED_EVENTS = 64;
 const ORCHESTRATOR_ERROR = Object.freeze({
   NO_ADAPTER: "ORCHESTRATOR_NO_ADAPTER",
   NOT_RUNNING: "ORCHESTRATOR_NOT_RUNNING",
+  // D4-03：存在未决副作用 / active lease 时任何入口都不得启动新执行（reason 见 TaskService）。
+  RUN_BLOCKED_UNRESOLVED_SIDE_EFFECT: "RUN_BLOCKED_UNRESOLVED_SIDE_EFFECT",
 });
 
 function sha256(text) { return crypto.createHash("sha256").update(String(text)).digest("hex"); }
@@ -140,6 +142,18 @@ class TaskHarnessOrchestrator {
   /** 全链路入口：createTask 之后调用；严格 PENDING→RUNNING→Step RUNNING→Harness。*/
   async runTask({ context, taskId, expectedRevision, stepInput = null, verify = null, turnTimeoutMs = this.turnTimeoutMs } = {}) {
     const svc = this.#service();
+    // D4-03：runTask 是第三条"启动新 run"入口，必须在**任何**状态变更（startTask）之前就问
+    // TaskService 的未决副作用判定，否则它会成为绕过 resume/append 守卫、让 Harness 重放旧
+    // WRITE 的旁路。归属 / 不存在等错误不在此改写：保持既有 startTask 路径原样返回。
+    const safety = svc.getSideEffectSafety({ context, taskId });
+    // 唯一例外：账本未装配（判定不可用）且本编排器也没有 side-effect 运行时 —— 这条路径根本
+    // 产生不了 SideEffectCall（facade 不暴露 WRITE，proxy 只执行 READ_ONLY），把"读不到"
+    // 当成"有未决副作用"会把纯推理入口整个锁死。只要装配了 side-effect runtime，四个 code 一律拒绝。
+    const effectCapable = !!this.sideEffectRuntime;
+    if (safety.ok && safety.blocked && (effectCapable || safety.code !== "EFFECT_STATE_UNAVAILABLE")) {
+      const current = svc.getTask({ context, taskId });
+      return { ok: false, error: ORCHESTRATOR_ERROR.RUN_BLOCKED_UNRESOLVED_SIDE_EFFECT, reason: safety.code, task: current.ok ? current.task : null };
+    }
     const started = svc.startTask({ context, taskId, expectedRevision });
     if (!started.ok) return started;
     const created = svc.createStep({ context, taskId, kind: ORCHESTRATION_KIND, input: stepInput, expectedRevision: started.task.revision });
