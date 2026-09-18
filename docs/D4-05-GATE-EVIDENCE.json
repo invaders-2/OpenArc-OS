@@ -1,7 +1,7 @@
 {
   "phase": "D4-05",
   "title": "执行关卡：产物不符 / 结果未知 / 用量到限 / 记忆越权",
-  "testedCommit": "3c9659a5bb05c351c7b215e69cd69ff44c3d4597",
+  "testedCommit": "f63e87ac5390e65fd733bf6467f693a5cc67a4f1",
   "workspaceState": "M docs/D4-04-GATE-EVIDENCE.json",
   "command": "npm run test:d4-05",
   "env": {
@@ -58,7 +58,7 @@
       "pass": 94,
       "fail": 0
     },
-    "artifactSha256": "ac0bf90094607635fe01deb7432027d436b8f801e51f0c470557b5c7432709a2"
+    "artifactSha256": "f2157aece7a08de904d7af166664fc2be6ec4b9bc9700711f231233b7cd15791"
   },
   "recoveryRun": {
     "exitCode": 0,
@@ -67,7 +67,7 @@
       "pass": 11,
       "fail": 0
     },
-    "artifactSha256": "6d9b66207bbb548173f1936082753595fb665af40e4627d7fecccaa51172aee6"
+    "artifactSha256": "2dfe8860a2531b62ec0df96998e193ff18e840d7992586516b06a7bfc49c55b9"
   },
   "memoryUiElectronRun": {
     "exitCode": 0,
@@ -76,7 +76,7 @@
       "pass": 15,
       "fail": 0
     },
-    "artifactSha256": "f26ac7d2f4594b2238b4e46d431aab09555168ed511e2f97e930afe81f78acdc",
+    "artifactSha256": "a597118f89b612806217b10c5410fcb7c1849200629803ac3e5911198c73332c",
     "secretHits": 0
   },
   "nodeRun": {
@@ -98,19 +98,19 @@
   "sourceArtifacts": [
     {
       "path": "artifacts/d4-04/vertical-smoke-gate.json",
-      "sha256": "8b05cb1ff75d47a99b2e9b3b4ca053504607280106af3e1277ac1b42a74e8904"
+      "sha256": "1bb69ad0ba1a91a72f2a06b50a77ea5040582aa6917a42097b9f630f06512791"
     },
     {
       "path": "artifacts/d4-05/node-tests.tap",
-      "sha256": "e7060d99beb63c91d968f72876d51adfed71d16c8e3ab68d9e2d84ae4493f40c"
+      "sha256": "ae52e8f4ba990b31073fc44b21cae8331799f7d7ba7250f3e0f5bd1d3f705256"
     },
     {
       "path": "artifacts/d4-05-recovery/recovery-ui-gate.json",
-      "sha256": "658b53e8a60e2918edd19b6538ed3d1925e1a3f144a91d0068088db8664254ef"
+      "sha256": "7a66035086416fdd448890af9d1f2bfc32632b3b327a36abcac213d0daf690a2"
     },
     {
       "path": "artifacts/d4-05-memory-ui/memory-ui-gate.json",
-      "sha256": "00d8566fabdb49adc1940bd8e1f854e23f634ce882e8029ab57a9d0a233411f8"
+      "sha256": "a39688123a4b374f5e9da8b734ce07f1e1837095d92327ec059be8f3e34b3abe"
     }
   ],
   "checks": [
@@ -575,7 +575,7 @@
       "source": "electron:d4-05-recovery-ui",
       "name": "S2-UI-4 · UI recovery 区块可见并显示实际状态/核查结论/关联产物",
       "expected": null,
-      "actual": "{\"recoveryShown\":true,\"stateText\":\"实际状态：UNKNOWN_EFFECT · 核查结论：尚无结论\",\"artifactsText\":\"关联产物：art_7NwUqbUrmGer6A（text）\",\"reasonText\":\"结果未知 · 停止原因：RECOVERY_REQUIRED\"}",
+      "actual": "{\"recoveryShown\":true,\"stateText\":\"实际状态：UNKNOWN_EFFECT · 核查结论：尚无结论\",\"artifactsText\":\"关联产物：art_R0R76Oxz1FsmiA（text）\",\"reasonText\":\"结果未知 · 停止原因：RECOVERY_REQUIRED\"}",
       "ok": true
     },
     {
@@ -855,7 +855,7 @@
       "source": "electron:d4-04-smoke",
       "name": "C3 · Approval UI 显示 tool / risk / target / effect",
       "expected": null,
-      "actual": "应用 / AgentAI 助手（本机会话）工具Trash Resource（resource.trash）风险可逆写入目标Vertical Smoke Resourceresource://res_Pp6-ZaIAP0SvsafzGo8rl",
+      "actual": "应用 / AgentAI 助手（本机会话）工具Trash Resource（resource.trash）风险可逆写入目标Vertical Smoke Resourceresource://res_y84Gw4x5JKxQQ64-II3Vw",
       "ok": true
     },
     {
@@ -895,7 +895,7 @@
       "source": "electron:d4-04-smoke",
       "name": "C8 · production executor spawned + ready + real child exit",
       "expected": null,
-      "actual": "{\"instanceId\":\"exe_DUCYb2H6\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":0,\"signal\":null,\"launchError\":false}",
+      "actual": "{\"instanceId\":\"exe_T4C8nn3f\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":0,\"signal\":null,\"launchError\":false}",
       "ok": true
     },
     {
@@ -1015,7 +1015,7 @@
       "source": "electron:d4-04-smoke",
       "name": "F5 · claim RUNNING 先于真实 child exit 崩溃",
       "expected": null,
-      "actual": "{\"claimIdx\":20,\"unknownIdx\":21,\"ev\":{\"instanceId\":\"exe_Laa8kw7J\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":9,\"signal\":null,\"launchError\":false}}",
+      "actual": "{\"claimIdx\":20,\"unknownIdx\":21,\"ev\":{\"instanceId\":\"exe_3hZvbJTR\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":9,\"signal\":null,\"launchError\":false}}",
       "ok": true
     },
     {
@@ -1039,7 +1039,7 @@
       "source": "electron:d4-04-smoke",
       "name": "G1 · Renderer 自报 actor/risk 被忽略（真实 session 决定）",
       "expected": null,
-      "actual": "{\"ok\":true,\"actor\":\"usr_qEhMgtdLSxU2X_-n1dk3CjeiiTxHklfA\"}",
+      "actual": "{\"ok\":true,\"actor\":\"usr_2oj6fN53UvBuyQ2oH2Ln3E0IHovCz8m0\"}",
       "ok": true
     },
     {
@@ -1063,7 +1063,7 @@
       "source": "electron:d4-04-smoke",
       "name": "H1 · Reload 后从 backend state 恢复 Task 结果",
       "expected": null,
-      "actual": "taskId=task_SLKBevgiV8U2qQ gate=ready",
+      "actual": "taskId=task_xOM1nHjbw_ZOhQ gate=ready",
       "ok": true
     },
     {
@@ -1499,7 +1499,7 @@
       "ok": true
     }
   ],
-  "at": "2026-09-18T03:29:59.663Z",
+  "at": "2026-09-18T07:13:53.071Z",
   "artifactSha256Coverage": "sha256 of canonical JSON (2-space indent) excluding the artifactSha256 field",
-  "artifactSha256": "06a5451babb7fd2be5303ab8356ccc3493114e51d901c9a4ca8db59caab34ef9"
+  "artifactSha256": "c638af01fa8d9cb539654a8473d2078252b557901e4713a60fd65e8ecaf6b492"
 }

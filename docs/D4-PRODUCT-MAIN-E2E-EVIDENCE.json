@@ -1,5 +1,5 @@
 {
-  "testedCommit": "3c9659a5bb05c351c7b215e69cd69ff44c3d4597",
+  "testedCommit": "f63e87ac5390e65fd733bf6467f693a5cc67a4f1",
   "workspaceState": "",
   "command": "node tests/d4-main-e2e.mjs",
   "env": {
@@ -54,7 +54,7 @@
   },
   "flows": {
     "flow1": {
-      "taskId": "task_WQz7RUchELtVdA",
+      "taskId": "task_5QVATH2k9ta64A",
       "prerequisiteGrant": "product governance UI (grantAppToolAccess)",
       "status": "SUCCEEDED",
       "sideEffectCalls": 1,
@@ -66,7 +66,7 @@
       "executorSpawned": true
     },
     "flow2": {
-      "taskId": "task_Fkm1GIzEVNA5wQ",
+      "taskId": "task_0V-BeH_nzYwMWQ",
       "prerequisiteGrant": "product governance UI (grantAppToolAccess)",
       "revokeEntry": "product governance/revokeAppToolAccess",
       "callStatus": "BLOCKED",
@@ -76,7 +76,7 @@
       "nonAdminGrantDenied": true
     },
     "flow3": {
-      "taskId": "task_u0CZjuIji9_IjQ",
+      "taskId": "task_TAd-KLfCHCAbdg",
       "prerequisiteGrant": "product entry grantAppToolAccess (search/readMetadata only)",
       "status": "BLOCKED",
       "sideEffectCalls": 0,
@@ -85,7 +85,7 @@
       "deniedUiVisible": true
     },
     "flow4": {
-      "taskId": "task_GBxZiBkMtyJuog",
+      "taskId": "task_02opvzpy3kx5bg",
       "entry": "真实 UI：task/run（plan write + 目标资源）→ Approve → [data-ai-append-goal] + [data-ai-append]（plan budget）→ 第二步真实预算停止 → [data-ai-resume]（plan final）→ 成功",
       "status": "SUCCEEDED",
       "appendAcceptedByUI": true,
@@ -178,15 +178,15 @@
       ],
       "artifactRefs": [
         {
-          "artifactId": "art_ljideIddmLA4Og",
-          "stepId": "step_sUL1oybs8DvAwA",
-          "runId": "hrun_B1cuKx_6HV-fbw",
+          "artifactId": "art_7udivfAQ7nWmEw",
+          "stepId": "step__3Xo6AtEtqHFgQ",
+          "runId": "hrun_825GjsqP3HFx5Q",
           "type": "text"
         },
         {
-          "artifactId": "art_7QgXKMJUulpZyg",
-          "stepId": "step_QUH7SYJIHKZ-lw",
-          "runId": "hrun_aDSSBr_muUYWDA",
+          "artifactId": "art_dTCSgapsv5-ZQw",
+          "stepId": "step_8ZrAVKIM42tWNw",
+          "runId": "hrun_eSF7pqlDfMskag",
           "type": "text"
         }
       ],
@@ -231,7 +231,7 @@
         ]
       },
       "revokeTask": {
-        "taskId": "task_wKRbHE4c_pJVlA",
+        "taskId": "task__tG6iMwshTFu_w",
         "steps": 2,
         "artifacts": 1,
         "appendReason": "APPEND_NOT_SUCCEEDED",
@@ -267,7 +267,7 @@
   "observations": [
     {
       "name": "flow4-append-budget-resume",
-      "detail": "{\"taskId\":\"task_GBxZiBkMtyJuog\",\"taskStatus\":\"SUCCEEDED\",\"steps\":[\"SUCCEEDED\",\"BLOCKED\",\"SUCCEEDED\"],\"artifacts\":2,\"verifications\":2,\"runs\":3,\"budget\":{\"before\":{\"MODEL_CALLS\":{\"authorized\":8,\"consumed\":4,\"remaining\":4},\"TOOL_CALLS\":{\"authorized\":8,\"consumed\":2,\"remaining\":6},\"TOOL_ROUNDS\":{\"authorized\":4,\"consumed\":1,\"remaining\":3}},\"stop\":{\"MODEL_CALLS\":{\"authorized\":8,\"consumed\":8,\"remaining\":0},\"TOOL_CALLS\":{\"authorized\":8,\"consumed\":6,\"remaining\":2},\"TOOL_ROUNDS\":{\"authorized\":4,\"consumed\":1,\"remaining\":3}},\"final\":{\"MODEL_CALLS\":{\"authorized\":16,\"consumed\":9,\"remaining\":7},\"TOOL_CALLS\":{\"authorized\":8,\"consumed\":6,\"remaining\":2},\"TOOL_ROUNDS\":{\"authorized\":4,\"consumed\":1,\"remaining\":3}},\"nextGrant\":{\"kind\":\"MODEL_CALLS\",\"amount\":8},\"additions\":1},\"calls\":{\"providerModelRequests\":9,\"providerToolCalls\":6,\"toolExecutions\":5,\"sideEffectCalls\":1}}"
+      "detail": "{\"taskId\":\"task_02opvzpy3kx5bg\",\"taskStatus\":\"SUCCEEDED\",\"steps\":[\"SUCCEEDED\",\"BLOCKED\",\"SUCCEEDED\"],\"artifacts\":2,\"verifications\":2,\"runs\":3,\"budget\":{\"before\":{\"MODEL_CALLS\":{\"authorized\":8,\"consumed\":4,\"remaining\":4},\"TOOL_CALLS\":{\"authorized\":8,\"consumed\":2,\"remaining\":6},\"TOOL_ROUNDS\":{\"authorized\":4,\"consumed\":1,\"remaining\":3}},\"stop\":{\"MODEL_CALLS\":{\"authorized\":8,\"consumed\":8,\"remaining\":0},\"TOOL_CALLS\":{\"authorized\":8,\"consumed\":6,\"remaining\":2},\"TOOL_ROUNDS\":{\"authorized\":4,\"consumed\":1,\"remaining\":3}},\"final\":{\"MODEL_CALLS\":{\"authorized\":16,\"consumed\":9,\"remaining\":7},\"TOOL_CALLS\":{\"authorized\":8,\"consumed\":6,\"remaining\":2},\"TOOL_ROUNDS\":{\"authorized\":4,\"consumed\":1,\"remaining\":3}},\"nextGrant\":{\"kind\":\"MODEL_CALLS\",\"amount\":8},\"additions\":1},\"calls\":{\"providerModelRequests\":9,\"providerToolCalls\":6,\"toolExecutions\":5,\"sideEffectCalls\":1}}"
     }
   ],
   "rendererConsoleErrors": 0,
@@ -395,8 +395,8 @@
       "flow": "setup",
       "name": "S5 · 真实 UI 设置默认 chat model（personal + organization）",
       "ok": true,
-      "actual": "org=mcf_Xp1ssQIrGvVPPg",
-      "expected": "mcf_Xp1ssQIrGvVPPg"
+      "actual": "org=mcf_c3KKX_omTvfTVw",
+      "expected": "mcf_c3KKX_omTvfTVw"
     },
     {
       "flow": "setup",
@@ -458,7 +458,7 @@
       "flow": "flow1",
       "name": "F1.6 · Approval UI 显示 tool / risk / target",
       "ok": true,
-      "actual": "应用 / AgentAI 助手（本机会话）工具Trash Resource（resource.trash）风险可逆写入目标Main E2E Targetresource://res_w5acESKYQZe9KIQdPjg7JIl_O0gkm0PV预期效果把该资源移入废纸篓（可通过",
+      "actual": "应用 / AgentAI 助手（本机会话）工具Trash Resource（resource.trash）风险可逆写入目标Main E2E Targetresource://res_jvb4GyiNGE2YsvOIJgGmRyvIzW8z6Ofc预期效果把该资源移入废纸篓（可通过",
       "expected": "tool+risk+target"
     },
     {
@@ -528,7 +528,7 @@
       "flow": "flow2",
       "name": "F2.2 · 经产品治理入口 revokeAppToolAccess 撤销 ai 的 TOOL grant（changed=true）",
       "ok": true,
-      "actual": "{\"ok\":true,\"changed\":true,\"grantId\":\"grant_EgrmGdj_yvVyadZFRjlzOLnx2QlZYCuk\"}",
+      "actual": "{\"ok\":true,\"changed\":true,\"grantId\":\"grant_UVbX_vc0PYsLoEKBOHaeivLEX80XHzZ8\"}",
       "expected": "ok=true, changed=true"
     },
     {
@@ -570,7 +570,7 @@
       "flow": "flow3",
       "name": "F3.1 · 经产品治理入口只授予 search/readMetadata（显式不授予 trash）",
       "ok": true,
-      "actual": "{\"ok\":true,\"grantId\":\"grant_AkxnZE44WaqcMlzNfrdpmAqc7WWYqVhc\",\"appId\":\"ai\",\"actions\":[\"tool.resource.search\",\"tool.resource.readMetadata\"],\"scope\":\"TOOL\"}",
+      "actual": "{\"ok\":true,\"grantId\":\"grant_yPRw394s6KPgIP1aioc-b87iVJxZe46Q\",\"appId\":\"ai\",\"actions\":[\"tool.resource.search\",\"tool.resource.readMetadata\"],\"scope\":\"TOOL\"}",
       "expected": "ok=true"
     },
     {
@@ -661,7 +661,7 @@
       "flow": "flow4",
       "name": "F4.5 · 14(a) 并发赢家同步返回 { ok:true, taskId 不变, status:RUNNING }；拒绝方同步拒绝且无 running 异步面",
       "ok": true,
-      "actual": "{\"winner\":{\"taskId\":\"task_yhCdfH3jGXzmYA\",\"status\":\"RUNNING\"},\"loser\":{\"error\":\"TASK_REVISION_CONFLICT\"}}",
+      "actual": "{\"winner\":{\"taskId\":\"task_1-2o7pilUhizaw\",\"status\":\"RUNNING\"},\"loser\":{\"error\":\"TASK_REVISION_CONFLICT\"}}",
       "expected": "winner RUNNING + loser 同步拒绝"
     },
     {
@@ -717,7 +717,7 @@
       "flow": "flow4",
       "name": "F4.13 · 14(e) 真实追加一个 WRITE 类第二步：同步接受 ok=true / taskId 不变 / status=RUNNING",
       "ok": true,
-      "actual": "{\"ok\":true,\"taskId\":\"task_wKRbHE4c_pJVlA\",\"status\":\"RUNNING\"}",
+      "actual": "{\"ok\":true,\"taskId\":\"task__tG6iMwshTFu_w\",\"status\":\"RUNNING\"}",
       "expected": "ok=true + 同一 taskId + RUNNING"
     },
     {
@@ -745,7 +745,7 @@
       "flow": "flow4",
       "name": "F4.17 · 14(e) 经产品治理入口 revokeAppToolAccess 撤销 ai 的 TOOL grant（changed=true）",
       "ok": true,
-      "actual": "{\"ok\":true,\"changed\":true,\"grantId\":\"grant_AkxnZE44WaqcMlzNfrdpmAqc7WWYqVhc\"}",
+      "actual": "{\"ok\":true,\"changed\":true,\"grantId\":\"grant_yPRw394s6KPgIP1aioc-b87iVJxZe46Q\"}",
       "expected": "ok=true + changed=true"
     },
     {
@@ -843,7 +843,7 @@
       "flow": "flow4",
       "name": "F4.31 · 真实 UI 点击 [data-ai-append]：同一 Task（data-ai-task-id 不变）+ 同步接收（返回时已 2 steps / RUNNING）+ 输入框清空且无错误",
       "ok": true,
-      "actual": "{\"ready\":true,\"click\":\"ok\",\"syncAccepted\":true,\"panelTaskId\":\"task_GBxZiBkMtyJuog\",\"goalClearedOrBlockGone\":true,\"appendBlockGone\":true,\"noErrorElement\":true}",
+      "actual": "{\"ready\":true,\"click\":\"ok\",\"syncAccepted\":true,\"panelTaskId\":\"task_02opvzpy3kx5bg\",\"goalClearedOrBlockGone\":true,\"appendBlockGone\":true,\"noErrorElement\":true}",
       "expected": "ok + 同一 taskId + 同步 2 steps + 清空"
     },
     {
@@ -892,7 +892,7 @@
       "flow": "flow4",
       "name": "F4.38 · 第一步产物与副作用在预算停止后保持不变（step/artifact/verification 行逐字段不变 + 仍 1 条 SUCCEEDED call + 资源仍处于废纸篓 + 0 新 lease/executor）",
       "ok": true,
-      "actual": "{\"step1\":\"SUCCEEDED\",\"artifacts\":1,\"calls\":[\"SUCCEEDED\"],\"resource\":\"deleted\",\"trashState\":\"TRASHED\",\"resourceUpdatedAt\":\"1789702032677/1789702032677\",\"leases\":1,\"exec\":\"4->4\"}",
+      "actual": "{\"step1\":\"SUCCEEDED\",\"artifacts\":1,\"calls\":[\"SUCCEEDED\"],\"resource\":\"deleted\",\"trashState\":\"TRASHED\",\"resourceUpdatedAt\":\"1789715462085/1789715462085\",\"leases\":1,\"exec\":\"4->4\"}",
       "expected": "旧行不变 + 1 SUCCEEDED + trashed 未再变 + 0 新 lease/executor"
     },
     {
@@ -983,7 +983,7 @@
       "flow": "flow4",
       "name": "F4.51 · 第一步副作用恰好一次：跨 step/跨 run 不重放（side_effect_calls==1、无第二次 trash execution、资源只 trash 一次、executor 不新增）",
       "ok": true,
-      "actual": "{\"sideEffectCalls\":1,\"callStatuses\":[\"SUCCEEDED\"],\"trashExecutions\":0,\"resource\":\"deleted\",\"trashState\":\"TRASHED\",\"trashedAt\":\"1789702032677==1789702032677\",\"exec\":\"4->4\"}",
+      "actual": "{\"sideEffectCalls\":1,\"callStatuses\":[\"SUCCEEDED\"],\"trashExecutions\":0,\"resource\":\"deleted\",\"trashState\":\"TRASHED\",\"trashedAt\":\"1789715462085==1789715462085\",\"exec\":\"4->4\"}",
       "expected": "1 SUCCEEDED + 0 重放 + 资源只 trash 一次"
     },
     {
@@ -1032,7 +1032,7 @@
       "flow": "flow5",
       "name": "F5.6 · 刷新后 AI 面板恢复到最新任务（= 流程 4 主任务）",
       "ok": true,
-      "actual": "{\"opened\":true,\"panelTaskId\":\"task_GBxZiBkMtyJuog\",\"expected\":\"task_GBxZiBkMtyJuog\"}",
+      "actual": "{\"opened\":true,\"panelTaskId\":\"task_02opvzpy3kx5bg\",\"expected\":\"task_02opvzpy3kx5bg\"}",
       "expected": "panel 指向流程 4 主任务"
     },
     {
@@ -1095,7 +1095,7 @@
       "flow": "boot",
       "name": "I2 · boot 观测写入早于首个任务接入",
       "ok": true,
-      "actual": "{\"bootMtime\":1789702022790.0493,\"firstTask\":1789702025391}",
+      "actual": "{\"bootMtime\":1789715451235.2578,\"firstTask\":1789715453704}",
       "expected": "boot <= task"
     },
     {
@@ -1120,7 +1120,7 @@
       "expected": "0"
     }
   ],
-  "at": "2026-09-18T03:27:17.252Z",
+  "at": "2026-09-18T07:11:07.052Z",
   "artifactSha256Coverage": "sha256 of canonical JSON (2-space indent) excluding artifactSha256 field",
-  "artifactSha256": "0461ad44d37af0ca05a0381cbe8a5515b650c138ba5e10e92e3da5a8eb0f7bcd"
+  "artifactSha256": "37133dfab90b408e13b51f41ebddd02e622aec5313c9b920e92a382c415d718c"
 }
