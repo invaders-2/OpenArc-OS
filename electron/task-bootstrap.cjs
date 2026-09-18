@@ -152,9 +152,14 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
           const ledger = taskService.getBudgetLedger({ context, taskId });
           // D4-05 S2：结果未知的只读恢复投影（仅 BLOCKED + UNKNOWN_EFFECT 时 applicable）。
           const recovery = taskService.getRecoveryState({ context, taskId });
+          // D4 收口：被后端拒绝且尚未被同一操作真实成功解决的明确 WRITE 操作（safe 投影）。
+          const denied = typeof taskService.getDeniedRequiredWriteOperations === "function"
+            ? taskService.getDeniedRequiredWriteOperations({ context, taskId })
+            : { ok: false };
           return {
             ok: true, task: got.task, steps: steps.ok ? steps.items : [], artifacts: artifacts.ok ? artifacts.items : [],
             verifications: verifications.ok ? verifications.items : [],
+            deniedOperations: denied.ok && Array.isArray(denied.unresolved) ? denied.unresolved : [],
             resumable: !!(eligibility.ok && eligibility.resumable),
             stopReason: eligibility.ok ? (eligibility.stopReason || null) : null,
             resumeReason: eligibility.ok ? (eligibility.reason || null) : (eligibility.error || null),

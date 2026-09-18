@@ -74,6 +74,14 @@ function sanitizeEvidenceValue(value, depth = 0) {
   return String(value).slice(0, 200);
 }
 
+/** 被拒 WRITE 操作的 safe arguments 投影：只回传有界、去敏、去私有路径的 evidence。 */
+function safeDeniedArguments(raw) {
+  const parsed = parseMaybeJson(raw);
+  if (parsed == null || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  const safe = sanitizeEvidenceValue(parsed);
+  return safe && typeof safe === "object" && !Array.isArray(safe) ? safe : {};
+}
+
 class TaskService {
   constructor({ identity, authService, authStore, taskStore, toolStore = null, sideEffectStore = null, modelService = null, clock = null, logger = null, hooks = null } = {}) {
     if (!identity) throw new Error("TaskService 需要 IdentityStore");
@@ -1107,6 +1115,100 @@ class TaskService {
       }
     }
     return { ok: true, unresolved, resolved };
+  }
+
+  /**
+   * D4 收口 · 只读列出「明确非 READ_ONLY（WRITE 类）操作被后端拒绝、且尚未被同一
+   * tool + 同一 canonical arguments 的真实成功解决」的记录。
+   *
+   * 判据全部来自后端记录（task_tool_proposals + tool_decisions + tool_executions +
+   * side_effect_calls），不信任模型自述；READ_ONLY 的拒绝绝不参与。
+   * 解决语义与 A33 同源：只有同一 (tool_id, arguments_hash) **之后**出现真实成功
+   * （SideEffectCall SUCCEEDED，或 decision=ALLOWED 且 execution SUCCEEDED）才算解决；
+   * arguments_hash 缺失（无法可靠关联）→ 以 proposal 唯一键保守保持未解决。
+   * 严格只读：绝不删除 / 改写任何拒绝记录，绝不产生副作用。
+   */
+  getDeniedRequiredWriteOperations({ context, taskId, runId = null } = {}) {
+    const guard = this.#guard(context);
+    if (!guard.ok) return guard;
+    const load = this.#load(guard, taskId);
+    if (!load.ok) return load;
+    const empty = { ok: true, denials: [], unresolved: [], resolved: [] };
+    if (!this.toolStore || typeof this.toolStore.decisionsOfTask !== "function" || typeof this.toolStore.proposalsOfTask !== "function") return empty;
+    const targetRunId = runId == null || runId === "" ? null : String(runId);
+
+    const proposals = this.toolStore.proposalsOfTask(load.task.task_id) || [];
+    const proposalById = new Map(proposals.map((p) => [String(p.proposal_id), p]));
+    const decisions = this.toolStore.decisionsOfTask(load.task.task_id) || [];
+    const decisionByProposal = new Map(decisions.map((d) => [String(d.proposal_id), d]));
+    // 同秒 / 固定时钟下 created_at 无法区分先后：优先用 proposal 插入顺序(rowid)判定“之后”。
+    const sequence = typeof this.toolStore.proposalSequenceOfTask === "function" ? this.toolStore.proposalSequenceOfTask(load.task.task_id) : null;
+    const seqOfProposal = new Map((sequence || []).map((id, index) => [String(id), index]));
+
+    // 真实成功索引：key = tool_id + "::" + arguments_hash → 成功记录（按 proposal 插入序判定“之后”）。
+    const successByKey = new Map();
+    const addSuccess = (key, proposalId, at, kind, ref, stepId, runIdOf) => {
+      if (!key) return;
+      let list = successByKey.get(key);
+      if (!list) { list = []; successByKey.set(key, list); }
+      list.push({ proposalId: proposalId == null ? null : String(proposalId), at: at == null ? null : Number(at), kind, ref, stepId: stepId || null, runId: runIdOf || null });
+    };
+    if (this.sideEffectStore && typeof this.sideEffectStore.callsOfTask === "function") {
+      for (const call of this.sideEffectStore.callsOfTask(load.task.task_id) || []) {
+        if (!call || call.status !== "SUCCEEDED" || !call.argumentsHash) continue;
+        addSuccess(String(call.toolId) + "::" + String(call.argumentsHash), call.proposalId, call.completedAt == null ? call.updatedAt : call.completedAt, "SIDE_EFFECT_CALL", call.callId, call.stepId, call.runId);
+      }
+    }
+    if (typeof this.toolStore.executionsOfTask === "function") {
+      for (const exec of this.toolStore.executionsOfTask(load.task.task_id) || []) {
+        if (!exec || exec.status !== "SUCCEEDED") continue;
+        const proposal = proposalById.get(String(exec.proposal_id));
+        if (!proposal || !proposal.arguments_hash) continue;
+        const decision = decisionByProposal.get(String(exec.proposal_id));
+        if (!decision || decision.decision !== "ALLOWED") continue;
+        addSuccess(String(exec.tool_id) + "::" + String(proposal.arguments_hash), exec.proposal_id, exec.completed_at == null ? exec.started_at : exec.completed_at, "TOOL_EXECUTION", exec.execution_id, exec.step_id, exec.run_id);
+      }
+    }
+
+    const denials = [];
+    for (const d of decisions) {
+      if (!d || String(d.decision) !== "DENIED") continue;
+      const riskClass = d.risk_class == null ? null : String(d.risk_class);
+      // READ_ONLY 拒绝不参与；risk 缺失无法归类为“明确 WRITE”，保守排除。
+      if (!riskClass || riskClass === "READ_ONLY") continue;
+      const proposal = proposalById.get(String(d.proposal_id));
+      if (!proposal) continue;
+      const proposalRunId = proposal.run_id == null ? null : String(proposal.run_id);
+      if (targetRunId && proposalRunId !== targetRunId) continue;
+      const argsHash = proposal.arguments_hash == null || proposal.arguments_hash === "" ? null : String(proposal.arguments_hash);
+      const toolId = String(proposal.tool_id);
+      const decidedAt = d.created_at == null ? null : Number(d.created_at);
+      const rec = {
+        toolId,
+        toolVersion: proposal.tool_version == null ? null : proposal.tool_version,
+        proposalId: proposal.proposal_id,
+        decisionId: d.decision_id,
+        reasonCode: d.reason_code || null,
+        riskClass,
+        stepId: proposal.step_id || null,
+        runId: proposalRunId,
+        argumentsHash: argsHash,
+        arguments: safeDeniedArguments(proposal.arguments_safe),
+        decidedAt,
+        linked: !!argsHash,
+      };
+      // 只有同一 tool + 同一 canonical arguments 的**后续**真实成功才解决；先后不可比 → 保守未解决。
+      if (argsHash) {
+        const denialSeq = seqOfProposal.has(String(proposal.proposal_id)) ? seqOfProposal.get(String(proposal.proposal_id)) : null;
+        const later = (successByKey.get(toolId + "::" + argsHash) || []).find((s) => {
+          if (denialSeq != null) return s.proposalId != null && seqOfProposal.has(s.proposalId) && seqOfProposal.get(s.proposalId) > denialSeq;
+          return decidedAt != null && s.at != null && Number.isFinite(s.at) && s.at > decidedAt;
+        });
+        if (later) rec.resolvedBy = { kind: later.kind, ref: later.ref, stepId: later.stepId, runId: later.runId, at: later.at, proposalId: later.proposalId };
+      }
+      denials.push(rec);
+    }
+    return { ok: true, denials, unresolved: denials.filter((r) => !r.resolvedBy), resolved: denials.filter((r) => !!r.resolvedBy) };
   }
 
   // 供 ADR / 测试断言：第一版永久冻结

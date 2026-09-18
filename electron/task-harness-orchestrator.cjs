@@ -392,6 +392,24 @@ class TaskHarnessOrchestrator {
         }
       }
 
+      // D4 收口 · 明确 WRITE 被拒未解决：后端已拒绝的具体操作，final text 绝不能当成完成。
+      // 判据来自后端记录（DENIED + risk_class 非 READ_ONLY，且无同一 tool + canonical
+      // arguments 的后续真实成功）。READ_ONLY 拒绝与普通 READ 错误绝不参与。
+      if (typeof svc.getDeniedRequiredWriteOperations === "function") {
+        const deniedRes = svc.getDeniedRequiredWriteOperations({ context, taskId });
+        if (deniedRes && deniedRes.ok && Array.isArray(deniedRes.unresolved) && deniedRes.unresolved.length) {
+          const first = deniedRes.unresolved[0];
+          return await this.#blockStep({
+            context, taskId, stepId, runId: run.runId,
+            reason: first.reasonCode || ERROR.TOOL_FORBIDDEN,
+            event: TASK_EVENT.TOOL_DENIED,
+            payload: { toolId: first.toolId, proposalId: first.proposalId, reasonCode: first.reasonCode, riskClass: first.riskClass, stepId: first.stepId, unresolvedCount: deniedRes.unresolved.length },
+            expectedRevision: this.#rev(context, taskId, task.revision),
+            alreadyRecorded: true,
+          });
+        }
+      }
+
       const fresh = svc.getTask({ context, taskId });
       const rev = fresh.ok ? fresh.task.revision : task.revision;
       let commit;

@@ -11,6 +11,8 @@ const SQL = {
   insertProposal: "INSERT INTO task_tool_proposals (proposal_id, task_id, step_id, run_id, tool_id, tool_version, arguments_safe, arguments_hash, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
   proposalById: "SELECT * FROM task_tool_proposals WHERE proposal_id = ?",
   proposalsOfTask: "SELECT * FROM task_tool_proposals WHERE task_id = ? ORDER BY created_at, proposal_id",
+  // 同毫秒（固定时钟）下 created_at 无法区分先后：以插入顺序(rowid)作稳定次序。
+  proposalSequenceOfTask: "SELECT proposal_id FROM task_tool_proposals WHERE task_id = ? ORDER BY rowid",
   updateProposal: "UPDATE task_tool_proposals SET status = ? WHERE proposal_id = ?",
   insertDecision: "INSERT INTO tool_decisions (decision_id, proposal_id, decision, reason_code, risk_class, approval_required, created_at) VALUES (?,?,?,?,?,?,?)",
   decisionById: "SELECT * FROM tool_decisions WHERE decision_id = ?",
@@ -45,6 +47,8 @@ class ToolStore {
   }
   proposalById(id) { return this.db.prepare(SQL.proposalById).get(String(id || "")) || null; }
   proposalsOfTask(taskId) { return this.db.prepare(SQL.proposalsOfTask).all(String(taskId || "")); }
+  /** 同一 task 内 proposal 的真实插入顺序（proposal_id[]），用于同秒/固定时钟下的先后判定。 */
+  proposalSequenceOfTask(taskId) { return this.db.prepare(SQL.proposalSequenceOfTask).all(String(taskId || "")).map((r) => r.proposal_id); }
   updateProposalStatus(id, status) {
     if (!PROPOSAL_STATUS_ALL.has(String(status))) throw new Error("invalid proposal status: " + status);
     this.db.prepare(SQL.updateProposal).run(String(status), String(id));

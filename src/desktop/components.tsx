@@ -486,6 +486,14 @@ function formatVerificationEvidence(v: any): string {
   return body.length > 400 ? body.slice(0, 400) + "…" : body;
 }
 
+/** D4 收口：被拒 WRITE 操作的目标可读投影（只展示后端 safe arguments）。 */
+function formatDeniedTarget(args: any): string {
+  if (!args || typeof args !== "object") return "—";
+  const ref = args.resourceRef || (Array.isArray(args.resourceRefs) ? args.resourceRefs[0] : null);
+  if (ref) return String(ref);
+  try { const body = JSON.stringify(args); return body.length > 200 ? body.slice(0, 200) + "…" : body; } catch { return "—"; }
+}
+
 type AIPanelProps = { onClose: () => void; onOpenSettings: () => void };
 /**
  * D4-04：全局 AI 助手 = 真实 Task Runtime 入口。
@@ -510,6 +518,8 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
   const [recovery, setRecovery] = useState<any>(null);
   // D4 收口：失败 Verification 证据（safe；只如实展示，绝不据此显示成功）。
   const [verifications, setVerifications] = useState<any[]>([]);
+  // D4 收口：被后端拒绝且尚未完成的明确 WRITE 操作（来源 task/get，renderer 不自报）。
+  const [deniedOperations, setDeniedOperations] = useState<any[]>([]);
 
   const applyTaskState = (got: any) => {
     if (!got || !got.ok || !got.task) return;
@@ -525,6 +535,7 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
     setResumeLedger(got.budgetLedger || null);
     setRecovery(got.recovery || null);
     setVerifications(Array.isArray(got.verifications) ? got.verifications : []);
+    setDeniedOperations(Array.isArray(got.deniedOperations) ? got.deniedOperations : []);
   };
 
   useEffect(() => {
@@ -649,7 +660,7 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
       </div>
       <div className="ai-state" data-ai-state>
         <strong>状态：</strong>
-        <span data-ai-status-text>{status === "BLOCKED" ? (resumable ? "BLOCKED · Budget Exhausted" : "BLOCKED · Recovery Required") : status}</span>
+        <span data-ai-status-text>{status === "BLOCKED" ? (resumable ? "BLOCKED · Budget Exhausted" : deniedOperations.length ? "BLOCKED · Operation Denied" : "BLOCKED · Recovery Required") : status}</span>
         {error ? <span data-ai-error> · {error}</span> : null}
       </div>
       {resumable ? (
@@ -689,6 +700,19 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
               {v.executionId ? <p data-ai-verification-evidence>证据引用：{v.executionId}</p> : null}
             </div>
           ))}
+        </div>
+      ) : null}
+      {status === "BLOCKED" && deniedOperations.length ? (
+        <div className="ai-denied" data-ai-denied>
+          <p data-ai-denied-title>尚未完成的操作（后端已拒绝）</p>
+          {deniedOperations.map((op: any) => (
+            <div key={op.proposalId} data-ai-denied-item={op.proposalId}>
+              <p data-ai-denied-tool>工具：{op.toolId}</p>
+              <p data-ai-denied-target>目标：{formatDeniedTarget(op.arguments)}</p>
+              <p data-ai-denied-reason>拒绝原因：{op.reasonCode || "DENIED"}</p>
+            </div>
+          ))}
+          <p data-ai-denied-note>该操作未执行，不会自动重试。</p>
         </div>
       ) : null}
       <div className="ai-result" data-ai-result>
