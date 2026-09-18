@@ -291,6 +291,55 @@ class GovernanceService {
 
   grantAppAccess({ context, appId, ...rest } = {}) { return this.authService.grantAppResourcePermission({ context, appId, ...rest }); }
   revokeAppAccess({ context, grantId } = {}) { return this.authService.revokeAppResourcePermission({ context, grantId }); }
+
+  /** TOOL-scope 权限投影：显式列出已授予动作 + 可授予动作清单，绝不默认授予任何动作。 */
+  getAppToolAccess({ context, appId } = {}) {
+    const gate = this.#adminGate(context);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    const app = this.authStore.appById(appId);
+    if (!app) return { ok: false, error: "APP_UNKNOWN" };
+    const grants = this.authStore.appGrantsForApp(appId).filter((g) => g.organization_id === gate.organizationId && String(g.scope) === "TOOL");
+    const granted = new Set();
+    for (const g of grants) for (const a of authzDom.toolGrantActions(g)) granted.add(a);
+    return {
+      ok: true,
+      app: { appId: app.app_id, name: app.name, publisher: app.publisher, status: app.status, builtIn: !!app.built_in },
+      grants: grants.map((g) => ({ grantId: g.id, actions: authzDom.toolGrantActions(g), expiresAt: g.expires_at || null })),
+      grantedActions: [...granted],
+      availableActions: [...authzDom.TOOL_ACTIONS],
+    };
+  }
+
+  /**
+   * 只接受 TOOL_ACTIONS 的显式授予。底层 grant 是"按 app 单条 upsert、整体覆盖"，
+   * 因此这里把已有 TOOL 动作并回请求集合，否则新授权会静默抹掉既有授权。
+   */
+  grantAppToolAccess({ context, appId, actions } = {}) {
+    const gate = this.#adminGate(context);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    const app = this.authStore.appById(appId);
+    if (!app) return { ok: false, error: "APP_UNKNOWN" };
+    const requested = (Array.isArray(actions) ? actions : actions == null ? [] : [actions]).map((a) => String(a || ""));
+    if (!requested.length) return { ok: false, error: "INVALID_INPUT" };
+    for (const a of requested) if (!authzDom.TOOL_ACTIONS.includes(a)) return { ok: false, error: "INVALID_INPUT" };
+    const existing = new Set();
+    for (const g of this.authStore.appGrantsForApp(appId).filter((g) => g.organization_id === gate.organizationId && String(g.scope) === "TOOL")) for (const a of authzDom.toolGrantActions(g)) existing.add(a);
+    const merged = [...new Set([...existing, ...requested])];
+    const res = this.authService.grantAppToolPermission({ context, appId, actions: merged });
+    if (!res.ok) return { ok: false, error: res.error };
+    return { ok: true, grantId: res.grant.grantId, appId, actions: res.grant.actions, scope: res.grant.scope };
+  }
+
+  /** 只撤销 scope=TOOL 的 grant；resource-scope grant 一律 NOT_FOUND_OR_FORBIDDEN。 */
+  revokeAppToolAccess({ context, grantId } = {}) {
+    const gate = this.#adminGate(context);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    const grant = this.authStore.appGrantById(grantId);
+    if (!grant || grant.organization_id !== gate.organizationId || String(grant.scope) !== "TOOL") return { ok: false, error: "NOT_FOUND_OR_FORBIDDEN" };
+    const res = this.authService.revokeAppResourcePermission({ context, grantId });
+    if (!res.ok) return { ok: false, error: res.error };
+    return { ok: true, changed: res.changed !== false, grantId };
+  }
   setAppStatus({ context, appId, status } = {}) { return this.authService.setAppStatus({ context, appId, status }); }
 
   // --- Resource grants ---

@@ -24,6 +24,8 @@ export function GovernanceApp() {
   const [deptForm, setDeptForm] = useState({ name: "", description: "" });
   const [accessRef, setAccessRef] = useState("");
   const [access, setAccess] = useState<any>(null);
+  const [toolAccess, setToolAccess] = useState<Record<string, any>>({});
+  const [toolPick, setToolPick] = useState<Record<string, string[]>>({});
 
   const cmd = useCallback(async (payload: Record<string, unknown>): Promise<any> => {
     const b = bridge();
@@ -72,6 +74,27 @@ export function GovernanceApp() {
     setAccess(null);
     const res = await cmd({ type: "governance/listResourceAccess", resourceRef: accessRef.trim() });
     if (res.ok) setAccess(res); else setError(res.error);
+  };
+  const loadToolAccess = async (appId: string) => {
+    const res = await cmd({ type: "governance/getAppToolAccess", appId });
+    if (res.ok) {
+      setToolAccess((m) => ({ ...m, [appId]: res }));
+      setToolPick((m) => ({ ...m, [appId]: [] }));
+    } else setError(res.error);
+  };
+  const toggleToolPick = (appId: string, action: string) => {
+    setToolPick((m) => {
+      const cur = m[appId] || [];
+      return { ...m, [appId]: cur.includes(action) ? cur.filter((a) => a !== action) : [...cur, action] };
+    });
+  };
+  const grantTools = async (appId: string) => {
+    const res = await cmd({ type: "governance/grantAppToolAccess", appId, actions: toolPick[appId] || [] });
+    if (res.ok) { setNotice("工具权限已授予"); await loadToolAccess(appId); } else setError(res.error);
+  };
+  const revokeTool = async (appId: string, grantId: string) => {
+    const res = await cmd({ type: "governance/revokeAppToolAccess", grantId });
+    if (res.ok) { setNotice("工具权限已撤销"); await loadToolAccess(appId); } else setError(res.error);
   };
 
   return (
@@ -148,9 +171,41 @@ export function GovernanceApp() {
                 ) : (
                   <Button variant="secondary" size="sm" data-d3-04d-app-enable={a.appId} onClick={() => void toggleApp(a.appId, "enabled")}>启用</Button>
                 )}
+                <Button variant="secondary" size="sm" data-gov-tool-toggle={a.appId} onClick={() => void loadToolAccess(a.appId)}>工具权限</Button>
               </li>
             ))}
           </ul>
+          {Object.entries(toolAccess).map(([appId, ta]) => (
+            <div key={appId} className="gov-tool" data-gov-tool-access={appId}>
+              <h3>工具权限 · {ta.app?.name || appId}</h3>
+              <p className="gov-meta">TOOL scope · 默认不授予，勾选后显式授予；已授予动作只能整体撤销</p>
+              <ul className="gov-list" data-gov-tool-actions>
+                {(ta.availableActions || []).map((action: string) => {
+                  const granted = (ta.grantedActions || []).includes(action);
+                  return (
+                    <li key={action} data-gov-tool-action={action} className="gov-row">
+                      <label className="gov-tool-pick">
+                        <input type="checkbox" checked={granted || (toolPick[appId] || []).includes(action)} disabled={granted} onChange={() => toggleToolPick(appId, action)} />
+                        <code>{action}</code>
+                      </label>
+                      <span className="gov-meta">{granted ? "已授予" : "未授予"}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+              <div className="gov-form">
+                <Button variant="primary" size="sm" data-gov-tool-grant={appId} onClick={() => void grantTools(appId)}>授予所选工具权限</Button>
+              </div>
+              <ul className="gov-list" data-gov-tool-grants>
+                {(ta.grants || []).map((g: any) => (
+                  <li key={g.grantId} data-gov-tool-grant-id={g.grantId} className="gov-row">
+                    <span className="gov-meta">{(g.actions || []).join(", ")}{g.expiresAt ? " · " + g.expiresAt : ""}</span>
+                    <Button variant="ghost" size="sm" data-gov-tool-revoke={g.grantId} onClick={() => void revokeTool(appId, g.grantId)}>撤销全部工具权限</Button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
         </section>
       ) : null}
 
