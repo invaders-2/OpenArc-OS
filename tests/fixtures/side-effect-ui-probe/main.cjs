@@ -238,13 +238,17 @@ app.whenReady().then(async () => {
     const realDecide = identity.sideEffectRuntime.decideApproval.bind(identity.sideEffectRuntime);
     let interleave = null;
     // 必须保持 runtime.decideApproval 的**同步契约**：gateway 不 await，包成 async 会让它拿到 Promise
-    // 并误判成 CALL_NOT_FOUND（旧 UI 正是在这个假错误上静默关闭面板的）。executeSideEffect 本身是同步的。
+    // 并误判成 CALL_NOT_FOUND（旧 UI 正是在这个假错误上静默关闭面板的）。
     identity.sideEffectRuntime.decideApproval = (args) => {
       const userCtx = { sessionRef: identity.service.current, appId: "ai", source: "user" };
       const approved = identity.sideEffectAuthority.approveSideEffect({ context: userCtx, callId: fourth.callId });
       const leased = approved.ok ? identity.sideEffectAuthority.acquireLease({ context: userCtx, callId: fourth.callId, holderId: "ui_exec" }) : null;
-      const exec = leased && leased.ok ? identity.sideEffectAuthority.executeSideEffect({ callId: fourth.callId, leaseId: leased.lease.leaseId, holderId: "ui_exec" }) : null;
-      interleave = { approved: approved.ok, leased: !!(leased && leased.ok), executed: !!(exec && exec.ok), call: identity.sideEffectStore.callById(fourth.callId).status };
+      // executeSideEffect 在 claim 之后把真实 dispatch 交给异步 helper，返回值是 **Promise**：
+      // 同步包装里读它的 .ok 只会得到 undefined（那是误导性证据，不是"没执行"）。这里只记录权威持久化状态；
+      // "执行真的发生了"由 A25 自身的 SUCCEEDED/PASS/trashed 断言覆盖。
+      if (leased && leased.ok) identity.sideEffectAuthority.executeSideEffect({ callId: fourth.callId, leaseId: leased.lease.leaseId, holderId: "ui_exec" });
+      const observed = identity.sideEffectStore.callById(fourth.callId);
+      interleave = { approved: approved.ok, leased: !!(leased && leased.ok), callStatus: observed ? observed.status : null, verificationStatus: observed ? observed.verificationStatus : null };
       return realDecide(args);
     };
     // 同一时刻只有这一个 prompt（A23 已确认是第四条请求），deny 按钮在 Dialog footer 内。
@@ -307,12 +311,14 @@ app.whenReady().then(async () => {
     const aiNotice = await text(".ai-panel [data-ai-notice]");
     const aiNoticeCode = await js("return document.querySelector('.ai-panel [data-ai-notice]')?.getAttribute('data-ai-notice-code') || ''");
     const thirdAfter = identity.sideEffectStore.callById(third.callId);
-    const revokeVisibleText = await js("return Array.from(document.querySelectorAll('.ai-panel [data-ai-notice], .ai-panel [data-ai-revoke-reason], .ai-panel [data-ai-revoke-meaning]')).map((e) => e.textContent || '').join(' | ')");
-    check("A31 · 撤销迟到 → 逐字提示，执行结果不被改写，界面无机器码",
+    // 机器码只允许出现在 data 属性里：扫描**整个 AI 面板（含审批面板若可见）的可见文本**。
+    const visibleText = await js("return (document.querySelector('.ai-panel')?.innerText || '') + ' | ' + (document.querySelector('.approval')?.innerText || '')");
+    const machineCodeVisible = /SIDE_EFFECT_/i.test(visibleText);
+    check("A31 · 撤销迟到 → 逐字提示，执行结果不被改写，可见文本无机器码",
       lateRevokeClick === "ok" && !!thirdExec && thirdExec.ok === true && thirdBefore.status === "SUCCEEDED" && thirdAfter.status === "SUCCEEDED"
         && lateNoticeShown && aiNotice === LATE_TEXT && aiNoticeCode === "SIDE_EFFECT_APPROVAL_TOO_LATE"
-        && !/SIDE_EFFECT_[A-Z_]+/.test(revokeVisibleText),
-      JSON.stringify({ lateRevokeClick, exec: thirdExec && thirdExec.ok, before: thirdBefore.status, after: thirdAfter.status, aiNotice, aiNoticeCode, revokeVisibleText }));
+        && !machineCodeVisible,
+      JSON.stringify({ lateRevokeClick, exec: thirdExec && thirdExec.ok, before: thirdBefore.status, after: thirdAfter.status, aiNotice, aiNoticeCode, machineCodeVisible, visibleText: visibleText.replace(/\s+/g, " ").slice(0, 240) }));
 
     // A32 · 刷新恢复（迟到场景）：面板撤销能力必须由后端权威重建，不残留内存假象。
     win.webContents.reload();
@@ -360,7 +366,13 @@ app.whenReady().then(async () => {
     check("A35 · 权限隔离前置：admin 的已批准 call 就绪", permApprove.ok === true && identity.sideEffectStore.callById(perm.callId).status === "APPROVED", JSON.stringify(permApprove));
 
     // A36/A37 · 权限隔离：换成真实非 owner / 非 ADMIN 会话（alice），可见性与撤销都必须由后端判定。
-    const permState = { created: false, logout: false, gateLoggedOut: "", gateAlice: "", aliceBlock: null, aliceRevocable: -1, aliceItems: -1, forced: null, permStatus: "", permDecision: "", falseClaim: false };
+    const permSnapshot = () => ({
+      status: identity.sideEffectStore.callById(perm.callId).status,
+      decisions: identity.sideEffectStore.approvalsOfCall(perm.callId).map((a) => a.decision),
+      leases: identity.sideEffectStore.leasesOfCall(perm.callId).length,
+      trashed: identity.resourceService.sideEffectPrecondition({ resourceRef: perm.resourceRef }).trashed,
+    });
+    const permState = { created: false, logout: false, gateLoggedOut: "", gateAlice: "", aliceBlock: null, aliceRevocable: -1, aliceHasTarget: null, forced: null, permStatus: "", permDecision: "", before: null, after: null, zeroChange: false, falseClaim: false, machineCodeVisible: false };
     try {
       const createdUser = await identity.store.createUser({ identifier: "alice@openarc.test", password: "alice-password-1", displayName: "alice", teamId: identity.service.snapshot.teamId });
       permState.created = !!(createdUser && createdUser.ok);
@@ -377,25 +389,32 @@ app.whenReady().then(async () => {
       permState.aliceBlock = await has("[data-ai-revoke-block]");
       const alicePending = await js("return window.openarc.sideEffect.command({ type: 'sideEffect/listPending' })");
       permState.aliceRevocable = alicePending && alicePending.ok ? (alicePending.revocable || []).length : -1;
-      permState.aliceItems = alicePending && alicePending.ok ? (alicePending.items || []).length : -1;
+      // 强断言：alice 的两份列表都**明确不含** admin 那条 call（不是"恰好为空"）。
+      permState.aliceHasTarget = alicePending && alicePending.ok
+        ? [...(alicePending.items || []), ...(alicePending.revocable || [])].some((i) => i.approvalRequestId === perm.callId)
+        : null;
+      permState.before = permSnapshot();
       permState.forced = await js("return window.openarc.sideEffect.revokeApproval({ approvalRequestId: " + JSON.stringify(perm.callId) + " })");
-      const permAfter = identity.sideEffectStore.callById(perm.callId);
-      const permApprovalRow = identity.sideEffectStore.latestApprovalOfCall(perm.callId);
-      permState.permStatus = permAfter.status;
-      permState.permDecision = permApprovalRow && permApprovalRow.decision;
-      const alicePanelText = await js("return document.querySelector('.ai-panel')?.textContent || ''");
+      permState.after = permSnapshot();
+      permState.zeroChange = JSON.stringify(permState.before) === JSON.stringify(permState.after);
+      permState.permStatus = permState.after.status;
+      permState.permDecision = permState.after.decisions[permState.after.decisions.length - 1];
+      const alicePanelText = await js("return document.querySelector('.ai-panel')?.innerText || ''");
       permState.falseClaim = /已撤销|已取消/.test(alicePanelText);
-      check("A36 · 非 owner / 非 ADMIN 会话：看不到他人 call 的撤销入口，强行调用被后端拒绝",
+      permState.machineCodeVisible = /SIDE_EFFECT_/i.test(alicePanelText);
+      check("A36 · 非 owner / 非 ADMIN 会话：看不到他人 call 的撤销入口，强行调用被拒绝且零状态变化",
         permState.created && permState.logout && permState.gateLoggedOut === "unauthenticated" && permState.gateAlice === "ready"
-          && permState.aliceBlock === false && permState.aliceRevocable === 0 && permState.aliceItems === 0
-          && !!permState.forced && permState.forced.ok === false && permState.forced.error === "SIDE_EFFECT_APPROVAL_FORBIDDEN",
+          && permState.aliceBlock === false && permState.aliceHasTarget === false
+          && !!permState.forced && permState.forced.ok === false && permState.forced.error === "SIDE_EFFECT_APPROVAL_FORBIDDEN"
+          && permState.zeroChange === true && permState.permStatus === "APPROVED" && permState.permDecision === "APPROVED"
+          && permState.before.leases === 0 && permState.before.trashed === false,
         JSON.stringify(permState));
-      check("A37 · 强行撤销零状态变化，界面不出现撤销假象",
-        permState.permStatus === "APPROVED" && permState.permDecision === "APPROVED" && permState.falseClaim === false,
+      check("A37 · 界面不出现撤销假象，也不显示机器码",
+        permState.falseClaim === false && permState.machineCodeVisible === false,
         JSON.stringify(permState));
     } catch (e) {
-      check("A36 · 非 owner / 非 ADMIN 会话：看不到他人 call 的撤销入口，强行调用被后端拒绝", false, "exception: " + String((e && e.message) || e) + " " + JSON.stringify(permState));
-      check("A37 · 强行撤销零状态变化，界面不出现撤销假象", false, "exception: " + String((e && e.message) || e) + " " + JSON.stringify(permState));
+      check("A36 · 非 owner / 非 ADMIN 会话：看不到他人 call 的撤销入口，强行调用被拒绝且零状态变化", false, "exception: " + String((e && e.message) || e) + " " + JSON.stringify(permState));
+      check("A37 · 界面不出现撤销假象，也不显示机器码", false, "exception: " + String((e && e.message) || e) + " " + JSON.stringify(permState));
     }
   } catch (e) {
     report.errors.push(String((e && e.stack) || e));

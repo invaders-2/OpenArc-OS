@@ -159,7 +159,14 @@ async function main() {
   const visibleText = (sel) => js("const el = " + (sel ? "document.querySelector(" + JSON.stringify(sel) + ")" : "document.body") + "; return el ? String(el.innerText || '') : ''");
   const ILLUSION_WORDS = ["未执行", "已撤销", "已取消"];
   const illusionHits = (t) => ILLUSION_WORDS.filter((w) => String(t).includes(w));
-  const dbStableSnapshot = (s) => { const c = Object.assign({}, s); delete c.events; return JSON.stringify(c); };
+  // dbSnapshot() 覆盖的 **17 张快照表**（tasks / task_steps / task_tool_proposals / tool_decisions / tool_executions /
+  // side_effect_calls / side_effect_leases / tool_approvals / task_artifacts / task_verifications / task_events /
+  // resource_registry / app_resource_grants / task_model_calls / task_harness_runs / task_budgets / library_resources）。
+  // authorization_audit **不在其中**，必须单独只读查询（见 auditRows），否则"零写入"会漏掉审计面。
+  const dbTableSignature = (s) => { const c = Object.assign({}, s); delete c.events; return JSON.stringify(c); };
+  const auditRows = () => { try { return dbAll("SELECT * FROM authorization_audit ORDER BY id"); } catch { return []; } };
+  const auditAdded = (before, after) => after.filter((r) => !before.some((b) => b.id === r.id));
+  const auditBrief = (rows) => rows.map((r) => ({ action: r.action, decision: r.decision, reasonCode: r.reason_code }));
   // 逐表 diff 作为**证据**（诊断后台无关写者；断言只覆盖被检查操作真实可能触及的行集）。
   const dbTableDiff = (a, b) => {
     const out = {};
@@ -170,14 +177,15 @@ async function main() {
     return out;
   };
   // 在后台真正静止的窗口里执行一次探针（撤销类调用都是幂等的零写入/固定错误，重试安全）。
-  // 只用于"整库逐字段不变"这类会被无关后台写者干扰的断言；失败时返回 null，让断言显式失败并输出 diff。
-  const dbQuietWindow = async (probe, tries = 20) => {
+  // "静止"= 17 张快照表逐字段不变（会被无关后台写者干扰，所以重试）；audit 前后行一并带回供断言。
+  const dbQuietWindow = async (probe, isQuiet = null, tries = 20) => {
     for (let i = 1; i <= tries; i += 1) {
-      const before = dbSnapshot();
+      const before = dbSnapshot(); const auditBefore = auditRows();
       const res = await probe();
-      const after = dbSnapshot();
+      const after = dbSnapshot(); const auditAfter = auditRows();
       const tables = dbTableDiff(before, after);
-      if (Object.keys(tables).length === 0) return { attempt: i, res, before, after };
+      const window = { attempt: i, res, before, after, auditBefore, auditAfter };
+      if (Object.keys(tables).length === 0 && (!isQuiet || isQuiet(window))) return window;
       await sleep(120);
     }
     return null;
@@ -345,15 +353,17 @@ async function main() {
   let gateFirstWindow = null;
   let gateClean = null;
   for (let attempt = 1; attempt <= 20; attempt += 1) {
-    const before = dbSnapshot();
+    const before = dbSnapshot(); const auditBefore = auditRows();
     const res = await sideEffectRevoke(writeApprovalId);
-    const after = dbSnapshot();
+    const after = dbSnapshot(); const auditAfter = auditRows();
     const added = after.events.filter((e) => !before.events.some((b) => b.event_id === e.event_id));
+    const addedAudit = auditAdded(auditBefore, auditAfter);
     const tables = dbTableDiff(before, after);
     if (!gateRevoke) gateRevoke = res;
     if (attempt === 1) gateFirstWindow = { tables, addedEvents: added.map((e) => e.event_type) };
     if (res && res.ok === false && res.error !== "SIDE_EFFECT_APPROVAL_REQUIRED") { gateRevoke = res; break; }
-    if (Object.keys(tables).length === 0 && added.length === 0) { gateClean = { attempt, res, before, after }; break; }
+    // 静止 = 17 张快照表不变 + 0 新事件 + 0 新 audit（AWAITING_APPROVAL 的撤销按设计在任何审计面都不留痕）。
+    if (Object.keys(tables).length === 0 && added.length === 0 && addedAudit.length === 0) { gateClean = { attempt, res, before, after, auditBefore, auditAfter, addedAudit }; break; }
     await sleep(120);
   }
   const gateCallBefore = gateClean ? byTask(gateClean.before.sideEffectCalls, writeRun.taskId)[0] : null;
@@ -361,16 +371,18 @@ async function main() {
   record("flow1", "F1.6a · 撤销门：经真实产品桥 sideEffect/revokeApproval 撤销一个 AWAITING_APPROVAL 的请求 → 明确 SIDE_EFFECT_APPROVAL_REQUIRED（不是 TOO_LATE）",
     !!gateRevoke && gateRevoke.ok === false && gateRevoke.error === "SIDE_EFFECT_APPROVAL_REQUIRED" && gateRevoke.callStatus === "AWAITING_APPROVAL" && gateRevoke.approvalRequestId === writeApprovalId,
     JSON.stringify({ res: gateRevoke, quietWindowAttempt: gateClean ? gateClean.attempt : null }), "{ ok:false, error:SIDE_EFFECT_APPROVAL_REQUIRED, callStatus:AWAITING_APPROVAL }");
-  record("flow1", "F1.6b · 该拒绝零写入（静止窗口）：call 行逐字段不变仍 AWAITING_APPROVAL / 0 lease / approvals 行数不变 / 0 mutation / 0 新事件 / 全库（除 events）逐字段不变",
+  record("flow1", "F1.6b · 该拒绝零写入（静止窗口）：call 行逐字段不变仍 AWAITING_APPROVAL / 0 lease / approvals 行数不变 / 0 mutation / 0 新事件 / 17 张快照表（除 events）逐字段不变 / authorization_audit 零新增且无 side_effect.revoke_too_late",
     !!gateClean && !!gateCallAfter && gateCallAfter.status === "AWAITING_APPROVAL" && JSON.stringify(gateCallAfter) === JSON.stringify(gateCallBefore)
       && gateClean.after.leases.filter((l) => l.call_id === writeApprovalId).length === 0
       && gateClean.after.approvals.length === gateClean.before.approvals.length
       && (gateClean.after.resources.find((r) => r.resource_id === target.id) || {}).status === "active"
       && byTask(gateClean.after.executions, writeRun.taskId).filter((e) => e.tool_id === "resource.trash").length === 0
       && gateClean.after.events.length === gateClean.before.events.length
-      && dbStableSnapshot(gateClean.after) === dbStableSnapshot(gateClean.before),
-    JSON.stringify({ quietWindowAttempt: gateClean ? gateClean.attempt : null, res: gateClean && gateClean.res, call: gateCallAfter && gateCallAfter.status, callRowUnchanged: !!gateCallAfter && JSON.stringify(gateCallAfter) === JSON.stringify(gateCallBefore), leases: gateClean ? gateClean.after.leases.filter((l) => l.call_id === writeApprovalId).length : null, approvals: gateClean ? gateClean.before.approvals.length + "->" + gateClean.after.approvals.length : null, resource: gateClean ? (gateClean.after.resources.find((r) => r.resource_id === target.id) || {}).status : null, trashExecutions: gateClean ? byTask(gateClean.after.executions, writeRun.taskId).filter((e) => e.tool_id === "resource.trash").length : null, events: gateClean ? gateClean.before.events.length + "->" + gateClean.after.events.length : null, dbUnchanged: !!gateClean && dbStableSnapshot(gateClean.after) === dbStableSnapshot(gateClean.before), firstWindowConcurrentWrites: gateFirstWindow }),
-    "静止窗口内 call 行不变 + 0 lease + approvals 不变 + active + 0 trash execution + 0 新事件 + 全库（除 events）不变");
+      && dbTableSignature(gateClean.after) === dbTableSignature(gateClean.before)
+      && gateClean.addedAudit.length === 0
+      && gateClean.auditAfter.filter((r) => r.action === "side_effect.revoke_too_late").length === 0,
+    JSON.stringify({ quietWindowAttempt: gateClean ? gateClean.attempt : null, res: gateClean && gateClean.res, call: gateCallAfter && gateCallAfter.status, callRowUnchanged: !!gateCallAfter && JSON.stringify(gateCallAfter) === JSON.stringify(gateCallBefore), leases: gateClean ? gateClean.after.leases.filter((l) => l.call_id === writeApprovalId).length : null, approvals: gateClean ? gateClean.before.approvals.length + "->" + gateClean.after.approvals.length : null, resource: gateClean ? (gateClean.after.resources.find((r) => r.resource_id === target.id) || {}).status : null, trashExecutions: gateClean ? byTask(gateClean.after.executions, writeRun.taskId).filter((e) => e.tool_id === "resource.trash").length : null, events: gateClean ? gateClean.before.events.length + "->" + gateClean.after.events.length : null, snapshotTables: gateClean ? 17 : null, tablesUnchanged: !!gateClean && dbTableSignature(gateClean.after) === dbTableSignature(gateClean.before), auditRows: gateClean ? gateClean.auditBefore.length + "->" + gateClean.auditAfter.length : null, auditAdded: gateClean ? auditBrief(gateClean.addedAudit) : null, auditRevokeTooLate: gateClean ? gateClean.auditAfter.filter((r) => r.action === "side_effect.revoke_too_late").length : null, firstWindowConcurrentWrites: gateFirstWindow }),
+    "静止窗口内 call 行不变 + 0 lease + approvals 不变 + active + 0 trash execution + 0 新事件 + 17 张快照表（除 events）不变 + audit 0 新增");
   await waitFor(async () => !(await isDisabled('[data-approval-action="approve"]')), 15000);
   record("flow1", "F1.7 · 点击真实 Approve", (await clickApprove()) === "ok", "clicked", "ok");
   const writeTerminal = await waitTaskTerminal(writeRun.taskId, 180000);
@@ -396,7 +408,11 @@ async function main() {
   R.exec.flow1Spawned = executorRecordCount();
   record("flow1", "F1.14 · production executor 真实 spawn（runtime/side-effects/executors 记录 >=1）", R.exec.flow1Spawned >= 1, R.exec.flow1Spawned, ">=1");
   /* ---------------- D4-03 Closure：迟到撤销绝不改写执行事实 ---------------- */
-  const lateWindow = await dbQuietWindow(() => sideEffectRevoke(writeApprovalId));
+  // 迟到撤销必须**恰好**留下 1 条 side_effect.revoke_too_late 审计：窗口里出现任何其它 audit 写入都重试（断言不放宽）。
+  const lateWindow = await dbQuietWindow(() => sideEffectRevoke(writeApprovalId), (w) => {
+    const a = auditAdded(w.auditBefore, w.auditAfter);
+    return a.length === 1 && a[0].action === "side_effect.revoke_too_late" && a[0].reason_code === "SIDE_EFFECT_APPROVAL_TOO_LATE" && a[0].decision === "SUCCEEDED";
+  });
   const lateBefore = lateWindow ? lateWindow.before : dbSnapshot();
   const lateAfter = lateWindow ? lateWindow.after : dbSnapshot();
   const lateRevoke = lateWindow ? lateWindow.res : null;
@@ -410,6 +426,11 @@ async function main() {
   const lateResBefore = lateBefore.resources.find((r) => r.resource_id === target.id);
   const lateResAfter = lateAfter.resources.find((r) => r.resource_id === target.id);
   const lateMutation = lateResAfter && lateResAfter.status !== "active" ? 1 : 0;
+  const lateAuditAdded = lateWindow ? auditAdded(lateWindow.auditBefore, lateWindow.auditAfter) : [];
+  const lateAuditOk = lateAuditAdded.length === 1
+    && lateAuditAdded[0].action === "side_effect.revoke_too_late"
+    && lateAuditAdded[0].reason_code === "SIDE_EFFECT_APPROVAL_TOO_LATE"
+    && lateAuditAdded[0].decision === "SUCCEEDED";
   const lateTablesUnchanged = JSON.stringify(lateCallAfter) === JSON.stringify(lateCallBefore)
     && JSON.stringify(lateApprovalsAfter) === JSON.stringify(lateApprovalsBefore)
     && JSON.stringify(lateLeasesAfter) === JSON.stringify(lateLeasesBefore)
@@ -417,15 +438,16 @@ async function main() {
     && JSON.stringify(byTask(lateAfter.artifacts, writeRun.taskId)) === JSON.stringify(byTask(lateBefore.artifacts, writeRun.taskId))
     && JSON.stringify(byTask(lateAfter.verifications, writeRun.taskId)) === JSON.stringify(byTask(lateBefore.verifications, writeRun.taskId))
     && JSON.stringify(lateResAfter) === JSON.stringify(lateResBefore)
-    && dbStableSnapshot(lateAfter) === dbStableSnapshot(lateBefore);
+    && dbTableSignature(lateAfter) === dbTableSignature(lateBefore);
   record("flow1", "F1.15 · 迟到撤销（该 call 已 SUCCEEDED）：经真实产品桥 revokeApproval → SIDE_EFFECT_APPROVAL_TOO_LATE + callStatus:SUCCEEDED（绝不中止执行、绝不动 lease）",
     !!lateRevoke && lateRevoke.ok === false && lateRevoke.error === "SIDE_EFFECT_APPROVAL_TOO_LATE" && lateRevoke.callStatus === "SUCCEEDED" && lateRevoke.approvalRequestId === writeApprovalId,
     JSON.stringify(lateRevoke), "{ ok:false, error:SIDE_EFFECT_APPROVAL_TOO_LATE, callStatus:SUCCEEDED }");
-  record("flow1", "F1.16 · 迟到撤销零状态改写：call/approval/lease/execution/artifact/verification/资源 trash 逐字段不变（mutation 仍 1、lease 仍 RELEASED），除既有安全审计事件外无任何业务写入",
+  record("flow1", "F1.16 · 迟到撤销零状态改写：call/approval/lease/execution/artifact/verification/资源 trash 逐字段不变（mutation 仍 1、lease 仍 RELEASED）、17 张快照表（除 events）逐字段不变，且 authorization_audit 恰好 +1 条 side_effect.revoke_too_late（SIDE_EFFECT_APPROVAL_TOO_LATE / decision=SUCCEEDED）",
     lateTablesUnchanged && lateMutation === 1 && lateCallAfter.status === "SUCCEEDED" && lateLeasesAfter.length === 1 && lateLeasesAfter[0].status === "RELEASED"
-      && lateAddedEvents.every((e) => e.event_type === "tool.side_effect.revoke_too_late"),
-    JSON.stringify({ quietWindowAttempt: lateWindow ? lateWindow.attempt : null, res: lateRevoke, call: lateCallAfter && lateCallAfter.status, leases: lateLeasesAfter.map((l) => l.status), mutation: lateMutation, resource: lateResAfter && lateResAfter.status, tablesUnchanged: lateTablesUnchanged, addedEvents: lateAddedEvents.map((e) => e.event_type) }),
-    "SUCCEEDED + RELEASED + mutation=1 + 全库（除 events）逐字段不变 + 仅安全审计事件");
+      && lateAddedEvents.every((e) => e.event_type === "tool.side_effect.revoke_too_late")
+      && lateAuditOk,
+    JSON.stringify({ quietWindowAttempt: lateWindow ? lateWindow.attempt : null, res: lateRevoke, call: lateCallAfter && lateCallAfter.status, leases: lateLeasesAfter.map((l) => l.status), mutation: lateMutation, resource: lateResAfter && lateResAfter.status, snapshotTables: 17, tablesUnchanged: lateTablesUnchanged, addedEvents: lateAddedEvents.map((e) => e.event_type), auditRows: lateWindow ? lateWindow.auditBefore.length + "->" + lateWindow.auditAfter.length : null, auditAdded: auditBrief(lateAuditAdded) }),
+    "SUCCEEDED + RELEASED + mutation=1 + 17 张快照表（除 events）不变 + audit 恰好 +1 条 revoke_too_late（TOO_LATE/SUCCEEDED）");
   // DOM 级（可见文本，不是 data 属性）：无机器码、无"未执行/已撤销/已取消"假象、已执行的 call 不再出现在撤销入口
   const lateRevokeGoneUi = await waitFor(async () => !(await has('[data-ai-revoke-request="' + writeApprovalId + '"]')), 15000);
   const lateBodyText = await visibleText("");
@@ -999,7 +1021,7 @@ async function main() {
       && JSON.stringify(memberLeasesAfter) === JSON.stringify(memberLeasesBefore)
       && !!memberResAfter && memberResAfter.status === "deleted" && JSON.stringify(memberResAfter) === JSON.stringify(memberResBefore)
       && memberRevokeAfter.events.length === memberRevokeBefore.events.length
-      && dbStableSnapshot(memberRevokeAfter) === dbStableSnapshot(memberRevokeBefore),
+      && dbTableSignature(memberRevokeAfter) === dbTableSignature(memberRevokeBefore),
     JSON.stringify({ session: memberReady, quietWindowAttempt: memberWindow ? memberWindow.attempt : null, res: memberRevoke, call: memberCallAfter && memberCallAfter.status, approvals: memberApprovalsAfter.map((a) => a.decision), leases: memberLeasesAfter.map((l) => l.status), resource: memberResAfter && memberResAfter.status, events: memberRevokeBefore.events.length + "->" + memberRevokeAfter.events.length }),
     "SIDE_EFFECT_APPROVAL_FORBIDDEN + 零状态变化 + mutation 仍 1");
   record("flow2", "F2.11 · 该 MEMBER 会话的 sideEffect/listPending 不把他人 call 当作可撤销（revocable 与 items 都不含 admin 的 callId），且连读都读不到该请求（正对照见 F1.4/F1.6：admin 自己的会话能看到它）",
