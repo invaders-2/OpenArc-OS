@@ -13,9 +13,14 @@
  * 或 window.openarc.governance.command 产品桥。已删除 OPENARC_E2E_SEED_TOOL_GRANTS test-only 播种。
  *
  * 必需流程与退出码契约：
- *   boot / setup / flow1 / flow2 / flow3 / flow5 任一 FAIL 或不可达 → overallStatus FAIL 且 exit 非零。
- *   flow4（预算停止 + UI 显式续接）当前产品入口不可达 → NOT_VERIFIED，但属必需项：overallStatus PARTIAL 且 exit 非零。
+ *   boot / setup / flow1 / flow2 / flow3 / flow4 / flow5 全部必需：任一 FAIL 或 renderer/main 错误 > 0 → overallStatus FAIL 且 exit 非零。
+ *   任一必需流程 NOT_VERIFIED → PARTIAL；全部 PASS → PASS 且 exitCode=0。
  *   绝不把 NOT_VERIFIED 当作通过。
+ *
+ * 流程 4 本轮经**真实产品入口**跑通：真实 UI 创建任务 → 出真实产物 → 经新增追加入口（[data-ai-append-*]，
+ * task/appendStep）在同一 Task 追加下一步目标 → 后续 step 真实耗尽预算停止 → UI 显式续接（[data-ai-resume]，
+ * task/resume）→ 完成。拒绝矩阵（并发 / 重复 revision / 陈旧 revision / 不安全状态 / 非 owner / 执行前撤权）
+ * 与本条主流程同源同入口，且每条拒绝都有「可追加时确实可追加」的正对照。
  */
 import { chromium } from "@playwright/test";
 import { spawn } from "node:child_process";
@@ -58,7 +63,7 @@ const sha256 = (t) => crypto.createHash("sha256").update(String(t)).digest("hex"
 const checks = [];
 const notVerified = [];
 const observations = [];
-const FLOW_BUCKETS = { boot: [], setup: [], flow1: [], flow2: [], flow3: [], flow5: [] };
+const FLOW_BUCKETS = { boot: [], setup: [], flow1: [], flow2: [], flow3: [], flow4: [], flow5: [] };
 const record = (flow, name, ok, actual, expected) => {
   const okv = !!ok;
   checks.push({ flow, name, ok: okv, actual: String(actual == null ? "" : actual), expected: expected === undefined ? "" : String(expected) });
@@ -93,6 +98,7 @@ function dbSnapshot() {
     approvals: all("tool_approvals"), artifacts: all("task_artifacts"),
     verifications: all("task_verifications"), events: all("task_events"),
     resources: all("resource_registry"), appGrants: all("app_resource_grants"), modelCalls: all("task_model_calls"),
+    runs: all("task_harness_runs"), budgets: all("task_budgets"), libraryResources: all("library_resources"),
   };
 }
 function toolGrantRows() { try { return dbAll("SELECT * FROM app_resource_grants WHERE app_id = 'ai' AND scope = 'TOOL'"); } catch { return []; } }
@@ -264,7 +270,7 @@ async function main() {
   const testPassed = await waitFor(async () => (await text('[data-d4-01-test-result="' + pid + '"]')).indexOf("Inference:PASS") >= 0, 30000);
   record("setup", "S6 · 真实 UI 连接测试 Inference:PASS", testPassed, await text('[data-d4-01-test-result="' + pid + '"]'), "Inference:PASS");
 
-  const flowReached = { flow1: false, flow2: false, flow3: false, flow5: false };
+  const flowReached = { flow1: false, flow2: false, flow3: false, flow4: false, flow5: false };
 
   // ================================================================ 流程 1：管理员授权 → WRITE 审批 → 一次副作用 → 成功
   const uiGrant = await grantToolsViaUI(TOOL_ACTIONS);
@@ -342,7 +348,8 @@ async function main() {
   const execAfter = executorRecordCount();
   record("flow2", "F2.5 · 撤权后旧批准不得执行：Call BLOCKED + SIDE_EFFECT_AUTHORIZATION_REVOKED", revokeTerminal && !!revokeCall && revokeCall.status === "BLOCKED" && revokeCall.error_code === "SIDE_EFFECT_AUTHORIZATION_REVOKED", JSON.stringify({ call: revokeCall && revokeCall.status, error: revokeCall && revokeCall.error_code }), "BLOCKED + SIDE_EFFECT_AUTHORIZATION_REVOKED");
   record("flow2", "F2.6 · 0 mutation / 0 新 lease / 0 新 executor", revokeResource && revokeResource.status === "active" && revokeLeases.length === 0 && execAfter === execBefore, JSON.stringify({ resource: revokeResource && revokeResource.status, leases: revokeLeases.length, exec: execBefore + "->" + execAfter }), "active + 0 lease + exec 不变");
-  record("flow2", "F2.7 · Task/Step BLOCKED + UI busy 复位", revokeTask && revokeTask.status === "BLOCKED" && revokeStep && revokeStep.status === "BLOCKED" && !(await isDisabled("[data-ai-run]")), JSON.stringify({ task: revokeTask && revokeTask.status, step: revokeStep && revokeStep.status, runEnabled: !(await isDisabled("[data-ai-run]")) }), "BLOCKED/BLOCKED + run enabled");
+  const runEnabledAfterRevoke = await waitFor(async () => !(await isDisabled("[data-ai-run]")), 20000);
+  record("flow2", "F2.7 · Task/Step BLOCKED + UI busy 复位", revokeTask && revokeTask.status === "BLOCKED" && revokeStep && revokeStep.status === "BLOCKED" && runEnabledAfterRevoke, JSON.stringify({ task: revokeTask && revokeTask.status, step: revokeStep && revokeStep.status, runEnabled: runEnabledAfterRevoke, runButtonDisabled: await isDisabled("[data-ai-run]") }), "BLOCKED/BLOCKED + run enabled");
   flowReached.flow2 = true;
 
   // ================================================================ 流程 3：明确 WRITE 被拒（不授予 ai 的 tool.resource.trash）
@@ -381,27 +388,387 @@ async function main() {
   const denyExecs = byTask(denySnap.executions, denyRun.taskId).filter((e) => e.tool_id === "resource.trash");
   record("flow3", "F3.8 · 后端记录：DENIED/TOOL_APP_NOT_GRANTED + 0 trash execution", denyDecisions.length >= 1 && denyExecs.length === 0, JSON.stringify({ decisions: denyDecisions.length, trashExecutions: denyExecs.length }), ">=1 decision + 0 execution");
   flowReached.flow3 = true;
+  // ================================================================ 流程 4：同一任务追加下一步目标 → 预算停止 → UI 显式续接（真实产品入口）
+  //
+  // 顺序契约：拒绝矩阵所需的若干小任务先建，"追加 → 预算停止 → 续接成功"的主任务最后创建，
+  // 使流程 5 刷新后 AI 面板恢复的最新任务就是它。所有结论只来自真实 UI / 产品桥 / 只读 DB。
+  const KINDS = ["MODEL_CALLS", "TOOL_CALLS", "TOOL_ROUNDS"];
+  const kindSnapshot = (ledger) => {
+    const out = {};
+    for (const k of KINDS) out[k] = { authorized: ledger.kinds[k].authorized, consumed: ledger.kinds[k].consumed, remaining: ledger.kinds[k].remaining };
+    return out;
+  };
+  const norm = (v) => String(v == null ? "" : v).replace(/\s+/g, "");
+  const stepsOfTask = (s, id) => byTask(s.steps, id).slice().sort((a, b) => Number(a.sequence) - Number(b.sequence));
+  const artsOfTask = (s, id) => byTask(s.artifacts, id);
+  const versOfTask = (s, id) => byTask(s.verifications, id);
+  const runsOfTask = (s, id) => byTask(s.runs, id);
+  const resourceOf = (s, id) => s.resources.find((r) => r.resource_id === id);
+  const trashStateOf = (s, id) => ((s.libraryResources || []).find((r) => r.resource_id === id) || {}).trash_state;
+  const inputValue = (sel) => js("const el = document.querySelector(" + JSON.stringify(sel) + "); return el ? String(el.value) : null;");
+  const appendViaBridge = (taskId, goal, expectedRevision) => bridge("task", { type: "task/appendStep", taskId, goal, expectedRevision });
+  // 在途状态下 task revision 仍会随在途事件推进：始终以刚读到的 revision 重试，直到拿到确定性拒绝或接收。
+  async function appendStable(taskId, goal, attempts = 8) {
+    let res = null;
+    let used = 0;
+    for (let i = 0; i < attempts; i += 1) {
+      const g = await taskGet(taskId);
+      res = await appendViaBridge(taskId, goal, g.task.revision);
+      used = i + 1;
+      if (!(res && res.ok === false && res.error === "TASK_REVISION_CONFLICT")) return { res, attempts: used };
+      await sleep(200);
+    }
+    return { res, attempts: used };
+  }
+  let lastApprovalId = "";
+  async function waitApprovalEx(prevId, timeout) {
+    const ok = await waitFor(async () => { const id = await attr("[data-approval-request-id]", "data-approval-request-id"); return id.length > 0 && id !== prevId; }, timeout || 120000);
+    return ok ? await attr("[data-approval-request-id]", "data-approval-request-id") : "";
+  }
+  async function approveCurrent() { await waitFor(async () => !(await isDisabled('[data-approval-action="approve"]')), 15000); return clickApprove(); }
+  const F4_APPEND_GOAL = "MAIN-E2E FLOW4 第二步：连续读取直至预算到限";
+  const F4_REVOKE_GOAL = "MAIN-E2E FLOW4-REVOKE 第二步：把 Main E2E Flow4 Revoke Target 2 移入废纸篓";
 
-  // ================================================================ 流程 4：预算停止 + UI 显式续接（如实调查 → NOT VERIFIED）
+  /* ---------------- 14 前置：经产品入口重新授予三个 TOOL 动作（F3.1 之后 trash 未授予，写入会被 DENY） ---------------- */
+  const f4Grant = await grantToolsBridge(TOOL_ACTIONS);
+  const f4Access = await getToolAccess();
+  record("flow4", "F4.0 · 14 前置：经产品治理入口重新授予 search/readMetadata/trash（F3 的显式拒绝语义不被污染，仅并集追加）",
+    !!(f4Grant && f4Grant.ok) && TOOL_ACTIONS.every((a) => (f4Access.grantedActions || []).includes(a)),
+    JSON.stringify({ ok: f4Grant && f4Grant.ok, granted: f4Access && f4Access.grantedActions }), JSON.stringify(TOOL_ACTIONS));
+
+  /* ---------------- 14(a) 小任务：同一 revision 真并发两次产品桥追加，恰好 1 次成功 ---------------- */
+  const dupTarget = await createResource("Main E2E Flow4 Dup Target", "text");
+  record("flow4", "F4.1 · 14(a) 小任务经产品桥 resource/create 造目标资源", !!dupTarget.ref, dupTarget.ref ? "created" : JSON.stringify(dupTarget.raw && dupTarget.raw.error), "created");
+  await grantAiResource(dupTarget.id);
+  await setPlan("write", { resourceRef: dupTarget.ref });
+  const dupRun = await runTask("MAIN-E2E FLOW4-DUP: 把 Main E2E Flow4 Dup Target 移入废纸篓");
+  R.taskIds.flow4Dup = dupRun.taskId;
+  const dupApprovalId = await waitApprovalEx(lastApprovalId, 120000); lastApprovalId = dupApprovalId;
+  await approveCurrent();
+  const dupTerminal = await waitTaskTerminal(dupRun.taskId, 180000);
+  const dupGet1 = await taskGet(dupRun.taskId);
+  const dupSnap1 = dbSnapshot();
+  const dupCall1 = byTask(dupSnap1.sideEffectCalls, dupRun.taskId)[0];
+  const dupRes1 = resourceOf(dupSnap1, dupTarget.id);
+  record("flow4", "F4.2 · 14(a) 小任务第一步真实成功（Task/Step SUCCEEDED + 1 Artifact + 1 Verification + trash 副作用 SUCCEEDED + 资源真实移入废纸篓）",
+    dupTerminal && dupGet1.task.status === "SUCCEEDED" && (dupGet1.artifacts || []).length === 1 && (dupGet1.verifications || []).length === 1 && !!dupCall1 && dupCall1.status === "SUCCEEDED" && !!dupRes1 && dupRes1.status === "deleted" && trashStateOf(dupSnap1, dupTarget.id) === "TRASHED",
+    JSON.stringify({ task: dupGet1.task.status, artifacts: (dupGet1.artifacts || []).length, verifications: (dupGet1.verifications || []).length, call: dupCall1 && dupCall1.status, resource: dupRes1 && dupRes1.status, trashState: trashStateOf(dupSnap1, dupTarget.id) }),
+    "SUCCEEDED + 1/1 + call SUCCEEDED + registry deleted/trash_state TRASHED");
+  record("flow4", "F4.3 · 14(f) 正对照：14(a) 小任务此刻 task/get.appendable=true（可追加时确实可追加）", dupGet1.appendable === true, String(dupGet1.appendable), "true");
+  const dupR1 = dupGet1.task.revision;
+  await setPlan("final");
+  const dupConcurrent = await Promise.all([
+    appendViaBridge(dupRun.taskId, "并发追加 A", dupR1),
+    appendViaBridge(dupRun.taskId, "并发追加 B", dupR1),
+  ]);
+  const dupWins = dupConcurrent.filter((r) => r && r.ok === true);
+  const dupLoses = dupConcurrent.filter((r) => !r || r.ok !== true);
+  const dupAfterConcurrent = await taskGet(dupRun.taskId);
+  record("flow4", "F4.4 · 14(a) 同一 revision 真并发（Promise.all 两次产品桥调用）恰好 1 次成功、step 数只 +1",
+    dupWins.length === 1 && dupLoses.length === 1 && (dupAfterConcurrent.steps || []).length === 2,
+    JSON.stringify({ results: dupConcurrent.map((r) => ({ ok: r && r.ok, error: r && r.error, reason: r && r.reason })), steps: (dupAfterConcurrent.steps || []).length }),
+    "1 winner + steps=2");
+  record("flow4", "F4.5 · 14(a) 并发赢家同步返回 { ok:true, taskId 不变, status:RUNNING }；拒绝方同步拒绝且无 running 异步面",
+    dupWins.length === 1 && dupWins[0].taskId === dupRun.taskId && dupWins[0].status === "RUNNING" && dupLoses.length === 1 && ["TASK_REVISION_CONFLICT", "APPEND_NOT_ALLOWED"].includes(dupLoses[0].error) && !("running" in dupLoses[0]),
+    JSON.stringify({ winner: dupWins[0] && { taskId: dupWins[0].taskId, status: dupWins[0].status }, loser: dupLoses[0] && { error: dupLoses[0].error, reason: dupLoses[0].reason } }),
+    "winner RUNNING + loser 同步拒绝");
+  const dupRepeat = await appendViaBridge(dupRun.taskId, "重复追加（同一 R1）", dupR1);
+  const dupAfterRepeat = await taskGet(dupRun.taskId);
+  record("flow4", "F4.6 · 14(a) 追加被接受后用同一 revision 再发起：同步被拒且 step 数不增（仍 2）",
+    dupRepeat.ok === false && ["TASK_REVISION_CONFLICT", "APPEND_NOT_ALLOWED"].includes(dupRepeat.error) && (dupAfterRepeat.steps || []).length === 2,
+    JSON.stringify({ error: dupRepeat.error, reason: dupRepeat.reason, steps: (dupAfterRepeat.steps || []).length }), "同步拒绝 + steps=2");
+  const dupTerminal2 = await waitTaskTerminal(dupRun.taskId, 180000);
+  const dupGetFinal = await taskGet(dupRun.taskId);
+  record("flow4", "F4.7 · 14(a) 小任务追加的第二步真实运行收敛（Task SUCCEEDED + 2 Artifact + 2 step）",
+    dupTerminal2 && dupGetFinal.task.status === "SUCCEEDED" && (dupGetFinal.artifacts || []).length === 2 && (dupGetFinal.steps || []).length === 2,
+    JSON.stringify({ task: dupGetFinal.task.status, artifacts: (dupGetFinal.artifacts || []).length, steps: (dupGetFinal.steps || []).length }), "SUCCEEDED + 2 artifacts + 2 steps");
+
+  /* ---------------- 14(c) 不安全状态（一）：flow3 的 BLOCKED 任务 ---------------- */
+  const f3GetB = await taskGet(R.taskIds.flow3);
+  const f3SnapB = dbSnapshot();
+  const f3StepsB = stepsOfTask(f3SnapB, R.taskIds.flow3).length;
+  const f3Rej = await appendViaBridge(R.taskIds.flow3, "对 BLOCKED 任务的追加", f3GetB.task.revision);
+  const f3SnapA = dbSnapshot();
+  const f3TaskA = f3SnapA.tasks.find((t) => t.task_id === R.taskIds.flow3);
+  record("flow4", "F4.8 · 14(c) 对 flow3 的 BLOCKED 任务追加：APPEND_NOT_ALLOWED + reason APPEND_NOT_SUCCEEDED",
+    f3Rej.ok === false && f3Rej.error === "APPEND_NOT_ALLOWED" && f3Rej.reason === "APPEND_NOT_SUCCEEDED",
+    JSON.stringify(f3Rej), "APPEND_NOT_ALLOWED + APPEND_NOT_SUCCEEDED");
+  record("flow4", "F4.9 · 14(c) 该拒绝 0 新增 step / task 状态与 revision 不变（task/get.appendReason 同因）",
+    f3StepsB === stepsOfTask(f3SnapA, R.taskIds.flow3).length && f3TaskA.status === f3GetB.task.status && f3TaskA.revision === f3GetB.task.revision && f3GetB.appendReason === "APPEND_NOT_SUCCEEDED",
+    JSON.stringify({ steps: f3StepsB + "->" + stepsOfTask(f3SnapA, R.taskIds.flow3).length, status: f3TaskA.status, revision: f3TaskA.revision, appendReason: f3GetB.appendReason }),
+    "steps=1 不变 + 状态/revision 不变");
+  const dupControl1 = await taskGet(dupRun.taskId);
+  record("flow4", "F4.10 · 14(f) 正对照：同一时刻 14(a) 小任务 appendable=true（拒绝只发生在不安全状态）", dupControl1.appendable === true, String(dupControl1.appendable), "true");
+
+  /* ---------------- 14(e)：执行前撤权不产生受保护操作（并为 14(c) 提供 AWAITING_APPROVAL 状态） ---------------- */
+  const revTarget = await createResource("Main E2E Flow4 Revoke Target", "text");
+  record("flow4", "F4.11 · 14(e) 撤权任务第一步目标资源经产品桥真实创建", !!revTarget.ref, revTarget.ref ? "created" : JSON.stringify(revTarget.raw && revTarget.raw.error), "created");
+  await grantAiResource(revTarget.id);
+  await setPlan("write", { resourceRef: revTarget.ref });
+  const revRun = await runTask("MAIN-E2E FLOW4-REVOKE: 把 Main E2E Flow4 Revoke Target 移入废纸篓");
+  R.taskIds.flow4Revoke = revRun.taskId;
+  const revApproval1 = await waitApprovalEx(lastApprovalId, 120000); lastApprovalId = revApproval1;
+  await approveCurrent();
+  const revTerminal1 = await waitTaskTerminal(revRun.taskId, 180000);
+  const revGet1 = await taskGet(revRun.taskId);
+  const revSnap1 = dbSnapshot();
+  const revArts1 = artsOfTask(revSnap1, revRun.taskId);
+  const revVers1 = versOfTask(revSnap1, revRun.taskId);
+  record("flow4", "F4.12 · 14(e) 撤权任务第一步真实成功且 appendable=true（第二步确有可追加资格）",
+    revTerminal1 && revGet1.task.status === "SUCCEEDED" && revArts1.length === 1 && revVers1.length === 1 && revGet1.appendable === true,
+    JSON.stringify({ task: revGet1.task.status, artifacts: revArts1.length, verifications: revVers1.length, appendable: revGet1.appendable }), "SUCCEEDED + 1/1 + appendable=true");
+  const revTarget2 = await createResource("Main E2E Flow4 Revoke Target 2", "text");
+  await grantAiResource(revTarget2.id);
+  await setPlan("write", { resourceRef: revTarget2.ref });
+  const revAppend = await appendViaBridge(revRun.taskId, F4_REVOKE_GOAL, revGet1.task.revision);
+  record("flow4", "F4.13 · 14(e) 真实追加一个 WRITE 类第二步：同步接受 ok=true / taskId 不变 / status=RUNNING",
+    revAppend.ok === true && revAppend.taskId === revRun.taskId && revAppend.status === "RUNNING",
+    JSON.stringify({ ok: revAppend.ok, taskId: revAppend.taskId, status: revAppend.status }), "ok=true + 同一 taskId + RUNNING");
+  const revApproval2 = await waitApprovalEx(revApproval1, 120000); lastApprovalId = revApproval2;
+  record("flow4", "F4.14 · 14(e) 第二步进入 AWAITING_APPROVAL（真实 WRITE 审批 UI 出现）", !!revApproval2, revApproval2 ? "AWAITING_APPROVAL" : "missing", "AWAITING_APPROVAL");
+  const revGetPending = await taskGet(revRun.taskId);
+  const revInFlightAttempt = await appendStable(revRun.taskId, "待批准时追加");
+  const revInFlight = revInFlightAttempt.res;
+  const revStepsPending = stepsOfTask(dbSnapshot(), revRun.taskId).length;
+  record("flow4", "F4.15 · 14(c) 对处于 AWAITING_APPROVAL 的任务追加：APPEND_NOT_ALLOWED + reason ∈ {APPEND_IN_FLIGHT, APPEND_SIDE_EFFECT_PENDING}，无新 step（在途 revision 会推进，须以最新 revision 重试才拿到状态拒绝）",
+    revInFlight.ok === false && revInFlight.error === "APPEND_NOT_ALLOWED" && ["APPEND_IN_FLIGHT", "APPEND_SIDE_EFFECT_PENDING"].includes(revInFlight.reason) && revStepsPending === 2,
+    JSON.stringify({ taskStatus: revGetPending.task.status, error: revInFlight.error, reason: revInFlight.reason, attempts: revInFlightAttempt.attempts, steps: revStepsPending }), "APPEND_NOT_ALLOWED + IN_FLIGHT/SIDE_EFFECT_PENDING + steps=2");
+  const dupControl2 = await taskGet(dupRun.taskId);
+  record("flow4", "F4.16 · 14(f) 正对照：同一时刻 14(a) 小任务 appendable=true（未决副作用只阻断自身任务）", dupControl2.appendable === true, String(dupControl2.appendable), "true");
+  const accessBeforeAppendRevoke = await getToolAccess();
+  const revGrant = accessBeforeAppendRevoke && Array.isArray(accessBeforeAppendRevoke.grants) ? accessBeforeAppendRevoke.grants[0] : null;
+  const execBeforeAppendRevoke = executorRecordCount();
+  const appendRevoke = revGrant ? await gov({ type: "governance/revokeAppToolAccess", grantId: revGrant.grantId }) : { ok: false, error: "NO_TOOL_GRANT" };
+  record("flow4", "F4.17 · 14(e) 经产品治理入口 revokeAppToolAccess 撤销 ai 的 TOOL grant（changed=true）", !!(appendRevoke && appendRevoke.ok && appendRevoke.changed === true), JSON.stringify(appendRevoke), "ok=true + changed=true");
+  const accessAfterAppendRevoke = await getToolAccess();
+  record("flow4", "F4.18 · 14(e) 撤权后 grantedActions 清空 / DB TOOL grant 为 0",
+    !!(accessAfterAppendRevoke && accessAfterAppendRevoke.ok) && (accessAfterAppendRevoke.grantedActions || []).length === 0 && toolGrantRows().length === 0,
+    JSON.stringify({ granted: accessAfterAppendRevoke && accessAfterAppendRevoke.grantedActions, rows: toolGrantRows().length }), "[] + 0");
+  const revApproved = await approveCurrent();
+  const revTerminal2 = await waitTaskTerminal(revRun.taskId, 180000);
+  const revGet2 = await taskGet(revRun.taskId);
+  const revSnap2 = dbSnapshot();
+  const revSteps2 = stepsOfTask(revSnap2, revRun.taskId);
+  const revCalls2 = byTask(revSnap2.sideEffectCalls, revRun.taskId);
+  const revBlockedCall = revCalls2.find((c) => c.status === "BLOCKED");
+  const revRes2 = resourceOf(revSnap2, revTarget2.id);
+  const revLeaseCount2 = revSnap2.leases.filter((l) => l.call_id === (revBlockedCall && revBlockedCall.call_id)).length;
+  record("flow4", "F4.19 · 14(e) 撤权后旧批准不得执行：Call BLOCKED + SIDE_EFFECT_AUTHORIZATION_REVOKED",
+    revTerminal2 && revApproved === "ok" && !!revBlockedCall && revBlockedCall.error_code === "SIDE_EFFECT_AUTHORIZATION_REVOKED",
+    JSON.stringify({ call: revBlockedCall && revBlockedCall.status, error: revBlockedCall && revBlockedCall.error_code }), "BLOCKED + SIDE_EFFECT_AUTHORIZATION_REVOKED");
+  record("flow4", "F4.20 · 14(e) 0 mutation（Target 2 仍 active）/ 0 新 lease / 0 新 executor",
+    !!revRes2 && revRes2.status === "active" && revLeaseCount2 === 0 && executorRecordCount() === execBeforeAppendRevoke,
+    JSON.stringify({ resource: revRes2 && revRes2.status, blockedCall: revBlockedCall && revBlockedCall.status, blockedCallLeases: revLeaseCount2, exec: execBeforeAppendRevoke + "->" + executorRecordCount() }), "active + blocked call 0 lease + exec 不变");
+  record("flow4", "F4.21 · 14(e) 第一步 Artifact/Verification 逐字段保留 + 该任务只有 1 条 SUCCEEDED 副作用",
+    revSteps2.length === 2 && revSteps2[0].status === "SUCCEEDED" && revSteps2[1].status === "BLOCKED"
+      && JSON.stringify([revSteps2[0]]) === JSON.stringify([stepsOfTask(revSnap1, revRun.taskId)[0]])
+      && JSON.stringify(artsOfTask(revSnap2, revRun.taskId)) === JSON.stringify(revArts1)
+      && JSON.stringify(versOfTask(revSnap2, revRun.taskId)) === JSON.stringify(revVers1)
+      && revCalls2.filter((c) => c.status === "SUCCEEDED").length === 1 && revCalls2.length === 2,
+    JSON.stringify({ steps: revSteps2.map((s) => s.status), artifacts: artsOfTask(revSnap2, revRun.taskId).length, verifications: versOfTask(revSnap2, revRun.taskId).length, callStatuses: revCalls2.map((c) => c.status) }),
+    "2 step(SUCCEEDED/BLOCKED) + 1 artifact + 1 SUCCEEDED call");
+  record("flow4", "F4.22 · 14(e) 撤权任务 BLOCKED / 2 steps / 1 artifact / appendReason=APPEND_NOT_SUCCEEDED（流程 5 复用）",
+    revGet2.task.status === "BLOCKED" && (revGet2.steps || []).length === 2 && (revGet2.artifacts || []).length === 1 && revGet2.appendReason === "APPEND_NOT_SUCCEEDED",
+    JSON.stringify({ status: revGet2.task.status, steps: (revGet2.steps || []).length, artifacts: (revGet2.artifacts || []).length, appendReason: revGet2.appendReason }),
+    "BLOCKED + 2 steps + 1 artifact + APPEND_NOT_SUCCEEDED");
+  R.flow4Revoke = { steps: (revGet2.steps || []).length, artifacts: (revGet2.artifacts || []).length, appendReason: revGet2.appendReason, status: revGet2.task.status };
+  const regrant = await grantToolsViaUI(TOOL_ACTIONS);
+  record("flow4", "F4.23 · 14(f) 正对照：经真实治理 UI 重新授予三个 TOOL 动作（主任务的真实 WRITE 依赖它）", regrant.ok, JSON.stringify(regrant), "ok=true");
+
+  /* ---------------- 主任务（必须最后创建）：真实 UI 创建 → 追加 → 预算停止 → UI 续接 → 成功 ---------------- */
+  const heroTarget = await createResource("Main E2E Flow4 Target", "text");
+  record("flow4", "F4.24 · 主任务目标资源经产品桥真实创建", !!heroTarget.ref, heroTarget.ref ? "created" : JSON.stringify(heroTarget.raw && heroTarget.raw.error), "created");
+  await grantAiResource(heroTarget.id);
+  await setPlan("write", { resourceRef: heroTarget.ref });
+  const heroHistoryStart = provider.state.history.length;
+  const heroRun = await runTask("MAIN-E2E FLOW4: 把 Main E2E Flow4 Target 移入废纸篓");
+  R.taskIds.flow4 = heroRun.taskId;
+  const heroApproval1 = await waitApprovalEx(lastApprovalId, 120000); lastApprovalId = heroApproval1;
+  record("flow4", "F4.25 · 主任务经真实 UI 发起并进入 AWAITING_APPROVAL", heroRun.started && !!heroApproval1, JSON.stringify({ started: heroRun.started, approval: !!heroApproval1 }), "started + approval");
+  await approveCurrent();
+  const heroTerminal1 = await waitTaskTerminal(heroRun.taskId, 180000);
+  const heroGet1 = await taskGet(heroRun.taskId);
+  const heroSnap1 = dbSnapshot();
+  const heroSteps1 = stepsOfTask(heroSnap1, heroRun.taskId);
+  const heroArts1 = artsOfTask(heroSnap1, heroRun.taskId);
+  const heroVers1 = versOfTask(heroSnap1, heroRun.taskId);
+  const heroCall1 = byTask(heroSnap1.sideEffectCalls, heroRun.taskId)[0];
+  const heroRes1 = resourceOf(heroSnap1, heroTarget.id);
+  const heroExecBefore = executorRecordCount();
+  record("flow4", "F4.26 · 第一步真实成功：Task/Step SUCCEEDED + 1 Artifact + 1 Verification（相互绑定 + checksum 正确）",
+    heroTerminal1 && heroGet1.task.status === "SUCCEEDED" && heroSteps1.length === 1 && heroSteps1[0].status === "SUCCEEDED" && heroArts1.length === 1 && heroVers1.length === 1
+      && heroVers1[0].artifact_id === heroArts1[0].artifact_id && heroArts1[0].checksum === sha256(heroArts1[0].safe_content),
+    JSON.stringify({ task: heroGet1.task.status, step: heroSteps1[0] && heroSteps1[0].status, artifacts: heroArts1.length, verifications: heroVers1.length }),
+    "SUCCEEDED + 1 artifact + 1 verification");
+  record("flow4", "F4.27 · 第一步真实副作用：SideEffectCall=1 SUCCEEDED + 资源真实移入废纸篓 + mutation=1",
+    byTask(heroSnap1.sideEffectCalls, heroRun.taskId).length === 1 && !!heroCall1 && heroCall1.status === "SUCCEEDED" && !!heroRes1 && heroRes1.status === "deleted" && trashStateOf(heroSnap1, heroTarget.id) === "TRASHED",
+    JSON.stringify({ calls: byTask(heroSnap1.sideEffectCalls, heroRun.taskId).length, call: heroCall1 && heroCall1.status, resource: heroRes1 && heroRes1.status, trashState: trashStateOf(heroSnap1, heroTarget.id), mutation: heroRes1 && heroRes1.status !== "active" ? 1 : 0 }),
+    "1 call SUCCEEDED + registry deleted/TRASHED + mutation=1");
+  const appendBlockVisible = await waitSel("[data-ai-append-block]", 30000);
+  const appendGoalVisible = appendBlockVisible && (await has("[data-ai-append-goal]"));
+  const appendBtnVisible = appendBlockVisible && (await has("[data-ai-append]"));
+  record("flow4", "F4.28 · task/get.appendable=true 且 UI 出现 [data-ai-append-block] + [data-ai-append-goal] + [data-ai-append]",
+    heroGet1.appendable === true && appendBlockVisible && appendGoalVisible && appendBtnVisible,
+    JSON.stringify({ appendable: heroGet1.appendable, block: appendBlockVisible, goal: appendGoalVisible, button: appendBtnVisible }), "appendable=true + 三个选择器可见");
+  const heroStep1UiStatus = await attr('[data-ai-step="1"]', "data-ai-step-status");
+  record("flow4", "F4.29 · [data-ai-steps] 内 [data-ai-step=\"1\"][data-ai-step-status=\"SUCCEEDED\"]",
+    (await has("[data-ai-steps]")) && heroStep1UiStatus === "SUCCEEDED", JSON.stringify({ steps: await has("[data-ai-steps]"), step1: heroStep1UiStatus }), "steps 容器 + step1 SUCCEEDED");
+  const ledgerBefore = heroGet1.budgetLedger;
+  const budgetBeforeAppend = kindSnapshot(ledgerBefore);
+  const ledgerShapeOk = KINDS.every((k) => Number.isFinite(ledgerBefore.kinds[k].authorized) && Number.isFinite(ledgerBefore.kinds[k].consumed) && Number.isFinite(ledgerBefore.kinds[k].remaining) && ledgerBefore.kinds[k].consumed <= ledgerBefore.kinds[k].authorized);
+  record("flow4", "F4.30 · 追加前账本快照（task/get.budgetLedger 三类 authorized/consumed/remaining，consumed<=authorized）",
+    ledgerShapeOk, JSON.stringify(budgetBeforeAppend), "三类齐全且自洽");
   await setPlan("budget");
-  const budgetRun = await runTask("MAIN-E2E BUDGET: 连续读取直至预算到限");
-  R.taskIds.flow4 = budgetRun.taskId;
-  const budgetTerminal = await waitTaskTerminal(budgetRun.taskId, 240000);
-  const budgetGet = await taskGet(budgetRun.taskId);
-  const budgetStatus = budgetGet && budgetGet.task && budgetGet.task.status;
-  const budgetSnap = dbSnapshot();
-  const budgetArts = byTask(budgetSnap.artifacts, budgetRun.taskId).length;
-  const budgetResumable = !!(budgetGet && budgetGet.resumable);
-  const budgetReason = budgetGet && budgetGet.resumeReason;
-  const budgetResumeVisible = await has("[data-ai-resume]");
-  observe("flow4-budget-stop", JSON.stringify({ status: budgetStatus, artifacts: budgetArts, resumable: budgetResumable, resumeReason: budgetReason, resumeUi: budgetResumeVisible }));
-  record("flow4", "F4.1 · [OBSERVE] bounded 预算任务在真实 main 下停止", budgetTerminal && budgetStatus === "BLOCKED", budgetStatus, "BLOCKED");
-  record("flow4", "F4.2 · [OBSERVE] 预算路径 0 Artifact（getResumeEligibility 前置不满足）", budgetArts === 0, budgetArts, 0);
-  markNotVerified("flow4",
-    "F4.3 · 预算停止后经产品入口可达可续接状态 + UI 显式续接",
-    "结构冲突（本轮不可达）：真实 UI 的 task/run 每次只创建一个 step；预算耗尽发生在推理过程中，该 step 直接 BLOCKED 且 0 Artifact。而 getResumeEligibility 要求 artifactsOfTask>0（否则 RESUME_NO_SAFE_CONTINUATION），因此产品入口永远拿不到 resumable=true / 续接 UI。d4-06-resume 是先经主进程 API 构造 2-step 任务（step1 成功 WRITE 出 Artifact，step2 预算停止）才触达；该构造不是产品入口。本轮不通过测试 API 构造多步任务、不制造空产物/假成功、不放宽续接守卫。最小方案：需要一个产品级“分阶段/追加步骤”入口，使正常任务先完成一个带 Artifact 的真实步骤，再在后续步骤预算停止。",
-    JSON.stringify({ status: budgetStatus, artifacts: budgetArts, resumable: budgetResumable, resumeReason: budgetReason, resumeUi: budgetResumeVisible }),
-    "resumable=true + nextGrant + UI resume");
+  const heroPanelTaskBefore = await attr(".ai-panel", "data-ai-task-id");
+  await setInput("[data-ai-append-goal]", F4_APPEND_GOAL);
+  const appendReady = await waitFor(async () => !(await isDisabled("[data-ai-append]")), 15000);
+  const appendClicked = await click("[data-ai-append]");
+  const appendAcceptedSync = await waitFor(async () => { const g = await taskGet(heroRun.taskId); return !!(g && g.ok && g.task.status === "RUNNING" && (g.steps || []).length === 2); }, 15000);
+  const heroPanelTaskAfter = await attr(".ai-panel", "data-ai-task-id");
+  // 接收后后端 appendable=false（该 step 在途），UI 要么清空输入框、要么整块收起；两者都不能留下可再次提交的旧目标。
+  const appendGoalCleared = await waitFor(async () => { const v = await inputValue("[data-ai-append-goal]"); return v === "" || (v === null && !(await has("[data-ai-append-block]"))); }, 10000);
+  const appendBlockGone = !(await has("[data-ai-append-block]"));
+  const noAppendError = !(await has("[data-ai-error]"));
+  record("flow4", "F4.31 · 真实 UI 点击 [data-ai-append]：同一 Task（data-ai-task-id 不变）+ 同步接收（返回时已 2 steps / RUNNING）+ 输入框清空且无错误",
+    appendReady && appendClicked === "ok" && appendAcceptedSync && heroPanelTaskBefore === heroRun.taskId && heroPanelTaskAfter === heroRun.taskId && appendGoalCleared && noAppendError,
+    JSON.stringify({ ready: appendReady, click: appendClicked, syncAccepted: appendAcceptedSync, panelTaskId: heroPanelTaskAfter, goalClearedOrBlockGone: appendGoalCleared, appendBlockGone, noErrorElement: noAppendError }),
+    "ok + 同一 taskId + 同步 2 steps + 清空");
+  const heroSteps2 = stepsOfTask(dbSnapshot(), heroRun.taskId);
+  let heroStep2Input = null; try { heroStep2Input = JSON.parse(heroSteps2[1].input); } catch { heroStep2Input = null; }
+  record("flow4", "F4.32 · 追加后 task_steps 恰好 2 行；第二行 sequence=2 / input.appended=true / input.goal=用户输入",
+    heroSteps2.length === 2 && Number(heroSteps2[1].sequence) === 2 && !!heroStep2Input && heroStep2Input.appended === true && heroStep2Input.goal === F4_APPEND_GOAL,
+    JSON.stringify({ steps: heroSteps2.length, sequence: heroSteps2[1] && heroSteps2[1].sequence, appended: heroStep2Input && heroStep2Input.appended, goal: heroStep2Input && heroStep2Input.goal }),
+    "2 steps + sequence2 + appended=true + goal 一致");
+  record("flow4", "F4.33 · 旧 step 行逐字段不变（append 前后 DB 行 JSON 快照相等）",
+    JSON.stringify([heroSteps1[0]]) === JSON.stringify([heroSteps2[0]]),
+    JSON.stringify(heroSteps2[0]) === JSON.stringify(heroSteps1[0]) ? "row-identical" : JSON.stringify({ before: heroSteps1[0], after: heroSteps2[0] }), "row-identical");
+  const heroGet2 = await taskGet(heroRun.taskId);
+  const budgetAfterAppend = kindSnapshot(heroGet2.budgetLedger);
+  record("flow4", "F4.34 · 追加未改变三类 budget authorized（快照相等，append 不增加额度）",
+    KINDS.every((k) => budgetAfterAppend[k].authorized === budgetBeforeAppend[k].authorized) && KINDS.every((k) => budgetAfterAppend[k].consumed >= budgetBeforeAppend[k].consumed),
+    JSON.stringify({ before: budgetBeforeAppend, after: budgetAfterAppend }), "authorized 三类全等");
+  const heroStale1 = await appendViaBridge(heroRun.taskId, "陈旧 revision 追加（追加被接受后）", heroGet1.task.revision);
+  const heroStepsAfterStale1 = stepsOfTask(dbSnapshot(), heroRun.taskId).length;
+  record("flow4", "F4.35 · 14(a)/14(b) 追加被接受后用同一 R1 再发起：同步 TASK_REVISION_CONFLICT，step 数不增（仍 2）",
+    heroStale1.ok === false && heroStale1.error === "TASK_REVISION_CONFLICT" && heroStepsAfterStale1 === 2,
+    JSON.stringify({ error: heroStale1.error, current: heroStale1.current, steps: heroStepsAfterStale1 }), "TASK_REVISION_CONFLICT + steps=2");
+  const heroStopTerminal = await waitTaskTerminal(heroRun.taskId, 300000);
+  const heroGetStop = await taskGet(heroRun.taskId);
+  const heroSnapStop = dbSnapshot();
+  const heroStepsStop = stepsOfTask(heroSnapStop, heroRun.taskId);
+  const heroRunsStop = runsOfTask(heroSnapStop, heroRun.taskId);
+  const heroStep2Run = heroRunsStop.filter((r) => r.step_id === heroStepsStop[1].step_id);
+  record("flow4", "F4.36 · 第二步真实耗尽预算：Task/Step BLOCKED + stopReason=BUDGET_EXHAUSTED + 该 step 有真实 harness run（run.error_code 同因）",
+    heroStopTerminal && heroGetStop.task.status === "BLOCKED" && heroStepsStop[1].status === "BLOCKED" && heroGetStop.stopReason === "BUDGET_EXHAUSTED"
+      && heroStep2Run.length === 1 && heroStep2Run[0].error_code === "BUDGET_EXHAUSTED" && heroRunsStop.length === 2,
+    JSON.stringify({ task: heroGetStop.task.status, step2: heroStepsStop[1].status, stopReason: heroGetStop.stopReason, runs: heroRunsStop.length, step2RunError: heroStep2Run[0] && heroStep2Run[0].error_code }),
+    "BLOCKED/BLOCKED + BUDGET_EXHAUSTED + 真实 run");
+  record("flow4", "F4.37 · 预算路径该 step 0 新增 Artifact（既有 F4.2 语义保留：预算停止不产出产物）",
+    artsOfTask(heroSnapStop, heroRun.taskId).length === 1 && (heroGetStop.artifacts || []).length === 1,
+    JSON.stringify({ dbArtifacts: artsOfTask(heroSnapStop, heroRun.taskId).length, getArtifacts: (heroGetStop.artifacts || []).length }), 1);
+  const heroCallsStop = byTask(heroSnapStop.sideEffectCalls, heroRun.taskId);
+  const heroResStop = resourceOf(heroSnapStop, heroTarget.id);
+  const heroLeaseIdsStop = new Set(heroCallsStop.map((c) => c.call_id));
+  const heroLeaseCountStop = heroSnapStop.leases.filter((l) => heroLeaseIdsStop.has(l.call_id)).length;
+  record("flow4", "F4.38 · 第一步产物与副作用在预算停止后保持不变（step/artifact/verification 行逐字段不变 + 仍 1 条 SUCCEEDED call + 资源仍处于废纸篓 + 0 新 lease/executor）",
+    JSON.stringify([heroStepsStop[0]]) === JSON.stringify([heroSteps1[0]])
+      && JSON.stringify(artsOfTask(heroSnapStop, heroRun.taskId)) === JSON.stringify(heroArts1)
+      && JSON.stringify(versOfTask(heroSnapStop, heroRun.taskId)) === JSON.stringify(heroVers1)
+      && heroCallsStop.length === 1 && heroCallsStop[0].status === "SUCCEEDED" && !!heroResStop && heroResStop.status === "deleted" && trashStateOf(heroSnapStop, heroTarget.id) === "TRASHED" && heroResStop.updated_at === heroRes1.updated_at
+      && heroLeaseCountStop === 1 && byTask(heroSnapStop.executions, heroRun.taskId).filter((e) => e.tool_id === "resource.trash").length === 0 && executorRecordCount() === heroExecBefore,
+    JSON.stringify({ step1: heroStepsStop[0].status, artifacts: artsOfTask(heroSnapStop, heroRun.taskId).length, calls: heroCallsStop.map((c) => c.status), resource: heroResStop && heroResStop.status, trashState: trashStateOf(heroSnapStop, heroTarget.id), resourceUpdatedAt: heroResStop && heroResStop.updated_at + "/" + (heroRes1 && heroRes1.updated_at), leases: heroLeaseCountStop, exec: heroExecBefore + "->" + executorRecordCount() }),
+    "旧行不变 + 1 SUCCEEDED + trashed 未再变 + 0 新 lease/executor");
+  const heroStale2 = await appendViaBridge(heroRun.taskId, "第二步 BLOCKED 后的陈旧追加", heroGet1.task.revision);
+  const heroStepsAfterStale2 = stepsOfTask(dbSnapshot(), heroRun.taskId).length;
+  record("flow4", "F4.39 · 14(b) 第二步已 BLOCKED 后用陈旧 revision 追加：TASK_REVISION_CONFLICT，step 数不变（2）",
+    heroStale2.ok === false && heroStale2.error === "TASK_REVISION_CONFLICT" && heroStepsAfterStale2 === 2,
+    JSON.stringify({ error: heroStale2.error, current: heroStale2.current, steps: heroStepsAfterStale2 }), "TASK_REVISION_CONFLICT + steps=2");
+  const resumeVisible = await waitSel("[data-ai-resume]", 30000);
+  const stopReasonRaw = await text("[data-ai-stop-reason]");
+  const resumeBudgetUi = await text("[data-ai-resume-budget]");
+  const resumeRemainingUi = await text("[data-ai-resume-remaining]");
+  const heroGetStopUi = await taskGet(heroRun.taskId);
+  const ledgerStop = heroGetStopUi.budgetLedger;
+  const budgetStopSnapshot = kindSnapshot(ledgerStop);
+  const nextGrant = ledgerStop.nextGrant;
+  const remStop = ledgerStop.remaining;
+  const expBudgetText = "本次追加预算：" + nextGrant.kind + " +" + nextGrant.amount + "（该 kind 任务剩余 " + remStop[nextGrant.kind] + "）（第 " + (ledgerStop.resumeCount + 1) + "/" + ledgerStop.maxResumes + " 次续接）";
+  const expRemainingText = "三类剩余：MODEL_CALLS " + remStop.MODEL_CALLS + " / TOOL_CALLS " + remStop.TOOL_CALLS + " / TOOL_ROUNDS " + remStop.TOOL_ROUNDS;
+  record("flow4", "F4.40 · UI 出现 [data-ai-resume] 且 [data-ai-stop-reason] 含 BUDGET_EXHAUSTED",
+    resumeVisible && norm(stopReasonRaw).includes("BUDGET_EXHAUSTED"), JSON.stringify({ resume: resumeVisible, stopReason: stopReasonRaw }), "resume 可见 + 含 BUDGET_EXHAUSTED");
+  record("flow4", "F4.41 · [data-ai-resume-budget] 文本 == 后端 task/get.budgetLedger.nextGrant（kind/amount/该 kind 剩余/第 N/M 次续接）",
+    !!nextGrant && norm(resumeBudgetUi) === norm(expBudgetText),
+    JSON.stringify({ ui: resumeBudgetUi, expected: expBudgetText, nextGrant }), "与 nextGrant 完全一致");
+  record("flow4", "F4.42 · [data-ai-resume-remaining] 文本 == 后端三类 remaining（MODEL_CALLS/TOOL_CALLS/TOOL_ROUNDS）",
+    norm(resumeRemainingUi) === norm(expRemainingText),
+    JSON.stringify({ ui: resumeRemainingUi, expected: expRemainingText }), "与三类 remaining 完全一致");
+  await setPlan("final");
+  const resumeReady = await waitFor(async () => !(await isDisabled("[data-ai-resume]")), 15000);
+  const resumeClicked = await click("[data-ai-resume]");
+  const heroFinalTerminal = await waitTaskTerminal(heroRun.taskId, 180000);
+  const heroGetFinal = await taskGet(heroRun.taskId);
+  const heroSnapFinal = dbSnapshot();
+  const heroStepsFinal = stepsOfTask(heroSnapFinal, heroRun.taskId);
+  record("flow4", "F4.43 · 点击 [data-ai-resume] 后最终 Task SUCCEEDED + 恰好 3 个 step（SUCCEEDED/BLOCKED/SUCCEEDED）",
+    resumeReady && resumeClicked === "ok" && heroFinalTerminal && heroGetFinal.task.status === "SUCCEEDED" && heroStepsFinal.length === 3 && heroStepsFinal.map((s) => s.status).join(",") === "SUCCEEDED,BLOCKED,SUCCEEDED",
+    JSON.stringify({ click: resumeClicked, task: heroGetFinal.task.status, steps: heroStepsFinal.map((s) => s.status) }), "SUCCEEDED + SUCCEEDED,BLOCKED,SUCCEEDED");
+  const heroArtsFinal = artsOfTask(heroSnapFinal, heroRun.taskId);
+  const heroVersFinal = versOfTask(heroSnapFinal, heroRun.taskId);
+  const heroRunsFinal = runsOfTask(heroSnapFinal, heroRun.taskId);
+  record("flow4", "F4.44 · 最终 2 Artifact + 2 Verification（续接 run 真实产出第二个产物）",
+    (heroGetFinal.artifacts || []).length === 2 && (heroGetFinal.verifications || []).length === 2 && heroArtsFinal.length === 2 && heroVersFinal.length === 2,
+    JSON.stringify({ getArtifacts: (heroGetFinal.artifacts || []).length, getVerifications: (heroGetFinal.verifications || []).length, dbArtifacts: heroArtsFinal.length, dbVerifications: heroVersFinal.length }),
+    "2 artifacts + 2 verifications");
+  const ledgerFinal = heroGetFinal.budgetLedger;
+  const budgetFinal = kindSnapshot(ledgerFinal);
+  const additions = ledgerFinal.additions || [];
+  record("flow4", "F4.45 · 账本 additions 恰好 1 条：kind/amount == 续接前 nextGrant，且含 consumedAtGrant；resumeCount=1",
+    additions.length === 1 && additions[0].kind === nextGrant.kind && additions[0].amount === nextGrant.amount && additions[0].consumedAtGrant != null && ledgerFinal.resumeCount === 1,
+    JSON.stringify({ additions: additions.map((a) => ({ kind: a.kind, amount: a.amount, consumedAtGrant: a.consumedAtGrant != null, grantedAt: a.grantedAt != null })), resumeCount: ledgerFinal.resumeCount, beforeNextGrant: nextGrant }),
+    "1 addition == nextGrant + consumedAtGrant");
+  record("flow4", "F4.46 · 只有被批准 kind 的 authorized 增加该 amount，其他 kind authorized 不变",
+    KINDS.every((k) => (k === nextGrant.kind ? budgetFinal[k].authorized === budgetBeforeAppend[k].authorized + nextGrant.amount : budgetFinal[k].authorized === budgetBeforeAppend[k].authorized)),
+    JSON.stringify({ beforeAuthorized: budgetBeforeAppend, afterAuthorized: budgetFinal, grantedKind: nextGrant.kind, amount: nextGrant.amount }), "仅 granted kind +amount");
+  record("flow4", "F4.47 · 三类 consumed 单调不减且 <= authorized（remaining = authorized - consumed）",
+    KINDS.every((k) => budgetFinal[k].consumed >= budgetBeforeAppend[k].consumed && budgetFinal[k].consumed >= budgetStopSnapshot[k].consumed && budgetFinal[k].consumed <= budgetFinal[k].authorized && budgetFinal[k].remaining === budgetFinal[k].authorized - budgetFinal[k].consumed),
+    JSON.stringify(budgetFinal), "单调不减 + <=authorized");
+  const heroHistory = provider.state.history.slice(heroHistoryStart);
+  const modelRequests = heroHistory.length;
+  const byMode = heroHistory.reduce((m, h) => { m[h.mode] = (m[h.mode] || 0) + 1; return m; }, {});
+  record("flow4", "F4.48 · 实际调用次数 vs 账本：MODEL_CALLS consumed == 该任务三次 run 的真实模型请求数（provider.state.history 增量）",
+    modelRequests > 0 && budgetFinal.MODEL_CALLS.consumed === modelRequests,
+    JSON.stringify({ providerRequests: modelRequests, byMode, ledgerModelConsumed: budgetFinal.MODEL_CALLS.consumed, modelCallEnvelopes: (ledgerFinal.consumed || {}).modelCallEnvelopes }),
+    "consumed == 真实模型请求数");
+  const heroToolExecs = byTask(heroSnapFinal.executions, heroRun.taskId);
+  const heroSideEffects = byTask(heroSnapFinal.sideEffectCalls, heroRun.taskId);
+  const planLen = { write: 2, budget: 14, final: 0 };
+  const observedToolCalls = heroHistory.filter((h) => planLen[h.mode] != null && h.n < planLen[h.mode]).length;
+  record("flow4", "F4.49 · 工具调用交叉核对：TOOL_CALLS consumed == DB tool_executions + side_effect_calls == provider 观测发出的 tool_call 数",
+    budgetFinal.TOOL_CALLS.consumed === heroToolExecs.length + heroSideEffects.length && budgetFinal.TOOL_CALLS.consumed === observedToolCalls,
+    JSON.stringify({ ledgerToolConsumed: budgetFinal.TOOL_CALLS.consumed, dbToolExecutions: heroToolExecs.length, dbSideEffectCalls: heroSideEffects.length, providerToolCalls: observedToolCalls, providerRequests: modelRequests }),
+    "consumed == executions + sideEffectCalls == provider tool_calls");
+  const artBound = heroArtsFinal.every((a) => a.task_id === heroRun.taskId && !!a.step_id && !!a.run_id && heroStepsFinal.some((s) => s.step_id === a.step_id) && heroRunsFinal.some((r) => r.run_id === a.run_id && r.step_id === a.step_id));
+  const verBound = heroVersFinal.every((v) => v.task_id === heroRun.taskId && heroArtsFinal.some((a) => a.artifact_id === v.artifact_id));
+  const checksumOk = heroArtsFinal.every((a) => a.checksum === sha256(a.safe_content));
+  record("flow4", "F4.50 · 关联链：2 artifact 各自绑定 (taskId, stepId, runId)、2 verification 绑定对应 artifactId（verification 行不承载 step/run）、checksum==sha256(content)、harness runs==3",
+    heroArtsFinal.length === 2 && heroVersFinal.length === 2 && heroRunsFinal.length === 3 && artBound && verBound && checksumOk,
+    JSON.stringify({ artifacts: heroArtsFinal.length, verifications: heroVersFinal.length, runs: heroRunsFinal.length, artBound, verBound, checksumOk, artifactRefs: heroArtsFinal.map((a) => ({ step: !!a.step_id, run: !!a.run_id })), verificationArtifacts: heroVersFinal.map((v) => !!heroArtsFinal.some((a) => a.artifact_id === v.artifact_id)) }), "2+2+3 绑定 + checksum 正确");
+  const heroResFinal = resourceOf(heroSnapFinal, heroTarget.id);
+  record("flow4", "F4.51 · 第一步副作用恰好一次：跨 step/跨 run 不重放（side_effect_calls==1、无第二次 trash execution、资源只 trash 一次、executor 不新增）",
+    heroSideEffects.length === 1 && heroSideEffects[0].status === "SUCCEEDED" && heroToolExecs.filter((e) => e.tool_id === "resource.trash").length === 0
+      && !!heroResFinal && heroResFinal.status === "deleted" && trashStateOf(heroSnapFinal, heroTarget.id) === "TRASHED" && heroResFinal.updated_at === heroRes1.updated_at && executorRecordCount() === heroExecBefore,
+    JSON.stringify({ sideEffectCalls: heroSideEffects.length, callStatuses: heroSideEffects.map((c) => c.status), trashExecutions: heroToolExecs.filter((e) => e.tool_id === "resource.trash").length, resource: heroResFinal && heroResFinal.status, trashState: trashStateOf(heroSnapFinal, heroTarget.id), trashedAt: heroRes1.updated_at + "==" + (heroResFinal && heroResFinal.updated_at), exec: heroExecBefore + "->" + executorRecordCount() }),
+    "1 SUCCEEDED + 0 重放 + 资源只 trash 一次");
+  const heroAppendableAfter = await taskGet(heroRun.taskId);
+  record("flow4", "F4.52 · 14(f) 收尾正对照：主任务最终态 appendable=true（成功态追加入口仍真实可用）", heroAppendableAfter.appendable === true, String(heroAppendableAfter.appendable), "true");
+  observe("flow4-append-budget-resume", JSON.stringify({ taskId: heroRun.taskId, taskStatus: heroGetFinal.task.status, steps: heroStepsFinal.map((s) => s.status), artifacts: heroArtsFinal.length, verifications: heroVersFinal.length, runs: heroRunsFinal.length, budget: { before: budgetBeforeAppend, stop: budgetStopSnapshot, final: budgetFinal, nextGrant, additions: additions.length }, calls: { providerModelRequests: modelRequests, providerToolCalls: observedToolCalls, toolExecutions: heroToolExecs.length, sideEffectCalls: heroSideEffects.length } }));
+  flowReached.flow4 = true;
+  R.flow4 = {
+    budgetBefore: budgetBeforeAppend, budgetStop: budgetStopSnapshot, budgetFinal, nextGrant,
+    modelRequests, providerToolCalls: observedToolCalls, ledgerFinal, additions: additions.length,
+    resumeCount: ledgerFinal.resumeCount, steps: heroStepsFinal.map((s) => s.status), artifacts: heroArtsFinal.length, verifications: heroVersFinal.length, runs: heroRunsFinal.length,
+    artifactChecksums: heroArtsFinal.map((a) => a.checksum), artifactRefs: heroArtsFinal.map((a) => ({ artifactId: a.artifact_id, stepId: a.step_id, runId: a.run_id, type: a.type })),
+  };
 
   // ================================================================ 流程 5：刷新一致性（Reload 后从后端一致恢复）
   const grantBeforeReload = await getToolAccess();
@@ -439,8 +806,45 @@ async function main() {
   const ledgerAfter = budgetGetAfter && budgetGetAfter.budgetLedger;
   const kindsAfter = ledgerAfter && ledgerAfter.kinds ? Object.keys(ledgerAfter.kinds).sort().join(",") : null;
   record("flow5", "F5.5 · 刷新后预算账本从后端一致恢复（非 renderer 自报）", kindsAfter === beforeSnapshot.flow4.kind && !!(budgetGetAfter && !budgetGetAfter.resumable), JSON.stringify({ before: beforeSnapshot.flow4.kind, after: kindsAfter, resumable: budgetGetAfter && budgetGetAfter.resumable }), "unchanged");
+  // ---- 流程 4 主任务 / 撤权任务刷新前快照（流程 5 的对照基准，全部来自后端 task/get） ----
+  const heroGetBeforeReload = await taskGet(R.taskIds.flow4);
+  const revGetBeforeReload = await taskGet(R.taskIds.flow4Revoke);
+  const heroLedgerBeforeReload = { kinds: kindSnapshot(heroGetBeforeReload.budgetLedger), additions: (heroGetBeforeReload.budgetLedger.additions || []).length, resumeCount: heroGetBeforeReload.budgetLedger.resumeCount };
+  const panelOpened = await openPanel();
+  const panelRestored = await waitFor(async () => (await attr(".ai-panel", "data-ai-task-id")) === R.taskIds.flow4, 30000);
+  const panelTaskId = await attr(".ai-panel", "data-ai-task-id");
+  record("flow5", "F5.6 · 刷新后 AI 面板恢复到最新任务（= 流程 4 主任务）", panelOpened && panelRestored, JSON.stringify({ opened: panelOpened, panelTaskId, expected: R.taskIds.flow4 }), "panel 指向流程 4 主任务");
+  const uiSteps = await js("return Array.from(document.querySelectorAll('[data-ai-steps] [data-ai-step]')).map((el) => ({ seq: el.getAttribute('data-ai-step'), status: el.getAttribute('data-ai-step-status'), appended: el.getAttribute('data-ai-step-appended'), text: (el.textContent || '') }))");
+  const uiSeq = uiSteps.map((s) => s.seq).join(",");
+  const uiStatus = uiSteps.map((s) => s.status).join(",");
+  record("flow5", "F5.7 · 刷新后 [data-ai-steps] 3 条：sequence 1,2,3 / status SUCCEEDED,BLOCKED,SUCCEEDED / 第 2 条 data-ai-step-appended=true 且文本含追加目标",
+    uiSteps.length === 3 && uiSeq === "1,2,3" && uiStatus === "SUCCEEDED,BLOCKED,SUCCEEDED" && uiSteps[1].appended === "true" && uiSteps[1].text.includes(F4_APPEND_GOAL) && uiSteps[0].appended == null && uiSteps[2].appended == null,
+    JSON.stringify({ steps: uiSteps.map((s) => ({ seq: s.seq, status: s.status, appended: s.appended })), step2Text: (uiSteps[1] || {}).text }),
+    "1,2,3 / SUCCEEDED,BLOCKED,SUCCEEDED / step2 appended=true + 追加目标");
+  const appendBlockAfterReload = await has("[data-ai-append-block]");
+  const resumeAfterReload = await has("[data-ai-resume]");
+  record("flow5", "F5.8 · 刷新后 [data-ai-append-block] 可见（appendable=true）且 [data-ai-resume] 不出现（resumable=false）",
+    appendBlockAfterReload && !resumeAfterReload && heroGetBeforeReload.appendable === true && heroGetBeforeReload.resumable === false,
+    JSON.stringify({ appendBlock: appendBlockAfterReload, resume: resumeAfterReload, appendable: heroGetBeforeReload.appendable, resumable: heroGetBeforeReload.resumable }), "append 可见 + resume 不可见");
+  const heroGetAfterReload = await taskGet(R.taskIds.flow4);
+  const heroLedgerAfterReload = { kinds: kindSnapshot(heroGetAfterReload.budgetLedger), additions: (heroGetAfterReload.budgetLedger.additions || []).length, resumeCount: heroGetAfterReload.budgetLedger.resumeCount };
+  record("flow5", "F5.9 · 刷新后主任务 task/get 权威一致：3 steps / 2 artifacts / 2 verifications / 账本 authorized+consumed+remaining+additions+resumeCount 与刷新前快照逐项相等",
+    heroGetAfterReload.task.status === "SUCCEEDED" && (heroGetAfterReload.steps || []).length === 3 && (heroGetAfterReload.artifacts || []).length === 2 && (heroGetAfterReload.verifications || []).length === 2
+      && JSON.stringify(heroLedgerAfterReload) === JSON.stringify(heroLedgerBeforeReload),
+    JSON.stringify({ status: heroGetAfterReload.task.status, steps: (heroGetAfterReload.steps || []).length, artifacts: (heroGetAfterReload.artifacts || []).length, verifications: (heroGetAfterReload.verifications || []).length, ledgerBefore: heroLedgerBeforeReload, ledgerAfter: heroLedgerAfterReload }),
+    "3/2/2 + 账本快照相等（非 renderer 自报）");
+  const revGetAfterReload = await taskGet(R.taskIds.flow4Revoke);
+  record("flow5", "F5.10 · 刷新后撤权任务（14(e)）BLOCKED / 2 steps / 1 artifact / appendReason=APPEND_NOT_SUCCEEDED（与刷新前一致）",
+    revGetAfterReload.task.status === "BLOCKED" && (revGetAfterReload.steps || []).length === 2 && (revGetAfterReload.artifacts || []).length === 1 && revGetAfterReload.appendReason === "APPEND_NOT_SUCCEEDED"
+      && revGetAfterReload.appendReason === revGetBeforeReload.appendReason && (revGetAfterReload.steps || []).length === (revGetBeforeReload.steps || []).length && (revGetAfterReload.artifacts || []).length === (revGetBeforeReload.artifacts || []).length,
+    JSON.stringify({ status: revGetAfterReload.task.status, steps: (revGetAfterReload.steps || []).length, artifacts: (revGetAfterReload.artifacts || []).length, appendReason: revGetAfterReload.appendReason }),
+    "BLOCKED + 2/1 + APPEND_NOT_SUCCEEDED");
+
   flowReached.flow5 = true;
 
+  // 14(d) 前置：在 admin 会话里取流程 4 主任务的真实 revision 与 step 数（MEMBER 会话读不到 task/get）
+  const heroRevForMember = (await taskGet(R.taskIds.flow4)).task.revision;
+  const heroStepsForMemberBefore = byTask(dbSnapshot().steps, R.taskIds.flow4).length;
   // ---------------------------------------------------------------- 流程 2（续）：真实 MEMBER 会话调用治理 grant 被拒
   const createdMember = await gov({ type: "governance/createUser", identifier: MEMBER, password: MEMBER_PW, displayName: "Main E2E Member", role: "MEMBER" });
   record("flow2", "F2.8 · 经产品治理入口创建 MEMBER 账号", !!(createdMember && createdMember.ok), createdMember && createdMember.ok ? "created" : JSON.stringify(createdMember), "created");
@@ -448,6 +852,13 @@ async function main() {
   const memberReady = await loginAs(MEMBER, MEMBER_PW);
   const grantAsMember = await gov({ type: "governance/grantAppToolAccess", appId: "ai", actions: [TOOL_TRASH] });
   record("flow2", "F2.9 · 真实 MEMBER 会话调用治理 grant 被拒", loggedOut && memberReady && grantAsMember && grantAsMember.ok === false && grantAsMember.error === "NOT_SUPER_ADMIN", JSON.stringify({ loggedOut, memberReady, res: grantAsMember }), "ok=false + NOT_SUPER_ADMIN");
+  // 14(d) 非 owner：真实 MEMBER 会话对 admin 的流程 4 主任务发起 appendStep（携带真实 revision）→ TASK_FORBIDDEN
+  const memberAppend = await appendViaBridge(R.taskIds.flow4, "MEMBER 对 admin 任务的追加", heroRevForMember);
+  const heroStepsForMemberAfter = byTask(dbSnapshot().steps, R.taskIds.flow4).length;
+  record("flow4", "F4.53 · 14(d) 真实 MEMBER 会话对 admin 任务的 appendStep 被拒：TASK_FORBIDDEN，0 新 step（14(f) 对照：同一任务在 admin 会话 appendable=true 且已被接受，见 F4.31/F4.52）",
+    memberAppend.ok === false && memberAppend.error === "TASK_FORBIDDEN" && heroStepsForMemberBefore === 3 && heroStepsForMemberAfter === 3,
+    JSON.stringify({ memberSession: memberReady, res: memberAppend, steps: heroStepsForMemberBefore + "->" + heroStepsForMemberAfter, adminControl: checks.find((c) => c.name.startsWith("F4.52"))?.ok === true }),
+    "TASK_FORBIDDEN + steps=3 不变");
 
   // ---------------------------------------------------------------- 只读 DB / 错误
   const snap = dbSnapshot();
@@ -491,6 +902,7 @@ function sanitize(value, extra) {
 }
 const snap = outcome.snap;
 const byTaskOut = (rows, id) => (rows || []).filter((r) => r.task_id === id);
+const checkOk = (id) => checks.some((c) => c.name.startsWith(id + " ") && c.ok === true);
 const flow1Id = R.taskIds.flow1, flow2Id = R.taskIds.flow2, flow3Id = R.taskIds.flow3, flow4Id = R.taskIds.flow4;
 const f1Calls = snap ? byTaskOut(snap.sideEffectCalls, flow1Id) : [];
 const f1CallIds = f1Calls.map((c) => c.call_id);
@@ -498,7 +910,6 @@ const f1Arts = snap ? byTaskOut(snap.artifacts, flow1Id) : [];
 const f1Vers = snap ? byTaskOut(snap.verifications, flow1Id) : [];
 
 function bucketStatus(flow) {
-  if (flow === "flow4") return "NOT_VERIFIED";
   const arr = FLOW_BUCKETS[flow] || [];
   if (!arr.length) return "FAIL";
   return arr.every(Boolean) ? "PASS" : "FAIL";
@@ -512,7 +923,7 @@ const requiredFlows = {
   flow1: bucketStatus("flow1"),
   flow2: bucketStatus("flow2"),
   flow3: bucketStatus("flow3"),
-  flow4: "NOT_VERIFIED",
+  flow4: bucketStatus("flow4"),
   flow5: bucketStatus("flow5"),
 };
 const anyRequiredFail = Object.entries(requiredFlows).some(([, s]) => s === "FAIL");
@@ -532,16 +943,49 @@ let gate = {
     { name: "test-only tool grant seeding", removed: true, env: "OPENARC_E2E_SEED_TOOL_GRANTS=1", effect: "已从 electron/main.cjs 删除；工具权限一律经产品治理入口" },
   ],
   productEntries: {
-    toolGrantUI: "组织治理（dock）→ App 权限 → 工具权限（data-gov-tool-*）；流程 1 经此真实 UI 授予",
-    governanceBridge: "window.openarc.governance.command：getAppToolAccess / grantAppToolAccess / revokeAppToolAccess",
+    toolGrantUI: "组织治理（dock）→ App 权限 → 工具权限（data-gov-tool-*）；流程 1 与流程 4 的正对照经此真实 UI 授予",
+    governanceBridge: "window.openarc.governance.command：getAppToolAccess / grantAppToolAccess / revokeAppToolAccess（流程 2 与 14(e) 撤权）",
+    appendStepEntry: "AI 面板 [data-ai-append-block] / [data-ai-append-goal] / [data-ai-append] → window.openarc.task.command task/appendStep（同一 taskId；拒绝同步返回，接收立即返回 RUNNING，结果经 task/result 推送）",
+    resumeEntry: "AI 面板 [data-ai-resume] / [data-ai-stop-reason] / [data-ai-resume-budget] / [data-ai-resume-remaining] → window.openarc.task.command task/resume（预算续接）",
+    stepsProjection: "AI 面板 [data-ai-steps] / [data-ai-step]（sequence 属性） / data-ai-step-status / data-ai-step-appended，全部来自后端 task/get",
   },
   boot: outcome.boot ? { snapshot: sanitize(outcome.boot, [PROVIDER_SECRET]), orderOk: checks.find((c) => c.name.startsWith("B1"))?.ok === true, listening: outcome.boot.modelProxyListening === true } : null,
   flows: {
     flow1: { taskId: flow1Id || null, prerequisiteGrant: "product governance UI (grantAppToolAccess)", status: snap ? (snap.tasks.find((t) => t.task_id === flow1Id) || {}).status : null, sideEffectCalls: f1Calls.length, approvals: snap ? snap.approvals.filter((a) => f1CallIds.includes(a.call_id)).length : 0, leases: snap ? snap.leases.filter((l) => f1CallIds.includes(l.call_id)).length : 0, artifacts: f1Arts.length, verifications: f1Vers.length, mutation: 1, executorSpawned: R.exec.flow1Spawned >= 1 },
     flow2: { taskId: flow2Id || null, prerequisiteGrant: "product governance UI (grantAppToolAccess)", revokeEntry: "product governance/revokeAppToolAccess", callStatus: snap ? (byTaskOut(snap.sideEffectCalls, flow2Id)[0] || {}).status || null : null, errorCode: snap ? (byTaskOut(snap.sideEffectCalls, flow2Id)[0] || {}).error_code || null : null, leases: snap ? byTaskOut(snap.leases, flow2Id).length : 0, mutation: 0, nonAdminGrantDenied: checks.find((c) => c.name.startsWith("F2.9"))?.ok === true },
     flow3: { taskId: flow3Id || null, prerequisiteGrant: "product entry grantAppToolAccess (search/readMetadata only)", status: snap ? (snap.tasks.find((t) => t.task_id === flow3Id) || {}).status : null, sideEffectCalls: snap ? byTaskOut(snap.sideEffectCalls, flow3Id).length : 0, mutation: 0, deniedOperation: checks.find((c) => c.name.startsWith("F3.5"))?.ok === true, deniedUiVisible: checks.find((c) => c.name.startsWith("F3.6"))?.ok === true },
-    flow4: { taskId: flow4Id || null, observed: observations.find((o) => o.name === "flow4-budget-stop")?.detail || null, resumable: false, uiResume: false },
-    flow5: { reloadGate: outcome.gateAfterReload || null, grantsRestored: checks.find((c) => c.name.startsWith("F5.2"))?.ok === true, flow1Restored: checks.find((c) => c.name.startsWith("F5.3"))?.ok === true, flow3Restored: checks.find((c) => c.name.startsWith("F5.4"))?.ok === true, budgetRestored: checks.find((c) => c.name.startsWith("F5.5"))?.ok === true },
+    flow4: {
+      taskId: flow4Id || null,
+      entry: "真实 UI：task/run（plan write + 目标资源）→ Approve → [data-ai-append-goal] + [data-ai-append]（plan budget）→ 第二步真实预算停止 → [data-ai-resume]（plan final）→ 成功",
+      status: snap ? (snap.tasks.find((t) => t.task_id === flow4Id) || {}).status : null,
+      appendAcceptedByUI: checkOk("F4.31"),
+      steps: R.flow4 ? R.flow4.steps : null,
+      budgetStop: R.flow4 ? { stopReason: "BUDGET_EXHAUSTED", blockingKind: R.flow4.nextGrant.kind, artifactsOfBudgetStep: 0, runs: R.flow4.runs } : null,
+      budgetBeforeAppend: R.flow4 ? R.flow4.budgetBefore : null,
+      budgetAfterStop: R.flow4 ? R.flow4.budgetStop : null,
+      budgetFinal: R.flow4 ? R.flow4.budgetFinal : null,
+      nextGrant: R.flow4 ? R.flow4.nextGrant : null,
+      resume: R.flow4 ? { uiVisible: checkOk("F4.40"), uiBudgetMatchesBackend: checkOk("F4.41"), uiRemainingMatchesBackend: checkOk("F4.42"), additions: R.flow4.additions, resumeCount: R.flow4.resumeCount } : null,
+      calls: R.flow4 ? { providerModelRequests: R.flow4.modelRequests, modelCallsConsumed: R.flow4.budgetFinal.MODEL_CALLS.consumed, providerToolCalls: R.flow4.providerToolCalls, toolCallsConsumed: R.flow4.budgetFinal.TOOL_CALLS.consumed, toolRoundsConsumed: R.flow4.budgetFinal.TOOL_ROUNDS.consumed } : null,
+      artifacts: R.flow4 ? R.flow4.artifacts : (snap ? byTaskOut(snap.artifacts, flow4Id).length : 0),
+      verifications: R.flow4 ? R.flow4.verifications : (snap ? byTaskOut(snap.verifications, flow4Id).length : 0),
+      harnessRuns: R.flow4 ? R.flow4.runs : 0,
+      artifactChecksums: R.flow4 ? R.flow4.artifactChecksums : null,
+      artifactRefs: R.flow4 ? R.flow4.artifactRefs : null,
+      rejectionMatrix: {
+        concurrencySingleWinner: checkOk("F4.4"), duplicateStaleRevision: checkOk("F4.6"), staleRevisionAfterAppend: checkOk("F4.35"), staleRevisionAfterBlocked: checkOk("F4.39"),
+        notSucceededBlockedTask: checkOk("F4.8"), awaitingApproval: checkOk("F4.15"), nonOwnerMemberSession: checkOk("F4.53"), revokeBeforeExecution: checkOk("F4.19"),
+        positiveControls: ["F4.3", "F4.5", "F4.10", "F4.12", "F4.16", "F4.23", "F4.52"].map((id) => ({ check: id, ok: checkOk(id) })),
+      },
+      revokeTask: Object.assign({ taskId: R.taskIds.flow4Revoke || null }, R.flow4Revoke || {}),
+    },
+    flow5: {
+      reloadGate: outcome.gateAfterReload || null,
+      source: "page.reload() 后仅经后端 task/get + 真实 AI 面板 [data-ai-steps]/[data-ai-append-block]/[data-ai-resume] 恢复，不依赖 renderer memory",
+      grantsRestored: checks.find((c) => c.name.startsWith("F5.2"))?.ok === true, flow1Restored: checks.find((c) => c.name.startsWith("F5.3"))?.ok === true, flow3Restored: checks.find((c) => c.name.startsWith("F5.4"))?.ok === true, budgetRestored: checks.find((c) => c.name.startsWith("F5.5"))?.ok === true,
+      flow4PanelRestored: checkOk("F5.6"), flow4StepsRestored: checkOk("F5.7"), flow4AppendStateRestored: checkOk("F5.8"), flow4LedgerRestored: checkOk("F5.9"), flow4RevokeTaskRestored: checkOk("F5.10"),
+      latestTaskIsFlow4: (outcome.snap ? outcome.snap.tasks.slice().sort((a, b) => a.created_at - b.created_at).slice(-1)[0].task_id : null) === (R.taskIds.flow4 || null),
+    },
   },
   requiredFlows,
   overallStatus,

@@ -128,7 +128,9 @@ test("TD7 · invalid transitions 全部 DENY（显式 transition table）", asyn
   assert.equal(f.taskService.startTask({ context: A, taskId: pending.task.taskId, expectedRevision: cancelled.task.revision }).error, "TASK_CANCELLED");
   // transition table 本身
   assert.equal(domain.canTransitionTask("PENDING", "RUNNING"), true);
-  for (const [from, to] of [["SUCCEEDED", "RUNNING"], ["FAILED", "SUCCEEDED"], ["CANCELLED", "RUNNING"]]) {
+  // 唯一被解禁的离开终态的边：SUCCEEDED→RUNNING（仅产品级追加步骤 AppendStep 使用）。
+  assert.equal(domain.canTransitionTask("SUCCEEDED", "RUNNING"), true);
+  for (const [from, to] of [["FAILED", "SUCCEEDED"], ["CANCELLED", "RUNNING"], ["SUCCEEDED", "CANCELLED"], ["SUCCEEDED", "WAITING"], ["SUCCEEDED", "BLOCKED"]]) {
     assert.equal(domain.canTransitionTask(from, to), false, from + "→" + to);
   }
 });

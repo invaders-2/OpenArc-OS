@@ -15,7 +15,7 @@ const { safeTask, safeStep, safeCall, safeEvent, sanitizeEventPayload } = domain
 const {
   TASK_STATUS, STEP_STATUS, TASK_EVENT, ERROR, DEFAULT_MAX_ATTEMPTS, AUTO_RETRY, TOOL_EXECUTION,
   HARNESS_RUN_STATUS, HARNESS_RUN_TERMINAL, ARTIFACT_TYPE, ARTIFACT_TYPE_ALL, VERIFICATION_TYPE, VERIFICATION_STATUS,
-  BUDGET_BASE, BUDGET_KIND, BUDGET_KIND_ALL, RESUME_GRANT_AMOUNT, MAX_BUDGET_RESUMES, RESUME_REASON, ORCHESTRATION_KIND,
+  BUDGET_BASE, BUDGET_KIND, BUDGET_KIND_ALL, RESUME_GRANT_AMOUNT, MAX_BUDGET_RESUMES, RESUME_REASON, APPEND_REASON, ORCHESTRATION_KIND,
   canTransitionTask, canTransitionStep, isKnownEventType,
 } = domain;
 
@@ -192,6 +192,8 @@ class TaskService {
       if (task.cancel_requested) return { ok: false, error: ERROR.TASK_CANCELLED };
       const conflict = this.#conflict(task, expectedRevision);
       if (conflict) return conflict;
+      // SUCCEEDED→RUNNING 只属于 AppendStep：startTask 显式拒绝，绝不借这条边重启已成功任务。
+      if (task.status === TASK_STATUS.SUCCEEDED) return { ok: false, error: ERROR.TASK_INVALID_STATE, from: task.status, to: TASK_STATUS.RUNNING, detail: "APPEND_REQUIRED" };
       if (!canTransitionTask(task.status, TASK_STATUS.RUNNING)) return { ok: false, error: ERROR.TASK_INVALID_STATE, from: task.status, to: TASK_STATUS.RUNNING };
       const now = this.#now();
       const updated = this.store.updateTask(task.task_id, { status: TASK_STATUS.RUNNING, started_at: task.started_at == null ? now : task.started_at, updated_at: now, revision: task.revision + 1 });
@@ -695,12 +697,19 @@ class TaskService {
     const runs = this.store.harnessRunsOfTask(task.task_id);
     const steps = this.store.stepsOfTask(task.task_id);
     const grants = this.#budgetGrantEvents(task.task_id);
+    const exhaust = this.#budgetExhaustEvents(task.task_id);
     const lastRun = runs.length ? runs[runs.length - 1] : null;
     const lastStep = steps.length ? steps[steps.length - 1] : null;
+    const lastExhaust = exhaust.length ? exhaust[exhaust.length - 1] : null;
+    // run 开始前 remaining==0 时不会创建 run，预算停止只留 TASK_BUDGET_EXHAUSTED 事件（payload.stepId）；
+    // 该事件属于最后一个 BLOCKED step 时同样是有效预算停止，否则用户拿不到续接入口。
+    const stepBudgetStop = !!lastStep && lastStep.status === STEP_STATUS.BLOCKED
+      && !!lastExhaust && String(lastExhaust.stepId == null ? "" : lastExhaust.stepId) === String(lastStep.step_id);
+    const runBudgetStop = !!lastRun && String(lastRun.error_code) === ERROR.BUDGET_EXHAUSTED;
     base.resumeCount = grants.length;
     base.resumeIndex = grants.length + 1;
     base.remainingResumes = Math.max(0, MAX_BUDGET_RESUMES - grants.length);
-    base.stopReason = lastRun ? (lastRun.error_code || lastRun.stop_reason || null) : null;
+    base.stopReason = stepBudgetStop ? ERROR.BUDGET_EXHAUSTED : (lastRun ? (lastRun.error_code || lastRun.stop_reason || null) : null);
     base.fromStepId = lastStep ? lastStep.step_id : null;
     base.fromRunId = lastRun ? lastRun.run_id : null;
 
@@ -716,16 +725,59 @@ class TaskService {
     const callIds = new Set(calls.map((c) => c.callId));
     if (this.sideEffectStore.activeLeases().some((l) => callIds.has(l.callId))) return Object.assign(base, { reason: RESUME_REASON.ACTIVE_LEASE });
 
-    if (!lastRun) return Object.assign(base, { reason: RESUME_REASON.NO_HARNESS_RUN });
-    if (String(lastRun.error_code) !== ERROR.BUDGET_EXHAUSTED) return Object.assign(base, { reason: RESUME_REASON.NOT_BUDGET_STOP });
-    const exhaust = this.#budgetExhaustEvents(task.task_id);
-    const lastExhaust = exhaust.length ? exhaust[exhaust.length - 1] : null;
+    if (!lastRun && !stepBudgetStop) return Object.assign(base, { reason: RESUME_REASON.NO_HARNESS_RUN });
+    if (!runBudgetStop && !stepBudgetStop) return Object.assign(base, { reason: RESUME_REASON.NOT_BUDGET_STOP });
     base.kind = lastExhaust ? (lastExhaust.kind || null) : null;
     if (!base.kind || !RESUME_GRANT_AMOUNT[base.kind]) return Object.assign(base, { reason: RESUME_REASON.UNKNOWN_BUDGET_KIND });
     if (grants.length >= MAX_BUDGET_RESUMES) return Object.assign(base, { reason: RESUME_REASON.LIMIT_REACHED });
     if (!this.store.artifactsOfTask(task.task_id).length) return Object.assign(base, { reason: RESUME_REASON.NO_SAFE_CONTINUATION });
 
     base.resumable = true;
+    return base;
+  }
+
+  /** 历史 appended step 数：只读本任务自身 step 行（input.appended===true）。 */
+  #appendedStepCount(steps) {
+    let count = 0;
+    for (const s of steps) {
+      if (!s.input) continue;
+      let parsed = null;
+      try { parsed = JSON.parse(s.input); } catch { parsed = null; }
+      if (parsed && parsed.appended === true) count += 1;
+    }
+    return count;
+  }
+
+  /**
+   * D4 Main-Entry Closure-6 后端追加步骤判定（与 #resumeAssessment 并列，appendStep / getAppendEligibility 唯一共用）。
+   *
+   * 安全守卫先于状态判定：绝不借"追加"绕过未决副作用 / UNKNOWN_EFFECT / active lease / cancel 的限制。
+   * 只有任务已 SUCCEEDED、存在真实产物、且无任何在途或未知副作用时，才允许新增一个 bounded step。
+   */
+  #appendAssessment(task) {
+    const base = { appendable: false, reason: null, appendIndex: 1, fromStepId: null, fromRunId: null };
+    if (!task) return Object.assign(base, { reason: APPEND_REASON.NOT_SUCCEEDED });
+    const runs = this.store.harnessRunsOfTask(task.task_id);
+    const steps = this.store.stepsOfTask(task.task_id);
+    const lastStep = steps.length ? steps[steps.length - 1] : null;
+    const lastRun = runs.length ? runs[runs.length - 1] : null;
+    base.fromStepId = lastStep ? lastStep.step_id : null;
+    base.fromRunId = lastRun ? lastRun.run_id : null;
+    base.appendIndex = this.#appendedStepCount(steps) + 1;
+
+    if (task.cancel_requested) return Object.assign(base, { reason: APPEND_REASON.NOT_SUCCEEDED });
+    if (runs.some((r) => r.status === HARNESS_RUN_STATUS.STARTING || r.status === HARNESS_RUN_STATUS.RUNNING)) return Object.assign(base, { reason: APPEND_REASON.IN_FLIGHT });
+    if (steps.some((s) => s.status === STEP_STATUS.RUNNING || s.status === STEP_STATUS.PENDING)) return Object.assign(base, { reason: APPEND_REASON.IN_FLIGHT });
+    if (!this.sideEffectStore) return Object.assign(base, { reason: APPEND_REASON.EFFECT_STATE_UNAVAILABLE });
+    const calls = this.sideEffectStore.callsOfTask(task.task_id);
+    if (calls.some((c) => String(c.status) === "UNKNOWN_EFFECT")) return Object.assign(base, { reason: APPEND_REASON.UNKNOWN_EFFECT });
+    if (calls.some((c) => ["AWAITING_APPROVAL", "APPROVED", "LEASED", "RUNNING"].includes(String(c.status)))) return Object.assign(base, { reason: APPEND_REASON.SIDE_EFFECT_PENDING });
+    const callIds = new Set(calls.map((c) => c.callId));
+    if (this.sideEffectStore.activeLeases().some((l) => callIds.has(l.callId))) return Object.assign(base, { reason: APPEND_REASON.ACTIVE_LEASE });
+    if (task.status !== TASK_STATUS.SUCCEEDED) return Object.assign(base, { reason: APPEND_REASON.NOT_SUCCEEDED });
+    if (!this.store.artifactsOfTask(task.task_id).length) return Object.assign(base, { reason: APPEND_REASON.NO_ARTIFACT });
+
+    base.appendable = true;
     return base;
   }
 
@@ -785,6 +837,18 @@ class TaskService {
       // nextGrant 即**当前阻塞 kind** 与它的一次追加额度；绝不补齐其他种类。
       const nextGrant = assessment.kind ? { kind: assessment.kind, amount: this.#grantBase(assessment.kind) } : null;
       return Object.assign({ ok: true, taskId: load.task.task_id, kinds, remaining: this.#remainingOf(kinds), nextGrant }, assessment);
+    });
+  }
+
+  /** D4 Main-Entry Closure-6：后端追加资格判定（与 appendStep 共用同一份 #appendAssessment，renderer 自报无效）。 */
+  getAppendEligibility({ context, taskId } = {}) {
+    const guard = this.#guard(context);
+    if (!guard.ok) return guard;
+    const load = this.#load(guard, taskId);
+    if (!load.ok) return load;
+    return this.store.transactSync(() => {
+      const assessment = this.#appendAssessment(load.task);
+      return { ok: true, taskId: load.task.task_id, appendable: assessment.appendable, reason: assessment.reason };
     });
   }
 
@@ -965,6 +1029,53 @@ class TaskService {
       this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.TASK_STARTED, at: now, safePayload: sanitizeEventPayload({ revision: updatedTask.revision, resumed: true, resumeIndex: assessment.resumeIndex, kind: useKind }) });
       this.#audit(guard, context, "task.resume", task.task_id);
       return { ok: true, task: safeTask(updatedTask), step: safeStep(step), resumeIndex: assessment.resumeIndex, kind: useKind, amount: addAmount, remaining: this.#budgetKinds(task.task_id) };
+    });
+  }
+
+  /**
+   * D4 Main-Entry Closure-6 · 唯一产品级"同一任务追加下一步目标"入口（AppendStep）。
+   *
+   * 判定 + 写入同一事务：并发/重复提交只成功一次。只新增一个 bounded reasoning step，
+   * 绝不修改/删除旧 step、artifact、verification、tool proposal/execution、side-effect call 或 lease，
+   * 绝不重放旧 tool 请求，也绝不写 task_budgets —— 新 run 只能用既有剩余额度。
+   */
+  appendStep({ context, taskId, goal, expectedRevision } = {}) {
+    const guard = this.#guard(context);
+    if (!guard.ok) return guard;
+    const g = typeof goal === "string" ? goal.trim() : "";
+    if (!g || g.length > 2000) return { ok: false, error: ERROR.INVALID_INPUT, detail: "goal is required" };
+    return this.store.transactSync(() => {
+      const load = this.#load(guard, taskId);
+      if (!load.ok) return load;
+      const task = load.task;
+      if (task.cancel_requested) return { ok: false, error: ERROR.TASK_CANCELLED };
+      const conflict = this.#conflict(task, expectedRevision);
+      if (conflict) return conflict;
+      const assessment = this.#appendAssessment(task);
+      if (!assessment.appendable) return { ok: false, error: ERROR.APPEND_NOT_ALLOWED, reason: assessment.reason };
+      const now = this.#now();
+      const sequence = this.store.nextStepSequence(task.task_id);
+      // priorArtifacts 只是低信任参考数据：只取本任务自身最后 ≤3 个产物，事务内现场读取，绝不跨用户/app 取。
+      const input = {
+        appended: true,
+        appendIndex: assessment.appendIndex,
+        fromStepId: assessment.fromStepId,
+        fromRunId: assessment.fromRunId,
+        goal: g,
+        priorArtifacts: this.store.artifactsOfTask(task.task_id).slice(-3).map((a) => ({
+          artifactId: a.artifact_id, type: a.type, content: String(a.safe_content == null ? "" : a.safe_content).slice(0, 2000),
+        })),
+        instruction: "Continue from the verified prior results. Do not re-issue any previous tool request and do not repeat already completed operations.",
+      };
+      const step = this.store.insertStep({ taskId: task.task_id, sequence, kind: ORCHESTRATION_KIND, status: STEP_STATUS.PENDING, input, attempt: 1, maxAttempts: DEFAULT_MAX_ATTEMPTS });
+      this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.STEP_CREATED, safePayload: sanitizeEventPayload({ stepId: step.step_id, sequence, kind: ORCHESTRATION_KIND, maxAttempts: DEFAULT_MAX_ATTEMPTS, appended: true, appendIndex: assessment.appendIndex }), at: now });
+      // 只改 status/updated_at/revision：started_at/completed_at 等历史字段一律保留（不伪装成新任务）。
+      const updatedTask = this.store.updateTask(task.task_id, { status: TASK_STATUS.RUNNING, updated_at: now, revision: task.revision + 1 });
+      this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.TASK_STARTED, safePayload: sanitizeEventPayload({ revision: updatedTask.revision, appended: true, appendIndex: assessment.appendIndex }), at: now });
+      this.#audit(guard, context, "task.appendStep", task.task_id);
+      // 账本只惰性补缺失行；已有 authorized/consumed 一律原样返回，绝不抬升/清零。
+      const kinds = this.#ensureBudgetRows(task, now);
+      return { ok: true, task: safeTask(updatedTask), step: safeStep(step), appendIndex: assessment.appendIndex, remaining: this.#remainingOf(kinds) };
     });
   }
 

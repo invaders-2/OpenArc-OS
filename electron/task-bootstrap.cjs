@@ -101,7 +101,7 @@ function createTaskBundle({ identityStore, authorization, authStore, modelServic
 }
 
 /** D4-04：Renderer 可用的 Task 命令白名单（trusted sender + main-process session 注入）。 */
-const TASK_COMMANDS = Object.freeze(["task/run", "task/get", "task/list", "task/cancel", "task/resume", "task/recovery", "task/acknowledgeUnknownEffect"]);
+const TASK_COMMANDS = Object.freeze(["task/run", "task/get", "task/list", "task/cancel", "task/resume", "task/appendStep", "task/recovery", "task/acknowledgeUnknownEffect"]);
 
 function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrusted, send = null, hostAppId = "ai" } = {}) {
   if (typeof ipcMain.removeHandler === "function") { try { ipcMain.removeHandler("task:command"); } catch { /* not registered */ } }
@@ -150,6 +150,8 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
           // D4-06 Closure：可续接状态与预算账本一律后端判定（renderer 自报无效）。
           const eligibility = taskService.getResumeEligibility({ context, taskId });
           const ledger = taskService.getBudgetLedger({ context, taskId });
+          // D4 Main-Entry Closure-6：追加资格与拒绝原因同样只由后端判定（只回 safe projection）。
+          const appendEligibility = taskService.getAppendEligibility({ context, taskId });
           // D4-05 S2：结果未知的只读恢复投影（仅 BLOCKED + UNKNOWN_EFFECT 时 applicable）。
           const recovery = taskService.getRecoveryState({ context, taskId });
           // D4 收口：被后端拒绝且尚未被同一操作真实成功解决的明确 WRITE 操作（safe 投影）。
@@ -165,6 +167,8 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
             resumeReason: eligibility.ok ? (eligibility.reason || null) : (eligibility.error || null),
             budgetLedger: ledger.ok ? ledger.ledger : null,
             recovery: recovery.ok ? recovery : null,
+            appendable: !!(appendEligibility.ok && appendEligibility.appendable),
+            appendReason: appendEligibility.ok ? (appendEligibility.reason || null) : (appendEligibility.error || null),
           };
         }
         case "task/list": {
@@ -186,6 +190,20 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
           const running = orchestrator.resumeBudgetExhausted({ context, taskId, expectedRevision, verify: { type: "SCHEMA_VALID" } });
           running.then((r) => emitResult(taskId, r)).catch(() => { try { send({ type: "task/result", taskId, ok: false, status: null, error: "INTERNAL_ERROR" }); } catch { /* ignore */ } });
           return { ok: true, taskId, status: got.task.status };
+        }
+        case "task/appendStep": {
+          const taskId = String(payload.taskId == null ? "" : payload.taskId);
+          const goal = typeof payload.goal === "string" ? payload.goal : "";
+          if (!goal.trim()) return { ok: false, error: "INVALID_INPUT" };
+          const got = taskService.getTask({ context, taskId });
+          if (!got.ok) return got;
+          // expectedRevision 只是乐观并发 token；追加资格 / 身份 / 预算一律由主进程判定。
+          const expectedRevision = payload.expectedRevision == null ? got.task.revision : Number(payload.expectedRevision);
+          // 拒绝同步返回（TASK_FORBIDDEN / TASK_NOT_FOUND / TASK_CANCELLED / TASK_REVISION_CONFLICT / APPEND_NOT_ALLOWED+reason）；只有运行异步。
+          const cmd = orchestrator.appendStepCommand({ context, taskId, goal, expectedRevision, verify: { type: "SCHEMA_VALID" } });
+          if (!cmd || cmd.ok !== true) return cmd;
+          cmd.running.then((r) => emitResult(taskId, r)).catch(() => { try { send({ type: "task/result", taskId, ok: false, status: null, error: "INTERNAL_ERROR" }); } catch { /* ignore */ } });
+          return { ok: true, taskId, status: cmd.task.status };
         }
         case "task/recovery": {
           const taskId = String(payload.taskId == null ? "" : payload.taskId);

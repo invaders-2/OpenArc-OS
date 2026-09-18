@@ -741,6 +741,37 @@ class TaskHarnessOrchestrator {
     return this.runStep({ context, taskId, stepId: granted.step.stepId, expectedRevision: stepStarted.task.revision, stepInput: granted.step.input, verify, turnTimeoutMs });
   }
 
+  /**
+   * D4 Main-Entry Closure-6 · 同一任务追加下一步目标的**同步决策**入口：
+   * 追加资格 / owner / app / 在途 / 副作用判定全在 TaskService 单事务内，拒绝必须同步返回形状，
+   * 绝不先接收再异步回传失败（UI 与 E2E 都要逐项拿到拒绝证据）；只有 runStep 是异步的。
+   *
+   * 只新增一个 step + 一次新 run（新 capability）；绝不 replay 旧 tool 请求，
+   * 新 run 只能用任务剩余额度（由 runStep 判定）。
+   */
+  appendStepCommand({ context, taskId, goal, expectedRevision, verify = null, turnTimeoutMs = this.turnTimeoutMs } = {}) {
+    const svc = this.#service();
+    const appended = svc.appendStep({ context, taskId, goal, expectedRevision });
+    if (!appended.ok) return appended;
+    const stepStarted = svc.startStep({ context, taskId, stepId: appended.step.stepId, expectedRevision: appended.task.revision });
+    if (!stepStarted.ok) {
+      // 防御：新 step 不能留在 PENDING 卡死后续 append/resume。
+      try { svc.blockStep({ context, taskId, stepId: appended.step.stepId, reason: stepStarted.error || "APPEND_START_FAILED", expectedRevision: appended.task.revision }); } catch { /* ignore */ }
+      return stepStarted;
+    }
+    return {
+      ok: true, task: appended.task, step: appended.step, appendIndex: appended.appendIndex, remaining: appended.remaining,
+      running: this.runStep({ context, taskId, stepId: appended.step.stepId, expectedRevision: stepStarted.task.revision, stepInput: appended.step.input, verify, turnTimeoutMs }),
+    };
+  }
+
+  /** 与 resumeBudgetExhausted 对称的 async 包装：同步拒绝原样返回，接收后等待整条 run。 */
+  async appendStep(args) {
+    const cmd = this.appendStepCommand(args);
+    if (!cmd || cmd.ok !== true) return cmd;
+    return cmd.running;
+  }
+
   /** 显式 resume（非预算场景）：第一版仍 DEFERRED；接口保留但不实现自动 replay。*/
   async resume() { return { ok: false, error: "EXPLICIT_RESUME_DEFERRED" }; }
 

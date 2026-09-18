@@ -494,6 +494,14 @@ function formatDeniedTarget(args: any): string {
   try { const body = JSON.stringify(args); return body.length > 200 ? body.slice(0, 200) + "…" : body; } catch { return "—"; }
 }
 
+/** D4 Main-Entry Closure-6：step 目标的可读投影。被追加 step 的真实输入在 input.goal；初始 step 没有 input。 */
+function formatStepGoal(step: any): string {
+  const input = step ? step.input : null;
+  if (input == null) return "初始步骤";
+  const goal = typeof input.goal === "string" ? input.goal : "";
+  return goal || "—";
+}
+
 type AIPanelProps = { onClose: () => void; onOpenSettings: () => void };
 /**
  * D4-04：全局 AI 助手 = 真实 Task Runtime 入口。
@@ -520,6 +528,11 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
   const [verifications, setVerifications] = useState<any[]>([]);
   // D4 收口：被后端拒绝且尚未完成的明确 WRITE 操作（来源 task/get，renderer 不自报）。
   const [deniedOperations, setDeniedOperations] = useState<any[]>([]);
+  // D4 Main-Entry Closure-6：对同一个已成功任务追加下一步目标。appendable / appendReason / steps 一律以后端 task/get 为准。
+  const [appendGoal, setAppendGoal] = useState("");
+  const [appendable, setAppendable] = useState(false);
+  const [appendReason, setAppendReason] = useState<string | null>(null);
+  const [steps, setSteps] = useState<any[]>([]);
 
   const applyTaskState = (got: any) => {
     if (!got || !got.ok || !got.task) return;
@@ -536,6 +549,9 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
     setRecovery(got.recovery || null);
     setVerifications(Array.isArray(got.verifications) ? got.verifications : []);
     setDeniedOperations(Array.isArray(got.deniedOperations) ? got.deniedOperations : []);
+    if (Array.isArray(got.steps)) setSteps(got.steps);
+    setAppendable(got.appendable === true);
+    setAppendReason(got.appendReason || null);
   };
 
   useEffect(() => {
@@ -602,7 +618,11 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
     if (!bridge || typeof bridge.command !== "function" || busy || !goal.trim()) return;
     setBusy(true); setStatus("running"); setResult(""); setError("");
     const res = await bridge.command({ type: "task/run", goal });
-    if (res && res.ok) { setTaskId(res.taskId || null); setStatus("running"); }
+    if (res && res.ok) {
+      setTaskId(res.taskId || null); setStatus("running");
+      // 新任务的 revision / 追加资格只能由随后的 task/get 给出，避免拿旧值去 appendStep。
+      setRevision(null); setAppendable(false); setAppendReason(null); setSteps([]); setAppendGoal("");
+    }
     else { setBusy(false); setStatus("error"); setError((res && res.error) || "TASK_FAILED"); }
   };
   const cancel = async () => {
@@ -618,6 +638,23 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
     const res = await bridge.command({ type: "task/resume", taskId, expectedRevision: revision });
     if (!res || !res.ok) { setBusy(false); setError((res && res.error) || "RESUME_REJECTED"); }
   };
+  // D4 Main-Entry Closure-6：追加下一步目标。进度与终态仍由 task/result 推送，与 run/resume 同一收敛方式。
+  const appendStep = async () => {
+    const bridge = (window as unknown as { openarc?: { task?: { command?: (c: unknown) => Promise<{ ok?: boolean; error?: string }> } } }).openarc?.task;
+    if (!bridge || typeof bridge.command !== "function" || !taskId || busy || !appendGoal.trim()) return;
+    setBusy(true); setError("");
+    const res = await bridge.command({ type: "task/appendStep", taskId, goal: appendGoal, expectedRevision: revision });
+    if (!res || !res.ok) { setBusy(false); setError((res && res.error) || "APPEND_REJECTED"); return; }
+    setAppendGoal("");
+    // 立即刷新一次，让新 step 出现在历史里；busy 保持到该 step 的 task/result 到达。
+    try {
+      const got = await bridge.command({ type: "task/get", taskId });
+      if (got && got.ok) applyTaskState(got);
+    } catch { /* task/result 到达时仍会收敛 */ }
+    // 刷新可能读到追加前的旧终态而提前复位 busy；本轮只能由 task/result 收敛
+    //（若后端确实已终态，下一次 task/get 轮询会在 1s 内复位）。
+    setBusy(true);
+  };
   // D4-05 S2：只追加“已人工核查”事件；绝不改 call/step/task 状态，绝不授权 resume/retry。
   const acknowledge = async (callId: string) => {
     const bridge = (window as unknown as { openarc?: { task?: { command?: (c: unknown) => Promise<{ ok?: boolean; error?: string }> } } }).openarc?.task;
@@ -632,6 +669,10 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
   };
 
   const failVerifications = (verifications || []).filter((v: any) => v && v.status === "FAIL");
+  const orderedSteps = useMemo(
+    () => [...steps].sort((a: any, b: any) => (Number(a && a.sequence) || 0) - (Number(b && b.sequence) || 0)),
+    [steps],
+  );
 
   return (
     <aside className="ai-panel" aria-label="AI 助手" data-ai-status={status} data-ai-task-id={taskId || ""}>
@@ -663,6 +704,48 @@ export function AIPanel({ onClose, onOpenSettings }: AIPanelProps) {
         <span data-ai-status-text>{status === "BLOCKED" ? (resumable ? "BLOCKED · Budget Exhausted" : deniedOperations.length ? "BLOCKED · Operation Denied" : "BLOCKED · Recovery Required") : status}</span>
         {error ? <span data-ai-error> · {error}</span> : null}
       </div>
+      {taskId && appendable ? (
+        <div className="ai-append" data-ai-append-block>
+          <textarea
+            data-ai-append-goal
+            aria-label="下一步目标"
+            placeholder="下一步目标…"
+            value={appendGoal}
+            onChange={(e) => setAppendGoal(e.target.value)}
+          />
+          <button data-ai-append onClick={appendStep} disabled={busy || !appendGoal.trim()}>
+            追加步骤
+          </button>
+        </div>
+      ) : null}
+      {taskId && !appendable && !busy && TASK_TERMINAL.includes(status) ? (
+        <div className="ai-append ai-append-blocked" data-ai-append-blocked>
+          {/* 原样展示后端 appendReason，renderer 不解释、不改写 */}
+          <p data-ai-append-reason>{appendReason || "—"}</p>
+        </div>
+      ) : null}
+      {taskId && orderedSteps.length ? (
+        <div className="ai-steps" data-ai-steps>
+          {orderedSteps.map((step: any) => {
+            const sequence = step && step.sequence != null ? String(step.sequence) : "";
+            const appended = !!(step && step.input && step.input.appended === true);
+            return (
+              <div
+                className="ai-step"
+                key={(step && step.stepId) || sequence}
+                data-ai-step={sequence}
+                data-ai-step-status={(step && step.status) || "UNKNOWN"}
+                data-ai-step-appended={appended ? "true" : undefined}
+              >
+                <p>
+                  #{sequence} · {step && step.kind ? step.kind : "STEP"} · {step && step.status ? step.status : "UNKNOWN"}
+                </p>
+                <p>{formatStepGoal(step)}</p>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
       {resumable ? (
         <div className="ai-resume" data-ai-resume-block>
           <p data-ai-stop-reason>停止原因：{stopReason || "BUDGET_EXHAUSTED"}</p>
