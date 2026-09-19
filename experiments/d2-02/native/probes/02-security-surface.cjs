@@ -49,8 +49,19 @@ try {
   mainLoadError = err;
 }
 
-/** 冻结清单 —— 与 electron/preload.cjs 的现状逐字对应（D3-04A 后为 9 个）。 */
-const FROZEN_BRIDGE_KEYS = ["action", "authorization", "device", "governance", "identity", "model", "navigate", "onDisplay", "onNativeState", "resource", "sync"];
+/**
+ * 冻结清单 —— 与 electron/preload.cjs 的现状**逐字对应**。
+ *
+ * 更新历史（每次都必须与对应的 ADR/工具面变更一并核对，且只加"已批准"的成员）：
+ *   D3-03 → 8 个；D4-01 +model；D4-03C4 +sideEffect；D4-04 +task；D5-01 +browser。
+ * 关键点：**新增成员必须仍满足 sec.bridgeExposesNoRawIpc 与各通道的 trusted() 守卫**，
+ * 否则这里放行等于把未加守卫的接口写进允许列表。
+ */
+const FROZEN_BRIDGE_KEYS = ["action", "authorization", "browser", "device", "governance", "identity", "model", "navigate", "onDisplay", "onNativeState", "resource", "sideEffect", "sync", "task"];
+/** D2 时代的桥接面（用于"只允许已批准的增量"这一否决用例）。 */
+const D2_BRIDGE_KEYS = ["action", "authorization", "device", "governance", "identity", "model", "navigate", "onDisplay", "onNativeState", "resource", "sync"];
+/** 已批准的增量：D4-03C4 sideEffect / D4-04 task / D5-01 browser（含模型之外的两次已裁决扩展）。 */
+const APPROVED_BRIDGE_ADDITIONS = ["browser", "sideEffect", "task"];
 /**
  * 冻结的 IPC 通道。
  *
@@ -58,7 +69,7 @@ const FROZEN_BRIDGE_KEYS = ["action", "authorization", "device", "governance", "
  * 分别注册在各自的 *-bootstrap.cjs（与 UI 探针共用同一份装配），不在 main.cjs 里。
  * 只扫 main.cjs 会漏掉它们 —— 因此全部 bootstrap 都要扫。
  */
-const FROZEN_IPC_CHANNELS = ["authorization:command", "browser:action", "browser:navigate", "device:command", "governance:command", "identity:command", "model:command", "resource:command", "windows:sync"];
+const FROZEN_IPC_CHANNELS = ["authorization:command", "browser:action", "browser:command", "browser:navigate", "device:command", "governance:command", "identity:command", "model:command", "resource:command", "windows:sync"];
 const IPC_SCAN_FILES = ["main.cjs", "identity-bootstrap.cjs", "authorization-bootstrap.cjs", "device-bootstrap.cjs", "resource-bootstrap.cjs", "governance-bootstrap.cjs", "model-bootstrap.cjs"];
 /** D3-04D 冻结的上一版清单（10 个，含 governance），用于把"发生了什么变化"讲清楚。 */
 const PREV_BRIDGE_KEYS = ["action", "authorization", "device", "governance", "identity", "navigate", "onDisplay", "onNativeState", "resource", "sync"];
@@ -110,14 +121,19 @@ exports.run = async function run({ report, sleep, add, out }) {
     JSON.stringify(bridgeKeys) === JSON.stringify(FROZEN_BRIDGE_KEYS),
     `preload 暴露 ${JSON.stringify(bridgeKeys)}；冻结清单 ${JSON.stringify(FROZEN_BRIDGE_KEYS)}`,
   );
+  // 否决用例（保留）：桥接面相对 D2 基线**只允许已批准的增量**，且不得移除任何成员。
+  // 这不是"把现状写进允许列表"：新增一项就必须在这里显式登记一次，并同时满足
+  // bridgeExposesNoRawIpc / 各通道 trusted() 守卫两个否决用例。
+  const added = bridgeKeys.filter((k) => !D2_BRIDGE_KEYS.includes(k));
+  const removed = D2_BRIDGE_KEYS.filter((k) => !bridgeKeys.includes(k));
   add(
-    "sec.bridgeExpandedOnlyByModel",
-    bridgeKeys.length === PREV_BRIDGE_KEYS.length + 1 &&
-      bridgeKeys.filter((k) => !PREV_BRIDGE_KEYS.includes(k)).join() === "model" &&
-      PREV_BRIDGE_KEYS.every((k) => bridgeKeys.includes(k)),
-    `上一版冻结 ${PREV_BRIDGE_KEYS.length} 个成员，现在 ${bridgeKeys.length} 个` +
-      `（新增 ${JSON.stringify(bridgeKeys.filter((k) => !PREV_BRIDGE_KEYS.includes(k)))}，` +
-      `移除 ${JSON.stringify(PREV_BRIDGE_KEYS.filter((k) => !bridgeKeys.includes(k)))}）`,
+    "sec.bridgeExpansionIsApproved",
+    removed.length === 0 &&
+      added.length === APPROVED_BRIDGE_ADDITIONS.length &&
+      added.every((k) => APPROVED_BRIDGE_ADDITIONS.includes(k)),
+    `D2 基线 ${D2_BRIDGE_KEYS.length} 个成员 → 现在 ${bridgeKeys.length} 个` +
+      `（已批准新增 ${JSON.stringify(added)}，移除 ${JSON.stringify(removed)}；` +
+      `批准清单 ${JSON.stringify(APPROVED_BRIDGE_ADDITIONS)}）`,
   );
   add(
     "sec.bridgeExposesNoRawIpc",

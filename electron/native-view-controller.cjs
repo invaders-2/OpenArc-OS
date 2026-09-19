@@ -200,6 +200,9 @@ class NativeViewController {
       appId: intent.appId,
       view,
       url: "",
+      title: "",
+      /** 会话键（= userId）：受控浏览器能力用它校验"这个标签是否属于当前账号"。 */
+      sessionKey: sessionKey ? String(sessionKey) : null,
       key: "",
       snapshots: {},
       lastMode: "",
@@ -298,7 +301,8 @@ class NativeViewController {
       event,
       url: wc.getURL(),
       loading: wc.isLoading(),
-      title: wc.getTitle(),
+      // entry.title 是受控浏览器能力读取页面信息的来源（与事件同源，避免两处口径）。
+      title: (entry.title = wc.getTitle()),
       /** 加载失败由主进程持有（见 entry.loadError 的说明），渲染层只镜像它。 */
       loadError: entry.loadError,
       /** 视图是否真的挂在宿主上（见 #isAttached 的说明）。 */
@@ -388,9 +392,42 @@ class NativeViewController {
       windowId: e.windowId,
       tabId: e.tabId,
       url: e.url,
+      title: e.title || "",
+      sessionKey: e.sessionKey || null,
       mode: e.lastMode,
       alive: !!(e.view.webContents && !e.view.webContents.isDestroyed()),
     }));
+  }
+
+  /** 单个视图的归属投影（受控浏览器能力用它做目标校验）。 */
+  ownerOfView(viewId) {
+    const e = this.entries.get(String(viewId));
+    if (!e) return null;
+    const wc = e.view.webContents;
+    return {
+      viewId: e.viewId,
+      windowId: e.windowId,
+      tabId: e.tabId,
+      sessionKey: e.sessionKey || null,
+      url: e.url,
+      title: e.title || "",
+      alive: !!(wc && !wc.isDestroyed()),
+    };
+  }
+
+  /**
+   * 读取视图正文（受控浏览器能力的**唯一**读取实现）。
+   *
+   * 只读 `document.body.innerText`：不碰 cookie / localStorage / 凭据，
+   * 不在主进程日志里落正文；调用方负责再截断与信任分层。
+   */
+  async readText(viewId, maxChars = 8000) {
+    const e = this.entries.get(String(viewId));
+    if (!e) return "";
+    const wc = e.view.webContents;
+    if (!wc || wc.isDestroyed()) return "";
+    const raw = await wc.executeJavaScript("document.body ? String(document.body.innerText || '') : ''", true);
+    return String(raw == null ? "" : raw).slice(0, Math.max(0, Number(maxChars) || 0));
   }
 
   // -------------------------------------------------------------------------
