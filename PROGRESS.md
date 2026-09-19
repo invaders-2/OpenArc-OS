@@ -948,6 +948,16 @@ C2/C4 只开放 resource.trash 一条 REVERSIBLE_WRITE：IRREVERSIBLE_WRITE / EX
 4. A37 / A38 不在 PLAN §41 的 D4-05 四场景内，未纳入。
 5. 真实 `electron/main.cjs` 全流程 = **PASS（D4 Main-Entry E2E Closure-6 `3c9659a`：5/5 必需流程含追加步骤/预算停止/UI 显式续接，Gate `120/120`、exit 0）**；真实外部 provider / 真实凭据 / Windows / OS 级网络沙箱 = 继承 `NOT VERIFIED`，不扩大。Closure-6 已补：追加步骤产品入口（`5577e82`）；Closure-5 已补：产品工具授权入口（`4e8c6c1`）、明确拒绝假成功修复（`81ced49`）。
 
+# D5-01 Closure · 最小受控 AI 浏览器能力（唯一口径 · 2026-09-20）
+
+**基线 `f93e835` → 代码/测试提交 `6c865023093855fee61f4db4ebb8a521764fc729`**；分支 `feature/d4-03-tool-proxy`；未 push、未合并 main、未触碰其它工作区。
+
+- **已落地（代码 + 服务层 6/6 测试）**：`electron/browser-control-authority.cjs` —— 用户在渲染层**显式选择**允许 AI 控制的标签，后端校验账号/App/标签归属（分区 sessionKey=userId）；目标绑定稳定身份 `windowId#tabId`；**每次执行前重新检查**；标签关闭/撤销/登出/切账号后**一律拒绝且不回落**；读取只取 `document.body.innerText`（4000 字符上限、标 `untrusted`、不碰 Cookie/令牌、不进审计与日志）；导航复用 `safeURL` + 原生视图控制器；审计 URL 去凭据/查询串/片段。控制器补 `ownerOfView`/`readText`。工具面注册 `browser.read.page`（READ_ONLY）与 `browser.navigate`（REVERSIBLE_WRITE + requiresApproval + CONTROLLED_REVERSIBLE_WRITE，**未标成只读**）。
+- **未接线（明确列出，不冒充完成）**：① 用户选择目标的正式产品入口（IPC/preload/UI）；② `executionProvider=BrowserControl` 的执行适配器；③ 导航接入 SideEffectAuthority 的 propose→approve→lease→execute；④ **产品链 E2E（真实 electron . + 确定性 provider + 产品 UI）与预算/停止/恶意页面证据本轮不存在**；⑤ 模型可见面需裁决（`dsh-tool-profile` 的 `FORBIDDEN_HARNESS_TOOLS` 含 `browser`）；⑥ 可见性（真人鼠标路径 + 连续截图/录屏）未取得（本机另有实例占用屏幕，不冒充）。
+- **D2 安全面四项已精确更新**：逐项核对实际暴露面与守卫后，冻结清单补 `browser/sideEffect/task` 与 `browser:command`；把写死"只允许 +model"的过期否决用例替换为"相对 D2 基线只允许已批准增量且不得移除"；保留 `bridgeExposesNoRawIpc`、`everyChannelTrustsSender` 两个否决用例。实测 **6/6 PASS**（此前 4 项 FAIL）。残余 `probe.error`（外壳窗口 8s 超时）在基线 `f93e835`/`39d733d` 上同样存在，属 D4 runtime boot 后的既有仪器时序问题。
+- **干净导出树 `6c86502` 实际检查**：新增/受影响 node 套件 **85/85**；`test:d4-03d` **52/52**；`security-surface` **6/6 checks**；`test:d5-01`（真实 `electron .`）**64/64**（1 NOT VERIFIED：崩溃持久化）。
+- **结论：D5-01 维持 PARTIAL**（原始必需项缺"AI 控制产品链闭环"与本轮可见性证据；崩溃恢复/高 DPI/多屏/Windows/任意网站兼容仍 NOT VERIFIED）。不因本轮升级 D4 结论；agent-browser 保持独立实验状态；本轮停止，不进入 D5-02。
+
 # D5-01 · R2 重启恢复修复与范围核对（唯一口径 · 2026-09-20）
 
 **基线 `39d733d39eb6a33386ad84ddb3117b4e7be59a48` → 代码/测试提交 `98c9f81aaba4b9754b76034bec5ce39430be9229`**；分支 `feature/d4-03-tool-proxy`；未 push、未合并 main、未触碰其它工作区。
