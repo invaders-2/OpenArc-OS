@@ -501,9 +501,12 @@ function nativeIntents(state, host) {
       focused: state.focused === w.id,
       viewport: {
         x: w.bounds.x,
-        y: w.bounds.y + domain.TITLE_BAR_H,
+        y: w.bounds.y + domain.TITLE_BAR_H + (w.kind === domain.KIND.BROWSER ? domain.BROWSER_CHROME_H : 0),
         width: w.bounds.w,
-        height: Math.max(0, w.bounds.h - domain.TITLE_BAR_H),
+        height: Math.max(
+          0,
+          w.bounds.h - domain.TITLE_BAR_H - (w.kind === domain.KIND.BROWSER ? domain.BROWSER_CHROME_H : 0),
+        ),
       },
       occluders: domain.aboveWindows(state, w.id),
     }));

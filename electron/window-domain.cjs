@@ -59,6 +59,16 @@ const AREA_BOTTOM = 114;
  */
 const TITLE_BAR_H = 44;
 
+/**
+ * 浏览器窗口的固定 chrome 高度（标签栏 + 地址栏），单位与 bounds 相同（DIP）。
+ *
+ * **原生视图必须从它下面开始**：WebContentsView 永远绘制在 DOM 之上，
+ * 视口若从窗口正文顶部开始，就会把标签栏和地址栏一起盖住 —— 界面看起来还在，
+ * 但用户点不到（合成点击能"过"，真人点击不能，属于典型的假通过）。
+ * 取值与 src/styles.css 的 .tabstrip / .addressbar 固定高度一一对应，改一处必须改另一处。
+ */
+const BROWSER_CHROME_H = 90;
+
 /** WindowKind：决定该窗口是否有原生 WebContentsView。 */
 const KIND = { APP: "app", BROWSER: "browser" };
 
@@ -452,6 +462,7 @@ module.exports = {
   FOLDER_PREFIX,
   NATIVE_APPS,
   TAB_LIMIT,
+  BROWSER_CHROME_H,
   kindOf,
   isNativeKind,
   normalizeBrowserMeta,

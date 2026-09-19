@@ -193,6 +193,7 @@ export function useDesktop(opts: { locked?: boolean; sessionKey?: string | null 
                 loading: !!e.loading,
                 canGoBack: !!e.canGoBack,
                 canGoForward: !!e.canGoForward,
+                attached: e.attached !== false,
                 // 加载失败由主进程持有并随每个 native-state 下发：
                 // 错误页同样会 did-finish-load，渲染层自行推断一定会把横幅清错。
                 error: loadError ? { code: Number(loadError.code) || 0, message: String(loadError.message || "网页加载失败"), url: String(loadError.url || "") } : null,

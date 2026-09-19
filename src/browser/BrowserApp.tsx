@@ -301,7 +301,7 @@ export function BrowserApp({ win, runtime, downloads, notices, nativeVisible, on
         </div>
       ) : null}
 
-      <WebViewport nativeVisible={nativeVisible} error={undefined} />
+      <WebViewport nativeVisible={nativeVisible} attached={activeRuntime.attached} error={undefined} />
     </div>
   );
 }

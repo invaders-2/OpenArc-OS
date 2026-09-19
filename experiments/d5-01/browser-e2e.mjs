@@ -109,6 +109,22 @@ async function stop() {
   await sleep(400);
 }
 
+/**
+ * **正常退出**：让产品自己走 window-all-closed → app.quit()，并等进程真的退出。
+ *
+ * 原实现用 SIGKILL 强杀来做"重启恢复"，而 Chromium 的 localStorage 磁盘提交是异步的 ——
+ * 强杀会丢掉最近一次写入（内存里已是新值、磁盘上还是旧值），于是表现为
+ * "重启后活动标签 URL 落后一次导航"。正常退出路径**不需要**任何人为等待或强制保存。
+ */
+async function quitNormally(ms = 20000) {
+  try { await js("window.close(); 'closing'"); } catch { /* 关窗后执行上下文会销毁 */ }
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms && child.exitCode == null && child.signalCode == null) await sleep(200);
+  const clean = child.exitCode != null || child.signalCode != null;
+  if (!clean) { try { child.kill("SIGKILL"); } catch { /* ignore */ } await sleep(500); }
+  return { clean, code: child.exitCode ?? null, signal: child.signalCode ?? null };
+}
+
 const js = (code) => page.evaluate("(async () => { " + code + " })()");
 const has = (sel) => js("return !!document.querySelector(" + JSON.stringify(sel) + ")");
 const attr = (sel, a) => js("return document.querySelector(" + JSON.stringify(sel) + ")?.getAttribute(" + JSON.stringify(a) + ") || ''");
@@ -123,6 +139,9 @@ const waitGate = (want, ms = 30000) => waitFor(async () => (await gate()) === wa
 
 function views() { return browser.contexts()[0].pages().filter((p) => !p.url().includes("dist/index.html")); }
 function viewByUrl(part) { return views().find((p) => p.url().includes(part)) || null; }
+/** 精确 URL 匹配：避免 "/" 这种子串把别的页面选进来（曾经选到 5392 的错误页面）。 */
+const viewByExactUrl = (url) => views().find((p) => p.url() === url) || null;
+async function waitViewExact(url, ms = 15000) { await waitFor(() => !!viewByExactUrl(url), ms); return viewByExactUrl(url); }
 /**
  * 在视图里求值。页面正在导航时执行上下文会被销毁，这是**正常现象**（不是产品缺陷），
  * 因此这里做有限重试；重试仍失败才算失败。
@@ -204,6 +223,21 @@ async function main() {
     await navigate(site.base + "/page2");
     const view = await waitView("/page2");
     record("nav", "N2 · 真实网址导航（地址栏 → 真实 WebContentsView）", !!view && (await viewEval(view, "return document.getElementById('page2-marker')?.textContent || ''")) === "PAGE2-MARKER-9f3a", "页面标记 PAGE2-MARKER-9f3a", view ? "已加载" : "无视图页面");
+    // 原生视图**必须真的挂在宿主上**：缺挂载时加载/CDP/下载全都正常，但屏幕上没有页面。
+    const attached = await attr(".web-viewport", "data-attached");
+    record("nav", "N2b · 原生视图已真实挂载到宿主（data-attached）", attached === "1", "data-attached=1", String(attached));
+    // chrome 不能被原生视图盖住：标签栏 + 地址栏的布局高度必须等于 domain 的固定 chrome 高度，
+    // 且网页视口必须从它们下面开始（原生视图永远绘制在 DOM 之上）。
+    const geoChrome = JSON.parse(
+      await js("const ts=document.querySelector('.tabstrip').getBoundingClientRect(); const ab=document.querySelector('.addressbar').getBoundingClientRect(); const vp=document.querySelector('.web-viewport').getBoundingClientRect(); const body=document.querySelector('[data-browser-window]').getBoundingClientRect(); return JSON.stringify({ chrome: Math.round(ab.bottom - body.top), vpTop: Math.round(vp.top - body.top) })"),
+    );
+    record(
+      "nav",
+      "N2c · 浏览器 chrome（标签栏+地址栏）与网页视口不重叠",
+      geoChrome.chrome >= 90 && geoChrome.vpTop >= geoChrome.chrome,
+      "chrome >= 90 且视口在其下方",
+      JSON.stringify(geoChrome),
+    );
     record("nav", "N3 · 标签 URL 与标题回灌到 Window domain", (await attr("[data-tab=t1]", "data-tab-active")) === "1" && (await js("return document.querySelector('.tab .tab-title')?.textContent || ''")).includes("PAGE2"), "活动标签显示页面标题", await js("return document.querySelector('.tab .tab-title')?.textContent || ''"));
 
     // 后退 / 前进 / 刷新
@@ -257,7 +291,7 @@ async function main() {
 
     /* ═══════════════ 5 · 下载（真实落盘 + 失败态） ═══════════════ */
     await navigate(site.base + "/");
-    const home = await waitView("/");
+    const home = await waitViewExact(site.base + "/", 15000);
     await js("document.querySelector('[data-downloads-toggle]').click()");
     await waitSel("[data-downloads-panel]", 8000);
     record("download", "D1 · 下载入口（面板可打开）", await has("[data-downloads-panel]"), "面板存在", "ok");
@@ -440,19 +474,45 @@ async function main() {
     const aCookie2 = aView2 ? await viewEval(aView2, "return JSON.stringify(window.__whoami)") : "{}";
     record("A04", "A04-10 · 用户 A 的会话仍在（Cookie 未被 B 覆盖/清除）", JSON.parse(aCookie2).cookie.includes("d501=USERA"), "d501=USERA", aCookie2);
 
-    /* ═══════════════ 10 · 重启恢复（标签 + 会话） ═══════════════ */
-    const tabsBefore = await js("return JSON.stringify(Array.from(document.querySelectorAll('.tab')).map((e) => e.getAttribute('data-tab')))");
-    await stop();
+    /* ═══════════════ 10 · 重启恢复（多标签 + 活动标签 + 正常退出） ═══════════════ */
+    // 造出确定的多标签状态：t1 = /redirect(302→/page2)，t2 = /page3，且**活动标签 = t1**。
+    await click("[data-tab-new]");
+    await waitFor(async () => (await js("return document.querySelectorAll('[data-tab]').length")) === 2, 10000);
+    await navigate(site.base + "/page3");
+    await waitFor(async () => (await addressValue()).includes("/page3"), 10000);
+    await js("document.querySelector('[data-tab=t1] .tab-main').click()");
+    await sleep(500);
+    await navigate(site.base + "/redirect");
+    await waitFor(async () => (await addressValue()).includes("/page2"), 10000);
+    const beforeExit = {
+      tabs: await js("return JSON.stringify(Array.from(document.querySelectorAll('[data-tab]')).map((e) => e.getAttribute('data-tab')))"),
+      active: await js("return document.querySelector('[data-tab-active=\"1\"]')?.getAttribute('data-tab') || ''"),
+      address: await addressValue(),
+      views: views().map((v) => v.url()).filter((u) => u.includes("5391")),
+    };
+    // R2 修复的关键：**正常退出**（不是 SIGKILL）。用户真实路径就是这条。
+    const exitInfo = await quitNormally();
+    record("restore", "R0 · 重启前以正常退出结束（非强杀）", exitInfo.clean, "进程自行退出", JSON.stringify(exitInfo));
     browser = null; page = null;
     await launch();
     await waitFor(async () => (await gate()) !== "checking", 30000);
     if ((await gate()) === "unauthenticated") await login(ADMIN);
-    const restored = await waitFor(async () => (await js("return document.querySelectorAll('.tab').length")) >= 1, 20000);
-    const tabsAfter = await js("return JSON.stringify(Array.from(document.querySelectorAll('.tab')).map((e) => e.getAttribute('data-tab')))");
-    record("restore", "R1 · 重启后浏览器窗口与标签恢复（按用户持久化）", restored && tabsAfter === tabsBefore, tabsBefore, tabsAfter);
-    const restoredUrl = await addressValue();
-    const restoredTitle = await js("return document.querySelector('.tab .tab-title')?.textContent || ''");
-    record("restore", "R2 · 恢复后地址栏仍指向上次页面", restoredUrl.includes("/cookie"), "/cookie", JSON.stringify({ address: restoredUrl, tabTitle: restoredTitle, tabs: tabsAfter }));
+    const restored = await waitFor(async () => (await js("return document.querySelectorAll('.tab').length")) >= 2, 20000);
+    const afterRestart = {
+      tabs: await js("return JSON.stringify(Array.from(document.querySelectorAll('[data-tab]')).map((e) => e.getAttribute('data-tab')))"),
+      active: await js("return document.querySelector('[data-tab-active=\"1\"]')?.getAttribute('data-tab') || ''"),
+      address: await addressValue(),
+      views: views().map((v) => v.url()).filter((u) => u.includes("5391")),
+    };
+    record("restore", "R1 · 重启后浏览器窗口与两个标签恢复", restored && afterRestart.tabs === beforeExit.tabs, beforeExit.tabs, afterRestart.tabs);
+    record("restore", "R2 · 恢复后地址栏 = 退出前的最终地址（重定向后的 /page2）", afterRestart.address === beforeExit.address && afterRestart.address.includes("/page2"), beforeExit.address, afterRestart.address);
+    record("restore", "R3 · 活动标签恢复为退出前的活动标签", afterRestart.active === beforeExit.active && afterRestart.active === "t1", beforeExit.active, afterRestart.active);
+    // 非活动标签的视图要等它加载完才出现在 CDP 列表里（有界等待，不是固定 sleep 掩盖失败）。
+    await waitView("/page2", 10000);
+    await waitView("/page3", 10000);
+    afterRestart.views = views().map((v) => v.url()).filter((u) => u.includes("5391"));
+    record("restore", "R4 · 每个标签的 URL 各自恢复（t2 = /page3）", JSON.stringify([...afterRestart.views].sort()) === JSON.stringify([...beforeExit.views].sort()) && afterRestart.views.some((u) => u.includes("/page3")), JSON.stringify([...beforeExit.views].sort()), JSON.stringify([...afterRestart.views].sort()));
+    record("restore", "R5 · 恢复到的是真实页面（不是只有记录对）", !!(await waitView("/page2", 10000)) && !!(await waitView("/page3", 10000)), "/page2 与 /page3 两个视图都在", JSON.stringify(afterRestart.views));
 
     // P7 的证书错误是**我们主动构造的**：Chromium 会打一行 SSL handshake failed，
     // 那是预期噪声，不是产品错误。只保留真正的未处理错误。
@@ -469,6 +529,12 @@ async function main() {
     try { if (flaky) await flaky.close(); } catch { /* ignore */ }
   }
 
+  // 明确不承诺的部分（不许写成通过）
+  NOT_VERIFIED.push({
+    name: "崩溃 / 强杀后最近一次导航的持久化",
+    reason:
+      "Chromium 的 localStorage 磁盘提交是异步的：强杀时内存里已是新值、磁盘上仍是旧值（已实测）。正常退出（window-all-closed → app.quit）路径不受影响（R0–R5 实测）。崩溃恢复不在现有契约内，不扩大承诺。",
+  });
   const gateOut = {
     phase: "D5-01",
     title: "真实桌面浏览器（导航/标签/下载/隔离/桥）",

@@ -128,7 +128,12 @@ test("nativeIntents：每个标签一条视图意图，只有活动标签 active
     ["browser#t2", "t2", "https://b.example/", true],
   ]);
   assert.equal(intent.url, "https://b.example/", "窗口级 url = 活动标签 url（快照键口径）");
-  assert.deepEqual(intent.viewport, { x: 60, y: 80 + domain.TITLE_BAR_H, width: 700, height: 500 - domain.TITLE_BAR_H });
+  assert.deepEqual(intent.viewport, {
+    x: 60,
+    y: 80 + domain.TITLE_BAR_H + domain.BROWSER_CHROME_H,
+    width: 700,
+    height: 500 - domain.TITLE_BAR_H - domain.BROWSER_CHROME_H,
+  });
   assert.deepEqual(intent.occluders.map((o) => o.id), ["home"]);
   // 非原生窗口不产出意图（最小化后 present=false）
   assert.equal(manager.nativeIntents(manager.reduce(state, { type: "window/minimize", id: "browser" }), HOST)[0].present, false);

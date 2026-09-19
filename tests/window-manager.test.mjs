@@ -282,7 +282,14 @@ test("nativeIntents：只有 browser kind 产出意图，且带上遮挡者与�
   assert.equal(i.present, true);
   assert.equal(i.focused, false); // home 是后开的，它才是聚焦者
   // 视口 = 窗口矩形挖掉 44px 标题栏（与 styles.css 的 .window-title 一致）
-  assert.deepEqual(i.viewport, { x: 60, y: 124, width: 700, height: 456 });
+  // D5-01：浏览器窗口的原生视口必须从**固定 chrome（标签栏 + 地址栏 = 90）下面**开始，
+  // 否则原生视图会盖住标签栏与地址栏（合成点击能过、真人点击不能）。
+  assert.deepEqual(i.viewport, {
+    x: 60,
+    y: 80 + domain.TITLE_BAR_H + domain.BROWSER_CHROME_H,
+    width: 700,
+    height: 500 - domain.TITLE_BAR_H - domain.BROWSER_CHROME_H,
+  });
   assert.deepEqual(i.occluders.map((o) => o.id), ["home"]);
   // 最小化后 present=false，但仍产出意图（控制器需要知道"该隐藏了"）
   const min = manager.reduce(state, { type: "window/minimize", id: "browser" });

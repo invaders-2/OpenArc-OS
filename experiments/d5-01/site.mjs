@@ -43,6 +43,8 @@ function routes() {
         </nav>`,
       ),
     "/page2": () => html("PAGE2", `<h2 id="page2-marker">PAGE2-MARKER-9f3a</h2>`),
+    "/redirect": null, // 由 server 处理：302 → /page2（真实重定向）
+    "/page3": () => html("PAGE3", `<h2 id="page3-marker">PAGE3-MARKER-4b7c</h2>`),
     "/dl/hello.txt": null, // 由 server 单独处理（附件下载）
     "/dl/broken": null,
     "/popup": () =>
@@ -143,6 +145,11 @@ export async function startSite({ port = Number(process.env.OA_D501_PORT || 5391
   const table = routes();
   const server = http.createServer((req, res) => {
     const pathname = new URL(req.url, "http://127.0.0.1").pathname;
+    if (pathname === "/redirect") {
+      res.writeHead(302, { Location: "/page2" });
+      res.end();
+      return;
+    }
     if (pathname === "/dl/hello.txt") {
       res.writeHead(200, {
         "Content-Type": "application/octet-stream",

@@ -253,9 +253,31 @@ class NativeViewController {
       this.onEvent({ type: "render-gone", windowId: entry.windowId, tabId: entry.tabId, reason: String(details?.reason || "") });
     });
 
+    // **必须显式挂到宿主 contentView 上**：WebContentsView 不会自己出现，
+    // 缺这一行时 webContents 照常加载（CDP/eval/下载都正常），但屏幕上永远看不到网页 ——
+    // 是"状态说 shown、画面里没有"的典型静默失效（本轮由屏幕取证抓到）。
+    try {
+      this.parent.addChildView(view);
+    } catch (e) {
+      this.log(`native-view: 挂载失败 ${entry.viewId} ${String((e && e.message) || e)}`);
+    }
     this.entries.set(entry.viewId, entry);
     this.log(`native-view: 创建 ${entry.viewId}（分区 ${partition}）`);
     return entry;
+  }
+
+  /**
+   * 视图是否真的挂在宿主 contentView 上。
+   *
+   * 缺 addChildView 时 webContents 照常加载（CDP/eval/下载/截图全都正常），
+   * 但屏幕上永远没有网页 —— 只靠"加载成功"判断会得到假通过，因此把它作为事实回报出去。
+   */
+  #isAttached(entry) {
+    try {
+      return !!this.parent && Array.isArray(this.parent.children) && this.parent.children.includes(entry.view);
+    } catch {
+      return false;
+    }
   }
 
   /** webContents → 它所属的视图（权限事件是会话级的，需要反查归属）。 */
@@ -279,6 +301,8 @@ class NativeViewController {
       title: wc.getTitle(),
       /** 加载失败由主进程持有（见 entry.loadError 的说明），渲染层只镜像它。 */
       loadError: entry.loadError,
+      /** 视图是否真的挂在宿主上（见 #isAttached 的说明）。 */
+      attached: this.#isAttached(entry),
       // 前进/后退可用性只有主进程知道（渲染层没有 webContents）。
       canGoBack: typeof history?.canGoBack === "function" ? history.canGoBack() : false,
       canGoForward: typeof history?.canGoForward === "function" ? history.canGoForward() : false,

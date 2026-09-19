@@ -46,6 +46,8 @@ type NativeEvent = {
   loading?: boolean;
   canGoBack?: boolean;
   canGoForward?: boolean;
+  /** 原生视图是否真的挂在宿主 contentView 上（false = 加载成功但屏幕上没有页面）。 */
+  attached?: boolean;
   code?: number;
   message?: string;
   /** 当前生效的加载失败（主进程持有；null = 正常）。 */

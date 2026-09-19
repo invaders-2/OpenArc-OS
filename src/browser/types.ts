@@ -11,6 +11,8 @@ export type TabRuntime = {
   loading: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
+  /** 原生视图是否真的挂在宿主上（false = 页面在跑但屏幕上没有）。 */
+  attached: boolean;
   error: { code: number; message: string; url: string } | null;
 };
 
@@ -50,7 +52,7 @@ export type BrowserNotice = {
 
 export const tabKey = (windowId: string, tabId: string): string => windowId + "#" + tabId;
 
-export const EMPTY_TAB_RUNTIME: TabRuntime = { loading: false, canGoBack: false, canGoForward: false, error: null };
+export const EMPTY_TAB_RUNTIME: TabRuntime = { loading: false, canGoBack: false, canGoForward: false, attached: false, error: null };
 
 export function formatBytes(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return "0 B";

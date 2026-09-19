@@ -757,8 +757,12 @@ input[type="checkbox"] {
   flex-direction: column;
   background: rgb(var(--content-rgb) / var(--content-alpha));
 }
+/* 高度与 electron/window-domain.cjs 的 BROWSER_CHROME_H（标签栏 37 + 地址栏 53 = 90）一致：
+   原生视图从这个高度下面开始；改这里必须同时改那个常量。 */
 .addressbar {
   padding: 8px 10px;
+  height: 53px;
+  box-sizing: border-box;
   display: flex;
   gap: 6px;
   align-items: center;
@@ -1494,6 +1498,8 @@ input[type="checkbox"] {
   align-items: center;
   gap: 4px;
   padding: 6px 8px 0;
+  height: 37px;
+  box-sizing: border-box;
   flex-shrink: 0;
   overflow: hidden;
 }

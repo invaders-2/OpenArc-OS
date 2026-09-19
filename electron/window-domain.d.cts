@@ -75,6 +75,7 @@ export const MIN_WINDOW_H: number;
 export const AREA_TOP: number;
 export const AREA_BOTTOM: number;
 export const TITLE_BAR_H: number;
+export const BROWSER_CHROME_H: number;
 export const TAB_LIMIT: number;
 export function normalizeBrowserMeta(meta?: Partial<WindowMeta>): { tabs: BrowserTab[]; activeTabId: string; tabSeq: number };
 export function tabsOf(w: Window | null | undefined): BrowserTab[];
