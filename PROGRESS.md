@@ -948,6 +948,19 @@ C2/C4 只开放 resource.trash 一条 REVERSIBLE_WRITE：IRREVERSIBLE_WRITE / EX
 4. A37 / A38 不在 PLAN §41 的 D4-05 四场景内，未纳入。
 5. 真实 `electron/main.cjs` 全流程 = **PASS（D4 Main-Entry E2E Closure-6 `3c9659a`：5/5 必需流程含追加步骤/预算停止/UI 显式续接，Gate `120/120`、exit 0）**；真实外部 provider / 真实凭据 / Windows / OS 级网络沙箱 = 继承 `NOT VERIFIED`，不扩大。Closure-6 已补：追加步骤产品入口（`5577e82`）；Closure-5 已补：产品工具授权入口（`4e8c6c1`）、明确拒绝假成功修复（`81ced49`）。
 
+# D5-01 · R2 重启恢复修复与范围核对（唯一口径 · 2026-09-20）
+
+**基线 `39d733d39eb6a33386ad84ddb3117b4e7be59a48` → 代码/测试提交 `98c9f81aaba4b9754b76034bec5ce39430be9229`**；分支 `feature/d4-03-tool-proxy`；未 push、未合并 main、未触碰其它工作区。
+
+- **R2 根因（实测复现，非导航事件/非恢复读取）**：原门禁用 `SIGKILL` 做"重启恢复"，而 Chromium 的 localStorage **磁盘提交是异步的** —— 强杀时内存里已是新值（`/cookie?set=1`）、磁盘上仍是旧值（`/page3`），于是表现为"重启后活动标签 URL 落后一次导航"。正常退出（`window-all-closed → app.quit`）路径本来就正确，含"导航后立刻关窗口"。
+- **最小修复**：门禁改用**正常退出**（`quitNormally()`），断言不放宽并增强为 R0–R5（正常退出 / 两标签恢复 / 最终地址 / 活动标签 / 每标签 URL / 真实页面）；崩溃与强杀后的持久化明确列为 **NOT VERIFIED**（未用固定等待、未强制保存）。
+- **顺带修掉两个"假通过"缺陷**（本轮取证发现）：① 原生视图**从未 `addChildView`** —— webContents 照常加载（CDP/eval/下载/capturePage 都正常）但屏幕上永远没有网页；现已挂载并通过 `native-state.attached` 回报（门禁断言 `data-attached=1`）。② 原生视图**盖住浏览器 chrome**（标签栏+地址栏）——合成点击能过、真人点不到；新增 domain 常量 `BROWSER_CHROME_H=90`（CSS 同步固定 37+53），门禁断言不重叠。
+- **干净导出树 `98c9f81` 实际检查**：D5-01 门禁（真实 `electron .`）**64/64 PASS**（1 NOT VERIFIED）；受影响单测 **59/59**；D1-01 `test:native` **26/26**；D2-02 `test:d2-02` FAIL —— **预先存在**（`security-surface` 的 preload/IPC 冻结清单过期；本轮基线 `39d733d` 上同样 4 项 FAIL，本轮不改该冻结断言）。
+- **D5-01 范围核对（对照 PLAN）**：真实视图/导航/标签/加载态/下载落盘/会话恢复/用户隔离/弹窗·外部协议·证书·上传·权限/A12·A13 均有实测证据；**仍未完成**：PLAN §8 "AI 控制浏览器（明确工具与授权、记录目标标签与执行结果）" —— Tool Registry 仍只有 6 个工具、无 `browser.*`；NOT VERIFIED：崩溃恢复、像素级层级真值（本机屏幕被另一个已运行的 OpenArc 实例占用）、高 DPI/多屏/Windows、任意网站兼容。**D5-01 维持 PARTIAL**。
+- **旧路径与新入口**：无 `views` 意图时仍走单视图；`destroy(windowId)`/`partitionFor(appId)` 旧签名与旧分区名逐字兼容；两参 `navigate/action` 仍作用于活动标签 —— 新入口是增量，未替换、未重构。
+- **agent-browser 冻结**：保留独立验证材料；不进产品依赖、启动路径与 Agent 工具列表；正常启动不开调试端口（门禁 B3/B4/B5 实测）；不开发替代执行器、不扩展第三方选型。
+- 详见 `docs/D5-01-RESULT.md`（R2 修复前后对照 + 范围核对 + 缺项清单）。
+
 # D5-01 · agent-browser 兼容性验证（唯一口径 · 2026-09-20）
 
 **产品被测 commit：`2411f109894950b6dc7921113a9a4b185d2a7262`（Base `3c64a3cbd4c082385c3bbad8fed57b6cda3ac57c`）**；分支 `feature/d4-03-tool-proxy`；未 push、未合并 main、未触碰其它工作区。
