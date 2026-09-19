@@ -948,6 +948,20 @@ C2/C4 只开放 resource.trash 一条 REVERSIBLE_WRITE：IRREVERSIBLE_WRITE / EX
 4. A37 / A38 不在 PLAN §41 的 D4-05 四场景内，未纳入。
 5. 真实 `electron/main.cjs` 全流程 = **PASS（D4 Main-Entry E2E Closure-6 `3c9659a`：5/5 必需流程含追加步骤/预算停止/UI 显式续接，Gate `120/120`、exit 0）**；真实外部 provider / 真实凭据 / Windows / OS 级网络沙箱 = 继承 `NOT VERIFIED`，不扩大。Closure-6 已补：追加步骤产品入口（`5577e82`）；Closure-5 已补：产品工具授权入口（`4e8c6c1`）、明确拒绝假成功修复（`81ced49`）。
 
+# D5-01 · agent-browser 兼容性验证（唯一口径 · 2026-09-20）
+
+**产品被测 commit：`2411f109894950b6dc7921113a9a4b185d2a7262`（Base `3c64a3cbd4c082385c3bbad8fed57b6cda3ac57c`）**；分支 `feature/d4-03-tool-proxy`；未 push、未合并 main、未触碰其它工作区。
+
+- **现场核对**：任务开始时 HEAD `3c64a3c` 的内置浏览器**没有真实标签页**（一个窗口一个原生视图）。真实标签页是本轮作为**必要前置**补齐的产品能力。
+- **本轮产品代码提交 `2411f10`**（新增，不替换任何既有实现）：每标签一个 `WebContentsView`（`viewId=windowId#tabId`）、`browser/tab-*` 命令与标签模型、下载真实落盘、按 App+用户会话分区、按用户持久化；干净导出树门禁 `npm run test:d5-01` **57/58**（唯一失败 R2：重启后活动标签 URL 落后一次导航，已登记）。
+- **agent-browser 固定版本 0.38.1**（npm，Apache-2.0，无运行时依赖；安装在临时独立目录，**不进产品依赖、不进启动路径**；**未使用其自带 Chrome**，仅 `--cdp` 连到真实 `electron .` 的仅本机调试端口 + `--pin-tab` 钉标签）。
+- **真实内置标签页 24 项检查：23 PASS / 1 FAIL**。失败项 = `open/goto` 导航命令在 Electron CDP + `--pin-tab` 下**不返回**（动作生效、命令挂起）。
+- **通过的要点**：连接并列出标签；钉在指定网页标签且操作不落在管理界面；读标题/输入回读/点击后页面状态可核查/滚动/刷新后重新识别；双标签下用户切换焦点不误投；被钉标签关闭 → `tab_gone` 且不转向其它标签；登出后旧控制会话立即失效；调试端口仅本机、退出即关、常规启动不开放。
+- **三个阻塞项（如实登记）**：① 控制连接可另行绑到 OpenArc 界面页 target —— **标签固定 ≠ 权限隔离**；② 动作完全绕过 D4 工具门/审批/停止/审计；③ agent-browser **没有 pause/stop** 语义，停止必须由 OpenArc 实现。
+- **结论：有条件采用**（不建议现在直接引入；正式替换/引入需另行决策）。它补充的是"Agent 友好的定位（a11y snapshot/ref）+ 严格标签绑定（tab_gone）语义"；**标签状态、会话/分区、导航、权限、审批、停止、审计必须继续由 OpenArc 持有**。若 Agent 需求只到页内读取/点击/输入，也可以基于既有 `WebContentsView` 自研，不引入。
+- 证据：`docs/D5-01-AGENT-BROWSER-EVALUATION.md`（逐项预期/实际/证据 + 权限与生命周期清单）、`docs/D5-01-AGENT-BROWSER-EVIDENCE.json`（脱敏）、`artifacts/d5-01-agent-browser/agent-browser-eval.json`（工作树本地，含全部 CLI 调用记录）。
+- **本轮到此为止**：不进入 D5-02，不扩大 D4 既有验收结论。
+
 # D4 阶段总结（唯一口径 · 2026-09-17）
 
 **D4 = PARTIAL**（macOS 核心基本完成，非整体完成）。D4-01 macOS Core、D4-02 macOS Core、**D4-03 = PASS（限定范围，2026-09-19 外部裁决）**、D4-04、**D4-05**、D4-06 在声明范围内通过；**D4-05 = PASS**（Closure-3 闭合 S4；Closure-4 修复记忆信任分层，S4 结论收窄为“消息结构 + 授权/执行边界”）。D4 整体仍 PARTIAL：剩余为既有项（Windows / External Provider、D4-03 审计）。**真实 `electron/main.cjs` 产品入口缺口已由 Closure-5/Closure-6 全部关闭，并经第三轮（被测 commit `42ebe3b`）干净树连续 2 次复跑：七条必需流程 PASS、Gate `133/133`、退出码 0。**

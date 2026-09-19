@@ -120,6 +120,19 @@ function routes() {
            }, true);
          }`,
       ),
+    // Agent 控制用：可填表、可点击、可滚动的确定性页面。
+    "/form": () =>
+      html(
+        "FORM",
+        `<input id="name" name="name" aria-label="名字">
+         <button id="submit">提交</button>
+         <div id="echo">echo:-</div>
+         <div style="height:2400px"></div>
+         <div id="bottom">BOTTOM</div>`,
+        `document.getElementById('submit').addEventListener('click', () => {
+           document.getElementById('echo').textContent = 'echo:' + (document.getElementById('name').value || '');
+         });`,
+      ),
     "/red": () => `<!doctype html><html><head><meta charset="utf-8"><title>RED</title></head><body style="margin:0;background:#ff0000"><div id="red-marker" style="width:100%;height:100vh"></div></body></html>`,
     "/marker": () => "MARKER-OK",
   };

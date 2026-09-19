@@ -1,0 +1,226 @@
+{
+  "phase": "D5-01",
+  "title": "agent-browser 兼容性验证（OpenArc 内置浏览器真实标签页）",
+  "testedProductCommit": "2411f109894950b6dc7921113a9a4b185d2a7262",
+  "baseHead": "3c64a3cbd4c082385c3bbad8fed57b6cda3ac57c",
+  "productBytesVerification": {
+    "note": "验证期间 electron/、src/、package.json 与 2411f10 逐字节相同（git diff 2411f10 -- electron src package.json 为空）",
+    "sha256": {
+      "electron/native-view-controller.cjs": "b7615c66d7d414c0e3328bebc5d048475de1c9c398b0eb1b3596410fe71c4c7d",
+      "src/browser/BrowserApp.tsx": "6249c4cfad3523089cafbea066b106083a978856b33bd59e57504aa217fa1522"
+    }
+  },
+  "agentBrowser": {
+    "name": "agent-browser",
+    "version": "0.38.1",
+    "license": "Apache-2.0",
+    "dependencies": [],
+    "install": "npm i agent-browser@0.38.1（安装在临时独立目录，不进入产品依赖）",
+    "connection": "真实 electron . + --remote-debugging-port（仅本机/仅本次运行）→ agent-browser --cdp <port> + --pin-tab <targetId>"
+  },
+  "harness": {
+    "script": "experiments/d5-01-agent-browser/eval.mjs",
+    "site": "experiments/d5-01/site.mjs（本地受控站点）",
+    "account": "独立测试账号（隔离 userData）",
+    "rawEvidence": "artifacts/d5-01-agent-browser/agent-browser-eval.json（工作树本地，含全部 CLI 调用记录）"
+  },
+  "counts": {
+    "pass": 23,
+    "fail": 1,
+    "total": 24
+  },
+  "checks": [
+    {
+      "section": "precondition",
+      "name": "P0 · 真实 electron . 内置浏览器已具备真实标签页",
+      "status": "PASS",
+      "expected": "存在 WebContentsView 标签（/form）",
+      "actual": "[\"http://127.0.0.1:5391/form\",\"file://<worktree>/dist/index.html\"]"
+    },
+    {
+      "section": "precondition",
+      "name": "P1 · 两个标签各自有独立 CDP target",
+      "status": "PASS",
+      "expected": "两个 target",
+      "actual": "[\"http://127.0.0.1:5391/page2\",\"http://127.0.0.1:5391/form\",\"file://<worktree>/dist/index.html\"]"
+    },
+    {
+      "section": "connect",
+      "name": "C1 · agent-browser 可通过 CDP 连接内置浏览器并列出标签",
+      "status": "PASS",
+      "expected": "exit 0 + JSON",
+      "actual": "\"{\\\"success\\\":true,\\\"data\\\":{\\\"lifecycle\\\":{\\\"effectiveLaunch\\\":{\\\"browserLaunched\\\":true,\\\"engine\\\":\\\"chrome\\\",\\\"launchHash\\\":13268635132210798301},\\\"launched\\\":false,\\\"relaunchedBrowser\\\":false,\\\"re"
+    },
+    {
+      "section": "connect",
+      "name": "C2 · 目标清单同时包含 OpenArc 界面页与网页标签（可见范围）",
+      "status": "PASS",
+      "expected": "界面页 + 网页都在清单里",
+      "actual": "[\"http://127.0.0.1:5391/page2\",\"file://<worktree>/dist/index.html\",\"http://127.0.0.1:5391/form\"]"
+    },
+    {
+      "section": "connect",
+      "name": "C3 · 把控制会话钉在指定网页标签（targetId + --pin-tab）",
+      "status": "PASS",
+      "expected": "exit 0",
+      "actual": "{\"bind\":\"{\\\"success\\\":true,\\\"data\\\":{\\\"label\\\":null,\\\"lifecycle\\\":{\\\"effectiveLaunch\\\":{\\\"browserLaunched\\\":true,\\\"engine\\\"\",\"pinned\":\"{\\\"success\\\":true,\\\"data\\\":{\\\"lifecycle\\\":{\\\"effectiveLaunch\\\":{\\\"browserLaunched\\\":true,\\\"engine\\\":\\\"chrome\\\",\\\"la\"}"
+    },
+    {
+      "section": "connect",
+      "name": "C4 · 操作落在指定网页标签，而不是 OpenArc 管理界面",
+      "status": "PASS",
+      "expected": "网页 /form 且无外壳 DOM",
+      "actual": "{\"href\":\"http://127.0.0.1:5391/form\",\"shell\":false,\"form\":true}"
+    },
+    {
+      "section": "actions",
+      "name": "A1 · 读页面标题",
+      "status": "PASS",
+      "expected": "FORM",
+      "actual": "{\"success\":true,\"data\":{\"lifecycle\":{\"effectiveLaunch\":{\"browserLaunched\":true,\""
+    },
+    {
+      "section": "actions",
+      "name": "A2 · 输入文本并读回",
+      "status": "PASS",
+      "expected": "openarc-agent",
+      "actual": "{\"success\":true,\"data\":{\"lifecycle\":{\"effectiveLaunch\":{\"browserLaunched\":true,\""
+    },
+    {
+      "section": "actions",
+      "name": "A3 · 点击按钮并取得可核查结果（页面自身状态变化）",
+      "status": "PASS",
+      "expected": "echo:openarc-agent",
+      "actual": "{\"success\":true,\"data\":{\"lifecycle\":{\"effectiveLaunch\":{\"browserLaunched\":true,\""
+    },
+    {
+      "section": "actions",
+      "name": "A4 · 滚动页面",
+      "status": "PASS",
+      "expected": "scrollY > 0",
+      "actual": "{\"success\":true,\"data\":{\"lifecycle\":{\"effectiveLaunch\":{\"bro"
+    },
+    {
+      "section": "actions",
+      "name": "A5 · 导航到指定 URL（命令返回）",
+      "status": "FAIL",
+      "expected": "exit 0",
+      "actual": "{\"code\":-1,\"out\":\"\",\"err\":\"\"}"
+    },
+    {
+      "section": "actions",
+      "name": "A5b · 导航动作是否真的生效（命令挂起后的实际结果）",
+      "status": "PASS",
+      "expected": "URL 变为 /page2",
+      "actual": "{\"success\":true,\"data\":{\"lifecycle\":{\"effectiveLaunch\":{\"browserLaunched\":true,\"engine\":\"chrome\",\"launchHash\":13268635132210798301},\"launche"
+    },
+    {
+      "section": "stale",
+      "name": "R1 · 刷新后旧 ref 不产生错误点击，重新快照后可用",
+      "status": "PASS",
+      "expected": "重新识别页面",
+      "actual": "{\"staleRef\":\"@e1\",\"stale\":\"{\\\"code\\\":0,\\\"stdout\\\":\\\"{\\\\\\\"success\\\\\\\":true,\\\\\\\"data\\\\\\\":{\\\\\\\"clicked\\\\\\\":\\\\\\\"@e1\\\\\\\",\\\\\\\"lifecycle\\\\\\\":{\\\\\\\"effectiveLaunch\\\\\\\":{\\\\\\\"browserLaunched\\\\\\\":true,\\\\\\\"engine\\\\\\\":\\\\\\\"chrome\\\\\\\",\\\\\\\"launch\\\"\",\"freshRef\":\"@e4\",\"freshCode\":0}"
+    },
+    {
+      "section": "two-tabs",
+      "name": "T1 · 用户切换活动标签后，Agent 仍操作被钉住的标签",
+      "status": "PASS",
+      "expected": "与 before 相同的站内路径",
+      "actual": "{\"before\":\"/form\",\"after\":\"/form\"}"
+    },
+    {
+      "section": "two-tabs",
+      "name": "T2 · 用户的标签状态未被 Agent 改写（界面活动标签仍是 t2）",
+      "status": "PASS",
+      "expected": "t2 active",
+      "actual": "1"
+    },
+    {
+      "section": "tab-gone",
+      "name": "G1 · 被钉住的标签关闭后，控制命令明确失败（tab_gone）",
+      "status": "PASS",
+      "expected": "exit≠0 + tab_gone",
+      "actual": "{\"code\":1,\"out\":\"{\\\"success\\\":false,\\\"data\\\":{\\\"lastUrl\\\":\\\"http://127.0.0.1:5391/form\\\",\\\"targetId\\\":\\\"27334A7940240E0CD6B9884DE1353E82\\\"},\\\"error\\\":\\\"tab_gone: bound tab is gone (target 2733\",\"err\":\"\",\"goneCode\":\"tab_gone\"}"
+    },
+    {
+      "section": "tab-gone",
+      "name": "G2 · 旧控制对象没有自动转向其它标签（t2 页面未被操作）",
+      "status": "PASS",
+      "expected": "只剩 t2",
+      "actual": "[\"http://127.0.0.1:5391/page2\",\"file://<worktree>/dist/index.html\"]"
+    },
+    {
+      "section": "logout",
+      "name": "L1 · 登出后旧控制会话不能再操作（标签已被释放）",
+      "status": "PASS",
+      "expected": "exit≠0",
+      "actual": "{\"code\":1,\"out\":\"{\\\"success\\\":false,\\\"data\\\":{\\\"lastUrl\\\":\\\"http://127.0.0.1:5391/form\\\",\\\"targetId\\\":\\\"27334A7940240E0CD6B9884DE1353E82\\\"},\\\"error\\\":\\\"tab_gone: bound tab \",\"err\":\"\"}"
+    },
+    {
+      "section": "logout",
+      "name": "L2 · 旧会话没有悄悄接管 OpenArc 界面页",
+      "status": "PASS",
+      "expected": "无网页标签残留",
+      "actual": "[\"file://<worktree>/dist/index.html\"]"
+    },
+    {
+      "section": "boundary",
+      "name": "B1 · 如实记录：控制连接能看到 OpenArc 界面页 target",
+      "status": "PASS",
+      "expected": "界面页在清单中",
+      "actual": "[\"file://<worktree>/dist/index.html\"]"
+    },
+    {
+      "section": "boundary",
+      "name": "B2 · 如实记录：标签固定**不等于**权限隔离（可另行绑到界面页）",
+      "status": "PASS",
+      "expected": "能读到界面页 DOM（预期为真，作为正式接入阻塞登记）",
+      "actual": "{\"code\":0,\"out\":\"{\\\"success\\\":true,\\\"data\\\":{\\\"lifecycle\\\":{\\\"effectiveLaunch\\\":{\\\"browserLaunched\\\":true,\\\"engine\\\":\\\"chrome\\\",\\\"launchHash\\\":1326863513\"}"
+    },
+    {
+      "section": "boundary",
+      "name": "B3 · 调试端口只在本机监听（127.0.0.1）",
+      "status": "PASS",
+      "expected": "127.0.0.1 监听",
+      "actual": "Electron 49341 wepingli   30u  IPv4 0x51413896e245d64      0t0  TCP 127.0.0.1:9795 (LISTEN)"
+    },
+    {
+      "section": "boundary",
+      "name": "B4 · 产品退出后调试端口关闭",
+      "status": "PASS",
+      "expected": "无监听",
+      "actual": "已关闭"
+    },
+    {
+      "section": "boundary",
+      "name": "B5 · 常规产品启动不永久开放调试端口",
+      "status": "PASS",
+      "expected": "产品入口/脚本无 remote-debugging",
+      "actual": "无"
+    }
+  ],
+  "blockers": [
+    {
+      "id": "A5",
+      "name": "agent-browser 的导航命令（open/goto）在 Electron CDP + pin-tab 组合下不返回",
+      "detail": "命令超时（exit -1，无输出），但导航动作实际发生（A5b 由后续 get url 证实 URL 已变为目标地址）；因此导航应继续由 OpenArc 负责。"
+    },
+    {
+      "id": "B2",
+      "name": "控制连接可另行绑到 OpenArc 界面页 target",
+      "detail": "--pin-tab 只是标签固定，不是权限隔离；正式接入必须由 OpenArc 侧限制可绑定的 target（只允许浏览器分区视图，禁止 shell/file 页面）。"
+    },
+    {
+      "id": "LIFECYCLE",
+      "name": "agent-browser 没有 pause/stop 一类的一等控制",
+      "detail": "停止必须由 OpenArc 实现（关闭调试通道 / 释放标签 / 撤销控制令牌）；实测：标签关闭与登出后旧会话立刻失效（tab_gone）。"
+    }
+  ],
+  "notVerified": [
+    "只覆盖本地受控站点，不代表任意网站兼容",
+    "未做真实模型自主规划（本轮要求：确定性操作）",
+    "Windows 平台未验证（本机 macOS）",
+    "open 挂起的根因未定位（只记录了行为：动作生效、命令不返回）"
+  ],
+  "at": "2026-09-19T18:33:17.522Z"
+}
