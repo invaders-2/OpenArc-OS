@@ -2,10 +2,14 @@
 
 import type { Area, Host, WindowCommand, WindowStateModel } from "./window-domain.cjs";
 
+/** D5-01：浏览器窗口的每标签视图意图（只有 active 参与遮挡结算）。 */
+export type NativeViewIntent = { viewId: string; tabId: string; url: string; active: boolean };
+
 export type NativeIntent = {
   windowId: string;
   appId: string;
   url: string;
+  views?: NativeViewIntent[];
   present: boolean;
   focused: boolean;
   viewport: { x: number; y: number; width: number; height: number };
@@ -24,6 +28,7 @@ export function serialize(state: WindowStateModel): string;
 export function deserialize(raw: unknown, areas?: Area[]): WindowStateModel;
 export function nativeIntents(state: WindowStateModel, host?: Host): NativeIntent[];
 export const WINDOW_COMMANDS: readonly string[];
+export const BROWSER_COMMANDS: readonly string[];
 export const SYSTEM_MUTATIONS: readonly string[];
 export const REDUCERS: Record<string, (state: WindowStateModel, command: unknown) => WindowStateModel>;
 
@@ -39,6 +44,7 @@ declare const manager: {
   deserialize: typeof deserialize;
   nativeIntents: typeof nativeIntents;
   WINDOW_COMMANDS: typeof WINDOW_COMMANDS;
+  BROWSER_COMMANDS: typeof BROWSER_COMMANDS;
   SYSTEM_MUTATIONS: typeof SYSTEM_MUTATIONS;
   REDUCERS: typeof REDUCERS;
 };

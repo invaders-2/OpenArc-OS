@@ -271,6 +271,7 @@ export function Window({ window: w, focused, onCommand, snapshots, onResizeStart
   const viewportRef = useRef<HTMLDivElement>(null);
   return (
     <section
+      data-window-id={w.id}
       aria-label={`${w.meta.title}窗口`}
       className={`window ${focused ? "active" : ""} ${w.visible ? "" : "minimized"}`}
       style={{ left: w.bounds.x, top: w.bounds.y, width: w.bounds.w, height: w.bounds.h, zIndex: 10 + w.z }}

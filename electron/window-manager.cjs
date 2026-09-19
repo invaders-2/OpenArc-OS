@@ -294,14 +294,112 @@ function reflow(state, cmd) {
   return domain.reindex({ ...state, windows: next });
 }
 
+// ---------------------------------------------------------------------------
+// D5-01 · 浏览器标签命令
+//
+// 它们**不是** Window Command：窗口的 9 条命令与层级/焦点语义冻结不变（ADR §25）。
+// 标签是"窗口内部的 App 状态"，写进的仍是同一个唯一权威（不新增第二份标签状态）。
+// ---------------------------------------------------------------------------
+
+/** 取浏览器窗口；非浏览器窗口 / 不存在一律 null（命令 no-op）。 */
+function browserWindow(state, cmd) {
+  const id = String(cmd?.id ?? cmd?.windowId ?? "");
+  const w = domain.byId(state, id);
+  return w && w.kind === domain.KIND.BROWSER ? w : null;
+}
+
+/**
+ * 写回 meta，并把**活动标签**的 url 同步成 meta.url。
+ * meta.url 是快照失效键与 nativeIntents 的输入；不同步就会出现
+ * "标签切了但快照键还是旧的"这类静默错误，因此同步只在这一个地方做。
+ */
+function withMeta(state, w, meta) {
+  const active = meta.tabs.find((t) => t.tabId === meta.activeTabId) || null;
+  const next = { ...meta, url: active ? active.url : "" };
+  return domain.reindex({ ...state, windows: state.windows.map((x) => (x.id === w.id ? { ...x, meta: next } : x)) });
+}
+
+/** 新标签。tabId 由调用方提供（保持 reduce 纯函数；域只负责校验唯一性与上限）。 */
+function tabOpen(state, cmd) {
+  const w = browserWindow(state, cmd);
+  if (!w) return state;
+  const tabs = domain.tabsOf(w);
+  // 上限：到达上限**不改状态**，由 UI 依据 tabs.length 明示原因（不是静默失败）。
+  if (tabs.length >= domain.TAB_LIMIT) return state;
+  const tabId = String(cmd.tabId || "");
+  if (!tabId || tabs.some((t) => t.tabId === tabId)) return state;
+  const url = typeof cmd.url === "string" ? cmd.url : "";
+  const tabSeq = Math.max(Number(w.meta.tabSeq) || 0, tabs.length) + 1;
+  return withMeta(state, w, { ...w.meta, tabs: [...tabs, { tabId, url, title: "" }], activeTabId: tabId, tabSeq });
+}
+
+/** 关闭标签。最后一个标签不在这里关：浏览器语义是关窗口，由 UI 派发 window/close。 */
+function tabClose(state, cmd) {
+  const w = browserWindow(state, cmd);
+  if (!w) return state;
+  const tabs = domain.tabsOf(w);
+  if (tabs.length <= 1) return state;
+  const tabId = String(cmd.tabId || "");
+  const index = tabs.findIndex((t) => t.tabId === tabId);
+  if (index < 0) return state;
+  const next = tabs.filter((t) => t.tabId !== tabId);
+  const activeTabId =
+    w.meta.activeTabId === tabId ? next[Math.min(index, next.length - 1)].tabId : w.meta.activeTabId;
+  return withMeta(state, w, { ...w.meta, tabs: next, activeTabId });
+}
+
+/** 切换标签。 */
+function tabActivate(state, cmd) {
+  const w = browserWindow(state, cmd);
+  if (!w) return state;
+  const tabId = String(cmd.tabId || "");
+  if (!domain.tabsOf(w).some((t) => t.tabId === tabId) || w.meta.activeTabId === tabId) return state;
+  return withMeta(state, w, { ...w.meta, activeTabId: tabId });
+}
+
+/**
+ * 原生视图回报的标签状态（url / title）。
+ * 只有 meta 变，不触碰 bounds / order / focused —— 因此不可能影响层级与焦点。
+ */
+function tabState(state, cmd) {
+  const w = browserWindow(state, { id: cmd?.windowId ?? cmd?.id });
+  if (!w) return state;
+  const tabs = domain.tabsOf(w);
+  const tabId = String(cmd?.tabId || domain.activeTabIdOf(w));
+  const index = tabs.findIndex((t) => t.tabId === tabId);
+  if (index < 0) return state;
+  const current = tabs[index];
+  // 空字符串不作为"新地址"：失败/中止的导航会让 getURL() 返回 ""，
+  // 若把它写进 domain，地址栏与持久化里的地址就被清空了（实测抓到过）。
+  const url = typeof cmd?.url === "string" && cmd.url ? cmd.url : current.url;
+  const title = typeof cmd?.title === "string" && cmd.title ? cmd.title : current.title;
+  const titleChanged = tabId === w.meta.activeTabId && !!title && title !== w.meta.title;
+  // 无变化 → 同一引用（原生状态会随每次导航/标题事件重复回报，空转会产生无意义的重渲染与持久化）
+  if (url === current.url && title === current.title && !titleChanged) return state;
+  const nextTabs =
+    url === current.url && title === current.title
+      ? tabs
+      : tabs.map((t) => (t.tabId === tabId ? { ...t, url, title } : t));
+  const meta = { ...w.meta, tabs: nextTabs };
+  // 窗口标题跟随**活动标签**（浏览器语义）。
+  if (titleChanged) meta.title = title;
+  return withMeta(state, w, meta);
+}
+
 /**
  * 原生视图回报的 url / loading / title 写回域。
  * 只有 meta 变，不触碰 bounds / order / focused —— 因此不可能影响层级与焦点。
+ *
+ * D5-01：浏览器窗口的 url/title 属于**标签**，统一走 tabState 的同一实现，
+ * 否则 meta.url 会与活动标签漂移（旧调用点不带 tabId 时默认落到活动标签）。
  */
 function nativeState(state, cmd) {
   const id = String(cmd?.windowId ?? "");
   const w = domain.byId(state, id);
   if (!w) return state;
+  if (w.kind === domain.KIND.BROWSER) {
+    return tabState(state, { windowId: id, tabId: cmd?.tabId ?? domain.activeTabIdOf(w), url: cmd?.url, title: cmd?.title });
+  }
   const meta = { ...w.meta };
   if (typeof cmd.title === "string" && cmd.title) meta.title = cmd.title;
   if (typeof cmd.url === "string") meta.url = cmd.url;
@@ -318,6 +416,11 @@ function nativeState(state, cmd) {
 // ---------------------------------------------------------------------------
 
 const REDUCERS = {
+  // D5-01：浏览器标签（App 内部状态，与窗口命令分开）
+  "browser/tab-open": tabOpen,
+  "browser/tab-close": tabClose,
+  "browser/tab-activate": tabActivate,
+  "browser/tab-state": tabState,
   "window/open": open,
   "window/close": close,
   "window/focus": focus,
@@ -345,8 +448,19 @@ const WINDOW_COMMANDS = Object.freeze([
   "window/unmaximize",
 ]);
 
+/**
+ * D5-01：浏览器标签命令。与冻结的 9 条 Window Command 分开登记 ——
+ * 它们不改窗口的位置/层级/焦点，只改窗口内部的 App 状态；AI 与手动共用同一条路径。
+ */
+const BROWSER_COMMANDS = Object.freeze([
+  "browser/tab-open",
+  "browser/tab-close",
+  "browser/tab-activate",
+  "browser/tab-state",
+]);
+
 /** 系统级变更。明确与命令层分开，避免"命令"这个概念被稀释。 */
-const SYSTEM_MUTATIONS = Object.freeze(["system/hydrate", "system/reflow", "system/native-state"]);
+const SYSTEM_MUTATIONS = Object.freeze(["system/hydrate", "system/reflow", "system/native-state", "browser/tab-state"]);
 
 /**
  * 唯一的状态变更入口。
@@ -375,6 +489,14 @@ function nativeIntents(state, host) {
       windowId: w.id,
       appId: w.appId,
       url: w.meta.url || "",
+      // D5-01：一个浏览器窗口 = 每个标签一个原生视图；只有 active 的那个参与遮挡结算，
+      // 其余由控制器 setVisible(false) 保持存活（页面状态不丢，切回即恢复）。
+      views: domain.tabsOf(w).map((t) => ({
+        viewId: w.id + "#" + t.tabId,
+        tabId: t.tabId,
+        url: t.url,
+        active: t.tabId === w.meta.activeTabId,
+      })),
       present: w.state !== WSTATE.MINIMIZED,
       focused: state.focused === w.id,
       viewport: {
@@ -399,6 +521,7 @@ module.exports = {
   deserialize,
   nativeIntents,
   WINDOW_COMMANDS,
+  BROWSER_COMMANDS,
   SYSTEM_MUTATIONS,
   REDUCERS,
 };

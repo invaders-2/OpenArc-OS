@@ -13,8 +13,16 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("openarc", {
   /** 把 Window Manager 结算出的原生意图交给主进程。这是唯一的原生层上行通道。 */
   sync: (payload) => ipcRenderer.invoke("windows:sync", payload),
-  navigate: (windowId, url) => ipcRenderer.invoke("browser:navigate", { windowId, url }),
-  action: (windowId, action) => ipcRenderer.invoke("browser:action", { windowId, action }),
+  // D5-01：tabId 可选 —— 缺省时作用于该窗口的活动标签（既有两参调用逐字不变）。
+  navigate: (windowId, url, tabId) => ipcRenderer.invoke("browser:navigate", { windowId, url, tabId }),
+  action: (windowId, action, tabId) => ipcRenderer.invoke("browser:action", { windowId, action, tabId }),
+  /**
+   * D5-01 浏览器命令面（受控白名单）：
+   *   · browser/downloads（list / open / reveal / cancel / remove / clear）
+   *   · browser/openExternal（**用户已确认**后才调用）
+   * 没有通用 shell / fs / 任意 IPC；downloadId 与 URL 都还要过主进程校验与 trusted(event)。
+   */
+  browser: (command) => ipcRenderer.invoke("browser:command", command),
   /** 原生状态（url / loading / title / 被拦截的弹窗与导航）只读下发。 */
   onNativeState: (callback) => {
     const listener = (_, state) => callback(state);

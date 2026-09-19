@@ -12,15 +12,14 @@ import { useDesktop } from "./desktop/useDesktop";
 // 直接叫 Window 会在类型位置与全局 Window 撞名。
 import {
   AIPanel,
-  AddressBar,
   AssistantPill,
   ContextMenu,
   Dock,
   TopBar,
-  WebViewport,
   Window as DesktopWindow,
   startResize,
 } from "./desktop/components";
+import { BrowserApp } from "./browser/BrowserApp";
 import type { MenuItem } from "./desktop/components";
 import { Dialog } from "./desktop/Dialog";
 import { useIdentity } from "./identity/useIdentity";
@@ -34,6 +33,38 @@ import { CanvasApp } from "./governance/CanvasApp";
 import { ProjectsApp } from "./governance/ProjectsApp";
 import { ApprovalPrompt } from "./approval/ApprovalPrompt";
 
+/**
+ * 原生层事件（electron/main.cjs + native-view-controller.cjs 下发）。
+ * 全部是"事实"：导航状态、加载失败、弹窗/外部协议/权限/证书、下载进度、会话切换。
+ */
+type NativeEvent = {
+  type?: string;
+  windowId?: string;
+  tabId?: string | null;
+  url?: string;
+  title?: string;
+  loading?: boolean;
+  canGoBack?: boolean;
+  canGoForward?: boolean;
+  code?: number;
+  message?: string;
+  /** 当前生效的加载失败（主进程持有；null = 正常）。 */
+  loadError?: { code: number; message: string; url: string } | null;
+  /** 触发这条 native-state 的事件名（did-finish-load 等），仅用于排查。 */
+  event?: string;
+  permission?: string;
+  origin?: string;
+  scheme?: string;
+  reason?: string;
+  error?: string;
+  downloadId?: string;
+  filename?: string;
+  state?: string;
+  received?: number;
+  total?: number;
+  sessionKey?: string | null;
+};
+
 type DisplayInfo = {
   id: number;
   scaleFactor: number;
@@ -45,9 +76,11 @@ declare global {
   interface Window {
     openarc?: {
       sync: (p: unknown) => Promise<{ ok?: boolean; error?: string; results?: unknown[] }>;
-      navigate: (windowId: string, url: string) => Promise<{ error?: string; ok?: boolean }>;
-      action: (windowId: string, action: string) => Promise<{ error?: string; ok?: boolean }>;
-      onNativeState: (cb: (e: Record<string, string>) => void) => () => void;
+      navigate: (windowId: string, url: string, tabId?: string) => Promise<{ error?: string; ok?: boolean }>;
+      action: (windowId: string, action: string, tabId?: string) => Promise<{ error?: string; ok?: boolean }>;
+      /** D5-01：受控浏览器命令（下载记录 / 用户确认后的外部打开）。 */
+      browser?: (command: Record<string, unknown>) => Promise<Record<string, unknown>>;
+      onNativeState: (cb: (e: NativeEvent) => void) => () => void;
       onDisplay: (cb: (d: DisplayInfo[]) => void) => () => void;
       identity?: {
         command: (cmd: Record<string, unknown>) => Promise<Record<string, unknown>>;
@@ -103,8 +136,19 @@ function App() {
    * DOM z-index 对它无效，因此 lock 必须一路传到主进程的 overlayOpen。
    */
   const locked = identity.phase === "locked";
-  const { state, dispatch, overlays, setOverlays, snapshotLayers, nativeVisibleOf, browserEvents, clearBrowserEvent } =
-    useDesktop({ locked });
+  const {
+    state,
+    dispatch,
+    overlays,
+    setOverlays,
+    snapshotLayers,
+    nativeVisibleOf,
+    browserRuntime,
+    downloads,
+    notices,
+    dismissNotice,
+    browserCommand,
+  } = useDesktop({ locked, sessionKey: identity.snapshot.userId });
 
   // ---------------------------------------------------------------------------
   // 桌面对象（文件夹）仍是独立的一类状态：它们不是窗口，不进 Window Manager。
@@ -121,6 +165,14 @@ function App() {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [bouncing, setBouncing] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; folder?: string } | null>(null);
+  /**
+   * 右键菜单必须让原生视图整块让位：WebContentsView 永远绘制在 DOM 之上，
+   * 菜单若不让位就会被网页盖住、点不到（D1-01 实测过的真实缺陷）。
+   * 这里把本地菜单状态同步进 overlays，而不是在每个 setMenu 调用点各写一遍。
+   */
+  useEffect(() => {
+    setOverlays((o) => (o.menu === !!menu ? o : { ...o, menu: !!menu }));
+  }, [menu, setOverlays]);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const dockRef = useRef<HTMLElement>(null);
@@ -335,31 +387,20 @@ function App() {
         </div>
       );
     if (w?.appId === "browser" || w?.kind === "browser") {
-      const url = w.meta.url || "https://example.com";
-      const visible = browserVisibleOf(id);
       return (
-        <div className="browser-shell">
-          <AddressBar
-            url={url}
-            onUrlChange={(v) => onCommand({ type: "system/native-state", windowId: id, url: v })}
-            onNavigate={() => {
-              if (!window.openarc) {
-                clearBrowserEvent();
-                return;
-              }
-              void window.openarc.navigate(id, url);
-            }}
-            onAction={(a) => void window.openarc?.action(id, a)}
-          />
-          <div className="browser-status" role="status">
-            {browserEvents?.windowId === id
-              ? browserEvents.message
-              : visible
-                ? "正在显示网页。桌面窗口可遮挡它，遮挡时由快照补齐。"
-                : w.meta.url || "输入地址开始浏览。外部页面与桌面权限隔离。"}
-          </div>
-          <WebViewport nativeVisible={visible} error={undefined} />
-        </div>
+        <BrowserApp
+          win={w}
+          runtime={browserRuntime}
+          downloads={downloads}
+          notices={notices}
+          nativeVisible={browserVisibleOf(id)}
+          onCommand={onCommand}
+          onNavigate={(tabId, url) => void window.openarc?.navigate(id, url, tabId)}
+          onAction={(tabId, action) => void window.openarc?.action(id, action, tabId)}
+          onBrowser={browserCommand}
+          onDismissNotice={dismissNotice}
+          onPanelOpenChange={(open) => setOverlays((o) => (o.panel === open ? o : { ...o, panel: open }))}
+        />
       );
     }
     if (w?.appId === "resource-library") return <ResourceLibraryApp />;

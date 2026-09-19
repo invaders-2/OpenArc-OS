@@ -180,6 +180,30 @@ app.whenReady().then(async () => {
       if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return;
       win.webContents.send("native:state", payload);
     },
+    // D5-01：下载默认落在系统下载目录；隔离运行（探针/E2E）用 OPENARC_DOWNLOADS_DIR 覆盖，
+    // 绝不为了让测试好看而改产品默认值。
+    downloadsDir: process.env.OPENARC_DOWNLOADS_DIR || app.getPath("downloads"),
+  });
+
+  // ---------------------------------------------------------------------------
+  // D5-01 · 会话键（A04）。
+  //
+  // **它由主进程从已认证 session 推导，渲染进程自报的 userId 一律无效。**
+  // 会话键是原生分区名的一部分：切账号 → 另一个分区 → Cookie / 存储 / 下载记录不跨用户。
+  // 会话一旦变化，上一个用户的全部网页视图立即释放（绝不留在屏幕上或内存里）。
+  // ---------------------------------------------------------------------------
+  const sessionKeyNow = () => {
+    const s = identity?.service?.snapshot;
+    return s && s.userId ? String(s.userId) : null;
+  };
+  let sessionKey = sessionKeyNow();
+  identity.service.onEvent(() => {
+    const next = sessionKeyNow();
+    if (next === sessionKey) return;
+    sessionKey = next;
+    try { controller?.releaseAll(); } catch { /* 视图可能已随窗口销毁 */ }
+    if (win && !win.isDestroyed() && !win.webContents.isDestroyed())
+      win.webContents.send("native:state", { type: "session-changed", sessionKey: next });
   });
 
   ipcMain.handle("windows:sync", async (e, payload) => {
@@ -189,8 +213,38 @@ app.whenReady().then(async () => {
     const results = await controller.sync(intents, {
       overlayOpen: !!payload?.overlayOpen,
       interactive: payload?.interactive !== false,
+      // 会话键只来自主进程：renderer 传什么都不看。
+      sessionKey,
     });
     return { ok: true, results };
+  });
+
+  // ---------------------------------------------------------------------------
+  // D5-01 · 浏览器命令面（受控白名单）。
+  // 只有"下载记录操作"与"用户确认后的外部打开"两类；没有通用 shell / fs / 任意 IPC。
+  // ---------------------------------------------------------------------------
+  ipcMain.handle("browser:command", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    const type = String(payload?.type || "");
+    if (type === "browser/downloads") {
+      const action = String(payload?.action || "list");
+      if (action === "list") return { ok: true, items: controller.listDownloads(sessionKey) };
+      if (action === "clear") {
+        controller.clearDownloads(sessionKey);
+        return { ok: true, items: controller.listDownloads(sessionKey) };
+      }
+      const res = controller.downloadAction(action, payload?.downloadId, sessionKey);
+      return { ...res, items: controller.listDownloads(sessionKey) };
+    }
+    if (type === "browser/openExternal") {
+      // 用户已在 UI 上明确确认；这里仍然拒绝已知危险的 scheme（file/javascript/data/...）。
+      const url = String(payload?.url || "");
+      const scheme = url.split(":")[0].toLowerCase();
+      if (!/^[a-z][a-z0-9+.-]*$/.test(scheme) || ["file", "javascript", "data", "vbscript", "blob", "about", "chrome"].includes(scheme))
+        return { error: "不支持的协议" };
+      return controller.openExternal(url);
+    }
+    return { error: "未知命令" };
   });
 
   /**
@@ -201,16 +255,32 @@ app.whenReady().then(async () => {
   ipcMain.handle("browser:navigate", async (e, payload) => {
     if (!trusted(e)) throw Error("Forbidden");
     const windowId = String(payload?.windowId ?? "");
+    const tabId = payload?.tabId == null ? null : String(payload.tabId);
     const url = payload?.url;
     if (typeof url !== "string" || !safeURL(url))
       return { error: "请输入完整 HTTP / HTTPS 地址，不支持其他协议或含凭据的网址。" };
-    const res = controller.navigate(windowId, url);
+    const res = controller.navigate(windowId, url, tabId);
     return res.error ? res : { ok: true };
   });
 
   ipcMain.handle("browser:action", async (e, payload) => {
     if (!trusted(e)) throw Error("Forbidden");
-    return controller.act(String(payload?.windowId ?? ""), String(payload?.action ?? ""));
+    const tabId = payload?.tabId == null ? null : String(payload.tabId);
+    return controller.act(String(payload?.windowId ?? ""), String(payload?.action ?? ""), tabId);
+  });
+
+  // ---------------------------------------------------------------------------
+  // D5-01 · 证书错误处理（fail closed，无"继续访问"旁路）。
+  //
+  // Electron 默认行为不能当作结论：这里显式 preventDefault + callback(false)，
+  // 把失败原因回报给 UI（页面本身会以 did-fail-load 收敛到错误页）。
+  // 没有"信任一次"的入口 —— 这是刻意的：一个"继续访问"按钮就是 MITM 的入口。
+  // ---------------------------------------------------------------------------
+  app.on("certificate-error", (event, _wc, url, error, _certificate, callback) => {
+    event.preventDefault();
+    callback(false);
+    if (win && !win.isDestroyed() && !win.webContents.isDestroyed())
+      win.webContents.send("native:state", { type: "certificate-error", url: String(url || ""), error: String(error || "") });
   });
 
   win.on("closed", () => {

@@ -1484,3 +1484,208 @@ input[type="checkbox"] {
 .approval-notice { margin: 0; font-size: var(--fs-caption, 12px); color: #ff8a8a; }
 
 
+
+/* ===========================================================================
+   D5-01 · 浏览器：标签栏 / 错误与提示 / 下载面板
+   全部消费既有 token（--line / --muted / --accent / --content-rgb ...），不新增装饰语言。
+   =========================================================================== */
+.tabstrip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px 0;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.tab {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 220px;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  background: var(--sunken);
+}
+.tab.active {
+  background: rgb(var(--surface-rgb) / var(--surface-alpha));
+  box-shadow: inset 0 -1px 0 rgb(var(--accent-rgb) / 0.5);
+}
+.tab-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 7px 4px 7px 10px;
+  background: none;
+  color: inherit;
+  font-size: var(--fs-micro);
+}
+.tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+}
+.tab-close {
+  padding: 5px 7px;
+  background: none;
+  color: var(--muted);
+  border-radius: 6px;
+}
+.tab-close:hover {
+  background: var(--sunken);
+}
+.tab-new {
+  padding: 6px 8px;
+  background: none;
+  color: var(--muted);
+}
+.tab-new:disabled {
+  opacity: 0.4;
+}
+.tabstrip-spacer {
+  flex: 1;
+}
+.tab-spinner {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid var(--muted);
+  border-top-color: transparent;
+  animation: oa-tab-spin 0.8s linear infinite;
+}
+@keyframes oa-tab-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.addressbar-downloads {
+  position: relative;
+  padding: 6px 8px;
+  background: none;
+  color: var(--muted);
+}
+.badge-count {
+  margin-left: 4px;
+  font-size: var(--fs-micro);
+  color: var(--accent);
+}
+.browser-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 10px 6px;
+  padding: 7px 10px;
+  font-size: var(--fs-caption);
+  color: var(--failed);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+}
+.browser-error button {
+  margin-left: auto;
+  padding: 4px 10px;
+  font-size: var(--fs-micro);
+}
+.browser-notices {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 10px 6px;
+  flex-shrink: 0;
+}
+.browser-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: var(--fs-caption);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+}
+.browser-notice .notice-title {
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+}
+.browser-notice .notice-text {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.browser-notice button {
+  padding: 3px 9px;
+  font-size: var(--fs-micro);
+  white-space: nowrap;
+}
+.downloads-panel {
+  position: absolute;
+  top: 78px;
+  right: 12px;
+  width: 320px;
+  max-height: 320px;
+  overflow: auto;
+  z-index: 6;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: rgb(var(--surface-rgb) / var(--surface-alpha));
+  backdrop-filter: blur(18px);
+}
+.downloads-panel header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.downloads-panel header strong {
+  margin-right: auto;
+}
+.download-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 0;
+  border-top: 1px solid var(--line);
+}
+.download-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.download-main strong {
+  font-size: var(--fs-caption);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.download-main small {
+  font-size: var(--fs-micro);
+  color: var(--muted);
+}
+.download-main progress {
+  width: 100%;
+  height: 4px;
+}
+.download-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+}
+.download-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.download-actions button {
+  padding: 3px 8px;
+  font-size: var(--fs-micro);
+  white-space: nowrap;
+}
+.browser-shell {
+  position: relative;
+}
+

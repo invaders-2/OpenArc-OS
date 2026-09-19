@@ -8,7 +8,20 @@ export type WindowStateName = "normal" | "minimized" | "maximized";
 /** 与 electron/geometry.cjs 的 WindowRect 同构，因此迁移不做坐标换算。 */
 export type Bounds = { x: number; y: number; w: number; h: number };
 
-export type WindowMeta = { title: string; icon: string; url?: string };
+/**
+ * D5-01 · 浏览器标签。标签是 meta 的一部分（唯一权威 + 唯一持久化出口）。
+ * `url` 恒等于活动标签的 url（快照失效键与 nativeIntents 的输入）。
+ */
+export type BrowserTab = { tabId: string; url: string; title: string };
+
+export type WindowMeta = {
+  title: string;
+  icon: string;
+  url?: string;
+  tabs?: BrowserTab[];
+  activeTabId?: string;
+  tabSeq?: number;
+};
 
 export type Window = {
   id: WindowId;
@@ -51,13 +64,22 @@ export type WindowCommand =
   | { type: "window/unmaximize"; id: WindowId }
   | { type: "system/hydrate"; persisted: unknown; areas?: Area[] }
   | { type: "system/reflow"; areas: Area[]; host?: Host }
-  | { type: "system/native-state"; windowId: WindowId; url?: string; title?: string; loading?: boolean };
+  | { type: "system/native-state"; windowId: WindowId; url?: string; title?: string; loading?: boolean; tabId?: string }
+  | { type: "browser/tab-open"; id: WindowId; tabId: string; url?: string }
+  | { type: "browser/tab-close"; id: WindowId; tabId: string }
+  | { type: "browser/tab-activate"; id: WindowId; tabId: string }
+  | { type: "browser/tab-state"; windowId: WindowId; tabId?: string; url?: string; title?: string };
 
 export const MIN_WINDOW_W: number;
 export const MIN_WINDOW_H: number;
 export const AREA_TOP: number;
 export const AREA_BOTTOM: number;
 export const TITLE_BAR_H: number;
+export const TAB_LIMIT: number;
+export function normalizeBrowserMeta(meta?: Partial<WindowMeta>): { tabs: BrowserTab[]; activeTabId: string; tabSeq: number };
+export function tabsOf(w: Window | null | undefined): BrowserTab[];
+export function activeTabIdOf(w: Window | null | undefined): string | null;
+export function activeTabOf(w: Window | null | undefined): BrowserTab | null;
 export const KIND: { APP: "app"; BROWSER: "browser" };
 export const WSTATE: { NORMAL: "normal"; MINIMIZED: "minimized"; MAXIMIZED: "maximized" };
 export const FOLDER_PREFIX: string;
@@ -98,6 +120,11 @@ declare const domain: {
   NATIVE_APPS: typeof NATIVE_APPS;
   kindOf: typeof kindOf;
   isNativeKind: typeof isNativeKind;
+  TAB_LIMIT: typeof TAB_LIMIT;
+  normalizeBrowserMeta: typeof normalizeBrowserMeta;
+  tabsOf: typeof tabsOf;
+  activeTabIdOf: typeof activeTabIdOf;
+  activeTabOf: typeof activeTabOf;
   normalizeBounds: typeof normalizeBounds;
   createWindow: typeof createWindow;
   createState: typeof createState;
