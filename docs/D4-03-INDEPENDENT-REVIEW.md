@@ -1,6 +1,7 @@
 # D4-03 独立审查与收口（Independent Review · 2026-09-19 · v5：统一编号 + 第三/四轮收口 + 第五轮 CG-01（租约申请事务状态保护））
 
 - 工作树：`/Users/wepingli/Desktop/OpenArc OS-d4-01`；分支：`feature/d4-03-tool-proxy`
+- **外部裁决（2026-09-19，实现方之外的审查者 ChatGPT）：`D4-03 = PASS（限定范围）`、`D4 = PARTIAL`（既有 NOT VERIFIED 项保留）** —— D4-03 收口循环结束；本文件保留为裁决输入与证据记录
 - **第三轮 Base HEAD**（干净）：`ad5e6003dd1fd50f928663573f75ca5db9d3ee00`；**第四轮（Closure）Base HEAD**（干净）：`5ea68759d1ce8f80c9cfe1ab847378ff8e2af342`；**第五轮（CG-01）Base HEAD**（干净）：`c1cd9e0067f9b7d6e7e62220c57ebbd0a8199b5f`
 - **第三轮被测 commit**：`2c5dc29` + `51f90f0` + `42ebe3b` + `1594771`（见 §3.2 各行）；**第四轮（Closure）被测 commit = `dc53c64`（authority：批准资格 + 撤销状态机）+ `b031b3658960a70e7365bfc52f2702fcb492a2d1`（产品入口 + UI + 真实 main E2E）；第四轮最终被测 commit = `68c84c976eab15c360c71e14903abf47de5a7d12`（test-only：main E2E 证据口径 + UI 探针证据精确化）**
 - **第五轮（D4-03 CG-01：租约申请事务状态保护）被测 commit = `eccf01b2991253e56c87ed51778541838508a58f`**（`electron/side-effect-authority.cjs` + 新测试 + `test:d4-03-cg01` 门禁入口）；本轮**只跑新增检查与受影响的租约/执行/恢复回归**（不重跑十六门禁，数字见 §8.1）
@@ -15,7 +16,7 @@
 | --- | --- | --- |
 | **实现方已修复** | 执行岗已提交代码/测试 | 第一轮 A1、B1–B5；第二轮 B6–B9、A4、A7、A8；第三轮 A9、A10、A14、A16、A17、A19、A21、A23、A24；**第四轮（Closure）A3（REV-03/S2）、A18、A20 按 Boss 已批准的产品规则实现** |
 | **内部独立复核通过** | 未参与实现的独立审查者在冻结修订上复现并判 CLOSED | 上述 22 项 + **第四轮三项（A3/A18/A20，十二轮复核）**；含真实双进程 / 真实 Bridge / 真实 Electron UI / 全库扫描 / parity 对照 / 基线区分力对照 |
-| **仍待 ChatGPT 审计** | 由实现方之外的审查者作出的封板裁决 | **全部**：本文件的 CLOSED 一律止于内部独立复核，**不等于外部审计通过**，D4-03 仍为 PASS candidate |
+| **外部裁决（已作出）** | 由实现方之外的审查者作出的封板裁决 | **2026-09-19：D4-03 = PASS（限定范围）**；D4 整体 = **PARTIAL**（Windows / External Provider / 多屏 / GPU 等既有 NOT VERIFIED 保留）。本文件中"PASS candidate / 不封板"的表述均为**裁决前**状态；裁决后 D4-03 收口，不再追加无依据审查 |
 
 1. **第三轮按裁决修复（本轮主线）**：① **A9/A10（拒绝操作的状态保护）**——DENY 只在 `AWAITING_APPROVAL/APPROVED/LEASED` 生效，`RUNNING` 与任何终态一律 `SIDE_EFFECT_APPROVAL_TOO_LATE` 且**状态零变化**、只落 safe 审计/事件、不中止执行、不覆盖 `UNKNOWN_EFFECT`/`SUCCEEDED`；② **A14（R-8）**——任务未绑定且无可用默认时**绝不创建 run**（0 capability / 0 模型请求 / 0 工具执行 / 0 artifact），Step/Task 收敛 BLOCKED，任务可保持未绑定；③ **A16/A17**（复核者发现的实现缺陷）——审批推送按当前会话重投影、读取在声明 context 时必须匹配真实 session；`effectiveApproval` 过期分支由死代码修复。
 2. **收尾修复（本轮复核新发现的低危项）**：④ **A19**：`tool.side_effect.deny_too_late` 与其 audit action 未登记进 `TASK_EVENT`/ADR:156 冻结清单（上一轮 `late_result_suppressed` 已登记），按同一手法补齐；⑤ **A21**：`resolveModel` **抛异常**时穿透 `runTask`，task/step 停在 RUNNING（0 run / 0 provider / 契约不破但有悬挂），按"返回失败"同一路径收敛 BLOCKED；⑥ **A23**：`approveSideEffect` 的"读状态 + 写 APPROVED"跨两个事务，可把已被 DENY 的 call **复活成 APPROVED**（DENY 决定被改写），已合并为同一事务 + 事务内状态前置（`SIDE_EFFECT_CALL_STATE`、0 写入、绝不复活）；⑦ **A24**（第十轮复核 B 发现）：已绑定路径同一 `resolveModel` 抛出 → task/step RUNNING + STARTING run 悬挂，已按“抛出 = 返回失败”同形收敛。**另登记未修项 A26**（其余 4 处 `resolveModel` 调用点未把抛出转成显式错误码；均不会留下悬挂 run）。
