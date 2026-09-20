@@ -285,7 +285,17 @@ export function useDesktop(opts: { locked?: boolean; sessionKey?: string | null 
   // ---------------------------------------------------------------------------
   // 原生意图下发（几何来自 **domain**，不再来自 getBoundingClientRect()）
   // ---------------------------------------------------------------------------
-  const intents: NativeIntent[] = useMemo(() => manager.nativeIntents(state, hostSize), [state, hostSize]);
+  // chrome 之下、网页之上的 **DOM 条带**（提示条 / 错误条 / 状态行）必须从原生视图矩形里让出去：
+  // 原生视图挂在窗口之上，DOM 在它下面，不让位就等于把提示条整个盖住（像素实测 24/25 采样是网页）。
+  // 高度由浏览器窗口自己量（见 BrowserApp 的 useLayoutEffect），这里只存这一份事实。
+  const [viewportReserves, setViewportReserves] = useState<Record<string, number>>({});
+  const reportViewportReserve = useCallback((windowId: string, reserve: number) => {
+    setViewportReserves((m) => (m[windowId] === reserve ? m : { ...m, [windowId]: reserve }));
+  }, []);
+  const intents: NativeIntent[] = useMemo(
+    () => manager.nativeIntents(state, hostSize, viewportReserves),
+    [state, hostSize, viewportReserves],
+  );
   const overlayOpen = overlays.dialog || overlays.search || overlays.ai || overlays.menu || overlays.panel || locked;
 
   const fingerprint = useMemo(
@@ -359,5 +369,6 @@ export function useDesktop(opts: { locked?: boolean; sessionKey?: string | null 
     dismissNotice: (id: string) => setNotices((list) => list.filter((n) => n.id !== id)),
     browserCommand,
     refreshDownloads,
+    reportViewportReserve,
   };
 }

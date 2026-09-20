@@ -7,7 +7,7 @@
  *   2. **不拥有原生对象**：视口只是 DOM 占位；原生视图由主进程按 windowId/tabId 管理。
  *   3. 运行期事实（loading / 错误 / 下载 / 提示）来自 props —— 它们不是持久化状态。
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Download, RotateCw, X, Plus, ShieldAlert, ExternalLink, Globe, Bot } from "lucide-react";
 import domain from "../../electron/window-domain.cjs";
 import type { Window as WinDomain, WindowCommand } from "../../electron/window-domain.cjs";
@@ -36,6 +36,11 @@ type Props = {
   onDismissNotice: (id: string) => void;
   /** 下载面板打开时必须让原生视图让位（否则面板被网页盖住，用户点不到）。 */
   onPanelOpenChange?: (open: boolean) => void;
+  /**
+   * 上报「chrome 之下、网页之上」的 DOM 条带高度（提示条 / 错误条 / 状态行）。
+   * 它是**实测**的：原生视图是窗口之上的子视图，不让位就会把提示条整个盖住。
+   */
+  onViewportReserve?: (windowId: string, reserve: number) => void;
 };
 
 const NOTICE_TITLE: Record<BrowserNotice["kind"], string> = {
@@ -47,7 +52,7 @@ const NOTICE_TITLE: Record<BrowserNotice["kind"], string> = {
   gone: "网页进程已退出",
 };
 
-export function BrowserApp({ win, runtime, downloads, notices, nativeVisible, onCommand, onNavigate, onAction, onBrowser, onDismissNotice, onPanelOpenChange }: Props) {
+export function BrowserApp({ win, runtime, downloads, notices, nativeVisible, onCommand, onNavigate, onAction, onBrowser, onDismissNotice, onPanelOpenChange, onViewportReserve }: Props) {
   const tabs = domain.tabsOf(win);
   const activeTabId = domain.activeTabIdOf(win);
   const activeTab = tabs.find((t) => t.tabId === activeTabId) || tabs[0];
@@ -56,6 +61,16 @@ export function BrowserApp({ win, runtime, downloads, notices, nativeVisible, on
   const [editing, setEditing] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
+  // 每次渲染后重算一次「视口顶到外壳顶」的距离：提示条/错误条的高度是 DOM 事实，
+  // 只有这里知道；值不变时 useDesktop 不会再渲染（不会形成回路）。
+  useLayoutEffect(() => {
+    const shell = shellRef.current;
+    const vp = shell ? shell.querySelector<HTMLElement>(".web-viewport") : null;
+    if (!shell || !vp || !onViewportReserve) return;
+    const top = Math.round(vp.getBoundingClientRect().top - shell.getBoundingClientRect().top);
+    onViewportReserve(win.id, Math.max(0, top - domain.BROWSER_CHROME_H));
+  });
   // ---------------------------------------------------------------- D5-01 Closure-2 · AI 控制授权
   // 目标身份与主进程/工具链**同一口径**（windowId#tabId）；这里只显示"哪个标签被授权了"，
   // 授权本身由用户在按钮上显式点击，主进程再校验账号 / 分区归属 / 存活。
@@ -133,7 +148,7 @@ export function BrowserApp({ win, runtime, downloads, notices, nativeVisible, on
   );
 
   return (
-    <div className="browser-shell" data-browser-window={win.id}>
+    <div className="browser-shell" data-browser-window={win.id} ref={shellRef}>
       <div className="tabstrip" role="tablist" aria-label="浏览器标签">
         {tabs.map((t) => {
           const active = t.tabId === activeTabId;

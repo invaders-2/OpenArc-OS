@@ -26,7 +26,8 @@ export function reduce(state: WindowStateModel, command: WindowCommand): WindowS
 export function applyAll(state: WindowStateModel, commands: WindowCommand[]): WindowStateModel;
 export function serialize(state: WindowStateModel): string;
 export function deserialize(raw: unknown, areas?: Area[]): WindowStateModel;
-export function nativeIntents(state: WindowStateModel, host?: Host): NativeIntent[];
+/** `reserves`：浏览器窗口 chrome 之下、网页之上的 DOM 条带高度（windowId → pt）。 */
+export function nativeIntents(state: WindowStateModel, host?: Host, reserves?: Record<string, number>): NativeIntent[];
 export const WINDOW_COMMANDS: readonly string[];
 export const BROWSER_COMMANDS: readonly string[];
 export const SYSTEM_MUTATIONS: readonly string[];

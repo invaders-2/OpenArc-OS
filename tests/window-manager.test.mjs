@@ -298,3 +298,27 @@ test("nativeIntents：只有 browser kind 产出意图，且带上遮挡者与�
   const onlyHome = boot([{ type: "window/open", appId: "home" }]);
   assert.deepEqual(manager.nativeIntents(onlyHome, HOST), []);
 });
+
+test("nativeIntents：chrome 之下的 DOM 条带（提示条/错误条）从原生视口里**让出去**", () => {
+  const state = boot([
+    { type: "window/open", appId: "browser", id: "browser", bounds: { x: 60, y: 80, w: 700, h: 500 } },
+    { type: "window/open", appId: "home", id: "home", bounds: { x: 100, y: 120, w: 700, h: 500 } },
+  ]);
+  const base = manager.nativeIntents(state, HOST)[0].viewport;
+  // 条带高度整块从顶部让出（宽/高同源；让位后网页不会被 DOM 提示条挡住）
+  const strip = 152;
+  assert.deepEqual(manager.nativeIntents(state, HOST, { browser: strip })[0].viewport, {
+    x: base.x,
+    y: base.y + strip,
+    width: base.width,
+    height: base.height - strip,
+  });
+  // 没上报的窗口与非浏览器窗口一律 0：既有几何逐字不变（D2-02 / D5-01 旧断言仍成立）
+  assert.deepEqual(manager.nativeIntents(state, HOST, {})[0].viewport, base);
+  assert.deepEqual(manager.nativeIntents(state, HOST, { home: 500 })[0].viewport, base);
+  // 脏值不产生负高度、不引入小数
+  assert.equal(manager.nativeIntents(state, HOST, { browser: -10 })[0].viewport.height, base.height);
+  assert.equal(manager.nativeIntents(state, HOST, { browser: 9e9 })[0].viewport.height, 0);
+  assert.equal(manager.nativeIntents(state, HOST, { browser: 151.6 })[0].viewport.y, base.y + 152);
+  assert.equal(manager.nativeIntents(state, HOST, { browser: Number.NaN })[0].viewport.y, base.y);
+});

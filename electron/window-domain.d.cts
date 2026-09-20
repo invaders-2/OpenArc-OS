@@ -115,6 +115,7 @@ declare const domain: {
   AREA_TOP: typeof AREA_TOP;
   AREA_BOTTOM: typeof AREA_BOTTOM;
   TITLE_BAR_H: typeof TITLE_BAR_H;
+  BROWSER_CHROME_H: typeof BROWSER_CHROME_H;
   KIND: typeof KIND;
   WSTATE: typeof WSTATE;
   FOLDER_PREFIX: typeof FOLDER_PREFIX;

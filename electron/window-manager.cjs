@@ -481,35 +481,44 @@ const applyAll = (state, commands) => commands.reduce((s, c) => reduce(s, c), st
 const serialize = (state) => JSON.stringify(domain.toPersisted(state));
 const deserialize = (raw, areas) => hydrate(domain.createState(), { persisted: raw, areas });
 
-/** 该窗口此刻是否应有原生视图可见（供 native-view-controller 消费的意图）。 */
-function nativeIntents(state, host) {
+/**
+ * 该窗口此刻是否应有原生视图可见（供 native-view-controller 消费的意图）。
+ *
+ * `reserves[windowId]` = 该窗口 chrome 之下、网页之上的 **DOM 条带高度**
+ * （提示条 / 错误条 / 状态行）。原生视图是挂在窗口之上的子视图，DOM 在它下面 ——
+ * 所以这条 strip 必须从原生视图矩形里**让出去**，否则提示会被网页整个盖住
+ * （D5-01 Closure-4 像素实测：提示条 34pt 全部落在网页矩形内，网页绿占比 24/25）。
+ */
+function nativeIntents(state, host, reserves = {}) {
   return state.windows
     .filter((w) => domain.isNativeKind(w.kind))
-    .map((w) => ({
-      windowId: w.id,
-      appId: w.appId,
-      url: w.meta.url || "",
-      // D5-01：一个浏览器窗口 = 每个标签一个原生视图；只有 active 的那个参与遮挡结算，
-      // 其余由控制器 setVisible(false) 保持存活（页面状态不丢，切回即恢复）。
-      views: domain.tabsOf(w).map((t) => ({
-        viewId: w.id + "#" + t.tabId,
-        tabId: t.tabId,
-        url: t.url,
-        active: t.tabId === w.meta.activeTabId,
-      })),
-      present: w.state !== WSTATE.MINIMIZED,
-      focused: state.focused === w.id,
-      viewport: {
-        x: w.bounds.x,
-        y: w.bounds.y + domain.TITLE_BAR_H + (w.kind === domain.KIND.BROWSER ? domain.BROWSER_CHROME_H : 0),
-        width: w.bounds.w,
-        height: Math.max(
-          0,
-          w.bounds.h - domain.TITLE_BAR_H - (w.kind === domain.KIND.BROWSER ? domain.BROWSER_CHROME_H : 0),
-        ),
-      },
-      occluders: domain.aboveWindows(state, w.id),
-    }));
+    .map((w) => {
+      const chrome = w.kind === domain.KIND.BROWSER ? domain.BROWSER_CHROME_H : 0;
+      const reserve = w.kind === domain.KIND.BROWSER ? Math.max(0, Math.round(Number((reserves || {})[w.id]) || 0)) : 0;
+      const inset = domain.TITLE_BAR_H + chrome + reserve;
+      return {
+        windowId: w.id,
+        appId: w.appId,
+        url: w.meta.url || "",
+        // D5-01：一个浏览器窗口 = 每个标签一个原生视图；只有 active 的那个参与遮挡结算，
+        // 其余由控制器 setVisible(false) 保持存活（页面状态不丢，切回即恢复）。
+        views: domain.tabsOf(w).map((t) => ({
+          viewId: w.id + "#" + t.tabId,
+          tabId: t.tabId,
+          url: t.url,
+          active: t.tabId === w.meta.activeTabId,
+        })),
+        present: w.state !== WSTATE.MINIMIZED,
+        focused: state.focused === w.id,
+        viewport: {
+          x: w.bounds.x,
+          y: w.bounds.y + inset,
+          width: w.bounds.w,
+          height: Math.max(0, w.bounds.h - inset),
+        },
+        occluders: domain.aboveWindows(state, w.id),
+      };
+    });
 }
 
 module.exports = {

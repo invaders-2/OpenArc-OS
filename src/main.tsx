@@ -150,6 +150,7 @@ function App() {
     notices,
     dismissNotice,
     browserCommand,
+    reportViewportReserve,
   } = useDesktop({ locked, sessionKey: identity.snapshot.userId });
 
   // ---------------------------------------------------------------------------
@@ -402,6 +403,7 @@ function App() {
           onBrowser={browserCommand}
           onDismissNotice={dismissNotice}
           onPanelOpenChange={(open) => setOverlays((o) => (o.panel === open ? o : { ...o, panel: open }))}
+          onViewportReserve={reportViewportReserve}
         />
       );
     }

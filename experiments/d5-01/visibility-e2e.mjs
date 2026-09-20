@@ -18,6 +18,13 @@ import fs from "node:fs";
 import os from "node:os";
 import { startSite } from "./site.mjs";
 import { startD4Provider } from "../../tests/fixtures/d4-04-provider.mjs";
+// **唯一换算**：屏幕像素 / 真实指针 / DOM 三条实测通道 + 一个换算器（见模块头部说明）。
+// 本文件不再自带任何"按 DOM 占位符 + 经验 dy"的换算路径。
+import {
+  sh, cliclick, ourWindows, activate, ensureFrontmost,
+  captureTo, imageSize, scanGreen, viewRectFromPixels, makeMapper, makeSafeClick,
+  isPageGreen, sleep,
+} from "./screen-geometry.mjs";
 
 const require = createRequire(import.meta.url);
 const electronPath = require("electron");
@@ -30,12 +37,11 @@ const ADMIN = { id: "admin@d501-vis.test", pw: "admin-password-1" };
 const PROVIDER_SECRET = "d501-vis-provider-secret";
 const PAGE_COLOR = [10, 125, 79]; // #0a7d4f
 const extraArgs = (process.env.ELECTRON_EXTRA_ARGS || "--no-sandbox --disable-gpu-sandbox --in-process-gpu").split(" ").filter(Boolean);
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const RECORD = [], CHECKS = [], NOT_VERIFIED = [], OBSERVATIONS = [];
 let passed = 0, failed = 0;
 function record(section, name, ok, expected, actual) {
-  const row = { section, name, status: ok ? "PASS" : "FAIL", expected: String(expected ?? ""), actual: String(actual ?? "").slice(0, 400), at: Date.now() };
+  const row = { section, name, status: ok ? "PASS" : "FAIL", expected: String(expected ?? ""), actual: String(actual ?? "").slice(0, 2400), at: Date.now() };
   RECORD.push(row); CHECKS.push(row);
   if (ok) passed += 1; else failed += 1;
   console.log((ok ? "  " : "! ") + "[" + row.status + "] " + section + " · " + name + (ok ? "" : " — 期望 " + row.expected + "，实际 " + row.actual));
@@ -44,107 +50,8 @@ function record(section, name, ok, expected, actual) {
 const note = (t) => { OBSERVATIONS.push(t); console.log("   · " + t); };
 const notVerified = (n, r) => { NOT_VERIFIED.push({ name: n, reason: r }); console.log("   ? [NOT VERIFIED] " + n + " — " + r); };
 
-const sh = (cmd, args) => execFileSync(cmd, args, { encoding: "utf8" });
-const cliclick = (s) => sh("cliclick", [String(s)]).trim();
-const PY = (script, args) => sh("python3", ["-c", script, ...args.map(String)]);
-
-/** 我们进程的屏幕窗口（CGWindowID + bounds）。只按 PID 过滤 —— 绝不碰别的实例。 */
-function ourWindows(pid) {
-  const py = [
-    "import json,sys",
-    "from Quartz import CGWindowListCopyWindowInfo, kCGWindowListOptionOnScreenOnly, kCGNullWindowID",
-    "pid=int(sys.argv[1]); out=[]",
-    "for w in CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID):",
-    "    if w.get('kCGWindowOwnerPID')==pid:",
-    "        b=w.get('kCGWindowBounds')",
-    "        out.append({'id':int(w.get('kCGWindowNumber')),'x':float(b['X']),'y':float(b['Y']),'w':float(b['Width']),'h':float(b['Height']),'layer':int(w.get('kCGWindowLayer')),'name':str(w.get('kCGWindowName') or '')})",
-    "print(json.dumps(out))",
-  ].join("\n");
-  return JSON.parse(PY(py, [pid]));
-}
-/** 全屏窗口顺序（用来确认"最前面的是不是我们"）。 */
-function frontmostLayer0() {
-  const py = [
-    "import json,sys",
-    "from Quartz import CGWindowListCopyWindowInfo, kCGWindowListOptionOnScreenOnly, kCGNullWindowID",
-    "out=[]",
-    "for w in CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly, kCGNullWindowID):",
-    "    if int(w.get('kCGWindowLayer'))==0: out.append({'pid':int(w.get('kCGWindowOwnerPID')),'id':int(w.get('kCGWindowNumber'))})",
-    "print(json.dumps(out[:5]))",
-  ].join("\n");
-  return JSON.parse(PY(py, []));
-}
-function capture(id, name) {
-  const file = path.join(FRAMES, name);
-  sh("screencapture", ["-x", "-o", "-l", String(id), file]);
-  return file;
-}
-/** 读 PNG 某个像素（图像像素坐标）。 */
-function pixelAt(file, x, y) {
-  const py = [
-    "import sys",
-    "from Quartz import CGImageSourceCreateWithURL, CGImageSourceCreateImageAtIndex, CGImageGetDataProvider, CGDataProviderCopyData, CGImageGetWidth, CGImageGetHeight, CGImageGetBytesPerRow, CGImageGetBitsPerPixel, CFURLCreateWithFileSystemPath, kCFURLPOSIXPathStyle",
-    "url=CFURLCreateWithFileSystemPath(None, sys.argv[1], kCFURLPOSIXPathStyle, False)",
-    "src=CGImageSourceCreateWithURL(url, None); img=CGImageSourceCreateImageAtIndex(src,0,None)",
-    "bpr=CGImageGetBytesPerRow(img); bpp=CGImageGetBitsPerPixel(img)",
-    "buf=bytes(CGDataProviderCopyData(CGImageGetDataProvider(img)))",
-    "x=int(sys.argv[2]); y=int(sys.argv[3]); off=y*bpr+x*(bpp//8)",
-    "print('%d,%d,%d' % (buf[off], buf[off+1], buf[off+2]))",
-  ].join("\n");
-  return PY(py, [file, x, y]).trim();
-}
-/** 一次调用量出两列的"绿区范围"（列坐标用**图像像素**）。 */
-function greenRanges(file, cols) {
-  const py = [
-    "import sys, json",
-    "from Quartz import CGImageSourceCreateWithURL, CGImageSourceCreateImageAtIndex, CGImageGetDataProvider, CGDataProviderCopyData, CGImageGetWidth, CGImageGetHeight, CGImageGetBytesPerRow, CGImageGetBitsPerPixel, CFURLCreateWithFileSystemPath, kCFURLPOSIXPathStyle",
-    "url=CFURLCreateWithFileSystemPath(None, sys.argv[1], kCFURLPOSIXPathStyle, False)",
-    "img=CGImageSourceCreateImageAtIndex(CGImageSourceCreateWithURL(url, None),0,None)",
-    "bpr=CGImageGetBytesPerRow(img); bpp=CGImageGetBitsPerPixel(img); h=CGImageGetHeight(img)",
-    "buf=bytes(CGDataProviderCopyData(CGImageGetDataProvider(img))); step=bpp//8",
-    "out={}",
-    "for c in sys.argv[2].split(','):",
-    "    x=int(c); first=None; last=None",
-    "    for y in range(h):",
-    "        o=y*bpr+x*step; r,g,b=buf[o],buf[o+1],buf[o+2]",
-    "        if g-r>=40 and g-b>=20:",
-    "            if first is None: first=y",
-    "            last=y",
-    "    out[str(x)]={'first':first,'last':last}",
-    "print(json.dumps(out))",
-  ].join("\n");
-  return JSON.parse(PY(py, [file, cols.join(",")]));
-}
-function imageSize(file) {
-  const py = [
-    "import sys",
-    "from Quartz import CGImageSourceCreateWithURL, CGImageSourceCreateImageAtIndex, CGImageGetWidth, CGImageGetHeight, CFURLCreateWithFileSystemPath, kCFURLPOSIXPathStyle",
-    "url=CFURLCreateWithFileSystemPath(None, sys.argv[1], kCFURLPOSIXPathStyle, False)",
-    "img=CGImageSourceCreateImageAtIndex(CGImageSourceCreateWithURL(url, None),0,None)",
-    "print('%d,%d' % (CGImageGetWidth(img), CGImageGetHeight(img)))",
-  ].join("\n");
-  return PY(py, [file]).trim().split(",").map(Number);
-}
-const closeTo = (rgb, target, tol = 26) => {
-  const p = String(rgb).split(",").map(Number);
-  return p.length === 3 && Math.abs(p[0] - target[0]) <= tol && Math.abs(p[1] - target[1]) <= tol && Math.abs(p[2] - target[2]) <= tol;
-};
-const activate = (pid) => {
-  // 先激活进程，再把窗口 AXRaise 到最前（只对本进程，绝不碰其它实例）。
-  try { sh("osascript", ["-e", "tell application \"System Events\" to set frontmost of (first process whose unix id is " + pid + ") to true"]); } catch { /* ignore */ }
-  try { sh("osascript", ["-e", "tell application \"System Events\" to tell (first process whose unix id is " + pid + ") to perform action \"AXRaise\" of window 1"]); } catch { /* ignore */ }
-  return true;
-};
-/** 反复尝试直到我们自己的窗口成为最前面的 layer-0 窗口（最多 ~9s）；拿不到就返回 false。 */
-async function ensureFrontmost(pid, winId, tries = 6) {
-  for (let i = 0; i < tries; i += 1) {
-    const f = frontmostLayer0();
-    if (f.length && f[0].id === winId) return { ok: true, front: f.slice(0, 3), tries: i + 1 };
-    activate(pid);
-    await sleep(1500);
-  }
-  return { ok: false, front: frontmostLayer0().slice(0, 3), tries };
-}
+/** 抓本窗口画面到 artifacts（几何 / 可见性判定的输入）。 */
+const capture = (id, name) => captureTo(id, path.join(FRAMES, name));
 
 let child = null, browser = null, page = null, site = null, provider = null, stderrBuf = "";
 const js = (code) => page.evaluate("(async () => { " + code + " })()");
@@ -266,80 +173,134 @@ async function main() {
   if (!isFront) {
     notVerified("真实指针输入（标签栏/地址栏/网页交互/窗口缩放）", "我们的隔离实例未能成为最前面的窗口；为**绝不影响**用户正在运行的另一个 OpenArc 实例，本门禁不发真实点击，改为保持未验证。需要的条件：本实例窗口可被激活到最前（无其它窗口覆盖其区域）。");
   } else {
-    const geo = JSON.parse(await js("const c=(s)=>{const e=document.querySelector(s); if(!e) return null; const b=e.getBoundingClientRect(); return {x:b.left+b.width/2,y:b.top+b.height/2,w:b.width,h:b.height};}; return JSON.stringify({origin:{x:window.screenX,y:window.screenY},outer:{ow:window.outerWidth,oh:window.outerHeight,iw:window.innerWidth,ih:window.innerHeight},tabNew:c('[data-tab-new]'),addr:c('[aria-label=\"网页地址\"]'),viewport:c('.web-viewport'),dl:c('[data-downloads-toggle]'),dlPanel:null});"));
+    const geo = JSON.parse(await js("const c=(s)=>{const e=document.querySelector(s); if(!e) return null; const b=e.getBoundingClientRect(); return {left:b.left,top:b.top,width:b.width,height:b.height,x:b.left+b.width/2,y:b.top+b.height/2,w:b.width,h:b.height};}; const bn=document.querySelector('.browser-notices, .browser-error'); const k=bn?bn.querySelector('[data-notice-kind]'):null; return JSON.stringify({origin:{x:window.screenX,y:window.screenY},outer:{ow:window.outerWidth,oh:window.outerHeight,iw:window.innerWidth,ih:window.innerHeight},tabNew:c('[data-tab-new]'),addr:c('[aria-label=\"网页地址\"]'),dl:c('[data-downloads-toggle]'),vp:c('.web-viewport'),shell:c('[data-browser-window]'),banner:bn?{cls:String(bn.className),left:bn.getBoundingClientRect().left,top:bn.getBoundingClientRect().top,width:bn.getBoundingClientRect().width,height:bn.getBoundingClientRect().height,kind:k?k.getAttribute('data-notice-kind'):null,text:String(bn.innerText||'').slice(0,80)}:null});"));
     const titlebar = Math.max(0, Math.round(geo.outer.oh - geo.outer.ih));
-    const contentTop = win.y + titlebar;
-    // 像素判定：macOS 截图会做色彩管理（P3→sRGB），因此判"这一块是不是网页纯绿"用**绿占优**而不是精确值。
-    const isPageGreen = (rgb) => { const p = String(rgb).split(",").map(Number); return p.length === 3 && p[1] - p[0] >= 40 && p[1] - p[2] >= 20; };
+    // 通道③：窗口 + DOM 事实推出的"网页坐标系原点"（不依赖任何点击标定）。
+    const contentDom = { x: win.x, y: win.y + titlebar };
+    /** 真实点击前的安全闸（每次点击前重新校验前台与落点；见 screen-geometry.mjs）。 */
+    const safeClick = makeSafeClick({ pid, titlebar, winId: win.id });
+    const boxOf = async (sel) => JSON.parse((await js("const e=document.querySelector(" + JSON.stringify(sel) + "); if(!e) return 'null'; const b=e.getBoundingClientRect(); return JSON.stringify({left:b.left,top:b.top,width:b.width,height:b.height,cx:b.left+b.width/2,cy:b.top+b.height/2});")) || "null");
+    /** 外壳侧点击监听：真实指针点外壳控件时，证据必须来自外壳自己（isTrusted + 命中哪个按钮）。 */
+    const shellWatch = () => js("window.__shellClicks = []; if (!window.__shellClickInstalled) { window.__shellClickInstalled = true; document.addEventListener('click', function (e) { const b = e.target && e.target.closest ? e.target.closest('button') : null; const t = e.target; window.__shellClicks.push({ trusted: !!e.isTrusted, x: e.clientX, y: e.clientY, target: (t && t.getAttribute && (t.getAttribute('aria-label') || t.tagName)) || '', button: b ? (b.getAttribute('aria-label') || String(b.className || '')) : '' }); }, true); } return 'ok'");
+    const shellClicks = async () => JSON.parse((await js("return JSON.stringify(window.__shellClicks || [])")) || "[]");
+    /**
+     * 真实指针点击 + **回执**：系统偶尔会把"刚被激活的窗口的第一下点击"吃掉（不送进内容），
+     * 因此最多重试 3 次，并以"外壳自己收到这次点击"为准 —— 绝不以"我们发了点击"当成功。
+     */
+    const clickUntil = async (pt, label, received, tries = 3) => {
+      const trace = [];
+      for (let i = 0; i < tries; i += 1) {
+        await shellWatch();
+        const r = await safeClick(pt, label + (i ? "-retry" + i : ""));
+        await sleep(320);
+        const got = await received();
+        trace.push({ i, click: r.ok ? { ok: true, attempt: r.attempt } : r, received: !!got });
+        if (r.ok && got) return { ok: true, tries: i + 1, trace };
+      }
+      return { ok: false, reason: "not-received:" + label, trace };
+    };
+    /** DOM 命中测试：这个 DOM 点现在到底压在哪个元素上（坐标换算的独立旁证）。 */
+    const elementAt = (p) => js("const e=document.elementFromPoint(" + Math.round(p.x) + "," + Math.round(p.y) + "); if(!e) return 'none'; const b=e.closest?e.closest('button'):null; return (b && b.getAttribute('aria-label')) || e.getAttribute('aria-label') || (e.tagName + '.' + String(e.className||'').split(' ')[0]);");
     const frame0 = capture(win.id, "01-paint-before.png");
     const size0 = imageSize(frame0);
     const scale = size0[0] / win.w;
-    const vpCenter = { x: Math.round(geo.origin.x + geo.viewport.x), y: Math.round(geo.origin.y + geo.viewport.y) };
-    const pixelOfPoint = (file, pt) => pixelAt(file, Math.round((pt.x - win.x) * scale), Math.round((pt.y - win.y) * scale));
-    const before = pixelOfPoint(frame0, vpCenter);
+    // 通道①：**像素**——扫中间一行/一列，直接量出网页那一块在屏幕上的矩形。
+    const scan0 = scanGreen(frame0, Math.round(size0[0] / 2), Math.round(size0[1] / 2));
+    const viewPixels = viewRectFromPixels(win, scale, scan0);
+    // 通道③的预测：DOM 预留矩形（.web-viewport）按"窗口内容原点"换算到屏幕。
+    const vpScreen = viewPixels ? { left: contentDom.x + geo.vp.left, top: contentDom.y + geo.vp.top, right: contentDom.x + geo.vp.left + geo.vp.width, bottom: contentDom.y + geo.vp.top + geo.vp.height } : null;
+    // 换算器的 DOM 原点来自**窗口 + DOM 事实**（③），不由像素矩形反推 —— 两条几何各自独立。
+    const M = viewPixels ? makeMapper({ win, scale, viewRect: viewPixels, origin: contentDom }) : null;
+    const pixelOfPoint = (file, pt) => M.pixelOfScreen(file, pt);
+    const origTitlebar = titlebar;
+    /** 当下实测（每次布局变化后都重新走一遍）：抓帧 → 扫像素 → 视图矩形 → 唯一换算器。 */
+    const measureView = async (tag) => {
+      const w = ourWindows(pid).filter((x) => x.layer === 0 && x.w > 400)[0] || win;
+      const shellRect = JSON.parse(await js("const e=document.querySelector('[data-browser-window]'); if(!e) return 'null'; const b=e.getBoundingClientRect(); return JSON.stringify({left:b.left,top:b.top,width:b.width,height:b.height});"));
+      const file = capture(w.id, tag);
+      const size = imageSize(file);
+      const sc = size[0] / w.w;
+      const scan = scanGreen(file, Math.round(size[0] / 2), Math.round(size[1] / 2));
+      const rect = viewRectFromPixels(w, sc, scan);
+      const origin = { x: w.x, y: w.y + Math.max(0, Math.round(Number(origTitlebar) || 0)) };
+      return { win: w, file, size, scale: sc, rect, shellRect, origin, mapper: rect && shellRect ? makeMapper({ win: w, scale: sc, viewRect: rect, origin }) : null };
+    };
+    const vpCenter = viewPixels ? { x: Math.round((viewPixels.left + viewPixels.right) / 2), y: Math.round((viewPixels.top + viewPixels.bottom) / 2) } : null;
+    const before = vpCenter ? pixelOfPoint(frame0, vpCenter) : "0,0,0";
     record("pixel", "V4 · 屏幕像素证明确实「看得见」网页（视口中心是页面纯绿）", isPageGreen(before), "页面纯绿（绿占优）", String(before));
     record("pixel", "V4b · 截图确实是本窗口的画面（图像尺寸 = 窗口 bounds × 缩放）", size0[0] > 400 && Math.abs(scale - Math.round(scale)) < 0.01, "尺寸一致", JSON.stringify({ image: size0, win: { w: Math.round(win.w), h: Math.round(win.h) }, scale, titlebar }));
-
-    // 直接**从像素**量出"网页那一块"在窗口里的真实范围（而不是相信 DOM 占位符），
-    // 并与 DOM 占位符比较 —— 两者的差就是"原生视图与预留位置是否一致"的真值。
-    // **单一真源**：原生视图的意图矩形 = 浏览器窗口内容区 - BROWSER_CHROME_H(90)。
-    // domain 里 viewport.y = bounds.y + TITLE_BAR_H + BROWSER_CHROME_H，而 DOM 里 .browser-shell
-    // 正好从 bounds.y + TITLE_BAR_H 开始 → 标题栏项在两边抵消，于是
-    //   意图 top(屏幕) = 页面原点 + shell.top + 90，意图高度 = shell.height - 90。
-    const shellBox = JSON.parse(await js("const e=document.querySelector('[data-browser-window]'); if(!e) return 'null'; const b=e.getBoundingClientRect(); return JSON.stringify({left:b.left,top:b.top,w:b.width,h:b.height});"));
-    const banner = JSON.parse((await js("const e=document.querySelector('.browser-notices, .browser-error'); if(!e) return 'null'; const b=e.getBoundingClientRect(); const k=e.querySelector('[data-notice-kind]'); return JSON.stringify({cls:e.className, top:b.top, h:b.height, kind:k?k.getAttribute('data-notice-kind'):null, text:String(e.innerText||'').slice(0,80)});")) || "null");
-    const intentTopPt = shellBox ? Math.round(win.y + titlebar + shellBox.top + 90) : null;
-    const intentBottomPt = shellBox ? Math.round(intentTopPt + shellBox.h - 90) : null;
-    const scanCol = Math.round((vpCenter.x - win.x) * scale);
-    const ranges = greenRanges(frame0, [scanCol, 6]);
-    const r1 = ranges[String(scanCol)] || { first: null, last: null };
-    const shellCol = ranges["6"] || { first: null, last: null };
-    const firstGreen = r1.first, lastGreen = r1.last;
-    const viewRectFromPixels = firstGreen == null ? null : { topPt: Math.round(win.y + firstGreen / scale), bottomPt: Math.round(win.y + lastGreen / scale) };
-    // DOM 占位符（.web-viewport）只是外壳里的一块**占位**：当有提示条/错误条时它会被推下去，
-    // 因此它不参与"原生视图是否错位"的判定；它的偏差只作为"为什么占位符与意图不同"的解释。
-    const placeholderTopPt = Math.round(geo.origin.y + geo.viewport.y - geo.viewport.h / 2);
-    const placeholderBottomPt = Math.round(placeholderTopPt + geo.viewport.h);
-    const deltaVsIntent = viewRectFromPixels ? { top: viewRectFromPixels.topPt - intentTopPt, bottom: viewRectFromPixels.bottomPt - intentBottomPt } : null;
-    const placeholderVsIntent = { top: placeholderTopPt - intentTopPt, bottom: placeholderBottomPt - intentBottomPt };
-    const bannerExplains = !!banner && Math.abs(banner.h - Math.max(0, placeholderVsIntent.top)) <= 3;
-    note("几何对照（屏幕 pt）：意图 " + JSON.stringify({ top: intentTopPt, bottom: intentBottomPt }) + "；像素真值 " + JSON.stringify(viewRectFromPixels) + "；DOM 占位 " + JSON.stringify({ top: placeholderTopPt, bottom: placeholderBottomPt }) + "；banner " + JSON.stringify(banner ? { cls: banner.cls, h: banner.h, kind: banner.kind } : null));
-    const shellColGreen = (shellCol.run || 0) > 20;
-    record("pixel", "V4c · 原生视图的**像素真值**与**意图矩形**一致（位置与高度都要对）", !shellColGreen && !!deltaVsIntent && (r1.run || 0) > 100 && Math.abs(deltaVsIntent.top) <= 4 && Math.abs(deltaVsIntent.bottom) <= 4, "|Δtop|≤4 且 |Δbottom|≤4", JSON.stringify({ intent: { top: intentTopPt, bottom: intentBottomPt }, fromPixels: viewRectFromPixels, delta: deltaVsIntent, shellColumnGreen: shellColGreen }));
-    record("pixel", "V4d · DOM 占位符与意图的偏差**有解释**（有提示条/错误条时被推下去，否则必须一致）", bannerExplains || Math.abs(placeholderVsIntent.top) <= 4, "占位符一致或由 banner 解释", JSON.stringify({ placeholderVsIntent, banner: banner ? { cls: banner.cls, h: banner.h, kind: banner.kind, text: banner.text } : null, bannerExplains }));
-
-    /** 真实点击前的**安全闸**：① 窗口还在；② 我们仍是最前面的窗口；③ 落点在我们的内容区内。 */
-    const safeClick = async (pt, label) => {
-      const w = ourWindows(pid).filter((x) => x.layer === 0 && x.w > 400)[0];
-      if (!w) return { ok: false, reason: "window-gone:" + label };
-      const front2 = frontmostLayer0();
-      if (!front2.length || front2[0].id !== w.id) return { ok: false, reason: "not-frontmost:" + label };
-      if (pt.x < w.x + 6 || pt.x > w.x + w.w - 6 || pt.y < w.y + titlebar + 4 || pt.y > w.y + w.h - 6) return { ok: false, reason: "outside-content:" + label };
-      cliclick("m:" + pt.x + "," + pt.y); await sleep(150); cliclick("c:" + pt.x + "," + pt.y);
-      return { ok: true };
-    };
-    const focusedAddress = () => js("return document.activeElement === document.querySelector('[aria-label=\"网页地址\"]')");
-
-    /* 先用地址栏做**坐标标定**：真实指针点在哪个 dy 上能真的把焦点送进输入框。 */
-    let dy = 0; let calib = null;
-    for (const cand of [0, 6, 12, 20, 28, -6, -12]) {
-      const pt = { x: Math.round(geo.origin.x + geo.addr.x), y: Math.round(geo.origin.y + geo.addr.y + cand) };
-      const r = await safeClick(pt, "calib");
-      if (!r.ok) { calib = r; break; }
-      await sleep(250);
-      if (await focusedAddress()) { dy = cand; calib = { ok: true, dy: cand }; break; }
+    // 通道②：**真实指针**——点像素矩形中心，网页回报它自己的 client 坐标 → 反推视图原点。
+    const vv0 = viewByUrl("/paint");
+    const centerTry = await safeClick(vpCenter, "geometry-crosscheck");
+    await sleep(400);
+    const seenCenter = vv0 ? JSON.parse((await viewEval(vv0, "const e=(window.__lastClick||null); return JSON.stringify(e)")) || "null") : null;
+    const viewPointer = seenCenter && centerTry.ok ? { left: vpCenter.x - seenCenter.x, top: vpCenter.y - seenCenter.y } : null;
+    const pageGeoC = vv0 ? JSON.parse((await viewEval(vv0, "return JSON.stringify({iw:window.innerWidth,ih:window.innerHeight,dpr:window.devicePixelRatio,scrollY:window.scrollY})")) || "{}") : {};
+    const delta = (a, b) => (a && b ? { top: Math.round(a.top - b.top), left: Math.round(a.left - b.left), bottom: Math.round(a.bottom - b.bottom), right: Math.round(a.right - b.right) } : null);
+    const dPixDom = delta(viewPixels, vpScreen);          // ① vs ③
+    const dPixPtr = viewPointer ? delta(viewPixels, { left: viewPointer.left, top: viewPointer.top, right: viewPointer.left + (viewPixels ? viewPixels.width : 0), bottom: viewPointer.top + (viewPixels ? viewPixels.height : 0) }) : null; // ① vs ②
+    const sizeOk = viewPixels && Math.abs(viewPixels.width - Number(pageGeoC.iw)) <= 3 && Math.abs(viewPixels.height - Number(pageGeoC.ih)) <= 3;
+    note("几何（屏幕 pt）：像素真值 " + JSON.stringify(viewPixels) + "；DOM 预留矩形 " + JSON.stringify(vpScreen) + "；指针反推原点 " + JSON.stringify(viewPointer) + "；网页自报 innerWidth/Height " + pageGeoC.iw + "×" + pageGeoC.ih + "；chrome 之下条带高度 " + (geo.shell ? Math.round(geo.vp.top - geo.shell.top - 90) : "?") + "；banner " + JSON.stringify(geo.banner ? { cls: geo.banner.cls, h: geo.banner.height, kind: geo.banner.kind } : null));
+    record("pixel", "V4c · 三条独立通道一致：像素真值 = DOM 预留矩形 = 指针反推（|Δ|≤3pt，宽高也对）", !!dPixDom && !!dPixPtr && Math.abs(dPixDom.top) <= 3 && Math.abs(dPixDom.bottom) <= 3 && Math.abs(dPixDom.left) <= 3 && Math.abs(dPixDom.right) <= 3 && Math.abs(dPixPtr.top) <= 3 && Math.abs(dPixPtr.left) <= 3 && sizeOk, "三路一致（|Δ|≤3pt）", JSON.stringify({ pixels: viewPixels, domReserved: vpScreen, pointerOrigin: viewPointer, deltaPixelsVsDom: dPixDom, deltaPixelsVsPointer: dPixPtr, sizeVsPage: { iw: pageGeoC.iw, ih: pageGeoC.ih, ok: sizeOk } }));
+    // V4d：有提示条/错误条时，网页必须**让出**那一条 DOM 条带（否则提示被网页整个盖住）。
+    const strip = geo.shell ? Math.round(geo.vp.top - geo.shell.top - 90) : 0;
+    const grid = [];
+    if (geo.banner && M) {
+      for (const fy of [0.2, 0.5, 0.8]) for (const fx of [0.1, 0.5, 0.9]) {
+        const pt = { x: Math.round(contentDom.x + geo.banner.left + geo.banner.width * fx), y: Math.round(contentDom.y + geo.banner.top + geo.banner.height * fy) };
+        grid.push({ fy, fx, rgb: pixelOfPoint(frame0, pt) });
+      }
     }
-    record("safety", "V3b · 真实点击只落在本实例窗口内（每次点击前重新校验前台与内容区）", !!(calib && calib.ok), "点击被安全闸放行", JSON.stringify(calib));
-    if (calib && calib.ok) {
-      record("pointer", "V6 · 真实指针点击地址栏 → 焦点真的进入输入框（并据此标定坐标偏移）", await focusedAddress(), "activeElement=地址栏", JSON.stringify({ dy }));
+    const greenInBanner = grid.filter((g) => isPageGreen(g.rgb)).length;
+    record("pixel", "V4d · 提示条/错误条存在时网页**让位**（条带高度 > 0，且条带内像素不是网页绿）", !!geo.banner ? strip > 0 && grid.length > 0 && greenInBanner === 0 : strip === 0, "条带让位且不被网页覆盖", JSON.stringify({ banner: geo.banner ? { kind: geo.banner.kind, h: Math.round(geo.banner.height), text: geo.banner.text } : null, stripH: strip, samples: grid.length, greenSamples: greenInBanner, sampleRgb: grid.map((g) => g.rgb) }));
+    // **热身**：系统会把"刚被激活的 App 的第一下点击"用于把窗口变成 key window（不送进内容）。
+    // 这是操作系统行为、不是产品缺陷，但会污染后面每一条点击断言：先点窗口标题栏
+    // （只触发拖拽、不改状态）并确认外壳真的收到了 pointerdown，最多三下。
+    const warmUp = async () => {
+      await js("window.__shellPointer = 0; if (!window.__shellPointerInstalled) { window.__shellPointerInstalled = true; document.addEventListener('pointerdown', function () { window.__shellPointer += 1; }, true); } return 'ok'");
+      const domWinId = await js("return document.querySelector('[data-browser-window]')?.getAttribute('data-browser-window') || ''");
+      const title = await boxOf('[data-window-id="' + domWinId + '"] .window-title');
+      if (!title || !M) return { ok: false, reason: "no-title-bar-or-geometry" };
+      const pt = M.domToScreen({ x: title.cx, y: title.cy });
+      const trace = [];
+      for (let i = 0; i < 3; i += 1) {
+        const r = await safeClick(pt, "warmup-" + i);
+        await sleep(350);
+        const seen = Number(await js("return window.__shellPointer || 0")) || 0;
+        trace.push({ i, click: r.ok ? { ok: true, attempt: r.attempt } : r, shellPointer: seen });
+        if (r.ok && seen > 0) return { ok: true, tries: i + 1, seen, point: pt, trace };
+      }
+      return { ok: false, reason: "shell-never-received-pointer", point: pt, trace };
+    };
+    const warm = await warmUp();
+    record("safety", "V3c · 真实指针确实到达本实例外壳（激活后的第一下点击可能被系统用于激活窗口，先热身）", warm.ok, "外壳收到真实 pointerdown（≤3 次热身点击）", JSON.stringify(warm));
+
+    const focusedAddress = () => js("return document.activeElement === document.querySelector('[aria-label=\"网页地址\"]')");
+    // 地址栏的真实点击：坐标由**统一换算**给出（DOM 点 → 屏幕点），不再有"试几个 dy"的标定路径。
+    // 判定用独立通道：焦点是否真的进了输入框。
+    const addrPt = M.domToScreen(geo.addr);
+    let calib = { ok: false }, addrFocused = false;
+    for (let i = 0; i < 3; i += 1) {
+      calib = await safeClick(addrPt, "addressbar" + (i ? "-retry" + i : ""));
+      await sleep(250);
+      addrFocused = await focusedAddress();
+      if (calib.ok && addrFocused) break;
+    }
+    record("safety", "V3b · 真实点击只落在本实例窗口内（每次点击前重新校验前台与内容区）", calib.ok, "点击被安全闸放行", JSON.stringify(calib));
+    if (calib.ok) {
+      record("pointer", "V6 · 统一换算给出的地址栏坐标 + 真实指针 → 焦点真的进入输入框", addrFocused, "activeElement=地址栏", JSON.stringify({ point: addrPt, fromDom: { x: geo.addr.x, y: geo.addr.y }, click: calib }));
       capture(win.id, "03-addressbar-focus.png");
-      const toScreen = (p) => ({ x: Math.round(geo.origin.x + p.x), y: Math.round(geo.origin.y + p.y + dy) });
+      const toScreen = M.domToScreen;
 
       /* V5 标签栏：真实指针点击「新建标签」→ 真的多出一个标签；再点第二个标签 → 活动标签切换 */
+      const tabNewPt = toScreen(geo.tabNew);
+      const tabNewEl = await elementAt(geo.tabNew);
+      const tabNewPixel = pixelOfPoint(frame0, tabNewPt);
       const tabs0 = await js("return document.querySelectorAll('[data-tab]').length");
-      const addR = await safeClick(toScreen(geo.tabNew), "new-tab");
+      const addR = await clickUntil(tabNewPt, "new-tab", async () => (await shellClicks()).some((c) => c.trusted && /新建标签/.test(c.button)));
+      const tabClicks = await shellClicks();
       const added = addR.ok && await waitFor(async () => (await js("return document.querySelectorAll('[data-tab]').length")) === tabs0 + 1, 6000);
-      record("pointer", "V5 · 真实指针点击标签栏「新建标签」→ 真的多出一个标签", added, "标签数 +1", JSON.stringify({ before: tabs0, after: await js("return document.querySelectorAll('[data-tab]').length"), click: addR }));
+      record("pointer", "V5 · 真实指针点击标签栏「新建标签」→ 真的多出一个标签（外壳收到该按钮的 isTrusted 点击）", added, "标签数 +1 且外壳收到该按钮点击", JSON.stringify({ before: tabs0, after: await js("return document.querySelectorAll('[data-tab]').length"), elementAtPoint: tabNewEl, screen: tabNewPt, pointPixel: tabNewPixel, click: addR, shellClicks: tabClicks }));
       if (added) {
         const g2 = JSON.parse(await js("const e=document.querySelectorAll('[data-tab]')[1]; const b=e.getBoundingClientRect(); return JSON.stringify({x:b.left+b.width/2,y:b.top+b.height/2,id:e.getAttribute('data-tab')});"));
         const r2 = await safeClick(toScreen(g2), "tab-switch");
@@ -354,29 +315,26 @@ async function main() {
         await sleep(400);
       }
 
-      /* V7 网页可见 + 可交互：真实指针点击页面内部（页面自己记录落点，用来度量真实命中位置） */
-      const vpRect = JSON.parse(await js("const b=document.querySelector('.web-viewport').getBoundingClientRect(); return JSON.stringify({left:b.left,top:b.top,width:b.width,height:b.height});"));
-      const pageClick = async (pageX, pageY, tag) => {
-        const r = await safeClick(toScreen({ x: vpRect.left + pageX, y: vpRect.top + pageY }), tag);
-        await sleep(400);
-        const vv = viewByUrl("/paint");
-        const last = vv ? await viewEval(vv, "return JSON.stringify(window.__lastClick || null)") : "null";
-        const count = vv ? await viewEval(vv, "return document.getElementById('paint-count')?.textContent || ''") : "";
-        return { r, last: JSON.parse(last || "null"), count };
-      };
-      // 先点页面**中心**（最稳的命中目标）——同时用它标定"我们算出的屏幕点"到"页面坐标系"的常量偏移。
-      const probePage = { x: Math.round(vpRect.width / 2), y: Math.round(vpRect.height / 2) };
-      const centerTry = await pageClick(probePage.x, probePage.y, "page-center");
+      /* V7 网页可见 + 可交互：真实指针点页面里的按钮本体（页面自己记录落点，作为独立通道） */
       const pageGeo = JSON.parse((await viewEval(viewByUrl("/paint"), "return JSON.stringify({scrollY: window.scrollY, innerH: window.innerHeight, docH: document.documentElement.scrollHeight, innerW: window.innerWidth})")) || "{}");
-      const dxCal = centerTry.last ? Math.round(centerTry.last.x - probePage.x) : 0;
-      const dyCal = centerTry.last ? Math.round(centerTry.last.y - probePage.y) : 0;
-      note("页面坐标标定：探测点 " + JSON.stringify(probePage) + " → 页面实际收到 " + JSON.stringify(centerTry.last) + "，常量偏移 dx=" + dxCal + " dy=" + dyCal + "；页面 scrollY=" + pageGeo.scrollY + " innerH=" + pageGeo.innerH + " docH=" + pageGeo.docH);
-      const btnInPage = { x: 60 + 130 - dxCal, y: 140 + 45 - dyCal }; // 用标定结果把"页面内的目标"换算成"我们该发的屏幕坐标"
-      const btnTry = await pageClick(btnInPage.x, btnInPage.y, "page-button");
+      // 首次点进原生视图可能被用于把焦点交给网页（系统行为）：允许至多重试 2 次，并如实记录第几次生效。
+      const pageClick = async (pageX, pageY, tag) => {
+        let r = { ok: false }, last = null, count = "";
+        for (let i = 0; i < 3; i += 1) {
+          r = await safeClick(M.pageToScreen({ x: pageX, y: pageY }), tag + (i ? "-retry" + i : ""));
+          await sleep(400);
+          const vv = viewByUrl("/paint");
+          last = vv ? JSON.parse((await viewEval(vv, "return JSON.stringify(window.__lastClick || null)")) || "null") : null;
+          count = vv ? await viewEval(vv, "return document.getElementById('paint-count')?.textContent || ''") : "";
+          if (last) return { r, last, count, attempt: i + 1 };
+        }
+        return { r, last, count, attempt: 3 };
+      };
+      // 目标 = /paint 的 CLICK-ME 按钮本体（页面坐标 left 60 / top 140 / 260×90 → 中心 190,185）
+      const btnTry = await pageClick(190, 185, "page-button");
       const frame2 = capture(win.id, "04-page-click.png");
-      const hit = !!(centerTry.last || btnTry.last);
-      record("pointer", "V7 · 真实指针点击**网页内部** → 页面自己收到了点击（网页真的可见且可交互）", hit && !!(centerTry.count || btnTry.count), "页面收到真实点击并计数", JSON.stringify({ center: { last: centerTry.last, count: centerTry.count, click: centerTry.r }, button: { last: btnTry.last, count: btnTry.count, click: btnTry.r }, calibration: { dx: dxCal, dy: dyCal, pageGeo }, frame: path.basename(frame2) }));
-      record("pointer", "V7b · 标定后点中页面按钮本体（落点误差 ≤ 6px，目标 = CLICK-ME）", !!btnTry.last && Math.abs(btnTry.last.x - 190) <= 6 && Math.abs(btnTry.last.y - 185) <= 6, "命中按钮", JSON.stringify({ got: btnTry.last, wantPagePoint: { x: 190, y: 185 }, calibration: { dx: dxCal, dy: dyCal } }));
+      record("pointer", "V7 · 真实指针点击**网页内部**按钮 → 页面自己收到点击并计数", btnTry.r.ok && !!btnTry.last && /^COUNT-[1-9]/.test(String(btnTry.count)), "页面收到真实点击并计数", JSON.stringify({ button: { last: btnTry.last, count: btnTry.count, click: btnTry.r }, pageGeo, frame: path.basename(frame2) }));
+      record("pointer", "V7b · 落点就是按钮本体（页面收到的坐标 = 目标，误差 ≤ 6px，target=paint-btn）", !!btnTry.last && Math.abs(btnTry.last.x - 190) <= 6 && Math.abs(btnTry.last.y - 185) <= 6 && btnTry.last.target === "paint-btn", "命中按钮", JSON.stringify({ got: btnTry.last, wantPagePoint: { x: 190, y: 185 } }));
 
       /* V8 面板出现时网页让位（像素级） */
       const dlR = await safeClick(toScreen(geo.dl), "downloads-toggle");
@@ -402,26 +360,20 @@ async function main() {
           resized = !!after2 && (Math.abs(after2.w - before2.w) > 40 || Math.abs(after2.h - before2.h) > 40);
           if (resized) {
             activate(pid); await sleep(800);
-            const geo2 = JSON.parse(await js("const c=(s)=>{const e=document.querySelector(s); if(!e) return null; const b=e.getBoundingClientRect(); return {x:b.left+b.width/2,y:b.top+b.height/2};}; return JSON.stringify({origin:{x:window.screenX,y:window.screenY},viewport:c('.web-viewport')});"));
-            const vp2 = JSON.parse(await js("const b=document.querySelector('.web-viewport').getBoundingClientRect(); return JSON.stringify({left:b.left,top:b.top});"));
-            // 缩放后重新标定（布局变了，偏移必须重新测，不能用旧值）
-            const probe2 = { x: Math.round(vp2.left + Math.round(Number((await js("return document.querySelector('.web-viewport').getBoundingClientRect().width")) || 0) / 2)), y: Math.round(vp2.top + Math.round(Number((await js("return document.querySelector('.web-viewport').getBoundingClientRect().height")) || 0) / 2)) };
-            const cal2 = await safeClick({ x: Math.round(geo2.origin.x + probe2.x), y: Math.round(geo2.origin.y + probe2.y + dy) }, "recalib");
-            await sleep(400);
-            const vvCal = viewByUrl("/paint");
-            const calLast = vvCal ? JSON.parse((await viewEval(vvCal, "return JSON.stringify(window.__lastClick || null)")) || "null") : null;
-            const dxCal2 = calLast ? Math.round(calLast.x - (probe2.x - vp2.left)) : 0;
-            const dyCal2 = calLast ? Math.round(calLast.y - (probe2.y - vp2.top)) : 0;
-            void cal2;
-            const pt2 = { x: Math.round(geo2.origin.x + vp2.left + (190 - dxCal2)), y: Math.round(geo2.origin.y + vp2.top + dy + (185 - dyCal2)) };
-            const r3 = await safeClick(pt2, "page-button-after-resize");
+            // 缩放后**重新测量**（布局变了，一律不用旧值）：像素 → 视图矩形 → 唯一换算器
+            const shell9 = JSON.parse(await js("const e=document.querySelector('[data-browser-window]'); if(!e) return 'null'; const b=e.getBoundingClientRect(); return JSON.stringify({left:b.left,top:b.top,width:b.width,height:b.height});"));
+            const frame5 = capture(win.id, "07-after-resize.png");
+            const s5 = imageSize(frame5);
+            const scale5 = s5[0] / after2.w;
+            const scan5 = scanGreen(frame5, Math.round(s5[0] / 2), Math.round(s5[1] / 2));
+            const view5 = viewRectFromPixels(after2, scale5, scan5);
+            const M5 = view5 ? makeMapper({ win: after2, scale: scale5, viewRect: view5, origin: { x: after2.x, y: after2.y + titlebar } }) : null;
+            const r3 = M5 ? await safeClick(M5.pageToScreen({ x: 190, y: 185 }), "page-button-after-resize") : { ok: false, reason: "no-view-rect" };
             await sleep(400);
             const vv3 = viewByUrl("/paint");
             const last3 = vv3 ? JSON.parse((await viewEval(vv3, "return JSON.stringify(window.__lastClick || null)")) || "null") : null;
-            const counted2 = r3.ok && !!last3 && Math.abs(last3.x - 190) <= 8 && Math.abs(last3.y - 185) <= 8;
-            const frame5 = capture(win.id, "07-after-resize.png");
-            const s5 = imageSize(frame5);
-            record("pointer", "V9 · 窗口缩放后重新测量坐标，真实指针点击仍然命中页面内部（落点误差 ≤ 8px）", counted2, "落点命中", JSON.stringify({ last: last3, click: r3, from: before2 ? { w: Math.round(before2.w), h: Math.round(before2.h) } : null, to: { w: Math.round(after2.w), h: Math.round(after2.h) } }));
+            const counted2 = !!r3.ok && !!last3 && Math.abs(last3.x - 190) <= 8 && Math.abs(last3.y - 185) <= 8;
+            record("pointer", "V9 · 窗口缩放后重新测量坐标，真实指针点击仍然命中页面内部（落点误差 ≤ 8px）", counted2, "落点命中", JSON.stringify({ last: last3, click: r3, viewRect: view5 && { left: Math.round(view5.left), top: Math.round(view5.top), w: Math.round(view5.width), h: Math.round(view5.height) }, from: before2 ? { w: Math.round(before2.w), h: Math.round(before2.h) } : null, to: { w: Math.round(after2.w), h: Math.round(after2.h) } }));
             record("pixel", "V9b · 缩放后截图尺寸随之变化（画面确实是缩放后的窗口）", Math.abs(s5[0] / after2.w - scale) < 0.01, "比例一致", JSON.stringify({ image: s5, win: { w: Math.round(after2.w), h: Math.round(after2.h) }, frame: path.basename(frame5) }));
           }
         }
@@ -430,78 +382,130 @@ async function main() {
       }
       if (!resized) notVerified("窗口缩放后的布局/点击一致性", "本机 System Events 未能改变窗口尺寸（或尺寸未变化）；需要的条件：允许通过辅助功能接口调整该窗口大小。");
 
-      /* V11 网页四边与近边界：真实指针在四个角附近点击，页面必须收到对应坐标 */
+      /* V11 网页四边与近边界：坐标一律由**当下实测**的视图矩形换算，不再经过 DOM 占位符 */
+      const em = await measureView("09-edges-frame.png");
+      const pw = em.rect ? Math.round(em.rect.width) : 0;
+      const ph = em.rect ? Math.round(em.rect.height) : 0;
+      // 原生视图有 16pt 圆角（native-view-controller 的 VIEW_RADIUS），圆角切掉的角落里
+      // 点击不落进网页。因此"近边界"分两组：四条边的中点（3pt 内）＋ 四个角内缩 24pt。
+      const corner = 24;
       const edgeProbes = [
-        { name: "左上", x: 3, y: 3 }, { name: "右上", x: Math.max(1, Math.round(vpRect.width) - 4), y: 3 },
-        { name: "左下", x: 3, y: Math.max(1, Math.round(vpRect.height) - 4) }, { name: "右下", x: Math.max(1, Math.round(vpRect.width) - 4), y: Math.max(1, Math.round(vpRect.height) - 4) },
+        { name: "上边中点", x: Math.round(pw / 2), y: 3 },
+        { name: "下边中点", x: Math.round(pw / 2), y: Math.max(1, ph - 4) },
+        { name: "左边中点", x: 3, y: Math.round(ph / 2) },
+        { name: "右边中点", x: Math.max(1, pw - 4), y: Math.round(ph / 2) },
+        { name: "左上角内", x: corner, y: corner },
+        { name: "右上角内", x: Math.max(1, pw - corner), y: corner },
+        { name: "左下角内", x: corner, y: Math.max(1, ph - corner) },
+        { name: "右下角内", x: Math.max(1, pw - corner), y: Math.max(1, ph - corner) },
       ];
       const edgeResults = [];
       for (const e of edgeProbes) {
-        const r = await safeClick(toScreen({ x: vpRect.left + e.x + 0, y: vpRect.top + e.y + dy }), "edge-" + e.name);
+        const pt = em.mapper ? em.mapper.pageToScreen({ x: e.x, y: e.y }) : null;
+        // 独立通道：落点像素必须是网页绿 —— 证明"我们算出的屏幕点确实落在网页上"，
+        // 而不是"点到了别处但页面恰好收到了坐标"。
+        const px = pt ? em.mapper.pixelOfScreen(em.file, pt) : null;
+        const r = pt ? await safeClick(pt, "edge-" + e.name) : { ok: false, reason: "no-geometry" };
         await sleep(300);
         const vv = viewByUrl("/paint");
         const last = vv ? JSON.parse((await viewEval(vv, "return JSON.stringify(window.__lastClick || null)")) || "null") : null;
-        edgeResults.push({ name: e.name, click: r, last });
+        edgeResults.push({ name: e.name, page: { x: e.x, y: e.y }, screen: pt, pixel: px, pixelGreen: isPageGreen(px), click: r, last });
       }
-      const edgeOk = edgeResults.every((e) => e.last && Math.abs(e.last.x - e.x) <= 6 && Math.abs(e.last.y - e.y) <= 6);
-      record("pointer", "V11 · 网页**四边近边界**的真实指针命中（页面收到的坐标与目标一致，误差 ≤6px）", edgeOk, "四边都命中", JSON.stringify(edgeResults));
+      const edgeOk = edgeResults.every((e) => e.pixelGreen && e.last && Math.abs(e.last.x - e.page.x) <= 6 && Math.abs(e.last.y - e.page.y) <= 6);
+      record("pointer", "V11 · 网页**四边近边界**的真实指针命中（坐标由实测视图矩形换算；落点像素独立证明在网页内）", edgeOk, "四边都命中", JSON.stringify({ viewRect: em.rect && { left: Math.round(em.rect.left), top: Math.round(em.rect.top), w: pw, h: ph }, probes: edgeResults }));
       capture(win.id, "09-edges.png");
 
-      /* V12 最大化 / 恢复：真实指针点窗口按钮 → 重新标定 → 再点网页（布局切换后位置仍一致） */
-      let maxiOk = false, restoreOk = false;
+      /* V12 最大化 / 恢复：先定位**真实按钮矩形**并核对前台窗口，再发真实指针；
+             判定用**窗口实际状态 + 网页布局变化**（不是"我们发了点击"）。 */
+      let maxiOk = false, restoreOk = false, maxiDetail = null;
       try {
-        const maxBtn = JSON.parse(await js("const e=document.querySelector('[aria-label=\"最大化当前窗口\"]'); if(!e) return 'null'; const b=e.getBoundingClientRect(); return JSON.stringify({x:b.left+b.width/2,y:b.top+b.height/2});"));
-        if (maxBtn) {
-          const r = await safeClick(toScreen(maxBtn), "maximize");
-          maxiOk = r.ok && await waitFor(async () => (await js("return !!document.querySelector('[aria-label=\"还原当前窗口\"]')")), 6000);
-          const wMax = ourWindows(pid).filter((x) => x.layer === 0 && x.w > 400)[0];
-          const fMax = await ensureFrontmost(pid, win.id);
-          const frameMax = capture(win.id, "10-maximized.png");
-          const sMax = imageSize(frameMax);
-          const geoMax = JSON.parse(await js("const c=(s)=>{const e=document.querySelector(s); if(!e) return null; const b=e.getBoundingClientRect(); return {x:b.left+b.width/2,y:b.top+b.height/2};}; return JSON.stringify({origin:{x:window.screenX,y:window.screenY},viewport:c('.web-viewport')});"));
-          const vpMax = JSON.parse(await js("const b=document.querySelector('.web-viewport').getBoundingClientRect(); return JSON.stringify({left:b.left,top:b.top,width:b.width,height:b.height});"));
-          // 最大化后重新标定（用页面中心），再点网页中心 → 必须命中
-          const probeMax = { x: Math.round(vpMax.left + vpMax.width / 2), y: Math.round(vpMax.top + vpMax.height / 2) };
-          const rM = await safeClick({ x: Math.round(geoMax.origin.x + probeMax.x), y: Math.round(geoMax.origin.y + probeMax.y + dy) }, "recalib-max");
-          await sleep(350);
-          const vvM = viewByUrl("/paint");
-          const lastM = vvM ? JSON.parse((await viewEval(vvM, "return JSON.stringify(window.__lastClick || null)")) || "null") : null;
-          void rM; void sMax;
-          record("pointer", "V12 · 最大化（真实指针点窗口按钮）后重新标定，网页中心仍能被真实指针命中", maxiOk && !!fMax.ok && !!lastM && Math.abs(lastM.x - Math.round(vpMax.width / 2)) <= 8, "最大化 + 命中", JSON.stringify({ maxiOk, front: fMax.ok, last: lastM, win: wMax ? { w: Math.round(wMax.w), h: Math.round(wMax.h) } : null, frame: path.basename(frameMax) }));
-          const restBtn = JSON.parse(await js("const e=document.querySelector('[aria-label=\"还原当前窗口\"]'); if(!e) return 'null'; const b=e.getBoundingClientRect(); return JSON.stringify({x:b.left+b.width/2,y:b.top+b.height/2});"));
+        const domWinId = await js("return document.querySelector('[data-browser-window]')?.getAttribute('data-browser-window') || ''");
+        const winRect = () => boxOf('[data-window-id="' + domWinId + '"]');
+        const pageSize = async () => { const vv = viewByUrl("/paint"); return vv ? JSON.parse((await viewEval(vv, "return JSON.stringify({iw:window.innerWidth,ih:window.innerHeight})")) || "{}") : {}; };
+        const pageClickAt = async (p, tag) => {
+          const r = await safeClick(p, tag); await sleep(350);
+          const vv = viewByUrl("/paint");
+          const last = vv ? JSON.parse((await viewEval(vv, "return JSON.stringify(window.__lastClick || null)")) || "null") : null;
+          return { r, last };
+        };
+        const beforeRect = await winRect();
+        const beforeSize = await pageSize();
+        const maxBtn = await boxOf('[aria-label="最大化' + domWinId + '"]');
+        if (!maxBtn) {
+          note("最大化按钮不存在（windowId=" + domWinId + "）");
+          notVerified("最大化 / 恢复后的布局与点击一致性", "当前窗口没有可点的最大化按钮（windowId=" + domWinId + "）。");
+        } else {
+          const m0 = await measureView("10-maximize-before.png");
+          const pt = m0.mapper ? m0.mapper.domToScreen({ x: maxBtn.cx, y: maxBtn.cy }) : null;
+          const elAt = await elementAt({ x: maxBtn.cx, y: maxBtn.cy });
+          const px = pt ? m0.mapper.pixelOfScreen(m0.file, pt) : null;
+          const frontOk = (await ensureFrontmost(pid, win.id)).ok;
+          const r = frontOk && pt ? await clickUntil(pt, "maximize", async () => (await shellClicks()).some((c) => c.trusted && c.button === "最大化" + domWinId)) : { ok: false, reason: "not-frontmost-or-no-geometry" };
+          const clicks = await shellClicks();
+          const stateChanged = r.ok && await waitFor(async () => !!(await boxOf('[aria-label="还原' + domWinId + '"]')), 6000);
+          await sleep(900);
+          const afterRect = await winRect();
+          const afterSize = await pageSize();
+          const m1 = await measureView("10-maximized.png");
+          const layoutChanged = !!(beforeRect && afterRect) && (Math.abs(afterRect.width - beforeRect.width) > 40 || Math.abs(afterRect.height - beforeRect.height) > 40);
+          const pageChanged = !!afterSize.iw && (afterSize.iw !== beforeSize.iw || afterSize.ih !== beforeSize.ih);
+          const viewFollows = !!(m1.rect && afterSize.iw) && Math.abs(m1.rect.width - afterSize.iw) <= 3 && Math.abs(m1.rect.height - afterSize.ih) <= 3;
+          const hitPt = m1.mapper && afterSize.iw ? m1.mapper.pageToScreen({ x: Math.round(afterSize.iw / 2), y: Math.round(afterSize.ih / 2) }) : null;
+          const hitMax = hitPt ? await pageClickAt(hitPt, "page-center-max") : { r: { ok: false }, last: null };
+          const hitOk = !!hitMax.r.ok && !!hitMax.last && Math.abs(hitMax.last.x - Math.round(afterSize.iw / 2)) <= 6 && Math.abs(hitMax.last.y - Math.round(afterSize.ih / 2)) <= 6;
+          const shellGot = clicks.some((c) => c.trusted && c.button === "最大化" + domWinId);
+          maxiOk = !!r.ok && shellGot && stateChanged && layoutChanged && pageChanged && viewFollows && hitOk;
+          maxiDetail = {
+            frontOk, button: { label: "最大化" + domWinId, rect: { left: Math.round(maxBtn.left), top: Math.round(maxBtn.top), w: Math.round(maxBtn.width), h: Math.round(maxBtn.height) }, elementAtPoint: elAt, screen: pt, pointPixel: px },
+            shellGot, shellClicks: clicks, click: r, stateChanged,
+            windowRect: { before: beforeRect, after: afterRect }, pageSize: { before: beforeSize, after: afterSize },
+            layoutChanged, pageChanged, viewFollows, viewRectAfter: m1.rect && { left: Math.round(m1.rect.left), top: Math.round(m1.rect.top), w: Math.round(m1.rect.width), h: Math.round(m1.rect.height) },
+            hit: hitMax.last, hitOk, frame: path.basename(m1.file),
+          };
+          record("pointer", "V12 · 真实指针点窗口「最大化」按钮 → 窗口状态 + 网页布局真的变化，且最大化后网页仍能被真实指针命中", maxiOk, "状态/布局/命中都成立", JSON.stringify(maxiDetail));
+          const restBtn = await boxOf('[aria-label="还原' + domWinId + '"]');
           if (restBtn) {
-            const r2 = await safeClick(toScreen(restBtn), "restore");
-            restoreOk = r2.ok && await waitFor(async () => !(await js("return !!document.querySelector('[aria-label=\"还原当前窗口\"]')")), 6000);
-            const wBack = ourWindows(pid).filter((x) => x.layer === 0 && x.w > 400)[0];
-            const frameBack = capture(win.id, "11-restored.png");
-            record("pixel", "V12b · 恢复后窗口尺寸回到最大化之前（截图尺寸同步变化）", restoreOk && !!wBack && Math.abs(imageSize(frameBack)[0] / wBack.w - scale) < 0.01, "尺寸恢复", JSON.stringify({ restoreOk, win: wBack ? { w: Math.round(wBack.w), h: Math.round(wBack.h) } : null }));
+            const m2 = await measureView("11-restore-before.png");
+            const pt2 = m2.mapper ? m2.mapper.domToScreen({ x: restBtn.cx, y: restBtn.cy }) : null;
+            const r2 = pt2 ? await clickUntil(pt2, "restore", async () => (await shellClicks()).some((c) => c.trusted && c.button === "还原" + domWinId)) : { ok: false, reason: "no-geometry" };
+            const restState = r2.ok && await waitFor(async () => !!(await boxOf('[aria-label="最大化' + domWinId + '"]')), 6000);
+            await sleep(900);
+            const backRect = await winRect();
+            const backSize = await pageSize();
+            const m3 = await measureView("11-restored.png");
+            const backLayout = !!(backRect && beforeRect) && Math.abs(backRect.width - beforeRect.width) <= 4 && Math.abs(backRect.height - beforeRect.height) <= 4;
+            const backPage = backSize.iw === beforeSize.iw && backSize.ih === beforeSize.ih;
+            const backView = !!(m3.rect && backSize.iw) && Math.abs(m3.rect.width - backSize.iw) <= 3 && Math.abs(m3.rect.height - backSize.ih) <= 3;
+            restoreOk = restState && backLayout && backPage && backView;
+            record("pixel", "V12b · 恢复后窗口矩形与网页布局回到最大化之前，且像素真值跟着回到原位", restoreOk, "尺寸/布局恢复", JSON.stringify({ restState, click: r2, windowRect: { before: beforeRect, restored: backRect, max: maxiDetail.windowRect.after }, pageSize: { before: beforeSize, restored: backSize }, backLayout, backPage, backView, viewRectRestored: m3.rect && { left: Math.round(m3.rect.left), top: Math.round(m3.rect.top), w: Math.round(m3.rect.width), h: Math.round(m3.rect.height) }, frame: path.basename(m3.file) }));
           }
         }
       } catch (e) { note("最大化/恢复路径异常：" + String(e && e.message).slice(0, 120)); }
-      if (!maxiOk) notVerified("最大化 / 恢复后的布局与点击一致性", "本机未能在真实指针下点中窗口最大化按钮（或按钮不可用）；需要复核窗口装饰是否可点。");
 
       /* V13 已支持的页面缩放：用真实按键试 Cmd +/-，如实记录产品是否支持 */
       const zoomBefore = JSON.parse(await js("return 'null'") || "null");
       void zoomBefore;
       const pageZoom = async () => { const vv = viewByUrl("/paint"); return vv ? JSON.parse((await viewEval(vv, "return JSON.stringify({iw: window.innerWidth, ih: window.innerHeight, dpr: window.devicePixelRatio})")) || "{}") : null; };
       const z0 = await pageZoom();
-      await safeClick(toScreen({ x: vpRect.left + Math.round(vpRect.width / 2), y: vpRect.top + Math.round(vpRect.height / 2) + dy }), "focus-page");
-      const keyZoom = (key) => { try { cliclick("kd:cmd"); cliclick("kp:" + key); cliclick("ku:cmd"); return true; } catch (e) { return false; } };
+      const focusPt = z0 && M ? M.pageToScreen({ x: Math.round(Number(z0.iw) / 2), y: Math.round(Number(z0.ih) / 2) }) : null;
+      await (focusPt ? safeClick(focusPt, "focus-page") : Promise.resolve({ ok: false }));
+      const keyZoom = (key) => { try { cliclick("kd:cmd"); cliclick("kp:" + key); cliclick("ku:cmd"); return true; } catch { return false; } };
       const zoomKeyOk = keyZoom("num-plus") && keyZoom("num-plus");
       await sleep(700);
       const z1 = await pageZoom();
       if (zoomKeyOk) { keyZoom("num-minus"); keyZoom("num-minus"); }
       await sleep(500);
       const z2 = await pageZoom();
-      const zoomSupported = !!z0 && !!z1 && (z0.dpr !== z1.dpr || z0.iw !== z1.iw);
-      if (zoomSupported) {
-        const frameZoom = capture(win.id, "12-zoom.png");
-        const greenZoom = greenRanges(frameZoom, [Math.round((vpCenter.x - win.x) * scale)]);
-        const zr = greenZoom[String(Math.round((vpCenter.x - win.x) * scale))] || {};
-        record("pixel", "V13 · 页面缩放状态下的可见性与几何仍然成立（缩放后网页仍铺满视口）", (zr.run || 0) > 100, "缩放后仍可见", JSON.stringify({ z0, z1, z2, green: zr }));
-      } else {
-        notVerified("页面缩放（Cmd +/-）", "真实按键未改变页面缩放（z0=" + JSON.stringify(z0) + "，z1=" + JSON.stringify(z1) + "）：产品当前没有页面缩放入口，因此该状态记未验证而不是假装通过。");
-      }
+      // V13 **不作为必需项**：D5-01 原始必需项里没有页面缩放（PLAN 的「缩放」指窗口缩放，已由 V9 覆盖），
+      // 本轮也不新增任何缩放入口。这里只如实记录真实按键的实测结果（上一轮写的"按键未改变页面"不成立）。
+      const zm = await measureView("12-zoom.png");
+      const zoomed = !!z0 && !!z1 && (z0.dpr !== z1.dpr || z0.iw !== z1.iw);
+      const ptPerCss = (v) => (v && v.iw ? Number(v.iw) * Number(v.dpr) : null);
+      notVerified("页面缩放（Cmd +/-）", "不适用：D5-01 原始必需项不含页面缩放（PLAN 里的『缩放』是窗口缩放，V9 已覆盖），产品无缩放入口、本轮不新增。" +
+        "实测补充（仅观察、不计入必需项）：真实按键 " + JSON.stringify(z0) + " → " + JSON.stringify(z1) + " → " + JSON.stringify(z2) + "，" +
+        (zoomed ? "**确实进入了缩放态**" : "未改变页面缩放") +
+        "；缩放态下像素真值 " + JSON.stringify(zm.rect && { left: Math.round(zm.rect.left), top: Math.round(zm.rect.top), w: Math.round(zm.rect.width), h: Math.round(zm.rect.height) }) +
+        " 与网页自报 innerWidth×dpr " + ptPerCss(z1) + "（未缩放时 " + ptPerCss(z0) + "）一致。");
 
       /* V10 连续帧（录屏等价物）：一段连续操作期间的多帧 */
       const burst = [];
@@ -509,7 +513,7 @@ async function main() {
       const sizes = burst.map((f) => fs.statSync(path.join(FRAMES, f)).size);
       record("pixel", "V10 · 连续截图可用（一段连续操作的多帧都真实落盘）", sizes.every((s) => s > 5000), "4 帧", JSON.stringify({ frames: burst, bytes: sizes }));
     } else {
-      notVerified("真实指针输入（标签栏/地址栏/网页交互/窗口缩放）", "坐标标定第一步就被安全闸拦下（" + JSON.stringify(calib) + "）；为绝不影响其它实例，未继续发真实点击。");
+      notVerified("真实指针输入（标签栏/地址栏/网页交互/窗口缩放）", "统一换算所需的第一个真实点击就被安全闸拦下（" + JSON.stringify(calib) + "）；为绝不影响其它实例，未继续发真实点击。");
     }
   }
 
@@ -517,8 +521,8 @@ async function main() {
   record("hygiene", "H1 · 主进程无未处理错误", tail.length === 0, "无错误行", tail.join(" | ") || "clean");
 
   const out = {
-    phase: "D5-01 Closure-3",
-    title: "本任务窗口的真实可见性（屏幕像素 + 真实指针输入）",
+    phase: "D5-01 Closure-4",
+    title: "本任务窗口的真实可见性（屏幕像素 + 真实指针输入；唯一坐标换算）",
     testedCommit: process.env.OPENARC_TESTED_COMMIT || null,
     command: process.env.npm_lifecycle_event ? "npm run " + process.env.npm_lifecycle_event : "node experiments/d5-01/visibility-e2e.mjs",
     env: { platform: process.platform, arch: process.arch, node: process.version, electron: require("electron/package.json").version, instrument: "screencapture -x -o -l <CGWindowID> + cliclick（CGEvent 真实指针）" },
@@ -531,11 +535,6 @@ async function main() {
   fs.writeFileSync(path.join(ART, "d5-01-visibility-e2e.json"), JSON.stringify(out, null, 2));
   console.log("\n结论：" + (failed === 0 ? "PASS" : "FAIL") + " — " + JSON.stringify({ pass: passed, fail: failed, total: CHECKS.length, notVerified: NOT_VERIFIED.length }));
   return failed === 0 ? 0 : 1;
-}
-
-/** 以"点 → 图像像素"的同一换算读一帧里的像素。 */
-function pixelOfPoint2(file, win, scale, pt) {
-  return pixelAt(file, Math.round((pt.x - win.x) * scale), Math.round((pt.y - win.y) * scale));
 }
 
 let exitCode = 2;

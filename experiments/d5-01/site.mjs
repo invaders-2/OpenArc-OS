@@ -84,6 +84,30 @@ function routes() {
          );
          if (window.Notification && Notification.requestPermission) Notification.requestPermission().then((v) => { window.__perm.notify = v; });`,
       ),
+    // Closure-4 提示条稳定场景：整页纯色（像素可判"谁在上面"）+ 只申请**一次**权限（不自动重弹）
+    // + 页面自己记录到达网页的指针事件（点击有没有漏进网页，由页面自己作证）。
+    "/notice-lab": () =>
+      html(
+        "NOTICE-LAB",
+        `<style>html,body{margin:0;padding:0;height:100%;background:#0a7d4f;overflow:hidden}</style>
+         <h2 id="lab-marker" style="color:#fff;margin:0;padding:8px">LAB-MARKER-51c3</h2>
+         <button id="lab-popup" style="position:absolute;left:60px;top:60px;width:260px;height:90px;font-size:18px">OPEN-POPUP</button>
+         <div id="lab-count" style="position:absolute;left:60px;top:170px;color:#fff;font-size:20px">EVENTS-0</div>`,
+        `window.__events = [];
+         window.__permissionRequests = 0;
+         window.__geo = 'pending';
+         const push = (t, e) => {
+           window.__events.push({ t, x: e.clientX, y: e.clientY, target: (e.target && (e.target.id || e.target.tagName)) || '', trusted: !!e.isTrusted });
+           document.getElementById('lab-count').textContent = 'EVENTS-' + window.__events.length;
+         };
+         for (const t of ['pointerdown', 'mousedown', 'click']) window.addEventListener(t, (e) => push(t, e), true);
+         document.getElementById('lab-popup').onclick = () => { window.open('/page2', '_blank'); };
+         window.__permissionRequests += 1;
+         navigator.geolocation.getCurrentPosition(
+           () => { window.__geo = 'granted'; },
+           (e) => { window.__geo = 'denied:' + (e && e.code); }
+         );`,
+      ),
     "/external": () => html("EXTERNAL", `<a id="mail-link" href="mailto:d501@example.com">mail us</a>`),
     "/bridge": () =>
       html(
