@@ -244,6 +244,12 @@ function evaluateExecutionEligibility(snapshot = {}) {
   if (approval.approved_tool_id != null && approval.approved_tool_id !== call.tool_id) return fail(ELIGIBILITY.STALE, SIDE_EFFECT_ERROR.PLAN_STALE);
   if (approval.approved_tool_version != null && Number(approval.approved_tool_version) !== Number(call.tool_version)) return fail(ELIGIBILITY.STALE, SIDE_EFFECT_ERROR.PLAN_STALE);
   if (approval.approved_effect_class != null && approval.approved_effect_class !== call.effect_class) return fail(ELIGIBILITY.STALE, SIDE_EFFECT_ERROR.PLAN_STALE);
+  // D5-01 Closure-3 · plan 完整性：批准时留存的 expectedEffects 是**独立副本**，必须与当前 plan 逐字一致。
+  // 任何"批准之后 plan 被改过"（例如把要去的地址换成另一个）都必须在这里 fail closed：
+  // 旧批准绝不能变成新目标 / 新地址的通行证。
+  const approvedEffects = Array.isArray(approval.approved_expected_effects) ? approval.approved_expected_effects : null;
+  const currentEffects = Array.isArray(call.expectedEffectsSafe) ? call.expectedEffectsSafe : [];
+  if (approvedEffects && JSON.stringify(approvedEffects) !== JSON.stringify(currentEffects)) return fail(ELIGIBILITY.STALE, SIDE_EFFECT_ERROR.PLAN_STALE);
   pass("approval");
 
   const lease = s.lease;

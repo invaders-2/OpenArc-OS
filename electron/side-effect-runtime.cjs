@@ -280,9 +280,20 @@ class SideEffectRuntime {
       return { ok: false, inProcess: true, error: (lease && lease.error) || SIDE_EFFECT_ERROR.CALL_STATE, call: this.store.callById(callId) };
     }
     await this.authority.executeSideEffect({ callId, leaseId: lease.lease.leaseId, holderId, timeoutMs: Number(timeoutMs) > 0 ? Number(timeoutMs) : this.executorTimeoutMs });
-    const after = this.store.callById(callId);
-    const ok = !!(after && after.status === CALL_STATUS.SUCCEEDED);
-    return { ok, inProcess: true, call: after, safeResult: ok ? safeToolResult(after) : null, error: ok ? null : ((after && after.errorCode) || SIDE_EFFECT_ERROR.DOMAIN_WRITE_FAILED) };
+    let after = this.store.callById(callId);
+    if (after && after.status === CALL_STATUS.SUCCEEDED) return { ok: true, inProcess: true, call: after, safeResult: safeToolResult(after), error: null };
+    // 与 out-of-process 路径**同一套**收敛语义：UNKNOWN_EFFECT 一律走只读恢复核查，
+    // 并标记 recovered=true 让 orchestrator 走 BLOCK（§28：绝不自动续接 Harness）。
+    if (after && after.status === CALL_STATUS.UNKNOWN_EFFECT) {
+      const v = await this.verifyUnknownEffect({ callId });
+      after = this.store.callById(callId);
+      return {
+        ok: false, inProcess: true, recovered: true, unknownEffect: true, recovery: v,
+        recoveredStatus: after && after.status, call: after,
+        error: (after && after.errorCode) || SIDE_EFFECT_ERROR.UNKNOWN_EFFECT,
+      };
+    }
+    return { ok: false, inProcess: true, call: after, error: (after && after.errorCode) || SIDE_EFFECT_ERROR.DOMAIN_WRITE_FAILED };
   }
 
   /** 受监督 executor runtime 执行一条已 APPROVED 的 call（唯一真实 mutation 入口）。 */

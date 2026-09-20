@@ -27,18 +27,25 @@ const entry = (over = {}) => ({
 });
 
 /**
- * 假控制器：只提供受控浏览器能力真正使用的那几个方法。
+ * 假控制器：只提供受控浏览器能力真正使用的那几个方法，模拟真实控制器的**派发三态**语义
+ * （真实实现见 electron/native-view-controller.cjs 的 #trackDispatch / waitForDispatch / dispatchEvidence）。
  *
- * `commitMode` 是**导航落地**的注入点（真实实现读 webContents.getURL()）：
- *   · "ok"          请求的地址真实落地；
- *   · "redirect"    落地到另一个地址（服务器 302 这类真实情况）；
- *   · "unconfirmed" 永远等不到落地 —— 必须按"结果不可知"返回，绝不猜成功。
+ * `commitMode` 是导航结果的注入点：
+ *   · "applied"      这次派发的加载真的完成；
+ *   · "redirect"     完成但落在别的地址（服务器 302）；
+ *   · "notapplied"   这次加载被中止，且当前地址不是目标 → 能证明没生效；
+ *   · "unconfirmed"  等不到落地 → **不可知**；
+ *   · "foreign"      **用户自己**导航到了同一个地址，而这次加载被中止 → 地址相等但不可归因。
  */
-function fakeController(entries = [entry()], { commitMode = "ok", body = null } = {}) {
+function fakeController(entries = [entry()], { commitMode = "applied", body = null } = {}) {
   const calls = [];
+  const ledger = new Map();
+  let seq = 0;
+  let pending = null;
   return {
     calls,
     entries,
+    ledger,
     inventory: () => entries.filter((e) => e.alive),
     ownerOfView: (viewId) => entries.find((e) => e.viewId === viewId && e.alive) || null,
     readText: async () => (body == null ? "PAGE-TEXT ".repeat(600) : body),
@@ -46,19 +53,33 @@ function fakeController(entries = [entry()], { commitMode = "ok", body = null } 
     navigate: (windowId, url, tabId) => {
       calls.push({ windowId, url, tabId });
       const e = entries.find((x) => x.viewId === windowId + "#" + tabId);
-      if (e && commitMode === "ok") e.url = url;
-      if (e && commitMode === "redirect") e.url = url.replace(/\/page2$/, "/page3");
-      return { ok: true };
+      seq += 1;
+      const ev = { seq, viewId: windowId + "#" + tabId, requested: String(url), from: e ? String(e.url) : "", at: 1, started: { url: String(url), at: 1 }, commitments: [], loaded: null, loadError: null, superseded: false };
+      ledger.set(ev.viewId + "#" + seq, ev);
+      pending = { seq, viewId: ev.viewId, requested: String(url), ev };
+      return { ok: true, seq };
     },
-    waitForCommit: async (viewId, { from = null, to = null } = {}) => {
+    async waitForDispatch(viewId, _opts = {}) {
+      if (!pending || pending.viewId !== String(viewId)) return { verdict: "INDETERMINATE", reason: "NO_DISPATCH" };
+      const { seq: s, requested, ev } = pending;
       const e = entries.find((x) => x.viewId === viewId);
-      if (!e || !e.alive) return { ok: false, error: "BROWSER_CONTROL_TARGET_GONE" };
-      if (commitMode === "unconfirmed" && String(e.url) !== String(to)) return { ok: false, error: "BROWSER_CONTROL_NAVIGATE_UNCONFIRMED" };
-      return { ok: true, url: e.url, noop: String(e.url) === String(from) };
+      if (commitMode === "notapplied") { ev.loadError = "ERR_ABORTED"; return { verdict: "NOT_APPLIED", seq: s, reason: "ERR_ABORTED", requested }; }
+      if (commitMode === "unconfirmed") return { verdict: "INDETERMINATE", seq: s, reason: "DISPATCH_UNCONFIRMED", requested };
+      if (commitMode === "foreign") { ev.loadError = "ERR_ABORTED"; if (e) e.url = requested; return { verdict: "INDETERMINATE", seq: s, reason: "ABORTED:ERR_ABORTED", requested }; }
+      const finalUrl = commitMode === "redirect" ? requested.replace(/\/page2$/, "/page3") : requested;
+      if (e) e.url = finalUrl;
+      ev.loaded = { at: 2, url: finalUrl };
+      return { verdict: "APPLIED", seq: s, url: finalUrl, requested, from: ev.from, redirected: finalUrl !== requested, noop: finalUrl === ev.from };
+    },
+    dispatchEvidence(viewId) {
+      let latest = null;
+      for (const ev of ledger.values()) if (ev.viewId === String(viewId)) latest = ev;
+      return latest ? { ...latest } : null;
     },
   };
 }
 const newAuthority = ({ entries, audits, commitMode, body } = {}) => {
+  // 注意：CommitMode 语义见 fakeController 注释（D5-01 Closure-3 起为派发三态）。
   const list = audits || [];
   const a = new BrowserControlAuthority({ clock: () => 1_700_000_000_000, audit: (r) => list.push(r) });
   const controller = fakeController(entries, { commitMode, body });
@@ -152,14 +173,15 @@ test("目标解析：显式 viewId 必须在授权表内；缺省只有唯一目
   assert.deepEqual(a.list({ userId: USER }).map((t) => t.viewId), ["browser#t1"]);
 });
 
-test("导航落地：等真实地址落地才算发生；302 跳转如实标记；等不到 → 不可知且不猜成功", async () => {
+test("导航三态：本次落地 / 302 / 能证明未生效 / 不可知 —— 一律不以'当前 URL 相等'当作成功依据", async () => {
   const ok = newAuthority();
   select(ok.a);
   const r = await nav(ok.a, "http://127.0.0.1:5391/page2");
   assert.equal(r.ok, true, JSON.stringify(r));
-  assert.equal(r.url, "http://127.0.0.1:5391/page2", "url = 真实落地地址");
+  assert.equal(r.url, "http://127.0.0.1:5391/page2", "url = 这次派发真实落地的地址");
   assert.equal(r.redirected, false);
   assert.equal(r.requested, "http://127.0.0.1:5391/page2");
+  assert.ok(Number.isInteger(r.dispatchSeq), "必须带派发序号（归因证据）");
 
   const redir = newAuthority({ commitMode: "redirect" });
   select(redir.a);
@@ -169,13 +191,38 @@ test("导航落地：等真实地址落地才算发生；302 跳转如实标记�
   assert.equal(rr.url, "http://127.0.0.1:5391/page3");
   assert.equal(rr.requested, "http://127.0.0.1:5391/page2");
 
+  // 能证明没生效：这次加载被中止，且当前真实地址不是目标 → NOT_APPLIED（可判 FAILED，0 重试）。
+  const na = newAuthority({ commitMode: "notapplied" });
+  select(na.a);
+  const notApplied = await nav(na.a, "http://127.0.0.1:5391/page2");
+  assert.equal(notApplied.ok, false);
+  assert.equal(notApplied.error, "BROWSER_CONTROL_NAVIGATE_NOT_APPLIED");
+  assert.equal(notApplied.notApplied, true);
+  assert.equal(notApplied.dispatched, true);
+
+  // 等不到落地 → 不可知（不是"未执行"）。
   const bad = newAuthority({ commitMode: "unconfirmed" });
   select(bad.a);
   const un = await nav(bad.a, "http://127.0.0.1:5391/page2");
   assert.equal(un.ok, false);
   assert.equal(un.error, "BROWSER_CONTROL_NAVIGATE_UNCONFIRMED");
   assert.equal(un.dispatched, true, "请求已发出但没落地 = 结果不可知（不是'未执行'）");
+  assert.equal(un.notApplied, undefined, "不可知绝不能被当成'没生效'");
   assert.ok(bad.audits.some((x) => x.action === "browser.navigate" && x.decision === "DENY"));
+});
+
+test("归因：用户自己导航到同一地址时，地址相等也不算本次成功（凭派发证据判不可知）", async () => {
+  const s = newAuthority({ commitMode: "foreign" });
+  select(s.a);
+  const r = await nav(s.a, "http://127.0.0.1:5391/page2");
+  assert.equal(r.ok, false, "地址恰好等于目标也不能算成功：" + JSON.stringify(r));
+  assert.equal(r.error, "BROWSER_CONTROL_NAVIGATE_UNCONFIRMED");
+  assert.equal(String(s.controller.liveUrl("browser#t1")), "http://127.0.0.1:5391/page2", "页面确实停在目标地址（但那是用户的导航）");
+  // 证据账本里这次派发只有"被中止"，没有 loaded → 任何下游都不得据此声称生效。
+  const ev = s.a.dispatchEvidence({ viewId: "browser#t1", seq: r.dispatchSeq });
+  assert.ok(ev, "必须留下派发证据");
+  assert.equal(ev.loaded, null);
+  assert.equal(ev.loadError, "ERR_ABORTED");
 });
 
 test("inspect：只读目标现状（含 URL），未授权/失效一律拒绝且不含正文", () => {

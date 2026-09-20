@@ -553,7 +553,7 @@ class SideEffectAuthority {
     let approval = null;
     // 这里刻意传 persisted decision + 显式 expires_at：纯函数按 (decision 绑定, 时间) 两段判定，
     // 这样过期仍收敛为 APPROVAL_EXPIRED；effectiveDecision 只服务于展示 / 幂等判据，不参与执行判定。
-    if (approvalRow) approval = { decision: approvalRow.decision, plan_hash: approvalRow.planHash, approved_arguments_hash: approvalRow.approvedArgumentsHash, approved_tool_id: approvalRow.approvedToolId, approved_tool_version: approvalRow.approvedToolVersion, approved_effect_class: approvalRow.approvedEffectClass, expires_at: approvalRow.expiresAt, revoked_at: approvalRow.revokedAt };
+    if (approvalRow) approval = { decision: approvalRow.decision, plan_hash: approvalRow.planHash, approved_arguments_hash: approvalRow.approvedArgumentsHash, approved_tool_id: approvalRow.approvedToolId, approved_tool_version: approvalRow.approvedToolVersion, approved_effect_class: approvalRow.approvedEffectClass, approved_expected_effects: approvalRow.approvedExpectedEffects, expires_at: approvalRow.expiresAt, revoked_at: approvalRow.revokedAt };
     const lease = this.store.activeLeaseOfCall(callId);
     const result = evaluateExecutionEligibility({
       call: { ...call, call_id: call.callId, effect_class: call.effectClass, plan_hash: call.planHash, arguments_hash: call.argumentsHash, tool_id: call.toolId, tool_version: call.toolVersion, status: call.status },
@@ -1157,7 +1157,7 @@ class SideEffectAuthority {
       const timeout = Number(timeoutMs) > 0 ? Number(timeoutMs) : 15000;
       let timer = null;
       const guard = new Promise((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error("SIDE_EFFECT_TIMEOUT"), { code: "SIDE_EFFECT_TIMEOUT" })), timeout); });
-      execResult = await Promise.race([adapter.execute({ context: execCtx, args, contract: tool.contract, preconditions: call.preconditionsSafe }), guard]).finally(() => clearTimeout(timer));
+      execResult = await Promise.race([adapter.execute({ context: execCtx, args, contract: tool.contract, preconditions: call.preconditionsSafe, expectedEffects: call.expectedEffectsSafe, callId: call.callId }), guard]).finally(() => clearTimeout(timer));
     } catch (e) {
       return this.#finishUnknownEffect({ call, leaseId, detail: (e && e.code) || "SIDE_EFFECT_DISPATCH_ERROR" });
     }

@@ -178,7 +178,7 @@ const BUILTIN_CONTRACTS = Object.freeze([
     inputSchema: { type: "object", additionalProperties: false, properties: { viewId: { type: "string", pattern: "^[A-Za-z0-9_:.#-]{1,80}$" }, url: { type: "string", maxLength: 2000, pattern: "^https?://[^\\s@]+$" } }, required: ["url"] },
     // url = **真实落地地址**（可能因服务器 302 与 requested 不同，redirected 如实标记）；
     // noop = 同址导航（确实发出过请求，但没有地址变化），绝不冒充写入。
-    outputSchema: { type: "object", additionalProperties: false, properties: { viewId: { type: "string" }, url: { type: "string" }, ok: { type: "boolean" }, requested: { type: "string" }, redirected: { type: "boolean" }, noop: { type: "boolean" } }, required: ["viewId", "url", "ok"] },
+    outputSchema: { type: "object", additionalProperties: false, properties: { viewId: { type: "string" }, url: { type: "string" }, ok: { type: "boolean" }, requested: { type: "string" }, redirected: { type: "boolean" }, noop: { type: "boolean" }, dispatchSeq: { type: "integer" } }, required: ["viewId", "url", "ok"] },
     riskClass: RISK_CLASS.REVERSIBLE_WRITE,
     sideEffect: SIDE_EFFECT.WRITE,
     requiresApproval: true,

@@ -5,6 +5,8 @@
  * 它按 smoke 设置的 mode 返回确定性的 model tool_call 序列，绝不接触 OpenArc DB / Domain。
  */
 import http from "node:http";
+// 有界 + 强制的关闭：绝不让"未结束的请求连接"把测试文件进程挂死（见 tests/model-fake-provider.mjs 的说明）。
+import { closeServer } from "../model-fake-provider.mjs";
 
 const FINAL_TEXT = "OPENARC_VERTICAL_SMOKE_OK";
 
@@ -85,5 +87,5 @@ export async function startD4Provider() {
     });
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
-  return { baseUrl: "http://127.0.0.1:" + server.address().port + "/v1", port: server.address().port, state, finalText: FINAL_TEXT, close: () => new Promise((r) => { server.close(() => r()); }) };
+  return { baseUrl: "http://127.0.0.1:" + server.address().port + "/v1", port: server.address().port, state, finalText: FINAL_TEXT, close: () => closeServer(server) };
 }

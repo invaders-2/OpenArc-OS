@@ -50,6 +50,8 @@ const CAPTURE_RETRY_MS = 40;
 
 /** 视图 id：windowId 自身不含 "#"，因此这个拼接是可逆、无歧义的。 */
 const viewIdOf = (windowId, tabId) => String(windowId) + "#" + String(tabId);
+/** 派发账本上限（内存，只服务 verify / recovery 的归因，绝不持久化）。 */
+const DISPATCH_LEDGER_MAX = 64;
 
 /** 只保留 origin：权限提示要给用户看"哪个站"，但不要把完整 URL（可能带查询串）落进事件。 */
 function originOf(url) {
@@ -80,6 +82,8 @@ class NativeViewController {
     /** 已装过分区级策略的 partition（权限 / 下载只装一次） */
     this.partitions = new Set();
     this.destroyed = false;
+    /** 派发账本：key = viewId#seq（内存、有界、**活**记录 —— 迟到完成会更新它，冷启动即消失）。 */
+    this.dispatches = new Map();
     this.downloads = new BrowserDownloads({ dir: downloadsDir, onEvent: (e) => this.onEvent(e), log: this.log });
   }
 
@@ -434,24 +438,108 @@ class NativeViewController {
    * 归为 noop —— 它是真实发生的导航请求，但**没有产生地址变化**，如实标记而不是冒充写入。
    * 等不到就返回 unconfirmed：调用方必须按"结果不可知"处理，绝不猜成功。
    */
-  async waitForCommit(viewId, { from = null, to = null, timeoutMs = 5000 } = {}) {
+  /**
+   * **派发追踪**（D5-01 Closure-3）。
+   *
+   * 为什么必须有：只比较"当前 URL == 目标 URL"无法区分
+   *   ① 这次受控导航真的落地、② 服务器 302 跳到别处、③ **用户自己**导航到了同一个地址、
+   *   ④ 这次导航被别的导航顶掉之后地址恰好等于目标。
+   * 因此每次受控导航都记一条 dispatch，其中 **loadURL() 自身 promise 的结果**是关键因果证据
+   * （"由这次调用引发的加载完成/被中止"）；did-start-navigation / did-navigate 只作旁证。
+   * 这些都只是**内存事实**，不写任何持久化权威，进程重启即消失（那时只能判"不可知"）。
+   */
+  #trackDispatch(entry, requested) {
+    const wc = entry.view.webContents;
+    const prior = entry.dispatch;
+    // 同标签上的新派发会顶掉旧派发：旧的从此**不许**再声称成功（superseded）。
+    if (prior && !prior.settled) prior.superseded = true;
+    this.dispatchSeq = (this.dispatchSeq || 0) + 1;
+    const dispatch = {
+      seq: this.dispatchSeq, viewId: String(entry.viewId), requested: String(requested), from: String((wc && !wc.isDestroyed() && wc.getURL()) || ""),
+      at: Date.now(), started: null, commitments: [], loaded: null, loadError: null, superseded: false, settled: false,
+    };
+    const onStart = (details) => {
+      const d = details || {};
+      if (d.isMainFrame === false || d.isSameDocument === true) return;
+      if (dispatch.started == null) dispatch.started = { url: String(d.url || ""), at: Date.now() };
+    };
+    const onNavigate = (_ev, navUrl) => {
+      const url = String(navUrl || "");
+      // 只有导航到**本次请求的地址**才算我们的提交；别人的导航只留旁证（foreignCommit）。
+      if (url !== dispatch.requested) { dispatch.foreignCommit = { url, at: Date.now() }; return; }
+      dispatch.commitments.push({ url, at: Date.now() });
+    };
+    dispatch.detach = () => {
+      try { wc.removeListener("did-start-navigation", onStart); } catch { /* 视图可能已销毁 */ }
+      try { wc.removeListener("did-navigate", onNavigate); } catch { /* 同上 */ }
+    };
+    try { wc.on("did-start-navigation", onStart); wc.on("did-navigate", onNavigate); } catch { /* 视图已销毁：只剩 loadURL promise 一条证据 */ }
+    entry.dispatch = dispatch;
+    this.dispatches.set(dispatch.viewId + "#" + dispatch.seq, dispatch);
+    while (this.dispatches.size > DISPATCH_LEDGER_MAX) this.dispatches.delete(this.dispatches.keys().next().value);
+    return dispatch;
+  }
+
+  /** 把 loadURL() 自身 promise 的结果落进 dispatch（成功=这次加载完成；失败=这次加载被中止/失败）。 */
+  #settleDispatch(dispatch, promise, wc) {
+    Promise.resolve(promise).then(
+      // 落地地址在 promise resolve 的**那一刻**取，之后用户再导航也不会改写这条记录。
+      () => { const live = wc && !wc.isDestroyed() ? String(wc.getURL() || "") : null; dispatch.loaded = { at: Date.now(), url: live }; dispatch.settled = true; },
+      (e) => { dispatch.loadError = String((e && e.code) || (e && e.message) || "LOAD_FAILED"); dispatch.settled = true; },
+    ).catch(() => {});
+  }
+
+  /**
+   * 等**这次派发**的真实结果 —— 三态，绝不猜：
+   *   APPLIED       ：这次调用引发的加载真的完成（loadURL promise resolve）；url 与是否重定向如实回报。
+   *   NOT_APPLIED   ：能证明没发生（这次加载被中止/失败，且当前真实地址不是目标地址）。
+   *   INDETERMINATE ：其它一切（超时、视图消失、被别的导航顶掉后地址恰好等于目标……）。
+   * 注意：**地址相等不作为 APPLIED 的依据**。
+   */
+  async waitForDispatch(viewId, { timeoutMs = 5000 } = {}) {
     const e = this.entries.get(String(viewId));
-    const wc = e && e.view.webContents;
-    if (!wc || wc.isDestroyed()) return { ok: false, error: "BROWSER_CONTROL_TARGET_GONE" };
-    const start = String(from == null ? "" : from);
-    const want = String(to == null ? "" : to);
+    if (!e || !e.dispatch) return { verdict: "INDETERMINATE", reason: this.entries.has(String(viewId)) ? "NO_DISPATCH" : "TARGET_GONE" };
+    const d = e.dispatch;
+    const wc = e.view.webContents;
     const deadline = Date.now() + Math.max(1, Number(timeoutMs) || 5000);
+    const live = () => (wc && !wc.isDestroyed() ? String(wc.getURL() || "") : null);
     for (;;) {
-      const live = String(wc.getURL() || "");
-      if (live && live !== start && !wc.isLoading()) return { ok: true, url: live, noop: false };
-      if (!live || live === start) {
-        if (want && live === want && !wc.isLoading()) return { ok: true, url: live, noop: true };
-        if (Date.now() >= deadline) return { ok: false, error: "BROWSER_CONTROL_NAVIGATE_UNCONFIRMED" };
-      } else if (Date.now() >= deadline) {
-        return { ok: true, url: live, noop: false };
+      if (d.loaded) {
+        const url = live();
+        d.detach();
+        // loadURL resolve 时文档已可读；万一此刻视图已被销毁，仍以"这次加载完成"为准并如实标注。
+        const finalUrl = url == null ? d.requested : url;
+        return { verdict: "APPLIED", seq: d.seq, url: finalUrl, requested: d.requested, from: d.from, redirected: finalUrl !== d.requested, noop: finalUrl === d.from };
       }
+      if (d.loadError) {
+        const url = live();
+        d.detach();
+        // 能证明"没生效"的必要条件：这次加载被中止**且从未提交过我们的地址**，并且当前地址也不是目标。
+        // 三者缺一 → 不可知（绝不猜成功、也不猜没发生）。
+        const neverCommitted = d.commitments.length === 0;
+        if (neverCommitted && url != null && url !== d.requested) return { verdict: "NOT_APPLIED", seq: d.seq, reason: d.loadError, url, requested: d.requested, foreignCommit: d.foreignCommit || null };
+        // 地址恰好等于目标、或我们确实提交过 → 无法归因（可能是用户自己导航过去的），只能判不可知。
+        return { verdict: "INDETERMINATE", seq: d.seq, reason: "ABORTED:" + d.loadError, url, requested: d.requested, foreignCommit: d.foreignCommit || null };
+      }
+      if (!wc || wc.isDestroyed() || this.destroyed) { try { d.detach(); } catch { /* ignore */ } return { verdict: "INDETERMINATE", seq: d.seq, reason: "TARGET_GONE_AFTER_DISPATCH", requested: d.requested }; }
+      if (Date.now() >= deadline) return { verdict: "INDETERMINATE", seq: d.seq, reason: "DISPATCH_UNCONFIRMED", url: live(), requested: d.requested, started: d.started };
       await new Promise((r) => setTimeout(r, 50));
     }
+  }
+
+/**
+   * dispatch 的安全投影（受控导航的 verify / recovery 只读证据）。
+   *
+   * `seq` 给定时按**这次派发**精确取（即便之后用户又导航过，旧记录仍在）；
+   * 不给时取该标签最近一次派发。取不到返回 null —— 调用方必须按"不可知"处理。
+   * 返回的是**此刻**的副本：派发之后的迟到完成会体现在下一次调用里。
+   */
+  dispatchEvidence(viewId, seq = null) {
+    const d = seq == null
+      ? (this.entries.get(String(viewId)) || {}).dispatch
+      : this.dispatches.get(String(viewId) + "#" + String(seq));
+    if (!d) return null;
+    return { seq: d.seq, viewId: d.viewId, requested: d.requested, from: d.from, at: d.at, started: d.started ? { ...d.started } : null, commitments: d.commitments.slice(-4), foreignCommit: d.foreignCommit ? { ...d.foreignCommit } : null, loaded: d.loaded ? { ...d.loaded } : null, loadError: d.loadError, superseded: !!d.superseded, settled: !!d.settled };
   }
 
   /**
@@ -724,8 +812,10 @@ class NativeViewController {
     e.loadError = null; // 显式导航：清除上一次的失败状态（重试/换地址都走这里）
     this.#emitState(e, "navigate");
     e.url = url;
-    e.view.webContents.loadURL(url).catch(() => {});
-    return { ok: true };
+    // 派发追踪：loadURL() 自己的 promise 是"这次调用引发的加载"的因果证据，绝不静默吞掉。
+    const dispatch = this.#trackDispatch(e, url);
+    this.#settleDispatch(dispatch, e.view.webContents.loadURL(String(url)), e.view.webContents);
+    return { ok: true, seq: dispatch.seq };
   }
 
   /** 用系统默认应用打开外部协议 / 系统浏览器（**必须由 UI 在用户确认后调用**）。 */

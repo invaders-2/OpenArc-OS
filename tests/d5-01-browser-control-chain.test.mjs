@@ -27,8 +27,12 @@ const PAGE2 = SITE + "/page2";
 const sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); if (t && t.unref) t.unref(); });
 const waitFor = async (fn, ms, detail = "") => { const deadline = Date.now() + ms; while (Date.now() < deadline) { if (await Promise.resolve(fn())) return true; await sleep(25); } assert.fail("waitFor 超时：" + detail); };
 
-/** 假原生控制器：只实现受控浏览器能力真正用到的方法，并记录每一次真实动作。 */
-function fakeController() {
+/**
+ * 假原生控制器：只实现受控浏览器能力真正用到的方法，并记录每一次真实动作。
+ * 导航语义与真实控制器同口径（派发三态 + 派发证据账本，见 native-view-controller.cjs）。
+ * `outcome` 决定这次派发的结果：applied / redirect / notapplied / unconfirmed / late。
+ */
+function fakeController({ outcome = "applied" } = {}) {
   const state = {
     entries: [
       { viewId: USER_VIEW, windowId: "browser", tabId: "t1", url: SITE + "/form", title: "FORM", sessionKey: "usr_admin", alive: true },
@@ -36,23 +40,48 @@ function fakeController() {
     ],
     reads: 0,
     navigations: [],
+    outcome,
+    ledger: new Map(),
+    seq: 0,
+    pending: null,
   };
+  const entryOf = (viewId) => state.entries.find((x) => x.viewId === viewId) || null;
   return {
     state,
     inventory: () => state.entries.filter((e) => e.alive),
     ownerOfView: (viewId) => state.entries.find((e) => e.viewId === viewId && e.alive) || null,
     readText: async () => { state.reads += 1; return PAGE_TEXT; },
-    liveUrl: (viewId) => { const e = state.entries.find((x) => x.viewId === viewId); return e && e.alive ? e.url : null; },
+    liveUrl: (viewId) => { const e = entryOf(viewId); return e && e.alive ? e.url : null; },
     navigate: (windowId, url, tabId) => {
       state.navigations.push({ windowId, url, tabId });
-      const e = state.entries.find((x) => x.viewId === windowId + "#" + tabId);
-      if (e) e.url = url;
-      return { ok: true };
+      const viewId = windowId + "#" + tabId;
+      const e = entryOf(viewId);
+      state.seq += 1;
+      const ev = { seq: state.seq, viewId, requested: String(url), from: e ? String(e.url) : "", at: 1, started: { url: String(url), at: 1 }, commitments: [], loaded: null, loadError: null, superseded: false };
+      state.ledger.set(viewId + "#" + ev.seq, ev);
+      state.pending = { viewId, ev };
+      if (state.outcome === "notapplied") ev.loadError = "ERR_ABORTED";
+      return { ok: true, seq: ev.seq };
     },
-    waitForCommit: async (viewId) => {
-      const e = state.entries.find((x) => x.viewId === viewId);
-      if (!e || !e.alive) return { ok: false, error: "BROWSER_CONTROL_TARGET_GONE" };
-      return { ok: true, url: e.url, noop: false };
+    async waitForDispatch(viewId) {
+      const p = state.pending;
+      if (!p || p.viewId !== String(viewId)) return { verdict: "INDETERMINATE", reason: "NO_DISPATCH" };
+      const { ev } = p;
+      if (state.outcome === "notapplied") return { verdict: "NOT_APPLIED", seq: ev.seq, reason: "ERR_ABORTED", requested: ev.requested };
+      if (state.outcome === "unconfirmed" || state.outcome === "late") {
+        if (state.outcome === "late") state.releaseLate = () => { const e = entryOf(viewId); if (e) e.url = ev.requested; ev.loaded = { at: 3, url: ev.requested }; };
+        return { verdict: "INDETERMINATE", seq: ev.seq, reason: "DISPATCH_UNCONFIRMED", requested: ev.requested };
+      }
+      const finalUrl = state.outcome === "redirect" ? ev.requested.replace(/\/page2$/, "/page3") : ev.requested;
+      const e = entryOf(viewId);
+      if (e) e.url = finalUrl;
+      ev.loaded = { at: 2, url: finalUrl };
+      return { verdict: "APPLIED", seq: ev.seq, url: finalUrl, requested: ev.requested, from: ev.from, redirected: finalUrl !== ev.requested, noop: finalUrl === ev.from };
+    },
+    dispatchEvidence(viewId) {
+      let latest = null;
+      for (const ev of state.ledger.values()) if (ev.viewId === String(viewId)) latest = ev;
+      return latest ? { ...latest } : null;
     },
   };
 }
