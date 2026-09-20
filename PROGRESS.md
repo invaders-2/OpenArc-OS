@@ -948,6 +948,17 @@ C2/C4 只开放 resource.trash 一条 REVERSIBLE_WRITE：IRREVERSIBLE_WRITE / EX
 4. A37 / A38 不在 PLAN §41 的 D4-05 四场景内，未纳入。
 5. 真实 `electron/main.cjs` 全流程 = **PASS（D4 Main-Entry E2E Closure-6 `3c9659a`：5/5 必需流程含追加步骤/预算停止/UI 显式续接，Gate `120/120`、exit 0）**；真实外部 provider / 真实凭据 / Windows / OS 级网络沙箱 = 继承 `NOT VERIFIED`，不扩大。Closure-6 已补：追加步骤产品入口（`5577e82`）；Closure-5 已补：产品工具授权入口（`4e8c6c1`）、明确拒绝假成功修复（`81ced49`）。
 
+# D5-02 Closure · 验收补齐与边界证据（唯一口径 · 2026-09-20）
+
+**基线 `18b7c4c` → 代码/测试提交 `ce5dd21`**；分支 `feature/d4-03-tool-proxy`；未 push、未合并 main、未进入 D5-03；只操作专用工作树。
+
+- **一次生成的任务/预算/停止归属（本轮新定）**：一次画布生成 = **一个 Task**（appId=canvas，`canvas_runs` v18 绑定 run↔task↔画布↔baseRevision）；预算用**任务级 MODEL_CALLS 账本**（`getTaskBudget`/`recordBudgetConsumption`，与任务层同一份）；停止走 `canvas/runStop` → `requestCancel`/`cancelTask` + run 终结 + AbortController；每次调用重新解析并授权模型（任务不绑定 config），迟到结果只在画布 revision 未前进时返回。`model-bootstrap` 删掉了 `canvas/chat|canvas/image`，画布生成**只能**走 `canvas:command` 的 run 链（不留第二条模型路径）。画布成为独立 App Principal（显式 `model.view/model.use`）。
+- **干净导出树 `ce5dd21` 单轮**：`npm run build` 0；D5-02 单测 **12/12**（exit 0）；**产品门禁 `canvas-e2e` 24/25，exit 1**（唯一 FAIL = D1 无权限路径未取得证据，断言未删除未放宽）；回归 `test:d5-01` **64/64**（exit 0）。
+- **新增实测证据（PASS）**：D2 能力不支持 → provider 0 图片请求；D3 预算耗尽 → provider 请求数=成功调用数；D4 停止 → 在途不可撤回如实、停止后不再发新请求、迟到结果丢弃且不覆盖用户随后编辑的节点；D5 失败收敛 → 每次调用恰好一次请求、无隐藏重试、无凭据；E1 宿主只接受当前实例（伪造 token/其它 iframe/外壳自身都无效）；E2 后端不信任自报身份；E3 `openarc-canvas://` 越界被拒；E4 出网通道（fetch/img/WebSocket/表单/外站脚本）本地接收端 **0 命中**（CSP + 协议 + 宿主校验，fetch 替换只是兼容层）。残余通道如实登记：`location.href` 自我导航无法由 CSP 关闭。
+- **统一图片存储口径**：`canvas/importAsset` 把本地导入图片写进**现有资源库**、画布只存 `openarc-asset:<ResourceRef>`，`canvas/readAsset` 逐资源授权解析，老文档 data URL 原样兼容 —— **后端与宿主已接，但未进门禁验证**（保存重开/账号隔离/删除提示仍缺证）。
+- **AI 编辑**：仍只有适配器/工具层证据；**真实 Agent 提议 → 审批 → 权威执行 → 画布呈现 → 保存恢复**整条产品链未取得。
+- **结论：D5-02 维持 PARTIAL**。未取得证据的既定要求：①D1 无权限路径；②统一图片存储口径的产品验证；③AI 编辑真实产品链。视频/多人实时协作仍按 PLAN 单列为非必需项，不扩开发。
+- 证据：`docs/D5-02-CLOSURE-RESULT.md`、`docs/D5-02-CLOSURE-EVIDENCE.json`；`artifacts/d5-02/d5-02-canvas-e2e.json` 与 `.log`（工作树本地）。
 # D5-02 · NOVAI 无限画布集成（唯一口径 · 2026-09-20）
 
 **基线 `fe6c9bf`（完整 HEAD 核对一致、工作树干净）→ 代码提交 `d875558` → 门禁补断言提交 `9b47463`**；分支 `feature/d4-03-tool-proxy`；未 push、未合并 main、未进入 D5-03；只操作专用工作树，其他工作区未触碰。
