@@ -948,6 +948,15 @@ C2/C4 只开放 resource.trash 一条 REVERSIBLE_WRITE：IRREVERSIBLE_WRITE / EX
 4. A37 / A38 不在 PLAN §41 的 D4-05 四场景内，未纳入。
 5. 真实 `electron/main.cjs` 全流程 = **PASS（D4 Main-Entry E2E Closure-6 `3c9659a`：5/5 必需流程含追加步骤/预算停止/UI 显式续接，Gate `120/120`、exit 0）**；真实外部 provider / 真实凭据 / Windows / OS 级网络沙箱 = 继承 `NOT VERIFIED`，不扩大。Closure-6 已补：追加步骤产品入口（`5577e82`）；Closure-5 已补：产品工具授权入口（`4e8c6c1`）、明确拒绝假成功修复（`81ced49`）。
 
+# D5-01 Closure-4 · VIS-GEOMETRY-1 定位（唯一口径 · 2026-09-20）
+
+**基线 \`3bcb07c\` → 代码提交 \`0e6702a\`**；未 push、未合并 main、未进入 D5-02。
+
+- **定位结论：VIS-GEOMETRY-1 是测量误差，不是产品缺陷。** 同一次稳定布局（屏幕 pt）：domain 意图矩形 {385,821}、**像素真值 {385,821}（偏差 0/0）**、DOM 占位符 {468,790}。占位符被一条 \`browser-notices\` 提示条（\`kind=permission\`，高 114.5）在 flex 流里推下去；**原生视图严格跟随 window-domain 意图矩形，没有错位、没有压住 chrome**。旧证据（Closure-3 报告 §二 与证据 JSON \`openFinding\`）已更正。
+- **修正**：几何断言改为与领域意图矩形比较（单一真源：\`shell.top + 90\` / \`shell.height - 90\`，标题栏项两边抵消）；前台资格轮询 + AXRaise；增补四边/最大化/缩放验收项。
+- **未完成（如实登记）**：完整验收一轮 19/23 PASS、4 FAIL、2 NOT VERIFIED（exit 1）——V4c/V4d 判据自身有 bug；V11/V12 的屏幕坐标仍按占位符换算（需改用意图矩形）；V13 页面缩放产品无入口 → NOT VERIFIED。**D5-01 维持 PARTIAL**：定位已完成，最终验收矩阵待重跑。
+- 证据：\`docs/D5-01-CLOSURE4-RESULT.md\`；\`artifacts/d5-01/d5-01-visibility-e2e.json\` 与 \`artifacts/d5-01/visibility/*.png\`（工作树本地）。
+
 # D5-01 Closure-3 · 执行边界与最终验收（唯一口径 · 2026-09-20）
 
 **基线 \`2534c31\` → 代码/测试提交 \`2cb3088\`**；分支 \`feature/d4-03-tool-proxy\`；未 push、未合并 main、未触碰其它工作区（另一个运行中的 \`OpenArc OS.app\` 全程未激活/未点击/未关闭）。本轮只收口三件事，不新增浏览器功能。

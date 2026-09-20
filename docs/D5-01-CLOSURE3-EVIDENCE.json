@@ -41,7 +41,25 @@
         "id": "VIS-GEOMETRY-1",
         "summary": "像素量与点击标定两个独立仪器都显示：网页那一块（原生视图）在屏幕上的位置比 DOM 预留位置偏高约 83–103pt，高度也更大（436pt vs 预留 322pt）；但真实指针点标签栏/地址栏仍然生效。两者未能完全对上，未定位根因。",
         "measured": "click mapping dx=0 dy=103（页面 scrollY=0）；pixel longest-green-run top=385 bottom=821 vs placeholder 468..790 → Δtop=-83 Δbottom=+31",
-        "status": "OPEN（如实登记，不冒充通过；V4c 一项因此失败）"
+        "status": "已由 D5-01 Closure-4 更正：测量误差（仪器），不是产品几何缺陷",
+        "correctedBy": {
+          "round": "D5-01 Closure-4",
+          "measurement": {
+            "intent": {
+              "top": 385,
+              "bottom": 821
+            },
+            "pixels": {
+              "top": 385,
+              "bottom": 821
+            },
+            "domPlaceholder": {
+              "top": 468,
+              "bottom": 790
+            }
+          },
+          "cause": "DOM 占位符被 browser-notices 提示条（kind=permission，高 114.5）在 flex 流里推下去；原生视图严格跟随 window-domain 意图矩形"
+        }
       }
     },
     "四·D4-03D 超时": {

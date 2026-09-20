@@ -74,3 +74,13 @@
 - 不新增浏览器功能、不扩展第三方选型、不 push、不合并 main；本轮到此停止，不进入 D5-02。
 
 **证据**：\`docs/D5-01-CLOSURE3-EVIDENCE.json\`（脱敏：门禁退出码 + 边界 32 项 + 可见性 9 项 + 安全面 16 项 + 未验证项）；\`artifacts/d5-01/d5-01-browser-inprocess-boundary-e2e.json\`、\`artifacts/d5-01/d5-01-visibility-e2e.json\`、\`artifacts/d5-01/visibility/*.png\`（工作树本地）。
+
+---
+
+## 更正（D5-01 Closure-4 · 2026-09-20）
+
+**VIS-GEOMETRY-1 的结论已被推翻：那是测量误差，不是产品几何缺陷。**
+
+同一次稳定布局下量齐五个来源（单位：屏幕 pt，原点=主屏左上）：**意图矩形 {top:385,bottom:821}**、**像素真值 {top:385,bottom:821}（偏差 0/0）**、DOM 占位符 {top:468,bottom:790}。
+占位符之所以不同，是因为外壳里有一条 \`browser-notices\` 提示条（\`kind=permission\`，高 114.5）在 flex 流里把它推下去；**原生视图严格跟随 window-domain 的意图矩形，没有错位、也没有压住 chrome**。
+上一轮把"像素真值 vs DOM 占位符"的差（-83/+31）当成了产品缺陷，属于仪器判据选错参照物。本文件 §二 中"偏高约 83–103pt"的表述按此更正；Closure-3 证据 JSON 里的 \`openFinding\` 同样作废（见 \`correctedBy\`）。
