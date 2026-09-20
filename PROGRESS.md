@@ -948,14 +948,16 @@ C2/C4 只开放 resource.trash 一条 REVERSIBLE_WRITE：IRREVERSIBLE_WRITE / EX
 4. A37 / A38 不在 PLAN §41 的 D4-05 四场景内，未纳入。
 5. 真实 `electron/main.cjs` 全流程 = **PASS（D4 Main-Entry E2E Closure-6 `3c9659a`：5/5 必需流程含追加步骤/预算停止/UI 显式续接，Gate `120/120`、exit 0）**；真实外部 provider / 真实凭据 / Windows / OS 级网络沙箱 = 继承 `NOT VERIFIED`，不扩大。Closure-6 已补：追加步骤产品入口（`5577e82`）；Closure-5 已补：产品工具授权入口（`4e8c6c1`）、明确拒绝假成功修复（`81ced49`）。
 
-# D5-01 Closure-4 · VIS-GEOMETRY-1 定位（唯一口径 · 2026-09-20）
+# D5-01 Closure-4 · 提示遮挡判定 + 最小修复 + 仪器收口（唯一口径 · 2026-09-20）
 
-**基线 \`3bcb07c\` → 代码提交 \`0e6702a\`**；未 push、未合并 main、未进入 D5-02。
+**基线 \`ebc9d21\`（完整 HEAD 核对一致、工作树干净）→ 代码/测试提交 \`f9564b7\`**；分支 \`feature/d4-03-tool-proxy\`；未 push、未合并 main、未进入 D5-02；只操作专用工作树（\`OpenArc OS-d4-01\`）。
 
-- **定位结论：VIS-GEOMETRY-1 是测量误差，不是产品缺陷。** 同一次稳定布局（屏幕 pt）：domain 意图矩形 {385,821}、**像素真值 {385,821}（偏差 0/0）**、DOM 占位符 {468,790}。占位符被一条 \`browser-notices\` 提示条（\`kind=permission\`，高 114.5）在 flex 流里推下去；**原生视图严格跟随 window-domain 意图矩形，没有错位、没有压住 chrome**。旧证据（Closure-3 报告 §二 与证据 JSON \`openFinding\`）已更正。
-- **修正**：几何断言改为与领域意图矩形比较（单一真源：\`shell.top + 90\` / \`shell.height - 90\`，标题栏项两边抵消）；前台资格轮询 + AXRaise；增补四边/最大化/缩放验收项。
-- **未完成（如实登记）**：完整验收一轮 19/23 PASS、4 FAIL、2 NOT VERIFIED（exit 1）——V4c/V4d 判据自身有 bug；V11/V12 的屏幕坐标仍按占位符换算（需改用意图矩形）；V13 页面缩放产品无入口 → NOT VERIFIED。**D5-01 维持 PARTIAL**：定位已完成，最终验收矩阵待重跑。
-- 证据：\`docs/D5-01-CLOSURE4-RESULT.md\`；\`artifacts/d5-01/d5-01-visibility-e2e.json\` 与 \`artifacts/d5-01/visibility/*.png\`（工作树本地）。
+- **产品缺陷 NOTICE-OCCLUSION-1（像素实证，不是测量误差）**：原生视图挂在窗口之上，位置 = 外壳顶 + 90pt chrome（domain 意图）；而 \`browser-notices\`/\`browser-error\` 是 chrome **之下**的 flex 条带 → 提示条被网页整条盖住，点击也进不了外壳、直接漏给网页。同一门禁在两棵树上对照：基线 \`ebc9d21\` **8 PASS/8 FAIL（exit 1）**（重叠 33.5pt、按钮中心像素 = 网页绿 56,123,83、提示条内网页绿 15/25、外壳零点击、网页事件 3→12、popup 按钮同样失效）→ 修复后 \`f9564b7\` **16/16 PASS（exit 0）**（重叠 0pt、按钮像素 91,91,93、0/25 网页绿、外壳收到 trusted 点击、该条消失其余不变、网页事件 3→3）。
+- **最小修复（让网页让位）**：\`BrowserApp\` 每次渲染量「chrome 之下、网页之上」的 DOM 条带高度并上送 → \`useDesktop\` 存 \`viewportReserves\` → \`window-manager.nativeIntents(state, host, reserves = {})\` 把它从原生视口减掉（默认 \`{}\` → 既有几何逐字不变；非浏览器/未上报窗口 0）；新增单测覆盖让位与脏值。未新增缩放入口、未改执行契约、未新增 IPC 通道、未放宽安全面断言。
+- **仪器一次修完**：V4c 改读实际采集字段（旧断言读 \`r1.run\` 恒 FAIL）；V4d 解释性差值移入诊断、断言改为"条带让位且条带内非网页绿"；V11/V12 统一到**实测原生视图矩形**换算（移除 \`.web-viewport\` + 经验 \`dy\` 残留路径），V11 增补落点像素独立证明并避开 16pt 圆角，V12 先定位真实按钮矩形 + \`elementFromPoint\` 旁证 + 前台/活跃 App 核对，以窗口状态/网页布局/像素真值判定；V13 页面缩放更正为"不适用（原始必需项不含）+ 实测补充"；新增 \`experiments/d5-01/screen-geometry.mjs\` 作为唯一换算器（含安全闸与"热身"，每条点击断言以"外壳/网页收到"为准）。
+- **干净导出树 \`f9564b7\` 单轮（不拼接）**：\`test:d5-01-visibility\` **25/25 PASS，exit 0**（1 NOT VERIFIED）；\`test:d5-01\` **64/64 PASS，exit 0**；\`test:d5-01-control\` **46/46 PASS，exit 0**；窗口回归单测 **55/55**；\`test:native\` **26/26**；提示门禁 **16/16**。文件身份 sha256 与提交一致。
+- **结论：D5-01 = PASS（限定范围：macOS 单屏 / 本地受控站点 / 正常退出）**。原始必需项 1–11 全部满足（AI 控制浏览器见 Closure-2 的 46/46，本轮无回归）；范围外项照旧 NOT VERIFIED：崩溃/强杀恢复、高 DPI/多屏/Windows、任意网站兼容、页面缩放（不适用）。设计内限制如实登记：原生视图 16pt 圆角区域不接收网页点击。
+- 证据：\`docs/D5-01-CLOSURE4-RESULT.md\`（前/后对照 + 逐项结论）、\`docs/D5-01-CLOSURE4-EVIDENCE.json\`（脱敏）；\`artifacts/d5-01/\`（工作树本地：4 份门禁 JSON + 对照组 JSON + \`visibility-clean/\`、\`notice-clean/\`、\`notice-prefix/\` 截图）。上一轮的"提示不需要让位"结论已更正；\`notice-coverage-probe.mjs\` 因判据无效已删除。
 
 # D5-01 Closure-3 · 执行边界与最终验收（唯一口径 · 2026-09-20）
 
