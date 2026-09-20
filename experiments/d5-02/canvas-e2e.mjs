@@ -181,6 +181,18 @@ async function main() {
     !!(addA.ok && addB.ok && link.ok && moved.ok) && savedOk && stored.canvas.revision >= 2,
     "2 节点 + 1 连线 + 坐标 520", JSON.stringify({ addA: addA.ok, addB: addB.ok, link: link.ok, moved: moved.ok, savedOk, revision: stored.canvas.revision, nodes: stored.canvas.doc.nodes.map((n) => ({ id: n.id, x: n.x, y: n.y })), edges: stored.canvas.doc.connections.length }));
 
+  /* ── C4b 撤销 / 重做（上游只有撤销；重做由适配层补齐，与手工编辑同一入口）── */
+  const undoState = await inFrame("window.__openarcCanvas.undo(); await new Promise(r=>setTimeout(r,400)); const it = window.__openarcCanvasInternals; const n = it.primitives.getNode('n_llm'); return { x: n.x, canRedo: window.__openarcCanvas.canRedo() };");
+  const redoState = await inFrame("window.__openarcCanvas.redo(); await new Promise(r=>setTimeout(r,400)); const it = window.__openarcCanvasInternals; const n = it.primitives.getNode('n_llm'); return { x: n.x, canRedo: window.__openarcCanvas.canRedo() };");
+  const undoPersisted = await waitFor(async () => {
+    const got = await canvas({ type: "canvas/get", canvasId });
+    const n = got && got.ok ? got.canvas.doc.nodes.find((x) => x.id === "n_llm") : null;
+    return n && Number(n.x) === 520;
+  }, 15000);
+  record("C4b", "撤销 / 重做：撤销真的回退、重做真的恢复（与手工编辑同一历史入口），且结果重新落库",
+    Math.round(undoState.x) === 420 && undoState.canRedo === true && Math.round(redoState.x) === 520 && undoPersisted,
+    "undo→420 / redo→520 + 落库", JSON.stringify({ undoState, redoState, undoPersisted }));
+
   /* ── C5 关闭 / 重新打开：恢复 ── */
   await clickDom('[aria-label="关闭无限画布窗口"]').catch(() => {});
   await js("const el=document.querySelector('[data-canvas-host]'); const win=el&&el.closest('[data-window-id]'); const btn=win&&win.querySelector('.window-title button.close'); if(btn) btn.click(); return !!btn;");
