@@ -16,14 +16,14 @@ const PNG_1x1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8B
 export const CANVAS_TEXT_PREFIX = "OPENARC-CANVAS-LLM:";
 
 export async function startCanvasProvider({ port = Number(process.env.OA_D502_PORT || 5411) } = {}) {
-  const state = { mode: "ok", chats: [], images: [], authSeen: 0, models: [] };
+  const state = { mode: "ok", delayMs: 2500, inflight: 0, chats: [], images: [], authSeen: 0, models: [] };
   const server = http.createServer((req, res) => {
     const send = (code, obj) => { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(obj)); };
     let raw = "";
     req.on("data", (d) => (raw += d));
     req.on("end", () => {
       if (req.method === "POST" && req.url === "/__mode") {
-        try { const b = JSON.parse(raw || "{}"); if (typeof b.mode === "string") state.mode = b.mode; } catch { /* ignore */ }
+        try { const b = JSON.parse(raw || "{}"); if (typeof b.mode === "string") state.mode = b.mode; if (Number.isFinite(Number(b.delayMs))) state.delayMs = Number(b.delayMs); } catch { /* ignore */ }
         state.chats = []; state.images = [];
         return send(200, { ok: true, mode: state.mode });
       }
@@ -37,6 +37,8 @@ export async function startCanvasProvider({ port = Number(process.env.OA_D502_PO
         if (state.mode === "fail") return send(500, { error: { message: "provider failure" } });
         const lastUser = Array.isArray(body.messages) ? [...body.messages].reverse().find((m) => m.role === "user") : null;
         const text = CANVAS_TEXT_PREFIX + String((lastUser && lastUser.content) || "").slice(0, 120);
+        // slow：真实在途请求（用于"用户停止 / 迟到结果"证据）
+        if (state.mode === "slow") { state.inflight += 1; setTimeout(() => { state.inflight -= 1; send(200, { id: "chatcmpl_canvas", object: "chat.completion", model: body.model, choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: "stop" }], usage: { prompt_tokens: 8, completion_tokens: 12, total_tokens: 20 } }); }, Number(state.delayMs) || 2500); return; }
         return send(200, { id: "chatcmpl_canvas", object: "chat.completion", model: body.model, choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: "stop" }], usage: { prompt_tokens: 8, completion_tokens: 12, total_tokens: 20 } });
       }
       if (req.method === "POST" && req.url === "/v1/images/generations") {

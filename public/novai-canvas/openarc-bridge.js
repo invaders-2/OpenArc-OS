@@ -14,19 +14,32 @@
   var seq = 0;
   var pending = new Map();
   var ctx = { ready: false, readOnly: true, canEdit: false, canvasId: null, models: null };
+  /** 宿主在 hello 里发来的**本次实例 token**：每条调用都必须带回，否则宿主忽略。*/
+  var token = null;
 
   function post(msg) {
     try { window.parent.postMessage(Object.assign({ ch: CH, dir: "canvas->host" }, msg), "*"); } catch (e) { /* host 不在 */ }
   }
   function errText(code, message) { return { error: code, message: message || code }; }
 
-  function call(method, params) {
+  function call(method, params, signal) {
     return new Promise(function (resolve, reject) {
       if (!ctx.ready) { reject(errText("CANVAS_HOST_NOT_READY", "OpenArc 画布宿主尚未就绪")); return; }
       seq += 1;
       var id = seq;
+      var onAbort = function () {
+        if (!pending.has(id)) return;
+        pending.delete(id);
+        // 用户停止（级联停止会 abort 在途请求）：通知宿主终结这次生成运行，之后不再发出后续请求。
+        post({ kind: "abort", id: id, method: method });
+        reject(errText("CANVAS_ABORTED", "已停止"));
+      };
       pending.set(id, { resolve: resolve, reject: reject });
-      post({ kind: "call", id: id, method: method, params: params || {} });
+      if (signal) {
+        if (signal.aborted) { onAbort(); return; }
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+      post({ kind: "call", id: id, method: method, params: params || {}, token: token });
       setTimeout(function () {
         if (!pending.has(id)) return;
         pending.delete(id);
@@ -39,6 +52,7 @@
     var d = event.data;
     if (!d || d.ch !== CH || d.dir !== "host->canvas") return;
     if (d.kind === "hello") {
+      token = d.token || null;
       ctx.ready = true;
       ctx.readOnly = !!d.readOnly;
       ctx.canEdit = !!d.canEdit;
@@ -136,7 +150,7 @@
     var mapped = route(method, parsed.pathname, parsed.search, isForm ? init.body : body);
     if (!mapped) return Promise.resolve(unsupported(parsed.pathname));
     if (parsed.pathname === "/api/ai/upload") return call(mapped.method, { form: init.body }).then(function (res) { return jsonResponse(200, res); }).catch(function (err) { return jsonResponse(502, { error: err.error, message: err.message }); });
-    return call(mapped.method, mapped.params || {}).then(function (res) {
+    return call(mapped.method, mapped.params || {}, init.signal || null).then(function (res) {
       if (res && res.__conflict) return jsonResponse(409, { detail: res.detail || null, error: "REVISION_CONFLICT" });
       if (res && res.__status) return jsonResponse(res.__status, res.body || {});
       return jsonResponse(200, res);

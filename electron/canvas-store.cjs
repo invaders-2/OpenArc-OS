@@ -31,6 +31,12 @@ const SQL = {
     "INSERT INTO canvas_commands (id, canvas_id, actor_user_id, actor_kind, command, base_revision, result_revision, outcome, before_doc, at) VALUES (?,?,?,?,?,?,?,?,?,?)",
   recentCommands: "SELECT * FROM canvas_commands WHERE canvas_id = ? ORDER BY at DESC, id DESC LIMIT ?",
   commandById: "SELECT * FROM canvas_commands WHERE id = ?",
+  insertRun:
+    "INSERT INTO canvas_runs (run_id, canvas_id, node_id, kind, actor_user_id, task_id, base_revision, status, stop_reason, started_at, finished_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+  runById: "SELECT * FROM canvas_runs WHERE run_id = ?",
+  runsOfCanvas: "SELECT * FROM canvas_runs WHERE canvas_id = ? ORDER BY started_at DESC, run_id DESC LIMIT ?",
+  finishRun: "UPDATE canvas_runs SET status = ?, stop_reason = ?, finished_at = ? WHERE run_id = ?",
+  activeRunsOfCanvas: "SELECT * FROM canvas_runs WHERE canvas_id = ? AND status = 'RUNNING' ORDER BY started_at DESC",
 };
 
 class CanvasStore {
@@ -95,6 +101,18 @@ class CanvasStore {
   }
   commandById(id) { return this.db.prepare(SQL.commandById).get(String(id)) || null; }
   recentCommands(canvasId, limit = 20) { return this.db.prepare(SQL.recentCommands).all(String(canvasId), Number(limit) || 20); }
+
+  insertRun({ runId, canvasId, nodeId = null, kind, actorUserId, taskId = null, baseRevision = 1, status = "RUNNING" }) {
+    this.db.prepare(SQL.insertRun).run(String(runId), String(canvasId), nodeId == null ? null : String(nodeId), String(kind), String(actorUserId), taskId == null ? null : String(taskId), Number(baseRevision) || 1, String(status), null, this.now(), null);
+    return this.runById(runId);
+  }
+  runById(runId) { return this.db.prepare(SQL.runById).get(String(runId || "")) || null; }
+  runsOfCanvas(canvasId, limit = 20) { return this.db.prepare(SQL.runsOfCanvas).all(String(canvasId), Number(limit) || 20); }
+  activeRunsOfCanvas(canvasId) { return this.db.prepare(SQL.activeRunsOfCanvas).all(String(canvasId)); }
+  finishRun({ runId, status, stopReason = null }) {
+    this.db.prepare(SQL.finishRun).run(String(status), stopReason == null ? null : String(stopReason), this.now(), String(runId));
+    return this.runById(runId);
+  }
 }
 
 module.exports = { CanvasStore };

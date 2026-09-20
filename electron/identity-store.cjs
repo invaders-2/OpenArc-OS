@@ -51,7 +51,7 @@ const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domai
  * 迁移按版本逐级前进，每一级各自是一个原子事务：任何一级失败只回滚该级，
  * 不会留下"user_version 已升级但表不完整"的半状态（§55）。
  */
-const SCHEMA_VERSION = 17;
+const SCHEMA_VERSION = 18;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -1153,6 +1153,24 @@ CREATE TABLE canvas_commands (
 CREATE INDEX idx_canvas_commands ON canvas_commands(canvas_id, at DESC);
 `;
 
+/** D5-02 Closure v18：一次画布生成 = 一个 Task（预算/停止/审计归属）。*/
+const SCHEMA_V18_SQL = `
+CREATE TABLE canvas_runs (
+  run_id        TEXT PRIMARY KEY,
+  canvas_id     TEXT NOT NULL,
+  node_id       TEXT,
+  kind          TEXT NOT NULL,
+  actor_user_id TEXT NOT NULL,
+  task_id       TEXT,
+  base_revision INTEGER NOT NULL,
+  status        TEXT NOT NULL,
+  stop_reason   TEXT,
+  started_at    INTEGER NOT NULL,
+  finished_at   INTEGER
+);
+CREATE INDEX idx_canvas_runs ON canvas_runs(canvas_id, started_at DESC);
+`;
+
 const MIGRATIONS = Object.freeze([
   { version: 1, sql: SCHEMA_SQL },
   { version: 2, sql: SCHEMA_V2_SQL },
@@ -1171,6 +1189,7 @@ const MIGRATIONS = Object.freeze([
   { version: 15, sql: SCHEMA_V15_SQL },
   { version: 16, sql: SCHEMA_V16_SQL },
   { version: 17, sql: SCHEMA_V17_SQL },
+  { version: 18, sql: SCHEMA_V18_SQL },
 ]);
 
 const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000; // 12h 绝对上限

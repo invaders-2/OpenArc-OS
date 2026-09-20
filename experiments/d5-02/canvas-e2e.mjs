@@ -23,6 +23,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { startCanvasProvider, CANVAS_TEXT_PREFIX } from "../../tests/fixtures/d5-02-canvas-provider.mjs";
+import http from "node:http";
 
 const require = createRequire(import.meta.url);
 const electronPath = require("electron");
@@ -89,6 +90,15 @@ async function launch() {
   page.on("dialog", (d) => { dialogs.push(String(d.message()).slice(0, 140)); void d.dismiss().catch(() => {}); });
   page.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text().slice(0, 200)); });
   page.on("pageerror", (e) => consoleErrors.push("pageerror:" + String(e.message).slice(0, 200)));
+}
+
+/** 本地接收端：记录任何到达的请求（用于证明出网通道被拦住）。*/
+async function startReceiver() {
+  const hits = [];
+  const server = http.createServer((req, res) => { hits.push(req.method + " " + req.url); res.writeHead(204); res.end(); });
+  server.on("upgrade", (req) => { hits.push("UPGRADE " + req.url); req.socket.destroy(); });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  return { port: server.address().port, hits: () => hits.slice(), close: () => new Promise((r) => server.close(() => r())) };
 }
 
 async function login(identifier, pw) {
@@ -251,6 +261,119 @@ async function main() {
   record("C8", "失败如实展示：provider 500 → 节点标记失败并带错误（不假装成功）",
     !!runFail && !!failedState && failedState.status === "failed" && failedState.error.length > 0,
     "runStatus=failed + runError", JSON.stringify(failedState));
+
+
+  /* ── D 系列：模型调用的授权 / 预算 / 停止（任务归属）── */
+  const canvasAppGrant = await governance({ type: "governance/getAppAccess", appId: "canvas" });
+  const modelGrant = (canvasAppGrant && canvasAppGrant.grants ? canvasAppGrant.grants : []).find((x) => Array.isArray(x.actions) && x.actions.includes("model.use")) || null;
+  const beforeNoPerm = provider.state().chats.length;
+  const noPermRun = await canvas({ type: "canvas/run", canvasId, kind: "chat" });
+  if (modelGrant) await governance({ type: "governance/revokeAppAccess", grantId: modelGrant.grantId });
+  const revokedRun = await canvas({ type: "canvas/run", canvasId, kind: "chat" });
+  const afterNoPerm = provider.state().chats.length;
+  if (modelGrant) await governance({ type: "governance/grantAppAccess", appId: "canvas", resourceType: "model", scope: "ORGANIZATION", actions: ["model.view", "model.use"] });
+  const regranted = await canvas({ type: "canvas/run", canvasId, kind: "chat" });
+  record("D1", "无权限：画布应用的 model.use 被撤销后，生成**明确拒绝**且 provider 收不到任何请求", 
+    !!modelGrant && revokedRun.ok === false && revokedRun.error === "PROXY_UNAUTHORIZED" && afterNoPerm === beforeNoPerm && noPermRun.ok && regranted.ok,
+    "PROXY_UNAUTHORIZED + 0 请求", JSON.stringify({ projectAccess: canvasAppGrant && { ok: canvasAppGrant.ok, error: canvasAppGrant.error, grants: (canvasAppGrant.grants || []).map((x) => ({ actions: x.actions, resourceType: x.resourceType })) }, hasGrant: !!modelGrant, noPermRun: noPermRun.ok, revoked: { ok: revokedRun.ok, error: revokedRun.error }, requests: beforeNoPerm + "→" + afterNoPerm, regranted: regranted.ok }));
+
+  // 能力不支持：把 image-generation 默认指到一个只有 chat 能力的模型上
+  const chatOnly = await model({ type: "model/create", providerId, remoteModelId: "d502-chat-only", displayName: "D5-02 ChatOnly", capabilities: ["chat"], scope: "ORGANIZATION" });
+  await model({ type: "defaults/set", capability: "image-generation", configId: chatOnly.model.configId });
+  const beforeCap = provider.state().images.length;
+  const capRun = await canvas({ type: "canvas/run", canvasId, kind: "image" });
+  const afterCap = provider.state().images.length;
+  await model({ type: "defaults/set", capability: "image-generation", configId: imgId });
+  record("D2", "能力不支持：图片能力被指到只有 chat 的模型上 → 明确 CAPABILITY_UNAVAILABLE，provider 收不到图片请求",
+    capRun.ok === false && capRun.error === "CAPABILITY_UNAVAILABLE" && afterCap === beforeCap,
+    "CAPABILITY_UNAVAILABLE + 0 请求", JSON.stringify({ capRun: { ok: capRun.ok, error: capRun.error }, images: beforeCap + "→" + afterCap }));
+
+  // 预算：同一个 run 内反复调用，直到任务级 MODEL_CALLS 用尽
+  await provider.setMode("ok");
+  const budgetRun = await canvas({ type: "canvas/run", canvasId, kind: "chat" });
+  let budgetOk = 0, budgetStop = null;
+  for (let i = 0; i < 40 && !budgetStop; i += 1) {
+    const r = await canvas({ type: "canvas/modelChat", canvasId, runId: budgetRun.runId, messages: [{ role: "user", content: "预算探测 " + (i + 1) }] });
+    if (r && r.ok) budgetOk += 1; else budgetStop = r;
+  }
+  const budgetState = await canvas({ type: "canvas/runState", canvasId, runId: budgetRun.runId });
+  const providerChats = provider.state().chats.length;
+  record("D3", "预算不足：任务级 MODEL_CALLS 用尽后**明确拒绝**，provider 请求数 = 成功调用数（拒绝的那次没发出去）",
+    budgetStop && budgetStop.error === "BUDGET_EXHAUSTED" && budgetState.run.status === "BUDGET_EXHAUSTED" && providerChats === budgetOk,
+    "BUDGET_EXHAUSTED + 请求数=成功数", JSON.stringify({ budgetOk, stop: budgetStop && budgetStop.error, runStatus: budgetState.run.status, providerChats, remaining: budgetState.budget && budgetState.budget.remaining }));
+
+  // 停止：在途请求不可撤回（如实记录），但停止后不再发新请求；迟到结果不返回、不覆盖用户随后编辑
+  await provider.setMode("slow");
+  const stopRun = await canvas({ type: "canvas/run", canvasId, kind: "chat", nodeId: "n_llm" });
+  const inflight = canvas({ type: "canvas/modelChat", canvasId, runId: stopRun.runId, messages: [{ role: "user", content: "这条会被停止" }] });
+  await sleep(600);
+  const stopped = await canvas({ type: "canvas/runStop", canvasId, runId: stopRun.runId, reason: "USER_STOP" });
+  const late = await inflight;
+  const afterStop = await canvas({ type: "canvas/modelChat", canvasId, runId: stopRun.runId, messages: [{ role: "user", content: "停止后不该再发" }] });
+  const chatsAtStop = provider.state().chats.length;
+  await sleep(3000);
+  const chatsAfterLate = provider.state().chats.length;
+  await provider.setMode("ok");
+  // 用户随后编辑的节点内容必须还在（迟到结果从未回到画布）
+  await inFrame("const it = window.__openarcCanvasInternals; const n = it.primitives.getNode('n_llm'); n.outputText = '用户随后编辑的内容'; it.primitives.render(); return true;");
+  const userText = await inFrame("const it = window.__openarcCanvasInternals; return { text: String(it.primitives.getNode('n_llm').outputText || '') };");
+  record("D4", "停止：在途请求不可撤回（如实），但停止后**不再发新请求**；迟到结果被丢弃，不覆盖用户随后编辑的节点",
+    !!(stopped && stopped.ok) && stopped.run.status === "STOPPED" && late && late.ok === false && late.error === "RUN_STOPPED" && afterStop.ok === false && ["RUN_STOPPED", "TASK_CANCELLED"].includes(afterStop.error) && chatsAfterLate === chatsAtStop && userText.text === "用户随后编辑的内容",
+    "STOPPED + 迟到丢弃 + 用户内容保留", JSON.stringify({ stopped: stopped && stopped.run, late: late && { ok: late.ok, error: late.error }, afterStop: { ok: afterStop.ok, error: afterStop.error }, chatsAtStop, chatsAfterLate, userText }));
+
+  // 失败收敛：不隐藏重试；凭据不出现在任何回包里
+  await provider.setMode("fail");
+  const failRun = await canvas({ type: "canvas/run", canvasId, kind: "chat" });
+  const beforeFail = provider.state().chats.length;
+  const fail1 = await canvas({ type: "canvas/modelChat", canvasId, runId: failRun.runId, messages: [{ role: "user", content: "失败探测" }] });
+  const afterFail1 = provider.state().chats.length;
+  const fail2 = await canvas({ type: "canvas/modelChat", canvasId, runId: failRun.runId, messages: [{ role: "user", content: "失败探测 2" }] });
+  const afterFail2 = provider.state().chats.length;
+  await provider.setMode("ok");
+  const leakScan = JSON.stringify([fail1, fail2, await canvas({ type: "canvas/models" }), canvasInfo, configSeen]);
+  record("D5", "失败收敛：provider 500 → 明确失败、**每次调用恰好一次请求**（无隐藏重试），且响应/authored 面不含凭据",
+    fail1 && fail1.ok === false && afterFail1 === beforeFail + 1 && fail2 && fail2.ok === false && afterFail2 === beforeFail + 2 && !leakScan.includes("d502-canvas-secret"),
+    "每次一次请求 + 无凭据", JSON.stringify({ fail1: fail1 && fail1.error, fail2: fail2 && fail2.error, requests: [beforeFail, afterFail1, afterFail2], leaksSecret: leakScan.includes("d502-canvas-secret") }));
+
+  /* ── E 系列：隔离必须由宿主强制 ── */
+  const escapeProto = await inFrame("const a = await fetch('openarc-canvas://bundle/../package.json'); const b = await fetch('openarc-canvas://bundle/SOURCE.md'); return { traversal: a.status, nonWhitelisted: b.status };");
+  record("E3", "openarc-canvas:// 不能越界读取任意本地文件（目录穿越与非白名单扩展名都被拒）",
+    escapeProto.traversal >= 400 && escapeProto.nonWhitelisted >= 400,
+    "403/404", JSON.stringify(escapeProto));
+
+  const forged = await js("window.__openarcCanvasForged = null; try { const r = await window.openarc.canvas.command({ type: 'canvas/list', userId: 'usr_forged_identity', sessionRef: 'forged-session' }); window.__openarcCanvasForged = { ok: r.ok, count: (r.items || []).length }; } catch (e) { window.__openarcCanvasForged = { error: String(e.message).slice(0, 60) }; } return window.__openarcCanvasForged;");
+  const forgedList = await canvas({ type: "canvas/list" });
+  record("E2", "后端不信任消息自报身份：带伪造 userId/sessionRef 的请求按**当前会话**处理（不是伪造身份）",
+    forged && forged.ok === true && forged.count === (forgedList.items || []).length,
+    "按会话身份处理", JSON.stringify({ forged, sessionListCount: (forgedList.items || []).length }));
+
+  /* ── E4：出网通道（本地接收端实测；fetch 替换只是兼容层，限制由宿主/CSP 强制）── */
+  const receiver = await startReceiver();
+  const egress = await inFrame([
+    "const out = { };",
+    "try { const r = await fetch('http://127.0.0.1:" + receiver.port + "/fetch'); out.fetch = r.status; } catch (e) { out.fetch = 'throw'; }",
+    "try { const img = new Image(); img.src = 'http://127.0.0.1:" + receiver.port + "/img'; document.body.appendChild(img); out.img = 'set'; } catch (e) { out.img = 'throw'; }",
+    "try { new WebSocket('ws://127.0.0.1:" + receiver.port + "/ws'); out.ws = 'set'; } catch (e) { out.ws = 'throw:' + String(e.name); }",
+    "try { const f = document.createElement('form'); f.method = 'POST'; f.action = 'http://127.0.0.1:" + receiver.port + "/form'; const i = document.createElement('input'); i.name = 'x'; i.value = '1'; f.appendChild(i); document.body.appendChild(f); f.submit(); out.form = 'submitted'; } catch (e) { out.form = 'throw'; }",
+    "try { const s = document.createElement('script'); s.src = 'http://127.0.0.1:" + receiver.port + "/script.js'; document.body.appendChild(s); out.script = 'set'; } catch (e) { out.script = 'throw'; }",
+    "await new Promise(r => setTimeout(r, 800));",
+    "return out;",
+  ].join("\n"));
+  await sleep(600);
+  const egressHits = receiver.hits();
+  record("E4", "出网通道：图片加载 / WebSocket / 表单提交 / 外站脚本都被**宿主级策略**拦住（本地接收端 0 命中）",
+    egressHits.length === 0,
+    "接收端 0 命中", JSON.stringify({ attempts: egress, hits: egressHits }));
+
+  /* ── E1：宿主只接受当前画布实例的消息 ── */
+  const listBefore2 = (await canvas({ type: "canvas/list" })).items.length;
+  const e1res = await js("const f = document.createElement('iframe'); f.id='oa-forged-frame'; f.setAttribute('sandbox','allow-scripts'); f.src='openarc-canvas://bundle/index.html?id=cv_probe'; f.style.display='none'; document.body.appendChild(f); await new Promise(r=>setTimeout(r,1500)); const w = f.contentWindow; let delivered = 0; try { w.postMessage({ ch:'openarc.canvas', dir:'canvas->host', kind:'call', id: 991, token:'t_forged', method:'canvas.create', params:{ title:'伪造' } }, '*'); delivered++; } catch(e) {} window.postMessage({ ch:'openarc.canvas', dir:'canvas->host', kind:'call', id: 992, token:'t_forged', method:'canvas.create', params:{ title:'来自外壳' } }, '*'); await new Promise(r=>setTimeout(r,1200)); f.remove(); return { delivered };");
+  await sleep(500);
+  const listAfter2 = (await canvas({ type: "canvas/list" })).items.length;
+  record("E1", "宿主只接受**当前画布实例**的消息：伪造 token / 其它 iframe / 外壳自身发的调用一律不执行",
+    listAfter2 === listBefore2,
+    "画布数量不变", JSON.stringify({ e1res, listBefore2, listAfter2 }));
+  await receiver.close();
 
   /* ── C9 不支持的能力明确报错 ── */
   const video = await inFrame("const r = await fetch('/api/canvas-video', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ prompt:'x' }) }); return { status: r.status, body: await r.json() };");

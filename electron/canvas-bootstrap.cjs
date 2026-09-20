@@ -29,16 +29,26 @@ const RENDERER_COMMANDS = Object.freeze([
   "canvas/undo",
   "canvas/log",
   "canvas/assetStates",
+  // D5-02 Closure：一次生成 = 一个 Task（预算/停止/审计归属）；图片统一进资源库
+  "canvas/run",
+  "canvas/runStop",
+  "canvas/runState",
+  "canvas/runs",
+  "canvas/runFinish",
+  "canvas/modelChat",
+  "canvas/modelImage",
+  "canvas/importAsset",
+  "canvas/readAsset",
 ]);
 const CANVAS_COMMAND_NOT_ALLOWED = "CANVAS_COMMAND_NOT_ALLOWED";
 
 const asStr = (v, max = 512) => (typeof v === "string" ? v.slice(0, max) : v == null ? undefined : String(v).slice(0, max));
 
-function createCanvasBundle({ identity = null, identityStore = null, resourceStore = null, authService = null, clock = null, logger = null } = {}) {
+function createCanvasBundle({ identity = null, identityStore = null, resourceStore = null, resourceService = null, authService = null, clock = null, logger = null } = {}) {
   const idStore = identityStore || identity;
   if (!idStore) throw new Error("createCanvasBundle 需要 identityStore");
   const store = new CanvasStore({ identity: idStore, clock });
-  const service = new CanvasService({ identity: idStore, store, resourceStore, authService, clock, logger });
+  const service = new CanvasService({ identity: idStore, store, resourceStore, resourceService, authService, clock, logger });
   return { store, service };
 }
 
@@ -86,6 +96,31 @@ function registerCanvasIpc({ ipcMain, service, identity, isTrusted, hostAppId = 
           return service.undoLastCommand({ context, canvasId: asStr(payload.canvasId, 120), baseRevision: payload.baseRevision == null ? null : Number(payload.baseRevision) });
         case "canvas/log": return service.commandLog({ context, canvasId: asStr(payload.canvasId, 120), limit: Number(payload.limit) || 20 });
         case "canvas/assetStates": return service.assetStates({ context, refs: Array.isArray(payload.refs) ? payload.refs : [] });
+        // ---- 生成运行：预算 / 停止 / 模型调用（唯一入口） ----
+        case "canvas/run":
+          return service.startRun({ context, canvasId: asStr(payload.canvasId, 120), nodeId: asStr(payload.nodeId, 120), kind: asStr(payload.kind, 20) });
+        case "canvas/runStop":
+          return service.stopRun({ context, canvasId: asStr(payload.canvasId, 120), runId: asStr(payload.runId, 120), reason: asStr(payload.reason, 60) });
+        case "canvas/runState":
+          return service.runState({ context, canvasId: asStr(payload.canvasId, 120), runId: asStr(payload.runId, 120) });
+        case "canvas/runs":
+          return service.listRuns({ context, canvasId: asStr(payload.canvasId, 120), limit: Number(payload.limit) || 20 });
+        case "canvas/runFinish":
+          return service.finishRun({ context, canvasId: asStr(payload.canvasId, 120), runId: asStr(payload.runId, 120), status: asStr(payload.status, 20) });
+        case "canvas/modelChat":
+          return service.modelCall({
+            context, canvasId: asStr(payload.canvasId, 120), runId: asStr(payload.runId, 120), kind: "chat",
+            messages: Array.isArray(payload.messages) ? payload.messages.slice(0, 64) : [], configId: asStr(payload.configId, 120),
+          });
+        case "canvas/modelImage":
+          return service.modelCall({
+            context, canvasId: asStr(payload.canvasId, 120), runId: asStr(payload.runId, 120), kind: "image",
+            prompt: asStr(payload.prompt, 4000), size: asStr(payload.size, 32), count: Math.max(1, Math.min(4, Number(payload.count) || 1)), configId: asStr(payload.configId, 120),
+          });
+        case "canvas/importAsset":
+          return service.importAsset({ context, canvasId: asStr(payload.canvasId, 120), name: asStr(payload.name, 120), dataUrl: typeof payload.dataUrl === "string" ? payload.dataUrl.slice(0, 12 * 1024 * 1024) : "" });
+        case "canvas/readAsset":
+          return service.readAsset({ context, ref: asStr(payload.ref, 200) });
         default: return { ok: false, error: CANVAS_COMMAND_NOT_ALLOWED };
       }
     } catch {

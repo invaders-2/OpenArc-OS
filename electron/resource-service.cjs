@@ -527,6 +527,30 @@ class ResourceService {
     return ok({ bytes, mimeType: r.mimeType, size: bytes });
   }
 
+  /**
+   * D5-02：受控读取资源内容为 data URL（供画布渲染引用图片）。
+   * 只读、逐资源授权、有界（默认 8MB）；绝不返回路径。
+   */
+  readDataUrl({ context, resourceRef, maxBytes = 8 * 1024 * 1024 } = {}) {
+    this.#ensureBuiltinPolicy(context);
+    const actor = this.#actor(context);
+    if (!actor.ok) return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
+    const row = this.#resolveRow(resourceRef);
+    if (!row) return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
+    const auth = this.authService.authorize({ context, action: authz.ACTION.READ, resource: row.resource_id });
+    if (!auth || auth.decision !== "ALLOW") return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
+    if (row.trash_state === TRASH_STATE.TRASHED) return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
+    const object = row.content_object_id ? this.store.contentObjectById(row.content_object_id) : null;
+    if (!object) return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
+    let bytes = null;
+    try { bytes = this.managedStore.readObject(object.checksum, null); } catch { bytes = null; }
+    if (!bytes) return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
+    const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
+    if (buf.length > Number(maxBytes)) return fail(REASON.INVALID_INPUT, "too-large");
+    const mime = row.mime_type || "application/octet-stream";
+    return ok({ dataUrl: "data:" + mime + ";base64," + buf.toString("base64"), name: row.name, mimeType: mime, version: Number(row.version || 1) });
+  }
+
   /** D3-04D：LINKED Resource 的受控 Reveal Source（路径只在本方法内返回给主进程，绝不回 Renderer）。 */
   resolveRevealPath({ context, resourceRef } = {}) {
     this.#ensureBuiltinPolicy(context);

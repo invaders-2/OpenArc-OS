@@ -3,6 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <!-- OpenArc：画布页面的加载/出网策略由**宿主级**约束（不只是 fetch 替换）。
+         沙箱 iframe 是 opaque origin，因此用 scheme 源而不是 'self'。
+         connect-src 'none' 封掉 fetch/XHR/WebSocket；form-action/frame-src/object-src 封掉表单、子帧与插件；
+         img/media/font 只允许本 bundle 与 data:/blob:（生成结果与本地导入都走 data URL 或稳定 ref）。 -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src openarc-canvas: 'unsafe-inline'; style-src openarc-canvas: 'unsafe-inline'; img-src openarc-canvas: data: blob:; media-src openarc-canvas: data: blob:; font-src openarc-canvas:; connect-src 'none'; frame-src 'none'; child-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'">
     <link rel="icon" href="./images/logo.png" type="image/png">
     <script src="./openarc-bridge.js"></script>
     <title>无限画布</title>

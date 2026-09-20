@@ -78,11 +78,12 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
   const { service: canvasDocService } = createCanvasBundle({
     identityStore: store,
     resourceStore,
+    resourceService,
     authService: authorization,
     logger: log,
   });
   // D4-01：模型 Provider / Credential / Config / Default（复用同一连接与 AuthorizationService）。
-  const { modelStore, credentialStore, modelService, modelProxy } = createModelBundle({
+  const { modelStore, credentialStore, modelService, modelProxy, seedModelAppPolicy } = createModelBundle({
     identityStore: store,
     authorization,
     authStore,
@@ -114,6 +115,21 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
     executorLauncher,
     executorTestHook,
   });
+  // D5-02 Closure：拿到会话时对该会话的组织再 seed 一次内置 Model App baseline
+  // （首次运行是"先建库、后注册管理员"，一次性 seed 时还没有组织）。upsert 幂等。
+  try {
+    service.onEvent((event) => {
+      const teamId = event && event.snapshot && event.snapshot.teamId ? String(event.snapshot.teamId) : null;
+      if (!teamId) return;
+      const admin = store.allUsers().find((u) => u.role === "ADMIN" && u.team_id === teamId) || null;
+      seedModelAppPolicy({ organizationId: teamId, grantedBy: admin ? admin.id : "system:model-baseline" });
+    });
+  } catch { /* ignore */ }
+
+  // D5-02 Closure：画布生成运行需要任务层（预算/停止/账本）与模型层 —— 装配完成后晚绑定同一实例。
+  canvasDocService.attachRuntime({ taskService, modelService, tempDir: path.join(userDataDir, "tmp", "canvas-imports") });
+  try { require("node:fs").mkdirSync(path.join(userDataDir, "tmp", "canvas-imports"), { recursive: true }); } catch { /* ignore */ }
+
   // Trusted Approval Gateway：Renderer 只能经此通道看到安全投影并提交 decision。
   const sideEffectGateway = createSideEffectGateway({ sideEffectRuntime });
   return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, modelStore, credentialStore, modelService, modelProxy, taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, sideEffectGateway, orchestrator, browserControl, canvasDocService };
