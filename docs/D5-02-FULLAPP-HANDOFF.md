@@ -51,3 +51,28 @@ Boss 要的是 **NOVAI 完整应用**：**必须保留原有首页**与完整流
 6. 干净树复跑（build + 单测 + D5-02 门禁 + D5-01 基础/控制/可见性回归）→ 单独提交 `docs/D5-02-RESULT.md`、`docs/D5-02-GATE-EVIDENCE.json`、`PROGRESS.md`、`public/novai-canvas/SOURCE.md`（来源与改动清单）。
 
 判定口径：首页或主要必需流程缺失、或 §4 已知安全缺项未闭合 → **D5-02 维持 PARTIAL**，不得以"单个画布可用"宣布 PASS。
+## 6. 源应用全量清单（子 Agent 产出，已并入本记录；实现时直接照此执行）
+
+**入口结论（再次确认）**：后端 `GET /` → `index.html`（`main.py:12890-12892`，`/` 是唯一非 `/static` 的页面路由）；`home.html` 只是 `index.html:3279` 的 iframe 子页；`home.html` 自身零跨页链接，全靠 `parent.postMessage({type:'navigate'…})`。
+
+**一级导航（index.html 侧栏）**：首页→`/static/home.html` · 在线生图→`/static/online.html` · GPT 对话→`/static/gpt-chat.html` · 无限画布→`/static/canvas-list.html` · 素材库→`/static/asset-manager.html`；设置弹窗内嵌 `/static/api-settings.html?embed=1` 与 `/static/comfyui-settings.html?embed=1`。
+
+**iframe 舞台**（`index.html:3279-3289`）：frame-home / zimage / enhance / klein / angle / online / gpt-chat / asset-manager / api-settings / comfyui-settings / canvas-list（`switchUI` 按需设 `src=data-src`）。已知上游坑：`DEFAULT_PAGE_ID='zimage'`(3901) 与预载 active 的 frame-home(3279) 不一致，首启可能高亮丢失（**不要在本轮"修上游"**，如实记录）。
+
+**导航图要点**：`canvas-list.html` → `canvas.html` 或 `smart-canvas.html`（`window.location.href`，1256-1258/1357-1359/1375-1377，新建先 `POST /api/canvases` 再跳）；`canvas.js` → `canvas-list.html`（2715/439/2277/14878）与 `smart-canvas.html`（2129）；`asset-manager.js` → `canvas/smart-canvas`（707）。所有跳转都是**根绝对 `/static/*.html`**。
+
+**每页必需端点（★）**：home ★`/api/recent-canvases`（+POST `/api/canvases`、`/api/lan-info`）；canvas-list ★`/api/projects`、★`/api/canvases`（+`/{id}`/`meta`/`touch`/`restore`/`purge`、`/trash`）；canvas ★`/api/canvases/{id}`、★`/api/workflows(/{id})`、★`/api/config`；smart-canvas ★`/api/canvases/{id}`、★`/api/workflows/{id}`、★`/api/tasks`、★`/api/canvas-llm`（+`/api/agent/*`）；asset-manager ★`/api/asset-library*`、★`/api/prompt-libraries*`；api-settings ★`/api/providers`、★`/api/settings/output-dir`；comfyui-settings ★`/api/comfyui/instances`、★`/api/workflows`；online ★`/api/config`、★`/api/online-image`；gpt-chat ★`/api/conversations`、★`/api/personas`、★`/api/memories`、★`/api/chat/stream`；zimage/enhance/klein ★`/api/generate`（+`/api/history`、`/api/view`）；angle ★`/api/angle/generate`+`/api/angle/poll_status`。index.html 自身 ★无，只有状态栏 `/api/queue_status` + WS 与更新器端点。
+
+**除 /api 之外还必须替代**：`/ws/stats`（WS，index/zimage/angle/smart-canvas）；`/output`、`/assets`（后端静态挂载被当 URL 用）；`/api/download-output`、`/api/view`、`/api/media-preview`、`/api/canvas-assets/{check,download}`；上传类 `/api/upload`、`/api/ai/upload`、`/api/local-assets/upload`、`/api/cloud-video/upload`；**11 个 pywebview 宿主方法**（`save_file/select_directory/quit_app/minimize/maximize/close/get_data_dir/open_data_dir/set_auto_start/set_titlebar_theme`，出现在 index.html:3843-3864/4295/4306/4318、asset-manager.html:719/753/765、zimage.html:587-593、js/theme.js:42-46）→ 必须垫片或明确报错；index.html:4865-4868 **直接 fetch GitHub/Gitee/ModelScope**（更新流程）→ 必须由 CSP `connect-src none` 拦住并显示"更新不可用"。
+
+**体积**：`static/` 13.8 MB（HTML 1.08 MB / js 2.89 MB / images 4.91 MB / vendor 3.98 MB（含 three 1.27 MB、tailwind 0.41 MB、fonts 2.18 MB）/ css 0.83 MB / system-prompts 0.05 MB / runninghub/thumbnails 0.04 MB）。
+
+### 6.1 由清单导出的两处**设计修正**（覆盖第 3 节的写法）
+
+1. **不做 `/static/` 路径改写**：把整棵 `static/` 原样放到 `public/novai-canvas/static/**`，入口仍是 `openarc-canvas://bundle/index.html`。自定义协议是 `standard:true`，因此页面里的**根绝对 `/static/...` 会自然解析为 `openarc-canvas://bundle/static/...`** —— script/link/iframe/字体/i18n 动态注入/`three-0.160.0.module.js` 的 `import()` 全部无需改写（改写 14 个页面 + 动态注入 + 动态 import 的风险远大于照原样服务）。协议处理器需放行 `bundle/static/**`（仍只读、白名单扩展名、无目录穿越）。
+2. **iframe 必须 `allow-same-origin`**：上游跨页交互**严重依赖同源**（`index.html:4039` 丢弃 `event.origin !== location.origin` 的消息；`BroadcastChannel('studio-api')`；localStorage 键跨页共享；`theme.js:116 window.self !== window.top` 判定）。opaque origin 会静默打断 home→canvas 导航与主题/语言/缩放同步。**安全上可接受**：画布 bundle 的 origin 是 `openarc-canvas://bundle`，与 OpenArc 外壳（`file://`）**不同源**，因此画布仍无法触达外壳 DOM/`window.openarc`；隔离继续由 CSP、协议白名单、宿主 token+`event.source` 校验、后端按会话重判身份/权限/版本共同保证。
+3. 桥需**中继**：子页 →（同一 bundle 内的）`window.top`（即 index.html 外壳页）→ OpenArc 宿主；token 由最外层 bundle 帧持有并在转发时附加，宿主仍只接受 `event.source === 画布帧` 且 token 匹配的消息。
+
+### 6.2 未接通即缺项的候选（保留入口 + 明确报错，不删页面）
+
+`/ws/stats` 实时队列、桌面更新器（`/api/update-*`、`/api/check-update`、GitHub/Gitee/ModelScope 直连）、`/output` 与 `/assets` 历史文件浏览、ComfyUI 实例与工作流执行、RunningHub/即梦/Codex/Gemini-CLI 等第三方供应商入口、pywebview 的 11 个宿主方法（可用 OpenArc 已有能力替换的：目录选择/保存文件→由宿主对话框代理；其余明确不适用）。所有第三方入口**只保留 UI 与明确错误，不自动联网、不购买服务**。
