@@ -1,0 +1,178 @@
+{
+  "phase": "D5-02",
+  "round": "NOVAI 无限画布集成（只提取画布）",
+  "baseHead": "fe6c9bf815a9f96908c8b76d56ce838002d1fc80",
+  "testedCommit": "d875558",
+  "gateCommit": "9b47463",
+  "branch": "feature/d4-03-tool-proxy",
+  "novaiSource": {
+    "repo": "https://github.com/invaders-2/NOVAI-Infinite-Canvas",
+    "commit": "6ce1a64680b669b31c2ac3b32418b54decd404f2",
+    "extracted": "只提取无限画布（canvas.html/js/css + 依赖，39 文件 ≈ 4.0MB），见 public/novai-canvas/SOURCE.md"
+  },
+  "verifyTree": "git archive d875558 → /tmp/oa-d502-clean（软链 node_modules）+ experiments/d5-02/canvas-e2e.mjs 取自 9b47463（sha256 3c2f9f5199d6af5a…）",
+  "pushOrMerge": "未 push、未合并 main、未进入 D5-03；其他工作区未触碰",
+  "integration": {
+    "reuse": "画布本体全部复用（节点/连线/拖拽/平移/缩放/分组/复制/撤销/左右面板/底部缩放/图片编辑/导出/自动保存），未重写、未复制",
+    "hosting": "应用 canvas 窗口 → src/canvas/CanvasHost.tsx（工具条 + sandbox iframe）+ openarc-canvas:// 只读协议（无 file://、无目录穿越）",
+    "dataOwnership": {
+      "canvasDocument": "OpenArc canvas_boards 文档层（v17：doc/revision/icon/kind/visibility/deleted_at）",
+      "boardIdentityAndResourceRefs": "沿用 D3-04D 的 canvas_boards / canvas_resource_nodes（不建第二套画布）",
+      "resourceFiles": "资源库（D3-04）持有；画布只存稳定 ResourceRef（openarc-asset:<ref>）",
+      "credentials": "主进程 credentialStore；画布页面与画布文档都不含密钥"
+    },
+    "modelEntryPoints": [
+      "POST /api/canvas-llm",
+      "POST /api/canvas-image-tasks + GET /api/canvas-image-tasks/:id",
+      "POST /api/image-task-query"
+    ],
+    "adaptation": [
+      "身份：sessionRef 由主进程注入，画布看不到 userId",
+      "权限：canvas-domain.evaluateCanvasAccess 一份规则（owner/共享角色/组织可见/无授权）",
+      "任务：AI 编辑走受控工具 canvas.edit（审批 + plan 固定 revision + READ_AFTER_WRITE）",
+      "上游改动仅两处注入：openarc-bridge.js（最早执行）+ canvas.js 末尾适配层 & openarc-adapter.js"
+    ]
+  },
+  "modelSingleSource": {
+    "projection": "canvas/models 只给 configId/显示名/能力/状态；api_providers=[]；无 baseUrl/凭据/credentialRef（门禁 C6b 断言）",
+    "capabilities": {
+      "chat": "✅ ModelService.chat（capability chat）",
+      "image-generation": "✅ 本轮新增传输（同一条 openai-compatible 协议 /images/generations；能力不支持的模型在 resolveModel 返回 CAPABILITY_UNAVAILABLE，不用文本接口顶替）",
+      "video-generation": "❌ 缺项：OpenArc 没有视频传输；画布视频端点一律 501 OPENARC_UNSUPPORTED（门禁 C9）",
+      "comfy_midjourney_runninghub_online": "❌ 范围外（上游其它产品能力），桥直接拒绝",
+      "vision-input": "⚠️ 未接入（域名声明了能力，画布本轮不喂图片给模型）"
+    },
+    "noNewVendor": "没有新增供应商或付费服务；图片传输用的是用户已配置的同一 provider 协议"
+  },
+  "productPath": {
+    "gate": "node experiments/d5-02/canvas-e2e.mjs",
+    "counts": {
+      "pass": 16,
+      "fail": 0,
+      "total": 16
+    },
+    "exitCode": 0,
+    "checks": [
+      "C2 打开画布：sandbox iframe + 上游画布渲染 + 适配器就绪（readOnly=false）",
+      "C3 隔离：iframe 内 openarc/require/process/ipcRenderer/fs 全 undefined；白名单外 501；白名单经宿主",
+      "C4 创建编辑：add×2 + connect + move → 自动保存 → 存储 2 节点/1 连线/坐标 520",
+      "C4b 撤销/重做：undo→420(canRedo=true) → redo→520 且重新落库",
+      "C5 关闭重开：2 节点/1 连线/坐标恢复（来自 OpenArc 存储）",
+      "C6 文本模型链：节点 ▶ → canvas-llm → ModelService.chat → 本地 provider（provider 侧见到 d502-chat + OpenArc Bearer 凭据）→ 文本回节点",
+      "C6b 模型面：无 provider / 无密钥 / chat+image 可用",
+      "C7 图片模型链：generator ▶ → canvas/image → ModelService.generateImage → /v1/images/generations → 输出节点 data URL",
+      "C8 失败如实：provider 500 → runStatus=failed + runError",
+      "C9 不支持能力：canvas-video → 501 OPENARC_UNSUPPORTED",
+      "C10 切账号隔离：B 的列表不含 A 的画布、get 返回 NOT_FOUND",
+      "C11 A28 只读：共享 VIEWER → 页面 readOnly=true、手工/保存/AI 三路 READ_ONLY、owner 节点数不变",
+      "C12 主进程无未处理错误"
+    ]
+  },
+  "requirementMapping": {
+    "PLAN §7 拖拽/平移/缩放/内容块/连线/选择/撤销/保存": "✅ 复用上游画布 + C2/C4/C4b/C5",
+    "PLAN §7 内容块覆盖文本/图片/文件引用/AI 生成结果": "✅ C4/C6/C7 + A08 单测（文件引用用稳定 ResourceRef）",
+    "PLAN §7 保存版本检查 + 冲突保留可恢复副本": "✅ 单测（base 过期 → REVISION_CONFLICT + 当前文档）+ A38",
+    "PLAN §7 重新打开后节点/连线/资源引用一致": "✅ C5 + A08 单测",
+    "PLAN §22 左侧资源/中央画布/右侧属性/底部缩放": "✅ 上游自带（C2 同一次渲染可见）",
+    "PLAN §22 只读禁用修改": "✅ C11",
+    "PLAN §24 命令覆盖 add/edit/move/copy/delete/group/connect/disconnect/undo/redo": "✅ 命令层 10 条（单测 8 条 + 账本撤销；帧内 undo/redo 由适配层提供并在 C4b 断言）",
+    "PLAN §24 鼠标/快捷键/AI 共用同一命令层（统一校验/版本检查/撤销记录）": "✅ 同一 canvas-domain + canvas-service + canvas_commands 账本",
+    "PLAN §24 AI 用节点标识 + 基准版本，不能绕过只读直接改存储": "✅ 工具测试（plan 固定 revision；只读 plan=null、execute 拒绝）",
+    "PLAN §24 批量原子性 / 状态分别显示": "⚠️ 部分：单条命令单事务；批量 all-or-nothing 未实现（登记为缺项）",
+    "A08": "✅ 单测：改名仍可用、删除明确不可用（引用是稳定 ref，不是路径或副本）",
+    "A28": "✅ 单测（保存/AI/撤销三路 READ_ONLY）+ C11 产品路径",
+    "A38": "✅ 单测（AI 过期基准冲突、用户内容保留、重试成功）+ 工具测试（批准后用户先改 → knownNoEffect）"
+  },
+  "gaps": [
+    "视频生成：OpenArc 模型服务无视频传输 → 画布视频节点明确失败（501），不新增供应商/付费服务",
+    "批量命令原子提交（一次多条命令 all-or-nothing）未实现",
+    "停止/预算的细粒度断言未覆盖在画布门禁（级联停止是上游行为；任务预算由 D5-01 control 门禁覆盖）",
+    "视觉输入（vision-input）未接入",
+    "多人实时协作、跨设备画布属于 PLAN 后续扩展，本轮不做",
+    "画布本地导入的图片以 data URL 存在项目文档里（有界 8MB/张），未写入资源库"
+  ],
+  "gates": [
+    {
+      "id": "G0",
+      "name": "构建",
+      "command": "npm run build",
+      "exitCode": 0
+    },
+    {
+      "id": "G1",
+      "name": "D5-02 单测",
+      "command": "node --test tests/d5-02-canvas-service.test.mjs tests/d5-02-canvas-tool.test.mjs",
+      "counts": {
+        "pass": 12,
+        "fail": 0
+      },
+      "exitCode": 0
+    },
+    {
+      "id": "G2",
+      "name": "D5-02 真实产品门禁",
+      "command": "node experiments/d5-02/canvas-e2e.mjs",
+      "counts": {
+        "pass": 16,
+        "fail": 0,
+        "total": 16
+      },
+      "exitCode": 0,
+      "artifact": "artifacts/d5-02/d5-02-canvas-e2e.json"
+    },
+    {
+      "id": "G3",
+      "name": "D5-01 基础门禁（回归）",
+      "command": "npm run test:d5-01",
+      "counts": {
+        "pass": 64,
+        "fail": 0,
+        "total": 64
+      },
+      "notVerified": 1,
+      "exitCode": 0
+    },
+    {
+      "id": "G4",
+      "name": "受控浏览器产品链门禁（回归）",
+      "command": "npm run test:d5-01-control",
+      "counts": {
+        "pass": 46,
+        "fail": 0,
+        "total": 46
+      },
+      "notVerified": 2,
+      "exitCode": 0
+    },
+    {
+      "id": "G5",
+      "name": "完整可见性门禁（回归）",
+      "command": "npm run test:d5-01-visibility",
+      "counts": {
+        "pass": 25,
+        "fail": 0,
+        "total": 25
+      },
+      "notVerified": 1,
+      "exitCode": 0
+    },
+    {
+      "id": "G6",
+      "name": "受影响单测（schema/identity/授权/浏览器）",
+      "command": "node --test tests/device-migration.test.mjs tests/identity-store.test.mjs tests/d5-01-browser-*.test.mjs",
+      "counts": {
+        "pass": 65,
+        "fail": 0
+      },
+      "exitCode": 0
+    }
+  ],
+  "securityBoundary": {
+    "frame": "sandbox=\"allow-scripts\"（opaque origin）；无 openarc 桥 / 无 Node / 无 IPC / 无 fs / 无凭据",
+    "network": "fetch/XHR 被桥接管：只放行画布需要的端点；其余 501；不直连、不出网",
+    "protocol": "openarc-canvas:// 只读 dist/novai-canvas 白名单扩展名（403/404 其余），无目录穿越",
+    "identity": "sessionRef 由主进程注入；渲染层自报的 userId/appId/role 一律忽略",
+    "storage": "画布文档按 owner_user_id 隔离 + 共享角色表；未授权账号 get 返回 NOT_FOUND"
+  },
+  "at": "2026-09-20T09:57:19.373Z"
+}

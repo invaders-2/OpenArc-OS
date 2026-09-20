@@ -948,6 +948,17 @@ C2/C4 只开放 resource.trash 一条 REVERSIBLE_WRITE：IRREVERSIBLE_WRITE / EX
 4. A37 / A38 不在 PLAN §41 的 D4-05 四场景内，未纳入。
 5. 真实 `electron/main.cjs` 全流程 = **PASS（D4 Main-Entry E2E Closure-6 `3c9659a`：5/5 必需流程含追加步骤/预算停止/UI 显式续接，Gate `120/120`、exit 0）**；真实外部 provider / 真实凭据 / Windows / OS 级网络沙箱 = 继承 `NOT VERIFIED`，不扩大。Closure-6 已补：追加步骤产品入口（`5577e82`）；Closure-5 已补：产品工具授权入口（`4e8c6c1`）、明确拒绝假成功修复（`81ced49`）。
 
+# D5-02 · NOVAI 无限画布集成（唯一口径 · 2026-09-20）
+
+**基线 `fe6c9bf`（完整 HEAD 核对一致、工作树干净）→ 代码提交 `d875558` → 门禁补断言提交 `9b47463`**；分支 `feature/d4-03-tool-proxy`；未 push、未合并 main、未进入 D5-03；只操作专用工作树，其他工作区未触碰。
+
+- **源固定**：`github.com/invaders-2/NOVAI-Infinite-Canvas` @ **6ce1a64680b669b31c2ac3b32418b54decd404f2**；**只提取无限画布**（39 文件 ≈4.0MB，见 `public/novai-canvas/SOURCE.md`），上游后端 / 桌面壳 / 智能画布 / 素材库 / ComfyUI / Midjourney / RunningHub 等一律不要。
+- **装配**：应用 canvas 窗口 = `CanvasHost`（工具条 + `sandbox="allow-scripts"` iframe）；画布经 `openarc-canvas://` 只读协议加载，**没有** openarc 桥 / Node / IPC / fs / 凭据；所有请求由 `openarc-bridge.js` 经 postMessage 转给宿主 → 受控命令（`canvas:command` / `model:command`）。对上游代码只有两处注入（桥 + canvas.js 末尾适配层），画布本体零重写。
+- **模型只有一个来源**：画布无密钥 / 无地址 / 无隐藏供应商；`/api/config` 由宿主用 OpenArc 已配置模型合成（无 provider、无 baseUrl、无凭据）。文本走 `ModelService.chat`；**图片本轮新增 image-generation 传输**（同一条 openai-compatible 协议，能力不支持即 CAPABILITY_UNAVAILABLE，绝不用文本接口顶替）；**视频 = 明确缺项**（501，不新增供应商 / 付费服务）。
+- **数据与权限**：画布文档挂在 D3-04D 的 `canvas_boards` 上（v17 迁移：doc/revision/visibility/deleted_at + `canvas_shares` + `canvas_commands`），**不建第二套画布**；命令层 / 版本检查 / 权限规则只有一份（`canvas-domain` + `canvas-service`）。**A08** 引用是稳定 ResourceRef（改名仍可用、删除明确不可用）；**A28** 只读成员的手工 / 保存 / AI / 撤销四路都被同一条规则拒；**A38** AI 用过期基准 → REVISION_CONFLICT 且用户内容保留。AI 编辑是受控工具 `canvas.edit`（审批 + plan 固定 revision + READ_AFTER_WRITE）。
+- **干净导出树单轮**：`npm run build` 0；D5-02 单测 **12/12**（exit 0）；**D5-02 真实产品门禁 `canvas-e2e` 16/16 PASS（exit 0）**；回归：`test:d5-01` **64/64**（exit 0）、`test:d5-01-control` **46/46**（exit 0）、`test:d5-01-visibility` **25/25**（exit 0）；受影响单测 **65/65**。
+- **结论：D5-02 = PASS（限定范围：macOS 单屏 / 本地确定性 provider / 单进程本地画布）**。缺项如实登记：视频生成、批量命令原子提交、停止 / 预算细粒度断言、视觉输入、多人实时协作、画布本地导入图片以 data URL 存项目文档（有界 8MB/张）。
+- 证据：`docs/D5-02-RESULT.md`（集成决策 + 逐项映射 + 缺项）、`docs/D5-02-EVIDENCE.json`（脱敏）；`artifacts/d5-02/d5-02-canvas-e2e.json` 与 `.log`（工作树本地）。
 # D5-01 Closure-4 · 提示遮挡判定 + 最小修复 + 仪器收口（唯一口径 · 2026-09-20）
 
 **基线 \`ebc9d21\`（完整 HEAD 核对一致、工作树干净）→ 代码/测试提交 \`f9564b7\`**；分支 \`feature/d4-03-tool-proxy\`；未 push、未合并 main、未进入 D5-02；只操作专用工作树（\`OpenArc OS-d4-01\`）。
