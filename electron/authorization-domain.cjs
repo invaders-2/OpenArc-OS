@@ -179,6 +179,10 @@ const TOOL_ACTION = Object.freeze({
   RESOURCE_SEARCH: "tool.resource.search",
   // D4-03C2：第一条受控真实写入（resource.trash）的 Tool 权限。
   RESOURCE_TRASH: "tool.resource.trash",
+  // D5-01 Closure-2：受控浏览器能力的 Tool 权限。读取与导航**分开**授予 ——
+  // 导航是可逆写入、需要审批，只读权限绝不隐含导航权限。
+  BROWSER_READ: "tool.browser.read",
+  BROWSER_NAVIGATE: "tool.browser.navigate",
 });
 const TOOL_ACTIONS = Object.freeze(Object.values(TOOL_ACTION));
 function isToolAction(action) { return TOOL_ACTIONS.includes(String(action)); }

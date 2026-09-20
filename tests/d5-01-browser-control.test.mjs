@@ -26,24 +26,42 @@ const entry = (over = {}) => ({
   ...over,
 });
 
-function fakeController(entries = [entry()]) {
+/**
+ * 假控制器：只提供受控浏览器能力真正使用的那几个方法。
+ *
+ * `commitMode` 是**导航落地**的注入点（真实实现读 webContents.getURL()）：
+ *   · "ok"          请求的地址真实落地；
+ *   · "redirect"    落地到另一个地址（服务器 302 这类真实情况）；
+ *   · "unconfirmed" 永远等不到落地 —— 必须按"结果不可知"返回，绝不猜成功。
+ */
+function fakeController(entries = [entry()], { commitMode = "ok", body = null } = {}) {
   const calls = [];
   return {
     calls,
     entries,
     inventory: () => entries.filter((e) => e.alive),
     ownerOfView: (viewId) => entries.find((e) => e.viewId === viewId && e.alive) || null,
-    readText: async () => "PAGE-TEXT ".repeat(600),
+    readText: async () => (body == null ? "PAGE-TEXT ".repeat(600) : body),
+    liveUrl: (viewId) => { const e = entries.find((x) => x.viewId === viewId); return e && e.alive ? e.url : null; },
     navigate: (windowId, url, tabId) => {
       calls.push({ windowId, url, tabId });
+      const e = entries.find((x) => x.viewId === windowId + "#" + tabId);
+      if (e && commitMode === "ok") e.url = url;
+      if (e && commitMode === "redirect") e.url = url.replace(/\/page2$/, "/page3");
       return { ok: true };
+    },
+    waitForCommit: async (viewId, { from = null, to = null } = {}) => {
+      const e = entries.find((x) => x.viewId === viewId);
+      if (!e || !e.alive) return { ok: false, error: "BROWSER_CONTROL_TARGET_GONE" };
+      if (commitMode === "unconfirmed" && String(e.url) !== String(to)) return { ok: false, error: "BROWSER_CONTROL_NAVIGATE_UNCONFIRMED" };
+      return { ok: true, url: e.url, noop: String(e.url) === String(from) };
     },
   };
 }
-const newAuthority = ({ entries, audits } = {}) => {
+const newAuthority = ({ entries, audits, commitMode, body } = {}) => {
   const list = audits || [];
   const a = new BrowserControlAuthority({ clock: () => 1_700_000_000_000, audit: (r) => list.push(r) });
-  const controller = fakeController(entries);
+  const controller = fakeController(entries, { commitMode, body });
   a.attachController(controller);
   a.setSession(USER);
   return { a, controller, audits: list };
@@ -117,6 +135,59 @@ test("标签关闭/撤销/登出/切账号：旧目标立即失效，且**不回
   assert.ok(audits.some((x) => x.action === "browser.control_released"));
 });
 
+test("目标解析：显式 viewId 必须在授权表内；缺省只有唯一目标才可推断；多目标明确拒绝", () => {
+  const { a } = newAuthority({ entries: [entry(), entry({ viewId: "browser#t2", tabId: "t2" })] });
+  // 未授权前：模型给什么 viewId 都不成立
+  assert.equal(a.resolveTarget({ userId: USER, viewId: "browser#t1" }).error, "BROWSER_CONTROL_NOT_SELECTED", "未授权目标不得被解析");
+  assert.equal(a.resolveTarget({ userId: USER }).error, "BROWSER_CONTROL_NOT_SELECTED", "一个都没授权 → 拒绝");
+  select(a);
+  assert.equal(a.resolveTarget({ userId: USER, viewId: "browser#t2" }).error, "BROWSER_CONTROL_NOT_SELECTED", "只有 t1 被授权，t2 不得被推断");
+  assert.deepEqual(a.resolveTarget({ userId: USER }), { ok: true, viewId: "browser#t1" }, "恰好一个已授权目标可推断");
+  select(a, { tabId: "t2" });
+  assert.equal(a.resolveTarget({ userId: USER }).error, "BROWSER_CONTROL_TARGET_AMBIGUOUS", "多个目标必须显式指定，绝不猜");
+  assert.deepEqual(a.resolveTarget({ userId: USER, viewId: "browser#t2" }), { ok: true, viewId: "browser#t2" });
+  // 生命周期收尾：标签真的没了就从授权表摘掉（不改绑、不残留）
+  a.controller.entries[1].alive = false;
+  assert.equal(a.pruneDead(), 1);
+  assert.deepEqual(a.list({ userId: USER }).map((t) => t.viewId), ["browser#t1"]);
+});
+
+test("导航落地：等真实地址落地才算发生；302 跳转如实标记；等不到 → 不可知且不猜成功", async () => {
+  const ok = newAuthority();
+  select(ok.a);
+  const r = await nav(ok.a, "http://127.0.0.1:5391/page2");
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.url, "http://127.0.0.1:5391/page2", "url = 真实落地地址");
+  assert.equal(r.redirected, false);
+  assert.equal(r.requested, "http://127.0.0.1:5391/page2");
+
+  const redir = newAuthority({ commitMode: "redirect" });
+  select(redir.a);
+  const rr = await nav(redir.a, "http://127.0.0.1:5391/page2");
+  assert.equal(rr.ok, true, JSON.stringify(rr));
+  assert.equal(rr.redirected, true, "服务器跳转必须如实标记，绝不假装去了批准的那个地址");
+  assert.equal(rr.url, "http://127.0.0.1:5391/page3");
+  assert.equal(rr.requested, "http://127.0.0.1:5391/page2");
+
+  const bad = newAuthority({ commitMode: "unconfirmed" });
+  select(bad.a);
+  const un = await nav(bad.a, "http://127.0.0.1:5391/page2");
+  assert.equal(un.ok, false);
+  assert.equal(un.error, "BROWSER_CONTROL_NAVIGATE_UNCONFIRMED");
+  assert.equal(un.dispatched, true, "请求已发出但没落地 = 结果不可知（不是'未执行'）");
+  assert.ok(bad.audits.some((x) => x.action === "browser.navigate" && x.decision === "DENY"));
+});
+
+test("inspect：只读目标现状（含 URL），未授权/失效一律拒绝且不含正文", () => {
+  const { a } = newAuthority();
+  assert.equal(a.inspect({ userId: USER, viewId: "browser#t1" }).error, "BROWSER_CONTROL_NOT_SELECTED");
+  select(a);
+  const st = a.inspect({ userId: USER, viewId: "browser#t1" });
+  assert.equal(st.ok, true);
+  assert.equal(st.url, "http://127.0.0.1:5391/form");
+  assert.equal("text" in st, false, "现状投影绝不带正文");
+});
+
 test("工具契约：读取是 READ_ONLY；导航是受控副作用（requiresApproval + CONTROLLED_REVERSIBLE_WRITE）", () => {
   const registry = new ToolRegistry();
   const readTool = registry.get("browser.read.page", 1);
@@ -134,6 +205,16 @@ test("工具契约：读取是 READ_ONLY；导航是受控副作用（requiresAp
     assert.equal(tool.inputSchema.additionalProperties, false);
     assert.equal(props.includes("script"), false);
     assert.equal(props.includes("selector"), false);
+  }
+  // 读取的 viewId 允许缺省（由后端在**已授权目标**里解析）；导航的 url 在工具门就收窄到 http(s) 且不含凭据。
+  assert.deepEqual(readTool.inputSchema.required, []);
+  assert.deepEqual(navTool.inputSchema.required, ["url"]);
+  const registry2 = new ToolRegistry();
+  for (const bad of ["file:///etc/passwd", "javascript:alert(1)", "data:text/html,x", "https://u:p@example.com/x", "http://a b/"]) {
+    assert.equal(registry2.validateInput(navTool, { url: bad }).ok, false, "工具门必须拒绝 " + bad);
+  }
+  for (const good of ["http://127.0.0.1:5391/page2", "https://example.com/a?b=c#d", "http://[::1]:8080/x"]) {
+    assert.equal(registry2.validateInput(navTool, { url: good }).ok, true, "工具门必须接受 " + good);
   }
 });
 

@@ -17,6 +17,20 @@
 const { app } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
+const os = require("node:os");
+
+/**
+ * D5-01 Closure-2 · 探针宿主必须隔离产品数据目录（仪器修复，不改产品行为）。
+ *
+ * 探针打的是**真实产品主入口** electron/main.cjs，它会打开 `<userData>/identity.db`。
+ * 若沿用 Electron 的共享默认目录（本机实际存在 schema_version 更高的库），产品会**正确地**
+ * 拒绝打开 —— 但在探针里只表现为"外壳窗口永远不出现"，把仪器缺陷伪装成产品缺陷。
+ * 产品侧门禁（D4 main E2E / D5-01 E2E）本来就各自使用隔离 userData，这里只是同口径。
+ * 必须在 app ready 之前设置。
+ */
+try {
+  app.setPath("userData", fs.mkdtempSync(path.join(os.tmpdir(), "oa-d2-02-native-")));
+} catch { /* 隔离失败就按默认目录跑：探针会如实失败，绝不静默通过 */ }
 
 const name = process.env.GATE_PROBE || "";
 const out = (l) => process.stdout.write(l + "\n");

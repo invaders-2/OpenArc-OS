@@ -416,6 +416,45 @@ class NativeViewController {
   }
 
   /**
+   * 视图**当前真实文档地址**（不是"意图地址"）。
+   *
+   * entry.url 在导航请求发出的那一刻就被乐观写成目标值，所以导航前快照与导航后核验
+   * 一律只认 webContents.getURL()。视图不存在/已释放返回 null。
+   */
+  liveUrl(viewId) {
+    const e = this.entries.get(String(viewId));
+    const wc = e && e.view.webContents;
+    return wc && !wc.isDestroyed() ? String(wc.getURL() || "") : null;
+  }
+
+  /**
+   * 等待真实文档地址落地（受控导航的 READ_AFTER_WRITE 依据）。
+   *
+   * 落地判据：真实地址既不是导航前地址、又已停止加载；同址导航（地址本来就是要去的地址）
+   * 归为 noop —— 它是真实发生的导航请求，但**没有产生地址变化**，如实标记而不是冒充写入。
+   * 等不到就返回 unconfirmed：调用方必须按"结果不可知"处理，绝不猜成功。
+   */
+  async waitForCommit(viewId, { from = null, to = null, timeoutMs = 5000 } = {}) {
+    const e = this.entries.get(String(viewId));
+    const wc = e && e.view.webContents;
+    if (!wc || wc.isDestroyed()) return { ok: false, error: "BROWSER_CONTROL_TARGET_GONE" };
+    const start = String(from == null ? "" : from);
+    const want = String(to == null ? "" : to);
+    const deadline = Date.now() + Math.max(1, Number(timeoutMs) || 5000);
+    for (;;) {
+      const live = String(wc.getURL() || "");
+      if (live && live !== start && !wc.isLoading()) return { ok: true, url: live, noop: false };
+      if (!live || live === start) {
+        if (want && live === want && !wc.isLoading()) return { ok: true, url: live, noop: true };
+        if (Date.now() >= deadline) return { ok: false, error: "BROWSER_CONTROL_NAVIGATE_UNCONFIRMED" };
+      } else if (Date.now() >= deadline) {
+        return { ok: true, url: live, noop: false };
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  }
+
+  /**
    * 读取视图正文（受控浏览器能力的**唯一**读取实现）。
    *
    * 只读 `document.body.innerText`：不碰 cookie / localStorage / 凭据，

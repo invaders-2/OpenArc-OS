@@ -9,6 +9,8 @@
  */
 "use strict";
 const domain = require("./tool-domain.cjs");
+const { safeURL } = require("./policy.cjs");
+const { safeUrlForAudit } = require("./browser-control-authority.cjs");
 
 const MAX_SEARCH_LIMIT = 20;
 const MAX_STRING = 200;
@@ -31,7 +33,7 @@ function projectFields(source, fields, { maxString = MAX_STRING } = {}) {
 }
 
 /** 静态 allowlist：provider → adapter（绝不从 arguments 解析 module/path）。*/
-function createToolAdapters({ resourceService = null, searchService = null, extra = {} } = {}) {
+function createToolAdapters({ resourceService = null, searchService = null, browserControl = null, extra = {} } = {}) {
   const providers = {};
 
   providers.test = {
@@ -158,6 +160,84 @@ function createToolAdapters({ resourceService = null, searchService = null, extr
       async verify({ args, result }) {
         if (!result || !Array.isArray(result.items)) return { ok: false, detail: { reason: "NO_ITEMS" } };
         return { ok: result.items.every((it) => it && typeof it.resourceRef === "string") && result.maxLimit === MAX_SEARCH_LIMIT && result.count >= result.items.length, detail: { count: result.count, items: result.items.length } };
+      },
+    };
+  }
+
+  if (browserControl) {
+    /**
+     * 目标只从**用户已授权的控制目标**里解析；模型给的 viewId 只是"请求"。
+     * 缺省 viewId 时：恰好一个已授权目标才可推断，多个必须显式指定（绝不猜）。
+     */
+    const targetOf = ({ context, args }) => {
+      const userId = context && context.actorUserId ? String(context.actorUserId) : "";
+      const appId = (context && context.appId) || "ai";
+      if (!userId) return { ok: false, error: "BROWSER_CONTROL_FORBIDDEN" };
+      const resolved = browserControl.resolveTarget({ userId, appId, viewId: args && args.viewId });
+      if (!resolved.ok) return { ok: false, error: resolved.error };
+      return { ok: true, userId, appId, viewId: resolved.viewId };
+    };
+    providers.BrowserControl = {
+      toolIds: ["browser.read.page", "browser.navigate"],
+      async prepare({ args }) { return { plan: { dryRun: false, provider: "BrowserControl", hasViewId: !!(args && args.viewId) } }; },
+      /** 只读 plan：目标 +（导航时）**已校验的地址**一起进 SideEffectPlan，0 mutation。 */
+      async plan({ context, args, contract }) {
+        const t = targetOf({ context, args });
+        if (!t.ok) return null;
+        const state = browserControl.inspect({ userId: t.userId, appId: t.appId, viewId: t.viewId });
+        if (!state.ok) return null;
+        if (contract && contract.toolId === "browser.navigate") {
+          const url = typeof (args && args.url) === "string" ? args.url : "";
+          if (!safeURL(url)) return null;
+          return {
+            targets: [t.viewId],
+            preconditions: { targetRef: t.viewId, targetType: "browser-tab", url },
+            expectedEffects: [{ action: "navigate", target: t.viewId, from: safeUrlForAudit(state.url), to: safeUrlForAudit(url) }],
+          };
+        }
+        return {
+          targets: [t.viewId],
+          preconditions: { targetRef: t.viewId, targetType: "browser-tab" },
+          expectedEffects: [{ action: "readPage", target: t.viewId, from: safeUrlForAudit(state.url) }],
+        };
+      },
+      /**
+       * 执行：导航**只用持久化的 trusted plan**（targetRef / url），不读 Harness 入参 ——
+       * 批准的目标与地址就是执行的目标与地址；读取的目标同样只从授权表解析。
+       */
+      async execute({ context, args, contract, preconditions }) {
+        const appId = (context && context.appId) || "ai";
+        const userId = context && context.actorUserId ? String(context.actorUserId) : "";
+        if (!userId) return { ok: false, knownNoEffect: true, error: "BROWSER_CONTROL_FORBIDDEN" };
+        if (contract && contract.toolId === "browser.navigate") {
+          const viewId = preconditions && preconditions.targetRef;
+          const url = preconditions && preconditions.url;
+          if (!viewId || typeof url !== "string") return { ok: false, knownNoEffect: true, error: "BROWSER_CONTROL_TARGET_GONE" };
+          const res = await browserControl.navigate({ userId, appId, viewId, url });
+          // 已经 dispatch 却没能确认落地 = 结果不可知，绝不猜成 FAILED（那会诱导第二次导航）。
+          if (!res.ok) return res.dispatched ? { ok: false, ambiguous: true, error: res.error } : { ok: false, knownNoEffect: true, error: res.error };
+          return { ok: true, result: { viewId: res.viewId, url: res.url, ok: true, requested: res.requested, redirected: !!res.redirected, noop: !!res.noop } };
+        }
+        const resolved = browserControl.resolveTarget({ userId, appId, viewId: (preconditions && preconditions.targetRef) || (args && args.viewId) });
+        if (!resolved.ok) return { ok: false, error: resolved.error };
+        const page = await browserControl.readPage({ userId, appId, viewId: resolved.viewId });
+        if (!page.ok) return { ok: false, error: page.error };
+        // 正文原样交给调用方，并**显式标注 untrusted**：它永远不是指令，也不进审计。
+        return { ok: true, result: { viewId: page.viewId, url: page.url, title: page.title, text: page.text, truncated: page.truncated, untrusted: true } };
+      },
+      /** 导航 = READ_AFTER_WRITE（重新读真实文档地址）；读取 = 结果形态 + 目标归属。 */
+      async verify({ context, result, contract }) {
+        const appId = (context && context.appId) || "ai";
+        const userId = context && context.actorUserId ? String(context.actorUserId) : "";
+        if (!userId) return { ok: false, detail: { reason: "NO_ACTOR" } };
+        if (contract && contract.toolId === "browser.navigate") {
+          const now = browserControl.inspect({ userId, appId, viewId: result && result.viewId });
+          if (!now.ok) return { ok: false, detail: { reason: now.error } };
+          const matches = String(now.url || "") === String((result && result.url) || "");
+          return { ok: true, applied: matches, detail: { viewId: now.viewId, observedUrl: safeUrlForAudit(now.url), expectedUrl: safeUrlForAudit(result && result.url), redirected: !!(result && result.redirected) } };
+        }
+        const okShape = !!(result && typeof result.viewId === "string" && typeof result.url === "string" && typeof result.text === "string" && typeof result.truncated === "boolean" && result.untrusted === true);
+        return { ok: okShape, detail: { viewId: result && result.viewId, textLength: result && typeof result.text === "string" ? result.text.length : 0, untrusted: !!(result && result.untrusted) } };
       },
     };
   }

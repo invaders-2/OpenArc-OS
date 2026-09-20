@@ -22,6 +22,9 @@ export type ApprovalRequest = {
   effectClass: string;
   targetDisplayName: string | null;
   resourceRef: string | null;
+  /** D5-01 Closure-2：受控浏览器目标的稳定身份与**被批准的地址**（都来自主进程）。 */
+  targetRef: string | null;
+  url: string | null;
   expectedEffects: Array<Record<string, unknown>>;
   expectedVersion: number | null;
   currentVersion: number | null;
@@ -49,6 +52,7 @@ const RISK_LABEL: Record<string, string> = {
 
 function effectText(request: ApprovalRequest): string {
   if (request.toolId === "resource.trash") return "把该资源移入废纸篓（可通过恢复还原）";
+  if (request.toolId === "browser.navigate") return "把该浏览器标签导航到下面这个地址（可通过后退还原）";
   const first = request.expectedEffects && request.expectedEffects[0];
   if (first && typeof first.action === "string") return String(first.action);
   return "执行该工具声明的副作用";
@@ -179,7 +183,12 @@ export function ApprovalPrompt({ onOpenChange }: { onOpenChange?: (open: boolean
             </span>
           </dd>
           <dt>目标</dt>
-          <dd data-approval-target>{request.targetDisplayName || "未命名资源"}<span className="approval-ref">{request.resourceRef || ""}</span></dd>
+          <dd data-approval-target>
+            {request.targetDisplayName || "未命名资源"}
+            <span className="approval-ref">{request.resourceRef || request.targetRef || ""}</span>
+            {/* 批准的就是这个地址：必须让用户**看见**，否则"批准"无从谈起。 */}
+            {request.url ? <span className="approval-ref" data-approval-url>{request.url}</span> : null}
+          </dd>
           <dt>预期效果</dt>
           <dd data-approval-effect>{effectText(request)}</dd>
           <dt>前置条件</dt>

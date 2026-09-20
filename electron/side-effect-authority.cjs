@@ -90,14 +90,26 @@ function sanitizeEffect(effect, depth = 0) {
   }
   return out;
 }
-/** preconditions 只允许 safe refs + version/hash，绝不复制业务对象。 */
-const PRECONDITION_KEYS = new Set(["resourceRef", "expectedVersion", "expectedHash", "targetRef", "targetType", "registryStatus", "updatedAt"]);
+/**
+ * preconditions 只允许 safe refs + version/hash，绝不复制业务对象。
+ *
+ * D5-01 Closure-2：新增 `url` —— 受控浏览器导航的**目标地址必须随 plan 一起持久化**，
+ * 否则 claim 之后就只能从 Harness 入参再取一次，"批准的东西"和"执行的东西"会分叉。
+ * `url` 有独立上界（见 PRECONDITION_STRING_MAX），因为它比 resourceRef 长得多。
+ */
+const PRECONDITION_KEYS = new Set(["resourceRef", "expectedVersion", "expectedHash", "targetRef", "targetType", "registryStatus", "updatedAt", "url"]);
+/** 每个 key 的字符串上界；未列出的沿用 300。 */
+const PRECONDITION_STRING_MAX = Object.freeze({ url: 2000 });
 function sanitizePreconditions(pre) {
   const out = {};
   if (!pre || typeof pre !== "object") return out;
   for (const [k, v] of Object.entries(pre)) {
     if (!PRECONDITION_KEYS.has(k)) continue;
-    out[k] = typeof v === "string" ? safeString(v, 300) : v;
+    if (typeof v !== "string") { out[k] = v; continue; }
+    const max = PRECONDITION_STRING_MAX[k] == null ? 300 : PRECONDITION_STRING_MAX[k];
+    // url 是**执行入参**：截断等于把目标换成另一个地址，所以超界一律丢弃该 key（fail closed），绝不截断。
+    if (v.length > max) continue;
+    out[k] = max === 300 ? safeString(v, 300) : v;
   }
   return out;
 }

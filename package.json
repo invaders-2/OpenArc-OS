@@ -52,6 +52,7 @@
     "test:d4-03d-closure": "node experiments/d4-03d-closure/run-all.mjs",
     "test:d4-03-cg01": "node experiments/d4-03-cg01/run-all.mjs",
     "test:d5-01": "npm run build && node experiments/d5-01/browser-e2e.mjs",
+    "test:d5-01-control": "npm run build && node experiments/d5-01/browser-control-e2e.mjs",
     "test:d4-04": "npm run build && node tests/d4-04-smoke.mjs",
     "test:d4-05": "npm run build && node tests/d4-05-smoke.mjs",
     "test:d4-05-memory-ui": "npm run build && node tests/d4-05-memory-ui.mjs",

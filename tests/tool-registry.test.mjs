@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { ToolRegistry, validateSchema, BUILTIN_CONTRACTS } = require("../electron/tool-registry.cjs");
+const { FORBIDDEN_HARNESS_TOOLS } = require("../electron/dsh-tool-profile.cjs");
 
 const TOOL_FIELDS = ["toolId", "version", "displayName", "description", "inputSchema", "outputSchema", "riskClass", "sideEffect", "requiresApproval", "requiredPermissions", "resourceActions", "executionProvider", "enabled"];
 
@@ -28,7 +29,15 @@ test("unknown / injected toolId denied（含路径注入、shell、mcp）", () =
   assert.equal(reg.resolve("filesystem.write", 1).error, "TOOL_NOT_FOUND");
   assert.equal(reg.resolve("process.spawn", 1).error, "TOOL_NOT_FOUND");
   assert.equal(reg.resolve("mcp.*", 1).error, "TOOL_NOT_FOUND");
-  for (const c of BUILTIN_CONTRACTS) assert.ok(!/shell|terminal|filesystem|process|mcp|browser/i.test(c.toolId), "禁止注册 " + c.toolId);
+  // D5-01 Closure-2：`browser.*` 不再是"一律禁止"的前缀 —— 受控浏览器工具是**正式受控契约**。
+  // 改为精确口径：非受控的 browser id 一律拒绝，且任何注册项都不得命中 Harness 旁路名（与 dsh-tool-profile 同源）。
+  const CONTROLLED_BROWSER_IDS = new Set(["browser.read.page", "browser.navigate"]);
+  for (const c of BUILTIN_CONTRACTS) {
+    const id = String(c.toolId);
+    assert.ok(!/shell|terminal|filesystem|process|mcp/i.test(id), "禁止注册 " + id);
+    if (/browser/i.test(id)) assert.ok(CONTROLLED_BROWSER_IDS.has(id), "browser 前缀只允许受控工具：" + id);
+    assert.ok(!FORBIDDEN_HARNESS_TOOLS.includes(id), "禁止注册 Harness 旁路名 " + id);
+  }
 });
 
 test("wrong version denied；disabled tool denied", () => {

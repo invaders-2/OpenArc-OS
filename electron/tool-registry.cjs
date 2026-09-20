@@ -153,7 +153,9 @@ const BUILTIN_CONTRACTS = Object.freeze([
     version: 1,
     displayName: "Read Browser Page",
     description: "读取用户已授权控制的浏览器标签的页面信息与有界正文（READ_ONLY；不支持任意脚本）。",
-    inputSchema: { type: "object", additionalProperties: false, properties: { viewId: { type: "string", pattern: "^[A-Za-z0-9_:.#-]{1,80}$" } }, required: ["viewId"] },
+    // viewId 缺省时由后端在**已授权目标**里解析（恰好一个才可推断，多个必须显式指定）；
+    // 模型给了 viewId 也只是"请求"，是否可用一律由 BrowserControlAuthority 判定。
+    inputSchema: { type: "object", additionalProperties: false, properties: { viewId: { type: "string", pattern: "^[A-Za-z0-9_:.#-]{1,80}$" } }, required: [] },
     outputSchema: { type: "object", additionalProperties: false, properties: { viewId: { type: "string" }, url: { type: "string" }, title: { type: "string" }, text: { type: "string" }, truncated: { type: "boolean" }, untrusted: { type: "boolean" } }, required: ["viewId", "url", "title", "text", "truncated"] },
     riskClass: RISK_CLASS.READ_ONLY,
     sideEffect: SIDE_EFFECT.READ,
@@ -171,8 +173,12 @@ const BUILTIN_CONTRACTS = Object.freeze([
     version: 1,
     displayName: "Navigate Browser Tab",
     description: "导航用户已授权控制的浏览器标签到指定 http(s) 地址（REVERSIBLE_WRITE；需审批）。",
-    inputSchema: { type: "object", additionalProperties: false, properties: { viewId: { type: "string", pattern: "^[A-Za-z0-9_:.#-]{1,80}$" }, url: { type: "string", minLength: 8, maxLength: 2000 } }, required: ["viewId", "url"] },
-    outputSchema: { type: "object", additionalProperties: false, properties: { viewId: { type: "string" }, url: { type: "string" }, ok: { type: "boolean" } }, required: ["viewId", "url", "ok"] },
+    // url 在**工具门**就先收窄到 http(s) 且不含凭据（pattern 里排除 "@"），
+    // 执行前还会再过一次产品 safeURL —— 两层都拒绝，绝不只靠一层。
+    inputSchema: { type: "object", additionalProperties: false, properties: { viewId: { type: "string", pattern: "^[A-Za-z0-9_:.#-]{1,80}$" }, url: { type: "string", maxLength: 2000, pattern: "^https?://[^\\s@]+$" } }, required: ["url"] },
+    // url = **真实落地地址**（可能因服务器 302 与 requested 不同，redirected 如实标记）；
+    // noop = 同址导航（确实发出过请求，但没有地址变化），绝不冒充写入。
+    outputSchema: { type: "object", additionalProperties: false, properties: { viewId: { type: "string" }, url: { type: "string" }, ok: { type: "boolean" }, requested: { type: "string" }, redirected: { type: "boolean" }, noop: { type: "boolean" } }, required: ["viewId", "url", "ok"] },
     riskClass: RISK_CLASS.REVERSIBLE_WRITE,
     sideEffect: SIDE_EFFECT.WRITE,
     requiresApproval: true,

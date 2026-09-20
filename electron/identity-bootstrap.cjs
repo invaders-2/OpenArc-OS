@@ -28,7 +28,7 @@ const { createSideEffectGateway, registerSideEffectIpc } = require("./side-effec
  * @param opts.allowAdmin  是否放行 admin / 测试夹具命令
  * @param opts.logger      可选，注入外部 logger（探针用）
  */
-function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, logger, serviceIdentity = null, nativeImage = null, executorLauncher = null, executorTestHook = null } = {}) {
+function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, logger, serviceIdentity = null, nativeImage = null, executorLauncher = null, executorTestHook = null, browserControl = null } = {}) {
   fs.mkdirSync(userDataDir, { recursive: true, mode: 0o700 });
   const log = logger || new IdentityLogger();
   const store = new IdentityStore({
@@ -92,6 +92,9 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
     logger: log,
     resourceService,
     searchService,
+    // D5-01 Closure-2：受控浏览器目标是**宿主（真实 main）持有**的对象：原生视图控制器晚绑定，
+    // 这里只把同一实例接进唯一工具链，绝不在装配层再造一个。
+    browserControl,
     dbPath: path.join(userDataDir, "identity.db"),
     storeRoot: path.join(userDataDir, "library"),
     runtimeDir: path.join(userDataDir, "runtime", "side-effects"),
@@ -102,7 +105,7 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
   });
   // Trusted Approval Gateway：Renderer 只能经此通道看到安全投影并提交 decision。
   const sideEffectGateway = createSideEffectGateway({ sideEffectRuntime });
-  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, modelStore, credentialStore, modelService, modelProxy, taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, sideEffectGateway, orchestrator };
+  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, modelStore, credentialStore, modelService, modelProxy, taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, sideEffectGateway, orchestrator, browserControl };
 }
 
 /**

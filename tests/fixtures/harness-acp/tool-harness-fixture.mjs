@@ -6,6 +6,8 @@ import path from "node:path";
 import { createTaskHarnessFixture, APPS, EXACT, PROVIDER_SECRET as TASK_PROVIDER_SECRET } from "./task-harness-fixture.mjs";
 import { reopenResourceRuntime } from "../../resource-fixtures.mjs";
 const require = createRequire(import.meta.url);
+// 产品 allowlist 的唯一真源（夹具不再自己写一份字面量，避免静默分叉）。
+const { READ_TOOL_IDS, WRITE_TOOL_IDS } = require("../../../electron/dsh-tool-profile.cjs");
 const { TaskStore } = require("../../../electron/task-store.cjs");
 const { TaskService } = require("../../../electron/task-service.cjs");
 const { ToolStore } = require("../../../electron/tool-store.cjs");
@@ -55,7 +57,8 @@ export async function createToolHarnessFixture(opts = {}) {
   const toolStore = new ToolStore({ identity: base.f.identity, clock: base.f.clock });
   const toolRegistry = new ToolRegistry();
   // withAdapters=true 才允许真实 READ_ONLY 执行（D4-03B）；默认保持 D4-03A gate 语义。
-  const adapters = opts.withAdapters ? createToolAdapters({ resourceService: base.f.resourceService, searchService: base.f.searchService }) : null;
+  // D5-01 Closure-2：与 production task-bootstrap 逐字同一条装配（browserControl 由宿主注入）。
+  const adapters = opts.withAdapters ? createToolAdapters({ resourceService: base.f.resourceService, searchService: base.f.searchService, browserControl: opts.browserControl || null }) : null;
   const toolProxy = new ControlledToolProxy({ registry: toolRegistry, toolStore, authService: base.f.authService, taskStore: base.taskStore, taskService: base.taskService, adapters, clock: base.f.clock });
   const sideEffectClock = typeof opts.sideEffectClock === "function" ? opts.sideEffectClock : base.f.clock;
   const sideEffectStore = new SideEffectStore({ identity: base.f.identity, clock: sideEffectClock });
@@ -109,7 +112,9 @@ export async function createToolHarnessFixture(opts = {}) {
         sideEffectRuntime,
         memoryContext,
         clock: base.f.clock,
-        toolFacade: { enabled: true, toolIds: opts.facadeToolIds || ["resource.read.metadata", "resource.search"], writeToolIds: opts.facadeWriteToolIds || [], maxCalls: opts.facadeMaxCalls || 4, ttlMs: opts.facadeTtlMs || 120000, execTimeoutMs: opts.facadeExecTimeoutMs, bridgeFactory: opts.facadeBridgeFactory },
+        // 默认即**产品 allowlist**（唯一真源 electron/dsh-tool-profile.cjs）：夹具不另写一份字面量，
+        // 否则产品加一个受控工具后，夹具装配的 facade 会与产品静默分叉。
+        toolFacade: { enabled: true, toolIds: opts.facadeToolIds || READ_TOOL_IDS, writeToolIds: opts.facadeWriteToolIds || WRITE_TOOL_IDS, maxCalls: opts.facadeMaxCalls || 4, ttlMs: opts.facadeTtlMs || 120000, execTimeoutMs: opts.facadeExecTimeoutMs, bridgeFactory: opts.facadeBridgeFactory },
         ...extra,
       });
     },

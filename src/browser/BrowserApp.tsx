@@ -8,7 +8,7 @@
  *   3. 运行期事实（loading / 错误 / 下载 / 提示）来自 props —— 它们不是持久化状态。
  */
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Download, RotateCw, X, Plus, ShieldAlert, ExternalLink, Globe } from "lucide-react";
+import { ArrowLeft, ArrowRight, Download, RotateCw, X, Plus, ShieldAlert, ExternalLink, Globe, Bot } from "lucide-react";
 import domain from "../../electron/window-domain.cjs";
 import type { Window as WinDomain, WindowCommand } from "../../electron/window-domain.cjs";
 import { WebViewport } from "../desktop/components";
@@ -56,6 +56,22 @@ export function BrowserApp({ win, runtime, downloads, notices, nativeVisible, on
   const [editing, setEditing] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  // ---------------------------------------------------------------- D5-01 Closure-2 · AI 控制授权
+  // 目标身份与主进程/工具链**同一口径**（windowId#tabId）；这里只显示"哪个标签被授权了"，
+  // 授权本身由用户在按钮上显式点击，主进程再校验账号 / 分区归属 / 存活。
+  const [controlTargets, setControlTargets] = useState<string[]>([]);
+  // 与主进程/原生视图同口径的稳定标签身份（windowId#tabId），不引入第二套命名。
+  const viewIdOf = (tabId: string) => (tabId ? `${win.id}#${tabId}` : "");
+  const refreshControl = async () => {
+    const res = await onBrowser({ type: "browser/controlList" });
+    const list = Array.isArray(res?.targets) ? (res.targets as Array<{ viewId?: unknown }>) : [];
+    setControlTargets(list.map((t) => String(t?.viewId || "")).filter(Boolean));
+  };
+  const toggleControl = async (tabId: string) => {
+    const authorized = controlTargets.includes(viewIdOf(tabId));
+    await onBrowser({ type: authorized ? "browser/controlRelease" : "browser/controlSelect", windowId: win.id, tabId });
+    await refreshControl();
+  };
 
   // 地址栏草稿只在"用户没有在输入"时跟随权威 url，避免打字被原生事件打断。
   useEffect(() => {
@@ -65,6 +81,13 @@ export function BrowserApp({ win, runtime, downloads, notices, nativeVisible, on
   // 会话级事件（权限 / 证书）没有具体窗口归属（windowId 为空）→ 在浏览器窗口里都显示，
   // 否则用户永远看不到"权限被拒"这条事实。
   const windowNotices = notices.filter((n) => !n.windowId || n.windowId === win.id);
+
+  // 标签增删后重读权威列表（关标签会让主进程摘掉失效目标，UI 不能停在旧状态）。
+  const tabIds = tabs.map((t) => t.tabId).join(",");
+  useEffect(() => {
+    void refreshControl();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [win.id, tabIds]);
 
   /** 新标签 id 必须在渲染层生成（reduce 保持纯函数），但状态权威仍是 domain。 */
   const newTabId = () => {
@@ -116,7 +139,13 @@ export function BrowserApp({ win, runtime, downloads, notices, nativeVisible, on
           const active = t.tabId === activeTabId;
           const rt = runtime[tabKey(win.id, t.tabId)] || EMPTY_TAB_RUNTIME;
           return (
-            <div key={t.tabId} className={`tab ${active ? "active" : ""}`} data-tab={t.tabId} data-tab-active={active ? "1" : "0"}>
+            <div
+              key={t.tabId}
+              className={`tab ${active ? "active" : ""}`}
+              data-tab={t.tabId}
+              data-tab-active={active ? "1" : "0"}
+              data-ai-control-authorized={controlTargets.includes(viewIdOf(t.tabId)) ? "1" : "0"}
+            >
               <button
                 role="tab"
                 aria-selected={active}
@@ -145,6 +174,23 @@ export function BrowserApp({ win, runtime, downloads, notices, nativeVisible, on
         </button>
         <div className="tabstrip-spacer" />
         {downloadsButton}
+        <button
+          type="button"
+          className="addressbar-downloads"
+          aria-label={controlTargets.includes(viewIdOf(activeTab.tabId)) ? "撤销 AI 控制该标签" : "允许 AI 控制该标签"}
+          title={
+            controlTargets.length
+              ? "已授权 AI 控制的标签：" + controlTargets.join("、")
+              : "未授权任何标签给 AI 控制"
+          }
+          data-ai-control-toggle
+          data-ai-control-state={controlTargets.includes(viewIdOf(activeTab.tabId)) ? "on" : "off"}
+          data-ai-control-count={controlTargets.length}
+          data-ai-control-view-id={viewIdOf(activeTab.tabId)}
+          onClick={() => void toggleControl(activeTab.tabId)}
+        >
+          <Bot size={16} />
+        </button>
       </div>
 
       <form

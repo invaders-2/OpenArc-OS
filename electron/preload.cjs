@@ -20,6 +20,9 @@ contextBridge.exposeInMainWorld("openarc", {
    * D5-01 浏览器命令面（受控白名单）：
    *   · browser/downloads（list / open / reveal / cancel / remove / clear）
    *   · browser/openExternal（**用户已确认**后才调用）
+   *   · browser/controlList | controlSelect | controlRelease
+   *     （D5-01 Closure-2：用户**显式选择**允许 AI 控制的标签；userId 由主进程注入，
+   *       renderer 只能给 windowId/tabId，归属与存活由主进程校验）
    * 没有通用 shell / fs / 任意 IPC；downloadId 与 URL 都还要过主进程校验与 trusted(event)。
    */
   browser: (command) => ipcRenderer.invoke("browser:command", command),

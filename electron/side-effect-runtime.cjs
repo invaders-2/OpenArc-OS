@@ -23,12 +23,20 @@
 const domain = require("./side-effect-domain.cjs");
 const { RuntimeSupervisor } = require("./runtime-supervisor.cjs");
 const {
-  CALL_STATUS, CALL_TERMINAL, APPROVAL_DECISION, SIDE_EFFECT_ERROR, DEFAULT_APPROVAL_TTL_MS, fingerprint,
+  CALL_STATUS, CALL_TERMINAL, APPROVAL_DECISION, SIDE_EFFECT_ERROR, DEFAULT_APPROVAL_TTL_MS, DEFAULT_LEASE_TTL_MS, fingerprint,
 } = domain;
 
 const DEFAULT_APPROVAL_WAIT_MS = 5 * 60 * 1000;
 const POLL_MS = 25;
 const EXECUTOR_TIMEOUT_MS = 15000;
+
+/**
+ * 进程局部 Domain 的 execution provider 白名单（静态，不从参数解析）。
+ *
+ * 只有 Domain 本身**只存在于 main 进程内**的 provider 才能列在这里：受控浏览器的原生视图
+ * （WebContentsView）就是这种。列在这里 ≠ 跳过 lease/claim/verify —— 那些仍然全部执行。
+ */
+const IN_PROCESS_EXECUTION_PROVIDERS = Object.freeze(new Set(["BrowserControl"]));
 
 /** approval 快照 / tool result 只允许 safe 字段。 */
 const SAFE_SNAPSHOT_SECRET_RE = /^(secret|token|authorization|api[_-]?key|credential|password|bearer|capability)/i;
@@ -170,8 +178,10 @@ class SideEffectRuntime {
     if (ref && nameStore && typeof nameStore.resourceByRef === "function") {
       try { const row = nameStore.resourceByRef(String(ref)); if (row && typeof row.name === "string") targetName = row.name.slice(0, 120); } catch { targetName = null; }
     }
+    // 非 Resource 目标（受控浏览器标签）：显示稳定的目标身份，绝不显示页面正文。
+    if (!targetName && pre.targetRef) targetName = "浏览器标签 " + String(pre.targetRef).slice(0, 80);
     const approval = this.authority.effectiveApproval(call.callId);
-    const allowed = new Set(["approvalRequestId", "status", "toolId", "toolDisplayName", "riskClass", "effectClass", "targetDisplayName", "resourceRef", "expectedEffects", "expectedVersion", "currentVersion", "expiresAt", "requiresApproval"]);
+    const allowed = new Set(["approvalRequestId", "status", "toolId", "toolDisplayName", "riskClass", "effectClass", "targetDisplayName", "resourceRef", "targetRef", "url", "expectedEffects", "expectedVersion", "currentVersion", "expiresAt", "requiresApproval"]);
     const snap = {
       approvalRequestId: call.callId,
       status: call.status,
@@ -181,6 +191,9 @@ class SideEffectRuntime {
       effectClass: call.effectClass,
       targetDisplayName: targetName,
       resourceRef: ref,
+      targetRef: pre.targetRef ? String(pre.targetRef).slice(0, 300) : null,
+      /** 批准的就是这个地址：它是**用户要看的**，不是 secret；正文仍然永不出现在这里。 */
+      url: typeof pre.url === "string" ? pre.url.slice(0, 2000) : null,
       expectedEffects: Array.isArray(call.expectedEffectsSafe) ? call.expectedEffectsSafe.slice(0, 8) : [],
       expectedVersion: pre.expectedVersion == null ? null : Number(pre.expectedVersion),
       currentVersion: pre.expectedVersion == null ? null : Number(pre.expectedVersion),
@@ -236,8 +249,50 @@ class SideEffectRuntime {
     return updated;
   }
 
+  /**
+   * **进程局部 Domain 的显式 in-process execution class**（D5-01 Closure-2）。
+   *
+   * 受控浏览器导航的 Domain 是 main 进程里的原生 WebContentsView（真实网页视图），
+   * out-of-process supervised executor 结构上无法执行它 —— child 里既没有原生视图，
+   * 也不应该为了执行它而在 child 里再造一份视图权威。
+   *
+   * 因此这条路径把 **execution placement 显式写成 IN_PROCESS** 并留审计：
+   *   · lease / claim / exactly-once / verify 全部仍由**同一个** SideEffectAuthority 裁决；
+   *   · 但**没有**独立 executor 进程的寿命证据（没有 child exit / socket lifetime）。
+   * 绝不假装它与 out-of-process 路径等价；这条差异写在 D5-01 Closure-2 报告 §4。
+   */
+  async executeInProcess({ callId, holderId = "oase_main", timeoutMs = null } = {}) {
+    const call = this.store.callById(callId);
+    if (!call) return { ok: false, error: SIDE_EFFECT_ERROR.CALL_NOT_FOUND };
+    if (call.status === CALL_STATUS.SUCCEEDED) return { ok: true, duplicate: true, inProcess: true, call, safeResult: safeToolResult(call) };
+    const preflight = this.authority.preflightAuthorization({ callId });
+    if (!preflight || preflight.ok !== true) {
+      const reason = (preflight && preflight.error) || SIDE_EFFECT_ERROR.AUTHORIZATION_REVOKED;
+      const afterPreflight = this.store.callById(callId);
+      if (afterPreflight && !CALL_TERMINAL.includes(String(afterPreflight.status))) this.#blockPending(callId, reason);
+      return { ok: false, inProcess: true, error: reason, call: this.store.callById(callId) };
+    }
+    this.#audit({ toolRef: call.toolId, action: "side_effect.execution_placement", decision: "IN_PROCESS", reasonCode: "PROCESS_LOCAL_DOMAIN" });
+    const lease = this.authority.acquireLease({ callId, holderId, ttlMs: DEFAULT_LEASE_TTL_MS });
+    if (!lease || lease.ok !== true) {
+      const after = this.store.callById(callId);
+      if (after && !CALL_TERMINAL.includes(String(after.status)) && after.status === CALL_STATUS.APPROVED) this.#blockPending(callId, (lease && lease.error) || SIDE_EFFECT_ERROR.CALL_STATE);
+      return { ok: false, inProcess: true, error: (lease && lease.error) || SIDE_EFFECT_ERROR.CALL_STATE, call: this.store.callById(callId) };
+    }
+    await this.authority.executeSideEffect({ callId, leaseId: lease.lease.leaseId, holderId, timeoutMs: Number(timeoutMs) > 0 ? Number(timeoutMs) : this.executorTimeoutMs });
+    const after = this.store.callById(callId);
+    const ok = !!(after && after.status === CALL_STATUS.SUCCEEDED);
+    return { ok, inProcess: true, call: after, safeResult: ok ? safeToolResult(after) : null, error: ok ? null : ((after && after.errorCode) || SIDE_EFFECT_ERROR.DOMAIN_WRITE_FAILED) };
+  }
+
   /** 受监督 executor runtime 执行一条已 APPROVED 的 call（唯一真实 mutation 入口）。 */
   async executeApproved({ callId, holderId = "oase_1", timeoutMs = null } = {}) {
+    // 进程局部 Domain：路由到显式 in-process class（其它 contract 一律不受影响）。
+    const resolved = this.store.callById(callId);
+    const contract = resolved && this.registry && typeof this.registry.get === "function" ? this.registry.get(resolved.toolId, resolved.toolVersion) : null;
+    if (contract && IN_PROCESS_EXECUTION_PROVIDERS.has(String(contract.executionProvider))) {
+      return this.executeInProcess({ callId, holderId: "oase_main", timeoutMs });
+    }
     const call = this.store.callById(callId);
     if (!call) return { ok: false, error: SIDE_EFFECT_ERROR.CALL_NOT_FOUND };
     if (call.status === CALL_STATUS.SUCCEEDED) return { ok: true, duplicate: true, call, safeResult: safeToolResult(call) };

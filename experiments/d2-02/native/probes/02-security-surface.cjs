@@ -106,6 +106,33 @@ const waitFor = async (fn, ms, sleep, label) => {
   }
 };
 
+/**
+ * 等**产品自己声明就绪**（D5-01 Closure-2）。
+ *
+ * 曾经的写法是"等 8 秒，然后去拿 BrowserWindow.getAllWindows()[0]"：D4 runtime boot 变长后
+ * 它必然假失败 —— 那是仪器时序缺陷，不是产品缺陷。修法只能换成产品信号，绝不改成"等更久"。
+ * 产品信号由 electron/main.cjs 的 markProductReady() 发出：外壳窗口已创建 + IPC 已注册 + 外壳页已开始加载。
+ */
+const waitProductReady = async (app, sleep, ms = 60000) => {
+  if (globalThis.__OPENARC_PRODUCT_READY__) return { state: globalThis.__OPENARC_PRODUCT_READY__, alreadyReady: true, waitedMs: 0 };
+  const t0 = Date.now();
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const onReady = (state) => { if (settled) return; settled = true; clearInterval(timer); resolve({ state, alreadyReady: false, waitedMs: Date.now() - t0 }); };
+    app.once("openarc:product-ready", onReady);
+    const timer = setInterval(() => {
+      if (settled) return;
+      if (globalThis.__OPENARC_PRODUCT_READY__) return onReady(globalThis.__OPENARC_PRODUCT_READY__);
+      if (Date.now() - t0 > ms) {
+        settled = true;
+        clearInterval(timer);
+        reject(new Error("产品未报告就绪（未收到 openarc:product-ready / __OPENARC_PRODUCT_READY__）—— 这是产品 boot 信号缺失，不是超时太短"));
+      }
+    }, 50);
+    void sleep;
+  });
+};
+
 exports.run = async function run({ report, sleep, add, out }) {
   // ─────────────── ① 静态面 ───────────────
   const preloadSrc = fs.readFileSync(path.join(ROOT, "electron", "preload.cjs"), "utf8");
@@ -172,9 +199,15 @@ exports.run = async function run({ report, sleep, add, out }) {
   // ─────────────── ② 运行时（真实主进程） ───────────────
   const uiURL = require("node:url").pathToFileURL(path.join(ROOT, "dist", "index.html")).href;
   if (!mainLoaded) throw new Error("加载 electron/main.cjs 失败：" + String(mainLoadError && mainLoadError.message));
-  await sleep(300);
-  const win = await waitFor(() => BrowserWindow.getAllWindows()[0], 8000, sleep, "外壳窗口");
-  await waitFor(() => win.webContents.getURL() === uiURL && !win.webContents.isLoading(), 15000, sleep, "外壳页加载完成");
+  const ready = await waitProductReady(app, sleep);
+  add(
+    "sec.productReadySignal",
+    ready.state && ready.state.shellWindow === true && ready.state.ipcRegistered === true,
+    `产品就绪信号：alreadyReady=${ready.alreadyReady} waitedMs=${ready.waitedMs} state=${JSON.stringify(ready.state)}`,
+  );
+  // 就绪信号之后窗口必然存在；这里只做一致性核对，不再用"等更久"掩盖时序。
+  const win = await waitFor(() => BrowserWindow.getAllWindows()[0], 2000, sleep, "外壳窗口（产品已报告就绪，窗口却不存在）");
+  await waitFor(() => win.webContents.getURL() === uiURL && !win.webContents.isLoading(), 20000, sleep, "外壳页加载完成");
   out("外壳页已加载：" + win.webContents.getURL());
 
   const keysInShell = await win.webContents.executeJavaScript("Object.keys(window.openarc || {}).sort()");

@@ -26,13 +26,14 @@ const { SideEffectStore } = require("./side-effect-store.cjs");
 const { SideEffectAuthority } = require("./side-effect-authority.cjs");
 const { SideEffectRuntime } = require("./side-effect-runtime.cjs");
 const { RuntimeSupervisor } = require("./runtime-supervisor.cjs");
-const { WRITE_TOOL_IDS } = require("./dsh-tool-profile.cjs");
+const { READ_TOOL_IDS, WRITE_TOOL_IDS } = require("./dsh-tool-profile.cjs");
 const { DEFAULT_MAX_CALLS, MAX_TOOL_ROUNDS } = require("./task-domain.cjs");
 
 /** D4-04 / D4-06：官方 dsh Tool Facade 的 run 级预算（与 orchestrator 实际使用同一份配置）。 */
-const TOOL_FACADE_CONFIG = Object.freeze({ enabled: true, toolIds: ["resource.search", "resource.read.metadata"], writeToolIds: WRITE_TOOL_IDS, maxCalls: 8, ttlMs: 300000 });
+// toolIds / writeToolIds 一律取 allowlist 常量（唯一真源；不在装配处再写一份字面量）。
+const TOOL_FACADE_CONFIG = Object.freeze({ enabled: true, toolIds: READ_TOOL_IDS, writeToolIds: WRITE_TOOL_IDS, maxCalls: 8, ttlMs: 300000 });
 
-function createTaskBundle({ identityStore, authorization, authStore, modelService = null, modelProxy = null, logger = null, clock = null, adapterFactory = null, resourceService = null, searchService = null, dbPath = null, storeRoot = null, runtimeDir = null, sideEffectApprovalWaitMs = null, executorLauncher = null, executorTestHook = null } = {}) {
+function createTaskBundle({ identityStore, authorization, authStore, modelService = null, modelProxy = null, logger = null, clock = null, adapterFactory = null, resourceService = null, searchService = null, browserControl = null, dbPath = null, storeRoot = null, runtimeDir = null, sideEffectApprovalWaitMs = null, executorLauncher = null, executorTestHook = null } = {}) {
   if (!identityStore) throw new Error("createTaskBundle 需要 identityStore");
   if (!authorization || !authStore) throw new Error("createTaskBundle 需要 D3 Authorization");
   const taskStore = new TaskStore({ identity: identityStore, clock });
@@ -44,7 +45,8 @@ function createTaskBundle({ identityStore, authorization, authStore, modelServic
   const toolStore = new ToolStore({ identity: identityStore, clock });
   const toolRegistry = new ToolRegistry();
   // D4-03B/C2：静态 allowlist adapter（executionProvider → 既有 Domain）。
-  const adapters = createToolAdapters({ resourceService, searchService });
+  // D5-01 Closure-2：BrowserControl 与 Resource/Search 同一条装配路径 —— 不存在第二套执行通道。
+  const adapters = createToolAdapters({ resourceService, searchService, browserControl });
   const toolProxy = new ControlledToolProxy({ registry: toolRegistry, toolStore, authService: authorization, taskStore, taskService, adapters, clock, logger });
   // D4-03C4：trusted runtime supervisor（唯一 observeExit / registerRuntime 调用方）。
   const supervisor = new RuntimeSupervisor({
@@ -97,7 +99,7 @@ function createTaskBundle({ identityStore, authorization, authStore, modelServic
       memoryContext,
     });
   }
-  return { taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, memoryContext, orchestrator };
+  return { taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, memoryContext, orchestrator, browserControl };
 }
 
 /** D4-04：Renderer 可用的 Task 命令白名单（trusted sender + main-process session 注入）。 */

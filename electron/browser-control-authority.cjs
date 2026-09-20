@@ -25,6 +25,8 @@ const { safeURL } = require("./policy.cjs");
 const MAX_TEXT_CHARS = 4000;
 /** 页面信息里的标题上限。 */
 const MAX_TITLE_CHARS = 200;
+/** 等真实文档地址落地的上界：等不到一律按"结果不可知"处理，绝不猜成功。 */
+const NAV_COMMIT_TIMEOUT_MS = 5000;
 
 /** URL 去敏：只保留 scheme + host + path（去凭据、查询串、片段）。 */
 function safeUrlForAudit(raw) {
@@ -134,6 +136,46 @@ class BrowserControlAuthority {
     return [...this.#targetsOf(userId, appId).values()].map((t) => ({ viewId: t.viewId, origin: t.origin, selectedAt: t.selectedAt }));
   }
 
+  /** 当前**用户已授权**的控制目标（安全投影；供产品 UI 与目标解析使用）。 */
+  authorizedViewIds({ userId, appId = "ai" } = {}) {
+    return [...this.#targetsOf(userId, appId).keys()];
+  }
+
+  /**
+   * 目标解析 —— **模型无法引入新目标**。
+   *
+   * 显式 viewId 必须已在授权表里；缺省时只有"恰好一个已授权目标"才可推断，
+   * 多个目标一律要求显式指定（绝不猜、绝不取第一个）。
+   */
+  resolveTarget({ userId, appId = "ai", viewId = null } = {}) {
+    const explicit = viewId == null ? "" : String(viewId);
+    if (explicit) {
+      if (!this.#targetsOf(userId, appId).has(explicit)) return { ok: false, error: "BROWSER_CONTROL_NOT_SELECTED" };
+      return { ok: true, viewId: explicit };
+    }
+    const ids = this.authorizedViewIds({ userId, appId });
+    if (!ids.length) return { ok: false, error: "BROWSER_CONTROL_NOT_SELECTED" };
+    if (ids.length > 1) return { ok: false, error: "BROWSER_CONTROL_TARGET_AMBIGUOUS" };
+    return { ok: true, viewId: ids[0] };
+  }
+
+  /** 目标现状（只读，**不含正文**）：导航后的 READ_AFTER_WRITE 校验用它。 */
+  inspect({ userId, appId = "ai", viewId } = {}) {
+    const v = this.#verifyTarget({ userId, appId, viewId });
+    if (!v.ok) return { ok: false, error: v.error };
+    return { ok: true, viewId: v.viewId, url: v.url, title: String(v.title || "").slice(0, MAX_TITLE_CHARS) };
+  }
+
+  /** 生命周期收尾：把控制器里已不存在/不再存活的标签从授权表摘掉（绝不改绑到别的标签）。 */
+  pruneDead() {
+    if (!this.controller) return 0;
+    const alive = new Set(this.controller.inventory().filter((e) => e.alive).map((e) => e.viewId));
+    let removed = 0;
+    for (const map of this.targets.values()) for (const id of [...map.keys()]) if (!alive.has(id)) { map.delete(id); removed += 1; }
+    if (removed) this.log("browser-control: pruned dead control targets " + removed);
+    return removed;
+  }
+
   /**
    * 目标校验（**每次操作前都要跑**）：
    * 目标在注册表里、控制器里仍存在、分区归属仍是本人、视图仍存活。
@@ -197,13 +239,27 @@ class BrowserControlAuthority {
       this.audit({ actorUserId: userId, appId, toolRef: "browser.navigate", action: "browser.navigate", decision: "DENY", reasonCode: v.error });
       return { ok: false, error: v.error };
     }
+    const before = typeof this.controller.liveUrl === "function" ? this.controller.liveUrl(v.viewId) : null;
     const res = this.controller.navigate(v.windowId, String(url), v.tabId);
     if (res && res.error) {
       this.audit({ actorUserId: userId, appId, toolRef: "browser.navigate", action: "browser.navigate", decision: "DENY", reasonCode: "BROWSER_CONTROL_NAVIGATE_FAILED" });
-      return { ok: false, error: "BROWSER_CONTROL_NAVIGATE_FAILED" };
+      return { ok: false, error: "BROWSER_CONTROL_NAVIGATE_FAILED", dispatched: false };
+    }
+    // 导航请求已发出 ≠ 导航已发生：等**真实文档地址**落地才算数；等不到按不可知返回（dispatched=true），
+    // 调用方据此进入 UNKNOWN_EFFECT，绝不写 "已回滚" 之类的假结论。
+    if (typeof this.controller.waitForCommit === "function") {
+      const commit = await this.controller.waitForCommit(v.viewId, { from: before, to: String(url), timeoutMs: NAV_COMMIT_TIMEOUT_MS });
+      if (!commit.ok) {
+        this.audit({ actorUserId: userId, appId, toolRef: "browser.navigate", action: "browser.navigate", decision: "DENY", reasonCode: commit.error });
+        return { ok: false, error: commit.error, dispatched: true };
+      }
+      // 服务器 302 等导致最终地址与批准地址不同时必须如实标记，绝不假装"就是去了批准的那个地址"。
+      const redirected = String(commit.url) !== String(url);
+      this.audit({ actorUserId: userId, appId, toolRef: "browser.navigate", action: "browser.navigate", decision: "ALLOW", reasonCode: redirected ? "BROWSER_CONTROL_REDIRECTED" : null });
+      return { ok: true, viewId: v.viewId, url: String(commit.url), requested: safeUrlForAudit(url), redirected, noop: !!commit.noop };
     }
     this.audit({ actorUserId: userId, appId, toolRef: "browser.navigate", action: "browser.navigate", decision: "ALLOW", reasonCode: null });
-    return { ok: true, viewId: v.viewId, url: safeUrlForAudit(url) };
+    return { ok: true, viewId: v.viewId, url: safeUrlForAudit(url), requested: safeUrlForAudit(url), redirected: false, noop: false };
   }
 }
 

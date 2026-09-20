@@ -2,6 +2,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createToolHarnessFixture, PROVIDER_SECRET } from "./fixtures/harness-acp/tool-harness-fixture.mjs";
+// 广播面的唯一真源（产品 allowlist）：断言不再写死字面量，避免产品加工具后静默分叉。
+import { HARNESS_VISIBLE_TOOL_IDS } from "../electron/dsh-tool-profile.cjs";
 
 const VISIBLE = "OPENARC_DSH_VISIBLE_RESOURCE";
 const HIDDEN = "OPENARC_DSH_HIDDEN_RESOURCE";
@@ -43,8 +45,10 @@ test("Official dsh E2E：tool_call → Tool Facade → Proxy → Search/Resource
     assert.deepEqual(fx.fp.state.toolCalls, ["resource_search", "resource_read_metadata"]);
     // §31：exactly 2 OpenArc tool，且无 shell/fs/web 等。
     const advertised = fx.fp.state.toolLoop.toolNames.slice().sort();
-    assert.deepEqual(advertised, ["resource_read_metadata", "resource_search"]);
-    for (const bad of ["run_code", "shell", "terminal", "filesystem", "write", "web", "mcp", "process", "exit_plan_mode"]) assert.ok(!advertised.includes(bad), "不得暴露 " + bad);
+    // 广播面必须精确等于**产品 allowlist**（唯一真源；D5-01 Closure-2 起含两个受控浏览器工具）。
+
+    assert.deepEqual(advertised, HARNESS_VISIBLE_TOOL_IDS.map((t) => t.replace(/\./g, "_")).sort());
+    for (const bad of ["run_code", "shell", "terminal", "filesystem", "write", "web", "mcp", "process", "exit_plan_mode", "browser", "cdp", "eval"]) assert.ok(!advertised.includes(bad), "不得暴露 " + bad);
 
     // §28：2 proposals / 2 decisions / 2 executions / 2 verifications，Domain 各 1 次。
     const props = fx.toolStore.proposalsOfTask(t.task.taskId);

@@ -20,7 +20,8 @@ const waitFor = (fn, ms, detail = "") => (async () => { const deadline = Date.no
 const dshName = (id) => String(id).replace(/\./g, "_");
 
 let seq = 0;
-async function setup({ behavior = "tool-loop", plan = null, approvalWaitMs = 60000, executorEntry = null, bridgeFactory = null, writeToolIds = ["resource.trash"] } = {}) {
+// 默认写工具取**产品 allowlist**（唯一真源）：与产品广播面保持一致，不另写一份字面量。
+async function setup({ behavior = "tool-loop", plan = null, approvalWaitMs = 60000, executorEntry = null, bridgeFactory = null, writeToolIds = WRITE_TOOL_IDS } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "oa-d3d-"));
   const fx = await createToolHarnessFixture({
     withAdapters: true, behavior, dbPath: path.join(root, "identity.db"),

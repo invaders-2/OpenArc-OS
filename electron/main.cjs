@@ -5,6 +5,7 @@ const { pathToFileURL } = require("node:url");
 const { safeURL } = require("./policy.cjs");
 const geometry = require("./geometry.cjs");
 const { NativeViewController } = require("./native-view-controller.cjs");
+const { BrowserControlAuthority } = require("./browser-control-authority.cjs");
 const { registerIdentityIpc } = require("./identity-bootstrap.cjs");
 const { registerTaskIpc } = require("./task-bootstrap.cjs");
 const { createDefaultExecutorLauncher } = require("./executor-launcher.cjs");
@@ -13,6 +14,8 @@ const { createOpenArcRuntime } = require("./runtime-boot.cjs");
 let win;
 let controller;
 let identity;
+/** D5-01 Closure-2：受控浏览器目标（用户显式授权）。宿主持有唯一实例，工具链与 UI 共用同一个。 */
+let browserControl;
 
 const uiURL = pathToFileURL(path.join(__dirname, "../dist/index.html")).href;
 
@@ -34,6 +37,27 @@ const glass = isMac
   ? { transparent: true, vibrancy: "under-window", backgroundColor: "#00000000" }
   : { backgroundMaterial: "mica", backgroundColor: "#00000000" };
 
+/**
+ * D5-01 Closure-2 · **产品就绪信号**（探针/门禁同步的唯一判据）。
+ *
+ * 就绪定义（本进程内的确定事实，不是时间猜测）：
+ *   ① 外壳窗口已创建；② 全部 IPC handler 已注册；③ 外壳页已开始加载。
+ * 探针原先"等 8 秒再找窗口"在 D4 runtime boot 变长后必然假失败 —— 那是仪器时序缺陷，
+ * 不是产品缺陷；修法只能是把判据换成这个信号，绝不改成"等更久"。
+ */
+function markProductReady() {
+  const state = {
+    at: Date.now(),
+    pid: process.pid,
+    shellWindow: !!(win && !win.isDestroyed()),
+    ipcRegistered: true,
+    uiURL,
+  };
+  globalThis.__OPENARC_PRODUCT_READY__ = state;
+  try { app.emit("openarc:product-ready", state); } catch { /* 没有监听者也要能启动 */ }
+  return state;
+}
+
 app.whenReady().then(async () => {
   // ---------------------------------------------------------------------------
   // D4-04 Closure-2 · 唯一 production runtime boot（与 D4-04 probe 共享同一 helper）。
@@ -42,6 +66,19 @@ app.whenReady().then(async () => {
   // against the actual created identity runtime.
   // identity 必须先于 modelProxy.start() 创建；顺序错误一律 loud fail，绝不静默吞掉。
   // ---------------------------------------------------------------------------
+  browserControl = new BrowserControlAuthority({
+    // 审计进**同一张** authorization_audit：受控浏览器的授权/撤销与工具调用同源可查。
+    audit: (r) => {
+      try {
+        identity?.toolStore?.insertToolAudit?.({
+          at: Date.now(), actorUserId: r.actorUserId || null, appId: r.appId || null, toolRef: r.toolRef || null,
+          action: String(r.action || "").slice(0, 80), decision: r.decision == null ? null : String(r.decision).slice(0, 120),
+          reasonCode: r.reasonCode == null ? null : String(r.reasonCode).slice(0, 120), requestId: null,
+        });
+      } catch { /* audit 失败不改变业务结果 */ }
+    },
+    log: () => {},
+  });
   const runtime = await createOpenArcRuntime({
     userDataDir: app.getPath("userData"),
     safeStorage,
@@ -54,6 +91,7 @@ app.whenReady().then(async () => {
     allowAdmin: process.env.OPENARC_IDENTITY_ADMIN === "1",
     // Control Service 身份（§60）：未配置时配对会因 SERVICE_IDENTITY_MISMATCH 被拒 —— 失败关闭。
     serviceIdentity: process.env.OPENARC_SERVICE_IDENTITY || null,
+    browserControl,
   });
   identity = runtime.identity;
 
@@ -184,6 +222,9 @@ app.whenReady().then(async () => {
     // 绝不为了让测试好看而改产品默认值。
     downloadsDir: process.env.OPENARC_DOWNLOADS_DIR || app.getPath("downloads"),
   });
+  // 晚绑定：受控浏览器能力的**唯一**原生执行入口就是上面这个控制器。
+  browserControl.attachController(controller);
+  browserControl.setSession((identity?.service?.snapshot?.userId) || null);
 
   // ---------------------------------------------------------------------------
   // D5-01 · 会话键（A04）。
@@ -202,6 +243,8 @@ app.whenReady().then(async () => {
     if (next === sessionKey) return;
     sessionKey = next;
     try { controller?.releaseAll(); } catch { /* 视图可能已随窗口销毁 */ }
+    // 登出 / 切账号：控制目标一律失效，绝不跨用户保留（也绝不改绑到别的标签）。
+    try { browserControl?.setSession(next); } catch { /* 控制器可能已随窗口销毁 */ }
     if (win && !win.isDestroyed() && !win.webContents.isDestroyed())
       win.webContents.send("native:state", { type: "session-changed", sessionKey: next });
   });
@@ -216,6 +259,8 @@ app.whenReady().then(async () => {
       // 会话键只来自主进程：renderer 传什么都不看。
       sessionKey,
     });
+    // 标签关闭 / 被替换：把死掉的目标从授权表摘掉（绝不是"换个标签继续"）。
+    try { browserControl?.pruneDead(); } catch { /* ignore */ }
     return { ok: true, results };
   });
 
@@ -235,6 +280,23 @@ app.whenReady().then(async () => {
       }
       const res = controller.downloadAction(action, payload?.downloadId, sessionKey);
       return { ...res, items: controller.listDownloads(sessionKey) };
+    }
+    // -------------------------------------------------------------------------
+    // D5-01 Closure-2 · "允许 AI 控制这个标签"（**用户**在渲染层显式选择）。
+    // 复用既有 browser:command 通道：不新增桥键、不新增 IPC 通道、不扩大暴露面。
+    // userId 由主进程从已认证 session 推导；renderer 只能给 windowId/tabId，
+    // 归属（分区 sessionKey）与存活一律由 BrowserControlAuthority 校验。
+    // -------------------------------------------------------------------------
+    if (type === "browser/controlList") {
+      return { ok: true, targets: browserControl.list({ userId: sessionKeyNow(), appId: "ai" }) };
+    }
+    if (type === "browser/controlSelect" || type === "browser/controlRelease") {
+      const windowId = String(payload?.windowId ?? "");
+      const tabId = payload?.tabId == null ? "" : String(payload.tabId);
+      if (!windowId || !tabId) return { error: "未知命令" };
+      const args = { context: { source: "user" }, userId: sessionKeyNow(), appId: "ai", windowId, tabId };
+      const res = type === "browser/controlSelect" ? browserControl.select(args) : browserControl.release(args);
+      return { ...res, targets: browserControl.list({ userId: sessionKeyNow(), appId: "ai" }) };
     }
     if (type === "browser/openExternal") {
       // 用户已在 UI 上明确确认；这里仍然拒绝已知危险的 scheme（file/javascript/data/...）。
@@ -290,6 +352,7 @@ app.whenReady().then(async () => {
   });
 
   win.loadURL(uiURL);
+  markProductReady();
   win.webContents.once("did-finish-load", () => {
     if (win && !win.isDestroyed()) win.webContents.send("display:changed", displayInfo());
   });
