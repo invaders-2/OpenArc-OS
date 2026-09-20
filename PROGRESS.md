@@ -948,6 +948,17 @@ C2/C4 只开放 resource.trash 一条 REVERSIBLE_WRITE：IRREVERSIBLE_WRITE / EX
 4. A37 / A38 不在 PLAN §41 的 D4-05 四场景内，未纳入。
 5. 真实 `electron/main.cjs` 全流程 = **PASS（D4 Main-Entry E2E Closure-6 `3c9659a`：5/5 必需流程含追加步骤/预算停止/UI 显式续接，Gate `120/120`、exit 0）**；真实外部 provider / 真实凭据 / Windows / OS 级网络沙箱 = 继承 `NOT VERIFIED`，不扩大。Closure-6 已补：追加步骤产品入口（`5577e82`）；Closure-5 已补：产品工具授权入口（`4e8c6c1`）、明确拒绝假成功修复（`81ced49`）。
 
+# D5-01 Closure-3 · 执行边界与最终验收（唯一口径 · 2026-09-20）
+
+**基线 \`2534c31\` → 代码/测试提交 \`2cb3088\`**；分支 \`feature/d4-03-tool-proxy\`；未 push、未合并 main、未触碰其它工作区（另一个运行中的 \`OpenArc OS.app\` 全程未激活/未点击/未关闭）。本轮只收口三件事，不新增浏览器功能。
+
+- **主进程内执行的边界（§二）**：保留 in-process execution class（原生视图搬不进子进程），但补齐全部缺失的证明并**不新增任何绕过** —— lease/claim/exactly-once/verify 仍由同一个 SideEffectAuthority 裁决。新增：**派发三态**（APPLIED / NOT_APPLIED / INDETERMINATE，判据是 \`loadURL()\` 自身 promise + 只把"我们请求的地址被提交过"算我们的提交）、**归因账本**（viewId#seq 活账本 + 按 callId 绑定本次执行）、**plan 完整性**（批准时 expectedEffects 独立副本逐字比对；执行入参 url 与 plan 自洽）。停止/迟到/关标签一律收敛为 UNKNOWN_EFFECT 并走既有只读恢复（recovered=true → 交 BLOCK），**绝不以"当前 URL 相等"当作成功**。单测 \`tests/d5-01-browser-inprocess-boundary.test.mjs\` **6/6**；真实原生视图门禁 \`experiments/d5-01/browser-inprocess-boundary-e2e.mjs\` **32/32 PASS**（claim 前撤权 0 派发 / 派发后停止 / 迟到完成不覆盖 / 关标签 / 归因 / 重复与绑定）。**限制如实声明**：in-process 与 out-of-process **不等价**（无独立 executor 进程寿命证据）；派发证据是内存账本，冷启动后只能判不可知；"能证明未执行"的条件很窄。
+- **真实可见性（§三）**：新增 \`experiments/d5-01/visibility-e2e.mjs\` —— \`screencapture -x -o -l <CGWindowID>\`（窗口自身画面）+ \`cliclick\`（CGEvent **真实指针**）+ Quartz 读像素；每次点击前校验"我们仍是最前面的窗口 + 落点在本窗口内容区"，否则宁可不点（绝不碰另一个实例）。工作区运行 **19/20 PASS**：网页真的可见（视口中心像素为页面纯绿、对照列无绿）、真的可交互（页面自己记录到真实点击坐标，标定后命中按钮本体误差 ≤6px）、标签栏真实点击新建/切换生效、地址栏真实点击获得焦点、面板打开网页让位/关闭恢复（像素级）、缩放后重新标定仍命中。**OPEN 发现 VIS-GEOMETRY-1（如实登记、不冒充通过）**：像素测量与点击标定两个独立仪器都显示原生视图在屏幕上比 DOM 预留位置偏高约 83–103pt、高度更大（436 vs 322pt），但标签栏/地址栏真实点击仍生效，未能定位根因 → V4c 保持 FAIL，可见性一项不判完成。干净树上复跑该门禁 7/9 + 1 NOT VERIFIED（那一轮本窗口未在最前，安全闸按设计拒绝发真实点击）。
+- **D4-03D 文件级超时（§四）**：**根因确定性复现** —— 测试夹具的 \`server.close(cb)\` 在还有未结束请求的连接时**永不回调**（2.5s 仍未关闭；\`closeAllConnections()\` 后立即关闭），据此做清理会让测试文件进程挂死（0 断言失败、文件级 180s 超时、每次命中不同文件、整轮约 930s）。**最小修复**：统一 \`closeServer()\`（closeIdleConnections + closeAllConnections + 有界兜底）落在 model-fake-provider（共享）/ d4-04-provider / d5-01 site / tool-d4-03d-closure；**不删测试、不跳过文件、不提高超时**。基线 \`0094e17\` 导出树同样复现（43/42、0 fail、1 文件级超时、exit 1）→ 预先存在。修复后连续 2 次 \`npm run test:d4-03d\` = **52/52 PASS / exit 0**。
+- **干净导出树 \`2cb3088\` 实际检查**：受影响 node 套件 **33/33**（exit 0）；\`security-surface\` **16/16**（exit 0）；\`test:d4-03d\` **52/52 PASS**（exit 0）；\`browser-inprocess-boundary-e2e\` **32/32**（exit 0）；\`visibility-e2e\` **7/9 + 1 NOT VERIFIED**（exit 1，见上）。
+- **结论：D5-01 仍为 PARTIAL**（不升级为限定范围 PASS）：执行边界与 D4-03D 已收口，可见性取得真实屏幕/真实指针证据但存在未定位的几何 OPEN 项；崩溃恢复、高 DPI、多屏、Windows、任意网站兼容、像素级层级真值仍单列 NOT VERIFIED。不进入 D5-02、不 push、不合并 main。
+- 证据：\`docs/D5-01-CLOSURE3-RESULT.md\`、\`docs/D5-01-CLOSURE3-EVIDENCE.json\`；\`artifacts/d5-01/d5-01-browser-inprocess-boundary-e2e.json\`、\`artifacts/d5-01/d5-01-visibility-e2e.json\`、\`artifacts/d5-01/visibility/*.png\`（工作树本地）。
+
 # D5-01 Closure-2 · 受控浏览器能力产品闭环（唯一口径 · 2026-09-20）
 
 **基线 `0094e17866a2937d61eebc88b382e42694148d98` → 代码/测试提交 `ad024749fbdc8cffe950cd034cd554134a2eca14`（`ad02474`）**；分支 `feature/d4-03-tool-proxy`；未 push、未合并 main、未触碰其它工作区（含另一个正在运行的 `OpenArc OS.app`，全程未操作）。
