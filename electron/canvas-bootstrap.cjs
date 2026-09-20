@@ -18,6 +18,8 @@ const RENDERER_COMMANDS = Object.freeze([
   "canvas/create",
   "canvas/list",
   "canvas/get",
+  "canvas/meta",
+  "canvas/recent",
   "canvas/save",
   "canvas/trash",
   "canvas/restore",
@@ -74,6 +76,10 @@ function registerCanvasIpc({ ipcMain, service, identity, isTrusted, hostAppId = 
           return service.listCanvases({ context, includeTrashed: !!payload.includeTrashed });
         case "canvas/get":
           return service.getCanvas({ context, canvasId: asStr(payload.canvasId, 120) });
+        case "canvas/meta":
+          return service.metaCanvas({ context, canvasId: asStr(payload.canvasId, 120) });
+        case "canvas/recent":
+          return service.recentCanvases({ context, limit: Number(payload.limit) || 12 });
         case "canvas/save":
           return service.saveCanvas({
             context, canvasId: asStr(payload.canvasId, 120),

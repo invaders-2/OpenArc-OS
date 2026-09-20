@@ -1,0 +1,10 @@
+{
+  "sourceCommit": "6ce1a64680b669b31c2ac3b32418b54decd404f2",
+  "source": "/tmp/novai-canvas-src",
+  "files": 103,
+  "pages": 14,
+  "entry": "index.html",
+  "entryShellHash": "77d1425f2108fd38",
+  "canvasJsHash": "e422f9d5b1245acb",
+  "csp": "default-src 'none'; script-src openarc-canvas: 'unsafe-inline'; style-src openarc-canvas: 'unsafe-inline'; img-src openarc-canvas: data: blob:; media-src openarc-canvas: data: blob:; font-src openarc-canvas:; connect-src openarc-canvas:; frame-src openarc-canvas:; child-src openarc-canvas:; object-src 'none'; form-action 'none'; base-uri 'none'"
+}

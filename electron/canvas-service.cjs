@@ -151,6 +151,33 @@ class CanvasService {
     return ok({ canvas: this.#view(r.board, r.access) });
   }
 
+  /** 只读元数据：宿主状态栏与画布页 2.5s 的版本轮询（`/api/canvases/{id}/meta`）用，**不含文档正文**。*/
+  metaCanvas({ context, canvasId } = {}) {
+    const r = this.#load(context, canvasId);
+    if (!r.ok) return r;
+    const board = r.board;
+    const doc = this.#docOf(board);
+    return ok({
+      meta: {
+        canvasId: board.id, id: board.id,
+        title: board.name, icon: board.icon, kind: board.kind,
+        revision: Number(board.revision || 1),
+        updated_at: Number(board.updated_at || 0), updatedAt: Number(board.updated_at || 0),
+        created_at: Number(board.created_at || 0),
+        trashed: !!board.deleted_at,
+        node_count: (doc.nodes || []).length, connection_count: (doc.connections || []).length,
+        access: { canEdit: domain.canEdit(r.access), canView: domain.canView(r.access), source: r.access.source },
+      },
+    });
+  }
+
+  /** 首页"最近画布"：与列表**同一份可见性规则**，只取前 N 条。*/
+  recentCanvases({ context, limit = 12 } = {}) {
+    const res = this.listCanvases({ context });
+    if (!res.ok) return res;
+    return ok({ canvases: res.items.slice(0, Math.max(1, Math.min(50, Number(limit) || 12))) });
+  }
+
   /** 手工路径保存：整文档 + 基准版本（版本不一致 → 返回当前文档与 revision，由界面合并/提示）。*/
   saveCanvas({ context, canvasId, baseRevision = null, doc = null, title = null, icon = null } = {}) {
     const r = this.#load(context, canvasId, { needEdit: true });
@@ -513,7 +540,8 @@ class CanvasService {
     if (!m) return fail(REASON.INVALID_INPUT);
     const bytes = Buffer.from(m[2], "base64");
     if (!bytes.length || bytes.length > 8 * 1024 * 1024) return fail(REASON.LIMIT_EXCEEDED);
-    const dir = this.tempDir ? this.tempDir() : null;
+    // 注入的 tempDir 既可能是字符串路径，也可能是返回路径的函数（identity-bootstrap 传字符串）。
+    const dir = typeof this.tempDir === "function" ? this.tempDir() : (this.tempDir || null);
     if (!dir) return fail("RESOURCE_UNAVAILABLE");
     const safe = String(name).replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 80) || "canvas-image";
     const file = require("node:path").join(dir, "canvas-import-" + Date.now().toString(36) + "-" + safe);
@@ -536,9 +564,12 @@ class CanvasService {
     if (!id) return fail(REASON.INVALID_INPUT);
     const row = this.resourceStore ? this.resourceStore.resourceRowById(id) : null;
     if (!row || row.trash_state === "TRASHED" || row.registry_status !== "active") return fail("ASSET_UNAVAILABLE");
+    // 授权：应用授权 OR **资源属于当前用户本人**（与画布 OWNER_POLICY 同一口径）。
+    // 之前只查 canvas 应用对资源的 grant，导致"自己刚导入的图，重开画布就变成不可用"。
     if (this.authService) {
       const auth = this.authService.authorize({ context, action: authz.ACTION.READ, resource: id });
-      if (!auth || auth.decision !== "ALLOW") return fail("ASSET_FORBIDDEN");
+      const ownerOk = row.owner_user_id != null && String(row.owner_user_id) === String(r.user.id);
+      if ((!auth || auth.decision !== "ALLOW") && !ownerOk) return fail("ASSET_FORBIDDEN");
     }
     if (typeof this.resourceService.readDataUrl !== "function") return fail("ASSET_UNAVAILABLE");
     const data = this.resourceService.readDataUrl({ context, resourceRef: id });
@@ -563,7 +594,8 @@ class CanvasService {
       if (row.registry_status !== "active") { exists[ref] = { state: "DELETED" }; continue; }
       if (this.authService) {
         const auth = this.authService.authorize({ context, action: authz.ACTION.READ, resource: id });
-        if (!auth || auth.decision !== "ALLOW") { exists[ref] = { state: "UNAUTHORIZED" }; continue; }
+        const ownerOk = row.owner_user_id != null && String(row.owner_user_id) === String(actor.user.id);
+        if ((!auth || auth.decision !== "ALLOW") && !ownerOk) { exists[ref] = { state: "UNAUTHORIZED" }; continue; }
       }
       exists[ref] = { state: "AVAILABLE", name: row.name, version: Number(row.version || 1) };
     }

@@ -11,6 +11,7 @@
 const crypto = require("node:crypto");
 const authzDom = require("./authorization-domain.cjs");
 const govDom = require("./governance-domain.cjs");
+const modelDom = require("./model-domain.cjs");
 
 class GovernanceService {
   constructor({ identity, authService, authStore, resourceStore, integrationStore = null, logger = null } = {}) {
@@ -275,6 +276,14 @@ class GovernanceService {
     return { ok: true, items };
   }
 
+  /**
+   * App Grant 的动作投影：resource.* 与 model.* 是同一张 app_resource_grants 上的两个
+   * action namespace（D4-01 起内置 App 的 model baseline 也写在这里）。只列 resource.*
+   * 会把真实存在的 model 授予显示成空动作，治理侧就拿不到可撤销的 grantId。
+   * TOOL 动作有意不入此投影：它有自己的 scope=TOOL 投影（getAppToolAccess）。
+   */
+  #appGrantActions(grant) { return [...authzDom.grantActions(grant), ...modelDom.modelGrantActions(grant)]; }
+
   getAppAccess({ context, appId } = {}) {
     const gate = this.#adminGate(context);
     if (!gate.ok) return { ok: false, error: gate.error };
@@ -284,7 +293,7 @@ class GovernanceService {
     return {
       ok: true,
       app: { appId: app.app_id, name: app.name, publisher: app.publisher, status: app.status, builtIn: !!app.built_in },
-      grants: grants.map((g) => ({ grantId: g.id, actions: authzDom.grantActions(g), resourceId: g.resource_id || null, collectionId: g.collection_id || null, resourceType: g.resource_type || null, departmentId: g.department_id || null, scope: g.scope || null, expiresAt: g.expires_at || null })),
+      grants: grants.map((g) => ({ grantId: g.id, actions: this.#appGrantActions(g), resourceId: g.resource_id || null, collectionId: g.collection_id || null, resourceType: g.resource_type || null, departmentId: g.department_id || null, scope: g.scope || null, expiresAt: g.expires_at || null })),
       memoryGrants: grants.filter((g) => g.resource_type === "memory").length,
     };
   }

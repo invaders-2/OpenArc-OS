@@ -38,7 +38,7 @@ protocol.registerSchemesAsPrivileged([
  * 画布页面跑在 sandbox iframe（allow-scripts，opaque origin）里，不接触 file:// 与用户目录：
  * 它只能读到 dist/novai-canvas 下白名单扩展名的文件（其余 403/404）。
  */
-const CANVAS_MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".ttf": "font/ttf", ".woff": "font/woff", ".ico": "image/x-icon" };
+const CANVAS_MIME = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".svg": "image/svg+xml", ".gif": "image/gif", ".webp": "image/webp", ".mp4": "video/mp4", ".webm": "video/webm", ".mp3": "audio/mpeg", ".woff2": "font/woff2", ".ttf": "font/ttf", ".woff": "font/woff", ".ico": "image/x-icon" };
 function handleCanvasProtocol(request) {
   let url;
   try { url = new URL(request.url); } catch { return new Response("bad request", { status: 400 }); }
@@ -181,8 +181,54 @@ app.whenReady().then(async () => {
 
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   win.webContents.on("will-navigate", (e, url) => {
-    if (url !== uiURL) e.preventDefault();
+    if (url === uiURL) return;
+    e.preventDefault();
+    // 主进程侧留证：外壳页顶层的导航出网也由宿主拦下（CSP 管不到顶层导航）。
+    try { console.warn("[openarc] 已拦截应用内导航出网（主框架）：", String(url).slice(0, 300)); } catch { /* ignore */ }
+    globalThis.__OPENARC_BLOCKED_NAVIGATIONS__ = (globalThis.__OPENARC_BLOCKED_NAVIGATIONS__ || []).concat([{ url: String(url).slice(0, 300), isMainFrame: true, at: Date.now() }]);
   });
+
+  // ---------------------------------------------------------------------------
+  // D5-02 Full-App · **宿主级导航出网拦截**（不是靠页面 CSP / fetch 替换）。
+  //
+  // 画布应用（外壳 + 14 个子页）在 sandbox iframe 里；页面里的 location.href 自我导航
+  // 无法被 CSP 关掉（Chromium 没有 navigate-to），所以在这里按帧拦：
+  //   允许：dist/index.html（本应用外壳）、openarc-canvas://bundle/**（bundle 内部的产品导航）；
+  //   其余（http/https/file/自造 scheme/其他）一律 preventDefault + 审计 + 通知渲染层。
+  // ---------------------------------------------------------------------------
+  const NAV_ALLOWED = (url) => {
+    const u = String(url || "");
+    if (u === uiURL) return true;
+    if (u === "about:blank") return true;
+    if (u.startsWith("openarc-canvas://bundle/")) return true;
+    return false;
+  };
+  const blockedNavigations = [];
+  const onFrameNavigate = (...args) => {
+    // will-frame-navigate 的签名随 Electron 版本变化：新版 (details{url,isMainFrame,preventDefault})，
+    // 旧版 (event, url, isInPlace, isMainFrame, ...)。两种都支持，不猜测版本。
+    const first = args[0];
+    const isDetails = !!first && typeof first === "object" && typeof first.url === "string";
+    const event = first;
+    const url = isDetails ? first.url : args[1];
+    const isMainFrame = isDetails ? !!first.isMainFrame : !!args[3];
+    if (NAV_ALLOWED(String(url))) return;
+    try { if (event && typeof event.preventDefault === "function") event.preventDefault(); } catch { /* 拦不住也要留证 */ }
+    const row = { url: String(url).slice(0, 300), isMainFrame, at: Date.now() };
+    blockedNavigations.push(row);
+    if (blockedNavigations.length > 50) blockedNavigations.shift();
+    globalThis.__OPENARC_BLOCKED_NAVIGATIONS__ = blockedNavigations;
+    // 主进程侧留证（门禁读 stderr 就能证明"是宿主拦的"，不是页面 CSP 声明）：
+    try { console.warn("[openarc] 已拦截应用内导航出网：", row.url); } catch { /* ignore */ }
+    // 同时经既有 native:state 只读通道告知渲染层（类型未知的载荷既有逻辑会忽略）。
+    if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
+      win.webContents.send("native:state", { type: "canvas-navigation-blocked", url: row.url, isMainFrame: row.isMainFrame, at: row.at });
+    }
+  };
+  if (typeof win.webContents.on === "function") {
+    try { win.webContents.on("will-frame-navigate", (...args) => onFrameNavigate(...args)); } catch { /* 旧版本没有该事件 */ }
+  }
+  globalThis.__OPENARC_BLOCKED_NAVIGATIONS__ = blockedNavigations;
 
   // ---------------------------------------------------------------------------
   // D3-01 · 身份服务（唯一权威，§25）已在 runtime boot 中创建；

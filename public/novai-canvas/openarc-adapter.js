@@ -158,6 +158,24 @@
       return;
     }
     if (d.kind === "state-request") { post({ kind: "state", id: d.id, state: state() }); return; }
+    if (d.kind === "reload-doc") {
+      // 宿主已经落库（AI 编辑）或发现引用的资源不可用：整篇换成本宿主给的文档，**不回写**。
+      var it3 = internals();
+      if (!it3) { post({ kind: "command-result", id: d.id, ok: false, error: { error: "CANVAS_NOT_READY" } }); return; }
+      try {
+        var doc = d.doc || {};
+        it3.primitives.setNodes(JSON.parse(JSON.stringify(doc.nodes || [])));
+        it3.primitives.setConnections(JSON.parse(JSON.stringify(doc.connections || [])));
+        it3.primitives.setCanvasMeta({ updated_at: d.updatedAt, title: d.title });
+        it3.primitives.setViewport(doc.viewport);
+        it3.primitives.sanitizeConnections();
+        it3.primitives.render();
+        post({ kind: "command-result", id: d.id, ok: true, value: { reloaded: true, state: state() } });
+      } catch (err) {
+        post({ kind: "command-result", id: d.id, ok: false, error: { error: "INVALID_INPUT", message: String((err && err.message) || err) } });
+      }
+      return;
+    }
   });
 
   window.addEventListener("openarc-canvas-context", function (event) {
@@ -205,7 +223,13 @@
   };
 
   (function wait() {
-    if (internals()) { post({ kind: "adapter-ready", state: state() }); return; }
+    if (internals()) {
+      // 桥可能早就收到过 hello（context 事件在适配器注册监听之前就派发过）：
+      // 就绪时按**桥里的只读事实**再同步一次，只读成员不会因为时序而漏掉闸门。
+      try { internals().setReadOnly(readOnly()); } catch (e) { /* ignore */ }
+      post({ kind: "adapter-ready", state: state() });
+      return;
+    }
     if (Date.now() - startedAt > MAX_WAIT) { post({ kind: "adapter-timeout" }); return; }
     setTimeout(wait, 50);
   })();

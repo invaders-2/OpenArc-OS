@@ -35,8 +35,14 @@ const EXECUTOR_TIMEOUT_MS = 15000;
  *
  * 只有 Domain 本身**只存在于 main 进程内**的 provider 才能列在这里：受控浏览器的原生视图
  * （WebContentsView）就是这种。列在这里 ≠ 跳过 lease/claim/verify —— 那些仍然全部执行。
+ *
+ * D5-02 Full-App 追加 `CanvasControl`：画布命令层的权威实例（CanvasService + 同一个 SQLite 连接）
+ * 就活在 main 进程里，渲染层手工路径与 AI 路径**必须共用同一个实例**（同一份版本检查 / 同一份权限规则）。
+ * 在受监督 executor 子进程里再造一份 CanvasService 会变成第二个写者与第二份 revision 权威 ——
+ * 那正是 D5-02 §"不建第二套画布"禁止的。因此这里显式把画布写操作的 execution placement 写成 IN_PROCESS
+ * （与浏览器导航同类取舍：放弃 child 寿命证据，换取唯一权威；lease/claim/exactly-once/verify 全部照旧）。
  */
-const IN_PROCESS_EXECUTION_PROVIDERS = Object.freeze(new Set(["BrowserControl"]));
+const IN_PROCESS_EXECUTION_PROVIDERS = Object.freeze(new Set(["BrowserControl", "CanvasControl"]));
 
 /** approval 快照 / tool result 只允许 safe 字段。 */
 const SAFE_SNAPSHOT_SECRET_RE = /^(secret|token|authorization|api[_-]?key|credential|password|bearer|capability)/i;

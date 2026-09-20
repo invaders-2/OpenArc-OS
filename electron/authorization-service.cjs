@@ -14,6 +14,7 @@
 "use strict";
 
 const domain = require("./authorization-domain.cjs");
+const modelDomain = require("./model-domain.cjs");
 const {
   ACTION,
   APP_STATUS,
@@ -1154,12 +1155,33 @@ class AuthorizationService {
     return { ok: true, items: this.store.allApps() };
   }
 
+  /**
+   * App Grant 的动作命名空间分派：resource.* 走 D3-02 归一化；resource_type='model' 的 grant
+   * 承载 model.*（D4-01 与 resource grant 同表不同 namespace）。两者互不通用，tool.* 仍只走
+   * 专用入口 —— 因此这里既不放宽 resource 授权，也不允许跨 namespace 写入。
+   */
+  #normalizeAppGrantActions({ resourceType, actions, permissionSet }) {
+    if (String(resourceType || "") !== "model") return domain.normalizeGrantActions({ actions, permissionSet });
+    if (permissionSet != null) return null;
+    const list = actions == null ? [] : Array.isArray(actions) ? actions : [actions];
+    const out = new Set();
+    for (const a of list) {
+      const act = String(a || "");
+      if (!modelDomain.MODEL_ACTIONS_ALL.includes(act)) return null;
+      out.add(act);
+    }
+    return [...out];
+  }
+
+  /** App Grant 的动作投影：audit 必须与 getAppAccess 同一口径，否则 model 授予撤了却记成"没撤动作"。 */
+  #appGrantActions(grant) { return [...domain.grantActions(grant), ...modelDomain.modelGrantActions(grant)]; }
+
   grantAppResourcePermission({ context, appId, resourceId = null, collectionId = null, resourceType = null, departmentId = null, scope = null, actions = null, permissionSet = null, expiresAt = null } = {}) {
     const gate = this.#governanceGate(context, GOVERNANCE_ACTION.GRANT_APP_PERMISSION);
     if (!gate.ok) return { ok: false, error: gate.error };
     const app = this.store.appById(appId);
     if (!app) return { ok: false, error: REASON.APP_UNKNOWN };
-    const normalized = domain.normalizeGrantActions({ actions, permissionSet });
+    const normalized = this.#normalizeAppGrantActions({ resourceType, actions, permissionSet });
     if (!normalized || !normalized.length) return { ok: false, error: REASON.INVALID_INPUT };
     if (resourceId) {
       const resource = this.store.resourceById(resourceId);
@@ -1185,8 +1207,8 @@ class AuthorizationService {
       reasonCode: "ALLOW",
       departmentId: departmentId || null,
       resourceRef: resourceId || null,
-      oldPermissions: result.previous ? domain.grantActions(result.previous) : [],
-      newPermissions: domain.grantActions(result.grant),
+      oldPermissions: result.previous ? this.#appGrantActions(result.previous) : [],
+      newPermissions: this.#appGrantActions(result.grant),
     });
     return { ok: true, created: result.created, grant: result.grant };
   }
@@ -1206,7 +1228,7 @@ class AuthorizationService {
       decision: DECISION.ALLOW,
       reasonCode: "ALLOW",
       resourceRef: before.resource_id || null,
-      oldPermissions: domain.grantActions(before),
+      oldPermissions: this.#appGrantActions(before),
       newPermissions: [],
     });
     return { ok: true, changed: true, reasonCode: "ALLOW" };

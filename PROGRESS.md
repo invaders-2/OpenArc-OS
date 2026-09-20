@@ -1203,3 +1203,39 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 ### 待验证（沿用）
 
 首个交付平台、局域网服务部署方式、Adobe 版本兼容性、具体 MCP 安装与授权要求，以及 Spectrum 动效组件与最终桌面技术方案的适配。
+
+---
+
+# D5-02 Full-App · 完整应用集成（2026-09-20 · 基线 `bf82c5c`）
+
+> 口径：本轮把上游 NOVAI **完整应用**（原版 `index.html` = AI Studio 外壳 + 首页 + 侧栏 + 14 个子页）接入 OpenArc，
+> 页面扩大后安全不变式不放宽；五项既有缺口逐项收口。详细结果与逐项验收见 `docs/D5-02-FULLAPP-RESULT.md`。
+
+## 1. 任务状态
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| 入口 = 原版应用外壳（首页 + 侧栏 + 子页） | **完成** | `openarc-canvas://bundle/index.html`；vendor 103 文件 / 14 页；A1/A2 |
+| 首页 → 无限画布 → 建/存 → 返回首页 → 再打开项目 | **完成** | A3–A7（同一 canvasId + 内容恢复）+ 截图 |
+| 统一后端（模型/资源/项目/任务） | **完成** | B1–B6；`/api/app-info`、`/api/queue_status`（= 运行中任务数）、`/api/recent-canvases`、`/api/projects` 全部由宿主回答 |
+| 更新/下载上游程序 + 直连 GitHub/Gitee/ModelScope | **禁用** | 501 `OPENARC_UPDATE_DISABLED` + 界面标注 + 出网接收端 0 命中 |
+| 缺口 1 任务模型绑定 | **闭合** | F1（停用/跨能力/不存在 → 拒绝 + 0 新增请求） |
+| 缺口 2 D1 撤权 | **闭合** | D1（撤销 → PROXY_UNAUTHORIZED + 0 请求 + 恢复）；修复 `getAppAccess` 只投影 `resource.*` 的 namespace 盲区 |
+| 缺口 3 图片资源产品链 | **闭合** | F3a/F3b/F3c；并修掉真实缺陷：`importAsset` 把注入的 tempDir 字符串当函数调用 |
+| 缺口 4 AI 编辑正式链 | **未闭合（PARTIAL）** | F4：`canvas.edit` 已进入 Harness 广播面、模型真的提议 `canvas_edit`，但 Harness → Tool Facade 的派发没有产生任何 proposal（`side_effect_calls`=0 / `tool_executions`=0，任务 `end_turn`）；对照工具 `resource.trash` 全链 PASS |
+| 缺口 5 宿主隔离与导航出网 | **闭合** | E1–E8（含 iframe 自我导航实测被拦 + 被拦后应用仍可用） |
+| 停止 / 预算 / 迟到结果保护 | **保持并复验** | D3 / D4（受影响部分已随完整应用重跑） |
+
+## 2. 结论
+
+**D5-02 维持 PARTIAL**：完整应用必需流程已实际运行并通过门禁，但**缺口 4（AI 编辑正式链）**在真实 Electron 里
+仍未取得"提议 → 审批 → 执行 → 呈现 → 保存恢复"的完整证据（缺环已定位到 Harness 工具派发这一跳，
+下一步见结果文档 §7）。其余四项缺口与安全不变式均已闭合且有实测证据。
+
+## 3. 安全不变式（页面扩大后仍然成立）
+
+无 openarc 桥 / Node / IPC / fs / 凭据；端点白名单外一律 501；`openarc-canvas://` 只读白名单（穿越与非白名单扩展名被拒）；
+宿主只接受当前实例（event.source + 每次挂载随机 token，子页 token 由外壳中继附加）；
+子页 ↔ 外壳 ↔ 宿主是逐项限定的中继协议；出网（fetch/img/ws/form/script/window.open/自我导航）0 命中，
+主进程 `will-navigate`/`will-frame-navigate` 留痕；账号边界 = 真实同源存储按 `oa:<本次挂载钥匙>:` 分桶 + 切账号帧全销毁。
+
