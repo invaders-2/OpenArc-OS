@@ -72,7 +72,9 @@ OpenArc 只在最外层加一条窗口条：当前项目/revision、画布选择
 | G3 | `node experiments/d5-02/agent-canvas-probe.mjs`（AI 编辑链专项探针） | 6 PASS / 3 FAIL（画布链未取得；对照链 PASS） |
 | G4 | 既有相关用例（governance / authorization / model / d5-02 canvas 单测） | 164 PASS / 0 FAIL |
 
-FAIL 明细：F3b（图片资源重开解析）、F4（AI 编辑链缺环）。门禁按"页面/功能/产品证据/缺项"逐项断言，未删断言、未放宽口径。
+FAIL 明细：F3b（图片资源重开解析）、F4（AI 编辑链缺环）。
+
+**干净树复跑**：`git rev-parse HEAD` = `6bca089`（工作树干净，`OPENARC_TESTED_COMMIT=6bca089`）复跑同一门禁 → **33 PASS / 2 FAIL / 35**，与提交前一致（同一失败项 F3b/F4）。门禁按"页面/功能/产品证据/缺项"逐项断言，未删断言、未放宽口径。
 
 ## 6. 本轮修掉的真实缺陷（都是门禁逼出来的）
 
