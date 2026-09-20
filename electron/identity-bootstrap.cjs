@@ -19,6 +19,7 @@ const { createDeviceBundle, registerDeviceIpc } = require("./device-bootstrap.cj
 const { createResourceBundle, registerResourceIpc } = require("./resource-bootstrap.cjs");
 const { createGovernanceBundle, registerGovernanceIpc } = require("./governance-bootstrap.cjs");
 const { createModelBundle, registerModelIpc } = require("./model-bootstrap.cjs");
+const { createCanvasBundle } = require("./canvas-bootstrap.cjs");
 const { createTaskBundle } = require("./task-bootstrap.cjs");
 const { createSideEffectGateway, registerSideEffectIpc } = require("./side-effect-bootstrap.cjs");
 
@@ -72,6 +73,14 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
     searchService,
     logger: log,
   });
+  // D5-02：无限画布的**文档层**。board 身份与资源引用沿用 D3-04D 的 canvasService，
+  // 这里只加"可编辑文档 + 版本检查 + 命令层"（AI 工具与画布宿主共用同一个实例）。
+  const { service: canvasDocService } = createCanvasBundle({
+    identityStore: store,
+    resourceStore,
+    authService: authorization,
+    logger: log,
+  });
   // D4-01：模型 Provider / Credential / Config / Default（复用同一连接与 AuthorizationService）。
   const { modelStore, credentialStore, modelService, modelProxy } = createModelBundle({
     identityStore: store,
@@ -95,6 +104,8 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
     // D5-01 Closure-2：受控浏览器目标是**宿主（真实 main）持有**的对象：原生视图控制器晚绑定，
     // 这里只把同一实例接进唯一工具链，绝不在装配层再造一个。
     browserControl,
+    // D5-02：AI 编辑画布的执行端（与手工路径同一命令层 + 版本检查 + 权限规则）。
+    canvasService: canvasDocService,
     dbPath: path.join(userDataDir, "identity.db"),
     storeRoot: path.join(userDataDir, "library"),
     runtimeDir: path.join(userDataDir, "runtime", "side-effects"),
@@ -105,7 +116,7 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
   });
   // Trusted Approval Gateway：Renderer 只能经此通道看到安全投影并提交 decision。
   const sideEffectGateway = createSideEffectGateway({ sideEffectRuntime });
-  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, modelStore, credentialStore, modelService, modelProxy, taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, sideEffectGateway, orchestrator, browserControl };
+  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, modelStore, credentialStore, modelService, modelProxy, taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, sideEffectGateway, orchestrator, browserControl, canvasDocService };
 }
 
 /**

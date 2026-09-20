@@ -112,6 +112,15 @@ contextBridge.exposeInMainWorld("openarc", {
     command: (command) => ipcRenderer.invoke("model:command", command),
   },
   /**
+   * D5-02 画布桥（只给 OpenArc 宿主窗口，**画布页面本身拿不到**：它跑在 sandbox iframe 里）。
+   *
+   * 唯一入口 canvas.command(...)；不暴露文件路径 / 资源字节 / 模型地址 / 凭据。
+   * sessionRef 与 appId 由主进程注入，Renderer 自报的身份字段一律忽略。
+   */
+  canvas: {
+    command: (command) => ipcRenderer.invoke("canvas:command", command),
+  },
+  /**
    * D4-04 Task 桥。
    *
    * **只有两条能力**：派发受控 task 命令、订阅 task 进度事件。

@@ -47,6 +47,8 @@ const MODEL_COMMANDS = Object.freeze([
   "model/list", "model/create", "model/update", "model/setStatus",
   "defaults/get", "defaults/set",
   "model/test",
+  // D5-02：画布**唯一**的模型入口（画布页面没有密钥/地址/隐藏供应商）。
+  "canvas/models", "canvas/chat", "canvas/image",
 ]);
 const MODEL_COMMAND_NOT_ALLOWED = "MODEL_COMMAND_NOT_ALLOWED";
 
@@ -92,6 +94,21 @@ function registerModelIpc({ ipcMain, service, identity, isTrusted, hostAppId = H
         case "defaults/get": return service.getDefaults({ context });
         case "defaults/set": return service.setDefault({ context, capability: requireStr(payload.capability, 40), configId: requireStr(payload.configId, 120), scope: asStr(payload.scope, 20) });
         case "model/test": return service.testConnection({ context, configId: requireStr(payload.configId, 120) });
+        // ---- D5-02 画布模型面：能力由 ModelService 判定，缺能力明确报错、绝不回落 ----
+        case "canvas/models": return service.listModelsForUse({ context });
+        case "canvas/chat": {
+          const messages = Array.isArray(payload.messages) ? payload.messages.slice(0, 64).map((m) => ({
+            role: ["system", "user", "assistant"].includes(String(m && m.role)) ? String(m.role) : "user",
+            content: String((m && m.content) || "").slice(0, 16000),
+          })) : [];
+          if (!messages.length) return { ok: false, error: "INVALID_INPUT" };
+          return service.chat({ context, configId: requireStr(payload.configId, 120), messages, capability: "chat", requestId: asStr(payload.requestId, 80) });
+        }
+        case "canvas/image": {
+          const prompt = asStr(payload.prompt, 4000);
+          if (!prompt) return { ok: false, error: "INVALID_INPUT" };
+          return service.generateImage({ context, configId: requireStr(payload.configId, 120), prompt, size: asStr(payload.size, 32), count: Math.max(1, Math.min(4, Number(payload.count) || 1)), capability: "image-generation", requestId: asStr(payload.requestId, 80) });
+        }
         default: return { ok: false, error: MODEL_COMMAND_NOT_ALLOWED };
       }
     } catch {

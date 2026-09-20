@@ -183,6 +183,9 @@ const TOOL_ACTION = Object.freeze({
   // 导航是可逆写入、需要审批，只读权限绝不隐含导航权限。
   BROWSER_READ: "tool.browser.read",
   BROWSER_NAVIGATE: "tool.browser.navigate",
+  // D5-02：无限画布的 Tool 权限。读取与编辑分开授予 —— 读取绝不隐含编辑。
+  CANVAS_READ: "tool.canvas.read",
+  CANVAS_EDIT: "tool.canvas.edit",
 });
 const TOOL_ACTIONS = Object.freeze(Object.values(TOOL_ACTION));
 function isToolAction(action) { return TOOL_ACTIONS.includes(String(action)); }

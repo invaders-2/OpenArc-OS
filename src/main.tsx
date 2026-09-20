@@ -29,7 +29,8 @@ import { ProtectedResourceFixture } from "./authorization/ProtectedResourceFixtu
 import { SettingsContent } from "./settings/SettingsContent";
 import { GovernanceApp } from "./governance/GovernanceApp";
 import { FilesApp } from "./governance/FilesApp";
-import { CanvasApp } from "./governance/CanvasApp";
+// D5-02：无限画布宿主（上游 NOVAI 画布跑在 sandbox iframe 里；这里只做装配与受控桥）。
+import { CanvasHost } from "./canvas/CanvasHost";
 import { ProjectsApp } from "./governance/ProjectsApp";
 import { ApprovalPrompt } from "./approval/ApprovalPrompt";
 
@@ -409,7 +410,7 @@ function App() {
     }
     if (w?.appId === "resource-library") return <ResourceLibraryApp />;
     if (w?.appId === "files") return <FilesApp />;
-    if (w?.appId === "canvas") return <CanvasApp />;
+    if (w?.appId === "canvas") return <CanvasHost win={w} />;
     if (w?.appId === "projects") return <ProjectsApp />;
     if (w?.appId === "organization") return <GovernanceApp />;
     if (w?.appId === "settings")

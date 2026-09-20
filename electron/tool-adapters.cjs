@@ -9,6 +9,8 @@
  */
 "use strict";
 const domain = require("./tool-domain.cjs");
+// D5-02：画布命令的**同一份**校验/归一化（手工路径与 AI 路径共用）。
+const canvasDomain = require("./canvas-domain.cjs");
 const { safeURL } = require("./policy.cjs");
 const { safeUrlForAudit } = require("./browser-control-authority.cjs");
 
@@ -33,7 +35,7 @@ function projectFields(source, fields, { maxString = MAX_STRING } = {}) {
 }
 
 /** 静态 allowlist：provider → adapter（绝不从 arguments 解析 module/path）。*/
-function createToolAdapters({ resourceService = null, searchService = null, browserControl = null, extra = {} } = {}) {
+function createToolAdapters({ resourceService = null, searchService = null, browserControl = null, canvasService = null, extra = {} } = {}) {
   const providers = {};
 
   providers.test = {
@@ -282,6 +284,98 @@ function createToolAdapters({ resourceService = null, searchService = null, brow
         }
         const okShape = !!(result && typeof result.viewId === "string" && typeof result.url === "string" && typeof result.text === "string" && typeof result.truncated === "boolean" && result.untrusted === true);
         return { ok: okShape, detail: { viewId: result && result.viewId, textLength: result && typeof result.text === "string" ? result.text.length : 0, untrusted: !!(result && result.untrusted) } };
+      },
+    };
+  }
+
+  if (canvasService) {
+    /** 只读项目：目标画布必须属于当前账号（或已共享给它 / 组织可见）。*/
+    function canvasTarget({ context, args }) {
+      const actorUserId = context && context.actorUserId ? String(context.actorUserId) : "";
+      if (!actorUserId) return { ok: false, error: "CANVAS_FORBIDDEN" };
+      const canvasId = String((args && args.canvasId) || "");
+      if (!canvasId) return { ok: false, error: "INVALID_INPUT" };
+      return { ok: true, actorUserId, canvasId };
+    }
+    providers.CanvasControl = {
+      toolIds: ["canvas.read", "canvas.edit"],
+      async prepare({ args }) { return { plan: { dryRun: false, provider: "CanvasControl", hasCanvasId: !!(args && args.canvasId) } }; },
+      /**
+       * 只读 plan：目标画布 + **基准 revision** 与命令指纹一起进 SideEffectPlan（0 mutation）。
+       * 批准后执行的就是这份 plan 里的 revision —— 用户在批准与执行之间改了画布，
+       * 版本检查会让这次 AI 编辑失败并保留用户内容（A38）。
+       */
+      async plan({ context, args, contract }) {
+        const t = canvasTarget({ context, args });
+        if (!t.ok) return null;
+        const doc = canvasService.getCanvas({ context: { ...context, sessionRef: context && context.sessionRef }, canvasId: t.canvasId });
+        if (!doc || !doc.ok) return null;
+        if (contract && contract.toolId === "canvas.read") {
+          return { targets: [t.canvasId], preconditions: { targetRef: t.canvasId, targetType: "canvas", revision: doc.canvas.revision }, expectedEffects: [{ action: "read", target: t.canvasId, from: "revision:" + doc.canvas.revision, to: "summary" }] };
+        }
+        // 写入必须先过**同一条权限规则**（只读成员连"计划一次写入"都不允许）。
+        if (!doc.canvas.access || !doc.canvas.access.canEdit) return null;
+        const command = args && args.command && typeof args.command === "object" ? args.command : null;
+        if (!command || typeof command.type !== "string") return null;
+        const normalized = canvasDomain.normalizeCommand(command);
+        if (!normalized.ok || !canvasDomain.AGENT_COMMANDS.includes(normalized.command.type)) return null;
+        const fp = JSON.stringify(normalized.command).slice(0, 2000);
+        return {
+          targets: [t.canvasId],
+          preconditions: { targetRef: t.canvasId, targetType: "canvas", revision: doc.canvas.revision, commandFingerprint: fp, command: normalized.command },
+          expectedEffects: [{ action: normalized.command.type, target: t.canvasId, from: "revision:" + doc.canvas.revision, to: "revision:" + (doc.canvas.revision + 1) }],
+        };
+      },
+      /** 执行**只用持久化的 trusted plan**（revision + 命令），不读 Harness 入参。*/
+      async execute({ context, args, contract, preconditions }) {
+        const actorUserId = context && context.actorUserId ? String(context.actorUserId) : "";
+        if (!actorUserId) return { ok: false, knownNoEffect: true, error: "CANVAS_FORBIDDEN" };
+        const canvasId = preconditions && preconditions.targetRef;
+        if (!canvasId) return { ok: false, knownNoEffect: true, error: "CANVAS_TARGET_GONE" };
+        if (contract && contract.toolId === "canvas.read") {
+          const got = canvasService.readCanvas({ context, canvasId });
+          if (!got.ok) return { ok: false, knownNoEffect: true, error: got.error };
+          return { ok: true, result: got.summary };
+        }
+        const command = preconditions && preconditions.command;
+        const baseRevision = preconditions && preconditions.revision;
+        if (!command || typeof command.type !== "string") return { ok: false, knownNoEffect: true, error: "CANVAS_PRECONDITION_CHANGED" };
+        const res = canvasService.applyCommand({ context, canvasId, baseRevision, command, actorKind: "AGENT" });
+        if (!res.ok) {
+          // 版本冲突 / 只读 / 输入非法 → 都**没有**发生写入（knownNoEffect），绝不重试。
+          return { ok: false, knownNoEffect: true, error: res.error, detail: res.detail ? { reason: res.detail } : null };
+        }
+        return { ok: true, result: { canvasId, revision: res.canvas.revision, commandType: res.command.type, touched: res.touched || null } };
+      },
+      /** READ_AFTER_WRITE：读回画布，确认 revision 前进且目标节点/连线确实存在（或确实被删）。*/
+      async verify({ context, result, preconditions, contract }) {
+        const canvasId = (result && result.canvasId) || (preconditions && preconditions.targetRef);
+        if (!canvasId) return { ok: false, detail: { reason: "NO_TARGET" } };
+        const got = canvasService.getCanvas({ context, canvasId });
+        if (!got || !got.ok) return { ok: false, detail: { reason: "READ_BACK_FAILED" } };
+        if (contract && contract.toolId === "canvas.read") return { ok: true, applied: true, detail: { revision: got.canvas.revision } };
+        const revisionOk = Number(got.canvas.revision) > Number(preconditions && preconditions.revision);
+        const touched = (result && result.touched) || {};
+        const ids = [...(touched.nodeIds || []), ...(touched.edgeIds || [])];
+        const present = ids.filter((id) => got.canvas.doc.nodes.some((n) => n.id === id) || got.canvas.doc.connections.some((c) => c.id === id));
+        const applied = revisionOk && (touched.removed ? present.length === 0 : present.length === ids.length);
+        return { ok: true, applied, detail: { revision: got.canvas.revision, expectedRevision: preconditions && preconditions.revision, touchedCheck: { ids: ids.length, present: present.length, removed: !!touched.removed } } };
+      },
+      /**
+       * UNKNOWN_EFFECT 恢复：只读账本比对。**只认这次计划里的那条命令**，
+       * 不拿"revision 变了"当证据（可能是用户自己改的）。
+       */
+      async recoveryVerify({ context, call, preconditions }) {
+        const canvasId = preconditions && preconditions.targetRef;
+        if (!canvasId) return { outcome: "INDETERMINATE", reason: "NO_TARGET" };
+        const got = canvasService.getCanvas({ context, canvasId });
+        if (!got || !got.ok) return { outcome: "INDETERMINATE", reason: "READ_BACK_FAILED" };
+        const fp = preconditions && preconditions.commandFingerprint;
+        const log = canvasService.commandLog({ context, canvasId, limit: 20 });
+        const hit = log && log.ok ? log.items.find((it) => JSON.stringify(it.command) === fp && it.outcome === "APPLIED") : null;
+        if (hit) return { outcome: "APPLIED", reason: "COMMAND_IN_JOURNAL", detail: { commandId: hit.id, revision: hit.resultRevision } };
+        if (Number(got.canvas.revision) === Number(preconditions && preconditions.revision)) return { outcome: "NOT_APPLIED", reason: "REVISION_UNCHANGED" };
+        return { outcome: "INDETERMINATE", reason: "REVISION_MOVED_WITHOUT_OUR_COMMAND", detail: { revision: got.canvas.revision, base: preconditions && preconditions.revision } };
       },
     };
   }

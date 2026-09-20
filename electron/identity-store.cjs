@@ -51,7 +51,7 @@ const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domai
  * 迁移按版本逐级前进，每一级各自是一个原子事务：任何一级失败只回滚该级，
  * 不会留下"user_version 已升级但表不完整"的半状态（§55）。
  */
-const SCHEMA_VERSION = 16;
+const SCHEMA_VERSION = 17;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -1114,6 +1114,45 @@ CREATE TABLE task_budgets (
 CREATE INDEX idx_task_budgets_task ON task_budgets(task_id);
 `;
 
+/**
+ * D5-02 v17：无限画布的**文档层**。
+ *
+ * 不建第二套画布：board 身份与资源引用沿用 D3-04D 的 canvas_boards / canvas_resource_nodes，
+ * 这里只把"可编辑文档"（节点/连线/视口/日志）挂到同一个 board 上，再加共享角色与命令账本。
+ */
+const SCHEMA_V17_SQL = `
+ALTER TABLE canvas_boards ADD COLUMN icon TEXT NOT NULL DEFAULT '🧩';
+ALTER TABLE canvas_boards ADD COLUMN kind TEXT NOT NULL DEFAULT 'classic';
+ALTER TABLE canvas_boards ADD COLUMN doc TEXT NOT NULL DEFAULT '{"nodes":[],"connections":[],"viewport":{"x":0,"y":0,"scale":1},"logs":[]}';
+ALTER TABLE canvas_boards ADD COLUMN revision INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE canvas_boards ADD COLUMN visibility TEXT NOT NULL DEFAULT 'PRIVATE';
+ALTER TABLE canvas_boards ADD COLUMN deleted_at INTEGER;
+ALTER TABLE canvas_boards ADD COLUMN deleted_by TEXT;
+CREATE INDEX idx_canvas_boards_owner ON canvas_boards(owner_user_id, deleted_at);
+CREATE TABLE canvas_shares (
+  canvas_id  TEXT NOT NULL,
+  user_id    TEXT NOT NULL,
+  role       TEXT NOT NULL CHECK (role IN ('VIEWER','CONTRIBUTOR','EDITOR')),
+  granted_by TEXT,
+  at         INTEGER NOT NULL,
+  PRIMARY KEY (canvas_id, user_id)
+);
+CREATE INDEX idx_canvas_shares_user ON canvas_shares(user_id);
+CREATE TABLE canvas_commands (
+  id            TEXT PRIMARY KEY,
+  canvas_id     TEXT NOT NULL,
+  actor_user_id TEXT NOT NULL,
+  actor_kind    TEXT NOT NULL CHECK (actor_kind IN ('USER','AGENT')),
+  command       TEXT NOT NULL,
+  base_revision INTEGER,
+  result_revision INTEGER,
+  outcome       TEXT NOT NULL,
+  before_doc    TEXT,
+  at            INTEGER NOT NULL
+);
+CREATE INDEX idx_canvas_commands ON canvas_commands(canvas_id, at DESC);
+`;
+
 const MIGRATIONS = Object.freeze([
   { version: 1, sql: SCHEMA_SQL },
   { version: 2, sql: SCHEMA_V2_SQL },
@@ -1131,6 +1170,7 @@ const MIGRATIONS = Object.freeze([
   { version: 14, sql: SCHEMA_V14_SQL },
   { version: 15, sql: SCHEMA_V15_SQL },
   { version: 16, sql: SCHEMA_V16_SQL },
+  { version: 17, sql: SCHEMA_V17_SQL },
 ]);
 
 const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000; // 12h 绝对上限

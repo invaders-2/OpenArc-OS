@@ -33,7 +33,7 @@ const { DEFAULT_MAX_CALLS, MAX_TOOL_ROUNDS } = require("./task-domain.cjs");
 // toolIds / writeToolIds 一律取 allowlist 常量（唯一真源；不在装配处再写一份字面量）。
 const TOOL_FACADE_CONFIG = Object.freeze({ enabled: true, toolIds: READ_TOOL_IDS, writeToolIds: WRITE_TOOL_IDS, maxCalls: 8, ttlMs: 300000 });
 
-function createTaskBundle({ identityStore, authorization, authStore, modelService = null, modelProxy = null, logger = null, clock = null, adapterFactory = null, resourceService = null, searchService = null, browserControl = null, dbPath = null, storeRoot = null, runtimeDir = null, sideEffectApprovalWaitMs = null, executorLauncher = null, executorTestHook = null } = {}) {
+function createTaskBundle({ identityStore, authorization, authStore, modelService = null, modelProxy = null, logger = null, clock = null, adapterFactory = null, resourceService = null, searchService = null, browserControl = null, canvasService = null, dbPath = null, storeRoot = null, runtimeDir = null, sideEffectApprovalWaitMs = null, executorLauncher = null, executorTestHook = null } = {}) {
   if (!identityStore) throw new Error("createTaskBundle 需要 identityStore");
   if (!authorization || !authStore) throw new Error("createTaskBundle 需要 D3 Authorization");
   const taskStore = new TaskStore({ identity: identityStore, clock });
@@ -46,7 +46,7 @@ function createTaskBundle({ identityStore, authorization, authStore, modelServic
   const toolRegistry = new ToolRegistry();
   // D4-03B/C2：静态 allowlist adapter（executionProvider → 既有 Domain）。
   // D5-01 Closure-2：BrowserControl 与 Resource/Search 同一条装配路径 —— 不存在第二套执行通道。
-  const adapters = createToolAdapters({ resourceService, searchService, browserControl });
+  const adapters = createToolAdapters({ resourceService, searchService, browserControl, canvasService });
   const toolProxy = new ControlledToolProxy({ registry: toolRegistry, toolStore, authService: authorization, taskStore, taskService, adapters, clock, logger });
   // D4-03C4：trusted runtime supervisor（唯一 observeExit / registerRuntime 调用方）。
   const supervisor = new RuntimeSupervisor({

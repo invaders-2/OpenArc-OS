@@ -7,6 +7,8 @@ const geometry = require("./geometry.cjs");
 const { NativeViewController } = require("./native-view-controller.cjs");
 const { BrowserControlAuthority } = require("./browser-control-authority.cjs");
 const { registerIdentityIpc } = require("./identity-bootstrap.cjs");
+// D5-02：无限画布的宿主命令面（文档层实例由 identity-bootstrap 装配，AI 工具用同一个）。
+const { registerCanvasIpc } = require("./canvas-bootstrap.cjs");
 const { registerTaskIpc } = require("./task-bootstrap.cjs");
 const { createDefaultExecutorLauncher } = require("./executor-launcher.cjs");
 const { createOpenArcRuntime } = require("./runtime-boot.cjs");
@@ -14,6 +16,8 @@ const { createOpenArcRuntime } = require("./runtime-boot.cjs");
 let win;
 let controller;
 let identity;
+/** D5-02：画布文档服务（AI 编辑工具的执行端与渲染层命令共用同一个实例）。*/
+let canvasBundle;
 /** D5-01 Closure-2：受控浏览器目标（用户显式授权）。宿主持有唯一实例，工具链与 UI 共用同一个。 */
 let browserControl;
 
@@ -23,7 +27,35 @@ const uiURL = pathToFileURL(path.join(__dirname, "../dist/index.html")).href;
 // Renderer 只能拿到 openarc-resource:// 短时 capability URL，绝不接触本地路径。
 protocol.registerSchemesAsPrivileged([
   { scheme: "openarc-resource", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: false } },
+  // D5-02：无限画布 bundle 的自定义协议（iframe 用；**只读**目录白名单，无目录穿越）。
+  // corsEnabled：画布 iframe 是 opaque origin，字体等子资源必须能跨源取（静态只读 bundle）。
+  { scheme: "openarc-canvas", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } },
 ]);
+
+/**
+ * D5-02 · 画布 bundle 的只读协议 handler。
+ *
+ * 画布页面跑在 sandbox iframe（allow-scripts，opaque origin）里，不接触 file:// 与用户目录：
+ * 它只能读到 dist/novai-canvas 下白名单扩展名的文件（其余 403/404）。
+ */
+const CANVAS_MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".ttf": "font/ttf", ".woff": "font/woff", ".ico": "image/x-icon" };
+function handleCanvasProtocol(request) {
+  let url;
+  try { url = new URL(request.url); } catch { return new Response("bad request", { status: 400 }); }
+  const rel = decodeURIComponent(url.pathname).replace(/^[/]+/, "");
+  if (!rel || rel.includes("..") || rel.includes("\\") || rel.includes('\0')) return new Response("forbidden", { status: 403 });
+  const ext = path.extname(rel).toLowerCase();
+  if (!Object.prototype.hasOwnProperty.call(CANVAS_MIME, ext)) return new Response("forbidden", { status: 403 });
+  const distRoot = path.join(__dirname, "../dist/novai-canvas");
+  const publicRoot = path.join(__dirname, "../public/novai-canvas");
+  const base = fs.existsSync(distRoot) ? distRoot : publicRoot;
+  const file = path.resolve(base, rel);
+  if (!file.startsWith(path.resolve(base) + path.sep)) return new Response("forbidden", { status: 403 });
+  if (!fs.existsSync(file)) return new Response("not found", { status: 404 });
+  // 画布跑在 opaque origin（sandbox allow-scripts）里：字体等子资源需要 CORS 头才能加载。
+  // 这是**只读静态 bundle**、无凭据、无用户数据，因此允许任意来源读取。
+  return new Response(fs.readFileSync(file), { status: 200, headers: { "content-type": CANVAS_MIME[ext], "access-control-allow-origin": "*" } });
+}
 
 /** 只接受来自本应用外壳页的调用。
  * 双重条件（sender + senderFrame.url）在 D1-05 冻结，本阶段不放宽。
@@ -189,6 +221,14 @@ app.whenReady().then(async () => {
     },
   });
 
+  // ---------------------------------------------------------------------------
+  // D5-02 · 无限画布：文档层 + 资源可用性 + 命令层。
+  // 画布页面运行在 sandbox iframe 里（无 openarc 桥 / 无 IPC / 无 fs / 无凭据），
+  // 它的全部请求都由宿主渲染层经 canvas:command 转发到这里。
+  // ---------------------------------------------------------------------------
+  canvasBundle = { service: identity.canvasDocService };
+  registerCanvasIpc({ ipcMain, service: identity.canvasDocService, identity: identity.service, isTrusted: trusted });
+
   // D4-04：Renderer 可发起真实 AI Task（Task Runtime + official dsh + Tool Facade），
   // sessionRef/appId 由主进程注入；进度经 task:event 推送。
   registerTaskIpc({
@@ -202,6 +242,8 @@ app.whenReady().then(async () => {
 
   // D3-04C：注册安全预览协议 handler（每次请求重新授权 + Range 流式返回）。
   protocol.handle("openarc-resource", (request) => identity.previewService.handleProtocolRequest(request));
+  // D5-02：画布 bundle（只读、白名单扩展名、无目录穿越）。
+  protocol.handle("openarc-canvas", (request) => handleCanvasProtocol(request));
 
   // ---------------------------------------------------------------------------
   // 原生视图控制器。它不拥有任何 Window domain 业务规则 ——
