@@ -129,7 +129,22 @@ const closeTo = (rgb, target, tol = 26) => {
   const p = String(rgb).split(",").map(Number);
   return p.length === 3 && Math.abs(p[0] - target[0]) <= tol && Math.abs(p[1] - target[1]) <= tol && Math.abs(p[2] - target[2]) <= tol;
 };
-const activate = (pid) => { try { sh("osascript", ["-e", "tell application \"System Events\" to set frontmost of (first process whose unix id is " + pid + ") to true"]); return true; } catch { return false; } };
+const activate = (pid) => {
+  // 先激活进程，再把窗口 AXRaise 到最前（只对本进程，绝不碰其它实例）。
+  try { sh("osascript", ["-e", "tell application \"System Events\" to set frontmost of (first process whose unix id is " + pid + ") to true"]); } catch { /* ignore */ }
+  try { sh("osascript", ["-e", "tell application \"System Events\" to tell (first process whose unix id is " + pid + ") to perform action \"AXRaise\" of window 1"]); } catch { /* ignore */ }
+  return true;
+};
+/** 反复尝试直到我们自己的窗口成为最前面的 layer-0 窗口（最多 ~9s）；拿不到就返回 false。 */
+async function ensureFrontmost(pid, winId, tries = 6) {
+  for (let i = 0; i < tries; i += 1) {
+    const f = frontmostLayer0();
+    if (f.length && f[0].id === winId) return { ok: true, front: f.slice(0, 3), tries: i + 1 };
+    activate(pid);
+    await sleep(1500);
+  }
+  return { ok: false, front: frontmostLayer0().slice(0, 3), tries };
+}
 
 let child = null, browser = null, page = null, site = null, provider = null, stderrBuf = "";
 const js = (code) => page.evaluate("(async () => { " + code + " })()");
@@ -245,9 +260,9 @@ async function main() {
   const wins = ourWindows(pid).filter((w) => w.layer === 0 && w.w > 400 && w.h > 300);
   if (!wins.length) throw new Error("找不到本实例的屏幕窗口（CGWindow）");
   const win = wins[0];
-  const front = frontmostLayer0();
-  const isFront = front.length > 0 && front[0].id === win.id;
-  record("safety", "V3 · 真实点击前先确认「最前面的窗口就是我们自己的实例」", isFront, "本实例窗口在最前", JSON.stringify({ ours: win.id, front: front.slice(0, 3) }));
+  const frontTry = await ensureFrontmost(pid, win.id);
+  const isFront = frontTry.ok;
+  record("safety", "V3 · 真实点击前先确认「最前面的窗口就是我们自己的实例」", isFront, "本实例窗口在最前", JSON.stringify({ ours: win.id, front: frontTry.front, tries: frontTry.tries }));
   if (!isFront) {
     notVerified("真实指针输入（标签栏/地址栏/网页交互/窗口缩放）", "我们的隔离实例未能成为最前面的窗口；为**绝不影响**用户正在运行的另一个 OpenArc 实例，本门禁不发真实点击，改为保持未验证。需要的条件：本实例窗口可被激活到最前（无其它窗口覆盖其区域）。");
   } else {
@@ -267,17 +282,31 @@ async function main() {
 
     // 直接**从像素**量出"网页那一块"在窗口里的真实范围（而不是相信 DOM 占位符），
     // 并与 DOM 占位符比较 —— 两者的差就是"原生视图与预留位置是否一致"的真值。
+    // **单一真源**：原生视图的意图矩形 = 浏览器窗口内容区 - BROWSER_CHROME_H(90)。
+    // domain 里 viewport.y = bounds.y + TITLE_BAR_H + BROWSER_CHROME_H，而 DOM 里 .browser-shell
+    // 正好从 bounds.y + TITLE_BAR_H 开始 → 标题栏项在两边抵消，于是
+    //   意图 top(屏幕) = 页面原点 + shell.top + 90，意图高度 = shell.height - 90。
+    const shellBox = JSON.parse(await js("const e=document.querySelector('[data-browser-window]'); if(!e) return 'null'; const b=e.getBoundingClientRect(); return JSON.stringify({left:b.left,top:b.top,w:b.width,h:b.height});"));
+    const banner = JSON.parse((await js("const e=document.querySelector('.browser-notices, .browser-error'); if(!e) return 'null'; const b=e.getBoundingClientRect(); const k=e.querySelector('[data-notice-kind]'); return JSON.stringify({cls:e.className, top:b.top, h:b.height, kind:k?k.getAttribute('data-notice-kind'):null, text:String(e.innerText||'').slice(0,80)});")) || "null");
+    const intentTopPt = shellBox ? Math.round(win.y + titlebar + shellBox.top + 90) : null;
+    const intentBottomPt = shellBox ? Math.round(intentTopPt + shellBox.h - 90) : null;
     const scanCol = Math.round((vpCenter.x - win.x) * scale);
     const ranges = greenRanges(frame0, [scanCol, 6]);
     const r1 = ranges[String(scanCol)] || { first: null, last: null };
     const shellCol = ranges["6"] || { first: null, last: null };
     const firstGreen = r1.first, lastGreen = r1.last;
     const viewRectFromPixels = firstGreen == null ? null : { topPt: Math.round(win.y + firstGreen / scale), bottomPt: Math.round(win.y + lastGreen / scale) };
-    const shellColGreen = shellCol.first != null;
+    // DOM 占位符（.web-viewport）只是外壳里的一块**占位**：当有提示条/错误条时它会被推下去，
+    // 因此它不参与"原生视图是否错位"的判定；它的偏差只作为"为什么占位符与意图不同"的解释。
     const placeholderTopPt = Math.round(geo.origin.y + geo.viewport.y - geo.viewport.h / 2);
     const placeholderBottomPt = Math.round(placeholderTopPt + geo.viewport.h);
-    const rectDelta = viewRectFromPixels ? { top: viewRectFromPixels.topPt - placeholderTopPt, bottom: viewRectFromPixels.bottomPt - placeholderBottomPt } : null;
-    record("pixel", "V4c · 像素量出的网页范围与 DOM 预留位置一致（原生视图没有压住 chrome、也没有错位）", !shellColGreen && !!rectDelta && Math.abs(rectDelta.top) <= 4 && Math.abs(rectDelta.bottom) <= 6, "|Δtop|≤4 且 |Δbottom|≤6", JSON.stringify({ fromPixels: viewRectFromPixels, placeholder: { topPt: placeholderTopPt, bottomPt: placeholderBottomPt }, delta: rectDelta, titlebar, chromePt: 90, shellColumnGreen: shellColGreen, shellColumn: shellCol }));
+    const deltaVsIntent = viewRectFromPixels ? { top: viewRectFromPixels.topPt - intentTopPt, bottom: viewRectFromPixels.bottomPt - intentBottomPt } : null;
+    const placeholderVsIntent = { top: placeholderTopPt - intentTopPt, bottom: placeholderBottomPt - intentBottomPt };
+    const bannerExplains = !!banner && Math.abs(banner.h - Math.max(0, placeholderVsIntent.top)) <= 3;
+    note("几何对照（屏幕 pt）：意图 " + JSON.stringify({ top: intentTopPt, bottom: intentBottomPt }) + "；像素真值 " + JSON.stringify(viewRectFromPixels) + "；DOM 占位 " + JSON.stringify({ top: placeholderTopPt, bottom: placeholderBottomPt }) + "；banner " + JSON.stringify(banner ? { cls: banner.cls, h: banner.h, kind: banner.kind } : null));
+    const shellColGreen = (shellCol.run || 0) > 20;
+    record("pixel", "V4c · 原生视图的**像素真值**与**意图矩形**一致（位置与高度都要对）", !shellColGreen && !!deltaVsIntent && (r1.run || 0) > 100 && Math.abs(deltaVsIntent.top) <= 4 && Math.abs(deltaVsIntent.bottom) <= 4, "|Δtop|≤4 且 |Δbottom|≤4", JSON.stringify({ intent: { top: intentTopPt, bottom: intentBottomPt }, fromPixels: viewRectFromPixels, delta: deltaVsIntent, shellColumnGreen: shellColGreen }));
+    record("pixel", "V4d · DOM 占位符与意图的偏差**有解释**（有提示条/错误条时被推下去，否则必须一致）", bannerExplains || Math.abs(placeholderVsIntent.top) <= 4, "占位符一致或由 banner 解释", JSON.stringify({ placeholderVsIntent, banner: banner ? { cls: banner.cls, h: banner.h, kind: banner.kind, text: banner.text } : null, bannerExplains }));
 
     /** 真实点击前的**安全闸**：① 窗口还在；② 我们仍是最前面的窗口；③ 落点在我们的内容区内。 */
     const safeClick = async (pt, label) => {
@@ -400,6 +429,79 @@ async function main() {
         note("窗口缩放（System Events）失败：" + String(e && e.message).slice(0, 120));
       }
       if (!resized) notVerified("窗口缩放后的布局/点击一致性", "本机 System Events 未能改变窗口尺寸（或尺寸未变化）；需要的条件：允许通过辅助功能接口调整该窗口大小。");
+
+      /* V11 网页四边与近边界：真实指针在四个角附近点击，页面必须收到对应坐标 */
+      const edgeProbes = [
+        { name: "左上", x: 3, y: 3 }, { name: "右上", x: Math.max(1, Math.round(vpRect.width) - 4), y: 3 },
+        { name: "左下", x: 3, y: Math.max(1, Math.round(vpRect.height) - 4) }, { name: "右下", x: Math.max(1, Math.round(vpRect.width) - 4), y: Math.max(1, Math.round(vpRect.height) - 4) },
+      ];
+      const edgeResults = [];
+      for (const e of edgeProbes) {
+        const r = await safeClick(toScreen({ x: vpRect.left + e.x + 0, y: vpRect.top + e.y + dy }), "edge-" + e.name);
+        await sleep(300);
+        const vv = viewByUrl("/paint");
+        const last = vv ? JSON.parse((await viewEval(vv, "return JSON.stringify(window.__lastClick || null)")) || "null") : null;
+        edgeResults.push({ name: e.name, click: r, last });
+      }
+      const edgeOk = edgeResults.every((e) => e.last && Math.abs(e.last.x - e.x) <= 6 && Math.abs(e.last.y - e.y) <= 6);
+      record("pointer", "V11 · 网页**四边近边界**的真实指针命中（页面收到的坐标与目标一致，误差 ≤6px）", edgeOk, "四边都命中", JSON.stringify(edgeResults));
+      capture(win.id, "09-edges.png");
+
+      /* V12 最大化 / 恢复：真实指针点窗口按钮 → 重新标定 → 再点网页（布局切换后位置仍一致） */
+      let maxiOk = false, restoreOk = false;
+      try {
+        const maxBtn = JSON.parse(await js("const e=document.querySelector('[aria-label=\"最大化当前窗口\"]'); if(!e) return 'null'; const b=e.getBoundingClientRect(); return JSON.stringify({x:b.left+b.width/2,y:b.top+b.height/2});"));
+        if (maxBtn) {
+          const r = await safeClick(toScreen(maxBtn), "maximize");
+          maxiOk = r.ok && await waitFor(async () => (await js("return !!document.querySelector('[aria-label=\"还原当前窗口\"]')")), 6000);
+          const wMax = ourWindows(pid).filter((x) => x.layer === 0 && x.w > 400)[0];
+          const fMax = await ensureFrontmost(pid, win.id);
+          const frameMax = capture(win.id, "10-maximized.png");
+          const sMax = imageSize(frameMax);
+          const geoMax = JSON.parse(await js("const c=(s)=>{const e=document.querySelector(s); if(!e) return null; const b=e.getBoundingClientRect(); return {x:b.left+b.width/2,y:b.top+b.height/2};}; return JSON.stringify({origin:{x:window.screenX,y:window.screenY},viewport:c('.web-viewport')});"));
+          const vpMax = JSON.parse(await js("const b=document.querySelector('.web-viewport').getBoundingClientRect(); return JSON.stringify({left:b.left,top:b.top,width:b.width,height:b.height});"));
+          // 最大化后重新标定（用页面中心），再点网页中心 → 必须命中
+          const probeMax = { x: Math.round(vpMax.left + vpMax.width / 2), y: Math.round(vpMax.top + vpMax.height / 2) };
+          const rM = await safeClick({ x: Math.round(geoMax.origin.x + probeMax.x), y: Math.round(geoMax.origin.y + probeMax.y + dy) }, "recalib-max");
+          await sleep(350);
+          const vvM = viewByUrl("/paint");
+          const lastM = vvM ? JSON.parse((await viewEval(vvM, "return JSON.stringify(window.__lastClick || null)")) || "null") : null;
+          void rM; void sMax;
+          record("pointer", "V12 · 最大化（真实指针点窗口按钮）后重新标定，网页中心仍能被真实指针命中", maxiOk && !!fMax.ok && !!lastM && Math.abs(lastM.x - Math.round(vpMax.width / 2)) <= 8, "最大化 + 命中", JSON.stringify({ maxiOk, front: fMax.ok, last: lastM, win: wMax ? { w: Math.round(wMax.w), h: Math.round(wMax.h) } : null, frame: path.basename(frameMax) }));
+          const restBtn = JSON.parse(await js("const e=document.querySelector('[aria-label=\"还原当前窗口\"]'); if(!e) return 'null'; const b=e.getBoundingClientRect(); return JSON.stringify({x:b.left+b.width/2,y:b.top+b.height/2});"));
+          if (restBtn) {
+            const r2 = await safeClick(toScreen(restBtn), "restore");
+            restoreOk = r2.ok && await waitFor(async () => !(await js("return !!document.querySelector('[aria-label=\"还原当前窗口\"]')")), 6000);
+            const wBack = ourWindows(pid).filter((x) => x.layer === 0 && x.w > 400)[0];
+            const frameBack = capture(win.id, "11-restored.png");
+            record("pixel", "V12b · 恢复后窗口尺寸回到最大化之前（截图尺寸同步变化）", restoreOk && !!wBack && Math.abs(imageSize(frameBack)[0] / wBack.w - scale) < 0.01, "尺寸恢复", JSON.stringify({ restoreOk, win: wBack ? { w: Math.round(wBack.w), h: Math.round(wBack.h) } : null }));
+          }
+        }
+      } catch (e) { note("最大化/恢复路径异常：" + String(e && e.message).slice(0, 120)); }
+      if (!maxiOk) notVerified("最大化 / 恢复后的布局与点击一致性", "本机未能在真实指针下点中窗口最大化按钮（或按钮不可用）；需要复核窗口装饰是否可点。");
+
+      /* V13 已支持的页面缩放：用真实按键试 Cmd +/-，如实记录产品是否支持 */
+      const zoomBefore = JSON.parse(await js("return 'null'") || "null");
+      void zoomBefore;
+      const pageZoom = async () => { const vv = viewByUrl("/paint"); return vv ? JSON.parse((await viewEval(vv, "return JSON.stringify({iw: window.innerWidth, ih: window.innerHeight, dpr: window.devicePixelRatio})")) || "{}") : null; };
+      const z0 = await pageZoom();
+      await safeClick(toScreen({ x: vpRect.left + Math.round(vpRect.width / 2), y: vpRect.top + Math.round(vpRect.height / 2) + dy }), "focus-page");
+      const keyZoom = (key) => { try { cliclick("kd:cmd"); cliclick("kp:" + key); cliclick("ku:cmd"); return true; } catch (e) { return false; } };
+      const zoomKeyOk = keyZoom("num-plus") && keyZoom("num-plus");
+      await sleep(700);
+      const z1 = await pageZoom();
+      if (zoomKeyOk) { keyZoom("num-minus"); keyZoom("num-minus"); }
+      await sleep(500);
+      const z2 = await pageZoom();
+      const zoomSupported = !!z0 && !!z1 && (z0.dpr !== z1.dpr || z0.iw !== z1.iw);
+      if (zoomSupported) {
+        const frameZoom = capture(win.id, "12-zoom.png");
+        const greenZoom = greenRanges(frameZoom, [Math.round((vpCenter.x - win.x) * scale)]);
+        const zr = greenZoom[String(Math.round((vpCenter.x - win.x) * scale))] || {};
+        record("pixel", "V13 · 页面缩放状态下的可见性与几何仍然成立（缩放后网页仍铺满视口）", (zr.run || 0) > 100, "缩放后仍可见", JSON.stringify({ z0, z1, z2, green: zr }));
+      } else {
+        notVerified("页面缩放（Cmd +/-）", "真实按键未改变页面缩放（z0=" + JSON.stringify(z0) + "，z1=" + JSON.stringify(z1) + "）：产品当前没有页面缩放入口，因此该状态记未验证而不是假装通过。");
+      }
 
       /* V10 连续帧（录屏等价物）：一段连续操作期间的多帧 */
       const burst = [];
