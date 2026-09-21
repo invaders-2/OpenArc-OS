@@ -16,7 +16,6 @@
  *   · 本地导入图片进**资源库**，画布文档只存 openarc-asset:<ResourceRef>。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Badge, Button, IconButton } from "../design-system/primitives";
 import type { Window as WinDomain } from "../../electron/window-domain.cjs";
 
 type Rpc = {
@@ -577,13 +576,13 @@ export function CanvasHost({ win }: { win: WinDomain }) {
             <option value="">选择画布…</option>
             {items.map((c) => <option key={c.canvasId} value={c.canvasId}>{c.title}</option>)}
           </select>
-          <Button variant="primary" size="sm" data-canvas-create onClick={() => void createCanvas()}>新建画布</Button>
-          <Button variant="secondary" size="sm" data-canvas-home onClick={() => { setFrameKey((k) => k + 1); setStatus("已回到首页"); }}>回到首页</Button>
+          <button type="button" className="primary" data-canvas-create onClick={() => void createCanvas()}>新建画布</button>
+          <button type="button" className="ghost" data-canvas-home onClick={() => { setFrameKey((k) => k + 1); setStatus("已回到首页"); }}>回到首页</button>
           {current && !current.canEdit ? (
-            <span data-canvas-readonly><Badge tone="warning">只读（无编辑权限）</Badge></span>
+            <span className="muted" data-canvas-readonly>只读（无编辑权限）</span>
           ) : null}
           {blockedNav > 0 ? (
-            <span data-canvas-nav-blocked><Badge tone="danger">已拦截导航出网 {blockedNav} 次</Badge></span>
+            <span className="muted" data-canvas-nav-blocked>已拦截导航出网 {blockedNav} 次</span>
           ) : null}
           <span className="toolbar-spacer" />
           <span className="muted" data-canvas-update-disabled title="OpenArc 不检查、不下载、不安装上游程序">更新/下载：已禁用</span>
@@ -596,7 +595,7 @@ export function CanvasHost({ win }: { win: WinDomain }) {
           <div className="browser-notice" data-canvas-notice data-notice-kind="warning">
             <span className="notice-title">提示</span>
             <span className="notice-text">{notice}</span>
-            <IconButton label="关闭提示" size="sm" onClick={() => setNotice("")}>×</IconButton>
+            <button type="button" className="ghost" aria-label="关闭提示" onClick={() => setNotice("")}>×</button>
           </div>
         </div>
       ) : null}
