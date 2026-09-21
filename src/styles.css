@@ -1325,6 +1325,14 @@ input[type="checkbox"] {
   flex-direction: column;
   background: rgb(var(--content-rgb) / var(--content-alpha));
 }
+/* D5-02 完整应用宿主（CanvasHost）：嵌入的只读应用帧占满窗口条以外的剩余高度。
+   既有类都是"容器"（.window-body / .folder-body / .web-viewport），没有可复用的"帧填充"。 */
+.canvas-host-frame {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+}
 .addressbar {
   padding: 8px 10px;
   display: flex;

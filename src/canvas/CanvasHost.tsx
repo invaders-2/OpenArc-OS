@@ -16,6 +16,7 @@
  *   · 本地导入图片进**资源库**，画布文档只存 openarc-asset:<ResourceRef>。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Badge, Button, IconButton } from "../design-system/primitives";
 import type { Window as WinDomain } from "../../electron/window-domain.cjs";
 
 type Rpc = {
@@ -562,33 +563,41 @@ export function CanvasHost({ win }: { win: WinDomain }) {
   }, [toShell]);
 
   return (
-    <div className="canvas-host" data-canvas-host={win.id} data-canvas-app="novai-full" style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-      <div className="canvas-host-bar" data-canvas-bar style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderBottom: "1px solid var(--line)", flexShrink: 0, flexWrap: "wrap" }}>
-        <strong data-canvas-title>{current ? current.title : "AI Studio（完整应用）"}</strong>
-        <span className="muted" data-canvas-revision>{current ? "revision " + current.revision : "未打开画布"}</span>
-        <select
-          aria-label="选择画布"
-          data-canvas-picker
-          value={current ? current.canvasId : ""}
-          onChange={(e) => { const id = e.target.value; if (id) void refreshListAndOpen(id); }}
-          style={{ maxWidth: 220 }}
-        >
-          <option value="">选择画布…</option>
-          {items.map((c) => <option key={c.canvasId} value={c.canvasId}>{c.title}</option>)}
-        </select>
-        <button type="button" data-canvas-create onClick={() => void createCanvas()}>新建画布</button>
-        <button type="button" data-canvas-home onClick={() => { setFrameKey((k) => k + 1); setStatus("已回到首页"); }}>回到首页</button>
-        <span className="muted" data-canvas-status>{status}</span>
-        {current && !current.canEdit ? <span data-canvas-readonly style={{ color: "var(--failed)" }}>只读（无编辑权限）</span> : null}
-        <span className="muted" data-canvas-update-disabled title="OpenArc 不检查、不下载、不安装上游程序">更新/下载：已禁用</span>
-        <span className="muted" data-canvas-models style={{ marginLeft: "auto" }}>
-          {modelInfo ? "模型：文本 " + modelInfo.chat + " / 图片 " + modelInfo.image : "模型：读取中…"}
-        </span>
-        {blockedNav > 0 ? <span data-canvas-nav-blocked style={{ color: "var(--failed)" }}>已拦截导航出网 {blockedNav} 次</span> : null}
-      </div>
+    <div className="browser-shell" data-canvas-host={win.id} data-canvas-app="novai-full">
+      <header className="gov-head" data-canvas-bar>
+        <h2 data-canvas-title>{current ? current.title : "AI Studio（完整应用）"}</h2>
+        <div className="gov-form">
+          <span className="muted" data-canvas-revision>{current ? "revision " + current.revision : "未打开画布"}</span>
+          <select
+            aria-label="选择画布"
+            data-canvas-picker
+            value={current ? current.canvasId : ""}
+            onChange={(e) => { const id = e.target.value; if (id) void refreshListAndOpen(id); }}
+          >
+            <option value="">选择画布…</option>
+            {items.map((c) => <option key={c.canvasId} value={c.canvasId}>{c.title}</option>)}
+          </select>
+          <Button variant="primary" size="sm" data-canvas-create onClick={() => void createCanvas()}>新建画布</Button>
+          <Button variant="secondary" size="sm" data-canvas-home onClick={() => { setFrameKey((k) => k + 1); setStatus("已回到首页"); }}>回到首页</Button>
+          {current && !current.canEdit ? (
+            <span data-canvas-readonly><Badge tone="warning">只读（无编辑权限）</Badge></span>
+          ) : null}
+          {blockedNav > 0 ? (
+            <span data-canvas-nav-blocked><Badge tone="danger">已拦截导航出网 {blockedNav} 次</Badge></span>
+          ) : null}
+          <span className="toolbar-spacer" />
+          <span className="muted" data-canvas-update-disabled title="OpenArc 不检查、不下载、不安装上游程序">更新/下载：已禁用</span>
+          <span className="muted" data-canvas-models>{modelInfo ? "模型：文本 " + modelInfo.chat + " / 图片 " + modelInfo.image : "模型：读取中…"}</span>
+        </div>
+      </header>
+      <div className="browser-status" role="status" data-canvas-status>{status}</div>
       {notice ? (
-        <div data-canvas-notice style={{ padding: "4px 10px", fontSize: 12, color: "var(--failed)", borderBottom: "1px solid var(--line)" }}>
-          {notice} <button type="button" className="ghost" onClick={() => setNotice("")}>关闭</button>
+        <div className="browser-notices" aria-label="应用提示">
+          <div className="browser-notice" data-canvas-notice data-notice-kind="warning">
+            <span className="notice-title">提示</span>
+            <span className="notice-text">{notice}</span>
+            <IconButton label="关闭提示" size="sm" onClick={() => setNotice("")}>×</IconButton>
+          </div>
         </div>
       ) : null}
       {frameSrc ? (
@@ -596,17 +605,15 @@ export function CanvasHost({ win }: { win: WinDomain }) {
           key={frameKey}
           ref={frameRef}
           title="NOVAI AI Studio（OpenArc 集成）"
+          className="canvas-host-frame"
           data-canvas-frame
           data-canvas-app-frame
           data-frame-ready={frameReady ? "1" : "0"}
           sandbox="allow-scripts allow-same-origin"
           src={frameSrc}
-          style={{ flex: 1, minHeight: 0, width: "100%", border: "0", background: "var(--bg)" }}
         />
       ) : (
-        <div data-canvas-frame-pending style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)" }}>
-          正在准备应用…
-        </div>
+        <div className="web-viewport" data-canvas-frame-pending>正在准备应用…</div>
       )}
     </div>
   );
