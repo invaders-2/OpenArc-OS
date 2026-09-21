@@ -31,7 +31,13 @@ import {
 } from "lucide-react";
 // Token 层必须先于组件层导入：tokens.css 只声明自定义属性与 base reset，
 // styles.css 全部是消费方。顺序颠倒会让组件拿到未定义的 var()。
+//
+// primitives.css 是**组件层**（只定义 .ds-* 规则，零 reset、零全局选择器），
+// 因此它夹在 token 层与产品层之间：设计系统组件（Button / Badge / IconButton / …）
+// 先拿到设计语言，产品样式仍保留最后发言权。在此之前它只在画廊页加载，
+// 产品里的 <Button> 等于是无样式块（GovernanceApp 的 12 个按钮就是这种状态）。
 import "./design-system/tokens.css";
+import "./design-system/primitives.css";
 import "./styles.css";
 import domain from "../electron/window-domain.cjs";
 import type { WindowCommand } from "../electron/window-domain.cjs";

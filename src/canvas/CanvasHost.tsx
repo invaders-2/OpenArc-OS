@@ -17,6 +17,10 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Window as WinDomain } from "../../electron/window-domain.cjs";
+// 窗口条是产品界面的一部分，控件走设计系统组件而不是自绘的 .primary/.ghost：
+// 那两个类只在个别容器里有样式，离开容器就是无样式的裸按钮。
+// Badge 不透传 data-*，所以 data-canvas-* 一律留在外层 span 上。
+import { Badge, Button, IconButton } from "../design-system/primitives";
 
 type Rpc = {
   ch: string; dir: string; kind: string; id?: number | string; token?: string; method?: string;
@@ -566,7 +570,9 @@ export function CanvasHost({ win }: { win: WinDomain }) {
       <header className="gov-head" data-canvas-bar>
         <h2 data-canvas-title>{current ? current.title : "AI Studio（完整应用）"}</h2>
         <div className="gov-form">
-          <span className="muted" data-canvas-revision>{current ? "revision " + current.revision : "未打开画布"}</span>
+          <span data-canvas-revision>
+            <Badge tone="neutral" size="sm">{current ? "revision " + current.revision : "未打开画布"}</Badge>
+          </span>
           <select
             aria-label="选择画布"
             data-canvas-picker
@@ -576,17 +582,25 @@ export function CanvasHost({ win }: { win: WinDomain }) {
             <option value="">选择画布…</option>
             {items.map((c) => <option key={c.canvasId} value={c.canvasId}>{c.title}</option>)}
           </select>
-          <button type="button" className="primary" data-canvas-create onClick={() => void createCanvas()}>新建画布</button>
-          <button type="button" className="ghost" data-canvas-home onClick={() => { setFrameKey((k) => k + 1); setStatus("已回到首页"); }}>回到首页</button>
+          <Button variant="primary" size="sm" data-canvas-create onClick={() => void createCanvas()}>新建画布</Button>
+          <Button variant="ghost" size="sm" data-canvas-home onClick={() => { setFrameKey((k) => k + 1); setStatus("已回到首页"); }}>回到首页</Button>
           {current && !current.canEdit ? (
-            <span className="muted" data-canvas-readonly>只读（无编辑权限）</span>
+            <span data-canvas-readonly>
+              <Badge tone="warning" size="sm">只读（无编辑权限）</Badge>
+            </span>
           ) : null}
           {blockedNav > 0 ? (
-            <span className="muted" data-canvas-nav-blocked>已拦截导航出网 {blockedNav} 次</span>
+            <span data-canvas-nav-blocked>
+              <Badge tone="warning" size="sm">已拦截导航出网 {blockedNav} 次</Badge>
+            </span>
           ) : null}
           <span className="toolbar-spacer" />
-          <span className="muted" data-canvas-update-disabled title="OpenArc 不检查、不下载、不安装上游程序">更新/下载：已禁用</span>
-          <span className="muted" data-canvas-models>{modelInfo ? "模型：文本 " + modelInfo.chat + " / 图片 " + modelInfo.image : "模型：读取中…"}</span>
+          <span data-canvas-update-disabled title="OpenArc 不检查、不下载、不安装上游程序">
+            <Badge tone="neutral" size="sm">更新/下载：已禁用</Badge>
+          </span>
+          <span data-canvas-models>
+            <Badge tone="neutral" size="sm">{modelInfo ? "模型：文本 " + modelInfo.chat + " / 图片 " + modelInfo.image : "模型：读取中…"}</Badge>
+          </span>
         </div>
       </header>
       <div className="browser-status" role="status" data-canvas-status>{status}</div>
@@ -595,7 +609,7 @@ export function CanvasHost({ win }: { win: WinDomain }) {
           <div className="browser-notice" data-canvas-notice data-notice-kind="warning">
             <span className="notice-title">提示</span>
             <span className="notice-text">{notice}</span>
-            <button type="button" className="ghost" aria-label="关闭提示" onClick={() => setNotice("")}>×</button>
+            <IconButton label="关闭提示" size="sm" onClick={() => setNotice("")}>×</IconButton>
           </div>
         </div>
       ) : null}
