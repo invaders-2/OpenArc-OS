@@ -347,7 +347,7 @@ const apps = [
   { id: "browser", name: "浏览器", icon: "safari" },
   { id: "files", name: "访达", icon: "finder" },
   { id: "resource-library", name: "资源库", icon: "finder" },
-  { id: "canvas", name: "无限画布", icon: "freeform" },
+  { id: "canvas", name: "AI Studio", icon: "freeform" },
   { id: "projects", name: "项目", icon: "folder" },
   { id: "organization", name: "组织治理", icon: "settings" },
   { id: "skills", name: "Skill 中心", icon: "shortcuts" },
