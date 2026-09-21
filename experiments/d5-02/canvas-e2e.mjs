@@ -107,11 +107,12 @@ async function startReceiver() {
 }
 
 async function openAppWindow() {
-  await clickDom('[aria-label="打开AI Studio"]');
+  // 预览集成分支按"不改用户已定 UI"保留入口名"无限画布"；核心线叫"AI Studio"。两种都接受。
+  await js("const el = document.querySelector('[aria-label=\"打开AI Studio\"]') || document.querySelector('[aria-label=\"打开无限画布\"]'); if (el) el.click(); return !!el;");
   return await waitFor(() => has("[data-canvas-host]"), 20000);
 }
 async function closeAppWindow() {
-  await clickDom('[aria-label="关闭AI Studio窗口"]').catch(() => {});
+  await js("const el = document.querySelector('[aria-label=\"关闭AI Studio窗口\"]') || document.querySelector('[aria-label=\"关闭无限画布窗口\"]'); if (el) el.click(); return !!el;").catch(() => {});
   await js("const el=document.querySelector('[data-canvas-host]'); const win=el&&el.closest('[data-window-id]'); const btn=win&&win.querySelector('.window-title button.close'); if(btn) btn.click(); return !!btn;");
   return await waitFor(() => allBundleFrames().length === 0, 15000);
 }
