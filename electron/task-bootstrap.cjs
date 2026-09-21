@@ -26,13 +26,14 @@ const { SideEffectStore } = require("./side-effect-store.cjs");
 const { SideEffectAuthority } = require("./side-effect-authority.cjs");
 const { SideEffectRuntime } = require("./side-effect-runtime.cjs");
 const { RuntimeSupervisor } = require("./runtime-supervisor.cjs");
-const { WRITE_TOOL_IDS } = require("./dsh-tool-profile.cjs");
+const { READ_TOOL_IDS, WRITE_TOOL_IDS } = require("./dsh-tool-profile.cjs");
 const { DEFAULT_MAX_CALLS, MAX_TOOL_ROUNDS } = require("./task-domain.cjs");
 
 /** D4-04 / D4-06：官方 dsh Tool Facade 的 run 级预算（与 orchestrator 实际使用同一份配置）。 */
-const TOOL_FACADE_CONFIG = Object.freeze({ enabled: true, toolIds: ["resource.search", "resource.read.metadata"], writeToolIds: WRITE_TOOL_IDS, maxCalls: 8, ttlMs: 300000 });
+// toolIds / writeToolIds 一律取 allowlist 常量（唯一真源；不在装配处再写一份字面量）。
+const TOOL_FACADE_CONFIG = Object.freeze({ enabled: true, toolIds: READ_TOOL_IDS, writeToolIds: WRITE_TOOL_IDS, maxCalls: 8, ttlMs: 300000 });
 
-function createTaskBundle({ identityStore, authorization, authStore, modelService = null, modelProxy = null, logger = null, clock = null, adapterFactory = null, resourceService = null, searchService = null, dbPath = null, storeRoot = null, runtimeDir = null, sideEffectApprovalWaitMs = null, executorLauncher = null, executorTestHook = null } = {}) {
+function createTaskBundle({ identityStore, authorization, authStore, modelService = null, modelProxy = null, logger = null, clock = null, adapterFactory = null, resourceService = null, searchService = null, browserControl = null, canvasService = null, dbPath = null, storeRoot = null, runtimeDir = null, sideEffectApprovalWaitMs = null, executorLauncher = null, executorTestHook = null } = {}) {
   if (!identityStore) throw new Error("createTaskBundle 需要 identityStore");
   if (!authorization || !authStore) throw new Error("createTaskBundle 需要 D3 Authorization");
   const taskStore = new TaskStore({ identity: identityStore, clock });
@@ -44,7 +45,8 @@ function createTaskBundle({ identityStore, authorization, authStore, modelServic
   const toolStore = new ToolStore({ identity: identityStore, clock });
   const toolRegistry = new ToolRegistry();
   // D4-03B/C2：静态 allowlist adapter（executionProvider → 既有 Domain）。
-  const adapters = createToolAdapters({ resourceService, searchService });
+  // D5-01 Closure-2：BrowserControl 与 Resource/Search 同一条装配路径 —— 不存在第二套执行通道。
+  const adapters = createToolAdapters({ resourceService, searchService, browserControl, canvasService });
   const toolProxy = new ControlledToolProxy({ registry: toolRegistry, toolStore, authService: authorization, taskStore, taskService, adapters, clock, logger });
   // D4-03C4：trusted runtime supervisor（唯一 observeExit / registerRuntime 调用方）。
   const supervisor = new RuntimeSupervisor({
@@ -97,11 +99,11 @@ function createTaskBundle({ identityStore, authorization, authStore, modelServic
       memoryContext,
     });
   }
-  return { taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, memoryContext, orchestrator };
+  return { taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, memoryContext, orchestrator, browserControl };
 }
 
 /** D4-04：Renderer 可用的 Task 命令白名单（trusted sender + main-process session 注入）。 */
-const TASK_COMMANDS = Object.freeze(["task/run", "task/get", "task/list", "task/cancel", "task/resume", "task/recovery", "task/acknowledgeUnknownEffect"]);
+const TASK_COMMANDS = Object.freeze(["task/run", "task/get", "task/list", "task/cancel", "task/resume", "task/appendStep", "task/recovery", "task/acknowledgeUnknownEffect"]);
 
 function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrusted, send = null, hostAppId = "ai" } = {}) {
   if (typeof ipcMain.removeHandler === "function") { try { ipcMain.removeHandler("task:command"); } catch { /* not registered */ } }
@@ -131,7 +133,15 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
         case "task/run": {
           const goal = typeof payload.goal === "string" ? payload.goal.slice(0, 2000) : "";
           if (!goal.trim()) return { ok: false, error: "INVALID_INPUT" };
-          const created = taskService.createTask({ context, goal });
+          // D4-03：产品任务的 model config 一律由**后端**按可信 context 解析后冻结（createTask 内再按当时
+          // version 落库）；renderer 自报的 modelConfigId / modelConfigVersion 一概忽略。解析不出来就明确
+          // 拒绝，绝不静默回退、绝不建未绑定任务（旧任务的懒绑定见 TaskService.startHarnessRun）。
+          const modelService = taskService.modelService;
+          const resolved = modelService && typeof modelService.resolveModel === "function"
+            ? modelService.resolveModel({ context, capability: "chat" })
+            : { ok: false, error: "MODEL_CONFIG_UNAVAILABLE" };
+          if (!resolved.ok) return { ok: false, error: resolved.error };
+          const created = taskService.createTask({ context, goal, modelConfigId: resolved.snapshot.modelConfigId });
           if (!created.ok) return created;
           const taskId = created.task.taskId;
           // 不等待整条 Harness 链：立即返回，进度经 send 推送；approval 由 sideeffect:event 推送。
@@ -150,16 +160,25 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
           // D4-06 Closure：可续接状态与预算账本一律后端判定（renderer 自报无效）。
           const eligibility = taskService.getResumeEligibility({ context, taskId });
           const ledger = taskService.getBudgetLedger({ context, taskId });
+          // D4 Main-Entry Closure-6：追加资格与拒绝原因同样只由后端判定（只回 safe projection）。
+          const appendEligibility = taskService.getAppendEligibility({ context, taskId });
           // D4-05 S2：结果未知的只读恢复投影（仅 BLOCKED + UNKNOWN_EFFECT 时 applicable）。
           const recovery = taskService.getRecoveryState({ context, taskId });
+          // D4 收口：被后端拒绝且尚未被同一操作真实成功解决的明确 WRITE 操作（safe 投影）。
+          const denied = typeof taskService.getDeniedRequiredWriteOperations === "function"
+            ? taskService.getDeniedRequiredWriteOperations({ context, taskId })
+            : { ok: false };
           return {
             ok: true, task: got.task, steps: steps.ok ? steps.items : [], artifacts: artifacts.ok ? artifacts.items : [],
             verifications: verifications.ok ? verifications.items : [],
+            deniedOperations: denied.ok && Array.isArray(denied.unresolved) ? denied.unresolved : [],
             resumable: !!(eligibility.ok && eligibility.resumable),
             stopReason: eligibility.ok ? (eligibility.stopReason || null) : null,
             resumeReason: eligibility.ok ? (eligibility.reason || null) : (eligibility.error || null),
             budgetLedger: ledger.ok ? ledger.ledger : null,
             recovery: recovery.ok ? recovery : null,
+            appendable: !!(appendEligibility.ok && appendEligibility.appendable),
+            appendReason: appendEligibility.ok ? (appendEligibility.reason || null) : (appendEligibility.error || null),
           };
         }
         case "task/list": {
@@ -181,6 +200,20 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
           const running = orchestrator.resumeBudgetExhausted({ context, taskId, expectedRevision, verify: { type: "SCHEMA_VALID" } });
           running.then((r) => emitResult(taskId, r)).catch(() => { try { send({ type: "task/result", taskId, ok: false, status: null, error: "INTERNAL_ERROR" }); } catch { /* ignore */ } });
           return { ok: true, taskId, status: got.task.status };
+        }
+        case "task/appendStep": {
+          const taskId = String(payload.taskId == null ? "" : payload.taskId);
+          const goal = typeof payload.goal === "string" ? payload.goal : "";
+          if (!goal.trim()) return { ok: false, error: "INVALID_INPUT" };
+          const got = taskService.getTask({ context, taskId });
+          if (!got.ok) return got;
+          // expectedRevision 只是乐观并发 token；追加资格 / 身份 / 预算一律由主进程判定。
+          const expectedRevision = payload.expectedRevision == null ? got.task.revision : Number(payload.expectedRevision);
+          // 拒绝同步返回（TASK_FORBIDDEN / TASK_NOT_FOUND / TASK_CANCELLED / TASK_REVISION_CONFLICT / APPEND_NOT_ALLOWED+reason）；只有运行异步。
+          const cmd = orchestrator.appendStepCommand({ context, taskId, goal, expectedRevision, verify: { type: "SCHEMA_VALID" } });
+          if (!cmd || cmd.ok !== true) return cmd;
+          cmd.running.then((r) => emitResult(taskId, r)).catch(() => { try { send({ type: "task/result", taskId, ok: false, status: null, error: "INTERNAL_ERROR" }); } catch { /* ignore */ } });
+          return { ok: true, taskId, status: cmd.task.status };
         }
         case "task/recovery": {
           const taskId = String(payload.taskId == null ? "" : payload.taskId);

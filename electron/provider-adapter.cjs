@@ -106,4 +106,41 @@ async function chatStream({ baseUrl, apiKey, model, messages, tools, params = {}
   return { text, toolCalls: toolCalls.filter(Boolean), usage };
 }
 
-module.exports = { chat, chatStream, parseSseChunk, mapUsage, ADAPTER_TYPE: "openai-compatible" };
+/**
+ * D5-02 · image-generation：**同一条 provider 协议**（openai-compatible /images/generations）。
+ * 不新增供应商、不新增付费服务：只有用户已配置且该模型声明了 image-generation 能力时才会走到这里；
+ * 能力不支持时 ModelService.resolveModel 直接返回 CAPABILITY_UNAVAILABLE（绝不回落成文本接口）。
+ */
+async function generateImage({ baseUrl, apiKey, model, prompt, size = null, count = 1, params = {}, signal, timeoutMs = 60000, fetchImpl = fetch }) {
+  const url = String(baseUrl).replace(/\/$/, "") + "/images/generations";
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error("timeout")), timeoutMs);
+  const onAbort = () => controller.abort(signal && signal.reason);
+  if (signal) signal.addEventListener("abort", onAbort, { once: true });
+  try {
+    const res = await fetchImpl(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer " + apiKey },
+      body: JSON.stringify({ model, prompt: String(prompt || "").slice(0, 4000), n: Math.max(1, Math.min(4, Number(count) || 1)), ...(size ? { size: String(size).slice(0, 32) } : {}), ...params }),
+      signal: controller.signal,
+      redirect: "error",
+    });
+    return { res, timedOut: () => controller.signal.aborted && controller.signal.reason && String(controller.signal.reason.message || controller.signal.reason).includes("timeout") };
+  } finally {
+    clearTimeout(timer);
+    if (signal) signal.removeEventListener("abort", onAbort);
+  }
+}
+
+/** 把 provider 的图片响应归一为 [{b64|url}]（两种形态都支持，绝不伪造）。*/
+function mapImages(body) {
+  const data = (body && Array.isArray(body.data)) ? body.data : (Array.isArray(body) ? body : []);
+  return data.slice(0, 4).map((item) => {
+    if (!item || typeof item !== "object") return null;
+    if (typeof item.b64_json === "string" && item.b64_json) return { b64: item.b64_json, mime: "image/png" };
+    if (typeof item.url === "string" && item.url) return { url: item.url };
+    return null;
+  }).filter(Boolean);
+}
+
+module.exports = { chat, chatStream, generateImage, mapImages, parseSseChunk, mapUsage, ADAPTER_TYPE: "openai-compatible" };

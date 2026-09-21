@@ -153,7 +153,7 @@ v14（D4-03C3）新增 **non-authoritative** `side_effect_calls.recovery_safe`�
 
 ## Audit / Task Events
 
-Audit：`side_effect.planned / approval_requested / approved / denied / approval_revoked / lease_acquired / lease_released / lease_revoked / blocked / unknown_effect / execution_started / verification_passed / verification_failed / succeeded / verification_started / verification_applied / verification_not_applied / verification_indeterminate / recovery_resolved`。TaskEvent：`tool.side_effect.planned / tool.approval_required / tool.approved / tool.denied / tool.lease_acquired / tool.execution_eligible / tool.execution_blocked / tool.side_effect.unknown_effect / tool.side_effect.execution_started / tool.side_effect.verification_passed / tool.side_effect.succeeded / tool.side_effect.verification_started / tool.side_effect.verification_applied / tool.side_effect.verification_not_applied / tool.side_effect.verification_indeterminate / tool.side_effect.recovery_resolved`。只存安全投影，无 raw arguments / content / secret / credential / capability / 绝对路径。Audit **不是** execution authority；SideEffectCall 仍是唯一 authoritative execution state（不建第二套真值）。
+Audit：`side_effect.planned / approval_requested / approved / denied / approval_revoked / lease_acquired / lease_released / lease_revoked / blocked / unknown_effect / execution_started / verification_passed / verification_failed / succeeded / late_result_suppressed / deny_too_late / revoke_too_late / verification_started / verification_applied / verification_not_applied / verification_indeterminate / recovery_resolved`。TaskEvent：`tool.side_effect.planned / tool.approval_required / tool.approved / tool.denied / tool.lease_acquired / tool.execution_eligible / tool.execution_blocked / tool.side_effect.unknown_effect / tool.side_effect.execution_started / tool.side_effect.verification_passed / tool.side_effect.succeeded / tool.side_effect.late_result_suppressed（迟到收敛被抑制：另一存活 runtime 已收敛权威状态时绝不覆盖，仅落该 safe 事件）/ tool.side_effect.deny_too_late（迟到 DENY：call 已进入不可撤回执行阶段或已终态，DENY 不改任何状态、不中止执行，仅落该 safe 事件）/ tool.side_effect.revoke_too_late（迟到撤销：同上，撤销不改任何状态、仅落该 safe 事件）/ tool.side_effect.verification_started / tool.side_effect.verification_applied / tool.side_effect.verification_not_applied / tool.side_effect.verification_indeterminate / tool.side_effect.recovery_resolved`。只存安全投影，无 raw arguments / content / secret / credential / capability / 绝对路径。Audit **不是** execution authority；SideEffectCall 仍是唯一 authoritative execution state（不建第二套真值）。
 
 ## 冻结
 
@@ -505,6 +505,49 @@ approval / lease 继续由 OpenArc generator 生成（`newId("scall")`），
 
 不新增 DB table；`callsById` 仍是 run/facade 内存级 delivery dedupe。
 cross-restart Tool-call replay 继续受既有 Task recovery contract 控制；`SCHEMA_VERSION` 保持 14。
+
+## D4-03 Closure · 批准有效期 / 撤销 / 迟到反馈（永久规则）
+
+### 批准有效期（产品规则已批准）
+- Approval 的有效性 = **内容绑定（planHash / argsHash / toolId / version / effectClass）+ 期限（TTL）+ 显式撤销（revoked_at）**；**不**随批准人退出登录 / 会话过期而自动失效。
+- 执行前**按当前状态重判批准人资格**：批准人账号存在且 `status=ACTIVE`，并且**当前**仍满足批准时的那条范围（`user.id === task.user_id` 为 owner 路径，或 `role=ADMIN` 为管理员路径）。**不得**要求批准人拥有执行主体的全部权限；**不得**以批准人 session 有效性作为判据。
+- 可信批准人身份只来自**持久化批准行的 `actor_user_id`**（approve 时由已认证 session 注入）；renderer 自报身份/资格一律无效。历史批准缺该字段 → **保守拒绝**（`SIDE_EFFECT_APPROVER_UNVERIFIED`），绝不伪造历史身份。
+- 新错误码：`SIDE_EFFECT_APPROVER_INELIGIBLE`、`SIDE_EFFECT_APPROVER_UNVERIFIED`。
+
+### 执行分界（永久）
+- 分界 = **claim 事务内 `LEASED → RUNNING` 的原子转换**；批准人资格在 `evaluateExecutionEligibility` 与 claim 的同一 `BEGIN IMMEDIATE` 事务内（`#verifyAuthoritySnapshot`）**用同一实现重判** —— "判定资格后、claim 前失权"因此无法漏过。
+- 分界之前失权：拒绝执行并按"拒绝的等价物"收敛 —— call `BLOCKED` + `error_code=<码>` + 同一事务终结其 ACTIVE lease（A-4）、`side_effect.blocked` audit + `tool.side_effect.execution_blocked` event、Step/Task `BLOCKED`；**0 mutation**。
+- 分界之后失权（RUNNING / UNKNOWN_EFFECT / SUCCEEDED 等）：**不追溯、不改写执行事实、不新增中止/回滚能力**，最终状态只由真实执行结果决定。
+- 执行主体（task owner）失权仍走既有 `SIDE_EFFECT_AUTHORIZATION_REVOKED` 路径，与本规则独立。
+
+### 撤销已批准的调用（产品入口 `sideEffect/revokeApproval`）
+- 入口只接受 `approvalRequestId`；`context / appId / 调用归属` 一律由主进程从已认证 session 与真实 task 反推，renderer 不提供 callId / taskId / userId。
+- 授权：仅**该调用所属任务的 owner 或 ADMIN**（后端核验，复用既有管理权限）；否则 `SIDE_EFFECT_APPROVAL_FORBIDDEN`，零状态变化。
+- 生效范围：**已批准、尚未 claim 执行**（`APPROVED` 或 `LEASED`，含已有 ACTIVE lease 的情况）。`AWAITING_APPROVAL`（尚未批准）→ `SIDE_EFFECT_APPROVAL_REQUIRED`。
+- **原子收敛**（单个 `transactSync`，事务内重读 persisted status）：批准 → `REVOKED`(+ `revoked_at`)、call → `BLOCKED` + `error_code = SIDE_EFFECT_APPROVAL_REVOKED` + `completed_at`、其 ACTIVE lease → `REVOKED`、Step/Task → `BLOCKED`；audit `side_effect.approval_revoked` 与 event `tool.denied(reason=APPROVAL_REVOKED)` 保持既有形状。
+- **与 claim 竞争只有一个赢家**：撤销先提交 → claim 事务读到 `BLOCKED` → `SIDE_EFFECT_CALL_STATE`、0 Domain 调用；claim 先提交 → 撤销读到 `RUNNING` → 迟到。
+- 迟到（`RUNNING` / 任何终态，或已被 DENY 的 `BLOCKED`）→ `SIDE_EFFECT_APPROVAL_TOO_LATE` + `callStatus`，**状态零变化**、不中止执行、不覆盖执行事实；只落 safe audit `side_effect.revoke_too_late` + safe event `tool.side_effect.revoke_too_late`（payload 仅 callId / toolId / observedStatus）。
+- 重复撤销（`BLOCKED` + 最新批准已 `REVOKED`）→ `{ ok:true, duplicate:true }`，**零写入**、不产生重复副作用。
+- 撤销后旧批准**不可再使用**（effectiveApproval / acquireLease / eligibility / claim 全部拒绝）；**本轮不新增**重新批准、重试或恢复入口。
+
+### 迟到反馈（UI，永久）
+- `DENY` 或撤销返回 `SIDE_EFFECT_APPROVAL_TOO_LATE` 时，必须在既有提示区域**逐字**显示："操作已进入执行或已有结果，本次拒绝／撤销未生效。"，随后重新读取后端权威状态刷新界面。
+- **禁止**静默关闭面板、**禁止**显示"已取消 / 未执行"等与权威状态不符的措辞、**禁止**把机器错误码显示为可见文本（机器码只允许进 data 属性供测试断言）。
+- Approval 面板在迟到后**保留**，由用户确认后再按后端权威状态关闭；撤销入口只在后端 `sideEffect/listPending.revocable` 列出的调用上渲染（renderer 不自行判断权限），列表按当前 session 与归属过滤。
+
+### 数据与兼容
+- 新事件类型 `tool.side_effect.revoke_too_late` 已登记进 `TASK_EVENT` 冻结清单（audit action 无白名单，字符串直接落库）。
+- 本规则不改变既有 TTL / 内容绑定 / 执行主体实时权限检查，不改变 AUTO_RETRY=0、quiescence、S1/S1-b 迟到写回守卫与既有终态写回语义。
+- `sideEffect/listPending` 的响应为 **additive** 扩展（新增 `revocable`），`items` 语义与既有消费方逐字不变。
+
+## D4-03 CG-01 · 租约申请的事务状态保护（永久规则）
+
+- `acquireLease` 的资格判定与租约发放都在**同一个 `BEGIN IMMEDIATE` 事务内**完成：事务内**重读 persisted status**，只有 `APPROVED` / `LEASED`（尚未 claim）才可能发放租约。**有效 approval ≠ 调用仍可执行**。
+- `RUNNING` 与任何终态（`SUCCEEDED` / `FAILED` / `BLOCKED` / `CANCELLED` / `UNKNOWN_EFFECT`）**绝不被迟到申请改写成 `LEASED`**：拒绝并返回既有错误码（`AWAITING_APPROVAL` → `SIDE_EFFECT_APPROVAL_REQUIRED`，其余 → `SIDE_EFFECT_CALL_STATE`），**零写入**（不改 call 任何字段、不建 lease、不落 `side_effect.lease_acquired` audit / `tool.lease_acquired` event）。
+- 批准绑定（planHash / argumentsHash / toolId / toolVersion / expiresAt / revokedAt）逐项比对必须使用**事务内新快照**，不得沿用事务外的 call 读。
+- **拒绝路径零写入**：过期 lease 的 `EXPIRED` 终结只在"确认可发放新租约"之后、与新租约同一事务执行；被拒绝的申请绝不提前终结或改写已有租约。
+- 既有语义保留：`APPROVED` → 正常申请（call `LEASED` + 1 ACTIVE）；同 holder 同 runtime 的合法重复 → `{ ok:true, duplicate:true }`；同 holder 不同 runtime 的竞争 → `SIDE_EFFECT_LEASE_CONFLICT`，既有 lease 逐字不变；过期 lease → 新租约取代（旧 `EXPIRED`、新 `ACTIVE`，恰好 1 ACTIVE）。
+- 本规则只收敛 `acquireLease` 的判定与写入顺序，不改变 claim（`LEASED → RUNNING`）、eligibility、TTL、runtime identity、deny/revoke 迟到语义与 AUTO_RETRY=0。
 
 ## 下一步
 

@@ -1,0 +1,288 @@
+{
+  "phase": "D5-01",
+  "round": "Closure-4 · 提示遮挡判定 + 最小修复 + 仪器收口",
+  "baseHead": "ebc9d2153bc9e8e9470f18a9303cc65aa61c020d",
+  "testedCommit": "f9564b7",
+  "testedCommitFull": "f9564b7e5d75a831f694478f9b6c88536292fb4d",
+  "branch": "feature/d4-03-tool-proxy",
+  "pushOrMerge": "未 push、未合并 main、未进入 D5-02",
+  "verifyTree": "git archive f9564b7 → /tmp/oa-d501-clean（干净导出树 + 软链 node_modules）；对照树 git archive ebc9d21 → /tmp/oa-d501-prefix",
+  "treeIdentityCheck": {
+    "method": "git show <commit>:<path> | shasum -a 256 vs 导出树文件 sha256",
+    "files": [
+      "src/browser/BrowserApp.tsx",
+      "electron/window-manager.cjs",
+      "experiments/d5-01/visibility-e2e.mjs"
+    ],
+    "result": "MATCH"
+  },
+  "deliverableAnswers": {
+    "permissionNoticeVisible": "可见（修复后）。修复前整条被原生视图（网页）盖住",
+    "permissionNoticeOperable": "可操作。真实指针点「关闭提示」→ 外壳收到 isTrusted 点击、仅该条消失、其余提示不受影响",
+    "clickLeaksToPage": "不会。同一次点击期间网页自己记录的指针事件数不变（3 → 3）；修复前 3 → 12",
+    "maximizeRestoreAndPageBounds": "正确。真实按钮矩形 + 前台/活跃 App 核对 + 真实指针；窗口 830×550 → 1156×550 → 830×550，网页 830×301 → 1156×301 → 830×301，像素真值同步",
+    "gates": "G1 25/25 exit 0；G2 64/64 exit 0；G3 46/46 exit 0；G4 55/55 exit 0；G5 26/26 exit 0；G6 16/16 exit 0",
+    "originalRequirements": "D5-01 原始必需项 1–11 全部满足（限定范围：macOS 单屏 / 本地受控站点 / 正常退出）"
+  },
+  "productDefect": {
+    "id": "NOTICE-OCCLUSION-1",
+    "summary": "原生视图（WebContentsView，挂在窗口之上）的位置来自 domain 意图 bounds.y + TITLE_BAR_H + BROWSER_CHROME_H（外壳顶 + 90pt chrome）；而 browser-notices / browser-error 是 chrome 之下的 flex 条带 → 原生视图把提示条整条盖住，点击也进不了外壳、直接漏给网页。",
+    "notMeasurementError": "domain 意图与像素真值一致（原生视图按意图摆放）；缺陷在于意图本身没有把 DOM 提示条算进去。上一轮'提示不需要让位'的说法据此更正。",
+    "beforeAfterSameInstrument": {
+      "instrument": "experiments/d5-01/notice-operability-e2e.mjs（同一份仪器跑在两棵树上）",
+      "prefixTree": {
+        "commit": "ebc9d21",
+        "counts": {
+          "pass": 8,
+          "fail": 8,
+          "total": 16
+        },
+        "exitCode": 1,
+        "pixelsViewTop": 371,
+        "domReservedTop": 523,
+        "noticeOverlapPt": 33.5,
+        "closeButtonCenterPixel": "56,123,83",
+        "greenSamplesInNoticeRect": "15/25",
+        "shellReceivedClick": false,
+        "pageEventCountAcrossClick": "3 → 12",
+        "popupButtonPixel": "56,123,83",
+        "popupOpenedTab": false,
+        "popupPageEventCount": "15 → 24"
+      },
+      "fixedTree": {
+        "commit": "f9564b7",
+        "counts": {
+          "pass": 16,
+          "fail": 0,
+          "total": 16
+        },
+        "exitCode": 0,
+        "pixelsViewTop": 523,
+        "domReservedTop": 523,
+        "noticeOverlapPt": 0,
+        "closeButtonCenterPixel": "91,91,93",
+        "greenSamplesInNoticeRect": "0/25",
+        "shellReceivedClick": "trusted:true, button:\"关闭提示\", x:519, y:381",
+        "pageEventCountAcrossClick": "3 → 3",
+        "popupButtonPixel": "245,245,245",
+        "popupOpenedTab": true,
+        "popupPageEventCount": "6 → 6"
+      }
+    },
+    "minimalFix": [
+      "src/browser/BrowserApp.tsx：useLayoutEffect 量 DOM 条带高度（.web-viewport 顶 − .browser-shell 顶 − BROWSER_CHROME_H），经 onViewportReserve 上送（值不变不重渲染）",
+      "src/desktop/useDesktop.ts：viewportReserves（windowId → pt）传进 nativeIntents",
+      "src/main.tsx：接线",
+      "electron/window-manager.cjs：nativeIntents(state, host, reserves = {}) 把条带从原生视口减掉（默认 {} → 既有几何不变；非浏览器/未上报窗口 0）",
+      "electron/window-manager.d.cts / window-domain.d.cts：类型声明（含 BROWSER_CHROME_H 默认导出）",
+      "tests/window-manager.test.mjs：让位公式 + 脏值 + 非浏览器窗口不受影响"
+    ],
+    "notDone": [
+      "未新增页面缩放入口",
+      "未改浏览器执行契约（lease / claim / verify 未动）",
+      "未新增 IPC 通道或桥接键",
+      "未放宽任何安全面冻结断言"
+    ]
+  },
+  "instrumentFixes": {
+    "V4c": "断言改读实际采集字段（scanGreen 的 first/last + 行/列扫描），旧断言读 r1.run 恒为 undefined",
+    "V4d": "解释性差值移入诊断；断言改为'条带高度 > 0 且条带内像素不是网页绿'",
+    "V11": "四边/角坐标改用实测原生视图矩形统一换算（移除 .web-viewport + 经验 dy 路径）；增补落点像素独立证明；角部取样内缩 24pt 避开 16pt 圆角",
+    "V12": "先定位真实按钮矩形 + elementFromPoint 旁证 + 前台/活跃 App 核对；以窗口状态、网页布局、像素真值判定；最大化后仍需真实指针命中",
+    "V13": "更正'按键未改变页面'为实测会进入缩放态；保持 NOT VERIFIED（不适用，原始必需项不含）",
+    "unifiedConversion": "新增 experiments/d5-01/screen-geometry.mjs（页面点/DOM 点 → 屏幕点 → 图像像素 + 安全闸 + 热身）",
+    "independenceClaim": "坐标计算用三条实测几何（像素 / DOM 预留 / 指针反推）；验收证据来自外壳 isTrusted 点击、网页自记事件与 client 坐标、像素颜色、窗口与网页真实状态 —— 无断言只证明计算与自身一致"
+  },
+  "gates": [
+    {
+      "id": "G1",
+      "name": "完整可见性门禁",
+      "command": "npm run test:d5-01-visibility",
+      "counts": {
+        "pass": 25,
+        "fail": 0,
+        "total": 25
+      },
+      "notVerified": 1,
+      "exitCode": 0,
+      "artifact": "artifacts/d5-01/d5-01-visibility-e2e.json"
+    },
+    {
+      "id": "G2",
+      "name": "D5-01 基础门禁",
+      "command": "npm run test:d5-01",
+      "counts": {
+        "pass": 64,
+        "fail": 0,
+        "total": 64
+      },
+      "notVerified": 1,
+      "exitCode": 0,
+      "artifact": "artifacts/d5-01/d5-01-browser-e2e.json"
+    },
+    {
+      "id": "G3",
+      "name": "受控浏览器产品链门禁",
+      "command": "npm run test:d5-01-control",
+      "counts": {
+        "pass": 46,
+        "fail": 0,
+        "total": 46
+      },
+      "notVerified": 2,
+      "exitCode": 0,
+      "artifact": "artifacts/d5-01/d5-01-browser-control-e2e.json"
+    },
+    {
+      "id": "G4",
+      "name": "窗口相关回归",
+      "command": "node --test tests/window-domain.test.mjs tests/window-manager.test.mjs tests/occlusion.test.mjs tests/d5-01-browser-tabs.test.mjs",
+      "counts": {
+        "pass": 55,
+        "fail": 0,
+        "total": 55
+      },
+      "exitCode": 0
+    },
+    {
+      "id": "G5",
+      "name": "原生视图主进程验收",
+      "command": "npm run test:native",
+      "counts": {
+        "pass": 26,
+        "fail": 0,
+        "total": 26
+      },
+      "exitCode": 0
+    },
+    {
+      "id": "G6",
+      "name": "提示可见/可操作/点击归属",
+      "command": "node experiments/d5-01/notice-operability-e2e.mjs",
+      "counts": {
+        "pass": 16,
+        "fail": 0,
+        "total": 16
+      },
+      "exitCode": 0,
+      "artifact": "artifacts/d5-01/d5-01-notice-operability-e2e.json"
+    },
+    {
+      "id": "C",
+      "name": "对照组：同一门禁跑在基线",
+      "command": "git archive ebc9d21 → node experiments/d5-01/notice-operability-e2e.mjs",
+      "counts": {
+        "pass": 8,
+        "fail": 8,
+        "total": 16
+      },
+      "exitCode": 1,
+      "artifact": "artifacts/d5-01/d5-01-notice-operability-e2e.prefix-ebc9d21.json"
+    }
+  ],
+  "keyMeasurements": {
+    "V4c": {
+      "pixels": {
+        "left": 308,
+        "top": 502,
+        "right": 1137.5,
+        "bottom": 822.5
+      },
+      "domReserved": {
+        "left": 308,
+        "top": 501.5,
+        "right": 1138,
+        "bottom": 823
+      },
+      "pointerOrigin": {
+        "left": 308,
+        "top": 502
+      },
+      "deltaPixelsVsDom": {
+        "top": 1,
+        "left": 0,
+        "bottom": 0,
+        "right": 0
+      },
+      "pageInner": "830×321"
+    },
+    "V4d": {
+      "stripH": 115,
+      "samples": 9,
+      "greenSamples": 0,
+      "sampleRgb": "245,245,245"
+    },
+    "V11": {
+      "viewRect": {
+        "left": 308,
+        "top": 410,
+        "w": 830,
+        "h": 301
+      },
+      "probes": "4 边中点（3pt 内）+ 4 角内缩 24pt，8/8 命中且落点像素网页绿"
+    },
+    "V12": {
+      "buttonRect": {
+        "left": 220,
+        "top": 59,
+        "w": 14,
+        "h": 14
+      },
+      "elementAtPoint": "最大化browser",
+      "pointPixel": "99,198,94",
+      "shellGot": true,
+      "windowRect": "830×550 → 1156×550",
+      "pageSize": "830×301 → 1156×301"
+    },
+    "V12b": {
+      "windowRectRestored": "830×550",
+      "pageSizeRestored": "830×301"
+    },
+    "notice": {
+      "screenRect": {
+        "left": 296,
+        "top": 484,
+        "w": 810,
+        "h": 34
+      },
+      "overlapPt": 0,
+      "closeButtonPixel": "91,91,93",
+      "shellClick": "trusted:true button:关闭提示"
+    }
+  },
+  "originalRequirements": {
+    "realBrowserView": "✅ 基础门禁 N2/N2b + 可见性门禁像素证据",
+    "realNavigation": "✅ 基础门禁 N2/N9/A5 系列",
+    "tabs": "✅ 基础门禁 T1–T6 + 单测 + V5/V5b（真实指针）",
+    "loadingState": "✅ 基础门禁 S1",
+    "downloads": "✅ 基础门禁 D1–D5（字节比对）+ V8/V8b",
+    "sessionRestore": "✅ 基础门禁 R0–R5（正常退出）",
+    "webDesktopIsolationA13": "✅ 基础门禁 A13-1…A13-3",
+    "popupExternalCertUploadPermission": "✅ 基础门禁 P1–P10 + 本轮 N7b–N7d",
+    "perUserSessionIsolation": "✅ 基础门禁 A04-1…A04-10",
+    "nativeViewWindowCoordinationA12": "✅ 可见性门禁 V4b/V4c/V4d/V8/V9/V9b/V11/V12/V12b（屏幕像素 + 真实指针）",
+    "aiControlledBrowser": "✅ 受控浏览器产品链门禁 46/46（本轮无回归）",
+    "complexLoginMediaArbitrarySites": "⚠️ 范围外未验证（只覆盖本地受控站点）"
+  },
+  "notVerified": [
+    "崩溃 / 强杀后的最近一次导航持久化（Chromium localStorage 异步提交；正常退出不受影响）",
+    "高 DPI / 多屏 / Windows（本机单屏，无 Windows 主机）",
+    "任意网站兼容（只覆盖本地受控站点）",
+    "页面缩放：不适用（D5-01 原始必需项不含；PLAN 的缩放指窗口缩放，V9 已覆盖）；实测补充：真实按键会让页面进入缩放态（dpr 2 → 2.4），缩放态下像素真值与 DOM 预留矩形仍一致"
+  ],
+  "designLimits": [
+    "原生视图有 16pt 圆角（native-view-controller.cjs VIEW_RADIUS），圆角切掉的角区不接收网页点击；四边近边界取样已避开，圆角区域内的点击归属不在承诺内",
+    "真实指针门禁需要本实例窗口在最前且本进程为活跃 App；不满足时按设计不发点击（如实记未验证），绝不触碰用户正在用的另一个实例"
+  ],
+  "corrections": [
+    "VIS-GEOMETRY-1 仍是测量误差，但'提示不需要让位'更正为产品缺陷（意图没把 DOM 提示条算进去）",
+    "删除 notice-coverage-probe.mjs：白底页'非绿 = 提示可见'的判据无效",
+    "'真实按键未改变页面缩放'更正为实测会进入缩放态（仍不属必需项）"
+  ],
+  "hygiene": {
+    "push": "未 push",
+    "mergeMain": "未合并 main",
+    "nextStage": "未进入 D5-02",
+    "otherWorktrees": "未触碰（含另一个正在运行的 OpenArc 实例）"
+  }
+}

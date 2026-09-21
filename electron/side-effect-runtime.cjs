@@ -23,12 +23,26 @@
 const domain = require("./side-effect-domain.cjs");
 const { RuntimeSupervisor } = require("./runtime-supervisor.cjs");
 const {
-  CALL_STATUS, CALL_TERMINAL, APPROVAL_DECISION, SIDE_EFFECT_ERROR, DEFAULT_APPROVAL_TTL_MS, fingerprint,
+  CALL_STATUS, CALL_TERMINAL, APPROVAL_DECISION, SIDE_EFFECT_ERROR, DEFAULT_APPROVAL_TTL_MS, DEFAULT_LEASE_TTL_MS, fingerprint,
 } = domain;
 
 const DEFAULT_APPROVAL_WAIT_MS = 5 * 60 * 1000;
 const POLL_MS = 25;
 const EXECUTOR_TIMEOUT_MS = 15000;
+
+/**
+ * 进程局部 Domain 的 execution provider 白名单（静态，不从参数解析）。
+ *
+ * 只有 Domain 本身**只存在于 main 进程内**的 provider 才能列在这里：受控浏览器的原生视图
+ * （WebContentsView）就是这种。列在这里 ≠ 跳过 lease/claim/verify —— 那些仍然全部执行。
+ *
+ * D5-02 Full-App 追加 `CanvasControl`：画布命令层的权威实例（CanvasService + 同一个 SQLite 连接）
+ * 就活在 main 进程里，渲染层手工路径与 AI 路径**必须共用同一个实例**（同一份版本检查 / 同一份权限规则）。
+ * 在受监督 executor 子进程里再造一份 CanvasService 会变成第二个写者与第二份 revision 权威 ——
+ * 那正是 D5-02 §"不建第二套画布"禁止的。因此这里显式把画布写操作的 execution placement 写成 IN_PROCESS
+ * （与浏览器导航同类取舍：放弃 child 寿命证据，换取唯一权威；lease/claim/exactly-once/verify 全部照旧）。
+ */
+const IN_PROCESS_EXECUTION_PROVIDERS = Object.freeze(new Set(["BrowserControl", "CanvasControl"]));
 
 /** approval 快照 / tool result 只允许 safe 字段。 */
 const SAFE_SNAPSHOT_SECRET_RE = /^(secret|token|authorization|api[_-]?key|credential|password|bearer|capability)/i;
@@ -154,8 +168,11 @@ class SideEffectRuntime {
     // 只有仍可被决定的 approval 才可投影：terminal / BLOCKED / UNKNOWN_EFFECT 一律不可 revive。
     const actionable = [CALL_STATUS.AWAITING_APPROVAL, CALL_STATUS.APPROVED, CALL_STATUS.LEASED];
     if (!call || !actionable.includes(String(call.status))) return null;
-    // §44：Renderer 不能指定 actor；快照只在请求来自该 call 所属 Task 的 session 时返回。
-    if (context && context.sessionRef) {
+    // §44：Renderer 不能指定 actor；只要调用方声明了 context，就必须给出真实 session 且与该 call 所属
+    // Task 的 session 一致。声明了 context 却没有 session（未登录窗口）一律不放行 —— 放行等于把全部
+    // pending 快照交给未认证的 Renderer。context == null 只留给内部投影，其 session 过滤在推送接线层。
+    if (context != null) {
+      if (!context.sessionRef) return null;
       const ownerTask = this.taskStore.taskById(call.taskId);
       if (!ownerTask || String(ownerTask.session_ref) !== String(context.sessionRef)) return null;
     }
@@ -167,8 +184,10 @@ class SideEffectRuntime {
     if (ref && nameStore && typeof nameStore.resourceByRef === "function") {
       try { const row = nameStore.resourceByRef(String(ref)); if (row && typeof row.name === "string") targetName = row.name.slice(0, 120); } catch { targetName = null; }
     }
+    // 非 Resource 目标（受控浏览器标签）：显示稳定的目标身份，绝不显示页面正文。
+    if (!targetName && pre.targetRef) targetName = "浏览器标签 " + String(pre.targetRef).slice(0, 80);
     const approval = this.authority.effectiveApproval(call.callId);
-    const allowed = new Set(["approvalRequestId", "status", "toolId", "toolDisplayName", "riskClass", "effectClass", "targetDisplayName", "resourceRef", "expectedEffects", "expectedVersion", "currentVersion", "expiresAt", "requiresApproval"]);
+    const allowed = new Set(["approvalRequestId", "status", "toolId", "toolDisplayName", "riskClass", "effectClass", "targetDisplayName", "resourceRef", "targetRef", "url", "expectedEffects", "expectedVersion", "currentVersion", "expiresAt", "requiresApproval"]);
     const snap = {
       approvalRequestId: call.callId,
       status: call.status,
@@ -178,6 +197,9 @@ class SideEffectRuntime {
       effectClass: call.effectClass,
       targetDisplayName: targetName,
       resourceRef: ref,
+      targetRef: pre.targetRef ? String(pre.targetRef).slice(0, 300) : null,
+      /** 批准的就是这个地址：它是**用户要看的**，不是 secret；正文仍然永不出现在这里。 */
+      url: typeof pre.url === "string" ? pre.url.slice(0, 2000) : null,
       expectedEffects: Array.isArray(call.expectedEffectsSafe) ? call.expectedEffectsSafe.slice(0, 8) : [],
       expectedVersion: pre.expectedVersion == null ? null : Number(pre.expectedVersion),
       currentVersion: pre.expectedVersion == null ? null : Number(pre.expectedVersion),
@@ -205,6 +227,21 @@ class SideEffectRuntime {
     return { ok: false, error: SIDE_EFFECT_ERROR.INVALID_INPUT };
   }
 
+  /**
+   * Trusted user revocation。与 decideApproval 同一条信任路径：context 由 main process 从
+   * authenticated session 注入，appId 从 call 绑定的真实 Task 反推；Renderer 只能给
+   * approvalRequestId —— callId / taskId / userId 一律由这里从真实 call 推导。
+   * authority 的返回值原样透传（含 SIDE_EFFECT_APPROVAL_TOO_LATE + callStatus），本层不重复写状态。
+   */
+  revokeApproval({ context = {}, approvalRequestId } = {}) {
+    const call = this.store.callById(approvalRequestId);
+    if (!call) return { ok: false, error: SIDE_EFFECT_ERROR.CALL_NOT_FOUND };
+    const task = this.taskStore.taskById(call.taskId);
+    if (!task) return { ok: false, error: SIDE_EFFECT_ERROR.TASK_NOT_FOUND };
+    const trusted = { sessionRef: context.sessionRef, appId: task.app_id, source: "user", agent: false, requestId: context.requestId || null };
+    return this.authority.revokeApproval({ context: trusted, callId: call.callId });
+  }
+
   // ------------------------------------------------------------------ supervised execution
   /** 把 AWAITING_APPROVAL 的 call 明确收敛为 BLOCKED（超时 / 取消 / 放弃）。0 execute。 */
   #blockPending(callId, reason) {
@@ -218,8 +255,61 @@ class SideEffectRuntime {
     return updated;
   }
 
+  /**
+   * **进程局部 Domain 的显式 in-process execution class**（D5-01 Closure-2）。
+   *
+   * 受控浏览器导航的 Domain 是 main 进程里的原生 WebContentsView（真实网页视图），
+   * out-of-process supervised executor 结构上无法执行它 —— child 里既没有原生视图，
+   * 也不应该为了执行它而在 child 里再造一份视图权威。
+   *
+   * 因此这条路径把 **execution placement 显式写成 IN_PROCESS** 并留审计：
+   *   · lease / claim / exactly-once / verify 全部仍由**同一个** SideEffectAuthority 裁决；
+   *   · 但**没有**独立 executor 进程的寿命证据（没有 child exit / socket lifetime）。
+   * 绝不假装它与 out-of-process 路径等价；这条差异写在 D5-01 Closure-2 报告 §4。
+   */
+  async executeInProcess({ callId, holderId = "oase_main", timeoutMs = null } = {}) {
+    const call = this.store.callById(callId);
+    if (!call) return { ok: false, error: SIDE_EFFECT_ERROR.CALL_NOT_FOUND };
+    if (call.status === CALL_STATUS.SUCCEEDED) return { ok: true, duplicate: true, inProcess: true, call, safeResult: safeToolResult(call) };
+    const preflight = this.authority.preflightAuthorization({ callId });
+    if (!preflight || preflight.ok !== true) {
+      const reason = (preflight && preflight.error) || SIDE_EFFECT_ERROR.AUTHORIZATION_REVOKED;
+      const afterPreflight = this.store.callById(callId);
+      if (afterPreflight && !CALL_TERMINAL.includes(String(afterPreflight.status))) this.#blockPending(callId, reason);
+      return { ok: false, inProcess: true, error: reason, call: this.store.callById(callId) };
+    }
+    this.#audit({ toolRef: call.toolId, action: "side_effect.execution_placement", decision: "IN_PROCESS", reasonCode: "PROCESS_LOCAL_DOMAIN" });
+    const lease = this.authority.acquireLease({ callId, holderId, ttlMs: DEFAULT_LEASE_TTL_MS });
+    if (!lease || lease.ok !== true) {
+      const after = this.store.callById(callId);
+      if (after && !CALL_TERMINAL.includes(String(after.status)) && after.status === CALL_STATUS.APPROVED) this.#blockPending(callId, (lease && lease.error) || SIDE_EFFECT_ERROR.CALL_STATE);
+      return { ok: false, inProcess: true, error: (lease && lease.error) || SIDE_EFFECT_ERROR.CALL_STATE, call: this.store.callById(callId) };
+    }
+    await this.authority.executeSideEffect({ callId, leaseId: lease.lease.leaseId, holderId, timeoutMs: Number(timeoutMs) > 0 ? Number(timeoutMs) : this.executorTimeoutMs });
+    let after = this.store.callById(callId);
+    if (after && after.status === CALL_STATUS.SUCCEEDED) return { ok: true, inProcess: true, call: after, safeResult: safeToolResult(after), error: null };
+    // 与 out-of-process 路径**同一套**收敛语义：UNKNOWN_EFFECT 一律走只读恢复核查，
+    // 并标记 recovered=true 让 orchestrator 走 BLOCK（§28：绝不自动续接 Harness）。
+    if (after && after.status === CALL_STATUS.UNKNOWN_EFFECT) {
+      const v = await this.verifyUnknownEffect({ callId });
+      after = this.store.callById(callId);
+      return {
+        ok: false, inProcess: true, recovered: true, unknownEffect: true, recovery: v,
+        recoveredStatus: after && after.status, call: after,
+        error: (after && after.errorCode) || SIDE_EFFECT_ERROR.UNKNOWN_EFFECT,
+      };
+    }
+    return { ok: false, inProcess: true, call: after, error: (after && after.errorCode) || SIDE_EFFECT_ERROR.DOMAIN_WRITE_FAILED };
+  }
+
   /** 受监督 executor runtime 执行一条已 APPROVED 的 call（唯一真实 mutation 入口）。 */
   async executeApproved({ callId, holderId = "oase_1", timeoutMs = null } = {}) {
+    // 进程局部 Domain：路由到显式 in-process class（其它 contract 一律不受影响）。
+    const resolved = this.store.callById(callId);
+    const contract = resolved && this.registry && typeof this.registry.get === "function" ? this.registry.get(resolved.toolId, resolved.toolVersion) : null;
+    if (contract && IN_PROCESS_EXECUTION_PROVIDERS.has(String(contract.executionProvider))) {
+      return this.executeInProcess({ callId, holderId: "oase_main", timeoutMs });
+    }
     const call = this.store.callById(callId);
     if (!call) return { ok: false, error: SIDE_EFFECT_ERROR.CALL_NOT_FOUND };
     if (call.status === CALL_STATUS.SUCCEEDED) return { ok: true, duplicate: true, call, safeResult: safeToolResult(call) };
@@ -351,17 +441,27 @@ class SideEffectRuntime {
   }
   async verifyUnknownEffect({ callId }) { return this.authority.verifyUnknownEffect({ callId }); }
 
-  /** 只返回当前 session 可见的 pending approval（安全投影，不含其它 session 的请求）。 */
+  /**
+   * 只返回当前 session 可见的 pending approval（安全投影，不含其它 session 的请求）。
+   * `revocable` 是 **additive** 的：已批准、尚未开始执行的 call（APPROVED / LEASED）—— 复用同一条
+   * approvalSnapshot 过滤，因此可见性与 items 完全一致，renderer 看不到别人的 call。
+   */
   listPendingApprovals({ context = {} } = {}) {
-    const out = [];
-    for (const status of [CALL_STATUS.AWAITING_APPROVAL]) {
+    const items = [];
+    for (const call of this.store.callsByStatus(CALL_STATUS.AWAITING_APPROVAL)) {
+      if (items.length >= 20) break;
+      const snap = this.approvalSnapshot({ approvalRequestId: call.callId, context });
+      if (snap) items.push(snap);
+    }
+    const revocable = [];
+    for (const status of [CALL_STATUS.APPROVED, CALL_STATUS.LEASED]) {
       for (const call of this.store.callsByStatus(status)) {
+        if (revocable.length >= 20) break;
         const snap = this.approvalSnapshot({ approvalRequestId: call.callId, context });
-        if (snap) out.push(snap);
-        if (out.length >= 20) return { ok: true, items: out };
+        if (snap) revocable.push(snap);
       }
     }
-    return { ok: true, items: out };
+    return { ok: true, items, revocable };
   }
 
   snapshot() {

@@ -17,7 +17,7 @@ import { createToolHarnessFixture } from "./fixtures/harness-acp/tool-harness-fi
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { HARNESS_VISIBLE_TOOL_IDS, FORBIDDEN_HARNESS_TOOLS } = require("../electron/dsh-tool-profile.cjs");
+const { HARNESS_VISIBLE_TOOL_IDS, FORBIDDEN_HARNESS_TOOLS, WRITE_TOOL_IDS } = require("../electron/dsh-tool-profile.cjs");
 
 const CRASH_EXECUTOR = path.join(import.meta.dirname, "fixtures", "harness-acp", "crash-executor-runtime.mjs");
 const LATE_CRASH_EXECUTOR = path.join(import.meta.dirname, "fixtures", "harness-acp", "late-crash-executor-runtime.mjs");
@@ -32,8 +32,9 @@ async function setup({ approvalWaitMs = 60000, executorEntry = null, threshold =
     withAdapters: true, behavior: "tool-loop", dbPath: path.join(root, "identity.db"),
     storeRoot: path.join(root, "library"), keepData: true, sideEffectRuntimeDir: path.join(root, "runtime"),
     sideEffectApprovalWaitMs: approvalWaitMs, ...(executorEntry ? { sideEffectExecutorEntry: executorEntry } : {}),
-    // C4 显式 opt-in WRITE proposal route；D4-03B 的 READ_ONLY facade gate 保持 exactly 2 read tool。
-    facadeWriteToolIds: ["resource.trash"],
+    // C4 显式 opt-in WRITE proposal route。装配取**产品 allowlist**（唯一真源）：
+    // C4 用例只走 resource.trash，但夹具的 facade 必须与产品广播面一致，否则两边会静默分叉。
+    facadeWriteToolIds: WRITE_TOOL_IDS,
   });
   seq += 1;
   const created = await fx.createResource("Dsh Write " + seq);

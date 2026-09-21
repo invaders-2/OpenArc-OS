@@ -50,9 +50,15 @@ const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domai
  * D3-01 = v1（identity）；D3-02 = v2（object authorization）；D3-03 = v3（device）；D3-04A = v4（resource store）。
  * 迁移按版本逐级前进，每一级各自是一个原子事务：任何一级失败只回滚该级，
  * 不会留下"user_version 已升级但表不完整"的半状态（§55）。
- * v17：users 增加 avatar_ref TEXT（可空），承载显示名之外的资料字段。
+ *
+ * 集成分支上两条线各自用了同一批版本号，合并后按"核心线编号不动、集成线顺延"排：
+ *   v17（核心线 D5-02）：canvas_boards 文档层 + canvas_shares / canvas_commands；
+ *   v18（核心线 D5-02 Closure）：canvas_runs（一次生成 = 一个 Task）；
+ *   v19（UI/D3-01b 集成线）：users 增加 avatar_ref TEXT（可空），承载显示名之外的资料字段。
+ * 核心线已升到 v18 的库继续往上走 v19（avatar_ref 幂等补列）；
+ * 集成线已升到 v17 的库补跑 v18/v19（画布文档层与运行归属表）。
  */
-const SCHEMA_VERSION = 17;
+const SCHEMA_VERSION = 19;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -1116,6 +1122,78 @@ CREATE TABLE task_budgets (
 CREATE INDEX idx_task_budgets_task ON task_budgets(task_id);
 `;
 
+/**
+ * D5-02 v17：无限画布的**文档层**。
+ *
+ * 不建第二套画布：board 身份与资源引用沿用 D3-04D 的 canvas_boards / canvas_resource_nodes，
+ * 这里只把"可编辑文档"（节点/连线/视口/日志）挂到同一个 board 上，再加共享角色与命令账本。
+ *
+ * 这一级必须能**重复执行**：合并前两条线各自用过 v17（集成线的 v17 是 users.avatar_ref），
+ * 回滚式迁移夹具（把库倒回旧版本再重放）与"另一条线的老库"都会碰到已经存在的列/表。
+ * SQLite 没有 ADD COLUMN IF NOT EXISTS，所以列先查 PRAGMA 再决定，表/索引一律 IF NOT EXISTS。
+ */
+const SCHEMA_V17_COLUMNS = [
+  ["icon", "TEXT NOT NULL DEFAULT '🧩'"],
+  ["kind", "TEXT NOT NULL DEFAULT 'classic'"],
+  ["doc", "TEXT NOT NULL DEFAULT '{\"nodes\":[],\"connections\":[],\"viewport\":{\"x\":0,\"y\":0,\"scale\":1},\"logs\":[]}'"],
+  ["revision", "INTEGER NOT NULL DEFAULT 1"],
+  ["visibility", "TEXT NOT NULL DEFAULT 'PRIVATE'"],
+  ["deleted_at", "INTEGER"],
+  ["deleted_by", "TEXT"],
+];
+const SCHEMA_V17_SQL = `
+CREATE INDEX IF NOT EXISTS idx_canvas_boards_owner ON canvas_boards(owner_user_id, deleted_at);
+CREATE TABLE IF NOT EXISTS canvas_shares (
+  canvas_id  TEXT NOT NULL,
+  user_id    TEXT NOT NULL,
+  role       TEXT NOT NULL CHECK (role IN ('VIEWER','CONTRIBUTOR','EDITOR')),
+  granted_by TEXT,
+  at         INTEGER NOT NULL,
+  PRIMARY KEY (canvas_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_canvas_shares_user ON canvas_shares(user_id);
+CREATE TABLE IF NOT EXISTS canvas_commands (
+  id            TEXT PRIMARY KEY,
+  canvas_id     TEXT NOT NULL,
+  actor_user_id TEXT NOT NULL,
+  actor_kind    TEXT NOT NULL CHECK (actor_kind IN ('USER','AGENT')),
+  command       TEXT NOT NULL,
+  base_revision INTEGER,
+  result_revision INTEGER,
+  outcome       TEXT NOT NULL,
+  before_doc    TEXT,
+  at            INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_canvas_commands ON canvas_commands(canvas_id, at DESC);
+`;
+
+/** v17 的列补齐 + 建表建索引；只在缺列时 ALTER，因此重放安全（见上）。*/
+function applyCanvasDocumentLayer(db) {
+  const existing = new Set(db.prepare("PRAGMA table_info(canvas_boards)").all().map((c) => c.name));
+  for (const [name, decl] of SCHEMA_V17_COLUMNS) {
+    if (!existing.has(name)) db.exec("ALTER TABLE canvas_boards ADD COLUMN " + name + " " + decl);
+  }
+  db.exec(SCHEMA_V17_SQL);
+}
+
+/** D5-02 Closure v18：一次画布生成 = 一个 Task（预算/停止/审计归属）。同样重放安全。*/
+const SCHEMA_V18_SQL = `
+CREATE TABLE IF NOT EXISTS canvas_runs (
+  run_id        TEXT PRIMARY KEY,
+  canvas_id     TEXT NOT NULL,
+  node_id       TEXT,
+  kind          TEXT NOT NULL,
+  actor_user_id TEXT NOT NULL,
+  task_id       TEXT,
+  base_revision INTEGER NOT NULL,
+  status        TEXT NOT NULL,
+  stop_reason   TEXT,
+  started_at    INTEGER NOT NULL,
+  finished_at   INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_canvas_runs ON canvas_runs(canvas_id, started_at DESC);
+`;
+
 const MIGRATIONS = Object.freeze([
   { version: 1, sql: SCHEMA_SQL },
   { version: 2, sql: SCHEMA_V2_SQL },
@@ -1133,13 +1211,21 @@ const MIGRATIONS = Object.freeze([
   { version: 14, sql: SCHEMA_V14_SQL },
   { version: 15, sql: SCHEMA_V15_SQL },
   { version: 16, sql: SCHEMA_V16_SQL },
+  { version: 17, run: applyCanvasDocumentLayer },
+  { version: 18, sql: SCHEMA_V18_SQL },
   {
-    version: 17,
-    // avatar_ref 是 UI 线新增字段：空库由 SCHEMA_SQL 直接建齐，老库（v1..v16）在这里补列。
-    // SQLite 没有 ADD COLUMN IF NOT EXISTS，所以先查 PRAGMA 再决定，保证任何版本都幂等。
+    version: 19,
+    // 合并后两条线共用一条迁移链（见文件顶部）：这一级把两条线各自在 v17 上做过的事都补齐，全部幂等。
+    //   ① 集成线 D3-01b 的 users.avatar_ref —— 核心线的库从 v18 升上来时补列；
+    //   ② 核心线 v17 的画布文档层 —— 集成线的库曾停在 v17（那一级是它自己的 avatar_ref），
+    //      核心线编号的 v17 会被"版本已到 17"跳过，这里探一次、缺了就补，避免开画布时报未知列。
     run: (db) => {
-      const cols = db.prepare("PRAGMA table_info(users)").all();
-      if (!cols.some((c) => c.name === "avatar_ref")) db.exec("ALTER TABLE users ADD COLUMN avatar_ref TEXT");
+      const userCols = db.prepare("PRAGMA table_info(users)").all();
+      if (!userCols.some((c) => c.name === "avatar_ref")) db.exec("ALTER TABLE users ADD COLUMN avatar_ref TEXT");
+      const boardCols = db.prepare("PRAGMA table_info(canvas_boards)").all();
+      if (!boardCols.some((c) => c.name === "doc")) applyCanvasDocumentLayer(db);
+      const hasRuns = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='canvas_runs'").get();
+      if (!hasRuns) db.exec(SCHEMA_V18_SQL);
     },
   },
 ]);
@@ -1257,7 +1343,11 @@ class IdentityStore {
     }
   }
 
-  /** 同步事务：只给迁移用（迁移里没有任何 await）。 */
+  /**
+   * 连接级同步事务：BEGIN IMMEDIATE 在 try 之外，且**没有连接内互斥** ——
+   * 因此事务体内绝不能有 await（一旦让出事件循环，另一条写路径会插进同一连接）。
+   * 全仓 electron/ 各 store 的主要写路径都走这里；迁移只是其中一个调用方。
+   */
   transactSync(fn) {
     const db = this.db;
     db.exec("BEGIN IMMEDIATE");

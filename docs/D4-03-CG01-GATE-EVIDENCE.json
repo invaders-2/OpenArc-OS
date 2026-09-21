@@ -1,0 +1,157 @@
+{
+  "phase": "D4-03",
+  "round": "CG-01",
+  "title": "acquireLease 事务状态保护：事务内重读 persisted status；拒绝路径零写入",
+  "branch": "feature/d4-03-tool-proxy",
+  "baseHead": "c1cd9e0067f9b7d6e7e62220c57ebbd0a8199b5f",
+  "testedCommit": "eccf01b2991253e56c87ed51778541838508a58f",
+  "verifyTree": "git archive eccf01b → /tmp/oa-cg01-clean（无 .git；node_modules 为符号链接）",
+  "workspaceState": null,
+  "repoKind": "archive",
+  "workspaceStateNote": "导出树无 .git，故 workspaceState=null（门禁报告如实标注 repoKind=archive）；工作树提交后仅有未提交的 docs 改动",
+  "env": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "node": "v22.22.3",
+    "schemaVersion": 16
+  },
+  "sourceSha256": {
+    "electron/side-effect-authority.cjs": "00b5d94509612405929ed64b9df777bf90e7ff924d9ac4f39eb7be2b40931de7",
+    "tests/d4-03-lease-acquire-state-protection.test.mjs": "463714ce9d9c0a0ae0fead789b2c065a20d187c2e1f7e494f9a0e8c4b5de4c8d",
+    "experiments/d4-03-cg01/run-all.mjs": "6716b76d1f96bae89f458dcfc26d618f5b88b484c09ea03ca94f9643efda29db",
+    "package.json": "7811331c338e24b7eb5c47a3b079fa1db98f8fabb2fdd9e5d9efb28575caba0e",
+    "note": "导出树内 sha256 与提交内 blob sha256 逐字节相同（artifacts/d4-03-cg01/source-sha256.txt）"
+  },
+  "commands": [
+    {
+      "name": "新增门禁",
+      "command": "npm run test:d4-03-cg01",
+      "tests": 31,
+      "pass": 31,
+      "fail": 0,
+      "exitCode": 0,
+      "artifact": "artifacts/d4-03-cg01/d4-03-cg01-gate.json"
+    },
+    {
+      "name": "租约/真实竞争/真实重启回归",
+      "command": "npm run test:d4-03c1-closure",
+      "tests": 52,
+      "pass": 52,
+      "fail": 0,
+      "exitCode": 0
+    },
+    {
+      "name": "执行 + acquire 语义回归",
+      "command": "npm run test:d4-03c2-closure3",
+      "tests": 51,
+      "pass": 51,
+      "fail": 0,
+      "exitCode": 0
+    },
+    {
+      "name": "恢复/未知效果/崩溃回归",
+      "command": "npm run test:d4-03c3-closure",
+      "tests": 63,
+      "pass": 63,
+      "fail": 0,
+      "exitCode": 0
+    },
+    {
+      "name": "相邻 acquireLease 使用点",
+      "command": "node --test --test-concurrency=1 tests/d4-09-append-step.test.mjs",
+      "tests": 11,
+      "pass": 11,
+      "fail": 0,
+      "exitCode": 0
+    }
+  ],
+  "newTests": {
+    "file": "tests/d4-03-lease-acquire-state-protection.test.mjs",
+    "tests": 9,
+    "pass": 9,
+    "fail": 0,
+    "cases": [
+      "T1 RUNNING/SUCCEEDED/UNKNOWN_EFFECT/FAILED/BLOCKED/CANCELLED（另一连接推进状态 → 拒绝 + 零改写）",
+      "T2 批准过期 + 已有过期 ACTIVE lease（拒绝申请不改写已有租约）",
+      "T3 正常申请/合法重复/不同执行器竞争/过期后重租"
+    ]
+  },
+  "baselineDiscrimination": {
+    "tree": "git archive c1cd9e0 + 新测试",
+    "tests": 9,
+    "pass": 1,
+    "fail": 8,
+    "exitCode": 1,
+    "artifact": "artifacts/d4-03-cg01/baseline-newtest.log"
+  },
+  "interleaveProbe": {
+    "method": "既有事务边界探针（资格预读后、第一个写事务前注入）+ 第二条真实 SQLite 连接提交状态推进；不 dispatch Domain",
+    "statuses": [
+      "RUNNING",
+      "SUCCEEDED",
+      "UNKNOWN_EFFECT"
+    ],
+    "baseline": [
+      {
+        "advancedTo": "RUNNING",
+        "acquireOk": true,
+        "leaseStatus": "ACTIVE",
+        "callAfter": "LEASED"
+      },
+      {
+        "advancedTo": "SUCCEEDED",
+        "acquireOk": true,
+        "leaseStatus": "ACTIVE",
+        "callAfter": "LEASED"
+      },
+      {
+        "advancedTo": "UNKNOWN_EFFECT",
+        "acquireOk": true,
+        "leaseStatus": "ACTIVE",
+        "callAfter": "LEASED",
+        "errorCode": "SIDE_EFFECT_UNKNOWN_EFFECT",
+        "recoverySafePreserved": true
+      }
+    ],
+    "patched": [
+      {
+        "advancedTo": "RUNNING",
+        "acquireOk": false,
+        "error": "SIDE_EFFECT_CALL_STATE",
+        "leases": 0,
+        "callAfter": "RUNNING"
+      },
+      {
+        "advancedTo": "SUCCEEDED",
+        "acquireOk": false,
+        "error": "SIDE_EFFECT_CALL_STATE",
+        "leases": 0,
+        "callAfter": "SUCCEEDED"
+      },
+      {
+        "advancedTo": "UNKNOWN_EFFECT",
+        "acquireOk": false,
+        "error": "SIDE_EFFECT_CALL_STATE",
+        "leases": 0,
+        "callAfter": "UNKNOWN_EFFECT"
+      }
+    ],
+    "artifacts": [
+      "artifacts/d4-03-cg01/probe-baseline.json",
+      "artifacts/d4-03-cg01/probe-patched.json"
+    ]
+  },
+  "notRun": [
+    "D4-03 十六门禁其余部分",
+    "真实 main E2E",
+    "npm test",
+    "npm run build"
+  ],
+  "limitations": [
+    "静态代码发现 + 受控交错实测：未实测第二次真实副作用/重复 Domain mutation（探针不 dispatch Domain）",
+    "交错点由 test-only 事务边界探针注入；真实多进程调度级交错未复现",
+    "未在本轮 commit 上重跑全部门禁（按要求只跑新增检查与受影响租约/执行/恢复回归）"
+  ],
+  "artifactsDir": "artifacts/d4-03-cg01/（仓库 .gitignore 排除 artifacts/，为工作树本地证据）",
+  "at": "2026-09-18T18:05:05.493Z"
+}

@@ -15,8 +15,11 @@
 const domain = require("./tool-domain.cjs");
 const {
   TOOL_ERROR, DECISION_STATUS, PROPOSAL_STATUS, EXECUTION_STATUS,
-  forbiddenArgumentKeys, containsAbsolutePath, fingerprint, projectArguments,
+  forbiddenArgumentKeys, containsAbsolutePath, fingerprint, projectArguments, redactProjectedArguments, REDACTION_MARKER_RE,
 } = domain;
+
+/** 执行入参进程内存缓存上限：proposalId → 修复前的 lossy projection（不带值级去敏，绝不落库）。 */
+const EXECUTION_ARGUMENTS_MAX = 64;
 
 function proposalStatusFor(decision) {
   switch (decision) {
@@ -63,6 +66,8 @@ class ControlledToolProxy {
     // §22/§23：executionProvider → 静态 allowlist adapter；绝不从 arguments 解析 module/path。
     this.adapterFor = adapters && typeof adapters.adapterFor === "function" ? adapters.adapterFor : null;
     this.lastExecution = null;
+    // 执行入参与落库投影解耦：这里只存本次进程的 pre-redaction projection，绝不落库 / 事件 / 日志。
+    this.executionArguments = new Map();
     this.clock = typeof clock === "function" ? clock : (taskStore.clock || (() => Date.now()));
     this.logger = logger;
   }
@@ -90,7 +95,10 @@ class ControlledToolProxy {
     }
 
     const finalize = ({ decision, reasonCode, contract = null, schemaErrors = null, plan = null, resolvedToolId = null, resolvedVersion = null }) => {
-      const safeArgs = contract ? projectArguments(args, contract.inputSchema.properties || {}) : {};
+      // projected 是修复前的 lossy 执行入参，safeArgs 才是落库文本；两者绝不互相回写。
+      const projected = contract ? projectArguments(args, contract.inputSchema.properties || {}) : {};
+      const safeArgs = redactProjectedArguments(projected);
+      const executionArgs = contract && decision === DECISION_STATUS.ALLOWED ? JSON.stringify(projected) : null;
       const argsHash = fingerprint(args == null ? {} : args);
       const status = proposalStatusFor(decision);
       const result = this.toolStore.transactSync(() => {
@@ -98,6 +106,7 @@ class ControlledToolProxy {
         const decisionRow = this.toolStore.insertDecision({ proposalId: proposal.proposal_id, decision, reasonCode: reasonCode || null, riskClass: contract ? contract.riskClass : null, approvalRequired: contract ? !!contract.requiresApproval : false, createdAt: now });
         return { proposal, decisionRow };
       });
+      if (executionArgs != null) this.#rememberExecutionArguments(result.proposal.proposal_id, executionArgs);
       this.#audit({ actorUserId: trusted.actorUserId || null, appId: trusted.appId, toolRef: result.proposal.tool_id, action: "tool.proposed", decision: "PROPOSED", reasonCode: null, requestId: trusted.requestId });
       const outcomeAction = decision === DECISION_STATUS.INVALID ? "tool.validation_failed" : decision === DECISION_STATUS.DENIED ? "tool.authorization_denied" : decision === DECISION_STATUS.APPROVAL_REQUIRED ? "tool.approval_required" : "tool.execution_blocked";
       this.#audit({ actorUserId: trusted.actorUserId || null, appId: trusted.appId, toolRef: result.proposal.tool_id, action: outcomeAction, decision, reasonCode: reasonCode || null, requestId: trusted.requestId });
@@ -192,7 +201,25 @@ class ControlledToolProxy {
     if (!row) return null;
     return { executionId: row.execution_id, proposalId: row.proposal_id, decisionId: row.decision_id || null, taskId: row.task_id, stepId: row.step_id || null, runId: row.run_id || null, toolId: row.tool_id, toolVersion: row.tool_version, status: row.status, startedAt: row.started_at, completedAt: row.completed_at == null ? null : row.completed_at, resultRef: row.result_ref || null, resultHash: row.result_hash || null, verificationStatus: row.verification_status || null, errorCode: row.error_code || null };
   }
-  #argsOf(proposal) { try { return proposal && proposal.arguments_safe ? JSON.parse(proposal.arguments_safe) : {}; } catch { return {}; } }
+  /**
+   * 执行入参优先取本次进程内的 pre-redaction projection（落库文本已去敏，绝不回读执行）；
+   * 缓存未命中而回退 DB 时，含去敏标记的投影一律 fail closed（返回 null），绝不静默换参执行。
+   */
+  #argsOf(proposal) {
+    const live = proposal && proposal.proposal_id ? this.executionArguments.get(String(proposal.proposal_id)) : null;
+    if (live != null) { try { return JSON.parse(live); } catch { /* 回退 DB */ } }
+    const text = proposal && proposal.arguments_safe != null ? String(proposal.arguments_safe) : "";
+    if (REDACTION_MARKER_RE.test(text)) return null;
+    try { return text ? JSON.parse(text) : {}; } catch { return {}; }
+  }
+
+  /** 有界 FIFO 进程内存缓存：只服务执行入参，绝不落库 / 事件 / 日志。 */
+  #rememberExecutionArguments(proposalId, executionArgsJson) {
+    if (!proposalId || executionArgsJson == null) return;
+    const map = this.executionArguments;
+    map.set(String(proposalId), executionArgsJson);
+    while (map.size > EXECUTION_ARGUMENTS_MAX) map.delete(map.keys().next().value);
+  }
 
   /** §5/§6/§19/§20/§43：执行前重新授权资源动作 + App Tool 权限（agent=true → useByAgent）。*/
   #authorizeExecution({ trusted, task, contract, args }) {
@@ -280,7 +307,9 @@ class ControlledToolProxy {
       const latest = runs[runs.length - 1];
       if (!runs.some((r) => r.run_id === runId) || (latest && latest.run_id !== runId)) return this.#recordBlockedExecution({ proposal, decision, taskId, stepId, runId, contract, error: TOOL_ERROR.TOOL_PROPOSAL_STALE });
     }
+    // 落库投影已去敏 → 绝不当作执行入参：fail closed（0 Domain 调用 / 0 execution record）。
     const args = this.#argsOf(proposal);
+    if (args == null) return denied(TOOL_ERROR.TOOL_ARGUMENTS_PROJECTION_UNAVAILABLE);
     const auth = this.#authorizeExecution({ trusted, task, contract, args });
     if (!auth.ok) return this.#recordBlockedExecution({ proposal, decision, taskId, stepId, runId, contract, error: auth.error });
 

@@ -1,0 +1,553 @@
+{
+  "phase": "D5-01",
+  "round": "R2 restart-restore fix + scope reconciliation",
+  "baseHead": "39d733d39eb6a33386ad84ddb3117b4e7be59a48",
+  "testedCommit": "98c9f81aaba4b9754b76034bec5ce39430be9229",
+  "verifyTree": "git archive 98c9f81 → 临时导出树（干净）",
+  "gate": {
+    "command": "npm run test:d5-01",
+    "cleanTree": {
+      "pass": 64,
+      "fail": 0,
+      "total": 64
+    },
+    "notVerified": [
+      {
+        "name": "崩溃 / 强杀后最近一次导航的持久化",
+        "reason": "Chromium 的 localStorage 磁盘提交是异步的：强杀时内存里已是新值、磁盘上仍是旧值（已实测）。正常退出（window-all-closed → app.quit）路径不受影响（R0–R5 实测）。崩溃恢复不在现有契约内，不扩大承诺。"
+      }
+    ],
+    "checks": [
+      {
+        "section": "boot",
+        "name": "M1 · 真实 electron . 启动并暴露 CDP",
+        "status": "PASS",
+        "expected": "CDP 可用",
+        "actual": "connected"
+      },
+      {
+        "section": "boot",
+        "name": "M2 · 真实 UI 登录 admin",
+        "status": "PASS",
+        "expected": "ready",
+        "actual": "ready"
+      },
+      {
+        "section": "nav",
+        "name": "N1 · 从 Dock 打开浏览器窗口",
+        "status": "PASS",
+        "expected": "浏览器窗口存在",
+        "actual": "true"
+      },
+      {
+        "section": "nav",
+        "name": "N2 · 真实网址导航（地址栏 → 真实 WebContentsView）",
+        "status": "PASS",
+        "expected": "页面标记 PAGE2-MARKER-9f3a",
+        "actual": "已加载"
+      },
+      {
+        "section": "nav",
+        "name": "N2b · 原生视图已真实挂载到宿主（data-attached）",
+        "status": "PASS",
+        "expected": "data-attached=1",
+        "actual": "1"
+      },
+      {
+        "section": "nav",
+        "name": "N2c · 浏览器 chrome（标签栏+地址栏）与网页视口不重叠",
+        "status": "PASS",
+        "expected": "chrome >= 90 且视口在其下方",
+        "actual": "{\"chrome\":90,\"vpTop\":205}"
+      },
+      {
+        "section": "nav",
+        "name": "N3 · 标签 URL 与标题回灌到 Window domain",
+        "status": "PASS",
+        "expected": "活动标签显示页面标题",
+        "actual": "PAGE2"
+      },
+      {
+        "section": "nav",
+        "name": "N4 · 第二个地址导航成功（准备后退）",
+        "status": "PASS",
+        "expected": "MARKER 页面",
+        "actual": "http://127.0.0.1:5391/marker"
+      },
+      {
+        "section": "nav",
+        "name": "N5 · 后退回到上一页",
+        "status": "PASS",
+        "expected": "回到 page2",
+        "actual": "http://127.0.0.1:5391/page2"
+      },
+      {
+        "section": "nav",
+        "name": "N6 · 前进按钮变为可用（可用性来自主进程 navigationHistory）",
+        "status": "PASS",
+        "expected": "前进可用",
+        "actual": "disabled=false"
+      },
+      {
+        "section": "nav",
+        "name": "N7 · 前进回到 MARKER 页",
+        "status": "PASS",
+        "expected": "MARKER 页面",
+        "actual": "ok"
+      },
+      {
+        "section": "nav",
+        "name": "N8 · 刷新后页面仍在（真实 reload）",
+        "status": "PASS",
+        "expected": "MARKER 页面",
+        "actual": "ok"
+      },
+      {
+        "section": "tabs",
+        "name": "T1 · 新建标签（第二个原生视图随即创建）",
+        "status": "PASS",
+        "expected": "2 个标签",
+        "actual": "2"
+      },
+      {
+        "section": "tabs",
+        "name": "T2 · 新标签独立导航（旧标签不受影响）",
+        "status": "PASS",
+        "expected": "新标签加载 /input",
+        "actual": "http://127.0.0.1:5391/input"
+      },
+      {
+        "section": "tabs",
+        "name": "T3 · 非活动标签仍然存活（切回不重新加载）",
+        "status": "PASS",
+        "expected": "两个视图同时存活",
+        "actual": "[\"/marker\",\"/input\"]"
+      },
+      {
+        "section": "tabs",
+        "name": "T4 · 活动标签 = 新建的那个",
+        "status": "PASS",
+        "expected": "t2",
+        "actual": "t2"
+      },
+      {
+        "section": "tabs",
+        "name": "T5 · 切换标签回到 t1",
+        "status": "PASS",
+        "expected": "地址栏与活动标签同步",
+        "actual": "http://127.0.0.1:5391/marker"
+      },
+      {
+        "section": "tabs",
+        "name": "T6 · 关闭标签后原生视图真正释放",
+        "status": "PASS",
+        "expected": "input 视图消失",
+        "actual": "[\"/marker\"]"
+      },
+      {
+        "section": "state",
+        "name": "S1 · 加载中状态（停止按钮 / 标签 spinner 可见）",
+        "status": "PASS",
+        "expected": "加载中可观察",
+        "actual": "reload-btn=stop"
+      },
+      {
+        "section": "state",
+        "name": "S2 · 连接失败 → 错误状态 + 重试入口",
+        "status": "PASS",
+        "expected": "错误横幅出现",
+        "actual": "网页加载失败：ERR_CONNECTION_REFUSED（http://127.0.0.1:5392/）\n重试"
+      },
+      {
+        "section": "state",
+        "name": "S3 · 重试后真实恢复（失败地址 + 服务端已可达）",
+        "status": "PASS",
+        "expected": "错误消失且加载到 flaky 页面",
+        "actual": "{\"recovered\":true,\"url\":\"http://127.0.0.1:5392/\",\"marker\":\"FLAKY-RECOVERED\"}"
+      },
+      {
+        "section": "download",
+        "name": "D1 · 下载入口（面板可打开）",
+        "status": "PASS",
+        "expected": "面板存在",
+        "actual": "ok"
+      },
+      {
+        "section": "download",
+        "name": "D2 · 下载完成 + 文件真实落盘（字节一致）",
+        "status": "PASS",
+        "expected": "1 个 hello.txt 且内容 = OPENARC-D501-DOWNL",
+        "actual": "files=1 bytes=40 sha=4d2fa28c1050"
+      },
+      {
+        "section": "download",
+        "name": "D3 · 面板显示完成状态与落盘路径",
+        "status": "PASS",
+        "expected": "已完成 + 文件名",
+        "actual": "hello.txt\n已完成 · 40 B / 40 B\n<tmp>"
+      },
+      {
+        "section": "download",
+        "name": "D4 · 下载失败（服务端中断）→ 失败态可见",
+        "status": "PASS",
+        "expected": "interrupted 记录",
+        "actual": "[\"interrupted\",\"completed\"]"
+      },
+      {
+        "section": "download",
+        "name": "D5 · 关闭下载面板后原生视图恢复显示",
+        "status": "PASS",
+        "expected": "data-view=shown",
+        "actual": "shown"
+      },
+      {
+        "section": "policy",
+        "name": "P1 · window.open 被阻止并给出明确提示",
+        "status": "PASS",
+        "expected": "popup 提示",
+        "actual": "已阻止弹窗\n网页尝试打开新窗口，已阻止。\n在新标签打开\n 用系统应用打开"
+      },
+      {
+        "section": "policy",
+        "name": "P2 · 弹窗未变成新窗口（原生窗口数不变）",
+        "status": "PASS",
+        "expected": "1 个浏览器窗口",
+        "actual": "1"
+      },
+      {
+        "section": "policy",
+        "name": "P3 · 外部协议（mailto:）需用户明确确认，不自动交给系统",
+        "status": "PASS",
+        "expected": "external 提示",
+        "actual": "外部协议\n网页请求用系统处理 mailto: 链接。\n 用系统应用打开"
+      },
+      {
+        "section": "policy",
+        "name": "P4 · 外部协议未导致页面跳转",
+        "status": "PASS",
+        "expected": "仍在 /external",
+        "actual": "http://127.0.0.1:5391/external"
+      },
+      {
+        "section": "policy",
+        "name": "P5 · 网站权限申请被显式拒绝并回报来源",
+        "status": "PASS",
+        "expected": "geolocation denied",
+        "actual": "notice=true geo=denied:1"
+      },
+      {
+        "section": "policy",
+        "name": "P6 · 权限提示面向用户可读（不显示机器码）",
+        "status": "PASS",
+        "expected": "含「已拒绝」且无机器码",
+        "actual": "网站权限\n已拒绝 http://127.0.0.1:5391 的 web-app-installation 申请。"
+      },
+      {
+        "section": "policy",
+        "name": "P7 · 自签名证书 → 证书错误明确阻止（无「继续访问」旁路）",
+        "status": "PASS",
+        "expected": "certificate 提示",
+        "actual": "证书错误\n证书校验失败（net::ERR_CERT_AUTHORITY_INVALID），未加载该网页。"
+      },
+      {
+        "section": "policy",
+        "name": "P8 · 证书错误页面未渲染出站点内容",
+        "status": "PASS",
+        "expected": "站点标记不存在",
+        "actual": "无视图"
+      },
+      {
+        "section": "policy",
+        "name": "P9 · 文件上传：网页拿到 File 对象（名称/大小）",
+        "status": "PASS",
+        "expected": "upload-probe.txt",
+        "actual": "{\"name\":\"upload-probe.txt\",\"size\":24,\"path\":null}"
+      },
+      {
+        "section": "policy",
+        "name": "P10 · 上传不泄漏本地路径给网页",
+        "status": "PASS",
+        "expected": "无绝对路径",
+        "actual": "{\"name\":\"upload-probe.txt\",\"size\":24,\"path\":null}"
+      },
+      {
+        "section": "security",
+        "name": "A13-1 · 外壳页有产品桥（对照）",
+        "status": "PASS",
+        "expected": "object",
+        "actual": "object"
+      },
+      {
+        "section": "security",
+        "name": "A13-2 · 远程页面拿不到任何桥/Node 能力",
+        "status": "PASS",
+        "expected": "全部 undefined",
+        "actual": "{\"openarc\":\"undefined\",\"require\":\"undefined\",\"process\":\"undefined\",\"module\":\"undefined\",\"electron\":\"undefined\",\"ipcRenderer\":\"undefined\",\"shell\":\"undefined\",\"fs\":\"undefined\",\"callResult\":\"NO_BRIDGE\"}"
+      },
+      {
+        "section": "security",
+        "name": "A13-3 · 远程页面调用产品桥被拒（无桥可调）",
+        "status": "PASS",
+        "expected": "NO_BRIDGE",
+        "actual": "NO_BRIDGE"
+      },
+      {
+        "section": "A12",
+        "name": "A12-1 · 指定标签页可交互（真实鼠标事件 → 页面计数器 +1）",
+        "status": "PASS",
+        "expected": "click>=1",
+        "actual": "{\"pointerdown\":1,\"click\":1,\"keydown\":0}"
+      },
+      {
+        "section": "A12",
+        "name": "A12-2 · 菜单打开 → 原生视图整块让位",
+        "status": "PASS",
+        "expected": "data-view=hidden",
+        "actual": "menu=true view=hidden"
+      },
+      {
+        "section": "A12",
+        "name": "A12-3 · 菜单打开时点击不穿透到网页",
+        "status": "PASS",
+        "expected": "计数不变",
+        "actual": "{\"before\":{\"pointerdown\":1,\"click\":1,\"keydown\":0},\"after\":{\"pointerdown\":1,\"click\":1,\"keydown\":0}}"
+      },
+      {
+        "section": "A12",
+        "name": "A12-4 · 关闭菜单后视图恢复且不改输入目标",
+        "status": "PASS",
+        "expected": "data-view=shown",
+        "actual": "shown"
+      },
+      {
+        "section": "A12",
+        "name": "A12-5 · 窗口拖动遮挡 → 快照补齐层出现（clip+snapshot / snapshot）",
+        "status": "PASS",
+        "expected": "快照图或整块 hidden",
+        "actual": "snapshots=0 view=hidden"
+      },
+      {
+        "section": "A12",
+        "name": "A12-6 · 被遮挡区域的点击不落到网页",
+        "status": "PASS",
+        "expected": "计数不变",
+        "actual": "{\"beforeDrag\":{\"pointerdown\":1,\"click\":1,\"keydown\":0},\"afterDrag\":{\"pointerdown\":1,\"click\":1,\"keydown\":0}}"
+      },
+      {
+        "section": "A12",
+        "name": "A12-7 · 最小化浏览器窗口 → DOM 与原生视图一并收起",
+        "status": "PASS",
+        "expected": "窗口不可见",
+        "actual": "hidden=true"
+      },
+      {
+        "section": "A12",
+        "name": "A12-8 · 从 Dock 恢复窗口且原生视图回到 shown",
+        "status": "PASS",
+        "expected": "shown",
+        "actual": "shown"
+      },
+      {
+        "section": "A04",
+        "name": "A04-1 · 用户 A 在网页建立 Cookie/存储（对照）",
+        "status": "PASS",
+        "expected": "cookie d501=USERA",
+        "actual": "{\"cookie\":\"d501=USERA\",\"storage\":\"USERA\"}"
+      },
+      {
+        "section": "A04",
+        "name": "A04-2 · 真实治理入口创建成员账号",
+        "status": "PASS",
+        "expected": "ok",
+        "actual": "{\"ok\":true,\"userId\":\"usr_BY6ppjexVWa5pTzasHC_Q-SE1ScJB-Ot\",\"identifier\":\"member@d501.test\",\"role\":\"MEMBER\"}"
+      },
+      {
+        "section": "A04",
+        "name": "A04-3 · 退出登录",
+        "status": "PASS",
+        "expected": "unauthenticated",
+        "actual": "unauthenticated"
+      },
+      {
+        "section": "A04",
+        "name": "A04-4 · 登录用户 B",
+        "status": "PASS",
+        "expected": "ready",
+        "actual": "ready"
+      },
+      {
+        "section": "A04",
+        "name": "A04-5 · 新账号看不到上一个用户的浏览器窗口/标签",
+        "status": "PASS",
+        "expected": "无浏览器窗口",
+        "actual": "browser-window=false"
+      },
+      {
+        "section": "A04",
+        "name": "A04-6 · 用户 B 的浏览器窗口只有一个空标签",
+        "status": "PASS",
+        "expected": "1 个空标签",
+        "actual": ""
+      },
+      {
+        "section": "A04",
+        "name": "A04-7 · 用户 B 读不到 A 的 Cookie 与 localStorage",
+        "status": "PASS",
+        "expected": "无 d501",
+        "actual": "{\"cookie\":\"\",\"storage\":null}"
+      },
+      {
+        "section": "A04",
+        "name": "A04-8 · 用户 B 的下载列表为空（不共享记录）",
+        "status": "PASS",
+        "expected": "空列表",
+        "actual": "[]"
+      },
+      {
+        "section": "A04",
+        "name": "A04-9 · 切回用户 A",
+        "status": "PASS",
+        "expected": "ready",
+        "actual": "ready"
+      },
+      {
+        "section": "A04",
+        "name": "A04-10 · 用户 A 的会话仍在（Cookie 未被 B 覆盖/清除）",
+        "status": "PASS",
+        "expected": "d501=USERA",
+        "actual": "{\"cookie\":\"d501=USERA\",\"storage\":\"USERA\"}"
+      },
+      {
+        "section": "restore",
+        "name": "R0 · 重启前以正常退出结束（非强杀）",
+        "status": "PASS",
+        "expected": "进程自行退出",
+        "actual": "{\"clean\":true,\"code\":0,\"signal\":null}"
+      },
+      {
+        "section": "restore",
+        "name": "R1 · 重启后浏览器窗口与两个标签恢复",
+        "status": "PASS",
+        "expected": "[\"t1\",\"t3\"]",
+        "actual": "[\"t1\",\"t3\"]"
+      },
+      {
+        "section": "restore",
+        "name": "R2 · 恢复后地址栏 = 退出前的最终地址（重定向后的 /page2）",
+        "status": "PASS",
+        "expected": "http://127.0.0.1:5391/page2",
+        "actual": "http://127.0.0.1:5391/page2"
+      },
+      {
+        "section": "restore",
+        "name": "R3 · 活动标签恢复为退出前的活动标签",
+        "status": "PASS",
+        "expected": "t1",
+        "actual": "t1"
+      },
+      {
+        "section": "restore",
+        "name": "R4 · 每个标签的 URL 各自恢复（t2 = /page3）",
+        "status": "PASS",
+        "expected": "[\"http://127.0.0.1:5391/page2\",\"http://127.0.0.1:5391/page3\"]",
+        "actual": "[\"http://127.0.0.1:5391/page2\",\"http://127.0.0.1:5391/page3\"]"
+      },
+      {
+        "section": "restore",
+        "name": "R5 · 恢复到的是真实页面（不是只有记录对）",
+        "status": "PASS",
+        "expected": "/page2 与 /page3 两个视图都在",
+        "actual": "[\"http://127.0.0.1:5391/page2\",\"http://127.0.0.1:5391/page3\"]"
+      },
+      {
+        "section": "hygiene",
+        "name": "H1 · 主进程无未处理错误",
+        "status": "PASS",
+        "expected": "无错误行",
+        "actual": "clean"
+      }
+    ]
+  },
+  "r2": {
+    "before": {
+      "evidence": "上一轮干净树 39d733d 门禁 57/58；唯一失败 R2 —— 重启后地址栏 = https://127.0.0.1:5393/（落后于实际导航到 /cookie）",
+      "rootCause": [
+        "导航事件：正确（每次导航都写入 Window domain）",
+        "恢复读取：正确（读到的就是磁盘上的值）",
+        "持久化时机：根因 —— Chromium localStorage 磁盘提交异步，SIGKILL 强杀时内存已是新值、磁盘仍是旧值"
+      ],
+      "repro": "experiments/d5-01/r2-repro.mjs：SIGKILL 前内存 localStorage = /cookie?set=1，重启后读到 /page3"
+    },
+    "after": {
+      "fix": "门禁改用正常退出（quitNormally：关窗口 → window-all-closed → app.quit → 等进程退出）；断言不放宽并增强为 R0–R5",
+      "checks": [
+        {
+          "name": "R0 · 重启前以正常退出结束（非强杀）",
+          "status": "PASS",
+          "actual": "{\"clean\":true,\"code\":0,\"signal\":null}"
+        },
+        {
+          "name": "R1 · 重启后浏览器窗口与两个标签恢复",
+          "status": "PASS",
+          "actual": "[\"t1\",\"t3\"]"
+        },
+        {
+          "name": "R2 · 恢复后地址栏 = 退出前的最终地址（重定向后的 /page2）",
+          "status": "PASS",
+          "actual": "http://127.0.0.1:5391/page2"
+        },
+        {
+          "name": "R3 · 活动标签恢复为退出前的活动标签",
+          "status": "PASS",
+          "actual": "t1"
+        },
+        {
+          "name": "R4 · 每个标签的 URL 各自恢复（t2 = /page3）",
+          "status": "PASS",
+          "actual": "[\"http://127.0.0.1:5391/page2\",\"http://127.0.0.1:5391/page3\"]"
+        },
+        {
+          "name": "R5 · 恢复到的是真实页面（不是只有记录对）",
+          "status": "PASS",
+          "actual": "[\"http://127.0.0.1:5391/page2\",\"http://127.0.0.1:5391/page3\"]"
+        }
+      ]
+    },
+    "extraProductFixes": [
+      "原生视图从未 addChildView：webContents 正常但屏幕上没有网页；已挂载并回报 native-state.attached（门禁 data-attached=1）",
+      "原生视图盖住浏览器 chrome（标签栏+地址栏）：新增 domain 常量 BROWSER_CHROME_H=90，CSS 固定 37+53，门禁断言不重叠"
+    ]
+  },
+  "cleanVerification": {
+    "test:d5-01": {
+      "pass": 64,
+      "fail": 0,
+      "total": 64
+    },
+    "unit (window/occlusion/d5-01)": {
+      "tests": 59,
+      "pass": 59,
+      "fail": 0
+    },
+    "test:native (D1-01)": {
+      "tests": 26,
+      "pass": 26,
+      "fail": 0
+    },
+    "test:d2-02": {
+      "status": "FAIL（预先存在：security-surface 的 preload/IPC 冻结清单过期；本轮基线 39d733d 上同样 4 项 FAIL）"
+    }
+  },
+  "d501Gaps": [
+    "PLAN §8 最后一条：AI 控制浏览器必须通过明确工具与授权并记录目标标签与执行结果 —— 未实现（Tool Registry 无 browser.*；agent-browser 仅独立验证，未接入）",
+    "崩溃/强杀后的最近一次导航持久化（NOT VERIFIED，不在契约内）",
+    "像素级层级真值（本机屏幕被另一个已运行实例占用；改以挂载事实 + chrome/视口几何为证据）",
+    "高 DPI / 多屏 / Windows / 任意网站兼容（NOT VERIFIED）"
+  ],
+  "agentBrowser": {
+    "frozen": true,
+    "note": "保留独立验证材料；不进产品依赖/启动路径/Agent 工具列表；正常启动不开调试端口"
+  },
+  "artifactsLocal": "artifacts/d5-01-r2/*（工作树本地：门禁 JSON、干净树各套件日志、上一轮基线同探针对照日志）",
+  "at": "2026-09-19T18:49:34.660Z"
+}

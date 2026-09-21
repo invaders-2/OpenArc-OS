@@ -155,12 +155,14 @@ async function withRace(mutate) {
   return { fx, sc, flow, exec, dc, hookFired, execId, close: () => fx.fx.close() };
 }
 
-function assertClaimDenied(r, expected) {
+function assertClaimDenied(r, expected, { callStatus = "LEASED", callErrorCode = null } = {}) {
   assert.equal(r.hookFired, true, "race hook 必须真实触发");
   assert.equal(r.exec.ok, false, JSON.stringify(r.exec));
   assert.ok(String(r.exec.error).includes(expected), "expected " + expected + " got " + r.exec.error);
   assert.equal(r.dc.calls, 0, "0 Domain mutation");
-  assert.equal(r.fx.store.callById(r.execId.callId).status, "LEASED", "claim 必须被拒绝（未进入 RUNNING）");
+  const call = r.fx.store.callById(r.execId.callId);
+  assert.equal(call.status, callStatus, "claim 必须被拒绝（未进入 RUNNING）");
+  if (callErrorCode) assert.equal(call.errorCode, callErrorCode, "拒绝原因必须可观测在 call 上");
 }
 
 test("Eligibility→Claim race：Task cancel → claim denied, 0 mutation", async () => {
@@ -189,9 +191,18 @@ test("Eligibility→Claim race：latest run changes → claim denied, 0 mutation
   try { assertClaimDenied(r, "SIDE_EFFECT_STALE_RUN"); } finally { await r.close(); }
 });
 
-test("Eligibility→Claim race：approval revoke → claim denied, 0 mutation", async () => {
+test("Eligibility→Claim race：approval revoke → call BLOCKED/APPROVAL_REVOKED、claim denied、0 mutation", async () => {
   const r = await withRace(({ fx, flow }) => { fx.revokeApproval(flow.callId); });
-  try { assertClaimDenied(r, "SIDE_EFFECT_APPROVAL_REVOKED"); } finally { await r.close(); }
+  try {
+    // 撤销在同一事务内把 call 置 BLOCKED + error_code=APPROVAL_REVOKED（原因可观测），
+    // 因此 claim 由状态守卫先拒绝（CALL_STATE）；0 Domain 调用与 lease 收敛断言逐条保留。
+    assertClaimDenied(r, "SIDE_EFFECT_CALL_STATE", { callStatus: "BLOCKED", callErrorCode: "SIDE_EFFECT_APPROVAL_REVOKED" });
+    assert.equal(r.fx.authority.effectiveApproval(r.execId.callId).effectiveDecision, "REVOKED");
+    assert.equal(r.fx.store.activeLeaseOfCall(r.execId.callId), null, "lease 必须收敛");
+    assert.equal(r.fx.taskStore.taskById(r.sc.run.taskId).status, "BLOCKED", "Step/Task 必须收敛 BLOCKED");
+    const blocked = r.fx.taskStore.eventsOfTask(r.sc.run.taskId).filter((e) => e.event_type === "step.blocked" || e.event_type === "task.blocked");
+    assert.ok(blocked.some((e) => String(e.safe_payload || "").includes("SIDE_EFFECT_APPROVAL_REVOKED")), "Step/Task 收敛原因必须是 APPROVAL_REVOKED：" + JSON.stringify(blocked.map((e) => [e.event_type, e.safe_payload])));
+  } finally { await r.close(); }
 });
 
 test("Eligibility→Claim race：lease revoke → claim denied, 0 mutation", async () => {

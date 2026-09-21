@@ -51,7 +51,14 @@ test("D4-04 executor unavailable：产品 executeApproved fail closed（0 spawn 
 
     // task / step / run 全部经产品 API 准备（不直改 DB）。
     const c = ctx("ai");
-    const t = identity.taskService.createTask({ context: c, goal: "executor unavailable probe" });
+    // R-8/F-2：任务必须像产品入口那样绑定 model config —— 未绑定任务不得启动 run。
+    // 本用例走的是 executor 不可用路径，不会真的调用模型，只需要一个可解析的 provider + config；
+    // 用持有 model.manage 的 settings App Principal 建（ai 只有 view/use/test，不额外放宽权限）。
+    const prov = identity.modelService.createProvider({ context: ctx("settings"), displayName: "D404 Executor Probe", baseUrl: "http://127.0.0.1:1/v1" });
+    assert.equal(prov.ok, true, JSON.stringify(prov));
+    const model = identity.modelService.createModel({ context: ctx("settings"), providerId: prov.provider.providerId, remoteModelId: "remote-d404", capabilities: ["chat"] });
+    assert.equal(model.ok, true, JSON.stringify(model));
+    const t = identity.taskService.createTask({ context: c, goal: "executor unavailable probe", modelConfigId: model.model.configId });
     assert.equal(t.ok, true, JSON.stringify(t));
     const st = identity.taskService.startTask({ context: c, taskId: t.task.taskId, expectedRevision: t.task.revision });
     assert.equal(st.ok, true, JSON.stringify(st));

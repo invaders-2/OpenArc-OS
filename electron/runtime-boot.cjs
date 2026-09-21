@@ -62,6 +62,7 @@ async function createOpenArcRuntime({
   logger = null,
   executorLauncher = null,
   executorTestHook = null,
+  browserControl = null,
   now = null,
 } = {}) {
   if (!userDataDir) throw new Error("createOpenArcRuntime 需要 userDataDir");
@@ -75,6 +76,7 @@ async function createOpenArcRuntime({
     logger,
     executorLauncher,
     executorTestHook,
+    browserControl,
   });
   bootOrder.push(BOOT_STEP.IDENTITY_CREATED);
   if (!identity || !identity.modelProxy || typeof identity.modelProxy.start !== "function") {

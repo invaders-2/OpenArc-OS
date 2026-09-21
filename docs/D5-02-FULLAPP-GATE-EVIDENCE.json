@@ -1,0 +1,293 @@
+{
+  "phase": "D5-02 Full-App",
+  "at": "2026-09-20T12:09:12.770Z",
+  "command": "node experiments/d5-02/canvas-e2e.mjs",
+  "env": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "node": "v22.22.3",
+    "electron": "44.3.0"
+  },
+  "counts": {
+    "pass": 33,
+    "fail": 2,
+    "total": 35
+  },
+  "checks": [
+    {
+      "section": "A0",
+      "name": "真实 electron . 启动（隔离 userData / 隔离 CDP 端口）",
+      "status": "PASS",
+      "actual": "connected"
+    },
+    {
+      "section": "A0",
+      "name": "真实 UI 登录 admin",
+      "status": "PASS",
+      "actual": "ready"
+    },
+    {
+      "section": "A1",
+      "name": "打开应用 = 上游原版外壳（AI Studio）+ 原版首页（不是单个画布编辑器）",
+      "status": "PASS",
+      "actual": "{\"opened\":true,\"shellUp\":true,\"homeUp\":true,\"shellInfo\":{\"title\":\"AI Studio\",\"active\":\"frame-home\",\"nav\":6,\"pages\":[\"frame-home\",\"frame-zimage\",\"frame-enhance\",\"frame-klein\",\"frame-angle\",\"frame-online\",\"frame-gpt-chat\",\"frame-asset-manager\",\"frame-api-settings\",\"frame-comfyui-settings\",\"frame-canvas\",\"settings-detail-frame\"]},\"homeInfo\":{\"title\":\"NOVAI - 首页\",\"newCard\":true,\"recentBox\":true}}"
+    },
+    {
+      "section": "A2",
+      "name": "左侧导航逐项可达：每个入口切到对应子页且子页文档真的加载（不是空 iframe）",
+      "status": "PASS",
+      "actual": "[{\"route\":\"online\",\"clicked\":\"ok\",\"ok\":true},{\"route\":\"gpt-chat\",\"clicked\":\"ok\",\"ok\":true},{\"route\":\"canvas\",\"clicked\":\"ok\",\"ok\":true},{\"route\":\"asset-manager\",\"clicked\":\"ok\",\"ok\":true},{\"route\":\"home\",\"clicked\":\"ok\",\"ok\":true}]"
+    },
+    {
+      "section": "A3",
+      "name": "首页「新建项目」→ 进入无限画布编辑器（同一本书由外壳中继交给画布页；不是只加载列表页）",
+      "status": "PASS",
+      "actual": "{\"before\":{\"n\":0},\"clickNew\":\"clicked\",\"editorUp\":true,\"adapterUp\":true,\"canvasState\":{\"id\":\"cv_mu9rni7p_0ovsh1\",\"nodes\":0,\"edges\":0,\"ro\":false}}"
+    },
+    {
+      "section": "A4",
+      "name": "创建并编辑真实项目：命令层 add/connect/move → 画布自动保存 → OpenArc 存储里一致",
+      "status": "PASS",
+      "actual": "{\"ok\":[true,true,true,true],\"savedOk\":true,\"revision\":2,\"nodes\":[{\"id\":\"n_prompt\",\"x\":80},{\"id\":\"n_llm\",\"x\":520}],\"edges\":1}"
+    },
+    {
+      "section": "A5",
+      "name": "撤销 / 重做：撤销真的回退、重做真的恢复（与手工编辑同一历史入口），结果重新落库",
+      "status": "PASS",
+      "actual": "{\"undoState\":{\"x\":420,\"canRedo\":true},\"redoState\":{\"x\":520},\"redoPersisted\":true}"
+    },
+    {
+      "section": "A6",
+      "name": "返回首页：最近画布列表里出现刚保存的项目（首页数据来自 OpenArc 存储）",
+      "status": "PASS",
+      "actual": "{\"backHome\":true,\"recent\":{\"n\":1,\"first\":{\"id\":\"cv_mu9rni7p_0ovsh1\",\"title\":\"画布 20:02\"}}}"
+    },
+    {
+      "section": "A7",
+      "name": "从首页再打开项目：打开的是**同一本**画布，节点/连线/坐标从 OpenArc 存储恢复",
+      "status": "PASS",
+      "actual": "{\"reopened\":true,\"reopenedSame\":true,\"reopenedState\":{\"id\":\"cv_mu9rni7p_0ovsh1\",\"nodes\":2,\"edges\":1,\"x\":520}}"
+    },
+    {
+      "section": "B1",
+      "name": "模型只有一个来源：画布只看到 OpenArc 已配置可用的模型（无 provider 地址、无凭据）",
+      "status": "PASS",
+      "actual": "{\"configSeen\":{\"chat\":1,\"image\":1,\"providers\":0,\"hasKey\":false,\"hasUrl\":false},\"projectionLeak\":false}"
+    },
+    {
+      "section": "B2",
+      "name": "真实模型调用链（文本）：经 OpenArc 模型服务 → 本地 provider → 结果回到 LLM 节点",
+      "status": "PASS",
+      "actual": "{\"llmDone\":{\"status\":\"done\",\"error\":\"\",\"text\":\"OPENARC-CANVAS-LLM:写一句关于海边的提示词\"},\"chats\":[{\"model\":\"d502-chat\",\"messages\":2,\"last\":\"写一句关于海边的提示词\"}],\"authSeen\":1}"
+    },
+    {
+      "section": "B3",
+      "name": "真实模型调用链（图片）：经 OpenArc 模型服务 → /images/generations → 输出节点拿到图片",
+      "status": "PASS",
+      "actual": "{\"addGen\":true,\"linkGen\":true,\"runGen\":{\"started\":true,\"model\":\"gpt-image-2\"},\"genDone\":{\"status\":\"done\",\"error\":\"\",\"outputCount\":1},\"images\":1}"
+    },
+    {
+      "section": "B4",
+      "name": "失败如实展示：provider 500 → 节点标记失败并带错误（不假装成功）",
+      "status": "PASS",
+      "actual": "{\"status\":\"failed\",\"error\":\"PROVIDER_UNAVAILABLE\"}"
+    },
+    {
+      "section": "B5",
+      "name": "OpenArc 尚不支持的能力（视频）明确报错，不静默改用其它服务",
+      "status": "PASS",
+      "actual": "{\"status\":501,\"body\":{\"error\":\"OPENARC_UNSUPPORTED\",\"message\":\"该功能不在 OpenArc 集成范围内：/api/canvas-video\"}}"
+    },
+    {
+      "section": "B6",
+      "name": "更新/下载上游程序保持禁用（界面明确说明），且应用信息/队列来自宿主（不是上游后端）",
+      "status": "PASS",
+      "actual": "{\"update\":{\"check\":501,\"checkBody\":\"OPENARC_UPDATE_DISABLED\",\"github\":501,\"githubBody\":\"OPENARC_UPDATE_DISABLED\"},\"info\":{\"status\":200,\"updateDisabled\":true,\"queueDisabled\":true},\"queue\":{\"status\":200,\"total\":0,\"source\":\"openarc-task-runtime\"}}"
+    },
+    {
+      "section": "D1",
+      "name": "无权限：撤销画布应用的 model.use 后，生成明确拒绝且 provider 收不到任何请求（F2 缺口）",
+      "status": "PASS",
+      "actual": "{\"hasGrant\":true,\"grantActions\":[\"model.view\",\"model.use\"],\"noPermRun\":true,\"revoked\":{\"ok\":false,\"error\":\"PROXY_UNAUTHORIZED\"},\"requests\":\"0→0\",\"regranted\":true}"
+    },
+    {
+      "section": "D2",
+      "name": "能力不支持：图片能力被指到只有 chat 的模型上 → 明确 CAPABILITY_UNAVAILABLE，provider 收不到图片请求",
+      "status": "PASS",
+      "actual": "{\"capRun\":{\"ok\":false,\"error\":\"CAPABILITY_UNAVAILABLE\"},\"images\":\"0→0\"}"
+    },
+    {
+      "section": "D3",
+      "name": "预算不足：任务级 MODEL_CALLS 用尽后明确拒绝，provider 请求数 = 成功调用数",
+      "status": "PASS",
+      "actual": "{\"budgetOk\":8,\"stop\":\"BUDGET_EXHAUSTED\",\"runStatus\":\"BUDGET_EXHAUSTED\",\"providerChats\":8}"
+    },
+    {
+      "section": "D4",
+      "name": "停止：停止后不再发新请求；迟到结果被丢弃，不覆盖用户随后编辑的节点",
+      "status": "PASS",
+      "actual": "{\"stopped\":\"STOPPED\",\"late\":\"RUN_STOPPED\",\"afterStop\":\"RUN_STOPPED\",\"chatsAtStop\":1,\"chatsAfterLate\":1,\"userText\":{\"text\":\"用户随后编辑的内容\"}}"
+    },
+    {
+      "section": "D5",
+      "name": "失败收敛：provider 500 → 明确失败、每次调用恰好一次请求（无隐藏重试），且回包不含凭据",
+      "status": "PASS",
+      "actual": "{\"fail1\":\"PROVIDER_UNAVAILABLE\",\"fail2\":\"PROVIDER_UNAVAILABLE\",\"requests\":[0,1,2],\"leaksSecret\":false}"
+    },
+    {
+      "section": "F1",
+      "name": "任务模型绑定：指定的模型配置被停用/能力不符/不存在时**明确拒绝**且 0 新增请求（不静默换模型）",
+      "status": "PASS",
+      "actual": "{\"okCall\":true,\"disabled\":{\"ok\":false,\"error\":\"MODEL_CONFIG_UNAVAILABLE\"},\"cross\":{\"ok\":false,\"error\":\"CAPABILITY_UNAVAILABLE\"},\"unknown\":{\"ok\":false,\"error\":\"MODEL_CONFIG_UNAVAILABLE\"},\"requests\":[1,1,1,1]}"
+    },
+    {
+      "section": "F3a",
+      "name": "图片资源：本地导入写入 OpenArc 资源库，画布文档只存 openarc-asset:<ResourceRef>（不存 data URL / 路径）",
+      "status": "PASS",
+      "actual": "{\"upload\":[{\"url\":\"data:image/png;base64,iV\",\"name\":\"d502-asset.png\"}],\"addImg\":{\"ok\":true,\"url\":\"data:image/png;base64,iV\"},\"assetRefHead\":\"res_HK3twMk3\",\"docUrlHead\":\"openarc-asset:res_HK3twMk3rhXD\",\"states\":{\"res_HK3twMk3rhXD6_8iYM0uLMeBlQImkmjD\":{\"state\":\"AVAILABLE\",\"name\":\"d502-asset.png\",\"version\":1}}}"
+    },
+    {
+      "section": "F3b",
+      "name": "图片资源：关闭窗口重开后仍可用（宿主按当前用户逐资源授权解析为 data URL 显示，存储里仍是 ref）",
+      "status": "FAIL",
+      "actual": "{\"closedOnce\":true,\"framesAfterClose\":0,\"reopenedOnce\":true,\"resolved\":false,\"resolvedState\":{\"id\":\"cv_mu9rni7p_0ovsh1\",\"url\":\"openarc-asset:res_HK3\",\"nodes\":5}}"
+    },
+    {
+      "section": "F3c",
+      "name": "图片资源：资源被删除后画布明确不可用（读回失败 → 保留 ref 显示不可用），旧 data URL 缓存不复活",
+      "status": "PASS",
+      "actual": "{\"delRes\":true,\"noticeIsAboutAssets\":false,\"read\":{\"ok\":false,\"error\":\"ASSET_UNAVAILABLE\"},\"state\":{\"state\":\"UNAVAILABLE\"},\"inMountInvalidated\":true,\"inMountNotice\":\"实时状态通道 /ws/stats 在 OpenArc 中不可用（状态栏改用宿主队列计数） 关闭\",\"closedTwice\":true,\"reopenedTwice\":true,\"afterDeleteUrl\":{\"url\":\"openarc-asset:res_HK3twMk3rhXD6_\"}}"
+    },
+    {
+      "section": "E1",
+      "name": "应用页面（含外壳页与画布子页）没有 openarc 桥 / Node / IPC / fs；端点白名单外一律明确拒绝",
+      "status": "PASS",
+      "actual": "{\"boundary\":{\"openarc\":\"undefined\",\"require\":\"undefined\",\"process\":\"undefined\",\"ipc\":\"undefined\",\"fs\":\"undefined\",\"pywebview\":\"undefined\"},\"shellBoundary\":{\"openarc\":\"undefined\",\"require\":\"undefined\",\"process\":\"undefined\",\"ipc\":\"undefined\"},\"unsupported\":{\"status\":501,\"body\":{\"error\":\"OPENARC_UNSUPPORTED\",\"message\":\"该功能不在 OpenArc 集成范围内：/api/secret-thing\"}}}"
+    },
+    {
+      "section": "E2",
+      "name": "openarc-canvas:// 只读白名单：目录穿越与非白名单扩展名都被拒，白名单内资源正常",
+      "status": "PASS",
+      "actual": "{\"traversal\":404,\"nonWhitelisted\":403,\"whitelisted\":200}"
+    },
+    {
+      "section": "E3",
+      "name": "后端不信任消息自报身份：带伪造 userId/sessionRef 的请求按当前会话处理",
+      "status": "PASS",
+      "actual": "{\"forged\":{\"ok\":true,\"count\":1},\"sessionListCount\":1}"
+    },
+    {
+      "section": "E4",
+      "name": "宿主只接受**当前应用实例**的消息：伪造 token / 其它 iframe / 外壳自身发的调用一律不执行",
+      "status": "PASS",
+      "actual": "{\"e4res\":{\"done\":true},\"listBefore2\":1,\"listAfter2\":1}"
+    },
+    {
+      "section": "E5",
+      "name": "出网通道：fetch / 图片 / WebSocket / 表单 / 外站脚本 / window.open / **iframe 自我导航**全部被拦（本地接收端 0 命中；被拦后重新进入画布仍可用）",
+      "status": "PASS",
+      "actual": "{\"attempts\":{\"fetch\":501,\"img\":\"set\",\"ws\":\"set\",\"form\":\"submitted\",\"script\":\"set\"},\"popup\":{\"opened\":false},\"selfNav\":{\"__error\":\"frame.evaluate: Execution context was destroyed, most likely because of a navigation\"},\"hits\":[],\"usableAfter\":true,\"usableState\":{\"id\":\"cv_mu9rni7p_0ovsh1\",\"nodes\":5}}"
+    },
+    {
+      "section": "E5b",
+      "name": "外壳页 / 顶层页的导航出网同样被拦（应用还活着、接收端仍 0 命中）",
+      "status": "PASS",
+      "actual": "{\"shellNav\":{\"__error\":\"frame.evaluate: Execution context was destroyed, most likely because of a navigation.\"},\"topNav\":{\"url\":\"file:///Users/wepingli/Desktop/OpenArc%2\"},\"hits\":[],\"desktopAlive\":true}"
+    },
+    {
+      "section": "E6",
+      "name": "宿主级拦截留证：主进程 will-navigate / will-frame-navigate 真的拦下了导航出网（不是只靠页面 CSP 声明）",
+      "status": "PASS",
+      "actual": "found"
+    },
+    {
+      "section": "E7",
+      "name": "账号边界（数据）：切账号后旧页面全部销毁，B 看不到也打不开 A 的私有画布",
+      "status": "PASS",
+      "actual": "{\"framesAfterLogout\":0,\"memberLogin\":true,\"createdMember\":true,\"memberListCount\":0,\"memberOpen\":false}"
+    },
+    {
+      "section": "E8",
+      "name": "账号边界（存储/通道）：真实同源存储按**本次挂载钥匙**分桶，A 账号的键一个不剩（页面内自证 + 桥的只读隔离探针）",
+      "status": "PASS",
+      "actual": "{\"keyAHead\":\"ka7z6g9e\",\"keyBHead\":\"k1h6272y\",\"isoA\":{\"own\":5,\"foreign\":0,\"mount\":true},\"isoB\":{\"own\":2,\"foreign\":0,\"mount\":true},\"pageSide\":{\"logicalKeys\":[\"studio_active_page\",\"client_id\"],\"active\":\"home\"}}"
+    },
+    {
+      "section": "F4",
+      "name": "AI 编辑正式链：Agent 提议 → 用户审批 → 授权执行 → 画布呈现 → 保存重开仍在（旧 revision 不覆盖用户内容）",
+      "status": "FAIL",
+      "actual": "{\"setup\":{\"providerId\":\"prv_bq7zwH7Ka3FoIQ\",\"agentConfigId\":\"mcf_qqppb47xoEosRQ\",\"defaultOk\":true,\"grantOk\":true},\"chain1\":{\"run1\":{\"taskId\":\"task_PeRxtj4ZCu-qbg\",\"started\":true,\"status\":\"running\",\"stateText\":\"状态：running\"},\"approval1\":false,\"approvalMeta\":null,\"advertised\":[\"browser_navigate\",\"browser_read_page\",\"canvas_edit\",\"canvas_read\",\"resource_read_metadata\",\"resource_search\",\"resource_trash\"],\"term1\":{\"terminal\":true,\"status\":\"SUCCEEDED\"},\"before\":{\"ok\":true,\"revision\":8,\"nodes\":5,\"edges\":3},\"after1\":{\"ok\":true,\"revision\":8,\"nodes\":5,\"edges\":3},\"call1\":null,\"presented\":false,\"closedForF"
+    },
+    {
+      "section": "Z1",
+      "name": "主进程无未处理错误",
+      "status": "PASS",
+      "actual": "clean"
+    }
+  ],
+  "agentChain": {
+    "command": "node experiments/d5-02/agent-canvas-probe.mjs",
+    "checks": [
+      {
+        "section": "S0",
+        "name": "真实 electron . 启动（隔离 userData 前缀 oa-d502agent- / CDP 9794）",
+        "status": "PASS",
+        "actual": "connected"
+      },
+      {
+        "section": "S0",
+        "name": "真实 UI 登录 admin（必要时先 setup）",
+        "status": "PASS",
+        "actual": "ready"
+      },
+      {
+        "section": "S0",
+        "name": "确定性 provider + chat 模型 + 默认 chat 就绪（AI 任务唯一模型来源）",
+        "status": "PASS",
+        "actual": "{\"providerId\":\"prv_BeDc5o0fWzCWeA\",\"configId\":\"mcf_vRhd6I4mDlLziA\",\"defaultOk\":true}"
+      },
+      {
+        "section": "S1",
+        "name": "新建画布 0 节点 + 打开画布窗口（iframe 活着，供‘呈现’路径轮询）",
+        "status": "FAIL",
+        "actual": "{\"nodes\":0,\"revision\":1,\"hostUp\":false,\"frameUp\":false,\"frame\":null}"
+      },
+      {
+        "section": "S2",
+        "name": "Agent 提议 canvas.edit → 真实审批面板出现（Agent 提议 → 审批这一段）",
+        "status": "FAIL",
+        "actual": "{\"approvalShown\":false,\"approvalRequestId\":null,\"advertised\":[\"browser_navigate\",\"browser_read_page\",\"canvas_edit\",\"canvas_read\",\"resource_read_metadata\",\"resource_search\",\"resource_trash\"],\"shot\":\"agent-canvas-no-approval.png\"}"
+      },
+      {
+        "section": "S2",
+        "name": "未出现审批面板时：画布内容与副作用账本必须原样不动（0 proposal / 0 mutation）",
+        "status": "PASS",
+        "actual": "{\"before\":{\"ok\":true,\"revision\":1,\"nodes\":0,\"edges\":0},\"afterAttempt\":{\"ok\":true,\"revision\":1,\"nodes\":0,\"edges\":0},\"canvasCalls\":0,\"toolGranted\":true}"
+      },
+      {
+        "section": "S2",
+        "name": "缺口定位：canvas.edit 未被产品广播给 Harness（模型提议也无法到达 Tool Facade）",
+        "status": "FAIL",
+        "actual": "{\"advertised\":[\"browser_navigate\",\"browser_read_page\",\"canvas_edit\",\"canvas_read\",\"resource_read_metadata\",\"resource_search\",\"resource_trash\"],\"productAllowlist\":[\"browser.navigate\",\"browser.read.page\",\"canvas.edit\",\"canvas.read\",\"resource.read.metadata\",\"resource.search\",\"resource.trash\"]}"
+      },
+      {
+        "section": "S3",
+        "name": "对照：同一命令层（canvas:command / actorKind=USER）落库 + 版本前进（≠ AI 链，仅证明画布侧不阻塞）",
+        "status": "PASS",
+        "actual": "{\"commandRevision\":2,\"beforeRevision\":1,\"reRead\":{\"ok\":true,\"revision\":2,\"nodes\":1,\"edges\":0},\"manualOk\":true}"
+      },
+      {
+        "section": "S4",
+        "name": "对照链：已广播 WRITE 工具走完 Agent 提议 → 审批 UI → 批准 → 受监督执行 → SUCCEEDED/PASS",
+        "status": "PASS",
+        "actual": "{\"status\":\"SUCCEEDED\",\"call\":{\"status\":\"SUCCEEDED\",\"verification\":\"PASS\"},\"audit\":true}"
+      }
+    ]
+  },
+  "observations": [
+    "LLM 运行前：{\"setText\":true,\"runLlm\":{\"started\":true,\"model\":\"gpt-4o-mini\"}}",
+    "画布页自我导航被拦后的状态：{\"usableAfter\":true,\"usableState\":{\"id\":\"cv_mu9rni7p_0ovsh1\",\"nodes\":5},\"relayResetAttempted\":true}",
+    "控制台错误样本：[\"pageerror:allHistory.slice is not a function\",\"Loading the image 'openarc-asset:res_HK3twMk3rhXD6_8iYM0uLMeBlQImkmjD' violates the following Content Security Policy directive: \\\"img-src openarc-canvas: data: blob:\\\". The action has been blocked.\",\"Loading the image 'openarc-asset:res_HK3twMk3rhXD6_8iYM0uLMeBlQImkmjD' violates the following Content Security Policy directive: \\\"img-src openarc-canvas: data: blob:\\\". The action has been blocked.\",\"Loading the image 'openarc-asset:res_HK3twMk3rhXD6_8iYM0uLMeBlQImkmjD' violates the following Content Security Policy directive: \\\"img-src op",
+    "对话框样本：[]"
+  ]
+}

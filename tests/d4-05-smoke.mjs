@@ -53,6 +53,7 @@ function parseTap(text) {
 /** Node TAP 用例 → D4-05 场景归属。 */
 function scenarioFor(name) {
   if (name.includes("S1 A33")) return "S1";
+  if (name.includes("D4-05 S1 ")) return "S1";
   if (name.includes("D4-05 S2")) return "S2";
   if (name.includes("S3 A35")) return "S3";
   if (name.includes("S4 A36")) return "S4";
@@ -79,6 +80,7 @@ const d4Raw = fs.existsSync(d4ArtifactPath) ? fs.readFileSync(d4ArtifactPath) : 
 const NODE_FILES = [
   "d4-05-s1-output-size.test.mjs",
   "d4-05-s1-facade-a33.test.mjs",
+  "d4-05-s1-facade-denied-write.test.mjs",
   "d4-05-s1-facade-association.test.mjs",
   "d4-05-s2-recovery.test.mjs",
   "d4-05-s3-budget-ledger.test.mjs",

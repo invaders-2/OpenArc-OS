@@ -9,6 +9,10 @@
  */
 "use strict";
 const domain = require("./tool-domain.cjs");
+// D5-02：画布命令的**同一份**校验/归一化（手工路径与 AI 路径共用）。
+const canvasDomain = require("./canvas-domain.cjs");
+const { safeURL } = require("./policy.cjs");
+const { safeUrlForAudit } = require("./browser-control-authority.cjs");
 
 const MAX_SEARCH_LIMIT = 20;
 const MAX_STRING = 200;
@@ -31,7 +35,7 @@ function projectFields(source, fields, { maxString = MAX_STRING } = {}) {
 }
 
 /** 静态 allowlist：provider → adapter（绝不从 arguments 解析 module/path）。*/
-function createToolAdapters({ resourceService = null, searchService = null, extra = {} } = {}) {
+function createToolAdapters({ resourceService = null, searchService = null, browserControl = null, canvasService = null, extra = {} } = {}) {
   const providers = {};
 
   providers.test = {
@@ -158,6 +162,220 @@ function createToolAdapters({ resourceService = null, searchService = null, extr
       async verify({ args, result }) {
         if (!result || !Array.isArray(result.items)) return { ok: false, detail: { reason: "NO_ITEMS" } };
         return { ok: result.items.every((it) => it && typeof it.resourceRef === "string") && result.maxLimit === MAX_SEARCH_LIMIT && result.count >= result.items.length, detail: { count: result.count, items: result.items.length } };
+      },
+    };
+  }
+
+  if (browserControl) {
+    /**
+     * 目标只从**用户已授权的控制目标**里解析；模型给的 viewId 只是"请求"。
+     * 缺省 viewId 时：恰好一个已授权目标才可推断，多个必须显式指定（绝不猜）。
+     */
+    const targetOf = ({ context, args }) => {
+      const userId = context && context.actorUserId ? String(context.actorUserId) : "";
+      const appId = (context && context.appId) || "ai";
+      if (!userId) return { ok: false, error: "BROWSER_CONTROL_FORBIDDEN" };
+      const resolved = browserControl.resolveTarget({ userId, appId, viewId: args && args.viewId });
+      if (!resolved.ok) return { ok: false, error: resolved.error };
+      return { ok: true, userId, appId, viewId: resolved.viewId };
+    };
+    providers.BrowserControl = {
+      toolIds: ["browser.read.page", "browser.navigate"],
+      async prepare({ args }) { return { plan: { dryRun: false, provider: "BrowserControl", hasViewId: !!(args && args.viewId) } }; },
+      /** 只读 plan：目标 +（导航时）**已校验的地址**一起进 SideEffectPlan，0 mutation。 */
+      async plan({ context, args, contract }) {
+        const t = targetOf({ context, args });
+        if (!t.ok) return null;
+        const state = browserControl.inspect({ userId: t.userId, appId: t.appId, viewId: t.viewId });
+        if (!state.ok) return null;
+        if (contract && contract.toolId === "browser.navigate") {
+          const url = typeof (args && args.url) === "string" ? args.url : "";
+          if (!safeURL(url)) return null;
+          return {
+            targets: [t.viewId],
+            preconditions: { targetRef: t.viewId, targetType: "browser-tab", url },
+            expectedEffects: [{ action: "navigate", target: t.viewId, from: safeUrlForAudit(state.url), to: safeUrlForAudit(url) }],
+          };
+        }
+        return {
+          targets: [t.viewId],
+          preconditions: { targetRef: t.viewId, targetType: "browser-tab" },
+          expectedEffects: [{ action: "readPage", target: t.viewId, from: safeUrlForAudit(state.url) }],
+        };
+      },
+      /**
+       * 执行：导航**只用持久化的 trusted plan**（targetRef / url），不读 Harness 入参 ——
+       * 批准的目标与地址就是执行的目标与地址；读取的目标同样只从授权表解析。
+       */
+      async execute({ context, args, contract, preconditions, expectedEffects, callId = null }) {
+        const appId = (context && context.appId) || "ai";
+        const userId = context && context.actorUserId ? String(context.actorUserId) : "";
+        if (!userId) return { ok: false, knownNoEffect: true, error: "BROWSER_CONTROL_FORBIDDEN" };
+        if (contract && contract.toolId === "browser.navigate") {
+          const viewId = preconditions && preconditions.targetRef;
+          const url = preconditions && preconditions.url;
+          if (!viewId || typeof url !== "string") return { ok: false, knownNoEffect: true, error: "BROWSER_CONTROL_TARGET_GONE" };
+          // 执行入参必须与 plan 自己的效果副本自洽；不自洽 = plan 被改过 → 明确拒绝，0 派发。
+          const planTo = Array.isArray(expectedEffects) && expectedEffects[0] && typeof expectedEffects[0].to === "string" ? expectedEffects[0].to : null;
+          if (planTo != null && planTo !== safeUrlForAudit(url)) return { ok: false, knownNoEffect: true, error: "BROWSER_CONTROL_PRECONDITION_CHANGED" };
+          const res = await browserControl.navigate({ userId, appId, viewId, url, callId });
+          // 三态严格映射：
+          //   NOT_APPLIED → 能证明这次没生效（FAILED，0 重试）；
+          //   其余已派发但不可知（超时 / 视图消失 / 被别人的导航顶掉）→ UNKNOWN_EFFECT，绝不猜成 FAILED。
+          if (!res.ok) {
+            if (res.notApplied) return { ok: false, knownNoEffect: true, error: res.error, detail: res.detail || null };
+            return res.dispatched ? { ok: false, ambiguous: true, error: res.error, detail: res.detail || null } : { ok: false, knownNoEffect: true, error: res.error };
+          }
+          return { ok: true, result: { viewId: res.viewId, url: res.url, ok: true, requested: res.requested, redirected: !!res.redirected, noop: !!res.noop, dispatchSeq: res.dispatchSeq == null ? null : Number(res.dispatchSeq) } };
+        }
+        const resolved = browserControl.resolveTarget({ userId, appId, viewId: (preconditions && preconditions.targetRef) || (args && args.viewId) });
+        if (!resolved.ok) return { ok: false, error: resolved.error };
+        const page = await browserControl.readPage({ userId, appId, viewId: resolved.viewId });
+        if (!page.ok) return { ok: false, error: page.error };
+        // 正文原样交给调用方，并**显式标注 untrusted**：它永远不是指令，也不进审计。
+        return { ok: true, result: { viewId: page.viewId, url: page.url, title: page.title, text: page.text, truncated: page.truncated, untrusted: true } };
+      },
+      /**
+       * UNKNOWN_EFFECT 的**只读**恢复核查（三态，绝不 mutation / retry）：
+       * 只有"这次派发的加载真的完成"（loadURL promise resolve）才升级为 APPLIED；
+       * 无证据（冷启动 / 记录被挤掉）或只被中止 → INDETERMINATE —— 绝不拿"当前 URL 相等"顶替证据。
+       */
+      async recoveryVerify({ call, preconditions }) {
+        const viewId = preconditions && preconditions.targetRef;
+        const approved = preconditions && typeof preconditions.url === "string" ? preconditions.url : null;
+        // **只认这次执行自己的派发**：绝不拿"该标签最近一次导航"（可能是用户自己点的）来顶替证据。
+        const bound = browserControl.callDispatchSeq && call ? browserControl.callDispatchSeq(call.callId) : null;
+        if (!bound) return { outcome: "INDETERMINATE", reason: "NO_DISPATCH_BINDING", detail: { callId: (call && call.callId) || null, viewId: viewId || null } };
+        const ev = browserControl.dispatchEvidence ? browserControl.dispatchEvidence({ viewId: bound.viewId, seq: bound.seq }) : null;
+        if (!ev) return { outcome: "INDETERMINATE", reason: "NO_DISPATCH_EVIDENCE", detail: { viewId: viewId || null } };
+        if (ev.loaded && ev.loaded.url) {
+          const appliedUrl = String(ev.loaded.url);
+          return {
+            outcome: "APPLIED",
+            reason: appliedUrl === String(ev.requested) ? "OUR_DISPATCH_LOADED" : "OUR_DISPATCH_LOADED_REDIRECTED",
+            detail: { seq: ev.seq, requested: safeUrlForAudit(ev.requested), approved: safeUrlForAudit(approved || ""), appliedUrl: safeUrlForAudit(appliedUrl) },
+          };
+        }
+        return { outcome: "INDETERMINATE", reason: ev.loadError ? "DISPATCH_ABORTED" : "DISPATCH_UNSETTLED", detail: { seq: ev.seq, loadError: ev.loadError || null } };
+      },
+      /** 导航 = 派发证据 + READ_AFTER_WRITE；读取 = 结果形态 + 目标归属。 */
+      async verify({ context, result, contract }) {
+        const appId = (context && context.appId) || "ai";
+        const userId = context && context.actorUserId ? String(context.actorUserId) : "";
+        if (!userId) return { ok: false, detail: { reason: "NO_ACTOR" } };
+        if (contract && contract.toolId === "browser.navigate") {
+          // 归因只认**这次派发**的证据：绝不因为"当前 URL 恰好等于目标"就把别人的导航算成本次成功。
+          const ev = browserControl.dispatchEvidence ? browserControl.dispatchEvidence({ viewId: result && result.viewId, seq: result && result.dispatchSeq }) : null;
+          if (!ev) return { ok: false, detail: { reason: "NO_DISPATCH_EVIDENCE" } };
+          if (result && result.dispatchSeq != null && Number(ev.seq) !== Number(result.dispatchSeq)) return { ok: false, detail: { reason: "DISPATCH_MISMATCH", expected: result.dispatchSeq, observed: ev.seq } };
+          const appliedUrl = ev.loaded ? String(ev.loaded.url || "") : null;
+          const applied = !!appliedUrl && appliedUrl === String((result && result.url) || "");
+          const now = browserControl.inspect({ userId, appId, viewId: result && result.viewId });
+          if (!applied) return { ok: true, applied: false, confidence: "KNOWN_NO_EFFECT", detail: { seq: ev.seq, loadError: ev.loadError || null, appliedUrl: safeUrlForAudit(appliedUrl || ""), observedUrl: now.ok ? safeUrlForAudit(now.url) : null } };
+          return {
+            ok: true, applied: true,
+            detail: {
+              seq: ev.seq, appliedUrl: safeUrlForAudit(appliedUrl), expectedUrl: safeUrlForAudit(result && result.url),
+              redirected: !!(result && result.redirected), superseded: !!ev.superseded,
+              // 之后用户又导航走了也不会改变这条结论：写确实生效过，只是页面已经不在那里。
+              observedUrl: now.ok ? safeUrlForAudit(now.url) : null, stillThere: !!(now.ok && String(now.url) === appliedUrl),
+            },
+          };
+        }
+        const okShape = !!(result && typeof result.viewId === "string" && typeof result.url === "string" && typeof result.text === "string" && typeof result.truncated === "boolean" && result.untrusted === true);
+        return { ok: okShape, detail: { viewId: result && result.viewId, textLength: result && typeof result.text === "string" ? result.text.length : 0, untrusted: !!(result && result.untrusted) } };
+      },
+    };
+  }
+
+  if (canvasService) {
+    /** 只读项目：目标画布必须属于当前账号（或已共享给它 / 组织可见）。*/
+    function canvasTarget({ context, args }) {
+      const actorUserId = context && context.actorUserId ? String(context.actorUserId) : "";
+      if (!actorUserId) return { ok: false, error: "CANVAS_FORBIDDEN" };
+      const canvasId = String((args && args.canvasId) || "");
+      if (!canvasId) return { ok: false, error: "INVALID_INPUT" };
+      return { ok: true, actorUserId, canvasId };
+    }
+    providers.CanvasControl = {
+      toolIds: ["canvas.read", "canvas.edit"],
+      async prepare({ args }) { return { plan: { dryRun: false, provider: "CanvasControl", hasCanvasId: !!(args && args.canvasId) } }; },
+      /**
+       * 只读 plan：目标画布 + **基准 revision** 与命令指纹一起进 SideEffectPlan（0 mutation）。
+       * 批准后执行的就是这份 plan 里的 revision —— 用户在批准与执行之间改了画布，
+       * 版本检查会让这次 AI 编辑失败并保留用户内容（A38）。
+       */
+      async plan({ context, args, contract }) {
+        const t = canvasTarget({ context, args });
+        if (!t.ok) return null;
+        const doc = canvasService.getCanvas({ context: { ...context, sessionRef: context && context.sessionRef }, canvasId: t.canvasId });
+        if (!doc || !doc.ok) return null;
+        if (contract && contract.toolId === "canvas.read") {
+          return { targets: [t.canvasId], preconditions: { targetRef: t.canvasId, targetType: "canvas", revision: doc.canvas.revision }, expectedEffects: [{ action: "read", target: t.canvasId, from: "revision:" + doc.canvas.revision, to: "summary" }] };
+        }
+        // 写入必须先过**同一条权限规则**（只读成员连"计划一次写入"都不允许）。
+        if (!doc.canvas.access || !doc.canvas.access.canEdit) return null;
+        const command = args && args.command && typeof args.command === "object" ? args.command : null;
+        if (!command || typeof command.type !== "string") return null;
+        const normalized = canvasDomain.normalizeCommand(command);
+        if (!normalized.ok || !canvasDomain.AGENT_COMMANDS.includes(normalized.command.type)) return null;
+        const fp = JSON.stringify(normalized.command).slice(0, 2000);
+        return {
+          targets: [t.canvasId],
+          preconditions: { targetRef: t.canvasId, targetType: "canvas", revision: doc.canvas.revision, commandFingerprint: fp, command: normalized.command },
+          expectedEffects: [{ action: normalized.command.type, target: t.canvasId, from: "revision:" + doc.canvas.revision, to: "revision:" + (doc.canvas.revision + 1) }],
+        };
+      },
+      /** 执行**只用持久化的 trusted plan**（revision + 命令），不读 Harness 入参。*/
+      async execute({ context, args, contract, preconditions }) {
+        const actorUserId = context && context.actorUserId ? String(context.actorUserId) : "";
+        if (!actorUserId) return { ok: false, knownNoEffect: true, error: "CANVAS_FORBIDDEN" };
+        const canvasId = preconditions && preconditions.targetRef;
+        if (!canvasId) return { ok: false, knownNoEffect: true, error: "CANVAS_TARGET_GONE" };
+        if (contract && contract.toolId === "canvas.read") {
+          const got = canvasService.readCanvas({ context, canvasId });
+          if (!got.ok) return { ok: false, knownNoEffect: true, error: got.error };
+          return { ok: true, result: got.summary };
+        }
+        const command = preconditions && preconditions.command;
+        const baseRevision = preconditions && preconditions.revision;
+        if (!command || typeof command.type !== "string") return { ok: false, knownNoEffect: true, error: "CANVAS_PRECONDITION_CHANGED" };
+        const res = canvasService.applyCommand({ context, canvasId, baseRevision, command, actorKind: "AGENT" });
+        if (!res.ok) {
+          // 版本冲突 / 只读 / 输入非法 → 都**没有**发生写入（knownNoEffect），绝不重试。
+          return { ok: false, knownNoEffect: true, error: res.error, detail: res.detail ? { reason: res.detail } : null };
+        }
+        return { ok: true, result: { canvasId, revision: res.canvas.revision, commandType: res.command.type, touched: res.touched || null } };
+      },
+      /** READ_AFTER_WRITE：读回画布，确认 revision 前进且目标节点/连线确实存在（或确实被删）。*/
+      async verify({ context, result, preconditions, contract }) {
+        const canvasId = (result && result.canvasId) || (preconditions && preconditions.targetRef);
+        if (!canvasId) return { ok: false, detail: { reason: "NO_TARGET" } };
+        const got = canvasService.getCanvas({ context, canvasId });
+        if (!got || !got.ok) return { ok: false, detail: { reason: "READ_BACK_FAILED" } };
+        if (contract && contract.toolId === "canvas.read") return { ok: true, applied: true, detail: { revision: got.canvas.revision } };
+        const revisionOk = Number(got.canvas.revision) > Number(preconditions && preconditions.revision);
+        const touched = (result && result.touched) || {};
+        const ids = [...(touched.nodeIds || []), ...(touched.edgeIds || [])];
+        const present = ids.filter((id) => got.canvas.doc.nodes.some((n) => n.id === id) || got.canvas.doc.connections.some((c) => c.id === id));
+        const applied = revisionOk && (touched.removed ? present.length === 0 : present.length === ids.length);
+        return { ok: true, applied, detail: { revision: got.canvas.revision, expectedRevision: preconditions && preconditions.revision, touchedCheck: { ids: ids.length, present: present.length, removed: !!touched.removed } } };
+      },
+      /**
+       * UNKNOWN_EFFECT 恢复：只读账本比对。**只认这次计划里的那条命令**，
+       * 不拿"revision 变了"当证据（可能是用户自己改的）。
+       */
+      async recoveryVerify({ context, call, preconditions }) {
+        const canvasId = preconditions && preconditions.targetRef;
+        if (!canvasId) return { outcome: "INDETERMINATE", reason: "NO_TARGET" };
+        const got = canvasService.getCanvas({ context, canvasId });
+        if (!got || !got.ok) return { outcome: "INDETERMINATE", reason: "READ_BACK_FAILED" };
+        const fp = preconditions && preconditions.commandFingerprint;
+        const log = canvasService.commandLog({ context, canvasId, limit: 20 });
+        const hit = log && log.ok ? log.items.find((it) => JSON.stringify(it.command) === fp && it.outcome === "APPLIED") : null;
+        if (hit) return { outcome: "APPLIED", reason: "COMMAND_IN_JOURNAL", detail: { commandId: hit.id, revision: hit.resultRevision } };
+        if (Number(got.canvas.revision) === Number(preconditions && preconditions.revision)) return { outcome: "NOT_APPLIED", reason: "REVISION_UNCHANGED" };
+        return { outcome: "INDETERMINATE", reason: "REVISION_MOVED_WITHOUT_OUR_COMMAND", detail: { revision: got.canvas.revision, base: preconditions && preconditions.revision } };
       },
     };
   }

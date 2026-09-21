@@ -13,8 +13,19 @@ const { contextBridge, ipcRenderer, webUtils } = require("electron");
 contextBridge.exposeInMainWorld("openarc", {
   /** 把 Window Manager 结算出的原生意图交给主进程。这是唯一的原生层上行通道。 */
   sync: (payload) => ipcRenderer.invoke("windows:sync", payload),
-  navigate: (windowId, url) => ipcRenderer.invoke("browser:navigate", { windowId, url }),
-  action: (windowId, action) => ipcRenderer.invoke("browser:action", { windowId, action }),
+  // D5-01：tabId 可选 —— 缺省时作用于该窗口的活动标签（既有两参调用逐字不变）。
+  navigate: (windowId, url, tabId) => ipcRenderer.invoke("browser:navigate", { windowId, url, tabId }),
+  action: (windowId, action, tabId) => ipcRenderer.invoke("browser:action", { windowId, action, tabId }),
+  /**
+   * D5-01 浏览器命令面（受控白名单）：
+   *   · browser/downloads（list / open / reveal / cancel / remove / clear）
+   *   · browser/openExternal（**用户已确认**后才调用）
+   *   · browser/controlList | controlSelect | controlRelease
+   *     （D5-01 Closure-2：用户**显式选择**允许 AI 控制的标签；userId 由主进程注入，
+   *       renderer 只能给 windowId/tabId，归属与存活由主进程校验）
+   * 没有通用 shell / fs / 任意 IPC；downloadId 与 URL 都还要过主进程校验与 trusted(event)。
+   */
+  browser: (command) => ipcRenderer.invoke("browser:command", command),
   /** 原生状态（url / loading / title / 被拦截的弹窗与导航）只读下发。 */
   onNativeState: (callback) => {
     const listener = (_, state) => callback(state);
@@ -101,6 +112,15 @@ contextBridge.exposeInMainWorld("openarc", {
     command: (command) => ipcRenderer.invoke("model:command", command),
   },
   /**
+   * D5-02 画布桥（只给 OpenArc 宿主窗口，**画布页面本身拿不到**：它跑在 sandbox iframe 里）。
+   *
+   * 唯一入口 canvas.command(...)；不暴露文件路径 / 资源字节 / 模型地址 / 凭据。
+   * sessionRef 与 appId 由主进程注入，Renderer 自报的身份字段一律忽略。
+   */
+  canvas: {
+    command: (command) => ipcRenderer.invoke("canvas:command", command),
+  },
+  /**
    * D4-04 Task 桥。
    *
    * **只有两条能力**：派发受控 task 命令、订阅 task 进度事件。
@@ -118,13 +138,15 @@ contextBridge.exposeInMainWorld("openarc", {
   /**
    * D4-03C4 Trusted Approval Gateway 桥。
    *
-   * **只有两条能力**：提交一个 approval decision、订阅 approval 请求事件。
-   * Renderer 不能指定 userId / role / appId / sessionRef / risk / planHash / effectClass /
+   * **三条能力**：提交一个 approval decision、撤销一个"已批准、尚未执行"的操作、订阅 approval 请求事件。
+   * Renderer 不能指定 userId / role / appId / sessionRef / callId / risk / planHash / effectClass /
    * argumentsHash —— 这些都由主进程从当前 authenticated session + SideEffectCall +
    * Tool Registry + Resource Domain 推导。返回值恒为 safe 投影。
    */
   sideEffect: {
     command: (command) => ipcRenderer.invoke("sideeffect:command", command),
+    /** 只能给 approvalRequestId：callId / taskId / userId 由主进程从真实 call 推导。 */
+    revokeApproval: ({ approvalRequestId }) => ipcRenderer.invoke("sideeffect:command", { type: "sideEffect/revokeApproval", approvalRequestId }),
     onEvent: (callback) => {
       const listener = (_, event) => callback(event);
       ipcRenderer.on("sideeffect:event", listener);

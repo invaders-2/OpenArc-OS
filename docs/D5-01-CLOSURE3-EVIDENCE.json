@@ -1,0 +1,385 @@
+{
+  "phase": "D5-01",
+  "round": "Closure-3 · 执行边界与最终验收",
+  "baseHead": "2534c312376c2a198898741132fef718d4626c39",
+  "testedCommit": "2cb3088",
+  "verifyTree": "git archive 2cb3088 → /tmp/oa-d501c-c3（干净导出树 + 软链 node_modules）",
+  "requirements": {
+    "二·主进程内执行边界": {
+      "contractDecision": "保留 in-process execution class（原生视图不可能搬进子进程），但不新增任何绕过：lease/claim/exactly-once/verify 全部仍由同一个 SideEffectAuthority 裁决；本轮补齐派发三态、归因、迟到完成、停止与 plan 完整性。",
+      "evidence": {
+        "unit": "tests/d5-01-browser-inprocess-boundary.test.mjs 6/6（B1 claim 前撤权 0 派发 / B2 派发后停止 / B3 迟到完成不覆盖 + 只读恢复 / B4 目标消失 / B5 归因 / B6 并发与绑定）",
+        "realView": "experiments/d5-01/browser-inprocess-boundary-e2e.mjs（真实原生视图 + 本地站点）",
+        "realViewCounts": {
+          "pass": 32,
+          "fail": 0,
+          "total": 32
+        }
+      },
+      "honestLimits": [
+        "in-process 与 out-of-process 不等价：没有独立 executor 进程的寿命证据（child exit / socket lifetime）。",
+        "导航派发证据只在内存账本（进程重启即消失）→ 冷启动后只能判 INDETERMINATE。",
+        "能证明未执行仅限：派发被中止且我们请求的地址从未提交且当前地址不是目标；其余一律按不可知。"
+      ]
+    },
+    "三·真实可见性": {
+      "instrument": "screencapture -x -o -l <CGWindowID>（窗口自身画面）+ cliclick（CGEvent 真实指针）+ Quartz 读像素；只按本进程 PID 定位窗口，另一个运行中的 OpenArc 实例绝不被激活/点击/关闭。",
+      "counts": {
+        "pass": 7,
+        "fail": 2,
+        "total": 9
+      },
+      "proven": [
+        "网页在屏幕上真的可见（视口中心像素为页面纯绿；对照列无绿 → 不是外壳背景）",
+        "网页可交互：真实指针点进页面，页面自己记录到点击坐标（标定后命中按钮本体，误差 ≤6px）",
+        "标签栏：真实指针新建标签 + 切换标签都真的生效；操作前后两帧像素不同",
+        "地址栏：真实指针点击后焦点真的进入输入框",
+        "面板出现时网页让位、关闭后回到可见（像素级）",
+        "窗口缩放后重新标定，真实指针点击仍然命中（误差 ≤8px）；截图尺寸随之变化"
+      ],
+      "openFinding": {
+        "id": "VIS-GEOMETRY-1",
+        "summary": "像素量与点击标定两个独立仪器都显示：网页那一块（原生视图）在屏幕上的位置比 DOM 预留位置偏高约 83–103pt，高度也更大（436pt vs 预留 322pt）；但真实指针点标签栏/地址栏仍然生效。两者未能完全对上，未定位根因。",
+        "measured": "click mapping dx=0 dy=103（页面 scrollY=0）；pixel longest-green-run top=385 bottom=821 vs placeholder 468..790 → Δtop=-83 Δbottom=+31",
+        "status": "已由 D5-01 Closure-4 更正：测量误差（仪器），不是产品几何缺陷",
+        "correctedBy": {
+          "round": "D5-01 Closure-4",
+          "measurement": {
+            "intent": {
+              "top": 385,
+              "bottom": 821
+            },
+            "pixels": {
+              "top": 385,
+              "bottom": 821
+            },
+            "domPlaceholder": {
+              "top": 468,
+              "bottom": 790
+            }
+          },
+          "cause": "DOM 占位符被 browser-notices 提示条（kind=permission，高 114.5）在 flex 流里推下去；原生视图严格跟随 window-domain 意图矩形"
+        }
+      }
+    },
+    "四·D4-03D 超时": {
+      "rootCause": "测试夹具里 server.close(cb) 在还有未结束请求的连接时会永不回调（已用最小复现确定性证明：2.5s 仍未关闭；closeAllConnections() 后立即关闭）。夹具用它做清理 → 文件进程挂死：0 断言失败、文件级 180s 超时、每次命中不同文件（含纯单测文件）、整轮约 930s 才结束。",
+      "fix": "统一 closeServer()（closeIdleConnections + closeAllConnections + 有界兜底），涉及 tests/model-fake-provider.mjs（共享）、tests/fixtures/d4-04-provider.mjs、experiments/d5-01/site.mjs、tests/tool-d4-03d-closure.test.mjs。不删测试、不跳过文件、不提高超时。",
+      "baselineComparison": "基线 0094e17 导出树同一条命令同样复现（43 tests / 42 pass / 0 fail / 1 文件级超时 / exit 1）→ 预先存在，不是 Closure-2 引入。",
+      "afterFix": "工作区连续 2 次 npm run test:d4-03d：52/52 PASS，exit 0。"
+    }
+  },
+  "gates": {
+    "worktree": [
+      {
+        "command": "npm run test:d4-03d（第 1 次）",
+        "pass": 52,
+        "fail": 0,
+        "tests": 52,
+        "exit": 0
+      },
+      {
+        "command": "npm run test:d4-03d（第 2 次）",
+        "pass": 52,
+        "fail": 0,
+        "tests": 52,
+        "exit": 0
+      },
+      {
+        "command": "node --test 受影响单测（含 in-process 边界 6 项）",
+        "pass": 43,
+        "fail": 0,
+        "exit": 0
+      },
+      {
+        "command": "node experiments/d5-01/browser-inprocess-boundary-e2e.mjs",
+        "pass": 32,
+        "fail": 0,
+        "exit": 0
+      },
+      {
+        "command": "node experiments/d5-01/visibility-e2e.mjs",
+        "pass": 7,
+        "fail": 2,
+        "exit": 1
+      }
+    ],
+    "cleanTree": "见报告 §六"
+  },
+  "productChainRegression": {
+    "command": "node experiments/d5-01/browser-control-e2e.mjs（Closure-2 门禁）",
+    "counts": {
+      "pass": 46,
+      "fail": 0,
+      "total": 46
+    }
+  },
+  "securitySurface": {
+    "counts": {
+      "passed": 16,
+      "failed": 0,
+      "total": 16
+    },
+    "artifactSha256_16": "68f29cc7851dbd1c"
+  },
+  "boundaryChecks": [
+    {
+      "section": "boot",
+      "name": "B0 · 真实 electron . 启动并暴露 CDP",
+      "status": "PASS",
+      "actual": "connected"
+    },
+    {
+      "section": "boot",
+      "name": "B1 · 真实 UI 登录 admin",
+      "status": "PASS",
+      "actual": "ready"
+    },
+    {
+      "section": "setup",
+      "name": "B2 · 真实 UI 建立确定性 provider/model 并设为默认 chat",
+      "status": "PASS",
+      "actual": "{\"pid\":true,\"cid\":true}"
+    },
+    {
+      "section": "setup",
+      "name": "B3 · 治理授予 ai 两个浏览器工具权限",
+      "status": "PASS",
+      "actual": "[\"tool.browser.read\",\"tool.browser.navigate\"]"
+    },
+    {
+      "section": "setup",
+      "name": "B4 · 用户在 UI 上显式授权该标签给 AI 控制",
+      "status": "PASS",
+      "actual": "{\"state\":\"on\",\"viewId\":\"browser#t1\"}"
+    },
+    {
+      "section": "P1",
+      "name": "P1.1 · 审批等待期间真实撤掉 ai 的工具权限（治理入口）",
+      "status": "PASS",
+      "actual": "{\"ok\":true,\"changed\":true,\"grantId\":\"grant_tzMPe-RdRlbUsIusDsi227-PEeWk-5mB\"}"
+    },
+    {
+      "section": "P1",
+      "name": "P1.2 · claim 前撤权 → 调用不成功、绝不派发导航",
+      "status": "PASS",
+      "actual": "{\"status\":\"BLOCKED\",\"error\":\"SIDE_EFFECT_AUTHORIZATION_REVOKED\",\"hits\":0}"
+    },
+    {
+      "section": "P1",
+      "name": "P1.3 · 页面零变化（真实视图仍在 /form）",
+      "status": "PASS",
+      "actual": "http://127.0.0.1:5391/form"
+    },
+    {
+      "section": "P1",
+      "name": "P1.4 · 不留 ACTIVE lease",
+      "status": "PASS",
+      "actual": "[]"
+    },
+    {
+      "section": "P2",
+      "name": "P2.1 · 已真实派发（站点收到请求）",
+      "status": "PASS",
+      "actual": "1"
+    },
+    {
+      "section": "P2",
+      "name": "P2.2 · 停止后调用收敛为**结果未知**（不是 FAILED、更不是'未执行'）",
+      "status": "PASS",
+      "actual": "{\"status\":\"UNKNOWN_EFFECT\",\"error\":\"SIDE_EFFECT_UNKNOWN_EFFECT\"}"
+    },
+    {
+      "section": "P2",
+      "name": "P2.3 · 任务/步骤都有终态（不悬挂）",
+      "status": "PASS",
+      "actual": "{\"task\":\"CANCELLED\",\"steps\":[\"CANCELLED\"]}"
+    },
+    {
+      "section": "P2",
+      "name": "P2.4 · 停止不产生第二次派发（站点仍只有 1 次请求）",
+      "status": "PASS",
+      "actual": "1"
+    },
+    {
+      "section": "P2",
+      "name": "P2.5 · 迟到完成确实发生了（真实视图已落到迟到页面）",
+      "status": "PASS",
+      "actual": "{\"url\":\"http://127.0.0.1:5391/late?ms=9000\",\"marker\":\"LATE-MARKER-5a1c\"}"
+    },
+    {
+      "section": "P2",
+      "name": "P2.6 · 迟到完成**绝不覆盖**已经形成的权威未知状态",
+      "status": "PASS",
+      "actual": "UNKNOWN_EFFECT"
+    },
+    {
+      "section": "P2",
+      "name": "P2.7 · 即时只读恢复结论 = 无结论（不给假结论）",
+      "status": "PASS",
+      "actual": "INDETERMINATE"
+    },
+    {
+      "section": "P2",
+      "name": "P2.8 · UI 如实显示停止/未成功，绝不谎称成功",
+      "status": "PASS",
+      "actual": "全局 AI 助手 让 AI 在授权范围内执行任务  OpenArc 决定、执行并验证；工具调用只在受控 Tool Proxy 内发生。  运行任务取消 状态：CANCELLED · HARNESS_CANCELLED  当前任务状态不支持追"
+    },
+    {
+      "section": "P3",
+      "name": "P3.1 · 执行中关闭标签 → 调用判**不可知**并收敛",
+      "status": "PASS",
+      "actual": "{\"status\":\"UNKNOWN_EFFECT\",\"error\":\"SIDE_EFFECT_UNKNOWN_EFFECT\"}"
+    },
+    {
+      "section": "P3",
+      "name": "P3.2 · 绝不转向别的标签（没有对 /page2 或管理界面的新导航）",
+      "status": "PASS",
+      "actual": "{\"page2\":0,\"late\":1}"
+    },
+    {
+      "section": "P3",
+      "name": "P3.3 · 任务/步骤终态一致（不悬挂）",
+      "status": "PASS",
+      "actual": "{\"task\":\"BLOCKED\",\"steps\":[\"BLOCKED\"]}"
+    },
+    {
+      "section": "P3",
+      "name": "P3.4 · 结果未知时给出人工核查入口（恢复面板 / task-recovery），结论不冒充",
+      "status": "PASS",
+      "actual": "{\"panel\":true,\"applicable\":true,\"calls\":[\"INDETERMINATE\"]}"
+    },
+    {
+      "section": "P4",
+      "name": "P4.0 · 本次导航已真实派发（站点收到请求）",
+      "status": "PASS",
+      "actual": "1"
+    },
+    {
+      "section": "P4",
+      "name": "P4.1 · 用户自己的导航确实落地（真实视图在用户的页面）",
+      "status": "PASS",
+      "actual": "{\"address\":\"http://127.0.0.1:5391/page2\",\"page2\":1}"
+    },
+    {
+      "section": "P4",
+      "name": "P4.2 · 本次执行**绝不被记成成功**（没有把自己的导航算作本次结果）",
+      "status": "PASS",
+      "actual": "{\"status\":\"FAILED\",\"error\":\"BROWSER_CONTROL_NAVIGATE_NOT_APPLIED\"}"
+    },
+    {
+      "section": "P4",
+      "name": "P4.3 · 结论是可辩护的：未提交过我们的地址 → 明确未生效；否则不可知",
+      "status": "PASS",
+      "actual": "KNOWN_NO_EFFECT(BROWSER_CONTROL_NAVIGATE_NOT_APPLIED)"
+    },
+    {
+      "section": "P4",
+      "name": "P4.4 · 绝不产生第二次派发",
+      "status": "PASS",
+      "actual": "1"
+    },
+    {
+      "section": "P5",
+      "name": "P5.1 · 双击批准只产生一次派发（站点恰好 +1）",
+      "status": "PASS",
+      "actual": "1"
+    },
+    {
+      "section": "P5",
+      "name": "P5.2 · 恰好 1 次执行 lease、调用 SUCCEEDED",
+      "status": "PASS",
+      "actual": "{\"leases\":1,\"status\":\"SUCCEEDED\"}"
+    },
+    {
+      "section": "P6",
+      "name": "P6.1 · 两次导航各自用自己的批准与地址（plan 不同、各自的 plan 里就是各自的地址）",
+      "status": "PASS",
+      "actual": "{\"sameHash\":false,\"u2\":\"http://127.0.0.1:5391/page2?probe=p6a\",\"u3\":\"http://127.0.0.1:5391/page3?probe=p6b\"}"
+    },
+    {
+      "section": "P6",
+      "name": "P6.1b · 两次都是从**不同地址**出发的真实导航（不是同址 no-op）",
+      "status": "PASS",
+      "actual": "{\"nav2\":{\"from\":\"http://127.0.0.1:5391/form\",\"to\":\"http://127.0.0.1:5391/page2\"},\"nav3\":{\"from\":\"http://127.0.0.1:5391/page2\",\"to\":\"http://127.0.0.1:5391/page3\"}}"
+    },
+    {
+      "section": "P6",
+      "name": "P6.2 · 各自真实落地到自己的地址（真实视图 = 目标）",
+      "status": "PASS",
+      "actual": "{\"page2\":1,\"page3\":1,\"landed2\":true,\"landed3\":true}"
+    },
+    {
+      "section": "hygiene",
+      "name": "H1 · 主进程无未处理错误",
+      "status": "PASS",
+      "actual": "clean"
+    }
+  ],
+  "visibilityChecks": [
+    {
+      "section": "boot",
+      "name": "V0 · 真实 electron . 启动（隔离 userData / 隔离 CDP 端口）",
+      "status": "PASS",
+      "actual": "connected"
+    },
+    {
+      "section": "boot",
+      "name": "V1 · 真实 UI 登录 admin",
+      "status": "PASS",
+      "actual": "ready"
+    },
+    {
+      "section": "setup",
+      "name": "V2 · 真实视图加载纯色页面（像素判定的基准）",
+      "status": "PASS",
+      "actual": "http://127.0.0.1:5391/paint"
+    },
+    {
+      "section": "safety",
+      "name": "V3 · 真实点击前先确认「最前面的窗口就是我们自己的实例」",
+      "status": "PASS",
+      "actual": "{\"ours\":97921,\"front\":[{\"pid\":86971,\"id\":97921},{\"pid\":1369,\"id\":97543},{\"pid\":17089,\"id\":68702}]}"
+    },
+    {
+      "section": "pixel",
+      "name": "V4 · 屏幕像素证明确实「看得见」网页（视口中心是页面纯绿）",
+      "status": "PASS",
+      "actual": "56,123,83"
+    },
+    {
+      "section": "pixel",
+      "name": "V4b · 截图确实是本窗口的画面（图像尺寸 = 窗口 bounds × 缩放）",
+      "status": "PASS",
+      "actual": "{\"image\":[2880,1880],\"win\":{\"w\":1440,\"h\":940},\"scale\":2,\"titlebar\":32}"
+    },
+    {
+      "section": "pixel",
+      "name": "V4c · 像素量出的网页范围与 DOM 预留位置一致（原生视图没有压住 chrome、也没有错位）",
+      "status": "FAIL",
+      "actual": "{\"fromPixels\":{\"topPt\":387,\"bottomPt\":823},\"placeholder\":{\"topPt\":470,\"bottomPt\":792},\"delta\":{\"top\":-83,\"bottom\":31},\"titlebar\":32,\"chromePt\":90,\"shellColumnGreen\":false,\"shellColumn\":{\"first\":null,\"last\":null}}"
+    },
+    {
+      "section": "safety",
+      "name": "V3b · 真实点击只落在本实例窗口内（每次点击前重新校验前台与内容区）",
+      "status": "FAIL",
+      "actual": "{\"ok\":false,\"reason\":\"not-frontmost:calib\"}"
+    },
+    {
+      "section": "hygiene",
+      "name": "H1 · 主进程无未处理错误",
+      "status": "PASS",
+      "actual": "clean"
+    }
+  ],
+  "notVerified": [
+    {
+      "name": "像素级可见性（本门禁只用 CDP + 站点侧证据，不含屏幕截图）",
+      "reason": "屏幕级证据见同一轮的可见性门禁 docs/D5-01-CLOSURE3-VISIBILITY-*；本门禁不冒充像素证据。"
+    },
+    {
+      "name": "真实指针输入（标签栏/地址栏/网页交互/窗口缩放）",
+      "reason": "坐标标定第一步就被安全闸拦下（{\"ok\":false,\"reason\":\"not-frontmost:calib\"}）；为绝不影响其它实例，未继续发真实点击。"
+    }
+  ]
+}

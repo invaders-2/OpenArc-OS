@@ -47,6 +47,8 @@ const TASK_EVENT = Object.freeze({
   STEP_BLOCKED: "step.blocked",
   STEP_RECOVERY_BLOCKED: "step.recovery_blocked",
   TASK_BLOCKED: "task.blocked",
+  // D4-03：绑定前创建的旧任务在首个 run 上懒绑定一次（绝不伪造历史版本）。
+  MODEL_CONFIG_BOUND: "task.model_config_bound",
   MODEL_CALL_STARTED: "model.call.started",
   MODEL_CALL_COMPLETED: "model.call.completed",
   MODEL_CALL_FAILED: "model.call.failed",
@@ -83,6 +85,12 @@ const TASK_EVENT = Object.freeze({
   TOOL_SIDE_EFFECT_VERIFICATION_PASSED: "tool.side_effect.verification_passed",
   TOOL_SIDE_EFFECT_SUCCEEDED: "tool.side_effect.succeeded",
   TOOL_SIDE_EFFECT_EXECUTION_BLOCKED: "tool.side_effect.execution_blocked",
+  // D4-03 状态完整性：迟到结果被抑制（效果已发生但状态权威不属于本 runtime；safe projection only）
+  TOOL_SIDE_EFFECT_LATE_RESULT_SUPPRESSED: "tool.side_effect.late_result_suppressed",
+  // D4-03 状态完整性：call 已进入不可撤回执行阶段 / 终态，迟到 DENY 不改状态（safe projection only）
+  TOOL_SIDE_EFFECT_DENY_TOO_LATE: "tool.side_effect.deny_too_late",
+  // D4-03 状态完整性：claim 之后的撤销一律 TOO_LATE，绝不改写执行事实（safe projection only）
+  TOOL_SIDE_EFFECT_REVOKE_TOO_LATE: "tool.side_effect.revoke_too_late",
   // D4-03C3 ambiguous result / recovery verification（safe projection only）
   TOOL_SIDE_EFFECT_VERIFICATION_STARTED: "tool.side_effect.verification_started",
   TOOL_SIDE_EFFECT_VERIFICATION_APPLIED: "tool.side_effect.verification_applied",
@@ -156,6 +164,8 @@ const ERROR = Object.freeze({
   TOOL_NOT_EXECUTABLE: "TOOL_NOT_EXECUTABLE",
   RESOURCE_NOT_AVAILABLE: "RESOURCE_NOT_AVAILABLE",
   WRITE_EXECUTION_DISABLED: "WRITE_EXECUTION_DISABLED",
+  // D4 Main-Entry Closure-6：AppendStep 被当前状态拒绝（具体原因见 APPEND_REASON）。
+  APPEND_NOT_ALLOWED: "APPEND_NOT_ALLOWED",
 });
 
 /** D4-02C 第一版编排只允许 reasoning step；绝不申请 tool/shell/browser/mcp step。 */
@@ -202,7 +212,8 @@ const TASK_TRANSITIONS = Object.freeze({
   RUNNING: Object.freeze([TASK_STATUS.WAITING, TASK_STATUS.SUCCEEDED, TASK_STATUS.FAILED, TASK_STATUS.CANCELLED, TASK_STATUS.BLOCKED]),
   WAITING: Object.freeze([TASK_STATUS.RUNNING, TASK_STATUS.CANCELLED, TASK_STATUS.BLOCKED]),
   BLOCKED: Object.freeze([TASK_STATUS.RUNNING, TASK_STATUS.CANCELLED]),
-  SUCCEEDED: Object.freeze([]),
+  // 唯一允许离开 SUCCEEDED 的边，仅产品级追加步骤（AppendStep）使用。
+  SUCCEEDED: Object.freeze([TASK_STATUS.RUNNING]),
   FAILED: Object.freeze([]),
   CANCELLED: Object.freeze([]),
 });
@@ -252,6 +263,18 @@ const RESUME_REASON = Object.freeze({
   // 该 kind 任务级 remaining 仍 > 0：不是容量停止，拒绝循环追加。
   BUDGET_REMAINING: "RESUME_BUDGET_REMAINING",
   EFFECT_STATE_UNAVAILABLE: "RESUME_EFFECT_STATE_UNAVAILABLE",
+});
+
+/** 追加步骤拒绝原因：与 RESUME_REASON 并列，一律显式，绝不模糊成 INTERNAL_ERROR。 */
+const APPEND_REASON = Object.freeze({
+  IN_FLIGHT: "APPEND_IN_FLIGHT",
+  EFFECT_STATE_UNAVAILABLE: "APPEND_EFFECT_STATE_UNAVAILABLE",
+  UNKNOWN_EFFECT: "APPEND_UNKNOWN_EFFECT",
+  SIDE_EFFECT_PENDING: "APPEND_SIDE_EFFECT_PENDING",
+  ACTIVE_LEASE: "APPEND_ACTIVE_LEASE",
+  // cancel 后不可追加；判据里没有独立的 APPEND_CANCELLED，统一归入此原因。
+  NOT_SUCCEEDED: "APPEND_NOT_SUCCEEDED",
+  NO_ARTIFACT: "APPEND_NO_ARTIFACT",
 });
 
 function canTransitionTask(from, to) { return (TASK_TRANSITIONS[String(from)] || []).includes(String(to)); }
@@ -328,7 +351,7 @@ module.exports = {
   CALL_STATUS, CALL_STATUS_ALL, TASK_EVENT, TASK_EVENT_ALL, ERROR,
   TASK_TRANSITIONS, STEP_TRANSITIONS,
   AUTO_RETRY, DEFAULT_MAX_ATTEMPTS, TOOL_EXECUTION,
-  BUDGET_KIND, BUDGET_KIND_ALL, BUDGET_BASE, DEFAULT_MAX_CALLS, MAX_TOOL_ROUNDS, RESUME_GRANT_AMOUNT, MAX_BUDGET_RESUMES, RESUME_REASON,
+  BUDGET_KIND, BUDGET_KIND_ALL, BUDGET_BASE, DEFAULT_MAX_CALLS, MAX_TOOL_ROUNDS, RESUME_GRANT_AMOUNT, MAX_BUDGET_RESUMES, RESUME_REASON, APPEND_REASON,
   ORCHESTRATION_KIND, HARNESS_RUN_STATUS, HARNESS_RUN_STATUS_ALL, HARNESS_RUN_TERMINAL,
   ARTIFACT_TYPE, ARTIFACT_TYPE_ALL, VERIFICATION_TYPE, VERIFICATION_STATUS, ACP_EVENT_MAP,
   canTransitionTask, canTransitionStep, isTerminalTask, isKnownTaskStatus, isKnownStepStatus, isKnownEventType,

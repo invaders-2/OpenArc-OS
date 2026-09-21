@@ -38,8 +38,8 @@ const BRIDGE_ERROR = Object.freeze({
   SIDE_EFFECT_ROUTE_UNAVAILABLE: "SIDE_EFFECT_ROUTE_UNAVAILABLE",
 });
 
-/** 工具结果不得携带绝对路径 / store root / credential 形态。 */
-const UNSAFE_STRING_RE = /(^|\s)(\/Users\/|\/private\/|\/var\/folders|C:\\|\\\\[^\\]+\\)/;
+/** 工具结果不得携带绝对路径 / store root / credential 形态。判据单一来源：tool-domain（safe projection 复用同一份，避免两处漂移）。 */
+const UNSAFE_STRING_RE = domain.UNSAFE_STRING_RE;
 const UNSAFE_KEY_RE = domain.FORBIDDEN_ARGUMENT_KEY;
 
 /**

@@ -66,14 +66,16 @@ try {
 
 /**
  * 冻结清单 —— 与 electron/preload.cjs 的现状逐字对应。
- * 集成后 = 核心线（identity/authorization/device/resource/governance/model/task/sideEffect）
- *        + UI 线文件桥 files，共 14 个。
+ * 集成后 = 核心线（identity/authorization/device/resource/governance/model/task/sideEffect/browser/canvas）
+ *        + UI 线文件桥 files，共 16 个。
+ * browser/canvas 是核心线 D5-01 / D5-02 的桥键：它们同样必须逐个登记在 REGISTERED_EXPANSIONS，
+ * 并按 sec.bridgeExposesNoRawIpc 与各通道 trusted() 守卫两条否决用例一起审。
  */
-const FROZEN_BRIDGE_KEYS = ["action", "authorization", "device", "files", "governance", "identity", "model", "navigate", "onDisplay", "onNativeState", "resource", "sideEffect", "sync", "task"];
+const FROZEN_BRIDGE_KEYS = ["action", "authorization", "browser", "canvas", "device", "files", "governance", "identity", "model", "navigate", "onDisplay", "onNativeState", "resource", "sideEffect", "sync", "task"];
 /** D2-02 冻结的历史基线（5 个）：新增成员必须逐个登记在 REGISTERED_EXPANSIONS。 */
 const PREV_BRIDGE_KEYS = ["action", "navigate", "onDisplay", "onNativeState", "sync"];
 /** 相对 D2-02 基线的全部已登记扩张（顺序与 sorted bridgeKeys 的差集一致）。 */
-const REGISTERED_EXPANSIONS = ["authorization", "device", "files", "governance", "identity", "model", "resource", "sideEffect", "task"];
+const REGISTERED_EXPANSIONS = ["authorization", "browser", "canvas", "device", "files", "governance", "identity", "model", "resource", "sideEffect", "task"];
 /**
  * 冻结的 IPC 通道。
  *
@@ -84,7 +86,9 @@ const REGISTERED_EXPANSIONS = ["authorization", "device", "files", "governance",
 const FROZEN_IPC_CHANNELS = [
   "authorization:command",
   "browser:action",
+  "browser:command",
   "browser:navigate",
+  "canvas:command",
   "device:command",
   "files:copy",
   "files:export",
@@ -115,7 +119,7 @@ const FROZEN_IPC_CHANNELS = [
  */
 const FROZEN_IPC_ON_CHANNELS = ["files:startDrag"];
 /** 扫描范围必须覆盖所有注册 handler 的 bootstrap，否则冻结清单可以靠"漏扫"骗过。 */
-const IPC_SCAN_FILES = ["main.cjs", "identity-bootstrap.cjs", "authorization-bootstrap.cjs", "device-bootstrap.cjs", "resource-bootstrap.cjs", "governance-bootstrap.cjs", "model-bootstrap.cjs", "task-bootstrap.cjs", "side-effect-bootstrap.cjs"];
+const IPC_SCAN_FILES = ["main.cjs", "identity-bootstrap.cjs", "authorization-bootstrap.cjs", "device-bootstrap.cjs", "resource-bootstrap.cjs", "governance-bootstrap.cjs", "model-bootstrap.cjs", "task-bootstrap.cjs", "side-effect-bootstrap.cjs", "canvas-bootstrap.cjs"];
 /** D3-02 冻结的版本（7 个，仅作历史留痕）。 */
 const D3_02_BRIDGE_KEYS = ["action", "authorization", "identity", "navigate", "onDisplay", "onNativeState", "sync"];
 /** D3-01 冻结的版本（6 个，仅作历史留痕）。 */

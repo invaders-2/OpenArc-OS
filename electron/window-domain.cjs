@@ -62,6 +62,16 @@ const AREA_BOTTOM = 114;
  */
 const TITLE_BAR_H = 44;
 
+/**
+ * 浏览器窗口的固定 chrome 高度（标签栏 + 地址栏），单位与 bounds 相同（DIP）。
+ *
+ * **原生视图必须从它下面开始**：WebContentsView 永远绘制在 DOM 之上，
+ * 视口若从窗口正文顶部开始，就会把标签栏和地址栏一起盖住 —— 界面看起来还在，
+ * 但用户点不到（合成点击能"过"，真人点击不能，属于典型的假通过）。
+ * 取值与 src/styles.css 的 .tabstrip / .addressbar 固定高度一一对应，改一处必须改另一处。
+ */
+const BROWSER_CHROME_H = 90;
+
 /** WindowKind：决定该窗口是否有原生 WebContentsView。 */
 const KIND = { APP: "app", BROWSER: "browser" };
 
@@ -70,6 +80,12 @@ const WSTATE = { NORMAL: "normal", MINIMIZED: "minimized", MAXIMIZED: "maximized
 
 /** 窗口 id 前缀：folder 窗口长期存在，其余为单例 app 窗口。 */
 const FOLDER_PREFIX = "folder:";
+
+/**
+ * 浏览器标签上限。原生视图与内存随标签数线性增长（ADR §22 第 5 条），
+ * 因此必须有硬上限：到达上限后 `browser/tab-open` 不改状态，由 UI 明示原因。
+ */
+const TAB_LIMIT = 12;
 
 /** 有原生视图的 App（会话分区按 appId 绑定，见 ADR §16）。 */
 const NATIVE_APPS = new Set(["browser"]);
@@ -107,6 +123,46 @@ function normalizeBounds(b, fallback = { x: 120, y: 100, w: 830, h: 570 }) {
 }
 
 /**
+ * 浏览器窗口的标签模型（D5-01）。
+ *
+ * 标签是 **meta 的一部分**，因此天然走 Window Manager 的唯一持久化出口（§22）；
+ * 渲染层不存在第二份标签状态 —— 开/关/切/改一律经 window-manager 的 browser/* 命令。
+ *
+ * 说明：`meta.url` 恒等于**活动标签**的 url —— 它是快照失效键（occlusion.snapshotKey）
+ * 与 nativeIntents 的输入，不允许与活动标签漂移（invariants 会断言）。
+ *
+ * @param meta 可能是 D5-01 之前的旧形状（只有 meta.url）——旧窗口恢复为单标签，不丢地址。
+ */
+function normalizeBrowserMeta(meta = {}) {
+  const raw = Array.isArray(meta.tabs) ? meta.tabs : [];
+  const tabs = [];
+  const seen = new Set();
+  for (const item of raw) {
+    if (tabs.length >= TAB_LIMIT) break;
+    if (!item || typeof item !== "object") continue;
+    const tabId = typeof item.tabId === "string" && item.tabId ? item.tabId : "";
+    if (!tabId || seen.has(tabId)) continue;
+    seen.add(tabId);
+    tabs.push({
+      tabId,
+      url: typeof item.url === "string" ? item.url : "",
+      title: typeof item.title === "string" ? item.title : "",
+    });
+  }
+  if (!tabs.length && typeof meta.url === "string" && meta.url) tabs.push({ tabId: "t1", url: meta.url, title: "" });
+  if (!tabs.length) tabs.push({ tabId: "t1", url: "", title: "" });
+  const seq = Number(meta.tabSeq);
+  const tabSeq = Number.isFinite(seq) && seq >= tabs.length ? Math.floor(seq) : tabs.length;
+  const activeTabId = tabs.some((t) => t.tabId === meta.activeTabId) ? meta.activeTabId : tabs[tabs.length - 1].tabId;
+  return { tabs, activeTabId, tabSeq };
+}
+
+/** 标签只读投影（非浏览器窗口返回空数组）。 */
+const tabsOf = (w) => (w && Array.isArray(w.meta?.tabs) ? w.meta.tabs : []);
+const activeTabIdOf = (w) => (w?.meta?.activeTabId ? String(w.meta.activeTabId) : tabsOf(w)[0]?.tabId || null);
+const activeTabOf = (w) => tabsOf(w).find((t) => t.tabId === activeTabIdOf(w)) || null;
+
+/**
  * 生成一个 Window 领域对象。
  *
  * @param spec { id, appId, kind?, bounds?, state?, restore?, minSize?, meta? }
@@ -130,12 +186,17 @@ function createWindow(spec, index = 0) {
       w: isNum(spec.minSize?.w) ? Math.max(1, Math.round(spec.minSize.w)) : MIN_WINDOW_W,
       h: isNum(spec.minSize?.h) ? Math.max(1, Math.round(spec.minSize.h)) : MIN_WINDOW_H,
     },
-    meta: {
-      title: String(spec.meta?.title || spec.id),
-      icon: String(spec.meta?.icon || "apps"),
-      // 只有原生窗口有 url；它是快照失效键的一部分（见 electron/occlusion.cjs snapshotKey）
-      ...(spec.meta?.url ? { url: String(spec.meta.url) } : {}),
-    },
+    meta: (() => {
+      const meta = {
+        title: String(spec.meta?.title || spec.id),
+        icon: String(spec.meta?.icon || "apps"),
+        // 只有原生窗口有 url；它是快照失效键的一部分（见 electron/occlusion.cjs snapshotKey）
+        ...(spec.meta?.url ? { url: String(spec.meta.url) } : {}),
+      };
+      // 浏览器窗口恒有标签（D5-01）。旧持久化（只有 url）在这里被归一成单标签。
+      if (kind === KIND.BROWSER) Object.assign(meta, normalizeBrowserMeta(spec.meta));
+      return meta;
+    })(),
     visible: state !== WSTATE.MINIMIZED,
     // 多显示器归属。本轮单屏，null = 主屏；字段先落位，D2-03 之后才有非 null 值。
     displayId: spec.displayId ?? null,
@@ -277,6 +338,18 @@ function invariants(state) {
     if (w.visible !== (w.state !== WSTATE.MINIMIZED)) bad.push(`window ${w.id} 的 visible 与 state 不一致`);
     if (w.bounds.w < w.minSize.w || w.bounds.h < w.minSize.h)
       bad.push(`window ${w.id} 小于最小尺寸`);
+    if (w.kind === KIND.BROWSER) {
+      // 标签模型的不变量：至少一个标签、id 唯一、activeTabId 有效、meta.url 与活动标签一致。
+      const tabs = tabsOf(w);
+      const ids = new Set(tabs.map((t) => t.tabId));
+      if (!tabs.length) bad.push(`浏览器窗口 ${w.id} 没有标签`);
+      if (tabs.length > TAB_LIMIT) bad.push(`浏览器窗口 ${w.id} 标签数超过上限`);
+      if (ids.size !== tabs.length) bad.push(`浏览器窗口 ${w.id} 标签 id 重复`);
+      if (!ids.has(String(w.meta.activeTabId))) bad.push(`浏览器窗口 ${w.id} 的 activeTabId 不在标签集合内`);
+      if (!Number.isFinite(w.meta.tabSeq) || w.meta.tabSeq < tabs.length) bad.push(`浏览器窗口 ${w.id} 的 tabSeq 无效`);
+      const active = activeTabOf(w);
+      if ((w.meta.url || "") !== (active ? active.url : "")) bad.push(`浏览器窗口 ${w.id} 的 meta.url 与活动标签不一致`);
+    }
     if (w.state === WSTATE.MAXIMIZED && !w.restore) bad.push(`window ${w.id} 最大化但没有 restore`);
   }
   if (state.focused) {
@@ -391,8 +464,14 @@ module.exports = {
   WSTATE,
   FOLDER_PREFIX,
   NATIVE_APPS,
+  TAB_LIMIT,
+  BROWSER_CHROME_H,
   kindOf,
   isNativeKind,
+  normalizeBrowserMeta,
+  tabsOf,
+  activeTabIdOf,
+  activeTabOf,
   normalizeBounds,
   createWindow,
   createState,

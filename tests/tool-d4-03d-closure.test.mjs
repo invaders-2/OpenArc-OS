@@ -7,6 +7,7 @@ import path from "node:path";
 import http from "node:http";
 import { pathToFileURL } from "node:url";
 import { createToolHarnessFixture } from "./fixtures/harness-acp/tool-harness-fixture.mjs";
+import { closeServer } from "./model-fake-provider.mjs";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -276,7 +277,8 @@ test("§5/§27 official dsh plugin missing exec.callId fail closed：0 Tool Faca
     assert.deepEqual(result, { items: [], count: 0, truncated: false });
     assert.equal(requests, 1, "有 callId 才发送请求");
   } finally {
-    await new Promise((r) => server.close(r));
+    // 有界关闭：未结束的连接绝不能让清理把测试挂死（见 tests/model-fake-provider.mjs）。
+    await closeServer(server);
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

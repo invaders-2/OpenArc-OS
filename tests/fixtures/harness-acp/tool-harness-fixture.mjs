@@ -6,6 +6,8 @@ import path from "node:path";
 import { createTaskHarnessFixture, APPS, EXACT, PROVIDER_SECRET as TASK_PROVIDER_SECRET } from "./task-harness-fixture.mjs";
 import { reopenResourceRuntime } from "../../resource-fixtures.mjs";
 const require = createRequire(import.meta.url);
+// 产品 allowlist 的唯一真源（夹具不再自己写一份字面量，避免静默分叉）。
+const { READ_TOOL_IDS, WRITE_TOOL_IDS } = require("../../../electron/dsh-tool-profile.cjs");
 const { TaskStore } = require("../../../electron/task-store.cjs");
 const { TaskService } = require("../../../electron/task-service.cjs");
 const { ToolStore } = require("../../../electron/tool-store.cjs");
@@ -55,7 +57,8 @@ export async function createToolHarnessFixture(opts = {}) {
   const toolStore = new ToolStore({ identity: base.f.identity, clock: base.f.clock });
   const toolRegistry = new ToolRegistry();
   // withAdapters=true 才允许真实 READ_ONLY 执行（D4-03B）；默认保持 D4-03A gate 语义。
-  const adapters = opts.withAdapters ? createToolAdapters({ resourceService: base.f.resourceService, searchService: base.f.searchService }) : null;
+  // D5-01 Closure-2：与 production task-bootstrap 逐字同一条装配（browserControl 由宿主注入）。
+  const adapters = opts.withAdapters ? createToolAdapters({ resourceService: base.f.resourceService, searchService: base.f.searchService, browserControl: opts.browserControl || null }) : null;
   const toolProxy = new ControlledToolProxy({ registry: toolRegistry, toolStore, authService: base.f.authService, taskStore: base.taskStore, taskService: base.taskService, adapters, clock: base.f.clock });
   const sideEffectClock = typeof opts.sideEffectClock === "function" ? opts.sideEffectClock : base.f.clock;
   const sideEffectStore = new SideEffectStore({ identity: base.f.identity, clock: sideEffectClock });
@@ -109,7 +112,9 @@ export async function createToolHarnessFixture(opts = {}) {
         sideEffectRuntime,
         memoryContext,
         clock: base.f.clock,
-        toolFacade: { enabled: true, toolIds: opts.facadeToolIds || ["resource.read.metadata", "resource.search"], writeToolIds: opts.facadeWriteToolIds || [], maxCalls: opts.facadeMaxCalls || 4, ttlMs: opts.facadeTtlMs || 120000, execTimeoutMs: opts.facadeExecTimeoutMs, bridgeFactory: opts.facadeBridgeFactory },
+        // 默认即**产品 allowlist**（唯一真源 electron/dsh-tool-profile.cjs）：夹具不另写一份字面量，
+        // 否则产品加一个受控工具后，夹具装配的 facade 会与产品静默分叉。
+        toolFacade: { enabled: true, toolIds: opts.facadeToolIds || READ_TOOL_IDS, writeToolIds: opts.facadeWriteToolIds || WRITE_TOOL_IDS, maxCalls: opts.facadeMaxCalls || 4, ttlMs: opts.facadeTtlMs || 120000, execTimeoutMs: opts.facadeExecTimeoutMs, bridgeFactory: opts.facadeBridgeFactory },
         ...extra,
       });
     },
@@ -121,12 +126,19 @@ export async function createToolHarnessFixture(opts = {}) {
     /** D4-03B Closure：为 Tool Facade 直接调用准备 RUNNING task/step/run（不启动 official dsh）。 */
     dshRunSetup(context = null) {
       const c = context || base.ctx();
-      const t = base.taskService.createTask({ context: c, goal: "bridge probe" });
-      const st = base.taskService.startTask({ context: c, taskId: t.task.taskId, expectedRevision: t.task.revision });
-      const step = base.taskService.createStep({ context: c, taskId: t.task.taskId, kind: "reasoning", input: null, expectedRevision: st.task.revision });
-      const ss = base.taskService.startStep({ context: c, taskId: t.task.taskId, stepId: step.step.stepId, expectedRevision: step.task.revision });
-      const run = base.taskService.startHarnessRun({ context: c, taskId: t.task.taskId, stepId: step.step.stepId, expectedRevision: ss.task.revision });
-      const mr = base.taskService.markHarnessRunRunning({ context: c, taskId: t.task.taskId, runId: run.run.runId, expectedRevision: run.task.revision });
+      // R-8：未绑定任务不得经真实 TaskService 启动 run。该 context 能使用本夹具的 config 就按 F-2 之后
+      // production 的样子绑定（后续测试还会用真实 TaskService 继续推进这个 run）；用不了（非 admin 对
+      // PERSONAL config 无 USE 权限）就退回契约允许的 test-only 桩装配 —— 那些调用者只走 Tool Facade /
+      // side-effect 路径，从不要求这个 run 能被真实 TaskService 继续推进。
+      const usable = base.f.modelService.resolveModel({ context: c, capability: "chat", configId: base.modelConfigId });
+      const svc = usable.ok ? base.taskService
+        : new TaskService({ identity: base.f.identity, authService: base.f.authService, authStore: base.f.store, taskStore: base.taskStore, clock: base.f.clock });
+      const t = svc.createTask({ context: c, goal: "bridge probe", ...(usable.ok ? { modelConfigId: base.modelConfigId } : {}) });
+      const st = svc.startTask({ context: c, taskId: t.task.taskId, expectedRevision: t.task.revision });
+      const step = svc.createStep({ context: c, taskId: t.task.taskId, kind: "reasoning", input: null, expectedRevision: st.task.revision });
+      const ss = svc.startStep({ context: c, taskId: t.task.taskId, stepId: step.step.stepId, expectedRevision: step.task.revision });
+      const run = svc.startHarnessRun({ context: c, taskId: t.task.taskId, stepId: step.step.stepId, expectedRevision: ss.task.revision });
+      const mr = svc.markHarnessRunRunning({ context: c, taskId: t.task.taskId, runId: run.run.runId, expectedRevision: run.task.revision });
       return { context: c, taskId: t.task.taskId, stepId: step.step.stepId, runId: run.run.runId, revision: mr.ok ? mr.task.revision : ss.task.revision };
     },
     /** D4-03B Closure：建立 ORGANIZATION 级 model config + default，使非 admin 用户也能走 official dsh。 */

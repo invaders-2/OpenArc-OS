@@ -1,0 +1,59 @@
+{
+  "phase": "D5-01",
+  "round": "Closure · 最小受控 AI 浏览器能力与验收补齐",
+  "baseHead": "f93e8351279fcfec26bf0e1ef7fdca0a53a87a56",
+  "testedCommit": "6c865023093855fee61f4db4ebb8a521764fc729",
+  "verifyTree": "git archive 6c86502 → 干净导出树",
+  "implemented": {
+    "authority": "electron/browser-control-authority.cjs（选择/归属/稳定绑定/每次重查/生命周期拒绝/有界不可信正文/URL 策略/审计去敏）",
+    "contracts": [
+      "browser.read.page (READ_ONLY)",
+      "browser.navigate (REVERSIBLE_WRITE + requiresApproval + CONTROLLED_REVERSIBLE_WRITE)"
+    ],
+    "controller": "native-view-controller：entry.sessionKey/title、ownerOfView、readText（只读 innerText）",
+    "tests": "tests/d5-01-browser-control.test.mjs 6/6"
+  },
+  "notWired": [
+    "用户选择目标的正式产品入口（IPC/preload/UI）",
+    "executionProvider=BrowserControl 的适配器与执行接线",
+    "导航接入 SideEffectAuthority 的 propose→approve→lease→execute 链",
+    "产品链 E2E（真实 electron . + 确定性 provider + 产品 UI 的 AI 控制闭环）与预算/停止/恶意页面证据",
+    "模型可见面（dsh-tool-profile 的 FORBIDDEN_HARNESS_TOOLS 含 browser，属需裁决的契约变化）"
+  ],
+  "d2SecuritySurface": {
+    "before": "4 项 FAIL（bridgeKeysMatchFrozenList / bridgeExpandedOnlyByModel / ipcChannelsMatchFrozenList / everyChannelTrustsSender）",
+    "after": "6/6 checks PASS（精确更新冻结清单 +browser/sideEffect/task、+browser:command；把过期的只允许 +model 否决用例替换为'相对 D2 基线只允许已批准增量且不得移除'；保留 bridgeExposesNoRawIpc 与 everyChannelTrustsSender 两个否决用例）",
+    "residual": "probe.error：真实主进程启动后等外壳窗口 8s 超时（D4 runtime boot 后既有时序问题；本轮基线 f93e835 与 39d733d 上同样失败），非本四项"
+  },
+  "cleanVerification": {
+    "affected node suites": {
+      "tests": 85,
+      "pass": 85,
+      "fail": 0
+    },
+    "test:d4-03d": {
+      "status": "PASS 52/52"
+    },
+    "d2-02 security-surface": {
+      "checks": "6/6 PASS",
+      "exitCode": 1,
+      "reason": "既有 probe.error（外壳窗口 8s 超时）"
+    },
+    "test:d5-01": {
+      "pass": 64,
+      "fail": 0,
+      "total": 64
+    }
+  },
+  "d501Status": "PARTIAL",
+  "d501Gaps": [
+    "AI 控制能力未接入产品链（选择入口 / 执行适配器 / 审批接线 / 产品链 E2E）",
+    "预算与停止的产品级拒绝未验证",
+    "恶意页面越权（其他标签 / 管理能力）未在产品链验证",
+    "可见性：真人鼠标路径 + 连续截图/录屏未取得（本机另有实例占用屏幕）",
+    "崩溃恢复、高 DPI、多屏、Windows、任意网站兼容、像素级层级真值 = NOT VERIFIED"
+  ],
+  "agentBrowser": "保持独立实验状态（不进依赖 / 启动路径 / 工具列表）",
+  "artifactsLocal": "artifacts/d5-01-r2/*、artifacts/d2-02/*（工作树本地）",
+  "at": "2026-09-19T19:07:50.845Z"
+}

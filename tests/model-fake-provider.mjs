@@ -1,6 +1,28 @@
 /** D4-01 · 真实 localhost fake OpenAI-compatible provider（不是 mock function）。 */
 import http from "node:http";
 
+/**
+ * 关闭测试用 HTTP server 的**唯一**写法（D5-01 Closure-3）。
+ *
+ * 为什么不能直接 `server.close(cb)`：只要还有一条"请求已开始但未结束"的连接
+ * （测试里很常见：任务在模型调用途中被取消 / 客户端断开），close 的回调**永远不会来** ——
+ * 于是测试文件进程永久挂起，表现为"某个文件级 180s 超时、0 断言失败"。
+ * 实测（本机 Node 22 / macOS）：未结束连接存在时 `close()` 2.5s 后仍未关闭；
+ * `closeAllConnections()` 之后立刻关闭。这里三件事都做：先关空闲、再强制关全部、
+ * 最后仍保留一个**有界**兜底，绝不让清理把测试挂死。
+ */
+export function closeServer(server, { timeoutMs = 2000 } = {}) {
+  return new Promise((resolve) => {
+    if (!server) return resolve();
+    let done = false;
+    const finish = () => { if (done) return; done = true; clearTimeout(timer); resolve(); };
+    const timer = setTimeout(() => { try { server.closeAllConnections?.(); } catch { /* ignore */ } finish(); }, Math.max(1, timeoutMs));
+    try { server.closeIdleConnections?.(); } catch { /* ignore */ }
+    try { server.closeAllConnections?.(); } catch { /* ignore */ }
+    try { server.close(() => finish()); } catch { finish(); }
+  });
+}
+
 export async function startFakeProvider({ behavior = "success", secretEcho = null, delayMs = 0 } = {}) {
   const state = { requests: 0, authHeaders: [], bodies: [], behavior, closed: 0, toolLoop: null, toolLoopBodies: [], toolCalls: [] };
   const server = http.createServer((req, res) => {
@@ -72,5 +94,5 @@ export async function startFakeProvider({ behavior = "success", secretEcho = nul
     });
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
-  return { baseUrl: "http://127.0.0.1:" + server.address().port, state, close: () => new Promise((r) => server.close(r)), setBehavior: (b) => { state.behavior = b; } };
+  return { baseUrl: "http://127.0.0.1:" + server.address().port, state, close: () => closeServer(server), setBehavior: (b) => { state.behavior = b; } };
 }

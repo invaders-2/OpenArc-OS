@@ -54,6 +54,9 @@ const GOVERNANCE_COMMANDS = Object.freeze([
   "governance/getAppAccess",
   "governance/grantAppAccess",
   "governance/revokeAppAccess",
+  "governance/getAppToolAccess",
+  "governance/grantAppToolAccess",
+  "governance/revokeAppToolAccess",
   "governance/setAppStatus",
   "governance/listAudit",
 ]);
@@ -96,6 +99,9 @@ function registerGovernanceIpc({ ipcMain, service, authorization, identity, isTr
         case "governance/getAppAccess": return gov.getAppAccess({ context, appId: command.appId });
         case "governance/grantAppAccess": return gov.grantAppAccess({ context, appId: command.appId, resourceId: command.resourceId, collectionId: command.collectionId, resourceType: command.resourceType, departmentId: command.departmentId, scope: command.scope, actions: command.actions, permissionSet: command.permissionSet, expiresAt: command.expiresAt });
         case "governance/revokeAppAccess": return gov.revokeAppAccess({ context, grantId: command.grantId });
+        case "governance/getAppToolAccess": return gov.getAppToolAccess({ context, appId: command.appId });
+        case "governance/grantAppToolAccess": return gov.grantAppToolAccess({ context, appId: command.appId, actions: command.actions });
+        case "governance/revokeAppToolAccess": return gov.revokeAppToolAccess({ context, grantId: command.grantId });
         case "governance/setAppStatus": return gov.setAppStatus({ context, appId: command.appId, status: command.status });
         case "governance/listAudit": return gov.listAudit({ context, filter: command.filter, limit: command.limit });
         default: return { ok: false, error: "INVALID_INPUT" };

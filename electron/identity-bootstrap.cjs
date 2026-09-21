@@ -19,6 +19,7 @@ const { createDeviceBundle, registerDeviceIpc } = require("./device-bootstrap.cj
 const { createResourceBundle, registerResourceIpc } = require("./resource-bootstrap.cjs");
 const { createGovernanceBundle, registerGovernanceIpc } = require("./governance-bootstrap.cjs");
 const { createModelBundle, registerModelIpc } = require("./model-bootstrap.cjs");
+const { createCanvasBundle } = require("./canvas-bootstrap.cjs");
 const { createTaskBundle } = require("./task-bootstrap.cjs");
 const { createSideEffectGateway, registerSideEffectIpc } = require("./side-effect-bootstrap.cjs");
 
@@ -28,7 +29,7 @@ const { createSideEffectGateway, registerSideEffectIpc } = require("./side-effec
  * @param opts.allowAdmin  是否放行 admin / 测试夹具命令
  * @param opts.logger      可选，注入外部 logger（探针用）
  */
-function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, logger, serviceIdentity = null, nativeImage = null, executorLauncher = null, executorTestHook = null } = {}) {
+function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, logger, serviceIdentity = null, nativeImage = null, executorLauncher = null, executorTestHook = null, browserControl = null } = {}) {
   fs.mkdirSync(userDataDir, { recursive: true, mode: 0o700 });
   const log = logger || new IdentityLogger();
   const store = new IdentityStore({
@@ -72,8 +73,17 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
     searchService,
     logger: log,
   });
+  // D5-02：无限画布的**文档层**。board 身份与资源引用沿用 D3-04D 的 canvasService，
+  // 这里只加"可编辑文档 + 版本检查 + 命令层"（AI 工具与画布宿主共用同一个实例）。
+  const { service: canvasDocService } = createCanvasBundle({
+    identityStore: store,
+    resourceStore,
+    resourceService,
+    authService: authorization,
+    logger: log,
+  });
   // D4-01：模型 Provider / Credential / Config / Default（复用同一连接与 AuthorizationService）。
-  const { modelStore, credentialStore, modelService, modelProxy } = createModelBundle({
+  const { modelStore, credentialStore, modelService, modelProxy, seedModelAppPolicy } = createModelBundle({
     identityStore: store,
     authorization,
     authStore,
@@ -92,6 +102,11 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
     logger: log,
     resourceService,
     searchService,
+    // D5-01 Closure-2：受控浏览器目标是**宿主（真实 main）持有**的对象：原生视图控制器晚绑定，
+    // 这里只把同一实例接进唯一工具链，绝不在装配层再造一个。
+    browserControl,
+    // D5-02：AI 编辑画布的执行端（与手工路径同一命令层 + 版本检查 + 权限规则）。
+    canvasService: canvasDocService,
     dbPath: path.join(userDataDir, "identity.db"),
     storeRoot: path.join(userDataDir, "library"),
     runtimeDir: path.join(userDataDir, "runtime", "side-effects"),
@@ -100,9 +115,24 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
     executorLauncher,
     executorTestHook,
   });
+  // D5-02 Closure：拿到会话时对该会话的组织再 seed 一次内置 Model App baseline
+  // （首次运行是"先建库、后注册管理员"，一次性 seed 时还没有组织）。upsert 幂等。
+  try {
+    service.onEvent((event) => {
+      const teamId = event && event.snapshot && event.snapshot.teamId ? String(event.snapshot.teamId) : null;
+      if (!teamId) return;
+      const admin = store.allUsers().find((u) => u.role === "ADMIN" && u.team_id === teamId) || null;
+      seedModelAppPolicy({ organizationId: teamId, grantedBy: admin ? admin.id : "system:model-baseline" });
+    });
+  } catch { /* ignore */ }
+
+  // D5-02 Closure：画布生成运行需要任务层（预算/停止/账本）与模型层 —— 装配完成后晚绑定同一实例。
+  canvasDocService.attachRuntime({ taskService, modelService, tempDir: path.join(userDataDir, "tmp", "canvas-imports") });
+  try { require("node:fs").mkdirSync(path.join(userDataDir, "tmp", "canvas-imports"), { recursive: true }); } catch { /* ignore */ }
+
   // Trusted Approval Gateway：Renderer 只能经此通道看到安全投影并提交 decision。
   const sideEffectGateway = createSideEffectGateway({ sideEffectRuntime });
-  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, modelStore, credentialStore, modelService, modelProxy, taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, sideEffectGateway, orchestrator };
+  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, modelStore, credentialStore, modelService, modelProxy, taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, sideEffectGateway, orchestrator, browserControl, canvasDocService };
 }
 
 /**
@@ -142,7 +172,14 @@ function registerIdentityIpc({ ipcMain, service, authorization, device, resource
   // D4-03C4：Trusted Approval Gateway（唯一 approval 通道；sessionRef 由主进程注入）。
   if (sideEffect) {
     if (typeof sideEffect === "object" && typeof sendSideEffect === "function" && sideEffect.runtime) {
-      sideEffect.runtime.onApprovalRequested = (request) => sendSideEffect({ type: "sideEffect/approvalRequested", request });
+      // §44 对推送同样成立：runtime 推来的快照没有 context，直接转发会把**别人任务**的
+      // approval 投影送进当前窗口，所以按当前 authenticated session 重新投影，不属于本会话就静默丢弃。
+      sideEffect.runtime.onApprovalRequested = (request) => {
+        const current = (service && service.current) || null;
+        if (!current) return;
+        const snapshot = sideEffect.runtime.approvalSnapshot({ approvalRequestId: request && request.approvalRequestId, context: { sessionRef: current } });
+        if (snapshot) sendSideEffect({ type: "sideEffect/approvalRequested", request: snapshot });
+      };
     }
     registerSideEffectIpc({ ipcMain, service: sideEffect, identity: service, isTrusted, send: sendSideEffect });
   }

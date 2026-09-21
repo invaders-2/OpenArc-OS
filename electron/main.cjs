@@ -18,7 +18,10 @@ const { pathToFileURL } = require("node:url");
 const { safeURL } = require("./policy.cjs");
 const geometry = require("./geometry.cjs");
 const { NativeViewController } = require("./native-view-controller.cjs");
+const { BrowserControlAuthority } = require("./browser-control-authority.cjs");
 const { registerIdentityIpc } = require("./identity-bootstrap.cjs");
+// D5-02：无限画布的宿主命令面（文档层实例由 identity-bootstrap 装配，AI 工具用同一个）。
+const { registerCanvasIpc } = require("./canvas-bootstrap.cjs");
 const { registerTaskIpc } = require("./task-bootstrap.cjs");
 const { createDefaultExecutorLauncher } = require("./executor-launcher.cjs");
 const { createOpenArcRuntime } = require("./runtime-boot.cjs");
@@ -30,6 +33,10 @@ let identity;
 let files;
 /** 身份服务创建失败时的人话原因；渲染层经 identity:command 的既有通道拿到它。 */
 let identityBootFailure = null;
+/** D5-02：画布文档服务（AI 编辑工具的执行端与渲染层命令共用同一个实例）。*/
+let canvasBundle;
+/** D5-01 Closure-2：受控浏览器目标（用户显式授权）。宿主持有唯一实例，工具链与 UI 共用同一个。 */
+let browserControl;
 
 /**
  * 只读文件协议（Quick Look 的流式媒体源）。
@@ -67,6 +74,9 @@ if (devURL) console.log("[openarc] 开发预览：加载 " + devURL + "（OA_DEV
 // Renderer 只能拿到 openarc-resource:// 短时 capability URL，绝不接触本地路径。
 protocol.registerSchemesAsPrivileged([
   { scheme: "openarc-resource", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: false } },
+  // D5-02：无限画布 bundle 的自定义协议（iframe 用；**只读**目录白名单，无目录穿越）。
+  // corsEnabled：画布 iframe 是 opaque origin，字体等子资源必须能跨源取（静态只读 bundle）。
+  { scheme: "openarc-canvas", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } },
 ]);
 
 /**
@@ -78,6 +88,31 @@ const NATIVE_RESOURCES = {
   "siri-blob": "/System/Library/PrivateFrameworks/SiriUI.framework/Versions/A/Resources/Siri Blob.mov",
 };
 const NATIVE_TYPES = { ".mov": "video/quicktime", ".mp4": "video/mp4", ".m4v": "video/x-m4v" };
+
+/**
+ * D5-02 · 画布 bundle 的只读协议 handler。
+ *
+ * 画布页面跑在 sandbox iframe（allow-scripts，opaque origin）里，不接触 file:// 与用户目录：
+ * 它只能读到 dist/novai-canvas 下白名单扩展名的文件（其余 403/404）。
+ */
+const CANVAS_MIME = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".svg": "image/svg+xml", ".gif": "image/gif", ".webp": "image/webp", ".mp4": "video/mp4", ".webm": "video/webm", ".mp3": "audio/mpeg", ".woff2": "font/woff2", ".ttf": "font/ttf", ".woff": "font/woff", ".ico": "image/x-icon" };
+function handleCanvasProtocol(request) {
+  let url;
+  try { url = new URL(request.url); } catch { return new Response("bad request", { status: 400 }); }
+  const rel = decodeURIComponent(url.pathname).replace(/^[/]+/, "");
+  if (!rel || rel.includes("..") || rel.includes("\\") || rel.includes('\0')) return new Response("forbidden", { status: 403 });
+  const ext = path.extname(rel).toLowerCase();
+  if (!Object.prototype.hasOwnProperty.call(CANVAS_MIME, ext)) return new Response("forbidden", { status: 403 });
+  const distRoot = path.join(__dirname, "../dist/novai-canvas");
+  const publicRoot = path.join(__dirname, "../public/novai-canvas");
+  const base = fs.existsSync(distRoot) ? distRoot : publicRoot;
+  const file = path.resolve(base, rel);
+  if (!file.startsWith(path.resolve(base) + path.sep)) return new Response("forbidden", { status: 403 });
+  if (!fs.existsSync(file)) return new Response("not found", { status: 404 });
+  // 画布跑在 opaque origin（sandbox allow-scripts）里：字体等子资源需要 CORS 头才能加载。
+  // 这是**只读静态 bundle**、无凭据、无用户数据，因此允许任意来源读取。
+  return new Response(fs.readFileSync(file), { status: 200, headers: { "content-type": CANVAS_MIME[ext], "access-control-allow-origin": "*" } });
+}
 
 /** 只接受来自本应用外壳页的调用。
  * 双重条件（sender + senderFrame.url）在 D1-05 冻结，本阶段不放宽。
@@ -148,6 +183,27 @@ function recoverFromStartupFailure(error) {
   }
 }
 
+/**
+ * D5-01 Closure-2 · **产品就绪信号**（探针/门禁同步的唯一判据）。
+ *
+ * 就绪定义（本进程内的确定事实，不是时间猜测）：
+ *   ① 外壳窗口已创建；② 全部 IPC handler 已注册；③ 外壳页已开始加载。
+ * 探针原先"等 8 秒再找窗口"在 D4 runtime boot 变长后必然假失败 —— 那是仪器时序缺陷，
+ * 不是产品缺陷；修法只能是把判据换成这个信号，绝不改成"等更久"。
+ */
+function markProductReady() {
+  const state = {
+    at: Date.now(),
+    pid: process.pid,
+    shellWindow: !!(win && !win.isDestroyed()),
+    ipcRegistered: true,
+    uiURL,
+  };
+  globalThis.__OPENARC_PRODUCT_READY__ = state;
+  try { app.emit("openarc:product-ready", state); } catch { /* 没有监听者也要能启动 */ }
+  return state;
+}
+
 app.whenReady().then(async () => {
   installApplicationMenu();
   // ---------------------------------------------------------------------------
@@ -157,8 +213,25 @@ app.whenReady().then(async () => {
   // against the actual created identity runtime.
   // identity 必须先于 modelProxy.start() 创建；顺序错误一律 loud fail，绝不静默吞掉。
   // ---------------------------------------------------------------------------
+  browserControl = new BrowserControlAuthority({
+    // 审计进**同一张** authorization_audit：受控浏览器的授权/撤销与工具调用同源可查。
+    audit: (r) => {
+      try {
+        identity?.toolStore?.insertToolAudit?.({
+          at: Date.now(), actorUserId: r.actorUserId || null, appId: r.appId || null, toolRef: r.toolRef || null,
+          action: String(r.action || "").slice(0, 80), decision: r.decision == null ? null : String(r.decision).slice(0, 120),
+          reasonCode: r.reasonCode == null ? null : String(r.reasonCode).slice(0, 120), requestId: null,
+        });
+      } catch { /* audit 失败不改变业务结果 */ }
+    },
+    log: () => {},
+  });
+
+  // runtime 在 try 之外声明：下面的 OPENARC_E2E_OBSERVE 观测块要用 runtime.snapshot()，
+  // 而"身份库打不开"是可恢复的启动失败（见 catch）—— 两条路径都得能引用到这个名字。
+  let runtime = null;
   try {
-    const runtime = await createOpenArcRuntime({
+    runtime = await createOpenArcRuntime({
       userDataDir: app.getPath("userData"),
       safeStorage,
       nativeImage,
@@ -170,6 +243,8 @@ app.whenReady().then(async () => {
       allowAdmin: process.env.OPENARC_IDENTITY_ADMIN === "1",
       // Control Service 身份（§60）：未配置时配对会因 SERVICE_IDENTITY_MISMATCH 被拒 —— 失败关闭。
       serviceIdentity: process.env.OPENARC_SERVICE_IDENTITY || null,
+      // D5-01 Closure-2：受控浏览器目标的唯一实例（审计进同一张 authorization_audit）。
+      browserControl,
     });
     identity = runtime.identity;
   } catch (error) {
@@ -180,7 +255,11 @@ app.whenReady().then(async () => {
     console.error("[openarc] 身份服务启动失败：" + identityBootFailure);
   }
 
-
+  // D4 main-entry E2E：唯一一处默认关闭的只读 boot 观测。仅把 safe boot snapshot 写到隔离
+  // userData，供真实 electron/main.cjs 启动的测试断言 boot 顺序；不改任何服务/权限/执行链。
+  if (process.env.OPENARC_E2E_OBSERVE === "1") {
+    try { fs.writeFileSync(path.join(app.getPath("userData"), "openarc-e2e-boot.json"), JSON.stringify(runtime.snapshot())); } catch {}
+  }
 
   win = new BrowserWindow({
     width: 1440,
@@ -247,6 +326,9 @@ app.whenReady().then(async () => {
     if (url === uiURL) return;
     if (devOrigin !== null && url.startsWith(devOrigin + "/")) return;
     e.preventDefault();
+    // 主进程侧留证：外壳页顶层的导航出网也由宿主拦下（CSP 管不到顶层导航）。
+    try { console.warn("[openarc] 已拦截应用内导航出网（主框架）：", String(url).slice(0, 300)); } catch { /* ignore */ }
+    globalThis.__OPENARC_BLOCKED_NAVIGATIONS__ = (globalThis.__OPENARC_BLOCKED_NAVIGATIONS__ || []).concat([{ url: String(url).slice(0, 300), isMainFrame: true, at: Date.now() }]);
   });
 
   /**
@@ -274,6 +356,48 @@ app.whenReady().then(async () => {
     if (permission !== "media") return true;
     return micOnly(details?.requestingUrl || requestingOrigin || wc?.getURL?.(), details?.mediaTypes);
   });
+
+  // ---------------------------------------------------------------------------
+  // D5-02 Full-App · **宿主级导航出网拦截**（不是靠页面 CSP / fetch 替换）。
+  //
+  // 画布应用（外壳 + 14 个子页）在 sandbox iframe 里；页面里的 location.href 自我导航
+  // 无法被 CSP 关掉（Chromium 没有 navigate-to），所以在这里按帧拦：
+  //   允许：dist/index.html（本应用外壳）、openarc-canvas://bundle/**（bundle 内部的产品导航）；
+  //   其余（http/https/file/自造 scheme/其他）一律 preventDefault + 审计 + 通知渲染层。
+  // ---------------------------------------------------------------------------
+  const NAV_ALLOWED = (url) => {
+    const u = String(url || "");
+    if (u === uiURL) return true;
+    if (u === "about:blank") return true;
+    if (u.startsWith("openarc-canvas://bundle/")) return true;
+    return false;
+  };
+  const blockedNavigations = [];
+  const onFrameNavigate = (...args) => {
+    // will-frame-navigate 的签名随 Electron 版本变化：新版 (details{url,isMainFrame,preventDefault})，
+    // 旧版 (event, url, isInPlace, isMainFrame, ...)。两种都支持，不猜测版本。
+    const first = args[0];
+    const isDetails = !!first && typeof first === "object" && typeof first.url === "string";
+    const event = first;
+    const url = isDetails ? first.url : args[1];
+    const isMainFrame = isDetails ? !!first.isMainFrame : !!args[3];
+    if (NAV_ALLOWED(String(url))) return;
+    try { if (event && typeof event.preventDefault === "function") event.preventDefault(); } catch { /* 拦不住也要留证 */ }
+    const row = { url: String(url).slice(0, 300), isMainFrame, at: Date.now() };
+    blockedNavigations.push(row);
+    if (blockedNavigations.length > 50) blockedNavigations.shift();
+    globalThis.__OPENARC_BLOCKED_NAVIGATIONS__ = blockedNavigations;
+    // 主进程侧留证（门禁读 stderr 就能证明"是宿主拦的"，不是页面 CSP 声明）：
+    try { console.warn("[openarc] 已拦截应用内导航出网：", row.url); } catch { /* ignore */ }
+    // 同时经既有 native:state 只读通道告知渲染层（类型未知的载荷既有逻辑会忽略）。
+    if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
+      win.webContents.send("native:state", { type: "canvas-navigation-blocked", url: row.url, isMainFrame: row.isMainFrame, at: row.at });
+    }
+  };
+  if (typeof win.webContents.on === "function") {
+    try { win.webContents.on("will-frame-navigate", (...args) => onFrameNavigate(...args)); } catch { /* 旧版本没有该事件 */ }
+  }
+  globalThis.__OPENARC_BLOCKED_NAVIGATIONS__ = blockedNavigations;
 
   // ---------------------------------------------------------------------------
   // D3-01 · 身份服务（唯一权威，§25）已在 runtime boot 中创建；
@@ -315,6 +439,14 @@ app.whenReady().then(async () => {
 
   // 身份 runtime 存在时才注册依赖它的能力；boot 失败时窗口仍照常加载并走 BootRetry。
   if (identity) {
+    // ---------------------------------------------------------------------------
+    // D5-02 · 无限画布：文档层 + 资源可用性 + 命令层。
+    // 画布页面运行在 sandbox iframe 里（无 openarc 桥 / 无 IPC / 无 fs / 无凭据），
+    // 它的全部请求都由宿主渲染层经 canvas:command 转发到这里。
+    // ---------------------------------------------------------------------------
+    canvasBundle = { service: identity.canvasDocService };
+    registerCanvasIpc({ ipcMain, service: identity.canvasDocService, identity: identity.service, isTrusted: trusted });
+
     // D4-04：Renderer 可发起真实 AI Task（Task Runtime + official dsh + Tool Facade），
     // sessionRef/appId 由主进程注入；进度经 task:event 推送。
     registerTaskIpc({
@@ -328,6 +460,8 @@ app.whenReady().then(async () => {
 
     // D3-04C：注册安全预览协议 handler（每次请求重新授权 + Range 流式返回）。
     protocol.handle("openarc-resource", (request) => identity.previewService.handleProtocolRequest(request));
+    // D5-02：画布 bundle（只读、白名单扩展名、无目录穿越）。
+    protocol.handle("openarc-canvas", (request) => handleCanvasProtocol(request));
   }
 
   // ---------------------------------------------------------------------------
@@ -541,6 +675,36 @@ app.whenReady().then(async () => {
       if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return;
       win.webContents.send("native:state", payload);
     },
+    // D5-01：下载默认落在系统下载目录；隔离运行（探针/E2E）用 OPENARC_DOWNLOADS_DIR 覆盖，
+    // 绝不为了让测试好看而改产品默认值。
+    downloadsDir: process.env.OPENARC_DOWNLOADS_DIR || app.getPath("downloads"),
+  });
+  // 晚绑定：受控浏览器能力的**唯一**原生执行入口就是上面这个控制器。
+  browserControl.attachController(controller);
+  browserControl.setSession((identity?.service?.snapshot?.userId) || null);
+
+  // ---------------------------------------------------------------------------
+  // D5-01 · 会话键（A04）。
+  //
+  // **它由主进程从已认证 session 推导，渲染进程自报的 userId 一律无效。**
+  // 会话键是原生分区名的一部分：切账号 → 另一个分区 → Cookie / 存储 / 下载记录不跨用户。
+  // 会话一旦变化，上一个用户的全部网页视图立即释放（绝不留在屏幕上或内存里）。
+  // ---------------------------------------------------------------------------
+  const sessionKeyNow = () => {
+    const s = identity?.service?.snapshot;
+    return s && s.userId ? String(s.userId) : null;
+  };
+  let sessionKey = sessionKeyNow();
+  // boot 失败（identityBootFailure）时没有身份服务：不注册这条监听，窗口与文件能力照常可用。
+  identity?.service?.onEvent(() => {
+    const next = sessionKeyNow();
+    if (next === sessionKey) return;
+    sessionKey = next;
+    try { controller?.releaseAll(); } catch { /* 视图可能已随窗口销毁 */ }
+    // 登出 / 切账号：控制目标一律失效，绝不跨用户保留（也绝不改绑到别的标签）。
+    try { browserControl?.setSession(next); } catch { /* 控制器可能已随窗口销毁 */ }
+    if (win && !win.isDestroyed() && !win.webContents.isDestroyed())
+      win.webContents.send("native:state", { type: "session-changed", sessionKey: next });
   });
 
   ipcMain.handle("windows:sync", async (e, payload) => {
@@ -550,8 +714,57 @@ app.whenReady().then(async () => {
     const results = await controller.sync(intents, {
       overlayOpen: !!payload?.overlayOpen,
       interactive: payload?.interactive !== false,
+      // 会话键只来自主进程：renderer 传什么都不看。
+      sessionKey,
     });
+    // 标签关闭 / 被替换：把死掉的目标从授权表摘掉（绝不是"换个标签继续"）。
+    try { browserControl?.pruneDead(); } catch { /* ignore */ }
     return { ok: true, results };
+  });
+
+  // ---------------------------------------------------------------------------
+  // D5-01 · 浏览器命令面（受控白名单）。
+  // 只有"下载记录操作"与"用户确认后的外部打开"两类；没有通用 shell / fs / 任意 IPC。
+  // ---------------------------------------------------------------------------
+  ipcMain.handle("browser:command", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    const type = String(payload?.type || "");
+    if (type === "browser/downloads") {
+      const action = String(payload?.action || "list");
+      if (action === "list") return { ok: true, items: controller.listDownloads(sessionKey) };
+      if (action === "clear") {
+        controller.clearDownloads(sessionKey);
+        return { ok: true, items: controller.listDownloads(sessionKey) };
+      }
+      const res = controller.downloadAction(action, payload?.downloadId, sessionKey);
+      return { ...res, items: controller.listDownloads(sessionKey) };
+    }
+    // -------------------------------------------------------------------------
+    // D5-01 Closure-2 · "允许 AI 控制这个标签"（**用户**在渲染层显式选择）。
+    // 复用既有 browser:command 通道：不新增桥键、不新增 IPC 通道、不扩大暴露面。
+    // userId 由主进程从已认证 session 推导；renderer 只能给 windowId/tabId，
+    // 归属（分区 sessionKey）与存活一律由 BrowserControlAuthority 校验。
+    // -------------------------------------------------------------------------
+    if (type === "browser/controlList") {
+      return { ok: true, targets: browserControl.list({ userId: sessionKeyNow(), appId: "ai" }) };
+    }
+    if (type === "browser/controlSelect" || type === "browser/controlRelease") {
+      const windowId = String(payload?.windowId ?? "");
+      const tabId = payload?.tabId == null ? "" : String(payload.tabId);
+      if (!windowId || !tabId) return { error: "未知命令" };
+      const args = { context: { source: "user" }, userId: sessionKeyNow(), appId: "ai", windowId, tabId };
+      const res = type === "browser/controlSelect" ? browserControl.select(args) : browserControl.release(args);
+      return { ...res, targets: browserControl.list({ userId: sessionKeyNow(), appId: "ai" }) };
+    }
+    if (type === "browser/openExternal") {
+      // 用户已在 UI 上明确确认；这里仍然拒绝已知危险的 scheme（file/javascript/data/...）。
+      const url = String(payload?.url || "");
+      const scheme = url.split(":")[0].toLowerCase();
+      if (!/^[a-z][a-z0-9+.-]*$/.test(scheme) || ["file", "javascript", "data", "vbscript", "blob", "about", "chrome"].includes(scheme))
+        return { error: "不支持的协议" };
+      return controller.openExternal(url);
+    }
+    return { error: "未知命令" };
   });
 
   /**
@@ -562,16 +775,32 @@ app.whenReady().then(async () => {
   ipcMain.handle("browser:navigate", async (e, payload) => {
     if (!trusted(e)) throw Error("Forbidden");
     const windowId = String(payload?.windowId ?? "");
+    const tabId = payload?.tabId == null ? null : String(payload.tabId);
     const url = payload?.url;
     if (typeof url !== "string" || !safeURL(url))
       return { error: "请输入完整 HTTP / HTTPS 地址，不支持其他协议或含凭据的网址。" };
-    const res = controller.navigate(windowId, url);
+    const res = controller.navigate(windowId, url, tabId);
     return res.error ? res : { ok: true };
   });
 
   ipcMain.handle("browser:action", async (e, payload) => {
     if (!trusted(e)) throw Error("Forbidden");
-    return controller.act(String(payload?.windowId ?? ""), String(payload?.action ?? ""));
+    const tabId = payload?.tabId == null ? null : String(payload.tabId);
+    return controller.act(String(payload?.windowId ?? ""), String(payload?.action ?? ""), tabId);
+  });
+
+  // ---------------------------------------------------------------------------
+  // D5-01 · 证书错误处理（fail closed，无"继续访问"旁路）。
+  //
+  // Electron 默认行为不能当作结论：这里显式 preventDefault + callback(false)，
+  // 把失败原因回报给 UI（页面本身会以 did-fail-load 收敛到错误页）。
+  // 没有"信任一次"的入口 —— 这是刻意的：一个"继续访问"按钮就是 MITM 的入口。
+  // ---------------------------------------------------------------------------
+  app.on("certificate-error", (event, _wc, url, error, _certificate, callback) => {
+    event.preventDefault();
+    callback(false);
+    if (win && !win.isDestroyed() && !win.webContents.isDestroyed())
+      win.webContents.send("native:state", { type: "certificate-error", url: String(url || ""), error: String(error || "") });
   });
 
   win.on("closed", () => {
@@ -581,6 +810,7 @@ app.whenReady().then(async () => {
   });
 
   win.loadURL(uiURL);
+  markProductReady();
   win.webContents.once("did-finish-load", () => {
     if (win && !win.isDestroyed()) win.webContents.send("display:changed", displayInfo());
   });

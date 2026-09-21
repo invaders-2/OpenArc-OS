@@ -11,11 +11,13 @@
 "use strict";
 const crypto = require("node:crypto");
 const domain = require("./task-domain.cjs");
+// D4-03 收口：证据投影路径去敏复用 tool-domain 单一来源（tool-domain 是叶子模块，无环）。
+const toolDomain = require("./tool-domain.cjs");
 const { safeTask, safeStep, safeCall, safeEvent, sanitizeEventPayload } = domain;
 const {
   TASK_STATUS, STEP_STATUS, TASK_EVENT, ERROR, DEFAULT_MAX_ATTEMPTS, AUTO_RETRY, TOOL_EXECUTION,
   HARNESS_RUN_STATUS, HARNESS_RUN_TERMINAL, ARTIFACT_TYPE, ARTIFACT_TYPE_ALL, VERIFICATION_TYPE, VERIFICATION_STATUS,
-  BUDGET_BASE, BUDGET_KIND, BUDGET_KIND_ALL, RESUME_GRANT_AMOUNT, MAX_BUDGET_RESUMES, RESUME_REASON, ORCHESTRATION_KIND,
+  BUDGET_BASE, BUDGET_KIND, BUDGET_KIND_ALL, RESUME_GRANT_AMOUNT, MAX_BUDGET_RESUMES, RESUME_REASON, APPEND_REASON, ORCHESTRATION_KIND,
   canTransitionTask, canTransitionStep, isKnownEventType,
 } = domain;
 
@@ -52,19 +54,22 @@ function safeVerification(row) {
 }
 function parseMaybeJson(text) { if (text == null) return null; try { return JSON.parse(text); } catch { return text; } }
 
-/** 失败 Verification 的 expected/actual 只允许安全扁平证据：截断 / 去敏键 / 去私有路径与 capability 前缀。 */
+/** 失败 Verification 的 expected/actual 只允许安全扁平证据：截断 / 去敏键 / 去路径与 capability 前缀。 */
 const EVIDENCE_SENSITIVE_KEY = /(secret|token|authorization|api[_-]?key|credential|password|bearer)/i;
-const EVIDENCE_PATH_RE = /\/Users\/[^\s"']*|\/private\/[^\s"']*|\/var\/folders\/[^\s"']*/g;
+// 路径判据单一来源：tool-domain 的持久化去敏判据（bridge 的窄口径是「拒绝」判据，不适用于证据投影）。
+const EVIDENCE_PATH_RE = toolDomain.UNSAFE_PATH_PERSIST_RE;
 const EVIDENCE_CAPABILITY_RE = /mpx_[A-Za-z0-9_-]+|tpx_[A-Za-z0-9_-]+/g;
+/** 证据文本一律过同一份判据，含 depth>=2 的 JSON 兜底分支（那里也绝不能出现明文路径）。 */
+function redactEvidenceText(text) { return String(text).replace(EVIDENCE_PATH_RE, "[REDACTED_PATH]").replace(EVIDENCE_CAPABILITY_RE, "[REDACTED_CAPABILITY]"); }
 function sanitizeEvidenceValue(value, depth = 0) {
   if (value == null) return null;
   if (typeof value === "string") {
-    const s = value.replace(EVIDENCE_PATH_RE, "[REDACTED_PATH]").replace(EVIDENCE_CAPABILITY_RE, "[REDACTED_CAPABILITY]");
+    const s = redactEvidenceText(value);
     return s.length > 200 ? s.slice(0, 200) + "…[truncated]" : s;
   }
   if (typeof value === "number") return Number.isFinite(value) ? value : String(value).slice(0, 40);
   if (typeof value === "boolean") return value;
-  if (depth >= 2) { try { return JSON.stringify(value).slice(0, 200); } catch { return "[unserializable]"; } }
+  if (depth >= 2) { try { return redactEvidenceText(JSON.stringify(value).slice(0, 200)); } catch { return "[unserializable]"; } }
   if (Array.isArray(value)) return value.slice(0, 16).map((v) => sanitizeEvidenceValue(v, depth + 1));
   if (typeof value === "object") {
     const out = {};
@@ -73,6 +78,31 @@ function sanitizeEvidenceValue(value, depth = 0) {
   }
   return String(value).slice(0, 200);
 }
+
+/** 被拒 WRITE 操作的 safe arguments 投影：只回传有界、去敏、去私有路径的 evidence。 */
+function safeDeniedArguments(raw) {
+  const parsed = parseMaybeJson(raw);
+  if (parsed == null || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  const safe = sanitizeEvidenceValue(parsed);
+  return safe && typeof safe === "object" && !Array.isArray(safe) ? safe : {};
+}
+
+/**
+ * D4-03 · #sideEffectSafety code → 各入口既有拒绝原因。
+ * 逐字保持既有 RESUME_* / APPEND_* 字符串：收敛判定来源，绝不改写对外语义。
+ */
+const RESUME_SAFETY_REASON = Object.freeze({
+  EFFECT_STATE_UNAVAILABLE: RESUME_REASON.EFFECT_STATE_UNAVAILABLE,
+  UNKNOWN_EFFECT: RESUME_REASON.UNKNOWN_EFFECT_PRESENT,
+  SIDE_EFFECT_PENDING: RESUME_REASON.SIDE_EFFECT_PENDING,
+  ACTIVE_LEASE: RESUME_REASON.ACTIVE_LEASE,
+});
+const APPEND_SAFETY_REASON = Object.freeze({
+  EFFECT_STATE_UNAVAILABLE: APPEND_REASON.EFFECT_STATE_UNAVAILABLE,
+  UNKNOWN_EFFECT: APPEND_REASON.UNKNOWN_EFFECT,
+  SIDE_EFFECT_PENDING: APPEND_REASON.SIDE_EFFECT_PENDING,
+  ACTIVE_LEASE: APPEND_REASON.ACTIVE_LEASE,
+});
 
 class TaskService {
   constructor({ identity, authService, authStore, taskStore, toolStore = null, sideEffectStore = null, modelService = null, clock = null, logger = null, hooks = null } = {}) {
@@ -132,6 +162,28 @@ class TaskService {
     return { ok: true, task };
   }
 
+  /**
+   * 任务冻结的 model config 版本 vs 当前生效版本（真实 resolve，不是读快照）。
+   * 变化一律 MODEL_CONFIG_CHANGED：绝不静默升级、绝不用新版本签发 capability。
+   * 未绑定的旧任务（model_config_id 为空）在这里不判定版本。
+   */
+  #boundModelConfig(task, context) {
+    if (!this.modelService || !task.model_config_id) return { ok: true, bound: false };
+    // 解析**抛出**（如已绑定 config 行的 capabilities 是损坏 JSON）与返回失败同等对待：
+    // 绝不穿透成 RUNNING 悬挂，也不吞掉真实原因（原样带 detail），且绝不写任何状态。
+    let resolved;
+    try {
+      resolved = this.modelService.resolveModel({ context, configId: task.model_config_id });
+    } catch (e) {
+      resolved = { ok: false, error: "MODEL_CONFIG_UNAVAILABLE", detail: String((e && e.message) || e).slice(0, 120) };
+    }
+    if (!resolved || !resolved.ok) return resolved || { ok: false, error: "MODEL_CONFIG_UNAVAILABLE" };
+    if (resolved.snapshot.modelConfigVersion !== task.model_config_version) {
+      return { ok: false, error: ERROR.MODEL_CONFIG_CHANGED, expected: task.model_config_version, current: resolved.snapshot.modelConfigVersion };
+    }
+    return { ok: true, bound: true, snapshot: resolved.snapshot };
+  }
+
   /** D4-06 Closure：late attach 只读账本 store（bootstrap / 测试夹具在装配完成后注入）。 */
   attachBudgetStores({ toolStore = null, sideEffectStore = null } = {}) {
     if (toolStore) this.toolStore = toolStore;
@@ -184,6 +236,8 @@ class TaskService {
       if (task.cancel_requested) return { ok: false, error: ERROR.TASK_CANCELLED };
       const conflict = this.#conflict(task, expectedRevision);
       if (conflict) return conflict;
+      // SUCCEEDED→RUNNING 只属于 AppendStep：startTask 显式拒绝，绝不借这条边重启已成功任务。
+      if (task.status === TASK_STATUS.SUCCEEDED) return { ok: false, error: ERROR.TASK_INVALID_STATE, from: task.status, to: TASK_STATUS.RUNNING, detail: "APPEND_REQUIRED" };
       if (!canTransitionTask(task.status, TASK_STATUS.RUNNING)) return { ok: false, error: ERROR.TASK_INVALID_STATE, from: task.status, to: TASK_STATUS.RUNNING };
       const now = this.#now();
       const updated = this.store.updateTask(task.task_id, { status: TASK_STATUS.RUNNING, started_at: task.started_at == null ? now : task.started_at, updated_at: now, revision: task.revision + 1 });
@@ -306,6 +360,18 @@ class TaskService {
   }
 
   // ------------------------------------------------------------- Model call
+  /**
+   * Orchestrator 启动 Harness **之前**的绑定校验入口：capability 只允许用任务冻结的版本签发，
+   * 因此在 spawn Harness / issueCapability 之前必须先问这一句（失败时 run/step/task 全部 BLOCKED）。
+   */
+  checkModelConfig({ context, taskId } = {}) {
+    const guard = this.#guard(context);
+    if (!guard.ok) return guard;
+    const load = this.#load(guard, taskId);
+    if (!load.ok) return load;
+    return this.#boundModelConfig(load.task, context);
+  }
+
   startModelCall({ context, taskId, stepId = null, requestId = null, expectedRevision } = {}) {
     const guard = this.#guard(context);
     if (!guard.ok) return guard;
@@ -318,13 +384,8 @@ class TaskService {
       if (conflict) return conflict;
       if (task.status !== TASK_STATUS.RUNNING) return { ok: false, error: ERROR.TASK_INVALID_STATE, from: task.status, to: "MODEL_CALL_STARTED" };
       // 调用时重新 authorize + 重新检查 model/provider status；snapshot 变化不静默升级。
-      if (this.modelService && task.model_config_id) {
-        const resolved = this.modelService.resolveModel({ context, configId: task.model_config_id });
-        if (!resolved.ok) return resolved;
-        if (resolved.snapshot.modelConfigVersion !== task.model_config_version) {
-          return { ok: false, error: ERROR.MODEL_CONFIG_CHANGED, expected: task.model_config_version, current: resolved.snapshot.modelConfigVersion };
-        }
-      }
+      const binding = this.#boundModelConfig(task, context);
+      if (!binding.ok) return binding;
       const now = this.#now();
       const call = this.store.insertCall({ taskId: task.task_id, stepId, modelConfigId: task.model_config_id, modelConfigVersion: task.model_config_version, requestId, status: "STARTED", startedAt: now });
       const updated = this.store.updateTask(task.task_id, { updated_at: now, revision: task.revision + 1 });
@@ -435,7 +496,7 @@ class TaskService {
     return this.store.transactSync(() => {
       const load = this.#load(guard, taskId);
       if (!load.ok) return load;
-      const task = load.task;
+      let task = load.task;
       if (task.cancel_requested) return { ok: false, error: ERROR.TASK_CANCELLED };
       const conflict = this.#conflict(task, expectedRevision);
       if (conflict) return conflict;
@@ -446,7 +507,29 @@ class TaskService {
         if (step.status !== STEP_STATUS.RUNNING) return { ok: false, error: ERROR.TASK_INVALID_STATE, from: step.status, to: "HARNESS_RUN_STARTED" };
       }
       const now = this.#now();
-      const run = this.store.insertHarnessRun({ taskId: task.task_id, stepId, status: HARNESS_RUN_STATUS.STARTING, harnessVersion, acpVersion, modelConfigId: modelConfigId || task.model_config_id, modelConfigVersion: modelConfigVersion == null ? task.model_config_version : modelConfigVersion, startedAt: now });
+      // R-8：绑定前创建的旧任务从未冻结过版本，这里按**当前**生效配置懒绑定一次（同一事务内落事件），
+      // 使 run 行归属正确。解析失败一律保持未绑定 —— 但**绝不建 run**：未绑定的 run 一旦在 capability
+      // 签发前出现默认配置，就会以"当前默认"真实执行，而 task/run/call 归属全是 null。
+      // 唯一例外：modelService 为 null 的 test-only / 桩装配没有真实模型服务可解析，保持既有建 run 行为不变。
+      if (!task.model_config_id && this.modelService) {
+        // 解析**抛出**（如库里的 capabilities 是损坏 JSON）与返回失败同等对待：绝不让异常穿透成
+        // task/step 停在 RUNNING 的悬挂，也不吞掉真实原因（原样带 detail）。
+        let resolved;
+        try {
+          resolved = this.modelService.resolveModel({ context, capability: "chat" });
+        } catch (e) {
+          resolved = { ok: false, error: "MODEL_CONFIG_UNAVAILABLE", detail: String((e && e.message) || e).slice(0, 120) };
+        }
+        if (!resolved || !resolved.ok) {
+          return Object.assign({}, resolved || null, { ok: false, error: (resolved && resolved.error) || "MODEL_CONFIG_UNAVAILABLE", message: "任务未绑定模型配置，无法启动", taskId: task.task_id });
+        }
+        task = this.store.updateTask(task.task_id, { model_config_id: resolved.snapshot.modelConfigId, model_config_version: resolved.snapshot.modelConfigVersion, updated_at: now });
+        this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.MODEL_CONFIG_BOUND, safePayload: sanitizeEventPayload({ modelConfigId: resolved.snapshot.modelConfigId, modelConfigVersion: resolved.snapshot.modelConfigVersion, source: resolved.snapshot.source, reason: "LEGACY_UNBOUND_LAZY_BIND" }), at: now });
+      }
+      // 归属只认任务已冻结的值：已绑定的任务不接受 caller 传入的 id/version 覆盖；未绑定的桩装配才沿用 caller 实参。
+      const boundId = task.model_config_id || modelConfigId;
+      const boundVersion = task.model_config_id ? task.model_config_version : modelConfigVersion;
+      const run = this.store.insertHarnessRun({ taskId: task.task_id, stepId, status: HARNESS_RUN_STATUS.STARTING, harnessVersion, acpVersion, modelConfigId: boundId, modelConfigVersion: boundVersion, startedAt: now });
       const updated = this.store.updateTask(task.task_id, { updated_at: now, revision: task.revision + 1 });
       this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.HARNESS_RUN_STARTED, safePayload: sanitizeEventPayload({ runId: run.run_id, stepId, harnessVersion, acpVersion, modelConfigId: run.model_config_id, modelConfigVersion: run.model_config_version }), at: now });
       return { ok: true, run: safeRun(run), task: safeTask(updated) };
@@ -673,6 +756,23 @@ class TaskService {
   }
 
   /**
+   * D4-03 · 未决副作用安全判定**单一来源**。
+   *
+   * resume / append / runTask 三条"启动新执行"入口必须给出同一答案：存在 UNKNOWN_EFFECT /
+   * 待批准 / 已批准未执行 / LEASED / RUNNING 或 active lease 时一律阻断。任何一条入口各自
+   * 复制判定，都会漂移出"某个入口漏守卫"的缺口（runTask 曾经就是）。只读，绝不改状态。
+   */
+  #sideEffectSafety(taskId) {
+    if (!this.sideEffectStore) return { blocked: true, code: "EFFECT_STATE_UNAVAILABLE" };
+    const calls = this.sideEffectStore.callsOfTask(taskId);
+    if (calls.some((c) => String(c.status) === "UNKNOWN_EFFECT")) return { blocked: true, code: "UNKNOWN_EFFECT" };
+    if (calls.some((c) => ["AWAITING_APPROVAL", "APPROVED", "LEASED", "RUNNING"].includes(String(c.status)))) return { blocked: true, code: "SIDE_EFFECT_PENDING" };
+    const callIds = new Set(calls.map((c) => c.callId));
+    if (this.sideEffectStore.activeLeases().some((l) => callIds.has(l.callId))) return { blocked: true, code: "ACTIVE_LEASE" };
+    return { blocked: false, code: null };
+  }
+
+  /**
    * D4-06 Closure 后端可续接判定（不信 renderer）。
    * 只有「BLOCKED + last run error_code=BUDGET_EXHAUSTED + 无未决副作用/UNKNOWN_EFFECT/active lease
    * + 存在可续接的已完成产物 + 未达续接上限」才 resumable。其余一律带显式 reason 拒绝。
@@ -687,12 +787,19 @@ class TaskService {
     const runs = this.store.harnessRunsOfTask(task.task_id);
     const steps = this.store.stepsOfTask(task.task_id);
     const grants = this.#budgetGrantEvents(task.task_id);
+    const exhaust = this.#budgetExhaustEvents(task.task_id);
     const lastRun = runs.length ? runs[runs.length - 1] : null;
     const lastStep = steps.length ? steps[steps.length - 1] : null;
+    const lastExhaust = exhaust.length ? exhaust[exhaust.length - 1] : null;
+    // run 开始前 remaining==0 时不会创建 run，预算停止只留 TASK_BUDGET_EXHAUSTED 事件（payload.stepId）；
+    // 该事件属于最后一个 BLOCKED step 时同样是有效预算停止，否则用户拿不到续接入口。
+    const stepBudgetStop = !!lastStep && lastStep.status === STEP_STATUS.BLOCKED
+      && !!lastExhaust && String(lastExhaust.stepId == null ? "" : lastExhaust.stepId) === String(lastStep.step_id);
+    const runBudgetStop = !!lastRun && String(lastRun.error_code) === ERROR.BUDGET_EXHAUSTED;
     base.resumeCount = grants.length;
     base.resumeIndex = grants.length + 1;
     base.remainingResumes = Math.max(0, MAX_BUDGET_RESUMES - grants.length);
-    base.stopReason = lastRun ? (lastRun.error_code || lastRun.stop_reason || null) : null;
+    base.stopReason = stepBudgetStop ? ERROR.BUDGET_EXHAUSTED : (lastRun ? (lastRun.error_code || lastRun.stop_reason || null) : null);
     base.fromStepId = lastStep ? lastStep.step_id : null;
     base.fromRunId = lastRun ? lastRun.run_id : null;
 
@@ -701,23 +808,58 @@ class TaskService {
     if (runs.some((r) => r.status === HARNESS_RUN_STATUS.STARTING || r.status === HARNESS_RUN_STATUS.RUNNING)) return Object.assign(base, { reason: RESUME_REASON.IN_FLIGHT });
     if (steps.some((s) => s.status === STEP_STATUS.RUNNING || s.status === STEP_STATUS.PENDING)) return Object.assign(base, { reason: RESUME_REASON.IN_FLIGHT });
     // 安全优先：未决/未知副作用与 active lease 无条件阻断续接，先于停止原因判定。
-    if (!this.sideEffectStore) return Object.assign(base, { reason: RESUME_REASON.EFFECT_STATE_UNAVAILABLE });
-    const calls = this.sideEffectStore.callsOfTask(task.task_id);
-    if (calls.some((c) => String(c.status) === "UNKNOWN_EFFECT")) return Object.assign(base, { reason: RESUME_REASON.UNKNOWN_EFFECT_PRESENT });
-    if (calls.some((c) => ["AWAITING_APPROVAL", "APPROVED", "LEASED", "RUNNING"].includes(String(c.status)))) return Object.assign(base, { reason: RESUME_REASON.SIDE_EFFECT_PENDING });
-    const callIds = new Set(calls.map((c) => c.callId));
-    if (this.sideEffectStore.activeLeases().some((l) => callIds.has(l.callId))) return Object.assign(base, { reason: RESUME_REASON.ACTIVE_LEASE });
+    const safety = this.#sideEffectSafety(task.task_id);
+    if (safety.blocked) return Object.assign(base, { reason: RESUME_SAFETY_REASON[safety.code] });
 
-    if (!lastRun) return Object.assign(base, { reason: RESUME_REASON.NO_HARNESS_RUN });
-    if (String(lastRun.error_code) !== ERROR.BUDGET_EXHAUSTED) return Object.assign(base, { reason: RESUME_REASON.NOT_BUDGET_STOP });
-    const exhaust = this.#budgetExhaustEvents(task.task_id);
-    const lastExhaust = exhaust.length ? exhaust[exhaust.length - 1] : null;
+    if (!lastRun && !stepBudgetStop) return Object.assign(base, { reason: RESUME_REASON.NO_HARNESS_RUN });
+    if (!runBudgetStop && !stepBudgetStop) return Object.assign(base, { reason: RESUME_REASON.NOT_BUDGET_STOP });
     base.kind = lastExhaust ? (lastExhaust.kind || null) : null;
     if (!base.kind || !RESUME_GRANT_AMOUNT[base.kind]) return Object.assign(base, { reason: RESUME_REASON.UNKNOWN_BUDGET_KIND });
     if (grants.length >= MAX_BUDGET_RESUMES) return Object.assign(base, { reason: RESUME_REASON.LIMIT_REACHED });
     if (!this.store.artifactsOfTask(task.task_id).length) return Object.assign(base, { reason: RESUME_REASON.NO_SAFE_CONTINUATION });
 
     base.resumable = true;
+    return base;
+  }
+
+  /** 历史 appended step 数：只读本任务自身 step 行（input.appended===true）。 */
+  #appendedStepCount(steps) {
+    let count = 0;
+    for (const s of steps) {
+      if (!s.input) continue;
+      let parsed = null;
+      try { parsed = JSON.parse(s.input); } catch { parsed = null; }
+      if (parsed && parsed.appended === true) count += 1;
+    }
+    return count;
+  }
+
+  /**
+   * D4 Main-Entry Closure-6 后端追加步骤判定（与 #resumeAssessment 并列，appendStep / getAppendEligibility 唯一共用）。
+   *
+   * 安全守卫先于状态判定：绝不借"追加"绕过未决副作用 / UNKNOWN_EFFECT / active lease / cancel 的限制。
+   * 只有任务已 SUCCEEDED、存在真实产物、且无任何在途或未知副作用时，才允许新增一个 bounded step。
+   */
+  #appendAssessment(task) {
+    const base = { appendable: false, reason: null, appendIndex: 1, fromStepId: null, fromRunId: null };
+    if (!task) return Object.assign(base, { reason: APPEND_REASON.NOT_SUCCEEDED });
+    const runs = this.store.harnessRunsOfTask(task.task_id);
+    const steps = this.store.stepsOfTask(task.task_id);
+    const lastStep = steps.length ? steps[steps.length - 1] : null;
+    const lastRun = runs.length ? runs[runs.length - 1] : null;
+    base.fromStepId = lastStep ? lastStep.step_id : null;
+    base.fromRunId = lastRun ? lastRun.run_id : null;
+    base.appendIndex = this.#appendedStepCount(steps) + 1;
+
+    if (task.cancel_requested) return Object.assign(base, { reason: APPEND_REASON.NOT_SUCCEEDED });
+    if (runs.some((r) => r.status === HARNESS_RUN_STATUS.STARTING || r.status === HARNESS_RUN_STATUS.RUNNING)) return Object.assign(base, { reason: APPEND_REASON.IN_FLIGHT });
+    if (steps.some((s) => s.status === STEP_STATUS.RUNNING || s.status === STEP_STATUS.PENDING)) return Object.assign(base, { reason: APPEND_REASON.IN_FLIGHT });
+    const safety = this.#sideEffectSafety(task.task_id);
+    if (safety.blocked) return Object.assign(base, { reason: APPEND_SAFETY_REASON[safety.code] });
+    if (task.status !== TASK_STATUS.SUCCEEDED) return Object.assign(base, { reason: APPEND_REASON.NOT_SUCCEEDED });
+    if (!this.store.artifactsOfTask(task.task_id).length) return Object.assign(base, { reason: APPEND_REASON.NO_ARTIFACT });
+
+    base.appendable = true;
     return base;
   }
 
@@ -778,6 +920,33 @@ class TaskService {
       const nextGrant = assessment.kind ? { kind: assessment.kind, amount: this.#grantBase(assessment.kind) } : null;
       return Object.assign({ ok: true, taskId: load.task.task_id, kinds, remaining: this.#remainingOf(kinds), nextGrant }, assessment);
     });
+  }
+
+  /** D4 Main-Entry Closure-6：后端追加资格判定（与 appendStep 共用同一份 #appendAssessment，renderer 自报无效）。 */
+  getAppendEligibility({ context, taskId } = {}) {
+    const guard = this.#guard(context);
+    if (!guard.ok) return guard;
+    const load = this.#load(guard, taskId);
+    if (!load.ok) return load;
+    return this.store.transactSync(() => {
+      const assessment = this.#appendAssessment(load.task);
+      return { ok: true, taskId: load.task.task_id, appendable: assessment.appendable, reason: assessment.reason };
+    });
+  }
+
+  /**
+   * D4-03 · 未决副作用安全判定的唯一只读出口（与 command 同源的 owner/app 归属校验）。
+   *
+   * orchestrator.runTask 在任何状态变更之前调用它；绝不改任何状态、绝不写事件。
+   * !ok（TASK_FORBIDDEN / TASK_NOT_FOUND）原样回传，调用方保持既有错误语义，绝不吞掉改写。
+   */
+  getSideEffectSafety({ context, taskId } = {}) {
+    const guard = this.#guard(context);
+    if (!guard.ok) return guard;
+    const load = this.#load(guard, taskId);
+    if (!load.ok) return load;
+    const safety = this.#sideEffectSafety(load.task.task_id);
+    return { ok: true, taskId: load.task.task_id, blocked: safety.blocked, code: safety.code };
   }
 
   /** 只读预算账本：每类 authorized/consumed/remaining + base + additions + nextGrant（绝不更新/清零历史计数）。 */
@@ -961,6 +1130,53 @@ class TaskService {
   }
 
   /**
+   * D4 Main-Entry Closure-6 · 唯一产品级"同一任务追加下一步目标"入口（AppendStep）。
+   *
+   * 判定 + 写入同一事务：并发/重复提交只成功一次。只新增一个 bounded reasoning step，
+   * 绝不修改/删除旧 step、artifact、verification、tool proposal/execution、side-effect call 或 lease，
+   * 绝不重放旧 tool 请求，也绝不写 task_budgets —— 新 run 只能用既有剩余额度。
+   */
+  appendStep({ context, taskId, goal, expectedRevision } = {}) {
+    const guard = this.#guard(context);
+    if (!guard.ok) return guard;
+    const g = typeof goal === "string" ? goal.trim() : "";
+    if (!g || g.length > 2000) return { ok: false, error: ERROR.INVALID_INPUT, detail: "goal is required" };
+    return this.store.transactSync(() => {
+      const load = this.#load(guard, taskId);
+      if (!load.ok) return load;
+      const task = load.task;
+      if (task.cancel_requested) return { ok: false, error: ERROR.TASK_CANCELLED };
+      const conflict = this.#conflict(task, expectedRevision);
+      if (conflict) return conflict;
+      const assessment = this.#appendAssessment(task);
+      if (!assessment.appendable) return { ok: false, error: ERROR.APPEND_NOT_ALLOWED, reason: assessment.reason };
+      const now = this.#now();
+      const sequence = this.store.nextStepSequence(task.task_id);
+      // priorArtifacts 只是低信任参考数据：只取本任务自身最后 ≤3 个产物，事务内现场读取，绝不跨用户/app 取。
+      const input = {
+        appended: true,
+        appendIndex: assessment.appendIndex,
+        fromStepId: assessment.fromStepId,
+        fromRunId: assessment.fromRunId,
+        goal: g,
+        priorArtifacts: this.store.artifactsOfTask(task.task_id).slice(-3).map((a) => ({
+          artifactId: a.artifact_id, type: a.type, content: String(a.safe_content == null ? "" : a.safe_content).slice(0, 2000),
+        })),
+        instruction: "Continue from the verified prior results. Do not re-issue any previous tool request and do not repeat already completed operations.",
+      };
+      const step = this.store.insertStep({ taskId: task.task_id, sequence, kind: ORCHESTRATION_KIND, status: STEP_STATUS.PENDING, input, attempt: 1, maxAttempts: DEFAULT_MAX_ATTEMPTS });
+      this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.STEP_CREATED, safePayload: sanitizeEventPayload({ stepId: step.step_id, sequence, kind: ORCHESTRATION_KIND, maxAttempts: DEFAULT_MAX_ATTEMPTS, appended: true, appendIndex: assessment.appendIndex }), at: now });
+      // 只改 status/updated_at/revision：started_at/completed_at 等历史字段一律保留（不伪装成新任务）。
+      const updatedTask = this.store.updateTask(task.task_id, { status: TASK_STATUS.RUNNING, updated_at: now, revision: task.revision + 1 });
+      this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.TASK_STARTED, safePayload: sanitizeEventPayload({ revision: updatedTask.revision, appended: true, appendIndex: assessment.appendIndex }), at: now });
+      this.#audit(guard, context, "task.appendStep", task.task_id);
+      // 账本只惰性补缺失行；已有 authorized/consumed 一律原样返回，绝不抬升/清零。
+      const kinds = this.#ensureBudgetRows(task, now);
+      return { ok: true, task: safeTask(updatedTask), step: safeStep(step), appendIndex: assessment.appendIndex, remaining: this.#remainingOf(kinds) };
+    });
+  }
+
+  /**
    * 原子提交 Step 成功：Artifact + Verification + Step + Task + Events 同一事务。
    * §82/§83/§84：Artifact 写入失败或 cancel 竞争时，绝不允许 Step/Task SUCCEEDED。
    */
@@ -1107,6 +1323,100 @@ class TaskService {
       }
     }
     return { ok: true, unresolved, resolved };
+  }
+
+  /**
+   * D4 收口 · 只读列出「明确非 READ_ONLY（WRITE 类）操作被后端拒绝、且尚未被同一
+   * tool + 同一 canonical arguments 的真实成功解决」的记录。
+   *
+   * 判据全部来自后端记录（task_tool_proposals + tool_decisions + tool_executions +
+   * side_effect_calls），不信任模型自述；READ_ONLY 的拒绝绝不参与。
+   * 解决语义与 A33 同源：只有同一 (tool_id, arguments_hash) **之后**出现真实成功
+   * （SideEffectCall SUCCEEDED，或 decision=ALLOWED 且 execution SUCCEEDED）才算解决；
+   * arguments_hash 缺失（无法可靠关联）→ 以 proposal 唯一键保守保持未解决。
+   * 严格只读：绝不删除 / 改写任何拒绝记录，绝不产生副作用。
+   */
+  getDeniedRequiredWriteOperations({ context, taskId, runId = null } = {}) {
+    const guard = this.#guard(context);
+    if (!guard.ok) return guard;
+    const load = this.#load(guard, taskId);
+    if (!load.ok) return load;
+    const empty = { ok: true, denials: [], unresolved: [], resolved: [] };
+    if (!this.toolStore || typeof this.toolStore.decisionsOfTask !== "function" || typeof this.toolStore.proposalsOfTask !== "function") return empty;
+    const targetRunId = runId == null || runId === "" ? null : String(runId);
+
+    const proposals = this.toolStore.proposalsOfTask(load.task.task_id) || [];
+    const proposalById = new Map(proposals.map((p) => [String(p.proposal_id), p]));
+    const decisions = this.toolStore.decisionsOfTask(load.task.task_id) || [];
+    const decisionByProposal = new Map(decisions.map((d) => [String(d.proposal_id), d]));
+    // 同秒 / 固定时钟下 created_at 无法区分先后：优先用 proposal 插入顺序(rowid)判定“之后”。
+    const sequence = typeof this.toolStore.proposalSequenceOfTask === "function" ? this.toolStore.proposalSequenceOfTask(load.task.task_id) : null;
+    const seqOfProposal = new Map((sequence || []).map((id, index) => [String(id), index]));
+
+    // 真实成功索引：key = tool_id + "::" + arguments_hash → 成功记录（按 proposal 插入序判定“之后”）。
+    const successByKey = new Map();
+    const addSuccess = (key, proposalId, at, kind, ref, stepId, runIdOf) => {
+      if (!key) return;
+      let list = successByKey.get(key);
+      if (!list) { list = []; successByKey.set(key, list); }
+      list.push({ proposalId: proposalId == null ? null : String(proposalId), at: at == null ? null : Number(at), kind, ref, stepId: stepId || null, runId: runIdOf || null });
+    };
+    if (this.sideEffectStore && typeof this.sideEffectStore.callsOfTask === "function") {
+      for (const call of this.sideEffectStore.callsOfTask(load.task.task_id) || []) {
+        if (!call || call.status !== "SUCCEEDED" || !call.argumentsHash) continue;
+        addSuccess(String(call.toolId) + "::" + String(call.argumentsHash), call.proposalId, call.completedAt == null ? call.updatedAt : call.completedAt, "SIDE_EFFECT_CALL", call.callId, call.stepId, call.runId);
+      }
+    }
+    if (typeof this.toolStore.executionsOfTask === "function") {
+      for (const exec of this.toolStore.executionsOfTask(load.task.task_id) || []) {
+        if (!exec || exec.status !== "SUCCEEDED") continue;
+        const proposal = proposalById.get(String(exec.proposal_id));
+        if (!proposal || !proposal.arguments_hash) continue;
+        const decision = decisionByProposal.get(String(exec.proposal_id));
+        if (!decision || decision.decision !== "ALLOWED") continue;
+        addSuccess(String(exec.tool_id) + "::" + String(proposal.arguments_hash), exec.proposal_id, exec.completed_at == null ? exec.started_at : exec.completed_at, "TOOL_EXECUTION", exec.execution_id, exec.step_id, exec.run_id);
+      }
+    }
+
+    const denials = [];
+    for (const d of decisions) {
+      if (!d || String(d.decision) !== "DENIED") continue;
+      const riskClass = d.risk_class == null ? null : String(d.risk_class);
+      // READ_ONLY 拒绝不参与；risk 缺失无法归类为“明确 WRITE”，保守排除。
+      if (!riskClass || riskClass === "READ_ONLY") continue;
+      const proposal = proposalById.get(String(d.proposal_id));
+      if (!proposal) continue;
+      const proposalRunId = proposal.run_id == null ? null : String(proposal.run_id);
+      if (targetRunId && proposalRunId !== targetRunId) continue;
+      const argsHash = proposal.arguments_hash == null || proposal.arguments_hash === "" ? null : String(proposal.arguments_hash);
+      const toolId = String(proposal.tool_id);
+      const decidedAt = d.created_at == null ? null : Number(d.created_at);
+      const rec = {
+        toolId,
+        toolVersion: proposal.tool_version == null ? null : proposal.tool_version,
+        proposalId: proposal.proposal_id,
+        decisionId: d.decision_id,
+        reasonCode: d.reason_code || null,
+        riskClass,
+        stepId: proposal.step_id || null,
+        runId: proposalRunId,
+        argumentsHash: argsHash,
+        arguments: safeDeniedArguments(proposal.arguments_safe),
+        decidedAt,
+        linked: !!argsHash,
+      };
+      // 只有同一 tool + 同一 canonical arguments 的**后续**真实成功才解决；先后不可比 → 保守未解决。
+      if (argsHash) {
+        const denialSeq = seqOfProposal.has(String(proposal.proposal_id)) ? seqOfProposal.get(String(proposal.proposal_id)) : null;
+        const later = (successByKey.get(toolId + "::" + argsHash) || []).find((s) => {
+          if (denialSeq != null) return s.proposalId != null && seqOfProposal.has(s.proposalId) && seqOfProposal.get(s.proposalId) > denialSeq;
+          return decidedAt != null && s.at != null && Number.isFinite(s.at) && s.at > decidedAt;
+        });
+        if (later) rec.resolvedBy = { kind: later.kind, ref: later.ref, stepId: later.stepId, runId: later.runId, at: later.at, proposalId: later.proposalId };
+      }
+      denials.push(rec);
+    }
+    return { ok: true, denials, unresolved: denials.filter((r) => !r.resolvedBy), resolved: denials.filter((r) => !!r.resolvedBy) };
   }
 
   // 供 ADR / 测试断言：第一版永久冻结

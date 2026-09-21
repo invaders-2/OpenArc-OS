@@ -272,6 +272,66 @@ class ModelService {
   }
 
 
+  /**
+   * D5-02 · image-generation（与 chat 同一套解析/授权/审计/错误归一化）。
+   * 能力不支持的模型在 resolveModel 就返回 CAPABILITY_UNAVAILABLE —— 绝不改用文本接口顶替。
+   * 返回的图片是 data URL（凭据与 provider URL 都不回渲染层）。
+   */
+  async generateImage({ context, configId = null, prompt = "", size = null, count = 1, params = {}, signal = null, requestId = null, capability = "image-generation" } = {}) {
+    const resolved = this.resolveModel({ context, capability, configId });
+    if (!resolved.ok) return resolved;
+    const snapshot = resolved.snapshot;
+    const cred = this.credentials.resolveInternalSync({ credentialRef: snapshot.credentialRef });
+    if (!cred.ok) return { ok: false, error: domain.ERROR_CODE.CREDENTIAL_MISSING };
+    if (cred.providerOrigin !== new URL(snapshot.baseUrl).origin) return { ok: false, error: domain.ERROR_CODE.ENDPOINT_BLOCKED };
+    const start = this.#now(); const rid = requestId || "ireq_" + crypto.randomBytes(8).toString("base64url");
+    const cleanParams = domain.sanitizeParams(params);
+    try {
+      const { res } = await adapter.generateImage({ baseUrl: snapshot.baseUrl, apiKey: cred.secret, model: snapshot.modelId, prompt, size, count, params: cleanParams, signal, timeoutMs: Math.max(this.timeoutMs, 60000), fetchImpl: this.fetchImpl });
+      if (!res.ok) {
+        const code = domain.normalizeError({ status: res.status });
+        await this.#record({ requestId: rid, context, snapshot, startedAt: start, status: "DENY", errorCode: code });
+        return { ok: false, error: code };
+      }
+      const body = await res.json();
+      const items = adapter.mapImages(body);
+      if (!items.length) {
+        await this.#record({ requestId: rid, context, snapshot, startedAt: start, status: "ERROR", errorCode: domain.ERROR_CODE.PROVIDER_PROTOCOL_ERROR });
+        return { ok: false, error: domain.ERROR_CODE.PROVIDER_PROTOCOL_ERROR };
+      }
+      const images = items.map((it) => (it.b64 ? { dataUrl: "data:" + (it.mime || "image/png") + ";base64," + it.b64 } : { url: it.url }));
+      await this.#record({ requestId: rid, context, snapshot, startedAt: start, status: "ALLOW", usage: null });
+      return { ok: true, requestId: rid, images, snapshot: this.#safeSnapshot(snapshot) };
+    } catch (err) {
+      let kind;
+      if (signal && signal.aborted) kind = "cancelled";
+      else if (String(err && err.name) === "AbortError" || String((err && err.message) || "").includes("timeout")) kind = "timeout";
+      else kind = "network";
+      const code = domain.normalizeError({ kind });
+      await this.#record({ requestId: rid, context, snapshot, startedAt: start, status: "ERROR", errorCode: code });
+      return { ok: false, error: code };
+    }
+  }
+
+  /** 渲染层可见的模型面（**无 baseUrl / 无凭据 / 无 credentialRef**）。*/
+  listModelsForUse({ context } = {}) {
+    const actor = this.#actor(context);
+    if (!actor.ok) return actor;
+    const capabilities = ["chat", "tool-calling", "vision-input", "image-generation", "video-generation", "embedding"];
+    const defaults = this.getDefaults({ context });
+    const items = this.listModels({ context });
+    const models = (items && items.items ? items.items : []).map((m) => ({
+      configId: m.configId, displayName: m.displayName || m.remoteModelId, remoteModelId: m.remoteModelId,
+      capabilities: m.capabilities || [], verifiedCapabilities: m.verifiedCapabilities || [], status: m.status, scope: m.scope,
+    }));
+    return {
+      ok: true, models, capabilities,
+      defaults: defaults && defaults.ok ? { personal: defaults.personal, organization: defaults.organization } : { personal: {}, organization: {} },
+      // 供应商/地址/凭据一律不出主进程：画布只看到"能用的模型"。
+      transports: { chat: true, "image-generation": true, "video-generation": false },
+    };
+  }
+
   // ---- Settings UI 管理入口（Renderer 只经 model:command 白名单） ----
   getDefaults({ context } = {}) {
     const actor = this.#actor(context);

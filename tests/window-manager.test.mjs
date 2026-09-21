@@ -288,7 +288,14 @@ test("nativeIntents：只有 browser kind 产出意图，且带上遮挡者与�
   assert.equal(i.present, true);
   assert.equal(i.focused, false); // home 是后开的，它才是聚焦者
   // 视口 = 窗口矩形挖掉 44px 标题栏（与 styles.css 的 .window-title 一致）
-  assert.deepEqual(i.viewport, { x: 60, y: 124, width: 700, height: 456 });
+  // D5-01：浏览器窗口的原生视口必须从**固定 chrome（标签栏 + 地址栏 = 90）下面**开始，
+  // 否则原生视图会盖住标签栏与地址栏（合成点击能过、真人点击不能）。
+  assert.deepEqual(i.viewport, {
+    x: 60,
+    y: 80 + domain.TITLE_BAR_H + domain.BROWSER_CHROME_H,
+    width: 700,
+    height: 500 - domain.TITLE_BAR_H - domain.BROWSER_CHROME_H,
+  });
   assert.deepEqual(i.occluders.map((o) => o.id), ["home"]);
   // 最小化后 present=false，但仍产出意图（控制器需要知道"该隐藏了"）
   const min = manager.reduce(state, { type: "window/minimize", id: "browser" });
@@ -296,4 +303,28 @@ test("nativeIntents：只有 browser kind 产出意图，且带上遮挡者与�
   // 非原生 App 永远不产出意图
   const onlyHome = boot([{ type: "window/open", appId: "home" }]);
   assert.deepEqual(manager.nativeIntents(onlyHome, HOST), []);
+});
+
+test("nativeIntents：chrome 之下的 DOM 条带（提示条/错误条）从原生视口里**让出去**", () => {
+  const state = boot([
+    { type: "window/open", appId: "browser", id: "browser", bounds: { x: 60, y: 80, w: 700, h: 500 } },
+    { type: "window/open", appId: "home", id: "home", bounds: { x: 100, y: 120, w: 700, h: 500 } },
+  ]);
+  const base = manager.nativeIntents(state, HOST)[0].viewport;
+  // 条带高度整块从顶部让出（宽/高同源；让位后网页不会被 DOM 提示条挡住）
+  const strip = 152;
+  assert.deepEqual(manager.nativeIntents(state, HOST, { browser: strip })[0].viewport, {
+    x: base.x,
+    y: base.y + strip,
+    width: base.width,
+    height: base.height - strip,
+  });
+  // 没上报的窗口与非浏览器窗口一律 0：既有几何逐字不变（D2-02 / D5-01 旧断言仍成立）
+  assert.deepEqual(manager.nativeIntents(state, HOST, {})[0].viewport, base);
+  assert.deepEqual(manager.nativeIntents(state, HOST, { home: 500 })[0].viewport, base);
+  // 脏值不产生负高度、不引入小数
+  assert.equal(manager.nativeIntents(state, HOST, { browser: -10 })[0].viewport.height, base.height);
+  assert.equal(manager.nativeIntents(state, HOST, { browser: 9e9 })[0].viewport.height, 0);
+  assert.equal(manager.nativeIntents(state, HOST, { browser: 151.6 })[0].viewport.y, base.y + 152);
+  assert.equal(manager.nativeIntents(state, HOST, { browser: Number.NaN })[0].viewport.y, base.y);
 });

@@ -88,6 +88,10 @@ const SIDE_EFFECT_ERROR = Object.freeze({
   APPROVAL_DENIED: "SIDE_EFFECT_APPROVAL_DENIED",
   APPROVAL_REVOKED: "SIDE_EFFECT_APPROVAL_REVOKED",
   APPROVAL_EXPIRED: "SIDE_EFFECT_APPROVAL_EXPIRED",
+  // D4-03 Closure：批准人资格。信任只来自持久化 approval 行的 actor_user_id；
+  // 登出 / 会话过期不撤销批准，只回答"批准人此刻是否仍有批准范围"。
+  APPROVER_INELIGIBLE: "SIDE_EFFECT_APPROVER_INELIGIBLE",
+  APPROVER_UNVERIFIED: "SIDE_EFFECT_APPROVER_UNVERIFIED",
   // D4-03C4 approval gateway：等待超时 / 重启后放弃，一律 0 execute。
   APPROVAL_TIMEOUT: "SIDE_EFFECT_APPROVAL_TIMEOUT",
   APPROVAL_ABANDONED: "SIDE_EFFECT_APPROVAL_ABANDONED",
@@ -240,6 +244,12 @@ function evaluateExecutionEligibility(snapshot = {}) {
   if (approval.approved_tool_id != null && approval.approved_tool_id !== call.tool_id) return fail(ELIGIBILITY.STALE, SIDE_EFFECT_ERROR.PLAN_STALE);
   if (approval.approved_tool_version != null && Number(approval.approved_tool_version) !== Number(call.tool_version)) return fail(ELIGIBILITY.STALE, SIDE_EFFECT_ERROR.PLAN_STALE);
   if (approval.approved_effect_class != null && approval.approved_effect_class !== call.effect_class) return fail(ELIGIBILITY.STALE, SIDE_EFFECT_ERROR.PLAN_STALE);
+  // D5-01 Closure-3 · plan 完整性：批准时留存的 expectedEffects 是**独立副本**，必须与当前 plan 逐字一致。
+  // 任何"批准之后 plan 被改过"（例如把要去的地址换成另一个）都必须在这里 fail closed：
+  // 旧批准绝不能变成新目标 / 新地址的通行证。
+  const approvedEffects = Array.isArray(approval.approved_expected_effects) ? approval.approved_expected_effects : null;
+  const currentEffects = Array.isArray(call.expectedEffectsSafe) ? call.expectedEffectsSafe : [];
+  if (approvedEffects && JSON.stringify(approvedEffects) !== JSON.stringify(currentEffects)) return fail(ELIGIBILITY.STALE, SIDE_EFFECT_ERROR.PLAN_STALE);
   pass("approval");
 
   const lease = s.lease;

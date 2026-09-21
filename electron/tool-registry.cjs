@@ -147,6 +147,106 @@ const BUILTIN_CONTRACTS = Object.freeze([
     expectedSideEffects: ["reads authorized resource index (no mutation)"],
   },
   {
+    // D5-01 Closure · 最小受控浏览器能力（读取）：目标标签由用户在渲染层显式选择，
+    // 后端校验账号 / App / 标签归属；正文作为**不可信参考数据**有界返回。
+    toolId: "browser.read.page",
+    version: 1,
+    displayName: "Read Browser Page",
+    description: "读取用户已授权控制的浏览器标签的页面信息与有界正文（READ_ONLY；不支持任意脚本）。",
+    // viewId 缺省时由后端在**已授权目标**里解析（恰好一个才可推断，多个必须显式指定）；
+    // 模型给了 viewId 也只是"请求"，是否可用一律由 BrowserControlAuthority 判定。
+    inputSchema: { type: "object", additionalProperties: false, properties: { viewId: { type: "string", pattern: "^[A-Za-z0-9_:.#-]{1,80}$" } }, required: [] },
+    outputSchema: { type: "object", additionalProperties: false, properties: { viewId: { type: "string" }, url: { type: "string" }, title: { type: "string" }, text: { type: "string" }, truncated: { type: "boolean" }, untrusted: { type: "boolean" } }, required: ["viewId", "url", "title", "text", "truncated"] },
+    riskClass: RISK_CLASS.READ_ONLY,
+    sideEffect: SIDE_EFFECT.READ,
+    requiresApproval: false,
+    requiredPermissions: ["tool.browser.read"],
+    resourceActions: [],
+    executionProvider: "BrowserControl",
+    enabled: true,
+    expectedSideEffects: ["reads the selected tab's page text (untrusted reference data, bounded)"],
+  },
+  {
+    // 导航：**副作用**，绝不标成只读；requiresApproval + CONTROLLED_REVERSIBLE_WRITE，
+    // 只有既有工具门 / 审批路径放行后才会执行（复用产品 safeURL 策略）。
+    toolId: "browser.navigate",
+    version: 1,
+    displayName: "Navigate Browser Tab",
+    description: "导航用户已授权控制的浏览器标签到指定 http(s) 地址（REVERSIBLE_WRITE；需审批）。",
+    // url 在**工具门**就先收窄到 http(s) 且不含凭据（pattern 里排除 "@"），
+    // 执行前还会再过一次产品 safeURL —— 两层都拒绝，绝不只靠一层。
+    inputSchema: { type: "object", additionalProperties: false, properties: { viewId: { type: "string", pattern: "^[A-Za-z0-9_:.#-]{1,80}$" }, url: { type: "string", maxLength: 2000, pattern: "^https?://[^\\s@]+$" } }, required: ["url"] },
+    // url = **真实落地地址**（可能因服务器 302 与 requested 不同，redirected 如实标记）；
+    // noop = 同址导航（确实发出过请求，但没有地址变化），绝不冒充写入。
+    outputSchema: { type: "object", additionalProperties: false, properties: { viewId: { type: "string" }, url: { type: "string" }, ok: { type: "boolean" }, requested: { type: "string" }, redirected: { type: "boolean" }, noop: { type: "boolean" }, dispatchSeq: { type: "integer" } }, required: ["viewId", "url", "ok"] },
+    riskClass: RISK_CLASS.REVERSIBLE_WRITE,
+    sideEffect: SIDE_EFFECT.WRITE,
+    requiresApproval: true,
+    requiredPermissions: ["tool.browser.navigate"],
+    resourceActions: [],
+    executionProvider: "BrowserControl",
+    enabled: true,
+    expectedSideEffects: ["browser tab navigation (reversible by navigating back)"],
+    idempotencySupport: true,
+    verificationStrategy: "READ_AFTER_WRITE",
+    approvalPolicy: "ONE_CALL",
+    leasePolicy: "SINGLE_ACTIVE",
+    executionPolicy: "CONTROLLED_REVERSIBLE_WRITE",
+  },
+  {
+    // D5-02：读取画布（节点/连线摘要，READ_ONLY）。目标画布必须属于当前账号或被共享给它。
+    toolId: "canvas.read",
+    version: 1,
+    displayName: "Read Canvas",
+    description: "读取指定画布的节点与连线摘要（READ_ONLY；不含凭据、不含资源字节）。",
+    inputSchema: { type: "object", additionalProperties: false, properties: { canvasId: { type: "string", pattern: "^[A-Za-z0-9_.#:-]{1,120}$" } }, required: ["canvasId"] },
+    outputSchema: { type: "object", additionalProperties: false, properties: { canvasId: { type: "string" }, revision: { type: "integer" }, nodeCount: { type: "integer" }, edgeCount: { type: "integer" }, nodes: { type: "array" }, untrusted: { type: "boolean" } }, required: ["canvasId", "revision", "nodeCount", "edgeCount"] },
+    riskClass: RISK_CLASS.READ_ONLY,
+    sideEffect: SIDE_EFFECT.READ,
+    requiresApproval: false,
+    requiredPermissions: ["tool.canvas.read"],
+    resourceActions: [],
+    executionProvider: "CanvasControl",
+    enabled: true,
+    expectedSideEffects: ["reads the canvas document summary (no mutation)"],
+  },
+  {
+    // D5-02：编辑画布。**与手工路径同一个命令处理层**（canvas-domain.applyCommand）+
+    // 同一份版本检查（baseRevision）+ 同一份权限规则（evaluateCanvasAccess）。
+    // 只接受结构化命令（不接受整篇文档覆盖），目标节点以 id 标识。
+    toolId: "canvas.edit",
+    version: 1,
+    displayName: "Edit Canvas",
+    description: "对指定画布执行一条结构化命令（添加/编辑/移动/复制/删除/分组/连线/断开；REVERSIBLE_WRITE，需审批）。",
+    inputSchema: {
+      type: "object", additionalProperties: false,
+      properties: {
+        canvasId: { type: "string", pattern: "^[A-Za-z0-9_.#:-]{1,120}$" },
+        baseRevision: { type: "integer", minimum: 1 },
+        command: {
+          type: "object", additionalProperties: true,
+          properties: { type: { type: "string", pattern: "^[a-z]+\\.[a-z]+$" } },
+          required: ["type"],
+        },
+      },
+      required: ["canvasId", "command"],
+    },
+    outputSchema: { type: "object", additionalProperties: false, properties: { canvasId: { type: "string" }, revision: { type: "integer" }, commandType: { type: "string" }, nodeIds: { type: "array" }, edgeIds: { type: "array" } }, required: ["canvasId", "revision", "commandType"] },
+    riskClass: RISK_CLASS.REVERSIBLE_WRITE,
+    sideEffect: SIDE_EFFECT.WRITE,
+    requiresApproval: true,
+    requiredPermissions: ["tool.canvas.edit"],
+    resourceActions: [],
+    executionProvider: "CanvasControl",
+    enabled: true,
+    expectedSideEffects: ["canvas document mutation (reversible via undo record)"],
+    idempotencySupport: false,
+    verificationStrategy: "READ_AFTER_WRITE",
+    approvalPolicy: "ONE_CALL",
+    leasePolicy: "SINGLE_ACTIVE",
+    executionPolicy: "CONTROLLED_REVERSIBLE_WRITE",
+  },
+  {
     toolId: "resource.trash",
     version: 1,
     displayName: "Trash Resource",

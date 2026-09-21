@@ -1,0 +1,108 @@
+{
+  "phase": "D5-02",
+  "round": "Closure · 验收补齐与边界证据",
+  "baseHead": "18b7c4c040d4574b3d7856dd0290312eacbd1778",
+  "testedCommit": "ce5dd21",
+  "branch": "feature/d4-03-tool-proxy",
+  "novaiSource": {
+    "repo": "https://github.com/invaders-2/NOVAI-Infinite-Canvas",
+    "commit": "6ce1a64680b669b31c2ac3b32418b54decd404f2"
+  },
+  "verifyTree": "git archive ce5dd21 → /tmp/oa-d502c-clean（软链 node_modules）",
+  "verdict": "PARTIAL",
+  "generationOwnership": {
+    "task": "一次画布生成 = 一个 Task（appId=canvas）；canvas_runs（schema v18）绑定 run↔task↔画布↔baseRevision",
+    "budget": "任务级 MODEL_CALLS（getTaskBudget/recordBudgetConsumption，与任务层同一份账本）；耗尽 → BUDGET_EXHAUSTED，不发请求",
+    "stop": "canvas/runStop → requestCancel/cancelTask + run 终结 + AbortController（在途请求中止）；桥把用户级联停止转成 abort",
+    "authorization": "任务不绑定 model config；每次调用经 ModelService.resolveModel(capability, configId) + TaskService.startModelCall 重新判定；App Principal = canvas",
+    "version": "run 固定 baseRevision；迟到的结果只在画布 revision 未前进时返回，否则 CANVAS_CHANGED（用户内容优先）",
+    "singleModelEntry": "model-bootstrap 删除 canvas/chat|canvas/image；画布只能走 canvas:command 的 run 链"
+  },
+  "checks": {
+    "pass": 24,
+    "fail": 1,
+    "total": 25,
+    "passed": [
+      "D2 能力不支持",
+      "D3 预算耗尽",
+      "D4 停止+迟到+不再发送",
+      "D5 失败收敛/无重试/无凭据",
+      "E1 只接受当前实例",
+      "E2 不信任自报身份",
+      "E3 协议越界",
+      "E4 出网通道（接收端 0 命中）",
+      "C1–C12 集成与产品路径"
+    ],
+    "failed": [
+      "D1 无权限（撤销画布应用 model.use 后明确拒绝且 provider 0 请求）"
+    ],
+    "d1RootCause": "governance/getAppAccess 的 grants 投影里没有 model.use 那条授予（只看到 1 条），撤销动作拿不到 grantId → 断言无法成立。已确认 ModelService.#authorize 的 app-grant 检查存在，画布也是独立 App Principal；缺的是门禁侧的授予句柄与一次成功的撤销-拒绝实测。"
+  },
+  "isolation": {
+    "hostLevel": [
+      "画布文档 CSP：default-src none / connect-src none / form-action none / frame-src none / object-src none / img,media,font 仅本 bundle 与 data:blob:",
+      "openarc-canvas:// 只读白名单扩展名 + 目录穿越拒绝（门禁 E3 实测）",
+      "宿主消息校验：event.source 必须是当前帧 + 每次挂载随机 token（E1 实测：伪造 token / 其它 iframe / 外壳自身都被忽略）",
+      "后端按会话重判身份/权限/版本（E2 实测：伪造 userId/sessionRef 无效）"
+    ],
+    "egressTest": "本地接收端（随机端口）接收 fetch/img/WebSocket/表单/外站 script 五类尝试 → 0 命中",
+    "residualChannel": "location.href 自我导航无法由 CSP 关闭（无 navigate-to 指令）；缓解=桥拦截用户可点外站链接 + 页面无凭据/Node；本轮未新增宿主重置机制，如实登记"
+  },
+  "assetStorage": {
+    "implemented": [
+      "canvas/importAsset → 资源库 importManaged（managed store）；画布只存 openarc-asset:<ResourceRef>",
+      "canvas/readAsset → 逐资源授权解析（有界 8MB）",
+      "宿主 ref⇄data URL 映射；老文档 data URL 原样兼容"
+    ],
+    "verifiedInGate": false,
+    "gap": "保存重开 / 账号隔离 / 资源删除后的明确提示未进门禁；上一轮“全部资源均为引用”的说法在产品证据层面仍不成立"
+  },
+  "aiEditChain": {
+    "verified": "适配器/工具层（tests/d5-02-canvas-tool.test.mjs 6/6：registry 条目 / plan 固定 revision / execute 只用 plan / 只读 plan=null / 批准后用户先改 → knownNoEffect + 用户内容保留）",
+    "notVerified": "真实 Agent 提议 → 审批 → 权威执行 → 画布呈现 → 保存恢复 整条产品链；以及该链上的旧 revision 对照"
+  },
+  "cleanTree": [
+    {
+      "id": "G0",
+      "command": "npm run build",
+      "exitCode": 0
+    },
+    {
+      "id": "G1",
+      "command": "node --test tests/d5-02-canvas-service.test.mjs tests/d5-02-canvas-tool.test.mjs",
+      "counts": {
+        "pass": 12,
+        "fail": 0
+      },
+      "exitCode": 0
+    },
+    {
+      "id": "G2",
+      "command": "node experiments/d5-02/canvas-e2e.mjs",
+      "counts": {
+        "pass": 24,
+        "fail": 1,
+        "total": 25
+      },
+      "exitCode": 1,
+      "artifact": "artifacts/d5-02/d5-02-canvas-e2e.json"
+    },
+    {
+      "id": "G3",
+      "command": "npm run test:d5-01",
+      "counts": {
+        "pass": 64,
+        "fail": 0,
+        "total": 64
+      },
+      "notVerified": 1,
+      "exitCode": 0
+    }
+  ],
+  "notExpanded": [
+    "视频生成（仍为非必需缺项）",
+    "多人实时协作（PLAN 后续扩展）",
+    "未 push / 未合并 main / 未进入 D5-03"
+  ],
+  "at": "2026-09-20T10:07:47.254Z"
+}

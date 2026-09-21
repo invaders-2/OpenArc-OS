@@ -107,7 +107,11 @@ test("WRITE / MCP / Shell 仍 0：Registry 未注册且 test.write 不可执行"
     const task = fx.createTask();
     const taskId = task.task.taskId;
     fx.taskService.startTask({ context: ctx, taskId, expectedRevision: task.task.revision });
-    assert.ok(!fx.toolRegistry.ids().some((id) => /mcp|shell|terminal|filesystem|browser/.test(id)));
+    // D5-01 Closure-2：受控浏览器工具（browser.read.page / browser.navigate）是有意注册的受控契约；
+    // 这里否决的是**Harness 旁路**类工具（含非受控的 browser.* 名字）。
+    const CONTROLLED = new Set(["browser.read.page", "browser.navigate"]);
+    assert.ok(!fx.toolRegistry.ids().some((id) => /mcp|shell|terminal|filesystem/.test(id)));
+    assert.ok(fx.toolRegistry.ids().filter((id) => /browser/.test(id)).every((id) => CONTROLLED.has(id)));
     const p = fx.toolProxy.propose({ context: ctx, taskId, toolId: "test.write", toolVersion: 1, arguments: { target: "x" }, proposalId: "sec_write" });
     const r = await fx.toolProxy.executeReadOnly({ context: ctx, taskId, proposalId: "sec_write" });
     assert.equal(r.error, "WRITE_EXECUTION_DISABLED");

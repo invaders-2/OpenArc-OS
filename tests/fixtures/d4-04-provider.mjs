@@ -5,10 +5,15 @@
  * 它按 smoke 设置的 mode 返回确定性的 model tool_call 序列，绝不接触 OpenArc DB / Domain。
  */
 import http from "node:http";
+// 有界 + 强制的关闭：绝不让"未结束的请求连接"把测试文件进程挂死（见 tests/model-fake-provider.mjs 的说明）。
+import { closeServer } from "../model-fake-provider.mjs";
 
 const FINAL_TEXT = "OPENARC_VERTICAL_SMOKE_OK";
 
-function planFor(mode, resourceRefs = [], followSeen = false) {
+function planFor(mode, resourceRefs = [], followSeen = false, explicit = null) {
+  // D5-01 Closure-2：显式 plan（[{name, args}]）。它只决定"模型想调什么"，
+  // 广播哪些工具、能不能执行、要不要审批一律仍由 Tool Facade / OpenArc 决定。
+  if (Array.isArray(explicit) && explicit.length) return explicit.map((s) => ({ name: String(s.name), args: () => (s.args && typeof s.args === "object" ? s.args : {}) }));
   const refs = Array.isArray(resourceRefs) ? resourceRefs : (resourceRefs == null ? [] : [resourceRefs]);
   const search = { name: "resource_search", args: () => ({ query: "Vertical Smoke Resource", limit: 5 }) };
   const read = { name: "resource_read_metadata", args: () => ({ resourceRef: refs[0] ?? null }) };
@@ -30,21 +35,24 @@ function planFor(mode, resourceRefs = [], followSeen = false) {
 }
 
 export async function startD4Provider() {
-  const state = { requests: 0, mode: "read", resourceRef: null, resourceRefs: [], toolCalls: [], names: [], authHeaders: [], history: [], finalText: null, bodies: [] };
+  const state = { requests: 0, mode: "read", resourceRef: null, resourceRefs: [], toolCalls: [], names: [], authHeaders: [], history: [], finalText: null, bodies: [], plan: null };
   const server = http.createServer((req, res) => {
     const send = (code, obj) => { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(obj)); };
     let raw = "";
     req.on("data", (d) => (raw += d));
     req.on("end", () => {
       if (req.method === "POST" && req.url === "/__plan") {
+        let setPlanFlag = false;
         try {
           const b = JSON.parse(raw || "{}");
           if (typeof b.mode === "string") state.mode = b.mode;
           if (typeof b.resourceRef === "string") { state.resourceRef = b.resourceRef; state.resourceRefs = [b.resourceRef]; }
           if (Array.isArray(b.resourceRefs)) { state.resourceRefs = b.resourceRefs.filter((r) => typeof r === "string"); state.resourceRef = state.resourceRefs[0] || null; }
           if (typeof b.finalText === "string") state.finalText = b.finalText;
+          if (Array.isArray(b.plan)) { state.plan = b.plan.filter((s) => s && typeof s.name === "string").slice(0, 32); setPlanFlag = true; }
         } catch { /* ignore */ }
         state.requests = 0; state.toolCalls = []; state.names = []; state.bodies = [];
+        if (!setPlanFlag) state.plan = null;
         return send(200, { ok: true });
       }
       if (req.method === "GET" && req.url === "/__bodies") return send(200, { ok: true, bodies: state.bodies });
@@ -66,7 +74,7 @@ export async function startD4Provider() {
         };
         const followSeen = msgs.some(isFollow);
         state.history.push({ mode: state.mode, n: names.length, names: names.slice(), followSeen });
-        const plan = planFor(state.mode, state.resourceRefs.length ? state.resourceRefs : state.resourceRef, followSeen);
+        const plan = planFor(state.mode, state.resourceRefs.length ? state.resourceRefs : state.resourceRef, followSeen, state.plan);
         const usage = { prompt_tokens: 11 * state.requests, completion_tokens: 5, total_tokens: 11 * state.requests + 5 };
         if (names.length < plan.length) {
           const step = plan[names.length];
@@ -79,5 +87,5 @@ export async function startD4Provider() {
     });
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
-  return { baseUrl: "http://127.0.0.1:" + server.address().port + "/v1", port: server.address().port, state, finalText: FINAL_TEXT, close: () => new Promise((r) => { server.close(() => r()); }) };
+  return { baseUrl: "http://127.0.0.1:" + server.address().port + "/v1", port: server.address().port, state, finalText: FINAL_TEXT, close: () => closeServer(server) };
 }

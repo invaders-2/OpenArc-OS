@@ -25,19 +25,35 @@ function createModelBundle({ identityStore, authorization, authStore, userDataDi
   const credentialStore = new CredentialStore({ store: modelStore, backend });
   const modelService = new ModelService({ identity: identityStore, authService: authorization, authStore, modelStore, credentialStore, fetchImpl, clock, logger });
   const modelProxy = new ModelProxy({ modelService, clock: clock || (() => Date.now()), logger });
-  // 内置 Model App baseline：resource-library 可管理/测试，ai 可用；其余 App 默认 DENY。
+  /**
+   * 内置 Model App baseline（每个组织一份）：settings 最小管理权，resource-library / ai 可用；
+   * D5-02 起 **canvas 是独立 App Principal**（画布页面的模型调用以 canvas 身份被授权与审计）；
+   * 其余 App 默认 DENY。
+   *
+   * 为什么按组织重复调用：数据库可能在还没有任何用户时就装配完成（首次运行先建库、后注册管理员），
+   * 那时既没有 team 也没有 admin，一次性 seed 会把授予落到 organization_id=""，谁都匹配不到。
+   * 因此宿主在拿到会话时对该会话的组织再 seed 一次（upsert 幂等）。
+   */
+  const seedModelAppPolicy = ({ organizationId = null, grantedBy = "system:model-baseline" } = {}) => {
+    if (!organizationId) return { ok: false, error: "NO_ORGANIZATION" };
+    try {
+      authStore.upsertApp({ appId: HOST_APP_ID, name: "系统设置", publisher: "openarc-builtin", status: "enabled", builtIn: 1 });
+      authStore.upsertApp({ appId: "canvas", name: "无限画布", publisher: "openarc-builtin", status: "enabled", builtIn: 1 });
+      const seed = (appId, actions) => { if (authStore.appById(appId)) authStore.upsertAppGrant({ appId, resourceType: "model", actions, grantedBy, organizationId }); };
+      seed(HOST_APP_ID, ["model.view", "model.use", "model.manage", "model.test"]);
+      seed("resource-library", ["model.view", "model.use"]);
+      seed("ai", ["model.view", "model.use", "model.test"]);
+      seed("canvas", ["model.view", "model.use"]);
+      return { ok: true };
+    } catch {
+      return { ok: false, error: "SEED_FAILED" };
+    }
+  };
   try {
     const admin = identityStore.allUsers().find((u) => u.role === "ADMIN") || null;
-    const orgId = admin ? admin.team_id : (identityStore.allTeams()[0] ? identityStore.allTeams()[0].id : "");
-    // shell 注册 settings App Principal（built-in），只给最小 Model 权限。
-    authStore.upsertApp({ appId: HOST_APP_ID, name: "系统设置", publisher: "openarc-builtin", status: "enabled", builtIn: 1 });
-    const seed = (appId, actions) => { if (authStore.appById(appId)) authStore.upsertAppGrant({ appId, resourceType: "model", actions, grantedBy: "system:model-baseline", organizationId: orgId }); };
-    seed(HOST_APP_ID, ["model.view", "model.use", "model.manage", "model.test"]);
-    seed("resource-library", ["model.view", "model.use"]);
-    seed("ai", ["model.view", "model.use", "model.test"]);
-    // 其它 App（canvas / browser / photoshop / illustrator / image-generator / video-generator / mcp-center / skill-runtime）保持默认 DENY。
+    seedModelAppPolicy({ organizationId: admin ? admin.team_id : (identityStore.allTeams()[0] ? identityStore.allTeams()[0].id : null), grantedBy: admin ? admin.id : "system:model-baseline" });
   } catch { /* baseline 失败不阻塞装配 */ }
-  return { modelStore, credentialStore, modelService, modelProxy };
+  return { modelStore, credentialStore, modelService, modelProxy, seedModelAppPolicy };
 }
 
 /** Renderer 白名单。新增能力必须显式登记；未知命令一律 MODEL_COMMAND_NOT_ALLOWED。 */
@@ -47,6 +63,8 @@ const MODEL_COMMANDS = Object.freeze([
   "model/list", "model/create", "model/update", "model/setStatus",
   "defaults/get", "defaults/set",
   "model/test",
+  // D5-02：画布只读模型面（唯一入口；真正的生成调用走 canvas:command 的 run，见 canvas-bootstrap）。
+  "canvas/models",
 ]);
 const MODEL_COMMAND_NOT_ALLOWED = "MODEL_COMMAND_NOT_ALLOWED";
 
@@ -92,6 +110,8 @@ function registerModelIpc({ ipcMain, service, identity, isTrusted, hostAppId = H
         case "defaults/get": return service.getDefaults({ context });
         case "defaults/set": return service.setDefault({ context, capability: requireStr(payload.capability, 40), configId: requireStr(payload.configId, 120), scope: asStr(payload.scope, 20) });
         case "model/test": return service.testConnection({ context, configId: requireStr(payload.configId, 120) });
+        // ---- D5-02 画布模型面：能力由 ModelService 判定，缺能力明确报错、绝不回落 ----
+        case "canvas/models": return service.listModelsForUse({ context: { ...context, appId: "canvas" } });
         default: return { ok: false, error: MODEL_COMMAND_NOT_ALLOWED };
       }
     } catch {

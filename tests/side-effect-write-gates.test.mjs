@@ -56,11 +56,22 @@ test("Approval expired → 0 mutation", async () => {
   } finally { await ctx.fx.fx.close(); }
 });
 
-test("Approval revoke → 0 mutation", async () => {
+test("Approval revoke → call BLOCKED/APPROVAL_REVOKED、lease 收敛、0 mutation", async () => {
   const ctx = await attempt();
   try {
-    assert.equal(ctx.fx.revokeApproval(ctx.callId).ok, true);
-    await expectZeroMutation(ctx, runExec(ctx), "SIDE_EFFECT_APPROVAL_REVOKED");
+    const rev = ctx.fx.revokeApproval(ctx.callId);
+    assert.equal(rev.ok, true, JSON.stringify(rev));
+    assert.equal(rev.revoked, true);
+    assert.equal(rev.callStatus, "BLOCKED");
+    // 撤销与 call/lease 收敛原子完成：拒绝原因承载在 call.error_code（不再是 approval 单独撤销）。
+    const call = ctx.fx.store.callById(ctx.callId);
+    assert.equal(call.status, "BLOCKED");
+    assert.equal(call.errorCode, "SIDE_EFFECT_APPROVAL_REVOKED");
+    assert.equal(ctx.fx.authority.effectiveApproval(ctx.callId).effectiveDecision, "REVOKED");
+    assert.equal(ctx.fx.store.activeLeaseOfCall(ctx.callId), null, "lease ownership 必须收敛，不得泄漏");
+    // 执行入口被状态守卫拒绝（CALL_STATE），0 Domain mutation 断言逐条保留。
+    await expectZeroMutation(ctx, runExec(ctx), "SIDE_EFFECT_CALL_STATE");
+    assert.equal(rev.approval.decision, "REVOKED");
   } finally { await ctx.fx.fx.close(); }
 });
 

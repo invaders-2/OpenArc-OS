@@ -1,7 +1,7 @@
 {
   "phase": "D4-05",
   "title": "执行关卡：产物不符 / 结果未知 / 用量到限 / 记忆越权",
-  "testedCommit": "ac9af8e502c5285b7bcf06c8fc0b8e0ecc52e9f0",
+  "testedCommit": "68c84c976eab15c360c71e14903abf47de5a7d12",
   "workspaceState": "",
   "command": "npm run test:d4-05",
   "env": {
@@ -32,7 +32,7 @@
       "status": "RESOLVED",
       "name": "S4 · memory → 任务上下文的正向注入",
       "expected": "PLAN §41 A36：用户删除个人记忆并切换账号，检索与新任务上下文均不出现已删或他人内容。",
-      "actual": "已接入受控装配入口 electron/memory-context.cjs，并在唯一出站口 electron/harness-model-adapter.cjs 注入（BEGIN/END_OPENARC_AUTHORIZED_MEMORY reference-data 标记块，明确非系统指令）。每次 assemble 重新 validateSession → SearchService 授权检索（agent=true）→ 逐条 getCapabilities + readText 最后检查；无缓存。真实 provider 请求体正负对照：授权/部门成员注入，无显式 grant（§25）、他人 personal、删除、撤权、同组织非成员、未接线均不注入；残缺标记 403 不转发。证据见 tests/d4-05-s4-memory-context.test.mjs（11/11）。真实 Electron UI 链路证据见 tests/d4-05-memory-ui.mjs：真实产品 boot 自动装配 MemoryContext → 真实 Renderer 登录 alice → 真实 UI task/run 注入（BEGIN/END reference-data + 唯一 secret + system 在 messages 最前）→ 产品 API 删除（trash+permanentDelete）→ 后续请求不含 marker/secret → 真实 UI 切账号 dana 不含 alice secret 且读 alice task=TASK_FORBIDDEN；DB/DOM 0 正文 secret 留存。",
+      "actual": "已接入受控装配入口 electron/memory-context.cjs；唯一出站口 electron/harness-model-adapter.cjs 按信任分层承载（Closure-4）：零资源文本的固定安全规则 system 消息 name:openarc.rules + 记忆正文经 JSON.stringify 转义后的独立 user 消息 name:openarc.reference_data（trust=untrusted），插入在所有前导 system 之后、第一条非 system 之前；正文绝不进入 system/developer，也绝不靠正文标记剔除消息（合法用户文本原样保留）。每次 assemble 重新 validateSession → SearchService 授权检索（agent=true）→ 逐条 getCapabilities + readText 最后检查；无缓存。真实 provider 请求体正负对照：授权/部门成员注入，无显式 grant（§25）、他人 personal、删除、撤权、同组织非成员、未接线均不注入；messages 结构不安全（非数组 / 非普通对象）→ 403 MEMORY_CONTEXT_UNSAFE 不转发。证据见 tests/d4-05-s4-memory-context.test.mjs。真实 Electron UI 链路证据见 tests/d4-05-memory-ui.mjs：真实产品 boot 自动装配 MemoryContext → 真实 Renderer 登录 alice → 真实 UI task/run 注入（openarc.rules system + openarc.reference_data user + 唯一 secret）→ 产品 API 删除（trash+permanentDelete）→ 后续请求不含 rules/reference/secret → 真实 UI 切账号 dana 不含 alice secret 且读 alice task=TASK_FORBIDDEN；DB/DOM 0 正文 secret 留存。",
       "reason": null
     }
   ],
@@ -42,6 +42,7 @@
   "nodeTests": [
     "d4-05-s1-output-size.test.mjs",
     "d4-05-s1-facade-a33.test.mjs",
+    "d4-05-s1-facade-denied-write.test.mjs",
     "d4-05-s1-facade-association.test.mjs",
     "d4-05-s2-recovery.test.mjs",
     "d4-05-s3-budget-ledger.test.mjs",
@@ -57,7 +58,7 @@
       "pass": 94,
       "fail": 0
     },
-    "artifactSha256": "81fc245409e74d10ca1e3c67375418601a3693e938c726eface626606de76a07"
+    "artifactSha256": "da08eab086cab84a339405bd9099e26e3fec86472e800867b8c7eb90948b50bc"
   },
   "recoveryRun": {
     "exitCode": 0,
@@ -66,7 +67,7 @@
       "pass": 11,
       "fail": 0
     },
-    "artifactSha256": "329d32fc0413ba72ba3e461006ffd3056217f050916a5a2a5dc9d19016e116ad"
+    "artifactSha256": "2a3a3df7b8a1dc943bda589cf897946bf4e62417fec326716e38794f02da6e9f"
   },
   "memoryUiElectronRun": {
     "exitCode": 0,
@@ -75,41 +76,41 @@
       "pass": 15,
       "fail": 0
     },
-    "artifactSha256": "077e44ce9a97c8529f2afd6b25d1e5ff273382d7be2074b6b4a2803d0c407855",
+    "artifactSha256": "8932be5e390228f1ec5bc658847eae1dbc0bf2807eb598e67de1f2a7a5e470f8",
     "secretHits": 0
   },
   "nodeRun": {
     "exitCode": 0,
     "counts": {
-      "pass": 45,
+      "pass": 53,
       "fail": 0,
-      "tests": 45
+      "tests": 53
     }
   },
   "rendererConsoleErrors": 0,
   "mainUnhandledErrors": 0,
   "secretHits": 0,
   "checksSummary": {
-    "total": 165,
-    "pass": 165,
+    "total": 173,
+    "pass": 173,
     "fail": 0
   },
   "sourceArtifacts": [
     {
       "path": "artifacts/d4-04/vertical-smoke-gate.json",
-      "sha256": "15aa1ea925d2da4cccfab53f2a9ca86df3181b1a4ec1d271eb71bf994c1fa99c"
+      "sha256": "5ae7ec44bcabf27b41fcf94916a848da503fe6a1a7402251727bb8f5e3d236d1"
     },
     {
       "path": "artifacts/d4-05/node-tests.tap",
-      "sha256": "feb1275314a51bbfd9f2dd48e391a0bd7af566cf922d8fad0c37fe117bed651e"
+      "sha256": "e41d2ef08c2317c2c46044f0596f6bb4af269570c1f46ec304d3303d82a9c196"
     },
     {
       "path": "artifacts/d4-05-recovery/recovery-ui-gate.json",
-      "sha256": "75a7616ae427669c0abdaf5b1f69f5ddfbfce16234df72d447b63abee7d699fe"
+      "sha256": "d7999a23548536ce9f3976dcc79b55e96dbc3dddfe6e68781a12234345e28bb3"
     },
     {
       "path": "artifacts/d4-05-memory-ui/memory-ui-gate.json",
-      "sha256": "6556c9786ac30894c9213a9cf5d1a151fc9dc3811a34e2d85d5c10e48c399d18"
+      "sha256": "cb84406ba65b6a28721ba30b46507aeb53d4c487dc31d4a1226461741d36fee9"
     }
   ],
   "checks": [
@@ -204,6 +205,38 @@
     {
       "scenario": "S1",
       "source": "node:tap",
+      "name": "D4-05 S1 明确 WRITE 被拒 · 无 TOOL grant → DENIED/TOOL_APP_NOT_GRANTED + final text 拒绝假成功（BLOCKED / 0 mutation / 0 call）",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "scenario": "S1",
+      "source": "node:tap",
+      "name": "D4-05 S1 明确 WRITE 正对照 · 有 TOOL grant + 批准 → WRITE 成功 / Task SUCCEEDED（不回归）",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "scenario": "S1",
+      "source": "node:tap",
+      "name": "D4-05 S1 READ_ONLY 拒绝不阻断 · resource.search 无 grant → DENIED 但不整体失败",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "scenario": "S1",
+      "source": "node:tap",
+      "name": "D4-05 S1 解决语义 · 同 tool+args 先 DENIED 后真实成功 → 允许成功且旧 DENIED 记录保留",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "scenario": "S1",
+      "source": "node:tap",
       "name": "D4-05 S1 A33 · 工具报告成功但产物尺寸不符 → TOOL_VERIFICATION_FAILED / Task BLOCKED / 0 Artifact / 无自动重试",
       "expected": "pass",
       "actual": "pass",
@@ -276,7 +309,7 @@
     {
       "scenario": "S4",
       "source": "node:tap",
-      "name": "D4-05 S4 A36 · 正向：授权 memory 注入真实 provider 请求体，包在 reference-data 标记块中且明确非系统指令",
+      "name": "D4-05 S4 A36 · 正向：授权 memory 只进入 name:openarc.reference_data 的 user 参考消息，任何 system/developer 消息绝不含 secret",
       "expected": "pass",
       "actual": "pass",
       "ok": true
@@ -356,7 +389,39 @@
     {
       "scenario": "S4",
       "source": "node:tap",
-      "name": "D4-05 S4 A36 · 出站防御：历史残缺 memory 标记 → 403 不转发；完整标记块被剔除后才转发",
+      "name": "D4-05 S4 A36 · 出站防御：无法安全处理的 messages 结构 → 403 不转发；合法用户文本含旧标记不被误删",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "scenario": "S4",
+      "source": "node:tap",
+      "name": "D4-05 S4 A36 · 结构不可注入：恶意 memory 正文只落在 reference JSON 字符串内，角色序列/数量只多出 rules+reference",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "scenario": "S4",
+      "source": "node:tap",
+      "name": "D4-05 S4 A36 · 放置与幂等：无 system 时 rules/reference 在最前；已含应用结构标签的消息被清洗后重插，不重复",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "scenario": "S4",
+      "source": "node:tap",
+      "name": "D4-05 S4 A36 · 未接线 adapter：无 memory 时请求结构逐字节不变",
+      "expected": "pass",
+      "actual": "pass",
+      "ok": true
+    },
+    {
+      "scenario": "S4",
+      "source": "node:tap",
+      "name": "D4-05 S4 A36 · 越权工具请求：恶意 memory 促使 provider 返回 resource_trash WRITE tool_call，仍走受控审批、0 自动批准 / 0 mutation",
       "expected": "pass",
       "actual": "pass",
       "ok": true
@@ -510,7 +575,7 @@
       "source": "electron:d4-05-recovery-ui",
       "name": "S2-UI-4 · UI recovery 区块可见并显示实际状态/核查结论/关联产物",
       "expected": null,
-      "actual": "{\"recoveryShown\":true,\"stateText\":\"实际状态：UNKNOWN_EFFECT · 核查结论：尚无结论\",\"artifactsText\":\"关联产物：art_fS1hwIF7QXhFnQ（text）\",\"reasonText\":\"结果未知 · 停止原因：RECOVERY_REQUIRED\"}",
+      "actual": "{\"recoveryShown\":true,\"stateText\":\"实际状态：UNKNOWN_EFFECT · 核查结论：尚无结论\",\"artifactsText\":\"关联产物：art_f3uL5MSBr7S1pQ（text）\",\"reasonText\":\"结果未知 · 停止原因：RECOVERY_REQUIRED\"}",
       "ok": true
     },
     {
@@ -604,17 +669,17 @@
     {
       "scenario": "S4",
       "source": "electron:d4-05-memory-ui",
-      "name": "S1.3 · 授权记忆生效：真实 UI task SUCCEEDED 且 provider 请求体含 marker + 唯一 secret",
-      "expected": "SUCCEEDED + BEGIN/END + secret",
-      "actual": "{\"status\":\"SUCCEEDED\",\"bodies\":1,\"marker\":true,\"secret\":true}",
+      "name": "S1.3 · 授权记忆生效：真实 UI task SUCCEEDED，provider 请求体含 openarc.reference_data 参考消息 + 唯一 secret",
+      "expected": "SUCCEEDED + reference_data(user) + secret",
+      "actual": "{\"status\":\"SUCCEEDED\",\"bodies\":1,\"reference\":1,\"secret\":true}",
       "ok": true
     },
     {
       "scenario": "S4",
       "source": "electron:d4-05-memory-ui",
-      "name": "S1.4 · 注入 System 消息在 messages 最前、明确非系统指令、携带 resourceRef；goal 本身不含 secret",
-      "expected": "system@0 + reference-data + resource:// + goal 无 secret",
-      "actual": "{\"firstRole\":\"system\",\"preamble\":true,\"ref\":true,\"goalHasSecret\":false}",
+      "name": "S1.4 · 信任分层：reference 紧跟 rules、role=user；rules 为固定 system 常量；任何 system/developer 消息不含 secret/memory 标题",
+      "expected": "rules(system) + reference(user) + 高信任角色无 secret",
+      "actual": "{\"placement\":true,\"highTrustClean\":true,\"goalHasSecret\":false}",
       "ok": true
     },
     {
@@ -628,17 +693,17 @@
     {
       "scenario": "S4",
       "source": "electron:d4-05-memory-ui",
-      "name": "S2.2 · 删除后同一 goal 真实 UI 任务：provider 请求体不再含 marker 与 secret",
+      "name": "S2.2 · 删除后同一 goal 真实 UI 任务：provider 请求体不再含 memory 注入结构（rules/reference）与 secret",
       "expected": "absent",
-      "actual": "{\"status\":\"SUCCEEDED\",\"bodies\":1,\"marker\":false,\"secret\":false}",
+      "actual": "{\"status\":\"SUCCEEDED\",\"bodies\":1,\"injected\":0,\"secret\":false}",
       "ok": true
     },
     {
       "scenario": "S4",
       "source": "electron:d4-05-memory-ui",
-      "name": "S3.1 · 真实 UI 切账号 dana：同一 goal 请求体不含 alice 的 secret / 注入块",
+      "name": "S3.1 · 真实 UI 切账号 dana：同一 goal 请求体不含 alice 的 secret / memory 注入结构",
       "expected": "absent",
-      "actual": "{\"logout\":\"unauthenticated\",\"login\":\"ready\",\"status\":\"SUCCEEDED\",\"secret\":false}",
+      "actual": "{\"logout\":\"unauthenticated\",\"login\":\"ready\",\"status\":\"SUCCEEDED\",\"injected\":0,\"secret\":false}",
       "ok": true
     },
     {
@@ -790,7 +855,7 @@
       "source": "electron:d4-04-smoke",
       "name": "C3 · Approval UI 显示 tool / risk / target / effect",
       "expected": null,
-      "actual": "应用 / AgentAI 助手（本机会话）工具Trash Resource（resource.trash）风险可逆写入目标Vertical Smoke Resourceresource://res_W3MxrgCMlakFg2GuF_QmB",
+      "actual": "应用 / AgentAI 助手（本机会话）工具Trash Resource（resource.trash）风险可逆写入目标Vertical Smoke Resourceresource://res_Y8qBPvRmFQikvIHMSm9zU",
       "ok": true
     },
     {
@@ -830,7 +895,7 @@
       "source": "electron:d4-04-smoke",
       "name": "C8 · production executor spawned + ready + real child exit",
       "expected": null,
-      "actual": "{\"instanceId\":\"exe_Ei6Di1Sb\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":0,\"signal\":null,\"launchError\":false}",
+      "actual": "{\"instanceId\":\"exe_21q3We75\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":0,\"signal\":null,\"launchError\":false}",
       "ok": true
     },
     {
@@ -950,7 +1015,7 @@
       "source": "electron:d4-04-smoke",
       "name": "F5 · claim RUNNING 先于真实 child exit 崩溃",
       "expected": null,
-      "actual": "{\"claimIdx\":20,\"unknownIdx\":21,\"ev\":{\"instanceId\":\"exe_3zKqkwpQ\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":9,\"signal\":null,\"launchError\":false}}",
+      "actual": "{\"claimIdx\":20,\"unknownIdx\":21,\"ev\":{\"instanceId\":\"exe_e1W0Us3F\",\"spawned\":true,\"ready\":true,\"exited\":true,\"exitCode\":9,\"signal\":null,\"launchError\":false}}",
       "ok": true
     },
     {
@@ -974,7 +1039,7 @@
       "source": "electron:d4-04-smoke",
       "name": "G1 · Renderer 自报 actor/risk 被忽略（真实 session 决定）",
       "expected": null,
-      "actual": "{\"ok\":true,\"actor\":\"usr_KjpWEDUh_-nzIObIpoa-dnnBre64IKFc\"}",
+      "actual": "{\"ok\":true,\"actor\":\"usr_d-E1dV9QKb_b6XQ92u1YWF-jC4CvJ5DT\"}",
       "ok": true
     },
     {
@@ -998,7 +1063,7 @@
       "source": "electron:d4-04-smoke",
       "name": "H1 · Reload 后从 backend state 恢复 Task 结果",
       "expected": null,
-      "actual": "taskId=task_WQzmBI1bzcoSew gate=ready",
+      "actual": "taskId=task_FX7LHEjJbt4Sow gate=ready",
       "ok": true
     },
     {
@@ -1434,7 +1499,7 @@
       "ok": true
     }
   ],
-  "at": "2026-09-17T09:47:37.533Z",
+  "at": "2026-09-18T16:11:26.647Z",
   "artifactSha256Coverage": "sha256 of canonical JSON (2-space indent) excluding the artifactSha256 field",
-  "artifactSha256": "cd33fed2df3587c0c0ab4493f2215b8a2029242f0ce86293f991f06fa6500bc4"
+  "artifactSha256": "45bd66741f7559ca4ecc3375d72eca3de65be50d96740109a2a0ae5a932e5d67"
 }

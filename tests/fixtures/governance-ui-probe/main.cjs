@@ -95,6 +95,16 @@ app.whenReady().then(async () => {
       check("G5 · Departments 面板显示部门与计数", await waitFn("Array.from(document.querySelectorAll('[data-d3-04d-dept]')).some(function(e){return e.textContent.indexOf('UI 部门')>=0;})"), await txt('[data-d3-04d-dept]'));
       await click('[data-d3-04d-tab="apps"]');
       check("G6 · Apps 面板列出内置 App", await waitFn("document.querySelectorAll('[data-d3-04d-app]').length>=5"), await js("return document.querySelectorAll('[data-d3-04d-app]').length"));
+      // D4-03：App TOOL-scope 权限产品入口（显式查看 / 授予 / 撤销）
+      await click('[data-gov-tool-toggle="ai"]');
+      check("G6a · 展开 App 工具权限区块", await waitSel('[data-gov-tool-access="ai"]'), "");
+      check("G6b · 工具动作默认不勾选", await waitFn("document.querySelector('[data-gov-tool-action=\"tool.resource.trash\"]')!==null && document.querySelectorAll('[data-gov-tool-access=\"ai\"] input[type=checkbox]:checked').length===0"), await txt('[data-gov-tool-access="ai"]'));
+      await js("document.querySelector('[data-gov-tool-action=\"tool.resource.trash\"] input[type=checkbox]').click();");
+      await click('[data-gov-tool-grant="ai"]');
+      check("G6c · UI 显式授予后主进程存在 TOOL grant", await (async () => { for (let i = 0; i < 40; i += 1) { if (identity.authStore.appGrantsForApp("ai").some((row) => String(row.scope) === "TOOL" && (JSON.parse(row.actions || "[]")).includes("tool.resource.trash"))) return true; await sleep(100); } return false; })(), "");
+      check("G6c2 · 授予后 UI 显示撤销入口", await waitSel('[data-gov-tool-revoke]'), "");
+      await click('[data-gov-tool-revoke]');
+      check("G6d · UI 撤销后 TOOL grant 消失", await (async () => { for (let i = 0; i < 40; i += 1) { if (identity.authStore.appGrantsForApp("ai").every((row) => String(row.scope) !== "TOOL")) return true; await sleep(100); } return false; })(), "");
       await click('[data-d3-04d-tab="access"]');
       await setValue('[data-d3-04d-access-ref]', uiResourceRef);
       await click('[data-d3-04d-access-load]');
