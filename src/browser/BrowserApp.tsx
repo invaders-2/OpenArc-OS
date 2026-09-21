@@ -362,8 +362,7 @@ export function BrowserApp({ win, runtime, downloads, notices, nativeVisible, on
         </div>
       ) : null}
 
-      {/* 集成线的 WebViewport（HEAD）没有 attached prop：这个组件本轮未接线，保持可编译即可。 */}
-      <WebViewport nativeVisible={nativeVisible} error={undefined} />
+      <WebViewport nativeVisible={nativeVisible} attached={activeRuntime.attached} error={undefined} />
     </div>
   );
 }

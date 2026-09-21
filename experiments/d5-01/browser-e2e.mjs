@@ -208,11 +208,23 @@ async function main() {
     const context = await launch();
     record("boot", "M1 · 真实 electron . 启动并暴露 CDP", !!browser, "CDP 可用", "connected");
     await waitFor(async () => (await gate()) !== "checking", 30000);
-    if ((await gate()) === "uninitialized") {
+    if ((await gate()) === "uninitialized" && (await waitSel('[data-d3-id="setup-name"]', 30000))) {
+      // 集成分支保留 UI 线已定的"三步初始化向导"（显示名 → 账号 → 密码），末步才提交：
+      // 后两步的输入在 DOM 里尚未存在，一次填完再点 setup-submit 不会发生任何事。
+      // 驱动方式与 UI 线探针（tests/fixtures/identity-ui-probe/main.cjs）一致。
+      const setupNext = async () => {
+        await waitFor(() => js("const b = document.querySelector('[data-d3-id=\"setup-next\"]'); return !!b && !b.disabled;"), 10000);
+        await click('[data-d3-id="setup-next"]');
+      };
       await setInput('[data-d3-id="setup-name"]', "D5-01 Admin");
+      await setupNext();
+      await waitSel('[data-d3-id="setup-identifier"]', 10000);
       await setInput('[data-d3-id="setup-identifier"]', ADMIN.id);
+      await setupNext();
+      await waitSel('[data-d3-id="setup-password"]', 10000);
       await setInput('[data-d3-id="setup-password"]', ADMIN.pw);
       await setInput('[data-d3-id="setup-confirm"]', ADMIN.pw);
+      await waitFor(() => js("const b = document.querySelector('[data-d3-id=\"setup-submit\"]'); return !!b && !b.disabled;"), 10000);
       await click('[data-d3-id="setup-submit"]');
       await waitGate("unauthenticated", 30000);
     }

@@ -586,6 +586,7 @@ export function Window({ window: w, focused, onCommand, snapshots, onResizeStart
   return (
     <section
       ref={rootRef}
+      data-window-id={w.id}
       aria-label={`${w.meta.title}窗口`}
       className={`window ${focused ? "active" : ""} ${w.visible ? "" : "minimized"}`}
       style={{ left: w.bounds.x, top: w.bounds.y, width: w.bounds.w, height: w.bounds.h, zIndex: 10 + w.z }}
@@ -725,6 +726,8 @@ export function startResize(e: React.PointerEvent, w: WinDomain, onCommand: (c: 
 type WebViewportProps = {
   /** 原生视图此刻是否真的可见 —— 文案必须与它一致，否则界面在撒谎。 */
   nativeVisible: boolean;
+  /** 原生视图是否真的挂在宿主上。缺挂载时"加载成功"依旧成立，但屏幕上没有页面。 */
+  attached?: boolean;
   error?: string;
   children?: React.ReactNode;
 };
@@ -734,9 +737,9 @@ type WebViewportProps = {
  * 只知道"这块区域有没有被原生内容填上"，用来决定占位文案。
  * 几何锚点也不是它自己量的 —— 视口矩形由 domain 的 bounds 推出。
  */
-export function WebViewport({ nativeVisible, error, children }: WebViewportProps) {
+export function WebViewport({ nativeVisible, attached, error, children }: WebViewportProps) {
   return (
-    <div className="web-viewport">
+    <div className="web-viewport" data-attached={attached === false ? "0" : "1"}>
       {children}
       <img className="viewport-icon" src={icon("safari")} alt="" draggable={false} />
       <p data-view={nativeVisible ? "shown" : "hidden"}>

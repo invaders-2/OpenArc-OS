@@ -43,17 +43,16 @@ import { applyCursors, CURSOR_SIZE_DEFAULT, CURSOR_SIZE_MAX, CURSOR_SIZE_MIN } f
 // 直接叫 Window 会在类型位置与全局 Window 撞名。
 import {
   AIPanel,
-  AddressBar,
   AssistantPill,
   ContextMenu,
   Dock,
   FolderIcon,
   TopBar,
-  WebViewport,
   Window as DesktopWindow,
   startDrag,
   startResize,
 } from "./desktop/components";
+import { BrowserApp } from "./browser/BrowserApp";
 import type { MenuItem } from "./desktop/components";
 import { Dialog } from "./desktop/Dialog";
 import { useIdentity } from "./identity/useIdentity";
@@ -70,6 +69,40 @@ import { errorText } from "./identity/types";
 import { Avatar } from "./identity/Avatar";
 import { AvatarPicker } from "./identity/AvatarPicker";
 
+/**
+ * 原生层事件（electron/main.cjs + native-view-controller.cjs 下发）。
+ * 全部是"事实"：导航状态、加载失败、弹窗/外部协议/权限/证书、下载进度、会话切换。
+ */
+type NativeEvent = {
+  type?: string;
+  windowId?: string;
+  tabId?: string | null;
+  url?: string;
+  title?: string;
+  loading?: boolean;
+  canGoBack?: boolean;
+  canGoForward?: boolean;
+  /** 原生视图是否真的挂在宿主 contentView 上（false = 加载成功但屏幕上没有页面）。 */
+  attached?: boolean;
+  code?: number;
+  message?: string;
+  /** 当前生效的加载失败（主进程持有；null = 正常）。 */
+  loadError?: { code: number; message: string; url: string } | null;
+  /** 触发这条 native-state 的事件名（did-finish-load 等），仅用于排查。 */
+  event?: string;
+  permission?: string;
+  origin?: string;
+  scheme?: string;
+  reason?: string;
+  error?: string;
+  downloadId?: string;
+  filename?: string;
+  state?: string;
+  received?: number;
+  total?: number;
+  sessionKey?: string | null;
+};
+
 type DisplayInfo = {
   id: number;
   scaleFactor: number;
@@ -81,9 +114,12 @@ declare global {
   interface Window {
     openarc?: {
       sync: (p: unknown) => Promise<{ ok?: boolean; error?: string; results?: unknown[] }>;
-      navigate: (windowId: string, url: string) => Promise<{ error?: string; ok?: boolean }>;
-      action: (windowId: string, action: string) => Promise<{ error?: string; ok?: boolean }>;
-      onNativeState: (cb: (e: Record<string, string>) => void) => () => void;
+      /** D5-01：tabId 可选 —— 缺省时作用于该窗口的活动标签（既有两参调用逐字不变）。 */
+      navigate: (windowId: string, url: string, tabId?: string) => Promise<{ error?: string; ok?: boolean }>;
+      action: (windowId: string, action: string, tabId?: string) => Promise<{ error?: string; ok?: boolean }>;
+      /** D5-01 受控浏览器命令面（下载 / 标签授权 / 用户确认后的外部打开）。 */
+      browser?: (command: Record<string, unknown>) => Promise<Record<string, unknown>>;
+      onNativeState: (cb: (e: NativeEvent) => void) => () => void;
       onDisplay: (cb: (d: DisplayInfo[]) => void) => () => void;
       identity?: {
         command: (cmd: Record<string, unknown>) => Promise<Record<string, unknown>>;
@@ -354,8 +390,21 @@ function App() {
    * DOM z-index 对它无效，因此 lock 必须一路传到主进程的 overlayOpen。
    */
   const locked = identity.phase === "locked";
-  const { state, dispatch, hostSize, overlays, setOverlays, snapshotLayers, nativeVisibleOf, browserEvents, clearBrowserEvent } =
-    useDesktop({ locked });
+  const {
+    state,
+    dispatch,
+    hostSize,
+    overlays,
+    setOverlays,
+    snapshotLayers,
+    nativeVisibleOf,
+    browserRuntime,
+    downloads,
+    notices,
+    dismissNotice,
+    browserCommand,
+    reportViewportReserve,
+  } = useDesktop({ locked, sessionKey: identity.snapshot.userId });
 
   // ---------------------------------------------------------------------------
   // 桌面对象（文件夹）仍是独立的一类状态：它们不是窗口，不进 Window Manager。
@@ -392,6 +441,16 @@ function App() {
   } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  /**
+   * 桌面右键菜单也必须让原生视图让位（§19 第 4 条）。
+   *
+   * 菜单是 App 自己的状态，而"视图让位"这条不变量只认 overlays —— 两处各写一半
+   * 必然漂移，所以在这里把菜单的存在如实投影进 overlays，而不是在十几个 setMenu
+   * 调用点各加一行。
+   */
+  useEffect(() => {
+    setOverlays((o) => (o.menu === !!menu ? o : { ...o, menu: !!menu }));
+  }, [menu, setOverlays]);
   const searchPanel = useRef<HTMLDivElement>(null);
   const searchTrigger = useRef<HTMLElement | null>(null);
   /** 右键菜单的来源元素。对话框关闭后焦点要回到它 —— 菜单本身届时已卸载。 */
@@ -1763,7 +1822,7 @@ function App() {
   const browserVisibleOf = (id: string) => nativeVisibleOf(id);
 
   // ---------------------------------------------------------------------------
-  // 各 App 的内容。浏览器窗口通过 AddressBar / WebViewport 消费原生视图状态。
+  // 各 App 的内容。浏览器窗口通过 BrowserApp 消费原生视图状态（标签/地址栏/下载）。
   // ---------------------------------------------------------------------------
   const content = (id: string) => {
     const w = domain.byId(state, id);
@@ -2546,31 +2605,21 @@ function App() {
         </div>
       );
     if (w?.appId === "browser" || w?.kind === "browser") {
-      const url = w.meta.url || "https://example.com";
-      const visible = browserVisibleOf(id);
       return (
-        <div className="browser-shell">
-          <AddressBar
-            url={url}
-            onUrlChange={(v) => onCommand({ type: "system/native-state", windowId: id, url: v })}
-            onNavigate={() => {
-              if (!window.openarc) {
-                clearBrowserEvent();
-                return;
-              }
-              void window.openarc.navigate(id, url);
-            }}
-            onAction={(a) => void window.openarc?.action(id, a)}
-          />
-          <div className="browser-status" role="status">
-            {browserEvents?.windowId === id
-              ? browserEvents.message
-              : visible
-                ? "正在显示网页。桌面窗口可遮挡它，遮挡时由快照补齐。"
-                : w.meta.url || "输入地址开始浏览。外部页面与桌面权限隔离。"}
-          </div>
-          <WebViewport nativeVisible={visible} error={undefined} />
-        </div>
+        <BrowserApp
+          win={w}
+          runtime={browserRuntime}
+          downloads={downloads}
+          notices={notices}
+          nativeVisible={browserVisibleOf(id)}
+          onCommand={onCommand}
+          onNavigate={(tabId, url) => void window.openarc?.navigate(id, url, tabId)}
+          onAction={(tabId, action) => void window.openarc?.action(id, action, tabId)}
+          onBrowser={browserCommand}
+          onDismissNotice={dismissNotice}
+          onPanelOpenChange={(open) => setOverlays((o) => (o.panel === open ? o : { ...o, panel: open }))}
+          onViewportReserve={reportViewportReserve}
+        />
       );
     }
     if (w?.appId === "resource-library") return <ResourceLibraryApp />;
