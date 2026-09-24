@@ -1,6 +1,7 @@
 # D5-03 第二批 · 内置策略提供记录与 App Grant 跨组织唯一键
 
-状态：已实现（node 层验收通过）；真机（Electron）验收留给下一批。
+状态：已实现（node 层验收通过）；真机（Electron）验收见 `artifacts/d5-03/mcp-policy-e2e.json`
+（43/43，含 v20 → v21 升级路径与撤销审计行归属；两处"共库双组织的**行为级**场景"仍如实记为 notVerified）。
 
 ## 1. 要修的两个真实缺陷
 
@@ -75,10 +76,50 @@ v21 升级时**无法**从"行不存在"区分"从未播种"与"曾经撤销"。
   —— 可能把"从未提供"误标成"已撤销"。这是保守方向（绝不复活已撤权限），代价是该 App 的
   baseline 不再补种，需要治理侧正式重授。
 
+### 4.1 撤销证据的 App 归属判据（第二批修复批次加固）
+
+历史 `authorization_audit` 行的 `app_id` 在 v21 之前记的是**发起治理的上下文 App**
+（`authorization-service.cjs` `#governanceGate` 的 `context.appId || 'resource-library'`），
+不是被撤销授权所属的 App。直接拿它当归属会把墓碑补到错误的 App 上：被撤的那个 App 因此
+判成"从未提供"，在下一次登录被重新种回来（真实缺陷 **D5-03B-D1**，真机 `L3` 复现）。
+本批在两侧收口：
+
+* **写入侧** `electron/authorization-service.cjs`：`#govAudit` 增加显式 `appId` 覆盖参数；
+  App Grant 的**授予**传目标 App（请求里的 `appId`）、**撤销**传 `before.app_id`
+  （resource 版与 tool 版走同一条 `revokeAppResourcePermission`），其余治理动作
+  （部门 / 资源授权 / 注册 App / 状态）保持"上下文 App"缺省不变。
+* **迁移侧** `electron/identity-store.cjs` `revokeTombstoneTargets`：历史行先用
+  `old_permissions` 的命名空间反推家族（`mcp.*`→mcp、`model.*`→model、
+  `resource.*`/`tool.*`→对应族），再按下面这张表判归属：
+
+  | 情形 | 归属 |
+  | --- | --- |
+  | 审计行 `app_id` 是该族提供者，且该 App 当前没有该族 baseline 行 | 精确归到该 App |
+  | `app_id` 不是该族提供者（旧缺陷的典型形状），或该 App 的 baseline 行还在（撤销不是针对它） | 给该族**全部**现存提供者补墓碑 |
+  | 该族没有登记提供者（tool 族），或候选全被排除 | 退回审计行的 `app_id`，不扩面 |
+
+  家族 → 提供者表 `BASELINE_POLICY_PROVIDERS` 与三处播种点对齐：resource →
+  `resource-service.cjs` `BUILTIN_APP_BASELINE` 的全部 App；model → `model-bootstrap.cjs`
+  `seedModelAppPolicy` 的四个 App；mcp → `mcp-bootstrap.cjs` `HOST_APP_ID`；
+  tool → 没有播种点（工具授权一律显式），空表。
+
+方向仍然保守：不能唯一确定目标 App 时**宁可多补墓碑**（把"从未提供"误判成"已撤销"，
+代价是该 App 的 baseline 不再补种、需治理侧正式重授），也绝不漏补（把"已撤销"判成
+"未提供" = 已撤权限复活）。残余不确定性如实记录：
+
+* 同一族有多个提供者（model 4 个、resource 10 个）而审计行 `app_id` 又恰好是该族提供者时，
+  "精确归属"仍可能记错 App：真实目标漏补 → 复活。窗口只覆盖 v21 之前写下的历史行，
+  写入侧修复后不再产生这类行；
+* `BASELINE_POLICY_PROVIDERS` 是**手工对齐**的：新增 baseline 提供者若忘了同步，
+  该 App 的历史撤销会退回"只认审计行 `app_id`"的旧口径；
+* 撤销发生在审计表没有留下对应行的路径上：见上一节的残留清单。
+
 ## 5. 未闭合项
 
-* 真机（Electron）验收：本批只做 node 层；主进程装配路径同一条已在 `createIdentityService`
-  上跑到（登录 → 撤销 → 重启 → 再登录）。
+* 真机（Electron）验收：已由 `experiments/d5-03/mcp-policy-e2e.mjs` 在真机跑到（首用播种 /
+  撤权即时 / 跨登录 / 跨重启 / 正式重授 / 新组织 / 升级路径），43/43；其中"同一库内两个组织的
+  **行为级**互不覆盖"在真机不可构造（单 root 团队约束 + 无创建组织入口），只验到 schema 级与
+  node 层行为级 —— 如实记在 artifact 的 `notVerified`。
 * `ModelService.revokeAppModelAccess` / `grantAppModelAccess` 只被测试夹具使用（无 IPC 入口），
   现已随 store 收口自动写/清墓碑；正式入口仍是 `governance/grantAppAccess|revokeAppAccess`。
 * MCP 工具调用仍未开放（5 个入口仍回 `MCP_TOOL_INVOCATION_NOT_ENABLED`），本批不改这条边界。

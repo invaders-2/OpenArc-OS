@@ -913,19 +913,28 @@ async function main() {
   notVerified("「工具描述不暴露」的 mcp.use-only 主路径（toolsHidden=true、mcp.view 仍在）", "渲染层既有治理命令无法写出部分动作的 mcp grant：governance/grantAppAccess(resourceType=mcp, actions=[mcp.view]) → " + JSON.stringify(partialGrant) + "；grantAppToolAccess → " + JSON.stringify(partialTool) + "。mcp-center baseline 是单条含 mcp.view/use/manage/test 的 grant（electron/mcp-bootstrap.cjs:41-50），governance/revokeAppAccess 只能整条撤销（authorization-service.cjs:1216），故真机上只能验收「mcp.view 也被撤 → 详情整块无权」这一支。");
   note("最小修法建议（未动手）：authorization-service.cjs:1163 #normalizeAppGrantActions 对 resourceType==='mcp' 放行 mcp.*（mcp-domain.mcpGrantActions 同一命名空间），或新增 governance/updateAppGrantActions。");
 
-  const restored = await logout() && (await login(ADMIN.id, ADMIN.pw));
-  const listBack = restored ? await waitFor(async () => (await mcp({ command: "mcp/list" })).ok === true, 15000, 300) : false;
+  // D5-03 第二批契约变更：撤销必须跨登录保持（v21 墓碑），只有正式治理入口重授才恢复。
+  // 旧 H2 断言的"重新登录触发内置 baseline upsert 重新授权"正是本批要修掉的语义，故改写；
+  // H1 一字未动，后续 I/J/K/L 的判定条件也一字未动（本段末尾把状态驱动回"已授权可用"）。
+  const relogin = (await logout()) && (await login(ADMIN.id, ADMIN.pw));
+  const afterReloginList = relogin ? await mcp({ command: "mcp/list" }) : { ok: null, error: "NOT_LOGGED_IN" };
+  const mcpProvision = dbAll("SELECT organization_id, app_id, policy_key, provisioned_at, revoked_at FROM app_policy_provisions WHERE app_id = 'mcp-center' AND policy_key = 'mcp'")[0] || null;
+  const mcpGrantRowsAfterRelogin = dbAll("SELECT id, organization_id, app_id, resource_type, scope, actions FROM app_resource_grants WHERE resource_type = 'mcp'");
+  const regrant = await governance({ type: "governance/grantAppAccess", appId: "mcp-center", resourceType: "mcp", actions: [...domain.MCP_ACTIONS_ALL] });
+  const listBack = regrant && regrant.ok === true ? await waitFor(async () => (await mcp({ command: "mcp/list" })).ok === true, 15000, 300) : false;
   const afterRestoreList = await mcp({ command: "mcp/list" });
   const afterRestoreGet = await mcp({ command: "mcp/get", connectionId: ids.remote });
   const reopenedR = await reopenMcpWindow();
   const restoreVisible = reopenedR && await waitFor(async () => (await mcpWindowInfo()).rows.some((r) => r.id === ids.remote), 20000, 200);
   await selectRow(ids.remote);
   const detailRestore = await detailSnapshot();
-  record("H2", "恢复授权后回到可用（重新登录触发内置 baseline upsert 重新授权）→ 列表/详情/工具表都回来",
-    restored && afterRestoreList.ok === true && afterRestoreGet.ok === true && afterRestoreGet.connection.toolsHidden === false && restoreVisible && detailRestore.tools.length === 2,
-    "mcp/list ok + 工具可见 + 界面恢复",
-    JSON.stringify({ restored, listBack, listOk: afterRestoreList.ok, itemCount: (afterRestoreList.items || []).length, getOk: afterRestoreGet.ok, toolsHidden: afterRestoreGet.connection ? afterRestoreGet.connection.toolsHidden : null, restoreVisible, uiTools: detailRestore.tools.map((t) => t.name), reauthEntryGone: !(await has("[data-mcp-auth-required]")) }));
-  note("产品行为记录：内置 App baseline 是「登录时对该组织再 seed 一次」（electron/identity-bootstrap.cjs:131-139 → mcp-bootstrap.cjs:41-50），所以被治理撤销的 mcp-center 授权在下次登录会被重新写回 —— 恢复路径可用，但撤销不跨登录保持。见缺陷清单。");
+  record("H2", "撤销跨登录保持（新契约）：登出→重新登录后仍无权、baseline 不得被种回来（只读库证据：该组织 mcp grant 行 0 + (organization_id,'mcp-center','mcp') 墓碑 revoked_at 非空）→ 再用正式治理入口 grantAppAccess 重授 → 列表/详情/工具表恢复可用",
+    relogin && afterReloginList.ok === false && afterReloginList.error === "MCP_UNAUTHORIZED"
+      && mcpGrantRowsAfterRelogin.length === 0 && !!mcpProvision && typeof mcpProvision.revoked_at === "number"
+      && regrant.ok === true && listBack && afterRestoreList.ok === true && afterRestoreGet.ok === true && afterRestoreGet.connection.toolsHidden === false && restoreVisible && detailRestore.tools.length === 2,
+    "重新登录后 MCP_UNAUTHORIZED + mcp grant 行 0 + 墓碑 revoked_at 非空；正式重授后 mcp/list ok + toolsHidden=false + 工具表 2 条 + 界面恢复",
+    JSON.stringify({ relogin, afterReloginList: { ok: afterReloginList.ok, error: afterReloginList.error }, mcpGrantRowsAfterRelogin, provision: mcpProvision, regrant: { ok: regrant.ok, error: regrant.error || null, created: regrant.created === true, grantId: regrant.grant ? regrant.grant.id : null, actions: regrant.grant ? JSON.parse(regrant.grant.actions) : null }, listBack, listOk: afterRestoreList.ok, itemCount: (afterRestoreList.items || []).length, getOk: afterRestoreGet.ok, toolsHidden: afterRestoreGet.connection ? afterRestoreGet.connection.toolsHidden : null, restoreVisible, uiTools: detailRestore.tools.map((t) => t.name), reauthEntryGone: !(await has("[data-mcp-auth-required]")) }));
+  note("产品行为记录（新契约，D5-03 第二批）：内置 App baseline 只在**首次使用**时播种（app_policy_provisions 记「已提供」），治理撤销写墓碑（authorization-store.cjs revokeAppGrant）→ 下次登录 / 重启都不再 upsert；恢复只走正式治理入口 grantAppAccess（同形状 grant 清墓碑，authorization-store.cjs upsertAppGrant）。");
 
   /* ── I 本批不开放工具调用 ── */
   const invocationScan = await js([
@@ -1098,10 +1107,14 @@ async function main() {
   const unauthDarkUp = await waitFor(async () => (await attrOf("[data-mcp-error]", "data-mcp-error-code")) === "MCP_UNAUTHORIZED", 20000, 150);
   const darkUnauth = await shotTo(path.join(VIS, "dark-07-unauthorized.png"));
   record("L2", "深色 · 无权（第二次整条撤销 → 界面无权，工具描述 0 暴露）", revoked2.ok === true && reopenedU2 && unauthDarkUp, "revoke 成功 + 界面 MCP_UNAUTHORIZED", JSON.stringify({ revoked2, reopenedU2, unauthDarkUp, shot: darkUnauth }));
+  // 驱动步骤随 H2 的新契约同步（**判定条件一字未动**，见 mcp-policy-e2e.mjs R1/R2）：
+  // 重新登录不再种回 baseline，恢复只能走正式治理入口 —— 与 H2 同一条路径在深色下复验。
   const restored2 = await logout() && (await login(ADMIN.id, ADMIN.pw));
+  const afterReloginList2 = restored2 ? await mcp({ command: "mcp/list" }) : { ok: null, error: "NOT_LOGGED_IN" };
+  const regrant2 = restored2 ? await governance({ type: "governance/grantAppAccess", appId: "mcp-center", resourceType: "mcp", actions: [...domain.MCP_ACTIONS_ALL] }) : { ok: false, error: "NOT_LOGGED_IN" };
   const listBack2 = restored2 ? await waitFor(async () => (await mcp({ command: "mcp/list" })).ok === true, 15000, 300) : false;
   const listRestore2 = await mcp({ command: "mcp/list" });
-  record("L3", "深色 · 恢复授权后再次可用", restored2 && listBack2 && listRestore2.ok === true, "登录后 mcp/list ok", JSON.stringify({ restored2, listBack2, ok: listRestore2.ok, items: (listRestore2.items || []).length }));
+  record("L3", "深色 · 恢复授权后再次可用", restored2 && listBack2 && listRestore2.ok === true, "登录后 mcp/list ok", JSON.stringify({ restored2, afterReloginList2: { ok: afterReloginList2.ok, error: afterReloginList2.error }, regrant2: { ok: regrant2.ok, error: regrant2.error || null }, listBack2, ok: listRestore2.ok, items: (listRestore2.items || []).length }));
 
   const finalConns = (listRestore2.items || []).map((i) => i.connectionId);
   for (const id of finalConns) await mcp({ command: "mcp/delete", connectionId: id });

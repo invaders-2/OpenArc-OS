@@ -598,11 +598,16 @@ class AuthorizationService {
     return { ok: true, prepared, isSuper, adminDeptIds, user, app: prepared.app, source: isSuper ? ALLOW_SOURCE.SUPER_ADMIN : ALLOW_SOURCE.DEPARTMENT_ADMIN };
   }
 
-  #govAudit(gate, { action, decision, reasonCode, targetUserId = null, departmentId = null, resourceRef = null, oldPermissions = null, newPermissions = null }) {
+  /**
+   * 治理审计。app_id 缺省是"承载这次治理调用的 App"（gate 的上下文 App）；
+   * App Grant 的授予 / 撤销必须显式传**被授权的那个 App**（grant 的目标 / before.app_id）——
+   * 审计行的 app_id 是迁移补墓碑与追责的唯一归属列，记成调用方会把撤销证据挂到错误的 App 上。
+   */
+  #govAudit(gate, { action, decision, reasonCode, targetUserId = null, departmentId = null, resourceRef = null, oldPermissions = null, newPermissions = null, appId = null }) {
     this.store.auditAuthorization({
       actorUserId: gate.prepared?.user?.id ?? null,
       targetUserId,
-      appId: gate.prepared?.app?.app_id ?? null,
+      appId: appId ?? gate.prepared?.app?.app_id ?? null,
       departmentId,
       resourceRef,
       action,
@@ -1209,6 +1214,7 @@ class AuthorizationService {
       action: GOVERNANCE_ACTION.GRANT_APP_PERMISSION,
       decision: DECISION.ALLOW,
       reasonCode: "ALLOW",
+      appId: app.app_id,
       departmentId: departmentId || null,
       resourceRef: resourceId || null,
       oldPermissions: result.previous ? this.#appGrantActions(result.previous) : [],
@@ -1231,6 +1237,7 @@ class AuthorizationService {
       action: GOVERNANCE_ACTION.REVOKE_APP_PERMISSION,
       decision: DECISION.ALLOW,
       reasonCode: "ALLOW",
+      appId: before.app_id,
       resourceRef: before.resource_id || null,
       oldPermissions: this.#appGrantActions(before),
       newPermissions: [],

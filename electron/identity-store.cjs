@@ -1384,6 +1384,44 @@ function policyKeyOfAuditActions(oldPermissions) {
 }
 
 /**
+ * 各 baseline 家族的**内置提供者**（谁会被播种这一族的 baseline）。必须与三处播种点对齐：
+ *   · resource → resource-service.cjs BUILTIN_APP_BASELINE 的全部 App（memory 定向行不是 baseline）；
+ *   · model    → model-bootstrap.cjs seedModelAppPolicy 的四个 App；
+ *   · mcp      → mcp-bootstrap.cjs HOST_APP_ID；
+ *   · tool     → 没有播种点（工具授权一律显式），因此是空表。
+ *
+ * 只被迁移补证据用来判断"历史审计行的 app_id 是否与该行动作命名空间自洽"。
+ * 新增 baseline 提供者时要同步这里，否则新 App 的历史撤销会退回"只认审计行 app_id"的旧口径
+ * （残余不确定性见 docs/decisions/D5-03B-app-policy-persistence.md §4）。
+ */
+const BASELINE_POLICY_PROVIDERS = Object.freeze({
+  resource: Object.freeze(["resource-library", "canvas", "browser", "ai", "image-generator", "video-generator", "photoshop", "illustrator", "mcp-center", "skill-runtime"]),
+  model: Object.freeze(["settings", "resource-library", "ai", "canvas"]),
+  mcp: Object.freeze(["mcp-center"]),
+  tool: Object.freeze([]),
+});
+
+/**
+ * 历史撤销行的墓碑归属。审计行的 app_id 在 v21 之前记的是"发起治理的上下文 App"
+ * （缺省 resource-library），不能直接当被撤 App 用；命名空间反推出的家族才是可信的那一半。
+ *
+ *   ① 记录自洽：app_id 是该族提供者，且该 App 当前没有该族 baseline 行 ⇒ 记的就是被撤的 App；
+ *   ② 记录不自洽（或该 App 的 baseline 行还在，说明撤销不是针对它）：给该族**全部**现存提供者
+ *      补墓碑。方向保守 —— 宁可把"从未提供"误判成"已撤销"（不复活），绝不把"已撤销"判成
+ *      "未提供"。代价是同一族多提供者（model / resource）时可能连坐，需治理侧正式重授；
+ *   ③ 该族没有登记提供者（tool 族）：退回审计行的 app_id，不额外扩面。
+ */
+function revokeTombstoneTargets({ appId, policyKey, organizationId, liveKeys, knownApps }) {
+  const providers = BASELINE_POLICY_PROVIDERS[policyKey] || [];
+  const recorded = String(appId || "");
+  const live = (p) => liveKeys.has(organizationId + "|" + p + "|" + policyKey);
+  if (recorded && providers.includes(recorded) && !live(recorded)) return [recorded];
+  const candidates = providers.filter((p) => knownApps.has(p) && !live(p));
+  if (candidates.length) return candidates;
+  return recorded ? [recorded] : [];
+}
+
+/**
  * v21 的证据补写。两轮，都只补"能证明的"：
  *   ① 现存 baseline 形状的 grant 行 ⇒ provisioned_at = 最早一行 created_at（当前有效，未撤销）；
  *   ② authorization_audit 里的治理撤销行（action=governance.revokeAppPermission，
@@ -1395,6 +1433,8 @@ function policyKeyOfAuditActions(oldPermissions) {
  * 且 audit 只记 resource_ref / department_id，"collection 定向行"的撤销与 baseline 撤销
  * 同形，可能把"从未提供"误标成"已撤销"——保守方向（绝不复活已撤权限），
  * 代价是该 App 的 baseline 不再补种。
+ *
+ * 撤销行的 app_id 归属见 revokeTombstoneTargets：不自洽时给该族全部提供者补墓碑。
  */
 function backfillPolicyProvisions(db) {
   const insert = db.prepare(
@@ -1420,6 +1460,18 @@ function backfillPolicyProvisions(db) {
     insert.run(String(row.organization_id), String(row.app_id), policyKey, at, row.granted_by == null ? null : String(row.granted_by), null, null, at);
   }
 
+  // "该族 baseline 行还在"的 App 不可能是被撤的那个：拿它当证据既排除了错误归属，
+  // 也避免给已由 ① 记成"未撤销"的记录再写墓碑（ON CONFLICT DO NOTHING 本来就挡得住）。
+  const liveKeys = new Set(
+    db
+      .prepare("SELECT organization_id, app_id, resource_type, scope FROM app_resource_grants WHERE resource_id = '' AND collection_id = '' AND department_id = ''")
+      .all()
+      .map((row) => ({ row, policyKey: baselinePolicyKeyOf(row) }))
+      .filter((x) => x.policyKey)
+      .map((x) => x.row.organization_id + "|" + x.row.app_id + "|" + x.policyKey),
+  );
+  const knownApps = new Set(db.prepare("SELECT app_id FROM app_principals").all().map((r) => String(r.app_id)));
+
   const revokes = db.prepare(
     "SELECT a.at AS at, a.app_id AS app_id, a.actor_user_id AS actor_user_id, a.old_permissions AS old_permissions, u.team_id AS team_id " +
       "FROM authorization_audit a JOIN users u ON u.id = a.actor_user_id " +
@@ -1430,7 +1482,11 @@ function backfillPolicyProvisions(db) {
     const policyKey = policyKeyOfAuditActions(row.old_permissions);
     if (!policyKey || !row.team_id) continue;
     const at = Number(row.at == null ? 0 : row.at);
-    insert.run(String(row.team_id), String(row.app_id), policyKey, null, null, at, row.actor_user_id == null ? null : String(row.actor_user_id), at);
+    const actor = row.actor_user_id == null ? null : String(row.actor_user_id);
+    const organizationId = String(row.team_id);
+    for (const appId of revokeTombstoneTargets({ appId: row.app_id, policyKey, organizationId, liveKeys, knownApps })) {
+      insert.run(organizationId, appId, policyKey, null, null, at, actor, at);
+    }
   }
 }
 
