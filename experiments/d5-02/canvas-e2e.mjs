@@ -1017,7 +1017,7 @@ async function main() {
     "  const tick = () => { out.push([Math.round(performance.now() - t0), Number(getComputedStyle(nodeEl).opacity)]); if (performance.now() - t0 < ms) requestAnimationFrame(tick); else resolve(out); };",
     "  requestAnimationFrame(tick); });",
     "const anim = (nodeEl) => nodeEl.getAnimations().map((a) => ({ name: a.animationName || null, duration: a.effect.getTiming().duration, easing: String(getComputedStyle(nodeEl).animationTimingFunction || '') }));",
-    "const state0 = it.aiMarks();",
+    "const state0 = it.primitives.aiMarks();",
     "const markedAi = !!(ai && ai.getAttribute('data-openarc-ai-source') === 'agent');",
     "const badge = badgeOf(ai);",
     "const userSource = user ? user.getAttribute('data-openarc-ai-source') : null;",
