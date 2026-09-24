@@ -1,4 +1,258 @@
 {
+  "batch2": {
+    "phase": "D5-03 第二批 · MCP 授权收口",
+    "at": "2026-09-24T15:02:33.334Z",
+    "openarcBranch": "integration/ui-core",
+    "testedCommit": "360d94b7092527ad18ead4b909d507f3efc42208",
+    "commitChain": [
+      {
+        "commit": "140182f",
+        "subject": "D5-03 第一批文档定稿（D5-02 收口 + D5-03 第一批结果与判定）"
+      },
+      {
+        "commit": "91bc436",
+        "subject": "撤权持久化（内置策略提供记录 v21）+ MCP 部分授权写路径"
+      },
+      {
+        "commit": "360d94b",
+        "subject": "授权审计归属目标 App；迁移按命名空间归属撤销证据；按新契约更新旧断言 + 本批两个验收脚本（本批最后一次提交，被测提交）"
+      }
+    ],
+    "artifacts": {
+      "mcpCenterE2e": {
+        "role": "第一批回归（本批重跑：notVerified 文案订正后）",
+        "path": "artifacts/d5-03/mcp-center-e2e.json",
+        "sha256": "d8f9a23781ff590aaa395b076defcb1f2cb141eef24618424ed102913b86a2e0",
+        "command": "node experiments/d5-03/mcp-center-e2e.mjs",
+        "counts": {
+          "pass": 38,
+          "fail": 0,
+          "total": 38
+        },
+        "notVerified": [],
+        "productDefects": [],
+        "z1": "clean",
+        "runtimeCommit": "360d94b7092527ad18ead4b909d507f3efc42208",
+        "gitDirtyLines": 1,
+        "dirtyNote": "唯一未提交文件 = experiments/d5-03/mcp-center-e2e.mjs 的 notVerified 文案订正（移除已过期的一条，原位补注释；4 增 1 删；38 条判定布尔表达式与所有其它字段一字未动）",
+        "scriptSha256": "9055e62d014e57b99b4fe24d3f1ca79ddc0b12dfecfd210c5d7fe4e762009970",
+        "scriptSha256BeforeFix": "e1ce85c5497eebdf4583a924bc25bd2699cbd51b74571fcd7499ac5af28abb02",
+        "logPath": "artifacts/d5-03/mcp-center-e2e.run-batch3-rerun.log",
+        "tailLog": "结论：PASS — {\"pass\":38,\"fail\":0,\"total\":38,\"notVerified\":0} / EXIT=0",
+        "sourceFingerprintFiles": 8,
+        "sourceFingerprintMatchesWorkingTree": true
+      },
+      "mcpPolicyE2e": {
+        "role": "第二批（授权收口）",
+        "path": "artifacts/d5-03/mcp-policy-e2e.json",
+        "sha256": "d4af5e9cbf6e7b8b6b8643f67d3dd38d040ee35baabb937fbeb338141c71d831",
+        "sha256VerifiedAt": "2026-09-24T14:59Z 与 2026-09-24T15:00Z 两次 shasum -a 256 复核（与交付口径一致）",
+        "sha256OnDiskAfterConcurrentRerun": "0c9ea8e5187f2cc08e3c823381fb67113aff941df7af90f6534b1e61a69119d6",
+        "sha256Note": "该路径于 2026-09-24T15:01:50Z 被另一个并发 DSH 会话在同一工作树重跑同一脚本覆盖；两轮判定一致（43/43、exit 0、firstBatch 38/38、同样的 2 条 notVerified、同一 scriptSha256），差别只在运行时事实（交付口径轮 openarcCommit=91bc436 + dirty 6 = 随后提交成 360d94b 的同一批；覆盖轮 openarcCommit=360d94b + dirty 2 = 本批脚本文案订正 + 结果文档）",
+        "command": "node experiments/d5-03/mcp-policy-e2e.mjs",
+        "counts": {
+          "pass": 43,
+          "fail": 0,
+          "total": 43
+        },
+        "firstBatchInArtifact": {
+          "pass": 38,
+          "fail": 0,
+          "total": 38
+        },
+        "notVerified": [
+          "同一安装内的第二个组织（两组织共库）无法用产品入口构造",
+          "跨组织行为级不互相覆盖（同一库里 A 撤销 → B 不受影响；两种登录顺序各验一次）"
+        ],
+        "runtimeCommit": "91bc436ccfaef466bc75c01c7c2cb49ceafda8da",
+        "gitDirtyLines": 6,
+        "dirtyNote": "那 6 个未提交文件正是随后提交成 360d94b 的同一批改动（git diff --stat 91bc436 360d94b = 6 files changed）；artifact 记录的 7 个源码指纹与 HEAD 工作树逐条相同，故该轮实际受验内容 = 360d94b",
+        "scriptSha256": "6d19a2eb673d73a3b38d1eb3de0ed58bb9e9bf59f5008e78018c08093a28c154",
+        "logPath": "artifacts/d5-03/mcp-policy-e2e.log",
+        "electronInstances": 8,
+        "instanceLabels": [
+          "run1-first-use",
+          "run2-restart-same-userdata",
+          "run3-restart-granted",
+          "run4-restart-revoked-again",
+          "run5-fresh-org",
+          "run6-fresh-org-restart",
+          "run8-back-to-first-org",
+          "run7-v20-upgrade"
+        ],
+        "fingerprints": {
+          "electron/identity-store.cjs": "77c335e047cbd6e2",
+          "electron/authorization-store.cjs": "8fde7a6d4f07dede",
+          "electron/authorization-service.cjs": "3ac23ace4556233c",
+          "electron/mcp-bootstrap.cjs": "a8020345239c1b24",
+          "electron/mcp-service.cjs": "04f5de89f4905877",
+          "electron/mcp-domain.cjs": "411403683e6e1015",
+          "src/mcp/McpCenter.tsx": "3184091abc0a87b3"
+        },
+        "fingerprintsMatchWorkingTree": true
+      }
+    },
+    "fixChain": [
+      {
+        "id": "D5-03B-D1",
+        "title": "撤销不持久：内置 App baseline 每次登录 / 重启被无条件重 upsert（治理撤销是删行）",
+        "fix": "schema v21 新增 app_policy_provisions（键 = organization_id + app_id + policy_key）；播种改为「没有记录 ⇒ 首次使用才给 + 记 provisioned；有记录 ⇒ 无论是否撤销都不再 upsert」；撤销写墓碑、正式重授清墓碑（AuthorizationStore.upsertAppGrant / revokeAppGrant 一处实现）"
+      },
+      {
+        "id": "D5-03B-D2",
+        "title": "app_resource_grants 唯一键不含 organization_id，两个组织对同一 (app, resource_type, scope) 互相覆盖",
+        "fix": "按 v17/v18 做法重建表：UNIQUE (organization_id, app_id, resource_id, collection_id, resource_type, department_id, scope)，upsert 的 ON CONFLICT 与按键查询同步带上 organization_id"
+      },
+      {
+        "id": "D5-03B-D3",
+        "title": "部分动作的 mcp grant 写不进去（写路径把 mcp.* 判成 INVALID_INPUT）",
+        "fix": "authorization-service 的 #normalizeAppGrantActions 对 resourceType==='mcp' 放行 mcp.* 命名空间（mcp-domain.mcpGrantActions 同一命名空间）"
+      },
+      {
+        "id": "D5-03B-D4",
+        "title": "撤销审计行记的是发起治理的上下文 App（resource-library），不是被撤销授权的 App，导致迁移把墓碑补到错误 App、已撤权限复活",
+        "fix": "写入侧 #govAudit 增加显式 appId 覆盖（授予传目标 appId、撤销传 before.app_id）；迁移侧 identity-store.revokeTombstoneTargets 先用 old_permissions 命名空间反推家族，再按 BASELINE_POLICY_PROVIDERS 归属（不能唯一确定时宁可多补墓碑）"
+      }
+    ],
+    "contractChanges": [
+      {
+        "target": "第一批脚本 H2（experiments/d5-03/mcp-center-e2e.mjs）",
+        "kind": "断言改写",
+        "detail": "旧 H2 编码的正是本批要修的旧语义（重新登录触发内置 baseline upsert → 权限回来）；新 H2 断言「跨登录不复活（MCP_UNAUTHORIZED + 库内 mcp grant 行 0 + 墓碑 revoked_at 非空）+ 正式治理入口重授后恢复（toolsHidden=false、工具表 2 条、界面恢复）」",
+        "impact": "仅此一条断言条件被改写，强度高于旧断言"
+      },
+      {
+        "target": "第一批脚本 L3",
+        "kind": "只插驱动步骤",
+        "detail": "登出 → 登录 → 正式重授，把状态驱回「已授权可用」",
+        "impact": "判定条件一字未动"
+      },
+      {
+        "target": "第一批 R1（在第二批脚本内）",
+        "kind": "标题文案",
+        "detail": "标题写明「H2 已按新契约更新，其余 37 条一字未动」",
+        "impact": "判定只是 counts 38/38，无影响"
+      },
+      {
+        "target": "其余",
+        "kind": "零改动",
+        "detail": "第一批 38 条里其余 37 条 + 第二批 43 条",
+        "impact": "判定条件零改动"
+      }
+    ],
+    "revocationPersistence": {
+      "immediate": "第一批 H1 未改；整条撤销 → mcp/list、mcp/get、mcp/connect 全部 MCP_UNAUTHORIZED，界面无权且工具描述 0 暴露",
+      "acrossRelogin": "policy C1/C2 + 第一批新 H2：重登录后 mcp/list=MCP_UNAUTHORIZED、库内 mcp grant 行 0、墓碑 revoked_at 非空且等于撤权当时的值、provisioned_at 保留",
+      "acrossRestart": "policy D1–D4：杀整个 Electron 进程树（含 Helper）→ 同一 userData 重启（新 pid）→ 仍无权、行仍 0、revoked_at 同值、界面 0 命中",
+      "onlyFormalRegrantRestores": "policy E1–E4：governance/grantAppAccess(appId=mcp-center, resourceType=mcp, 四动作) → 落库 1 行 + 清墓碑 + provisioned_at 保留 → list/get ok、toolsHidden=false、工具表 2 行；重授后再重启仍有效；再次撤销 → 再重启仍保持撤销",
+      "newOrgStillSeeded": "policy F1/F2：全新安装（新 organization_id）首用即拿到 mcp baseline（1 行、provisioned_at 非空）；该新组织撤销后重启仍撤销",
+      "dbWitness": "app_policy_provisions 行 (organization_id,'mcp-center','mcp')：provisioned_at 非空；撤销后 revoked_at 非空、app_resource_grants 该组织 mcp 行 = 0"
+    },
+    "partialGrantEvidence": {
+      "writePath": "正式入口可写部分动作：H1 把 grant 置为 [mcp.view]（created=false，覆盖同一行）→ 库 1 行、actions=[\"mcp.view\"]、revoked_at NULL",
+      "capabilityFace": "H2：toolsHidden=true、tools=[]、toolsHash=null；连接状态仍可见（mcp/list ok、status READY、界面行与状态徽标在，工具列「无权查看」）",
+      "threeFacesZeroHits": "H3：工具名 / 描述 / 参数 / hash 在 DOM 文本 + DOM 属性 + mcp/get + mcp/testLog 全部 0 命中（含 64 位 hex 与 hash=）",
+      "sidePathsDenied": "H4：mcp/connect、mcp/test → MCP_UNAUTHORIZED（reason=app-action-missing）",
+      "positiveControls": "H0（授权完整时三面都可见）与 H5（再授 [mcp.view, mcp.use] → toolsHidden=false、DOM 工具表 2 行、hash 一致）",
+      "revokeThenRegrantViewOnly": "H6：整条撤销 → 再正式重授 view-only → 三面仍 0 命中",
+      "namespaceIsolation": "I1：跨命名空间动作组合（mcp 带 model./resource./tool.、model 带 mcp.、空资源类型 / 空动作 / permissionSet）9/9 INVALID_INPUT，被拒写入不留 grant 行",
+      "privilegeBoundary": "I2/I3：MEMBER 真实登录发 getAppAccess/grant/revoke → NOT_SUPER_ADMIN 且库内授权行未改动；ORGANIZATION scope 的 mcp.manage 只有 SUPER_ADMIN 能过（验完撤销恢复）"
+    },
+    "auditEvidence": {
+      "J2": "撤销审计行 app_id 全部 = mcp-center（appIdValues=[\"mcp-center\"]，4 条）；修复前是上下文 App resource-library",
+      "J1": "authorization_audit 的 grant/revoke 各有行，old_permissions/new_permissions 如实（grant 记新动作、revoke 记旧动作、撤销后 new=[]）",
+      "L1": "用 git archive 140182f 的 v20 electron/ 跑旧服务建库并真实撤销一次（不写一行 SQL）→ 该库审计行仍是旧口径 app_id=resource-library，作为迁移要处理的历史现场"
+    },
+    "migrationEvidence": {
+      "L2": "v20 库（user_version=20、无 app_policy_provisions、4 行既有授权）上启动当前 Electron → 自动迁移 v21：user_version=21、建 app_policy_provisions、app_resource_grants 唯一键含 organization_id、既有授权行 4→4 一条不丢（noRowLost=true、lostRows=[]、newRowsAtBoot=[]）、主进程无迁移错误",
+      "L3": "迁移补写把旧撤销证据归到 (organization_id,'mcp-center','mcp')：revoked_at 非空、provisioned_at 空（= 有撤销证据、无提供证据）；升级后登录 mcp/list 仍 MCP_UNAUTHORIZED、mcp grant 行 0，登录不再复活"
+    },
+    "boundary": {
+      "toolInvocationStillClosed": "K1：5 个调用命令 × 2 形状 = 10 次全部 MCP_TOOL_INVOCATION_NOT_ENABLED；未登记命令 MCP_COMMAND_NOT_ALLOWED；第一批 I1/I2 重跑仍 PASS",
+      "noThirdParty": "K2：本次全部 MCP 连接端点只指向自建 fixture（127.0.0.1 动态端口）；第一批 J1a/J1b 重跑仍 PASS",
+      "noUserData": true,
+      "noArbitraryLocalPrograms": true,
+      "pluginIsolationClaimed": false,
+      "databaseWritesByProbe": false,
+      "writesOnlyByProduct": true,
+      "note": "验收全程只读查库（DatabaseSync readOnly），所有写入都由产品自己的命令路径完成；连接成功不等于插件隔离通过（D5-08 范围）"
+    },
+    "regression": {
+      "command": "node --test tests/d5-03-mcp-*.test.mjs tests/authorization-*.test.mjs tests/governance-*.test.mjs tests/*-migration.test.mjs tests/identity-store.test.mjs",
+      "counts": {
+        "pass": 145,
+        "fail": 0,
+        "total": 145
+      },
+      "exitCode": 0,
+      "logPath": "artifacts/d5-03/regression-batch2.log",
+      "newTests": [
+        {
+          "path": "tests/d5-03-mcp-policy-persistence.test.mjs",
+          "counts": {
+            "pass": 11,
+            "fail": 0,
+            "total": 11
+          }
+        },
+        {
+          "path": "tests/authorization-app-grant-scope.test.mjs",
+          "counts": {
+            "pass": 6,
+            "fail": 0,
+            "total": 6
+          }
+        }
+      ],
+      "build": "npm run build exit 0（本批执行期间未复跑，避免改写第一批 artifact 记录的 distFingerprint）",
+      "preexistingFailures": [
+        "tests/side-effect-c4-gates.test.mjs:474",
+        "tests/side-effect-c4-gates.test.mjs:444",
+        "tests/d4-03-approval-push-isolation.test.mjs:94"
+      ],
+      "preexistingFailuresNote": "与本批无关：已在干净 HEAD 导出树复现，继续单列、未改断言",
+      "srcDiffSinceFirstBatch": "空（d583154 → 360d94b 的 src/ diff 为空）"
+    },
+    "notVerified": {
+      "mcpCenterE2e": [],
+      "mcpPolicyE2e": [
+        {
+          "name": "同一安装内的第二个组织（两组织共库）无法用产品入口构造",
+          "reason": "真机「组织」= teams 行，只在 identity/initialize 建 root 团队（唯一部分索引 idx_teams_single_root 只允许一行 root=1）；命令白名单无创建组织入口；governance/createUser 把 teamId 钉死在 gate.user.team_id。既有 node 测试造第二组织是直接 INSERT teams（本批禁止的直接改库）"
+        },
+        {
+          "name": "跨组织行为级不互相覆盖（同一库里 A 撤销 → B 不受影响；两种登录顺序各验一次）",
+          "reason": "真机不可构造（同上）；真机只到 schema 级（G1：两个组织的库都验了唯一键 / 主键含 organization_id）+ node 行为级（tests/d5-03-mcp-policy-persistence.test.mjs 11/11、tests/authorization-app-grant-scope.test.mjs 6/6：不同 organization_id 各一行、两种写入顺序同结论）→ 真机跨组织如实标未验收"
+        }
+      ],
+      "overallCleared": false
+    },
+    "evidenceGaps": [
+      "第一批 artifact（mcp-center-e2e.json）的 mcpSourceFingerprint 仍只 pin 8 个文件，不含本批实际改动的 electron/authorization-service.cjs 与 electron/identity-store.cjs（脚本指纹逻辑按执行边界一字未动）→ 不声称第一批 artifact 的指纹覆盖本批全部改动文件；覆盖这两个文件的是第二批 artifact 的 fingerprints（7 条，与 HEAD 逐条相同），两个台架合起来才可复核本批受验源码",
+      "artifacts/d5-03/mcp-center-e2e.json 这一路径每次重跑都会被改写（第一批当时 sha256=dca23cb7…、第二轮=80d3fc0c…），且 artifacts/ 被 gitignore；当前有效值 = batch2.artifacts.mcpCenterE2e.sha256",
+      "脚本内仍留第一批的过时文案（不在允许改动范围）：observations 里的 note(\"最小修法建议（未动手）…\")（写入路径已修，被 H1 的 partialGrantAttempt={\"ok\":true,...} 取代）、J1b 判定标题里修复前的括号",
+      "BASELINE_POLICY_PROVIDERS 手工对齐（迁移归属表与三处播种点），无漂移守卫：新增 baseline 提供者若忘同步，该 App 的历史撤销会退回只认审计行 app_id 的旧口径",
+      "app_policy_provisions 无保留期 / 清理策略（记录随组织与 App 数增长，量级很小）"
+    ],
+    "environmentNote": "本批执行期间另一个 DSH 会话在同一工作树并发跑同一脚本、抢 CDP 端口，导致一次运行 Z0 FAIL(exit 2)，且其 Electron 实例被按前缀误杀；受影响日志保留在 artifacts/d5-03/*.run-batch3.log / .run-final.log，最终 artifact 是在端口空出后重跑产生的（环境说明，非产品结论）。脚本只按自己的 userData 前缀 oa-d503- 清理，未杀别人的进程。",
+    "verdict": {
+      "batch2": "PASS（限定范围）",
+      "d5_03Overall": "PARTIAL",
+      "remainingGaps": [
+        "OAuth（只有 NONE / BEARER）",
+        "远程长连接流（GET SSE / 断线续传）与 streamable HTTP 单响应之外的部分",
+        "真实第三方服务与 Adobe / PS 等本地服务（D5-04 / D5-05）",
+        "插件隔离（D5-08）—— 连接成功 ≠ 插件隔离通过",
+        "第二个组织的真机入口 / 跨组织真机行为级验收",
+        "BASELINE_POLICY_PROVIDERS 手工对齐，无漂移守卫",
+        "第一批 artifact 指纹集不含本批改动的两个文件",
+        "app_policy_provisions 无清理策略"
+      ],
+      "d5_02Separate": "D5-02 的「重命名依赖 Electron 不支持的 prompt()」仍单列，不并入本批"
+    },
+    "supersedes": "根部字段（counts / artifactSha256 / artifactPath / notVerified / verifiedTree / logPath / mcpSourceFingerprint / distFingerprint / checks）是 D5-03 第一批当时的门禁记录；其中 artifacts/d5-03/mcp-center-e2e.json 这一路径已被本批重跑覆盖，第一批当时的 sha256=dca23cb7…。第二批的最新口径以本 batch2 段为准（见 docs/D5-03-RESULT.md 正文 §1–§13）。"
+  },
+  "rootFieldsNote": "根部字段（phase / at / runNote / verifiedTree / invocation / counts / artifactPath / artifactSha256 / logPath / previousLogPath / mcpSourceFingerprint / distFingerprint / fixture / boundary / defectChain / regression / assertionChanges / notVerified / scopeBoundaries / checks）是 **D5-03 第一批当时**（2026-09-24T13:54Z，提交 d583154）的门禁记录，保留作历史：其中 artifact `artifacts/d5-03/mcp-center-e2e.json` 已被本批（第二批）重跑覆盖（当前 sha256 与 notVerified 见 batch2.artifacts.mcpCenterE2e）；根部 `notVerified`（1 条 mcp.use-only 主路径）与 `checks` 里 H2 / 恢复相关的旧文案，均以 batch2 的 contractChanges / notVerified 为准。第二批 = 本文件的 batch2 段（最新）。",
   "phase": "D5-03 第一批 · MCP 中心（连接管理与能力发现）",
   "at": "2026-09-24T13:54:26.715Z",
   "runNote": "本轮为干净代码树复跑（HEAD d583154，21:54）；首轮 34/38 的历史保留在 defectChain 与 assertionChanges（首轮验收脚本提交 4dfe923）。",

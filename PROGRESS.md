@@ -1437,7 +1437,7 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 
 # D5-03 第一批 · MCP 中心（连接管理与能力发现）· 2026-09-24（`d583154`）
 
-> **口径（用户明确定范围）**：**本批 = 连接管理与能力发现**；**不开放 MCP 工具调用、不运行任意第三方本地程序、不连真实第三方、不发用户数据、不把连接成功写成插件隔离已通过**。判定：**D5-03 第一批（连接管理与能力发现）= PASS（限定范围）**；**D5-03 整体 = PARTIAL**（剩余：OAuth、长连接流、真实第三方 / Adobe 服务 D5-04/05、插件隔离 D5-08、部分授权主路径与跨登录撤销缺口 —— 见 §5）。完整结果文档 `docs/D5-03-RESULT.md`；tracked 证据 `docs/D5-03-GATE-EVIDENCE.json`（38 条 checks 逐条脱敏复制 + counts / sha256 / boundary / 缺陷修复链 / 回归计数 / notVerified）。
+> **口径（用户明确定范围）**：**本批 = 连接管理与能力发现**；**不开放 MCP 工具调用、不运行任意第三方本地程序、不连真实第三方、不发用户数据、不把连接成功写成插件隔离已通过**。判定：**D5-03 第一批（连接管理与能力发现）= PASS（限定范围）**；**D5-03 整体 = PARTIAL**（剩余：OAuth、长连接流、真实第三方 / Adobe 服务 D5-04/05、插件隔离 D5-08、部分授权主路径与跨登录撤销缺口 —— 见 §5）。**【第二批已更新】** 该两项缺口已由第二批闭环；本节的 `notVerified: 1`、恢复口径、artifact sha256 均以紧随其后的第二批节为准。完整结果文档 `docs/D5-03-RESULT.md`；tracked 证据 `docs/D5-03-GATE-EVIDENCE.json`（38 条 checks 逐条脱敏复制 + counts / sha256 / boundary / 缺陷修复链 / 回归计数 / notVerified）。
 >
 > **被测内容 = `d583154`（干净代码树复跑，2026-09-24 21:54）**：门禁命令 `OPENARC_TESTED_COMMIT=$(git rev-parse HEAD) node experiments/d5-03/mcp-center-e2e.mjs`；artifact 的 `openarcCommit=d583154a7b4dbb3b249f288b4ed23c09eb286fc2`、`gitDirtyLines=5` —— **这 5 个未提交文件全部是本批文档**（`PROGRESS.md` + 4 个 `docs/` 文档），**没有任何代码 / 脚本 / 断言未提交改动**（`git diff d583154 <文档提交> --stat` 可核对；不写成"完全干净树"）。artifact 里 8 个 MCP 源码指纹与工作树**逐条相同**（第十七批文档岗按脚本的 `fileSha` 复核）。**（历史，仅备查）** 上一轮 artifact 记录的是 `openarcCommit=4dfe923` + `gitDirtyLines=12`（修复提交前的树）；本轮以干净树复跑的新 artifact 为准。
 
@@ -1445,7 +1445,7 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 
 | 项 | 状态 | 证据 |
 | --- | --- | --- |
-| 真实 Electron 门禁（`OPENARC_TESTED_COMMIT=$(git rev-parse HEAD) node experiments/d5-03/mcp-center-e2e.mjs`，HEAD `d583154` 干净代码树复跑） | **已完成** | **38 PASS / 0 FAIL / 38，exit 0**；`productDefects: []`；`notVerified: 1`；Z1 clean；artifact `artifacts/d5-03/mcp-center-e2e.json`（sha256 `dca23cb7b78df4997852500cebcabc5e2ad4e013795259b23b692ee8fc7aca23`，本批 `shasum -a 256` 独立复核；`openarcCommit=d583154`、`gitDirtyLines=5` 全部为本批文档）+ 日志 `artifacts/d5-03/mcp-center-e2e-rerun.log` |
+| 真实 Electron 门禁（`OPENARC_TESTED_COMMIT=$(git rev-parse HEAD) node experiments/d5-03/mcp-center-e2e.mjs`，HEAD `d583154` 干净代码树复跑） | **已完成** | **38 PASS / 0 FAIL / 38，exit 0**；`productDefects: []`；`notVerified: 1`（**【第二批已更新】重跑后为 0 条**）；Z1 clean；artifact `artifacts/d5-03/mcp-center-e2e.json`（sha256 `dca23cb7b78df4997852500cebcabc5e2ad4e013795259b23b692ee8fc7aca23**【第二批已更新：该 artifact 已被重跑覆盖，当前 sha256 = `d8f9a23781ff590aaa395b076defcb1f2cb141eef24618424ed102913b86a2e0`】**`，本批 `shasum -a 256` 独立复核；`openarcCommit=d583154`、`gitDirtyLines=5` 全部为本批文档）+ 日志 `artifacts/d5-03/mcp-center-e2e-rerun.log` |
 | 后端：连接管理与能力发现 | **已完成** | `electron/mcp-{domain,store,client,service,bootstrap}.cjs`；白名单 10 条命令；20 个稳定错误码；v20 迁移三张表；远程 URL 复用 `model-domain.validateEndpoint`；凭据只存 ref + safeStorage；授权 / 审计走 D3-02 的 `mcp.view/use/manage/test` |
 | 本地 stdio 生产路径 | **已完成**（`d583154` 修 D2） | `electron/executor-launcher.cjs:226-251` 新增 `createMcpStdioLauncher`（Electron main = `process.execPath` + `ELECTRON_RUN_AS_NODE=1`；纯 Node 同一 launcher）；C2 协商值与 fixture 参照逐字一致；D1 重连 `toolsHash` 不变；D2 测试日志含 `TOOLS_DISCOVERED` |
 | 远程 http（streamable HTTP 单响应） | **已完成** | F0 / F1 / F1a；协商常量与 stdio 同一组；执行位置 = 远程服务 |
@@ -1463,12 +1463,12 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 1. **D5-03-D2（最严重）：本地 stdio 生产路径永远握不上手** —— `utilityProcess.fork()` 句柄没有 stdin（Electron 44.3.0 实测 `stdinType=undefined` / `stdinHasWrite=false`），`MCP_UNREACHABLE detail=stdin-unavailable`；单测全过是因为 `tests/mcp-fixtures.mjs` 走 Node child（有 stdin）。根因位置 `electron/executor-launcher.cjs:114-131` + `electron/mcp-client.cjs:157-167`。**修**：新增 `createMcpStdioLauncher`（`electron/executor-launcher.cjs:226-251`），Electron main 用 `process.execPath` + `ELECTRON_RUN_AS_NODE=1`，**测试与生产共用同一实现**；白名单 entry/args/env 未放宽、`ELECTRON_RUN_AS_NODE` 由 launcher 追加不可覆盖、**D4-04 执行器 launcher 未动**。新增单测 `tests/d5-03-mcp-stdio-launcher.test.mjs`（3 例）。
 2. **D5-03-D1（高）：空态没有「新建连接」入口** —— `PageState` 的 `empty` 规范是 `action='none'`，传入的 `onAction` 被静默忽略（`src/mcp/McpCenter.tsx:962-970` + `src/design-system/page-states.tsx:46,82`），真空态建不出首条连接。**修**：空态自渲染 `data-mcp-action="create"`（`src/mcp/McpCenter.tsx:963-974` + `.mcp-empty` 样式），**PageState 共享语义未动**。
 3. **D5-03-D3（中）：失败后不刷新列表与详情** —— `runAction` 失败分支直接 return（`src/mcp/McpCenter.tsx:435-455`），鉴权失败当下不出现重授权入口、协议不符显示旧投影。**修**：失败分支也 `loadList({silent:true})` + `loadDetail()`（`:445-452`）。
-4. **观察件（非缺陷）**：治理侧 app 授权投影并入 `mcp.*`（`electron/governance-service.cjs:278-287`、`electron/authorization-service.cjs:1174`）—— 只开可见性与整条撤销，**写路径仍不支持部分动作的 mcp grant**（`notVerified:1` 的原因）。
+4. **观察件（非缺陷）**：治理侧 app 授权投影并入 `mcp.*`（`electron/governance-service.cjs:278-287`、`electron/authorization-service.cjs:1174`）—— 只开可见性与整条撤销，**写路径仍不支持部分动作的 mcp grant**（`notVerified:1` 的原因）。**【第二批已更新】** 写路径已支持部分动作的 mcp grant，`notVerified` 已清零（见第二批节）。
 
 ## 3. 门禁与回归（命令 / 退出码 / 计数 / 证据 / sha256）
 
-- 命令：`OPENARC_TESTED_COMMIT=$(git rev-parse HEAD) node experiments/d5-03/mcp-center-e2e.mjs`（HEAD `d583154`，干净代码树复跑）；结果：**38 PASS / 0 FAIL / 38，exit 0**；`productDefects: []`；`notVerified: 1`；Z1 = clean；控制台错误样本 `[]`、对话框样本 `[]`
-- 证据：`artifacts/d5-03/mcp-center-e2e.json`（sha256 **`dca23cb7b78df4997852500cebcabc5e2ad4e013795259b23b692ee8fc7aca23`**，本批 `shasum - a 256` 独立复核；`openarcCommit=d583154`、`gitDirtyLines=5` 全为本批文档）+ 日志 `artifacts/d5-03/mcp-center-e2e-rerun.log`（尾行 `结论：PASS — {"pass":38,"fail":0,"total":38,"notVerified":1}` + `E2E_EXIT=0`；旧 `mcp-center-e2e.log` 留作首轮 / 上一轮历史）；视觉 `artifacts/d5-03/visual/`（17 张）、动效 `artifacts/d5-03/motion/`（66 帧）；`artifacts/` 被 gitignore
+- 命令：`OPENARC_TESTED_COMMIT=$(git rev-parse HEAD) node experiments/d5-03/mcp-center-e2e.mjs`（HEAD `d583154`，干净代码树复跑）；结果：**38 PASS / 0 FAIL / 38，exit 0**；`productDefects: []`；`notVerified: 1`（**【第二批已更新】重跑后为 0 条**）；Z1 = clean；控制台错误样本 `[]`、对话框样本 `[]`
+- 证据：`artifacts/d5-03/mcp-center-e2e.json`（sha256 **`dca23cb7b78df4997852500cebcabc5e2ad4e013795259b23b692ee8fc7aca23**【第二批已更新：该 artifact 已被重跑覆盖，当前 sha256 = `d8f9a23781ff590aaa395b076defcb1f2cb141eef24618424ed102913b86a2e0`】**`**，本批 `shasum - a 256` 独立复核；`openarcCommit=d583154`、`gitDirtyLines=5` 全为本批文档）+ 日志 `artifacts/d5-03/mcp-center-e2e-rerun.log`（尾行 `结论：PASS — {"pass":38,"fail":0,"total":38,"notVerified":1}` + `E2E_EXIT=0`；旧 `mcp-center-e2e.log` 留作首轮 / 上一轮历史）；视觉 `artifacts/d5-03/visual/`（17 张）、动效 `artifacts/d5-03/motion/`（66 帧）；`artifacts/` 被 gitignore
 - 检查项分组（38 条）：A 3（A × 2 + A0 错误码自检）；B 3（B1–B3）；C 3（C0 / C1 / C2）；D 2；E 2；F 3（F0 / F1 / F1a）；G 6（G1 / G2 / G3a / G3b / G4 / G5）；H 2；I 2；J 2（J1a / J1b）；K 4；L 5；Z1
 - 关键实测值：协商 `protocolVersion=2025-06-18` / `serverName=openarc-test-echo` / `serverVersion=1.4.0` / `capabilities={tools:{listChanged:false},logging:{}}` / 工具 `echo_sum`+`describe_self` / `toolsHash=7db033b3636227f94fc2a51859637cbb7b93c7e865a0e12b79d86c9dda7721ce`；挂死服务超时 **8068ms**（干净树复跑实测，上限 15s，G5）；不可达 138ms（G2）；删除 174ms（E2）；`MCP_TIMEOUT` 期间界面显示「发现工具中」（6 帧采样）
 - 单测回归（第十七批文档岗复跑核对）：`node --test tests/d5-03-mcp-*.test.mjs` = **34/34**（含新增 stdio launcher 3 例）；`tests/d5-03-mcp-*.test.mjs + tests/d5-02-canvas-*.test.mjs` = **74/74**；`tests/d4-04-*.test.mjs + tests/governance-*.test.mjs` = **52/52**（第十七批文档岗复跑核对；整套 d4-04 + governance 口径，0 失败）；`npm run build` = 本批记录 **exit 0**（文档岗未复跑，避免改写 artifact 的 `distFingerprint`）
@@ -1476,15 +1476,71 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 
 ## 4. 功能 / 视觉 / 动效 / 边界
 
-- **功能 = 通过（限定范围）**：本地 stdio 与远程 http 都取得**真实协商值**（逐字等于 fixture 参照）；四个失败类（非白名单 key / 不可达 / 401 / 协议不符）都有稳定错误码 + 人话提示 + 有界时延；停用 / 删除真的收掉连接与子进程；权限整条撤销 → `MCP_UNAUTHORIZED` 且工具描述 0 暴露，重新登录恢复。
+- **功能 = 通过（限定范围）**：本地 stdio 与远程 http 都取得**真实协商值**（逐字等于 fixture 参照）；四个失败类（非白名单 key / 不可达 / 401 / 协议不符）都有稳定错误码 + 人话提示 + 有界时延；停用 / 删除真的收掉连接与子进程；权限整条撤销 → `MCP_UNAUTHORIZED` 且工具描述 0 暴露；**【第二批已更新】** 旧口径「重新登录恢复」在本批被修掉 —— 现在是**跨登录 / 跨重启都不复活、只有正式治理入口重授才恢复**（见第二批节 §1）。
 - **视觉 = 截图齐全，不整体宣布"视觉通过"**：浅色 9 张 + 深色 8 张，覆盖两套主题下的空态 / 列表 / 详情 / 能力表 / 测试日志 / 远程详情 / 发现中 / 认证失败 / 无权；实现复用既有 `Button` / `TextField` / `Badge` / `PageState` / `Dialog`，`styles.css` 61 条 `.mcp-*` 规则 **0 条硬编码颜色**、27 个既有 token（中性灰、无新增彩色）；**未做逐像素 / 色值 / 对比度量测**，深色详情页无单独截图 → 如实登记。
 - **动效 = 通过（限定范围）**：列表插入 / 删除 160ms（`mcp-row-in` / `mcp-row-out`）、详情按 `connectionId` 重挂载、发现中不造假进度、减少动态效果下 `--dur-quick=0ms` + `animation:none`（删除 4ms vs 常规 195ms）；**loading 态 <8ms 采样间隔，只记录不判定**。
 - **边界 = 未越界**：只连自建 fixture（J1a 端点 100% 本地）、只跑白名单 entry 的受控子进程（J1b）、0 个工具调用入口且 10 次调用尝试全被显式拒绝（I1 / I2）、`boundary.pluginIsolationClaimed=false` —— **连接成功 ≠ 插件隔离通过**。
 
 ## 5. 缺口与判定
 
-1. 本批**不开放工具调用**（设计如此）；2. **无 OAuth**（只有 NONE / BEARER）；3. 远程只做 streamable HTTP **单响应**（无 GET SSE 长连接 / 断线续传；服务端 → 客户端请求一律 `-32601`）；4. 工具目录上限 **200 个 / 10 页**，超出标记 `truncated`，完整 `inputSchema` 不入库；5. 本地白名单只有测试 fixture（真实 Adobe / PS 属 D5-04/05）；6. `ELECTRON_RUN_AS_NODE` 依赖 Electron fuse（当前无打包 / 关 fuse 配置，关掉则握手有界失败 fail closed）；7. `notVerified: 1` = `toolsHidden`（只有 `mcp.view` 没有 `mcp.use`）主路径无法构造（治理写路径不支持部分动作的 mcp grant；`revokeAppAccess` 只能整条撤销）；8. **撤销不跨登录保持**（内置 baseline 每次登录重 upsert，`identity-bootstrap.cjs:131-139 → mcp-bootstrap.cjs:41-50`，与 model / canvas 同一内置模式）；9. **插件隔离属 D5-08**，本批未验也不声称；10. 门禁脚本 J1b 的 check 标题保留修复前的括号（判定与 PASS 内容已是修复后正常路径）—— 只允许改文档，本轮不改脚本，登记为文档级缺口。
+1. 本批**不开放工具调用**（设计如此）；2. **无 OAuth**（只有 NONE / BEARER）；3. 远程只做 streamable HTTP **单响应**（无 GET SSE 长连接 / 断线续传；服务端 → 客户端请求一律 `-32601`）；4. 工具目录上限 **200 个 / 10 页**，超出标记 `truncated`，完整 `inputSchema` 不入库；5. 本地白名单只有测试 fixture（真实 Adobe / PS 属 D5-04/05）；6. `ELECTRON_RUN_AS_NODE` 依赖 Electron fuse（当前无打包 / 关 fuse 配置，关掉则握手有界失败 fail closed）；7. **【第二批已更新：已闭合】** `notVerified` 现为 **0 条** —— `mcp.view`-only 主路径已由第二批 `mcp-policy-e2e` 验收（写路径已支持部分动作的 mcp grant）；8. **【第二批已修复】** 撤销已跨登录 / 跨重启保持（内置 baseline 只在首次使用时播种，`identity-bootstrap.cjs:131-139 → mcp-bootstrap.cjs:41-50` 的旧口径已改）；9. **插件隔离属 D5-08**，本批未验也不声称；10. 门禁脚本 J1b 的 check 标题保留修复前的括号（判定与 PASS 内容已是修复后正常路径）—— 只允许改文档，本轮不改脚本，登记为文档级缺口。
 
 **判定：D5-03 第一批（连接管理与能力发现）= PASS（限定范围）；D5-03 整体 = PARTIAL。**（功能 = 通过；视觉 = 截图齐全 / 只用既有 token 与组件，未做色值与对比度量测，不宣布"视觉通过"；动效 = 通过，loading 态未判定；边界按 §4 自证。剩余 = OAuth、长连接流、真实第三方 / Adobe 服务（D5-04/05）、插件隔离（D5-08）、部分授权主路径与跨登录撤销缺口。）
+
+**【第二批已更新】** 上面这一节的「部分授权主路径（`mcp.view`-only 写路径）」与「撤销跨登录」两项缺口已由第二批闭环；`notVerified` 从 1 条变为 0 条（第一批台架本批重跑 38/38）。第二批的完整口径见下一节。
+
+---
+
+# D5-03 第二批 · MCP 授权收口 · 2026-09-24（`360d94b`）
+
+> **口径（用户明确定范围）**：本批**只做 MCP 授权收口**（撤权持久化 + 部分授权写路径 + 审计归属 + v20→v21 升级归属）；**不开放工具调用、不连真实第三方、不运行任意第三方程序、不发用户数据、不声称插件隔离通过**。
+> **判定：D5-03 第二批（MCP 授权收口）= PASS（限定范围）；D5-03 整体 = PARTIAL**（剩余缺口逐条见 §5）。完整结果文档 `docs/D5-03-RESULT.md` 正文 §1–§13；tracked 证据 `docs/D5-03-GATE-EVIDENCE.json` 的 `batch2` 段；决策 `docs/decisions/D5-03B-app-policy-persistence.md`。
+> **提交链**：`140182f`（D5-03 第一批文档定稿）→ `91bc436`（内置策略提供记录 v21 / 墓碑 / 唯一键含 org + MCP 部分授权写路径）→ **`360d94b`（本批最后一次提交 = 被测提交，2026-09-24 22:58；审计归属目标 App + 迁移按命名空间归属撤销证据 + 按新契约更新旧断言 + 本批两个脚本）**。未 push、未合并 main、未切分支；执行期间唯一未提交改动 = 第一批脚本的 notVerified 文案订正（重跑 artifact `gitDirtyLines=1` 即指它）。
+
+## 1. 任务状态
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| 第二批真机台架（`node experiments/d5-03/mcp-policy-e2e.mjs`） | **已完成** | **43 PASS / 0 FAIL / 43、exit 0**；内嵌 firstBatch **38/38**；artifact `artifacts/d5-03/mcp-policy-e2e.json`，sha256 **`d4af5e9cbf6e7b8b6b8643f67d3dd38d040ee35baabb937fbeb338141c71d831`**（本批 `shasum -a 256` 复核两次）。**注意**：该路径于 23:01:50 被另一个并发 DSH 会话重跑覆盖，当前磁盘 sha256 = `0c9ea8e5187f2cc08e3c823381fb67113aff941df7af90f6534b1e61a69119d6`（同为 43/43、firstBatch 38/38、同样 2 条 notVerified）；`notVerified` 2 条（§5）；8 个真实 Electron 实例 |
+| 第一批回归台架（本批重跑；notVerified 文案订正后） | **已完成** | **38 PASS / 0 FAIL / 38、exit 0**；`productDefects: []`；**`notVerified: []` = 0 条**；Z1 clean；artifact `artifacts/d5-03/mcp-center-e2e.json`，sha256 **`d8f9a23781ff590aaa395b076defcb1f2cb141eef24618424ed102913b86a2e0`**（`shasum - a 256` 复核）；日志 `artifacts/d5-03/mcp-center-e2e.run-batch3-rerun.log`（尾行 `结论：PASS — {"pass":38,"fail":0,"total":38,"notVerified":0}` + `EXIT=0`） |
+| 目标一：撤权持久 | **已完成（真机）** | 撤权即时（第一批 H1 未改）；跨登录不复活（C1/C2 + 新 H2：重登录后 `MCP_UNAUTHORIZED`、库内 mcp 行 0、墓碑 `revoked_at` 非空）；跨重启（D1–D4）；只有正式治理入口重授才恢复（E1–E4；重授后再重启仍有效）；新组织首用仍有既定初始授权（F1/F2） |
+| 目标二：MCP 部分授权（`mcp.view` only） | **已完成（真机）** | H1 正式入口把 grant 置为 `[mcp.view]`（覆盖同一行，库 1 行）；H2 `toolsHidden=true` / `tools=[]` / `hash=null`，但连接状态仍可见（READY）；H3 DOM + `mcp/get` + `mcp/testLog` 三面 0 命中（含 64 位 hex 与 `hash=`）；H4 `connect`/`test` → `MCP_UNAUTHORIZED`；H5 再授 `[mcp.view, mcp.use]` 立即可见；H6 再撤销 → 再授 view-only 又不外泄；跨命名空间 9/9 `INVALID_INPUT`；越权全部 `NOT_SUPER_ADMIN` |
+| 审计归属（本批修复） | **已完成（真机）** | J2 撤销审计行 `app_id` 全部 = `mcp-center`（修复前 `resource-library`）；J1 `old_permissions`/`new_permissions` 如实；L1 用 `git archive 140182f` 的 v20 代码建库并真实撤销一次，历史行仍是旧口径（旧缺陷现场保留） |
+| 升级路径 v20 → v21 | **已完成（真机）** | L2：v21 生效（`user_version=21` + `app_policy_provisions` + 唯一键含 `organization_id`）+ 既有授权行 **4→4 一条不丢**（`noRowLost=true`）+ 主进程无迁移错误；L3：迁移把旧撤销证据归到 `(organization_id,'mcp-center','mcp')` 的墓碑（`revoked_at` 非空、`provisioned_at` 空），登录不再复活 |
+| 契约变更披露 | **已披露（逐条）** | 第一批 `H2` 改写（旧断言编码的正是本批要修的旧语义；新 H2 断言「不复活 + 库证据 + 正式重授恢复」，强度更高）；第一批 `L3` 只插驱动步骤（判定未动）；第一批 `R1` 标题文案（判定未动）；其余 37 + 43 条判定**零改动** |
+| 边界 | **未越界** | K1：5 个工具调用入口 × 2 形状仍全部 `MCP_TOOL_INVOCATION_NOT_ENABLED`；K2：端点只指向自建 fixture；artifact `boundary.databaseWritesByProbe=false` / `writesOnlyByProduct=true`（**全程只读查库**）；`pluginIsolationClaimed=false` |
+
+## 2. 证据订正（本批必做项）
+
+* `experiments/d5-03/mcp-center-e2e.mjs` 里「『工具描述不暴露』的 mcp.use-only 主路径（toolsHidden=true、mcp.view 仍在）」这条 notVerified 已**移除**（只动这一条文案/列表项：`git diff` = 4 增 1 删，原位补注释注明该路径已由 `experiments/d5-03/mcp-policy-e2e.mjs` 覆盖，见其 artifact 的 view-only 组 H0–H6）；38 条判定的布尔表达式与其它字段**一字未动**。
+* 订正后脚本 sha256 = `9055e62d014e57b99b4fe24d3f1ca79ddc0b12dfecfd210c5d7fe4e762009970`（订正前 `e1ce85c5497eebdf4583a924bc25bd2699cbd51b74571fcd7499ac5af28abb02`，即第二批 artifact 的 `relation.regression` 文本里记的值）。
+* 重跑后 artifact：**38/38、exit 0、`notVerified: []`（0 条）**，sha256 见 §1；`openarcCommit=360d94b`、`gitDirtyLines=1`。
+
+## 3. 回归
+
+* `node --test tests/d5-03-mcp-*.test.mjs tests/authorization-*.test.mjs tests/governance-*.test.mjs tests/*-migration.test.mjs tests/identity-store.test.mjs` = **145 / 145 pass、exit 0**（本批复跑，日志 `artifacts/d5-03/regression-batch2.log`）；新增 `tests/d5-03-mcp-policy-persistence.test.mjs` **11/11**、`tests/authorization-app-grant-scope.test.mjs` **6/6**。
+* `npm run build` = **exit 0**（`tsc --noEmit` + `vite build`；本批执行期间未复跑，避免改写第一批 artifact 的 `distFingerprint`）；`d583154` → `360d94b` 的 `src/` diff **为空**（第二批 R3）。
+* **两条预存在失败继续单列、未改断言**：`tests/side-effect-c4-gates.test.mjs:474` / `:444`、`tests/d4-03-approval-push-isolation.test.mjs:94`（已在干净 HEAD 导出树复现）。
+
+## 4. notVerified 与证据完整性缺口（如实登记）
+
+* **整体 notVerified 未清零**：第一批台架 **0 条**；第二批台架 **2 条** —— ①「同一安装内的第二个组织（两组织共库）无法用产品入口构造」（真机「组织」= `teams` 行，只在 `identity/initialize` 建 root 团队、唯一部分索引只允许一行 `root=1`；命令白名单无创建组织入口；`governance/createUser` 把 `teamId` 钉死在 `gate.user.team_id`）；②「跨组织**行为级**互不覆盖」—— 真机只到 **schema 级**（G1）+ node 行为级（11/11、6/6），**真机跨组织 = 未验收**。
+* **第一批 artifact 的指纹集不含本批改动的两个文件**：`mcp-center-e2e` 的 `mcpSourceFingerprint` 仍只 pin 8 个文件，不含 `electron/authorization-service.cjs` 与 `electron/identity-store.cjs`；按执行边界脚本指纹逻辑**一字未动**，缺口如实登记（不声称第一批指纹覆盖本批改动文件）。第二批 artifact 的 `fingerprints` 覆盖了这两个文件（7 条，与 HEAD 逐条相同），两个台架合起来才可复核本批受验源码。
+* **同一 artifact 路径被重跑覆盖**：`artifacts/d5-03/mcp-center-e2e.json` 每次重跑改写，第一批当时 sha256（`dca23cb7…`）、第二轮（`80d3fc0c…`）只在文档留痕；`artifacts/` 被 gitignore。**当前有效值以 §1 的 `d8f9a237…` 为准。**
+* **脚本内仍留第一批的过时文案（不在允许改动范围）**：`observations` 里的 `note("最小修法建议（未动手）…")`（写入路径本批已修，被 H1 的 `partialGrantAttempt={"ok":true,...}` 实测取代）、第一批 `J1b` 判定标题里修复前的括号。
+* **`BASELINE_POLICY_PROVIDERS` 手工对齐**（迁移归属表与三处播种点），**无漂移守卫**；**`app_policy_provisions` 无清理策略**（量级很小）。
+* **环境事件（一行，非产品结论）**：本轮期间另一个 DSH 会话在同一工作树并发跑同一脚本、抢 CDP 端口，导致一次运行 `Z0 FAIL(exit 2)`，且其 Electron 实例被按前缀误杀；受影响日志保留在 `artifacts/d5-03/*.run-batch3.log` / `.run-final.log`，**最终 artifact 是在端口空出后重跑产生的**（重跑前后 `pgrep -fl "oa-d50"` 均为空；脚本只按自己的前缀 `oa-d503-` 清理，未杀别人的进程）。同一时段还有**第二次**并发：本批复核后（23:01:50）`artifacts/d5-03/mcp-policy-e2e.json` 被另一个会话重跑覆盖（判定一致，43/43；两个 sha256 均如实记录）。
+
+## 5. 缺口与判定
+
+**判定：D5-03 第二批（MCP 授权收口）= PASS（限定范围）；D5-03 整体 = PARTIAL。**
+
+剩余缺口逐条：① **OAuth**（只有 NONE / BEARER）；② 远程**长连接流**（GET SSE / 断线续传）；③ **真实第三方服务**与 **Adobe / PS 等本地服务**（D5-04 / D5-05）；④ **插件隔离**（D5-08）—— 连接成功 ≠ 插件隔离通过；⑤ **第二组织真机入口 / 跨组织真机行为级**；⑥ **`BASELINE_POLICY_PROVIDERS` 手工对齐无漂移守卫**；⑦ **第一批 artifact 指纹集不含本批改动的两个文件**；⑧ **`app_policy_provisions` 无清理策略**。
+
+**D5-02 的「重命名依赖 Electron 不支持的 `prompt()`」继续单列**（见 D5-02 段 §7 关闭条件），**不并入本批**。
+
+## 6. 下一步
+
+* 本批不再有必须立刻修的产品缺陷（两个台架全绿、单测 145/145）；若要继续收口 D5-03，优先级建议：跨组织真机入口（产品需新增「新建组织」或多租户安装）→ 第一批 artifact 指纹集补 `authorization-service.cjs` / `identity-store.cjs`（下批允许改脚本时）→ OAuth / 长连接流。
 
 

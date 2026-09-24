@@ -1,7 +1,11 @@
 # D5-03 第二批 · 内置策略提供记录与 App Grant 跨组织唯一键
 
-状态：已实现（node 层验收通过）；真机（Electron）验收见 `artifacts/d5-03/mcp-policy-e2e.json`
-（43/43，含 v20 → v21 升级路径与撤销审计行归属；两处"共库双组织的**行为级**场景"仍如实记为 notVerified）。
+状态：**已实现并完成真机（Electron）验收** —— `experiments/d5-03/mcp-policy-e2e.mjs` 在真机跑出
+**43 PASS / 0 FAIL / 43、exit 0**（2026-09-24；被测提交 `360d94b`；artifact `artifacts/d5-03/mcp-policy-e2e.json`，
+sha256 `d4af5e9cbf6e7b8b6b8643f67d3dd38d040ee35baabb937fbeb338141c71d831`；该路径在 23:01:50 被另一个并发 DSH 会话重跑覆盖，当前磁盘值 = `0c9ea8e5…`，判定一致 —— 两个值都记录在 `docs/D5-03-RESULT.md` §12 第 7 条），覆盖首用播种 / 撤权即时 /
+跨登录 / 跨重启 / 正式重授 / 新组织 / v20 → v21 升级路径 / 撤销审计行归属 / `mcp.view`-only 部分授权。
+两处"共库双组织的**行为级**场景"在真机不可构造，仍如实记为 notVerified（见 §5）；完整口径与判定见
+`docs/D5-03-RESULT.md` 正文 §1–§13。
 
 ## 1. 要修的两个真实缺陷
 
@@ -114,12 +118,28 @@ v21 升级时**无法**从"行不存在"区分"从未播种"与"曾经撤销"。
   该 App 的历史撤销会退回"只认审计行 `app_id`"的旧口径；
 * 撤销发生在审计表没有留下对应行的路径上：见上一节的残留清单。
 
+**真机实测（2026-09-24，`mcp-policy-e2e` 的 J2 / J1 / L1–L3）**：修复后 4 条撤销审计行的 `app_id`
+**全部 = `mcp-center`**（修复前是 `resource-library`），`old_permissions` / `new_permissions` 如实；
+`L1` 用 `git archive 140182f` 的 v20 代码跑旧服务建库并真实撤销一次（不写一行 SQL），产出的历史行仍是旧
+口径（`app_id=resource-library`）；`L2` 升级到 v21 后既有授权行 **4 → 4 一条不丢**、`user_version=21`、
+唯一键含 `organization_id`；`L3` 迁移把该撤销证据归到 `(organization_id,'mcp-center','mcp')` 的墓碑
+（`revoked_at` 非空、`provisioned_at` 空 = "有撤销证据、无提供证据"），升级后登录不再复活。
+
 ## 5. 未闭合项
 
-* 真机（Electron）验收：已由 `experiments/d5-03/mcp-policy-e2e.mjs` 在真机跑到（首用播种 /
-  撤权即时 / 跨登录 / 跨重启 / 正式重授 / 新组织 / 升级路径），43/43；其中"同一库内两个组织的
-  **行为级**互不覆盖"在真机不可构造（单 root 团队约束 + 无创建组织入口），只验到 schema 级与
-  node 层行为级 —— 如实记在 artifact 的 `notVerified`。
+* 真机（Electron）验收：**已完成**（`experiments/d5-03/mcp-policy-e2e.mjs`，**43/43、exit 0**；8 个真实
+  Electron 实例：首用 / 跨重启 / 重授后重启 / 再撤销重启 / 新组织 ×2 / 回第一组织 / v20 升级库）。
+  `mcp.view`-only 部分授权同为真机实测：`toolsHidden=true`、`tools=[]`、`hash=null`，但连接状态可见，
+  工具名 / 描述 / 参数 / hash 在 DOM + `mcp/get` + `mcp/testLog` 三面 0 命中，`connect` / `test` 被拒，
+  再授 `mcp.use` 立即可见。
+  **仍未闭合**：同一库内两个组织的**行为级**互不覆盖在真机不可构造（单 root 团队约束 + 无创建组织入口），
+  只验到 schema 级（`G1`：唯一键 / 主键含 `organization_id`）与 node 层行为级
+  （`tests/authorization-app-grant-scope.test.mjs` 6/6、`tests/d5-03-mcp-policy-persistence.test.mjs` 11/11：
+  不同 `organization_id` 各一行、两种写入顺序同结论）—— 如实记在 artifact 的 `notVerified`（2 条）。
+* 证据完整性缺口（与本文件描述的修复无关，如实登记）：第一批台架 `mcp-center-e2e` 的源码指纹集**不含**
+  本批改动的 `electron/authorization-service.cjs` 与 `electron/identity-store.cjs`；第二批台架的
+  `fingerprints`（7 条，与 HEAD 逐条相同）覆盖了它们，两个台架合起来才可复核本批受验源码。见
+  `docs/D5-03-RESULT.md` 正文 §12。
 * `ModelService.revokeAppModelAccess` / `grantAppModelAccess` 只被测试夹具使用（无 IPC 入口），
   现已随 store 收口自动写/清墓碑；正式入口仍是 `governance/grantAppAccess|revokeAppAccess`。
 * MCP 工具调用仍未开放（5 个入口仍回 `MCP_TOOL_INVOCATION_NOT_ENABLED`），本批不改这条边界。

@@ -910,7 +910,10 @@ async function main() {
     JSON.stringify({ mcpGrant, partialGrantAttempt: partialGrant, partialToolAttempt: partialTool, beforeRevokeListOk: beforeRevoke.list.ok, revoked, afterList: { ok: afterList.ok, error: afterList.error, reason: afterList.reason }, afterGet: { ok: afterGet.ok, error: afterGet.error }, afterConnect: { ok: afterConnect.ok, error: afterConnect.error }, reopenedH, unauthorized: { code: unauthorizedInfo.errorCode, text: unauthorizedInfo.errorText }, toolTextLeak }));
   const shotUnauth = await shotTo(path.join(VIS, "light-08-unauthorized.png"));
   note("浅色无权截图：" + shotUnauth);
-  notVerified("「工具描述不暴露」的 mcp.use-only 主路径（toolsHidden=true、mcp.view 仍在）", "渲染层既有治理命令无法写出部分动作的 mcp grant：governance/grantAppAccess(resourceType=mcp, actions=[mcp.view]) → " + JSON.stringify(partialGrant) + "；grantAppToolAccess → " + JSON.stringify(partialTool) + "。mcp-center baseline 是单条含 mcp.view/use/manage/test 的 grant（electron/mcp-bootstrap.cjs:41-50），governance/revokeAppAccess 只能整条撤销（authorization-service.cjs:1216），故真机上只能验收「mcp.view 也被撤 → 详情整块无权」这一支。");
+  // D5-03 第二批订正：本条已从 notVerified 列表移除 —— 该路径现由 experiments/d5-03/mcp-policy-e2e.mjs 覆盖
+  // （见其 artifact `artifacts/d5-03/mcp-policy-e2e.json` 的 view-only 组：toolsHidden=true / tools=[] / hash=null /
+  //  连接状态仍可见 / DOM+get+testLog 三面 0 命中 / connect+test=MCP_UNAUTHORIZED / 再授 mcp.use 立即可见）；
+  // 旧 reason 所述「写路径写不出部分动作的 mcp grant」已在本批修好，故不再列为未验收。判定条件与其它字段一字未动。
   note("最小修法建议（未动手）：authorization-service.cjs:1163 #normalizeAppGrantActions 对 resourceType==='mcp' 放行 mcp.*（mcp-domain.mcpGrantActions 同一命名空间），或新增 governance/updateAppGrantActions。");
 
   // D5-03 第二批契约变更：撤销必须跨登录保持（v21 墓碑），只有正式治理入口重授才恢复。
