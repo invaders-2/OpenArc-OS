@@ -796,6 +796,87 @@ async function main() {
     "本地编辑落库 → 宿主新增 ≤5s 呈现（primitives+DOM）+ 本地内容仍在 + revision 稳定",
     JSON.stringify({ ready: { ok: d1Ready.ok, waitedMs: d1Ready.waitedMs, steps: d1Ready.steps }, localEdit: d1LocalEdit, localSaved: d1LocalSaved, hostAdd: { ok: !!(d1HostAdd && d1HostAdd.ok), revision: d1HostAdd && d1HostAdd.ok ? d1HostAdd.canvas.revision : null, error: d1HostAdd && d1HostAdd.error }, waitedMs: d1WaitedMs, page: d1Page, ipcHost: d1IpcHost && { found: d1IpcHost.found, text: d1IpcHost.text }, ipcLocal: d1IpcLocal && { found: d1IpcLocal.found, text: d1IpcLocal.text }, revisions: { at: d1RevAt, after5s: d1RevAfter } }));
 
+  /* ══════════════════ F3e：500ms 待保存窗口内的受控交错 —— 两边内容都必须保留 ══════════════════ */
+  // 已登记缺陷（第八 / 十 / 十一批实测）：页面在 debounce 窗口里做的本地编辑撞上宿主 / AI 的改动时，
+  // 上游 409 分支会把基线换成远端新值后**重发同一份基于旧 revision 的旧文档** —— 对方那次改动被静默覆盖。
+  // 本断言在**同一个 500ms 窗口内**制造交错（页面 applyCommand 之后立刻用宿主 IPC canvas/command 写入）：
+  //   ① 不同节点：两边都要在（页面 primitives + DOM + 宿主读回 + 关窗重开仍在）；
+  //   ② 同一节点同一字段：本地那一版留在原位、远端那一版作为可辨认副本（<id>-remote）保留，
+  //      两边文本都能在存储里读到，而且合并**确实发生过**（页面冲突证据通道 count ≥ 1，不是碰巧没冲突）。
+  // **只新增这一条，不改任何既有断言。**
+  await page.bringToFront().catch(() => {});
+  const f3eLocalId = "n_f3e_local", f3eHostId = "n_f3e_host", f3eSharedId = "n_f3e_shared";
+  const f3eLocalText = "F3e 页面本地编辑", f3eHostText = "F3e 宿主窗口内写入";
+  const f3ePageText = "F3e 页面改的文本", f3eHostEditText = "F3e 宿主改的文本";
+  const f3eReady = await waitChain2Ready("n_img", 20000);
+  const f3eIpcText = async (id) => { const n = await nodeOf(currentCanvasId, id); return n ? String(n.text == null ? "" : n.text) : null; };
+  // ① 不同节点：同一个 500ms 窗口内交错
+  const f3eT0 = Date.now();
+  const f3eLocal = f3eReady.ok
+    ? await inFrame(canvasFrame(), "return await window.__openarcCanvas.applyCommand({ type: 'node.add', node: { id: " + JSON.stringify(f3eLocalId) + ", type: 'prompt', x: 220, y: 620, text: " + JSON.stringify(f3eLocalText) + " } }, null);")
+    : { __skipped: "canvas-not-ready" };
+  const f3eHost = await canvas({ type: "canvas/command", canvasId: currentCanvasId, command: { type: "node.add", node: { id: f3eHostId, type: "prompt", x: 220, y: 780, text: f3eHostText } } });
+  const f3eWindowMs = Date.now() - f3eT0;
+  // 等页面那次保存真的落库（页面独有的 id 出现在存储里），再留 4s 让"盲重试"跑完 —— 修复前它正是
+  // 在这段时间里把宿主那次写入覆盖掉的；修复后这段时间里不会再有任何覆盖。
+  const f3eLocalSaved = await waitFor(async () => !!(await nodeOf(currentCanvasId, f3eLocalId)), 25000);
+  await sleep(4000);
+  const f3ePage = await inFrame(canvasFrame(), [
+    "const it = window.__openarcCanvasInternals;",
+    "const g = (id) => { const n = it.primitives.getNode(id); return n ? String(n.text == null ? '' : n.text) : null; };",
+    "const log = (it.primitives.conflictLog && it.primitives.conflictLog()) || window.__openarcCanvasConflicts || null;",
+    "return { localText: g(" + JSON.stringify(f3eLocalId) + "), hostText: g(" + JSON.stringify(f3eHostId) + "),",
+    "  domHost: !!document.querySelector('.node[data-id=' + " + JSON.stringify(f3eHostId) + " + ']'), domLocal: !!document.querySelector('.node[data-id=' + " + JSON.stringify(f3eLocalId) + " + ']'),",
+    "  conflicts: log ? log.count : 0, lastOutcome: log && log.last ? log.last.outcome : null };",
+  ].join("\n"));
+  const f3eIpcLocalText = await f3eIpcText(f3eLocalId);
+  const f3eIpcHostText = await f3eIpcText(f3eHostId);
+  // ② 同一节点同一字段：先把共享节点落库，再在同一窗口内交错
+  const f3eSeed = await inFrame(canvasFrame(), "return await window.__openarcCanvas.applyCommand({ type: 'node.add', node: { id: " + JSON.stringify(f3eSharedId) + ", type: 'prompt', x: 220, y: 940, text: 'F3e 共享节点（初始）' } }, null);");
+  const f3eSeedSaved = await waitFor(async () => !!(await nodeOf(currentCanvasId, f3eSharedId)), 25000);
+  await sleep(1500);
+  const f3eT1 = Date.now();
+  const f3eEditLocal = await inFrame(canvasFrame(), "return await window.__openarcCanvas.applyCommand({ type: 'node.edit', id: " + JSON.stringify(f3eSharedId) + ", patch: { text: " + JSON.stringify(f3ePageText) + " } }, null);");
+  const f3eEditHost = await canvas({ type: "canvas/command", canvasId: currentCanvasId, command: { type: "node.edit", id: f3eSharedId, patch: { text: f3eHostEditText } } });
+  const f3eEditWindowMs = Date.now() - f3eT1;
+  const f3eEditSaved = await waitFor(async () => (await f3eIpcText(f3eSharedId)) === f3ePageText, 25000);
+  await sleep(4000);
+  const f3eConflict = await inFrame(canvasFrame(), [
+    "const it = window.__openarcCanvasInternals;",
+    "const g = (id) => { const n = it.primitives.getNode(id); return n ? { text: String(n.text == null ? '' : n.text), mark: n.oaConflictCopyOf || null } : null; };",
+    "const log = (it.primitives.conflictLog && it.primitives.conflictLog()) || window.__openarcCanvasConflicts || null;",
+    "return { shared: g(" + JSON.stringify(f3eSharedId) + "), copy: g(" + JSON.stringify(f3eSharedId + "-remote") + "),",
+    "  conflicts: log ? log.count : 0, last: log ? log.last : null };",
+  ].join("\n"));
+  const f3eIpcSharedText = await f3eIpcText(f3eSharedId);
+  const f3eIpcCopyText = await f3eIpcText(f3eSharedId + "-remote");
+  // ③ 关窗重开：两边内容都还在（重开恢复）
+  const f3eClosed = await closeAppWindow();
+  await sleep(800);
+  const f3eReopened = await reopenCurrentCanvasFromHome();
+  const f3eStillThere = f3eReopened && await waitFor(async () => {
+    const [local, host, shared, copy] = await Promise.all([f3eIpcText(f3eLocalId), f3eIpcText(f3eHostId), f3eIpcText(f3eSharedId), f3eIpcText(f3eSharedId + "-remote")]);
+    return local === f3eLocalText && host === f3eHostText && shared === f3ePageText && copy === f3eHostEditText;
+  }, 25000);
+  const f3eReopenPage = f3eReopened ? await inFrame(canvasFrame(), [
+    "const it = window.__openarcCanvasInternals;",
+    "const g = (id) => { const n = it.primitives.getNode(id); return n ? String(n.text == null ? '' : n.text) : null; };",
+    "return { localText: g(" + JSON.stringify(f3eLocalId) + "), hostText: g(" + JSON.stringify(f3eHostId) + "), sharedText: g(" + JSON.stringify(f3eSharedId) + "), copyText: g(" + JSON.stringify(f3eSharedId + "-remote") + ") };",
+  ].join("\n")) : null;
+  record("F3e", "500ms 待保存窗口内的受控交错：页面本地编辑与宿主 IPC 改动**两边内容都保留**（不同节点都在；同一节点同一字段 → 本地原位 + 远端 <id>-remote 副本；关窗重开仍在）",
+    f3eReady.ok === true && f3eWindowMs < 500 && f3eEditWindowMs < 500
+      && f3eLocal && f3eLocal.ok === true && f3eLocalSaved === true && !!(f3eHost && f3eHost.ok)
+      && !!f3ePage && f3ePage.localText === f3eLocalText && f3ePage.hostText === f3eHostText && f3ePage.domLocal === true && f3ePage.domHost === true
+      && f3eIpcLocalText === f3eLocalText && f3eIpcHostText === f3eHostText
+      && !!f3eSeed && f3eSeed.ok === true && f3eSeedSaved === true && f3eEditSaved === true
+      && !!f3eConflict && f3eConflict.shared && f3eConflict.shared.text === f3ePageText && f3eConflict.copy && f3eConflict.copy.text === f3eHostEditText
+      && f3eIpcSharedText === f3ePageText && f3eIpcCopyText === f3eHostEditText
+      && f3eConflict.conflicts >= 2
+      && f3eClosed === true && f3eReopened === true && f3eStillThere === true
+      && !!f3eReopenPage && f3eReopenPage.sharedText === f3ePageText && f3eReopenPage.copyText === f3eHostEditText,
+    "同窗口交错 → 两边都在（页面 + DOM + IPC + 重开后）+ 同字段冲突留 <id>-remote 副本 + 合并确实发生",
+    JSON.stringify({ windowMs: f3eWindowMs, editWindowMs: f3eEditWindowMs, local: f3eLocal, host: f3eHost && { ok: f3eHost.ok, error: f3eHost.error || null }, localSaved: f3eLocalSaved, page: f3ePage, ipc: { local: f3eIpcLocalText, host: f3eIpcHostText }, seed: f3eSeed && { ok: f3eSeed.ok }, seedSaved: f3eSeedSaved, editLocal: f3eEditLocal && { ok: f3eEditLocal.ok, error: f3eEditLocal.error || null }, editHost: f3eEditHost && { ok: f3eEditHost.ok, error: f3eEditHost.error || null }, editSaved: f3eEditSaved, conflict: f3eConflict, ipcConflict: { shared: f3eIpcSharedText, copy: f3eIpcCopyText }, closed: f3eClosed, reopened: f3eReopened, stillThere: f3eStillThere, reopenPage: f3eReopenPage }));
+
   /* ══════════════════ E 系列：宿主级隔离（F5） ══════════════════ */
   const boundary = await inFrame(canvasFrame(), "return { openarc: typeof window.openarc, require: typeof window.require, process: typeof window.process, ipc: typeof window.ipcRenderer, fs: typeof window.fs, pywebview: typeof window.pywebview };");
   const unsupported = await inFrame(canvasFrame(), "const r = await fetch('/api/secret-thing'); return { status: r.status, body: await r.json() };");
@@ -914,6 +995,70 @@ async function main() {
   const f4 = await runAiEditChain();
   record("F4", "AI 编辑正式链：Agent 提议 → 用户审批 → 授权执行 → 画布呈现 → 保存重开仍在（旧 revision 不覆盖用户内容）",
     f4.ok, f4.expected, f4.actual);
+
+
+  /* ══════════════════ F3f：MOTION_SYSTEM §6 —— AI 新增节点 160ms 淡入 + 来源标记 ══════════════════ */
+  // 真源是**画布命令账本**（canvas/log 的 actorKind=AGENT、outcome=APPLIED、command.node.id），
+  // **不是**"这次改动是远端同步来的"：本地用户新增、别的窗口的 USER 操作走的是同一条远端同步路径。
+  // 样本：agent_node_1 = F4 那条正式链里 canvas.edit（actorKind=AGENT）真的加上去的；
+  //       n_prompt = A7 里页面自己 applyCommand（用户手工）加的 —— 它必须既没有标记、也没有淡入。
+  // **只新增这一条断言，不改任何既有断言。**
+  await page.bringToFront().catch(() => {});
+  const f3fWait = await waitFor(async () => (await inFrame(canvasFrame(), "return !!document.querySelector('.node[data-id=agent_node_1] .openarc-ai-badge');")) === true, 20000);
+  const f3f = await inFrame(canvasFrame(), [
+    "const it = window.__openarcCanvasInternals;",
+    "const elOf = (id) => document.querySelector('.node[data-id=' + id + ']');",
+    "const ai = elOf('agent_node_1'), user = elOf('n_prompt');",
+    "const badgeOf = (nodeEl) => { const b = nodeEl ? nodeEl.querySelector('.openarc-ai-badge') : null; if (!b) return null; const cs = getComputedStyle(b);",
+    "  const r = b.getBoundingClientRect(); const n = nodeEl.getBoundingClientRect();",
+    "  return { text: String(b.textContent || '').trim(), source: b.getAttribute('data-openarc-ai-source'), aria: b.getAttribute('aria-label'), inHead: !!b.closest('.node-head'), pointerEvents: cs.pointerEvents,",
+    "    fontSize: cs.fontSize, lineHeight: cs.lineHeight, fontWeight: cs.fontWeight, color: cs.color, background: cs.backgroundColor, borderRadius: cs.borderRadius, borderStyle: cs.borderStyle, borderWidth: cs.borderWidth, box: { w: Math.round(r.width), h: Math.round(r.height) }, insideNode: r.left >= n.left - 1 && r.right <= n.right + 1 && r.top >= n.top - 1 && r.bottom <= n.bottom + 1 }; };",
+    "const sample = (nodeEl, ms) => new Promise((resolve) => { const out = []; const t0 = performance.now();",
+    "  const tick = () => { out.push([Math.round(performance.now() - t0), Number(getComputedStyle(nodeEl).opacity)]); if (performance.now() - t0 < ms) requestAnimationFrame(tick); else resolve(out); };",
+    "  requestAnimationFrame(tick); });",
+    "const anim = (nodeEl) => nodeEl.getAnimations().map((a) => ({ name: a.animationName || null, duration: a.effect.getTiming().duration, easing: String(getComputedStyle(nodeEl).animationTimingFunction || '') }));",
+    "const state0 = it.aiMarks();",
+    "const markedAi = !!(ai && ai.getAttribute('data-openarc-ai-source') === 'agent');",
+    "const badge = badgeOf(ai);",
+    "const userSource = user ? user.getAttribute('data-openarc-ai-source') : null;",
+    "const userBadges = user ? user.querySelectorAll('.openarc-ai-badge').length : -1;",
+    "ai.removeAttribute('data-openarc-ai-enter'); void ai.offsetWidth; ai.setAttribute('data-openarc-ai-enter', '1');",
+    "const anims = anim(ai);",
+    "const opacityAtStart = Number(getComputedStyle(ai).opacity);",
+    "const samples = await sample(ai, 260);",
+    "const rmPrev = document.documentElement.getAttribute('data-openarc-reduced-motion');",
+    "document.documentElement.setAttribute('data-openarc-reduced-motion', '1');",
+    "ai.removeAttribute('data-openarc-ai-enter'); void ai.offsetWidth; ai.setAttribute('data-openarc-ai-enter', '1');",
+    "const rmAnims = anim(ai);",
+    "const rmOpacity = Number(getComputedStyle(ai).opacity);",
+    "const rmSamples = await sample(ai, 120);",
+    "ai.removeAttribute('data-openarc-ai-enter');",
+    "if (rmPrev === null) document.documentElement.removeAttribute('data-openarc-reduced-motion'); else document.documentElement.setAttribute('data-openarc-reduced-motion', rmPrev);",
+    "const ramp = samples.filter((s) => s[1] > 0.001 && s[1] < 0.999).length;",
+    "const reach1 = samples.find((s) => s[1] >= 0.999) || null;",
+    "const dupPerNode = Array.from(document.querySelectorAll('.node')).map((n) => n.querySelectorAll('.openarc-ai-badge').length).filter((c) => c > 1).length;",
+    "return { state0: state0, markedAi: markedAi, badge: badge, user: { has: !!user, source: userSource, badges: userBadges },",
+    "  anims: anims, opacityAtStart: opacityAtStart, samples: samples.slice(0, 20), ramp: ramp, reach1: reach1, first: samples[0] ? samples[0][1] : null, last: samples[samples.length - 1] ? samples[samples.length - 1][1] : null,",
+    "  rm: { anims: rmAnims.length, opacity: rmOpacity, min: Math.min.apply(null, rmSamples.map((s) => s[1])), max: Math.max.apply(null, rmSamples.map((s) => s[1])) },",
+    "  badges: document.querySelectorAll('.node .openarc-ai-badge').length, dupPerNode: dupPerNode,",
+    "  nPromptInMarked: state0.marked.nodeIds.indexOf('n_prompt') >= 0, agent2InMarked: state0.marked.nodeIds.indexOf('agent_node_2') >= 0, agent2InDom: !!elOf('agent_node_2') };",
+  ].join("\n"));
+  const f3fAnim = (f3f && f3f.anims && f3f.anims[0]) || null;
+  const f3fEasing = f3fAnim ? String(f3fAnim.easing).replace(/\s+/g, "") : "";
+  record("F3f", "MOTION_SYSTEM §6：AI 新增节点（命令账本 actorKind=AGENT）带中性来源标记（12/18、字重 500、中性灰、无描边、pointer-events:none、不吃节点按钮），用户手工新增的节点没有标记；新节点 160ms cubic-bezier(.2,0,0,1) 淡入（实测采样），html[data-openarc-reduced-motion=1] 下 animation:none + opacity 立即为 1",
+    f3fWait === true && !!f3f && !f3f.__noFrame && !f3f.__error
+      && f3f.markedAi === true && !!f3f.badge && f3f.badge.text === "AI" && f3f.badge.source === "agent" && f3f.badge.inHead === true
+      && f3f.badge.pointerEvents === "none" && f3f.badge.fontSize === "12px" && f3f.badge.lineHeight === "18px" && Number(f3f.badge.fontWeight) <= 500
+      && f3f.badge.borderWidth === "0px" && f3f.badge.insideNode === true
+      && f3f.user.has === true && f3f.user.source === null && f3f.user.badges === 0 && f3f.nPromptInMarked === false
+      && f3f.agent2InMarked === false && f3f.agent2InDom === false
+      && f3f.anims.length === 1 && f3fAnim.name === "openarc-ai-node-in" && Number(f3fAnim.duration) === 160 && f3fEasing === "cubic-bezier(0.2,0,0,1)"
+      && f3f.opacityAtStart <= 0.02 && f3f.first !== null && f3f.ramp >= 1 && !!f3f.reach1 && f3f.reach1[0] >= 100 && f3f.reach1[0] <= 400 && f3f.last >= 0.999
+      && f3f.rm.anims === 0 && f3f.rm.opacity === 1 && f3f.rm.min >= 0.999
+      && f3f.dupPerNode === 0
+      && f3f.state0.marked.nodeIds.indexOf("agent_node_1") >= 0 && f3f.state0.seen.nodeIds.indexOf("agent_node_1") >= 0,
+    "标记 + 160ms(.2,0,0,1) 淡入 + 减少动态效果即时呈现 + 用户新增不误标 + 每节点最多一个徽标",
+    JSON.stringify(f3f));
 
   /* ══════════════════ 收尾 ══════════════════ */
   // 门禁自己制造的噪声：E5 里被拦下的导航会在 Chromium 日志里留下 ERR_BLOCKED_BY_CSP（那正是"被拦住"的证据）。

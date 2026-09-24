@@ -367,10 +367,32 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
         }
         return Object.assign({}, meta.meta, { canvas: upstreamCanvas({ canvasId: params.canvasId, title: meta.meta.title, icon: meta.meta.icon, kind: meta.meta.kind, updatedAt: meta.meta.updatedAt, revision: meta.meta.revision, access: meta.meta.access }) });
       }
+      /** 只读：AI 新增标记（页面据此给对应节点加来源标记 + 一次性 160ms 淡入）。*/
+      case "canvas.agentMarks": {
+        const target = String(params.canvasId || canvasId || "");
+        if (!target) return { ok: false, error: "CANVAS_NOT_OPEN", marks: [] };
+        return await agentMarksOf(canvasCmd, target);
+      }
       case "canvas.save": {
         const body = (params.body || {}) as any;
         const target = String(params.canvasId || canvasId || "");
-        const base = cur && Number(body.base_updated_at || 0) === Number(cur.updatedAt) ? cur.revision : -1;
+        const want = Number(body.base_updated_at || 0);
+        /**
+         * 页面声明的是"它最后一次成功同步的 updated_at"，要映射成 revision 才能做乐观并发检查。
+         * 宿主的 current 快照在别处写入（宿主 IPC / AI / 其它窗口）之后最多落后 2.5s，拿落后快照判定会把
+         * **已经对齐**的基线误判成 -1：页面只能靠反复重试等快照追上，而追上那一刻它就用手里的旧文档
+         * 覆盖了对方（第八 / 十 / 十一批实测的"500ms 待保存窗口"缺陷）。这里按存储的当前事实对齐一次再映射：
+         * 基线真的过期才冲突 —— 语义没放宽，只是不再用过期快照判"过期"。
+         */
+        let snapshot = currentRef.current;
+        if (snapshot && want !== Number(snapshot.updatedAt) && (!snapshot.canvasId || snapshot.canvasId === target)) {
+          const fresh = await canvasCmd({ type: "canvas/meta", canvasId: target });
+          if (fresh && fresh.ok && fresh.meta) {
+            snapshot = { canvasId: target, title: fresh.meta.title, revision: Number(fresh.meta.revision || 1), updatedAt: Number(fresh.meta.updatedAt || 0), canEdit: !!fresh.meta.access?.canEdit };
+            setCurrent(snapshot);
+          }
+        }
+        const base = snapshot && want === Number(snapshot.updatedAt) ? snapshot.revision : -1;
         const res = await canvasCmd({
           type: "canvas/save", canvasId: target, baseRevision: base,
           doc: refsBack({ nodes: body.nodes || [], connections: body.connections || [], viewport: body.viewport || { x: 0, y: 0, scale: 1 }, logs: body.logs || [] }),
@@ -379,7 +401,11 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
         if (!res.ok && res.error === "REVISION_CONFLICT") {
           const c = (res.detail && res.detail.canvas) || null;
           setStatus("版本冲突：已在别处修改，保留双方内容");
-          return { __conflict: true, detail: { canvas: c ? upstreamCanvas(c) : null, updated_at: c ? c.updatedAt : 0 } };
+          // 冲突回包就是页面做三方合并要用的 remote。它必须和 canvas.get 一样是**可显示形态**
+          // （资源引用解析成当前用户有权读的 data URL）：否则页面拿 ref 与本地 data URL 比较，
+          // 会把"没改过的图片字段"误判成远端改动，合并时把显示用的地址换掉。
+          const doc = c ? await resolveRefs(c.doc) : null;
+          return { __conflict: true, detail: { canvas: c ? upstreamCanvas(c, doc) : null, updated_at: c ? c.updatedAt : 0 } };
         }
         if (!res.ok) { setStatus("保存失败：" + String(res.error)); return { __status: 502, body: { error: res.error } }; }
         setCurrent({ canvasId: res.canvas.canvasId, title: res.canvas.title, revision: res.canvas.revision, updatedAt: Number(res.canvas.updatedAt || 0), canEdit: !!res.canvas.access?.canEdit });
@@ -695,6 +721,41 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
       )}
     </div>
   );
+}
+
+/**
+ * 「AI 新增」标记（MOTION_SYSTEM §6）：从**画布命令账本**里读出真正由 AI 新增、且**现在仍在文档里**
+ * 的节点 / 连线 id。只读：走既有 canvas/log 与 canvas/get，不新增命令面、不动任何权限口径。
+ * 判据是账本本身（actorKind=AGENT + outcome=APPLIED + 命令里带 id），**不是**"这次改动是远端同步来的"
+ * —— 本地用户新增、别的窗口的 USER 操作都会走同一条远端同步路径，按同步来源猜会把它们全打成 AI。
+ * 日志记的是命令，不是结果：只有命令里带了 id 的新增才能对上号（AI 的 canvas.edit 就是这么传的）；
+ * node.copy / 未带 id 的新增在账本里没有 id 可对 —— 不猜、不标记（没有证据，而不是"漏了"）。
+ */
+async function agentMarksOf(canvasCmd: (p: Record<string, unknown>) => Promise<any>, target: string) {
+  const log = await canvasCmd({ type: "canvas/log", canvasId: target, limit: 200 });
+  if (!log || !log.ok) return { ok: false, error: String((log && log.error) || "LOG_UNAVAILABLE"), marks: [] };
+  const got = await canvasCmd({ type: "canvas/get", canvasId: target });
+  if (!got || !got.ok) return { ok: false, error: String((got && got.error) || "DOC_UNAVAILABLE"), marks: [] };
+  const doc = (got.canvas && got.canvas.doc) || {};
+  const liveNodes = new Set<string>((doc.nodes || []).map((n: any) => String(n && n.id)));
+  const liveEdges = new Set<string>((doc.connections || []).map((c: any) => String(c && c.id)));
+  const marks: Array<{ nodeIds: string[]; edgeIds: string[]; commandType: string; resultRevision: number | null; at: number | null }> = [];
+  for (const row of ((log.items || []) as any[])) {
+    if (String(row && row.actorKind).toUpperCase() !== "AGENT") continue;
+    if (String(row && row.outcome).toUpperCase() !== "APPLIED") continue;
+    const cmd = (row && row.command) || {};
+    const type = String(cmd.type || "");
+    const nodeIds: string[] = [];
+    const edgeIds: string[] = [];
+    if (type === "node.add" && cmd.node && cmd.node.id) nodeIds.push(String(cmd.node.id));
+    if (type === "edge.connect" && cmd.id) edgeIds.push(String(cmd.id));
+    // 只回**仍存在于当前文档里**的 id：命令是历史，节点可能已经被删掉/撤销掉。
+    const liveN = nodeIds.filter((id) => liveNodes.has(id));
+    const liveE = edgeIds.filter((id) => liveEdges.has(id));
+    if (!liveN.length && !liveE.length) continue;
+    marks.push({ nodeIds: liveN, edgeIds: liveE, commandType: type, resultRevision: Number(row.resultRevision) || null, at: Number(row.at) || null });
+  }
+  return { ok: true, canvasId: target, marks, scanned: ((log.items || []) as any[]).length };
 }
 
 /** 清单外模型名的统一拒绝载荷（MODEL_NOT_FOUND；不建 run、不发 provider 请求）。*/

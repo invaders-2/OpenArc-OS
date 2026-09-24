@@ -22,14 +22,14 @@ OA_NOVAI_SRC=/tmp/novai-canvas-src node experiments/d5-02/vendor-novai-app.mjs
 
 | 目录/文件 | 来源 | 说明 |
 | --- | --- | --- |
-| `static/**` | `static/**` | **原样**，仅做下面六处改动 |
+| `static/**` | `static/**` | **原样**，仅做下面八处改动 |
 | `index.html` | `static/index.html` | 上游外壳副本（桥 + 中继），**已不是产品入口**，只留给边界测试；根绝对 `/static/` 指向同一份资源 |
 | `openarc-bridge.js` | OpenArc 新增 | 每页最先执行：端点白名单、账号作用域存储、pywebview 明确不可用、出网拒绝 |
 | `openarc-shell.js` | OpenArc 新增 | **只注入 bundle 根 `index.html`**（已不是产品入口）：子页 ↔ 外壳 ↔ 宿主的中继协议 |
 | `openarc-adapter.js` | OpenArc 新增 | 只注入画布页：把宿主命令翻译成画布自己的原语（同一命令层 + 只读闸） |
 | `openarc-canvas-guard.js` | OpenArc 新增 | **只注入画布编辑器页**：供应商/模型单一真源守卫（读 `/api/config` 的能力事实、真实 disable 未接通/未配置的下拉、清清单外旧值、锁死三把页面侧模型来源键、提供"打开 OpenArc 总 API 设置"引导） |
 
-## 对上游文件的六处改动（脚本化、可审计）
+## 对上游文件的八处改动（脚本化、可审计）
 
 1. 每个页面 `<head>` 开头：CSP meta + `<script src="/openarc-bridge.js">`；
 2. `static/js/canvas.js` 的 IIFE 末尾追加适配层（模板：`experiments/d5-02/vendor/canvas-internals.js`）：
@@ -46,6 +46,24 @@ OA_NOVAI_SRC=/tmp/novai-canvas-src node experiments/d5-02/vendor-novai-app.mjs
    `applyRemoteCanvasData()` 的判空条件里含 `saveTimer` ⇒ 恒真 —— 同一页做过一次本地编辑/保存之后，
    宿主 / AI 对画布的改动只反复延后 1s 重试，20s 都进不到**已经打开的编辑器**里（第八批真机复现的 D1）。
    补丁写在 `vendor-novai-app.mjs` 的 `CANVAS_JS_PATCHES` 里，幂等，且目标找不到就**报错退出**（不静默跳过）。
+6. `static/js/canvas.js` 的 IIFE 末尾（适配层**之前**）依次内联两个纯数据模块（都不碰 DOM、
+   不读画布闭包，因此 Node 单测 require 的是**同一份文本**，不是影子实现）：
+   · 三方合并 `experiments/d5-02/vendor/canvas-merge.js`（单测 `tests/d5-02-canvas-merge.test.mjs`）；
+   · AI 新增标记 / 入场去重 `experiments/d5-02/vendor/canvas-ai-marks.js`
+     （单测 `tests/d5-02-canvas-ai-marks.test.mjs`，见下面第 8 条与差异表第 17 条）。
+7. `static/js/canvas.js` 的 `saveCanvas()` 三处补丁（同 `CANVAS_JS_PATCHES`，幂等、缺目标即报错）：
+   `saveCanvas()` 记录"这次真正发出去的文档"；保存成功时把它交给注入层（下一次冲突的 base）；
+   **409 分支改为交给注入层做三方合并**（不再"换上新基线 → 重发同一份旧文档"）。见下面第 15、16 条差异。
+
+8. `static/js/canvas.js` 的注入层增加**AI 新增节点的来源标记 + 160ms 淡入**（MOTION_SYSTEM §6，
+   模板：`experiments/d5-02/vendor/canvas-internals.js` 的 `__ai*` 段）。它只做四件事：
+   · 包装 `renderNode()`：节点元素生成的**那一刻**就补标记（`render()` 每次整层重建节点元素，
+     渲染完再扫 DOM 补会漏帧）；
+   · 包装 `syncRemoteCanvasNow()`：远端同步**之前**先取一次 marks（有界 400ms）；
+   · `openCanvas()` 加载完成后再取一次（重开保留来源标记；此刻节点已在 DOM 里，只补标记不补动画）；
+   · `applyRemoteCanvasData()` / 冲突合并写回之后再取一次（这两条路径没走同步前预取）。
+   取 marks 走桥的**唯一一条只读路由** `GET /api/canvases/{id}/agent-marks` → 宿主
+   `canvas.agentMarks` → 既有 `canvas/log` + `canvas/get`（**没有新增命令面、没有放宽任何白名单**）。
 
 注入清单与哈希写在 `experiments/d5-02/vendor/vendor-manifest.json`（每次 vendor 重新生成）。
 
@@ -67,6 +85,11 @@ OA_NOVAI_SRC=/tmp/novai-canvas-src node experiments/d5-02/vendor-novai-app.mjs
 | 12 | ComfyUI 实例数 `Math.max(1, comfy_instances.length)`（`:1704`）、工作流下拉指向已死设置页 | `comfy_instances` 恒为空；守卫禁用 ComfyUI 节点的运行/模式/工作流控件并写"OpenArc 未接入 ComfyUI（不可用）"；`/api/canvas-comfy-tasks` 页面侧明确失败 | 同上，"0 个实例"不得显示成 1 个 |
 | 13 | 第二套模型来源：localStorage 的 `canvas_custom_image_models` / `canvas_image_models_ordered` / `canvas_chat_models_ordered`（`:578-580/669-688/877-880`）会覆盖或追加清单外的模型名 | 守卫把这三把键的读写都拦掉（读恒为 null、写丢弃、旧值当场删除），并清掉下拉里任何不在 OpenArc 清单中的选项与选中值 | 模型清单只有 OpenArc 一个真源 |
 | 14 | 所有"去 API 设置"文案指向已 501 / 已不可达的上游设置页（`canvas.js:1143/1147/1157/1739`、`js/i18n/canvas.js:5-7`） | 守卫把 `<option>` 文本里的"API 设置"改指"OpenArc 总 API 设置"，并在未配置处给出真实可点的引导按钮（`app.openModelSettings` → 宿主 `activateApp("settings")` 且停在「模型 / AI」） | 唯一能配置模型的地方是 OpenArc 总 API 设置 |
+
+| 15 | 保存冲突（HTTP 409）时上游 `saveCanvas()` 把基线换成远端新值后**立刻重发同一份基于旧 revision 的整篇文档** = 对方（宿主 / AI / 其它窗口）那次改动被静默覆盖（第八 / 十 / 十一批真机实测） | 409 分支改为**三方合并**：base = 页面最后一次成功同步的文档（打开画布 / 整篇远端刷新 / 宿主 `reload-doc` / 保存成功四处维护），local = 页面当前文档，remote = 冲突回包里的远端文档。按 **node id / edge id / log id** 合并：只在一侧新增 → 保留；一侧删除、另一侧未改 → 删除；两侧都改同一项 → 字段级各自保留；**同一字段两边都改了 → 不猜**：本地那一版留在原位，远端那一版另存为可辨认副本（id 后缀 `-remote`、带 `oaConflictCopyOf` 标记、并排偏移 48px），并弹页面自己的 toast + 写只读证据 `window.__openarcCanvasConflicts`。合并结果写回页面（与 `applyRemoteCanvasData` 同一类"远端变更"路径：不压撤销栈），基线换成远端值后**只重发一次**；再冲突就重复合并但**有界（最多 2 次）**，仍冲突则明确呈现"无法自动合并，双方内容都已保留"并且**不再重试**（页面文档一旦再变才重新开始计数） | 用户硬要求：两方内容都必须保留，或明确呈现可恢复的冲突；不得静默覆盖任何一方；不许用盲目重试 409 / 延长定时器掩盖冲突 |
+| 16 | `base_updated_at` 由宿主按 `current`（React 快照）里的 `updatedAt` 映射成 revision；而该快照在别处写入后最多落后 2.5s（2.5s 的 meta 轮询才刷新） | `src/canvas/CanvasHost.tsx` 的 `canvas.save`：页面声明的基线若与快照不一致，先按**存储的当前事实**（`canvas/meta`，只在真的不一致时多这一次调用）对齐快照再做映射；冲突回包里的远端文档按与 `canvas.get` 同一口径**解析资源引用**（ref → 当前用户有权读的 data URL） | ① 拿过期快照判定会把"已经对齐的基线"误判成过期（-1），页面只能靠反复重试等快照追上 —— 而追上那一刻它就用手里的旧文档覆盖了对方：这正是缺陷的最后一环，合并结果也必须落在正确 revision 上才谈得上"只重发一次"；② 冲突回包若给 ref 而页面本地是 data URL，合并会把"没改过的图片字段"误判成远端改动并换掉显示地址 |
+
+| 17 | 上游画布**没有节点入场动画、也没有来源标记**：`render()` 每次整层重建节点元素，宿主 / AI 新增的节点在同一帧直接以终态出现，"哪个节点是 AI 加的"在界面上无从分辨（第八批真机证据） | 注入层按**命令账本**（`canvas/log`：`actorKind=AGENT` + `outcome=APPLIED` + `command.node.id`）给对应节点加一个中性来源徽标（`.openarc-ai-badge`，12/18、字重 500、中性灰、无描边、`--radius-sm`，`pointer-events:none` 不吃节点按钮的命中），节点元素带稳定契约 `data-openarc-ai-source="agent"`；**只有本次新增的那一个节点**播 160ms `cubic-bezier(.2,0,0,1)` 淡入（`data-openarc-ai-enter="1"`），已播过的 id 记在去重集合里，整层重建不重播；`html[data-openarc-reduced-motion="1"]` 与 `@media (prefers-reduced-motion: reduce)` 下 `animation:none;opacity:1`（即时呈现） | MOTION_SYSTEM §6「AI 新增节点采用 160 ms 淡入并保留来源标记」+ §8 减少动态效果；判据必须来自**命令账本**而不是"这次改动是远端同步来的"（后者会把本地用户新增、别的窗口的 USER 操作一起打成 AI） |
 
 > 上表 1、2 两条只作用于 `openarc-shell.js`，而它只注入 bundle 根 `index.html`。产品入口换成
 > `static/canvas-list.html` 后该外壳页不再是入口，这两条只在那次边界测试加载 `index.html` 时生效。

@@ -170,6 +170,8 @@
         it3.primitives.setViewport(doc.viewport);
         it3.primitives.sanitizeConnections();
         it3.primitives.render();
+        // 宿主已经落库并整篇推来：这一版就是页面新的共同祖先（保存冲突三方合并的 base）。
+        if (it3.primitives.markSynced) it3.primitives.markSynced();
         post({ kind: "command-result", id: d.id, ok: true, value: { reloaded: true, state: state() } });
       } catch (err) {
         post({ kind: "command-result", id: d.id, ok: false, error: { error: "INVALID_INPUT", message: String((err && err.message) || err) } });

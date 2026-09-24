@@ -335,6 +335,10 @@
     }
     var meta = pathname.match(/^\/api\/canvases\/([^/]+)\/meta$/);
     if (meta) return { method: "canvas.meta", params: { canvasId: decodeURIComponent(meta[1]), body: body, httpMethod: m } };
+    // 「AI 新增」标记：只读。宿主从**命令账本**（actorKind=AGENT）推导，只回脱敏后的 id 形状；
+    // 页面据此给对应节点加来源标记与一次性淡入（MOTION_SYSTEM §6）。不接受任何写入参数。
+    var agentMarks = pathname.match(/^\/api\/canvases\/([^/]+)\/agent-marks$/);
+    if (agentMarks && m === "GET") return { method: "canvas.agentMarks", params: { canvasId: decodeURIComponent(agentMarks[1]) } };
     var touch = pathname.match(/^\/api\/canvases\/([^/]+)\/(touch|restore)$/);
     if (touch) return { method: "canvas." + touch[2], params: { canvasId: decodeURIComponent(touch[1]) } };
     var purge = pathname.match(/^\/api\/canvases\/([^/]+)\/purge$/);
