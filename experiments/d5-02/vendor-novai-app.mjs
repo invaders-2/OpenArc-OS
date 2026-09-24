@@ -150,6 +150,11 @@ function main() {
 
   // 3) canvas-list.html（现在的产品入口）：三个"新建"入口**直接进编辑器**，不再弹上游那个
   //    "选画布" picker（它会变成挡在编辑器前面的一层选择遮挡层）。目标找不到就报错，不静默跳过。
+  //    （第十五批）右下角回收站 FAB 显隐 —— 用户裁定：回收站为空 ⇒ 隐藏，有已删除画布 ⇒ 显示。
+  //    事实只有一个：updateTrashBadge() 里的 v4DeletedCanvases.length —— 上游每次回收站变化都经过它
+  //    （初始 loadTrash / 删除后 loadTrash / 恢复 / 彻底删除 / 清空 / 拦到 trash 响应），不新造第二套事实。
+  //    .trash-fab 自带 display:flex 会盖过 [hidden] 的 UA 规则，所以补一条显式规则：真隐藏
+  //    （不占布局、不进 tab 顺序、不接收点击），不是 CSS 遮挡。
   const listPath = path.join(OUT_STATIC, "canvas-list.html");
   let listHtml = fs.readFileSync(listPath, "utf8");
   const LIST_PATCHES = [
@@ -159,6 +164,16 @@ function main() {
      "document.getElementById('btnNewProject').addEventListener('click', () => createCanvasFromPicker('classic'));"],
     ["                } else {\n                    openCanvasPicker();\n                }",
      "                } else {\n                    createCanvasFromPicker('classic');\n                }"],
+    // 空 ⇒ 隐藏：页面还没有回收站数据时按"空"呈现（与角标 style="display:none" 同一约定），
+    // 之后由 loadTrash() 的响应决定是否显示。
+    ['<button class="trash-fab" id="trashFab" title="回收站" aria-label="回收站">',
+     '<button class="trash-fab" id="trashFab" title="回收站" aria-label="回收站" hidden>'],
+    ["        .trash-fab svg { width: 20px; height: 20px; }",
+     "        .trash-fab svg { width: 20px; height: 20px; }\n        .trash-fab[hidden] { display: none; }"],
+    ["            const trashBadgeV4 = document.getElementById('trashBadgeV4');",
+     "            const trashBadgeV4 = document.getElementById('trashBadgeV4');\n            const trashFab = document.getElementById('trashFab');"],
+    ["            function updateTrashBadge() {\n                const count = v4DeletedCanvases.length;\n                trashBadgeV4.textContent = count;\n                trashBadgeV4.style.display = count > 0 ? '' : 'none';\n            }",
+     "            function updateTrashBadge() {\n                const count = v4DeletedCanvases.length;\n                trashBadgeV4.textContent = count;\n                trashBadgeV4.style.display = count > 0 ? '' : 'none';\n                trashFab.hidden = count === 0;\n            }"],
   ];
   for (const [from, to] of LIST_PATCHES) {
     if (listHtml.includes(to)) continue;                                  // 已经打过：幂等

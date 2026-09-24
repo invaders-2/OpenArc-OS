@@ -40,7 +40,14 @@ OA_NOVAI_SRC=/tmp/novai-canvas-src node experiments/d5-02/vendor-novai-app.mjs
 4. `static/canvas-list.html`（产品入口）的三个"新建"入口改成**直接进编辑器**：
    `btnStartCreate` / `btnNewProject` / 「继续上次」空列表兜底，从 `openCanvasPicker()` 改成
    `createCanvasFromPicker('classic')`（该函数本来就是"建完直接跳 canvas.html"）。
-   补丁写在 `vendor-novai-app.mjs` 的 `LIST_PATCHES` 里，幂等，且目标找不到就**报错退出**（不静默跳过）。
+   同一个文件里还有**右下角回收站 FAB 的显隐**（第十五批，用户裁定：空 ⇒ 隐藏、非空 ⇒ 显示）：
+   按钮标记加 `hidden`、样式补 `.trash-fab[hidden] { display: none; }`（`.trash-fab` 自带
+   `display: flex`，会盖过 `[hidden]` 的 UA 规则）、`updateTrashBadge()` 里用**已经存在的那一个事实**
+   （`v4DeletedCanvases.length`）切换 —— 上游每次回收站变化（初始 `loadTrash` / 删除后 `loadTrash` /
+   恢复 / 彻底删除 / 清空 / 拦到 trash 响应）都经过它，所以 FAB 与角标永远同源；页面还没有回收站数据时
+   按"空"呈现（与角标 `style="display:none"` 同一约定），由 `loadTrash()` 的响应决定是否显示。
+   显隐是**真隐藏**（不占布局 / 不进 tab 顺序 / 不接收点击），不是 CSS 遮挡。
+   两处补丁都写在 `vendor-novai-app.mjs` 的 `LIST_PATCHES` 里，幂等，且目标找不到就**报错退出**（不静默跳过）。
 5. `static/js/canvas.js` 的 `saveCanvas()` 里补一句 `if(saveTimer){ clearTimeout(saveTimer); saveTimer = null; }`：
    上游只在 `beforeunload` 里清 `saveTimer`，定时器触发过一次之后句柄一直留着，而远端同步入口
    `applyRemoteCanvasData()` 的判空条件里含 `saveTimer` ⇒ 恒真 —— 同一页做过一次本地编辑/保存之后，
@@ -93,6 +100,8 @@ OA_NOVAI_SRC=/tmp/novai-canvas-src node experiments/d5-02/vendor-novai-app.mjs
 
 > 上表 1、2 两条只作用于 `openarc-shell.js`，而它只注入 bundle 根 `index.html`。产品入口换成
 > `static/canvas-list.html` 后该外壳页不再是入口，这两条只在那次边界测试加载 `index.html` 时生效。
+
+| 18 | `.trash-fab` 是**无显隐逻辑的静态元素**（上游只有角标按删除数显隐），回收站为空时右下角照样挂着一个回收站按钮 | 同一个真源（`updateTrashBadge()` 里的 `v4DeletedCanvases.length`）同时决定角标与 FAB：`hidden` 属性 + `.trash-fab[hidden] { display: none; }`；页面还没有回收站数据时按"空"呈现，`loadTrash()` 的响应决定是否显示 | 用户裁定"回收站为空时隐藏右下角按钮，有已删除画布时显示"；显隐必须是真实语义（DOM 属性 + 真实不渲染），不许用 CSS 遮挡冒充 |
 
 ## 未接入即缺项（保留入口 + 明确报错，不删页面）
 

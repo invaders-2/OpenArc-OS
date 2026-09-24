@@ -1060,6 +1060,105 @@ async function main() {
     "标记 + 160ms(.2,0,0,1) 淡入 + 减少动态效果即时呈现 + 用户新增不误标 + 每节点最多一个徽标",
     JSON.stringify(f3f));
 
+  /* ══════════════════ F3g：回收站 FAB 显隐（用户裁定：空 ⇒ 隐藏，非空 ⇒ 显示） ══════════════════ */
+  // 真源只有一个：updateTrashBadge() 里的 v4DeletedCanvases.length —— 上游每次回收站变化都经过它
+  // （初始 loadTrash / 删除后 loadTrash / 恢复 / 彻底删除 / 清空 / 拦到 trash 响应），FAB 与角标同源。
+  // 四态：① 空 ⇒ 隐藏；② 真删一本（产品端点 DELETE /api/canvases/:id → 页面自取回收站）⇒ 显示 + 角标 = 列表长度；
+  // ③ 回收站面板「恢复」⇒ 回到隐藏；④ 同一本再删 →「清空回收站」（含二次确认）⇒ 回到隐藏。
+  // 显隐判定只用可检查的 DOM 事实（hidden 属性 + computed display + 是否占布局 + 命中测试），
+  // 不用"看不见"这种主观口径。**只新增这一条断言，不改任何既有断言。**
+  const F3G_FAB = [
+    "const fab = document.getElementById('trashFab');",
+    "const badge = document.getElementById('trashBadgeV4');",
+    "const cs = fab ? getComputedStyle(fab) : null;",
+    "const r = fab ? fab.getBoundingClientRect() : null;",
+    "const cx = r ? r.left + r.width / 2 : 0, cy = r ? r.top + r.height / 2 : 0;",
+    "const hitEl = (r && r.width > 0 && r.height > 0) ? document.elementFromPoint(cx, cy) : null;",
+    "const bcs = badge ? getComputedStyle(badge) : null;",
+    "return { existed: !!fab, hidden: fab ? fab.hidden : null, display: cs ? cs.display : null, visibility: cs ? cs.visibility : null,",
+    "  rect: r ? { x: +r.x.toFixed(1), y: +r.y.toFixed(1), w: +r.width.toFixed(1), h: +r.height.toFixed(1) } : null,",
+    "  occupiesLayout: !!(r && r.width > 0 && r.height > 0), hitInsideFab: !!(fab && r && r.width > 0 && hitEl && fab.contains(hitEl)), hitTag: hitEl ? hitEl.tagName : null,",
+    "  bottomRight: !!(r && r.width > 0 && r.x > innerWidth - 120 && r.y > innerHeight - 120),",
+    "  badgeText: badge ? String(badge.textContent) : null, badgeDisplay: bcs ? bcs.display : null,",
+    "  trashRows: document.querySelectorAll('#trashListV4 .trash-item').length,",
+    "  clearBtnDisabled: (document.getElementById('trashClearBtn') || {}).disabled === true };",
+  ].join("\n");
+  const f3gTruth = () => inFrame(listFrame(), "const res = await fetch('/api/canvases/trash'); const d = await res.json(); const list = (d && d.canvases) || []; return { n: list.length, ids: list.map(function (c) { return c.id; }) };");
+  const f3gFab = () => inFrame(listFrame(), F3G_FAB);
+  const f3gCardSel = (id) => "#cardsGrid .project-card[data-canvas-id=" + JSON.stringify(id) + "]";
+  // 软删走产品自己的端点：DELETE /api/canvases/:id（桥 → 宿主 canvas.trash；与上游 deleteCanvasAPI 的第一条请求
+  // 同一口径），紧接着由**页面自己**再取一次回收站（= 上游 deleteCanvasAPI 里的 loadTrash()）—— 页面拦到
+  // trash 响应就走同一个 updateTrashBadge()，FAB 与角标同源。**不新造第二套事实、不直接改页面状态。**
+  // 为什么不用卡片菜单「删除」那条入口：宿主 iframe 是 sandbox="allow-scripts allow-same-origin"（无 allow-modals），
+  // Chromium 直接忽略 confirm()（本轮实测控制台："Ignored call to 'confirm()'. The document is sandboxed…"）⇒
+  // 上游那条入口在宿主里点不动。这是**既有事实、非本批引入**；本批只登记（见文档／manifest.fabFix），不改它。
+  const f3gSoftDelete = (id) => inFrame(listFrame(), [
+    "const res = await fetch('/api/canvases/' + " + JSON.stringify(id) + ", { method: 'DELETE' });",
+    "const tr = await fetch('/api/canvases/trash'); const d = await tr.json().catch(function () { return {}; });",
+    "return { del: res.ok, delStatus: res.status, trashAfter: ((d && d.canvases) || []).length };",
+  ].join("\n"));
+
+  const f3gBack = await inFrame(canvasFrame(), "const el = document.getElementById('backToManagerBtn'); if (!el) return 'missing'; el.click(); return 'clicked';");
+  const f3gList = await waitFor(() => !!listFrame() && !canvasFrame(), 30000);
+  const f3gCardsReady = f3gList && await waitFor(async () => (await inFrame(listFrame(), "return document.querySelectorAll('#cardsGrid .project-card').length;")) > 0, 20000);
+
+  // ① 空态：没有任何已删除画布 ⇒ FAB 隐藏（不占布局、不进命中测试、角标也不显示）
+  const f3gT1 = await f3gTruth();
+  await sleep(800);
+  const f3gF1 = await f3gFab();
+
+  // ② 非空态：产品入口真删一本（卡片菜单 → 删除 → 确认）⇒ FAB 显示 + 角标计数 = 回收站列表长度
+  const f3gTitle = "F3g 回收站探针 " + Date.now();
+  const f3gMade = await inFrame(listFrame(), "const res = await fetch('/api/canvases', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: " + JSON.stringify(f3gTitle) + ", icon: '🧩', kind: 'classic', project: 'default', board_x: 40, board_y: 40 }) }); const d = await res.json().catch(function () { return {}; }); return { ok: res.ok, id: (d.canvas || {}).id || null };");
+  const f3gCardUp = await waitFor(async () => (await inFrame(listFrame(), "return !!document.querySelector(" + JSON.stringify(f3gCardSel(f3gMade.id)) + ");")) === true, 20000);
+  const f3gDel = f3gMade.ok && f3gMade.id ? await f3gSoftDelete(f3gMade.id) : { del: false };
+  const f3gFabUp = await waitFor(async () => (await inFrame(listFrame(), "const f=document.getElementById('trashFab'); return !!f && f.hidden === false;")) === true, 20000);
+  const f3gT2 = await f3gTruth();
+  await sleep(800);
+  const f3gF2 = await f3gFab();
+
+  // ③ 恢复：点 FAB 开回收站面板 → 「恢复」⇒ FAB 回到隐藏
+  const f3gOpen = await inFrame(listFrame(), "const f=document.getElementById('trashFab'); if(!f) return 'no-fab'; f.click(); return 'clicked';");
+  await sleep(600);
+  const f3gPanel = await inFrame(listFrame(), "return { active: !!document.querySelector('.trash-overlay.active'), rows: document.querySelectorAll('#trashListV4 .trash-item').length, clearDisabled: (document.getElementById('trashClearBtn') || {}).disabled === true };");
+  const f3gRestored = await inFrame(listFrame(), "const b=document.querySelector('#trashListV4 .trash-item-restore'); if(!b) return 'no-item'; const cid=b.getAttribute('data-canvas-id'); b.click(); return cid;");
+  const f3gHidden3 = await waitFor(async () => (await inFrame(listFrame(), "const f=document.getElementById('trashFab'); return !!f && f.hidden === true;")) === true, 20000);
+  const f3gBackInGrid = await waitFor(async () => (await inFrame(listFrame(), "return !!document.querySelector(" + JSON.stringify(f3gCardSel(f3gMade.id)) + ");")) === true, 20000);
+  const f3gT3 = await f3gTruth();
+  await sleep(800);
+  const f3gF3 = await f3gFab();
+
+  // ④ 清空：同一本再删（卡片菜单，含确认）⇒ FAB 显示 → FAB → 回收站面板 →「清空回收站」→ 二次确认 ⇒ 回到隐藏
+  const f3gDel4 = await f3gSoftDelete(f3gMade.id);
+  const f3gFabUp4 = await waitFor(async () => (await inFrame(listFrame(), "const f=document.getElementById('trashFab'); return !!f && f.hidden === false;")) === true, 20000);
+  const f3gT4a = await f3gTruth();
+  const f3gF4a = await f3gFab();
+  const f3gOpen4 = await inFrame(listFrame(), "const f=document.getElementById('trashFab'); if(!f) return 'no-fab'; f.click(); return 'clicked';");
+  await sleep(600);
+  const f3gClearClick = await inFrame(listFrame(), "const b=document.getElementById('trashClearBtn'); if(!b) return 'no-btn'; if(b.disabled) return 'disabled'; b.click(); return 'clicked';");
+  await sleep(500);
+  const f3gConfirm = await inFrame(listFrame(), "const ok=document.getElementById('purgeConfirmOk'); if(!ok) return false; ok.click(); return true;");
+  const f3gHidden4 = await waitFor(async () => (await inFrame(listFrame(), "const f=document.getElementById('trashFab'); return !!f && f.hidden === true;")) === true, 20000);
+  const f3gT4 = await f3gTruth();
+  await sleep(800);
+  const f3gF4 = await f3gFab();
+  await inFrame(listFrame(), "const c=document.getElementById('trashOverlayClose'); if(c) c.click(); return 'closed';");
+
+  record("F3g", "回收站 FAB 显隐（用户裁定）：回收站为空 ⇒ 右下角 FAB 隐藏（hidden 属性 + computed display:none + 不占布局 + 命中测试落空）；有已删除画布 ⇒ 显示（真删一本后，角标计数 = 回收站列表长度、位置仍在右下角、命中测试落在 FAB 内）；「恢复」与「清空回收站」之后都回到隐藏（同一真源 updateTrashBadge()）",
+    f3gBack === "clicked" && f3gList && f3gCardsReady
+      && f3gT1.n === 0 && f3gF1.existed === true && f3gF1.hidden === true && f3gF1.display === "none" && f3gF1.occupiesLayout === false && f3gF1.hitInsideFab === false && f3gF1.badgeDisplay === "none" && f3gF1.trashRows === 0
+      && f3gMade.ok === true && !!f3gMade.id && f3gDel.del === true && f3gDel.trashAfter === 1 && f3gFabUp
+      && f3gT2.n === 1 && f3gT2.ids.indexOf(f3gMade.id) >= 0
+      && f3gF2.hidden === false && f3gF2.display !== "none" && f3gF2.occupiesLayout === true && f3gF2.hitInsideFab === true && f3gF2.bottomRight === true && f3gF2.badgeText === String(f3gT2.n) && f3gF2.badgeDisplay !== "none"
+      && f3gOpen === "clicked" && f3gPanel.active === true && f3gPanel.rows === 1 && f3gPanel.clearDisabled === false
+      && f3gRestored === f3gMade.id && f3gHidden3
+      && f3gT3.n === 0 && f3gF3.hidden === true && f3gF3.display === "none" && f3gF3.occupiesLayout === false
+      && f3gDel4.del === true && f3gFabUp4 && f3gT4a.n === 1 && f3gF4a.hidden === false && f3gF4a.badgeText === "1"
+      && f3gOpen4 === "clicked" && f3gClearClick === "clicked" && f3gConfirm === true && f3gHidden4
+      && f3gT4.n === 0 && f3gF4.hidden === true && f3gF4.display === "none" && f3gF4.occupiesLayout === false && f3gF4.trashRows === 0 && f3gF4.badgeDisplay === "none",
+    "空⇒隐藏（display:none/不占布局/命中落空）；删一本⇒显示（badge = 回收站长度、右下角、命中在 FAB 内）；恢复⇒隐藏；清空⇒隐藏",
+    JSON.stringify({ back: f3gBack, list: f3gList, cardsReady: f3gCardsReady, s1: { truth: f3gT1, fab: f3gF1 }, s2: { made: f3gMade, cardUpEvidence: f3gCardUp, del: f3gDel, fabUp: f3gFabUp, truth: f3gT2, fab: f3gF2 }, s3: { open: f3gOpen, panel: f3gPanel, restored: f3gRestored, hidden: f3gHidden3, backInGrid: f3gBackInGrid, truth: f3gT3, fab: f3gF3 }, s4: { del: f3gDel4, fabUp: f3gFabUp4, truthBefore: f3gT4a, fabBefore: f3gF4a, open: f3gOpen4, clearClick: f3gClearClick, confirm: f3gConfirm, hidden: f3gHidden4, truth: f3gT4, fab: f3gF4 } }));
+
   /* ══════════════════ 收尾 ══════════════════ */
   // 门禁自己制造的噪声：E5 里被拦下的导航会在 Chromium 日志里留下 ERR_BLOCKED_BY_CSP（那正是"被拦住"的证据）。
   // ENV_NOISE = **环境噪声白名单**（不是放宽断言）：只登记应用代码之外的系统/运行时消息。

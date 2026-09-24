@@ -495,6 +495,7 @@
         .trash-fab:active { transform: scale(0.95); }
         .trash-fab:focus-visible { outline: 2px solid var(--v4-focus-ring); outline-offset: 3px; }
         .trash-fab svg { width: 20px; height: 20px; }
+        .trash-fab[hidden] { display: none; }
         .trash-badge {
             position: absolute; top: -4px; right: -4px;
             min-width: 18px; height: 18px; border-radius: 9px;
@@ -947,7 +948,7 @@
     </div>
 
     <!-- ═══ TRASH FAB ═══ -->
-    <button class="trash-fab" id="trashFab" title="回收站" aria-label="回收站">
+    <button class="trash-fab" id="trashFab" title="回收站" aria-label="回收站" hidden>
         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="3 6 5 6 21 6"/>
             <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
@@ -966,6 +967,7 @@
             const cardsEmpty = document.getElementById('cardsEmpty');
             const viewMoreSection = document.getElementById('viewMoreSection');
             const trashBadgeV4 = document.getElementById('trashBadgeV4');
+            const trashFab = document.getElementById('trashFab');
             const trashListV4 = document.getElementById('trashListV4');
             const sectionLabel = document.getElementById('sectionLabel');
 
@@ -1396,6 +1398,7 @@
                 const count = v4DeletedCanvases.length;
                 trashBadgeV4.textContent = count;
                 trashBadgeV4.style.display = count > 0 ? '' : 'none';
+                trashFab.hidden = count === 0;
             }
 
             // ═══ 彻底删除二次确认 ═══

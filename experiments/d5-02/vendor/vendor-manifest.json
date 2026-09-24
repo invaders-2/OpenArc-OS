@@ -8,6 +8,6 @@
   "canvasJsHash": "9ae53844b6c2f0e1",
   "canvasHtmlHash": "0c95ae19e983c18f",
   "guardHash": "f52fb6c0196a8dea",
-  "listHtmlHash": "32e0ff039afd250a",
+  "listHtmlHash": "aacb2cf8395f7b10",
   "csp": "default-src 'none'; script-src openarc-canvas: 'unsafe-inline'; style-src openarc-canvas: 'unsafe-inline'; img-src openarc-canvas: data: blob:; media-src openarc-canvas: data: blob:; font-src openarc-canvas:; connect-src openarc-canvas:; frame-src openarc-canvas:; child-src openarc-canvas:; object-src 'none'; form-action 'none'; base-uri 'none'"
 }
