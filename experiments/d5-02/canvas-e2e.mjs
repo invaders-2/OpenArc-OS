@@ -755,6 +755,47 @@ async function main() {
     delRes && delRes.ok === true && readAfterDelete.ok === false && stateAfterDelete.exists[assetRef] && stateAfterDelete.exists[assetRef].state !== "AVAILABLE" && inMountInvalidated && closedTwice && reopenedTwice && afterDeleteState && afterDeleteUrl.url.indexOf("data:image") < 0,
     "ASSET_UNAVAILABLE + 当场缓存失效 + 提示 + 重开不复活", JSON.stringify({ delRes: delRes && delRes.ok, noticeIsAboutAssets, read: { ok: readAfterDelete.ok, error: readAfterDelete.error }, state: stateAfterDelete.exists[assetRef], inMountInvalidated, inMountNotice, closedTwice, reopenedTwice, afterDeleteUrl }));
 
+  /* ══════════════════ F3d：本地保存之后宿主侧新增仍能进到已打开的编辑器（D1 回归钉） ══════════════════ */
+  // D1 复现条件（第八批真机 A/B）：同一页做过一次本地编辑/保存之后，宿主新增的节点 20s 都进不来 ——
+  // 上游 saveCanvas() 触发后不清 saveTimer，applyRemoteCanvasData() 的判空条件里含 saveTimer 恒真，
+  // 页面只反复延后重试。本断言自己先做一次页面内本地编辑并等它真的落库（宿主 IPC 读回），再让宿主 IPC
+  // canvas/command(actorKind=USER) 新增节点：≤5s 必须在 primitives **和** DOM 里出现，用户本地内容
+  // 不被覆盖，且之后 5s 内 revision 不回环。**只新增这一条，不改任何既有断言。**
+  // 前置：让应用窗口处于前台 —— 画布页的 2.5s 版本轮询在 document.hidden / 后台节流下会直接 return，
+  // 那是浏览器节流不是产品行为；本断言要测的是"轮询能不能把宿主改动带进来"，所以先把窗口带到前台。
+  await page.bringToFront().catch(() => {});
+  const d1LocalId = "n_d1_local", d1HostId = "n_d1_host";
+  const d1LocalText = "本地编辑（D1 回归钉）", d1HostText = "宿主新增（D1 回归钉）";
+  const d1Ready = await waitChain2Ready("n_img", 20000);
+  const d1LocalEdit = d1Ready.ok
+    ? await inFrame(canvasFrame(), "return await window.__openarcCanvas.applyCommand({ type: 'node.add', node: { id: " + JSON.stringify(d1LocalId) + ", type: 'prompt', x: 120, y: 120, text: " + JSON.stringify(d1LocalText) + " } }, null);")
+    : { __skipped: "canvas-not-ready" };
+  const d1LocalSaved = await waitFor(async () => { const n = await nodeOf(currentCanvasId, d1LocalId); return !!(n && n.text === d1LocalText); }, 20000);
+  const d1HostAdd = await canvas({ type: "canvas/command", canvasId: currentCanvasId, command: { type: "node.add", node: { id: d1HostId, type: "prompt", x: 120, y: 300, text: d1HostText } } });
+  const d1T0 = Date.now();
+  const d1Appeared = await waitFor(async () => (await inFrame(canvasFrame(), "const it = window.__openarcCanvasInternals; return !!(it && it.primitives.getNode(" + JSON.stringify(d1HostId) + "));")) === true, 5000);
+  const d1WaitedMs = Date.now() - d1T0;
+  const d1Page = await inFrame(canvasFrame(), [
+    "const it = window.__openarcCanvasInternals;",
+    "const has = (id) => !!(it && it.primitives.getNode(id));",
+    "const nodeEl = (id) => document.querySelector('.node[data-id=' + id + ']');",
+    "return { hasLocal: has(" + JSON.stringify(d1LocalId) + "), localText: String((it.primitives.getNode(" + JSON.stringify(d1LocalId) + ") || {}).text || ''),",
+    "  hasHost: has(" + JSON.stringify(d1HostId) + "), domHost: !!nodeEl(" + JSON.stringify(d1HostId) + "),",
+    "  hostText: String((it.primitives.getNode(" + JSON.stringify(d1HostId) + ") || {}).text || ''),",
+    "  revision: it.getState().canvas ? Number(it.getState().canvas.revision) : null, nodes: it.getState().nodes.length };",
+  ].join("\n"));
+  const d1IpcHost = await nodeOf(currentCanvasId, d1HostId);
+  const d1IpcLocal = await nodeOf(currentCanvasId, d1LocalId);
+  const d1RevAt = (await canvasState(currentCanvasId)).revision;
+  await sleep(5000);
+  const d1RevAfter = (await canvasState(currentCanvasId)).revision;
+  const d1RevisionStable = d1RevAt === d1RevAfter;
+  record("F3d", "本地编辑保存之后，宿主 IPC canvas/command（actorKind=USER）新增的节点仍能进到已打开的编辑器（≤5s，primitives + DOM）：用户本地内容不被覆盖、revision 不回环",
+    d1Ready.ok === true && !!d1LocalEdit && d1LocalEdit.ok === true && d1LocalSaved === true && !!(d1HostAdd && d1HostAdd.ok) && d1Appeared === true && d1WaitedMs <= 5000
+      && !!d1Page && d1Page.hasHost === true && d1Page.domHost === true && d1Page.localText === d1LocalText && !!d1IpcHost && d1IpcHost.text === d1HostText && !!d1IpcLocal && d1IpcLocal.text === d1LocalText && d1RevisionStable,
+    "本地编辑落库 → 宿主新增 ≤5s 呈现（primitives+DOM）+ 本地内容仍在 + revision 稳定",
+    JSON.stringify({ ready: { ok: d1Ready.ok, waitedMs: d1Ready.waitedMs, steps: d1Ready.steps }, localEdit: d1LocalEdit, localSaved: d1LocalSaved, hostAdd: { ok: !!(d1HostAdd && d1HostAdd.ok), revision: d1HostAdd && d1HostAdd.ok ? d1HostAdd.canvas.revision : null, error: d1HostAdd && d1HostAdd.error }, waitedMs: d1WaitedMs, page: d1Page, ipcHost: d1IpcHost && { found: d1IpcHost.found, text: d1IpcHost.text }, ipcLocal: d1IpcLocal && { found: d1IpcLocal.found, text: d1IpcLocal.text }, revisions: { at: d1RevAt, after5s: d1RevAfter } }));
+
   /* ══════════════════ E 系列：宿主级隔离（F5） ══════════════════ */
   const boundary = await inFrame(canvasFrame(), "return { openarc: typeof window.openarc, require: typeof window.require, process: typeof window.process, ipc: typeof window.ipcRenderer, fs: typeof window.fs, pywebview: typeof window.pywebview };");
   const unsupported = await inFrame(canvasFrame(), "const r = await fetch('/api/secret-thing'); return { status: r.status, body: await r.json() };");

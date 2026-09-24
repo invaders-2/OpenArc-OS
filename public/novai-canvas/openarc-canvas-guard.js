@@ -186,14 +186,20 @@
     style.id = "openarc-guard-style";
     // 只消费上游已有变量；中性灰、无描边分层、字重 ≤500、4px 间距体系。
     style.textContent = [
-      ".openarc-model-status{display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin:4px 0 0;font-size:11px;line-height:16px;font-weight:400;color:var(--text-2,#737373)}",
+      ".openarc-model-status{display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin:4px 0 0;font-size:12px;line-height:18px;font-weight:400;color:var(--text-2,#737373)}",
       ".openarc-model-status-text{font-weight:400}",
-      ".openarc-guide-btn{height:24px;padding:0 8px;border-radius:8px;background:var(--nav-hover-bg,rgba(0,0,0,.05));color:var(--text,#0a0a0a);font-size:11px;font-weight:500;cursor:pointer;transition:background 100ms cubic-bezier(.2,0,0,1)}",
+      ".openarc-guide-btn{height:24px;padding:0 8px;border-radius:var(--radius-md,8px);background:var(--nav-hover-bg,rgba(0,0,0,.05));color:var(--text,#0a0a0a);font-size:12px;font-weight:500;cursor:pointer;transition:background 100ms cubic-bezier(.2,0,0,1)}",
       ".openarc-guide-btn:hover{background:var(--border-2,rgba(0,0,0,.12))}",
-      // 键盘焦点环：显式中性高对比 2px + 2px 间隔（浏览器默认的 auto 环是彩色系统色，设计系统禁用）
-      ".openarc-guide-btn:focus-visible{outline:2px solid var(--text,#0a0a0a);outline-offset:2px}",
-      ".openarc-guard-note{margin:4px 0 0;font-size:11px;line-height:16px;font-weight:400;color:var(--text-2,#737373);animation:openarc-note-in 160ms cubic-bezier(.2,0,0,1)}",
-      ".openarc-guard-note[data-openarc-guard-flash='1']{color:var(--text,#0a0a0a)}",
+      // 键盘焦点环：显式中性高对比 2px + 2px 间隔（浏览器默认的 auto 环是彩色系统色，设计系统禁用）。
+      // 有效值要用上游的 --studio-ui-scale 折回来：.topbar{zoom:var(--studio-ui-scale)} 会把注入的
+      // 焦点环一起缩放（实测 2px 在 scale 0.68/0.87 下只剩 1.47px），除以它才能真的落在 2px。
+      ".openarc-guide-btn:focus-visible{outline:2px solid var(--text,#0a0a0a);outline-width:calc(2px / var(--studio-ui-scale,1));outline-offset:calc(2px / var(--studio-ui-scale,1))}",
+      // 说明行：12/18（DS §5 最小档）+ 中性高对比正文色（--text-2 在 #f5f5f5 上只有 4.35）；
+      // 单行省略（完整文本进 title），节点被压到固定高度时不再把说明行挤出节点盒。
+      ".openarc-guard-note{display:flex;align-items:center;margin:4px 0 0;font-size:12px;line-height:18px;font-weight:400;color:var(--text,#0a0a0a);overflow:hidden;animation:openarc-note-in 160ms cubic-bezier(.2,0,0,1)}",
+      ".openarc-guard-note>.openarc-guard-note-text{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+      // 闪烁态：基色已经是正文色，不能再靠"变深"；改成字重 500 的强调（中性、≤500、不改几何）。
+      ".openarc-guard-note[data-openarc-guard-flash='1']{font-weight:500}",
       ".openarc-guard-note .openarc-guide-btn{margin-left:4px}",
       ".openarc-guard-note[data-openarc-guard-error='1']{color:var(--danger-text,#d70015)}",
       "@keyframes openarc-note-in{from{opacity:0}to{opacity:1}}",
@@ -233,6 +239,7 @@
     var text = note.querySelector(".openarc-guard-note-text");
     // 失败红必须"标记 + 文字"成对出现（设计系统 §3.1）：前面加一个中性感叹标记。
     if (text) text.textContent = "！" + message;
+    note.setAttribute("title", "！" + message);
   }
 
   /** 节点里的说明行：文字 + （未配置时）真实可点的引导。能力未接通只给事实文案，不给误导性的"去设置里开"。*/
@@ -251,6 +258,8 @@
     }
     var spanEl = note.querySelector(".openarc-guard-note-text");
     if (spanEl && textOf(spanEl) !== text) spanEl.textContent = text;
+    // 单行省略后完整文本只能从 title 取（信息不丢）。
+    if (note.getAttribute("title") !== text) note.setAttribute("title", text);
     var guide = note.querySelector("[data-openarc-open-model-settings]");
     if (!withGuide && guide && guide.parentNode) guide.parentNode.removeChild(guide);
     if (withGuide && !guide) note.appendChild(makeGuideButton());

@@ -13,6 +13,15 @@ const CAPABILITY_CHOICES = [
   { id: "vision-input", label: "图片输入" },
 ] as const;
 
+/** 能力的中文名：只用于"已配置的默认为什么不可用"的选项文案（取值与 CAPABILITY_CHOICES 同一套）。 */
+const CAPABILITY_LABEL: Record<string, string> = { chat: "文本对话", "image-generation": "生图", "tool-calling": "工具调用", "vision-input": "图片输入" };
+
+/** 显式配置的默认值不在能力过滤后的清单里时，如实点名配的是哪个模型、为什么不可用（不是"没配"）。 */
+function defaultUnavailableText(cap: string, m: any) {
+  const name = m ? String(m.displayName || m.remoteModelId || m.configId) : "（该模型已不在清单里）";
+  return name + "（已配置为默认" + (m ? "，但没有「" + (CAPABILITY_LABEL[cap] || cap) + "」能力" : "") + "，不可用）";
+}
+
 export function ModelSettings({ role }: { role: string | null }) {
   const [tab, setTab] = useState<Tab>("providers");
   const [providers, setProviders] = useState<any[]>([]);
@@ -91,6 +100,20 @@ export function ModelSettings({ role }: { role: string | null }) {
   const setDefault = async (capability: string, configId: string, scope: string) => { if (!configId) return; const r = await cmd("defaults/set", { capability, configId, scope }); if (!r.ok) setError(r.error); else { setNotice("Default saved"); await load(); } };
   const credLabel = (providerId: string) => { const c = credStatus[providerId]; if (!c) return "..."; if (c.manageable === false) return "—"; if (!c.storeAvailable) return "Unavailable"; return c.configured ? "Configured" : "Missing"; };
   const opts = (cap: string) => models.filter((m) => m.capabilities.includes(cap)).map((m) => <option key={m.configId} value={m.configId}>{m.displayName || m.remoteModelId}</option>);
+  /** 已配置的默认值不在能力过滤后的 options 里（能力不符/已不存在）时，补一个 disabled 选项把它显示出来：
+   *  否则 select 匹配不到 option 会回落到第一项，界面看起来像"根本没配"——与画布页"默认不可用"口径冲突。*/
+  const defaultOpts = (cap: string, current: string | null | undefined) => {
+    const def = current || "";
+    const found = def ? models.find((m) => m.configId === def) : null;
+    const inList = !!found && found.capabilities.includes(cap);
+    return (
+      <>
+        <option value="">No default configured</option>
+        {def && !inList ? <option value={def} disabled data-d4-01-default-unavailable={cap}>{defaultUnavailableText(cap, found)}</option> : null}
+        {opts(cap)}
+      </>
+    );
+  };
 
   return (
     <div className="d401-settings" data-d4-01="settings">
@@ -204,17 +227,17 @@ export function ModelSettings({ role }: { role: string | null }) {
         <section data-d4-01-pane="defaults">
           <div className="d401-defaults" data-d4-01-defaults-personal>
             <h4>My Defaults</h4>
-            <label>Chat <select data-d4-01-default-personal-chat value={defaults.personal.chat || ""} onChange={(e) => void setDefault("chat", e.target.value, "PERSONAL")}><option value="">No default configured</option>{opts("chat")}</select></label>
-            <label>Tool Calling <select data-d4-01-default-personal-tool value={defaults.personal["tool-calling"] || ""} onChange={(e) => void setDefault("tool-calling", e.target.value, "PERSONAL")}><option value="">No default configured</option>{opts("tool-calling")}</select></label>
-            <label>Image Generation <select data-d4-01-default-personal-image value={defaults.personal["image-generation"] || ""} onChange={(e) => void setDefault("image-generation", e.target.value, "PERSONAL")}><option value="">No default configured</option>{opts("image-generation")}</select></label>
+            <label>Chat <select data-d4-01-default-personal-chat value={defaults.personal.chat || ""} onChange={(e) => void setDefault("chat", e.target.value, "PERSONAL")}>{defaultOpts("chat", defaults.personal.chat)}</select></label>
+            <label>Tool Calling <select data-d4-01-default-personal-tool value={defaults.personal["tool-calling"] || ""} onChange={(e) => void setDefault("tool-calling", e.target.value, "PERSONAL")}>{defaultOpts("tool-calling", defaults.personal["tool-calling"])}</select></label>
+            <label>Image Generation <select data-d4-01-default-personal-image value={defaults.personal["image-generation"] || ""} onChange={(e) => void setDefault("image-generation", e.target.value, "PERSONAL")}>{defaultOpts("image-generation", defaults.personal["image-generation"])}</select></label>
             {/* 视频没有传输：这里是"不可选"的事实位，不是可配置项（选中也不会被 ModelService 解析）。 */}
             <label>Video Generation <select data-d4-01-default-personal-video disabled aria-disabled="true"><option value="">无可用传输（未接通）</option></select></label>
           </div>
           <div className="d401-defaults" data-d4-01-defaults-organization>
             <h4>Organization Defaults {defaults.canManageOrganization ? null : <span className="muted">(read-only)</span>}</h4>
-            <label>Chat <select data-d4-01-default-org-chat value={defaults.organization.chat || ""} onChange={(e) => void setDefault("chat", e.target.value, "ORGANIZATION")}><option value="">No default configured</option>{opts("chat")}</select></label>
-            <label>Tool Calling <select data-d4-01-default-org-tool value={defaults.organization["tool-calling"] || ""} onChange={(e) => void setDefault("tool-calling", e.target.value, "ORGANIZATION")}><option value="">No default configured</option>{opts("tool-calling")}</select></label>
-            <label>Image Generation <select data-d4-01-default-org-image value={defaults.organization["image-generation"] || ""} onChange={(e) => void setDefault("image-generation", e.target.value, "ORGANIZATION")}><option value="">No default configured</option>{opts("image-generation")}</select></label>
+            <label>Chat <select data-d4-01-default-org-chat value={defaults.organization.chat || ""} onChange={(e) => void setDefault("chat", e.target.value, "ORGANIZATION")}>{defaultOpts("chat", defaults.organization.chat)}</select></label>
+            <label>Tool Calling <select data-d4-01-default-org-tool value={defaults.organization["tool-calling"] || ""} onChange={(e) => void setDefault("tool-calling", e.target.value, "ORGANIZATION")}>{defaultOpts("tool-calling", defaults.organization["tool-calling"])}</select></label>
+            <label>Image Generation <select data-d4-01-default-org-image value={defaults.organization["image-generation"] || ""} onChange={(e) => void setDefault("image-generation", e.target.value, "ORGANIZATION")}>{defaultOpts("image-generation", defaults.organization["image-generation"])}</select></label>
             <label>Video Generation <select data-d4-01-default-org-video disabled aria-disabled="true"><option value="">无可用传输（未接通）</option></select></label>
           </div>
           {role !== "ADMIN" ? <p className="muted" data-d4-01-org-hint>Organization defaults require an authorized admin.</p> : null}

@@ -5,9 +5,9 @@
   "pages": 14,
   "entry": "index.html",
   "entryShellHash": "77d1425f2108fd38",
-  "canvasJsHash": "e422f9d5b1245acb",
+  "canvasJsHash": "7550afb3529e9233",
   "canvasHtmlHash": "0c95ae19e983c18f",
-  "guardHash": "770fb7ed9c489e7e",
+  "guardHash": "f52fb6c0196a8dea",
   "listHtmlHash": "32e0ff039afd250a",
   "csp": "default-src 'none'; script-src openarc-canvas: 'unsafe-inline'; style-src openarc-canvas: 'unsafe-inline'; img-src openarc-canvas: data: blob:; media-src openarc-canvas: data: blob:; font-src openarc-canvas:; connect-src openarc-canvas:; frame-src openarc-canvas:; child-src openarc-canvas:; object-src 'none'; form-action 'none'; base-uri 'none'"
 }

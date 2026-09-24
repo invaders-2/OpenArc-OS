@@ -1637,6 +1637,9 @@ async function saveCanvas(){
         saveCanvasAgain = true;
         return;
     }
+    // OpenArc：本次保存真的会发生；定时器已经触发过，句柄不清掉就会被 applyRemoteCanvasData()
+    // 当成「本地有未保存编辑」，远端（宿主 / AI / 其它页面）的改动永远只是延后重试。
+    if(saveTimer){ clearTimeout(saveTimer); saveTimer = null; }
     sanitizeConnections();
     savingCanvasNow = true;
     saveCanvasAgain = false;

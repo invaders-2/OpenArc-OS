@@ -22,14 +22,14 @@ OA_NOVAI_SRC=/tmp/novai-canvas-src node experiments/d5-02/vendor-novai-app.mjs
 
 | 目录/文件 | 来源 | 说明 |
 | --- | --- | --- |
-| `static/**` | `static/**` | **原样**，仅做下面五处改动 |
+| `static/**` | `static/**` | **原样**，仅做下面六处改动 |
 | `index.html` | `static/index.html` | 上游外壳副本（桥 + 中继），**已不是产品入口**，只留给边界测试；根绝对 `/static/` 指向同一份资源 |
 | `openarc-bridge.js` | OpenArc 新增 | 每页最先执行：端点白名单、账号作用域存储、pywebview 明确不可用、出网拒绝 |
 | `openarc-shell.js` | OpenArc 新增 | **只注入 bundle 根 `index.html`**（已不是产品入口）：子页 ↔ 外壳 ↔ 宿主的中继协议 |
 | `openarc-adapter.js` | OpenArc 新增 | 只注入画布页：把宿主命令翻译成画布自己的原语（同一命令层 + 只读闸） |
 | `openarc-canvas-guard.js` | OpenArc 新增 | **只注入画布编辑器页**：供应商/模型单一真源守卫（读 `/api/config` 的能力事实、真实 disable 未接通/未配置的下拉、清清单外旧值、锁死三把页面侧模型来源键、提供"打开 OpenArc 总 API 设置"引导） |
 
-## 对上游文件的五处改动（脚本化、可审计）
+## 对上游文件的六处改动（脚本化、可审计）
 
 1. 每个页面 `<head>` 开头：CSP meta + `<script src="/openarc-bridge.js">`；
 2. `static/js/canvas.js` 的 IIFE 末尾追加适配层（模板：`experiments/d5-02/vendor/canvas-internals.js`）：
@@ -41,6 +41,11 @@ OA_NOVAI_SRC=/tmp/novai-canvas-src node experiments/d5-02/vendor-novai-app.mjs
    `btnStartCreate` / `btnNewProject` / 「继续上次」空列表兜底，从 `openCanvasPicker()` 改成
    `createCanvasFromPicker('classic')`（该函数本来就是"建完直接跳 canvas.html"）。
    补丁写在 `vendor-novai-app.mjs` 的 `LIST_PATCHES` 里，幂等，且目标找不到就**报错退出**（不静默跳过）。
+5. `static/js/canvas.js` 的 `saveCanvas()` 里补一句 `if(saveTimer){ clearTimeout(saveTimer); saveTimer = null; }`：
+   上游只在 `beforeunload` 里清 `saveTimer`，定时器触发过一次之后句柄一直留着，而远端同步入口
+   `applyRemoteCanvasData()` 的判空条件里含 `saveTimer` ⇒ 恒真 —— 同一页做过一次本地编辑/保存之后，
+   宿主 / AI 对画布的改动只反复延后 1s 重试，20s 都进不到**已经打开的编辑器**里（第八批真机复现的 D1）。
+   补丁写在 `vendor-novai-app.mjs` 的 `CANVAS_JS_PATCHES` 里，幂等，且目标找不到就**报错退出**（不静默跳过）。
 
 注入清单与哈希写在 `experiments/d5-02/vendor/vendor-manifest.json`（每次 vendor 重新生成）。
 

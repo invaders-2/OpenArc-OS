@@ -93,7 +93,26 @@ function main() {
 
   // 2) canvas.js：IIFE 末尾追加适配层（必须插在最后的 })(); 之前）
   const canvasJsPath = path.join(OUT_STATIC, "js", "canvas.js");
-  const canvasJs = fs.readFileSync(canvasJsPath, "utf8");
+  let canvasJs = fs.readFileSync(canvasJsPath, "utf8");
+
+  // 2b) canvas.js 上游补丁（幂等；目标缺失即报错，不静默跳过）——D1：
+  //     saveCanvas() 真的跑起来之后必须清掉 saveTimer。上游只在 beforeunload 里清它，于是
+  //     "定时器已经触发过一次"的句柄会一直留着；applyRemoteCanvasData() 的判空条件里含 saveTimer，
+  //     恒真 ⇒ 宿主 / AI 对画布的改动永远只是延后 1s 重试，进不到**已经打开的编辑器**页面上
+  //     （实测：同一页做过一次本地编辑/保存后，宿主新增的节点 20s 都不呈现）。
+  const CANVAS_JS_PATCHES = [
+    {
+      name: "saveCanvas 清掉已触发的 saveTimer（D1）",
+      from: "async function saveCanvas(){\n    if(!canvas || applyingRemoteCanvas) return;\n    if(savingCanvasNow){\n        saveCanvasAgain = true;\n        return;\n    }\n",
+      to: "async function saveCanvas(){\n    if(!canvas || applyingRemoteCanvas) return;\n    if(savingCanvasNow){\n        saveCanvasAgain = true;\n        return;\n    }\n    // OpenArc：本次保存真的会发生；定时器已经触发过，句柄不清掉就会被 applyRemoteCanvasData()\n    // 当成「本地有未保存编辑」，远端（宿主 / AI / 其它页面）的改动永远只是延后重试。\n    if(saveTimer){ clearTimeout(saveTimer); saveTimer = null; }\n",
+    },
+  ];
+  for (const p of CANVAS_JS_PATCHES) {
+    if (canvasJs.includes(p.to)) continue;                                  // 已经打过：幂等
+    if (!canvasJs.includes(p.from)) throw new Error("canvas.js 补丁目标缺失（上游结构变了）：" + p.name);
+    canvasJs = canvasJs.replace(p.from, p.to);
+  }
+
   const tail = "\n})();";
   const cut = canvasJs.lastIndexOf(tail);
   if (cut < 0) throw new Error("canvas.js 结构不符合预期（找不到收尾 IIFE）");
