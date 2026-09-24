@@ -15,6 +15,7 @@
 
 const domain = require("./authorization-domain.cjs");
 const modelDomain = require("./model-domain.cjs");
+const mcpDomain = require("./mcp-domain.cjs");
 const {
   ACTION,
   APP_STATUS,
@@ -1173,8 +1174,8 @@ class AuthorizationService {
     return [...out];
   }
 
-  /** App Grant 的动作投影：audit 必须与 getAppAccess 同一口径，否则 model 授予撤了却记成"没撤动作"。 */
-  #appGrantActions(grant) { return [...domain.grantActions(grant), ...modelDomain.modelGrantActions(grant)]; }
+  /** App Grant 的动作投影：audit 必须与 getAppAccess 同一口径，否则 model / mcp 授予撤了却记成"没撤动作"。 */
+  #appGrantActions(grant) { return [...domain.grantActions(grant), ...modelDomain.modelGrantActions(grant), ...mcpDomain.mcpGrantActions(grant)]; }
 
   grantAppResourcePermission({ context, appId, resourceId = null, collectionId = null, resourceType = null, departmentId = null, scope = null, actions = null, permissionSet = null, expiresAt = null } = {}) {
     const gate = this.#governanceGate(context, GOVERNANCE_ACTION.GRANT_APP_PERMISSION);

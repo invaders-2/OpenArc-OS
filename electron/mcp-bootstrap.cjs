@@ -14,7 +14,7 @@ const { McpStore } = require("./mcp-store.cjs");
 const { McpService } = require("./mcp-service.cjs");
 const { McpClient } = require("./mcp-client.cjs");
 const { CredentialStore, safeStorageCredentialBackend } = require("./credential-store.cjs");
-const { createDefaultExecutorLauncher } = require("./executor-launcher.cjs");
+const { createMcpStdioLauncher } = require("./executor-launcher.cjs");
 const domain = require("./mcp-domain.cjs");
 
 /** MCP 中心由 shell 拥有的系统 App Principal 承载（app_principals 里已内置）。 */
@@ -30,7 +30,7 @@ function createMcpBundle({ identityStore, authorization, authStore, userDataDir,
   const credentialStore = new CredentialStore({ store: mcpStore, backend });
   const factory = typeof clientFactory === "function"
     ? clientFactory
-    : () => new McpClient({ launcher: launcher || createDefaultExecutorLauncher(), fetchImpl, requestTimeoutMs, maxTools, maxPages });
+    : () => new McpClient({ launcher: launcher || createMcpStdioLauncher(), fetchImpl, requestTimeoutMs, maxTools, maxPages });
   const mcpService = new McpService({ identity: identityStore, authService: authorization, authStore, mcpStore, credentialStore, clientFactory: factory, requestTimeoutMs, maxTools, maxPages, reconnectAttempts, reconnectBackoffMs, clock, logger });
 
   /**

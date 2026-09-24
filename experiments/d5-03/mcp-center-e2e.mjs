@@ -19,7 +19,14 @@
  *   L 动效（列表插入 / 删除 / 详情切换 / 发现中 连续帧；减少动态效果同一场景 即时或 ≤100ms）
  *   Z 收尾（主进程 stderr / 控制台错误 / 产物清单）
  *
- * 只新增本文件与 artifacts/d5-03/**；不动产品代码、不动既有断言。
+ * 首轮（34/38）暴露 D5-03-D1/D2/D3 三个产品缺陷；D5-03 修复批次改动产品代码后本文件同步：
+ *   · 只改"把缺陷写进判定"的两条（B3 空态入口、G3a 失败当下重授权入口）与对应 defect() 登记
+ *     （改为只有该断言失败时才登记缺陷）；其余断言判定条件未动；
+ *   · K 段采样读取加空值保护（缺字段判 FAIL，不允许 TypeError 让整轮崩掉）；
+ *   · D1 前加同步等待（等「重新连接已完成」通知）：重连是 READY→READY，旧投影会让
+ *     waitStatusText 立刻命中，下一步的 mcp/test 会撞上 in-flight reconnect
+ *     （后端回 MCP_CONNECTION_BUSY）——只加等待，不改判定条件；
+ *   · 指纹清单补 electron/executor-launcher.cjs（D2 的修复文件）。
  * 探针只清理自己的进程（userData 前缀 oa-d503-）。
  */
 import { chromium } from "@playwright/test";
@@ -588,11 +595,11 @@ async function main() {
   record("B2", "空态渲染：显示「还没有连接」与下一步说明（DOM 证据）", !!infoB.empty && infoB.emptyText.includes("还没有连接") && infoB.emptyText.includes("新建一个连接后"),
     "data-mcp-empty 含标题与说明", JSON.stringify({ empty: infoB.empty, emptyText: infoB.emptyText.slice(0, 260) }));
   const emptyEntryScan = await js("const root = document.querySelector('[data-mcp-empty]'); return { buttons: root ? root.querySelectorAll('button').length : -1, labels: root ? Array.from(root.querySelectorAll('button')).map(function (b) { return (b.textContent || '').trim(); }) : null, pageListCreate: !!document.querySelector('[data-mcp-action=create]'), pageStateKind: document.querySelector('[data-mcp-empty] [data-ds-kind]')?.getAttribute('data-ds-kind') || null };");
-  record("B3", "空态「新建连接」入口：期望有（PLAN §22「无连接可添加」），实际 0 个按钮 —— 首条连接在界面上无法创建（缺陷，见 productDefects D5-03-D1）",
+  const b3 = record("B3", "空态「新建连接」入口：期望有（PLAN §22「无连接可添加」）—— 首条连接必须能在界面上创建",
     emptyEntryScan.buttons >= 1 && emptyEntryScan.pageListCreate === true,
     "空态 ≥1 个新建入口按钮 + 页面存在 data-mcp-action=create",
     JSON.stringify(emptyEntryScan));
-  defect("D5-03-D1",
+  if (!b3) defect("D5-03-D1",
     "MCP 中心空态没有任何「新建连接」入口：列表为空时界面无法创建首条连接（PLAN §22「无连接可添加」不满足）",
     "src/mcp/McpCenter.tsx:962-970（空态分支传 onAction/actionLabel）+ src/design-system/page-states.tsx:46（PAGE_STATE_SPEC.empty.action='none'）与 :82（showAction = spec.action!=='none' && Boolean(onAction)）",
     "全新 userData → 程序坞打开「MCP 中心」→ 列表空态：document.querySelectorAll('[data-mcp-empty] button').length = 0，且页面无 [data-mcp-action=create]（列表头的「新建」只在非空分支渲染，McpCenter.tsx:1005）。PageState 把传入的 onAction/actionLabel 静默忽略。",
@@ -611,9 +618,9 @@ async function main() {
   const createLocal = await createViaUI({ name: "本地测试回显", transport: "stdio", location: "LOCAL_DEVICE", serverKey: "openarc-test-echo", authMode: "NONE", visibility: "PERSONAL" });
   ids.local = createLocal.connectionId;
   const listB = await mcpWindowInfo();
-  record("C1", "本地连接（stdio）经界面表单创建：传输=本地 stdio、serverKey=白名单 openarc-test-echo；因 B3 空态缺陷，首条连接前用主进程命令面种了占位连接让「新建」入口出现（绕过已标注）",
-    createLocal.ok === true && !!ids.local && listB.rows.some((r) => r.id === ids.local) && !!placeholderUsed && placeholderUsed.createEntryVisible === true,
-    "对话框关闭 + 列表出现该连接（entry 绕过记录见 actual）",
+  record("C1", "本地连接（stdio）经界面表单创建：传输=本地 stdio、serverKey=白名单 openarc-test-echo；首条连接从真空态走界面入口（无占位绕过）",
+    createLocal.ok === true && !!ids.local && listB.rows.some((r) => r.id === ids.local) && placeholderUsed === null,
+    "对话框关闭 + 列表出现该连接 + 未使用占位连接绕过（placeholderUsed=null）",
     JSON.stringify({ create: { ok: createLocal.ok, dialogClosed: createLocal.dialogClosed, listed: createLocal.listed, connectionId: ids.local, entry: createLocal.entry }, placeholderUsed, rows: listB.rows, transport: createLocal.item && createLocal.item.transport, location: createLocal.item && createLocal.item.location, endpoint: createLocal.item && createLocal.item.endpoint }));
 
   const pidsIdleLocal = descendantPids();
@@ -644,6 +651,10 @@ async function main() {
       localChildProcess: { sampledNewDescendants: spawnedInfo, descendantsAtIdle: pidsIdleLocal.length, connectFailureLog: (await mcp({ command: "mcp/testLog", connectionId: ids.local, limit: 5 })).items },
     }));
 
+  if (connected && rowLocal.status === "READY") {
+    note("D5-03-D2 修复后传输：本地 stdio 的 Node child（Electron 运行时 + ELECTRON_RUN_AS_NODE=1）—— 子进程 " + JSON.stringify(spawnedInfo.map((p) => ({ pid: p.pid, cmd: p.cmd.slice(0, 160) }))));
+  }
+
   if (!connected || rowLocal.status !== "READY") {
     defect("D5-03-D2",
       "本地（stdio）MCP 连接在真实 Electron 里永远握不上手：utilityProcess 句柄没有 stdin，客户端写第一帧前就回 MCP_UNREACHABLE / stdin-unavailable",
@@ -663,11 +674,15 @@ async function main() {
 
   /* ── D 重连 + 测试 ── */
   const clickReconnect = await clickAction("reconnect");
+  /* 重连是 READY → READY：详情在刷新前仍是旧的 READY 投影，单靠 waitStatusText 会立刻命中旧值，
+     下一步的 mcp/test 就会撞上 in-flight 的 reconnect（后端回 MCP_CONNECTION_BUSY）。
+     这里等本页 runAction 的成功通知（IPC 已返回、busy 已清）——只加同步，不改判定条件。 */
+  const reconnectSettled = await waitFor(async () => (await textOf("[data-mcp-notice]")).includes("重新连接已完成"), 30000, 120);
   const reconnected = await waitStatusText("READY", 30000);
   const detailD1 = await detailSnapshot();
   record("D1", "重连后状态与工具哈希稳定（READY + toolsHash 与首次协商一致）",
     clickReconnect === "ok" && reconnected && detailD1.toolsHash === expLocal.toolsHash && detailD1.status.includes("READY"),
-    "READY + toolsHash 不变", JSON.stringify({ click: clickReconnect, reconnected, toolsHash: detailD1.toolsHash, expected: expLocal.toolsHash, status: detailD1.status }));
+    "READY + toolsHash 不变", JSON.stringify({ click: clickReconnect, reconnectSettled, reconnected, toolsHash: detailD1.toolsHash, expected: expLocal.toolsHash, status: detailD1.status }));
 
   const logsBefore = (await mcp({ command: "mcp/testLog", connectionId: ids.local, limit: 50 })).items || [];
   const clickTest = await clickAction("test");
@@ -812,12 +827,12 @@ async function main() {
   const authBannerUp = await waitFor(async () => (await attrOf("[data-mcp-error]", "data-mcp-error-code")) === "MCP_AUTH_REQUIRED", 20000, 150);
   const authImmediate = await mcpWindowInfo();
   const authRaw = await mcp({ command: "mcp/get", connectionId: ids.auth });
-  record("G3a", "负例③ fixture 鉴权失败模式（--auth-token）→ MCP_AUTH_REQUIRED + 记录 status=AUTH_REQUIRED（后端如实落库；界面失败当下不出现重授权入口 → 缺陷 D5-03-D3）",
-    authProbe.status === 401 && createAuth.ok && authBannerUp && authImmediate.authRequired === false
+  const g3a = record("G3a", "负例③ fixture 鉴权失败模式（--auth-token）→ MCP_AUTH_REQUIRED + 记录 status=AUTH_REQUIRED + 失败当下即出现重授权入口",
+    authProbe.status === 401 && createAuth.ok && authBannerUp && authImmediate.authRequired === true
       && authRaw.connection.status === "AUTH_REQUIRED" && authRaw.connection.lastErrorCode === "MCP_AUTH_REQUIRED",
-    "fixture 401 + 错误码 MCP_AUTH_REQUIRED + status=AUTH_REQUIRED + （失败当下 data-mcp-auth-required 尚未出现）",
+    "fixture 401 + 错误码 MCP_AUTH_REQUIRED + status=AUTH_REQUIRED + 失败当下 data-mcp-auth-required 已出现",
     JSON.stringify({ fixtureStatus: authProbe.status, errorCode: authImmediate.errorCode, errorText: authImmediate.errorText, authRequiredImmediately: authImmediate.authRequired, record: { status: authRaw.connection.status, lastErrorCode: authRaw.connection.lastErrorCode } }));
-  defect("D5-03-D3",
+  if (!g3a) defect("D5-03-D3",
     "连接/重连/测试失败后不刷新列表与详情：鉴权失败当下界面不出现「认证失败 → 重新授权」入口，必须手动重选该行才出现（PLAN §22「认证失败重授权」的入口被延迟）",
     "src/mcp/McpCenter.tsx:435-455（runAction：res.ok !== true 时 setFailure 后直接 return，不执行 loadList/loadDetail）",
     "新建远程连接（fixture --auth-token，NONE）→ 启用 → 点「连接」→ 失败横幅出现 MCP_AUTH_REQUIRED，但右侧详情仍是失败前的旧投影（status=DISABLED 等），[data-mcp-auth-required] 不存在；左键再点同一行后才出现。",
@@ -971,8 +986,10 @@ async function main() {
   ids.motionInsert = createMotion.connectionId;
   const insertPresentMs = Date.now() - tInsert;
   const insertSample = motionInsert.samples.find((s) => s.v && s.v.anyNew) || null;
+  /* 采样对象可能缺字段（页面在采样间跳转/行被摘除）：取不到就是 FAIL，不能抛 TypeError 让整轮崩掉。 */
+  const insertSampleV = (insertSample && insertSample.v) || null;
   record("K1", "动效 · 列表插入：新行播 MS §5 入场（is-new + mcp-row-in，--dur-quick=160ms）",
-    createMotion.ok && !!insertSample && insertSample.v.anim === "mcp-row-in" && insertSample.v.dur === "0.16s",
+    createMotion.ok && !!insertSampleV && insertSampleV.anim === "mcp-row-in" && insertSampleV.dur === "0.16s",
     "采样到 .mcp-row.is-new + animationName=mcp-row-in + duration=0.16s",
     JSON.stringify({ insertPresentMs, sample: insertSample, samples: motionInsert.samples, frames: motionInsert.frames.length }));
 
@@ -987,7 +1004,7 @@ async function main() {
   const deleteMs2 = Date.now() - tDel2;
   const motionDelete2 = await motionDelete2P;
   const leaveTrace = await js("clearInterval(window.__d503LeaveTimer); return window.__d503Leave;");
-  const leaveSample = leaveTrace.find((s) => s.leaving) || null;
+  const leaveSample = (Array.isArray(leaveTrace) ? leaveTrace : []).find((s) => s && s.leaving) || null;
   record("K2", "动效 · 列表删除：退场 160ms（is-leaving + mcp-row-out）后行被摘除",
     gone2 && deleteMs2 >= 120 && !!leaveSample && leaveSample.anim === "mcp-row-out" && leaveSample.dur === "0.16s",
     "页面内 8ms 采样到 .mcp-row.is-leaving + mcp-row-out/0.16s + 摘除耗时 ≥120ms",
@@ -1017,7 +1034,7 @@ async function main() {
   const createReduced = await createReducedP;
   ids.motionReduced = createReduced.connectionId;
   const reducedInsertMs = Date.now() - tReducedInsert;
-  const reducedAnim = await js("const r = document.querySelector('.mcp-row[data-mcp-connection=" + JSON.stringify(ids.motionReduced) + "]'); const s = document.querySelector('.mcp-row.is-new'); return { rowAnim: r ? getComputedStyle(r).animationName : null, newRowAnim: s ? getComputedStyle(s).animationName : null, newRowDur: s ? getComputedStyle(s).animationDuration : null };");
+  const reducedAnim = (await js("const r = document.querySelector('.mcp-row[data-mcp-connection=" + JSON.stringify(ids.motionReduced) + "]'); const s = document.querySelector('.mcp-row.is-new'); return { rowAnim: r ? getComputedStyle(r).animationName : null, newRowAnim: s ? getComputedStyle(s).animationName : null, newRowDur: s ? getComputedStyle(s).animationDuration : null };")) || {};
   const motionReducedDeleteP = captureMotion("reduced-delete", "const r = document.querySelector('.mcp-row[data-mcp-connection=" + JSON.stringify(ids.motionReduced) + "]'); return { present: !!r, anim: r ? getComputedStyle(r).animationName : null };", { count: 6, intervalMs: 35 });
   await selectRow(ids.motionReduced);
   await clickAction("delete");
@@ -1112,7 +1129,7 @@ async function main() {
     gitDirtyLines: (() => { try { return execFileSync("git", ["-C", ROOT, "status", "--porcelain"], { encoding: "utf8" }).split("\n").filter(Boolean).length; } catch { return null; } })(),
     command: "node experiments/d5-03/mcp-center-e2e.mjs",
     mcpSourceFingerprint: (() => {
-      const files = ["electron/mcp-domain.cjs", "electron/mcp-store.cjs", "electron/mcp-client.cjs", "electron/mcp-service.cjs", "electron/mcp-bootstrap.cjs", "src/mcp/McpCenter.tsx", "tests/fixtures/mcp/echo-server.mjs"];
+      const files = ["electron/mcp-domain.cjs", "electron/mcp-store.cjs", "electron/mcp-client.cjs", "electron/mcp-service.cjs", "electron/mcp-bootstrap.cjs", "electron/executor-launcher.cjs", "src/mcp/McpCenter.tsx", "tests/fixtures/mcp/echo-server.mjs"];
       return Object.fromEntries(files.map((f) => [f, fileSha(f)]));
     })(),
     env: { platform: process.platform, arch: process.arch, node: process.version, electron: require("electron/package.json").version, cdpPort: CDP_PORT, userDataPrefix: "oa-d503-" },

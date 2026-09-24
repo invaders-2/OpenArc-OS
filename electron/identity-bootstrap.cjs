@@ -93,7 +93,8 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
     logger: log,
   });
   // D5-03 第一批：MCP 中心（连接记录 + 凭据元数据 + 会话日志；复用同一连接与 AuthorizationService）。
-  // 真实握手用的受控 launcher 由 mcp-bootstrap 按运行环境选择（Electron main = utilityProcess）。
+  // 真实握手用的受控 launcher 由 mcp-bootstrap 按运行环境选择
+  // （Electron main = Electron 运行时 + ELECTRON_RUN_AS_NODE，stdio 需要真 stdin）。
   const { mcpStore, mcpService, seedMcpAppPolicy } = createMcpBundle({
     identityStore: store,
     authorization,

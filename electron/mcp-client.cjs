@@ -7,8 +7,10 @@
  * MCP_TOOL_INVOCATION_NOT_ENABLED（第一批不开放工具调用）。
  *
  * 约定：
- *   · 子进程只用受控 launcher 启动（Node = child_process；Electron main = utilityProcess），
- *     绝不 spawn(process.execPath) 去跑 Electron executable；
+ *   · 子进程只用受控 launcher 启动（createMcpStdioLauncher）：纯 Node 走 child_process；
+ *     Electron main 走 child_process + 子进程 ELECTRON_RUN_AS_NODE=1（官方"以 Node 运行"
+ *     模式），因为 utilityProcess 句柄没有 stdin、跑不了 stdio 握手（D5-03-D2 实测）。
+ *     绝不把 Electron 当 app main 启动；entry/args/env 仍由 mcp-domain 白名单固定映射；
  *   · 每个请求都有超时；close() 一定回收子进程与在途请求（fail-closed，不悬挂）；
  *   · 服务端真实返回的 protocolVersion / serverInfo / capabilities / tools 原样上报，
  *     协议版本不支持时明确报错 —— 不假装成功。
@@ -16,7 +18,7 @@
 "use strict";
 
 const domain = require("./mcp-domain.cjs");
-const { createDefaultExecutorLauncher } = require("./executor-launcher.cjs");
+const { createMcpStdioLauncher } = require("./executor-launcher.cjs");
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 8000;
 const DEFAULT_MAX_TOOLS = 200;
@@ -81,10 +83,10 @@ class McpClient {
   // 传输
   // ---------------------------------------------------------------------------
 
-  /** stdio：受控 launcher 启动白名单程序（entry/args 来自主进程映射，不来自渲染层）。 */
+  /** stdio：受控 launcher 启动白名单程序（entry/args 来自主进程映射，不来自渲染层；需要真 stdin）。 */
   #openStdio({ endpoint }) {
     if (!endpoint || !endpoint.entry) return { ok: false, error: domain.ERROR_CODE.MCP_LOCAL_SERVER_NOT_ALLOWED };
-    const launcher = this.launcher || createDefaultExecutorLauncher();
+    const launcher = this.launcher || createMcpStdioLauncher();
     if (!launcher || launcher.available === false) return { ok: false, error: domain.ERROR_CODE.MCP_UNREACHABLE, detail: "launcher-unavailable" };
     let handle;
     try {

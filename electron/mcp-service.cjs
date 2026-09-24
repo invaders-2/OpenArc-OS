@@ -15,7 +15,7 @@
 
 const domain = require("./mcp-domain.cjs");
 const { McpClient } = require("./mcp-client.cjs");
-const { createDefaultExecutorLauncher } = require("./executor-launcher.cjs");
+const { createMcpStdioLauncher } = require("./executor-launcher.cjs");
 
 const DEFAULT_RECONNECT_ATTEMPTS = 3;
 const DEFAULT_RECONNECT_BACKOFF_MS = 25;
@@ -40,7 +40,7 @@ class McpService {
     this.maxPages = maxPages;
     this.reconnectAttempts = Math.max(1, Number(reconnectAttempts) || DEFAULT_RECONNECT_ATTEMPTS);
     this.reconnectBackoffMs = Math.max(0, Number(reconnectBackoffMs) || 0);
-    this.clientFactory = typeof clientFactory === "function" ? clientFactory : () => new McpClient({ launcher: createDefaultExecutorLauncher(), requestTimeoutMs, maxTools, maxPages });
+    this.clientFactory = typeof clientFactory === "function" ? clientFactory : () => new McpClient({ launcher: createMcpStdioLauncher(), requestTimeoutMs, maxTools, maxPages });
     this.live = new Map();
     this.busy = new Set();
   }

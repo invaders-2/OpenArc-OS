@@ -445,6 +445,10 @@ export function McpCenter({ role }: { role: string | null }) {
     const res = await send(command, payload);
     setBusy(null);
     if (res.ok !== true) {
+      /* 失败也要把真实状态拿回来：后端已把 status / lastErrorCode / 实际协商版本落库，
+         不刷新的话右侧还是失败前的旧投影（PLAN §22「认证失败重授权」入口会被延迟）。 */
+      await loadList({ silent: true });
+      await loadDetail(connectionId);
       setFailure({ code: String(res.error || "INTERNAL_ERROR"), context });
       return null;
     }
@@ -959,14 +963,17 @@ export function McpCenter({ role }: { role: string | null }) {
             </p>
           </div>
         ) : null}
-        <div data-mcp-empty>
+        <div className="mcp-empty" data-mcp-empty>
           <PageState
             kind="empty"
             title="还没有连接"
             description="新建一个连接后，中心会做真实 MCP 握手（initialize → initialized → tools/list），把服务端实际协商出的版本、能力与工具写进记录。第一批不开放工具调用。"
-            onAction={openCreate}
-            actionLabel="新建连接"
           />
+          {/* PageState 的 empty 语义是 action='none'（共享规范，不为这一页改），
+              所以空态的新建入口由本页自己渲染 —— 否则列表为空时无法建第一条连接。 */}
+          <Button variant="secondary" data-mcp-action="create" onClick={openCreate}>
+            新建连接
+          </Button>
         </div>
         {dialogs}
       </div>

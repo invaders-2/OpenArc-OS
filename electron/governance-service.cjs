@@ -12,6 +12,7 @@ const crypto = require("node:crypto");
 const authzDom = require("./authorization-domain.cjs");
 const govDom = require("./governance-domain.cjs");
 const modelDom = require("./model-domain.cjs");
+const mcpDom = require("./mcp-domain.cjs");
 
 class GovernanceService {
   constructor({ identity, authService, authStore, resourceStore, integrationStore = null, logger = null } = {}) {
@@ -277,12 +278,13 @@ class GovernanceService {
   }
 
   /**
-   * App Grant 的动作投影：resource.* 与 model.* 是同一张 app_resource_grants 上的两个
-   * action namespace（D4-01 起内置 App 的 model baseline 也写在这里）。只列 resource.*
-   * 会把真实存在的 model 授予显示成空动作，治理侧就拿不到可撤销的 grantId。
+   * App Grant 的动作投影：resource.* / model.* / mcp.* 是同一张 app_resource_grants 上的
+   * 三个 action namespace（D4-01 起内置 App 的 model baseline、D5-03 起 mcp baseline 也写在
+   * 这里）。只列 resource.* 会把真实存在的 model / mcp 授予显示成空动作，治理侧就拿不到
+   * 可撤销的 grantId（MCP 因此只能整条 revoke，看不到 mcp.view/use/manage/test）。
    * TOOL 动作有意不入此投影：它有自己的 scope=TOOL 投影（getAppToolAccess）。
    */
-  #appGrantActions(grant) { return [...authzDom.grantActions(grant), ...modelDom.modelGrantActions(grant)]; }
+  #appGrantActions(grant) { return [...authzDom.grantActions(grant), ...modelDom.modelGrantActions(grant), ...mcpDom.mcpGrantActions(grant)]; }
 
   getAppAccess({ context, appId } = {}) {
     const gate = this.#adminGate(context);

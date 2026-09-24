@@ -17,11 +17,11 @@ const { McpStore } = require("../electron/mcp-store.cjs");
 const { McpService } = require("../electron/mcp-service.cjs");
 const { McpClient } = require("../electron/mcp-client.cjs");
 const { CredentialStore, memoryCredentialBackend } = require("../electron/credential-store.cjs");
-const { NodeChildProcessLauncher } = require("../electron/executor-launcher.cjs");
+const { NodeChildProcessLauncher, createMcpStdioLauncher } = require("../electron/executor-launcher.cjs");
 const { registerMcpIpc, MCP_COMMANDS, MCP_TOOL_INVOCATION_COMMANDS } = require("../electron/mcp-bootstrap.cjs");
 const domain = require("../electron/mcp-domain.cjs");
 
-export { domain, MCP_COMMANDS, MCP_TOOL_INVOCATION_COMMANDS, McpClient, NodeChildProcessLauncher, McpService, McpStore, CredentialStore, memoryCredentialBackend };
+export { domain, MCP_COMMANDS, MCP_TOOL_INVOCATION_COMMANDS, McpClient, NodeChildProcessLauncher, createMcpStdioLauncher, McpService, McpStore, CredentialStore, memoryCredentialBackend };
 export const ECHO_HTTP_PATH = fileURLToPath(new URL("./fixtures/mcp/echo-server.mjs", import.meta.url));
 
 /** 与 fixture 实际返回值一一对应（断言必须对着它，而不是对着客户端自己的常量）。 */
@@ -35,7 +35,7 @@ export const ECHO = Object.freeze({
 
 /** 收集 pid 的 launcher 包装：用于断言"停用/删除真的收掉了子进程"。 */
 export function recordingLauncher() {
-  const inner = new NodeChildProcessLauncher();
+  const inner = createMcpStdioLauncher();
   const pids = [];
   return {
     pids,
@@ -94,7 +94,8 @@ export async function createMcpFixture({ requestTimeoutMs = 4000, maxTools = 200
   const fx = await createDeviceFixture({ dbPath: ":memory:" });
   const mcpStore = new McpStore({ identity: fx.identity, clock: fx.clock });
   const credentialStore = new CredentialStore({ store: mcpStore, backend: credentialBackend || memoryCredentialBackend() });
-  const activeLauncher = withStdioArgs(launcher || new NodeChildProcessLauncher(), stdioArgs);
+  /* 与生产同一个 launcher 工厂（纯 Node 下 = NodeChildProcessLauncher，Electron main 下追加 ELECTRON_RUN_AS_NODE）。 */
+  const activeLauncher = withStdioArgs(launcher || createMcpStdioLauncher(), stdioArgs);
   const mcpService = new McpService({
     identity: fx.identity,
     authService: fx.authService,

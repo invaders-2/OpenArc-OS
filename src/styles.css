@@ -3611,6 +3611,20 @@ label {
   font-size: var(--fs-caption);
   color: var(--muted);
 }
+/* 空态（PLAN §22「无连接可添加」）：PageState 的居中文案 + 本页自己的「新建连接」入口。
+   入口必须留在 [data-mcp-empty] 内：空列表时列表头的「新建」不渲染。 */
+.mcp-empty {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--space-4) var(--space-6);
+}
+.mcp-empty .ds-page-state {
+  padding-bottom: var(--space-2);
+}
 .mcp-mono {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;

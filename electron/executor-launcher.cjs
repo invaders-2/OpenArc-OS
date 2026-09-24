@@ -10,6 +10,9 @@
  *   Electron 官方提供的是 utilityProcess.fork()：真正 Node-enabled 的 utility child，
  *   不依赖 ELECTRON_RUN_AS_NODE，也不依赖 runAsNode fuse。
  *
+ *   例外：MCP stdio（见文末 createMcpStdioLauncher）。stdio 握手必须能写子进程 stdin，
+ *   而 utilityProcess 句柄没有 stdin；那条线单独走 Node 语义 + ELECTRON_RUN_AS_NODE。
+ *
  * 生命周期 authority 仍然只有一个：RuntimeSupervisor。
  * 本模块只负责 spawn / stdio 归一化 / kill，**不做**任何 quiescence 或 death 判定，
  * 也绝不决定是否执行 write。
@@ -36,7 +39,7 @@ function createHandle() {
   const handle = {
     stdout: "",
     stderr: "",
-    // stdin 只对 Node child 有意义（gated test fixture 用）；utility child 为 null。
+    // Node child（tests + MCP stdio，见 createMcpStdioLauncher）有 stdin；utility child 为 null。
     stdin: null,
     pid: null,
     exitCode: null,
@@ -68,13 +71,15 @@ function createHandle() {
 
 /** 把 Node ChildProcess 归一化成 launcher contract。 */
 class NodeChildProcessLauncher {
-  constructor({ nodePath = process.execPath, spawnImpl = spawn } = {}) {
+  constructor({ nodePath = process.execPath, spawnImpl = spawn, extraEnv = null } = {}) {
     this.nodePath = nodePath;
     this.spawnImpl = typeof spawnImpl === "function" ? spawnImpl : spawn;
+    /* launcher 固定追加、调用方 env 无法覆盖的环境（MCP stdio 用它给子进程 ELECTRON_RUN_AS_NODE）。 */
+    this.extraEnv = sanitizeEnv(extraEnv);
     this.available = true;
   }
   launch({ entry, args = [], env = {} } = {}) {
-    const child = this.spawnImpl(this.nodePath, [entry, ...args], { stdio: ["pipe", "pipe", "pipe"], env: sanitizeEnv(env) });
+    const child = this.spawnImpl(this.nodePath, [entry, ...args], { stdio: ["pipe", "pipe", "pipe"], env: { ...sanitizeEnv(env), ...this.extraEnv } });
     const handle = createHandle();
     handle.pid = child.pid == null ? null : child.pid;
     handle.stdin = child.stdin || null;
@@ -218,4 +223,32 @@ function createDefaultExecutorLauncher() {
   return selectExecutorLauncher({ isElectronMain, utilityProcess });
 }
 
-module.exports = { NodeChildProcessLauncher, ElectronUtilityProcessLauncher, UnavailableExecutorLauncher, selectExecutorLauncher, createDefaultExecutorLauncher, sanitizeEnv };
+/**
+ * MCP stdio 的传输 launcher（D5-03-D2 修复）。
+ *
+ * 为什么不能复用上面的 ElectronUtilityProcessLauncher：真实 Electron 44.3.0 下
+ * utilityProcess.fork() 返回的句柄**没有 stdin**（探针：stdinType=undefined /
+ * stdinHasWrite=false），而 MCP stdio 的每一帧请求都要写进子进程 stdin ——
+ * 生产路径因此永远握不上手（MCP_UNREACHABLE detail=stdin-unavailable）。
+ *
+ * 这里改用 Node 语义：spawn(process.execPath, [entry, ...args]) 并给子进程追加
+ * ELECTRON_RUN_AS_NODE=1。理由：
+ *   · ELECTRON_RUN_AS_NODE 是 Electron 官方文档的"以纯 Node 运行"模式：不起 browser
+ *     进程、不加载 app main、不开窗口 —— 正是"把 Electron 自带运行时当 node 用"；
+ *     这不是上面 D4-04 禁止的"把 Electron 当 app main 碰巧跑起来"。
+ *   · entry/args/env 仍由 mcp-domain 白名单在主进程固定映射（渲染层只能给 serverKey）；
+ *     ELECTRON_RUN_AS_NODE 由本工厂追加、调用方 env 覆盖不了 —— 白名单边界不放宽。
+ *   · 纯 Node（tests）与 Electron main 走**同一个** NodeChildProcessLauncher 实现，
+ *     不再有"测试走 Node、生产走 utility"的双路径。
+ *
+ * 风险（如实记录）：若将来打包用 @electron/fuses 关掉 RunAsNode，ELECTRON_RUN_AS_NODE
+ * 会被忽略；此时子进程不会成为 Node，MCP 握手会在有界超时内失败并回
+ * MCP_UNREACHABLE / MCP_TIMEOUT（fail closed，不假装连接成功）。本仓库当前没有
+ * 打包/关 fuse 的配置；真要关 fuse 就必须换回 utilityProcess + 仓库内 shim 的传输。
+ */
+function createMcpStdioLauncher({ isElectronMain = !!(process.versions.electron && process.type === "browser"), execPath = process.execPath, spawnImpl = spawn } = {}) {
+  if (!isElectronMain) return new NodeChildProcessLauncher({ spawnImpl });
+  return new NodeChildProcessLauncher({ nodePath: execPath, spawnImpl, extraEnv: { ELECTRON_RUN_AS_NODE: "1" } });
+}
+
+module.exports = { NodeChildProcessLauncher, ElectronUtilityProcessLauncher, UnavailableExecutorLauncher, selectExecutorLauncher, createDefaultExecutorLauncher, createMcpStdioLauncher, sanitizeEnv };
