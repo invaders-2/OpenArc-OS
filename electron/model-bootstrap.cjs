@@ -30,21 +30,32 @@ function createModelBundle({ identityStore, authorization, authStore, userDataDi
    * D5-02 起 **canvas 是独立 App Principal**（画布页面的模型调用以 canvas 身份被授权与审计）；
    * 其余 App 默认 DENY。
    *
-   * 为什么按组织重复调用：数据库可能在还没有任何用户时就装配完成（首次运行先建库、后注册管理员），
+   * 数据库可能在还没有任何用户时就装配完成（首次运行先建库、后注册管理员），
    * 那时既没有 team 也没有 admin，一次性 seed 会把授予落到 organization_id=""，谁都匹配不到。
-   * 因此宿主在拿到会话时对该会话的组织再 seed 一次（upsert 幂等）。
+   * 因此宿主在拿到会话时对该会话的组织再 seed 一次。
+   *
+   * 播种语义（v21 起）：**首次使用才给，撤销后永不再给**。app_policy_provisions 按
+   * (organization_id, app_id, 'model') 记录是否已提供过；有记录（无论是否已撤销）就跳过。
+   * 这一条是对"撤销（删行）下次登录又被种回来"的正面修复，不是幂等优化。
    */
   const seedModelAppPolicy = ({ organizationId = null, grantedBy = "system:model-baseline" } = {}) => {
     if (!organizationId) return { ok: false, error: "NO_ORGANIZATION" };
     try {
       authStore.upsertApp({ appId: HOST_APP_ID, name: "系统设置", publisher: "openarc-builtin", status: "enabled", builtIn: 1 });
       authStore.upsertApp({ appId: "canvas", name: "无限画布", publisher: "openarc-builtin", status: "enabled", builtIn: 1 });
-      const seed = (appId, actions) => { if (authStore.appById(appId)) authStore.upsertAppGrant({ appId, resourceType: "model", actions, grantedBy, organizationId }); };
-      seed(HOST_APP_ID, ["model.view", "model.use", "model.manage", "model.test"]);
-      seed("resource-library", ["model.view", "model.use"]);
-      seed("ai", ["model.view", "model.use", "model.test"]);
-      seed("canvas", ["model.view", "model.use"]);
-      return { ok: true };
+      const seed = (appId, actions) => {
+        if (!authStore.appById(appId)) return false;
+        if (authStore.policyProvisionByKey({ organizationId, appId, policyKey: "model" })) return false;
+        authStore.upsertAppGrant({ appId, resourceType: "model", actions, grantedBy, organizationId });
+        return true;
+      };
+      const seeded = [
+        seed(HOST_APP_ID, ["model.view", "model.use", "model.manage", "model.test"]),
+        seed("resource-library", ["model.view", "model.use"]),
+        seed("ai", ["model.view", "model.use", "model.test"]),
+        seed("canvas", ["model.view", "model.use"]),
+      ].some(Boolean);
+      return { ok: true, seeded };
     } catch {
       return { ok: false, error: "SEED_FAILED" };
     }

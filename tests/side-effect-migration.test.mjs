@@ -51,7 +51,7 @@ test("v12 -> current：side_effect_calls / tool_approvals / side_effect_leases �
   const { root, dbPath, storeRoot, snapshot } = await makeV12Db();
   try {
     const reopened = reopenResourceRuntime({ dbPath, storeRoot });
-    assert.equal(SCHEMA_VERSION, 20);
+    assert.equal(SCHEMA_VERSION, 21);
     assert.equal(reopened.identity.schemaVersion, SCHEMA_VERSION);
     for (const t of V13_TABLES) assert.equal(hasTable(reopened.identity.connection, t), true, t + " 应存在");
     assert.ok(colsOf(reopened.identity.connection, "side_effect_calls").includes("recovery_safe"), "v14 应有 recovery_safe");

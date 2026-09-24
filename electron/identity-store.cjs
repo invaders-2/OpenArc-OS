@@ -57,10 +57,15 @@ const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domai
  *   v19（UI/D3-01b 集成线）：users 增加 avatar_ref TEXT（可空），承载显示名之外的资料字段；
  *   v20（D5-03 第一批 · MCP 中心）：mcp_connections 连接记录 + mcp_credentials 凭据元数据
  *        + mcp_connection_logs 测试日志（raw secret 只进 OS 安全后端，库里只有 credential_ref）。
+ *   v21（D5-03 第二批 · 授权收口）：app_policy_provisions 内置策略提供记录（"首次使用才给、
+ *        撤销后永不再给"的持久依据），并把 organization_id 纳入 app_resource_grants 唯一键
+ *        （SQLite 改不了约束，按既有迁移做法重建表，逐行搬运）。
+ *        迁移历史：session 事件里无条件重 upsert baseline → 撤销（删行）在下次登录被复活；
+ *        唯一键不含 organization_id → 两个组织对同一 (app,type,scope) 的授权互相覆盖。
  * 核心线已升到 v18 的库继续往上走 v19（avatar_ref 幂等补列）；
  * 集成线已升到 v17 的库补跑 v18/v19（画布文档层与运行归属表）。
  */
-const SCHEMA_VERSION = 20;
+const SCHEMA_VERSION = 21;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -1266,6 +1271,188 @@ CREATE TABLE IF NOT EXISTS mcp_connection_logs (
 CREATE INDEX IF NOT EXISTS idx_mcp_connection_logs ON mcp_connection_logs(connection_id, at DESC, id DESC);
 `;
 
+/**
+ * D5-03 第二批 v21 · 内置策略提供记录 + app_resource_grants 跨组织唯一键。
+ *
+ * ## 为什么需要"提供记录"
+ *
+ * 内置 App baseline（resource / model / mcp）原本靠"会话事件里再 upsert 一次"保证按组织落位，
+ * 但 upsert 是无条件的：治理侧 revokeAppGrant 是**删行**，于是"撤了 → 下次登录又种回来"。
+ * 这里把"这个组织的这个 App 的这一族 baseline 是否已经给过"变成持久事实：
+ *
+ *   · 没有记录  ⇒ 首次使用：种 baseline + 记录 provisioned_at/provisioned_by
+ *   · 有记录    ⇒ 无论是否撤销，**不再 upsert**（撤销后永不再给）
+ *   · revoked   ⇒ 保持撤销；只有治理侧正式重授（写同一形状的 grant）才清掉撤销标记
+ *
+ * 键是 (organization_id, app_id, policy_key)：policy_key 是 baseline 家族名
+ * （resource / model / mcp / tool），不是单条 grant —— 一族 baseline 可能写多行
+ * （例如 resource-library 的全局行 + memory 行），它们同生同灭。
+ *
+ * provisioned_at 与 revoked_at 都可空，因为两者都可能"确实不知道"：迁移分不清
+ * "从未播种"与"曾经撤销"，只能按可恢复的证据（现存 grant 行、authorization_audit
+ * 里的治理撤销行）尽量补；只有撤销证据的行 provisioned_at 为 NULL。
+ *
+ * ## 为什么重建 app_resource_grants
+ *
+ * 旧唯一键 UNIQUE (app_id, resource_id, collection_id, resource_type, department_id, scope)
+ * 不含 organization_id，而 upsert 的 ON CONFLICT 又固定写 organization_id = excluded.organization_id
+ * —— 两个组织对同一 (app, type, scope) 的授权会互相覆盖，谁后写谁赢。SQLite 不能改约束，
+ * 只能建新表 → 逐行搬运（id 与全部字段原样保留）→ 换名。与 v17/v18 同一条约定：全部幂等，
+ * 重放（测试会把 user_version 降回去再重放迁移链）不会重复搬运或丢行。
+ */
+const APP_POLICY_KEYS = Object.freeze(["resource", "model", "mcp", "tool"]);
+
+const SCHEMA_V21_POLICY_SQL = `
+CREATE TABLE IF NOT EXISTS app_policy_provisions (
+  organization_id TEXT    NOT NULL,
+  app_id          TEXT    NOT NULL,
+  policy_key      TEXT    NOT NULL CHECK (policy_key IN ('resource','model','mcp','tool')),
+  provisioned_at  INTEGER,
+  provisioned_by  TEXT,
+  revoked_at      INTEGER,
+  revoked_by      TEXT,
+  updated_at      INTEGER NOT NULL,
+  PRIMARY KEY (organization_id, app_id, policy_key)
+);
+CREATE INDEX IF NOT EXISTS idx_app_policy_provisions_app ON app_policy_provisions(app_id);
+`;
+
+const SCHEMA_V21_APP_GRANTS_SQL = `
+CREATE TABLE IF NOT EXISTS app_resource_grants_v21 (
+  id              TEXT PRIMARY KEY,
+  app_id          TEXT NOT NULL REFERENCES app_principals(app_id),
+  resource_id     TEXT NOT NULL DEFAULT '',
+  collection_id   TEXT NOT NULL DEFAULT '',
+  resource_type   TEXT NOT NULL DEFAULT '',
+  department_id   TEXT NOT NULL DEFAULT '',
+  scope           TEXT NOT NULL DEFAULT '',
+  actions         TEXT NOT NULL,
+  granted_by      TEXT,
+  organization_id TEXT NOT NULL,
+  created_at      INTEGER NOT NULL,
+  expires_at      INTEGER,
+  UNIQUE (organization_id, app_id, resource_id, collection_id, resource_type, department_id, scope)
+);
+`;
+
+/**
+ * 授权行 → 策略家族（app 级授权）。针对具体 resource / collection / department 的授权
+ * 返回 null —— 它们**不得**影响 baseline 提供记录。
+ *
+ * 只按动作命名空间认族：resource_type '' / 'model' / 'mcp' / 'tool' 分别对应四族；
+ * 'image' / 'memory' 这类"某一种资源类型"的定向行不是 baseline。
+ * 入参形状固定为数据库行的列名（snake_case）—— 调用方传 grant 行本身，或按列名转一次。
+ */
+function policyFamilyOfAppGrant(row) {
+  if (!row) return null;
+  if (String(row.resource_id || "") || String(row.collection_id || "") || String(row.department_id || "")) return null;
+  const type = String(row.resource_type || "");
+  if (type === "") return "resource";
+  if (type === "model" || type === "mcp" || type === "tool") return type;
+  return null;
+}
+
+/**
+ * baseline 形状 → 策略家族；不是 baseline 形状返回 null。写墓碑与"已提供"事实只认这个形状。
+ *
+ * baseline = app 级（三个 id 全空）且 scope 是 baseline 字样：
+ *   · scope = ''      → resource / model / mcp 族的全局基线；
+ *   · scope = 'TOOL'  → tool 族（tool 授权只走 scope=TOOL 专用入口）。
+ * scope = 'ORGANIZATION' 这类同族但非基线字样的正式授权**不算** baseline：
+ * 它清墓碑（正式重授），但不冒充"系统播种过"。
+ */
+function baselinePolicyKeyOf(row) {
+  const family = policyFamilyOfAppGrant(row);
+  if (!family) return null;
+  const scope = String((row && row.scope) || "");
+  if (family === "tool") return scope === "TOOL" ? "tool" : null;
+  return scope === "" ? family : null;
+}
+
+/** 审计行里的动作投影 → 策略家族（迁移补证据用；只认 namespace 前缀）。 */
+function policyKeyOfAuditActions(oldPermissions) {
+  let list = [];
+  try {
+    const parsed = JSON.parse(oldPermissions || "[]");
+    if (Array.isArray(parsed)) list = parsed.map(String);
+  } catch { list = []; }
+  if (list.some((a) => a.startsWith("mcp."))) return "mcp";
+  if (list.some((a) => a.startsWith("model."))) return "model";
+  if (list.some((a) => a.startsWith("tool."))) return "tool";
+  if (list.some((a) => a.startsWith("resource."))) return "resource";
+  return null;
+}
+
+/**
+ * v21 的证据补写。两轮，都只补"能证明的"：
+ *   ① 现存 baseline 形状的 grant 行 ⇒ provisioned_at = 最早一行 created_at（当前有效，未撤销）；
+ *   ② authorization_audit 里的治理撤销行（action=governance.revokeAppPermission，
+ *      resource_ref / department_id 为空）⇒ revoked_at = 撤销时刻。已有 ① 的记录时不覆盖
+ *      （grant 行还在就说明撤销之后又正式授过）。
+ *
+ * 诚实边界（见交付说明）：审计表没有 organization_id，只能用 actor 所在 team 反推
+ * （撤销本身被 before.organization_id === gate.user.team_id 约束，故该映射成立）；
+ * 且 audit 只记 resource_ref / department_id，"collection 定向行"的撤销与 baseline 撤销
+ * 同形，可能把"从未提供"误标成"已撤销"——保守方向（绝不复活已撤权限），
+ * 代价是该 App 的 baseline 不再补种。
+ */
+function backfillPolicyProvisions(db) {
+  const insert = db.prepare(
+    "INSERT INTO app_policy_provisions (organization_id, app_id, policy_key, provisioned_at, provisioned_by, revoked_at, revoked_by, updated_at) " +
+      "VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(organization_id, app_id, policy_key) DO NOTHING",
+  );
+  // 逐行取回（不 GROUP BY）：provisioned_by 必须是**最早那条**的 granted_by，聚合函数给不出这个对应关系。
+  const grantRows = db.prepare(
+    "SELECT organization_id, app_id, resource_type, scope, created_at, granted_by FROM app_resource_grants " +
+      "WHERE resource_id = '' AND collection_id = '' AND department_id = '' " +
+      "  AND ((scope = '' AND resource_type IN ('', 'model', 'mcp')) OR (scope = 'TOOL' AND resource_type = 'tool')) " +
+      "ORDER BY created_at, id",
+  ).all();
+  const firstEvidence = new Map();
+  for (const row of grantRows) {
+    const policyKey = baselinePolicyKeyOf(row);
+    if (!policyKey) continue;
+    const key = row.organization_id + "|" + row.app_id + "|" + policyKey;
+    if (!firstEvidence.has(key)) firstEvidence.set(key, { row, policyKey });
+  }
+  for (const { row, policyKey } of firstEvidence.values()) {
+    const at = Number(row.created_at == null ? 0 : row.created_at);
+    insert.run(String(row.organization_id), String(row.app_id), policyKey, at, row.granted_by == null ? null : String(row.granted_by), null, null, at);
+  }
+
+  const revokes = db.prepare(
+    "SELECT a.at AS at, a.app_id AS app_id, a.actor_user_id AS actor_user_id, a.old_permissions AS old_permissions, u.team_id AS team_id " +
+      "FROM authorization_audit a JOIN users u ON u.id = a.actor_user_id " +
+      "WHERE a.action = 'governance.revokeAppPermission' AND a.app_id IS NOT NULL " +
+      "  AND a.resource_ref IS NULL AND a.department_id IS NULL ORDER BY a.at",
+  ).all();
+  for (const row of revokes) {
+    const policyKey = policyKeyOfAuditActions(row.old_permissions);
+    if (!policyKey || !row.team_id) continue;
+    const at = Number(row.at == null ? 0 : row.at);
+    insert.run(String(row.team_id), String(row.app_id), policyKey, null, null, at, row.actor_user_id == null ? null : String(row.actor_user_id), at);
+  }
+}
+
+/** v21 的唯一键重建：逐行搬运既有授权（id 与全部字段不变、一条不丢），再换名。可重放。 */
+function rebuildAppGrantUniqueKey(db) {
+  db.exec(SCHEMA_V21_APP_GRANTS_SQL);
+  db.exec("DELETE FROM app_resource_grants_v21");
+  db.exec(
+    "INSERT INTO app_resource_grants_v21 (id, app_id, resource_id, collection_id, resource_type, department_id, scope, actions, granted_by, organization_id, created_at, expires_at) " +
+      "SELECT id, app_id, resource_id, collection_id, resource_type, department_id, scope, actions, granted_by, organization_id, created_at, expires_at FROM app_resource_grants",
+  );
+  db.exec("DROP TABLE app_resource_grants");
+  db.exec("ALTER TABLE app_resource_grants_v21 RENAME TO app_resource_grants");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_agrants_app ON app_resource_grants(app_id)");
+}
+
+function applyPolicyProvisionLayer(db) {
+  db.exec(SCHEMA_V21_POLICY_SQL);
+  backfillPolicyProvisions(db);
+  rebuildAppGrantUniqueKey(db);
+}
+
 const MIGRATIONS = Object.freeze([
   { version: 1, sql: SCHEMA_SQL },
   { version: 2, sql: SCHEMA_V2_SQL },
@@ -1301,6 +1488,7 @@ const MIGRATIONS = Object.freeze([
     },
   },
   { version: 20, sql: SCHEMA_V20_SQL },
+  { version: 21, run: applyPolicyProvisionLayer },
 ]);
 
 const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000; // 12h 绝对上限
@@ -2523,6 +2711,10 @@ module.exports = {
   SCHEMA_V8_SQL,
   SCHEMA_V9_SQL,
   SCHEMA_V20_SQL,
+  SCHEMA_V21_POLICY_SQL,
+  APP_POLICY_KEYS,
+  baselinePolicyKeyOf,
+  policyFamilyOfAppGrant,
   MIGRATIONS,
   IdentityStore,
   DEFAULT_TTL_MS,

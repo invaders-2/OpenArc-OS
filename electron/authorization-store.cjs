@@ -12,6 +12,8 @@
 "use strict";
 
 const domain = require("./authorization-domain.cjs");
+// 形状判据只有一份实现：提供记录的表与迁移都在 identity-store，这里复用同一对函数。
+const { baselinePolicyKeyOf, policyFamilyOfAppGrant } = require("./identity-store.cjs");
 const { ok, fail, newId, REASON, PRINCIPAL, SCOPE } = domain;
 
 const SQL = {
@@ -73,12 +75,23 @@ const SQL = {
   upsertAppGrant:
     "INSERT INTO app_resource_grants (id, app_id, resource_id, collection_id, resource_type, department_id, scope, actions, granted_by, organization_id, created_at, expires_at) " +
     "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) " +
-    "ON CONFLICT(app_id, resource_id, collection_id, resource_type, department_id, scope) DO UPDATE SET actions = excluded.actions, granted_by = excluded.granted_by, organization_id = excluded.organization_id, created_at = excluded.created_at, expires_at = excluded.expires_at",
+    "ON CONFLICT(organization_id, app_id, resource_id, collection_id, resource_type, department_id, scope) DO UPDATE SET actions = excluded.actions, granted_by = excluded.granted_by, created_at = excluded.created_at, expires_at = excluded.expires_at",
   appGrantById: "SELECT * FROM app_resource_grants WHERE id = ?",
   appGrantsForApp: "SELECT * FROM app_resource_grants WHERE app_id = ? ORDER BY created_at, id",
   allAppGrants: "SELECT * FROM app_resource_grants ORDER BY created_at, id",
   deleteAppGrant: "DELETE FROM app_resource_grants WHERE id = ?",
   deleteAppGrantsForResource: "DELETE FROM app_resource_grants WHERE resource_id = ? OR collection_id = ?",
+
+  upsertPolicyProvision:
+    "INSERT INTO app_policy_provisions (organization_id, app_id, policy_key, provisioned_at, provisioned_by, revoked_at, revoked_by, updated_at) " +
+    "VALUES (?,?,?,?,?,?,?,?) " +
+    "ON CONFLICT(organization_id, app_id, policy_key) DO UPDATE SET " +
+    "provisioned_at = CASE WHEN app_policy_provisions.provisioned_at IS NULL THEN excluded.provisioned_at ELSE app_policy_provisions.provisioned_at END, " +
+    "provisioned_by = CASE WHEN app_policy_provisions.provisioned_by IS NULL THEN excluded.provisioned_by ELSE app_policy_provisions.provisioned_by END, " +
+    "revoked_at = excluded.revoked_at, revoked_by = excluded.revoked_by, updated_at = excluded.updated_at",
+  clearPolicyRevoked: "UPDATE app_policy_provisions SET revoked_at = NULL, revoked_by = NULL, updated_at = ? WHERE organization_id = ? AND app_id = ? AND policy_key = ?",
+  policyProvisionByKey: "SELECT * FROM app_policy_provisions WHERE organization_id = ? AND app_id = ? AND policy_key = ?",
+  allPolicyProvisions: "SELECT * FROM app_policy_provisions ORDER BY organization_id, app_id, policy_key",
 
   insertAuthzAudit:
     "INSERT INTO authorization_audit (at, actor_user_id, target_user_id, app_id, department_id, resource_ref, action, decision, reason_code, permission_source, request_id, old_permissions, new_permissions) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -379,12 +392,35 @@ class AuthorizationStore {
     return { changed: res.changes > 0 };
   }
 
+  /**
+   * 写一条 App Grant。
+   *
+   * `organizationId` 是唯一键的一部分（v21 起）：同一 App 在不同组织各自的 grant 是不同行，
+   * 不再互相覆盖。baseline 形状的写入同时是"这一族 baseline 已提供"的持久证据 ——
+   * 它把 app_policy_provisions 的撤销标记清掉（正式重授 = 恢复；没有记录则建记录）。
+   */
   upsertAppGrant({ appId, resourceId = "", collectionId = "", resourceType = "", departmentId = "", scope = "", actions, grantedBy = null, organizationId, expiresAt = null, grantId = null } = {}) {
-    const existing = this.appGrantByKey({ appId, resourceId, collectionId, resourceType, departmentId, scope });
+    const organization = String(organizationId == null ? "" : organizationId);
+    const existing = this.appGrantByKey({ appId, resourceId, collectionId, resourceType, departmentId, scope, organizationId: organization });
     const id = existing?.id || grantId || newId("GRANT");
+    const now = this.clock();
     this.db
       .prepare(SQL.upsertAppGrant)
-      .run(id, String(appId), String(resourceId), String(collectionId), String(resourceType), String(departmentId), String(scope), J(actions), grantedBy, String(organizationId), this.clock(), expiresAt);
+      .run(id, String(appId), String(resourceId), String(collectionId), String(resourceType), String(departmentId), String(scope), J(actions), grantedBy, organization, now, expiresAt);
+    // baselinePolicyKeyOf 只认数据库行的列名（snake_case）—— 迁移补证据时传的就是真实行。
+    const shape = { resource_id: resourceId, collection_id: collectionId, resource_type: resourceType, department_id: departmentId, scope };
+    const policyKey = baselinePolicyKeyOf(shape);
+    if (policyKey) {
+      // 播种 / 基线形状的正式授予：记录"已提供"并清墓碑。
+      this.upsertPolicyProvision({ organizationId: organization, appId, policyKey, provisionedAt: now, provisionedBy: grantedBy });
+    } else {
+      // 同族但非基线字样（例如 scope='ORGANIZATION'）的正式授予：清墓碑，但不冒充"系统播种过"；
+      // 没有记录时什么都不做，避免一次定向授权挡住以后该族的首次播种。
+      const family = policyFamilyOfAppGrant(shape);
+      if (family && this.policyProvisionByKey({ organizationId: organization, appId, policyKey: family })) {
+        this.clearPolicyRevoked({ organizationId: organization, appId, policyKey: family });
+      }
+    }
     return { grant: this.appGrantById(id), created: !existing, previous: existing || null };
   }
 
@@ -392,13 +428,45 @@ class AuthorizationStore {
     return this.db.prepare(SQL.appGrantById).get(String(id || "")) || null;
   }
 
-  appGrantByKey({ appId, resourceId = "", collectionId = "", resourceType = "", departmentId = "", scope = "" } = {}) {
+  appGrantByKey({ appId, resourceId = "", collectionId = "", resourceType = "", departmentId = "", scope = "", organizationId } = {}) {
     const row = this.db
       .prepare(
-        "SELECT * FROM app_resource_grants WHERE app_id = ? AND resource_id = ? AND collection_id = ? AND resource_type = ? AND department_id = ? AND scope = ?",
+        "SELECT * FROM app_resource_grants WHERE organization_id = ? AND app_id = ? AND resource_id = ? AND collection_id = ? AND resource_type = ? AND department_id = ? AND scope = ?",
       )
-      .get(String(appId), String(resourceId), String(collectionId), String(resourceType), String(departmentId), String(scope));
+      .get(String(organizationId == null ? "" : organizationId), String(appId), String(resourceId), String(collectionId), String(resourceType), String(departmentId), String(scope));
     return row || null;
+  }
+
+  // -------------------------------------------------------------------------
+  // 内置策略提供记录（v21）
+  // -------------------------------------------------------------------------
+
+  /**
+   * 提供/撤销记录的唯一写入口。
+   *
+   *   · 提供（provisionedAt 非空、revokedAt 为空）：最早的 provisioned_* 保留，revoked_* 清空；
+   *   · 撤销（revokedAt 非空、provisionedAt 为空）：provisioned_* 保留（可能本来就是 NULL ——
+   *     "撤销证据在、提供证据不在"是迁移的诚实记录），只写 revoked_*。
+   */
+  upsertPolicyProvision({ organizationId, appId, policyKey, provisionedAt = null, provisionedBy = null, revokedAt = null, revokedBy = null } = {}) {
+    this.db
+      .prepare(SQL.upsertPolicyProvision)
+      .run(String(organizationId == null ? "" : organizationId), String(appId), String(policyKey), provisionedAt, provisionedBy, revokedAt, revokedBy, this.clock());
+    return this.policyProvisionByKey({ organizationId, appId, policyKey });
+  }
+
+  /** 正式重授清墓碑：只在记录已存在时清（不创建、不改 provisioned_*）。 */
+  clearPolicyRevoked({ organizationId, appId, policyKey } = {}) {
+    this.db.prepare(SQL.clearPolicyRevoked).run(this.clock(), String(organizationId == null ? "" : organizationId), String(appId), String(policyKey));
+    return this.policyProvisionByKey({ organizationId, appId, policyKey });
+  }
+
+  policyProvisionByKey({ organizationId, appId, policyKey } = {}) {
+    return this.db.prepare(SQL.policyProvisionByKey).get(String(organizationId == null ? "" : organizationId), String(appId), String(policyKey)) || null;
+  }
+
+  allPolicyProvisions() {
+    return this.db.prepare(SQL.allPolicyProvisions).all();
   }
 
   appGrantsForApp(appId) {
@@ -415,10 +483,20 @@ class AuthorizationStore {
     return { changed: res.changes > 0 };
   }
 
-  revokeAppGrant(grantId) {
+  /**
+   * 删一行 App Grant。baseline 形状的删除同时写"这一族 baseline 已被显式撤销"的墓碑，
+   * 下次登录/重启的播种据此跳过 —— 撤销因此是真持久，而不是"等下一次 upsert 复活"。
+   * 非 baseline 形状（针对具体 resource / collection / department）不动提供记录。
+   * `by` 是撤销者（主进程可信身份），只用于留痕。
+   */
+  revokeAppGrant(grantId, { by = null } = {}) {
     const before = this.appGrantById(grantId);
     if (!before) return { changed: false, grant: null, previous: null };
     const res = this.db.prepare(SQL.deleteAppGrant).run(String(grantId));
+    const policyKey = res.changes > 0 ? baselinePolicyKeyOf(before) : null;
+    if (policyKey) {
+      this.upsertPolicyProvision({ organizationId: before.organization_id, appId: before.app_id, policyKey, revokedAt: this.clock(), revokedBy: by });
+    }
     return { changed: res.changes > 0, grant: null, previous: before };
   }
 

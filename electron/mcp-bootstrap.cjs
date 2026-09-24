@@ -35,15 +35,20 @@ function createMcpBundle({ identityStore, authorization, authStore, userDataDir,
 
   /**
    * 内置 MCP 中心 App baseline（每个组织一份）：mcp-center 持有 mcp.* 四个动作。
-   * 为什么按组织重复调用：与 model-baseline 同因（首次运行先建库、后注册管理员），
-   * 宿主在拿到会话时对该会话的组织再 seed 一次（upsert 幂等）。
+   *
+   * 播种语义（v21 起，与 model / resource baseline 同一口径）：**首次使用才给，撤销后永不再给**。
+   * app_policy_provisions 记着 (organization_id, app_id, 'mcp') 是否已提供过 —— 有记录就跳过，
+   * 因此治理侧撤销（删行）不会被下一次登录/重启复活；要恢复必须走治理正式重授。
+   * 首次运行是"先建库、后注册管理员"，那时没有组织也没有记录，宿主在拿到会话时对该组织 seed 一次。
    */
   const seedMcpAppPolicy = ({ organizationId = null, grantedBy = "system:mcp-baseline" } = {}) => {
     if (!organizationId) return { ok: false, error: "NO_ORGANIZATION" };
     try {
       authStore.upsertApp({ appId: HOST_APP_ID, name: "MCP 中心", publisher: "openarc-builtin", status: "enabled", builtIn: 1 });
-      if (authStore.appById(HOST_APP_ID)) authStore.upsertAppGrant({ appId: HOST_APP_ID, resourceType: "mcp", actions: [...domain.MCP_ACTIONS_ALL], grantedBy, organizationId });
-      return { ok: true };
+      if (!authStore.appById(HOST_APP_ID)) return { ok: true, seeded: false };
+      if (authStore.policyProvisionByKey({ organizationId, appId: HOST_APP_ID, policyKey: "mcp" })) return { ok: true, seeded: false };
+      authStore.upsertAppGrant({ appId: HOST_APP_ID, resourceType: "mcp", actions: [...domain.MCP_ACTIONS_ALL], grantedBy, organizationId });
+      return { ok: true, seeded: true };
     } catch {
       return { ok: false, error: "SEED_FAILED" };
     }

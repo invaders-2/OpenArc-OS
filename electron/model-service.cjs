@@ -58,7 +58,7 @@ class ModelService {
     const actor = this.#actor(context);
     if (!actor.ok) return actor;
     if (!actor.isSuper) return { ok: false, error: domain.ERROR_CODE.PROXY_UNAUTHORIZED };
-    return { ok: true, ...this.authStore.transactSync(() => this.authStore.revokeAppGrant(grantId)) };
+    return { ok: true, ...this.authStore.transactSync(() => this.authStore.revokeAppGrant(grantId, { by: actor.user.id })) };
   }
 
   // ---- Provider ----

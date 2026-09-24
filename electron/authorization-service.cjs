@@ -1157,18 +1157,21 @@ class AuthorizationService {
   }
 
   /**
-   * App Grant 的动作命名空间分派：resource.* 走 D3-02 归一化；resource_type='model' 的 grant
-   * 承载 model.*（D4-01 与 resource grant 同表不同 namespace）。两者互不通用，tool.* 仍只走
-   * 专用入口 —— 因此这里既不放宽 resource 授权，也不允许跨 namespace 写入。
+   * App Grant 的动作命名空间分派：resource.* 走 D3-02 归一化；resource_type='model' / 'mcp'
+   * 的 grant 分别承载 model.*（D4-01）与 mcp.*（D5-03）。三者互不通用，tool.* 仍只走专用入口
+   * —— 因此这里既不放宽 resource 授权，也不允许跨 namespace 写入：
+   * mcp grant 里带 model.use / resource.read / tool.* 一律 INVALID_INPUT。
    */
   #normalizeAppGrantActions({ resourceType, actions, permissionSet }) {
-    if (String(resourceType || "") !== "model") return domain.normalizeGrantActions({ actions, permissionSet });
+    const type = String(resourceType || "");
+    if (type !== "model" && type !== "mcp") return domain.normalizeGrantActions({ actions, permissionSet });
     if (permissionSet != null) return null;
+    const known = type === "model" ? modelDomain.MODEL_ACTIONS_ALL : mcpDomain.MCP_ACTIONS_ALL;
     const list = actions == null ? [] : Array.isArray(actions) ? actions : [actions];
     const out = new Set();
     for (const a of list) {
       const act = String(a || "");
-      if (!modelDomain.MODEL_ACTIONS_ALL.includes(act)) return null;
+      if (!known.includes(act)) return null;
       out.add(act);
     }
     return [...out];
@@ -1223,7 +1226,7 @@ class AuthorizationService {
       return { ok: true, changed: false, reasonCode: REASON.NO_CHANGE };
     }
     if (before.organization_id !== gate.user.team_id) return { ok: false, error: REASON.CROSS_DEPARTMENT_DENIED };
-    this.store.transactSync(() => this.store.revokeAppGrant(grantId));
+    this.store.transactSync(() => this.store.revokeAppGrant(grantId, { by: gate.user.id }));
     this.#govAudit(gate, {
       action: GOVERNANCE_ACTION.REVOKE_APP_PERMISSION,
       decision: DECISION.ALLOW,

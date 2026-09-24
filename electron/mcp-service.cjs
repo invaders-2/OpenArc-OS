@@ -78,14 +78,20 @@ class McpService {
     return this.authStore.appGrantsForApp(appId).filter((g) => g.resource_type === "mcp" && (!g.organization_id || g.organization_id === actor.organizationId));
   }
 
+  /** 能力数据（工具目录）只有持有 mcp.use 的 App 才可见；mcp.view 只给连接状态。 */
+  #toolsVisible(auth) {
+    const actor = auth && auth.actor ? auth.actor : null;
+    const appId = auth && auth.app ? auth.app.app_id : null;
+    return !!actor && !!appId && this.#grantsFor(appId, actor).some((g) => domain.mcpGrantActions(g).includes(domain.MCP_ACTIONS.USE));
+  }
+
   /**
    * 渲染层投影：工具描述属能力数据，App 必须持有 mcp.use 才投影
    * （只有 mcp.view 时 tools 为空且 toolsHidden=true）。
    */
   #safe(row, auth) {
     const actor = auth && auth.actor ? auth.actor : null;
-    const appId = auth && auth.app ? auth.app.app_id : null;
-    const toolsVisible = !!actor && !!appId && this.#grantsFor(appId, actor).some((g) => domain.mcpGrantActions(g).includes(domain.MCP_ACTIONS.USE));
+    const toolsVisible = this.#toolsVisible(auth);
     const projected = domain.projectConnection(row, { toolsVisible });
     if (!projected || !actor) return projected;
     const isOrg = row.visibility === domain.VISIBILITY.ORGANIZATION;
@@ -324,7 +330,9 @@ class McpService {
       const result = await this.#handshake(this.store.connectionById(connectionId), { attempt: 1 });
       const fresh = this.store.connectionById(connectionId);
       if (!result.ok) return { ok: false, error: result.error, reachable: result.reachable !== false, status: fresh ? fresh.status : null, connection: fresh ? this.#safe(fresh, auth) : null };
-      return { ok: true, reachable: true, negotiated: result.snapshot, connection: this.#safe(fresh, auth) };
+      // negotiated 也是能力数据：没有 mcp.use 时不回工具名/描述/参数/hash（只保留计数与协商元信息）。
+      const negotiated = this.#toolsVisible(auth) ? result.snapshot : { ...result.snapshot, tools: [], toolsHash: null, toolsHidden: true };
+      return { ok: true, reachable: true, negotiated, connection: this.#safe(fresh, auth) };
     } finally {
       this.busy.delete(connectionId);
     }
@@ -335,7 +343,16 @@ class McpService {
     if (!row) return { ok: false, error: domain.ERROR_CODE.MCP_CONNECTION_NOT_FOUND, items: [] };
     const auth = this.#authorize({ context, action: domain.MCP_ACTIONS.VIEW, connection: row });
     if (!auth.ok) return { ok: false, error: auth.error, reason: auth.reason, items: [] };
-    const items = this.store.logsOfConnection(connectionId, limit).map((r) => ({ at: r.at, level: r.level, event: r.event, errorCode: r.error_code || null, detail: r.detail || null }));
+    // 日志里 TOOLS_DISCOVERED 的 detail 带 tools=<n> 与 hash 前缀；没有 mcp.use 的 App 只能看到计数，
+    // hash 必须抹掉 —— 否则"无权看工具目录"可以经 testLog 侧漏 hash。
+    const toolsVisible = this.#toolsVisible(auth);
+    const items = this.store.logsOfConnection(connectionId, limit).map((r) => ({
+      at: r.at,
+      level: r.level,
+      event: r.event,
+      errorCode: r.error_code || null,
+      detail: r.detail ? (toolsVisible ? String(r.detail) : String(r.detail).replace(/\s*hash=\S+/g, "")) : null,
+    }));
     return { ok: true, items, connectionId };
   }
 

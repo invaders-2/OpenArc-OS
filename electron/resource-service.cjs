@@ -70,12 +70,10 @@ class ResourceService {
     this.deviceService = deviceService;
     this.logger = logger;
     this.clock = typeof clock === "function" ? clock : identity.clock;
-    this.#builtinEnsured = new Set();
     this.#running = new Map();
     this.#progress = new Map();
   }
 
-  #builtinEnsured;
   #running;
   #progress;
 
@@ -92,19 +90,28 @@ class ResourceService {
     return this.store.contentObjectByChecksum(checksum, size) || this.store.insertContentObject({ checksum, size, internalKey: domain.contentInternalKey(checksum), organizationId });
   }
 
+  /**
+   * 内置 App 的 resource baseline：**按 (organization_id, app_id, 'resource') 首次提供一次**。
+   *
+   * 旧实现在内存 Set 里挡一次 —— 应用重启后内存清空，第一次资源操作又会 upsert 一遍，
+   * 于是被撤销的 baseline 同样复活。现在守卫是持久记录（app_policy_provisions）：
+   * 有记录就跳过（撤销后永不再给），没有记录才种。稳态下这里只做只读查询，不开写事务。
+   */
   #ensureBuiltinPolicy(context) {
     const ref = context && context.sessionRef;
     if (!ref || !this.authStore) return;
     const v = this.identity.validateSession(ref, { sensitive: false });
     if (!v.ok) return;
     const organizationId = v.user.team_id;
-    if (this.#builtinEnsured.has(organizationId)) return;
+    const pending = Object.entries(BUILTIN_APP_BASELINE).filter(
+      ([appId]) => this.authStore.appById(appId) && !this.authStore.policyProvisionByKey({ organizationId, appId, policyKey: "resource" }),
+    );
+    if (!pending.length) return;
     const admin = this.identity.allUsers().find((u) => u.role === "ADMIN" && u.team_id === organizationId) || null;
     const grantedBy = admin ? admin.id : "system:builtin-policy";
     try {
       this.store.transactSync(() => {
-        for (const [appId, spec] of Object.entries(BUILTIN_APP_BASELINE)) {
-          if (!this.authStore.appById(appId)) continue;
+        for (const [appId, spec] of pending) {
           this.authStore.upsertAppGrant({ appId, actions: spec.actions, grantedBy, organizationId });
           for (const extra of spec.scoped || []) {
             this.authStore.upsertAppGrant({ appId, ...extra, grantedBy, organizationId });
@@ -114,7 +121,6 @@ class ResourceService {
     } catch {
       return;
     }
-    this.#builtinEnsured.add(organizationId);
   }
 
   #validateTarget({ organizationId, scope, departmentId, collectionId }) {
