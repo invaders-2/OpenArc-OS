@@ -1248,9 +1248,9 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 
 > **范围来源**：用户 2026-09-24 的范围修正（原文要点）：① 入口 = 用户截图里的「无限画布」首页（开始创作 / 继续上次 / 画布卡片列表），点这些入口直接打开真实编辑器，不再有额外欢迎页或选画布遮挡层；② 去掉 NOVAI 完整应用的左侧导航与其他子页面入口，以及 OpenArc 画布宿主顶部操作条 / 状态行 / 提示横幅；保留首页 ↔ 编辑器返回路径；③ 供应商与模型只有 OpenArc 总 API 设置一个来源（列表 / 默认值 / 可用状态 / 实际调用都来自统一模型服务，遵守个人团队配置、授权、撤权、凭据隔离；不用 NOVAI 配置页、静态清单、独立密钥、直连）；后端没有的能力（视频传输等）未接通就明确显示不可用，不能显示为已连接；④ 不许用 CSS 遮挡冒充完成；首页→画布通信、保存、权限、账号隔离都要正常；⑤ 用真实 Electron 分别验收：首页、新建、继续上次、打开已有画布、返回首页、无模型、模型被停用或撤权、各已支持模型的真实调用；截图对照首页基准；功能 / 视觉 / 动效分别记录。
 >
-> **本轮为定稿**：功能 / 视觉 / 动效均已取得实测证据（见 §3 / §5）。**（第十一批更正）** 用户首页基准图已落盘本工作区并完成逐项对照：能比的项判「一致」，数据性与条件性差异判「未验收」，**不整体宣布"视觉通过"**；明细见 §5.1「首页视觉基准对照」。**（第十四批定稿）** 最终门禁 = **50 PASS / 0 FAIL / 50、exit 0**（被测 commit `2a97b95`）；保存竞争（关闭条件③）与 MOTION_SYSTEM §6（关闭条件②）均已实现并有实机证据；判定与关闭条件见 §7。本节数字全部来自命令或证据文件。
+> **本轮为定稿**：功能 / 视觉 / 动效均已取得实测证据（见 §3 / §5）。**（第十一批更正）** 用户首页基准图已落盘本工作区并完成逐项对照：能比的项判「一致」，数据性与条件性差异判「未验收」，**不整体宣布"视觉通过"**；明细见 §5.1「首页视觉基准对照」。**（第十七批定稿）** 最终门禁 = **52 PASS / 0 FAIL / 52、exit 0**（被测 commit `4dfe923`，工作树干净）；保存竞争（关闭条件③）与 MOTION_SYSTEM §6（关闭条件②）均已实现并有实机证据；**F3g / F3h（第十五 / 十六批）都已包含在最终门禁里**；判定与关闭条件见 §7。本节数字全部来自命令或证据文件。
 
-> **（第十五批收口 · 2026-09-24）** 用户裁定首页右下角回收站 FAB「回收站为空时隐藏，有已删除画布时显示」。已按 vendor 幂等补丁实现（不新造第二套事实，与角标同一个 `v4DeletedCanvases.length`）+ 真实 Electron 四态实测 + 在**回收站为空**的条件下重截首页：视觉对照里这一项从「不一致（版本差异 · 待用户裁定）」改为**一致**（同窗口逐像素 mean|diff| 0.62/255、>24 占 0.00%）。**关闭条件①由此关闭 → D5-02 升级 PASS（限定范围）**。细节见 §2 第 14 条 / §3 / §5.1 / §7。
+> **（第十五批收口 · 2026-09-24）** 用户裁定首页右下角回收站 FAB「回收站为空时隐藏，有已删除画布时显示」。已按 vendor 幂等补丁实现（不新造第二套事实，与角标同一个 `v4DeletedCanvases.length`）+ 真实 Electron 四态实测 + 在**回收站为空**的条件下重截首页：视觉对照里这一项从「不一致（版本差异 · 待用户裁定）」改为**一致**（同窗口逐像素 mean|diff| 0.62/255、>24 占 0.00%）。**关闭条件①由此关闭 → D5-02 升级 PASS（限定范围）**。细节见 §2 第 14 条 / §3 / §5.1 / §7。**（第十七批定稿）** 最终门禁 = **52 PASS / 0 FAIL / 52、exit 0**（被测 commit `4dfe923`，工作树干净），比上一版新增 **F3g**（FAB 显隐四态）与 **F3h**（卡片菜单真实产品路径，宿主 iframe 补 `allow-modals`）；两条都是纯新增（99 增 / 0 删、102 增 / 0 删），F3g 与全部既有断言一行未改；tracked 证据已按最终 artifact 重生成（52 条 checks，sha256 `33f9de17…`）。
 
 ## 1. 任务状态
 
@@ -1274,7 +1274,7 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 | 各已支持模型的真实调用（文本 / 图片 / 失败如实） | **已完成** | B2 / B3 / B4 |
 | 图片资源产品链（导入 / 重开 / 删除失效） | **已完成**（`9aabefe` 修 F3b） | F3a / F3b / F3c |
 | AI 编辑正式链（提议 → 审批 → 执行 → 呈现 → 保存重开） | **已完成**（`527176e` 修 F4） | F4b / F4 |
-| 真实 Electron 门禁（最终 · 第十四批） | **已完成** | **50 PASS / 0 FAIL / 50，exit 0**（被测 commit `2a97b95`；比上轮新增 F3e / F3f）；`notVerified: []`；Z1 = clean；artifact `artifacts/d5-02/d5-02-canvas-e2e.json`（sha256 `7579e32c…`）；见 §3 |
+| 真实 Electron 门禁（最终 · 第十七批定稿） | **已完成** | **52 PASS / 0 FAIL / 52，exit 0**（被测 commit `4dfe923`，工作树干净；比上轮新增 F3e / F3f / **F3g** / **F3h**）；`notVerified: []`；Z1 = clean；artifact `artifacts/d5-02/d5-02-canvas-e2e.json`（sha256 `33f9de17…`，本批 `shasum -a 256` 复核）；见 §3 |
 | 保存竞争（关闭条件③）：500ms 待保存窗口内本地编辑撞上宿主 / AI 改动被静默覆盖（`4525ab8` 修复） | **已完成** | 三方合并（base = 最后一次成功同步 / local / remote），同字段冲突 → 本地留原位 + 远端复制 `<id>-remote`；只重发合并结果、最多 2 次，达上限明确停止（不盲重试 409、debounce 一字未动）；F3e + `tests/d5-02-canvas-merge.test.mjs` 12/12；见 §2 第 12 条 |
 | MOTION_SYSTEM §6「AI 新增节点 160ms 淡入 + 来源标记」（关闭条件②，`4525ab8` 实现） | **已完成** | 账本 `actorKind=AGENT` + `APPLIED` 口径；160ms `cubic-bezier(.2,0,0,1)` 淡入一次（整层重建不重播）+ 中性「AI」标记；减少动态效果下 animation:none、opacity 立即 1；F3f + `tests/d5-02-canvas-ai-marks.test.mjs` 11/11；见 §2 第 13 条 |
 | D1（高）：编辑器本地保存后宿主改动永不呈现（`5b77186` 修复） | **已完成** | `public/novai-canvas/static/js/canvas.js:1642` + vendor 补丁 `experiments/d5-02/vendor-novai-app.mjs:103` + `public/novai-canvas/SOURCE.md:44`；F3d 实测 1820ms 呈现、revision 10 → 10 |
@@ -1309,26 +1309,26 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
     - **修复前对照（未改 dist，真机 · 隔离 userData + CDP + 三步向导）**：卡片菜单「删除 / 重命名 / 复制画布」点下去 **0 个对话框事件**；控制台 3 条 `Ignored call to 'prompt()' / 'confirm()'. The document is sandboxed, and the 'allow-modals' keyword is not set.`；回收站 0 条；FAB 保持隐藏（`hidden=true` / `display:none` / 角标 0）。
     - **修复后（同一台架）**：confirm / prompt / alert **真的弹出**并被接受 —— `confirm: 确定要删除画布「…」吗？此操作可在回收站撤销。` ⇒ 卡片消失、`/api/canvases/trash` 长度 1、FAB `hidden=false` + `display:flex` + 角标 `1`；`confirm: 确定要复制画布「…」吗？` ⇒ 列表真的多出「… 副本」（2 本）；服务端 404 时上游 `alert('删除失败')` 真的弹出；跑完用产品入口（FAB → 清空回收站 → 二次确认）清回 0 条 + FAB 隐藏；0 条 `Ignored call to …`。
     - **仍存在的宿主边界（与 sandbox 无关，如实登记）**：Electron 本身不支持 `prompt()`（顶层页实测 `prompt() is not supported.`；sandbox 帧里返回 `null`，对话框事件能捕获但拿不到输入）⇒「重命名」入口只到「prompt 对话框真的弹出（消息 `重命名画布` + 默认值 = 画布名）」为止；要让重命名真正可用，需把上游 `prompt` 换成应用内模态（产品决定，本批未做）。
-    - **门禁**：只新增 **F3h**（`experiments/d5-02/canvas-e2e.mjs`，98 增 / 0 删；F3g 与全部既有断言一行未改）。F3g 走产品命令层（`DELETE /api/canvases/:id` + 页面自取回收站）钉 FAB 显隐真源，F3h 走卡片菜单真实入口钉「模态对话真的弹出 + 真删除 + FAB 出现」，两条路径互不替代。独立探针 `experiments/d5-02/card-menu-modals-probe.mjs --phase=pre|post`（证据 `artifacts/d5-02/modals/{pre,post}-evidence.json` + `pre-*.png` / `post-*.png`）；F3h 逐字抽出的单独台架真机跑出 **PASS**（A0×2 + F3h，exit 0）。
+    - **门禁**：只新增 **F3h**（`experiments/d5-02/canvas-e2e.mjs`，**102 增 / 0 删**，本批 `git show --numstat bf8a6ba` 复核；F3g 与全部既有断言一行未改）。F3g 走产品命令层（`DELETE /api/canvases/:id` + 页面自取回收站）钉 FAB 显隐真源，F3h 走卡片菜单真实入口钉「模态对话真的弹出 + 真删除 + FAB 出现」，两条路径互不替代。独立探针 `experiments/d5-02/card-menu-modals-probe.mjs --phase=pre|post`（证据 `artifacts/d5-02/modals/{pre,post}-evidence.json` + `pre-*.png` / `post-*.png`）；F3h 逐字抽出的单独台架真机跑出 **PASS**（A0×2 + F3h，exit 0）。
     - **回归**：`npm run build` exit 0（tsc --noEmit + vite build）；`node --test tests/d5-02-canvas-*.test.mjs tests/d5-02-model-list-authorization.test.mjs` = 45 pass / 0 fail（6 个文件逐个复跑）；真机 E1（页面拿不到 window.openarc / Node / IPC / fs）、E4（伪造帧调用 0 回包）、E5（本地接收端 0 命中 + img / ws 被拦 + window.open 为 null）同台架复验通过；安全面探针 `experiments/d2-02/native/probes/02-security-surface.cjs` 只断言**外壳窗口**的 webPreferences 与冻结桥接面，不读应用 iframe 的 sandbox 字符串 —— 无需同步。
 
 ## 3. 门禁与回归（命令 / 退出码 / 计数 / 证据路径 / sha256）
 
-**产品门禁（真实 Electron · 第十四批定稿）**
+**产品门禁（真实 Electron · 第十七批定稿）**
 
 - 命令：`OPENARC_TESTED_COMMIT=$(git rev-parse HEAD) node experiments/d5-02/canvas-e2e.mjs`
-- 被测 commit：`2a97b95873652a23a20d1344cac42a75f81b38f2`（HEAD，工作树干净）
-- 结果：**50 PASS / 0 FAIL / 50，exit 0**（比上轮新增 F3e / F3f）；日志尾行 `结论：PASS — {"pass":50,"fail":0,"total":50,"notVerified":0}`、`GATE_EXIT=0`
-- 证据：`artifacts/d5-02/d5-02-canvas-e2e.json`（sha256 `7579e32c49f4aaafddb197be4a1b4e65336ddc8d6a01a4a30352e0b198b4f645`，本批 `shasum -a 256` 复核）；同名 `.log`；截图 `artifacts/d5-02/d5-02-app-*.png`（`artifacts/` 被 gitignore，证据留在本工作树）
+- 被测 commit：`4dfe9231565331fd14a822d754c76dde83c8aa3b`（HEAD，工作树干净）
+- 结果：**52 PASS / 0 FAIL / 52，exit 0**（比上轮新增 F3e / F3f / **F3g** FAB 显隐四态 / **F3h** 卡片菜单真实产品路径）；日志尾行 `结论：PASS — {"pass":52,"fail":0,"total":52,"notVerified":0}`、`GATE_EXIT=0`
+- 证据：`artifacts/d5-02/d5-02-canvas-e2e.json`（sha256 **`33f9de1774a204fe855c00d9ab19e3c56dc2f44be5a05fc783abdbe324e8a1a9`**，本批 `shasum -a 256` 复核）；同名 `.log`（尾行 `结论：PASS — {"pass":52,"fail":0,"total":52,"notVerified":0}`）；截图 `artifacts/d5-02/d5-02-app-*.png`（`artifacts/` 被 gitignore，证据留在本工作树）
 - `notVerified: []`；Z1 = clean（主进程无未处理错误）
-- tracked 证据：`docs/D5-02-SCOPE-CORRECTION-EVIDENCE.json`（50 条 checks 逐条脱敏复制 + counts / env / regression / assertionChanges / notVerified）
+- tracked 证据：`docs/D5-02-SCOPE-CORRECTION-EVIDENCE.json`（**52 条 checks** 逐条脱敏复制 + counts / env / regression / assertionChanges / notVerified；已按最终 artifact 重生成，含 F3g / F3h）
 - 本轮新增断言（只增不改）：**F3e** = 保存冲突双向保留（500ms 待保存窗口受控交错：页面本地编辑 + 宿主 IPC 改动两边都在；同一节点同一字段 → 本地原位 + 远端 `<id>-remote` 副本；关窗重开仍在）；**F3f** = MS §6（AI 新增节点带中性来源标记 + 160ms `cubic-bezier(.2,0,0,1)` 淡入 + 减少动态效果 `animation:none` / opacity 立即 1 + 用户新增不误标 + 每节点最多 1 个徽标）
-- **第十五批新增断言（只增不改）：F3g** = 回收站 FAB 显隐四态（空 ⇒ `hidden` + `display:none` + 不占布局 + 命中落空 + 角标不显示；真删一本 ⇒ 显示 + 角标计数 = 回收站列表长度 + 仍在右下角 + 命中落在 FAB 内；「恢复」⇒ 隐藏；「清空回收站」⇒ 隐藏）。`git diff --numstat` 对 `experiments/d5-02/canvas-e2e.mjs` = **99 增 / 0 删**（纯新增；0 删 ⇒ 既有断言既没删也没改，含 F3b / F3c / F3d / F3e / F3f / F4 / D1 / E1 / Z1）。F3g 已把该段**逐字抽出来**在真实 Electron + 隔离 userData 台架上跑过：**PASS**（台架 `/tmp/oa-probe/f3g-standalone.mjs`，控制台 0 错误；证据 `/tmp/oa-probe/f3g-standalone.json`）；**完整门禁由主线统一重跑，本轮不代填 51 项计数**
+- **第十五批新增断言（只增不改）：F3g** = 回收站 FAB 显隐四态（空 ⇒ `hidden` + `display:none` + 不占布局 + 命中落空 + 角标不显示；真删一本 ⇒ 显示 + 角标计数 = 回收站列表长度 + 仍在右下角 + 命中落在 FAB 内；「恢复」⇒ 隐藏；「清空回收站」⇒ 隐藏）。`git diff --numstat` 对 `experiments/d5-02/canvas-e2e.mjs` = **99 增 / 0 删**（纯新增；0 删 ⇒ 既有断言既没删也没改，含 F3b / F3c / F3d / F3e / F3f / F4 / D1 / E1 / Z1）。F3g 已把该段**逐字抽出来**在真实 Electron + 隔离 userData 台架上跑过：**PASS**（台架 `/tmp/oa-probe/f3g-standalone.mjs`，控制台 0 错误；证据 `/tmp/oa-probe/f3g-standalone.json`）；**完整门禁已在第十七批定稿：52 / 52、exit 0（见 §3）**
 - vendor 幂等（第十五批复跑）：`node experiments/d5-02/vendor-novai-app.mjs` 连跑两次 → `public/novai-canvas` 整棵树 **109 个文件逐字节一致**（合集 sha256 `197e3cdf945a1d7e…`）；`vendor/vendor-manifest.json` 的 `listHtmlHash` 两次相同（`aacb2cf8395f7b10`）
 - 首页基准重截（第十五批）：按与第十一批相同条件（内容区 1119x827、dpr2、缩放 100%、浅色、宿主默认玻璃、`scrollY=0`、轮播固定第 1 张、5 本画布）在**回收站为空**的条件下重截 `home-firstscreen-*.png` / `home-cards-*.png`（覆盖旧产物），并重跑 `compare.py` / `pixdiff.py` / `sidebyside.py` / `finalize.js` 更新 `manifest.json`（新增 `fabFix` 段）与三张并排图；新增 `side-by-side-fab-region.png`（FAB 窗口 3 倍放大）。整幅像素差与上一批同量级（整幅首屏 mean|diff| 14.21 → 14.20，卡片行 32.67 → 32.62）→ 重截没有引入新差异
 - 工作区并发说明（第十五批）：本轮期间同一工作树有**其它批次**同时改动 `electron/` / `src/` / `tests/`（D5-03 MCP 相关，非 D5-02 文件；`git status` 可见，本批未碰它们）。本批只改本节开头列出的 7 个文件；首页重截与两个真实 Electron 台架跑的是本批 20:19–20:20 `npm run build` 产出的 `dist`（含本批 vendor 补丁，不含 20:22 之后其它批次的 `src` 改动）；收尾的 `npm run build`（此时已包含并发改动）仍 **exit 0**
-- 检查项分组（50 条）：A 系列 12（A0 × 2 + A1–A10）；N 系列 8（N1–N4 / N6 / N5a / N5c / N5d）；B 系列 6（B1–B6）；D 系列 5（D1–D5）；F 系列 9（F1 / F3a–F3f / F4b / F4）；E 系列 9（E1–E8 含 E5b）；Z1
-- 门禁文件变更（可复核）：`git diff --numstat 5b77186 2a97b95 -- experiments/d5-02/canvas-e2e.mjs` = **145 增 / 0 删**（纯新增）；F1 / F3a / F3b / F3c / F4 / D1 / E1 / Z1 的断言语句在 `9aabefe` → `2a97b95` 各提交间**逐字节哈希相同**
+- 检查项分组（**52 条**）：A 系列 12（A0 × 2 + A1–A10）；N 系列 8（N1–N4 / N6 / N5a / N5c / N5d）；B 系列 6（B1–B6）；D 系列 5（D1–D5）；F 系列 **11**（F1 / F3a–F3h / F4b / F4）；E 系列 9（E1–E8 含 E5b）；Z1
+- 门禁文件变更（可复核）：`git diff --numstat 5b77186 2a97b95 -- experiments/d5-02/canvas-e2e.mjs` = **145 增 / 0 删**（纯新增）；第十五批 `git show --numstat a32c53d` = **99 增 / 0 删**、第十六批 `git show --numstat bf8a6ba` = **102 增 / 0 删**（都是纯新增）；F1 / F3a / F3b / F3c / F4 / D1 / E1 / Z1 的断言语句在 `9aabefe` → `2a97b95` 各提交间**逐字节哈希相同**
 
 **构建 / 单测**
 
@@ -1353,10 +1353,11 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 10. **F3f 只新增**：MS §6 标记 + 160ms `cubic-bezier(.2,0,0,1)` 淡入 + 减少动态效果即时呈现 + 用户新增不误标 + 每节点最多 1 个徽标；`2a97b95` 只把取注入层证据的路径改走 `primitives.aiMarks`，**判定条件未动**。
 11. **没有为了让测试变绿改任何断言**（本批可复核）：`5b77186` → `2a97b95` 对 `experiments/d5-02/canvas-e2e.mjs` 是 **145 增 / 0 删**（纯新增）；F1 / F3a / F3b / F3c / F4 / D1 / E1 / Z1 的断言语句在 `9aabefe` → `2a97b95` 各提交间**逐字节哈希相同**；两条预存在失败照旧单列、未改断言。
 12. **F3g 只新增（第十五批）**：回收站 FAB 显隐四态（空 / 真删一本 / 恢复 / 清空）；对本文件是 **99 增 / 0 删**（纯新增，0 删 ⇒ 既有断言一行未改）。删除与回收站刷新走产品自己的命令层（`DELETE /api/canvases/:id` + 页面自取 `/api/canvases/trash`），原因见 §2 第 14 条的 sandbox 发现；断言只看 FAB 的 DOM 事实（`hidden` / computed `display` / 是否占布局 / 命中测试）与回收站列表长度。
+13. **F3h 只新增（第十六批）**：卡片菜单真实产品路径（宿主 iframe sandbox 补 `allow-modals` 后）—— 复制 confirm 弹出并 accept ⇒ 列表真的多出「… 副本」；删除 confirm 弹出并 accept ⇒ 卡片消失 + 真进回收站（长度 +1）+ FAB 出现且角标 = 回收站长度；重命名 prompt 对话框真的弹出（消息 `重命名画布` + 默认值）；服务端失败 ⇒ `alert('删除失败')` 真的弹出；跑完用产品入口清空回收站回到 0 条 + FAB 隐藏。对本文件是 **102 增 / 0 删**（纯新增，0 删 ⇒ F3g 与全部既有断言一行未改；本批 `git show --numstat bf8a6ba` 复核）。断言只到「对话框真的弹出」为止，重命名真正可用仍受 Electron 不支持 `prompt()` 的宿主边界限制（§2 第 15 条 / §6 第 9 条）。
 
 ## 5. 功能 / 视觉 / 动效
 
-- **功能**：**通过** —— 真实 Electron 门禁 **50 PASS / 0 FAIL / 50（exit 0，commit `2a97b95`）**，门禁 `notVerified: []`、Z1 = clean；首页 / 新建 / 继续上次 / 打开已有画布 / 返回首页 / 无模型 / 停用撤权 / 各已支持模型真实调用 / 保存冲突（F3e）/ MS §6（F3f）全部有断言与实机证据。证据见 §3。
+- **功能**：**通过** —— 真实 Electron 门禁 **52 PASS / 0 FAIL / 52（exit 0，commit `4dfe923`，工作树干净）**，门禁 `notVerified: []`、Z1 = clean；首页 / 新建 / 继续上次 / 打开已有画布 / 返回首页 / 无模型 / 停用撤权 / 各已支持模型真实调用 / 保存冲突（F3e）/ MS §6（F3f）全部有断言与实机证据。证据见 §3。
 - **视觉（我们新增 / 改动的元素）**：**通过** —— 中性灰（chip / 说明行 `rgb(115,115,115)`、按钮 `rgb(10,10,10)`，像素 spread ≤3，无蓝 / 彩色）；无发丝线框（我们元素 border 全 0）；字重 400/500；字阶 12/18；说明行对比 18.16 / 19.05、chip 4.50–4.65；焦点环有效 **2px + 2px**（像素实测左右环各 4 设备像素 = 2.00 CSS px）；圆角 `var(--radius-md,8px)`；禁用态 disabled + aria-disabled + 原因文案；说明行单行省略 + `title` 全文不溢出。证据：`artifacts/d5-02/visual/`（25 张截图 + 3 份 manifest + `visual-checks.md` + `computed-styles*.json` + `pixel-samples.json`）。
 - **视觉（上游原版外观，按用户指令保留、不用 OpenArc DS 判定）**：只记录适用范围 —— 上游控件字重 600–800；首页 hero 彩色主视觉；深色主题不传导到上游页面（画布页 / 首页仍浅色）。
 - **动效（本轮改动 / 新增部分）**：**通过** —— c1 首页→编辑器：点击后 95ms 起画面切换、约 190ms 帧间差归 0（无残影 / 无布局抖动）；c2 返回：约 190ms 换页，之后是上游首页卡片自身 `fadeUp 0.7s`（约 620ms 稳定）；c3 守卫说明行 160ms 淡入（`duration.quick` + `easing.standard`，实测 160–210ms）；c4 减少动态效果下 0ms（animation none / 0s，达标 ≤100ms）；c5 点击被禁用的视频下拉：DOM 指纹不变、无浮层、无状态变化（仅有上游 2.5s 轮询的整体重渲染）。证据：`artifacts/d5-02/motion/`（8 段共 1824 帧 PNG + `motion-summary.md` + `motion-report.json` + `ai-node-report.json`）。
@@ -1426,9 +1427,64 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 
 **判定：D5-02 = PASS（限定范围）。**
 
-- 功能 = **通过**（**第十四批定稿：真实 Electron 门禁 50 PASS / 0 FAIL / 50、exit 0、`notVerified: []`、Z1 clean**；首页 / 新建 / 继续上次 / 打开已有画布 / 返回首页 / 无模型 / 停用撤权 / 各已支持模型真实调用 / 保存冲突（F3e）/ MS §6（F3f）全部有断言与实机证据。**第十五批只新增 F3g**（`experiments/d5-02/canvas-e2e.mjs` 99 增 / 0 删，既有断言一行未改），F3g 已把该段逐字抽出来在真实 Electron 台架上跑出 **PASS**；**完整门禁 51 项计数由主线统一重跑后填**；**第十六批：宿主 iframe 补 `allow-modals` 修掉「卡片菜单删除 / 复制 / alert 不可用」，门禁只新增 F3h（真实产品路径——卡片菜单删除 → 确认真弹出 → 真进回收站 + FAB 出现 + 角标 = 回收站长度），F3g 与全部既有断言一行未改，F3h 已用逐字抽取的单独台架跑出 PASS；完整门禁 52 项计数由主线统一重跑后填**）。
+- 功能 = **通过**（**第十七批定稿：真实 Electron 门禁 52 PASS / 0 FAIL / 52、exit 0、`notVerified: []`、Z1 clean（被测 commit `4dfe923`，工作树干净）**；首页 / 新建 / 继续上次 / 打开已有画布 / 返回首页 / 无模型 / 停用撤权 / 各已支持模型真实调用 / 保存冲突（F3e）/ MS §6（F3f）/ 回收站 FAB 显隐（F3g）/ 卡片菜单真实产品路径（F3h）全部有断言与实机证据。**第十五批只新增 F3g**（99 增 / 0 删，既有断言一行未改，逐字抽段台架 PASS）；**第十六批：宿主 iframe 补 `allow-modals` 修掉「卡片菜单删除 / 复制 / alert 不可用」，门禁只新增 F3h**（102 增 / 0 删，F3g 与全部既有断言一行未改，逐字抽取的单独台架 PASS；重命名仍受 Electron 不支持 `prompt()` 的宿主边界限制）；**两条新断言都已包含在最终 52 项门禁里**）。
 - 视觉 = 对照已完成、可比项**一致**（含右下角回收站 FAB：空态同窗口逐像素 mean|diff| 0.62/255、max 10、>24 占 0.00%）；数据项与条件项**未验收**（如实登记，不再是阻塞项）。**不整体宣布"视觉通过"。**
 - 动效 = 本轮改动 **通过**，**MS §6 已实现并验证**（160ms `cubic-bezier(.2,0,0,1)` 淡入 + 中性「AI」标记 + 减少动态效果立即呈现；F3f PASS）。**第十五批的 FAB 显隐不引入新动效**：显隐即时生效，上游 FAB 自带的 hover / active 过渡原样沿用，未新增 / 未改任何动效参数。
 
-关闭条件（第十五批收口）：① **用户对回收站 FAB 的裁定 —— 已满足并关闭**（裁定「回收站为空时隐藏右下角按钮，有已删除画布时显示」；已实现 + 四态实测 + 重截对照判「一致」，见 §2 第 14 条 / §5.1）；② 两条**预存在**失败测试（`tests/side-effect-c4-gates.test.mjs:474`、`tests/d4-03-approval-push-isolation.test.mjs:103`，已在干净 HEAD 导出树复现，与本轮无关）继续单列、不改断言；③ 既有 NOT VERIFIED（Windows / 多屏 / 高 DPI 等）不变；④ 已知边界如实登记不变：AI 标记只覆盖账本里带 id 的新增、marks 只取最近 200 条账本、视觉数据 / 条件项未验收、FAB 与角标同源（随页面自身的回收站刷新时机）；**第十六批已修掉「宿主 sandbox 忽略 `confirm` / `prompt` / `alert`」**（sandbox 补 `allow-modals`，只放行模态对话，§2 第 15 条 / §6 第 9 条），F3g 与既有断言一行未改、只新增 F3h；**`prompt` 的 Electron 宿主边界保留**（重命名入口只到「prompt 对话框真的弹出」为止，要真可用需把上游 prompt 换成应用内模态，属产品决定）。
+关闭条件（第十七批定稿）：① **用户对回收站 FAB 的裁定 —— 已满足并关闭**（裁定「回收站为空时隐藏右下角按钮，有已删除画布时显示」；已实现 + 四态实测 + 重截对照判「一致」，见 §2 第 14 条 / §5.1）；② 两条**预存在**失败测试（`tests/side-effect-c4-gates.test.mjs:474`、`tests/d4-03-approval-push-isolation.test.mjs:103`，已在干净 HEAD 导出树复现，与本轮无关）继续单列、不改断言；③ 既有 NOT VERIFIED（Windows / 多屏 / 高 DPI 等）不变；④ 已知边界如实登记不变：AI 标记只覆盖账本里带 id 的新增、marks 只取最近 200 条账本、视觉数据 / 条件项未验收、FAB 与角标同源（随页面自身的回收站刷新时机）；**第十六批已修掉「宿主 sandbox 忽略 `confirm` / `prompt` / `alert`」**（sandbox 补 `allow-modals`，只放行模态对话，§2 第 15 条 / §6 第 9 条），F3g 与既有断言一行未改、只新增 F3h（**102 增 / 0 删**）；**`prompt` 的 Electron 宿主边界保留**（重命名入口只到「prompt 对话框真的弹出」为止，要真可用需把上游 prompt 换成应用内模态，属产品决定）。**最终门禁 = 52 PASS / 0 FAIL / 52、exit 0、`notVerified: []`、Z1 clean（被测 commit `4dfe923`）**；tracked 证据 `docs/D5-02-SCOPE-CORRECTION-EVIDENCE.json` = 52 条 checks。
+
+---
+
+# D5-03 第一批 · MCP 中心（连接管理与能力发现）· 2026-09-24（`d583154`）
+
+> **口径（用户明确定范围）**：**本批 = 连接管理与能力发现**；**不开放 MCP 工具调用、不运行任意第三方本地程序、不连真实第三方、不发用户数据、不把连接成功写成插件隔离已通过**。判定：**D5-03 第一批（连接管理与能力发现）= PASS（限定范围）**；**D5-03 整体 = PARTIAL**（剩余：OAuth、长连接流、真实第三方 / Adobe 服务 D5-04/05、插件隔离 D5-08、部分授权主路径与跨登录撤销缺口 —— 见 §5）。完整结果文档 `docs/D5-03-RESULT.md`；tracked 证据 `docs/D5-03-GATE-EVIDENCE.json`（38 条 checks 逐条脱敏复制 + counts / sha256 / boundary / 缺陷修复链 / 回归计数 / notVerified）。
+>
+> **被测内容 = `d583154`（干净代码树复跑，2026-09-24 21:54）**：门禁命令 `OPENARC_TESTED_COMMIT=$(git rev-parse HEAD) node experiments/d5-03/mcp-center-e2e.mjs`；artifact 的 `openarcCommit=d583154a7b4dbb3b249f288b4ed23c09eb286fc2`、`gitDirtyLines=5` —— **这 5 个未提交文件全部是本批文档**（`PROGRESS.md` + 4 个 `docs/` 文档），**没有任何代码 / 脚本 / 断言未提交改动**（`git diff d583154 <文档提交> --stat` 可核对；不写成"完全干净树"）。artifact 里 8 个 MCP 源码指纹与工作树**逐条相同**（第十七批文档岗按脚本的 `fileSha` 复核）。**（历史，仅备查）** 上一轮 artifact 记录的是 `openarcCommit=4dfe923` + `gitDirtyLines=12`（修复提交前的树）；本轮以干净树复跑的新 artifact 为准。
+
+## 1. 任务状态
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| 真实 Electron 门禁（`OPENARC_TESTED_COMMIT=$(git rev-parse HEAD) node experiments/d5-03/mcp-center-e2e.mjs`，HEAD `d583154` 干净代码树复跑） | **已完成** | **38 PASS / 0 FAIL / 38，exit 0**；`productDefects: []`；`notVerified: 1`；Z1 clean；artifact `artifacts/d5-03/mcp-center-e2e.json`（sha256 `dca23cb7b78df4997852500cebcabc5e2ad4e013795259b23b692ee8fc7aca23`，本批 `shasum -a 256` 独立复核；`openarcCommit=d583154`、`gitDirtyLines=5` 全部为本批文档）+ 日志 `artifacts/d5-03/mcp-center-e2e-rerun.log` |
+| 后端：连接管理与能力发现 | **已完成** | `electron/mcp-{domain,store,client,service,bootstrap}.cjs`；白名单 10 条命令；20 个稳定错误码；v20 迁移三张表；远程 URL 复用 `model-domain.validateEndpoint`；凭据只存 ref + safeStorage；授权 / 审计走 D3-02 的 `mcp.view/use/manage/test` |
+| 本地 stdio 生产路径 | **已完成**（`d583154` 修 D2） | `electron/executor-launcher.cjs:226-251` 新增 `createMcpStdioLauncher`（Electron main = `process.execPath` + `ELECTRON_RUN_AS_NODE=1`；纯 Node 同一 launcher）；C2 协商值与 fixture 参照逐字一致；D1 重连 `toolsHash` 不变；D2 测试日志含 `TOOLS_DISCOVERED` |
+| 远程 http（streamable HTTP 单响应） | **已完成** | F0 / F1 / F1a；协商常量与 stdio 同一组；执行位置 = 远程服务 |
+| 前端「MCP 中心」窗口 | **已完成** | `src/mcp/McpCenter.tsx`（1594 行）+ `src/styles.css` 61 条 `.mcp-*` 规则；列表 / 详情 / 能力表 / 测试日志；PLAN §22 四态；**0 个工具调用入口** |
+| 受控测试服务 | **已完成** | `tests/fixtures/mcp/echo-server.mjs`（stdio + HTTP；可控失败模式 `--auth-token` / 协议 `1999-01-01` / `--no-response`） |
+| 空态新建入口（D1 修复） | **已完成** | `src/mcp/McpCenter.tsx:963-974`（空态自渲染 `data-mcp-action=create`，PageState 共享语义未动）；B3 / C1（`placeholderUsed=null`） |
+| 失败后刷新列表与详情（D3 修复） | **已完成** | `src/mcp/McpCenter.tsx:445-452`；G3a（鉴权失败当下出现重授权入口）/ G4（如实显示 1999-01-01） |
+| 本批不开放工具调用（设计如此） | **已完成** | I1（界面 0 入口、桥只暴露 `command`）；I2（5 个调用命令 × 2 形状 = 10 次全部 `MCP_TOOL_INVOCATION_NOT_ENABLED`，未登记命令 `MCP_COMMAND_NOT_ALLOWED`） |
+| 边界自证 | **已完成** | J1a（DB 端点 100% `openarc-test-echo` / 127.0.0.1）；J1b（子进程 = Electron 运行时 + 仓库 fixture `--stdio`）；`boundary={thirdPartyServices:false,userDataSent:false,arbitraryLocalPrograms:false,pluginIsolationClaimed:false}` |
+| 视觉 | **截图齐全，不宣布"视觉通过"** | `artifacts/d5-03/visual/` 17 张（浅 9 + 深 8）；实现只用既有组件与 token（61 条 `.mcp-*` 规则 0 条硬编码颜色、27 个既有 token）；未做色值 / 对比度量测 |
+| 动效 | **通过（限定范围）** | K1 插入 160ms `mcp-row-in`（12 帧）；K2 删除 160ms `mcp-row-out`（行摘除 195ms）；K3 详情按 `connectionId` 重挂载（loading 态 <8ms 采样，只记录不判定）；K4 减少动态效果 `--dur-quick=0ms` / `animation:none`，删除 4ms；`artifacts/d5-03/motion/` 66 帧 |
+
+## 2. 首轮 → 修复（三个真实产品缺陷，全部有根因与 file:line）
+
+1. **D5-03-D2（最严重）：本地 stdio 生产路径永远握不上手** —— `utilityProcess.fork()` 句柄没有 stdin（Electron 44.3.0 实测 `stdinType=undefined` / `stdinHasWrite=false`），`MCP_UNREACHABLE detail=stdin-unavailable`；单测全过是因为 `tests/mcp-fixtures.mjs` 走 Node child（有 stdin）。根因位置 `electron/executor-launcher.cjs:114-131` + `electron/mcp-client.cjs:157-167`。**修**：新增 `createMcpStdioLauncher`（`electron/executor-launcher.cjs:226-251`），Electron main 用 `process.execPath` + `ELECTRON_RUN_AS_NODE=1`，**测试与生产共用同一实现**；白名单 entry/args/env 未放宽、`ELECTRON_RUN_AS_NODE` 由 launcher 追加不可覆盖、**D4-04 执行器 launcher 未动**。新增单测 `tests/d5-03-mcp-stdio-launcher.test.mjs`（3 例）。
+2. **D5-03-D1（高）：空态没有「新建连接」入口** —— `PageState` 的 `empty` 规范是 `action='none'`，传入的 `onAction` 被静默忽略（`src/mcp/McpCenter.tsx:962-970` + `src/design-system/page-states.tsx:46,82`），真空态建不出首条连接。**修**：空态自渲染 `data-mcp-action="create"`（`src/mcp/McpCenter.tsx:963-974` + `.mcp-empty` 样式），**PageState 共享语义未动**。
+3. **D5-03-D3（中）：失败后不刷新列表与详情** —— `runAction` 失败分支直接 return（`src/mcp/McpCenter.tsx:435-455`），鉴权失败当下不出现重授权入口、协议不符显示旧投影。**修**：失败分支也 `loadList({silent:true})` + `loadDetail()`（`:445-452`）。
+4. **观察件（非缺陷）**：治理侧 app 授权投影并入 `mcp.*`（`electron/governance-service.cjs:278-287`、`electron/authorization-service.cjs:1174`）—— 只开可见性与整条撤销，**写路径仍不支持部分动作的 mcp grant**（`notVerified:1` 的原因）。
+
+## 3. 门禁与回归（命令 / 退出码 / 计数 / 证据 / sha256）
+
+- 命令：`OPENARC_TESTED_COMMIT=$(git rev-parse HEAD) node experiments/d5-03/mcp-center-e2e.mjs`（HEAD `d583154`，干净代码树复跑）；结果：**38 PASS / 0 FAIL / 38，exit 0**；`productDefects: []`；`notVerified: 1`；Z1 = clean；控制台错误样本 `[]`、对话框样本 `[]`
+- 证据：`artifacts/d5-03/mcp-center-e2e.json`（sha256 **`dca23cb7b78df4997852500cebcabc5e2ad4e013795259b23b692ee8fc7aca23`**，本批 `shasum - a 256` 独立复核；`openarcCommit=d583154`、`gitDirtyLines=5` 全为本批文档）+ 日志 `artifacts/d5-03/mcp-center-e2e-rerun.log`（尾行 `结论：PASS — {"pass":38,"fail":0,"total":38,"notVerified":1}` + `E2E_EXIT=0`；旧 `mcp-center-e2e.log` 留作首轮 / 上一轮历史）；视觉 `artifacts/d5-03/visual/`（17 张）、动效 `artifacts/d5-03/motion/`（66 帧）；`artifacts/` 被 gitignore
+- 检查项分组（38 条）：A 3（A × 2 + A0 错误码自检）；B 3（B1–B3）；C 3（C0 / C1 / C2）；D 2；E 2；F 3（F0 / F1 / F1a）；G 6（G1 / G2 / G3a / G3b / G4 / G5）；H 2；I 2；J 2（J1a / J1b）；K 4；L 5；Z1
+- 关键实测值：协商 `protocolVersion=2025-06-18` / `serverName=openarc-test-echo` / `serverVersion=1.4.0` / `capabilities={tools:{listChanged:false},logging:{}}` / 工具 `echo_sum`+`describe_self` / `toolsHash=7db033b3636227f94fc2a51859637cbb7b93c7e865a0e12b79d86c9dda7721ce`；挂死服务超时 **8068ms**（干净树复跑实测，上限 15s，G5）；不可达 138ms（G2）；删除 174ms（E2）；`MCP_TIMEOUT` 期间界面显示「发现工具中」（6 帧采样）
+- 单测回归（第十七批文档岗复跑核对）：`node --test tests/d5-03-mcp-*.test.mjs` = **34/34**（含新增 stdio launcher 3 例）；`tests/d5-03-mcp-*.test.mjs + tests/d5-02-canvas-*.test.mjs` = **74/74**；`tests/d4-04-*.test.mjs + tests/governance-*.test.mjs` = **52/52**（第十七批文档岗复跑核对；整套 d4-04 + governance 口径，0 失败）；`npm run build` = 本批记录 **exit 0**（文档岗未复跑，避免改写 artifact 的 `distFingerprint`）
+- tracked 证据：`docs/D5-03-GATE-EVIDENCE.json`（38 条 checks 逐条脱敏复制 + counts / artifactPath / artifactSha256 / env / mcpSourceFingerprint / fixture / boundary / defectChain / regression / notVerified / scopeBoundaries）
+
+## 4. 功能 / 视觉 / 动效 / 边界
+
+- **功能 = 通过（限定范围）**：本地 stdio 与远程 http 都取得**真实协商值**（逐字等于 fixture 参照）；四个失败类（非白名单 key / 不可达 / 401 / 协议不符）都有稳定错误码 + 人话提示 + 有界时延；停用 / 删除真的收掉连接与子进程；权限整条撤销 → `MCP_UNAUTHORIZED` 且工具描述 0 暴露，重新登录恢复。
+- **视觉 = 截图齐全，不整体宣布"视觉通过"**：浅色 9 张 + 深色 8 张，覆盖两套主题下的空态 / 列表 / 详情 / 能力表 / 测试日志 / 远程详情 / 发现中 / 认证失败 / 无权；实现复用既有 `Button` / `TextField` / `Badge` / `PageState` / `Dialog`，`styles.css` 61 条 `.mcp-*` 规则 **0 条硬编码颜色**、27 个既有 token（中性灰、无新增彩色）；**未做逐像素 / 色值 / 对比度量测**，深色详情页无单独截图 → 如实登记。
+- **动效 = 通过（限定范围）**：列表插入 / 删除 160ms（`mcp-row-in` / `mcp-row-out`）、详情按 `connectionId` 重挂载、发现中不造假进度、减少动态效果下 `--dur-quick=0ms` + `animation:none`（删除 4ms vs 常规 195ms）；**loading 态 <8ms 采样间隔，只记录不判定**。
+- **边界 = 未越界**：只连自建 fixture（J1a 端点 100% 本地）、只跑白名单 entry 的受控子进程（J1b）、0 个工具调用入口且 10 次调用尝试全被显式拒绝（I1 / I2）、`boundary.pluginIsolationClaimed=false` —— **连接成功 ≠ 插件隔离通过**。
+
+## 5. 缺口与判定
+
+1. 本批**不开放工具调用**（设计如此）；2. **无 OAuth**（只有 NONE / BEARER）；3. 远程只做 streamable HTTP **单响应**（无 GET SSE 长连接 / 断线续传；服务端 → 客户端请求一律 `-32601`）；4. 工具目录上限 **200 个 / 10 页**，超出标记 `truncated`，完整 `inputSchema` 不入库；5. 本地白名单只有测试 fixture（真实 Adobe / PS 属 D5-04/05）；6. `ELECTRON_RUN_AS_NODE` 依赖 Electron fuse（当前无打包 / 关 fuse 配置，关掉则握手有界失败 fail closed）；7. `notVerified: 1` = `toolsHidden`（只有 `mcp.view` 没有 `mcp.use`）主路径无法构造（治理写路径不支持部分动作的 mcp grant；`revokeAppAccess` 只能整条撤销）；8. **撤销不跨登录保持**（内置 baseline 每次登录重 upsert，`identity-bootstrap.cjs:131-139 → mcp-bootstrap.cjs:41-50`，与 model / canvas 同一内置模式）；9. **插件隔离属 D5-08**，本批未验也不声称；10. 门禁脚本 J1b 的 check 标题保留修复前的括号（判定与 PASS 内容已是修复后正常路径）—— 只允许改文档，本轮不改脚本，登记为文档级缺口。
+
+**判定：D5-03 第一批（连接管理与能力发现）= PASS（限定范围）；D5-03 整体 = PARTIAL。**（功能 = 通过；视觉 = 截图齐全 / 只用既有 token 与组件，未做色值与对比度量测，不宣布"视觉通过"；动效 = 通过，loading 态未判定；边界按 §4 自证。剩余 = OAuth、长连接流、真实第三方 / Adobe 服务（D5-04/05）、插件隔离（D5-08）、部分授权主路径与跨登录撤销缺口。）
+
 

@@ -1,0 +1,537 @@
+{
+  "phase": "D5-03 第一批 · MCP 中心（连接管理与能力发现）",
+  "at": "2026-09-24T13:54:26.715Z",
+  "runNote": "本轮为干净代码树复跑（HEAD d583154，21:54）；首轮 34/38 的历史保留在 defectChain 与 assertionChanges（首轮验收脚本提交 4dfe923）。",
+  "openarcBranch": "integration/ui-core",
+  "openarcCommitRecorded": "d583154a7b4dbb3b249f288b4ed23c09eb286fc2",
+  "gitDirtyLines": 5,
+  "verifiedTree": {
+    "note": "干净代码树复跑：运行时提交 = d583154（HEAD）；gitDirtyLines=5，这 5 个未提交文件全部是本批文档（PROGRESS.md / docs/D5-02-FULLAPP-RESULT.md / docs/D5-02-SCOPE-CORRECTION-EVIDENCE.json / docs/D5-03-RESULT.md / docs/D5-03-GATE-EVIDENCE.json），没有任何代码 / 脚本 / 断言未提交改动（git diff d583154 <文档提交> --stat 可核对）。artifact 记录运行时未提交文件 5 个，全部为本批文档；不写成「完全干净树」。artifact 里 8 个 MCP 源码指纹与工作树逐条相同（第十七批文档岗按 mcp-center-e2e.mjs:86 的 fileSha 复核）。上一轮（21:40）artifact 记录 openarcCommit=4dfe923 + 12 个未提交产品代码文件（修复提交前的树）；本轮以本 artifact 为准。",
+    "runtimeCommit": "d583154a7b4dbb3b249f288b4ed23c09eb286fc2",
+    "fixCommit": "d583154a7b4dbb3b249f288b4ed23c09eb286fc2",
+    "dirtyFiles": 5,
+    "dirtyFilesAreDocsOnly": true,
+    "sourceFingerprintMatchesWorkingTree": true,
+    "firstRunCommit": "4dfe9231565331fd14a822d754c76dde83c8aa3b"
+  },
+  "invocation": "OPENARC_TESTED_COMMIT=$(git rev-parse HEAD) node experiments/d5-03/mcp-center-e2e.mjs",
+  "command": "node experiments/d5-03/mcp-center-e2e.mjs",
+  "counts": {
+    "pass": 38,
+    "fail": 0,
+    "total": 38
+  },
+  "artifactPath": "artifacts/d5-03/mcp-center-e2e.json",
+  "artifactSha256": "dca23cb7b78df4997852500cebcabc5e2ad4e013795259b23b692ee8fc7aca23",
+  "logPath": "artifacts/d5-03/mcp-center-e2e-rerun.log",
+  "previousLogPath": "artifacts/d5-03/mcp-center-e2e.log",
+  "env": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "node": "v22.22.3",
+    "electron": "44.3.0",
+    "cdpPort": 9811,
+    "userDataPrefix": "oa-d503-"
+  },
+  "mcpSourceFingerprint": {
+    "electron/mcp-domain.cjs": "411403683e6e1015",
+    "electron/mcp-store.cjs": "24bb1a3ff38c4598",
+    "electron/mcp-client.cjs": "bbfd58c77a19dcf9",
+    "electron/mcp-service.cjs": "a87d41043730f4db",
+    "electron/mcp-bootstrap.cjs": "2b21046596607582",
+    "electron/executor-launcher.cjs": "53af83d4a46afa96",
+    "src/mcp/McpCenter.tsx": "3184091abc0a87b3",
+    "tests/fixtures/mcp/echo-server.mjs": "5e0d25994b56dbc9"
+  },
+  "distFingerprint": {
+    "entry": "./assets/main-Ct-YFunl.js",
+    "bytes": 371576,
+    "mtime": "2026-09-24T13:37:10.479Z"
+  },
+  "fixture": {
+    "path": "tests/fixtures/mcp/echo-server.mjs",
+    "instances": [
+      {
+        "name": "http",
+        "port": 51779,
+        "url": "http://127.0.0.1:51779/mcp"
+      },
+      {
+        "name": "http-auth",
+        "port": 51786,
+        "url": "http://127.0.0.1:51786/mcp"
+      },
+      {
+        "name": "http-protocol",
+        "port": 51790,
+        "url": "http://127.0.0.1:51790/mcp"
+      },
+      {
+        "name": "http-no-response",
+        "port": 51795,
+        "url": "http://127.0.0.1:51795/mcp"
+      }
+    ],
+    "referenceStdio": {
+      "protocolVersion": "2025-06-18",
+      "serverInfo": {
+        "name": "openarc-test-echo",
+        "version": "1.4.0"
+      },
+      "capabilities": {
+        "tools": {
+          "listChanged": false
+        },
+        "logging": {}
+      },
+      "tools": [
+        "echo_sum",
+        "describe_self"
+      ]
+    },
+    "referenceHttp": {
+      "protocolVersion": "2025-06-18",
+      "serverInfo": {
+        "name": "openarc-test-echo",
+        "version": "1.4.0"
+      },
+      "capabilities": {
+        "tools": {
+          "listChanged": false
+        },
+        "logging": {}
+      },
+      "tools": [
+        "echo_sum",
+        "describe_self"
+      ]
+    }
+  },
+  "boundary": {
+    "thirdPartyServices": false,
+    "userDataSent": false,
+    "arbitraryLocalPrograms": false,
+    "pluginIsolationClaimed": false,
+    "note": "只连自建 fixture（stdio 子进程 + 127.0.0.1 HTTP）；连接成功不等于插件隔离通过"
+  },
+  "defectChain": [
+    {
+      "id": "D5-03-D2",
+      "severity": "最严重",
+      "symptom": "本地 stdio 连接在真实 Electron 里永远握不上手：CONNECT_START 后立刻 CONNECT_FAILED MCP_UNREACHABLE detail=stdin-unavailable，记录 status=ERROR、无 protocolVersion / 工具表；单元测试 31/31 却全过（首轮 34/38 实测）",
+      "rootCause": "electron/executor-launcher.cjs:114-131（ElectronUtilityProcessLauncher 的 handle.stdin = child.stdin || null，而 Electron 44 的 utilityProcess.fork() 返回句柄没有 stdin）+ electron/mcp-client.cjs:157-167（#write 无 stdin → MCP_UNREACHABLE/stdin-unavailable）。根因探针（真实 Electron 44.3.0）experiments/d5-03/utility-stdin-probe.cjs：stdinType=undefined / stdinHasWrite=false，子进程确实起来但子进程侧 process.stdin 立即 end。单测之所以过：tests/mcp-fixtures.mjs 走 NodeChildProcessLauncher（Node child 有 stdin），只有生产路径用 utilityProcess",
+      "fix": "新增 createMcpStdioLauncher（electron/executor-launcher.cjs:226-251）：Electron main = process.execPath + 子进程 ELECTRON_RUN_AS_NODE=1，纯 Node 同一实现；测试与生产共用同一个 NodeChildProcessLauncher。白名单 entry/args/env 仍由 mcp-domain 固定映射（渲染层只能给 serverKey，ELECTRON_RUN_AS_NODE 由 launcher 追加、调用方 env 覆盖不了）；D4-04 执行器 launcher 一字未动",
+      "verifiedBy": [
+        "C2 实际协商值与 fixture 参照逐字一致（干净树复跑同样一致）",
+        "D1 重连 toolsHash 不变",
+        "D2 测试日志含 TOOLS_DISCOVERED",
+        "E1 停用后子进程退出",
+        "tests/d5-03-mcp-stdio-launcher.test.mjs 3 例"
+      ]
+    },
+    {
+      "id": "D5-03-D1",
+      "severity": "高",
+      "symptom": "全新 userData 下「MCP 中心」空态没有任何「新建连接」入口（[data-mcp-empty] button = 0、无 [data-mcp-action=create]），首条连接在界面上建不出来（PLAN §22「无连接可添加」不满足）",
+      "rootCause": "src/mcp/McpCenter.tsx:962-970（空态把 onAction/actionLabel 传给 PageState）+ src/design-system/page-states.tsx:46（PAGE_STATE_SPEC.empty.action='none'）与 :82（showAction = spec.action!=='none' && Boolean(onAction)）—— 共享组件把传入的动作静默忽略",
+      "fix": "不动 PageState 共享语义，空态由本页自己渲染 <Button data-mcp-action=\"create\">新建连接</Button> 包在 [data-mcp-empty] 内（src/mcp/McpCenter.tsx:963-974 + src/styles.css 的 .mcp-empty）；首条连接从真空态完全走界面表单创建",
+      "verifiedBy": [
+        "B3 空态 ≥1 个新建入口",
+        "C1 placeholderUsed=null（无占位连接绕过）"
+      ]
+    },
+    {
+      "id": "D5-03-D3",
+      "severity": "中",
+      "symptom": "连接 / 重连 / 测试失败后不刷新列表与详情：鉴权失败当下不出现「认证失败 → 重新授权」入口，必须手动重选该行；协议不符时详情不是真实协商版本",
+      "rootCause": "src/mcp/McpCenter.tsx:435-455（runAction：res.ok !== true 时 setFailure 后直接 return，不执行 loadList/loadDetail），而失败状态 status/lastErrorCode/protocolVersion 后端已经落库",
+      "fix": "runAction 失败分支也 await loadList({silent:true}) + await loadDetail(connectionId) 再 setFailure（src/mcp/McpCenter.tsx:445-452）",
+      "verifiedBy": [
+        "G3a 失败当下 data-mcp-auth-required 已出现",
+        "G4 协议不符如实显示 1999-01-01"
+      ]
+    },
+    {
+      "id": "观察件（非缺陷）",
+      "severity": "记录",
+      "symptom": "治理侧 app 授权投影原本只认 resource.* / model.*，mcp.view/use/manage/test 被投影成空动作，治理界面拿不到可撤销的 grantId",
+      "rootCause": "electron/governance-service.cjs #appGrantActions 与 electron/authorization-service.cjs #appGrantActions 未并入 mcpGrantActions",
+      "fix": "d583154 把 mcpGrantActions 并入两处投影（governance-service.cjs:278-287、authorization-service.cjs:1174）—— 只开可见性与整条撤销，写路径仍不支持部分动作的 mcp grant",
+      "verifiedBy": [
+        "H1 撤销 mcp-center 的 mcp grant 后全部 mcp 读命令 MCP_UNAUTHORIZED",
+        "H2 重新登录后恢复"
+      ]
+    }
+  ],
+  "regression": {
+    "build": {
+      "command": "npm run build",
+      "exitCode": 0,
+      "note": "本批记录（tsc --noEmit + vite build）；第十七批文档岗未复跑，避免改写 artifact 记录的 distFingerprint"
+    },
+    "unitTests": [
+      {
+        "command": "node --test tests/d5-03-mcp-*.test.mjs",
+        "counts": "34/34",
+        "note": "第十七批文档岗复跑核对；含新增 tests/d5-03-mcp-stdio-launcher.test.mjs 3 例"
+      },
+      {
+        "command": "node --test tests/d5-03-mcp-*.test.mjs tests/d5-02-canvas-*.test.mjs",
+        "counts": "74/74",
+        "note": "第十七批文档岗复跑核对；0 失败"
+      },
+      {
+        "command": "node --test tests/d4-04-*.test.mjs tests/governance-*.test.mjs",
+        "counts": "52/52",
+        "note": "第十七批文档岗复跑核对；整套 d4-04 + governance 全通过，0 失败"
+      }
+    ],
+    "gateNotVerified": 1
+  },
+  "assertionChanges": [
+    {
+      "id": "首轮（4dfe923）→ 修复（d583154）",
+      "change": "首轮 34/38 暴露 D5-03-D1/D2/D3 三个产品缺陷。修复批次同步脚本：只改「把缺陷写进判定」的两条（B3 空态入口、G3a 失败当下重授权入口）与对应 defect() 登记（改为只有该断言失败时才登记缺陷）；其余断言判定条件未动。另有三处非判定改动：K 段采样读加空值保护（缺字段判 FAIL，不让 TypeError 崩整轮）、D1 前加同步等待（等「重新连接已完成」通知，不改判定）、指纹清单补 electron/executor-launcher.cjs（D2 的修复文件）",
+      "reason": "修复后重跑 38/38（干净代码树复跑再次 38/38）；判定条件只在两条上对齐修复后的行为（G3a 收紧为「失败当下」、C1 要求无绕过）",
+      "gateRef": "experiments/d5-03/mcp-center-e2e.mjs 头部注释（:22-30）与 d583154 对脚本的 32 增 / 15 删"
+    },
+    {
+      "id": "未改声明",
+      "change": "C0/C2/D1/D2/E1/E2/F0/F1/F1a/G1/G2/G4/G5/H1/H2/I1/I2/J1a/J1b/K1-K4/L1-L5/Z1 的判定条件在首轮 → 修复之间未动；修复后这些 check 全部 PASS（干净代码树复跑同样全 PASS）",
+      "reason": "排除为了让测试变绿改判定",
+      "gateRef": "experiments/d5-03/mcp-center-e2e.mjs（git show d583154 -- experiments/d5-03/mcp-center-e2e.mjs）"
+    },
+    {
+      "id": "复跑口径",
+      "change": "最终门禁以 21:54 的干净代码树复跑（HEAD d583154，OPENARC_TESTED_COMMIT=$(git rev-parse HEAD)）为准：38/38、exit 0、notVerified 1、productDefects 空；artifact gitDirtyLines=5 全部为本批文档，无代码 / 脚本 / 断言改动",
+      "reason": "把「验收内容 = d583154」从指纹推断升级为运行时提交自证",
+      "gateRef": "artifacts/d5-03/mcp-center-e2e.json（openarcCommit / gitDirtyLines 字段）"
+    }
+  ],
+  "notVerified": [
+    {
+      "name": "「工具描述不暴露」的 mcp.use-only 主路径（toolsHidden=true、mcp.view 仍在）",
+      "reason": "渲染层既有治理命令无法写出部分动作的 mcp grant：governance/grantAppAccess(resourceType=mcp, actions=[mcp.view]) → {\"ok\":false,\"error\":\"INVALID_INPUT\"}；grantAppToolAccess → {\"ok\":false,\"error\":\"INVALID_INPUT\"}。mcp-center baseline 是单条含 mcp.view/use/manage/test 的 grant（electron/mcp-bootstrap.cjs:41-50），governance/revokeAppAccess 只能整条撤销（authorization-service.cjs:1216），故真机上只能验收「mcp.view 也被撤 → 详情整块无权」这一支。"
+    }
+  ],
+  "scopeBoundaries": [
+    "本批不开放工具调用（设计如此）：界面 0 入口，5 个调用命令 × 2 形状 = 10 次全部 MCP_TOOL_INVOCATION_NOT_ENABLED",
+    "无 OAuth：只有 NONE / BEARER 两种认证模式",
+    "远程只做 streamable HTTP 单响应：未做 GET SSE 长连接流与断线续传；服务端 → 客户端请求（sampling/roots/elicitation）一律 -32601",
+    "工具目录上限 200 个 / 10 页，超出标记 truncated；完整 inputSchema 不入库（只存摘要）",
+    "本地白名单只有测试 fixture openarc-test-echo；真实 Adobe / PS 等本地服务属 D5-04 / D5-05",
+    "ELECTRON_RUN_AS_NODE 依赖 Electron fuse：当前仓库无打包 / 关 fuse 配置；关掉则握手有界失败 fail closed",
+    "notVerified:1 = toolsHidden（只有 mcp.view 没有 mcp.use）主路径无法构造：治理写路径不支持部分动作的 mcp grant（grantAppAccess(resourceType=mcp)/grantAppToolAccess → INVALID_INPUT），revokeAppAccess 只能整条撤销",
+    "撤销不跨登录保持：内置 App baseline 每次登录重 upsert（identity-bootstrap.cjs:131-139 → mcp-bootstrap.cjs:41-50），与 model / canvas 同一内置模式",
+    "插件隔离属 D5-08：本批未验也不声称（boundary.pluginIsolationClaimed=false）",
+    "视觉：未做逐像素 / 色值 / 对比度量测（截图齐全 + 实现只用既有 token 与组件）；深色详情页无单独截图",
+    "动效：详情切换 loading 态是数据态、可能短于 8ms 采样间隔（loadingFrames=0），只记录不判定",
+    "门禁脚本 J1b 的 check 标题保留修复前的括号（「本地 stdio 握手本身在 D5-03-D2 下失败」），判定条件与 PASS 内容已是修复后正常路径；只允许改文档，本轮不改脚本，登记为文档级缺口"
+  ],
+  "checks": [
+    {
+      "section": "A",
+      "name": "真实 electron . 启动（隔离 userData oa-d503-* / 隔离 CDP 端口）",
+      "status": "PASS",
+      "expected": "CDP 可用 + 界面页",
+      "actual": "cdp=9811 userData=oa-d503-Y0ab9x",
+      "at": "2026-09-24T13:53:50.891Z"
+    },
+    {
+      "section": "A",
+      "name": "三步向导（setup-name→next→identifier→next→password/confirm→submit）+ 真实 UI 登录 admin",
+      "status": "PASS",
+      "expected": "identity gate = ready",
+      "actual": "gate=ready",
+      "at": "2026-09-24T13:53:51.437Z"
+    },
+    {
+      "section": "A0",
+      "name": "本脚本断言的全部错误码都存在于 electron/mcp-domain.cjs ERROR_CODE（避免期望码写错）",
+      "status": "PASS",
+      "expected": "0 个未知错误码",
+      "actual": "{\"asserted\":[\"MCP_LOCAL_SERVER_NOT_ALLOWED\",\"MCP_ENDPOINT_BLOCKED\",\"MCP_UNREACHABLE\",\"MCP_TIMEOUT\",\"MCP_AUTH_REQUIRED\",\"MCP_PROTOCOL_VERSION_UNSUPPORTED\",\"MCP_UNAUTHORIZED\",\"MCP_CONNECTION_DISABLED\",\"MCP_COMMAND_NOT_ALLOWED\",\"MCP_TOOL_INVOCATION_NOT_ENABLED\",\"MCP_CONNECTION_NOT_FOUND\",\"MCP_PROTOCOL_ERROR\"],\"missing\":[]}",
+      "at": "2026-09-24T13:53:51.438Z"
+    },
+    {
+      "section": "B1",
+      "name": "程序坞打开「MCP 中心」→ 窗口出现 + MCP 域可用",
+      "status": "PASS",
+      "expected": "窗口存在 + data-mcp-available=true",
+      "actual": "{\"opened\":true,\"emptyUp\":true,\"window\":true,\"available\":\"true\"}",
+      "at": "2026-09-24T13:53:51.759Z"
+    },
+    {
+      "section": "B2",
+      "name": "空态渲染：显示「还没有连接」与下一步说明（DOM 证据）",
+      "status": "PASS",
+      "expected": "data-mcp-empty 含标题与说明",
+      "actual": "{\"empty\":true,\"emptyText\":\"◌还没有连接新建一个连接后，中心会做真实 MCP 握手（initialize → initialized → tools/list），把服务端实际协商出的版本、能力与工具写进记录。第一批不开放工具调用。新建连接\"}",
+      "at": "2026-09-24T13:53:51.759Z"
+    },
+    {
+      "section": "B3",
+      "name": "空态「新建连接」入口：期望有（PLAN §22「无连接可添加」）—— 首条连接必须能在界面上创建",
+      "status": "PASS",
+      "expected": "空态 ≥1 个新建入口按钮 + 页面存在 data-mcp-action=create",
+      "actual": "{\"buttons\":1,\"labels\":[\"新建连接\"],\"pageListCreate\":true,\"pageStateKind\":\"empty\"}",
+      "at": "2026-09-24T13:53:51.760Z"
+    },
+    {
+      "section": "C0",
+      "name": "fixture stdio 参照握手（独立进程，产品链路之外）= 固化常量：protocolVersion/serverInfo/capabilities/tools/toolsHash",
+      "status": "PASS",
+      "expected": "{\"protocolVersion\":\"2025-06-18\",\"serverName\":\"openarc-test-echo\",\"serverVersion\":\"1.4.0\",\"capabilities\":{\"tools\":{\"listChanged\":false},\"logging\":{}},\"tools\":[{\"name\":\"echo_sum\",\"description\":\"把两个数字相加并回显（测试服务；不实现调用）\",\"inputSchemaSummary\":\"type=object; properties: a:number(required), b:number(required); required: a,b\"},{\"name\":\"describe_self\",\"description\":\"描述本测试服务自身的传输与协议版本\",\"inputSchemaSummary\":\"type=object; properties: verbose:boolean\"}],\"toolsHash\":\"7db033b3636227f94fc2a51859637cbb7b93c7e865a0e12b79d86c9dda7721ce\"}",
+      "actual": "{\"protocolVersion\":\"2025-06-18\",\"serverInfo\":{\"name\":\"openarc-test-echo\",\"version\":\"1.4.0\"},\"capabilities\":{\"tools\":{\"listChanged\":false},\"logging\":{}},\"tools\":[{\"name\":\"echo_sum\",\"description\":\"把两个数字相加并回显（测试服务；不实现调用）\",\"inputSchemaSummary\":\"type=object; properties: a:number(required), b:number(required); required: a,b\"},{\"name\":\"describe_self\",\"description\":\"描述本测试服务自身的传输与协议版本\",\"inputSchemaSummary\":\"type=object; properties: verbose:boolean\"}],\"toolsHash\":\"7db033b3636227f94fc2a51859637cbb7b93c7e865a0e12b79d86c9dda7721ce\"}",
+      "at": "2026-09-24T13:53:51.886Z"
+    },
+    {
+      "section": "C1",
+      "name": "本地连接（stdio）经界面表单创建：传输=本地 stdio、serverKey=白名单 openarc-test-echo；首条连接从真空态走界面入口（无占位绕过）",
+      "status": "PASS",
+      "expected": "对话框关闭 + 列表出现该连接 + 未使用占位连接绕过（placeholderUsed=null）",
+      "actual": "{\"create\":{\"ok\":true,\"dialogClosed\":true,\"listed\":true,\"connectionId\":\"mcp_GoFK7Ex3rLP-pA\",\"entry\":{\"needed\":false,\"reason\":\"list-non-empty\"}},\"placeholderUsed\":null,\"rows\":[{\"id\":\"mcp_GoFK7Ex3rLP-pA\",\"status\":\"DISABLED\",\"name\":\"本地测试回显\",\"tools\":\"工具未发现\",\"location\":\"执行位置：本地设备\"}],\"transport\":\"stdio\",\"location\":\"LOCAL_DEVICE\",\"endpoint\":{\"serverKey\":\"openarc-test-echo\"}}",
+      "at": "2026-09-24T13:53:52.757Z"
+    },
+    {
+      "section": "C2",
+      "name": "启用 → 连接：实际协商结果与 fixture 真实返回一致（protocolVersion / serverName / serverVersion / capabilities / 工具表含描述与参数摘要 / 执行位置=本地设备 / READY）",
+      "status": "PASS",
+      "expected": "协议/身份/能力/工具/位置/状态逐条等于 fixture 参照值",
+      "actual": "{\"ui\":{\"protocolVersion\":\"2025-06-18\",\"serverName\":\"openarc-test-echo\",\"serverVersion\":\"1.4.0\",\"toolsHash\":\"7db033b3636227f94fc2a51859637cbb7b93c7e865a0e12b79d86c9dda7721ce\",\"location\":\"执行位置：本地设备\",\"status\":\"就绪 READY\",\"capabilities\":[{\"key\":\"tools\",\"name\":\"工具 tools\",\"flag\":\"已声明，但没有开启子能力\"},{\"key\":\"logging\",\"name\":\"日志 logging\",\"flag\":\"已声明，但没有开启子能力\"}],\"tools\":[{\"name\":\"echo_sum\",\"description\":\"把两个数字相加并回显（测试服务；不实现调用）\",\"schema\":\"type=object; properties: a:number(required), b:number(required); required: a,b\"},{\"name\":\"describe_self\",\"description\":\"描述本测试服务自身的传输与协议版本\",\"schema\":\"type=object; properties: verbose:boolean\"}],\"transport\":\"stdio（本地进程）\",\"endpoint\":\"本地服务键 openarc-test-echo（主进程映射到受控程序与固定参数）\"},\"fixtureReference\":{\"protocolVersion\":\"2025-06-18\",\"serverName\":\"openarc-test-echo\",\"serverVersion\":\"1.4.0\",\"toolsHash\":\"7db033b3636227f94fc2a51859637cbb7b93c7e865a0e12b79d86c9dda7721ce\",\"capabilities\":{\"tools\":{\"listChanged\":false},\"logging\":{}},\"tools\":[{\"name\":\"echo_sum\",\"description\":\"把两个数字相加并回显（测试服务；不实现调用）\",\"inputSchemaSummary\":\"type=object; properties: a:number(required), b:number(required); required: a,b\"},{\"name\":\"describe_self\",\"description\":\"描述本测试服务自身的传输与协议版本\",\"inputSchemaSummary\":\"type=object; properties: verbose:boolean\"}]},\"record\":{\"status\":\"READY\",\"protocolVersion\":\"2025-06-18\",\"serverName\":\"openarc-test-echo\",\"serverVersion\":\"1.4.0\",\"toolsHash\":\"7db033b3636227f94fc2a51859637cbb7b93c7e865a0e12b79d86c9dda7721ce\",\"location\":\"LOCAL_DEVICE\",\"transport\":\"stdio\",\"capabilities\":{\"tools\":{\"listChanged\":false},\"logging\":{}},\"authMode\":\"NONE\",\"credentialConfigured\":false},\"capabilitiesMatch\":true,\"toolsMatch\":true,\"localChildProcess\":{\"sampledNewDescendants\":[{\"pid\":50328,\"ppid\":50264,\"stat\":\"R\",\"cmd\":\"<repo>/node_modules/electron/dist/El",
+      "at": "2026-09-24T13:53:54.130Z"
+    },
+    {
+      "section": "D1",
+      "name": "重连后状态与工具哈希稳定（READY + toolsHash 与首次协商一致）",
+      "status": "PASS",
+      "expected": "READY + toolsHash 不变",
+      "actual": "{\"click\":\"ok\",\"reconnectSettled\":true,\"reconnected\":true,\"toolsHash\":\"7db033b3636227f94fc2a51859637cbb7b93c7e865a0e12b79d86c9dda7721ce\",\"expected\":\"7db033b3636227f94fc2a51859637cbb7b93c7e865a0e12b79d86c9dda7721ce\",\"status\":\"就绪 READY\"}",
+      "at": "2026-09-24T13:53:54.944Z"
+    },
+    {
+      "section": "D2",
+      "name": "mcp/test 做真实握手并产生界面可见测试日志（步骤 / 结果 / 时间）",
+      "status": "PASS",
+      "expected": "新增 ≥2 条日志 + 每条有时间 + 步骤含 CONNECT_START/TOOLS_DISCOVERED",
+      "actual": "{\"click\":\"ok\",\"notice\":true,\"logsBefore\":6,\"logsAfter\":8,\"newLogs\":2,\"phases\":[\"TOOLS_DISCOVERED\",\"CONNECT_START\",\"ENABLED\",\"CREATED\"],\"results\":[\"unknown\"],\"uiLogs\":[{\"time\":\"2026/9/24 21:53:55\",\"phase\":\"TOOLS_DISCOVERED\",\"level\":\"INFO\",\"result\":\"unknown\",\"message\":\"tools=2 pages=1 truncated=false hash=7db033b3636227f9\"},{\"time\":\"2026/9/24 21:53:54\",\"phase\":\"CONNECT_START\",\"level\":\"INFO\",\"result\":\"unknown\",\"message\":\"attempt=1\"},{\"time\":\"2026/9/24 21:53:54\",\"phase\":\"TOOLS_DISCOVERED\",\"level\":\"INFO\",\"result\":\"unknown\",\"message\":\"tools=2 pages=1 truncated=false hash=7db033b3636227f9\"},{\"time\":\"2026/9/24 21:53:54\",\"phase\":\"CONNECT_START\",\"level\":\"INFO\",\"result\":\"unknown\",\"message\":\"attempt=1\"},{\"time\":\"2026/9/24 21:53:53\",\"phase\":\"TOOLS_DISCOVERED\",\"level\":\"INFO\",\"result\":\"unknown\",\"message\":\"tools=2 pages=1 truncated=false hash=7db033b3636227f9\"},{\"time\":\"2026/9/24 21:53:53\",\"phase\":\"CONNECT_START\",\"level\":\"INFO\",\"result\":\"unknown\",\"message\":\"attempt=1\"}],\"rawNewest\":[{\"at\":1790258035072,\"level\":\"INFO\",\"event\":\"TOOLS_DISCOVERED\",\"errorCode\":null,\"detail\":\"tools=2 pages=1 truncated=false hash=7db033b3636227f9\"},{\"at\":1790258034960,\"level\":\"INFO\",\"event\":\"CONNECT_START\",\"errorCode\":null,\"detail\":\"attempt=1\"},{\"at\":1790258034828,\"level\":\"INFO\",\"event\":\"TOOLS_DISCOVERED\",\"errorCode\":null,\"detail\":\"tools=2 pages=1 truncated=false hash=7db033b3636227f9\"},{\"at\":1790258034691,\"level\":\"INFO\",\"event\":\"CONNECT_START\",\"errorCode\":null,\"detail\":\"attempt=1\"}]}",
+      "at": "2026-09-24T13:53:55.168Z"
+    },
+    {
+      "section": "E1",
+      "name": "停用 → 状态 DISABLED + 连接/子进程收掉（进程级证据）+ 停用后不再接受连接",
+      "status": "PASS",
+      "expected": "DISABLED + MCP 子进程（连接后新增后代）全部退出 + mcp/connect=MCP_CONNECTION_DISABLED",
+      "actual": "{\"click\":\"ok\",\"descendantsAtDisable\":3,\"sampledNewDescendants\":[{\"pid\":50328,\"ppid\":50264,\"stat\":\"R\",\"cmd\":\"<repo>/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron <repo>/tests/fixtures/mcp/echo-server.mjs --stdio\",\"firstSeenAtMs\":546,\"lastSeenMs\":857}],\"mcpSpawnedPidsAtReady\":[],\"childrenGoneAfterDisable\":true,\"record\":{\"status\":\"DISABLED\",\"enabled\":false},\"connectWhileDisabled\":\"MCP_CONNECTION_DISABLED\"}",
+      "at": "2026-09-24T13:53:55.689Z"
+    },
+    {
+      "section": "E2",
+      "name": "删除 → 记录消失、列表回到空态、子进程无残留（占位连接也经界面删除；DB 只读取证）",
+      "status": "PASS",
+      "expected": "行消失 + 占位行也消失 + data-mcp-empty + 子进程仍全退 + mcp_connections 空 + mcp_connection_logs 无该 id",
+      "actual": "{\"gone\":true,\"deleteMs\":177,\"placeholderDeleted\":null,\"empty\":true,\"rows\":0,\"mcpPidsAliveAfterDelete\":[],\"dbConnections\":[],\"dbLogsOfLocal\":0,\"motionSamples\":[{\"i\":0,\"at\":1790258035691,\"v\":{\"present\":true,\"leaving\":false,\"anim\":\"none\"}},{\"i\":1,\"at\":1790258035824,\"v\":{\"present\":true,\"leaving\":true,\"anim\":\"mcp-row-out\"}},{\"i\":2,\"at\":1790258035976,\"v\":{\"present\":false,\"leaving\":false,\"anim\":null}},{\"i\":3,\"at\":1790258036118,\"v\":{\"present\":false,\"leaving\":false,\"anim\":null}},{\"i\":4,\"at\":1790258036246,\"v\":{\"present\":false,\"leaving\":false,\"anim\":null}}]}",
+      "at": "2026-09-24T13:53:56.896Z"
+    },
+    {
+      "section": "F0",
+      "name": "fixture http 参照握手（127.0.0.1 动态端口）= 与 stdio 同一组固化常量（协议/身份/能力/工具/哈希一致）",
+      "status": "PASS",
+      "expected": "http 与 stdio 协商结果一致且等于固化常量",
+      "actual": "{\"port\":51779,\"url\":\"http://127.0.0.1:51779/mcp\",\"status\":200,\"protocolVersion\":\"2025-06-18\",\"serverInfo\":{\"name\":\"openarc-test-echo\",\"version\":\"1.4.0\"},\"toolsHash\":\"7db033b3636227f94fc2a51859637cbb7b93c7e865a0e12b79d86c9dda7721ce\",\"pinnedHash\":\"7db033b3636227f94fc2a51859637cbb7b93c7e865a0e12b79d86c9dda7721ce\"}",
+      "at": "2026-09-24T13:53:56.996Z"
+    },
+    {
+      "section": "F1",
+      "name": "界面新建远程服务连接（http，127.0.0.1 动态端口）→ 连接：协商结果与 fixture 真实返回一致 + 执行位置=远程服务",
+      "status": "PASS",
+      "expected": "协议/身份/能力/工具等于 fixture 参照值 + 位置=远程服务 + 端点范围=仅本机",
+      "actual": "{\"fixture\":{\"url\":\"http://127.0.0.1:51779/mcp\",\"port\":51779,\"reference\":{\"protocolVersion\":\"2025-06-18\",\"serverName\":\"openarc-test-echo\",\"serverVersion\":\"1.4.0\",\"toolsHash\":\"7db033b3636227f94fc2a51859637cbb7b93c7e865a0e12b79d86c9dda7721ce\",\"capabilities\":{\"tools\":{\"listChanged\":false},\"logging\":{}},\"tools\":[{\"name\":\"echo_sum\",\"description\":\"把两个数字相加并回显（测试服务；不实现调用）\",\"inputSchemaSummary\":\"type=object; properties: a:number(required), b:number(required); required: a,b\"},{\"name\":\"describe_self\",\"description\":\"描述本测试服务自身的传输与协议版本\",\"inputSchemaSummary\":\"type=object; properties: verbose:boolean\"}]}},\"ui\":{\"protocolVersion\":\"2025-06-18\",\"serverName\":\"openarc-test-echo\",\"serverVersion\":\"1.4.0\",\"toolsHash\":\"7db033b3636227f94fc2a51859637cbb7b93c7e865a0e12b79d86c9dda7721ce\",\"location\":\"执行位置：远程服务\",\"status\":\"就绪 READY\",\"endpoint\":\"http://127.0.0.1:51779/mcp · 仅本机 LOCALHOST\",\"capabilities\":[{\"key\":\"tools\",\"name\":\"工具 tools\",\"flag\":\"已声明，但没有开启子能力\"},{\"key\":\"logging\",\"name\":\"日志 logging\",\"flag\":\"已声明，但没有开启子能力\"}],\"tools\":[{\"name\":\"echo_sum\",\"description\":\"把两个数字相加并回显（测试服务；不实现调用）\",\"schema\":\"type=object; properties: a:number(required), b:number(required); required: a,b\"},{\"name\":\"describe_self\",\"description\":\"描述本测试服务自身的传输与协议版本\",\"schema\":\"type=object; properties: verbose:boolean\"}]},\"record\":{\"status\":\"READY\",\"protocolVersion\":\"2025-06-18\",\"toolsHash\":\"7db033b3636227f94fc2a51859637cbb7b93c7e865a0e12b79d86c9dda7721ce\",\"capabilities\":{\"tools\":{\"listChanged\":false},\"logging\":{}},\"transport\":\"http\",\"location\":\"REMOTE_SERVICE\"},\"toolsMatchHttp\":true,\"capsMatchHttp\":true,\"remoteSpawnedLocalProcesses\":[]}",
+      "at": "2026-09-24T13:53:57.443Z"
+    },
+    {
+      "section": "G1",
+      "name": "负例① 非白名单 serverKey（/bin/sh、带分号、未知 key、路径穿越）→ MCP_LOCAL_SERVER_NOT_ALLOWED，且界面不提供任意命令行",
+      "status": "PASS",
+      "expected": "4 个 key 全部 ok:false + MCP_LOCAL_SERVER_NOT_ALLOWED + 界面白名单下拉 + 人话提示在构建产物中",
+      "actual": "{\"badResults\":[{\"key\":\"/bin/sh\",\"ok\":false,\"error\":\"MCP_LOCAL_SERVER_NOT_ALLOWED\",\"detail\":\"/bin/sh\"},{\"key\":\"openarc-test-echo; rm -rf /\",\"ok\":false,\"error\":\"MCP_LOCAL_SERVER_NOT_ALLOWED\",\"detail\":\"openarc-test-echo; rm -rf /\"},{\"key\":\"unknown-echo\",\"ok\":false,\"error\":\"MCP_LOCAL_SERVER_NOT_ALLOWED\",\"detail\":\"unknown-echo\"},{\"key\":\"../../bin/sh\",\"ok\":false,\"error\":\"MCP_LOCAL_SERVER_NOT_ALLOWED\",\"detail\":\"../../bin/sh\"}],\"humanTextInBundle\":{\"ok\":true,\"file\":\"./assets/main-Ct-YFunl.js\"},\"uiServerKeyOptions\":[\"openarc-test-echo\"]}",
+      "at": "2026-09-24T13:53:57.559Z"
+    },
+    {
+      "section": "F1a",
+      "name": "界面新建路径在列表非空时可用（此时无绕过：entry.needed=false，完全走 DOM 表单）",
+      "status": "PASS",
+      "expected": "createDead.ok + entry.needed=false",
+      "actual": "{\"create\":{\"ok\":true,\"dialogClosed\":true,\"listed\":true,\"connectionId\":\"mcp_ETb1Mkz34-cnMA\"},\"entry\":{\"needed\":false,\"reason\":\"list-non-empty\"}}",
+      "at": "2026-09-24T13:53:57.715Z"
+    },
+    {
+      "section": "G2",
+      "name": "负例② 不可达 URL（127.0.0.1 已关闭端口）→ MCP_UNREACHABLE/MCP_TIMEOUT，有界且有人话提示",
+      "status": "PASS",
+      "expected": "稳定错误码 + 人话提示 + 耗时 ≤15s",
+      "actual": "{\"url\":\"http://127.0.0.1:51784/mcp\",\"create\":true,\"errorCode\":\"MCP_UNREACHABLE\",\"errorText\":\"连接未完成：连不上服务端（本地进程未起来，或远程不可达）（MCP_UNREACHABLE）\",\"elapsedMs\":105,\"record\":{\"status\":\"ERROR\",\"lastErrorCode\":\"MCP_UNREACHABLE\"}}",
+      "at": "2026-09-24T13:53:57.992Z"
+    },
+    {
+      "section": "G3a",
+      "name": "负例③ fixture 鉴权失败模式（--auth-token）→ MCP_AUTH_REQUIRED + 记录 status=AUTH_REQUIRED + 失败当下即出现重授权入口",
+      "status": "PASS",
+      "expected": "fixture 401 + 错误码 MCP_AUTH_REQUIRED + status=AUTH_REQUIRED + 失败当下 data-mcp-auth-required 已出现",
+      "actual": "{\"fixtureStatus\":401,\"errorCode\":\"MCP_AUTH_REQUIRED\",\"errorText\":\"连接未完成：认证失败，需要重新授权或更新凭据（MCP_AUTH_REQUIRED）\",\"authRequiredImmediately\":true,\"record\":{\"status\":\"AUTH_REQUIRED\",\"lastErrorCode\":\"MCP_AUTH_REQUIRED\"}}",
+      "at": "2026-09-24T13:53:58.546Z"
+    },
+    {
+      "section": "G3b",
+      "name": "重选该行后界面出现「认证失败，需要重新授权」入口（data-mcp-auth-required + 重授权按钮）",
+      "status": "PASS",
+      "expected": "status=AUTH_REQUIRED + data-mcp-auth-required + 重授权按钮",
+      "actual": "{\"authStatusUp\":true,\"authUp\":true,\"authButton\":{\"text\":\"重新连接\",\"action\":\"reauth\"},\"detailStatus\":\"需重新授权 AUTH_REQUIRED\",\"lastError\":\"最后错误：认证失败，需要重新授权或更新凭据（MCP_AUTH_REQUIRED）\"}",
+      "at": "2026-09-24T13:53:58.560Z"
+    },
+    {
+      "section": "G4",
+      "name": "负例④ 协议版本不符模式 → MCP_PROTOCOL_VERSION_UNSUPPORTED（真实码），并如实记录服务端返回的版本",
+      "status": "PASS",
+      "expected": "MCP_PROTOCOL_VERSION_UNSUPPORTED + status=ERROR + 记录实际协议版本 1999-01-01",
+      "actual": "{\"fixtureVersion\":\"1999-01-01\",\"errorCode\":\"MCP_PROTOCOL_VERSION_UNSUPPORTED\",\"errorText\":\"连接未完成：服务端协议版本不在受支持列表内（MCP_PROTOCOL_VERSION_UNSUPPORTED）\",\"uiProtocolVersion\":\"1999-01-01\",\"record\":{\"status\":\"ERROR\",\"lastErrorCode\":\"MCP_PROTOCOL_VERSION_UNSUPPORTED\",\"protocolVersion\":\"1999-01-01\",\"serverName\":\"openarc-test-echo\",\"serverVersion\":\"1.4.0\"}}",
+      "at": "2026-09-24T13:53:59.180Z"
+    },
+    {
+      "section": "G5",
+      "name": "负例⑤ 挂死服务（fixture --no-response）→ 有界 MCP_TIMEOUT（不长时间挂死），期间界面显示「发现工具中」",
+      "status": "PASS",
+      "expected": "MCP_TIMEOUT + 耗时 ≤15s + 出现 data-mcp-discovering",
+      "actual": "{\"errorCode\":\"MCP_TIMEOUT\",\"elapsedMs\":8068,\"discoveringSamples\":6,\"frames\":[\"light-discovering-00.png\",\"light-discovering-01.png\",\"light-discovering-02.png\",\"light-discovering-03.png\",\"light-discovering-04.png\",\"light-discovering-05.png\"],\"shot\":\"light-06b-discovering.png\"}",
+      "at": "2026-09-24T13:54:07.637Z"
+    },
+    {
+      "section": "H1",
+      "name": "撤掉 mcp-center 的 MCP 授权（既有治理命令 governance/revokeAppAccess）→ 全部 mcp 读命令拒绝；界面「无权」不暴露任何工具描述（mcp.view 也被撤 → 详情整块无权）",
+      "status": "PASS",
+      "expected": "revoke 成功 + list/get/connect=MCP_UNAUTHORIZED + 界面无权文案 + 0 工具名/工具表",
+      "actual": "{\"mcpGrant\":{\"grantId\":\"grant_1kWl4bPDSNXTCUKiL_hUwmCN3UE29_Kl\",\"actions\":[\"mcp.view\",\"mcp.use\",\"mcp.manage\",\"mcp.test\"],\"resourceId\":null,\"collectionId\":null,\"resourceType\":\"mcp\",\"departmentId\":null,\"scope\":null,\"expiresAt\":null},\"partialGrantAttempt\":{\"ok\":false,\"error\":\"INVALID_INPUT\"},\"partialToolAttempt\":{\"ok\":false,\"error\":\"INVALID_INPUT\"},\"beforeRevokeListOk\":true,\"revoked\":{\"ok\":true,\"changed\":true,\"reasonCode\":\"ALLOW\"},\"afterList\":{\"ok\":false,\"error\":\"MCP_UNAUTHORIZED\",\"reason\":\"app-action-missing\"},\"afterGet\":{\"ok\":false,\"error\":\"MCP_UNAUTHORIZED\"},\"afterConnect\":{\"ok\":false,\"error\":\"MCP_UNAUTHORIZED\"},\"reopenedH\":true,\"unauthorized\":{\"code\":\"MCP_UNAUTHORIZED\",\"text\":\"读取连接列表未完成：当前账号或该应用没有被授这个动作（MCP_UNAUTHORIZED）\"},\"toolTextLeak\":{\"echo_sum\":false,\"describe_self\":false,\"toolsTable\":false}}",
+      "at": "2026-09-24T13:54:08.019Z"
+    },
+    {
+      "section": "H2",
+      "name": "恢复授权后回到可用（重新登录触发内置 baseline upsert 重新授权）→ 列表/详情/工具表都回来",
+      "status": "PASS",
+      "expected": "mcp/list ok + 工具可见 + 界面恢复",
+      "actual": "{\"restored\":true,\"listBack\":true,\"listOk\":true,\"itemCount\":5,\"getOk\":true,\"toolsHidden\":false,\"restoreVisible\":true,\"uiTools\":[\"echo_sum\",\"describe_self\"],\"reauthEntryGone\":true}",
+      "at": "2026-09-24T13:54:08.848Z"
+    },
+    {
+      "section": "I1",
+      "name": "界面没有任何「调用/运行工具」入口（交互元素扫描 0 命中；桥只暴露 command）",
+      "status": "PASS",
+      "expected": "0 个调用入口 + bridge keys = ['command']",
+      "actual": "{\"labels\":[\"新建\",\"远程回显服务就绪 READYhttp（远程服务）执行位置：远程服务2 个工具最后连接 2026/9/24 21:53:57\",\"不可达服务错误 ERRORhttp（远程服务）执行位置：远程服务工具未发现最后连接 —\",\"鉴权失败服务需重新授权 AUTH_REQUIREDhttp（远程服务）执行位置：远程服务工具未发现最后连接 —\",\"协议版本不符错误 ERRORhttp（远程服务）执行位置：远程服务工具未发现最后连接 —\",\"无响应服务错误 ERRORhttp（远程服务）执行位置：远程服务工具未发现最后连接 —\",\"停用\",\"重连\",\"测试\",\"编辑\",\"删除\"],\"hitCount\":0,\"bridgeKeys\":[\"command\"],\"extraCallEntries\":[]}",
+      "at": "2026-09-24T13:54:08.849Z"
+    },
+    {
+      "section": "I2",
+      "name": "直接对 window.openarc.mcp.command 发 5 个调用命令（nested + flat 两种形状）→ 全部 MCP_TOOL_INVOCATION_NOT_ENABLED；未登记命令仍是 MCP_COMMAND_NOT_ALLOWED",
+      "status": "PASS",
+      "expected": "5×2 全部 MCP_TOOL_INVOCATION_NOT_ENABLED + 未知命令 MCP_COMMAND_NOT_ALLOWED",
+      "actual": "{\"invResults\":[{\"command\":\"mcp/callTool\",\"nested\":{\"ok\":false,\"error\":\"MCP_TOOL_INVOCATION_NOT_ENABLED\"},\"flat\":{\"ok\":false,\"error\":\"MCP_TOOL_INVOCATION_NOT_ENABLED\"}},{\"command\":\"mcp/call\",\"nested\":{\"ok\":false,\"error\":\"MCP_TOOL_INVOCATION_NOT_ENABLED\"},\"flat\":{\"ok\":false,\"error\":\"MCP_TOOL_INVOCATION_NOT_ENABLED\"}},{\"command\":\"mcp/invoke\",\"nested\":{\"ok\":false,\"error\":\"MCP_TOOL_INVOCATION_NOT_ENABLED\"},\"flat\":{\"ok\":false,\"error\":\"MCP_TOOL_INVOCATION_NOT_ENABLED\"}},{\"command\":\"mcp/invokeTool\",\"nested\":{\"ok\":false,\"error\":\"MCP_TOOL_INVOCATION_NOT_ENABLED\"},\"flat\":{\"ok\":false,\"error\":\"MCP_TOOL_INVOCATION_NOT_ENABLED\"}},{\"command\":\"mcp/toolCall\",\"nested\":{\"ok\":false,\"error\":\"MCP_TOOL_INVOCATION_NOT_ENABLED\"},\"flat\":{\"ok\":false,\"error\":\"MCP_TOOL_INVOCATION_NOT_ENABLED\"}}],\"unknownCmd\":{\"ok\":false,\"error\":\"MCP_COMMAND_NOT_ALLOWED\",\"detail\":\"mcp/toolsInvoke\"}}",
+      "at": "2026-09-24T13:54:08.864Z"
+    },
+    {
+      "section": "J1a",
+      "name": "自证边界（端点）：全部 MCP 连接端点只指向自建 fixture（stdio 白名单 key openarc-test-echo / 127.0.0.1 动态端口）",
+      "status": "PASS",
+      "expected": "每条 endpoint_json 都是 openarc-test-echo 或 127.0.0.1",
+      "actual": "{\"connections\":[{\"id\":\"mcp_kW18jWJRXWZduQ\",\"name\":\"远程回显服务\",\"transport\":\"http\",\"location\":\"REMOTE_SERVICE\",\"endpoint\":\"{\\\"url\\\":\\\"http://127.0.0.1:51779/mcp\\\",\\\"endpointScope\\\":\\\"LOCALHOST\\\"}\",\"status\":\"READY\",\"lastErrorCode\":null},{\"id\":\"mcp_ETb1Mkz34-cnMA\",\"name\":\"不可达服务\",\"transport\":\"http\",\"location\":\"REMOTE_SERVICE\",\"endpoint\":\"{\\\"url\\\":\\\"http://127.0.0.1:51784/mcp\\\",\\\"endpointScope\\\":\\\"LOCALHOST\\\"}\",\"status\":\"ERROR\",\"lastErrorCode\":\"MCP_UNREACHABLE\"},{\"id\":\"mcp_QuuDveugEqBphw\",\"name\":\"鉴权失败服务\",\"transport\":\"http\",\"location\":\"REMOTE_SERVICE\",\"endpoint\":\"{\\\"url\\\":\\\"http://127.0.0.1:51786/mcp\\\",\\\"endpointScope\\\":\\\"LOCALHOST\\\"}\",\"status\":\"AUTH_REQUIRED\",\"lastErrorCode\":\"MCP_AUTH_REQUIRED\"},{\"id\":\"mcp_BocXva0Y1G1k6A\",\"name\":\"协议版本不符\",\"transport\":\"http\",\"location\":\"REMOTE_SERVICE\",\"endpoint\":\"{\\\"url\\\":\\\"http://127.0.0.1:51790/mcp\\\",\\\"endpointScope\\\":\\\"LOCALHOST\\\"}\",\"status\":\"ERROR\",\"lastErrorCode\":\"MCP_PROTOCOL_VERSION_UNSUPPORTED\"},{\"id\":\"mcp_difHIG0CIcNNmw\",\"name\":\"无响应服务\",\"transport\":\"http\",\"location\":\"REMOTE_SERVICE\",\"endpoint\":\"{\\\"url\\\":\\\"http://127.0.0.1:51795/mcp\\\",\\\"endpointScope\\\":\\\"LOCALHOST\\\"}\",\"status\":\"ERROR\",\"lastErrorCode\":\"MCP_TIMEOUT\"}],\"fixtureRows\":[{\"name\":\"http\",\"port\":51779,\"url\":\"http://127.0.0.1:51779/mcp\"},{\"name\":\"http-auth\",\"port\":51786,\"url\":\"http://127.0.0.1:51786/mcp\"},{\"name\":\"http-protocol\",\"port\":51790,\"url\":\"http://127.0.0.1:51790/mcp\"},{\"name\":\"http-no-response\",\"port\":51795,\"url\":\"http://127.0.0.1:51795/mcp\"}]}",
+      "at": "2026-09-24T13:54:08.869Z"
+    },
+    {
+      "section": "J1b",
+      "name": "自证边界（子进程）：本地 stdio 连接期间确实起过本仓库受控子进程，命令行不含 shell/python/curl 等任意外部程序（本地 stdio 握手本身在 D5-03-D2 下失败）",
+      "status": "PASS",
+      "expected": "≥1 个本地连接期间新出现的后代进程，且命令行为仓库 fixture 或 Electron/Node 运行时",
+      "actual": "{\"sampledNewDescendants\":[{\"pid\":50328,\"ppid\":50264,\"stat\":\"R\",\"cmd\":\"<repo>/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron <repo>/tests/fixtures/mcp/echo-server.mjs --stdio\",\"firstSeenAtMs\":546,\"lastSeenMs\":857}],\"mcpSpawnedPids\":[50328]}",
+      "at": "2026-09-24T13:54:08.869Z"
+    },
+    {
+      "section": "K1",
+      "name": "动效 · 列表插入：新行播 MS §5 入场（is-new + mcp-row-in，--dur-quick=160ms）",
+      "status": "PASS",
+      "expected": "采样到 .mcp-row.is-new + animationName=mcp-row-in + duration=0.16s",
+      "actual": "{\"insertPresentMs\":1801,\"sample\":{\"i\":1,\"at\":1790258049102,\"v\":{\"anyNew\":true,\"anim\":\"mcp-row-in\",\"dur\":\"0.16s\",\"rows\":6}},\"samples\":[{\"i\":0,\"at\":1790258048871,\"v\":{\"anyNew\":false,\"anim\":null,\"dur\":null,\"rows\":5}},{\"i\":1,\"at\":1790258049102,\"v\":{\"anyNew\":true,\"anim\":\"mcp-row-in\",\"dur\":\"0.16s\",\"rows\":6}},{\"i\":2,\"at\":1790258049261,\"v\":{\"anyNew\":true,\"anim\":\"mcp-row-in\",\"dur\":\"0.16s\",\"rows\":6}},{\"i\":3,\"at\":1790258049416,\"v\":{\"anyNew\":true,\"anim\":\"mcp-row-in\",\"dur\":\"0.16s\",\"rows\":6}},{\"i\":4,\"at\":1790258049564,\"v\":{\"anyNew\":true,\"anim\":\"mcp-row-in\",\"dur\":\"0.16s\",\"rows\":6}},{\"i\":5,\"at\":1790258049723,\"v\":{\"anyNew\":true,\"anim\":\"mcp-row-in\",\"dur\":\"0.16s\",\"rows\":6}},{\"i\":6,\"at\":1790258049838,\"v\":{\"anyNew\":true,\"anim\":\"mcp-row-in\",\"dur\":\"0.16s\",\"rows\":6}},{\"i\":7,\"at\":1790258049973,\"v\":{\"anyNew\":true,\"anim\":\"mcp-row-in\",\"dur\":\"0.16s\",\"rows\":6}},{\"i\":8,\"at\":1790258050108,\"v\":{\"anyNew\":true,\"anim\":\"mcp-row-in\",\"dur\":\"0.16s\",\"rows\":6}},{\"i\":9,\"at\":1790258050250,\"v\":{\"anyNew\":true,\"anim\":\"mcp-row-in\",\"dur\":\"0.16s\",\"rows\":6}},{\"i\":10,\"at\":1790258050388,\"v\":{\"anyNew\":true,\"anim\":\"mcp-row-in\",\"dur\":\"0.16s\",\"rows\":6}},{\"i\":11,\"at\":1790258050516,\"v\":{\"anyNew\":true,\"anim\":\"mcp-row-in\",\"dur\":\"0.16s\",\"rows\":6}}],\"frames\":12}",
+      "at": "2026-09-24T13:54:10.672Z"
+    },
+    {
+      "section": "K2",
+      "name": "动效 · 列表删除：退场 160ms（is-leaving + mcp-row-out）后行被摘除",
+      "status": "PASS",
+      "expected": "页面内 8ms 采样到 .mcp-row.is-leaving + mcp-row-out/0.16s + 摘除耗时 ≥120ms",
+      "actual": "{\"gone\":true,\"deleteMs\":170,\"leaveSample\":{\"t\":19989,\"leaving\":true,\"anim\":\"mcp-row-out\",\"dur\":\"0.16s\"},\"leavingFrames\":21,\"frames\":8}",
+      "at": "2026-09-24T13:54:11.728Z"
+    },
+    {
+      "section": "K3",
+      "name": "动效 · 详情切换：从远程连接切到鉴权失败连接，详情面板按 connectionId 重挂载（连续帧覆盖切换；loading 是数据态，进程内 IPC 可能短于 8ms 采样，只记录不判定）",
+      "status": "PASS",
+      "expected": "页面内 8ms 采样到 ≥2 个详情名（重挂载）；loading 帧数仅作参考",
+      "actual": "{\"switchNames\":[\"远程回显服务\",\"鉴权失败服务\"],\"statesSeen\":[\"ready\"],\"loadingFrames\":0,\"loadingNote\":\"数据态 loading 可能短于 8ms 采样间隔，不作为动效判定\",\"nameChanges\":[{\"t\":21551,\"name\":\"鉴权失败服务\"}],\"frames\":8}",
+      "at": "2026-09-24T13:54:13.070Z"
+    },
+    {
+      "section": "K4",
+      "name": "动效 · 减少动态效果：同一场景（插入 + 删除）animation 被压掉、--dur-quick=0ms，删除即时（≤100ms，且明显快于常规 160ms 退场）",
+      "status": "PASS",
+      "expected": "desktop.reduced + --dur-quick=0ms + animationName=none + 删除耗时 ≤100ms 且 < 常规",
+      "actual": "{\"reducedOn\":true,\"reducedState\":{\"desktopReduced\":true,\"durQuick\":\"0ms\"},\"reducedAnim\":{\"rowAnim\":\"none\",\"newRowAnim\":\"none\",\"newRowDur\":\"0s\"},\"reducedInsertMs\":998,\"reducedDeleteMs\":3,\"normalDeleteMs\":170,\"insertFrames\":8,\"deleteFrames\":6,\"insertSamples\":[{\"i\":0,\"at\":1790258053210,\"v\":{\"anyNew\":false,\"anim\":null,\"dur\":null}},{\"i\":1,\"at\":1790258053365,\"v\":{\"anyNew\":true,\"anim\":\"none\",\"dur\":\"0s\"}},{\"i\":2,\"at\":1790258053482,\"v\":{\"anyNew\":true,\"anim\":\"none\",\"dur\":\"0s\"}}]}",
+      "at": "2026-09-24T13:54:14.866Z"
+    },
+    {
+      "section": "L1",
+      "name": "深色主题切换（真实产品外观开关）",
+      "status": "PASS",
+      "expected": ".desktop.dark + 减少动效已关闭",
+      "actual": "{\"themeDark\":true,\"darkState\":{\"dark\":true,\"reduced\":false}}",
+      "at": "2026-09-24T13:54:15.761Z"
+    },
+    {
+      "section": "L2",
+      "name": "深色 · 无权（第二次整条撤销 → 界面无权，工具描述 0 暴露）",
+      "status": "PASS",
+      "expected": "revoke 成功 + 界面 MCP_UNAUTHORIZED",
+      "actual": "{\"revoked2\":{\"ok\":true,\"changed\":true,\"reasonCode\":\"ALLOW\"},\"reopenedU2\":true,\"unauthDarkUp\":true,\"shot\":\"dark-07-unauthorized.png\"}",
+      "at": "2026-09-24T13:54:25.711Z"
+    },
+    {
+      "section": "L3",
+      "name": "深色 · 恢复授权后再次可用",
+      "status": "PASS",
+      "expected": "登录后 mcp/list ok",
+      "actual": "{\"restored2\":true,\"listBack2\":true,\"ok\":true,\"items\":5}",
+      "at": "2026-09-24T13:54:25.925Z"
+    },
+    {
+      "section": "L4",
+      "name": "深色 · 空态（清空连接后回到「还没有连接」）",
+      "status": "PASS",
+      "expected": "data-mcp-empty 可见",
+      "actual": "{\"reopenedEmpty\":true,\"emptyDarkUp\":true,\"shot\":\"dark-08-empty.png\"}",
+      "at": "2026-09-24T13:54:26.564Z"
+    },
+    {
+      "section": "L5",
+      "name": "清空后无 MCP 子进程残留",
+      "status": "PASS",
+      "expected": "本地连接起的后代进程全部退出",
+      "actual": "{\"mcpSpawnedPids\":[],\"finalAlive\":[],\"fixtureRows\":[{\"name\":\"http\",\"port\":51779,\"url\":\"http://127.0.0.1:51779/mcp\"},{\"name\":\"http-auth\",\"port\":51786,\"url\":\"http://127.0.0.1:51786/mcp\"},{\"name\":\"http-protocol\",\"port\":51790,\"url\":\"http://127.0.0.1:51790/mcp\"},{\"name\":\"http-no-response\",\"port\":51795,\"url\":\"http://127.0.0.1:51795/mcp\"}]}",
+      "at": "2026-09-24T13:54:26.649Z"
+    },
+    {
+      "section": "Z1",
+      "name": "主进程 stderr 无未处理错误",
+      "status": "PASS",
+      "expected": "无错误行",
+      "actual": "clean",
+      "at": "2026-09-24T13:54:26.649Z"
+    }
+  ]
+}
