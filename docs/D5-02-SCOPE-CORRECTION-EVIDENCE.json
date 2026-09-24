@@ -1,0 +1,505 @@
+{
+  "phase": "D5-02 范围修正 · 无限画布首页 + 单一模型真源",
+  "at": "2026-09-24T06:55:40.822Z",
+  "openarcCommit": "5b77186c24d0608d7b6514811e2adcb4d419e575",
+  "command": "OPENARC_TESTED_COMMIT=$(git rev-parse HEAD) node experiments/d5-02/canvas-e2e.mjs",
+  "env": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "node": "v22.22.3",
+    "electron": "44.3.0"
+  },
+  "counts": {
+    "pass": 48,
+    "fail": 0,
+    "total": 48
+  },
+  "artifactPath": "artifacts/d5-02/d5-02-canvas-e2e.json",
+  "artifactSha256": "746a436a668493e6d2486f354cf8f2ad5e52a6f81730c1a514a28c54dd9080a0",
+  "regression": {
+    "build": {
+      "command": "npm run build",
+      "exitCode": 0,
+      "note": "tsc --noEmit + vite build"
+    },
+    "unitTests": [
+      {
+        "set": "tests/d5-02-canvas-service.test.mjs + tests/d5-02-canvas-tool.test.mjs + tests/d5-02-model-list-authorization.test.mjs + tests/d5-02-canvas-edit-proposal.test.mjs",
+        "counts": "22/22"
+      },
+      {
+        "file": "tests/governance-app-model-grant.test.mjs",
+        "counts": "4/4"
+      },
+      {
+        "set": "tests/model-*.test.mjs（8 个文件：model-bootstrap / model-isolation / model-performance / model-proxy-child / model-proxy / model-secret-scan / model-service-stream / model-service）",
+        "counts": "59/59",
+        "note": "文档岗复跑核对；不再使用旧的 60/60 口径"
+      }
+    ],
+    "gateNotVerified": [],
+    "preExistingFailures": [
+      {
+        "file": "tests/side-effect-c4-gates.test.mjs",
+        "line": 474,
+        "assertion": "主进程绝不 in-process 执行 write（源扫描 electron/side-effect-runtime.cjs）",
+        "conflict": "与 D5-02 canvas.edit 的 in-process 执行类（CanvasControl）冲突",
+        "reproducedOnCleanHeadExportTree": true,
+        "verdict": "预存在失败，与本轮改动无关，如实登记为既有缺口"
+      },
+      {
+        "file": "tests/d4-03-approval-push-isolation.test.mjs",
+        "line": 103,
+        "assertion": "审批推送载荷字段白名单 SNAPSHOT_FIELDS",
+        "conflict": "白名单少 D5-01 的 targetRef/url",
+        "reproducedOnCleanHeadExportTree": true,
+        "verdict": "预存在失败，与本轮改动无关，如实登记为既有缺口"
+      }
+    ]
+  },
+  "assertionChanges": [
+    {
+      "id": "A 系列（A1–A10）",
+      "change": "重写：旧 A1/A2/A3/A6/A7 与 reopenCurrentCanvasFromHome 口径作废重写；新增「无外壳 / 无 chrome / 无其他子页入口 / 无遮挡层 / 卡片直达 / 继续上次」",
+      "reason": "产品形态变更：入口从完整应用外壳改为无限画布首页",
+      "gateRef": "experiments/d5-02/canvas-e2e.mjs:224-420"
+    },
+    {
+      "id": "B1",
+      "change": "更严：api_providers 从空数组改为真实投影；数量=IPC 真值交叉核对；键集合 ⊆ {id,name,enabled,chat_models,image_models,video_models}；泄漏正则加宽（base_url|protocol|has_key|key_preview|token|localhost|127.0.0.1）",
+      "reason": "单一模型真源要求——清单必须如实投影且不得泄露地址/凭据",
+      "gateRef": "experiments/d5-02/canvas-e2e.mjs:464"
+    },
+    {
+      "id": "B5",
+      "change": "更严：错误码由桥兜底 OPENARC_UNSUPPORTED 改为页面守卫的 CAPABILITY_UNAVAILABLE（守卫在桥之前截住），并 AND 上 available:false / transport:null / detail 非空",
+      "reason": "未接通能力必须给出能力事实，不是笼统不支持",
+      "gateRef": "experiments/d5-02/canvas-e2e.mjs:567"
+    },
+    {
+      "id": "E8",
+      "change": "更严：A/B 两账号各自用页面 scoped localStorage 写探针键，own>=1 有真实来源；新增 isoA.foreign===0、own 增量、A 的键在 B 侧读为 null",
+      "reason": "账号边界的存储分桶需要页面侧自证，而不是只看桥的结论",
+      "gateRef": "experiments/d5-02/canvas-e2e.mjs:859"
+    },
+    {
+      "id": "N5c / N5d",
+      "change": "本轮新增后按契约改写：N5c 去掉「生图清单必须为空」（与「清单如实投影」相反），改为断言 data-openarc-default-unavailable + disabled + 运行按钮 blocked + 原因文案与引导 + 清单仍在 + select.value 为空 + 文本区不受影响 + 恢复后标记消失；N5d 三条 0 命中保留，把「下拉仍可选」改成「默认不可用口径」（原因码必须是 MODEL_DISABLED）",
+      "reason": "ec5cbc5 明确「显式默认不可用不静默替换」的界面口径",
+      "gateRef": "experiments/d5-02/canvas-e2e.mjs:618,694"
+    },
+    {
+      "id": "F3b / F3c / F4",
+      "change": "断言一字未动（逐字节相同）",
+      "reason": "缺口修复后按原断言复跑通过，不放宽",
+      "gateRef": "experiments/d5-02/canvas-e2e.mjs:726,754,874"
+    },
+    {
+      "id": "Z1",
+      "change": "只把 macOS IMKit 系统消息 IMKCFRunLoopWakeUpReliable 加入噪声白名单（不是放宽判定）",
+      "reason": "该行是 macOS 输入法框架向主线程 mach port 发唤醒消息失败时的系统日志，不是产品错误",
+      "gateRef": "experiments/d5-02/canvas-e2e.mjs:880-885"
+    },
+    {
+      "id": "F3d",
+      "change": "只新增：本地编辑并落库后宿主 canvas/command 新增节点 ≤5s 呈现 + 用户内容仍在 + revision 5s 稳定（既有断言一行未动）",
+      "reason": "D1 修复的回归钉：本地保存过的编辑器也必须能呈现宿主侧改动",
+      "gateRef": "experiments/d5-02/canvas-e2e.mjs（F3d，本批新增）"
+    }
+  ],
+  "notVerified": [
+    "与用户截图对照：未验收（基准文件缺失）——用户给的首页截图未出现在本工作区 / 本会话（已检索工作区与 Desktop/Downloads）；关闭方式：用户提供文件，或明确「以上游原版页面在真实 Electron 中的渲染为基准」",
+    "MS §6「AI 新增节点 160ms 淡入 + 来源标记」= 未实现（上游）：canvas.html / canvas.js / canvas.css 无节点入场动画与来源徽标，节点同帧直接出现；关闭方式：由后续动效批次实现",
+    "新登记的既有缺陷：宿主改动落在页面 500ms debounce 窗口内会被页面 PUT 覆盖（未落库竞态；改前改后一致，非本批引入），建议单开一批处理",
+    "门禁 F3d / F4-presented 依赖页面 2.5s 轮询与窗口前台状态（被完全遮挡时 Chromium 会节流；F3d 已 bringToFront 兜住）",
+    "其他 NOVAI 子页文件仍在 bundle 内但无入口不可达（smart-canvas 亦不可达，未注入适配层 / 守卫）",
+    "视频 / ComfyUI / RunningHub 等保持「明确不可用」，未接通链路未启用",
+    "Windows / 多屏 / 高 DPI 等既有 NOT VERIFIED 不变"
+  ],
+  "checks": [
+    {
+      "section": "A0",
+      "name": "真实 electron . 启动（隔离 userData / 隔离 CDP 端口）",
+      "status": "PASS",
+      "expected": "CDP 可用",
+      "actual": "connected",
+      "at": 1790232887832
+    },
+    {
+      "section": "A0",
+      "name": "真实 UI 登录 admin",
+      "status": "PASS",
+      "expected": "ready",
+      "actual": "ready",
+      "at": 1790232888744
+    },
+    {
+      "section": "A1",
+      "name": "打开应用 = 上游原版列表首页 static/canvas-list.html（画布工作台）；不是完整外壳（无 index.html/home.html 帧、无侧栏导航），宿主只剩宿主根（顶部操作条/状态行/提示横幅已删）",
+      "status": "PASS",
+      "expected": "canvas-list 入口帧 + 无外壳/无宿主 chrome",
+      "actual": "{\"opened\":true,\"entryUp\":true,\"entryInfo\":{\"title\":\"画布工作台\",\"start\":true,\"cont\":true,\"newProject\":true,\"grid\":true,\"empty\":true,\"picker\":true,\"iframes\":0,\"homeFrameEl\":false,\"navItems\":0},\"hostChrome\":{\"host\":true,\"bar\":false,\"status\":false,\"notice\":false},\"bundleFrames\":[\"openarc-canvas://bundle/static/canvas-list.html#oa=k1fxa511q89i\"],\"deadShellFrames\":[]}",
+      "at": 1790232890212
+    },
+    {
+      "section": "A2",
+      "name": "其他子页面入口不可达：入口页没有指向 online/gpt-chat/asset-manager/api-settings/comfyui-settings/smart-canvas 的导航，也不存在这些子页帧",
+      "status": "PASS",
+      "expected": "0 个跨页导航入口 + 0 个子页帧",
+      "actual": "{\"entryNav\":{\"hits\":[],\"hitCount\":0,\"navFrameIds\":[],\"iframes\":0},\"subFrames\":[]}",
+      "at": 1790232890214
+    },
+    {
+      "section": "A3",
+      "name": "「开始创作」→ 直接进入无限画布编辑器（canvas.html + 适配器就绪 + 非只读），且真的新建了一本；全程选画布遮挡层 #canvasPickerOverlay 未出现 .active",
+      "status": "PASS",
+      "expected": "编辑器帧 + 非只读 + 新建 1 本 + 遮挡层未激活",
+      "actual": "{\"startClick\":\"clicked\",\"editorUp\":true,\"adapterUp\":true,\"canvasState0\":{\"id\":\"cv_muf6fur4_6wos0e\",\"nodes\":0,\"edges\":0,\"ro\":false},\"listBeforeCreate\":0,\"listAfterCreate\":1,\"pickerSamples\":[{\"page\":\"canvas\",\"cls\":\"absent\"}],\"pickerActive\":[]}",
+      "at": 1790232890431
+    },
+    {
+      "section": "A4",
+      "name": "编辑器 #backToManagerBtn → 回到 canvas-list 入口帧（同一宿主帧内导航：返回后画布帧不再存在）",
+      "status": "PASS",
+      "expected": "回入口帧 + 画布帧消失",
+      "actual": "{\"backClick\":\"clicked\",\"backToList\":true,\"backInfo\":{\"title\":\"画布工作台\",\"grid\":true,\"start\":true}}",
+      "at": 1790232890639
+    },
+    {
+      "section": "A5",
+      "name": "「继续上次」→ 进入 canvas.html 且打开的正是最近更新的那本（宿主 IPC canvas/list 的 updatedAt 第一名，也就是刚创建的这本）",
+      "status": "PASS",
+      "expected": "canvas.html + 最近更新那本",
+      "actual": "{\"listReadyForContinue\":true,\"continueClick\":\"clicked\",\"contUp\":true,\"openedId\":\"cv_muf6fur4_6wos0e\",\"latest\":{\"canvasId\":\"cv_muf6fur4_6wos0e\",\"updatedAt\":1790232890224},\"currentCanvasId\":\"cv_muf6fur4_6wos0e\",\"ipcCount\":1}",
+      "at": 1790232890851
+    },
+    {
+      "section": "A6",
+      "name": "卡片直达：入口页 #cardsGrid .project-card[data-canvas-id=当前这本] → 进入编辑器且 canvasId 一致（真实卡片点击，不是 IPC 造帧）",
+      "status": "PASS",
+      "expected": "卡片点击 → 同一本",
+      "actual": "{\"cardSel\":\"#cardsGrid .project-card[data-canvas-id=\\\"cv_muf6fur4_6wos0e\\\"]\",\"backForCard\":true,\"cardUp\":true,\"cardClick\":\"clicked\",\"cardUpFrame\":true,\"cardId\":\"cv_muf6fur4_6wos0e\",\"currentCanvasId\":\"cv_muf6fur4_6wos0e\"}",
+      "at": 1790232891262
+    },
+    {
+      "section": "A7",
+      "name": "创建并编辑真实项目：命令层 add/connect/move → 画布自动保存 → OpenArc 存储里一致",
+      "status": "PASS",
+      "expected": "2 节点 + 1 连线 + 坐标 520",
+      "actual": "{\"ok\":[true,true,true,true],\"savedOk\":true,\"revision\":2,\"nodes\":[{\"id\":\"n_prompt\",\"x\":80},{\"id\":\"n_llm\",\"x\":520}],\"edges\":1}",
+      "at": 1790232891931
+    },
+    {
+      "section": "A8",
+      "name": "撤销 / 重做：撤销真的回退、重做真的恢复（与手工编辑同一历史入口），结果重新落库",
+      "status": "PASS",
+      "expected": "undo→420 / redo→520 + 落库",
+      "actual": "{\"undoState\":{\"x\":420,\"canRedo\":true},\"redoState\":{\"x\":520},\"redoPersisted\":true}",
+      "at": 1790232892944
+    },
+    {
+      "section": "N1",
+      "name": "无模型（配置模型之前）：编辑器页头模型状态 = unconfigured + 引导按钮文案精确为「打开 OpenArc 总 API 设置」；文本/生图下拉都被标成未配置且真的 disabled（唯一占位文案精确）；DOM 全文 / option.value / select.value 扫 /comfly/i 0 命中（不存在伪造供应商）",
+      "status": "PASS",
+      "expected": "unconfigured + 引导文案精确 + 4 个下拉 disabled/unconfigured + /comfly/i 0 命中",
+      "actual": "{\"probes\":{\"add\":[\"ok\",\"ok\"],\"marked\":true},\"chip\":\"unconfigured\",\"chipText\":\"模型：文本未配置 · 生图未配置 · 视频未接通\",\"chipGuideText\":\"打开 OpenArc 总 API 设置\",\"guideCount\":3,\"guideTexts\":[\"打开 OpenArc 总 API 设置\"],\"guardGuideText\":\"打开 OpenArc 总 API 设置\",\"chat\":{\"provider\":{\"disabled\":true,\"aria\":\"true\",\"unconfigured\":\"chat\",\"unavailable\":null,\"value\":\"\",\"texts\":[\"未配置（OpenArc 总 API 设置里没有可用的文本模型）\"]},\"model\":{\"disabled\":true,\"aria\":\"true\",\"unconfigured\":\"chat\",\"unavailable\":null,\"value\":\"\",\"texts\":[\"未配置（OpenArc 总 API 设置里没有可用的文本模型）\"]}},\"image\":{\"provider\":{\"disabled\":true,\"aria\":\"true\",\"unconfigured\":\"image-generation\",\"unavailable\":null,\"value\":\"\",\"texts\":[\"未配置（OpenArc 总 API 设置里没有可用的生图模型）\"]},\"model\":{\"disabled\":true,\"aria\":\"true\",\"unconfigured\":\"image-generation\",\"unavailable\":null,\"value\":\"\",\"texts\":[\"未配置（OpenArc 总 API 设置里没有可用的生图模型）\"]}},\"fake\":{\"htmlMatched\":false,\"hits\":[],\"optionHits\":[],\"selectHits\":[],\"options\":40}}",
+      "at": 1790232893375
+    },
+    {
+      "section": "N2",
+      "name": "引导真的打开 OpenArc 总 API 设置：真实点击页面里的引导按钮 → 桥把这一次请求真的送到宿主（按钮拿到 data-openarc-guide-state=opened）+ 出现设置窗口且 [data-settings-active=model]（标题「模型 / AI」、未被最小化）；随后关掉设置窗口，不留残留、不影响后续断言",
+      "status": "PASS",
+      "expected": "点击 → guide-state=opened + 设置窗口 data-settings-active=model（模型 / AI）+ 关闭成功",
+      "actual": "{\"click\":{\"clicked\":true,\"text\":\"打开 OpenArc 总 API 设置\",\"inChip\":true},\"opened\":true,\"guideState\":{\"opened\":true,\"text\":\"打开 OpenArc 总 API 设置\"},\"settings\":{\"active\":\"model\",\"title\":\"模型 / AI\",\"minimized\":false,\"hasWindow\":true,\"panes\":3},\"close\":{\"byButton\":\"clicked\",\"byDock\":null,\"closed\":true}}",
+      "at": 1790232893598
+    },
+    {
+      "section": "N3",
+      "name": "未接通能力（视频）明确不可用：视频 provider/model 下拉 disabled + aria-disabled + data-openarc-unavailable=video-generation + 唯一文案（且节点说明里不给误导性引导）；视频节点 data-openarc-available=false；运行按钮 data-openarc-blocked + disabled；页面内直接 POST /api/canvas-video → 501 CAPABILITY_UNAVAILABLE（available:false / transport:null / detail 非空）；假 provider 请求计数 0→0",
+      "status": "PASS",
+      "expected": "501 CAPABILITY_UNAVAILABLE + 下拉/节点/运行按钮全不可用 + 假 provider 0→0 请求",
+      "actual": "{\"status\":501,\"body\":{\"error\":\"CAPABILITY_UNAVAILABLE\",\"detail\":\"OpenArc 未接通视频传输（不可用）\",\"capability\":\"video-generation\",\"message\":\"OpenArc 未接通视频传输（不可用）\",\"available\":false,\"transport\":null},\"guard\":{\"version\":1,\"text\":\"OpenArc 未接通视频传输（不可用）\"},\"videoNode\":{\"capability\":\"video-generation\",\"available\":\"false\",\"noteText\":\"OpenArc 未接通视频传输（不可用）\",\"guideInNote\":false},\"provider\":{\"disabled\":true,\"aria\":\"true\",\"unconfigured\":null,\"unavailable\":\"video-generation\",\"value\":\"\",\"texts\":[\"OpenArc 未接通视频传输（不可用）\"]},\"model\":{\"disabled\":true,\"aria\":\"true\",\"unconfigured\":null,\"unavailable\":\"video-generation\",\"value\":\"\",\"texts\":[\"OpenArc 未接通视频传输（不可用）\"]},\"runBtn\":{\"blocked\":\"video-generation\",\"aria\":\"true\",\"disabled\":true,\"title\":\"OpenArc 未接通视频传输（不可用）\"},\"blockedCount\":3,\"requests\":{\"before\":0,\"after\":0},\"hostNoticeHead\":\"\",\"bridgeUnsupportedNotice\":false}",
+      "at": 1790232893601
+    },
+    {
+      "section": "A9",
+      "name": "返回画布列表：列表里出现刚保存的项目、当前这本的卡片真的渲染出来（列表数据来自 OpenArc 存储，最近更新的排第一）",
+      "status": "PASS",
+      "expected": "canvas-list 帧 + 列表含该书 + 卡片存在",
+      "actual": "{\"backClick2\":\"clicked\",\"backList2\":true,\"cardListed\":true,\"listPayload\":{\"n\":1,\"first\":{\"id\":\"cv_muf6fur4_6wos0e\",\"title\":\"画布 14:54\"},\"hasCurrent\":true,\"cards\":1}}",
+      "at": 1790232893835
+    },
+    {
+      "section": "A10",
+      "name": "从画布列表再打开项目：打开的是**同一本**画布，节点/连线/坐标从 OpenArc 存储恢复",
+      "status": "PASS",
+      "expected": "同一 canvasId + 2 节点 1 连线 x=520",
+      "actual": "{\"reopened\":true,\"reopenedSame\":true,\"reopenedState\":{\"id\":\"cv_muf6fur4_6wos0e\",\"nodes\":2,\"edges\":1,\"x\":520}}",
+      "at": 1790232894270
+    },
+    {
+      "section": "B1",
+      "name": "模型只有一个来源：画布只看到 OpenArc 已配置可用的模型；provider 投影的数量/身份/键集合与 IPC 真值逐项一致，且全程无地址与凭据",
+      "status": "PASS",
+      "expected": "有 chat+image；api_providers 数量 = 真实 provider 数 1（id/name 对齐 IPC、键集合 ⊆ 白名单、无地址/凭据）",
+      "actual": "{\"configSeen\":{\"chat\":1,\"image\":1,\"providers\":1,\"ids\":[\"prv_RXkgoqtjC-oppw\"],\"names\":[\"D5-02 Canvas Provider\"],\"keySets\":[[\"chat_models\",\"enabled\",\"id\",\"image_models\",\"name\",\"video_models\"]],\"hasKey\":false,\"hasUrl\":false},\"ipcProviders\":[{\"id\":\"prv_RXkgoqtjC-oppw\",\"name\":\"D5-02 Canvas Provider\",\"status\":\"enabled\"}],\"usableProviderIds\":[\"prv_RXkgoqtjC-oppw\"],\"expectedProviderIds\":[\"prv_RXkgoqtjC-oppw\"],\"keysWhitelisted\":true,\"configLeak\":false,\"projectionLeak\":false}",
+      "at": 1790232894451
+    },
+    {
+      "section": "B2",
+      "name": "真实模型调用链（文本）：经 OpenArc 模型服务 → 本地 provider → 结果回到 LLM 节点",
+      "status": "PASS",
+      "expected": "节点拿到 provider 文本 + provider 收到 OpenArc 凭据",
+      "actual": "{\"llmDone\":{\"status\":\"done\",\"error\":\"\",\"text\":\"OPENARC-CANVAS-LLM:写一句关于海边的提示词\"},\"chats\":[{\"model\":\"d502-chat\",\"messages\":2,\"last\":\"写一句关于海边的提示词\"}],\"authSeen\":1}",
+      "at": 1790232894689
+    },
+    {
+      "section": "B3",
+      "name": "真实模型调用链（图片）：经 OpenArc 模型服务 → /images/generations → 输出节点拿到图片",
+      "status": "PASS",
+      "expected": "输出节点有图片 + provider 收到图片请求",
+      "actual": "{\"addGen\":true,\"linkGen\":true,\"runGen\":{\"started\":true,\"model\":\"D5-02 Image · PAng\"},\"genDone\":{\"status\":\"done\",\"error\":\"\",\"outputCount\":1},\"images\":1}",
+      "at": 1790232895014
+    },
+    {
+      "section": "B4",
+      "name": "失败如实展示：provider 500 → 节点标记失败并带错误（不假装成功）",
+      "status": "PASS",
+      "expected": "runStatus=failed + runError",
+      "actual": "{\"status\":\"failed\",\"error\":\"PROVIDER_UNAVAILABLE\"}",
+      "at": 1790232895074
+    },
+    {
+      "section": "N4",
+      "name": "真实投影 + 无第二来源：B 系列配好 provider+模型后，编辑器 provider 下拉逐项 = OpenArc 真 provider（id + displayName，不是 Comfly/API 的造物）；模型下拉的每个选项都在 OpenArc 清单里（gpt-4o-mini / gpt-image-2 / veo3-fast 在 DOM 属性+文本 / option.value / select.value 三处 0 命中）；三把 localStorage 模型键 setItem 后读回 null 且不留残留键；/api/config.api_providers 键集合 ⊆ 六键",
+      "status": "PASS",
+      "expected": "provider 下拉 = 真 displayName；模型下拉选项 ⊆ 真源清单；三个伪造标签 0 命中；localStorage 三键读回 null",
+      "actual": "{\"providers\":[{\"id\":\"prv_RXkgoqtjC-oppw\",\"name\":\"D5-02 Canvas Provider\",\"keys\":[\"chat_models\",\"enabled\",\"id\",\"image_models\",\"name\",\"video_models\"]}],\"chatModels\":[\"D5-02 Chat · xupg\"],\"imageModels\":[\"D5-02 Image · PAng\"],\"provider\":{\"llm\":{\"disabled\":false,\"aria\":null,\"unconfigured\":null,\"unavailable\":null,\"value\":\"prv_RXkgoqtjC-oppw\",\"texts\":[\"D5-02 Canvas Provider\"]},\"gen\":{\"disabled\":false,\"aria\":null,\"unconfigured\":null,\"unavailable\":null,\"value\":\"prv_RXkgoqtjC-oppw\",\"texts\":[\"D5-02 Canvas Provider\"]}},\"model\":{\"llm\":{\"disabled\":false,\"aria\":null,\"unconfigured\":null,\"unavailable\":null,\"value\":\"D5-02 Chat · xupg\",\"texts\":[\"D5-02 Chat · xupg\"]},\"gen\":{\"disabled\":false,\"aria\":null,\"unconfigured\":null,\"unavailable\":null,\"value\":\"D5-02 Image · PAng\",\"texts\":[\"D5-02 Image · PAng\"]}},\"nodes\":{\"llm\":{\"provider\":\"prv_RXkgoqtjC-oppw\",\"model\":\"D5-02 Chat · xupg\"},\"gen\":{\"provider\":\"prv_RXkgoqtjC-oppw\",\"model\":\"D5-02 Image · PAng\"}},\"fake\":{\"htmlMatched\":false,\"hits\":[],\"optionHits\":[],\"selectHits\":[],\"options\":24},\"readBack\":{\"canvas_custom_image_models\":null,\"canvas_image_models_ordered\":null,\"canvas_chat_models_ordered\":null},\"residue\":[]}",
+      "at": 1790232895091
+    },
+    {
+      "section": "N6",
+      "name": "无静默回落：页面用清单外标签 POST /api/canvas-llm → 502 MODEL_NOT_FOUND（回包点名 model/method，detail 是人话），provider 请求 0 新增，宿主 data-canvas-model-not-found 真的 +1",
+      "status": "PASS",
+      "expected": "502 MODEL_NOT_FOUND + 0 新增 provider 请求 + 宿主计数 +1",
+      "actual": "{\"status\":502,\"body\":{\"error\":\"MODEL_NOT_FOUND\",\"detail\":\"该模型不在当前 OpenArc 模型清单里（不会改用其它模型）：gpt-4o-mini\",\"message\":\"当前 OpenArc 模型清单里没有这个模型（不会改用其它模型）：gpt-4o-mini\",\"model\":\"gpt-4o-mini\",\"method\":\"model.chat\"},\"inManifest\":false,\"chatModels\":1,\"hostCounter\":\"0→1\",\"requests\":{\"chats\":[0,0],\"images\":[0,0],\"authSeen\":[3,3]}}",
+      "at": 1790232895598
+    },
+    {
+      "section": "B5",
+      "name": "OpenArc 尚不支持的能力（视频）明确报错，不静默改用其它服务：页面侧守卫按能力事实回答 501 CAPABILITY_UNAVAILABLE（available:false / transport:null / detail 非空），不是笼统的 OPENARC_UNSUPPORTED",
+      "status": "PASS",
+      "expected": "501 CAPABILITY_UNAVAILABLE + available:false + transport:null + detail 非空",
+      "actual": "{\"status\":501,\"body\":{\"error\":\"CAPABILITY_UNAVAILABLE\",\"detail\":\"OpenArc 未接通视频传输（不可用）\",\"capability\":\"video-generation\",\"message\":\"OpenArc 未接通视频传输（不可用）\",\"available\":false,\"transport\":null}}",
+      "at": 1790232895599
+    },
+    {
+      "section": "B6",
+      "name": "更新/下载上游程序保持禁用（界面明确说明），且应用信息/队列来自宿主（不是上游后端）",
+      "status": "PASS",
+      "expected": "更新 501 + app-info/queue 200 且标注禁用",
+      "actual": "{\"update\":{\"check\":501,\"checkBody\":\"OPENARC_UPDATE_DISABLED\",\"github\":501,\"githubBody\":\"OPENARC_UPDATE_DISABLED\"},\"info\":{\"status\":200,\"updateDisabled\":true,\"queueDisabled\":true},\"queue\":{\"status\":200,\"total\":0,\"source\":\"openarc-task-runtime\"}}",
+      "at": 1790232895604
+    },
+    {
+      "section": "D1",
+      "name": "无权限：撤销画布应用的 model.use 后，生成明确拒绝且 provider 收不到任何请求（F2 缺口）",
+      "status": "PASS",
+      "expected": "PROXY_UNAUTHORIZED + 0 请求",
+      "actual": "{\"hasGrant\":true,\"grantActions\":[\"model.view\",\"model.use\"],\"noPermRun\":true,\"revoked\":{\"ok\":false,\"error\":\"PROXY_UNAUTHORIZED\"},\"requests\":\"0→0\",\"regranted\":true}",
+      "at": 1790232895879
+    },
+    {
+      "section": "N5a",
+      "name": "撤权 → 页面模型区真的变成不可用（实测口径 = unconfigured：页头状态位 unconfigured + 文本/生图下拉 disabled 且只剩一条精确的「未配置…」占位；不是「看着还能点」）；恢复授权 → 回到可用（chip ok + 下拉可选且选项只在真源清单里）",
+      "status": "PASS",
+      "expected": "撤权 unconfigured/disabled + 恢复后 ok/可选",
+      "actual": "{\"revoked\":{\"ok\":true,\"want\":\"unavailable-all\",\"waitedMs\":259,\"reads\":2,\"chip\":\"unconfigured\",\"chipText\":\"模型：文本默认不可用 · 生图默认不可用 · 视频未接通\",\"defaultFacts\":{\"chat\":{\"usable\":false,\"reason\":\"MODEL_UNAUTHORIZED\"},\"image\":{\"usable\":false,\"reason\":\"MODEL_UNAUTHORIZED\"}},\"chat\":{\"disabled\":true,\"aria\":\"true\",\"unconfigured\":\"chat\",\"defaultUnavailable\":\"chat\",\"value\":\"\",\"options\":[\"\"]},\"image\":{\"disabled\":true,\"aria\":\"true\",\"unconfigured\":\"image-generation\",\"defaultUnavailable\":\"image-generation\",\"value\":\"\",\"options\":[\"\"]},\"chatRun\":{\"cls\":\"llm-run \",\"blocked\":\"chat\",\"disabled\":true,\"aria\":\"true\",\"title\":\"文本默认不可用（默认模型当前未被授权使用）；OpenArc 里显式配置的默认不会被自动换成别的模型\"},\"imageRun\":{\"cls\":\"gen-btn\",\"blocked\":\"image-generation\",\"disabled\":true,\"aria\":\"true\",\"title\":\"生图默认不可用（默认模型当前未被授权使用）；OpenArc 里显式配置的默认不会被自动换成别的模型\"},\"chatNote\":{\"text\":\"文本默认不可用（默认模型当前未被授权使用）；OpenArc 里显式配置的默认不会被自动换成别的模型\",\"guide\":true,\"guideText\":\"打开 OpenArc 总 API 设置\"},\"imageNote\":{\"text\":\"生图默认不可用（默认模型当前未被授权使用）；OpenArc 里显式配置的默认不会被自动换成别的模型\",\"guide\":true,\"guideText\":\"打开 OpenArc 总 API 设置\"},\"llmModel\":\"\",\"genModel\":\"\",\"manifest\":{\"chat\":[],\"image\":[]}},\"regranted\":{\"ok\":true,\"want\":\"available-all\",\"waitedMs\":259,\"reads\":2,\"chip\":\"ok\",\"chipText\":\"模型：文本 1 · 生图 1 · 视频未接通\",\"defaultFacts\":{\"chat\":{\"usable\":true,\"reason\":null},\"image\":{\"usable\":true,\"reason\":null}},\"chat\":{\"disabled\":false,\"aria\":null,\"unconfigured\":null,\"defaultUnavailable\":null,\"va",
+      "at": 1790232896138
+    },
+    {
+      "section": "D2",
+      "name": "能力不支持：图片能力被指到只有 chat 的模型上 → 明确 CAPABILITY_UNAVAILABLE，provider 收不到图片请求",
+      "status": "PASS",
+      "expected": "CAPABILITY_UNAVAILABLE + 0 请求",
+      "actual": "{\"capRun\":{\"ok\":false,\"error\":\"CAPABILITY_UNAVAILABLE\"},\"images\":\"0→0\"}",
+      "at": 1790232896403
+    },
+    {
+      "section": "N5c",
+      "name": "跨能力（生图默认被指到只有 chat 的模型）→ 生图区按**显式默认不可用**呈现：data-openarc-default-unavailable=image-generation + 下拉 disabled/aria-disabled + 运行按钮 data-openarc-blocked + 原因文案与「打开 OpenArc 总 API 设置」引导；**清单仍如实投影**（那个可用生图模型仍在 /api/config.image_models 里，只是没有被自动选中：select.value 为空、生图节点 model 为空 = 没有静默换默认）；文本区不受影响（仍可选、选项 ⊆ 真源清单、默认仍是显式配置的那个）；恢复默认 → 标记消失、下拉恢复可选、chip 回 ok",
+      "status": "PASS",
+      "expected": "跨能力：生图默认不可用（标记 + disabled/aria + blocked + 原因/引导）且清单照旧如实投影、未被自动选中；文本仍可用；恢复后标记消失且可选",
+      "actual": "{\"defaultApplied\":{\"capability\":\"image-generation\",\"configId\":\"mcf_OXi8tfdXFxmIrQ\",\"note\":\"生图默认被指到一个只有 chat 能力的模型（清单里的可用生图模型 = D5-02 Image · PAng）\"},\"crossCap\":{\"ok\":true,\"want\":\"image-unavailable\",\"waitedMs\":259,\"reads\":2,\"chip\":\"unconfigured\",\"chipText\":\"模型：文本 2 · 生图默认不可用 · 视频未接通\",\"defaultFacts\":{\"chat\":{\"usable\":true,\"reason\":null},\"image\":{\"usable\":false,\"reason\":\"CAPABILITY_UNAVAILABLE\"}},\"chat\":{\"disabled\":false,\"aria\":null,\"unconfigured\":null,\"defaultUnavailable\":null,\"value\":\"D5-02 Chat · xupg\",\"options\":[\"D5-02 Chat · xupg\",\"D5-02 ChatOnly · mIrQ\"]},\"image\":{\"disabled\":true,\"aria\":\"true\",\"unconfigured\":\"image-generation\",\"defaultUnavailable\":\"image-generation\",\"value\":\"\",\"options\":[\"\"]},\"chatRun\":{\"cls\":\"llm-run \",\"blocked\":null,\"disabled\":false,\"aria\":null,\"title\":\"\"},\"imageRun\":{\"cls\":\"gen-btn\",\"blocked\":\"image-generation\",\"disabled\":true,\"aria\":\"true\",\"title\":\"生图默认不可用（默认模型没有这个能力）；OpenArc 里显式配置的默认不会被自动换成别的模型\"},\"chatNote\":null,\"imageNote\":{\"text\":\"生图默认不可用（默认模型没有这个能力）；OpenArc 里显式配置的默认不会被自动换成别的模型\",\"guide\":true,\"guideText\":\"打开 OpenArc 总 API 设置\"},\"llmModel\":\"D5-02 Chat · xupg\",\"genModel\":\"\",\"manifest\":{\"chat\":[\"D5-02 Chat · xupg\",\"D5-02 ChatOnly · mIrQ\"],\"image\":[\"D5-02 Image · PAng\"]}},\"restored\":{\"ok\":true,\"want\":\"available-all\",\"waitedMs\":268,\"reads\":2,\"chip\":\"ok\",\"chipText\":\"模型：文本 2 · 生图 1 · 视频未接通\",\"defaultFacts\":{\"chat\":{\"usable\":true,\"reason\":null},\"image\":{\"usable\"",
+      "at": 1790232896671
+    },
+    {
+      "section": "D3",
+      "name": "预算不足：任务级 MODEL_CALLS 用尽后明确拒绝，provider 请求数 = 成功调用数",
+      "status": "PASS",
+      "expected": "BUDGET_EXHAUSTED + 请求数=成功数",
+      "actual": "{\"budgetOk\":8,\"stop\":\"BUDGET_EXHAUSTED\",\"runStatus\":\"BUDGET_EXHAUSTED\",\"providerChats\":8}",
+      "at": 1790232896731
+    },
+    {
+      "section": "D4",
+      "name": "停止：停止后不再发新请求；迟到结果被丢弃，不覆盖用户随后编辑的节点",
+      "status": "PASS",
+      "expected": "STOPPED + 迟到丢弃 + 用户内容保留",
+      "actual": "{\"stopped\":\"STOPPED\",\"late\":\"RUN_STOPPED\",\"afterStop\":\"RUN_STOPPED\",\"chatsAtStop\":1,\"chatsAfterLate\":1,\"userText\":{\"text\":\"用户随后编辑的内容\"}}",
+      "at": 1790232899866
+    },
+    {
+      "section": "D5",
+      "name": "失败收敛：provider 500 → 明确失败、每次调用恰好一次请求（无隐藏重试），且回包不含凭据",
+      "status": "PASS",
+      "expected": "每次一次请求 + 无凭据",
+      "actual": "{\"fail1\":\"PROVIDER_UNAVAILABLE\",\"fail2\":\"PROVIDER_UNAVAILABLE\",\"requests\":[0,1,2],\"leaksSecret\":false}",
+      "at": 1790232899888
+    },
+    {
+      "section": "F1",
+      "name": "任务模型绑定：指定的模型配置被停用/能力不符/不存在时**明确拒绝**且 0 新增请求（不静默换模型）",
+      "status": "PASS",
+      "expected": "停用/跨能力/不存在 → 拒绝 + 0 请求",
+      "actual": "{\"okCall\":true,\"disabled\":{\"ok\":false,\"error\":\"MODEL_CONFIG_UNAVAILABLE\"},\"cross\":{\"ok\":false,\"error\":\"CAPABILITY_UNAVAILABLE\"},\"unknown\":{\"ok\":false,\"error\":\"MODEL_CONFIG_UNAVAILABLE\"},\"requests\":[1,1,1,1]}",
+      "at": 1790232900178
+    },
+    {
+      "section": "N5d",
+      "name": "停用**显式配置的文本默认** → 被停用模型从页面模型区消失（清单 / DOM option / 节点当前模型三处 0 命中）；文本能力按「默认不可用」呈现（data-openarc-default-unavailable=chat + 下拉 disabled/aria-disabled + 运行按钮 data-openarc-blocked + 原因文案与「打开 OpenArc 总 API 设置」引导，select.value 为空 = 没有自动改用剩下的那个文本模型）；恢复 enabled → 页面模型区回到可用（chip ok + 下拉可选 + 标记消失）",
+      "status": "PASS",
+      "expected": "停用后标签三处 0 命中 + 默认不可用口径（标记/disabled/aria/blocked/原因+引导，value 为空）+ 恢复后 ok/可选且标记消失",
+      "actual": "{\"disabledModelLabel\":\"D5-02 Chat · xupg\",\"disabledConfigId\":\"mcf_KQaRkZdYWTxupg\",\"manifestBefore\":[\"D5-02 Chat · xupg\",\"D5-02 ChatOnly · mIrQ\"],\"atDisable\":{\"ok\":true,\"want\":\"chat-model-removed\",\"waitedMs\":260,\"reads\":2,\"chip\":\"unconfigured\",\"chipText\":\"模型：生图 1 · 文本默认不可用 · 视频未接通\",\"defaultFacts\":{\"chat\":{\"usable\":false,\"reason\":\"MODEL_DISABLED\"},\"image\":{\"usable\":true,\"reason\":null}},\"chat\":{\"disabled\":true,\"aria\":\"true\",\"unconfigured\":\"chat\",\"defaultUnavailable\":\"chat\",\"value\":\"\",\"options\":[\"\"]},\"image\":{\"disabled\":false,\"aria\":null,\"unconfigured\":null,\"defaultUnavailable\":null,\"value\":\"D5-02 Image · PAng\",\"options\":[\"D5-02 Image · PAng\"]},\"chatRun\":{\"cls\":\"llm-run \",\"blocked\":\"chat\",\"disabled\":true,\"aria\":\"true\",\"title\":\"文本默认不可用（默认模型已被停用）；OpenArc 里显式配置的默认不会被自动换成别的模型\"},\"imageRun\":{\"cls\":\"gen-btn\",\"blocked\":null,\"disabled\":false,\"aria\":null,\"title\":\"\"},\"chatNote\":{\"text\":\"文本默认不可用（默认模型已被停用）；OpenArc 里显式配置的默认不会被自动换成别的模型\",\"guide\":true,\"guideText\":\"打开 OpenArc 总 API 设置\"},\"imageNote\":null,\"llmModel\":\"\",\"genModel\":\"D5-02 Image · PAng\",\"manifest\":{\"chat\":[\"D5-02 ChatOnly · mIrQ\"],\"image\":[\"D5-02 Image · PAng\"]}},\"atEnable\":{\"ok\":true,\"want\":\"available-all\",\"waitedMs\":258,\"reads\":2,\"chip\":\"ok\",\"chipText\":\"模型：文本 2 · 生图 1 · 视频未接通\",\"defaultFacts\":{\"chat\":{\"usable\":true,\"reason\":null},\"image\":{\"usable\":true,\"reason\":null}},\"chat\":{\"disabled\":false,\"aria\":null,\"unconfigured\":null,\"defaultUnav",
+      "at": 1790232900436
+    },
+    {
+      "section": "F3a",
+      "name": "图片资源：本地导入写入 OpenArc 资源库，画布文档只存 openarc-asset:<ResourceRef>（不存 data URL / 路径）",
+      "status": "PASS",
+      "expected": "文档里只有稳定 ref",
+      "actual": "{\"upload\":[{\"url\":\"data:image/png;base64,iV\",\"name\":\"d502-asset.png\"}],\"addImg\":{\"ok\":true,\"url\":\"data:image/png;base64,iV\"},\"assetRefHead\":\"res_LfL5cXxs\",\"docUrlHead\":\"openarc-asset:res_LfL5cXxsFoTF\",\"states\":{\"res_LfL5cXxsFoTFri8bheefC1KwgcvEWCTJ\":{\"state\":\"AVAILABLE\",\"name\":\"d502-asset.png\",\"version\":1}}}",
+      "at": 1790232901107
+    },
+    {
+      "section": "F3b",
+      "name": "图片资源：关闭窗口重开后仍可用（宿主按当前用户逐资源授权解析为 data URL 显示，存储里仍是 ref）",
+      "status": "PASS",
+      "expected": "重开后图片可用 + 存储仍是 ref",
+      "actual": "{\"closedOnce\":true,\"framesAfterClose\":0,\"reopenedOnce\":true,\"resolved\":true,\"resolvedState\":{\"id\":\"cv_muf6fur4_6wos0e\",\"url\":\"data:image/png;base64\",\"nodes\":5}}",
+      "at": 1790232901776
+    },
+    {
+      "section": "F3c",
+      "name": "图片资源：资源被删除后画布明确不可用（读回失败 → 保留 ref 显示不可用），旧 data URL 缓存不复活",
+      "status": "PASS",
+      "expected": "ASSET_UNAVAILABLE + 当场缓存失效 + 提示 + 重开不复活",
+      "actual": "{\"delRes\":true,\"noticeIsAboutAssets\":true,\"read\":{\"ok\":false,\"error\":\"ASSET_UNAVAILABLE\"},\"state\":{\"state\":\"UNAVAILABLE\"},\"inMountInvalidated\":true,\"inMountNotice\":{\"flag\":\"1\",\"text\":\"引用资源已删除或无权限（1 个）：画布上按不可用显示，不会拿旧缓存顶替\"},\"closedTwice\":true,\"reopenedTwice\":true,\"afterDeleteUrl\":{\"url\":\"openarc-asset:res_LfL5cXxsFoTFri\"}}",
+      "at": 1790232904680
+    },
+    {
+      "section": "F3d",
+      "name": "本地编辑保存之后，宿主 IPC canvas/command（actorKind=USER）新增的节点仍能进到已打开的编辑器（≤5s，primitives + DOM）：用户本地内容不被覆盖、revision 不回环",
+      "status": "PASS",
+      "expected": "本地编辑落库 → 宿主新增 ≤5s 呈现（primitives+DOM）+ 本地内容仍在 + revision 稳定",
+      "actual": "{\"ready\":{\"ok\":true,\"waitedMs\":4,\"steps\":{\"canvasFrame\":{\"ok\":true,\"atMs\":0},\"adapter\":{\"ok\":true,\"atMs\":0},\"doc\":{\"ok\":true,\"atMs\":1},\"editable\":{\"ok\":true,\"atMs\":1},\"node\":{\"ok\":true,\"atMs\":2}}},\"localEdit\":{\"ok\":true,\"result\":{\"node\":{\"id\":\"n_d1_local\",\"type\":\"prompt\",\"x\":120,\"y\":120,\"text\":\"本地编辑（D1 回归钉）\"}},\"revision\":1790232900983,\"state\":{\"nodeCount\":6,\"edgeCount\":3}},\"localSaved\":true,\"hostAdd\":{\"ok\":true,\"revision\":10},\"waitedMs\":1820,\"page\":{\"hasLocal\":true,\"localText\":\"本地编辑（D1 回归钉）\",\"hasHost\":true,\"domHost\":true,\"hostText\":\"宿主新增（D1 回归钉）\",\"revision\":1790232905318,\"nodes\":7},\"ipcHost\":{\"text\":\"宿主新增（D1 回归钉）\"},\"ipcLocal\":{\"text\":\"本地编辑（D1 回归钉）\"},\"revisions\":{\"at\":10,\"after5s\":10}}",
+      "at": 1790232912157
+    },
+    {
+      "section": "E1",
+      "name": "应用页面（含外壳页与画布子页）没有 openarc 桥 / Node / IPC / fs；端点白名单外一律明确拒绝",
+      "status": "PASS",
+      "expected": "无桥 + 501",
+      "actual": "{\"boundary\":{\"openarc\":\"undefined\",\"require\":\"undefined\",\"process\":\"undefined\",\"ipc\":\"undefined\",\"fs\":\"undefined\",\"pywebview\":\"undefined\"},\"shellBoundary\":{\"openarc\":\"undefined\",\"require\":\"undefined\",\"process\":\"undefined\",\"ipc\":\"undefined\"},\"unsupported\":{\"status\":501,\"body\":{\"error\":\"OPENARC_UNSUPPORTED\",\"message\":\"该功能不在 OpenArc 集成范围内：/api/secret-thing\"}}}",
+      "at": 1790232912163
+    },
+    {
+      "section": "E2",
+      "name": "openarc-canvas:// 只读白名单：目录穿越与非白名单扩展名都被拒，白名单内资源正常",
+      "status": "PASS",
+      "expected": "403/404 + 200",
+      "actual": "{\"traversal\":404,\"nonWhitelisted\":403,\"whitelisted\":200}",
+      "at": 1790232912168
+    },
+    {
+      "section": "E3",
+      "name": "后端不信任消息自报身份：带伪造 userId/sessionRef 的请求按当前会话处理",
+      "status": "PASS",
+      "expected": "按会话身份处理",
+      "actual": "{\"forged\":{\"ok\":true,\"count\":1},\"sessionListCount\":1}",
+      "at": 1790232912173
+    },
+    {
+      "section": "E4",
+      "name": "宿主只接受**当前应用实例**的消息：伪造 token / 其它 iframe / 外壳自身发的调用一律不执行",
+      "status": "PASS",
+      "expected": "画布数量不变",
+      "actual": "{\"e4res\":{\"done\":true},\"listBefore2\":1,\"listAfter2\":1}",
+      "at": 1790232916991
+    },
+    {
+      "section": "E5",
+      "name": "出网通道：fetch / 图片 / WebSocket / 表单 / 外站脚本 / window.open / **iframe 自我导航**全部被拦（本地接收端 0 命中；被拦后重新进入画布仍可用）",
+      "status": "PASS",
+      "expected": "接收端 0 命中 + 应用仍可用",
+      "actual": "{\"attempts\":{\"fetch\":501,\"img\":\"set\",\"ws\":\"set\",\"form\":\"submitted\",\"script\":\"set\"},\"popup\":{\"opened\":false},\"selfNav\":{\"__error\":\"frame.evaluate: Execution context was destroyed, most likely because of a navigation.\"},\"hits\":[],\"usableAfter\":true,\"usableState\":{\"id\":\"cv_muf6fur4_6wos0e\",\"nodes\":7}}",
+      "at": 1790232921559
+    },
+    {
+      "section": "E5b",
+      "name": "外壳页 / 顶层页的导航出网同样被拦（应用还活着、接收端仍 0 命中）",
+      "status": "PASS",
+      "expected": "接收端 0 命中 + 桌面仍在",
+      "actual": "{\"shellNav\":{\"__error\":\"frame.evaluate: Execution context was destroyed, most likely because of a navigation.\"},\"topNav\":{\"url\":\"<绝对路径已脱敏>\"},\"hits\":[],\"desktopAlive\":true}",
+      "at": 1790232924768
+    },
+    {
+      "section": "E6",
+      "name": "宿主级拦截留证：主进程 will-navigate / will-frame-navigate 真的拦下了导航出网（不是只靠页面 CSP 声明）",
+      "status": "PASS",
+      "expected": "主进程日志出现拦截记录",
+      "actual": "found",
+      "at": 1790232924768
+    },
+    {
+      "section": "E7",
+      "name": "账号边界（数据）：切账号后旧页面全部销毁，B 看不到也打不开 A 的私有画布",
+      "status": "PASS",
+      "expected": "0 个残留帧 + B 的列表不含 A 的画布",
+      "actual": "{\"framesAfterLogout\":0,\"memberLogin\":true,\"createdMember\":true,\"memberListCount\":0,\"memberOpen\":false}",
+      "at": 1790232925362
+    },
+    {
+      "section": "E8",
+      "name": "账号边界（存储/通道）：真实同源存储按**本次挂载钥匙**分桶，A 账号的键一个不剩（A/B 各自写入探针键自证 + 桥的只读隔离探针）",
+      "status": "PASS",
+      "expected": "钥匙变化 + 0 个外账号键 + oa:mount=当前钥匙 + A 的键在 B 侧读不到",
+      "actual": "{\"keyAHead\":\"k1975eqd\",\"keyBHead\":\"krjdwsyq\",\"probeA\":{\"before\":{\"own\":1,\"foreign\":0,\"mount\":true},\"after\":{\"own\":2,\"foreign\":0,\"mount\":true},\"readBack\":\"A-account-probe\",\"rawKey\":\"oa:k1975eqdlfve:oa_probe_a\"},\"isoA\":{\"own\":2,\"foreign\":0,\"mount\":true},\"probeB\":{\"isolation\":{\"own\":1,\"foreign\":0,\"mount\":true},\"ownReadBack\":\"B-account-probe\",\"foreignReadBack\":null,\"rawKey\":\"oa:krjdwsyqorm:oa_probe_b\"},\"isoB\":{\"own\":1,\"foreign\":0,\"mount\":true},\"pageSide\":{\"logicalKeys\":[\"oa_probe_b\"],\"active\":null}}",
+      "at": 1790232926375
+    },
+    {
+      "section": "F4b",
+      "name": "AI 编辑正式链 · chain2 前置：重开画布帧后等宿主把 canEdit 推下来（非只读）+ 适配器/文档就绪 + n_prompt 可见，然后才做用户编辑（不放宽 F4 任何判定）",
+      "status": "PASS",
+      "expected": "五步就绪 + 编辑前快照非只读且 n_prompt 可见",
+      "actual": "{\"ready\":{\"ok\":true,\"waitedMs\":3,\"steps\":{\"canvasFrame\":{\"ok\":true,\"atMs\":0},\"adapter\":{\"ok\":true,\"atMs\":0},\"doc\":{\"ok\":true,\"atMs\":1},\"editable\":{\"ok\":true,\"atMs\":1},\"node\":{\"ok\":true,\"atMs\":2}}},\"pageBeforeEdit\":{\"isReadOnly\":false,\"canEdit\":true,\"ctxCanvasId\":\"cv_muf6fur4_6wos0e\",\"canvasId\":\"cv_muf6fur4_6wos0e\",\"revision\":1790232928908,\"nodeCount\":8,\"hasNode\":true},\"userEdit\":{\"ok\":true,\"result\":{\"node\":{\"id\":\"n_prompt\",\"type\":\"prompt\",\"x\":80,\"y\":120,\"text\":\"用户先改的内容\"}},\"revision\":1790232928908,\"state\":{\"nodeCount\":8,\"edgeCount\":3}},\"userSaved\":true,\"revisionAfterUser\":12}",
+      "at": 1790232940606
+    },
+    {
+      "section": "F4",
+      "name": "AI 编辑正式链：Agent 提议 → 用户审批 → 授权执行 → 画布呈现 → 保存重开仍在（旧 revision 不覆盖用户内容）",
+      "status": "PASS",
+      "expected": "提议→审批→执行→呈现→保存恢复（+ 旧 revision 不覆盖用户内容）",
+      "actual": "{\"setup\":{\"providerId\":\"prv_OtEv4iqXz9_Lbw\",\"agentConfigId\":\"mcf_mDXX4wSVYeO8Xg\",\"defaultOk\":true,\"grantOk\":true},\"chain1\":{\"run1\":{\"taskId\":\"task_Z0SjUwKBedDZ5Q\",\"started\":true,\"status\":\"running\",\"stateText\":\"状态：running\"},\"approval1\":true,\"approvalMeta\":{\"id\":\"scall_3BxjOZRzaQwJ7w\",\"tool\":\"canvas.edit\",\"risk\":\"\"},\"advertised\":[\"browser_navigate\",\"browser_read_page\",\"canvas_edit\",\"canvas_read\",\"resource_read_metadata\",\"resource_search\",\"resource_trash\"],\"term1\":{\"terminal\":true,\"status\":\"SUCCEEDED\"},\"before\":{\"ok\":true,\"revision\":10,\"nodes\":7,\"edges\":3},\"after1\":{\"ok\":true,\"revision\":11,\"nodes\":8,\"edges\":3},\"call1\":{\"status\":\"SUCCEEDED\",\"verification\":\"PASS\",\"callId\":\"scall_3BxjOZRzaQwJ7w\"},\"presented\":true,\"closedForF4\":true,\"reopenedForF4\":true,\"restored\":true,\"diag1\":{\"events\":[{\"type\":\"task/result\",\"tool\":null,\"status\":\"SUCCEEDED\",\"error\":null,\"message\":null}],\"emitted\":[\"canvas_edit\"],\"toolExecs\":[],\"panel\":\"全局 AI 助手让 AI 在授权范围内执行任务OpenArc 决定、执行并验证；工具调用只在受控 Tool Proxy 内发生。在画布 cv_muf6fur4_6wos0e 上添加一个提示词节点（节点 id=agent_node_1）运行任务取消状态：SUCCEEDEDOPENARC_VERTICAL_SMOKE_OK开始聆听开启后球会跟着你的声音变化（只在本机算音量，不外发）。受控工具：resource.search / resource.read.metadata / resource.trash。查看统一设置\"}},\"chain2\":{\"ready\":{\"ok\":true,\"waitedMs\":3,\"steps\":{\"canvasFrame\":{\"ok\":true,\"atMs\":0},\"adapter\":{\"ok\":true,\"atMs\":0},\"doc\":{\"ok\":true,\"atMs\":1},\"editable\":{\"ok\":true,\"atMs\":1},\"node\":{\"ok\":true,\"atMs\":2}}},\"pa",
+      "at": 1790232940821
+    },
+    {
+      "section": "Z1",
+      "name": "主进程无未处理错误",
+      "status": "PASS",
+      "expected": "无错误行",
+      "actual": "clean",
+      "at": 1790232940821
+    }
+  ]
+}

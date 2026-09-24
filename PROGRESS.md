@@ -1242,3 +1242,117 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 子页 ↔ 外壳 ↔ 宿主是逐项限定的中继协议；出网（fetch/img/ws/form/script/window.open/自我导航）0 命中，
 主进程 `will-navigate`/`will-frame-navigate` 留痕；账号边界 = 真实同源存储按 `oa:<本次挂载钥匙>:` 分桶 + 切账号帧全销毁。
 
+---
+
+# D5-02 范围修正 · 无限画布首页 + 单一模型真源（2026-09-24 · b7ebaa5 → 5b77186）
+
+> **范围来源**：用户 2026-09-24 的范围修正（原文要点）：① 入口 = 用户截图里的「无限画布」首页（开始创作 / 继续上次 / 画布卡片列表），点这些入口直接打开真实编辑器，不再有额外欢迎页或选画布遮挡层；② 去掉 NOVAI 完整应用的左侧导航与其他子页面入口，以及 OpenArc 画布宿主顶部操作条 / 状态行 / 提示横幅；保留首页 ↔ 编辑器返回路径；③ 供应商与模型只有 OpenArc 总 API 设置一个来源（列表 / 默认值 / 可用状态 / 实际调用都来自统一模型服务，遵守个人团队配置、授权、撤权、凭据隔离；不用 NOVAI 配置页、静态清单、独立密钥、直连）；后端没有的能力（视频传输等）未接通就明确显示不可用，不能显示为已连接；④ 不许用 CSS 遮挡冒充完成；首页→画布通信、保存、权限、账号隔离都要正常；⑤ 用真实 Electron 分别验收：首页、新建、继续上次、打开已有画布、返回首页、无模型、模型被停用或撤权、各已支持模型的真实调用；截图对照首页基准；功能 / 视觉 / 动效分别记录。
+>
+> **本轮为定稿**：功能 / 视觉 / 动效均已取得实测证据（见 §3 / §5）；与用户截图对照仍为未验收（基准缺失）。本节数字全部来自命令或证据文件。
+
+## 1. 任务状态
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| 入口 = 上游原版「无限画布」首页（画布卡片列表） | **已完成** | `src/canvas/CanvasHost.tsx:34`（`IFRAME_BASE = openarc-canvas://bundle/static/canvas-list.html`）；A1 |
+| 无完整应用外壳：无 `index.html` / `home.html` 帧、无左侧导航、无其他子页入口 | **已完成** | A1 / A2 |
+| 宿主三块 chrome（顶部操作条 / 状态行 / 提示横幅）真删 | **已完成** | `src/canvas/CanvasHost.tsx:8,57,674`；A1 |
+| 「开始创作 / 新建画布 / 继续上次（空列表）」直达真实编辑器，无欢迎页、无选画布遮挡层 | **已完成** | `public/novai-canvas/static/canvas-list.html:1038-1039,1381`；A3（`#canvasPickerOverlay` 全程未出现 `.active`）/ A5 |
+| 首页 ↔ 编辑器返回路径保留 | **已完成** | A4 / A9 / A10 |
+| 供应商 / 模型单一真源（列表 / 默认值 / 可用状态 / 实际调用） | **已完成** | `electron/model-service.cjs:324,349-368`；`electron/model-bootstrap.cjs:114`；`public/novai-canvas/openarc-canvas-guard.js`；B1 / B2 / B4 / N4 / N6 / B6 |
+| 需要配置时引导到「OpenArc 总 API 设置」 | **已完成** | N1 / N2 / N5c / N5d（真实点击 → 桥真的送到宿主 → 设置窗口真的打开） |
+| 未接通能力（视频 / ComfyUI 等）明确不可用、0 请求 | **已完成** | N3 / B5（`CAPABILITY_UNAVAILABLE` + `available:false` + `transport:null`；假 provider 0 请求） |
+| 显式配置的默认模型不可用时不再静默替换（`ec5cbc5`） | **已完成** | `electron/model-service.cjs:349-359`；`src/canvas/CanvasHost.tsx:126-135`；N5c / N5d |
+| 打开已有画布后编辑器只读（`b7ebaa5` 修复） | **已完成** | `src/canvas/CanvasHost.tsx:345-355`（`canvas.get` 后补 `pushContext`）；A6 / A10 / F4b |
+| 被 CSP `frame-src` 拦下的自我导航不再把帧留在错误页（`ec5cbc5` 修复） | **已完成** | `src/canvas/CanvasHost.tsx:575-599,690`（onLoad 后 3s 说话窗口 → 立即整帧复位，原约 10s 等 8s 看门狗）；E5b |
+| 不许用 CSS 遮挡冒充完成 | **已完成** | A3（遮挡层不出现）；N3 / N5c / N5d 用 `disabled` / `aria-disabled` / `data-openarc-*` 能力事实断言 |
+| 首页→画布通信与保存 | **已完成** | A7 / A8（命令层 → 自动保存 → OpenArc 存储一致；撤销 / 重做落库） |
+| 权限与撤权 | **已完成** | D1 / N5a（撤权 → 明确拒绝 + provider 0 请求；恢复授权 → 回到可用） |
+| 账号隔离 | **已完成** | E7 / E8（切账号帧全销毁；同源存储按本次挂载钥匙分桶，A 的键在 B 侧读为 null） |
+| 各已支持模型的真实调用（文本 / 图片 / 失败如实） | **已完成** | B2 / B3 / B4 |
+| 图片资源产品链（导入 / 重开 / 删除失效） | **已完成**（`9aabefe` 修 F3b） | F3a / F3b / F3c |
+| AI 编辑正式链（提议 → 审批 → 执行 → 呈现 → 保存重开） | **已完成**（`527176e` 修 F4） | F4b / F4 |
+| 真实 Electron 门禁（最终） | **已完成** | **48 PASS / 0 FAIL / 48，exit 0**（被测 commit `5b77186`；比上轮新增 F3d）；artifact `artifacts/d5-02/d5-02-canvas-e2e.json`（sha256 `746a436a…`）；见 §3 |
+| D1（高）：编辑器本地保存后宿主改动永不呈现（`5b77186` 修复） | **已完成** | `public/novai-canvas/static/js/canvas.js:1642` + vendor 补丁 `experiments/d5-02/vendor-novai-app.mjs:103` + `public/novai-canvas/SOURCE.md:44`；F3d 实测 1820ms 呈现、revision 10 → 10 |
+| D2（中）：设置 Defaults 在「显式默认能力不符」时显示 `No default configured` | **已完成** | `src/settings/ModelSettings.tsx:20,105,112`（补 disabled 选项显示已配置值与原因） |
+| 视觉（我们新增 / 改动的元素） | **通过** | 12/18；说明行对比 18.16 / 19.05、chip 4.50–4.65；焦点环有效 2px + 2px；`var(--radius-md,8px)`；省略 + `title`；证据 `artifacts/d5-02/visual/`；见 §5 |
+| 视觉（上游原版外观，按用户指令保留，不用 OpenArc DS 判定） | **不判定（仅记录适用范围）** | 上游控件字重 600–800；首页 hero 彩色主视觉；深色主题不传导到上游页面（画布页 / 首页仍浅色） |
+| 动效（本轮改动 / 新增部分） | **通过** | c1 95ms / 约 190ms；c2 约 190ms + 上游 `fadeUp 0.7s`；c3 160–210ms；c4 0ms；c5 无反馈；证据 `artifacts/d5-02/motion/`；见 §5 |
+| 动效 · MS §6「AI 新增节点 160ms 淡入 + 来源标记」 | **未实现（上游）** | `canvas.html` / `canvas.js` / `canvas.css` 无节点入场动画与来源徽标；如实登记为未实现的规范项 |
+| 与用户截图对照首页基准 | **未验收（基准缺失）** | 用户给的首页截图未出现在本工作区 / 本会话；见 §6 |
+
+## 2. 产品缺陷（本轮修掉，含 file:line）
+
+1. **入口是「完整应用外壳」，还多出欢迎页 / 选画布遮挡层**：点「开始创作」只弹 picker，不直接进编辑器。修：入口改为上游原版列表首页 `src/canvas/CanvasHost.tsx:34`；三处入口改成建完直接跳 `canvas.html` —— `public/novai-canvas/static/canvas-list.html:1038-1039`（开始创作 / 新建画布）、`:1381`（继续上次空列表）；旧的 `reopenCurrentCanvasFromHome` 口径作废。
+2. **完整应用外壳与宿主三块 chrome 还在**（左侧导航 + 其他子页入口 + 顶部操作条 / 状态行 / 提示横幅）：真删，不是隐藏。修：`src/canvas/CanvasHost.tsx:8`（宿主不画任何 chrome）、`:57`、`:674`（状态与提示的写点保留，渲染删除）；门禁 A1 / A2 断言「不存在外壳帧 / 不存在子页入口 / 不存在这些子页帧」。
+3. **页面内部跳转丢掉 fragment 里的账号钥匙 → 桥把账号读成 `anon` → 清掉同账号刚写的数据**。修：`public/novai-canvas/openarc-bridge.js:38`（fragment 无 `oa=` 时回落到同源真实存储 `oa:mount`）、`:255`（两处都读不到就跳过那次清理，交给宿主 hello 的 `applyAccount`）、`:490`（alive 心跳 800ms）。
+4. **供应商 / 模型存在第二来源**（NOVAI 配置页、静态清单、独立密钥、直连）。修：`electron/model-service.cjs:324`（`listModelsForUse` 与 `resolveModel` 同一授权口径：App 与 provider 都 enabled + app grant 含 `model.use`；PERSONAL 配置必须属于当前 actor）、`electron/model-bootstrap.cjs:114`（画布走 `canvas/models`）、`src/canvas/CanvasHost.tsx:138-160`（provider 只投影 id / 显示名 / 模型，不投影 baseUrl / protocol / 凭据）、`src/settings/ModelSettings.tsx:160-163,209,217`（总 API 设置补能力勾选与生图默认）；新增页面守卫 `public/novai-canvas/openarc-canvas-guard.js`（只注入编辑器页：`public/novai-canvas/static/canvas.html:537`），锁死三把页面侧模型来源键。门禁 B1 / B5 / N4 / N6。
+5. **打开已有画布后编辑器停在只读**（`canvas.get` 成功但没把 `canEdit` 推给页面）。修：`src/canvas/CanvasHost.tsx:345-355`（`canvas.get` 后与 `canvas.create` 同一口径补 `pushContext`）；A6 / A10 / F4b。
+6. **`ec5cbc5` 缺陷 A：显式配置的默认模型不可用时静默替换成清单第一个**。修：`electron/model-service.cjs:349-359`（`defaultsState{configId,usable,reason}`，reason 顺序与 `resolveModel` 一致：`MODEL_NOT_FOUND` → `MODEL_DISABLED` → `CAPABILITY_UNAVAILABLE` → `MODEL_UNAUTHORIZED`）；`src/canvas/CanvasHost.tsx:126-135`（服务没给事实时 fail-closed，不回落）；`public/novai-canvas/openarc-canvas-guard.js:107-122,394-395`（明确不可用 + 原因 + 引导，清单仍如实投影）；N5c / N5d。
+7. **`ec5cbc5` 缺陷 B：被 CSP `frame-src` 拦下的自我导航把帧留在 Chromium 错误页**（导航没走到主进程，原约 10s 才等到 8s 心跳看门狗）。修：`src/canvas/CanvasHost.tsx:588-599`（iframe `onLoad` 后开 3s 说话窗口：3s 内一条本帧消息都没有 = 换出来的不是应用页 → 立即整帧复位）、`:690`（绑定 `onLoad`）、`:575-584`（8s 看门狗保留作兜底）；E5b。
+8. **更早两个缺口的修复**：`9aabefe`（F3b：`electron/resource-service.cjs:534` 的 `readDataUrl` 读对象字节，画布重开能解析自己的图片；门禁改为走程序坞真关闭）、`527176e`（F4：`canvas.edit` 受控写入链四个阻断点 —— `electron/controlled-tool-proxy.cjs` / `electron/side-effect-authority.cjs` / `electron/tool-domain.cjs` / `electron/tool-registry.cjs:211,219,240,242`）。
+9. **D1（高，`5b77186` 修复）：编辑器本地保存过一次之后，宿主侧的改动永远不呈现。** 根因：上游 `canvas.js` 的 `scheduleSave` 触发后 `saveTimer` 从不清空（上游只在 `beforeunload` 清），而远端同步入口 `applyRemoteCanvasData()` 的判空条件里含 `saveTimer` ⇒ 恒真，2.5s 远端同步被永久延后。真机 A/B：干净页 2.0s 出现 / 本地保存后 20s 不出现。修：`public/novai-canvas/static/js/canvas.js:1642`（`saveCanvas()` 真正保存前清空 `saveTimer`，幂等、目标缺失即报错）；vendor 补丁 `experiments/d5-02/vendor-novai-app.mjs:103`（`CANVAS_JS_PATCHES`）；登记 `public/novai-canvas/SOURCE.md:44`（第 5 处上游改动）。修复后 **1.83s 呈现**，用户内容与 revision 稳定（F3d）。
+10. **D2（中，`5b77186` 修复）：总 API 设置 Defaults 在「显式配置的默认模型能力不符」时显示 `No default configured`**，与画布页「默认不可用」口径冲突。修：`src/settings/ModelSettings.tsx:20`（`defaultUnavailableText`：点名配的是哪个模型、为什么不可用）、`:105` + `:112`（`defaultOpts` 补 disabled 选项显示已配置值与原因）。
+11. **D3 + 视觉五项（`5b77186`）**：说明行 / chip / 引导按钮字阶 **11/16 → 12/18**（DS §5 最小档）；说明行改正文中性色，对比 **4.35 → 18.16 / 19.05**；焦点环 `calc(2px / var(--studio-ui-scale,1))` 抵消上游 `.topbar` 的 zoom，有效 **2px + 2px**（像素实测左右环各 4 设备像素 = 2.00 CSS px）；圆角消费 `var(--radius-md,8px)`；说明行单行省略 + `title` 全文不溢出。位置：`public/novai-canvas/openarc-canvas-guard.js:191-200`、`:242`、`:262`。
+
+## 3. 门禁与回归（命令 / 退出码 / 计数 / 证据路径 / sha256）
+
+**产品门禁（真实 Electron）**
+
+- 命令：`OPENARC_TESTED_COMMIT=$(git rev-parse HEAD) node experiments/d5-02/canvas-e2e.mjs`
+- 被测 commit：`5b77186c24d0608d7b6514811e2adcb4d419e575`（HEAD，工作树干净）
+- 结果：**48 PASS / 0 FAIL / 48，exit 0**（比上轮新增 F3d）；日志尾行 `结论：PASS — {"pass":48,"fail":0,"total":48,"notVerified":0}`、`GATE_EXIT=0`
+- 证据：`artifacts/d5-02/d5-02-canvas-e2e.json`（sha256 `746a436a668493e6d2486f354cf8f2ad5e52a6f81730c1a514a28c54dd9080a0`）；同名 `.log`；截图 `artifacts/d5-02/d5-02-app-*.png`（`artifacts/` 被 gitignore，证据留在本工作树）
+- `notVerified: []`；Z1 = clean（主进程无未处理错误）
+- tracked 证据：`docs/D5-02-SCOPE-CORRECTION-EVIDENCE.json`（48 条 checks 逐条脱敏复制 + counts / env / regression / assertionChanges）
+- 新增断言 F3d：本地编辑并落库后，宿主 `canvas/command`（actorKind=USER）新增节点 ≤5s 呈现（primitives + DOM）+ 用户本地内容仍在 + revision 5s 稳定；实测 1820ms 呈现、revision `at` 10 / `after5s` 10
+- 检查项分组（48 条）：A0 × 2；A1–A10（首页 / 无外壳无 chrome / 无其他子页入口 / 开始创作直达 / 返回 / 继续上次 / 卡片直达 / 命令层 / 撤销重做 / 返回列表 / 再打开）；N1–N6（含 N5a / N5c / N5d）；B1–B6；D1–D5；F1；F3a / F3b / F3c / F3d；E1–E8；F4b / F4；Z1
+
+**构建 / 单测**
+
+- `npm run build` → **exit 0**（`tsc --noEmit` + `vite build`）
+- `tests/d5-02-canvas-service.test.mjs` + `tests/d5-02-canvas-tool.test.mjs` + `tests/d5-02-model-list-authorization.test.mjs` + `tests/d5-02-canvas-edit-proposal.test.mjs` → **22/22**
+- `tests/governance-app-model-grant.test.mjs` → **4/4**
+- `tests/model-*.test.mjs` 全套 8 个文件 → **59/59**（model-bootstrap / model-isolation / model-performance / model-proxy-child / model-proxy / model-secret-scan / model-service-stream / model-service；文档岗复跑核对，取代旧的「60/60」口径）
+- 两条**预存在**失败（与本轮改动无关）：`tests/side-effect-c4-gates.test.mjs:474` 源扫描断言（「主进程绝不 in-process 执行 write」）与 D5-02 的 in-process 执行类冲突；`tests/d4-03-approval-push-isolation.test.mjs:103` 快照白名单少 D5-01 的 `targetRef` / `url`。两条已在**干净 HEAD 导出树**复现同样失败 → 如实登记为既有缺口。
+
+## 4. 断言变更披露
+
+1. **A 系列重写（A1–A10）**：产品形态变更（入口从完整外壳改为无限画布首页），旧 A1 / A2 / A3 / A6 / A7 与 `reopenCurrentCanvasFromHome` 口径作废重写；新增「无外壳 / 无 chrome / 无其他子页入口 / 无遮挡层 / 卡片直达 / 继续上次」。
+2. **B1 更严**：`api_providers` 从空数组改为真实投影，数量 = IPC 真值交叉核对、键集合 ⊆ {id,name,enabled,chat_models,image_models,video_models}、泄漏正则加宽（`base_url|protocol|has_key|key_preview|token|localhost|127.0.0.1`）。
+3. **B5 更严**：错误码由桥兜底 `OPENARC_UNSUPPORTED` 改为页面守卫的 `CAPABILITY_UNAVAILABLE`（守卫在桥之前截住），并 AND 上 `available:false` / `transport:null` / `detail` 非空。
+4. **E8 更严**：A / B 两账号各自用页面 scoped localStorage 写探针键，`own>=1` 有真实来源；新增 `isoA.foreign===0`、own 增量、A 的键在 B 侧读为 null。
+5. **N5c / N5d 本轮新增后按契约改写**：N5c 去掉「生图清单必须为空」（与「清单如实投影」相反），改为断言 `data-openarc-default-unavailable` + disabled + 运行按钮 blocked + 原因文案与引导 + 清单仍在 + `select.value` 为空 + 文本区不受影响 + 恢复后标记消失；N5d 三条 0 命中保留，把「下拉仍可选」改成「默认不可用口径」（原因码必须是 `MODEL_DISABLED`）。
+6. **F3b / F3c / F4 断言一字未动**（逐字节相同）。
+7. **Z1 只把 macOS IMKit 系统消息 `IMKCFRunLoopWakeUpReliable` 加入噪声白名单**（不是放宽判定）。
+8. **F3d 只新增**：本地编辑并落库后宿主 `canvas/command` 新增节点 ≤5s 呈现 + 用户内容仍在 + revision 5s 稳定；既有断言一行未动。
+
+## 5. 功能 / 视觉 / 动效
+
+- **功能**：**通过** —— 真实 Electron 门禁 **48 PASS / 0 FAIL / 48（exit 0，commit `5b77186`）**，门禁 `notVerified: []`、Z1 = clean；F3d 实测 1820ms 呈现、revision 稳定。证据见 §3。
+- **视觉（我们新增 / 改动的元素）**：**通过** —— 中性灰（chip / 说明行 `rgb(115,115,115)`、按钮 `rgb(10,10,10)`，像素 spread ≤3，无蓝 / 彩色）；无发丝线框（我们元素 border 全 0）；字重 400/500；字阶 12/18；说明行对比 18.16 / 19.05、chip 4.50–4.65；焦点环有效 **2px + 2px**（像素实测左右环各 4 设备像素 = 2.00 CSS px）；圆角 `var(--radius-md,8px)`；禁用态 disabled + aria-disabled + 原因文案；说明行单行省略 + `title` 全文不溢出。证据：`artifacts/d5-02/visual/`（25 张截图 + 3 份 manifest + `visual-checks.md` + `computed-styles*.json` + `pixel-samples.json`）。
+- **视觉（上游原版外观，按用户指令保留、不用 OpenArc DS 判定）**：只记录适用范围 —— 上游控件字重 600–800；首页 hero 彩色主视觉；深色主题不传导到上游页面（画布页 / 首页仍浅色）。
+- **动效（本轮改动 / 新增部分）**：**通过** —— c1 首页→编辑器：点击后 95ms 起画面切换、约 190ms 帧间差归 0（无残影 / 无布局抖动）；c2 返回：约 190ms 换页，之后是上游首页卡片自身 `fadeUp 0.7s`（约 620ms 稳定）；c3 守卫说明行 160ms 淡入（`duration.quick` + `easing.standard`，实测 160–210ms）；c4 减少动态效果下 0ms（animation none / 0s，达标 ≤100ms）；c5 点击被禁用的视频下拉：DOM 指纹不变、无浮层、无状态变化（仅有上游 2.5s 轮询的整体重渲染）。证据：`artifacts/d5-02/motion/`（8 段共 1824 帧 PNG + `motion-summary.md` + `motion-report.json` + `ai-node-report.json`）。
+- **动效（MS §6）**：**未实现（上游）** —— 「AI 新增节点 160ms 淡入 + 来源标记」：`canvas.html` / `canvas.js` / `canvas.css` 0 处节点入场动画、无来源徽标，节点同帧直接出现；D1 修复后「本地保存过的编辑器」也能呈现（1820ms）。如实记为未实现的规范项。
+- **与用户截图对照（首页基准）**：**未验收（基准文件缺失）** —— 用户给的首页截图未出现在本工作区 / 本会话（已检索工作区与 Desktop/Downloads）；关闭方式：用户提供文件，或明确「以上游原版页面在真实 Electron 中的渲染为基准」。
+
+## 6. 未闭合 / 下一步
+
+1. **与用户截图对照 = 未验收（基准缺失）**：用户给的首页截图未出现在本工作区 / 本会话。关闭方式：用户提供文件，或明确「以上游原版页面在真实 Electron 中的渲染为基准」。
+2. **MS §6「AI 新增节点 160ms 淡入 + 来源标记」= 未实现（上游）**：`canvas.html` / `canvas.js` / `canvas.css` 无节点入场动画与来源徽标（`canvas.js:5615-5642` 每次整体重建节点层），节点同帧直接出现。关闭方式：由后续动效批次实现。
+3. **新登记的既有缺陷：宿主改动落在页面 500ms debounce 窗口内会被页面 PUT 覆盖**（未落库竞态；改前改后一致，非本批引入）。建议单开一批处理。
+4. **F3d / F4-presented 依赖页面 2.5s 轮询与窗口前台状态**：窗口被完全遮挡时 Chromium 会节流；F3d 已 `bringToFront` 兜住。
+5. **其他 NOVAI 子页文件仍在 bundle 内但无入口不可达**（smart-canvas 亦不可达，未注入适配层 / 守卫）。
+6. **视频 / ComfyUI / RunningHub 等保持「明确不可用」**：未接通链路未启用。
+7. **Windows / 多屏 / 高 DPI 等既有 NOT VERIFIED 不变**。
+
+## 7. 判定
+
+**判定：D5-02 = PARTIAL（限定范围）。**
+
+- 功能 = **通过**（真实 Electron 门禁 48/48、exit 0；首页 / 新建 / 继续上次 / 打开已有画布 / 返回首页 / 无模型 / 停用撤权 / 各已支持模型真实调用全部有断言与实机证据）。
+- 视觉 = 自身规范符合 **通过**；**与用户截图对照 = 未验收**（基准缺失）。
+- 动效 = 本轮改动 **通过**；**MS §6 AI 节点淡入 + 来源标记 = 未实现**（上游）。
+
+关闭条件：① 用户提供首页截图或确认基准；② MS §6 由后续动效批次实现；③ 宿主改动落在页面 500ms debounce 窗口内会被页面 PUT 覆盖（未落库竞态，改前改后一致，非本批引入）建议单开一批处理；④ 门禁 F3d / F4-presented 依赖页面 2.5s 轮询与窗口前台状态（被完全遮挡时 Chromium 会节流；F3d 已 bringToFront 兜住）。
+
