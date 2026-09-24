@@ -62,6 +62,10 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
   const [modelNotFound, setModelNotFound] = useState(0);
   /** 应用帧最后一次心跳（看门狗用）：被非预期导航/崩溃打断时整帧重置，绝不留在错误页上。*/
   const lastBeat = useRef(Date.now());
+  /** 本帧说过的消息条数：iframe 换了文档之后用它判断"换出来的还是不是应用页"。*/
+  const beatSeq = useRef(0);
+  /** 帧加载后的说话窗口（见 onFrameLoad）。*/
+  const loadCheck = useRef<number | null>(null);
 
   /** 本次挂载的实例 token：只有带它的宿主消息才被接受（重挂载后旧实例立即失效）。*/
   const instanceToken = useRef(randomToken());
@@ -104,10 +108,31 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
     labelToConfig.current = new Map(models.map((m) => [label(m), m.configId] as [string, string]));
     const chat = usable("chat");
     const image = usable("image-generation");
+    /**
+     * 默认值只认 OpenArc 的**显式配置**，两种情况必须分开（这是"禁止静默换模型"的落点）：
+     *   · def == null —— OpenArc 里根本没配该能力默认：回落到清单第一个可用模型只是**展示便利**
+     *     （新节点有个开箱可用的初值），不是替换谁的显式配置，保持原行为；
+     *   · def != null 却不在可用清单里（能力不符 / 被停用 / 不存在 / 没有 model.use 授权）——
+     *     **绝不回落**：投影空字符串，让守卫脚本把该能力明确显示为不可用（原因见 defaultFact）。
+     */
     const pick = (cap: string, list: any[]) => {
       const def = defaults.personal?.[cap] || defaults.organization?.[cap] || null;
+      if (!def) return list[0] ? label(list[0]) : "";
       const found = list.find((m) => m.configId === def);
-      return found ? label(found) : (list[0] ? label(list[0]) : "");
+      return found ? label(found) : "";
+    };
+    /**
+     * 显式默认的可用性事实：由模型服务（唯一真源）判定原因，不在页面侧猜。
+     *   defaultUsable = null（没配该能力默认）/ true（显式默认可用）/ false（显式默认不可用 + defaultReason）
+     * 服务没给事实时 fail-closed 按"清单里找不到就是不可用"，绝不悄悄回落。
+     */
+    const defaultFact = (cap: string) => {
+      const def = defaults.personal?.[cap] || defaults.organization?.[cap] || null;
+      if (!def) return { defaultUsable: null, defaultReason: null };
+      const fact = res && res.defaultsState ? res.defaultsState[cap] : null;
+      if (fact && typeof fact.usable === "boolean") return { defaultUsable: fact.usable, defaultReason: fact.usable ? null : (fact.reason || null) };
+      const found = usable(cap).some((m) => m.configId === def);
+      return { defaultUsable: found, defaultReason: found ? null : "MODEL_NOT_FOUND" };
     };
     /**
      * 供应商投影：**只含该能力下有可用模型的 provider**（OpenArc 是唯一真源，页面侧不再造供应商）。
@@ -138,6 +163,8 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
      *   transport  传输是否存在（null = OpenArc 根本没接通这个能力）
      *   available  = transport != null（能力本身在不在）
      *   configured = 该能力有没有可用模型（缺模型是"未配置"，不是"不可用"）
+     * 第四个事实 defaultUsable/defaultReason 见 defaultFact()：显式默认坏了也是"不可用"，但原因不同
+     * （CAPABILITY_UNAVAILABLE / MODEL_DISABLED / MODEL_NOT_FOUND / MODEL_UNAUTHORIZED）。
      */
     const capability = (transport: string | null, configured: boolean, reason: string | null) => ({ available: !!transport, transport, configured, reason });
     return {
@@ -157,8 +184,8 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
        * 未接通的能力一律 available:false + reason —— 不是装饰字段。
        */
       capabilities: {
-        chat: capability("openarc-model-service", chat.length > 0, chat.length ? null : "OpenArc 总 API 设置里还没有可用的文本模型"),
-        "image-generation": capability("openarc-model-service", image.length > 0, image.length ? null : "OpenArc 总 API 设置里还没有可用的生图模型"),
+        chat: { ...capability("openarc-model-service", chat.length > 0, chat.length ? null : "OpenArc 总 API 设置里还没有可用的文本模型"), ...defaultFact("chat") },
+        "image-generation": { ...capability("openarc-model-service", image.length > 0, image.length ? null : "OpenArc 总 API 设置里还没有可用的生图模型"), ...defaultFact("image-generation") },
         "video-generation": capability(null, false, "OpenArc 未接通视频传输（不可用）"),
         comfy: capability(null, false, "OpenArc 未接入 ComfyUI（不可用）"),
       },
@@ -475,6 +502,7 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
       const relayed = typeof d.id === "string" && /^f\d+:\d+$/.test(d.id);       // 子页调用（外壳中继）
       if (d.kind !== "hello-request" && d.kind !== "notice" && d.kind !== "alive" && d.token !== instanceToken.current) return; // 旧实例 / 伪造 token 一律忽略
       lastBeat.current = Date.now();
+      beatSeq.current += 1;
       if (d.kind === "alive") return;
       if (d.kind === "hello-request") {
         const cur = currentRef.current;
@@ -526,6 +554,24 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
     return () => window.removeEventListener("message", onMessage);
   }, [bindCanvas, frameSrc, handleCall, pushContext]);
 
+  /** 整帧重置：换新实例 token + 把应用帧重挂载回 bundle 入口（旧页面与旧 token 立即失效）。
+   *  看门狗（长时间不心跳）与"iframe 换了文档"复核共用这一条路径。*/
+  const resetAppFrame = useCallback((reason: string) => {
+    lastBeat.current = Date.now();
+    instanceToken.current = randomToken();
+    setNotice(reason);
+    void (async () => {
+      let seed = "anon";
+      try {
+        const st: any = await (window as any).openarc?.identity?.command({ type: "identity/status" });
+        const s = st?.snapshot;
+        if (s && s.userId) seed = String(s.userId) + ":" + String(s.sessionRef || "");
+      } catch { /* ignore */ }
+      setFrameSrc(IFRAME_BASE + "#oa=" + keyOf(seed + ":" + instanceToken.current));
+      setFrameKey((k) => k + 1);
+    })();
+  }, []);
+
   // 应用帧看门狗：正常情况下外壳中继每 800ms 发一次心跳。若连续 8s 没有任何消息，
   // 说明该帧被非预期导航/崩溃打断（例如页面自我导航到外部站点被 CSP/宿主拦下后停在错误页）——
   // 这里整帧重置到 bundle 入口（新 token），保证用户不会卡在错误页上，也保证旧页面立即失效。
@@ -534,22 +580,24 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
       const frameWin = frameRef.current?.contentWindow;
       if (!frameWin || !frameSrc) return;
       if (Date.now() - lastBeat.current < 8000) return;
-      lastBeat.current = Date.now();
-      instanceToken.current = randomToken();
-      setNotice("应用页面被非预期导航/崩溃中断，已重置（旧页面与旧实例 token 立即失效）");
-      void (async () => {
-        let seed = "anon";
-        try {
-          const st: any = await (window as any).openarc?.identity?.command({ type: "identity/status" });
-          const s = st?.snapshot;
-          if (s && s.userId) seed = String(s.userId) + ":" + String(s.sessionRef || "");
-        } catch { /* ignore */ }
-        setFrameSrc(IFRAME_BASE + "#oa=" + keyOf(seed + ":" + instanceToken.current));
-        setFrameKey((k) => k + 1);
-      })();
+      resetAppFrame("应用页面被非预期导航/崩溃中断，已重置（旧页面与旧实例 token 立即失效）");
     }, 3000);
     return () => clearInterval(timer);
-  }, [frameSrc]);
+  }, [frameSrc, resetAppFrame]);
+
+  /** 帧内文档被换掉之后的复核：iframe 自我导航出网是被**父文档的 CSP frame-src** 拦下的，
+   *  导航根本没走到主进程（will-frame-navigate 不触发），帧里落的是 Chromium 错误页；
+   *  错误页同样会触发 iframe 的 load，所以只能按"换了文档之后还说不说话"判定：加载完成 3s 内
+   *  连一条本帧消息都没有 = 换出来的不是应用页 → 立即整帧重置回入口（不用等 8s 看门狗）。*/
+  const onFrameLoad = useCallback(() => {
+    if (loadCheck.current) window.clearTimeout(loadCheck.current);
+    const seen = beatSeq.current;
+    loadCheck.current = window.setTimeout(() => {
+      loadCheck.current = null;
+      if (beatSeq.current === seen) resetAppFrame("应用页面被非预期导航替换，已立即重置（旧页面与旧实例 token 立即失效）");
+    }, 3000);
+  }, [resetAppFrame]);
+  useEffect(() => () => { if (loadCheck.current) window.clearTimeout(loadCheck.current); }, []);
 
   // 主进程拦截的应用内导航出网：证据留在宿主 notice 状态里（不再有计数徽标）
   useEffect(() => {
@@ -639,6 +687,7 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
           data-canvas-frame
           data-canvas-app-frame
           sandbox="allow-scripts allow-same-origin"
+          onLoad={onFrameLoad}
           src={frameSrc}
         />
       ) : (

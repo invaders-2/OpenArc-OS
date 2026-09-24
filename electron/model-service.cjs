@@ -341,8 +341,27 @@ class ModelService {
         capabilities: m.capabilities || [], verifiedCapabilities: m.verifiedCapabilities || [], status: m.status, scope: m.scope,
       });
     }
+    /**
+     * 显式配置的默认模型**为什么用不了**：渲染层要如实告诉用户，而不是悄悄换成清单第一个。
+     * 判定顺序与 resolveModel 一致（不存在 → 停用 → 缺能力 → 没授权），reason 就是调用时的拒绝口径。
+     * def == null（OpenArc 里压根没配该能力默认）不是故障：那种情况页面回落清单第一个只是展示便利。
+     */
+    const defaultState = (cap) => {
+      const configId = (defaults && defaults.ok ? (defaults.personal[cap] || defaults.organization[cap]) : null) || null;
+      if (!configId) return { configId: null, usable: null, reason: null };
+      if (models.some((m) => m.configId === configId && (m.capabilities || []).includes(cap))) return { configId, usable: true, reason: null };
+      const config = this.store.configById(configId);
+      const provider = config ? this.store.providerById(config.provider_id) : null;
+      if (!config || !provider) return { configId, usable: false, reason: "MODEL_NOT_FOUND" };
+      if (String(config.status) !== "enabled" || String(provider.status) !== "enabled") return { configId, usable: false, reason: "MODEL_DISABLED" };
+      const caps = (this.#safeConfig(config) || {}).capabilities || [];
+      if (!caps.includes(cap)) return { configId, usable: false, reason: "CAPABILITY_UNAVAILABLE" };
+      return { configId, usable: false, reason: "MODEL_UNAUTHORIZED" };
+    };
+    const defaultsState = {};
+    for (const cap of capabilities) defaultsState[cap] = defaultState(cap);
     return {
-      ok: true, models, capabilities,
+      ok: true, models, capabilities, defaultsState,
       defaults: defaults && defaults.ok ? { personal: defaults.personal, organization: defaults.organization } : { personal: {}, organization: {} },
       // 供应商地址/凭据一律不出主进程：画布只看到"能用的模型"和供应商显示名。
       transports: { chat: true, "image-generation": true, "video-generation": false },

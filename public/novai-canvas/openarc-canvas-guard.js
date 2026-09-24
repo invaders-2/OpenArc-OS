@@ -18,7 +18,10 @@
  *   window.__openarcCanvasGuard.facts                    真源事实快照
  *   select[data-openarc-unavailable="<cap>"]            该下拉因能力未接通被禁用（disabled + aria-disabled）
  *   select[data-openarc-unconfigured="<cap>"]           该下拉因清单为空被禁用（disabled + aria-disabled）
- *   [data-openarc-guard-note="<cap>"]                   说明文字（视频/ComfyUI 为"未接通"，其余为"未配置"）
+ *   select[data-openarc-default-unavailable="<cap>"]    该下拉因**OpenArc 里显式配置的默认模型不可用**被禁用
+ *                                                       （与"未配置"同一套可见口径，另加这个标记区分原因）
+ *   [data-openarc-guard-note="<cap>"]                   说明文字（视频/ComfyUI 为"未接通"，其余为"未配置"；
+ *                                                       显式默认不可用时是「原因 + 打开 OpenArc 总 API 设置」）
  *   .node[data-openarc-capability][data-openarc-available="false"]   节点级可用性事实
  *   button[data-openarc-blocked="<cap>"]                该运行按钮被守卫禁用（disabled + aria-disabled）
  *   button[data-openarc-open-model-settings]            "打开 OpenArc 总 API 设置"（真实可点，走桥的登记动作）
@@ -41,6 +44,19 @@
     "video-generation": "OpenArc 未接通视频传输（不可用）",
     "comfy": "OpenArc 未接入 ComfyUI（不可用）",
   };
+  /** OpenArc 里**显式配置的默认模型**用不了时，必须把原因说清楚（不是"没配"，更不是悄悄换一个模型）。
+   *  原因码由模型服务给（MODEL_UNAUTHORIZED = 模型在、也有这个能力，但当前应用没有 model.use 授权）。*/
+  var DEFAULT_REASON_TEXT = {
+    "CAPABILITY_UNAVAILABLE": "默认模型没有这个能力",
+    "MODEL_DISABLED": "默认模型已被停用",
+    "MODEL_NOT_FOUND": "默认模型已不存在",
+    "MODEL_UNAUTHORIZED": "默认模型当前未被授权使用",
+  };
+  function defaultUnavailableText(cap, reason) {
+    var who = cap === "chat" ? "文本" : (cap === "image-generation" ? "生图" : String(cap));
+    var why = DEFAULT_REASON_TEXT[String(reason || "")] || "默认模型当前不可用";
+    return who + "默认不可用（" + why + "）；OpenArc 里显式配置的默认不会被自动换成别的模型";
+  }
   var MODEL_SOURCE_KEYS = ["canvas_custom_image_models", "canvas_image_models_ordered", "canvas_chat_models_ordered"];
   var RUN_SELECTORS = {
     "video-generation": [".gen-btn", ".table-batch-run-btn", ".gen-cascade-btn"],
@@ -87,17 +103,23 @@
   function jsonResponse(status, body) {
     return new Response(JSON.stringify(body), { status: status, headers: { "content-type": "application/json" } });
   }
-  /** 能力事实：transport=有没有传输；available=能力在不在；configured=有没有可用模型。三件事分开，不靠文案猜。*/
+  /** 能力事实：transport=有没有传输；available=能力在不在；configured=有没有可用模型。三件事分开，不靠文案猜。
+   *  defaultUsable=false = OpenArc 里**显式配置的默认模型**不可用（原因见 defaultReason）：此时界面必须明确
+   *  显示不可用，绝不回落成清单第一个（那就是静默换模型）。defaultUsable=null/true 都不是这种故障。*/
   function capabilityOf(cap) {
     var c = facts.capabilities && facts.capabilities[cap];
     if (c && typeof c.available === "boolean") {
-      return { available: !!c.available, configured: !!c.configured, transport: c.transport || null, reason: c.reason || null };
+      return {
+        available: !!c.available, configured: !!c.configured, transport: c.transport || null, reason: c.reason || null,
+        defaultUsable: c.defaultUsable === false ? false : (c.defaultUsable === true ? true : null), defaultReason: c.defaultReason || null,
+      };
     }
     // 真源没给事实 = 不可用（fail-closed）：绝不让界面"猜"成可用。
-    return { available: false, configured: false, transport: null, reason: UNAVAILABLE_TEXT[cap] || "OpenArc 未接通该能力（不可用）" };
+    return { available: false, configured: false, transport: null, reason: UNAVAILABLE_TEXT[cap] || "OpenArc 未接通该能力（不可用）", defaultUsable: null, defaultReason: null };
   }
-  /** 界面口径的"能用"= 有传输 且 有模型。*/
+  /** 界面口径的"能用"= 有传输 且 有模型。显式默认坏没坏单独判（见 defaultDown）。*/
   function usable(cap) { var c = capabilityOf(cap); return c.available && c.configured; }
+  function defaultDown(cap) { return capabilityOf(cap).defaultUsable === false; }
   function applyFacts(cfg) {
     cfg = cfg || {};
     facts.providers = (Array.isArray(cfg.api_providers) ? cfg.api_providers : []).map(function (p) {
@@ -276,17 +298,21 @@
     sel.setAttribute("data-openarc-unavailable", cap);
     sel.removeAttribute("data-openarc-unconfigured");
   }
-  function markUnconfigured(sel, cap, text) {
+  /** 未配置口径（下拉 disabled + 唯一占位）。显式默认不可用时走**同一套可见口径**，但多一个标记把原因分开。*/
+  function markUnconfigured(sel, cap, text, byDefault) {
     if (sel.value) keepValue.set(sel, sel.value);
-    if (sel.getAttribute("data-openarc-state") !== "unconfigured:" + text) {
+    var state = (byDefault ? "default-unavailable:" : "unconfigured:") + text;
+    if (sel.getAttribute("data-openarc-state") !== state) {
       clearSelect(sel);
       sel.appendChild(placeholderOption(text));
-      sel.setAttribute("data-openarc-state", "unconfigured:" + text);
+      sel.setAttribute("data-openarc-state", state);
     }
     sel.disabled = true;
     sel.setAttribute("aria-disabled", "true");
     sel.setAttribute("data-openarc-unconfigured", cap);
     sel.removeAttribute("data-openarc-unavailable");
+    if (byDefault) sel.setAttribute("data-openarc-default-unavailable", cap);
+    else sel.removeAttribute("data-openarc-default-unavailable");
   }
   /** 清单外的选项（写死默认值、localStorage 旧清单、伪造供应商）直接删掉；空则回落到"未配置"。*/
   function pruneOptions(sel, allowed) {
@@ -357,24 +383,28 @@
     if (!role) return;
     var cap = role.cap;
     var availability = capabilityOf(cap);
+    var unconfiguredText = UNCONFIGURED_TEXT[cap] || "未配置（OpenArc 总 API 设置里没有可用模型）";
     if (!availability.available) {
       markUnavailable(sel, cap, availability.reason || UNAVAILABLE_TEXT[cap] || "OpenArc 未接通该能力（不可用）");
       syncNodeField(sel, role);
       return;
     }
-    if (!availability.configured) {
-      markUnconfigured(sel, cap, UNCONFIGURED_TEXT[cap] || "未配置（OpenArc 总 API 设置里没有可用模型）");
+    // 显式配置的默认模型不可用 → 与"未配置"同一套可见口径（多一个 default-unavailable 标记）：
+    // 绝不让下拉自己选中清单第一个 —— 那就是把用户显式配的默认静默换掉。
+    if (!availability.configured || availability.defaultUsable === false) {
+      markUnconfigured(sel, cap, unconfiguredText, availability.defaultUsable === false);
       syncNodeField(sel, role);
       return;
     }
     var allowed = role.kind === "provider" ? facts.providerIds : modelsFor(cap);
-    if (!allowed.length) { markUnconfigured(sel, cap, UNCONFIGURED_TEXT[cap] || "未配置（OpenArc 总 API 设置里没有可用模型）"); syncNodeField(sel, role); return; }
+    if (!allowed.length) { markUnconfigured(sel, cap, unconfiguredText, false); syncNodeField(sel, role); return; }
     pruneOptions(sel, allowed);
     if (sel.getAttribute("data-openarc-state")) { rebuildOptions(sel, role); sel.removeAttribute("data-openarc-state"); }
     sel.disabled = false;
     sel.removeAttribute("aria-disabled");
     sel.removeAttribute("data-openarc-unavailable");
     sel.removeAttribute("data-openarc-unconfigured");
+    sel.removeAttribute("data-openarc-default-unavailable");
     if (allowed.indexOf(sel.value) < 0) sel.value = allowed[0];
     if (role.kind === "provider" && !sel.value) sel.value = allowed[0];
     keepValue.delete(sel);
@@ -397,12 +427,16 @@
     var caps = cap ? [cap] : [];
     caps.forEach(function (cap) {
       var availability = capabilityOf(cap);
-      var ok = usable(cap);
+      // 三种"不能跑"要分开说，而且都**真的禁用运行按钮**：传输没有 / 清单为空 / 显式默认不可用。
+      var byDefault = availability.defaultUsable === false;
+      var unconfigured = availability.available && !availability.configured;
+      var ok = usable(cap) && !byDefault;
       nodeEl.setAttribute("data-openarc-capability", cap);
       nodeEl.setAttribute("data-openarc-available", ok ? "true" : "false");
-      var unconfigured = availability.available && !availability.configured;
-      var text = ok ? "" : (unconfigured ? (UNCONFIGURED_TEXT[cap] || "未配置") : (availability.reason || UNAVAILABLE_TEXT[cap] || "不可用"));
-      if (text) setNodeNote(nodeEl, cap, text, unconfigured); else removeNodeNote(nodeEl, cap);
+      var text = ok ? "" : (!availability.available
+        ? (availability.reason || UNAVAILABLE_TEXT[cap] || "不可用")
+        : (byDefault ? defaultUnavailableText(cap, availability.defaultReason) : (UNCONFIGURED_TEXT[cap] || "未配置")));
+      if (text) setNodeNote(nodeEl, cap, text, unconfigured || byDefault); else removeNodeNote(nodeEl, cap);
       (RUN_SELECTORS[cap] || []).forEach(function (selector) {
         Array.prototype.forEach.call(nodeEl.querySelectorAll(selector), function (btn) {
           if (ok) {
@@ -457,11 +491,18 @@
       if (span) span.textContent = STATUS_LOADING;
       return;
     }
-    var chatOk = usable("chat");
-    var imageOk = usable("image-generation");
+    /** 状态位只说事实：显式默认不可用与"未配置/不可用"措辞分开（chip 的状态属性仍是 unconfigured，不改门禁口径）。*/
+    var stateOf = function (cap) {
+      var c = capabilityOf(cap);
+      if (c.defaultUsable === false) return "默认不可用";
+      return c.configured ? "不可用" : "未配置";
+    };
+    var who = function (cap) { return cap === "chat" ? "文本" : "生图"; };
+    var chatOk = usable("chat") && !defaultDown("chat");
+    var imageOk = usable("image-generation") && !defaultDown("image-generation");
     var missing = [];
-    if (!chatOk) missing.push("文本" + (capabilityOf("chat").configured ? "不可用" : "未配置"));
-    if (!imageOk) missing.push("生图" + (capabilityOf("image-generation").configured ? "不可用" : "未配置"));
+    if (!chatOk) missing.push(who("chat") + stateOf("chat"));
+    if (!imageOk) missing.push(who("image-generation") + stateOf("image-generation"));
     var parts = [];
     if (chatOk) parts.push("文本 " + facts.chat.length);
     if (imageOk) parts.push("生图 " + facts.image.length);

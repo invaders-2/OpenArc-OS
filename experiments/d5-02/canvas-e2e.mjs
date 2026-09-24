@@ -603,19 +603,24 @@ async function main() {
   const beforeCap = provider.state().images.length;
   const capRun = await canvas({ type: "canvas/run", canvasId: currentCanvasId, kind: "image" });
   const afterCap = provider.state().images.length;
-  // N5c：跨能力状态点（生图默认被指到只有 chat 的模型）—— 页面生图区必须 unconfigured，文本区不受影响。
-  const n5cCrossCap = await nWaitModelArea("image-unavailable");
+  // N5c：跨能力状态点（生图默认被指到只有 chat 的模型）。产品契约（本批修订）：**不回落、不换模型、不隐瞒清单** ——
+  // 生图区按「显式默认不可用」呈现（与未配置同一套可见口径 + data-openarc-default-unavailable），清单照旧如实投影，
+  // 那个可用生图模型**不会**被自动选中；文本区不受影响。
+  const n5cImgLabel = String((imgModel && imgModel.model && (imgModel.model.displayName || imgModel.model.remoteModelId)) || "") + " · " + String(imgId).slice(-4);
+  const n5cCrossCap = await nWaitModelArea("image-unavailable", n5cImgLabel);
   await model({ type: "defaults/set", capability: "image-generation", configId: imgId });
   record("D2", "能力不支持：图片能力被指到只有 chat 的模型上 → 明确 CAPABILITY_UNAVAILABLE，provider 收不到图片请求",
     capRun.ok === false && capRun.error === "CAPABILITY_UNAVAILABLE" && afterCap === beforeCap,
     "CAPABILITY_UNAVAILABLE + 0 请求", JSON.stringify({ capRun: { ok: capRun.ok, error: capRun.error }, images: beforeCap + "→" + afterCap }));
 
-  // N5c：恢复生图默认 → 生图区回到可用（文本区全程不该被牵连）。
+  // N5c：恢复生图默认 → 生图区回到可用且标记消失（文本区全程不该被牵连）。
   const n5cRestored = await nWaitModelArea("available-all");
-  record("N5c", "跨能力（生图默认被指到只有 chat 的模型）→ 页面生图区真的变成不可用（未配置占位 + disabled），文本区不受影响仍是可选状态；恢复默认 → 生图区回到可用",
-    n5cCrossCap.ok && n5cRestored.ok,
-    "跨能力：生图 unconfigured/disabled 且文本仍可用；恢复后 ok",
-    JSON.stringify({ crossCap: nSnapBrief(n5cCrossCap), restored: nSnapBrief(n5cRestored) }));
+  record("N5c", "跨能力（生图默认被指到只有 chat 的模型）→ 生图区按**显式默认不可用**呈现：data-openarc-default-unavailable=image-generation + 下拉 disabled/aria-disabled + 运行按钮 data-openarc-blocked + 原因文案与「打开 OpenArc 总 API 设置」引导；**清单仍如实投影**（那个可用生图模型仍在 /api/config.image_models 里，只是没有被自动选中：select.value 为空、生图节点 model 为空 = 没有静默换默认）；文本区不受影响（仍可选、选项 ⊆ 真源清单、默认仍是显式配置的那个）；恢复默认 → 标记消失、下拉恢复可选、chip 回 ok",
+    n5cCrossCap.ok && n5cRestored.ok
+      && !(n5cRestored.snap && n5cRestored.snap.image && n5cRestored.snap.image.model && n5cRestored.snap.image.model.defaultUnavailable)
+      && !(n5cRestored.snap && n5cRestored.snap.chat && n5cRestored.snap.chat.model && n5cRestored.snap.chat.model.defaultUnavailable),
+    "跨能力：生图默认不可用（标记 + disabled/aria + blocked + 原因/引导）且清单照旧如实投影、未被自动选中；文本仍可用；恢复后标记消失且可选",
+    JSON.stringify({ defaultApplied: { capability: "image-generation", configId: chatOnly && chatOnly.model && chatOnly.model.configId, note: "生图默认被指到一个只有 chat 能力的模型（清单里的可用生图模型 = " + n5cImgLabel + "）" }, crossCap: nSnapBrief(n5cCrossCap), restored: nSnapBrief(n5cRestored) }));
 
   const budgetRun = await canvas({ type: "canvas/run", canvasId: currentCanvasId, kind: "chat" });
   let budgetOk = 0, budgetStop = null;
@@ -681,14 +686,16 @@ async function main() {
     okCall && okCall.ok === true && disabledCall.ok === false && afterDisable === beforeDisable && crossCap.ok === false && afterCross === beforeDisable && unknownCfg.ok === false && afterUnknown === beforeDisable,
     "停用/跨能力/不存在 → 拒绝 + 0 请求", JSON.stringify({ okCall: okCall && okCall.ok, disabled: { ok: disabledCall.ok, error: disabledCall.error }, cross: { ok: crossCap.ok, error: crossCap.error }, unknown: { ok: unknownCfg.ok, error: unknownCfg.error }, requests: [beforeDisable, afterDisable, afterCross, afterUnknown] }));
 
-  // N5d/N5e：停用/恢复的 UI 面。停用点上的实测口径不是 unconfigured（同能力的另一个模型仍可用，文本能力整体
-  // 仍 configured），所以判定写成更强也更准的事实：被停用模型的标签在（清单 / DOM option / 节点当前模型）三处
-  // 全部 0 命中，剩下的选项只在真源清单里；恢复 enabled 后模型区回到可用。D1/F1 的调用级判定一个字未改。
+  // N5d/N5e：停用/恢复的 UI 面。被停用的正是**显式配置的文本默认**（defaults/set chat = chatId，本段第 669 行停用它），
+  // 产品契约（本批修订）：文本区按「显式默认不可用」呈现 —— **不回落、不自动改用清单里剩下的那个模型**。
+  // 三条 0 命中判定（清单 / DOM option / 节点当前模型）原样保留；恢复 enabled 后回到 ok 且可选、标记消失。
+  // D1/F1 的调用级判定一个字未改。
   const n5eEnabled = await nWaitModelArea("available-all");
-  record("N5d", "停用 → 被停用模型从页面模型区消失（清单 / DOM option / 节点当前模型三处 0 命中，剩余选项 ⊆ 真源清单，且没有半禁用状态）；恢复 enabled → 页面模型区回到可用（chip ok + 下拉可选）",
-    !!(n5dManifestBefore && n5dLabel && n5dManifestBefore.chat.includes(n5dLabel)) && n5dDisabled.ok && n5eEnabled.ok,
-    "停用后标签三处 0 命中 + 恢复后可用",
-    JSON.stringify({ disabledModelLabel: n5dLabel, manifestBefore: n5dManifestBefore && n5dManifestBefore.chat, atDisable: nSnapBrief(n5dDisabled), atEnable: nSnapBrief(n5eEnabled) }));
+  record("N5d", "停用**显式配置的文本默认** → 被停用模型从页面模型区消失（清单 / DOM option / 节点当前模型三处 0 命中）；文本能力按「默认不可用」呈现（data-openarc-default-unavailable=chat + 下拉 disabled/aria-disabled + 运行按钮 data-openarc-blocked + 原因文案与「打开 OpenArc 总 API 设置」引导，select.value 为空 = 没有自动改用剩下的那个文本模型）；恢复 enabled → 页面模型区回到可用（chip ok + 下拉可选 + 标记消失）",
+    !!(n5dManifestBefore && n5dLabel && n5dManifestBefore.chat.includes(n5dLabel)) && n5dDisabled.ok && n5eEnabled.ok
+      && !(n5eEnabled.snap && n5eEnabled.snap.chat && n5eEnabled.snap.chat.model && n5eEnabled.snap.chat.model.defaultUnavailable),
+    "停用后标签三处 0 命中 + 默认不可用口径（标记/disabled/aria/blocked/原因+引导，value 为空）+ 恢复后 ok/可选且标记消失",
+    JSON.stringify({ disabledModelLabel: n5dLabel, disabledConfigId: chatId, manifestBefore: n5dManifestBefore && n5dManifestBefore.chat, atDisable: nSnapBrief(n5dDisabled), atEnable: nSnapBrief(n5eEnabled) }));
 
   /* ══════════════════ F3：图片资源产品链 ══════════════════ */
   const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIAQMAAAD+wSzIAAAABlBMVEX///+/v7+jQ3Y5AAAADklEQVQI12P4AIX8EAgALgAD/aNpbtEAAAAASUVORK5CYII=";
@@ -898,6 +905,12 @@ async function main() {
  * 契约来源（产品侧已在真实 Electron 逐条验过）：public/novai-canvas/openarc-canvas-guard.js 的 DOM 契约
  * 与 src/canvas/CanvasHost.tsx buildConfig() 的 /api/config 投影。断言只观察产品自己的 DOM / 端点 /
  * 假 provider 计数，不替产品造事实，也不放宽任何既有判定。 */
+/* 本批产品契约修订（N5c / N5d 两条期望据此重写，其余断言未动）：
+ *   OpenArc 里**显式配置的默认模型**不可用（能力不符 / 被停用 / 不存在 / 未授权）时，页面**不回落、不换模型、
+ *   不隐瞒清单**：/api/config 的 chat_model / image_model 投影为空，能力事实带 defaultUsable:false + defaultReason，
+ *   该能力按「与未配置同一套可见口径」呈现并多一个 data-openarc-default-unavailable=<cap>，运行按钮 blocked，
+ *   说明行给原因 + 「打开 OpenArc 总 API 设置」引导；模型清单照旧如实投影，但那个可用模型不会被自动选中。
+ *   旧期望里的「生图清单必须为空」「文本下拉此刻仍可选」两条与新契约相反，已按新契约改成更精确的判定。*/
 const N_GUIDE_TEXT = "打开 OpenArc 总 API 设置";
 const N_UNCONFIGURED_TEXT = {
   "chat": "未配置（OpenArc 总 API 设置里没有可用的文本模型）",
@@ -910,7 +923,7 @@ const N_FAKE_CHAT_LABEL = "gpt-4o-mini";
 const N_MODEL_SOURCE_KEYS = ["canvas_custom_image_models", "canvas_image_models_ordered", "canvas_chat_models_ordered"];
 const N_PROVIDER_KEYS = ["chat_models", "enabled", "id", "image_models", "name", "video_models"];
 /** 下拉的完整事实（class / disabled / aria / unconfigured / unavailable / 当前值 / 每个 option 的 value+text）。*/
-const N_SEL_INFO = "const selInfo = (sel) => sel ? { cls: String(sel.className), disabled: !!sel.disabled, aria: sel.getAttribute('aria-disabled'), unconfigured: sel.getAttribute('data-openarc-unconfigured'), unavailable: sel.getAttribute('data-openarc-unavailable'), value: String(sel.value), options: Array.from(sel.options).map(o => ({ value: String(o.value), text: String(o.textContent).trim() })) } : null;";
+const N_SEL_INFO = "const selInfo = (sel) => sel ? { cls: String(sel.className), disabled: !!sel.disabled, aria: sel.getAttribute('aria-disabled'), unconfigured: sel.getAttribute('data-openarc-unconfigured'), defaultUnavailable: sel.getAttribute('data-openarc-default-unavailable'), unavailable: sel.getAttribute('data-openarc-unavailable'), value: String(sel.value), options: Array.from(sel.options).map(o => ({ value: String(o.value), text: String(o.textContent).trim() })) } : null;";
 const nSelBrief = (s) => (s ? { disabled: s.disabled, aria: s.aria, unconfigured: s.unconfigured, unavailable: s.unavailable, value: s.value, texts: s.options.map((o) => o.text) } : null);
 
 /** 探针节点：生图 / 视频节点在 A 系列里还不存在，临时加进来才能看到守卫在**真实渲染**上的 DOM 契约；
@@ -958,6 +971,15 @@ function nFakeScanLines(reLiteral) {
 const nSelOk = (s, cap) => !!s && s.disabled === true && s.aria === "true" && s.unconfigured === cap && s.unavailable === null && s.options.length === 1 && s.options[0].value === "" && s.options[0].text === N_UNCONFIGURED_TEXT[cap];
 const nVideoSelOk = (s) => !!s && s.disabled === true && s.aria === "true" && s.unavailable === "video-generation" && s.unconfigured === null && s.options.length === 1 && s.options[0].value === "" && s.options[0].text === N_VIDEO_TEXT;
 const nAvailSel = (s, list) => !!s && s.disabled === false && !s.unconfigured && !s.unavailable && s.options.length >= 1 && s.options.every((o) => o.value !== "" && list.includes(o.value)) && list.includes(String(s.value));
+/** 显式配置的默认模型不可用时的呈现（本批产品契约修订）：与"未配置"同一套可见口径
+ *  （disabled + aria-disabled + data-openarc-unconfigured + 唯一「未配置…」占位）**并且**多一个
+ *  data-openarc-default-unavailable=<cap> 把原因分开；select.value 为空 = 没有自动选中清单里的别的模型。*/
+const nDefaultDownSel = (s, cap) => !!s && s.disabled === true && s.aria === "true" && s.unconfigured === cap && s.unavailable === null
+  && s.defaultUnavailable === cap && s.options.length === 1 && s.options[0].value === "" && s.options[0].text === N_UNCONFIGURED_TEXT[cap] && String(s.value) === "";
+/** 运行按钮被守卫按能力禁用（disabled + aria-disabled + data-openarc-blocked=<cap>）。*/
+const nBlockedRun = (r, cap) => !!r && r.disabled === true && r.aria === "true" && r.blocked === cap;
+/** 说明行：点名「默认不可用」+ 真实原因（缺能力/停用/不存在/未授权）+ 可点的「打开 OpenArc 总 API 设置」。*/
+const nReasonNote = (n) => !!n && /默认不可用/.test(String(n.text)) && /没有这个能力|停用|不存在|未被授权使用/.test(String(n.text)) && n.guide === true && n.guideText === N_GUIDE_TEXT;
 
 /** N5 状态点：读一次真源 + DOM + 节点当前模型（同一次读取里的 fetch('/api/config') 就是页面重读真源的动作，
  *  守卫按这次响应更新事实 → providers-changed → 上游 refreshCanvasConfigFromSettings + render → 守卫再扫一遍）。*/
@@ -967,26 +989,44 @@ const nModelArea = () => inFrame(canvasFrame(), [
   "const it = window.__openarcCanvasInternals;",
   "const node = (id) => { try { const n = it.primitives.getNode(id); return n ? { provider: String(n.apiProvider || n.llmProvider || ''), model: String(n.model || '') } : null; } catch (e) { return null; } };",
   "const chip = document.querySelector('.canvas-nav-meta [data-openarc-model-status]');",
+  // 显式默认的可用性事实（产品契约：defaultUsable/defaultReason）+ 运行按钮 + 说明行（原因与引导）。
+  "const caps = cfg.capabilities || {};",
+  "const runOf = (nodeId, cls) => { const n = document.querySelector('.node[data-id=' + nodeId + ']'); const b = n ? n.querySelector('.' + cls) : null; return b ? { cls: String(b.className), blocked: b.getAttribute('data-openarc-blocked'), disabled: !!b.disabled, aria: b.getAttribute('aria-disabled'), title: String(b.title || '').slice(0, 90) } : null; };",
+  "const noteOf = (nodeId, cap) => { const n = document.querySelector('.node[data-id=' + nodeId + ']'); const p = n ? n.querySelector('[data-openarc-guard-note=' + cap + ']') : null; if (!p) return null; const g = p.querySelector('[data-openarc-open-model-settings]'); return { text: String((p.querySelector('.openarc-guard-note-text') || {}).textContent || '').trim(), guide: !!g, guideText: g ? String(g.textContent).trim() : null }; };",
   "return { chip: chip ? chip.getAttribute('data-openarc-model-status') : null,",
   "  chipText: String((chip && chip.querySelector('.openarc-model-status-text') || {}).textContent || '').trim(),",
+  "  caps: { chat: caps.chat || null, image: caps['image-generation'] || null },",
   "  chat: { provider: selInfo(document.querySelector('.llm-provider-select')), model: selInfo(document.querySelector('.llm-model')) },",
   "  image: { provider: selInfo(document.querySelector('.generator-body .provider-select')), model: selInfo(document.querySelector('.generator-body .model-select')) },",
+  "  chatRun: runOf('n_llm', 'llm-run'), imageRun: runOf('n_gen', 'gen-btn'),",
+  "  chatNote: noteOf('n_llm', 'chat'), imageNote: noteOf('n_gen', 'image-generation'),",
   "  nodes: { llm: node('n_llm'), gen: node('n_gen') },",
   "  manifest: { chat: cfg.chat_models || [], image: cfg.image_models || [], providers: (cfg.api_providers || []).map(function (p) { return String(p.id); }) } };",
 ].join("\n"));
-/** want：unavailable-all（撤权：文本+生图都不可用）| available-all | image-unavailable（跨能力）| chat-model-removed（停用某个模型）。*/
+/** want：unavailable-all（撤权：文本+生图都不可用）| available-all |
+ *  image-unavailable（跨能力：生图显式默认不可用，label = 那个仍可用、但**不该被自动选中**的生图模型标签）|
+ *  chat-model-removed（停用**显式配置的文本默认**：label = 被停用模型标签）。*/
 function nModelAreaOk(want, snap, label) {
   if (!snap || snap.__noFrame || snap.__error) return false;
   const chat = snap.manifest.chat || [], image = snap.manifest.image || [];
   if (want === "unavailable-all") return snap.chip === "unconfigured" && chat.length === 0 && image.length === 0 && nSelOk(snap.chat.model, "chat") && nSelOk(snap.image.model, "image-generation");
   if (want === "available-all") return snap.chip === "ok" && chat.length > 0 && image.length > 0 && nAvailSel(snap.chat.model, chat) && nAvailSel(snap.image.model, image);
-  if (want === "image-unavailable") return snap.chip === "unconfigured" && image.length === 0 && nSelOk(snap.image.model, "image-generation") && nAvailSel(snap.chat.model, chat);
+  // 跨能力（生图默认被指到只有 chat 的模型）：产品契约修订后**不再要求生图清单为空**（清单照旧如实投影，
+  // 不向页面隐瞒真源），而是要求「默认不可用」口径 + 那个可用生图模型仍在清单里、但没被自动选中（label = 生图默认模型标签）。
+  if (want === "image-unavailable") return snap.chip === "unconfigured"
+    && !!snap.caps && !!snap.caps.image && snap.caps.image.defaultUsable === false && snap.caps.image.defaultReason === "CAPABILITY_UNAVAILABLE"
+    && image.length > 0 && (!label || image.includes(label))
+    && nDefaultDownSel(snap.image.model, "image-generation") && nBlockedRun(snap.imageRun, "image-generation") && nReasonNote(snap.imageNote)
+    && chat.length > 0 && !!snap.caps.chat && snap.caps.chat.defaultUsable === true && nAvailSel(snap.chat.model, chat);
   if (want === "chat-model-removed") {
     const goneFromManifest = !chat.includes(label) && !image.includes(label);
     const goneFromDom = !(snap.chat.model && snap.chat.model.options.some((o) => o.value === label));
     const goneFromNode = !(snap.nodes && snap.nodes.llm && snap.nodes.llm.model === label);
     if (!(goneFromManifest && goneFromDom && goneFromNode)) return false;
-    return chat.length ? nAvailSel(snap.chat.model, chat) : nSelOk(snap.chat.model, "chat");
+    // 被停用的正是**显式配置的文本默认**：产品契约修订 = 文本区按"默认不可用"呈现（不回落、不换模型），
+    // 而不是自动改用清单里剩下的那个模型。三条 0 命中判定原样保留，只把"下拉此刻仍可选"换成更精确的呈现。
+    return snap.chip === "unconfigured" && !!snap.caps && !!snap.caps.chat && snap.caps.chat.defaultUsable === false && snap.caps.chat.defaultReason === "MODEL_DISABLED"
+      && nDefaultDownSel(snap.chat.model, "chat") && nBlockedRun(snap.chatRun, "chat") && nReasonNote(snap.chatNote);
   }
   return false;
 }
@@ -1001,11 +1041,19 @@ async function nWaitModelArea(want, label, timeout = 20000) {
   }
   return { ok: false, want: want, reads: reads, waitedMs: Date.now() - t0, snap: snap };
 }
+/** 证据摘要（断言之外的"一眼可读"字段）：默认不可用原因码、两个标记、运行按钮、说明行、select.value 与清单。*/
 const nSnapBrief = (r) => (r ? {
   ok: r.ok, want: r.want, waitedMs: r.waitedMs, reads: r.reads, chip: r.snap && r.snap.chip, chipText: r.snap && r.snap.chipText,
-  chat: r.snap && r.snap.chat.model && { disabled: r.snap.chat.model.disabled, unconfigured: r.snap.chat.model.unconfigured, value: r.snap.chat.model.value, options: r.snap.chat.model.options.map((o) => o.value) },
-  image: r.snap && r.snap.image.model && { disabled: r.snap.image.model.disabled, unconfigured: r.snap.image.model.unconfigured, value: r.snap.image.model.value, options: r.snap.image.model.options.map((o) => o.value) },
+  defaultFacts: r.snap && r.snap.caps ? {
+    chat: r.snap.caps.chat && { usable: r.snap.caps.chat.defaultUsable, reason: r.snap.caps.chat.defaultReason },
+    image: r.snap.caps.image && { usable: r.snap.caps.image.defaultUsable, reason: r.snap.caps.image.defaultReason },
+  } : null,
+  chat: r.snap && r.snap.chat.model && { disabled: r.snap.chat.model.disabled, aria: r.snap.chat.model.aria, unconfigured: r.snap.chat.model.unconfigured, defaultUnavailable: r.snap.chat.model.defaultUnavailable, value: r.snap.chat.model.value, options: r.snap.chat.model.options.map((o) => o.value) },
+  image: r.snap && r.snap.image.model && { disabled: r.snap.image.model.disabled, aria: r.snap.image.model.aria, unconfigured: r.snap.image.model.unconfigured, defaultUnavailable: r.snap.image.model.defaultUnavailable, value: r.snap.image.model.value, options: r.snap.image.model.options.map((o) => o.value) },
+  chatRun: r.snap && r.snap.chatRun, imageRun: r.snap && r.snap.imageRun,
+  chatNote: r.snap && r.snap.chatNote, imageNote: r.snap && r.snap.imageNote,
   llmModel: r.snap && r.snap.nodes && r.snap.nodes.llm && r.snap.nodes.llm.model,
+  genModel: r.snap && r.snap.nodes && r.snap.nodes.gen && r.snap.nodes.gen.model,
   manifest: r.snap && r.snap.manifest && { chat: r.snap.manifest.chat, image: r.snap.manifest.image },
 } : null);
 
