@@ -163,7 +163,10 @@
   --space-8: 32px;
 
   /* ── Motion ───────────────────────────────────────────────────────────
-     时长三档。slow 仅在确有必要时使用（目前未使用）。 */
+     时长四档。slow 仅在确有必要时使用（目前未使用）。
+     feedback 是 MOTION_SYSTEM §2 的 duration.feedback（按下、颜色、短反馈），
+     按本文件"需要新值就先在这里加"的口径补齐 —— 组件不再写 100ms 字面值。 */
+  --dur-feedback: 100ms;
   --dur-quick: 160ms;
   --dur-standard: 220ms;
   --dur-slow: 320ms;
@@ -351,6 +354,7 @@
    硬要求：**功能不能依赖动画结束**。任何 transitionend 回调都不得作为
    状态推进的唯一路径（否则 reduced 下功能会卡死）。 */
 .reduced {
+  --dur-feedback: 0ms;
   --dur-quick: 0ms;
   --dur-standard: 0ms;
   --dur-slow: 0ms;
@@ -365,6 +369,7 @@
 /* 系统级 Reduce Motion 与产品内开关走同一套结果 */
 @media (prefers-reduced-motion: reduce) {
   :root {
+    --dur-feedback: 0ms;
     --dur-quick: 0ms;
     --dur-standard: 0ms;
     --dur-slow: 0ms;

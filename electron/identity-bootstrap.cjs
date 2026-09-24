@@ -19,6 +19,7 @@ const { createDeviceBundle, registerDeviceIpc } = require("./device-bootstrap.cj
 const { createResourceBundle, registerResourceIpc } = require("./resource-bootstrap.cjs");
 const { createGovernanceBundle, registerGovernanceIpc } = require("./governance-bootstrap.cjs");
 const { createModelBundle, registerModelIpc } = require("./model-bootstrap.cjs");
+const { createMcpBundle } = require("./mcp-bootstrap.cjs");
 const { createCanvasBundle } = require("./canvas-bootstrap.cjs");
 const { createTaskBundle } = require("./task-bootstrap.cjs");
 const { createSideEffectGateway, registerSideEffectIpc } = require("./side-effect-bootstrap.cjs");
@@ -91,6 +92,16 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
     safeStorage,
     logger: log,
   });
+  // D5-03 第一批：MCP 中心（连接记录 + 凭据元数据 + 会话日志；复用同一连接与 AuthorizationService）。
+  // 真实握手用的受控 launcher 由 mcp-bootstrap 按运行环境选择（Electron main = utilityProcess）。
+  const { mcpStore, mcpService, seedMcpAppPolicy } = createMcpBundle({
+    identityStore: store,
+    authorization,
+    authStore,
+    userDataDir,
+    safeStorage,
+    logger: log,
+  });
   // D4-02A：Task Runtime 持久权威（复用同一连接与 AuthorizationService；启动即 recovery）。
   // D4-03C4：唯一 side-effect production assembly（Registry → Proxy → Authority → Supervisor → Runtime）。
   const { taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, orchestrator } = createTaskBundle({
@@ -123,6 +134,7 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
       if (!teamId) return;
       const admin = store.allUsers().find((u) => u.role === "ADMIN" && u.team_id === teamId) || null;
       seedModelAppPolicy({ organizationId: teamId, grantedBy: admin ? admin.id : "system:model-baseline" });
+      seedMcpAppPolicy({ organizationId: teamId, grantedBy: admin ? admin.id : "system:mcp-baseline" });
     });
   } catch { /* ignore */ }
 
@@ -132,7 +144,7 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
 
   // Trusted Approval Gateway：Renderer 只能经此通道看到安全投影并提交 decision。
   const sideEffectGateway = createSideEffectGateway({ sideEffectRuntime });
-  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, modelStore, credentialStore, modelService, modelProxy, taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, sideEffectGateway, orchestrator, browserControl, canvasDocService };
+  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, modelStore, credentialStore, modelService, modelProxy, mcpStore, mcpService, taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, sideEffectGateway, orchestrator, browserControl, canvasDocService };
 }
 
 /**

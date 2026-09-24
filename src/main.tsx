@@ -70,6 +70,7 @@ import { GovernanceApp } from "./governance/GovernanceApp";
 import { FilesApp } from "./governance/FilesApp";
 import { CanvasHost } from "./canvas/CanvasHost";
 import { ProjectsApp } from "./governance/ProjectsApp";
+import { McpCenter } from "./mcp/McpCenter";
 import { ApprovalPrompt } from "./approval/ApprovalPrompt";
 import { errorText } from "./identity/types";
 import { Avatar } from "./identity/Avatar";
@@ -144,6 +145,10 @@ declare global {
         command: (cmd: Record<string, unknown>) => Promise<Record<string, unknown>>;
       };
       model?: {
+        command: (cmd: Record<string, unknown>) => Promise<Record<string, unknown>>;
+      };
+      /** D5-03 第一批 MCP 桥：唯一入口 mcp.command(...)，命令白名单与 sessionRef 在主进程。 */
+      mcp?: {
         command: (cmd: Record<string, unknown>) => Promise<Record<string, unknown>>;
       };
       sideEffect?: {
@@ -351,6 +356,9 @@ const apps = [
   { id: "projects", name: "项目", icon: "folder" },
   { id: "organization", name: "组织治理", icon: "settings" },
   { id: "skills", name: "Skill 中心", icon: "shortcuts" },
+  // MCP 中心（D5-03 第一批：连接管理与能力发现，不开放工具调用）。
+  // 图标复用既有图标集里的 shortcuts：与 canvas/browser 同风格，不为它新增图标资产。
+  { id: "mcp-center", name: "MCP 中心", icon: "shortcuts" },
   { id: "settings", name: "系统设置", icon: "settings" },
   // 系统级回收站：固定在程序坞分隔线右侧（见 components.tsx 的 Dock）。
   // 图标用 macOS 原生 trashempty / trashfull（见 public/icons/trash.png 与 trash-full.png）。
@@ -2645,6 +2653,7 @@ function App() {
         />
       );
     if (w?.appId === "projects") return <ProjectsApp />;
+    if (w?.appId === "mcp-center") return <McpCenter role={identity.snapshot.role} />;
     if (w?.appId === "organization") return <GovernanceApp />;
     if (w?.appId === "settings")
       return (

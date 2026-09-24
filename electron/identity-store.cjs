@@ -54,11 +54,13 @@ const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domai
  * 集成分支上两条线各自用了同一批版本号，合并后按"核心线编号不动、集成线顺延"排：
  *   v17（核心线 D5-02）：canvas_boards 文档层 + canvas_shares / canvas_commands；
  *   v18（核心线 D5-02 Closure）：canvas_runs（一次生成 = 一个 Task）；
- *   v19（UI/D3-01b 集成线）：users 增加 avatar_ref TEXT（可空），承载显示名之外的资料字段。
+ *   v19（UI/D3-01b 集成线）：users 增加 avatar_ref TEXT（可空），承载显示名之外的资料字段；
+ *   v20（D5-03 第一批 · MCP 中心）：mcp_connections 连接记录 + mcp_credentials 凭据元数据
+ *        + mcp_connection_logs 测试日志（raw secret 只进 OS 安全后端，库里只有 credential_ref）。
  * 核心线已升到 v18 的库继续往上走 v19（avatar_ref 幂等补列）；
  * 集成线已升到 v17 的库补跑 v18/v19（画布文档层与运行归属表）。
  */
-const SCHEMA_VERSION = 19;
+const SCHEMA_VERSION = 20;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -1194,6 +1196,76 @@ CREATE TABLE IF NOT EXISTS canvas_runs (
 CREATE INDEX IF NOT EXISTS idx_canvas_runs ON canvas_runs(canvas_id, started_at DESC);
 `;
 
+
+/**
+ * D5-03 第一批 v20：MCP 中心（连接管理 + 能力发现）。
+ *
+ * 三张表各管一件事：
+ *   mcp_connections       —— 连接的**唯一权威记录**（含能力/工具快照与状态机字段）
+ *   mcp_credentials       —— 凭据元数据，与 model_credentials 同形但**独立命名空间**
+ *                            （MCP 的凭据不会出现在模型凭据查询里）；raw secret 只进 safeStorage
+ *   mcp_connection_logs   —— 连接/测试日志（有界保留），支撑 UI 的"测试日志"面板
+ *
+ * 工具描述属于**能力数据**：tools_json 只在有 mcp.view 权限时被投影出去（无权时连 hash 都不给）。
+ * status 的 CHECK 与 mcp-domain 的状态机一一对应，数据库层挡掉非法状态写入。
+ *
+ * DDL 全部 IF NOT EXISTS：与 v17/v18 同样**重放安全** —— 回归用例会"降级 user_version 再重放
+ * 迁移链"（模拟旧库升级），非幂等的 CREATE TABLE 会让那类用例直接报 table already exists。
+ */
+const SCHEMA_V20_SQL = `
+CREATE TABLE IF NOT EXISTS mcp_connections (
+  connection_id     TEXT PRIMARY KEY,
+  organization_id   TEXT NOT NULL,
+  owner_user_id     TEXT,
+  visibility        TEXT NOT NULL CHECK (visibility IN ('PERSONAL','ORGANIZATION')) DEFAULT 'PERSONAL',
+  name              TEXT NOT NULL,
+  transport         TEXT NOT NULL CHECK (transport IN ('stdio','http')),
+  location          TEXT NOT NULL CHECK (location IN ('LOCAL_DEVICE','REMOTE_SERVICE')),
+  endpoint_json     TEXT NOT NULL,
+  auth_mode         TEXT NOT NULL CHECK (auth_mode IN ('NONE','BEARER')) DEFAULT 'NONE',
+  credential_ref    TEXT,
+  enabled           INTEGER NOT NULL CHECK (enabled IN (0,1)) DEFAULT 0,
+  status            TEXT NOT NULL CHECK (status IN ('DISABLED','CONNECTING','READY','ERROR','AUTH_REQUIRED')) DEFAULT 'DISABLED',
+  last_error_code   TEXT,
+  protocol_version  TEXT,
+  server_name       TEXT,
+  server_version    TEXT,
+  capabilities_json TEXT NOT NULL DEFAULT '{}',
+  tools_json        TEXT NOT NULL DEFAULT '[]',
+  tools_hash        TEXT,
+  created_at        INTEGER NOT NULL,
+  updated_at        INTEGER NOT NULL,
+  last_connected_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_connections_org ON mcp_connections(organization_id, visibility);
+CREATE INDEX IF NOT EXISTS idx_mcp_connections_owner ON mcp_connections(owner_user_id, visibility);
+
+CREATE TABLE IF NOT EXISTS mcp_credentials (
+  credential_ref     TEXT PRIMARY KEY,
+  owner_user_id      TEXT NOT NULL,
+  organization_id    TEXT NOT NULL,
+  scope              TEXT NOT NULL CHECK (scope IN ('PERSONAL','ORGANIZATION')) DEFAULT 'PERSONAL',
+  provider_origin    TEXT NOT NULL,
+  provider_config_id TEXT,
+  credential_version INTEGER NOT NULL DEFAULT 1,
+  status             TEXT NOT NULL CHECK (status IN ('CONFIGURED','MISSING','DELETED')) DEFAULT 'CONFIGURED',
+  created_at         INTEGER NOT NULL,
+  updated_at         INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_credentials_owner ON mcp_credentials(owner_user_id);
+
+CREATE TABLE IF NOT EXISTS mcp_connection_logs (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  connection_id TEXT NOT NULL,
+  at            INTEGER NOT NULL,
+  level         TEXT NOT NULL,
+  event         TEXT NOT NULL,
+  error_code    TEXT,
+  detail        TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_connection_logs ON mcp_connection_logs(connection_id, at DESC, id DESC);
+`;
+
 const MIGRATIONS = Object.freeze([
   { version: 1, sql: SCHEMA_SQL },
   { version: 2, sql: SCHEMA_V2_SQL },
@@ -1228,6 +1300,7 @@ const MIGRATIONS = Object.freeze([
       if (!hasRuns) db.exec(SCHEMA_V18_SQL);
     },
   },
+  { version: 20, sql: SCHEMA_V20_SQL },
 ]);
 
 const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000; // 12h 绝对上限
@@ -2449,6 +2522,7 @@ module.exports = {
   SCHEMA_V7_SQL,
   SCHEMA_V8_SQL,
   SCHEMA_V9_SQL,
+  SCHEMA_V20_SQL,
   MIGRATIONS,
   IdentityStore,
   DEFAULT_TTL_MS,

@@ -3552,3 +3552,404 @@ label {
   margin-top: 2px;
   color: var(--text);
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   D5-03 第一批 · MCP 中心（连接管理与能力发现）
+
+   只用 token：颜色走 --text / --muted / --failed / --sunken / --content-rgb，
+   间距走 --space-*，圆角走 --radius-*，时长走 --dur-*。
+   分层靠明度差与留白，不靠发丝线框 —— 唯一的 1px 线在工具表上，
+   属 DESIGN_SYSTEM §3.2 明确允许的"表格线"（另一处是表单控件边界）。
+   ══════════════════════════════════════════════════════════════════════════ */
+.mcp-center {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  color: var(--text);
+}
+.mcp-banner {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4) 0;
+}
+.mcp-banner__row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.mcp-banner__title {
+  margin: 0;
+  font-size: var(--fs-heading);
+  font-weight: var(--fw-medium);
+}
+.mcp-muted {
+  margin: 0;
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+.mcp-hint {
+  font-size: var(--fs-micro);
+  color: var(--muted);
+  line-height: var(--lh-normal);
+}
+.mcp-error {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: rgb(var(--failed-rgb) / 0.12);
+  color: var(--failed);
+  font-size: var(--fs-caption);
+  /* MS §7 failed：错误图标与具体说明 100ms */
+  animation: mcp-feedback-in var(--dur-feedback) var(--ease-standard);
+}
+.mcp-notice {
+  margin: 0;
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+.mcp-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  word-break: break-all;
+}
+.mcp-subhead {
+  margin: var(--space-3) 0 var(--space-1);
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+
+/* ── 两栏：连接列表 / 详情（PLAN §22「连接列表、配置详情、能力表、测试日志」）── */
+.mcp-split {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 264px) minmax(0, 1fr);
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+}
+.mcp-list-pane,
+.mcp-detail-pane {
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+}
+.mcp-list-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.mcp-pane-head,
+.mcp-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.mcp-pane-head h3,
+.mcp-section-head h4 {
+  margin: 0;
+}
+.mcp-pane-head {
+  padding-bottom: var(--space-2);
+}
+.mcp-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.mcp-row {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  background: var(--sunken);
+  text-align: left;
+  cursor: var(--cursor-arrow, default);
+  transition: background var(--dur-quick) var(--ease-standard);
+}
+.mcp-row:hover {
+  background: rgb(var(--text-rgb) / 0.08);
+}
+/* 选中 = 背景明度 + 左侧标记两个通道，不只靠颜色深浅（DESIGN_SYSTEM §3）。
+   与 .split-nav[aria-current] 同一族取值，不引入新色。 */
+.mcp-row[aria-pressed="true"] {
+  background: rgb(var(--text-rgb) / 0.14);
+  box-shadow: inset 2px 0 0 rgb(var(--text-rgb) / 0.5);
+}
+.mcp-row[disabled] {
+  cursor: default;
+}
+/* MS §5 列表插入：opacity 0→1，y 4→0，160ms；只动画新增可见行。
+   初始态写在 keyframes 里，减少动态效果下 animation:none 直接呈现终态。 */
+.mcp-row.is-new {
+  animation: mcp-row-in var(--dur-quick) var(--ease-standard);
+}
+/* MS §5 列表删除：opacity 1→0，后续行移位；正在离开的行立刻停止接收业务点击（MS §3）。 */
+.mcp-row.is-leaving {
+  animation: mcp-row-out var(--dur-quick) var(--ease-standard) forwards;
+  pointer-events: none;
+}
+@keyframes mcp-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-1));
+  }
+}
+@keyframes mcp-row-out {
+  to {
+    opacity: 0;
+    transform: translateY(calc(-1 * var(--space-1)));
+  }
+}
+.mcp-row__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.mcp-row__top strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-medium);
+}
+.mcp-row__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  font-size: var(--fs-micro);
+  color: var(--muted);
+}
+.mcp-status {
+  transition:
+    background-color var(--dur-feedback) var(--ease-standard),
+    color var(--dur-feedback) var(--ease-standard);
+}
+.mcp-role-note {
+  margin: 0;
+  font-size: var(--fs-micro);
+  color: var(--muted);
+  line-height: var(--lh-normal);
+}
+@keyframes mcp-feedback-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* ── 详情 ─────────────────────────────────────────────────────────────── */
+/* MS §5 页面切换：opacity .6→1，y 4→0，160ms（换连接时 key 变化重放一次）。 */
+.mcp-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  animation: mcp-page-in var(--dur-quick) var(--ease-standard);
+}
+@keyframes mcp-page-in {
+  from {
+    opacity: 0.6;
+    transform: translateY(var(--space-1));
+  }
+}
+.mcp-detail__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.mcp-detail__title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.mcp-detail__title h3 {
+  margin: 0;
+}
+.mcp-detail__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+.mcp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.mcp-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.mcp-kv {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-1) var(--space-4);
+  font-size: var(--fs-caption);
+}
+.mcp-kv dt {
+  color: var(--muted);
+}
+.mcp-kv dd {
+  margin: 0;
+  min-width: 0;
+}
+.mcp-kv-inline {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  font-size: var(--fs-caption);
+}
+.mcp-caps,
+.mcp-logs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--fs-caption);
+}
+.mcp-caps li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+}
+.mcp-cap__flag {
+  color: var(--muted);
+}
+.mcp-tools {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-caption);
+}
+.mcp-tools th {
+  text-align: left;
+  font-weight: var(--fw-medium);
+  color: var(--muted);
+  padding: var(--space-2);
+  background: var(--sunken);
+}
+.mcp-tools td {
+  padding: var(--space-2);
+  vertical-align: top;
+  border-bottom: 1px solid var(--line);
+}
+.mcp-tools tr:last-child td {
+  border-bottom: 0;
+}
+.mcp-tool__name {
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+.mcp-denied {
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: var(--fs-caption);
+}
+.mcp-auth {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  background: var(--sunken);
+  animation: mcp-feedback-in var(--dur-feedback) var(--ease-standard);
+}
+.mcp-auth__title {
+  margin: 0;
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-medium);
+}
+/* 发现工具中：真实握手进行中的活动指示 + 当前阶段，不伪造百分比（MS §7） */
+.mcp-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+  font-size: var(--fs-caption);
+  color: var(--muted);
+  animation: mcp-feedback-in var(--dur-feedback) var(--ease-standard);
+}
+.mcp-log {
+  display: grid;
+  grid-template-columns: max-content max-content max-content max-content minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  align-items: baseline;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+}
+.mcp-log__time,
+.mcp-log__level,
+.mcp-log__result {
+  color: var(--muted);
+  white-space: nowrap;
+}
+.mcp-log__message {
+  min-width: 0;
+  word-break: break-word;
+}
+.mcp-log__raw {
+  grid-column: 1 / -1;
+  font-size: var(--fs-micro);
+  color: var(--muted);
+}
+
+/* ── 对话框表单 ───────────────────────────────────────────────────────── */
+.mcp-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.mcp-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--fs-caption);
+}
+.mcp-field > span {
+  color: var(--muted);
+}
+.mcp-field select {
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+  color: var(--text);
+  font-size: var(--fs-secondary);
+}
+
+/* 窄窗口（560—799px 档）：列表在上、详情的空间优先，两栏改上下堆叠。
+   容器查询按窗口自身宽度响应（.window 已声明 container-type: inline-size）。 */
+@container (max-width: 860px) {
+  .mcp-split {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 38%) minmax(0, 1fr);
+  }
+}
+

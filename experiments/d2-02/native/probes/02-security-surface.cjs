@@ -44,6 +44,13 @@
  *   `<userData>/files/.trash/`，folderId 与 id 仍过 [A-Za-z0-9_-] 白名单；purge / restore
  *   只认回收站索引里记录过的条目，渲染进程伪造 id 只会得到 NOT_FOUND。
  *   仍然没有暴露 fs / path / shell，也没有任意路径删除。
+ *
+ * **D5-03 变更（显式登记）**：暴露面 16 → 17，新增 `mcp` 与通道 `mcp:command`。
+ *   新增内容 = **一个受控 MCP Command 方法** mcp.command(cmd)（list / get / create / update /
+ *   delete / setEnabled / connect / reconnect / test / testLog）。**没有** raw credential /
+ *   credentialRef / 本机路径 / 子进程句柄 / raw HTTP / raw SQL；本地连接只接受白名单
+ *   serverKey，程序与参数由主进程固定映射（未知 key 一律 MCP_LOCAL_SERVER_NOT_ALLOWED）。
+ *   本批不开放工具调用：任何调用入口明确回 MCP_TOOL_INVOCATION_NOT_ENABLED。
  */
 const { BrowserWindow, WebContentsView, session, app } = require("electron");
 const http = require("node:http");
@@ -66,16 +73,16 @@ try {
 
 /**
  * 冻结清单 —— 与 electron/preload.cjs 的现状逐字对应。
- * 集成后 = 核心线（identity/authorization/device/resource/governance/model/task/sideEffect/browser/canvas）
- *        + UI 线文件桥 files，共 16 个。
- * browser/canvas 是核心线 D5-01 / D5-02 的桥键：它们同样必须逐个登记在 REGISTERED_EXPANSIONS，
+ * 集成后 = 核心线（identity/authorization/device/resource/governance/model/task/sideEffect/browser/canvas/mcp）
+ *        + UI 线文件桥 files，共 17 个。
+ * browser/canvas/mcp 是核心线 D5-01 / D5-02 / D5-03 的桥键：它们同样必须逐个登记在 REGISTERED_EXPANSIONS，
  * 并按 sec.bridgeExposesNoRawIpc 与各通道 trusted() 守卫两条否决用例一起审。
  */
-const FROZEN_BRIDGE_KEYS = ["action", "authorization", "browser", "canvas", "device", "files", "governance", "identity", "model", "navigate", "onDisplay", "onNativeState", "resource", "sideEffect", "sync", "task"];
+const FROZEN_BRIDGE_KEYS = ["action", "authorization", "browser", "canvas", "device", "files", "governance", "identity", "mcp", "model", "navigate", "onDisplay", "onNativeState", "resource", "sideEffect", "sync", "task"];
 /** D2-02 冻结的历史基线（5 个）：新增成员必须逐个登记在 REGISTERED_EXPANSIONS。 */
 const PREV_BRIDGE_KEYS = ["action", "navigate", "onDisplay", "onNativeState", "sync"];
 /** 相对 D2-02 基线的全部已登记扩张（顺序与 sorted bridgeKeys 的差集一致）。 */
-const REGISTERED_EXPANSIONS = ["authorization", "browser", "canvas", "device", "files", "governance", "identity", "model", "resource", "sideEffect", "task"];
+const REGISTERED_EXPANSIONS = ["authorization", "browser", "canvas", "device", "files", "governance", "identity", "mcp", "model", "resource", "sideEffect", "task"];
 /**
  * 冻结的 IPC 通道。
  *
@@ -107,6 +114,7 @@ const FROZEN_IPC_CHANNELS = [
   "files:trashRestore",
   "governance:command",
   "identity:command",
+  "mcp:command",
   "model:command",
   "resource:command",
   "sideeffect:command",
@@ -119,7 +127,7 @@ const FROZEN_IPC_CHANNELS = [
  */
 const FROZEN_IPC_ON_CHANNELS = ["files:startDrag"];
 /** 扫描范围必须覆盖所有注册 handler 的 bootstrap，否则冻结清单可以靠"漏扫"骗过。 */
-const IPC_SCAN_FILES = ["main.cjs", "identity-bootstrap.cjs", "authorization-bootstrap.cjs", "device-bootstrap.cjs", "resource-bootstrap.cjs", "governance-bootstrap.cjs", "model-bootstrap.cjs", "task-bootstrap.cjs", "side-effect-bootstrap.cjs", "canvas-bootstrap.cjs"];
+const IPC_SCAN_FILES = ["main.cjs", "identity-bootstrap.cjs", "authorization-bootstrap.cjs", "device-bootstrap.cjs", "resource-bootstrap.cjs", "governance-bootstrap.cjs", "model-bootstrap.cjs", "mcp-bootstrap.cjs", "task-bootstrap.cjs", "side-effect-bootstrap.cjs", "canvas-bootstrap.cjs"];
 /** D3-02 冻结的版本（7 个，仅作历史留痕）。 */
 const D3_02_BRIDGE_KEYS = ["action", "authorization", "identity", "navigate", "onDisplay", "onNativeState", "sync"];
 /** D3-01 冻结的版本（6 个，仅作历史留痕）。 */

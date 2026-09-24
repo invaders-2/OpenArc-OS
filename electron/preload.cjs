@@ -112,6 +112,17 @@ contextBridge.exposeInMainWorld("openarc", {
     command: (command) => ipcRenderer.invoke("model:command", command),
   },
   /**
+   * D5-03 第一批 MCP 桥。
+   *
+   * 唯一入口 mcp.command(...)；**不暴露** raw credential / credentialRef / 本机路径 /
+   * 子进程句柄 / raw HTTP / raw SQL。本地连接只能给白名单 serverKey（程序与参数由主进程固定映射），
+   * sessionRef 与 appId 由主进程注入，Renderer 自报的 userId/appId/role 一律忽略。
+   * 本批**不开放工具调用**：任何调用入口都会拿到 MCP_TOOL_INVOCATION_NOT_ENABLED。
+   */
+  mcp: {
+    command: (command) => ipcRenderer.invoke("mcp:command", command),
+  },
+  /**
    * D5-02 画布桥（只给 OpenArc 宿主窗口，**画布页面本身拿不到**：它跑在 sandbox iframe 里）。
    *
    * 唯一入口 canvas.command(...)；不暴露文件路径 / 资源字节 / 模型地址 / 凭据。

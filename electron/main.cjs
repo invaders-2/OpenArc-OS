@@ -23,6 +23,8 @@ const { registerIdentityIpc } = require("./identity-bootstrap.cjs");
 // D5-02：无限画布的宿主命令面（文档层实例由 identity-bootstrap 装配，AI 工具用同一个）。
 const { registerCanvasIpc } = require("./canvas-bootstrap.cjs");
 const { registerTaskIpc } = require("./task-bootstrap.cjs");
+// D5-03：MCP 中心的宿主命令面（连接管理 + 能力发现；本批不开放工具调用）。
+const { registerMcpIpc } = require("./mcp-bootstrap.cjs");
 const { createDefaultExecutorLauncher } = require("./executor-launcher.cjs");
 const { createOpenArcRuntime } = require("./runtime-boot.cjs");
 const { createFileService } = require("./file-service.cjs");
@@ -436,6 +438,10 @@ app.whenReady().then(async () => {
       win.webContents.send("sideeffect:event", event);
     },
   });
+
+  // D5-03：MCP 中心（mcp:command 单一通道；sessionRef/appId 由主进程注入，本批不开放工具调用）。
+  // boot 失败时以 service:null 注册，渲染层拿到 mcp-not-ready 的稳定错误，而不是 "No handler registered"。
+  registerMcpIpc({ ipcMain, service: identity?.mcpService ?? null, identity: identity?.service ?? null, isTrusted: trusted });
 
   // 身份 runtime 存在时才注册依赖它的能力；boot 失败时窗口仍照常加载并走 BootRetry。
   if (identity) {
