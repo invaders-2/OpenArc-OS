@@ -1159,6 +1159,108 @@ async function main() {
     "空⇒隐藏（display:none/不占布局/命中落空）；删一本⇒显示（badge = 回收站长度、右下角、命中在 FAB 内）；恢复⇒隐藏；清空⇒隐藏",
     JSON.stringify({ back: f3gBack, list: f3gList, cardsReady: f3gCardsReady, s1: { truth: f3gT1, fab: f3gF1 }, s2: { made: f3gMade, cardUpEvidence: f3gCardUp, del: f3gDel, fabUp: f3gFabUp, truth: f3gT2, fab: f3gF2 }, s3: { open: f3gOpen, panel: f3gPanel, restored: f3gRestored, hidden: f3gHidden3, backInGrid: f3gBackInGrid, truth: f3gT3, fab: f3gF3 }, s4: { del: f3gDel4, fabUp: f3gFabUp4, truthBefore: f3gT4a, fabBefore: f3gF4a, open: f3gOpen4, clearClick: f3gClearClick, confirm: f3gConfirm, hidden: f3gHidden4, truth: f3gT4, fab: f3gF4 } }));
 
+  /* ══════════════════ F3h：卡片菜单的真实产品路径（宿主 sandbox 已放行模态对话 allow-modals） ══════════════════ */
+  // F3g 走的是产品命令层（DELETE /api/canvases/:id + 页面自取回收站），钉的是 FAB 显隐这一条真源；
+  // F3h 钉的是**用户真正点得到的那条入口**：卡片菜单「复制画布 → confirm → 真出副本」「删除 → confirm → 真删
+  // 进回收站 + FAB 出现」「重命名 → prompt 对话框真的弹出」「服务端失败 → alert 真的弹出」。两条路径互不替代。
+  // 修的是什么：宿主 iframe 的 sandbox 少了 allow-modals，Chromium 直接忽略页面里的 confirm/prompt/alert
+  //（src/canvas/CanvasHost.tsx:721 已补上；本块是它的行为证据）。**只新增这一条断言，不改任何既有断言行。**
+  // 对话框策略只在本块内接管：launch() 注册的"一律 dismiss"监听先摘掉、结束时原样装回（行尾 finally）。
+  // （F3g 上方那段注释记的是**修复前**的事实；那段与它的断言都属既有内容，一字未动，两条路径的关系以本段为准。）
+  // 已知宿主边界（如实登记，不是本条失败）：Electron 本身不支持 prompt()（顶层页实测 "prompt() is not supported."，
+  // sandbox 帧里返回 null），所以这里只断言 prompt 对话框**出现**（消息 + 默认值），不断言重命名生效。
+  const f3hSavedDialogListeners = page.listeners("dialog");
+  page.removeAllListeners("dialog");
+  const f3hDialogs = [];
+  const f3hOnDialog = (d) => {
+    const row = { type: d.type(), message: String(d.message()).slice(0, 200), defaultValue: d.defaultValue() };
+    f3hDialogs.push(row);
+    dialogs.push(row.type + ": " + row.message);
+    void d.accept().catch((e) => { row.err = String((e && e.message) || e).slice(0, 120); });
+  };
+  page.on("dialog", f3hOnDialog);
+  let f3hEvidence = null, f3hOk = false;
+  try {
+    const f3hSandbox = await js("const f = document.querySelector('iframe[data-canvas-app-frame]'); return f ? f.getAttribute('sandbox') : null;");
+    const f3hCardSel = (id) => "#cardsGrid .project-card[data-canvas-id=\"" + id + "\"]";
+    const f3hList = () => inFrame(listFrame(), "const fab = document.getElementById('trashFab'); const badge = document.getElementById('trashBadgeV4'); return { cards: Array.from(document.querySelectorAll('#cardsGrid .project-card')).map(function (c) { return { id: c.getAttribute('data-canvas-id'), title: String(((c.querySelector('.card-title') || {}).textContent) || '').trim() }; }), fab: fab ? { hidden: fab.hidden, display: getComputedStyle(fab).display, badge: badge ? String(badge.textContent) : null, badgeDisplay: badge ? getComputedStyle(badge).display : null } : null };");
+    const f3hTrash = () => inFrame(listFrame(), "const res = await fetch('/api/canvases/trash'); const d = await res.json(); return { n: ((d && d.canvases) || []).length };");
+    // 卡片菜单真实入口：先点 .card-more-btn 打开菜单，再点对应 data-action 的菜单项（canvas-list.html:1234-1252）。
+    const f3hMenu = (id, action) => inFrame(listFrame(), "const card = document.querySelector(" + JSON.stringify(f3hCardSel(id)) + "); if (!card) return 'no-card'; const b = card.querySelector('.card-more-btn'); if (b) b.click(); const item = card.querySelector(" + JSON.stringify('.card-more-menu-item[data-action="' + action + '"]') + "); if (!item) return 'no-item'; item.click(); return 'clicked';");
+
+    const f3hTrashBefore = await f3hTrash();
+    const f3hTitle = "F3h 模态对话探针 " + Date.now();
+    const f3hMade = await inFrame(listFrame(), "const res = await fetch('/api/canvases', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: " + JSON.stringify(f3hTitle) + ", icon: '🧩', kind: 'classic', project: 'default', board_x: 40, board_y: 40 }) }); const d = await res.json().catch(function () { return {}; }); const v = document.getElementById('btnViewMore'); if (v) v.click(); return { ok: res.ok, id: (d.canvas || {}).id || null };");
+    const f3hCardUp = f3hMade.ok && f3hMade.id ? await waitFor(async () => (await inFrame(listFrame(), "return !!document.querySelector(" + JSON.stringify(f3hCardSel(f3hMade.id)) + ");")) === true, 20000) : false;
+
+    // ① 复制画布 → confirm（对话框必须真的出现并被 accept）→ 列表真的多出一本「… 副本」
+    const f3hDupFrom = f3hDialogs.length;
+    const f3hDupClick = await f3hMenu(f3hMade.id, "duplicate");
+    const f3hDupDialog = await waitFor(() => f3hDialogs.slice(f3hDupFrom).some((r) => r.type === "confirm" && /确定要复制画布/.test(r.message)), 8000);
+    const f3hDuped = await waitFor(async () => (await f3hList()).cards.some((c) => /副本$/.test(c.title)), 20000);
+
+    // ② 删除 → confirm → 卡片消失、真的进回收站、FAB 出现且角标 = 回收站长度
+    const f3hDelFrom = f3hDialogs.length;
+    const f3hDelClick = await f3hMenu(f3hMade.id, "delete");
+    const f3hDelDialog = await waitFor(() => f3hDialogs.slice(f3hDelFrom).some((r) => r.type === "confirm" && /确定要删除画布/.test(r.message)), 8000);
+    const f3hDelMsg = (f3hDialogs.slice(f3hDelFrom).find((r) => r.type === "confirm") || {}).message || "";
+    const f3hGone = await waitFor(async () => !(await f3hList()).cards.some((c) => c.id === f3hMade.id), 20000);
+    const f3hTrashAfter = await waitFor(async () => (await f3hTrash()).n === f3hTrashBefore.n + 1, 20000);
+    const f3hTrashAfterDel = await f3hTrash();
+    const f3hFabUp = await waitFor(async () => { const s = await f3hList(); const tr = await f3hTrash(); return !!(s.fab && s.fab.hidden === false && s.fab.badge === String(tr.n)); }, 20000);
+    const f3hFabState = (await f3hList()).fab;
+    const f3hTrashAtFab = await f3hTrash();
+
+    // ③ 重命名 → prompt 对话框必须真的出现（消息 + 默认值都是真值；Electron 不支持 prompt，不断言标题变化）
+    const f3hDupCard = (await f3hList()).cards.find((c) => /副本$/.test(c.title)) || null;
+    const f3hRenFrom = f3hDialogs.length;
+    const f3hRenClick = f3hDupCard ? await f3hMenu(f3hDupCard.id, "rename") : "no-dup-card";
+    const f3hPromptUp = await waitFor(() => f3hDialogs.slice(f3hRenFrom).some((r) => r.type === "prompt" && r.message === "重命名画布" && !!r.defaultValue), 8000);
+
+    // ④ 错误路径 alert：副本先由命令层删掉（卡片还在 DOM 里）→ 卡片菜单「删除」→ 服务端失败 → 上游 alert('删除失败')
+    const f3hAlertFrom = f3hDialogs.length;
+    const f3hPreDel = f3hDupCard ? await inFrame(listFrame(), "const res = await fetch(" + JSON.stringify("/api/canvases/" + f3hDupCard.id) + ", { method: 'DELETE' }); return { ok: res.ok, status: res.status };") : null;
+    const f3hErrClick = f3hDupCard ? await f3hMenu(f3hDupCard.id, "delete") : "no-dup-card";
+    const f3hAlertUp = await waitFor(() => f3hDialogs.slice(f3hAlertFrom).some((r) => r.type === "alert" && r.message === "删除失败"), 10000);
+
+    // ⑤ 清理（产品入口，循环到 0）：清空回收站清的是页面自己取过的那些，所以先取回收站同步页面事实再清
+    const f3hClearRounds = [];
+    for (let i = 0; i < 4; i += 1) {
+      const before = (await f3hTrash()).n;
+      if (!before) break;
+      await inFrame(listFrame(), "const f = document.getElementById('trashFab'); if (f) f.click(); return !!f;");
+      await sleep(600);
+      const clear = await inFrame(listFrame(), "const b = document.getElementById('trashClearBtn'); if (!b || b.disabled) return false; b.click(); return true;");
+      await sleep(400);
+      const confirmed = await inFrame(listFrame(), "const ok = document.getElementById('purgeConfirmOk'); if (!ok) return false; ok.click(); return true;");
+      f3hClearRounds.push({ before, clear, confirmed });
+      await waitFor(async () => (await f3hTrash()).n === 0, 10000);
+    }
+    await inFrame(listFrame(), "const c = document.getElementById('trashOverlayClose'); if (c) c.click(); return 'closed';");
+    await sleep(600);
+    const f3hEnd = await f3hList();
+    const f3hTrashEnd = await f3hTrash();
+
+    f3hOk = !!f3hSandbox && f3hSandbox.indexOf("allow-modals") >= 0
+      && f3hMade.ok === true && !!f3hMade.id && f3hCardUp === true
+      && f3hDupClick === "clicked" && f3hDupDialog === true && f3hDuped === true
+      && f3hDelClick === "clicked" && f3hDelDialog === true && f3hDelMsg.indexOf("确定要删除画布「") === 0 && f3hGone === true && f3hTrashAfter === true
+      && f3hFabUp === true && f3hFabState && f3hFabState.hidden === false && f3hFabState.display !== "none" && f3hFabState.badge === String(f3hTrashAtFab.n)
+      && f3hRenClick === "clicked" && f3hPromptUp === true
+      && !!f3hPreDel && f3hPreDel.ok === true && f3hErrClick === "clicked" && f3hAlertUp === true
+      && f3hTrashEnd.n === 0 && f3hEnd.fab && f3hEnd.fab.hidden === true;
+    f3hEvidence = { sandbox: f3hSandbox, made: f3hMade, cardUp: f3hCardUp, duplicate: { click: f3hDupClick, dialogUp: f3hDupDialog, duped: f3hDuped }, delete: { click: f3hDelClick, dialogUp: f3hDelDialog, message: f3hDelMsg, cardGone: f3hGone, trashAfter: f3hTrashAfterDel, fabUp: f3hFabUp, fab: f3hFabState }, rename: { click: f3hRenClick, promptUp: f3hPromptUp, prompt: f3hDialogs.slice(f3hRenFrom).find((r) => r.type === "prompt") || null }, errorAlert: { preDelete: f3hPreDel, click: f3hErrClick, alertUp: f3hAlertUp, alert: f3hDialogs.slice(f3hAlertFrom).find((r) => r.type === "alert") || null }, cleanup: { rounds: f3hClearRounds, trash: f3hTrashEnd, fab: f3hEnd.fab }, dialogs: f3hDialogs };
+  } finally {
+    page.removeListener("dialog", f3hOnDialog);
+    for (const h of f3hSavedDialogListeners) page.on("dialog", h);
+  }
+  note("F3h 对话框原始记录：" + JSON.stringify(f3hDialogs));
+  note("F3h 已知宿主边界：Electron 不支持 prompt()（" + JSON.stringify((await js("try { prompt('探测宿主 prompt 支持'); return { returned: true }; } catch (e) { return { returned: false, error: String((e && e.message) || e) }; }")).error || "") + "）⇒ 重命名入口只到「对话框弹出」为止，要真正可用需把上游 prompt 换成应用内模态（产品决定）。");
+  record("F3h", "卡片菜单真实产品路径（宿主 sandbox = allow-modals）：菜单「复制画布」confirm 弹出并 accept → 列表真的多出「… 副本」；菜单「删除」confirm 弹出并 accept（消息含画布名）→ 卡片消失、真的进回收站（长度 +1）、右下角 FAB 出现且角标 = 回收站长度；菜单「重命名」prompt 对话框真的弹出（消息 + 默认值）；服务端失败时上游 alert('删除失败') 真的弹出；跑完用产品入口清空回收站 → 0 条 + FAB 回到隐藏",
+    f3hOk,
+    "sandbox 含 allow-modals；confirm/prompt/alert 真的弹出（修复前被 Chromium 忽略）；真删除 + FAB 出现；清理回 0",
+    JSON.stringify(f3hEvidence));
+
   /* ══════════════════ 收尾 ══════════════════ */
   // 门禁自己制造的噪声：E5 里被拦下的导航会在 Chromium 日志里留下 ERR_BLOCKED_BY_CSP（那正是"被拦住"的证据）。
   // ENV_NOISE = **环境噪声白名单**（不是放宽断言）：只登记应用代码之外的系统/运行时消息。

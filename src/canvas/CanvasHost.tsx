@@ -9,8 +9,11 @@
  * 账号分桶与资源失效复核，界面外观完全交给上游原版页面 —— 删除就是删除，不用 CSS 遮挡冒充。
  *
  * 边界（入口换成列表页后**仍然成立**）：
- *   · 应用页面在 sandbox="allow-scripts allow-same-origin" 的 iframe 里：origin 是
+ *   · 应用页面在 sandbox="allow-scripts allow-same-origin allow-modals" 的 iframe 里：origin 是
  *     openarc-canvas://bundle，与 OpenArc 外壳（file://）**不同源**，页面拿不到 window.openarc / IPC / fs / 凭据；
+ *     allow-modals 只放行 alert / confirm / prompt / print 这类模态对话（上游首页卡片菜单的「删除 / 重命名 /
+ *     复制画布」与所有 alert 错误提示都要靠它们，此前缺这个标志时 Chromium 直接忽略），**不新增**文件系统、
+ *     网络、origin、脚本执行或跨源能力；实例 token 校验 / CSP / 只读闸一律未动；
  *   · 宿主**只接受当前这一个应用帧**的消息：event.source 必须是本帧，且必须带本次挂载的随机 token
  *     （更深的子帧由外层中继附加 token，子帧自己拿不到 token）；
  *   · 账号作用域：入口 URL 的 #oa= 钥匙按"账号 + 本次挂载"生成，页面 localStorage/BroadcastChannel
@@ -712,7 +715,10 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
           className="canvas-host-frame"
           data-canvas-frame
           data-canvas-app-frame
-          sandbox="allow-scripts allow-same-origin"
+          // allow-modals 只放行 alert / confirm / prompt / print 这类模态对话（上游卡片菜单的删除/重命名/复制
+          // 与错误提示要用），不新增文件系统 / 网络 / origin / 脚本执行 / 跨源能力：帧仍与外壳不同源，
+          // 实例 token 校验、CSP、只读闸一律未动。
+          sandbox="allow-scripts allow-same-origin allow-modals"
           onLoad={onFrameLoad}
           src={frameSrc}
         />
