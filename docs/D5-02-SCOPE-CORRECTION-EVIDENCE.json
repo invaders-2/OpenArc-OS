@@ -1,7 +1,7 @@
 {
   "phase": "D5-02 范围修正 · 无限画布首页 + 单一模型真源",
-  "at": "2026-09-24T06:55:40.822Z",
-  "openarcCommit": "5b77186c24d0608d7b6514811e2adcb4d419e575",
+  "at": "2026-09-24T08:59:11.422Z",
+  "openarcCommit": "2a97b95873652a23a20d1344cac42a75f81b38f2",
   "command": "OPENARC_TESTED_COMMIT=$(git rev-parse HEAD) node experiments/d5-02/canvas-e2e.mjs",
   "env": {
     "platform": "darwin",
@@ -10,12 +10,12 @@
     "electron": "44.3.0"
   },
   "counts": {
-    "pass": 48,
+    "pass": 50,
     "fail": 0,
-    "total": 48
+    "total": 50
   },
   "artifactPath": "artifacts/d5-02/d5-02-canvas-e2e.json",
-  "artifactSha256": "746a436a668493e6d2486f354cf8f2ad5e52a6f81730c1a514a28c54dd9080a0",
+  "artifactSha256": "7579e32c49f4aaafddb197be4a1b4e65336ddc8d6a01a4a30352e0b198b4f645",
   "regression": {
     "build": {
       "command": "npm run build",
@@ -24,8 +24,9 @@
     },
     "unitTests": [
       {
-        "set": "tests/d5-02-canvas-service.test.mjs + tests/d5-02-canvas-tool.test.mjs + tests/d5-02-model-list-authorization.test.mjs + tests/d5-02-canvas-edit-proposal.test.mjs",
-        "counts": "22/22"
+        "command": "node --test tests/d5-02-canvas-*.test.mjs tests/d5-02-model-list-authorization.test.mjs",
+        "counts": "45/45",
+        "note": "本批复跑：d5-02-canvas-{service,tool,edit-proposal,merge,ai-marks} + model-list-authorization；其中本轮新增 tests/d5-02-canvas-merge.test.mjs 12/12、tests/d5-02-canvas-ai-marks.test.mjs 11/11"
       },
       {
         "file": "tests/governance-app-model-grant.test.mjs",
@@ -45,7 +46,7 @@
         "assertion": "主进程绝不 in-process 执行 write（源扫描 electron/side-effect-runtime.cjs）",
         "conflict": "与 D5-02 canvas.edit 的 in-process 执行类（CanvasControl）冲突",
         "reproducedOnCleanHeadExportTree": true,
-        "verdict": "预存在失败，与本轮改动无关，如实登记为既有缺口"
+        "verdict": "预存在失败，与本轮改动无关，未改断言，如实登记为既有缺口"
       },
       {
         "file": "tests/d4-03-approval-push-isolation.test.mjs",
@@ -53,7 +54,7 @@
         "assertion": "审批推送载荷字段白名单 SNAPSHOT_FIELDS",
         "conflict": "白名单少 D5-01 的 targetRef/url",
         "reproducedOnCleanHeadExportTree": true,
-        "verdict": "预存在失败，与本轮改动无关，如实登记为既有缺口"
+        "verdict": "预存在失败，与本轮改动无关，未改断言，如实登记为既有缺口"
       }
     ]
   },
@@ -105,13 +106,31 @@
       "change": "只新增：本地编辑并落库后宿主 canvas/command 新增节点 ≤5s 呈现 + 用户内容仍在 + revision 5s 稳定（既有断言一行未动）",
       "reason": "D1 修复的回归钉：本地保存过的编辑器也必须能呈现宿主侧改动",
       "gateRef": "experiments/d5-02/canvas-e2e.mjs（F3d，本批新增）"
+    },
+    {
+      "id": "F3e",
+      "change": "只新增：500ms 待保存窗口内的受控交错 —— 页面本地编辑与宿主 IPC 改动两边内容都保留（不同节点都在；同一节点同一字段 → 本地留在原位 + 远端那一版复制为 <id>-remote，带 oaConflictCopyOf 标记并排偏移 + 中性可恢复提示）；关窗重开仍在。既有断言一行未动",
+      "reason": "关闭条件③（保存竞争静默覆盖）的回归钉：三方合并后两边内容都不许丢",
+      "gateRef": "experiments/d5-02/canvas-e2e.mjs（F3e，本批新增，4525ab8）"
+    },
+    {
+      "id": "F3f",
+      "change": "只新增：MOTION_SYSTEM §6 —— AI 新增节点（命令账本 actorKind=AGENT + outcome=APPLIED，不是\"远端同步=AI\"的猜测口径）带中性来源标记（12/18、字重 500、rgb(115,115,115)、border-width 0、--radius-sm 6px、pointer-events:none、不吃节点按钮、节点尺寸不变），页面手工新增 / 宿主 USER / 用户新增但被 AI 改过三类都不标记；新节点 160ms cubic-bezier(.2,0,0,1) 淡入（实测采样）；html[data-openarc-reduced-motion=1] 下 animation:none + opacity 立即 1",
+      "reason": "MS §6 实现的回归钉；2a97b95 只把取注入层证据的路径改走 primitives.aiMarks，判定条件未动",
+      "gateRef": "experiments/d5-02/canvas-e2e.mjs（F3f，本批新增，4525ab8 / 2a97b95）"
+    },
+    {
+      "id": "未改断言声明（本批）",
+      "change": "未删除、未放宽任何既有断言：F1 / F3a / F3b / F3c / F4 / D1 / E1 / Z1 的断言语句在 9aabefe → 2a97b95 各提交间逐字节哈希相同；5b77186 → 2a97b95 对门禁文件只有新增行（145 增 / 0 删）；F3d 只在 5b77186 新增，F3e / F3f 只在 4525ab8 新增",
+      "reason": "排除\"为了让测试变绿改断言\"：逐提交可复核",
+      "gateRef": "experiments/d5-02/canvas-e2e.mjs（git diff 5b77186 2a97b95 --numstat = 145 / 0）"
     }
   ],
   "notVerified": [
-    "与用户截图对照：未验收（基准文件缺失）——用户给的首页截图未出现在本工作区 / 本会话（已检索工作区与 Desktop/Downloads）；关闭方式：用户提供文件，或明确「以上游原版页面在真实 Electron 中的渲染为基准」",
-    "MS §6「AI 新增节点 160ms 淡入 + 来源标记」= 未实现（上游）：canvas.html / canvas.js / canvas.css 无节点入场动画与来源徽标，节点同帧直接出现；关闭方式：由后续动效批次实现",
-    "新登记的既有缺陷：宿主改动落在页面 500ms debounce 窗口内会被页面 PUT 覆盖（未落库竞态；改前改后一致，非本批引入），建议单开一批处理",
-    "门禁 F3d / F4-presented 依赖页面 2.5s 轮询与窗口前台状态（被完全遮挡时 Chromium 会节流；F3d 已 bringToFront 兜住）",
+    "视觉对照 · 数据项未验收：画布数量 13 vs 5、「所有画布 · N 个」（13 vs 5）、卡片标题 / 缩略图 / 时间戳内容 —— 隔离 userData 里是宿主 canvas/create 播的 5 本，需真实数据才能比；字阶 / 位置 / 字号 / 颜色一致",
+    "视觉对照 · 条件项未验收：整幅 (2.0, 9.0)px 平移、布局视口宽差 2px、真实窗口可达内容区 1119x758（宿主窗口固定 1440x940，electron/window-manager.cjs 的 resize 夹取 maxH=host.h-100-y；827 高靠 CDP 视口模拟达到）—— 条件差异，不是页面缺陷",
+    "视觉对照 · 1 项版本差异待用户裁定：基准图右下角没有回收站 FAB，我们 vendor 的 6ce1a64 有（canvas-list.html 里是无显隐逻辑的静态元素）→ 接受现状 或 要求对齐（一行可逆改动）；用户裁定后可升级 PASS（限定范围）",
+    "两条预存在失败测试（干净 HEAD 导出树同样复现，与本轮改动无关，继续单列、未改断言）：tests/side-effect-c4-gates.test.mjs:474、tests/d4-03-approval-push-isolation.test.mjs:103",
     "其他 NOVAI 子页文件仍在 bundle 内但无入口不可达（smart-canvas 亦不可达，未注入适配层 / 守卫）",
     "视频 / ComfyUI / RunningHub 等保持「明确不可用」，未接通链路未启用",
     "Windows / 多屏 / 高 DPI 等既有 NOT VERIFIED 不变"
@@ -123,7 +142,7 @@
       "status": "PASS",
       "expected": "CDP 可用",
       "actual": "connected",
-      "at": 1790232887832
+      "at": 1790240284521
     },
     {
       "section": "A0",
@@ -131,15 +150,15 @@
       "status": "PASS",
       "expected": "ready",
       "actual": "ready",
-      "at": 1790232888744
+      "at": 1790240285694
     },
     {
       "section": "A1",
       "name": "打开应用 = 上游原版列表首页 static/canvas-list.html（画布工作台）；不是完整外壳（无 index.html/home.html 帧、无侧栏导航），宿主只剩宿主根（顶部操作条/状态行/提示横幅已删）",
       "status": "PASS",
       "expected": "canvas-list 入口帧 + 无外壳/无宿主 chrome",
-      "actual": "{\"opened\":true,\"entryUp\":true,\"entryInfo\":{\"title\":\"画布工作台\",\"start\":true,\"cont\":true,\"newProject\":true,\"grid\":true,\"empty\":true,\"picker\":true,\"iframes\":0,\"homeFrameEl\":false,\"navItems\":0},\"hostChrome\":{\"host\":true,\"bar\":false,\"status\":false,\"notice\":false},\"bundleFrames\":[\"openarc-canvas://bundle/static/canvas-list.html#oa=k1fxa511q89i\"],\"deadShellFrames\":[]}",
-      "at": 1790232890212
+      "actual": "{\"opened\":true,\"entryUp\":true,\"entryInfo\":{\"title\":\"画布工作台\",\"start\":true,\"cont\":true,\"newProject\":true,\"grid\":true,\"empty\":true,\"picker\":true,\"iframes\":0,\"homeFrameEl\":false,\"navItems\":0},\"hostChrome\":{\"host\":true,\"bar\":false,\"status\":false,\"notice\":false},\"bundleFrames\":[\"openarc-canvas://bundle/static/canvas-list.html#oa=kpbrneef1uo\"],\"deadShellFrames\":[]}",
+      "at": 1790240287153
     },
     {
       "section": "A2",
@@ -147,15 +166,15 @@
       "status": "PASS",
       "expected": "0 个跨页导航入口 + 0 个子页帧",
       "actual": "{\"entryNav\":{\"hits\":[],\"hitCount\":0,\"navFrameIds\":[],\"iframes\":0},\"subFrames\":[]}",
-      "at": 1790232890214
+      "at": 1790240287157
     },
     {
       "section": "A3",
       "name": "「开始创作」→ 直接进入无限画布编辑器（canvas.html + 适配器就绪 + 非只读），且真的新建了一本；全程选画布遮挡层 #canvasPickerOverlay 未出现 .active",
       "status": "PASS",
       "expected": "编辑器帧 + 非只读 + 新建 1 本 + 遮挡层未激活",
-      "actual": "{\"startClick\":\"clicked\",\"editorUp\":true,\"adapterUp\":true,\"canvasState0\":{\"id\":\"cv_muf6fur4_6wos0e\",\"nodes\":0,\"edges\":0,\"ro\":false},\"listBeforeCreate\":0,\"listAfterCreate\":1,\"pickerSamples\":[{\"page\":\"canvas\",\"cls\":\"absent\"}],\"pickerActive\":[]}",
-      "at": 1790232890431
+      "actual": "{\"startClick\":\"clicked\",\"editorUp\":true,\"adapterUp\":true,\"canvasState0\":{\"id\":\"cv_mufaue9q_zay9e4\",\"nodes\":0,\"edges\":0,\"ro\":false},\"listBeforeCreate\":0,\"listAfterCreate\":1,\"pickerSamples\":[{\"page\":\"canvas\",\"cls\":\"absent\"}],\"pickerActive\":[]}",
+      "at": 1790240287375
     },
     {
       "section": "A4",
@@ -163,23 +182,23 @@
       "status": "PASS",
       "expected": "回入口帧 + 画布帧消失",
       "actual": "{\"backClick\":\"clicked\",\"backToList\":true,\"backInfo\":{\"title\":\"画布工作台\",\"grid\":true,\"start\":true}}",
-      "at": 1790232890639
+      "at": 1790240287581
     },
     {
       "section": "A5",
       "name": "「继续上次」→ 进入 canvas.html 且打开的正是最近更新的那本（宿主 IPC canvas/list 的 updatedAt 第一名，也就是刚创建的这本）",
       "status": "PASS",
       "expected": "canvas.html + 最近更新那本",
-      "actual": "{\"listReadyForContinue\":true,\"continueClick\":\"clicked\",\"contUp\":true,\"openedId\":\"cv_muf6fur4_6wos0e\",\"latest\":{\"canvasId\":\"cv_muf6fur4_6wos0e\",\"updatedAt\":1790232890224},\"currentCanvasId\":\"cv_muf6fur4_6wos0e\",\"ipcCount\":1}",
-      "at": 1790232890851
+      "actual": "{\"listReadyForContinue\":true,\"continueClick\":\"clicked\",\"contUp\":true,\"openedId\":\"cv_mufaue9q_zay9e4\",\"latest\":{\"canvasId\":\"cv_mufaue9q_zay9e4\",\"updatedAt\":1790240287166},\"currentCanvasId\":\"cv_mufaue9q_zay9e4\",\"ipcCount\":1}",
+      "at": 1790240287793
     },
     {
       "section": "A6",
       "name": "卡片直达：入口页 #cardsGrid .project-card[data-canvas-id=当前这本] → 进入编辑器且 canvasId 一致（真实卡片点击，不是 IPC 造帧）",
       "status": "PASS",
       "expected": "卡片点击 → 同一本",
-      "actual": "{\"cardSel\":\"#cardsGrid .project-card[data-canvas-id=\\\"cv_muf6fur4_6wos0e\\\"]\",\"backForCard\":true,\"cardUp\":true,\"cardClick\":\"clicked\",\"cardUpFrame\":true,\"cardId\":\"cv_muf6fur4_6wos0e\",\"currentCanvasId\":\"cv_muf6fur4_6wos0e\"}",
-      "at": 1790232891262
+      "actual": "{\"cardSel\":\"#cardsGrid .project-card[data-canvas-id=\\\"cv_mufaue9q_zay9e4\\\"]\",\"backForCard\":true,\"cardUp\":true,\"cardClick\":\"clicked\",\"cardUpFrame\":true,\"cardId\":\"cv_mufaue9q_zay9e4\",\"currentCanvasId\":\"cv_mufaue9q_zay9e4\"}",
+      "at": 1790240288225
     },
     {
       "section": "A7",
@@ -187,7 +206,7 @@
       "status": "PASS",
       "expected": "2 节点 + 1 连线 + 坐标 520",
       "actual": "{\"ok\":[true,true,true,true],\"savedOk\":true,\"revision\":2,\"nodes\":[{\"id\":\"n_prompt\",\"x\":80},{\"id\":\"n_llm\",\"x\":520}],\"edges\":1}",
-      "at": 1790232891931
+      "at": 1790240288905
     },
     {
       "section": "A8",
@@ -195,7 +214,7 @@
       "status": "PASS",
       "expected": "undo→420 / redo→520 + 落库",
       "actual": "{\"undoState\":{\"x\":420,\"canRedo\":true},\"redoState\":{\"x\":520},\"redoPersisted\":true}",
-      "at": 1790232892944
+      "at": 1790240289922
     },
     {
       "section": "N1",
@@ -203,7 +222,7 @@
       "status": "PASS",
       "expected": "unconfigured + 引导文案精确 + 4 个下拉 disabled/unconfigured + /comfly/i 0 命中",
       "actual": "{\"probes\":{\"add\":[\"ok\",\"ok\"],\"marked\":true},\"chip\":\"unconfigured\",\"chipText\":\"模型：文本未配置 · 生图未配置 · 视频未接通\",\"chipGuideText\":\"打开 OpenArc 总 API 设置\",\"guideCount\":3,\"guideTexts\":[\"打开 OpenArc 总 API 设置\"],\"guardGuideText\":\"打开 OpenArc 总 API 设置\",\"chat\":{\"provider\":{\"disabled\":true,\"aria\":\"true\",\"unconfigured\":\"chat\",\"unavailable\":null,\"value\":\"\",\"texts\":[\"未配置（OpenArc 总 API 设置里没有可用的文本模型）\"]},\"model\":{\"disabled\":true,\"aria\":\"true\",\"unconfigured\":\"chat\",\"unavailable\":null,\"value\":\"\",\"texts\":[\"未配置（OpenArc 总 API 设置里没有可用的文本模型）\"]}},\"image\":{\"provider\":{\"disabled\":true,\"aria\":\"true\",\"unconfigured\":\"image-generation\",\"unavailable\":null,\"value\":\"\",\"texts\":[\"未配置（OpenArc 总 API 设置里没有可用的生图模型）\"]},\"model\":{\"disabled\":true,\"aria\":\"true\",\"unconfigured\":\"image-generation\",\"unavailable\":null,\"value\":\"\",\"texts\":[\"未配置（OpenArc 总 API 设置里没有可用的生图模型）\"]}},\"fake\":{\"htmlMatched\":false,\"hits\":[],\"optionHits\":[],\"selectHits\":[],\"options\":40}}",
-      "at": 1790232893375
+      "at": 1790240290160
     },
     {
       "section": "N2",
@@ -211,7 +230,7 @@
       "status": "PASS",
       "expected": "点击 → guide-state=opened + 设置窗口 data-settings-active=model（模型 / AI）+ 关闭成功",
       "actual": "{\"click\":{\"clicked\":true,\"text\":\"打开 OpenArc 总 API 设置\",\"inChip\":true},\"opened\":true,\"guideState\":{\"opened\":true,\"text\":\"打开 OpenArc 总 API 设置\"},\"settings\":{\"active\":\"model\",\"title\":\"模型 / AI\",\"minimized\":false,\"hasWindow\":true,\"panes\":3},\"close\":{\"byButton\":\"clicked\",\"byDock\":null,\"closed\":true}}",
-      "at": 1790232893598
+      "at": 1790240290381
     },
     {
       "section": "N3",
@@ -219,31 +238,31 @@
       "status": "PASS",
       "expected": "501 CAPABILITY_UNAVAILABLE + 下拉/节点/运行按钮全不可用 + 假 provider 0→0 请求",
       "actual": "{\"status\":501,\"body\":{\"error\":\"CAPABILITY_UNAVAILABLE\",\"detail\":\"OpenArc 未接通视频传输（不可用）\",\"capability\":\"video-generation\",\"message\":\"OpenArc 未接通视频传输（不可用）\",\"available\":false,\"transport\":null},\"guard\":{\"version\":1,\"text\":\"OpenArc 未接通视频传输（不可用）\"},\"videoNode\":{\"capability\":\"video-generation\",\"available\":\"false\",\"noteText\":\"OpenArc 未接通视频传输（不可用）\",\"guideInNote\":false},\"provider\":{\"disabled\":true,\"aria\":\"true\",\"unconfigured\":null,\"unavailable\":\"video-generation\",\"value\":\"\",\"texts\":[\"OpenArc 未接通视频传输（不可用）\"]},\"model\":{\"disabled\":true,\"aria\":\"true\",\"unconfigured\":null,\"unavailable\":\"video-generation\",\"value\":\"\",\"texts\":[\"OpenArc 未接通视频传输（不可用）\"]},\"runBtn\":{\"blocked\":\"video-generation\",\"aria\":\"true\",\"disabled\":true,\"title\":\"OpenArc 未接通视频传输（不可用）\"},\"blockedCount\":3,\"requests\":{\"before\":0,\"after\":0},\"hostNoticeHead\":\"\",\"bridgeUnsupportedNotice\":false}",
-      "at": 1790232893601
+      "at": 1790240290387
     },
     {
       "section": "A9",
       "name": "返回画布列表：列表里出现刚保存的项目、当前这本的卡片真的渲染出来（列表数据来自 OpenArc 存储，最近更新的排第一）",
       "status": "PASS",
       "expected": "canvas-list 帧 + 列表含该书 + 卡片存在",
-      "actual": "{\"backClick2\":\"clicked\",\"backList2\":true,\"cardListed\":true,\"listPayload\":{\"n\":1,\"first\":{\"id\":\"cv_muf6fur4_6wos0e\",\"title\":\"画布 14:54\"},\"hasCurrent\":true,\"cards\":1}}",
-      "at": 1790232893835
+      "actual": "{\"backClick2\":\"clicked\",\"backList2\":true,\"cardListed\":true,\"listPayload\":{\"n\":1,\"first\":{\"id\":\"cv_mufaue9q_zay9e4\",\"title\":\"画布 16:58\"},\"hasCurrent\":true,\"cards\":1}}",
+      "at": 1790240290607
     },
     {
       "section": "A10",
       "name": "从画布列表再打开项目：打开的是**同一本**画布，节点/连线/坐标从 OpenArc 存储恢复",
       "status": "PASS",
       "expected": "同一 canvasId + 2 节点 1 连线 x=520",
-      "actual": "{\"reopened\":true,\"reopenedSame\":true,\"reopenedState\":{\"id\":\"cv_muf6fur4_6wos0e\",\"nodes\":2,\"edges\":1,\"x\":520}}",
-      "at": 1790232894270
+      "actual": "{\"reopened\":true,\"reopenedSame\":true,\"reopenedState\":{\"id\":\"cv_mufaue9q_zay9e4\",\"nodes\":2,\"edges\":1,\"x\":520}}",
+      "at": 1790240291049
     },
     {
       "section": "B1",
       "name": "模型只有一个来源：画布只看到 OpenArc 已配置可用的模型；provider 投影的数量/身份/键集合与 IPC 真值逐项一致，且全程无地址与凭据",
       "status": "PASS",
       "expected": "有 chat+image；api_providers 数量 = 真实 provider 数 1（id/name 对齐 IPC、键集合 ⊆ 白名单、无地址/凭据）",
-      "actual": "{\"configSeen\":{\"chat\":1,\"image\":1,\"providers\":1,\"ids\":[\"prv_RXkgoqtjC-oppw\"],\"names\":[\"D5-02 Canvas Provider\"],\"keySets\":[[\"chat_models\",\"enabled\",\"id\",\"image_models\",\"name\",\"video_models\"]],\"hasKey\":false,\"hasUrl\":false},\"ipcProviders\":[{\"id\":\"prv_RXkgoqtjC-oppw\",\"name\":\"D5-02 Canvas Provider\",\"status\":\"enabled\"}],\"usableProviderIds\":[\"prv_RXkgoqtjC-oppw\"],\"expectedProviderIds\":[\"prv_RXkgoqtjC-oppw\"],\"keysWhitelisted\":true,\"configLeak\":false,\"projectionLeak\":false}",
-      "at": 1790232894451
+      "actual": "{\"configSeen\":{\"chat\":1,\"image\":1,\"providers\":1,\"ids\":[\"prv_dIF1m1YUh3bv1A\"],\"names\":[\"D5-02 Canvas Provider\"],\"keySets\":[[\"chat_models\",\"enabled\",\"id\",\"image_models\",\"name\",\"video_models\"]],\"hasKey\":false,\"hasUrl\":false},\"ipcProviders\":[{\"id\":\"prv_dIF1m1YUh3bv1A\",\"name\":\"D5-02 Canvas Provider\",\"status\":\"enabled\"}],\"usableProviderIds\":[\"prv_dIF1m1YUh3bv1A\"],\"expectedProviderIds\":[\"prv_dIF1m1YUh3bv1A\"],\"keysWhitelisted\":true,\"configLeak\":false,\"projectionLeak\":false}",
+      "at": 1790240291219
     },
     {
       "section": "B2",
@@ -251,15 +270,15 @@
       "status": "PASS",
       "expected": "节点拿到 provider 文本 + provider 收到 OpenArc 凭据",
       "actual": "{\"llmDone\":{\"status\":\"done\",\"error\":\"\",\"text\":\"OPENARC-CANVAS-LLM:写一句关于海边的提示词\"},\"chats\":[{\"model\":\"d502-chat\",\"messages\":2,\"last\":\"写一句关于海边的提示词\"}],\"authSeen\":1}",
-      "at": 1790232894689
+      "at": 1790240291462
     },
     {
       "section": "B3",
       "name": "真实模型调用链（图片）：经 OpenArc 模型服务 → /images/generations → 输出节点拿到图片",
       "status": "PASS",
       "expected": "输出节点有图片 + provider 收到图片请求",
-      "actual": "{\"addGen\":true,\"linkGen\":true,\"runGen\":{\"started\":true,\"model\":\"D5-02 Image · PAng\"},\"genDone\":{\"status\":\"done\",\"error\":\"\",\"outputCount\":1},\"images\":1}",
-      "at": 1790232895014
+      "actual": "{\"addGen\":true,\"linkGen\":true,\"runGen\":{\"started\":true,\"model\":\"D5-02 Image · RJOw\"},\"genDone\":{\"status\":\"done\",\"error\":\"\",\"outputCount\":1},\"images\":1}",
+      "at": 1790240291847
     },
     {
       "section": "B4",
@@ -267,15 +286,15 @@
       "status": "PASS",
       "expected": "runStatus=failed + runError",
       "actual": "{\"status\":\"failed\",\"error\":\"PROVIDER_UNAVAILABLE\"}",
-      "at": 1790232895074
+      "at": 1790240291932
     },
     {
       "section": "N4",
       "name": "真实投影 + 无第二来源：B 系列配好 provider+模型后，编辑器 provider 下拉逐项 = OpenArc 真 provider（id + displayName，不是 Comfly/API 的造物）；模型下拉的每个选项都在 OpenArc 清单里（gpt-4o-mini / gpt-image-2 / veo3-fast 在 DOM 属性+文本 / option.value / select.value 三处 0 命中）；三把 localStorage 模型键 setItem 后读回 null 且不留残留键；/api/config.api_providers 键集合 ⊆ 六键",
       "status": "PASS",
       "expected": "provider 下拉 = 真 displayName；模型下拉选项 ⊆ 真源清单；三个伪造标签 0 命中；localStorage 三键读回 null",
-      "actual": "{\"providers\":[{\"id\":\"prv_RXkgoqtjC-oppw\",\"name\":\"D5-02 Canvas Provider\",\"keys\":[\"chat_models\",\"enabled\",\"id\",\"image_models\",\"name\",\"video_models\"]}],\"chatModels\":[\"D5-02 Chat · xupg\"],\"imageModels\":[\"D5-02 Image · PAng\"],\"provider\":{\"llm\":{\"disabled\":false,\"aria\":null,\"unconfigured\":null,\"unavailable\":null,\"value\":\"prv_RXkgoqtjC-oppw\",\"texts\":[\"D5-02 Canvas Provider\"]},\"gen\":{\"disabled\":false,\"aria\":null,\"unconfigured\":null,\"unavailable\":null,\"value\":\"prv_RXkgoqtjC-oppw\",\"texts\":[\"D5-02 Canvas Provider\"]}},\"model\":{\"llm\":{\"disabled\":false,\"aria\":null,\"unconfigured\":null,\"unavailable\":null,\"value\":\"D5-02 Chat · xupg\",\"texts\":[\"D5-02 Chat · xupg\"]},\"gen\":{\"disabled\":false,\"aria\":null,\"unconfigured\":null,\"unavailable\":null,\"value\":\"D5-02 Image · PAng\",\"texts\":[\"D5-02 Image · PAng\"]}},\"nodes\":{\"llm\":{\"provider\":\"prv_RXkgoqtjC-oppw\",\"model\":\"D5-02 Chat · xupg\"},\"gen\":{\"provider\":\"prv_RXkgoqtjC-oppw\",\"model\":\"D5-02 Image · PAng\"}},\"fake\":{\"htmlMatched\":false,\"hits\":[],\"optionHits\":[],\"selectHits\":[],\"options\":24},\"readBack\":{\"canvas_custom_image_models\":null,\"canvas_image_models_ordered\":null,\"canvas_chat_models_ordered\":null},\"residue\":[]}",
-      "at": 1790232895091
+      "actual": "{\"providers\":[{\"id\":\"prv_dIF1m1YUh3bv1A\",\"name\":\"D5-02 Canvas Provider\",\"keys\":[\"chat_models\",\"enabled\",\"id\",\"image_models\",\"name\",\"video_models\"]}],\"chatModels\":[\"D5-02 Chat · sccA\"],\"imageModels\":[\"D5-02 Image · RJOw\"],\"provider\":{\"llm\":{\"disabled\":false,\"aria\":null,\"unconfigured\":null,\"unavailable\":null,\"value\":\"prv_dIF1m1YUh3bv1A\",\"texts\":[\"D5-02 Canvas Provider\"]},\"gen\":{\"disabled\":false,\"aria\":null,\"unconfigured\":null,\"unavailable\":null,\"value\":\"prv_dIF1m1YUh3bv1A\",\"texts\":[\"D5-02 Canvas Provider\"]}},\"model\":{\"llm\":{\"disabled\":false,\"aria\":null,\"unconfigured\":null,\"unavailable\":null,\"value\":\"D5-02 Chat · sccA\",\"texts\":[\"D5-02 Chat · sccA\"]},\"gen\":{\"disabled\":false,\"aria\":null,\"unconfigured\":null,\"unavailable\":null,\"value\":\"D5-02 Image · RJOw\",\"texts\":[\"D5-02 Image · RJOw\"]}},\"nodes\":{\"llm\":{\"provider\":\"prv_dIF1m1YUh3bv1A\",\"model\":\"D5-02 Chat · sccA\"},\"gen\":{\"provider\":\"prv_dIF1m1YUh3bv1A\",\"model\":\"D5-02 Image · RJOw\"}},\"fake\":{\"htmlMatched\":false,\"hits\":[],\"optionHits\":[],\"selectHits\":[],\"options\":24},\"readBack\":{\"canvas_custom_image_models\":null,\"canvas_image_models_ordered\":null,\"canvas_chat_models_ordered\":null},\"residue\":[]}",
+      "at": 1790240291941
     },
     {
       "section": "N6",
@@ -283,7 +302,7 @@
       "status": "PASS",
       "expected": "502 MODEL_NOT_FOUND + 0 新增 provider 请求 + 宿主计数 +1",
       "actual": "{\"status\":502,\"body\":{\"error\":\"MODEL_NOT_FOUND\",\"detail\":\"该模型不在当前 OpenArc 模型清单里（不会改用其它模型）：gpt-4o-mini\",\"message\":\"当前 OpenArc 模型清单里没有这个模型（不会改用其它模型）：gpt-4o-mini\",\"model\":\"gpt-4o-mini\",\"method\":\"model.chat\"},\"inManifest\":false,\"chatModels\":1,\"hostCounter\":\"0→1\",\"requests\":{\"chats\":[0,0],\"images\":[0,0],\"authSeen\":[3,3]}}",
-      "at": 1790232895598
+      "at": 1790240292451
     },
     {
       "section": "B5",
@@ -291,7 +310,7 @@
       "status": "PASS",
       "expected": "501 CAPABILITY_UNAVAILABLE + available:false + transport:null + detail 非空",
       "actual": "{\"status\":501,\"body\":{\"error\":\"CAPABILITY_UNAVAILABLE\",\"detail\":\"OpenArc 未接通视频传输（不可用）\",\"capability\":\"video-generation\",\"message\":\"OpenArc 未接通视频传输（不可用）\",\"available\":false,\"transport\":null}}",
-      "at": 1790232895599
+      "at": 1790240292453
     },
     {
       "section": "B6",
@@ -299,7 +318,7 @@
       "status": "PASS",
       "expected": "更新 501 + app-info/queue 200 且标注禁用",
       "actual": "{\"update\":{\"check\":501,\"checkBody\":\"OPENARC_UPDATE_DISABLED\",\"github\":501,\"githubBody\":\"OPENARC_UPDATE_DISABLED\"},\"info\":{\"status\":200,\"updateDisabled\":true,\"queueDisabled\":true},\"queue\":{\"status\":200,\"total\":0,\"source\":\"openarc-task-runtime\"}}",
-      "at": 1790232895604
+      "at": 1790240292457
     },
     {
       "section": "D1",
@@ -307,15 +326,15 @@
       "status": "PASS",
       "expected": "PROXY_UNAUTHORIZED + 0 请求",
       "actual": "{\"hasGrant\":true,\"grantActions\":[\"model.view\",\"model.use\"],\"noPermRun\":true,\"revoked\":{\"ok\":false,\"error\":\"PROXY_UNAUTHORIZED\"},\"requests\":\"0→0\",\"regranted\":true}",
-      "at": 1790232895879
+      "at": 1790240292746
     },
     {
       "section": "N5a",
       "name": "撤权 → 页面模型区真的变成不可用（实测口径 = unconfigured：页头状态位 unconfigured + 文本/生图下拉 disabled 且只剩一条精确的「未配置…」占位；不是「看着还能点」）；恢复授权 → 回到可用（chip ok + 下拉可选且选项只在真源清单里）",
       "status": "PASS",
       "expected": "撤权 unconfigured/disabled + 恢复后 ok/可选",
-      "actual": "{\"revoked\":{\"ok\":true,\"want\":\"unavailable-all\",\"waitedMs\":259,\"reads\":2,\"chip\":\"unconfigured\",\"chipText\":\"模型：文本默认不可用 · 生图默认不可用 · 视频未接通\",\"defaultFacts\":{\"chat\":{\"usable\":false,\"reason\":\"MODEL_UNAUTHORIZED\"},\"image\":{\"usable\":false,\"reason\":\"MODEL_UNAUTHORIZED\"}},\"chat\":{\"disabled\":true,\"aria\":\"true\",\"unconfigured\":\"chat\",\"defaultUnavailable\":\"chat\",\"value\":\"\",\"options\":[\"\"]},\"image\":{\"disabled\":true,\"aria\":\"true\",\"unconfigured\":\"image-generation\",\"defaultUnavailable\":\"image-generation\",\"value\":\"\",\"options\":[\"\"]},\"chatRun\":{\"cls\":\"llm-run \",\"blocked\":\"chat\",\"disabled\":true,\"aria\":\"true\",\"title\":\"文本默认不可用（默认模型当前未被授权使用）；OpenArc 里显式配置的默认不会被自动换成别的模型\"},\"imageRun\":{\"cls\":\"gen-btn\",\"blocked\":\"image-generation\",\"disabled\":true,\"aria\":\"true\",\"title\":\"生图默认不可用（默认模型当前未被授权使用）；OpenArc 里显式配置的默认不会被自动换成别的模型\"},\"chatNote\":{\"text\":\"文本默认不可用（默认模型当前未被授权使用）；OpenArc 里显式配置的默认不会被自动换成别的模型\",\"guide\":true,\"guideText\":\"打开 OpenArc 总 API 设置\"},\"imageNote\":{\"text\":\"生图默认不可用（默认模型当前未被授权使用）；OpenArc 里显式配置的默认不会被自动换成别的模型\",\"guide\":true,\"guideText\":\"打开 OpenArc 总 API 设置\"},\"llmModel\":\"\",\"genModel\":\"\",\"manifest\":{\"chat\":[],\"image\":[]}},\"regranted\":{\"ok\":true,\"want\":\"available-all\",\"waitedMs\":259,\"reads\":2,\"chip\":\"ok\",\"chipText\":\"模型：文本 1 · 生图 1 · 视频未接通\",\"defaultFacts\":{\"chat\":{\"usable\":true,\"reason\":null},\"image\":{\"usable\":true,\"reason\":null}},\"chat\":{\"disabled\":false,\"aria\":null,\"unconfigured\":null,\"defaultUnavailable\":null,\"va",
-      "at": 1790232896138
+      "actual": "{\"revoked\":{\"ok\":true,\"want\":\"unavailable-all\",\"waitedMs\":263,\"reads\":2,\"chip\":\"unconfigured\",\"chipText\":\"模型：文本默认不可用 · 生图默认不可用 · 视频未接通\",\"defaultFacts\":{\"chat\":{\"usable\":false,\"reason\":\"MODEL_UNAUTHORIZED\"},\"image\":{\"usable\":false,\"reason\":\"MODEL_UNAUTHORIZED\"}},\"chat\":{\"disabled\":true,\"aria\":\"true\",\"unconfigured\":\"chat\",\"defaultUnavailable\":\"chat\",\"value\":\"\",\"options\":[\"\"]},\"image\":{\"disabled\":true,\"aria\":\"true\",\"unconfigured\":\"image-generation\",\"defaultUnavailable\":\"image-generation\",\"value\":\"\",\"options\":[\"\"]},\"chatRun\":{\"cls\":\"llm-run \",\"blocked\":\"chat\",\"disabled\":true,\"aria\":\"true\",\"title\":\"文本默认不可用（默认模型当前未被授权使用）；OpenArc 里显式配置的默认不会被自动换成别的模型\"},\"imageRun\":{\"cls\":\"gen-btn\",\"blocked\":\"image-generation\",\"disabled\":true,\"aria\":\"true\",\"title\":\"生图默认不可用（默认模型当前未被授权使用）；OpenArc 里显式配置的默认不会被自动换成别的模型\"},\"chatNote\":{\"text\":\"文本默认不可用（默认模型当前未被授权使用）；OpenArc 里显式配置的默认不会被自动换成别的模型\",\"guide\":true,\"guideText\":\"打开 OpenArc 总 API 设置\"},\"imageNote\":{\"text\":\"生图默认不可用（默认模型当前未被授权使用）；OpenArc 里显式配置的默认不会被自动换成别的模型\",\"guide\":true,\"guideText\":\"打开 OpenArc 总 API 设置\"},\"llmModel\":\"\",\"genModel\":\"\",\"manifest\":{\"chat\":[],\"image\":[]}},\"regranted\":{\"ok\":true,\"want\":\"available-all\",\"waitedMs\":262,\"reads\":2,\"chip\":\"ok\",\"chipText\":\"模型：文本 1 · 生图 1 · 视频未接通\",\"defaultFacts\":{\"chat\":{\"usable\":true,\"reason\":null},\"image\":{\"usable\":true,\"reason\":null}},\"chat\":{\"disabled\":false,\"aria\":null,\"unconfigured\":null,\"defaultUnavailable\":null,\"va",
+      "at": 1790240293008
     },
     {
       "section": "D2",
@@ -323,15 +342,15 @@
       "status": "PASS",
       "expected": "CAPABILITY_UNAVAILABLE + 0 请求",
       "actual": "{\"capRun\":{\"ok\":false,\"error\":\"CAPABILITY_UNAVAILABLE\"},\"images\":\"0→0\"}",
-      "at": 1790232896403
+      "at": 1790240293279
     },
     {
       "section": "N5c",
       "name": "跨能力（生图默认被指到只有 chat 的模型）→ 生图区按**显式默认不可用**呈现：data-openarc-default-unavailable=image-generation + 下拉 disabled/aria-disabled + 运行按钮 data-openarc-blocked + 原因文案与「打开 OpenArc 总 API 设置」引导；**清单仍如实投影**（那个可用生图模型仍在 /api/config.image_models 里，只是没有被自动选中：select.value 为空、生图节点 model 为空 = 没有静默换默认）；文本区不受影响（仍可选、选项 ⊆ 真源清单、默认仍是显式配置的那个）；恢复默认 → 标记消失、下拉恢复可选、chip 回 ok",
       "status": "PASS",
       "expected": "跨能力：生图默认不可用（标记 + disabled/aria + blocked + 原因/引导）且清单照旧如实投影、未被自动选中；文本仍可用；恢复后标记消失且可选",
-      "actual": "{\"defaultApplied\":{\"capability\":\"image-generation\",\"configId\":\"mcf_OXi8tfdXFxmIrQ\",\"note\":\"生图默认被指到一个只有 chat 能力的模型（清单里的可用生图模型 = D5-02 Image · PAng）\"},\"crossCap\":{\"ok\":true,\"want\":\"image-unavailable\",\"waitedMs\":259,\"reads\":2,\"chip\":\"unconfigured\",\"chipText\":\"模型：文本 2 · 生图默认不可用 · 视频未接通\",\"defaultFacts\":{\"chat\":{\"usable\":true,\"reason\":null},\"image\":{\"usable\":false,\"reason\":\"CAPABILITY_UNAVAILABLE\"}},\"chat\":{\"disabled\":false,\"aria\":null,\"unconfigured\":null,\"defaultUnavailable\":null,\"value\":\"D5-02 Chat · xupg\",\"options\":[\"D5-02 Chat · xupg\",\"D5-02 ChatOnly · mIrQ\"]},\"image\":{\"disabled\":true,\"aria\":\"true\",\"unconfigured\":\"image-generation\",\"defaultUnavailable\":\"image-generation\",\"value\":\"\",\"options\":[\"\"]},\"chatRun\":{\"cls\":\"llm-run \",\"blocked\":null,\"disabled\":false,\"aria\":null,\"title\":\"\"},\"imageRun\":{\"cls\":\"gen-btn\",\"blocked\":\"image-generation\",\"disabled\":true,\"aria\":\"true\",\"title\":\"生图默认不可用（默认模型没有这个能力）；OpenArc 里显式配置的默认不会被自动换成别的模型\"},\"chatNote\":null,\"imageNote\":{\"text\":\"生图默认不可用（默认模型没有这个能力）；OpenArc 里显式配置的默认不会被自动换成别的模型\",\"guide\":true,\"guideText\":\"打开 OpenArc 总 API 设置\"},\"llmModel\":\"D5-02 Chat · xupg\",\"genModel\":\"\",\"manifest\":{\"chat\":[\"D5-02 Chat · xupg\",\"D5-02 ChatOnly · mIrQ\"],\"image\":[\"D5-02 Image · PAng\"]}},\"restored\":{\"ok\":true,\"want\":\"available-all\",\"waitedMs\":268,\"reads\":2,\"chip\":\"ok\",\"chipText\":\"模型：文本 2 · 生图 1 · 视频未接通\",\"defaultFacts\":{\"chat\":{\"usable\":true,\"reason\":null},\"image\":{\"usable\"",
-      "at": 1790232896671
+      "actual": "{\"defaultApplied\":{\"capability\":\"image-generation\",\"configId\":\"mcf_Q6kaH2W73p9fRg\",\"note\":\"生图默认被指到一个只有 chat 能力的模型（清单里的可用生图模型 = D5-02 Image · RJOw）\"},\"crossCap\":{\"ok\":true,\"want\":\"image-unavailable\",\"waitedMs\":260,\"reads\":2,\"chip\":\"unconfigured\",\"chipText\":\"模型：文本 2 · 生图默认不可用 · 视频未接通\",\"defaultFacts\":{\"chat\":{\"usable\":true,\"reason\":null},\"image\":{\"usable\":false,\"reason\":\"CAPABILITY_UNAVAILABLE\"}},\"chat\":{\"disabled\":false,\"aria\":null,\"unconfigured\":null,\"defaultUnavailable\":null,\"value\":\"D5-02 Chat · sccA\",\"options\":[\"D5-02 Chat · sccA\",\"D5-02 ChatOnly · 9fRg\"]},\"image\":{\"disabled\":true,\"aria\":\"true\",\"unconfigured\":\"image-generation\",\"defaultUnavailable\":\"image-generation\",\"value\":\"\",\"options\":[\"\"]},\"chatRun\":{\"cls\":\"llm-run \",\"blocked\":null,\"disabled\":false,\"aria\":null,\"title\":\"\"},\"imageRun\":{\"cls\":\"gen-btn\",\"blocked\":\"image-generation\",\"disabled\":true,\"aria\":\"true\",\"title\":\"生图默认不可用（默认模型没有这个能力）；OpenArc 里显式配置的默认不会被自动换成别的模型\"},\"chatNote\":null,\"imageNote\":{\"text\":\"生图默认不可用（默认模型没有这个能力）；OpenArc 里显式配置的默认不会被自动换成别的模型\",\"guide\":true,\"guideText\":\"打开 OpenArc 总 API 设置\"},\"llmModel\":\"D5-02 Chat · sccA\",\"genModel\":\"\",\"manifest\":{\"chat\":[\"D5-02 Chat · sccA\",\"D5-02 ChatOnly · 9fRg\"],\"image\":[\"D5-02 Image · RJOw\"]}},\"restored\":{\"ok\":true,\"want\":\"available-all\",\"waitedMs\":261,\"reads\":2,\"chip\":\"ok\",\"chipText\":\"模型：文本 2 · 生图 1 · 视频未接通\",\"defaultFacts\":{\"chat\":{\"usable\":true,\"reason\":null},\"image\":{\"usable\"",
+      "at": 1790240293540
     },
     {
       "section": "D3",
@@ -339,7 +358,7 @@
       "status": "PASS",
       "expected": "BUDGET_EXHAUSTED + 请求数=成功数",
       "actual": "{\"budgetOk\":8,\"stop\":\"BUDGET_EXHAUSTED\",\"runStatus\":\"BUDGET_EXHAUSTED\",\"providerChats\":8}",
-      "at": 1790232896731
+      "at": 1790240293630
     },
     {
       "section": "D4",
@@ -347,7 +366,7 @@
       "status": "PASS",
       "expected": "STOPPED + 迟到丢弃 + 用户内容保留",
       "actual": "{\"stopped\":\"STOPPED\",\"late\":\"RUN_STOPPED\",\"afterStop\":\"RUN_STOPPED\",\"chatsAtStop\":1,\"chatsAfterLate\":1,\"userText\":{\"text\":\"用户随后编辑的内容\"}}",
-      "at": 1790232899866
+      "at": 1790240296774
     },
     {
       "section": "D5",
@@ -355,7 +374,7 @@
       "status": "PASS",
       "expected": "每次一次请求 + 无凭据",
       "actual": "{\"fail1\":\"PROVIDER_UNAVAILABLE\",\"fail2\":\"PROVIDER_UNAVAILABLE\",\"requests\":[0,1,2],\"leaksSecret\":false}",
-      "at": 1790232899888
+      "at": 1790240296793
     },
     {
       "section": "F1",
@@ -363,47 +382,55 @@
       "status": "PASS",
       "expected": "停用/跨能力/不存在 → 拒绝 + 0 请求",
       "actual": "{\"okCall\":true,\"disabled\":{\"ok\":false,\"error\":\"MODEL_CONFIG_UNAVAILABLE\"},\"cross\":{\"ok\":false,\"error\":\"CAPABILITY_UNAVAILABLE\"},\"unknown\":{\"ok\":false,\"error\":\"MODEL_CONFIG_UNAVAILABLE\"},\"requests\":[1,1,1,1]}",
-      "at": 1790232900178
+      "at": 1790240297081
     },
     {
       "section": "N5d",
       "name": "停用**显式配置的文本默认** → 被停用模型从页面模型区消失（清单 / DOM option / 节点当前模型三处 0 命中）；文本能力按「默认不可用」呈现（data-openarc-default-unavailable=chat + 下拉 disabled/aria-disabled + 运行按钮 data-openarc-blocked + 原因文案与「打开 OpenArc 总 API 设置」引导，select.value 为空 = 没有自动改用剩下的那个文本模型）；恢复 enabled → 页面模型区回到可用（chip ok + 下拉可选 + 标记消失）",
       "status": "PASS",
       "expected": "停用后标签三处 0 命中 + 默认不可用口径（标记/disabled/aria/blocked/原因+引导，value 为空）+ 恢复后 ok/可选且标记消失",
-      "actual": "{\"disabledModelLabel\":\"D5-02 Chat · xupg\",\"disabledConfigId\":\"mcf_KQaRkZdYWTxupg\",\"manifestBefore\":[\"D5-02 Chat · xupg\",\"D5-02 ChatOnly · mIrQ\"],\"atDisable\":{\"ok\":true,\"want\":\"chat-model-removed\",\"waitedMs\":260,\"reads\":2,\"chip\":\"unconfigured\",\"chipText\":\"模型：生图 1 · 文本默认不可用 · 视频未接通\",\"defaultFacts\":{\"chat\":{\"usable\":false,\"reason\":\"MODEL_DISABLED\"},\"image\":{\"usable\":true,\"reason\":null}},\"chat\":{\"disabled\":true,\"aria\":\"true\",\"unconfigured\":\"chat\",\"defaultUnavailable\":\"chat\",\"value\":\"\",\"options\":[\"\"]},\"image\":{\"disabled\":false,\"aria\":null,\"unconfigured\":null,\"defaultUnavailable\":null,\"value\":\"D5-02 Image · PAng\",\"options\":[\"D5-02 Image · PAng\"]},\"chatRun\":{\"cls\":\"llm-run \",\"blocked\":\"chat\",\"disabled\":true,\"aria\":\"true\",\"title\":\"文本默认不可用（默认模型已被停用）；OpenArc 里显式配置的默认不会被自动换成别的模型\"},\"imageRun\":{\"cls\":\"gen-btn\",\"blocked\":null,\"disabled\":false,\"aria\":null,\"title\":\"\"},\"chatNote\":{\"text\":\"文本默认不可用（默认模型已被停用）；OpenArc 里显式配置的默认不会被自动换成别的模型\",\"guide\":true,\"guideText\":\"打开 OpenArc 总 API 设置\"},\"imageNote\":null,\"llmModel\":\"\",\"genModel\":\"D5-02 Image · PAng\",\"manifest\":{\"chat\":[\"D5-02 ChatOnly · mIrQ\"],\"image\":[\"D5-02 Image · PAng\"]}},\"atEnable\":{\"ok\":true,\"want\":\"available-all\",\"waitedMs\":258,\"reads\":2,\"chip\":\"ok\",\"chipText\":\"模型：文本 2 · 生图 1 · 视频未接通\",\"defaultFacts\":{\"chat\":{\"usable\":true,\"reason\":null},\"image\":{\"usable\":true,\"reason\":null}},\"chat\":{\"disabled\":false,\"aria\":null,\"unconfigured\":null,\"defaultUnav",
-      "at": 1790232900436
+      "actual": "{\"disabledModelLabel\":\"D5-02 Chat · sccA\",\"disabledConfigId\":\"mcf_njvO92ArZtsccA\",\"manifestBefore\":[\"D5-02 Chat · sccA\",\"D5-02 ChatOnly · 9fRg\"],\"atDisable\":{\"ok\":true,\"want\":\"chat-model-removed\",\"waitedMs\":258,\"reads\":2,\"chip\":\"unconfigured\",\"chipText\":\"模型：生图 1 · 文本默认不可用 · 视频未接通\",\"defaultFacts\":{\"chat\":{\"usable\":false,\"reason\":\"MODEL_DISABLED\"},\"image\":{\"usable\":true,\"reason\":null}},\"chat\":{\"disabled\":true,\"aria\":\"true\",\"unconfigured\":\"chat\",\"defaultUnavailable\":\"chat\",\"value\":\"\",\"options\":[\"\"]},\"image\":{\"disabled\":false,\"aria\":null,\"unconfigured\":null,\"defaultUnavailable\":null,\"value\":\"D5-02 Image · RJOw\",\"options\":[\"D5-02 Image · RJOw\"]},\"chatRun\":{\"cls\":\"llm-run \",\"blocked\":\"chat\",\"disabled\":true,\"aria\":\"true\",\"title\":\"文本默认不可用（默认模型已被停用）；OpenArc 里显式配置的默认不会被自动换成别的模型\"},\"imageRun\":{\"cls\":\"gen-btn\",\"blocked\":null,\"disabled\":false,\"aria\":null,\"title\":\"\"},\"chatNote\":{\"text\":\"文本默认不可用（默认模型已被停用）；OpenArc 里显式配置的默认不会被自动换成别的模型\",\"guide\":true,\"guideText\":\"打开 OpenArc 总 API 设置\"},\"imageNote\":null,\"llmModel\":\"\",\"genModel\":\"D5-02 Image · RJOw\",\"manifest\":{\"chat\":[\"D5-02 ChatOnly · 9fRg\"],\"image\":[\"D5-02 Image · RJOw\"]}},\"atEnable\":{\"ok\":true,\"want\":\"available-all\",\"waitedMs\":259,\"reads\":2,\"chip\":\"ok\",\"chipText\":\"模型：文本 2 · 生图 1 · 视频未接通\",\"defaultFacts\":{\"chat\":{\"usable\":true,\"reason\":null},\"image\":{\"usable\":true,\"reason\":null}},\"chat\":{\"disabled\":false,\"aria\":null,\"unconfigured\":null,\"defaultUnav",
+      "at": 1790240297340
     },
     {
       "section": "F3a",
       "name": "图片资源：本地导入写入 OpenArc 资源库，画布文档只存 openarc-asset:<ResourceRef>（不存 data URL / 路径）",
       "status": "PASS",
       "expected": "文档里只有稳定 ref",
-      "actual": "{\"upload\":[{\"url\":\"data:image/png;base64,iV\",\"name\":\"d502-asset.png\"}],\"addImg\":{\"ok\":true,\"url\":\"data:image/png;base64,iV\"},\"assetRefHead\":\"res_LfL5cXxs\",\"docUrlHead\":\"openarc-asset:res_LfL5cXxsFoTF\",\"states\":{\"res_LfL5cXxsFoTFri8bheefC1KwgcvEWCTJ\":{\"state\":\"AVAILABLE\",\"name\":\"d502-asset.png\",\"version\":1}}}",
-      "at": 1790232901107
+      "actual": "{\"upload\":[{\"url\":\"data:image/png;base64,iV\",\"name\":\"d502-asset.png\"}],\"addImg\":{\"ok\":true,\"url\":\"data:image/png;base64,iV\"},\"assetRefHead\":\"res_nIDzHfIt\",\"docUrlHead\":\"openarc-asset:res_nIDzHfItynUt\",\"states\":{\"res_nIDzHfItynUtzi_52dGSkCYCrbbdPJEe\":{\"state\":\"AVAILABLE\",\"name\":\"d502-asset.png\",\"version\":1}}}",
+      "at": 1790240298007
     },
     {
       "section": "F3b",
       "name": "图片资源：关闭窗口重开后仍可用（宿主按当前用户逐资源授权解析为 data URL 显示，存储里仍是 ref）",
       "status": "PASS",
       "expected": "重开后图片可用 + 存储仍是 ref",
-      "actual": "{\"closedOnce\":true,\"framesAfterClose\":0,\"reopenedOnce\":true,\"resolved\":true,\"resolvedState\":{\"id\":\"cv_muf6fur4_6wos0e\",\"url\":\"data:image/png;base64\",\"nodes\":5}}",
-      "at": 1790232901776
+      "actual": "{\"closedOnce\":true,\"framesAfterClose\":0,\"reopenedOnce\":true,\"resolved\":true,\"resolvedState\":{\"id\":\"cv_mufaue9q_zay9e4\",\"url\":\"data:image/png;base64\",\"nodes\":5}}",
+      "at": 1790240298676
     },
     {
       "section": "F3c",
       "name": "图片资源：资源被删除后画布明确不可用（读回失败 → 保留 ref 显示不可用），旧 data URL 缓存不复活",
       "status": "PASS",
       "expected": "ASSET_UNAVAILABLE + 当场缓存失效 + 提示 + 重开不复活",
-      "actual": "{\"delRes\":true,\"noticeIsAboutAssets\":true,\"read\":{\"ok\":false,\"error\":\"ASSET_UNAVAILABLE\"},\"state\":{\"state\":\"UNAVAILABLE\"},\"inMountInvalidated\":true,\"inMountNotice\":{\"flag\":\"1\",\"text\":\"引用资源已删除或无权限（1 个）：画布上按不可用显示，不会拿旧缓存顶替\"},\"closedTwice\":true,\"reopenedTwice\":true,\"afterDeleteUrl\":{\"url\":\"openarc-asset:res_LfL5cXxsFoTFri\"}}",
-      "at": 1790232904680
+      "actual": "{\"delRes\":true,\"noticeIsAboutAssets\":true,\"read\":{\"ok\":false,\"error\":\"ASSET_UNAVAILABLE\"},\"state\":{\"state\":\"UNAVAILABLE\"},\"inMountInvalidated\":true,\"inMountNotice\":{\"flag\":\"1\",\"text\":\"引用资源已删除或无权限（1 个）：画布上按不可用显示，不会拿旧缓存顶替\"},\"closedTwice\":true,\"reopenedTwice\":true,\"afterDeleteUrl\":{\"url\":\"openarc-asset:res_nIDzHfItynUtzi\"}}",
+      "at": 1790240301576
     },
     {
       "section": "F3d",
       "name": "本地编辑保存之后，宿主 IPC canvas/command（actorKind=USER）新增的节点仍能进到已打开的编辑器（≤5s，primitives + DOM）：用户本地内容不被覆盖、revision 不回环",
       "status": "PASS",
       "expected": "本地编辑落库 → 宿主新增 ≤5s 呈现（primitives+DOM）+ 本地内容仍在 + revision 稳定",
-      "actual": "{\"ready\":{\"ok\":true,\"waitedMs\":4,\"steps\":{\"canvasFrame\":{\"ok\":true,\"atMs\":0},\"adapter\":{\"ok\":true,\"atMs\":0},\"doc\":{\"ok\":true,\"atMs\":1},\"editable\":{\"ok\":true,\"atMs\":1},\"node\":{\"ok\":true,\"atMs\":2}}},\"localEdit\":{\"ok\":true,\"result\":{\"node\":{\"id\":\"n_d1_local\",\"type\":\"prompt\",\"x\":120,\"y\":120,\"text\":\"本地编辑（D1 回归钉）\"}},\"revision\":1790232900983,\"state\":{\"nodeCount\":6,\"edgeCount\":3}},\"localSaved\":true,\"hostAdd\":{\"ok\":true,\"revision\":10},\"waitedMs\":1820,\"page\":{\"hasLocal\":true,\"localText\":\"本地编辑（D1 回归钉）\",\"hasHost\":true,\"domHost\":true,\"hostText\":\"宿主新增（D1 回归钉）\",\"revision\":1790232905318,\"nodes\":7},\"ipcHost\":{\"text\":\"宿主新增（D1 回归钉）\"},\"ipcLocal\":{\"text\":\"本地编辑（D1 回归钉）\"},\"revisions\":{\"at\":10,\"after5s\":10}}",
-      "at": 1790232912157
+      "actual": "{\"ready\":{\"ok\":true,\"waitedMs\":3,\"steps\":{\"canvasFrame\":{\"ok\":true,\"atMs\":0},\"adapter\":{\"ok\":true,\"atMs\":1},\"doc\":{\"ok\":true,\"atMs\":1},\"editable\":{\"ok\":true,\"atMs\":2},\"node\":{\"ok\":true,\"atMs\":2}}},\"localEdit\":{\"ok\":true,\"result\":{\"node\":{\"id\":\"n_d1_local\",\"type\":\"prompt\",\"x\":120,\"y\":120,\"text\":\"本地编辑（D1 回归钉）\"}},\"revision\":1790240297880,\"state\":{\"nodeCount\":6,\"edgeCount\":3}},\"localSaved\":true,\"hostAdd\":{\"ok\":true,\"revision\":10},\"waitedMs\":1823,\"page\":{\"hasLocal\":true,\"localText\":\"本地编辑（D1 回归钉）\",\"hasHost\":true,\"domHost\":true,\"hostText\":\"宿主新增（D1 回归钉）\",\"revision\":1790240302214,\"nodes\":7},\"ipcHost\":{\"text\":\"宿主新增（D1 回归钉）\"},\"ipcLocal\":{\"text\":\"本地编辑（D1 回归钉）\"},\"revisions\":{\"at\":10,\"after5s\":10}}",
+      "at": 1790240309051
+    },
+    {
+      "section": "F3e",
+      "name": "500ms 待保存窗口内的受控交错：页面本地编辑与宿主 IPC 改动**两边内容都保留**（不同节点都在；同一节点同一字段 → 本地原位 + 远端 <id>-remote 副本；关窗重开仍在）",
+      "status": "PASS",
+      "expected": "同窗口交错 → 两边都在（页面 + DOM + IPC + 重开后）+ 同字段冲突留 <id>-remote 副本 + 合并确实发生",
+      "actual": "{\"windowMs\":26,\"editWindowMs\":14,\"local\":{\"ok\":true,\"result\":{\"node\":{\"id\":\"n_f3e_local\",\"type\":\"prompt\",\"x\":220,\"y\":620,\"text\":\"F3e 页面本地编辑\"}},\"revision\":1790240302214,\"state\":{\"nodeCount\":8,\"edgeCount\":3}},\"host\":{\"ok\":true,\"error\":null},\"localSaved\":true,\"page\":{\"localText\":\"F3e 页面本地编辑\",\"hostText\":\"F3e 宿主窗口内写入\",\"domHost\":true,\"domLocal\":true,\"conflicts\":1,\"lastOutcome\":\"MERGED\"},\"ipc\":{\"local\":\"F3e 页面本地编辑\",\"host\":\"F3e 宿主窗口内写入\"},\"seed\":{\"ok\":true},\"seedSaved\":true,\"editLocal\":{\"ok\":true,\"error\":null},\"editHost\":{\"ok\":true,\"error\":null},\"editSaved\":true,\"conflict\":{\"shared\":{\"text\":\"F3e 页面改的文本\",\"mark\":null},\"copy\":{\"text\":\"F3e 宿主改的文本\",\"mark\":\"n_f3e_shared\"},\"conflicts\":2,\"last\":{\"at\":1790240316358,\"canvasId\":\"cv_mufaue9q_zay9e4\",\"outcome\":\"MERGED_WITH_COPIES\",\"attempt\":1,\"remoteUpdatedAt\":1790240315850,\"copies\":[\"n_f3e_shared-remote\"],\"conflicts\":[{\"kind\":\"node\",\"id\":\"n_f3e_shared\",\"reason\":\"SAME_FIELD\",\"fields\":[\"text\"]}],\"added\":[],\"applied\":[],\"deleted\":[],\"message\":\"保存冲突：已与别处的改动合并。同一处两边各改了一版：你的版本留在原位，对方那一版已作为副本保留（n_f3e_shared-remote）。两边内容都保留了，请核对后自行取舍。\"}},\"ipcConflict\":{\"shared\":\"F3e 页面改的文本\",\"copy\":\"F3e 宿主改的文本\"},\"closed\":true,\"reopened\":true,\"stillThere\":true,\"reopenPage\":{\"localText\":\"F3e 页面本地编辑\",\"hostText\":\"F3e 宿主窗口内写入\",\"sharedText\":\"F3e 页面改的文本\",\"copyText\":\"F3e 宿主改的文本\"}}",
+      "at": 1790240322003
     },
     {
       "section": "E1",
@@ -411,7 +438,7 @@
       "status": "PASS",
       "expected": "无桥 + 501",
       "actual": "{\"boundary\":{\"openarc\":\"undefined\",\"require\":\"undefined\",\"process\":\"undefined\",\"ipc\":\"undefined\",\"fs\":\"undefined\",\"pywebview\":\"undefined\"},\"shellBoundary\":{\"openarc\":\"undefined\",\"require\":\"undefined\",\"process\":\"undefined\",\"ipc\":\"undefined\"},\"unsupported\":{\"status\":501,\"body\":{\"error\":\"OPENARC_UNSUPPORTED\",\"message\":\"该功能不在 OpenArc 集成范围内：/api/secret-thing\"}}}",
-      "at": 1790232912163
+      "at": 1790240322010
     },
     {
       "section": "E2",
@@ -419,7 +446,7 @@
       "status": "PASS",
       "expected": "403/404 + 200",
       "actual": "{\"traversal\":404,\"nonWhitelisted\":403,\"whitelisted\":200}",
-      "at": 1790232912168
+      "at": 1790240322015
     },
     {
       "section": "E3",
@@ -427,7 +454,7 @@
       "status": "PASS",
       "expected": "按会话身份处理",
       "actual": "{\"forged\":{\"ok\":true,\"count\":1},\"sessionListCount\":1}",
-      "at": 1790232912173
+      "at": 1790240322020
     },
     {
       "section": "E4",
@@ -435,15 +462,15 @@
       "status": "PASS",
       "expected": "画布数量不变",
       "actual": "{\"e4res\":{\"done\":true},\"listBefore2\":1,\"listAfter2\":1}",
-      "at": 1790232916991
+      "at": 1790240326834
     },
     {
       "section": "E5",
       "name": "出网通道：fetch / 图片 / WebSocket / 表单 / 外站脚本 / window.open / **iframe 自我导航**全部被拦（本地接收端 0 命中；被拦后重新进入画布仍可用）",
       "status": "PASS",
       "expected": "接收端 0 命中 + 应用仍可用",
-      "actual": "{\"attempts\":{\"fetch\":501,\"img\":\"set\",\"ws\":\"set\",\"form\":\"submitted\",\"script\":\"set\"},\"popup\":{\"opened\":false},\"selfNav\":{\"__error\":\"frame.evaluate: Execution context was destroyed, most likely because of a navigation.\"},\"hits\":[],\"usableAfter\":true,\"usableState\":{\"id\":\"cv_muf6fur4_6wos0e\",\"nodes\":7}}",
-      "at": 1790232921559
+      "actual": "{\"attempts\":{\"fetch\":501,\"img\":\"set\",\"ws\":\"set\",\"form\":\"submitted\",\"script\":\"set\"},\"popup\":{\"opened\":false},\"selfNav\":{\"__error\":\"frame.evaluate: Execution context was destroyed, most likely because of a navigation.\"},\"hits\":[],\"usableAfter\":true,\"usableState\":{\"id\":\"cv_mufaue9q_zay9e4\",\"nodes\":11}}",
+      "at": 1790240331474
     },
     {
       "section": "E5b",
@@ -451,7 +478,7 @@
       "status": "PASS",
       "expected": "接收端 0 命中 + 桌面仍在",
       "actual": "{\"shellNav\":{\"__error\":\"frame.evaluate: Execution context was destroyed, most likely because of a navigation.\"},\"topNav\":{\"url\":\"<绝对路径已脱敏>\"},\"hits\":[],\"desktopAlive\":true}",
-      "at": 1790232924768
+      "at": 1790240334687
     },
     {
       "section": "E6",
@@ -459,7 +486,7 @@
       "status": "PASS",
       "expected": "主进程日志出现拦截记录",
       "actual": "found",
-      "at": 1790232924768
+      "at": 1790240334687
     },
     {
       "section": "E7",
@@ -467,31 +494,39 @@
       "status": "PASS",
       "expected": "0 个残留帧 + B 的列表不含 A 的画布",
       "actual": "{\"framesAfterLogout\":0,\"memberLogin\":true,\"createdMember\":true,\"memberListCount\":0,\"memberOpen\":false}",
-      "at": 1790232925362
+      "at": 1790240335259
     },
     {
       "section": "E8",
       "name": "账号边界（存储/通道）：真实同源存储按**本次挂载钥匙**分桶，A 账号的键一个不剩（A/B 各自写入探针键自证 + 桥的只读隔离探针）",
       "status": "PASS",
       "expected": "钥匙变化 + 0 个外账号键 + oa:mount=当前钥匙 + A 的键在 B 侧读不到",
-      "actual": "{\"keyAHead\":\"k1975eqd\",\"keyBHead\":\"krjdwsyq\",\"probeA\":{\"before\":{\"own\":1,\"foreign\":0,\"mount\":true},\"after\":{\"own\":2,\"foreign\":0,\"mount\":true},\"readBack\":\"A-account-probe\",\"rawKey\":\"oa:k1975eqdlfve:oa_probe_a\"},\"isoA\":{\"own\":2,\"foreign\":0,\"mount\":true},\"probeB\":{\"isolation\":{\"own\":1,\"foreign\":0,\"mount\":true},\"ownReadBack\":\"B-account-probe\",\"foreignReadBack\":null,\"rawKey\":\"oa:krjdwsyqorm:oa_probe_b\"},\"isoB\":{\"own\":1,\"foreign\":0,\"mount\":true},\"pageSide\":{\"logicalKeys\":[\"oa_probe_b\"],\"active\":null}}",
-      "at": 1790232926375
+      "actual": "{\"keyAHead\":\"k17yh18g\",\"keyBHead\":\"kamijaku\",\"probeA\":{\"before\":{\"own\":1,\"foreign\":0,\"mount\":true},\"after\":{\"own\":2,\"foreign\":0,\"mount\":true},\"readBack\":\"A-account-probe\",\"rawKey\":\"oa:k17yh18gjb0u:oa_probe_a\"},\"isoA\":{\"own\":2,\"foreign\":0,\"mount\":true},\"probeB\":{\"isolation\":{\"own\":1,\"foreign\":0,\"mount\":true},\"ownReadBack\":\"B-account-probe\",\"foreignReadBack\":null,\"rawKey\":\"oa:kamijaku6vx:oa_probe_b\"},\"isoB\":{\"own\":1,\"foreign\":0,\"mount\":true},\"pageSide\":{\"logicalKeys\":[\"oa_probe_b\"],\"active\":null}}",
+      "at": 1790240336273
     },
     {
       "section": "F4b",
       "name": "AI 编辑正式链 · chain2 前置：重开画布帧后等宿主把 canEdit 推下来（非只读）+ 适配器/文档就绪 + n_prompt 可见，然后才做用户编辑（不放宽 F4 任何判定）",
       "status": "PASS",
       "expected": "五步就绪 + 编辑前快照非只读且 n_prompt 可见",
-      "actual": "{\"ready\":{\"ok\":true,\"waitedMs\":3,\"steps\":{\"canvasFrame\":{\"ok\":true,\"atMs\":0},\"adapter\":{\"ok\":true,\"atMs\":0},\"doc\":{\"ok\":true,\"atMs\":1},\"editable\":{\"ok\":true,\"atMs\":1},\"node\":{\"ok\":true,\"atMs\":2}}},\"pageBeforeEdit\":{\"isReadOnly\":false,\"canEdit\":true,\"ctxCanvasId\":\"cv_muf6fur4_6wos0e\",\"canvasId\":\"cv_muf6fur4_6wos0e\",\"revision\":1790232928908,\"nodeCount\":8,\"hasNode\":true},\"userEdit\":{\"ok\":true,\"result\":{\"node\":{\"id\":\"n_prompt\",\"type\":\"prompt\",\"x\":80,\"y\":120,\"text\":\"用户先改的内容\"}},\"revision\":1790232928908,\"state\":{\"nodeCount\":8,\"edgeCount\":3}},\"userSaved\":true,\"revisionAfterUser\":12}",
-      "at": 1790232940606
+      "actual": "{\"ready\":{\"ok\":true,\"waitedMs\":4,\"steps\":{\"canvasFrame\":{\"ok\":true,\"atMs\":0},\"adapter\":{\"ok\":true,\"atMs\":0},\"doc\":{\"ok\":true,\"atMs\":1},\"editable\":{\"ok\":true,\"atMs\":2},\"node\":{\"ok\":true,\"atMs\":3}}},\"pageBeforeEdit\":{\"isReadOnly\":false,\"canEdit\":true,\"ctxCanvasId\":\"cv_mufaue9q_zay9e4\",\"canvasId\":\"cv_mufaue9q_zay9e4\",\"revision\":1790240338742,\"nodeCount\":12,\"hasNode\":true},\"userEdit\":{\"ok\":true,\"result\":{\"node\":{\"id\":\"n_prompt\",\"type\":\"prompt\",\"x\":80,\"y\":120,\"text\":\"用户先改的内容\"}},\"revision\":1790240338742,\"state\":{\"nodeCount\":12,\"edgeCount\":3}},\"userSaved\":true,\"revisionAfterUser\":17}",
+      "at": 1790240350716
     },
     {
       "section": "F4",
       "name": "AI 编辑正式链：Agent 提议 → 用户审批 → 授权执行 → 画布呈现 → 保存重开仍在（旧 revision 不覆盖用户内容）",
       "status": "PASS",
       "expected": "提议→审批→执行→呈现→保存恢复（+ 旧 revision 不覆盖用户内容）",
-      "actual": "{\"setup\":{\"providerId\":\"prv_OtEv4iqXz9_Lbw\",\"agentConfigId\":\"mcf_mDXX4wSVYeO8Xg\",\"defaultOk\":true,\"grantOk\":true},\"chain1\":{\"run1\":{\"taskId\":\"task_Z0SjUwKBedDZ5Q\",\"started\":true,\"status\":\"running\",\"stateText\":\"状态：running\"},\"approval1\":true,\"approvalMeta\":{\"id\":\"scall_3BxjOZRzaQwJ7w\",\"tool\":\"canvas.edit\",\"risk\":\"\"},\"advertised\":[\"browser_navigate\",\"browser_read_page\",\"canvas_edit\",\"canvas_read\",\"resource_read_metadata\",\"resource_search\",\"resource_trash\"],\"term1\":{\"terminal\":true,\"status\":\"SUCCEEDED\"},\"before\":{\"ok\":true,\"revision\":10,\"nodes\":7,\"edges\":3},\"after1\":{\"ok\":true,\"revision\":11,\"nodes\":8,\"edges\":3},\"call1\":{\"status\":\"SUCCEEDED\",\"verification\":\"PASS\",\"callId\":\"scall_3BxjOZRzaQwJ7w\"},\"presented\":true,\"closedForF4\":true,\"reopenedForF4\":true,\"restored\":true,\"diag1\":{\"events\":[{\"type\":\"task/result\",\"tool\":null,\"status\":\"SUCCEEDED\",\"error\":null,\"message\":null}],\"emitted\":[\"canvas_edit\"],\"toolExecs\":[],\"panel\":\"全局 AI 助手让 AI 在授权范围内执行任务OpenArc 决定、执行并验证；工具调用只在受控 Tool Proxy 内发生。在画布 cv_muf6fur4_6wos0e 上添加一个提示词节点（节点 id=agent_node_1）运行任务取消状态：SUCCEEDEDOPENARC_VERTICAL_SMOKE_OK开始聆听开启后球会跟着你的声音变化（只在本机算音量，不外发）。受控工具：resource.search / resource.read.metadata / resource.trash。查看统一设置\"}},\"chain2\":{\"ready\":{\"ok\":true,\"waitedMs\":3,\"steps\":{\"canvasFrame\":{\"ok\":true,\"atMs\":0},\"adapter\":{\"ok\":true,\"atMs\":0},\"doc\":{\"ok\":true,\"atMs\":1},\"editable\":{\"ok\":true,\"atMs\":1},\"node\":{\"ok\":true,\"atMs\":2}}},\"pa",
-      "at": 1790232940821
+      "actual": "{\"setup\":{\"providerId\":\"prv_T-wAxr7uVcaiQQ\",\"agentConfigId\":\"mcf_WRCnpMJAMvv4Pw\",\"defaultOk\":true,\"grantOk\":true},\"chain1\":{\"run1\":{\"taskId\":\"task_3g_5gn-eHRwgZg\",\"started\":true,\"status\":\"running\",\"stateText\":\"状态：running\"},\"approval1\":true,\"approvalMeta\":{\"id\":\"scall_wpmpIjVJUsSo4g\",\"tool\":\"canvas.edit\",\"risk\":\"\"},\"advertised\":[\"browser_navigate\",\"browser_read_page\",\"canvas_edit\",\"canvas_read\",\"resource_read_metadata\",\"resource_search\",\"resource_trash\"],\"term1\":{\"terminal\":true,\"status\":\"SUCCEEDED\"},\"before\":{\"ok\":true,\"revision\":15,\"nodes\":11,\"edges\":3},\"after1\":{\"ok\":true,\"revision\":16,\"nodes\":12,\"edges\":3},\"call1\":{\"status\":\"SUCCEEDED\",\"verification\":\"PASS\",\"callId\":\"scall_wpmpIjVJUsSo4g\"},\"presented\":true,\"closedForF4\":true,\"reopenedForF4\":true,\"restored\":true,\"diag1\":{\"events\":[{\"type\":\"task/result\",\"tool\":null,\"status\":\"SUCCEEDED\",\"error\":null,\"message\":null}],\"emitted\":[\"canvas_edit\"],\"toolExecs\":[],\"panel\":\"全局 AI 助手让 AI 在授权范围内执行任务OpenArc 决定、执行并验证；工具调用只在受控 Tool Proxy 内发生。在画布 cv_mufaue9q_zay9e4 上添加一个提示词节点（节点 id=agent_node_1）运行任务取消状态：SUCCEEDEDOPENARC_VERTICAL_SMOKE_OK开始聆听开启后球会跟着你的声音变化（只在本机算音量，不外发）。受控工具：resource.search / resource.read.metadata / resource.trash。查看统一设置\"}},\"chain2\":{\"ready\":{\"ok\":true,\"waitedMs\":4,\"steps\":{\"canvasFrame\":{\"ok\":true,\"atMs\":0},\"adapter\":{\"ok\":true,\"atMs\":0},\"doc\":{\"ok\":true,\"atMs\":1},\"editable\":{\"ok\":true,\"atMs\":2},\"node\":{\"ok\":true,\"atMs\":3}}},\"",
+      "at": 1790240351006
+    },
+    {
+      "section": "F3f",
+      "name": "MOTION_SYSTEM §6：AI 新增节点（命令账本 actorKind=AGENT）带中性来源标记（12/18、字重 500、中性灰、无描边、pointer-events:none、不吃节点按钮），用户手工新增的节点没有标记；新节点 160ms cubic-bezier(.2,0,0,1) 淡入（实测采样），html[data-openarc-reduced-motion=1] 下 animation:none + opacity 立即为 1",
+      "status": "PASS",
+      "expected": "标记 + 160ms(.2,0,0,1) 淡入 + 减少动态效果即时呈现 + 用户新增不误标 + 每节点最多一个徽标",
+      "actual": "{\"state0\":{\"canvasId\":\"cv_mufaue9q_zay9e4\",\"marked\":{\"nodeIds\":[\"agent_node_1\"],\"edgeIds\":[]},\"seen\":{\"nodeIds\":[\"agent_node_1\"],\"edgeIds\":[]},\"pending\":[],\"enterAt\":[],\"fetchedAt\":1790240343355,\"lastError\":null},\"markedAi\":true,\"badge\":{\"text\":\"AI\",\"source\":\"agent\",\"aria\":\"来自 AI\",\"inHead\":true,\"pointerEvents\":\"none\",\"fontSize\":\"12px\",\"lineHeight\":\"18px\",\"fontWeight\":\"500\",\"color\":\"rgb(115, 115, 115)\",\"background\":\"rgb(250, 250, 250)\",\"borderRadius\":\"6px\",\"borderStyle\":\"solid\",\"borderWidth\":\"0px\",\"box\":{\"w\":24,\"h\":18},\"insideNode\":true},\"user\":{\"has\":true,\"source\":null,\"badges\":0},\"anims\":[{\"name\":\"openarc-ai-node-in\",\"duration\":160,\"easing\":\"cubic-bezier(0.2, 0, 0, 1)\"}],\"opacityAtStart\":0,\"samples\":[[11,0],[26,0.171425],[43,0.520325],[69,0.703094],[82,0.81741],[112,0.938874],[128,0.970875],[145,0.989647],[170,0.998631],[187,1],[207,1],[210,1],[226,1],[242,1],[260,1],[276,1]],\"ramp\":8,\"reach1\":[187,1],\"first\":0,\"last\":1,\"rm\":{\"anims\":0,\"opacity\":1,\"min\":1,\"max\":1},\"badges\":1,\"dupPerNode\":0,\"nPromptInMarked\":false,\"agent2InMarked\":false,\"agent2InDom\":false}",
+      "at": 1790240351421
     },
     {
       "section": "Z1",
@@ -499,7 +534,7 @@
       "status": "PASS",
       "expected": "无错误行",
       "actual": "clean",
-      "at": 1790232940821
+      "at": 1790240351421
     }
   ]
 }

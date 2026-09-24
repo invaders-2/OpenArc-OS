@@ -9,8 +9,8 @@
 * 供应商与模型只有 OpenArc 总 API 设置一个来源（统一模型服务；不用 NOVAI 配置页、静态清单、独立密钥、直连）；未接通能力（视频等）明确不可用，不能显示为已连接；
 * 不许用 CSS 遮挡冒充完成；首页→画布通信、保存、权限、账号隔离都要正常。
 
-新的入口 / 边界 / 模型真源**以本轮为准**：提交 `b7ebaa5`（入口与单一真源）→ `ec5cbc5`（不静默替换不可用的默认模型 + 被拦导航后立即复位）→ `5b77186`（本地保存后仍呈现宿主改动；默认值显示与说明行收口）；真实 Electron 门禁 **48 PASS / 0 FAIL / 48（exit 0）**，证据 `artifacts/d5-02/d5-02-canvas-e2e.json`（sha256 `746a436a…`）。
-功能 / 视觉 / 动效均已取得实测证据（见 §5.1 的 G5 / G6）；**判定 = PARTIAL（限定范围）**：视觉自身规范符合通过、但与用户截图对照未验收（基准缺失）；动效本轮改动通过、MS §6「AI 新增节点 160ms 淡入 + 来源标记」上游未实现。逐项记录见 `PROGRESS.md` 末尾同名小节；tracked 证据 `docs/D5-02-SCOPE-CORRECTION-EVIDENCE.json`（48 条 checks）。
+新的入口 / 边界 / 模型真源**以本轮为准**：提交 `b7ebaa5`（入口与单一真源）→ `ec5cbc5`（不静默替换不可用的默认模型 + 被拦导航后立即复位）→ `5b77186`（本地保存后仍呈现宿主改动；默认值显示与说明行收口）→ `4525ab8`（保存冲突三方合并；MS §6 节点淡入 + 来源标记）→ `2a97b95`（F3f 取注入层证据的路径修正，判定未动）；**最终真实 Electron 门禁 = 50 PASS / 0 FAIL / 50（exit 0，被测 commit `2a97b95`）**，证据 `artifacts/d5-02/d5-02-canvas-e2e.json`（sha256 `7579e32c…`）。
+功能 / 视觉 / 动效均已取得实测证据（见 §5.1 的 G5 / G6 / G7）；**判定 = PARTIAL（限定范围，仅剩 1 项待用户裁定）**：功能 = 通过（50/50、exit 0、`notVerified: []`、Z1 clean，含保存冲突 F3e 与 MS §6 F3f）；视觉 = 对照已完成、可比项一致，数据项与条件项未验收（如实登记，不再阻塞），**1 项版本差异（回收站 FAB）待用户裁定**，**不整体宣布"视觉通过"**（§5.2）；动效 = 本轮改动通过、**MS §6 已实现并验证**。逐项记录见 `PROGRESS.md` 末尾同名小节；tracked 证据 `docs/D5-02-SCOPE-CORRECTION-EVIDENCE.json`（**50 条 checks，已按新 artifact 重生成**）。**一旦用户裁定 FAB → 可升级 PASS（限定范围）。**
 
 **基线 `bf82c5c`（开工核对：完整 HEAD 一致、工作树干净）**；分支 `feature/d4-03-tool-proxy`；
 唯一工作区 `/Users/wepingli/Desktop/OpenArc OS-d4-01`。未 push、未合并 main、未触碰其他工作区或实例、未进入 D5-03。
@@ -50,7 +50,7 @@ OpenArc 只在最外层加一条窗口条：当前项目/revision、画布选择
 
 ## 3. 五项既有缺口（结论已按 2026-09-24 范围修正更新）
 
-> 2026-09-24 真实 Electron 门禁 **48 PASS / 0 FAIL / 48**（exit 0，比上轮新增 F3d，`notVerified: []`）；五项缺口全部闭合。
+> 2026-09-24 真实 Electron 门禁 **50 PASS / 0 FAIL / 50**（exit 0，比上轮新增 F3e / F3f，`notVerified: []`；被测 commit `2a97b95`）；五项缺口全部闭合。
 
 | # | 缺口 | 结论（2026-09-24） | 证据 |
 | --- | --- | --- | --- |
@@ -97,16 +97,68 @@ OpenArc 只在最外层加一条窗口条：当前项目/revision、画布选择
 | # | 命令 | 结果 |
 | --- | --- | --- |
 | G0 | `npm run build` | exit 0（`tsc --noEmit` + `vite build`） |
-| G1 | `OPENARC_TESTED_COMMIT=$(git rev-parse HEAD) node experiments/d5-02/canvas-e2e.mjs`（真实 Electron；被测 commit `5b77186`） | **48 PASS / 0 FAIL / 48，exit 0**（比上轮新增 F3d）；`notVerified: []`；Z1 = clean |
-| G2 | `tests/d5-02-canvas-service` + `d5-02-canvas-tool` + `d5-02-model-list-authorization` + `d5-02-canvas-edit-proposal` | **22/22** |
+| G1 | `OPENARC_TESTED_COMMIT=$(git rev-parse HEAD) node experiments/d5-02/canvas-e2e.mjs`（真实 Electron；被测 commit `2a97b95`） | **50 PASS / 0 FAIL / 50，exit 0**（比上轮新增 **F3e** 保存冲突双向保留、**F3f** MS §6 标记 + 160ms 淡入）；`notVerified: []`；Z1 = clean |
+| G2 | `node --test tests/d5-02-canvas-*.test.mjs tests/d5-02-model-list-authorization.test.mjs`（整套 d5-02，本批复跑） | **45 pass / 0 fail**（比上轮新增 `tests/d5-02-canvas-merge.test.mjs` **12/12**、`tests/d5-02-canvas-ai-marks.test.mjs` **11/11**；旧的 22/22 是其中 4 个文件的口径） |
 | G3 | `tests/governance-app-model-grant.test.mjs`；`tests/model-*.test.mjs`（8 个文件） | **4/4**；**59/59**（文档岗复跑核对，取代旧的 60/60 口径） |
 | G4 | 两条预存在失败（干净 HEAD 导出树同样复现） | `tests/side-effect-c4-gates.test.mjs:474`、`tests/d4-03-approval-push-isolation.test.mjs:103`；与本轮改动无关，登记为既有缺口 |
-| G5 | 视觉核对（`artifacts/d5-02/visual/`：25 张截图 + 3 份 manifest + `visual-checks.md` + `computed-styles*.json` + `pixel-samples.json`） | 我们新增 / 改动元素 **通过**（12/18、说明行对比 18.16/19.05、chip 4.50–4.65、焦点环 2px+2px、`var(--radius-md,8px)`、省略 + `title`）；上游原版外观按用户指令保留；与用户截图对照 = 未验收（基准缺失） |
-| G6 | 动效核对（`artifacts/d5-02/motion/`：8 段 1824 帧 PNG + `motion-summary.md` + `motion-report.json` + `ai-node-report.json`） | 本轮改动 **通过**（c1 95ms / 约 190ms；c2 约 190ms + 上游 fadeUp 0.7s；c3 160–210ms；c4 0ms；c5 无反馈）；MS §6 = 未实现（上游） |
+| G5 | 视觉核对（`artifacts/d5-02/visual/`：25 张截图 + 3 份 manifest + `visual-checks.md` + `computed-styles*.json` + `pixel-samples.json`） | 我们新增 / 改动元素 **通过**（12/18、说明行对比 18.16/19.05、chip 4.50–4.65、焦点环 2px+2px、`var(--radius-md,8px)`、省略 + `title`）；上游原版外观按用户指令保留 |
+| G6 | 动效核对（`artifacts/d5-02/motion/`：8 段 1824 帧 PNG + `motion-summary.md` + `motion-report.json` + `ai-node-report.json`） | 本轮改动 **通过**（c1 95ms / 约 190ms；c2 约 190ms + 上游 fadeUp 0.7s；c3 160–210ms；c4 0ms；c5 无反馈）；**MS §6 = 已实现并验证**（`4525ab8`：160ms `cubic-bezier(.2,0,0,1)` 淡入 + 中性「AI」标记 + 减少动态效果立即呈现；门禁 F3f + `tests/d5-02-canvas-ai-marks.test.mjs` 11/11） |
+| G7 | 首页视觉基准对照（第十一批；`artifacts/d5-02/visual-baseline/`：11 张 PNG + `manifest.json`） | 基准已落盘（sha256 `557ce43d…`，2238x1654 = 1119x827 @dpr2，浅色）+ 真实 Electron 元素级截图：结构 / 尺寸 / 字体层级 / 按钮主次 / 网格列数 / 徽标 / 圆点 / 主题 / dpr / 缩放 / 背景 **一致**（多数量到 0px 差）；整幅平移 (2.0, 9.0)px、布局视口宽 2px、真实窗口可达内容区 1119x758、画布数量 13 vs 5 与卡片数据 **未验收**（如实登记，不再阻塞）；右下角回收站 FAB 为 **1 项版本差异，待用户裁定**；**不整体通过**（§5.2） |
 
-证据：`artifacts/d5-02/d5-02-canvas-e2e.json`（sha256 `746a436a668493e6d2486f354cf8f2ad5e52a6f81730c1a514a28c54dd9080a0`）+ 同名 `.log` + `d5-02-app-*.png`；tracked 证据 `docs/D5-02-SCOPE-CORRECTION-EVIDENCE.json`（48 条 checks）；视觉 / 动效证据见 G5 / G6。
+证据：`artifacts/d5-02/d5-02-canvas-e2e.json`（sha256 `7579e32c49f4aaafddb197be4a1b4e65336ddc8d6a01a4a30352e0b198b4f645`，本批 `shasum -a 256` 复核）+ 同名 `.log` + `d5-02-app-*.png`；tracked 证据 `docs/D5-02-SCOPE-CORRECTION-EVIDENCE.json`（50 条 checks，已按新 artifact 重生成）；视觉 / 动效证据见 G5 / G6；首页基准对照证据见 G7 / §5.2。
 
-### 5.2 历史记录（完整应用外壳形态 · 2026-09-20；**已被 2026-09-24 范围修正取代**）
+### 5.2 首页视觉基准对照（第十一批 · 2026-09-24）
+
+> 本节是**更正**：此前记录的"与用户截图对照 = 未验收（当时基准图不在本工作区）"已不成立 —— 用户首页基准图已由主线落盘本工作区（见下），本批按同一条件重截我们的首页并逐项对照。**判定不整体通过**：能比的项判「一致」，数据性与条件性差异判「未验收」。
+
+**基准（不再缺失）**
+
+| 项 | 值 |
+| --- | --- |
+| 原始来源（Codex 剪贴板临时文件，仍存在） | `/var/folders/49/m7hfshm96vl9xkmkpjrygqqc0000gn/T/codex-clipboard-48126615-7162-4f0d-b262-6ee0d399e5d8.png` |
+| 工作副本 | `artifacts/d5-02/baseline/user-home-baseline.png`（gitignored） |
+| tracked 副本 | `docs/snapshots/2026-09-24-user-home-baseline.png` |
+| sha256（三处相同） | `557ce43d865a1a08cd883daf116eea1ef54793dac7438d916753dddaae80d127` |
+| 尺寸 | 2238x1654 像素 = **1119x827 逻辑 @dpr2**；浅色主题 |
+| 复制留档时间 | 2026-09-24 15:43:13 |
+
+**我们的取图条件**（真实 Electron + 隔离 userData + CDP + 三步初始化向导）：目标 = **画布应用窗口内容区**（宿主 iframe 元素本身；不含宿主窗口标题栏与桌面），Playwright 元素级截图；浅色、dpr2、缩放 100%（页面 `data-studio-scale="off"`，ui-scaled 未加、body transform none、html zoom 1）、宿主默认玻璃（`--content-alpha .94` / `--surface-alpha .68` / blur(34px) saturate(1.8)）、`scrollY=0`、轮播固定第 1 张（点圆点，activeSlide=0，与基准同一份 `carousel-image-generation.jpg`）。
+
+尺寸口径：Electron 未实现 Browser.getWindowForTarget，OS 窗口改不动；物理口径上限 **1119x758**（宿主窗口固定 1440x940，`electron/window-manager.cjs` 的 resize 把 h 夹到 `host.h-100-y`）。827 高由 CDP `Emulation.setDeviceMetricsOverride(width=tw, height=th+82, deviceScaleFactor=2)` + 页面内画布窗口最大化达到（dpr 仍 2）；两条口径都留产物。
+
+**产物**（`artifacts/d5-02/visual-baseline/`，gitignored）：`home-firstscreen-1119x827@2x.png`（2238x1654，与基准同像素尺寸，判定主图）、`home-firstscreen-1152x827@2x.png`（2304x1654，按基准版面反推的布局视口宽）、`home-firstscreen-1119x758@2x-physical.png`（真实夹取上限旁证）、`home-cards-*.png`、`host-window-context-*.png`（含窗口条，仅留证）、`side-by-side-firstscreen-1152.png` / `-1119.png` / `side-by-side-cards-1152.png`、`baseline-home.png` / `baseline-home-cards.png`、`manifest.json`（每张图的 inner/outer 尺寸、dpr、缩放、主题、背景与透明度、滚动位置、画布数量、时间 + 条件对照 + 逐项判定 + 位移证据 + 像素差）。
+
+**逐项对照（判定只用三档；"一致"仅限条件可比项）**
+
+| 项目 | 基准 | 我们 | 判定 |
+| --- | --- | --- | --- |
+| 图幅 / 逻辑尺寸 | 2238x1654 = 1119x827 | 2238x1654 = 1119x827 | 一致 |
+| 主题 / dpr / 缩放 | 浅色 #f5f5f7 / 2 / 100% | 同 | 一致 |
+| 背景 / 玻璃透明度 | 页面自身不透明底 | 同（宿主玻璃在页面之下，不影响内容区像素） | 一致 |
+| 页面内容宽与居中 | 960 居中 | 960 居中 | 一致 |
+| 标题「无限画布」 | ink 189.5x44.5 | ink 189.5x44.5（48px/400/.02em） | 一致 |
+| 说明两行 | 行距 24、ink 高 39 | 同 | 一致 |
+| 主按钮「＋ 开始创作」 | 144.5x51 实心黑 | 144.5x51 实心黑 | 一致 |
+| 次按钮「继续上次」 | 白底 + 时钟图标 | 同（146.6x51） | 一致 |
+| hero 轮播块 | 450x298（CSS 452x300） | 450x298 | 一致 |
+| hero 图与信息条 | 第 1 张 jpg +「文生图创作 / 输入提示词…」ink 399x32 + 右侧「图像生成」 | 同一份 jpg、同文字同尺寸 | 一致 |
+| 轮播圆点 | 3 个（active 药丸 24x8 + 2 点） | 3 个（同） | 一致（用户口述"4 个"与图不符，按图判 3 个） |
+| 「所有画布 · N 个」 | 「所有画布 · 13 个」ink 86.5x10 | 「所有画布 · 5 个」ink 81.5x10 | **未验收**（数据不同；字阶 / 位置一致） |
+| 「＋ 新建画布」 | 116.5x39.5 | 116.5x39.5 | 一致 |
+| 卡片网格列数 / 列宽 / 间距 | 3 列 x 312、gap 12 | 3 列 x 312、gap 12（列距 324 同） | 一致 |
+| 卡片预览区结构 / 徽标「智能」 | 高 140、2x2、16:10 / 40.5x21 | 同 / 同 | 一致 |
+| 卡片缩略图 / 标题 / 时间戳内容 | 用户 13 本真实画布（有缩略图） | 隔离 userData 播的 5 本「智能画布 HH:MM」（缩略图空占位） | **未验收**（数据不同；字号 / 字重 / 颜色一致） |
+| 第二行被裁切构图 | 有 | 有 | 一致 |
+| 右下角回收站 FAB | **没有**（右下区域最暗像素 238） | **有**（同区域最暗 22） | **不一致（版本差异 · 唯一待用户裁定项）** —— 上游 6ce1a64 的 .trash-fab 是静态元素（无显隐逻辑）→ 基准侧版本与我们 vendor 的 commit 不同；也可能是 (2.0, 9.0)px 偏移的来源。裁定 = 接受现状 或 要求对齐（一行可逆改动） |
+| 整幅绝对位置 | 内容在 (0,0) | 整体右移 2.0px、下移 9.0px | **未验收**（差 2.0 / 9.0px） |
+| 布局视口宽（页面左边缘反推） | `~1156（页面左 98）~` | 1119（页面左 79.5）/ 1152（页面左 96） | **未验收**（差 2px） |
+| 真实窗口可达内容区 | —— | 1119x758 | **未验收**（高差 69px；827 靠 CDP 视口模拟） |
+
+**位移证据（"差的只是平移，不是布局"）**：内部相对距离逐项相同 —— 轮播顶→主按钮顶 195.0/195.0；轮播顶→「所有画布」顶 377.5/377.5；轮播顶→「新建画布」顶 363.0/363.0；轮播顶→卡片标题顶 601.5/601.5；标题 ink 顶→轮播顶 −55.5/−55.5；按钮 144.5x51、新建按钮 116.5x39.5、列宽 312、列距 324 全为 0 差。基准图内白字 bbox 差恰好 (2.0, 9.0)px；位移补偿后 hero 图区域 mean|diff| 6.59/255（>24 占 2.51%），不补偿 17.63。结论：**布局与基准一致，整幅只差一个 (2.0, 9.0)px 平移**；基准侧更像"内容被上移 9px（滚动或被裁切）+ 视口宽约多 4px"。
+
+**发现的产品缺陷**：无本批引入的缺陷 —— 页面就是上游 static/canvas-list.html 原文件（vendor 只改了 3 处"新建"入口），基准与我们在同一份文件下的内部布局逐项 0 差；差异来自条件（基准侧 9px 平移 / 视口宽、宿主窗口尺寸与 resize 夹取）与**基准侧版本不同**（右下角回收站 FAB：基准没有、上游 6ce1a64 有；该元素无显隐逻辑），不是本分支的布局缺陷。**最小修法建议（不动手）**：回收站 FAB 的取舍待用户裁定 —— 接受现状，或要求对齐（对齐是一行可逆改动）；9px 平移与 2px 视口宽不需要改代码。**未闭合**：见 §7 第 1 条。
+
+### 5.3 历史记录（完整应用外壳形态 · 2026-09-20；**已被 2026-09-24 范围修正取代**）
 
 | # | 命令 | 结果（原记录） |
 | --- | --- | --- |
@@ -129,20 +181,22 @@ FAIL 明细：F3b（图片资源重开解析）、F4（AI 编辑链缺环）。
    （D1 撤权路径失效的根因）。
 4. `electron/dsh-tool-profile.cjs`：`canvas.read`/`canvas.edit` 不在 Harness 广播面（加入后模型才能看到并提议画布工具）。
 5. 桥：同源 bundle 资源被 fetch 覆盖层误伤成 501；上传依赖 FormData 过 postMessage（改为页面内读 data URL 再交宿主）。
+6. **保存竞争（关闭条件③，`4525ab8` 修复）：页面 500ms 待保存窗口内的本地编辑撞上宿主 / AI 改动被静默覆盖。** 上游 409 分支"换新基线 → 重发旧文档"会覆盖对方；改为**三方合并**（base = 最后一次成功同步 / local / remote），按 node / edge id 合并、字段互不重叠各自保留、**同一字段两边都改 → 本地留原位 + 远端复制为 `<id>-remote`**（`oaConflictCopyOf` 标记 + 并排偏移）+ 中性可恢复提示；只重发合并结果、**最多 2 次**，达上限明确呈现"无法自动合并，双方内容都已保留"并停止（**不盲重试 409、debounce 一字未动**）。真机前后对照：修复前宿主改动在页面与存储双双消失、同字段冲突无副本；修复后两边都在且重开仍在；回归：自动保存 / saveNow / 撤销重做 / 重开 / 旧 revision PUT→409 不覆盖 / 只读闸 全通过。宿主侧两处：base 按存储当前事实对齐（`src/canvas/CanvasHost.tsx:381-395`）、冲突回包按 `canvas.get` 口径解析资源引用（`:408`）。新增单测 `tests/d5-02-canvas-merge.test.mjs` **12/12**；门禁 F3e。
+7. **MOTION_SYSTEM §6（关闭条件②，`4525ab8` 实现）：「AI 新增节点 160ms 淡入 + 来源标记」之前未实现。** 以命令账本为唯一真源（`actorKind=AGENT` + `outcome=APPLIED`，**不是**"远端同步=AI"的猜测口径）：命中节点 **160ms `cubic-bezier(.2,0,0,1)` 淡入一次**（整层重建不重播）+ 中性「AI」标记（12/18、字重 500、`#737373`、`border-width 0`、`--radius-sm 6px`、`pointer-events:none`、不挡节点按钮、节点尺寸不变）；减少动态效果下 `animation:none`、opacity 立即 1。真机实测（F3f）：11ms 采样 0 → 8 个中间帧 → 187ms 到 1（同期另一组采样 161ms ≈0.999 / 177ms = 1），与解析曲线拟合整体时移 **2ms**、最大偏差 **0.0068**；三类反证（页面手工新增 / 宿主 USER / 用户新增被 AI 改过）全部无标记无动画；重开从账本重新推导保留标记；去重（每节点最多 1 个徽标、不重播）。**已知边界**：账本只记命令本身 → `node.copy` / 不带 id 的 AI 新增不猜不标记；marks 只取最近 200 条账本。新增单测 `tests/d5-02-canvas-ai-marks.test.mjs` **11/11**；门禁 F3f。
 
 ## 7. 未闭合 / 下一步
 
 （2026-09-24 范围修正后最终口径）
 
-1. **与用户截图对照 = 未验收（基准缺失）**：用户给的首页截图未出现在本工作区 / 本会话（已检索工作区与 Desktop/Downloads）。关闭方式：用户提供文件，或明确「以上游原版页面在真实 Electron 中的渲染为基准」。
-2. **MS §6「AI 新增节点 160ms 淡入 + 来源标记」= 未实现（上游）**：`canvas.html` / `canvas.js` / `canvas.css` 无节点入场动画与来源徽标（`canvas.js:5615-5642` 每次整体重建节点层），节点同帧直接出现（D1 修复后本地保存过的编辑器也能呈现，1820ms）。关闭方式：由后续动效批次实现。
-3. **新登记的既有缺陷：宿主改动落在页面 500ms debounce 窗口内会被页面 PUT 覆盖**（未落库竞态；改前改后一致，非本批引入）。建议单开一批处理。
+1. **视觉对照里剩下的"未验收"项（按"条件无法完全匹配 → 未验收"如实登记，不再是阻塞项；§5.2）**：① **数据项** —— 画布数量 13 vs 5、「所有画布 · N 个」、卡片标题 / 缩略图 / 时间戳内容（隔离 userData 里是宿主 `canvas/create` 播的 5 本，需要真实数据才能比）；② **条件项** —— 整幅 (2.0, 9.0)px 平移、布局视口宽差 2px、真实窗口可达内容区 1119x758（宿主窗口固定 1440x940 + `electron/window-manager.cjs` 的 resize 夹取 maxH=host.h-100-y，827 高靠 CDP 视口模拟达到）；③ **1 项版本差异待用户裁定（关闭条件①）** —— 基准图右下角没有回收站 FAB、我们 vendor 的 6ce1a64 有（静态元素、无显隐逻辑）→「接受现状」或「要求对齐」（一行可逆改动）。**这是当前唯一待用户裁定的关闭条件；裁定后可升级 PASS（限定范围）。**
+2. **两条预存在失败测试继续单列、不改断言（关闭条件②）**：`tests/side-effect-c4-gates.test.mjs:474`、`tests/d4-03-approval-push-isolation.test.mjs:103`（干净 HEAD 导出树同样复现，与本轮无关）。
+3. **既有 NOT VERIFIED 不变（关闭条件③）**：Windows / 多屏 / 高 DPI 等（逐条见 `docs/D5-02-SCOPE-CORRECTION-EVIDENCE.json` 的 `notVerified`）。
 4. **F3d / F4-presented 依赖页面 2.5s 轮询与窗口前台状态**：被完全遮挡时 Chromium 会节流；F3d 已 `bringToFront` 兜住。
 5. **其他 NOVAI 子页文件仍在 bundle 内但无入口不可达**（smart-canvas 亦不可达，未注入适配层 / 守卫）。
 6. **视频 / ComfyUI / RunningHub 等保持「明确不可用」**，未接通链路未启用。
-7. **Windows / 多屏 / 高 DPI 等既有 NOT VERIFIED 不变**。
+7. **MS §6 的已知边界（见 §6 第 7 条）**：账本只记命令本身 —— `node.copy` / 不带 id 的 AI 新增对不上号，不猜不标记；marks 只取最近 200 条账本。
 
-**判定：D5-02 = PARTIAL（限定范围）。** 功能 = **通过**（真实 Electron 门禁 48/48、exit 0）；视觉 = 自身规范符合 **通过**、**与用户截图对照 = 未验收**（基准缺失）；动效 = 本轮改动 **通过**、**MS §6 AI 节点淡入 + 来源标记 = 未实现**（上游）。关闭条件：① 用户提供首页截图或确认基准；② MS §6 由后续动效批次实现；③ 宿主改动落在页面 500ms debounce 窗口内会被页面 PUT 覆盖（未落库竞态，改前改后一致，非本批引入）建议单开一批处理；④ 门禁 F3d / F4-presented 依赖页面 2.5s 轮询与窗口前台状态（被完全遮挡时 Chromium 会节流；F3d 已 bringToFront 兜住）。
+**判定：D5-02 = PARTIAL（限定范围，仅剩 1 项待用户裁定）。** 功能 = **通过**（真实 Electron 门禁 **50/50、exit 0**、`notVerified: []`、Z1 clean；含保存冲突 F3e 与 MS §6 F3f）；视觉 = 对照已完成、可比项一致（多数量到 0px 差），数据项与条件项 **未验收**（如实登记，不再是阻塞项），**1 项版本差异（回收站 FAB）待用户裁定**，**不整体宣布"视觉通过"**（§5.2）；动效 = 本轮改动 **通过**、**MS §6 已实现并验证**。关闭条件：① **用户对回收站 FAB 的裁定**（接受现状 或 要求对齐；其余视觉项已按"条件无法完全匹配 → 未验收"如实登记，不再是阻塞项）；② 两条**预存在**失败测试（`tests/side-effect-c4-gates.test.mjs:474`、`tests/d4-03-approval-push-isolation.test.mjs:103`，已在干净 HEAD 导出树复现，与本轮无关）继续单列、不改断言；③ 既有 NOT VERIFIED（Windows / 多屏 / 高 DPI 等）不变。**一旦用户裁定 FAB → 可升级 PASS（限定范围）（唯一的升级条件）。**
 
 ### 7.1 历史记录（完整应用外壳形态 · 2026-09-20；已被 2026-09-24 范围修正取代）
 
