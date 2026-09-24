@@ -112,18 +112,22 @@ const callsByTool = (toolId) => tableRows("side_effect_calls").filter((r) => r.t
 const execsByTool = (toolId) => tableRows("tool_executions").filter((r) => r.tool_id === toolId);
 const auditHas = (needle) => JSON.stringify(tableRows("authorization_audit")).includes(needle);
 
-/* ── 画布帧（宿主 iframe；仅作观测，主线负责画布页断言）── */
-function canvasFrame() {
+/* ── 应用帧（宿主 iframe；仅作观测，主线负责画布页断言）──
+ *  新形态：入口是上游原版列表首页 static/canvas-list.html，编辑器是**同一个宿主帧内**导航后的
+ *  static/canvas.html；两者不再同时存在，所以分别按 URL 精确取帧。*/
+function frameMatching(re) {
   const pages = browser ? browser.contexts().flatMap((c) => c.pages()) : [];
-  for (const p of pages) { for (const f of p.frames()) { if (String(f.url()).includes("openarc-canvas://")) return f; } }
+  for (const p of pages) { for (const f of p.frames()) { if (re.test(String(f.url()))) return f; } }
   return null;
 }
-async function inFrame(code) {
-  const f = canvasFrame();
+const listFrame = () => frameMatching(/openarc-canvas:\/\/bundle\/static\/canvas-list\.html/);
+const canvasFrame = () => frameMatching(/openarc-canvas:\/\/bundle\/static\/canvas\.html/);
+async function inFrameOf(f, code) {
   if (!f) return { __noFrame: true };
   try { return JSON.parse((await f.evaluate("(async () => { return JSON.stringify(await (async () => { " + code + " })()); })()")) || "null"); }
   catch (e) { return { __error: String((e && e.message) || e).slice(0, 200) }; }
 }
+async function inFrame(code) { return await inFrameOf(canvasFrame(), code); }
 const frameNodeCount = () => inFrame("return { url: location.href, nodes: document.querySelectorAll('#nodes .node, #nodes [data-node-id], .canvas-node').length, board: !!document.getElementById('board'), internals: typeof window.__openarcCanvasInternals };");
 
 async function shot(name) {
@@ -254,10 +258,18 @@ async function main() {
   // 预览集成分支按"不改用户已定 UI"保留入口名"无限画布"；核心线叫"AI Studio"。两种都接受。
   await js("const el = document.querySelector('[aria-label=\"打开AI Studio\"]') || document.querySelector('[aria-label=\"打开无限画布\"]'); if (el) el.click(); return !!el;");
   const hostUp = await waitSel("[data-canvas-host]", 20000);
-  const frameUp = await waitFor(() => !!canvasFrame(), 15000);
+  // 产品路径：开窗先落在列表首页（canvas-list），点当前这本的卡片进入编辑器（不直接造帧）
+  const listUp = await waitFor(() => !!listFrame(), 25000);
+  const cardSel = "#cardsGrid .project-card[data-canvas-id=\"" + canvasId + "\"]";
+  const cardUp = listUp && await waitFor(async () => (await inFrameOf(listFrame(), "return !!document.querySelector(" + JSON.stringify(cardSel) + ");")) === true, 20000);
+  const cardClick = cardUp ? await inFrameOf(listFrame(), "const el = document.querySelector(" + JSON.stringify(cardSel) + "); if (!el) return 'missing'; el.click(); return 'clicked';") : "missing";
+  const frameUp = await waitFor(() => !!canvasFrame(), 40000);
+  const adapterUp = frameUp && await waitFor(async () => (await inFrame("return typeof window.__openarcCanvasInternals;")) === "object", 30000);
   const frameProbe = frameUp ? await frameNodeCount() : null;
+  const openedState = adapterUp ? await inFrame("const s = window.__openarcCanvas && window.__openarcCanvas.state ? window.__openarcCanvas.state() : null; return s ? { id: s.canvasId, nodes: s.nodeCount } : null;") : null;
   show("canvas frame", frameProbe);
-  record("S1", "新建画布 0 节点 + 打开画布窗口（iframe 活着，供‘呈现’路径轮询）", !!(created && created.ok) && before.nodes === 0 && hostUp, "0 节点 / host 就绪", JSON.stringify({ nodes: before.nodes, revision: before.revision, hostUp, frameUp, frame: frameProbe }));
+  show("opened canvas", openedState);
+  record("S1", "新建画布 0 节点 + 从列表首页卡片进入画布窗口（编辑器帧活着、canvasId 一致，供‘呈现’路径轮询）", !!(created && created.ok) && before.nodes === 0 && hostUp && listUp && cardClick === "clicked" && frameUp && !!adapterUp && !!(openedState && openedState.id === canvasId), "0 节点 / host 就绪 / 卡片进入编辑器且 canvasId 一致", JSON.stringify({ nodes: before.nodes, revision: before.revision, hostUp, listUp, cardUp, cardClick, frameUp, adapterUp, frame: frameProbe, openedState }));
 
   /* ── S2 画布 Agent 链：提议 canvas_edit（产品入口 task/run）── */
   const grant = await governance({ type: "governance/grantAppToolAccess", appId: "ai", actions: ["tool.canvas.edit"] });

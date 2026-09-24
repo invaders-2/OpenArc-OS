@@ -1354,16 +1354,6 @@ input[type="checkbox"] {
   border-radius: var(--radius-md);
   white-space: nowrap;
 }
-.browser-status {
-  height: 28px;
-  flex-shrink: 0;
-  padding: 3px 13px;
-  font-size: 11px;
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .web-viewport {
   flex: 1;
   min-height: 0;
@@ -2899,6 +2889,9 @@ input[type="checkbox"] {
 .d401-defaults h4 { margin: 0; font-size: var(--fs-heading); font-weight: var(--fw-medium); }
 .d401-defaults label { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); font-size: var(--fs-secondary); }
 .d401-test { font-size: var(--fs-micro); color: var(--muted); }
+/* 模型能力勾选（D5-02）：中性灰、无描边分层，行内排布；键盘焦点沿用全局 focus 环（tokens.css）。 */
+.d401-caps { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font-size: var(--fs-micro); color: var(--muted); }
+.d401-caps label { display: inline-flex; align-items: center; gap: var(--space-1); }
 
 /* ── D4-03C4 · Trusted Approval UI ───────────────────────────────────────── */
 .approval { display: flex; flex-direction: column; gap: 10px; }

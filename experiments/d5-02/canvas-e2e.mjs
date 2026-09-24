@@ -1,8 +1,8 @@
 /**
  * D5-02 Full-App · NOVAI 完整应用集成门禁（真实 electron . + 真实产品 UI + 本地确定性 provider）。
  *
- *   A 系列  完整应用：原版首页(AI Studio 外壳)、侧栏导航逐项可达、首页→新建项目→无限画布→
- *           编辑保存→返回首页→再打开项目（同一本、内容仍在）、截图留证
+ *   A 系列  入口形态：入口就是上游原版列表首页 canvas-list（画布工作台，不再是完整外壳/侧栏导航）、
+ *           开始创作直达编辑器、返回列表、继续上次、卡片直达→编辑保存→返回列表→再打开（同一本、内容仍在）、截图留证
  *   B 系列  统一后端：模型只来自 OpenArc、文本/图片真实调用、失败如实、不支持能力明确报错、
  *           更新/下载禁用 + 出网接收端 0 命中、应用信息/队列来自宿主
  *   C 系列  D1 撤权 / D2 能力不支持 / D3 预算 / D4 停止与迟到 / D5 失败收敛
@@ -63,10 +63,14 @@ async function waitFor(fn, timeout = 30000) { const t0 = Date.now(); while (Date
 const waitSel = (sel, ms) => waitFor(() => has(sel), ms || 20000);
 
 const frameBy = (re) => page.frames().find((f) => re.test(f.url())) || null;
-const shellFrame = () => frameBy(/openarc-canvas:\/\/bundle\/index\.html/);
-const canvasFrame = () => frameBy(/openarc-canvas:\/\/bundle\/static\/canvas\.html/);
+/** 应用入口帧：宿主持有的应用页，入口就是上游原版列表首页 canvas-list.html（画布工作台）。*/
 const listFrame = () => frameBy(/openarc-canvas:\/\/bundle\/static\/canvas-list\.html/);
-const homeFrame = () => frameBy(/openarc-canvas:\/\/bundle\/static\/home\.html/);
+/** 无限画布编辑器帧：入口帧在**同一个宿主帧内**导航到 canvas.html?id=…&project=…（不是子 iframe）。*/
+const canvasFrame = () => frameBy(/openarc-canvas:\/\/bundle\/static\/canvas\.html/);
+/** 「应用页」= 当前加载的应用帧。入口页与编辑器是同一个宿主帧在不同时刻的 URL：停在编辑器时
+ *  canvas-list 帧已经不存在，所以需要"应用页自证"的探针（无桥 / 账号存储 / 宿主端点）必须按当前页取帧，
+ *  否则会退化成 __noFrame 的空断言。入口页优先。*/
+const shellFrame = () => listFrame() || canvasFrame();
 const frameFor = (pageId) => frameBy(new RegExp("/static/" + pageId + "\\.html"));
 const allBundleFrames = () => page.frames().filter((f) => f.url().indexOf("openarc-canvas://bundle/") === 0);
 async function inFrame(f, code) {
@@ -149,13 +153,22 @@ async function closeAppWindow() {
   if (!clicked) return false;
   return await waitFor(() => allBundleFrames().length === 0, 15000);
 }
-/** 关窗重开/切页之后，从**首页最近项目卡片**再打开当前这本画布（产品路径）。*/
+/** 关窗重开/切页之后，从**画布列表首页的卡片**再打开当前这本画布（产品路径）。
+ *  新形态里入口页 canvas-list 与编辑器 canvas.html 是同一个宿主帧：若此刻还停在编辑器（例如上一次
+ *  导航被拦、宿主没有整帧重置），先按产品路径点 #backToManagerBtn 回列表，再点卡片进编辑器。
+ *  卡片实现（public/novai-canvas/static/canvas-list.html:1175-1253）：.project-card[data-canvas-id]
+ *  由 addEventListener 绑定 click → openCanvas(c) → /static/canvas.html?id=…。*/
 async function reopenCurrentCanvasFromHome() {
   const opened = await openAppWindow();
   if (!opened) return false;
-  await waitFor(() => !!homeFrame(), 25000);
-  await waitFor(async () => (await inFrame(homeFrame(), "const r = await (await fetch('/api/recent-canvases')).json(); return (Array.isArray(r) ? r : []).some(function (c) { return c.id === " + JSON.stringify(currentCanvasId) + "; });")) === true, 20000);
-  const clicked = await inFrame(homeFrame(), "const id = " + JSON.stringify(currentCanvasId) + "; const cards = Array.from(document.querySelectorAll('#recentProjects .hp-proj:not(.hp-proj-new)')); const hit = cards.find(function (c) { return (c.getAttribute('onclick') || '').indexOf(encodeURIComponent(id)) >= 0; }) || cards[0]; if (!hit) return 'missing'; hit.click(); return 'clicked';");
+  if (!listFrame() && canvasFrame()) {
+    await inFrame(canvasFrame(), "const el = document.getElementById('backToManagerBtn'); if (!el) return 'missing'; el.click(); return 'clicked';");
+    await waitFor(() => !!listFrame() && !canvasFrame(), 30000);
+  }
+  const listUp = await waitFor(() => !!listFrame(), 25000);
+  const cardSel = "#cardsGrid .project-card[data-canvas-id=\"" + currentCanvasId + "\"]";
+  const cardUp = listUp && await waitFor(async () => (await inFrame(listFrame(), "return !!document.querySelector(" + JSON.stringify(cardSel) + ");")) === true, 20000);
+  const clicked = cardUp ? await inFrame(listFrame(), "const el = document.querySelector(" + JSON.stringify(cardSel) + "); if (!el) return 'missing'; el.click(); return 'clicked';") : "missing";
   const up = await waitFor(() => !!canvasFrame(), 35000);
   return clicked === "clicked" && up === true;
 }
@@ -200,52 +213,87 @@ async function main() {
   }
   record("A0", "真实 UI 登录 admin", await login(ADMIN.id, ADMIN.pw), "ready", await gate());
 
-  /* ══════════════════ A 系列：完整应用（首页 / 导航 / 项目往返） ══════════════════ */
+  /* ══════════════════ A 系列：入口形态（列表首页 / 直达编辑器 / 返回路径） ══════════════════ */
   const opened = await openAppWindow();
-  const shellUp = await waitFor(() => !!shellFrame(), 25000);
-  const homeUp = await waitFor(() => !!homeFrame(), 20000);
+  const entryUp = await waitFor(() => !!listFrame(), 25000);
   await sleep(1200);
-  const shellInfo = await shellJs("return { title: document.title, active: (document.querySelector('iframe.active') || {}).id || null, nav: Array.from(document.querySelectorAll('.nav-item,.side-pill')).length, pages: Array.from(document.querySelectorAll('iframe')).map(f => f.id) };");
-  const homeInfo = await inFrame(homeFrame(), "return { title: document.title, newCard: !!document.querySelector('.hp-proj-new'), recentBox: !!document.getElementById('recentProjects') };");
-  record("A1", "打开应用 = 上游原版外壳（AI Studio）+ 原版首页（不是单个画布编辑器）",
-    opened && shellUp && homeUp && shellInfo.title === "AI Studio" && shellInfo.active === "frame-home" && shellInfo.pages.length >= 11 && homeInfo.newCard === true && homeInfo.recentBox === true,
-    "AI Studio 外壳 + frame-home 首页渲染", JSON.stringify({ opened, shellUp, homeUp, shellInfo, homeInfo }));
+  const entryInfo = await inFrame(listFrame(), "return { title: document.title, start: !!document.getElementById('btnStartCreate'), cont: !!document.getElementById('btnContinueLast'), newProject: !!document.getElementById('btnNewProject'), grid: !!document.getElementById('cardsGrid'), empty: !!document.getElementById('cardsEmpty'), picker: !!document.getElementById('canvasPickerOverlay'), iframes: document.querySelectorAll('iframe').length, homeFrameEl: !!document.getElementById('frame-home'), navItems: document.querySelectorAll('.nav-item,.side-pill').length };");
+  const hostChrome = await js("const host = document.querySelector('[data-canvas-host]'); return { host: !!host, bar: !!document.querySelector('[data-canvas-bar]'), status: !!document.querySelector('[data-canvas-status]'), notice: !!document.querySelector('[data-canvas-notice]') };");
+  const bundleFrames = allBundleFrames().map((f) => String(f.url()));
+  const deadShellFrames = page.frames().filter((f) => /bundle\/index\.html|\/static\/home\.html/.test(f.url())).map((f) => String(f.url()));
+  record("A1", "打开应用 = 上游原版列表首页 static/canvas-list.html（画布工作台）；不是完整外壳（无 index.html/home.html 帧、无侧栏导航），宿主只剩宿主根（顶部操作条/状态行/提示横幅已删）",
+    opened && entryUp && entryInfo.title === "画布工作台" && entryInfo.start === true && entryInfo.cont === true && entryInfo.newProject === true && entryInfo.grid === true && entryInfo.iframes === 0 && entryInfo.homeFrameEl === false && entryInfo.navItems === 0 && hostChrome.host === true && hostChrome.bar === false && hostChrome.status === false && hostChrome.notice === false && bundleFrames.length === 1 && /\/static\/canvas-list\.html/.test(bundleFrames[0]) && deadShellFrames.length === 0,
+    "canvas-list 入口帧 + 无外壳/无宿主 chrome", JSON.stringify({ opened, entryUp, entryInfo, hostChrome, bundleFrames: bundleFrames.map((u) => u.slice(0, 90)), deadShellFrames }));
 
-  const NAV = [
-    { route: "online", frame: "frame-online" },
-    { route: "gpt-chat", frame: "frame-gpt-chat" },
-    { route: "canvas", frame: "frame-canvas" },
-    { route: "asset-manager", frame: "frame-asset-manager" },
-    { route: "home", frame: "frame-home" },
-  ];
-  const navResults = [];
-  for (const item of NAV) {
-    const navSel = "[onclick*=\"" + "'" + item.route + "'" + "\"]";
-    const clicked = await shellJs("const el = document.querySelector(" + JSON.stringify(navSel) + "); if (!el) return 'missing'; el.click(); return 'ok';");
-    const ok = await waitFor(async () => {
-      const st = await shellJs("return { active: (document.querySelector('iframe.active') || {}).id || null, activeHasDoc: !!document.querySelector('iframe.active') && document.querySelector('iframe.active').contentDocument !== null };");
-      return st.active === item.frame && st.activeHasDoc === true;
-    }, 20000);
-    navResults.push({ route: item.route, clicked, ok });
-  }
-  record("A2", "左侧导航逐项可达：每个入口切到对应子页且子页文档真的加载（不是空 iframe）",
-    navResults.every((r) => r.ok === true && r.clicked === "ok"),
-    "5 个导航项 active + contentDocument 就绪", JSON.stringify(navResults));
+  // A2：新形态下没有左侧导航，其他子页面（在线生图 / GPT 对话 / 素材库 / 设置 / 智能画布）一律不可达。
+  // 判定口径：① 入口页内 a/button/iframe 以及带 onclick/data-* 的元素的**全部属性**里不出现这些路由名；
+  //          ② 入口页里 iframe 数 = 0；③ 页面内不存在 frame-* 子页容器；④ 宿主帧 URL 里没有这些子页。
+  const SUBPAGES = ["online", "gpt-chat", "asset-manager", "api-settings", "comfyui-settings", "smart-canvas"];
+  const entryNav = await inFrame(listFrame(), "const routes = " + JSON.stringify(SUBPAGES) + "; const els = Array.from(document.querySelectorAll('a,button,iframe,[onclick],[data-route],[data-src],[data-page],[data-href]')); const hits = []; els.forEach(function (el) { const attrs = Array.from(el.attributes || []).map(function (a) { return a.name + '=' + a.value; }).join(' ').toLowerCase(); routes.forEach(function (rt) { if (attrs.indexOf(rt) >= 0) hits.push({ tag: el.tagName, route: rt, attrs: attrs.slice(0, 120) }); }); }); const ids = ['frame-home','frame-online','frame-gpt-chat','frame-canvas','frame-asset-manager','frame-api-settings','frame-comfyui-settings']; return { hits: hits.slice(0, 5), hitCount: hits.length, navFrameIds: ids.filter(function (id) { return !!document.getElementById(id); }), iframes: document.querySelectorAll('iframe').length };");
+  const subFrames = page.frames().filter((f) => /\/static\/(online|gpt-chat|asset-manager|api-settings|comfyui-settings|smart-canvas)\.html/.test(f.url())).map((f) => String(f.url()));
+  record("A2", "其他子页面入口不可达：入口页没有指向 online/gpt-chat/asset-manager/api-settings/comfyui-settings/smart-canvas 的导航，也不存在这些子页帧",
+    entryNav.hitCount === 0 && entryNav.iframes === 0 && entryNav.navFrameIds.length === 0 && subFrames.length === 0,
+    "0 个跨页导航入口 + 0 个子页帧", JSON.stringify({ entryNav, subFrames }));
 
-  // 首页 → 新建项目 → 无限画布编辑器
-  await shellJs("const el = document.querySelector(" + JSON.stringify("[onclick*=\"" + "'home'" + "\"]") + "); if (el) el.click(); return 'ok';");
-  await waitFor(() => !!homeFrame(), 15000);
-  const before = await inFrame(homeFrame(), "const r = await (await fetch('/api/recent-canvases')).json(); return { n: Array.isArray(r) ? r.length : r };");
-  const clickNew = await inFrame(homeFrame(), "const el = document.querySelector('.hp-proj-new'); if (!el) return 'missing'; el.click(); return 'clicked';");
+  // A3：列表首页「开始创作」→ **直接**进入编辑器；全程不得出现选画布遮挡层 .active
+  const pickerSamples = [];
+  const pickerTimer = setInterval(async () => {
+    try {
+      const f = shellFrame();
+      if (!f) return;
+      const cls = await inFrame(f, "const el = document.getElementById('canvasPickerOverlay'); return el ? String(el.className) : null;");
+      pickerSamples.push({ page: /canvas-list\.html/.test(f.url()) ? "list" : "canvas", cls: cls === null ? "absent" : String(cls) });
+    } catch { /* ignore */ }
+  }, 150);
+  const listBeforeCreate = ((await canvas({ type: "canvas/list" })).items || []).length;
+  const startClick = await inFrame(listFrame(), "const el = document.getElementById('btnStartCreate'); if (!el) return 'missing'; el.click(); return 'clicked';");
   const editorUp = await waitFor(() => !!canvasFrame(), 40000);
   const adapterUp = await waitFor(async () => (await inFrame(canvasFrame(), "return { i: typeof window.__openarcCanvasInternals, a: typeof window.__openarcCanvas, b: typeof window.__openarcBridge };")).i === "object", 30000);
   // 适配器就绪 ≠ 画布文档已载入：等到 canvasId 真的出现（否则后面所有断言都建在 null 上）
   await waitFor(async () => { const st = await inFrame(canvasFrame(), "const s = window.__openarcCanvas.state(); return { id: s.canvasId };"); return !!(st && st.id); }, 30000);
-  const canvasState = await inFrame(canvasFrame(), "const s = window.__openarcCanvas.state(); return { id: s.canvasId, nodes: s.nodeCount, edges: s.edgeCount, ro: window.__openarcBridge.isReadOnly() };");
-  currentCanvasId = canvasState.id || null;
-  record("A3", "首页「新建项目」→ 进入无限画布编辑器（同一本书由外壳中继交给画布页；不是只加载列表页）",
-    clickNew === "clicked" && editorUp && adapterUp && !!currentCanvasId && canvasState.ro === false,
-    "编辑器帧 + 适配器就绪 + 非只读", JSON.stringify({ before, clickNew, editorUp, adapterUp, canvasState }));
+  clearInterval(pickerTimer);
+  const pickerActive = pickerSamples.filter((s) => /(^|\s)active(\s|$)/.test(s.cls));
+  const canvasState0 = await inFrame(canvasFrame(), "const s = window.__openarcCanvas.state(); return { id: s.canvasId, nodes: s.nodeCount, edges: s.edgeCount, ro: window.__openarcBridge.isReadOnly() };");
+  currentCanvasId = canvasState0.id || null;
+  const listAfterCreate = ((await canvas({ type: "canvas/list" })).items || []).length;
+  record("A3", "「开始创作」→ 直接进入无限画布编辑器（canvas.html + 适配器就绪 + 非只读），且真的新建了一本；全程选画布遮挡层 #canvasPickerOverlay 未出现 .active",
+    startClick === "clicked" && editorUp && adapterUp && !!currentCanvasId && canvasState0.ro === false && listAfterCreate === listBeforeCreate + 1 && pickerActive.length === 0,
+    "编辑器帧 + 非只读 + 新建 1 本 + 遮挡层未激活", JSON.stringify({ startClick, editorUp, adapterUp, canvasState0, listBeforeCreate, listAfterCreate, pickerSamples: pickerSamples.slice(0, 8), pickerActive: pickerActive.slice(0, 3) }));
+
+  // A4：编辑器 #backToManagerBtn → 回到 canvas-list 入口帧（同一个宿主帧内导航）
+  const backClick = await inFrame(canvasFrame(), "const el = document.getElementById('backToManagerBtn'); if (!el) return 'missing'; el.click(); return 'clicked';");
+  const backToList = await waitFor(() => !!listFrame() && !canvasFrame(), 30000);
+  const backInfo = await inFrame(listFrame(), "return { title: document.title, grid: !!document.getElementById('cardsGrid'), start: !!document.getElementById('btnStartCreate') };");
+  record("A4", "编辑器 #backToManagerBtn → 回到 canvas-list 入口帧（同一宿主帧内导航：返回后画布帧不再存在）",
+    backClick === "clicked" && backToList && backInfo.title === "画布工作台" && backInfo.grid === true && backInfo.start === true,
+    "回入口帧 + 画布帧消失", JSON.stringify({ backClick, backToList, backInfo }));
+
+  // A5：「继续上次」= 打开最近更新的那本（与宿主 canvas/list 的 updatedAt 第一名对照）
+  const ipcList = (await canvas({ type: "canvas/list" })).items || [];
+  const latest = ipcList.slice().sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))[0] || null;
+  // 「继续上次」读的是页面自己的画布清单：等卡片渲染出来（页面数据到位）再点，否则会走"没有画布→新建"分支
+  const listReadyForContinue = await waitFor(async () => (await inFrame(listFrame(), "return document.querySelectorAll('#cardsGrid .project-card').length;")) > 0, 20000);
+  const continueClick = await inFrame(listFrame(), "const el = document.getElementById('btnContinueLast'); if (!el) return 'missing'; el.click(); return 'clicked';");
+  const contUp = await waitFor(() => !!canvasFrame(), 40000);
+  const contReady = contUp && await waitFor(async () => { const st = await inFrame(canvasFrame(), "const s = window.__openarcCanvas ? window.__openarcCanvas.state() : null; return s ? { id: s.canvasId } : null;"); return !!(st && st.id); }, 30000);
+  const contId = contReady ? (await inFrame(canvasFrame(), "const s = window.__openarcCanvas.state(); return { id: s.canvasId };")).id : null;
+  const contDoc = contId ? await canvas({ type: "canvas/get", canvasId: contId }) : null;
+  record("A5", "「继续上次」→ 进入 canvas.html 且打开的正是最近更新的那本（宿主 IPC canvas/list 的 updatedAt 第一名，也就是刚创建的这本）",
+    listReadyForContinue && continueClick === "clicked" && contUp && !!contId && !!latest && contId === latest.canvasId && contId === currentCanvasId && !!(contDoc && contDoc.ok),
+    "canvas.html + 最近更新那本", JSON.stringify({ listReadyForContinue, continueClick, contUp, openedId: contId, latest: latest ? { canvasId: latest.canvasId, updatedAt: latest.updatedAt } : null, currentCanvasId, ipcCount: ipcList.length }));
+
+  // A6：卡片直达（上游卡片实现：.project-card[data-canvas-id] → openCanvas → canvas.html?id=）
+  await inFrame(canvasFrame(), "const el = document.getElementById('backToManagerBtn'); if (el) el.click(); return !!el;");
+  const backForCard = await waitFor(() => !!listFrame() && !canvasFrame(), 30000);
+  const cardSel = "#cardsGrid .project-card[data-canvas-id=\"" + currentCanvasId + "\"]";
+  const cardUp = backForCard && await waitFor(async () => (await inFrame(listFrame(), "return !!document.querySelector(" + JSON.stringify(cardSel) + ");")) === true, 20000);
+  const cardClick = cardUp ? await inFrame(listFrame(), "const el = document.querySelector(" + JSON.stringify(cardSel) + "); if (!el) return 'missing'; el.click(); return 'clicked';") : "missing";
+  const cardUpFrame = await waitFor(() => !!canvasFrame(), 40000);
+  const cardReady = cardUpFrame && await waitFor(async () => { const st = await inFrame(canvasFrame(), "const s = window.__openarcCanvas ? window.__openarcCanvas.state() : null; return s ? { id: s.canvasId } : null;"); return !!(st && st.id); }, 30000);
+  const cardId = cardReady ? (await inFrame(canvasFrame(), "const s = window.__openarcCanvas.state(); return { id: s.canvasId };")).id : null;
+  record("A6", "卡片直达：入口页 #cardsGrid .project-card[data-canvas-id=当前这本] → 进入编辑器且 canvasId 一致（真实卡片点击，不是 IPC 造帧）",
+    cardClick === "clicked" && cardUpFrame && cardId === currentCanvasId,
+    "卡片点击 → 同一本", JSON.stringify({ cardSel, backForCard, cardUp, cardClick, cardUpFrame, cardId, currentCanvasId }));
 
   const addA = await inFrame(canvasFrame(), "return await window.__openarcCanvas.applyCommand({ type:'node.add', node:{ id:'n_prompt', type:'prompt', x:80, y:120, text:'D5-02 提示词节点' } }, null);");
   const addB = await inFrame(canvasFrame(), "return await window.__openarcCanvas.applyCommand({ type:'node.add', node:{ id:'n_llm', type:'llm', x:420, y:120, model:'', systemPrompt:'You are a helpful assistant.' } }, null);");
@@ -257,7 +305,7 @@ async function main() {
     return nodes.length === 2 && got.canvas.doc.connections.length === 1 && Number(nodes.find((n) => n.id === "n_llm").x) === 520;
   }, 20000);
   const stored = await canvas({ type: "canvas/get", canvasId: currentCanvasId });
-  record("A4", "创建并编辑真实项目：命令层 add/connect/move → 画布自动保存 → OpenArc 存储里一致",
+  record("A7", "创建并编辑真实项目：命令层 add/connect/move → 画布自动保存 → OpenArc 存储里一致",
     !!(addA.ok && addB.ok && link.ok && moved.ok) && savedOk,
     "2 节点 + 1 连线 + 坐标 520", JSON.stringify({ ok: [addA.ok, addB.ok, link.ok, moved.ok], savedOk, revision: stored.canvas.revision, nodes: stored.canvas.doc.nodes.map((n) => ({ id: n.id, x: n.x })), edges: stored.canvas.doc.connections.length }));
 
@@ -268,25 +316,108 @@ async function main() {
     const n = got && got.ok ? got.canvas.doc.nodes.find((x) => x.id === "n_llm") : null;
     return n && Number(n.x) === 520;
   }, 20000);
-  record("A5", "撤销 / 重做：撤销真的回退、重做真的恢复（与手工编辑同一历史入口），结果重新落库",
+  record("A8", "撤销 / 重做：撤销真的回退、重做真的恢复（与手工编辑同一历史入口），结果重新落库",
     Math.round(undoState.x) === 420 && undoState.canRedo === true && Math.round(redoState.x) === 520 && redoPersisted,
     "undo→420 / redo→520 + 落库", JSON.stringify({ undoState, redoState, redoPersisted }));
 
   await page.screenshot({ path: path.join(ART, "d5-02-app-canvas.png") }).catch(() => {});
-  // 返回首页（产品路径：外壳侧栏「首页」）
-  await shellJs("const el = document.querySelector(" + JSON.stringify("[onclick*=\"" + "'home'" + "\"]") + "); if (el) el.click(); return 'ok';");
-  const backHome = await waitFor(async () => (await shellJs("return (document.querySelector('iframe.active') || {}).id || null;")) === "frame-home", 20000);
-  const recent = await inFrame(homeFrame(), "const r = await (await fetch('/api/recent-canvases')).json(); const list = Array.isArray(r) ? r : []; return { n: list.length, first: list[0] ? { id: list[0].id, title: list[0].title } : null };");
-  record("A6", "返回首页：最近画布列表里出现刚保存的项目（首页数据来自 OpenArc 存储）",
-    backHome && recent.n >= 1 && recent.first && recent.first.id === currentCanvasId,
-    "frame-home 活跃 + 最近列表含该书", JSON.stringify({ backHome, recent }));
+  /* ══════════════════ N 系列（无模型状态）：必须在 B 系列配置模型**之前**跑 ══════════════════
+   * 此刻 /api/config.api_providers = 0、chat/image 清单为空、视频传输未接通 —— 正是"无模型契约"的状态点。*/
+  // 生图 / 视频节点在这一步还不存在：临时加两个探针节点，观察守卫在真实渲染上的契约，观察完立刻删除。
+  const nProbes = await nAddProbeNodes();
+  note("N 系列探针节点（生图 + 视频，观察后删除）：" + JSON.stringify(nProbes));
+
+  const n1 = await inFrame(canvasFrame(), [
+    "const chip = document.querySelector('.canvas-nav-meta [data-openarc-model-status]');",
+    "const chipGuide = chip ? chip.querySelector('[data-openarc-open-model-settings]') : null;",
+    "const guides = Array.from(document.querySelectorAll('[data-openarc-open-model-settings]'));",
+    N_SEL_INFO,
+    nFakeScanLines(N_FAKE_PROVIDER_RE).join("\n"),
+    "const g = window.__openarcCanvasGuard || {};",
+    "const gen = document.querySelector('.generator-body .provider-select') ? document.querySelector('.generator-body .provider-select').closest('.generator-body') : null;",
+    "return { chip: chip ? chip.getAttribute('data-openarc-model-status') : null,",
+    "  chipText: String((chip && chip.querySelector('.openarc-model-status-text') || {}).textContent || '').trim(),",
+    "  chipGuideText: chipGuide ? String(chipGuide.textContent).trim() : null,",
+    "  guideCount: guides.length,",
+    "  guideTexts: Array.from(new Set(guides.map(function (b) { return String(b.textContent).trim(); }))),",
+    "  guardGuideText: String(g.guideText || ''),",
+    "  chat: { provider: selInfo(document.querySelector('.llm-provider-select')), model: selInfo(document.querySelector('.llm-model')) },",
+    "  image: { provider: gen ? selInfo(gen.querySelector('.provider-select')) : null, model: gen ? selInfo(gen.querySelector('.model-select')) : null },",
+    "  fake: fake };",
+  ].join("\n"));
+  record("N1", "无模型（配置模型之前）：编辑器页头模型状态 = unconfigured + 引导按钮文案精确为「打开 OpenArc 总 API 设置」；文本/生图下拉都被标成未配置且真的 disabled（唯一占位文案精确）；DOM 全文 / option.value / select.value 扫 /comfly/i 0 命中（不存在伪造供应商）",
+    !!n1 && !n1.__noFrame && !n1.__error && n1.chip === "unconfigured"
+      && n1.chipGuideText === N_GUIDE_TEXT && n1.guardGuideText === N_GUIDE_TEXT && n1.guideCount >= 1 && n1.guideTexts.length === 1 && n1.guideTexts[0] === N_GUIDE_TEXT
+      && nSelOk(n1.chat.provider, "chat") && nSelOk(n1.chat.model, "chat")
+      && nSelOk(n1.image.provider, "image-generation") && nSelOk(n1.image.model, "image-generation")
+      && n1.fake.htmlMatched === false && n1.fake.optionHits.length === 0 && n1.fake.selectHits.length === 0,
+    "unconfigured + 引导文案精确 + 4 个下拉 disabled/unconfigured + /comfly/i 0 命中",
+    JSON.stringify({ probes: nProbes, chip: n1 && n1.chip, chipText: n1 && n1.chipText, chipGuideText: n1 && n1.chipGuideText, guideCount: n1 && n1.guideCount, guideTexts: n1 && n1.guideTexts, guardGuideText: n1 && n1.guardGuideText, chat: { provider: nSelBrief(n1 && n1.chat && n1.chat.provider), model: nSelBrief(n1 && n1.chat && n1.chat.model) }, image: { provider: nSelBrief(n1 && n1.image && n1.image.provider), model: nSelBrief(n1 && n1.image && n1.image.model) }, fake: n1 && n1.fake }));
+
+  // N2：**真实点击**引导按钮（不是直接调桥）→ 宿主真的打开设置窗口并停在模型页；随后关掉，不留残留窗口。
+  const n2Click = await inFrame(canvasFrame(), "const b = document.querySelector('.canvas-nav-meta [data-openarc-open-model-settings]') || document.querySelector('[data-openarc-open-model-settings]'); if (!b) return { clicked: false, why: 'no-guide-button', guides: document.querySelectorAll('[data-openarc-open-model-settings]').length }; const text = String(b.textContent).trim(); const inChip = !!b.closest('.canvas-nav-meta'); b.click(); return { clicked: true, text: text, inChip: inChip };");
+  const n2Opened = await waitFor(async () => { const s = await nSettingsWindow(); return !!s && s.active === "model"; }, 25000);
+  const n2Guide = "const b = document.querySelector('[data-openarc-guide-state=opened]'); return b ? { opened: true, text: String(b.textContent).trim() } : null;";
+  const n2GuideState = (await waitFor(async () => (await inFrame(canvasFrame(), n2Guide)) !== null, 15000)) ? await inFrame(canvasFrame(), n2Guide) : { opened: false, text: null };
+  const n2Settings = await nSettingsWindow();
+  const n2Close = await nCloseSettingsWindow();
+  record("N2", "引导真的打开 OpenArc 总 API 设置：真实点击页面里的引导按钮 → 桥把这一次请求真的送到宿主（按钮拿到 data-openarc-guide-state=opened）+ 出现设置窗口且 [data-settings-active=model]（标题「模型 / AI」、未被最小化）；随后关掉设置窗口，不留残留、不影响后续断言",
+    !!n2Click && n2Click.clicked === true && n2Click.text === N_GUIDE_TEXT && n2Opened === true
+      && !!n2GuideState && n2GuideState.opened === true
+      && !!n2Settings && n2Settings.active === "model" && n2Settings.title === "模型 / AI" && n2Settings.minimized === false && n2Settings.hasWindow === true
+      && !!n2Close && n2Close.closed === true,
+    "点击 → guide-state=opened + 设置窗口 data-settings-active=model（模型 / AI）+ 关闭成功",
+    JSON.stringify({ click: n2Click, opened: n2Opened, guideState: n2GuideState, settings: n2Settings, close: n2Close }));
+
+  const n3ReqBefore = provider.state();
+  const n3 = await inFrame(canvasFrame(), [
+    N_SEL_INFO,
+    "const vid = document.querySelector('.node[data-id=n_ng_probe_vid]');",
+    "const btn = vid ? vid.querySelector('.gen-btn') : null;",
+    "const vnote = vid ? vid.querySelector('[data-openarc-guard-note=video-generation]') : null;",
+    "const g = window.__openarcCanvasGuard || {};",
+    "const r = await fetch('/api/canvas-video', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: 'x' }) });",
+    "let body = null; try { body = await r.json(); } catch (e) { body = { parseError: String(e && e.message), status: r.status }; }",
+    "return { status: r.status, body: body, guardVersion: Number(g.version || 0), guardText: String((g.unavailableText || {})['video-generation'] || ''),",
+    "  videoNode: vid ? { capability: vid.getAttribute('data-openarc-capability'), available: vid.getAttribute('data-openarc-available'), noteText: String((vnote || {}).textContent || '').trim(), guideInNote: !!(vnote && vnote.querySelector('[data-openarc-open-model-settings]')) } : null,",
+    "  provider: selInfo(document.querySelector('.video-provider')), model: selInfo(document.querySelector('.video-model')),",
+    "  runBtn: btn ? { blocked: btn.getAttribute('data-openarc-blocked'), aria: btn.getAttribute('aria-disabled'), disabled: !!btn.disabled, title: String(btn.title || '').slice(0, 80) } : null,",
+    "  blockedCount: document.querySelectorAll('button[data-openarc-blocked]').length };",
+  ].join("\n"));
+  const n3ReqAfter = provider.state();
+  const n3HostNotice = await js("const el = document.querySelector('[data-canvas-host]'); return el ? String(el.getAttribute('data-canvas-asset-notice-text') || '') : null;");
+  const n3Req = (s) => s.chats.length + s.images.length + s.authSeen;
+  // 页面侧守卫在**发出请求之前**就按能力事实回答了：桥的"该功能未接入 OpenArc（保留入口）"分支不该被走到。
+  const n3BridgeNotice = /未接入 OpenArc（保留入口）：\/api\/canvas-video/.test(String(n3HostNotice || ""));
+  record("N3", "未接通能力（视频）明确不可用：视频 provider/model 下拉 disabled + aria-disabled + data-openarc-unavailable=video-generation + 唯一文案（且节点说明里不给误导性引导）；视频节点 data-openarc-available=false；运行按钮 data-openarc-blocked + disabled；页面内直接 POST /api/canvas-video → 501 CAPABILITY_UNAVAILABLE（available:false / transport:null / detail 非空）；假 provider 请求计数 0→0",
+    !!n3 && !n3.__noFrame && !n3.__error && n3.status === 501 && !!n3.body && n3.body.error === "CAPABILITY_UNAVAILABLE" && n3.body.available === false && n3.body.transport === null && String(n3.body.detail || "").length > 0
+      && n3.guardVersion >= 1 && n3.guardText === N_VIDEO_TEXT
+      && !!n3.videoNode && n3.videoNode.capability === "video-generation" && n3.videoNode.available === "false" && n3.videoNode.noteText.indexOf(N_VIDEO_TEXT) >= 0 && n3.videoNode.guideInNote === false
+      && nVideoSelOk(n3.provider) && nVideoSelOk(n3.model)
+      && !!n3.runBtn && n3.runBtn.blocked === "video-generation" && n3.runBtn.aria === "true" && n3.runBtn.disabled === true
+      && n3Req(n3ReqBefore) === 0 && n3Req(n3ReqAfter) === n3Req(n3ReqBefore)
+      && n3BridgeNotice === false,
+    "501 CAPABILITY_UNAVAILABLE + 下拉/节点/运行按钮全不可用 + 假 provider 0→0 请求",
+    JSON.stringify({ status: n3 && n3.status, body: n3 && n3.body, guard: n3 && { version: n3.guardVersion, text: n3.guardText }, videoNode: n3 && n3.videoNode, provider: nSelBrief(n3 && n3.provider), model: nSelBrief(n3 && n3.model), runBtn: n3 && n3.runBtn, blockedCount: n3 && n3.blockedCount, requests: { before: n3Req(n3ReqBefore), after: n3Req(n3ReqAfter) }, hostNoticeHead: String(n3HostNotice || "").slice(0, 60), bridgeUnsupportedNotice: n3BridgeNotice }));
+
+  const nProbesOff = await nRemoveProbeNodes();
+  note("N 系列探针节点已删除（画布回到观察前的节点集合）：" + JSON.stringify(nProbesOff));
+
+  // 返回画布列表（产品路径：编辑器 #backToManagerBtn → canvas-list）
+  const backClick2 = await inFrame(canvasFrame(), "const el = document.getElementById('backToManagerBtn'); if (!el) return 'missing'; el.click(); return 'clicked';");
+  const backList2 = await waitFor(() => !!listFrame() && !canvasFrame(), 30000);
+  const cardListed = backList2 && await waitFor(async () => (await inFrame(listFrame(), "return !!document.querySelector('#cardsGrid .project-card[data-canvas-id=" + JSON.stringify(currentCanvasId) + "]');")) === true, 20000);
+  const listPayload = cardListed ? await inFrame(listFrame(), "const r = await (await fetch('/api/canvases')).json(); const list = (r && r.canvases) || []; const sorted = list.slice().sort(function (a, b) { return Number(b.updated_at || 0) - Number(a.updated_at || 0); }); return { n: list.length, first: sorted[0] ? { id: sorted[0].id, title: sorted[0].title } : null, hasCurrent: list.some(function (c) { return c.id === " + JSON.stringify(currentCanvasId) + "; }), cards: document.querySelectorAll('#cardsGrid .project-card').length };") : null;
+  record("A9", "返回画布列表：列表里出现刚保存的项目、当前这本的卡片真的渲染出来（列表数据来自 OpenArc 存储，最近更新的排第一）",
+    backClick2 === "clicked" && backList2 && cardListed && !!listPayload && listPayload.n >= 1 && listPayload.first && listPayload.first.id === currentCanvasId && listPayload.hasCurrent === true && listPayload.cards >= 1,
+    "canvas-list 帧 + 列表含该书 + 卡片存在", JSON.stringify({ backClick2, backList2, cardListed, listPayload }));
   await page.screenshot({ path: path.join(ART, "d5-02-app-home.png") }).catch(() => {});
 
-  // 再打开项目：点首页最近项目卡片
+  // 再打开项目：点列表首页上这本画布的卡片（产品路径，不是 IPC 造帧）
   const reopened = await reopenCurrentCanvasFromHome();
   const reopenedSame = await waitFor(async () => (await inFrame(canvasFrame(), "const s = window.__openarcCanvas.state(); return { id: s.canvasId, nodes: s.nodeCount, edges: s.edgeCount, x: (window.__openarcCanvasInternals.primitives.getNode('n_llm')||{}).x };")).id === currentCanvasId, 25000);
   const reopenedState = await inFrame(canvasFrame(), "const s = window.__openarcCanvas.state(); return { id: s.canvasId, nodes: s.nodeCount, edges: s.edgeCount, x: (window.__openarcCanvasInternals.primitives.getNode('n_llm')||{}).x };");
-  record("A7", "从首页再打开项目：打开的是**同一本**画布，节点/连线/坐标从 OpenArc 存储恢复",
+  record("A10", "从画布列表再打开项目：打开的是**同一本**画布，节点/连线/坐标从 OpenArc 存储恢复",
     reopened && reopenedSame && reopenedState.nodes === 2 && reopenedState.edges === 1 && Math.round(reopenedState.x) === 520,
     "同一 canvasId + 2 节点 1 连线 x=520", JSON.stringify({ reopened, reopenedSame, reopenedState }));
   await page.screenshot({ path: path.join(ART, "d5-02-app-reopen.png") }).catch(() => {});
@@ -300,12 +431,43 @@ async function main() {
   const imgId = imgModel && imgModel.model && imgModel.model.configId;
   await model({ type: "defaults/set", capability: "chat", configId: chatId });
   await model({ type: "defaults/set", capability: "image-generation", configId: imgId });
-  const configSeen = await inFrame(canvasFrame(), "const cfg = await (await fetch('/api/config')).json(); return { chat: (cfg.chat_models||[]).length, image: (cfg.image_models||[]).length, providers: (cfg.api_providers||[]).length, hasKey: JSON.stringify(cfg).includes('d502-canvas-secret'), hasUrl: JSON.stringify(cfg).includes('127.0.0.1') };");
+  // 产品侧第二批（模型/供应商单一真源）：`/api/config.api_providers` 从**空数组**改成 OpenArc provider 的
+  // **真实投影**（id=providerId、name=displayName，只含该能力下有可用模型的 provider，**不含** baseUrl/凭据/has_key。
+  // 产品实现见 src/canvas/CanvasHost.tsx 的 buildConfig()：键集 = {id,name,enabled,chat_models,image_models,video_models}）。
+  // B1 因此**因产品范围变更而重写**，但保留原意（"不外泄 provider 地址与凭据"，不是"必须是 0 个投影"），且比旧版本更严：
+  //   ① 数量必须等于**真实配置数量**——用两条独立 IPC 数据源交叉核对（provider/list ∩ canvas/models 的 providerId），不是"不为 0 就算过"；
+  //   ② 每个投影对象的键集合必须 ⊆ 产品 buildConfig 的真实键集（多一个字段就 FAIL）；
+  //   ③ 投影里的 id / name 必须与 IPC 真值逐项相等（不是"有几个就行"）；
+  //   ④ 整个 /api/config JSON 不得出现地址/凭据类字样（正则比旧版更宽：加 base_url/protocol/has_key/key_preview/token/localhost）。
+  const providerList = await model({ type: "provider/list" });
+  const ipcProviders = (providerList && providerList.items) || [];
+  const usableModels = await model({ type: "canvas/models" });
+  const usableProviderIds = new Set(((usableModels && usableModels.models) || [])
+    .filter((m) => Array.isArray(m.capabilities) && (m.capabilities.includes("chat") || m.capabilities.includes("image-generation")))
+    .map((m) => String(m.providerId)));
+  const expectProviders = ipcProviders.filter((p) => usableProviderIds.has(String(p.providerId)));
+  // /api/config 的取数是"页面帧还在不在"的外部事实：取不到就重试（有界），仍然取不到 → 断言如实 FAIL（不静默跳过）。
+  let cfgSeen = null;
+  for (let i = 0; i < 3; i += 1) {
+    cfgSeen = await inFrame(canvasFrame(), "const cfg = await (await fetch('/api/config')).json(); const p = Array.isArray(cfg.api_providers) ? cfg.api_providers : []; const raw = JSON.stringify(cfg); return { chat: (cfg.chat_models||[]).length, image: (cfg.image_models||[]).length, providers: p.length, ids: p.map(function (x) { return String(x.id); }), names: p.map(function (x) { return String(x.name); }), keySets: p.map(function (x) { return Object.keys(x).sort(); }), hasKey: raw.includes('d502-canvas-secret'), hasUrl: raw.includes('127.0.0.1'), raw: raw };");
+    if (cfgSeen && Array.isArray(cfgSeen.ids) && Array.isArray(cfgSeen.names) && Array.isArray(cfgSeen.keySets)) break;
+    await sleep(500);
+  }
+  const cfgOk = !!(cfgSeen && Array.isArray(cfgSeen.ids) && Array.isArray(cfgSeen.names) && Array.isArray(cfgSeen.keySets));
+  const configSeen = cfgOk ? { chat: cfgSeen.chat, image: cfgSeen.image, providers: cfgSeen.providers, ids: cfgSeen.ids, names: cfgSeen.names, keySets: cfgSeen.keySets, hasKey: cfgSeen.hasKey, hasUrl: cfgSeen.hasUrl } : null;
+  const CFG_PROVIDER_KEYS = ["chat_models", "enabled", "id", "image_models", "name", "video_models"];
+  const keysWhitelisted = cfgOk && cfgSeen.keySets.length > 0 && cfgSeen.keySets.every((ks) => ks.length > 0 && ks.every((k) => CFG_PROVIDER_KEYS.includes(k)));
+  const CFG_LEAK = /baseUrl|base_url|protocol|credential|has_key|key_preview|secret|token|localhost|127\.0\.0\.1/i;
+  const configLeak = CFG_LEAK.test(String((cfgSeen && cfgSeen.raw) || ""));
   const models = await model({ type: "canvas/models" });
   const projection = JSON.stringify(models);
-  record("B1", "模型只有一个来源：画布只看到 OpenArc 已配置可用的模型（无 provider 地址、无凭据）",
-    configSeen.chat >= 1 && configSeen.image >= 1 && configSeen.providers === 0 && configSeen.hasKey === false && configSeen.hasUrl === false && !/baseUrl|secret|credential|apiKey/i.test(projection),
-    "有 chat+image、无 provider/密钥/地址", JSON.stringify({ configSeen, projectionLeak: /baseUrl|secret|credential|127\.0\.0\.1|apiKey/i.test(projection) }));
+  record("B1", "模型只有一个来源：画布只看到 OpenArc 已配置可用的模型；provider 投影的数量/身份/键集合与 IPC 真值逐项一致，且全程无地址与凭据",
+    cfgOk && cfgSeen.chat >= 1 && cfgSeen.image >= 1 && expectProviders.length >= 1 && cfgSeen.providers === expectProviders.length && keysWhitelisted && !configLeak
+      && JSON.stringify(cfgSeen.ids.slice().sort()) === JSON.stringify(expectProviders.map((p) => String(p.providerId)).sort())
+      && JSON.stringify(cfgSeen.names.slice().sort()) === JSON.stringify(expectProviders.map((p) => String(p.displayName || p.providerId)).sort())
+      && !/baseUrl|secret|credential|apiKey/i.test(projection),
+    "有 chat+image；api_providers 数量 = 真实 provider 数 " + expectProviders.length + "（id/name 对齐 IPC、键集合 ⊆ 白名单、无地址/凭据）",
+    JSON.stringify({ configSeen: configSeen || cfgSeen, ipcProviders: ipcProviders.map((p) => ({ id: p.providerId, name: p.displayName, status: p.status })), usableProviderIds: Array.from(usableProviderIds), expectedProviderIds: expectProviders.map((p) => String(p.providerId)), keysWhitelisted, configLeak, projectionLeak: /baseUrl|secret|credential|apiKey/i.test(projection) }));
 
   const setText = await inFrame(canvasFrame(), "return await window.__openarcCanvas.applyCommand({ type:'node.edit', id:'n_prompt', patch:{ text:'写一句关于海边的提示词' } }, null);");
   const runLlm = await inFrame(canvasFrame(), "const it = window.__openarcCanvasInternals; const n = it.primitives.getNode('n_llm'); const cfg = await (await fetch('/api/config')).json(); n.model = cfg.chat_models[0]; it.primitives.render(); window.__openarcCanvas.runNode('n_llm'); return { started: true, model: n.model };");
@@ -342,10 +504,69 @@ async function main() {
     !!failedState && failedState.status === "failed" && String(failedState.error).length > 0,
     "runStatus=failed + runError", JSON.stringify(failedState));
 
+  /* ── N4：真实投影 + 无第二来源（B 系列已配好 provider+模型，看页面是不是真的按真源渲染） ── */
+  const n4Names = expectProviders.map((p) => String(p.displayName || p.providerId));
+  const n4 = await inFrame(canvasFrame(), [
+    "const cfg = await (await fetch('/api/config')).json();",
+    N_SEL_INFO,
+    nFakeScanLines(N_FAKE_LABEL_RE).join("\n"),
+    "const it = window.__openarcCanvasInternals;",
+    "const node = (id) => { try { const n = it.primitives.getNode(id); return n ? { provider: String(n.apiProvider || n.llmProvider || ''), model: String(n.model || '') } : null; } catch (e) { return null; } };",
+    "const keys = " + JSON.stringify(N_MODEL_SOURCE_KEYS) + ";",
+    "const readBack = {}; const residue = [];",
+    "keys.forEach(function (k) { try { window.localStorage.setItem(k, 'N4-伪造清单'); } catch (e) { /* 写不进去也是被封住的一种表现 */ } });",
+    "keys.forEach(function (k) { try { readBack[k] = window.localStorage.getItem(k); } catch (e) { readBack[k] = 'throw'; } });",
+    "for (let i = 0; i < window.localStorage.length; i += 1) { const k = String(window.localStorage.key(i) || ''); if (keys.some(function (x) { return k.indexOf(x) >= 0; })) residue.push(k.slice(0, 80)); }",
+    "return { providers: (cfg.api_providers || []).map(function (p) { return { id: String(p.id), name: String(p.name), keys: Object.keys(p).sort() }; }),",
+    "  chatModels: cfg.chat_models || [], imageModels: cfg.image_models || [],",
+    "  provider: { llm: selInfo(document.querySelector('.llm-provider-select')), gen: selInfo(document.querySelector('.generator-body .provider-select')) },",
+    "  model: { llm: selInfo(document.querySelector('.llm-model')), gen: selInfo(document.querySelector('.generator-body .model-select')) },",
+    "  nodes: { llm: node('n_llm'), gen: node('n_gen') },",
+    "  fake: fake, readBack: readBack, residue: residue };",
+  ].join("\n"));
+  const n4ProvOk = (s) => !!s && s.disabled === false && s.options.length >= 1 && s.options.every((o) => o.value === providerId && n4Names.includes(o.text)) && String(s.value) === providerId;
+  const n4ModelOk = (s, list) => !!s && s.disabled === false && s.options.length >= 1 && s.options.every((o) => o.value !== "" && o.value === o.text && list.includes(o.value)) && list.includes(String(s.value));
+  record("N4", "真实投影 + 无第二来源：B 系列配好 provider+模型后，编辑器 provider 下拉逐项 = OpenArc 真 provider（id + displayName，不是 Comfly/API 的造物）；模型下拉的每个选项都在 OpenArc 清单里（gpt-4o-mini / gpt-image-2 / veo3-fast 在 DOM 属性+文本 / option.value / select.value 三处 0 命中）；三把 localStorage 模型键 setItem 后读回 null 且不留残留键；/api/config.api_providers 键集合 ⊆ 六键",
+    !!n4 && !n4.__noFrame && !n4.__error
+      && n4.providers.length >= 1 && n4.providers.every((p) => p.keys.length > 0 && p.keys.every((k) => N_PROVIDER_KEYS.includes(k)))
+      && n4.providers.some((p) => p.id === providerId && n4Names.includes(p.name))
+      && n4ProvOk(n4.provider.llm) && n4ProvOk(n4.provider.gen)
+      && n4ModelOk(n4.model.llm, n4.chatModels) && n4ModelOk(n4.model.gen, n4.imageModels)
+      && !!n4.nodes.gen && n4.nodes.gen.provider === providerId && n4.imageModels.includes(n4.nodes.gen.model)
+      && !!n4.nodes.llm && n4.chatModels.includes(n4.nodes.llm.model)
+      && n4.fake.htmlMatched === false && n4.fake.optionHits.length === 0 && n4.fake.selectHits.length === 0
+      && N_MODEL_SOURCE_KEYS.every((k) => n4.readBack[k] === null) && n4.residue.length === 0,
+    "provider 下拉 = 真 displayName；模型下拉选项 ⊆ 真源清单；三个伪造标签 0 命中；localStorage 三键读回 null",
+    JSON.stringify({ providers: n4 && n4.providers, chatModels: n4 && n4.chatModels, imageModels: n4 && n4.imageModels, provider: { llm: nSelBrief(n4 && n4.provider && n4.provider.llm), gen: nSelBrief(n4 && n4.provider && n4.provider.gen) }, model: { llm: nSelBrief(n4 && n4.model && n4.model.llm), gen: nSelBrief(n4 && n4.model && n4.model.gen) }, nodes: n4 && n4.nodes, fake: n4 && n4.fake, readBack: n4 && n4.readBack, residue: n4 && n4.residue }));
+
+  /* ── N6：无静默回落 —— 清单外标签必须被明确拒绝，且一次 provider 请求都不发 ── */
+  const n6HostBefore = await attrOf("[data-canvas-host]", "data-canvas-model-not-found");
+  const n6ReqBefore = provider.state();
+  const n6 = await inFrame(canvasFrame(), [
+    "const cfg = await (await fetch('/api/config')).json();",
+    "const label = " + JSON.stringify(N_FAKE_CHAT_LABEL) + ";",
+    "const inManifest = (cfg.chat_models || []).indexOf(label) >= 0;",
+    "const r = await fetch('/api/canvas-llm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: label, message: '清单外模型探测（不得静默回落）', messages: [], nodeId: 'n_llm' }) });",
+    "let body = null; try { body = await r.json(); } catch (e) { body = { parseError: String(e && e.message), status: r.status }; }",
+    "return { status: r.status, body: body, inManifest: inManifest, chatModels: (cfg.chat_models || []).length };",
+  ].join("\n"));
+  await sleep(500);
+  const n6HostAfter = await attrOf("[data-canvas-host]", "data-canvas-model-not-found");
+  const n6ReqAfter = provider.state();
+  record("N6", "无静默回落：页面用清单外标签 POST /api/canvas-llm → 502 MODEL_NOT_FOUND（回包点名 model/method，detail 是人话），provider 请求 0 新增，宿主 data-canvas-model-not-found 真的 +1",
+    !!n6 && !n6.__noFrame && !n6.__error && n6.status === 502 && !!n6.body && n6.body.error === "MODEL_NOT_FOUND" && String(n6.body.model || "") === N_FAKE_CHAT_LABEL && String(n6.body.method || "") === "model.chat" && String(n6.body.detail || "").length > 0
+      && n6.inManifest === false
+      && n6ReqAfter.chats.length === n6ReqBefore.chats.length && n6ReqAfter.images.length === n6ReqBefore.images.length && n6ReqAfter.authSeen === n6ReqBefore.authSeen
+      && Number(n6HostAfter) === Number(n6HostBefore) + 1,
+    "502 MODEL_NOT_FOUND + 0 新增 provider 请求 + 宿主计数 +1",
+    JSON.stringify({ status: n6 && n6.status, body: n6 && n6.body, inManifest: n6 && n6.inManifest, chatModels: n6 && n6.chatModels, hostCounter: n6HostBefore + "→" + n6HostAfter, requests: { chats: [n6ReqBefore.chats.length, n6ReqAfter.chats.length], images: [n6ReqBefore.images.length, n6ReqAfter.images.length], authSeen: [n6ReqBefore.authSeen, n6ReqAfter.authSeen] } }));
+
   const video = await inFrame(canvasFrame(), "const r = await fetch('/api/canvas-video', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ prompt:'x' }) }); return { status: r.status, body: await r.json() };");
-  record("B5", "OpenArc 尚不支持的能力（视频）明确报错，不静默改用其它服务",
-    video && video.status === 501 && video.body && video.body.error === "OPENARC_UNSUPPORTED",
-    "501 OPENARC_UNSUPPORTED", JSON.stringify(video));
+  // 期望值随产品契约更新（守卫已按能力事实在页面侧回答）：错误码从笼统的 OPENARC_UNSUPPORTED 变成
+  // CAPABILITY_UNAVAILABLE，并**多加** available/transport/detail 三项判定 —— 是加强，不是放宽。
+  record("B5", "OpenArc 尚不支持的能力（视频）明确报错，不静默改用其它服务：页面侧守卫按能力事实回答 501 CAPABILITY_UNAVAILABLE（available:false / transport:null / detail 非空），不是笼统的 OPENARC_UNSUPPORTED",
+    video && video.status === 501 && video.body && video.body.error === "CAPABILITY_UNAVAILABLE" && video.body.available === false && video.body.transport === null && String(video.body.detail || "").length > 0,
+    "501 CAPABILITY_UNAVAILABLE + available:false + transport:null + detail 非空", JSON.stringify(video));
 
   const update = await inFrame(shellFrame(), "const a = await fetch('/api/check-update'); const b = await fetch('/api/update-from-github', { method:'POST' }); return { check: a.status, checkBody: (await a.json()).error, github: b.status, githubBody: (await b.json()).error };");
   const info = await inFrame(shellFrame(), "const r = await fetch('/api/app-info'); const d = await r.json(); return { status: r.status, updateDisabled: !!d.update_disabled, queueDisabled: !!(d.openarc && d.openarc.updateDisabled) };");
@@ -362,21 +583,39 @@ async function main() {
   if (modelGrant) await governance({ type: "governance/revokeAppAccess", grantId: modelGrant.grantId });
   const revokedRun = await canvas({ type: "canvas/run", canvasId: currentCanvasId, kind: "chat" });
   const afterNoPerm = provider.state().chats.length;
+  // N5a：撤权状态点 —— D1 的调用级判定一个字不动，这里只补"页面模型区也必须变成不可用"。
+  const n5aRevoked = await nWaitModelArea("unavailable-all");
   if (modelGrant) await governance({ type: "governance/grantAppAccess", appId: "canvas", resourceType: "model", scope: "ORGANIZATION", actions: ["model.view", "model.use"] });
   const regranted = await canvas({ type: "canvas/run", canvasId: currentCanvasId, kind: "chat" });
   record("D1", "无权限：撤销画布应用的 model.use 后，生成明确拒绝且 provider 收不到任何请求（F2 缺口）",
     !!modelGrant && revokedRun.ok === false && revokedRun.error === "PROXY_UNAUTHORIZED" && afterNoPerm === beforeNoPerm && noPermRun.ok && regranted.ok,
     "PROXY_UNAUTHORIZED + 0 请求", JSON.stringify({ hasGrant: !!modelGrant, grantActions: modelGrant && modelGrant.actions, noPermRun: noPermRun.ok, revoked: { ok: revokedRun.ok, error: revokedRun.error }, requests: beforeNoPerm + "→" + afterNoPerm, regranted: regranted.ok }));
 
+  // N5a：恢复授权 → 页面模型区必须回到可用（与撤权时那份 snapshot 成对，缺一半就是没验完）。
+  const n5aRegranted = await nWaitModelArea("available-all");
+  record("N5a", "撤权 → 页面模型区真的变成不可用（实测口径 = unconfigured：页头状态位 unconfigured + 文本/生图下拉 disabled 且只剩一条精确的「未配置…」占位；不是「看着还能点」）；恢复授权 → 回到可用（chip ok + 下拉可选且选项只在真源清单里）",
+    n5aRevoked.ok && n5aRegranted.ok,
+    "撤权 unconfigured/disabled + 恢复后 ok/可选",
+    JSON.stringify({ revoked: nSnapBrief(n5aRevoked), regranted: nSnapBrief(n5aRegranted) }));
+
   const chatOnly = await model({ type: "model/create", providerId, remoteModelId: "d502-chat-only", displayName: "D5-02 ChatOnly", capabilities: ["chat"], scope: "ORGANIZATION" });
   await model({ type: "defaults/set", capability: "image-generation", configId: chatOnly.model.configId });
   const beforeCap = provider.state().images.length;
   const capRun = await canvas({ type: "canvas/run", canvasId: currentCanvasId, kind: "image" });
   const afterCap = provider.state().images.length;
+  // N5c：跨能力状态点（生图默认被指到只有 chat 的模型）—— 页面生图区必须 unconfigured，文本区不受影响。
+  const n5cCrossCap = await nWaitModelArea("image-unavailable");
   await model({ type: "defaults/set", capability: "image-generation", configId: imgId });
   record("D2", "能力不支持：图片能力被指到只有 chat 的模型上 → 明确 CAPABILITY_UNAVAILABLE，provider 收不到图片请求",
     capRun.ok === false && capRun.error === "CAPABILITY_UNAVAILABLE" && afterCap === beforeCap,
     "CAPABILITY_UNAVAILABLE + 0 请求", JSON.stringify({ capRun: { ok: capRun.ok, error: capRun.error }, images: beforeCap + "→" + afterCap }));
+
+  // N5c：恢复生图默认 → 生图区回到可用（文本区全程不该被牵连）。
+  const n5cRestored = await nWaitModelArea("available-all");
+  record("N5c", "跨能力（生图默认被指到只有 chat 的模型）→ 页面生图区真的变成不可用（未配置占位 + disabled），文本区不受影响仍是可选状态；恢复默认 → 生图区回到可用",
+    n5cCrossCap.ok && n5cRestored.ok,
+    "跨能力：生图 unconfigured/disabled 且文本仍可用；恢复后 ok",
+    JSON.stringify({ crossCap: nSnapBrief(n5cCrossCap), restored: nSnapBrief(n5cRestored) }));
 
   const budgetRun = await canvas({ type: "canvas/run", canvasId: currentCanvasId, kind: "chat" });
   let budgetOk = 0, budgetStop = null;
@@ -423,9 +662,15 @@ async function main() {
   const bindRun = await canvas({ type: "canvas/run", canvasId: currentCanvasId, kind: "chat" });
   const okCall = await canvas({ type: "canvas/modelChat", canvasId: currentCanvasId, runId: bindRun.runId, messages: [{ role: "user", content: "绑定探测" }], configId: chatId });
   const beforeDisable = provider.state().chats.length;
+  // N5d 前置：按宿主的 label() 口径算出**要被停用的那个模型**在页面清单里的标签（停用后它就查不到了），
+  // 并当场确认它此刻真的在清单里 —— 公式错位在这里就暴露，不让后面的判定空对空。
+  const n5dLabel = String((chatModel && chatModel.model && (chatModel.model.displayName || chatModel.model.remoteModelId)) || "") + " · " + String(chatId).slice(-4);
+  const n5dManifestBefore = await inFrame(canvasFrame(), "const cfg = await (await fetch('/api/config')).json(); return { chat: cfg.chat_models || [] };");
   await model({ type: "model/setStatus", configId: chatId, status: "disabled" });
   const disabledCall = await canvas({ type: "canvas/modelChat", canvasId: currentCanvasId, runId: bindRun.runId, messages: [{ role: "user", content: "停用后不该成功" }], configId: chatId });
   const afterDisable = provider.state().chats.length;
+  // N5d：停用状态点 —— 被停用模型的标签必须从页面模型区消失（不许静默留在下拉 / 节点当前模型里）。
+  const n5dDisabled = await nWaitModelArea("chat-model-removed", n5dLabel);
   const crossCap = await canvas({ type: "canvas/modelChat", canvasId: currentCanvasId, runId: bindRun.runId, messages: [{ role: "user", content: "拿图片模型跑文本" }], configId: imgId });
   const afterCross = provider.state().chats.length;
   const unknownCfg = await canvas({ type: "canvas/modelChat", canvasId: currentCanvasId, runId: bindRun.runId, messages: [{ role: "user", content: "不存在的配置" }], configId: "mcf_does_not_exist" });
@@ -435,6 +680,15 @@ async function main() {
   record("F1", "任务模型绑定：指定的模型配置被停用/能力不符/不存在时**明确拒绝**且 0 新增请求（不静默换模型）",
     okCall && okCall.ok === true && disabledCall.ok === false && afterDisable === beforeDisable && crossCap.ok === false && afterCross === beforeDisable && unknownCfg.ok === false && afterUnknown === beforeDisable,
     "停用/跨能力/不存在 → 拒绝 + 0 请求", JSON.stringify({ okCall: okCall && okCall.ok, disabled: { ok: disabledCall.ok, error: disabledCall.error }, cross: { ok: crossCap.ok, error: crossCap.error }, unknown: { ok: unknownCfg.ok, error: unknownCfg.error }, requests: [beforeDisable, afterDisable, afterCross, afterUnknown] }));
+
+  // N5d/N5e：停用/恢复的 UI 面。停用点上的实测口径不是 unconfigured（同能力的另一个模型仍可用，文本能力整体
+  // 仍 configured），所以判定写成更强也更准的事实：被停用模型的标签在（清单 / DOM option / 节点当前模型）三处
+  // 全部 0 命中，剩下的选项只在真源清单里；恢复 enabled 后模型区回到可用。D1/F1 的调用级判定一个字未改。
+  const n5eEnabled = await nWaitModelArea("available-all");
+  record("N5d", "停用 → 被停用模型从页面模型区消失（清单 / DOM option / 节点当前模型三处 0 命中，剩余选项 ⊆ 真源清单，且没有半禁用状态）；恢复 enabled → 页面模型区回到可用（chip ok + 下拉可选）",
+    !!(n5dManifestBefore && n5dLabel && n5dManifestBefore.chat.includes(n5dLabel)) && n5dDisabled.ok && n5eEnabled.ok,
+    "停用后标签三处 0 命中 + 恢复后可用",
+    JSON.stringify({ disabledModelLabel: n5dLabel, manifestBefore: n5dManifestBefore && n5dManifestBefore.chat, atDisable: nSnapBrief(n5dDisabled), atEnable: nSnapBrief(n5eEnabled) }));
 
   /* ══════════════════ F3：图片资源产品链 ══════════════════ */
   const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIAQMAAAD+wSzIAAAABlBMVEX///+/v7+jQ3Y5AAAADklEQVQI12P4AIX8EAgALgAD/aNpbtEAAAAASUVORK5CYII=";
@@ -470,18 +724,19 @@ async function main() {
   const delRes = await resource({ type: "resource/delete", resourceRef: assetRef });
   const stateAfterDelete = await canvas({ type: "canvas/assetStates", canvasId: currentCanvasId, refs: [assetRef] });
   const readAfterDelete = await canvas({ type: "canvas/readAsset", ref: assetRef });
-  // 同一次挂载内：宿主复核发现资源不可用 → 失效缓存 + 整篇刷新画布 + 明确提示
+  // 同一次挂载内：宿主复核发现资源不可用 → 失效缓存 + 整篇刷新画布（横幅 chrome 已删，证据通道换成
+  // 宿主根的**只读**属性 data-canvas-asset-notice："1" = 宿主刚发现引用资源失效并已失效缓存 + 整篇刷新）。
   const noticeSamples = [];
   const noticeTimer = setInterval(async () => {
-    try { const t = await js("const el = document.querySelector('[data-canvas-notice]'); return el ? el.textContent.slice(0, 60) : null;"); if (t) noticeSamples.push(t); } catch { /* ignore */ }
+    try { const v = await js("const el = document.querySelector('[data-canvas-host]'); return el ? { flag: String(el.getAttribute('data-canvas-asset-notice') || ''), text: String(el.getAttribute('data-canvas-asset-notice-text') || '').slice(0, 60) } : null;"); if (v) noticeSamples.push(v); } catch { /* ignore */ }
   }, 400);
   const inMountInvalidated = await waitFor(async () => {
     const st = await inFrame(canvasFrame(), "const it = window.__openarcCanvasInternals; return { url: String((it.primitives.getNode('n_img')||{}).url || '').slice(0, 24) };");
     return st && st.url.indexOf("data:image") < 0;
   }, 20000);
   clearInterval(noticeTimer);
-  const inMountNotice = noticeSamples.find((t) => /引用资源/.test(t)) || (await js("const el = document.querySelector('[data-canvas-notice]'); return el ? el.textContent.slice(0, 80) : null;"));
-  const noticeIsAboutAssets = /引用资源/.test(String(inMountNotice));
+  const inMountNotice = noticeSamples.find((s) => /引用资源/.test(String(s.text))) || (await js("const el = document.querySelector('[data-canvas-host]'); return el ? { flag: String(el.getAttribute('data-canvas-asset-notice') || ''), text: String(el.getAttribute('data-canvas-asset-notice-text') || '').slice(0, 80) } : null;"));
+  const noticeIsAboutAssets = !!inMountNotice && inMountNotice.flag === "1" && /引用资源/.test(String(inMountNotice.text));
   const closedTwice = await closeAppWindow();
   const reopenedTwice = await reopenCurrentCanvasFromHome();
   const afterDeleteState = await waitFor(async () => {
@@ -520,9 +775,13 @@ async function main() {
     listAfter2 === listBefore2,
     "画布数量不变", JSON.stringify({ e4res, listBefore2, listAfter2 }));
 
-  /** A 账号（admin）本次挂载的存储钥匙与分桶自证：必须在导航尝试**之前**采集。*/
+  /** A 账号（admin）本次挂载的存储钥匙与分桶自证：必须在导航尝试**之前**采集。
+   *  E8 里 own>=1 必须有**真实、确定的来源**：这里在 A 账号页面的 scoped localStorage 写一个探针键 ——
+   *  桥会把键名写成 "oa:<本次挂载钥匙>:oa_probe_a" 落到**真实同源 localStorage**（谁写的：A 这一次挂载的页面；
+   *  写在哪一层：真实存储、带 A 的钥匙前缀），不再依赖某个页面顺手写 studio_active_page。*/
   const keyA = await shellJs("return String(window.__openarcBridge.accountKey());");
-  const isoA = await shellJs("return window.__openarcBridge.storageIsolation();");
+  const probeA = await shellJs("const b = window.__openarcBridge; const before = b.storageIsolation(); window.localStorage.setItem('oa_probe_a', 'A-account-probe'); const after = b.storageIsolation(); return { before: before, after: after, readBack: window.localStorage.getItem('oa_probe_a'), rawKey: 'oa:' + String(b.accountKey()) + ':oa_probe_a' };");
+  const isoA = probeA ? probeA.after : null;
 
   const receiver = await startReceiver();
   const egress = await inFrame(canvasFrame(), [
@@ -583,19 +842,25 @@ async function main() {
 
   await openAppWindow();
   await waitFor(() => !!shellFrame(), 25000);
-  await waitFor(() => !!homeFrame(), 20000);
   await sleep(800);
   const keyB = await shellJs("return String(window.__openarcBridge.accountKey());");
-  const isoB = await shellJs("return window.__openarcBridge.storageIsolation();");
-  const pageSide = await shellJs("return { logicalKeys: (function(){ const out=[]; for (let i=0;i<localStorage.length;i+=1) out.push(localStorage.key(i)); return out.slice(0,8); })(), active: localStorage.getItem('studio_active_page') };");
-  record("E8", "账号边界（存储/通道）：真实同源存储按**本次挂载钥匙**分桶，A 账号的键一个不剩（页面内自证 + 桥的只读隔离探针）",
-    !!keyA && !!keyB && keyA !== keyB && isoB && isoB.foreign === 0 && isoB.mount === true && Number(isoB.own) >= 1 && isoA && isoA.mount === true,
-    "钥匙变化 + 0 个外账号键 + oa:mount=当前钥匙", JSON.stringify({ keyAHead: String(keyA).slice(0, 8), keyBHead: String(keyB).slice(0, 8), isoA, isoB, pageSide }));
+  /** B 侧探针：B 也写一个自己的键 —— 这样 isoB.own>=1 有真实来源（隔离探针确实看得见键），
+   *  foreign===0 才不是"空对空"；同时用 B 的 scoped 存储去读 A 的逻辑键（必须 null）。*/
+  const probeB = await shellJs("const b = window.__openarcBridge; window.localStorage.setItem('oa_probe_b', 'B-account-probe'); const iso = b.storageIsolation(); return { isolation: iso, ownReadBack: window.localStorage.getItem('oa_probe_b'), foreignReadBack: window.localStorage.getItem('oa_probe_a'), rawKey: 'oa:' + String(b.accountKey()) + ':oa_probe_b', logicalKeys: (function () { const out = []; for (let i = 0; i < localStorage.length; i += 1) out.push(localStorage.key(i)); return out.slice(0, 8); })(), active: localStorage.getItem('studio_active_page') };");
+  const isoB = probeB ? probeB.isolation : null;
+  const pageSide = { logicalKeys: probeB ? probeB.logicalKeys : null, active: probeB ? probeB.active : null };
+  record("E8", "账号边界（存储/通道）：真实同源存储按**本次挂载钥匙**分桶，A 账号的键一个不剩（A/B 各自写入探针键自证 + 桥的只读隔离探针）",
+    !!keyA && !!keyB && keyA !== keyB
+      && isoA && isoA.mount === true && isoA.foreign === 0 && probeA && probeA.before && Number(isoA.own) >= Number(probeA.before.own) + 1 && probeA.readBack === "A-account-probe"
+      && isoB && isoB.mount === true && isoB.foreign === 0 && Number(isoB.own) >= 1 && probeB && probeB.ownReadBack === "B-account-probe" && probeB.foreignReadBack === null,
+    "钥匙变化 + 0 个外账号键 + oa:mount=当前钥匙 + A 的键在 B 侧读不到",
+    JSON.stringify({ keyAHead: String(keyA).slice(0, 8), keyBHead: String(keyB).slice(0, 8), probeA: probeA ? { before: probeA.before, after: probeA.after, readBack: probeA.readBack, rawKey: probeA.rawKey } : null, isoA, probeB: probeB ? { isolation: probeB.isolation, ownReadBack: probeB.ownReadBack, foreignReadBack: probeB.foreignReadBack, rawKey: probeB.rawKey } : null, isoB, pageSide }));
 
   await logout();
   await login(ADMIN.id, ADMIN.pw);
-  await openAppWindow();
-  await waitFor(() => !!canvasFrame(), 30000);
+  // 新形态：重新打开应用先落在列表首页（没有外壳的"上次页面"还原）——按产品路径从列表卡片进入当前这本。
+  const reopenedForF4 = await reopenCurrentCanvasFromHome();
+  note("F4 前置：切回 admin 后从画布列表重新进入当前这本 = " + reopenedForF4);
 
   /* ══════════════════ F4：AI 编辑正式链（提议 → 审批 → 执行 → 呈现 → 保存恢复） ══════════════════ */
   const f4 = await runAiEditChain();
@@ -604,7 +869,11 @@ async function main() {
 
   /* ══════════════════ 收尾 ══════════════════ */
   // 门禁自己制造的噪声：E5 里被拦下的导航会在 Chromium 日志里留下 ERR_BLOCKED_BY_CSP（那正是"被拦住"的证据）。
-  const ENV_NOISE = /ExperimentalWarning|SQLite is an experimental|SetApplicationIsDaemon|NSOSStatusErrorDomain|In-process GPU|ERR_BLOCKED_BY_CSP|Failed to load URL: http:\/\/127\.0\.0\.1/;
+  // ENV_NOISE = **环境噪声白名单**（不是放宽断言）：只登记应用代码之外的系统/运行时消息。
+  // IMKCFRunLoopWakeUpReliable：macOS 输入法框架（IMKit）向主线程 mach port 发唤醒消息失败时打的系统日志
+  // （整行是 "… Electron[pid:tid] error messaging the mach port for IMKCFRunLoopWakeUpReliable"），
+  // 仓库里 0 命中、与既有 SetApplicationIsDaemon / NSOSStatusErrorDomain 同类；应用代码不可能产生它。
+  const ENV_NOISE = /ExperimentalWarning|SQLite is an experimental|SetApplicationIsDaemon|NSOSStatusErrorDomain|IMKCFRunLoopWakeUpReliable|In-process GPU|ERR_BLOCKED_BY_CSP|Failed to load URL: http:\/\/127\.0\.0\.1/;
   const tail = stderrBuf.split("\n").filter((l) => /error|Error|FATAL/.test(l)).filter((l) => !ENV_NOISE.test(l) && !/已拦截应用内导航出网/.test(l)).slice(0, 5);
   record("Z1", "主进程无未处理错误", tail.length === 0, "无错误行", tail.join(" | ") || "clean");
   note("控制台错误样本：" + JSON.stringify(consoleErrors.slice(0, 8)));
@@ -623,6 +892,135 @@ async function main() {
   fs.writeFileSync(path.join(ART, "d5-02-canvas-e2e.json"), JSON.stringify(out, null, 2));
   console.log("\n结论：" + (failed === 0 ? "PASS" : "FAIL") + " — " + JSON.stringify({ pass: passed, fail: failed, total: CHECKS.length, notVerified: NOT_VERIFIED.length }));
   return failed === 0 ? 0 : 1;
+}
+
+/* ── N 系列辅助：模型 / 供应商验收（无模型契约 / 引导 / 未接通 / 真源渲染 / 状态点 / 无静默回落） ──
+ * 契约来源（产品侧已在真实 Electron 逐条验过）：public/novai-canvas/openarc-canvas-guard.js 的 DOM 契约
+ * 与 src/canvas/CanvasHost.tsx buildConfig() 的 /api/config 投影。断言只观察产品自己的 DOM / 端点 /
+ * 假 provider 计数，不替产品造事实，也不放宽任何既有判定。 */
+const N_GUIDE_TEXT = "打开 OpenArc 总 API 设置";
+const N_UNCONFIGURED_TEXT = {
+  "chat": "未配置（OpenArc 总 API 设置里没有可用的文本模型）",
+  "image-generation": "未配置（OpenArc 总 API 设置里没有可用的生图模型）",
+};
+const N_VIDEO_TEXT = "OpenArc 未接通视频传输（不可用）";
+const N_FAKE_LABEL_RE = "/gpt-4o-mini|gpt-image-2|veo3-fast/i";
+const N_FAKE_PROVIDER_RE = "/comfly/i";
+const N_FAKE_CHAT_LABEL = "gpt-4o-mini";
+const N_MODEL_SOURCE_KEYS = ["canvas_custom_image_models", "canvas_image_models_ordered", "canvas_chat_models_ordered"];
+const N_PROVIDER_KEYS = ["chat_models", "enabled", "id", "image_models", "name", "video_models"];
+/** 下拉的完整事实（class / disabled / aria / unconfigured / unavailable / 当前值 / 每个 option 的 value+text）。*/
+const N_SEL_INFO = "const selInfo = (sel) => sel ? { cls: String(sel.className), disabled: !!sel.disabled, aria: sel.getAttribute('aria-disabled'), unconfigured: sel.getAttribute('data-openarc-unconfigured'), unavailable: sel.getAttribute('data-openarc-unavailable'), value: String(sel.value), options: Array.from(sel.options).map(o => ({ value: String(o.value), text: String(o.textContent).trim() })) } : null;";
+const nSelBrief = (s) => (s ? { disabled: s.disabled, aria: s.aria, unconfigured: s.unconfigured, unavailable: s.unavailable, value: s.value, texts: s.options.map((o) => o.text) } : null);
+
+/** 探针节点：生图 / 视频节点在 A 系列里还不存在，临时加进来才能看到守卫在**真实渲染**上的 DOM 契约；
+ *  观察完立刻删除 —— 画布文档回到观察前的节点集合（A9 / B 系列 / F4 看到的画布不变）。 */
+const N_PROBE_NODES = [
+  { id: "n_ng_probe_gen", type: "generator", x: 120, y: 900, count: 1 },
+  { id: "n_ng_probe_vid", type: "video", x: 620, y: 900 },
+];
+async function nAddProbeNodes() {
+  const added = [];
+  for (const node of N_PROBE_NODES) added.push(await inFrame(canvasFrame(), "return await window.__openarcCanvas.applyCommand({ type:'node.add', node:" + JSON.stringify(node) + " }, null);"));
+  const marked = await waitFor(async () => {
+    const s = await inFrame(canvasFrame(), "return { gen: !!document.querySelector('.generator-body .provider-select[data-openarc-unconfigured=image-generation]'), vid: !!document.querySelector('.video-provider[data-openarc-unavailable=video-generation]') };");
+    return !!s && s.gen === true && s.vid === true;
+  }, 20000);
+  return { add: added.map((r) => (r && r.ok === true ? "ok" : String((r && r.error) || "noFrame"))), marked };
+}
+async function nRemoveProbeNodes() {
+  const res = await inFrame(canvasFrame(), "return await window.__openarcCanvas.applyCommand({ type:'node.delete', ids:" + JSON.stringify(N_PROBE_NODES.map((n) => n.id)) + " }, null);");
+  const gone = await waitFor(async () => {
+    const s = await inFrame(canvasFrame(), "const it = window.__openarcCanvasInternals; return { gen: !!it.primitives.getNode('n_ng_probe_gen'), vid: !!it.primitives.getNode('n_ng_probe_vid') };");
+    return !!s && s.gen === false && s.vid === false;
+  }, 15000);
+  return { del: res && res.ok === true ? "ok" : String((res && res.error) || "noFrame"), gone };
+}
+
+/** 页面内「伪造事实」扫描：outerHTML（全部属性 + 文本）、option.value（JS 属性，不一定落成 HTML 属性）、
+ *  select 当前 value 三处都扫。命中即证明页面上还留着第二套来源里的名字；样本带 where 便于定位。 */
+function nFakeScanLines(reLiteral) {
+  return [
+    "const fake = (function () {",
+    "  var re = " + reLiteral + ";",
+    "  var html = document.documentElement.outerHTML;",
+    "  var hits = [];",
+    "  var where = function (el) { var n = el && el.closest ? el.closest('.node') : null; return n ? ('node:' + String(n.getAttribute('data-id') || '?')) : (el && el.closest && el.closest('.canvas-nav-meta') ? 'nav' : 'page'); };",
+    "  if (re.test(html)) { Array.prototype.forEach.call(document.querySelectorAll('*'), function (el) { if (hits.length >= 5) return; Array.prototype.forEach.call(el.attributes || [], function (a) { if (hits.length < 5 && re.test(String(a.value))) hits.push({ kind: 'attr', where: where(el), tag: el.tagName, name: a.name, value: String(a.value).slice(0, 80) }); }); if (hits.length < 5 && el.children.length === 0 && re.test(String(el.textContent || ''))) hits.push({ kind: 'text', where: where(el), tag: el.tagName, value: String(el.textContent).slice(0, 80) }); }); }",
+    "  var optionHits = []; Array.prototype.forEach.call(document.querySelectorAll('option'), function (o) { if (optionHits.length < 5 && re.test(String(o.value))) optionHits.push({ where: where(o), value: String(o.value).slice(0, 80), text: String(o.textContent).trim().slice(0, 80) }); });",
+    "  var selectHits = []; Array.prototype.forEach.call(document.querySelectorAll('select'), function (s) { if (selectHits.length < 5 && re.test(String(s.value))) selectHits.push({ where: where(s), cls: String(s.className).slice(0, 60), value: String(s.value).slice(0, 80) }); });",
+    "  return { htmlMatched: re.test(html), hits: hits, optionHits: optionHits, selectHits: selectHits, options: document.querySelectorAll('option').length };",
+    "})();",
+  ];
+}
+
+/** 守卫的三种合格写法（严格 AND：disabled + aria + 标记 + 唯一占位 option 的精确文案）。*/
+const nSelOk = (s, cap) => !!s && s.disabled === true && s.aria === "true" && s.unconfigured === cap && s.unavailable === null && s.options.length === 1 && s.options[0].value === "" && s.options[0].text === N_UNCONFIGURED_TEXT[cap];
+const nVideoSelOk = (s) => !!s && s.disabled === true && s.aria === "true" && s.unavailable === "video-generation" && s.unconfigured === null && s.options.length === 1 && s.options[0].value === "" && s.options[0].text === N_VIDEO_TEXT;
+const nAvailSel = (s, list) => !!s && s.disabled === false && !s.unconfigured && !s.unavailable && s.options.length >= 1 && s.options.every((o) => o.value !== "" && list.includes(o.value)) && list.includes(String(s.value));
+
+/** N5 状态点：读一次真源 + DOM + 节点当前模型（同一次读取里的 fetch('/api/config') 就是页面重读真源的动作，
+ *  守卫按这次响应更新事实 → providers-changed → 上游 refreshCanvasConfigFromSettings + render → 守卫再扫一遍）。*/
+const nModelArea = () => inFrame(canvasFrame(), [
+  "const cfg = await (await fetch('/api/config')).json();",
+  N_SEL_INFO,
+  "const it = window.__openarcCanvasInternals;",
+  "const node = (id) => { try { const n = it.primitives.getNode(id); return n ? { provider: String(n.apiProvider || n.llmProvider || ''), model: String(n.model || '') } : null; } catch (e) { return null; } };",
+  "const chip = document.querySelector('.canvas-nav-meta [data-openarc-model-status]');",
+  "return { chip: chip ? chip.getAttribute('data-openarc-model-status') : null,",
+  "  chipText: String((chip && chip.querySelector('.openarc-model-status-text') || {}).textContent || '').trim(),",
+  "  chat: { provider: selInfo(document.querySelector('.llm-provider-select')), model: selInfo(document.querySelector('.llm-model')) },",
+  "  image: { provider: selInfo(document.querySelector('.generator-body .provider-select')), model: selInfo(document.querySelector('.generator-body .model-select')) },",
+  "  nodes: { llm: node('n_llm'), gen: node('n_gen') },",
+  "  manifest: { chat: cfg.chat_models || [], image: cfg.image_models || [], providers: (cfg.api_providers || []).map(function (p) { return String(p.id); }) } };",
+].join("\n"));
+/** want：unavailable-all（撤权：文本+生图都不可用）| available-all | image-unavailable（跨能力）| chat-model-removed（停用某个模型）。*/
+function nModelAreaOk(want, snap, label) {
+  if (!snap || snap.__noFrame || snap.__error) return false;
+  const chat = snap.manifest.chat || [], image = snap.manifest.image || [];
+  if (want === "unavailable-all") return snap.chip === "unconfigured" && chat.length === 0 && image.length === 0 && nSelOk(snap.chat.model, "chat") && nSelOk(snap.image.model, "image-generation");
+  if (want === "available-all") return snap.chip === "ok" && chat.length > 0 && image.length > 0 && nAvailSel(snap.chat.model, chat) && nAvailSel(snap.image.model, image);
+  if (want === "image-unavailable") return snap.chip === "unconfigured" && image.length === 0 && nSelOk(snap.image.model, "image-generation") && nAvailSel(snap.chat.model, chat);
+  if (want === "chat-model-removed") {
+    const goneFromManifest = !chat.includes(label) && !image.includes(label);
+    const goneFromDom = !(snap.chat.model && snap.chat.model.options.some((o) => o.value === label));
+    const goneFromNode = !(snap.nodes && snap.nodes.llm && snap.nodes.llm.model === label);
+    if (!(goneFromManifest && goneFromDom && goneFromNode)) return false;
+    return chat.length ? nAvailSel(snap.chat.model, chat) : nSelOk(snap.chat.model, "chat");
+  }
+  return false;
+}
+async function nWaitModelArea(want, label, timeout = 20000) {
+  const t0 = Date.now();
+  let snap = null, reads = 0;
+  while (Date.now() - t0 < timeout) {
+    snap = await nModelArea();
+    reads += 1;
+    if (nModelAreaOk(want, snap, label)) return { ok: true, want: want, reads: reads, waitedMs: Date.now() - t0, snap: snap };
+    await sleep(250);
+  }
+  return { ok: false, want: want, reads: reads, waitedMs: Date.now() - t0, snap: snap };
+}
+const nSnapBrief = (r) => (r ? {
+  ok: r.ok, want: r.want, waitedMs: r.waitedMs, reads: r.reads, chip: r.snap && r.snap.chip, chipText: r.snap && r.snap.chipText,
+  chat: r.snap && r.snap.chat.model && { disabled: r.snap.chat.model.disabled, unconfigured: r.snap.chat.model.unconfigured, value: r.snap.chat.model.value, options: r.snap.chat.model.options.map((o) => o.value) },
+  image: r.snap && r.snap.image.model && { disabled: r.snap.image.model.disabled, unconfigured: r.snap.image.model.unconfigured, value: r.snap.image.model.value, options: r.snap.image.model.options.map((o) => o.value) },
+  llmModel: r.snap && r.snap.nodes && r.snap.nodes.llm && r.snap.nodes.llm.model,
+  manifest: r.snap && r.snap.manifest && { chat: r.snap.manifest.chat, image: r.snap.manifest.image },
+} : null);
+
+/** 设置窗口（宿主顶层页 DOM）：pane 归属 + 标题 + 是否被最小化。*/
+const nSettingsWindow = () => js("const p = document.querySelector('[data-settings-active]'); if (!p) return null; const w = p.closest('.window'); return { active: String(p.getAttribute('data-settings-active') || ''), title: String((p.querySelector('.settings-pane h1') || {}).textContent || '').trim(), minimized: !!(w && w.classList.contains('minimized')), hasWindow: !!w, panes: document.querySelectorAll('[data-settings-pane]').length };");
+/** 关掉设置窗口：先走窗口自己的关闭按钮（settings 的 closeAction 就是 close），不行再退回程序坞菜单「关闭应用」。*/
+async function nCloseSettingsWindow() {
+  const byButton = await js("const p = document.querySelector('[data-settings-active]'); const w = p && p.closest('.window'); const b = w && w.querySelector('.window-title button.close'); if (!b) return 'missing'; b.click(); return 'clicked';");
+  let closed = await waitFor(() => js("return !document.querySelector('[data-settings-active]')"), 8000);
+  let byDock = null;
+  if (!closed && await rightClickDockItem("settings")) {
+    byDock = await waitFor(() => js("const menu = document.querySelector('.context-menu.dock-menu[aria-label=\"程序坞菜单\"]'); if (!menu) return false; const item = Array.from(menu.querySelectorAll('button[role=\"menuitem\"]')).find(function (b) { return b.textContent.trim() === '关闭应用'; }); if (!item || item.disabled) return false; item.click(); return true;"), 8000);
+    closed = await waitFor(() => js("return !document.querySelector('[data-settings-active]')"), 10000);
+  }
+  return { byButton: byButton, byDock: byDock, closed: closed };
 }
 
 /* ── F4 辅助：AI 助手面板（产品入口）+ 确定性 provider 计划 + 只读 DB 取证 ── */
@@ -675,6 +1073,32 @@ function dbRows(table) {
 }
 const canvasState = async (id) => { const g = await canvas({ type: "canvas/get", canvasId: id }); return { ok: !!(g && g.ok), revision: g && g.ok ? g.canvas.revision : null, nodes: g && g.ok ? (g.canvas.doc.nodes || []).length : null, edges: g && g.ok ? (g.canvas.doc.connections || []).length : null }; };
 const nodeOf = async (id, nodeId) => { const g = await canvas({ type: "canvas/get", canvasId: id }); return g && g.ok ? ((g.canvas.doc.nodes || []).find((n) => n.id === nodeId) || null) : null; };
+
+/** F4 chain2 前置换帧就绪：关窗重开后画布帧是**新挂载**的 —— 桥的 ctx.readOnly 默认 true，
+ *  要等宿主把 canEdit 推下来；适配器与文档也是异步就绪的。五步各自计时、各自可失败：
+ *  任一步在预算内没到 → ok=false，steps 原样进证据（谁都不许"假装用户已经能编辑"）。
+ *  注意：这里只等**事实**，不主动制造事实 —— 不替宿主 pushContext、不绕过桥的只读闸。*/
+async function waitChain2Ready(nodeId, budget = 20000) {
+  const t0 = Date.now();
+  const steps = {};
+  const left = () => Math.max(500, budget - (Date.now() - t0));
+  const mark = async (name, fn) => { const ok = await waitFor(fn, left()); steps[name] = { ok, atMs: Date.now() - t0 }; return ok; };
+  const sample = () => inFrame(canvasFrame(), [
+    "const b = window.__openarcBridge || null;",
+    "const it = window.__openarcCanvasInternals || null;",
+    "const s = it ? it.getState() : null;",
+    "return { isReadOnly: b ? b.isReadOnly() : null, canEdit: b ? !!b.context.canEdit : null, ctxCanvasId: b ? (b.context.canvasId || null) : null,",
+    "  canvasId: s && s.canvas ? s.canvas.id : null, revision: s && s.canvas ? s.canvas.revision : null, nodeCount: s ? s.nodes.length : null,",
+    "  hasNode: !!(it && it.primitives.getNode(" + JSON.stringify(nodeId) + ")) };",
+  ].join("\n"));
+  const done = async (ok) => ({ ok, steps, sample: await sample(), waitedMs: Date.now() - t0 });
+  if (!await mark("canvasFrame", () => !!canvasFrame())) return done(false);
+  if (!await mark("adapter", async () => { const a = await inFrame(canvasFrame(), "return { a: typeof window.__openarcCanvas, i: typeof window.__openarcCanvasInternals, b: typeof window.__openarcBridge };"); return a && a.a === "object" && a.i === "object" && a.b === "object"; })) return done(false);
+  if (!await mark("doc", async () => { const s = await inFrame(canvasFrame(), "const s = window.__openarcCanvas ? window.__openarcCanvas.state() : null; return s ? { id: s.canvasId } : null;"); return !!(s && s.id); })) return done(false);
+  if (!await mark("editable", async () => (await inFrame(canvasFrame(), "return window.__openarcBridge.isReadOnly();")) === false)) return done(false);
+  if (!await mark("node", async () => (await inFrame(canvasFrame(), "const it = window.__openarcCanvasInternals; return !!(it && it.primitives.getNode(" + JSON.stringify(nodeId) + "));")) === true)) return done(false);
+  return done(true);
+}
 
 /**
  * F4：AI 编辑正式链。全部走**真实产品入口**：
@@ -732,6 +1156,10 @@ async function runAiEditChain() {
     await setPlanOn(agentProvider, [{ name: "canvas_edit", args: { canvasId, baseRevision: beforeStale.revision, command: cmd2 } }]);
     const run2 = await runTaskViaUI("在画布 " + canvasId + " 上再添加一个节点（节点 id=agent_node_2）");
     const approval2 = await waitApproval(120000);
+    /** 重开后的画布帧是新挂载的：先等"帧/适配器/文档/非只读/n_prompt"五步就绪，再做用户编辑。
+     *  即使等待失败也照做一次编辑：把产品侧的真实错误码如实记下来（判定仍要求 userEdit.ok===true）。*/
+    const ready2 = approval2 ? await waitChain2Ready("n_prompt") : null;
+    const pageBeforeEdit = ready2 ? ready2.sample : null;
     let userEdit = null, userSaved = false, revisionAfterUser = null;
     if (approval2) {
       userEdit = await inFrame(canvasFrame(), "return await window.__openarcCanvas.applyCommand({ type: 'node.edit', id: 'n_prompt', patch: { text: '用户先改的内容' } }, null);");
@@ -745,7 +1173,17 @@ async function runAiEditChain() {
     const staleNode = await nodeOf(canvasId, "agent_node_2");
     const promptNode = await nodeOf(canvasId, "n_prompt");
     const call2 = dbRows("side_effect_calls").filter((r) => r.task_id === run2.taskId && r.tool_id === "canvas.edit").slice(-1)[0] || null;
-    details.chain2 = { run2, approval2, userEdit: userEdit && userEdit.ok, userSaved, revisionAfterUser, term2, beforeStale, afterStale, staleNodeAdded: !!staleNode, userText: promptNode && promptNode.text, call2: call2 ? { status: call2.status, verification: call2.verification_status } : null };
+    details.chain2 = {
+      ready: ready2 ? { ok: ready2.ok, waitedMs: ready2.waitedMs, steps: ready2.steps } : null,
+      pageBeforeEdit, userEdit, userSaved, revisionAfterUser,
+      approval2, beforeStale, afterStale, staleNodeAdded: !!staleNode, userText: promptNode && promptNode.text,
+      run2, term2, call2: call2 ? { status: call2.status, verification: call2.verification_status } : null,
+    };
+    // chain2 的结论单独一条短 record：F4 的 actual 会被 record 截到 1400 字符，chain2 的关键事实必须自己可见。
+    record("F4b", "AI 编辑正式链 · chain2 前置：重开画布帧后等宿主把 canEdit 推下来（非只读）+ 适配器/文档就绪 + n_prompt 可见，然后才做用户编辑（不放宽 F4 任何判定）",
+      !!(ready2 && ready2.ok === true) && !!pageBeforeEdit && pageBeforeEdit.isReadOnly === false && pageBeforeEdit.canEdit === true && pageBeforeEdit.hasNode === true && pageBeforeEdit.canvasId === canvasId,
+      "五步就绪 + 编辑前快照非只读且 n_prompt 可见",
+      JSON.stringify({ ready: ready2 && { ok: ready2.ok, waitedMs: ready2.waitedMs, steps: ready2.steps }, pageBeforeEdit, userEdit, userSaved, revisionAfterUser }));
     await page.screenshot({ path: path.join(ART, "d5-02-app-ai-stale.png") }).catch(() => {});
 
     const ok = !!(term1 && term1.status === "SUCCEEDED") && approval1 === true && advertised.includes("canvas_edit")

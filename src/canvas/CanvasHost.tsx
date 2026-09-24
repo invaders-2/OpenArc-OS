@@ -1,26 +1,27 @@
 /**
- * D5-02 Full-App · NOVAI 完整应用宿主（OpenArc 应用窗口内容）。
+ * D5-02 入口与宿主 chrome · NOVAI 画布应用宿主（OpenArc 应用窗口内容）。
  *
- * 结构（PLAN §22 + §6.1）：**入口就是上游原版 index.html（AI Studio 外壳：首页 + 左侧导航 + 子页 iframe）**，
- * 由 openarc-canvas:// 只读协议原样服务整棵 static/；OpenArc 只在最外层加一条窗口条：
- * 当前项目与 revision、画布选择、只读标记、模型来源、更新/下载已禁用说明与提示区。
+ * 结构：**入口 = 上游原版列表首页 static/canvas-list.html（"画布工作台"：无限画布标题、开始创作、
+ * 继续上次、新建画布与画布卡片列表）**，由 openarc-canvas:// 只读协议原样服务整棵 static/。
+ * 首页上的每个入口都**直接打开真实编辑器 static/canvas.html?id=…**（不插欢迎页、不插选画布遮挡层），
+ * 编辑器自带的返回按钮回到列表页：首页 ⇄ 编辑器就是完整的往返路径。
+ * 宿主**不画任何 chrome**（没有顶部操作条、状态行、提示横幅）：OpenArc 只负责协议服务、消息闸门、
+ * 账号分桶与资源失效复核，界面外观完全交给上游原版页面 —— 删除就是删除，不用 CSS 遮挡冒充。
  *
- * 边界（页面扩大后**仍然成立**，不因接入首页而放宽）：
+ * 边界（入口换成列表页后**仍然成立**）：
  *   · 应用页面在 sandbox="allow-scripts allow-same-origin" 的 iframe 里：origin 是
  *     openarc-canvas://bundle，与 OpenArc 外壳（file://）**不同源**，页面拿不到 window.openarc / IPC / fs / 凭据；
- *   · 宿主**只接受当前这一个外壳实例**的消息：event.source 必须是本帧，且必须带本次挂载的随机 token
- *     （子页的调用由外壳中继附加 token，子页自己拿不到 token）；
+ *   · 宿主**只接受当前这一个应用帧**的消息：event.source 必须是本帧，且必须带本次挂载的随机 token
+ *     （更深的子帧由外层中继附加 token，子帧自己拿不到 token）；
  *   · 账号作用域：入口 URL 的 #oa= 钥匙按"账号 + 本次挂载"生成，页面 localStorage/BroadcastChannel
- *     一律按该钥匙分桶（内存实现，不落盘）；切账号时窗口整体重建，旧页面与旧通道随之失效；
+ *     一律按该钥匙分桶（内存实现，不落盘）；切账号时窗口整体重建，旧页面与旧通道随之失效。
+ *     页面内部跳转（列表 → 编辑器）会丢掉 fragment，所以桥在 fragment 之外回落到 oa:mount 找回同一把钥匙；
+ *   · 每个应用页都靠桥的 800ms alive 心跳喂看门狗（入口不再固定是带中继的外壳页）；
  *   · 每次生成 = 一个 Task（预算/停止/审计归属）：模型调用只能经 canvas/modelChat|modelImage；
  *   · 本地导入图片进**资源库**，画布文档只存 openarc-asset:<ResourceRef>。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Window as WinDomain } from "../../electron/window-domain.cjs";
-// 窗口条是产品界面的一部分，控件走设计系统组件而不是自绘的 .primary/.ghost：
-// 那两个类只在个别容器里有样式，离开容器就是无样式的裸按钮。
-// Badge 不透传 data-*，所以 data-canvas-* 一律留在外层 span 上。
-import { Badge, Button, IconButton } from "../design-system/primitives";
 
 type Rpc = {
   ch: string; dir: string; kind: string; id?: number | string; token?: string; method?: string;
@@ -29,8 +30,8 @@ type Rpc = {
 };
 
 const CH = "openarc.canvas";
-/** 入口 = 完整应用外壳（首页 + 导航 + 子页）；画布编辑器是它里面的 iframe。*/
-const IFRAME_BASE = "openarc-canvas://bundle/index.html";
+/** 入口 = 上游原版列表首页（无限画布）；画布编辑器由首页上的入口直接打开。*/
+const IFRAME_BASE = "openarc-canvas://bundle/static/canvas-list.html";
 const ASSET_PREFIX = "openarc-asset:";
 const randomToken = () => "t_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
 /** 不透明账号钥匙：账号 + 本次挂载，页面只拿它做作用域分桶，不含任何凭据。*/
@@ -42,17 +43,23 @@ function keyOf(seed: string) {
 
 type CanvasListItem = { canvasId: string; title: string; icon: string; updatedAt: number; createdAt?: number; kind?: string; access?: { canEdit: boolean; source: string }; boardX?: number | null; boardY?: number | null; nodes?: number; edges?: number };
 
-export function CanvasHost({ win }: { win: WinDomain }) {
+export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpenModelSettings?: () => void }) {
   const frameRef = useRef<HTMLIFrameElement>(null);
+  /** "打开 OpenArc 总 API 设置"是宿主能力，不是页面能力：页面只能请求这一个固定动作（无参数）。*/
+  const openModelSettings = useRef(onOpenModelSettings);
+  openModelSettings.current = onOpenModelSettings;
+  /** 环境"减少动态效果"：随 hello/context 传给应用页，守卫脚本据此跳过动效（跨不了 sandbox 的类名靠这个事实传）。*/
+  const reducedMotion = () => (typeof document !== "undefined" && !!document.querySelector(".desktop.reduced")) ? true : false;
   const [items, setItems] = useState<CanvasListItem[]>([]);
   const [frameKey, setFrameKey] = useState(0);
   const [frameSrc, setFrameSrc] = useState<string>("");
   const [current, setCurrent] = useState<{ canvasId: string; title: string; revision: number; updatedAt: number; canEdit: boolean } | null>(null);
+  // 宿主不再有状态行与提示横幅（那是 chrome），但 status/notice 的**写点全部保留**：
+  // notice 另以根节点上的只读属性暴露给探针（资源失效复核 F3c 的证据通道），status 由看门狗与适配器路径写入。
   const [status, setStatus] = useState("初始化…");
   const [notice, setNotice] = useState<string>("");
-  const [modelInfo, setModelInfo] = useState<{ chat: number; image: number } | null>(null);
-  const [frameReady, setFrameReady] = useState(false);
-  const [blockedNav, setBlockedNav] = useState(0);
+  /** 清单外模型名被拒的次数（DOM 只读证据通道：data-canvas-model-not-found）。*/
+  const [modelNotFound, setModelNotFound] = useState(0);
   /** 应用帧最后一次心跳（看门狗用）：被非预期导航/崩溃打断时整帧重置，绝不留在错误页上。*/
   const lastBeat = useRef(Date.now());
 
@@ -97,21 +104,64 @@ export function CanvasHost({ win }: { win: WinDomain }) {
     labelToConfig.current = new Map(models.map((m) => [label(m), m.configId] as [string, string]));
     const chat = usable("chat");
     const image = usable("image-generation");
-    setModelInfo({ chat: chat.length, image: image.length });
     const pick = (cap: string, list: any[]) => {
       const def = defaults.personal?.[cap] || defaults.organization?.[cap] || null;
       const found = list.find((m) => m.configId === def);
       return found ? label(found) : (list[0] ? label(list[0]) : "");
     };
+    /**
+     * 供应商投影：**只含该能力下有可用模型的 provider**（OpenArc 是唯一真源，页面侧不再造供应商）。
+     * 字段名严格按上游消费点取名 —— canvas.js 读 p.id / p.name / p.enabled /
+     * p.chat_models / p.image_models / p.video_models（:713-800、:1141-1162、:7833/:8254）。
+     * **不投影** baseUrl / protocol / credentialRef / has_key：页面既拿不到地址也拿不到凭据，
+     * 因此不可能出现"看着连上了"的伪造供应商。
+     */
+    const providersOf = (cap: "chat" | "image-generation") => {
+      const out = new Map<string, { id: string; name: string; models: string[] }>();
+      for (const m of usable(cap)) {
+        const id = String(m.providerId || "");
+        if (!id) continue;
+        if (!out.has(id)) out.set(id, { id, name: String(m.providerName || id), models: [] });
+        out.get(id)!.models.push(label(m));
+      }
+      return out;
+    };
+    const chatProviders = providersOf("chat");
+    const imageProviders = providersOf("image-generation");
+    const apiProviders = Array.from(new Set([...chatProviders.keys(), ...imageProviders.keys()])).map((id) => ({
+      id, name: String((chatProviders.get(id) || imageProviders.get(id))!.name), enabled: true,
+      chat_models: chatProviders.get(id)?.models || [], image_models: imageProviders.get(id)?.models || [],
+      video_models: [],
+    }));
+    /**
+     * 能力事实三件套，语义互不重叠（守卫脚本按它决定"未接通"还是"未配置"）：
+     *   transport  传输是否存在（null = OpenArc 根本没接通这个能力）
+     *   available  = transport != null（能力本身在不在）
+     *   configured = 该能力有没有可用模型（缺模型是"未配置"，不是"不可用"）
+     */
+    const capability = (transport: string | null, configured: boolean, reason: string | null) => ({ available: !!transport, transport, configured, reason });
     return {
       chat_models: chat.map(label),
       image_models: image.map(label),
-      video_models: [], ms_chat_models: [], comfy_instances: [], api_providers: [],
+      // 视频/ComfyUI 在 OpenArc 里没有传输：投影一律为空，并把原因交给守卫脚本（绝不显示为已连接）。
+      video_models: [], ms_chat_models: [], comfy_instances: [],
+      api_providers: apiProviders,
       image_model: pick("image-generation", image),
       chat_model: pick("chat", chat),
-      chat_capability: chat.length > 0,
-      image_capability: image.length > 0,
-      unsupported: { "video-generation": "OpenArc 模型服务当前没有视频传输", comfy: "ComfyUI 不在 OpenArc 集成范围内" },
+      provider_count: apiProviders.length,
+      chat_model_count: chat.length,
+      image_model_count: image.length,
+      /**
+       * 能力可用性事实。**守卫脚本真的读它**（public/novai-canvas/openarc-canvas-guard.js 按
+       * available / transport / reason 决定禁用哪些下拉、写什么说明、给不给"打开 OpenArc 总 API 设置"）。
+       * 未接通的能力一律 available:false + reason —— 不是装饰字段。
+       */
+      capabilities: {
+        chat: capability("openarc-model-service", chat.length > 0, chat.length ? null : "OpenArc 总 API 设置里还没有可用的文本模型"),
+        "image-generation": capability("openarc-model-service", image.length > 0, image.length ? null : "OpenArc 总 API 设置里还没有可用的生图模型"),
+        "video-generation": capability(null, false, "OpenArc 未接通视频传输（不可用）"),
+        comfy: capability(null, false, "OpenArc 未接入 ComfyUI（不可用）"),
+      },
     };
   }, [modelCmd]);
 
@@ -205,23 +255,18 @@ export function CanvasHost({ win }: { win: WinDomain }) {
   }, []);
 
   const pushContext = useCallback(async (c: { canEdit: boolean; canvasId: string } | null) => {
-    await toShell({ kind: "context", canEdit: c ? c.canEdit : false, readOnly: c ? !c.canEdit : true, canvasId: c ? c.canvasId : null });
+    await toShell({ kind: "context", canEdit: c ? c.canEdit : false, readOnly: c ? !c.canEdit : true, canvasId: c ? c.canvasId : null, reducedMotion: reducedMotion() });
   }, [toShell]);
 
-  const refreshListAndOpen = useCallback(async (canvasId: string) => {
-    await refreshList();
-    const next = await bindCanvas(canvasId);
-    if (next) { await pushContext(next); await toShell({ kind: "open-canvas", canvasId }); }
-  }, [bindCanvas, pushContext, refreshList, toShell]);
-
-  const createCanvas = useCallback(async () => {
-    const title = "画布 " + new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
-    const res = await canvasCmd({ type: "canvas/create", title, icon: "🧩", kind: "classic" });
-    if (!res || !res.ok) { setNotice("创建画布失败：" + String(res && res.error)); return; }
-    await refreshList();
-    const next = await bindCanvas(res.canvas.canvasId);
-    if (next) { await pushContext(next); await toShell({ kind: "open-canvas", canvasId: next.canvasId }); }
-  }, [bindCanvas, canvasCmd, pushContext, refreshList, toShell]);
+  // 宿主「减少动态效果」是实时开关：sandbox iframe 读不到外壳的类名，只能由宿主把事实重新推过去
+  //（应用页的守卫按 data-openarc-reduced-motion 关掉自己的动效）。
+  useEffect(() => {
+    const root = typeof document !== "undefined" ? document.querySelector(".desktop") : null;
+    if (!root || typeof MutationObserver === "undefined") return;
+    const observer = new MutationObserver(() => { void pushContext(currentRef.current); });
+    observer.observe(root, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, [pushContext]);
 
   /** 宿主 RPC：应用页面的每一条请求都在这里被翻译成受控命令。*/
   const handleCall = useCallback(async (method: string, params: Record<string, any>): Promise<any> => {
@@ -229,6 +274,9 @@ export function CanvasHost({ win }: { win: WinDomain }) {
     const canvasId = (cur && cur.canvasId) || null;
     switch (method) {
       // —— 应用外壳 ——
+      case "app.openModelSettings":
+        openModelSettings.current?.();
+        return { ok: true, app: "settings", pane: "model", label: "打开 OpenArc 总 API 设置" };
       case "app.info":
         return {
           name: "AI Studio · OpenArc", version: "1.0.117-openarc", repo_url: null, version_url: "", tree_url: "",
@@ -270,7 +318,11 @@ export function CanvasHost({ win }: { win: WinDomain }) {
       case "canvas.get": {
         const res = await canvasCmd({ type: "canvas/get", canvasId: params.canvasId });
         if (!res.ok) return { __status: 404, body: { error: res.error } };
-        setCurrent({ canvasId: res.canvas.canvasId, title: res.canvas.title, revision: res.canvas.revision, updatedAt: Number(res.canvas.updatedAt || 0), canEdit: !!res.canvas.access?.canEdit });
+        const canEdit = !!res.canvas.access?.canEdit;
+        setCurrent({ canvasId: res.canvas.canvasId, title: res.canvas.title, revision: res.canvas.revision, updatedAt: Number(res.canvas.updatedAt || 0), canEdit });
+        // 页面自己发起的打开（列表卡片 / 直链）与 canvas.create 同一口径：current 变了就立刻把
+        // 只读事实推给页面，否则页面停在 hello 那一刻的 canEdit:false 上（重开的画布改不动、也存不了）。
+        await pushContext({ canvasId: res.canvas.canvasId, canEdit });
         const doc = await resolveRefs(res.canvas.doc);
         return { canvas: upstreamCanvas(res.canvas, doc) };
       }
@@ -342,6 +394,11 @@ export function CanvasHost({ win }: { win: WinDomain }) {
       case "model.chat": {
         const body = (params.body || {}) as any;
         if (!canvasId) return { __status: 502, body: { error: "CANVAS_NOT_OPEN" } };
+        // 页面传的是清单里的标签（displayName · configId 尾号）：不在当前 OpenArc 清单 = 明确报错，
+        // **绝不静默回落到"该能力的默认模型"**。判定发生在任何 canvas/run 之前：0 次 provider 请求。
+        const wanted = String(body.model || "");
+        const configId = wanted ? labelToConfig.current.get(wanted) : null;
+        if (wanted && !configId) { setModelNotFound((n) => n + 1); setNotice("模型不在 OpenArc 清单里（已拒绝，不回落）：" + wanted); return rejectUnknownModel("model.chat", wanted); }
         const run = await canvasCmd({ type: "canvas/run", canvasId, kind: "chat", nodeId: body.nodeId || null });
         if (!run || !run.ok) { setNotice("无法开始生成：" + String((run && run.error) || "UNKNOWN")); return { __status: 502, body: { error: (run && run.error) || "RUN_FAILED" } }; }
         const system = String(body.system_prompt || "You are a helpful assistant.");
@@ -351,7 +408,7 @@ export function CanvasHost({ win }: { win: WinDomain }) {
           .concat([{ role: "user", content: String(body.message || "") }]);
         const res = await canvasCmd({
           type: "canvas/modelChat", canvasId, runId: run.runId, messages,
-          configId: labelToConfig.current.get(String(body.model || "")) || null,
+          configId,
         });
         const ok = !!(res && res.ok);
         await canvasCmd({ type: "canvas/runFinish", canvasId, runId: run.runId, status: ok ? "DONE" : "FAILED" });
@@ -365,6 +422,9 @@ export function CanvasHost({ win }: { win: WinDomain }) {
       case "model.imageTask": {
         const body = (params.body || {}) as any;
         if (!canvasId) return { __status: 502, body: { error: "CANVAS_NOT_OPEN" } };
+        const wantedImage = String(body.model || "");
+        const imageConfigId = wantedImage ? labelToConfig.current.get(wantedImage) : null;
+        if (wantedImage && !imageConfigId) { setModelNotFound((n) => n + 1); setNotice("模型不在 OpenArc 清单里（已拒绝，不回落）：" + wantedImage); return rejectUnknownModel("model.imageTask", wantedImage); }
         const run = await canvasCmd({ type: "canvas/run", canvasId, kind: "image", nodeId: body.nodeId || null });
         if (!run || !run.ok) { setNotice("无法开始生成：" + String((run && run.error) || "UNKNOWN")); return { __status: 502, body: { error: (run && run.error) || "RUN_FAILED" } }; }
         const taskId = "oa_img_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -372,7 +432,7 @@ export function CanvasHost({ win }: { win: WinDomain }) {
           const res = await canvasCmd({
             type: "canvas/modelImage", canvasId, runId: run.runId, prompt: String(body.prompt || ""),
             size: body.size || null, count: Number(body.count) || 1,
-            configId: labelToConfig.current.get(String(body.model || "")) || null,
+            configId: imageConfigId,
           });
           const ok = !!(res && res.ok);
           await canvasCmd({ type: "canvas/runFinish", canvasId, runId: run.runId, status: ok ? "DONE" : "FAILED" });
@@ -417,18 +477,17 @@ export function CanvasHost({ win }: { win: WinDomain }) {
       lastBeat.current = Date.now();
       if (d.kind === "alive") return;
       if (d.kind === "hello-request") {
-        setFrameReady(true);
         const cur = currentRef.current;
         frameWin.postMessage({
           ch: CH, dir: "host->canvas", kind: "hello", token: instanceToken.current,
           canEdit: cur ? cur.canEdit : false, readOnly: cur ? !cur.canEdit : true, canvasId: cur ? cur.canvasId : null,
-          account: "openarc", accountKey: (frameSrc.split("#oa=")[1] || null),
+          account: "openarc", accountKey: (frameSrc.split("#oa=")[1] || null), reducedMotion: reducedMotion(),
         }, "*");
         return;
       }
       if (d.kind === "context-request") {
         const cur = currentRef.current;
-        frameWin.postMessage({ ch: CH, dir: "host->canvas", kind: "context", canEdit: cur ? cur.canEdit : false, readOnly: cur ? !cur.canEdit : true, canvasId: cur ? cur.canvasId : null, accountKey: (frameSrc.split("#oa=")[1] || null) }, "*");
+        frameWin.postMessage({ ch: CH, dir: "host->canvas", kind: "context", canEdit: cur ? cur.canEdit : false, readOnly: cur ? !cur.canEdit : true, canvasId: cur ? cur.canvasId : null, accountKey: (frameSrc.split("#oa=")[1] || null), reducedMotion: reducedMotion() }, "*");
         return;
       }
       if (d.kind === "notice") { if (d.message) setNotice(String(d.message)); return; }
@@ -477,7 +536,6 @@ export function CanvasHost({ win }: { win: WinDomain }) {
       if (Date.now() - lastBeat.current < 8000) return;
       lastBeat.current = Date.now();
       instanceToken.current = randomToken();
-      setFrameReady(false);
       setNotice("应用页面被非预期导航/崩溃中断，已重置（旧页面与旧实例 token 立即失效）");
       void (async () => {
         let seed = "anon";
@@ -493,11 +551,10 @@ export function CanvasHost({ win }: { win: WinDomain }) {
     return () => clearInterval(timer);
   }, [frameSrc]);
 
-  // 主进程拦截的应用内导航出网（宿主级证据的 UI 面）
+  // 主进程拦截的应用内导航出网：证据留在宿主 notice 状态里（不再有计数徽标）
   useEffect(() => {
     const off = (window as any).openarc?.onNativeState?.((e: any) => {
       if (String(e?.type || "") !== "canvas-navigation-blocked") return;
-      setBlockedNav((n) => n + 1);
       setNotice("已拦截应用内导航出网：" + String(e?.url || "").slice(0, 120));
     });
     return () => { try { off?.(); } catch { /* ignore */ } };
@@ -526,7 +583,7 @@ export function CanvasHost({ win }: { win: WinDomain }) {
     })();
   }, [buildConfig, refreshList]);
 
-  // 状态栏轮询：当前画布 revision 跟着 OpenArc 存储走；同时做**引用资源可用性复核**
+  // 当前画布轮询：revision 跟着 OpenArc 存储走；同时做**引用资源可用性复核**
   // （删除 / 撤权之后，宿主的显示缓存必须失效，不能继续拿旧 data URL 顶替 —— 缺项 3）。
   useEffect(() => {
     const timer = setInterval(() => {
@@ -561,67 +618,26 @@ export function CanvasHost({ win }: { win: WinDomain }) {
     return () => clearInterval(timer);
   }, [canvasCmd, resolveRefs, toShell]);
 
-  const openHome = useCallback(async () => {
-    await toShell({ kind: "command", command: "__noop__" }); // 保持协议单向形状：不新增宿主→页面任意消息
-  }, [toShell]);
-
   return (
-    <div className="browser-shell" data-canvas-host={win.id} data-canvas-app="novai-full">
-      <header className="gov-head" data-canvas-bar>
-        <h2 data-canvas-title>{current ? current.title : "AI Studio（完整应用）"}</h2>
-        <div className="gov-form">
-          <span data-canvas-revision>
-            <Badge tone="neutral" size="sm">{current ? "revision " + current.revision : "未打开画布"}</Badge>
-          </span>
-          <select
-            aria-label="选择画布"
-            data-canvas-picker
-            value={current ? current.canvasId : ""}
-            onChange={(e) => { const id = e.target.value; if (id) void refreshListAndOpen(id); }}
-          >
-            <option value="">选择画布…</option>
-            {items.map((c) => <option key={c.canvasId} value={c.canvasId}>{c.title}</option>)}
-          </select>
-          <Button variant="primary" size="sm" data-canvas-create onClick={() => void createCanvas()}>新建画布</Button>
-          <Button variant="ghost" size="sm" data-canvas-home onClick={() => { setFrameKey((k) => k + 1); setStatus("已回到首页"); }}>回到首页</Button>
-          {current && !current.canEdit ? (
-            <span data-canvas-readonly>
-              <Badge tone="warning" size="sm">只读（无编辑权限）</Badge>
-            </span>
-          ) : null}
-          {blockedNav > 0 ? (
-            <span data-canvas-nav-blocked>
-              <Badge tone="warning" size="sm">已拦截导航出网 {blockedNav} 次</Badge>
-            </span>
-          ) : null}
-          <span className="toolbar-spacer" />
-          <span data-canvas-update-disabled title="OpenArc 不检查、不下载、不安装上游程序">
-            <Badge tone="neutral" size="sm">更新/下载：已禁用</Badge>
-          </span>
-          <span data-canvas-models>
-            <Badge tone="neutral" size="sm">{modelInfo ? "模型：文本 " + modelInfo.chat + " / 图片 " + modelInfo.image : "模型：读取中…"}</Badge>
-          </span>
-        </div>
-      </header>
-      <div className="browser-status" role="status" data-canvas-status>{status}</div>
-      {notice ? (
-        <div className="browser-notices" aria-label="应用提示">
-          <div className="browser-notice" data-canvas-notice data-notice-kind="warning">
-            <span className="notice-title">提示</span>
-            <span className="notice-text">{notice}</span>
-            <IconButton label="关闭提示" size="sm" onClick={() => setNotice("")}>×</IconButton>
-          </div>
-        </div>
-      ) : null}
+    <div
+      className="browser-shell"
+      data-canvas-host={win.id}
+      data-canvas-app="novai-full"
+      // 宿主不再画提示横幅（横幅是 chrome）。这一对**只读属性**是资源失效复核等路径的
+      // 行为证据通道，供探针与门禁读取 —— 不是 UI，也没有用 CSS 把任何东西藏起来。
+      data-canvas-asset-notice={notice ? "1" : "0"}
+      data-canvas-asset-notice-text={notice || undefined}
+      // 清单外模型名的拒绝计数（只读证据：配合"0 次 provider 请求"，证明没有静默回落）
+      data-canvas-model-not-found={modelNotFound}
+    >
       {frameSrc ? (
         <iframe
           key={frameKey}
           ref={frameRef}
-          title="NOVAI AI Studio（OpenArc 集成）"
+          title="NOVAI 无限画布（OpenArc 集成）"
           className="canvas-host-frame"
           data-canvas-frame
           data-canvas-app-frame
-          data-frame-ready={frameReady ? "1" : "0"}
           sandbox="allow-scripts allow-same-origin"
           src={frameSrc}
         />
@@ -632,7 +648,22 @@ export function CanvasHost({ win }: { win: WinDomain }) {
   );
 }
 
+/** 清单外模型名的统一拒绝载荷（MODEL_NOT_FOUND；不建 run、不发 provider 请求）。*/
+function rejectUnknownModel(method: string, label: string) {
+  return {
+    __status: 502,
+    body: {
+      // error 是稳定错误码（门禁断言用）；detail 是人话（上游错误弹窗优先显示它，避免只给一个错误码）。
+      error: "MODEL_NOT_FOUND",
+      detail: "该模型不在当前 OpenArc 模型清单里（不会改用其它模型）：" + label,
+      message: "当前 OpenArc 模型清单里没有这个模型（不会改用其它模型）：" + label,
+      model: label, method,
+    },
+  };
+}
+
 function explain(code: string) {
+  if (code === "MODEL_NOT_FOUND") return "该模型不在当前 OpenArc 模型清单里（不会改用其它模型，请在 设置 → 模型 / AI 里登记）";
   if (code === "CAPABILITY_UNAVAILABLE") return "该模型没有这项能力（OpenArc 不会用文本接口顶替）";
   if (code === "MODEL_CONFIG_UNAVAILABLE") return "没有可用的模型配置（请在 设置 → 模型 里配置）";
   if (code === "CREDENTIAL_MISSING") return "该模型缺少凭据";

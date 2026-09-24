@@ -313,21 +313,38 @@ class ModelService {
     }
   }
 
-  /** 渲染层可见的模型面（**无 baseUrl / 无凭据 / 无 credentialRef**）。*/
+  /**
+   * 渲染层可见的模型面（**无 baseUrl / 无凭据 / 无 credentialRef**）。
+   *
+   * 与 resolveModel **同一口径**做授权过滤：App 必须 enabled 且 app grant 含 `model.use`，
+   * PERSONAL 配置还必须属于当前 actor —— 否则撤权/停用后列表仍显示模型，而调用会被拒，
+   * 界面就成了"看着能用、点了报错"。过滤掉的模型连 provider 名字都不投影。
+   * 每个模型带 providerId / providerName（**只有显示名**），供画布按供应商分组展示。
+   */
   listModelsForUse({ context } = {}) {
     const actor = this.#actor(context);
     if (!actor.ok) return actor;
     const capabilities = ["chat", "tool-calling", "vision-input", "image-generation", "video-generation", "embedding"];
     const defaults = this.getDefaults({ context });
     const items = this.listModels({ context });
-    const models = (items && items.items ? items.items : []).map((m) => ({
-      configId: m.configId, displayName: m.displayName || m.remoteModelId, remoteModelId: m.remoteModelId,
-      capabilities: m.capabilities || [], verifiedCapabilities: m.verifiedCapabilities || [], status: m.status, scope: m.scope,
-    }));
+    const models = [];
+    for (const m of items && items.items ? items.items : []) {
+      const config = this.store.configById(m.configId);
+      if (!config) continue;
+      const provider = this.store.providerById(config.provider_id);
+      if (!provider) continue;
+      if (String(config.status) !== "enabled" || String(provider.status) !== "enabled") continue;
+      if (!this.#authorize({ context, action: domain.MODEL_ACTIONS.USE, config, provider }).ok) continue;
+      models.push({
+        configId: m.configId, displayName: m.displayName || m.remoteModelId, remoteModelId: m.remoteModelId,
+        providerId: provider.provider_id, providerName: provider.display_name || provider.provider_id,
+        capabilities: m.capabilities || [], verifiedCapabilities: m.verifiedCapabilities || [], status: m.status, scope: m.scope,
+      });
+    }
     return {
       ok: true, models, capabilities,
       defaults: defaults && defaults.ok ? { personal: defaults.personal, organization: defaults.organization } : { personal: {}, organization: {} },
-      // 供应商/地址/凭据一律不出主进程：画布只看到"能用的模型"。
+      // 供应商地址/凭据一律不出主进程：画布只看到"能用的模型"和供应商显示名。
       transports: { chat: true, "image-generation": true, "video-generation": false },
     };
   }

@@ -16,7 +16,7 @@
  * .settings-pane 文本与 .material-select 在设置打开时就在 DOM 里。
  * .settings-content / .settings-pane 仅作为探针钩子保留。
  */
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Bot, Monitor, Sliders } from "lucide-react";
 import { DevicePane } from "../device/DevicePane";
 import { ModelSettings } from "./ModelSettings";
@@ -29,6 +29,8 @@ type SettingsContentProps = {
   role: string | null;
   /** 「外观与交互」pane 的正文（标题与副标题之下）。由 main.tsx 组合进来。 */
   appearanceBody?: ReactNode;
+  /** 每次 +1 = 外部请求（画布页的"打开 OpenArc 总 API 设置"）切到「模型 / AI」pane。 */
+  paneRequest?: number;
 };
 
 const PANES: { id: Pane; label: string; icon: ReactNode }[] = [
@@ -43,8 +45,11 @@ const TITLES: Record<Pane, { title: string; subtitle: string }> = {
   devices: { title: "设备", subtitle: "管理已授权的设备、配对凭据与设备审计。" },
 };
 
-export function SettingsContent({ role, appearanceBody }: SettingsContentProps) {
+export function SettingsContent({ role, appearanceBody, paneRequest = 0 }: SettingsContentProps) {
   const [pane, setPane] = useState<Pane>("appearance");
+
+  // 外部请求（画布页的模型引导）落在模型 pane；用户之后手动切走不会被再拽回来。
+  useEffect(() => { if (paneRequest) setPane("model"); }, [paneRequest]);
 
   return (
     <div className="split">

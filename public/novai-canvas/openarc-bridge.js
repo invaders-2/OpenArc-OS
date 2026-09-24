@@ -24,14 +24,23 @@
   try { IS_TOP = window.top === window.self; } catch (e) { IS_TOP = false; }
   ctx.top = IS_TOP;
 
-  /** 账号作用域钥匙：宿主在入口 URL 的 fragment 里给出（不透明、不含凭据），外壳再传给子页。*/
+  /** 账号作用域钥匙：宿主在入口 URL 的 fragment 里给出（不透明、不含凭据），外壳再传给子页。
+   *  上游页面之间的内部跳转（canvas-list.html → canvas.html）**不带 fragment**，这里必须回落到同源真实存储里的
+   *  oa:mount 找回本次挂载的钥匙：读成 "anon" 会让 purgeOtherAccountResidue() 把刚写入的真实数据整片 clear()
+   *  （首页 ↔ 编辑器来回一次，主题/项目记忆/待导入全丢）。
+   *  两处都读不到 = 钥匙未知 → 返回 null，调用方**跳过那次清理**，等宿主 hello 里的 accountKey 再清。*/
   function readAccountKey() {
+    var m = null;
+    try { m = /(?:^|[#&])oa=([A-Za-z0-9_-]{4,64})/.exec(String(window.location.hash || "")); } catch (e) { m = null; }
+    if (m) return m[1];
     try {
-      var m = /(?:^|[#&])oa=([A-Za-z0-9_-]{4,64})/.exec(String(window.location.hash || ""));
-      return m ? m[1] : "anon";
-    } catch (e) { return "anon"; }
+      // 这一行在 localStorage 被换成账号作用域实现**之前**执行，读到的就是真实存储。
+      var mount = window.localStorage.getItem("oa:mount");
+      return mount ? String(mount) : null;
+    } catch (e) { return null; }
   }
-  var accountKey = readAccountKey();
+  var mountAccountKey = readAccountKey();
+  var accountKey = mountAccountKey || "anon";
 
   function post(msg) {
     try { window.parent.postMessage(Object.assign({ ch: CH, dir: "canvas->host", top: IS_TOP }, msg), "*"); } catch (e) { /* host 不在 */ }
@@ -83,6 +92,23 @@
     }); });
   }
 
+  /** 页面 → 宿主的**动作白名单**：只有登记在这里的固定动作能经公开入口发起，且不接受任何参数
+   *  （页面不能借它"打开任意 app / 传任意 payload"）。当前只有一条：打开 OpenArc 总 API 设置。
+   *  宿主侧对应 CanvasHost 的 app.openModelSettings 分支，最终由外壳 activateApp("settings") 打开真实设置窗口。*/
+  var PAGE_ACTIONS = { "app.openModelSettings": true };
+  function callPageAction(method) {
+    if (!PAGE_ACTIONS[String(method)]) return Promise.reject(errText("CANVAS_METHOD_NOT_ALLOWED", "未登记的页面动作：" + method));
+    return call(method, {});
+  }
+
+  /** 宿主（CanvasHost）在 hello/context 里带来的"减少动态效果"事实：sandbox iframe 读不到外壳的类名，
+   *  所以由宿主显式传进来，守卫脚本按它跳过动效。属性名是稳定的 DOM 契约。*/
+  function applyHostFlags(d) {
+    try {
+      if (typeof d.reducedMotion !== "undefined") document.documentElement.setAttribute("data-openarc-reduced-motion", d.reducedMotion ? "1" : "0");
+    } catch (e) { /* ignore */ }
+  }
+
   function applyAccount(next) {
     var key = next ? String(next) : null;
     if (!key || key === accountKey) return;
@@ -102,6 +128,7 @@
       ctx.canvasId = d.canvasId || null;
       ctx.models = d.models || null;
       ctx.account = d.account || null;
+      applyHostFlags(d);
       applyAccount(d.accountKey);
       flushReady();
       window.dispatchEvent(new CustomEvent("openarc-canvas-context", { detail: { readOnly: ctx.readOnly, canEdit: ctx.canEdit, canvasId: ctx.canvasId, models: ctx.models, top: IS_TOP } }));
@@ -111,6 +138,7 @@
       ctx.readOnly = !!d.readOnly;
       ctx.canEdit = !!d.canEdit;
       if (d.canvasId) ctx.canvasId = d.canvasId;
+      applyHostFlags(d);
       applyAccount(d.accountKey);
       window.dispatchEvent(new CustomEvent("openarc-canvas-context", { detail: { readOnly: ctx.readOnly, canEdit: ctx.canEdit, canvasId: ctx.canvasId, models: ctx.models, top: IS_TOP } }));
       return;
@@ -125,6 +153,9 @@
 
   window.__openarcBridge = {
     call: call,
+    /** 唯一被登记的页面动作（无参数）：打开 OpenArc 总 API 设置。*/
+    openModelSettings: function () { return callPageAction("app.openModelSettings"); },
+    pageActions: function () { return Object.keys(PAGE_ACTIONS); },
     context: ctx,
     accountKey: function () { return accountKey; },
     /** 账号边界自证：真实同源存储里属于本次挂载的键 / 不属于的键（只回计数，不回键名）。*/
@@ -221,7 +252,9 @@
       get length() { return keys().length; },
     };
   }
-  purgeOtherAccountResidue();
+  // 钥匙未知（fragment 没有 oa= 且还没有 oa:mount）时不做破坏性清理：清错就是清掉本账号的数据。
+  // 交给宿主 hello 驱动的 applyAccount() 用真钥匙清。
+  if (mountAccountKey) purgeOtherAccountResidue();
   Object.defineProperty(window, "localStorage", { value: scopedStorage("local"), configurable: true });
   Object.defineProperty(window, "sessionStorage", { value: scopedStorage("session"), configurable: true });
 
@@ -450,4 +483,9 @@
     post({ kind: "hello-request" });
     setTimeout(function () { helloLoop(tries + 1); }, 500);
   })(0);
+
+  // 心跳：宿主看门狗连续 8s 收不到本帧任何消息就换 token 整帧重置。
+  // 入口不再固定是带中继的外壳页（现在直接是 canvas-list / canvas.html 本身），所以每个页面都必须自己发；
+  // 宿主对 alive 免 token 校验，只刷新 lastBeat（CanvasHost 消息闸门）。
+  setInterval(function () { post({ kind: "alive", token: token }); }, 800);
 })();

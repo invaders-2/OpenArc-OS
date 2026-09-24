@@ -3,7 +3,11 @@
 - 仓库：https://github.com/invaders-2/NOVAI-Infinite-Canvas
 - **固定的源 commit：`6ce1a64680b669b31c2ac3b32418b54decd404f2`**（vendor 脚本每次核对 `git rev-parse HEAD`）
 - 本轮 vendor **整个 `static/`**（14 个页面 + js/css/images/vendor/system-prompts/runninghub，103 个文件）：
-  **入口 = 上游原版 `static/index.html`（AI Studio 外壳：首页 + 左侧导航 + 子页 iframe）**。
+  **产品入口 = 上游原版 `static/canvas-list.html`（"画布工作台"：无限画布标题 + 开始创作 / 继续上次 /
+  新建画布 + 画布卡片列表）；它上面的每个入口都直接打开真实编辑器 `static/canvas.html?id=…`，
+  编辑器自带的返回按钮回到列表页 —— 首页 ⇄ 编辑器就是完整往返路径。**
+  `index.html`（AI Studio 外壳：首页 + 左侧导航 + 子页）仍然 vendor 到 bundle 根，但**不再是入口**，
+  只留给宿主级边界测试使用。
   上游的 Python 后端与桌面壳不在本目录内（OpenArc 用受控能力替代，见下）。
 
 ## 生成方式（唯一入口，可重复执行）
@@ -18,18 +22,25 @@ OA_NOVAI_SRC=/tmp/novai-canvas-src node experiments/d5-02/vendor-novai-app.mjs
 
 | 目录/文件 | 来源 | 说明 |
 | --- | --- | --- |
-| `static/**` | `static/**` | **原样**，仅做下面三处注入 |
-| `index.html` | `static/index.html` | 入口副本（桥 + 中继），根绝对 `/static/` 指向同一份资源 |
+| `static/**` | `static/**` | **原样**，仅做下面五处改动 |
+| `index.html` | `static/index.html` | 上游外壳副本（桥 + 中继），**已不是产品入口**，只留给边界测试；根绝对 `/static/` 指向同一份资源 |
 | `openarc-bridge.js` | OpenArc 新增 | 每页最先执行：端点白名单、账号作用域存储、pywebview 明确不可用、出网拒绝 |
-| `openarc-shell.js` | OpenArc 新增 | **只注入入口**：子页 ↔ 外壳 ↔ 宿主的中继协议 |
+| `openarc-shell.js` | OpenArc 新增 | **只注入 bundle 根 `index.html`**（已不是产品入口）：子页 ↔ 外壳 ↔ 宿主的中继协议 |
 | `openarc-adapter.js` | OpenArc 新增 | 只注入画布页：把宿主命令翻译成画布自己的原语（同一命令层 + 只读闸） |
+| `openarc-canvas-guard.js` | OpenArc 新增 | **只注入画布编辑器页**：供应商/模型单一真源守卫（读 `/api/config` 的能力事实、真实 disable 未接通/未配置的下拉、清清单外旧值、锁死三把页面侧模型来源键、提供"打开 OpenArc 总 API 设置"引导） |
 
-## 对上游文件的三处注入（脚本化、可审计）
+## 对上游文件的五处改动（脚本化、可审计）
 
 1. 每个页面 `<head>` 开头：CSP meta + `<script src="/openarc-bridge.js">`；
 2. `static/js/canvas.js` 的 IIFE 末尾追加适配层（模板：`experiments/d5-02/vendor/canvas-internals.js`）：
    暴露画布原语（`window.__openarcCanvasInternals`）、只读闸、与撤销配对的 redo；
-3. `static/canvas.html` 在 `canvas.js` 之后注入 `openarc-adapter.js`；入口 `index.html` 在桥之后注入 `openarc-shell.js`。
+3. `static/canvas.html` 在 `canvas.js` 之后依次注入 `openarc-adapter.js`、`openarc-canvas-guard.js`
+   （defer 顺序 = 执行顺序，守卫在 `window.onload` 里的首次 `loadConfig()` 之前装好 `fetch` 包装）；
+   bundle 根 `index.html` 在桥之后注入 `openarc-shell.js`；
+4. `static/canvas-list.html`（产品入口）的三个"新建"入口改成**直接进编辑器**：
+   `btnStartCreate` / `btnNewProject` / 「继续上次」空列表兜底，从 `openCanvasPicker()` 改成
+   `createCanvasFromPicker('classic')`（该函数本来就是"建完直接跳 canvas.html"）。
+   补丁写在 `vendor-novai-app.mjs` 的 `LIST_PATCHES` 里，幂等，且目标找不到就**报错退出**（不静默跳过）。
 
 注入清单与哈希写在 `experiments/d5-02/vendor/vendor-manifest.json`（每次 vendor 重新生成）。
 
@@ -42,10 +53,23 @@ OA_NOVAI_SRC=/tmp/novai-canvas-src node experiments/d5-02/vendor-novai-app.mjs
 | 3 | 依赖 pywebview 桌面壳（11 个宿主方法） | 明确不可用：`window.pywebview` 读取即记录 + 明确提示，页面自动走网页版分支 | 不提供退出 OpenArc / 任意文件路径 / 任意宿主方法转发 |
 | 4 | `localStorage`/`BroadcastChannel` 按同源共享 | 按 **OpenArc 账号 + 本次挂载** 的钥匙分桶（真实存储加 `oa:<key>:` 前缀，换挂载整片清掉） | "同一个 bundle origin"不等于不同账号已隔离 |
 | 5 | `/ws/stats` 实时推送、桌面更新器（GitHub/Gitee/ModelScope 直连） | `/ws/stats` 明确失败（状态栏改用宿主队列计数）；更新/下载一律 501 并在界面标注"已禁用" | 不出网、不下载、不安装上游程序 |
+| 6 | 首页「开始创作 / 新建画布」只弹"选画布"picker，「继续上次」空列表也落到 picker | 三处都改成 `createCanvasFromPicker('classic')`：建完立刻跳 `canvas.html` | 产品要求点入口**直接进真实编辑器**，不要额外欢迎页/选画布遮挡层 |
+| 7 | picker 的「智能画布」走 `smart-canvas.html`（没有 OpenArc 适配层，不在安全不变式内） | 因此**不可达**；不为它补实现，也不隐藏任何入口 | 该页不在本次范围内，如实记录而不是拿遮挡层糊过去 |
+| 8 | 子页的心跳由外壳页（`index.html`）中继 | 入口换成列表页后，**每个页面**靠 `openarc-bridge.js` 的 800ms `alive` 心跳喂宿主看门狗 | 入口不再固定是带中继的外壳页；没心跳会被看门狗按"帧被非预期导航打断"整帧重置 |
+| 9 | 页面内部跳转（列表 → 编辑器）不带任何账号标记 | 桥的 `readAccountKey()` 在 fragment 无 `oa=` 时回落到同源真实存储的 `oa:mount`；两处都读不到就**跳过那次清理**，交给宿主 hello 的 `applyAccount` | 否则新页把账号读成 `anon` 并 `clear()` 掉刚写入的真实数据（来回一次就丢主题/项目记忆/待导入） |
+| 10 | `api_providers` 为空时凭空造 `comfly` 供应商（`canvas.js:697-699/1705/1721`，provider 下拉显示 "Comfly"） | `/api/config` 的 `api_providers` 由宿主按 **OpenArc provider 真实投影**给出（`id`=providerId、`name`=displayName，只含该能力下有可用模型的 provider；不含 baseUrl/凭据）；守卫再按真源清单删掉任何不在清单里的下拉选项 | 供应商只能有一个来源：OpenArc 总 API 设置 |
+| 11 | `video_models` 为空时填 25 个写死模型（`:586-606/1702`），视频节点默认 `veo3-fast`（`:8240/10484`），提交才撞 501 | `video_models` 恒为空 + `capabilities["video-generation"]={available:false,transport:null,reason}`；守卫把 provider/model 下拉**真实 disable**、写死"OpenArc 未接通视频传输（不可用）"、清掉节点里的写死模型、禁用运行按钮，拦截 `/api/canvas-video` 返回明确不可用错误 | 后端没有视频传输就不许显示成已连接 |
+| 12 | ComfyUI 实例数 `Math.max(1, comfy_instances.length)`（`:1704`）、工作流下拉指向已死设置页 | `comfy_instances` 恒为空；守卫禁用 ComfyUI 节点的运行/模式/工作流控件并写"OpenArc 未接入 ComfyUI（不可用）"；`/api/canvas-comfy-tasks` 页面侧明确失败 | 同上，"0 个实例"不得显示成 1 个 |
+| 13 | 第二套模型来源：localStorage 的 `canvas_custom_image_models` / `canvas_image_models_ordered` / `canvas_chat_models_ordered`（`:578-580/669-688/877-880`）会覆盖或追加清单外的模型名 | 守卫把这三把键的读写都拦掉（读恒为 null、写丢弃、旧值当场删除），并清掉下拉里任何不在 OpenArc 清单中的选项与选中值 | 模型清单只有 OpenArc 一个真源 |
+| 14 | 所有"去 API 设置"文案指向已 501 / 已不可达的上游设置页（`canvas.js:1143/1147/1157/1739`、`js/i18n/canvas.js:5-7`） | 守卫把 `<option>` 文本里的"API 设置"改指"OpenArc 总 API 设置"，并在未配置处给出真实可点的引导按钮（`app.openModelSettings` → 宿主 `activateApp("settings")` 且停在「模型 / AI」） | 唯一能配置模型的地方是 OpenArc 总 API 设置 |
+
+> 上表 1、2 两条只作用于 `openarc-shell.js`，而它只注入 bundle 根 `index.html`。产品入口换成
+> `static/canvas-list.html` 后该外壳页不再是入口，这两条只在那次边界测试加载 `index.html` 时生效。
 
 ## 未接入即缺项（保留入口 + 明确报错，不删页面）
 
 素材库 / 提示词库 / 智能画布(Agent) / ComfyUI 与工作流 / RunningHub·即梦·Codex·Gemini-CLI 等第三方供应商 /
 `/output`、`/assets` 历史文件浏览 / `/api/download-output`、`/api/view`、`/api/media-preview`
 —— 这些页面照常可达，但它们的端点在桥里**明确返回 501 `OPENARC_UNSUPPORTED`**，
-并在 OpenArc 窗口条上给出"该功能未接入 OpenArc（保留入口）"的一次性提示。
+并作为一次性提示写进宿主状态（宿主已无窗口条/状态行/提示横幅；见 `src/canvas/CanvasHost.tsx` 的
+`data-canvas-asset-notice-text` 只读证据通道）。

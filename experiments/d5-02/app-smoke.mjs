@@ -1,6 +1,7 @@
 /**
  * D5-02 Full-App · 交互式冒烟探针（开发期快速定位；正式门禁是 canvas-e2e.mjs）。
- * 流程：登录 → 打开应用 → 原版首页 → 新建项目 → 进入无限画布 → 编辑保存 → 返回首页 → 再打开项目。
+ * 流程：登录 → 打开应用（入口=原版列表首页 canvas-list）→ 开始创作直达编辑器 → 编辑保存 →
+ *       #backToManagerBtn 返回列表 → 点卡片再进编辑器（产品路径；不是 IPC 造帧）。
  */
 import { chromium } from "@playwright/test";
 import { spawn, spawnSync } from "node:child_process";
@@ -28,10 +29,9 @@ const setInput = (sel, v) => js("const el = document.querySelector(" + JSON.stri
 const clickDom = (sel) => js("const el = document.querySelector(" + JSON.stringify(sel) + "); if (!el) return 'missing'; el.click(); return 'ok';");
 const gate = () => js("return document.querySelector('.desktop')?.getAttribute('data-identity-gate') || 'no-root'");
 const frameBy = (re) => page.frames().find((f) => re.test(f.url())) || null;
-const shellFrame = () => frameBy(/openarc-canvas:\/\/bundle\/index\.html/);
-const canvasFrame = () => frameBy(/openarc-canvas:\/\/bundle\/static\/canvas\.html/);
+/** 新形态：入口帧 = 上游原版列表首页 canvas-list（画布工作台）；编辑器 = 同一宿主帧导航后的 canvas.html。*/
 const listFrame = () => frameBy(/openarc-canvas:\/\/bundle\/static\/canvas-list\.html/);
-const homeFrame = () => frameBy(/openarc-canvas:\/\/bundle\/static\/home\.html/);
+const canvasFrame = () => frameBy(/openarc-canvas:\/\/bundle\/static\/canvas\.html/);
 async function inFrame(f, code) { if (!f) return { __noFrame: true }; try { return JSON.parse((await f.evaluate("(async () => { return JSON.stringify(await (async () => { " + code + " })()); })()")) || "null"); } catch (e) { return { __error: String((e && e.message) || e).slice(0, 200) }; } }
 const hostCanvas = (payload) => js("return await window.openarc.canvas.command(" + JSON.stringify(payload) + ")");
 
@@ -65,17 +65,21 @@ async function main() {
 
   await clickDom('[aria-label="打开AI Studio"]');
   await waitFor(() => has("[data-canvas-host]"), 20000);
-  console.log("A1 shell frame:", await waitFor(() => !!shellFrame(), 25000));
-  await waitFor(() => !!homeFrame(), 15000);
+  console.log("A1 入口帧（canvas-list）:", await waitFor(() => !!listFrame(), 25000));
   await sleep(2500);
   console.log("A2 frames:", page.frames().map((f) => f.url().replace("openarc-canvas://bundle/", "").slice(0, 60)).join(" | "));
+  console.log("A2b 入口页身份:", JSON.stringify(await inFrame(listFrame(), "return { title: document.title, start: !!document.getElementById('btnStartCreate'), cont: !!document.getElementById('btnContinueLast'), grid: !!document.getElementById('cardsGrid'), picker: !!document.getElementById('canvasPickerOverlay'), iframes: document.querySelectorAll('iframe').length };")));
 
-  // A3 首页"新建项目" → 进画布
-  const created = await inFrame(homeFrame(), "const before = await (await fetch('/api/recent-canvases')).json(); return { before: Array.isArray(before) ? before.length : before };");
-  console.log("A3 home recent:", JSON.stringify(created));
-  const clickRes = await inFrame(homeFrame(), "const el = document.querySelector('.hp-proj-new'); if (!el) return 'missing'; el.click(); return 'clicked';");
-  console.log("A3b click 新建项目:", JSON.stringify(clickRes));
-  const gotCanvas = await waitFor(() => !!canvasFrame(), 30000);
+  // A3 入口页「开始创作」→ 直接进画布编辑器（不再有选画布遮挡层 .active）
+  const created = await inFrame(listFrame(), "const r = await (await fetch('/api/canvases')).json(); return { before: (r && r.canvases ? r.canvases : []).length };");
+  console.log("A3 list canvases:", JSON.stringify(created));
+  const pickerWatch = [];
+  const watchTimer = setInterval(async () => { try { const f = listFrame() || canvasFrame(); if (!f) return; const cls = await inFrame(f, "const el = document.getElementById('canvasPickerOverlay'); return el ? String(el.className) : null;"); pickerWatch.push(cls === null ? "absent" : cls); } catch { /* ignore */ } }, 150);
+  const clickRes = await inFrame(listFrame(), "const el = document.getElementById('btnStartCreate'); if (!el) return 'missing'; el.click(); return 'clicked';");
+  console.log("A3b click 开始创作:", JSON.stringify(clickRes));
+  const gotCanvas = await waitFor(() => !!canvasFrame(), 40000);
+  clearInterval(watchTimer);
+  console.log("A3c picker overlay 采样:", JSON.stringify(pickerWatch.slice(0, 10)), "激活过:", pickerWatch.some((c) => /(^|\s)active(\s|$)/.test(c)));
   console.log("A4 canvas editor frame:", gotCanvas, "| list frame:", !!listFrame(), "| frames:", page.frames().map((f) => f.url().split("/static/")[1] || f.url().slice(0, 30)).join(","));
   const adapterReady = await waitFor(async () => (await inFrame(canvasFrame(), "return { internals: typeof window.__openarcCanvasInternals, adapter: typeof window.__openarcCanvas, bridge: typeof window.__openarcBridge, board: !!document.getElementById('board'), ro: window.__openarcBridge ? window.__openarcBridge.isReadOnly() : null };")).internals === "object", 30000);
   console.log("A5 adapter:", adapterReady, JSON.stringify(await inFrame(canvasFrame(), "return { internals: typeof window.__openarcCanvasInternals, board: !!document.getElementById('board'), nodes: !!document.getElementById('nodes'), ro: window.__openarcBridge.isReadOnly() };")));
@@ -92,18 +96,19 @@ async function main() {
   const hostState = await hostCanvas({ type: "canvas/get", canvasId: state.id });
   console.log("A8 host doc:", JSON.stringify({ nodes: hostState.canvas.doc.nodes.map((n) => ({ id: n.id, x: n.x })), rev: hostState.canvas.revision, title: hostState.canvas.title }).slice(0, 300));
 
-  // A9 返回：画布页 → 画布列表 → 首页
-  await inFrame(canvasFrame(), "window.location.href = '/static/canvas-list.html?project=default#oa=' + (location.hash.split('oa=')[1] || 'anon'); return 'nav';");
-  await waitFor(() => !!listFrame(), 20000);
-  console.log("A9 back to list:", !!listFrame());
-  await clickDom('iframe#frame-canvas-list, iframe#frame-canvas'); // 占位，不作断言
-  const navClick = await inFrame(shellFrame(), "const nav = document.querySelector('[data-route=\"home\"]'); const html = nav ? nav.outerHTML.slice(0,120) : null; if (nav) nav.click(); return { html, fn: typeof window.switchUI };");
-  console.log("A9b home nav:", JSON.stringify(navClick));
-  await sleep(1500);
-  const shellDiag = await inFrame(shellFrame(), "return { active: (document.querySelector('iframe.active')||{}).id || null, homeActive: document.getElementById('frame-home') ? document.getElementById('frame-home').classList.contains('active') : null };");
-  console.log("A10 back home:", JSON.stringify(shellDiag));
-  const recent = await inFrame(homeFrame(), "const r = await (await fetch('/api/recent-canvases')).json(); return { n: Array.isArray(r) ? r.length : r, first: Array.isArray(r) && r[0] ? { id: r[0].id, title: r[0].title } : null };");
-  console.log("A11 recent after save:", JSON.stringify(recent));
+  // A9 返回：画布页 #backToManagerBtn → 画布列表（同一个宿主帧内导航）
+  const backClick = await inFrame(canvasFrame(), "const el = document.getElementById('backToManagerBtn'); if (!el) return 'missing'; el.click(); return 'clicked';");
+  const backToList = await waitFor(() => !!listFrame() && !canvasFrame(), 30000);
+  console.log("A9 back to list:", JSON.stringify({ backClick, backToList }));
+  const listNow = await inFrame(listFrame(), "const r = await (await fetch('/api/canvases')).json(); const list = (r && r.canvases) || []; return { n: list.length, first: list[0] ? { id: list[0].id, title: list[0].title } : null, cards: document.querySelectorAll('#cardsGrid .project-card').length };");
+  console.log("A10 list after save:", JSON.stringify(listNow));
+  // A11 点当前这本的卡片再进编辑器（产品路径）
+  const cardSel = "#cardsGrid .project-card[data-canvas-id=\"" + state.id + "\"]";
+  const cardUp = await waitFor(async () => (await inFrame(listFrame(), "return !!document.querySelector(" + JSON.stringify(cardSel) + ");")) === true, 20000);
+  const cardClick = cardUp ? await inFrame(listFrame(), "const el = document.querySelector(" + JSON.stringify(cardSel) + "); if (!el) return 'missing'; el.click(); return 'clicked';") : "missing";
+  const reopened = await waitFor(() => !!canvasFrame(), 40000);
+  const reopenedState = reopened ? await waitFor(async () => (await inFrame(canvasFrame(), "const s = window.__openarcCanvas ? window.__openarcCanvas.state() : null; return s ? { id: s.canvasId, nodes: s.nodeCount } : null;")) !== null, 20000) ? await inFrame(canvasFrame(), "const s = window.__openarcCanvas.state(); return { id: s.canvasId, nodes: s.nodeCount };") : null : null;
+  console.log("A11 reopen via card:", JSON.stringify({ cardSel, cardClick, reopened, reopenedState }));
 
   // A12 上传链诊断（本地 PNG → /api/ai/upload → 宿主导入资源库）
   const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIAQMAAAD+wSzIAAAABlBMVEX///+/v7+jQ3Y5AAAADklEQVQI12P4AIX8EAgALgAD/aNpbtEAAAAASUVORK5CYII=";

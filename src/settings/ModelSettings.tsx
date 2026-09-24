@@ -6,6 +6,13 @@ type ModelBridge = { command: (c: Record<string, unknown>) => Promise<any> };
 const bridge = (): ModelBridge | undefined => (window as any).openarc?.model;
 type Tab = "providers" | "models" | "defaults";
 
+/** 可勾选的能力：取值与 electron/model-domain.cjs 的 CAPABILITIES 完全一致（不多造能力名）。 */
+const CAPABILITY_CHOICES = [
+  { id: "chat", label: "文本对话" },
+  { id: "image-generation", label: "生图" },
+  { id: "vision-input", label: "图片输入" },
+] as const;
+
 export function ModelSettings({ role }: { role: string | null }) {
   const [tab, setTab] = useState<Tab>("providers");
   const [providers, setProviders] = useState<any[]>([]);
@@ -19,6 +26,8 @@ export function ModelSettings({ role }: { role: string | null }) {
   const [pForm, setPForm] = useState({ displayName: "", baseUrl: "", endpointScope: "LOCALHOST", scope: "PERSONAL", credentialSecret: "" });
   const [mForm, setMForm] = useState({ providerId: "", remoteModelId: "", displayName: "", capabilities: ["chat"], scope: "PERSONAL" });
   const [credDraft, setCredDraft] = useState<Record<string, string>>({});
+  /** 编辑已有模型能力的草稿（key = configId）；保存走 model/update。 */
+  const [capsDraft, setCapsDraft] = useState<Record<string, string[]>>({});
 
   const cmd = useCallback(async (command: string, payload: Record<string, unknown> = {}): Promise<any> => {
     const b = bridge();
@@ -71,6 +80,9 @@ export function ModelSettings({ role }: { role: string | null }) {
       " Inference:" + (t.inference ? "PASS" : "FAIL") +
       " Capabilities:" + ((t.verifiedCapabilities && t.verifiedCapabilities.length) ? t.verifiedCapabilities.join(",") : "NOT VERIFIED");
   };
+  const toggleCap = (list: string[], cap: string) => (list.includes(cap) ? list.filter((c) => c !== cap) : [...list, cap]);
+  const draftCaps = (m: any) => capsDraft[m.configId] || m.capabilities || [];
+  const saveCaps = async (configId: string) => { const r = await cmd("model/update", { configId, capabilities: capsDraft[configId] || [] }); if (!r.ok) setError(r.error); else { setNotice("Model capabilities updated"); setCapsDraft((prev) => { const next = { ...prev }; delete next[configId]; return next; }); await load(); } };
   const createModel = async () => {
     const r = await cmd("model/create", { providerId: mForm.providerId, remoteModelId: mForm.remoteModelId, displayName: mForm.displayName, capabilities: mForm.capabilities, scope: mForm.scope });
     if (r.ok) { setNotice("Model registered"); await load(); } else setError(r.error);
@@ -141,6 +153,19 @@ export function ModelSettings({ role }: { role: string | null }) {
               <option value="PERSONAL">PERSONAL</option>
               <option value="ORGANIZATION">ORGANIZATION</option>
             </select>
+            <div className="d401-caps" data-d4-01-model-create-caps role="group" aria-label="模型能力">
+              {CAPABILITY_CHOICES.map((c) => (
+                <label key={c.id}>
+                  <input
+                    type="checkbox"
+                    data-d4-01-model-create-cap={c.id}
+                    checked={mForm.capabilities.includes(c.id)}
+                    onChange={() => setMForm({ ...mForm, capabilities: toggleCap(mForm.capabilities, c.id) })}
+                  />
+                  {c.label}
+                </label>
+              ))}
+            </div>
             <Button variant="primary" size="sm" data-d4-01-model-create onClick={() => void createModel()}>注册 Model</Button>
           </div>
           {models.length === 0 ? <p className="muted" data-d4-01-models-empty>No models configured</p> : null}
@@ -151,6 +176,21 @@ export function ModelSettings({ role }: { role: string | null }) {
                 <span className="d401-meta">{m.remoteModelId} | {m.scope} | v{m.version} | {m.status}</span>
                 <span className="d401-meta" data-d4-01-model-declared={m.configId}>Declared: {m.capabilities.join(", ") || "-"}</span>
                 <span className="d401-meta" data-d4-01-model-verified={m.configId}>Verified: {m.verifiedCapabilities.join(", ") || "-"}</span>
+                <div className="d401-caps" role="group" aria-label={"模型能力 " + (m.displayName || m.remoteModelId)}>
+                  {CAPABILITY_CHOICES.map((c) => (
+                    <label key={c.id}>
+                      <input
+                        type="checkbox"
+                        data-d4-01-model-cap={m.configId}
+                        data-d4-01-model-cap-id={c.id}
+                        checked={draftCaps(m).includes(c.id)}
+                        onChange={() => setCapsDraft((prev) => ({ ...prev, [m.configId]: toggleCap(draftCaps(m), c.id) }))}
+                      />
+                      {c.label}
+                    </label>
+                  ))}
+                  <Button variant="secondary" size="sm" data-d4-01-model-cap-save={m.configId} onClick={() => void saveCaps(m.configId)}>保存能力</Button>
+                </div>
                 {m.status === "enabled"
                   ? <Button variant="ghost" size="sm" data-d4-01-model-disable={m.configId} onClick={() => void setModelStatus(m.configId, "disabled")}>禁用</Button>
                   : <Button variant="secondary" size="sm" data-d4-01-model-enable={m.configId} onClick={() => void setModelStatus(m.configId, "enabled")}>启用</Button>}
@@ -166,11 +206,16 @@ export function ModelSettings({ role }: { role: string | null }) {
             <h4>My Defaults</h4>
             <label>Chat <select data-d4-01-default-personal-chat value={defaults.personal.chat || ""} onChange={(e) => void setDefault("chat", e.target.value, "PERSONAL")}><option value="">No default configured</option>{opts("chat")}</select></label>
             <label>Tool Calling <select data-d4-01-default-personal-tool value={defaults.personal["tool-calling"] || ""} onChange={(e) => void setDefault("tool-calling", e.target.value, "PERSONAL")}><option value="">No default configured</option>{opts("tool-calling")}</select></label>
+            <label>Image Generation <select data-d4-01-default-personal-image value={defaults.personal["image-generation"] || ""} onChange={(e) => void setDefault("image-generation", e.target.value, "PERSONAL")}><option value="">No default configured</option>{opts("image-generation")}</select></label>
+            {/* 视频没有传输：这里是"不可选"的事实位，不是可配置项（选中也不会被 ModelService 解析）。 */}
+            <label>Video Generation <select data-d4-01-default-personal-video disabled aria-disabled="true"><option value="">无可用传输（未接通）</option></select></label>
           </div>
           <div className="d401-defaults" data-d4-01-defaults-organization>
             <h4>Organization Defaults {defaults.canManageOrganization ? null : <span className="muted">(read-only)</span>}</h4>
             <label>Chat <select data-d4-01-default-org-chat value={defaults.organization.chat || ""} onChange={(e) => void setDefault("chat", e.target.value, "ORGANIZATION")}><option value="">No default configured</option>{opts("chat")}</select></label>
             <label>Tool Calling <select data-d4-01-default-org-tool value={defaults.organization["tool-calling"] || ""} onChange={(e) => void setDefault("tool-calling", e.target.value, "ORGANIZATION")}><option value="">No default configured</option>{opts("tool-calling")}</select></label>
+            <label>Image Generation <select data-d4-01-default-org-image value={defaults.organization["image-generation"] || ""} onChange={(e) => void setDefault("image-generation", e.target.value, "ORGANIZATION")}><option value="">No default configured</option>{opts("image-generation")}</select></label>
+            <label>Video Generation <select data-d4-01-default-org-video disabled aria-disabled="true"><option value="">无可用传输（未接通）</option></select></label>
           </div>
           {role !== "ADMIN" ? <p className="muted" data-d4-01-org-hint>Organization defaults require an authorized admin.</p> : null}
         </section>

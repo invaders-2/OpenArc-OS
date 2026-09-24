@@ -463,6 +463,9 @@ function App() {
   const menuTrigger = useRef<HTMLElement | null>(null);
 
   const [reduced, setReduced] = useState(() => localStorage.getItem("oa-motion") === "true");
+  /** 递增请求号：画布页点"打开 OpenArc 总 API 设置"时 +1，设置窗口据此切到「模型 / AI」pane。
+   *  用计数而不是布尔，是为了"用户手动切回外观后再点一次引导"仍然生效。 */
+  const [modelSettingsRequest, setModelSettingsRequest] = useState(0);
   const [glass, setGlass] = useState<GlassMode>(() => {
     const v = localStorage.getItem("oa-glass");
     if (v === "full" || v === "reduced" || v === "solid") return v;
@@ -2630,13 +2633,24 @@ function App() {
     }
     if (w?.appId === "resource-library") return <ResourceLibraryApp />;
     if (w?.appId === "files") return <FilesApp />;
-    if (w?.appId === "canvas") return <CanvasHost win={w} />;
+    if (w?.appId === "canvas")
+      return (
+        <CanvasHost
+          win={w}
+          // 画布页唯一允许请求的宿主动作（无参数）：打开设置窗口并停在模型设置页。
+          onOpenModelSettings={() => {
+            setModelSettingsRequest((n) => n + 1);
+            activateApp("settings");
+          }}
+        />
+      );
     if (w?.appId === "projects") return <ProjectsApp />;
     if (w?.appId === "organization") return <GovernanceApp />;
     if (w?.appId === "settings")
       return (
         <SettingsContent
           role={identity.snapshot.role}
+          paneRequest={modelSettingsRequest}
           appearanceBody={
             <>
                 <div className="setting-row">

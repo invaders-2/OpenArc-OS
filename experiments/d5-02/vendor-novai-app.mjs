@@ -3,16 +3,19 @@
  *
  * 用法：node experiments/d5-02/vendor-novai-app.mjs
  *   源：OA_NOVAI_SRC（默认 /tmp/novai-canvas-src），必须是 SOURCE_COMMIT 的干净检出。
- *   目标：public/novai-canvas/static/**（整棵 static/ 原样）+ public/novai-canvas/index.html（入口外壳副本）。
+ *   目标：public/novai-canvas/static/**（整棵 static/ 原样）+ public/novai-canvas/index.html（上游外壳副本，
+ *   只留给宿主级边界测试；**产品入口是 static/canvas-list.html**，宿主 IFRAME_BASE 指向它）。
  *
  * 为什么**不改写 /static/ 路径**：自定义协议是 standard:true，根绝对 /static/x 会自然解析为
  * openarc-canvas://bundle/static/x。改写 14 个页面 + 动态注入 + 动态 import 的风险远大于原样服务。
  *
- * 对上游文件的改动只有三处（全部可审计、可重复生成）：
+ * 对上游文件的改动只有四处（全部可审计、可重复生成）：
  *   1) 每个页面 head 注入 CSP meta + openarc-bridge.js（最先执行）；
- *   2) 入口 index.html 额外注入 openarc-shell.js（子页 → 外壳 → 宿主的中继）；
+ *   2) static/index.html 的副本（bundle 根 index.html）额外注入 openarc-shell.js（子页 → 外壳 → 宿主的中继）；
  *   3) static/js/canvas.js 末尾（IIFE 内）追加 OpenArc 适配层（experiments/d5-02/vendor/canvas-internals.js），
- *      static/canvas.html 在其后注入 openarc-adapter.js。
+ *      static/canvas.html 在其后注入 openarc-adapter.js 与 openarc-canvas-guard.js（**只 canvas.html**：
+ *      编辑器是唯一有供应商/模型下拉的页面）；
+ *   4) static/canvas-list.html 的三个"新建"入口改成直接进编辑器（见下面 LIST_PATCHES，幂等且缺目标即报错）。
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -28,6 +31,8 @@ const SRC_STATIC = path.join(SRC, "static");
 const OUT = path.join(ROOT, "public", "novai-canvas");
 const OUT_STATIC = path.join(OUT, "static");
 const PATCH = path.join(here, "vendor", "canvas-internals.js");
+/** D5-02 供应商/模型单一真源守卫：只注入编辑器页，在 canvas.js / openarc-adapter.js 之后执行。*/
+const GUARD = path.join(OUT, "openarc-canvas-guard.js");
 
 const CSP = [
   "default-src 'none'",
@@ -73,6 +78,7 @@ function main() {
   try { head = execFileSync("git", ["-C", SRC, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(); } catch { /* 非 git 检出 */ }
   if (head && head !== SOURCE_COMMIT) throw new Error("源 commit 不符：" + head + " != " + SOURCE_COMMIT);
   if (!fs.existsSync(PATCH)) throw new Error("缺少适配层模板：" + PATCH);
+  if (!fs.existsSync(GUARD)) throw new Error("缺少画布守卫脚本：" + GUARD);
   const patchBlock = fs.readFileSync(PATCH, "utf8").trimEnd();
 
   // 1) 原样拷贝整棵 static/
@@ -93,7 +99,26 @@ function main() {
   if (cut < 0) throw new Error("canvas.js 结构不符合预期（找不到收尾 IIFE）");
   fs.writeFileSync(canvasJsPath, canvasJs.slice(0, cut) + "\n" + patchBlock + canvasJs.slice(cut));
 
-  // 3) 逐页注入 CSP + 桥；canvas.html 再注入适配层
+  // 3) canvas-list.html（现在的产品入口）：三个"新建"入口**直接进编辑器**，不再弹上游那个
+  //    "选画布" picker（它会变成挡在编辑器前面的一层选择遮挡层）。目标找不到就报错，不静默跳过。
+  const listPath = path.join(OUT_STATIC, "canvas-list.html");
+  let listHtml = fs.readFileSync(listPath, "utf8");
+  const LIST_PATCHES = [
+    ["document.getElementById('btnStartCreate').addEventListener('click', openCanvasPicker);",
+     "document.getElementById('btnStartCreate').addEventListener('click', () => createCanvasFromPicker('classic'));"],
+    ["document.getElementById('btnNewProject').addEventListener('click', openCanvasPicker);",
+     "document.getElementById('btnNewProject').addEventListener('click', () => createCanvasFromPicker('classic'));"],
+    ["                } else {\n                    openCanvasPicker();\n                }",
+     "                } else {\n                    createCanvasFromPicker('classic');\n                }"],
+  ];
+  for (const [from, to] of LIST_PATCHES) {
+    if (listHtml.includes(to)) continue;                                  // 已经打过：幂等
+    if (!listHtml.includes(from)) throw new Error("canvas-list.html 补丁目标缺失（上游结构变了）：" + from.slice(0, 70));
+    listHtml = listHtml.replace(from, to);
+  }
+  fs.writeFileSync(listPath, listHtml);
+
+  // 4) 逐页注入 CSP + 桥；canvas.html 再注入适配层
   const injected = [];
   for (const rel of files.filter((f) => f.endsWith(".html"))) {
     const p = path.join(OUT_STATIC, rel);
@@ -102,13 +127,13 @@ function main() {
     if (rel === "canvas.html") {
       const tag = /<script defer src="\/static\/js\/canvas\.js[^"]*"><\/script>/;
       if (!tag.test(html)) throw new Error("canvas.html 找不到 canvas.js 脚本标签");
-      html = html.replace(tag, (m) => m + '\n    <script defer src="/openarc-adapter.js"></script>');
+      html = html.replace(tag, (m) => m + '\n    <script defer src="/openarc-adapter.js"></script>\n    <script defer src="/openarc-canvas-guard.js"></script>');
     }
     fs.writeFileSync(p, html);
     injected.push(rel);
   }
 
-  // 4) 入口：static/index.html 的副本放在 bundle 根（根绝对 /static/ 仍解析到同一份资源）
+  // 5) 上游外壳副本：static/index.html 放在 bundle 根（根绝对 /static/ 仍解析到同一份资源）
   let shell = fs.readFileSync(path.join(OUT_STATIC, "index.html"), "utf8");
   const bridgeTag = '<script src="/openarc-bridge.js"></script>';
   if (!shell.includes(bridgeTag)) throw new Error("入口页缺少宿主桥注入");
@@ -123,6 +148,9 @@ function main() {
     entry: "index.html",
     entryShellHash: sha256(shell),
     canvasJsHash: sha256(fs.readFileSync(canvasJsPath, "utf8")),
+    canvasHtmlHash: sha256(fs.readFileSync(path.join(OUT_STATIC, "canvas.html"), "utf8")),
+    guardHash: sha256(fs.readFileSync(GUARD, "utf8")),
+    listHtmlHash: sha256(fs.readFileSync(listPath, "utf8")),
     csp: CSP,
   };
   fs.writeFileSync(path.join(here, "vendor", "vendor-manifest.json"), JSON.stringify(manifest, null, 2) + "\n");

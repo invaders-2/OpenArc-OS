@@ -1035,8 +1035,8 @@
                 if (pickerOverlay) pickerOverlay.classList.remove('active');
             }
 
-            document.getElementById('btnStartCreate').addEventListener('click', openCanvasPicker);
-            document.getElementById('btnNewProject').addEventListener('click', openCanvasPicker);
+            document.getElementById('btnStartCreate').addEventListener('click', () => createCanvasFromPicker('classic'));
+            document.getElementById('btnNewProject').addEventListener('click', () => createCanvasFromPicker('classic'));
 
             pickerOverlay.addEventListener('click', function(e) {
                 if (e.target === pickerOverlay) closeCanvasPicker();
@@ -1378,7 +1378,7 @@
                         ? `/static/smart-canvas.html?id=${enc}&project=${project}&t=1786289367`
                         : `/static/canvas.html?id=${enc}&project=${project}&t=1786289367`;
                 } else {
-                    openCanvasPicker();
+                    createCanvasFromPicker('classic');
                 }
             });
 
