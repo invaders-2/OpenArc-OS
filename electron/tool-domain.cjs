@@ -71,11 +71,17 @@ function isWellFormedToolId(id) { return TOOL_ID_RE.test(String(id == null ? "" 
 
 /** 明令禁止出现在 Tool arguments 的字段（§23/§24）。 */
 const FORBIDDEN_ARGUMENT_KEY = /(secret|token|authorization|api[_-]?key|credential|password|bearer|proxyBearer|absolutePath|rawPath|filesystemPath|filePath|shell|command|exec|spawn)/i;
-function forbiddenArgumentKeys(obj, depth = 0, out = []) {
+/**
+ * @param allowTopLevel Registry 合同**显式声明**的结构化参数名（contract.structuredArguments）。
+ *   只豁免顶层：合同 schema（additionalProperties:false）已经把字段集合裁决完，未被声明的同名字段
+ *   一律照旧拒绝；嵌套层 schema 往往更宽，denylist 必须继续兜底（同名嵌套字段仍然命中）。
+ */
+function forbiddenArgumentKeys(obj, allowTopLevel = null, depth = 0, out = []) {
   if (obj == null || typeof obj !== "object" || depth > 4) return out;
+  const allow = depth === 0 && allowTopLevel && allowTopLevel.length ? new Set(allowTopLevel.map(String)) : null;
   for (const [k, v] of Object.entries(obj)) {
-    if (FORBIDDEN_ARGUMENT_KEY.test(k)) out.push(k);
-    if (v && typeof v === "object") forbiddenArgumentKeys(v, depth + 1, out);
+    if (FORBIDDEN_ARGUMENT_KEY.test(k) && !(allow && allow.has(k))) out.push(k);
+    if (v && typeof v === "object") forbiddenArgumentKeys(v, allowTopLevel, depth + 1, out);
   }
   return out;
 }

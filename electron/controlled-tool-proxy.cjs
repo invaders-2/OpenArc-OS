@@ -158,7 +158,7 @@ class ControlledToolProxy {
     if (!validation.ok) return finalize({ decision: DECISION_STATUS.INVALID, reasonCode: TOOL_ERROR.TOOL_ARGUMENT_INVALID, contract, schemaErrors: validation.errors });
 
     // §23/§24 防御性检查：禁止 credential/shell/absolute path。
-    const badKeys = forbiddenArgumentKeys(args);
+    const badKeys = forbiddenArgumentKeys(args, contract.structuredArguments || null);
     if (badKeys.length) return finalize({ decision: DECISION_STATUS.INVALID, reasonCode: TOOL_ERROR.TOOL_ARGUMENT_FORBIDDEN_FIELD, contract });
     if (containsAbsolutePath(args)) return finalize({ decision: DECISION_STATUS.INVALID, reasonCode: TOOL_ERROR.TOOL_ARGUMENT_INVALID, contract });
 

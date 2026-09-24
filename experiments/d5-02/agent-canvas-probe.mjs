@@ -155,10 +155,22 @@ async function launch() {
 async function loginAdmin() {
   await waitFor(async () => ["uninitialized", "unauthenticated", "ready"].includes(await gate()), 60000);
   if ((await gate()) === "uninitialized" && (await waitSel('[data-d3-id="setup-name"]', 30000))) {
+    // 集成分支保留 UI 线已定的"三步初始化向导"（显示名 → 账号 → 密码），末步才提交：
+    // 后两步的输入在 DOM 里尚未存在，一次填完再点 setup-submit 不会发生任何事。
+    // 驱动方式与 canvas-e2e.mjs / tests/fixtures/identity-ui-probe/main.cjs 一致。
+    const setupNext = async () => {
+      await waitFor(() => js("const b = document.querySelector('[data-d3-id=\"setup-next\"]'); return !!b && !b.disabled;"), 10000);
+      await click('[data-d3-id="setup-next"]');
+    };
     await setInput('[data-d3-id="setup-name"]', "D5-02 Agent Admin");
+    await setupNext();
+    await waitSel('[data-d3-id="setup-identifier"]', 10000);
     await setInput('[data-d3-id="setup-identifier"]', ADMIN.id);
+    await setupNext();
+    await waitSel('[data-d3-id="setup-password"]', 10000);
     await setInput('[data-d3-id="setup-password"]', ADMIN.pw);
     await setInput('[data-d3-id="setup-confirm"]', ADMIN.pw);
+    await waitFor(() => js("const b = document.querySelector('[data-d3-id=\"setup-submit\"]'); return !!b && !b.disabled;"), 10000);
     await click('[data-d3-id="setup-submit"]');
     await waitFor(async () => (await gate()) === "unauthenticated", 30000);
   }
@@ -239,7 +251,8 @@ async function main() {
   show("canvas/create", { ok: !!(created && created.ok), canvasId, revision: created && created.ok ? created.canvas.revision : null, nodes: created && created.ok ? created.canvas.doc.nodes.length : null });
   const before = await canvasState(canvasId);
   show("canvas/get(after create)", before);
-  await click('[aria-label="打开无限画布"]');
+  // 预览集成分支按"不改用户已定 UI"保留入口名"无限画布"；核心线叫"AI Studio"。两种都接受。
+  await js("const el = document.querySelector('[aria-label=\"打开AI Studio\"]') || document.querySelector('[aria-label=\"打开无限画布\"]'); if (el) el.click(); return !!el;");
   const hostUp = await waitSel("[data-canvas-host]", 20000);
   const frameUp = await waitFor(() => !!canvasFrame(), 15000);
   const frameProbe = frameUp ? await frameNodeCount() : null;
@@ -350,9 +363,12 @@ async function main() {
   }
 
   const canvasCallsFinal = callsByTool("canvas.edit");
-  console.log("\n── 缺口定位（产品代码事实，探针只读引用）──");
-  note("electron/dsh-tool-profile.cjs WRITE_TOOL_IDS = " + JSON.stringify(PROFILE.WRITE_TOOL_IDS) + "（不含 canvas.edit ⇒ 不广播、capability.allowedTools 不含它 ⇒ 模型提议也进不了 Tool Facade）");
-  note("electron/side-effect-runtime.cjs IN_PROCESS_EXECUTION_PROVIDERS = [\"BrowserControl\"]（不含 CanvasControl）且 electron/side-effect-executor-bundle.cjs 只装 createToolAdapters({ resourceService }) ⇒ 受监督 executor 里没有 CanvasControl adapter");
+  console.log("\n── 产品代码事实（探针只读引用，不是缺口结论）──");
+  note("electron/dsh-tool-profile.cjs WRITE_TOOL_IDS = " + JSON.stringify(PROFILE.WRITE_TOOL_IDS) + "（含 canvas.edit ⇒ 已在 Harness 广播面与 capability.allowedTools 里）");
+  const runtimeSrc = fs.readFileSync(path.join(ROOT, "electron", "side-effect-runtime.cjs"), "utf8");
+  const inProcessSrc = (runtimeSrc.match(/IN_PROCESS_EXECUTION_PROVIDERS\s*=\s*Object\.freeze\(new Set\(\[([^\]]*)\]\)\)/) || [])[1] || "";
+  const inProcessProviders = inProcessSrc.split(",").map((s) => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+  note("electron/side-effect-runtime.cjs IN_PROCESS_EXECUTION_PROVIDERS = " + JSON.stringify(inProcessProviders) + "（含 CanvasControl：画布命令层的唯一权威实例在主进程内，故走 executeInProcess；lease / claim / exactly-once / verify 全部照旧，executor bundle 不需要它）");
   note("canvas.edit 账本：side_effect_calls=" + canvasCallsFinal.length + " / tool_executions(canvas.edit)=" + execsByTool("canvas.edit").length);
 
   const gapConfirmed = !canvasChainOk && canvasCallsFinal.length === 0 && productManifest.toolIds.indexOf("canvas.edit") < 0;

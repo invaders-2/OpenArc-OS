@@ -17,7 +17,9 @@ const CONTRACT_FIELDS = ["toolId", "version", "displayName", "description", "inp
   // D4-03C1：write contract 必须显式声明 side-effect authority 合同。
   "idempotencySupport", "verificationStrategy", "approvalPolicy", "leasePolicy",
   // D4-03C2：只有显式声明 executionPolicy 的 contract 才允许真实受控写入。
-  "executionPolicy"];
+  "executionPolicy",
+  // D5-02：显式声明哪些顶层参数是结构化对象（豁免 §23/§24 denylist 的同名误判）。
+  "structuredArguments"];
 
 /** 极简 JSON Schema 子集校验器：object/string/integer/number/boolean/array + additionalProperties:false。*/
 function validateSchema(schema, value, path = "$") {
@@ -240,7 +242,12 @@ const BUILTIN_CONTRACTS = Object.freeze([
     executionProvider: "CanvasControl",
     enabled: true,
     expectedSideEffects: ["canvas document mutation (reversible via undo record)"],
-    idempotencySupport: false,
+    // command 是**结构化命令对象**（合同 schema 已收窄 type / additionalProperties），
+    // 与 §23/§24 denylist 里的 shell "command" 字符串同名不同物：显式声明豁免，绝不改 denylist 本身。
+    structuredArguments: ["command"],
+    // 如实声明：recovery/verify 都已实现（READ_AFTER_WRITE + 画布命令日志 fingerprint 的 recoveryVerify），
+    // idempotencyKey = callId+toolId+version+argumentsHash+targets，不引入自动重试（AUTO_RETRY 恒为 0）。
+    idempotencySupport: true,
     verificationStrategy: "READ_AFTER_WRITE",
     approvalPolicy: "ONE_CALL",
     leasePolicy: "SINGLE_ACTIVE",
@@ -362,7 +369,7 @@ function buildBridgeManifest(registry, { readToolIds = [], writeToolIds = [] } =
 }
 
 function frozenContract(c) {
-  return Object.freeze({ ...c, requiredPermissions: Object.freeze([...(c.requiredPermissions || [])]), resourceActions: Object.freeze([...(c.resourceActions || [])]), expectedSideEffects: Object.freeze([...(c.expectedSideEffects || [])]) });
+  return Object.freeze({ ...c, requiredPermissions: Object.freeze([...(c.requiredPermissions || [])]), resourceActions: Object.freeze([...(c.resourceActions || [])]), expectedSideEffects: Object.freeze([...(c.expectedSideEffects || [])]), structuredArguments: Object.freeze([...(c.structuredArguments || [])]) });
 }
 
 class ToolRegistry {

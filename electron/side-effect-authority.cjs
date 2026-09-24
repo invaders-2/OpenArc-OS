@@ -97,14 +97,28 @@ function sanitizeEffect(effect, depth = 0) {
  * 否则 claim 之后就只能从 Harness 入参再取一次，"批准的东西"和"执行的东西"会分叉。
  * `url` 有独立上界（见 PRECONDITION_STRING_MAX），因为它比 resourceRef 长得多。
  */
-const PRECONDITION_KEYS = new Set(["resourceRef", "expectedVersion", "expectedHash", "targetRef", "targetType", "registryStatus", "updatedAt", "url"]);
+const PRECONDITION_KEYS = new Set(["resourceRef", "expectedVersion", "expectedHash", "targetRef", "targetType", "registryStatus", "updatedAt", "url",
+  // D5-02：画布编辑的**基准 revision + 命令 + 命令指纹**必须随 plan 一起持久化 —— 否则 claim 之后只能从
+  // Harness 入参再取一次，"批准的命令"和"执行的任务"会分叉（与 D5-01 的 url 同一口径；execute / verify /
+  // recoveryVerify 都只读这份快照，commandFingerprint 还要与画布命令日志**逐字节**比对）。
+  "revision", "commandFingerprint", "command"]);
 /** 每个 key 的字符串上界；未列出的沿用 300。 */
-const PRECONDITION_STRING_MAX = Object.freeze({ url: 2000 });
+const PRECONDITION_STRING_MAX = Object.freeze({ url: 2000, commandFingerprint: 2000 });
+/** command 是结构化执行入参：与 commandFingerprint 同一预算；超界一律丢弃该 key（fail closed，绝不截断）。 */
+const PRECONDITION_OBJECT_MAX = 2000;
 function sanitizePreconditions(pre) {
   const out = {};
   if (!pre || typeof pre !== "object") return out;
   for (const [k, v] of Object.entries(pre)) {
     if (!PRECONDITION_KEYS.has(k)) continue;
+    if (k === "command") {
+      if (!v || typeof v !== "object" || Array.isArray(v)) continue;
+      let blob = null;
+      try { blob = JSON.stringify(v); } catch { continue; }
+      if (typeof blob !== "string" || blob.length > PRECONDITION_OBJECT_MAX) continue;
+      out[k] = v;
+      continue;
+    }
     if (typeof v !== "string") { out[k] = v; continue; }
     const max = PRECONDITION_STRING_MAX[k] == null ? 300 : PRECONDITION_STRING_MAX[k];
     // url 是**执行入参**：截断等于把目标换成另一个地址，所以超界一律丢弃该 key（fail closed），绝不截断。
@@ -1167,7 +1181,9 @@ class SideEffectAuthority {
 
     // Execution != Verified Effect：必须真实 Domain verification 通过才允许 SUCCEEDED。
     let verdict;
-    try { verdict = await adapter.verify({ context: execCtx, args, result: execResult.result, contract: tool.contract }); }
+    // verify 与 execute / recoveryVerify 同源：**只读持久化的 trusted plan**。
+    // 需要基准 revision 的 verifier（CanvasControl READ_AFTER_WRITE）看不到 preconditions 就只能判 FAIL。
+    try { verdict = await adapter.verify({ context: execCtx, args, result: execResult.result, contract: tool.contract, preconditions: call.preconditionsSafe }); }
     catch { return this.#finishUnknownEffect({ call, leaseId, detail: "VERIFIER_UNAVAILABLE" }); }
     if (!verdict || verdict.ok !== true) return this.#finishUnknownEffect({ call, leaseId, detail: "VERIFIER_UNAVAILABLE" });
     if (verdict.applied !== true) return this.#finishKnownNoEffect({ call, leaseId, error: SIDE_EFFECT_ERROR.VERIFICATION_FAILED, verificationStatus: "FAIL", knownNoEffect: true });
