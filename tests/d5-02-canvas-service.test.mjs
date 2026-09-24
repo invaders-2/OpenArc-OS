@@ -6,6 +6,9 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { createResourceFixture } from "./resource-fixtures.mjs";
 import { CanvasStore } from "../electron/canvas-store.cjs";
 import { CanvasService } from "../electron/canvas-service.cjs";
@@ -194,6 +197,47 @@ test("D5-02 · A08：资源引用用稳定 ref —— 重命名仍可用，删�
     const doc = f.service.getCanvas({ context: c, canvasId: f.canvasId }).canvas.doc;
     assert.equal(doc.nodes[0].url, url);
   } finally { f.fx.close(); }
+});
+
+test("D5-02 · F3b：关窗重开后宿主按当前用户逐资源解析 openarc-asset:（本人可用 / 他人仍拒 / 删除后不复活）", async () => {
+  const f = await fixture();
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "oa-d5-02-imports-"));
+  try {
+    // 与产品装配一致：画布服务拿到的是同一个 resourceService 实例（identity-bootstrap.cjs:78-84）。
+    const service = new CanvasService({
+      identity: f.fx.identity, store: f.store, resourceStore: f.fx.resourceStore,
+      authService: f.fx.authService, resourceService: f.fx.resourceService, clock: f.fx.clock,
+    });
+    service.attachRuntime({ tempDir });
+    const c = f.ctx("admin");
+    const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIAQMAAAD+wSzIAAAABlBMVEX///+/v7+jQ3Y5AAAADklEQVQI12P4AIX8EAgALgAD/aNpbtEAAAAASUVORK5CYII=";
+    // 1) 与画布页面同一条导入路径（内部以 resource-library 身份、PERSONAL scope 入库）
+    const imported = await service.importAsset({ context: c, canvasId: f.canvasId, name: "d502-asset.png", dataUrl: "data:image/png;base64," + PNG });
+    assert.equal(imported.ok, true, JSON.stringify(imported));
+    const ref = String(imported.ref).replace("openarc-asset:", "");
+    assert.ok(ref.length > 0, "导入必须返回稳定 ResourceRef");
+    // 2) 文档里只存稳定 ref（不存 data URL / 路径）
+    const add = service.applyCommand({ context: c, canvasId: f.canvasId, baseRevision: 1, command: { type: "node.add", node: { id: "n_img", type: "image", x: 0, y: 0, url: imported.ref } } });
+    assert.equal(add.ok, true, JSON.stringify(add));
+    assert.equal(service.getCanvas({ context: c, canvasId: f.canvasId }).canvas.doc.nodes[0].url, imported.ref);
+    // 3) 重开画布时宿主做的就是这件事：ref → data URL（逐资源授权 + 受控读取）
+    const read = service.readAsset({ context: c, ref });
+    assert.equal(read.ok, true, JSON.stringify(read));
+    assert.ok(String(read.dataUrl).startsWith("data:image/png;base64,"), String(read.dataUrl).slice(0, 30));
+    // 4) 同组织、非本人的 PERSONAL 资源仍然被拒（修 F3b 不放宽授权）
+    const danaCtx = { sessionRef: f.fx.sessions.dana, appId: "canvas", source: "ui" };
+    const cross = service.readAsset({ context: danaCtx, ref });
+    assert.equal(cross.ok, false);
+    assert.equal(cross.error, "ASSET_FORBIDDEN");
+    assert.equal(service.assetStates({ context: danaCtx, refs: [ref] }).exists[ref].state, "UNAUTHORIZED");
+    // 5) 删除后重开：明确不可用，旧内容不复活
+    f.fx.resourceService.delete({ context: f.fx.ctx("admin"), resourceRef: ref });
+    assert.equal(service.readAsset({ context: c, ref }).ok, false);
+    assert.notEqual(service.assetStates({ context: c, refs: [ref] }).exists[ref].state, "AVAILABLE");
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    f.fx.close();
+  }
 });
 
 test("D5-02 · 领域层：AI 命令白名单不含 undo/redo（撤销走账本，不走 AI）", async () => {

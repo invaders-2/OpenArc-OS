@@ -111,9 +111,42 @@ async function openAppWindow() {
   await js("const el = document.querySelector('[aria-label=\"打开AI Studio\"]') || document.querySelector('[aria-label=\"打开无限画布\"]'); if (el) el.click(); return !!el;");
   return await waitFor(() => has("[data-canvas-host]"), 20000);
 }
+/** 程序坞图标右键。真实产品入口是"右键图标 → 程序坞菜单"（main.tsx:3551-3559）。
+ *  优先用 CDP 原生右键；Dock 自动隐藏导致命中测试失败时退回 button:2 的 pointer/mouse 事件序列 + 冒泡的 contextmenu。*/
+async function rightClickDockItem(appId) {
+  const sel = '.dock-item[data-dock-id="' + appId + '"]';
+  const menuSel = '[aria-label="程序坞菜单"]';
+  if (!(await has(sel))) return false;
+  try {
+    await page.locator(sel).click({ button: "right", timeout: 3000 });
+    if (await waitFor(() => has(menuSel), 2000)) return true;
+  } catch { /* 原生右键不可达 → 走事件派发 */ }
+  const sent = await js(
+    "const el = document.querySelector(" + JSON.stringify(sel) + "); if (!el) return false;" +
+    "const r = el.getBoundingClientRect(); const x = r.left + r.width / 2, y = r.top + r.height / 2;" +
+    "const base = { bubbles: true, cancelable: true, composed: true, view: window, clientX: x, clientY: y, screenX: x, screenY: y };" +
+    "el.dispatchEvent(new PointerEvent('pointerdown', Object.assign({}, base, { button: 2, buttons: 2 })));" +
+    "el.dispatchEvent(new MouseEvent('mousedown', Object.assign({}, base, { button: 2, buttons: 2 })));" +
+    "el.dispatchEvent(new PointerEvent('pointerup', Object.assign({}, base, { button: 2, buttons: 0 })));" +
+    "el.dispatchEvent(new MouseEvent('mouseup', Object.assign({}, base, { button: 2, buttons: 0 })));" +
+    "el.dispatchEvent(new MouseEvent('contextmenu', Object.assign({}, base, { button: 2, buttons: 0 })));" +
+    "return true;",
+  ).catch(() => false);
+  return sent === true && (await waitFor(() => has(menuSel), 5000));
+}
+/** 关掉画布 App 窗口并等它**真的销毁**（bundle frames 归零）。
+ *  标题栏红灯对非 settings 应用只做最小化（components.tsx:598），最小化不销毁 iframe，
+ *  所以必须走程序坞右键菜单的「关闭应用」→ window/close（main.tsx:2927-2939 的程序坞菜单项）。
+ *  关不掉（图标/菜单项缺失或 disabled）就返回 false，不伪装成功。*/
 async function closeAppWindow() {
-  await js("const el = document.querySelector('[aria-label=\"关闭AI Studio窗口\"]') || document.querySelector('[aria-label=\"关闭无限画布窗口\"]'); if (el) el.click(); return !!el;").catch(() => {});
-  await js("const el=document.querySelector('[data-canvas-host]'); const win=el&&el.closest('[data-window-id]'); const btn=win&&win.querySelector('.window-title button.close'); if(btn) btn.click(); return !!btn;");
+  if (!(await rightClickDockItem("canvas"))) return false;
+  const clicked = await waitFor(() => js(
+    "const menu = document.querySelector('.context-menu.dock-menu[aria-label=\"程序坞菜单\"]'); if (!menu) return false;" +
+    "const item = Array.from(menu.querySelectorAll('button[role=\"menuitem\"]')).find(function (b) { return b.textContent.trim() === '关闭应用'; });" +
+    "if (!item || item.disabled) return false;" +
+    "item.click(); return true;",
+  ), 10000);
+  if (!clicked) return false;
   return await waitFor(() => allBundleFrames().length === 0, 15000);
 }
 /** 关窗重开/切页之后，从**首页最近项目卡片**再打开当前这本画布（产品路径）。*/

@@ -543,7 +543,15 @@ class ResourceService {
     const object = row.content_object_id ? this.store.contentObjectById(row.content_object_id) : null;
     if (!object) return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
     let bytes = null;
-    try { bytes = this.managedStore.readObject(object.checksum, null); } catch { bytes = null; }
+    // 本类的 managed store 叫 this.fs（构造函数命名），且 readObject 返回的是流不是字节：
+    // 原来写 this.managedStore.readObject(...) 恒抛 TypeError，再被 catch 吞成"资源不存在"，
+    // 于是 readDataUrl 永远拿不到内容（画布重开后 openarc-asset: 解析不出来）。
+    try {
+      const objectPath = this.fs.objectPath(object.checksum);
+      const stat = objectPath ? fs.statSync(objectPath) : null;
+      if (stat && stat.isFile() && stat.size > Number(maxBytes)) return fail(REASON.INVALID_INPUT, "too-large");
+      bytes = stat && stat.isFile() ? fs.readFileSync(objectPath) : null;
+    } catch { bytes = null; }
     if (!bytes) return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
     const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
     if (buf.length > Number(maxBytes)) return fail(REASON.INVALID_INPUT, "too-large");
