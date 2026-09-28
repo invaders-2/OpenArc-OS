@@ -787,6 +787,13 @@ async function main() {
     "toolsHash 一致 + DOM 2 行工具 + testLog 有 hash=",
     JSON.stringify({ regrant: { ok: hRegrant.ok }, toolsHidden: h0Get.connection ? h0Get.connection.toolsHidden : null, uiTools: h0Detail ? h0Detail.tools.map((t) => t.name) : null, uiHash: h0Detail ? h0Detail.toolsHash : null, logHashHits: (JSON.stringify(h0Log).match(/hash=/g) || []).length, domToolRows: h0Dom.info.toolRows }));
 
+  /* H2 驱动重基线（第三批契约）：第三批起「撤权才收流」（closeAppConnections + 连接日志 AUTHORIZATION_REVOKED），
+     而 H1 把 grant 收窄为 [mcp.view] 是**正式治理入口的 grant**（upsertAppGrant），不是 revoke —— 不触发收流。
+     原驱动里 B1/E4/H0 的净效果是"授权回来了、活连接没有"，于是 H2 在 ERROR 上断言 READY（判定本身没错，是被测前提没了）。
+     这里先真实 connect 回 READY，H2 的既有断言照旧跑在"连着的时候只有 view 权限"这个原始前提下；不新增/不改判定。 */
+  const h0Connect = await mcp({ command: "mcp/connect", connectionId: state.connectionId });
+  note("H2 驱动前置：重授四动作后真实 mcp/connect → " + JSON.stringify(brief(h0Connect)) + "，status=" + (conn(h0Connect) ? conn(h0Connect).status : null) + "（随后的 H1 是同一条 grant 的收窄，不是 revoke，按第三批契约不收流）。");
+
   const viewOnly = await grantByGovernance(["mcp.view"]);
   const evH1 = evidenceOf(dataDirFirst);
   const h1Prov = evH1.provisions.find((p) => p.policy_key === "mcp") || null;
@@ -1027,15 +1034,28 @@ async function main() {
     "失败项 ⊆ " + JSON.stringify(EXPLAINABLE),
     JSON.stringify({ failed: origFails.map((c) => ({ section: c.section, name: c.name, expected: c.expected, actual: c.actual.slice(0, 400) })), staleExpectation: STALE_EXPECTATION, cascade: CASCADE, notVerifiedInOriginal: orig ? orig.notVerified : null }));
 
-  const srcDiff = (() => { try { return execFileSync("git", ["-C", ROOT, "diff", "--name-only", "d583154", "HEAD", "--", "src/"], { encoding: "utf8" }).trim(); } catch { return "git-diff-failed"; } })();
-  const allDiff = (() => { try { return execFileSync("git", ["-C", ROOT, "diff", "--name-only", "d583154", "HEAD"], { encoding: "utf8" }).trim().split("\n").filter(Boolean); } catch { return []; } })();
+  /* R3 基线重定（第三批）：原基线 d583154 已过期 —— 第三批在 1b78953 为「会话已结束」提示合法改了渲染层。
+     新基线 = 第三批开始前的提交 c2e96c1。实测该区间 src/ 的改动**有且只有**白名单那个文件，所以这里是白名单式放行：
+     文件级 + 只增不删 + 补丁内容确实带 MCP_SESSION_ENDED；白名单之外的任何 src/ 改动照样判 FAIL（不是"有改动就算过"）。 */
+  const R3_BASE_REV = "c2e96c1";
+  const R3_ALLOWED_SRC = ["src/mcp/McpCenter.tsx"];
+  const gitTextOf = (args) => { try { return execFileSync("git", ["-C", ROOT, ...args], { encoding: "utf8" }).trim(); } catch { return null; } };
+  const srcDiffRaw = gitTextOf(["diff", "--name-only", R3_BASE_REV, "HEAD", "--", "src/"]);
+  const srcDiff = srcDiffRaw === null ? "git-diff-failed" : srcDiffRaw;
+  const srcDiffFiles = srcDiff === "" ? [] : srcDiff.split("\n");
+  const srcDiffOutsideWhitelist = srcDiffFiles.filter((f) => !R3_ALLOWED_SRC.includes(f));
+  const whitelistNumstat = srcDiffFiles.length ? gitTextOf(["diff", "--numstat", R3_BASE_REV, "HEAD", "--", ...R3_ALLOWED_SRC]) : "";
+  const whitelistPatch = srcDiffFiles.length ? gitTextOf(["diff", R3_BASE_REV, "HEAD", "--", ...R3_ALLOWED_SRC]) : "";
+  const srcWhitelistAddOnly = srcDiff !== "git-diff-failed" && (!srcDiffFiles.length
+    || (!!whitelistNumstat && whitelistNumstat.split("\n").filter(Boolean).every((l) => /^\d+\t0\t/.test(l)) && !!whitelistPatch && whitelistPatch.includes("MCP_SESSION_ENDED")));
+  const allDiff = (() => { try { return execFileSync("git", ["-C", ROOT, "diff", "--name-only", R3_BASE_REV, "HEAD"], { encoding: "utf8" }).trim().split("\n").filter(Boolean); } catch { return []; } })();
   const kFails = origFails.filter((c) => ["K1", "K2", "K3", "K4", "L2", "L4"].includes(c.section));
   const kCascadePattern = /"rows":0|"leavingFrames":0|"statesSeen":\[null\]|"rowAnim":null|"insertPresentMs":1[0-9]{4}|"reducedInsertMs":1[0-9]{4}|NO_MCP_GRANT|"emptyDarkUp":false/;
   const kAllCascade = kFails.every((c) => kCascadePattern.test(c.actual));
-  record("R3", "下游失败可被独立证伪为「产品回归」：本批 d583154→HEAD 的 diff 里 src/ 一个文件都没改（38/38 那一轮的渲染层原样），且下游失败的实际值全是「列表空 / 没有行可采样 / 删除即时 / NO_MCP_GRANT」的授权已撤上下文",
-    srcDiff === "" && (kFails.length === 0 || kAllCascade),
-    "src/ diff 为空 + K 段失败实际值全部命中空态上下文",
-    JSON.stringify({ srcDiff, changedOutsideSrc: allDiff, kFailures: kFails.map((c) => ({ section: c.section, actual: c.actual.slice(0, 260) })), kAllCascade }));
+  record("R3", "下游失败可被独立证伪为「产品回归」：本批 " + R3_BASE_REV + "→HEAD 的 diff 里 src/ 改动 ⊆ 白名单 " + JSON.stringify(R3_ALLOWED_SRC) + "（1b78953 的「会话已结束」提示，只增不删），白名单外的 src/ 文件一个都没改，且下游失败的实际值全是「列表空 / 没有行可采样 / 删除即时 / NO_MCP_GRANT」的授权已撤上下文",
+    srcDiffOutsideWhitelist.length === 0 && srcWhitelistAddOnly && (kFails.length === 0 || kAllCascade),
+    "src/ diff ⊆ 白名单（只增不删，且补丁确实带 MCP_SESSION_ENDED）+ K 段失败实际值全部命中空态上下文",
+    JSON.stringify({ baseRev: R3_BASE_REV, allowedSrc: R3_ALLOWED_SRC, srcDiff, srcDiffOutsideWhitelist, whitelistNumstat, srcWhitelistAddOnly, changedOutsideSrc: allDiff, kFailures: kFails.map((c) => ({ section: c.section, actual: c.actual.slice(0, 260) })), kAllCascade }));
 
   /* ── Z 收尾 ── */
   const ENV_NOISE = /ExperimentalWarning|SQLite is an experimental|SetApplicationIsDaemon|NSOSStatusErrorDomain|IMKCFRunLoopWakeUpReliable|In-process GPU|ERR_BLOCKED_BY_CSP/;
