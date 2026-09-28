@@ -2,10 +2,12 @@
 
 状态：**已实现并完成真机（Electron）验收** —— `experiments/d5-03/mcp-policy-e2e.mjs` 在真机跑出
 **43 PASS / 0 FAIL / 43、exit 0**（2026-09-24；被测提交 `360d94b`；artifact `artifacts/d5-03/mcp-policy-e2e.json`，
-sha256 `d4af5e9cbf6e7b8b6b8643f67d3dd38d040ee35baabb937fbeb338141c71d831`；该路径在 23:01:50 被另一个并发 DSH 会话重跑覆盖，当前磁盘值 = `0c9ea8e5…`，判定一致 —— 两个值都记录在 `docs/D5-03-RESULT.md` §12 第 7 条），覆盖首用播种 / 撤权即时 /
+sha256 `d4af5e9cbf6e7b8b6b8643f67d3dd38d040ee35baabb937fbeb338141c71d831`；该路径在 23:01:50 被本任务自己并行跑的批次重跑覆盖（原文曾记为“另一个并发 DSH 会话”，**【第三批订正】**），当前磁盘值 = `0c9ea8e5…`，判定一致 —— 两个值都记录在 `docs/D5-03-RESULT.md` §12 第 7 条），覆盖首用播种 / 撤权即时 /
 跨登录 / 跨重启 / 正式重授 / 新组织 / v20 → v21 升级路径 / 撤销审计行归属 / `mcp.view`-only 部分授权。
 两处"共库双组织的**行为级**场景"在真机不可构造，仍如实记为 notVerified（见 §5）；完整口径与判定见
 `docs/D5-03-RESULT.md` 正文 §1–§13。
+
+> **【第三批已更新 · 2026-09-28】** 本决策的 §1–§4（schema v21 设计、墓碑语义、跨组织唯一键、迁移归属判据）**内容未变、继续有效**；第三批（`1b78953` / `0aa4027`）只做了两件事：① 在同轮三门禁里重跑本台架 —— **43/43、exit 0**，artifact 改走 `artifacts/d5-03/runs/20260928T020348Z-fb87-mcp-policy-e2e/mcp-policy-e2e.json`（sha256 `df7891ef…`），根目录 `artifacts/d5-03/mcp-policy-e2e.json` 只作历史；② **R3 门禁重基线**（基线 `d583154` → `c2e96c1`，改白名单式：仅允许 `src/mcp/McpCenter.tsx`、只增不删、补丁必须含 `MCP_SESSION_ENDED`）、**H2 只补一次真实 `mcp/connect` 驱动**（判定与 `expected` 一字未动；44 个 `record` 调用点 id 序列一致），其余 42 条判定逐字未动 —— 详见 §7。`notVerified` 仍为 **2 条，未清零**（本批不新增"创建组织"入口，用户明令）。
 
 ## 1. 要修的两个真实缺陷
 
@@ -139,7 +141,7 @@ v21 升级时**无法**从"行不存在"区分"从未播种"与"曾经撤销"。
 * 证据完整性缺口（与本文件描述的修复无关，如实登记）：第一批台架 `mcp-center-e2e` 的源码指纹集**不含**
   本批改动的 `electron/authorization-service.cjs` 与 `electron/identity-store.cjs`；第二批台架的
   `fingerprints`（7 条，与 HEAD 逐条相同）覆盖了它们，两个台架合起来才可复核本批受验源码。见
-  `docs/D5-03-RESULT.md` 正文 §12。
+  `docs/D5-03-RESULT.md` 正文 §12。**【第三批已更新：该缺口已闭环 —— 第三批把源码指纹集扩为 14 条（product 源码 12 条，含 `authorization-service.cjs` / `identity-store.cjs` / `governance-service.cjs` / `authorization-store.cjs` / `executor-launcher.cjs` / `src/mcp/McpCenter.tsx`），三个 artifact 里产品源码全部 `inTestedCommit=true` / `worktreeMatchesCommit=true`；center 与 policy 的指纹集整体 sha256 同为 `0b435692…`。】**
 * `ModelService.revokeAppModelAccess` / `grantAppModelAccess` 只被测试夹具使用（无 IPC 入口），
   现已随 store 收口自动写/清墓碑；正式入口仍是 `governance/grantAppAccess|revokeAppAccess`。
 * MCP 工具调用仍未开放（5 个入口仍回 `MCP_TOOL_INVOCATION_NOT_ENABLED`），本批不改这条边界。
@@ -153,3 +155,14 @@ v21 升级时**无法**从"行不存在"区分"从未播种"与"曾经撤销"。
 * `electron/mcp-bootstrap.cjs`、`electron/model-bootstrap.cjs`、`electron/resource-service.cjs`：
   三处播种改为"首次使用才给"；
 * `electron/mcp-service.cjs`：工具目录（名/描述/参数/hash）一律要 `mcp.use`。
+
+## 7. 第三批更新（2026-09-28，`1b78953` / `0aa4027`）
+
+* **判定不变**：本台架（`experiments/d5-03/mcp-policy-e2e.mjs`）第三批同轮重跑 **43 PASS / 0 FAIL / 43、exit 0**；内嵌第一批回归 **38/38**；`notVerified` 仍 **2 条**（同一安装内第二个组织无产品入口 + 跨组织行为级），**未清零** —— 本批不新增"创建组织"入口（用户明令）。
+* **证据路径换代**：第三批起每次运行独立写 `artifacts/d5-03/runs/<runId>/mcp-policy-e2e.json`（+ 日志 + `.sha256` + 截图），索引只追加（`runs/index.json` / `index.jsonl`）；**根目录不再写入可变 JSON**。**当前有效证据以本轮 runId 目录为准，历史轮次只作历史。**本轮 runId `20260928T020348Z-fb87-mcp-policy-e2e`、artifact sha256 `df7891ef72abcb02fe057654d1132633f64bbdfae9c83a7393bd342fb9dc2a5b`；根目录 `artifacts/d5-03/mcp-policy-e2e.json`（mtime 2026-09-24）只作历史。
+* **R3 门禁重基线（白名单式，判定更严不是放宽）**：基线由 `d583154` 改为 `c2e96c1`；仅允许 `src/mcp/McpCenter.tsx`；只增不删（`numstat=8\t0`）；补丁必须含 `MCP_SESSION_ENDED`；白名单外任何 `src/` 改动 FAIL；`git` 拿不到 diff 时 fail-closed。实测 `srcDiffOutsideWhitelist=[]`、`srcWhitelistAddOnly=true`、`kFailures=[]`、`kAllCascade=true`。原因：第三批在 `1b78953` 为"会话已结束"提示合法改了渲染层 8 行（`src/mcp/McpCenter.tsx`），旧基线"src/ 零改动"已过期。
+* **H2 只补驱动、不动判定**：重授四动作后补一次真实 `mcp/connect` 前置（先连回 `READY`，再收窄 `view-only`；`H1` 是 grant 收窄不是 revoke，按第三批契约不收流），**H2 判定与 `expected` 一字未动**；全文件 44 个 `record` 调用点 id 序列与基线 `c2e96c1` 逐条一致（执行岗 `diff` 复核）。其余 **42 条判定逐字未动**。
+* **脚本指纹口径**：`mcp-policy-e2e.mjs` 在三份 artifact 里都标 `worktreeMatchesCommit=false` / `status="modified"` —— 这是"重基线当时未提交"的诚实自报；sha256_16 `56b9ba59ee896864`（全量 `56b9ba59ee896864f2922785749eda9bc525a765ba7f3088de116b2e04e798af`）与提交 `0aa4027` 当前内容逐字节相同。
+* **归因订正（第三批）**：第二批文档里"另一个并发 DSH 会话重跑覆盖本 artifact"的说法已订正 —— 那是**本任务自己并行跑的批次**；第三批的机制性修复 = 独立 runId 目录 + `acquirePort` 独占探测 CDP 端口 + 只清理自己的 pid 树 + Electron 批次串行执行（见 `docs/D5-03-RESULT.md` 正文 §3/§10）。
+* 本决策文档描述的 schema v21 / 墓碑 / 唯一键 / 迁移归属实现**本批未改动**（第三批 `src/` 只动了 `src/mcp/McpCenter.tsx` 的一行文案类说明）。
+

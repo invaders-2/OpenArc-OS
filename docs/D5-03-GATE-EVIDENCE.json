@@ -1,4 +1,441 @@
 {
+  "batch3": {
+    "phase": "D5-03 第三批 · Streamable HTTP 流式收口 + 生命周期收尾",
+    "at": "2026-09-28T02:04:12.365Z",
+    "openarcBranch": "integration/ui-core",
+    "testedCommit": "1b789537442e8eeafcaddfa291920cdc7a47c404",
+    "commitChain": [
+      {
+        "commit": "c2e96c1",
+        "subject": "第二批（MCP 授权收口）文档与证据定稿；同时是本批 R3 重基线起点"
+      },
+      {
+        "commit": "3590f27",
+        "subject": "Streamable HTTP 流式收口（POST/GET SSE、续传、去重、有界失败）+ 门禁运行证据隔离（run-artifacts：独立 runId 目录与只追加索引）"
+      },
+      {
+        "commit": "1b78953",
+        "subject": "生命周期收尾接线（关应用有界 dispose / 登出·锁屏收流 / 撤权即时收流 / MCP_SESSION_ENDED）+ d5-03-mcp-lifecycle 测试（本批被测提交）"
+      },
+      {
+        "commit": "0aa4027",
+        "subject": "流式真机验收脚本（29 项）+ policy 门禁重基线（H2 驱动 / R3 白名单式）；本批最后一次提交 = HEAD"
+      }
+    ],
+    "headAtDelivery": "0aa4027cb8e477b618fd2cca5450a879454be435",
+    "runOrder": "center → stream → policy（同轮串行；policy 的 R 段读本轮 center 的 run 目录）",
+    "runs": {
+      "mcpCenterE2e": {
+        "role": "第一批回归（本批同轮重跑）",
+        "runId": "20260928T020242Z-fd67-mcp-center-e2e",
+        "runDir": "artifacts/d5-03/runs/20260928T020242Z-fd67-mcp-center-e2e",
+        "artifactPath": "artifacts/d5-03/runs/20260928T020242Z-fd67-mcp-center-e2e/mcp-center-e2e.json",
+        "artifactSha256": "83d8e6ab49edd63d9d88f64c799f1e8f1c1523e336f605ec782fba915bab66bf",
+        "logPath": "artifacts/d5-03/runs/20260928T020242Z-fd67-mcp-center-e2e/mcp-center-e2e.log",
+        "command": "node experiments/d5-03/mcp-center-e2e.mjs",
+        "counts": {
+          "pass": 38,
+          "fail": 0,
+          "total": 38
+        },
+        "notVerified": [],
+        "productDefects": [],
+        "exitCode": 0,
+        "startedAt": "2026-09-28T02:02:42.080Z",
+        "finishedAt": "2026-09-28T02:03:20.157Z",
+        "cdpPort": 9811,
+        "cdpPorts": [
+          9811
+        ],
+        "userDataPrefix": "oa-d503-20260928T020242Z-fd67-",
+        "visualFiles": 17,
+        "motionFiles": 66,
+        "cleanup": {
+          "strategy": "own-pid-tree-only",
+          "leftovers": [],
+          "pkillUsed": false
+        }
+      },
+      "mcpStreamE2e": {
+        "role": "第三批（流式收口 + 生命周期）本批新增台架",
+        "runId": "20260928T020320Z-8b11-mcp-stream-e2e",
+        "runDir": "artifacts/d5-03/runs/20260928T020320Z-8b11-mcp-stream-e2e",
+        "artifactPath": "artifacts/d5-03/runs/20260928T020320Z-8b11-mcp-stream-e2e/mcp-stream-e2e.json",
+        "artifactSha256": "09e6023f61550d72c36d9f39effde3955d84d964e77f2d1488cac25ccc99cb80",
+        "logPath": "artifacts/d5-03/runs/20260928T020320Z-8b11-mcp-stream-e2e/mcp-stream-e2e.log",
+        "command": "node experiments/d5-03/mcp-stream-e2e.mjs",
+        "counts": {
+          "pass": 29,
+          "fail": 0,
+          "total": 29
+        },
+        "notVerified": [],
+        "productDefects": [],
+        "exitCode": 0,
+        "startedAt": "2026-09-28T02:03:20.407Z",
+        "finishedAt": "2026-09-28T02:03:47.951Z",
+        "cdpPort": 9841,
+        "cdpPorts": [
+          9841
+        ],
+        "userDataPrefix": "oa-d503s-20260928T020320Z-8b11-",
+        "visualFiles": [
+          "visual/session-ended-note.png",
+          "visual/unauthorized.png"
+        ],
+        "cleanup": {
+          "strategy": "own-pid-tree-only",
+          "leftovers": [],
+          "pkillUsed": false
+        }
+      },
+      "mcpPolicyE2e": {
+        "role": "第二批回归（本批同轮重跑，含 H2 驱动补丁与 R3 白名单重基线）",
+        "runId": "20260928T020348Z-fb87-mcp-policy-e2e",
+        "runDir": "artifacts/d5-03/runs/20260928T020348Z-fb87-mcp-policy-e2e",
+        "artifactPath": "artifacts/d5-03/runs/20260928T020348Z-fb87-mcp-policy-e2e/mcp-policy-e2e.json",
+        "artifactSha256": "df7891ef72abcb02fe057654d1132633f64bbdfae9c83a7393bd342fb9dc2a5b",
+        "logPath": "artifacts/d5-03/runs/20260928T020348Z-fb87-mcp-policy-e2e/mcp-policy-e2e.log",
+        "command": "node experiments/d5-03/mcp-policy-e2e.mjs",
+        "counts": {
+          "pass": 43,
+          "fail": 0,
+          "total": 43
+        },
+        "firstBatchInArtifact": {
+          "pass": 38,
+          "fail": 0,
+          "total": 38,
+          "artifactPath": "artifacts/d5-03/runs/20260928T020242Z-fd67-mcp-center-e2e/mcp-center-e2e.json",
+          "scriptSha256": "ee27d1c50580b46b44beffde3efb52d95e7b02dec1980f41149eadd25d8750d5"
+        },
+        "notVerified": [
+          "同一安装内的第二个组织（两组织共库）无法用产品入口构造",
+          "跨组织行为级不互相覆盖（同一库里 A 撤销 → B 不受影响；两种登录顺序各验一次）"
+        ],
+        "exitCode": 0,
+        "startedAt": "2026-09-28T02:03:48.181Z",
+        "finishedAt": "2026-09-28T02:04:12.365Z",
+        "cdpPort": 9812,
+        "cdpPorts": [
+          9812,
+          9813,
+          9814,
+          9815,
+          9816,
+          9817,
+          9818,
+          9819
+        ],
+        "userDataPrefix": "oa-d503b-20260928T020348Z-fb87-",
+        "scriptSha256": "56b9ba59ee896864f2922785749eda9bc525a765ba7f3088de116b2e04e798af",
+        "cleanup": {
+          "strategy": "own-pid-tree-only",
+          "leftovers": [],
+          "pkillUsed": false
+        }
+      }
+    },
+    "runTimeFacts": {
+      "testedCommitInArtifacts": "1b789537442e8eeafcaddfa291920cdc7a47c404",
+      "gitDirtyLines": 2,
+      "dirtyNote": "三个 artifact 的 2 个未提交文件 = 本批两个验收脚本（mcp-policy-e2e.mjs 重基线 + mcp-stream-e2e.mjs 新增），随后提交成 0aa4027",
+      "checkFieldShape": "checks[].status ∈ {PASS, FAIL} + expected / actual；三份 counts 声明 = len(checks) = 与 exitCode 0 三者一致（执行岗复算）",
+      "cdpPortsAreDynamic": "CDP 端口由 run-artifacts.acquirePort(base) 从基址递增、以 127.0.0.1 独占监听探测并占住（真正 spawn 前释放），每次运行记 cdpPortProbes；本批实测 center 9811 / stream 9841 / policy 9812–9819，均为运行期动态值，不是静态端口"
+    },
+    "evidenceLayout": {
+      "perRunDir": "artifacts/d5-03/runs/<runId>/（artifact JSON + 日志 + .sha256 + 截图）",
+      "index": "runs/index.json + runs/index.jsonl（只追加；同一 runId 绝不改写）",
+      "rootNoLongerWritten": true,
+      "rootHistoricalJson": [
+        "artifacts/d5-03/mcp-center-e2e.json（mtime 2026-09-24，历史）",
+        "artifacts/d5-03/mcp-policy-e2e.json（mtime 2026-09-24，历史）",
+        "artifacts/d5-03/mcp-policy-e2e.sibling-run.json（mtime 2026-09-24，历史）"
+      ],
+      "currentEffectiveValueRule": "当前有效证据以本轮 runId 目录为准；历史轮次（第一批 dca23cb7…、第二批 d4af5e9c… / 并发覆盖 0c9ea8e5…、第三批首轮 f32c1226…）只作历史",
+      "serialExecution": "三个台架同轮串行（center 02:02:42–02:03:20、stream 02:03:20–02:03:47、policy 02:03:48–02:04:12），不并发抢端口"
+    },
+    "sourceFingerprint": {
+      "counts": {
+        "center": 14,
+        "stream": 15,
+        "policy": 14
+      },
+      "productSourceFiles": 12,
+      "productSourceStatus": "全部 status=ok / inTestedCommit=true / worktreeMatchesCommit=true（mcp-bootstrap / mcp-client / mcp-domain / mcp-service / mcp-store、identity-store、authorization-store、authorization-service、governance-service、executor-launcher、tests/fixtures/mcp/echo-server.mjs、src/mcp/McpCenter.tsx）",
+      "centerScript": "experiments/d5-03/mcp-center-e2e.mjs：status=ok / inTestedCommit=true / worktreeMatchesCommit=true（sha256_16 ee27d1c50580b46b）",
+      "policyScript": "experiments/d5-03/mcp-policy-e2e.mjs：三份 artifact 里均 inTestedCommit=true / worktreeMatchesCommit=false / status=modified（重基线当时未提交）；sha256_16 56b9ba59ee896864，与 0aa4027 当前内容逐字节相同（全量 56b9ba59ee896864f2922785749eda9bc525a765ba7f3088de116b2e04e798af）",
+      "streamScript": "experiments/d5-03/mcp-stream-e2e.mjs：stream artifact 里 inTestedCommit=false / worktreeMatchesCommit=false / status=untracked（新文件当时未跟踪）；sha256_16 6af0115d62fd1e3c，与 0aa4027 当前内容逐字节相同",
+      "interpretation": "脚本的 modified/untracked 是诚实自报『当时未提交』，不是内容不一致",
+      "setSha256": {
+        "centerAndPolicy": "0b4356929ad08ce446f81b57ab875a63c6ff8c58851e21d671a16387dd9839e6",
+        "stream": "b7244f7ce64b9aed0a1bca6e37b2f1c3f252d14e5cf01dd29a8ff5c583488f57"
+      }
+    },
+    "streamEvidence": {
+      "persistentPostSse": {
+        "connectMs": 29,
+        "boundMs": 8000,
+        "fixtureSide": {
+          "streams": 2,
+          "notifications": 2,
+          "closedByClient": 2,
+          "openStreams": 0,
+          "droppedByServer": 0
+        },
+        "status": "READY",
+        "toolsHashMatches": true
+      },
+      "getSse": {
+        "supported": true,
+        "state": "open",
+        "status": 200,
+        "error": null,
+        "notificationsSeen": 4,
+        "statusAfter": "READY"
+      },
+      "get405": {
+        "supported": false,
+        "state": "unsupported",
+        "status": 405,
+        "error": null,
+        "connection": "READY",
+        "lastErrorCode": null,
+        "mcpTestStillOk": true
+      },
+      "resumeWithId": {
+        "server": {
+          "lastEventIdSeen": "3",
+          "replayedFrom": 3,
+          "replays": 1,
+          "closesByServer": 1,
+          "opens": 2,
+          "distinctSent": 4
+        },
+        "client": {
+          "reconnects": 1,
+          "hasLastEventId": true,
+          "duplicates": 0,
+          "total": 4
+        }
+      },
+      "resumeWithoutId": {
+        "server": {
+          "lastEventIdSeen": null,
+          "replays": 0,
+          "opens": 2
+        },
+        "client": {
+          "hasLastEventId": false,
+          "duplicates": 0
+        }
+      },
+      "duplicateEvents": {
+        "server": {
+          "duplicatesSent": 2,
+          "distinctSent": 2
+        },
+        "client": {
+          "duplicates": 2,
+          "total": 2
+        }
+      },
+      "splitWrites": {
+        "chunks": 134,
+        "chunkBytes": 5,
+        "connectMs": 464,
+        "status": "READY"
+      },
+      "tooLargeEvent": {
+        "eventBytes": 393216,
+        "maxEventBytes": 262144,
+        "error": "MCP_STREAM_EVENT_TOO_LARGE",
+        "connectMs": 11,
+        "serverInitializeCount": 1,
+        "resent": false
+      },
+      "noResponseTimeout": {
+        "error": "MCP_TIMEOUT",
+        "connectMs": 8007,
+        "boundMs": 8000,
+        "notifications": 79,
+        "closedByClient": 1
+      },
+      "serverToClientRequest": {
+        "sent": 1,
+        "responses": [
+          {
+            "id": "srv-1",
+            "code": -32601
+          }
+        ]
+      },
+      "sessionExpiredPost": {
+        "error": "MCP_SESSION_EXPIRED",
+        "connectMs": 15,
+        "status": "ERROR",
+        "getStream": null,
+        "serverCountsUnchangedAfter2500ms": true
+      },
+      "sessionExpiredGetReconnect": {
+        "reconnect404": 1,
+        "opens": 1,
+        "openStreams": 0,
+        "status": "ERROR",
+        "lastErrorCode": "MCP_SESSION_EXPIRED"
+      }
+    },
+    "lifecycleEvidence": {
+      "logout": {
+        "serverOpenStreams": "1→0",
+        "db": {
+          "enabled": 1,
+          "status": "DISABLED",
+          "last_error_code": "MCP_SESSION_ENDED"
+        },
+        "log": "SESSION_ENDED detail=logout",
+        "reloginNote": "data-mcp-note=session-ended；enabled 仍为已启用；再 connect READY（213ms）"
+      },
+      "quit": {
+        "path": "page.close() → window-all-closed → app.quit → will-quit",
+        "exitCode": 0,
+        "signal": null,
+        "quitMs": 80,
+        "disposeLine": "{\"ok\":true,\"closed\":1,\"aborted\":1,\"ended\":1,\"error\":null,\"failures\":[]}",
+        "serverStreams": "两条归零",
+        "leftoverDescendants": []
+      },
+      "disableDeleteHttp": {
+        "serverOpenStreams": 0,
+        "record": "DISABLED/enabled=false",
+        "connectError": "MCP_CONNECTION_DISABLED",
+        "deletedFromListAndDb": true
+      },
+      "disableDeleteStdio": {
+        "spawnedChildPid": 57070,
+        "childrenGone": true,
+        "connectAfterDelete": "MCP_CONNECTION_NOT_FOUND",
+        "leftovers": []
+      },
+      "revoke": {
+        "collectedWithoutAnyCommand": true,
+        "serverOpenStreams": "1→0",
+        "commands": "mcp/list|get|connect|test → MCP_UNAUTHORIZED",
+        "db": "ERROR/MCP_UNAUTHORIZED",
+        "projectionHits": 0
+      },
+      "regrantViewOnly": {
+        "toolsHidden": true,
+        "tools": [],
+        "toolsHash": null,
+        "domHits": 0,
+        "connect": "MCP_UNAUTHORIZED"
+      },
+      "lifecycleUnitTests": "tests/d5-03-mcp-lifecycle.test.mjs L1–L5：登出 / 锁屏 / 撤权 / dispose 幂等与有界超时 / 登出中止在途握手（5/5）"
+    },
+    "lifecycleStatePolicy": {
+      "noSixthState": "不新增第六状态：会强制 schema v22 重建表并使 8 个冻结断言失效；enabled（用户意图）+ status 已足够",
+      "logoutLockQuit": "DISABLED + MCP_SESSION_ENDED（enabled 不改写；详情页人话 + 日志 SESSION_ENDED）",
+      "revoke": "ERROR + MCP_UNAUTHORIZED（日志 AUTHORIZATION_REVOKED）",
+      "inFlightAbort": "在途握手被收尾中止用明确中断码，不伪装 MCP_TIMEOUT / MCP_UNREACHABLE"
+    },
+    "newErrorCodes": [
+      "MCP_STREAM_INTERRUPTED",
+      "MCP_STREAM_EVENT_TOO_LARGE",
+      "MCP_SESSION_EXPIRED",
+      "MCP_SESSION_ENDED"
+    ],
+    "protocolVersion": {
+      "value": "2025-06-18",
+      "consistentAt": [
+        "record",
+        "clientConstant",
+        "domainConstant"
+      ],
+      "upgraded": false
+    },
+    "boundary": {
+      "thirdPartyServices": false,
+      "userDataSent": false,
+      "arbitraryLocalPrograms": false,
+      "pluginIsolationClaimed": false,
+      "note": "只连自建 fixture（stdio 白名单 serverKey=openarc-test-echo + 127.0.0.1 动态端口，本轮 HTTP 实例如 56124/56127/56137…）；流式收口通过 ≠ 插件隔离通过（D5-08）",
+      "invocationBoundary": "5 个调用入口 × 2 形状全 MCP_TOOL_INVOCATION_NOT_ENABLED；未登记命令 MCP_COMMAND_NOT_ALLOWED"
+    },
+    "gateRebaseline": {
+      "h2Driver": {
+        "target": "experiments/d5-03/mcp-policy-e2e.mjs 的 H 段驱动",
+        "detail": "只补一次真实 mcp/connect 前置（重授四动作后先连回 READY，再收窄 view-only；H1 是 grant 收窄不是 revoke，按第三批契约不收流）；H2 判定与 expected 一字未动；全文件 44 个 record 调用点 id 序列与 c2e96c1 一致（执行岗 diff 复核）"
+      },
+      "r3": {
+        "target": "experiments/d5-03/mcp-policy-e2e.mjs 的 R3",
+        "oldBaseRev": "d583154",
+        "newBaseRev": "c2e96c1",
+        "allowedSrc": [
+          "src/mcp/McpCenter.tsx"
+        ],
+        "addOnly": true,
+        "whitelistNumstat": "8\t0\tsrc/mcp/McpCenter.tsx",
+        "requiresPatchMarker": "MCP_SESSION_ENDED",
+        "outsideWhitelist": "FAIL",
+        "gitFailure": "fail-closed（判 FAIL）",
+        "kCascadeRule": "原样",
+        "observed": {
+          "srcDiffOutsideWhitelist": [],
+          "srcWhitelistAddOnly": true,
+          "kFailures": [],
+          "kAllCascade": true
+        }
+      },
+      "otherChecks": "policy 43 条里只有 R3 判定被重写，其余 42 条判定逐字未动；center 38 条判定未动（脚本 sha256 ee27d1c50580b46b…）",
+      "reason": "第三批在 1b78953 为『会话已结束』提示合法改了 src/mcp/McpCenter.tsx 8 行（只增不删），旧 R3 的『src/ 零改动』判据已过期"
+    },
+    "regression": {
+      "command": "node --test tests/d5-03-mcp-*.test.mjs tests/authorization-*.test.mjs tests/governance-*.test.mjs tests/identity-store.test.mjs",
+      "result": "143 / 143 pass、exit 0（本交付执行岗复跑核对）",
+      "newTests": {
+        "tests/d5-03-mcp-lifecycle.test.mjs": "5/5",
+        "tests/d5-03-mcp-stream.test.mjs": "8/8",
+        "tests/d5-03-mcp-get-stream.test.mjs": "7/7"
+      },
+      "build": "npm run build exit 0（本批执行期间记录；本交付未复跑，避免改写 distFingerprint）",
+      "preexistingFailures": [
+        "tests/side-effect-c4-gates.test.mjs",
+        "tests/d4-03-approval-push-isolation.test.mjs"
+      ],
+      "note": "两条预存在失败继续单列、未改断言"
+    },
+    "notVerified": [
+      "同一安装内的第二个组织（两组织共库）无法用产品入口构造（mcp-policy-e2e；本批不新增『创建组织』入口，用户明令）",
+      "跨组织行为级不互相覆盖（同库 A 撤销 → B 不受影响）—— 真机不可构造，只到 schema 级 + node 行为级（mcp-policy-e2e）"
+    ],
+    "notVerifiedCount": 2,
+    "evidenceGaps": [
+      "会话空闲过期没有身份事件：自然过期不触发 identity/logged-out|locked，活连接要等下一次收尾动作才被收掉；期间靠命令层实时判权拒绝 —— 空闲过期即时收流未验收",
+      "视觉两项未验收：浅/深主题对照与对比度量测未做（新增一行说明复用既有 mcp-muted 与 neutral 徽标，无新 token/组件/颜色/动效）",
+      "policy 脚本收尾留 2 个 oa-d503b-* 临时目录（既有行为，脚本不在本批允许改动范围）",
+      "既有缺口：OAuth；真实第三方 / Adobe（D5-04/05）；插件隔离（D5-08）；BASELINE_POLICY_PROVIDERS 无漂移守卫；app_policy_provisions 无清理策略；D5-02 重命名依赖 Electron 不支持的 prompt()"
+    ],
+    "attributionCorrection": {
+      "target": "docs/D5-03-RESULT.md 第二批 §12 第 4/7 条、docs/D5-03-GATE-EVIDENCE.json batch2.artifacts.mcpPolicyE2e.sha256Note 等处的旧说法",
+      "oldWording": "另一个并发 DSH 会话在同一工作树重跑同一脚本 / 抢 CDP 端口 / 实例被按前缀误杀",
+      "corrected": "已查明那不是外部会话，就是本任务自己并行跑的批次（同一时刻并行的 Electron 批次）；保留事实：曾发生 CDP 端口冲突、一次 Z0 FAIL(exit 2)",
+      "mechanismFix": "每次运行独立 runId 目录 + acquirePort 独占探测 CDP 端口 + 只清理自己的 pid 树（own-pid-tree-only / pkillUsed:false）+ Electron 批次串行执行",
+      "historicalArtifactsUntouched": true
+    },
+    "threeAxisVerdict": {
+      "functional": "通过 —— 三门禁 38/38 + 29/29 + 43/43 全绿、exit 0；真实 Electron、真实产品命令面、自建受控服务；边界四项自证",
+      "visual": "部分通过 / 含未验收 —— 新增一行『会话已结束』说明（src/mcp/McpCenter.tsx，data-mcp-note=session-ended；复用既有 mcp-muted 与 neutral 徽标，无新 token/组件/颜色/动效；该提交 src/ diff = 8 增 0 删，styles.css 未动）；实机截图 runs/20260928T020320Z-8b11-mcp-stream-e2e/visual/{session-ended-note.png,unauthorized.png}；浅/深主题对照与对比度量测未做 → 这两项标未验收；第一/二批已验界面沿用其结论（center 本轮 L1–L5 深色仍 PASS）",
+      "motion": "沿用既有通过结论、本批无新增动效需验 —— 流式/生命周期改动均为非视觉行为；既有『插入/删除 160ms、减少动态效果 0ms（删除 4ms）』结论不变（引用 docs/D5-03-RESULT.md 附二 §6 + center 本轮 K1–K4）"
+    },
+    "verdict": "D5-03 第三批（Streamable HTTP 流式收口 + 生命周期收尾）= PASS（限定范围）；D5-03 整体仍 = PARTIAL（剩余缺口见 evidenceGaps / notVerified）",
+    "trackedEvidence": [
+      "docs/D5-03-RESULT.md 正文 §1–§12",
+      "docs/D5-03-GATE-EVIDENCE.json batch3（本段）",
+      "docs/decisions/D5-03C-streamable-http.md",
+      "docs/decisions/D5-03B-app-policy-persistence.md §7（第三批更新）"
+    ]
+  },
   "batch2": {
     "phase": "D5-03 第二批 · MCP 授权收口",
     "at": "2026-09-24T15:02:33.334Z",
@@ -48,7 +485,7 @@
         "sha256": "d4af5e9cbf6e7b8b6b8643f67d3dd38d040ee35baabb937fbeb338141c71d831",
         "sha256VerifiedAt": "2026-09-24T14:59Z 与 2026-09-24T15:00Z 两次 shasum -a 256 复核（与交付口径一致）",
         "sha256OnDiskAfterConcurrentRerun": "0c9ea8e5187f2cc08e3c823381fb67113aff941df7af90f6534b1e61a69119d6",
-        "sha256Note": "该路径于 2026-09-24T15:01:50Z 被另一个并发 DSH 会话在同一工作树重跑同一脚本覆盖；两轮判定一致（43/43、exit 0、firstBatch 38/38、同样的 2 条 notVerified、同一 scriptSha256），差别只在运行时事实（交付口径轮 openarcCommit=91bc436 + dirty 6 = 随后提交成 360d94b 的同一批；覆盖轮 openarcCommit=360d94b + dirty 2 = 本批脚本文案订正 + 结果文档）",
+        "sha256Note": "该路径于 2026-09-24T15:01:50Z 被本任务自己并行跑的批次在同一工作树重跑同一脚本覆盖（原文此处曾记为「另一个并发 DSH 会话」，**【第三批订正】**；历史 artifact 里当时的文字保留不改）；两轮判定一致（43/43、exit 0、firstBatch 38/38、同样的 2 条 notVerified、同一 scriptSha256），差别只在运行时事实（交付口径轮 openarcCommit=91bc436 + dirty 6 = 随后提交成 360d94b 的同一批；覆盖轮 openarcCommit=360d94b + dirty 2 = 本批脚本文案订正 + 结果文档）",
         "command": "node experiments/d5-03/mcp-policy-e2e.mjs",
         "counts": {
           "pass": 43,
@@ -234,7 +671,7 @@
       "BASELINE_POLICY_PROVIDERS 手工对齐（迁移归属表与三处播种点），无漂移守卫：新增 baseline 提供者若忘同步，该 App 的历史撤销会退回只认审计行 app_id 的旧口径",
       "app_policy_provisions 无保留期 / 清理策略（记录随组织与 App 数增长，量级很小）"
     ],
-    "environmentNote": "本批执行期间另一个 DSH 会话在同一工作树并发跑同一脚本、抢 CDP 端口，导致一次运行 Z0 FAIL(exit 2)，且其 Electron 实例被按前缀误杀；受影响日志保留在 artifacts/d5-03/*.run-batch3.log / .run-final.log，最终 artifact 是在端口空出后重跑产生的（环境说明，非产品结论）。脚本只按自己的 userData 前缀 oa-d503- 清理，未杀别人的进程。",
+    "environmentNote": "本批执行期间另一个 DSH 会话在同一工作树并发跑同一脚本、抢 CDP 端口，导致一次运行 Z0 FAIL(exit 2)，且其 Electron 实例被按前缀误杀；受影响日志保留在 artifacts/d5-03/*.run-batch3.log / .run-final.log，最终 artifact 是在端口空出后重跑产生的（环境说明，非产品结论）。脚本只按自己的 userData 前缀 oa-d503- 清理，未杀别人的进程。【第三批订正：那不是外部 DSH 会话，就是本任务自己并行跑的批次（实例被“误杀”的归因一并撤回）；机制性修复见 batch3.attributionCorrection。】",
     "verdict": {
       "batch2": "PASS（限定范围）",
       "d5_03Overall": "PARTIAL",
