@@ -1,4 +1,634 @@
 {
+  "batch5": {
+    "phase": "D5-03 第五批 · 安装重置同事务清授权状态 + 登录失败文案不泄漏内部 detail",
+    "at": "2026-09-28T07:28:49Z",
+    "openarcBranch": "integration/ui-core",
+    "stage": "文档与证据定稿（只改文档：PROGRESS.md / docs/D5-03-RESULT.md / docs/D5-03-GATE-EVIDENCE.json / docs/decisions/D5-03D-session-expiry-and-policy-retention.md（就地订正 + 加第五批节）/ 新增 docs/decisions/D5-03E-install-reset-authorization-consistency.md）",
+    "testedContentDisclosure": {
+      "productFixCommit": "09dccf9c2cba5f21e787160de376a166db61a38d",
+      "gateScriptsAndReportsCommit": "7ad424c",
+      "gateScriptsAndReportsScope": "7ad424c 只改 experiments/ 7 个文件（+2719 / −24）：mcp-reset-e2e.mjs / auth-error-visual.mjs / batch5-affectedness.mjs 新增，mcp-policy-e2e.mjs R3 重基线，mcp-expiry-e2e.mjs M1 口径修正，D5-03-BATCH5-RESET-REPORT.md 与 d5-03-batch5-summary.json —— git diff 09dccf9 7ad424c --stat 证明产品代码零改动",
+      "artifactsRecordedCommit": "09dccf9c2cba5f21e787160de376a166db61a38d（10 个 batch5 artifact 全部同值）",
+      "whyArtifactsSay09dccf9": "重置门禁 mcp-reset-e2e 与视觉门禁 auth-error-visual 是本批新增、运行时仍未跟踪的脚本，它们就是在 09dccf9 上跑的；R3 重基线那次 policy 重跑（db3d）发生在 mcp-policy-e2e.mjs 的改动已进工作树、尚未提交时（该 artifact 记 gitDirtyLines=7），随后才提交成 7ad424c",
+      "conclusion": "不写成「测试提交 = 7ad424c」，也不写成「产品修复与测试无关」；产品修复 = 09dccf9，门禁脚本/报告 = 7ad424c，与 artifact 的 testedCommit=09dccf9 不矛盾",
+      "summaryFrozenBeforeR3Rebaseline": "d5-03-batch5-summary.json 的 at=2026-09-28T07:09:52.721Z，冻结在 R3 重跑（07:17）之前：它记 policy 42/43、indexRuns=43、不含 db3d；当前有效的 policy 证据 = 20260928T071705Z-db3d 43/43（索引现在 44 条）。两个数字并列，不互相顶替。"
+    },
+    "commitChain": [
+      {
+        "commit": "81a211e",
+        "subject": "第四批结果与证据定稿；第五批真机运行发生在它之后的工作树上（部分脚本当时未跟踪）"
+      },
+      {
+        "commit": "09dccf9",
+        "subject": "产品修复（被测提交）：安装重置同事务清授权状态 + 登录失败文案不再泄漏内部 detail（3 产品 + 3 测试文件）"
+      },
+      {
+        "commit": "7ad424c",
+        "subject": "HEAD：第五批门禁 安装重置真机验收 + 文案视觉量测 + R3 基线登记表（只改 experiments/ 7 个文件）"
+      }
+    ],
+    "currentEffectiveEvidence": {
+      "statement": "当前有效证据 = 第五批 7 个当前有效 runId（见 runs.current）+ 仍然有效的第四批证据（见 reusedBatch4Evidence）。",
+      "counting": "batch5 共 10 个 artifact：7 个当前有效 + 3 个仅历史对照（d18e 首轮探针参数缺陷 / b56c R3 未重基线 42/43 / 5288 M1 修前 24/25）。",
+      "artifactHashRecheck": "10 个 artifact 的 sha256 与同目录 .sha256 文件逐字一致；counts 声明、len(checks) 与 exitCode 三者一致（本批文档定稿执行岗独立复算）。"
+    },
+    "runs": {
+      "current": {
+        "reset": {
+          "runId": "20260928T070842Z-9cd0-mcp-reset-e2e",
+          "counts": {
+            "pass": 26,
+            "fail": 0,
+            "total": 26
+          },
+          "exitCode": 0,
+          "artifactSha256": "17202b482ffea7aa587f7fb0f9d0e6cd92342997b424852450fa6e00fee37766",
+          "artifactPath": "artifacts/d5-03/runs/20260928T070842Z-9cd0-mcp-reset-e2e/mcp-reset-e2e.json",
+          "sideLog": "artifacts/d5-03/runs/20260928T070842Z-9cd0-mcp-reset-e2e/node-reset-consistency.log"
+        },
+        "policy": {
+          "runId": "20260928T071705Z-db3d-mcp-policy-e2e",
+          "counts": {
+            "pass": 43,
+            "fail": 0,
+            "total": 43
+          },
+          "notVerified": 2,
+          "exitCode": 0,
+          "artifactSha256": "18fe75ba8a651b1427632ef2134955dc9af73bda593d988951912e147c0efa2f",
+          "artifactPath": "artifacts/d5-03/runs/20260928T071705Z-db3d-mcp-policy-e2e/mcp-policy-e2e.json"
+        },
+        "center": {
+          "runId": "20260928T065801Z-c7ba-mcp-center-e2e",
+          "counts": {
+            "pass": 38,
+            "fail": 0,
+            "total": 38
+          },
+          "exitCode": 0,
+          "artifactSha256": "f40caac71cb5e8298b7659dde956775bc1a8ca31369c38ac83f467c7ebd85575"
+        },
+        "stream": {
+          "runId": "20260928T065841Z-cce3-mcp-stream-e2e",
+          "counts": {
+            "pass": 29,
+            "fail": 0,
+            "total": 29
+          },
+          "exitCode": 0,
+          "artifactSha256": "47ce54542391bd97806491c129077f63ce1a4ba225243c81eb6de4c1fa42960a"
+        },
+        "expiryIdle": {
+          "runId": "20260928T070551Z-f078-mcp-expiry-e2e",
+          "counts": {
+            "pass": 26,
+            "fail": 0,
+            "total": 26
+          },
+          "exitCode": 0,
+          "artifactSha256": "37e9dbb9d93cbe2d662f981a70e18d3a5d13f4273950cf4e90c43d5e25955176"
+        },
+        "visual": {
+          "runId": "20260928T070627Z-27eb-auth-error-visual",
+          "counts": {
+            "pass": 16,
+            "fail": 1,
+            "total": 17
+          },
+          "exitCode": 1,
+          "artifactSha256": "506f2a48ad42f906591487583f17a0162eef57d4940d24866509a2fcc41759a8",
+          "onlyFail": "V6a 浅色向导卡 .auth-error 对比度 2.62:1 < 4.5:1（既有缺口，本批未改样式）"
+        },
+        "affectedness": {
+          "runId": "20260928T070745Z-e3b6-batch5-affectedness",
+          "counts": {
+            "pass": 10,
+            "fail": 0,
+            "total": 10
+          },
+          "exitCode": 0,
+          "artifactSha256": "259d3dafa011e886714f604c45b564e0cc3250e8451df5b68d965e7f888c006f"
+        }
+      },
+      "historicalOnly": [
+        {
+          "runId": "20260928T065649Z-d18e-mcp-reset-e2e",
+          "counts": {
+            "pass": 26,
+            "fail": 0,
+            "total": 26
+          },
+          "exitCode": 0,
+          "artifactSha256": "495964b8ca826caf078dd542e9d88af027f2d4e6b07292fa32c38ad8d913d315",
+          "why": "首轮：探针把命令写在 command 字段而 resource:command 的信封字段是 type，A3 返回 INVALID_INPUT（探针参数错误，不是产品缺陷）；结论与最终轮一致"
+        },
+        {
+          "runId": "20260928T065727Z-b56c-mcp-policy-e2e",
+          "counts": {
+            "pass": 42,
+            "fail": 1,
+            "total": 43
+          },
+          "exitCode": 1,
+          "artifactSha256": "34d9fdd8866128cf181b9d9bafa1b73133f072db77a6760c62f07ed2f132e233",
+          "why": "R3 未重基线（旧固定白名单，对第三批基线已过期）；唯一差异 = R3，重基线后 43/43"
+        },
+        {
+          "runId": "20260928T065912Z-5288-mcp-expiry-e2e",
+          "counts": {
+            "pass": 24,
+            "fail": 1,
+            "total": 25
+          },
+          "exitCode": 1,
+          "artifactSha256": "0ed39614269dad2c12fb4a74a22a824b5698450063c06deba4ca8b639dd72259",
+          "why": "M1 修前：脚本假阳性（把「工作树 diff 为空」判成 FAIL，本批没有改 src/mcp/McpCenter.tsx）；实质动效断言全部通过"
+        },
+        {
+          "note": "视觉脚本的两轮迭代 20260928T070159Z-0cf1（脚本缺陷 textOf 未定义，V0 后中止）与 20260928T070255Z-8298（V7 读取已卸载元素 getComputedStyle(null) 抛错，V1–V6 已出结果）也留在 runs/ 与索引里"
+        }
+      ]
+    },
+    "reusedBatch4Evidence": [
+      {
+        "item": "expiry 其余五个场景：extend / absolute / relogin / regress / override-deny",
+        "runIds": [
+          "20260928T043517Z-7ab7-mcp-expiry-e2e",
+          "20260928T043538Z-4e4c-mcp-expiry-e2e",
+          "20260928T043554Z-e52c-mcp-expiry-e2e",
+          "20260928T043611Z-561b-mcp-expiry-e2e",
+          "20260928T043615Z-3f55-mcp-expiry-e2e"
+        ],
+        "why": "受影响性分析机械证据：四段门禁源码 0 处调用 identity/reset-installation（B2）；只有 expiry 的 idle 场景在源码里直接断言登录页 auth-error 文案（B1）→ 本批两处改动不落在其余五场景的断言面上；idle 已由 f078 重跑取新鲜证据"
+      },
+      {
+        "item": "临时目录归属机制（userdata-ownership.cjs）",
+        "why": "本批未改该机制与脚本；本批每次运行收尾只有自己的 pid 树（pkillUsed=false）、自建 userData 目录全部 REMOVED、/var/folders/*/*/T/oa-d503b-* 残留 0"
+      },
+      {
+        "item": "BASELINE_POLICY_PROVIDERS 防漂移守卫（tests/policy-provider-drift.test.mjs 6/6）",
+        "why": "该测试文件本批一字未改；产品表未漂移（本批只删授权行、不改表）"
+      },
+      {
+        "item": "第四批 center / stream / policy / expiry-idle 的 runId（…b4df / …8d65 / …25c6 / …140a）",
+        "why": "不再作为当前证据：前三者由同提交新鲜重跑取代；policy 的旧 43/43 用旧 R3 白名单口径、已被重基线取代（stream 按分析本可复用，本批仍重跑）"
+      },
+      {
+        "item": "保留规则 R1–R4（tests/app-policy-provisions-retention.test.mjs）",
+        "why": "该文件本批被改（R5 期望 + R6 守卫 + 新增 R6b）→ 以本批 55/55 的最新口径为准"
+      }
+    ],
+    "goal1Reset": {
+      "whatChanged": "electron/identity-store.cjs:1574 新增 RESET_AUTHORIZATION_DELETE_SQL（Object.freeze 的四条整表删除字面量：app_policy_provisions / app_resource_grants / resource_grants / device_access）；resetInstallation（:2767）在既有的那个 transactSync 内先 for…exec 这四条，随后才删 sessions / login_attempts / users / teams / installations",
+      "whyLiterals": "R6 守卫按源码字符串字面量核对组织删除路径；把表名拼进 SQL 会让守卫看不见这条删除（fail-open）",
+      "sameTransactionProof": "tests/d5-03-reset-authorization-consistency.test.mjs 的 T1a（注入授权第 2 条删除语句）与 T1b（注入身份最后一条 DELETE FROM installations）两个注入点，都断言逐表逐行与重置前一致（授权四表 + 身份五表 + 审计三表全表 dump 比对）→ 排除「其实是两个独立事务」",
+      "dbSnapshots": {
+        "A_seeded": {
+          "app_policy_provisions": 15,
+          "app_resource_grants": 16,
+          "resource_grants": 0,
+          "device_access": 0,
+          "identityTables": "1/1/1/1",
+          "tombstones": "无",
+          "auditLogRows": 2
+        },
+        "B_before_reset": {
+          "app_policy_provisions": 15,
+          "app_resource_grants": 14,
+          "resource_grants": 1,
+          "device_access": 0,
+          "identityTables": "1/1/1/1",
+          "tombstones": "canvas|model、mcp-center|mcp",
+          "auditLogRows": 2
+        },
+        "C_after_bad_confirm": {
+          "app_policy_provisions": 15,
+          "app_resource_grants": 14,
+          "resource_grants": 1,
+          "device_access": 0,
+          "identityTables": "1/1/1/1",
+          "tombstones": "同上（逐行不变）",
+          "auditLogRows": 4
+        },
+        "D_after_reset": {
+          "app_policy_provisions": 0,
+          "app_resource_grants": 0,
+          "resource_grants": 0,
+          "device_access": 0,
+          "identityTables": "0/0/0/0",
+          "tombstones": "无",
+          "auditLogRows": 6
+        },
+        "E_reseeded": {
+          "app_policy_provisions": 15,
+          "app_resource_grants": 16,
+          "resource_grants": 0,
+          "device_access": 0,
+          "identityTables": "1/1/1/1",
+          "tombstones": "无",
+          "auditLogRows": 8
+        }
+      },
+      "auditWording": "不写成「行数不变」：audit_log 既有行一行不删（前缀逐行相等），重置自身恰好新增两条（OK_REQUESTED + OK）；两次错误 confirm 各留一条 DENY（error_code=INVALID_INPUT）。真机行数 2 → 2 → 4 → 6 → 8；authorization_audit / device_audit 逐行相等。node T2 同口径：audit_log.length = before + 2。",
+      "deviceAccessLimit": "device_access 真机 0 → 0，不构成清理证据；node T1/T2 在四表都非空（含 device_access）下验证清理与回滚",
+      "invariants": "invariantsEquivalentReadonly（与 identity-store invariants() 判定逐条等价）在 A/B/C/D/E 五个快照全部为 []；真机 identity:command 白名单没有 invariants() 原生入口",
+      "reseededOrg": "新组织 id team_8GYXyRw… ≠ 旧 team_tnM0rkPP…；提供记录 15 条逐条等于期望集合、全表 0 条墓碑、旧组织 id 0 行；app_resource_grants 16 条与重置前首次播种的「组织无关形状集合」逐行同形（diff=[]）；重置前被撤销的 mcp 授权在新组织首次播种 → mcp/list ok=true",
+      "negativeConfirm": "identity/reset-installation 缺 confirm 或大小写不符 → INVALID_INPUT + detail=confirm-required（各留一条 DENY 审计）"
+    },
+    "orgScopedTableJudgement": {
+      "machineChecked": "tests/d5-03-reset-authorization-consistency.test.mjs 的 ORG_SCOPED_TABLE_COUNT = 27 + orphanInventory() 逐表盘点 rows/orphans；T2 断言「带 organization_id 的表集合变了 → 必须重新逐表判定清理范围」",
+      "delete": [
+        {
+          "table": "app_policy_provisions",
+          "kind": "授权事实（提供记录 + 撤销墓碑）",
+          "risk": "组织 id 复用时旧墓碑静默抑制新组织首次播种（T3 实测 seeded:false → seeded:true）",
+          "readPath": "authorization-store.cjs:93 policyProvisionByKey(organization_id, app_id, policy_key)"
+        },
+        {
+          "table": "app_resource_grants",
+          "kind": "授权事实（App 侧 ACL）",
+          "risk": "能直接复活权限：appGrantsForApp(app_id) 不带组织过滤，evaluateAppAuthorization 只看 grant.app_id + 目标覆盖（T5 实测 ALLOW，allowSources 含 APP_GRANT）",
+          "readPath": "authorization-store.cjs:80 → authorization-service.cjs:114 → authorization-domain.cjs:547"
+        },
+        {
+          "table": "resource_grants",
+          "kind": "授权事实（User / Department ACL）",
+          "risk": "user 侧判定按 organization_id = user.team_id 过滤 → 组织整体消失后不可达；组织 id 复用时命中",
+          "readPath": "authorization-store.cjs:59 / :62；判定 authorization-domain.cjs:490"
+        },
+        {
+          "table": "device_access",
+          "kind": "授权事实（设备 ACL）",
+          "risk": "取数 accessOfDevice(device_id)，ORGANIZATION 分支不比对 organization_id",
+          "readPath": "device-store.cjs:61 / :62；device-service.cjs #accessAllows"
+        }
+      ],
+      "keep": [
+        {
+          "tables": [
+            "departments",
+            "department_memberships"
+          ],
+          "category": "组织架构",
+          "why": "无权限列、不是 grant 事实；DEPARTMENT 授权生效必须同时命中 membershipsOfUser(活用户 id)，重置后无活用户 → 不可达；清了反而新造不一致（collections / resource_registry / devices 的 department_id 悬空）"
+        },
+        {
+          "tables": [
+            "collections",
+            "resource_registry",
+            "canvas_boards"
+          ],
+          "category": "用户内容（判定目标）",
+          "why": "授权判定的目标不是来源"
+        },
+        {
+          "tables": [
+            "content_objects",
+            "resource_relations",
+            "resource_import_jobs",
+            "tags",
+            "resource_tags",
+            "resource_favorites",
+            "resource_recent",
+            "projects"
+          ],
+          "category": "用户内容 / 用户态",
+          "why": "不参与授权判定"
+        },
+        {
+          "tables": [
+            "devices",
+            "device_credentials"
+          ],
+          "category": "设备登记 / 凭据（配置）",
+          "why": "访问权威是 device_access（已清）；登记行本身不构成资源 / 应用授权"
+        },
+        {
+          "tables": [
+            "device_pairing_credentials"
+          ],
+          "category": "配对凭据（配置）",
+          "why": "本批新登记残留：重置前签发的配对凭据仍可再登记设备，但 T7 证明不产生授权结论（device_access 已清 → 全部 DENY）"
+        },
+        {
+          "tables": [
+            "model_providers",
+            "model_configs",
+            "model_defaults",
+            "model_credentials"
+          ],
+          "category": "模型配置 / 凭据引用",
+          "why": "模型授权权威是 app_resource_grants(resource_type='model')（已清）"
+        },
+        {
+          "tables": [
+            "mcp_connections",
+            "mcp_credentials"
+          ],
+          "category": "连接配置 / 凭据引用",
+          "why": "mcp 授权权威是 app_resource_grants(resource_type='mcp')（已清）"
+        },
+        {
+          "tables": [
+            "device_audit"
+          ],
+          "category": "审计（三表之一）",
+          "why": "历史事实，不是授权状态 —— 一行不删"
+        }
+      ],
+      "noWholeDatabaseSweep": "用户明令禁止整库扫删；清理范围只认授权事实（4 清 + 23 不清）"
+    },
+    "deletionGuard": {
+      "before": "ALLOWED_ORG_DELETION_PATHS = []（第四批：空 = 产品里没有合法删除路径）",
+      "after": "恰好一条：{file:'identity-store.cjs', pattern:'DELETE FROM', statement:'DELETE FROM app_policy_provisions', entry:'resetInstallation → RESET_AUTHORIZATION_DELETE_SQL', reason:…}",
+      "passCriteria": "文件 + 命中形态 + 去空白后逐字相等的完整语句三者同时成立；取消 includes 模糊匹配（多一个 WHERE 就不放行）",
+      "failClosedAdditions": [
+        "登记项必须在源码有对应的字符串字面量",
+        "必须位于 RESET_AUTHORIZATION_DELETE_SQL 内",
+        "resetInstallation 必须真的迭代它",
+        "迭代必须在 transactSync 里"
+      ],
+      "r6b": "新增永久负向自证（tests/app-policy-provisions-retention.test.mjs:537）：真品 electron/ 复制到临时目录，注入四类白名单外命中（别的文件 / 同文件多一个 WHERE / cleanup 式 / 跨字面量拼接）→ 同一份判据必须判为未登记命中；反向：登记的那一条必须仍放行；副本跑完即删",
+      "externalRunProof": {
+        "command": "OA_RETENTION_ELECTRON_DIR=<临时副本>/electron node --test tests/app-policy-provisions-retention.test.mjs",
+        "uninjected": "# tests 7 / # pass 7 / # fail 0 / exit 0",
+        "injected": "在 authorization-store.cjs 追加 const OA_D503E_GUARD_INJECTED = \"DELETE FROM app_policy_provisions\"; → exit 1、# tests 7 / # pass 6 / # fail 1；not ok 6 - R6；命中原文 [{\"rel\":\"authorization-store.cjs\",\"kind\":\"DELETE FROM\",\"text\":\"DELETE FROM app_policy_provisions\"}]",
+        "note": "本批文档定稿执行岗复跑，原仓库零写入，临时副本验完即删"
+      },
+      "r5ExpectationChange": "本批唯一允许改期望值处（逐字披露）：R5 旧期望刻画缺陷现状（重置后 provisions=15 / grants=15 / 墓碑原样保留）→ 改为 0 / 0 / null，并补「重置前墓碑必须真实存在」与四表整表归零断言。守卫没有被放宽。"
+    },
+    "orgIdReuse": {
+      "realMachineNotConstructible": "产品没有「用指定 id 创建组织」的入口（identity/initialize 的组织 id 由产品随机生成）；本批未新增该入口 → 不用改库构造",
+      "nodeControlledT3": "现场重跑 node --test tests/d5-03-reset-authorization-consistency.test.mjs = 9/9、exit 0；同一个组织 id 上：重置前播种被旧墓碑压制（seeded:false）→ 重置清除 → 重新初始化后同 id seeded:true，授权形状与全新安装逐行同形",
+      "realMachineEquivalent": "重置后旧组织 app_policy_provisions 0 行、全表 0 墓碑、新组织 id 不同且 15 条提供记录逐条等于期望集合"
+    },
+    "errorTextDisclosure": {
+      "whitelist": "src/identity/types.ts:95 SHOWABLE_ERROR_DETAIL —— 4 条，全挂 INVALID_INPUT，每条带 text / codes / why：password-too-short / password-mismatch / identifier-taken / display-name-too-long",
+      "rule": "errorText = code 那一句 + 可展示 detail 白名单；detail 只能经 showableDetailText 查表进来（模板串 / String(detail) / 括号括注都不允许），表外一律过滤",
+      "renderLayer": "src/identity/AuthScreens.tsx 只发标记 password-mismatch，不写第二份人话",
+      "internalDiagnosticsPreserved": "日志 / 审计 / 连接 detail=expired:idle、事件 payload 的 reason 都不变；被过滤的只是进用户文案这一条路径",
+      "realMachineTexts": [
+        "输入不合法。两次输入的密码不一致。",
+        "输入不合法。显示名太长了。",
+        "账号或密码不正确。",
+        "尝试过于频繁，请稍后再试。"
+      ],
+      "objectDetail": "RATE_LIMITED 的 detail 是对象 {retryAfterMs} → 按对象键查找查不到 → 被过滤（不再显示 [object Object]）；但未映射成人话（本批新登记残留）",
+      "markerScanReal": "五个界面状态（浅色向导 / 深色向导 / 深色设置 / 深色登录页错误口令 / 深色登录页限流）全文扫描 11 个内部标记 + 旧括号形态 → 0 命中，bracketHits=[false×5]",
+      "markerScanNode": "tests/identity-session-expired-ui.test.mjs 对 253 个内部标记做全量断言（一律不进用户文案）"
+    },
+    "r3Rebaseline": {
+      "classification": "陈旧 src-diff 白名单（基线 c2e96c1，第三批写入）—— 功能行为零回归；是基线更新，不是判定削弱",
+      "oldToNew": {
+        "baseRev": "R3_BASE_REV = \"c2e96c1\"（不变）",
+        "allowSet": "R3_ALLOWED_SRC（写死的单文件数组）→ R3_REGISTRY（4 条，每条带 batch / why / requireAdded / forbidCode / addOnly）",
+        "perEntryCriteria": "必含标记按词边界正则；标记必须在 HEAD 存在（防整段回退）；禁含形态在「新增行代码」与「HEAD 代码行」两处 0 命中；McpCenter.tsx 的 N TAB 0 TAB 只增判据原样保留",
+        "outsideRegistry": "FAIL（不变）",
+        "gitUnavailable": "FAIL（diffOk=false；每个登记项的 patch / numstat / HEAD blob 任一为 null 也 FAIL，比旧版更严）",
+        "kCascade": "kFails 选取集合 / kCascadePattern 正则 / kAllCascade 及在判定式里的位置逐字符未动"
+      },
+      "registry": [
+        {
+          "file": "src/mcp/McpCenter.tsx",
+          "batch": "1b78953 · 第三批",
+          "numstat": "8 TAB 0（只增仍成立）",
+          "marker": "MCP_SESSION_ENDED HEAD=2 / 新增=2"
+        },
+        {
+          "file": "src/identity/types.ts",
+          "batch": "09dccf9 · 第五批",
+          "numstat": "112 TAB 3",
+          "marker": "SHOWABLE_ERROR_DETAIL HEAD=2 / 新增=2；禁含 R3_DETAIL_LEAK 新增 0 / HEAD 0"
+        },
+        {
+          "file": "src/identity/useIdentity.ts",
+          "batch": "7b75ea3 · 第四批",
+          "numstat": "18 TAB 18",
+          "marker": "identityEventConvergence HEAD=2 / 新增=3；禁含 R3_EVENT_REASON_DETAIL 新增 0 / HEAD 0"
+        },
+        {
+          "file": "src/identity/AuthScreens.tsx",
+          "batch": "09dccf9 · 第五批",
+          "numstat": "2 TAB 1",
+          "marker": "password-mismatch HEAD=1 / 新增=1"
+        }
+      ],
+      "negativeSelfProof": "6 例（1 对照 + 5 注入）全部符合预期，harness 末行「R3 负向自证：全部符合预期（6 个副本）」，exit 0；白名单外新增 / 白名单外修改既有文件 / 塞回 detail: event.reason / types.ts 整段退回 c2e96c1 / 只把标记改名 …_OFF → 全部 FAIL",
+      "selfFoundHoles": [
+        "第一版「登记项不在 diff 里 → 直接跳过」放过了整段回退 → 改成 HEAD 不变量",
+        "第一版 String.includes 放过 SHOWABLE_ERROR_DETAIL_OFF → 改成词边界正则",
+        "另有一轮对照 FAIL 是自证用例写错（对照组用了已被 checkout 的副本 HEAD），改显式 sha 后 PASS —— 工装问题"
+      ],
+      "rerunResult": "20260928T071705Z-db3d-mcp-policy-e2e → 43/43、notVerified 2、exit 0；与上一轮 42/43 逐位置比对 → 唯一差异 = R3：FAIL → PASS，其余 42 条（R1/R2 与全部 A–L、Z 段）状态一字未变",
+      "crossBatchDesign": "登记表跨批不复位：第六批若合法改到这 4 个文件之外，或改掉任一条必含标记 / 引入禁含形态 → R3 FAIL，属 fail-closed 设计意图"
+    },
+    "m1FixDisclosure": {
+      "status": "修前 FAIL（脚本假阳性）→ 修后 PASS（含新增 M1b 负向自证）",
+      "rootCause": "旧 M1 的最后一个合取项要求「工作树里对 src/mcp/McpCenter.tsx 的 diff 必须有一行文案改动」；第五批没有改这个文件 → 空 diff 被判成 FAIL。实质动效断言（animationName=none、transitionDuration=0s、reduced 下元素作用域 --dur-quick=0ms、说明行仍在且含「会话过期」）修前全部通过",
+      "fix": "改成等价语义（空 diff = 不存在非文案改动行 → 通过）+ 追加两条非空转条件（该文件在 HEAD 仍存在且确实带那句文案；与动效基线 8cbf8df 的差异里也没有非文案改动行）+ 新增 M1b 负向自证（三种注入必须翻 FAIL）",
+      "substantiveAssertionsWeakened": 0,
+      "mechanicalProof": "补丁只新增 mcpCenterDiff 计算、期望文案与 M1b；motionNormal / motionReduced / isZeroDur / durQuick / animationName / transitionDuration / transitionProperty 等 9 个 token 在补丁的 +/- 行里 0 处出现",
+      "patch": "artifacts/d5-03/runs/20260928T070551Z-f078-mcp-expiry-e2e/m1-fix.patch（sha256 b375050f6bf08a05ceebfa0bded5d089ee0320e8603c97556f063ac62605b123）"
+    },
+    "visualEvidence": {
+      "runId": "20260928T070627Z-27eb-auth-error-visual（16/17、exit 1；唯一 FAIL = V6a）",
+      "screenshots": "浅 / 深 / 深色+减少动态效果 共 10 张，整窗 2880×1880 设备像素（= 1440×940 CSS × DPR 2），窗口 / 缩放 / 背景 / 透明度与第四批基准同口径；第四批基准是 MCP 窗口 830×570 CSS 裁剪 —— 截图范围不同，不是逐像素同尺寸（已登记 notVerified）",
+      "contrastNote": "所有对比度数值来自本批 runId 27eb 的 artifact（首次实机量测），不是任何历史 runId",
+      "contrast": {
+        "lightWizardCard": {
+          "ratio": 2.620039040738697,
+          "bg": "181,181,181 (92.3%)",
+          "text": "215,2,21",
+          "style": "12px / 400 / color rgb(215,0,21) / --failed rgb(215 0 21 / 1)",
+          "threshold": 4.5,
+          "pass": false
+        },
+        "darkWizardCard": {
+          "ratio": 5.31,
+          "bg": "22,22,22 (69.5%)",
+          "text": "255,69,57",
+          "pass": true
+        },
+        "lightWindowSurface": {
+          "ratio": 5.192,
+          "bg": "251,251,251 (46.3%)",
+          "text": "215,2,21",
+          "pass": true
+        },
+        "darkReducedSettings": {
+          "ratio": 5.159,
+          "bg": "25,25,25 (29.6%)",
+          "text": "255,69,57",
+          "pass": true
+        }
+      },
+      "failureCharacterization": "不是文字色本身不达标（同一 --failed 在浅色窗口面 5.19:1）；向导卡是玻璃卡片、浮在默认深色壁纸（theme-dark）上，合成后成中灰 181,181,181。既有缺口，本批未改任何样式（本批改动文件不含 .css；.auth-error 规则本批一字未动），属首次被实机量测暴露",
+      "verdict": "部分通过 —— 文案逐字正确、11 个内部标记 0 命中；唯一失败 = 浅色向导卡 2.62:1"
+    },
+    "motionEvidence": {
+      "noNewMotion": true,
+      "note": "本批改动文件不含任何 .css / 动效文件；.auth-error 规则本身不含 transition / animation",
+      "measured": "错误行常规（浅/深）与减少动态效果下 animationName=none、transitionDuration=0s、transitionDelay=0s、transitionProperty=all；减少动态效果下元素作用域 --dur-quick=0ms（:root 仍 0.16s，必须读元素作用域）；错误文案仍完整显示（信息不丢）",
+      "verdict": "通过"
+    },
+    "regression": {
+      "relatedFiveFiles": {
+        "command": "node --test tests/d5-03-reset-authorization-consistency.test.mjs tests/app-policy-provisions-retention.test.mjs tests/identity-session-expired-ui.test.mjs tests/identity-session-expiry.test.mjs tests/identity-store.test.mjs",
+        "result": "55/55 pass、exit 0",
+        "breakdown": "9 + 7 + 11 + 12 + 16 = 55",
+        "verifiedBy": "本批文档定稿执行岗本轮独立复跑"
+      },
+      "fullSuite": {
+        "result": "1347/1349（交付口径 / 总经理复跑）",
+        "knownFailures": [
+          "tests/side-effect-c4-gates.test.mjs",
+          "tests/d4-03-approval-push-isolation.test.mjs"
+        ],
+        "note": "两条既有失败与本批无关；本岗未复跑全量，避免产生新产物 / 改写 artifact"
+      },
+      "build": "npm run build exit 0（tsc --noEmit + vite build，交付口径）",
+      "schemaVersion": "SCHEMA_VERSION 仍 21（electron/identity-store.cjs:68，本岗复核）"
+    },
+    "boundary": {
+      "thirdPartyServices": false,
+      "userDataSent": false,
+      "arbitraryLocalPrograms": false,
+      "pluginIsolationClaimed": false,
+      "dbReadOnly": "探针 DatabaseSync readOnly；所有授权状态的产生 / 撤销 / 重置都由产品自己的命令路径完成",
+      "toolInvocation": "5 个工具调用入口仍全部 MCP_TOOL_INVOCATION_NOT_ENABLED",
+      "protocolVersion": "2025-06-18（未升级）",
+      "noNewOrgCreationEntry": true,
+      "serial": "同一时刻只有一个 Electron；独立 runId 目录、只追加索引、独占 CDP 端口、收尾只清自己的 pid 树（pkillUsed=false）",
+      "tmpLeftovers": "/var/folders/*/*/T/oa-d503b-* 残留 0"
+    },
+    "notVerified": [
+      {
+        "source": "mcp-policy-e2e",
+        "name": "跨组织真机 2 条（继续保留）",
+        "reason": "同一安装内第二个组织无产品入口（本批未新增「创建组织」入口）→ 跨组织行为级只到 schema + node 级",
+        "substitute": "policy notVerified: 2（条目与第四批一致）；db3d 43/43"
+      },
+      {
+        "source": "mcp-reset-e2e",
+        "name": "组织 ID 复用的真机对照",
+        "reason": "产品没有「用指定 id 创建组织」的入口，不用改库构造",
+        "substitute": "node 受控 T3（现场重跑 9/9）；真机等价面：旧组织 0 行、全表 0 墓碑"
+      },
+      {
+        "source": "mcp-reset-e2e",
+        "name": "device_access 重置清理证据（真机）",
+        "reason": "重置前该表 0 行（0 → 0 不构成清理证据）；consumePairing 需要另一台设备带服务身份消费配对密钥",
+        "substitute": "node T1/T2 在四表非空（含 device_access）下验证清理与同事务回滚"
+      },
+      {
+        "source": "mcp-reset-e2e",
+        "name": "产品侧 invariants() 的原生可读入口",
+        "reason": "identity:command 白名单没有对应命令（本轮不新增产品入口、不改判定）",
+        "substitute": "真机同一判定的只读复算 invariantsEquivalentReadonly（逐条等价），五个快照全空"
+      },
+      {
+        "source": "auth-error-visual",
+        "name": "session-missing / not-locked 等内部 detail 的「界面不显示」真机构造",
+        "reason": "渲染层在这些路径上不显示错误行（restore 失败只回登录页；unlock 只在锁屏可用）",
+        "substitute": "五处真机 DOM 扫描 0 命中 + node 对 253 个内部标记的全量断言"
+      },
+      {
+        "source": "auth-error-visual",
+        "name": "浅色向导卡对比度达标",
+        "reason": "实测 2.62:1 < 4.5:1，判定不通过（视觉轴因此为「部分通过」，不是「未验收」）",
+        "substitute": "同 token 在浅色窗口面 5.19:1（定位为合成背景问题）"
+      },
+      {
+        "source": "auth-error-visual",
+        "name": "整窗截图与第四批窗口裁剪逐像素同尺寸",
+        "reason": "认证界面是全窗表面，第四批基准是 MCP 窗口 830×570 CSS 裁剪；窗口 / 缩放 / 背景 / 透明度同口径，截图范围不同",
+        "substitute": "窗口度量：innerWidth/innerHeight=1440×940、DPR 2、data-glass=full、data-wallpaper=theme-dark、未开不透明"
+      }
+    ],
+    "notVerifiedCount": 7,
+    "newResiduals": [
+      {
+        "id": "R5-1",
+        "item": "device_pairing_credentials 未清",
+        "detail": "重置前签发的配对凭据仍可再登记设备；T7 证明不产生授权结论（device_access 已清 → 全部 DENY）。建议下批处理或由产品裁定。"
+      },
+      {
+        "id": "R5-2",
+        "item": "app_principals.status 不受重置影响",
+        "detail": "安装级配置，app_principals 无 organization_id，不在 27 张表内"
+      },
+      {
+        "id": "R5-3",
+        "item": "RATE_LIMITED 的 {retryAfterMs} 对象 detail 现被过滤但未映射成人话",
+        "detail": "用户只看到「尝试过于频繁，请稍后再试。」"
+      },
+      {
+        "id": "R5-4",
+        "item": "invariants() 未加「孤儿授权行」检查",
+        "detail": "理由：它是交付给 node 测试的判据、改动会牵动既有断言；代价：将来若再出现孤儿行，自检不报"
+      },
+      {
+        "id": "R5-5",
+        "item": "浅色 .auth-error 2.62:1 未闭合",
+        "detail": "既有缺口，本批未改样式，登记为未闭合缺陷（属产品 / 设计决策）"
+      }
+    ],
+    "gmRulings": [
+      {
+        "id": 1,
+        "ruling": "守卫只放行「安装重置」这一条路径，不开放通用清理",
+        "detail": "ALLOWED_ORG_DELETION_PATHS 恰好一条且逐字匹配；表外任何 app_policy_provisions 行删除一律 FAIL；不做整库扫删，用户内容与配置登记为不清（4 清 + 23 不清）"
+      },
+      {
+        "id": 2,
+        "ruling": "R3 采用登记表式基线、跨批不复位",
+        "detail": "第六批若合法改到这 4 个文件之外，或改掉任一条必含标记 / 引入禁含形态 → R3 FAIL，属 fail-closed 设计；届时按同一形态新增或更新登记项并重跑负向自证"
+      },
+      {
+        "id": 3,
+        "ruling": "浅色 .auth-error 2.62:1 本批不改",
+        "detail": "涉及设计值 / 视觉，属产品决策；登记为未闭合缺陷，不做「看起来更达标」的临时改色，也不把不达标写成达标"
+      }
+    ],
+    "threeAxisVerdict": {
+      "functional": "通过 —— 重置门禁 26/26、policy 43/43（notVerified 2）、center 38/38、stream 29/29、expiry-idle 26/26、受影响性分析 10/10，全部 exit 0；真实 electron . / 真实产品命令面 / 自建受控 fixture；探针只读 DB",
+      "visual": "部分通过 —— 文案逐字正确、五个界面 11 个内部标记 0 命中；唯一失败 = 浅色向导卡 .auth-error 2.62:1 < 4.5:1（既有缺口，本批未改样式）；其余三个面 5.16–5.31:1 通过",
+      "motion": "通过 —— 错误行常规 / 减少动态效果下 animationName=none、transitionDuration=0s，元素作用域 --dur-quick=0ms；本批改动文件不含任何 .css"
+    },
+    "verdict": "D5-03 第五批（安装重置同事务清授权 + 登录失败文案收口）= PASS（限定范围：功能通过、视觉部分通过）；D5-03 整体仍 = PARTIAL",
+    "closedGaps": [
+      "resetInstallation 孤儿授权残留（第四批登记；其「不可达」判定被本批订正为「App 侧孤儿 grant 能直接复活权限 = 撤销失效路径」）",
+      "errorText 通用括注泄漏内部 detail（第四批登记）",
+      "R3 陈旧 src 白名单（第五批过程中暴露并重基线）"
+    ],
+    "remainingGaps": [
+      "跨组织真机入口 / 跨组织真机行为级（notVerified 2 条）",
+      "OAuth（仅 NONE / BEARER）",
+      "真实第三方与 Adobe / PS（D5-04 / D5-05）",
+      "插件隔离（D5-08）",
+      "D5-02 重命名受 Electron 不支持 prompt() 限制",
+      "SIGKILL 边界",
+      "本批新登记 5 条残留（device_pairing_credentials 未清 / app_principals.status / RATE_LIMITED 对象 detail / invariants() 孤儿行检查 / 浅色 .auth-error 2.62:1）"
+    ],
+    "trackedEvidence": "docs/D5-03-GATE-EVIDENCE.json（本 batch5 段：结论 / 证据清单 / 27 张表判据 / 守卫与外跑留证 / R3 重基线 / M1 披露 / notVerified / 残留 / 裁定）；docs/D5-03-RESULT.md 第五批正文；docs/decisions/D5-03E-install-reset-authorization-consistency.md；PROGRESS.md 第五批节；docs/decisions/D5-03D-session-expiry-and-policy-retention.md §13（就地订正 + 第五批节）",
+    "batch4ClaimCorrection": {
+      "claimInBatch4": "重置后残留的旧组织授权行「不可达、不致权限复活」（第四批 docs/D5-03-RESULT.md §5、docs/decisions/D5-03D-… §8、PROGRESS.md 第四批节，以及本文件 batch4.policyGuardEvidence.gmRuling.assessed）",
+      "correction": "该判定仅对 user 侧取数成立（判定按 organization_id = user.team_id 过滤，electron/authorization-domain.cjs:490）；对 App 侧取数不成立 —— electron/authorization-store.cjs:80 的 appGrantsForApp 只按 app_id 过滤、完全不看 organization_id；electron/authorization-domain.cjs:547 evaluateAppAuthorization 只比对 grant.app_id 与资源覆盖、无任何组织判断",
+      "codeEvidence": [
+        "electron/authorization-store.cjs:80 appGrantsForApp: SELECT * FROM app_resource_grants WHERE app_id = ? ORDER BY created_at, id",
+        "electron/authorization-domain.cjs:547 evaluateAppAuthorization（只比 grant.app_id 与资源覆盖，无组织判断）",
+        "取数调用链 authorization-service.cjs:114 → authorization-store.cjs:80 → authorization-domain.cjs:547"
+      ],
+      "empiricalEvidence": "W37 的 T5：往不存在的组织 id（team_ghost00000000000000000000，teams 里 0 行）写一条同形 grant → 立刻 ALLOW，allowSources 含 APP_GRANT；删掉该行 → DENY（证明那次 ALLOW 的唯一来源就是这条孤儿行）。T5b 产品级后果：重置 → 重新初始化新组织 → 在新组织撤销 canvas 是真 DENY；把旧组织那条残留行种回去立刻变 ALLOW（撤销失效）",
+      "whyThisMatters": "这正是本批把授权表纳入重置同事务清理的原因 —— 不是卫生问题，是撤销失效路径（已修：RESET_AUTHORIZATION_DELETE_SQL 四表在既有 transactSync 内同事务清）",
+      "inPlaceMarkers": {
+        "docs/D5-03-RESULT.md": "第四批正文相关处（R5 行 / 「判定为不可达」段 / §11 第 3 条 / §12 剩余缺口 / 附一第 8 条）已就地加【第五批订正】/【第五批已更新】，原文保留不删",
+        "docs/decisions/D5-03D-session-expiry-and-policy-retention.md": "R5 行 / R6 行 / 两条裁定 / 「判定为不可达」段 / 风险段 / §10 第 2、3 条 / §12 判定已就地加标记，并新增 §13 第五批节",
+        "PROGRESS.md": "第四批节的保留规则行 / 本批新登记的残留段 / 下一步建议已就地加标记，并新增文末第五批节",
+        "本文件 batch4 段": "按交付要求「batch5 段纯插入、旧段未改」，batch4.policyGuardEvidence.gmRuling.assessed 的旧文字**未改**（逐字节不变，见纯插入证明）；订正即本字段"
+      }
+    }
+  },
   "batch4": {
     "phase": "D5-03 第四批 · 会话自然到期 → MCP 收流 + 策略收口（防漂移 / 保留规则 / 临时目录归属）",
     "at": "2026-09-28T04:55:46.477Z",
