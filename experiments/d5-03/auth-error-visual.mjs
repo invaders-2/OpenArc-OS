@@ -17,6 +17,14 @@
  *
  * 边界：不连真实第三方、不发用户数据、不声称插件隔离通过、不改产品代码；查库只读；
  * 临时目录全部经 experiments/d5-03/userdata-ownership.cjs 建与清。
+ *
+ * 第六批（本文件被修改的两处，逐字披露见 experiments/d5-03/D5-03-BATCH6-MATRIX-REPORT.md）：
+ *   ① V7b 的 .auth-error 规则体从「按行号硬切 split("\n").slice(2464, 2472)」改为
+ *      「按选择器提取」（新模块 experiments/d5-03/auth-error-css-audit.cjs）—— 旧切片在第六批
+ *      规则体挪到 2471-2478 后只剩注释 + 1 条声明，断言半空（恒真）。
+ *   ② V7b 的 !cssChanged 判据（本批 diff 不含 .css）重基线为「本批新增 transition/animation
+ *      声明数 = 0 + 运行时 V7a 全绿」—— 该判据在「本批修复就是改 CSS」的前提下必然 FAIL。
+ *   其余 V1–V7、Z 段一字未改；新增 V7c 与 V8–V12 全部是**增补**判定。
  */
 import { chromium } from "@playwright/test";
 import { spawn, execFileSync } from "node:child_process";
@@ -32,6 +40,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(here, "../..");
 const RUN_ARTIFACTS = require(path.join(here, "run-artifacts.cjs"));
 const OWNERSHIP = require(path.join(here, "userdata-ownership.cjs"));
+const MATRIX = require(path.join(here, "auth-error-matrix.cjs"));
 const CDP_PORT_BASE = Number(process.env.OA_D503E_VIS_CDP_PORT || 9823);
 const USERDATA_PREFIX_BASE = OWNERSHIP.PREFIX;
 const ADMIN = { id: "admin@d503e-visual.test", pw: "visual-admin-1" };
@@ -81,7 +90,7 @@ function fileSha(rel) { try { return crypto.createHash("sha256").update(fs.readF
 function gitText(args) { try { return execFileSync("git", ["-C", ROOT, ...args], { encoding: "utf8" }).trim(); } catch { return null; } }
 function pngSize(file) { const b = fs.readFileSync(file); return { width: b.readUInt32BE(16), height: b.readUInt32BE(20), bytes: b.length }; }
 
-let RUN = null, OUT = null, USERDATA_PREFIX = USERDATA_PREFIX_BASE, VIS = null;
+let RUN = null, OUT = null, USERDATA_PREFIX = USERDATA_PREFIX_BASE, VIS = null, NOT_VERIFIED_MATRIX = null;
 let page = null, app = null;
 const apps = [], dialogs = [], consoleErrors = [], SPAWNS = [];
 const js = (code) => page.evaluate("(async () => { " + code + " })()");
@@ -287,6 +296,28 @@ async function launchApp({ userDataDir = null, label = "" } = {}) {
   app = rec; page = rec.page;
   return rec;
 }
+/**
+ * 重新连一次 CDP 并把 page 指针换到新对象上。
+ *
+ * 为什么需要：同一个进程里先 connectOverCDP 连过第一个 electron 实例、把它 kill 掉之后再连第二个实例时，
+ * Playwright 的 `page.reload()` 会抛 "Target page, context or browser has been closed"，
+ * 之后 `page.screenshot` / `page.keyboard` / `newCDPSession` 也陆续报同一个错，
+ * 而 `page.evaluate` 仍然可用。用页面内 location.reload() + 重连可以彻底绕开。
+ * 只影响取证脚本自身，不碰产品。
+ */
+async function rebindPage(rec) {
+  const browser = await chromium.connectOverCDP("http://127.0.0.1:" + rec.cdpPort);
+  const ctx = browser.contexts()[0];
+  let p = null; const end = Date.now() + 30000;
+  while (!p && end > Date.now()) { p = ctx.pages().find((x) => x.url().includes("dist/index.html")) || null; if (!p) await sleep(250); }
+  if (!p) throw new Error("重连后找不到界面页面：" + rec.label);
+  rec.browser = browser; rec.page = p; app = rec; page = p;
+  p.on("dialog", (d) => { dialogs.push(String(d.message()).slice(0, 140)); void d.dismiss().catch(() => {}); });
+  p.on("console", (m) => { if (m.type() === "error") consoleErrors.push((rec.label + ":" + m.text()).slice(0, 220)); });
+  p.on("pageerror", (e) => consoleErrors.push(rec.label + ":pageerror:" + String(e.message).slice(0, 200)));
+  return p;
+}
+
 async function killApp(rec) {
   if (!rec) return null;
   const tree = [rec.child.pid, ...descendantsOf(rec.child.pid).filter((r) => !r.stat.startsWith("Z")).map((r) => r.pid)];
@@ -452,18 +483,57 @@ async function main() {
   /* ── V7 动效（本批未新增） ── */
   const motionShot = { light: { transitionProperty: styleL.transitionProperty, transitionDuration: styleL.transitionDuration, transitionDelay: styleL.transitionDelay, animationName: styleL.animationName, animationDuration: styleL.animationDuration, tokDurQuickElement: styleL.tokDurQuick }, dark: { transitionProperty: styleD.transitionProperty, transitionDuration: styleD.transitionDuration, animationName: styleD.animationName, tokDurQuickElement: styleD.tokDurQuick }, darkReduced: { transitionProperty: styleR.transitionProperty, transitionDuration: styleR.transitionDuration, animationName: styleR.animationName, tokDurQuickElement: styleR.tokDurQuick } };
   const rootDur = await js("const el = document.querySelector('[data-d3-id=settings-error]'); return { rootDurQuick: getComputedStyle(document.documentElement).getPropertyValue('--dur-quick').trim(), reducedClass: document.querySelector('.desktop').classList.contains('reduced'), errorHasAnimation: el ? getComputedStyle(el).animationName : null };");
-  record("V7a", "错误行无动效：常规（浅/深）与减少动态效果下 transition/animation 均为 none/0s（元素作用域 --dur-quick = 0ms）",
+  const v7aOk = record("V7a", "错误行无动效：常规（浅/深）与减少动态效果下 transition/animation 均为 none/0s（元素作用域 --dur-quick = 0ms）",
     motionShot.light.animationName === "none" && motionShot.dark.animationName === "none" && motionShot.darkReduced.animationName === "none"
       && motionShot.darkReduced.transitionDuration.split(",").every((d) => d.trim() === "0s") && styleR.tokDurQuick === "0ms",
     "animationName=none；减少动态效果下 transitionDuration=0s、元素作用域 --dur-quick=0ms",
     JSON.stringify({ motionShot, rootDur }));
-  const batchDiffFiles = (gitText(["diff", "--name-only", "81a211e", "HEAD"]) || "").split("\n").filter(Boolean);
-  const cssChanged = batchDiffFiles.some((f) => f.endsWith(".css"));
-  const authErrorRule = fs.readFileSync(path.join(ROOT, "src/styles.css"), "utf8").split("\n").slice(2464, 2472).join("\n");
-  record("V7b", "本批未新增动效的代码级证据：81a211e→HEAD 改动文件里没有 .css / 动效文件，.auth-error 规则本身不含 transition/animation",
-    !cssChanged && !/transition|animation/.test(authErrorRule),
-    "改动文件集不含样式文件，且 .auth-error 规则无 transition/animation",
-    JSON.stringify({ batchDiffFiles, authErrorRule }));
+  /* 门禁重基线（第六批，唯一允许的既有判定改动，逐字披露见报告）：
+     旧口径两处假阳性 ——
+       ① 规则体用行号硬切 split("\n").slice(2464, 2472)：第六批把 .auth-error 从 2465 挪到
+          2471-2478，切片只剩注释 + margin-top，断言半空（恒真）。改为按**选择器**提取。
+       ② 判据 !cssChanged（本批 diff 不含 .css）在"本批修复就是给 .auth-error 加不透明底"的
+          前提下必然 FAIL —— 与第五批 R3 同形，属 fail-closed 设计问题，不是产品缺陷。
+          替代判据 = 本批**新增** transition/animation 声明数 = 0 + 运行时 V7a 仍全绿。
+     反证对照（修正前会给假绿/假红）见 experiments/d5-03/batch6-gate-rebase-proof.mjs。 */
+  const AUDIT = require(path.join(here, "auth-error-css-audit.cjs"));
+  const BATCH_BASE = process.env.OPENARC_BATCH_BASE || "d4a3516";
+  let batchBaseIsAncestor = false;
+  try { execFileSync("git", ["-C", ROOT, "merge-base", "--is-ancestor", BATCH_BASE, "HEAD"], { stdio: "ignore" }); batchBaseIsAncestor = true; } catch { batchBaseIsAncestor = false; }
+  const cssTextRaw = fs.readFileSync(path.join(ROOT, "src/styles.css"), "utf8");
+  const authErrorRule = AUDIT.readRule(path.join(ROOT, "src/styles.css"), ".auth-error");
+  const batchDiffFiles = (gitText(["diff", "--name-only", BATCH_BASE]) || "").split("\n").filter(Boolean);
+  const cssDiff = gitText(["diff", "--unified=0", BATCH_BASE, "--", "*.css"]) || "";
+  const addedMotion = AUDIT.countAddedMotionDeclarations(cssDiff);
+  /* 旧口径复现：只作为反证留痕（例如旧行号切片只覆盖 1 条声明、旧判据在本批必 FAIL），不参与评分 */
+  const legacySlice = AUDIT.legacyLineSlice(cssTextRaw, 2465, 2472);
+  const legacy = {
+    ruleExtraction: { criterion: 'split("\\n").slice(2464, 2472)', declarations: AUDIT.declarationsOf(legacySlice).count, declarationNames: AUDIT.declarationsOf(legacySlice).names, hasBackgroundDeclaration: /(^|[;{\s])background\s*:/.test(legacySlice) },
+    cssChanged: { criterion: "!cssChanged（本批 diff 不含 .css）", cssChanged: AUDIT.legacyCssChanged(batchDiffFiles), wouldFail: AUDIT.legacyCssChanged(batchDiffFiles) },
+  };
+  record("V7b", "【门禁重基线 · 旧口径→新口径】本批**新增** transition/animation 声明数 = 0，且运行时 V7a 仍全绿（旧判据「本批 diff 不含 .css」在「本批修复就是改 .auth-error 的 CSS」前提下必然 FAIL，属 fail-closed 设计问题，不是产品缺陷；与第五批 R3 同形）",
+    addedMotion.count === 0 && v7aOk && batchBaseIsAncestor,
+    "本批新增 transition/animation 声明数 = 0 且 V7a PASS；基线 = d4a3516（第五批定稿提交，须是 HEAD 祖先）",
+    JSON.stringify({ batchBase: BATCH_BASE, batchBaseIsAncestor, batchDiffFiles, addedMotion, legacy }));
+  record("V7c", "【假阳性 ①修正】.auth-error 规则体按**选择器**提取且完整：命中 1 条、6 条声明（含本批新增 background / border-radius / padding），不含 .auth-error:empty 的 display、无 transition/animation —— 旧口径按行号硬切只剩注释 + 1 条声明（恒真）",
+    authErrorRule.bodies.length === 1 && authErrorRule.declarations >= 6
+      && ["margin-top", "font-size", "color", "background", "border-radius", "padding"].every((n) => authErrorRule.declarationNames.includes(n))
+      && /background\s*:\s*rgb\(var\(--content-rgb\)\s*\/\s*1\)/.test(authErrorRule.text)
+      && !/(^|[;{\s])display\s*:/.test(authErrorRule.text) && authErrorRule.hasMotion === false
+      && legacy.ruleExtraction.declarations === 1 && legacy.ruleExtraction.hasBackgroundDeclaration === false,
+    "选择器提取：bodies=1 / 声明 >=6（含 background=rgb(var(--content-rgb)/1)、border-radius、padding）/ 无 display / 无 transition|animation；对照：旧行号切片声明数 = 1 且不含 background",
+    JSON.stringify({ selector: ".auth-error", file: "src/styles.css", lineRange: authErrorRule.lineRange, bodies: authErrorRule.bodies.length, declarations: authErrorRule.declarations, declarationNames: authErrorRule.declarationNames, text: authErrorRule.text, hasMotion: authErrorRule.hasMotion, legacyRuleExtraction: legacy.ruleExtraction, legacySlicePreview: legacySlice.slice(0, 160) }));
+
+  /* ── V8–V12 · 真机渲染与对比度矩阵 / 布局 / 焦点 / 动效（新开一个 electron 实例） ── */
+  const MATRIX_OUT = await MATRIX.runMatrix({
+    js, page, sleep, waitFor, VIS, record, note, notVerified, step,
+    measureContrast, windowShot, clipShot, domScan, styleOf,
+    has, textOf, setInput, clickSel, waitSel, gate, identity,
+    setupWizard, login, logout, loginAttempt, openSettings, setTheme, setReduced,
+    launchApp, EXPECT,
+    pageNow: () => page, appRec: () => app, rebindPage,
+  });
+  NOT_VERIFIED_MATRIX = MATRIX_OUT;
 
   /* ── Z 收尾 ── */
   const ENV_NOISE = /ExperimentalWarning|SQLite is an experimental|SetApplicationIsDaemon|NSOSStatusErrorDomain|IMKCFRunLoopWakeUpReliable|In-process GPU|ERR_BLOCKED_BY_CSP/;
@@ -480,17 +550,23 @@ async function main() {
   const sourceFingerprint = RUN_ARTIFACTS.collectSourceFingerprint(ROOT, RUN_ARTIFACTS.d503SourceFiles(ROOT));
   const testedCommit = process.env.OPENARC_TESTED_COMMIT || gitText(["rev-parse", "HEAD"]);
   const out = {
-    phase: "D5-03 第五批",
-    title: "登录/初始化失败文案（可展示 detail 白名单）真机视觉与动效验收",
+    phase: "D5-03 第六批",
+    title: "登录错误行不透明内容底真机渲染与对比度矩阵（含授权组织隔离批次的视觉复测）",
     runId: RUN.runId, runDir: RUN.runDirRel, startedAt: RUN.startedAt,
     testedCommit, openarcCommit: testedCommit, openarcBranch: gitText(["rev-parse", "--abbrev-ref", "HEAD"]),
     command: "node experiments/d5-03/auth-error-visual.mjs",
     scriptSha256: fileSha("experiments/d5-03/auth-error-visual.mjs"),
-    specRefs: { DESIGN_SYSTEM: { versionLine: 3, textSecondary: 64, fontWeight: "153-154", secondaryType: 164, contrast: 248 }, MOTION_SYSTEM: { versionLine: 3, instant: 21, reduced: "141-145" }, PLAN: { sections: ["4", "42"] } },
+    specRefs: {
+      DESIGN_SYSTEM: { versionLine: 3, textSecondary: 64, noHairline: 108, materialTable: "126-140", fontWeight: "153-154", secondaryType: 164, contrast: 248, compositeBackground: 251, dsA05: 270, dsA02: 267 },
+      MOTION_SYSTEM: { versionLine: 3, instant: 21, reduced: 145, reducedAsScreenshotCondition: 177, msA07: 192 },
+      PLAN: { sections: ["4", "42"], section4Line: 38, section42Line: 801 },
+      gateRebase: { base: "d4a3516", oldCriterion: "!cssChanged（本批 diff 不含 .css）", newCriterion: "本批新增 transition/animation 声明数 = 0 且运行时 V7a 全绿", reason: "本批修复本身就是改 .auth-error 的 CSS，旧判据必然 FAIL（fail-closed 设计问题，非产品缺陷；与第五批 R3 同形）", proof: "experiments/d5-03/batch6-gate-rebase-proof.mjs" },
+    },
     expectedTexts: EXPECT, internalDetails: INTERNAL_DETAILS,
     steps: STEPS, screenshots: SHOTS, contrast: CONTRAST,
     domScans: { light: domL, dark: domD, darkReducedSettings: domR, loginInvalid: domLogin, loginRateLimited: domRate },
     checks: CHECKS, counts: { pass: passed, fail: failed, total: CHECKS.length },
+    matrix: NOT_VERIFIED_MATRIX,
     notVerified: NOT_VERIFIED, observations: OBSERVATIONS, productDefects: DEFECTS,
     appStderrs,
     sourceFingerprint, sourceFingerprintSetSha256: sourceFingerprint.setSha256,

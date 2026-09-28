@@ -533,6 +533,90 @@ const R3_BASE_REV = "c2e96c1";
 const R3_DETAIL_LEAK = /\$\{[^}\n]*\bdetail\b[^}\n]*\}|\bString\(\s*detail\s*\)/;
 /* 第四批修掉的根因：把事件的运维 reason 当 detail 塞进 absorb，errorText 会把它括注给用户。 */
 const R3_EVENT_REASON_DETAIL = /\bdetail\s*:\s*event\s*\.\s*reason\b/;
+
+/* ── 第六批登记项（src/styles.css）的逐条机械判据 ──────────────────────────────
+   基线更新（2026-09-28，第六批）：登记表由 4 项增为 5 项，新增 src/styles.css。
+   理由：第六批的合法修复就是改 .auth-error 的 CSS（加不透明内容底），
+   旧登记表没有它 → R3 恒 FAIL。这是**基线陈旧**，与第五批 R3 重基线同形，
+   不是判定削弱：新增项要求"只增不删 + .auth-error 规则体内出现不透明底 +
+   规则体内 0 条 transition/animation + 深浅 --failed-rgb 原值不动 +
+   本批新增行全部落在 .auth-error 规则体内"，任一条不成立即 FAIL。
+   K 段 42 条与其它门禁一段未动。 */
+const R3_AUTH_ERROR_OPAQUE = /background\s*:\s*rgb\(\s*var\(\s*--content-rgb\s*\)\s*\/\s*1\s*\)/;
+const R3_FAILED_RGB_LIGHT = /--failed-rgb\s*:\s*215\s+0\s+21\s*;/;
+const R3_FAILED_RGB_DARK = /--failed-rgb\s*:\s*255\s+69\s+58\s*;/;
+const R3_ADDED_FAILED_TOKEN = /--failed-(?:rgb|alpha)\s*:/;
+/** 按选择器取规则体与它在文件里的 1-based 行号区间（不靠行号硬切；注释先剥掉）。 */
+function r3RuleBody(codeText, selector) {
+  const lines = String(codeText).split("\n");
+  const start = lines.findIndex((l) => l.trim() === selector + " {");
+  if (start < 0) return { found: false, startLine: null, endLine: null, body: "" };
+  let depth = 0, end = -1;
+  for (let i = start; i < lines.length; i += 1) {
+    for (const ch of lines[i]) { if (ch === "{") depth += 1; else if (ch === "}") depth -= 1; }
+    if (depth === 0) { end = i; break; }
+  }
+  if (end < 0) return { found: false, startLine: null, endLine: null, body: "" };
+  return { found: true, startLine: start + 1, endLine: end + 1, body: lines.slice(start, end + 1).join("\n") };
+}
+/** --unified=0 补丁里每个 hunk 的**新增行号区间**（1-based）。 */
+function r3HunkAddedRanges(patch) {
+  const out = [];
+  for (const line of String(patch || "").split("\n")) {
+    const m = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(line);
+    if (!m) continue;
+    const start = Number(m[1]);
+    const count = m[2] === undefined ? 1 : Number(m[2]);
+    if (count > 0) out.push({ start, end: start + count - 1 });
+  }
+  return out;
+}
+/** src/styles.css 的机械审计：全部基于 HEAD 内容 + 本区间新增行，不用行号硬切规则体。 */
+function r3AuthErrorCssAudit({ blob, tokensBlob, added, patch }) {
+  const code = r3StripBlockComments(String(blob || ""));
+  /* --failed-rgb 的权威定义在 src/design-system/tokens.css（不在 styles.css 里）：
+     所以"状态色原值未动"必须查那个文件，而不是查本文件。 */
+  const tokensCode = r3StripBlockComments(String(tokensBlob || ""));
+  const rule = r3RuleBody(code, ".auth-error");
+  /* 只取大括号**里面**的文本再按分号切：否则规则体第一条声明会和选择器粘在一起，
+     导致「第一条就是 transition/animation」这种情况漏检（负向自证 case-iii 抓到的真实漏洞）。 */
+  const inner = rule.found ? rule.body.slice(rule.body.indexOf("{") + 1) : "";
+  const decls = inner.split(";").map((d) => d.trim()).filter((d) => d && d !== "}");
+  const motion = decls.filter((d) => /^(transition|animation)(-[a-z-]+)?\s*:/.test(d));
+  const addedCode = added.filter((l) => { const s = l.trim(); return s && !s.startsWith("*") && !s.startsWith("/*") && !s.startsWith("//"); });
+  const addedTouchesFailedToken = addedCode.filter((l) => R3_ADDED_FAILED_TOKEN.test(l));
+  const ranges = r3HunkAddedRanges(patch);
+  /* 改动范围约束（父口径第 3 条）：按**新增行号**逐行落到 HEAD 里核，注释行/空行不算改动内容。
+     这样「本批新增五行动机注释 + 三条声明」也能表达成「三条声明全部落在 .auth-error 规则体内」。 */
+  const headLines = String(blob || "").split("\n");
+  /* 判断某一行是不是「纯注释行」：剥掉块注释后该行变空、但原文非空 → 纯注释。
+     这样本文件那种「续行不带 *」的中文块注释也能整段排除，不需要猜注释风格。 */
+  const strippedLines = r3StripBlockComments(String(blob || "")).split("\n");
+  const addedContent = [];
+  for (const r of ranges) for (let n = r.start; n <= r.end; n += 1) {
+    const raw = (headLines[n - 1] || "").trim();
+    const codeLine = (strippedLines[n - 1] || "").trim();
+    if (!raw || !codeLine) continue;
+    addedContent.push({ line: n, text: codeLine });
+  }
+  const outsideRule = addedContent.filter((x) => !rule.found || x.line < rule.startLine || x.line > rule.endLine);
+  const addedOpensOrClosesRule = addedContent.filter((x) => x.text.includes("{") || x.text.includes("}"));
+  const addedCustomProperty = addedContent.filter((x) => /^--[a-z0-9-]+\s*:/.test(x.text));
+  return {
+    found: rule.found, startLine: rule.startLine, endLine: rule.endLine,
+    declarations: decls.length, declarationNames: decls.map((d) => (d.split(":")[0] || "").trim()),
+    opaqueContentBackground: R3_AUTH_ERROR_OPAQUE.test(rule.body),
+    motionDeclarationCount: motion.length, motionDeclarations: motion,
+    lightFailedRgbIntact: R3_FAILED_RGB_LIGHT.test(tokensCode), darkFailedRgbIntact: R3_FAILED_RGB_DARK.test(tokensCode),
+    tokensFileReadable: tokensBlob !== null,
+    addedTouchesFailedToken: addedTouchesFailedToken,
+    addedHunkRanges: ranges, addedContentLines: addedContent, hunkRangesOutsideRule: outsideRule,
+    addedOpensOrClosesRule: addedOpensOrClosesRule, addedCustomProperty: addedCustomProperty,
+    addedLinesInsideRule: rule.found && addedContent.length > 0 && outsideRule.length === 0 && addedOpensOrClosesRule.length === 0 && addedCustomProperty.length === 0,
+    ruleBodyPreview: rule.body.slice(0, 400),
+  };
+}
+
 const R3_REGISTRY = [
   {
     file: "src/mcp/McpCenter.tsx",
@@ -565,6 +649,15 @@ const R3_REGISTRY = [
     requireAdded: ["password-mismatch"],
     forbidCode: [],
     addOnly: false,
+  },
+  {
+    file: "src/styles.css",
+    batch: "d1ba058 · 第六批（登录错误行不透明内容底：合成背景与壁纸 / 玻璃档解耦）",
+    why: "错误行落在玻璃卡上、玻璃卡又压在壁纸上，浅色 full + 默认深色壁纸实测合成背景 181,181,181，--failed 只有 2.62:1。给 .auth-error 加不透明内容底 rgb(var(--content-rgb) / 1)（只用既有 token）后，合成背景只随主题变：浅 5.38:1 / 深 5.26:1。",
+    requireAdded: [],
+    forbidCode: [],
+    addOnly: true,
+    authErrorCssAudit: true,
   },
 ];
 
@@ -627,14 +720,29 @@ function r3SrcDiffEvaluation({ root, baseRev, headRev, registry }) {
     /* 必含标记：HEAD 里必须真的有（防「整段回退后文件不在 diff 里」蒙混），且本区间改了就还得出现在新增行。 */
     const markersOk = markers.every((m) => m.validMarker && m.hitsInHeadCode > 0 && (!changed || m.hitsInAdded > 0));
     const forbiddenOk = forbidden.every((x) => x.hitsInAddedCode === 0 && x.hitsInHeadCode === 0);
-    const ok = blob !== null && patch !== null && numstat !== null && markersOk && forbiddenOk && (!e.addOnly || addOnlyOk);
+    /* 第六批登记项专用：src/styles.css 的逐条机械审计（见 r3AuthErrorCssAudit）。 */
+    const tokensBlob = e.authErrorCssAudit ? gitTextOf(["show", headRev + ":src/design-system/tokens.css"]) : null;
+    const audit = e.authErrorCssAudit && blob !== null ? r3AuthErrorCssAudit({ blob, tokensBlob, added, patch: patch || "" }) : null;
+    const auditOk = !e.authErrorCssAudit || !!(audit && audit.found && audit.opaqueContentBackground && audit.motionDeclarationCount === 0
+      && audit.lightFailedRgbIntact && audit.darkFailedRgbIntact && audit.addedTouchesFailedToken.length === 0 && audit.addedLinesInsideRule);
+    const ok = blob !== null && patch !== null && numstat !== null && markersOk && forbiddenOk && auditOk && (!e.addOnly || addOnlyOk);
     const reasons = [];
     if (patch === null || numstat === null) reasons.push("git diff 取不到");
     if (blob === null) reasons.push("HEAD 里读不到这个文件（被删/改名？）");
     if (e.addOnly && !addOnlyOk) reasons.push("要求只增不删，实际 numstat=" + JSON.stringify(numstat));
     if (!markersOk) reasons.push("必含标记在 HEAD 里缺失，或本区间改了这个文件却没把标记写进新增行");
     if (!forbiddenOk) reasons.push("出现了禁含形态");
-    return { file: e.file, batch: e.batch, why: e.why, changed, addOnlyRequired: !!e.addOnly, requireAdded: (e.requireAdded || []).slice(), forbidCode: (e.forbidCode || []).map(String), ok, numstat, addOnlyOk, headReadable: blob !== null, markers, forbidden, note: ok ? (changed ? null : "本区间未改动（登记表是「允许改」，不是「必须改」；HEAD 里仍必须带标记）") : reasons.join("；") };
+    if (!auditOk) {
+      if (!audit) reasons.push("styles.css 审计拿不到内容");
+      else if (!audit.found) reasons.push("HEAD 里找不到 .auth-error 规则体（按选择器提取）");
+      else if (!audit.opaqueContentBackground) reasons.push(".auth-error 规则体里没有不透明内容底 background: rgb(var(--content-rgb) / 1)");
+      else if (audit.motionDeclarationCount !== 0) reasons.push(".auth-error 规则体里出现了 transition/animation 声明：" + JSON.stringify(audit.motionDeclarations));
+      else if (!audit.tokensFileReadable) reasons.push("HEAD 里读不到 src/design-system/tokens.css");
+      else if (!audit.lightFailedRgbIntact || !audit.darkFailedRgbIntact) reasons.push("--failed-rgb 原值被动过（浅 215 0 21 / 深 255 69 58 必须原样，定义在 src/design-system/tokens.css）");
+      else if (audit.addedTouchesFailedToken.length) reasons.push("新增行里出现 --failed-rgb/--failed-alpha 改动：" + JSON.stringify(audit.addedTouchesFailedToken.slice(0, 3).map(r3Brief)));
+      else if (!audit.addedLinesInsideRule) reasons.push("本批新增行没有全部落在 .auth-error 规则体内：越界新增行=" + JSON.stringify(audit.hunkRangesOutsideRule) + "，新增了规则开闭括号=" + JSON.stringify(audit.addedOpensOrClosesRule) + "，新增了自定义属性=" + JSON.stringify(audit.addedCustomProperty) + "，规则体行号 " + audit.startLine + "-" + audit.endLine);
+    }
+    return { file: e.file, batch: e.batch, why: e.why, changed, addOnlyRequired: !!e.addOnly, requireAdded: (e.requireAdded || []).slice(), forbidCode: (e.forbidCode || []).map(String), ok, numstat, addOnlyOk, headReadable: blob !== null, markers, forbidden, audit, note: ok ? (changed ? null : "本区间未改动（登记表是「允许改」，不是「必须改」；HEAD 里仍必须带标记）") : reasons.join("；") };
   });
   return { ok: diffOk && outsideRegistry.length === 0 && entries.every((e) => e.ok), diffOk, baseRev, headRev, changedSrc, outsideRegistry, registryFiles: registry.map((e) => e.file), entries };
 }
@@ -660,6 +768,7 @@ function r3SelfTest(rootsJson) {
       label: s.label || path.basename(root), root, headRev, head, expect: expect || "(未指定)", verdict, matched,
       diffOk: res.diffOk, changedSrc: res.changedSrc, outsideRegistry: res.outsideRegistry,
       failedEntries: res.entries.filter((e) => !e.ok).map((e) => e.file),
+      audits: res.entries.filter((e) => e.audit).map((e) => ({ file: e.file, ok: e.ok, found: e.audit.found, startLine: e.audit.startLine, endLine: e.audit.endLine, opaque: e.audit.opaqueContentBackground, motionCount: e.audit.motionDeclarationCount, tokensFileReadable: e.audit.tokensFileReadable, lightFailedRgbIntact: e.audit.lightFailedRgbIntact, darkFailedRgbIntact: e.audit.darkFailedRgbIntact, hunkRangesOutsideRule: e.audit.hunkRangesOutsideRule, addedLinesInsideRule: e.audit.addedLinesInsideRule })),
       entries: res.entries.map((e) => ({ file: e.file, ok: e.ok, changed: e.changed, numstat: e.numstat, addOnlyRequired: e.addOnlyRequired, addOnlyOk: e.addOnlyOk, note: e.note, markers: e.markers.map((m) => ({ marker: m.marker, validMarker: m.validMarker, hitsInAdded: m.hitsInAdded, hitsInHeadCode: m.hitsInHeadCode, sample: m.samples[0] || null })), forbidden: e.forbidden.map((x) => ({ pattern: x.pattern, hitsInAddedCode: x.hitsInAddedCode, hitsInHeadCode: x.hitsInHeadCode, sample: x.samples[0] || null })) })),
     }));
   }
@@ -1195,8 +1304,8 @@ async function main() {
     markers: e.markers.map((m) => ({ marker: m.marker, hitsInAdded: m.hitsInAdded })),
     forbidden: e.forbidden.map((x) => ({ pattern: x.pattern, hitsInAddedCode: x.hitsInAddedCode, hitsInHeadCode: x.hitsInHeadCode })), note: e.note }));
   /* 完整证据（含每条 why / 命中样例 / 全仓库改动面）走 note：observations 不截断，checks[].actual 有 2600 字上限。 */
-  note("R3 登记表逐条证据（完整）：" + JSON.stringify({ baseRev: R3_BASE_REV, diffOk: r3Src.diffOk, registry: R3_REGISTRY.map((e) => ({ file: e.file, batch: e.batch, why: e.why, requireAdded: e.requireAdded, forbidCode: (e.forbidCode || []).map(String), addOnly: !!e.addOnly })), srcDiff: r3Src.changedSrc, srcDiffOutsideRegistry: r3Src.outsideRegistry, srcEntries: r3Src.entries, changedOutsideSrc: allDiff, kFailures: kFails.map((c) => ({ section: c.section, actual: c.actual.slice(0, 260) })), kAllCascade }));
-  record("R3", "下游失败可被独立证伪为「产品回归」：本批 " + R3_BASE_REV + "→HEAD 的 diff 里 src/ 改动 ⊆ 登记表 " + JSON.stringify(R3_REGISTRY.map((e) => e.file)) + "（逐条机械判据：McpCenter.tsx 只增不删且新增行带 MCP_SESSION_ENDED / types.ts 新增行带 SHOWABLE_ERROR_DETAIL 且代码行不含「detail 原样括注」的旧形态 / useIdentity.ts 代码行不含 detail: event.reason / AuthScreens.tsx 新增行带 password-mismatch），登记表之外的 src/ 文件一个都没改，且下游失败的实际值全是「列表空 / 没有行可采样 / 删除即时 / NO_MCP_GRANT」的授权已撤上下文",
+  note("R3 登记表逐条证据（完整）：" + JSON.stringify({ baseRev: R3_BASE_REV, diffOk: r3Src.diffOk, registry: R3_REGISTRY.map((e) => ({ file: e.file, batch: e.batch, why: e.why, requireAdded: e.requireAdded, forbidCode: (e.forbidCode || []).map(String), addOnly: !!e.addOnly, authErrorCssAudit: !!e.authErrorCssAudit })), srcDiff: r3Src.changedSrc, srcDiffOutsideRegistry: r3Src.outsideRegistry, srcEntries: r3Src.entries, changedOutsideSrc: allDiff, kFailures: kFails.map((c) => ({ section: c.section, actual: c.actual.slice(0, 260) })), kAllCascade }));
+  record("R3", "下游失败可被独立证伪为「产品回归」：本批 " + R3_BASE_REV + "→HEAD 的 diff 里 src/ 改动 ⊆ 登记表 " + JSON.stringify(R3_REGISTRY.map((e) => e.file)) + "（逐条机械判据：McpCenter.tsx 只增不删且新增行带 MCP_SESSION_ENDED / types.ts 新增行带 SHOWABLE_ERROR_DETAIL 且代码行不含「detail 原样括注」的旧形态 / useIdentity.ts 代码行不含 detail: event.reason / AuthScreens.tsx 新增行带 password-mismatch / styles.css 只增不删且 .auth-error 规则体带不透明内容底、规则体内 0 条 transition|animation、深浅 --failed-rgb 原值不动、本批新增行全部落在该规则体内），登记表之外的 src/ 文件一个都没改，且下游失败的实际值全是「列表空 / 没有行可采样 / 删除即时 / NO_MCP_GRANT」的授权已撤上下文",
     r3Src.ok && (kFails.length === 0 || kAllCascade),
     "src/ diff ⊆ 登记表且逐条登记项的判据成立（fail-closed：git diff 取不到即 FAIL）+ K 段失败实际值全部命中空态上下文",
     JSON.stringify({ baseRev: R3_BASE_REV, registryFiles: r3Src.registryFiles, diffOk: r3Src.diffOk, srcDiff: r3Src.changedSrc, srcDiffOutsideRegistry: r3Src.outsideRegistry, entries: r3ShortEntries, kFailures: kFails.map((c) => c.section), kAllCascade, fullEvidence: "observations 里的「R3 登记表逐条证据（完整）」" }));
