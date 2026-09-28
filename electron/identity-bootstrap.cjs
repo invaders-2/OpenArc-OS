@@ -10,7 +10,7 @@
 
 const path = require("node:path");
 const fs = require("node:fs");
-const { IdentityStore } = require("./identity-store.cjs");
+const { IdentityStore, DEFAULT_TTL_MS, DEFAULT_IDLE_MS } = require("./identity-store.cjs");
 const { IdentityService } = require("./identity-service.cjs");
 const { IdentityLogger } = require("./identity-log.cjs");
 const { SessionSecretStore, safeStorageBackend, plainFileBackend } = require("./session-secret-store.cjs");
@@ -24,17 +24,115 @@ const { createCanvasBundle } = require("./canvas-bootstrap.cjs");
 const { createTaskBundle } = require("./task-bootstrap.cjs");
 const { createSideEffectGateway, registerSideEffectIpc } = require("./side-effect-bootstrap.cjs");
 
+// ---------------------------------------------------------------------------
+// 短有效期覆写（验收用）：**默认路径完全不经过这里**
+// ---------------------------------------------------------------------------
+
+/** 双重开关与边界。MIN_MS 是下限保护：比它更短的有效期不是"测试方便"，是把会话变成噪声。 */
+const SESSION_TTL_OVERRIDE = Object.freeze({
+  ACK_ENV: "OPENARC_ALLOW_SESSION_TTL_OVERRIDE",
+  IDLE_ENV: "OPENARC_SESSION_IDLE_MS",
+  TTL_ENV: "OPENARC_SESSION_TTL_MS",
+  MIN_MS: 2000,
+});
+
+const TTL_OVERRIDE_VALUE_RE = /^[0-9]+$/;
+
+/**
+ * 短有效期覆写的**唯一**解析入口。生效需要**同时**满足两件事：
+ *   ① OPENARC_ALLOW_SESSION_TTL_OVERRIDE=1 —— 显式承认"这不是产品默认值"
+ *   ② OPENARC_SESSION_IDLE_MS / OPENARC_SESSION_TTL_MS 是 >= 2000 的十进制整数
+ *
+ * 缺一个就整体忽略并留痕（ack 缺失与值非法分开记），**绝不静默**，
+ * 也绝不把非法值折算成任何东西 —— 没被接受的那一项继续走产品默认值。
+ *
+ * @returns {{ applied: boolean, sessionIdleMs?: number, sessionTtlMs?: number,
+ *             records: Array<{ event: string, result: string, error_code?: string, detail: object, message: string }> }}
+ *          records 由调用方（main 的启动路径）打到可见日志里，人一眼能看出"这不是产品默认值"。
+ */
+function resolveSessionTtlOverride({ env = process.env } = {}) {
+  const read = (name) => (env && env[name] != null ? String(env[name]).trim() : "");
+  const requested = [
+    ["idleMs", SESSION_TTL_OVERRIDE.IDLE_ENV, read(SESSION_TTL_OVERRIDE.IDLE_ENV)],
+    ["ttlMs", SESSION_TTL_OVERRIDE.TTL_ENV, read(SESSION_TTL_OVERRIDE.TTL_ENV)],
+  ].filter(([, , value]) => value !== "");
+  const acknowledged = read(SESSION_TTL_OVERRIDE.ACK_ENV) === "1";
+  // 一个值都没给：既没有覆写请求，也没有需要留痕的东西（ack 单独给出不改变任何行为）。
+  if (!requested.length) return { applied: false, records: [] };
+
+  const event = "session-ttl-override";
+  if (!acknowledged) {
+    const ignored = requested.map(([, name]) => name);
+    return {
+      applied: false,
+      records: [{
+        event,
+        result: "DENY",
+        error_code: "OVERRIDE_NOT_ACKNOWLEDGED",
+        detail: { ackEnv: SESSION_TTL_OVERRIDE.ACK_ENV, ignored },
+        message: "忽略 " + ignored.join(" / ") + "：必须同时设置 " + SESSION_TTL_OVERRIDE.ACK_ENV + "=1（显式承认这不是产品默认值）才生效，本次沿用默认有效期。",
+      }],
+    };
+  }
+
+  const accepted = {};
+  const rejected = [];
+  for (const [key, name, value] of requested) {
+    const parsed = TTL_OVERRIDE_VALUE_RE.test(value) ? Number(value) : NaN;
+    // 十进制整数 + 安全整数（SQLite INTEGER 落得进去）+ 下限保护，三者缺一即忽略。
+    if (!Number.isSafeInteger(parsed) || parsed < SESSION_TTL_OVERRIDE.MIN_MS) rejected.push({ env: name, value });
+    else accepted[key] = parsed;
+  }
+  if (!Object.keys(accepted).length) {
+    return {
+      applied: false,
+      records: [{
+        event,
+        result: "DENY",
+        error_code: "OVERRIDE_VALUE_INVALID",
+        detail: { minMs: SESSION_TTL_OVERRIDE.MIN_MS, rejected },
+        message: "忽略 " + rejected.map((r) => r.env).join(" / ") + "：值必须是不小于 " + SESSION_TTL_OVERRIDE.MIN_MS + " 的十进制整数（收到 " + rejected.map((r) => JSON.stringify(r.value)).join(" / ") + "），本次沿用默认有效期。",
+      }],
+    };
+  }
+
+  const effective = { idleMs: accepted.idleMs ?? DEFAULT_IDLE_MS, ttlMs: accepted.ttlMs ?? DEFAULT_TTL_MS };
+  return {
+    applied: true,
+    sessionIdleMs: accepted.idleMs,
+    sessionTtlMs: accepted.ttlMs,
+    records: [{
+      event,
+      result: "OK",
+      detail: {
+        ackEnv: SESSION_TTL_OVERRIDE.ACK_ENV,
+        applied: { idleMs: accepted.idleMs ?? null, ttlMs: accepted.ttlMs ?? null },
+        defaults: { idleMs: DEFAULT_IDLE_MS, ttlMs: DEFAULT_TTL_MS },
+        effective,
+        ...(rejected.length ? { rejected } : {}),
+      },
+      message: "会话有效期覆写生效（非产品默认值；原因：" + SESSION_TTL_OVERRIDE.ACK_ENV + "=1 且显式给出 " + requested.map(([, name]) => name).join(" / ") + "）：idleMs " + DEFAULT_IDLE_MS + " → " + effective.idleMs + "，ttlMs " + DEFAULT_TTL_MS + " → " + effective.ttlMs + "。不给开关的默认路径不受影响。",
+    }],
+  };
+}
+
 /**
  * @param opts.userDataDir 数据目录（identity.db 与受保护存储落在这里）
  * @param opts.safeStorage Electron safeStorage（macOS Keychain / Windows DPAPI）
  * @param opts.allowAdmin  是否放行 admin / 测试夹具命令
  * @param opts.logger      可选，注入外部 logger（探针用）
+ * @param opts.sessionTtlMs   可选，绝对有效期（**只有显式注入才改**；默认 DEFAULT_TTL_MS）
+ * @param opts.sessionIdleMs  可选，空闲有效期（**只有显式注入才改**；默认 DEFAULT_IDLE_MS）
+ * @param opts.timers         可选，到期调度用的 { setTimeout, clearTimeout }（测试注入）
  */
-function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, logger, serviceIdentity = null, nativeImage = null, executorLauncher = null, executorTestHook = null, browserControl = null } = {}) {
+function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, logger, serviceIdentity = null, nativeImage = null, executorLauncher = null, executorTestHook = null, browserControl = null, sessionTtlMs = null, sessionIdleMs = null, timers = null } = {}) {
   fs.mkdirSync(userDataDir, { recursive: true, mode: 0o700 });
   const log = logger || new IdentityLogger();
   const store = new IdentityStore({
     path: path.join(userDataDir, "identity.db"),
+    // 非有限值（未注入 / null / 非法）一律落回 store 的默认有效期 —— 默认路径一个字节都不变。
+    ttlMs: Number.isFinite(sessionTtlMs) ? sessionTtlMs : undefined,
+    idleMs: Number.isFinite(sessionIdleMs) ? sessionIdleMs : undefined,
     onAudit: (r) => log.log(r),
   }).open();
 
@@ -47,7 +145,7 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
     log.log({ event: "secret-backend", result: "DENY", error_code: "DOWNGRADED", detail: backend.kind });
   }
   const secrets = new SessionSecretStore(backend);
-  const service = new IdentityService({ store, secrets, logger: log, allowAdmin });
+  const service = new IdentityService({ store, secrets, logger: log, allowAdmin, timers });
   // D3-02：对象授权与身份共用同一条 SQLite 连接与同一套命令接线。
   const { authorization, authStore } = createAuthorizationService({ identityStore: store, logger: log });
   // D3-03：设备域挂在**同一条** SQLite 连接与事务队列上（迁移 v3 已在 open() 里完成）。
@@ -204,4 +302,4 @@ function registerIdentityIpc({ ipcMain, service, authorization, device, resource
   }
 }
 
-module.exports = { createIdentityService, registerIdentityIpc };
+module.exports = { createIdentityService, registerIdentityIpc, resolveSessionTtlOverride, SESSION_TTL_OVERRIDE };

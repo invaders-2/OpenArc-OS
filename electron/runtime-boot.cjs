@@ -63,6 +63,8 @@ async function createOpenArcRuntime({
   executorLauncher = null,
   executorTestHook = null,
   browserControl = null,
+  sessionTtlMs = null,
+  sessionIdleMs = null,
   now = null,
 } = {}) {
   if (!userDataDir) throw new Error("createOpenArcRuntime 需要 userDataDir");
@@ -77,6 +79,9 @@ async function createOpenArcRuntime({
     executorLauncher,
     executorTestHook,
     browserControl,
+    // 短有效期覆写（验收用）：只有 main 在双重开关下解析出值才会传进来。
+    sessionTtlMs,
+    sessionIdleMs,
   });
   bootOrder.push(BOOT_STEP.IDENTITY_CREATED);
   if (!identity || !identity.modelProxy || typeof identity.modelProxy.start !== "function") {

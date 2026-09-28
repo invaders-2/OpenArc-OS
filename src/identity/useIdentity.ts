@@ -13,7 +13,7 @@
  *   3. **错误只认 code。** UI 分支一律 `switch (result.error)`，不解析文本（§26）。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { errorText } from "./types";
+import { errorText, identityEventConvergence } from "./types";
 import type { IdentityPhase, IdentitySnapshot, InstallationStatus } from "./types";
 
 type Result = {
@@ -170,30 +170,30 @@ export function useIdentity() {
     };
   }, [bridge, send, attempt]);
 
-  /** 主进程推来的身份事件（§24）：登出 / 锁定 / 解锁 / 会话变更。 */
+  /**
+   * 主进程推来的身份事件（§24）：登出 / 锁定 / 解锁 / 会话变更 / 自然到期。
+   *
+   * 判定本身是纯函数（identityEventConvergence）；这里只做"写状态"。
+   * 收敛不另起一套：自然到期与登出走同一条路 —— 清投影、回登录页，
+   * 并按身份域真实的 SESSION_EXPIRED 走 absorb 的失败收敛（登录页给的就是那句规范文案；
+   * 事件 payload 的 reason 属运维口径，不进用户文案）。
+   */
   useEffect(() => {
     if (!bridge?.onEvent) return;
-    return bridge.onEvent((event: { event: string; snapshot?: IdentitySnapshot | unknown }) => {
+    return bridge.onEvent((event: { event: string; reason?: string; snapshot?: IdentitySnapshot | unknown }) => {
       if (!alive.current) return;
       const snap = event.snapshot as IdentitySnapshot | undefined;
       if (snap) setSnapshot(snap);
-      switch (event.event) {
-        case "identity/locked":
-          setPhase("locked");
-          break;
-        case "identity/logged-out":
-          setSnapshot(EMPTY);
-          setPhase("unauthenticated");
-          break;
-        case "identity/unlocked":
-        case "identity/session-changed":
-          setPhase(snap?.locked ? "locked" : "ready");
-          break;
-        default:
-          break;
+      const intent = identityEventConvergence({ event: event.event, snapshot: snap });
+      if (intent.clearSnapshot) setSnapshot(EMPTY);
+      if (intent.errorCode) {
+        // 不带 detail：事件的 reason 是运维口径（连接日志 detail = expired:idle），进 absorb 会被 errorText 括注给用户
+        absorb({ ok: false, error: intent.errorCode }, "unauthenticated");
+        return;
       }
+      if (intent.phase) setPhase(intent.phase);
     });
-  }, [bridge]);
+  }, [bridge, absorb]);
 
   const run = useCallback(
     async (command: Record<string, unknown>, fallback: IdentityPhase) => {

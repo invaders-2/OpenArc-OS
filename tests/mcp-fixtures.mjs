@@ -91,8 +91,8 @@ function withStdioArgs(launcher, stdioArgs) {
   };
 }
 
-export async function createMcpFixture({ requestTimeoutMs = 4000, maxTools = 200, maxPages = 10, reconnectAttempts = 2, reconnectBackoffMs = 5, launcher = null, stdioArgs = null, clientFactory = null, credentialBackend = null } = {}) {
-  const fx = await createDeviceFixture({ dbPath: ":memory:" });
+export async function createMcpFixture({ requestTimeoutMs = 4000, maxTools = 200, maxPages = 10, reconnectAttempts = 2, reconnectBackoffMs = 5, launcher = null, stdioArgs = null, clientFactory = null, credentialBackend = null, ttlMs = undefined, idleMs = undefined, timers = null } = {}) {
+  const fx = await createDeviceFixture({ dbPath: ":memory:", ttlMs, idleMs });
   const mcpStore = new McpStore({ identity: fx.identity, clock: fx.clock });
   const credentialStore = new CredentialStore({ store: mcpStore, backend: credentialBackend || memoryCredentialBackend() });
   /* 与生产同一个 launcher 工厂（纯 Node 下 = NodeChildProcessLauncher，Electron main 下追加 ELECTRON_RUN_AS_NODE）。 */
@@ -113,7 +113,8 @@ export async function createMcpFixture({ requestTimeoutMs = 4000, maxTools = 200
   });
   /* D5-03 第三批：夹具走与产品同一条装配线（真实 IdentityService + 两个 attach 助手），
      不自己复制"登出 / 锁屏 / 撤权时收连接"的逻辑。 */
-  const identityService = new IdentityService({ store: fx.identity, secrets: null, allowAdmin: true });
+  // timers 只在到期用例里注入（计数 / 可控）；其余用例走产品同款全局定时器。
+  const identityService = new IdentityService({ store: fx.identity, secrets: null, allowAdmin: true, timers });
   identityService.current = fx.sessions.admin;
   const detachSessionLifecycle = attachMcpSessionLifecycle({ identityService, mcpService });
   const detachAppGrantRevocation = attachMcpAppGrantRevocation({ authorization: fx.authService, mcpService });

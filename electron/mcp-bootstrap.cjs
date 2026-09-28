@@ -156,15 +156,32 @@ function disposeMcpIpc({ ipcMain } = {}) {
 // **绝不改写 enabled**（那是用户意图），也绝不留 READY 假象。
 // ---------------------------------------------------------------------------
 
-const MCP_SESSION_END_EVENTS = Object.freeze({ "identity/logged-out": "logout", "identity/locked": "lock" });
+const MCP_SESSION_END_EVENTS = Object.freeze({
+  "identity/logged-out": "logout",
+  "identity/locked": "lock",
+  // 会话自然到期（空闲 / 绝对）与登出、锁屏同归属：都是"这条会话结束了"。
+  "identity/session-expired": "expired",
+});
 
-/** 登出 / 锁屏 = 会话结束：立刻收掉活连接与在途握手（与关应用同一个 dispose）。 */
+/**
+ * 会话结束 → dispose reason 的口径。reason 会原样落进连接日志的 detail，
+ * 那是日志里唯一说明"谁把连接收掉"的字段，读日志的人必须一眼看出归属：
+ *   · 自然到期 → "expired:<idle|absolute>"（前缀标归属；光看 "idle" 读不出是会话过期）；
+ *   · 登出 / 锁屏 / 关应用 / 撤权 → 沿用既有 reason（logout / user / app-quit /
+ *     app-grant-revoked），一个字符都不许动 —— 第三批门禁按这些字面量断言。
+ */
+function sessionEndReason(event, kind) {
+  if (kind === "expired") return "expired:" + ((event && event.reason) || "unknown");
+  return event && event.reason ? String(event.reason) : kind;
+}
+
+/** 登出 / 锁屏 / 自然到期 = 会话结束：立刻收掉活连接与在途握手（与关应用同一个 dispose）。 */
 function attachMcpSessionLifecycle({ identityService, mcpService, logger = null } = {}) {
   if (!identityService || typeof identityService.onEvent !== "function" || !mcpService || typeof mcpService.dispose !== "function") return () => {};
   return identityService.onEvent((event) => {
     const kind = MCP_SESSION_END_EVENTS[event && event.event];
     if (!kind) return;
-    const reason = event && event.reason ? String(event.reason) : kind;
+    const reason = sessionEndReason(event, kind);
     Promise.resolve()
       .then(() => mcpService.dispose({ reason }))
       .then((res) => logger?.log?.({ event: "mcp-session-end", result: res && res.ok === false ? "ERROR" : "OK", detail: { reason, closed: (res && res.closed) || 0, aborted: (res && res.aborted) || 0, ended: (res && res.ended) || 0 } }))

@@ -52,6 +52,8 @@ const ROOT = path.resolve(here, "../..");
 /* 历史产物目录 artifacts/d5-03/ 只读兜底（新运行不再写这里；历史文件原样保留）。 */
 const ART = path.join(ROOT, "artifacts", "d5-03");
 const RUN_ARTIFACTS = require(path.join(here, "run-artifacts.cjs"));
+/* D5-03 第四批：临时 userData 目录的归属标记 + 只按创建清单/标记清理（含 orphan 清理 CLI）。 */
+const OWNERSHIP = require(path.join(here, "userdata-ownership.cjs"));
 const FIXTURE = path.join(ROOT, "tests", "fixtures", "mcp", "echo-server.mjs");
 const domain = require(path.join(ROOT, "electron", "mcp-domain.cjs"));
 const CDP_PORT_BASE = Number(process.env.OA_D503B_CDP_PORT || 9812);
@@ -388,7 +390,7 @@ async function verifyInstance(rec) {
 async function launchApp({ userDataDir = null, label = "" } = {}) {
   // 上一次实例必须先杀掉：否则新进程抢不到同一个 CDP 端口，会静默连到旧实例。
   if (app) { const stray = await killApp(app); note("launchApp 自我保护：先杀掉仍存活的上一实例 " + JSON.stringify(stray)); }
-  const dir = userDataDir || fs.mkdtempSync(path.join(os.tmpdir(), USERDATA_PREFIX));
+  const dir = userDataDir || OWNERSHIP.createOwnedDir({ prefix: USERDATA_PREFIX, kind: label ? "electron-userdata/" + label : "electron-userdata", runId: RUN ? RUN.runId : null });
   // 本次运行内单调递增（不复用刚释放的端口），并从基址起递增探测第一个空闲端口：探测即占住，spawn 前释放
   const requested = Math.max(CDP_BASE + apps.length, lastCdpPort + 1);
   const reservation = RUN ? await RUN.acquirePort(requested) : null;
@@ -504,7 +506,7 @@ const conn = (r) => (r && r.connection) || null;
 
 /* ══════════════════════════ v20 旧库构造（旧代码，非改库） ══════════════════════════ */
 function buildLegacyV20Db(userDataDir) {
-  const tree = fs.mkdtempSync(path.join(os.tmpdir(), USERDATA_PREFIX + "legacy-"));
+  const tree = OWNERSHIP.createOwnedDir({ prefix: USERDATA_PREFIX + "legacy-", kind: "legacy-v20-source-tree", runId: RUN ? RUN.runId : null });
   const archive = spawnSync("git", ["-C", ROOT, "archive", LEGACY.commit, "electron", "package.json"], { encoding: "buffer", maxBuffer: 1 << 28 });
   if (archive.status !== 0 || !archive.stdout) return { ok: false, tree, error: "git-archive-failed:" + String(archive.stderr).slice(0, 160) };
   const untar = spawnSync("tar", ["-x", "-C", tree], { input: archive.stdout });
@@ -527,7 +529,7 @@ async function main() {
   lastCdpPort = CDP_BASE - 1;
   VIS = path.join(RUN.runDir, "policy-visual");
   fs.mkdirSync(VIS, { recursive: true });
-  const runDirOk = fs.mkdtempSync(path.join(os.tmpdir(), USERDATA_PREFIX));
+  const runDirOk = OWNERSHIP.createOwnedDir({ prefix: USERDATA_PREFIX, kind: "run1-first-use-userdata", runId: RUN.runId });
   runDir = runDirOk;
   console.log("本次运行：" + RUN.runId + " → " + RUN.runDirRel + "（CDP 基址 " + CDP_BASE + "，userData 前缀 " + USERDATA_PREFIX + "）");
   const firstScriptSha = { script: fileSha("experiments/d5-03/mcp-center-e2e.mjs"), originalBefore: null };
@@ -727,7 +729,7 @@ async function main() {
   state.revokedAt = provE4 ? provE4.revoked_at : state.revokedAt;
 
   /* ── F 新组织首次使用仍有既定初始授权 ── */
-  freshDir = fs.mkdtempSync(path.join(os.tmpdir(), USERDATA_PREFIX));
+  freshDir = OWNERSHIP.createOwnedDir({ prefix: USERDATA_PREFIX, kind: "run5-fresh-org-userdata", runId: RUN.runId });
   const fresh = await launchApp({ userDataDir: freshDir, label: "run5-fresh-org" });
   const fLogin = await ensureLoggedIn(ADMIN, "D5-03B Admin");
   const freshOrgId = (await js("try { const r = await window.openarc.identity.command({ type: 'identity/status' }); return (r && r.snapshot && r.snapshot.teamId) || null; } catch (e) { return null; }"))
@@ -965,7 +967,7 @@ async function main() {
     JSON.stringify({ connections: conns, fixtureUrl: fxUrl, fixturePids }));
 
   /* ── L 升级路径（已存在的 v20 库 + 库里一次真实撤销 → 当前 Electron 启动迁移到 v21） ── */
-  upgradeDir = fs.mkdtempSync(path.join(os.tmpdir(), USERDATA_PREFIX + "upgrade-"));
+  upgradeDir = OWNERSHIP.createOwnedDir({ prefix: USERDATA_PREFIX + "upgrade-", kind: "v20-upgrade-userdata", runId: RUN.runId });
   const legacyBuild = buildLegacyV20Db(upgradeDir);
   const legacyV = schemaVersionOf(upgradeDir);
   const legacyEv = evidenceOf(upgradeDir);
@@ -1111,6 +1113,21 @@ async function main() {
 }
 
 /* ══════════════════════════ 收尾（只清理本次运行自己 spawn 的进程 / 目录） ══════════════════════════ */
+/* 硬退出兜底：Ctrl-C / 超时 SIGTERM 也要收掉本次运行的进程树与自建临时目录（SIGKILL 拦不住）。 */
+let hardExitCleanupStarted = false;
+const onHardExit = (signal) => {
+  if (hardExitCleanupStarted) return;
+  hardExitCleanupStarted = true;
+  void (async () => {
+    console.error("收到 " + signal + "：按本次运行清单收尾（进程树 + 自建 userData 目录）");
+    try { await cleanupOwnProcesses(); } catch (err) { console.error("硬退出收尾（进程）失败：" + String((err && err.message) || err)); }
+    try { OWNERSHIP.cleanupOwnedDirs({ log: (line) => console.error("   " + line) }); } catch (err) { console.error("硬退出收尾（目录）失败：" + String((err && err.message) || err)); }
+    process.exit(signal === "SIGINT" ? 130 : 143);
+  })();
+};
+process.once("SIGINT", () => onHardExit("SIGINT"));
+process.once("SIGTERM", () => onHardExit("SIGTERM"));
+
 let exitCode = 2;
 try { exitCode = await main(); } catch (e) {
   console.error("验收异常：" + String((e && e.stack) || e));
@@ -1119,8 +1136,8 @@ try { exitCode = await main(); } catch (e) {
 }
 const cleanup = await cleanupOwnProcesses();
 console.log("收尾：只清理本次运行 spawn 的 pid 树（" + JSON.stringify(cleanup.targets.map((t) => ({ label: t.label, rootPid: t.rootPid, leftovers: t.leftovers }))) + "），未使用 pkill");
-cleanup.userDataDirsRemoved = [];
-for (const dir of [runDir, freshDir, upgradeDir]) { try { if (dir) { fs.rmSync(dir, { recursive: true, force: true }); cleanup.userDataDirsRemoved.push(path.basename(dir)); } } catch { /* ignore */ } }
+/* 只删本次运行自己创建、且 owner.json 标记确认是本进程写的目录（清单在 OWNERSHIP 里，不做通配符扫描）。 */
+cleanup.userDataDirsRemoved = OWNERSHIP.cleanupOwnedDirs({ log: (line) => console.log("   " + line) });
 if (RUN) {
   try {
     const fallback = {

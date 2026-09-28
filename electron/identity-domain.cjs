@@ -86,6 +86,12 @@ const REVOKE_REASON = Object.freeze({
   USER_DISABLED: "USER_DISABLED",
   RESET: "RESET",
   ADMIN: "ADMIN",
+  /**
+   * 自然到期（绝对 / 空闲）落终态用的原因。**它不是"被撤销"**：
+   * 库里留一条"这条会话是被到期收掉的"的权威事实（幂等，重复触发只终结一次），
+   * 但 evaluateSession 对外仍然回 SESSION_EXPIRED —— 判据与懒判定同一份。
+   */
+  EXPIRED: "EXPIRED",
 });
 
 // ---------------------------------------------------------------------------
@@ -349,6 +355,11 @@ const EVENT = Object.freeze({
   LOCKED: "identity/locked",
   UNLOCKED: "identity/unlocked",
   LOGGED_OUT: "identity/logged-out",
+  /**
+   * 会话自然到期（空闲 / 绝对上限到点）。
+   * payload：{ reason: "idle" | "absolute"（当前真正起约束作用的那个）, sessionId, sessionRef }
+   */
+  SESSION_EXPIRED: "identity/session-expired",
   INITIALIZED: "identity/initialized",
   PROFILE_UPDATED: "identity/profile-updated",
 });
@@ -356,6 +367,31 @@ const EVENT = Object.freeze({
 // ---------------------------------------------------------------------------
 // Session 判定（纯函数，供 store 与测试共用同一套口径）
 // ---------------------------------------------------------------------------
+
+/** 到期归因：哪一条上限真的起约束作用。 */
+const EXPIRY_REASON = Object.freeze({ IDLE: "idle", ABSOLUTE: "absolute" });
+
+/** 到期 detail 文案。懒判定原有的两个取值不许改（探针与日志按它分类）。 */
+const EXPIRY_DETAIL = Object.freeze({ idle: "idle-expiry", absolute: "absolute-expiry" });
+
+/**
+ * 到期判据。**定时器与懒判定共用这一份**，不允许各算各的 ——
+ * 否则就会出现"定时器说过期了、命令层还认它有效"或反之。
+ *
+ * 返回 null = 此刻没过期；否则给出归因与 dueAt（到期定时器就排在这里）。
+ * 两条上限同时到点时归因绝对上限：与 evaluateSession 原有的判定顺序一致。
+ */
+function sessionExpiry(session, now) {
+  if (!session) return null;
+  const absolute = session.expires_at;
+  const idle = session.idle_expires_at;
+  const absoluteDue = Number.isFinite(absolute) && now >= absolute;
+  const idleDue = Number.isFinite(idle) && now >= idle;
+  if (!absoluteDue && !idleDue) return null;
+  const reason = absoluteDue && (!idleDue || absolute <= idle) ? EXPIRY_REASON.ABSOLUTE : EXPIRY_REASON.IDLE;
+  const dueAt = Math.min(Number.isFinite(absolute) ? absolute : Infinity, Number.isFinite(idle) ? idle : Infinity);
+  return { reason, dueAt, detail: EXPIRY_DETAIL[reason] };
+}
 
 /**
  * session 此刻是否可用。
@@ -368,13 +404,20 @@ const EVENT = Object.freeze({
  *
  * **用户状态排在 authVersion 之前**：改密与禁用同时发生时，
  * 报告"账号已禁用"比报告"session 已失效"更能指导下一步动作。
+ *
+ * 到期终结（REVOKE_REASON.EXPIRED）是这条顺序的唯一例外：那条落库只是把
+ * "它到期了"写成权威事实，对外仍必须是 SESSION_EXPIRED —— 与定时器同一判据。
  */
 function evaluateSession(session, user, now) {
   if (!session) return fail(ERROR.SESSION_REVOKED, "session-missing");
   if (!user) return fail(ERROR.SESSION_REVOKED, "user-missing");
+  if (session.revoked_at != null && session.revoked_reason !== REVOKE_REASON.EXPIRED) {
+    return fail(ERROR.SESSION_REVOKED, "session-revoked");
+  }
+  const expiry = sessionExpiry(session, now);
+  if (expiry) return fail(ERROR.SESSION_EXPIRED, expiry.detail);
+  // 到期终态但时钟未到点（时钟回拨）：仍是终态，绝不复活。
   if (session.revoked_at != null) return fail(ERROR.SESSION_REVOKED, "session-revoked");
-  if (now >= session.expires_at) return fail(ERROR.SESSION_EXPIRED, "absolute-expiry");
-  if (now >= session.idle_expires_at) return fail(ERROR.SESSION_EXPIRED, "idle-expiry");
   if (user.status === USER_STATUS.DISABLED) return fail(ERROR.USER_DISABLED, "user-disabled");
   if (session.auth_version !== user.auth_version) return fail(ERROR.SESSION_REVOKED, "auth-version-mismatch");
   return ok({ session, user });
@@ -441,6 +484,8 @@ module.exports = {
   REAUTH_CODES,
   TERMINAL_CODES,
   EVENT,
+  EXPIRY_REASON,
+  EXPIRY_DETAIL,
   RATE_LIMIT,
   FORBIDDEN_SNAPSHOT_KEYS,
   newId,
@@ -460,6 +505,7 @@ module.exports = {
   emptySnapshot,
   installationSnapshot,
   snapshotViolations,
+  sessionExpiry,
   evaluateSession,
   guardProtected,
   cooldownFor,

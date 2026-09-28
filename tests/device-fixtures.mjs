@@ -43,11 +43,12 @@ export const SERVICE_IDENTITY = "svc_openarc-control-test0001";
  * @returns { identity, store, authService, deviceStore, deviceService, sessions, users,
  *            orgId, foreignOrgId, serviceIdentity, now, advance, ctx, adminCtx }
  */
-export async function createDeviceFixture({ dbPath = ":memory:", serviceIdentity = SERVICE_IDENTITY, deviceServiceFactory = null } = {}) {
+export async function createDeviceFixture({ dbPath = ":memory:", serviceIdentity = SERVICE_IDENTITY, deviceServiceFactory = null, ttlMs = undefined, idleMs = undefined } = {}) {
   let current = START;
   const clock = () => current;
 
-  const identity = new IdentityStore({ path: dbPath, clock }).open();
+  // ttlMs / idleMs 只有显式传入才覆盖（默认路径与 device-* 全部既有用例一致）。
+  const identity = new IdentityStore({ path: dbPath, clock, ttlMs, idleMs }).open();
   const store = new AuthorizationStore({ identity, clock });
   const authService = new AuthorizationService({ identity, authStore: store });
   const deviceStore = new DeviceStore({ identity, clock });

@@ -19,7 +19,7 @@ const { safeURL } = require("./policy.cjs");
 const geometry = require("./geometry.cjs");
 const { NativeViewController } = require("./native-view-controller.cjs");
 const { BrowserControlAuthority } = require("./browser-control-authority.cjs");
-const { registerIdentityIpc } = require("./identity-bootstrap.cjs");
+const { registerIdentityIpc, resolveSessionTtlOverride } = require("./identity-bootstrap.cjs");
 // D5-02：无限画布的宿主命令面（文档层实例由 identity-bootstrap 装配，AI 工具用同一个）。
 const { registerCanvasIpc } = require("./canvas-bootstrap.cjs");
 const { registerTaskIpc } = require("./task-bootstrap.cjs");
@@ -233,10 +233,16 @@ app.whenReady().then(async () => {
   // 而"身份库打不开"是可恢复的启动失败（见 catch）—— 两条路径都得能引用到这个名字。
   let runtime = null;
   try {
+    // 短有效期覆写：**双重开关**（OPENARC_ALLOW_SESSION_TTL_OVERRIDE=1 + 具体值）才生效。
+    // 默认路径不读、不用这些变量；生效时打一条含生效值与原因的可见日志。
+    const sessionTtl = resolveSessionTtlOverride({ env: process.env });
+    for (const record of sessionTtl.records) console.log("[openarc] " + record.message);
     runtime = await createOpenArcRuntime({
       userDataDir: app.getPath("userData"),
       safeStorage,
       nativeImage,
+      sessionTtlMs: sessionTtl.sessionTtlMs,
+      sessionIdleMs: sessionTtl.sessionIdleMs,
       // production executor 由 Electron utilityProcess.fork 启动（Node-enabled child，
       // 不依赖 ELECTRON_RUN_AS_NODE / runAsNode fuse）；生命周期权威仍是 RuntimeSupervisor。
       executorLauncher: createDefaultExecutorLauncher(),

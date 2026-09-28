@@ -10,8 +10,13 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { createMcpFixture, startEchoServer, waitFor, disposeMcpBounded } from "./mcp-fixtures.mjs";
 import { pw } from "./device-fixtures.mjs";
+import { fakeTimers } from "./session-expiry-fixtures.mjs";
+
+const require = createRequire(import.meta.url);
+const { MCP_SESSION_END_EVENTS } = require("../electron/mcp-bootstrap.cjs");
 
 async function withFixture(fn, options = {}) {
   const fx = await createMcpFixture(options);
@@ -149,6 +154,7 @@ test("L3 · 撤权：mcp.* 被撤销后立刻收掉活连接；后续命令 MCP_
     assert.equal(row.enabled, 1, "撤权不改写 enabled");
     const logs = fx.mcpStore.logsOfConnection(id, 50);
     assert.equal(logs.some((r) => r.event === "AUTHORIZATION_REVOKED" && r.error_code === "MCP_UNAUTHORIZED"), true, JSON.stringify(logs));
+    assert.equal(logs.some((r) => r.event === "AUTHORIZATION_REVOKED" && r.detail === "app-grant-revoked"), true, "撤权的既有 detail 一个字符不变：" + JSON.stringify(logs));
 
     // 撤销后任何 mcp 命令都回 MCP_UNAUTHORIZED；工具调用入口仍是"未开放"而不是"无权限"
     for (const command of ["mcp/list", "mcp/connect", "mcp/reconnect", "mcp/test", "mcp/testLog"]) {
@@ -187,6 +193,7 @@ test("L4 · dispose 幂等；关应用的有界 dispose 超时/异常只留痕�
       assert.equal(row.status, "DISABLED");
       assert.equal(row.last_error_code, "MCP_SESSION_ENDED");
       assert.equal(row.enabled, 1);
+      assert.equal(fx.mcpStore.logsOfConnection(id, 50).some((r) => r.event === "SESSION_ENDED" && r.detail === "app-quit"), true, "关应用的既有 detail 一个字符不变");
 
       const second = await fx.mcpService.dispose({ reason: "app-quit" });
       assert.deepEqual({ ok: second.ok, closed: second.closed, aborted: second.aborted, ended: second.ended }, { ok: true, closed: 0, aborted: 0, ended: 0 }, "dispose 必须幂等");
@@ -246,3 +253,171 @@ test("L5 · 登出中止在途握手：立刻结束、不留 live / opening，�
     server.stop();
   }
 });
+
+// ---------------------------------------------------------------------------
+// D5-03 第四批 · 会话自然到期也走同一条收流线
+//
+// 到期由身份服务层的**单一定时器**判定（定时器注入后可精确到点）；
+// 事件 identity/session-expired → attachMcpSessionLifecycle → dispose，
+// 与登出 / 锁屏完全同归属：只收连接与在途、只落状态，绝不改写 enabled。
+// ---------------------------------------------------------------------------
+
+const EXPIRY_IDLE_MS = 20_000;
+
+test("L6 · 空闲自然过期：活连接与 GET 流立刻收掉，状态 DISABLED + MCP_SESSION_ENDED，enabled 不变", async () => {
+  const server = startEchoServer(["--http", "--port=0", "--get-sse", "--get-sse-ids", "--get-sse-notify-interval=20"]);
+  try {
+    const info = await server.ready;
+    const timers = fakeTimers();
+    await withFixture(async (fx) => {
+      const login = await fx.identityService.dispatch({ type: "identity/login", identifier: "admin@openarc.test", password: pw("admin") });
+      assert.equal(login.ok, true, JSON.stringify(login));
+      fx.identityRef.current = fx.identityService.current;
+      const events = [];
+      fx.identityService.onEvent((e) => events.push(e));
+
+      const id = await createHttp(fx, info);
+      const connected = await fx.invoke({ command: "mcp/connect", connectionId: id });
+      assert.equal(connected.ok, true, JSON.stringify(connected));
+      const client = fx.mcpService.live.get(id).client;
+      assert.equal(client.diagnostics().stream.state, "open");
+      const running = await waitForState(info, (s) => s.getSse.openStreams >= 1);
+      assert.equal(running.getSse.openStreams >= 1, true, "连接后服务端侧 GET 流应当活着：" + JSON.stringify(running.getSse));
+
+      const before = await fx.invoke({ command: "mcp/get", connectionId: id });
+      assert.equal(before.ok, true, JSON.stringify(before));
+      assert.equal(before.connection.tools.some((t) => t.name === "echo_sum"), true, "到期前工具照常投影：" + JSON.stringify(before.connection.tools));
+
+      // 空闲期限到点：唯一定时器把"已过期"落成权威事实并 emit
+      fx.advance(EXPIRY_IDLE_MS);
+      await timers.fire();
+
+      const settled = await waitFor(() => (fx.mcpService.live.size === 0 && fx.mcpService.opening.size === 0 && recordOf(fx, id).status === "DISABLED" ? true : null));
+      assert.equal(settled, true, "空闲到期后不得留下活连接或握手中的客户端");
+      assert.equal(client.diagnostics().stream.state, "closed");
+      assert.equal(client.diagnostics().inflightRequests, 0);
+      assert.equal(client.diagnostics().background, 0);
+      const closed = await waitForState(info, (s) => s.getSse.openStreams === 0);
+      assert.equal(closed.getSse.openStreams, 0, "到期后服务端侧 GET 流必须断开：" + JSON.stringify(closed.getSse));
+
+      const row = recordOf(fx, id);
+      assert.equal(row.status, "DISABLED", "到期后状态必须照实（未连接的 DISABLED），不能留 READY");
+      assert.equal(row.last_error_code, "MCP_SESSION_ENDED", "为什么变成 DISABLED 必须留痕：会话结束");
+      assert.equal(row.enabled, 1, "enabled 是用户意图，到期不得改写");
+      const logs = fx.mcpStore.logsOfConnection(id, 50);
+      /* 口径：到期这条路径的 detail 自带 expired: 前缀 —— 光看 "idle" 读不出这是会话自然过期；
+         登出 / 锁屏 / 关应用 / 撤权仍用各自的既有 detail（L1 / L2 / L3 / L4 各自盯着）。 */
+      assert.equal(logs.some((r) => r.event === "SESSION_ENDED" && r.detail === "expired:idle"), true, JSON.stringify(logs));
+      assert.equal(logs.some((r) => r.event === "SESSION_ENDED" && r.detail === "idle"), false, "不得再落裸的 idle：" + JSON.stringify(logs));
+
+      // 新事件的 payload：起约束作用的那条上限 + 会话标识
+      const expired = events.filter((e) => e.event === "identity/session-expired");
+      assert.equal(expired.length, 1, "只 emit 一次");
+      assert.equal(expired[0].reason, "idle");
+      assert.equal(expired[0].sessionId, fx.identity.sessionByRef(expired[0].sessionRef).id);
+
+      // 没有会话：命令照旧被拒，工具名 / 描述 / hash 一律不再投影
+      const listed = await fx.invoke({ command: "mcp/list" });
+      assert.equal(listed.error, "MCP_UNAUTHORIZED", JSON.stringify(listed));
+      assert.equal(JSON.stringify(listed).includes("echo_sum"), false, "会话结束后连工具名都不得出现");
+      assert.equal((await fx.invoke({ command: "mcp/connect", connectionId: id })).error, "MCP_UNAUTHORIZED");
+      assert.equal(fx.mcpService.invokeTool({ connectionId: id, name: "echo_sum" }).error, "MCP_TOOL_INVOCATION_NOT_ENABLED");
+
+      // 重新登录：不重新配置、不重新启用，直接 connect 就恢复
+      const again = await fx.identityService.dispatch({ type: "identity/login", identifier: "admin@openarc.test", password: pw("admin") });
+      assert.equal(again.ok, true, JSON.stringify(again));
+      fx.identityRef.current = fx.identityService.current;
+      const reconnected = await fx.invoke({ command: "mcp/connect", connectionId: id });
+      assert.equal(reconnected.ok, true, JSON.stringify(reconnected));
+      assert.equal(recordOf(fx, id).status, "READY");
+      assert.equal(recordOf(fx, id).enabled, 1);
+    }, { requestTimeoutMs: 3000, idleMs: EXPIRY_IDLE_MS, ttlMs: 12 * 60 * 60 * 1000, timers });
+  } finally {
+    server.stop();
+  }
+});
+
+test("L7 · 旧会话到期不关随后登录的新会话：旧安排已出队也动不了新连接", async () => {
+  const IDLE_MS = 15_000;
+  const timers = fakeTimers();
+  await withFixture(async (fx) => {
+    const first = await fx.identityService.dispatch({ type: "identity/login", identifier: "admin@openarc.test", password: pw("admin") });
+    assert.equal(first.ok, true, JSON.stringify(first));
+    const firstRef = first.snapshot.sessionRef;
+    fx.identityRef.current = firstRef;
+    const events = [];
+    fx.identityService.onEvent((e) => events.push(e));
+    const stale = timers.history[0];
+    assert.equal(!!stale, true, "登录必须排一次到期");
+
+    const created = await fx.createLocal();
+    const id = created.connection.connectionId;
+    await fx.invoke({ command: "mcp/setEnabled", connectionId: id, enabled: true });
+    const connected = await fx.invoke({ command: "mcp/connect", connectionId: id });
+    assert.equal(connected.ok, true, JSON.stringify(connected));
+    assert.equal(fx.mcpService.live.size, 1);
+
+    // 用户重新登录 → 新会话；旧安排被取消，但真实竞态里那个回调可能已经出队
+    const second = await fx.identityService.dispatch({ type: "identity/login", identifier: "admin@openarc.test", password: pw("admin") });
+    assert.equal(second.ok, true, JSON.stringify(second));
+    const secondRef = second.snapshot.sessionRef;
+    assert.notEqual(secondRef, firstRef, "重新登录必须是一条新会话");
+    fx.identityRef.current = secondRef;
+    assert.equal(stale.cleared, true, "重新登录后旧安排必须被取消");
+    assert.equal(timers.pending(), 1, "在途定时器仍然只有一个（新会话的）");
+
+    // 旧到期时间到
+    fx.advance(IDLE_MS);
+    await stale.fn();
+    await timers.settle();
+
+    assert.equal(events.filter((e) => e.event === "identity/session-expired").length, 0, "旧到期不得 emit");
+    assert.equal(fx.identityService.current, secondRef, "旧到期不得把当前会话收掉");
+    assert.equal(fx.identity.sessionByRef(firstRef).revoked_at, null, "旧到期不得去动别的世代");
+    assert.equal(fx.identity.sessionByRef(secondRef).revoked_at, null, "旧到期不得终结新会话");
+    assert.equal(fx.mcpService.live.size, 1, "旧到期不得收掉新会话的活连接");
+    assert.equal(recordOf(fx, id).status, "READY");
+    assert.equal(recordOf(fx, id).last_error_code ?? null, null, "不得留下任何会话结束痕迹");
+  }, { requestTimeoutMs: 3000, idleMs: IDLE_MS, ttlMs: 12 * 60 * 60 * 1000, timers });
+});
+
+test("L8 · 事件登记：identity/session-expired 与登出 / 锁屏走同一条收流线", () => {
+  assert.equal(MCP_SESSION_END_EVENTS["identity/session-expired"], "expired");
+  assert.equal(MCP_SESSION_END_EVENTS["identity/logged-out"], "logout");
+  assert.equal(MCP_SESSION_END_EVENTS["identity/locked"], "lock");
+  assert.deepEqual(Object.keys(MCP_SESSION_END_EVENTS).sort(), ["identity/locked", "identity/logged-out", "identity/session-expired"]);
+});
+
+test("L9 · 绝对到期：连接日志 detail 是 expired:absolute，登出 / 锁屏 / 关应用 / 撤权的既有 detail 不变", async () => {
+  const TTL_MS = 12_000;
+  const timers = fakeTimers();
+  await withFixture(async (fx) => {
+    const login = await fx.identityService.dispatch({ type: "identity/login", identifier: "admin@openarc.test", password: pw("admin") });
+    assert.equal(login.ok, true, JSON.stringify(login));
+    fx.identityRef.current = fx.identityService.current;
+
+    const created = await fx.createLocal();
+    const id = created.connection.connectionId;
+    await fx.invoke({ command: "mcp/setEnabled", connectionId: id, enabled: true });
+    const connected = await fx.invoke({ command: "mcp/connect", connectionId: id });
+    assert.equal(connected.ok, true, JSON.stringify(connected));
+    assert.equal(fx.mcpService.live.size, 1);
+
+    // 绝对上限（ttl）先到、空闲上限远在其后 → 到期原因是 absolute
+    fx.advance(TTL_MS);
+    await timers.fire();
+
+    const settled = await waitFor(() => (fx.mcpService.live.size === 0 && recordOf(fx, id).status === "DISABLED" ? true : null));
+    assert.equal(settled, true, "绝对到期后不得留下活连接，状态必须照实收敛");
+    const row = recordOf(fx, id);
+    assert.equal(row.last_error_code, "MCP_SESSION_ENDED", "为什么变成 DISABLED 必须留痕：会话结束");
+    assert.equal(row.enabled, 1, "enabled 是用户意图，到期不得改写");
+
+    const logs = fx.mcpStore.logsOfConnection(id, 50);
+    assert.equal(logs.some((r) => r.event === "SESSION_ENDED" && r.detail === "expired:absolute"), true, JSON.stringify(logs));
+    assert.equal(logs.some((r) => r.event === "SESSION_ENDED" && r.detail === "absolute"), false, "不得再落裸的 absolute：" + JSON.stringify(logs));
+    assert.equal(logs.filter((r) => r.event === "SESSION_ENDED").length, 1, "只记一条收尾日志（与 L6 同一份幂等语义）");
+    // 其余收尾路径的 detail 由 L1（logout）/ L2（user）/ L3（app-grant-revoked）/ L4（app-quit）各自盯着
+  }, { requestTimeoutMs: 3000, ttlMs: TTL_MS, idleMs: 60 * 60 * 1000, timers });
+});
+

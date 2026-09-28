@@ -2342,6 +2342,43 @@ class IdentityStore {
   }
 
   // -------------------------------------------------------------------------
+  // 自然到期（§9 / §32）
+  // -------------------------------------------------------------------------
+
+  /**
+   * 把"已到期"落成权威事实。**幂等，且只认权威行**。
+   *
+   * 判据来自 domain.sessionExpiry / evaluateSession —— 与懒判定同一份；
+   * 写入走 transact 队列（连接内互斥），与其它事务体不会交错。
+   * 只写"它是被到期收掉的"（REVOKE_REASON.EXPIRED），对外错误码仍是 SESSION_EXPIRED。
+   *
+   * 返回 { changed, reason }：
+   *   changed=false, reason="not-expired"     → 合法活动已经续期：什么都不做（调用方按权威行重排）
+   *   changed=false, reason="ended"           → 已被其它路径终结（登出/改密/撤权/已收过），各路径自有归属
+   *   changed=false, reason="ended-elsewhere" → 会话还在，但判据给的是别的终止原因（用户禁用 / authVersion）
+   *   changed=false, reason="missing"         → 行不存在
+   *   changed=true,  reason="idle"|"absolute" → 本次真的终结了它，原因 = 当前起约束作用的那条上限
+   */
+  async expireSession(ref, now = this.clock()) {
+    if (!this.db) return { changed: false, reason: "store-closed" };
+    const outcome = await this.#withBusyRetry(() =>
+      this.transact(() => {
+        const session = this.sessionByRef(ref);
+        if (!session) return { changed: false, reason: "missing" };
+        if (session.revoked_at != null) return { changed: false, reason: "ended" };
+        const verdict = domain.evaluateSession(session, this.userById(session.user_id), now);
+        if (verdict.ok) return { changed: false, reason: "not-expired" };
+        if (verdict.error !== ERROR.SESSION_EXPIRED) return { changed: false, reason: "ended-elsewhere", error: verdict.error };
+        const expiry = domain.sessionExpiry(session, now) || { reason: domain.EXPIRY_REASON.ABSOLUTE };
+        this.#revokeSession(session, REVOKE_REASON.EXPIRED, now);
+        return { changed: true, reason: expiry.reason, sessionId: session.id, userId: session.user_id, sessionRef: session.ref };
+      }),
+    );
+    if (outcome.changed) this.audit("expire", { userId: outcome.userId, sessionRef: outcome.sessionRef, result: "OK", errorCode: ERROR.SESSION_EXPIRED });
+    return outcome;
+  }
+
+  // -------------------------------------------------------------------------
   // Lock / Unlock（§14 / §15 / §16 / §47）
   // -------------------------------------------------------------------------
 

@@ -23,6 +23,13 @@ const passwords = require("./password.cjs");
 
 const { ERROR, EVENT } = domain;
 
+/**
+ * 单次 setTimeout 的上限（2^31-1 ms ≈ 24.8 天）。
+ * 比它更远的 horizon 必须**分块重排**：setTimeout 溢出会立刻触发，那就成了忙循环。
+ * 产品默认（12h / 2h）远小于它，这一条是为"注入超长有效期"准备的。
+ */
+const MAX_TIMEOUT_MS = 2 ** 31 - 1;
+
 /** 渲染进程可以带走的字段。其余一律在服务层截住。 */
 function sanitizeSession(session) {
   if (!session) return null;
@@ -43,7 +50,7 @@ class IdentityService {
    * @param opts.logger     IdentityLogger
    * @param opts.allowAdmin 是否放行 admin / 测试夹具命令（默认 false）
    */
-  constructor({ store, secrets, logger, allowAdmin = false } = {}) {
+  constructor({ store, secrets, logger, allowAdmin = false, timers = null } = {}) {
     if (!store) throw new Error("IdentityService 需要 store");
     this.store = store;
     this.secrets = secrets || null;
@@ -52,7 +59,22 @@ class IdentityService {
     this.listeners = new Set();
     /** 当前进程持有的会话引用。渲染进程每次启动都会重新向服务要一次。 */
     this.current = null;
+    /**
+     * 定时器接缝。产品走全局 setTimeout/clearTimeout；
+     * 测试可注入计数 / 可控实现来断言"在途定时器 ≤ 1"并精确触发到期。
+     */
+    this.timers = {
+      setTimeout: typeof timers?.setTimeout === "function" ? timers.setTimeout : setTimeout,
+      clearTimeout: typeof timers?.clearTimeout === "function" ? timers.clearTimeout : clearTimeout,
+    };
+    this.#expiryTimer = null;
+    this.#expiryGen = 0;
   }
+
+  /** 在途的到期定时器句柄；同一时刻最多一个。 */
+  #expiryTimer;
+  /** 代次：每次重排自增，让已经出队的旧回调失效（旧到期不得动新会话）。 */
+  #expiryGen;
 
   onEvent(fn) {
     this.listeners.add(fn);
@@ -75,11 +97,134 @@ class IdentityService {
     this.logger?.log(record);
   }
 
+  // -------------------------------------------------------------------------
+  // 到期调度（§9 / §32）
+  //
+  // **单一定时器**：每次会话状态变化后，从持久层权威行算 dueAt = min(expires_at,
+  // idle_expires_at) 重排一次。禁止 setInterval、禁止渲染层轮询、禁止固定高频轮询；
+  // 超过 MAX_TIMEOUT_MS 的 horizon 分块重排。
+  // -------------------------------------------------------------------------
+
+  /** 取消在途定时器，并让已经出队的旧回调失效。 */
+  #clearExpiryTimer() {
+    this.#expiryGen += 1;
+    if (this.#expiryTimer == null) return;
+    try {
+      this.timers.clearTimeout(this.#expiryTimer);
+    } catch {
+      /* 定时器已消失 */
+    }
+    this.#expiryTimer = null;
+  }
+
+  /**
+   * 按**持久层权威行**重排到期。没有会话 / 会话已终结 → 不留任何安排。
+   * 绝不凭内存里的时间戳排程：合法活动刚延长过空闲期限时，只有库里的行算数。
+   */
+  #scheduleExpiry() {
+    this.#clearExpiryTimer();
+    if (!this.store || !this.store.db) return;
+    const ref = this.current;
+    if (!ref) return;
+    let row = null;
+    try {
+      row = this.store.sessionByRef(ref);
+    } catch {
+      return;
+    }
+    if (!row || row.revoked_at != null) return;
+    const now = this.store.clock();
+    const expiry = domain.sessionExpiry(row, now);
+    const dueAt = Number.isFinite(expiry?.dueAt)
+      ? expiry.dueAt
+      : Math.min(Number(row.expires_at), Number(row.idle_expires_at));
+    if (!Number.isFinite(dueAt)) return;
+    const delay = Math.max(0, Math.min(dueAt - now, MAX_TIMEOUT_MS));
+    const gen = this.#expiryGen;
+    const handle = this.timers.setTimeout(() => this.#onExpiryDue(gen, ref), delay);
+    if (handle && typeof handle.unref === "function") handle.unref();
+    this.#expiryTimer = handle;
+  }
+
+  /**
+   * 定时器到点。**一切以权威行为准**：
+   *   · 已被重排（旧安排）       → 什么都不做
+   *   · 已不是排程时那一代会话   → 什么都不做（旧到期不得关掉随后登录的新会话）
+   *   · 已被其它路径终结         → store 会回 ended，什么都不做
+   *   · 合法活动延长过空闲期限   → store 回 not-expired，只重排
+   *   · 真的过期                 → 落终态 + 新事件
+   */
+  #onExpiryDue(gen, ref) {
+    if (gen !== this.#expiryGen) return;
+    this.#expiryTimer = null;
+    if (this.current !== ref) return;
+    this.#triggerExpiry(ref);
+  }
+
+  #triggerExpiry(ref) {
+    this.#expireSession(ref).catch((e) => {
+      this.#log({ event: "session-expired", result: "ERROR", error_code: ERROR.INTERNAL_ERROR, detail: String((e && e.message) || e) });
+    });
+  }
+
+  /** 终结 + 广播。幂等由 store.expireSession 保证：重复触发只有第一次 changed。 */
+  async #expireSession(ref) {
+    const res = await this.store.expireSession(ref);
+    if (!res.changed) {
+      if (res.reason === "not-expired") this.#scheduleExpiry();
+      return res;
+    }
+    // 落终态期间用户可能已经重新登录（新会话）：旧到期不得关掉新会话的连接，也不清它的 token。
+    if (this.current !== null && this.current !== ref) return res;
+    this.current = null;
+    this.#clearExpiryTimer();
+    try {
+      await this.secrets?.clear();
+    } catch {
+      /* token 清理失败不改变"会话已到期"这个事实 */
+    }
+    this.#emit(EVENT.SESSION_EXPIRED, { reason: res.reason, sessionId: res.sessionId || null, sessionRef: ref });
+    return res;
+  }
+
+  /**
+   * 每条命令之后收敛一次到期状态。
+   * 懒判定（validate / status / 各受保护命令）观察到的到期与定时器走**同一条**
+   * 终结路径，因此不可能出现"定时器说过期、命令层还认它有效"或反之。
+   */
+  #reconcileExpiry() {
+    if (!this.store || !this.store.db) return;
+    const ref = this.current;
+    if (!ref) {
+      this.#clearExpiryTimer();
+      return;
+    }
+    let row = null;
+    try {
+      row = this.store.sessionByRef(ref);
+    } catch {
+      return;
+    }
+    if (!row) {
+      this.#clearExpiryTimer();
+      return;
+    }
+    if (row.revoked_at == null && domain.sessionExpiry(row, this.store.clock())) {
+      this.#clearExpiryTimer();
+      this.#triggerExpiry(ref);
+      return;
+    }
+    this.#scheduleExpiry();
+  }
+
   get snapshot() {
     if (!this.current) return domain.emptySnapshot({ initialized: this.store.status().initialized });
-    const res = this.store.validateSession(this.current, { sensitive: false });
+    const ref = this.current;
+    const res = this.store.validateSession(ref, { sensitive: false });
     if (!res.ok) {
       this.current = null;
+      // 懒判定看到的到期同样要落权威终态并广播（与定时器同一条路径、同一份判据）。
+      if (res.error === ERROR.SESSION_EXPIRED) this.#triggerExpiry(ref);
       return domain.emptySnapshot({ initialized: this.store.status().initialized });
     }
     return domain.identitySnapshot({
@@ -150,6 +295,9 @@ class IdentityService {
         result = domain.fail(ERROR.INVALID_INPUT, "unhandled");
     }
     result.durationMs = this.store.clock() - started;
+    // 会话状态可能刚变（login / restore / touch / unlock / 改密 / 登出 …）：
+    // 按持久层权威行重排那个唯一定时器，并把懒判定看到的到期收敛成同一条终结路径。
+    this.#reconcileExpiry();
     return result;
   }
 

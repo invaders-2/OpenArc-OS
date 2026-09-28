@@ -1214,7 +1214,7 @@ export function McpCenter({ role }: { role: string | null }) {
                 ) : null}
                 {current?.lastErrorCode === "MCP_SESSION_ENDED" ? (
                   <p className="mcp-muted" data-mcp-note="session-ended">
-                    会话已结束（登出 / 锁屏 / 应用退出）：活连接、GET 流与在途请求都已收掉，所以状态回到
+                    会话已结束（登出 / 锁屏 / 会话过期 / 应用退出）：活连接、GET 流与在途请求都已收掉，所以状态回到
                     未连接的 DISABLED —— 不是连接故障，也不需要重新授权。「启用」意图保持不变，
                     重新登录后点连接即可恢复。
                   </p>

@@ -73,3 +73,46 @@ export const errorText = (code: string | undefined, detail?: string) => {
   // detail 只在其本身不是 code 时才补，避免把内部枚举直接糊给用户
   return detail && detail !== code ? `${base}（${detail}）` : base;
 };
+
+/**
+ * 主进程推来的身份事件 → 渲染层收敛（纯函数）。
+ *
+ * 判定集中在这里、而不是散在订阅回调里，有两个理由：
+ *   · 收敛用的错误码必须是身份域真实的码（自然到期 = SESSION_EXPIRED），
+ *     与命令失败时 absorb 的失败收敛同一张表，不允许在渲染层另造一个"过期"状态；
+ *   · 渲染层没有 hook 级测试基建（真机路径是 tests/identity-ui.mjs 的 Electron 探针），
+ *     做成"事件进 → 状态出"的纯函数才能被 node --test 直接覆盖，
+ *     也保证测的就是 useIdentity 用的那一份判定。
+ *
+ * 口径与旧行为逐条对齐：
+ *   · LOCKED                → 锁屏（不动投影）
+ *   · LOGGED_OUT            → 清投影 + 登录页，不写错误（正常登出不是错误）
+ *   · SESSION_EXPIRED（自然到期）→ 与登出同一条收敛，额外按 SESSION_EXPIRED 写一次错误，
+ *     让登录页给出的解释和"下一条命令失败"完全一致
+ *   · UNLOCKED / SESSION_CHANGED → 按快照的 locked 定 locked / ready
+ *   · 其余事件一律不动（未知事件不改变门禁状态）
+ */
+export type IdentityEventConvergence = {
+  /** 要迁移到的门禁状态；null = 保持当前状态。 */
+  phase: IdentityPhase | null;
+  /** true = 这条会话已经没了，本地投影必须清空，不能留一个"看似已登录"的壳。 */
+  clearSnapshot: boolean;
+  /** 非 null = 按这个身份域错误码走 absorb 的失败收敛。 */
+  errorCode: IdentityErrorCode | null;
+};
+
+export function identityEventConvergence(event: { event?: string; snapshot?: { locked?: boolean } | null }): IdentityEventConvergence {
+  switch (event?.event) {
+    case "identity/locked":
+      return { phase: "locked", clearSnapshot: false, errorCode: null };
+    case "identity/logged-out":
+      return { phase: "unauthenticated", clearSnapshot: true, errorCode: null };
+    case "identity/session-expired":
+      return { phase: "unauthenticated", clearSnapshot: true, errorCode: "SESSION_EXPIRED" };
+    case "identity/unlocked":
+    case "identity/session-changed":
+      return { phase: event.snapshot?.locked ? "locked" : "ready", clearSnapshot: false, errorCode: null };
+    default:
+      return { phase: null, clearSnapshot: false, errorCode: null };
+  }
+}
