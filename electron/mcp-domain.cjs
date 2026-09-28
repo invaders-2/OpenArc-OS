@@ -48,6 +48,11 @@ const ERROR_CODE = Object.freeze({
   MCP_STREAM_EVENT_TOO_LARGE: "MCP_STREAM_EVENT_TOO_LARGE",
   /** 服务端判定 Mcp-Session-Id 失效（404 / 明确 session 信号）：停止流与在途请求，如实上报。 */
   MCP_SESSION_EXPIRED: "MCP_SESSION_EXPIRED",
+  /**
+   * 本地会话结束（登出 / 锁屏 / 应用退出）收掉了连接或中止了在途握手。
+   * 不是服务端故障，也不假装超时；状态回到"启用但未连接"的 DISABLED，enabled 不改写。
+   */
+  MCP_SESSION_ENDED: "MCP_SESSION_ENDED",
   MCP_AUTH_REQUIRED: "MCP_AUTH_REQUIRED",
   MCP_CREDENTIAL_MISSING: "MCP_CREDENTIAL_MISSING",
   MCP_CREDENTIAL_STORE_UNAVAILABLE: "MCP_CREDENTIAL_STORE_UNAVAILABLE",
@@ -243,6 +248,8 @@ function normalizeError({ kind = "", status = 0, jsonrpcCode = null } = {}) {
 
 /** 凭据相关失败按状态归类：需要重新授权 vs 一般错误。 */
 function statusForError(code) {
+  // 会话结束收掉连接后回到"启用但未连接"（DISABLED）：不假装故障，也不要求重新授权。
+  if (code === ERROR_CODE.MCP_SESSION_ENDED) return STATUS.DISABLED;
   return code === ERROR_CODE.MCP_AUTH_REQUIRED || code === ERROR_CODE.MCP_CREDENTIAL_MISSING
     ? STATUS.AUTH_REQUIRED
     : STATUS.ERROR;

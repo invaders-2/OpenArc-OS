@@ -152,6 +152,7 @@ const ERROR_LABEL: Record<string, string> = {
   MCP_TOOL_DISCOVERY_FAILED: "tools/list 没有成功返回：工具清单未发现",
   MCP_TOOL_INVOCATION_NOT_ENABLED: "第一批不开放工具调用，这里只做连接管理与能力发现",
   MCP_RECONNECT_LIMIT: "重连次数已达上限，已停止重试（不空转）",
+  MCP_SESSION_ENDED: "会话已结束（登出 / 锁屏 / 应用退出），连接已收掉；重新登录后可再次连接",
   MCP_INTERNAL_ERROR: "主进程内部错误",
   /* 渲染层自己的事实位（不是后端码，前缀刻意与 MCP_ 区分开）。 */
   LOCAL_INPUT_REQUIRED: "名称不能为空（界面上先行拦截，没有发给后端）",
@@ -1209,6 +1210,13 @@ export function McpCenter({ role }: { role: string | null }) {
                   <p className="mcp-muted" data-mcp-note="disabled">
                     连接已停用：先启用，再做连接 / 重连 / 测试 —— 主进程对停用连接直接回
                     MCP_CONNECTION_DISABLED。
+                  </p>
+                ) : null}
+                {current?.lastErrorCode === "MCP_SESSION_ENDED" ? (
+                  <p className="mcp-muted" data-mcp-note="session-ended">
+                    会话已结束（登出 / 锁屏 / 应用退出）：活连接、GET 流与在途请求都已收掉，所以状态回到
+                    未连接的 DISABLED —— 不是连接故障，也不需要重新授权。「启用」意图保持不变，
+                    重新登录后点连接即可恢复。
                   </p>
                 ) : null}
                 {!canUseTools ? (

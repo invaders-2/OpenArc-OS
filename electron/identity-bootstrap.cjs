@@ -19,7 +19,7 @@ const { createDeviceBundle, registerDeviceIpc } = require("./device-bootstrap.cj
 const { createResourceBundle, registerResourceIpc } = require("./resource-bootstrap.cjs");
 const { createGovernanceBundle, registerGovernanceIpc } = require("./governance-bootstrap.cjs");
 const { createModelBundle, registerModelIpc } = require("./model-bootstrap.cjs");
-const { createMcpBundle } = require("./mcp-bootstrap.cjs");
+const { createMcpBundle, attachMcpSessionLifecycle, attachMcpAppGrantRevocation } = require("./mcp-bootstrap.cjs");
 const { createCanvasBundle } = require("./canvas-bootstrap.cjs");
 const { createTaskBundle } = require("./task-bootstrap.cjs");
 const { createSideEffectGateway, registerSideEffectIpc } = require("./side-effect-bootstrap.cjs");
@@ -103,6 +103,12 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
     safeStorage,
     logger: log,
   });
+  // D5-03 第三批 · 生命周期接线（唯一装配路径，产品与探针共用）：
+  //   · 登出 / 锁屏（identity/logged-out | identity/locked）→ 收掉活连接与在途握手；
+  //   · 撤销 App 的 mcp.* 授权 → 立刻收掉该组织下的活连接。
+  // 两者都不改写 enabled，重新登录 / 重授后 connect 照常可用。
+  attachMcpSessionLifecycle({ identityService: service, mcpService, logger: log });
+  attachMcpAppGrantRevocation({ authorization, mcpService });
   // D4-02A：Task Runtime 持久权威（复用同一连接与 AuthorizationService；启动即 recovery）。
   // D4-03C4：唯一 side-effect production assembly（Registry → Proxy → Authority → Supervisor → Runtime）。
   const { taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, orchestrator } = createTaskBundle({

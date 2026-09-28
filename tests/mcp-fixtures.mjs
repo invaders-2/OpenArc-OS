@@ -18,10 +18,11 @@ const { McpService } = require("../electron/mcp-service.cjs");
 const { McpClient } = require("../electron/mcp-client.cjs");
 const { CredentialStore, memoryCredentialBackend } = require("../electron/credential-store.cjs");
 const { NodeChildProcessLauncher, createMcpStdioLauncher } = require("../electron/executor-launcher.cjs");
-const { registerMcpIpc, MCP_COMMANDS, MCP_TOOL_INVOCATION_COMMANDS } = require("../electron/mcp-bootstrap.cjs");
+const { registerMcpIpc, MCP_COMMANDS, MCP_TOOL_INVOCATION_COMMANDS, attachMcpSessionLifecycle, attachMcpAppGrantRevocation, disposeMcpBounded } = require("../electron/mcp-bootstrap.cjs");
+const { IdentityService } = require("../electron/identity-service.cjs");
 const domain = require("../electron/mcp-domain.cjs");
 
-export { domain, MCP_COMMANDS, MCP_TOOL_INVOCATION_COMMANDS, McpClient, NodeChildProcessLauncher, createMcpStdioLauncher, McpService, McpStore, CredentialStore, memoryCredentialBackend };
+export { domain, MCP_COMMANDS, MCP_TOOL_INVOCATION_COMMANDS, attachMcpSessionLifecycle, attachMcpAppGrantRevocation, disposeMcpBounded, IdentityService, McpClient, NodeChildProcessLauncher, createMcpStdioLauncher, McpService, McpStore, CredentialStore, memoryCredentialBackend };
 export const ECHO_HTTP_PATH = fileURLToPath(new URL("./fixtures/mcp/echo-server.mjs", import.meta.url));
 
 /** 与 fixture 实际返回值一一对应（断言必须对着它，而不是对着客户端自己的常量）。 */
@@ -110,6 +111,13 @@ export async function createMcpFixture({ requestTimeoutMs = 4000, maxTools = 200
     reconnectBackoffMs,
     clock: fx.clock,
   });
+  /* D5-03 第三批：夹具走与产品同一条装配线（真实 IdentityService + 两个 attach 助手），
+     不自己复制"登出 / 锁屏 / 撤权时收连接"的逻辑。 */
+  const identityService = new IdentityService({ store: fx.identity, secrets: null, allowAdmin: true });
+  identityService.current = fx.sessions.admin;
+  const detachSessionLifecycle = attachMcpSessionLifecycle({ identityService, mcpService });
+  const detachAppGrantRevocation = attachMcpAppGrantRevocation({ authorization: fx.authService, mcpService });
+
   // 内置 App baseline：MCP 中心持有 mcp.* 全量动作；resource-library 只有 mcp.view（无权看工具描述）。
   fx.store.upsertApp({ appId: "mcp-center", name: "MCP 中心", publisher: "openarc-builtin", status: "enabled", builtIn: 1 });
   fx.store.upsertAppGrant({ appId: "mcp-center", resourceType: "mcp", actions: ["mcp.view", "mcp.use", "mcp.manage", "mcp.test"], grantedBy: "test", organizationId: fx.orgId });
@@ -131,6 +139,9 @@ export async function createMcpFixture({ requestTimeoutMs = 4000, maxTools = 200
     mcpStore,
     credentialStore,
     mcpService,
+    identityService,
+    detachSessionLifecycle,
+    detachAppGrantRevocation,
     identityRef,
     ipc,
     invoke,
@@ -152,6 +163,8 @@ export async function createMcpFixture({ requestTimeoutMs = 4000, maxTools = 200
       return res;
     },
     async close() {
+      try { detachSessionLifecycle(); } catch { /* ignore */ }
+      try { detachAppGrantRevocation(); } catch { /* ignore */ }
       try { await mcpService.dispose(); } catch { /* ignore */ }
       try { fx.identity.close(); } catch { /* ignore */ }
     },

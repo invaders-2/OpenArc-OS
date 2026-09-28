@@ -149,4 +149,57 @@ function disposeMcpIpc({ ipcMain } = {}) {
   if (ipcMain && typeof ipcMain.removeHandler === "function") { try { ipcMain.removeHandler("mcp:command"); } catch { /* ignore */ } }
 }
 
-module.exports = { createMcpBundle, registerMcpIpc, disposeMcpIpc, MCP_COMMANDS, MCP_TOOL_INVOCATION_COMMANDS, HOST_APP_ID };
+// ---------------------------------------------------------------------------
+// D5-03 第三批 · 生命周期接线（会话结束 / 撤权 / 关应用）
+//
+// 三条路径都汇到同一份 dispose / closeAppConnections：只收连接与在途请求、只落状态，
+// **绝不改写 enabled**（那是用户意图），也绝不留 READY 假象。
+// ---------------------------------------------------------------------------
+
+const MCP_SESSION_END_EVENTS = Object.freeze({ "identity/logged-out": "logout", "identity/locked": "lock" });
+
+/** 登出 / 锁屏 = 会话结束：立刻收掉活连接与在途握手（与关应用同一个 dispose）。 */
+function attachMcpSessionLifecycle({ identityService, mcpService, logger = null } = {}) {
+  if (!identityService || typeof identityService.onEvent !== "function" || !mcpService || typeof mcpService.dispose !== "function") return () => {};
+  return identityService.onEvent((event) => {
+    const kind = MCP_SESSION_END_EVENTS[event && event.event];
+    if (!kind) return;
+    const reason = event && event.reason ? String(event.reason) : kind;
+    Promise.resolve()
+      .then(() => mcpService.dispose({ reason }))
+      .then((res) => logger?.log?.({ event: "mcp-session-end", result: res && res.ok === false ? "ERROR" : "OK", detail: { reason, closed: (res && res.closed) || 0, aborted: (res && res.aborted) || 0, ended: (res && res.ended) || 0 } }))
+      .catch((e) => logger?.log?.({ event: "mcp-session-end", result: "ERROR", error_code: "DISPOSE_FAILED", detail: String((e && e.message) || e) }));
+  });
+}
+
+/** 撤销 App 的 mcp.* 授权后：立刻收掉该组织下的活连接与在途握手（命令层仍实时回 MCP_UNAUTHORIZED）。 */
+function attachMcpAppGrantRevocation({ authorization, mcpService } = {}) {
+  if (!authorization || !mcpService || typeof mcpService.closeAppConnections !== "function") return () => {};
+  const previous = typeof authorization.onAppGrantRevoked === "function" ? authorization.onAppGrantRevoked : null;
+  const handler = (info) => {
+    if (previous) { try { previous(info); } catch { /* 其它订阅者失败不影响 MCP 收尾 */ } }
+    if (!info || String(info.resourceType || "") !== "mcp") return;
+    try { mcpService.closeAppConnections({ appId: info.appId || null, organizationId: info.organizationId || null, reason: "app-grant-revoked" }); } catch { /* 收尾失败不改变"授权已撤销"这个事实 */ }
+  };
+  authorization.onAppGrantRevoked = handler;
+  return () => { if (authorization.onAppGrantRevoked === handler) authorization.onAppGrantRevoked = previous; };
+}
+
+/**
+ * 关闭应用：有界等待 dispose（默认 2s），超时或异常只作为结果留痕，绝不阻塞退出。
+ * 返回字段与 dispose 对齐，另加 timedOut / error / skipped。
+ */
+function disposeMcpBounded({ service = null, timeoutMs = 2000, reason = "app-quit" } = {}) {
+  if (!service || typeof service.dispose !== "function") return Promise.resolve({ ok: true, closed: 0, aborted: 0, ended: 0, skipped: true });
+  let timer = null;
+  const limit = Math.max(0, Number(timeoutMs) || 0);
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve({ ok: false, closed: 0, aborted: 0, ended: 0, error: "DISPOSE_TIMEOUT", timedOut: true }), limit);
+    if (timer && typeof timer.unref === "function") timer.unref();
+  });
+  return Promise.race([Promise.resolve().then(() => service.dispose({ reason })), timeout])
+    .then((res) => { if (timer) clearTimeout(timer); return res && typeof res === "object" ? res : { ok: true }; })
+    .catch((e) => { if (timer) clearTimeout(timer); return { ok: false, closed: 0, aborted: 0, ended: 0, error: String((e && e.message) || e) }; });
+}
+
+module.exports = { createMcpBundle, registerMcpIpc, disposeMcpIpc, attachMcpSessionLifecycle, attachMcpAppGrantRevocation, disposeMcpBounded, MCP_COMMANDS, MCP_TOOL_INVOCATION_COMMANDS, MCP_SESSION_END_EVENTS, HOST_APP_ID };

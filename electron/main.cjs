@@ -24,7 +24,7 @@ const { registerIdentityIpc } = require("./identity-bootstrap.cjs");
 const { registerCanvasIpc } = require("./canvas-bootstrap.cjs");
 const { registerTaskIpc } = require("./task-bootstrap.cjs");
 // D5-03：MCP 中心的宿主命令面（连接管理 + 能力发现；本批不开放工具调用）。
-const { registerMcpIpc } = require("./mcp-bootstrap.cjs");
+const { registerMcpIpc, disposeMcpBounded } = require("./mcp-bootstrap.cjs");
 const { createDefaultExecutorLauncher } = require("./executor-launcher.cjs");
 const { createOpenArcRuntime } = require("./runtime-boot.cjs");
 const { createFileService } = require("./file-service.cjs");
@@ -824,16 +824,30 @@ app.whenReady().then(async () => {
 
 app.on("window-all-closed", () => app.quit());
 
-// SQLite 的连接必须在进程退出前关闭，否则 WAL 里未 checkpoint 的事务会丢
-app.on("will-quit", () => {
-  try {
-    identity?.modelProxy?.stop();
-  } catch {
-    /* 已关闭 */
-  }
-  try {
-    identity?.store?.close();
-  } catch {
-    /* 已关闭 */
-  }
+// SQLite 的连接必须在进程退出前关闭，否则 WAL 里未 checkpoint 的事务会丢。
+// D5-03 第三批：关闭应用时 MCP 的 GET 流与在途请求也要及时结束 ——
+// 先做有界 dispose（2s 兜底），再停 modelProxy / 关 store；失败只留痕，绝不阻塞退出。
+let quitting = false;
+app.on("will-quit", (event) => {
+  if (quitting) return;
+  quitting = true;
+  event.preventDefault();
+  disposeMcpBounded({ service: identity?.mcpService, timeoutMs: 2000, reason: "app-quit" }).then((res) => {
+    try {
+      console.log("[openarc] MCP 收尾：" + JSON.stringify({ ok: res.ok !== false, closed: res.closed || 0, aborted: res.aborted || 0, ended: res.ended || 0, error: res.error || null, failures: res.failures || [] }));
+    } catch {
+      /* 日志失败不阻塞退出 */
+    }
+    try {
+      identity?.modelProxy?.stop();
+    } catch {
+      /* 已关闭 */
+    }
+    try {
+      identity?.store?.close();
+    } catch {
+      /* 已关闭 */
+    }
+    app.quit();
+  });
 });

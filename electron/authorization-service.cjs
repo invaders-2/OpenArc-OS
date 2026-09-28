@@ -52,6 +52,11 @@ class AuthorizationService {
     this.identity = identity;
     this.store = authStore;
     this.logger = logger || null;
+    /**
+     * D5-03 第三批：App Grant 被撤销后的通知钩子（默认无订阅者）。
+     * 消费方（MCP）据此立刻收掉已建立的活连接 —— 授权失效不能等下一次命令才发现。
+     */
+    this.onAppGrantRevoked = null;
   }
 
   // -------------------------------------------------------------------------
@@ -1242,6 +1247,12 @@ class AuthorizationService {
       oldPermissions: this.#appGrantActions(before),
       newPermissions: [],
     });
+    // 撤销"立即生效"：已建立的活连接不能继续活着。通知失败不改变"已撤销"这个事实（投递方兜底）。
+    try {
+      if (typeof this.onAppGrantRevoked === "function") {
+        this.onAppGrantRevoked({ appId: before.app_id, organizationId: before.organization_id, resourceType: before.resource_type || null, actions: this.#appGrantActions(before), grantId });
+      }
+    } catch { /* 收尾失败不回滚撤销 */ }
     return { ok: true, changed: true, reasonCode: "ALLOW" };
   }
 

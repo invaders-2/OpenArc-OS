@@ -45,6 +45,14 @@ class McpService {
     this.busy = new Set();
     /** 正在握手（还没进 live）的客户端：应用关闭/收尾时也要能 abort 掉，不留悬挂。 */
     this.opening = new Set();
+    /** 握手中客户端 → connectionId：撤权只收"这一个组织"的在途握手，不误伤别的组织。 */
+    this.openingOf = new Map();
+    /** 已被撤权的连接：在途握手即便此刻才失败/成功，也按 MCP_UNAUTHORIZED 收敛，不复活。 */
+    this.revokedConnections = new Set();
+    /** 收尾代次：dispose 之后，任何还在途的握手都不得再进入 live。 */
+    this.epoch = 0;
+    /** 最近一次 dispose 的原因（只用于收尾日志与状态 detail）。 */
+    this.disposeReason = null;
   }
 
   #now() { return this.clock(); }
@@ -367,14 +375,59 @@ class McpService {
     return { ok: false, error: domain.ERROR_CODE.MCP_TOOL_INVOCATION_NOT_ENABLED };
   }
 
-  /** 关闭全部活动连接（宿主退出 / 测试收尾）。 */
-  async dispose() {
+  /**
+   * 关闭全部活动连接与在途握手（宿主退出 / 登出 / 锁屏 / 测试收尾）。
+   *
+   * 只落"连接不再活着"这个事实，**不改写 enabled**：那是用户意图，重新登录后 connect 照常可用。
+   * 幂等：重复调用 closed / aborted / ended 都是 0，不重复改状态、不重复记日志。
+   */
+  async dispose({ reason = "host-shutdown" } = {}) {
+    // 先推进代次：收尾之后，任何"刚好成功"的在途握手都不许再进 live（不留 READY 假象）。
+    this.epoch += 1;
+    this.disposeReason = String(reason || "host-shutdown");
     const ids = [...this.live.keys()];
-    for (const id of ids) await this.#closeLive(id);
+    let closed = 0;
+    let ended = 0;
+    const failures = [];
+    for (const id of ids) {
+      const res = await this.#closeLive(id);
+      if (res.closed) closed += 1;
+      if (this.#markEnded(id, { status: domain.STATUS.DISABLED, lastErrorCode: domain.ERROR_CODE.MCP_SESSION_ENDED, event: "SESSION_ENDED", detail: this.disposeReason })) ended += 1;
+    }
     // 握手进行中的客户端同样要 abort：否则退出登录/关闭应用会留下悬挂的握手与 GET 流
     const opening = [...this.opening];
-    await Promise.all(opening.map((client) => Promise.resolve(client.close()).catch(() => {})));
-    return { ok: true, closed: ids.length, aborted: opening.length };
+    const settled = await Promise.all(opening.map((client) =>
+      Promise.resolve(client.close()).then(() => true, (e) => { failures.push(String((e && e.message) || e)); return false; })));
+    return { ok: failures.length === 0, closed, aborted: settled.filter(Boolean).length, ended, failures, reason: this.disposeReason };
+  }
+
+  /**
+   * App 的 mcp.* 授权被撤销：立刻收掉该组织（组织未知时 = 全部）的活连接与在途握手。
+   *
+   * 命令层的 MCP_UNAUTHORIZED 判定不依赖这里 —— 每次命令都实时读授权；
+   * 这里只保证"已经建立起来的连接不能继续活着"。同步完成，不留可复活的窗口。
+   */
+  closeAppConnections({ appId = null, organizationId = null, reason = "app-grant-revoked" } = {}) {
+    const inScope = (connectionId) => {
+      if (!organizationId) return true;
+      const row = this.store.connectionById(connectionId);
+      return !!row && row.organization_id === organizationId;
+    };
+    let closed = 0;
+    for (const id of [...this.live.keys()]) {
+      if (!inScope(id)) continue;
+      if (!this.#closeLiveDetached(id)) continue;
+      closed += 1;
+      this.#markEnded(id, { status: domain.STATUS.ERROR, lastErrorCode: domain.ERROR_CODE.MCP_UNAUTHORIZED, event: "AUTHORIZATION_REVOKED", detail: reason });
+    }
+    let revoked = 0;
+    for (const [client, connectionId] of [...this.openingOf]) {
+      if (!inScope(connectionId)) continue;
+      this.revokedConnections.add(connectionId);
+      revoked += 1;
+      Promise.resolve(client.close()).catch(() => {});
+    }
+    return { ok: true, closed, revoked, appId, organizationId };
   }
 
   // ---------------------------------------------------------------------------
@@ -427,6 +480,40 @@ class McpService {
   }
 
   /**
+   * 收尾落状态：把"已经没有活连接"如实写下来（会话结束 → DISABLED + MCP_SESSION_ENDED），
+   * 绝不留 READY 假象，也绝不改写 enabled。
+   * 只对 READY / CONNECTING 生效 —— ERROR / AUTH_REQUIRED 是上一次尝试的真实结论，不覆盖。
+   */
+  #markEnded(connectionId, { status, lastErrorCode = null, event = "SESSION_ENDED", detail = null } = {}) {
+    const row = this.store.connectionById(connectionId);
+    if (!row || !row.enabled) return false;
+    if (row.status === status && (row.last_error_code || null) === (lastErrorCode || null)) return false;
+    if (row.status !== domain.STATUS.READY && row.status !== domain.STATUS.CONNECTING) return false;
+    this.store.transactSync(() => this.store.updateConnection(connectionId, { status, lastErrorCode }));
+    this.#log(connectionId, status === domain.STATUS.ERROR ? "ERROR" : "INFO", event, { errorCode: lastErrorCode, detail });
+    return true;
+  }
+
+  /** 在途握手的收尾判定：dispose 的全局代次，或本连接被撤权。 */
+  #teardownFor(connectionId, epoch) {
+    if (epoch !== this.epoch) return "session-ended";
+    if (this.revokedConnections.has(connectionId)) return "authorization-revoked";
+    return null;
+  }
+
+  /** 收尾发生在握手途中：关客户端、按原因落状态与错误码，绝不让这次握手进入 live。 */
+  async #abortHandshake(connectionId, client, reason) {
+    try { await client.close(); } catch { /* 已经关了 */ }
+    if (reason === "authorization-revoked") {
+      this.revokedConnections.delete(connectionId);
+      this.#markEnded(connectionId, { status: domain.STATUS.ERROR, lastErrorCode: domain.ERROR_CODE.MCP_UNAUTHORIZED, event: "AUTHORIZATION_REVOKED", detail: "handshake-aborted" });
+      return { ok: false, error: domain.ERROR_CODE.MCP_UNAUTHORIZED, status: domain.STATUS.ERROR };
+    }
+    this.#markEnded(connectionId, { status: domain.STATUS.DISABLED, lastErrorCode: domain.ERROR_CODE.MCP_SESSION_ENDED, event: "SESSION_ENDED", detail: this.disposeReason || "session-ended" });
+    return { ok: false, error: domain.ERROR_CODE.MCP_SESSION_ENDED, status: domain.STATUS.DISABLED };
+  }
+
+  /**
    * 一次真实握手：resolve endpoint → (BEARER) 取凭据 → connect → initialize → tools/list。
    * 无论成功失败都写记录：成功写协商快照，失败写稳定错误码与真实协议版本（如果有）。
    */
@@ -464,11 +551,17 @@ class McpService {
     const client = this.clientFactory();
     // 会话失效可能发生在 GET 流上（服务端 404）：服务层必须同步收敛，不能等下一次 IPC
     client.onSessionInvalid = (code, info) => this.#onSessionInvalid(connectionId, client, code, info);
+    const epoch = this.epoch;
     this.opening.add(client);
+    this.openingOf.set(client, connectionId);
     try {
       const opened = await client.connect({ transport: starting.transport, endpoint, credentialSecret, authMode: starting.auth_mode });
+      const afterConnect = this.#teardownFor(connectionId, epoch);
+      if (afterConnect) return await this.#abortHandshake(connectionId, client, afterConnect);
       if (!opened.ok) return this.#fail(connectionId, opened.error, { detail: opened.detail, client });
       const init = await client.initialize({});
+      const afterInit = this.#teardownFor(connectionId, epoch);
+      if (afterInit) return await this.#abortHandshake(connectionId, client, afterInit);
       if (!init.ok) {
         // 协议版本不符时仍记录服务端真实返回的版本/身份 —— "失败"不等于"没看到"
         if (init.protocolVersion || init.serverInfo) {
@@ -478,8 +571,12 @@ class McpService {
       }
       // GET server→client 流：服务端不支持（405/404/501）不算连接失败，POST 照常可用
       const stream = await client.startServerStream();
+      const afterStream = this.#teardownFor(connectionId, epoch);
+      if (afterStream) return await this.#abortHandshake(connectionId, client, afterStream);
       this.#log(connectionId, "INFO", stream.supported ? "GET_STREAM_OPEN" : "GET_STREAM_UNAVAILABLE", { errorCode: stream.error || null, detail: "status=" + (stream.status || 0) + " reason=" + String(stream.reason || "") });
       const discovered = await client.listTools({});
+      const afterDiscover = this.#teardownFor(connectionId, epoch);
+      if (afterDiscover) return await this.#abortHandshake(connectionId, client, afterDiscover);
       if (!discovered.ok) {
         this.store.transactSync(() => this.store.updateConnection(connectionId, { protocolVersion: init.protocolVersion, serverName: init.serverInfo.name, serverVersion: init.serverInfo.version, capabilitiesJson: JSON.stringify(init.capabilities || {}) }));
         return this.#fail(connectionId, discovered.error, { detail: "tools-discovery-failed", client });
@@ -504,6 +601,7 @@ class McpService {
       };
     } finally {
       this.opening.delete(client);
+      this.openingOf.delete(client);
     }
   }
 
