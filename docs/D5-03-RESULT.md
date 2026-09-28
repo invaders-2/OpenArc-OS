@@ -1,9 +1,103 @@
 # D5-03 · MCP 中心结果（2026-09-28）—— 第四批（会话自然到期收流 + 策略收口）+ 第三批 + 第二批 + 第一批
 
-> **本文件四部分**：**第四批（会话自然到期 → MCP 收流 + 策略收口）** 是本文当前正文（被测内容 `7b75ea3`；判定 = PASS（限定范围），D5-03 整体仍 = PARTIAL）；**第三批（Streamable HTTP 流式收口 + 生命周期收尾，`1b78953` / `0aa4027`）** 降级为历史原文（结论一条未删，被本批改写的口径就地加 **【第四批已更新】** 标记）；**第二批（MCP 授权收口，`360d94b`）** 与 **第一批（连接管理与能力发现，`d583154`）** 的原文保留在文末「附一」「附二」里，其中被后批改写的口径已就地标注 **【第三批已更新】** / **【第三批订正】** / **【第二批已更新】**。【**第五批已更新**：**本文当前正文 = 第五批（安装重置同事务清授权 + 登录失败文案收口，`09dccf9` + `7ad424c`）**；第一至第四批降级为历史原文，结论一条未删，被本批改写的口径就地加【第五批已更新】/【第五批订正】】
-> **当前有效证据 = 第四批统一重跑的 9 个 runId（见第四批 §2）**；第三批的 runId / 根目录 artifact 路径 / 静态 CDP 端口（9811/9812）/ 143、145 回归口径都只作历史。第一至第三批的既有结论按「不删改、只加注」处理。【**第五批已更新**：**当前有效证据 = 第五批 runId 清单（见第五批 §2.1）+ 仍然有效的第四批证据（哪些复用、为什么，见 §2.2）**；第四批的 9 个 runId 中，expiry 的**其余五个场景**（extend / absolute / relogin / regress / override-deny）继续有效并复用，center / stream / policy / expiry-idle 四项已由同提交新鲜重跑取代】
+> **本文件四部分**：**第四批（会话自然到期 → MCP 收流 + 策略收口）** 是本文当前正文（被测内容 `7b75ea3`；判定 = PASS（限定范围），D5-03 整体仍 = PARTIAL）；**第三批（Streamable HTTP 流式收口 + 生命周期收尾，`1b78953` / `0aa4027`）** 降级为历史原文（结论一条未删，被本批改写的口径就地加 **【第四批已更新】** 标记）；**第二批（MCP 授权收口，`360d94b`）** 与 **第一批（连接管理与能力发现，`d583154`）** 的原文保留在文末「附一」「附二」里，其中被后批改写的口径已就地标注 **【第三批已更新】** / **【第三批订正】** / **【第二批已更新】**。【**第五批已更新**：**本文当前正文 = 第五批（安装重置同事务清授权 + 登录失败文案收口，`09dccf9` + `7ad424c`）**；第一至第四批降级为历史原文，结论一条未删，被本批改写的口径就地加【第五批已更新】/【第五批订正】】【**第六批已更新**：**本文当前正文 = 第六批（App 授权组织隔离 + 登录错误行不透明内容底，`d1ba058` + `2944e45`）**；第一至第五批全部降级为历史原文，结论一条未删，被本批改写的口径就地加【第六批已更新】/【第六批订正】】
+> **当前有效证据 = 第四批统一重跑的 9 个 runId（见第四批 §2）**；第三批的 runId / 根目录 artifact 路径 / 静态 CDP 端口（9811/9812）/ 143、145 回归口径都只作历史。第一至第三批的既有结论按「不删改、只加注」处理。【**第五批已更新**：**当前有效证据 = 第五批 runId 清单（见第五批 §2.1）+ 仍然有效的第四批证据（哪些复用、为什么，见 §2.2）**；第四批的 9 个 runId 中，expiry 的**其余五个场景**（extend / absolute / relogin / regress / override-deny）继续有效并复用，center / stream / policy / expiry-idle 四项已由同提交新鲜重跑取代】【**第六批已更新**：**当前有效证据 = 第六批 runId 清单（见 §六 §2.1）+ 仍然有效的第五批 / 第四批证据（哪些复用、为什么，见 §六 §2.2）**；第五批的 reset / center / stream / policy / 视觉五项已由第六批**同提交新鲜重跑**取代，`27eb` 的 **16/17 保留为修复前失败历史**；expiry-idle `f078` 本批未重跑，按结构判断沿用】
 > 第三批口径（用户明确定范围）：**只做 Streamable HTTP 流式收口**（POST / GET SSE、断线续传、重复事件去重、半包与超大事件、有界失败、会话失效不自动重连）**与生命周期收尾**（登出 / 锁屏 / 关应用 / 停用删除 / 撤权即时收流）；**不开放工具调用、不连真实第三方、不运行任意第三方程序、不发用户数据、不声称插件隔离通过**；**本批不新增「创建组织」产品入口**（用户明令）。文中数字全部来自真实运行输出 / 本轮 run 目录 artifact；没有实测到的项一律进「未验收」，不美化。
-> **判定：D5-03 第三批（Streamable HTTP 流式收口）= PASS（限定范围）；D5-03 整体仍 = PARTIAL**（剩余缺口逐条见 §10 / §12）。【第五批已更新：最新判定 = **D5-03 第五批 = PASS（限定范围：功能通过、视觉部分通过）；D5-03 整体仍 = PARTIAL**（见第五批 §5）】
+> **判定：D5-03 第三批（Streamable HTTP 流式收口）= PASS（限定范围）；D5-03 整体仍 = PARTIAL**（剩余缺口逐条见 §10 / §12）。【第五批已更新：最新判定 = **D5-03 第五批 = PASS（限定范围：功能通过、视觉部分通过）；D5-03 整体仍 = PARTIAL**（见第五批 §5）】【**第六批已更新**：最新判定 = **D5-03 第六批（App 授权组织隔离 + 登录错误行不透明内容底）= PASS（限定范围）；D5-03 整体仍 = PARTIAL**（见 §六 §5）】
+
+## 第六批（App 授权组织隔离 + 登录错误行不透明内容底）· 2026-09-28 · 被测内容 `d1ba058`（产品修复）+ `2944e45`（门禁脚本/报告）
+
+> **口径（用户明确定范围）**：本批 = **App 授权组织隔离（含安全修复）**（取数按 `(app_id, organization_id)` + 空组织 fail-closed 空集 + 判权层纵深防御 + 三处漏掉的调用点补组织）+ **登录错误行不透明内容底**（`.auth-error` 加 `rgb(var(--content-rgb) / 1)`，让该行合成背景与壁纸 / 玻璃档解耦）+ **门禁假阳性修正与 R3 登记表 4 → 5 项**（经总经理逐条授权）；**不开放工具调用、不连真实第三方、不运行任意第三方程序、不发用户数据、不声称插件隔离通过**；**不新增「创建组织」产品入口**（用户明令）；**不做整库扫删**（用户明令）。
+> **判定：D5-03 第六批（App 授权组织隔离 + 登录错误行不透明内容底）= PASS（限定范围）；D5-03 整体仍 = PARTIAL**（剩余缺口逐条见 §4 / §5）。
+> **本批决策文档 = `docs/decisions/D5-03F-app-grant-org-isolation-and-auth-error-contrast.md`**（含规范例外集中登记）；真机报告 `experiments/d5-03/D5-03-BATCH6-MATRIX-REPORT.md`；tracked 证据 `docs/D5-03-GATE-EVIDENCE.json` 的 `batch6` 段。
+
+### 1. 被测内容与证据口径披露（必读，不含糊）
+
+| 项 | 值 |
+| --- | --- |
+| 分支 | `integration/ui-core`（未 push、未合并 main、未切分支） |
+| 产品修复（被测提交） | `d1ba058`：**27 个文件** = 7 个 `electron/*.cjs`（`authorization-store` / `authorization-domain` / `authorization-service` / `governance-service` / `model-service` / `mcp-service` / `identity-store`（**仅注释**，剥块注释后逐字节相同））+ `src/styles.css` + 2 个 `experiments/` 旧单参调用修正 + 17 个 `tests/` 测试/夹具文件（含 2 个新增），`+833 / −83` |
+| 门禁脚本与报告（HEAD） | `2944e45`：**9 个文件全部在 `experiments/d5-03/`**，`+1897 / −16`；`2944e45` 的父提交 = `d1ba058`，`git diff d1ba058 2944e45 --stat` = **产品代码零改动** |
+| artifact 记录的 `testedCommit` | **`d1ba058bdfb6b7d7cdb0d9e2c4115317a74adf7b`**（本次会话新增的 20 个索引 run 全部同值） |
+| **区分（如实披露）** | 真机运行发生在**门禁脚本改动已写入工作树、尚未提交**时：两个 policy artifact 记 `gitDirtyLines=6`（`74ec`，R3 重基线前）与 `8`（`2780`，重基线后），随后才提交成 `2944e45`。**不写成「测试提交 = 2944e45」，也不写成「产品修复与测试无关」。** |
+| 汇总 JSON | **本批没有机器可读汇总 JSON**（当前有效证据 = 报告 §6 的 runId/sha256 表 + `runs/index.json` + 各 run artifact） |
+| 索引完整性（本岗复核） | `index.json` **64 条**、`index.jsonl` **64 行**；64 个 artifact 逐条重算 sha256 = **64 一致 / 0 不一致 / 0 缺失**，旁挂 `.sha256` 64/64 一致，runId 无重复。**报告 §8 记「61 条 / 60 行」与本岗复核值（64 / 64）不一致 —— 如实登记，报告原文不改，数值以复核为准**。 |
+| 未入索引的目录（如实登记） | 会话新增 22 个目录 = 20 个入索引 + `f364`（报告 §6.3 已登记：冒烟中止、未 finalize）+ **`20260928T092533Z-cf4e-batch6-r3-rebase-proof`（空目录，报告未登记 —— 本岗补登，不影响任何判定）**；工装迭代轮 `fcfa`（39/40）报告 §6.3 未列、本岗补登。 |
+
+### 2. 当前有效证据
+
+#### 2.1 第六批 runId 清单（串行、同一份 `d1ba058` 代码）
+
+| 用途 | runId | counts / exit | artifact sha256 |
+| --- | --- | --- | --- |
+| 安装重置一致性 | `20260928T091457Z-f559-mcp-reset-e2e` | **26/26 · exit 0 · notVerified 3** | `9c2c91a1eb5e9dc4b33d134ea377fa7c43511338ea133f5270a56de26133e254` |
+| center（第一批回归） | `20260928T091508Z-967d-mcp-center-e2e` | **38/38 · exit 0 · notVerified 0** | `6726b742034d49c1f4bb09d252e6e8585339b94e1af567859421e26d6c070b1e` |
+| stream（第三批回归） | `20260928T091545Z-23e3-mcp-stream-e2e` | **29/29 · exit 0 · notVerified 0** | `8df59d5277f10d1034f75a21a1ed953266f9057715752476fe99386edd044b34` |
+| policy（**R3 重基线后**） | `20260928T095113Z-2780-mcp-policy-e2e` | **43/43 · exit 0 · notVerified 2** | `79483f1db9cb8b7b4ec7a2bde9ed4f711fc2d3858c7ef2b3f1fc1eab4d76631e` |
+| ↳ policy（重基线前，留档对照） | `20260928T091621Z-74ec-mcp-policy-e2e` | 42/43 · exit 1 · notVerified 2 | `95ae1de005e2a8695156630028f6be7eea6df0dd3df3152f82955f704f8201fe` |
+| 视觉 / 布局 / 焦点 / 动效矩阵 | `20260928T094556Z-c729-auth-error-visual` | **43/43 · exit 0 · notVerified 2** | `1e87ced41e3b9c453e206d2b63e44290e244f06d8dcbe50fd27a9340778ca86b` |
+| 门禁假阳性先红后绿反证 | `20260928T084047Z-866c-batch6-gate-rebase-proof` | 11/11 · exit 0 | `019a14032fafcd0a9caebdaef299c3df79964a3127bb24c3f6beabe4486c7def` |
+| R3 新增项负向自证 | `20260928T092753Z-e537-batch6-r3-rebase-proof` | 4/4 · exit 0 | `9c7f00e904a2fe6d08635a7525e76e70c10e9f8c5b4657e9dab10d595a835966` |
+
+* **计数不得低于上一轮**：reset 26 ≥ 26、center 38 ≥ 38、stream 29 ≥ 29、policy 43 ≥ 43（重基线前那一轮 42/43 已按「如实报告并停下说明」处理，经总经理逐条授权后重基线）。
+* 本岗复算：8 个 artifact 的 sha256 与索引记录、同目录 `.sha256` 逐字一致；`2780` 与 `74ec` 按位置逐条比对 43 条（runId 归一化）→ **状态不同的只有 1 条 = R3 FAIL → PASS**，其余 42 条与 notVerified 2 条一字未动。
+
+#### 2.2 仍然有效的第五批 / 第四批证据（哪些复用、为什么）
+
+| 复用的证据 | 出处 | 为什么仍然有效 |
+| --- | --- | --- |
+| 第五批 expiry-idle `20260928T070551Z-f078-mcp-expiry-e2e` **26/26** | 第五批 §2.1 | 本批**未重跑** expiry；第六批改动落在 App 授权取数与 `.auth-error` 样式，**不落在 expiry 的断言面上**（断言会话到期 / 收流 / 连接状态 / `detail=expired:*`，不读 app grant 取数）。**口径如实说明：这是结构判断；第六批未跑受影响性分析工具、也未重跑 expiry 六场景**（见 §4 登记）。 |
+| 第四批 expiry 其余五场景：extend / absolute / relogin / regress / override-deny | 第四批 §2（第五批 §2.2 复用） | 同上；且本批对 `governance-service.cjs` 的改动是「调用点补组织、显式组织过滤原样保留、行为逐行不变」（O9 行为级对照）。 |
+| 第五批 R3 登记表前 4 项 | 第五批 §2.7 | 本批**只新增第 5 项 `src/styles.css`**，前 4 项的必含 / 禁含 / 只增判据一字未改。 |
+| 第五批 `SHOWABLE_ERROR_DETAIL` / `errorText` 收口 | 第五批 §2.6 | 本批一字未改（`d1ba058` 的 diff 不含 `src/identity/types.ts`）；`c729` 43/43 仍在真机上复验文案与内部标记。 |
+| 第四批临时目录归属机制（`userdata-ownership.cjs`） | 第四批 §6 | 本批未改该脚本；每次运行 `cleanup.leftovers = []`、`pkillUsed=false`。 |
+| 第五批登记的残留（`device_pairing_credentials` 未清 / `app_principals.status` / `RATE_LIMITED` 对象 detail / `invariants()` 无孤儿行检查） | 第五批 §4 | 本批未处理这些项，结论继续有效。 |
+
+**不再作为当前证据**：第五批的 reset `9cd0` / center `c7ba` / stream `cce3` / policy `db3d` / 视觉 `27eb` —— 前四者已由第六批**同提交新鲜重跑**取代；`27eb` **16/17 保留为「修复前」的历史失败证据**（2.62:1 的失败历史必须留，不能顶替成当前值）。
+
+#### 2.3 三轴判定与关键实测
+
+* **功能 = 通过**：四段 MCP 门禁 **26/26 + 38/38 + 29/29 + 43/43** 全 exit 0；`node --test tests/d4-04-closure2-boot.test.mjs` **9/9**；`npm test` **1363/1365**（两条既有失败与本批无关）；App 授权组织隔离的新证据 `tests/d5-03-app-grant-org-isolation.test.mjs`（**O1–O9，9/9**，A/B 两真实组织各 15 对按产品路径播种；**先红后绿 2×2**：全还原 7 fail / 只恢复判权层 5 fail / 只恢复取数层 1 fail）；reset 测试 T5/T5b 期望值订正后现场重跑 9/9（`f559` 的 `node-reset-consistency.log`）。
+* **视觉 = 通过**：矩阵 **10 格 × 2 面全部 ≥4.5:1**，每格底 = **该行自身 token 底** —— 浅 `255,255,255` → **5.372**、深 `23,23,23` → **5.261**、深实色 `14,14,14` → **5.665**；四个基准点对照第五批 `27eb`：**2.620 → 5.372、5.192 → 5.372、5.310 → 5.261、5.159 → 5.261**；**登录页两条错误行首次量到对比度**（各 5.372，配置 = light × reduced × 浅壁纸）。布局 / 焦点 / 动效全绿：向导面错误行高 **36.40px ≥ line-height 20.40px**；无错误行时元素**整段不在 DOM**；出现后 `.auth-actions` 下移 **48.4px = 行高 36.4 + margin 12.0**（精确相等）；8 组缩放（100/125/150/200% × 长文案 126 字注入）无横向溢出、按钮与错误行不相交；焦点环 `2px` + `offset 2px` 与错误行不相交（输入框按产品设计不用焦点环，已留档）。**第五批 16/17 与 2.62:1 的失败历史保留**（修复前证据）。
+* **动效 = 通过（含 1 条口径不符的如实登记）**：两档帧序列 **0 中间帧**、末帧与首现帧矩形一致、`animationName=none` / `transitionDuration=0s`（各 34 帧、中位 73 / 82ms，即时出现的分辨率上界 ≈ 80ms ≤ MS:145 的 100ms）；`.reduced` 档元素作用域 `--dur-quick=0ms`。**如实登记一条口径不符**：任务书说「normal 与 reduced 都 0ms」，实现里 0ms 只在 `.reduced`（`tokens.css:358`），常规档 **160ms**（`:170`）；该行两档都无过渡 / 动画声明、帧序列已证两档都即时出现 —— **按实现记录，不写成通过**。
+
+### 3. 回归与边界
+
+| 命令 / 项 | 结果 |
+| --- | --- |
+| `node --test tests/d4-04-closure2-boot.test.mjs` | **9/9 pass、exit 0**（该 fixture 的「全表读取」改动被真实执行到） |
+| `npm test`（全量） | **1363/1365**（两条既有失败：`tests/side-effect-c4-gates.test.mjs`、`tests/d4-03-approval-push-isolation.test.mjs`，与本批无关） |
+| 两条探针门禁（`governance-ui` 1/5、`model-keychain-restart` 3/15） | **既有失败**（一次性授权 A/B 实测：fixture 临时回退到 `d4a3516` 后结果完全相同 —— 同计数、同失败点；恢复后 sha256 一致、`git status` 为空）→ 登记待单独排期 |
+| `npm run build` | exit 0（**产品提交自证**，见 `d1ba058` 提交信息；本批未独立复跑，避免改写 `distFingerprint`） |
+| `SCHEMA_VERSION` | **仍 21** |
+
+**边界（未越界）**：不接真实第三方；不发用户数据；不运行任意第三方本地程序；不声称插件隔离通过（D5-08）；工具调用入口仍 `MCP_TOOL_INVOCATION_NOT_ENABLED`；协议仍 `2025-06-18`；**本批未新增「创建组织」入口**；串行（同一时刻只有一个 Electron）、独立 runId 目录、只追加索引、独占 CDP 端口、只清自己的 pid 树（`pkillUsed=false`、`leftovers: []`）。
+
+### 4. notVerified 与缺口（逐条，不美化）
+
+| # | 条目 | 理由 | 现有替代证据 |
+| --- | --- | --- | --- |
+| 1 | **「normal 与 reduced 下元素作用域 `--dur-quick` 都是 0ms」口径不符** | 任务书口径与实现不符（0ms 只在 `.reduced`）→ **按实现记录，不改成通过**（总经理裁定 ③） | 该行两档都无过渡 / 动画声明 + 帧序列两档即时出现 |
+| 2 | 设置面错误行消失后的空间释放量**精确等于「行高 + margin」** | 实测释放 61px，行高 + margin = 48.4px，**残余 12.6px 成因未查明**（向导面同一判据精确成立） | 向导面 48.4 = 48.4；元素整段移出 DOM |
+| 3 | 产品 Zoom 的「真实入口」 | 产品没有缩放 UI / API，四档缩放由 CDP 设备度量覆写复现 | 8 组缩放布局检查（探针模拟口径已登记） |
+| 4 | 缩放矩阵里的长文案 | 126 字是注入 DOM 的排版压力测试，不是产品真实文案 | 真实文案（7–13 字）四档缩放各自量过 |
+| 5 | 动效证据是连续帧序列而不是视频文件 | 帧间隔中位 73 / 82ms；未做视频编码、未做人工节奏评审 | 逐帧 PNG 序列（`wizard-normal-00..33` / `wizard-reduced-00..33`） |
+| 6 | **跨组织真机 2 条（policy，继续保留）** | 同一安装内第二个组织无产品入口 → 跨组织行为级只到 schema + node 级；**本批未新增「创建组织」入口** | policy `notVerified: 2`；`2780` 43/43；node 行为级 O1–O9 / `authorization-app-grant-scope` / `d5-03-mcp-policy-persistence` |
+| 7 | **`governance-ui` / `model-keychain-restart` 两条探针门禁本身** | 已用 A/B 实测证明是**既有失败**（与本批改动行无关），但两条门禁在当前提交上不通过，需单独排期；本批不改 `tests/**` | A/B 对比（回退 `d4a3516` 后同计数、同失败点）+ 逐字节恢复证明 |
+| 8 | `.auth-error` 在实色档（solid）下的浅色 token 无区分度 | `light × solid` 的 `--content-rgb` 仍 `255 255 255`，与 `light × full` 同值 | 深色实色档有区分度（`14 14 14` ≠ `23 23 23`） |
+
+**两条探针门禁的失败点（逐字）**：`governance-ui` **1/5**，崩在探针 `main.cjs:91-92` 的 `userByIdentifier` 返 null → `u2.id` 抛错，在改动行 104/106/108 **之前**；`model-keychain-restart` **3/15**，崩在 `appById("settings")` 为 `null` → `createProvider` 直接 `PROXY_UNAUTHORIZED`，在改动的第 97 行**上游**的 `!app` 检查；`settings` 由 `electron/model-bootstrap.cjs:44` 的 `seedModelAppPolicy` 在拿到会话时补种，该探针 `boot()` 从未调用它。**⇒ 既有失败、与本批改动行无关。**
+
+**本批新登记的残留**：① `experiments/d3-04d/02-picker.mjs:26` 的 `qApp.total===0` 断言**本身不敏感**（baseline 存在时该查询也是 0；**既有弱化，非本批引入**，本批只把撤销循环的取数补上组织）；② `.auth-error` 是**组件级局部补**，规范级解法（token 层「浮在可变背景上的文本行」材质档 / 语义映射）**未做**（决策文档已登记取舍）；③ 第六批**未跑受影响性分析工具、也未重跑 expiry 六场景**（expiry 复用是结构判断）；④ 报告 §8 的索引数字（61 条 / 60 行）与复核值（64 / 64）不一致；未入索引的空目录 `cf4e` 与工装迭代轮 `fcfa` 报告未登记（本岗补登）。
+
+**继续单列（不并入本批）**：**OAuth**（仅 `NONE` / `BEARER`）、**设备配对凭据重置**（第五批登记残留：`device_pairing_credentials` 未清）、**插件隔离（D5-08）**、**D5-02 重命名受 Electron 不支持 `prompt()` 限制**、**SIGKILL 边界**、第五批登记的其余残留（`app_principals.status` / `RATE_LIMITED` 对象 detail / `invariants()` 无孤儿行检查）。**本批未新增「创建组织」入口。**
+
+### 5. 判定
+
+* **D5-03 第六批（App 授权组织隔离 + 登录错误行不透明内容底）= PASS（限定范围）**：四段 MCP 门禁 **26/26 + 38/38 + 29/29 + 43/43** 全 exit 0；App 授权取数按 `(app_id, organization_id)` 且**空组织 fail-closed 返回空集**，判权层 `evaluateAppAuthorization` 逐条挡异组织行（含 `organization_id=''` 无主行）、三处调用点补组织、MCP 域删掉 `!g.organization_id` 通配分支（O1–O9 **9/9**，先红后绿 2×2 = 7 / 5 / 1 fail）；`.auth-error` 不透明内容底使矩阵 **10 格 × 2 面全部 ≥4.5:1**（浅 5.372 / 深 5.261 / 深实色 5.665），**第五批 2.62:1 的唯一失败闭合**；门禁两处假阳性修正（按选择器提取 + V7b 重基线，先红后绿 11/11）+ R3 登记表 **4 → 5 项**（负向自证 4/4）；`npm test` **1363/1365**（两条既有失败）、`d4-04-closure2` **9/9**、`SCHEMA_VERSION` 仍 21。
+* **D5-03 整体仍 = PARTIAL**，剩余缺口 = §4 逐条（跨组织真机 2 条 / 两条探针门禁既有失败待排期 / OAuth / 设备配对凭据重置 / 插件隔离（D5-08）/ D5-02 `prompt()` / SIGKILL 边界 / 本批新登记残留）。
+* **本批闭环的旧缺口**：第五批视觉唯一失败（浅色 `.auth-error` **2.62:1 → 5.372:1**）；第四批登记的「App 侧孤儿授权行可复活权限」（第五批订正、第六批从**取数 + 判权两层**闭合）；第五批「取数 `appGrantsForApp(app_id)` 不带组织过滤」的口径。
+* tracked 证据：`docs/D5-03-GATE-EVIDENCE.json` 的 `batch6` 段；本批决策 `docs/decisions/D5-03F-app-grant-org-isolation-and-auth-error-contrast.md`；真机报告 `experiments/d5-03/D5-03-BATCH6-MATRIX-REPORT.md`。
 
 ## 第五批（安装重置同事务清授权 + 登录失败文案收口）· 2026-09-28 · 被测内容 `09dccf9`（产品修复）+ `7ad424c`（门禁脚本/报告）
 
@@ -36,7 +130,7 @@
 | stream（第三批回归 · 当前有效） | `20260928T065841Z-cce3-mcp-stream-e2e` | 29/29 · exit 0 | `47ce54542391bd97806491c129077f63ce1a4ba225243c81eb6de4c1fa42960a` |
 | expiry-idle（M1 修前 · 历史） | `20260928T065912Z-5288-mcp-expiry-e2e` | 24/25 · exit 1 | `0ed39614269dad2c12fb4a74a22a824b5698450063c06deba4ca8b639dd72259` |
 | **expiry-idle（M1 修后 · 当前有效）** | `20260928T070551Z-f078-mcp-expiry-e2e` | **26/26 · exit 0** | `37e9dbb9d93cbe2d662f981a70e18d3a5d13f4273950cf4e90c43d5e25955176` |
-| **视觉 + 动效（当前有效）** | `20260928T070627Z-27eb-auth-error-visual` | **16/17 · exit 1**（唯一 FAIL = 浅色对比度 V6a） | `506f2a48ad42f906591487583f17a0162eef57d4940d24866509a2fcc41759a8` |
+| **视觉 + 动效（当前有效）** | `20260928T070627Z-27eb-auth-error-visual` | **16/17 · exit 1**（唯一 FAIL = 浅色对比度 V6a） | `506f2a48ad42f906591487583f17a0162eef57d4940d24866509a2fcc41759a8`【**第六批已更新**：本行是**第五批当时的**当前有效视觉证据；第六批已由 `20260928T094556Z-c729`（**43/43 · exit 0**，10 格 × 2 面全绿）取代，`27eb` 的 16/17 与 2.62:1 保留为**修复前历史证据**（见 §六 §2.1 / §2.3）。】 |
 | 受影响性分析（静态 · 当前有效） | `20260928T070745Z-e3b6-batch5-affectedness` | 10/10 · exit 0 | `259d3dafa011e886714f604c45b564e0cc3250e8451df5b68d965e7f888c006f` |
 
 * 本岗独立复算：10 个 artifact 的 sha256 与同目录 `.sha256` 文件**逐字一致**；`counts` 声明、`len(checks)` 与 `exitCode` 三者一致。
@@ -78,7 +172,7 @@
 | 表 | 是否授权事实 | 能否复活 / 误导 | 处理 | 可复核取数路径 |
 | --- | --- | --- | --- | --- |
 | `app_policy_provisions` | 是（提供记录 + 撤销墓碑） | 组织 id 复用时旧墓碑**静默抑制新组织首次播种**（T3 实测） | **清** | `authorization-store.cjs:93 policyProvisionByKey(organization_id,…)` |
-| `app_resource_grants` | 是（App 侧 ACL） | **能直接复活权限**：`appGrantsForApp(app_id)` 不带组织过滤；`evaluateAppAuthorization` 只看 `grant.app_id` + 目标覆盖（T5 实测 ALLOW，`allowSources` 含 `APP_GRANT`） | **清** | `authorization-store.cjs:80` → `authorization-service.cjs:114` → `authorization-domain.cjs:547` |
+| `app_resource_grants` | 是（App 侧 ACL） | **能直接复活权限**：`appGrantsForApp(app_id)` 不带组织过滤；`evaluateAppAuthorization` 只看 `grant.app_id` + 目标覆盖（T5 实测 ALLOW，`allowSources` 含 `APP_GRANT`） | **清** | `authorization-store.cjs:80` → `authorization-service.cjs:114` → `authorization-domain.cjs:547`【**第六批已更新**：取数已改为按 **(app_id, organization_id)**（`authorization-store.cjs:80`），且**组织为空/缺失 fail-closed 返回空集**；判权层 `evaluateAppAuthorization` 逐条跳过异组织 grant（`authorization-domain.cjs:568`），组织为空一行都不放行。第五批「只按 app_id 取数、孤儿行能跨组织授权」是**第五批当时的事实**，其取证价值不变（本批即据此修复），**不再是当前口径**。详见 §六。】 |
 | `resource_grants` | 是（User / Department ACL） | user 侧判定按 `organization_id = user.team_id` 过滤 → 组织整体消失后不可达；组织 id 复用时命中 | **清** | `authorization-store.cjs:59 / :62`；判定 `authorization-domain.cjs:490` |
 | `device_access` | 是（设备 ACL） | 取数 `accessOfDevice(device_id)`，`ORGANIZATION` 分支不比对 `organization_id` | **清** | `device-store.cjs:61 / :62`；`device-service.cjs #accessAllows` |
 
@@ -136,7 +230,7 @@
 | 设置窗口面 `.auth-error` | 浅色 | `rgb(251,251,251)`（46.3%） | `rgb(215,2,21)` | 5.19:1 | 通过 |
 | 设置窗口面 `.auth-error` | 深色 + 减少动态效果 | `rgb(25,25,25)`（29.6%） | `rgb(255,69,57)` | 5.16:1 | 通过 |
 
-  * 失败定性：**不是文字色本身不达标** —— 同一个 `--failed` 在浅色**窗口面**实测 5.19:1；向导卡是玻璃卡片、浮在默认**深色壁纸**（`theme-dark`）上，合成后成中灰 181,181,181。**既有缺口，本批未改任何样式**（本批改动文件不含 `.css`；`.auth-error` 规则本批一字未动），属**首次被实机量测暴露**。
+  * 失败定性：**不是文字色本身不达标** —— 同一个 `--failed` 在浅色**窗口面**实测 5.19:1；向导卡是玻璃卡片、浮在默认**深色壁纸**（`theme-dark`）上，合成后成中灰 181,181,181。**既有缺口，本批未改任何样式**（本批改动文件不含 `.css`；`.auth-error` 规则本批一字未动），属**首次被实机量测暴露**。 【**第六批已更新**：该失败已在第六批修复 —— `.auth-error` 加不透明内容底 `rgb(var(--content-rgb) / 1)`，合成背景与壁纸 / 玻璃档解耦；真机复测向导面 **5.372:1**（浅）、设置面 5.372 / 深色 5.261 / 深色实色 5.665，矩阵 **10 格 × 2 面全部 ≥4.5:1**（runId `20260928T094556Z-c729`，43/43，exit 0）。本段 2.62:1 是**修复前**的历史失败证据，保留不改。】
   * 截图：浅 / 深 / 深色+减少动态效果共 10 张（整窗 2880×1880 设备像素 = 1440×940 CSS × DPR 2；窗口 / 缩放 / 背景 / 透明度与第四批基准同口径，**截图范围不同** —— 第四批是 MCP 窗口 830×570 CSS 裁剪，见 §11）。
 * **动效 = 通过**：错误行常规（浅/深）与减少动态效果下 `animationName=none` / `transitionDuration=0s`，元素作用域 `--dur-quick=0ms`（`:root` 仍 0.16s，必须读元素作用域）；`.auth-error` 规则本身不含 `transition` / `animation`；**本批改动文件不含任何 `.css` / 动效文件**。
 * 迭代披露：视觉脚本前两轮 `…0cf1`（脚本缺陷 `textOf` 未定义，V0 后中止）与 `…8298`（V7 读取已卸载元素时 `getComputedStyle(null)` 抛错，V1–V6 已出结果）都如实留在 runs/ 与索引里；最终有效产物 = `27eb`。
@@ -161,17 +255,17 @@
 | 3 | `device_access` 重置清理证据（真机） | 重置前该表 0 行（**0 → 0 不构成清理证据**；`consumePairing` 需要另一台设备带服务身份） | node T1/T2 在四表非空（含 `device_access`）下验证清理与同事务回滚 |
 | 4 | 产品侧 `invariants()` 的**原生**可读入口 | `identity:command` 白名单没有对应命令（本轮不新增产品入口、不改判定） | 真机同一判定的只读复算 `invariantsEquivalentReadonly`（逐条等价），五个快照全空 |
 | 5 | `session-missing` / `not-locked` 等内部 detail 的「界面不显示」真机构造 | 渲染层在这些路径上不显示错误行（restore 失败只回登录页；unlock 只在锁屏可用），真机不可构造 | 五处真机 DOM 扫描 0 命中 + node 对 253 个内部标记的全量断言 |
-| 6 | 浅色向导卡对比度达标 | 实测 **2.62:1 < 4.5:1**，**判定不通过**（视觉轴因此为「部分通过」，不是「未验收」） | 同 token 在浅色窗口面 5.19:1（定位为合成背景问题） |
+| 6 | 浅色向导卡对比度达标 | 实测 **2.62:1 < 4.5:1**，**判定不通过**（视觉轴因此为「部分通过」，不是「未验收」） | 同 token 在浅色窗口面 5.19:1（定位为合成背景问题）【**第六批已更新**：**已修复** —— 向导面浅色 2.62:1 → **5.372:1 ≥ 4.5:1**、深色 → 5.261:1；本条作为第五批的历史 notVerified 保留。】 |
 | 7 | 整窗截图与第四批窗口裁剪**逐像素同尺寸** | 认证界面是全窗表面，第四批基准是 MCP 窗口 830×570 CSS 裁剪；两者窗口 / 缩放 / 背景 / 透明度同口径，**截图范围不同** | 窗口度量：`innerWidth/innerHeight=1440×940`、DPR 2、`data-glass=full`、`data-wallpaper=theme-dark`、未开不透明 |
 
-**本批新登记的残留**：① `device_pairing_credentials` **未清**（重置前签发的配对凭据仍可再登记设备；T7 证明不产生授权结论，建议下批或产品裁定）；② `app_principals.status` **不受重置影响**（安装级配置，不在 27 张表内）；③ `RATE_LIMITED` 的 `{retryAfterMs}` 对象 detail **现被过滤但未映射成人话**；④ `invariants()` **未加「孤儿授权行」检查**（理由：它是交付给 node 测试的判据、改动会牵动既有断言；代价：将来若再出现孤儿行，自检不报）；⑤ **浅色 `.auth-error` 2.62:1 未闭合**。
+**本批新登记的残留**：① `device_pairing_credentials` **未清**（重置前签发的配对凭据仍可再登记设备；T7 证明不产生授权结论，建议下批或产品裁定）；② `app_principals.status` **不受重置影响**（安装级配置，不在 27 张表内）；③ `RATE_LIMITED` 的 `{retryAfterMs}` 对象 detail **现被过滤但未映射成人话**；④ `invariants()` **未加「孤儿授权行」检查**（理由：它是交付给 node 测试的判据、改动会牵动既有断言；代价：将来若再出现孤儿行，自检不报）；⑤ **浅色 `.auth-error` 2.62:1 未闭合**。 【**第六批已更新**：⑤ 浅色 `.auth-error` 2.62:1 **已闭环**（不透明内容底，真机 5.372:1）；①–④ 继续有效。】
 
 **既有缺口继续单列（不并入本批）**：OAuth（仅 `NONE` / `BEARER`）、真实第三方与 Adobe / PS（D5-04 / D5-05）、插件隔离（D5-08）、D5-02 重命名受 Electron 不支持 `prompt()` 限制、SIGKILL 边界。
 
 ### 5. 判定
 
-* **D5-03 第五批（安装重置同事务清授权 + 登录失败文案收口）= PASS（限定范围：功能通过、视觉部分通过）**：重置门禁 **26/26**、policy **43/43**（notVerified 2）、center **38/38**、stream **29/29**、expiry-idle **26/26**、受影响性分析 **10/10**，**全部 exit 0**；四张授权事实表真机 15/14/1/0 → **0/0/0/0**、审计三表一行不删；27 张 `organization_id` 表逐表判据 + 整库扫删被拒；守卫收紧到「恰好一条 + 逐字匹配」并有永久负向自证 R6b；文案收口后内部标记 0 命中；视觉 = **部分通过**（唯一失败 = 浅色向导卡 2.62:1，既有缺口、本批未改样式）；**动效 = 通过**；回归相关五文件 **55/55**、全量 1347/1349（两条既有失败与本批无关）、build exit 0、`SCHEMA_VERSION` 仍 21。
-* **D5-03 整体仍 = PARTIAL**，剩余缺口 = §4 逐条（跨组织真机 2 条 / OAuth / 真实第三方与 Adobe、PS（D5-04/05）/ 插件隔离（D5-08）/ D5-02 `prompt()` / SIGKILL 边界 / 本批新登记 5 条残留，含浅色对比度 2.62:1）。
+* **D5-03 第五批（安装重置同事务清授权 + 登录失败文案收口）= PASS（限定范围：功能通过、视觉部分通过）**：重置门禁 **26/26**、policy **43/43**（notVerified 2）、center **38/38**、stream **29/29**、expiry-idle **26/26**、受影响性分析 **10/10**，**全部 exit 0**；四张授权事实表真机 15/14/1/0 → **0/0/0/0**、审计三表一行不删；27 张 `organization_id` 表逐表判据 + 整库扫删被拒；守卫收紧到「恰好一条 + 逐字匹配」并有永久负向自证 R6b；文案收口后内部标记 0 命中；视觉 = **部分通过**（唯一失败 = 浅色向导卡 2.62:1，既有缺口、本批未改样式）；**动效 = 通过**；回归相关五文件 **55/55**、全量 1347/1349（两条既有失败与本批无关）、build exit 0、`SCHEMA_VERSION` 仍 21。 【**第六批已更新**：第五批的 reset / center / stream / policy / 视觉五项已由第六批**同提交新鲜重跑**取代（26/26 / 38/38 / 29/29 / 43/43 / 43/43）；「视觉 = 部分通过」的唯一失败已在第六批修复 ⇒ **第六批视觉 = 通过**；第五批的功能判定与历史价值不变。见 §六。】
+* **D5-03 整体仍 = PARTIAL**，剩余缺口 = §4 逐条（跨组织真机 2 条 / OAuth / 真实第三方与 Adobe、PS（D5-04/05）/ 插件隔离（D5-08）/ D5-02 `prompt()` / SIGKILL 边界 / 本批新登记 5 条残留，含浅色对比度 2.62:1）。 【**第六批已更新**：剩余缺口更新为「跨组织真机 2 条 / 两条探针门禁既有失败待排期（`governance-ui` 1/5、`model-keychain-restart` 3/15）/ OAuth / 设备配对凭据重置 / 插件隔离（D5-08）/ D5-02 `prompt()` / SIGKILL 边界 / 第六批新登记残留」；其中「浅色对比度 2.62:1」已闭合。】
 * **本批闭环的旧缺口**：`resetInstallation` 孤儿授权残留（第四批登记，且其「不可达」判定被本批**订正**为「App 侧可复活」）；`errorText` 通用括注泄漏内部 detail（第四批登记）；R3 陈旧 src 白名单（第五批过程中暴露并重基线）。
 * tracked 证据：`docs/D5-03-GATE-EVIDENCE.json` 的 `batch5` 段；本批决策 `docs/decisions/D5-03E-install-reset-authorization-consistency.md`；真机报告与汇总 JSON 见 §0 口径行。
 
@@ -272,7 +366,7 @@
 | R6 | 源码级守卫：除登记的组织删除路径外，`electron/**` 里任何 `app_policy_provisions` 行删除（`DELETE FROM` / `DROP TABLE` / `TRUNCATE` / cleanup 式语句）都 FAIL；正式重授 SQL 只允许 `SET revoked_at, revoked_by, updated_at`；守卫白名单 `ALLOWED_ORG_DELETION_PATHS = []`（空 = 产品里没有合法删除路径，测试把它钉住）【第五批已更新：白名单已从空数组改为**恰好一条**（安装重置），放行判据 = 文件 + 命中形态 + 去空白逐字相等的完整语句（取消 `includes` 模糊匹配）+ 四条 fail-closed 加固 + 永久负向自证 R6b。**是收紧，不是放宽**；详见第五批正文 §5】 |
 
 * **总经理裁定（本批决策）**：产品没有「组织正式删除」入口 → **本批不实现任何删除**，白名单保持为空；规则 = **组织仍存在时撤权记录永不清理**；将来若新增「组织正式删除」入口，必须 **provisions + grants 同事务一并清**并在守卫白名单登记。【第五批已更新：第五批的总经理裁定 = **守卫只放行安装重置这一条路径、不开放通用清理**；白名单从空数组改为恰好一条（安装重置），「不做整库扫删」的原则不变（27 张表逐表判据，4 清 + 23 不清）】
-* `resetInstallation` 现状残留（R5 实测）：重置后 `app_policy_provisions` 留 **15 行**孤儿、`app_resource_grants` 留 **15 行**孤儿，都指向已从 `teams` 删除的组织。**判定为不可达、不致权限复活**：重置后重建得到**全新随机组织 id**，新组织拿到与重置前**完全相同的 15 对播种**；无任何用户属于旧组织 → 旧组织授权行对所有授权判定都不可达；治理视图只看到新组织自己的行。【**第五批订正**：**该判定仅对 user 侧取数成立**（user 侧判定按 `organization_id = user.team_id` 过滤，`electron/authorization-domain.cjs:490`）；**对 App 侧取数不成立** —— `electron/authorization-store.cjs:80` 的 `appGrantsForApp: "SELECT * FROM app_resource_grants WHERE app_id = ? …"` **只按 `app_id` 过滤、完全不看 `organization_id`**，`electron/authorization-domain.cjs:547 evaluateAppAuthorization` 也只比对 `grant.app_id` 与资源覆盖、**没有任何组织判断**。实测（W37 的 T5/T5b）：往**不存在的组织** id 写一条同形 grant → 立刻 **ALLOW**（`allowSources` 含 `APP_GRANT`）；删掉 → **DENY**。产品级后果：重置 → 重新初始化新组织 → 在新组织撤销 canvas 是真 DENY；把旧组织那条残留行种回去立刻变 **ALLOW（撤销失效）**。**这正是本批把授权表纳入重置同事务清理的原因 —— 不是卫生问题，是撤销失效路径（已修，见第五批正文）。** 原文保留不删】**如实记为数据残留 / 不变量缺口**（现有 `invariants()` 不检查指向已删组织的孤儿行）；**唯一真实风险**：将来若出现**组织 id 复用**（恢复备份 / 导入 / 人为指定），旧墓碑会**静默抑制新组织首次播种**。按裁定本批不修，风险登记在案。
+* `resetInstallation` 现状残留（R5 实测）：重置后 `app_policy_provisions` 留 **15 行**孤儿、`app_resource_grants` 留 **15 行**孤儿，都指向已从 `teams` 删除的组织。**判定为不可达、不致权限复活**：重置后重建得到**全新随机组织 id**，新组织拿到与重置前**完全相同的 15 对播种**；无任何用户属于旧组织 → 旧组织授权行对所有授权判定都不可达；治理视图只看到新组织自己的行。【**第五批订正**：**该判定仅对 user 侧取数成立**（user 侧判定按 `organization_id = user.team_id` 过滤，`electron/authorization-domain.cjs:490`）；**对 App 侧取数不成立** —— `electron/authorization-store.cjs:80` 的 `appGrantsForApp: "SELECT * FROM app_resource_grants WHERE app_id = ? …"` **只按 `app_id` 过滤、完全不看 `organization_id`**，`electron/authorization-domain.cjs:547 evaluateAppAuthorization` 也只比对 `grant.app_id` 与资源覆盖、**没有任何组织判断**。实测（W37 的 T5/T5b）：往**不存在的组织** id 写一条同形 grant → 立刻 **ALLOW**（`allowSources` 含 `APP_GRANT`）；删掉 → **DENY**。产品级后果：重置 → 重新初始化新组织 → 在新组织撤销 canvas 是真 DENY；把旧组织那条残留行种回去立刻变 **ALLOW（撤销失效）**。**这正是本批把授权表纳入重置同事务清理的原因 —— 不是卫生问题，是撤销失效路径（已修，见第五批正文）。** 原文保留不删】**如实记为数据残留 / 不变量缺口**（现有 `invariants()` 不检查指向已删组织的孤儿行）；**唯一真实风险**：将来若出现**组织 id 复用**（恢复备份 / 导入 / 人为指定），旧墓碑会**静默抑制新组织首次播种**。按裁定本批不修，风险登记在案。 【**第六批已更新**：第六批把「取数不带组织过滤」这一条也修了 —— `appGrantsForApp(app_id, organization_id)` 按组织取数、空组织返回空集，`evaluateAppAuthorization` 逐条挡异组织行（含 `organization_id=''` 的无主行），MCP 域删掉 `!g.organization_id` 通配分支；第五批的历史结论与其取证价值不变。见 §六。】
 
 ### 6. 临时目录归属（第三批残留闭环）
 
@@ -331,7 +425,7 @@
 
 1. **`notVerified` 仍 2 条**（都在 `mcp-policy-e2e`）：① 同一安装内第二个组织（两组织共库）无产品入口；② 跨组织行为级互不覆盖真机不可构造，只到 schema 级 + node 行为级。**本批不新增「创建组织」入口**（用户明令）。**expiry 六场景与 center / stream 本轮 0 条**。
 2. **`errorText` 仍是通用括注实现**：命令失败路径的 detail（如 `idle-expiry`、`session-missing`）照旧显示；本批只修「事件 reason 被当 detail 传进用户文案」这一条根因。【第五批已更新：**已收口** —— `errorText` = 「code 那一句 + 可展示 detail 白名单 `SHOWABLE_ERROR_DETAIL`（4 条全挂 `INVALID_INPUT`、每条带 `why`）」，表外 detail 一律过滤（模板串 / `String(detail)` / 括号括注都不允许）；`AuthScreens.tsx` 只发标记；内部诊断（日志 / 审计 / 连接 `detail=expired:idle`）原样保留。新登记残留：`RATE_LIMITED` 的 `{retryAfterMs}` 对象 detail 现被过滤但未映射成人话】
-3. **`resetInstallation` 孤儿残留**：provisions 15 行 + grants 15 行指向已删组织 —— 数据残留 / 不变量缺口；按裁定不修；风险 = 将来若出现组织 id 复用（恢复备份 / 导入 / 人为指定），旧墓碑会静默抑制新组织首次播种。【**第五批订正 + 已闭环**：孤儿行已随重置**同事务**清零（真机四表 15 / 14 / 1 / 0 → **0 / 0 / 0 / 0**，审计三表一行不删）；且「不可达」判定只对 **user 侧**成立 —— **App 侧**孤儿 `app_resource_grants` 能直接复活权限（`appGrantsForApp` 不带组织过滤 + `evaluateAppAuthorization` 无组织判断，T5/T5b 实测）。组织 id 复用已用 node T3 验证：重置前同 id 播种 `seeded:false` → 重置清除 → 重初始化后同 id `seeded:true` 且授权形状与全新安装逐行同形】
+3. **`resetInstallation` 孤儿残留**：provisions 15 行 + grants 15 行指向已删组织 —— 数据残留 / 不变量缺口；按裁定不修；风险 = 将来若出现组织 id 复用（恢复备份 / 导入 / 人为指定），旧墓碑会静默抑制新组织首次播种。【**第五批订正 + 已闭环**：孤儿行已随重置**同事务**清零（真机四表 15 / 14 / 1 / 0 → **0 / 0 / 0 / 0**，审计三表一行不删）；且「不可达」判定只对 **user 侧**成立 —— **App 侧**孤儿 `app_resource_grants` 能直接复活权限（`appGrantsForApp` 不带组织过滤 + `evaluateAppAuthorization` 无组织判断，T5/T5b 实测）。组织 id 复用已用 node T3 验证：重置前同 id 播种 `seeded:false` → 重置清除 → 重初始化后同 id `seeded:true` 且授权形状与全新安装逐行同形】【**第六批已更新**：`appGrantsForApp` 现按 `(app_id, organization_id)` 取数、空组织返回空集，判权层逐条挡异组织行 —— 第五批的「App 侧孤儿行能直接复活权限」**不再是当前口径**；历史结论与其取证价值不变。见 §六。】
 4. **SIGKILL 拦不住**：临时目录归属清理靠 `SIGINT` / `SIGTERM` + 收尾块；`kill -9` 只能靠 `cleanOrphans` 事后按三条件清理（默认 dry-run）。
 5. 既有缺口继续单列：**OAuth**（仅 `NONE` / `BEARER`）、**真实第三方与 Adobe / PS**（D5-04 / D5-05）、**插件隔离**（D5-08）、**D5-02 重命名受 Electron 不支持 `prompt()` 限制**。
 6. 协议版本不升级：仍 `2025-06-18`（记录 / 客户端常量 / 域常量三处一致）。

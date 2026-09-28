@@ -245,7 +245,8 @@ exit 1
 
 ## 8. 索引、临时目录与工作树核对
 
-- 索引 `artifacts/d5-03/runs/index.json`：**61 条**，本次会话新增 20 个 run 目录；**逐条复核 61 个 artifact 的 sha256 与索引记录全部一致（0 不一致）**；旁挂 `.sha256` 61/61 一致；`runId` 无重复；`index.jsonl` 60 行（只追加）
+- 索引 `artifacts/d5-03/runs/index.json`：**64 条**，本次会话新增 20 个 run 目录；**逐条复核 64 个 artifact 的 sha256 与索引记录全部一致（0 不一致）**；旁挂 `.sha256` 64/64 一致；`runId` 无重复；`index.jsonl` 64 行（只追加）。【**第六批订正（定稿复核）**：报告初稿写「61 条 / 60 行」，经定稿岗复核为 **64 条 / 64 行**（会话前 44 条 + 本次会话 20 条 = 64）；64 个 artifact 的 sha256 全部一致、**0 缺失、0 重复**。初稿数字的来源不改写历史，以本节订正值为准。】
+- **报告初稿未提及的两个运行目录（第六批定稿补登，如实标注性质）**：① `artifacts/d5-03/runs/20260928T092533Z-cf4e-batch6-r3-rebase-proof` —— **空目录**：无 JSON、无索引项、无任何 artifact，不参与任何判定；② `artifacts/d5-03/runs/20260928T093239Z-fcfa-auth-error-visual` —— 工装迭代轮，counts **39/40 · exit 1**，产物已入索引并留档，报告 §6.3 的迭代清单未列。
 - **历史 artifact 未被改写**：会话前已有的 44 个 run 目录，本次会话中被修改过的 **0 个**（含 27eb 的 `auth-error-visual.json` / 截图，mtime 仍是 15:06）
 - **临时目录**：跑完 `ls -d /var/folders/*/*/T/oa-d503*` 只剩 **`oa-d503f-probe-AGgbdV`**（mtime 16:25，**早于本会话首次运行**；仓库里没有任何代码产出这个前缀 —— 唯一相近的是 `tests/d5-03-app-grant-org-isolation.test.mjs:58` 的 `oa-d503f-seed-`，且该测试会自清理）。按"只清自己的"原则未删除，如实登记；本次所有 electron userData 目录均经 `userdata-ownership.cjs` 建后即清（每个 run 的 `cleanup.leftovers` 都是 `[]`，`pkillUsed=false`）
 - 进程：本次 spawn 的 pid 树全部回收（`leftovers: []`），`pkill` 未使用；收尾时无我方 Electron 残留
