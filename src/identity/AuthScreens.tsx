@@ -316,7 +316,8 @@ export function SetupScreen({ busy, error, defaultIdentifier = "", onSubmit }: S
           </div>
         </div>
 
-        <AuthErrorLine error={local ? { code: local, detail: "两次输入的密码不一致" } : error} />
+        {/* 文案只在 types.ts 的白名单里：这里只发标记，渲染层不写第二份人话 */}
+        <AuthErrorLine error={local ? { code: local, detail: "password-mismatch" } : error} />
         <div className="auth-actions">
           {step > 0 && (
             <button className="ghost" type="button" onClick={goBack} disabled={busy} data-d3-id="setup-back">

@@ -1547,6 +1547,37 @@ const MIGRATIONS = Object.freeze([
   { version: 21, run: applyPolicyProvisionLayer },
 ]);
 
+/**
+ * 安装重置（identity/reset-installation）要清的**授权事实**表 —— 范围仅此四张。
+ *
+ * 判据（逐表可复核）：这张表里的行是不是"授权/权限事实"，且它能不能在被重置后的
+ * 安装里复活权限或误导判定。四张都满足；其余 23 张带 organization_id 的表是
+ * 用户内容 / 配置 / 审计（判定与证据见 tests/d5-03-reset-authorization-consistency.test.mjs）。
+ *
+ *   · app_policy_provisions —— 策略提供记录 + 撤销墓碑。"首次使用才给、撤销后永不再给"
+ *     的持久依据；组织 id 被复用时旧墓碑会**压住**新组织的首次播种（判定被误导）。
+ *   · app_resource_grants  —— App 侧 ACL。判定的取数是 appGrantsForApp(appId)，
+ *     不经 organization_id 过滤（authorization-domain.evaluateAppAuthorization 只看
+ *     app_id 与目标约束），因此孤儿行能跨组织继续授权 —— 本次实测到的唯一"真复活"面。
+ *   · resource_grants      —— User / Department ACL（grant 事实本体）。
+ *   · device_access        —— 设备 ACL（principal × actions）。同样按 device_id 取，
+ *     ORGANIZATION 分支不比对行的 organization_id，孤儿行是悬空授权。
+ *
+ * 为什么整表删而不是按 organization_id 过滤：重置后 teams 为空，这四张表里每一行
+ * 的 organization_id 都指向已删组织（含历史遗留的 organization_id = '' 无主行，
+ * 它同样会被 App 侧无组织过滤的判定读到）。审计三表（audit_log / authorization_audit /
+ * device_audit）一行都不删。
+ *
+ * 为什么必须是**字面量**：tests/app-policy-provisions-retention.test.mjs 的 R6 守卫按
+ * 源码字符串字面量逐条核对组织删除路径；把表名拼进 SQL 会让守卫看不见这条删除（fail-open）。
+ */
+const RESET_AUTHORIZATION_DELETE_SQL = Object.freeze([
+  "DELETE FROM app_policy_provisions",
+  "DELETE FROM app_resource_grants",
+  "DELETE FROM resource_grants",
+  "DELETE FROM device_access",
+]);
+
 const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000; // 12h 绝对上限
 const DEFAULT_IDLE_MS = 2 * 60 * 60 * 1000; //  2h 空闲上限
 const BUSY_RETRY = { attempts: 5, baseDelayMs: 15 };
@@ -2728,6 +2759,8 @@ class IdentityStore {
    *   · 必须显式传 `confirm: "DELETE-ALL-IDENTITY-DATA"`，输错一字即拒
    *   · 不在任何产品 UI 里暴露入口（本轮只有探针与未来的恢复流程会调）
    *   · 审计留痕：audit_log **不删**，否则"谁重置了"将无据可查
+   *   · 授权状态**同事务**清干净：重置后 teams 为空，任何仍留在授权表里的行
+   *     都属于"指向已删组织的授权状态"（详见 RESET_AUTHORIZATION_DELETE_SQL）
    */
   resetInstallation({ confirm } = {}) {
     if (confirm !== "DELETE-ALL-IDENTITY-DATA") {
@@ -2737,6 +2770,9 @@ class IdentityStore {
     const started = this.clock();
     this.audit("reset-installation", { result: "OK_REQUESTED" });
     this.transactSync(() => {
+      // 先清授权事实，再删身份：两者必须在**同一个事务**里，任一语句失败都整体回滚，
+      // 不允许出现"身份没了、授权还在"或反向的半状态。
+      for (const sql of RESET_AUTHORIZATION_DELETE_SQL) this.db.exec(sql);
       this.db.exec("DELETE FROM sessions");
       this.db.exec("DELETE FROM login_attempts");
       this.db.exec("DELETE FROM users");
@@ -2812,6 +2848,7 @@ module.exports = {
   IdentityStore,
   DEFAULT_TTL_MS,
   DEFAULT_IDLE_MS,
+  RESET_AUTHORIZATION_DELETE_SQL,
   openDatabase,
   isBusy,
 };

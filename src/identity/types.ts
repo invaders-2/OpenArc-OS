@@ -67,11 +67,77 @@ export const IDENTITY_ERROR_TEXT: Record<IdentityErrorCode, string> = {
   INTERNAL_ERROR: "身份服务内部错误。",
 };
 
+/**
+ * 可展示 detail 白名单 —— `errorText` 里 detail **唯一**的出口。
+ *
+ * 身份域命令失败结果里的 `detail` 是给运维与审计看的内部标记（kebab-case 字面量，
+ * 见 electron/identity-domain.cjs、identity-store.cjs、password.cjs）。absorb 把它收进
+ * `identity.error` 后，早先的实现会括注给用户，于是登录页/锁屏/设置里出现
+ * 「登录状态已过期，请重新登录。（idle-expiry）」这类句子。
+ *
+ * 现在规则反过来：**只有列在这里的 detail 才允许出现**，且必须换成一句人话；
+ * 表外的一律丢弃（code 那一句照旧），既不原样显示，也不翻译。
+ *
+ * 进表门槛三条，缺一不可（测试逐条锁）：
+ *   · `text` 是用户看得懂、能照做的人话，不是标记的翻译腔；
+ *   · `codes` 是它真实搭配的错误码 —— 同一个标记串到别的码上不显示；
+ *   · `why` 写清"为什么它对用户可理解"。答不出的 detail 该被过滤，而不是进表。
+ */
+export type ShowableErrorDetail = {
+  /** 给用户的那句话。 */
+  text: string;
+  /** 允许搭配的错误码（防止同一个标记串到别的语义上）。 */
+  codes: IdentityErrorCode[];
+  /** 为什么这句话对用户可理解、可照做。 */
+  why: string;
+};
+
+export const SHOWABLE_ERROR_DETAIL: Record<string, ShowableErrorDetail> = {
+  /**
+   * 四条都挂在 INVALID_INPUT：只有它的句子（「输入不合法。」）等于没说，
+   * 也只有这里的 detail 带着用户自己没有的信息。其余码的句子本身已说清原因
+   * （如 SESSION_EXPIRED「登录状态已过期，请重新登录。」），detail 只是内部复述，一律过滤。
+   */
+  "password-too-short": {
+    text: "密码至少需要 8 位。",
+    codes: ["INVALID_INPUT"],
+    why: "唯一用户能当场改掉的口令规则；8 位取自 electron/password.cjs 的 MIN_PASSWORD_LENGTH，初始化向导已用「至少 8 位」同一说法。",
+  },
+  "password-mismatch": {
+    text: "两次输入的密码不一致。",
+    codes: ["INVALID_INPUT"],
+    why: "初始化向导提交前自己就能判定的输入错误（渲染层发出的标记）；不说的话用户只看到「输入不合法」，不知道该重输哪一格。",
+  },
+  "identifier-taken": {
+    text: "换一个账号名再试。",
+    codes: ["INVALID_INPUT"],
+    why: "初始化唯一需要用户改输入才能继续的失败（账号创建后不可更改）；只给「输入不合法」会让人反复重试同一串字符。",
+  },
+  "display-name-too-long": {
+    text: "显示名太长了。",
+    codes: ["INVALID_INPUT"],
+    why: "设置里改资料唯一能靠删几个字解决的失败（上限 80 字符）；用户看得懂「太长」，也知道下一步。",
+  },
+};
+
+/** 白名单命中才给出可展示短语，否则空串 —— 表外的 detail 到此为止。 */
+export function showableDetailText(code: string, detail?: string) {
+  const entry = detail ? SHOWABLE_ERROR_DETAIL[detail] : undefined;
+  if (!entry) return "";
+  return entry.codes.includes(code as IdentityErrorCode) ? entry.text : "";
+}
+
+/**
+ * code + 白名单 detail → 用户文案。
+ *
+ * detail 只能经 `showableDetailText` 进来：**任何原样拼接都不允许**
+ * （模板串 / String(detail) / 括号括注），没有白名单就进不了用户文案。
+ * 没有 code 时返回空串，由调用方给兜底句 —— 裸 detail 不是句子。
+ */
 export const errorText = (code: string | undefined, detail?: string) => {
-  if (!code) return detail ? String(detail) : "";
+  if (!code) return "";
   const base = IDENTITY_ERROR_TEXT[code as IdentityErrorCode] || String(code);
-  // detail 只在其本身不是 code 时才补，避免把内部枚举直接糊给用户
-  return detail && detail !== code ? `${base}（${detail}）` : base;
+  return base + showableDetailText(code, detail);
 };
 
 /**
