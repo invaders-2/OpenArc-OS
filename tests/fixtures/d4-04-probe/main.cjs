@@ -309,7 +309,7 @@ app.whenReady().then(async () => {
     if (!r1Call) throw new Error("R1 proposal missing");
     const r1ExecBefore = identity.supervisor.executorEvidence().length;
     const r1Revoke = identity.authorization.revokeAppResourcePermission({ context: aiCtx(), grantId: toolGrantId });
-    const r1ResourceGrantKept = identity.authStore.appGrantsForApp("ai").some((g) => g.resource_id === r1Res.resourceId && String(g.actions || "").includes("resource.delete"));
+    const r1ResourceGrantKept = identity.authStore.allAppGrants().some((g) => g.app_id === "ai" && g.resource_id === r1Res.resourceId && String(g.actions || "").includes("resource.delete"));
     check("R1.2 · 产品 governance API 撤销 app tool 权限（changed=true）", r1Revoke && r1Revoke.ok === true && r1Revoke.changed === true, JSON.stringify(r1Revoke), "ok=true, changed=true");
     check("R1.3 · 撤权只针对 tool 权限：resource grant 仍在", r1ResourceGrantKept === true, String(r1ResourceGrantKept), "true");
     const r1ApproveClick = await click('[data-approval-action="approve"]');

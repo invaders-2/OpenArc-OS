@@ -12,8 +12,8 @@
  *      organization_id 的表逐表盘点；audit_log / authorization_audit / device_audit 一行不删；
  *   T3 组织 id 复用不被旧墓碑压制：同一个 id 上的 A/B 对照（重置前播种被墓碑挡 → 重置后正常播种）；
  *   T4 反向：正常路径（未重置）墓碑仍在、不被重播种覆盖、撤权不复活；
- *   T5 判据：App 侧判定不读 organization_id —— 指向不存在组织的 app grant 仍能授权；
- *   T5b 产品后果：修复后新组织撤销 canvas 必须真 DENY（反事实对照证明旧残留会让撤销失效）；
+ *   T5 判据（第六批订正）：取数与判定都按 organization_id —— 指向不存在组织的 app grant 不再授权；
+ *   T5b 产品后果：新组织撤销 canvas 必须真 DENY（把旧组织残留行种回去也不得让它复活）；
  *   T6 范围守卫：重置要删的表集合恰好是登记的四张授权表，不含审计表 / 内容表，且语句无 WHERE；
  *   T7 判据：登记为"不清"的设备凭据表不构成授权结论（残留配对凭据 + 已清的 device_access = 全部 DENY）。
  *
@@ -25,8 +25,9 @@
  *   清（授权事实，四张）：
  *     app_policy_provisions   策略提供记录 + 撤销墓碑。取数 policyProvisionByKey(organization_id,…)；
  *                             组织 id 复用时旧墓碑会压住首次播种（T3 实测）。
- *     app_resource_grants     App 侧 ACL。取数 appGrantsForApp(app_id) **不带组织过滤**，
- *                             判定 evaluateAppAuthorization 只看 app_id + 目标约束（T5 实测）。
+ *     app_resource_grants     App 侧 ACL。取数 appGrantsForApp(app_id, organization_id) 按组织过滤，
+ *                             判定 evaluateAppAuthorization 也逐条跳过异组织 grant（D5-03 第六批；
+ *                             第五批以前两处都不看组织，T5 实测孤儿行仍能授权）。
  *     resource_grants         User / Department ACL。取数 grantsForOrganizationContext(user.team_id)。
  *     device_access           设备 ACL。取数 accessOfDevice(device_id)，ORGANIZATION 分支不比对
  *                             organization_id（device-service.cjs #accessAllows）。
@@ -121,7 +122,7 @@ const grantShapes = (store, orgId) =>
     .map((g) => [g.app_id, g.resource_id, g.collection_id, g.resource_type, g.department_id, g.scope, String(g.actions)].join("|")).sort();
 /** 某组织的 baseline 形状 grant（三个目标 id 全空 + 指定 resource_type）。 */
 const baselineGrantOf = (store, orgId, appId, resourceType) =>
-  store.appGrantsForApp(appId).find((g) => g.organization_id === orgId && String(g.resource_type) === resourceType && !g.resource_id && !g.collection_id && !g.department_id && String(g.scope) === "") || null;
+  store.appGrantsForApp(appId, orgId).find((g) => String(g.resource_type) === resourceType && !g.resource_id && !g.collection_id && !g.department_id && String(g.scope) === "") || null;
 
 /** 重置后仍指向不存在组织的行 —— 目标二的"孤儿行"判据。 */
 function orphanInventory(store) {
@@ -349,7 +350,7 @@ test("T3 · 组织 id 复用不被旧墓碑压制：同一个 id 上的重置前
     beforeShapes = grantShapes(a.authStore, oldOrg);
     assert.equal(beforePairs.length, 15, "首次使用必须播满 10 resource + 4 model + 1 mcp：" + JSON.stringify(beforePairs));
 
-    const mcpGrant = a.authStore.appGrantsForApp("mcp-center").find((g) => g.organization_id === oldOrg && g.resource_type === "mcp");
+    const mcpGrant = a.authStore.appGrantsForApp("mcp-center", oldOrg).find((g) => g.resource_type === "mcp");
     assert.ok(mcpGrant, "mcp baseline 必须先存在");
     assert.equal(a.governanceService.revokeAppAccess({ context: uiCtx(snap), grantId: mcpGrant.id }).changed, true);
     const tombstone = provisionOf(a.authStore, oldOrg, "mcp-center", "mcp");
@@ -363,7 +364,7 @@ test("T3 · 组织 id 复用不被旧墓碑压制：同一个 id 上的重置前
     assert.equal(reset.ok, true, JSON.stringify(reset));
     assert.equal(provisionOf(a.authStore, oldOrg, "mcp-center", "mcp"), null, "重置后旧墓碑必须不存在");
     assert.equal(a.authStore.allPolicyProvisions().filter((r) => r.organization_id === oldOrg).length, 0);
-    assert.equal(a.authStore.appGrantsForApp("mcp-center").filter((g) => g.organization_id === oldOrg).length, 0);
+    assert.equal(a.authStore.appGrantsForApp("mcp-center", oldOrg).length, 0);
   } finally {
     a.store.close();
   }
@@ -428,7 +429,7 @@ test("T4 · 反向：未重置时墓碑仍在，重播种/重试都不覆盖、�
     const snap = await initAndLogin(f);
     const org = snap.teamId;
     await seedFirstUse(f, snap);
-    const mcpGrant = f.authStore.appGrantsForApp("mcp-center").find((g) => g.organization_id === org && g.resource_type === "mcp");
+    const mcpGrant = f.authStore.appGrantsForApp("mcp-center", org).find((g) => g.resource_type === "mcp");
     assert.ok(mcpGrant);
     assert.equal(f.governanceService.revokeAppAccess({ context: uiCtx(snap), grantId: mcpGrant.id }).changed, true);
     const tombstone = provisionOf(f.authStore, org, "mcp-center", "mcp");
@@ -446,9 +447,9 @@ test("T4 · 反向：未重置时墓碑仍在，重播种/重试都不覆盖、�
   }
 });
 
-/* ══════════════════════ T5 · 判据：App 侧判定不读 organization_id ══════════════════════ */
+/* ══════════════════════ T5 · 判据：App 侧取数与判定都读 organization_id ══════════════════════ */
 
-test("T5 · 判据：指向不存在组织的 app grant 仍能授权（App 侧判定不看 organization_id）", async () => {
+test("T5 · 判据：指向不存在组织的 app grant 不再授权（旧行为 ALLOW，第六批修复为 DENY）", async () => {
   const f = openService(tmpDir());
   try {
     const snap = await initAndLogin(f);
@@ -471,16 +472,28 @@ test("T5 · 判据：指向不存在组织的 app grant 仍能授权（App 侧�
     // 受控构造：往一个**不存在任何组织**的 organization_id 上写一条同形 app grant。
     assert.equal(count(f.store, "SELECT COUNT(*) c FROM teams WHERE id = ?", GHOST_ORG), 0, "受控构造的前提：这个组织不存在");
     f.authStore.upsertAppGrant({ appId: "canvas", resourceType: "text", actions: ["resource.view", "resource.read"], grantedBy: snap.userId, organizationId: GHOST_ORG });
-    const ghostRow = f.authStore.appGrantsForApp("canvas").find((g) => g.organization_id === GHOST_ORG);
+    const ghostRow = f.authStore.appGrantsForApp("canvas", GHOST_ORG)[0] || null;
     assert.ok(ghostRow, "受控构造：孤儿 app grant 已写入");
     assert.equal(provisionOf(f.authStore, GHOST_ORG, "canvas", "resource"), null, "定向形状不写提供记录（这行纯粹是孤儿授权）");
     assert.equal(orphanInventory(f.store).find((r) => r.table === "app_resource_grants").orphans, 1, "这行必须被孤儿行判据认出来");
 
-    const revived = authorize();
-    assert.equal(revived.decision, "ALLOW", "指向已删除组织的 app grant 仍然授权 → 这正是重置残留会复活权限的机制");
-    assert.equal(revived.allowSources.includes("APP_GRANT"), true, JSON.stringify(revived.allowSources));
+    // 第六批修复后的期望：孤儿行**不能**授权。
+    // 【期望值订正】旧期望 = ALLOW（allowSources 含 APP_GRANT）；新期望 = DENY + APP_ACTION_NOT_GRANTED。
+    // 理由：取数层 appGrantsForApp 现在按 (app_id, organization_id) 过滤，判权层 evaluateAppAuthorization
+    // 再逐条跳过异组织 grant —— 指向已删组织的行不再是"跨组织通配"。
+    const notRevived = authorize();
+    assert.equal(notRevived.decision, "DENY", "指向已删除组织的 app grant 不得再授权（旧期望 ALLOW，那正是本批修掉的漏洞）");
+    assert.equal(notRevived.reasonCode, "APP_ACTION_NOT_GRANTED");
+    assert.equal(notRevived.allowSources.includes("APP_GRANT"), false, JSON.stringify(notRevived.allowSources));
 
-    // 清掉孤儿行 → 回到 DENY：证明刚才那次 ALLOW 的唯一来源就是这条孤儿行。
+    // 阳性对照：同形授予落在**本组织**时立刻 ALLOW —— 证明上面那条 DENY 来自组织隔离本身，
+    // 而不是"形状不被识别"或别的闸门。
+    const inOrg = f.authStore.upsertAppGrant({ appId: "canvas", resourceType: "text", actions: ["resource.view", "resource.read"], grantedBy: snap.userId, organizationId: org });
+    assert.equal(authorize().decision, "ALLOW", "同形授予落在本组织必须放行：" + JSON.stringify(authorize()));
+    assert.equal(f.governanceService.revokeAppAccess({ context: uiCtx(snap), grantId: inOrg.grant.id }).changed, true);
+    assert.equal(authorize().decision, "DENY", "本组织的正式撤销必须立刻生效");
+
+    // 清掉孤儿行 → 仍然 DENY（孤儿行从来不是那次撤销的复活来源）。
     f.store.connection.prepare("DELETE FROM app_resource_grants WHERE organization_id = ?").run(GHOST_ORG);
     assert.equal(authorize().decision, "DENY");
 
@@ -496,11 +509,12 @@ test("T5 · 判据：指向不存在组织的 app grant 仍能授权（App 侧�
 /* ══════════════════════ T5b · 重置残留的实际后果（产品级） ══════════════════════ */
 
 /**
- * 第四批的文档把孤儿判定为"不可达、不致权限复活"。T5 证明该判定对 app_resource_grants 不成立，
- * 这条用例给出**产品级后果**的对照：
- *   旧残留（app_id=canvas、目标全空、organization_id 指向已删组织）在新组织里等价于一条
+ * 第四批的文档把孤儿判定为"不可达、不致权限复活"；第五批实测证明该判定对 app_resource_grants
+ * 不成立（旧残留行能让新组织的撤销失效）。这条用例给出**产品级后果**的对照：
+ *   旧残留（app_id=canvas、目标全空、organization_id 指向已删组织）当时在新组织里等价于一条
  *   "永久有效"的 canvas 全局授权 —— 新组织里再撤销 canvas，App 侧照样能命中旧残留行 → ALLOW。
- * 修复后旧组织的行在重置时被清掉，撤销就是真的 DENY。
+ * 第五批让重置把旧组织的行一起清掉；第六批再把取数与判定都按组织过滤，**两层**保证
+ * 撤销是真 DENY（残留行即使被种回来也不放行）。
  */
 test("T5b · 产品后果：重置后新组织撤销 canvas 必须真 DENY（旧残留若在会继续 ALLOW）", async () => {
   const dir = tmpDir("oa-d503e-reset-consequence-");
@@ -512,7 +526,7 @@ test("T5b · 产品后果：重置后新组织撤销 canvas 必须真 DENY（旧
     await seedFirstUse(a, snapA);
     assert.ok(baselineGrantOf(a.authStore, oldOrg, "canvas", ""), "旧组织的 canvas baseline 必须先存在");
     assert.equal(a.store.resetInstallation({ confirm: CONFIRM }).ok, true);
-    assert.equal(a.authStore.appGrantsForApp("canvas").length, 0, "重置后 canvas 的授权行必须全部消失");
+    assert.equal(a.authStore.allAppGrants().filter((g) => g.app_id === "canvas").length, 0, "重置后 canvas 的授权行必须全部消失");
   } finally {
     a.store.close();
   }
@@ -533,14 +547,26 @@ test("T5b · 产品后果：重置后新组织撤销 canvas 必须真 DENY（旧
     assert.equal(afterRevoke.decision, "DENY", "新组织撤销 canvas 之后必须 DENY（旧组织的残留行不得再让它 ALLOW）");
     assert.equal(afterRevoke.reasonCode, "APP_ACTION_NOT_GRANTED");
 
-    // 反事实对照：把旧组织那条残留行原样种回去（同一个形状，organization_id 指向已删组织），
-    // 立刻就能让撤销失效 —— 这正是修复前重置留下的东西。
+    // 反事实对照：把旧组织那条残留行原样种回去（同一个形状，organization_id 指向已删组织）。
+    // 【期望值订正】旧期望 = ALLOW（"残留行会让新组织的撤销失效"）；新期望 = DENY。
+    // 理由：取数按组织过滤 + 判权层逐条跳过异组织 grant，残留行不再是跨组织通配。
     const ghost = b.authStore.upsertAppGrant({ appId: "canvas", actions: ["resource.view", "resource.search", "resource.preview", "resource.read"], grantedBy: "system:model-baseline", organizationId: oldOrg });
     assert.ok(ghost.grant, "受控构造：旧组织的同形残留行已种回");
     assert.equal(count(b.store, "SELECT COUNT(*) c FROM teams WHERE id = ?", oldOrg), 0, "它指向的组织确实不存在");
-    assert.equal(authorize().decision, "ALLOW", "残留行会让新组织的撤销失效 —— 这就是第四批判定漏掉的那条取数路径");
+    const afterGhost = authorize();
+    assert.equal(afterGhost.decision, "DENY", "旧组织的残留行不得让新组织的撤销失效（旧期望 ALLOW）");
+    assert.equal(afterGhost.reasonCode, "APP_ACTION_NOT_GRANTED");
+    assert.equal(afterGhost.allowSources.includes("APP_GRANT"), false, JSON.stringify(afterGhost.allowSources));
+
+    // 阳性对照：同一形状落在**新组织**时立刻 ALLOW —— 本组织的正式重授是真授权，与残留行无关。
+    const regrant = b.authStore.upsertAppGrant({ appId: "canvas", actions: ["resource.view", "resource.search", "resource.preview", "resource.read"], grantedBy: "system:model-baseline", organizationId: newOrg });
+    assert.equal(authorize().decision, "ALLOW", "本组织的同形授予必须放行");
+    assert.equal(b.governanceService.revokeAppAccess({ context: uiCtx(snapB), grantId: regrant.grant.id }).changed, true);
+    assert.equal(authorize().decision, "DENY", "本组织撤销后立刻回到 DENY");
+
+    // 清掉旧组织的残留行 → 仍然是 DENY。
     b.store.connection.prepare("DELETE FROM app_resource_grants WHERE id = ?").run(ghost.grant.id);
-    assert.equal(authorize().decision, "DENY", "清掉残留行后撤销立刻恢复生效");
+    assert.equal(authorize().decision, "DENY", "清掉残留行后仍是 DENY");
   } finally {
     b.store.close();
   }

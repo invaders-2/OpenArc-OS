@@ -2462,10 +2462,19 @@ input[type="checkbox"] {
   background: transparent;
   color: var(--muted);
 }
+/* 错误行自带**不透明内容底**：它落在玻璃卡上，玻璃卡又压在壁纸上，合成背景随壁纸与
+   玻璃档浮动（浅色 full + 默认深色壁纸实测 181,181,181 → --failed 只有 2.62:1）。
+   底只用既有 token：通道 = --content-rgb（浅 #fff / 深 #171717），alpha = 1，即
+   tokens.css 给"内容面"的全不透明档（--content-alpha 在 reduced / solid 就是 1）。
+   这样合成背景与壁纸、玻璃档解耦，只随主题变；不加描边、不加动效。
+   圆角 / 内边距沿用设置里同族的 .d401-row（--radius-md + --space-2 / --space-3）。 */
 .auth-error {
   margin-top: var(--space-3);
   font-size: var(--fs-caption);
   color: var(--failed);
+  background: rgb(var(--content-rgb) / 1);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
 }
 .auth-error:empty {
   display: none;

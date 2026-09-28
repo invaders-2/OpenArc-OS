@@ -77,7 +77,7 @@ const countRows = (store, orgId, appId, policyKey) =>
   store.db.prepare("SELECT COUNT(*) c FROM " + TABLE + " WHERE organization_id = ? AND app_id = ? AND policy_key = ?").get(orgId, appId, policyKey).c;
 /** baseline 形状的 grant 行：app 级（三个 id 全空）+ baseline scope。 */
 const baselineGrantOf = (store, orgId, appId, resourceType) =>
-  store.appGrantsForApp(appId).find((g) => g.organization_id === orgId && String(g.resource_type) === resourceType && !g.resource_id && !g.collection_id && !g.department_id && String(g.scope) === "") || null;
+  store.appGrantsForApp(appId, orgId).find((g) => String(g.resource_type) === resourceType && !g.resource_id && !g.collection_id && !g.department_id && String(g.scope) === "") || null;
 
 /** 核心合同：before 里的每一行撤权记录必须仍然存在，且逐字段不变。 */
 function assertRowsPreserved(store, before, label) {
@@ -295,7 +295,7 @@ test("R5 · resetInstallation 是唯一「组织整体消失」路径：授权�
     beforePairs = pairList(a.authStore, oldOrg);
     assert.equal(beforePairs.length, 15, "首次使用必须播满 10 resource + 4 model + 1 mcp：" + JSON.stringify(beforePairs));
 
-    const mcpGrant = a.authStore.appGrantsForApp("mcp-center").find((g) => g.organization_id === oldOrg && g.resource_type === "mcp");
+    const mcpGrant = a.authStore.appGrantsForApp("mcp-center", oldOrg).find((g) => g.resource_type === "mcp");
     assert.ok(mcpGrant, "mcp baseline 必须先存在");
     assert.equal(a.governanceService.revokeAppAccess({ context: { sessionRef: login.snapshot.sessionRef, appId: "mcp-center", source: "ui" }, grantId: mcpGrant.id }).changed, true);
     tombstoneBefore = snapshotRow(a.authStore, oldOrg, "mcp-center", "mcp");
@@ -353,7 +353,7 @@ test("R5 · resetInstallation 是唯一「组织整体消失」路径：授权�
     assert.equal(view.grants.filter((g) => g.resourceType === "mcp").length, 1, "新组织只看到自己那一行 mcp 授权，看不到旧组织的残留行");
     assert.equal(snapshotRow(b.authStore, oldOrg, "mcp-center", "mcp"), null, "旧组织的墓碑已被重置删除，不再有孤儿行（第五批修复；旧期望「孤儿墓碑保持原样」）");
     assert.equal(b.authStore.allPolicyProvisions().filter((r) => r.organization_id === oldOrg).length, 0, "旧组织不得残留任何提供记录");
-    assert.equal(b.authStore.appGrantsForApp("mcp-center").filter((g) => g.organization_id === oldOrg).length, 0, "旧组织不得残留任何 app 授权行");
+    assert.equal(b.authStore.appGrantsForApp("mcp-center", oldOrg).length, 0, "旧组织不得残留任何 app 授权行");
     t.diagnostic("重置后新组织播种 " + afterPairs.length + " 对，与重置前一致；旧组织残留 provisions=" + orphan.provisions + " grants=" + orphan.grants + "（修复后为 0）");
   } finally {
     b.store.close();

@@ -33,7 +33,7 @@ test("App 只授权 Department A：Department B 资源不出现", async () => {
   f.authService.grantResourcePermission({ context: admin, principalType: "DEPARTMENT", principalId: A.department.id, resourceId: imgA, permissionSet: "VIEWER" });
   f.authService.grantResourcePermission({ context: admin, principalType: "DEPARTMENT", principalId: B.department.id, resourceId: imgB, permissionSet: "VIEWER" });
   // 内置 canvas 有全局 baseline；先撤销全部，再只授权 A 部门（模拟"该 App 只被允许 A 部门"）
-  for (const g of f.store.appGrantsForApp("canvas")) {
+  for (const g of f.store.appGrantsForApp("canvas", f.orgId)) {
     f.governanceService.revokeAppAccess({ context: admin, grantId: g.id });
   }
   f.governanceService.grantAppAccess({ context: admin, appId: "canvas", departmentId: A.department.id, actions: ["resource.read", "resource.view", "resource.search"] });

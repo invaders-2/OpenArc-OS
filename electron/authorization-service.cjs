@@ -111,7 +111,7 @@ class AuthorizationService {
     }
     const memberships = this.store.membershipsOfUser(user.id).filter((m) => m.status === "ACTIVE");
     const grants = this.store.grantsForOrganizationContext(user.team_id);
-    const appGrants = this.store.appGrantsForApp(app.appId);
+    const appGrants = this.store.appGrantsForApp(app.appId, user.team_id);
     return {
       ok: true,
       ctx,
@@ -157,6 +157,7 @@ class AuthorizationService {
       grants: prepared.grants,
       app: prepared.app,
       appGrants: prepared.appGrants,
+      organizationId: prepared.organizationId,
       action,
       agent: agent === undefined ? prepared.agent : !!agent,
       allowInactiveResource: !!allowInactiveResource,
@@ -332,7 +333,7 @@ class AuthorizationService {
     const row = this.#resourceFromInput(resource);
     if (!row) return { ok: false, error: REASON.NOT_FOUND_OR_FORBIDDEN };
     const userResult = domain.evaluateUserAuthorization({ resource: row, user: prepared.user, memberships: prepared.memberships, grants: prepared.grants });
-    const appResult = domain.evaluateAppAuthorization({ resource: row, app: prepared.app, grants: prepared.appGrants });
+    const appResult = domain.evaluateAppAuthorization({ resource: row, app: prepared.app, grants: prepared.appGrants, organizationId: prepared.organizationId });
     const effective = [...userResult.actions].filter((a) => appResult.actions.has(a));
     return {
       ok: true,
@@ -1001,6 +1002,7 @@ class AuthorizationService {
         grants: prepared.grants,
         app: prepared.app,
         appGrants: prepared.appGrants,
+        organizationId: prepared.organizationId,
         action: ACTION.MANAGE_ACCESS,
       });
       grantorActions = policy.effectivePermissions;

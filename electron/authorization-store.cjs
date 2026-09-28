@@ -77,7 +77,7 @@ const SQL = {
     "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) " +
     "ON CONFLICT(organization_id, app_id, resource_id, collection_id, resource_type, department_id, scope) DO UPDATE SET actions = excluded.actions, granted_by = excluded.granted_by, created_at = excluded.created_at, expires_at = excluded.expires_at",
   appGrantById: "SELECT * FROM app_resource_grants WHERE id = ?",
-  appGrantsForApp: "SELECT * FROM app_resource_grants WHERE app_id = ? ORDER BY created_at, id",
+  appGrantsForApp: "SELECT * FROM app_resource_grants WHERE app_id = ? AND organization_id = ? ORDER BY created_at, id",
   allAppGrants: "SELECT * FROM app_resource_grants ORDER BY created_at, id",
   deleteAppGrant: "DELETE FROM app_resource_grants WHERE id = ?",
   deleteAppGrantsForResource: "DELETE FROM app_resource_grants WHERE resource_id = ? OR collection_id = ?",
@@ -469,8 +469,16 @@ class AuthorizationStore {
     return this.db.prepare(SQL.allPolicyProvisions).all();
   }
 
-  appGrantsForApp(appId) {
-    return this.db.prepare(SQL.appGrantsForApp).all(String(appId || ""));
+  /**
+   * 按 **(app, organization)** 取 App Grant。
+   *
+   * 组织是判定的**必需输入**：拿不到组织就返回空集，绝不退化成"只按 app_id"的全表取数 ——
+   * 那会让异组织行（含 organization_id = '' 的历史无主行）变成跨组织通配（D5-03 第六批）。
+   */
+  appGrantsForApp(appId, organizationId) {
+    const organization = organizationId == null ? "" : String(organizationId);
+    if (!organization) return [];
+    return this.db.prepare(SQL.appGrantsForApp).all(String(appId || ""), organization);
   }
 
   allAppGrants() {

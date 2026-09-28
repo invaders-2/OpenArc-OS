@@ -18,8 +18,10 @@ try {
   const dana = f.ctx("dana");
   const denied = await f.pickerService.query({ context: dana, appId: "resource-library", query: "picker probe", limit: 10 });
   p.assert("无权用户 0 结果且不泄漏 name", denied.total === 0 && !JSON.stringify(denied).includes("PickProbe"), "");
-  // 内置 App 有 baseline 全局 grant；先撤销再验证 "无 grant → 0"
-  for (const g of f.store.appGrantsForApp("image-generator")) f.governanceService.revokeAppAccess({ context: admin, grantId: g.id });
+  // 内置 App 有 baseline grant；先撤销再验证 "无 grant → 0"。
+  // 组织取自 fixture 的管理员会话（f.orgId = admin.team_id）：第六批起 appGrantsForApp 按
+  // (app, organization) 取数，漏传组织会 fail-closed 返空集，撤销循环会空转成"什么都没撤"。
+  for (const g of f.store.appGrantsForApp("image-generator", f.orgId)) f.governanceService.revokeAppAccess({ context: admin, grantId: g.id });
   const qApp = await f.pickerService.query({ context: admin, appId: "image-generator", query: "picker probe", limit: 10 });
   p.assert("App 无 grant → 0", qApp.total === 0, "");
   const choice = f.pickerService.choose({ context: ppCtx, appId: "resource-library", resourceRef: imp.resource.resourceId, requestedActions: ["resource.read"] });

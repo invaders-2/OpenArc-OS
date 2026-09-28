@@ -101,10 +101,15 @@ test("V2 · 跨组织不再互相覆盖：同一 (app,type,scope) 两个组织�
     const b = f.store.upsertAppGrant({ appId: "mcp-center", resourceType: "mcp", actions: ["mcp.view", "mcp.use"], grantedBy: "sysB", organizationId: B });
     const a = f.store.upsertAppGrant({ appId: "mcp-center", resourceType: "mcp", actions: ["mcp.view"], grantedBy: "sysA", organizationId: A });
     assert.notEqual(a.grant.id, b.grant.id);
-    const rows = f.store.appGrantsForApp("mcp-center");
+    const rows = f.store.allAppGrants().filter((r) => r.app_id === "mcp-center");
     assert.equal(rows.length, 2, "两个组织必须各留一行");
     const rowA = rows.find((r) => r.organization_id === A);
     const rowB = rows.find((r) => r.organization_id === B);
+    // 取数按 (app, organization)：每个组织只看到自己那一行（D5-03 第六批）
+    assert.deepEqual(f.store.appGrantsForApp("mcp-center", A).map((r) => r.id), [rowA.id]);
+    assert.deepEqual(f.store.appGrantsForApp("mcp-center", B).map((r) => r.id), [rowB.id]);
+    assert.deepEqual(f.store.appGrantsForApp("mcp-center", ""), [], "空组织不得退化成不过滤");
+    assert.deepEqual(f.store.appGrantsForApp("mcp-center"), [], "缺组织不得退化成不过滤");
     assert.deepEqual(JSON.parse(rowA.actions), ["mcp.view"]);
     assert.deepEqual(JSON.parse(rowB.actions), ["mcp.view", "mcp.use"], "后写的组织不得改写另一个组织的行");
     // 再 upsert A：只改 A 的行

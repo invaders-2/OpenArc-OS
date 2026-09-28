@@ -543,8 +543,15 @@ function evaluateUserAuthorization({ resource, user, memberships = [], grants = 
   return result;
 }
 
-/** App 侧授权。App 默认 DENY；高敏资源要求显式 Resource / Collection / Type grant。 */
-function evaluateAppAuthorization({ resource, app, grants = [] }) {
+/**
+ * App 侧授权。App 默认 DENY；高敏资源要求显式 Resource / Collection / Type grant。
+ *
+ * 纵深防御（D5-03 第六批）：**逐条**只认 organization_id 等于当前组织的 grant。
+ * 取数层已经按组织过滤，这里再挡一道 —— 将来若有人把全表直接喂进来（例如新增调用点
+ * 又用了不带组织的取数），异组织行也不会放行。organization_id = '' 的历史无主行
+ * **不是通配**：组织非空时它不相等，组织为空时整个判定直接不放行任何 grant。
+ */
+function evaluateAppAuthorization({ resource, app, grants = [], organizationId }) {
   const result = { actions: new Set(), sources: new Set(), denied: null };
   if (!app) {
     result.denied = REASON.APP_REQUIRED;
@@ -555,7 +562,10 @@ function evaluateAppAuthorization({ resource, app, grants = [] }) {
     result.denied = REASON.APP_DISABLED;
     return result;
   }
+  const organization = organizationId == null ? "" : String(organizationId);
+  if (!organization) return result;
   for (const grant of grants) {
+    if (String(grant.organization_id == null ? "" : grant.organization_id) !== organization) continue;
     if (grant.app_id !== app.app_id) continue;
     if (!appGrantCoversResource(grant, resource)) continue;
     const acts = grantActions(grant);
@@ -573,7 +583,7 @@ function evaluateAppAuthorization({ resource, app, grants = [] }) {
  *
  * @returns { decision, reasonCode, effectivePermissions, userActions, appActions, allowSources }
  */
-function evaluatePolicy({ resource, user, memberships = [], grants = [], app, appGrants = [], action, agent = false, allowInactiveResource = false }) {
+function evaluatePolicy({ resource, user, memberships = [], grants = [], app, appGrants = [], organizationId, action, agent = false, allowInactiveResource = false }) {
   const deny = (reasonCode, extra = {}) => ({
     decision: DECISION.DENY,
     reasonCode,
@@ -593,7 +603,7 @@ function evaluatePolicy({ resource, user, memberships = [], grants = [], app, ap
   const userResult = evaluateUserAuthorization({ resource, user, memberships, grants });
   if (userResult.denied) return deny(userResult.denied);
 
-  const appResult = evaluateAppAuthorization({ resource, app, grants: appGrants });
+  const appResult = evaluateAppAuthorization({ resource, app, grants: appGrants, organizationId });
   if (appResult.denied) return deny(appResult.denied);
 
   const effective = new Set([...userResult.actions].filter((a) => appResult.actions.has(a)));

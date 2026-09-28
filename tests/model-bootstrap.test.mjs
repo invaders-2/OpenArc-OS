@@ -81,7 +81,7 @@ test("A5 · actor/app 伪造被忽略 + Confused Deputy（host app = settings）
   const created = await invoke({ command: "provider/create", payload: { displayName: "Spoof", baseUrl: "http://127.0.0.1:9", appId: "canvas", credentialSecret: "FAKE_MODEL_IPC_SECRET_D401_5" } });
   assert.equal(created.ok, true);
   // Confused Deputy：真实 host=settings 无 manage 时，payload.appId=resource-library 也不能提权
-  const settingsGrant = f.store.appGrantsForApp("settings").find((g) => g.resource_type === "model");
+  const settingsGrant = f.store.appGrantsForApp("settings", f.orgId).find((g) => g.resource_type === "model");
   f.authService.revokeAppResourcePermission ? null : null;
   f.modelService.revokeAppModelAccess({ context: admin, grantId: settingsGrant.id });
   const denied = await invoke({ command: "provider/create", payload: { displayName: "Deputy", baseUrl: "http://127.0.0.1:9", appId: "resource-library", credentialSecret: "FAKE_MODEL_IPC_SECRET_D401_5" } });

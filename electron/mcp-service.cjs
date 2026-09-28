@@ -83,9 +83,12 @@ class McpService {
     return { ok: true, actor, app };
   }
 
-  /** App Grant 必须落在当前 actor 的组织上（跨组织的同名 App 授权不算授权）。 */
+  /**
+   * App Grant 必须落在当前 actor 的组织上（跨组织的同名 App 授权不算授权）。
+   * organization_id = '' 的行**不是通配**：取数按组织过滤后它根本不会被取到（D5-03 第六批）。
+   */
   #grantsFor(appId, actor) {
-    return this.authStore.appGrantsForApp(appId).filter((g) => g.resource_type === "mcp" && (!g.organization_id || g.organization_id === actor.organizationId));
+    return this.authStore.appGrantsForApp(appId, actor.organizationId).filter((g) => g.resource_type === "mcp");
   }
 
   /** 能力数据（工具目录）只有持有 mcp.use 的 App 才可见；mcp.view 只给连接状态。 */

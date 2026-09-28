@@ -39,7 +39,7 @@ assert.equal(f.modelService.setDefault({ context: host, capability: "chat", conf
 
 const list = () => f.modelService.listModelsForUse({ context: canvasCtx });
 const ids = () => (list().models || []).map((m) => m.configId);
-const grantId = () => (f.store.appGrantsForApp("canvas").find((g) => g.resource_type === "model" && JSON.parse(g.actions || "[]").includes("model.use")) || {}).id;
+const grantId = () => (f.store.appGrantsForApp("canvas", f.orgId).find((g) => g.resource_type === "model" && JSON.parse(g.actions || "[]").includes("model.use")) || {}).id;
 
 test("L1 · 有 model.use 授权时列表含模型与供应商显示名，且不含地址/凭据", () => {
   const res = list();

@@ -24,7 +24,7 @@ class ModelService {
     const app = this.authStore.appById(appId);
     if (!app || String(app.status).toLowerCase() !== "enabled") return { ok: false, error: domain.ERROR_CODE.PROXY_UNAUTHORIZED };
     if (requireApp) {
-      const grants = this.authStore.appGrantsForApp(appId).filter((g) => g.resource_type === "model");
+      const grants = this.authStore.appGrantsForApp(appId, actor.organizationId).filter((g) => g.resource_type === "model");
       const canApp = grants.some((g) => domain.modelGrantActions(g).includes(action));
       if (!canApp) return { ok: false, error: domain.ERROR_CODE.PROXY_UNAUTHORIZED };
     }

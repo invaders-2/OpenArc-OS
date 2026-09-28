@@ -89,7 +89,7 @@ test("Proxy: per-call reauthorization —— disable User / App / Model / revoke
   f.modelService.setModelStatus({ context: ai, configId, status: "enabled" });
   // revoke App model access
   const cap4 = proxy.issueCapability({ context: puCtx2, configId, maxCalls: 20 });
-  const grant = f.store.appGrantsForApp("ai").find((g) => g.resource_type === "model");
+  const grant = f.store.appGrantsForApp("ai", f.orgId).find((g) => g.resource_type === "model");
   f.modelService.revokeAppModelAccess({ context: admin, grantId: grant.id });
   assert.equal((await call(cap4.capability.token)).status, 403);
   f.modelService.grantAppModelAccess({ context: admin, appId: "ai", actions: ["model.view", "model.use", "model.manage", "model.test"] });

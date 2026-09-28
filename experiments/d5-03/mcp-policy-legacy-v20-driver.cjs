@@ -26,7 +26,10 @@ const { createIdentityService } = require(bootPath);
   const access = svc.governanceService.getAppAccess({ context: ctx, appId: "mcp-center" });
   const grant = access && access.ok ? (access.grants || []).find((g) => g.resourceType === "mcp") : null;
   const revoke = grant ? svc.governanceService.revokeAppAccess({ context: ctx, grantId: grant.grantId }) : { ok: false, error: "NO_MCP_GRANT" };
-  const mcpRowsAfterRevoke = svc.authStore.appGrantsForApp("mcp-center").filter((g) => g.resource_type === "mcp");
+  // 这里要的是**全表**语义：L1 证的是"这次真实撤销之后整库再没有 mcp-center 的 mcp 行"，
+  // 与旁证 evidenceOf() 的整表 SQL（WHERE app_id='mcp-center'，不带 organization_id）同形。
+  // 按组织取会漏掉"行落到别的组织/无主行"这种最该被这条 0 抓到的形态，故不走 appGrantsForApp。
+  const mcpRowsAfterRevoke = svc.authStore.allAppGrants().filter((g) => g.app_id === "mcp-center" && g.resource_type === "mcp");
   const revokeAudit = svc.store.connection
     .prepare("SELECT id, app_id, action, old_permissions, new_permissions FROM authorization_audit WHERE action = 'governance.revokeAppPermission' ORDER BY id DESC LIMIT 3")
     .all();

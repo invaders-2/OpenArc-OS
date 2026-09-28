@@ -39,8 +39,8 @@ function withGovernance(fx) {
   return new GovernanceService({ identity: fx.identity, authService: fx.authService, authStore: fx.store, resourceStore });
 }
 
-const mcpGrantsOf = (fx, orgId) => fx.store.appGrantsForApp("mcp-center").filter((g) => g.organization_id === orgId && g.resource_type === "mcp");
-const modelGrantsOf = (fx, orgId, appId) => fx.store.appGrantsForApp(appId).filter((g) => g.organization_id === orgId && g.resource_type === "model");
+const mcpGrantsOf = (fx, orgId) => fx.store.appGrantsForApp("mcp-center", orgId).filter((g) => g.resource_type === "mcp");
+const modelGrantsOf = (fx, orgId, appId) => fx.store.appGrantsForApp(appId, orgId).filter((g) => g.resource_type === "model");
 const provisionOf = (fx, orgId, appId, policyKey) => fx.store.policyProvisionByKey({ organizationId: orgId, appId, policyKey });
 
 async function withMcp(fn, options = {}) {
@@ -180,21 +180,21 @@ test("P6 · resource baseline：撤销后重启（新实例、无内存守卫）
     const alice = f.ctx("alice");
     const trigger = await f.resourceService.createResource({ context: alice, resourceType: "text", name: "SeedTrigger", content: "seed" });
     assert.equal(trigger.ok, true, JSON.stringify(trigger));
-    const baselineOf = (appId) => f.store.appGrantsForApp(appId).find((g) => g.organization_id === f.orgId && g.resource_type === "" && !g.resource_id && !g.collection_id && !g.department_id && String(g.scope) === "");
+    const baselineOf = (appId) => f.store.appGrantsForApp(appId, f.orgId).find((g) => g.resource_type === "" && !g.resource_id && !g.collection_id && !g.department_id && String(g.scope) === "");
     const canvasBaseline = baselineOf("canvas");
-    assert.ok(canvasBaseline, "resource baseline 必须先存在：" + JSON.stringify(f.store.appGrantsForApp("canvas")));
+    assert.ok(canvasBaseline, "resource baseline 必须先存在：" + JSON.stringify(f.store.appGrantsForApp("canvas", f.orgId)));
     assert.equal(f.store.policyProvisionByKey({ organizationId: f.orgId, appId: "canvas", policyKey: "resource" }).revoked_at, null);
 
     assert.equal(f.governanceService.revokeAppAccess({ context: f.adminCtx(), grantId: canvasBaseline.id }).changed, true);
     assert.equal(typeof f.store.policyProvisionByKey({ organizationId: f.orgId, appId: "canvas", policyKey: "resource" }).revoked_at, "number");
-    const grantCountBefore = f.store.appGrantsForApp("canvas").length;
+    const grantCountBefore = f.store.appGrantsForApp("canvas", f.orgId).length;
 
     // 应用重启：新实例没有旧的 #builtinEnsured 内存守卫，这正是原来"重启后第一次资源操复活"的路径
     const restarted = new ResourceService({ identity: f.identity, resourceStore: f.resourceStore, managedStore: f.managedStore, authService: f.authService, authStore: f.store, deviceService: f.deviceService, clock: f.clock });
     const after = await restarted.createResource({ context: alice, resourceType: "text", name: "AfterRestart", content: "after" });
     assert.equal(after.ok, true, JSON.stringify(after));
-    assert.equal(f.store.appGrantsForApp("canvas").some((g) => g.id === canvasBaseline.id), false, "撤销的 baseline 不得被重启后的第一次资源操作补回来");
-    assert.equal(f.store.appGrantsForApp("canvas").length, grantCountBefore, "重启后不得新增 baseline 行");
+    assert.equal(f.store.appGrantsForApp("canvas", f.orgId).some((g) => g.id === canvasBaseline.id), false, "撤销的 baseline 不得被重启后的第一次资源操作补回来");
+    assert.equal(f.store.appGrantsForApp("canvas", f.orgId).length, grantCountBefore, "重启后不得新增 baseline 行");
     assert.equal(typeof f.store.policyProvisionByKey({ organizationId: f.orgId, appId: "canvas", policyKey: "resource" }).revoked_at, "number", "墓碑保持");
     assert.equal(f.store.policyProvisionByKey({ organizationId: f.orgId, appId: "ai", policyKey: "resource" }).revoked_at, null, "其他 App 的 resource baseline 记录不受影响");
   } finally {
@@ -218,8 +218,8 @@ test("P7 · 真机同一条装配路径：撤销 mcp baseline 后重启 + 重新
   assert.equal(login1.ok, true, JSON.stringify(login1));
   const orgId = login1.snapshot.teamId;
   const ctx = { sessionRef: login1.snapshot.sessionRef, appId: "mcp-center", source: "ui" };
-  assert.equal(a.authStore.appGrantsForApp("mcp-center").filter((g) => g.organization_id === orgId && g.resource_type === "mcp").length, 1, "登录路径必须完成 mcp baseline 播种");
-  const modelRows = () => ["settings", "resource-library", "ai", "canvas"].reduce((n, id) => n + a.authStore.appGrantsForApp(id).filter((g) => g.resource_type === "model").length, 0);
+  assert.equal(a.authStore.appGrantsForApp("mcp-center", orgId).filter((g) => g.resource_type === "mcp").length, 1, "登录路径必须完成 mcp baseline 播种");
+  const modelRows = () => ["settings", "resource-library", "ai", "canvas"].reduce((n, id) => n + a.authStore.appGrantsForApp(id, orgId).filter((g) => g.resource_type === "model").length, 0);
   const modelRowsBefore = modelRows();
   assert.equal(modelRowsBefore, 4, "登录路径必须完成 model baseline 播种");
 
@@ -231,12 +231,12 @@ test("P7 · 真机同一条装配路径：撤销 mcp baseline 后重启 + 重新
 
   // 重启（应用重启 = 重新装配同一份用户数据目录）
   const b = open();
-  assert.equal(b.authStore.appGrantsForApp("mcp-center").filter((g) => g.organization_id === orgId).length, 0, "重启装配不得把撤销的 baseline 种回来");
+  assert.equal(b.authStore.appGrantsForApp("mcp-center", orgId).length, 0, "重启装配不得把撤销的 baseline 种回来");
   const login2 = await b.service.dispatch({ type: "identity/login", identifier: ID, password: PW });
   assert.equal(login2.ok, true);
-  assert.equal(b.authStore.appGrantsForApp("mcp-center").filter((g) => g.organization_id === orgId).length, 0, "重新登录不得把撤销的 baseline 种回来");
+  assert.equal(b.authStore.appGrantsForApp("mcp-center", orgId).length, 0, "重新登录不得把撤销的 baseline 种回来");
   assert.equal(b.authStore.policyProvisionByKey({ organizationId: orgId, appId: "mcp-center", policyKey: "mcp" }).revoked_at, revokedAt, "墓碑跨重启保持");
-  assert.equal(["settings", "resource-library", "ai", "canvas"].reduce((n, id) => n + b.authStore.appGrantsForApp(id).filter((g) => g.resource_type === "model").length, 0), modelRowsBefore, "重启 + 重新登录不得重复写 model baseline");
+  assert.equal(["settings", "resource-library", "ai", "canvas"].reduce((n, id) => n + b.authStore.appGrantsForApp(id, orgId).filter((g) => g.resource_type === "model").length, 0), modelRowsBefore, "重启 + 重新登录不得重复写 model baseline");
 
   // 正式重授 → 跨重启保持
   const ctx2 = { sessionRef: login2.snapshot.sessionRef, appId: "mcp-center", source: "ui" };
@@ -248,7 +248,7 @@ test("P7 · 真机同一条装配路径：撤销 mcp baseline 后重启 + 重新
   const c = open();
   const login3 = await c.service.dispatch({ type: "identity/login", identifier: ID, password: PW });
   assert.equal(login3.ok, true);
-  const rows = c.authStore.appGrantsForApp("mcp-center").filter((g) => g.organization_id === orgId && g.resource_type === "mcp");
+  const rows = c.authStore.appGrantsForApp("mcp-center", orgId).filter((g) => g.resource_type === "mcp");
   assert.equal(rows.length, 1, "重授后跨重启保持恰好一行");
   assert.deepEqual(JSON.parse(rows[0].actions).sort(), ["mcp.use", "mcp.view"]);
   assert.equal(c.authStore.policyProvisionByKey({ organizationId: orgId, appId: "mcp-center", policyKey: "mcp" }).revoked_at, null);
@@ -269,7 +269,7 @@ test("S1 · 合法的 mcp.view/use/manage/test 组合能授予并落库、能回
     for (const actions of combos) {
       const res = grantMcp(governance, fx, "skill-runtime", actions);
       assert.equal(res.ok, true, JSON.stringify(actions) + " -> " + JSON.stringify(res));
-      const rows = fx.store.appGrantsForApp("skill-runtime").filter((g) => g.resource_type === "mcp");
+      const rows = fx.store.appGrantsForApp("skill-runtime", fx.orgId).filter((g) => g.resource_type === "mcp");
       assert.equal(rows.length, 1, "同组织同 App 只有一行 mcp grant");
       assert.deepEqual(JSON.parse(rows[0].actions).sort(), [...actions].sort());
       assert.equal(rows[0].organization_id, fx.orgId);
@@ -302,7 +302,7 @@ test("S2 · 跨命名空间动作一律 INVALID_INPUT（mcp / model / resource /
       assert.equal(res.ok, false, JSON.stringify(attempt));
       assert.equal(res.error, "INVALID_INPUT", JSON.stringify(attempt) + " -> " + JSON.stringify(res));
     }
-    assert.equal(fx.store.appGrantsForApp("skill-runtime").length, 0, "被拒的写入不得留下任何 grant 行");
+    assert.equal(fx.store.allAppGrants().filter((g) => g.app_id === "skill-runtime").length, 0, "被拒的写入不得留下任何 grant 行");
   });
 });
 
@@ -313,7 +313,7 @@ test("S3 · 越权拒绝：非 Super Admin 不能授 ORGANIZATION scope 的 mcp.
       assert.equal(res.ok, false, key);
       assert.equal(res.error, "NOT_SUPER_ADMIN", key + " -> " + JSON.stringify(res));
     }
-    assert.equal(fx.store.appGrantsForApp("skill-runtime").length, 0, "越权尝试不得留下 grant 行");
+    assert.equal(fx.store.allAppGrants().filter((g) => g.app_id === "skill-runtime").length, 0, "越权尝试不得留下 grant 行");
     const ok = governance.grantAppAccess({ context: { sessionRef: fx.sessions.admin, appId: "resource-library", source: "ui" }, appId: "skill-runtime", resourceType: "mcp", scope: "ORGANIZATION", actions: ["mcp.manage"] });
     assert.equal(ok.ok, true, "Super Admin 可以授 ORGANIZATION scope 的 mcp.manage：" + JSON.stringify(ok));
   });

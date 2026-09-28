@@ -14,7 +14,7 @@ test("Gate-App: User × App 交集（ALLOW/DENY 组合）覆盖 search/read/expo
   const rid = r.resource.resourceId;
   const canvasAlice = { sessionRef: f.sessions.alice, appId: "canvas" };
   // User ALLOW + App DENY
-  for (const g of f.store.appGrantsForApp("canvas")) f.governanceService.revokeAppAccess({ context: admin, grantId: g.id });
+  for (const g of f.store.appGrantsForApp("canvas", f.orgId)) f.governanceService.revokeAppAccess({ context: admin, grantId: g.id });
   assert.equal(f.authService.authorize({ context: canvasAlice, action: "resource.read", resource: rid }).decision, "DENY");
   // App ALLOW + User DENY（dana 无 user grant）
   f.governanceService.grantAppAccess({ context: admin, appId: "canvas", resourceId: rid, actions: ["resource.read", "resource.view", "resource.search", "resource.export"] });

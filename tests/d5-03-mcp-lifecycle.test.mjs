@@ -28,7 +28,7 @@ async function withFixture(fn, options = {}) {
 }
 
 const recordOf = (fx, id) => fx.identity.connection.prepare("SELECT * FROM mcp_connections WHERE connection_id = ?").get(id);
-const mcpGrantOf = (fx) => fx.store.appGrantsForApp("mcp-center").find((g) => g.resource_type === "mcp");
+const mcpGrantOf = (fx) => fx.store.appGrantsForApp("mcp-center", fx.orgId).find((g) => g.resource_type === "mcp");
 const stateOf = async (info) => (await fetch("http://127.0.0.1:" + info.port + "/__state")).json();
 
 async function waitForState(info, predicate, { timeoutMs = 2500, intervalMs = 10 } = {}) {

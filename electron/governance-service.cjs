@@ -291,7 +291,7 @@ class GovernanceService {
     if (!gate.ok) return { ok: false, error: gate.error };
     const app = this.authStore.appById(appId);
     if (!app) return { ok: false, error: "APP_UNKNOWN" };
-    const grants = this.authStore.appGrantsForApp(appId).filter((g) => g.organization_id === gate.organizationId);
+    const grants = this.authStore.appGrantsForApp(appId, gate.organizationId).filter((g) => g.organization_id === gate.organizationId);
     return {
       ok: true,
       app: { appId: app.app_id, name: app.name, publisher: app.publisher, status: app.status, builtIn: !!app.built_in },
@@ -309,7 +309,7 @@ class GovernanceService {
     if (!gate.ok) return { ok: false, error: gate.error };
     const app = this.authStore.appById(appId);
     if (!app) return { ok: false, error: "APP_UNKNOWN" };
-    const grants = this.authStore.appGrantsForApp(appId).filter((g) => g.organization_id === gate.organizationId && String(g.scope) === "TOOL");
+    const grants = this.authStore.appGrantsForApp(appId, gate.organizationId).filter((g) => g.organization_id === gate.organizationId && String(g.scope) === "TOOL");
     const granted = new Set();
     for (const g of grants) for (const a of authzDom.toolGrantActions(g)) granted.add(a);
     return {
@@ -334,7 +334,7 @@ class GovernanceService {
     if (!requested.length) return { ok: false, error: "INVALID_INPUT" };
     for (const a of requested) if (!authzDom.TOOL_ACTIONS.includes(a)) return { ok: false, error: "INVALID_INPUT" };
     const existing = new Set();
-    for (const g of this.authStore.appGrantsForApp(appId).filter((g) => g.organization_id === gate.organizationId && String(g.scope) === "TOOL")) for (const a of authzDom.toolGrantActions(g)) existing.add(a);
+    for (const g of this.authStore.appGrantsForApp(appId, gate.organizationId).filter((g) => g.organization_id === gate.organizationId && String(g.scope) === "TOOL")) for (const a of authzDom.toolGrantActions(g)) existing.add(a);
     const merged = [...new Set([...existing, ...requested])];
     const res = this.authService.grantAppToolPermission({ context, appId, actions: merged });
     if (!res.ok) return { ok: false, error: res.error };

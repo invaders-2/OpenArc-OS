@@ -1556,17 +1556,22 @@ const MIGRATIONS = Object.freeze([
  *
  *   · app_policy_provisions —— 策略提供记录 + 撤销墓碑。"首次使用才给、撤销后永不再给"
  *     的持久依据；组织 id 被复用时旧墓碑会**压住**新组织的首次播种（判定被误导）。
- *   · app_resource_grants  —— App 侧 ACL。判定的取数是 appGrantsForApp(appId)，
- *     不经 organization_id 过滤（authorization-domain.evaluateAppAuthorization 只看
- *     app_id 与目标约束），因此孤儿行能跨组织继续授权 —— 本次实测到的唯一"真复活"面。
+ *   · app_resource_grants  —— App 侧 ACL。第六批起取数与判定都按组织：取数
+ *     appGrantsForApp(appId, organizationId) 只回本组织的行，拿不到组织直接返回空集；
+ *     authorization-domain.evaluateAppAuthorization 再逐条只认 organization_id 等于
+ *     当前组织的行 —— 异组织行与历史遗留的 organization_id = '' 无主行都不再放行
+ *     （空组织不是通配）。
  *   · resource_grants      —— User / Department ACL（grant 事实本体）。
  *   · device_access        —— 设备 ACL（principal × actions）。同样按 device_id 取，
  *     ORGANIZATION 分支不比对行的 organization_id，孤儿行是悬空授权。
  *
- * 为什么整表删而不是按 organization_id 过滤：重置后 teams 为空，这四张表里每一行
- * 的 organization_id 都指向已删组织（含历史遗留的 organization_id = '' 无主行，
- * 它同样会被 App 侧无组织过滤的判定读到）。审计三表（audit_log / authorization_audit /
- * device_audit）一行都不删。
+ * 为什么整表删而不是按 organization_id 过滤：收紧放行口径只挡住"当下读到异组织/空组织行"，
+ * 换不掉下面两个前提。其一，重置后 teams 为空，这四张表里每一行的 organization_id 都指向
+ * 已删组织（含历史遗留的 organization_id = '' 无主行），行本身**无所属**。其二，组织 id
+ * 一旦被复用就会重新生效：按 organization_id 取的两张表（app_resource_grants /
+ * resource_grants）会把旧行当成新组织的既有授权，app_policy_provisions 的旧墓碑会压制
+ * 新组织的首次播种，device_access 干脆按 device_id 取、不比组织，孤儿行是悬空授权。
+ * 审计三表（audit_log / authorization_audit / device_audit）一行都不删。
  *
  * 为什么必须是**字面量**：tests/app-policy-provisions-retention.test.mjs 的 R6 守卫按
  * 源码字符串字面量逐条核对组织删除路径；把表名拼进 SQL 会让守卫看不见这条删除（fail-open）。

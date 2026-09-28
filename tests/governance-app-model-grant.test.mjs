@@ -52,7 +52,7 @@ assert.equal(f.governanceService.grantAppAccess({ context: admin, appId: "canvas
 /** 与 CanvasService.startRun 同一条授权调用。 */
 const canvasResolve = () => f.modelService.resolveModel({ context: canvasCtx, capability: "chat" });
 const modelGrantOf = (view) => view.grants.find((g) => g.resourceType === "model" && Array.isArray(g.actions) && g.actions.includes("model.use")) || null;
-const otherAppGrants = () => Object.fromEntries(["ai", "browser", "resource-library", "image-generator"].map((appId) => [appId, f.store.appGrantsForApp(appId).length]));
+const otherAppGrants = () => Object.fromEntries(["ai", "browser", "resource-library", "image-generator"].map((appId) => [appId, f.store.appGrantsForApp(appId, f.orgId).length]));
 let modelGrantId = null;
 
 test("D1-a · getAppAccess 如实列出画布 App 真实持有的 model.use 授予句柄", () => {
@@ -61,7 +61,7 @@ test("D1-a · getAppAccess 如实列出画布 App 真实持有的 model.use 授�
   const grant = modelGrantOf(view);
   assert.ok(grant, "画布缺少含 model.use 的授予：" + JSON.stringify(view.grants));
   assert.deepEqual([...grant.actions].sort(), ["model.use", "model.view"]);
-  assert.equal(grant.grantId, f.store.appGrantsForApp("canvas").find((g) => g.resource_type === "model").id);
+  assert.equal(grant.grantId, f.store.appGrantsForApp("canvas", f.orgId).find((g) => g.resource_type === "model").id);
   // 同一个投影里 resource 授予仍按原样列出，且两个 namespace 不互相污染
   const resourceGrant = view.grants.find((g) => g.resourceId === textResourceId);
   assert.ok(resourceGrant, JSON.stringify(view.grants));

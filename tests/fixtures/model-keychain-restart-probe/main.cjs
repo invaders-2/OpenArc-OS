@@ -94,7 +94,7 @@ async function boot() {
 
 function settingsGrant(identity) {
   const app = identity.authStore.appById(APP);
-  const grants = identity.authStore.appGrantsForApp(APP).filter((g) => g.resource_type === "model");
+  const grants = identity.authStore.allAppGrants().filter((g) => g.app_id === APP && g.resource_type === "model");
   const actions = grants.flatMap((g) => (typeof g.actions === "string" ? JSON.parse(g.actions) : g.actions || [])).sort();
   return { app, actions };
 }

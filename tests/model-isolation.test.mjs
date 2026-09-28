@@ -158,7 +158,7 @@ test("ISO9 · User B 全部响应无 raw secret / credentialRef / Authorization"
 
 test("ISO10 · settings 是真实 trusted App Principal（最小四权），不是借权", async () => {
   assert.equal(HOST_APP_ID, "settings");
-  const grants = f.store.appGrantsForApp("settings").filter((g) => g.resource_type === "model");
+  const grants = f.store.appGrantsForApp("settings", f.orgId).filter((g) => g.resource_type === "model");
   assert.equal(grants.length, 1);
   const raw = grants[0].actions;
   const actions = Array.isArray(raw) ? raw : JSON.parse(raw || "[]");
