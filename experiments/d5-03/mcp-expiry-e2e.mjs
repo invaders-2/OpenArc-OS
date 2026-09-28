@@ -32,7 +32,7 @@
  *   · 收尾只清本次运行自己 spawn 的 pid 树 + 自己建并带归属标记的临时 userData 目录，绝不 pkill 通配。
  */
 import { chromium } from "@playwright/test";
-import { spawn, execFileSync } from "node:child_process";
+import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -984,20 +984,69 @@ async function runIdle() {
   const reducedShot = await shotTo(path.join(VIS, "dark-reduced-session-expired.png"));
   const reducedOff = await setReduced(false);
   await closeSettings();
+  /**
+   * 动效口径修正（第五批 · 报告里逐字披露，只修这一处判定逻辑，实质动效断言一条没放宽）：
+   * 旧写法把"改动行全部是文案"写成 changed.length > 0 && every(文案) —— 一旦本轮根本没改这个文件
+   * （工作树 diff 为空），它会把"没有改动"判成 FAIL，这是验收脚本自己的假阳性，不是产品回归。
+   * 新口径的等价语义：**不存在"非文案改动行"**（空 diff 满足），另加两条非空转条件：
+   *   (a) 该文件在 HEAD 里仍存在且确实带那句文案（防"文件被删/改名"造成空转通过）；
+   *   (b) 与动效基线提交 8cbf8df（说明行文案定稿前）的差异里也没有非文案改动行。
+   * 负向自证见 M1b：临时副本注入 + git diff --no-index（不碰产品文件，验完即删）。
+   */
+  const MCP_COPY_RE = /会话已结束（登出/;
+  const MCP_MOTION_BASELINE_REV = "8cbf8df";
+  const mcpCopyOnlyVerdict = ({ changedLines, headText, injectNonCopyLine = false }) => {
+    const lines = injectNonCopyLine ? [...changedLines, "+  transition: opacity 120ms; /* 注入的非文案改动 */"] : changedLines;
+    const nonCopyLines = lines.filter((l) => !MCP_COPY_RE.test(l));
+    const headHasCopy = MCP_COPY_RE.test(String(headText || ""));
+    return { changedLines: lines, nonCopyLines, headHasCopy, allAreCopy: nonCopyLines.length === 0 && headHasCopy };
+  };
+  const diffChangedLines = (args) => {
+    const r = spawnSync("git", ["-C", ROOT, ...args], { encoding: "utf8", maxBuffer: 1 << 26 });
+    return String(r.stdout || "").split("\n").filter((l) => (l.startsWith("+") || l.startsWith("-")) && !l.startsWith("+++") && !l.startsWith("---"));
+  };
   const mcpCenterDiff = (() => {
     try {
-      const d = execFileSync("git", ["-C", ROOT, "diff", "-U0", "--", "src/mcp/McpCenter.tsx"], { encoding: "utf8" });
-      const changed = d.split("\n").filter((l) => (l.startsWith("+") || l.startsWith("-")) && !l.startsWith("+++") && !l.startsWith("---"));
-      return { changedLines: changed, allAreCopy: changed.length > 0 && changed.every((l) => /会话已结束（登出/.test(l)) };
-    } catch { return null; }
+      const headText = execFileSync("git", ["-C", ROOT, "show", "HEAD:src/mcp/McpCenter.tsx"], { encoding: "utf8" });
+      const worktree = mcpCopyOnlyVerdict({ changedLines: diffChangedLines(["diff", "-U0", "--", "src/mcp/McpCenter.tsx"]), headText });
+      const probe = spawnSync("git", ["-C", ROOT, "diff", "-U0", MCP_MOTION_BASELINE_REV, "HEAD", "--", "src/mcp/McpCenter.tsx"], { encoding: "utf8", maxBuffer: 1 << 26 });
+      const anchored = probe.status === 0 || probe.status === 1
+        ? mcpCopyOnlyVerdict({ changedLines: String(probe.stdout || "").split("\n").filter((l) => (l.startsWith("+") || l.startsWith("-")) && !l.startsWith("+++") && !l.startsWith("---")), headText })
+        : null;
+      let negative = null, tmpDir = null, tmpRemoved = null;
+      try {
+        tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "oa-d503e-m1check-"));
+        const a = path.join(tmpDir, "head.tsx"), b = path.join(tmpDir, "injected.tsx");
+        fs.writeFileSync(a, headText);
+        fs.writeFileSync(b, headText.replace(MCP_COPY_RE, "会话已结束X（登出")); // 真实副本：只改写第一处文案
+        const injectedLines = diffChangedLines(["diff", "--no-index", "-U0", a, b]);
+        negative = {
+          injectedDiffLines: injectedLines.length,
+          injectedNonCopy: mcpCopyOnlyVerdict({ changedLines: injectedLines, headText }).nonCopyLines.length,
+          injectedAllAreCopy: mcpCopyOnlyVerdict({ changedLines: injectedLines, headText }).allAreCopy,
+          syntheticStyleAllAreCopy: mcpCopyOnlyVerdict({ changedLines: worktree.changedLines, headText, injectNonCopyLine: true }).allAreCopy,
+          emptyWithoutCopyAllAreCopy: mcpCopyOnlyVerdict({ changedLines: [], headText: "" }).allAreCopy, // HEAD 里那句文案不存在（例如文件被删/改名）时，空 diff 不得空转通过
+        };
+      } finally {
+        if (tmpDir) { fs.rmSync(tmpDir, { recursive: true, force: true }); tmpRemoved = !fs.existsSync(tmpDir); }
+      }
+      return { changedLines: worktree.changedLines, allAreCopy: worktree.allAreCopy && (anchored ? anchored.allAreCopy : true), worktree, anchored, baselineRev: MCP_MOTION_BASELINE_REV, anchoredAvailable: !!anchored, negative, tmpRemoved };
+    } catch (e) { return { error: String((e && e.message) || e).slice(0, 200) }; }
   })();
   record("M1", "动效 · 本批未新增动效：该说明行在常规与减少动态效果下都没有过渡 / 动画（常规 transitionProperty=" + JSON.stringify(motionNormal && motionNormal.transitionProperty) + "、transitionDuration=" + JSON.stringify(motionNormal && motionNormal.transitionDuration) + "、animationName=" + JSON.stringify(motionNormal && motionNormal.animationName) + "）；减少动态效果下说明行自身 --dur-quick=" + JSON.stringify(motionReduced.durQuickElement) + "（.reduced 作用域已压到 0ms；:root 仍是 " + JSON.stringify(motionReduced.durQuickRoot) + "）且说明行仍完整显示（信息不丢）",
     !!motionNormal && motionNormal.animationName === "none" && isZeroDur(motionNormal.transitionDuration)
       && motionReduced.present === true && motionReduced.animationName === "none" && isZeroDur(motionReduced.transitionDuration) && isZeroDur(motionReduced.animationDuration)
       && reducedOn === true && motionReduced.reduced === true && motionReduced.durQuickElement === "0ms" && motionReduced.durQuickDesktop === "0ms" && !!motionReduced.text
       && !!(mcpCenterDiff && mcpCenterDiff.allAreCopy),
-    "无 animation + 过渡 0s（常规与减少动态效果下都是）+ 减少动态效果下元素作用域 --dur-quick=0ms + 说明行仍显示 + McpCenter 本批只改了那一行文案",
+    "无 animation + 过渡 0s（常规与减少动态效果下都是）+ 减少动态效果下元素作用域 --dur-quick=0ms + 说明行仍显示 + McpCenter 相对动效基线只有文案改动（第五批口径修正：空 diff = 不存在非文案改动行 → 通过；非空自证与负向自证见 M1b）",
     JSON.stringify({ normal: motionNormal, reduced: motionReduced, reducedOn, reducedOff, shot: reducedShot, mcpCenterDiff }));
+  record("M1b", "动效口径修正的负向自证（不碰产品文件）：空 diff 判通过；注入样式改动 / 文案被改写 / HEAD 缺那句文案三种形态都判 FAIL；临时副本已删；与动效基线 8cbf8df 的差异里也没有非文案改动行",
+    !!mcpCenterDiff && mcpCenterDiff.allAreCopy === true
+      && !!mcpCenterDiff.negative && mcpCenterDiff.negative.injectedAllAreCopy === false
+      && mcpCenterDiff.negative.syntheticStyleAllAreCopy === false && mcpCenterDiff.negative.emptyWithoutCopyAllAreCopy === false
+      && mcpCenterDiff.tmpRemoved === true && !!mcpCenterDiff.anchored && mcpCenterDiff.anchored.nonCopyLines.length === 0,
+    "空 diff = 通过（不存在非文案改动行）；三种注入形态全 FAIL；临时目录已删；8cbf8df→HEAD 的差异里非文案改动行 = 0",
+    JSON.stringify({ negative: mcpCenterDiff && mcpCenterDiff.negative, tmpRemoved: mcpCenterDiff && mcpCenterDiff.tmpRemoved, anchoredAvailable: mcpCenterDiff && mcpCenterDiff.anchoredAvailable, anchoredChangedLines: mcpCenterDiff && mcpCenterDiff.anchored ? mcpCenterDiff.anchored.changedLines.length : null, anchoredNonCopy: mcpCenterDiff && mcpCenterDiff.anchored ? mcpCenterDiff.anchored.nonCopyLines.length : null, worktreeChangedLines: mcpCenterDiff && mcpCenterDiff.changedLines ? mcpCenterDiff.changedLines.length : null }));
 
   /* 视觉 / 动效阶段必须证明"会话 B 一直活着"（保活是合法活动）：否则截图可能拍的是过期后的空壳，证据无效 */
   const aliveAfterVisual = await js("const d = document.querySelector('.desktop'); return { gate: d?.getAttribute('data-identity-gate') || 'no-root', notePresent: !!document.querySelector(" + JSON.stringify(noteSel) + "), dark: d ? d.classList.contains('dark') : null, reduced: d ? d.classList.contains('reduced') : null };");

@@ -1,0 +1,727 @@
+{
+  "schema": 1,
+  "phase": "D5-03 第五批",
+  "title": "安装重置同事务清授权 + 登录失败文案不泄漏内部 detail（真机验收）",
+  "testedCommit": "09dccf9c2cba5f21e787160de376a166db61a38d",
+  "testedBranch": "integration/ui-core",
+  "at": "2026-09-28T07:09:52.721Z",
+  "verdict": {
+    "functional": "pass",
+    "visual": "partial（浅色向导卡 .auth-error 实测 2.62:1 < 4.5:1；其余三个面 5.16–5.31:1 通过）",
+    "motion": "pass（本批无新增动效；错误行 none/0s，reduced 下元素作用域 --dur-quick=0ms）"
+  },
+  "goal1_reset": {
+    "run": {
+      "runId": "20260928T070842Z-9cd0-mcp-reset-e2e",
+      "counts": {
+        "pass": 26,
+        "fail": 0,
+        "total": 26
+      },
+      "exitCode": 0,
+      "artifactSha256": "17202b482ffea7aa587f7fb0f9d0e6cd92342997b424852450fa6e00fee37766",
+      "artifactPath": "artifacts/d5-03/runs/20260928T070842Z-9cd0-mcp-reset-e2e/mcp-reset-e2e.json"
+    },
+    "firstRun": {
+      "runId": "20260928T065649Z-d18e-mcp-reset-e2e",
+      "counts": {
+        "pass": 26,
+        "fail": 0,
+        "total": 26
+      },
+      "exitCode": 0,
+      "artifactSha256": "495964b8ca826caf078dd542e9d88af027f2d4e6b07292fa32c38ad8d913d315",
+      "artifactPath": "artifacts/d5-03/runs/20260928T065649Z-d18e-mcp-reset-e2e/mcp-reset-e2e.json"
+    },
+    "orgIds": {
+      "first": "team_tnM0rkPP6WB8lKUKpUvscg9pC2Rf5whw",
+      "second": "team_8GYXyRw-3BvUA3ibqp4uNiw_4PjqUcgw",
+      "reuseOnRealMachine": null
+    },
+    "seeding": {
+      "provisions": 15,
+      "grants": 16,
+      "pairs": [
+        "ai|model",
+        "ai|resource",
+        "browser|resource",
+        "canvas|model",
+        "canvas|resource",
+        "illustrator|resource",
+        "image-generator|resource",
+        "mcp-center|mcp",
+        "mcp-center|resource",
+        "photoshop|resource",
+        "resource-library|model",
+        "resource-library|resource",
+        "settings|model",
+        "skill-runtime|resource",
+        "video-generator|resource"
+      ],
+      "apps": {
+        "resource": [
+          "ai",
+          "browser",
+          "canvas",
+          "illustrator",
+          "image-generator",
+          "mcp-center",
+          "photoshop",
+          "resource-library",
+          "skill-runtime",
+          "video-generator"
+        ],
+        "model": [
+          "ai",
+          "canvas",
+          "resource-library",
+          "settings"
+        ],
+        "mcp": [
+          "mcp-center"
+        ]
+      }
+    },
+    "dbSnapshots": {
+      "A_seeded": {
+        "counts": {
+          "app_policy_provisions": 15,
+          "app_resource_grants": 16,
+          "resource_grants": 0,
+          "device_access": 0,
+          "installations": 1,
+          "teams": 1,
+          "users": 1,
+          "sessions": 1,
+          "login_attempts": 0
+        },
+        "tombstones": [],
+        "auditLogRows": 2,
+        "invariants": []
+      },
+      "B_before_reset": {
+        "counts": {
+          "app_policy_provisions": 15,
+          "app_resource_grants": 14,
+          "resource_grants": 1,
+          "device_access": 0,
+          "installations": 1,
+          "teams": 1,
+          "users": 1,
+          "sessions": 1,
+          "login_attempts": 0
+        },
+        "tombstones": [
+          "canvas|model",
+          "mcp-center|mcp"
+        ],
+        "auditLogRows": 2,
+        "invariants": []
+      },
+      "C_after_bad_confirm": {
+        "counts": {
+          "app_policy_provisions": 15,
+          "app_resource_grants": 14,
+          "resource_grants": 1,
+          "device_access": 0,
+          "installations": 1,
+          "teams": 1,
+          "users": 1,
+          "sessions": 1,
+          "login_attempts": 0
+        },
+        "tombstones": [
+          "canvas|model",
+          "mcp-center|mcp"
+        ],
+        "auditLogRows": 4,
+        "invariants": []
+      },
+      "D_after_reset": {
+        "counts": {
+          "app_policy_provisions": 0,
+          "app_resource_grants": 0,
+          "resource_grants": 0,
+          "device_access": 0,
+          "installations": 0,
+          "teams": 0,
+          "users": 0,
+          "sessions": 0,
+          "login_attempts": 0
+        },
+        "tombstones": [],
+        "auditLogRows": 6,
+        "invariants": []
+      },
+      "E_reseeded": {
+        "counts": {
+          "app_policy_provisions": 15,
+          "app_resource_grants": 16,
+          "resource_grants": 0,
+          "device_access": 0,
+          "installations": 1,
+          "teams": 1,
+          "users": 1,
+          "sessions": 1,
+          "login_attempts": 0
+        },
+        "tombstones": [],
+        "auditLogRows": 8,
+        "invariants": []
+      }
+    },
+    "steps": [
+      {
+        "id": "A1.login",
+        "command": "UI: [data-d3-id=login-*] → identity/login",
+        "result": {
+          "gate": "ready",
+          "wizard": {
+            "steps": [
+              true,
+              true,
+              true
+            ],
+            "submitted": "ok",
+            "arrived": true,
+            "gate": "unauthenticated"
+          }
+        }
+      },
+      {
+        "id": "A1.status",
+        "command": "identity/status",
+        "result": {
+          "ok": true,
+          "teamId": "team_tnM0rkPP6WB8lKUKpUvscg9pC2Rf5whw",
+          "userId": "usr_SZ3PDd5XalBsAumhocM16KA2C4EZWqpH",
+          "installationId": "inst_hh2tEdMKYiRsq2eOcJ3YRrDppSd64AvC",
+          "initStatus": "READY"
+        }
+      },
+      {
+        "id": "A3",
+        "command": "resource/create",
+        "result": {
+          "ok": true,
+          "error": null,
+          "resourceId": "res_lasuAuCRRpCjTkngBWPh3jQVXmaMMA3E"
+        }
+      },
+      {
+        "id": "B1",
+        "command": "governance/grantResourceAccess",
+        "result": {
+          "ok": true,
+          "error": null,
+          "grantId": "grant_i1Jx0loKnTJNF9K_i_nIkrVjrR4ShEaU"
+        }
+      },
+      {
+        "id": "B2",
+        "command": "governance/revokeAppAccess",
+        "result": {
+          "ok": true,
+          "error": null,
+          "revokedGrantId": "grant_oRDdtIYbx_cuV-7rFfl-VO4LJ9HHBHcT"
+        }
+      },
+      {
+        "id": "B3",
+        "command": "governance/revokeAppAccess",
+        "result": {
+          "ok": true,
+          "error": null,
+          "revokedGrantId": "grant_w4SrPi0a8gsa9Qx7rbbe03iEsMzAnU24"
+        }
+      },
+      {
+        "id": "B4",
+        "command": "mcp/list",
+        "result": {
+          "ok": false,
+          "error": "MCP_UNAUTHORIZED"
+        }
+      },
+      {
+        "id": "C1",
+        "command": "identity/reset-installation",
+        "result": {
+          "ok": false,
+          "error": "INVALID_INPUT",
+          "detail": "confirm-required"
+        }
+      },
+      {
+        "id": "C2",
+        "command": "identity/reset-installation",
+        "result": {
+          "ok": false,
+          "error": "INVALID_INPUT",
+          "detail": "confirm-required"
+        }
+      },
+      {
+        "id": "D1",
+        "command": "identity/reset-installation",
+        "result": {
+          "ok": true,
+          "error": null,
+          "status": {
+            "initialized": false,
+            "status": "UNINITIALIZED",
+            "installationId": null,
+            "userCount": 0
+          }
+        }
+      },
+      {
+        "id": "D6",
+        "command": "UI reload → identity/status → identity/restore",
+        "result": {
+          "gate": "uninitialized"
+        }
+      },
+      {
+        "id": "E1.status",
+        "command": "identity/status",
+        "result": {
+          "ok": true,
+          "teamId": "team_8GYXyRw-3BvUA3ibqp4uNiw_4PjqUcgw",
+          "userId": "usr_CjhANSL3HXYP7A29vNQvRMwi-LIGaJJP"
+        }
+      },
+      {
+        "id": "E6",
+        "command": "mcp/list",
+        "result": {
+          "ok": true,
+          "error": null
+        }
+      },
+      {
+        "id": "F1",
+        "command": "node --test ...",
+        "result": {
+          "exitCode": 0,
+          "summary": [
+            "# tests 9",
+            "# pass 9",
+            "# fail 0"
+          ]
+        }
+      }
+    ],
+    "negativeConfirm": [
+      {
+        "section": "C1",
+        "status": "PASS",
+        "actual": "{\"first\":{\"ok\":false,\"error\":\"INVALID_INPUT\",\"detail\":\"confirm-required\"},\"second\":{\"ok\":false,\"error\":\"INVALID_INPUT\",\"detail\":\"confirm-required\"}}"
+      },
+      {
+        "section": "C2",
+        "status": "PASS",
+        "actual": "{\"authzSame\":true,\"identitySame\":true,\"counts\":{\"app_policy_provisions\":15,\"app_resource_grants\":14,\"resource_grants\":1,\"device_access\":0,\"installations\":1,\"teams\":1,\"users\":1,\"sessions\":1,\"login_attempts\":0},\"tombstones\":[\"canvas|model\",\"mcp-center|mcp\"],\"provisions\":15}"
+      },
+      {
+        "section": "C3",
+        "status": "PASS",
+        "actual": "{\"auditSameExceptLog\":true,\"logPrefixKept\":true,\"logDelta\":2,\"denyRows\":[{\"event\":\"reset-installation\",\"result\":\"DENY\",\"error_code\":\"INVALID_INPUT\"},{\"event\":\"reset-installation\",\"result\":\"DENY\",\"error_code\":\"INVALID_INPUT\"}]}"
+      },
+      {
+        "section": "C4",
+        "status": "PASS",
+        "actual": "{\"gate\":\"ready\",\"statusOk\":true}"
+      }
+    ],
+    "auditDelta": "audit_log 2 → 4（+2 条被拒 DENY）→ 6（+OK_REQUESTED +OK）→ 8；authorization_audit / device_audit 逐行不变；既有行一行不删",
+    "notVerified": [
+      "device_access 重置前没有行（0 → 0 不构成清理证据）",
+      "产品侧 invariants() 的**原生**可读入口",
+      "组织 ID 复用的**真机**对照（同一 org id 上「旧墓碑压制 → 重置后不压制」）"
+    ]
+  },
+  "goal2_gates": {
+    "policy": {
+      "runId": "20260928T065727Z-b56c-mcp-policy-e2e",
+      "counts": {
+        "pass": 42,
+        "fail": 1,
+        "total": 43
+      },
+      "exitCode": 1,
+      "artifactSha256": "34d9fdd8866128cf181b9d9bafa1b73133f072db77a6760c62f07ed2f132e233",
+      "artifactPath": "artifacts/d5-03/runs/20260928T065727Z-b56c-mcp-policy-e2e/mcp-policy-e2e.json"
+    },
+    "center": {
+      "runId": "20260928T065801Z-c7ba-mcp-center-e2e",
+      "counts": {
+        "pass": 38,
+        "fail": 0,
+        "total": 38
+      },
+      "exitCode": 0,
+      "artifactSha256": "f40caac71cb5e8298b7659dde956775bc1a8ca31369c38ac83f467c7ebd85575",
+      "artifactPath": "artifacts/d5-03/runs/20260928T065801Z-c7ba-mcp-center-e2e/mcp-center-e2e.json"
+    },
+    "stream": {
+      "runId": "20260928T065841Z-cce3-mcp-stream-e2e",
+      "counts": {
+        "pass": 29,
+        "fail": 0,
+        "total": 29
+      },
+      "exitCode": 0,
+      "artifactSha256": "47ce54542391bd97806491c129077f63ce1a4ba225243c81eb6de4c1fa42960a",
+      "artifactPath": "artifacts/d5-03/runs/20260928T065841Z-cce3-mcp-stream-e2e/mcp-stream-e2e.json"
+    },
+    "expiryIdleBeforeFix": {
+      "runId": "20260928T065912Z-5288-mcp-expiry-e2e",
+      "counts": {
+        "pass": 24,
+        "fail": 1,
+        "total": 25
+      },
+      "exitCode": 1,
+      "artifactSha256": "0ed39614269dad2c12fb4a74a22a824b5698450063c06deba4ca8b639dd72259",
+      "artifactPath": "artifacts/d5-03/runs/20260928T065912Z-5288-mcp-expiry-e2e/mcp-expiry-e2e.json"
+    },
+    "expiryIdleAfterFix": {
+      "runId": "20260928T070551Z-f078-mcp-expiry-e2e",
+      "counts": {
+        "pass": 26,
+        "fail": 0,
+        "total": 26
+      },
+      "exitCode": 0,
+      "artifactSha256": "37e9dbb9d93cbe2d662f981a70e18d3a5d13f4273950cf4e90c43d5e25955176",
+      "artifactPath": "artifacts/d5-03/runs/20260928T070551Z-f078-mcp-expiry-e2e/mcp-expiry-e2e.json"
+    },
+    "affectedness": {
+      "runId": "20260928T070745Z-e3b6-batch5-affectedness",
+      "counts": {
+        "pass": 10,
+        "fail": 0,
+        "total": 10
+      },
+      "exitCode": 0,
+      "artifactSha256": "259d3dafa011e886714f604c45b564e0cc3250e8451df5b68d965e7f888c006f",
+      "artifactPath": "artifacts/d5-03/runs/20260928T070745Z-e3b6-batch5-affectedness/batch5-affectedness.json"
+    },
+    "policyR3": {
+      "status": "FAIL（既有断言，未改）",
+      "classification": "陈旧 src-diff 白名单（第三批基线 c2e96c1）；src diff = 4 个文件，全部可追到第四批 7b75ea3 / 第五批 09dccf9",
+      "recommendation": "重定 R3_ALLOWED_SRC 或改成「登记后新增的 src 改动才失败」"
+    },
+    "expiryM1": {
+      "status": "修前 FAIL（脚本假阳性）→ 修后 PASS（含新增 M1b 负向自证）",
+      "patch": "artifacts/d5-03/runs/20260928T070551Z-f078-mcp-expiry-e2e/m1-fix.patch",
+      "patchSha256": "b375050f6bf08a05ceebfa0bded5d089ee0320e8603c97556f063ac62605b123",
+      "substantiveAssertionsWeakened": 0
+    },
+    "streamDecision": "按受影响性分析不落在改动函数上（resetInstallation 0 命中、authError 0 命中）→ 可复用 20260928T043657Z-8d65（sha256 699aae6b216fd94c…），本轮仍重跑"
+  },
+  "goal3_visual": {
+    "run": {
+      "runId": "20260928T070627Z-27eb-auth-error-visual",
+      "counts": {
+        "pass": 16,
+        "fail": 1,
+        "total": 17
+      },
+      "exitCode": 1,
+      "artifactSha256": "506f2a48ad42f906591487583f17a0162eef57d4940d24866509a2fcc41759a8",
+      "artifactPath": "artifacts/d5-03/runs/20260928T070627Z-27eb-auth-error-visual/auth-error-visual.json"
+    },
+    "expectedTexts": {
+      "mismatch": "输入不合法。两次输入的密码不一致。",
+      "mismatchOldForm": "（两次输入的密码不一致）",
+      "marker": "password-mismatch",
+      "displayNameTooLong": "输入不合法。显示名太长了。",
+      "invalidCredentials": "账号或密码不正确。",
+      "rateLimited": "尝试过于频繁，请稍后再试。"
+    },
+    "contrast": {
+      "[data-d3-id=\"auth-error\"]@light-02-auth-error-row.png": {
+        "ratio": 2.62,
+        "bg": "181,181,181",
+        "text": "215,2,21",
+        "fontSize": "12px",
+        "fontWeight": "400",
+        "threshold": 4.5,
+        "pass": false
+      },
+      "[data-d3-id=\"settings-error\"]@light-04-auth-error-row.png": {
+        "ratio": 5.192,
+        "bg": "251,251,251",
+        "text": "215,2,21",
+        "fontSize": "12px",
+        "fontWeight": "400",
+        "threshold": 4.5,
+        "pass": true
+      },
+      "[data-d3-id=\"auth-error\"]@dark-02-auth-error-row.png": {
+        "ratio": 5.31,
+        "bg": "22,22,22",
+        "text": "255,69,57",
+        "fontSize": "12px",
+        "fontWeight": "400",
+        "threshold": 4.5,
+        "pass": true
+      },
+      "[data-d3-id=\"settings-error\"]@dark-reduced-02-auth-error-row.png": {
+        "ratio": 5.159,
+        "bg": "25,25,25",
+        "text": "255,69,57",
+        "fontSize": "12px",
+        "fontWeight": "400",
+        "threshold": 4.5,
+        "pass": true
+      }
+    },
+    "screenshots": [
+      "light-01-setup-password-mismatch.png",
+      "light-02-auth-error-row.png",
+      "light-03-settings-error.png",
+      "light-04-auth-error-row.png",
+      "dark-01-setup-password-mismatch.png",
+      "dark-02-auth-error-row.png",
+      "dark-reduced-01-settings-error.png",
+      "dark-reduced-02-auth-error-row.png",
+      "dark-03-login-invalid-credentials.png",
+      "dark-04-login-rate-limited.png"
+    ],
+    "internalDetailHits": {
+      "light": 0,
+      "dark": 0,
+      "settings": 0,
+      "login": 0,
+      "bracket": 0
+    },
+    "motion": {
+      "normal": "transitionProperty=all / transitionDuration=0s / animationName=none",
+      "reduced": "同 + 元素作用域 --dur-quick=0ms",
+      "newMotionInBatch": false
+    },
+    "specRefs": {
+      "DESIGN_SYSTEM.md:248": "普通文本 4.5:1 / 大字 3:1",
+      "DESIGN_SYSTEM.md:64": "text.secondary",
+      "DESIGN_SYSTEM.md:164": "次级说明 12/18 400",
+      "MOTION_SYSTEM.md:21": "duration.instant 0ms"
+    }
+  },
+  "notVerified": [
+    {
+      "source": "mcp-reset-e2e",
+      "name": "device_access 重置前没有行（0 → 0 不构成清理证据）"
+    },
+    {
+      "source": "mcp-reset-e2e",
+      "name": "产品侧 invariants() 的**原生**可读入口"
+    },
+    {
+      "source": "mcp-reset-e2e",
+      "name": "组织 ID 复用的**真机**对照（同一 org id 上「旧墓碑压制 → 重置后不压制」）"
+    },
+    {
+      "source": "auth-error-visual",
+      "name": "浅色向导卡对比度不达标（2.62:1）—— 记为视觉轴部分通过，不是未验收"
+    }
+  ],
+  "artifacts": [
+    {
+      "runId": "20260928T065649Z-d18e-mcp-reset-e2e",
+      "script": "mcp-reset-e2e",
+      "counts": {
+        "pass": 26,
+        "fail": 0,
+        "total": 26
+      },
+      "exitCode": 0,
+      "artifactSha256": "495964b8ca826caf078dd542e9d88af027f2d4e6b07292fa32c38ad8d913d315",
+      "artifactPath": "artifacts/d5-03/runs/20260928T065649Z-d18e-mcp-reset-e2e/mcp-reset-e2e.json",
+      "logPath": "artifacts/d5-03/runs/20260928T065649Z-d18e-mcp-reset-e2e/mcp-reset-e2e.log",
+      "runDir": "artifacts/d5-03/runs/20260928T065649Z-d18e-mcp-reset-e2e"
+    },
+    {
+      "runId": "20260928T065727Z-b56c-mcp-policy-e2e",
+      "script": "mcp-policy-e2e",
+      "counts": {
+        "pass": 42,
+        "fail": 1,
+        "total": 43
+      },
+      "exitCode": 1,
+      "artifactSha256": "34d9fdd8866128cf181b9d9bafa1b73133f072db77a6760c62f07ed2f132e233",
+      "artifactPath": "artifacts/d5-03/runs/20260928T065727Z-b56c-mcp-policy-e2e/mcp-policy-e2e.json",
+      "logPath": "artifacts/d5-03/runs/20260928T065727Z-b56c-mcp-policy-e2e/mcp-policy-e2e.log",
+      "runDir": "artifacts/d5-03/runs/20260928T065727Z-b56c-mcp-policy-e2e"
+    },
+    {
+      "runId": "20260928T065801Z-c7ba-mcp-center-e2e",
+      "script": "mcp-center-e2e",
+      "counts": {
+        "pass": 38,
+        "fail": 0,
+        "total": 38
+      },
+      "exitCode": 0,
+      "artifactSha256": "f40caac71cb5e8298b7659dde956775bc1a8ca31369c38ac83f467c7ebd85575",
+      "artifactPath": "artifacts/d5-03/runs/20260928T065801Z-c7ba-mcp-center-e2e/mcp-center-e2e.json",
+      "logPath": "artifacts/d5-03/runs/20260928T065801Z-c7ba-mcp-center-e2e/mcp-center-e2e.log",
+      "runDir": "artifacts/d5-03/runs/20260928T065801Z-c7ba-mcp-center-e2e"
+    },
+    {
+      "runId": "20260928T065841Z-cce3-mcp-stream-e2e",
+      "script": "mcp-stream-e2e",
+      "counts": {
+        "pass": 29,
+        "fail": 0,
+        "total": 29
+      },
+      "exitCode": 0,
+      "artifactSha256": "47ce54542391bd97806491c129077f63ce1a4ba225243c81eb6de4c1fa42960a",
+      "artifactPath": "artifacts/d5-03/runs/20260928T065841Z-cce3-mcp-stream-e2e/mcp-stream-e2e.json",
+      "logPath": "artifacts/d5-03/runs/20260928T065841Z-cce3-mcp-stream-e2e/mcp-stream-e2e.log",
+      "runDir": "artifacts/d5-03/runs/20260928T065841Z-cce3-mcp-stream-e2e"
+    },
+    {
+      "runId": "20260928T065912Z-5288-mcp-expiry-e2e",
+      "script": "mcp-expiry-e2e",
+      "counts": {
+        "pass": 24,
+        "fail": 1,
+        "total": 25
+      },
+      "exitCode": 1,
+      "artifactSha256": "0ed39614269dad2c12fb4a74a22a824b5698450063c06deba4ca8b639dd72259",
+      "artifactPath": "artifacts/d5-03/runs/20260928T065912Z-5288-mcp-expiry-e2e/mcp-expiry-e2e.json",
+      "logPath": "artifacts/d5-03/runs/20260928T065912Z-5288-mcp-expiry-e2e/mcp-expiry-e2e.log",
+      "runDir": "artifacts/d5-03/runs/20260928T065912Z-5288-mcp-expiry-e2e"
+    },
+    {
+      "runId": "20260928T070159Z-0cf1-auth-error-visual",
+      "script": "auth-error-visual",
+      "counts": {
+        "pass": 1,
+        "fail": 1,
+        "total": 2
+      },
+      "exitCode": 2,
+      "artifactSha256": "e8e7cc10f3e857538f492b669c815e269733fd0cd79311e4b0236a76fb2b2d92",
+      "artifactPath": "artifacts/d5-03/runs/20260928T070159Z-0cf1-auth-error-visual/auth-error-visual.json",
+      "logPath": "artifacts/d5-03/runs/20260928T070159Z-0cf1-auth-error-visual/auth-error-visual.log",
+      "runDir": "artifacts/d5-03/runs/20260928T070159Z-0cf1-auth-error-visual"
+    },
+    {
+      "runId": "20260928T070255Z-8298-auth-error-visual",
+      "script": "auth-error-visual",
+      "counts": {
+        "pass": 11,
+        "fail": 2,
+        "total": 13
+      },
+      "exitCode": 2,
+      "artifactSha256": "0f079f6a834c714c2de25e2768bc58c8786fcb4bb8c87febce47eeb8e32f0fed",
+      "artifactPath": "artifacts/d5-03/runs/20260928T070255Z-8298-auth-error-visual/auth-error-visual.json",
+      "logPath": "artifacts/d5-03/runs/20260928T070255Z-8298-auth-error-visual/auth-error-visual.log",
+      "runDir": "artifacts/d5-03/runs/20260928T070255Z-8298-auth-error-visual"
+    },
+    {
+      "runId": "20260928T070551Z-f078-mcp-expiry-e2e",
+      "script": "mcp-expiry-e2e",
+      "counts": {
+        "pass": 26,
+        "fail": 0,
+        "total": 26
+      },
+      "exitCode": 0,
+      "artifactSha256": "37e9dbb9d93cbe2d662f981a70e18d3a5d13f4273950cf4e90c43d5e25955176",
+      "artifactPath": "artifacts/d5-03/runs/20260928T070551Z-f078-mcp-expiry-e2e/mcp-expiry-e2e.json",
+      "logPath": "artifacts/d5-03/runs/20260928T070551Z-f078-mcp-expiry-e2e/mcp-expiry-e2e.log",
+      "runDir": "artifacts/d5-03/runs/20260928T070551Z-f078-mcp-expiry-e2e"
+    },
+    {
+      "runId": "20260928T070627Z-27eb-auth-error-visual",
+      "script": "auth-error-visual",
+      "counts": {
+        "pass": 16,
+        "fail": 1,
+        "total": 17
+      },
+      "exitCode": 1,
+      "artifactSha256": "506f2a48ad42f906591487583f17a0162eef57d4940d24866509a2fcc41759a8",
+      "artifactPath": "artifacts/d5-03/runs/20260928T070627Z-27eb-auth-error-visual/auth-error-visual.json",
+      "logPath": "artifacts/d5-03/runs/20260928T070627Z-27eb-auth-error-visual/auth-error-visual.log",
+      "runDir": "artifacts/d5-03/runs/20260928T070627Z-27eb-auth-error-visual"
+    },
+    {
+      "runId": "20260928T070719Z-0986-batch5-affectedness",
+      "script": "batch5-affectedness",
+      "counts": {
+        "pass": 7,
+        "fail": 3,
+        "total": 10
+      },
+      "exitCode": 1,
+      "artifactSha256": "d4f57364eaa5ab785e7c4838fc659cd75603ae81bef626fdd6b0fed3b6b6a579",
+      "artifactPath": "artifacts/d5-03/runs/20260928T070719Z-0986-batch5-affectedness/batch5-affectedness.json",
+      "logPath": "artifacts/d5-03/runs/20260928T070719Z-0986-batch5-affectedness/batch5-affectedness.log",
+      "runDir": "artifacts/d5-03/runs/20260928T070719Z-0986-batch5-affectedness"
+    },
+    {
+      "runId": "20260928T070740Z-c614-batch5-affectedness",
+      "script": "batch5-affectedness",
+      "counts": {
+        "pass": 10,
+        "fail": 0,
+        "total": 10
+      },
+      "exitCode": 0,
+      "artifactSha256": "1e85044687ea5c94938b2255ed0e8fbe65dfaab4ce06c48d44cef3df2eee92a3",
+      "artifactPath": "artifacts/d5-03/runs/20260928T070740Z-c614-batch5-affectedness/batch5-affectedness.json",
+      "logPath": "artifacts/d5-03/runs/20260928T070740Z-c614-batch5-affectedness/batch5-affectedness.log",
+      "runDir": "artifacts/d5-03/runs/20260928T070740Z-c614-batch5-affectedness"
+    },
+    {
+      "runId": "20260928T070745Z-e3b6-batch5-affectedness",
+      "script": "batch5-affectedness",
+      "counts": {
+        "pass": 10,
+        "fail": 0,
+        "total": 10
+      },
+      "exitCode": 0,
+      "artifactSha256": "259d3dafa011e886714f604c45b564e0cc3250e8451df5b68d965e7f888c006f",
+      "artifactPath": "artifacts/d5-03/runs/20260928T070745Z-e3b6-batch5-affectedness/batch5-affectedness.json",
+      "logPath": "artifacts/d5-03/runs/20260928T070745Z-e3b6-batch5-affectedness/batch5-affectedness.log",
+      "runDir": "artifacts/d5-03/runs/20260928T070745Z-e3b6-batch5-affectedness"
+    },
+    {
+      "runId": "20260928T070842Z-9cd0-mcp-reset-e2e",
+      "script": "mcp-reset-e2e",
+      "counts": {
+        "pass": 26,
+        "fail": 0,
+        "total": 26
+      },
+      "exitCode": 0,
+      "artifactSha256": "17202b482ffea7aa587f7fb0f9d0e6cd92342997b424852450fa6e00fee37766",
+      "artifactPath": "artifacts/d5-03/runs/20260928T070842Z-9cd0-mcp-reset-e2e/mcp-reset-e2e.json",
+      "logPath": "artifacts/d5-03/runs/20260928T070842Z-9cd0-mcp-reset-e2e/mcp-reset-e2e.log",
+      "runDir": "artifacts/d5-03/runs/20260928T070842Z-9cd0-mcp-reset-e2e"
+    }
+  ],
+  "newScripts": [
+    "experiments/d5-03/mcp-reset-e2e.mjs",
+    "experiments/d5-03/auth-error-visual.mjs",
+    "experiments/d5-03/batch5-affectedness.mjs"
+  ],
+  "modifiedScripts": [
+    "experiments/d5-03/mcp-expiry-e2e.mjs（按指示的口径修正，见 report §3.4）"
+  ],
+  "environment": {
+    "leftoversOaD503b": 0,
+    "indexRuns": 43
+  }
+}

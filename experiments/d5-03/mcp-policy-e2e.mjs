@@ -521,8 +521,156 @@ function buildLegacyV20Db(userDataDir) {
   return { ok: res.status === 0 && !!payload && payload.loginOk === true && payload.revokeOk === true, tree, bootstrap: boot, driver, payload, stderr: String(res.stderr || "").slice(0, 400) };
 }
 
+/* ══════════════════════════ R3 门禁登记表（第五批重基线，2026-09-28） ══════════════════════════ */
+/* R3 的实质语义不变：证明 K 段那些失败来自「授权已撤的空态上下文」，不是本批代码回归。
+   变的只是「拿哪一段 diff、放行哪些改动」：第三批登记的文件只有 src/mcp/McpCenter.tsx，而第四批 7b75ea3、
+   第五批 09dccf9 的合法 src 改动提交后也落进 c2e96c1→HEAD 这个区间，旧白名单于是把**已验收批次**判成 FAIL
+   （第四批跑的时候这些改动还在工作树里，diff 根本看不见）—— 这是基线陈旧，不是产品回归。
+   重基线沿用第三批的形态并逐条补强：文件级登记表 + 每条「why + 必含标记 + 禁含形态 + 只增不删（要求时）」，
+   登记表之外的任何 src/ 改动一律 FAIL；git diff 取不到（null）→ fail-closed，一律判 FAIL。 */
+const R3_BASE_REV = "c2e96c1";
+/* detail 原样进用户文案的旧形态：模板串插值 ${base}（${detail}）与 String(detail) 直出。只扫去掉注释后的代码行。 */
+const R3_DETAIL_LEAK = /\$\{[^}\n]*\bdetail\b[^}\n]*\}|\bString\(\s*detail\s*\)/;
+/* 第四批修掉的根因：把事件的运维 reason 当 detail 塞进 absorb，errorText 会把它括注给用户。 */
+const R3_EVENT_REASON_DETAIL = /\bdetail\s*:\s*event\s*\.\s*reason\b/;
+const R3_REGISTRY = [
+  {
+    file: "src/mcp/McpCenter.tsx",
+    batch: "1b78953 · 第三批（流式收口 + 生命周期收尾接线）",
+    why: "会话被撤 / 自然过期后活连接、GET 流与在途请求都已收掉，界面必须给出「会话已结束」的说明，否则用户把 DISABLED 误读成连接故障。",
+    requireAdded: ["MCP_SESSION_ENDED"],
+    forbidCode: [],
+    addOnly: true,
+  },
+  {
+    file: "src/identity/types.ts",
+    batch: "09dccf9 · 第五批（登录失败文案不再泄漏内部 detail）",
+    why: "errorText 改成「code 那一句 + SHOWABLE_ERROR_DETAIL 白名单」：detail 只有进表才换成一句人话，表外一律丢弃；同时把 detail 原样括注给用户的旧形态删掉。",
+    requireAdded: ["SHOWABLE_ERROR_DETAIL"],
+    forbidCode: [R3_DETAIL_LEAK],
+    addOnly: false,
+  },
+  {
+    file: "src/identity/useIdentity.ts",
+    batch: "7b75ea3 · 第四批（会话自然过期收流 + 策略收口）",
+    why: "身份事件收敛抽成纯函数 identityEventConvergence（自然到期与登出走同一条路），并去掉把事件 reason 当 detail 传给 absorb 的写法 —— 那个 detail 会经 errorText 括注给用户。",
+    requireAdded: ["identityEventConvergence"],
+    forbidCode: [R3_EVENT_REASON_DETAIL],
+    addOnly: false,
+  },
+  {
+    file: "src/identity/AuthScreens.tsx",
+    batch: "09dccf9 · 第五批（渲染层只发标记、不写第二份人话）",
+    why: "向导两次密码不一致只发 password-mismatch 标记，人话交给 types.ts 的白名单，渲染层不再自己写第二份文案（两份文案会各自漂移）。",
+    requireAdded: ["password-mismatch"],
+    forbidCode: [],
+    addOnly: false,
+  },
+];
+
+/** 去掉块注释（含 JSDoc）：注释里的示例串不算代码。 */
+function r3StripBlockComments(text) {
+  let inBlock = false;
+  const out = [];
+  for (const raw of String(text).split("\n")) {
+    let i = 0, kept = "";
+    while (i < raw.length) {
+      if (inBlock) { const end = raw.indexOf("*/", i); if (end === -1) { i = raw.length; break; } inBlock = false; i = end + 2; kept += " "; }
+      else { const begin = raw.indexOf("/*", i); if (begin === -1) { kept += raw.slice(i); i = raw.length; } else { kept += raw.slice(i, begin); inBlock = true; i = begin + 2; } }
+    }
+    out.push(kept);
+  }
+  return out.join("\n");
+}
+/** 只看代码行：先去掉块注释，再丢掉 // 与 * 开头的整行注释（行尾注释保留 —— 宁可多扫，不漏扫）。 */
+function r3CodeLines(text) {
+  return r3StripBlockComments(text).split("\n").filter((l) => { const s = l.trim(); return s && !s.startsWith("//") && !s.startsWith("*"); });
+}
+/** 从 --unified=0 的补丁里取 +/- 行本体（去掉 +++/--- 头）。 */
+function r3PatchLines(patch, sign) {
+  return patch.split("\n").filter((l) => l.startsWith(sign) && !l.startsWith(sign + sign + sign)).map((l) => l.slice(1));
+}
+const r3Brief = (l) => String(l).trim().slice(0, 160);
+/** 必含标记按「词边界正则」匹配：改名成 SHOWABLE_ERROR_DETAIL_OFF / X_SHOWABLE_ERROR_DETAIL 这种带前后缀的串不算命中。 */
+function r3MarkerRegex(marker) {
+  const m = String(marker);
+  return /^[A-Za-z0-9_.-]+$/.test(m) ? new RegExp("\\b" + m + "\\b") : null;
+}
+/** R3 的 src-diff 腿：登记表外的 src/ 改动 / 登记项缺必含标记 / 出现禁含形态 / 要求只增却删了行 → FAIL。全程只读。 */
+function r3SrcDiffEvaluation({ root, baseRev, headRev, registry }) {
+  const gitTextOf = (args) => { try { return execFileSync("git", ["-C", root, ...args], { encoding: "utf8", maxBuffer: 1 << 28 }).trim(); } catch { return null; } };
+  const changedRaw = gitTextOf(["diff", "--name-only", baseRev, headRev, "--", "src/"]);
+  const diffOk = changedRaw !== null;
+  const changedSrc = changedRaw ? changedRaw.split("\n").map((l) => l.trim()).filter(Boolean) : [];
+  const registered = new Set(registry.map((e) => e.file));
+  const outsideRegistry = changedSrc.filter((f) => !registered.has(f));
+  const entries = registry.map((e) => {
+    const changed = changedSrc.includes(e.file);
+    const numstat = changed ? gitTextOf(["diff", "--numstat", baseRev, headRev, "--", e.file]) : "";
+    const patch = changed ? gitTextOf(["diff", "--unified=0", baseRev, headRev, "--", e.file]) : "";
+    const blob = gitTextOf(["show", headRev + ":" + e.file]);
+    const added = patch ? r3PatchLines(patch, "+") : [];
+    const addedCode = r3CodeLines(added.join("\n"));
+    const headCode = blob === null ? null : r3CodeLines(blob);
+    const addOnlyOk = !changed || (numstat !== null && numstat.split("\n").filter(Boolean).every((l) => /^\d+\t0\t/.test(l)));
+    const markers = (e.requireAdded || []).map((m) => {
+      const re = r3MarkerRegex(m);
+      const hitsAdded = re === null ? [] : added.filter((l) => re.test(l));
+      const hitsHead = re === null || headCode === null ? [] : headCode.filter((l) => re.test(l));
+      return { marker: m, validMarker: re !== null, hitsInAdded: changed ? hitsAdded.length : 0, hitsInHeadCode: blob === null ? null : hitsHead.length, samples: [...hitsAdded, ...hitsHead].slice(0, 2).map(r3Brief) };
+    });
+    const forbidden = (e.forbidCode || []).map((re) => {
+      const inAdded = addedCode.filter((l) => re.test(l));
+      const inHead = headCode === null ? [] : headCode.filter((l) => re.test(l));
+      return { pattern: String(re), hitsInAddedCode: inAdded.length, hitsInHeadCode: blob === null ? null : inHead.length, samples: [...inAdded, ...inHead].slice(0, 2).map(r3Brief) };
+    });
+    /* 必含标记：HEAD 里必须真的有（防「整段回退后文件不在 diff 里」蒙混），且本区间改了就还得出现在新增行。 */
+    const markersOk = markers.every((m) => m.validMarker && m.hitsInHeadCode > 0 && (!changed || m.hitsInAdded > 0));
+    const forbiddenOk = forbidden.every((x) => x.hitsInAddedCode === 0 && x.hitsInHeadCode === 0);
+    const ok = blob !== null && patch !== null && numstat !== null && markersOk && forbiddenOk && (!e.addOnly || addOnlyOk);
+    const reasons = [];
+    if (patch === null || numstat === null) reasons.push("git diff 取不到");
+    if (blob === null) reasons.push("HEAD 里读不到这个文件（被删/改名？）");
+    if (e.addOnly && !addOnlyOk) reasons.push("要求只增不删，实际 numstat=" + JSON.stringify(numstat));
+    if (!markersOk) reasons.push("必含标记在 HEAD 里缺失，或本区间改了这个文件却没把标记写进新增行");
+    if (!forbiddenOk) reasons.push("出现了禁含形态");
+    return { file: e.file, batch: e.batch, why: e.why, changed, addOnlyRequired: !!e.addOnly, requireAdded: (e.requireAdded || []).slice(), forbidCode: (e.forbidCode || []).map(String), ok, numstat, addOnlyOk, headReadable: blob !== null, markers, forbidden, note: ok ? (changed ? null : "本区间未改动（登记表是「允许改」，不是「必须改」；HEAD 里仍必须带标记）") : reasons.join("；") };
+  });
+  return { ok: diffOk && outsideRegistry.length === 0 && entries.every((e) => e.ok), diffOk, baseRev, headRev, changedSrc, outsideRegistry, registryFiles: registry.map((e) => e.file), entries };
+}
+
+/* R3 负向自证入口（默认关闭）：对**仓库副本**跑同一份 r3SrcDiffEvaluation，证明每个登记项都真的能翻成 FAIL。
+   只在 OA_D503_R3_SELFTEST_ROOTS 显式给定时生效（JSON 数组：[{"root":"/abs/path","expect":"fail"|"pass","label":"…"}]）；
+   正常门禁不设这个变量，判定走的还是同一个函数。只读：不启动 Electron、不建 run 目录、不写副本。 */
+function r3SelfTest(rootsJson) {
+  let spec = null;
+  try { spec = JSON.parse(rootsJson); } catch (err) { console.error("OA_D503_R3_SELFTEST_ROOTS 不是合法 JSON：" + String((err && err.message) || err)); process.exit(2); }
+  if (!Array.isArray(spec) || spec.length === 0) { console.error("OA_D503_R3_SELFTEST_ROOTS 必须是非空 JSON 数组"); process.exit(2); }
+  let allMatched = true;
+  for (const s of spec) {
+    const root = path.resolve(String(s.root));
+    const headRev = String(s.headRev || "HEAD");
+    const head = (() => { try { return execFileSync("git", ["-C", root, "rev-parse", headRev], { encoding: "utf8" }).trim(); } catch { return null; } })();
+    const res = r3SrcDiffEvaluation({ root, baseRev: String(s.baseRev || R3_BASE_REV), headRev, registry: R3_REGISTRY });
+    const verdict = res.ok ? "PASS" : "FAIL";
+    const expect = String(s.expect || "").toLowerCase();
+    const matched = expect === verdict.toLowerCase();
+    if (!matched) allMatched = false;
+    console.log(JSON.stringify({
+      label: s.label || path.basename(root), root, headRev, head, expect: expect || "(未指定)", verdict, matched,
+      diffOk: res.diffOk, changedSrc: res.changedSrc, outsideRegistry: res.outsideRegistry,
+      failedEntries: res.entries.filter((e) => !e.ok).map((e) => e.file),
+      entries: res.entries.map((e) => ({ file: e.file, ok: e.ok, changed: e.changed, numstat: e.numstat, addOnlyRequired: e.addOnlyRequired, addOnlyOk: e.addOnlyOk, note: e.note, markers: e.markers.map((m) => ({ marker: m.marker, validMarker: m.validMarker, hitsInAdded: m.hitsInAdded, hitsInHeadCode: m.hitsInHeadCode, sample: m.samples[0] || null })), forbidden: e.forbidden.map((x) => ({ pattern: x.pattern, hitsInAddedCode: x.hitsInAddedCode, hitsInHeadCode: x.hitsInHeadCode, sample: x.samples[0] || null })) })),
+    }));
+  }
+  console.log("R3 负向自证：" + (allMatched ? "全部符合预期" : "有副本不符合预期") + "（" + spec.length + " 个副本）");
+  process.exit(allMatched ? 0 : 1);
+}
+
 /* ══════════════════════════ 主流程 ══════════════════════════ */
 async function main() {
+  /* 负向自证模式：显式给变量才进，跑完自行退出，不碰 Electron / run 目录。 */
+  if (process.env.OA_D503_R3_SELFTEST_ROOTS) r3SelfTest(process.env.OA_D503_R3_SELFTEST_ROOTS);
   RUN = await RUN_ARTIFACTS.createRun({ root: ROOT, script: "mcp-policy-e2e", basePort: CDP_PORT_BASE, envBaseVar: "OA_D503B_CDP_PORT", userDataPrefixBase: USERDATA_PREFIX_BASE });
   USERDATA_PREFIX = RUN.userDataPrefix;
   CDP_BASE = CDP_PORT_BASE;
@@ -1036,28 +1184,22 @@ async function main() {
     "失败项 ⊆ " + JSON.stringify(EXPLAINABLE),
     JSON.stringify({ failed: origFails.map((c) => ({ section: c.section, name: c.name, expected: c.expected, actual: c.actual.slice(0, 400) })), staleExpectation: STALE_EXPECTATION, cascade: CASCADE, notVerifiedInOriginal: orig ? orig.notVerified : null }));
 
-  /* R3 基线重定（第三批）：原基线 d583154 已过期 —— 第三批在 1b78953 为「会话已结束」提示合法改了渲染层。
-     新基线 = 第三批开始前的提交 c2e96c1。实测该区间 src/ 的改动**有且只有**白名单那个文件，所以这里是白名单式放行：
-     文件级 + 只增不删 + 补丁内容确实带 MCP_SESSION_ENDED；白名单之外的任何 src/ 改动照样判 FAIL（不是"有改动就算过"）。 */
-  const R3_BASE_REV = "c2e96c1";
-  const R3_ALLOWED_SRC = ["src/mcp/McpCenter.tsx"];
-  const gitTextOf = (args) => { try { return execFileSync("git", ["-C", ROOT, ...args], { encoding: "utf8" }).trim(); } catch { return null; } };
-  const srcDiffRaw = gitTextOf(["diff", "--name-only", R3_BASE_REV, "HEAD", "--", "src/"]);
-  const srcDiff = srcDiffRaw === null ? "git-diff-failed" : srcDiffRaw;
-  const srcDiffFiles = srcDiff === "" ? [] : srcDiff.split("\n");
-  const srcDiffOutsideWhitelist = srcDiffFiles.filter((f) => !R3_ALLOWED_SRC.includes(f));
-  const whitelistNumstat = srcDiffFiles.length ? gitTextOf(["diff", "--numstat", R3_BASE_REV, "HEAD", "--", ...R3_ALLOWED_SRC]) : "";
-  const whitelistPatch = srcDiffFiles.length ? gitTextOf(["diff", R3_BASE_REV, "HEAD", "--", ...R3_ALLOWED_SRC]) : "";
-  const srcWhitelistAddOnly = srcDiff !== "git-diff-failed" && (!srcDiffFiles.length
-    || (!!whitelistNumstat && whitelistNumstat.split("\n").filter(Boolean).every((l) => /^\d+\t0\t/.test(l)) && !!whitelistPatch && whitelistPatch.includes("MCP_SESSION_ENDED")));
+  /* R3 src-diff 腿（第五批重基线）：判据与登记表在文件头的 R3_REGISTRY，这里只组装证据。
+     语义没变 —— 登记表内的改动放行、表外一个都不许有、取不到 diff 就 FAIL；变的只是登记表内容与逐条判据。 */
+  const r3Src = r3SrcDiffEvaluation({ root: ROOT, baseRev: R3_BASE_REV, headRev: "HEAD", registry: R3_REGISTRY });
   const allDiff = (() => { try { return execFileSync("git", ["-C", ROOT, "diff", "--name-only", R3_BASE_REV, "HEAD"], { encoding: "utf8" }).trim().split("\n").filter(Boolean); } catch { return []; } })();
   const kFails = origFails.filter((c) => ["K1", "K2", "K3", "K4", "L2", "L4"].includes(c.section));
   const kCascadePattern = /"rows":0|"leavingFrames":0|"statesSeen":\[null\]|"rowAnim":null|"insertPresentMs":1[0-9]{4}|"reducedInsertMs":1[0-9]{4}|NO_MCP_GRANT|"emptyDarkUp":false/;
   const kAllCascade = kFails.every((c) => kCascadePattern.test(c.actual));
-  record("R3", "下游失败可被独立证伪为「产品回归」：本批 " + R3_BASE_REV + "→HEAD 的 diff 里 src/ 改动 ⊆ 白名单 " + JSON.stringify(R3_ALLOWED_SRC) + "（1b78953 的「会话已结束」提示，只增不删），白名单外的 src/ 文件一个都没改，且下游失败的实际值全是「列表空 / 没有行可采样 / 删除即时 / NO_MCP_GRANT」的授权已撤上下文",
-    srcDiffOutsideWhitelist.length === 0 && srcWhitelistAddOnly && (kFails.length === 0 || kAllCascade),
-    "src/ diff ⊆ 白名单（只增不删，且补丁确实带 MCP_SESSION_ENDED）+ K 段失败实际值全部命中空态上下文",
-    JSON.stringify({ baseRev: R3_BASE_REV, allowedSrc: R3_ALLOWED_SRC, srcDiff, srcDiffOutsideWhitelist, whitelistNumstat, srcWhitelistAddOnly, changedOutsideSrc: allDiff, kFailures: kFails.map((c) => ({ section: c.section, actual: c.actual.slice(0, 260) })), kAllCascade }));
+  const r3ShortEntries = r3Src.entries.map((e) => ({ file: e.file, ok: e.ok, changed: e.changed, numstat: e.numstat, addOnlyOk: e.addOnlyOk,
+    markers: e.markers.map((m) => ({ marker: m.marker, hitsInAdded: m.hitsInAdded })),
+    forbidden: e.forbidden.map((x) => ({ pattern: x.pattern, hitsInAddedCode: x.hitsInAddedCode, hitsInHeadCode: x.hitsInHeadCode })), note: e.note }));
+  /* 完整证据（含每条 why / 命中样例 / 全仓库改动面）走 note：observations 不截断，checks[].actual 有 2600 字上限。 */
+  note("R3 登记表逐条证据（完整）：" + JSON.stringify({ baseRev: R3_BASE_REV, diffOk: r3Src.diffOk, registry: R3_REGISTRY.map((e) => ({ file: e.file, batch: e.batch, why: e.why, requireAdded: e.requireAdded, forbidCode: (e.forbidCode || []).map(String), addOnly: !!e.addOnly })), srcDiff: r3Src.changedSrc, srcDiffOutsideRegistry: r3Src.outsideRegistry, srcEntries: r3Src.entries, changedOutsideSrc: allDiff, kFailures: kFails.map((c) => ({ section: c.section, actual: c.actual.slice(0, 260) })), kAllCascade }));
+  record("R3", "下游失败可被独立证伪为「产品回归」：本批 " + R3_BASE_REV + "→HEAD 的 diff 里 src/ 改动 ⊆ 登记表 " + JSON.stringify(R3_REGISTRY.map((e) => e.file)) + "（逐条机械判据：McpCenter.tsx 只增不删且新增行带 MCP_SESSION_ENDED / types.ts 新增行带 SHOWABLE_ERROR_DETAIL 且代码行不含「detail 原样括注」的旧形态 / useIdentity.ts 代码行不含 detail: event.reason / AuthScreens.tsx 新增行带 password-mismatch），登记表之外的 src/ 文件一个都没改，且下游失败的实际值全是「列表空 / 没有行可采样 / 删除即时 / NO_MCP_GRANT」的授权已撤上下文",
+    r3Src.ok && (kFails.length === 0 || kAllCascade),
+    "src/ diff ⊆ 登记表且逐条登记项的判据成立（fail-closed：git diff 取不到即 FAIL）+ K 段失败实际值全部命中空态上下文",
+    JSON.stringify({ baseRev: R3_BASE_REV, registryFiles: r3Src.registryFiles, diffOk: r3Src.diffOk, srcDiff: r3Src.changedSrc, srcDiffOutsideRegistry: r3Src.outsideRegistry, entries: r3ShortEntries, kFailures: kFails.map((c) => c.section), kAllCascade, fullEvidence: "observations 里的「R3 登记表逐条证据（完整）」" }));
 
   /* ── Z 收尾 ── */
   const ENV_NOISE = /ExperimentalWarning|SQLite is an experimental|SetApplicationIsDaemon|NSOSStatusErrorDomain|IMKCFRunLoopWakeUpReliable|In-process GPU|ERR_BLOCKED_BY_CSP/;
