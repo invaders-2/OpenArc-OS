@@ -1,20 +1,21 @@
 /**
  * D5-03 第二批 · 授权收口（撤权持久化 / 部分授权 / 拒绝路径 / 升级路径）真机验收。
  *
- *   真实 electron .（隔离 userData 前缀 oa-d503b-* / 隔离 CDP 端口 9812）+ 真实产品 UI
+ *   真实 electron .（隔离 userData 前缀 oa-d503b-<runId>-* / 从环境变量基址递增探测的空闲 CDP 端口）+ 真实产品 UI
  *   （程序坞「MCP 中心」）+ 自建受控测试服务 tests/fixtures/mcp/echo-server.mjs。
  *
  * 与 mcp-center-e2e.mjs（第一批，38 条）的关系：
- *   · mcp-center-e2e.mjs  **不改**（本批硬约束：只新增、不改既有断言判定），继续作为第一批回归基线；
+ *   · mcp-center-e2e.mjs 继续作为第一批回归基线：第二批按其新契约只更新了 H2 一条的期望（其余 37 条的判定条件一字未动），
+ *     本文件自身不改它任何一行，只在 R 段读回它最近一次运行的 JSON；
  *   · 本文件是第二批新增：撤权即时 / 跨登录 / **跨重启** / 正式重授 / 新组织首用 / 跨组织 /
  *     部分授权（mcp.view only）/ 拒绝路径 / 审计 / 工具调用边界 / **v20 库升级到 v21**；
- *   · 两个脚本各自独立进程、独立 userData、独立 CDP 端口，互不共享状态；
- *   · 总数 = 原 38（mcp-center-e2e.json）+ 本文件 N（本文件 Z 段汇总，并在 R 段读回原脚本结果）。
+ *   · 两个脚本各自独立 run 目录（artifacts/d5-03/runs/<runId>/）、独立 userData、各自探测的空闲 CDP 端口，互不共享状态；
+ *   · 总数 = 原 38（mcp-center-e2e 最近一次 run 的 JSON）+ 本文件 N（本文件 Z 段汇总，并在 R 段读回该结果）。
  *
  * 硬约束（本脚本自证）：
  *   · **只读**查库（DatabaseSync readOnly），没有任何 UPDATE/INSERT/DELETE/DROP；
  *     迁移由产品自己在启动时完成（L 段验 v20 → v21）。
- *   · 只清理自己的进程（自己的 pid 树）与自己的 userData 目录；不 pkill 别人的进程。
+ *   · 只清理**本次运行自己 spawn 的 pid 树**与自己的 userData 目录；不 pkill 别人的进程。
  *   · 不连真实第三方、不运行任意第三方程序、不发送用户数据、不声称插件隔离通过（见 boundary 字段）。
  *
  * 段：
@@ -30,7 +31,7 @@
  *   J 审计（authorization_audit 原始行摘要）
  *   K 边界（5 个工具调用入口仍不开放；端点自证）
  *   L 升级路径（v20 库 → 当前 Electron 启动迁移到 v21）
- *   R 第一批回归（读 mcp-center-e2e.json，不改原脚本）
+ *   R 第一批回归（读 mcp-center-e2e 最近一次 run 的 JSON；不改原脚本）
  *   Z 收尾（stderr / 产物清单 / 总数）
  */
 import { chromium } from "@playwright/test";
@@ -48,13 +49,17 @@ const require = createRequire(import.meta.url);
 const electronPath = require("electron");
 const here = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(here, "../..");
+/* 历史产物目录 artifacts/d5-03/ 只读兜底（新运行不再写这里；历史文件原样保留）。 */
 const ART = path.join(ROOT, "artifacts", "d5-03");
-const VIS = path.join(ART, "policy-visual");
+const RUN_ARTIFACTS = require(path.join(here, "run-artifacts.cjs"));
 const FIXTURE = path.join(ROOT, "tests", "fixtures", "mcp", "echo-server.mjs");
 const domain = require(path.join(ROOT, "electron", "mcp-domain.cjs"));
-const CDP_BASE = Number(process.env.OA_D503B_CDP_PORT || 9812);
-/** 每次启动一个独立端口 9812+n：端口被占时宁可抛错，也不静默连到上一个实例（真机验收的仪器纪律）。 */
-const USERDATA_PREFIX = "oa-d503b-";
+const CDP_PORT_BASE = Number(process.env.OA_D503B_CDP_PORT || 9812);
+const USERDATA_PREFIX_BASE = "oa-d503b-";
+/* 每次启动从本次运行的基址递增取一个空闲端口：探测时占住、spawn 前释放；端口被占时宁可抛错，也不静默连到别的实例。 */
+let RUN = null, OUT = null, CDP_BASE = CDP_PORT_BASE, USERDATA_PREFIX = USERDATA_PREFIX_BASE, lastCdpPort = CDP_PORT_BASE - 1;
+let VIS = null;
+
 const ADMIN = { id: "admin@d503b-policy.test", pw: "policy-admin-1" };
 const MEMBER = { id: "member@d503b-policy.test", pw: "policy-member-1" };
 const LEGACY = { id: "admin@d503b-upgrade.test", pw: "upgrade-admin-1", commit: "140182f", schema: 20 };
@@ -113,6 +118,8 @@ const apps = [];
 const dialogs = [], consoleErrors = [], fixtures = [];
 let runDir = null, freshDir = null, upgradeDir = null;
 const state = { orgId: null, freshOrgId: null, connectionId: null, revokedAt: null, provisionedAt: null };
+/** 本次运行 spawn 过的全部直接子进程（收尾只杀这些的 pid 树）。 */
+const SPAWNS = [];
 
 /* ══════════════════════════ 页面 DOM 助手（与第一批同一口径） ══════════════════════════ */
 const js = (code) => page.evaluate("(async () => { " + code + " })()");
@@ -351,7 +358,7 @@ const grantDdlHasOrg = (dir) => { const sql = tableSqlOf(dir, "app_resource_gran
 const provisionPkHasOrg = (dir) => { const sql = tableSqlOf(dir, "app_policy_provisions"); const m = sql.match(/PRIMARY KEY\s*\(([^)]*)\)/i); return !!(m && m[1].includes("organization_id")); };
 
 /* ══════════════════════════ Electron 启停（只动自己的进程树） ══════════════════════════ */
-async function portFree(port = CDP_BASE) {
+async function portFree(port) {
   try { await fetch("http://127.0.0.1:" + port + "/json/version"); return false; } catch { return true; }
 }
 /**
@@ -382,11 +389,17 @@ async function launchApp({ userDataDir = null, label = "" } = {}) {
   // 上一次实例必须先杀掉：否则新进程抢不到同一个 CDP 端口，会静默连到旧实例。
   if (app) { const stray = await killApp(app); note("launchApp 自我保护：先杀掉仍存活的上一实例 " + JSON.stringify(stray)); }
   const dir = userDataDir || fs.mkdtempSync(path.join(os.tmpdir(), USERDATA_PREFIX));
-  const cdpPort = CDP_BASE + apps.length;
+  // 本次运行内单调递增（不复用刚释放的端口），并从基址起递增探测第一个空闲端口：探测即占住，spawn 前释放
+  const requested = Math.max(CDP_BASE + apps.length, lastCdpPort + 1);
+  const reservation = RUN ? await RUN.acquirePort(requested) : null;
+  const cdpPort = reservation ? reservation.port : requested;
+  lastCdpPort = cdpPort;
+  if (reservation) await reservation.release();
   if (!(await portFree(cdpPort))) throw new Error("CDP 端口 " + cdpPort + " 仍被占用，拒绝启动（避免连到别的实例）");
   const child = spawn(electronPath, [".", "--user-data-dir=" + dir, "--remote-debugging-port=" + cdpPort, ...extraArgs], {
     cwd: ROOT, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, OPENARC_IDENTITY_ADMIN: "1" },
   });
+  SPAWNS.push({ kind: "electron", pid: child.pid, label, cdpPort, userDataDir: dir, at: new Date().toISOString() });
   const rec = { label, userDataDir: dir, cdpPort, child, pid: child.pid, browser: null, page: null, stderr: "", launchedAt: Date.now() };
   apps.push(rec);
   child.stdout.on("data", () => {});
@@ -422,9 +435,25 @@ async function killApp(rec) {
   return out;
 }
 
+/** 收尾：只杀本次运行自己 spawn 的 pid 树（Electron 主进程 + 后代 + fixture 子进程）；绝不按前缀 pkill 别人的。 */
+async function cleanupOwnProcesses() {
+  const result = { strategy: "own-pid-tree-only", pkillUsed: false, at: new Date().toISOString(), targets: [], leftovers: [] };
+  for (const rec of apps) {
+    const tree = [rec.child.pid, ...descendantsOf(rec.child.pid).filter((r) => !r.stat.startsWith("Z")).map((r) => r.pid)];
+    for (const pid of tree) { try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ } }
+    await waitFor(() => tree.every((pid) => !pidAlive(pid)), 12000, 100);
+    result.targets.push({ kind: "electron", label: rec.label, rootPid: rec.child.pid, tree, leftovers: tree.filter(pidAlive) });
+  }
+  for (const fx of fixtures) { try { fx.stop(); } catch { /* ignore */ } }
+  result.leftovers = [...new Set(result.targets.flatMap((t) => t.leftovers))];
+  result.unregisteredSurvivors = SPAWNS.filter((s) => s.pid && s.kind !== "legacy-v20-driver" && pidAlive(s.pid) && !result.targets.some((t) => t.tree.includes(s.pid))).map((s) => ({ pid: s.pid, kind: s.kind, label: s.label }));
+  return result;
+}
+
 /* ══════════════════════════ fixture ══════════════════════════ */
 function startHttpFixture() {
   const c = spawn(process.execPath, [FIXTURE, "--http", "--port=0"], { stdio: ["ignore", "pipe", "pipe"] });
+  SPAWNS.push({ kind: "fixture", pid: c.pid, label: "echo-server --http", at: new Date().toISOString() });
   let buf = "", errBuf = "";
   const entry = { child: c, stderr: () => errBuf, stop() { try { c.kill("SIGKILL"); } catch { /* ignore */ } } };
   fixtures.push(entry);
@@ -484,6 +513,7 @@ function buildLegacyV20Db(userDataDir) {
   // 驱动文件只调旧代码自己的装配 + 治理 API（不写 SQL）：建库、登录（v20 会种 mcp baseline）、再真实撤销一次。
   const driver = path.join(here, "mcp-policy-legacy-v20-driver.cjs");
   const res = spawnSync(process.execPath, [driver, boot, userDataDir, LEGACY.id, LEGACY.pw], { encoding: "utf8", timeout: 120000 });
+  SPAWNS.push({ kind: "legacy-v20-driver", pid: res.pid, label: "spawnSync（同步等待，返回时已退出）", at: new Date().toISOString() });
   let payload = null;
   try { payload = JSON.parse(String(res.stdout || "{}")); } catch { payload = { parseError: String(res.stdout).slice(0, 200) }; }
   return { ok: res.status === 0 && !!payload && payload.loginOk === true && payload.revokeOk === true, tree, bootstrap: boot, driver, payload, stderr: String(res.stderr || "").slice(0, 400) };
@@ -491,9 +521,15 @@ function buildLegacyV20Db(userDataDir) {
 
 /* ══════════════════════════ 主流程 ══════════════════════════ */
 async function main() {
+  RUN = await RUN_ARTIFACTS.createRun({ root: ROOT, script: "mcp-policy-e2e", basePort: CDP_PORT_BASE, envBaseVar: "OA_D503B_CDP_PORT", userDataPrefixBase: USERDATA_PREFIX_BASE });
+  USERDATA_PREFIX = RUN.userDataPrefix;
+  CDP_BASE = CDP_PORT_BASE;
+  lastCdpPort = CDP_BASE - 1;
+  VIS = path.join(RUN.runDir, "policy-visual");
   fs.mkdirSync(VIS, { recursive: true });
   const runDirOk = fs.mkdtempSync(path.join(os.tmpdir(), USERDATA_PREFIX));
   runDir = runDirOk;
+  console.log("本次运行：" + RUN.runId + " → " + RUN.runDirRel + "（CDP 基址 " + CDP_BASE + "，userData 前缀 " + USERDATA_PREFIX + "）");
   const firstScriptSha = { script: fileSha("experiments/d5-03/mcp-center-e2e.mjs"), originalBefore: null };
   firstScriptSha.originalBefore = firstScriptSha.script;
 
@@ -969,13 +1005,19 @@ async function main() {
 
   /* ── R 第一批回归（不改原脚本，只读其结果） ── */
   let orig = null;
-  try { orig = JSON.parse(fs.readFileSync(path.join(ART, "mcp-center-e2e.json"), "utf8")); } catch { orig = null; }
+  // 第一批产物已改为 runs/<runId>/ 布局：取最近一次 run 的 JSON，根目录历史文件只作兜底（可用 OA_D503_FIRST_BATCH_JSON 指定）
+  const firstBatchPick = process.env.OA_D503_FIRST_BATCH_JSON
+    ? { file: path.resolve(process.env.OA_D503_FIRST_BATCH_JSON), mtimeMs: 0, legacy: false }
+    : RUN_ARTIFACTS.findLatestRunArtifact(ROOT, "mcp-center-e2e");
+  const origPath = firstBatchPick ? firstBatchPick.file : path.join(ART, "mcp-center-e2e.json");
+  const origRel = path.relative(ROOT, origPath).split(path.sep).join("/");
+  try { orig = JSON.parse(fs.readFileSync(origPath, "utf8")); } catch { orig = null; }
   const origCounts = orig && orig.counts ? orig.counts : null;
   const origFails = orig ? (orig.checks || []).filter((c) => c.status === "FAIL") : [];
   record("R1", "第一批回归（本批 HEAD 上重跑；H2 已按 D5-03 第二批新契约更新，其余 37 条一字未动）38 条全绿",
     !!origCounts && origCounts.fail === 0 && origCounts.total === 38,
     "38/38 PASS",
-    JSON.stringify({ counts: origCounts, testedCommit: orig ? orig.openarcCommit : null, failedChecks: origFails.map((c) => c.section + "·" + c.name), scriptSha256: fileSha("experiments/d5-03/mcp-center-e2e.mjs") }));
+    JSON.stringify({ counts: origCounts, testedCommit: orig ? orig.openarcCommit : null, failedChecks: origFails.map((c) => c.section + "·" + c.name), scriptSha256: fileSha("experiments/d5-03/mcp-center-e2e.mjs"), firstBatchArtifactPath: origRel }));
 
   const STALE_EXPECTATION = ["H2", "L3"];
   const CASCADE = ["K1", "K2", "K3", "K4", "L2", "L4"];
@@ -1003,29 +1045,38 @@ async function main() {
   note("对话框样本：" + JSON.stringify(dialogs.slice(0, 5)));
 
   const scriptSha = fileSha("experiments/d5-03/mcp-policy-e2e.mjs");
+  const testedCommit = process.env.OPENARC_TESTED_COMMIT || (() => { try { return execFileSync("git", ["-C", ROOT, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(); } catch { return null; } })();
+  /* 被测相关文件全集（electron/mcp-*.cjs + 授权/治理/身份/执行器 + 渲染层 + fixture + 两个验收脚本），逐文件标 missing/modified。 */
+  const sourceFingerprint = RUN_ARTIFACTS.collectSourceFingerprint(ROOT, RUN_ARTIFACTS.d503SourceFiles(ROOT));
   const out = {
     phase: "D5-03 第二批",
     title: "授权收口（撤权持久化 / 正式重授 / 部分授权 / 拒绝路径 / v20→v21 升级）真机验收",
+    runId: RUN.runId,
+    runDir: RUN.runDirRel,
+    startedAt: RUN.startedAt,
+    testedCommit,
     relation: {
       this: "experiments/d5-03/mcp-policy-e2e.mjs（第二批新增，N 条）",
-      regression: "experiments/d5-03/mcp-center-e2e.mjs（第一批，38 条，本批未改；sha256=" + firstScriptSha.originalBefore + "）",
+      regression: "experiments/d5-03/mcp-center-e2e.mjs（第一批，38 条；第二批按其新契约只更新 H2 一条期望，其余判定未动；sha256=" + firstScriptSha.originalBefore + "）",
       total: { first: origCounts ? origCounts.total : 38, second: CHECKS.length, combined: (origCounts ? origCounts.total : 38) + CHECKS.length },
-      note: "两个脚本各自启动真实 Electron（独立 userData 前缀 oa-d503- / oa-d503b-、独立 CDP 端口 9811 / 9812），互不共享状态；本文件不修改原脚本任何一行。",
+      note: "两个脚本各自启动真实 Electron（各自 run 目录 artifacts/d5-03/runs/<runId>/、独立 userData 前缀 oa-d503-* / oa-d503b-*、从环境变量基址递增探测的空闲 CDP 端口），互不共享状态；本文件不修改原脚本的判定。",
     },
-    openarcCommit: process.env.OPENARC_TESTED_COMMIT || (() => { try { return execFileSync("git", ["-C", ROOT, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(); } catch { return null; } })(),
+    openarcCommit: testedCommit,
     openarcBranch: (() => { try { return execFileSync("git", ["-C", ROOT, "rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8" }).trim(); } catch { return null; } })(),
     gitDirtyLines: (() => { try { return execFileSync("git", ["-C", ROOT, "status", "--porcelain"], { encoding: "utf8" }).split("\n").filter(Boolean).length; } catch { return null; } })(),
     command: "node experiments/d5-03/mcp-policy-e2e.mjs",
     scriptSha256: scriptSha,
-    fingerprints: Object.fromEntries(["electron/identity-store.cjs", "electron/authorization-store.cjs", "electron/authorization-service.cjs", "electron/mcp-bootstrap.cjs", "electron/mcp-service.cjs", "electron/mcp-domain.cjs", "src/mcp/McpCenter.tsx"].map((f) => [f, (fileSha(f) || "").slice(0, 16)])),
-    env: { platform: process.platform, arch: process.arch, node: process.version, electron: require("electron/package.json").version, cdpPorts: apps.map((a) => a.cdpPort), userDataPrefix: USERDATA_PREFIX },
+    fingerprints: Object.fromEntries(Object.entries(sourceFingerprint.files).map(([f, v]) => [f, v.sha256_16])),
+    sourceFingerprint,
+    sourceFingerprintSetSha256: sourceFingerprint.setSha256,
+    env: { platform: process.platform, arch: process.arch, node: process.version, electron: require("electron/package.json").version, cdpPort: apps[0] ? apps[0].cdpPort : null, cdpPorts: apps.map((a) => a.cdpPort), cdpPortProbes: RUN.portProbes, userDataPrefix: USERDATA_PREFIX, runId: RUN.runId, runDir: RUN.runDirRel },
     fixture: { path: "tests/fixtures/mcp/echo-server.mjs", url: fxUrl, tools: FIXTURE_EXPECTED.tools.map((t) => t.name), toolsHash: FIXTURE_EXPECTED.toolsHash },
     restarts: apps.map((a) => ({ label: a.label, pid: a.pid, cdpPort: a.cdpPort, userData: path.basename(a.userDataDir), instance: a.instance })),
     orgIds: { first: state.orgId, fresh: state.freshOrgId },
     checks: CHECKS, counts: { pass: passed, fail: failed, total: CHECKS.length },
     notVerified: NOT_VERIFIED, observations: OBSERVATIONS, productDefects: DEFECTS,
     dbEvidence: DB_EVIDENCE,
-    firstBatch: orig ? { counts: origCounts, failedChecks: origFails.map((c) => ({ section: c.section, name: c.name, expected: c.expected, actual: c.actual.slice(0, 400) })), notVerified: orig.notVerified, scriptSha256: firstScriptSha.originalBefore } : null,
+    firstBatch: orig ? { artifactPath: origRel, counts: origCounts, failedChecks: origFails.map((c) => ({ section: c.section, name: c.name, expected: c.expected, actual: c.actual.slice(0, 400) })), notVerified: orig.notVerified, scriptSha256: firstScriptSha.originalBefore } : null,
     boundary: {
       thirdPartyServices: false, userDataSent: false, arbitraryLocalPrograms: false, pluginIsolationClaimed: false,
       databaseWritesByProbe: false, writesOnlyByProduct: true,
@@ -1033,23 +1084,36 @@ async function main() {
     },
     at: new Date().toISOString(),
   };
-  fs.writeFileSync(path.join(ART, "mcp-policy-e2e.json"), JSON.stringify(out, null, 2));
+  OUT = out;
+  out.exitCode = failed === 0 ? 0 : 1;
   console.log("\n结论：" + (failed === 0 ? "PASS" : "FAIL") + " — " + JSON.stringify({ pass: passed, fail: failed, total: CHECKS.length, notVerified: NOT_VERIFIED.length, firstBatch: origCounts, combined: (origCounts ? origCounts.total : 38) + CHECKS.length }));
   return failed === 0 ? 0 : 1;
 }
 
-/* ══════════════════════════ 收尾（只清理自己的进程 / 目录） ══════════════════════════ */
+/* ══════════════════════════ 收尾（只清理本次运行自己 spawn 的进程 / 目录） ══════════════════════════ */
 let exitCode = 2;
 try { exitCode = await main(); } catch (e) {
   console.error("验收异常：" + String((e && e.stack) || e));
   record("Z0", "验收脚本无未捕获异常", false, "无异常", String((e && e.message) || e));
   exitCode = 2;
 }
-for (const rec of apps) {
-  try { rec.child.kill("SIGKILL"); } catch { /* ignore */ }
-  for (const pid of descendantsOf(rec.pid).map((r) => r.pid)) { try { process.kill(pid, "SIGKILL"); } catch { /* ignore */ } }
+const cleanup = await cleanupOwnProcesses();
+console.log("收尾：只清理本次运行 spawn 的 pid 树（" + JSON.stringify(cleanup.targets.map((t) => ({ label: t.label, rootPid: t.rootPid, leftovers: t.leftovers }))) + "），未使用 pkill");
+cleanup.userDataDirsRemoved = [];
+for (const dir of [runDir, freshDir, upgradeDir]) { try { if (dir) { fs.rmSync(dir, { recursive: true, force: true }); cleanup.userDataDirsRemoved.push(path.basename(dir)); } } catch { /* ignore */ } }
+if (RUN) {
+  try {
+    const fallback = {
+      phase: "D5-03 第二批",
+      title: "授权收口（撤权持久化 / 正式重授 / 部分授权 / 拒绝路径 / v20→v21 升级）真机验收",
+      aborted: true,
+      checks: CHECKS, counts: { pass: passed, fail: failed, total: CHECKS.length },
+      notVerified: NOT_VERIFIED, observations: OBSERVATIONS, productDefects: DEFECTS,
+    };
+    const fin = await RUN.finalize({ out: OUT || fallback, exitCode, logLines: LOG_LINES, cleanup });
+    console.log("产物：" + fin.artifactPath + "（sha256 " + fin.artifactSha256.slice(0, 16) + "）+ " + fin.logPath + "；索引 " + RUN_ARTIFACTS.RUNS_REL + "/index.json");
+  } catch (e) { console.error("产物写入失败：" + String((e && e.stack) || e)); }
+} else {
+  console.error("未创建 run 目录（createRun 失败），本次运行无产物");
 }
-for (const fx of fixtures) { try { fx.stop(); } catch { /* ignore */ } }
-for (const dir of [runDir, freshDir, upgradeDir]) { try { if (dir) fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ } }
-try { fs.mkdirSync(ART, { recursive: true }); fs.writeFileSync(path.join(ART, "mcp-policy-e2e.log"), LOG_LINES.join("\n") + "\n"); } catch { /* ignore */ }
 process.exit(exitCode);

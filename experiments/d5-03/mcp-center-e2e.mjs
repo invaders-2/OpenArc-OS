@@ -27,10 +27,11 @@
  *     waitStatusText 立刻命中，下一步的 mcp/test 会撞上 in-flight reconnect
  *     （后端回 MCP_CONNECTION_BUSY）——只加等待，不改判定条件；
  *   · 指纹清单补 electron/executor-launcher.cjs（D2 的修复文件）。
- * 探针只清理自己的进程（userData 前缀 oa-d503-）。
+ * 探针只清理**本次运行自己 spawn 的 pid 树**（Electron 主进程 + 后代 + fixture 子进程），绝不按前缀 pkill 别人的进程。
+ * 产物（JSON / 日志 / 截图 / motion）写入 artifacts/d5-03/runs/<runId>/；根目录 artifacts/d5-03/ 只作为历史与只读兜底。
  */
 import { chromium } from "@playwright/test";
-import { spawn, spawnSync, execFileSync } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -44,12 +45,14 @@ const require = createRequire(import.meta.url);
 const electronPath = require("electron");
 const here = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(here, "../..");
-const ART = path.join(ROOT, "artifacts", "d5-03");
-const VIS = path.join(ART, "visual");
-const MOTION = path.join(ART, "motion");
+/* 历史产物目录 artifacts/d5-03/ 只读兜底（新运行不再写这里；历史文件原样保留）。 */
+const RUN_ARTIFACTS = require(path.join(here, "run-artifacts.cjs"));
 const FIXTURE = path.join(ROOT, "tests", "fixtures", "mcp", "echo-server.mjs");
 const domain = require(path.join(ROOT, "electron", "mcp-domain.cjs"));
-const CDP_PORT = Number(process.env.OA_D503_CDP_PORT || 9811);
+const USERDATA_PREFIX_BASE = "oa-d503-";
+const CDP_PORT_BASE = Number(process.env.OA_D503_CDP_PORT || 9811);
+let RUN = null, RESERVED_PORT = null, OUT = null;
+let VIS = null, MOTION = null, CDP_PORT = CDP_PORT_BASE, USERDATA_PREFIX = USERDATA_PREFIX_BASE;
 const ADMIN = { id: "admin@d503-mcp.test", pw: "mcp-admin-1" };
 const extraArgs = (process.env.OA_D503_ELECTRON_ARGS || "--no-sandbox --disable-gpu-sandbox --in-process-gpu").split(" ").filter(Boolean);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -81,11 +84,6 @@ const FIXTURE_EXPECTED = Object.freeze({
   ],
   toolsHash: "7db033b3636227f94fc2a51859637cbb7b93c7e865a0e12b79d86c9dda7721ce",
 });
-
-/** 受验 MCP 产品文件的 sha256 前 16 位（工作区可能同时有别的批次未提交改动；这里固化本批受验内容）。 */
-function fileSha(rel) {
-  try { return crypto.createHash("sha256").update(fs.readFileSync(path.join(ROOT, rel))).digest("hex").slice(0, 16); } catch { return null; }
-}
 
 /** 本地 stdio 断链的根因探针（experiments/d5-03/utility-stdin-probe.cjs，单独跑一次的真实输出）。 */
 const STDIO_PROBE = Object.freeze({"electron":"44.3.0","node":"24.20.0","command":"electron experiments/d5-03/utility-stdin-probe.cjs --no-sandbox --disable-gpu-sandbox --in-process-gpu","handle":{"stdinType":"undefined","stdinIsNull":false,"stdinIsUndefined":true,"stdinHasWrite":false,"stdoutType":"object","stdoutHasOn":true},"child":{"spawned":true,"pid":39647,"ppid":39636,"stdinType":"object","stdinEndedImmediately":true,"argv":[".../Electron Helper","experiments/d5-03/utility-stdin-probe-child.cjs","--probe-arg"]},"conclusion":"Electron 44.3.0 的 utilityProcess.fork() 返回句柄没有 stdin（stdin 为 undefined）；子进程确实被拉起，但子进程侧 process.stdin 立即 end。executor-launcher 的 handle.stdin = child.stdin || null 因此恒为 null。"});
@@ -129,6 +127,8 @@ async function waitFor(fn, timeout = 20000, intervalMs = 120) {
 /* ══════════════════════════ 状态 ══════════════════════════ */
 let child = null, browser = null, page = null, userDataDir = null, stderrBuf = "";
 const dialogs = [], consoleErrors = [], fixtures = [], fixtureRows = [];
+/** 本次运行 spawn 过的全部直接子进程（收尾只杀这些的 pid 树）。 */
+const SPAWNS = [];
 let refLocal = null, refHttp = null, refAuth = null, refProtocol = null;
 const ids = { local: null, remote: null, unreachable: null, auth: null, protocol: null, noResponse: null, motionInsert: null, motionReduced: null };
 
@@ -403,6 +403,7 @@ async function scrollDetailTo(sel) {
 function startFixture(args) {
   const c = spawn(process.execPath, [FIXTURE, ...args], { stdio: ["ignore", "pipe", "pipe"] });
   let buf = "", errBuf = "";
+  SPAWNS.push({ kind: "fixture", pid: c.pid, label: args.join(" "), at: new Date().toISOString() });
   const entry = { child: c, stdout: () => buf, stderr: () => errBuf, stop() { try { c.kill("SIGKILL"); } catch { /* ignore */ } } };
   fixtures.push(entry);
   const ready = new Promise((resolve, reject) => {
@@ -427,6 +428,7 @@ async function startHttpFixture(args = []) {
 function rawStdioReference() {
   return new Promise((resolve, reject) => {
     const c = spawn(process.execPath, [FIXTURE, "--stdio"], { stdio: ["pipe", "pipe", "pipe"] });
+    SPAWNS.push({ kind: "fixture", pid: c.pid, label: "reference-stdio", at: new Date().toISOString() });
     let buf = "", errBuf = "", step = 0, initResult = null;
     const timer = setTimeout(() => { try { c.kill("SIGKILL"); } catch { /* ignore */ } reject(new Error("参照 stdio 握手超时：" + errBuf)); }, 10000);
     c.stdout.on("data", (d) => {
@@ -526,6 +528,26 @@ function startPidSampler(durationMs = 6000) {
   })();
   return { stop: async () => { state.done = true; await loop.catch(() => {}); return [...seen.values()]; } };
 }
+/**
+ * 收尾：只杀**本次运行自己 spawn 的 pid 树**（记录到的 Electron 主进程 + 其后代 + fixture 子进程），
+ * 并等到确实退出。绝不按 userData 前缀 pkill —— 并发运行的另一个验收实例不能被误杀。
+ */
+async function cleanupOwnProcesses() {
+  const result = { strategy: "own-pid-tree-only", pkillUsed: false, at: new Date().toISOString(), targets: [], leftovers: [] };
+  const roots = [];
+  if (child && child.pid) roots.push({ kind: "electron", rootPid: child.pid });
+  for (const fx of fixtures) if (fx.child && fx.child.pid) roots.push({ kind: "fixture", rootPid: fx.child.pid });
+  for (const r of roots) {
+    const tree = [r.rootPid, ...descendantsOf(r.rootPid).filter((x) => !x.stat.startsWith("Z")).map((x) => x.pid)];
+    for (const pid of tree) { try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ } }
+    await waitFor(() => tree.every((pid) => !pidAlive(pid)), 12000, 100);
+    result.targets.push({ ...r, tree, leftovers: tree.filter(pidAlive) });
+  }
+  for (const fx of fixtures) { try { fx.stop(); } catch { /* ignore */ } }
+  result.leftovers = [...new Set(result.targets.flatMap((t) => t.leftovers))];
+  result.unregisteredSurvivors = SPAWNS.filter((s) => s.pid && pidAlive(s.pid) && !result.targets.some((t) => t.tree.includes(s.pid))).map((s) => ({ pid: s.pid, kind: s.kind }));
+  return result;
+}
 function dbAll(sql) {
   try {
     const db = new DatabaseSync(path.join(userDataDir, "identity.db"), { readOnly: true });
@@ -552,10 +574,13 @@ function bundleHasText(needle) {
 
 /* ══════════════════════════ 启动 Electron ══════════════════════════ */
 async function launch() {
-  userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "oa-d503-"));
+  userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), USERDATA_PREFIX));
+  // 端口是本次运行探测并占住的：Electron 绑定前必须先松开这个占位监听
+  if (RESERVED_PORT) { await RESERVED_PORT.release(); RESERVED_PORT = null; }
   child = spawn(electronPath, [".", "--user-data-dir=" + userDataDir, "--remote-debugging-port=" + CDP_PORT, ...extraArgs], {
     cwd: ROOT, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, OPENARC_IDENTITY_ADMIN: "1" },
   });
+  SPAWNS.push({ kind: "electron", pid: child.pid, label: "main", cdpPort: CDP_PORT, userDataDir, at: new Date().toISOString() });
   child.stdout.on("data", () => {});
   child.stderr.on("data", (d) => { stderrBuf += String(d); });
   let version = null;
@@ -575,12 +600,19 @@ async function launch() {
 
 /* ══════════════════════════ 主流程 ══════════════════════════ */
 async function main() {
+  RUN = await RUN_ARTIFACTS.createRun({ root: ROOT, script: "mcp-center-e2e", basePort: CDP_PORT_BASE, envBaseVar: "OA_D503_CDP_PORT", userDataPrefixBase: USERDATA_PREFIX_BASE });
+  USERDATA_PREFIX = RUN.userDataPrefix;
+  RESERVED_PORT = await RUN.acquirePort(CDP_PORT_BASE);
+  CDP_PORT = RESERVED_PORT.port;
+  VIS = path.join(RUN.runDir, "visual");
+  MOTION = path.join(RUN.runDir, "motion");
   fs.mkdirSync(VIS, { recursive: true });
   fs.mkdirSync(MOTION, { recursive: true });
+  console.log("本次运行：" + RUN.runId + " → " + RUN.runDirRel + "（CDP " + CDP_PORT + "，userData 前缀 " + USERDATA_PREFIX + "）");
 
   /* ── A 装配与登录 ── */
   await launch();
-  record("A", "真实 electron . 启动（隔离 userData oa-d503-* / 隔离 CDP 端口）", !!browser, "CDP 可用 + 界面页", "cdp=" + CDP_PORT + " userData=" + path.basename(userDataDir));
+  record("A", "真实 electron . 启动（隔离 userData " + USERDATA_PREFIX + "* / 隔离 CDP 端口）", !!browser, "CDP 可用 + 界面页", "cdp=" + CDP_PORT + " userData=" + path.basename(userDataDir));
   const loggedIn = await setupAndLogin();
   record("A", "三步向导（setup-name→next→identifier→next→password/confirm→submit）+ 真实 UI 登录 admin", loggedIn, "identity gate = ready", "gate=" + (await gate()));
   const missingCodes = ASSERTED_ERROR_CODES.filter((c) => !Object.values(domain.ERROR_CODE).includes(c));
@@ -983,7 +1015,7 @@ async function main() {
     JSON.stringify({ connections: conns.map((r) => ({ id: r.connection_id, name: r.name, transport: r.transport, location: r.location, endpoint: r.endpoint_json, status: r.status, lastErrorCode: r.last_error_code })), fixtureRows }));
   // 本地连接起的子进程必须是本仓库 Electron/Node 运行时，且不得是任意外部程序（shell/python/curl）
   const spawnedSafe = spawnedAll.length >= 1 && spawnedAll.every((p) => !/\/bin\/(sh|bash|zsh|python3?|curl|nc)\b/.test(p.cmd) && (p.cmd.includes("echo-server.mjs") || /Electron|electron|Helper|node/.test(p.cmd)));
-  record("J1b", "自证边界（子进程）：本地 stdio 连接期间确实起过本仓库受控子进程，命令行不含 shell/python/curl 等任意外部程序（本地 stdio 握手本身在 D5-03-D2 下失败）",
+  record("J1b", "自证边界（子进程）：本地 stdio 连接期间确实起过本仓库受控子进程，命令行不含 shell/python/curl 等任意外部程序（本地 stdio 握手已由 D5-03 修复批次修复，C2/D1/D2 复验通过）",
     spawnedSafe,
     "≥1 个本地连接期间新出现的后代进程，且命令行为仓库 fixture 或 Electron/Node 运行时",
     JSON.stringify({ sampledNewDescendants: spawnedAll, mcpSpawnedPids }));
@@ -1137,18 +1169,24 @@ async function main() {
   note("对话框样本：" + JSON.stringify(dialogs.slice(0, 5)));
 
   const files = { visual: fs.existsSync(VIS) ? fs.readdirSync(VIS).sort() : [], motion: fs.existsSync(MOTION) ? fs.readdirSync(MOTION).sort() : [] };
+  const testedCommit = process.env.OPENARC_TESTED_COMMIT || (() => { try { return execFileSync("git", ["-C", ROOT, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(); } catch { return null; } })();
+  /* 被测相关文件全集（electron/mcp-*.cjs + 授权/治理/身份/执行器 + 渲染层 + fixture + 两个验收脚本），逐文件标 missing/modified。 */
+  const sourceFingerprint = RUN_ARTIFACTS.collectSourceFingerprint(ROOT, RUN_ARTIFACTS.d503SourceFiles(ROOT));
   const out = {
     phase: "D5-03 第一批",
     title: "MCP 中心连接管理与能力发现（真实 electron + 自建受控测试服务）",
-    openarcCommit: process.env.OPENARC_TESTED_COMMIT || (() => { try { return execFileSync("git", ["-C", ROOT, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(); } catch { return null; } })(),
+    runId: RUN.runId,
+    runDir: RUN.runDirRel,
+    startedAt: RUN.startedAt,
+    testedCommit,
+    openarcCommit: testedCommit,
     openarcBranch: (() => { try { return execFileSync("git", ["-C", ROOT, "rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8" }).trim(); } catch { return null; } })(),
     gitDirtyLines: (() => { try { return execFileSync("git", ["-C", ROOT, "status", "--porcelain"], { encoding: "utf8" }).split("\n").filter(Boolean).length; } catch { return null; } })(),
     command: "node experiments/d5-03/mcp-center-e2e.mjs",
-    mcpSourceFingerprint: (() => {
-      const files = ["electron/mcp-domain.cjs", "electron/mcp-store.cjs", "electron/mcp-client.cjs", "electron/mcp-service.cjs", "electron/mcp-bootstrap.cjs", "electron/executor-launcher.cjs", "src/mcp/McpCenter.tsx", "tests/fixtures/mcp/echo-server.mjs"];
-      return Object.fromEntries(files.map((f) => [f, fileSha(f)]));
-    })(),
-    env: { platform: process.platform, arch: process.arch, node: process.version, electron: require("electron/package.json").version, cdpPort: CDP_PORT, userDataPrefix: "oa-d503-" },
+    mcpSourceFingerprint: Object.fromEntries(Object.entries(sourceFingerprint.files).map(([f, v]) => [f, v.sha256_16])),
+    sourceFingerprint,
+    sourceFingerprintSetSha256: sourceFingerprint.setSha256,
+    env: { platform: process.platform, arch: process.arch, node: process.version, electron: require("electron/package.json").version, cdpPort: CDP_PORT, cdpPorts: RUN.ports.slice(), userDataPrefix: USERDATA_PREFIX, runId: RUN.runId, runDir: RUN.runDirRel },
     distFingerprint: (() => {
       try {
         const html = fs.readFileSync(path.join(ROOT, "dist", "index.html"), "utf8");
@@ -1168,12 +1206,13 @@ async function main() {
     boundary: { thirdPartyServices: false, userDataSent: false, arbitraryLocalPrograms: false, pluginIsolationClaimed: false, note: "只连自建 fixture（stdio 子进程 + 127.0.0.1 HTTP）；连接成功不等于插件隔离通过" },
     at: new Date().toISOString(),
   };
-  fs.writeFileSync(path.join(ART, "mcp-center-e2e.json"), JSON.stringify(out, null, 2));
+  OUT = out;
+  out.exitCode = failed === 0 ? 0 : 1;
   console.log("\n结论：" + (failed === 0 ? "PASS" : "FAIL") + " — " + JSON.stringify({ pass: passed, fail: failed, total: CHECKS.length, notVerified: NOT_VERIFIED.length }));
   return failed === 0 ? 0 : 1;
 }
 
-/* ══════════════════════════ 收尾 ══════════════════════════ */
+/* ══════════════════════════ 收尾（只清理本次运行自己 spawn 的进程） ══════════════════════════ */
 let exitCode = 2;
 try { exitCode = await main(); } catch (e) {
   console.error("验收异常：" + String((e && e.stack) || e));
@@ -1181,9 +1220,22 @@ try { exitCode = await main(); } catch (e) {
   exitCode = 2;
 }
 try { if (browser) await browser.close().catch(() => {}); } catch { /* ignore */ }
-try { if (child) child.kill("SIGKILL"); } catch { /* ignore */ }
-try { spawnSync("pkill", ["-f", "oa-d503-"], { stdio: "ignore" }); } catch { /* ignore */ }
-for (const fx of fixtures) { try { fx.stop(); } catch { /* ignore */ } }
-try { if (userDataDir) fs.rmSync(userDataDir, { recursive: true, force: true }); } catch { /* ignore */ }
-try { fs.mkdirSync(ART, { recursive: true }); fs.writeFileSync(path.join(ART, "mcp-center-e2e.log"), LOG_LINES.join("\n") + "\n"); } catch { /* ignore */ }
+const cleanup = await cleanupOwnProcesses();
+console.log("收尾：只清理本次运行 spawn 的 pid 树（" + JSON.stringify(cleanup.targets.map((t) => ({ kind: t.kind, rootPid: t.rootPid, leftovers: t.leftovers }))) + "），未使用 pkill");
+try { if (userDataDir) { fs.rmSync(userDataDir, { recursive: true, force: true }); cleanup.userDataRemoved = userDataDir; } } catch { /* ignore */ }
+if (RUN) {
+  try {
+    const fallback = {
+      phase: "D5-03 第一批",
+      title: "MCP 中心连接管理与能力发现（真实 electron + 自建受控测试服务）",
+      aborted: true,
+      checks: CHECKS, counts: { pass: passed, fail: failed, total: CHECKS.length },
+      notVerified: NOT_VERIFIED, observations: OBSERVATIONS, productDefects: DEFECTS,
+    };
+    const fin = await RUN.finalize({ out: OUT || fallback, exitCode, logLines: LOG_LINES, cleanup });
+    console.log("产物：" + fin.artifactPath + "（sha256 " + fin.artifactSha256.slice(0, 16) + "）+ " + fin.logPath + "；索引 " + RUN_ARTIFACTS.RUNS_REL + "/index.json");
+  } catch (e) { console.error("产物写入失败：" + String((e && e.stack) || e)); }
+} else {
+  console.error("未创建 run 目录（createRun 失败），本次运行无产物");
+}
 process.exit(exitCode);

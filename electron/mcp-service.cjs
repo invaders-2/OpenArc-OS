@@ -43,6 +43,8 @@ class McpService {
     this.clientFactory = typeof clientFactory === "function" ? clientFactory : () => new McpClient({ launcher: createMcpStdioLauncher(), requestTimeoutMs, maxTools, maxPages });
     this.live = new Map();
     this.busy = new Set();
+    /** 正在握手（还没进 live）的客户端：应用关闭/收尾时也要能 abort 掉，不留悬挂。 */
+    this.opening = new Set();
   }
 
   #now() { return this.clock(); }
@@ -93,10 +95,14 @@ class McpService {
     const actor = auth && auth.actor ? auth.actor : null;
     const toolsVisible = this.#toolsVisible(auth);
     const projected = domain.projectConnection(row, { toolsVisible });
-    if (!projected || !actor) return projected;
+    if (!projected) return projected;
+    // 只有活连接才有 GET 流的实时状态；状态照实（405/不支持/中断都不改连接状态本身）。
+    const live = this.live.get(row.connection_id);
+    const withRuntime = live ? { ...projected, getStream: this.#streamProjection(live.client) } : projected;
+    if (!actor) return withRuntime;
     const isOrg = row.visibility === domain.VISIBILITY.ORGANIZATION;
     return {
-      ...projected,
+      ...withRuntime,
       access: {
         canView: true,
         canUse: toolsVisible,
@@ -365,7 +371,10 @@ class McpService {
   async dispose() {
     const ids = [...this.live.keys()];
     for (const id of ids) await this.#closeLive(id);
-    return { ok: true, closed: ids.length };
+    // 握手进行中的客户端同样要 abort：否则退出登录/关闭应用会留下悬挂的握手与 GET 流
+    const opening = [...this.opening];
+    await Promise.all(opening.map((client) => Promise.resolve(client.close()).catch(() => {})));
+    return { ok: true, closed: ids.length, aborted: opening.length };
   }
 
   // ---------------------------------------------------------------------------
@@ -453,39 +462,86 @@ class McpService {
       credentialSecret = resolved.secret;
     }
     const client = this.clientFactory();
-    const opened = await client.connect({ transport: starting.transport, endpoint, credentialSecret, authMode: starting.auth_mode });
-    if (!opened.ok) return this.#fail(connectionId, opened.error, { detail: opened.detail, client });
-    const init = await client.initialize({});
-    if (!init.ok) {
-      // 协议版本不符时仍记录服务端真实返回的版本/身份 —— "失败"不等于"没看到"
-      if (init.protocolVersion || init.serverInfo) {
-        this.store.transactSync(() => this.store.updateConnection(connectionId, { protocolVersion: init.protocolVersion || null, serverName: init.serverInfo ? init.serverInfo.name : null, serverVersion: init.serverInfo ? init.serverInfo.version : null, capabilitiesJson: JSON.stringify(init.capabilities || {}) }));
+    // 会话失效可能发生在 GET 流上（服务端 404）：服务层必须同步收敛，不能等下一次 IPC
+    client.onSessionInvalid = (code, info) => this.#onSessionInvalid(connectionId, client, code, info);
+    this.opening.add(client);
+    try {
+      const opened = await client.connect({ transport: starting.transport, endpoint, credentialSecret, authMode: starting.auth_mode });
+      if (!opened.ok) return this.#fail(connectionId, opened.error, { detail: opened.detail, client });
+      const init = await client.initialize({});
+      if (!init.ok) {
+        // 协议版本不符时仍记录服务端真实返回的版本/身份 —— "失败"不等于"没看到"
+        if (init.protocolVersion || init.serverInfo) {
+          this.store.transactSync(() => this.store.updateConnection(connectionId, { protocolVersion: init.protocolVersion || null, serverName: init.serverInfo ? init.serverInfo.name : null, serverVersion: init.serverInfo ? init.serverInfo.version : null, capabilitiesJson: JSON.stringify(init.capabilities || {}) }));
+        }
+        return this.#fail(connectionId, init.error, { detail: init.detail, client });
       }
-      return this.#fail(connectionId, init.error, { detail: init.detail, client });
+      // GET server→client 流：服务端不支持（405/404/501）不算连接失败，POST 照常可用
+      const stream = await client.startServerStream();
+      this.#log(connectionId, "INFO", stream.supported ? "GET_STREAM_OPEN" : "GET_STREAM_UNAVAILABLE", { errorCode: stream.error || null, detail: "status=" + (stream.status || 0) + " reason=" + String(stream.reason || "") });
+      const discovered = await client.listTools({});
+      if (!discovered.ok) {
+        this.store.transactSync(() => this.store.updateConnection(connectionId, { protocolVersion: init.protocolVersion, serverName: init.serverInfo.name, serverVersion: init.serverInfo.version, capabilitiesJson: JSON.stringify(init.capabilities || {}) }));
+        return this.#fail(connectionId, discovered.error, { detail: "tools-discovery-failed", client });
+      }
+      const hash = domain.toolsHash(discovered.tools);
+      this.store.transactSync(() => this.store.updateConnection(connectionId, {
+        protocolVersion: init.protocolVersion,
+        serverName: init.serverInfo.name,
+        serverVersion: init.serverInfo.version,
+        capabilitiesJson: JSON.stringify(init.capabilities || {}),
+        toolsJson: JSON.stringify(discovered.tools),
+        toolsHash: hash,
+        lastConnectedAt: this.#now(),
+      }));
+      const ready = this.#transition(this.store.connectionById(connectionId), domain.STATUS.READY, { lastErrorCode: null });
+      if (!ready.ok) { await client.close(); return ready; }
+      this.live.set(connectionId, { client, openedAt: this.#now() });
+      this.#log(connectionId, "INFO", "TOOLS_DISCOVERED", { detail: "tools=" + discovered.tools.length + " pages=" + discovered.pages + " truncated=" + discovered.truncated + " hash=" + hash.slice(0, 16) });
+      return {
+        ok: true,
+        snapshot: { protocolVersion: init.protocolVersion, serverName: init.serverInfo.name, serverVersion: init.serverInfo.version, capabilities: init.capabilities, toolCount: discovered.tools.length, tools: discovered.tools.map((t) => t.name), toolsHash: hash, pages: discovered.pages, truncated: discovered.truncated, transport: starting.transport, location: starting.location, stream: { supported: !!stream.supported, status: stream.status || 0, error: stream.error || null } },
+      };
+    } finally {
+      this.opening.delete(client);
     }
-    const discovered = await client.listTools({});
-    if (!discovered.ok) {
-      this.store.transactSync(() => this.store.updateConnection(connectionId, { protocolVersion: init.protocolVersion, serverName: init.serverInfo.name, serverVersion: init.serverInfo.version, capabilitiesJson: JSON.stringify(init.capabilities || {}) }));
-      return this.#fail(connectionId, discovered.error, { detail: "tools-discovery-failed", client });
+  }
+
+  /** GET 流的实时投影：只给状态与计数，不给事件 id 原文 / URL / secret。 */
+  #streamProjection(client) {
+    let diag = null;
+    try {
+      diag = typeof client.diagnostics === "function" ? client.diagnostics() : null;
+    } catch {
+      diag = null;
     }
-    const hash = domain.toolsHash(discovered.tools);
-    this.store.transactSync(() => this.store.updateConnection(connectionId, {
-      protocolVersion: init.protocolVersion,
-      serverName: init.serverInfo.name,
-      serverVersion: init.serverInfo.version,
-      capabilitiesJson: JSON.stringify(init.capabilities || {}),
-      toolsJson: JSON.stringify(discovered.tools),
-      toolsHash: hash,
-      lastConnectedAt: this.#now(),
-    }));
-    const ready = this.#transition(this.store.connectionById(connectionId), domain.STATUS.READY, { lastErrorCode: null });
-    if (!ready.ok) { await client.close(); return ready; }
-    this.live.set(connectionId, { client, openedAt: this.#now() });
-    this.#log(connectionId, "INFO", "TOOLS_DISCOVERED", { detail: "tools=" + discovered.tools.length + " pages=" + discovered.pages + " truncated=" + discovered.truncated + " hash=" + hash.slice(0, 16) });
+    if (!diag || !diag.stream) return null;
     return {
-      ok: true,
-      snapshot: { protocolVersion: init.protocolVersion, serverName: init.serverInfo.name, serverVersion: init.serverInfo.version, capabilities: init.capabilities, toolCount: discovered.tools.length, tools: discovered.tools.map((t) => t.name), toolsHash: hash, pages: discovered.pages, truncated: discovered.truncated, transport: starting.transport, location: starting.location },
+      state: diag.stream.state,
+      supported: diag.stream.supported,
+      status: diag.stream.status,
+      error: diag.stream.error,
+      reconnects: diag.stream.reconnects,
+      hasLastEventId: diag.stream.hasLastEventId,
+      events: diag.events,
     };
+  }
+
+  /**
+   * 会话失效（服务端 404 / 明确 session 信号）：摘掉 live、如实写 ERROR + 错误码、收掉客户端。
+   * 不重连、不重发；是否重新建立连接由调用方决定。
+   */
+  #onSessionInvalid(connectionId, client, code = domain.ERROR_CODE.MCP_SESSION_EXPIRED, info = null) {
+    const entry = this.live.get(connectionId);
+    if (entry && entry.client === client) this.live.delete(connectionId);
+    try {
+      const row = this.store.connectionById(connectionId);
+      if (row) this.store.transactSync(() => this.store.updateConnection(connectionId, { status: domain.statusForError(code), lastErrorCode: code }));
+    } catch {
+      /* 记录失败不改变"会话已失效"这个事实 */
+    }
+    this.#log(connectionId, "ERROR", "SESSION_INVALID", { errorCode: code, detail: info && info.reason ? String(info.reason) : "session-invalid" });
+    Promise.resolve(client.close()).catch(() => {});
   }
 
   async #fail(connectionId, code, { detail = null, client = null } = {}) {
