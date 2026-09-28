@@ -102,3 +102,15 @@ center / policy artifact 各 14 条，stream 15 条（多自己一条）：**产
 * `src/mcp/McpCenter.tsx`：`MCP_SESSION_ENDED` 文案与 `data-mcp-note="session-ended"`（`1b78953`，8 增 0 删，无样式改动）；
 * `experiments/d5-03/run-artifacts.cjs`：runId 目录 / 索引 / `acquirePort`；
 * `experiments/d5-03/mcp-stream-e2e.mjs`（29 项）、`tests/d5-03-mcp-stream.test.mjs`（S1–S8）、`tests/d5-03-mcp-get-stream.test.mjs`（G1–G7）、`tests/d5-03-mcp-lifecycle.test.mjs`（L1–L5）、`tests/fixtures/mcp/echo-server.mjs`（可控失败模式：持续通知 / 事件 ID / 重复 ID / 分片 / 超大 / 无响应 / 会话失效 / GET 405）。
+
+---
+
+## 12. 第四批影响（2026-09-28，`7b75ea3`）
+
+第四批（**会话自然到期 → MCP 收流 + 策略收口**）在本决策的结论上落地 / 改写了下面几处；本节只登记影响，**本文 §1–§11 的第三批结论不删改**（被本批改写的口径在本节说明）：
+
+* **§6 生命周期状态策略：多一条收尾事件，状态口径不变**。第三批 §10 登记的「会话空闲过期没有身份事件」由第四批闭环：新事件 `identity/session-expired`（reason / sessionId / sessionRef）并入 `MCP_SESSION_END_EVENTS`，走 §6 同一条既有 dispose —— 活连接与在途请求立刻收掉、**`enabled` 不改写**、状态如实 `DISABLED + MCP_SESSION_ENDED`、连接日志 `detail = expired:idle | expired:absolute`；登出 / 锁屏 / 关应用 / 撤权的既有 detail（`logout` / `user` / `app-quit` / `app-grant-revoked`）**一字未改**。**仍不新增第六状态、`SCHEMA_VERSION` 仍 21** —— 与 §6 决策一致。
+* **§10 未闭合项：四项闭环 / 改写**。①「会话空闲过期即时收流」—— 真机验收通过（idle 25/25：`dueAt→revoked_at` 偏差 0ms、事件 3ms、收流 53ms、`expired:idle`；absolute 5/5：`reason=absolute`、`expired:absolute`；extend 越过原到期点 3004ms 仍 READY）；②「视觉两项未验收」—— 已验收通过（浅/深实机截图 1660×1140 与第一批基准逐像素同尺寸；说明行 12px/400 按普通文本门槛实测浅 4.94:1 / 深 6.30:1，指定色 / 合成背景 / 实机像素三方一致）；③「policy 脚本收尾留临时目录」—— 已闭环（`owner.json` 归属标记 + 只按本次创建清单清理 + SIGINT/SIGTERM 兜底 + 三条件 orphan 清理，残留 4 → 0）；④ 既有缺口里的「`BASELINE_POLICY_PROVIDERS` 无漂移守卫」「`app_policy_provisions` 无清理策略」—— 已闭环（行为级 15 对 = resource 10 + model 4 + mcp 1 逐项相等 + 反向穷举表外 0 + 源码级 fail-closed + 负向自证 T5/T6；保留规则 R1–R6 + 空白名单源码守卫；按总经理裁定**不实现删除**）。
+* **§3 / §4 / §5（流式语义与有界失败）不受影响**；协议版本仍 `2025-06-18`；`notVerified` 仍 2 条（跨组织真机入口，第四批未新增「创建组织」入口）。
+* 第四批判定 = **PASS（限定范围）**，D5-03 整体仍 = **PARTIAL**。证据：`docs/D5-03-RESULT.md` 第四批正文、`docs/D5-03-GATE-EVIDENCE.json` 的 `batch4` 段、决策 `docs/decisions/D5-03D-session-expiry-and-policy-retention.md`、真机报告 `experiments/d5-03/D5-03-BATCH4-EXPIRY-REPORT.md`。
+

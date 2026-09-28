@@ -1536,7 +1536,7 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 
 **判定：D5-03 第二批（MCP 授权收口）= PASS（限定范围）；D5-03 整体 = PARTIAL。**
 
-剩余缺口逐条：① **OAuth**（只有 NONE / BEARER）；② 远程**长连接流**（GET SSE / 断线续传）【第三批已更新：**已闭环**，见文末第三批节】；③ **真实第三方服务**与 **Adobe / PS 等本地服务**（D5-04 / D5-05）；④ **插件隔离**（D5-08）—— 连接成功 ≠ 插件隔离通过；⑤ **第二组织真机入口 / 跨组织真机行为级**；⑥ **`BASELINE_POLICY_PROVIDERS` 手工对齐无漂移守卫**；⑦ **第一批 artifact 指纹集不含本批改动的两个文件**【第三批已更新：**已闭环** —— 指纹集扩为 14 条】；⑧ **`app_policy_provisions` 无清理策略**。
+剩余缺口逐条：① **OAuth**（只有 NONE / BEARER）；② 远程**长连接流**（GET SSE / 断线续传）【第三批已更新：**已闭环**，见文末第三批节】；③ **真实第三方服务**与 **Adobe / PS 等本地服务**（D5-04 / D5-05）；④ **插件隔离**（D5-08）—— 连接成功 ≠ 插件隔离通过；⑤ **第二组织真机入口 / 跨组织真机行为级**；⑥ **`BASELINE_POLICY_PROVIDERS` 手工对齐无漂移守卫**；⑦ **第一批 artifact 指纹集不含本批改动的两个文件**【第三批已更新：**已闭环** —— 指纹集扩为 14 条】；⑧ **`app_policy_provisions` 无清理策略**。【第四批已更新：⑥⑧ 已闭环 —— 防漂移守卫（行为级 15 对逐项相等 + 反向穷举表外 0 + 源码级 fail-closed + 负向自证 T5/T6）与保留规则 R1–R6（按总经理裁定**不实现删除**、守卫白名单为空）】
 
 **D5-02 的「重命名依赖 Electron 不支持的 `prompt()`」继续单列**（见 D5-02 段 §7 关闭条件），**不并入本批**。
 
@@ -1574,22 +1574,69 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 
 ## 3. notVerified 与缺口（如实登记）
 
-* **notVerified 未清零**：`mcp-policy-e2e` **2 条**（同一安装内第二个组织无产品入口 → 跨组织行为级只到 schema + node 级）；`mcp-center-e2e` 0 条；`mcp-stream-e2e` 0 条。**本批不新增"创建组织"产品入口**（用户明令），因此两位数仍无法在真机构造。
-* **第三批新登记的残留**：**会话空闲过期没有身份事件** —— 会话自然过期不触发 `identity/logged-out|locked`，活连接要等下一次收尾动作才被收掉；期间靠命令层实时判权拒绝。**"空闲过期即时收流"未验收**。
-* **视觉两项未验收**（浅 / 深主题对照、对比度量测）。
-* **policy 脚本收尾留 2 个 `oa-d503b-*` 临时目录**（既有行为，脚本不在本批允许改动范围）。
+* **notVerified 未清零**：`mcp-policy-e2e` **2 条**（同一安装内第二个组织无产品入口 → 跨组织行为级只到 schema + node 级）；`mcp-center-e2e` 0 条；`mcp-stream-e2e` 0 条。**本批不新增"创建组织"产品入口**（用户明令），因此两位数仍无法在真机构造。【第四批已更新：仍为这 2 条（expiry 六场景与 center / stream 第四批本轮 0 条；第四批同样未新增该入口）】
+* **第三批新登记的残留**：**会话空闲过期没有身份事件** —— 会话自然过期不触发 `identity/logged-out|locked`，活连接要等下一次收尾动作才被收掉；期间靠命令层实时判权拒绝。**"空闲过期即时收流"未验收**。【第四批已更新：**已闭环** —— 新事件 `identity/session-expired` → 既有 MCP dispose 真机验收（idle 25/25：偏差 0ms、收流 53ms、`detail=expired:idle`；absolute 5/5：`expired:absolute`；`enabled` 未改写）】
+* **视觉两项未验收**（浅 / 深主题对照、对比度量测）。【第四批已更新：**已验收通过** —— 浅/深实机截图 1660×1140 与第一批基准逐像素同尺寸；对比度浅 4.94:1 / 深 6.30:1（12px 普通文本门槛 4.5:1）】
+* **policy 脚本收尾留 2 个 `oa-d503b-*` 临时目录**（既有行为，脚本不在本批允许改动范围）。【第四批已更新：**已闭环** —— 归属标记 + 只按本次创建清单清理 + SIGINT/SIGTERM 兜底；历史残留 4 → 0；根因订正：不是「脚本没有清理」，真漏洞是 `launchApp` 自建目录不在清单 + 硬退出跳过收尾块】
 * **归因订正（第三批）**：第二节（第二批）曾把一次 `Z0 FAIL(exit 2)` 与 CDP 端口冲突记成"另一个并发 DSH 会话"、"实例被按前缀误杀"；经复核那是**本任务自己并行跑的批次**。第三批的机制性修复 = 独立 runId 目录 + `acquirePort` 独占探测 + 只清理自己的 pid 树 + Electron 批次串行执行。历史 artifact 里当时的文字保留不改，文档结论已就地订正。
-* 既有缺口继续单列：OAuth（只有 NONE / BEARER）、真实第三方与 Adobe / PS（D5-04 / D5-05）、插件隔离（D5-08，连接成功 ≠ 插件隔离通过）、`BASELINE_POLICY_PROVIDERS` 手工对齐无漂移守卫、`app_policy_provisions` 无清理策略、D5-02 的"重命名依赖 Electron 不支持的 `prompt()`"。
+* 既有缺口继续单列：OAuth（只有 NONE / BEARER）、真实第三方与 Adobe / PS（D5-04 / D5-05）、插件隔离（D5-08，连接成功 ≠ 插件隔离通过）、`BASELINE_POLICY_PROVIDERS` 手工对齐无漂移守卫、`app_policy_provisions` 无清理策略、D5-02 的"重命名依赖 Electron 不支持的 `prompt()`"。【第四批已更新：`BASELINE_POLICY_PROVIDERS` 防漂移守卫与 `app_policy_provisions` 保留规则 R1–R6 已闭环；后者按总经理裁定**不实现删除**、守卫白名单保持为空】
 
 ## 4. 缺口与判定
 
 **判定：D5-03 第三批（Streamable HTTP 流式收口 + 生命周期收尾）= PASS（限定范围）；D5-03 整体仍 = PARTIAL。**
 
-剩余缺口逐条：① **第二个组织的真机入口 / 跨组织真机行为级**（notVerified 2 条）；② **会话空闲过期即时收流**（缺身份事件）；③ **OAuth**；④ **真实第三方服务与 Adobe / PS 等本地服务**（D5-04 / D5-05）；⑤ **插件隔离**（D5-08）；⑥ **`BASELINE_POLICY_PROVIDERS` 无漂移守卫**；⑦ **`app_policy_provisions` 无清理策略**；⑧ **D5-02 `prompt()` 遗留**；⑨ 视觉两项未验收（浅/深主题对照、对比度量测）。
+剩余缺口逐条：① **第二个组织的真机入口 / 跨组织真机行为级**（notVerified 2 条）；② **会话空闲过期即时收流**（缺身份事件）；③ **OAuth**；④ **真实第三方服务与 Adobe / PS 等本地服务**（D5-04 / D5-05）；⑤ **插件隔离**（D5-08）；⑥ **`BASELINE_POLICY_PROVIDERS` 无漂移守卫**；⑦ **`app_policy_provisions` 无清理策略**；⑧ **D5-02 `prompt()` 遗留**；⑨ 视觉两项未验收（浅/深主题对照、对比度量测）。【第四批已更新：②⑥⑦⑨ 已由第四批处理（空闲过期即时收流 / 防漂移守卫 / 保留规则 R1–R6 / 视觉两项）；剩余 = ① 跨组织真机入口、③ OAuth、④ 真实第三方与 Adobe、⑤ 插件隔离、⑧ D5-02 `prompt()`、`errorText` 通用括注、`resetInstallation` 孤儿残留、SIGKILL 边界】
 
 ## 5. 下一步
 
-* 本批不再有必须立刻修的产品缺陷（三门禁全绿、单测 143/143、build exit 0）；若要继续收口 D5-03，优先级建议：跨组织真机入口（产品需新增「新建组织」或多租户安装，本轮不做）→ 会话空闲过期的身份事件（让活连接在过期当下即被收掉）→ OAuth → 真实第三方 / Adobe（D5-04 / D5-05）。
+* 本批不再有必须立刻修的产品缺陷（三门禁全绿、单测 143/143、build exit 0）；若要继续收口 D5-03，优先级建议：跨组织真机入口（产品需新增「新建组织」或多租户安装，本轮不做）→ 会话空闲过期的身份事件（让活连接在过期当下即被收掉）→ OAuth → 真实第三方 / Adobe（D5-04 / D5-05）。【第四批已更新：本轮建议的「会话空闲过期身份事件」与「策略收口」已落地；第四批的判定、残留与下一步见文末「D5-03 第四批」节】
+
+---
+
+# D5-03 第四批 · 会话自然到期收流 + 策略收口 · 2026-09-28（`7b75ea3`）
+
+> **口径（用户明确定范围）**：本批 = **会话自然到期 → MCP 收流**（第三批登记的残留）+ **策略收口**（`BASELINE_POLICY_PROVIDERS` 防漂移守卫 / `app_policy_provisions` 保留规则）+ **临时目录归属**；**不开放工具调用、不连真实第三方、不运行任意第三方程序、不发用户数据、不声称插件隔离通过**；**不新增「创建组织」产品入口**（用户明令）；**不实现任何组织数据删除**（总经理裁定）。
+> **判定：D5-03 第四批（会话自然到期收流 + 策略收口）= PASS（限定范围）；D5-03 整体仍 = PARTIAL**（剩余缺口逐条见 §3 / §4）。
+> **当前有效证据 = 本轮统一重跑的 9 个 runId**：expiry `20260928T043453Z-140a` / `20260928T043517Z-7ab7` / `20260928T043538Z-4e4c` / `20260928T043554Z-e52c` / `20260928T043611Z-561b` / `20260928T043615Z-3f55`（各后缀 `-mcp-expiry-e2e`）+ 门禁 `20260928T043622Z-b4df-mcp-center-e2e` / `20260928T043657Z-8d65-mcp-stream-e2e` / `20260928T043724Z-25c6-mcp-policy-e2e`；首轮（EXP-01 修复前 6 个）与 1R 单场景复测（1 个）只作历史对照，不作为当前证据。
+> 完整结果 `docs/D5-03-RESULT.md` 第四批正文；tracked 证据 `docs/D5-03-GATE-EVIDENCE.json` 的 `batch4` 段；决策 `docs/decisions/D5-03D-session-expiry-and-policy-retention.md`；真机报告 `experiments/d5-03/D5-03-BATCH4-EXPIRY-REPORT.md`、机器可读汇总 `experiments/d5-03/d5-03-batch4-expiry-summary.json`。
+> **证据口径披露（必读）**：9 次 artifact 记 `testedCommit=8cbf8df2`（它们是提交前在工作树上跑的）；工作树 24 个改动文件的逐文件 sha256 冻结在汇总 JSON 的 `freezeSnapshot`；跑完复核 **22/24 一字未改**（只有两个报告文件因本轮更新而改写）；提交 `7b75ea3` 的文件清单与冻结清单 24/24 相同、其中 22/24 的 blob sha256 与冻结值逐字节相同 —— **被测内容 = `7b75ea3` 的内容**（冻结的 24 文件工作树状态 + 报告/汇总最终文本），不写成「测试提交=7b75ea3」。
+
+## 1. 任务状态
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| 会话自然到期收流（真机） | **已完成** | idle **25/25**（dueAt→revoked 偏差 **0ms**、事件送达 3ms、收流 **53ms**、`detail=expired:idle`、`enabled` 未改写、之后 4.2s 计数零变化）；extend **7/7**（越过原到期点 **3004ms** 仍 READY、旧安排不误关）；absolute **5/5**（`reason=absolute`、收流 48ms）；relogin **7/7**（旧会话到期不关新会话、偏差 71ms）；regress **7/7**（`logout` / `user` / `app-grant-revoked` 三条 detail 一字未改）；override-deny **5/5**（权威行仍 43200000ms / 7200032ms，`DENY OVERRIDE_NOT_ACKNOWLEDGED`） |
+| 到期机制 | **已完成** | `identity-domain.sessionExpiry()` 共用判据（dueAt=min(expires_at, idle_expires_at)、reason=idle|absolute）；`identity-service` **单一定时器**（unref、2^31−1 分块、全链路无 `setInterval`、每条命令后按持久层权威行重排、触发时重读行过**四道门**）；`identity-store.expireSession()` 幂等；对外仍 `SESSION_EXPIRED`；**SCHEMA_VERSION 仍 21、仍 5 种连接状态（未新增第六态）** |
+| 策略防漂移守卫 | **已完成** | `tests/policy-provider-drift.test.mjs` T1–T6 **6/6**：行为级实测 **15 对 = resource 10 + model 4 + mcp 1** 与表逐项相等、反向穷举表外 **0**；源码级 fail-closed（3 个播种点登记 + 「凡引用 `policyProvisionByKey` 的文件必须登记」锚点）；负向自证 T5/T6（注入漂移后确实 FAIL）。**表没有漂移、未改表** |
+| `app_policy_provisions` 保留规则 | **已完成 + 总经理裁定** | `tests/app-policy-provisions-retention.test.mjs` R1–R6 **6/6**（重播种 / 其它组织操作 / 关库重开重放迁移 / 正式重授后逐字段不变、撤权不复活；源码级禁止任何 cleanup 式行删除，白名单为空）。裁定：产品无「组织正式删除」入口 → **本批不实现删除**；`resetInstallation` 孤儿残留（provisions 15 行 + grants 15 行指向已删组织）判定**不可达、不致权限复活**，如实记为**数据残留 / 不变量缺口**，唯一真实风险 = 将来组织 id 复用（恢复备份/导入/人为指定）会**静默抑制新组织首次播种** |
+| 临时目录归属 | **已完成** | `experiments/d5-03/userdata-ownership.cjs`（`owner.json` + 只按本次创建清单删 + SIGINT/SIGTERM 兜底 + 三条件 orphan 清理、默认 dry-run）；单测 O1–O5 **5/5**；**残留 4 → 0**；索引 30 条逐条重算 **0 处不一致**、每次运行 Z1 `changedExisting=[]`/`removed=[]` |
+| 三门禁同轮重跑 | **已完成** | center **38/38**、stream **29/29**、policy **43/43（notVerified 仍 2）**，全部 exit 0、计数不低于首轮；runId / sha256 见结果文档第四批 §2 |
+| 缺陷 EXP-01 | **已修 + 统一重跑全量复验** | 登录页旧文案 `登录状态已过期，请重新登录。（idle）` → 新文案 `登录状态已过期，请重新登录。`；只改「事件 reason 被当 detail 传」1 行调用 + 2 行说明注释；`tests/identity-session-expired-ui.test.mjs` 只新增 U5/U6（先红后绿，27/27）；`productDefectsFixed:1 / productDefectsOpen:0` |
+| 视觉 | **通过** | 浅/深/减少动态效果三张实机截图 **1660×1140** 与第一批基准**逐像素同尺寸**（DPR 2、窗口 1440×940、默认背景/透明度、真实设置面板切主题）；说明行 12px/400 属**普通文本**（门槛 4.5:1），实测**浅 4.94:1 / 深 6.30:1**；`--muted` #6e6e73 / #98989d、合成背景、实机像素**三方一致**；规范 `DESIGN_SYSTEM.md` :3 / :64 / :154/:164 / :248 |
+| 动效 | **通过（本批未新增动效）** | 说明行常规与减少动态效果下 `transitionDuration=0s` / `animationName=none`；减少动态效果下**元素作用域** `--dur-quick=0ms`（`:root` 仍 0.16s）；既有列表入场 `mcp-row-in / 0.16s` 抽样正常 |
+| 回归 | **已完成** | node 目标集 **193/193、exit 0**（总经理独立复跑；执行岗同口径复跑一致）；全量 `npm test` 本批记录 **1332/1334**，执行岗定稿复跑 **1334 pass / 2 fail / 1336 total**（两条既有失败与本批无关：`tests/side-effect-c4-gates.test.mjs`、`tests/d4-03-approval-push-isolation.test.mjs`；两个数字并列，差值 2 与 EXP-01 新增 U5/U6 数量一致）；`npm run build` 记录 **exit 0**（本交付未复跑，避免改写 `distFingerprint`） |
+
+## 2. 三轴判定（分列）
+
+* **功能 = 通过**：expiry 六场景 **25/25 + 7/7 + 5/5 + 7/7 + 7/7 + 5/5**、exit 0、defects 0；三门禁 **38/38 + 29/29 + 43/43**、exit 0；真实 `electron .` / 真实产品入口 / 自建受控 fixture；边界四项自证（5 个工具调用入口仍全拒、协议仍 `2025-06-18`、只连 127.0.0.1 fixture、不声称插件隔离）。
+* **视觉 = 通过**：见上表（1660×1140 逐像素同尺寸、对比度浅 4.94:1 / 深 6.30:1、门槛归属按普通文本 4.5:1）。
+* **动效 = 通过**：本批未新增动效；既有动效结论不变。
+
+## 3. notVerified 与缺口（如实登记）
+
+* **notVerified 仍 2 条**（`mcp-policy-e2e`）：同一安装内第二个组织无产品入口 → 跨组织行为级只到 schema + node 级；**本批不新增「创建组织」入口**（用户明令）。expiry 六场景与 center / stream 本轮 **0 条**。
+* **本批新登记的残留**：① `errorText` 仍是通用括注实现 —— 命令失败路径的 detail（如 `idle-expiry`）照旧显示，本批只修「事件 reason 被当 detail 传」这一条根因；② `resetInstallation` 孤儿残留（provisions 15 行 + grants 15 行指向已删组织；数据残留 / 不变量缺口，按裁定不修；风险 = 组织 id 复用时静默抑制新组织首次播种）；③ **SIGKILL 拦不住**（归属清理靠 SIGINT/SIGTERM + 收尾块，`kill -9` 靠 `cleanOrphans` 事后按三条件清理、默认 dry-run）。
+* **本批闭环的旧缺口**：会话空闲过期无即时收流（第三批登记）、`BASELINE_POLICY_PROVIDERS` 无漂移守卫（第二批登记）、`app_policy_provisions` 无保留规则（第二批登记）、policy 门禁临时目录残留（第三批登记）。
+* 既有缺口继续单列：OAuth（仅 NONE / BEARER）、真实第三方与 Adobe / PS（D5-04 / D5-05）、插件隔离（D5-08，连接成功 ≠ 插件隔离通过）、D5-02 的「重命名依赖 Electron 不支持的 `prompt()`」。
+
+## 4. 判定与下一步
+
+**判定：D5-03 第四批（会话自然到期收流 + 策略收口）= PASS（限定范围）；D5-03 整体仍 = PARTIAL。**
+
+剩余缺口逐条：① 第二个组织的真机入口 / 跨组织真机行为级（notVerified 2 条）；② OAuth；③ 真实第三方服务与 Adobe / PS（D5-04 / D5-05）；④ 插件隔离（D5-08）；⑤ D5-02 `prompt()` 遗留；⑥ `errorText` 通用括注；⑦ `resetInstallation` 孤儿残留（数据残留 / 不变量缺口）；⑧ SIGKILL 边界。
+
+下一步建议：跨组织真机入口（产品需新增「新建组织」或多租户安装，本批不做）→ OAuth → 真实第三方 / Adobe（D5-04 / D5-05）；`resetInstallation` 孤儿是否清理属产品决定（当前按总经理裁定不修）。
+
 
 
 
