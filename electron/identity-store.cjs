@@ -1548,11 +1548,12 @@ const MIGRATIONS = Object.freeze([
 ]);
 
 /**
- * 安装重置（identity/reset-installation）要清的**授权事实**表 —— 范围仅此四张。
+ * 安装重置（identity/reset-installation）要清的表 —— **授权事实四张 + 能恢复设备身份/权限的设备事实三张**。
  *
- * 判据（逐表可复核）：这张表里的行是不是"授权/权限事实"，且它能不能在被重置后的
- * 安装里复活权限或误导判定。四张都满足；其余 23 张带 organization_id 的表是
- * 用户内容 / 配置 / 审计（判定与证据见 tests/d5-03-reset-authorization-consistency.test.mjs）。
+ * 判据（逐表可复核）：这张表里的行是不是"授权 / 权限事实"，**或者**它能不能在被重置后的安装里
+ * 恢复设备身份或权限（旧密钥再登记设备、旧凭据再拿连接）。七张都满足；其余 20 张带
+ * organization_id 的表是用户内容 / 配置 / 审计（判定与证据见
+ * tests/d5-03-reset-authorization-consistency.test.mjs 与 tests/d5-03-reset-device-identity.test.mjs）。
  *
  *   · app_policy_provisions —— 策略提供记录 + 撤销墓碑。"首次使用才给、撤销后永不再给"
  *     的持久依据；组织 id 被复用时旧墓碑会**压住**新组织的首次播种（判定被误导）。
@@ -1565,13 +1566,31 @@ const MIGRATIONS = Object.freeze([
  *   · device_access        —— 设备 ACL（principal × actions）。同样按 device_id 取，
  *     ORGANIZATION 分支不比对行的 organization_id，孤儿行是悬空授权。
  *
+ * 第七批补三张 —— 重置后**设备身份事实**仍在的三条路径，逐条可复核：
+ *   · device_pairing_credentials —— 未消费的配对密钥就是一张"再登记一台设备"的门票。
+ *     consumePairing 只按 secret_hash 反查（device-store.cjs:39/:43），判定里**不看组织是否仍存在**，
+ *     因此重置前签发、尚未过期的密钥在重置后仍能把设备登记进那个**已删组织**（第五批 T7 实测）；
+ *     组织 id 一旦被复用，它还会变成新安装里的"既有设备"。
+ *   · device_credentials  —— 指纹是 TLS 握手后"这个连接是谁"的唯一查找键
+ *     （device-store.cjs:51 credentialByFingerprint → device-service.cjs:514 authenticateConnection、:520 取数），
+ *     而 heartbeat 的 Device Gate 用的是 role: "ADMIN" 的合成 actor（device-service.cjs:601），
+ *     于是"旧凭据 + 旧 devices 行"在重置后**仍能拿到连接与心跳放行**，不需要任何 device_access 行。
+ *   · devices             —— Registry 行既是上面两步的落点，又是 authorizeDevice 的组织来源。
+ *     它与 device_credentials 互为父子（device_credentials.device_id REFERENCES devices(id)），
+ *     所以删除顺序必须是先凭据、再 Registry —— PRAGMA foreign_keys = ON 下反了会直接抛错。
+ *
  * 为什么整表删而不是按 organization_id 过滤：收紧放行口径只挡住"当下读到异组织/空组织行"，
- * 换不掉下面两个前提。其一，重置后 teams 为空，这四张表里每一行的 organization_id 都指向
+ * 换不掉下面两个前提。其一，重置后 teams 为空，这些表里每一行的 organization_id 都指向
  * 已删组织（含历史遗留的 organization_id = '' 无主行），行本身**无所属**。其二，组织 id
  * 一旦被复用就会重新生效：按 organization_id 取的两张表（app_resource_grants /
  * resource_grants）会把旧行当成新组织的既有授权，app_policy_provisions 的旧墓碑会压制
  * 新组织的首次播种，device_access 干脆按 device_id 取、不比组织，孤儿行是悬空授权。
+ * 设备三张同理 —— devices 行带着旧 organization_id 复活，凭据按 fingerprint 取数、配对密钥按
+ * secret_hash 取数，**两条取数路径都不比对组织**，所以"行属于哪个组织"根本挡不住它们。
  * 审计三表（audit_log / authorization_audit / device_audit）一行都不删。
+ *
+ * 常量名保留 RESET_AUTHORIZATION_DELETE_SQL 不改：它是 docs / 守卫 fail-closed 定位串与既有引用
+ * 的稳定锚点。它现在的语义是"重置要删的行删除集合"，含设备身份事实三张。
  *
  * 为什么必须是**字面量**：tests/app-policy-provisions-retention.test.mjs 的 R6 守卫按
  * 源码字符串字面量逐条核对组织删除路径；把表名拼进 SQL 会让守卫看不见这条删除（fail-open）。
@@ -1581,6 +1600,10 @@ const RESET_AUTHORIZATION_DELETE_SQL = Object.freeze([
   "DELETE FROM app_resource_grants",
   "DELETE FROM resource_grants",
   "DELETE FROM device_access",
+  /** 设备身份/权限事实（第七批）：顺序 = 子表 → 父表，见上面 FK 那条。 */
+  "DELETE FROM device_credentials",
+  "DELETE FROM device_pairing_credentials",
+  "DELETE FROM devices",
 ]);
 
 const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000; // 12h 绝对上限
@@ -2764,8 +2787,9 @@ class IdentityStore {
    *   · 必须显式传 `confirm: "DELETE-ALL-IDENTITY-DATA"`，输错一字即拒
    *   · 不在任何产品 UI 里暴露入口（本轮只有探针与未来的恢复流程会调）
    *   · 审计留痕：audit_log **不删**，否则"谁重置了"将无据可查
-   *   · 授权状态**同事务**清干净：重置后 teams 为空，任何仍留在授权表里的行
-   *     都属于"指向已删组织的授权状态"（详见 RESET_AUTHORIZATION_DELETE_SQL）
+   *   · 授权状态与**能恢复设备身份/权限的设备事实**同事务清干净：重置后 teams 为空，
+   *     任何仍留在授权表里的行都属于"指向已删组织的授权状态"；未消费的配对密钥、devices 行、
+   *     device_credentials 行则会绕过授权表直接恢复设备身份（详见 RESET_AUTHORIZATION_DELETE_SQL）
    */
   resetInstallation({ confirm } = {}) {
     if (confirm !== "DELETE-ALL-IDENTITY-DATA") {
@@ -2775,8 +2799,8 @@ class IdentityStore {
     const started = this.clock();
     this.audit("reset-installation", { result: "OK_REQUESTED" });
     this.transactSync(() => {
-      // 先清授权事实，再删身份：两者必须在**同一个事务**里，任一语句失败都整体回滚，
-      // 不允许出现"身份没了、授权还在"或反向的半状态。
+      // 先清授权事实与设备身份事实，再删身份：必须在**同一个事务**里，任一语句失败都整体回滚，
+      // 不允许出现"身份没了、授权还在"（或旧的设备身份还能用）这类半状态。
       for (const sql of RESET_AUTHORIZATION_DELETE_SQL) this.db.exec(sql);
       this.db.exec("DELETE FROM sessions");
       this.db.exec("DELETE FROM login_attempts");

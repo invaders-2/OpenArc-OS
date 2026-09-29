@@ -14,11 +14,24 @@
  *   T4 反向：正常路径（未重置）墓碑仍在、不被重播种覆盖、撤权不复活；
  *   T5 判据（第六批订正）：取数与判定都按 organization_id —— 指向不存在组织的 app grant 不再授权；
  *   T5b 产品后果：新组织撤销 canvas 必须真 DENY（把旧组织残留行种回去也不得让它复活）；
- *   T6 范围守卫：重置要删的表集合恰好是登记的四张授权表，不含审计表 / 内容表，且语句无 WHERE；
- *   T7 判据：登记为"不清"的设备凭据表不构成授权结论（残留配对凭据 + 已清的 device_access = 全部 DENY）。
+ *   T6 范围守卫：重置要删的表集合恰好是登记的七张（授权事实四张 + 设备身份事实三张），
+ *      不含审计表 / 内容表，且每条语句都是无 WHERE 的整表删除；
+ *   T7 判据（第七批订正）：重置后**旧设备事实不再能恢复身份或权限** —— 旧配对密钥被拒、
+ *      旧凭据不能认证，devices / device_credentials / device_pairing_credentials 归零。
  *
- * 授权事实表集合的唯一权威是 electron/identity-store.cjs 的 RESET_AUTHORIZATION_DELETE_SQL；
+ * 重置删除集合的唯一权威是 electron/identity-store.cjs 的 RESET_AUTHORIZATION_DELETE_SQL；
  * 本文件不另立一份"应该删什么"的名单，只核对它的范围与后果。
+ *
+ * 第七批变更披露（旧期望 → 新期望，逐字）：
+ *   · 文件头旧结论「devices / device_credentials / device_pairing_credentials —— 设备与凭据登记（配置类），
+ *     设备访问权威是 device_access（已清），凭据本身不构成资源/应用授权」→ 订正为「这三张是**能恢复
+ *     设备身份**的事实，随重置同事务清空」。理由：凭据按 fingerprint 取数、配对密钥按 secret_hash 取数，
+ *     两条路径都不比对组织，且 heartbeat 的 Device Gate 用 role:"ADMIN" 的合成 actor —— 旧凭据 + 旧
+ *     devices 行在重置后仍能拿到连接与心跳放行（第五批 T7 只证明了"不产生授权结论"，没证明"不恢复身份"）。
+ *   · T7 旧期望「残留的配对凭据确实还能登记设备（已登记的残留，本批不清）」→ 新期望「PAIRING_TOKEN_UNKNOWN，
+ *     0 台新设备 / 0 条新凭据」。理由：那正是"重置后还能用旧密钥登记设备"的缺陷本身。
+ *   · T6 旧期望「恰好四张授权表」→ 新期望「七张（四张授权 + 三张设备身份）」。
+ *   · T2 旧期望「授权事实四表 0 行」→ 新期望「七张全 0 行」。
  *
  * 27 张带 organization_id 的表的逐表结论（判据都是可复核的取数路径，不是"应该没事"）：
  *
@@ -32,21 +45,27 @@
  *     device_access           设备 ACL。取数 accessOfDevice(device_id)，ORGANIZATION 分支不比对
  *                             organization_id（device-service.cjs #accessAllows）。
  *
+ *   清（能恢复设备身份/权限的设备事实，第七批新增三张）：
+ *     devices                  Registry 行 = authorizeDevice 的组织来源，也是下面两条的落点。
+ *     device_credentials       取数 credentialByFingerprint(fingerprint)（device-store.cjs:51）——
+ *                             不比对组织；命中后 authenticateConnection 放行，heartbeat 再走
+ *                             合成 ADMIN actor 的 Device Gate，于是旧凭据在重置后仍能拿到连接。
+ *     device_pairing_credentials  取数 pairingBySecretHash(sha256(secret))（device-store.cjs:39/:43）——
+ *                             同样不比对组织；未消费的密钥 = 一张"再登记一台设备"的门票（第五批 T7 实测）。
+ *
  *   不清（用户内容 / 配置 / 审计）：
  *     departments / department_memberships —— 组织架构，不是 grant 事实（无 actions/权限列）。
  *        DEPARTMENT 授权生效必须同时命中 membershipsOfUser(活用户 id)，而用户 id 是
  *        24 字节随机（authorization-domain.newId）；重置后没有任何活用户，判定不可达。
- *        （它们若被清，collections / resource_registry / devices 的 department_id 会变成
- *         悬空引用 —— 那才是新造的不一致，故不在本批范围。）
+ *        （它们若被清，collections / resource_registry 的 department_id 会变成悬空引用 ——
+ *         那才是新造的不一致，故不在本批范围。第七批起 devices 本身随重置清空，不再是举例对象。）
  *     collections / resource_registry / content_objects / library_resources / resource_* /
  *       tags / projects / canvas_boards —— 用户内容，用户明令禁止整库扫删。
- *     devices / device_credentials / device_pairing_credentials —— 设备与凭据登记（配置类），
- *       设备访问权威是 device_access（已清），凭据本身不构成资源/应用授权。
  *     mcp_connections / mcp_credentials —— 连接配置与凭据引用；mcp 授权权威是
  *       app_resource_grants(resource_type='mcp')（已清），连接自身按 organization_id 取。
  *     model_providers / model_configs / model_defaults / model_credentials —— 模型配置与凭据。
  *     resource_favorites / resource_recent / resource_relations / resource_tags /
- *       resource_import_jobs / devices 等 —— 用户态数据。
+ *       resource_import_jobs 等 —— 用户态数据。
  *     device_audit —— 审计，一行不删。
  *
  * 临时目录前缀 oa-d503e-reset-，与 d503d-retention- / d503b- 命名空间分开。
@@ -72,8 +91,19 @@ const PW = "reset-password-1";
 const SERVICE_IDENTITY = "svc_d503e_reset";
 const GHOST_ORG = "team_ghost00000000000000000000";
 
-/** 授权事实表：重置必须清空。与源码登记的删除语句一一对应（T6 核对）。 */
-const AUTHORIZATION_TABLES = Object.freeze(["app_policy_provisions", "app_resource_grants", "resource_grants", "device_access"]);
+/**
+ * 重置必须清空的表：授权事实四张 + 能恢复设备身份/权限的设备事实三张。
+ * 与源码登记的删除语句一一对应（T6 核对）；唯一权威仍是 RESET_AUTHORIZATION_DELETE_SQL。
+ */
+const RESET_DELETED_TABLES = Object.freeze([
+  "app_policy_provisions",
+  "app_resource_grants",
+  "resource_grants",
+  "device_access",
+  "device_credentials",
+  "device_pairing_credentials",
+  "devices",
+]);
 /** 审计表：一行都不许删。 */
 const AUDIT_TABLES = Object.freeze(["audit_log", "authorization_audit", "device_audit"]);
 /** 当前真实 schema 里带 organization_id 的表数量（逐表结论见文件头）。 */
@@ -214,7 +244,7 @@ test("T1a · 授权清理语句失败 → 整个重置回滚：逐表逐行与�
     const snap = await initAndLogin(f);
     await seedFirstUse(f, snap);
     enrichAuthorizationState(f, snap);
-    for (const table of AUTHORIZATION_TABLES) assert.equal(tableCount(f.store, table) > 0, true, "重置前 " + table + " 必须有行可回滚");
+    for (const table of RESET_DELETED_TABLES) assert.equal(tableCount(f.store, table) > 0, true, "重置前 " + table + " 必须有行可回滚");
 
     const before = dumpTables(f.store);
     const injected = injectExecFailure(f.store, "DELETE FROM resource_grants");
@@ -253,7 +283,7 @@ test("T1b · 身份最后一条语句失败 → 授权清理同样回滚（同�
     const snap = await initAndLogin(f);
     await seedFirstUse(f, snap);
     enrichAuthorizationState(f, snap);
-    const beforeCounts = Object.fromEntries(AUTHORIZATION_TABLES.map((t) => [t, tableCount(f.store, t)]));
+    const beforeCounts = Object.fromEntries(RESET_DELETED_TABLES.map((t) => [t, tableCount(f.store, t)]));
     assert.equal(beforeCounts.app_policy_provisions > 0, true);
 
     // T1a + T1b 合起来才排除"两个独立事务"：若清理在身份删除**之前**的独立事务里提交，
@@ -264,7 +294,7 @@ test("T1b · 身份最后一条语句失败 → 授权清理同样回滚（同�
     } finally {
       injected.restore();
     }
-    for (const table of AUTHORIZATION_TABLES) {
+    for (const table of RESET_DELETED_TABLES) {
       assert.equal(tableCount(f.store, table), beforeCounts[table], "身份语句失败时 " + table + " 必须原样保留");
     }
     assert.equal(count(f.store, "SELECT COUNT(*) c FROM users"), 1, "用户必须原样保留");
@@ -277,7 +307,7 @@ test("T1b · 身份最后一条语句失败 → 授权清理同样回滚（同�
 
 /* ══════════════════════ T2 · 范围与审计保留 ══════════════════════ */
 
-test("T2 · 重置后授权事实四表 0 行；27 张 org 表逐表盘点；审计三表一行不删", async (t) => {
+test("T2 · 重置后授权事实四表 + 设备身份三表 0 行；27 张 org 表逐表盘点；审计三表一行不删", async (t) => {
   const f = openService(tmpDir());
   try {
     const snap = await initAndLogin(f);
@@ -285,8 +315,8 @@ test("T2 · 重置后授权事实四表 0 行；27 张 org 表逐表盘点；审
     await seedFirstUse(f, snap);
     enrichAuthorizationState(f, snap);
 
-    // 判据前提：重置前这四张表里的每一行都指向一个**当时存在**的组织。
-    for (const table of AUTHORIZATION_TABLES) {
+    // 判据前提：重置前这七张表里的每一行都指向一个**当时存在**的组织。
+    for (const table of RESET_DELETED_TABLES) {
       assert.equal(count(f.store, "SELECT COUNT(*) c FROM " + table + " WHERE organization_id NOT IN (SELECT id FROM teams)"), 0, table + " 重置前不得有孤儿行");
     }
     const dumpedBefore = dumpTables(f.store);
@@ -295,8 +325,8 @@ test("T2 · 重置后授权事实四表 0 行；27 张 org 表逐表盘点；审
     const reset = f.store.resetInstallation({ confirm: CONFIRM });
     assert.equal(reset.ok, true, "resetInstallation 必须成功：" + JSON.stringify(reset));
 
-    for (const table of AUTHORIZATION_TABLES) {
-      assert.equal(tableCount(f.store, table), 0, table + " 重置后必须 0 行（旧组织 " + oldOrg + " 的授权状态不得残留）");
+    for (const table of RESET_DELETED_TABLES) {
+      assert.equal(tableCount(f.store, table), 0, table + " 重置后必须 0 行（旧组织 " + oldOrg + " 的授权状态 / 设备身份不得残留）");
     }
     assert.equal(f.authStore.allPolicyProvisions().length, 0);
     assert.equal(f.authStore.allAppGrants().length, 0);
@@ -317,7 +347,7 @@ test("T2 · 重置后授权事实四表 0 行；27 张 org 表逐表盘点；审
     const inventory = orphanInventory(f.store);
     assert.equal(inventory.length, ORG_SCOPED_TABLE_COUNT, "带 organization_id 的表集合变了 → 必须重新逐表判定清理范围：" + JSON.stringify(inventory.map((r) => r.table)));
     const byTable = Object.fromEntries(inventory.map((r) => [r.table, r]));
-    for (const table of AUTHORIZATION_TABLES) {
+    for (const table of RESET_DELETED_TABLES) {
       assert.equal(byTable[table].orphans, 0, table + " 不得留下指向已删组织的孤儿行");
       assert.equal(byTable[table].rows, 0, table + " 不得留下任何行");
     }
@@ -572,60 +602,73 @@ test("T5b · 产品后果：重置后新组织撤销 canvas 必须真 DENY（旧
   }
 });
 
-/* ══════════════════════ T7 · 登记为"不清"的表不会复活权限（判据） ══════════════════════ */
+/* ══════════════════════ T7 · 设备身份事实随重置归零（第七批订正） ══════════════════════ */
 
 /**
- * device_pairing_credentials / device_credentials / devices 登记为**不清**（它们是设备凭据与登记，
- * 不是授权状态）。这条用例把"不清也不会复活权限"变成可复核的判据，而不是一句"应该没事"：
- *   · 重置前签发、未消费的配对凭据在重置后仍然存活（这是**已登记的残留能力**：它能再登记一台设备）；
- *   · 但重置清掉了 device_access，于是设备授权链上没有 ORGANIZATION 授权可命中；
- *   · 新组织的成员在设备闸门第一层就被跨组织拒掉。
- * 结论：残留凭据本身不构成任何授权结论（authorizeDevice 是唯一出授权结论的地方）。
+ * 第五批把 devices / device_credentials / device_pairing_credentials 登记为**不清**，只在 T7 里证明
+ * "残留配对凭据不产生授权结论"。第七批把这条结论订正掉：**不产生授权结论 ≠ 不能恢复设备身份**。
+ *   · 旧期望（逐字）："残留的配对凭据确实还能登记设备（已登记的残留，本批不清）"，且断言
+ *     device_pairing_credentials 在重置后仍有 1 行；
+ *   · 新期望：重置后旧密钥被拒（PAIRING_TOKEN_UNKNOWN），三张设备表 0 行，0 台新设备 / 0 条新凭据。
+ * 理由（可复核的代码路径）：credentialByFingerprint（device-store.cjs:51）与 pairingBySecretHash
+ * （device-store.cjs:39/:43）两条取数路径**都不比对组织**，且 heartbeat 的 Device Gate 用
+ * role:"ADMIN" 的合成 actor（device-service.cjs:601）—— 于是"旧凭据 + 旧 devices 行"在重置后
+ * 仍能拿到连接与心跳放行，这条路径根本不经过 device_access。
+ * 设备侧的完整证据（含旧→新逐条 expected/actual）见 tests/d5-03-reset-device-identity.test.mjs。
  */
-test("T7 · 登记为不清的设备表：残留配对凭据仍可登记设备，但设备授权链上没有可命中的授权", async () => {
+test("T7 · 重置后旧设备事实不再可用：旧配对密钥被拒、三张设备表 0 行、旧设备查不到", async () => {
   const f = openService(tmpDir());
   try {
     const snap = await initAndLogin(f);
     const oldOrg = snap.teamId;
     const pairing = f.deviceService.createPairing({ context: uiCtx(snap), ttlMs: 60000 });
     assert.equal(pairing.ok, true, JSON.stringify(pairing));
+    // 重置前先真的配一台设备：这样 devices / device_credentials 都有行，"清空"才是 1 → 0 的证据。
+    const consumedBefore = f.deviceService.consumePairing({
+      secret: pairing.secret,
+      serviceIdentitySeen: SERVICE_IDENTITY,
+      deviceIdentity: { displayName: "Pre-Reset GPU", platform: "darwin", architecture: "arm64", fingerprint: "fp_d503e_pre_reset" },
+    });
+    assert.equal(consumedBefore.ok, true, "重置前必须能配对成功：" + JSON.stringify(consumedBefore));
+    const survivorFingerprint = "fp_d503e_pre_reset";
+
+    // 重置前再签发一条**未消费**的密钥：这是第五批登记为"残留能力"的那条路径。
+    const pending = f.deviceService.createPairing({ context: uiCtx(snap), ttlMs: 60000 });
+    assert.equal(pending.ok, true, JSON.stringify(pending));
+    assert.equal(tableCount(f.store, "devices"), 1, "重置前恰好 1 台设备");
+    assert.equal(tableCount(f.store, "device_credentials"), 1, "重置前恰好 1 条凭据");
+    assert.equal(tableCount(f.store, "device_pairing_credentials"), 2, "重置前 1 条已消费 + 1 条未消费");
 
     assert.equal(f.store.resetInstallation({ confirm: CONFIRM }).ok, true);
-    assert.equal(count(f.store, "SELECT COUNT(*) c FROM device_pairing_credentials WHERE organization_id = ?", oldOrg), 1, "设备配对凭据按设计不清（登记为残留能力）");
-    assert.equal(tableCount(f.store, "device_access"), 0, "但设备访问授权必须被重置清空");
+    for (const table of ["devices", "device_credentials", "device_pairing_credentials"]) {
+      assert.equal(tableCount(f.store, table), 0, table + " 重置后必须 0 行（旧设备身份不得残留）");
+    }
+    assert.equal(tableCount(f.store, "device_access"), 0, "设备访问授权同样被清空");
 
-    const consumed = f.deviceService.consumePairing({
-      secret: pairing.secret,
+    // ① 旧凭据不能再认证：指纹反查不到任何凭据行。
+    const auth = f.deviceService.authenticateConnection({ fingerprint: survivorFingerprint });
+    assert.equal(auth.ok, false, "旧设备凭据不得再解析出设备：" + JSON.stringify(auth));
+    assert.equal(auth.error, "DEVICE_CREDENTIAL_UNKNOWN", JSON.stringify(auth));
+
+    // ② 未消费的旧密钥不能再登记设备（第五批的行为在这里被堵死）。
+    const reused = f.deviceService.consumePairing({
+      secret: pending.secret,
       serviceIdentitySeen: SERVICE_IDENTITY,
       deviceIdentity: { displayName: "Survivor", platform: "darwin", architecture: "arm64", fingerprint: "fp_d503e_survivor" },
     });
-    assert.equal(consumed.ok, true, "残留的配对凭据确实还能登记设备（已登记的残留，本批不清）：" + JSON.stringify(consumed));
-    assert.equal(consumed.device.organizationId, oldOrg, "它登记到的仍是那个已删组织");
+    assert.equal(reused.ok, false, "重置后旧配对密钥必须被拒：" + JSON.stringify(reused));
+    assert.equal(reused.error, "PAIRING_TOKEN_UNKNOWN", JSON.stringify(reused));
 
+    // ③ 重新初始化后，旧设备对新组织来说根本不存在（不是"存在但被拒"）。
     const snapNew = await initAndLogin(f);
     assert.notEqual(snapNew.teamId, oldOrg);
-    const byId = f.deviceService.authorizeDeviceById({ context: uiCtx(snapNew), deviceId: consumed.device.deviceId, action: "device.use" });
+    const byId = f.deviceService.authorizeDeviceById({ context: uiCtx(snapNew), deviceId: consumedBefore.device.deviceId, action: "device.use" });
     assert.equal(byId.ok, false, "新组织成员不得因残留设备/凭据拿到授权");
-    assert.equal(byId.error, "CROSS_ORGANIZATION_DEVICE", JSON.stringify(byId));
-
-    // 受控构造：把 actor 的组织换成旧组织（模拟"组织 id 复用 + 伪造组织"的最坏情况）。
-    // 结论仍然是 DENY —— 因为唯一能放行非管理员的 ORGANIZATION 授权行已经被重置清掉。
-    const spoofed = f.deviceService.authorizeDevice({
-      device: f.deviceStore.deviceById(consumed.device.deviceId),
-      actor: { userId: snapNew.userId, role: "MEMBER", organizationId: oldOrg, departmentIds: [] },
-      action: "device.use",
-    });
-    assert.equal(spoofed.ok, false, "即使组织对得上，没有 device_access 行就必须 DENY");
-    assert.equal(spoofed.error, "DEVICE_ACTION_NOT_GRANTED", JSON.stringify(spoofed));
-    // 反向对照：有授权行时才放行（证明上面那条 DENY 真的来自"授权被清"，而不是别的闸门）。
-    assert.equal(f.deviceService.grantDeviceAccess({ context: uiCtx(snapNew), deviceId: consumed.device.deviceId, principalType: "ORGANIZATION", principalId: "", actions: ["device.use"] }).ok, true);
-    const allowed = f.deviceService.authorizeDevice({
-      device: f.deviceStore.deviceById(consumed.device.deviceId),
-      actor: { userId: snapNew.userId, role: "MEMBER", organizationId: oldOrg, departmentIds: [] },
-      action: "device.use",
-    });
-    assert.equal(allowed.ok, true, "补上授权行后同一判定必须放行：" + JSON.stringify(allowed));
-    assert.equal(allowed.source === "ORGANIZATION_GRANT" || allowed.source === "SUPER_ADMIN", true, String(allowed.source));
+    assert.equal(byId.error, "DEVICE_NOT_FOUND", JSON.stringify(byId));
+    assert.equal(byId.reason, "NOT_FOUND_OR_FORBIDDEN", "对外理由必须仍然不泄漏设备是否存在：" + JSON.stringify(byId));
+    assert.equal(f.deviceService.listDevices({ context: uiCtx(snapNew) }).items.length, 0, "新组织的设备列表必须为空");
+    assert.equal(tableCount(f.store, "devices"), 0, "失败的重放不得留下新设备");
+    assert.equal(tableCount(f.store, "device_credentials"), 0, "失败的重放不得留下新凭据");
   } finally {
     f.store.close();
   }
@@ -633,14 +676,26 @@ test("T7 · 登记为不清的设备表：残留配对凭据仍可登记设备�
 
 /* ══════════════════════ T6 · 范围守卫 ══════════════════════ */
 
-test("T6 · 范围守卫：重置删除集合恰好是登记的四张授权表，无 WHERE、不含审计/内容表", () => {
+test("T6 · 范围守卫：重置删除集合恰好是登记的七张表（授权事实 + 设备身份），无 WHERE、不含审计/内容表", () => {
   const tables = RESET_AUTHORIZATION_DELETE_SQL.map((sql) => {
     const m = /^DELETE FROM ([a-z_]+)$/.exec(String(sql).trim());
     assert.ok(m, "每条重置删除语句都必须是纯 DELETE FROM <table>（不得带 WHERE / 子查询 / 拼接）：" + sql);
     return m[1];
   });
-  assert.deepEqual(tables.slice().sort(), AUTHORIZATION_TABLES.slice().sort(), "重置要删的表集合必须恰好是登记的四张授权事实表");
+  assert.deepEqual(tables.slice().sort(), RESET_DELETED_TABLES.slice().sort(), "重置要删的表集合必须恰好是登记的七张表（四张授权事实 + 三张设备身份）");
   for (const table of AUDIT_TABLES) assert.equal(tables.includes(table), false, "审计表不得进入重置删除集合：" + table);
+  // 顺序约束：device_credentials.device_id REFERENCES devices(id) 且 PRAGMA foreign_keys = ON，
+  // 先删父表会直接抛外键错误 —— 顺序是"能不能重置成功"的一部分，不是风格问题。
+  assert.equal(
+    tables.indexOf("device_credentials") < tables.indexOf("devices"),
+    true,
+    "device_credentials 必须在 devices 之前删（否则外键违约，重置整体回滚）：" + JSON.stringify(tables),
+  );
+  assert.equal(
+    tables.indexOf("device_access") < tables.indexOf("devices"),
+    true,
+    "device_access 也引用 devices(id)，同样必须先删：" + JSON.stringify(tables),
+  );
 
   const f = openService(tmpDir());
   try {
@@ -648,7 +703,7 @@ test("T6 · 范围守卫：重置删除集合恰好是登记的四张授权表�
       const cols = columnsOf(f.store, table);
       assert.equal(cols.length > 0, true, table + " 必须在真实 schema 里存在");
       const org = cols.find((c) => c.name === "organization_id");
-      assert.ok(org, table + " 必须组织作用域（整表删 = 删指向已删组织的授权状态）");
+      assert.ok(org, table + " 必须组织作用域（整表删 = 删指向已删组织的授权状态 / 设备身份）");
       assert.equal(org.notnull, 1, table + ".organization_id 必须是 NOT NULL：整表删的语义依赖它");
     }
     const inventory = orphanInventory(f.store).map((r) => r.table);

@@ -13,6 +13,11 @@
  *   ② §17/§18 单次消费：`consumePairing` 全程在一个事务里，token 的消费用
  *      `WHERE status='ISSUED'` 的 changes 判定 —— 并发两个请求只有一个拿到 1。
  *   ③ §26 撤销立即生效：Revoke/Disable 既**关闭**已建立连接，又让**下一条受保护消息**失败。
+ *
+ * 组织归属（第七批收口）：**唯一来源是 sessionRef 反查出来的 users.team_id**。
+ * 签发配对、列出配对/设备、单设备取数、设备授权判定一律用它；调用方自报的
+ * context.organizationId 不一致时明确拒绝（SESSION_ORGANIZATION_MISMATCH），
+ * 既不能覆盖它，也不能被静默忽略成"看起来成功了"。
  */
 
 const domain = require("./device-domain.cjs");
@@ -50,7 +55,7 @@ class DeviceService {
    * @param opts.clock        注入时钟（§37：可测试时钟，不靠 wall clock）
    * @param opts.serviceIdentity 本轮 Control Service 的身份指纹（§60）；未配置则拒绝配对
    */
-  constructor({ identity, deviceStore, authService = null, logger = null, clock = null, serviceIdentity = null, organizationId = null } = {}) {
+  constructor({ identity, deviceStore, authService = null, logger = null, clock = null, serviceIdentity = null } = {}) {
     if (!identity) throw new Error("DeviceService 需要 IdentityStore");
     if (!deviceStore) throw new Error("DeviceService 需要 DeviceStore");
     this.identity = identity;
@@ -59,7 +64,6 @@ class DeviceService {
     this.logger = logger;
     this.clock = typeof clock === "function" ? clock : () => Date.now();
     this.serviceIdentity = serviceIdentity;
-    this.organizationId = organizationId;
     /** deviceId → Set<connection>，用于 §26 "撤销后关闭长连接"。 */
     this.connections = new Map();
   }
@@ -82,7 +86,8 @@ class DeviceService {
 
   /**
    * 复用 D3-01 的会话真值，**不**在设备层另造一套身份来源（§30/§35）。
-   * userId / organizationId / role 一律由 sessionRef 反查，渲染进程说了不算。
+   * userId / organizationId / role 一律由 sessionRef 反查，渲染进程说了不算 ——
+   * 调用方自报的 userId / organizationId 只在与会话一致时被忽略，不一致直接拒绝。
    * 部门归属从 D3-02 的 membership 读，同样不接受调用方自报。
    */
   #sessionGate(context = {}) {
@@ -93,6 +98,14 @@ class DeviceService {
     const user = res.user;
     const claimed = context?.userId ? String(context.userId) : null;
     if (claimed && claimed !== user.id) return { ok: false, error: "SESSION_USER_MISMATCH" };
+    /**
+     * 组织归属同样只认会话反查出来的 team_id（users.team_id NOT NULL，见 identity-store.cjs:101）。
+     * 调用方自报的 context.organizationId 一律**不得覆盖**它：放行等于让"配对签发给哪个组织"
+     * 与"设备列表读哪个组织"变成调用方说了算。与上面 userId 的处理保持同一形态 —— 不一致就明确
+     * 拒绝（稳定错误码），不静默忽略，否则越权调用会以为自己成功了。
+     */
+    const claimedOrg = context?.organizationId ? String(context.organizationId) : null;
+    if (claimedOrg && claimedOrg !== user.team_id) return { ok: false, error: "SESSION_ORGANIZATION_MISMATCH" };
     let departmentIds = [];
     try {
       const memberships = this.authService?.store?.membershipsOfUser?.(user.id) || [];
@@ -131,7 +144,8 @@ class DeviceService {
     const ttl = Math.max(1000, Math.min(Number(ttlMs) || DEFAULT_PAIRING_TTL_MS, MAX_PAIRING_TTL_MS));
     const now = this.#now();
     const secret = domain.newPairingSecret();
-    const organizationId = context.organizationId || this.organizationId || gate.actor.organizationId || "org_default000000000000";
+    /** 签发组织 = 会话反查出来的组织。没有第二个来源，也没有"默认组织"兜底。 */
+    const organizationId = gate.actor.organizationId;
     const pairing = this.store.transactSync(() => {
       const row = this.store.insertPairing({
         organizationId,
@@ -301,7 +315,7 @@ class DeviceService {
   listPairings({ context } = {}) {
     const gate = this.#sessionGate(context);
     if (!gate.ok) return gate;
-    const organizationId = context.organizationId || this.organizationId || gate.actor.organizationId;
+    const organizationId = gate.actor.organizationId;
     const items = this.store.pairingsOfOrg(organizationId).map((p) => ({
       id: p.id,
       status: p.status,
@@ -340,7 +354,7 @@ class DeviceService {
   listDevices({ context } = {}) {
     const gate = this.#sessionGate(context);
     if (!gate.ok) return gate;
-    const organizationId = context.organizationId || this.organizationId || gate.actor.organizationId;
+    const organizationId = gate.actor.organizationId;
     const items = this.store.devicesOfOrg(organizationId).map((d) => this.#publicDevice(d));
     return { ok: true, items };
   }
@@ -349,7 +363,7 @@ class DeviceService {
     const gate = this.#sessionGate(context);
     if (!gate.ok) return gate;
     const device = this.store.deviceById(deviceId);
-    const organizationId = context.organizationId || this.organizationId || gate.actor.organizationId;
+    const organizationId = gate.actor.organizationId;
     if (!device || device.organization_id !== organizationId) return this.#deny(REASON.DEVICE_NOT_FOUND);
     return { ok: true, device: this.#publicDevice(device) };
   }
@@ -655,7 +669,7 @@ class DeviceService {
     if (!gate.ok) return gate;
     const device = this.store.deviceById(deviceId);
     if (!device) return this.#deny(REASON.DEVICE_NOT_FOUND);
-    const actor = { userId: gate.actor.userId, role: gate.actor.role, organizationId: context.organizationId || this.organizationId || gate.actor.organizationId, departmentIds: gate.actor.departmentIds };
+    const actor = { userId: gate.actor.userId, role: gate.actor.role, organizationId: gate.actor.organizationId, departmentIds: gate.actor.departmentIds };
     const verdict = this.authorizeDevice({ device, action, actor, credential });
     if (!verdict.ok) {
       this.#audit({ actorUserId: actor.userId, deviceId, organizationId: device.organization_id, event: AUDIT_EVENT.DEVICE_AUTH_DENIED, reasonCode: verdict.error, detail: { action } });
@@ -685,7 +699,7 @@ class DeviceService {
     const actor = {
       userId: gate.actor.userId,
       role: gate.actor.role,
-      organizationId: context.organizationId || this.organizationId || gate.actor.organizationId,
+      organizationId: gate.actor.organizationId,
       departmentIds: gate.actor.departmentIds,
     };
     const device = this.store.deviceById(deviceId);

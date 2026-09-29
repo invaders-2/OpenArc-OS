@@ -368,11 +368,16 @@ const ANCHOR_FILES = Object.freeze(["identity-store.cjs", "authorization-store.c
 const ELECTRON_DIR = process.env.OA_RETENTION_ELECTRON_DIR ? path.resolve(process.env.OA_RETENTION_ELECTRON_DIR) : path.join(ROOT, "electron");
 
 /**
- * 组织正式删除路径的白名单：**恰好一条** —— 安装重置（identity/reset-installation）。
+ * 组织正式删除路径的白名单：**恰好四条** —— 安装重置（identity/reset-installation）。
  *
  * 放行判据是"文件 + 命中形态 + 去空白后逐字相等的完整语句"三者同时命中：
  *   · 白名单外的文件、白名单外的语句文本（哪怕只多一个 WHERE）、拼接式、cleanup 式，一律 FAIL；
- *   · 唯一登记的语句是**整表删除**，所以不存在"在它后面拼点东西让范围更宽"的空间。
+ *   · 四条都是**整表删除**，所以不存在"在它后面拼点东西让范围更宽"的空间。
+ *
+ * 第七批新增三条设备表登记项（devices / device_credentials / device_pairing_credentials）：
+ * 重置后它们能**恢复设备身份**（未消费的密钥再登记设备；旧凭据 + 旧 devices 行凭旧组织身份
+ * 拿到连接与心跳放行），因此并入同一个 transactSync；登记形态与 app_policy_provisions 完全一致，
+ * 匹配强度一处未放宽（见 R6 的 fail-closed 与 R6b 的负向自证）。
  */
 const ALLOWED_ORG_DELETION_PATHS = Object.freeze([
   Object.freeze({
@@ -382,8 +387,48 @@ const ALLOWED_ORG_DELETION_PATHS = Object.freeze([
     entry: "resetInstallation → RESET_AUTHORIZATION_DELETE_SQL",
     reason: "安装重置是唯一「组织整体消失」路径：重置后 teams 为空，该行必然指向已删组织；与身份删除在同一个 transactSync 内（回滚证明见 tests/d5-03-reset-authorization-consistency.test.mjs T1a/T1b）。",
   }),
+  Object.freeze({
+    file: "identity-store.cjs",
+    pattern: "DELETE FROM",
+    statement: "DELETE FROM device_credentials",
+    entry: "resetInstallation → RESET_AUTHORIZATION_DELETE_SQL",
+    reason: "凭据指纹是 TLS 握手后「这个连接是谁」的唯一查找键（device-store.cjs:51 credentialByFingerprint → device-service.cjs:520），而心跳的 Device Gate 用的是 role:ADMIN 的合成 actor（device-service.cjs:601）—— 旧凭据 + 旧 devices 行在重置后仍能拿到连接与心跳放行，不需要任何 device_access 行。同一 transactSync；回滚证明见 tests/d5-03-reset-device-identity.test.mjs T4/T5。",
+  }),
+  Object.freeze({
+    file: "identity-store.cjs",
+    pattern: "DELETE FROM",
+    statement: "DELETE FROM device_pairing_credentials",
+    entry: "resetInstallation → RESET_AUTHORIZATION_DELETE_SQL",
+    reason: "未消费的配对密钥就是一张「再登记一台设备」的门票：consumePairing 只按 secret_hash 反查、判定里不看组织是否仍存在（device-store.cjs:39/:43），重置后仍能把设备登记进那个已删组织（第五批 T7 实测）。同一 transactSync；回滚证明见 tests/d5-03-reset-device-identity.test.mjs T4/T5。",
+  }),
+  Object.freeze({
+    file: "identity-store.cjs",
+    pattern: "DELETE FROM",
+    statement: "DELETE FROM devices",
+    entry: "resetInstallation → RESET_AUTHORIZATION_DELETE_SQL",
+    reason: "Registry 行是上面两条的落点，也是 authorizeDevice 的组织来源；与 device_credentials 互为父子（device_credentials.device_id REFERENCES devices(id)），故必须先删凭据再删它。同一 transactSync；回滚证明见 tests/d5-03-reset-device-identity.test.mjs T4/T5。",
+  }),
 ]);
 const normSql = (s) => String(s).replace(/\s+/g, " ").trim();
+
+const tableOfStatement = (sql) => {
+  const m = /^DELETE\s+FROM\s+([a-z_]+)$/i.exec(normSql(sql));
+  return m ? m[1] : null;
+};
+
+/**
+ * 受守卫 watch 的表：出现这些表的 DELETE / DROP / TRUNCATE / cleanup 式字面量都必须登记。
+ * 这是**独立于白名单的清单** —— 白名单里删掉一条登记项，这里仍然会要求它存在（fail-closed）。
+ * 有意不含 app_resource_grants / resource_grants / device_access：它们在正常业务路径上本来就有
+ * 带 WHERE 的单行删除（authorization-store.cjs:63/:66/:82/:83、device-store.cjs:64），
+ * 把它们塞进"整表删除"白名单会逼着白名单接受带 WHERE 的条目 —— 那是放宽，不是收紧。
+ */
+const WATCHED_TABLES = Object.freeze([
+  "app_policy_provisions",
+  "device_credentials",
+  "device_pairing_credentials",
+  "devices",
+]);
 
 /** 白名单判定：所有条件都必须同时成立（不做 includes 模糊匹配）。 */
 function isAllowedOffence(offence) {
@@ -391,11 +436,13 @@ function isAllowedOffence(offence) {
     (p) => p.file === offence.rel && p.pattern === offence.kind && normSql(offence.text) === normSql(p.statement),
   );
 }
-const ROW_DELETION = [
-  { name: "DELETE FROM", re: /\bDELETE\s+FROM\s+app_policy_provisions\b/i },
-  { name: "DROP TABLE", re: /\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?app_policy_provisions\b/i },
-  { name: "TRUNCATE", re: /\bTRUNCATE\s+(?:TABLE\s+)?app_policy_provisions\b/i },
+/** 每条命中形态按**表**生成：换一张表就是另一组正则，不存在"用 A 表的白名单放行 B 表删除"。 */
+const rowDeletionPatterns = (table) => [
+  { name: "DELETE FROM", re: new RegExp("\\bDELETE\\s+FROM\\s+" + table + "\\b", "i") },
+  { name: "DROP TABLE", re: new RegExp("\\bDROP\\s+TABLE\\s+(?:IF\\s+EXISTS\\s+)?" + table + "\\b", "i") },
+  { name: "TRUNCATE", re: new RegExp("\\bTRUNCATE\\s+(?:TABLE\\s+)?" + table + "\\b", "i") },
 ];
+const mentionsTable = (table, s) => new RegExp("\\b" + table + "\\b", "i").test(s);
 const CLEANUP_STYLE = /\b(VACUUM|prune|purge|cleanup|wipe|drop)\b/i;
 
 function listElectronSources(dir = ELECTRON_DIR) {
@@ -446,48 +493,80 @@ function spansBoundary(pattern, first, joined) {
 function findRowDeletions(rel, src) {
   const literals = sqlLiterals(src);
   const offences = [];
-  const hasTable = (s) => new RegExp("app_policy_provisions", "i").test(s);
   for (let i = 0; i < literals.length; i++) {
     const single = literals[i];
     const joined = i + 1 < literals.length ? single + literals[i + 1] : null;
-    for (const pattern of ROW_DELETION) {
-      if (pattern.re.test(single)) offences.push({ rel, literal: i, kind: pattern.name, text: single });
-      else if (joined && spansBoundary(pattern, single, joined)) offences.push({ rel, literal: i, kind: pattern.name + "（相邻拼接）", text: joined });
+    for (const table of WATCHED_TABLES) {
+      for (const pattern of rowDeletionPatterns(table)) {
+        if (pattern.re.test(single)) offences.push({ rel, table, literal: i, kind: pattern.name, text: single });
+        else if (joined && spansBoundary(pattern, single, joined)) offences.push({ rel, table, literal: i, kind: pattern.name + "（相邻拼接）", text: joined });
+      }
     }
-    // cleanup 式只在**单个字面量**里判：一条字面量同时提到表名与清理词才可疑。
-    if (hasTable(single) && CLEANUP_STYLE.test(single)) offences.push({ rel, literal: i, kind: "cleanup-style", text: single });
+    // cleanup 式只在**单个字面量**里判：一条字面量同时提到受 watch 的表名与清理词才可疑。
+    const mentioned = WATCHED_TABLES.find((table) => mentionsTable(table, single));
+    if (mentioned && CLEANUP_STYLE.test(single)) offences.push({ rel, table: mentioned, literal: i, kind: "cleanup-style", text: single });
   }
   return { offences, unallowed: offences.filter((o) => !isAllowedOffence(o)) };
 }
 
-test("R6 · 源码级：electron/** 只有安装重置这一条登记的 app_policy_provisions 行删除；正式重授只清撤销标记", () => {
-  const sources = listElectronSources();
-  let mentions = 0;
-  for (const [rel, src] of sources) {
-    if (sqlLiterals(src).some((lit) => new RegExp("app_policy_provisions", "i").test(lit))) mentions++;
-    const { unallowed } = findRowDeletions(rel, src);
-    assert.deepEqual(unallowed, [], "发现未登记的政策提供记录行删除（组织删除路径必须登记到 ALLOWED_ORG_DELETION_PATHS）：" + JSON.stringify(unallowed.map((o) => ({ rel: o.rel, kind: o.kind, text: o.text.slice(0, 120) }))));
-  }
-  assert.equal(mentions >= 2, true, "表名必须至少出现在 identity-store.cjs / authorization-store.cjs 的 SQL 字面量里（守卫 fail-closed，实际 " + mentions + " 个文件）");
-
-  // 白名单**恰好一条**，且指向安装重置路径。
-  assert.equal(ALLOWED_ORG_DELETION_PATHS.length, 1, "只允许登记恰好一条组织删除路径（安装重置）；新增必须给出理由与测试");
-  const [entry] = ALLOWED_ORG_DELETION_PATHS;
-  assert.equal(entry.file, "identity-store.cjs", "登记项必须指向安装重置所在的文件");
-  assert.equal(normSql(entry.statement), "DELETE FROM app_policy_provisions", "登记项必须是删除 app_policy_provisions 的整表语句");
-  assert.match(String(entry.entry), /resetInstallation/, "登记项必须写明它是安装重置路径");
-  assert.equal(typeof entry.reason, "string");
-  assert.equal(entry.reason.length > 0, true, "登记项必须带理由");
-
-  // fail-closed：登记项必须真实存在于源码文本里，位于 resetInstallation 迭代的那个常量里，否则守卫形同虚设。
-  const identitySrc = sources.get(entry.file);
-  assert.ok(identitySrc, "白名单指向的源码文件必须存在：" + entry.file);
-  assert.notEqual(sqlLiterals(identitySrc).findIndex((lit) => normSql(lit) === normSql(entry.statement)), -1, "登记的语句必须在源码里有对应的字符串字面量");
+/**
+ * R6 的 fail-closed 复查（**独立成函数**，好让 R6b 能用同一份判据对"改表名"的副本断言它会 FAIL）：
+ *   ① 每条登记项必须在源码里有对应字面量，且位于 resetInstallation 迭代的 RESET_AUTHORIZATION_DELETE_SQL 里；
+ *   ② 每张受 watch 表必须**仍然**被那个删除集合整表删掉 —— 改表名 / 删条目 / 改成带 WHERE 的语句都会在这里 FAIL。
+ * 返回删除集合里"整表删除"覆盖的表清单，供调用方记账。
+ */
+function resetDeletionSetFailClosed(sources) {
+  const identitySrc = sources.get("identity-store.cjs");
+  assert.ok(identitySrc, "白名单指向的源码文件必须存在：identity-store.cjs");
+  const literals = sqlLiterals(identitySrc).map(normSql);
   const arrayStart = identitySrc.indexOf("RESET_AUTHORIZATION_DELETE_SQL = Object.freeze([");
   assert.notEqual(arrayStart, -1, "必须能定位重置删除集合常量（守卫 fail-closed）");
   const arrayEnd = identitySrc.indexOf("]);", arrayStart);
   assert.equal(arrayEnd > arrayStart, true, "必须能定位重置删除集合常量的结尾（守卫 fail-closed）");
-  assert.equal(sqlLiterals(identitySrc.slice(arrayStart, arrayEnd)).some((lit) => normSql(lit) === normSql(entry.statement)), true, "登记的语句必须位于 RESET_AUTHORIZATION_DELETE_SQL 里");
+  const arrayLiterals = sqlLiterals(identitySrc.slice(arrayStart, arrayEnd)).map(normSql);
+  // 先查最强的那条（改表名 / 删条目都会先在这里 FAIL），再查登记项自身的字面量与位置。
+  const deletedTables = arrayLiterals.filter((lit) => /^DELETE FROM [a-z_]+$/.test(lit)).map((lit) => tableOfStatement(lit));
+  for (const table of WATCHED_TABLES) {
+    assert.notEqual(deletedTables.indexOf(table), -1, "受 watch 表 " + table + " 必须仍在重置删除集合里（改表名或删条目都意味着重置不再清它，守卫必须 FAIL）");
+  }
+  for (const entry of ALLOWED_ORG_DELETION_PATHS) {
+    assert.notEqual(literals.indexOf(normSql(entry.statement)), -1, "登记的语句必须在源码里有对应的字符串字面量：" + entry.statement);
+    assert.notEqual(arrayLiterals.indexOf(normSql(entry.statement)), -1, "登记的语句必须位于 RESET_AUTHORIZATION_DELETE_SQL 里：" + entry.statement);
+  }
+  return deletedTables;
+}
+
+test("R6 · 源码级：electron/** 里受 watch 表的行删除只有安装重置登记的这四条；正式重授只清撤销标记", () => {
+  const sources = listElectronSources();
+  let mentions = 0;
+  for (const [rel, src] of sources) {
+    if (sqlLiterals(src).some((lit) => WATCHED_TABLES.some((table) => mentionsTable(table, lit)))) mentions++;
+    const { unallowed } = findRowDeletions(rel, src);
+    assert.deepEqual(unallowed, [], "发现未登记的行删除（组织删除路径必须登记到 ALLOWED_ORG_DELETION_PATHS）：" + JSON.stringify(unallowed.map((o) => ({ rel: o.rel, table: o.table, kind: o.kind, text: o.text.slice(0, 120) }))));
+  }
+  assert.equal(mentions >= 2, true, "表名必须至少出现在 identity-store.cjs / authorization-store.cjs 的 SQL 字面量里（守卫 fail-closed，实际 " + mentions + " 个文件）");
+
+  // 白名单与受 watch 表一一对应：一张表一条登记项，不能多也不能少。
+  assert.equal(
+    ALLOWED_ORG_DELETION_PATHS.length,
+    WATCHED_TABLES.length,
+    "登记项数必须等于受 watch 表数（新增受保护表必须同时给出登记项与理由）：" + ALLOWED_ORG_DELETION_PATHS.map((p) => p.statement).join(" / "),
+  );
+  const registeredTables = ALLOWED_ORG_DELETION_PATHS.map((p) => tableOfStatement(p.statement));
+  assert.deepEqual(registeredTables.slice().sort(), WATCHED_TABLES.slice().sort(), "登记项覆盖的表必须恰好是受 watch 表集合：" + JSON.stringify(registeredTables));
+  for (const entry of ALLOWED_ORG_DELETION_PATHS) {
+    assert.equal(entry.file, "identity-store.cjs", "登记项必须指向安装重置所在的文件：" + entry.statement);
+    assert.equal(entry.pattern, "DELETE FROM", "登记项形态必须是整条 DELETE FROM：" + entry.statement);
+    assert.match(normSql(entry.statement), /^DELETE FROM [a-z_]+$/, "登记项必须是**不带 WHERE** 的整表删除：" + entry.statement);
+    assert.match(String(entry.entry), /resetInstallation/, "登记项必须写明它是安装重置路径：" + entry.statement);
+    assert.equal(typeof entry.reason, "string");
+    assert.equal(entry.reason.length > 0, true, "登记项必须带理由：" + entry.statement);
+  }
+
+  // fail-closed：登记项真实存在 + 位于重置删除集合里 + 每张受 watch 表仍被整表删（见 resetDeletionSetFailClosed）。
+  const identitySrc = sources.get("identity-store.cjs");
+  const deletedTables = resetDeletionSetFailClosed(sources);
+  assert.equal(deletedTables.length >= WATCHED_TABLES.length, true, "删除集合必须至少覆盖受 watch 表：" + JSON.stringify(deletedTables));
   const resetStart = identitySrc.indexOf("resetInstallation({ confirm } = {}) {");
   assert.notEqual(resetStart, -1, "必须能定位 resetInstallation（守卫 fail-closed）");
   const resetEnd = identitySrc.indexOf("\n  }", resetStart);
@@ -497,6 +576,7 @@ test("R6 · 源码级：electron/** 只有安装重置这一条登记的 app_pol
   assert.equal(resetBody.includes("transactSync"), true, "删除集合必须在 transactSync 里执行（同事务）");
 
   // 负向自证（判据级）：白名单不是"有名单就放行一切"。
+  const entry = ALLOWED_ORG_DELETION_PATHS[0];
   const offence = (over) => ({ rel: entry.file, literal: 0, kind: "DELETE FROM", text: entry.statement, ...over });
   assert.equal(isAllowedOffence(offence()), true, "登记项本身必须放行");
   assert.equal(isAllowedOffence(offence({ text: entry.statement + " WHERE revoked_at IS NOT NULL" })), false, "多一个 WHERE 就不放行（不得按 includes 模糊匹配）");
@@ -506,12 +586,30 @@ test("R6 · 源码级：electron/** 只有安装重置这一条登记的 app_pol
   assert.equal(isAllowedOffence(offence({ text: "DELETE FROM app_resource_grants" })), false, "白名单只覆盖登记的那一条语句");
   assert.equal(isAllowedOffence(offence({ text: "DROP TABLE app_policy_provisions" })), false, "DROP 不放行");
 
-  // 判据级负向/正向自证：相邻字面量既不误伤、也不漏判。
+  // 设备表登记项：判据级负向自证（逐字匹配，不因为没有 WHERE 而放宽）。
+  const deviceOffence = (over) => ({ rel: "identity-store.cjs", literal: 0, kind: "DELETE FROM", text: "DELETE FROM devices", ...over });
+  assert.equal(isAllowedOffence(deviceOffence()), true, "登记的 DELETE FROM devices 必须放行");
+  assert.equal(isAllowedOffence(deviceOffence({ text: "DELETE FROM devices WHERE status = 'REVOKED'" })), false, "设备表删除多一个 WHERE 就不放行");
+  assert.equal(isAllowedOffence(deviceOffence({ text: "DELETE FROM device_registry" })), false, "改表名就不放行");
+  assert.equal(isAllowedOffence(deviceOffence({ rel: "device-store.cjs" })), false, "换个文件（device-store.cjs）就不放行");
+  assert.equal(isAllowedOffence(deviceOffence({ kind: "DROP TABLE", text: "DROP TABLE devices" })), false, "设备表 DROP 不放行");
+  assert.equal(isAllowedOffence(deviceOffence({ kind: "TRUNCATE", text: "TRUNCATE devices" })), false, "设备表 TRUNCATE 不放行");
+  assert.equal(isAllowedOffence(deviceOffence({ kind: "cleanup-style", text: "wipe devices" })), false, "设备表 cleanup 式命中不放行");
+  assert.equal(isAllowedOffence(deviceOffence({ kind: "DELETE FROM（相邻拼接）", text: "DELETE FROM devices" })), false, "设备表拼接式命中不放行");
+
+  // 判据级负向/正向自证：相邻字面量既不误伤、也不漏判（设备表同判据）。
   const unrelated = 'const OA_A = "真复活";\nconst OA_B = "DELETE FROM app_policy_provisions";\n';
   assert.deepEqual(findRowDeletions(entry.file, unrelated).unallowed, [], "相邻但无关的字面量不得被误判为拼接式删除");
   const split = 'const OA_C = "DELETE FROM " + "app_policy_provisions";\n';
   assert.equal(findRowDeletions(entry.file, split).unallowed.length > 0, true, "真正跨字面量拼接的删除必须仍然被判为未登记命中");
   assert.equal(findRowDeletions(entry.file, 'const OA_D = "wipe app_policy_provisions";\n').unallowed.length > 0, true, "cleanup 式字面量必须仍然被判为未登记命中");
+  const unrelatedDevice = 'const OA_E = "真复活";\nconst OA_F = "DELETE FROM devices";\n';
+  assert.deepEqual(findRowDeletions(entry.file, unrelatedDevice).unallowed, [], "设备表相邻但无关的字面量不得被误判为拼接式删除");
+  const splitDevice = 'const OA_G = "DELETE FROM " + "devices";\n';
+  assert.equal(findRowDeletions(entry.file, splitDevice).unallowed.length > 0, true, "设备表跨字面量拼接的删除必须仍然被判为未登记命中");
+  assert.equal(findRowDeletions(entry.file, 'const OA_H = "wipe devices";\n').unallowed.length > 0, true, "设备表 cleanup 式字面量必须仍然被判为未登记命中");
+  const stitchedDevice = 'const OA_I = "DELETE FROM device_" + "credentials";\n';
+  assert.equal(findRowDeletions(entry.file, stitchedDevice).unallowed.length > 0, true, "设备凭据表跨字面量拼接的删除必须仍然被判为未登记命中");
 
   const authSrc = sources.get("authorization-store.cjs");
   const clear = /clearPolicyRevoked:\s*"([^"]+)"/.exec(authSrc);
@@ -568,8 +666,56 @@ test("R6b · 负向自证：副本里注入白名单外的删除 → 同一守�
   const split = scanUnallowed(listElectronSources(copy));
   assert.equal(split.some((o) => String(o.kind).includes("相邻拼接")), true, "跨字面量拼接的删除必须 FAIL：" + JSON.stringify(split.map((o) => o.kind)));
 
-  // 反向：真正登记的那一条必须仍然放行（守卫既不是"全放"也不是"全拒"）。
-  assert.deepEqual(sameFile.filter((o) => o.text === ALLOWED_ORG_DELETION_PATHS[0].statement), [], "登记的那一条必须仍然放行");
+  // ── 第七批：设备表登记的负向自证（同一条判据，不是另写一份宽松规则）─────────────
+  fs.copyFileSync(path.join(ROOT, "electron", "identity-store.cjs"), path.join(copy, "identity-store.cjs"));
+
+  // 注入 5：**别的文件**里加一条 DELETE FROM devices → 必须 FAIL。
+  append("device-store.cjs", '\nconst OA_RESET_INJECTED_DEVICES = "DELETE FROM devices";\n');
+  const deviceOtherFile = scanUnallowed(listElectronSources(copy));
+  assert.equal(deviceOtherFile.length > 0, true, "白名单外的文件里出现 DELETE FROM devices 必须 FAIL");
+  assert.deepEqual([...new Set(deviceOtherFile.map((o) => o.rel))], ["device-store.cjs"], "命中的必须正是注入的文件：" + JSON.stringify(deviceOtherFile.map((o) => o.rel)));
+  assert.deepEqual([...new Set(deviceOtherFile.map((o) => o.table))], ["devices"], "命中的必须正是设备表：" + JSON.stringify(deviceOtherFile.map((o) => o.table)));
+  fs.copyFileSync(path.join(ROOT, "electron", "device-store.cjs"), path.join(copy, "device-store.cjs"));
+
+  // 注入 6：登记的那个文件里给设备表删除**加 WHERE** → 必须 FAIL（整句逐字匹配）。
+  append("identity-store.cjs", '\nconst OA_RESET_INJECTED_DEVICES_WHERE = "DELETE FROM devices WHERE status = \'REVOKED\'";\n');
+  const deviceWhere = scanUnallowed(listElectronSources(copy));
+  assert.equal(deviceWhere.some((o) => o.table === "devices" && o.kind === "DELETE FROM"), true, "设备表删除多一个 WHERE 必须 FAIL：" + JSON.stringify(deviceWhere.map((o) => ({ t: o.table, k: o.kind }))));
+  fs.copyFileSync(path.join(ROOT, "electron", "identity-store.cjs"), path.join(copy, "identity-store.cjs"));
+
+  // 注入 7：cleanup 式设备表字面量 → 必须 FAIL。
+  append("identity-store.cjs", '\nconst OA_RESET_INJECTED_DEVICES_WIPE = "wipe devices";\n');
+  const deviceCleanup = scanUnallowed(listElectronSources(copy));
+  assert.equal(deviceCleanup.some((o) => o.table === "devices" && o.kind === "cleanup-style"), true, "设备表 cleanup 式字面量必须 FAIL：" + JSON.stringify(deviceCleanup.map((o) => ({ t: o.table, k: o.kind }))));
+  fs.copyFileSync(path.join(ROOT, "electron", "identity-store.cjs"), path.join(copy, "identity-store.cjs"));
+
+  // 注入 8：跨字面量拼接的设备凭据表删除 → 必须 FAIL。
+  append("identity-store.cjs", '\nconst OA_RESET_INJECTED_DEVCRED_SPLIT = "DELETE FROM device_" + "credentials";\n');
+  const deviceSplit = scanUnallowed(listElectronSources(copy));
+  assert.equal(deviceSplit.some((o) => o.table === "device_credentials" && String(o.kind).includes("相邻拼接")), true, "跨字面量拼接的设备凭据删除必须 FAIL：" + JSON.stringify(deviceSplit.map((o) => ({ t: o.table, k: o.kind }))));
+  fs.copyFileSync(path.join(ROOT, "electron", "identity-store.cjs"), path.join(copy, "identity-store.cjs"));
+
+  // 注入 9：把重置集合里的 DELETE FROM devices **改表名**（模拟"顺手段改名"）→ 必须 FAIL：
+  // 白名单条目不会因此变成死条目 —— 受 watch 表必须在删除集合里被整表删掉。
+  const pristine = fs.readFileSync(path.join(ROOT, "electron", "identity-store.cjs"), "utf8");
+  const mutated = pristine.replace('"DELETE FROM devices",', '"DELETE FROM device_registry",');
+  assert.notEqual(mutated, pristine, "改表名必须真的改到源码（否则下面的判据形同虚设）");
+  fs.writeFileSync(path.join(copy, "identity-store.cjs"), mutated);
+  const mutatedSources = listElectronSources(copy);
+  const mutatedArray = mutatedSources.get("identity-store.cjs").slice(mutatedSources.get("identity-store.cjs").indexOf("RESET_AUTHORIZATION_DELETE_SQL = Object.freeze(["));
+  const mutatedTables = sqlLiterals(mutatedArray.slice(0, mutatedArray.indexOf("]);"))).map((lit) => tableOfStatement(lit));
+  assert.equal(mutatedTables.includes("devices"), false, "改表名后删除集合里不得再有 devices：" + JSON.stringify(mutatedTables));
+  assert.throws(() => resetDeletionSetFailClosed(mutatedSources), /受 watch 表 devices/, "改表名后 R6 的 fail-closed 复查必须真的 FAIL（用同一份判据函数）");
+  fs.copyFileSync(path.join(ROOT, "electron", "identity-store.cjs"), path.join(copy, "identity-store.cjs"));
+
+  // 对照：未改动的副本必须全绿（证明上面每一条失败都来自注入，而不是副本本身）。
+  assert.deepEqual(scanUnallowed(listElectronSources(copy)), [], "对照（未改动副本）必须 PASS");
+
+  // 反向：真正登记的那几条必须仍然放行（守卫既不是"全放"也不是"全拒"）。
+  assert.deepEqual(sameFile.filter((o) => ALLOWED_ORG_DELETION_PATHS.some((p) => p.statement === o.text)), [], "登记的语句必须仍然放行");
+  for (const p of ALLOWED_ORG_DELETION_PATHS) {
+    assert.equal(isAllowedOffence({ rel: p.file, literal: 0, kind: p.pattern, text: p.statement }), true, "登记项必须放行：" + p.statement);
+  }
 
   fs.rmSync(root, { recursive: true, force: true });
 });
