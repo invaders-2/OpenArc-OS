@@ -1,0 +1,1669 @@
+{
+  "phase": "D5-03 第九批 · 独立验收 · 第一段（错误码可控阻塞 + 反向验证 + 竞争）",
+  "testedHead": "f9133f5d5b8cc4af30c3ca96ee66e0f3c8d39422",
+  "branch": "integration/ui-core",
+  "worktreePorcelain": "?? experiments/d5-03/batch9/verify/\n",
+  "script": "experiments/d5-03/batch9/verify/batch9-01-codes-probe.mjs",
+  "scriptSha256": "6395aab9ea6aeabee871cc78b7250a70b2bc42c7ee25216c2e93ae401ad7e38e",
+  "productFingerprints": {
+    "electron/task-domain.cjs": "ec66ed3b46f88e0efea97039cb7acb118fc2958e9ddf1bafe0b416752f03edd4",
+    "electron/task-harness-orchestrator.cjs": "aa6142e15365c170463ab229bae913a4b365fbd098e6ab8622c9da3a9e589e2c",
+    "electron/harness-adapter.cjs": "9667b527daf44c4d98345a4a8a435655121b681142feade04646cd49a22ff870"
+  },
+  "injectedBudgets": {
+    "note": "产品默认 30000/180000 未改；场景均为构造参数注入",
+    "scenarios": {
+      "B": 1200,
+      "C": 1200,
+      "D": 1200,
+      "E": 1200,
+      "R1_start": 4000,
+      "R2_turn": 20000
+    }
+  },
+  "checks": [
+    {
+      "id": "A1",
+      "name": "classifyHarnessError(HARNESS_START_TIMEOUT)",
+      "expected": "\"HARNESS_START_TIMEOUT\"",
+      "actual": "\"HARNESS_START_TIMEOUT\"",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "A2",
+      "name": "classifyHarnessError(HARNESS_TURN_TIMEOUT)",
+      "expected": "\"HARNESS_TURN_TIMEOUT\"",
+      "actual": "\"HARNESS_TURN_TIMEOUT\"",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "A3",
+      "name": "ERROR.HARNESS_START_TIMEOUT 枚举存在",
+      "expected": "\"HARNESS_START_TIMEOUT\"",
+      "actual": "\"HARNESS_START_TIMEOUT\"",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "A4",
+      "name": "两个码互不改写",
+      "expected": "START->START 且 TURN->TURN",
+      "actual": "START->HARNESS_START_TIMEOUT / TURN->HARNESS_TURN_TIMEOUT",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "A5",
+      "name": "产品默认预算未被改动（30000/180000）",
+      "expected": "DEFAULT_TURN_TIMEOUT_MS = 180000; DEFAULT_START_TIMEOUT_MS = 30000;",
+      "actual": "const DEFAULT_TURN_TIMEOUT_MS = 180000; const DEFAULT_START_TIMEOUT_MS = 30000;",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "B1",
+      "name": "错误码 = HARNESS_START_TIMEOUT",
+      "expected": "\"HARNESS_START_TIMEOUT\"",
+      "actual": "\"HARNESS_START_TIMEOUT\"",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "B2",
+      "name": "错误码 != HARNESS_TURN_TIMEOUT（不冒充执行超时）",
+      "expected": "!= HARNESS_TURN_TIMEOUT",
+      "actual": "HARNESS_START_TIMEOUT",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "B3",
+      "name": "step 终态 BLOCKED",
+      "expected": "\"BLOCKED\"",
+      "actual": "\"BLOCKED\"",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "B4",
+      "name": "task 终态 BLOCKED",
+      "expected": "\"BLOCKED\"",
+      "actual": "\"BLOCKED\"",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "B5",
+      "name": "run 终态 BLOCKED",
+      "expected": "\"BLOCKED\"",
+      "actual": "\"BLOCKED\"",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "B6",
+      "name": "run.errorCode = HARNESS_START_TIMEOUT",
+      "expected": "\"HARNESS_START_TIMEOUT\"",
+      "actual": "\"HARNESS_START_TIMEOUT\"",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "B7",
+      "name": "run.stopReason = blocked",
+      "expected": "\"blocked\"",
+      "actual": "\"blocked\"",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "B8",
+      "name": "run 行恰好 1 条（0 respawn）",
+      "expected": "1",
+      "actual": "1",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "B9",
+      "name": "start 调用恰好 1 次",
+      "expected": "1",
+      "actual": "1",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "B10",
+      "name": "prompt 调用 0 次",
+      "expected": "0",
+      "actual": "0",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "B11",
+      "name": "provider 真实 HTTP 请求 0 次",
+      "expected": "0",
+      "actual": "0",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "B12",
+      "name": "TaskService call 记录 0 条",
+      "expected": "0",
+      "actual": "0",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "B13",
+      "name": "artifact 0 条",
+      "expected": "0",
+      "actual": "0",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "B14",
+      "name": "capability >=1 且全部 REVOKED",
+      "expected": "true",
+      "actual": "true",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "B15",
+      "name": "capability 行为验证：旧 token 打 Model Proxy 一律 401",
+      "expected": "true",
+      "actual": "true",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "B16",
+      "name": "事件 step.blocked.reason 携带该码",
+      "expected": "\"HARNESS_START_TIMEOUT\"",
+      "actual": "\"HARNESS_START_TIMEOUT\"",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "B17",
+      "name": "事件 harness.run.blocked.errorCode 携带该码",
+      "expected": "\"HARNESS_START_TIMEOUT\"",
+      "actual": "\"HARNESS_START_TIMEOUT\"",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "B18",
+      "name": "有界停止：总耗时与注入预算同量级（< 5x 预算 = 6000ms）",
+      "expected": "< 6000ms",
+      "actual": "1268ms",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "B19",
+      "name": "无自己的孤儿 harness 进程",
+      "expected": "0",
+      "actual": "0",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "B20",
+      "name": "终态 1.5s 内稳定（不翻转）",
+      "expected": "true",
+      "actual": "true",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "C1",
+      "name": "错误码 = HARNESS_TURN_TIMEOUT",
+      "expected": "\"HARNESS_TURN_TIMEOUT\"",
+      "actual": "\"HARNESS_TURN_TIMEOUT\"",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "C2",
+      "name": "错误码 != HARNESS_START_TIMEOUT",
+      "expected": "!= HARNESS_START_TIMEOUT",
+      "actual": "HARNESS_TURN_TIMEOUT",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "C3",
+      "name": "step/task 终态 BLOCKED",
+      "expected": "\"BLOCKED/BLOCKED\"",
+      "actual": "\"BLOCKED/BLOCKED\"",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "C4",
+      "name": "run 终态 BLOCKED + errorCode/stopReason 正确",
+      "expected": "\"BLOCKED/HARNESS_TURN_TIMEOUT/blocked\"",
+      "actual": "\"BLOCKED/HARNESS_TURN_TIMEOUT/blocked\"",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "C5",
+      "name": "prompts 恰好 1 次（0 重试）",
+      "expected": "1",
+      "actual": "1",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "C6",
+      "name": "start 恰好 1 次",
+      "expected": "1",
+      "actual": "1",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "C7",
+      "name": "TaskService call 恰好 1 条（0 二次 call）",
+      "expected": "1",
+      "actual": "1",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "C8",
+      "name": "call 状态 FAILED + providerErrorCode=HARNESS_TURN_TIMEOUT",
+      "expected": "\"FAILED/HARNESS_TURN_TIMEOUT\"",
+      "actual": "\"FAILED/HARNESS_TURN_TIMEOUT\"",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "C9",
+      "name": "artifact 0 条",
+      "expected": "0",
+      "actual": "0",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "C10",
+      "name": "capability >=1 且全部 REVOKED + 行为 401",
+      "expected": "true",
+      "actual": "true",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "C11",
+      "name": "有界停止：总耗时与注入预算同量级（< 5x 预算 = 6000ms）",
+      "expected": "< 6000ms",
+      "actual": "1254ms",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "C12",
+      "name": "无自己的孤儿 harness 进程",
+      "expected": "0",
+      "actual": "0",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "C13",
+      "name": "终态 1.5s 内稳定",
+      "expected": "true",
+      "actual": "true",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "D0",
+      "name": "副本里旧映射确实生效（classifyHarnessError(START)）",
+      "expected": "\"HARNESS_TURN_TIMEOUT\"",
+      "actual": "\"HARNESS_TURN_TIMEOUT\"",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "D1",
+      "name": "【必须变红·反向验证】启动阻塞用例：错误码 = HARNESS_START_TIMEOUT（旧映射下必须给不出该码）",
+      "expected": "HARNESS_START_TIMEOUT",
+      "actual": "HARNESS_TURN_TIMEOUT",
+      "pass": false,
+      "intentionalRed": true
+    },
+    {
+      "id": "D2",
+      "name": "【对照保持绿】执行阻塞用例在旧映射下仍是 HARNESS_TURN_TIMEOUT",
+      "expected": "HARNESS_TURN_TIMEOUT",
+      "actual": "HARNESS_TURN_TIMEOUT",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "D3",
+      "name": "副本已删除（验完删除）",
+      "expected": "true",
+      "actual": "true",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "D4",
+      "name": "产品 orchestrator 文件未被改动（sha256 与副本制作前一致）",
+      "expected": "\"aa6142e15365c170463ab229bae913a4b365fbd098e6ab8622c9da3a9e589e2c\"",
+      "actual": "\"aa6142e15365c170463ab229bae913a4b365fbd098e6ab8622c9da3a9e589e2c\"",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "R11",
+      "name": "终态唯一且属于 {CANCELLED, BLOCKED}",
+      "expected": "CANCELLED 或 BLOCKED",
+      "actual": "CANCELLED",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "R12",
+      "name": "终态在收敛后 1.5s 内不翻转",
+      "expected": "true",
+      "actual": "true",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "R13",
+      "name": "task 终态与 run 终态一致",
+      "expected": "同一终态",
+      "actual": "task=CANCELLED run=CANCELLED",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "R14",
+      "name": "0 孤儿进程（本次运行自己 spawn 的 harness 子进程全部消失）",
+      "expected": "0",
+      "actual": "0",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "R15",
+      "name": "全局扫描无遗留 hang 探针",
+      "expected": "0",
+      "actual": "0",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "R16",
+      "name": "无能力残留：全部 REVOKED 且旧 token 行为上 401",
+      "expected": "true",
+      "actual": "true",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "R17",
+      "name": "取消确实被接受（cancel ok/cancelled）",
+      "expected": "ok=true",
+      "actual": "{\"ok\":true,\"cancelled\":true,\"error\":null,\"taskStatus\":\"CANCELLED\"}",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "R21",
+      "name": "终态唯一且属于 {CANCELLED, BLOCKED}",
+      "expected": "CANCELLED 或 BLOCKED",
+      "actual": "CANCELLED",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "R22",
+      "name": "终态在收敛后 1.5s 内不翻转",
+      "expected": "true",
+      "actual": "true",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "R23",
+      "name": "task 终态与 run 终态一致",
+      "expected": "同一终态",
+      "actual": "task=CANCELLED run=CANCELLED",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "R24",
+      "name": "0 孤儿进程（本次运行自己 spawn 的 harness 子进程全部消失）",
+      "expected": "0",
+      "actual": "0",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "R25",
+      "name": "全局扫描无遗留 hang 探针",
+      "expected": "0",
+      "actual": "0",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "R26",
+      "name": "无能力残留：全部 REVOKED 且旧 token 行为上 401",
+      "expected": "true",
+      "actual": "true",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "R27",
+      "name": "取消确实被接受（cancel ok/cancelled）",
+      "expected": "ok=true",
+      "actual": "{\"ok\":true,\"cancelled\":true,\"error\":null,\"taskStatus\":\"CANCELLED\"}",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "R3",
+      "name": "R1 取消后 runTask 的最终返回（记录，不判分）",
+      "expected": "竞争结果如实记录",
+      "actual": "{\"ok\":false,\"error\":\"TASK_REVISION_CONFLICT\",\"blocked\":false,\"cancelled\":false,\"stepStatus\":null,\"taskStatus\":null} cancel={\"ok\":true,\"cancelled\":true,\"error\":null,\"taskStatus\":\"CANCELLED\"}",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "R4",
+      "name": "R2 取消后 runTask 的最终返回（记录，不判分）",
+      "expected": "竞争结果如实记录",
+      "actual": "{\"ok\":false,\"error\":\"TASK_REVISION_CONFLICT\",\"blocked\":false,\"cancelled\":false,\"stepStatus\":null,\"taskStatus\":null} cancel={\"ok\":true,\"cancelled\":true,\"error\":null,\"taskStatus\":\"CANCELLED\"}",
+      "pass": true,
+      "intentionalRed": false
+    },
+    {
+      "id": "F1",
+      "name": "对 fake provider 直发 1 次 HTTP 后计数 +1（计数器活着）",
+      "expected": "1",
+      "actual": "1",
+      "pass": true,
+      "intentionalRed": false
+    }
+  ],
+  "counts": {
+    "total": 60,
+    "pass": 59,
+    "fail": 0,
+    "expectedRed": 1,
+    "unexpectedGreen": 0
+  },
+  "failedChecks": [],
+  "expectedRedChecks": [
+    "D1 【必须变红·反向验证】启动阻塞用例：错误码 = HARNESS_START_TIMEOUT（旧映射下必须给不出该码） → actual=HARNESS_TURN_TIMEOUT"
+  ],
+  "unexpectedGreenChecks": [],
+  "raw": {
+    "B-start-block": {
+      "id": "B-start-block",
+      "agentFile": "start-hang-agent.mjs",
+      "startTimeoutMs": 1200,
+      "turnTimeoutMs": 60000,
+      "cancelAtMs": null,
+      "cancelAfterPrompt": false,
+      "orchestrator": "product",
+      "elapsedMs": 1268,
+      "cancelAtMsActual": null,
+      "promptSeenAtMs": null,
+      "timeline": [],
+      "runResult": {
+        "ok": false,
+        "error": "HARNESS_START_TIMEOUT",
+        "blocked": true,
+        "cancelled": false,
+        "stepStatus": "BLOCKED",
+        "taskStatus": "BLOCKED"
+      },
+      "cancelResult": null,
+      "adapterCalls": {
+        "starts": 1,
+        "prompts": 0
+      },
+      "providerRequests": {
+        "before": 0,
+        "after": 0,
+        "delta": 0
+      },
+      "afterRun": {
+        "task": {
+          "status": "BLOCKED",
+          "revision": 7,
+          "cancelRequested": false
+        },
+        "runs": [
+          {
+            "runId": "hrun_olh6OzMP9026WA",
+            "taskId": "task_0_rHp-2CqkH13w",
+            "stepId": "step_bLgtu-AUGbqYxw",
+            "status": "BLOCKED",
+            "harnessVersion": null,
+            "acpVersion": null,
+            "modelConfigId": "mcf_ITSn7WliPzEdsA",
+            "modelConfigVersion": 1,
+            "startedAt": 1700000000000,
+            "completedAt": 1700000000000,
+            "stopReason": "blocked",
+            "errorCode": "HARNESS_START_TIMEOUT"
+          }
+        ],
+        "calls": [],
+        "artifacts": 0,
+        "events": [
+          {
+            "eventType": "harness.run.unknown_effect",
+            "safePayload": {
+              "stepId": "step_bLgtu-AUGbqYxw",
+              "runId": "hrun_olh6OzMP9026WA",
+              "reason": "HARNESS_START_TIMEOUT"
+            }
+          },
+          {
+            "eventType": "step.blocked",
+            "safePayload": {
+              "stepId": "step_bLgtu-AUGbqYxw",
+              "reason": "HARNESS_START_TIMEOUT"
+            }
+          },
+          {
+            "eventType": "task.blocked",
+            "safePayload": {
+              "reason": "HARNESS_START_TIMEOUT",
+              "stepId": "step_bLgtu-AUGbqYxw"
+            }
+          },
+          {
+            "eventType": "harness.run.blocked",
+            "safePayload": {
+              "runId": "hrun_olh6OzMP9026WA",
+              "stepId": "step_bLgtu-AUGbqYxw",
+              "status": "BLOCKED",
+              "stopReason": "blocked",
+              "errorCode": "HARNESS_START_TIMEOUT"
+            }
+          }
+        ]
+      },
+      "afterSettle": {
+        "task": {
+          "status": "BLOCKED",
+          "revision": 7,
+          "cancelRequested": false
+        },
+        "runs": [
+          {
+            "runId": "hrun_olh6OzMP9026WA",
+            "taskId": "task_0_rHp-2CqkH13w",
+            "stepId": "step_bLgtu-AUGbqYxw",
+            "status": "BLOCKED",
+            "harnessVersion": null,
+            "acpVersion": null,
+            "modelConfigId": "mcf_ITSn7WliPzEdsA",
+            "modelConfigVersion": 1,
+            "startedAt": 1700000000000,
+            "completedAt": 1700000000000,
+            "stopReason": "blocked",
+            "errorCode": "HARNESS_START_TIMEOUT"
+          }
+        ],
+        "calls": [],
+        "artifacts": 0,
+        "events": [
+          {
+            "eventType": "harness.run.unknown_effect",
+            "safePayload": {
+              "stepId": "step_bLgtu-AUGbqYxw",
+              "runId": "hrun_olh6OzMP9026WA",
+              "reason": "HARNESS_START_TIMEOUT"
+            }
+          },
+          {
+            "eventType": "step.blocked",
+            "safePayload": {
+              "stepId": "step_bLgtu-AUGbqYxw",
+              "reason": "HARNESS_START_TIMEOUT"
+            }
+          },
+          {
+            "eventType": "task.blocked",
+            "safePayload": {
+              "reason": "HARNESS_START_TIMEOUT",
+              "stepId": "step_bLgtu-AUGbqYxw"
+            }
+          },
+          {
+            "eventType": "harness.run.blocked",
+            "safePayload": {
+              "runId": "hrun_olh6OzMP9026WA",
+              "stepId": "step_bLgtu-AUGbqYxw",
+              "status": "BLOCKED",
+              "stopReason": "blocked",
+              "errorCode": "HARNESS_START_TIMEOUT"
+            }
+          }
+        ]
+      },
+      "statusStableOver1500ms": true,
+      "capabilities": {
+        "issued": 1,
+        "states": [
+          {
+            "capabilityId": "mcap_KYNeZ0p0VZQ",
+            "state": "REVOKED",
+            "remaining": 8,
+            "binding": null,
+            "tokenLen": 36
+          }
+        ],
+        "allRevoked": true,
+        "behavioralProbes": [
+          {
+            "status": 401,
+            "body": "{\"ok\":false,\"error\":\"PROXY_UNAUTHORIZED\",\"detail\":null}"
+          }
+        ],
+        "behavioralAll401": true,
+        "liveChildRefs": null
+      },
+      "orphans": {
+        "mine": [
+          {
+            "pid": 57408,
+            "cmd": null,
+            "processExitedFlag": true,
+            "alive": false,
+            "zombie": false
+          }
+        ],
+        "leftoverAlive": [],
+        "globalScanHits": [],
+        "globalScanCount": 0
+      },
+      "budgetsInjected": {
+        "startTimeoutMs": 1200,
+        "turnTimeoutMs": 60000
+      }
+    },
+    "C-turn-block": {
+      "id": "C-turn-block",
+      "agentFile": "turn-hang-agent.mjs",
+      "startTimeoutMs": 20000,
+      "turnTimeoutMs": 1200,
+      "cancelAtMs": null,
+      "cancelAfterPrompt": false,
+      "orchestrator": "product",
+      "elapsedMs": 1254,
+      "cancelAtMsActual": null,
+      "promptSeenAtMs": null,
+      "timeline": [],
+      "runResult": {
+        "ok": false,
+        "error": "HARNESS_TURN_TIMEOUT",
+        "blocked": true,
+        "cancelled": false,
+        "stepStatus": "BLOCKED",
+        "taskStatus": "BLOCKED"
+      },
+      "cancelResult": null,
+      "adapterCalls": {
+        "starts": 1,
+        "prompts": 1
+      },
+      "providerRequests": {
+        "before": 0,
+        "after": 0,
+        "delta": 0
+      },
+      "afterRun": {
+        "task": {
+          "status": "BLOCKED",
+          "revision": 10,
+          "cancelRequested": false
+        },
+        "runs": [
+          {
+            "runId": "hrun_M9Irhc_d0BJsaQ",
+            "taskId": "task_BoqlqgMhQQVWBA",
+            "stepId": "step_IbAVf6oYoegh0g",
+            "status": "BLOCKED",
+            "harnessVersion": null,
+            "acpVersion": null,
+            "modelConfigId": "mcf_Hp6iEkCQQ9qiFw",
+            "modelConfigVersion": 1,
+            "startedAt": 1700000000000,
+            "completedAt": 1700000000000,
+            "stopReason": "blocked",
+            "errorCode": "HARNESS_TURN_TIMEOUT"
+          }
+        ],
+        "calls": [
+          {
+            "callId": "mcall_QeHuBhbxUdAg9w",
+            "status": "FAILED",
+            "providerErrorCode": "HARNESS_TURN_TIMEOUT"
+          }
+        ],
+        "artifacts": 0,
+        "events": [
+          {
+            "eventType": "harness.run.unknown_effect",
+            "safePayload": {
+              "stepId": "step_IbAVf6oYoegh0g",
+              "runId": "hrun_M9Irhc_d0BJsaQ",
+              "reason": "HARNESS_TURN_TIMEOUT"
+            }
+          },
+          {
+            "eventType": "step.blocked",
+            "safePayload": {
+              "stepId": "step_IbAVf6oYoegh0g",
+              "reason": "HARNESS_TURN_TIMEOUT"
+            }
+          },
+          {
+            "eventType": "task.blocked",
+            "safePayload": {
+              "reason": "HARNESS_TURN_TIMEOUT",
+              "stepId": "step_IbAVf6oYoegh0g"
+            }
+          },
+          {
+            "eventType": "harness.run.blocked",
+            "safePayload": {
+              "runId": "hrun_M9Irhc_d0BJsaQ",
+              "stepId": "step_IbAVf6oYoegh0g",
+              "status": "BLOCKED",
+              "stopReason": "blocked",
+              "errorCode": "HARNESS_TURN_TIMEOUT"
+            }
+          }
+        ]
+      },
+      "afterSettle": {
+        "task": {
+          "status": "BLOCKED",
+          "revision": 10,
+          "cancelRequested": false
+        },
+        "runs": [
+          {
+            "runId": "hrun_M9Irhc_d0BJsaQ",
+            "taskId": "task_BoqlqgMhQQVWBA",
+            "stepId": "step_IbAVf6oYoegh0g",
+            "status": "BLOCKED",
+            "harnessVersion": null,
+            "acpVersion": null,
+            "modelConfigId": "mcf_Hp6iEkCQQ9qiFw",
+            "modelConfigVersion": 1,
+            "startedAt": 1700000000000,
+            "completedAt": 1700000000000,
+            "stopReason": "blocked",
+            "errorCode": "HARNESS_TURN_TIMEOUT"
+          }
+        ],
+        "calls": [
+          {
+            "callId": "mcall_QeHuBhbxUdAg9w",
+            "status": "FAILED",
+            "providerErrorCode": "HARNESS_TURN_TIMEOUT"
+          }
+        ],
+        "artifacts": 0,
+        "events": [
+          {
+            "eventType": "harness.run.unknown_effect",
+            "safePayload": {
+              "stepId": "step_IbAVf6oYoegh0g",
+              "runId": "hrun_M9Irhc_d0BJsaQ",
+              "reason": "HARNESS_TURN_TIMEOUT"
+            }
+          },
+          {
+            "eventType": "step.blocked",
+            "safePayload": {
+              "stepId": "step_IbAVf6oYoegh0g",
+              "reason": "HARNESS_TURN_TIMEOUT"
+            }
+          },
+          {
+            "eventType": "task.blocked",
+            "safePayload": {
+              "reason": "HARNESS_TURN_TIMEOUT",
+              "stepId": "step_IbAVf6oYoegh0g"
+            }
+          },
+          {
+            "eventType": "harness.run.blocked",
+            "safePayload": {
+              "runId": "hrun_M9Irhc_d0BJsaQ",
+              "stepId": "step_IbAVf6oYoegh0g",
+              "status": "BLOCKED",
+              "stopReason": "blocked",
+              "errorCode": "HARNESS_TURN_TIMEOUT"
+            }
+          }
+        ]
+      },
+      "statusStableOver1500ms": true,
+      "capabilities": {
+        "issued": 1,
+        "states": [
+          {
+            "capabilityId": "mcap_c93cTtJiink",
+            "state": "REVOKED",
+            "remaining": 8,
+            "binding": null,
+            "tokenLen": 36
+          }
+        ],
+        "allRevoked": true,
+        "behavioralProbes": [
+          {
+            "status": 401,
+            "body": "{\"ok\":false,\"error\":\"PROXY_UNAUTHORIZED\",\"detail\":null}"
+          }
+        ],
+        "behavioralAll401": true,
+        "liveChildRefs": null
+      },
+      "orphans": {
+        "mine": [
+          {
+            "pid": 57438,
+            "cmd": null,
+            "processExitedFlag": true,
+            "alive": false,
+            "zombie": false
+          }
+        ],
+        "leftoverAlive": [],
+        "globalScanHits": [],
+        "globalScanCount": 0
+      },
+      "budgetsInjected": {
+        "startTimeoutMs": 20000,
+        "turnTimeoutMs": 1200
+      }
+    },
+    "D-reverse-start-block": {
+      "id": "D-reverse-start-block",
+      "agentFile": "start-hang-agent.mjs",
+      "startTimeoutMs": 1200,
+      "turnTimeoutMs": 60000,
+      "cancelAtMs": null,
+      "cancelAfterPrompt": false,
+      "orchestrator": "PATCHED-COPY(old mapping)",
+      "elapsedMs": 1211,
+      "cancelAtMsActual": null,
+      "promptSeenAtMs": null,
+      "timeline": [],
+      "runResult": {
+        "ok": false,
+        "error": "HARNESS_TURN_TIMEOUT",
+        "blocked": true,
+        "cancelled": false,
+        "stepStatus": "BLOCKED",
+        "taskStatus": "BLOCKED"
+      },
+      "cancelResult": null,
+      "adapterCalls": {
+        "starts": 1,
+        "prompts": 0
+      },
+      "providerRequests": {
+        "before": 0,
+        "after": 0,
+        "delta": 0
+      },
+      "afterRun": {
+        "task": {
+          "status": "BLOCKED",
+          "revision": 7,
+          "cancelRequested": false
+        },
+        "runs": [
+          {
+            "runId": "hrun_WaK7aQOxrn4CvQ",
+            "taskId": "task_JvWl8jBOMR2P1w",
+            "stepId": "step_-eZsScORQnvVwA",
+            "status": "BLOCKED",
+            "harnessVersion": null,
+            "acpVersion": null,
+            "modelConfigId": "mcf_FrJMmL7LfwfxZg",
+            "modelConfigVersion": 1,
+            "startedAt": 1700000000000,
+            "completedAt": 1700000000000,
+            "stopReason": "blocked",
+            "errorCode": "HARNESS_TURN_TIMEOUT"
+          }
+        ],
+        "calls": [],
+        "artifacts": 0,
+        "events": [
+          {
+            "eventType": "harness.run.unknown_effect",
+            "safePayload": {
+              "stepId": "step_-eZsScORQnvVwA",
+              "runId": "hrun_WaK7aQOxrn4CvQ",
+              "reason": "HARNESS_TURN_TIMEOUT"
+            }
+          },
+          {
+            "eventType": "step.blocked",
+            "safePayload": {
+              "stepId": "step_-eZsScORQnvVwA",
+              "reason": "HARNESS_TURN_TIMEOUT"
+            }
+          },
+          {
+            "eventType": "task.blocked",
+            "safePayload": {
+              "reason": "HARNESS_TURN_TIMEOUT",
+              "stepId": "step_-eZsScORQnvVwA"
+            }
+          },
+          {
+            "eventType": "harness.run.blocked",
+            "safePayload": {
+              "runId": "hrun_WaK7aQOxrn4CvQ",
+              "stepId": "step_-eZsScORQnvVwA",
+              "status": "BLOCKED",
+              "stopReason": "blocked",
+              "errorCode": "HARNESS_TURN_TIMEOUT"
+            }
+          }
+        ]
+      },
+      "afterSettle": {
+        "task": {
+          "status": "BLOCKED",
+          "revision": 7,
+          "cancelRequested": false
+        },
+        "runs": [
+          {
+            "runId": "hrun_WaK7aQOxrn4CvQ",
+            "taskId": "task_JvWl8jBOMR2P1w",
+            "stepId": "step_-eZsScORQnvVwA",
+            "status": "BLOCKED",
+            "harnessVersion": null,
+            "acpVersion": null,
+            "modelConfigId": "mcf_FrJMmL7LfwfxZg",
+            "modelConfigVersion": 1,
+            "startedAt": 1700000000000,
+            "completedAt": 1700000000000,
+            "stopReason": "blocked",
+            "errorCode": "HARNESS_TURN_TIMEOUT"
+          }
+        ],
+        "calls": [],
+        "artifacts": 0,
+        "events": [
+          {
+            "eventType": "harness.run.unknown_effect",
+            "safePayload": {
+              "stepId": "step_-eZsScORQnvVwA",
+              "runId": "hrun_WaK7aQOxrn4CvQ",
+              "reason": "HARNESS_TURN_TIMEOUT"
+            }
+          },
+          {
+            "eventType": "step.blocked",
+            "safePayload": {
+              "stepId": "step_-eZsScORQnvVwA",
+              "reason": "HARNESS_TURN_TIMEOUT"
+            }
+          },
+          {
+            "eventType": "task.blocked",
+            "safePayload": {
+              "reason": "HARNESS_TURN_TIMEOUT",
+              "stepId": "step_-eZsScORQnvVwA"
+            }
+          },
+          {
+            "eventType": "harness.run.blocked",
+            "safePayload": {
+              "runId": "hrun_WaK7aQOxrn4CvQ",
+              "stepId": "step_-eZsScORQnvVwA",
+              "status": "BLOCKED",
+              "stopReason": "blocked",
+              "errorCode": "HARNESS_TURN_TIMEOUT"
+            }
+          }
+        ]
+      },
+      "statusStableOver1500ms": true,
+      "capabilities": {
+        "issued": 1,
+        "states": [
+          {
+            "capabilityId": "mcap_TmN98KBcqYI",
+            "state": "REVOKED",
+            "remaining": 8,
+            "binding": null,
+            "tokenLen": 36
+          }
+        ],
+        "allRevoked": true,
+        "behavioralProbes": [
+          {
+            "status": 401,
+            "body": "{\"ok\":false,\"error\":\"PROXY_UNAUTHORIZED\",\"detail\":null}"
+          }
+        ],
+        "behavioralAll401": true,
+        "liveChildRefs": null
+      },
+      "orphans": {
+        "mine": [
+          {
+            "pid": 57468,
+            "cmd": null,
+            "processExitedFlag": true,
+            "alive": false,
+            "zombie": false
+          }
+        ],
+        "leftoverAlive": [],
+        "globalScanHits": [],
+        "globalScanCount": 0
+      },
+      "budgetsInjected": {
+        "startTimeoutMs": 1200,
+        "turnTimeoutMs": 60000
+      }
+    },
+    "E-reverse-turn-block": {
+      "id": "E-reverse-turn-block",
+      "agentFile": "turn-hang-agent.mjs",
+      "startTimeoutMs": 20000,
+      "turnTimeoutMs": 1200,
+      "cancelAtMs": null,
+      "cancelAfterPrompt": false,
+      "orchestrator": "PATCHED-COPY(old mapping)",
+      "elapsedMs": 1244,
+      "cancelAtMsActual": null,
+      "promptSeenAtMs": null,
+      "timeline": [],
+      "runResult": {
+        "ok": false,
+        "error": "HARNESS_TURN_TIMEOUT",
+        "blocked": true,
+        "cancelled": false,
+        "stepStatus": "BLOCKED",
+        "taskStatus": "BLOCKED"
+      },
+      "cancelResult": null,
+      "adapterCalls": {
+        "starts": 1,
+        "prompts": 1
+      },
+      "providerRequests": {
+        "before": 0,
+        "after": 0,
+        "delta": 0
+      },
+      "afterRun": {
+        "task": {
+          "status": "BLOCKED",
+          "revision": 10,
+          "cancelRequested": false
+        },
+        "runs": [
+          {
+            "runId": "hrun_mpgXtXigWwq_og",
+            "taskId": "task_EeACwTVjTkcNuQ",
+            "stepId": "step_W3gppWIvYA6kow",
+            "status": "BLOCKED",
+            "harnessVersion": null,
+            "acpVersion": null,
+            "modelConfigId": "mcf_PLzVjZFMHLxiaQ",
+            "modelConfigVersion": 1,
+            "startedAt": 1700000000000,
+            "completedAt": 1700000000000,
+            "stopReason": "blocked",
+            "errorCode": "HARNESS_TURN_TIMEOUT"
+          }
+        ],
+        "calls": [
+          {
+            "callId": "mcall_pC0fowVAdtNziQ",
+            "status": "FAILED",
+            "providerErrorCode": "HARNESS_TURN_TIMEOUT"
+          }
+        ],
+        "artifacts": 0,
+        "events": [
+          {
+            "eventType": "harness.run.unknown_effect",
+            "safePayload": {
+              "stepId": "step_W3gppWIvYA6kow",
+              "runId": "hrun_mpgXtXigWwq_og",
+              "reason": "HARNESS_TURN_TIMEOUT"
+            }
+          },
+          {
+            "eventType": "step.blocked",
+            "safePayload": {
+              "stepId": "step_W3gppWIvYA6kow",
+              "reason": "HARNESS_TURN_TIMEOUT"
+            }
+          },
+          {
+            "eventType": "task.blocked",
+            "safePayload": {
+              "reason": "HARNESS_TURN_TIMEOUT",
+              "stepId": "step_W3gppWIvYA6kow"
+            }
+          },
+          {
+            "eventType": "harness.run.blocked",
+            "safePayload": {
+              "runId": "hrun_mpgXtXigWwq_og",
+              "stepId": "step_W3gppWIvYA6kow",
+              "status": "BLOCKED",
+              "stopReason": "blocked",
+              "errorCode": "HARNESS_TURN_TIMEOUT"
+            }
+          }
+        ]
+      },
+      "afterSettle": {
+        "task": {
+          "status": "BLOCKED",
+          "revision": 10,
+          "cancelRequested": false
+        },
+        "runs": [
+          {
+            "runId": "hrun_mpgXtXigWwq_og",
+            "taskId": "task_EeACwTVjTkcNuQ",
+            "stepId": "step_W3gppWIvYA6kow",
+            "status": "BLOCKED",
+            "harnessVersion": null,
+            "acpVersion": null,
+            "modelConfigId": "mcf_PLzVjZFMHLxiaQ",
+            "modelConfigVersion": 1,
+            "startedAt": 1700000000000,
+            "completedAt": 1700000000000,
+            "stopReason": "blocked",
+            "errorCode": "HARNESS_TURN_TIMEOUT"
+          }
+        ],
+        "calls": [
+          {
+            "callId": "mcall_pC0fowVAdtNziQ",
+            "status": "FAILED",
+            "providerErrorCode": "HARNESS_TURN_TIMEOUT"
+          }
+        ],
+        "artifacts": 0,
+        "events": [
+          {
+            "eventType": "harness.run.unknown_effect",
+            "safePayload": {
+              "stepId": "step_W3gppWIvYA6kow",
+              "runId": "hrun_mpgXtXigWwq_og",
+              "reason": "HARNESS_TURN_TIMEOUT"
+            }
+          },
+          {
+            "eventType": "step.blocked",
+            "safePayload": {
+              "stepId": "step_W3gppWIvYA6kow",
+              "reason": "HARNESS_TURN_TIMEOUT"
+            }
+          },
+          {
+            "eventType": "task.blocked",
+            "safePayload": {
+              "reason": "HARNESS_TURN_TIMEOUT",
+              "stepId": "step_W3gppWIvYA6kow"
+            }
+          },
+          {
+            "eventType": "harness.run.blocked",
+            "safePayload": {
+              "runId": "hrun_mpgXtXigWwq_og",
+              "stepId": "step_W3gppWIvYA6kow",
+              "status": "BLOCKED",
+              "stopReason": "blocked",
+              "errorCode": "HARNESS_TURN_TIMEOUT"
+            }
+          }
+        ]
+      },
+      "statusStableOver1500ms": true,
+      "capabilities": {
+        "issued": 1,
+        "states": [
+          {
+            "capabilityId": "mcap_vZdBW07D1BA",
+            "state": "REVOKED",
+            "remaining": 8,
+            "binding": null,
+            "tokenLen": 36
+          }
+        ],
+        "allRevoked": true,
+        "behavioralProbes": [
+          {
+            "status": 401,
+            "body": "{\"ok\":false,\"error\":\"PROXY_UNAUTHORIZED\",\"detail\":null}"
+          }
+        ],
+        "behavioralAll401": true,
+        "liveChildRefs": null
+      },
+      "orphans": {
+        "mine": [
+          {
+            "pid": 57496,
+            "cmd": null,
+            "processExitedFlag": true,
+            "alive": false,
+            "zombie": false
+          }
+        ],
+        "leftoverAlive": [],
+        "globalScanHits": [],
+        "globalScanCount": 0
+      },
+      "budgetsInjected": {
+        "startTimeoutMs": 20000,
+        "turnTimeoutMs": 1200
+      }
+    },
+    "R1-race-start": {
+      "id": "R1-race-start",
+      "agentFile": "start-hang-agent.mjs",
+      "startTimeoutMs": 4000,
+      "turnTimeoutMs": 60000,
+      "cancelAtMs": 900,
+      "cancelAfterPrompt": false,
+      "orchestrator": "product",
+      "elapsedMs": 4011,
+      "cancelAtMsActual": 902,
+      "promptSeenAtMs": null,
+      "timeline": [
+        {
+          "atMs": 904,
+          "what": "orch.cancel → {\"ok\":true,\"cancelled\":true,\"error\":null}"
+        }
+      ],
+      "runResult": {
+        "ok": false,
+        "error": "TASK_REVISION_CONFLICT",
+        "blocked": false,
+        "cancelled": false,
+        "stepStatus": null,
+        "taskStatus": null
+      },
+      "cancelResult": {
+        "ok": true,
+        "cancelled": true,
+        "error": null,
+        "taskStatus": "CANCELLED"
+      },
+      "adapterCalls": {
+        "starts": 1,
+        "prompts": 0
+      },
+      "providerRequests": {
+        "before": 0,
+        "after": 0,
+        "delta": 0
+      },
+      "afterRun": {
+        "task": {
+          "status": "CANCELLED",
+          "revision": 8,
+          "cancelRequested": true
+        },
+        "runs": [
+          {
+            "runId": "hrun_gk5UoLuucNEU_g",
+            "taskId": "task_biWc6trGHwokNA",
+            "stepId": "step_ifVEpyZX24hCCA",
+            "status": "CANCELLED",
+            "harnessVersion": null,
+            "acpVersion": null,
+            "modelConfigId": "mcf_O6wiCNwgq_vjFA",
+            "modelConfigVersion": 1,
+            "startedAt": 1700000000000,
+            "completedAt": 1700000000000,
+            "stopReason": null,
+            "errorCode": null
+          }
+        ],
+        "calls": [],
+        "artifacts": 0,
+        "events": [
+          {
+            "eventType": "task.cancel_requested",
+            "safePayload": {
+              "cancelRequested": true
+            }
+          },
+          {
+            "eventType": "step.cancelled",
+            "safePayload": {
+              "stepId": "step_ifVEpyZX24hCCA",
+              "reason": "TASK_CANCELLED"
+            }
+          },
+          {
+            "eventType": "task.cancelled",
+            "safePayload": {
+              "revision": 8
+            }
+          }
+        ]
+      },
+      "afterSettle": {
+        "task": {
+          "status": "CANCELLED",
+          "revision": 8,
+          "cancelRequested": true
+        },
+        "runs": [
+          {
+            "runId": "hrun_gk5UoLuucNEU_g",
+            "taskId": "task_biWc6trGHwokNA",
+            "stepId": "step_ifVEpyZX24hCCA",
+            "status": "CANCELLED",
+            "harnessVersion": null,
+            "acpVersion": null,
+            "modelConfigId": "mcf_O6wiCNwgq_vjFA",
+            "modelConfigVersion": 1,
+            "startedAt": 1700000000000,
+            "completedAt": 1700000000000,
+            "stopReason": null,
+            "errorCode": null
+          }
+        ],
+        "calls": [],
+        "artifacts": 0,
+        "events": [
+          {
+            "eventType": "task.cancel_requested",
+            "safePayload": {
+              "cancelRequested": true
+            }
+          },
+          {
+            "eventType": "step.cancelled",
+            "safePayload": {
+              "stepId": "step_ifVEpyZX24hCCA",
+              "reason": "TASK_CANCELLED"
+            }
+          },
+          {
+            "eventType": "task.cancelled",
+            "safePayload": {
+              "revision": 8
+            }
+          }
+        ]
+      },
+      "statusStableOver1500ms": true,
+      "capabilities": {
+        "issued": 1,
+        "states": [
+          {
+            "capabilityId": "mcap_donhmol_1c8",
+            "state": "REVOKED",
+            "remaining": 8,
+            "binding": null,
+            "tokenLen": 36
+          }
+        ],
+        "allRevoked": true,
+        "behavioralProbes": [
+          {
+            "status": 401,
+            "body": "{\"ok\":false,\"error\":\"PROXY_UNAUTHORIZED\",\"detail\":null}"
+          }
+        ],
+        "behavioralAll401": true,
+        "liveChildRefs": null
+      },
+      "orphans": {
+        "mine": [
+          {
+            "pid": 57524,
+            "cmd": null,
+            "processExitedFlag": true,
+            "alive": false,
+            "zombie": false
+          }
+        ],
+        "leftoverAlive": [],
+        "globalScanHits": [],
+        "globalScanCount": 0
+      },
+      "budgetsInjected": {
+        "startTimeoutMs": 4000,
+        "turnTimeoutMs": 60000
+      }
+    },
+    "R2-race-turn": {
+      "id": "R2-race-turn",
+      "agentFile": "turn-hang-agent.mjs",
+      "startTimeoutMs": 20000,
+      "turnTimeoutMs": 20000,
+      "cancelAtMs": null,
+      "cancelAfterPrompt": true,
+      "orchestrator": "product",
+      "elapsedMs": 20044,
+      "cancelAtMsActual": 166,
+      "promptSeenAtMs": 45,
+      "timeline": [
+        {
+          "atMs": 45,
+          "what": "adapter:prompt:begin (prompts=1)"
+        },
+        {
+          "atMs": 167,
+          "what": "orch.cancel → {\"ok\":true,\"cancelled\":true,\"error\":null}"
+        }
+      ],
+      "runResult": {
+        "ok": false,
+        "error": "TASK_REVISION_CONFLICT",
+        "blocked": false,
+        "cancelled": false,
+        "stepStatus": null,
+        "taskStatus": null
+      },
+      "cancelResult": {
+        "ok": true,
+        "cancelled": true,
+        "error": null,
+        "taskStatus": "CANCELLED"
+      },
+      "adapterCalls": {
+        "starts": 1,
+        "prompts": 1
+      },
+      "providerRequests": {
+        "before": 0,
+        "after": 0,
+        "delta": 0
+      },
+      "afterRun": {
+        "task": {
+          "status": "CANCELLED",
+          "revision": 10,
+          "cancelRequested": true
+        },
+        "runs": [
+          {
+            "runId": "hrun_pC-X4Jviz3NSJw",
+            "taskId": "task_7AmeF7VZtR7oTg",
+            "stepId": "step_eS4NaU4nraDcoQ",
+            "status": "CANCELLED",
+            "harnessVersion": null,
+            "acpVersion": null,
+            "modelConfigId": "mcf_UZ5AZxpLhBm43Q",
+            "modelConfigVersion": 1,
+            "startedAt": 1700000000000,
+            "completedAt": 1700000000000,
+            "stopReason": null,
+            "errorCode": null
+          }
+        ],
+        "calls": [
+          {
+            "callId": "mcall_XXng1j_JtteEVw",
+            "status": "STARTED",
+            "providerErrorCode": null
+          }
+        ],
+        "artifacts": 0,
+        "events": [
+          {
+            "eventType": "task.cancel_requested",
+            "safePayload": {
+              "cancelRequested": true
+            }
+          },
+          {
+            "eventType": "step.cancelled",
+            "safePayload": {
+              "stepId": "step_eS4NaU4nraDcoQ",
+              "reason": "TASK_CANCELLED"
+            }
+          },
+          {
+            "eventType": "task.cancelled",
+            "safePayload": {
+              "revision": 10
+            }
+          }
+        ]
+      },
+      "afterSettle": {
+        "task": {
+          "status": "CANCELLED",
+          "revision": 10,
+          "cancelRequested": true
+        },
+        "runs": [
+          {
+            "runId": "hrun_pC-X4Jviz3NSJw",
+            "taskId": "task_7AmeF7VZtR7oTg",
+            "stepId": "step_eS4NaU4nraDcoQ",
+            "status": "CANCELLED",
+            "harnessVersion": null,
+            "acpVersion": null,
+            "modelConfigId": "mcf_UZ5AZxpLhBm43Q",
+            "modelConfigVersion": 1,
+            "startedAt": 1700000000000,
+            "completedAt": 1700000000000,
+            "stopReason": null,
+            "errorCode": null
+          }
+        ],
+        "calls": [
+          {
+            "callId": "mcall_XXng1j_JtteEVw",
+            "status": "STARTED",
+            "providerErrorCode": null
+          }
+        ],
+        "artifacts": 0,
+        "events": [
+          {
+            "eventType": "task.cancel_requested",
+            "safePayload": {
+              "cancelRequested": true
+            }
+          },
+          {
+            "eventType": "step.cancelled",
+            "safePayload": {
+              "stepId": "step_eS4NaU4nraDcoQ",
+              "reason": "TASK_CANCELLED"
+            }
+          },
+          {
+            "eventType": "task.cancelled",
+            "safePayload": {
+              "revision": 10
+            }
+          }
+        ]
+      },
+      "statusStableOver1500ms": true,
+      "capabilities": {
+        "issued": 1,
+        "states": [
+          {
+            "capabilityId": "mcap_f9spT1BKwHE",
+            "state": "REVOKED",
+            "remaining": 8,
+            "binding": null,
+            "tokenLen": 36
+          }
+        ],
+        "allRevoked": true,
+        "behavioralProbes": [
+          {
+            "status": 401,
+            "body": "{\"ok\":false,\"error\":\"PROXY_UNAUTHORIZED\",\"detail\":null}"
+          }
+        ],
+        "behavioralAll401": true,
+        "liveChildRefs": null
+      },
+      "orphans": {
+        "mine": [
+          {
+            "pid": 57552,
+            "cmd": null,
+            "processExitedFlag": true,
+            "alive": false,
+            "zombie": false
+          }
+        ],
+        "leftoverAlive": [],
+        "globalScanHits": [],
+        "globalScanCount": 0
+      },
+      "budgetsInjected": {
+        "startTimeoutMs": 20000,
+        "turnTimeoutMs": 20000
+      }
+    }
+  },
+  "deleteProof": {
+    "copyDeleted": true,
+    "copyPath": "experiments/d5-03/batch9/verify/patched-orchestrator-OLD-MAPPING.cjs",
+    "copySha256": "e1221a42b4ede63ecb59486b7696ed4b296d3a01cbd22fb5f82c2fff3951a8a6",
+    "productSha256After": "aa6142e15365c170463ab229bae913a4b365fbd098e6ab8622c9da3a9e589e2c"
+  },
+  "at": "2026-09-29T09:36:30.689Z"
+}

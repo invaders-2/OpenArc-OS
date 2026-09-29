@@ -1,0 +1,34 @@
+受影响门禁（必须重跑）：["test:d4-02c"]
+
+[unaffected] test:d4-01                 files= 8 closure= 44 loadsChanged=[] branch=false
+[unaffected] test:d4-02a                files= 3 closure= 42 loadsChanged=["electron/task-domain.cjs"] branch=false
+[unaffected] test:d4-02b                files= 5 closure= 42 loadsChanged=[] branch=false
+[AFFECTED ] test:d4-02c                files= 6 closure= 67 loadsChanged=["electron/task-domain.cjs","electron/task-harness-orchestrator.cjs"] branch=true
+             分支证据文件：tests/task-harness-orchestrator.test.mjs
+[unaffected] test:d4-03a                files= 6 closure= 66 loadsChanged=["electron/task-domain.cjs","electron/task-harness-orchestrator.cjs"] branch=false
+[unaffected] test:d4-03b                files=11 closure= 71 loadsChanged=["electron/task-domain.cjs","electron/task-harness-orchestrator.cjs"] branch=false
+[unaffected] test:d4-03c1               files= 7 closure= 68 loadsChanged=["electron/task-domain.cjs","electron/task-harness-orchestrator.cjs"] branch=false
+[unaffected] test:d4-03c1-closure       files= 9 closure= 70 loadsChanged=["electron/task-domain.cjs","electron/task-harness-orchestrator.cjs"] branch=false
+[unaffected] test:d4-03c2               files= 2 closure= 63 loadsChanged=["electron/task-domain.cjs","electron/task-harness-orchestrator.cjs"] branch=false
+[unaffected] test:d4-03c2-closure       files= 3 closure= 64 loadsChanged=["electron/task-domain.cjs","electron/task-harness-orchestrator.cjs"] branch=false
+[unaffected] test:d4-03c2-closure2      files= 4 closure= 65 loadsChanged=["electron/task-domain.cjs","electron/task-harness-orchestrator.cjs"] branch=false
+[unaffected] test:d4-03c2-closure3      files= 5 closure= 66 loadsChanged=["electron/task-domain.cjs","electron/task-harness-orchestrator.cjs"] branch=false
+[unaffected] test:d4-03c3               files= 6 closure= 67 loadsChanged=["electron/task-domain.cjs","electron/task-harness-orchestrator.cjs"] branch=false
+[unaffected] test:d4-03c3-closure       files= 7 closure= 68 loadsChanged=["electron/task-domain.cjs","electron/task-harness-orchestrator.cjs"] branch=false
+[unaffected] test:d4-03c4               files= 3 closure= 64 loadsChanged=["electron/task-domain.cjs","electron/task-harness-orchestrator.cjs"] branch=false
+[unaffected] test:d4-03c4-closure       files= 1 closure= 61 loadsChanged=["electron/task-domain.cjs","electron/task-harness-orchestrator.cjs"] branch=false
+[unaffected] test:d4-03c4-closure2      files= 1 closure= 61 loadsChanged=["electron/task-domain.cjs","electron/task-harness-orchestrator.cjs"] branch=false
+[unaffected] test:d4-03c4-closure3      files= 1 closure= 61 loadsChanged=["electron/task-domain.cjs","electron/task-harness-orchestrator.cjs"] branch=false
+[unaffected] test:d4-03d                files= 9 closure= 69 loadsChanged=["electron/task-domain.cjs","electron/task-harness-orchestrator.cjs"] branch=false
+[unaffected] test:d4-03d-closure        files=10 closure= 70 loadsChanged=["electron/task-domain.cjs","electron/task-harness-orchestrator.cjs"] branch=false
+[unaffected] test:d4-03-cg01            files= 3 closure= 65 loadsChanged=["electron/task-domain.cjs","electron/task-harness-orchestrator.cjs"] branch=false
+[unaffected] test:d4-04                 files= 1 closure=  3 loadsChanged=[] branch=false
+[unaffected] test:d4-05                 files= 1 closure=  1 loadsChanged=[] branch=false
+[unaffected] test:d4-05-memory-ui       files= 1 closure=  3 loadsChanged=[] branch=false
+[unaffected] test:d4-06                 files= 1 closure=  1 loadsChanged=[] branch=false
+[unaffected] test:d4-06-resume          files= 1 closure=  3 loadsChanged=[] branch=false
+[unaffected] test:d4-08-verification-ui files= 1 closure=  3 loadsChanged=[] branch=false
+[unaffected] test:d4-08                 files= 1 closure= 61 loadsChanged=["electron/task-domain.cjs","electron/task-harness-orchestrator.cjs"] branch=false
+[unaffected] test:d4-04-closure2        files= 1 closure= 74 loadsChanged=["electron/task-domain.cjs","electron/task-harness-orchestrator.cjs"] branch=false
+[unaffected] test:d4-03c4-ui            files= 1 closure=  1 loadsChanged=[] branch=false
+[unaffected] test:d4-03b-dsh            files= 5 closure= 65 loadsChanged=["electron/task-domain.cjs","electron/task-harness-orchestrator.cjs"] branch=false

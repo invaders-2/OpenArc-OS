@@ -1,0 +1,5 @@
+{
+  "name": "openarc-d503-batch9-harness-timeout-ui-probe",
+  "private": true,
+  "main": "main.cjs"
+}

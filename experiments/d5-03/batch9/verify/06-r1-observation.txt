@@ -1,0 +1,15 @@
+(node:60022) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  [PASS] R1-a · 对照组（initialize 阻塞）在 8s 观察窗内收敛（证明 700ms 预算是真预算） — 期望 true，实际 true
+  [PASS] R1-b · R1 复现：session/new 阻塞时 run 在 700ms 预算 + 8s 观察窗内**未收敛** — 期望 false，实际 false
+  [PASS] R1-c · R1 期间 run 仍停在 STARTING、task 仍 RUNNING、0 provider 请求、0 prompt — 期望 STARTING/RUNNING/0/0，实际 "STARTING/RUNNING/0/0"
+  [PASS] R1-d · R1 期间 harness 子进程仍存活（无界段） — 期望 true，实际 true
+! [FAIL] R1-e · 【发现·不属于本批】R1 的 harness 子进程在 orchestrator.dispose() 后仍在运行（registry.set 在 adapter.start() 返回之后，:241；dispose 只遍历 registry，:824-831） — 期望 无在跑的孤儿（对照组成立，R1 场景不成立），实际 "{\"psState\":\"S\",\"runningOrphan\":true,\"zombie\":false}"
+  [PASS] R1-f · 对照组 dispose 后同样无在跑的孤儿 — 期望 无在跑的孤儿，实际 "{\"psState\":\"gone\",\"runningOrphan\":false,\"zombie\":false}"
+
+R1 复现：是（未收敛）
+R1 阶段时间线：+2.2ms adapter:start:begin | +8005.8ms watch:end
+对照阶段时间线：+6.2ms adapter:start:begin | +757.0ms adapter:start:error HARNESS_START_TIMEOUT | +774.7ms runTask:resolved HARNESS_START_TIMEOUT | +790.3ms watch:end
+负载：{"loadavg":[7.6435546875,11.91455078125,15.44970703125],"cpus":12,"totalmem":19327352832}
+计数：{"total":6,"pass":5,"fail":0,"observations":1,"observationFindings":1}
+观察项（finding）：["R1-e 【发现·不属于本批】R1 的 harness 子进程在 orchestrator.dispose() 后仍在运行（registry.set 在 adapter.start() 返回之后，:241；dispose 只遍历 registry，:824-831） → {\"psState\":\"S\",\"runningOrphan\":true,\"zombie\":false}"]

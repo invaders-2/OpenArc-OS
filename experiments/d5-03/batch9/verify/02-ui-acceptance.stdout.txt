@@ -1,0 +1,107 @@
+runId=20260929T094444Z-3a33-batch9-harness-timeout-ui  runDir=artifacts/d5-03/runs/20260929T094444Z-3a33-batch9-harness-timeout-ui
+[probe] PROBE_VERSIONS {"electron":"44.3.0","node":"24.20.0","platform":"darwin","arch":"arm64","nodeBin":"/Users/wepingli/.hermes/node/bin/node","uiURL":"file:///Users/wepingli/Desktop/OpenArc%20OS-integration/dist/index.html","window":"1360x900"}
+[probe] PROBE_DIAG runtime-booted
+[probe] PROBE_DIAG orchestrators-ready {"startTimeoutMs":700,"turnTimeoutMs":700}
+[probe] PROBE_DIAG ipc-registered
+[probe] PROBE_READY
+[probe] PROBE_MODEL_READY {"providerId":"prv_bm686ncDnzumbA","modelConfigId":"mcf_d7We_A90dl7aKg","providerRequests":0}
+  [PASS] S1 · 真实 UI 登录进入桌面（真实身份 IPC）
+  [PASS] S2 · 探针宿主建立真实 provider/model 配置（经真实 Identity IPC 装配）
+   · PROBE_VERSIONS {"electron":"44.3.0","node":"24.20.0","platform":"darwin","arch":"arm64","nodeBin":"/Users/wepingli/.hermes/node/bin/node","uiURL":"file:///Users/wepingli/Desktop/OpenArc%20OS-integration/dist/index.html","window":"1360x900"}
+  [PASS] S3 · 窗口/背景基准 = 既有任务界面门禁探针（tests/fixtures/d4-08-verification-ui）同一 BrowserWindow 参数 1360x900；内容区 1360x868（原生标题栏 32px）；玻璃模式 full；壁纸 theme-dark（产品默认）；产品无 setZoomFactor → 缩放 100%，dpr=2 是本机显示器缩放
+
+--- 场景 light-start ---
+[probe] PROBE_TASK_EVENT {"event":{"type":"task/result","taskId":"task_UEhaI-506IUr8Q","ok":false,"status":"BLOCKED","stepStatus":"BLOCKED","artifact":null,"verification":null,"error":"HARNESS_START_TIMEOUT"},"facts":{"taskId":"task_UEhaI-506IUr8Q","mode":"start","taskStatus":"BLOCKED","runs":[{"status":"BLOCKED","errorCode":"HARNESS_START_TIMEOUT","stopReason":"blocked"}],"calls":[],"artifacts":0,"status":"BLOCKED","resumable":false,"stopReason":"HARNESS_START_TIMEOUT","capabilities":["REVOKED"]}}
+  [PASS] light-start-1 · 任务状态行原样显示 HARNESS_START_TIMEOUT
+  [PASS] light-start-2 · 状态文字 BLOCKED · Recovery Required（resumable=false 路径）
+  [PASS] light-start-3 · 真实界面操作成功触发真实运行（clicked=ok 且错误行出现且 busy 复位）
+  [PASS] light-start-4 · 结构：无 [data-ai-stop-reason] / 无恢复块 / 无验证块（启动与执行超时都不是预算停止）
+  [PASS] light-start-5 · 主题/减少动态效果确实由真实设置面板切换到位
+  [PASS] light-start-6 · 错误行无横向溢出：scrollWidth <= clientWidth
+  [PASS] light-start-7 · 错误行容器无横向溢出：.ai-state scrollWidth <= clientWidth
+  [PASS] light-start-8 · 面板无横向溢出：.ai-panel scrollWidth <= clientWidth
+  [PASS] light-start-9 · 祖先链全部无横向溢出（到 body）
+  [PASS] light-start-10 · 错误行在面板内容宽内（error.right <= panel.right - padding）
+  [PASS] light-start-11 · 对比度 ≥ 4.5:1（12px 级普通文本门槛，DESIGN_SYSTEM.md:248）
+  [PASS] light-start-12 · 本行未新增动效：animationName=none 且 transitionDuration=0s
+
+--- 场景 light-turn ---
+[probe] PROBE_TASK_EVENT {"event":{"type":"task/result","taskId":"task_p98EXQOQtEd0SA","ok":false,"status":"BLOCKED","stepStatus":"BLOCKED","artifact":null,"verification":null,"error":"HARNESS_TURN_TIMEOUT"},"facts":{"taskId":"task_p98EXQOQtEd0SA","mode":"turn","taskStatus":"BLOCKED","runs":[{"status":"BLOCKED","errorCode":"HARNESS_TURN_TIMEOUT","stopReason":"blocked"}],"calls":[{"status":"FAILED","providerErrorCode":"HARNESS_TURN_TIMEOUT"}],"artifacts":0,"status":"BLOCKED","resumable":false,"stopReason":"HARNESS_TURN_TIMEOUT","capabilities":["REVOKED","REVOKED"]}}
+  [PASS] light-turn-1 · 任务状态行原样显示 HARNESS_TURN_TIMEOUT
+  [PASS] light-turn-2 · 状态文字 BLOCKED · Recovery Required（resumable=false 路径）
+  [PASS] light-turn-3 · 真实界面操作成功触发真实运行（clicked=ok 且错误行出现且 busy 复位）
+  [PASS] light-turn-4 · 结构：无 [data-ai-stop-reason] / 无恢复块 / 无验证块（启动与执行超时都不是预算停止）
+  [PASS] light-turn-5 · 主题/减少动态效果确实由真实设置面板切换到位
+  [PASS] light-turn-6 · 错误行无横向溢出：scrollWidth <= clientWidth
+  [PASS] light-turn-7 · 错误行容器无横向溢出：.ai-state scrollWidth <= clientWidth
+  [PASS] light-turn-8 · 面板无横向溢出：.ai-panel scrollWidth <= clientWidth
+  [PASS] light-turn-9 · 祖先链全部无横向溢出（到 body）
+  [PASS] light-turn-10 · 错误行在面板内容宽内（error.right <= panel.right - padding）
+  [PASS] light-turn-11 · 对比度 ≥ 4.5:1（12px 级普通文本门槛，DESIGN_SYSTEM.md:248）
+  [PASS] light-turn-12 · 本行未新增动效：animationName=none 且 transitionDuration=0s
+
+--- 场景 dark-start ---
+[probe] PROBE_TASK_EVENT {"event":{"type":"task/result","taskId":"task_EJt5sosHMYHFSQ","ok":false,"status":"BLOCKED","stepStatus":"BLOCKED","artifact":null,"verification":null,"error":"HARNESS_START_TIMEOUT"},"facts":{"taskId":"task_EJt5sosHMYHFSQ","mode":"start","taskStatus":"BLOCKED","runs":[{"status":"BLOCKED","errorCode":"HARNESS_START_TIMEOUT","stopReason":"blocked"}],"calls":[],"artifacts":0,"status":"BLOCKED","resumable":false,"stopReason":"HARNESS_START_TIMEOUT","capabilities":["REVOKED","REVOKED","REVOKED"]}}
+  [PASS] dark-start-1 · 任务状态行原样显示 HARNESS_START_TIMEOUT
+  [PASS] dark-start-2 · 状态文字 BLOCKED · Recovery Required（resumable=false 路径）
+  [PASS] dark-start-3 · 真实界面操作成功触发真实运行（clicked=ok 且错误行出现且 busy 复位）
+  [PASS] dark-start-4 · 结构：无 [data-ai-stop-reason] / 无恢复块 / 无验证块（启动与执行超时都不是预算停止）
+  [PASS] dark-start-5 · 主题/减少动态效果确实由真实设置面板切换到位
+  [PASS] dark-start-6 · 错误行无横向溢出：scrollWidth <= clientWidth
+  [PASS] dark-start-7 · 错误行容器无横向溢出：.ai-state scrollWidth <= clientWidth
+  [PASS] dark-start-8 · 面板无横向溢出：.ai-panel scrollWidth <= clientWidth
+  [PASS] dark-start-9 · 祖先链全部无横向溢出（到 body）
+  [PASS] dark-start-10 · 错误行在面板内容宽内（error.right <= panel.right - padding）
+  [PASS] dark-start-11 · 对比度 ≥ 4.5:1（12px 级普通文本门槛，DESIGN_SYSTEM.md:248）
+  [PASS] dark-start-12 · 本行未新增动效：animationName=none 且 transitionDuration=0s
+
+--- 场景 dark-turn ---
+[probe] PROBE_TASK_EVENT {"event":{"type":"task/result","taskId":"task_uSkxKAjyDRVZhg","ok":false,"status":"BLOCKED","stepStatus":"BLOCKED","artifact":null,"verification":null,"error":"HARNESS_TURN_TIMEOUT"},"facts":{"taskId":"task_uSkxKAjyDRVZhg","mode":"turn","taskStatus":"BLOCKED","runs":[{"status":"BLOCKED","errorCode":"HARNESS_TURN_TIMEOUT","stopReason":"blocked"}],"calls":[{"status":"FAILED","providerErrorCode":"HARNESS_TURN_TIMEOUT"}],"artifacts":0,"status":"BLOCKED","resumable":false,"stopReason":"HARNESS_TURN_TIMEOUT","capabilities":["REVOKED","REVOKED","REVOKED","REVOKED"]}}
+  [PASS] dark-turn-1 · 任务状态行原样显示 HARNESS_TURN_TIMEOUT
+  [PASS] dark-turn-2 · 状态文字 BLOCKED · Recovery Required（resumable=false 路径）
+  [PASS] dark-turn-3 · 真实界面操作成功触发真实运行（clicked=ok 且错误行出现且 busy 复位）
+  [PASS] dark-turn-4 · 结构：无 [data-ai-stop-reason] / 无恢复块 / 无验证块（启动与执行超时都不是预算停止）
+  [PASS] dark-turn-5 · 主题/减少动态效果确实由真实设置面板切换到位
+  [PASS] dark-turn-6 · 错误行无横向溢出：scrollWidth <= clientWidth
+  [PASS] dark-turn-7 · 错误行容器无横向溢出：.ai-state scrollWidth <= clientWidth
+  [PASS] dark-turn-8 · 面板无横向溢出：.ai-panel scrollWidth <= clientWidth
+  [PASS] dark-turn-9 · 祖先链全部无横向溢出（到 body）
+  [PASS] dark-turn-10 · 错误行在面板内容宽内（error.right <= panel.right - padding）
+  [PASS] dark-turn-11 · 对比度 ≥ 4.5:1（12px 级普通文本门槛，DESIGN_SYSTEM.md:248）
+  [PASS] dark-turn-12 · 本行未新增动效：animationName=none 且 transitionDuration=0s
+
+--- 场景 dark-reduced-turn ---
+[probe] PROBE_TASK_EVENT {"event":{"type":"task/result","taskId":"task_yB5V9kR827focw","ok":false,"status":"BLOCKED","stepStatus":"BLOCKED","artifact":null,"verification":null,"error":"HARNESS_TURN_TIMEOUT"},"facts":{"taskId":"task_yB5V9kR827focw","mode":"turn","taskStatus":"BLOCKED","runs":[{"status":"BLOCKED","errorCode":"HARNESS_TURN_TIMEOUT","stopReason":"blocked"}],"calls":[{"status":"FAILED","providerErrorCode":"HARNESS_TURN_TIMEOUT"}],"artifacts":0,"status":"BLOCKED","resumable":false,"stopReason":"HARNESS_TURN_TIMEOUT","capabilities":["REVOKED","REVOKED","REVOKED","REVOKED","REVOKED"]}}
+  [PASS] dark-reduced-turn-1 · 任务状态行原样显示 HARNESS_TURN_TIMEOUT
+  [PASS] dark-reduced-turn-2 · 状态文字 BLOCKED · Recovery Required（resumable=false 路径）
+  [PASS] dark-reduced-turn-3 · 真实界面操作成功触发真实运行（clicked=ok 且错误行出现且 busy 复位）
+  [PASS] dark-reduced-turn-4 · 结构：无 [data-ai-stop-reason] / 无恢复块 / 无验证块（启动与执行超时都不是预算停止）
+  [PASS] dark-reduced-turn-5 · 主题/减少动态效果确实由真实设置面板切换到位
+  [PASS] dark-reduced-turn-6 · 错误行无横向溢出：scrollWidth <= clientWidth
+  [PASS] dark-reduced-turn-7 · 错误行容器无横向溢出：.ai-state scrollWidth <= clientWidth
+  [PASS] dark-reduced-turn-8 · 面板无横向溢出：.ai-panel scrollWidth <= clientWidth
+  [PASS] dark-reduced-turn-9 · 祖先链全部无横向溢出（到 body）
+  [PASS] dark-reduced-turn-10 · 错误行在面板内容宽内（error.right <= panel.right - padding）
+  [PASS] dark-reduced-turn-11 · 对比度 ≥ 4.5:1（12px 级普通文本门槛，DESIGN_SYSTEM.md:248）
+  [PASS] dark-reduced-turn-12 · 本行未新增动效：animationName=none 且 transitionDuration=0s
+  [PASS] dark-reduced-turn-13 · 减少动态效果下该行 --dur-quick=0ms（元素作用域）
+
+--- 布局对照（同一主题下两种码） ---
+  [PASS] layout-light · 更长的码（HARNESS_START_TIMEOUT 21 字符 vs HARNESS_TURN_TIMEOUT 20 字符）不改变行数/行高/按钮矩形
+  [PASS] layout-dark · 更长的码（HARNESS_START_TIMEOUT 21 字符 vs HARNESS_TURN_TIMEOUT 20 字符）不改变行数/行高/按钮矩形
+
+--- 窄窗口压力（额外，不改基准） ---
+   · AI 面板固定宽度 = {"panelWidth":350,"contentWidth":350,"pad":"22px"}（窗口宽 1360 → 面板右贴边，面板宽度不随窗口变化）
+  [PASS] layout-narrow · AI 面板宽度固定 350px（不随窗口宽度变化）→ 窗口尺寸变化不构成该行布局风险
+   [REMOVED] oa-d503b-QAnE1D
+  [PASS] Z1 · 只清了本次运行自己的 pid 树，0 残留
+  [PASS] Z2 · 本次运行的 userData 临时目录已按归属标记删除
+  [PASS] Z3 · TMPDIR 下 oa-d503* 无本次运行残留
+  [PASS] Z4a · 渲染层 0 个未捕获异常（pageerror）
+  [PASS] Z4b · 除探针宿主未注册的自定义协议（openarc-resource/canvas/file 的 ERR_UNKNOWN_URL_SCHEME）外，渲染层 0 条 console error
+  [PASS] Z5 · 探针宿主无致命错误
+  [PASS] Z6 · 宿主主进程无 uncaughtException/unhandledRejection（每次 task/result 后的探针健康快照）
+  [PASS] Z7 · 被测渲染层确实是当前构建（dist bundle 含 data-ai-error 与状态文案）
+
+计数：{"total":75,"pass":75,"fail":0}  artifactSha256=7ed60d0be05c80790d53f2d285814bf27b00af739fe523ec746a23a356f77d56
+runDir=artifacts/d5-03/runs/20260929T094444Z-3a33-batch9-harness-timeout-ui

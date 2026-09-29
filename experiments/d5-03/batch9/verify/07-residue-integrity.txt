@@ -1,0 +1,14 @@
+① TMPDIR oa-d503* 残留：[]
+② 进程残留：["60067 22841 Ss   bash -c echo \"=== M-fM^\\M^@M-gM-;M^HM-fM-.M^KM-gM^UM^Y/M-eM-.M^LM-fM^UM-4M-fM^@M-' ===\"; node experiments/d5-03/batch9/verify/batch9-05-residue-integrity.mjs > experiments/d5-03/batch9/verify/07-residue-integrity.txt 2>&1; sed -n '1,3p' experiments/d5-03/batch9/verify/07-residue-integrity.txt; grep -E \"M-bM^QM-\"|M-bM^QM-#b|index.json sha256\" experiments/d5-03/batch9/verify/07-residue-integrity.txt; echo; echo \"=== M-hM-?M^[M-gM-(M^KM-fM^\\M^@M-gM-;M^HM-eM-$M^MM-fM^_M-%M-oM-<M^HM-fM^\\M-,M-dM-;M-;M-eM^JM-!M-f\\240M^GM-hM-.M-0M-oM-<M^I===\"; ps -axo pid=,command= | grep -E \"batch9-0[0-9]-|harness-timeout-ui-probe|hang-agent\" | grep -v grep | grep -v \"sleep 285\"; echo \"(M-gM-)M-:=0)\"; echo; echo \"=== git status ===\"; git status --porcelain; echo; echo \"=== M-dM-:M-'M-eM^SM^A/M-fM-5M^KM-hM-/M^UM-dM-;M-#M-g\\240M^AM-fM^XM-/M-eM^PM-&M-hM-\"M-+M-fM^TM-9M-eM^JM-(M-oM-<M^HM-eM-:M^TM-dM-8M-:M-gM-)M-:M-oM-<M^I===\"; git diff --stat HEAD -- electron/ src/ tests/; echo \"(M-gM-)M-:=M-fM^\\M-*M-fM^TM-9M-dM-:M-'M-eM^SM^A/M-fM-5M^KM-hM-/M^U)\"; echo; echo \"=== M-fM^\\M-,M-fM^IM-9 verify M-hM-/M^AM-fM^MM-.M-fM-8M^EM-eM^MM^U ===\"; ls -la experiments/d5-03/batch9/verify/ | head -25","60068 60067 S    node experiments/d5-03/batch9/verify/batch9-05-residue-integrity.mjs"]
+③ 索引条目 81 条，sha256 复算不一致 0 条（全部一致）
+④ 近 3 小时内 runs/ 下被改动的文件（按目录汇总）：{
+ "artifacts/d5-03/runs/20260929T093908Z-0dc2-batch9-harness-timeout-ui": 3,
+ "artifacts/d5-03/runs/20260929T094128Z-1244-batch9-harness-timeout-ui": 3,
+ "artifacts/d5-03/runs/20260929T094230Z-fccc-batch9-harness-timeout-ui": 3,
+ "artifacts/d5-03/runs/20260929T094240Z-a352-batch9-harness-timeout-ui": 23,
+ "artifacts/d5-03/runs/20260929T094329Z-2a0e-batch9-harness-timeout-ui": 23,
+ "artifacts/d5-03/runs/20260929T094444Z-3a33-batch9-harness-timeout-ui": 23,
+ "artifacts/d5-03/runs": 2
+}
+④b 其中**不属于本批 batch9 run**的文件：[{"file":"artifacts/d5-03/runs/index.jsonl","mtime":"2026-09-29T09:45:19.062Z"},{"file":"artifacts/d5-03/runs/index.json","mtime":"2026-09-29T09:45:19.072Z"}]
+index.json sha256=a83c1ec0704e623605b265411c06334e2d36fc354b6286d5ecc8f8cd27d65266 mtime=2026-09-29T09:45:19.072Z

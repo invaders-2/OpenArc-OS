@@ -1,0 +1,181 @@
+{
+  "phase": "D5-03 第九批 · 独立验收 · R1 观察（newSession 无界）",
+  "findingsNote": "observation=true 的条目是本次独立验收**发现**（如实记录，不参与判分，也不在本批可写面内修）",
+  "codeFacts": {
+    "electron/harness-adapter.cjs:272-275": "#withTimeout(this.conn.initialize(...), startTimeoutMs, START_TIMEOUT) —— 只有 initialize 有上界",
+    "electron/harness-adapter.cjs:278": "const session = await this.conn.newSession({...}) —— **裸 await，无任何超时**"
+  },
+  "injectedStartTimeoutMs": 700,
+  "productDefaultStartTimeoutMs": "30000",
+  "results": {
+    "control_startHang": {
+      "label": "对照：initialize 永不返回（启动预算确实生效）",
+      "agentFile": "start-hang-agent.mjs",
+      "startTimeoutMs": 700,
+      "watchMs": 8000,
+      "settledWithinWatchWindow": true,
+      "settled": {
+        "kind": "resolved",
+        "atMs": 774.721375,
+        "ok": false,
+        "error": "HARNESS_START_TIMEOUT",
+        "taskStatus": "BLOCKED"
+      },
+      "taskStatus": "BLOCKED",
+      "runStatus": "BLOCKED",
+      "runErrorCode": "HARNESS_START_TIMEOUT",
+      "providerRequestsDelta": 0,
+      "adapterCalls": {
+        "starts": 1,
+        "prompts": 0
+      },
+      "callRecords": 0,
+      "childPid": 60023,
+      "childAliveAfterWatch": false,
+      "lifecycle": {
+        "childPid": 60023,
+        "childAliveBeforeDispose": false,
+        "childPidAfterDispose": 60023,
+        "psStateAfterDispose": "gone",
+        "runningOrphanAfterDispose": false,
+        "zombieAfterDispose": false
+      },
+      "load": {
+        "loadavg": [
+          8.13525390625,
+          12.08203125,
+          15.529296875
+        ],
+        "cpus": 12,
+        "totalmem": 19327352832
+      },
+      "timeline": [
+        {
+          "name": "adapter:start:begin",
+          "detail": null,
+          "atMs": 6.18
+        },
+        {
+          "name": "adapter:start:error",
+          "detail": "HARNESS_START_TIMEOUT",
+          "atMs": 757.008583
+        },
+        {
+          "name": "runTask:resolved",
+          "detail": "HARNESS_START_TIMEOUT",
+          "atMs": 774.74025
+        },
+        {
+          "name": "watch:end",
+          "detail": null,
+          "atMs": 790.27025
+        }
+      ]
+    },
+    "r1_sessionNewHang": {
+      "label": "R1：session/new 永不返回（启动预算是否覆盖这一段）",
+      "agentFile": "session-new-hang-agent.mjs",
+      "startTimeoutMs": 700,
+      "watchMs": 8000,
+      "settledWithinWatchWindow": false,
+      "settled": null,
+      "taskStatus": "RUNNING",
+      "runStatus": "STARTING",
+      "runErrorCode": null,
+      "providerRequestsDelta": 0,
+      "adapterCalls": {
+        "starts": 1,
+        "prompts": 0
+      },
+      "callRecords": 0,
+      "childPid": 60033,
+      "childAliveAfterWatch": true,
+      "lifecycle": {
+        "childPid": 60033,
+        "childAliveBeforeDispose": true,
+        "childPidAfterDispose": 60033,
+        "psStateAfterDispose": "S",
+        "runningOrphanAfterDispose": true,
+        "zombieAfterDispose": false
+      },
+      "load": {
+        "loadavg": [
+          7.6435546875,
+          11.91455078125,
+          15.44970703125
+        ],
+        "cpus": 12,
+        "totalmem": 19327352832
+      },
+      "timeline": [
+        {
+          "name": "adapter:start:begin",
+          "detail": null,
+          "atMs": 2.219334
+        },
+        {
+          "name": "watch:end",
+          "detail": null,
+          "atMs": 8005.788875
+        }
+      ]
+    }
+  },
+  "checks": [
+    {
+      "id": "R1-a",
+      "name": "对照组（initialize 阻塞）在 8s 观察窗内收敛（证明 700ms 预算是真预算）",
+      "expected": true,
+      "actual": true,
+      "pass": true
+    },
+    {
+      "id": "R1-b",
+      "name": "R1 复现：session/new 阻塞时 run 在 700ms 预算 + 8s 观察窗内**未收敛**",
+      "expected": false,
+      "actual": false,
+      "pass": true
+    },
+    {
+      "id": "R1-c",
+      "name": "R1 期间 run 仍停在 STARTING、task 仍 RUNNING、0 provider 请求、0 prompt",
+      "expected": "STARTING/RUNNING/0/0",
+      "actual": "STARTING/RUNNING/0/0",
+      "pass": true
+    },
+    {
+      "id": "R1-d",
+      "name": "R1 期间 harness 子进程仍存活（无界段）",
+      "expected": true,
+      "actual": true,
+      "pass": true
+    },
+    {
+      "id": "R1-e",
+      "name": "【发现·不属于本批】R1 的 harness 子进程在 orchestrator.dispose() 后仍在运行（registry.set 在 adapter.start() 返回之后，:241；dispose 只遍历 registry，:824-831）",
+      "expected": "无在跑的孤儿（对照组成立，R1 场景不成立）",
+      "actual": "{\"psState\":\"S\",\"runningOrphan\":true,\"zombie\":false}",
+      "pass": false,
+      "observation": true
+    },
+    {
+      "id": "R1-f",
+      "name": "对照组 dispose 后同样无在跑的孤儿",
+      "expected": "无在跑的孤儿",
+      "actual": "{\"psState\":\"gone\",\"runningOrphan\":false,\"zombie\":false}",
+      "pass": true
+    }
+  ],
+  "counts": {
+    "total": 6,
+    "pass": 5,
+    "fail": 0,
+    "observations": 1,
+    "observationFindings": 1
+  },
+  "findings": [
+    "R1-e 【发现·不属于本批】R1 的 harness 子进程在 orchestrator.dispose() 后仍在运行（registry.set 在 adapter.start() 返回之后，:241；dispose 只遍历 registry，:824-831） → {\"psState\":\"S\",\"runningOrphan\":true,\"zombie\":false}"
+  ],
+  "reproduced": true,
+  "at": "2026-09-29T09:51:01.063Z"
+}

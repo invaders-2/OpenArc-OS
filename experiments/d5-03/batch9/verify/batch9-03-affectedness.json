@@ -1,0 +1,703 @@
+{
+  "phase": "D5-03 第九批 · 独立验收 · 受影响性分析",
+  "testedHead": "f9133f5d5b8cc4af30c3ca96ee66e0f3c8d39422",
+  "changedFilesThisBatch": [
+    "electron/task-domain.cjs                           |    2 +",
+    "electron/task-harness-orchestrator.cjs             |    2 +-",
+    ".../d5-03/batch9/00-prefix-orchestrator-test.txt   |   70 +",
+    ".../d5-03/batch9/01-postfix-orchestrator-test.txt  |   22 +",
+    ".../d5-03/batch9/02-postfix-orchestrator-ipc.txt   |   23 +",
+    "experiments/d5-03/batch9/03-cancel-run1.txt        |   15 +",
+    "experiments/d5-03/batch9/04-cancel-5x-single.txt   |   55 +",
+    "experiments/d5-03/batch9/05-npm-test-full-1.txt    | 8873 ++++++++++++++++++++",
+    "experiments/d5-03/batch9/06-stress-cancel-1.txt    |   16 +",
+    "experiments/d5-03/batch9/06-stress-cancel-2.txt    |   16 +",
+    "experiments/d5-03/batch9/06-stress-cancel-3.txt    |   16 +",
+    "experiments/d5-03/batch9/06-stress-cancel-4.txt    |   16 +",
+    "experiments/d5-03/batch9/06-stress-cancel-5.txt    |   16 +",
+    "experiments/d5-03/batch9/06-stress-cancel-6.txt    |   16 +",
+    "experiments/d5-03/batch9/07-npm-test-full-2.txt    | 8873 ++++++++++++++++++++",
+    "experiments/d5-03/batch9/08-subset-run.txt         |  278 +",
+    "experiments/d5-03/batch9/09-integrity.txt          |   39 +",
+    "experiments/d5-03/batch9/D5-03-BATCH9-REPORT.md    |  238 +",
+    ".../d5-03/batch9/new-session-unbounded-probe.mjs   |   62 +",
+    ".../harness-acp/session-new-hang-agent.mjs         |   19 +",
+    "tests/fixtures/harness-acp/start-hang-agent.mjs    |    8 +",
+    "tests/fixtures/harness-acp/turn-hang-agent.mjs     |   22 +",
+    "tests/task-harness-cancel.test.mjs                 |  179 +-",
+    "tests/task-harness-orchestrator.test.mjs           |  138 +-",
+    "24 files changed, 18989 insertions(+), 25 deletions(-)"
+  ],
+  "method": "门禁脚本 → 真实执行文件清单 → import/require 传递闭包 → 是否加载改动模块 × 是否可达改动分支",
+  "changedModules": [
+    "electron/task-domain.cjs",
+    "electron/task-harness-orchestrator.cjs"
+  ],
+  "branchMarkers": [
+    "/start-hang-agent\\.mjs/"
+  ],
+  "gateCount": 31,
+  "affectedGates": [
+    "test:d4-02c"
+  ],
+  "unaffectedGates": [
+    "test:d4-01",
+    "test:d4-02a",
+    "test:d4-02b",
+    "test:d4-03a",
+    "test:d4-03b",
+    "test:d4-03c1",
+    "test:d4-03c1-closure",
+    "test:d4-03c2",
+    "test:d4-03c2-closure",
+    "test:d4-03c2-closure2",
+    "test:d4-03c2-closure3",
+    "test:d4-03c3",
+    "test:d4-03c3-closure",
+    "test:d4-03c4",
+    "test:d4-03c4-closure",
+    "test:d4-03c4-closure2",
+    "test:d4-03c4-closure3",
+    "test:d4-03d",
+    "test:d4-03d-closure",
+    "test:d4-03-cg01",
+    "test:d4-04",
+    "test:d4-05",
+    "test:d4-05-memory-ui",
+    "test:d4-06",
+    "test:d4-06-resume",
+    "test:d4-08-verification-ui",
+    "test:d4-08",
+    "test:d4-04-closure2",
+    "test:d4-03c4-ui",
+    "test:d4-03b-dsh"
+  ],
+  "rows": [
+    {
+      "gate": "test:d4-01",
+      "command": "node experiments/d4-01/run-all.mjs",
+      "runner": "experiments/d4-01/run-all.mjs",
+      "how": "run-all.mjs FILES[]",
+      "files": [
+        "tests/model-service.test.mjs",
+        "tests/model-proxy.test.mjs",
+        "tests/model-proxy-child.test.mjs",
+        "tests/model-service-stream.test.mjs",
+        "tests/model-bootstrap.test.mjs",
+        "tests/model-secret-scan.test.mjs",
+        "tests/model-performance.test.mjs",
+        "tests/model-isolation.test.mjs"
+      ],
+      "closureFiles": 44,
+      "loadsChangedModules": [],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "闭包内不加载本批改动模块（electron/task-domain.cjs / electron/task-harness-orchestrator.cjs）→ 不受影响"
+    },
+    {
+      "gate": "test:d4-02a",
+      "command": "node experiments/d4-02a/run-all.mjs",
+      "runner": "experiments/d4-02a/run-all.mjs",
+      "how": "run-all.mjs FILES[]",
+      "files": [
+        "tests/task-domain.test.mjs",
+        "tests/task-store.test.mjs",
+        "tests/task-recovery.test.mjs"
+      ],
+      "closureFiles": 42,
+      "loadsChangedModules": [
+        "electron/task-domain.cjs"
+      ],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "加载改动模块，但闭包内没有「启动超时」产生点（没有任何用例 spawn start-hang-agent / 注入极小 startTimeoutMs 的 hang 夹具）→ 改动的分支不可达，行为逐字节不变"
+    },
+    {
+      "gate": "test:d4-02b",
+      "command": "node experiments/d4-02b/run-all.mjs",
+      "runner": "experiments/d4-02b/run-all.mjs",
+      "how": "run-all.mjs FILES[]",
+      "files": [
+        "tests/harness-acp-protocol.test.mjs",
+        "tests/harness-acp-isolation.test.mjs",
+        "tests/harness-acp-cancel.test.mjs",
+        "tests/harness-acp-lifecycle.test.mjs",
+        "tests/harness-acp-permission.test.mjs"
+      ],
+      "closureFiles": 42,
+      "loadsChangedModules": [],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "闭包内不加载本批改动模块（electron/task-domain.cjs / electron/task-harness-orchestrator.cjs）→ 不受影响"
+    },
+    {
+      "gate": "test:d4-02c",
+      "command": "node experiments/d4-02c/run-all.mjs",
+      "runner": "experiments/d4-02c/run-all.mjs",
+      "how": "run-all.mjs FILES[]",
+      "files": [
+        "tests/task-harness-orchestrator.test.mjs",
+        "tests/task-harness-e2e.test.mjs",
+        "tests/task-harness-cancel.test.mjs",
+        "tests/task-harness-recovery.test.mjs",
+        "tests/task-harness-security.test.mjs",
+        "tests/task-orchestration-migration.test.mjs"
+      ],
+      "closureFiles": 67,
+      "loadsChangedModules": [
+        "electron/task-domain.cjs",
+        "electron/task-harness-orchestrator.cjs"
+      ],
+      "canReachChangedBranch": true,
+      "branchEvidenceFiles": [
+        "tests/task-harness-orchestrator.test.mjs"
+      ],
+      "affected": true,
+      "reason": "加载改动模块且闭包内含启动超时产生点 → 必须重跑"
+    },
+    {
+      "gate": "test:d4-03a",
+      "command": "node experiments/d4-03a/run-all.mjs",
+      "runner": "experiments/d4-03a/run-all.mjs",
+      "how": "run-all.mjs FILES[]",
+      "files": [
+        "tests/tool-registry.test.mjs",
+        "tests/tool-proposal.test.mjs",
+        "tests/tool-authorization.test.mjs",
+        "tests/tool-gate-security.test.mjs",
+        "tests/tool-proposal-e2e.test.mjs",
+        "tests/tool-migration.test.mjs"
+      ],
+      "closureFiles": 66,
+      "loadsChangedModules": [
+        "electron/task-domain.cjs",
+        "electron/task-harness-orchestrator.cjs"
+      ],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "加载改动模块，但闭包内没有「启动超时」产生点（没有任何用例 spawn start-hang-agent / 注入极小 startTimeoutMs 的 hang 夹具）→ 改动的分支不可达，行为逐字节不变"
+    },
+    {
+      "gate": "test:d4-03b",
+      "command": "node experiments/d4-03b/run-all.mjs",
+      "runner": "experiments/d4-03b/run-all.mjs",
+      "how": "run-all.mjs FILES[]",
+      "files": [
+        "tests/tool-execution-readonly.test.mjs",
+        "tests/tool-resource-read.test.mjs",
+        "tests/tool-resource-search.test.mjs",
+        "tests/tool-execution-cancel.test.mjs",
+        "tests/tool-execution-security.test.mjs",
+        "tests/tool-execution-migration.test.mjs",
+        "tests/tool-dsh-facade.test.mjs",
+        "tests/tool-dsh-e2e.test.mjs",
+        "tests/tool-dsh-security.test.mjs",
+        "tests/tool-dsh-cancel.test.mjs",
+        "tests/tool-dsh-lifecycle.test.mjs"
+      ],
+      "closureFiles": 71,
+      "loadsChangedModules": [
+        "electron/task-domain.cjs",
+        "electron/task-harness-orchestrator.cjs"
+      ],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "加载改动模块，但闭包内没有「启动超时」产生点（没有任何用例 spawn start-hang-agent / 注入极小 startTimeoutMs 的 hang 夹具）→ 改动的分支不可达，行为逐字节不变"
+    },
+    {
+      "gate": "test:d4-03c1",
+      "command": "node experiments/d4-03c1/run-all.mjs",
+      "runner": "experiments/d4-03c1/run-all.mjs",
+      "how": "run-all.mjs FILES[]",
+      "files": [
+        "tests/side-effect-domain.test.mjs",
+        "tests/side-effect-approval.test.mjs",
+        "tests/side-effect-lease.test.mjs",
+        "tests/side-effect-idempotency.test.mjs",
+        "tests/side-effect-recovery.test.mjs",
+        "tests/side-effect-security.test.mjs",
+        "tests/side-effect-migration.test.mjs"
+      ],
+      "closureFiles": 68,
+      "loadsChangedModules": [
+        "electron/task-domain.cjs",
+        "electron/task-harness-orchestrator.cjs"
+      ],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "加载改动模块，但闭包内没有「启动超时」产生点（没有任何用例 spawn start-hang-agent / 注入极小 startTimeoutMs 的 hang 夹具）→ 改动的分支不可达，行为逐字节不变"
+    },
+    {
+      "gate": "test:d4-03c1-closure",
+      "command": "node experiments/d4-03c1-closure/run-all.mjs",
+      "runner": "experiments/d4-03c1-closure/run-all.mjs",
+      "how": "run-all.mjs FILES[]",
+      "files": [
+        "tests/side-effect-domain.test.mjs",
+        "tests/side-effect-approval.test.mjs",
+        "tests/side-effect-lease.test.mjs",
+        "tests/side-effect-idempotency.test.mjs",
+        "tests/side-effect-recovery.test.mjs",
+        "tests/side-effect-security.test.mjs",
+        "tests/side-effect-migration.test.mjs",
+        "tests/side-effect-real-contention.test.mjs",
+        "tests/side-effect-real-restart.test.mjs"
+      ],
+      "closureFiles": 70,
+      "loadsChangedModules": [
+        "electron/task-domain.cjs",
+        "electron/task-harness-orchestrator.cjs"
+      ],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "加载改动模块，但闭包内没有「启动超时」产生点（没有任何用例 spawn start-hang-agent / 注入极小 startTimeoutMs 的 hang 夹具）→ 改动的分支不可达，行为逐字节不变"
+    },
+    {
+      "gate": "test:d4-03c2",
+      "command": "node experiments/d4-03c2/run-all.mjs",
+      "runner": "experiments/d4-03c2/run-all.mjs",
+      "how": "run-all.mjs FILES[]",
+      "files": [
+        "tests/side-effect-write-e2e.test.mjs",
+        "tests/side-effect-write-gates.test.mjs"
+      ],
+      "closureFiles": 63,
+      "loadsChangedModules": [
+        "electron/task-domain.cjs",
+        "electron/task-harness-orchestrator.cjs"
+      ],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "加载改动模块，但闭包内没有「启动超时」产生点（没有任何用例 spawn start-hang-agent / 注入极小 startTimeoutMs 的 hang 夹具）→ 改动的分支不可达，行为逐字节不变"
+    },
+    {
+      "gate": "test:d4-03c2-closure",
+      "command": "node experiments/d4-03c2-closure/run-all.mjs",
+      "runner": "experiments/d4-03c2-closure/run-all.mjs",
+      "how": "run-all.mjs FILES[]",
+      "files": [
+        "tests/side-effect-write-e2e.test.mjs",
+        "tests/side-effect-write-gates.test.mjs",
+        "tests/side-effect-c2-closure.test.mjs"
+      ],
+      "closureFiles": 64,
+      "loadsChangedModules": [
+        "electron/task-domain.cjs",
+        "electron/task-harness-orchestrator.cjs"
+      ],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "加载改动模块，但闭包内没有「启动超时」产生点（没有任何用例 spawn start-hang-agent / 注入极小 startTimeoutMs 的 hang 夹具）→ 改动的分支不可达，行为逐字节不变"
+    },
+    {
+      "gate": "test:d4-03c2-closure2",
+      "command": "node experiments/d4-03c2-closure2/run-all.mjs",
+      "runner": "experiments/d4-03c2-closure2/run-all.mjs",
+      "how": "run-all.mjs FILES[]",
+      "files": [
+        "tests/side-effect-write-e2e.test.mjs",
+        "tests/side-effect-write-gates.test.mjs",
+        "tests/side-effect-c2-closure.test.mjs",
+        "tests/side-effect-c2-closure2.test.mjs"
+      ],
+      "closureFiles": 65,
+      "loadsChangedModules": [
+        "electron/task-domain.cjs",
+        "electron/task-harness-orchestrator.cjs"
+      ],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "加载改动模块，但闭包内没有「启动超时」产生点（没有任何用例 spawn start-hang-agent / 注入极小 startTimeoutMs 的 hang 夹具）→ 改动的分支不可达，行为逐字节不变"
+    },
+    {
+      "gate": "test:d4-03c2-closure3",
+      "command": "node experiments/d4-03c2-closure3/run-all.mjs",
+      "runner": "experiments/d4-03c2-closure3/run-all.mjs",
+      "how": "run-all.mjs FILES[]",
+      "files": [
+        "tests/side-effect-write-e2e.test.mjs",
+        "tests/side-effect-write-gates.test.mjs",
+        "tests/side-effect-c2-closure.test.mjs",
+        "tests/side-effect-c2-closure2.test.mjs",
+        "tests/side-effect-c2-closure3.test.mjs"
+      ],
+      "closureFiles": 66,
+      "loadsChangedModules": [
+        "electron/task-domain.cjs",
+        "electron/task-harness-orchestrator.cjs"
+      ],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "加载改动模块，但闭包内没有「启动超时」产生点（没有任何用例 spawn start-hang-agent / 注入极小 startTimeoutMs 的 hang 夹具）→ 改动的分支不可达，行为逐字节不变"
+    },
+    {
+      "gate": "test:d4-03c3",
+      "command": "node experiments/d4-03c3/run-all.mjs",
+      "runner": "experiments/d4-03c3/run-all.mjs",
+      "how": "run-all.mjs FILES[]",
+      "files": [
+        "tests/side-effect-migration.test.mjs",
+        "tests/side-effect-write-e2e.test.mjs",
+        "tests/side-effect-write-gates.test.mjs",
+        "tests/side-effect-c2-closure3.test.mjs",
+        "tests/side-effect-c3-unknown-effect.test.mjs",
+        "tests/side-effect-c3-crash.test.mjs"
+      ],
+      "closureFiles": 67,
+      "loadsChangedModules": [
+        "electron/task-domain.cjs",
+        "electron/task-harness-orchestrator.cjs"
+      ],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "加载改动模块，但闭包内没有「启动超时」产生点（没有任何用例 spawn start-hang-agent / 注入极小 startTimeoutMs 的 hang 夹具）→ 改动的分支不可达，行为逐字节不变"
+    },
+    {
+      "gate": "test:d4-03c3-closure",
+      "command": "node experiments/d4-03c3-closure/run-all.mjs",
+      "runner": "experiments/d4-03c3-closure/run-all.mjs",
+      "how": "run-all.mjs FILES[]",
+      "files": [
+        "tests/side-effect-migration.test.mjs",
+        "tests/side-effect-write-e2e.test.mjs",
+        "tests/side-effect-write-gates.test.mjs",
+        "tests/side-effect-c2-closure3.test.mjs",
+        "tests/side-effect-c3-unknown-effect.test.mjs",
+        "tests/side-effect-c3-crash.test.mjs",
+        "tests/side-effect-c3-closure.test.mjs"
+      ],
+      "closureFiles": 68,
+      "loadsChangedModules": [
+        "electron/task-domain.cjs",
+        "electron/task-harness-orchestrator.cjs"
+      ],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "加载改动模块，但闭包内没有「启动超时」产生点（没有任何用例 spawn start-hang-agent / 注入极小 startTimeoutMs 的 hang 夹具）→ 改动的分支不可达，行为逐字节不变"
+    },
+    {
+      "gate": "test:d4-03c4",
+      "command": "node experiments/d4-03c4/run-all.mjs",
+      "runner": "experiments/d4-03c4/run-all.mjs",
+      "how": "run-all.mjs FILES[]",
+      "files": [
+        "tests/side-effect-c4-runtime.test.mjs",
+        "tests/side-effect-c4-gates.test.mjs",
+        "tests/side-effect-c4-dsh-write.test.mjs"
+      ],
+      "closureFiles": 64,
+      "loadsChangedModules": [
+        "electron/task-domain.cjs",
+        "electron/task-harness-orchestrator.cjs"
+      ],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "加载改动模块，但闭包内没有「启动超时」产生点（没有任何用例 spawn start-hang-agent / 注入极小 startTimeoutMs 的 hang 夹具）→ 改动的分支不可达，行为逐字节不变"
+    },
+    {
+      "gate": "test:d4-03c4-closure",
+      "command": "node experiments/d4-03c4-closure/run-all.mjs",
+      "runner": "experiments/d4-03c4-closure/run-all.mjs",
+      "how": "run-all.mjs FILES[]",
+      "files": [
+        "tests/side-effect-c4-closure.test.mjs"
+      ],
+      "closureFiles": 61,
+      "loadsChangedModules": [
+        "electron/task-domain.cjs",
+        "electron/task-harness-orchestrator.cjs"
+      ],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "加载改动模块，但闭包内没有「启动超时」产生点（没有任何用例 spawn start-hang-agent / 注入极小 startTimeoutMs 的 hang 夹具）→ 改动的分支不可达，行为逐字节不变"
+    },
+    {
+      "gate": "test:d4-03c4-closure2",
+      "command": "node experiments/d4-03c4-closure2/run-all.mjs",
+      "runner": "experiments/d4-03c4-closure2/run-all.mjs",
+      "how": "run-all.mjs FILES[]",
+      "files": [
+        "tests/side-effect-c4-closure2.test.mjs"
+      ],
+      "closureFiles": 61,
+      "loadsChangedModules": [
+        "electron/task-domain.cjs",
+        "electron/task-harness-orchestrator.cjs"
+      ],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "加载改动模块，但闭包内没有「启动超时」产生点（没有任何用例 spawn start-hang-agent / 注入极小 startTimeoutMs 的 hang 夹具）→ 改动的分支不可达，行为逐字节不变"
+    },
+    {
+      "gate": "test:d4-03c4-closure3",
+      "command": "node experiments/d4-03c4-closure3/run-all.mjs",
+      "runner": "experiments/d4-03c4-closure3/run-all.mjs",
+      "how": "run-all.mjs FILES[]",
+      "files": [
+        "tests/side-effect-c4-closure3.test.mjs"
+      ],
+      "closureFiles": 61,
+      "loadsChangedModules": [
+        "electron/task-domain.cjs",
+        "electron/task-harness-orchestrator.cjs"
+      ],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "加载改动模块，但闭包内没有「启动超时」产生点（没有任何用例 spawn start-hang-agent / 注入极小 startTimeoutMs 的 hang 夹具）→ 改动的分支不可达，行为逐字节不变"
+    },
+    {
+      "gate": "test:d4-03d",
+      "command": "node experiments/d4-03d/run-all.mjs",
+      "runner": "experiments/d4-03d/run-all.mjs",
+      "how": "run-all.mjs FILES[]",
+      "files": [
+        "tests/tool-d4-03d-e2e.test.mjs",
+        "tests/tool-d4-03d-authority.test.mjs",
+        "tests/tool-d4-03d-audit.test.mjs",
+        "tests/tool-dsh-facade.test.mjs",
+        "tests/tool-dsh-e2e.test.mjs",
+        "tests/tool-dsh-security.test.mjs",
+        "tests/tool-dsh-cancel.test.mjs",
+        "tests/tool-dsh-lifecycle.test.mjs",
+        "tests/side-effect-c4-dsh-write.test.mjs"
+      ],
+      "closureFiles": 69,
+      "loadsChangedModules": [
+        "electron/task-domain.cjs",
+        "electron/task-harness-orchestrator.cjs"
+      ],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "加载改动模块，但闭包内没有「启动超时」产生点（没有任何用例 spawn start-hang-agent / 注入极小 startTimeoutMs 的 hang 夹具）→ 改动的分支不可达，行为逐字节不变"
+    },
+    {
+      "gate": "test:d4-03d-closure",
+      "command": "node experiments/d4-03d-closure/run-all.mjs",
+      "runner": "experiments/d4-03d-closure/run-all.mjs",
+      "how": "run-all.mjs FILES[]",
+      "files": [
+        "tests/tool-d4-03d-closure.test.mjs",
+        "tests/tool-d4-03d-e2e.test.mjs",
+        "tests/tool-d4-03d-authority.test.mjs",
+        "tests/tool-d4-03d-audit.test.mjs",
+        "tests/tool-dsh-facade.test.mjs",
+        "tests/tool-dsh-e2e.test.mjs",
+        "tests/tool-dsh-security.test.mjs",
+        "tests/tool-dsh-cancel.test.mjs",
+        "tests/tool-dsh-lifecycle.test.mjs",
+        "tests/side-effect-c4-dsh-write.test.mjs"
+      ],
+      "closureFiles": 70,
+      "loadsChangedModules": [
+        "electron/task-domain.cjs",
+        "electron/task-harness-orchestrator.cjs"
+      ],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "加载改动模块，但闭包内没有「启动超时」产生点（没有任何用例 spawn start-hang-agent / 注入极小 startTimeoutMs 的 hang 夹具）→ 改动的分支不可达，行为逐字节不变"
+    },
+    {
+      "gate": "test:d4-03-cg01",
+      "command": "node experiments/d4-03-cg01/run-all.mjs",
+      "runner": "experiments/d4-03-cg01/run-all.mjs",
+      "how": "run-all.mjs FILES[]",
+      "files": [
+        "tests/d4-03-lease-acquire-state-protection.test.mjs",
+        "tests/d4-03-lease-state-integrity.test.mjs",
+        "tests/d4-03-deny-state-protection.test.mjs"
+      ],
+      "closureFiles": 65,
+      "loadsChangedModules": [
+        "electron/task-domain.cjs",
+        "electron/task-harness-orchestrator.cjs"
+      ],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "加载改动模块，但闭包内没有「启动超时」产生点（没有任何用例 spawn start-hang-agent / 注入极小 startTimeoutMs 的 hang 夹具）→ 改动的分支不可达，行为逐字节不变"
+    },
+    {
+      "gate": "test:d4-04",
+      "command": "npm run build && node tests/d4-04-smoke.mjs",
+      "runner": "tests/d4-04-smoke.mjs",
+      "how": "package.json 命令直给",
+      "files": [
+        "tests/d4-04-smoke.mjs"
+      ],
+      "closureFiles": 3,
+      "loadsChangedModules": [],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "闭包内不加载本批改动模块（electron/task-domain.cjs / electron/task-harness-orchestrator.cjs）→ 不受影响"
+    },
+    {
+      "gate": "test:d4-05",
+      "command": "npm run build && node tests/d4-05-smoke.mjs",
+      "runner": "tests/d4-05-smoke.mjs",
+      "how": "package.json 命令直给",
+      "files": [
+        "tests/d4-05-smoke.mjs"
+      ],
+      "closureFiles": 1,
+      "loadsChangedModules": [],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "闭包内不加载本批改动模块（electron/task-domain.cjs / electron/task-harness-orchestrator.cjs）→ 不受影响"
+    },
+    {
+      "gate": "test:d4-05-memory-ui",
+      "command": "npm run build && node tests/d4-05-memory-ui.mjs",
+      "runner": "tests/d4-05-memory-ui.mjs",
+      "how": "package.json 命令直给",
+      "files": [
+        "tests/d4-05-memory-ui.mjs"
+      ],
+      "closureFiles": 3,
+      "loadsChangedModules": [],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "闭包内不加载本批改动模块（electron/task-domain.cjs / electron/task-harness-orchestrator.cjs）→ 不受影响"
+    },
+    {
+      "gate": "test:d4-06",
+      "command": "npm run build && node tests/d4-06-smoke.mjs",
+      "runner": "tests/d4-06-smoke.mjs",
+      "how": "package.json 命令直给",
+      "files": [
+        "tests/d4-06-smoke.mjs"
+      ],
+      "closureFiles": 1,
+      "loadsChangedModules": [],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "闭包内不加载本批改动模块（electron/task-domain.cjs / electron/task-harness-orchestrator.cjs）→ 不受影响"
+    },
+    {
+      "gate": "test:d4-06-resume",
+      "command": "npm run build && node tests/d4-06-resume-ui.mjs",
+      "runner": "tests/d4-06-resume-ui.mjs",
+      "how": "package.json 命令直给",
+      "files": [
+        "tests/d4-06-resume-ui.mjs"
+      ],
+      "closureFiles": 3,
+      "loadsChangedModules": [],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "闭包内不加载本批改动模块（electron/task-domain.cjs / electron/task-harness-orchestrator.cjs）→ 不受影响"
+    },
+    {
+      "gate": "test:d4-08-verification-ui",
+      "command": "npm run build && node tests/d4-08-verification-ui.mjs",
+      "runner": "tests/d4-08-verification-ui.mjs",
+      "how": "package.json 命令直给",
+      "files": [
+        "tests/d4-08-verification-ui.mjs"
+      ],
+      "closureFiles": 3,
+      "loadsChangedModules": [],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "闭包内不加载本批改动模块（electron/task-domain.cjs / electron/task-harness-orchestrator.cjs）→ 不受影响"
+    },
+    {
+      "gate": "test:d4-08",
+      "command": "node --test --test-concurrency=1 tests/d4-08-budget-carryover.test.mjs",
+      "runner": "--test-concurrency=1",
+      "how": "package.json 命令直给",
+      "files": [
+        "tests/d4-08-budget-carryover.test.mjs"
+      ],
+      "closureFiles": 61,
+      "loadsChangedModules": [
+        "electron/task-domain.cjs",
+        "electron/task-harness-orchestrator.cjs"
+      ],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "加载改动模块，但闭包内没有「启动超时」产生点（没有任何用例 spawn start-hang-agent / 注入极小 startTimeoutMs 的 hang 夹具）→ 改动的分支不可达，行为逐字节不变"
+    },
+    {
+      "gate": "test:d4-04-closure2",
+      "command": "node --test tests/d4-04-closure2-boot.test.mjs",
+      "runner": "tests/d4-04-closure2-boot.test.mjs",
+      "how": "package.json 命令直给",
+      "files": [
+        "tests/d4-04-closure2-boot.test.mjs"
+      ],
+      "closureFiles": 74,
+      "loadsChangedModules": [
+        "electron/task-domain.cjs",
+        "electron/task-harness-orchestrator.cjs"
+      ],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "加载改动模块，但闭包内没有「启动超时」产生点（没有任何用例 spawn start-hang-agent / 注入极小 startTimeoutMs 的 hang 夹具）→ 改动的分支不可达，行为逐字节不变"
+    },
+    {
+      "gate": "test:d4-03c4-ui",
+      "command": "npm run build && node tests/side-effect-approval-ui.mjs",
+      "runner": "tests/side-effect-approval-ui.mjs",
+      "how": "package.json 命令直给",
+      "files": [
+        "tests/side-effect-approval-ui.mjs"
+      ],
+      "closureFiles": 1,
+      "loadsChangedModules": [],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "闭包内不加载本批改动模块（electron/task-domain.cjs / electron/task-harness-orchestrator.cjs）→ 不受影响"
+    },
+    {
+      "gate": "test:d4-03b-dsh",
+      "command": "node --test --test-concurrency=1 tests/tool-dsh-facade.test.mjs tests/tool-dsh-e2e.test.mjs tests/tool-dsh-security.test.mjs tests/tool-dsh-cancel.test.mjs tests/tool-dsh-lifecycle.test.mjs",
+      "runner": "--test-concurrency=1",
+      "how": "package.json 命令直给",
+      "files": [
+        "tests/tool-dsh-facade.test.mjs",
+        "tests/tool-dsh-e2e.test.mjs",
+        "tests/tool-dsh-security.test.mjs",
+        "tests/tool-dsh-cancel.test.mjs",
+        "tests/tool-dsh-lifecycle.test.mjs"
+      ],
+      "closureFiles": 65,
+      "loadsChangedModules": [
+        "electron/task-domain.cjs",
+        "electron/task-harness-orchestrator.cjs"
+      ],
+      "canReachChangedBranch": false,
+      "branchEvidenceFiles": [],
+      "affected": false,
+      "reason": "加载改动模块，但闭包内没有「启动超时」产生点（没有任何用例 spawn start-hang-agent / 注入极小 startTimeoutMs 的 hang 夹具）→ 改动的分支不可达，行为逐字节不变"
+    }
+  ],
+  "at": "2026-09-29T09:46:05.984Z"
+}
