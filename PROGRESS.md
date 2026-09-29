@@ -1928,6 +1928,51 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 
 **本批闭环的旧缺口**：第九批 §3 遗留的 **R1**（`newSession` 无上界）与 **R1-e**（无界段 dispose / cancel 触达不到 adapter）——已实施并验证（见 §1）。
 
-剩余缺口逐条：① R2（取消后 call 停 `STARTED`，已定性为不同根因）另案；② 应用退出路径未调用 `orchestrator.dispose()`（待裁决）；③ 两条既有确定性失败（`d4-03-approval-push-isolation` P2、`side-effect-c4-gates` No Direct Domain Bypass）另案；④ 上述 notVerified 4 条；⑤ `START_MARGIN_MS` 与产品预算同步约束；⑥ 跨组织真机 2 条 notVerified；⑦ 两条探针门禁既有失败；⑧ OAuth；⑨ 插件隔离（D5-08）；⑩ D5-02 `prompt()` 遗留；⑪ SIGKILL 边界；⑫ 第五批登记其余残留。
+剩余缺口逐条：① R2（取消后 call 停 `STARTED`，已定性为不同根因）另案；② 应用退出路径未调用 `orchestrator.dispose()`（待裁决）【第十一批已实施：will-quit 改调 app-shutdown.cjs 的唯一收尾顺序，Harness 先收、modelProxy/store 后关；并修掉 quit 微任务挂死；见第十一批节】；③ 两条既有确定性失败（`d4-03-approval-push-isolation` P2、`side-effect-c4-gates` No Direct Domain Bypass）另案；④ 上述 notVerified 4 条；⑤ `START_MARGIN_MS` 与产品预算同步约束；⑥ 跨组织真机 2 条 notVerified；⑦ 两条探针门禁既有失败；⑧ OAuth；⑨ 插件隔离（D5-08）；⑩ D5-02 `prompt()` 遗留；⑪ SIGKILL 边界；⑫ 第五批登记其余残留。
 
-下一步建议：R2 裁决（取消路径终结 model call 信封）→ 应用退出路径是否调用 `orchestrator.dispose()`（一行接线，但属产品行为变更，需裁决）→ 两条既有确定性失败另案 → 两条探针门禁单独排期 → 跨组织真机入口 → OAuth → 真实第三方 / Adobe（D5-04 / D5-05）。
+下一步建议：R2 裁决（取消路径终结 model call 信封）→ 【第十一批已完成：应用退出路径是否调用 `orchestrator.dispose()`】原建议：R2 裁决（取消路径终结 model call 信封）→ 应用退出路径是否调用 `orchestrator.dispose()`（一行接线，但属产品行为变更，需裁决）→ 两条既有确定性失败另案 → 两条探针门禁单独排期 → 跨组织真机入口 → OAuth → 真实第三方 / Adobe（D5-04 / D5-05）。
+
+# D5-03 第十一批 · 应用正常退出时收尾 Harness · 2026-09-29（`0eed84c`）
+
+> **口径（用户明确定范围）**：本批 = 第十批登记的「应用退出路径（`electron/main.cjs` 的 `will-quit`）从未调用 `orchestrator.dispose()`」**一项**；**R2**（取消后 model call 停在 `STARTED`）**留给下一批，未混入**。**不调宽任何超时、不跳过测试、不放松断言**；**未做 OAuth、D5-04、未新增「创建组织」入口**；只在 `/Users/wepingli/Desktop/OpenArc OS-integration` 工作，未触碰主工作树 17 项改动、DSH Desktop 共享运行时与 `~/.dsh`，未 push。
+> **判定：D5-03 第十一批（应用正常退出时收尾 Harness）= PASS（限定范围：will-quit 确实收尾 Harness，顺序 / 有界 / 不伪造终态 / 重复 quit 全部有真实 Electron 证据；并顺带修掉门禁暴露的 quit 微任务挂死缺陷；R2 与新登记项如实单列）；D5-03 整体仍 = PARTIAL**。
+> **被测 commit**：`0eed84c`（父 `7569016`，单提交；改动面 `electron/app-shutdown.cjs` +80/−0（新增）、`electron/main.cjs` +23/−19、`package.json` +1/−0、`tests/app-shutdown.test.mjs` +92/−0（新增）、`tests/fixtures/harness-acp/echo-agent.mjs` +31/−0（新增）、`experiments/d5-03/batch11/verify/**` 验收脚本；`src/**` **0 行改动**、`SCHEMA_VERSION` 仍 **21**、预算 `30000 / 180000` 未动）。
+> **证据**：`experiments/d5-03/batch11/verify/`（`01-exit-e2e.txt`、`02-gate-d4-02c.txt`、`03-npm-test-full.txt`、`04-quit-microtask-repro.txt`、`exit-e2e.mjs`、`app/**`、`quit-microtask-repro.mjs`；运行产物 `runs/**` 已 gitignore）；执行方报告 `experiments/d5-03/batch11/D5-03-BATCH11-REPORT.md`；tracked 证据 `docs/D5-03-GATE-EVIDENCE.json` 的 `batch11` 段（**纯插入**：`git diff --numstat` = `181 / 0`，旧段自 `"batch10"` 起至 EOF **逐字节相同**，已机械校验）。
+
+## 1. 任务状态
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| 退出时收尾 Harness | **已完成** | `electron/main.cjs` 的 `will-quit` 改调 `app-shutdown.cjs` 的 `disposeAppResources()` → `orchestrator.dispose()`：停下在途启动 / 执行、撤销模型与工具能力、回收 harness 子进程与 bridge、删临时目录；6 场景真实退出中 `harness.timedOut=false`，退出后后代进程 **0** |
+| 收尾顺序 | **已完成** | `Promise.all[ MCP 有界 dispose(2s) , Harness 有界 dispose(8s) ] → modelProxy.stop → store.close`；每场景 `proxyStopped=true` 且 `storeClosed=true`（先停 Harness、后关库） |
+| 有界退出 | **已完成** | 单项超时（`DISPOSE_TIMEOUT` / `HARNESS_DISPOSE_TIMEOUT`）或抛错只留痕；单测证明「MCP 抛错 / Harness 卡死都不跳过后面的 `proxy.stop` / `store.close`」；6 场景退出时长 **111–564ms** |
+| 重复 quit | **已完成** | `quitting` 标志在 `preventDefault()` 之前同步置位；场景 D 连续两次 `app.quit()`：exit 0、终态唯一、0 孤儿 |
+| 不伪造终态 | **已完成** | 退出只收资源、**0 处状态写入**：退出前库中 `RUNNING`（A/B/C/D）→ 重启后 `BLOCKED + RECOVERY_REQUIRED`；对照 E 正常成功仍 `SUCCEEDED`、F 用户取消仍 `CANCELLED`（都未被退出改写） |
+| 真实 Electron 退出验收 | **86 / 86 PASS · exit 0 · 41s** | 6 场景 ×（退出码 / 时长 / 在途后代进程峰值 / 退出后孤儿 / 库可重开 / 库中状态 / 重启恢复）+ 旧能力请求被拒 + MCP 流关闭 + 全批残留自检 0 |
+| 门禁（受影响） | **全部 exit 0** | `test:d5-03-exit` 86/86（41s）；`app-shutdown` 单测 5/5；`test:d4-02c` 33/33（47s，dsh 0.1.5-rc.2 / acp 1.4.0 / schema 21）；MCP 生命周期+流 17/17；boot 顺序 14/14 |
+| 全量 `npm test` | **exit 1，如实单列** | **1399 tests / 1397 pass / 2 fail**（duration 139671ms）：两条**既有确定性失败**（`d4-03-approval-push-isolation` P2、`side-effect-c4-gates` No Direct Domain Bypass）**未修**；**无新增失败、无 flake、无 skipped**；1394 → 1399 = 本批新增单测 5 条 |
+| 顺带修掉的真实缺陷 | **已完成** | 原实现 `disposeMcpBounded(...).then(() => app.quit())`：**在 `.then()` 微任务里再调 `app.quit()`，Electron 44 不会继续退出序列**（停在 `will-quit`、进程只能被外部杀）→ 最小复现两种模式对照（微任务 8.2s 挂死被 SIGKILL / 宏任务 1.29s exit 0）；修法 = 收尾完成后 `setImmediate` 里 quit + 3s 有界保险丝 `app.exit(0)` |
+| 断言变更清单 | **无既有断言改动** | 无既有断言被修改 / 放宽 / 跳过；新增 `tests/app-shutdown.test.mjs` 5 条 + 真实退出驱动 86 条 |
+
+## 2. 三轴判定（分列）
+
+* **功能 = 通过（限定范围）**：6 场景真实 Electron 退出全部 exit 0 且有界；Harness 先收、proxy/store 后关；0 孤儿；旧能力被拒（原 baseUrl `ECONNREFUSED` + 能力账本 `REVOKED`）；MCP 服务端 `openStreams=0`；库 `integrity_check=ok` 且 `-wal` 0 字节；未完成任务重启后 `BLOCKED + RECOVERY_REQUIRED`；正常成功与用户取消两个对照未被改写。
+* **视觉 = 本批不适用（如实披露）**：`src/**` 0 行改动，退出过程无界面变化；**未做截图**。
+* **动效 = 本批不适用（如实披露）**：无动效改动。
+
+## 3. notVerified 与缺口（如实登记）
+
+* **notVerified 4 条**：① 未做界面截图（无界面改动）；② 退出保险丝 `app.exit(0)` 的触发路径未构造用例（正常收尾耗时可忽略，只在退出序列不推进时生效）；③ 崩溃 / SIGKILL / 断电退出（无 `will-quit` 机会）不在本批；④ 「旧能力请求被拒」用端口释放 + 能力账本共同证明（进程已退出，无法再发真实请求）。
+* **本批新登记（不修，单列）**：**用户取消后 `runTask` promise 在有在途模型调用时不收敛**——场景 F 取消后 20s 内 `runTask` 仍未 settle，而 task / run 已是 `CANCELLED`；与 **R2** 同一片区域（取消路径 × 在途 model call）但证据不同（本次是 run promise 不收敛，R2 是 call 停在 `STARTED`）→ **建议与 R2 同批裁决**。
+* **继续单列**：R2（未修）· 两条既有确定性失败（未修）· `START_MARGIN_MS` 与产品预算成对 · 跨组织真机 2 条 notVerified · 两条探针门禁既有失败（`governance-ui` 1/5、`model-keychain-restart` 3/15）· OAuth · 插件隔离（D5-08）· D5-02 `prompt()` 遗留 · SIGKILL 边界 · 历史调试 run 目录。
+* **本批新增临时产物**：`experiments/d5-03/batch11/verify/runs/**`（隔离安装 / 数据库 / 日志，已 gitignore）；`/tmp/oa-quit*/**`（最小复现用的临时 Electron 应用）。
+
+## 4. 判定与下一步
+
+**判定：D5-03 第十一批（应用正常退出时收尾 Harness）= PASS（限定范围：will-quit 确实收尾 Harness，顺序 / 有界 / 不伪造终态 / 重复 quit 有真实 Electron 证据；并修掉 quit 微任务挂死）；R2 与新登记项如实单列；D5-03 整体仍 = PARTIAL。**
+
+**本批闭环的旧缺口**：第十批登记的「应用退出路径未调用 `orchestrator.dispose()`」——已实施并验证（见 §1）。
+
+剩余缺口逐条：① R2（取消后 call 停 `STARTED`，已定性为不同根因）另案；② 新登记：用户取消后 `runTask` promise 不收敛（建议与 R2 同批）；③ 两条既有确定性失败（`d4-03-approval-push-isolation` P2、`side-effect-c4-gates` No Direct Domain Bypass）另案；④ 上述 notVerified 4 条；⑤ `START_MARGIN_MS` 与产品预算同步约束；⑥ 跨组织真机 2 条 notVerified；⑦ 两条探针门禁既有失败；⑧ OAuth；⑨ 插件隔离（D5-08）；⑩ D5-02 `prompt()` 遗留；⑪ SIGKILL 边界；⑫ 第五批登记其余残留。
+
+下一步建议：R2 + 「取消后 runTask 不收敛」合并裁决（取消路径终结 model call 信封与 run 收敛）→ 两条既有确定性失败另案 → 两条探针门禁单独排期 → 跨组织真机入口 → OAuth → 真实第三方 / Adobe（D5-04 / D5-05）。

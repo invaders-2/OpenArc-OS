@@ -1,0 +1,226 @@
+
+> openarc-os@0.1.0 test:d4-02c
+> node experiments/d4-02c/run-all.mjs
+
+TAP version 13
+# (node:75088) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Cancel E2E：真实 slow provider → 用户取消 → 0 retry + capability revoked + CANCELLED
+ok 1 - Cancel E2E：真实 slow provider → 用户取消 → 0 retry + capability revoked + CANCELLED
+  ---
+  duration_ms: 5900.389916
+  type: 'test'
+  ...
+# Subtest: Cancel Race：cancel 先行 → 绝不 Task CANCELLED + Step SUCCEEDED
+ok 2 - Cancel Race：cancel 先行 → 绝不 Task CANCELLED + Step SUCCEEDED
+  ---
+  duration_ms: 452.880209
+  type: 'test'
+  ...
+# Subtest: Cancel 后不存在 Provider retry：abort 只发生一次
+ok 3 - Cancel 后不存在 Provider retry：abort 只发生一次
+  ---
+  duration_ms: 5162.029916
+  type: 'test'
+  ...
+# Subtest: 启动未返回时取消：session/new 阻塞中 cancel → 唯一 CANCELLED + 子进程被回收 + 能力撤销 + 旧 token 401
+ok 4 - 启动未返回时取消：session/new 阻塞中 cancel → 唯一 CANCELLED + 子进程被回收 + 能力撤销 + 旧 token 401
+  ---
+  duration_ms: 520.542666
+  type: 'test'
+  ...
+# Subtest: 启动临界点竞争：session/new 即将回应时 cancel 先行 → 绝不 CANCELLED 与 SUCCEEDED 翻转、绝不 prompt
+ok 5 - 启动临界点竞争：session/new 即将回应时 cancel 先行 → 绝不 CANCELLED 与 SUCCEEDED 翻转、绝不 prompt
+  ---
+  duration_ms: 1979.947417
+  type: 'test'
+  ...
+# Subtest: 启动未返回时应用 dispose：有界收敛、0 孤儿、0 未处理 Promise 异常、run 不悬挂
+ok 6 - 启动未返回时应用 dispose：有界收敛、0 孤儿、0 未处理 Promise 异常、run 不悬挂
+  ---
+  duration_ms: 650.106458
+  type: 'test'
+  ...
+# (node:75099) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Vertical E2E：Task→Step→Harness→Proxy→Fake Provider→Artifact→Verification→SUCCEEDED
+ok 7 - Vertical E2E：Task→Step→Harness→Proxy→Fake Provider→Artifact→Verification→SUCCEEDED
+  ---
+  duration_ms: 1211.402458
+  type: 'test'
+  ...
+# Subtest: Tool proposal E2E：真实 ACP tool_call → 0 execution → BLOCKED
+ok 8 - Tool proposal E2E：真实 ACP tool_call → 0 execution → BLOCKED
+  ---
+  duration_ms: 485.061917
+  type: 'test'
+  ...
+# Subtest: Permission request E2E：真实 ACP request_permission → reject → BLOCKED
+ok 9 - Permission request E2E：真实 ACP request_permission → reject → BLOCKED
+  ---
+  duration_ms: 463.706042
+  type: 'test'
+  ...
+# (node:75103) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: ACP → TaskEvent mapping 显式、聚合 text、丢 reasoning、洪泛有上限
+ok 10 - ACP → TaskEvent mapping 显式、聚合 text、丢 reasoning、洪泛有上限
+  ---
+  duration_ms: 1.095
+  type: 'test'
+  ...
+# Subtest: prompt 只含 goal + safe input，且 schema 版本冻结
+ok 11 - prompt 只含 goal + safe input，且 schema 版本冻结
+  ---
+  duration_ms: 0.167209
+  type: 'test'
+  ...
+# Subtest: turn 成功：Artifact + Verification PASS → Step/Task SUCCEEDED
+ok 12 - turn 成功：Artifact + Verification PASS → Step/Task SUCCEEDED
+  ---
+  duration_ms: 473.248958
+  type: 'test'
+  ...
+# Subtest: 成功必须 Verification PASS：文本不符 → BLOCKED 且 0 artifact
+ok 13 - 成功必须 Verification PASS：文本不符 → BLOCKED 且 0 artifact
+  ---
+  duration_ms: 431.640333
+  type: 'test'
+  ...
+# Subtest: Artifact 写入失败：Step/Task 绝不 SUCCEEDED，且无 artifact（失败原子性）
+ok 14 - Artifact 写入失败：Step/Task 绝不 SUCCEEDED，且无 artifact（失败原子性）
+  ---
+  duration_ms: 410.021833
+  type: 'test'
+  ...
+# Subtest: Harness crash → BLOCKED + HARNESS_PROCESS_EXITED，0 respawn
+ok 15 - Harness crash → BLOCKED + HARNESS_PROCESS_EXITED，0 respawn
+  ---
+  duration_ms: 408.966542
+  type: 'test'
+  ...
+# Subtest: turn timeout → BLOCKED + HARNESS_TURN_TIMEOUT，0 第二次 prompt
+ok 16 - turn timeout → BLOCKED + HARNESS_TURN_TIMEOUT，0 第二次 prompt
+  ---
+  duration_ms: 410.706166
+  type: 'test'
+  ...
+# Subtest: Tool proposal → 0 execution + BLOCKED TOOL_EXECUTION_NOT_AVAILABLE
+ok 17 - Tool proposal → 0 execution + BLOCKED TOOL_EXECUTION_NOT_AVAILABLE
+  ---
+  duration_ms: 410.828542
+  type: 'test'
+  ...
+# Subtest: Permission request → reject + BLOCKED PERMISSION_NOT_AVAILABLE，0 execution
+ok 18 - Permission request → reject + BLOCKED PERMISSION_NOT_AVAILABLE，0 execution
+  ---
+  duration_ms: 427.486792
+  type: 'test'
+  ...
+# Subtest: classifyHarnessError：启动超时 / 执行超时各自映射，绝不互相改写
+ok 19 - classifyHarnessError：启动超时 / 执行超时各自映射，绝不互相改写
+  ---
+  duration_ms: 0.350125
+  type: 'test'
+  ...
+# Subtest: 启动超时（真实 adapter + 可控阻塞 initialize）→ HARNESS_START_TIMEOUT · BLOCKED · capability 撤销 · 0 重试
+ok 20 - 启动超时（真实 adapter + 可控阻塞 initialize）→ HARNESS_START_TIMEOUT · BLOCKED · capability 撤销 · 0 重试
+  ---
+  duration_ms: 1117.021792
+  type: 'test'
+  ...
+# Subtest: 执行超时（真实 adapter + 可控阻塞 prompt）→ HARNESS_TURN_TIMEOUT · BLOCKED · capability 撤销 · 恰好 1 次 prompt
+ok 21 - 执行超时（真实 adapter + 可控阻塞 prompt）→ HARNESS_TURN_TIMEOUT · BLOCKED · capability 撤销 · 恰好 1 次 prompt
+  ---
+  duration_ms: 1156.680459
+  type: 'test'
+  ...
+# Subtest: 真实 IPC 入口：启动超时 → task/result.error 与 task/get.stopReason 都是 HARNESS_START_TIMEOUT
+ok 22 - 真实 IPC 入口：启动超时 → task/result.error 与 task/get.stopReason 都是 HARNESS_START_TIMEOUT
+  ---
+  duration_ms: 1152.327125
+  type: 'test'
+  ...
+# Subtest: 启动预算覆盖整段 session/new：initialize 正常回应但 session/new 永不回应 → HARNESS_START_TIMEOUT · BLOCKED · 子进程与能力全收干净
+ok 23 - 启动预算覆盖整段 session/new：initialize 正常回应但 session/new 永不回应 → HARNESS_START_TIMEOUT · BLOCKED · 子进程与能力全收干净
+  ---
+  duration_ms: 1117.488417
+  type: 'test'
+  ...
+# Subtest: 共享绝对截止时间：initialize 吃掉 600/700 预算后，session/new 只剩剩余预算（不重新获得 700ms）
+ok 24 - 共享绝对截止时间：initialize 吃掉 600/700 预算后，session/new 只剩剩余预算（不重新获得 700ms）
+  ---
+  duration_ms: 543.898041
+  type: 'test'
+  ...
+# Subtest: 迟到 session/new 响应：截止时间后到达 → 绝不复活 run、绝不触发 prompt、0 provider 请求
+ok 25 - 迟到 session/new 响应：截止时间后到达 → 绝不复活 run、绝不触发 prompt、0 provider 请求
+  ---
+  duration_ms: 5591.300084
+  type: 'test'
+  ...
+# Subtest: adapter 级：启动失败自清理——子进程退出、临时目录删除、能力撤销、sessionId 保持 null
+ok 26 - adapter 级：启动失败自清理——子进程退出、临时目录删除、能力撤销、sessionId 保持 null
+  ---
+  duration_ms: 1130.12475
+  type: 'test'
+  ...
+# (node:75121) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Harness crash E2E：kill child → BLOCKED + HARNESS_PROCESS_EXITED + 0 respawn
+ok 27 - Harness crash E2E：kill child → BLOCKED + HARNESS_PROCESS_EXITED + 0 respawn
+  ---
+  duration_ms: 601.643375
+  type: 'test'
+  ...
+# Subtest: Restart E2E：进程崩溃后重启 → RECOVERY_REQUIRED，0 replay
+ok 28 - Restart E2E：进程崩溃后重启 → RECOVERY_REQUIRED，0 replay
+  ---
+  duration_ms: 488.465208
+  type: 'test'
+  ...
+# (node:75125) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Provider Secret / proxy capability 0 forbidden persistence（Task DB / Event / Artifact）
+ok 29 - Provider Secret / proxy capability 0 forbidden persistence（Task DB / Event / Artifact）
+  ---
+  duration_ms: 1503.768709
+  type: 'test'
+  ...
+# Subtest: User / App / Artifact isolation：非 owner 或非 owner App 不能 run / read
+ok 30 - User / App / Artifact isolation：非 owner 或非 owner App 不能 run / read
+  ---
+  duration_ms: 1193.311791
+  type: 'test'
+  ...
+# Subtest: capability 执行绑定：run A 的 token 不能用于 run B（401），绑定含 task/step/run
+ok 31 - capability 执行绑定：run A 的 token 不能用于 run B（401），绑定含 task/step/run
+  ---
+  duration_ms: 429.837584
+  type: 'test'
+  ...
+# (node:75130) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: v9 -> v10：HarnessRun / Artifact / Verification 表建立，旧数据完整
+ok 32 - v9 -> v10：HarnessRun / Artifact / Verification 表建立，旧数据完整
+  ---
+  duration_ms: 443.355959
+  type: 'test'
+  ...
+# Subtest: v10 迁移失败 -> 整级回滚：user_version 停 9，v10 表不残留
+ok 33 - v10 迁移失败 -> 整级回滚：user_version 停 9，v10 表不残留
+  ---
+  duration_ms: 431.867833
+  type: 'test'
+  ...
+1..33
+# tests 33
+# suites 0
+# pass 33
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 46577.000667
+
+结论：PASS — {"tests":33,"pass":33,"fail":0,"versions":{"dsh":"0.1.5-rc.2","dshBin":"/Users/wepingli/Desktop/OpenArc OS-integration/node_modules/.bin/dsh","acpSdk":"1.4.0","protocolVersion":1,"schemaVersion":21}}

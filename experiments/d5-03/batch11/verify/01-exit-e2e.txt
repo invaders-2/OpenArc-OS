@@ -1,0 +1,106 @@
+RUN_DIR /Users/wepingli/Desktop/OpenArc OS-integration/experiments/d5-03/batch11/verify/runs/2026-09-29T13-47-36-856Z
+
+────────── 场景 A-start-inflight ──────────
+(node:74356) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS A-start-inflight · 退出码 = 0 :: exit=0 signal=null killedByTimeout=false
+PASS A-start-inflight · 退出时长有界（<30000ms） :: quitMs=418
+PASS A-start-inflight · 探针无 uncaughtException / unhandledRejection :: []
+PASS A-start-inflight · 收尾顺序在库关闭前完成（proxyStopped + storeClosed） :: {"ok":true,"mcp":{"ok":true,"closed":0,"aborted":0,"ended":0,"error":null,"timedOut":false},"harness":{"ok":true,"error":null,"timedOut":false,"skipped":false},"proxyStopped":true,"storeClosed":true,"at":1790689658932}
+PASS A-start-inflight · Harness 收尾未超时 :: {"ok":true,"error":null,"timedOut":false,"skipped":false}
+PASS A-start-inflight · 退出时确有在途 harness 子进程（证明不是空跑） :: maxDescendants=3
+PASS A-start-inflight · 后代进程 0（无孤儿） :: leftovers=[]
+PASS A-start-inflight · 数据库可重开（integrity_check） :: {"ok":true,"integrity":"ok","walBytes":0}
+PASS A-start-inflight · 退出前库中任务状态 = RUNNING :: {"task_id":"task_9N5RLQ_Q4dySMw","status":"RUNNING","cancel_requested":0,"revision":5,"completed_at":null}
+PASS A-start-inflight · 退出前库中 run 状态包含 STARTING :: [{"status":"STARTING","error_code":null,"stop_reason":null}]
+PASS A-start-inflight · 重启后任务状态 = BLOCKED :: {"status":"BLOCKED","runs":[{"status":"BLOCKED","errorCode":"RECOVERY_REQUIRED","stopReason":"RECOVERY_REQUIRED"}]}
+PASS A-start-inflight · 重启进程退出码 0 :: exit=0
+PASS A-start-inflight · 重启后残余后代进程 0 :: []
+PASS A-start-inflight · 旧能力请求被拒（端口已释放，进程内 proxy 已随退出消失） :: {"released":true,"note":"ECONNREFUSED"}
+
+────────── 场景 B-turn-inflight ──────────
+PASS B-turn-inflight · 退出码 = 0 :: exit=0 signal=null killedByTimeout=false
+PASS B-turn-inflight · 退出时长有界（<30000ms） :: quitMs=564
+PASS B-turn-inflight · 探针无 uncaughtException / unhandledRejection :: []
+PASS B-turn-inflight · 收尾顺序在库关闭前完成（proxyStopped + storeClosed） :: {"ok":true,"mcp":{"ok":true,"closed":0,"aborted":0,"ended":0,"error":null,"timedOut":false},"harness":{"ok":true,"error":null,"timedOut":false,"skipped":false},"proxyStopped":true,"storeClosed":true,"at":1790689662412}
+PASS B-turn-inflight · Harness 收尾未超时 :: {"ok":true,"error":null,"timedOut":false,"skipped":false}
+PASS B-turn-inflight · 退出时确有在途 harness 子进程（证明不是空跑） :: maxDescendants=4
+PASS B-turn-inflight · 后代进程 0（无孤儿） :: leftovers=[]
+PASS B-turn-inflight · 数据库可重开（integrity_check） :: {"ok":true,"integrity":"ok","walBytes":0}
+PASS B-turn-inflight · 退出前库中任务状态 = RUNNING :: {"task_id":"task_PQyzwc6ySWp6bg","status":"RUNNING","cancel_requested":0,"revision":7,"completed_at":null}
+PASS B-turn-inflight · 退出前库中 run 状态包含 RUNNING :: [{"status":"RUNNING","error_code":null,"stop_reason":null}]
+PASS B-turn-inflight · 重启后任务状态 = BLOCKED :: {"status":"BLOCKED","runs":[{"status":"BLOCKED","errorCode":"RECOVERY_REQUIRED","stopReason":"RECOVERY_REQUIRED"}]}
+PASS B-turn-inflight · 重启进程退出码 0 :: exit=0
+PASS B-turn-inflight · 重启后残余后代进程 0 :: []
+PASS B-turn-inflight · 旧能力请求被拒（端口已释放，进程内 proxy 已随退出消失） :: {"released":true,"note":"ECONNREFUSED"}
+
+────────── 场景 C-mcp-and-harness ──────────
+PASS C-mcp-and-harness · 退出码 = 0 :: exit=0 signal=null killedByTimeout=false
+PASS C-mcp-and-harness · 退出时长有界（<30000ms） :: quitMs=139
+PASS C-mcp-and-harness · 探针无 uncaughtException / unhandledRejection :: []
+PASS C-mcp-and-harness · 收尾顺序在库关闭前完成（proxyStopped + storeClosed） :: {"ok":true,"mcp":{"ok":true,"closed":1,"aborted":0,"ended":1,"error":null,"timedOut":false},"harness":{"ok":true,"error":null,"timedOut":false,"skipped":false},"proxyStopped":true,"storeClosed":true,"at":1790689666878}
+PASS C-mcp-and-harness · Harness 收尾未超时 :: {"ok":true,"error":null,"timedOut":false,"skipped":false}
+PASS C-mcp-and-harness · 退出时确有在途 harness 子进程（证明不是空跑） :: maxDescendants=6
+PASS C-mcp-and-harness · 后代进程 0（无孤儿） :: leftovers=[]
+PASS C-mcp-and-harness · 数据库可重开（integrity_check） :: {"ok":true,"integrity":"ok","walBytes":0}
+PASS C-mcp-and-harness · 退出前库中任务状态 = RUNNING :: {"task_id":"task_4bjFrBjxHOug9g","status":"RUNNING","cancel_requested":0,"revision":7,"completed_at":null}
+PASS C-mcp-and-harness · 重启后任务状态 = BLOCKED :: {"status":"BLOCKED","runs":[{"status":"BLOCKED","errorCode":"RECOVERY_REQUIRED","stopReason":"RECOVERY_REQUIRED"}]}
+PASS C-mcp-and-harness · 重启进程退出码 0 :: exit=0
+PASS C-mcp-and-harness · 重启后残余后代进程 0 :: []
+PASS C-mcp-and-harness · MCP 服务端 GET 流已关闭（openStreams = 0） :: {"requests":1,"opens":1,"rejected":0,"reconnect404":0,"lastEventIdSeen":null,"replays":0,"replayedFrom":null,"distinctSent":56,"duplicatesSent":0,"lastSeq":56,"closesByServer":0,"openStreams":0}
+PASS C-mcp-and-harness · MCP 连接在库中已收尾（DISABLED / MCP_SESSION_ENDED） :: [{"connection_id":"mcp_Y0At4Fy5nfylwA","status":"DISABLED","enabled":1,"last_error_code":"MCP_SESSION_ENDED"}]
+PASS C-mcp-and-harness · 旧能力请求被拒（端口已释放，进程内 proxy 已随退出消失） :: {"released":true,"note":"ECONNREFUSED"}
+
+────────── 场景 D-repeat-quit ──────────
+PASS D-repeat-quit · 退出码 = 0 :: exit=0 signal=null killedByTimeout=false
+PASS D-repeat-quit · 退出时长有界（<30000ms） :: quitMs=111
+PASS D-repeat-quit · 探针无 uncaughtException / unhandledRejection :: []
+PASS D-repeat-quit · 收尾顺序在库关闭前完成（proxyStopped + storeClosed） :: {"ok":true,"mcp":{"ok":true,"closed":0,"aborted":0,"ended":0,"error":null,"timedOut":false},"harness":{"ok":true,"error":null,"timedOut":false,"skipped":false},"proxyStopped":true,"storeClosed":true,"at":1790689668796}
+PASS D-repeat-quit · Harness 收尾未超时 :: {"ok":true,"error":null,"timedOut":false,"skipped":false}
+PASS D-repeat-quit · 退出时确有在途 harness 子进程（证明不是空跑） :: maxDescendants=6
+PASS D-repeat-quit · 后代进程 0（无孤儿） :: leftovers=[]
+PASS D-repeat-quit · 数据库可重开（integrity_check） :: {"ok":true,"integrity":"ok","walBytes":0}
+PASS D-repeat-quit · 退出前库中任务状态 = RUNNING :: {"task_id":"task_hfJLZmmDeOeseQ","status":"RUNNING","cancel_requested":0,"revision":7,"completed_at":null}
+PASS D-repeat-quit · 重启后任务状态 = BLOCKED :: {"status":"BLOCKED","runs":[{"status":"BLOCKED","errorCode":"RECOVERY_REQUIRED","stopReason":"RECOVERY_REQUIRED"}]}
+PASS D-repeat-quit · 重启进程退出码 0 :: exit=0
+PASS D-repeat-quit · 重启后残余后代进程 0 :: []
+PASS D-repeat-quit · 旧能力请求被拒（端口已释放，进程内 proxy 已随退出消失） :: {"released":true,"note":"ECONNREFUSED"}
+
+────────── 场景 E-success ──────────
+PASS E-success · 退出码 = 0 :: exit=0 signal=null killedByTimeout=false
+PASS E-success · 退出时长有界（<30000ms） :: quitMs=156
+PASS E-success · 探针无 uncaughtException / unhandledRejection :: []
+PASS E-success · 收尾顺序在库关闭前完成（proxyStopped + storeClosed） :: {"ok":true,"mcp":{"ok":true,"closed":0,"aborted":0,"ended":0,"error":null,"timedOut":false},"harness":{"ok":true,"error":null,"timedOut":false,"skipped":false},"proxyStopped":true,"storeClosed":true,"at":1790689673696}
+PASS E-success · Harness 收尾未超时 :: {"ok":true,"error":null,"timedOut":false,"skipped":false}
+PASS E-success · 退出时确有在途 harness 子进程（证明不是空跑） :: maxDescendants=6
+PASS E-success · 后代进程 0（无孤儿） :: leftovers=[]
+PASS E-success · 数据库可重开（integrity_check） :: {"ok":true,"integrity":"ok","walBytes":0}
+PASS E-success · 退出前库中任务状态 = SUCCEEDED :: {"task_id":"task_-PQ3gIm7bBcBgA","status":"SUCCEEDED","cancel_requested":0,"revision":11,"completed_at":1790689671096}
+PASS E-success · 退出前库中 run 状态包含 SUCCEEDED :: [{"status":"SUCCEEDED","error_code":null,"stop_reason":"end_turn"}]
+PASS E-success · 重启后任务状态 = SUCCEEDED :: {"status":"SUCCEEDED","runs":[{"status":"SUCCEEDED","errorCode":null,"stopReason":"end_turn"}]}
+PASS E-success · 重启进程退出码 0 :: exit=0
+PASS E-success · 重启后残余后代进程 0 :: []
+PASS E-success · 旧能力请求被拒（端口已释放，进程内 proxy 已随退出消失） :: {"released":true,"note":"ECONNREFUSED"}
+
+────────── 场景 F-user-cancel ──────────
+PASS F-user-cancel · 退出码 = 0 :: exit=0 signal=null killedByTimeout=false
+PASS F-user-cancel · 退出时长有界（<30000ms） :: quitMs=135
+PASS F-user-cancel · 探针无 uncaughtException / unhandledRejection :: []
+PASS F-user-cancel · 收尾顺序在库关闭前完成（proxyStopped + storeClosed） :: {"ok":true,"mcp":{"ok":true,"closed":0,"aborted":0,"ended":0,"error":null,"timedOut":false},"harness":{"ok":true,"error":null,"timedOut":false,"skipped":false},"proxyStopped":true,"storeClosed":true,"at":1790689695784}
+PASS F-user-cancel · Harness 收尾未超时 :: {"ok":true,"error":null,"timedOut":false,"skipped":false}
+PASS F-user-cancel · 退出时确有在途 harness 子进程（证明不是空跑） :: maxDescendants=6
+PASS F-user-cancel · 后代进程 0（无孤儿） :: leftovers=[]
+PASS F-user-cancel · 数据库可重开（integrity_check） :: {"ok":true,"integrity":"ok","walBytes":0}
+PASS F-user-cancel · 退出前库中任务状态 = CANCELLED :: {"task_id":"task_RkCC1d6ZR_1q1w","status":"CANCELLED","cancel_requested":1,"revision":10,"completed_at":1790689675736}
+PASS F-user-cancel · 退出前 cancel_requested = true :: {"task_id":"task_RkCC1d6ZR_1q1w","status":"CANCELLED","cancel_requested":1,"revision":10,"completed_at":1790689675736}
+PASS F-user-cancel · 退出前库中 run 状态包含 CANCELLED :: [{"status":"CANCELLED","error_code":null,"stop_reason":null}]
+PASS F-user-cancel · 重启后任务状态 = CANCELLED :: {"status":"CANCELLED","runs":[{"status":"CANCELLED","errorCode":null,"stopReason":null}]}
+PASS F-user-cancel · 重启进程退出码 0 :: exit=0
+PASS F-user-cancel · 重启后残余后代进程 0 :: []
+PASS F-user-cancel · 旧能力请求被拒（端口已释放，进程内 proxy 已随退出消失） :: {"released":true,"note":"ECONNREFUSED"}
+PASS F-user-cancel · [登记·非本批] 取消后 runTask 仍未收敛（如实记录，不计入本批失败） :: {"settled":"timeout","taskStatus":"CANCELLED","runs":["CANCELLED"]}
+残留自检：{"firstPass":5,"remaining":[]}
+PASS 全批退出后无本批残留进程 :: []
+
+计数：{"total":86,"pass":86,"fail":0}
+结论：PASS

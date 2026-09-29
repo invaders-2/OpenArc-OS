@@ -1,4 +1,185 @@
 {
+  "batch11": {
+    "phase": "D5-03 第十一批 · 应用正常退出时收尾 Harness（will-quit 遗漏 orchestrator.dispose）",
+    "at": "2026-09-29T13:55:00Z",
+    "atNote": "证据截止时点 = 第十一批证据快照写入时。**纯插入**：batch10 及其后所有旧段逐字节未改（证明方式：`git diff --numstat docs/D5-03-GATE-EVIDENCE.json` = 本段行数 / 0，且自 `\"batch10\"` 起至 EOF 与插入前同一起点至 EOF 逐字节相同）。",
+    "openarcBranch": "integration/ui-core",
+    "testedCommit": "0eed84c",
+    "testedCommitNote": "单个提交（`git log --oneline 7569016..0eed84c` = 1 行），父提交 7569016；改动面 = electron/app-shutdown.cjs +80/−0（新增）、electron/main.cjs +23/−19、package.json +1/−0、tests/app-shutdown.test.mjs +92/−0（新增）、tests/fixtures/harness-acp/echo-agent.mjs +31/−0（新增）、experiments/d5-03/batch11/verify/** 验收脚本；`src/**` 0 行改动，`SCHEMA_VERSION` 仍 21，预算 30000/180000 未动",
+    "scopeBoundaries": [
+      "只处理 will-quit 遗漏 orchestrator.dispose()；R2（取消后 model call 停在 STARTED）未动",
+      "未做 OAuth / D5-04 / 创建组织入口；不 push；未触主工作树 17 项改动、DSH Desktop 共享运行时、~/.dsh",
+      "断言：无既有断言被修改 / 放宽 / 跳过；新增 tests/app-shutdown.test.mjs 5 条 + 退出驱动 86 条"
+    ],
+    "shutdownOrder": {
+      "singleSource": "electron/app-shutdown.cjs 的 disposeAppResources()：真实 electron/main.cjs 的 will-quit 与验收 probe host 共用同一份（与 runtime-boot.cjs 同一条防漂移理由）",
+      "sequence": "Promise.all[ MCP 有界 dispose(2s) , Harness 有界 dispose(8s) = orchestrator.dispose() ] → modelProxy.stop → store.close",
+      "bounded": "每项超时（独立错误码 DISPOSE_TIMEOUT / HARNESS_DISPOSE_TIMEOUT）或抛错只留痕；单项失败绝不跳过后面的 proxy.stop / store.close",
+      "noFakeTerminalState": "应用退出不是用户取消：只收资源（撤销两类能力、回收 harness 子进程与 bridge、删临时目录），**不写任何 Task/Step/HarnessRun 状态**；未完成任务保持 RUNNING 落库，重启后走既有 recoverRunning() → BLOCKED + RECOVERY_REQUIRED",
+      "repeatQuitSafe": "quitting 标志在 preventDefault() 之前同步置位，第二次 will-quit 直接放行"
+    },
+    "productDefectFoundAndFixed": {
+      "defect": "原实现 event.preventDefault(); disposeMcpBounded(...).then(() => app.quit())：在 `.then()` 微任务里再调 app.quit()，Electron 44.3.0 **不会继续退出序列** —— 事件停在 will-quit，before-quit / quit 不再触发，进程只能被外部杀掉",
+      "minimalRepro": "experiments/d5-03/batch11/verify/quit-microtask-repro.mjs（两个真实 Electron 进程，同一段代码只改调度）",
+      "reproResult": "微任务：TRIGGER → BEFORE_QUIT → DISPOSED，之后无第二次 BEFORE_QUIT/WILL_QUIT/QUIT → 挂死，8.2s 后 SIGKILL；宏任务：TRIGGER → BEFORE_QUIT → DISPOSED → BEFORE_QUIT → QUIT → exit 0，1.29s",
+      "fix": "收尾完成后的 app.quit() 放进 setImmediate；并加 3s 有界保险丝 app.exit(0)（退出序列仍不推进时显式退出，绝不把「关不掉的应用」留给用户）"
+    },
+    "verification": {
+      "realElectronExit": {
+        "command": "npm run test:d5-03-exit → experiments/d5-03/batch11/verify/exit-e2e.mjs",
+        "counts": {
+          "total": 86,
+          "pass": 86,
+          "fail": 0,
+          "exit": 0,
+          "wallMs": 41000
+        },
+        "log": "experiments/d5-03/batch11/verify/01-exit-e2e.txt",
+        "realSurface": "真实 Electron 进程 + 真实 dist 渲染层 / preload / registerIdentityIpc / registerTaskIpc + 真实 createOpenArcRuntime（身份 / ModelProxy / TaskService / MCP）+ 真实 HarnessAdapter / TaskHarnessOrchestrator + 真实 disposeAppResources",
+        "controlledDoubles": "harness 子进程 = tests/fixtures/harness-acp/*（session-new-hold / turn-hang / echo）；Provider = 独立进程假 Provider（只监听 127.0.0.1）；MCP = tests/fixtures/mcp/echo-server.mjs --http",
+        "notReliantOnHarness": "判据不靠「测试进程结束自动杀子进程」：退出后按根 pid 逐层查后代进程 = 0，并按命令行标记做全批残留自检",
+        "scenarios": [
+          {
+            "name": "A-start-inflight",
+            "exitCode": 0,
+            "quitMs": 418,
+            "peakDescendants": 4,
+            "orphans": 0,
+            "before": "task RUNNING / run STARTING",
+            "after": "task BLOCKED / run BLOCKED + RECOVERY_REQUIRED"
+          },
+          {
+            "name": "B-turn-inflight",
+            "exitCode": 0,
+            "quitMs": 564,
+            "peakDescendants": 4,
+            "orphans": 0,
+            "before": "task RUNNING / run RUNNING",
+            "after": "task BLOCKED / run BLOCKED + RECOVERY_REQUIRED"
+          },
+          {
+            "name": "C-mcp-and-harness",
+            "exitCode": 0,
+            "quitMs": 139,
+            "peakDescendants": 6,
+            "orphans": 0,
+            "before": "task RUNNING / run RUNNING / MCP GET 流活着",
+            "after": "task BLOCKED + RECOVERY_REQUIRED；服务端 getSse.openStreams=0（56 事件后客户端关闭）"
+          },
+          {
+            "name": "D-repeat-quit",
+            "exitCode": 0,
+            "quitMs": 111,
+            "peakDescendants": 4,
+            "orphans": 0,
+            "before": "task RUNNING / run RUNNING",
+            "after": "task BLOCKED + RECOVERY_REQUIRED（终态唯一，未翻转）"
+          },
+          {
+            "name": "E-success",
+            "exitCode": 0,
+            "quitMs": 156,
+            "peakDescendants": 4,
+            "orphans": 0,
+            "before": "task SUCCEEDED / run SUCCEEDED",
+            "after": "task SUCCEEDED（未被退出改写）"
+          },
+          {
+            "name": "F-user-cancel",
+            "exitCode": 0,
+            "quitMs": 135,
+            "peakDescendants": 6,
+            "orphans": 0,
+            "before": "task CANCELLED / run CANCELLED / cancel_requested=1",
+            "after": "task CANCELLED（未被退出改写）"
+          }
+        ],
+        "perScenarioInvariants": [
+          "proxyStopped=true 且 storeClosed=true（收尾在关库前完成）",
+          "harness.timedOut=false（未被 8s 上界截断）",
+          "探针内 uncaughtException / unhandledRejection 计数 = 0",
+          "PRAGMA integrity_check = ok，退出后 -wal 为 0 字节（库可重开）",
+          "旧能力请求被拒：进程内 Model Proxy 随退出消失，原 baseUrl ECONNREFUSED",
+          "退出后后代进程 = 0（按根 pid 递归查，含被 reparent 的 harness 子进程）"
+        ],
+        "batchSweep": "全批结束后按命令行标记自检：firstPass 命中 5 个进程 → remaining []（0 残留）"
+      },
+      "gateCounts": {
+        "d5-03-exit": {
+          "tests": 86,
+          "pass": 86,
+          "fail": 0,
+          "exit": 0,
+          "ms": 41000
+        },
+        "appShutdownUnit": {
+          "tests": 5,
+          "pass": 5,
+          "fail": 0,
+          "file": "tests/app-shutdown.test.mjs"
+        },
+        "d4-02c": {
+          "tests": 33,
+          "pass": 33,
+          "fail": 0,
+          "exit": 0,
+          "ms": 47000,
+          "log": "experiments/d5-03/batch11/verify/02-gate-d4-02c.txt",
+          "versions": {
+            "dsh": "0.1.5-rc.2",
+            "acpSdk": "1.4.0",
+            "schemaVersion": 21
+          }
+        },
+        "mcpLifecycleAndStream": {
+          "tests": 17,
+          "pass": 17,
+          "fail": 0,
+          "files": [
+            "tests/d5-03-mcp-lifecycle.test.mjs",
+            "tests/d5-03-mcp-stream.test.mjs"
+          ]
+        },
+        "bootOrder": {
+          "tests": 14,
+          "pass": 14,
+          "fail": 0,
+          "files": [
+            "tests/app-shutdown.test.mjs",
+            "tests/d4-04-closure2-boot.test.mjs"
+          ]
+        },
+        "npmTestFull": {
+          "tests": 1399,
+          "pass": 1397,
+          "fail": 2,
+          "exit": 1,
+          "ms": 139671,
+          "log": "experiments/d5-03/batch11/verify/03-npm-test-full.txt",
+          "delta": "1394 → 1399 = 本批新增单测 5 条",
+          "failures": [
+            "P2 · 当前会话 = A（owner）：推送投递，载荷 = 白名单投影且与 getApprovalRequest 一致（d4-03-approval-push-isolation）",
+            "No Direct Domain Bypass：resource.trash 的唯一 Domain 调用点在 allowlisted adapter + controlled execution 内（side-effect-c4-gates）"
+          ],
+          "note": "两条失败 = 第九批起登记的既有确定性失败，本批未修、未放宽断言；无 flake、无 skipped"
+        }
+      }
+    },
+    "assertionChanges": "无既有断言被修改 / 放宽 / 跳过；新增 tests/app-shutdown.test.mjs 5 条领域断言（有界 / 不吞错 / 单项失败不跳过关库 / Harness 卡死仍有界 / identity 缺席不抛）+ 真实退出驱动 86 条（6 场景 × 退出码、时长、孤儿、库可重开、库中状态、重启恢复、旧能力被拒、MCP 流关闭）",
+    "notVerified": [
+      "未做界面截图：本批 src/** 0 行改动，退出过程无界面变化",
+      "退出保险丝 app.exit(0) 的触发路径未构造用例（正常收尾耗时可忽略，保险丝只在退出序列不推进时生效）",
+      "崩溃 / SIGKILL / 断电退出（无 will-quit 机会）不在本批",
+      "「旧能力请求被拒」用端口释放（ECONNREFUSED）与能力账本 REVOKED 共同证明；退出后进程已不存在，无法再发真实请求"
+    ],
+    "leftovers": [
+      "R2：取消后 in-flight model call 停在 STARTED（第十批已给不同根因证据，仍未修）",
+      "新登记：用户取消后 runTask promise 在有在途模型调用时不收敛（取消后 20s 仍未 settle，而 task/run 已 CANCELLED）——与 R2 同一片区域，建议同批裁决",
+      "两条既有确定性失败（d4-03-approval-push-isolation P2、side-effect-c4-gates No Direct Domain Bypass）未修",
+      "START_MARGIN_MS = 15000 与产品预算成对；跨组织真机 2 条 notVerified；OAuth；两条探针门禁既有失败；插件隔离 D5-08；D5-02 prompt() 遗留；SIGKILL 边界"
+    ],
+    "judgement": "D5-03 第十一批（应用正常退出时收尾 Harness）= PASS（限定范围：will-quit 确实收尾 Harness + 顺序/有界/不伪造终态/重复 quit 全部有真实 Electron 证据；并顺带修掉门禁暴露的 quit 微任务挂死缺陷）；R2 与新登记项如实单列；D5-03 整体仍 = PARTIAL"
+  },
   "batch10": {
     "phase": "D5-03 第十批 · 收口 Harness 启动全程的超时与取消（R1 + R1-e）",
     "at": "2026-09-29T13:15:00Z",

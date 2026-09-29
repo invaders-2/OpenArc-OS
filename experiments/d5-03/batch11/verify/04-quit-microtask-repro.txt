@@ -1,0 +1,31 @@
+{
+  "at": "2026-09-29T13:52:27.103Z",
+  "electron": null,
+  "microtask": {
+    "mode": "micro",
+    "hung": true,
+    "exitCode": null,
+    "elapsedMs": 8198,
+    "lifecycle": [
+      "TRIGGER@1790689938651",
+      "BEFORE_QUIT@1790689938655",
+      "DISPOSED@1790689938698 {\"ok\":true}"
+    ],
+    "processAliveAfterWatch": false
+  },
+  "macrotask": {
+    "mode": "macro",
+    "hung": false,
+    "exitCode": 0,
+    "elapsedMs": 1292,
+    "lifecycle": [
+      "TRIGGER@1790689946856",
+      "BEFORE_QUIT@1790689946858",
+      "DISPOSED@1790689946865 {\"ok\":true}",
+      "BEFORE_QUIT@1790689946873",
+      "QUIT@1790689946873"
+    ],
+    "processAliveAfterWatch": false
+  },
+  "conclusion": "复现成立：微任务里的 app.quit() 停在 will-quit（进程不退出）；宏任务正常退出"
+}
