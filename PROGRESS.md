@@ -1785,7 +1785,7 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 # D5-03 第八批 · DSH 运行时 PIN（项目专用可复现运行时 + 解析器只认项目安装）· 2026-09-29（`3bbb347`）
 
 > **口径（用户明确定范围）**：本批 = **项目专用、可复现的 DSH 运行时**（`npm install --save-dev --save-exact @deepseek-ai/dsh@0.1.5-rc.2`；`package.json` 精确版本、无 `^` / `~`；锁文件带 resolved + 完整 integrity）+ **解析器只认项目安装**（默认 = 仓库根；`OPENARC_DSH_RUNTIME` / `OPENARC_DSH_BIN` 覆盖同样校验；缺失 → `DSH_RUNTIME_MISSING`、版本不符 → `DSH_VERSION_MISMATCH`；**绝不回退** DSH Desktop 共享运行时 / 用户 PATH / 未知版本）+ **ACP SDK 保持 1.4.0**（`resolveAcpSdk()` 删除「回退运行时副本」的分支）+ **保留精确版本断言**（未改成「读自报版本与自身比较」）+ 新增契约测试 **7/7**。**本批无界面改动**（视觉 / 动效 = 通过，本批无界面改动）；**不开放工具调用、不连真实第三方、不运行任意第三方程序、不发用户数据、不声称插件隔离通过**；**不新增「创建组织」产品入口**；**不为凑全绿调宽任何超时 / 等待窗口、不改任何断言**（总经理裁定，见本批决策文档 §6）。
-> **判定：D5-03 第八批（DSH 运行时 PIN）= PASS（限定范围：PIN 成立、版本漂移 4 条已闭环、1 条负载 flake 与 2 条预存失败如实单列）；D5-03 整体仍 = PARTIAL**（剩余缺口逐条见 §3 / §4）。
+> **判定：D5-03 第八批（DSH 运行时 PIN）= PASS（限定范围：PIN 成立、版本漂移 4 条已闭环、1 条负载 flake 与 2 条预存失败如实单列）；D5-03 整体仍 = PARTIAL**（剩余缺口逐条见 §3 / §4）。【第九批已更新：该条负载 flake 在第九批**未再出现**（第九批全量 1387 / 1385 / 2 的失败名单 = 2 条既有确定性失败）；第九批已实施「保留原始错误码」并改造 cancel 等待；见第九批节】
 > **当前有效证据 = 第八批证据清单**：`experiments/d5-03/EVIDENCE.md`（交接方证据索引，随被测提交 `3bbb347` 跟踪）+ `experiments/d5-03/batch8/`（独立验收 **37 个文件** = 36 个收录进 `sha256-manifest.txt` 的原始输出 / 报告 / 5 个探针与扫描脚本 + 清单本身）；本批**没有 runId、没有机器可读汇总 JSON**；更早批次（第一至第七批）的 runId / sha256 / 计数只作历史对照（本批为 node-only 运行时 PIN，未重跑 Electron 台架）。
 > **证据口径披露（必读）**：被测内容 = 提交 `3bbb347`（单个提交，父提交 `186e2e0`）**17 个文件 `+11279 / −1083`** = 3 个产品 / 依赖文件（`electron/harness-adapter.cjs` `+43/−14`、`package.json` `+1`（第 91 行精确版本）、`package-lock.json` `+9915/−1069`）+ 1 个新增契约测试 `tests/d5-03-dsh-runtime-pin.test.mjs`（198 行）+ 13 个证据文件（全在 `experiments/d5-03/`）。**锁文件两层口径分列**：依赖条目层 177 → 737 条，**added 560 / removed 0 / modified 0**；文本行层的 1069 条「删除」是 npm 重排 —— 逐行多重集比对，旧锁文件 **2697 行中 0 行**在新锁文件里找不到（新增 8846 行）→ **无任何旧行被真正丢弃**。**证据缺口如实披露**：失败当刻未采集宿主负载指标（报告 §八 标注）；复跑那轮整轮 86571ms、子测试仅 3668ms（约 82 s 在 fixture 建立 / 收尾）→ flake 只能定位到「**环境**」，**未证明具体停顿机制**。
 > 完整结果 `docs/D5-03-RESULT.md` 第八批正文；tracked 证据 `docs/D5-03-GATE-EVIDENCE.json` 的 `batch8` 段（**纯插入**：旧段逐字节 / 逐键未改）；本批决策 `docs/decisions/D5-03H-dsh-runtime-pinning.md`；独立验收报告 `experiments/d5-03/batch8/D5-03-BATCH8-VERIFICATION-REPORT.md`。
@@ -1802,7 +1802,7 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 | 修前 → 修后 | **已完成** | 3 文件 `tests 12 / pass 8 / fail 4` exit 1（I5 / P1 / P2 / official facade）→ 同 3 文件 **12/12 exit 0**（`experiments/d5-03/baseline-before-pin.txt` → `05` `64f3b10f`） |
 | 六类真实链路 | **已完成（全绿）** | protocol 4/4、c4-dsh-write 5/5、tool-dsh-facade 3/3（exactly 2 READ_ONLY）、permission 1/1（1 request / reject(cancelled) / 0 执行 / 0 触达 Provider）、cancel 3/3（0 retry + 连接关闭 + exited）、acp-lifecycle 3/3；tool-dsh-lifecycle 首跑 1/2（环境型 flake）→ 复跑 2/2 + 探针 2/2 ×3 |
 | 受影响门禁 | **211/211 exit 0** | `test:d4-02b` 16/16、`test:d4-02c` 22/22、`test:d4-03b` 59/59、`test:d4-03d` 52/52、`test:d4-03d-closure` 62/62（`19-affected-gates-summary.txt` `703a91a5`）；**Electron UI 门禁未重跑**（静态证明不 require `harness-adapter.cjs`，不受影响） |
-| 全量 `npm test` | **exit 1，如实单列** | `1383 tests / 1380 pass / 3 fail`（duration 144273ms）：2 条预存（`d4-03-approval-push-isolation` P2、`side-effect-c4-gates` No Direct Domain Bypass）+ 1 条**已证环境型 flake**（`task-harness-cancel:84`，`0 !== 1`，单跑 `--test-concurrency=1` **3/3 ×3 全过**）；**原先 4 条版本漂移失败在全量失败名单里已全部消失** |
+| 全量 `npm test` | **exit 1，如实单列** | `1383 tests / 1380 pass / 3 fail`（duration 144273ms）：2 条预存（`d4-03-approval-push-isolation` P2、`side-effect-c4-gates` No Direct Domain Bypass）+ 1 条**已证环境型 flake**（`task-harness-cancel:84`，`0 !== 1`，单跑 `--test-concurrency=1` **3/3 ×3 全过**）；**原先 4 条版本漂移失败在全量失败名单里已全部消失** |【第九批已更新：该 flake 在第九批**未再出现**（第九批全量 1387 / 1385 / 2 的失败名单里没有它；cancel 三用例全绿），且第九批已把该等待改为「产品可观察阶段 + 上界与产品预算成对」；W49 的「0 次请求」未复现；见第九批节 §3】
 | flake 归因（A/B 补做） | **已完成** | `--version` p50 项目 40.9ms vs 共享 46.4ms；ACP boot p50 项目 474.4ms vs 共享 445.2ms（±7%）；失败那次需 >30s（≈ 产品路径 0.73 s/run 的 40–65 倍）→ **量级上版本差异无法解释，判为宿主环境型，与本批 PIN 无关**（`22` `546cce1a` / `23` `a54ddd6b`） |
 | 边界 | **未变** | `~/.dsh` mtime `1790647563` 前后一致、11 个顶层条目逐条一致、`.credentials.yaml` 仅元数据一致（atime 停在 9/11 → **未被读取**）；共享运行时 mtime `1789097644`、版本仍 `0.2.0-rc.1`；主工作树 17 条未提交与 HEAD `9119f85` 未动；密钥扫描 **63 文件 0 命中**；argv 含项目 dsh 的进程 **0 个** |
 | 三轴判定 | **功能 = 通过；视觉 = 通过（无界面改动）；动效 = 通过（无界面改动）** | 见 §2 |
@@ -1817,18 +1817,66 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 
 * **notVerified 8 条**（以 batch8 报告 §六为准）：① **Electron UI 门禁实机重跑**（静态证明不 require `harness-adapter.cjs`，不受本批影响，未重跑）；② `experiments/d5-02/agent-canvas-probe.mjs`（引用 harness-adapter 但**非 npm 门禁**）；③ **视觉 / 动效验收**（本批无 UI 改动）；④ `~/.dsh` 各子目录**内部内容**（只记顶层与 stat，不读内容）；⑤ `.credentials.yaml` **内容**（明确禁读）；⑥ W48 其余非 harness 门禁；⑦ **失败当刻的宿主负载指标**（loadavg / `vm_stat` / spindump 未采集 —— 本批证据缺口，报告 §八 标注）；⑧ `npm ci` 实跑（锁文件具备可复现依据，但未实跑）。
 * **两条既有探针门禁继续单列**（第六批已 A/B 实证为既有失败，本批未改 `tests/**`）：`governance-ui` **1/5**、`model-keychain-restart` **3/15**，登记待单独排期。
-* **本批新登记的遗留**：① **超时预算 / 错误码映射**（`DEFAULT_START_TIMEOUT_MS = 30000`；orchestrator 把 `HARNESS_START_TIMEOUT` 映射成 `HARNESS_TURN_TIMEOUT`）→ **单独批次的产品 / 测试裁决项，本批不实施**（报告 §七 列出「调宽预算 / 保留原始错误码 / 维持现状」三个选项的利弊）；② `tests/task-harness-cancel.test.mjs:84` 的 **20s 等待窗口**同为环境型 flake；③ 两条预存失败仍在（需另案）；④ `/tmp` 下 **22 个更早批次 `oa-d503*` 残留**未清；⑤ 首次 `npm install` 耗时 **34 分钟**（CI 需预留）；⑥ `npm ls --depth=0` 2 个 `extraneous`（`@emnapi/runtime` / `@img/sharp-wasm32`，锁文件里本就 `optional: true`，非漂移）。
+* **本批新登记的遗留**：① **超时预算 / 错误码映射**（`DEFAULT_START_TIMEOUT_MS = 30000`；orchestrator 把 `HARNESS_START_TIMEOUT` 映射成 `HARNESS_TURN_TIMEOUT`）→ **单独批次的产品 / 测试裁决项，本批不实施**（报告 §七 列出「调宽预算 / 保留原始错误码 / 维持现状」三个选项的利弊）；② `tests/task-harness-cancel.test.mjs:84` 的 **20s 等待窗口**同为环境型 flake；③ 两条预存失败仍在（需另案）；④ `/tmp` 下 **22 个更早批次 `oa-d503*` 残留**未清；⑤ 首次 `npm install` 耗时 **34 分钟**（CI 需预留）；⑥ `npm ls --depth=0` 2 个 `extraneous`（`@emnapi/runtime` / `@img/sharp-wasm32`，锁文件里本就 `optional: true`，非漂移）。【第九批已更新：①**已实施**——分类器原样保留 `HARNESS_START_TIMEOUT`（不再冒充 `HARNESS_TURN_TIMEOUT`），`DEFAULT_START_TIMEOUT_MS` 仍 **30000**（预算未动）；界面可见文案由 `· HARNESS_TURN_TIMEOUT` 变为 `· HARNESS_START_TIMEOUT`，经浅 / 深 + 布局 + 对比度实机验收（8.208:1 / 16.62:1 ≥ 4.5:1）。②**已实施**——`tests/task-harness-cancel.test.mjs` 改为等待产品可观察阶段（上界 = 产品预算 30000 + 余量 15000，与产品常量成对），判据一字未放宽；第八批那条环境型 flake 在第九批**未再出现**。③④⑤⑥ 仍按原文单列。详见第九批节】
 * 既有缺口继续单列（不并入本批）：**跨组织真机 2 条 notVerified**、**OAuth**（仅 `NONE` / `BEARER`）、**插件隔离（D5-08）**、**D5-02 重命名受 Electron 不支持 `prompt()` 限制**、**SIGKILL 边界**、第五批登记其余残留（`app_principals.status` / `RATE_LIMITED` 对象 detail / `invariants()` 无孤儿行检查）。**本批未新增「创建组织」入口。**
 
 ## 4. 判定与下一步
 
-**判定：D5-03 第八批（DSH 运行时 PIN）= PASS（限定范围：PIN 成立、版本漂移 4 条已闭环、1 条负载 flake 与 2 条预存失败如实单列）；D5-03 整体仍 = PARTIAL。**
+**判定：D5-03 第八批（DSH 运行时 PIN）= PASS（限定范围：PIN 成立、版本漂移 4 条已闭环、1 条负载 flake 与 2 条预存失败如实单列）；D5-03 整体仍 = PARTIAL。**【第九批已更新：该条环境型 flake 在第九批**未再出现**（第九批全量 1387 / 1385 / 2 的失败名单里没有它）；第九批已实施「保留原始错误码」并把 cancel 等待改为产品可观察阶段，见第九批节】
 
 **本批闭环的旧缺口**：第七批登记的「环境 dsh 版本漂移（`0.1.5-rc.2` → 共享运行时 `0.2.0-rc.1`）令全量长期不绿」——运行时已 PIN 到项目内，**4 条漂移失败在全量失败名单里清零**。
 
-剩余缺口逐条：① 超时预算 / 错误码映射（单独批次裁决，本批不改）；② `task-harness-cancel:84` 的 20s 窗口；③ 两条预存失败（`d4-03-approval-push-isolation` P2、`side-effect-c4-gates` No Direct Domain Bypass）另案；④ `/tmp` 22 个更早批次残留；⑤ CI 首次安装时间；⑥ 跨组织真机 2 条 notVerified；⑦ 两条探针门禁既有失败；⑧ OAuth；⑨ 插件隔离（D5-08）；⑩ D5-02 `prompt()` 遗留；⑪ SIGKILL 边界；⑫ 第五批登记其余残留。
+剩余缺口逐条：① 超时预算 / 错误码映射（单独批次裁决，本批不改）；② `task-harness-cancel:84` 的 20s 窗口；③ 两条预存失败（`d4-03-approval-push-isolation` P2、`side-effect-c4-gates` No Direct Domain Bypass）另案；④ `/tmp` 22 个更早批次残留；⑤ CI 首次安装时间；⑥ 跨组织真机 2 条 notVerified；⑦ 两条探针门禁既有失败；⑧ OAuth；⑨ 插件隔离（D5-08）；⑩ D5-02 `prompt()` 遗留；⑪ SIGKILL 边界；⑫ 第五批登记其余残留。【第九批已更新：其中①「超时 / 错误码映射」与②「cancel 20s 窗口」已由第九批实施（保留原始错误码 + 取消测试按可观察阶段等待；预算未调宽、判据未放宽）；本批剩余缺口逐条见第九批节 §3 / §4】
 
-下一步建议：超时 / 错误码裁决（单独批次，三选项利弊已备）→ 两条预存失败另案 → 两条探针门禁单独排期 → 跨组织真机入口（产品需新增「新建组织」或多租户安装，本批不做）→ OAuth → 真实第三方 / Adobe（D5-04 / D5-05）。
+下一步建议：超时 / 错误码裁决（单独批次，三选项利弊已备）→ 两条预存失败另案 → 两条探针门禁单独排期 → 跨组织真机入口（产品需新增「新建组织」或多租户安装，本批不做）→ OAuth → 真实第三方 / Adobe（D5-04 / D5-05）。【第九批已更新：第一项「超时 / 错误码裁决」已由第九批完成（采纳「保留原始错误码」+ 取消等待改造）；后续顺位调整为：R1 / R1-e 裁决 → 两条既有确定性失败另案 → 两条探针门禁单独排期 → 跨组织真机入口 → OAuth → 真实第三方 / Adobe（D5-04 / D5-05）】
+
+# D5-03 第九批 · 启动超时不再冒充执行超时 + 取消测试按可观察阶段等待 · 2026-09-29（`f9133f5` + `d2d9281`）
+
+> **口径（用户明确定范围）**：本批 = **错误归属**（`electron/task-domain.cjs` 新增 `ERROR.HARNESS_START_TIMEOUT`；`electron/task-harness-orchestrator.cjs:101` 的分类器**原样保留**启动超时，不再改写成执行超时）+ **取消测试按产品可观察阶段等待**（不再用固定 20s 魔数窗；上界 = 产品启动预算 30000 + 余量 15000，与产品常量成对；判据一字未放宽）+ **只改这两处**（预算 `30000 / 180000` 未动、`SCHEMA_VERSION` 仍 **21**、`src/**` **0 行**改动）。**不开放工具调用、不连真实第三方、不运行任意第三方程序、不发用户数据、不声称插件隔离通过**；**不新增「创建组织」产品入口**；**不为凑全绿调宽任何超时 / 等待窗口、不改任何既有断言**（断言变更清单 = **无**）。
+> **判定：D5-03 第九批（启动超时错误归属 + 取消测试按可观察阶段等待）= PASS（限定范围：两项收口成立；2 条既有确定性失败与 R1 / R2 遗留如实单列）；D5-03 整体仍 = PARTIAL**（剩余缺口逐条见 §3 / §4）。
+> **当前有效证据 = 第九批 runId + 两种码探针 + 复用门禁证据**：`experiments/d5-03/batch9/verify/`（`batch9-01-codes-probe.json` 两种码探针、真机界面验收 runId `20260929T094444Z-3a33-batch9-harness-timeout-ui`、`batch9-03-affectedness.json` 机械受影响性、`04-gate-d4-02c.txt`、`05-npm-test-full.txt`、`batch9-04-r1-observation.json`、`batch9-05-residue-integrity.json`、`MANIFEST.sha256`）；**复用门禁证据** = 其余 **32 个门禁**，依据是机械判据「**改动分支不可达**」（逐条见验收报告 §3.1；复用产物**不含被测 commit 戳**，如实披露）。
+> **证据口径披露（必读）**：被测内容 = 提交 `f9133f5`（单个提交，父提交 `668238e`）**24 个文件 `+18989 / −25`** = **产品 / 测试改动面 7 个文件 `+345 / −25`**（`electron/task-domain.cjs` `+2/−0`、`electron/task-harness-orchestrator.cjs` `+1/−1`、`tests/task-harness-orchestrator.test.mjs` `+137/−1`、`tests/task-harness-cancel.test.mjs` `+156/−23` + **新增 3 个夹具探针** `tests/fixtures/harness-acp/{start-hang-agent,turn-hang-agent,session-new-hang-agent}.mjs`）+ 17 个 `experiments/d5-03/batch9/**` 证据文件；验收证据提交 = `d2d9281`（22 个文件 `+15670 / −0`，全在 `experiments/d5-03/batch9/verify/**`；`artifacts/` 被 `.gitignore:3` 忽略）。
+> 完整结果 `docs/D5-03-RESULT.md` 第九批正文；tracked 证据 `docs/D5-03-GATE-EVIDENCE.json` 的 `batch9` 段（**纯插入**：旧段逐字节 / 逐键未改）；本批决策 `docs/decisions/D5-03I-harness-timeout-attribution.md`（第八批决策 `D5-03H` 的 §6 裁定 1/3、§7 末尾、§10 遗留 1/2、§12 判定已就地加【第九批已实施】/【第九批已更新】并写明结果，**原文一字未删**）；独立验收报告 `experiments/d5-03/batch9/verify/BATCH9-VERIFY-REPORT.md`；执行方报告 `experiments/d5-03/batch9/D5-03-BATCH9-REPORT.md`。
+
+## 1. 任务状态
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| 启动超时保留原始错误码 | **已完成** | `electron/task-domain.cjs:131-135` 新增 `ERROR.HARNESS_START_TIMEOUT`；`electron/task-harness-orchestrator.cjs:101` 不再改写 → 真实链路两种码 **60 项检查（59 PASS + 1 条按预期红，exit 0）** |
+| 完整路径与界面影响（如实） | **已交付** | 逐跳 `file:line` 见执行方报告 §1.1（adapter 抛码 → orchestrator 撤销能力 + dispose + 分类 → `#blockStep` → task-service 三处 BLOCKED + `error_code` + `stop_reason="blocked"` + 四类事件 → task-bootstrap → main → preload → 渲染层；**无独立日志 sink**）；`[data-ai-error]`（`src/desktop/components.tsx:1010`）**原样显示错误码** → 可见文案由 `· HARNESS_TURN_TIMEOUT` 变 `· HARNESS_START_TIMEOUT`；`[data-ai-stop-reason]` 只在 `resumable=true` 渲染 → 启动超时该节点不出现；**未加错误码 → 人话映射、`src/**` 0 行改动** |
+| 预算 / schema 未动 | **已完成（约束）** | `DEFAULT_START_TIMEOUT_MS = 30000` / `DEFAULT_TURN_TIMEOUT_MS = 180000` 未改；`SCHEMA_VERSION` 仍 **21**（`electron/identity-store.cjs:68`）；测试只注入更小值 |
+| 取消测试按可观察阶段等待 | **已完成** | 旧固定 `deadline = +20000` 魔数窗 → `waitForProviderRequest`（等 provider 请求已发起；期间记录 `child-spawned` / `session-created` / `harness-running`）；上界 = 产品启动预算 30000 + `START_MARGIN_MS(15000)`（**与产品常量成对**）；超限或产品先收敛 → 单调时钟阶段时间线 + 宿主负载 + 产品状态；**判据一字未放宽**（`requests === 1` / `calls === 1` / `CANCELLED` / capability `REVOKED`），未 skip / 未删除 |
+| 反向验证 | **已完成** | 副本只改回旧映射 → 启动用例 `[EXPECTED-RED]` 实际 `HARNESS_TURN_TIMEOUT`；执行用例仍绿（外科式）；产品源码 sha256 前后一致 `aa6142e1…`；副本已删 |
+| 竞争（取消 vs 超时） | **已完成** | 两例终态一致且唯一 `CANCELLED`、0 孤儿、能力全 `REVOKED` + 旧 token 401、取消后 **fail-closed**（`TASK_REVISION_CONFLICT`） |
+| 真机界面验收 | **75/75 · exit 0** | runId `20260929T094444Z-3a33-batch9-harness-timeout-ui`（artifact sha256 `7ed60d0b…`）：浅 / 深 / 深色减少动态 5 场景 20 张截图；无横向溢出、错误行 2 行、按钮矩形相同、余量 108.88px；对比度 **浅 8.208:1 / 深 16.62:1** ≥ 4.5:1（`DESIGN_SYSTEM.md:248`）；该行 `animationName=none` / `transitionDuration=0s` |
+| 受影响门禁 | **26/26 · exit 0** | 机械分析（`batch9-03-affectedness.json`）：**只有 `test:d4-02c` 真受影响**（唯一产生启动超时的夹具 `start-hang-agent.mjs` 全仓只被一个门禁执行）；其余 **32 个门禁**「分支不可达」→ 复用证据（依据写清） |
+| 全量 `npm test` | **exit 1，如实单列** | **1387 tests / 1385 pass / 2 fail**：两条**既有确定性失败**（`d4-03-approval-push-isolation` P2 多 `targetRef` / `url`；`side-effect-c4-gates` No Direct Domain Bypass）**未修**；**无新失败**；**第八批那条环境型 flake 未再出现**；W49 的「0 次请求」**未复现** |
+| 断言变更清单 | **无** | 本批没有任何既有断言需要修改（错的是产品映射）；新增断言 = `task-harness-orchestrator.test.mjs` 两码正反例 + 真实 IPC 入口对渲染层可见载荷的断言、`task-harness-cancel.test.mjs` 等阶段机制（判据未变） |
+| 三轴判定 | **功能 = 通过；视觉 = 通过；动效 = 通过** | 见 §2 |
+
+## 2. 三轴判定（分列）
+
+* **功能 = 通过（限定范围）**：两种码 60 项检查（59 PASS + 1 条按预期红）、反向验证成立、竞争两例 fail-closed、能力撤销 + 旧 token 401、有界停止、0 孤儿；真机 UI 两种码均如实显示，后端 facts 与界面一致。
+* **视觉 = 通过**：真机 **75/75**；布局两码只差 1 字符（无溢出 / 无换行变化 / 按钮矩形相同 / 余量 **108.88px**）；对比度 **浅 8.208:1 / 深 16.62:1** ≥ 普通文本门槛 **4.5:1**（`DESIGN_SYSTEM.md:248`；背景取众数 `:251`、文字 `text.primary` `:63`）。
+* **动效 = 通过**：该行 `animationName=none` / `transitionDuration=0s`（浅 / 深 / 减少动态）；减少动态下元素作用域 `--dur-quick=0ms`（`MOTION_SYSTEM.md:21`）；`dark-turn` 与 `dark-reduced-turn` 状态行 PNG **sha256 完全相同**；本批 `src/**` **0 行改动**。
+
+## 3. notVerified 与缺口（如实登记）
+
+* **notVerified 6 条**（以验收报告 §四为准）：① **R2 竞争后 in-flight model call 的最终归宿**（取消后 1.5s 仍 `STARTED`，未观测更久）；② **R1 场景未做实机截图**（R1 在界面上会长期停在「运行中」）；③ **`providerErrorCode` 语义**（装的是 harness 超时码，**未判定是否为缺陷**）；④ **复用门禁证据不含 commit 戳**（依据是机械不可达；含 `test:d4-02a` 未重跑）；⑤ **未做 <1000px 窗口实测**；⑥ **探针宿主未接入 `openarc-resource` / `openarc-canvas` 协议**（只接 `openarc-file`）。
+* **遗留（本批未修）**：**R1** `electron/harness-adapter.cjs:278` 的 `newSession` **无任何超时**（启动预算只包 `initialize`；受控实验：700ms 预算下 8s 不收敛 = run `STARTING` / task `RUNNING` / 0 请求 / 0 prompt / 子进程存活；对照 `initialize` 阻塞 `+757.0ms` 即收敛）· **R1-e** 该无界段里 `orchestrator.dispose()` / `cancel()` **触达不到 adapter**（`registry.set` 晚于 `adapter.start()` 返回），子进程只在主进程退出后消失 · **R2** 竞争账本残留（call 停 `STARTED`）· **两条既有确定性失败**（未修）· `START_MARGIN_MS = 15000` 与产品预算成对（产品改预算需同步）· **本批新增调试 / 中途 run 目录如实登记**：`…-0dc2`（exit 2，0/0/0）、`…-1244`（exit 2，2/3）、`…-fccc`（exit 2，2/2）、`…-a352`（exit 1，73/74）、`…-2a0e`（exit 0，75/75，已被取代）+ `…-be39` 空目录（未 finalize，不入索引）。
+* **继续单列（不并入本批）**：**跨组织真机 2 条 notVerified**、**OAuth**、**两条既有探针门禁失败**（`governance-ui` 1/5、`model-keychain-restart` 3/15）、**插件隔离（D5-08）**、**D5-02 重命名受 Electron 不支持 `prompt()` 限制**、**SIGKILL 边界**；**本批未新增「创建组织」入口**。
+
+## 4. 判定与下一步
+
+**判定：D5-03 第九批（启动超时错误归属 + 取消测试按可观察阶段等待）= PASS（限定范围：两项收口成立；2 条既有确定性失败与 R1 / R2 遗留如实单列）；D5-03 整体仍 = PARTIAL。**
+
+**本批闭环的旧缺口**：第八批登记的「超时 / 错误码映射」与「cancel 20s 等待窗口」——① **已实施**（分类器原样保留 `HARNESS_START_TIMEOUT`，预算未动；界面文案由 `· HARNESS_TURN_TIMEOUT` 变为 `· HARNESS_START_TIMEOUT`，经浅 / 深与对比度实机验收）；② **已实施**（取消测试按产品可观察阶段等待，上界与产品预算成对，判据未放宽）。
+
+剩余缺口逐条：① R1（`newSession` 无上界）+ R1-e（无界段 dispose / cancel 触达不到 adapter）；② R2 竞争账本残留；③ 两条既有确定性失败（`d4-03-approval-push-isolation` P2、`side-effect-c4-gates` No Direct Domain Bypass）另案；④ `START_MARGIN_MS` 与产品预算同步约束；⑤ 本批调试 run 目录（如实登记，历史产物未被改写）；⑥ 上述 notVerified 6 条；⑦ 跨组织真机 2 条 notVerified；⑧ 两条探针门禁既有失败；⑨ OAuth；⑩ 插件隔离（D5-08）；⑪ D5-02 `prompt()` 遗留；⑫ SIGKILL 边界；⑬ 第五批登记其余残留。
+
+下一步建议：R1 / R1-e 裁决（给 `session/new` 同预算上界，或启动各子阶段落 safe 事件）→ 两条既有确定性失败另案 → 两条探针门禁单独排期 → 跨组织真机入口（产品需新增「新建组织」或多租户安装，本批不做）→ OAuth → 真实第三方 / Adobe（D5-04 / D5-05）。
+
+
 
 
 

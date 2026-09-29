@@ -1,4 +1,186 @@
 {
+  "batch9": {
+    "phase": "D5-03 第九批 · 启动超时不再冒充执行超时（错误归属）+ 取消测试按可观察阶段等待",
+    "at": "2026-09-29T09:51:58Z",
+    "atNote": "证据截止时点 = batch9 独立验收 MANIFEST.sha256 的 mtime（本地 2026-09-29T17:51:58+08:00 = 09:51:58Z，含 §四 notVerified 与 R1 观察）；本段由第九批文档定稿时写入。**纯插入**：batch8 / batch7 / batch6 / batch5 / batch4 / batch3 / batch2 与根段的所有键值逐字节未改（证明方式：本文件自 `  \"batch8\": {` 起至 EOF 与 HEAD 版自同一起点至 EOF 逐字节相同、sha256 相等；且解析后删除 batch9 键与 HEAD 解析结果深度相等）。",
+    "openarcBranch": "integration/ui-core",
+    "testedCommit": "f9133f5d5b8cc4af30c3ca96ee66e0f3c8d39422",
+    "testedCommitNote": "单个提交（`git log --oneline 668238e..f9133f5` = 1 行），父提交 `668238e`；被测提交 = 24 个文件 `+18989 / −25`，其中**产品 / 测试改动面 7 个文件 `+345 / −25`**（electron/task-domain.cjs +2/−0、electron/task-harness-orchestrator.cjs +1/−1、tests/task-harness-orchestrator.test.mjs +137/−1、tests/task-harness-cancel.test.mjs +156/−23、新增 3 个夹具探针 tests/fixtures/harness-acp/{start-hang-agent,turn-hang-agent,session-new-hang-agent}.mjs +8/+22/+19）；其余 17 个为 experiments/d5-03/batch9/** 证据文件；`src/**` 0 行改动",
+    "acceptanceCommit": "d2d928131e0655d9ec8e768f52a49b9cc55d6cad",
+    "acceptanceCommitNote": "独立验收证据提交（当前 HEAD）：22 个文件 `+15670 / −0`，全部在 `experiments/d5-03/batch9/verify/**`（含探针宿主 harness-timeout-ui-probe/）；`artifacts/` 被 `.gitignore:3` 忽略（run 产物不入提交）",
+    "stage": "文档与证据定稿（只改文档：`PROGRESS.md` / `docs/D5-03-RESULT.md` / `docs/D5-03-GATE-EVIDENCE.json`（本段纯插入）/ `docs/decisions/D5-03H-dsh-runtime-pinning.md` 就地加注 / 新增 `docs/decisions/D5-03I-harness-timeout-attribution.md`）；未改任何代码 / 脚本 / 测试 / 既有报告；未 commit / push / 切分支",
+    "currentEffectiveEvidence": {
+      "statement": "当前有效证据 = 第九批 runId（`20260929T094444Z-3a33-batch9-harness-timeout-ui` 界面验收 75/75 + 两种码探针）+ 复用门禁证据",
+      "uiRunId": "20260929T094444Z-3a33-batch9-harness-timeout-ui",
+      "uiRunCounts": "75/75 · exit 0 · notVerified 0",
+      "uiRunArtifactSha256": "7ed60d0be05c80790d53f2d285814bf27b00af739fe523ec746a23a356f77d56",
+      "uiRunScriptSha256": "bcad56796543d7e41541218d6e4a5926941ca9fb19d348ba605091ea73687904",
+      "codesProbe": "experiments/d5-03/batch9/verify/batch9-01-codes-probe.json（60 项检查 = 59 PASS + 1 条「必须变红」按预期红，exit 0）",
+      "evidenceRoot": "experiments/d5-03/batch9/verify/**（+ MANIFEST.sha256，22 条）",
+      "reusedGates": "其余 32 个门禁：机械判据「改动分支不可达」→ 复用证据（复用产物不含被测 commit 戳，依据是机械不可达而非产物戳记；逐条见验收报告 §3.1）",
+      "superseded": "更早批次（第一至第八批）的 runId / sha256 / 计数只作历史对照；第八批证据清单（experiments/d5-03/EVIDENCE.md + batch8/）保留为历史对照",
+      "countingRule": "计数一律取真实 TAP / run artifact 与 exit code；未实测项进 notVerified，不美化"
+    },
+    "errorAttribution": {
+      "newEnum": "`electron/task-domain.cjs:131-135` 新增 `HARNESS_START_TIMEOUT: \"HARNESS_START_TIMEOUT\"`（HARNESS_* 族内，位于 HARNESS_PROCESS_EXITED 与 HARNESS_TURN_TIMEOUT 之间）",
+      "classifierFix": "`electron/task-harness-orchestrator.cjs:101` 不再把 `HARNESS_START_TIMEOUT` 改写成 `HARNESS_TURN_TIMEOUT`，原样返回 `ERROR.HARNESS_START_TIMEOUT`（本批唯一产品语义改动，一行；旧映射只作「被本批订正」的历史口径）",
+      "path": [
+        "adapter 抛码：harness-adapter.cjs:272-275 `#withTimeout(conn.initialize(...), startTimeoutMs, HARNESS_ERROR.START_TIMEOUT)`（:29 定义、:321-325 实现、:90 造 e.code）",
+        "编排器捕获：task-harness-orchestrator.cjs:236-240 → revokeToolCapability() / revokeModelCapability() + await adapter.dispose() + facade.bridge.stop() → #blockStep({reason: classifyHarnessError(e), event: HARNESS_RUN_UNKNOWN_EFFECT})",
+        "分类（本批修复点）：task-harness-orchestrator.cjs:96-107（原 :101）",
+        "#blockStep → task-service.cjs:592-618 blockStep：Step BLOCKED(:606) / Task BLOCKED(:613)；事件 harness.run.unknown_effect(:608) / step.blocked(:609) / task.blocked(:615)",
+        "run 行 + 停因：task-harness-orchestrator.cjs:725 → task-service.cjs:565 blockHarnessRun({errorCode, stopReason:\"blocked\"}) → :539-562 #runTransition（:555-556 error_code/stop_reason；:559 事件 harness.run.blocked，safePayload 含 {runId, stepId, status, stopReason, errorCode}）",
+        "事件读取：task-service.cjs:445-450 getEvents → task-domain.cjs:343-346 safeEvent（事件是唯一持久化的失败事实来源）",
+        "停因投影（后端）：task-service.cjs:780-823 #resumeAssessment（:798 只特判 BUDGET_EXHAUSTED → 启动超时 runBudgetStop=false；:802 stopReason=该码；:815 NOT_BUDGET_STOP；:821 resumable=false）",
+        "IPC 投影：task-bootstrap.cjs:152-183 task/get（:175 resumable / :176 stopReason）+ :119-130 emitResult（:128 error）→ main.cjs:470 win.webContents.send(\"task:event\")（注册 :464-471）",
+        "渲染层：preload.cjs:141-147 → src/desktop/components.tsx:932-944（:939 setError(ev.error)；:941 再拉 task/get → :871-885 applyTaskState，:881 setStopReason）→ :1009 状态文字 / :1010 [data-ai-error] / :1012-1014 [data-ai-stop-reason]（仅 resumable 时渲染）"
+      ],
+      "noIndependentLogSink": true,
+      "noLogSinkNote": "没有独立日志 sink：orchestrator.logger 只透传给 ToolFacadeBridge / model bridge（task-harness-orchestrator.cjs:123/:646），不落 harness 错误码；失败事实只存在于 task events + task_harness_runs.error_code/stop_reason 行",
+      "consumers": "两个码在产品内只有 3 处引用（harness-adapter.cjs 生产端、task-harness-orchestrator.cjs:99/101 分类器、task-domain.cjs 枚举声明）；渲染层不按码分支；全仓无 ERROR 枚举整体遍历；停因判定只特判 BUDGET_EXHAUSTED（故启动超时仍 resumable=false）"
+    },
+    "budgetsAndSchema": {
+      "startTimeoutMs": 30000,
+      "turnTimeoutMs": 180000,
+      "unchanged": true,
+      "unchangedNote": "预算未动（electron/task-harness-orchestrator.cjs:31-32）；测试只注入更小值（1200 / 700 / 4000ms）",
+      "schemaVersion": 21,
+      "schemaNote": "electron/identity-store.cjs:68 SCHEMA_VERSION = 21 未改；task-store.cjs 的 error_code / stop_reason 是自由 TEXT 列（无 CHECK 约束），新增枚举成员无需迁移；test:d4-02c 门禁计数行含 schemaVersion:21"
+    },
+    "uiImpact": {
+      "visibleTextBefore": "· HARNESS_TURN_TIMEOUT",
+      "visibleTextAfter": "· HARNESS_START_TIMEOUT",
+      "node": "[data-ai-error]（src/desktop/components.tsx:1010）原样渲染错误码（既有行为；tests/d4-main-e2e.mjs:1159-1163 已证同类）",
+      "stopReasonNode": "[data-ai-stop-reason]（:1012-1014）只在 resumable=true 渲染 → 启动超时该节点不出现",
+      "unchanged": "状态文字（:1009 BLOCKED · Recovery Required）、恢复块、验证失败块、按钮可用性不变",
+      "noErrorCodeToHumanTextMapping": true,
+      "srcLinesChanged": 0,
+      "nodeLayerAssertion": "tests/task-harness-orchestrator.test.mjs:282-311 经真实 IPC 入口 task/run 断言 task/result.error / task/get.stopReason = 该码、resumable === false"
+    },
+    "cancelTestRework": {
+      "old": "tests/task-harness-cancel.test.mjs:84-99 固定 deadline = Date.now() + 20000 魔数窗（同文件 :24-26 同形）；超窗后不检查任何阶段就继续 cancel，失败退化为 0 !== 1",
+      "new": "waitForProviderRequest（:90-114）等待产品可观察阶段：requests >= 1（模型请求已发起）为成功；期间用单调时钟记录 phase:child-spawned / phase:session-created / phase:harness-running / phase:provider-request",
+      "upperBoundMs": 45000,
+      "upperBoundFormula": "PRODUCT_START_TIMEOUT_MS(30000) + START_MARGIN_MS(15000)（与产品常量成对，tests/task-harness-cancel.test.mjs:15-17）；产品调整启动预算时该常量需同步（不是新的魔数窗）",
+      "failureDiagnosis": "failWithTimeline（:116-127）：等待原因 + 上界与实测耗时 + 完整阶段时间线 + 宿主负载（loadavg / CPU 数 / 进程数 / 内存）+ 产品状态（task.status / run.status/errorCode/stopReason）；产品自己先收敛也立即失败并说明",
+      "criteriaUnchanged": [
+        "requests === 1（:163 / :228）",
+        "getCalls().items.length === 1（:229）",
+        "CANCELLED 终态与 capability REVOKED（:149-167）"
+      ],
+      "skippedOrDeleted": false,
+      "measured": "单跑 5 次 × 3 用例全过（启动阶段 677.7–1032.7ms，请求发起距 start:done 仅 90–170ms）；6 路并发（loadavg ≈ 46）6/6 实例 × 3 用例全过；3 轮全量中 cancel 三用例均绿"
+    },
+    "verification": {
+      "codesProbe": {
+        "command": "node experiments/d5-03/batch9/verify/batch9-01-codes-probe.mjs",
+        "counts": {
+          "total": 60,
+          "pass": 59,
+          "fail": 0,
+          "expectedRed": 1,
+          "unexpectedGreen": 0
+        },
+        "exit": 0,
+        "startTimeoutCase": "注入 startTimeoutMs=1200 → HARNESS_START_TIMEOUT；BLOCKED ×3（step/task/run）；0 prompt / 0 provider 请求 / 0 call / 0 artifact；capability 全 REVOKED + 旧 token 行为 401；有界 1268.0ms（≈1.06× 预算）；0 孤儿；事件携带该码（harness.run.unknown_effect / step.blocked / task.blocked / harness.run.blocked{stopReason:\"blocked\", errorCode}）",
+        "turnTimeoutCase": "注入 turnTimeoutMs=1200 → HARNESS_TURN_TIMEOUT；prompts 恰好 1 / start 恰好 1 / call 恰好 1（FAILED，providerErrorCode=HARNESS_TURN_TIMEOUT）；有界 1254.0ms（≈1.05×）；0 孤儿",
+        "raceCases": "R1 启动阻塞中途取消 / R2 执行阻塞中途取消：两例终态一致且唯一 CANCELLED（task 终态 == run 终态、1.5s 不翻转）、0 孤儿（全局扫描 0）、能力全 REVOKED + 旧 token 401、取消后 runTask 返回 TASK_REVISION_CONFLICT（fail-closed：取消后无任何 post-cancel mutation）",
+        "reverseVerification": "副本只改回旧映射（sha256 e1221a42…）→ classifyHarnessError(START) = HARNESS_TURN_TIMEOUT；启动用例 [EXPECTED-RED] 实际 HARNESS_TURN_TIMEOUT（run 行同错）；执行用例仍绿；产品源码 sha256 前后一致 aa6142e1…；副本已删",
+        "evidence": "01-codes-probe.stdout.txt / batch9-01-codes-probe.json"
+      },
+      "uiAcceptance": {
+        "runId": "20260929T094444Z-3a33-batch9-harness-timeout-ui",
+        "counts": {
+          "total": 75,
+          "pass": 75,
+          "fail": 0
+        },
+        "exit": 0,
+        "artifactSha256": "7ed60d0be05c80790d53f2d285814bf27b00af739fe523ec746a23a356f77d56",
+        "scenarios": "5 场景 × 4 张截图 = 20 张（浅·两种码 / 深·两种码 / 深色+减少动态；窗口 / 状态行 / 面板 / 对比度各一）",
+        "baseline": "与既有任务界面门禁探针族一致 new BrowserWindow({width:1360,height:900})；内容区 1360×868、dpr=2、产品无 setZoomFactor（缩放 100%）",
+        "layout": "两种码只差 1 字符（21 vs 20）；错误行矩形 / 状态行容器 / 按钮矩形完全相同；错误行 2 行；clientWidth == scrollWidth（无横向溢出）；祖先链到 body 全 horizontalOverflow=false；余量 108.88px",
+        "contrast": "浅 8.208:1 / 深 16.62:1（14px / 400 → DESIGN_SYSTEM.md:248 普通文本门槛 4.5:1；背景取众数 :251、文字 text.primary :63）",
+        "motion": "该行 animationName=none / transitionDuration=0s（浅 / 深 / 减少动态）；减少动态元素作用域 --dur-quick=0ms（MOTION_SYSTEM.md:21）；dark-turn-state-row.png 与 dark-reduced-turn-state-row.png sha256 完全相同（22f44dce143f63a7…）；本批 src/** 0 行改动",
+        "isolation": "独立 runId 目录 + acquirePort 独占探测（CDP cdpPortProbes 有记录）+ 只清自己 pid 树（strategy=own-pid-tree-only, pkillUsed=false, leftovers=[]）+ 串行执行"
+      },
+      "affectedGate": {
+        "gate": "test:d4-02c",
+        "counts": {
+          "tests": 26,
+          "pass": 26,
+          "fail": 0
+        },
+        "exit": 0,
+        "durationMs": 33656,
+        "criterion": "唯一真受影响（闭包加载两个改动模块且可达改动分支：唯一产生启动超时的夹具 start-hang-agent.mjs 全仓只被 tests/task-harness-orchestrator.test.mjs 使用，而该文件只被此门禁执行）",
+        "versionsLine": "dsh 0.1.5-rc.2 / acpSdk 1.4.0 / protocolVersion 1 / schemaVersion 21",
+        "artifact": "artifacts/d4-02c/d4-02c-gate.json",
+        "evidence": "04-gate-d4-02c.txt"
+      },
+      "fullTest": {
+        "counts": {
+          "tests": 1387,
+          "pass": 1385,
+          "fail": 2
+        },
+        "exit": 1,
+        "durationMs": 130873.5,
+        "evidence": "05-npm-test-full.txt（sha256 874ca4b0586808fc17dae08da967deac951d873325ae30af5367ae93da624c63）",
+        "failures": [
+          "not ok 64 P2 · 当前会话 = A（owner）：推送投递，载荷 = 白名单投影且与 getApprovalRequest 一致（tests/d4-03-approval-push-isolation.test.mjs:94，断言 :103）：actual 比 expected 多 targetRef / url —— 既有确定性失败，未修",
+          "not ok 1064 No Direct Domain Bypass：resource.trash 的唯一 Domain 调用点在 allowlisted adapter + controlled execution 内（tests/side-effect-c4-gates.test.mjs:444，断言 :474）：主进程绝不 in-process 执行 write expected true actual false —— 既有确定性失败，未修"
+        ],
+        "noNewFailures": true,
+        "batch8FlakeRecurred": false,
+        "w49ZeroRequestsReproduced": false,
+        "relatedCasesGreen": "ok 1181-1184 两码分类 / 启动超时 / 执行超时（恰好 1 次 prompt）/ 真实 IPC 入口；ok 1166-1168 cancel E2E / race / 无 Provider retry"
+      }
+    },
+    "assertionChanges": {
+      "existingAssertionsModified": 0,
+      "note": "断言变更清单 = **无**：本批没有任何既有断言需要修改（错的是产品映射，不是断言）；判据一字未放宽，未 skip / 未删除",
+      "newAssertions": [
+        "tests/task-harness-orchestrator.test.mjs 两码正反例（:194-197、:213-214 / :253-254）与真实 IPC 入口对渲染层可见载荷的断言（:299-309）",
+        "tests/task-harness-cancel.test.mjs 等阶段机制（waitForProviderRequest，:90-114；判据未变）"
+      ],
+      "reverseVerification": "修复前新用例为红：00-prefix-orchestrator-test.txt 2 fail（真实链路得到 HARNESS_TURN_TIMEOUT）；副本改回旧映射 → 启动用例 [EXPECTED-RED]；执行用例仍绿；产品源码 sha256 前后一致 aa6142e1…；副本已删"
+    },
+    "artifactRuns": {
+      "final": "20260929T094444Z-3a33-batch9-harness-timeout-ui（75/75，exit 0）",
+      "interim": [
+        "20260929T093908Z-0dc2（exit 2，counts 0/0/0）",
+        "20260929T094128Z-1244（exit 2，2/3）",
+        "20260929T094230Z-fccc（exit 2，2/2）",
+        "20260929T094240Z-a352（exit 1，73/74）",
+        "20260929T094329Z-2a0e（exit 0，75/75，已由定稿取代）"
+      ],
+      "unfinalized": "20260929T094215Z-be39（空目录，一次被中断的尝试，未 finalize，不入 index.json）",
+      "indexIntegrity": "artifacts/d5-03/runs/index.json 81 条（sha256 a83c1ec0704e623605b265411c06334e2d36fc354b6286d5ecc8f8cd27d65266）逐条复算 artifact 与 log 摘要 = 0 条不一致；近 3 小时改动仅本批 6 个 run 目录 + index.json / index.jsonl → 历史 run 产物未被改写"
+    },
+    "notVerified": [
+      "R2 竞争后 in-flight model call 的最终归宿：取消后 1.5s 该 call 行仍 STARTED（非终态），未观测更长时间后是否被终结；属既有 cancel 路径，非本批改动面",
+      "R1 场景未做实机截图：R1（session/new 无界）在界面上会长期停在「运行中」，本批未做该场景实机截图（不影响两种错误码的界面验收）",
+      "providerErrorCode 语义：执行超时时 model call 行记录 providerErrorCode = HARNESS_TURN_TIMEOUT；该字段名为 provider 侧语义而实际装的是 harness 超时码，本批只如实记录，未判定是否为缺陷",
+      "复用门禁证据强度：32 个「分支不可达」门禁沿用早于本批的运行产物，产物不含被测 commit 戳；复用依据是机械不可达证明，未重跑；其中 test:d4-02a 闭包只加载 task-domain.cjs 的新增枚举，同按「不受影响」处理、未重跑",
+      "极端窄窗口：面板宽度固定 350px，本批未做窗口 <1000px（产品 minWidth）的实测",
+      "openarc-resource / openarc-canvas 协议：探针宿主只接入了 openarc-file（AI 球原生素材）；另两个协议未接入（本次未触发相关控制台错误 / 请求失败）"
+    ],
+    "leftovers": [
+      "R1（新登记的产品面遗留，本批未修）：electron/harness-adapter.cjs:278 的 newSession 无任何超时（启动预算 :272-275 只包 ACP initialize）；受控实验：注入 startTimeoutMs=700、探针 session-new-hang-agent.mjs（initialize 正常回、session/new 不回）→ 8s 观察窗内不收敛（run=STARTING / task=RUNNING / 0 请求 / 0 prompt / 子进程存活）；对照（initialize 阻塞）+757.0ms 即收敛（HARNESS_START_TIMEOUT）",
+      "R1-e（本批新增的附加发现，未修）：该无界段里 orchestrator.dispose() / cancel() 触达不到 adapter —— task-harness-orchestrator.cjs:241 的 registry.set(...) 在 adapter.start() 返回之后才登记，而 dispose()（:824-831）与 cancel()（:746）都只遍历 registry；实测 dispose 后子进程仍存活（ps 状态 S，对照场景为 gone），只在主进程退出后消失（脚本退出后 0 残留）",
+      "R2 竞争账本残留：取消竞争中 in-flight model call 行可停在 STARTED",
+      "两条既有确定性失败（d4-03-approval-push-isolation 的 P2、side-effect-c4-gates 的 No Direct Domain Bypass）：按要求未修，如实单列",
+      "START_MARGIN_MS = 15000 与产品 DEFAULT_START_TIMEOUT_MS = 30000 成对（tests/task-harness-cancel.test.mjs:15-17）：产品未来调整启动预算时该常量需同步",
+      "本批新增调试 / 中途 run 目录如实登记（见 artifactRuns）；历史 run 产物未被改写"
+    ],
+    "continuedSeparate": "跨组织真机 2 条 notVerified、OAuth（仅 NONE / BEARER）、两条既有探针门禁失败（governance-ui 1/5、model-keychain-restart 3/15）、插件隔离（D5-08）、D5-02 重命名受 Electron 不支持 prompt() 限制、SIGKILL 边界；本批未新增「创建组织」入口",
+    "scopeBoundaries": [
+      "只改文档：PROGRESS.md / docs/D5-03-RESULT.md / docs/D5-03-GATE-EVIDENCE.json（本段纯插入）/ docs/decisions/D5-03H-dsh-runtime-pinning.md（就地加注）/ 新增 docs/decisions/D5-03I-harness-timeout-attribution.md",
+      "未改任何代码 / 脚本 / 测试 / 既有报告；未 commit / push / 切分支；第一至第八批内容不删改，仅就地加【第九批已更新】/【第九批已实施】",
+      "不开放工具调用、不连真实第三方、不运行任意第三方程序、不发用户数据、不声称插件隔离通过；不新增「创建组织」产品入口"
+    ]
+  },
   "batch8": {
     "phase": "D5-03 第八批 · DSH 运行时 PIN（项目专用可复现运行时 + 解析器只认项目安装）",
     "at": "2026-09-29T05:32:56Z",

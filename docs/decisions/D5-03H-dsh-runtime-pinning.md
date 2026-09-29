@@ -84,9 +84,9 @@ sdkPath    = .../node_modules/@agentclientprotocol/sdk/dist/acp.js              
 
 ## 6. 决策五：总经理裁定（本批，写进本决策文档即生效）
 
-1. **不调宽任何超时 / 等待窗口**（`DEFAULT_START_TIMEOUT_MS`、`HARNESS_START_TIMEOUT`、20s 等待窗口等一律不动）。
+1. **不调宽任何超时 / 等待窗口**（`DEFAULT_START_TIMEOUT_MS`、`HARNESS_START_TIMEOUT`、20s 等待窗口等一律不动）。【第九批已更新：本条约束在第九批继续成立 —— 超时预算与等待窗口一律未调宽（`DEFAULT_START_TIMEOUT_MS = 30000` / `DEFAULT_TURN_TIMEOUT_MS = 180000` 未改，`SCHEMA_VERSION` 仍 21）；「保留原始错误码」按 §6 裁定 3 的加注已于第九批实施，见本文件 §6 裁定 3 / §10 遗留 1 加注与 `docs/decisions/D5-03I-harness-timeout-attribution.md`】
 2. **不改任何断言去凑绿**：全量 `npm test` 的 `exit 1` 如实呈现为「**2 条预存失败 + 1 条已证负载 flake**」，不隐藏、不重跑刷绿。
-3. **超时预算与错误码映射登记为单独批次的产品 / 测试裁决项，本批不实施**：`DEFAULT_START_TIMEOUT_MS = 30000`（`electron/task-harness-orchestrator.cjs:32`）在高负载下偏紧，且 orchestrator（`:101`）把 `HARNESS_START_TIMEOUT` **映射成** `HARNESS_TURN_TIMEOUT` 导致错误码不精确 —— 两项都需要改产品 / 测试代码，超出本批「只改文档 / 只做 PIN」的范围。
+3. **超时预算与错误码映射登记为单独批次的产品 / 测试裁决项，本批不实施**：`DEFAULT_START_TIMEOUT_MS = 30000`（`electron/task-harness-orchestrator.cjs:32`）在高负载下偏紧，且 orchestrator（`:101`）把 `HARNESS_START_TIMEOUT` **映射成** `HARNESS_TURN_TIMEOUT` 导致错误码不精确 —— 两项都需要改产品 / 测试代码，超出本批「只改文档 / 只做 PIN」的范围。【第九批已实施：分类器（`electron/task-harness-orchestrator.cjs:101`）不再把 `HARNESS_START_TIMEOUT` 改写成 `HARNESS_TURN_TIMEOUT`，而是**原样保留**该码，并新增领域枚举 `ERROR.HARNESS_START_TIMEOUT`（`electron/task-domain.cjs`）；`DEFAULT_START_TIMEOUT_MS` 仍 **30000**（预算未动，§6 裁定 1 的约束同时成立）、`SCHEMA_VERSION` 仍 **21**；界面可见文案由 `· HARNESS_TURN_TIMEOUT` 变为 `· HARNESS_START_TIMEOUT`（`src/desktop/components.tsx:1010` 原样渲染错误码，`src/**` 0 行改动），已通过浅 / 深主题 + 布局 + 对比度实机验收（浅 8.208:1 / 深 16.62:1 ≥ 普通文本门槛 4.5:1）；反向验证（副本改回旧映射 → 启动用例按预期变红）成立；判定与证据见 `docs/decisions/D5-03I-harness-timeout-attribution.md`】
 4. 本批**只做**：运行时 PIN、解析器收紧、契约测试、证据记录；**不新增任何功能**，不改工具（`run-artifacts.cjs` 等）、不改既有门禁脚本。
 5. 版本一致性口径：全文 `0.1.5-rc.2` / `1.4.0` 一律指**项目内安装**的版本；DSH Desktop 共享运行时的 `0.2.0-rc.1` 只作为「被拒绝的回退目标」出现。
 
@@ -113,7 +113,7 @@ sdkPath    = .../node_modules/@agentclientprotocol/sdk/dist/acp.js              
 
 **另有一处同类 flake（如实计入）**：`tool-dsh-lifecycle` 首跑 `1/2`，失败 run 0 报 `HARNESS_TURN_TIMEOUT`、`duration_ms 59964`；复跑 `2/2`（5-run 本次 3668ms）+ 探针 `2/2 ×3` → 合计 **4 通过 / 5 次**。
 
-**flake 归因（补做 A/B 实测，`22-startup-latency-ab.txt` `546cce1a` / `23-flake-timeline.txt` `a54ddd6b`）**：直接 exec 两个 bin（N=10、严格 A/B 交替、隔离 `DSH_HOME` / `HOME`、共享安装只执行不写入）——Phase 1 `--version`：项目 bin p50 **40.9 ms** vs 共享 bin p50 **46.4 ms**（项目反而更快）；Phase 2 `--profile acp` + ACP `initialize`：项目 p50 **474.4 ms** vs 共享 p50 **445.2 ms**（相对 +6.6%，两组分布大幅重叠，两侧 **0 失败**、均 `protocolVersion=1`）。失败那次需 **> 30 s**（约为产品真实路径实测 **0.73 s/run** 的 **40–65 倍**），而版本间差异仅约 **±7%** → **量级上版本差异无法解释该 flake，判为宿主环境型，与本批 PIN 无关**（具体停顿机制未定位，见 §9）；超时预算处置留给单独批次（§6 裁定 3）。
+**flake 归因（补做 A/B 实测，`22-startup-latency-ab.txt` `546cce1a` / `23-flake-timeline.txt` `a54ddd6b`）**：直接 exec 两个 bin（N=10、严格 A/B 交替、隔离 `DSH_HOME` / `HOME`、共享安装只执行不写入）——Phase 1 `--version`：项目 bin p50 **40.9 ms** vs 共享 bin p50 **46.4 ms**（项目反而更快）；Phase 2 `--profile acp` + ACP `initialize`：项目 p50 **474.4 ms** vs 共享 p50 **445.2 ms**（相对 +6.6%，两组分布大幅重叠，两侧 **0 失败**、均 `protocolVersion=1`）。失败那次需 **> 30 s**（约为产品真实路径实测 **0.73 s/run** 的 **40–65 倍**），而版本间差异仅约 **±7%** → **量级上版本差异无法解释该 flake，判为宿主环境型，与本批 PIN 无关**（具体停顿机制未定位，见 §9）；超时预算处置留给单独批次（§6 裁定 3）。【第九批已更新：预算处置维持「不调宽」（30000 / 180000 未改）；「保留原始错误码」已由第九批实施，见 §6 裁定 3 加注与 `docs/decisions/D5-03I-harness-timeout-attribution.md`】
 
 ## 8. 边界与不变性（跑前 04:57:34Z / 跑后 05:12:36Z 两次快照逐项一致）
 
@@ -144,8 +144,8 @@ sdkPath    = .../node_modules/@agentclientprotocol/sdk/dist/acp.js              
 
 ## 10. 遗留与建议
 
-1. **超时预算 / 错误码映射**（`DEFAULT_START_TIMEOUT_MS = 30000` 偏紧；orchestrator（`:101`）把 `HARNESS_START_TIMEOUT` 映射成 `HARNESS_TURN_TIMEOUT`，两者错误码不可区分）→ **单独批次的产品 / 测试裁决项**，本批不实施（见 §6 裁定 3）。A/B 已判定该 flake 与 PIN 无关（§7）；报告 §七 列出三个选项的利弊：**调宽 start 预算**（消除宿主争用导致的假失败，但真实"启动卡死"会更晚暴露，且掩盖更值得修的错误码误映射）/ **保留原始错误码**（失败可正确归因、运行行为不变，需先评估既有依赖 `HARNESS_TURN_TIMEOUT` 的调用方兼容面）/ **维持现状**（零改动零回归面，但本机高负载下仍偶发，实测 5 次中 1 次）。
-2. `tests/task-harness-cancel.test.mjs:84` 的 **20s 等待窗口**同为环境型 flake（单跑 3/3 ×3 全过），一并留给单独批次裁决，本批不实施。
+1. **超时预算 / 错误码映射**（`DEFAULT_START_TIMEOUT_MS = 30000` 偏紧；orchestrator（`:101`）把 `HARNESS_START_TIMEOUT` 映射成 `HARNESS_TURN_TIMEOUT`，两者错误码不可区分）→ **单独批次的产品 / 测试裁决项**，本批不实施（见 §6 裁定 3）。A/B 已判定该 flake 与 PIN 无关（§7）；报告 §七 列出三个选项的利弊：**调宽 start 预算**（消除宿主争用导致的假失败，但真实"启动卡死"会更晚暴露，且掩盖更值得修的错误码误映射）/ **保留原始错误码**（失败可正确归因、运行行为不变，需先评估既有依赖 `HARNESS_TURN_TIMEOUT` 的调用方兼容面）/ **维持现状**（零改动零回归面，但本机高负载下仍偶发，实测 5 次中 1 次）。【第九批已实施：三选项中采纳「**保留原始错误码**」—— 分类器原样保留 `HARNESS_START_TIMEOUT`（不再冒充执行超时），`DEFAULT_START_TIMEOUT_MS` 仍 **30000**（预算未动）；界面可见文案由 `· HARNESS_TURN_TIMEOUT` 变为 `· HARNESS_START_TIMEOUT`，已通过浅 / 深主题与对比度验收（浅 8.208:1 / 深 16.62:1 ≥ 4.5:1）；反向验证（副本改回旧映射）启动用例按预期变红（真实链路得到 `HARNESS_TURN_TIMEOUT`）；详见 `docs/decisions/D5-03I-harness-timeout-attribution.md`】
+2. `tests/task-harness-cancel.test.mjs:84` 的 **20s 等待窗口**同为环境型 flake（单跑 3/3 ×3 全过），一并留给单独批次裁决，本批不实施。【第九批已更新：**已实施** —— `tests/task-harness-cancel.test.mjs` 不再用固定 20s 魔数窗，改为等待**产品可观察阶段**（provider 请求已发起；期间记录 child-spawned / session-created / harness-running），上界 = 产品启动预算 30000 + 余量 15000 且与产品常量成对；判据一字未放宽（`requests === 1` / `calls === 1` / `CANCELLED` / capability `REVOKED`），未 skip / 未删除；5 次单跑 + 6 路并发 + 3 轮全量均未再出现该 flake，W49 的「0 次请求」未复现；见 `docs/decisions/D5-03I-harness-timeout-attribution.md` §5】
 3. 两条**预存失败**仍在（`d4-03-approval-push-isolation` P2、`side-effect-c4-gates` No Direct Domain Bypass），与本批 dsh PIN 无关，**需另案处理**。
 4. `/tmp` 下 **22 个更早批次 `oa-d503*` 残留**未清（非本批产物）。
 5. 首次 `npm install` 耗时 **34 分钟**（498 个包，含各平台二进制）→ 首次安装 / CI 需预留时间。
@@ -164,6 +164,6 @@ sdkPath    = .../node_modules/@agentclientprotocol/sdk/dist/acp.js              
 
 * **D5-03 第八批（DSH 运行时 PIN）= PASS（限定范围）**：项目专用可复现运行时（`0.1.5-rc.2` 精确版本 + resolved / integrity + 项目内 bin）；ACP SDK **仍 1.4.0** 且不再回退运行时副本；解析器默认 = 仓库根、覆盖同校验、缺失 / 不符显式失败（`DSH_RUNTIME_MISSING` / `DSH_VERSION_MISMATCH`）、绝不回退共享运行时 / PATH / 未知版本、孤儿与 planted 假 bin 一律拒绝（含阳性对照）；修前 4 条版本漂移失败 → 修后 **12/12 exit 0**，新增契约 **7/7**；六类真实链路全绿；5 个受影响门禁 **211/211 exit 0**；**4 条版本漂移失败在全量失败名单里已全部消失**；负载 flake 已用 A/B 实测归因为**宿主环境型**（两版本启动同量级、差异约 ±7%，与失败那次的 40–65× 偏差量级不符），与本批 PIN 无关。
 * **全量 `npm test` = exit 1**（1383 / 1380 / 3）：**2 条预存 + 1 条已证负载 flake**，逐条列名给因，**未调宽超时、未改断言**。
-* **D5-03 整体仍 = PARTIAL**，剩余缺口 = §9 / §10 逐条（超时 / 错误码映射待单独批次；cancel 20s 窗口；2 条预存失败另案；`/tmp` 22 个更早批次残留；CI 首次安装时间）。
+* **D5-03 整体仍 = PARTIAL**，剩余缺口 = §9 / §10 逐条（超时 / 错误码映射待单独批次；cancel 20s 窗口；2 条预存失败另案；`/tmp` 22 个更早批次残留；CI 首次安装时间）。【第九批已更新：其中「超时 / 错误码映射」与「cancel 20s 窗口」两项已由第九批实施（保留原始错误码 + 取消测试按可观察阶段等待；预算未调宽、判据未放宽），本批剩余缺口逐条见 `docs/decisions/D5-03I-harness-timeout-attribution.md` §7 / §8 / §11】
 * **继续单列（不并入本批）**：跨组织真机 **2 条 notVerified**、**OAuth**、**两条既有探针门禁失败**（`governance-ui` 1/5、`model-keychain-restart` 3/15）、**插件隔离（D5-08）**、**D5-02 重命名受 Electron 不支持 `prompt()` 限制**、**SIGKILL 边界**；**本批未新增「创建组织」入口**。
 * tracked 证据：`docs/D5-03-GATE-EVIDENCE.json` 的 `batch8` 段（纯插入）；本批决策 = 本文件；结果正文 = `docs/D5-03-RESULT.md` 第八批节；进度 = `PROGRESS.md` 第八批节。
