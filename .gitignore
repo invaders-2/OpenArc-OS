@@ -6,3 +6,6 @@ artifacts/
 npm-debug.log*
 # 代理工作区（记忆与会话数据），不进版本库
 .workbuddy/
+
+# D5-03 第十一批：真实 Electron 退出探针的临时运行产物（隔离安装 / 数据库 / 日志），不进版本库
+experiments/d5-03/batch11/verify/runs/

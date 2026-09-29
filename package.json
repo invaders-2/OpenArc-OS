@@ -37,6 +37,7 @@
     "test:d4-02a": "node experiments/d4-02a/run-all.mjs",
     "test:d4-02b": "node experiments/d4-02b/run-all.mjs",
     "test:d4-02c": "node experiments/d4-02c/run-all.mjs",
+    "test:d5-03-exit": "node experiments/d5-03/batch11/verify/exit-e2e.mjs",
     "test:d4-03a": "node experiments/d4-03a/run-all.mjs",
     "test:d4-03b": "node experiments/d4-03b/run-all.mjs",
     "test:d4-03c1": "node experiments/d4-03c1/run-all.mjs",

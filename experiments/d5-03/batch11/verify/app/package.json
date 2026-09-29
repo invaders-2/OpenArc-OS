@@ -1,0 +1,7 @@
+{
+  "name": "openarc-batch11-exit-probe",
+  "private": true,
+  "version": "0.0.0",
+  "description": "D5-03 第十一批 · 真实 Electron 退出探针宿主（import 产品 electron/app-shutdown.cjs，不自己写收尾顺序）",
+  "main": "main.cjs"
+}

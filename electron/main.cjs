@@ -24,7 +24,9 @@ const { registerIdentityIpc, resolveSessionTtlOverride } = require("./identity-b
 const { registerCanvasIpc } = require("./canvas-bootstrap.cjs");
 const { registerTaskIpc } = require("./task-bootstrap.cjs");
 // D5-03：MCP 中心的宿主命令面（连接管理 + 能力发现；本批不开放工具调用）。
-const { registerMcpIpc, disposeMcpBounded } = require("./mcp-bootstrap.cjs");
+const { registerMcpIpc } = require("./mcp-bootstrap.cjs");
+// D5-03 第十一批：关应用的唯一收尾顺序（MCP → Harness → modelProxy → store）。
+const { disposeAppResources } = require("./app-shutdown.cjs");
 const { createDefaultExecutorLauncher } = require("./executor-launcher.cjs");
 const { createOpenArcRuntime } = require("./runtime-boot.cjs");
 const { createFileService } = require("./file-service.cjs");
@@ -831,29 +833,31 @@ app.whenReady().then(async () => {
 app.on("window-all-closed", () => app.quit());
 
 // SQLite 的连接必须在进程退出前关闭，否则 WAL 里未 checkpoint 的事务会丢。
-// D5-03 第三批：关闭应用时 MCP 的 GET 流与在途请求也要及时结束 ——
-// 先做有界 dispose（2s 兜底），再停 modelProxy / 关 store；失败只留痕，绝不阻塞退出。
+// D5-03 第三批：关闭应用时 MCP 的 GET 流与在途请求也要及时结束。
+// D5-03 第十一批：**Harness 也在途**——退出时必须先停下 Harness 的启动 / 执行、撤销模型与
+// 工具能力、回收 harness 子进程与 bridge，然后才停 modelProxy / 关 store；
+// 顺序与有界收尾只在 app-shutdown.cjs 里存在一份（真实 main 与验收 probe 共用，避免漂移）。
+// 应用退出不是用户取消：只收资源，绝不写 Task/Step/Run 状态（重启后仍走既有 RECOVERY_REQUIRED）。
+//
+// 退出序列踩过的坑（实测 Electron 44）：在 `.then()` 微任务里再调 app.quit() **不会**让退出
+// 序列继续 —— 事件停在 will-quit，进程只能被外部杀掉（最小复现：同样两段代码，微任务挂住、
+// 宏任务正常退出）。所以收尾完成后必须把 app.quit() 放到宏任务里；再加一道有界保险丝，
+// 万一退出序列仍不推进就显式 exit，绝不把「关不掉的应用」留给用户。
 let quitting = false;
 app.on("will-quit", (event) => {
   if (quitting) return;
   quitting = true;
   event.preventDefault();
-  disposeMcpBounded({ service: identity?.mcpService, timeoutMs: 2000, reason: "app-quit" }).then((res) => {
+  disposeAppResources({ identity, log: (line) => console.log(line) }).then((res) => {
     try {
-      console.log("[openarc] MCP 收尾：" + JSON.stringify({ ok: res.ok !== false, closed: res.closed || 0, aborted: res.aborted || 0, ended: res.ended || 0, error: res.error || null, failures: res.failures || [] }));
-    } catch {
-      /* 日志失败不阻塞退出 */
-    }
-    try {
-      identity?.modelProxy?.stop();
-    } catch {
-      /* 已关闭 */
-    }
-    try {
-      identity?.store?.close();
-    } catch {
-      /* 已关闭 */
-    }
-    app.quit();
+      console.log("[openarc] 退出收尾：" + JSON.stringify({ ok: res.ok, harness: res.harness, mcp: res.mcp, proxyStopped: res.proxyStopped, storeClosed: res.storeClosed }));
+    } catch { /* 日志失败不阻塞退出 */ }
+    setImmediate(() => {
+      app.quit();
+      setTimeout(() => {
+        console.error("[openarc] 退出序列未推进，显式退出");
+        app.exit(0);
+      }, 3000).unref?.();
+    });
   });
 });
