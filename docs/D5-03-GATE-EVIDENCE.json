@@ -1,4 +1,150 @@
 {
+  "batch10": {
+    "phase": "D5-03 第十批 · 收口 Harness 启动全程的超时与取消（R1 + R1-e）",
+    "at": "2026-09-29T13:15:00Z",
+    "atNote": "证据截止时点 = 第十批证据快照写入时。**纯插入**：batch9 及其后所有旧段逐字节未改（证明方式：本文件自 `  \"batch9\": {` 起至 EOF 与插入前同一起点至 EOF 逐字节相同）。",
+    "openarcBranch": "integration/ui-core",
+    "testedCommit": "e626045",
+    "testedCommitNote": "单个提交（`git log --oneline 05fa678..e626045` = 1 行），父提交 05fa678；5 个文件 `+601 / −44`（electron/harness-adapter.cjs +134/−32、electron/task-harness-orchestrator.cjs +71/−12、tests/fixtures/harness-acp/session-new-hold-agent.mjs +30/−0、tests/task-harness-cancel.test.mjs +200/−0、tests/task-harness-orchestrator.test.mjs +166/−0）；`src/**` 0 行改动；`SCHEMA_VERSION` 仍 21；提交由门禁暴露的回归（启动段内 kill child 退化成 INTERNAL_ERROR）修复后 amend 一次，内容即被测内容",
+    "scopeBoundaries": [
+      "只做第九批登记的 R1（session/new 无上界）与 R1-e（无界段 dispose/cancel 触达不到 adapter）",
+      "R2（取消后 call 停在 STARTED）只做同根因排查：结论不同根因（取消路径不终结 in-flight model call 信封），本批不改，另案登记",
+      "未做 OAuth、D5-04、未新增创建组织入口；预算 30000/180000 未调宽；无既有断言被放宽或跳过"
+    ],
+    "r1StartupDeadline": {
+      "mechanism": "adapter.start 进入时算一次绝对截止时间 deadlineAt = clock() + startTimeoutMs；initialize 与 session/new 都经 #withDeadline(promise, deadlineAt, code)，剩余预算 = deadlineAt - now()，为 0 立刻超时",
+      "noPerPhaseReset": "已证明：注入时钟在 session/new 发出的那一刻已走 600/700ms，该调用剩余预算 98ms（>0 且 ≤ 600ms）；旧行为会重新获得 700ms",
+      "lateResponse": "session/new 返回后 #assertNotInterrupted 复核；迟到响应不复活 run、不产生 run、不产生 prompt、0 provider 请求",
+      "failureSelfCleanup": "启动失败一律 #runTeardown()（幂等、只跑一次）：撤销 tool + model 能力 → closeSession → stdin close → SIGTERM → bounded SIGKILL → bridge.stop() → 删临时目录"
+    },
+    "r1eReachability": {
+      "mechanism": "adapter.start() 之前先 registry.set(runId, { ..., starting: true })；cancel() / dispose() 对 starting 登记执行 abortStart → revoke 两类能力 → await dispose()，再立刻注销登记",
+      "cancelPriority": "cancel 先持久 cancel_requested=1；启动段 catch 与启动后阶段复核都据此走 #finalizeCancelled → 唯一 CANCELLED，绝不翻转成 BLOCKED",
+      "idempotent": "重复 cancel 幂等（终态与 run 条数不变、0 重复 prompt）",
+      "criticalPoint": "session/new 即将回应时取消：等 1.5s 窗口后终态不翻转、无 CANCELLED + SUCCEEDED 矛盾、0 孤儿",
+      "disposeDuringStart": "应用 dispose 在启动段内触达：runTask 有界收敛且绝不抛异常、run 不悬挂 STARTING、unhandledRejection 计数 0"
+    },
+    "verification": {
+      "red": {
+        "probe": "experiments/d5-03/batch9/new-session-unbounded-probe.mjs（第九批探针，工作树回到 05fa678 的两个产品文件）",
+        "probeResult": "runSettled=false、run STARTING、task RUNNING、0 请求、0 prompt、childAlive=true（700ms 预算 + 8s 观察窗不收敛）",
+        "newCases": "3 个编排器用例全部 RED-HANG（4s 观察窗内未收敛，期望 HARNESS_START_TIMEOUT 实际未收敛）；adapter 自清用例同样未收敛；启动段取消用例全程挂住（30s 外层有界杀停，无 TAP 断言产出）",
+        "boundedRedRuns": [
+          "experiments/d5-03/batch10/verify/red-run-orchestrator.txt",
+          "experiments/d5-03/batch10/verify/red-run-cancel.txt"
+        ]
+      },
+      "green": {
+        "batch9Probe": "experiments/d5-03/batch10/verify/00-r1-probe-green.json：runSettled=true、HARNESS_START_TIMEOUT、task/run BLOCKED、childAlive=false、hasSessionId=null、0 请求、0 prompt",
+        "newCases": "experiments/d5-03/batch10/verify/03-new-cases.txt：tests 23 / pass 23 / fail 0，duration 32588.6ms",
+        "stateTriples": "task / step / harness run 三处状态在每条用例内逐项断言（BLOCKED+error_code 或唯一 CANCELLED）"
+      },
+      "gateCounts": {
+        "d4-02c": {
+          "tests": 33,
+          "pass": 33,
+          "fail": 0,
+          "exit": 0,
+          "ms": 45254,
+          "log": "experiments/d5-03/batch10/verify/01-gate-d4-02c.txt",
+          "note": "含 tests/task-harness-{orchestrator,e2e,cancel,recovery,security}.test.mjs + task-orchestration-migration.test.mjs；版本 dsh 0.1.5-rc.2 / acp 1.4.0 / schema 21"
+        },
+        "npmTestFull": {
+          "tests": 1394,
+          "pass": 1392,
+          "fail": 2,
+          "exit": 1,
+          "ms": 142327,
+          "log": "experiments/d5-03/batch10/verify/02-npm-test-full.txt",
+          "failures": [
+            "P2 · 当前会话 = A（owner）：推送投递，载荷 = 白名单投影且与 getApprovalRequest 一致（d4-03-approval-push-isolation）",
+            "No Direct Domain Bypass：resource.trash 的唯一 Domain 调用点在 allowlisted adapter + controlled execution 内（side-effect-c4-gates）"
+          ],
+          "note": "2 条失败 = 第九批登记的两条既有确定性失败，本批无新增失败；无 flake、无 skipped"
+        },
+        "otherHarnessGates": [
+          {
+            "cmd": "node --test --test-concurrency=1 tests/tool-dsh-lifecycle.test.mjs tests/tool-dsh-cancel.test.mjs tests/tool-dsh-facade.test.mjs",
+            "tests": 9,
+            "pass": 9,
+            "fail": 0,
+            "exit": 0,
+            "ms": 32366
+          },
+          {
+            "cmd": "npm run test:d4-03b-dsh",
+            "tests": 26,
+            "pass": 26,
+            "fail": 0,
+            "exit": 0,
+            "ms": 51000
+          },
+          {
+            "cmd": "node --test --test-concurrency=1 tests/d4-03-model-binding.test.mjs",
+            "tests": 19,
+            "pass": 19,
+            "fail": 0,
+            "exit": 0,
+            "ms": 28000
+          },
+          {
+            "cmd": "node --test --test-concurrency=1 tests/d5-03-dsh-runtime-pin.test.mjs tests/d5-03-mcp-stream.test.mjs tests/d5-03-app-grant-org-isolation.test.mjs",
+            "tests": 24,
+            "pass": 24,
+            "fail": 0,
+            "exit": 0,
+            "ms": 11000
+          },
+          {
+            "cmd": "node --test --test-concurrency=1 tests/d4-07-budget-consistency.test.mjs",
+            "tests": 3,
+            "pass": 3,
+            "fail": 0,
+            "exit": 0,
+            "ms": 6000
+          }
+        ],
+        "gateRule": "受影响的 D4 Harness 门禁 = 6 个（d4-02c + 上述 5 条），全部 exit 0；复用证据不含被测 commit 戳，如实披露（沿用第九批口径）"
+      },
+      "countersInCases": {
+        "providerRequests": 0,
+        "prompts": 0,
+        "autoRetry": 0,
+        "capabilities": "REVOKED（model + tool）",
+        "oldTokenActualRequest": "401 PROXY_UNAUTHORIZED（真实 POST /v1/chat/completions）",
+        "orphanProcesses": "0（process.kill(pid, 0) 在 cancel / dispose / 超时收尾后判定）",
+        "tempDir": "adapter 级用例断言 start 失败后临时目录已删除",
+        "registry": "启动段收敛后无残留登记"
+      }
+    },
+    "processExitClassification": {
+      "found": "启动段内 kill child：ACP 连接先关、exit 事件同 tick 才到，修复前归因为 INTERNAL_ERROR（真实回归，由 test:d4-02c 的 task-harness-recovery 用例暴露）",
+      "fix": "start 段 catch 中若异常无 code 先等 ≤250ms 复判 processExited，再退化成 PROTOCOL_ERROR；另断言 session/new 必须返回 sessionId",
+      "result": "test:d4-02c 33/33 pass；task-harness-recovery 单文件 3 连跑全部 2/2 pass"
+    },
+    "r2RootCauseCheck": {
+      "question": "R2（取消后 call 停在 STARTED）是否与本批同一根因",
+      "method": "experiments/d5-03/batch10/verify/r2-diagnose.mjs（真实 adapter + slow provider，等 provider 请求已发起后 cancel，观测 0/200/1000/3000/6000ms 五个时点）",
+      "observed": "cancel ok=true；run/task/step = CANCELLED/CANCELLED/CANCELLED；model call 五个时点始终 STARTED、providerErrorCode=null",
+      "conclusion": "不同根因：R2 期间启动早已完成、registry 登记正常；缺陷面在「取消路径不终结 in-flight model call 信封」（TaskService 的 finalizeCancel / cancelHarnessRun 不触碰 task_model_calls；运行时内联的 failModelCall/completeModelCall 均在 callRes.ok 之后；非取消路径的 #blockStep 也只 blockHarnessRun）",
+      "action": "本批不改任何相关代码，另案登记（见 leftovers）"
+    },
+    "assertionChanges": "无既有断言被修改 / 放宽 / 跳过；新增 7 条用例（4 条在 tests/task-harness-orchestrator.test.mjs、3 条在 tests/task-harness-cancel.test.mjs）+ 1 个探针夹具 tests/fixtures/harness-acp/session-new-hold-agent.mjs（延迟由 argv[2] 控制，不传 = 永不回应）",
+    "notVerified": [
+      "未做真机截图：本批 src/** 0 行改动，界面影响为取消启动段后 task/run 显示 CANCELLED（沿用既有文案与组件路径）",
+      "复用门禁证据不含被测 commit 戳（依据是本批只碰 Harness 启动 / 取消路径，其余门禁不可达；如实披露）",
+      "未做 <1000px 窗口实测（本批无界面改动）",
+      "启动段「迟到响应」用例只在探针层面验证，未构造真实 dsh 迟到响应"
+    ],
+    "leftovers": [
+      "R2：取消后 in-flight model call 停在 STARTED（本批已给不同根因证据，另案）",
+      "两条既有确定性失败（d4-03-approval-push-isolation P2、side-effect-c4-gates No Direct Domain Bypass）未修",
+      "orchestrator.dispose() 在应用退出路径未被调用（electron/main.cjs will-quit 只做 MCP 有界 dispose + modelProxy.stop + store.close）→ 本批未改，待裁决",
+      "START_MARGIN_MS = 15000 与产品预算成对（产品改预算需同步）",
+      "跨组织真机 2 条 notVerified、OAuth、两条探针门禁既有失败（governance-ui 1/5、model-keychain-restart 3/15）、插件隔离 D5-08、D5-02 prompt() 遗留、SIGKILL 边界"
+    ],
+    "judgement": "D5-03 第十批（R1 启动全程预算 + R1-e 启动段可取消/可 dispose）= PASS（限定范围：两项收口成立，红→绿、竞争与重复取消、迟到响应、进程与能力回收均有证据；R2 不同根因与两条既有失败如实单列）；D5-03 整体仍 = PARTIAL"
+  },
   "batch9": {
     "phase": "D5-03 第九批 · 启动超时不再冒充执行超时（错误归属）+ 取消测试按可观察阶段等待",
     "at": "2026-09-29T09:51:58Z",

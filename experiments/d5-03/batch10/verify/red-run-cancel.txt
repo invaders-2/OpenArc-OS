@@ -1,0 +1,5 @@
+TAP version 13
+# (node:64486) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+
+[RED-RUN-KILLED after 30000ms: 未收敛]

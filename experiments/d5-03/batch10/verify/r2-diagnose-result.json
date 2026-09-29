@@ -1,0 +1,111 @@
+(node:66650) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+{
+  "probeRequests": 1,
+  "callsBefore": [
+    {
+      "id": "mcall_56r6r4y77_rPIA",
+      "status": "STARTED"
+    }
+  ],
+  "cancelOk": true,
+  "cancelError": null,
+  "runResult": {
+    "ok": false,
+    "error": "HARNESS_CANCELLED",
+    "cancelled": true,
+    "task": {
+      "taskId": "task_T4PHsZZ_1Kvj_w",
+      "userId": "usr_ZSPooiJxpe7tgM8SIo_5s7ul5anubMtz",
+      "appId": "ai",
+      "status": "CANCELLED",
+      "goal": "Return exactly: OPENARC_TASK_OK",
+      "createdAt": 1700000000000,
+      "updatedAt": 1700000000000,
+      "startedAt": 1700000000000,
+      "completedAt": 1700000000000,
+      "modelConfigId": "mcf_-VxGUYXKLxBu7A",
+      "modelConfigVersion": 1,
+      "currentStepId": null,
+      "revision": 10,
+      "cancelRequested": true,
+      "budgetSnapshot": null,
+      "permissionSnapshotRef": null
+    },
+    "run": {
+      "runId": "hrun_4rZA39aug7sk8w",
+      "taskId": "task_T4PHsZZ_1Kvj_w",
+      "stepId": "step_hl11h3WV9PGNpg",
+      "status": "CANCELLED",
+      "harnessVersion": null,
+      "acpVersion": null,
+      "modelConfigId": "mcf_-VxGUYXKLxBu7A",
+      "modelConfigVersion": 1,
+      "startedAt": 1700000000000,
+      "completedAt": 1700000000000,
+      "stopReason": null,
+      "errorCode": null
+    }
+  },
+  "runStatus": [
+    {
+      "status": "CANCELLED",
+      "errorCode": null,
+      "stopReason": null
+    }
+  ],
+  "taskStatus": "CANCELLED",
+  "stepStatus": "CANCELLED",
+  "callTimeline": [
+    {
+      "at": 0,
+      "calls": [
+        {
+          "id": "mcall_56r6r4y77_rPIA",
+          "status": "STARTED",
+          "providerErrorCode": null
+        }
+      ]
+    },
+    {
+      "at": 200,
+      "calls": [
+        {
+          "id": "mcall_56r6r4y77_rPIA",
+          "status": "STARTED",
+          "providerErrorCode": null
+        }
+      ]
+    },
+    {
+      "at": 1000,
+      "calls": [
+        {
+          "id": "mcall_56r6r4y77_rPIA",
+          "status": "STARTED",
+          "providerErrorCode": null
+        }
+      ]
+    },
+    {
+      "at": 3000,
+      "calls": [
+        {
+          "id": "mcall_56r6r4y77_rPIA",
+          "status": "STARTED",
+          "providerErrorCode": null
+        }
+      ]
+    },
+    {
+      "at": 6000,
+      "calls": [
+        {
+          "id": "mcall_56r6r4y77_rPIA",
+          "status": "STARTED",
+          "providerErrorCode": null
+        }
+      ]
+    }
+  ]
+}

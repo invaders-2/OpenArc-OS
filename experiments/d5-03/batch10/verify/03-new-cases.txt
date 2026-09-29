@@ -1,0 +1,152 @@
+TAP version 13
+# (node:66615) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Cancel E2E：真实 slow provider → 用户取消 → 0 retry + capability revoked + CANCELLED
+ok 1 - Cancel E2E：真实 slow provider → 用户取消 → 0 retry + capability revoked + CANCELLED
+  ---
+  duration_ms: 5082.130791
+  type: 'test'
+  ...
+# Subtest: Cancel Race：cancel 先行 → 绝不 Task CANCELLED + Step SUCCEEDED
+ok 2 - Cancel Race：cancel 先行 → 绝不 Task CANCELLED + Step SUCCEEDED
+  ---
+  duration_ms: 421.831167
+  type: 'test'
+  ...
+# Subtest: Cancel 后不存在 Provider retry：abort 只发生一次
+ok 3 - Cancel 后不存在 Provider retry：abort 只发生一次
+  ---
+  duration_ms: 5067.872416
+  type: 'test'
+  ...
+# Subtest: 启动未返回时取消：session/new 阻塞中 cancel → 唯一 CANCELLED + 子进程被回收 + 能力撤销 + 旧 token 401
+ok 4 - 启动未返回时取消：session/new 阻塞中 cancel → 唯一 CANCELLED + 子进程被回收 + 能力撤销 + 旧 token 401
+  ---
+  duration_ms: 459.191334
+  type: 'test'
+  ...
+# Subtest: 启动临界点竞争：session/new 即将回应时 cancel 先行 → 绝不 CANCELLED 与 SUCCEEDED 翻转、绝不 prompt
+ok 5 - 启动临界点竞争：session/new 即将回应时 cancel 先行 → 绝不 CANCELLED 与 SUCCEEDED 翻转、绝不 prompt
+  ---
+  duration_ms: 1945.167791
+  type: 'test'
+  ...
+# Subtest: 启动未返回时应用 dispose：有界收敛、0 孤儿、0 未处理 Promise 异常、run 不悬挂
+ok 6 - 启动未返回时应用 dispose：有界收敛、0 孤儿、0 未处理 Promise 异常、run 不悬挂
+  ---
+  duration_ms: 649.80325
+  type: 'test'
+  ...
+# (node:66625) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: ACP → TaskEvent mapping 显式、聚合 text、丢 reasoning、洪泛有上限
+ok 7 - ACP → TaskEvent mapping 显式、聚合 text、丢 reasoning、洪泛有上限
+  ---
+  duration_ms: 0.721875
+  type: 'test'
+  ...
+# Subtest: prompt 只含 goal + safe input，且 schema 版本冻结
+ok 8 - prompt 只含 goal + safe input，且 schema 版本冻结
+  ---
+  duration_ms: 0.159416
+  type: 'test'
+  ...
+# Subtest: turn 成功：Artifact + Verification PASS → Step/Task SUCCEEDED
+ok 9 - turn 成功：Artifact + Verification PASS → Step/Task SUCCEEDED
+  ---
+  duration_ms: 423.734167
+  type: 'test'
+  ...
+# Subtest: 成功必须 Verification PASS：文本不符 → BLOCKED 且 0 artifact
+ok 10 - 成功必须 Verification PASS：文本不符 → BLOCKED 且 0 artifact
+  ---
+  duration_ms: 449.305125
+  type: 'test'
+  ...
+# Subtest: Artifact 写入失败：Step/Task 绝不 SUCCEEDED，且无 artifact（失败原子性）
+ok 11 - Artifact 写入失败：Step/Task 绝不 SUCCEEDED，且无 artifact（失败原子性）
+  ---
+  duration_ms: 402.869792
+  type: 'test'
+  ...
+# Subtest: Harness crash → BLOCKED + HARNESS_PROCESS_EXITED，0 respawn
+ok 12 - Harness crash → BLOCKED + HARNESS_PROCESS_EXITED，0 respawn
+  ---
+  duration_ms: 403.064792
+  type: 'test'
+  ...
+# Subtest: turn timeout → BLOCKED + HARNESS_TURN_TIMEOUT，0 第二次 prompt
+ok 13 - turn timeout → BLOCKED + HARNESS_TURN_TIMEOUT，0 第二次 prompt
+  ---
+  duration_ms: 404.835208
+  type: 'test'
+  ...
+# Subtest: Tool proposal → 0 execution + BLOCKED TOOL_EXECUTION_NOT_AVAILABLE
+ok 14 - Tool proposal → 0 execution + BLOCKED TOOL_EXECUTION_NOT_AVAILABLE
+  ---
+  duration_ms: 403.481542
+  type: 'test'
+  ...
+# Subtest: Permission request → reject + BLOCKED PERMISSION_NOT_AVAILABLE，0 execution
+ok 15 - Permission request → reject + BLOCKED PERMISSION_NOT_AVAILABLE，0 execution
+  ---
+  duration_ms: 419.543125
+  type: 'test'
+  ...
+# Subtest: classifyHarnessError：启动超时 / 执行超时各自映射，绝不互相改写
+ok 16 - classifyHarnessError：启动超时 / 执行超时各自映射，绝不互相改写
+  ---
+  duration_ms: 0.419958
+  type: 'test'
+  ...
+# Subtest: 启动超时（真实 adapter + 可控阻塞 initialize）→ HARNESS_START_TIMEOUT · BLOCKED · capability 撤销 · 0 重试
+ok 17 - 启动超时（真实 adapter + 可控阻塞 initialize）→ HARNESS_START_TIMEOUT · BLOCKED · capability 撤销 · 0 重试
+  ---
+  duration_ms: 1117.681125
+  type: 'test'
+  ...
+# Subtest: 执行超时（真实 adapter + 可控阻塞 prompt）→ HARNESS_TURN_TIMEOUT · BLOCKED · capability 撤销 · 恰好 1 次 prompt
+ok 18 - 执行超时（真实 adapter + 可控阻塞 prompt）→ HARNESS_TURN_TIMEOUT · BLOCKED · capability 撤销 · 恰好 1 次 prompt
+  ---
+  duration_ms: 1176.256
+  type: 'test'
+  ...
+# Subtest: 真实 IPC 入口：启动超时 → task/result.error 与 task/get.stopReason 都是 HARNESS_START_TIMEOUT
+ok 19 - 真实 IPC 入口：启动超时 → task/result.error 与 task/get.stopReason 都是 HARNESS_START_TIMEOUT
+  ---
+  duration_ms: 1146.753125
+  type: 'test'
+  ...
+# Subtest: 启动预算覆盖整段 session/new：initialize 正常回应但 session/new 永不回应 → HARNESS_START_TIMEOUT · BLOCKED · 子进程与能力全收干净
+ok 20 - 启动预算覆盖整段 session/new：initialize 正常回应但 session/new 永不回应 → HARNESS_START_TIMEOUT · BLOCKED · 子进程与能力全收干净
+  ---
+  duration_ms: 1124.116542
+  type: 'test'
+  ...
+# Subtest: 共享绝对截止时间：initialize 吃掉 600/700 预算后，session/new 只剩剩余预算（不重新获得 700ms）
+ok 21 - 共享绝对截止时间：initialize 吃掉 600/700 预算后，session/new 只剩剩余预算（不重新获得 700ms）
+  ---
+  duration_ms: 539.627125
+  type: 'test'
+  ...
+# Subtest: 迟到 session/new 响应：截止时间后到达 → 绝不复活 run、绝不触发 prompt、0 provider 请求
+ok 22 - 迟到 session/new 响应：截止时间后到达 → 绝不复活 run、绝不触发 prompt、0 provider 请求
+  ---
+  duration_ms: 4846.376417
+  type: 'test'
+  ...
+# Subtest: adapter 级：启动失败自清理——子进程退出、临时目录删除、能力撤销、sessionId 保持 null
+ok 23 - adapter 级：启动失败自清理——子进程退出、临时目录删除、能力撤销、sessionId 保持 null
+  ---
+  duration_ms: 1128.0915
+  type: 'test'
+  ...
+1..23
+# tests 23
+# suites 0
+# pass 23
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 32588.568041

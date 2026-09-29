@@ -1863,7 +1863,7 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 ## 3. notVerified 与缺口（如实登记）
 
 * **notVerified 6 条**（以验收报告 §四为准）：① **R2 竞争后 in-flight model call 的最终归宿**（取消后 1.5s 仍 `STARTED`，未观测更久）；② **R1 场景未做实机截图**（R1 在界面上会长期停在「运行中」）；③ **`providerErrorCode` 语义**（装的是 harness 超时码，**未判定是否为缺陷**）；④ **复用门禁证据不含 commit 戳**（依据是机械不可达；含 `test:d4-02a` 未重跑）；⑤ **未做 <1000px 窗口实测**；⑥ **探针宿主未接入 `openarc-resource` / `openarc-canvas` 协议**（只接 `openarc-file`）。
-* **遗留（本批未修）**：**R1** `electron/harness-adapter.cjs:278` 的 `newSession` **无任何超时**（启动预算只包 `initialize`；受控实验：700ms 预算下 8s 不收敛 = run `STARTING` / task `RUNNING` / 0 请求 / 0 prompt / 子进程存活；对照 `initialize` 阻塞 `+757.0ms` 即收敛）· **R1-e** 该无界段里 `orchestrator.dispose()` / `cancel()` **触达不到 adapter**（`registry.set` 晚于 `adapter.start()` 返回），子进程只在主进程退出后消失 · **R2** 竞争账本残留（call 停 `STARTED`）· **两条既有确定性失败**（未修）· `START_MARGIN_MS = 15000` 与产品预算成对（产品改预算需同步）· **本批新增调试 / 中途 run 目录如实登记**：`…-0dc2`（exit 2，0/0/0）、`…-1244`（exit 2，2/3）、`…-fccc`（exit 2，2/2）、`…-a352`（exit 1，73/74）、`…-2a0e`（exit 0，75/75，已被取代）+ `…-be39` 空目录（未 finalize，不入索引）。
+* **遗留（本批未修）**：【第十批已实施 + 已验证：R1 改为绝对截止时间（initialize 与 session/new 共用一份预算），R1-e 让启动段在 registry 里可被 cancel/dispose 触达；红→绿证据见第十批节】**R1** `electron/harness-adapter.cjs:278` 的 `newSession` **无任何超时**（启动预算只包 `initialize`；受控实验：700ms 预算下 8s 不收敛 = run `STARTING` / task `RUNNING` / 0 请求 / 0 prompt / 子进程存活；对照 `initialize` 阻塞 `+757.0ms` 即收敛）· **R1-e** 该无界段里 `orchestrator.dispose()` / `cancel()` **触达不到 adapter**（`registry.set` 晚于 `adapter.start()` 返回），子进程只在主进程退出后消失 · **R2** 竞争账本残留（call 停 `STARTED`）· **两条既有确定性失败**（未修）· `START_MARGIN_MS = 15000` 与产品预算成对（产品改预算需同步）· **本批新增调试 / 中途 run 目录如实登记**：`…-0dc2`（exit 2，0/0/0）、`…-1244`（exit 2，2/3）、`…-fccc`（exit 2，2/2）、`…-a352`（exit 1，73/74）、`…-2a0e`（exit 0，75/75，已被取代）+ `…-be39` 空目录（未 finalize，不入索引）。
 * **继续单列（不并入本批）**：**跨组织真机 2 条 notVerified**、**OAuth**、**两条既有探针门禁失败**（`governance-ui` 1/5、`model-keychain-restart` 3/15）、**插件隔离（D5-08）**、**D5-02 重命名受 Electron 不支持 `prompt()` 限制**、**SIGKILL 边界**；**本批未新增「创建组织」入口**。
 
 ## 4. 判定与下一步
@@ -1872,11 +1872,9 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 
 **本批闭环的旧缺口**：第八批登记的「超时 / 错误码映射」与「cancel 20s 等待窗口」——① **已实施**（分类器原样保留 `HARNESS_START_TIMEOUT`，预算未动；界面文案由 `· HARNESS_TURN_TIMEOUT` 变为 `· HARNESS_START_TIMEOUT`，经浅 / 深与对比度实机验收）；② **已实施**（取消测试按产品可观察阶段等待，上界与产品预算成对，判据未放宽）。
 
-剩余缺口逐条：① R1（`newSession` 无上界）+ R1-e（无界段 dispose / cancel 触达不到 adapter）；② R2 竞争账本残留；③ 两条既有确定性失败（`d4-03-approval-push-isolation` P2、`side-effect-c4-gates` No Direct Domain Bypass）另案；④ `START_MARGIN_MS` 与产品预算同步约束；⑤ 本批调试 run 目录（如实登记，历史产物未被改写）；⑥ 上述 notVerified 6 条；⑦ 跨组织真机 2 条 notVerified；⑧ 两条探针门禁既有失败；⑨ OAuth；⑩ 插件隔离（D5-08）；⑪ D5-02 `prompt()` 遗留；⑫ SIGKILL 边界；⑬ 第五批登记其余残留。
+剩余缺口逐条：① R1（`newSession` 无上界）+ R1-e（无界段 dispose / cancel 触达不到 adapter）【第十批已实施：两项均已收口并有红→绿证据；见第十批节】；② R2 竞争账本残留【第十批已给**不同根因**证据：取消路径不终结 in-flight model call 信封，仍未修，另案】；③ 两条既有确定性失败（`d4-03-approval-push-isolation` P2、`side-effect-c4-gates` No Direct Domain Bypass）另案；④ `START_MARGIN_MS` 与产品预算同步约束；⑤ 本批调试 run 目录（如实登记，历史产物未被改写）；⑥ 上述 notVerified 6 条；⑦ 跨组织真机 2 条 notVerified；⑧ 两条探针门禁既有失败；⑨ OAuth；⑩ 插件隔离（D5-08）；⑪ D5-02 `prompt()` 遗留；⑫ SIGKILL 边界；⑬ 第五批登记其余残留。
 
-下一步建议：R1 / R1-e 裁决（给 `session/new` 同预算上界，或启动各子阶段落 safe 事件）→ 两条既有确定性失败另案 → 两条探针门禁单独排期 → 跨组织真机入口（产品需新增「新建组织」或多租户安装，本批不做）→ OAuth → 真实第三方 / Adobe（D5-04 / D5-05）。
-
-
+下一步建议：【第十批已裁决并实施：给 `session/new` 同一绝对截止时间 + 启动段可被 cancel/dispose 触达】原建议：R1 / R1-e 裁决（给 `session/new` 同预算上界，或启动各子阶段落 safe 事件）→ 两条既有确定性失败另案 → 两条探针门禁单独排期 → 跨组织真机入口（产品需新增「新建组织」或多租户安装，本批不做）→ OAuth → 真实第三方 / Adobe（D5-04 / D5-05）。
 
 
 
@@ -1884,3 +1882,52 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 
 
 
+
+
+
+# D5-03 第十批 · 收口 Harness 启动全程的超时与取消（R1 + R1-e）· 2026-09-29（`e626045`）
+
+> **口径（用户明确定范围）**：本批 = 第九批登记的 **R1**（`session/new` 无上界）+ **R1-e**（无界段里 `orchestrator.cancel()` / `dispose()` 触达不到 adapter）；**R2**（取消后 call 停在 `STARTED`）**只做同根因排查并单列，不修**。**不调宽任何超时 / 等待窗口、不跳过测试、不放松任何断言**（断言变更清单 = **无既有断言改动**）；**未做 OAuth、D5-04、未新增「创建组织」入口**；只在 `/Users/wepingli/Desktop/OpenArc OS-integration` 工作，未触碰主工作树改动、DSH Desktop 共享运行时与 `~/.dsh`，未 push。
+> **判定：D5-03 第十批（R1 启动全程预算 + R1-e 启动段可取消 / 可 dispose）= PASS（限定范围：两项收口成立，红→绿、共享截止时间、迟到响应、竞争与重复取消、进程与能力回收均有证据；R2 不同根因与两条既有失败如实单列）；D5-03 整体仍 = PARTIAL**（剩余缺口见 §3 / §4）。
+> **被测 commit**：`e626045`（父 `05fa678`，单提交，5 个文件 `+601 / −44`；`src/**` **0 行改动**；`SCHEMA_VERSION` 仍 **21**；预算 `30000 / 180000` **未动**）。提交曾按 `test:d4-02c` 门禁暴露的真实回归（启动段内 kill child 退化成 `INTERNAL_ERROR`）修复后 `--amend` 一次，**被测内容 = 最终提交内容**。
+> **证据**：`experiments/d5-03/batch10/verify/`（`00-r1-probe-green.json`、`01-gate-d4-02c.txt`、`02-npm-test-full.txt`、`03-new-cases.txt`、`red-run-orchestrator.txt`、`red-run-cancel.txt`、`r2-diagnose.mjs` + `r2-diagnose-result.json`）；执行方报告 `experiments/d5-03/batch10/D5-03-BATCH10-REPORT.md`；tracked 证据 `docs/D5-03-GATE-EVIDENCE.json` 的 `batch10` 段（**纯插入**：`git diff --numstat` = `146 / 0`，旧段自 `"batch9"` 起至 EOF **逐字节相同**，已机械校验）。
+
+## 1. 任务状态
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| R1 · 启动预算覆盖整段异步启动 | **已完成** | `adapter.start` 进入时算一次**绝对截止时间** `deadlineAt = clock() + startTimeoutMs`；`initialize` 与 `session/new` 共用它（`#withDeadline`，剩余预算 = `deadlineAt - now()`，为 0 立刻超时）→ **每段不再各自获得 30 秒**；实测注入时钟走 600/700ms 时 `session/new` 剩余预算 **98ms**（`03-new-cases.txt` 第 20 条用例：`session/new` 剩余预算 98ms） |
+| R1 · 无响应时有界收敛 | **已完成** | `session/new` 永不回应 → `HARNESS_START_TIMEOUT` + task/step/run 三处 `BLOCKED` + `error_code`；子进程退出、临时目录删除、两类能力 `REVOKED`、0 孤儿；`0 provider 请求 / 0 prompt / 0 模型调用` |
+| R1 · 迟到响应不复活 | **已完成** | 探针延迟 1800ms 回应（预算 700ms）：窗口过后仍是同一条 `BLOCKED`，不新建 run、0 调用、0 请求、0 prompt、无 artifact、无 `harness.run.succeeded`；adapter 侧 `#assertNotInterrupted` 双向拦截 |
+| R1 · 启动失败自清理 | **已完成** | `start` 失败一律 `#runTeardown()`（幂等、只跑一次）：撤销 tool + model 能力 → `closeSession` → stdin close → SIGTERM → bounded SIGKILL → `bridge.stop()` → 删临时目录；`sessionId` 保持 `null`；重复 `dispose()` 结果形状不变 |
+| R1-e · 启动段可被 cancel 触达 | **已完成** | `adapter.start()` **之前**先 `registry.set(..., starting: true)`；`cancel()` 对 `starting` 登记 `abortStart → revoke 两类能力 → await dispose()` 并立刻注销登记；用户取消在启动段内 → **唯一 `CANCELLED`**（task / step / run 三处），0 孤儿，**旧 token 实际请求 401 `PROXY_UNAUTHORIZED`**，重复取消幂等 |
+| R1-e · 启动段可被 dispose 触达 | **已完成** | 应用 `dispose()` 在启动段内：`runTask` 有界收敛且**绝不抛异常**、run 不悬挂 `STARTING`、0 孤儿、能力 `REVOKED`、`unhandledRejection` 计数 **0** |
+| 竞争与临界点 | **已完成** | 取消优先（`cancel_requested` 先持久）：`session/new` 700ms 后即将回应时取消 → 取消后 1.5s 窗口终态不翻转、无 `CANCELLED + SUCCEEDED` 矛盾、0 prompt；启动段 catch 与启动后阶段复核都据此走 `#finalizeCancelled`，绝不翻转成 `BLOCKED`；`#finalizeCancelled` 增加 revision 冲突重读，run 绝不留在非终态 |
+| 正常启动与执行阶段超时 | **继续通过** | 两条既有用例（`start-hang` / `turn-hang`）与 IPC 入口用例全部通过；`test:d4-02c` **33/33 exit 0** |
+| 门禁（受影响） | **6/6 · 全部 exit 0** | `test:d4-02c` 33/33（45.3s）；`tool-dsh-{lifecycle,cancel,facade}` 9/9（32.4s）；`test:d4-03b-dsh` 26/26（51s）；`d4-03-model-binding` 19/19（28s）；`d5-03-{dsh-runtime-pin,mcp-stream,app-grant-org-isolation}` 24/24（11s）；`d4-07-budget-consistency` 3/3（6s） |
+| 全量 `npm test` | **exit 1，如实单列** | **1394 tests / 1392 pass / 2 fail**（duration **142327.9ms**）：两条**既有确定性失败**（`d4-03-approval-push-isolation` P2 多 `targetRef` / `url`；`side-effect-c4-gates` No Direct Domain Bypass）**未修**；**无新增失败、无 flake、无 skipped**；新增 7 条用例已计入总数 |
+| 断言变更清单 | **无既有断言改动** | 没有任何既有断言被修改 / 放宽 / 跳过；新增 7 条用例 + 1 个探针夹具（`tests/fixtures/harness-acp/session-new-hold-agent.mjs`，延迟由 `argv[2]` 控制，不传 = 永不回应） |
+| 反向验证（红） | **已完成** | 工作树回到 `05fa678` 的两个产品文件：第九批探针 `runSettled=false`（700ms 预算 + 8s 观察窗不收敛、run `STARTING`、task `RUNNING`、child 存活）；新增 3 条编排器用例全部 `RED-HANG`（4s 观察窗未收敛）；adapter 自清用例同样未收敛；启动段取消用例**全程挂住**（30s 外层有界杀停，无 TAP 断言产出） |
+
+## 2. 三轴判定（分列）
+
+* **功能 = 通过（限定范围）**：红→绿成立；共享绝对截止时间有决定性判据（剩余预算 98ms，而非重新获得 700ms）；迟到响应不复活；取消 / dispose 在启动段内可触达且终态唯一；旧 token 真实请求 401；0 孤儿、0 未处理 Promise 异常；正常启动与执行阶段超时用例继续通过。
+* **视觉 = 本批不适用（如实披露）**：`src/**` **0 行改动**，无新增文案 / 布局 / 组件；界面影响仅为取消启动段后 task / run 显示既有 `CANCELLED` 文案。**未做真机截图**。
+* **动效 = 本批不适用（如实披露）**：无任何动效相关改动。
+
+## 3. notVerified 与缺口（如实登记）
+
+* **notVerified 4 条**：① 未做真机截图（本批无界面改动，界面影响沿用既有组件路径）；② 复用门禁证据不含被测 commit 戳（依据是本批只碰 Harness 启动 / 取消路径，其余门禁不可达；如实披露）；③ 未做 `<1000px` 窗口实测（无界面改动）；④ 「迟到响应」只在探针层面验证，未构造真实 dsh 的迟到 `session/new`。
+* **本批新登记（不修，单列）**：① **R2 不同根因证据**——取消后 in-flight model call 五个时点（0/200/1000/3000/6000ms）始终 `STARTED`，而 run/task/step 均 `CANCELLED`；缺陷面在「取消路径不终结 model call 信封」（`TaskService.finalizeCancel` / `cancelHarnessRun` 不触碰 `task_model_calls`）→ **另案**；② `orchestrator.dispose()` 在**应用退出路径未被调用**（`electron/main.cjs` 的 `will-quit` 只做 MCP 有界 dispose + `modelProxy.stop()` + `store.close()`）→ 本批未改，待裁决；③ 门禁暴露的真实回归（启动段内 kill child 归因 `INTERNAL_ERROR`）**已在本批内修复**并复跑通过（`task-harness-recovery` 3 连跑 2/2）。
+* **继续单列**：两条既有确定性失败（未修）· `START_MARGIN_MS = 15000` 与产品预算成对（产品改预算需同步）· 跨组织真机 2 条 notVerified · 两条探针门禁既有失败（`governance-ui` 1/5、`model-keychain-restart` 3/15）· OAuth · 插件隔离（D5-08）· D5-02 `prompt()` 遗留 · SIGKILL 边界 · 第九批调试 run 目录残留。
+* **本批新增临时产物**：`/tmp/oa-b10-sub/*`（独立门禁日志）、`/tmp/oa-b10-red/*`（红运行临时副本，已删除；红运行结论已入库 `experiments/d5-03/batch10/verify/red-run-*.txt`）；仓库内 `experiments/d5-03/batch10/**` 与 `docs/D5-03-GATE-EVIDENCE.json` 的 `batch10` 段为**本批新增 tracked 证据**。
+
+## 4. 判定与下一步
+
+**判定：D5-03 第十批（R1 启动全程预算 + R1-e 启动段可取消 / 可 dispose）= PASS（限定范围：两项收口成立；R2 不同根因与两条既有失败如实单列）；D5-03 整体仍 = PARTIAL。**
+
+**本批闭环的旧缺口**：第九批 §3 遗留的 **R1**（`newSession` 无上界）与 **R1-e**（无界段 dispose / cancel 触达不到 adapter）——已实施并验证（见 §1）。
+
+剩余缺口逐条：① R2（取消后 call 停 `STARTED`，已定性为不同根因）另案；② 应用退出路径未调用 `orchestrator.dispose()`（待裁决）；③ 两条既有确定性失败（`d4-03-approval-push-isolation` P2、`side-effect-c4-gates` No Direct Domain Bypass）另案；④ 上述 notVerified 4 条；⑤ `START_MARGIN_MS` 与产品预算同步约束；⑥ 跨组织真机 2 条 notVerified；⑦ 两条探针门禁既有失败；⑧ OAuth；⑨ 插件隔离（D5-08）；⑩ D5-02 `prompt()` 遗留；⑪ SIGKILL 边界；⑫ 第五批登记其余残留。
+
+下一步建议：R2 裁决（取消路径终结 model call 信封）→ 应用退出路径是否调用 `orchestrator.dispose()`（一行接线，但属产品行为变更，需裁决）→ 两条既有确定性失败另案 → 两条探针门禁单独排期 → 跨组织真机入口 → OAuth → 真实第三方 / Adobe（D5-04 / D5-05）。
