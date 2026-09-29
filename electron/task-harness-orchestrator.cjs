@@ -125,9 +125,11 @@ class TaskHarnessOrchestrator {
     this.turnTimeoutMs = turnTimeoutMs;
     this.startTimeoutMs = startTimeoutMs;
     this.maxPersistedHarnessEvents = maxPersistedHarnessEvents;
-    this.registry = new Map(); // runId -> { taskId, stepId, capabilityId, adapter }
+    this.registry = new Map(); // runId -> { taskId, stepId, capabilityId, adapter, starting }
     // runId -> Set<callId>：已经作为 verified result 交回过 Harness 的 side-effect call。
     this.resolvedSideEffectCalls = new Map();
+    // D5-03 第十批：应用 dispose 之后不再接受新的启动段（在途启动要在同一份收尾里被中断）。
+    this.disposed = false;
     this.lastEvidence = null;
   }
 
@@ -232,13 +234,28 @@ class TaskHarnessOrchestrator {
     try {
       facade = await this.#startToolFacade({ context, taskId, stepId, runId: run.runId, maxCalls: toolQuota });
       adapter = this.#makeAdapter({ context, taskId, stepId, runId: run.runId, modelConfigId: task.modelConfigId, modelConfigVersion: task.modelConfigVersion });
+      // D5-03 第十批：adapter.start() 返回**之前**就要能被 cancel / dispose 找到。
+      this.registry.set(run.runId, { taskId, stepId, capabilityId: null, adapter, bridge: facade ? facade.bridge : null, starting: true });
       info = await adapter.start({ context, modelConfigId: task.modelConfigId, modelConfigVersion: task.modelConfigVersion, maxCalls: modelQuota, startTimeoutMs: this.startTimeoutMs, requestId: "mreq_" + run.runId, toolFacade: facade, memory: this.#memoryFor({ context, taskId, goal: task.goal }) });
     } catch (e) {
+      // 启动段失败：立刻注销登记，避免把 adapter 留在 registry 里被重复收尾。
+      this.registry.delete(run.runId);
       if (adapter) { try { adapter.revokeToolCapability(); } catch { /* ignore */ } try { adapter.revokeModelCapability(); } catch { /* ignore */ } try { await adapter.dispose(); } catch { /* ignore */ } }
       if (facade) { try { await facade.bridge.stop(); } catch { /* ignore */ } }
-      return this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: classifyHarnessError(e), event: TASK_EVENT.HARNESS_RUN_UNKNOWN_EFFECT, expectedRevision: task.revision });
+      // D5-03 第十批：启动段内用户已取消 / 应用已 dispose 时绝不翻转成 BLOCKED；
+      // 取消优先，保持唯一 CANCELLED 终态（run 一并收敛，不留 STARTING 悬挂）。
+      const fresh = svc.getTask({ context, taskId });
+      const freshRev = fresh.ok ? fresh.task.revision : task.revision;
+      if (this.#taskCancelled(fresh)) return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: freshRev });
+      return this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: classifyHarnessError(e), event: TASK_EVENT.HARNESS_RUN_UNKNOWN_EFFECT, expectedRevision: freshRev });
     }
-    this.registry.set(run.runId, { taskId, stepId, capabilityId: info.capabilityId, adapter, bridge: facade ? facade.bridge : null });
+    // 迟到的启动结果不得复活：启动期间被取消 / 被 dispose 的 run 一律收敛成 CANCELLED。
+    if (this.#isStartCancelled(run.runId)) {
+      const fresh = svc.getTask({ context, taskId });
+      return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: fresh.ok ? fresh.task.revision : task.revision });
+    }
+    const entry = this.registry.get(run.runId);
+    if (entry) { entry.starting = false; entry.capabilityId = info && info.capabilityId ? info.capabilityId : null; }
 
     try {
       // §59/§60：config 变化绝不启动 / 绝不 fallback。
@@ -489,6 +506,8 @@ class TaskHarnessOrchestrator {
       };
       return { ok: true, task: finalTask, step: commit.step, artifact: commit.artifact, verification: commit.verification, run: done.ok ? done.run : null, stopReason: res.stopReason, usage: usage || null, events: mapped.events };
     } finally {
+      // D5-03 第十批：先注销再由本段收尾，避免与启动段共用同一个 adapter 时被重复收尾。
+      this.registry.delete(run.runId);
       // D4-06 Closure：run 结束（成功/失败/block/cancel 都恰好一次）时把真实消耗记入任务级账本。
       // 必须先读 capability 观测（revoke 后就拿不到），失败绝不影响 run 收敛。
       try {
@@ -499,7 +518,6 @@ class TaskHarnessOrchestrator {
       try { adapter.revokeModelCapability(); } catch { /* ignore */ }
       try { await adapter.dispose(); } catch { /* ignore */ }
       if (facade) { try { await facade.bridge.stop(); } catch { /* ignore */ } }
-      this.registry.delete(run.runId);
       this.resolvedSideEffectCalls.delete(run.runId);
     }
   }
@@ -726,9 +744,35 @@ class TaskHarnessOrchestrator {
     return { ok: false, error: reason, blocked: true, step: blocked.step, task: runBlocked.ok ? runBlocked.task : blocked.task, run: runBlocked.ok ? runBlocked.run : null };
   }
 
+  #taskCancelled(taskResult) {
+    if (!taskResult || !taskResult.ok || !taskResult.task) return false;
+    return taskResult.task.status === TASK_STATUS.CANCELLED || !!taskResult.task.cancelRequested;
+  }
+
+  /** 启动段返回后的阶段复核：登记已被取消 / dispose 摘掉时，run 一律按取消收敛。 */
+  #isStartCancelled(runId) { return !this.registry.has(runId); }
+
+  /**
+   * 启动未完成时 cancel / dispose 必须先打断在途 start，再等同一份收尾
+   * （子进程 / 连接 / 临时目录 / 能力），并立刻注销登记，使迟到的启动结果无处复活。
+   */
+  async #cancelEntry(runId, entry) {
+    if (!entry || !entry.adapter) return;
+    this.registry.delete(runId);
+    if (typeof entry.adapter.abortStart === "function") { try { entry.adapter.abortStart(); } catch { /* ignore */ } }
+    try { entry.adapter.revokeToolCapability(); } catch { /* ignore */ }
+    try { entry.adapter.revokeModelCapability(); } catch { /* ignore */ }
+    try { await entry.adapter.dispose(); } catch { /* ignore */ }
+  }
+
   async #finalizeCancelled({ context, taskId, runId, expectedRevision }) {
     const svc = this.#service();
-    const runCancel = svc.cancelHarnessRun({ context, taskId, runId, expectedRevision });
+    let runCancel = svc.cancelHarnessRun({ context, taskId, runId, expectedRevision });
+    // 取消与启动/归并并发时 revision 可能已前进一格：重读一次，绝不因此把 run 留在非终态。
+    if (!runCancel.ok && runCancel.error === ERROR.TASK_REVISION_CONFLICT) {
+      const fresh = svc.getTask({ context, taskId });
+      if (fresh.ok && fresh.task.revision !== expectedRevision) runCancel = svc.cancelHarnessRun({ context, taskId, runId, expectedRevision: fresh.task.revision });
+    }
     const rev = runCancel.ok ? runCancel.task.revision : expectedRevision;
     const fin = svc.finalizeCancel({ context, taskId, expectedRevision: rev });
     if (fin.ok) return { ok: false, error: ERROR.HARNESS_CANCELLED, cancelled: true, task: fin.task, run: runCancel.ok ? runCancel.run : null };
@@ -737,17 +781,26 @@ class TaskHarnessOrchestrator {
     return fin;
   }
 
-  /** 用户 cancel：先持久 cancel_requested=1 → ACP cancel → revoke capability → finalize。*/
+  /**
+   * 用户 cancel：先持久 cancel_requested=1（供 race 判定）→ 打断并收尾在途启动 →
+   * ACP cancel → revoke capability → finalize。
+   * D5-03 第十批：`adapter.start()` 还没返回的 run 也必须在 registry 里被找到并真正停下。
+   */
   async cancel({ context, taskId, expectedRevision } = {}) {
     const svc = this.#service();
     const req = svc.requestCancel({ context, taskId, expectedRevision });
     if (!req.ok) return req;
     let rev = req.task.revision;
-    for (const [runId, entry] of this.registry) {
-      if (entry.taskId !== taskId) continue;
-      try { await entry.adapter.cancel(); } catch { /* ignore */ }
-      try { entry.adapter.revokeToolCapability(); } catch { /* ignore */ }
-      try { entry.adapter.revokeModelCapability(); } catch { /* ignore */ }
+    const entries = [...this.registry.entries()].filter(([, entry]) => entry.taskId === taskId);
+    for (const [runId, entry] of entries) {
+      if (entry.starting) await this.#cancelEntry(runId, entry);
+    }
+    for (const [runId, entry] of entries) {
+      if (!entry.starting) {
+        try { await entry.adapter.cancel(); } catch { /* ignore */ }
+        try { entry.adapter.revokeToolCapability(); } catch { /* ignore */ }
+        try { entry.adapter.revokeModelCapability(); } catch { /* ignore */ }
+      }
       const cr = svc.cancelHarnessRun({ context, taskId, runId, expectedRevision: rev });
       if (cr.ok) rev = cr.task.revision;
     }
@@ -822,7 +875,13 @@ class TaskHarnessOrchestrator {
   async resume() { return { ok: false, error: "EXPLICIT_RESUME_DEFERRED" }; }
 
   async dispose() {
-    for (const entry of this.registry.values()) {
+    this.disposed = true;
+    const entries = [...this.registry.entries()];
+    for (const [runId, entry] of entries) {
+      if (entry.starting) await this.#cancelEntry(runId, entry);
+    }
+    for (const entry of entries) {
+      if (entry.starting) continue;
       try { entry.adapter.revokeToolCapability(); } catch { /* ignore */ }
       try { entry.adapter.revokeModelCapability(); } catch { /* ignore */ }
       try { await entry.adapter.dispose(); } catch { /* ignore */ }

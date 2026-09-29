@@ -1,11 +1,32 @@
 /** D4-02C · Cancel：用户取消 → ACP cancel → Provider abort → capability revoke → Step/Task CANCELLED；Cancel Race。 */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import os from "node:os";
 import { execFileSync } from "node:child_process";
 import { createTaskHarnessFixture, EXACT } from "./fixtures/harness-acp/task-harness-fixture.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** 真实 prompt 调用次数：终态之外还必须证明 0 次执行。 */
+function realPromptCount(counter) { return counter.prompts; }
+
+/** 进程是否还在跑（EPERM 也算在跑）：用于「无孤儿进程」判据。 */
+function processAlive(pid) {
+  if (!pid) return false;
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; }
+}
+
+/** 旧 token 的**实际**请求必须被 Model Proxy 拒绝（401 PROXY_UNAUTHORIZED），而不只是账本状态。 */
+async function proxyRejectsOldToken(proxy, token) {
+  const res = await fetch(proxy.baseUrl + "/v1/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer " + token },
+    body: JSON.stringify({ model: "openarc-task-model", messages: [{ role: "user", content: "ping" }] }),
+  });
+  const body = await res.json().catch(() => ({}));
+  return { status: res.status, error: body.error || null };
+}
 
 /**
  * 等待上界 = **产品自己的启动预算**（orchestrator DEFAULT_START_TIMEOUT_MS=30000）+ 余量。
@@ -229,4 +250,183 @@ test("Cancel 后不存在 Provider retry：abort 只发生一次", async (t) => 
     assert.equal(fx.taskService.getCalls({ context: ctx, taskId: task.task.taskId }).items.length, 1, "0 retry / 0 二次 call");
     if (process.env.OPENARC_PHASE_TIMELINE === "1") t.diagnostic("成功时间线：" + tl.format());
   } finally { tl.mark("exit"); try { await orch?.dispose(); } catch { /* ignore */ } await fx.close(); }
+});
+
+/** 等到产品可观察的「harness run 已建、启动段还没返回」阶段；超上界即失败，绝不静默。 */
+async function waitForStartingRun({ fx, ctx, taskId, tl, counter, limitMs = 10000 }) {
+  for (;;) {
+    const runs = fx.taskService.getHarnessRuns({ context: ctx, taskId });
+    const items = runs.ok ? runs.items : [];
+    const adapter = counter.adapter;
+    if (items.length && items[0].status === "STARTING" && adapter && adapter.child && !adapter.sessionId) {
+      tl.mark("phase:starting-run");
+      return items[0];
+    }
+    if (tl.elapsedMs >= limitMs) {
+      tl.mark("phase:wait-limit");
+      assert.fail("等不到 STARTING 启动段：" + tl.format() + " 宿主负载 " + JSON.stringify(hostLoadSnapshot()));
+    }
+    await sleep(5);
+  }
+}
+
+test("启动未返回时取消：session/new 阻塞中 cancel → 唯一 CANCELLED + 子进程被回收 + 能力撤销 + 旧 token 401", async (t) => {
+  const fx = await createTaskHarnessFixture();
+  const tl = makeTimeline();
+  const counter = { starts: 0, prompts: 0, adapter: null };
+  let orch = null;
+  try {
+    const ctx = fx.ctx();
+    const task = fx.createTask();
+    orch = fx.makeOrchestrator(instrumentFactory(fx.agentFactory("session-new-hold-agent.mjs"), tl, counter), { startTimeoutMs: 30000, turnTimeoutMs: 60000 });
+    tl.mark("run:dispatch");
+    const runPromise = orch.runTask({ context: ctx, taskId: task.task.taskId, expectedRevision: task.task.revision });
+    await waitForStartingRun({ fx, ctx, taskId: task.task.taskId, tl, counter });
+
+    const adapter = counter.adapter;
+    const orphanPid = adapter.child.pid;
+    const tempRoot = adapter.root;
+    const token = adapter.capability ? adapter.capability.token : null;
+    assert.ok(token, "启动段已签发 capability");
+
+    tl.mark("cancel:begin");
+    const c = await cancelWithRetry(fx, orch, ctx, task.task.taskId);
+    tl.mark("cancel:done");
+    assert.ok(c.ok, JSON.stringify(c));
+
+    const r = await runPromise;
+    tl.mark("run:converged", String((r && r.error) || ""));
+    assert.equal(r.ok, false);
+    assert.ok(r.cancelled || r.error === "HARNESS_CANCELLED" || r.error === "TASK_CANCELLED", JSON.stringify(r));
+
+    // 三处状态一致，且唯一 CANCELLED（绝不出现 BLOCKED 翻转）。
+    const got = fx.taskService.getTask({ context: ctx, taskId: task.task.taskId });
+    assert.equal(got.task.status, "CANCELLED");
+    assert.equal(got.task.cancelRequested, true);
+    assert.equal(fx.taskService.getSteps({ context: ctx, taskId: task.task.taskId }).items[0].status, "CANCELLED");
+    const runs = fx.taskService.getHarnessRuns({ context: ctx, taskId: task.task.taskId });
+    assert.equal(runs.items.length, 1, "0 respawn / 0 rerun");
+    assert.equal(runs.items[0].status, "CANCELLED");
+    assert.equal(fx.taskService.getArtifacts({ context: ctx, taskId: task.task.taskId }).items.length, 0);
+    assert.equal(realPromptCount(counter), 0, "启动未完成 → 0 prompt");
+    assert.equal(fx.fp.state.requests, 0, "0 provider 请求");
+    assert.equal(fx.taskService.getCalls({ context: ctx, taskId: task.task.taskId }).items.length, 0, "0 模型调用 / 0 自动重试");
+
+    // 启动段被取消：子进程必须真的退出，临时目录回收，两类能力撤销。
+    assert.equal(adapter.processExited, true, "子进程已退出");
+    assert.equal(adapter.sessionId, null, "绝不持有 session");
+    assert.equal(processAlive(orphanPid), false, "无在跑的孤儿进程");
+    if (tempRoot) assert.equal(fs.existsSync(tempRoot), false, "临时目录已删除");
+    for (const cap of fx.proxy.capabilities.values()) assert.equal(cap.state, "REVOKED", "capability 立即 revoke");
+    const rejected = await proxyRejectsOldToken(fx.proxy, token);
+    assert.equal(rejected.status, 401, "旧 token 的实际请求必须被拒绝：" + JSON.stringify(rejected));
+    assert.equal(rejected.error, "PROXY_UNAUTHORIZED");
+
+    // 重复取消幂等：终态不翻转、不重复执行。
+    tl.mark("cancel-again:begin");
+    const again = await orch.cancel({ context: ctx, taskId: task.task.taskId, expectedRevision: got.task.revision });
+    tl.mark("cancel-again:done");
+    assert.equal(again.ok, true, JSON.stringify(again));
+    const after = fx.taskService.getTask({ context: ctx, taskId: task.task.taskId });
+    assert.equal(after.task.status, "CANCELLED");
+    const runsAfter = fx.taskService.getHarnessRuns({ context: ctx, taskId: task.task.taskId });
+    assert.equal(runsAfter.items.length, 1);
+    assert.equal(runsAfter.items[0].status, "CANCELLED");
+    assert.equal(realPromptCount(counter), 0, "重复取消绝不触发 prompt");
+    if (process.env.OPENARC_PHASE_TIMELINE === "1") t.diagnostic("启动段取消时间线：" + tl.format());
+  } finally { tl.mark("exit"); try { await orch?.dispose(); } catch { /* ignore */ } await fx.close(); }
+});
+
+test("启动临界点竞争：session/new 即将回应时 cancel 先行 → 绝不 CANCELLED 与 SUCCEEDED 翻转、绝不 prompt", async () => {
+  const fx = await createTaskHarnessFixture();
+  const tl = makeTimeline();
+  const counter = { starts: 0, prompts: 0, adapter: null };
+  let orch = null;
+  try {
+    const ctx = fx.ctx();
+    const task = fx.createTask();
+    // 探针延迟 700ms 回应 session/new：cancel 在此之前落地（小于产品启动预算 30000ms）。
+    const slowProbe = (opts) => {
+      const adapter = fx.agentFactory("session-new-hold-agent.mjs")(opts);
+      adapter.dshArgs = [adapter.dshArgs[0], "700"];
+      return adapter;
+    };
+    orch = fx.makeOrchestrator(instrumentFactory(slowProbe, tl, counter), { startTimeoutMs: 30000, turnTimeoutMs: 60000 });
+    tl.mark("run:dispatch");
+    const runPromise = orch.runTask({ context: ctx, taskId: task.task.taskId, expectedRevision: task.task.revision });
+    await waitForStartingRun({ fx, ctx, taskId: task.task.taskId, tl, counter });
+    const adapter = counter.adapter;
+    const orphanPid = adapter.child.pid;
+
+    tl.mark("cancel:begin");
+    const c = await cancelWithRetry(fx, orch, ctx, task.task.taskId);
+    tl.mark("cancel:done");
+    assert.ok(c.ok, JSON.stringify(c));
+    const r = await runPromise;
+    tl.mark("run:converged", String((r && r.error) || ""));
+    assert.equal(r.ok, false, "临界点取消绝不成功");
+
+    // 等到迟到的 session/new 响应窗口过去：终态不得翻转、绝不 prompt。
+    await sleep(1500);
+    tl.mark("late-response:window-closed");
+    const got = fx.taskService.getTask({ context: ctx, taskId: task.task.taskId });
+    assert.equal(got.task.status, "CANCELLED");
+    const steps = fx.taskService.getSteps({ context: ctx, taskId: task.task.taskId });
+    assert.equal(steps.items[0].status, "CANCELLED");
+    assert.ok(!(got.task.status === "CANCELLED" && steps.items[0].status === "SUCCEEDED"), "矛盾终态禁止");
+    const runs = fx.taskService.getHarnessRuns({ context: ctx, taskId: task.task.taskId });
+    assert.equal(runs.items.length, 1, "迟到响应绝不新建 run");
+    assert.equal(runs.items[0].status, "CANCELLED");
+    assert.equal(realPromptCount(counter), 0, "启动未完成 → 0 prompt");
+    assert.equal(fx.fp.state.requests, 0, "0 provider 请求");
+    assert.equal(fx.taskService.getArtifacts({ context: ctx, taskId: task.task.taskId }).items.length, 0);
+    assert.equal(processAlive(orphanPid), false, "无在跑的孤儿进程");
+    for (const cap of fx.proxy.capabilities.values()) assert.equal(cap.state, "REVOKED", "capability 立即 revoke");
+  } finally { tl.mark("exit"); try { await orch?.dispose(); } catch { /* ignore */ } await fx.close(); }
+});
+
+test("启动未返回时应用 dispose：有界收敛、0 孤儿、0 未处理 Promise 异常、run 不悬挂", async (t) => {
+  const fx = await createTaskHarnessFixture();
+  const tl = makeTimeline();
+  const counter = { starts: 0, prompts: 0, adapter: null };
+  const unhandled = [];
+  const onUnhandled = (e) => unhandled.push(String((e && e.message) || e));
+  process.on("unhandledRejection", onUnhandled);
+  let orch = null;
+  try {
+    const ctx = fx.ctx();
+    const task = fx.createTask();
+    orch = fx.makeOrchestrator(instrumentFactory(fx.agentFactory("session-new-hold-agent.mjs"), tl, counter), { startTimeoutMs: 30000, turnTimeoutMs: 60000 });
+    tl.mark("run:dispatch");
+    let outcome = null;
+    const runPromise = orch.runTask({ context: ctx, taskId: task.task.taskId, expectedRevision: task.task.revision });
+    runPromise.then((r) => { outcome = { ok: r.ok, error: r.error, cancelled: !!r.cancelled }; }, (e) => { outcome = { threw: String((e && e.message) || e) }; });
+    await waitForStartingRun({ fx, ctx, taskId: task.task.taskId, tl, counter });
+    const adapter = counter.adapter;
+    const orphanPid = adapter.child.pid;
+
+    tl.mark("dispose:begin");
+    await orch.dispose();
+    tl.mark("dispose:done");
+    await runPromise;
+    tl.mark("run:converged", JSON.stringify(outcome));
+    assert.ok(outcome && !outcome.threw, "runTask 绝不抛异常：" + JSON.stringify(outcome));
+    assert.equal(outcome.ok, false);
+
+    const runs = fx.taskService.getHarnessRuns({ context: ctx, taskId: task.task.taskId });
+    assert.equal(runs.items.length, 1, "0 respawn / 0 rerun");
+    assert.ok(["CANCELLED", "BLOCKED"].includes(runs.items[0].status), "run 不悬挂在 STARTING，实际 " + runs.items[0].status);
+    assert.equal(adapter.processExited, true, "子进程已退出");
+    assert.equal(adapter.sessionId, null, "绝不持有 session");
+    assert.equal(processAlive(orphanPid), false, "无在跑的孤儿进程");
+    for (const cap of fx.proxy.capabilities.values()) assert.equal(cap.state, "REVOKED", "capability 立即 revoke");
+    assert.equal(realPromptCount(counter), 0, "0 prompt");
+    assert.equal(fx.fp.state.requests, 0, "0 provider 请求");
+    await sleep(200);
+    assert.deepEqual(unhandled, [], "0 未处理 Promise 异常");
+  } finally {
+    tl.mark("exit");
+    process.off("unhandledRejection", onUnhandled);
+    try { await orch?.dispose(); } catch { /* ignore */ } await fx.close();
+  }
 });

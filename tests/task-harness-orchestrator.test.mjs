@@ -1,6 +1,7 @@
 /** D4-02C · Orchestrator 领域单测：ACP mapping / prompt / block / 原子提交 / 0 execution。 */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { createRequire } from "node:module";
 import { createTaskHarnessFixture, EXACT } from "./fixtures/harness-acp/task-harness-fixture.mjs";
 const require = createRequire(import.meta.url);
@@ -308,4 +309,169 @@ test("真实 IPC 入口：启动超时 → task/result.error 与 task/get.stopRe
     // components.tsx:1012 起 [data-ai-stop-reason] 只在 resumable 时渲染；启动超时不是预算停止。
     assert.equal(got.resumable, false);
   } finally { try { await orch?.dispose(); } catch { /* ignore */ } await fx.close(); }
+});
+
+test("启动预算覆盖整段 session/new：initialize 正常回应但 session/new 永不回应 → HARNESS_START_TIMEOUT · BLOCKED · 子进程与能力全收干净", async () => {
+  const fx = await createTaskHarnessFixture();
+  let orch = null;
+  try {
+    const ctx = fx.ctx();
+    const t = fx.createTask();
+    const realCalls = { starts: 0, prompts: 0 };
+    orch = fx.makeOrchestrator(countingFactory(fx.agentFactory("session-new-hold-agent.mjs"), realCalls), { startTimeoutMs: 700, turnTimeoutMs: 60000 });
+    const t0 = Date.now();
+    const r = await orch.runTask({ context: ctx, taskId: t.task.taskId, expectedRevision: t.task.revision });
+    const elapsedMs = Date.now() - t0;
+
+    // R1：initialize 成功之后的这段启动同样必须有上界，且归因为启动超时。
+    assert.equal(r.error, "HARNESS_START_TIMEOUT", JSON.stringify(r));
+    assert.equal(r.ok, false);
+    assert.equal(r.step.status, "BLOCKED");
+    assert.equal(r.task.status, "BLOCKED");
+    assert.equal(r.run.status, "BLOCKED");
+    assert.equal(r.run.errorCode, "HARNESS_START_TIMEOUT");
+    assert.equal(realCalls.starts, 1, "0 第二次 start");
+    assert.equal(realCalls.prompts, 0, "启动未成功 → 0 prompt");
+
+    const runs = fx.taskService.getHarnessRuns({ context: ctx, taskId: t.task.taskId });
+    assert.equal(runs.items.length, 1, "0 respawn / 0 rerun");
+    assert.equal(runs.items[0].status, "BLOCKED");
+    assert.equal(runs.items[0].errorCode, "HARNESS_START_TIMEOUT");
+    assert.equal(runs.items[0].stopReason, "blocked");
+    assert.equal(fx.fp.state.requests, 0, "0 provider 请求");
+    assert.equal(fx.taskService.getCalls({ context: ctx, taskId: t.task.taskId }).items.length, 0, "0 模型调用");
+
+    const events = fx.taskService.getEvents({ context: ctx, taskId: t.task.taskId }).items;
+    assert.equal(events.find((e) => e.eventType === "step.blocked").safePayload.reason, "HARNESS_START_TIMEOUT");
+    assert.equal(events.find((e) => e.eventType === "harness.run.blocked").safePayload.errorCode, "HARNESS_START_TIMEOUT");
+
+    const caps = [...fx.proxy.capabilities.values()];
+    assert.ok(caps.length >= 1, "启动前已签发 capability");
+    for (const cap of caps) assert.equal(cap.state, "REVOKED", "收敛后两类能力立即撤销");
+    const held = orch.registry.get(runs.items[0].runId);
+    assert.equal(held, undefined, "启动段收敛后不残留 registry 登记");
+    assert.ok(elapsedMs < 700 + 15000, "有界停止，实际 " + elapsedMs + "ms");
+  } finally { try { await orch?.dispose(); } catch { /* ignore */ } await fx.close(); }
+});
+
+test("共享绝对截止时间：initialize 吃掉 600/700 预算后，session/new 只剩剩余预算（不重新获得 700ms）", async () => {
+  const fx = await createTaskHarnessFixture();
+  let orch = null;
+  try {
+    const ctx = fx.ctx();
+    const t = fx.createTask();
+    const realCalls = { starts: 0, prompts: 0 };
+    const budgetMs = 700;
+    const spentMs = 600;
+    const t0 = Date.now();
+    let currentNow = t0;
+    let deadlineAt = null;
+    let startCalledAt = null;
+    let sessionRemainingMs = null;
+    // session/new 永不回应（延迟 0）；initialize 的耗时只记进注入时钟（真实时钟仍在走）。
+    const baseFactory = countingFactory(fx.agentFactory("session-new-hold-agent.mjs"), realCalls);
+    orch = fx.makeOrchestrator((opts) => {
+      const adapter = baseFactory(opts);
+      adapter.clock = () => currentNow;
+      const start = adapter.start.bind(adapter);
+      adapter.start = async (a) => {
+        startCalledAt = Date.now();
+        deadlineAt = currentNow + Math.max(1, a.startTimeoutMs);
+        return await start(a);
+      };
+      // initialize 已回应、session/new 刚发出：这一刻把 600ms 记进注入时钟。
+      let conn = null;
+      Object.defineProperty(adapter, "conn", {
+        configurable: true,
+        get() { return conn; },
+        set(value) {
+          conn = value;
+          if (value) {
+            const newSession = value.newSession.bind(value);
+            value.newSession = (params) => {
+              currentNow = startCalledAt + spentMs;
+              sessionRemainingMs = deadlineAt - currentNow;
+              return newSession(params);
+            };
+          }
+        },
+      });
+      return adapter;
+    }, { startTimeoutMs: budgetMs, turnTimeoutMs: 60000 });
+
+    const r = await orch.runTask({ context: ctx, taskId: t.task.taskId, expectedRevision: t.task.revision });
+
+    assert.equal(r.error, "HARNESS_START_TIMEOUT", JSON.stringify(r));
+    assert.equal(r.task.status, "BLOCKED");
+    assert.equal(r.run.errorCode, "HARNESS_START_TIMEOUT");
+    assert.equal(realCalls.prompts, 0, "0 prompt");
+    assert.equal(fx.fp.state.requests, 0, "0 provider 请求");
+    // 决定性判据：session/new 发出时用的仍是**同一个**绝对截止时间，只剩 ~100ms 剩余预算
+    // （放宽到「≤ 已花掉的 600ms」以吸收 initialize 的真实耗时），旧行为必然重新获得 700ms。
+    assert.ok(sessionRemainingMs > 0, "session/new 必须仍有剩余预算，实际 " + sessionRemainingMs + "ms");
+    assert.ok(sessionRemainingMs <= spentMs, "session/new 绝不重新获得整份预算，实际 " + sessionRemainingMs + "ms");
+  } finally { try { await orch?.dispose(); } catch { /* ignore */ } await fx.close(); }
+});
+
+test("迟到 session/new 响应：截止时间后到达 → 绝不复活 run、绝不触发 prompt、0 provider 请求", async () => {
+  const fx = await createTaskHarnessFixture();
+  let orch = null;
+  try {
+    const ctx = fx.ctx();
+    const t = fx.createTask();
+    const realCalls = { starts: 0, prompts: 0 };
+    // 探查探针：session/new 延迟 1800ms 回应；启动预算 700ms 先到期。
+    const probeFactory = (opts) => fx.agentFactory("session-new-hold-agent.mjs")(opts);
+    const baseFactory = (opts) => {
+      const adapter = probeFactory(opts);
+      adapter.dshArgs = [adapter.dshArgs[0], "1800"];
+      return adapter;
+    };
+    orch = fx.makeOrchestrator(countingFactory(baseFactory, realCalls), { startTimeoutMs: 700, turnTimeoutMs: 60000 });
+    const r = await orch.runTask({ context: ctx, taskId: t.task.taskId, expectedRevision: t.task.revision });
+    assert.equal(r.error, "HARNESS_START_TIMEOUT", JSON.stringify(r));
+    const runs = fx.taskService.getHarnessRuns({ context: ctx, taskId: t.task.taskId });
+    assert.equal(runs.items.length, 1);
+
+    // 等到迟到响应窗口之后：run 必须还是同一条 BLOCKED，绝不复活成 RUNNING。
+    await sleep(2600);
+    const after = fx.taskService.getHarnessRuns({ context: ctx, taskId: t.task.taskId });
+    assert.equal(after.items.length, 1, "迟到响应绝不新建 run");
+    assert.equal(after.items[0].status, "BLOCKED");
+    assert.equal(after.items[0].errorCode, "HARNESS_START_TIMEOUT");
+    const task = fx.taskService.getTask({ context: ctx, taskId: t.task.taskId });
+    assert.equal(task.task.status, "BLOCKED");
+    assert.equal(task.task.cancelRequested, false);
+    assert.equal(fx.taskService.getCalls({ context: ctx, taskId: t.task.taskId }).items.length, 0, "迟到响应绝不产生模型调用");
+    assert.equal(realCalls.prompts, 0, "迟到响应绝不触发 prompt");
+    assert.equal(fx.fp.state.requests, 0, "迟到响应绝不产生 provider 请求");
+    assert.equal(fx.taskService.getArtifacts({ context: ctx, taskId: t.task.taskId }).items.length, 0);
+    const events = fx.taskService.getEvents({ context: ctx, taskId: t.task.taskId }).items.map((e) => e.eventType);
+    assert.equal(events.filter((e) => e === "harness.run.started").length, 1, "只有一次 run");
+    assert.ok(!events.includes("harness.run.succeeded"), "绝不因迟到响应成功");
+  } finally { try { await orch?.dispose(); } catch { /* ignore */ } await fx.close(); }
+});
+
+test("adapter 级：启动失败自清理——子进程退出、临时目录删除、能力撤销、sessionId 保持 null", async () => {
+  const fx = await createTaskHarnessFixture();
+  try {
+    const ctx = fx.ctx();
+    const adapter = fx.agentFactory("session-new-hold-agent.mjs")({ context: ctx, taskId: "t", stepId: "s", runId: "r", modelConfigId: fx.modelConfigId, modelConfigVersion: null });
+    const issued = fx.proxy.capabilities.size;
+    let code = null;
+    try { await adapter.start({ context: ctx, modelConfigId: fx.modelConfigId, maxCalls: 4, ttlMs: 120000, startTimeoutMs: 700 }); }
+    catch (e) { code = e.code; }
+    assert.equal(code, "HARNESS_START_TIMEOUT");
+    assert.equal(adapter.sessionId, null, "启动未完成 → 绝不持有 session");
+    assert.equal(adapter.processExited, true, "启动失败必须回收子进程");
+    assert.equal(adapter.bridge, null, "bridge 已关闭");
+    if (adapter.root) assert.equal(fs.existsSync(adapter.root), false, "临时目录已删除");
+    const caps = [...fx.proxy.capabilities.values()];
+    assert.ok(caps.length > issued, "启动前已签发 capability");
+    for (const cap of caps) assert.equal(cap.state, "REVOKED", "启动失败即撤销能力");
+    // dispose 幂等：重复收尾不得改变结果形状。
+    const again = await adapter.dispose();
+    assert.equal(again.ok, true);
+    assert.equal(again.exited, true);
+  } finally { await fx.close(); }
 });

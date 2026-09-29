@@ -210,14 +210,42 @@ class HarnessAdapter {
     this.exitCode = null;
     this.protocolError = false;
     this.stderr = "";
+    // D5-03 第十批：在途启动的中断 / 收尾状态（启动预算见 start 的绝对截止时间）。
+    this.disposed = false;
+    this.interrupted = false;
+    this.startupSettled = false;
+    this._startupSettleDeferred = null;
+    this._teardownPromise = null;
     this._exitWaiters = [];
   }
 
   /** Harness 只能拿到 Proxy endpoint + scoped capability + safe model metadata。 */
   /** modelConfigVersion = 本 run 的任务冻结版本；未绑定旧任务传 null（不校验，保持既有行为）。 */
-  async start({ context, modelConfigId, modelConfigVersion = null, maxCalls = 4, ttlMs = 120000, workspace = null, startTimeoutMs = 30000, requestId = null, toolFacade = null, memory = null } = {}) {
+  async start(args = {}) {
+    const { startTimeoutMs = 30000 } = args;
+    // D5-03 第十批：启动预算是一个**绝对截止时间**，initialize 与 session/new 共用它，
+    // 绝不每段各自重新获得一份预算。启动被 cancel / dispose 中断时也不得再复活。
+    const deadlineAt = this.#now() + Math.max(1, startTimeoutMs);
+    this.startupSettled = false;
+    this.interrupted = false;
+    try {
+      return await Promise.race([
+        this.#runStartup(args, deadlineAt),
+        this.#awaitStartupSettled().then(() => { throw harnessError(HARNESS_ERROR.START_TIMEOUT); }),
+      ]);
+    } catch (e) {
+      // 启动失败（超时 / 中断 / 协议错）必须自己收干净：子进程、连接、临时目录、两类能力。
+      await this.#runTeardown();
+      throw e;
+    }
+  }
+
+  async #runStartup(options, deadlineAt) {
+    const { context, modelConfigId, modelConfigVersion = null, maxCalls = 4, ttlMs = 120000, workspace = null, requestId = null, toolFacade = null, memory = null } = options;
     if (!this.bin) throw harnessError(HARNESS_ERROR.NOT_STARTED, "dsh executable not found in runtime " + this.runtime);
     if (!this.sdkPath) throw harnessError(HARNESS_ERROR.NOT_STARTED, "ACP SDK not found");
+    // dispose 之后不再复用同一实例（启动、签发能力、spawn 子进程全部拒绝）。
+    this.#assertNotInterrupted(HARNESS_ERROR.START_TIMEOUT);
     const cap = this.modelProxy.issueCapability({ context, configId: modelConfigId, allowedCapabilities: ["chat"], maxCalls, ttlMs, expectedModelConfigVersion: modelConfigVersion });
     if (!cap.ok) { const e = harnessError(cap.error === "MODEL_CONFIG_UNAVAILABLE" ? HARNESS_ERROR.NOT_STARTED : cap.error); throw e; }
     this.capability = { capabilityId: cap.capability.capabilityId, token: cap.capability.token, maxCalls: cap.capability.maxCalls, modelConfigId: cap.capability.modelConfigId, modelConfigVersion: cap.capability.modelConfigVersion };
@@ -269,13 +297,34 @@ class HarnessAdapter {
     };
     this.conn = new ClientSideConnection(() => client, stream);
 
-    const init = await this.#withTimeout(
-      this.conn.initialize({ protocolVersion: ACP_PROTOCOL_VERSION, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } } }),
-      startTimeoutMs, HARNESS_ERROR.START_TIMEOUT
-    );
-    if (Number(init.protocolVersion) !== ACP_PROTOCOL_VERSION) throw harnessError(HARNESS_ERROR.PROTOCOL_UNSUPPORTED, "agent protocolVersion=" + init.protocolVersion);
-    this.agentInfo = init.agentInfo || null;
-    const session = await this.conn.newSession({ cwd: this.workspace, mcpServers: [], additionalDirectories: [] });
+    let init;
+    let session;
+    try {
+      init = await this.#withDeadline(
+        this.conn.initialize({ protocolVersion: ACP_PROTOCOL_VERSION, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } } }),
+        deadlineAt, HARNESS_ERROR.START_TIMEOUT
+      );
+      this.#assertNotInterrupted(HARNESS_ERROR.START_TIMEOUT);
+      if (Number(init.protocolVersion) !== ACP_PROTOCOL_VERSION) throw harnessError(HARNESS_ERROR.PROTOCOL_UNSUPPORTED, "agent protocolVersion=" + init.protocolVersion);
+      this.agentInfo = init.agentInfo || null;
+      session = await this.#withDeadline(
+        this.conn.newSession({ cwd: this.workspace, mcpServers: [], additionalDirectories: [] }),
+        deadlineAt, HARNESS_ERROR.START_TIMEOUT
+      );
+    } catch (e) {
+      if (e && e.code) throw e;
+      this.protocolError = true;
+      // 子进程死亡时 ACP 连接先关、exit 事件通常同 tick 才到：等一个很短的窗口再判定真实原因，
+      // 绝不把「子进程没了」退化成协议错或内建错误（与 prompt 的失败归类同口径）。
+      if (!this.processExited) await Promise.race([this.waitExit(250), new Promise((r) => setTimeout(r, 100))]);
+      if (this.processExited) throw harnessError(HARNESS_ERROR.PROCESS_EXITED);
+      throw harnessError(HARNESS_ERROR.PROTOCOL_ERROR, String((e && e.message) || e).slice(0, 120));
+    }
+    // 迟到的 session/new（截止时间已过 / 已被 cancel / dispose 中断）绝不复活启动。
+    this.#assertNotInterrupted(HARNESS_ERROR.START_TIMEOUT);
+    // 启动段内子进程死亡：按真实原因收敛，绝不把「没有 session 的成功」交给编排器。
+    if (this.processExited) throw harnessError(HARNESS_ERROR.PROCESS_EXITED);
+    if (!session || !session.sessionId) throw harnessError(HARNESS_ERROR.PROTOCOL_ERROR, "session/new 未返回 sessionId");
     this.sessionId = session.sessionId;
     return {
       sessionId: this.sessionId,
@@ -318,10 +367,69 @@ class HarnessAdapter {
     this.events.push(ev);
   }
 
-  #withTimeout(promise, ms, code) {
-    let t;
-    const timeout = new Promise((_, reject) => { t = setTimeout(() => reject(harnessError(code)), Math.max(1, ms)); });
-    return Promise.race([promise, timeout]).finally(() => clearTimeout(t));
+  #withTimeout(promise, ms, code) { return this.#withDeadline(promise, this.#now() + Math.max(1, ms), code); }
+
+  /**
+   * D5-03 第十批：**绝对截止时间**版等待。`deadlineAt <= now` 立刻超时（剩余预算为 0），
+   * 绝不退化成「本段重新计时」；中断信号同时打断等待。
+   */
+  #withDeadline(promise, deadlineAt, code) {
+    const ms = Math.max(0, deadlineAt - this.#now());
+    let timer;
+    const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(harnessError(code)), ms); });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+  }
+
+  #now() { return this.clock(); }
+
+  #assertNotInterrupted(code) { if (this.interrupted) throw harnessError(code); }
+
+  #signalStartupSettled() {
+    this.startupSettled = true;
+    const settle = this._startupSettle;
+    this._startupSettle = null;
+    if (settle) settle();
+  }
+
+  #awaitStartupSettled() {
+    if (this.startupSettled) return Promise.resolve();
+    if (!this._startupSettleDeferred) {
+      let settle;
+      const promise = new Promise((r) => { settle = r; });
+      this._startupSettleDeferred = { promise, settle };
+    }
+    return this._startupSettleDeferred.promise;
+  }
+
+  /**
+   * 启动被中断（用户 cancel / 应用 dispose）：立刻让在途 start 有界收敛，
+   * 之后 dispose 再回收子进程、连接、临时目录与两类能力。
+   */
+  abortStart() { this.interrupted = true; this.#signalStartupSettled(); }
+
+  /** 启动失败（超时 / 中断 / 协议错）时的自清理：与 dispose 同一份收尾，幂等且只跑一次。 */
+  #runTeardown() {
+    const dispose = () => (async () => {
+      try { this.revokeToolCapability(); } catch { /* ignore */ }
+      try { this.revokeModelCapability(); } catch { /* ignore */ }
+      try { await this.closeSession(); } catch { /* ignore */ }
+      const child = this.child;
+      if (child && !this.processExited) {
+        try { child.stdin.end(); } catch { /* ignore */ }
+        const exited = await Promise.race([this.waitExit(2500), new Promise((r) => setTimeout(() => r({ timeout: true }), 2500))]);
+        if (exited && exited.timeout && !this.processExited) {
+          try { child.kill("SIGTERM"); } catch { /* ignore */ }
+          const term = await Promise.race([this.waitExit(2000), new Promise((r) => setTimeout(() => r({ timeout: true }), 2000))]);
+          if (term && term.timeout && !this.processExited) { try { child.kill("SIGKILL"); } catch { /* ignore */ } await this.waitExit(1500); }
+        }
+      }
+      try { await this.bridge?.stop(); } catch { /* ignore */ }
+      this.bridge = null;
+      if (!this.keepTemp && this.root) { try { fs.rmSync(this.root, { recursive: true, force: true }); } catch { /* ignore */ } }
+      return { ok: true, exited: this.processExited, exitCode: this.exitCode, protocolError: this.protocolError };
+    })();
+    if (!this._teardownPromise) this._teardownPromise = dispose().catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
+    return this._teardownPromise;
   }
 
   async prompt(text, { timeoutMs = 120000 } = {}) {
@@ -356,7 +464,9 @@ class HarnessAdapter {
     if (this.protocolError) throw harnessError(HARNESS_ERROR.PROTOCOL_ERROR);
   }
 
+  /** 用户 cancel 同时打断在途启动段：启动未完成时也必须能被取消。 */
   async cancel() {
+    this.abortStart();
     if (!this.conn || !this.sessionId) return { ok: false, error: HARNESS_ERROR.NOT_STARTED };
     this.turnCancelled = true;
     await this.conn.cancel({ sessionId: this.sessionId });
@@ -411,9 +521,11 @@ class HarnessAdapter {
   }
 
   async closeSession() {
-    if (!this.conn || !this.sessionId) return { ok: true, changed: false };
-    try { await this.#withTimeout(this.conn.closeSession({ sessionId: this.sessionId }), 10000, HARNESS_ERROR.TURN_TIMEOUT); } catch { /* best effort */ }
-    const id = this.sessionId; this.sessionId = null;
+    const conn = this.conn;
+    if (!conn || !this.sessionId) return { ok: true, changed: false };
+    const id = this.sessionId;
+    this.sessionId = null;
+    try { await this.#withTimeout(conn.closeSession({ sessionId: id }), 10000, HARNESS_ERROR.TURN_TIMEOUT); } catch { /* best effort */ }
     return { ok: true, sessionId: id };
   }
 
@@ -422,24 +534,14 @@ class HarnessAdapter {
     return new Promise((resolve) => { const w = (x) => resolve(x); this._exitWaiters.push(w); setTimeout(() => resolve({ code: null, timeout: true }), ms); });
   }
 
-  /** bounded shutdown：closeSession → stdin close → SIGTERM → bounded SIGKILL。 */
+  /**
+   * bounded shutdown：closeSession → stdin close → SIGTERM → bounded SIGKILL。
+   * D5-03 第十批：**幂等**，且先打断在途启动（否则启动段会留在无界等待里）。
+   */
   async dispose() {
-    try { this.revokeToolCapability(); } catch { /* ignore */ }
-    try { await this.closeSession(); } catch { /* ignore */ }
-    const child = this.child;
-    if (child && !this.processExited) {
-      try { child.stdin.end(); } catch { /* ignore */ }
-      const exited = await Promise.race([this.waitExit(2500), new Promise((r) => setTimeout(() => r({ timeout: true }), 2500))]);
-      if (exited && exited.timeout && !this.processExited) {
-        try { child.kill("SIGTERM"); } catch { /* ignore */ }
-        const term = await Promise.race([this.waitExit(2000), new Promise((r) => setTimeout(() => r({ timeout: true }), 2000))]);
-        if (term && term.timeout && !this.processExited) { try { child.kill("SIGKILL"); } catch { /* ignore */ } await this.waitExit(1500); }
-      }
-    }
-    try { await this.bridge?.stop(); } catch { /* ignore */ }
-    this.bridge = null;
-    if (!this.keepTemp && this.root) { try { fs.rmSync(this.root, { recursive: true, force: true }); } catch { /* ignore */ } }
-    return { ok: true, exited: this.processExited, exitCode: this.exitCode, protocolError: this.protocolError };
+    this.disposed = true;
+    this.abortStart();
+    return await this.#runTeardown();
   }
 }
 
