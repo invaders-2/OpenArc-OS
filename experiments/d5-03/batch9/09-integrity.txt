@@ -1,0 +1,39 @@
+=== git status --porcelain ===
+ M electron/task-domain.cjs
+ M electron/task-harness-orchestrator.cjs
+ M tests/task-harness-cancel.test.mjs
+ M tests/task-harness-orchestrator.test.mjs
+?? experiments/d5-03/batch9/
+?? tests/fixtures/harness-acp/session-new-hang-agent.mjs
+?? tests/fixtures/harness-acp/start-hang-agent.mjs
+?? tests/fixtures/harness-acp/turn-hang-agent.mjs
+
+=== git diff --stat ===
+ electron/task-domain.cjs                 |   2 +
+ electron/task-harness-orchestrator.cjs   |   2 +-
+ tests/task-harness-cancel.test.mjs       | 179 +++++++++++++++++++++++++++----
+ tests/task-harness-orchestrator.test.mjs | 138 +++++++++++++++++++++++-
+ 4 files changed, 296 insertions(+), 25 deletions(-)
+
+=== SCHEMA_VERSION ===
+68:const SCHEMA_VERSION = 21;
+
+=== identity-store/task-store modified? ===
+(none)
+
+=== task-store CHECK constraints ===
+0
+
+=== budgets ===
+31:const DEFAULT_TURN_TIMEOUT_MS = 180000;
+32:const DEFAULT_START_TIMEOUT_MS = 30000;
+
+=== src/** modified? ===
+(end)
+
+=== orphan hang probes ===
+0
+
+=== HEAD ===
+668238ea806f5e53b784c797cc36174cb15963a8
+integration/ui-core

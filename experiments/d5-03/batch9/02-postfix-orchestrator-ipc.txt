@@ -1,0 +1,23 @@
+(node:49106) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ ACP → TaskEvent mapping 显式、聚合 text、丢 reasoning、洪泛有上限 (2.478958ms)
+✔ prompt 只含 goal + safe input，且 schema 版本冻结 (0.743042ms)
+✔ turn 成功：Artifact + Verification PASS → Step/Task SUCCEEDED (463.450333ms)
+✔ 成功必须 Verification PASS：文本不符 → BLOCKED 且 0 artifact (398.588458ms)
+✔ Artifact 写入失败：Step/Task 绝不 SUCCEEDED，且无 artifact（失败原子性） (408.2455ms)
+✔ Harness crash → BLOCKED + HARNESS_PROCESS_EXITED，0 respawn (402.021625ms)
+✔ turn timeout → BLOCKED + HARNESS_TURN_TIMEOUT，0 第二次 prompt (397.305125ms)
+✔ Tool proposal → 0 execution + BLOCKED TOOL_EXECUTION_NOT_AVAILABLE (417.849875ms)
+✔ Permission request → reject + BLOCKED PERMISSION_NOT_AVAILABLE，0 execution (454.429417ms)
+✔ classifyHarnessError：启动超时 / 执行超时各自映射，绝不互相改写 (0.374791ms)
+✔ 启动超时（真实 adapter + 可控阻塞 initialize）→ HARNESS_START_TIMEOUT · BLOCKED · capability 撤销 · 0 重试 (1168.71675ms)
+✔ 执行超时（真实 adapter + 可控阻塞 prompt）→ HARNESS_TURN_TIMEOUT · BLOCKED · capability 撤销 · 恰好 1 次 prompt (1157.223625ms)
+✔ 真实 IPC 入口：启动超时 → task/result.error 与 task/get.stopReason 都是 HARNESS_START_TIMEOUT (1135.3325ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 9009.767833

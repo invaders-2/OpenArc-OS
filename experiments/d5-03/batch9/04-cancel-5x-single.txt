@@ -1,0 +1,55 @@
+=== cancel single run 1 ===
+✔ Cancel E2E：真实 slow provider → 用户取消 → 0 retry + capability revoked + CANCELLED (5657.860375ms)
+ℹ 成功时间线：+1.7ms run:dispatch | +8.3ms adapter:start:begin | +81.4ms phase:child-spawned(observed) | +1032.7ms adapter:start:done | +1033.7ms adapter:prompt:begin | +1038.3ms phase:session-created(observed) | +1038.6ms phase:harness-running | +1154.6ms phase:provider-request | +1154.6ms cancel:begin | +1155.4ms adapter:cancel:begin | +1155.6ms adapter:cancel:done | +1156.4ms cancel:done | +1160.4ms adapter:prompt:done | +1252.5ms run:converged HARNESS_CANCELLED
+✔ Cancel Race：cancel 先行 → 绝不 Task CANCELLED + Step SUCCEEDED (525.408458ms)
+✔ Cancel 后不存在 Provider retry：abort 只发生一次 (5413.34575ms)
+ℹ 成功时间线：+0.4ms run:dispatch | +2.3ms adapter:start:begin | +12.3ms phase:child-spawned(observed) | +828.0ms adapter:start:done | +828.8ms adapter:prompt:begin | +836.9ms phase:session-created(observed) | +837.1ms phase:harness-running | +938.4ms phase:provider-request | +938.4ms cancel:begin | +938.8ms adapter:cancel:begin | +939.0ms adapter:cancel:done | +939.6ms cancel:done | +945.6ms adapter:prompt:done | +1021.1ms run:converged | +1322.5ms settle:300ms
+ℹ tests 3
+ℹ pass 3
+ℹ fail 0
+ℹ duration_ms 12688.0725
+exit=0
+=== cancel single run 2 ===
+✔ Cancel E2E：真实 slow provider → 用户取消 → 0 retry + capability revoked + CANCELLED (5537.327417ms)
+ℹ 成功时间线：+1.6ms run:dispatch | +8.2ms adapter:start:begin | +92.4ms phase:child-spawned(observed) | +953.7ms adapter:start:done | +954.9ms adapter:prompt:begin | +959.7ms phase:session-created(observed) | +959.9ms phase:harness-running | +1074.3ms phase:provider-request | +1074.3ms cancel:begin | +1074.9ms adapter:cancel:begin | +1075.2ms adapter:cancel:done | +1076.1ms cancel:done | +1082.8ms adapter:prompt:done | +1192.6ms run:converged HARNESS_CANCELLED
+✔ Cancel Race：cancel 先行 → 绝不 Task CANCELLED + Step SUCCEEDED (441.912958ms)
+✔ Cancel 后不存在 Provider retry：abort 只发生一次 (5076.569541ms)
+ℹ 成功时间线：+0.3ms run:dispatch | +2.2ms adapter:start:begin | +12.6ms phase:child-spawned(observed) | +577.7ms adapter:start:done | +578.3ms adapter:prompt:begin | +588.6ms phase:session-created(observed) | +588.8ms phase:harness-running | +656.1ms phase:provider-request | +656.1ms cancel:begin | +656.6ms adapter:cancel:begin | +656.8ms adapter:cancel:done | +657.3ms cancel:done | +662.2ms adapter:prompt:done | +733.4ms run:converged | +1034.7ms settle:300ms
+ℹ tests 3
+ℹ pass 3
+ℹ fail 0
+ℹ duration_ms 12146.096416
+exit=0
+=== cancel single run 3 ===
+✔ Cancel E2E：真实 slow provider → 用户取消 → 0 retry + capability revoked + CANCELLED (5255.828958ms)
+ℹ 成功时间线：+1.2ms run:dispatch | +9.2ms adapter:start:begin | +67.9ms phase:child-spawned(observed) | +677.7ms adapter:start:done | +678.8ms adapter:prompt:begin | +682.6ms phase:session-created(observed) | +682.9ms phase:harness-running | +773.9ms phase:provider-request | +773.9ms cancel:begin | +774.7ms adapter:cancel:begin | +775.0ms adapter:cancel:done | +775.7ms cancel:done | +781.0ms adapter:prompt:done | +859.9ms run:converged HARNESS_CANCELLED
+✔ Cancel Race：cancel 先行 → 绝不 Task CANCELLED + Step SUCCEEDED (484.575334ms)
+✔ Cancel 后不存在 Provider retry：abort 只发生一次 (5236.072292ms)
+ℹ 成功时间线：+0.4ms run:dispatch | +2.6ms adapter:start:begin | +13.8ms phase:child-spawned(observed) | +686.6ms adapter:start:done | +687.3ms adapter:prompt:begin | +690.9ms phase:session-created(observed) | +691.0ms phase:harness-running | +769.6ms phase:provider-request | +769.6ms cancel:begin | +770.1ms adapter:cancel:begin | +770.2ms adapter:cancel:done | +770.7ms cancel:done | +777.6ms adapter:prompt:done | +860.1ms run:converged | +1161.5ms settle:300ms
+ℹ tests 3
+ℹ pass 3
+ℹ fail 0
+ℹ duration_ms 12080.520833
+exit=0
+=== cancel single run 4 ===
+✔ Cancel E2E：真实 slow provider → 用户取消 → 0 retry + capability revoked + CANCELLED (5263.560167ms)
+ℹ 成功时间线：+1.3ms run:dispatch | +5.6ms adapter:start:begin | +66.6ms phase:child-spawned(observed) | +693.7ms adapter:start:done | +695.0ms adapter:prompt:begin | +695.2ms phase:session-created(observed) | +695.3ms phase:harness-running | +791.0ms phase:provider-request | +791.0ms cancel:begin | +791.8ms adapter:cancel:begin | +792.1ms adapter:cancel:done | +793.2ms cancel:done | +797.7ms adapter:prompt:done | +902.0ms run:converged HARNESS_CANCELLED
+✔ Cancel Race：cancel 先行 → 绝不 Task CANCELLED + Step SUCCEEDED (475.974125ms)
+✔ Cancel 后不存在 Provider retry：abort 只发生一次 (5482.215708ms)
+ℹ 成功时间线：+0.5ms run:dispatch | +3.6ms adapter:start:begin | +13.4ms phase:child-spawned(observed) | +899.9ms adapter:start:done | +900.6ms adapter:prompt:begin | +909.8ms phase:session-created(observed) | +910.2ms phase:harness-running | +989.3ms phase:provider-request | +989.3ms cancel:begin | +990.0ms adapter:cancel:begin | +990.1ms adapter:cancel:done | +990.8ms cancel:done | +996.1ms adapter:prompt:done | +1075.9ms run:converged | +1377.3ms settle:300ms
+ℹ tests 3
+ℹ pass 3
+ℹ fail 0
+ℹ duration_ms 12309.110708
+exit=0
+=== cancel single run 5 ===
+✔ Cancel E2E：真实 slow provider → 用户取消 → 0 retry + capability revoked + CANCELLED (5431.169291ms)
+ℹ 成功时间线：+2.2ms run:dispatch | +8.0ms adapter:start:begin | +69.5ms phase:child-spawned(observed) | +784.3ms adapter:start:done | +785.3ms adapter:prompt:begin | +793.6ms phase:session-created(observed) | +793.9ms phase:harness-running | +897.3ms phase:provider-request | +897.3ms cancel:begin | +898.2ms adapter:cancel:begin | +898.7ms adapter:cancel:done | +899.9ms cancel:done | +904.1ms adapter:prompt:done | +981.0ms run:converged HARNESS_CANCELLED
+✔ Cancel Race：cancel 先行 → 绝不 Task CANCELLED + Step SUCCEEDED (516.0085ms)
+✔ Cancel 后不存在 Provider retry：abort 只发生一次 (5437.9675ms)
+ℹ 成功时间线：+0.7ms run:dispatch | +6.2ms adapter:start:begin | +13.8ms phase:child-spawned(observed) | +818.4ms adapter:start:done | +820.9ms adapter:prompt:begin | +823.1ms phase:session-created(observed) | +824.0ms phase:harness-running | +928.0ms phase:provider-request | +928.1ms cancel:begin | +929.1ms adapter:cancel:begin | +929.4ms adapter:cancel:done | +932.6ms cancel:done | +937.4ms adapter:prompt:done | +1052.8ms run:converged | +1354.2ms settle:300ms
+ℹ tests 3
+ℹ pass 3
+ℹ fail 0
+ℹ duration_ms 12480.976791
+exit=0

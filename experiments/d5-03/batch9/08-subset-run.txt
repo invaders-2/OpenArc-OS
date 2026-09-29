@@ -1,0 +1,278 @@
+(node:56249) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ P1 · 当前会话 = B：A 任务进入 AWAITING_APPROVAL 时推送必须被静默丢弃 (1145.219375ms)
+✖ P2 · 当前会话 = A（owner）：推送投递，载荷 = 白名单投影且与 getApprovalRequest 一致 (965.03325ms)
+✔ P3 · 会话切回 A 后仍能发现 B 会话期间产生的 pending（挂载查询等价） (1098.523125ms)
+✔ P4 · 无 authenticated session：不推送、不改任何状态 (982.188625ms)
+✔ P5 · 决策路径不受影响：owner APPROVE/DENY 正常，非 owner 会话决策仍被拒 (949.429333ms)
+✔ P6 · 无 session：读路径空 / not-found，声明了 context 的投影一律 null (712.236459ms)
+✔ P7 · A 会话下读路径正常（正对照） (597.414375ms)
+✔ P8 · context == null 的内部投影语义未变（推送钩子用） (603.781667ms)
+(node:56250) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+T1 approver disabled: {"elig":{"status":"DENIED","reasonCode":"SIDE_EFFECT_APPROVER_INELIGIBLE"},"exec":{"ok":false,"error":"SIDE_EFFECT_APPROVER_INELIGIBLE","mutationCount":0},"call":"BLOCKED","errorCode":"SIDE_EFFECT_APPROVER_INELIGIBLE","leases":["REVOKED"],"task":"BLOCKED","step":"BLOCKED","mutation":0}
+✔ T1 · 批准人被 DISABLE → eligibility DENIED(APPROVER_INELIGIBLE)，claim 前拒绝、0 mutation、Step/Task BLOCKED (1228.973167ms)
+T1-b approver demoted: {"elig":"SIDE_EFFECT_APPROVER_INELIGIBLE","exec":"SIDE_EFFECT_APPROVER_INELIGIBLE","call":"BLOCKED","task":"BLOCKED","mutation":0}
+✔ T1-b · 批准人被降级为非 ADMIN 且非 owner → APPROVER_INELIGIBLE（丢失批准范围） (920.004209ms)
+T2 approver logout: {"sessionRevoked":true,"approval":"APPROVED","elig":"ELIGIBLE","exec":{"ok":true,"verificationStatus":"PASS"},"call":"SUCCEEDED","mutation":1}
+✔ T2 · 批准人仅登出（session 撤销）→ 批准仍有效，真实执行成功（不因登出撤销） (1038.516334ms)
+T3 owner revoked: {"elig":"SIDE_EFFECT_AUTHORIZATION_REVOKED","exec":{"ok":false,"error":"SIDE_EFFECT_AUTHORIZATION_REVOKED"},"call":"LEASED","leases":1,"task":"RUNNING","mutation":0}
+✔ T3 · 执行主体（task owner）失权 → 既有 SIDE_EFFECT_AUTHORIZATION_REVOKED 逐字不变（不进入批准人收敛） (930.066334ms)
+T4 revoke before claim: {"rev":{"ok":true,"revoked":true,"callStatus":"BLOCKED","approval":"REVOKED"},"call":"BLOCKED","errorCode":"SIDE_EFFECT_APPROVAL_REVOKED","leases":["REVOKED"],"leaseAgain":{"ok":false,"error":"SIDE_EFFECT_CALL_STATE"},"execute":{"ok":false,"error":"SIDE_EFFECT_CALL_STATE"},"task":"BLOCKED","step":"BLOCKED","mutation":0}
+✔ T4 · 撤销先于 claim → call BLOCKED/APPROVAL_REVOKED、lease 收敛、claim/execute 拒绝、0 mutation、Step/Task BLOCKED (865.481375ms)
+T5 revoke after claim: {"revoke":{"ok":false,"error":"SIDE_EFFECT_APPROVAL_TOO_LATE","callStatus":"RUNNING"},"exec":{"ok":true,"verificationStatus":"PASS"},"call":"SUCCEEDED","leases":["RELEASED"],"approval":"APPROVED","mutation":1}
+✔ T5 · claim 先于撤销 → 撤销 TOO_LATE、RUNNING 零变化、执行继续收敛真实结果、批准不丢 (728.974292ms)
+T5-b disable after claim: {"exec":{"ok":true,"verificationStatus":"PASS"},"call":"SUCCEEDED","task":"RUNNING","mutation":1}
+✔ T5-b · claim 之后批准人失权 → 不追溯：执行继续成功，批准行不变 (615.461792ms)
+T6 revoke state machine: {"duplicate":{"ok":true,"duplicate":true,"callStatus":"BLOCKED"},"forbidden":"SIDE_EFFECT_APPROVAL_FORBIDDEN","required":"SIDE_EFFECT_APPROVAL_REQUIRED","blockedDenied":{"ok":false,"error":"SIDE_EFFECT_APPROVAL_TOO_LATE","callStatus":"BLOCKED"},"approvals":{"a":["REVOKED"],"d":["DENIED"]},"mutation":0}
+✔ T6 · 撤销状态机边界：重复撤销幂等、非授权 FORBIDDEN、AWAITING_APPROVAL → APPROVAL_REQUIRED、已被 DENY 的 BLOCKED → TOO_LATE (676.257084ms)
+T7 revoke after succeeded: {"revoke":{"ok":false,"error":"SIDE_EFFECT_APPROVAL_TOO_LATE","callStatus":"SUCCEEDED"},"call":"SUCCEEDED","verificationStatus":"PASS","approvals":["APPROVED"],"mutation":1}
+✔ T7 · SUCCEEDED 终态：撤销一律 TOO_LATE、call 逐字不变、无撤销事件 (589.422292ms)
+T7-b revoke after unknown effect: {"revoke":{"ok":false,"error":"SIDE_EFFECT_APPROVAL_TOO_LATE","callStatus":"UNKNOWN_EFFECT"},"call":"UNKNOWN_EFFECT","recoverySafe":{"quiesced":false,"source":"unproven","originRuntimeInstanceId":"inst_test","originLeaseId":"slease_KgwLVZrjjj6uTw","proof":{"type":"SELF_RUNTIME_ACTIVE","instanceId":"inst_test"},"reason":"SELF_RUNTIME_ACTIVE","recordedAt":1700000000000},"recoveryApplicable":true,"mutation":1}
+✔ T7-b · UNKNOWN_EFFECT：撤销 TOO_LATE、恢复证据逐字段不变、恢复入口保留 (655.907625ms)
+T8 legacy approval: {"actorUserId":null,"elig":{"status":"DENIED","reasonCode":"SIDE_EFFECT_APPROVER_UNVERIFIED"},"exec":{"ok":false,"error":"SIDE_EFFECT_APPROVER_UNVERIFIED"},"call":"BLOCKED","errorCode":"SIDE_EFFECT_APPROVER_UNVERIFIED","leases":["REVOKED"],"task":"BLOCKED","mutation":0}
+✔ T8 · 旧批准缺 actor_user_id → APPROVER_UNVERIFIED 保守拒绝（不伪造历史身份） (632.400042ms)
+(node:56251) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+T1 after deny: {"call":"BLOCKED","errorCode":"SIDE_EFFECT_APPROVAL_DENIED","leases":0,"mutation":0,"repeat":{"ok":true,"duplicate":true,"callStatus":"BLOCKED"},"approvals":["DENIED"]}
+✔ T1 · AWAITING_APPROVAL：DENY → BLOCKED、0 lease、0 mutation；重复 DENY 幂等成功 (1220.705125ms)
+T2 after deny: {"call":"BLOCKED","approvals":["APPROVED","DENIED"],"leases":0,"mutation":0}
+✔ T2 · APPROVED：DENY → BLOCKED、0 mutation、0 ACTIVE lease (841.082292ms)
+T3 after deny: {"call":"BLOCKED","leases":["REVOKED"],"executor":{"ok":false,"error":"SIDE_EFFECT_CALL_STATE","mutationCount":0},"mutation":0}
+✔ T3 · LEASED：DENY → BLOCKED + 0 ACTIVE lease；释放 executor → claim 失败、0 mutation、无第二套 call (1109.701417ms)
+T4[afterClaimBeforeDispatch] after deny: {"deny":{"ok":false,"error":"SIDE_EFFECT_APPROVAL_TOO_LATE","callStatus":"RUNNING"},"exec":{"ok":true,"verificationStatus":"PASS"},"call":"SUCCEEDED","leases":["RELEASED"],"mutation":1,"approvals":["APPROVED"]}
+✔ T4 · RUNNING（afterClaimBeforeDispatch）：DENY → TOO_LATE + 状态不变；执行仍收敛 SUCCEEDED，恰好 1 次 mutation (924.918375ms)
+T4[afterDomainResultBeforeVerification] after deny: {"deny":{"ok":false,"error":"SIDE_EFFECT_APPROVAL_TOO_LATE","callStatus":"RUNNING"},"exec":{"ok":true,"verificationStatus":"PASS"},"call":"SUCCEEDED","leases":["RELEASED"],"mutation":1,"approvals":["APPROVED"]}
+✔ T4 · RUNNING（afterDomainResultBeforeVerification）：DENY → TOO_LATE + 状态不变；执行仍收敛 SUCCEEDED，恰好 1 次 mutation (931.097292ms)
+T5 after deny: {"deny":{"ok":false,"error":"SIDE_EFFECT_APPROVAL_TOO_LATE","callStatus":"UNKNOWN_EFFECT"},"callAtDeny":"UNKNOWN_EFFECT","recoverySafe":{"quiesced":false,"source":"unproven","originRuntimeInstanceId":"inst_test","originLeaseId":"slease_NpRAJuKavd5SSQ","proof":{"type":"SELF_RUNTIME_ACTIVE","instanceId":"inst_test"},"reason":"SELF_RUNTIME_ACTIVE","recordedAt":1700000000000},"recoveryApplicable":true,"verified":{"outcome":"APPLIED","status":"SUCCEEDED"},"mutation":1}
+✔ T5 · UNKNOWN_EFFECT：DENY → TOO_LATE、call 与恢复证据逐字段不变、恢复入口仍可用 (739.798042ms)
+T6 after deny: {"deny":{"ok":false,"error":"SIDE_EFFECT_APPROVAL_TOO_LATE","callStatus":"SUCCEEDED"},"call":"SUCCEEDED","verificationStatus":"PASS","approvals":["APPROVED"],"leases":["RELEASED"],"mutation":1}
+✔ T6 · SUCCEEDED：DENY → TOO_LATE、call 仍 SUCCEEDED/PASS、无 BLOCKED 覆盖、无 DENIED approval 行 (612.604125ms)
+T7 bridge: {"pendingBefore":1,"deny":{"ok":true,"status":"BLOCKED"},"denyAgain":{"ok":true,"status":"BLOCKED"},"late":{"ok":false,"error":"SIDE_EFFECT_APPROVAL_TOO_LATE"},"call":"SUCCEEDED","pendingAfter":0,"request":{"ok":false,"error":"SIDE_EFFECT_CALL_NOT_FOUND"}}
+✔ T7 · 产品桥 sideEffect/decideApproval：迟到 DENY 显式报错；listPending / getApprovalRequest 不再待决 (606.585209ms)
+T8 effectiveApproval: {"expired":"EXPIRED","rowDecision":"APPROVED","acquire":"SIDE_EFFECT_APPROVAL_EXPIRED","eligibility":"SIDE_EFFECT_APPROVAL_EXPIRED","claimSide":{"ok":false,"error":"SIDE_EFFECT_APPROVAL_EXPIRED","mutationCount":0,"call":"LEASED"},"revoked":"REVOKED","denied":"DENIED","duplicate":true,"mutation":0}
+✔ T8 · effectiveApproval：TTL 过期 → EXPIRED（行不变）；未过期 / 已撤销 / 已拒绝对照不变；执行侧判定逐字不变 (607.012083ms)
+T9 race: {"approve":{"ok":false,"error":"SIDE_EFFECT_CALL_STATE"},"deny":{"ok":true,"status":"BLOCKED"},"call":"BLOCKED","errorCode":"SIDE_EFFECT_APPROVAL_DENIED","latestApproval":"DENIED","approvals":["DENIED"],"lease":{"ok":false,"error":"SIDE_EFFECT_CALL_STATE"},"eligibility":"BLOCKED","mutation":0,"approvedEvents":0}
+✔ T9 · 并发 DENY vs 在途 APPROVE：已被拒绝的 call 绝不能被 approve 复活（原子前置，fail closed） (688.230583ms)
+T9-b control: {"first":{"ok":true,"status":"APPROVED"},"second":{"ok":true,"duplicate":true,"approvalIdSame":true},"approvals":["APPROVED"],"approvedEvents":1,"approvedAudit":1,"lease":{"ok":true,"status":"LEASED"},"lateApprove":{"ok":false,"error":"SIDE_EFFECT_CALL_STATE"},"mutation":0}
+✔ T9-b · 正对照：无并发 DENY 时 approve 正常生效，双次 approve 幂等不变，lease 判据不变 (620.357292ms)
+T9-c concurrent approve: {"first":{"ok":true,"duplicate":false},"second":{"ok":true,"duplicate":true},"approvals":["APPROVED"],"approvedEvents":1,"approvedAudit":1,"call":"APPROVED","mutation":0}
+✔ T9-c · 并发双次 APPROVE：同一绑定只允许一次 authoritative transition（原子事务内的 duplicate） (2077.110291ms)
+(node:56252) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+T1 RUNNING: {"error":"SIDE_EFFECT_CALL_STATE","callStatus":"RUNNING","leases":0}
+T1 SUCCEEDED: {"error":"SIDE_EFFECT_CALL_STATE","callStatus":"SUCCEEDED","leases":0}
+T1 UNKNOWN_EFFECT: {"error":"SIDE_EFFECT_CALL_STATE","callStatus":"UNKNOWN_EFFECT","leases":0}
+T1 FAILED: {"error":"SIDE_EFFECT_CALL_STATE","callStatus":"FAILED","leases":0}
+T1 BLOCKED: {"error":"SIDE_EFFECT_CALL_STATE","callStatus":"BLOCKED","leases":0}
+T1 CANCELLED: {"error":"SIDE_EFFECT_CALL_STATE","callStatus":"CANCELLED","leases":0}
+▶ T1 · 另一连接已推进状态的六种 call：迟到 acquire 必须被拒，call / 恢复证据 / lease 零改写
+  ✔ RUNNING (11.991959ms)
+  ✔ SUCCEEDED (9.95025ms)
+  ✔ UNKNOWN_EFFECT (13.665625ms)
+  ✔ FAILED (10.735958ms)
+  ✔ BLOCKED (6.099209ms)
+  ✔ CANCELLED (15.241167ms)
+✔ T1 · 另一连接已推进状态的六种 call：迟到 acquire 必须被拒，call / 恢复证据 / lease 零改写 (1259.461666ms)
+T2: {"error":"SIDE_EFFECT_APPROVAL_EXPIRED","leaseStatus":"ACTIVE","leases":1}
+✔ T2 · 批准已过期 + 已有过期 ACTIVE lease：拒绝申请时该 lease 逐字不变（绝不提前 EXPIRED） (873.120791ms)
+T3: {"leases":["EXPIRED","ACTIVE"],"call":"LEASED"}
+✔ T3 · 既有语义保留：正常申请 / 合法重复 / 不同执行器竞争 / 过期后重租 (1074.72125ms)
+(node:56253) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+T1 before/after 观察点: {"call":"SUCCEEDED","activeLease":null,"safety":{"ok":true,"taskId":"task_-7Zsd2EeWqBpnA","blocked":false,"code":null}}
+✔ T1 · A-4：SUCCEEDED 落定时刻 call 已是终态且无 ACTIVE lease（同一事务） (1186.310541ms)
+T2 after deny: {"call":"BLOCKED","activeLeases":0,"safety":{"ok":true,"taskId":"task_LetS6u3kGafSXQ","blocked":false,"code":null}}
+✔ T2 · A-4：denySideEffect 收敛 LEASED call 时终结其 ACTIVE lease (916.949667ms)
+T3 after recovery: {"call":"SUCCEEDED","stale":"REVOKED","foreign":"ACTIVE"}
+✔ T3 · A-4：终态 call 的遗留 ACTIVE lease 被 recoverAfterExecutorExit 回收，终态与证据不变 (1067.60475ms)
+T4 A 迟到写回: {"exec":{"ok":false,"executed":true,"suppressed":true,"error":"SIDE_EFFECT_UNKNOWN_EFFECT"},"call":"UNKNOWN_EFFECT","task":"BLOCKED","recoveryApplicable":true,"domainCalls":1,"lateEvent":{"callId":"scall_eLfA8sdovHlaYg","toolId":"resource.trash","observedStatus":"UNKNOWN_EFFECT"}}
+✔ T4 · S1：另一个 runtime 的 UNKNOWN_EFFECT 权威不被本 runtime 迟到终态覆盖 (963.967625ms)
+T6 收敛: {"verified":{"outcome":"APPLIED","resolved":true},"call":"SUCCEEDED","verificationStatus":"PASS","domainCalls":1}
+✔ T6 · 既有恢复路径仍可用：verifyUnknownEffect → APPLIED → SUCCEEDED（0 二次执行） (935.001084ms)
+T5 正对照: {"call":"SUCCEEDED","verificationStatus":"PASS","leases":["RELEASED"],"domainCalls":1}
+✔ T5 · 正对照：单 runtime WRITE 全链 SUCCEEDED/PASS、lease RELEASED、恰好 1 次 mutation (735.032292ms)
+T7 SUCCEEDED: {"execError":null,"call":"SUCCEEDED","leases":["RELEASED"],"boundaries":["LEASED/ACTIVE","RUNNING/ACTIVE"]}
+T7 ambiguous→UNKNOWN_EFFECT: {"execError":"SIDE_EFFECT_UNKNOWN_EFFECT","call":"UNKNOWN_EFFECT","leases":["REVOKED"],"boundaries":["LEASED/ACTIVE","RUNNING/ACTIVE"]}
+T7 known-no-effect→FAILED: {"execError":"SIDE_EFFECT_PRECONDITION_CHANGED","call":"FAILED","leases":["RELEASED"],"boundaries":["LEASED/ACTIVE","RUNNING/ACTIVE"]}
+T7 非白名单→BLOCKED: {"execError":"INTERNAL_DOMAIN_FAILURE","call":"BLOCKED","leases":["RELEASED"],"boundaries":["LEASED/ACTIVE","RUNNING/ACTIVE"]}
+✔ T7 · A-4：SUCCEEDED/UNKNOWN_EFFECT/FAILED/BLOCKED 四类收敛写回与 lease 终结均同一事务 (2528.469583ms)
+T8 known-no-effect(FAILED 类): {"exec":{"ok":false,"executed":true,"suppressed":true,"error":"SIDE_EFFECT_PRECONDITION_CHANGED","observedStatus":"UNKNOWN_EFFECT"},"call":"UNKNOWN_EFFECT","task":"BLOCKED","recoveryApplicable":true,"domainCalls":1,"lateEvent":{"callId":"scall_7xXlgn3EVCAiKg","toolId":"resource.trash","observedStatus":"UNKNOWN_EFFECT"}}
+✔ T8-a · S1-b：known-no-effect 迟到写回不覆盖 UNKNOWN_EFFECT 权威 (741.420333ms)
+T8 non-whitelist(BLOCKED 类): {"exec":{"ok":false,"executed":true,"suppressed":true,"error":"INTERNAL_DOMAIN_FAILURE","observedStatus":"UNKNOWN_EFFECT"},"call":"UNKNOWN_EFFECT","task":"BLOCKED","recoveryApplicable":true,"domainCalls":1,"lateEvent":{"callId":"scall_0-vRDc6z1oiDgQ","toolId":"resource.trash","observedStatus":"UNKNOWN_EFFECT"}}
+✔ T8-b · S1-b：非白名单错误迟到写回不覆盖 UNKNOWN_EFFECT 权威 (2834.476875ms)
+T9 known-no-effect→FAILED: {"exec":{"ok":false,"error":"SIDE_EFFECT_PRECONDITION_CHANGED","knownNoEffect":true},"call":"FAILED","errorCode":"SIDE_EFFECT_PRECONDITION_CHANGED","leases":["RELEASED"],"lateEvent":false}
+T9 ambiguous→UNKNOWN_EFFECT: {"exec":{"ok":false,"error":"SIDE_EFFECT_UNKNOWN_EFFECT"},"call":"UNKNOWN_EFFECT","errorCode":"SIDE_EFFECT_UNKNOWN_EFFECT","leases":["REVOKED"],"lateEvent":false}
+T9 非白名单→BLOCKED: {"exec":{"ok":false,"error":"INTERNAL_DOMAIN_FAILURE","knownNoEffect":false},"call":"BLOCKED","errorCode":"INTERNAL_DOMAIN_FAILURE","leases":["RELEASED"],"lateEvent":false}
+✔ T9 · 正对照：单 runtime known-no-effect→FAILED / ambiguous→UNKNOWN_EFFECT / 非白名单→BLOCKED (8334.311958ms)
+(node:56254) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ D4-03 A · task/run 由后端解析并冻结 model config；renderer 自报的 id/version 一律忽略 (4020.983209ms)
+✔ D4-03 B · 无可用默认配置：task/run 明确拒绝且不创建任何任务（绝不静默回退） (841.937458ms)
+✔ D4-03 C · 配置改版后该任务的新 run：MODEL_CONFIG_CHANGED / 全量 BLOCKED / 0 call / 0 capability / 0 artifact (790.133542ms)
+✔ D4-03 D1 · 改版后 appendStep：同步接收但整链 MODEL_CONFIG_CHANGED + 全量 BLOCKED + 0 执行 + 旧产物逐字段不变 (1777.20875ms)
+✔ D4-03 D2 · 改版后 resumeBudgetExhausted：明确 MODEL_CONFIG_CHANGED + 全量 BLOCKED + 0 执行 + 旧产物不变 (2700.713292ms)
+✔ D4-03 E · 默认切到另一个 config（原 config 未变）：原任务 append 仍成功且归属不变，新任务绑定新默认 (12975.082584ms)
+✔ D4-03 F1 · 绑定前创建的旧任务首个 run：同一事务懒绑定 + task.model_config_bound 事件 + run 行归属正确 (523.028375ms)
+✔ D4-03 F2 · R-8：无可用默认配置的旧任务：保持未绑定且绝不建 run（明确 MODEL_CONFIG_UNAVAILABLE） (553.818625ms)
+✔ D4-03 G · 两个同步竞态窗口（绑定→签发 / 签发→调用）：绝不以非冻结版本签发 capability，run 绝不悬挂 (1655.11125ms)
+✔ D4-03 H · R-7：capability 签发同一同步点配置改版 —— 绝不以非冻结版本签发（H2 正对照正常签发） (1270.745958ms)
+✔ D4-03 I · R-9：绑定后禁用 config → MODEL_CONFIG_UNAVAILABLE 全量 BLOCKED / 0 capability / 0 provider；恢复后可再跑 (2019.096834ms)
+✔ D4-03 J · 正对照：未绑定旧任务（expected=null）capability 签发路径与既有行为逐项不变 (1814.963875ms)
+✔ D4-03 K · R-8：未绑定旧任务 + 无可用默认配置 —— 四条真实入口明确 MODEL_CONFIG_UNAVAILABLE；0 run/0 capability/0 call/0 请求/0 工具执行/0 artifact；Step/Task 收敛 BLOCKED (463.600209ms)
+✔ D4-03 L · R-8：默认配置稍后出现 —— 下一次显式运行重新解析并绑定（绑定事件 + run/call 归属 == 绑定值）并真实成功；绝不沿用未绑定的旧 run (1303.881542ms)
+✔ D4-03 M · R-8/并发：同一未绑定旧任务上的两个并发 run 只形成一种绑定（受控同步点，无 sleep 竞猜）；所有 run/call 归属一致，绝无第二配置 (1275.986916ms)
+✔ D4-03 N · R-8：历史保留 —— 未绑定的历史 run/call 行逐字段不变、绝不回填；绑定之后的新 run 才用绑定值 (1733.170208ms)
+✔ D4-03 P · R-8：解析**抛出**（真实库行 capabilities 损坏 JSON）与解析失败完全同形 —— 0 run/0 capability/0 请求/0 执行，Step/Task BLOCKED，任务仍未绑定 (503.376917ms)
+✔ D4-03 Q · R-8：已绑定 config 行损坏（解析抛出）—— 预检与 startModelCall 两个窗口都收敛 BLOCKED，绝无 STARTING/RUNNING 悬挂 (1780.790417ms)
+✔ D4-03 O · 正对照：modelService 为 null 的 test-only 桩装配行为与 ad5e600 逐字一致 (604.760834ms)
+(node:56255) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+A. 起点: task=BLOCKED call1=UNKNOWN_EFFECT calls=1
+C. runTask(dsh on BLOCKED+UNKNOWN_EFFECT) ok=false error=RUN_BLOCKED_UNRESOLVED_SIDE_EFFECT reason=UNKNOWN_EFFECT
+D. 出现第二条 SideEffectCall=false calls=1 task=BLOCKED steps=2 runs=2
+E. 终态: taskStatus=BLOCKED | call1=UNKNOWN_EFFECT | recovery.applicable=true | appendable=false | resumable=false
+✔ D4-03 A · BLOCKED + 真实 UNKNOWN_EFFECT：runTask 拒绝（UNKNOWN_EFFECT），0 新 run/step/call/事件 (1615.487958ms)
+✔ D4-03 B · 遗留 AWAITING_APPROVAL 副作用：runTask 拒绝（SIDE_EFFECT_PENDING），0 状态变化 (971.227708ms)
+✔ D4-03 C · 正对照：全新 PENDING 任务 runTask 仍正常（既有路径不受影响） (3195.762042ms)
+✔ D4-03 D · 正对照：blockStep 造成的 BLOCKED（无任何未决副作用）runTask 仍被允许 (676.575666ms)
+✔ D4-03 E · LEASED 遗留 active lease：runTask 拒绝（ACTIVE_LEASE），0 状态变化 (575.723625ms)
+✔ D4-03 G · 纯推理装配（无账本、无 side-effect runtime）runTask 仍正常；账本不可用只由访问器如实报告 (580.0685ms)
+✔ D4-03 F · getSideEffectSafety 契约：owner/app 归属校验、绝不改状态、无账本 fail-closed (669.347042ms)
+(node:56256) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ D4-09 A · SUCCEEDED + 1 artifact → appendStep 只新增 1 step；旧行逐行不变、completed_at 保留、账本 0 变化 (1464.904709ms)
+✔ D4-09 B · orchestrator.appendStep 全链：新 run 只拿任务剩余额度；成功后 2 artifact、旧行保留、0 tool 重放 (4842.253875ms)
+✔ D4-09 C · 追加 step 的 input 只承载本任务自身 priorArtifacts（≤3、普通 JSON、无 role/system 提升） (14172.744834ms)
+✔ D4-09 D · 拒绝矩阵：非 SUCCEEDED、0 artifact、已 cancel、不存在、非法 goal、身份、无副作用账本 (799.821959ms)
+✔ D4-09 E · appendStepCommand 同步拒绝形状：非 owner / 过期 revision / 非 SUCCEEDED / 无产物 / 不安全，且 0 新增 0 改动 (746.058125ms)
+✔ D4-09 K · IPC task/appendStep：拒绝同步返回、接收后立即返回并由 task/result 收敛；task/get 回 appendable/appendReason (1957.061625ms)
+✔ D4-09 F · 同一 revision 连续/并发追加只成功一次、只新增一个 step (1989.830167ms)
+✔ D4-09 G · 遗留 AWAITING_APPROVAL 副作用 → APPEND_SIDE_EFFECT_PENDING，0 新增 step (497.552291ms)
+✔ D4-09 H · LEASED 未 claim 遗留 active lease → APPEND_ACTIVE_LEASE，0 新增 step (469.033209ms)
+✔ D4-09 I · 真实 live-unlinked 崩溃遗留 UNKNOWN_EFFECT → APPEND_UNKNOWN_EFFECT，0 新增 step (575.467416ms)
+✔ D4-09 J · 无额度追加：新 step BLOCKED/BUDGET_EXHAUSTED 且 0 空转 run → resumable → grantBudgetResume 后 run 成功 (534.182791ms)
+(node:56257) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ Cancel E2E：真实 slow provider → 用户取消 → 0 retry + capability revoked + CANCELLED (7772.071875ms)
+✔ Cancel Race：cancel 先行 → 绝不 Task CANCELLED + Step SUCCEEDED (669.180958ms)
+✔ Cancel 后不存在 Provider retry：abort 只发生一次 (13157.184709ms)
+(node:56258) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ Vertical E2E：Task→Step→Harness→Proxy→Fake Provider→Artifact→Verification→SUCCEEDED (4028.987625ms)
+✔ Tool proposal E2E：真实 ACP tool_call → 0 execution → BLOCKED (1017.819666ms)
+✔ Permission request E2E：真实 ACP request_permission → reject → BLOCKED (823.28675ms)
+(node:56259) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ ACP → TaskEvent mapping 显式、聚合 text、丢 reasoning、洪泛有上限 (2.454625ms)
+✔ prompt 只含 goal + safe input，且 schema 版本冻结 (0.245541ms)
+✔ turn 成功：Artifact + Verification PASS → Step/Task SUCCEEDED (1236.012625ms)
+✔ 成功必须 Verification PASS：文本不符 → BLOCKED 且 0 artifact (896.898542ms)
+✔ Artifact 写入失败：Step/Task 绝不 SUCCEEDED，且无 artifact（失败原子性） (1033.939875ms)
+✔ Harness crash → BLOCKED + HARNESS_PROCESS_EXITED，0 respawn (882.315834ms)
+✔ turn timeout → BLOCKED + HARNESS_TURN_TIMEOUT，0 第二次 prompt (861.6015ms)
+✔ Tool proposal → 0 execution + BLOCKED TOOL_EXECUTION_NOT_AVAILABLE (769.705542ms)
+✔ Permission request → reject + BLOCKED PERMISSION_NOT_AVAILABLE，0 execution (579.691916ms)
+✔ classifyHarnessError：启动超时 / 执行超时各自映射，绝不互相改写 (0.425625ms)
+✔ 启动超时（真实 adapter + 可控阻塞 initialize）→ HARNESS_START_TIMEOUT · BLOCKED · capability 撤销 · 0 重试 (1361.99875ms)
+✔ 执行超时（真实 adapter + 可控阻塞 prompt）→ HARNESS_TURN_TIMEOUT · BLOCKED · capability 撤销 · 恰好 1 次 prompt (1426.4255ms)
+✔ 真实 IPC 入口：启动超时 → task/result.error 与 task/get.stopReason 都是 HARNESS_START_TIMEOUT (3141.513291ms)
+(node:56271) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ Harness crash E2E：kill child → BLOCKED + HARNESS_PROCESS_EXITED + 0 respawn (2450.471708ms)
+✔ Restart E2E：进程崩溃后重启 → RECOVERY_REQUIRED，0 replay (712.938667ms)
+(node:56281) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ Provider Secret / proxy capability 0 forbidden persistence（Task DB / Event / Artifact） (2007.336375ms)
+✔ User / App / Artifact isolation：非 owner 或非 owner App 不能 run / read (10353.734958ms)
+✔ capability 执行绑定：run A 的 token 不能用于 run B（401），绑定含 task/step/run (1326.453292ms)
+(node:56286) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ §29/§30/§48 Domain Bypass Audit：Harness / Tool Facade / ACP plugin 绝不直接触达 Resource/Search Domain (21.415416ms)
+✔ §48 Full Tool Proxy Security Gate：Registry / Authorization / Approval / Result / Executor / Lease / Verification / Retry 全部不可绕过 (819.120917ms)
+✔ §14/§44/§55 Capability non-persistence + Secret Scan：tpx_/mpx_/provider secret/绝对路径/store root 0 落库 (9962.891417ms)
+✔ §46/§47 Tool result / Model text 不能改变 Task state：无 tool call 的 model 文本不产生 mutation (3765.342542ms)
+(node:56290) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ §12 Capability scope：绑定 session/app/task/step/run；body 自报 scope 一律忽略；app mismatch → SCOPE_INVALID (780.938916ms)
+✔ §16/§17/§18 cross-run / cross-task / cross-step replay → DENY；wrong bridge → 401 (2626.434333ms)
+✔ §20/§21 session revoke / tool permission revoke / resource permission revoke → 下一次 call DENY + 0 Domain (6814.623667ms)
+✔ §20 session revoke：READ 后 logout → 下一次 WRITE proposal DENY + 0 mutation (1647.741084ms)
+✔ §22/§23 Registry stale + tool version binding（READ 与 WRITE 都不静默 fallback） (1459.628458ms)
+✔ §24/§41 duplicate delivery：READ 1 次 Domain execution；WRITE 1 次 SideEffectCall；duplicate 不消耗 maxCalls (626.560208ms)
+✔ §25 concurrent duplicate delivery：并发同 callId → 1 次 READ execution / 1 次 WRITE SideEffectCall (1128.858375ms)
+✔ §27 malformed Tool Facade body：invalid JSON / oversized / missing / bad / not allowlisted / wrong type / schema / forbidden field → DENY + 0 Domain (629.725292ms)
+✔ §28 argument authority spoof：注入 authority 字段 → schema reject / 零 authority gain (680.172ms)
+✔ §31 safe result projection：READ result 与 Approval snapshot 无绝对路径 / token / store root / lease internals (617.269208ms)
+✔ §13 tpx != mpx：tpx 打 Model Proxy → 401；mpx 打 Tool Facade → 401；cross-domain 0 privilege (554.8555ms)
+✔ §15 capability lifecycle：ACTIVE → EXPIRED / EXHAUSTED / REVOKED (495.973416ms)
+(node:56293) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ §3/§4 callId Mandatory Gate：missing / invalid callId → 400 TOOL_CALL_ID_REQUIRED，0 budget / 0 proposal / 0 execution / 0 SideEffectCall (2949.545375ms)
+✔ §8/§13/§14 exact duplicate + terminal WRITE replay：same approvalRequestId / 1 SideEffectCall / 0 second mutation / 0 extra budget (5321.428958ms)
+✔ §10 READ→WRITE same-callId collision：409 TOOL_CALL_ID_CONFLICT；绝不把 READ result 当成 WRITE success；0 SideEffectCall / 0 mutation (2466.142875ms)
+✔ §11 WRITE→READ same-callId collision：409 TOOL_CALL_ID_CONFLICT；绝不返回 SIDE_EFFECT_APPROVAL_REQUIRED 冒充 READ result (978.555875ms)
+✔ §12 WRITE A→WRITE B same-callId collision：只允许 1 SideEffectCall，且只绑定 resourceA (757.770167ms)
+✔ §9 same tool + different args collision：canonical arguments fingerprint 不同 → 409 (620.336292ms)
+✔ §17/§18 concurrent exact duplicate + concurrent payload collision：恰好一个 winner (1308.200958ms)
+[openarc-read-tools] module imported
+[openarc-read-tools] registered resource_search
+✔ §19 maxCalls=1 concurrent unique calls：恰好一个消耗 budget，另一个 TOOL_CAPABILITY_EXHAUSTED (845.39575ms)
+✔ §5/§27 official dsh plugin missing exec.callId fail closed：0 Tool Facade request；有 callId 才发请求 (5.482417ms)
+✔ §22/§23 Harness callId 不能成为 SideEffectCall authority identity：OpenArc 自己生成 scall_ id (725.695583ms)
+(node:56294) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ §10/§11/§45/§49 Mixed READ + WRITE official dsh E2E：one run / one facade / READ controlled / WRITE exactly-once verified / Task SUCCEEDED (11752.950625ms)
+✔ §35 Mixed chain UNKNOWN_EFFECT：READ 已成功也不得让 Task SUCCEEDED；WRITE UNKNOWN_EFFECT → Task/Step BLOCKED / 0 second call (2322.691333ms)
+✔ §36 Mixed chain cancellation：READ success → WRITE WAITING_APPROVAL → Task cancel → 0 write / 0 lease / capability revoked (1978.834333ms)
+✔ §38 Bridge disconnect：READ 中断不返回 stale 数据；WRITE proposal 不因 client 断开自动 approve/lease/execute (4838.446708ms)
+✔ §39/§40 Bridge shutdown + loopback：stop 后旧 token 不可用；listener 只 bind 127.0.0.1 (515.962167ms)
+ℹ tests 142
+ℹ suites 0
+ℹ pass 141
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 40745.796542
+
+✖ failing tests:
+
+test at tests/d4-03-approval-push-isolation.test.mjs:94:1
+✖ P2 · 当前会话 = A（owner）：推送投递，载荷 = 白名单投影且与 getApprovalRequest 一致 (965.03325ms)
+  AssertionError [ERR_ASSERTION]: 推送不得新增/泄露字段
+  + actual - expected
+  ... Skipped lines
+  
+    [
+      'approvalRequestId',
+      'currentVersion',
+      'effectClass',
+      'expectedEffects',
+  ...
+      'targetDisplayName',
+  +   'targetRef',
+      'toolDisplayName',
+      'toolId',
+  +   'url'
+    ]
+  
+      at TestContext.<anonymous> (file:///Users/wepingli/Desktop/OpenArc%20OS-integration/tests/d4-03-approval-push-isolation.test.mjs:103:12)
+      at async Test.run (node:internal/test_runner/test:1054:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:744:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [
+      'approvalRequestId', 'currentVersion',
+      'effectClass',       'expectedEffects',
+      'expectedVersion',   'expiresAt',
+      'requiresApproval',  'resourceRef',
+      'riskClass',         'status',
+      'targetDisplayName', 'targetRef',
+      'toolDisplayName',   'toolId',
+      'url'
+    ],
+    expected: [ 'approvalRequestId', 'currentVersion', 'effectClass', 'expectedEffects', 'expectedVersion', 'expiresAt', 'requiresApproval', 'resourceRef', 'riskClass', 'status', 'targetDisplayName', 'toolDisplayName', 'toolId' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

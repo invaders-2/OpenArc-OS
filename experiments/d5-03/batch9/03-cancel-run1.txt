@@ -1,0 +1,15 @@
+(node:49198) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ Cancel E2E：真实 slow provider → 用户取消 → 0 retry + capability revoked + CANCELLED (5470.216041ms)
+ℹ 成功时间线：+1.1ms run:dispatch | +6.4ms adapter:start:begin | +61.0ms phase:child-spawned(observed) | +941.2ms adapter:start:done | +942.1ms adapter:prompt:begin | +942.3ms phase:session-created(observed) | +942.4ms phase:harness-running | +1053.5ms phase:provider-request | +1053.5ms cancel:begin | +1054.2ms adapter:cancel:begin | +1054.4ms adapter:cancel:done | +1055.1ms cancel:done | +1059.6ms adapter:prompt:done | +1132.3ms run:converged HARNESS_CANCELLED
+✔ Cancel Race：cancel 先行 → 绝不 Task CANCELLED + Step SUCCEEDED (420.430458ms)
+✔ Cancel 后不存在 Provider retry：abort 只发生一次 (5199.346834ms)
+ℹ 成功时间线：+0.3ms run:dispatch | +2.2ms adapter:start:begin | +12.0ms phase:child-spawned(observed) | +700.2ms adapter:start:done | +700.8ms adapter:prompt:begin | +711.0ms phase:session-created(observed) | +711.2ms phase:harness-running | +788.1ms phase:provider-request | +788.1ms cancel:begin | +788.6ms adapter:cancel:begin | +788.7ms adapter:cancel:done | +789.3ms cancel:done | +793.4ms adapter:prompt:done | +860.7ms run:converged | +1161.9ms settle:300ms
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 12195.291209

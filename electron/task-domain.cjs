@@ -129,6 +129,8 @@ const ERROR = Object.freeze({
   INTERNAL_ERROR: "INTERNAL_ERROR",
   // D4-02C orchestration-level classifications（OpenArc 自己决定，不由 Harness 自报）
   HARNESS_PROCESS_EXITED: "HARNESS_PROCESS_EXITED",
+  // 启动超时（spawn / ACP initialize 未在 startTimeoutMs 内完成）与执行超时是两个不同事实，绝不互相改写。
+  HARNESS_START_TIMEOUT: "HARNESS_START_TIMEOUT",
   HARNESS_TURN_TIMEOUT: "HARNESS_TURN_TIMEOUT",
   HARNESS_CANCELLED: "HARNESS_CANCELLED",
   TOOL_EXECUTION_NOT_AVAILABLE: "TOOL_EXECUTION_NOT_AVAILABLE",

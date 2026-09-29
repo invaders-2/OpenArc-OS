@@ -1,0 +1,70 @@
+(node:48982) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ ACP → TaskEvent mapping 显式、聚合 text、丢 reasoning、洪泛有上限 (2.287584ms)
+✔ prompt 只含 goal + safe input，且 schema 版本冻结 (3.511417ms)
+✔ turn 成功：Artifact + Verification PASS → Step/Task SUCCEEDED (508.290791ms)
+✔ 成功必须 Verification PASS：文本不符 → BLOCKED 且 0 artifact (447.856875ms)
+✔ Artifact 写入失败：Step/Task 绝不 SUCCEEDED，且无 artifact（失败原子性） (593.224833ms)
+✔ Harness crash → BLOCKED + HARNESS_PROCESS_EXITED，0 respawn (456.656041ms)
+✔ turn timeout → BLOCKED + HARNESS_TURN_TIMEOUT，0 第二次 prompt (470.944ms)
+✔ Tool proposal → 0 execution + BLOCKED TOOL_EXECUTION_NOT_AVAILABLE (458.28325ms)
+✔ Permission request → reject + BLOCKED PERMISSION_NOT_AVAILABLE，0 execution (451.219208ms)
+✖ classifyHarnessError：启动超时 / 执行超时各自映射，绝不互相改写 (1.147709ms)
+✖ 启动超时（真实 adapter + 可控阻塞 initialize）→ HARNESS_START_TIMEOUT · BLOCKED · capability 撤销 · 0 重试 (1248.072709ms)
+✔ 执行超时（真实 adapter + 可控阻塞 prompt）→ HARNESS_TURN_TIMEOUT · BLOCKED · capability 撤销 · 恰好 1 次 prompt (1275.491375ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 10
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 8731.446917
+
+✖ failing tests:
+
+test at tests/task-harness-orchestrator.test.mjs:190:1
+✖ classifyHarnessError：启动超时 / 执行超时各自映射，绝不互相改写 (1.147709ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'HARNESS_TURN_TIMEOUT'
+  - 'HARNESS_START_TIMEOUT'
+             ^
+  
+      at TestContext.<anonymous> (file:///Users/wepingli/Desktop/OpenArc%20OS-integration/tests/task-harness-orchestrator.test.mjs:191:10)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1047:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+      at Test.postRun (node:internal/test_runner/test:1173:19)
+      at Test.run (node:internal/test_runner/test:1101:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:744:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'HARNESS_TURN_TIMEOUT',
+    expected: 'HARNESS_START_TIMEOUT',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/task-harness-orchestrator.test.mjs:197:1
+✖ 启动超时（真实 adapter + 可控阻塞 initialize）→ HARNESS_START_TIMEOUT · BLOCKED · capability 撤销 · 0 重试 (1248.072709ms)
+  AssertionError [ERR_ASSERTION]: {"ok":false,"error":"HARNESS_TURN_TIMEOUT","blocked":true,"step":{"stepId":"step_8LzI6nCPm83jLg","taskId":"task_sw0_-gSp1vnTWg","sequence":1,"kind":"reasoning","status":"BLOCKED","input":null,"outputRef":null,"startedAt":1700000000000,"completedAt":1700000000000,"attempt":1,"maxAttempts":1},"task":{"taskId":"task_sw0_-gSp1vnTWg","userId":"usr_lexY8OBpOAV817adBs0ILwLafi9mUIZ9","appId":"ai","status":"BLOCKED","goal":"Return exactly: OPENARC_TASK_OK","createdAt":1700000000000,"updatedAt":1700000000000,"startedAt":1700000000000,"completedAt":null,"modelConfigId":"mcf_MDBli_3D6c6HuQ","modelConfigVersion":1,"currentStepId":null,"revision":7,"cancelRequested":false,"budgetSnapshot":null,"permissionSnapshotRef":null},"run":{"runId":"hrun_UpdRHVBTvlOXmQ","taskId":"task_sw0_-gSp1vnTWg","stepId":"step_8LzI6nCPm83jLg","status":"BLOCKED","harnessVersion":null,"acpVersion":null,"modelConfigId":"mcf_MDBli_3D6c6HuQ","modelConfigVersion":1,"startedAt":1700000000000,"completedAt":1700000000000,"stopReason":"blocked","errorCode":"HARNESS_TURN_TIMEOUT"}}
+  + actual - expected
+  
+  + 'HARNESS_TURN_TIMEOUT'
+  - 'HARNESS_START_TIMEOUT'
+             ^
+  
+      at TestContext.<anonymous> (file:///Users/wepingli/Desktop/OpenArc%20OS-integration/tests/task-harness-orchestrator.test.mjs:210:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+      at async Test.run (node:internal/test_runner/test:1054:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:744:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'HARNESS_TURN_TIMEOUT',
+    expected: 'HARNESS_START_TIMEOUT',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

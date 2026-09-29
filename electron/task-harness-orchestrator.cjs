@@ -98,7 +98,7 @@ function classifyHarnessError(e) {
   if (code === "HARNESS_PROCESS_EXITED") return ERROR.HARNESS_PROCESS_EXITED;
   if (code === "HARNESS_TURN_TIMEOUT") return ERROR.HARNESS_TURN_TIMEOUT;
   if (code === "HARNESS_CANCELLED") return ERROR.HARNESS_CANCELLED;
-  if (code === "HARNESS_START_TIMEOUT") return ERROR.HARNESS_TURN_TIMEOUT;
+  if (code === "HARNESS_START_TIMEOUT") return ERROR.HARNESS_START_TIMEOUT;
   if (code === "HARNESS_PROTOCOL_ERROR" || code === "HARNESS_PROTOCOL_UNSUPPORTED") return code;
   if (code === "HARNESS_NOT_STARTED") return code;
   // Model 冻结版本在签发窗口内被改版：adapter 拒绝签发后原样上报明确原因码，绝不退化成 INTERNAL_ERROR。
