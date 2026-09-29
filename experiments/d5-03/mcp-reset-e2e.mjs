@@ -3,8 +3,10 @@
  *
  * 被测提交：integration/ui-core HEAD（本次运行脚本自报 testedCommit）。
  * 被验改动：electron/identity-store.cjs 的 RESET_AUTHORIZATION_DELETE_SQL —— 重置在既有的那个
- * transactSync 里先删四张**授权事实**表（app_policy_provisions / app_resource_grants /
- * resource_grants / device_access），再删身份五表；审计三表一行不删。
+ * transactSync 里先删**七张**表（授权事实四张 app_policy_provisions / app_resource_grants /
+ * resource_grants / device_access ＋ 第七批新增的设备身份三张 device_credentials →
+ * device_pairing_credentials → devices，子表先删），再删身份五表；审计三表一行不删。
+ * 第七批文案更新（只改说明，不动判定）：本脚本原有 26 条断言一字未改，新增 D2b / C2b 两条覆盖设备三表。
  *
  * 走的是**真实产品入口**：真实 electron .（隔离 userData oa-d503b-<runId>-*）+ 真实产品 UI
  * 三步向导初始化 + 登录 + 程序坞窗口；授权状态的产生与撤销一律经产品命令层
@@ -16,7 +18,8 @@
  *   B 造「有授权 + 有墓碑」：resource_grants 一行（governance/grantResourceAccess）
  *     + 撤销 mcp-center 的 mcp 授权 + 撤销 canvas 的 model 授权（两条墓碑）
  *   C 负向：错误 confirm 两次 → INVALID_INPUT，且授权 / 墓碑 / 身份逐行不变（审计留 DENY）
- *   D 正确 confirm 真重置 → 四张授权表 0 行 / 身份五表 0 行 / 审计三表逐行不变 /
+ *   D 正确 confirm 真重置 → 七张重置表 0 行（四张授权表见 D2 + 第七批新增的设备身份三张见 D2b）/
+ *     身份五表 0 行 / 审计三表逐行不变 /
  *     等价只读自检为空（产品未暴露 invariants() 入口 → 记 notVerified）
  *   E 重新初始化 → 新组织（新 id）拿到完整初始授权 15 提供记录 / 16 授权行，无旧墓碑残留
  *   F 组织 ID 复用（真机无产品入口 → notVerified；以 node 受控测试 T3 为证据，现场重跑留档）
@@ -54,6 +57,8 @@ const extraArgs = (process.env.OA_D503E_ELECTRON_ARGS || "--no-sandbox --disable
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* 授权事实四表（唯一权威是 identity-store.cjs 的 RESET_AUTHORIZATION_DELETE_SQL，这里只做断言取值）。 */
+/* 第七批新增：重置删除集合里的另外三张 —— 设备身份事实（devices / device_credentials / device_pairing_credentials）。 */
+const DEVICE_TABLES = Object.freeze(["devices", "device_credentials", "device_pairing_credentials"]);
 const AUTHZ_TABLES = Object.freeze(["app_policy_provisions", "app_resource_grants", "resource_grants", "device_access"]);
 const IDENTITY_TABLES = Object.freeze(["installations", "teams", "users", "sessions", "login_attempts"]);
 const AUDIT_TABLES = Object.freeze(["audit_log", "authorization_audit", "device_audit"]);
@@ -394,10 +399,12 @@ async function main() {
       && snapB.counts.app_resource_grants === 14 && snapB.counts.resource_grants >= 1 && listAfterRevoke?.error === "MCP_UNAUTHORIZED",
     JSON.stringify({ provisions: 15, tombstones: ["canvas|model", "mcp-center|mcp"], grants: 14, mcpListAfterRevoke: "MCP_UNAUTHORIZED" }),
     JSON.stringify({ revokeMcp: revokeMcp?.ok, revokeCanvas: revokeCanvas?.ok, provisions: snapB.provisionPairs.length, tombstones: tombstonesNow, grants: snapB.counts.app_resource_grants, resource_grants: snapB.counts.resource_grants, device_access: snapB.counts.device_access, mcpList: { ok: listAfterRevoke?.ok, error: listAfterRevoke?.error || null } }));
-  if (snapB.counts.device_access === 0) notVerified("device_access 重置前没有行（0 → 0 不构成清理证据）", "真机单机没有可用的产品入口：device_access 由 deviceService.grantDeviceAccess 写入，而 consumePairing 需要**另一台设备**带服务身份消费配对密钥；产品 IPC 只暴露 device/pairing.create|list|revoke 与 device/disable|enable|revoke|rename|audit，没有授权入口。第四批口径一致：不可用改库构造。node 受控测试 T1/T2 在四表都非空（含 device_access）下验证过清理与回滚。");
+  if (snapB.counts.device_access === 0) notVerified("device_access 重置前没有行（0 → 0 不构成清理证据）", "真机单机没有可用的产品入口：device_access 由 deviceService.grantDeviceAccess 写入，而 consumePairing 需要**另一台设备**带服务身份消费配对密钥；产品 IPC 只暴露 device/pairing.create|list|revoke 与 device/disable|enable|revoke|rename|audit，没有授权入口。第四批口径一致：不可用改库构造。node 受控测试 T1/T2 在**七张重置表都非空**（含 device_access）下验证过清理与回滚；第七批起 device_access 的真机 1 → 0 证据在 experiments/d5-03/mcp-device-reset-e2e.mjs（真机 device_access 仍无 IPC 入口，那一脚本在真实主进程对同一 DeviceService 直接调用，已披露）。");
 
   /* ── C 负向：错误 confirm ── */
-  const beforeC = { authz: snapB.authzRows, identity: snapB.identityRows, audit: snapB.audit, counts: snapB.counts };
+  /* 第七批新增字段（只增不改）：被拒前的设备身份三表逐行快照 —— 供新增的 C2b 断言使用。 */
+  const deviceRowsBeforeReject = dumpTables(rec.userDataDir, DEVICE_TABLES);
+  const beforeC = { authz: snapB.authzRows, identity: snapB.identityRows, audit: snapB.audit, counts: snapB.counts, deviceRows: deviceRowsBeforeReject };
   const badConfirm1 = await identity({ type: "identity/reset-installation" });
   const badConfirm2 = await identity({ type: "identity/reset-installation", confirm: "delete-all-identity-data" });
   step("C1", "identity/reset-installation（缺 confirm）", "identity/reset-installation", {}, { ok: badConfirm1?.ok, error: badConfirm1?.error, detail: badConfirm1?.detail });
@@ -418,6 +425,14 @@ async function main() {
     authzSame && identitySame,
     "4 张授权表 + 5 张身份表逐行相等",
     JSON.stringify({ authzSame, identitySame, counts: snapC.counts, tombstones: snapC.tombstones, provisions: snapC.provisionPairs.length }));
+  /* 第七批新增（只增不改）：被拒的重置同样不得碰设备三表。本流程里它们本来就是 0 行（0 → 0 不构成清理证据，
+     真正的 1 → 0 证据在 experiments/d5-03/mcp-device-reset-e2e.mjs 的真机设备场景），这里只断言"一行没动"。 */
+  const deviceRowsAfterReject = dumpTables(rec.userDataDir, DEVICE_TABLES);
+  const deviceSame = DEVICE_TABLES.every((t) => sameRows(deviceRowsAfterReject[t], beforeC.deviceRows[t]));
+  record("C2b", "被拒后三张设备身份表逐行不变（第七批新增断言；本流程里设备三表均为 0 行，0 → 0 不作为清理证据）",
+    deviceSame && DEVICE_TABLES.every((t) => Array.isArray(deviceRowsAfterReject[t]) && deviceRowsAfterReject[t].length === beforeC.deviceRows[t].length),
+    "devices / device_credentials / device_pairing_credentials 逐行相等（含行数为 0 这一事实）",
+    JSON.stringify({ deviceSame, before: Object.fromEntries(DEVICE_TABLES.map((t) => [t, beforeC.deviceRows[t].length])), after: Object.fromEntries(DEVICE_TABLES.map((t) => [t, deviceRowsAfterReject[t].length])) }));
   record("C3", "被拒后审计：authorization_audit / device_audit 逐行不变；audit_log 只新增 2 条被拒留痕（DENY），既有行一行不删",
     auditSameExceptLog && logPrefixKept && logDelta === 2 && denyRows.length === 2 && denyRows.every((r) => r.result === "DENY"),
     "授权审计逐行不变 + audit_log 前缀不变 + 恰新增 2 条 reset-installation/DENY",
@@ -438,6 +453,15 @@ async function main() {
   const authzZero = AUTHZ_TABLES.map((t) => ({ table: t, rows: snapD.counts[t] }));
   record("D2", "重置后四张授权事实表行数为 0（app_policy_provisions / app_resource_grants / resource_grants / device_access）",
     authzZero.every((r) => r.rows === 0), "四表都是 0 行", JSON.stringify({ before: Object.fromEntries(AUTHZ_TABLES.map((t) => [t, beforeC.counts[t]])), after: authzZero, tombstonePairsAfter: snapD.tombstones }));
+  /* 第七批新增（只增不改）：重置后设备身份三表也必须 0 行；并与 D2 的四张合计成"七张全 0"。
+     如实标注：本流程重置前设备三表本来就是 0 行（真机单机没有设备侧入口），所以这里的 0 → 0
+     不是清理证据；1 / 1 / 2 → 0 的真机证据在同提交新增的 experiments/d5-03/mcp-device-reset-e2e.mjs。 */
+  const deviceZero = DEVICE_TABLES.map((t) => ({ table: t, before: beforeC.deviceRows[t].length, rows: dbCount(rec.userDataDir, t) }));
+  const sevenTables = Object.fromEntries([...AUTHZ_TABLES, ...DEVICE_TABLES].map((t) => [t, dbCount(rec.userDataDir, t)]));
+  record("D2b", "重置后三张设备身份表 0 行（第七批新增断言）；与 D2 的四张授权表合计 = 重置删除集合**七张全 0**",
+    deviceZero.every((r) => r.rows === 0) && Object.values(sevenTables).every((n) => n === 0),
+    "设备三表 0 行 + 七张合计 0 行",
+    JSON.stringify({ deviceZero, sevenTables }));
   const identityZero = IDENTITY_TABLES.map((t) => ({ table: t, rows: snapD.counts[t] }));
   record("D3", "重置后身份五表行数为 0（installations / teams / users / sessions / login_attempts）",
     identityZero.every((r) => r.rows === 0), "五表都是 0 行", JSON.stringify({ before: Object.fromEntries(IDENTITY_TABLES.map((t) => [t, beforeC.counts[t]])), after: identityZero }));
