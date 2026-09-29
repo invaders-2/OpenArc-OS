@@ -1,0 +1,46 @@
+=== timeline reconstruction (file mtimes, local time) ===
+2026-09-29T12:59:26  07-cat1-acp-protocol.txt
+2026-09-29T13:00:29  08-cat1-cat6-tool-dsh-lifecycle.txt
+2026-09-29T13:00:36  09-cat2-c4-dsh-write.txt
+2026-09-29T13:00:39  10-cat4-acp-permission.txt
+2026-09-29T13:00:49  11-cat5-acp-cancel.txt
+2026-09-29T13:00:55  12-cat6-acp-lifecycle.txt
+2026-09-29T13:00:56  13-cat3-tool-dsh-facade.txt
+2026-09-29T13:02:33  14-rerun-tool-dsh-lifecycle.txt
+2026-09-29T13:03:02  15-flake-probe-tool-dsh-lifecycle.txt
+2026-09-29T13:05:34  17-npm-test-full.txt
+
+=== duration evidence inside the two lifecycle runs ===
+--- FAILING run 08: subtest durations ---
+ok 1 - Bridge lifecycle：start → issue → stop → listener/port/capability 全部清理
+  duration_ms: 351.72925
+not ok 2 - 5-run lifecycle：每 run 独立 dsh / DSH_HOME / capability；0 orphan / 0 listener 累积
+  duration_ms: 59963.756958
+# duration_ms 62718.631375
+
+--- PASSING rerun 14: subtest durations ---
+ok 1 - Bridge lifecycle：start → issue → stop → listener/port/capability 全部清理
+  duration_ms: 353.332334
+ok 2 - 5-run lifecycle：每 run 独立 dsh / DSH_HOME / capability；0 orphan / 0 listener 累积
+  duration_ms: 3667.884583
+# duration_ms 86571.401125
+
+=== flake-probe (3 more passes) ===
+=== flake-probe run 1 ===
+exit=0
+# tests 2
+# pass 2
+# fail 0
+real 6.63
+=== flake-probe run 2 ===
+exit=0
+# tests 2
+# pass 2
+# fail 0
+real 6.30
+=== flake-probe run 3 ===
+exit=0
+# tests 2
+# pass 2
+# fail 0
+real 6.32

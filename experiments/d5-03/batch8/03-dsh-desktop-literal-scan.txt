@@ -1,0 +1,26 @@
+scanned files: 709  (node_modules/.git/dist/artifacts/build excluded)
+
+--- comment (3) ---
+  electron/harness-adapter.cjs:37  * 运行时必须来自 OpenArc 自己冻结的本地安装，绝不依赖用户 PATH，也绝不借用 DSH Desktop 共享运行时。
+  experiments/d5-03/batch8/scan-dsh-desktop-literal.cjs:4  "DSH Desktop" per LINE with its context. Comments are excluded from the verdict; bare-code
+  tests/d5-03-dsh-runtime-pin.test.mjs:5  * 显式覆盖同样必须校验，任何不符一律抛稳定错误码，绝不回退到 DSH Desktop 共享运行时、用户 PATH
+
+--- string-literal (6) ---
+  experiments/d5-03/batch8/probe-resolvers-b8.cjs:59  line("=== 1.3c OPENARC_DSH_RUNTIME=<REAL DSH Desktop shared runtime> -> expect DSH_VERSION_MISMATCH (must NOT adopt) ===");
+  experiments/d5-03/batch8/probe-resolvers-b8.cjs:60  const SHARED = "/Users/wepingli/Library/Application Support/DSH Desktop/runtime";
+  experiments/d5-03/batch8/scan-dsh-desktop-literal.cjs:9  const NEEDLE = "DSH Desktop";
+  tests/d5-03-dsh-runtime-pin.test.mjs:21  const SHARED_RUNTIME = path.join(os.homedir(), "Library", "Application Support", "DSH Desktop", "runtime");
+  tests/d5-03-dsh-runtime-pin.test.mjs:106  : "本机没有 DSH Desktop 共享运行时 → 存在性证明为空；下方抛错/notEqual 断言仍然执行");
+  tests/d5-03-dsh-runtime-pin.test.mjs:164  for (const forbidden of ["DSH Desktop", "Application Support", "homedir", "OPENARC_DSH_RUNTIME ||"]) {
+
+--- BARE-CODE (0) ---
+
+VERDICT_1_3d: non-comment hits inside PRODUCT code (electron/, src/): 0
+  -> PASS
+
+non-comment hit files (all, incl. this batch's own evidence + contract test):
+  [
+  "experiments/d5-03/batch8/probe-resolvers-b8.cjs",
+  "experiments/d5-03/batch8/scan-dsh-desktop-literal.cjs",
+  "tests/d5-03-dsh-runtime-pin.test.mjs"
+]

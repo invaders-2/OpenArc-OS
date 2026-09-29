@@ -1,0 +1,42 @@
+TAP version 13
+# (node:38200) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Official dsh WRITE Happy Path：proposal → WAITING_APPROVAL → trusted approve → 受监督 exactly-once → verified → dsh 继续 → Task SUCCEEDED
+ok 1 - Official dsh WRITE Happy Path：proposal → WAITING_APPROVAL → trusted approve → 受监督 exactly-once → verified → dsh 继续 → Task SUCCEEDED
+  ---
+  duration_ms: 1055.722875
+  type: 'test'
+  ...
+# Subtest: Official dsh WRITE Deny Path：真实 Approval UI Deny → 0 mutation / 0 lease / Harness 得不到 success
+ok 2 - Official dsh WRITE Deny Path：真实 Approval UI Deny → 0 mutation / 0 lease / Harness 得不到 success
+  ---
+  duration_ms: 948.894458
+  type: 'test'
+  ...
+# Subtest: Official dsh WRITE Timeout Path：用户不操作 → 0 mutation / 0 lease / call BLOCKED
+ok 3 - Official dsh WRITE Timeout Path：用户不操作 → 0 mutation / 0 lease / call BLOCKED
+  ---
+  duration_ms: 1368.212792
+  type: 'test'
+  ...
+# Subtest: Official dsh WRITE UNKNOWN_EFFECT Path：dispatched 后 executor 死亡 → 不把 unverified 结果交给 Harness；Task/Step BLOCKED；0 second call / 0 retry
+ok 4 - Official dsh WRITE UNKNOWN_EFFECT Path：dispatched 后 executor 死亡 → 不把 unverified 结果交给 Harness；Task/Step BLOCKED；0 second call / 0 retry
+  ---
+  duration_ms: 979.901667
+  type: 'test'
+  ...
+# Subtest: Official dsh WRITE APPLIED Recovery：mutation 已提交后 executor 死亡 → recovery APPLIED → call SUCCEEDED，但 Task/Step 保持 BLOCKED（Explicit Resume = DEFERRED）
+ok 5 - Official dsh WRITE APPLIED Recovery：mutation 已提交后 executor 死亡 → recovery APPLIED → call SUCCEEDED，但 Task/Step 保持 BLOCKED（Explicit Resume = DEFERRED）
+  ---
+  duration_ms: 973.107666
+  type: 'test'
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 7857.096292

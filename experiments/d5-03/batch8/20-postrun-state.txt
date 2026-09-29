@@ -1,0 +1,81 @@
+=== batch8 post-run state capture ===
+2026-09-29T05:12:36Z
+
+--- stat ~/.dsh ---
+1790647563 /Users/wepingli/.dsh
+
+--- ls -la ~/.dsh (names only) ---
+total 24
+drwx------@  11 wepingli  staff   352 Sep 29 10:06 .
+drwxr-x---+ 160 wepingli  staff  5120 Sep 29 09:06 ..
+-rw-r--r--@   1 wepingli  staff    37 Sep  9 11:53 .anonymous-user-id
+-rw-------@   1 wepingli  staff   223 Sep 11 09:54 .credentials.yaml
+lrwxr-xr-x@   1 wepingli  staff    25 Sep 14 14:44 AGENTS.md -> /Users/wepingli/AGENTS.md
+drwx------@   3 wepingli  staff    96 Sep  9 16:28 attachments
+drwx------@   3 wepingli  staff    96 Sep 28 18:32 llm-deepseek
+drwxr-xr-x@   6 wepingli  staff   192 Sep 14 17:31 profiles
+drwx------@   6 wepingli  staff   192 Sep 11 23:17 sessions
+-rw-------@   1 wepingli  staff   322 Sep 18 10:37 settings.yaml.imported
+drwx------@   5 wepingli  staff   160 Sep 29 09:41 storages
+
+--- stat ~/.dsh/.credentials.yaml (metadata only, NOT read) ---
+mode=-rw------- mtime=1789091651 atime=1789091652 size=223 /Users/wepingli/.dsh/.credentials.yaml
+
+--- stat shared DSH Desktop runtime ---
+1789097644 /Users/wepingli/Library/Application Support/DSH Desktop/runtime
+
+--- shared runtime dsh version ---
+0.2.0-rc.1
+
+=== leftover processes attributable to THIS batch ===
+--- pgrep -fl 'OpenArc OS-integration' ---
+39155 bash -c sleep 290; cd "/Users/wepingli/Desktop/OpenArc OS-integration" && ls -1t experiments/d5-03/batch8/ | head -5
+39520 bash -c sleep 280; cd "/Users/wepingli/Desktop/OpenArc OS-integration" && ls -1t experiments/d5-03/batch8/ | head -5
+--- pgrep -fl 'deepseek-ai/dsh' (all dsh, incl. host) ---
+39523 /Users/wepingli/.hermes/node/bin/node --max-old-space-size=512 /Users/wepingli/Library/Application Support/DSH Desktop/runtime/node_modules/@deepseek-ai/dsh-ptc-runtime-node/lib/process.js 134217728
+39555 /Users/wepingli/.hermes/node/bin/node --max-old-space-size=512 /Users/wepingli/Library/Application Support/DSH Desktop/runtime/node_modules/@deepseek-ai/dsh-ptc-runtime-node/lib/process.js 134217728
+--- pgrep -fl 'oa-d503' (my temp dirs) ---
+(none)
+--- count: node processes whose argv contains OpenArc OS-integration ---
+4
+
+=== temp dirs from this task ===
+--- ls -d /var/folders/*/*/T/oa-d503* ---
+/var/folders/49/m7hfshm96vl9xkmkpjrygqqc0000gn/T/oa-d503-b8-bin-kH62vB
+/var/folders/49/m7hfshm96vl9xkmkpjrygqqc0000gn/T/oa-d503-b8-probe-K0OpU0
+--- ls -d /tmp/oa-d503* ---
+/tmp/oa-d503-b8-flake-1.time
+/tmp/oa-d503-b8-flake-1.txt
+/tmp/oa-d503-b8-flake-2.time
+/tmp/oa-d503-b8-flake-2.txt
+/tmp/oa-d503-b8-flake-3.time
+/tmp/oa-d503-b8-flake-3.txt
+/tmp/oa-d503-batch4-build.log
+/tmp/oa-d503-batch4-tests-final.log
+/tmp/oa-d503-batch4-tests.log
+/tmp/oa-d503-batch4.txt
+/tmp/oa-d503-rt.txt
+/tmp/oa-d503-scratch-inspect.cjs
+/tmp/oa-d503b-archive-test
+/tmp/oa-d503e-commit-msg.txt
+/tmp/oa-d503f-batch6-segment.json
+/tmp/oa-d503f-gate-head.json
+/tmp/oa-d503f-msg.txt
+/tmp/oa-d503f-report-head.md
+/tmp/oa-d503g-backup
+/tmp/oa-d503g-final
+/tmp/oa-d503g-guard-harness.sh
+/tmp/oa-d503g-mine-device-service.cjs
+/tmp/oa-d503g-mine-identity-store.cjs
+/tmp/oa-d503g-msg.txt
+/tmp/oa-d503g-part1.txt
+/tmp/oa-d503g-part2.txt
+/tmp/oa-d503g-part3.txt
+/tmp/oa-d503h-msg.txt
+--- ls -d /private/var/folders/*/*/T/oa-d503* ---
+/private/var/folders/49/m7hfshm96vl9xkmkpjrygqqc0000gn/T/oa-d503-b8-bin-kH62vB
+/private/var/folders/49/m7hfshm96vl9xkmkpjrygqqc0000gn/T/oa-d503-b8-probe-K0OpU0
+
+=== git tree clean? (integration) ===
+?? experiments/d5-03/batch8/
+(empty above = clean)

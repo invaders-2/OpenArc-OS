@@ -1,0 +1,33 @@
+=== POST-补做 FINAL INTEGRITY ===
+2026-09-29T05:29:58Z
+
+--- integration repo HEAD / status ---
+3bbb347
+integration/ui-core
+?? docs/decisions/D5-03H-dsh-runtime-pinning.md
+?? experiments/d5-03/batch8/
+--- main worktree uncommitted count (expect 17) ---
+      17
+
+--- ~/.dsh (expect 1790647563) ---
+1790647563 /Users/wepingli/.dsh
+mode=-rw------- mtime=1789091651 atime=1789091652 size=223 /Users/wepingli/.dsh/.credentials.yaml
+
+--- shared runtime (expect 1789097644) + its dsh install ---
+1789097644 /Users/wepingli/Library/Application Support/DSH Desktop/runtime
+1790647176 /Users/wepingli/Library/Application Support/DSH Desktop/runtime/node_modules/@deepseek-ai/dsh
+
+--- shared runtime dsh version (expect still 0.2.0-rc.1) ---
+0.2.0-rc.1
+
+--- product pin still intact ---
+project dsh = 0.1.5-rc.2
+
+--- temp residue /var/folders/*/*/T/oa-d503* ---
+(none — CLEAN)
+--- temp residue /tmp/oa-d503-b8* ---
+(none — CLEAN)
+
+--- 0 orphan OpenArc dsh children? ---
+40700 bash -c \012{\012echo "=== POST-M-hM-!M-%M-eM^AM^Z FINAL INTEGRITY ==="\012date -u +"%Y-%m-%dT%H:%M:%SZ"\012echo\012echo "--- integration repo HEAD / status ---"\012git -C "/Users/wepingli/Desktop/OpenArc OS-integration" rev-parse --short HEAD\012git -C "/Users/wepingli/Desktop/OpenArc OS-integration" branch --show-current\012git -C "/Users/wepingli/Desktop/OpenArc OS-integration" status --porcelain\012echo "--- main worktree uncommitted count (expect 17) ---"\012git -C "/Users/wepingli/Desktop/OpenArc OS" status --porcelain | wc -l\012echo\012echo "--- ~/.dsh (expect 1790647563) ---"\012stat -f "%m %N" ~/.dsh\012stat -f "mode=%Sp mtime=%m atime=%a size=%z %N" ~/.dsh/.credentials.yaml\012echo\012echo "--- shared runtime (expect 1789097644) + its dsh install ---"\012stat -f "%m %N" "/Users/wepingli/Library/Application Support/DSH Desktop/runtime"\012stat -f "%m %N" "/Users/wepingli/Library/Application Support/DSH Desktop/runtime/node_modules/@deepseek-ai/dsh"\012echo\012echo "--- shared runtime dsh version (expect still 0.2.0-rc.1) ---"\012node -e "console.log(require('/Users/wepingli/Library/Application Support/DSH Desktop/runtime/node_modules/@deepseek-ai/dsh/package.json').version)"\012echo\012echo "--- product pin still intact ---"\012node -e "console.log('project dsh =', require('/Users/wepingli/Desktop/OpenArc OS-integration/node_modules/@deepseek-ai/dsh/package.json').version)"\012echo\012echo "--- temp residue /var/folders/*/*/T/oa-d503* ---"\012ls -d /var/folders/*/*/T/oa-d503* 2>/dev/null || echo "(none M-bM^@M^T CLEAN)"\012echo "--- temp residue /tmp/oa-d503-b8* ---"\012ls -d /tmp/oa-d503-b8* 2>/dev/null || echo "(none M-bM^@M^T CLEAN)"\012echo\012echo "--- 0 orphan OpenArc dsh children? ---"\012ps -Ao pid,command | grep "[O]penArc OS-integration/node_modules/@deepseek-ai/dsh" || echo "(none M-bM^@M^T 0 orphan)"\012} 2>&1 | tee experiments/d5-03/batch8/24-post-ab-final-integrity.txt\012cd experiments/d5-03/batch8 && {\012  echo "=== sha256 manifest M-BM-7 experiments/d5-03/batch8 (batch8 evidence) ==="\012  date -u +"%Y-%m-%dT%H:%M:%SZ"\012  echo\012  for f in $(ls -1 | grep -v '^sha256-manifest.txt$' | sort); do\012    if [ -f "$f" ]; then shasum -a 256 "$f"; fi\012  done\012} > sha256-manifest.txt 2>&1\012echo; echo "=== manifest regenerated (files: $(ls -1 | wc -l)) ==="\012grep -E "24-post-ab|D5-03-BATCH8-VERIFICATION-REPORT" sha256-manifest.txt\012
+40701 bash -c \012{\012echo "=== POST-M-hM-!M-%M-eM^AM^Z FINAL INTEGRITY ==="\012date -u +"%Y-%m-%dT%H:%M:%SZ"\012echo\012echo "--- integration repo HEAD / status ---"\012git -C "/Users/wepingli/Desktop/OpenArc OS-integration" rev-parse --short HEAD\012git -C "/Users/wepingli/Desktop/OpenArc OS-integration" branch --show-current\012git -C "/Users/wepingli/Desktop/OpenArc OS-integration" status --porcelain\012echo "--- main worktree uncommitted count (expect 17) ---"\012git -C "/Users/wepingli/Desktop/OpenArc OS" status --porcelain | wc -l\012echo\012echo "--- ~/.dsh (expect 1790647563) ---"\012stat -f "%m %N" ~/.dsh\012stat -f "mode=%Sp mtime=%m atime=%a size=%z %N" ~/.dsh/.credentials.yaml\012echo\012echo "--- shared runtime (expect 1789097644) + its dsh install ---"\012stat -f "%m %N" "/Users/wepingli/Library/Application Support/DSH Desktop/runtime"\012stat -f "%m %N" "/Users/wepingli/Library/Application Support/DSH Desktop/runtime/node_modules/@deepseek-ai/dsh"\012echo\012echo "--- shared runtime dsh version (expect still 0.2.0-rc.1) ---"\012node -e "console.log(require('/Users/wepingli/Library/Application Support/DSH Desktop/runtime/node_modules/@deepseek-ai/dsh/package.json').version)"\012echo\012echo "--- product pin still intact ---"\012node -e "console.log('project dsh =', require('/Users/wepingli/Desktop/OpenArc OS-integration/node_modules/@deepseek-ai/dsh/package.json').version)"\012echo\012echo "--- temp residue /var/folders/*/*/T/oa-d503* ---"\012ls -d /var/folders/*/*/T/oa-d503* 2>/dev/null || echo "(none M-bM^@M^T CLEAN)"\012echo "--- temp residue /tmp/oa-d503-b8* ---"\012ls -d /tmp/oa-d503-b8* 2>/dev/null || echo "(none M-bM^@M^T CLEAN)"\012echo\012echo "--- 0 orphan OpenArc dsh children? ---"\012ps -Ao pid,command | grep "[O]penArc OS-integration/node_modules/@deepseek-ai/dsh" || echo "(none M-bM^@M^T 0 orphan)"\012} 2>&1 | tee experiments/d5-03/batch8/24-post-ab-final-integrity.txt\012cd experiments/d5-03/batch8 && {\012  echo "=== sha256 manifest M-BM-7 experiments/d5-03/batch8 (batch8 evidence) ==="\012  date -u +"%Y-%m-%dT%H:%M:%SZ"\012  echo\012  for f in $(ls -1 | grep -v '^sha256-manifest.txt$' | sort); do\012    if [ -f "$f" ]; then shasum -a 256 "$f"; fi\012  done\012} > sha256-manifest.txt 2>&1\012echo; echo "=== manifest regenerated (files: $(ls -1 | wc -l)) ==="\012grep -E "24-post-ab|D5-03-BATCH8-VERIFICATION-REPORT" sha256-manifest.txt\012

@@ -1,0 +1,81 @@
+=== shared runtime install mtime BEFORE A/B ===
+1789097644 2026-09-11T11:34:04 /Users/wepingli/Library/Application Support/DSH Desktop/runtime
+1790647176 2026-09-29T09:59:36 /Users/wepingli/Library/Application Support/DSH Desktop/runtime/node_modules/@deepseek-ai/dsh
+
+host load BEFORE A/B: { 5.08 6.70 8.65 }  cpus=12
+concurrent process count BEFORE:      772
+
+temp root (all writes go here): /var/folders/49/m7hfshm96vl9xkmkpjrygqqc0000gn/T/oa-d503-b8-ab-QCHaIQ
+project bin: /Users/wepingli/Desktop/OpenArc OS-integration/node_modules/.bin/dsh  exists=true
+shared  bin: /Users/wepingli/Library/Application Support/DSH Desktop/runtime/node_modules/.bin/dsh  exists=true
+N = 10 per bin per phase (interleaved A/B)
+
+=== Phase 1: <bin> --version (interleaved) ===
+  iter  1  project 46.1 ms  out=0.1.5-rc.2
+  iter  1  shared  47.1 ms  out=0.2.0-rc.1
+  iter  2  project 42.0 ms  out=0.1.5-rc.2
+  iter  2  shared  46.4 ms  out=0.2.0-rc.1
+  iter  3  project 39.7 ms  out=0.1.5-rc.2
+  iter  3  shared  45.8 ms  out=0.2.0-rc.1
+  iter  4  project 40.7 ms  out=0.1.5-rc.2
+  iter  4  shared  46.7 ms  out=0.2.0-rc.1
+  iter  5  project 41.0 ms  out=0.1.5-rc.2
+  iter  5  shared  46.5 ms  out=0.2.0-rc.1
+  iter  6  project 40.1 ms  out=0.1.5-rc.2
+  iter  6  shared  46.8 ms  out=0.2.0-rc.1
+  iter  7  project 40.3 ms  out=0.1.5-rc.2
+  iter  7  shared  46.3 ms  out=0.2.0-rc.1
+  iter  8  project 41.2 ms  out=0.1.5-rc.2
+  iter  8  shared  46.1 ms  out=0.2.0-rc.1
+  iter  9  project 39.7 ms  out=0.1.5-rc.2
+  iter  9  shared  46.4 ms  out=0.2.0-rc.1
+  iter 10  project 41.0 ms  out=0.1.5-rc.2
+  iter 10  shared  47.6 ms  out=0.2.0-rc.1
+
+--- Phase 1 stats (ms) ---
+  project: {"n":10,"min":39.7,"p50":40.9,"p90":46.1,"max":46.1,"mean":41.2,"sd":1.8}
+  shared : {"n":10,"min":45.8,"p50":46.4,"p90":47.6,"max":47.6,"mean":46.6,"sd":0.5}
+
+=== Phase 2: <bin> --profile acp + ACP initialize (interleaved) ===
+  iter  1  project 454.6 ms  protocolVersion=1
+  iter  1  shared  443.0 ms  protocolVersion=1
+  iter  2  project 471.4 ms  protocolVersion=1
+  iter  2  shared  457.1 ms  protocolVersion=1
+  iter  3  project 474.1 ms  protocolVersion=1
+  iter  3  shared  439.3 ms  protocolVersion=1
+  iter  4  project 475.4 ms  protocolVersion=1
+  iter  4  shared  431.2 ms  protocolVersion=1
+  iter  5  project 474.5 ms  protocolVersion=1
+  iter  5  shared  442.7 ms  protocolVersion=1
+  iter  6  project 483.8 ms  protocolVersion=1
+  iter  6  shared  449.6 ms  protocolVersion=1
+  iter  7  project 473.3 ms  protocolVersion=1
+  iter  7  shared  447.5 ms  protocolVersion=1
+  iter  8  project 475.7 ms  protocolVersion=1
+  iter  8  shared  438.7 ms  protocolVersion=1
+  iter  9  project 474.3 ms  protocolVersion=1
+  iter  9  shared  576.5 ms  protocolVersion=1
+  iter 10  project 525.7 ms  protocolVersion=1
+  iter 10  shared  454.1 ms  protocolVersion=1
+
+--- Phase 2 stats (ms) ---
+  project: {"n":10,"min":454.6,"p50":474.4,"p90":525.7,"max":525.7,"mean":478.3,"sd":17.2}
+  shared : {"n":10,"min":431.2,"p50":445.2,"p90":576.5,"max":576.5,"mean":458,"sd":40.2}
+
+--- raw arrays ---
+  phase1 project ms: [46.1,42,39.7,40.7,41,40.1,40.3,41.2,39.7,41]
+  phase1 shared  ms: [47.1,46.4,45.8,46.7,46.5,46.8,46.3,46.1,46.4,47.6]
+  phase2 project ms: [454.6,471.4,474.1,475.4,474.5,483.8,473.3,475.7,474.3,525.7]
+  phase2 shared  ms: [443,457.1,439.3,431.2,442.7,449.6,447.5,438.7,576.5,454.1]
+
+--- phase2 failures (if any) ---
+
+host load at end: [4.81884765625,6.58935546875,8.587890625] cpus=12
+temp root kept for inspection: /var/folders/49/m7hfshm96vl9xkmkpjrygqqc0000gn/T/oa-d503-b8-ab-QCHaIQ
+
+=== shared runtime install mtime AFTER A/B ===
+1789097644 2026-09-11T11:34:04 /Users/wepingli/Library/Application Support/DSH Desktop/runtime
+1790647176 2026-09-29T09:59:36 /Users/wepingli/Library/Application Support/DSH Desktop/runtime/node_modules/@deepseek-ai/dsh
+
+host load AFTER A/B: { 4.82 6.59 8.59 }  process count:      777
+exit=0

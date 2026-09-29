@@ -1,0 +1,22 @@
+temp root: /var/folders/49/m7hfshm96vl9xkmkpjrygqqc0000gn/T/oa-d503-b8-bin-kH62vB
+
+=== 1.3e-1 fake bin, belongs to NO dsh install ===
+  path=/var/folders/49/m7hfshm96vl9xkmkpjrygqqc0000gn/T/oa-d503-b8-bin-kH62vB/orphan/dsh
+  executable=100755  realpath=/private/var/folders/49/m7hfshm96vl9xkmkpjrygqqc0000gn/T/oa-d503-b8-bin-kH62vB/orphan/dsh
+  [orphan-fake-bin] THROW code=DSH_RUNTIME_MISSING :: DSH_RUNTIME_MISSING: OPENARC_DSH_BIN /var/folders/49/m7hfshm96vl9xkmkpjrygqqc0000gn/T/oa-d503-b8-bin-kH62vB/orphan/dsh 不属于任何 @deepseek-ai/dsh 安装
+
+=== 1.3e-2 fake bin claiming ownership by a planted 9.9.9-fake install ===
+  bin=/var/folders/49/m7hfshm96vl9xkmkpjrygqqc0000gn/T/oa-d503-b8-bin-kH62vB/planted-runtime/node_modules/.bin/dsh  plantedVersion=9.9.9-fake
+  [planted-wrong-version-bin] THROW code=DSH_VERSION_MISMATCH :: DSH_VERSION_MISMATCH: OPENARC_DSH_BIN runtime /private/var/folders/49/m7hfshm96vl9xkmkpjrygqqc0000gn/T/oa-d503-b8-bin-kH62vB/planted-runtime 需要 0.1.5-rc.2，实际 9.9.9-fake
+
+=== 1.3e-3 fake dsh earlier on PATH must NOT be picked up ===
+  fake on PATH: /var/folders/49/m7hfshm96vl9xkmkpjrygqqc0000gn/T/oa-d503-b8-bin-kH62vB/pathshadow/dsh
+  resolveDshBin() -> /Users/wepingli/Desktop/OpenArc OS-integration/node_modules/.bin/dsh
+  picked the PATH shadow? NO (PASS)
+
+=== 1.3e-4 positive control: real project-owned dsh bin ===
+  bin=/Users/wepingli/Desktop/OpenArc OS-integration/node_modules/@deepseek-ai/dsh/lib/bin.js exists=true
+  [real-project-bin] OK -> "/Users/wepingli/Desktop/OpenArc OS-integration/node_modules/@deepseek-ai/dsh/lib/bin.js"
+
+=== 1.3e-5 runtime with correct version but no .bin/dsh ===
+  [runtime-without-bin] OK -> null

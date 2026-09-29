@@ -1,0 +1,27 @@
+=== FINAL INTEGRITY CHECK ===
+2026-09-29T05:14:33Z
+
+--- integration repo HEAD (must still be 3bbb347) ---
+3bbb34741f17039982f1390f9913f7a5ac64a38b
+3bbb347
+integration/ui-core
+
+--- integration repo status (product tree must be untouched) ---
+?? experiments/d5-03/batch8/
+(only ?? experiments/d5-03/batch8/ expected)
+
+--- MAIN worktree untouched? (expected 17 uncommitted, user-stated) ---
+      17
+
+--- main worktree HEAD ---
+9119f85
+
+--- shared runtime + ~/.dsh still unchanged ---
+1789097644 /Users/wepingli/Library/Application Support/DSH Desktop/runtime
+1790647563 /Users/wepingli/.dsh
+mode=-rw------- mtime=1789091651 atime=1789091652 size=223 /Users/wepingli/.dsh/.credentials.yaml
+
+--- dsh still pinned in package.json / node_modules ---
+node_modules dsh = 0.1.5-rc.2
+node_modules acp sdk = 1.4.0
+91:    "@deepseek-ai/dsh": "0.1.5-rc.2",

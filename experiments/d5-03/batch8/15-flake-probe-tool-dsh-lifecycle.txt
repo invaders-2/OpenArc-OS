@@ -1,0 +1,18 @@
+=== flake-probe run 1 ===
+exit=0
+# tests 2
+# pass 2
+# fail 0
+real 6.63
+=== flake-probe run 2 ===
+exit=0
+# tests 2
+# pass 2
+# fail 0
+real 6.30
+=== flake-probe run 3 ===
+exit=0
+# tests 2
+# pass 2
+# fail 0
+real 6.32

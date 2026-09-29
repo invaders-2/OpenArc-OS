@@ -1,0 +1,34 @@
+temp root: /var/folders/49/m7hfshm96vl9xkmkpjrygqqc0000gn/T/oa-d503-b8-probe-K0OpU0
+adapter:   /Users/wepingli/Desktop/OpenArc OS-integration/electron/harness-adapter.cjs
+
+=== 1.2 default resolver quadruple (no overrides) ===
+  runtime    = /Users/wepingli/Desktop/OpenArc OS-integration
+  bin        = /Users/wepingli/Desktop/OpenArc OS-integration/node_modules/.bin/dsh
+  dshVersion = 0.1.5-rc.2
+  sdkPath    = /Users/wepingli/Desktop/OpenArc OS-integration/node_modules/@agentclientprotocol/sdk/dist/acp.js
+  sdkVersion = /Users/wepingli/Desktop/OpenArc OS-integration/node_modules/@agentclientprotocol/sdk/dist/acp.js -> 1.4.0
+  PINNED_DSH_VERSION constant vs actual: MATCH
+  runtime === repo root ? true
+  bin exists on disk ? true
+  DEFAULT_JSON {"runtime":"/Users/wepingli/Desktop/OpenArc OS-integration","bin":"/Users/wepingli/Desktop/OpenArc OS-integration/node_modules/.bin/dsh","dshVersion":"0.1.5-rc.2","sdkPath":"/Users/wepingli/Desktop/OpenArc OS-integration/node_modules/@agentclientprotocol/sdk/dist/acp.js"}
+
+=== 1.3a OPENARC_DSH_RUNTIME=<empty temp dir> -> expect DSH_RUNTIME_MISSING ===
+  dir contents: []
+  RESULT: THROW code=DSH_RUNTIME_MISSING message=DSH_RUNTIME_MISSING: OPENARC_DSH_RUNTIME /var/folders/49/m7hfshm96vl9xkmkpjrygqqc0000gn/T/oa-d503-b8-probe-K0OpU0/empty-runtime 内没有 @deepseek-ai/dsh
+
+=== 1.3b OPENARC_DSH_RUNTIME=<temp dir with fake package.json 0.2.0-rc.1> -> expect DSH_VERSION_MISMATCH ===
+  planted: /var/folders/49/m7hfshm96vl9xkmkpjrygqqc0000gn/T/oa-d503-b8-probe-K0OpU0/drift-runtime/node_modules/@deepseek-ai/dsh/package.json version=0.2.0-rc.1
+  RESULT: THROW code=DSH_VERSION_MISMATCH message=DSH_VERSION_MISMATCH: OPENARC_DSH_RUNTIME /var/folders/49/m7hfshm96vl9xkmkpjrygqqc0000gn/T/oa-d503-b8-probe-K0OpU0/drift-runtime 需要 0.1.5-rc.2，实际 0.2.0-rc.1
+
+=== 1.3c OPENARC_DSH_RUNTIME=<REAL DSH Desktop shared runtime> -> expect DSH_VERSION_MISMATCH (must NOT adopt) ===
+  shared runtime exists on disk ? true
+  shared dsh package.json exists ? true
+  shared dsh version = 0.2.0-rc.1  (expected drift = 0.2.0-rc.1)
+  shared bin exists ? true
+  RESULT: THROW code=DSH_VERSION_MISMATCH message=DSH_VERSION_MISMATCH: OPENARC_DSH_RUNTIME /Users/wepingli/Library/Application Support/DSH Desktop/runtime 需要 0.1.5-rc.2，实际 0.2.0-rc.1
+  ALSO resolveDshBin under shared runtime (expect reject too):
+  RESULT: THROW code=DSH_VERSION_MISMATCH message=DSH_VERSION_MISMATCH: OPENARC_DSH_RUNTIME /Users/wepingli/Library/Application Support/DSH Desktop/runtime 需要 0.1.5-rc.2，实际 0.2.0-rc.1
+  ALSO OPENARC_DSH_BIN=<shared bin> (expect reject too):
+  RESULT: THROW code=DSH_VERSION_MISMATCH message=DSH_VERSION_MISMATCH: OPENARC_DSH_BIN runtime /Users/wepingli/Library/Application Support/DSH Desktop/runtime 需要 0.1.5-rc.2，实际 0.2.0-rc.1
+
+RESULT_JSON {"quad":{"runtime":"/Users/wepingli/Desktop/OpenArc OS-integration","bin":"/Users/wepingli/Desktop/OpenArc OS-integration/node_modules/.bin/dsh","dshVersion":"0.1.5-rc.2","sdkPath":"/Users/wepingli/Desktop/OpenArc OS-integration/node_modules/@agentclientprotocol/sdk/dist/acp.js"},"resShared":{"label":"shared-runtime","ok":false,"code":"DSH_VERSION_MISMATCH","message":"DSH_VERSION_MISMATCH: OPENARC_DSH_RUNTIME /Users/wepingli/Library/Application Support/DSH Desktop/runtime 需要 0.1.5-rc.2，实际 0.2.0-rc.1"}}

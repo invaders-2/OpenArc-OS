@@ -1,0 +1,404 @@
+TAP version 13
+# (node:39416) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Official dsh WRITE Happy Path：proposal → WAITING_APPROVAL → trusted approve → 受监督 exactly-once → verified → dsh 继续 → Task SUCCEEDED
+ok 1 - Official dsh WRITE Happy Path：proposal → WAITING_APPROVAL → trusted approve → 受监督 exactly-once → verified → dsh 继续 → Task SUCCEEDED
+  ---
+  duration_ms: 1096.129917
+  type: 'test'
+  ...
+# Subtest: Official dsh WRITE Deny Path：真实 Approval UI Deny → 0 mutation / 0 lease / Harness 得不到 success
+ok 2 - Official dsh WRITE Deny Path：真实 Approval UI Deny → 0 mutation / 0 lease / Harness 得不到 success
+  ---
+  duration_ms: 959.640291
+  type: 'test'
+  ...
+# Subtest: Official dsh WRITE Timeout Path：用户不操作 → 0 mutation / 0 lease / call BLOCKED
+ok 3 - Official dsh WRITE Timeout Path：用户不操作 → 0 mutation / 0 lease / call BLOCKED
+  ---
+  duration_ms: 1394.436708
+  type: 'test'
+  ...
+# Subtest: Official dsh WRITE UNKNOWN_EFFECT Path：dispatched 后 executor 死亡 → 不把 unverified 结果交给 Harness；Task/Step BLOCKED；0 second call / 0 retry
+ok 4 - Official dsh WRITE UNKNOWN_EFFECT Path：dispatched 后 executor 死亡 → 不把 unverified 结果交给 Harness；Task/Step BLOCKED；0 second call / 0 retry
+  ---
+  duration_ms: 991.704416
+  type: 'test'
+  ...
+# Subtest: Official dsh WRITE APPLIED Recovery：mutation 已提交后 executor 死亡 → recovery APPLIED → call SUCCEEDED，但 Task/Step 保持 BLOCKED（Explicit Resume = DEFERRED）
+ok 5 - Official dsh WRITE APPLIED Recovery：mutation 已提交后 executor 死亡 → recovery APPLIED → call SUCCEEDED，但 Task/Step 保持 BLOCKED（Explicit Resume = DEFERRED）
+  ---
+  duration_ms: 1028.053583
+  type: 'test'
+  ...
+# (node:39431) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: §29/§30/§48 Domain Bypass Audit：Harness / Tool Facade / ACP plugin 绝不直接触达 Resource/Search Domain
+ok 6 - §29/§30/§48 Domain Bypass Audit：Harness / Tool Facade / ACP plugin 绝不直接触达 Resource/Search Domain
+  ---
+  duration_ms: 11.616
+  type: 'test'
+  ...
+# Subtest: §48 Full Tool Proxy Security Gate：Registry / Authorization / Approval / Result / Executor / Lease / Verification / Retry 全部不可绕过
+ok 7 - §48 Full Tool Proxy Security Gate：Registry / Authorization / Approval / Result / Executor / Lease / Verification / Retry 全部不可绕过
+  ---
+  duration_ms: 378.80475
+  type: 'test'
+  ...
+# Subtest: §14/§44/§55 Capability non-persistence + Secret Scan：tpx_/mpx_/provider secret/绝对路径/store root 0 落库
+ok 8 - §14/§44/§55 Capability non-persistence + Secret Scan：tpx_/mpx_/provider secret/绝对路径/store root 0 落库
+  ---
+  duration_ms: 981.340125
+  type: 'test'
+  ...
+# Subtest: §46/§47 Tool result / Model text 不能改变 Task state：无 tool call 的 model 文本不产生 mutation
+ok 9 - §46/§47 Tool result / Model text 不能改变 Task state：无 tool call 的 model 文本不产生 mutation
+  ---
+  duration_ms: 989.435292
+  type: 'test'
+  ...
+# (node:39454) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: §12 Capability scope：绑定 session/app/task/step/run；body 自报 scope 一律忽略；app mismatch → SCOPE_INVALID
+ok 10 - §12 Capability scope：绑定 session/app/task/step/run；body 自报 scope 一律忽略；app mismatch → SCOPE_INVALID
+  ---
+  duration_ms: 394.995708
+  type: 'test'
+  ...
+# Subtest: §16/§17/§18 cross-run / cross-task / cross-step replay → DENY；wrong bridge → 401
+ok 11 - §16/§17/§18 cross-run / cross-task / cross-step replay → DENY；wrong bridge → 401
+  ---
+  duration_ms: 364.305125
+  type: 'test'
+  ...
+# Subtest: §20/§21 session revoke / tool permission revoke / resource permission revoke → 下一次 call DENY + 0 Domain
+ok 12 - §20/§21 session revoke / tool permission revoke / resource permission revoke → 下一次 call DENY + 0 Domain
+  ---
+  duration_ms: 726.054625
+  type: 'test'
+  ...
+# Subtest: §20 session revoke：READ 后 logout → 下一次 WRITE proposal DENY + 0 mutation
+ok 13 - §20 session revoke：READ 后 logout → 下一次 WRITE proposal DENY + 0 mutation
+  ---
+  duration_ms: 350.635083
+  type: 'test'
+  ...
+# Subtest: §22/§23 Registry stale + tool version binding（READ 与 WRITE 都不静默 fallback）
+ok 14 - §22/§23 Registry stale + tool version binding（READ 与 WRITE 都不静默 fallback）
+  ---
+  duration_ms: 718.919167
+  type: 'test'
+  ...
+# Subtest: §24/§41 duplicate delivery：READ 1 次 Domain execution；WRITE 1 次 SideEffectCall；duplicate 不消耗 maxCalls
+ok 15 - §24/§41 duplicate delivery：READ 1 次 Domain execution；WRITE 1 次 SideEffectCall；duplicate 不消耗 maxCalls
+  ---
+  duration_ms: 359.791833
+  type: 'test'
+  ...
+# Subtest: §25 concurrent duplicate delivery：并发同 callId → 1 次 READ execution / 1 次 WRITE SideEffectCall
+ok 16 - §25 concurrent duplicate delivery：并发同 callId → 1 次 READ execution / 1 次 WRITE SideEffectCall
+  ---
+  duration_ms: 670.933042
+  type: 'test'
+  ...
+# Subtest: §27 malformed Tool Facade body：invalid JSON / oversized / missing / bad / not allowlisted / wrong type / schema / forbidden field → DENY + 0 Domain
+ok 17 - §27 malformed Tool Facade body：invalid JSON / oversized / missing / bad / not allowlisted / wrong type / schema / forbidden field → DENY + 0 Domain
+  ---
+  duration_ms: 370.360125
+  type: 'test'
+  ...
+# Subtest: §28 argument authority spoof：注入 authority 字段 → schema reject / 零 authority gain
+ok 18 - §28 argument authority spoof：注入 authority 字段 → schema reject / 零 authority gain
+  ---
+  duration_ms: 374.507792
+  type: 'test'
+  ...
+# Subtest: §31 safe result projection：READ result 与 Approval snapshot 无绝对路径 / token / store root / lease internals
+ok 19 - §31 safe result projection：READ result 与 Approval snapshot 无绝对路径 / token / store root / lease internals
+  ---
+  duration_ms: 378.043584
+  type: 'test'
+  ...
+# Subtest: §13 tpx != mpx：tpx 打 Model Proxy → 401；mpx 打 Tool Facade → 401；cross-domain 0 privilege
+ok 20 - §13 tpx != mpx：tpx 打 Model Proxy → 401；mpx 打 Tool Facade → 401；cross-domain 0 privilege
+  ---
+  duration_ms: 370.238583
+  type: 'test'
+  ...
+# Subtest: §15 capability lifecycle：ACTIVE → EXPIRED / EXHAUSTED / REVOKED
+ok 21 - §15 capability lifecycle：ACTIVE → EXPIRED / EXHAUSTED / REVOKED
+  ---
+  duration_ms: 358.739125
+  type: 'test'
+  ...
+# (node:39475) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: §3/§4 callId Mandatory Gate：missing / invalid callId → 400 TOOL_CALL_ID_REQUIRED，0 budget / 0 proposal / 0 execution / 0 SideEffectCall
+ok 22 - §3/§4 callId Mandatory Gate：missing / invalid callId → 400 TOOL_CALL_ID_REQUIRED，0 budget / 0 proposal / 0 execution / 0 SideEffectCall
+  ---
+  duration_ms: 385.673916
+  type: 'test'
+  ...
+# Subtest: §8/§13/§14 exact duplicate + terminal WRITE replay：same approvalRequestId / 1 SideEffectCall / 0 second mutation / 0 extra budget
+ok 23 - §8/§13/§14 exact duplicate + terminal WRITE replay：same approvalRequestId / 1 SideEffectCall / 0 second mutation / 0 extra budget
+  ---
+  duration_ms: 424.092917
+  type: 'test'
+  ...
+# Subtest: §10 READ→WRITE same-callId collision：409 TOOL_CALL_ID_CONFLICT；绝不把 READ result 当成 WRITE success；0 SideEffectCall / 0 mutation
+ok 24 - §10 READ→WRITE same-callId collision：409 TOOL_CALL_ID_CONFLICT；绝不把 READ result 当成 WRITE success；0 SideEffectCall / 0 mutation
+  ---
+  duration_ms: 359.912875
+  type: 'test'
+  ...
+# Subtest: §11 WRITE→READ same-callId collision：409 TOOL_CALL_ID_CONFLICT；绝不返回 SIDE_EFFECT_APPROVAL_REQUIRED 冒充 READ result
+ok 25 - §11 WRITE→READ same-callId collision：409 TOOL_CALL_ID_CONFLICT；绝不返回 SIDE_EFFECT_APPROVAL_REQUIRED 冒充 READ result
+  ---
+  duration_ms: 361.771083
+  type: 'test'
+  ...
+# Subtest: §12 WRITE A→WRITE B same-callId collision：只允许 1 SideEffectCall，且只绑定 resourceA
+ok 26 - §12 WRITE A→WRITE B same-callId collision：只允许 1 SideEffectCall，且只绑定 resourceA
+  ---
+  duration_ms: 382.491625
+  type: 'test'
+  ...
+# Subtest: §9 same tool + different args collision：canonical arguments fingerprint 不同 → 409
+ok 27 - §9 same tool + different args collision：canonical arguments fingerprint 不同 → 409
+  ---
+  duration_ms: 373.843583
+  type: 'test'
+  ...
+# Subtest: §17/§18 concurrent exact duplicate + concurrent payload collision：恰好一个 winner
+ok 28 - §17/§18 concurrent exact duplicate + concurrent payload collision：恰好一个 winner
+  ---
+  duration_ms: 883.560125
+  type: 'test'
+  ...
+# [openarc-read-tools] module imported
+# [openarc-read-tools] registered resource_search
+# Subtest: §19 maxCalls=1 concurrent unique calls：恰好一个消耗 budget，另一个 TOOL_CAPABILITY_EXHAUSTED
+ok 29 - §19 maxCalls=1 concurrent unique calls：恰好一个消耗 budget，另一个 TOOL_CAPABILITY_EXHAUSTED
+  ---
+  duration_ms: 625.5495
+  type: 'test'
+  ...
+# Subtest: §5/§27 official dsh plugin missing exec.callId fail closed：0 Tool Facade request；有 callId 才发请求
+ok 30 - §5/§27 official dsh plugin missing exec.callId fail closed：0 Tool Facade request；有 callId 才发请求
+  ---
+  duration_ms: 6.602209
+  type: 'test'
+  ...
+# Subtest: §22/§23 Harness callId 不能成为 SideEffectCall authority identity：OpenArc 自己生成 scall_ id
+ok 31 - §22/§23 Harness callId 不能成为 SideEffectCall authority identity：OpenArc 自己生成 scall_ id
+  ---
+  duration_ms: 380.34575
+  type: 'test'
+  ...
+# (node:39491) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: §10/§11/§45/§49 Mixed READ + WRITE official dsh E2E：one run / one facade / READ controlled / WRITE exactly-once verified / Task SUCCEEDED
+ok 32 - §10/§11/§45/§49 Mixed READ + WRITE official dsh E2E：one run / one facade / READ controlled / WRITE exactly-once verified / Task SUCCEEDED
+  ---
+  duration_ms: 1634.321458
+  type: 'test'
+  ...
+# Subtest: §35 Mixed chain UNKNOWN_EFFECT：READ 已成功也不得让 Task SUCCEEDED；WRITE UNKNOWN_EFFECT → Task/Step BLOCKED / 0 second call
+ok 33 - §35 Mixed chain UNKNOWN_EFFECT：READ 已成功也不得让 Task SUCCEEDED；WRITE UNKNOWN_EFFECT → Task/Step BLOCKED / 0 second call
+  ---
+  duration_ms: 1151.618541
+  type: 'test'
+  ...
+# Subtest: §36 Mixed chain cancellation：READ success → WRITE WAITING_APPROVAL → Task cancel → 0 write / 0 lease / capability revoked
+ok 34 - §36 Mixed chain cancellation：READ success → WRITE WAITING_APPROVAL → Task cancel → 0 write / 0 lease / capability revoked
+  ---
+  duration_ms: 1886.689542
+  type: 'test'
+  ...
+# Subtest: §38 Bridge disconnect：READ 中断不返回 stale 数据；WRITE proposal 不因 client 断开自动 approve/lease/execute
+ok 35 - §38 Bridge disconnect：READ 中断不返回 stale 数据；WRITE proposal 不因 client 断开自动 approve/lease/execute
+  ---
+  duration_ms: 4604.377791
+  type: 'test'
+  ...
+# Subtest: §39/§40 Bridge shutdown + loopback：stop 后旧 token 不可用；listener 只 bind 127.0.0.1
+ok 36 - §39/§40 Bridge shutdown + loopback：stop 后旧 token 不可用；listener 只 bind 127.0.0.1
+  ---
+  duration_ms: 388.389583
+  type: 'test'
+  ...
+# (node:39522) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Cancel 竞争：Tool 执行中 cancelTask → BLOCKED / TASK_CANCELLED，不返回数据
+ok 37 - Cancel 竞争：Tool 执行中 cancelTask → BLOCKED / TASK_CANCELLED，不返回数据
+  ---
+  duration_ms: 1126.156792
+  type: 'test'
+  ...
+# Subtest: Task CANCELLED 后再尝试 Tool → DENY + 0 Domain call
+ok 38 - Task CANCELLED 后再尝试 Tool → DENY + 0 Domain call
+  ---
+  duration_ms: 364.09625
+  type: 'test'
+  ...
+# Subtest: Tool timeout：bounded timeout → TOOL_TIMEOUT + 0 retry
+ok 39 - Tool timeout：bounded timeout → TOOL_TIMEOUT + 0 retry
+  ---
+  duration_ms: 429.310083
+  type: 'test'
+  ...
+# Subtest: Harness crash：tool chain 中 kill dsh → Task BLOCKED + capability revoked + 0 respawn
+ok 40 - Harness crash：tool chain 中 kill dsh → Task BLOCKED + capability revoked + 0 respawn
+  ---
+  duration_ms: 2450.954916
+  type: 'test'
+  ...
+# (node:39525) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Official dsh E2E：tool_call → Tool Facade → Proxy → Search/Resource Domain → result 回 dsh → 续推理 → Artifact/Verification/Task SUCCEEDED
+ok 41 - Official dsh E2E：tool_call → Tool Facade → Proxy → Search/Resource Domain → result 回 dsh → 续推理 → Artifact/Verification/Task SUCCEEDED
+  ---
+  duration_ms: 990.514292
+  type: 'test'
+  ...
+# Subtest: Official dsh search privacy：alice 搜 admin HIDDEN resource → 0 items / 0 leak
+ok 42 - Official dsh search privacy：alice 搜 admin HIDDEN resource → 0 items / 0 leak
+  ---
+  duration_ms: 939.28125
+  type: 'test'
+  ...
+# Subtest: Official dsh useByAgent=false：alice 可 read 但无 useByAgent → tool DENY + 0 Domain read
+ok 43 - Official dsh useByAgent=false：alice 可 read 但无 useByAgent → tool DENY + 0 Domain read
+  ---
+  duration_ms: 919.672625
+  type: 'test'
+  ...
+# Subtest: official dsh 0.1.5-rc.2 通过 official profile bundle 加载 OpenArc Tool Plugin 并注册 exactly 2 个 READ_ONLY tool
+ok 44 - official dsh 0.1.5-rc.2 通过 official profile bundle 加载 OpenArc Tool Plugin 并注册 exactly 2 个 READ_ONLY tool
+  ---
+  duration_ms: 443.230542
+  type: 'test'
+  ...
+# Subtest: OpenArc dsh plugin 不 import 业务模块（静态扫描）
+ok 45 - OpenArc dsh plugin 不 import 业务模块（静态扫描）
+  ---
+  duration_ms: 0.209625
+  type: 'test'
+  ...
+# Subtest: 空 manifest → 插件注册 0 个 tool（不伪造工具）
+ok 46 - 空 manifest → 插件注册 0 个 tool（不伪造工具）
+  ---
+  duration_ms: 439.038541
+  type: 'test'
+  ...
+# (node:39534) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Bridge lifecycle：start → issue → stop → listener/port/capability 全部清理
+ok 47 - Bridge lifecycle：start → issue → stop → listener/port/capability 全部清理
+  ---
+  duration_ms: 362.545708
+  type: 'test'
+  ...
+# Subtest: 5-run lifecycle：每 run 独立 dsh / DSH_HOME / capability；0 orphan / 0 listener 累积
+ok 48 - 5-run lifecycle：每 run 独立 dsh / DSH_HOME / capability；0 orphan / 0 listener 累积
+  ---
+  duration_ms: 3460.640542
+  type: 'test'
+  ...
+# (node:39541) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: listener 只 bind 127.0.0.1 + 未知 / Model capability → 401
+ok 49 - listener 只 bind 127.0.0.1 + 未知 / Model capability → 401
+  ---
+  duration_ms: 368.762583
+  type: 'test'
+  ...
+# Subtest: wrong-run：bridge A 的 capability 在 bridge B → 401 + 0 proposal
+ok 50 - wrong-run：bridge A 的 capability 在 bridge B → 401 + 0 proposal
+  ---
+  duration_ms: 343.724916
+  type: 'test'
+  ...
+# Subtest: expired capability → 401 + 0 Domain call
+ok 51 - expired capability → 401 + 0 Domain call
+  ---
+  duration_ms: 343.435667
+  type: 'test'
+  ...
+# Subtest: maxCalls=2：第三次 TOOL_CAPABILITY_EXHAUSTED + 0 Domain call
+ok 52 - maxCalls=2：第三次 TOOL_CAPABILITY_EXHAUSTED + 0 Domain call
+  ---
+  duration_ms: 347.100084
+  type: 'test'
+  ...
+# Subtest: WRITE / 未授权 tool / toolId 注入 → NOT_ALLOWED + 0 execution
+ok 53 - WRITE / 未授权 tool / toolId 注入 → NOT_ALLOWED + 0 execution
+  ---
+  duration_ms: 348.967917
+  type: 'test'
+  ...
+# Subtest: duplicate ACP call（同 callId）→ 只 1 次 Domain execution
+ok 54 - duplicate ACP call（同 callId）→ 只 1 次 Domain execution
+  ---
+  duration_ms: 346.331166
+  type: 'test'
+  ...
+# Subtest: stale tool contract → TOOL_CONTRACT_STALE，不静默继续
+ok 55 - stale tool contract → TOOL_CONTRACT_STALE，不静默继续
+  ---
+  duration_ms: 343.903541
+  type: 'test'
+  ...
+# Subtest: Session revoke：Tool 2 → DENY + 0 Domain read
+ok 56 - Session revoke：Tool 2 → DENY + 0 Domain read
+  ---
+  duration_ms: 342.522958
+  type: 'test'
+  ...
+# Subtest: App disable：Tool 2 → DENY + 0 Domain read
+ok 57 - App disable：Tool 2 → DENY + 0 Domain read
+  ---
+  duration_ms: 347.617792
+  type: 'test'
+  ...
+# Subtest: Permission revoke：Tool 2 → DENY + 0 Domain read
+ok 58 - Permission revoke：Tool 2 → DENY + 0 Domain read
+  ---
+  duration_ms: 347.880708
+  type: 'test'
+  ...
+# Subtest: Resource delete race：search 后删除 → RESOURCE_NOT_AVAILABLE，不返回 stale metadata
+ok 59 - Resource delete race：search 后删除 → RESOURCE_NOT_AVAILABLE，不返回 stale metadata
+  ---
+  duration_ms: 342.438958
+  type: 'test'
+  ...
+# Subtest: useByAgent=false（alice 可 read）：DENY + 0 Domain read
+ok 60 - useByAgent=false（alice 可 read）：DENY + 0 Domain read
+  ---
+  duration_ms: 339.81425
+  type: 'test'
+  ...
+# Subtest: search privacy（alice 搜 admin HIDDEN）：0 result，无存在泄漏
+ok 61 - search privacy（alice 搜 admin HIDDEN）：0 result，无存在泄漏
+  ---
+  duration_ms: 339.949583
+  type: 'test'
+  ...
+# Subtest: Tool capability 打到 Model Proxy → 401（域隔离）
+ok 62 - Tool capability 打到 Model Proxy → 401（域隔离）
+  ---
+  duration_ms: 339.959916
+  type: 'test'
+  ...
+1..62
+# tests 62
+# suites 0
+# pass 62
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 54395.482792
+
+结论：PASS — {"tests":62,"pass":62,"fail":0,"dsh":"0.1.5-rc.2","acp":"1.4.0","errorCodes":{"callIdRequired":"TOOL_CALL_ID_REQUIRED","callIdConflict":"TOOL_CALL_ID_CONFLICT"}}

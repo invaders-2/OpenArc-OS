@@ -1,0 +1,144 @@
+=== section 1.1 version & provenance ===
+
+--- node_modules/@deepseek-ai/dsh/package.json version ---
+name=@deepseek-ai/dsh
+version=0.1.5-rc.2
+bin={"dsh":"lib/bin.js"}
+
+--- node_modules/@agentclientprotocol/sdk/package.json version ---
+name=@agentclientprotocol/sdk
+version=1.4.0
+
+--- package.json dsh specifier lines ---
+70:    "test:d4-03b-dsh": "node --test --test-concurrency=1 tests/tool-dsh-facade.test.mjs tests/tool-dsh-e2e.test.mjs tests/tool-dsh-security.test.mjs tests/tool-dsh-cancel.test.mjs tests/tool-dsh-lifecycle.test.mjs",
+91:    "@deepseek-ai/dsh": "0.1.5-rc.2",
+
+--- package.json agentclientprotocol specifier ---
+90:    "@agentclientprotocol/sdk": "1.4.0",
+
+--- lockfile root deps (packages. ) ---
+lockfileVersion=3
+root.dependencies={
+  "lucide-react": "^0.468.0",
+  "motion": "^13.2.0",
+  "orb-ui": "^0.8.0",
+  "react": "^19.1.0",
+  "react-dom": "^19.1.0"
+}
+root.devDependencies={
+  "@agentclientprotocol/sdk": "1.4.0",
+  "@deepseek-ai/dsh": "0.1.5-rc.2",
+  "@playwright/test": "^1.55.0",
+  "@tailwindcss/vite": "^4.3.3",
+  "@types/react": "^19.1.0",
+  "@types/react-dom": "^19.1.0",
+  "@vitejs/plugin-react": "^5.2.0",
+  "electron": "44.3.0",
+  "tailwindcss": "^4.3.3",
+  "typescript": "^5.9.0",
+  "vite": "^7.1.0"
+}
+
+--- lockfile entry node_modules/@deepseek-ai/dsh ---
+{
+  "version": "0.1.5-rc.2",
+  "resolved": "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-0.1.5-rc.2.tgz",
+  "integrity": "sha512-8Xc8hCQHcIWRmTCVU/xZdp6/qMsWMeAd2ObChKDEsfhUPJFXx6H0lgeb1DxUMD86HZrrVN+1bCvn1ppjZ/fOxw==",
+  "dev": true,
+  "license": "MIT",
+  "dependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/cordis-plugin-hmr": "^1.0.17",
+    "@deepseek-ai/cordis-plugin-include": "^1.0.7",
+    "@deepseek-ai/cordis-plugin-loader": "^1.0.3",
+    "@deepseek-ai/cordis-plugin-timer": "^1.1.4",
+    "@deepseek-ai/dsh-acp-app": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-agent-instructions": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-agent-tool-presentation": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-app-boot": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-base": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-agent-preset": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-cordis": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-cmdline": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-command-compact": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-command-goal": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-compaction-basic": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-compaction-tool-result-pruner": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-cordis-client-runner": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-fs-local": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-goal": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-goal-round-driver": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-headless": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-home-paths": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-hooks-claude-code": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-hooks-codex": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-http-proxy": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-jobs-local": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-launch-environment": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-mcp-client": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-persona": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-plan-mode": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-pwsh-local": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-pwsh-sandbox": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-schedule": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-sdk-app": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-sdk-minimal": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-session-projection": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-session-reference": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-skill": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-skill-filesystem": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-terminal": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-terminal-bash": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-time-context": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tmux-context": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-token-meter": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-ask-user": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-bash": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-bash-persistent": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-cordis": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-fs": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-fs-search": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-goal": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-jobs": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-present": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-pwsh": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-pwsh-persistent": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-ralph": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-skill": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-str-replace-editor": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-subagent": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-subagent-control": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-todo": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-web": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-workflow": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-web-app": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-webhook": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-webhook-github": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-workflow-worker-thread": "^0.1.5-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.2",
+    "commander": "^15.0.0",
+    "js-yaml": "^4.2.0",
+    "node-addon-require-builtin": "^0.1.4"
+  },
+  "bin": {
+    "dsh": "lib/bin.js"
+  }
+}
+
+--- lockfile entry node_modules/@agentclientprotocol/sdk ---
+{
+  "version": "1.4.0",
+  "resolved": "https://registry.npmjs.org/@agentclientprotocol/sdk/-/sdk-1.4.0.tgz",
+  "integrity": "sha512-/eufudw+aFY1LKLolT6yFE6UMmYRl7fMJ/DEONSIyR6wI3slHWITBsANRGqXEY8FRzqUxwh7QEaGiZHcJPVThg==",
+  "dev": true,
+  "license": "Apache-2.0",
+  "peerDependencies": {
+    "zod": "^3.25.0 || ^4.0.0"
+  }
+}
+
+--- realpath node_modules/.bin/dsh ---
+/Users/wepingli/Desktop/OpenArc OS-integration/node_modules/@deepseek-ai/dsh/lib/bin.js
+
+--- ls -la node_modules/.bin/dsh ---
+lrwxr-xr-x@ 1 wepingli  staff  30 Sep 29 12:49 node_modules/.bin/dsh -> ../@deepseek-ai/dsh/lib/bin.js

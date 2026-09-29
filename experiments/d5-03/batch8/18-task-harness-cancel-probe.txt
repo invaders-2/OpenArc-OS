@@ -1,0 +1,15 @@
+=== task-harness-cancel probe 1 ===
+exit=0
+# tests 3
+# pass 3
+# fail 0
+=== task-harness-cancel probe 2 ===
+exit=0
+# tests 3
+# pass 3
+# fail 0
+=== task-harness-cancel probe 3 ===
+exit=0
+# tests 3
+# pass 3
+# fail 0

@@ -1,4 +1,256 @@
 {
+  "batch8": {
+    "phase": "D5-03 第八批 · DSH 运行时 PIN（项目专用可复现运行时 + 解析器只认项目安装）",
+    "at": "2026-09-29T05:32:56Z",
+    "atNote": "证据截止时点 = batch8 独立验收的 sha256-manifest 头部时间戳 2026-09-29T05:29:59Z（含 §八 A/B 补做与 24-post-ab-final-integrity）；本段由第八批文档定稿时写入。**纯插入**：batch7 / batch6 / batch5 / batch4 / batch3 / batch2 与根段的所有键值逐字节未改。",
+    "openarcBranch": "integration/ui-core",
+    "testedCommit": "3bbb34741f17039982f1390f9913f7a5ac64a38b",
+    "testedCommitNote": "单个提交（git log --oneline 186e2e0..3bbb347 = 1 行），父提交 186e2e0f00eb2375ccda85350b2681094608c28e；被测提交后工作树干净，唯一未跟踪 = experiments/d5-03/batch8/",
+    "stage": "文档与证据定稿（只改文档：PROGRESS.md / docs/D5-03-RESULT.md / docs/D5-03-GATE-EVIDENCE.json（本段纯插入）/ 新增 docs/decisions/D5-03H-dsh-runtime-pinning.md / docs/D4-02B-RESULT.md 就地加注 / docs/decisions/D4-02B-harness-acp-adapter.md 就地加注）；未改任何代码 / 脚本 / 测试 / 既有报告；未 commit / push / 切分支",
+    "testedContentDisclosure": {
+      "commit": "3bbb347",
+      "scope": "17 个文件，+11279 / −1083：3 个产品 / 依赖文件（electron/harness-adapter.cjs +43/−14 解析器收紧；package.json +1 第 91 行精确版本；package-lock.json +9915/−1069）+ 1 个新增契约测试 tests/d5-03-dsh-runtime-pin.test.mjs（198 行）+ 13 个证据文件（全部在 experiments/d5-03/）",
+      "lockfileTwoLayerDisclosure": "依赖条目层（交接方口径）：HEAD 177 条 → 现 737 条，added 560 / removed 0 / modified 0，直接依赖版本逐条未变；文本行层（本岗复核）：git diff --stat 的 +9915 / −1069 中 1069 条「删除」是 npm 重排 —— 逐行多重集比对，旧锁文件 2697 行中 0 行在新锁文件里找不到（新锁文件 11543 行，新增 8846 行）→ 无任何旧行被真正丢弃。不得把 git diff --stat 读成「只增不改」。",
+      "noRunId": true,
+      "noMachineReadableSummaryJson": true,
+      "evidenceRoot": "experiments/d5-03/batch8/（37 个文件 = 36 个收录进 sha256-manifest.txt 的原始输出 / 报告 / 5 个探针与扫描脚本 + 清单本身）",
+      "handoffIndex": "experiments/d5-03/EVIDENCE.md（随被测提交跟踪）",
+      "independentReport": "experiments/d5-03/batch8/D5-03-BATCH8-VERIFICATION-REPORT.md（sha256 beca08b7…，含 §八 启动延迟 A/B 补做与 §8.1 时间线）"
+    },
+    "currentEffectiveEvidence": {
+      "statement": "当前有效证据 = 第八批证据清单：experiments/d5-03/EVIDENCE.md + experiments/d5-03/batch8/（含 sha256-manifest.txt）",
+      "countingRule": "计数一律取真实 TAP 输出与 exit code；未实测项进 notVerified，不美化",
+      "superseded": "更早批次（第一至第七批）的 runId / sha256 / 计数只作历史对照：本批为 node-only 运行时 PIN，未重跑 Electron 台架，未产生新 runId",
+      "recheck": "批内逐文件 sha256 见 sha256-manifest.txt（2026-09-29T05:29:59Z，36 条）"
+    },
+    "runtimePin": {
+      "command": "npm install --save-dev --save-exact @deepseek-ai/dsh@0.1.5-rc.2",
+      "installResult": "added 498 packages, and audited 604 packages in 34m；exit 0",
+      "packageJson": "L91 \"@deepseek-ai/dsh\": \"0.1.5-rc.2\"（精确版本，无 ^ / ~）；L90 \"@agentclientprotocol/sdk\": \"1.4.0\"（未变）",
+      "nodeModulesVersion": "0.1.5-rc.2",
+      "registry": "https://registry.npmjs.org/",
+      "lockResolved": "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-0.1.5-rc.2.tgz",
+      "lockIntegrity": "sha512-8Xc8hCQHcIWRmTCVU/xZdp6/qMsWMeAd2ObChKDEsfhUPJFXx6H0lgeb1DxUMD86HZrrVN+1bCvn1ppjZ/fOxw==",
+      "lockfileVersion": 3,
+      "binStartupPath": "node_modules/.bin/dsh → 相对软链 ../@deepseek-ai/dsh/lib/bin.js → realpath /Users/wepingli/Desktop/OpenArc OS-integration/node_modules/@deepseek-ai/dsh/lib/bin.js",
+      "npmCi": "锁文件带 resolved + 完整 integrity（具备 npm ci 可复现安装依据）；本批未实跑 npm ci（列入 notVerified）",
+      "evidence": "01-version-provenance.txt（12eb3537）/ install-evidence.txt / npm-install-log.txt"
+    },
+    "acpSdk": {
+      "version": "1.4.0",
+      "npmLs": "dsh → dsh-acp-app → dsh-acp → @agentclientprotocol/sdk@1.4.0 deduped（未被挪走 / 降级 / 升级）",
+      "lockEntryUnchanged": "node_modules/@agentclientprotocol/sdk 的锁文件条目与 resolved / integrity 与安装前逐字相同",
+      "resolveAcpSdk": "删除「回退运行时副本」的分支，只认项目那份（node_modules/@agentclientprotocol/sdk/dist/acp.js）"
+    },
+    "resolver": {
+      "defaultQuadruple": {
+        "runtime": "/Users/wepingli/Desktop/OpenArc OS-integration（=== 仓库根: true）",
+        "bin": "/Users/wepingli/Desktop/OpenArc OS-integration/node_modules/.bin/dsh（exists: true）",
+        "dshVersion": "0.1.5-rc.2（=== PINNED_DSH_VERSION: MATCH）",
+        "sdkPath": ".../node_modules/@agentclientprotocol/sdk/dist/acp.js（sdkVersion 1.4.0）"
+      },
+      "rejections": [
+        "OPENARC_DSH_RUNTIME=<空临时目录> → DSH_RUNTIME_MISSING",
+        "OPENARC_DSH_RUNTIME=<假 package.json 0.2.0-rc.1> → DSH_VERSION_MISMATCH（与「缺失」可区分）",
+        "OPENARC_DSH_RUNTIME=<真实存在的 DSH Desktop 共享运行时> → DSH_VERSION_MISMATCH，未采用（非空证明：共享运行时真实存在、dsh 0.2.0-rc.1、node_modules/.bin/dsh 存在）",
+        "resolveDshBin() / OPENARC_DSH_BIN=<共享 bin> → 同样 DSH_VERSION_MISMATCH",
+        "默认分支源码无 DSH Desktop 字面量（注释不算）→ BARE-CODE 0；产品代码非注释命中 0",
+        "OPENARC_DSH_BIN=<孤儿假可执行文件> → DSH_RUNTIME_MISSING（不属于任何 @deepseek-ai/dsh 安装）",
+        "OPENARC_DSH_BIN=<planted 9.9.9-fake 安装的假 bin> → DSH_VERSION_MISMATCH",
+        "PATH 前置假 dsh → resolveDshBin() 仍返回项目内 bin（未取 PATH 影子）",
+        "阳性对照：真实项目内 bin → 正常接受（证明不是「一律拒绝」）",
+        "版本正确但无 .bin/dsh 的运行时 → 返回 null（调用方以 NOT_STARTED 区分，不静默采用外部 bin）"
+      ],
+      "semantics": "默认 = 仓库根；覆盖同样校验；绝不回退共享运行时 / 用户 PATH / 未知版本；resolveDshBin() 只在解析出的运行时内找 bin（realpath 归属校验）",
+      "evidence": "02-resolvers-quadruple-and-rejections.txt（9bde0c55）/ 04-dshbin-rejection.txt（a00f1496）"
+    },
+    "sourceLevelLock": {
+      "scannedFiles": 709,
+      "excluded": "node_modules/.git/dist/artifacts/build",
+      "classification": "逐字符分层标注 comment | string-literal | BARE-CODE",
+      "counts": {
+        "comment": 3,
+        "stringLiteral": 6,
+        "bareCode": 0
+      },
+      "productCodeNonCommentHits": 0,
+      "onlyHit": "electron/harness-adapter.cjs:37（注释：「绝不借用 DSH Desktop 共享运行时」）",
+      "verdict": "PASS",
+      "evidence": "03-dsh-desktop-literal-scan.txt（6d3924ec）"
+    },
+    "contractTest": {
+      "file": "tests/d5-03-dsh-runtime-pin.test.mjs（新增，198 行）",
+      "result": "tests 7 / pass 7 / fail 0，exit 0",
+      "cases": "D5-03-A 默认解析=项目本地根+PIN / B 无 dsh→MISSING / C 版本不符→MISMATCH 且与「缺失」可区分 / D 不回退证明（本机非空证明）/ E SDK 1.4.0 / F 源码级锁 / G OPENARC_DSH_BIN 校验且合法覆盖可用",
+      "evidence": "06-contract-pin.txt（22817f8a）"
+    },
+    "fixConfirmation": {
+      "files": [
+        "tests/harness-acp-isolation.test.mjs",
+        "tests/harness-acp-protocol.test.mjs",
+        "tests/tool-dsh-facade.test.mjs"
+      ],
+      "before": "tests 12 / pass 8 / fail 4 / exit 1（失败 = D4-02B-I5、D4-02B-P1、D4-02B-P2、official dsh 0.1.5-rc.2 … exactly 2 个 READ_ONLY tool）",
+      "beforeEvidence": "experiments/d5-03/baseline-before-pin.txt（tracked）",
+      "after": "tests 12 / pass 12 / fail 0 / exit 0",
+      "afterEvidence": "05-fix-confirm-3files.txt（64f3b10f）",
+      "versionDriftFailuresGone": "全量 1383 条中 not ok 恰好 3 条，无一为上述 4 个名字"
+    },
+    "realChains": {
+      "acpProtocol": "4/4 exit 0（07 4fcf9a41）",
+      "toolDshLifecycle": "首跑 1/2（run 0 → HARNESS_TURN_TIMEOUT，duration_ms 59964）→ 复跑 2/2（14 72677008）+ 探针 2/2 ×3（15 43d729fe）= 4 通过 / 5 次",
+      "modelProxy": "protocol P2（Provider 收到 key）+ c4-dsh-write 5/5 exit 0（09 6f17451e）",
+      "readonlyTools": "tool-dsh-facade 3/3 exit 0，exactly 2 个 READ_ONLY tool（13 cac103af）",
+      "permissionDeny": "1/1 exit 0：1 次 permission request / client reject(cancelled) / 0 执行 / 0 触达 Provider（10 dd700ddf）",
+      "cancel": "3/3 exit 0：C1 0 retry + Provider 连接关闭 + dispose().exited === true；C2 child crash → HARNESS_PROCESS_EXITED 无 respawn；C3 turn timeout 有界（11 3fd3c6d7）",
+      "processCleanup": "acp-lifecycle 3/3 exit 0（12 7100edc5）；跑完 ps 中 argv 含项目 dsh 路径的进程 0 个（20 5e1bb8d7）"
+    },
+    "affectedGates": {
+      "analysis": "静态扫描 experiments/*/run-all.mjs 与 tests/*.mjs 是否 require electron/harness-adapter.cjs（唯一 dsh 入口）：只有 5 个门禁真正启动 harness，且全是 node-only、无 Electron",
+      "gates": {
+        "test:d4-02b": "16/16 exit 0",
+        "test:d4-02c": "22/22 exit 0",
+        "test:d4-03b": "59/59 exit 0",
+        "test:d4-03d": "52/52 exit 0",
+        "test:d4-03d-closure": "62/62 exit 0"
+      },
+      "total": "211 / 211 / 0，全部 exit 0",
+      "electronUiNotRerun": "静态证明 tests/*-ui.mjs / desktop.mjs / native-view.mjs / showcase.mjs 无一 require harness-adapter.cjs → 不受本批影响，未重跑（沿用既有证据）；因此不存在受影响的 Electron 门禁，无需串行 Electron / acquirePort / runId 布局",
+      "nonGate": "experiments/d5-02/agent-canvas-probe.mjs 引用 harness-adapter 但不是 npm 门禁，未重跑",
+      "evidence": "19-affected-gates-summary.txt（703a91a5）+ 5 个 19-gate-*.txt"
+    },
+    "fullTestSuite": {
+      "command": "npm test（= node --test tests/*.test.mjs）",
+      "plan": "1..1377",
+      "counts": {
+        "tests": 1383,
+        "pass": 1380,
+        "fail": 3,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0,
+        "durationMs": 144273
+      },
+      "exitCode": 1,
+      "failures": [
+        {
+          "n": 1,
+          "test": "P2 · 当前会话 = A（owner）：推送投递，载荷 = 白名单投影且与 getApprovalRequest 一致",
+          "location": "tests/d4-03-approval-push-isolation.test.mjs:94",
+          "reason": "白名单投影多出 targetRef / url；确定性断言失败",
+          "class": "预存 #1（与 dsh PIN 无关）"
+        },
+        {
+          "n": 2,
+          "test": "No Direct Domain Bypass：resource.trash 的唯一 Domain 调用点在 allowlisted adapter + controlled execution 内",
+          "location": "tests/side-effect-c4-gates.test.mjs:444",
+          "reason": "主进程绝不 in-process 执行 write：expected true actual false；确定性断言失败",
+          "class": "预存 #2（与 dsh PIN 无关）"
+        },
+        {
+          "n": 3,
+          "test": "Cancel 后不存在 Provider retry：abort 只发生一次",
+          "location": "tests/task-harness-cancel.test.mjs:84（断言在 :96）",
+          "reason": "0 !== 1，duration 51723ms；该用例先等 fp.state.requests >= 1（20s deadline），全量并行高负载下请求未在窗口内到达",
+          "class": "环境型负载 flake（非预存 / 非回归）"
+        }
+      ],
+      "flakeIndependence": "单跑 node --test --test-concurrency=1 tests/task-harness-cancel.test.mjs = 3/3 通过 ×3 次 exit 0（18 31bfe261）",
+      "versionDriftFailuresGone": true,
+      "evidence": "17-npm-test-full.txt（f47491af）"
+    },
+    "flakeAttribution": {
+      "method": "直接 exec 两个 bin（不走产品解析器路径，纯测量），N=10、严格 A/B 交替，隔离 DSH_HOME / HOME，共享运行时安装目录只执行不写入",
+      "phase1": {
+        "action": "<bin> --version",
+        "projectP50ms": 40.9,
+        "sharedP50ms": 46.4,
+        "note": "项目 bin 反而更快，分布几乎不重叠"
+      },
+      "phase2": {
+        "action": "<bin> --profile acp + ACP initialize",
+        "projectP50ms": 474.4,
+        "sharedP50ms": 445.2,
+        "note": "相对 +6.6%，两组分布大幅重叠；两侧 0 失败，均 protocolVersion=1"
+      },
+      "failureMagnitude": "失败那次需 > 30 s，约为产品真实路径实测 0.73 s/run 的 40–65 倍；版本间差异仅约 ±7%",
+      "conclusion": "量级上版本差异无法解释 → 判为宿主环境型，与本批 PIN 无关",
+      "retainedEvidenceGap": "失败当刻未采集 loadavg / vm_stat / spindump（本批证据缺口）；复跑那轮整轮 86571ms、子测试仅 3668ms（约 82 s 在 fixture 建立 / 收尾）→ 只定位到「环境」，未证明具体停顿机制",
+      "evidence": "22-startup-latency-ab.txt（546cce1a）/ 23-flake-timeline.txt（a54ddd6b）/ probe-startup-latency-ab.cjs（78be962d）"
+    },
+    "secretScan": {
+      "targets": "experiments/d5-03/（全目录）+ tests/d5-03-dsh-runtime-pin.test.mjs + package.json + package-lock.json",
+      "filesScanned": 63,
+      "rawHits": 0,
+      "verdict": "CLEAN",
+      "processDisclosure": "首次运行 3 条命中均为扫描器自身正则字面量自匹配（scan-secrets.cjs:12–14），加排除集后复跑得 0；过程如实保留",
+      "evidence": "16-secret-scan.txt（99b2271a）"
+    },
+    "boundary": {
+      "dshHome": "~/.dsh 目录 mtime 1790647563 跑前（04:57:34Z）跑后（05:12:36Z）一致；11 个顶层条目逐条同名 / 同 size / 同 mtime",
+      "credentials": "~/.dsh/.credentials.yaml 仅取元数据：mode=-rw------- mtime=1789091651 atime=1789091652 size=223 完全一致；atime 停在 9/11 → 未被读取、未被复制；内容明确禁读",
+      "sharedRuntime": "mtime 1789097644 与版本 0.2.0-rc.1 未变、未被替换（A/B 期间亦只执行不写入，mtime 二次核对一致）",
+      "mainWorktree": "/Users/wepingli/Desktop/OpenArc OS：未提交仍 17 条、HEAD 9119f85 未动",
+      "repoState": "被测仓 git status 仅 ?? experiments/d5-03/batch8/；产品代码 / 测试 / 断言零改动；未 commit / push / 切分支",
+      "leftoverProcesses": "argv 含 OpenArc OS-integration/node_modules/@deepseek-ai/dsh 的进程 0 个（未杀任何进程）",
+      "tempDirs": "本批探针临时目录已删除（/var/folders 与 /tmp/oa-d503-b8* 复查 CLEAN）；/tmp 下 22 个更早批次 oa-d503* 残留未触碰",
+      "uiChange": "本批改动面不含任何 .tsx / .css（视觉 / 动效 = 通过，本批无界面改动）",
+      "newOrganizationEntryAdded": false,
+      "thirdPartyServices": false,
+      "userDataSent": false,
+      "arbitraryLocalPrograms": false,
+      "pluginIsolationClaimed": false,
+      "timeoutsWidened": false,
+      "assertionsChanged": false
+    },
+    "notVerified": [
+      "Electron UI 门禁（test:*-ui / test:desktop / test:native / showcase）实机重跑 —— 静态扫描证明不 require harness-adapter.cjs（不受本批影响），按「只重跑受影响」未重跑，沿用既有证据",
+      "experiments/d5-02/agent-canvas-probe.mjs —— 引用 harness-adapter 但不是 npm 门禁，不在本批范围",
+      "视觉 / 动效验收 —— 本批为运行时 PIN + 后端链路，无 UI 改动",
+      "~/.dsh 各子目录（sessions/、storages/ 等）内部内容 —— 按要求只记录顶层条目与 stat，不读文件内容",
+      "~/.dsh/.credentials.yaml 内容 —— 明确禁止读取（仅取元数据）",
+      "W48 其余非 harness 门禁 —— 与 dsh PIN 无关，未重跑",
+      "失败当刻的宿主负载指标（loadavg / vm_stat / spindump）—— 本批证据缺口，报告 §八 已标注",
+      "npm ci 实跑 —— 锁文件具备可复现依据，但本批未实跑"
+    ],
+    "notVerifiedCount": 8,
+    "newResiduals": [
+      "超时预算 / 错误码映射（DEFAULT_START_TIMEOUT_MS = 30000；orchestrator 把 HARNESS_START_TIMEOUT 映射成 HARNESS_TURN_TIMEOUT）→ 单独批次的产品 / 测试裁决项，本批不实施；报告 §七 列出「调宽预算 / 保留原始错误码 / 维持现状」三个选项的利弊",
+      "tests/task-harness-cancel.test.mjs:84 的 20s 等待窗口同为环境型 flake，一并留给单独批次裁决",
+      "两条预存失败仍在（d4-03-approval-push-isolation P2、side-effect-c4-gates No Direct Domain Bypass），与本批无关，需另案",
+      "/tmp 下 22 个更早批次 oa-d503* 残留未清（非本批产物）",
+      "首次 npm install 耗时 34 分钟（498 个包）→ 首次安装 / CI 需预留时间",
+      "npm ls --depth=0 有 2 个 extraneous（@emnapi/runtime@1.11.3、@img/sharp-wasm32@0.35.5）：新锁文件里本就 optional: true（dsh→sharp 跨平台 WASM 回退包），非依赖漂移"
+    ],
+    "stillSeparate": [
+      "跨组织真机 2 条 notVerified",
+      "OAuth（仅 NONE / BEARER）",
+      "两条既有探针门禁失败（governance-ui 1/5、model-keychain-restart 3/15）",
+      "插件隔离（D5-08）",
+      "D5-02 重命名受 Electron 不支持 prompt() 限制",
+      "SIGKILL 边界",
+      "第五批登记其余残留（app_principals.status / RATE_LIMITED 对象 detail / invariants() 无孤儿行检查）",
+      "本批未新增「创建组织」入口"
+    ],
+    "generalManagerRuling": {
+      "noTimeoutWidening": "不调宽任何超时 / 等待窗口（DEFAULT_START_TIMEOUT_MS / HARNESS_START_TIMEOUT / 20s 等待窗口一律不动）",
+      "noAssertionChanges": "不改任何断言去凑绿；全量 npm test 的 exit 1 如实呈现为「2 条预存失败 + 1 条已证环境型 flake」",
+      "registeredSeparately": "超时预算调整（30000ms 在高负载下偏紧、且 orchestrator 把 HARNESS_START_TIMEOUT 映射成 HARNESS_TURN_TIMEOUT 导致错误码不精确）作为单独批次的产品 / 测试裁决项登记，本批不实施",
+      "scope": "本批只做运行时 PIN、解析器收紧、契约测试与证据记录；不新增功能、不改工具、不改既有门禁脚本",
+      "versionConvention": "0.1.5-rc.2 / 1.4.0 一律指项目内安装版本；共享运行时的 0.2.0-rc.1 只作为「被拒绝的回退目标」出现",
+      "documentedIn": "docs/decisions/D5-03H-dsh-runtime-pinning.md §6"
+    },
+    "threeAxisVerdict": {
+      "functional": "通过（限定范围）：修后 12/12、契约 7/7、六类真实链路全绿、受影响门禁 211/211，全 exit 0",
+      "visual": "通过（本批无界面改动）：改动面不含 .tsx / .css，无像素变化可量；不宣称做过量测",
+      "motion": "通过（本批无界面改动）：改动面不含样式与动画"
+    },
+    "verdict": "D5-03 第八批（DSH 运行时 PIN）= PASS（限定范围：PIN 成立、版本漂移 4 条已闭环、1 条负载 flake 与 2 条预存失败如实单列）；D5-03 整体仍 = PARTIAL",
+    "closedGaps": "第七批登记的环境 dsh 版本漂移（0.1.5-rc.2 → 共享运行时 0.2.0-rc.1）导致全量长期不绿：运行时已 PIN 到项目内，4 条漂移失败在全量失败名单里清零",
+    "remainingGaps": "超时 / 错误码映射（单独批次）/ task-harness-cancel:84 的 20s 窗口 / 2 条预存失败另案 / /tmp 22 个残留 / CI 首次安装时间 / 跨组织真机 2 条 / 两条探针门禁既有失败 / OAuth / 插件隔离（D5-08）/ D5-02 prompt() / SIGKILL 边界",
+    "trackedEvidence": "docs/D5-03-GATE-EVIDENCE.json 的 batch8 段（本段，纯插入）；docs/D5-03-RESULT.md 第八批正文 + 三处【第八批已更新】标记；PROGRESS.md 第八批节；新增 docs/decisions/D5-03H-dsh-runtime-pinning.md；docs/D4-02B-RESULT.md 与 docs/decisions/D4-02B-harness-acp-adapter.md 的【第八批已更新】就地标注；独立验收报告 experiments/d5-03/batch8/D5-03-BATCH8-VERIFICATION-REPORT.md",
+    "legacyInPlaceAnnotation": "本段为**纯插入**：batch7 / batch6 / batch5 / batch4 / batch3 / batch2 段与根段的所有键值逐字节未改（第六批对 batch5 的三处【第六批已更新】加注、第七批对 batch6/batch5 的就地加注均为上一批已存在的字节）。证明方式：把新文件里 batch8 的精确字节块移除后与 HEAD 版逐字节相同（sha256 相等），且 JSON.parse 后除 batch8 外所有键深比较相等。两个 D4-02B 文档的就地加注同样零删除：抹掉【第八批已更新…】括号内容后与 HEAD 原行逐字相同。"
+  },
   "batch7": {
     "phase": "D5-03 第七批 · 安装重置后旧设备身份失效 + 配对组织归属以会话为准",
     "at": "2026-09-29T02:42:21Z",

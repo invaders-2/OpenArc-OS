@@ -1,0 +1,41 @@
+TAP version 13
+# (node:38193) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Bridge lifecycle：start → issue → stop → listener/port/capability 全部清理
+ok 1 - Bridge lifecycle：start → issue → stop → listener/port/capability 全部清理
+  ---
+  duration_ms: 351.72925
+  type: 'test'
+  ...
+# Subtest: 5-run lifecycle：每 run 独立 dsh / DSH_HOME / capability；0 orphan / 0 listener 累积
+not ok 2 - 5-run lifecycle：每 run 独立 dsh / DSH_HOME / capability；0 orphan / 0 listener 累积
+  ---
+  duration_ms: 59963.756958
+  type: 'test'
+  location: '/Users/wepingli/Desktop/OpenArc OS-integration/tests/tool-dsh-lifecycle.test.mjs:38:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    run 0: {"ok":false,"error":"HARNESS_TURN_TIMEOUT","blocked":true,"step":{"stepId":"step_WjTcT6EKYhYuCw","taskId":"task_BlsHylCNfLRzPw","sequence":1,"kind":"reasoning","status":"BLOCKED","input":null,"outputRef":null,"startedAt":1700000000000,"completedAt":1700000000000,"attempt":1,"maxAttempts":1},"task":{"taskId":"task_BlsHylCNfLRzPw","userId":"usr_PJ9gZMFQ8iOPJjvkObqwqWk9zzCHH8EJ","appId":"ai","status":"BLOCKED","goal":"Return exactly: OPENARC_TASK_OK","createdAt":1700000000000,"updatedAt":1700000000000,"startedAt":1700000000000,"completedAt":null,"modelConfigId":"mcf_L5FOAi1G2Kd2Vw","modelConfigVersion":1,"currentStepId":null,"revision":7,"cancelRequested":false,"budgetSnapshot":null,"permissionSnapshotRef":null},"run":{"runId":"hrun_fmEJyLXNQft9RA","taskId":"task_BlsHylCNfLRzPw","stepId":"step_WjTcT6EKYhYuCw","status":"BLOCKED","harnessVersion":null,"acpVersion":null,"modelConfigId":"mcf_L5FOAi1G2Kd2Vw","modelConfigVersion":1,"startedAt":1700000000000,"completedAt":1700000000000,"stopReason":"blocked","errorCode":"HARNESS_TURN_TIMEOUT"}}
+    
+    false !== true
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/wepingli/Desktop/OpenArc%20OS-integration/tests/tool-dsh-lifecycle.test.mjs:62:14)
+    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 1
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 62718.631375

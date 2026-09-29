@@ -8,7 +8,7 @@
 
 - Harness：**官方 DeepSeek Harness `@deepseek-ai/dsh@0.1.5-rc.2`**（developer preview），由 DSH Desktop managed runtime 冻结安装；`dsh --profile acp` 是官方 ACP profile（`@deepseek-ai/dsh-acp-app` / `@deepseek-ai/dsh-acp`）。
 - ACP：**v1**，官方 `@agentclientprotocol/sdk@1.4.0`（`PROTOCOL_VERSION = 1`）；**不使用** experimental v2。repo devDependencies 以 exact 版本 PIN；运行时可从 repo `node_modules` 或冻结 DSH runtime 解析。
-- 启动**不依赖全局 PATH**：`OPENARC_DSH_BIN` → repo `node_modules/.bin/dsh` → 冻结 runtime `node_modules/.bin/dsh`；测试报告输出 dsh version / ACP SDK version / protocol version。
+- 启动**不依赖全局 PATH**：`OPENARC_DSH_BIN` → repo `node_modules/.bin/dsh` → 冻结 runtime `node_modules/.bin/dsh`；测试报告输出 dsh version / ACP SDK version / protocol version。【第八批已更新（2026-09-29，`3bbb347`）：本节上文「由 DSH Desktop managed runtime 冻结安装」、本行回退链与上一行「运行时可从 repo `node_modules` 或冻结 DSH runtime 解析」**均已过时** —— 现行口径 = 运行时**项目专用**（由**项目自己的 `npm install --save-dev --save-exact @deepseek-ai/dsh@0.1.5-rc.2`** 安装）（`node_modules` 内精确版本 `0.1.5-rc.2` + 锁文件 resolved / integrity）；默认解析 = **仓库根** `node_modules/.bin/dsh`；`OPENARC_DSH_RUNTIME` / `OPENARC_DSH_BIN` 覆盖**同样校验**（缺失 → `DSH_RUNTIME_MISSING`、版本不符 → `DSH_VERSION_MISMATCH`），**绝不回退**冻结 runtime / 用户 PATH / 未知版本；`resolveDshBin()` 只在解析出的运行时内找 bin（realpath 归属校验）；`resolveAcpSdk()` 只认项目那份（1.4.0），不再回退运行时副本。原文保留不删，详见 `docs/decisions/D5-03H-dsh-runtime-pinning.md` 与 `docs/D5-03-RESULT.md` 第八批节。】
 
 ## Transport
 

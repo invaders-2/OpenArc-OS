@@ -1,0 +1,28 @@
+=== batch8 pre-run state capture ===
+2026-09-29T04:57:34Z
+
+--- stat ~/.dsh (top-level) ---
+1790647563 /Users/wepingli/.dsh
+
+--- ls -la ~/.dsh (names only, no content read) ---
+total 24
+drwx------@  11 wepingli  staff   352 Sep 29 10:06 .
+drwxr-x---+ 160 wepingli  staff  5120 Sep 29 09:06 ..
+-rw-r--r--@   1 wepingli  staff    37 Sep  9 11:53 .anonymous-user-id
+-rw-------@   1 wepingli  staff   223 Sep 11 09:54 .credentials.yaml
+lrwxr-xr-x@   1 wepingli  staff    25 Sep 14 14:44 AGENTS.md -> /Users/wepingli/AGENTS.md
+drwx------@   3 wepingli  staff    96 Sep  9 16:28 attachments
+drwx------@   3 wepingli  staff    96 Sep 28 18:32 llm-deepseek
+drwxr-xr-x@   6 wepingli  staff   192 Sep 14 17:31 profiles
+drwx------@   6 wepingli  staff   192 Sep 11 23:17 sessions
+-rw-------@   1 wepingli  staff   322 Sep 18 10:37 settings.yaml.imported
+drwx------@   5 wepingli  staff   160 Sep 29 09:41 storages
+
+--- stat shared DSH Desktop runtime ---
+1789097644 /Users/wepingli/Library/Application Support/DSH Desktop/runtime
+
+--- shared runtime version ---
+dsh-managed-runtime 1.0.0
+
+--- shared runtime .bin/dsh realpath ---
+/Users/wepingli/Library/Application Support/DSH Desktop/runtime/node_modules/@deepseek-ai/dsh/lib/bin.js

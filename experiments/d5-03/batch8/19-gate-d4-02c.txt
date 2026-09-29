@@ -1,0 +1,156 @@
+TAP version 13
+# (node:39235) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Cancel E2E：真实 slow provider → 用户取消 → 0 retry + capability revoked + CANCELLED
+ok 1 - Cancel E2E：真实 slow provider → 用户取消 → 0 retry + capability revoked + CANCELLED
+  ---
+  duration_ms: 4887.476167
+  type: 'test'
+  ...
+# Subtest: Cancel Race：cancel 先行 → 绝不 Task CANCELLED + Step SUCCEEDED
+ok 2 - Cancel Race：cancel 先行 → 绝不 Task CANCELLED + Step SUCCEEDED
+  ---
+  duration_ms: 367.644458
+  type: 'test'
+  ...
+# Subtest: Cancel 后不存在 Provider retry：abort 只发生一次
+ok 3 - Cancel 后不存在 Provider retry：abort 只发生一次
+  ---
+  duration_ms: 4877.442625
+  type: 'test'
+  ...
+# (node:39239) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Vertical E2E：Task→Step→Harness→Proxy→Fake Provider→Artifact→Verification→SUCCEEDED
+ok 4 - Vertical E2E：Task→Step→Harness→Proxy→Fake Provider→Artifact→Verification→SUCCEEDED
+  ---
+  duration_ms: 928.089708
+  type: 'test'
+  ...
+# Subtest: Tool proposal E2E：真实 ACP tool_call → 0 execution → BLOCKED
+ok 5 - Tool proposal E2E：真实 ACP tool_call → 0 execution → BLOCKED
+  ---
+  duration_ms: 363.426625
+  type: 'test'
+  ...
+# Subtest: Permission request E2E：真实 ACP request_permission → reject → BLOCKED
+ok 6 - Permission request E2E：真实 ACP request_permission → reject → BLOCKED
+  ---
+  duration_ms: 361.904084
+  type: 'test'
+  ...
+# (node:39243) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: ACP → TaskEvent mapping 显式、聚合 text、丢 reasoning、洪泛有上限
+ok 7 - ACP → TaskEvent mapping 显式、聚合 text、丢 reasoning、洪泛有上限
+  ---
+  duration_ms: 1.027875
+  type: 'test'
+  ...
+# Subtest: prompt 只含 goal + safe input，且 schema 版本冻结
+ok 8 - prompt 只含 goal + safe input，且 schema 版本冻结
+  ---
+  duration_ms: 0.134875
+  type: 'test'
+  ...
+# Subtest: turn 成功：Artifact + Verification PASS → Step/Task SUCCEEDED
+ok 9 - turn 成功：Artifact + Verification PASS → Step/Task SUCCEEDED
+  ---
+  duration_ms: 345.946834
+  type: 'test'
+  ...
+# Subtest: 成功必须 Verification PASS：文本不符 → BLOCKED 且 0 artifact
+ok 10 - 成功必须 Verification PASS：文本不符 → BLOCKED 且 0 artifact
+  ---
+  duration_ms: 331.63525
+  type: 'test'
+  ...
+# Subtest: Artifact 写入失败：Step/Task 绝不 SUCCEEDED，且无 artifact（失败原子性）
+ok 11 - Artifact 写入失败：Step/Task 绝不 SUCCEEDED，且无 artifact（失败原子性）
+  ---
+  duration_ms: 331.578375
+  type: 'test'
+  ...
+# Subtest: Harness crash → BLOCKED + HARNESS_PROCESS_EXITED，0 respawn
+ok 12 - Harness crash → BLOCKED + HARNESS_PROCESS_EXITED，0 respawn
+  ---
+  duration_ms: 345.957125
+  type: 'test'
+  ...
+# Subtest: turn timeout → BLOCKED + HARNESS_TURN_TIMEOUT，0 第二次 prompt
+ok 13 - turn timeout → BLOCKED + HARNESS_TURN_TIMEOUT，0 第二次 prompt
+  ---
+  duration_ms: 329.525667
+  type: 'test'
+  ...
+# Subtest: Tool proposal → 0 execution + BLOCKED TOOL_EXECUTION_NOT_AVAILABLE
+ok 14 - Tool proposal → 0 execution + BLOCKED TOOL_EXECUTION_NOT_AVAILABLE
+  ---
+  duration_ms: 329.079625
+  type: 'test'
+  ...
+# Subtest: Permission request → reject + BLOCKED PERMISSION_NOT_AVAILABLE，0 execution
+ok 15 - Permission request → reject + BLOCKED PERMISSION_NOT_AVAILABLE，0 execution
+  ---
+  duration_ms: 329.895625
+  type: 'test'
+  ...
+# (node:39256) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Harness crash E2E：kill child → BLOCKED + HARNESS_PROCESS_EXITED + 0 respawn
+ok 16 - Harness crash E2E：kill child → BLOCKED + HARNESS_PROCESS_EXITED + 0 respawn
+  ---
+  duration_ms: 855.781708
+  type: 'test'
+  ...
+# Subtest: Restart E2E：进程崩溃后重启 → RECOVERY_REQUIRED，0 replay
+ok 17 - Restart E2E：进程崩溃后重启 → RECOVERY_REQUIRED，0 replay
+  ---
+  duration_ms: 389.220208
+  type: 'test'
+  ...
+# (node:39260) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Provider Secret / proxy capability 0 forbidden persistence（Task DB / Event / Artifact）
+ok 18 - Provider Secret / proxy capability 0 forbidden persistence（Task DB / Event / Artifact）
+  ---
+  duration_ms: 920.818959
+  type: 'test'
+  ...
+# Subtest: User / App / Artifact isolation：非 owner 或非 owner App 不能 run / read
+ok 19 - User / App / Artifact isolation：非 owner 或非 owner App 不能 run / read
+  ---
+  duration_ms: 905.200041
+  type: 'test'
+  ...
+# Subtest: capability 执行绑定：run A 的 token 不能用于 run B（401），绑定含 task/step/run
+ok 20 - capability 执行绑定：run A 的 token 不能用于 run B（401），绑定含 task/step/run
+  ---
+  duration_ms: 340.584042
+  type: 'test'
+  ...
+# (node:39263) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: v9 -> v10：HarnessRun / Artifact / Verification 表建立，旧数据完整
+ok 21 - v9 -> v10：HarnessRun / Artifact / Verification 表建立，旧数据完整
+  ---
+  duration_ms: 352.143583
+  type: 'test'
+  ...
+# Subtest: v10 迁移失败 -> 整级回滚：user_version 停 9，v10 表不残留
+ok 22 - v10 迁移失败 -> 整级回滚：user_version 停 9，v10 表不残留
+  ---
+  duration_ms: 346.696792
+  type: 'test'
+  ...
+1..22
+# tests 22
+# suites 0
+# pass 22
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 24335.77225
+
+结论：PASS — {"tests":22,"pass":22,"fail":0,"versions":{"dsh":"0.1.5-rc.2","dshBin":"/Users/wepingli/Desktop/OpenArc OS-integration/node_modules/.bin/dsh","acpSdk":"1.4.0","protocolVersion":1,"schemaVersion":21}}
