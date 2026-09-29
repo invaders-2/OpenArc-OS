@@ -172,7 +172,7 @@
 | 第五批 R3 登记表前 4 项（`McpCenter.tsx` / `types.ts` / `useIdentity.ts` / `AuthScreens.tsx`） | 第五批 §2.7 / §9 | 本批**只新增第 5 项**，前 4 项的必含 / 禁含 / 只增判据一字未改（`git diff d1ba058 2944e45 -- experiments/d5-03/mcp-policy-e2e.mjs` 可核）。 |
 | 第五批 `SHOWABLE_ERROR_DETAIL` / `errorText` 收口 | 第五批 §2.6 | 本批一字未改（`d1ba058` 的 diff 不含 `src/identity/types.ts`）；且 `c729` 43/43 里 V1–V6 仍在真机上复验文案与内部标记。 |
 | 第四批临时目录归属机制（`userdata-ownership.cjs`） | 第四批 §6（第五批 §2.2 复用） | 本批未改该脚本；本批每次运行的 `cleanup.leftovers` 都是 `[]`、`pkillUsed=false`，自建 userData 目录建后即清。 |
-| 第五批登记的残留（`device_pairing_credentials` 未清 / `app_principals.status` / `RATE_LIMITED` 对象 detail / `invariants()` 无孤儿行检查） | 第五批 §4 | 本批未处理这些项，结论继续有效（见 §10）。 |
+| 第五批登记的残留（`device_pairing_credentials` 未清 / `app_principals.status` / `RATE_LIMITED` 对象 detail / `invariants()` 无孤儿行检查） | 第五批 §4 | 本批未处理这些项，结论继续有效（见 §10）。【**第七批已更新**：已随安装重置**同事务**清空 —— 真机证据 = 设备三表 **1 / 1 / 2 → 0**、旧未使用密钥 `PAIRING_TOKEN_UNKNOWN` 且 **0 新设备 / 0 新凭据**、旧指纹 `DEVICE_CREDENTIAL_UNKNOWN`；第五批 / 第六批的历史结论不变（详见 `docs/decisions/D5-03G-install-reset-device-identity.md`）。】 |
 
 **不再作为当前证据**：第五批的 reset `9cd0` / center `c7ba` / stream `cce3` / policy `db3d` / 视觉 `27eb` —— 前四者已由**同提交新鲜重跑**取代；`27eb` **16/17 保留为「修复前」的历史失败证据**（2.62:1 的失败历史必须留，不能顶替成当前值）。
 
@@ -205,7 +205,7 @@
 * 索引口径：报告 §8 的「61 条 / 60 行」与复核值「64 条 / 64 行」不一致；未入索引目录 `cf4e` 未在报告登记（§1）。
 * 工装迭代轮 `fcfa` 未列入报告 §6.3（§1）。
 
-**继续单列（不并入本批）**：**OAuth**（仅 `NONE` / `BEARER`）、**设备配对凭据重置**（第五批登记残留：`device_pairing_credentials` 未清）、**插件隔离（D5-08）**、**D5-02 重命名受 Electron 不支持 `prompt()` 限制**、**SIGKILL 边界**（`kill -9` 靠 `cleanOrphans` 事后按三条件清理、默认 dry-run）、第五批登记的其余残留（`app_principals.status` / `RATE_LIMITED` 对象 detail / `invariants()` 无孤儿行检查）。**本批未新增「创建组织」入口**。
+**继续单列（不并入本批）**：**OAuth**（仅 `NONE` / `BEARER`）、**设备配对凭据重置**（第五批登记残留：`device_pairing_credentials` 未清）【**第七批已更新**：已随安装重置**同事务**清空 —— 真机证据 = 设备三表 **1 / 1 / 2 → 0**、旧未使用密钥 `PAIRING_TOKEN_UNKNOWN` 且 **0 新设备 / 0 新凭据**、旧指纹 `DEVICE_CREDENTIAL_UNKNOWN`；第五批 / 第六批的历史结论不变（详见 `docs/decisions/D5-03G-install-reset-device-identity.md`）。】、**插件隔离（D5-08）**、**D5-02 重命名受 Electron 不支持 `prompt()` 限制**、**SIGKILL 边界**（`kill -9` 靠 `cleanOrphans` 事后按三条件清理、默认 dry-run）、第五批登记的其余残留（`app_principals.status` / `RATE_LIMITED` 对象 detail / `invariants()` 无孤儿行检查）。**本批未新增「创建组织」入口**。
 
 **跨组织真机 2 条（policy，继续保留）**：同一安装内第二个组织无产品入口 → 跨组织行为级只到 schema + node 级。
 

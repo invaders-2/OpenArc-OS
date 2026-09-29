@@ -183,6 +183,6 @@
 2. **R3 采用登记表式基线、跨批不复位**：第六批若动到这 4 个文件之外、或改掉任一条必含标记 / 引入禁含形态 → R3 FAIL，属 **fail-closed 设计**。
 3. **浅色 `.auth-error` 2.62:1 本批不改**（设计值 / 视觉属产品决策），**登记为未闭合缺陷**。
 4. `notVerified`：跨组织真机 **2 条继续保留**；本批新增 6 条（组织 ID 复用真机不可构造 → node T3；`device_access` 真机 0 → 0 不构成清理证据；`invariants()` 原生入口缺失 → 等价只读复算；`session-missing` / `not-locked` 真机不可达；浅色对比度不达标；整窗截图与第四批窗口裁剪非逐像素同尺寸）。
-5. **本批新登记残留**：`device_pairing_credentials` 未清（T7 证明不产生授权结论，建议下批或产品裁定）；`app_principals.status` 不受重置影响（安装级配置）；`RATE_LIMITED` 的 `{retryAfterMs}` 对象 detail 现被过滤但未映射成人话；`invariants()` 未加「孤儿授权行」检查（理由与代价已登记）；浅色 `.auth-error` 2.62:1 未闭合。
+5. **本批新登记残留**：`device_pairing_credentials` 未清（T7 证明不产生授权结论，建议下批或产品裁定）；【**第七批已更新**：已随安装重置**同事务**清空 —— 真机证据 = 设备三表 **1 / 1 / 2 → 0**、旧未使用密钥 `PAIRING_TOKEN_UNKNOWN` 且 **0 新设备 / 0 新凭据**、旧指纹 `DEVICE_CREDENTIAL_UNKNOWN`；第五批 / 第六批的历史结论不变（详见 `docs/decisions/D5-03G-install-reset-device-identity.md`）。】`app_principals.status` 不受重置影响（安装级配置）；`RATE_LIMITED` 的 `{retryAfterMs}` 对象 detail 现被过滤但未映射成人话；`invariants()` 未加「孤儿授权行」检查（理由与代价已登记）；浅色 `.auth-error` 2.62:1 未闭合。
 6. **本批未新增「创建组织」入口**（用户明令）；协议仍 `2025-06-18`、`SCHEMA_VERSION` 仍 21。
 

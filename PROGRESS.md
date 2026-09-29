@@ -1672,7 +1672,7 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 ## 3. notVerified 与缺口（如实登记）
 
 * **`notVerified`：跨组织真机 2 条继续保留**（policy）；本批新增并逐条列出（完整结果文档第五批 §4）：① 组织 ID 复用真机不可构造 → node T3；② `device_access` 真机 0 → 0 **不构成清理证据**；③ 产品侧 `invariants()` 原生入口缺失 → 等价只读复算；④ `session-missing` / `not-locked` 真机不可达；⑤ 浅色对比度不达标（**判定不通过**）；⑥ 整窗截图与第四批窗口裁剪非逐像素同尺寸。**本批未新增「创建组织」入口**。
-* **本批新登记的残留**：① `device_pairing_credentials` **未清**（重置前签发的配对凭据仍可再登记设备；T7 证明不产生授权结论，建议下批或产品裁定）；② `app_principals.status` **不受重置影响**（安装级配置）；③ `RATE_LIMITED` 的 `{retryAfterMs}` 对象 detail **现被过滤但未映射成人话**；④ `invariants()` **未加「孤儿授权行」检查**（理由与代价已登记）；⑤ **浅色 `.auth-error` 2.62:1 未闭合**。【**第六批已更新**：⑤ **已闭环**（不透明内容底，真机 5.372:1）；①–④ 继续有效。】
+* **本批新登记的残留**：① `device_pairing_credentials` **未清**（重置前签发的配对凭据仍可再登记设备；T7 证明不产生授权结论，建议下批或产品裁定）；【**第七批已更新**：**已闭环** —— 这三张设备身份表已随重置同事务清空（真机 `devices` / `device_credentials` / `device_pairing_credentials` **1 / 1 / 2 → 0**）；旧未使用密钥再消费 `PAIRING_TOKEN_UNKNOWN` 且 **0 新设备 / 0 新凭据**；旧指纹 `DEVICE_CREDENTIAL_UNKNOWN`、旧长连接心跳 `DEVICE_CREDENTIAL_MISMATCH`（runId `20260929T023418Z-448b-mcp-device-reset-e2e`，44/44 exit 0）。详见文末「D5-03 第七批」节与 `docs/decisions/D5-03G-install-reset-device-identity.md`。】② `app_principals.status` **不受重置影响**（安装级配置）；③ `RATE_LIMITED` 的 `{retryAfterMs}` 对象 detail **现被过滤但未映射成人话**；④ `invariants()` **未加「孤儿授权行」检查**（理由与代价已登记）；⑤ **浅色 `.auth-error` 2.62:1 未闭合**。【**第六批已更新**：⑤ **已闭环**（不透明内容底，真机 5.372:1）；①–④ 继续有效。】
 * **本批闭环的旧缺口**：`resetInstallation` 孤儿授权残留（第四批登记；其「不可达」判定被本批**【第五批订正】**：只对 user 侧成立，App 侧孤儿 grant 能直接复活权限 = 撤销失效路径）；`errorText` 通用括注泄漏内部 detail（第四批登记）；R3 陈旧 src 白名单（第五批过程中暴露并重基线）。
 * 既有缺口继续单列（不并入本批）：OAuth（仅 NONE / BEARER）、真实第三方与 Adobe / PS（D5-04 / D5-05）、插件隔离（D5-08）、D5-02 的「重命名依赖 Electron 不支持的 `prompt()`」、SIGKILL 边界。
 
@@ -1680,11 +1680,11 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 
 **判定：D5-03 第五批（安装重置同事务清授权 + 登录失败文案收口）= PASS（限定范围：功能通过、视觉部分通过）；D5-03 整体仍 = PARTIAL。**
 
-剩余缺口逐条：① 跨组织真机入口 / 跨组织真机行为级（`notVerified` 2 条）；② OAuth；③ 真实第三方服务与 Adobe / PS（D5-04 / D5-05）；④ 插件隔离（D5-08）；⑤ D5-02 `prompt()` 遗留；⑥ SIGKILL 边界；⑦ 本批新登记 5 条残留（`device_pairing_credentials` 未清 / `app_principals.status` / `RATE_LIMITED` 对象 detail / `invariants()` 孤儿行检查 / 浅色 `.auth-error` 2.62:1）。 【**第六批已更新**：⑦ 中的「浅色 `.auth-error` 2.62:1」**已闭合**；第六批新登记的残留见文末第六批节 §3。】
+剩余缺口逐条：① 跨组织真机入口 / 跨组织真机行为级（`notVerified` 2 条）；② OAuth；③ 真实第三方服务与 Adobe / PS（D5-04 / D5-05）；④ 插件隔离（D5-08）；⑤ D5-02 `prompt()` 遗留；⑥ SIGKILL 边界；⑦ 本批新登记 5 条残留（`device_pairing_credentials` 未清 / `app_principals.status` / `RATE_LIMITED` 对象 detail / `invariants()` 孤儿行检查 / 浅色 `.auth-error` 2.62:1）。 【**第六批已更新**：⑦ 中的「浅色 `.auth-error` 2.62:1」**已闭合**；第六批新登记的残留见文末第六批节 §3。】 【**第七批已更新**：⑦ 中的「`device_pairing_credentials` 未清」**已闭环**（已随重置同事务清空，真机 **1 / 1 / 2 → 0**，旧密钥 `PAIRING_TOKEN_UNKNOWN`、0 新设备 / 0 新凭据）；第七批的判定与残留见文末第七批节。】
 
 **总经理裁定（本批，写进决策文档即生效）**：① 守卫**只放行安装重置这一条路径**、不开放通用清理；② R3 采用**登记表式**基线、**跨批不复位**（第六批若合法动到这 4 个文件就会 FAIL，属 fail-closed 设计，届时按同一形态新增登记项并重跑负向自证）；③ 浅色 `.auth-error` **2.62:1 本批不改**（涉及设计值 / 视觉，留给产品决策），**登记为未闭合缺陷**。 【**第六批已更新**：裁定 ③ 已由第六批执行 —— 修复方式 = **组件级不透明内容底**（不是改色、不是改 token），真机复测 5.372:1 ≥ 4.5:1；规范级解法（token 层材质档）仍未做，取舍已登记进 `docs/decisions/D5-03F-app-grant-org-isolation-and-auth-error-contrast.md`。】
 
-下一步建议：浅色玻璃卡面红字对比度（产品 / 设计决策：提高卡面材质不透明度，或浅色下用更高对比红档，或把该行放到不透明表面上）→ `device_pairing_credentials` 是否随重置清理（产品裁定）→ 跨组织真机入口（产品需新增「新建组织」或多租户安装，本批不做）→ OAuth → 真实第三方 / Adobe（D5-04 / D5-05）。
+下一步建议：浅色玻璃卡面红字对比度（产品 / 设计决策：提高卡面材质不透明度，或浅色下用更高对比红档，或把该行放到不透明表面上）→ `device_pairing_credentials` 是否随重置清理（产品裁定）【**第七批已更新**：已由第七批处理 —— **随重置同事务清空**，真机 **1 / 1 / 2 → 0**，旧密钥 `PAIRING_TOKEN_UNKNOWN`、0 新设备 / 0 新凭据】→ 跨组织真机入口（产品需新增「新建组织」或多租户安装，本批不做）→ OAuth → 真实第三方 / Adobe（D5-04 / D5-05）。
 
 ---
 
@@ -1692,7 +1692,7 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 
 > **口径（用户明确定范围）**：本批 = **App 授权组织隔离（含安全修复）**（取数按 `(app_id, organization_id)` + 空组织 fail-closed 空集 + 判权层纵深防御 + 三处漏掉的调用点补组织）+ **登录错误行不透明内容底**（`.auth-error` 合成背景与壁纸 / 玻璃档解耦）+ **门禁假阳性修正与 R3 登记表 4 → 5 项**（经总经理逐条授权）；**不开放工具调用、不连真实第三方、不运行任意第三方程序、不发用户数据、不声称插件隔离通过**；**不新增「创建组织」产品入口**（用户明令）；**不做整库扫删**（用户明令）。
 > **判定：D5-03 第六批（App 授权组织隔离 + 登录错误行不透明内容底）= PASS（限定范围）；D5-03 整体仍 = PARTIAL**（剩余缺口逐条见 §3 / §4）。
-> **当前有效证据 = 第六批 runId 清单**：reset `20260928T091457Z-f559` **26/26**、center `20260928T091508Z-967d` **38/38**、stream `20260928T091545Z-23e3` **29/29**、policy `20260928T095113Z-2780` **43/43**（R3 重基线后）、矩阵 `20260928T094556Z-c729` **43/43**；另 `20260928T084047Z-866c`（门禁假阳性反证 11/11）、`20260928T092753Z-e537`（R3 负向自证 4/4）、`20260928T091621Z-74ec`（重基线前 42/43，仅留档）。**仍然有效的早期证据**（复用理由见完整结果文档第六批 §2.2）：expiry-idle `20260928T070551Z-f078` **26/26**（本批未重跑，结构判断）+ 第四批 expiry 其余五场景（extend / absolute / relogin / regress / override-deny）+ 第五批 R3 前 4 项 / 文案收口 / 第四批临时目录归属。
+> **当前有效证据 = 第六批 runId 清单**：reset `20260928T091457Z-f559` **26/26**、center `20260928T091508Z-967d` **38/38**、stream `20260928T091545Z-23e3` **29/29**、policy `20260928T095113Z-2780` **43/43**（R3 重基线后）、矩阵 `20260928T094556Z-c729` **43/43**；另 `20260928T084047Z-866c`（门禁假阳性反证 11/11）、`20260928T092753Z-e537`（R3 负向自证 4/4）、`20260928T091621Z-74ec`（重基线前 42/43，仅留档）。**仍然有效的早期证据**（复用理由见完整结果文档第六批 §2.2）：expiry-idle `20260928T070551Z-f078` **26/26**（本批未重跑，结构判断）+ 第四批 expiry 其余五场景（extend / absolute / relogin / regress / override-deny）+ 第五批 R3 前 4 项 / 文案收口 / 第四批临时目录归属。【**第七批已更新**：本行里第六批的 reset `f559`（26/26）与 policy `2780`（43/43）已由第七批**同提交新鲜重跑**取代（`91f9` **28/28**、`2442` **43/43**）；center `967d`（38/38）/ stream `23e3`（29/29）仍为**当前有效证据**（按机械受影响性分析复用）。本行其余内容保留为第六批当时的记录。】
 > **证据口径披露（必读）**：产品修复 = 提交 `d1ba058`（**27 个文件**：7 个 `electron/*.cjs` + `src/styles.css` + 2 个 experiments 旧单参调用 + 17 个测试/夹具）；门禁脚本与报告 = HEAD `2944e45`（**只改 `experiments/d5-03/` 9 个文件**，`+1897 / −16`；父提交 = `d1ba058`，`git diff d1ba058 2944e45 --stat` 产品代码零改动）。**全部 artifact 记 `testedCommit=d1ba058`** —— 真机运行时门禁脚本改动**尚未提交**（policy 两次运行记 `gitDirtyLines=6 / 8`），随后才提交成 `2944e45`。**本批没有机器可读汇总 JSON**；索引复核 = `runs/index.json` **64 条** / `index.jsonl` **64 行**、64 个 artifact sha256 **64 一致 / 0 不一致 / 0 缺失**（报告 §8 记 61 条 / 60 行，差异如实登记，报告原文不改）。
 > 完整结果 `docs/D5-03-RESULT.md` 第六批正文；tracked 证据 `docs/D5-03-GATE-EVIDENCE.json` 的 `batch6` 段；本批决策 `docs/decisions/D5-03F-app-grant-org-isolation-and-auth-error-contrast.md`（含规范例外集中登记）；真机报告 `experiments/d5-03/D5-03-BATCH6-MATRIX-REPORT.md`。
 
@@ -1722,17 +1722,65 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 * **notVerified 8 条**（以真机报告 §7 为准）：① `--dur-quick` 口径不符（按实现记录）；② 设置面错误行消失后释放量残余 **12.6px** 成因未查明（向导面 48.4 = 48.4 精确成立）；③ 产品 Zoom 无真实入口（CDP 模拟）；④ 缩放长文案是注入的压力测试；⑤ 动效证据是帧序列不是视频；⑥ 跨组织真机 2 条继续保留（policy）；⑦ 两条探针门禁本身不通过；⑧ `light × solid` 的 `--content-rgb` 与 `light × full` 同值、该格无区分度。
 * **两步探针门禁既有失败（登记待单独排期）**：`governance-ui` **1/5**（失败点 `userByIdentifier` 返 null → `u2.id` 抛错，改动行之前）、`model-keychain-restart` **3/15**（失败点 `appById("settings")` 为 null → `PROXY_UNAUTHORIZED`，改动行上游）；**一次性授权 A/B 实测**：两个 fixture 临时回退到本批之前（`d4a3516`）→ 结果**完全相同**（同计数、同失败点），随后逐字节恢复（sha256 一致、`git status` 为空）⇒ **既有失败、与本批无关**。
 * **本批新登记的残留**：① `experiments/d3-04d/02-picker.mjs:26` 的 `qApp.total===0` 断言本身不敏感（baseline 存在时该查询也是 0；**既有弱化，非本批引入**）；② `.auth-error` 是**组件级局部补**，规范级解法（token 层「浮在可变背景上的文本行」材质档）**未做**（取舍已登记进决策文档）；③ 第六批**未跑受影响性分析工具、也未重跑 expiry 六场景**（expiry 复用是结构判断）；④ 报告 §8 的索引数字（61 条 / 60 行）与复核值（64 / 64）不一致，未入索引的空目录 `cf4e` 与工装迭代轮 `fcfa` 报告未登记（本岗补登）。
-* 既有缺口继续单列（不并入本批）：**OAuth**（仅 `NONE` / `BEARER`）、**设备配对凭据重置**（第五批登记残留）、**插件隔离（D5-08）**、**D5-02 重命名受 Electron 不支持 `prompt()` 限制**、**SIGKILL 边界**、第五批登记其余残留（`app_principals.status` / `RATE_LIMITED` 对象 detail / `invariants()` 无孤儿行检查）。**本批未新增「创建组织」入口**。
+* 既有缺口继续单列（不并入本批）：**OAuth**（仅 `NONE` / `BEARER`）、**设备配对凭据重置**（第五批登记残留）【**第七批已更新**：**已闭环** —— 已随重置同事务清空（真机 `devices` / `device_credentials` / `device_pairing_credentials` **1 / 1 / 2 → 0**，见文末第七批节）】、**插件隔离（D5-08）**、**D5-02 重命名受 Electron 不支持 `prompt()` 限制**、**SIGKILL 边界**、第五批登记其余残留（`app_principals.status` / `RATE_LIMITED` 对象 detail / `invariants()` 无孤儿行检查）。**本批未新增「创建组织」入口**。
 
 ## 4. 判定与下一步
 
 **判定：D5-03 第六批（App 授权组织隔离 + 登录错误行不透明内容底）= PASS（限定范围）；D5-03 整体仍 = PARTIAL。**
 
-剩余缺口逐条：① 跨组织真机入口 / 跨组织真机行为级（`notVerified` 2 条）；② 两条探针门禁既有失败（`governance-ui` / `model-keychain-restart`）待单独排期；③ OAuth；④ 设备配对凭据是否随重置清理；⑤ 插件隔离（D5-08）；⑥ D5-02 `prompt()` 遗留；⑦ SIGKILL 边界；⑧ 本批新登记残留（`.auth-error` 规范级解法 / expiry 未重跑 / 索引口径差异）。
+剩余缺口逐条：① 跨组织真机入口 / 跨组织真机行为级（`notVerified` 2 条）；② 两条探针门禁既有失败（`governance-ui` / `model-keychain-restart`）待单独排期；③ OAuth；④ 设备配对凭据是否随重置清理【**第七批已更新**：**已处理** —— 随重置同事务清空，真机 **1 / 1 / 2 → 0**】；⑤ 插件隔离（D5-08）；⑥ D5-02 `prompt()` 遗留；⑦ SIGKILL 边界；⑧ 本批新登记残留（`.auth-error` 规范级解法 / expiry 未重跑 / 索引口径差异）。
 
 **总经理裁定（本批，写进决策文档即生效）**：① **R3 登记表新增 `src/styles.css`（4 → 5 项）**，条件见决策文档 §7.3，含负向自证 4/4；② **`auth-error-visual` 的 V7b 口径重基线**（假阳性修正，**不是产品缺陷**：旧判据在本批「修复本身就是改 CSS」下必 FAIL）；③ **任务书 `--dur-quick` 口径与实现不符 → 按实现记录、不改成通过**。
 
 下一步建议：两条探针门禁单独排期 → 跨组织真机入口（产品需新增「新建组织」或多租户安装，本批不做）→ 设备配对凭据是否随重置清理（产品裁定）→ `.auth-error` 的 token 级材质档（规范级解法）→ OAuth → 真实第三方 / Adobe（D5-04 / D5-05）。
+
+---
+
+# D5-03 第七批 · 安装重置后旧设备身份失效 + 配对组织归属以会话为准 · 2026-09-29（`ed4502d` + `cd06927`）
+
+> **口径（用户明确定范围）**：本批 = **安装重置后旧设备身份失效**（重置删除集合 4 张 → 7 张：新增 `device_credentials` → `device_pairing_credentials` → `devices`，**子表先删**，仍在 `resetInstallation` **既有的那个 `transactSync`** 内；审计三表一行不删）+ **配对 / 设备读取的组织归属唯一来源 = 会话反查的 `users.team_id`**（`#sessionGate` 新增自报组织校验 `SESSION_ORGANIZATION_MISMATCH`）+ **守卫收紧**（白名单 1 → 恰好 4 条 + `WATCHED_TABLES` + 两条 fail-closed）；**不开放工具调用、不连真实第三方、不运行任意第三方程序、不发用户数据、不声称插件隔离通过**；**不新增「创建组织」产品入口**（用户明令）；**不做整库扫删**（用户明令）。
+> **判定：D5-03 第七批（安装重置后旧设备身份失效 + 配对组织归属以会话为准）= PASS（限定范围：功能通过；视觉 / 动效本批无界面改动）；D5-03 整体仍 = PARTIAL**（剩余缺口逐条见 §3 / §4）。
+> **当前有效证据 = 第七批 runId 清单**：新门禁 `mcp-device-reset-e2e` `20260929T023418Z-448b` **44/44 exit 0**、reset `20260929T023431Z-91f9` **28/28**、policy `20260929T023443Z-2442` **43/43**、`batch7-gates-rerun` `20260929T023535Z-73ed` **4/4**（内含 device-ui 32/32、identity-ui 26/26、相关 node 集合 183/183、`npm test` 1376/1370/6）、受影响性 `20260929T023327Z-2abd` **6/6**、索引完整性 `20260929T024221Z-fd34` **8/8**。**仍然有效的第六批证据**（复用理由见完整结果文档第七批 §2.2）：center `20260928T091508Z-967d` **38/38**（artifact sha256 `6726b742…`，复算未变）+ stream `20260928T091545Z-23e3` **29/29**（`8df59d52…`，复算未变）。
+> **证据口径披露（必读）**：产品修复 = 提交 `ed4502d`（5 个文件 = 2 个产品文件 `electron/identity-store.cjs` / `electron/device-service.cjs` + 3 个测试文件，含新增 `tests/d5-03-reset-device-identity.test.mjs`；`+934 / −111`）；门禁脚本与报告 = HEAD `cd06927`（**只改 `experiments/d5-03/` 6 个文件**，`git diff ed4502d cd06927 --stat` 证明产品代码零改动）。**全部 batch7 artifact 记 `testedCommit=ed4502d`** —— 真机运行时新门禁脚本尚未提交（受影响性分析 A2 记工作树只有两个未跟踪脚本 `batch7-affectedness.mjs` / `mcp-device-reset-e2e.mjs`），随后才提交成 `cd06927`；本岗复核：`mcp-device-reset-e2e.mjs` 在 HEAD 的 sha256 `c7f809b6…` 与 `448b` artifact 的 `scriptSha256` 逐字相等。**本批没有机器可读汇总 JSON**；索引复核 = `runs/index.json` **75 条**（11 条 batch7 + 64 条历史），75 个 artifact 逐条复算 sha256 **75 一致 / 0 不一致 / 0 缺失**（本岗独立复算）。
+> 完整结果 `docs/D5-03-RESULT.md` 第七批正文；tracked 证据 `docs/D5-03-GATE-EVIDENCE.json` 的 `batch7` 段（**纯插入**：旧段逐字节未改）；本批决策 `docs/decisions/D5-03G-install-reset-device-identity.md`；真机报告 `experiments/d5-03/D5-03-BATCH7-DEVICE-RESET-REPORT.md`。
+
+## 1. 任务状态
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| 重置清理 4 张 → 7 张 | **已完成** | `electron/identity-store.cjs` 的 `RESET_AUTHORIZATION_DELETE_SQL` 恰好 7 条字面量（授权四张 + `device_credentials` → `device_pairing_credentials` → `devices`，**子表先删**：`device_credentials.device_id REFERENCES devices(id)`，`PRAGMA foreign_keys = ON` 下顺序反了会直接抛错）；仍在 `resetInstallation` **既有的那个 `transactSync`** 内先执行、再删身份五表；真机设备三表 **1 / 1 / 2 → 0**、授权四表 **15 / 16 / 0 / 1 → 0**（含 `device_access` **1 → 0**）、身份五表 0；node 三个注入点（T4 / T5 / T6）分别证整体回滚 |
+| 为什么必须清（判据链） | **已完成** | `credentialByFingerprint`（`device-store.cjs:51`）→ `authenticateConnection`（`device-service.cjs:514`）是「这个连接是谁」的**唯一查找键**，只看指纹与凭据可用性、**不看组织**；随后心跳（`device-service.cjs:601`）用 `role:"ADMIN"` 的合成 actor 走 Device Gate **直接放行** —— 整条路径**不经过 `device_access`**，所以第五批只清授权表不足以让旧设备身份失效。未消费配对密钥同理：`consumePairing` 只按 `secret_hash` 反查、**不校验组织是否仍存在** → 重置后仍能把设备登记进已删组织（第五批 T7 实测的残留） |
+| 不清什么 + 理由 | **已完成** | 逐表给出「能否恢复身份 / 权限」的判据与代码位置；`resource_registry.device_id` 等属用户内容（不产生身份 / 权限）**不整库扫删**；`device_audit` / `authorization_audit` / `audit_log` 一行不删（真机 `device_audit` **8 → 8 逐行不变**） |
+| 组织归属唯一来源 = 会话 | **已完成** | `#sessionGate`（`device-service.cjs:87`）新增自报组织校验（`:108`）：调用方自报 `context.organizationId` 与会话不一致 → `SESSION_ORGANIZATION_MISMATCH`（与既有 `SESSION_USER_MISMATCH` 同形态，**不静默忽略**）；**6 处**取数 / 判定改用 `gate.actor.organizationId`；删掉 `"org_default000000000000"` 假组织兜底与服务级 `organizationId` 入口（全仓 `electron/` + `src/` **0 命中**）；`consumePairing` 的组织仍来自签发时的 `pairing.organization_id`（自报 `deviceIdentity.organizationId` 不匹配仍拒 `PAIRING_TOKEN_ORGANIZATION_MISMATCH`） |
+| 守卫（收紧） | **已完成** | `ALLOWED_ORG_DELETION_PATHS` 1 条 → **恰好 4 条**（含设备三表），匹配强度未放宽（文件 + 命中形态 + 去空白逐字相等）；新增 `WATCHED_TABLES`（**独立于白名单**：删掉一条登记项，仍要求该表被整表删 → fail-closed）+ 两条 fail-closed 断言（登记项必须在重置集合内 / 每张受 watch 表必须仍被整表删）；负向自证 **4 组注入全 FAIL、对照 PASS** |
+| 既有断言改写披露 | **已完成（逐字）** | 被测提交自己改写了 `tests/d5-03-reset-authorization-consistency.test.mjs` 的 4 处既有断言（T7「残留配对凭据仍能登记设备」→「`PAIRING_TOKEN_UNKNOWN` + 0 新设备 / 0 新凭据」；文件头「设备三表是配置类、凭据不构成授权」→「这三张是**能恢复设备身份**的事实，随重置同事务清空」；T6「恰好四张授权表」→「七张」；T2「四表 0 行」→「七张全 0 行」），文件头已逐字写明「旧期望 → 新期望」；理由 = 这些断言刻画的正是本批要修的缺陷本身。本岗对 `experiments/d5-03/mcp-reset-e2e.mjs` **只增** C2b / D2b 两条七表断言 + 文案，**原 26 条一字未删**，计数 26 → 28 |
+| 三轴判定 | **功能 = 通过；视觉 = 通过（本批无界面改动）；动效 = 通过（本批无界面改动）** | 见 §2 |
+| 回归 | **已完成** | 相关 node 集合 **183/183、exit 0**（29 文件，含新增 `tests/d5-03-reset-device-identity.test.mjs` 11 用例）；`device-ui` **32/32**、`identity-ui` **26/26** 均 exit 0；全量 `npm test` **1376 tests / 1370 pass / 6 fail / exit 1**（6 条逐个给因：2 条既有 + 4 条 **dsh 版本漂移环境性失败**，5 个失败文件对本批改动符号命中数**全为 0**）；`SCHEMA_VERSION` **仍 21**（无 schema 变更，只删行不删表）；`npm run build` 未独立复跑（产品提交自证） |
+
+## 2. 三轴判定（分列）
+
+* **功能 = 通过**：新门禁 `mcp-device-reset-e2e` **44/44 exit 0**（notVerified 0 / productDefects 0）；`mcp-reset-e2e` **28/28 exit 0**；`mcp-policy-e2e` **43/43 exit 0**（notVerified 2，既有）；`batch7-gates-rerun` **4/4**；受影响性 **6/6**；索引完整性 **8/8**；真实 `electron .` + 真实产品操作面（配对密钥由真实 UI 设备面板签发，界面加入码与服务返回值 sha256 逐字相等）/ 探针只读 DB（`DatabaseSync readOnly`，`databaseWritesByProbe=false`，写操作只经产品服务）。
+* **视觉 = 通过（本批无界面改动）**：本批改动文件只有 `electron/identity-store.cjs` 与 `electron/device-service.cjs`（+ 3 个测试文件），**不含任何 `.tsx` / `.css`** —— 无需新的浅 / 深或动效量测；如实写理由，不宣称做过像素量测。真机 UI（设备面板）只作为功能驱动路径使用（加入码逐字对照、设备行与后端对照）。
+* **动效 = 通过（本批无界面改动）**：同上，改动面不含样式与动画，本批无动效可验。
+
+## 3. notVerified 与缺口（如实登记）
+
+* **notVerified 7 条**（以真机报告 §8 为准）：① **真机注入式回滚**（真机没有注入入口，且不改产品代码无法注入）→ 替代证据 = `tests/d5-03-reset-device-identity.test.mjs` 的 **T4**（`DELETE FROM device_credentials` 注入）/ **T5**（`DELETE FROM devices` 注入）/ **T6**（`DELETE FROM installations` 注入）三个注入点，本轮现场重跑 **183/183**；② **视觉 / 动效量测**（本批无界面改动，没有像素变化可量）；③ **`device_access` 的产品 IPC 入口**（真机为服务级直调，路径已披露）—— **第五批那条「`device_access` 真机 0 → 0 不构成清理证据」本轮已闭环**：新门禁在真实主进程对产品自己的 `DeviceService` 直调 `grantDeviceAccess` 造 1 行 → 重置后 **1 → 0**；④ `invariants()` 的**原生可读入口**（`identity:command` 白名单里没有，仍用等价只读复算）；⑤ **组织 ID 复用的真机对照**（产品没有「用指定 id 创建组织」的入口）→ node T3；⑥ **共库双组织的真机行为级**（`mcp-policy-e2e` 既有 notVerified 2 条；本批未新增「创建组织」入口）；⑦ **真实第三方接入 / 插件隔离**（不在本批范围，**不声称通过**）。
+* **路径披露（设备侧动作真的没有 IPC 入口）**：`device:command` 白名单 10 条命令里**没有** `consumePairing`（设备侧动作）/ `authenticateConnection` / `heartbeat`（TLS 后连接身份）/ `grantDeviceAccess`（设备 ACL 写入），且 `device:command` 的 context 由主进程自建（`electron/device-bootstrap.cjs:54`）—— 渲染层连自报 `organizationId` 都递不进去。新门禁经**真实主进程调试口**（`--inspect`，只监听 127.0.0.1、端口独占）给 `DeviceService.prototype` 装**只记录、不改变行为**的包装，捕获**产品自己在真实 UI 路径上创建的那个实例**后直调这些方法 —— **不改产品文件、不写 SQL、查库 readOnly、会话 token 不回传（只回传长度 + sha256 前 16 位）**。
+* **两条既有探针门禁继续单列**（**第六批**已用一次性授权 A/B 实测证明是既有失败，本批未改 `tests/**`）：`governance-ui` **1/5**、`model-keychain-restart` **3/15**，登记待单独排期。
+* **本批新登记的遗留**：① `run-artifacts.cjs` 索引条目**不记录 `logSha256`**（既有工具缺口：条目引用 `artifacts.logSha256`，而该字段写在 artifact 上；本轮用产物 JSON 核对代替，**未改工具**）；② **2 个历史孤儿 run 目录 + 1 次崩溃运行目录**（均无产物 JSON，不影响判定）；③ **环境 dsh 版本漂移**（`0.1.5-rc.2` → `0.2.0-rc.1`）会让「全量绿」长期不可得，建议维护方决定钉版本或改断言（**不由本批擅自改断言**）。
+* **常量名说明**：`RESET_AUTHORIZATION_DELETE_SQL` 现在含设备身份三张表、**名字偏窄但保留未改名**（docs / 守卫 fail-closed 定位串锚在此名上），已在代码注释中显式披露。
+* 既有缺口继续单列（不并入本批）：**OAuth**（仅 `NONE` / `BEARER`）、**插件隔离（D5-08）**、**D5-02 重命名受 Electron 不支持 `prompt()` 限制**、**SIGKILL 边界**、第五批登记其余残留（`app_principals.status` / `RATE_LIMITED` 对象 detail / `invariants()` 无孤儿行检查）。**本批未新增「创建组织」入口。**
+
+## 4. 判定与下一步
+
+**判定：D5-03 第七批（安装重置后旧设备身份失效 + 配对组织归属以会话为准）= PASS（限定范围）；D5-03 整体仍 = PARTIAL。**
+
+剩余缺口逐条：① 跨组织真机入口 / 跨组织真机行为级（`notVerified` 2 条，继续保留）；② 两条探针门禁既有失败（`governance-ui` / `model-keychain-restart`）待单独排期；③ OAuth；④ 插件隔离（D5-08）；⑤ D5-02 `prompt()` 遗留；⑥ SIGKILL 边界；⑦ 本批新登记遗留（`logSha256` 工具缺口 / 孤儿目录 / dsh 版本漂移）；⑧ 第五批登记其余残留（`app_principals.status` / `RATE_LIMITED` 对象 detail / `invariants()` 无孤儿行检查）。
+
+**本批闭环的旧缺口**：第五批登记的「`device_pairing_credentials` 未清 = 已登记的残留能力」（本批随重置同事务清空，真机 **1 / 1 / 2 → 0**、旧密钥 `PAIRING_TOKEN_UNKNOWN`、**0 新设备 / 0 新凭据**）；第五批 `device_access` 真机「0 → 0 不构成清理证据」（本批补成真机 **1 → 0**）。
+
+下一步建议：两条探针门禁单独排期 → 跨组织真机入口（产品需新增「新建组织」或多租户安装，本批不做）→ 设备侧动作是否要开一条产品命令通道（产品方向决策）→ OAuth → 真实第三方 / Adobe（D5-04 / D5-05）→ dsh 版本漂移处置（钉版本或改断言，由维护方决定）。
 
 
 

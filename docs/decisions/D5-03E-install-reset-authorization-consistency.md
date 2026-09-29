@@ -1,6 +1,6 @@
 # D5-03 第五批 · 安装重置同事务清授权状态 + 登录失败文案收口
 
-状态：**已实现并完成真机（Electron）验收** —— 2026-09-28 串行重跑：安装重置门禁 **26/26**、policy **43/43**（R3 重基线后）、center **38/38**、stream **29/29**、expiry-idle **26/26**（M1 假阳性修正后）、受影响性分析 **10/10**，**全部 exit 0**；文案视觉 **16/17**（唯一失败 = 浅色向导卡 `.auth-error` 实测 **2.62:1** 不达 4.5:1，**既有缺口，本批未改样式**）；本批改动文件**不含任何 `.css`**。 【**第六批已更新**：本节为第五批的历史正文，结论一条未删；被第六批改写的口径就地加【第六批已更新】。**第六批（App 授权组织隔离 + 登录错误行不透明内容底，`d1ba058` + `2944e45`）的判定 = PASS（限定范围）；D5-03 整体仍 = PARTIAL**，见 `docs/decisions/D5-03F-app-grant-org-isolation-and-auth-error-contrast.md` 与本文件的就地标注。第五批的 reset / center / stream / policy / 视觉五项已由第六批**同提交新鲜重跑**取代；`27eb` 的 **16/17 与 2.62:1 保留为修复前历史证据**。】
+状态：**已实现并完成真机（Electron）验收** —— 2026-09-28 串行重跑：安装重置门禁 **26/26**、policy **43/43**（R3 重基线后）、center **38/38**、stream **29/29**、expiry-idle **26/26**（M1 假阳性修正后）、受影响性分析 **10/10**，**全部 exit 0**；文案视觉 **16/17**（唯一失败 = 浅色向导卡 `.auth-error` 实测 **2.62:1** 不达 4.5:1，**既有缺口，本批未改样式**）；本批改动文件**不含任何 `.css`**。 【**第六批已更新**：本节为第五批的历史正文，结论一条未删；被第六批改写的口径就地加【第六批已更新】。**第六批（App 授权组织隔离 + 登录错误行不透明内容底，`d1ba058` + `2944e45`）的判定 = PASS（限定范围）；D5-03 整体仍 = PARTIAL**，见 `docs/decisions/D5-03F-app-grant-org-isolation-and-auth-error-contrast.md` 与本文件的就地标注。第五批的 reset / center / stream / policy / 视觉五项已由第六批**同提交新鲜重跑**取代；`27eb` 的 **16/17 与 2.62:1 保留为修复前历史证据**。】 【**第七批已更新**：本节仍是第五批历史正文，结论一条未删；被第七批改写的口径就地加【第七批已更新】。**第七批（安装重置后旧设备身份失效 + 配对组织归属以会话为准，`ed4502d` + `cd06927`）的判定 = PASS（限定范围）；D5-03 整体仍 = PARTIAL**，见 `docs/decisions/D5-03G-install-reset-device-identity.md`。第五批的 reset（26/26）与 policy（43/43）已由第七批**同提交新鲜重跑**取代（`91f9` 28/28、`2442` 43/43）；center / stream 按机械受影响性分析（0 命中改动符号）**复用第六批证据**。】
 
 * **判定：D5-03 第五批 = PASS（限定范围：功能通过、视觉部分通过）；D5-03 整体仍 = PARTIAL**（剩余缺口见 §10）。
 * 被测内容 = 提交 `09dccf9`（产品修复）+ `7ad424c`（门禁脚本与报告）；**artifact 记录的 `testedCommit` = `09dccf9c2cba5f21e787160de376a166db61a38d`**（10 个 batch5 artifact 全部同值）—— 逐条披露见 §1。
@@ -91,7 +91,7 @@
 | `canvas_boards` | 用户内容 | 授权判定的**目标**，不是来源 | `canvas-store.cjs:13 / :18` |
 | `devices` | 设备登记（配置） | 访问权威是 `device_access`（已清）；设备行本身不构成资源 / 应用授权 | `device-store.cjs:22` |
 | `device_credentials` | 设备凭据（配置） | 同上 | `device-store.cjs:50 / :51 / :52` |
-| `device_pairing_credentials` | 配对凭据（配置） | **本批新登记的残留**：重置前签发的配对凭据仍可再登记设备，但 T7 证明它**不产生授权结论**（`device_access` 已清 → 全部 DENY）；是否清属产品裁定 | `device-store.cjs:38 / :39` |
+| `device_pairing_credentials` | 配对凭据（配置） | **本批新登记的残留**：重置前签发的配对凭据仍可再登记设备，但 T7 证明它**不产生授权结论**（`device_access` 已清 → 全部 DENY）；是否清属产品裁定【**第七批已更新**：**已随重置同事务清空**（真机 `devices` / `device_credentials` / `device_pairing_credentials` **1 / 1 / 2 → 0**、旧未使用密钥 `PAIRING_TOKEN_UNKNOWN` 且 **0 新设备 / 0 新凭据**）；判据订正见 §8 同款注解与 `docs/decisions/D5-03G-install-reset-device-identity.md`】 | `device-store.cjs:38 / :39` |
 | `model_providers` | 模型配置 | 模型授权权威是 `app_resource_grants(resource_type='model')`（已清） | `model-store.cjs:7 / :8` |
 | `model_configs` | 模型配置 | 同上 | `model-store.cjs:13 / :14` |
 | `model_defaults` | 模型配置 | 同上 | `model-store.cjs:18 / :19` |
@@ -167,13 +167,13 @@
 1. **`notVerified`：跨组织真机 2 条继续保留**（`mcp-policy-e2e`）—— 同一安装内第二个组织无产品入口 → 跨组织行为级只到 schema + node 级；**本批未新增「创建组织」入口**。
 2. **本批新增并逐条列出（6 条）**：
    ① **组织 ID 复用真机不可构造** → 用 node 受控 T3（理由：产品没有「用指定 id 创建组织」的入口，不用改库构造）；
-   ② **`device_access` 真机 0 → 0 不构成清理证据**（`consumePairing` 需要另一台设备带服务身份消费配对密钥，产品 IPC 没有授权入口）→ node T1/T2 在四表非空下覆盖；
+   ② **`device_access` 真机 0 → 0 不构成清理证据**（`consumePairing` 需要另一台设备带服务身份消费配对密钥，产品 IPC 没有授权入口）→ node T1/T2 在四表非空下覆盖；【**第七批已更新**：**该 notVerified 已闭环** —— 第七批新门禁 `mcp-device-reset-e2e`（runId `20260929T023418Z-448b`，44/44 exit 0）在真实主进程对产品自己的 `DeviceService` 直调 `grantDeviceAccess` 造 1 行 → 重置后真机 **1 → 0**（`device_access` 的产品 IPC 入口仍不存在，路径已在报告 §1.2 披露）；`mcp-reset-e2e` 自身那条 0 → 0 文案已改为指向本批真机证据】
    ③ **产品侧 `invariants()` 原生入口缺失** → 真机用等价只读复算 `invariantsEquivalentReadonly`（逐条等价），五个快照全空；
    ④ **`session-missing` / `not-locked` 真机不可达**（restore 失败时渲染层只回登录页、不显示错误行；unlock 只在锁屏可用）→ 五处真机 DOM 扫描 0 命中 + node 对 253 个内部标记的全量断言；
    ⑤ **浅色向导卡 `.auth-error` 实测 2.62:1 < 4.5:1** —— **判定不通过**（视觉轴因此为「部分通过」，不是「未验收」）；⑤ **浅色向导卡 `.auth-error` 实测 2.62:1 < 4.5:1** —— **判定不通过**（视觉轴因此为「部分通过」，不是「未验收」）；【**第六批已更新**：**已修复** —— `.auth-error` 加不透明内容底 `rgb(var(--content-rgb) / 1)`；真机复测向导面 **5.372:1 ≥ 4.5:1**（矩阵 10 格 × 2 面全绿，runId `20260928T094556Z-c729`，43/43、exit 0）。本条作为第五批的历史 notVerified 保留。】
    ⑥ **整窗截图与第四批窗口裁剪非逐像素同尺寸** —— 认证界面是全窗表面（2880×1880 设备像素 = 1440×940 CSS × DPR 2），第四批基准是 MCP 窗口 830×570 CSS 裁剪；窗口 / 缩放 / 背景 / 透明度同口径，**截图范围不同**。
 3. **本批新登记的残留**：
-   * `device_pairing_credentials` **未清**：重置前签发的配对凭据仍可再登记设备；T7 证明**不产生授权结论**（`device_access` 已清 → 全部 DENY）。建议下批处理或由产品裁定。
+   * `device_pairing_credentials` **未清**：重置前签发的配对凭据仍可再登记设备；T7 证明**不产生授权结论**（`device_access` 已清 → 全部 DENY）。建议下批处理或由产品裁定。【**第七批已更新**：**已闭环** —— 第七批把 `device_credentials` → `device_pairing_credentials` → `devices` 三张并入 `RESET_AUTHORIZATION_DELETE_SQL`（4 → 7 张，仍在既有的那个 `transactSync` 内，子表先删）；真机三表 **1 / 1 / 2 → 0**、旧未使用密钥 `PAIRING_TOKEN_UNKNOWN` 且 **0 新设备 / 0 新凭据**、旧指纹 `DEVICE_CREDENTIAL_UNKNOWN`、旧长连接心跳 `DEVICE_CREDENTIAL_MISMATCH`；判据链（凭据按 fingerprint 取数、配对密钥按 secret_hash 取数，两条都不比对组织；心跳用 `role:ADMIN` 合成 actor 走 Device Gate 不经 `device_access`）见 `docs/decisions/D5-03G-install-reset-device-identity.md`】
    * `app_principals.status` **不受重置影响**（安装级配置，`app_principals` 无 `organization_id`，不在 27 张表内）。
    * `RATE_LIMITED` 的 `{retryAfterMs}` 对象 detail **现被过滤，但未映射成人话**（用户只看到「尝试过于频繁，请稍后再试。」）。
    * `invariants()` **未加「孤儿授权行」检查**：本批把孤儿行清零了，但自检本身仍不检查该形态（理由：`invariants()` 是交付给 node 测试的判据、改动会牵动既有断言；代价：将来若再出现孤儿行，自检不会报）。
@@ -205,6 +205,6 @@ OA_RETENTION_ELECTRON_DIR="$T/electron" node --test tests/app-policy-provisions-
 ## 12. 判定
 
 * **D5-03 第五批（安装重置同事务清授权状态 + 登录失败文案收口）= PASS（限定范围：功能通过、视觉部分通过）**：重置门禁 **26/26**、policy **43/43**（notVerified 2）、center **38/38**、stream **29/29**、expiry-idle **26/26**、受影响性分析 **10/10**，**全部 exit 0**；四张授权事实表真机 15/14/1/0 → **0/0/0/0**，审计三表一行不删（`audit_log` 既有行不删 + 恰好多重置自身两条）；27 张 `organization_id` 表逐表判据 + 整库扫删被拒；守卫收紧到「恰好一条 + 逐字匹配」并有永久负向自证 R6b；文案收口后内部标记 0 命中；视觉 = **部分通过**（唯一失败 = 浅色向导卡 2.62:1，既有缺口、本批未改样式）；**动效 = 通过**（本批改动文件不含任何 `.css`）。
-* **D5-03 整体仍 = PARTIAL**，剩余缺口 = §10 逐条（跨组织真机 2 条 / OAuth / 真实第三方与 Adobe、PS（D5-04/05）/ 插件隔离（D5-08）/ D5-02 `prompt()` / SIGKILL 边界 / 本批新登记 5 条残留，含浅色对比度 2.62:1）。/ 本批新登记 5 条残留，含浅色对比度 2.62:1）。【**第六批已更新**：剩余缺口更新为「跨组织真机 2 条 / 两条探针门禁既有失败待排期（`governance-ui` 1/5、`model-keychain-restart` 3/15）/ OAuth / 设备配对凭据重置 / 插件隔离（D5-08）/ D5-02 `prompt()` / SIGKILL 边界 / 第六批新登记残留」；其中「浅色对比度 2.62:1」已闭合。】
+* **D5-03 整体仍 = PARTIAL**，剩余缺口 = §10 逐条（跨组织真机 2 条 / OAuth / 真实第三方与 Adobe、PS（D5-04/05）/ 插件隔离（D5-08）/ D5-02 `prompt()` / SIGKILL 边界 / 本批新登记 5 条残留，含浅色对比度 2.62:1）。/ 本批新登记 5 条残留，含浅色对比度 2.62:1）。【**第六批已更新**：剩余缺口更新为「跨组织真机 2 条 / 两条探针门禁既有失败待排期（`governance-ui` 1/5、`model-keychain-restart` 3/15）/ OAuth / 设备配对凭据重置 / 插件隔离（D5-08）/ D5-02 `prompt()` / SIGKILL 边界 / 第六批新登记残留」；其中「浅色对比度 2.62:1」已闭合。】【**第七批已更新**：剩余缺口中的「设备配对凭据重置」**已闭合**（随重置同事务清空，真机 **1 / 1 / 2 → 0**）；最新剩余缺口 = 跨组织真机 2 条（继续保留）/ 两条探针门禁既有失败待排期 / OAuth / 插件隔离（D5-08）/ D5-02 `prompt()` / SIGKILL 边界 / 第七批新登记遗留（`logSha256` 工具缺口、孤儿目录、dsh 版本漂移）/ 第五批登记其余残留（`app_principals.status` / `RATE_LIMITED` 对象 detail / `invariants()` 无孤儿行检查）；**D5-03 整体仍 = PARTIAL**】
 * **本批闭环的旧缺口**：`resetInstallation` 孤儿授权残留（第四批登记，且其「不可达」判定被本批订正为「App 侧可复活」）；`errorText` 通用括注泄漏内部 detail（第四批登记）；R3 陈旧 src 白名单（第五批过程中暴露并重基线）。
 * tracked 证据：`docs/D5-03-GATE-EVIDENCE.json` 的 `batch5` 段；本批决策 = 本文件；真机报告与汇总 JSON 见 §0 口径行；第三批决策 `docs/decisions/D5-03C-streamable-http.md`、第四批决策 `docs/decisions/D5-03D-session-expiry-and-policy-retention.md`（含【第五批订正】标记与第五批节）。
