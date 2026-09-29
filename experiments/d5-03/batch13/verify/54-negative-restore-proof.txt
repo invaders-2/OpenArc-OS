@@ -1,0 +1,50 @@
+$ cp /tmp/oa-b13-runtime.orig.cjs electron/side-effect-runtime.cjs   # 负向自证 A 还原
+# date: 2026-09-29T15:53:06Z
+=== shasum -a 256 electron/side-effect-runtime.cjs ===
+8e7d269d4c768e55a4fec98743e7e082644d134cd1d58f0088c561da11fd5777  electron/side-effect-runtime.cjs
+=== shasum -a 256 /tmp/oa-b13-runtime.orig.cjs（备份）===
+8e7d269d4c768e55a4fec98743e7e082644d134cd1d58f0088c561da11fd5777  /tmp/oa-b13-runtime.orig.cjs
+=== git diff --exit-code -- electron/ tests/ ===
+git diff exit=0
+=== git diff --exit-code（全树）===
+git diff exit=0
+=== git status --porcelain（只应有 ?? 未跟踪）===
+?? experiments/d5-03/batch13/E1-REPORT.md
+?? experiments/d5-03/batch13/E2-REPORT.md
+?? experiments/d5-03/batch13/evidence/
+?? experiments/d5-03/batch13/red/00-pre-diff-confirm.txt
+?? experiments/d5-03/batch13/red/00-red-inprocess-bypass.txt
+?? experiments/d5-03/batch13/red/00-red-summary.json
+?? experiments/d5-03/batch13/red/01-green-inprocess-bypass.txt
+?? experiments/d5-03/batch13/red/01-green-summary.json
+?? experiments/d5-03/batch13/red/02-legit-inprocess-regression.txt
+?? experiments/d5-03/batch13/red/03-green-c4-gates.txt
+?? experiments/d5-03/batch13/red/04-negative-selfproof-whitelist-widened.txt
+?? experiments/d5-03/batch13/red/05-negative-selfproof-behavior.txt
+?? experiments/d5-03/batch13/verify/
+$ cp /tmp/oa-b13-runtime.orig.cjs electron/side-effect-runtime.cjs   # 负向自证 B 还原
+# date: 2026-09-29T15:53:26Z
+=== shasum -a 256 electron/side-effect-runtime.cjs ===
+8e7d269d4c768e55a4fec98743e7e082644d134cd1d58f0088c561da11fd5777  electron/side-effect-runtime.cjs
+=== shasum -a 256 /tmp/oa-b13-runtime.orig.cjs（备份）===
+8e7d269d4c768e55a4fec98743e7e082644d134cd1d58f0088c561da11fd5777  /tmp/oa-b13-runtime.orig.cjs
+=== sha256（与 commit 312dc60 内置版本对比）===
+8e7d269d4c768e55a4fec98743e7e082644d134cd1d58f0088c561da11fd5777  -
+=== git diff --exit-code -- electron/ tests/ ===
+git diff exit=0
+=== git diff --exit-code（全树）===
+git diff exit=0
+=== git status --porcelain ===
+?? experiments/d5-03/batch13/E1-REPORT.md
+?? experiments/d5-03/batch13/E2-REPORT.md
+?? experiments/d5-03/batch13/evidence/
+?? experiments/d5-03/batch13/red/00-pre-diff-confirm.txt
+?? experiments/d5-03/batch13/red/00-red-inprocess-bypass.txt
+?? experiments/d5-03/batch13/red/00-red-summary.json
+?? experiments/d5-03/batch13/red/01-green-inprocess-bypass.txt
+?? experiments/d5-03/batch13/red/01-green-summary.json
+?? experiments/d5-03/batch13/red/02-legit-inprocess-regression.txt
+?? experiments/d5-03/batch13/red/03-green-c4-gates.txt
+?? experiments/d5-03/batch13/red/04-negative-selfproof-whitelist-widened.txt
+?? experiments/d5-03/batch13/red/05-negative-selfproof-behavior.txt
+?? experiments/d5-03/batch13/verify/

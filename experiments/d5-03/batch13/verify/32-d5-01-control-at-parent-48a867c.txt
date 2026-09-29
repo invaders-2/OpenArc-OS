@@ -1,0 +1,50 @@
+$ cd /tmp/oa-b013-base && env -u ELECTRON_RUN_AS_NODE OA_D501_CTRL_CDP_PORT=9791 npm run test:d5-01-control
+# 基线对照：父提交 48a867c（git worktree add /tmp/oa-b013-base 48a867c；node_modules 软链到集成工作树）
+# git -C /tmp/oa-b013-base rev-parse HEAD = 48a867c75f94d082d68f9509fed35293454fc65e
+# CDP 端口用 9791 避开集成树默认 9790
+# date: 2026-09-29T16:03:16Z
+# --- begin raw stdout+stderr ---
+
+> openarc-os@0.1.0 test:d5-01-control
+> npm run build && node experiments/d5-01/browser-control-e2e.mjs
+
+
+> openarc-os@0.1.0 build
+> tsc --noEmit && vite build
+
+vite v7.3.6 building client environment for production...
+transforming...
+✓ 1638 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/design-system.html                   0.79 kB │ gzip:   0.43 kB
+dist/index.html                           0.84 kB │ gzip:   0.42 kB
+dist/assets/design-system-Wum50NZM.css    3.45 kB │ gzip:   0.95 kB
+dist/assets/page-states-CtkK1Qxt.css     87.47 kB │ gzip:  16.15 kB
+dist/assets/design-system-BKhOPsHZ.js    15.16 kB │ gzip:   5.08 kB
+dist/assets/page-states-BFPlgRhI.js     230.68 kB │ gzip:  72.24 kB
+dist/assets/main-qXEiIhXD.js            373.56 kB │ gzip: 112.99 kB
+✓ built in 1.13s
+(node:93330) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  [PASS] boot · M1 · 真实 electron . 启动并暴露 CDP
+  [PASS] boot · M2 · 真实 UI 登录 admin
+! [FAIL] setup · S0a · 真实 UI 创建确定性 provider/model 并设为默认 chat — 期望 provider+model+default，实际 {"pid":"","cid":"","defaultOk":false}
+! [FAIL] setup · S0b · 真实 UI 连接测试 Inference:PASS — 期望 Inference:PASS，实际 
+  [PASS] setup · S0c · 真实治理 UI 授予 ai tool.browser.read / tool.browser.navigate
+  [PASS] ui · U1 · 从 Dock 打开浏览器窗口
+  [PASS] ui · U2 · 地址栏真实导航到恶意页面（注入样例）
+  [PASS] ui · U3 · 未授权时 AI 控制按钮为 off，且主进程授权列表为空
+  [PASS] ui · U4 · 点击按钮显式授权当前标签（真实 UI → 主进程）
+  [PASS] ui · U5 · 主进程授权目标 = 该标签的稳定身份（windowId#tabId）
+  [PASS] ui · U6 · 标签栏显示该标签已被授权
+! [FAIL] S1 · S1.0 · 真实 UI 启动任务（official dsh + Tool Facade） — 期望 新 task id，实际 
+E2E 异常：TypeError: Cannot read properties of undefined (reading 'status')
+    at main (file:///private/tmp/oa-b013-base/experiments/d5-01/browser-control-e2e.mjs:297:106)
+    at async file:///private/tmp/oa-b013-base/experiments/d5-01/browser-control-e2e.mjs:475:14
+--- main stderr tail ---
+
+DevTools listening on ws://127.0.0.1:9791/devtools/browser/778a17f9-cb29-41ad-b427-a42f48e83bf7
+
+# --- end raw output ---
+# EXIT CODE: 2

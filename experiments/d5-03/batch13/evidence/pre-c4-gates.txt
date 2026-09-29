@@ -1,0 +1,143 @@
+TAP version 13
+# (node:84284) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Deny → 0 mutation / BLOCKED / 0 lease / 0 execution；Harness 只得到 bounded denied
+ok 1 - Deny → 0 mutation / BLOCKED / 0 lease / 0 execution；Harness 只得到 bounded denied
+  ---
+  duration_ms: 455.959833
+  type: 'test'
+  ...
+# Subtest: Approval timeout → 0 mutation / call BLOCKED(APPROVAL_TIMEOUT) / 0 retry
+ok 2 - Approval timeout → 0 mutation / call BLOCKED(APPROVAL_TIMEOUT) / 0 retry
+  ---
+  duration_ms: 559.630917
+  type: 'test'
+  ...
+# Subtest: Task Cancel While Waiting → 0 mutation / 0 lease / no later approval can execute
+ok 3 - Task Cancel While Waiting → 0 mutation / 0 lease / no later approval can execute
+  ---
+  duration_ms: 512.661042
+  type: 'test'
+  ...
+# Subtest: Session Revoked While Waiting → Approve DENY / 0 execution
+ok 4 - Session Revoked While Waiting → Approve DENY / 0 execution
+  ---
+  duration_ms: 549.584083
+  type: 'test'
+  ...
+# Subtest: App Disabled While Waiting → claim-time snapshot 拒绝；0 mutation
+ok 5 - App Disabled While Waiting → claim-time snapshot 拒绝；0 mutation
+  ---
+  duration_ms: 428.860416
+  type: 'test'
+  ...
+# Subtest: Tool permission revoked While Waiting → 0 mutation
+ok 6 - Tool permission revoked While Waiting → 0 mutation
+  ---
+  duration_ms: 436.266458
+  type: 'test'
+  ...
+# Subtest: useByAgent revoked While Waiting（non-admin actor）→ 0 mutation
+ok 7 - useByAgent revoked While Waiting（non-admin actor）→ 0 mutation
+  ---
+  duration_ms: 442.067166
+  type: 'test'
+  ...
+# Subtest: Precondition changed While Waiting → SIDE_EFFECT_PRECONDITION_CHANGED；0 write / 不 silent re-plan
+ok 8 - Precondition changed While Waiting → SIDE_EFFECT_PRECONDITION_CHANGED；0 write / 不 silent re-plan
+  ---
+  duration_ms: 499.297834
+  type: 'test'
+  ...
+# Subtest: Concurrent Approve click → 单一 authoritative approval transition；1 lease / 1 execution
+ok 9 - Concurrent Approve click → 单一 authoritative approval transition；1 lease / 1 execution
+  ---
+  duration_ms: 497.5985
+  type: 'test'
+  ...
+# Subtest: Concurrent Executor → only one claim / only one ACTIVE lease；mutation exactly 1
+ok 10 - Concurrent Executor → only one claim / only one ACTIVE lease；mutation exactly 1
+  ---
+  duration_ms: 587.318917
+  type: 'test'
+  ...
+# Subtest: Approval Revocation Race：APPROVED 后 claim 前 REVOKED → 0 Domain invocation
+ok 11 - Approval Revocation Race：APPROVED 后 claim 前 REVOKED → 0 Domain invocation
+  ---
+  duration_ms: 484.321583
+  type: 'test'
+  ...
+# Subtest: Task Cancel Race：executor eligibility 窗口内 cancel → 0 Domain invocation
+ok 12 - Task Cancel Race：executor eligibility 窗口内 cancel → 0 Domain invocation
+  ---
+  duration_ms: 519.719917
+  type: 'test'
+  ...
+# Subtest: Harness spoof through production WRITE route → denied / 0 SideEffectCall
+ok 13 - Harness spoof through production WRITE route → denied / 0 SideEffectCall
+  ---
+  duration_ms: 442.535375
+  type: 'test'
+  ...
+# Subtest: Duplicate tool delivery → 只有一个 SideEffectCall / 一个 idempotencyKey；0 second mutation
+ok 14 - Duplicate tool delivery → 只有一个 SideEffectCall / 一个 idempotencyKey；0 second mutation
+  ---
+  duration_ms: 443.541041
+  type: 'test'
+  ...
+# Subtest: Trusted Approval Gateway：untrusted sender 抛错；unknown command 拒绝；Renderer 自报 actor 被忽略
+ok 15 - Trusted Approval Gateway：untrusted sender 抛错；unknown command 拒绝；Renderer 自报 actor 被忽略
+  ---
+  duration_ms: 429.259125
+  type: 'test'
+  ...
+# Subtest: Approval Snapshot：safe 投影（无 secret / 路径 / store root）；terminal 或跨 session → 不返回
+ok 16 - Approval Snapshot：safe 投影（无 secret / 路径 / store root）；terminal 或跨 session → 不返回
+  ---
+  duration_ms: 436.607417
+  type: 'test'
+  ...
+# Subtest: Tool Facade Bridge WRITE route：只产生 SideEffect Proposal；WRITE 绝不经 READ_ONLY execution route
+ok 17 - Tool Facade Bridge WRITE route：只产生 SideEffect Proposal；WRITE 绝不经 READ_ONLY execution route
+  ---
+  duration_ms: 454.930083
+  type: 'test'
+  ...
+# Subtest: No Direct Domain Bypass：resource.trash 的唯一 Domain 调用点在 allowlisted adapter + controlled execution 内
+not ok 18 - No Direct Domain Bypass：resource.trash 的唯一 Domain 调用点在 allowlisted adapter + controlled execution 内
+  ---
+  duration_ms: 2.256959
+  type: 'test'
+  location: '/Users/wepingli/Desktop/OpenArc OS-integration/tests/side-effect-c4-gates.test.mjs:444:1'
+  failureType: 'testCodeFailure'
+  error: '主进程绝不 in-process 执行 write'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: '=='
+  stack: |-
+    TestContext.<anonymous> (file:///Users/wepingli/Desktop/OpenArc%20OS-integration/tests/side-effect-c4-gates.test.mjs:474:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: WRITE tool result 投影只含 safe 字段（无绝对路径 / DB id / lease / capability）
+ok 19 - WRITE tool result 投影只含 safe 字段（无绝对路径 / DB id / lease / capability）
+  ---
+  duration_ms: 507.173542
+  type: 'test'
+  ...
+1..19
+# tests 19
+# suites 0
+# pass 18
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 8775.575625

@@ -1,0 +1,73 @@
+$ env -u ELECTRON_RUN_AS_NODE OA_D501_CTRL_CDP_PORT=9792 npm run test:d5-01-control
+# 复核：HEAD=312dc60 第二次跑（换 CDP 端口 9792、清空 stderr 日志），用于判定 30 号那次「页面被关闭」是竞态还是产品差异
+# cwd: /Users/wepingli/Desktop/OpenArc OS-integration
+# git HEAD: 312dc606fee9d9c147a9d863fba7fe504961ab26
+# date: 2026-09-29T16:10:37Z
+# --- begin raw stdout+stderr ---
+
+> openarc-os@0.1.0 test:d5-01-control
+> npm run build && node experiments/d5-01/browser-control-e2e.mjs
+
+
+> openarc-os@0.1.0 build
+> tsc --noEmit && vite build
+
+vite v7.3.6 building client environment for production...
+transforming...
+✓ 1638 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/design-system.html                   0.79 kB │ gzip:   0.43 kB
+dist/index.html                           0.84 kB │ gzip:   0.42 kB
+dist/assets/design-system-Wum50NZM.css    3.45 kB │ gzip:   0.95 kB
+dist/assets/page-states-CtkK1Qxt.css     87.47 kB │ gzip:  16.15 kB
+dist/assets/design-system-BKhOPsHZ.js    15.16 kB │ gzip:   5.08 kB
+dist/assets/page-states-BFPlgRhI.js     230.68 kB │ gzip:  72.24 kB
+dist/assets/main-qXEiIhXD.js            373.56 kB │ gzip: 112.99 kB
+✓ built in 1.19s
+(node:93643) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  [PASS] boot · M1 · 真实 electron . 启动并暴露 CDP
+  [PASS] boot · M2 · 真实 UI 登录 admin
+! [FAIL] setup · S0a · 真实 UI 创建确定性 provider/model 并设为默认 chat — 期望 provider+model+default，实际 {"pid":"","cid":"","defaultOk":false}
+! [FAIL] setup · S0b · 真实 UI 连接测试 Inference:PASS — 期望 Inference:PASS，实际 
+  [PASS] setup · S0c · 真实治理 UI 授予 ai tool.browser.read / tool.browser.navigate
+  [PASS] ui · U1 · 从 Dock 打开浏览器窗口
+  [PASS] ui · U2 · 地址栏真实导航到恶意页面（注入样例）
+  [PASS] ui · U3 · 未授权时 AI 控制按钮为 off，且主进程授权列表为空
+  [PASS] ui · U4 · 点击按钮显式授权当前标签（真实 UI → 主进程）
+  [PASS] ui · U5 · 主进程授权目标 = 该标签的稳定身份（windowId#tabId）
+  [PASS] ui · U6 · 标签栏显示该标签已被授权
+! [FAIL] S1 · S1.0 · 真实 UI 启动任务（official dsh + Tool Facade） — 期望 新 task id，实际 
+E2E 异常：TypeError: Cannot read properties of undefined (reading 'status')
+    at main (file:///Users/wepingli/Desktop/OpenArc%20OS-integration/experiments/d5-01/browser-control-e2e.mjs:297:106)
+    at async file:///Users/wepingli/Desktop/OpenArc%20OS-integration/experiments/d5-01/browser-control-e2e.mjs:475:14
+--- main stderr tail ---
+
+DevTools listening on ws://127.0.0.1:9792/devtools/browser/38d7bfcf-8186-45a6-bbf0-e3235e74e83e
+
+# --- end raw output ---
+# EXIT CODE: 2
+
+########################################################################
+# 三次运行对照表（S0a 失败的既存性 + 崩溃点非确定性 的证据）
+########################################################################
+# 顺序｜commit            ｜文件                                  ｜最后到达的 check ｜中止点            ｜exit
+# 1   ｜312dc60（HEAD）   ｜30-electron-d5-01-control.txt         ｜setup S0a        ｜:255 page closed  ｜2
+# 2   ｜48a867c（父提交） ｜32-d5-01-control-at-parent-48a867c.txt｜setup S0b→S0c,U1–U6｜:297 TypeError   ｜2
+# 3   ｜312dc60（HEAD）   ｜33-d5-01-control-rerun-at-312dc60.txt  ｜setup S0b→S0c,U1–U6｜:297 TypeError   ｜2
+#
+# 判据一致性（三次共有）：
+#   · S0a 均 FAIL，失败串逐字相同：实际 {"pid":"","cid":"","defaultOk":false}
+#   · 均 EXIT CODE: 2，均未产出 artifacts/d5-01/d5-01-browser-control-e2e.json
+#   · 均未到达任何浏览器读取/导航/审批的副作用场景（S1 起全部未执行）
+# 差异（非确定性，非本批因果）：
+#   · 312dc60 的两次运行互相之间中止点就不同（:255 vs :297）→ 崩溃点非确定性
+#   · 312dc60 的第 2 次与父提交 48a867c 的中止点、check 序列**逐条一致**
+#   · 第 1 次运行 stderr 日志里出现两条 DevTools listening（9790）——该日志是**追加写**且
+#     文件在本次运行前已存在（已备份 /tmp/oa-b13-stderr-before-step33.txt），故其中一条是历史残留；
+#     第 3 次运行前后清空日志，全过程只有 1 条 DevTools listening → 无重复实例
+# 渲染层同源证明（排除 UI 漂移由本批引入）：
+#   · 三次 `npm run build` 产物主包哈希完全相同：dist/assets/main-qXEiIhXD.js 373.56 kB
+#   · git diff --stat 48a867c 312dc60 -- src/ = 空（本批 src/** 零改动）
+########################################################################

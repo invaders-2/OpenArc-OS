@@ -1,0 +1,197 @@
+$ node --test tests/side-effect-c4-gates.test.mjs
+# NOTE: 负向自证 A —— 临时把 "ResourceService" 加入 IN_PROCESS_EXECUTION_PROVIDERS（白名单放宽）
+# cwd: /Users/wepingli/Desktop/OpenArc OS-integration
+# git HEAD: 312dc606fee9d9c147a9d863fba7fe504961ab26
+# date: 2026-09-29T15:52:47Z
+# --- begin raw stdout+stderr ---
+TAP version 13
+# (node:90451) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Deny → 0 mutation / BLOCKED / 0 lease / 0 execution；Harness 只得到 bounded denied
+ok 1 - Deny → 0 mutation / BLOCKED / 0 lease / 0 execution；Harness 只得到 bounded denied
+  ---
+  duration_ms: 479.982167
+  type: 'test'
+  ...
+# Subtest: Approval timeout → 0 mutation / call BLOCKED(APPROVAL_TIMEOUT) / 0 retry
+ok 2 - Approval timeout → 0 mutation / call BLOCKED(APPROVAL_TIMEOUT) / 0 retry
+  ---
+  duration_ms: 583.072458
+  type: 'test'
+  ...
+# Subtest: Task Cancel While Waiting → 0 mutation / 0 lease / no later approval can execute
+ok 3 - Task Cancel While Waiting → 0 mutation / 0 lease / no later approval can execute
+  ---
+  duration_ms: 553.236708
+  type: 'test'
+  ...
+# Subtest: Session Revoked While Waiting → Approve DENY / 0 execution
+ok 4 - Session Revoked While Waiting → Approve DENY / 0 execution
+  ---
+  duration_ms: 561.216375
+  type: 'test'
+  ...
+# Subtest: App Disabled While Waiting → claim-time snapshot 拒绝；0 mutation
+ok 5 - App Disabled While Waiting → claim-time snapshot 拒绝；0 mutation
+  ---
+  duration_ms: 446.641667
+  type: 'test'
+  ...
+# Subtest: Tool permission revoked While Waiting → 0 mutation
+ok 6 - Tool permission revoked While Waiting → 0 mutation
+  ---
+  duration_ms: 457.952083
+  type: 'test'
+  ...
+# Subtest: useByAgent revoked While Waiting（non-admin actor）→ 0 mutation
+ok 7 - useByAgent revoked While Waiting（non-admin actor）→ 0 mutation
+  ---
+  duration_ms: 461.485875
+  type: 'test'
+  ...
+# Subtest: Precondition changed While Waiting → SIDE_EFFECT_PRECONDITION_CHANGED；0 write / 不 silent re-plan
+ok 8 - Precondition changed While Waiting → SIDE_EFFECT_PRECONDITION_CHANGED；0 write / 不 silent re-plan
+  ---
+  duration_ms: 454.491834
+  type: 'test'
+  ...
+# Subtest: Concurrent Approve click → 单一 authoritative approval transition；1 lease / 1 execution
+not ok 9 - Concurrent Approve click → 单一 authoritative approval transition；1 lease / 1 execution
+  ---
+  duration_ms: 458.766209
+  type: 'test'
+  location: '/Users/wepingli/Desktop/OpenArc OS-integration/tests/side-effect-c4-gates.test.mjs:221:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    mutation 只发生在 executor runtime
+    
+    1 !== 0
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 0
+  actual: 1
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/wepingli/Desktop/OpenArc%20OS-integration/tests/side-effect-c4-gates.test.mjs:234:12)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: Concurrent Executor → only one claim / only one ACTIVE lease；mutation exactly 1
+ok 10 - Concurrent Executor → only one claim / only one ACTIVE lease；mutation exactly 1
+  ---
+  duration_ms: 612.397333
+  type: 'test'
+  ...
+# Subtest: Approval Revocation Race：APPROVED 后 claim 前 REVOKED → 0 Domain invocation
+ok 11 - Approval Revocation Race：APPROVED 后 claim 前 REVOKED → 0 Domain invocation
+  ---
+  duration_ms: 443.316334
+  type: 'test'
+  ...
+# Subtest: Task Cancel Race：executor eligibility 窗口内 cancel → 0 Domain invocation
+not ok 12 - Task Cancel Race：executor eligibility 窗口内 cancel → 0 Domain invocation
+  ---
+  duration_ms: 444.115958
+  type: 'test'
+  location: '/Users/wepingli/Desktop/OpenArc OS-integration/tests/side-effect-c4-gates.test.mjs:297:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    {"ok":true,"inProcess":true,"call":{"callId":"scall_3BVpKUfqiYglWw","proposalId":"tprop_VRPUX1ENlNaYZg","decisionId":"tdec_rhpCEHDZGUsSHg","taskId":"task_2Hi8uA3WBNkXlQ","stepId":"step_IXwBmD-5dowweg","runId":"hrun_vJywtVFmq3745Q","toolId":"resource.trash","toolVersion":1,"argumentsHash":"fea86cba0a96bb5a93cf3b809749474b47a14edaf9ab8d20ae59c597ec7ee30a","planHash":"55263ef4912d0f9c38536d87e2cd679c04d99c5bb8278dbe6e40aa8bc9db6374","idempotencyKey":"idem_915bd0ea408b48e61a82014f9a809fb47a86d446","effectClass":"REVERSIBLE_WRITE","status":"SUCCEEDED","preconditionsSafe":{"resourceRef":"resource://res_zjXW7yCXw8u88S4X2rKApj6q3sig5g02","expectedVersion":1,"registryStatus":"active"},"expectedEffectsSafe":[{"action":"trash","resourceRef":"resource://res_zjXW7yCXw8u88S4X2rKApj6q3sig5g02","expectedVersion":1,"trashed":true}],"createdAt":1700000000000,"updatedAt":1700000000000,"authorizedAt":null,"approvedAt":1700000000000,"leasedAt":1700000000000,"startedAt":1700000000000,"completedAt":1700000000000,"verificationStatus":"PASS","errorCode":null,"recoverySafe":null},"safeResult":{"resourceRef":"resource://res_zjXW7yCXw8u88S4X2rKApj6q3sig5g02","trashed":true,"verified":true,"version":1},"error":null}
+    
+    true !== false
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: false
+  actual: true
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/wepingli/Desktop/OpenArc%20OS-integration/tests/side-effect-c4-gates.test.mjs:308:12)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: Harness spoof through production WRITE route → denied / 0 SideEffectCall
+ok 13 - Harness spoof through production WRITE route → denied / 0 SideEffectCall
+  ---
+  duration_ms: 443.636458
+  type: 'test'
+  ...
+# Subtest: Duplicate tool delivery → 只有一个 SideEffectCall / 一个 idempotencyKey；0 second mutation
+ok 14 - Duplicate tool delivery → 只有一个 SideEffectCall / 一个 idempotencyKey；0 second mutation
+  ---
+  duration_ms: 437.888292
+  type: 'test'
+  ...
+# Subtest: Trusted Approval Gateway：untrusted sender 抛错；unknown command 拒绝；Renderer 自报 actor 被忽略
+ok 15 - Trusted Approval Gateway：untrusted sender 抛错；unknown command 拒绝；Renderer 自报 actor 被忽略
+  ---
+  duration_ms: 443.0555
+  type: 'test'
+  ...
+# Subtest: Approval Snapshot：safe 投影（无 secret / 路径 / store root）；terminal 或跨 session → 不返回
+ok 16 - Approval Snapshot：safe 投影（无 secret / 路径 / store root）；terminal 或跨 session → 不返回
+  ---
+  duration_ms: 440.551166
+  type: 'test'
+  ...
+# Subtest: Tool Facade Bridge WRITE route：只产生 SideEffect Proposal；WRITE 绝不经 READ_ONLY execution route
+ok 17 - Tool Facade Bridge WRITE route：只产生 SideEffect Proposal；WRITE 绝不经 READ_ONLY execution route
+  ---
+  duration_ms: 459.3755
+  type: 'test'
+  ...
+# Subtest: No Direct Domain Bypass：resource.trash 的唯一 Domain 调用点在 allowlisted adapter + controlled execution 内
+not ok 18 - No Direct Domain Bypass：resource.trash 的唯一 Domain 调用点在 allowlisted adapter + controlled execution 内
+  ---
+  duration_ms: 4.052458
+  type: 'test'
+  location: '/Users/wepingli/Desktop/OpenArc OS-integration/tests/side-effect-c4-gates.test.mjs:445:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    in-process 白名单必须恰好等于 BrowserControl + CanvasControl
+    + actual - expected
+    
+      [
+        'BrowserControl',
+        'CanvasControl',
+    +   'ResourceService'
+      ]
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    0: 'BrowserControl'
+    1: 'CanvasControl'
+  actual:
+    0: 'BrowserControl'
+    1: 'CanvasControl'
+    2: 'ResourceService'
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/wepingli/Desktop/OpenArc%20OS-integration/tests/side-effect-c4-gates.test.mjs:480:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+    Test.postRun (node:internal/test_runner/test:1173:19)
+    Test.run (node:internal/test_runner/test:1101:12)
+    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: WRITE tool result 投影只含 safe 字段（无绝对路径 / DB id / lease / capability）
+ok 19 - WRITE tool result 投影只含 safe 字段（无绝对路径 / DB id / lease / capability）
+  ---
+  duration_ms: 447.227125
+  type: 'test'
+  ...
+1..19
+# tests 19
+# suites 0
+# pass 16
+# fail 3
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 8733.905708
+# --- end raw output ---
+# EXIT CODE: 1

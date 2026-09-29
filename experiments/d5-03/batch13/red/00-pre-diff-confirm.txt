@@ -1,0 +1,9 @@
+=== 红证据前置确认：产品代码未修改 ===
+HEAD: 48a867c75f94d082d68f9509fed35293454fc65e
+branch: integration/ui-core
+--- git status --porcelain ---
+?? experiments/d5-03/batch13/
+--- git diff --stat ---
+(以上为空 = electron/ 下无改动)
+--- git diff --stat -- electron/ ---
+--- git diff --stat -- tests/ ---

@@ -1,0 +1,338 @@
+$ node --test tests/d4-03-approval-push-isolation.test.mjs
+# NOTE: 负向自证 B —— 临时在 approvalSnapshot 的 allowed 集合与 snap 里加入白名单外字段 ownerUserIdProbe
+# cwd: /Users/wepingli/Desktop/OpenArc OS-integration
+# git HEAD: 312dc606fee9d9c147a9d863fba7fe504961ab26
+# date: 2026-09-29T15:53:15Z
+# --- begin raw stdout+stderr ---
+TAP version 13
+# (node:90538) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: P1 · 当前会话 = B：A 任务进入 AWAITING_APPROVAL 时推送必须被静默丢弃
+ok 1 - P1 · 当前会话 = B：A 任务进入 AWAITING_APPROVAL 时推送必须被静默丢弃
+  ---
+  duration_ms: 471.649958
+  type: 'test'
+  ...
+# Subtest: P2 · 当前会话 = A（owner）：推送投递，载荷 = 白名单投影且与 getApprovalRequest 一致
+not ok 2 - P2 · 当前会话 = A（owner）：推送投递，载荷 = 白名单投影且与 getApprovalRequest 一致
+  ---
+  duration_ms: 450.970209
+  type: 'test'
+  location: '/Users/wepingli/Desktop/OpenArc OS-integration/tests/d4-03-approval-push-isolation.test.mjs:193:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    P2 resource.trash：推送/读取的字段集合必须是封闭白名单，多一个少一个都不行
+    + actual - expected
+    
+      [
+        'approvalRequestId',
+        'currentVersion',
+        'effectClass',
+        'expectedEffects',
+        'expectedVersion',
+        'expiresAt',
+    +   'ownerUserIdProbe',
+        'requiresApproval',
+        'resourceRef',
+        'riskClass',
+        'status',
+        'targetDisplayName',
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    0: 'approvalRequestId'
+    1: 'currentVersion'
+    2: 'effectClass'
+    3: 'expectedEffects'
+    4: 'expectedVersion'
+    5: 'expiresAt'
+    6: 'requiresApproval'
+    7: 'resourceRef'
+    8: 'riskClass'
+    9: 'status'
+    10: 'targetDisplayName'
+    11: 'targetRef'
+    12: 'toolDisplayName'
+    13: 'toolId'
+    14: 'url'
+  actual:
+    0: 'approvalRequestId'
+    1: 'currentVersion'
+    2: 'effectClass'
+    3: 'expectedEffects'
+    4: 'expectedVersion'
+    5: 'expiresAt'
+    6: 'ownerUserIdProbe'
+    7: 'requiresApproval'
+    8: 'resourceRef'
+    9: 'riskClass'
+    10: 'status'
+    11: 'targetDisplayName'
+    12: 'targetRef'
+    13: 'toolDisplayName'
+    14: 'toolId'
+    15: 'url'
+  operator: 'deepStrictEqual'
+  stack: |-
+    assertExactSnapshotKeys (file:///Users/wepingli/Desktop/OpenArc%20OS-integration/tests/d4-03-approval-push-isolation.test.mjs:51:10)
+    TestContext.<anonymous> (file:///Users/wepingli/Desktop/OpenArc%20OS-integration/tests/d4-03-approval-push-isolation.test.mjs:202:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: P3 · 会话切回 A 后仍能发现 B 会话期间产生的 pending（挂载查询等价）
+ok 3 - P3 · 会话切回 A 后仍能发现 B 会话期间产生的 pending（挂载查询等价）
+  ---
+  duration_ms: 469.185625
+  type: 'test'
+  ...
+# Subtest: P4 · 无 authenticated session：不推送、不改任何状态
+ok 4 - P4 · 无 authenticated session：不推送、不改任何状态
+  ---
+  duration_ms: 438.844458
+  type: 'test'
+  ...
+# Subtest: P5 · 决策路径不受影响：owner APPROVE/DENY 正常，非 owner 会话决策仍被拒
+ok 5 - P5 · 决策路径不受影响：owner APPROVE/DENY 正常，非 owner 会话决策仍被拒
+  ---
+  duration_ms: 460.347208
+  type: 'test'
+  ...
+# Subtest: P6 · 无 session：读路径空 / not-found，声明了 context 的投影一律 null
+ok 6 - P6 · 无 session：读路径空 / not-found，声明了 context 的投影一律 null
+  ---
+  duration_ms: 441.469834
+  type: 'test'
+  ...
+# Subtest: P7 · A 会话下读路径正常（正对照）
+ok 7 - P7 · A 会话下读路径正常（正对照）
+  ---
+  duration_ms: 448.064042
+  type: 'test'
+  ...
+# Subtest: P8 · context == null 的内部投影语义未变（推送钩子用）
+ok 8 - P8 · context == null 的内部投影语义未变（推送钩子用）
+  ---
+  duration_ms: 442.445416
+  type: 'test'
+  ...
+# Subtest: N1 · 反例 · 资源回收审批不携带任何浏览器目标
+not ok 9 - N1 · 反例 · 资源回收审批不携带任何浏览器目标
+  ---
+  duration_ms: 442.797792
+  type: 'test'
+  location: '/Users/wepingli/Desktop/OpenArc OS-integration/tests/d4-03-approval-push-isolation.test.mjs:308:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    N1 resource.trash：推送/读取的字段集合必须是封闭白名单，多一个少一个都不行
+    + actual - expected
+    
+      [
+        'approvalRequestId',
+        'currentVersion',
+        'effectClass',
+        'expectedEffects',
+        'expectedVersion',
+        'expiresAt',
+    +   'ownerUserIdProbe',
+        'requiresApproval',
+        'resourceRef',
+        'riskClass',
+        'status',
+        'targetDisplayName',
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    0: 'approvalRequestId'
+    1: 'currentVersion'
+    2: 'effectClass'
+    3: 'expectedEffects'
+    4: 'expectedVersion'
+    5: 'expiresAt'
+    6: 'requiresApproval'
+    7: 'resourceRef'
+    8: 'riskClass'
+    9: 'status'
+    10: 'targetDisplayName'
+    11: 'targetRef'
+    12: 'toolDisplayName'
+    13: 'toolId'
+    14: 'url'
+  actual:
+    0: 'approvalRequestId'
+    1: 'currentVersion'
+    2: 'effectClass'
+    3: 'expectedEffects'
+    4: 'expectedVersion'
+    5: 'expiresAt'
+    6: 'ownerUserIdProbe'
+    7: 'requiresApproval'
+    8: 'resourceRef'
+    9: 'riskClass'
+    10: 'status'
+    11: 'targetDisplayName'
+    12: 'targetRef'
+    13: 'toolDisplayName'
+    14: 'toolId'
+    15: 'url'
+  operator: 'deepStrictEqual'
+  stack: |-
+    assertExactSnapshotKeys (file:///Users/wepingli/Desktop/OpenArc%20OS-integration/tests/d4-03-approval-push-isolation.test.mjs:51:10)
+    TestContext.<anonymous> (file:///Users/wepingli/Desktop/OpenArc%20OS-integration/tests/d4-03-approval-push-isolation.test.mjs:316:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: N2 · 正例 · 浏览器导航：推送 / 读取 / 列表三处同一个待批准地址
+not ok 10 - N2 · 正例 · 浏览器导航：推送 / 读取 / 列表三处同一个待批准地址
+  ---
+  duration_ms: 432.869917
+  type: 'test'
+  location: '/Users/wepingli/Desktop/OpenArc OS-integration/tests/d4-03-approval-push-isolation.test.mjs:331:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    N2 browser.navigate：推送/读取的字段集合必须是封闭白名单，多一个少一个都不行
+    + actual - expected
+    
+      [
+        'approvalRequestId',
+        'currentVersion',
+        'effectClass',
+        'expectedEffects',
+        'expectedVersion',
+        'expiresAt',
+    +   'ownerUserIdProbe',
+        'requiresApproval',
+        'resourceRef',
+        'riskClass',
+        'status',
+        'targetDisplayName',
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    0: 'approvalRequestId'
+    1: 'currentVersion'
+    2: 'effectClass'
+    3: 'expectedEffects'
+    4: 'expectedVersion'
+    5: 'expiresAt'
+    6: 'requiresApproval'
+    7: 'resourceRef'
+    8: 'riskClass'
+    9: 'status'
+    10: 'targetDisplayName'
+    11: 'targetRef'
+    12: 'toolDisplayName'
+    13: 'toolId'
+    14: 'url'
+  actual:
+    0: 'approvalRequestId'
+    1: 'currentVersion'
+    2: 'effectClass'
+    3: 'expectedEffects'
+    4: 'expectedVersion'
+    5: 'expiresAt'
+    6: 'ownerUserIdProbe'
+    7: 'requiresApproval'
+    8: 'resourceRef'
+    9: 'riskClass'
+    10: 'status'
+    11: 'targetDisplayName'
+    12: 'targetRef'
+    13: 'toolDisplayName'
+    14: 'toolId'
+    15: 'url'
+  operator: 'deepStrictEqual'
+  stack: |-
+    assertExactSnapshotKeys (file:///Users/wepingli/Desktop/OpenArc%20OS-integration/tests/d4-03-approval-push-isolation.test.mjs:51:10)
+    TestContext.<anonymous> (file:///Users/wepingli/Desktop/OpenArc%20OS-integration/tests/d4-03-approval-push-isolation.test.mjs:343:5)
+    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: N3 · 反例 · 非所属会话 / 未登录窗口在浏览器场景仍为 0 投影
+ok 11 - N3 · 反例 · 非所属会话 / 未登录窗口在浏览器场景仍为 0 投影
+  ---
+  duration_ms: 437.286334
+  type: 'test'
+  ...
+# Subtest: N4 · 反例 · 路径 / 凭据 / 其它未准许字段一律不得进入推送
+not ok 12 - N4 · 反例 · 路径 / 凭据 / 其它未准许字段一律不得进入推送
+  ---
+  duration_ms: 880.016333
+  type: 'test'
+  location: '/Users/wepingli/Desktop/OpenArc OS-integration/tests/d4-03-approval-push-isolation.test.mjs:415:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    N4 resource.trash：推送/读取的字段集合必须是封闭白名单，多一个少一个都不行
+    + actual - expected
+    
+      [
+        'approvalRequestId',
+        'currentVersion',
+        'effectClass',
+        'expectedEffects',
+        'expectedVersion',
+        'expiresAt',
+    +   'ownerUserIdProbe',
+        'requiresApproval',
+        'resourceRef',
+        'riskClass',
+        'status',
+        'targetDisplayName',
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    0: 'approvalRequestId'
+    1: 'currentVersion'
+    2: 'effectClass'
+    3: 'expectedEffects'
+    4: 'expectedVersion'
+    5: 'expiresAt'
+    6: 'requiresApproval'
+    7: 'resourceRef'
+    8: 'riskClass'
+    9: 'status'
+    10: 'targetDisplayName'
+    11: 'targetRef'
+    12: 'toolDisplayName'
+    13: 'toolId'
+    14: 'url'
+  actual:
+    0: 'approvalRequestId'
+    1: 'currentVersion'
+    2: 'effectClass'
+    3: 'expectedEffects'
+    4: 'expectedVersion'
+    5: 'expiresAt'
+    6: 'ownerUserIdProbe'
+    7: 'requiresApproval'
+    8: 'resourceRef'
+    9: 'riskClass'
+    10: 'status'
+    11: 'targetDisplayName'
+    12: 'targetRef'
+    13: 'toolDisplayName'
+    14: 'toolId'
+    15: 'url'
+  operator: 'deepStrictEqual'
+  stack: |-
+    assertExactSnapshotKeys (file:///Users/wepingli/Desktop/OpenArc%20OS-integration/tests/d4-03-approval-push-isolation.test.mjs:51:10)
+    TestContext.<anonymous> (file:///Users/wepingli/Desktop/OpenArc%20OS-integration/tests/d4-03-approval-push-isolation.test.mjs:424:5)
+    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+1..12
+# tests 12
+# suites 0
+# pass 8
+# fail 4
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5925.048125
+# --- end raw output ---
+# EXIT CODE: 1

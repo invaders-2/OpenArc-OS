@@ -1,0 +1,51 @@
+{
+  "probe": "inprocess-bypass",
+  "toolId": "resource.trash",
+  "callId": "scall_Z1di_o2Bd7SCWQ",
+  "executionProvider": "ResourceService",
+  "directExecuteInProcess": true,
+  "res": {
+    "ok": true,
+    "error": null,
+    "inProcess": true,
+    "callStatus": "SUCCEEDED"
+  },
+  "before": {
+    "domain": {
+      "preconditionTrashed": false,
+      "preconditionRegistryStatus": "active",
+      "preconditionVersion": 1,
+      "libraryTrashState": "ACTIVE",
+      "libraryDeletedAt": null,
+      "registryStatus": "active"
+    },
+    "deleteCalls": 0,
+    "leaseCount": 0,
+    "activeLeaseCount": 0,
+    "auditCount": 6
+  },
+  "after": {
+    "domain": {
+      "preconditionTrashed": true,
+      "preconditionRegistryStatus": "deleted",
+      "preconditionVersion": 1,
+      "libraryTrashState": "TRASHED",
+      "libraryDeletedAt": 1700000000000,
+      "registryStatus": "deleted"
+    },
+    "deleteCalls": 1,
+    "leaseCount": 1,
+    "activeLeaseCount": 0,
+    "auditCount": 12
+  },
+  "callStatusFinal": "SUCCEEDED",
+  "domainMutated": true,
+  "placementAudits": [
+    {
+      "action": "side_effect.execution_placement",
+      "decision": "IN_PROCESS",
+      "reasonCode": "PROCESS_LOCAL_DOMAIN"
+    }
+  ],
+  "verdict": "RED_BYPASS_PROVEN"
+}

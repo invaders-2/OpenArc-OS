@@ -1,4 +1,506 @@
 {
+  "batch13": {
+    "phase": "D5-03 第十三批 · 执行边界按提供者收口并修 in-process 白名单绕过（两条 D4 门禁转绿）",
+    "at": "2026-09-29T16:30:00Z",
+    "atNote": "证据截止时点 = 第十三批证据快照写入时。**纯插入**：batch12 及其后所有旧段逐字节未改（证明方式：`git diff --numstat docs/D5-03-GATE-EVIDENCE.json` = 本段行数 / 0；且自 `\"batch12\"` 起至 EOF 与 `git show 312dc60:docs/D5-03-GATE-EVIDENCE.json` 对应区段 sha256 相同）。",
+    "openarcBranch": "integration/ui-core",
+    "testedCommit": "312dc60",
+    "testedCommitNote": "被测 commit = `312dc606fee9d9c147a9d863fba7fe504961ab26`（`git rev-parse HEAD` 实测一致），父提交 `48a867c`，单提交。改动面（`git show --stat 312dc60`）= electron/side-effect-domain.cjs +4、electron/side-effect-runtime.cjs +11/−5、experiments/d5-03/batch13/red/inprocess-bypass.mjs +134、tests/d4-03-approval-push-isolation.test.mjs +256、tests/side-effect-c4-gates.test.mjs +79；共 5 files / +482 / −7。**`src/**` 零改动**（`git diff --stat 48a867c 312dc60 -- src/` 为空）；SCHEMA_VERSION / 预算 / 审批 TTL 未动。",
+    "scopeBoundaries": [
+      "未 push / 未 merge / 未 rebase / 未 amend / 未 commit；只做取证与文档写入",
+      "未触碰主工作树 /Users/wepingli/Desktop/OpenArc OS（17 项未提交改动原样）、DSH Desktop 共享运行时、~/.dsh",
+      "未进入 OAuth / D5-04 / 创建组织入口",
+      "除负向自证环节临时改 electron/side-effect-runtime.cjs 外未改产品代码；两次临时改动均逐字还原（sha256 = 8e7d269d4c768e55a4fec98743e7e082644d134cd1d58f0088c561da11fd5777，与 git show 312dc60:electron/side-effect-runtime.cjs 一致，git diff --exit-code = 0）",
+      "没有删除整段门禁、没有降低安全判据：提供者集合与审批字段集合仍是封闭精确集合"
+    ],
+    "redEvidence": {
+      "at": "父提交 48a867c 的产品代码（本批改动之前）",
+      "gate1_c4_nodirectbypass": {
+        "log": "experiments/d5-03/batch13/evidence/pre-c4-gates.txt",
+        "counts": {
+          "tests": 19,
+          "pass": 18,
+          "fail": 1
+        },
+        "failingAssert": "not ok 18 - No Direct Domain Bypass：resource.trash 的唯一 Domain 调用点在 allowlisted adapter + controlled execution 内",
+        "oldAssert": "assert.ok(!/authority\\.executeSideEffect\\(/.test(runtime), \"主进程绝不 in-process 执行 write\")"
+      },
+      "gate2_approval_push": {
+        "log": "experiments/d5-03/batch13/evidence/pre-push-gate.txt",
+        "counts": {
+          "tests": 8,
+          "pass": 7,
+          "fail": 1
+        },
+        "failingAssert": "P2 · 当前会话 = A（owner）：推送投递，载荷 = 白名单投影且与 getApprovalRequest 一致"
+      },
+      "realProductDefect_inprocessBypass": {
+        "log": "experiments/d5-03/batch13/red/00-red-inprocess-bypass.txt",
+        "summary": "experiments/d5-03/batch13/red/00-red-summary.json",
+        "probe": "experiments/d5-03/batch13/red/inprocess-bypass.mjs（直接调公开方法 executeInProcess，不经 executeApproved）",
+        "toolId": "resource.trash",
+        "executionProvider": "ResourceService",
+        "verdict": "RED_BYPASS_PROVEN",
+        "mutation": {
+          "res.ok": true,
+          "res.error": null,
+          "res.inProcess": true,
+          "callStatus": "APPROVED -> SUCCEEDED",
+          "libraryTrashState": "ACTIVE -> TRASHED",
+          "libraryDeletedAt": "null -> 1700000000000",
+          "registryStatus": "active -> deleted",
+          "sideEffectPreconditionTrashed": "false -> true",
+          "deleteCalls": "0 -> 1",
+          "leaseCount": "0 -> 1",
+          "auditCount": "6 -> 12",
+          "placementAudit": "IN_PROCESS / PROCESS_LOCAL_DOMAIN（谎报进程局部执行）"
+        }
+      }
+    },
+    "rootCause": {
+      "assertionStale": "`主进程绝不 in-process 执行 write` 是**绝对论断**，已被 D5-01 Closure-2 / D5-02 的显式进程局部 in-process execution class 取代（受控浏览器原生 WebContentsView 与画布 CanvasService + 同一 SQLite 连接都只存在于 main 进程），属**断言过时**",
+      "realDefect": "公开方法 `SideEffectRuntime.executeInProcess({callId})` **自身没有 execution placement 守卫**，placement 只由 `executeApproved` 分流保证；直接调用可对 executionProvider=ResourceService 的 resource.trash 在 main 进程内真实执行 ResourceService.delete，并留下谎报 IN_PROCESS / PROCESS_LOCAL_DOMAIN 的 placement 审计。旧断言是纯文本存在性判据（!regex.test(src)），连 in-process 白名单有几个成员都管不到，因此完全漏掉该缺陷",
+      "pushAssertionStale": "`SNAPSHOT_FIELDS` 是产品封闭白名单（electron/side-effect-runtime.cjs:194 的 allowed + :196-209 的 snap）的副本；D5-01 Closure-2 为受控浏览器导航审批把 targetRef（目标标签身份）与 url（用户正在批准的那个地址）纳入用户必须看到的信息，测试期望集合没跟上 —— 属断言过时，非泄露"
+    },
+    "fix": {
+      "runtimeGuard": "electron/side-effect-runtime.cjs:277-284：executeInProcess 方法体在 :286 preflightAuthorization 与 :294 acquireLease **之前**按 contract.executionProvider 对静态白名单 IN_PROCESS_EXECUTION_PROVIDERS 做 fail-closed 守卫；不是白名单成员（或 registry.get 拿不到 contract）→ 写恰好 1 条 side_effect.execution_placement / DENY / IN_PROCESS_NOT_PERMITTED 审计并返回 {ok:false, inProcess:false, error}，**不写 call 状态**（误路由不得把合法 call 打成 BLOCKED 而变成对受监督路径的 DoS）",
+      "newErrorCode": "electron/side-effect-domain.cjs:120 新增 IN_PROCESS_NOT_PERMITTED: \"SIDE_EFFECT_IN_PROCESS_NOT_PERMITTED\"",
+      "headerBoundary": "electron/side-effect-runtime.cjs:12-21 头注释改为「默认路径是受监督 executor；唯一例外是 Domain 权威只在 main 的 provider（BrowserControl / CanvasControl）走显式白名单 in-process class；**它不是等价路径**（放弃 child 寿命证据），preflight/approval/lease/claim/exactly-once/verify/audit 仍由同一个 authority 裁决；白名单是静态字面量，绝不从 arguments/plan 解析」",
+      "gate1Rewrite": "tests/side-effect-c4-gates.test.mjs：删除旧绝对论断断言，改为 (a) 受监督路径行为正例 + (b) 行为级拒绝证明（含 lease 总数 0、call 不被 BLOCKED、同一 call 随后仍能经受监督路径成功）+ (c) 静态封闭白名单解析 + (d) in-process 路径裁决顺序与 placement 审计",
+      "gate2Update": "tests/d4-03-approval-push-isolation.test.mjs：SNAPSHOT_FIELDS 加入 targetRef / url（13 -> 15 项）；抽出 assertExactSnapshotKeys() 把封闭精确键集合比较从 1 处扩到 7 处；新增 N1–N4 正反例"
+    },
+    "verification": {
+      "gate1": {
+        "log": "experiments/d5-03/batch13/verify/10-gate-c4-nodirectbypass.txt",
+        "counts": {
+          "tests": 19,
+          "pass": 19,
+          "fail": 0,
+          "exit": 0
+        }
+      },
+      "gate2": {
+        "log": "experiments/d5-03/batch13/verify/11-gate-approval-push.txt",
+        "counts": {
+          "tests": 12,
+          "pass": 12,
+          "fail": 0,
+          "exit": 0
+        }
+      },
+      "bypassProbeGreen": {
+        "log": "experiments/d5-03/batch13/red/01-green-inprocess-bypass.txt",
+        "verdict": "GREEN_GUARD_HELD",
+        "ok": false,
+        "error": "SIDE_EFFECT_IN_PROCESS_NOT_PERMITTED",
+        "inProcess": false,
+        "domainMutation": 0,
+        "deleteCalls": 0,
+        "leaseCount": 0,
+        "callStatus": "APPROVED",
+        "placementAudits": 1,
+        "placementDecision": "DENY / IN_PROCESS_NOT_PERMITTED"
+      },
+      "regressions": {
+        "d5_01_node": {
+          "log": "experiments/d5-03/batch13/verify/20-d5-01-regression.txt",
+          "files": [
+            "d5-01-browser-control",
+            "d5-01-browser-control-chain",
+            "d5-01-browser-control-surface",
+            "d5-01-browser-inprocess-boundary",
+            "d5-01-browser-policy",
+            "d5-01-browser-tabs"
+          ],
+          "counts": {
+            "tests": 37,
+            "pass": 37,
+            "fail": 0,
+            "exit": 0
+          },
+          "note": "第 1 次运行被并发活动 SIGKILL（exit 137）打断、作废；本行为第 2 次"
+        },
+        "d5_02_node": {
+          "log": "experiments/d5-03/batch13/verify/21-d5-02-regression.txt",
+          "coverageNote": "本组 7 个文件全绿；其中 d5-02-canvas-edit-proposal.test.mjs 是 CanvasControl in-process 白名单的真实行为覆盖点（经 executeApproved 走 in-process）；d5-02-canvas-tool.test.mjs 只覆盖 adapter 层。",
+          "files": [
+            "d5-02-canvas-ai-marks",
+            "d5-02-canvas-edit-proposal",
+            "d5-02-canvas-merge",
+            "d5-02-canvas-service",
+            "d5-02-canvas-tool",
+            "d5-02-model-list-authorization",
+            "resource-canvas-integration"
+          ],
+          "counts": {
+            "tests": 48,
+            "pass": 48,
+            "fail": 0,
+            "exit": 0
+          }
+        },
+        "side_effect_d4_03": {
+          "log": "experiments/d5-03/batch13/verify/22-side-effect-d4-03-regression.txt",
+          "counts": {
+            "tests": 278,
+            "pass": 278,
+            "fail": 0,
+            "exit": 0
+          }
+        },
+        "d5_01_doc_merged_set": {
+          "log": "experiments/d5-03/batch13/verify/23-d5-01-doc-merged-set.txt",
+          "doc": "docs/D5-01-RESULT.md:79",
+          "counts": {
+            "tests": 60,
+            "pass": 60,
+            "fail": 0,
+            "exit": 0
+          },
+          "note": "文档写 59/59 已过期：docs/D5-01-RESULT.md 末次提交 f93e835 上这 5 个文件共 59 条；f9564b7 把 tests/window-manager.test.mjs 由 16 增为 17 -> 60 条。f9564b7 基线文件在隔离宿主复算同样 # tests 60。本批未触碰这 5 个文件 -> 非产品回归"
+        }
+      },
+      "realMachine": {
+        "d5_02_canvas": {
+          "command": "env -u ELECTRON_RUN_AS_NODE node experiments/d5-02/canvas-e2e.mjs",
+          "log": "experiments/d5-03/batch13/verify/31-electron-d5-02-canvas.txt",
+          "counts": {
+            "pass": 52,
+            "fail": 0,
+            "total": 52,
+            "notVerified": 0,
+            "exit": 0
+          },
+          "baseline": "52 PASS / 0 FAIL -> 完全一致"
+        },
+        "d5_01_control": {
+          "command": "env -u ELECTRON_RUN_AS_NODE npm run test:d5-01-control",
+          "status": "NOT OBTAINED",
+          "log": "experiments/d5-03/batch13/verify/30-electron-d5-01-control.txt",
+          "exit": 2,
+          "abortedAt": "setup · S0a · 真实 UI 创建确定性 provider/model 并设为默认 chat `实际 {\"pid\":\"\",\"cid\":\"\",\"defaultOk\":false}`",
+          "baselineComparison": {
+            "log": "experiments/d5-03/batch13/verify/32-d5-01-control-at-parent-48a867c.txt",
+            "worktree": "git worktree add /tmp/oa-b013-base 48a867c（已 git worktree remove --force 清理）",
+            "cdpPort": 9791,
+            "result": "父提交 48a867c 上 S0a 同样 FAIL，失败串逐字相同，同样 EXIT CODE: 2 -> 既有失败，与本批无因果"
+          },
+          "rerun": {
+            "log": "experiments/d5-03/batch13/verify/33-d5-01-control-rerun-at-312dc60.txt",
+            "cdpPort": 9792,
+            "result": "312dc60 第 2 次与父提交 48a867c 的 check 序列与中止点逐条一致（S0c、U1–U6 PASS，:297 TypeError）；312dc60 两次运行互相之间中止点不同（:255 vs :297）-> 中止点非确定性"
+          }
+        }
+      },
+      "independentVerification": {
+        "report": "experiments/d5-03/batch13/verify/BATCH13-VERIFY-REPORT.md",
+        "verifier": "独立对抗性验收岗（与执行方无关联、全新上下文）",
+        "independentCounts": {
+          "c4_gates": "19/19 fail 0 exit 0（V-10）",
+          "push_gate": "12/12 fail 0 exit 0（V-11）",
+          "d5_01_boundary": "6/6（V-20）",
+          "d5_02_canvas_tool": "4/4（V-21）",
+          "npm_test": "1412/1412/0 exit 0（V-40，duration 121321ms）",
+          "pre_fix_red_at_parent_48a867c": "c4-gates 18/19/1（V-F1，失败者 No Direct Domain Bypass）、push-gate 7/8/1（V-F2，失败者 P2）"
+        },
+        "ownNegativeSelfProof": [
+          "V-A 整段删掉 executeInProcess 守卫 -> c4-gates 18/19/1，失败者 not ok 18 No Direct Domain Bypass",
+          "V-B 只把守卫移到 acquireLease 之后（判据一字不改）-> c4-gates 18/19/1，恰好红在 tests/side-effect-c4-gates.test.mjs:524 的 lease 1 !== 0 —— 证明 (b) 的位置断言不是空断言",
+          "V-C 给审批投影加不同类型字段 actorUserId -> push-gate 8 pass / 4 fail，P2/N1/N2/N4 全红",
+          "正对照 删掉 CanvasControl -> d5-02-canvas-tool 与 d5-01-browser-inprocess-boundary 无变化，d5-02-canvas-edit-proposal 4/3/1 红（据此发现覆盖归属问题 F-1）"
+        ],
+        "independentAdjudication": "裁定「S0a 与本批 312dc60 无因果」成立（三次失败串逐字相同、父提交与 312dc60 第 2 次 check 序列逐条一致、本批不含 src/** 且三次构建主包哈希相同）；同时指出「S0a 起于 f9564b7 之后」的回归时点归因未被独立验证，故本 JSON 已把该项降级为「未取得证据」",
+        "restoreProof": "独立验收对其全部临时产品改动逐字还原（git hash-object = 312dc60 内置 blob 2eafc0d5…，git diff --exit-code 均为 0）",
+        "verdict": "本批 PASS（限定范围）／D5-03 整体 PARTIAL，与执行方一致；未发现执行方任何不成立或夸大声明"
+      },
+      "npmTestFull": {
+        "command": "env -u ELECTRON_RUN_AS_NODE npm test",
+        "log": "experiments/d5-03/batch13/verify/40-npm-test-full.txt",
+        "counts": {
+          "tests": 1412,
+          "pass": 1412,
+          "fail": 0,
+          "skipped": 0,
+          "exit": 0,
+          "ms": 120205
+        },
+        "previousBatch": {
+          "tests": 1408,
+          "pass": 1406,
+          "fail": 2,
+          "exit": 1
+        },
+        "delta": "+4 条用例 = 本批给 d4-03-approval-push-isolation 新增 N1–N4（8 -> 12）；−2 条失败 = 第十二批登记的两条既有确定性失败本批已修并转绿",
+        "failures": [],
+        "attribution": "本批 npm test 无任何失败，无需逐条归因"
+      },
+      "negativeSelfProof": {
+        "A_static": {
+          "change": "临时把 \"ResourceService\" 加入 electron/side-effect-runtime.cjs:49 的 IN_PROCESS_EXECUTION_PROVIDERS",
+          "log": "experiments/d5-03/batch13/verify/50-negative-whitelist-widened.txt",
+          "counts": {
+            "tests": 19,
+            "pass": 16,
+            "fail": 3,
+            "exit": 1
+          },
+          "failures": [
+            "not ok 9 - Concurrent Approve click → 单一 authoritative approval transition；1 lease / 1 execution（连带）",
+            "not ok 12 - Task Cancel Race：executor eligibility 窗口内 cancel → 0 Domain invocation（连带）",
+            "not ok 18 - No Direct Domain Bypass：resource.trash 的唯一 Domain 调用点在 allowlisted adapter + controlled execution 内（目标判据）"
+          ]
+        },
+        "A_behavior": {
+          "log": "experiments/d5-03/batch13/verify/51-negative-whitelist-widened-behavior.txt",
+          "verdict": "RED_BYPASS_PROVEN",
+          "mutation": {
+            "libraryTrashState": "ACTIVE -> TRASHED",
+            "libraryDeletedAt": "null -> 1700000000000",
+            "registryStatus": "active -> deleted",
+            "deleteCalls": "0 -> 1",
+            "leaseCount": "0 -> 1",
+            "auditCount": "6 -> 12",
+            "placementAudit": "IN_PROCESS / PROCESS_LOCAL_DOMAIN"
+          }
+        },
+        "B_projection": {
+          "change": "临时在 approvalSnapshot 的 allowed 集合与 snap 里加入白名单外字段 ownerUserIdProbe",
+          "log": "experiments/d5-03/batch13/verify/52-negative-projection-field-added.txt",
+          "counts": {
+            "tests": 12,
+            "pass": 8,
+            "fail": 4,
+            "exit": 1
+          },
+          "failures": [
+            "P2 · 当前会话 = A（owner）：推送投递，载荷 = 白名单投影且与 getApprovalRequest 一致",
+            "N1 · 反例 · 资源回收审批不携带任何浏览器目标",
+            "N2 · 正例 · 浏览器导航：推送 / 读取 / 列表三处同一个待批准地址",
+            "N4 · 反例 · 路径 / 凭据 / 其它未准许字段一律不得进入推送"
+          ]
+        },
+        "restoreProof": {
+          "log": "experiments/d5-03/batch13/verify/54-negative-restore-proof.txt",
+          "sha256_runtime": "8e7d269d4c768e55a4fec98743e7e082644d134cd1d58f0088c561da11fd5777",
+          "sha256_fromCommit": "8e7d269d4c768e55a4fec98743e7e082644d134cd1d58f0088c561da11fd5777",
+          "gitDiffElectronTestsExit": 0,
+          "gitDiffFullTreeExit": 0
+        }
+      },
+      "positivePathsAfterRestore": {
+        "log": "experiments/d5-03/batch13/verify/53-positive-paths-still-pass.txt",
+        "coverageNote": "覆盖归属更正（据独立验收 F-1）：tests/d5-02-canvas-tool.test.mjs 只直测 CanvasControl adapter 层，从不经 SideEffectRuntime.executeInProcess；tests/d5-01-browser-inprocess-boundary.test.mjs 只覆盖 BrowserControl。二者都不覆盖 CanvasControl 的 in-process 路径（删掉 CanvasControl 后实测无变化）。CanvasControl in-process 白名单的真实行为覆盖 = tests/d5-02-canvas-edit-proposal.test.mjs（经 executeApproved 走 in-process；破坏后实测 4/3/1 红，EXECUTOR_FAILED）。",
+        "blocks": [
+          {
+            "cmd": "node --test tests/side-effect-c4-gates.test.mjs",
+            "tests": 19,
+            "pass": 19,
+            "fail": 0,
+            "exit": 0
+          },
+          {
+            "cmd": "node --test tests/d4-03-approval-push-isolation.test.mjs",
+            "tests": 12,
+            "pass": 12,
+            "fail": 0,
+            "exit": 0
+          },
+          {
+            "cmd": "node --test tests/d5-02-canvas-tool.test.mjs (只覆盖 CanvasControl adapter 层，不是 in-process 覆盖点)",
+            "tests": 4,
+            "pass": 4,
+            "fail": 0,
+            "exit": 0
+          },
+          {
+            "cmd": "node --test tests/d5-01-browser-control-chain.test.mjs (浏览器导航 in-process 成功)",
+            "tests": 5,
+            "pass": 5,
+            "fail": 0,
+            "exit": 0
+          },
+          {
+            "cmd": "node --test tests/d5-01-browser-inprocess-boundary.test.mjs (合法 in-process 调用方)",
+            "tests": 6,
+            "pass": 6,
+            "fail": 0,
+            "exit": 0
+          },
+          {
+            "cmd": "node experiments/d5-03/batch13/red/inprocess-bypass.mjs",
+            "verdict": "GREEN_GUARD_HELD",
+            "exit": 0
+          }
+        ]
+      }
+    },
+    "assertionChanges": [
+      {
+        "file": "tests/side-effect-c4-gates.test.mjs",
+        "line": "旧 :471 注释",
+        "old": "// 生产 runtime 只经受监督 executor 执行，绝不在主进程 in-process 执行 write。",
+        "new": "// (a) 默认路径：只有受监督 executor 允许做 out-of-process mutation。（新 :473）",
+        "basis": "electron/side-effect-runtime.cjs:12-21（头注释已写明默认路径 + 唯一白名单例外）"
+      },
+      {
+        "file": "tests/side-effect-c4-gates.test.mjs",
+        "line": "旧 :474",
+        "old": "assert.ok(!/authority\\.executeSideEffect\\(/.test(runtime), \"主进程绝不 in-process 执行 write\")",
+        "new": "**删除**；由新增 (a)(b)(c)(d) 共同替代",
+        "basis": "electron/side-effect-runtime.cjs:274（in-process class 为已验收契约）、:277-284（新增守卫）"
+      },
+      {
+        "file": "tests/side-effect-c4-gates.test.mjs",
+        "line": ":474（保留项）",
+        "old": "assert.ok(/supervisor\\.spawnExecutor\\(/.test(runtime), \"production write 必须经 supervisor.spawnExecutor\")",
+        "new": "**原文不动**",
+        "basis": "electron/side-effect-runtime.cjs:337"
+      },
+      {
+        "file": "tests/side-effect-c4-gates.test.mjs",
+        "line": "新增 (c) :476-484",
+        "old": "无",
+        "new": "静态解析 IN_PROCESS_EXECUTION_PROVIDERS = Object.freeze(new Set([...])) 字面量；成员恰好 [\"BrowserControl\",\"CanvasControl\"]；只允许 1 处声明、2 处只读 .has(；禁 .add/.delete/.clear；禁 Object.assign/defineProperty；成员只允许字符串字面量",
+        "basis": "electron/side-effect-runtime.cjs:49（唯一声明）、:281（守卫）、:322（分流）"
+      },
+      {
+        "file": "tests/side-effect-c4-gates.test.mjs",
+        "line": "新增 (d) :486-495",
+        "old": "无",
+        "new": "源码级：executeInProcess 方法体内 preflightAuthorization -> acquireLease -> executeSideEffect 的顺序成立，且含 action \"side_effect.execution_placement\", decision \"IN_PROCESS\"",
+        "basis": "electron/side-effect-runtime.cjs:286、:294、:300、:293"
+      },
+      {
+        "file": "tests/side-effect-c4-gates.test.mjs",
+        "line": "新增 (b) 核心 :511-537",
+        "old": "无",
+        "new": "行为：直接调 executeInProcess 对 resource.trash（provider=ResourceService）-> ok===false、error===SIDE_EFFECT_IN_PROCESS_NOT_PERMITTED、inProcess===false、Domain 0 mutation、lease 总数 0、call 仍 APPROVED、恰好 1 条 DENY/IN_PROCESS_NOT_PERMITTED 审计；随后同一 call 经 executeApproved 仍成功",
+        "basis": "electron/side-effect-runtime.cjs:277-284（守卫在 :286 preflight 与 :294 acquireLease 之前）、electron/side-effect-domain.cjs:120"
+      },
+      {
+        "file": "tests/side-effect-c4-gates.test.mjs",
+        "line": "新增 (a) :539-550",
+        "old": "无",
+        "new": "行为：resource.trash 走 propose -> APPROVE -> executeApproved 后 res.ok===true、真实 trashed===true、lease 恰好 1、verificationStatus===\"PASS\"、主进程 resourceService.delete 调用数不变",
+        "basis": "electron/side-effect-runtime.cjs:318-337（受监督路径）+ SideEffectAuthority 的 PASS 判定"
+      },
+      {
+        "file": "tests/side-effect-c4-gates.test.mjs",
+        "line": ":19",
+        "old": "无",
+        "new": "const { SIDE_EFFECT_ERROR } = require(\"../electron/side-effect-domain.cjs\");",
+        "basis": "electron/side-effect-domain.cjs:120"
+      },
+      {
+        "file": "tests/side-effect-c4-gates.test.mjs",
+        "line": "未改动的既有断言",
+        "old": "forbidden 9 文件扫描、tool-adapters.cjs 中 resourceService.delete( 恰好 1 处、side-effect-authority.cjs 必须经 adapter.execute(、controlled-tool-proxy.cjs 必须 riskClass !== \"READ_ONLY\" 且经 adapter.execute(",
+        "new": "全部逐字保留（判据一条未降）",
+        "basis": "本批未放宽任何既有判据"
+      },
+      {
+        "file": "tests/d4-03-approval-push-isolation.test.mjs",
+        "line": ":37 SNAPSHOT_FIELDS",
+        "old": "13 项，不含 targetRef、url",
+        "new": "15 项，加入 targetRef、url",
+        "basis": "electron/side-effect-runtime.cjs:194（allowed 集合）、:204（targetRef = pre.targetRef slice 300）、:206（url = pre.url slice 2000）；src/approval/ApprovalPrompt.tsx:186、:190"
+      },
+      {
+        "file": "tests/d4-03-approval-push-isolation.test.mjs",
+        "line": "P2 内联断言 -> :50 assertExactSnapshotKeys",
+        "old": "assert.deepEqual(Object.keys(event.request).sort(), SNAPSHOT_FIELDS, \"推送不得新增/泄露字段\")（1 处）",
+        "new": "抽出 assertExactSnapshotKeys()，同样精确键集合 deepEqual，改由 P2 + N1 + N2×3 + N4×2 共 7 处调用（:202、:316、:343、:353、:373、:424、:436）",
+        "basis": "同一封闭白名单；把精确集合从 1 处扩到 7 处，判据只增不减"
+      },
+      {
+        "file": "tests/d4-03-approval-push-isolation.test.mjs",
+        "line": "新增 N1 :308",
+        "old": "无",
+        "new": "resource.trash 推送：精确键集合；request.targetRef === null 且 request.url === null；推送文本不含 浏览器标签、不含 http(s)://；非空转断言 planned.call.preconditionsSafe 必须存在，request.resourceRef 等于它且为非空 string；preconditionsSafe 键集合精确等于 [\"expectedVersion\",\"registryStatus\",\"resourceRef\"]",
+        "basis": "electron/tool-adapters.cjs 的 trashPlan（preconditions: { resourceRef, expectedVersion, registryStatus }，无 targetRef/url）-> 投影必然为 null（electron/side-effect-runtime.cjs:204-206 的三元）"
+      },
+      {
+        "file": "tests/d4-03-approval-push-isolation.test.mjs",
+        "line": "新增 N2 :331",
+        "old": "无",
+        "new": "browser.navigate 推送 1 条；request.url === 被提案的地址（精确相等）；request.targetRef === \"browser#t1\"；targetDisplayName === \"浏览器标签 browser#t1\"；推送 = getApprovalRequest = listPending 三处 deepEqual；长地址与带 query/path/fragment 的地址原样未截断；页面正文标记不出现；审批阶段 0 真实导航",
+        "basis": "electron/tool-adapters.cjs:191-198（preconditions: { targetRef: viewId, targetType: \"browser-tab\", url }）；electron/side-effect-runtime.cjs:194-209；src/approval/ApprovalPrompt.tsx:186、:190"
+      },
+      {
+        "file": "tests/d4-03-approval-push-isolation.test.mjs",
+        "line": "新增 N3 :384",
+        "old": "无",
+        "new": "把 P1/P4/P6 的 0 投影语义扩展到 browser.navigate：B 会话 0 推送 + listPending 空 + getApprovalRequest 返回 SIDE_EFFECT_CALL_NOT_FOUND；未登录 0 推送 + call 仍 AWAITING_APPROVAL + approvalSnapshot({context:{}}) / {context:{sessionRef:null}} / {context:{sessionRef:B}} 均 null",
+        "basis": "electron/side-effect-runtime.cjs:174-179（声明 context 必须有真实 session 且等于 task 的 session_ref）、electron/identity-bootstrap.cjs:295-299"
+      },
+      {
+        "file": "tests/d4-03-approval-push-isolation.test.mjs",
+        "line": "新增 N4 :415",
+        "old": "无",
+        "new": "两场景推送文本不含绝对路径（/Users/、/private/、/var/folders）、不含 store root、不含 slease_ / tappr_；两场景各做一次精确键集合比较（:424、:436）；含 user:pass@host 的地址在提案阶段即被拒（ok===false、error===\"TOOL_ARGUMENT_INVALID\"、decisionStatus===\"INVALID\"）且 0 推送 / 0 新 call / 凭据不进投影",
+        "basis": "electron/tool-registry.cjs:180（browser.navigate inputSchema pattern \"^https?://[^\\\\s@]+$\"，工具门排除 @）、:44、:46（schema 校验）；electron/side-effect-runtime.cjs:209-210；tests/side-effect-c4-gates.test.mjs:488（同款内部 id 判据）"
+      },
+      {
+        "file": "tests/d4-03-approval-push-isolation.test.mjs",
+        "line": "新增 require / 常量 / 夹具 :14、:30-35、:47-48、:39-47、:81-89、:119-152",
+        "old": "无",
+        "new": "BrowserControlAuthority；NAVIGATE = \"browser.navigate\"；INTERNAL_ID_RE = /slease_|tappr_/i；SITE/VIEW/PAGE2/PAGE_TEXT；顶部注释说明旧断言为何失效；assertExactSnapshotKeys()；fakeBrowserController()；setupBrowser()（真实 BrowserControlAuthority + 真实 SideEffectRuntime.proposeWrite，只取提案 -> 审批快照/推送一段）",
+        "basis": "D5-01 Closure-2 浏览器场景；真实导航执行与验证由 D5-01 回归覆盖，避免重复装配"
+      },
+      {
+        "file": "tests/d4-03-approval-push-isolation.test.mjs",
+        "line": "未改动的既有断言",
+        "old": "P1、P3、P4、P5、P6、P7、P8",
+        "new": "语句逐字未改；P2 只改了字段集合这一处，其余断言（推送条数、推送 = 读取、listPending 可发现、不含 store root / 绝对路径）原样保留",
+        "basis": "本批未放宽任何既有判据"
+      },
+      {
+        "file": "electron/side-effect-runtime.cjs",
+        "line": ":12-21（产品）",
+        "old": "真实 mutation 只发生在 RuntimeSupervisor 拥有并监督的 executor runtime 里，主进程绝不直接执行 write",
+        "new": "默认路径是受监督 executor；唯一例外是 Domain 权威只在 main 的 provider（BrowserControl / CanvasControl）走显式白名单 in-process class；它不是等价路径（放弃 child 寿命证据），preflight/approval/lease/claim/exactly-once/verify/audit 仍由同一个 authority 裁决；白名单是静态字面量，绝不从 arguments/plan 解析",
+        "basis": "D5-01 Closure-2（WebContentsView 只在 main）、D5-02（CanvasService + 同一 SQLite 连接在 main，禁止第二写者）；如实披露、不写等价"
+      },
+      {
+        "file": "electron/side-effect-runtime.cjs",
+        "line": ":277-284（产品）",
+        "old": "executeInProcess 无 placement 守卫（只靠 executeApproved 分流）",
+        "new": "按 contract.executionProvider 对 IN_PROCESS_EXECUTION_PROVIDERS fail closed；写恰好 1 条 execution_placement / DENY / IN_PROCESS_NOT_PERMITTED 审计并返回 {ok:false, inProcess:false, error}；不写 call 状态",
+        "basis": "公开方法不能只靠 executeApproved 分流；误路由不得变成对受监督路径的 DoS"
+      },
+      {
+        "file": "electron/side-effect-domain.cjs",
+        "line": ":120（产品）",
+        "old": "无此错误码",
+        "new": "IN_PROCESS_NOT_PERMITTED: \"SIDE_EFFECT_IN_PROCESS_NOT_PERMITTED\"",
+        "basis": "本批新增契约"
+      }
+    ],
+    "notVerified": [
+      "真机 D5-01 受控浏览器链（test:d5-01-control）本批未取得：三次运行均 EXIT CODE 2，在 provider/model 安装段 S0a 即失败（实际 {\"pid\":\"\",\"cid\":\"\",\"defaultOk\":false}）；父提交 48a867c 上逐字相同失败 -> 既有失败，与本批 312dc60 无因果。**其回归时点未定位**：本批未在 f9564b7 上复跑真机，仅能确认 f9564b7 是 312dc60 的祖先（git merge-base --is-ancestor 成立），故「S0a 起于 f9564b7 之后」只有时间上的可能、没有因果证据。线索（**非已定位根因**）：dock 选择器 data-app-id 在 merge 7d707ab 被删除（f9564b7 仍在 src/main.tsx:361），而 experiments/d5-01/browser-control-e2e.mjs 与 experiments/d5-01/visibility-e2e.mjs:139、experiments/d5-01/browser-inprocess-boundary-e2e.mjs:198 仍在使用它。因此本批**没有**浏览器导航的真机 UI 证据；该点可核查依据只有 (a) src/approval/ApprovalPrompt.tsx:186/:190 渲染的正是门禁 ② 现在逐字钉住的投影字段、(b) src/** 本批零改动且三次 npm run build 产物主包哈希相同（dist/assets/main-qXEiIhXD.js 373.56 kB）、(c) D5-01 验收期已通过的 S2.1/S2.2 记录",
+      "CanvasControl in-process 白名单的行为覆盖归属已按独立验收更正（发现 F-1）：tests/d5-02-canvas-tool.test.mjs 只直测 CanvasControl adapter 层（adapterFor(...).plan/execute/verify），从不经 SideEffectRuntime.executeInProcess；tests/d5-01-browser-inprocess-boundary.test.mjs 只覆盖 BrowserControl。把 CanvasControl 从白名单删掉后这两个文件实测毫无变化（仍 4/4、6/6 全绿）。真实行为覆盖 = tests/d5-02-canvas-edit-proposal.test.mjs（经 executeApproved 真走 in-process；破坏后实测 4/3/1 红，EXECUTOR_FAILED）。发现方式：独立验收用「删 CanvasControl」做正对照。",
+      "url 的 2000 截断上界未覆盖：N2 用的长地址只有 1533 字符（低于工具门 maxLength 2000），证明的是未被更小上界截断，不是 2000 处不截断；2000 整与 2001 两条边界均未产出证据",
+      "targetRef 的 300 字符上界无断言（electron/side-effect-runtime.cjs:204）；sanitizePreconditions 超界 fail-closed 丢弃（electron/side-effect-authority.cjs:124-125）的红/绿证据未产出",
+      "canvas.edit 未进审批推送门禁的专门断言（走同一处投影代码，resourceRef 为画布 ref、targetRef/url 为 null，但未被本门禁直接覆盖）",
+      "推送目标窗口身份未验：没有证明 sendSideEffect 的投递对象与 getApprovalRequest 是同一个窗口；用例里 isTrusted 恒 true",
+      "registry.get 返回 null 时 executeInProcess 的新 fail-closed 行为无专门用例（有意的 fail-closed 收紧，正常流程 contract 不会缺失）",
+      "in-process class 仍无独立 child 寿命证据（child exit / socket lifetime），已在 electron/side-effect-runtime.cjs:12-21 头注释如实披露，未写成等价",
+      "N4 的未准许字段只做了键集合 + 具体敏感标记，未对全部 SAFE_SNAPSHOT_SECRET_RE 键名做穷举注入式验证"
+    ],
+    "leftovers": [
+      "test:d5-01-control 当前不可达其浏览器场景：安装段 S0a 在父提交 48a867c 与本批上同样失败且失败串逐字相同（与本批无因果）；其失效/回归时点**未定位**（未在 f9564b7 上复跑真机，仅能确认 f9564b7 是 312dc60 的祖先，及 D5-01 验收期记录为 46 PASS）；修它需动 src/settings/ModelSettings.tsx 或 e2e 驱动，属 D5-01 门禁修复，不在本批范围（需另开批次并走设计对齐）",
+      "F-3（独立验收 Low · 探针判据口径）：experiments/d5-03/batch13/red/inprocess-bypass.mjs:110 的 guardHeld 用 activeLeaseCount（只数 ACTIVE），而门禁 tests/side-effect-c4-gates.test.mjs:524 用 leasesOfCall().length（全部 lease）—— 探针口径略宽于门禁。结论：探针是探索性工具、门禁判据更严，**不改探针**（红/绿结论不受影响，探针同时输出 after.leaseCount = 0 且门禁覆盖更严口径）",
+      "F-2（独立验收 Low · 证据等级）：verify/32-d5-01-control-at-parent-48a867c.txt 中「跑在 48a867c 上」的显式依据是撰写的前置注释行（非 raw 捕获）；运行期原始旁证是同一文件中止栈里的真实路径 at main (file:///private/tmp/oa-b013-base/experiments/d5-01/browser-control-e2e.mjs:297:106)，而 30/33 为 file:///Users/wepingli/Desktop/OpenArc%20OS-integration/... → 独立验收裁定该证据**可信**。后续真机类证据的前置事实（如 rev-parse）应直接放进 raw 捕获块",
+      "F-1 已并入 notVerified：CanvasControl in-process 行为覆盖归属更正（真实覆盖点 = tests/d5-02-canvas-edit-proposal.test.mjs；d5-02-canvas-tool 只覆盖 adapter 层）",
+      "独立对抗性验收已完成：独立复现全部计数（19/19、12/12、6/6、4/4、1412/1412/0）、用三组不同破坏方式完成负向自证、并独立复现父提交 48a867c 上的修前红；报告 experiments/d5-03/batch13/verify/BATCH13-VERIFY-REPORT.md（未发现执行方任何不成立或夸大的声明）",
+      "E1 登记的计数型/文本定位型维护约束 4 项（白名单 = 恰好 1 处、.has( 恰好 2 处、(d) 注释文本定位、成员必须是字符串字面量）—— 有意封闭集合约束，放宽必须显式改门禁并留痕",
+      "url 2000 上界 / targetRef 300 上界 / canvas.edit 推送门禁 / 推送目标窗口身份 / registry.get null 用例缺位",
+      "环境修复需登记：node_modules/electron/dist 缺失（已按 checksums.json 逐字节相符的官方 zip 修复，node_modules 被 .gitignore 忽略）；本会话 shell 的 ELECTRON_RUN_AS_NODE=1 需由调用方 env -u 剥离（未改产品代码）",
+      "上级复核观察：docs/D5-01-RESULT.md:79 的 59/59 计数已过期（现为 60/60），建议后续同步",
+      "跨组织真机 2 条 notVerified；OAuth；两条探针门禁既有失败（governance-ui 1/5、model-keychain-restart 3/15）；插件隔离 D5-08；D5-02 prompt() 遗留；SIGKILL 边界"
+    ],
+    "judgement": "D5-03 第十三批（两条 D4 门禁收口 + 真实执行边界复核）= PASS（限定范围）：门禁 ① side-effect-c4-gates 19/19 PASS fail 0 exit 0（旧 18/19、1 fail），真实产品缺陷 executeInProcess 白名单绕过已红->绿修复；门禁 ② d4-03-approval-push-isolation 12/12 PASS fail 0 exit 0（旧 7/8、1 fail），断言按现行封闭契约更新且判据未降低；负向自证三组全部按要求变红（A 静态 16/3、A 行为 RED_BYPASS_PROVEN 真实 mutation、B 8/4 失败者恰为 P2/N1/N2/N4）且两次临时改动逐字还原（sha256 与提交内置版本一致、git diff --exit-code = 0）；完整 npm test 1412 tests / 1412 pass / 0 fail / exit 0（第十二批 1408/1406/2 -> 本批 1412/1412/0，两条既有确定性失败清零）；回归全绿（D5-01 37/37、D5-02 48/48、side-effect+D4-03 278/278、文档口径 D5-01 合并集 60/60）；真机 D5-02 画布 52 PASS / 0 FAIL / exit 0；真机 D5-01 受控浏览器链本批未取得（S0a 既有失败，父提交 48a867c 上失败串逐字相同，故与本批无因果；其回归时点未定位），已如实登记为未取得项 + 剩余缺口，未当作产品回归、未用真机画布替代；D5-03 整体仍 = PARTIAL"
+  },
   "batch12": {
     "phase": "D5-03 第十二批 · 用户取消在途模型调用后的完整收敛（R2 + runTask 不返回）",
     "at": "2026-09-29T14:45:00Z",

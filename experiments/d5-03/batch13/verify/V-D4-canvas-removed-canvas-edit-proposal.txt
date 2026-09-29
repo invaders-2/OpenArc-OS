@@ -1,0 +1,54 @@
+TAP version 13
+# (node:95200) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: D5-02 F4 · canvas.edit 合同如实声明幂等能力（verify + 画布命令日志 recovery 已实现）
+ok 1 - D5-02 F4 · canvas.edit 合同如实声明幂等能力（verify + 画布命令日志 recovery 已实现）
+  ---
+  duration_ms: 1.477083
+  type: 'test'
+  ...
+# Subtest: D5-02 F4 · proposeWrite(canvas.edit) → SideEffectCall(AWAITING_APPROVAL)，0 mutation / 0 lease / 0 execution
+ok 2 - D5-02 F4 · proposeWrite(canvas.edit) → SideEffectCall(AWAITING_APPROVAL)，0 mutation / 0 lease / 0 execution
+  ---
+  duration_ms: 416.915416
+  type: 'test'
+  ...
+# Subtest: D5-02 F4 · trusted approve → 受监督 in-process 执行 → READ_AFTER_WRITE verify → SUCCEEDED/PASS
+not ok 3 - D5-02 F4 · trusted approve → 受监督 in-process 执行 → READ_AFTER_WRITE verify → SUCCEEDED/PASS
+  ---
+  duration_ms: 437.548416
+  type: 'test'
+  location: '/Users/wepingli/Desktop/OpenArc OS-integration/tests/d5-02-canvas-edit-proposal.test.mjs:138:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    受监督执行失败：{"error":"EXECUTOR_FAILED","status":"APPROVED"}
+    
+    false !== true
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/wepingli/Desktop/OpenArc%20OS-integration/tests/d5-02-canvas-edit-proposal.test.mjs:153:12)
+    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: D5-02 F4 · 没有 tool.canvas.edit 权限时绝不产生 SideEffectCall（权限门仍在最前）
+ok 4 - D5-02 F4 · 没有 tool.canvas.edit 权限时绝不产生 SideEffectCall（权限门仍在最前）
+  ---
+  duration_ms: 390.232875
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 3
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1324.423833
+EXIT=1

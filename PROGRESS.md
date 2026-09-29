@@ -2027,3 +2027,58 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 剩余缺口逐条：① 上述 notVerified 5 条；② 两条既有确定性失败（`d4-03-approval-push-isolation` P2、`side-effect-c4-gates` No Direct Domain Bypass）另案；③ `START_MARGIN_MS` 与产品预算同步约束；④ 跨组织真机 2 条 notVerified；⑤ 两条探针门禁既有失败；⑥ OAuth；⑦ 插件隔离（D5-08）；⑧ D5-02 `prompt()` 遗留；⑨ SIGKILL 边界；⑩ 第五批登记其余残留。
 
 下一步建议：两条既有确定性失败另案 → 两条探针门禁单独排期 → 跨组织真机入口 → OAuth → 真实第三方 / Adobe（D5-04 / D5-05）。
+
+# D5-03 第十三批 · 执行边界按提供者收口并修 in-process 白名单绕过 · 2026-09-29（`312dc60`）
+
+> **口径（用户明确定范围）**：本批只含**两条长期失败的 D4 门禁收口**（`side-effect-c4-gates` 的 `No Direct Domain Bypass`、`d4-03-approval-push-isolation` 的 `P2`）与**真实执行边界复核**；**未进入 OAuth、D5-04、创建组织入口**。不调宽超时、不跳过测试、不放松断言。只在 `/Users/wepingli/Desktop/OpenArc OS-integration` 工作，未触碰主工作树 17 项改动、DSH Desktop 共享运行时与 `~/.dsh`，未 push / 未 merge。
+> **判定：D5-03 第十三批（两条 D4 门禁收口 + 真实执行边界复核）= PASS（限定范围：两条门禁红→绿且判据提高、负向自证必然变红并逐字还原、完整 `npm test` 全绿、真机画布 52/52；真机 D5-01 受控浏览器链**本批未取得**（`S0a` 既有失败，父提交 `48a867c` 上失败串逐字相同，故与本批无因果；**其回归时点未定位**），已如实登记为未取得项 + 剩余缺口）；D5-03 整体仍 = PARTIAL**。
+> **被测 commit**：`312dc60`（`git rev-parse HEAD` 实测 `312dc606fee9d9c147a9d863fba7fe504961ab26`，与要求一致；父 `48a867c`，单提交）。改动面：`electron/side-effect-domain.cjs` +4、`electron/side-effect-runtime.cjs` +11/−5、`tests/d4-03-approval-push-isolation.test.mjs` +256、`tests/side-effect-c4-gates.test.mjs` +79、`experiments/d5-03/batch13/red/inprocess-bypass.mjs` +134；共 5 files / +482 / −7。**`src/**` 0 行改动**、`SCHEMA_VERSION` 与预算未动。
+> **证据**：`experiments/d5-03/batch13/verify/`（`COUNTS.md` 汇总 + `10/11` 两门禁、`20/21/22/23` 回归、`30/31/32/33` 真机、`40` 全量、`50/51/52` 负向自证、`53` 正常路径、`54` 还原证明、`60` JSON 纯插入证明，全部含原始 stdout+stderr 与 `# EXIT CODE`）；执行方报告 `experiments/d5-03/batch13/D5-03-BATCH13-REPORT.md`；tracked 证据 `docs/D5-03-GATE-EVIDENCE.json` 的 `batch13` 段（**纯插入**：更正后的最终 `git diff --numstat` = `502 / 0`（首版为 `474 / 0`，更正只在 batch13 段内部增改）；自 `"batch12"` 起至 EOF sha256 = `e9dac4dca98dda0d1ab2b18ef3e1926ae65a7fa080f055f7373729f223c10767`，与 `git show 312dc60:docs/D5-03-GATE-EVIDENCE.json` 对应区段逐字节相同；`python3 -c "import json;json.load(...)"` 成功）。
+
+## 1. 任务状态
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| 门禁 ① `side-effect-c4-gates` · `No Direct Domain Bypass` | **已完成（红→绿，判据提高）** | 旧 `18/19、1 fail`（失败句 `主进程绝不 in-process 执行 write`）→ **19/19 PASS、fail 0、exit 0**；旧绝对论断删除，改为 (a) 受监督路径行为正例 + (b) 行为级拒绝证明 + (c) 静态封闭白名单 + (d) 裁决顺序与 placement 审计 |
+| 门禁 ② `d4-03-approval-push-isolation` | **已完成（红→绿，判据未降）** | 旧 `7/8、1 fail`（P2）→ **12/12 PASS、fail 0、exit 0**；`SNAPSHOT_FIELDS` 13 → 15 项（加 `targetRef`/`url`），封闭精确键集合比较由 1 处扩到 **7 处**，新增 N1–N4 正反例 |
+| 真实产品缺陷 · `executeInProcess` 白名单绕过 | **已定性 + 已修** | 未修改代码时直接调公开方法 `executeInProcess` 对 `resource.trash`（`executionProvider=ResourceService`）：`ok=true`、`trash_state ACTIVE→TRASHED`、`registry active→deleted`、`deleteCalls 0→1`、`lease 0→1`、审计 `6→12`、`SUCCEEDED`、placement 谎报 `IN_PROCESS`；修后 `ok=false` / `0 mutation` / **lease 总数 0** / call 仍 `APPROVED` / 恰好 1 条 `DENY` 审计 |
+| 负向自证（故意放宽 → 必须变红） | **三组全部变红并逐字还原** | A 静态 `19 tests / 16 pass / 3 fail / exit 1`（含 `No Direct Domain Bypass`）；A 行为 `verdict: RED_BYPASS_PROVEN` + 真实 mutation；B `12 tests / 8 pass / 4 fail`（失败者恰为 P2/N1/N2/N4）。还原后 sha256 = `8e7d269d…5777` 与提交内置版本一致、`git diff --exit-code` = 0 |
+| 回归（node 级） | **全绿** | D5-01 六文件 **37/37**；D5-02 七文件 **48/48**；`side-effect-*` + `d4-03-*` **278/278**；`docs/D5-01-RESULT.md:79` 文档口径合并集 **60/60**（文档写 59/59 已过期，见 §4） |
+| 真机 D5-02 画布 | **52 PASS / 0 FAIL / notVerified 0 / exit 0** | `env -u ELECTRON_RUN_AS_NODE node experiments/d5-02/canvas-e2e.mjs`，与基线 52/52 完全一致 |
+| 真机 D5-01 受控浏览器链 | **本批未取得（既有失败）** | `test:d5-01-control` 三次运行均 `EXIT CODE: 2`，在 `S0a`（provider/model 安装段）失败 `{"pid":"","cid":"","defaultOk":false}`；**父提交 `48a867c` 的临时 worktree 上逐字相同失败** → 既有失败，与本批无因果。本批**没有**浏览器导航的真机 UI 证据 |
+| 全量 `npm test` | **exit 0，全绿** | **1412 tests / 1412 pass / 0 fail / skipped 0**（120.2s）；第十二批 1408/1406/2 → 本批 1412/1412/0（+4 = 新增 N1–N4；−2 = 第十二批登记的两条既有确定性失败本批已修） |
+| 断言变更清单 | **逐条登记，无整段删除、无判据降低** | 见 `docs/D5-03-GATE-EVIDENCE.json` 的 `batch13.assertionChanges`（**20 条**：旧句 / 新句 / 契约依据 文件:行）与报告 §2 |
+
+## 2. 根因与修法
+
+1. **断言过时（真）**：`主进程绝不 in-process 执行 write` 是**绝对论断**，已被 D5-01 Closure-2 / D5-02 的**显式进程局部 in-process execution class** 取代（受控浏览器原生 `WebContentsView`、画布 `CanvasService` + 同一 SQLite 连接都只在 main）。
+2. **产品确有缺陷（被旧断言掩盖）**：公开方法 `SideEffectRuntime.executeInProcess` **自身没有 execution placement 守卫**，placement 只由 `executeApproved` 分流保证 → 直接调用可在 main 进程真实执行 `ResourceService.delete` 并留下谎报 `IN_PROCESS / PROCESS_LOCAL_DOMAIN` 的审计。修法：方法体内在 `preflightAuthorization` 与 `acquireLease` **之前**按 `contract.executionProvider` 对静态白名单 fail closed，写恰好 1 条 `DENY` 审计、**不写 call 状态**（误路由不得把合法 call 打成 `BLOCKED` 而变成 DoS），新增错误码 `SIDE_EFFECT_IN_PROCESS_NOT_PERMITTED`。
+3. **审批投影断言过时（非泄露）**：`SNAPSHOT_FIELDS` 是产品封闭白名单的副本；D5-01 Closure-2 把 `targetRef`（目标标签身份）与 `url`（用户正在批准的那个地址）纳入**用户必须看到**的信息（UI 侧 `src/approval/ApprovalPrompt.tsx:186/:190` 确实渲染）。按现行契约更新，**字段集合仍是封闭精确集合**、比较处数从 1 增到 7。
+
+## 3. 三轴判定（分列）
+
+* **功能 = 通过（限定范围）**：两条目标门禁红→绿；真实执行边界按提供者收口（`ResourceService` 只能经受监督 executor，in-process 白名单是恰好 `BrowserControl + CanvasControl` 的静态封闭集合）；真机画布 52/52；全量 `npm test` 1412/1412/0；回归全绿；负向自证三组必然变红且逐字还原。
+* **视觉 = 本批不适用（如实披露）**：`src/**` 0 行改动，无新增界面文案，未做截图。
+* **动效 = 本批不适用（如实披露）**：无动效改动。
+
+## 4. notVerified 与缺口（如实登记）
+
+* **真机 D5-01 受控浏览器链未取得（本批最主要缺口）**：`test:d5-01-control` **当前不可达其浏览器场景** —— 安装段 `S0a` 在**父提交 `48a867c` 与本批上同样失败**且失败串逐字相同 → **与本批无因果**；其**失效 / 回归时点未定位**（未在 `f9564b7` 上复跑真机，仅能确认 `f9564b7` 是 `312dc60` 的祖先、且 D5-01 验收期记录为 46 PASS）。线索（**非已定位根因**）：dock 选择器 `data-app-id` 在 merge `7d707ab` 被删除（`f9564b7` 仍在 `src/main.tsx:361`），而 `experiments/d5-01/` 下三个 e2e 仍用它。**本批没有**"界面显示同一个待批准地址"的**真机 UI** 证据；该点可核查依据只有：(a) `src/approval/ApprovalPrompt.tsx:186` / `:190` 渲染的正是门禁 ② 现在逐字钉住的投影字段；(b) `src/**` 本批零改动，且三次 `npm run build` 产物主包哈希完全相同（`dist/assets/main-qXEiIhXD.js 373.56 kB`），被驱动的渲染层与父提交同源；(c) D5-01 验收期已通过的 S2.1/S2.2 记录。**修它需动 `src/settings/ModelSettings.tsx` 或 e2e 驱动，属 D5-01 门禁修复，不在本批范围**（需另开批次并走设计对齐）。检索 `docs/`、`PROGRESS.md`、`experiments/` 未发现此前登记过该失效。
+* **其余 notVerified 7 条**（连同上面单列的「真机 D5-01」与「CanvasControl 覆盖归属更正」，`docs/D5-03-GATE-EVIDENCE.json` 的 `batch13.notVerified` 共 **9** 条）：① `url` 的 2000 截断上界未覆盖（N2 长地址仅 1533 字符）；② `targetRef` 的 300 上界无断言；③ `canvas.edit` 未进推送门禁专门断言；④ 推送目标窗口身份未验（`isTrusted` 恒 `true`）；⑤ `registry.get` 返回 `null` 时的新 fail-closed 行为无专门用例；⑥ in-process class 仍无独立 child 寿命证据（头注释已如实披露、未写"等价"）；⑦ N4 未对全部 `SAFE_SNAPSHOT_SECRET_RE` 键名做穷举注入。
+* **环境登记（非产品缺陷）**：`node_modules/electron/dist/` 缺 `Electron.app` → 任何 `require("electron")` 触发自动下载器，GitHub CDN 实测约 **12 KB/s**（110MB 需 ~2.5h），使 `tests/d5-01-browser-policy.test.mjs` 表现为"挂住"；已用本机官方缓存 zip（sha256 `49b91ef2…5035`，与 `node_modules/electron/checksums.json` 期望值逐字节相符）经 `ditto -x -k` 修好（`node_modules` 被 `.gitignore` 忽略）。本会话 shell 继承 `ELECTRON_RUN_AS_NODE=1` 会让 `electron` 退化成纯 Node（带变量报 `v24.20.0`、`env -u` 后报 `v44.3.0`），真机链一律用 `env -u ELECTRON_RUN_AS_NODE` 运行 —— 这是**还原基线 shell**，不是放宽；**未**改产品代码或 `experiments/` 脚本去防御它。另：取证期间上级的并发诊断探针导致本批 `20-d5-01-regression.txt` 第 1 次运行被 **SIGKILL（exit 137）** 打断、作废，已冻结并发后重跑（第二次 37/37）。
+* **CanvasControl 覆盖归属更正（独立验收 F-1）**：`CanvasControl` in-process 白名单的**行为覆盖点**是 `tests/d5-02-canvas-edit-proposal.test.mjs`（经 `executeApproved` 走 in-process；被破坏后 4/3/1 红、`EXECUTOR_FAILED`），**不是** `tests/d5-02-canvas-tool.test.mjs`（只覆盖 adapter 层），也**不是** `tests/d5-01-browser-inprocess-boundary.test.mjs`（只覆盖 BrowserControl）—— 删掉 `CanvasControl` 后这两个文件实测**无变化**。
+* **独立验收 F-2（证据等级）**：`verify/32-…` 证明"跑在 `48a867c` 上"的显式依据是撰写的前置注释行；**运行期原始旁证**是中止栈里的真实路径 `file:///private/tmp/oa-b013-base/…`（`30-…`/`33-…` 则是 `file:///Users/wepingli/Desktop/OpenArc%20OS-integration/…`）。独立验收裁定该证据**可信**，建议后续把真机证据的前置事实直接放进 raw 捕获块。
+* **独立验收 F-3（探针口径）**：`red/inprocess-bypass.mjs:110` 的 `guardHeld` 用 `activeLeaseCount`（只数 ACTIVE），门禁 `tests/side-effect-c4-gates.test.mjs:524` 用 `leasesOfCall().length`（全部 lease）→ **探针口径略宽于门禁**；处置：**探针是探索性工具、门禁判据更严，不改探针**（红/绿结论不受影响）。
+* **独立对抗性验收已完成**：独立验收岗（与执行方无关联、全新上下文）独立复现全部计数（19/19、12/12、6/6、4/4、1412/1412/0）、用三组**不同**破坏方式完成负向自证（整段删守卫 / 只移动守卫位置 / 加 `actorUserId`，全部变红且逐字还原）、并独立复现父提交 `48a867c` 上的修前红（18/19/1、7/8/1）与红/绿双状态；报告 `experiments/d5-03/batch13/verify/BATCH13-VERIFY-REPORT.md`。**未发现本批执行方任何不成立或夸大的声明**；其"真机 D5-01 与本批无因果"的独立裁定 = 成立。
+* **文档计数过期（建议后续同步）**：`docs/D5-01-RESULT.md:79` 的 `59/59` 已过期（现为 **60/60**）—— 该文档末次提交 `f93e835` 时 `tests/window-manager.test.mjs` 为 16 条，`f9564b7` 增为 17 条（该文件在 `f9564b7..312dc60` 之间只有断言口径更新）；把 `f9564b7` 的这 5 个文件放进隔离宿主复算同样是 60 条。本批**未触碰**这 5 个文件 → **非产品回归**。
+* **继续单列**：跨组织真机 2 条 notVerified · 两条探针门禁既有失败（`governance-ui` 1/5、`model-keychain-restart` 3/15）· OAuth · 插件隔离（D5-08）· D5-02 `prompt()` 遗留 · SIGKILL 边界 · 第五批登记其余残留。
+
+## 5. 判定与下一步
+
+**判定：D5-03 第十三批（两条 D4 门禁收口 + 真实执行边界复核）= PASS（限定范围：两条门禁红→绿且判据提高、负向自证必然变红并逐字还原、完整 `npm test` 全绿、真机画布 52/52；真机 D5-01 受控浏览器链本批未取得（`S0a` 既有失败，父提交上失败串逐字相同；**其回归时点未定位**），已如实登记为未取得项 + 剩余缺口）；D5-03 整体仍 = PARTIAL。**
+
+**本批闭环的旧缺口**：第十二批登记的「两条既有确定性失败」（`d4-03-approval-push-isolation` P2、`side-effect-c4-gates` No Direct Domain Bypass）——两条均已修复并转绿，且 `side-effect-c4-gates` 旧断言掩盖的**真实 in-process 白名单绕过缺陷**已定性、已修、已负向自证。
+
+剩余缺口逐条：① 真机 D5-01 受控浏览器链门禁不可达（`S0a` 失败；**回归时点未定位**，`data-app-id` 选择器被 merge `7d707ab` 删除是线索而非已定位根因；需另开批次做 D5-01 门禁修复 + 设计对齐）；② 上述 notVerified 8 条（含独立的 CanvasControl 覆盖归属更正项）；③ `docs/D5-01-RESULT.md:79` 的 59/59 计数过期需同步为 60/60；④ E1 登记的 4 项计数型/文本定位型维护约束（白名单恰好 1 处、`.has(` 恰好 2 处、(d) 注释文本定位、成员必须字符串字面量）；⑤ 环境登记两项（electron dist 修复、`ELECTRON_RUN_AS_NODE` 需调用方剥离）；⑥ 跨组织真机 2 条 notVerified；⑦ 两条探针门禁既有失败；⑧ OAuth；⑨ 插件隔离（D5-08）；⑩ D5-02 `prompt()` 遗留；⑪ SIGKILL 边界；⑫ 第五批登记其余残留。
+
+下一步建议：定位并修 `test:d5-01-control` 的 `S0a` 失败（设置界面漂移为线索、回归时点未定位；另开 D5-01 门禁修复批次）→ 补 `url` 2000 / `targetRef` 300 / `canvas.edit` 推送 / 推送目标窗口身份 / `registry.get` null 用例 → 两条探针门禁单独排期 → 跨组织真机入口 → OAuth → 真实第三方 / Adobe（D5-04 / D5-05）。

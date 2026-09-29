@@ -1,0 +1,401 @@
+$ node --test tests/window-domain.test.mjs tests/window-manager.test.mjs tests/occlusion.test.mjs tests/d5-01-browser-tabs.test.mjs tests/d5-01-browser-policy.test.mjs
+# 上级要求的文档口径（docs/D5-01-RESULT.md:79）受影响单测合并集，基线 59/59 PASS
+# cwd: /Users/wepingli/Desktop/OpenArc OS-integration
+# node: v22.22.3
+# git HEAD: 312dc606fee9d9c147a9d863fba7fe504961ab26
+# date: 2026-09-29T15:54:16Z
+# --- begin raw stdout+stderr ---
+TAP version 13
+# Subtest: safeFilename：去掉路径分隔符与控制字符，不产生空名
+ok 1 - safeFilename：去掉路径分隔符与控制字符，不产生空名
+  ---
+  duration_ms: 0.522958
+  type: 'test'
+  ...
+# Subtest: uniquePath：同名不覆盖；safeSourceURL：去凭据
+ok 2 - uniquePath：同名不覆盖；safeSourceURL：去凭据
+  ---
+  duration_ms: 1.346
+  type: 'test'
+  ...
+# Subtest: attach/list：记录按会话键隔离，落盘路径真实存在且可写
+ok 3 - attach/list：记录按会话键隔离，落盘路径真实存在且可写
+  ---
+  duration_ms: 3.789917
+  type: 'test'
+  ...
+# Subtest: act：跨会话键拒绝、未完成不可打开、完成状态可移除；clear 只清已完成
+ok 4 - act：跨会话键拒绝、未完成不可打开、完成状态可移除；clear 只清已完成
+  ---
+  duration_ms: 1.798292
+  type: 'test'
+  ...
+# Subtest: 会话分区（A04）：同一 App 同用户共享；不同用户绝不共享；旧口径不变
+ok 5 - 会话分区（A04）：同一 App 同用户共享；不同用户绝不共享；旧口径不变
+  ---
+  duration_ms: 0.739625
+  type: 'test'
+  ...
+# Subtest: 标签模型：浏览器窗口恒有标签；非浏览器窗口没有标签字段
+ok 6 - 标签模型：浏览器窗口恒有标签；非浏览器窗口没有标签字段
+  ---
+  duration_ms: 1.603917
+  type: 'test'
+  ...
+# Subtest: 旧持久化（只有 meta.url）恢复成单标签，不丢地址
+ok 7 - 旧持久化（只有 meta.url）恢复成单标签，不丢地址
+  ---
+  duration_ms: 0.5705
+  type: 'test'
+  ...
+# Subtest: browser/tab-open / activate / close：命令语义与不变量
+ok 8 - browser/tab-open / activate / close：命令语义与不变量
+  ---
+  duration_ms: 0.444917
+  type: 'test'
+  ...
+# Subtest: 活动标签被关闭：激活邻居；持久化往返保留 tabs / activeTabId / tabSeq
+ok 9 - 活动标签被关闭：激活邻居；持久化往返保留 tabs / activeTabId / tabSeq
+  ---
+  duration_ms: 0.514125
+  type: 'test'
+  ...
+# Subtest: TAB_LIMIT：到达上限后 tab-open 不改状态；invariants 不接受超限
+ok 10 - TAB_LIMIT：到达上限后 tab-open 不改状态；invariants 不接受超限
+  ---
+  duration_ms: 0.862333
+  type: 'test'
+  ...
+# Subtest: browser/tab-state：只改目标标签；活动标签标题成为窗口标题；无变化同一引用
+ok 11 - browser/tab-state：只改目标标签；活动标签标题成为窗口标题；无变化同一引用
+  ---
+  duration_ms: 0.668666
+  type: 'test'
+  ...
+# Subtest: system/native-state 对浏览器窗口走标签路径（meta.url 不会与活动标签漂移）
+ok 12 - system/native-state 对浏览器窗口走标签路径（meta.url 不会与活动标签漂移）
+  ---
+  duration_ms: 0.259334
+  type: 'test'
+  ...
+# Subtest: nativeIntents：每个标签一条视图意图，只有活动标签 active；视口与遮挡者不变
+ok 13 - nativeIntents：每个标签一条视图意图，只有活动标签 active；视口与遮挡者不变
+  ---
+  duration_ms: 0.315833
+  type: 'test'
+  ...
+# Subtest: 浏览器命令只作用于浏览器窗口：home / ghost 一律 no-op
+ok 14 - 浏览器命令只作用于浏览器窗口：home / ghost 一律 no-op
+  ---
+  duration_ms: 0.294916
+  type: 'test'
+  ...
+# Subtest: freeRects：无遮挡时返回视口本身
+ok 15 - freeRects：无遮挡时返回视口本身
+  ---
+  duration_ms: 1.233875
+  type: 'test'
+  ...
+# Subtest: freeRects：完全覆盖时为空
+ok 16 - freeRects：完全覆盖时为空
+  ---
+  duration_ms: 0.18475
+  type: 'test'
+  ...
+# Subtest: freeRects：中心遮挡切成四条带，面积守恒
+ok 17 - freeRects：中心遮挡切成四条带，面积守恒
+  ---
+  duration_ms: 0.118041
+  type: 'test'
+  ...
+# Subtest: freeRects：贴边遮挡不会切出零面积块
+ok 18 - freeRects：贴边遮挡不会切出零面积块
+  ---
+  duration_ms: 0.064083
+  type: 'test'
+  ...
+# Subtest: freeRects：视口外的遮挡不影响结果
+ok 19 - freeRects：视口外的遮挡不影响结果
+  ---
+  duration_ms: 0.111916
+  type: 'test'
+  ...
+# Subtest: 提交的遮挡顺序不影响面积（可交换性）
+ok 20 - 提交的遮挡顺序不影响面积（可交换性）
+  ---
+  duration_ms: 0.159292
+  type: 'test'
+  ...
+# Subtest: classify：三态分类
+ok 21 - classify：三态分类
+  ---
+  duration_ms: 0.091834
+  type: 'test'
+  ...
+# Subtest: plan：最小化直接隐藏
+ok 22 - plan：最小化直接隐藏
+  ---
+  duration_ms: 0.104959
+  type: 'test'
+  ...
+# Subtest: plan：系统级覆盖层整块让位，不做快照
+ok 23 - plan：系统级覆盖层整块让位，不做快照
+  ---
+  duration_ms: 0.248625
+  type: 'test'
+  ...
+# Subtest: plan：无遮挡时铺满视口
+ok 24 - plan：无遮挡时铺满视口
+  ---
+  duration_ms: 0.292209
+  type: 'test'
+  ...
+# Subtest: plan：完全遮挡时改用快照占位
+ok 25 - plan：完全遮挡时改用快照占位
+  ---
+  duration_ms: 0.114125
+  type: 'test'
+  ...
+# Subtest: plan：部分遮挡且最大空闲矩形够大 → clip+snapshot
+ok 26 - plan：部分遮挡且最大空闲矩形够大 → clip+snapshot
+  ---
+  duration_ms: 0.091541
+  type: 'test'
+  ...
+# Subtest: plan：部分遮挡但最大空闲矩形过小 → 整块快照
+ok 27 - plan：部分遮挡但最大空闲矩形过小 → 整块快照
+  ---
+  duration_ms: 0.050125
+  type: 'test'
+  ...
+# Subtest: plan：不可交互时即使空闲矩形很大也整块快照
+ok 28 - plan：不可交互时即使空闲矩形很大也整块快照
+  ---
+  duration_ms: 0.145625
+  type: 'test'
+  ...
+# Subtest: plan：空视口隐藏
+ok 29 - plan：空视口隐藏
+  ---
+  duration_ms: 0.032208
+  type: 'test'
+  ...
+# Subtest: plan：非法数值不产生 NaN 尺寸
+ok 30 - plan：非法数值不产生 NaN 尺寸
+  ---
+  duration_ms: 0.066833
+  type: 'test'
+  ...
+# Subtest: snapshotKey：视口或遮挡不变时稳定，变化时改变
+ok 31 - snapshotKey：视口或遮挡不变时稳定，变化时改变
+  ---
+  duration_ms: 0.149875
+  type: 'test'
+  ...
+# Subtest: 不变量：随机场景下面积守恒、互不重叠、不越界
+ok 32 - 不变量：随机场景下面积守恒、互不重叠、不越界
+  ---
+  duration_ms: 36.145583
+  type: 'test'
+  ...
+# Subtest: kindOf：只有登记的原生 App 才是 browser kind
+ok 33 - kindOf：只有登记的原生 App 才是 browser kind
+  ---
+  duration_ms: 0.512125
+  type: 'test'
+  ...
+# Subtest: normalizeBounds：非有限值退回 fallback，越界值被 clamp
+ok 34 - normalizeBounds：非有限值退回 fallback，越界值被 clamp
+  ---
+  duration_ms: 0.504292
+  type: 'test'
+  ...
+# Subtest: createWindow：restore 只在 MAXIMIZED 时非 null，避免跨次最大化串味
+ok 35 - createWindow：restore 只在 MAXIMIZED 时非 null，避免跨次最大化串味
+  ---
+  duration_ms: 0.151834
+  type: 'test'
+  ...
+# Subtest: windowsOfApp：同一 App 的多个窗口都必须被返回（§32）
+ok 36 - windowsOfApp：同一 App 的多个窗口都必须被返回（§32）
+  ---
+  duration_ms: 0.311209
+  type: 'test'
+  ...
+# Subtest: reindex：剔除幽灵 id、补上遗漏 id、写回 z 与 visible、修正 focused
+ok 37 - reindex：剔除幽灵 id、补上遗漏 id、写回 z 与 visible、修正 focused
+  ---
+  duration_ms: 0.167583
+  type: 'test'
+  ...
+# Subtest: aboveWindows：只返回目标之上、且未最小化的窗口
+ok 38 - aboveWindows：只返回目标之上、且未最小化的窗口
+  ---
+  duration_ms: 0.3735
+  type: 'test'
+  ...
+# Subtest: fromPersisted：坏数据一律降级，不抛异常
+ok 39 - fromPersisted：坏数据一律降级，不抛异常
+  ---
+  duration_ms: 0.814333
+  type: 'test'
+  ...
+# Subtest: fromPersisted：丢弃重复 id，保留首个
+ok 40 - fromPersisted：丢弃重复 id，保留首个
+  ---
+  duration_ms: 0.340583
+  type: 'test'
+  ...
+# Subtest: fromPersisted：恢复后不预设焦点（不把上次的层级带到这次）
+ok 41 - fromPersisted：恢复后不预设焦点（不把上次的层级带到这次）
+  ---
+  duration_ms: 0.580917
+  type: 'test'
+  ...
+# Subtest: isPersistable：只有带 windows 数组的对象才值得信任
+ok 42 - isPersistable：只有带 windows 数组的对象才值得信任
+  ---
+  duration_ms: 0.721166
+  type: 'test'
+  ...
+# Subtest: invariants：能抓出被手工破坏的状态
+ok 43 - invariants：能抓出被手工破坏的状态
+  ---
+  duration_ms: 0.210042
+  type: 'test'
+  ...
+# Subtest: 命令契约：WINDOW_COMMANDS 恰好是 §20 的 9 条，且每条都有实现
+ok 44 - 命令契约：WINDOW_COMMANDS 恰好是 §20 的 9 条，且每条都有实现
+  ---
+  duration_ms: 0.950792
+  type: 'test'
+  ...
+# Subtest: reduce：未知 / 畸形命令原样返回原状态（同一引用）
+ok 45 - reduce：未知 / 畸形命令原样返回原状态（同一引用）
+  ---
+  duration_ms: 0.369292
+  type: 'test'
+  ...
+# Subtest: reduce 是纯的：不改动入参 state 与其内部对象
+ok 46 - reduce 是纯的：不改动入参 state 与其内部对象
+  ---
+  duration_ms: 1.294667
+  type: 'test'
+  ...
+# Subtest: OPEN 是幂等的：同 id 重复 open 只聚焦，不新建
+ok 47 - OPEN 是幂等的：同 id 重复 open 只聚焦，不新建
+  ---
+  duration_ms: 0.138417
+  type: 'test'
+  ...
+# Subtest: OPEN：新窗口落在最上层，且同 App 可开多窗口（§32）
+ok 48 - OPEN：新窗口落在最上层，且同 App 可开多窗口（§32）
+  ---
+  duration_ms: 1.919375
+  type: 'test'
+  ...
+# Subtest: CLOSE：关闭聚焦窗口后焦点落到最上层剩余可见窗口；关完变 null
+ok 49 - CLOSE：关闭聚焦窗口后焦点落到最上层剩余可见窗口；关完变 null
+  ---
+  duration_ms: 0.210667
+  type: 'test'
+  ...
+# Subtest: MOVE：clamp 保底，最大化窗口不可移动，相同位置不产生新对象
+ok 50 - MOVE：clamp 保底，最大化窗口不可移动，相同位置不产生新对象
+  ---
+  duration_ms: 0.521834
+  type: 'test'
+  ...
+# Subtest: RESIZE：clamp 到 [minSize, host]，且不越出工作区；最大化时拒绝
+ok 51 - RESIZE：clamp 到 [minSize, host]，且不越出工作区；最大化时拒绝
+  ---
+  duration_ms: 0.139417
+  type: 'test'
+  ...
+# Subtest: MINIMIZE/RESTORE：焦点交接正确，且最小化不丢 bounds
+ok 52 - MINIMIZE/RESTORE：焦点交接正确，且最小化不丢 bounds
+  ---
+  duration_ms: 0.331667
+  type: 'test'
+  ...
+# Subtest: MAXIMIZE：保存 restore 快照，重复最大化不吃掉快照
+ok 53 - MAXIMIZE：保存 restore 快照，重复最大化不吃掉快照
+  ---
+  duration_ms: 0.509458
+  type: 'test'
+  ...
+# Subtest: FOCUS：置顶 + 取消最小化；已是最上层时不动 order
+ok 54 - FOCUS：置顶 + 取消最小化；已是最上层时不动 order
+  ---
+  duration_ms: 0.155209
+  type: 'test'
+  ...
+# Subtest: system/reflow：复用 geometry.clampAll 把屏外窗口拉回可见工作区（A05）
+ok 55 - system/reflow：复用 geometry.clampAll 把屏外窗口拉回可见工作区（A05）
+  ---
+  duration_ms: 0.308291
+  type: 'test'
+  ...
+# Subtest: system/reflow：宿主窗口缩小后所有窗口仍完整落在工作区内（同一条 A05 不变量）
+ok 56 - system/reflow：宿主窗口缩小后所有窗口仍完整落在工作区内（同一条 A05 不变量）
+  ---
+  duration_ms: 0.181458
+  type: 'test'
+  ...
+# Subtest: system/native-state：只写 meta，不触碰 bounds / order / focused
+ok 57 - system/native-state：只写 meta，不触碰 bounds / order / focused
+  ---
+  duration_ms: 0.186167
+  type: 'test'
+  ...
+# Subtest: areaOf / maximizedBounds：工作区公式只有一处
+ok 58 - areaOf / maximizedBounds：工作区公式只有一处
+  ---
+  duration_ms: 0.052125
+  type: 'test'
+  ...
+# Subtest: nativeIntents：只有 browser kind 产出意图，且带上遮挡者与视口
+ok 59 - nativeIntents：只有 browser kind 产出意图，且带上遮挡者与视口
+  ---
+  duration_ms: 0.284875
+  type: 'test'
+  ...
+# Subtest: nativeIntents：chrome 之下的 DOM 条带（提示条/错误条）从原生视口里**让出去**
+ok 60 - nativeIntents：chrome 之下的 DOM 条带（提示条/错误条）从原生视口里**让出去**
+  ---
+  duration_ms: 0.19525
+  type: 'test'
+  ...
+1..60
+# tests 60
+# suites 0
+# pass 60
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 105.078417
+# --- end raw output ---
+# EXIT CODE: 0
+
+########################################################################
+# 归因附注（59/59 → 60/60 的差异判定）：不是产品回归，是文档计数过期
+########################################################################
+# docs/D5-01-RESULT.md:79 的「59/59 PASS」写于该文档最后一次提交 f93e835。
+# 在 f93e835 上逐文件统计 test( 声明数：
+#   tests/window-domain.test.mjs        11
+#   tests/window-manager.test.mjs       16   <-- 当时 16
+#   tests/occlusion.test.mjs            18
+#   tests/d5-01-browser-tabs.test.mjs    9
+#   tests/d5-01-browser-policy.test.mjs  5
+#   TOTAL = 59
+# f9564b7（fix(d5-01): 提示条被原生视图盖住…）把 tests/window-manager.test.mjs 的用例数
+# 由 16 增为 17（该文件在 f9564b7..312dc60 之间的 diff 只有断言口径更新，用例数不变）：
+#   $ for c in $(git log --format=%H -8 -- tests/window-manager.test.mjs); do
+#       echo "$(git show $c:tests/window-manager.test.mjs | grep -cE '^\s*test\(')  $c"; done
+#   17  7d707ab(merge)   17  f9564b7   16  98c9f81   16  ca94c3e   16  083fc57   15  a337f02
+# 本批 312dc60 **未触碰**这 5 个文件（git show --stat 312dc60 无它们）。
+# 独立复算（把 f9564b7 的 5 个基线文件放进 /tmp/oa-b13-base 的隔离宿主、electron/node_modules 用软链指向本工作树）：
+#   # tests 60   （60 条用例在 f9564b7 就已经是 60 条；该次 57 pass / 3 fail 是因为基线测试文件配的是
+#                  f9564b7 的旧窗口口径断言、而产品代码是 312dc60 的新口径，属预期错配，与本批无关）
+# 结论：当前 60/60 PASS、fail 0，比文档口径**多 1 条且全过**，非产品回归。

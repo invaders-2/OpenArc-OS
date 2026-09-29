@@ -1,0 +1,402 @@
+# 步骤 C：负向自证 A/B 逐字还原后，确认正常路径仍通过（重跑步骤 1、2 + 三条正常路径）
+# cwd: /Users/wepingli/Desktop/OpenArc OS-integration
+# node: v22.22.3
+# git HEAD: 312dc606fee9d9c147a9d863fba7fe504961ab26
+# date: 2026-09-29T15:53:37Z
+# 还原证明见 54-negative-restore-proof.txt（sha256 = 8e7d269d4c768e55a4fec98743e7e082644d134cd1d58f0088c561da11fd5777，与 312dc60 内置版本一致；git diff --exit-code = 0）
+# --- begin raw stdout+stderr ---
+
+########################################################################
+$ node --test tests/side-effect-c4-gates.test.mjs
+########################################################################
+TAP version 13
+# (node:90600) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Deny → 0 mutation / BLOCKED / 0 lease / 0 execution；Harness 只得到 bounded denied
+ok 1 - Deny → 0 mutation / BLOCKED / 0 lease / 0 execution；Harness 只得到 bounded denied
+  ---
+  duration_ms: 476.959709
+  type: 'test'
+  ...
+# Subtest: Approval timeout → 0 mutation / call BLOCKED(APPROVAL_TIMEOUT) / 0 retry
+ok 2 - Approval timeout → 0 mutation / call BLOCKED(APPROVAL_TIMEOUT) / 0 retry
+  ---
+  duration_ms: 577.586542
+  type: 'test'
+  ...
+# Subtest: Task Cancel While Waiting → 0 mutation / 0 lease / no later approval can execute
+ok 3 - Task Cancel While Waiting → 0 mutation / 0 lease / no later approval can execute
+  ---
+  duration_ms: 523.356917
+  type: 'test'
+  ...
+# Subtest: Session Revoked While Waiting → Approve DENY / 0 execution
+ok 4 - Session Revoked While Waiting → Approve DENY / 0 execution
+  ---
+  duration_ms: 547.761584
+  type: 'test'
+  ...
+# Subtest: App Disabled While Waiting → claim-time snapshot 拒绝；0 mutation
+ok 5 - App Disabled While Waiting → claim-time snapshot 拒绝；0 mutation
+  ---
+  duration_ms: 446.448083
+  type: 'test'
+  ...
+# Subtest: Tool permission revoked While Waiting → 0 mutation
+ok 6 - Tool permission revoked While Waiting → 0 mutation
+  ---
+  duration_ms: 447.071834
+  type: 'test'
+  ...
+# Subtest: useByAgent revoked While Waiting（non-admin actor）→ 0 mutation
+ok 7 - useByAgent revoked While Waiting（non-admin actor）→ 0 mutation
+  ---
+  duration_ms: 443.024292
+  type: 'test'
+  ...
+# Subtest: Precondition changed While Waiting → SIDE_EFFECT_PRECONDITION_CHANGED；0 write / 不 silent re-plan
+ok 8 - Precondition changed While Waiting → SIDE_EFFECT_PRECONDITION_CHANGED；0 write / 不 silent re-plan
+  ---
+  duration_ms: 872.698417
+  type: 'test'
+  ...
+# Subtest: Concurrent Approve click → 单一 authoritative approval transition；1 lease / 1 execution
+ok 9 - Concurrent Approve click → 单一 authoritative approval transition；1 lease / 1 execution
+  ---
+  duration_ms: 548.651917
+  type: 'test'
+  ...
+# Subtest: Concurrent Executor → only one claim / only one ACTIVE lease；mutation exactly 1
+ok 10 - Concurrent Executor → only one claim / only one ACTIVE lease；mutation exactly 1
+  ---
+  duration_ms: 624.196084
+  type: 'test'
+  ...
+# Subtest: Approval Revocation Race：APPROVED 后 claim 前 REVOKED → 0 Domain invocation
+ok 11 - Approval Revocation Race：APPROVED 后 claim 前 REVOKED → 0 Domain invocation
+  ---
+  duration_ms: 503.046625
+  type: 'test'
+  ...
+# Subtest: Task Cancel Race：executor eligibility 窗口内 cancel → 0 Domain invocation
+ok 12 - Task Cancel Race：executor eligibility 窗口内 cancel → 0 Domain invocation
+  ---
+  duration_ms: 501.425167
+  type: 'test'
+  ...
+# Subtest: Harness spoof through production WRITE route → denied / 0 SideEffectCall
+ok 13 - Harness spoof through production WRITE route → denied / 0 SideEffectCall
+  ---
+  duration_ms: 444.227875
+  type: 'test'
+  ...
+# Subtest: Duplicate tool delivery → 只有一个 SideEffectCall / 一个 idempotencyKey；0 second mutation
+ok 14 - Duplicate tool delivery → 只有一个 SideEffectCall / 一个 idempotencyKey；0 second mutation
+  ---
+  duration_ms: 442.924916
+  type: 'test'
+  ...
+# Subtest: Trusted Approval Gateway：untrusted sender 抛错；unknown command 拒绝；Renderer 自报 actor 被忽略
+ok 15 - Trusted Approval Gateway：untrusted sender 抛错；unknown command 拒绝；Renderer 自报 actor 被忽略
+  ---
+  duration_ms: 466.531083
+  type: 'test'
+  ...
+# Subtest: Approval Snapshot：safe 投影（无 secret / 路径 / store root）；terminal 或跨 session → 不返回
+ok 16 - Approval Snapshot：safe 投影（无 secret / 路径 / store root）；terminal 或跨 session → 不返回
+  ---
+  duration_ms: 441.882875
+  type: 'test'
+  ...
+# Subtest: Tool Facade Bridge WRITE route：只产生 SideEffect Proposal；WRITE 绝不经 READ_ONLY execution route
+ok 17 - Tool Facade Bridge WRITE route：只产生 SideEffect Proposal；WRITE 绝不经 READ_ONLY execution route
+  ---
+  duration_ms: 455.711208
+  type: 'test'
+  ...
+# Subtest: No Direct Domain Bypass：resource.trash 的唯一 Domain 调用点在 allowlisted adapter + controlled execution 内
+ok 18 - No Direct Domain Bypass：resource.trash 的唯一 Domain 调用点在 allowlisted adapter + controlled execution 内
+  ---
+  duration_ms: 585.646792
+  type: 'test'
+  ...
+# Subtest: WRITE tool result 投影只含 safe 字段（无绝对路径 / DB id / lease / capability）
+ok 19 - WRITE tool result 投影只含 safe 字段（无绝对路径 / DB id / lease / capability）
+  ---
+  duration_ms: 503.7615
+  type: 'test'
+  ...
+1..19
+# tests 19
+# suites 0
+# pass 19
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 9957.82525
+# ^^^ EXIT CODE: 0 ^^^
+
+########################################################################
+$ node --test tests/d4-03-approval-push-isolation.test.mjs
+########################################################################
+TAP version 13
+# (node:90623) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: P1 · 当前会话 = B：A 任务进入 AWAITING_APPROVAL 时推送必须被静默丢弃
+ok 1 - P1 · 当前会话 = B：A 任务进入 AWAITING_APPROVAL 时推送必须被静默丢弃
+  ---
+  duration_ms: 478.230167
+  type: 'test'
+  ...
+# Subtest: P2 · 当前会话 = A（owner）：推送投递，载荷 = 白名单投影且与 getApprovalRequest 一致
+ok 2 - P2 · 当前会话 = A（owner）：推送投递，载荷 = 白名单投影且与 getApprovalRequest 一致
+  ---
+  duration_ms: 445.25075
+  type: 'test'
+  ...
+# Subtest: P3 · 会话切回 A 后仍能发现 B 会话期间产生的 pending（挂载查询等价）
+ok 3 - P3 · 会话切回 A 后仍能发现 B 会话期间产生的 pending（挂载查询等价）
+  ---
+  duration_ms: 445.619708
+  type: 'test'
+  ...
+# Subtest: P4 · 无 authenticated session：不推送、不改任何状态
+ok 4 - P4 · 无 authenticated session：不推送、不改任何状态
+  ---
+  duration_ms: 443.491792
+  type: 'test'
+  ...
+# Subtest: P5 · 决策路径不受影响：owner APPROVE/DENY 正常，非 owner 会话决策仍被拒
+ok 5 - P5 · 决策路径不受影响：owner APPROVE/DENY 正常，非 owner 会话决策仍被拒
+  ---
+  duration_ms: 475.523209
+  type: 'test'
+  ...
+# Subtest: P6 · 无 session：读路径空 / not-found，声明了 context 的投影一律 null
+ok 6 - P6 · 无 session：读路径空 / not-found，声明了 context 的投影一律 null
+  ---
+  duration_ms: 451.457416
+  type: 'test'
+  ...
+# Subtest: P7 · A 会话下读路径正常（正对照）
+ok 7 - P7 · A 会话下读路径正常（正对照）
+  ---
+  duration_ms: 454.582959
+  type: 'test'
+  ...
+# Subtest: P8 · context == null 的内部投影语义未变（推送钩子用）
+ok 8 - P8 · context == null 的内部投影语义未变（推送钩子用）
+  ---
+  duration_ms: 442.224625
+  type: 'test'
+  ...
+# Subtest: N1 · 反例 · 资源回收审批不携带任何浏览器目标
+ok 9 - N1 · 反例 · 资源回收审批不携带任何浏览器目标
+  ---
+  duration_ms: 444.942833
+  type: 'test'
+  ...
+# Subtest: N2 · 正例 · 浏览器导航：推送 / 读取 / 列表三处同一个待批准地址
+ok 10 - N2 · 正例 · 浏览器导航：推送 / 读取 / 列表三处同一个待批准地址
+  ---
+  duration_ms: 442.372
+  type: 'test'
+  ...
+# Subtest: N3 · 反例 · 非所属会话 / 未登录窗口在浏览器场景仍为 0 投影
+ok 11 - N3 · 反例 · 非所属会话 / 未登录窗口在浏览器场景仍为 0 投影
+  ---
+  duration_ms: 438.609375
+  type: 'test'
+  ...
+# Subtest: N4 · 反例 · 路径 / 凭据 / 其它未准许字段一律不得进入推送
+ok 12 - N4 · 反例 · 路径 / 凭据 / 其它未准许字段一律不得进入推送
+  ---
+  duration_ms: 887.59925
+  type: 'test'
+  ...
+1..12
+# tests 12
+# suites 0
+# pass 12
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5953.915
+# ^^^ EXIT CODE: 0 ^^^
+
+########################################################################
+$ node --test tests/d5-02-canvas-tool.test.mjs
+########################################################################
+TAP version 13
+# (node:90626) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: D5-02 · Registry：canvas.read / canvas.edit 权限、审批与执行类
+ok 1 - D5-02 · Registry：canvas.read / canvas.edit 权限、审批与执行类
+  ---
+  duration_ms: 1.008208
+  type: 'test'
+  ...
+# Subtest: D5-02 · CanvasControl adapter：plan 带基准版本，execute 用 plan，verify 读回确认
+ok 2 - D5-02 · CanvasControl adapter：plan 带基准版本，execute 用 plan，verify 读回确认
+  ---
+  duration_ms: 428.138667
+  type: 'test'
+  ...
+# Subtest: D5-02 · A38：批准后用户先改了 → AI 执行被版本检查拒绝（不覆盖用户内容）
+ok 3 - D5-02 · A38：批准后用户先改了 → AI 执行被版本检查拒绝（不覆盖用户内容）
+  ---
+  duration_ms: 417.765375
+  type: 'test'
+  ...
+# Subtest: D5-02 · A28：只读成员时 AI 工具执行被同一条权限规则拒绝
+ok 4 - D5-02 · A28：只读成员时 AI 工具执行被同一条权限规则拒绝
+  ---
+  duration_ms: 416.0175
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1332.489666
+# ^^^ EXIT CODE: 0 ^^^
+
+########################################################################
+$ node --test tests/d5-01-browser-control-chain.test.mjs
+########################################################################
+TAP version 13
+# (node:90628) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: READ 链：工具门 → 真实受控读取 → 有界 untrusted 正文回 dsh → 审计与日志零正文
+ok 1 - READ 链：工具门 → 真实受控读取 → 有界 untrusted 正文回 dsh → 审计与日志零正文
+  ---
+  duration_ms: 1563.194708
+  type: 'test'
+  ...
+# Subtest: READ 越权：模型自报未授权 viewId → 0 次真实读取、execution FAILED、任务不成功
+ok 2 - READ 越权：模型自报未授权 viewId → 0 次真实读取、execution FAILED、任务不成功
+  ---
+  duration_ms: 1181.923292
+  type: 'test'
+  ...
+# Subtest: WRITE 链：导航 propose → 用户审批（绑定目标+地址）→ lease → claim → 真实导航 → READ_AFTER_WRITE PASS
+ok 3 - WRITE 链：导航 propose → 用户审批（绑定目标+地址）→ lease → claim → 真实导航 → READ_AFTER_WRITE PASS
+  ---
+  duration_ms: 1225.108083
+  type: 'test'
+  ...
+# Subtest: WRITE 拒绝：用户 DENY → 0 导航、execution 不存在、不产生任何“已回滚”式结论
+ok 4 - WRITE 拒绝：用户 DENY → 0 导航、execution 不存在、不产生任何“已回滚”式结论
+  ---
+  duration_ms: 2052.991042
+  type: 'test'
+  ...
+# Subtest: 工具门：URL 协议/凭据在 propose 阶段就被拒（0 side-effect call、0 导航），未授权目标不产生 plan
+ok 5 - 工具门：URL 协议/凭据在 propose 阶段就被拒（0 side-effect call、0 导航），未授权目标不产生 plan
+  ---
+  duration_ms: 839.471916
+  type: 'test'
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 8497.733792
+# ^^^ EXIT CODE: 0 ^^^
+
+########################################################################
+$ node --test tests/d5-01-browser-inprocess-boundary.test.mjs
+########################################################################
+TAP version 13
+# (node:90636) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: B1 · claim 前撤权：绝不派发（0 导航）、调用明确收敛，且不留 ACTIVE lease
+ok 1 - B1 · claim 前撤权：绝不派发（0 导航）、调用明确收敛，且不留 ACTIVE lease
+  ---
+  duration_ms: 610.59525
+  type: 'test'
+  ...
+# Subtest: B2 · 派发后停止（取消任务）：结论不是'未执行'，状态不悬挂，且不再有第二次派发
+ok 2 - B2 · 派发后停止（取消任务）：结论不是'未执行'，状态不悬挂，且不再有第二次派发
+  ---
+  duration_ms: 656.792125
+  type: 'test'
+  ...
+# Subtest: B3 · 超时后迟到完成：不覆盖权威 UNKNOWN_EFFECT、不自动重试；只读恢复才给结论
+ok 3 - B3 · 超时后迟到完成：不覆盖权威 UNKNOWN_EFFECT、不自动重试；只读恢复才给结论
+  ---
+  duration_ms: 667.395875
+  type: 'test'
+  ...
+# Subtest: B4 · 执行中目标消失：判不可知、不转向别的标签、调用与任务都有终态
+ok 4 - B4 · 执行中目标消失：判不可知、不转向别的标签、调用与任务都有终态
+  ---
+  duration_ms: 457.945208
+  type: 'test'
+  ...
+# Subtest: B5 · 结果核查归因：只认本次派发证据；无证据/被中止一律不得认领成功
+ok 5 - B5 · 结果核查归因：只认本次派发证据；无证据/被中止一律不得认领成功
+  ---
+  duration_ms: 425.511625
+  type: 'test'
+  ...
+# Subtest: B6 · 并发与重复：同一执行记录只派发一次；plan 被改后旧批准不得用于新地址
+ok 6 - B6 · 并发与重复：同一执行记录只派发一次；plan 被改后旧批准不得用于新地址
+  ---
+  duration_ms: 847.551791
+  type: 'test'
+  ...
+1..6
+# tests 6
+# suites 0
+# pass 6
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3827.36475
+# ^^^ EXIT CODE: 0 ^^^
+
+########################################################################
+$ node experiments/d5-03/batch13/red/inprocess-bypass.mjs
+########################################################################
+(node:90637) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+propose.ok: true
+callId: scall_dyVkyPDUwvWsKQ
+contract.executionProvider: ResourceService
+approve.ok: true
+call.status.afterApprove: APPROVED
+before.domain: {"preconditionTrashed":false,"preconditionRegistryStatus":"active","preconditionVersion":1,"libraryTrashState":"ACTIVE","libraryDeletedAt":null,"registryStatus":"active"}
+before.deleteCalls: 0
+before.leaseCount: 0
+before.activeLeaseCount: 0
+before.auditCount: 6
+res.ok: false
+res.error: SIDE_EFFECT_IN_PROCESS_NOT_PERMITTED
+res.inProcess: false
+res.call.status: APPROVED
+after.domain: {"preconditionTrashed":false,"preconditionRegistryStatus":"active","preconditionVersion":1,"libraryTrashState":"ACTIVE","libraryDeletedAt":null,"registryStatus":"active"}
+after.deleteCalls: 0
+after.leaseCount: 0
+after.activeLeaseCount: 0
+after.auditCount: 7
+call.status.final: APPROVED
+domainMutated: false
+audit.placementRows: [{"action":"side_effect.execution_placement","decision":"DENY","reasonCode":"IN_PROCESS_NOT_PERMITTED"}]
+verdict.bypassProven: false
+verdict.guardHeld: true
+verdict: GREEN_GUARD_HELD
+# ^^^ EXIT CODE: 0 ^^^
+
+# --- end raw output ---

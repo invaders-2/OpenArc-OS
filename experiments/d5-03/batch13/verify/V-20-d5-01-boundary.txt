@@ -1,0 +1,49 @@
+TAP version 13
+# (node:95063) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: B1 · claim 前撤权：绝不派发（0 导航）、调用明确收敛，且不留 ACTIVE lease
+ok 1 - B1 · claim 前撤权：绝不派发（0 导航）、调用明确收敛，且不留 ACTIVE lease
+  ---
+  duration_ms: 423.524917
+  type: 'test'
+  ...
+# Subtest: B2 · 派发后停止（取消任务）：结论不是'未执行'，状态不悬挂，且不再有第二次派发
+ok 2 - B2 · 派发后停止（取消任务）：结论不是'未执行'，状态不悬挂，且不再有第二次派发
+  ---
+  duration_ms: 399.228083
+  type: 'test'
+  ...
+# Subtest: B3 · 超时后迟到完成：不覆盖权威 UNKNOWN_EFFECT、不自动重试；只读恢复才给结论
+ok 3 - B3 · 超时后迟到完成：不覆盖权威 UNKNOWN_EFFECT、不自动重试；只读恢复才给结论
+  ---
+  duration_ms: 430.897042
+  type: 'test'
+  ...
+# Subtest: B4 · 执行中目标消失：判不可知、不转向别的标签、调用与任务都有终态
+ok 4 - B4 · 执行中目标消失：判不可知、不转向别的标签、调用与任务都有终态
+  ---
+  duration_ms: 395.186292
+  type: 'test'
+  ...
+# Subtest: B5 · 结果核查归因：只认本次派发证据；无证据/被中止一律不得认领成功
+ok 5 - B5 · 结果核查归因：只认本次派发证据；无证据/被中止一律不得认领成功
+  ---
+  duration_ms: 394.577292
+  type: 'test'
+  ...
+# Subtest: B6 · 并发与重复：同一执行记录只派发一次；plan 被改后旧批准不得用于新地址
+ok 6 - B6 · 并发与重复：同一执行记录只派发一次；plan 被改后旧批准不得用于新地址
+  ---
+  duration_ms: 793.737833
+  type: 'test'
+  ...
+1..6
+# tests 6
+# suites 0
+# pass 6
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2921.323958
+d5-01 EXIT=0

@@ -1,0 +1,74 @@
+$ env -u ELECTRON_RUN_AS_NODE node experiments/d5-02/canvas-e2e.mjs
+# 环境：env -u ELECTRON_RUN_AS_NODE（还原基线 shell：本会话 DSH 注入了 ELECTRON_RUN_AS_NODE=1，会让 electron 退化成纯 Node）
+# cwd: /Users/wepingli/Desktop/OpenArc OS-integration
+# node: v22.22.3
+# git HEAD: 312dc606fee9d9c147a9d863fba7fe504961ab26
+# date: 2026-09-29T15:58:33Z
+# --- begin raw stdout+stderr ---
+(node:91591) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  [PASS] A0 · 真实 electron . 启动（隔离 userData / 隔离 CDP 端口）
+  [PASS] A0 · 真实 UI 登录 admin
+  [PASS] A1 · 打开应用 = 上游原版列表首页 static/canvas-list.html（画布工作台）；不是完整外壳（无 index.html/home.html 帧、无侧栏导航），宿主只剩宿主根（顶部操作条/状态行/提示横幅已删）
+  [PASS] A2 · 其他子页面入口不可达：入口页没有指向 online/gpt-chat/asset-manager/api-settings/comfyui-settings/smart-canvas 的导航，也不存在这些子页帧
+  [PASS] A3 · 「开始创作」→ 直接进入无限画布编辑器（canvas.html + 适配器就绪 + 非只读），且真的新建了一本；全程选画布遮挡层 #canvasPickerOverlay 未出现 .active
+  [PASS] A4 · 编辑器 #backToManagerBtn → 回到 canvas-list 入口帧（同一宿主帧内导航：返回后画布帧不再存在）
+  [PASS] A5 · 「继续上次」→ 进入 canvas.html 且打开的正是最近更新的那本（宿主 IPC canvas/list 的 updatedAt 第一名，也就是刚创建的这本）
+  [PASS] A6 · 卡片直达：入口页 #cardsGrid .project-card[data-canvas-id=当前这本] → 进入编辑器且 canvasId 一致（真实卡片点击，不是 IPC 造帧）
+  [PASS] A7 · 创建并编辑真实项目：命令层 add/connect/move → 画布自动保存 → OpenArc 存储里一致
+  [PASS] A8 · 撤销 / 重做：撤销真的回退、重做真的恢复（与手工编辑同一历史入口），结果重新落库
+   · N 系列探针节点（生图 + 视频，观察后删除）：{"add":["ok","ok"],"marked":true}
+  [PASS] N1 · 无模型（配置模型之前）：编辑器页头模型状态 = unconfigured + 引导按钮文案精确为「打开 OpenArc 总 API 设置」；文本/生图下拉都被标成未配置且真的 disabled（唯一占位文案精确）；DOM 全文 / option.value / select.value 扫 /comfly/i 0 命中（不存在伪造供应商）
+  [PASS] N2 · 引导真的打开 OpenArc 总 API 设置：真实点击页面里的引导按钮 → 桥把这一次请求真的送到宿主（按钮拿到 data-openarc-guide-state=opened）+ 出现设置窗口且 [data-settings-active=model]（标题「模型 / AI」、未被最小化）；随后关掉设置窗口，不留残留、不影响后续断言
+  [PASS] N3 · 未接通能力（视频）明确不可用：视频 provider/model 下拉 disabled + aria-disabled + data-openarc-unavailable=video-generation + 唯一文案（且节点说明里不给误导性引导）；视频节点 data-openarc-available=false；运行按钮 data-openarc-blocked + disabled；页面内直接 POST /api/canvas-video → 501 CAPABILITY_UNAVAILABLE（available:false / transport:null / detail 非空）；假 provider 请求计数 0→0
+   · N 系列探针节点已删除（画布回到观察前的节点集合）：{"del":"ok","gone":true}
+  [PASS] A9 · 返回画布列表：列表里出现刚保存的项目、当前这本的卡片真的渲染出来（列表数据来自 OpenArc 存储，最近更新的排第一）
+  [PASS] A10 · 从画布列表再打开项目：打开的是**同一本**画布，节点/连线/坐标从 OpenArc 存储恢复
+  [PASS] B1 · 模型只有一个来源：画布只看到 OpenArc 已配置可用的模型；provider 投影的数量/身份/键集合与 IPC 真值逐项一致，且全程无地址与凭据
+   · LLM 运行前：{"setText":true,"runLlm":{"started":true,"model":"D5-02 Chat · OugA"}}
+  [PASS] B2 · 真实模型调用链（文本）：经 OpenArc 模型服务 → 本地 provider → 结果回到 LLM 节点
+  [PASS] B3 · 真实模型调用链（图片）：经 OpenArc 模型服务 → /images/generations → 输出节点拿到图片
+  [PASS] B4 · 失败如实展示：provider 500 → 节点标记失败并带错误（不假装成功）
+  [PASS] N4 · 真实投影 + 无第二来源：B 系列配好 provider+模型后，编辑器 provider 下拉逐项 = OpenArc 真 provider（id + displayName，不是 Comfly/API 的造物）；模型下拉的每个选项都在 OpenArc 清单里（gpt-4o-mini / gpt-image-2 / veo3-fast 在 DOM 属性+文本 / option.value / select.value 三处 0 命中）；三把 localStorage 模型键 setItem 后读回 null 且不留残留键；/api/config.api_providers 键集合 ⊆ 六键
+  [PASS] N6 · 无静默回落：页面用清单外标签 POST /api/canvas-llm → 502 MODEL_NOT_FOUND（回包点名 model/method，detail 是人话），provider 请求 0 新增，宿主 data-canvas-model-not-found 真的 +1
+  [PASS] B5 · OpenArc 尚不支持的能力（视频）明确报错，不静默改用其它服务：页面侧守卫按能力事实回答 501 CAPABILITY_UNAVAILABLE（available:false / transport:null / detail 非空），不是笼统的 OPENARC_UNSUPPORTED
+  [PASS] B6 · 更新/下载上游程序保持禁用（界面明确说明），且应用信息/队列来自宿主（不是上游后端）
+  [PASS] D1 · 无权限：撤销画布应用的 model.use 后，生成明确拒绝且 provider 收不到任何请求（F2 缺口）
+  [PASS] N5a · 撤权 → 页面模型区真的变成不可用（实测口径 = unconfigured：页头状态位 unconfigured + 文本/生图下拉 disabled 且只剩一条精确的「未配置…」占位；不是「看着还能点」）；恢复授权 → 回到可用（chip ok + 下拉可选且选项只在真源清单里）
+  [PASS] D2 · 能力不支持：图片能力被指到只有 chat 的模型上 → 明确 CAPABILITY_UNAVAILABLE，provider 收不到图片请求
+  [PASS] N5c · 跨能力（生图默认被指到只有 chat 的模型）→ 生图区按**显式默认不可用**呈现：data-openarc-default-unavailable=image-generation + 下拉 disabled/aria-disabled + 运行按钮 data-openarc-blocked + 原因文案与「打开 OpenArc 总 API 设置」引导；**清单仍如实投影**（那个可用生图模型仍在 /api/config.image_models 里，只是没有被自动选中：select.value 为空、生图节点 model 为空 = 没有静默换默认）；文本区不受影响（仍可选、选项 ⊆ 真源清单、默认仍是显式配置的那个）；恢复默认 → 标记消失、下拉恢复可选、chip 回 ok
+  [PASS] D3 · 预算不足：任务级 MODEL_CALLS 用尽后明确拒绝，provider 请求数 = 成功调用数
+  [PASS] D4 · 停止：停止后不再发新请求；迟到结果被丢弃，不覆盖用户随后编辑的节点
+  [PASS] D5 · 失败收敛：provider 500 → 明确失败、每次调用恰好一次请求（无隐藏重试），且回包不含凭据
+  [PASS] F1 · 任务模型绑定：指定的模型配置被停用/能力不符/不存在时**明确拒绝**且 0 新增请求（不静默换模型）
+  [PASS] N5d · 停用**显式配置的文本默认** → 被停用模型从页面模型区消失（清单 / DOM option / 节点当前模型三处 0 命中）；文本能力按「默认不可用」呈现（data-openarc-default-unavailable=chat + 下拉 disabled/aria-disabled + 运行按钮 data-openarc-blocked + 原因文案与「打开 OpenArc 总 API 设置」引导，select.value 为空 = 没有自动改用剩下的那个文本模型）；恢复 enabled → 页面模型区回到可用（chip ok + 下拉可选 + 标记消失）
+  [PASS] F3a · 图片资源：本地导入写入 OpenArc 资源库，画布文档只存 openarc-asset:<ResourceRef>（不存 data URL / 路径）
+  [PASS] F3b · 图片资源：关闭窗口重开后仍可用（宿主按当前用户逐资源授权解析为 data URL 显示，存储里仍是 ref）
+  [PASS] F3c · 图片资源：资源被删除后画布明确不可用（读回失败 → 保留 ref 显示不可用），旧 data URL 缓存不复活
+  [PASS] F3d · 本地编辑保存之后，宿主 IPC canvas/command（actorKind=USER）新增的节点仍能进到已打开的编辑器（≤5s，primitives + DOM）：用户本地内容不被覆盖、revision 不回环
+  [PASS] F3e · 500ms 待保存窗口内的受控交错：页面本地编辑与宿主 IPC 改动**两边内容都保留**（不同节点都在；同一节点同一字段 → 本地原位 + 远端 <id>-remote 副本；关窗重开仍在）
+  [PASS] E1 · 应用页面（含外壳页与画布子页）没有 openarc 桥 / Node / IPC / fs；端点白名单外一律明确拒绝
+  [PASS] E2 · openarc-canvas:// 只读白名单：目录穿越与非白名单扩展名都被拒，白名单内资源正常
+  [PASS] E3 · 后端不信任消息自报身份：带伪造 userId/sessionRef 的请求按当前会话处理
+  [PASS] E4 · 宿主只接受**当前应用实例**的消息：伪造 token / 其它 iframe / 外壳自身发的调用一律不执行
+   · 画布页自我导航被拦后的状态：{"usableAfter":true,"usableState":{"id":"cv_mumv2f7t_ly2ek4","nodes":11},"relayResetAttempted":true}
+  [PASS] E5 · 出网通道：fetch / 图片 / WebSocket / 表单 / 外站脚本 / window.open / **iframe 自我导航**全部被拦（本地接收端 0 命中；被拦后重新进入画布仍可用）
+  [PASS] E5b · 外壳页 / 顶层页的导航出网同样被拦（应用还活着、接收端仍 0 命中）
+  [PASS] E6 · 宿主级拦截留证：主进程 will-navigate / will-frame-navigate 真的拦下了导航出网（不是只靠页面 CSP 声明）
+  [PASS] E7 · 账号边界（数据）：切账号后旧页面全部销毁，B 看不到也打不开 A 的私有画布
+  [PASS] E8 · 账号边界（存储/通道）：真实同源存储按**本次挂载钥匙**分桶，A 账号的键一个不剩（A/B 各自写入探针键自证 + 桥的只读隔离探针）
+   · F4 前置：切回 admin 后从画布列表重新进入当前这本 = true
+  [PASS] F4b · AI 编辑正式链 · chain2 前置：重开画布帧后等宿主把 canEdit 推下来（非只读）+ 适配器/文档就绪 + n_prompt 可见，然后才做用户编辑（不放宽 F4 任何判定）
+  [PASS] F4 · AI 编辑正式链：Agent 提议 → 用户审批 → 授权执行 → 画布呈现 → 保存重开仍在（旧 revision 不覆盖用户内容）
+  [PASS] F3f · MOTION_SYSTEM §6：AI 新增节点（命令账本 actorKind=AGENT）带中性来源标记（12/18、字重 500、中性灰、无描边、pointer-events:none、不吃节点按钮），用户手工新增的节点没有标记；新节点 160ms cubic-bezier(.2,0,0,1) 淡入（实测采样），html[data-openarc-reduced-motion=1] 下 animation:none + opacity 立即为 1
+  [PASS] F3g · 回收站 FAB 显隐（用户裁定）：回收站为空 ⇒ 右下角 FAB 隐藏（hidden 属性 + computed display:none + 不占布局 + 命中测试落空）；有已删除画布 ⇒ 显示（真删一本后，角标计数 = 回收站列表长度、位置仍在右下角、命中测试落在 FAB 内）；「恢复」与「清空回收站」之后都回到隐藏（同一真源 updateTrashBadge()）
+   · F3h 对话框原始记录：[{"type":"confirm","message":"确定要复制画布「F3h 模态对话探针 1790697591537」吗？","defaultValue":""},{"type":"confirm","message":"确定要删除画布「F3h 模态对话探针 1790697591537」吗？此操作可在回收站撤销。","defaultValue":""},{"type":"prompt","message":"重命名画布","defaultValue":"F3h 模态对话探针 1790697591537 副本","err":"dialog.accept: Protocol error (Page.handleJavaScriptDialog): No dialog is showing"},{"type":"confirm","message":"确定要删除画布「F3h 模态对话探针 1790697591537 副本」吗？此操作可在回收站撤销。","defaultValue":""},{"type":"alert","message":"删除失败","defaultValue":""}]
+   · F3h 已知宿主边界：Electron 不支持 prompt()（"prompt() is not supported."）⇒ 重命名入口只到「对话框弹出」为止，要真正可用需把上游 prompt 换成应用内模态（产品决定）。
+  [PASS] F3h · 卡片菜单真实产品路径（宿主 sandbox = allow-modals）：菜单「复制画布」confirm 弹出并 accept → 列表真的多出「… 副本」；菜单「删除」confirm 弹出并 accept（消息含画布名）→ 卡片消失、真的进回收站（长度 +1）、右下角 FAB 出现且角标 = 回收站长度；菜单「重命名」prompt 对话框真的弹出（消息 + 默认值）；服务端失败时上游 alert('删除失败') 真的弹出；跑完用产品入口清空回收站 → 0 条 + FAB 回到隐藏
+  [PASS] Z1 · 主进程无未处理错误
+   · 控制台错误样本：["Loading the image 'openarc-asset:res_biiT_T9dwjyyp_R79PvObr2t_Kwgn0Xi' violates the following Content Security Policy directive: \"img-src openarc-canvas: data: blob:\". The action has been blocked.","Loading the image 'openarc-asset:res_biiT_T9dwjyyp_R79PvObr2t_Kwgn0Xi' violates the following Content Security Policy directive: \"img-src openarc-canvas: data: blob:\". The action has been blocked.","Loading the image 'openarc-asset:res_biiT_T9dwjyyp_R79PvObr2t_Kwgn0Xi' violates the following Content Security Policy directive: \"img-src openarc-canvas: data: blob:\". The action has been blocked.","Loading the image 'openarc-asset:res_biiT_T9dwjyyp_R79PvObr2t_Kwgn0Xi' violates the following Content Security Policy directive: \"img-src openarc-canvas: data: blob:\". The action has been blocked.","Loading the image 'openarc-asset:res_biiT_T9dwjyyp_R79PvObr2t_Kwgn0Xi' violates the following Content Security Policy directive: \"img-src openarc-canvas: data: blob:\". The action has been blocked.","Loading the image 'openarc-asset:res_biiT_T9dwjyyp_R79PvObr2t_Kwgn0Xi' violates the following Content Security Policy directive: \"img-src openarc-canvas: data: blob:\". The action has been blocked.","Loading the image 'openarc-asset:res_biiT_T9dwjyyp_R79PvObr2t_Kwgn0Xi' violates the following Content Security Policy directive: \"img-src openarc-canvas: data: blob:\". The action has been blocked.","Loading the image 'openarc-asset:res_biiT_T9dwjyyp_R79PvObr2t_Kwgn0Xi' violates the following Content Security Policy directive: \"img-src openarc-canvas: data: blob:\". The action has been blocked."]
+   · 对话框样本：["confirm: 确定要复制画布「F3h 模态对话探针 1790697591537」吗？","confirm: 确定要删除画布「F3h 模态对话探针 1790697591537」吗？此操作可在回收站撤销。","prompt: 重命名画布","confirm: 确定要删除画布「F3h 模态对话探针 1790697591537 副本」吗？此操作可在回收站撤销。","alert: 删除失败"]
+
+结论：PASS — {"pass":52,"fail":0,"total":52,"notVerified":0}
+# --- end raw output ---
+# EXIT CODE: 0

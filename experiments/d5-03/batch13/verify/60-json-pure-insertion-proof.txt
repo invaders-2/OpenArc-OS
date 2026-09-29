@@ -1,0 +1,45 @@
+# docs/D5-03-GATE-EVIDENCE.json 「batch13」纯插入三份证明
+# date: 2026-09-29T16:19:48Z
+
+## 证明 1：git diff --numstat（应为 本段行数 / 0）
+474	0	docs/D5-03-GATE-EVIDENCE.json
+
+## 证明 2：自 "batch12" 起至 EOF，与 git show 312dc60:docs/D5-03-GATE-EVIDENCE.json 对应区段逐字节相同
+current  region: offset=31678 len=321582 sha256=e9dac4dca98dda0d1ab2b18ef3e1926ae65a7fa080f055f7373729f223c10767
+committed region: offset=4 len=321582 sha256=e9dac4dca98dda0d1ab2b18ef3e1926ae65a7fa080f055f7373729f223c10767
+BYTE-IDENTICAL: True
+
+## 证明 3：JSON 合法性
+python3 -c "import json;json.load(open(...))" -> OK（exit 0）
+exit=0
+
+## 附加：文件整体 sha256
+current : abe3a51f06824fa53dc7d2fb2f420800d1e0266896c6b2953c6a6a7a25b4151f  docs/D5-03-GATE-EVIDENCE.json
+312dc60 : 216472b2a9fa6ab71894408d024b96436b179dfdd8a79841aeabca96bc48d24e  -
+
+########################################################################
+# 追加 · 更正后复核（定稿态）
+# 上方首版记录里的 numstat 474/0 是**首版插入**时的真实历史，保留不动；
+# 下面为按独立验收 F-1/F-2 更正并入之后的定稿态复核。
+########################################################################
+
+## 时间 / commit
+# date: 2026-09-29T16:45:15Z（本地 2026-09-30 00:45:15 CST）
+# git rev-parse HEAD: 312dc606fee9d9c147a9d863fba7fe504961ab26
+
+## 复核 1：git diff --numstat PROGRESS.md docs/D5-03-GATE-EVIDENCE.json（删除列必须为 0）
+55	0	PROGRESS.md
+502	0	docs/D5-03-GATE-EVIDENCE.json
+
+## 复核 2："batch12" -> EOF 区间 sha256（两侧必须相同）
+worktree(定稿) : len=321582 sha256=e9dac4dca98dda0d1ab2b18ef3e1926ae65a7fa080f055f7373729f223c10767
+312dc60        : len=321582 sha256=e9dac4dca98dda0d1ab2b18ef3e1926ae65a7fa080f055f7373729f223c10767
+BYTE-IDENTICAL : True
+
+## 复核 3：JSON 合法性
+python3 -c "import json;json.load(open(...))" -> OK（exit 0）
+exit=0
+
+## 结论（一行）
+# 行数 474 -> 502 是**更正本身在 batch13 段内新增**的行（首版 474/0 -> 定稿 502/0，PROGRESS.md 51/0 -> 55/0，两者删除列均为 0）；
+# 旧段（"batch12" -> EOF，len 321582）逐字节未动，故区间 sha256 不变（e9dac4dca98dda0d1ab2b18ef3e1926ae65a7fa080f055f7373729f223c10767），**纯插入结论不变**。

@@ -1,0 +1,27 @@
+(node:86413) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+propose.ok: true
+callId: scall_ch4a3Joos_iiLQ
+contract.executionProvider: ResourceService
+approve.ok: true
+call.status.afterApprove: APPROVED
+before.domain: {"preconditionTrashed":false,"preconditionRegistryStatus":"active","preconditionVersion":1,"libraryTrashState":"ACTIVE","libraryDeletedAt":null,"registryStatus":"active"}
+before.deleteCalls: 0
+before.leaseCount: 0
+before.activeLeaseCount: 0
+before.auditCount: 6
+res.ok: true
+res.error: null
+res.inProcess: true
+res.call.status: SUCCEEDED
+after.domain: {"preconditionTrashed":true,"preconditionRegistryStatus":"deleted","preconditionVersion":1,"libraryTrashState":"TRASHED","libraryDeletedAt":1700000000000,"registryStatus":"deleted"}
+after.deleteCalls: 1
+after.leaseCount: 1
+after.activeLeaseCount: 0
+after.auditCount: 12
+call.status.final: SUCCEEDED
+domainMutated: true
+audit.placementRows: [{"action":"side_effect.execution_placement","decision":"IN_PROCESS","reasonCode":"PROCESS_LOCAL_DOMAIN"}]
+verdict.bypassProven: true
+verdict.guardHeld: false
+verdict: RED_BYPASS_PROVEN

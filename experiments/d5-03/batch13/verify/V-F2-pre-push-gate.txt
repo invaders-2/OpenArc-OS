@@ -1,0 +1,118 @@
+TAP version 13
+# (node:96181) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: P1 · 当前会话 = B：A 任务进入 AWAITING_APPROVAL 时推送必须被静默丢弃
+ok 1 - P1 · 当前会话 = B：A 任务进入 AWAITING_APPROVAL 时推送必须被静默丢弃
+  ---
+  duration_ms: 737.930083
+  type: 'test'
+  ...
+# Subtest: P2 · 当前会话 = A（owner）：推送投递，载荷 = 白名单投影且与 getApprovalRequest 一致
+not ok 2 - P2 · 当前会话 = A（owner）：推送投递，载荷 = 白名单投影且与 getApprovalRequest 一致
+  ---
+  duration_ms: 668.748375
+  type: 'test'
+  location: '/Users/wepingli/Desktop/OpenArc OS-integration/tests/d4-03-approval-push-isolation.test.mjs:94:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    推送不得新增/泄露字段
+    + actual - expected
+    ... Skipped lines
+    
+      [
+        'approvalRequestId',
+        'currentVersion',
+        'effectClass',
+        'expectedEffects',
+    ...
+        'targetDisplayName',
+    +   'targetRef',
+        'toolDisplayName',
+        'toolId',
+    +   'url'
+      ]
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    0: 'approvalRequestId'
+    1: 'currentVersion'
+    2: 'effectClass'
+    3: 'expectedEffects'
+    4: 'expectedVersion'
+    5: 'expiresAt'
+    6: 'requiresApproval'
+    7: 'resourceRef'
+    8: 'riskClass'
+    9: 'status'
+    10: 'targetDisplayName'
+    11: 'toolDisplayName'
+    12: 'toolId'
+  actual:
+    0: 'approvalRequestId'
+    1: 'currentVersion'
+    2: 'effectClass'
+    3: 'expectedEffects'
+    4: 'expectedVersion'
+    5: 'expiresAt'
+    6: 'requiresApproval'
+    7: 'resourceRef'
+    8: 'riskClass'
+    9: 'status'
+    10: 'targetDisplayName'
+    11: 'targetRef'
+    12: 'toolDisplayName'
+    13: 'toolId'
+    14: 'url'
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/wepingli/Desktop/OpenArc%20OS-integration/tests/d4-03-approval-push-isolation.test.mjs:103:12)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: P3 · 会话切回 A 后仍能发现 B 会话期间产生的 pending（挂载查询等价）
+ok 3 - P3 · 会话切回 A 后仍能发现 B 会话期间产生的 pending（挂载查询等价）
+  ---
+  duration_ms: 682.227167
+  type: 'test'
+  ...
+# Subtest: P4 · 无 authenticated session：不推送、不改任何状态
+ok 4 - P4 · 无 authenticated session：不推送、不改任何状态
+  ---
+  duration_ms: 652.5205
+  type: 'test'
+  ...
+# Subtest: P5 · 决策路径不受影响：owner APPROVE/DENY 正常，非 owner 会话决策仍被拒
+ok 5 - P5 · 决策路径不受影响：owner APPROVE/DENY 正常，非 owner 会话决策仍被拒
+  ---
+  duration_ms: 682.098292
+  type: 'test'
+  ...
+# Subtest: P6 · 无 session：读路径空 / not-found，声明了 context 的投影一律 null
+ok 6 - P6 · 无 session：读路径空 / not-found，声明了 context 的投影一律 null
+  ---
+  duration_ms: 656.856833
+  type: 'test'
+  ...
+# Subtest: P7 · A 会话下读路径正常（正对照）
+ok 7 - P7 · A 会话下读路径正常（正对照）
+  ---
+  duration_ms: 700.855959
+  type: 'test'
+  ...
+# Subtest: P8 · context == null 的内部投影语义未变（推送钩子用）
+ok 8 - P8 · context == null 的内部投影语义未变（推送钩子用）
+  ---
+  duration_ms: 681.080708
+  type: 'test'
+  ...
+1..8
+# tests 8
+# suites 0
+# pass 7
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5602.22125
+EXIT=1

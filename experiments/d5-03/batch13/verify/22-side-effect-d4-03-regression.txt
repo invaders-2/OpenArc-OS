@@ -1,0 +1,1795 @@
+$ node --test tests/side-effect-approval.test.mjs tests/side-effect-c2-closure.test.mjs tests/side-effect-c2-closure2.test.mjs tests/side-effect-c2-closure3.test.mjs tests/side-effect-c3-closure.test.mjs tests/side-effect-c3-crash.test.mjs tests/side-effect-c3-unknown-effect.test.mjs tests/side-effect-c4-closure.test.mjs tests/side-effect-c4-closure2.test.mjs tests/side-effect-c4-closure3.test.mjs tests/side-effect-c4-dsh-write.test.mjs tests/side-effect-c4-gates.test.mjs tests/side-effect-c4-runtime.test.mjs tests/side-effect-domain.test.mjs tests/side-effect-idempotency.test.mjs tests/side-effect-lease.test.mjs tests/side-effect-migration.test.mjs tests/side-effect-real-contention.test.mjs tests/side-effect-real-restart.test.mjs tests/side-effect-recovery.test.mjs tests/side-effect-security.test.mjs tests/side-effect-write-e2e.test.mjs tests/side-effect-write-gates.test.mjs tests/d4-03-approval-push-isolation.test.mjs tests/d4-03-approver-eligibility.test.mjs tests/d4-03-deny-state-protection.test.mjs tests/d4-03-lease-acquire-state-protection.test.mjs tests/d4-03-lease-state-integrity.test.mjs tests/d4-03-model-binding.test.mjs tests/d4-03-run-entry-guard.test.mjs
+# cwd: /Users/wepingli/Desktop/OpenArc OS-integration
+# node: v22.22.3
+# git HEAD: 312dc606fee9d9c147a9d863fba7fe504961ab26
+# date: 2026-09-29T15:50:34Z
+# --- begin raw stdout+stderr ---
+TAP version 13
+# (node:89509) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: P1 · 当前会话 = B：A 任务进入 AWAITING_APPROVAL 时推送必须被静默丢弃
+ok 1 - P1 · 当前会话 = B：A 任务进入 AWAITING_APPROVAL 时推送必须被静默丢弃
+  ---
+  duration_ms: 2749.751
+  type: 'test'
+  ...
+# Subtest: P2 · 当前会话 = A（owner）：推送投递，载荷 = 白名单投影且与 getApprovalRequest 一致
+ok 2 - P2 · 当前会话 = A（owner）：推送投递，载荷 = 白名单投影且与 getApprovalRequest 一致
+  ---
+  duration_ms: 1071.865458
+  type: 'test'
+  ...
+# Subtest: P3 · 会话切回 A 后仍能发现 B 会话期间产生的 pending（挂载查询等价）
+ok 3 - P3 · 会话切回 A 后仍能发现 B 会话期间产生的 pending（挂载查询等价）
+  ---
+  duration_ms: 930.295
+  type: 'test'
+  ...
+# Subtest: P4 · 无 authenticated session：不推送、不改任何状态
+ok 4 - P4 · 无 authenticated session：不推送、不改任何状态
+  ---
+  duration_ms: 1094.964
+  type: 'test'
+  ...
+# Subtest: P5 · 决策路径不受影响：owner APPROVE/DENY 正常，非 owner 会话决策仍被拒
+ok 5 - P5 · 决策路径不受影响：owner APPROVE/DENY 正常，非 owner 会话决策仍被拒
+  ---
+  duration_ms: 1473.677666
+  type: 'test'
+  ...
+# Subtest: P6 · 无 session：读路径空 / not-found，声明了 context 的投影一律 null
+ok 6 - P6 · 无 session：读路径空 / not-found，声明了 context 的投影一律 null
+  ---
+  duration_ms: 1564.667333
+  type: 'test'
+  ...
+# Subtest: P7 · A 会话下读路径正常（正对照）
+ok 7 - P7 · A 会话下读路径正常（正对照）
+  ---
+  duration_ms: 979.358458
+  type: 'test'
+  ...
+# Subtest: P8 · context == null 的内部投影语义未变（推送钩子用）
+ok 8 - P8 · context == null 的内部投影语义未变（推送钩子用）
+  ---
+  duration_ms: 1215.957167
+  type: 'test'
+  ...
+# Subtest: N1 · 反例 · 资源回收审批不携带任何浏览器目标
+ok 9 - N1 · 反例 · 资源回收审批不携带任何浏览器目标
+  ---
+  duration_ms: 941.250708
+  type: 'test'
+  ...
+# Subtest: N2 · 正例 · 浏览器导航：推送 / 读取 / 列表三处同一个待批准地址
+ok 10 - N2 · 正例 · 浏览器导航：推送 / 读取 / 列表三处同一个待批准地址
+  ---
+  duration_ms: 990.943709
+  type: 'test'
+  ...
+# Subtest: N3 · 反例 · 非所属会话 / 未登录窗口在浏览器场景仍为 0 投影
+ok 11 - N3 · 反例 · 非所属会话 / 未登录窗口在浏览器场景仍为 0 投影
+  ---
+  duration_ms: 825.437416
+  type: 'test'
+  ...
+# Subtest: N4 · 反例 · 路径 / 凭据 / 其它未准许字段一律不得进入推送
+ok 12 - N4 · 反例 · 路径 / 凭据 / 其它未准许字段一律不得进入推送
+  ---
+  duration_ms: 1783.156542
+  type: 'test'
+  ...
+# (node:89510) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# T1 approver disabled: {"elig":{"status":"DENIED","reasonCode":"SIDE_EFFECT_APPROVER_INELIGIBLE"},"exec":{"ok":false,"error":"SIDE_EFFECT_APPROVER_INELIGIBLE","mutationCount":0},"call":"BLOCKED","errorCode":"SIDE_EFFECT_APPROVER_INELIGIBLE","leases":["REVOKED"],"task":"BLOCKED","step":"BLOCKED","mutation":0}
+# Subtest: T1 · 批准人被 DISABLE → eligibility DENIED(APPROVER_INELIGIBLE)，claim 前拒绝、0 mutation、Step/Task BLOCKED
+ok 13 - T1 · 批准人被 DISABLE → eligibility DENIED(APPROVER_INELIGIBLE)，claim 前拒绝、0 mutation、Step/Task BLOCKED
+  ---
+  duration_ms: 2723.207167
+  type: 'test'
+  ...
+# T1-b approver demoted: {"elig":"SIDE_EFFECT_APPROVER_INELIGIBLE","exec":"SIDE_EFFECT_APPROVER_INELIGIBLE","call":"BLOCKED","task":"BLOCKED","mutation":0}
+# Subtest: T1-b · 批准人被降级为非 ADMIN 且非 owner → APPROVER_INELIGIBLE（丢失批准范围）
+ok 14 - T1-b · 批准人被降级为非 ADMIN 且非 owner → APPROVER_INELIGIBLE（丢失批准范围）
+  ---
+  duration_ms: 1270.429875
+  type: 'test'
+  ...
+# T2 approver logout: {"sessionRevoked":true,"approval":"APPROVED","elig":"ELIGIBLE","exec":{"ok":true,"verificationStatus":"PASS"},"call":"SUCCEEDED","mutation":1}
+# Subtest: T2 · 批准人仅登出（session 撤销）→ 批准仍有效，真实执行成功（不因登出撤销）
+ok 15 - T2 · 批准人仅登出（session 撤销）→ 批准仍有效，真实执行成功（不因登出撤销）
+  ---
+  duration_ms: 945.102416
+  type: 'test'
+  ...
+# T3 owner revoked: {"elig":"SIDE_EFFECT_AUTHORIZATION_REVOKED","exec":{"ok":false,"error":"SIDE_EFFECT_AUTHORIZATION_REVOKED"},"call":"LEASED","leases":1,"task":"RUNNING","mutation":0}
+# Subtest: T3 · 执行主体（task owner）失权 → 既有 SIDE_EFFECT_AUTHORIZATION_REVOKED 逐字不变（不进入批准人收敛）
+ok 16 - T3 · 执行主体（task owner）失权 → 既有 SIDE_EFFECT_AUTHORIZATION_REVOKED 逐字不变（不进入批准人收敛）
+  ---
+  duration_ms: 1086.970792
+  type: 'test'
+  ...
+# T4 revoke before claim: {"rev":{"ok":true,"revoked":true,"callStatus":"BLOCKED","approval":"REVOKED"},"call":"BLOCKED","errorCode":"SIDE_EFFECT_APPROVAL_REVOKED","leases":["REVOKED"],"leaseAgain":{"ok":false,"error":"SIDE_EFFECT_CALL_STATE"},"execute":{"ok":false,"error":"SIDE_EFFECT_CALL_STATE"},"task":"BLOCKED","step":"BLOCKED","mutation":0}
+# Subtest: T4 · 撤销先于 claim → call BLOCKED/APPROVAL_REVOKED、lease 收敛、claim/execute 拒绝、0 mutation、Step/Task BLOCKED
+ok 17 - T4 · 撤销先于 claim → call BLOCKED/APPROVAL_REVOKED、lease 收敛、claim/execute 拒绝、0 mutation、Step/Task BLOCKED
+  ---
+  duration_ms: 1316.369375
+  type: 'test'
+  ...
+# T5 revoke after claim: {"revoke":{"ok":false,"error":"SIDE_EFFECT_APPROVAL_TOO_LATE","callStatus":"RUNNING"},"exec":{"ok":true,"verificationStatus":"PASS"},"call":"SUCCEEDED","leases":["RELEASED"],"approval":"APPROVED","mutation":1}
+# Subtest: T5 · claim 先于撤销 → 撤销 TOO_LATE、RUNNING 零变化、执行继续收敛真实结果、批准不丢
+ok 18 - T5 · claim 先于撤销 → 撤销 TOO_LATE、RUNNING 零变化、执行继续收敛真实结果、批准不丢
+  ---
+  duration_ms: 1381.832834
+  type: 'test'
+  ...
+# T5-b disable after claim: {"exec":{"ok":true,"verificationStatus":"PASS"},"call":"SUCCEEDED","task":"RUNNING","mutation":1}
+# Subtest: T5-b · claim 之后批准人失权 → 不追溯：执行继续成功，批准行不变
+ok 19 - T5-b · claim 之后批准人失权 → 不追溯：执行继续成功，批准行不变
+  ---
+  duration_ms: 1091.573833
+  type: 'test'
+  ...
+# T6 revoke state machine: {"duplicate":{"ok":true,"duplicate":true,"callStatus":"BLOCKED"},"forbidden":"SIDE_EFFECT_APPROVAL_FORBIDDEN","required":"SIDE_EFFECT_APPROVAL_REQUIRED","blockedDenied":{"ok":false,"error":"SIDE_EFFECT_APPROVAL_TOO_LATE","callStatus":"BLOCKED"},"approvals":{"a":["REVOKED"],"d":["DENIED"]},"mutation":0}
+# Subtest: T6 · 撤销状态机边界：重复撤销幂等、非授权 FORBIDDEN、AWAITING_APPROVAL → APPROVAL_REQUIRED、已被 DENY 的 BLOCKED → TOO_LATE
+ok 20 - T6 · 撤销状态机边界：重复撤销幂等、非授权 FORBIDDEN、AWAITING_APPROVAL → APPROVAL_REQUIRED、已被 DENY 的 BLOCKED → TOO_LATE
+  ---
+  duration_ms: 1066.18625
+  type: 'test'
+  ...
+# T7 revoke after succeeded: {"revoke":{"ok":false,"error":"SIDE_EFFECT_APPROVAL_TOO_LATE","callStatus":"SUCCEEDED"},"call":"SUCCEEDED","verificationStatus":"PASS","approvals":["APPROVED"],"mutation":1}
+# Subtest: T7 · SUCCEEDED 终态：撤销一律 TOO_LATE、call 逐字不变、无撤销事件
+ok 21 - T7 · SUCCEEDED 终态：撤销一律 TOO_LATE、call 逐字不变、无撤销事件
+  ---
+  duration_ms: 951.730042
+  type: 'test'
+  ...
+# T7-b revoke after unknown effect: {"revoke":{"ok":false,"error":"SIDE_EFFECT_APPROVAL_TOO_LATE","callStatus":"UNKNOWN_EFFECT"},"call":"UNKNOWN_EFFECT","recoverySafe":{"quiesced":false,"source":"unproven","originRuntimeInstanceId":"inst_test","originLeaseId":"slease_P6_nVMAjmt5big","proof":{"type":"SELF_RUNTIME_ACTIVE","instanceId":"inst_test"},"reason":"SELF_RUNTIME_ACTIVE","recordedAt":1700000000000},"recoveryApplicable":true,"mutation":1}
+# Subtest: T7-b · UNKNOWN_EFFECT：撤销 TOO_LATE、恢复证据逐字段不变、恢复入口保留
+ok 22 - T7-b · UNKNOWN_EFFECT：撤销 TOO_LATE、恢复证据逐字段不变、恢复入口保留
+  ---
+  duration_ms: 877.753958
+  type: 'test'
+  ...
+# T8 legacy approval: {"actorUserId":null,"elig":{"status":"DENIED","reasonCode":"SIDE_EFFECT_APPROVER_UNVERIFIED"},"exec":{"ok":false,"error":"SIDE_EFFECT_APPROVER_UNVERIFIED"},"call":"BLOCKED","errorCode":"SIDE_EFFECT_APPROVER_UNVERIFIED","leases":["REVOKED"],"task":"BLOCKED","mutation":0}
+# Subtest: T8 · 旧批准缺 actor_user_id → APPROVER_UNVERIFIED 保守拒绝（不伪造历史身份）
+ok 23 - T8 · 旧批准缺 actor_user_id → APPROVER_UNVERIFIED 保守拒绝（不伪造历史身份）
+  ---
+  duration_ms: 882.573125
+  type: 'test'
+  ...
+# (node:89511) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# T1 after deny: {"call":"BLOCKED","errorCode":"SIDE_EFFECT_APPROVAL_DENIED","leases":0,"mutation":0,"repeat":{"ok":true,"duplicate":true,"callStatus":"BLOCKED"},"approvals":["DENIED"]}
+# Subtest: T1 · AWAITING_APPROVAL：DENY → BLOCKED、0 lease、0 mutation；重复 DENY 幂等成功
+ok 24 - T1 · AWAITING_APPROVAL：DENY → BLOCKED、0 lease、0 mutation；重复 DENY 幂等成功
+  ---
+  duration_ms: 2780.093666
+  type: 'test'
+  ...
+# T2 after deny: {"call":"BLOCKED","approvals":["APPROVED","DENIED"],"leases":0,"mutation":0}
+# Subtest: T2 · APPROVED：DENY → BLOCKED、0 mutation、0 ACTIVE lease
+ok 25 - T2 · APPROVED：DENY → BLOCKED、0 mutation、0 ACTIVE lease
+  ---
+  duration_ms: 1122.911917
+  type: 'test'
+  ...
+# T3 after deny: {"call":"BLOCKED","leases":["REVOKED"],"executor":{"ok":false,"error":"SIDE_EFFECT_CALL_STATE","mutationCount":0},"mutation":0}
+# Subtest: T3 · LEASED：DENY → BLOCKED + 0 ACTIVE lease；释放 executor → claim 失败、0 mutation、无第二套 call
+ok 26 - T3 · LEASED：DENY → BLOCKED + 0 ACTIVE lease；释放 executor → claim 失败、0 mutation、无第二套 call
+  ---
+  duration_ms: 1106.380917
+  type: 'test'
+  ...
+# T4[afterClaimBeforeDispatch] after deny: {"deny":{"ok":false,"error":"SIDE_EFFECT_APPROVAL_TOO_LATE","callStatus":"RUNNING"},"exec":{"ok":true,"verificationStatus":"PASS"},"call":"SUCCEEDED","leases":["RELEASED"],"mutation":1,"approvals":["APPROVED"]}
+# Subtest: T4 · RUNNING（afterClaimBeforeDispatch）：DENY → TOO_LATE + 状态不变；执行仍收敛 SUCCEEDED，恰好 1 次 mutation
+ok 27 - T4 · RUNNING（afterClaimBeforeDispatch）：DENY → TOO_LATE + 状态不变；执行仍收敛 SUCCEEDED，恰好 1 次 mutation
+  ---
+  duration_ms: 906.813875
+  type: 'test'
+  ...
+# T4[afterDomainResultBeforeVerification] after deny: {"deny":{"ok":false,"error":"SIDE_EFFECT_APPROVAL_TOO_LATE","callStatus":"RUNNING"},"exec":{"ok":true,"verificationStatus":"PASS"},"call":"SUCCEEDED","leases":["RELEASED"],"mutation":1,"approvals":["APPROVED"]}
+# Subtest: T4 · RUNNING（afterDomainResultBeforeVerification）：DENY → TOO_LATE + 状态不变；执行仍收敛 SUCCEEDED，恰好 1 次 mutation
+ok 28 - T4 · RUNNING（afterDomainResultBeforeVerification）：DENY → TOO_LATE + 状态不变；执行仍收敛 SUCCEEDED，恰好 1 次 mutation
+  ---
+  duration_ms: 1311.839542
+  type: 'test'
+  ...
+# T5 after deny: {"deny":{"ok":false,"error":"SIDE_EFFECT_APPROVAL_TOO_LATE","callStatus":"UNKNOWN_EFFECT"},"callAtDeny":"UNKNOWN_EFFECT","recoverySafe":{"quiesced":false,"source":"unproven","originRuntimeInstanceId":"inst_test","originLeaseId":"slease_QPzF0IgKlJJpYg","proof":{"type":"SELF_RUNTIME_ACTIVE","instanceId":"inst_test"},"reason":"SELF_RUNTIME_ACTIVE","recordedAt":1700000000000},"recoveryApplicable":true,"verified":{"outcome":"APPLIED","status":"SUCCEEDED"},"mutation":1}
+# Subtest: T5 · UNKNOWN_EFFECT：DENY → TOO_LATE、call 与恢复证据逐字段不变、恢复入口仍可用
+ok 29 - T5 · UNKNOWN_EFFECT：DENY → TOO_LATE、call 与恢复证据逐字段不变、恢复入口仍可用
+  ---
+  duration_ms: 1086.954458
+  type: 'test'
+  ...
+# T6 after deny: {"deny":{"ok":false,"error":"SIDE_EFFECT_APPROVAL_TOO_LATE","callStatus":"SUCCEEDED"},"call":"SUCCEEDED","verificationStatus":"PASS","approvals":["APPROVED"],"leases":["RELEASED"],"mutation":1}
+# Subtest: T6 · SUCCEEDED：DENY → TOO_LATE、call 仍 SUCCEEDED/PASS、无 BLOCKED 覆盖、无 DENIED approval 行
+ok 30 - T6 · SUCCEEDED：DENY → TOO_LATE、call 仍 SUCCEEDED/PASS、无 BLOCKED 覆盖、无 DENIED approval 行
+  ---
+  duration_ms: 993.615125
+  type: 'test'
+  ...
+# T7 bridge: {"pendingBefore":1,"deny":{"ok":true,"status":"BLOCKED"},"denyAgain":{"ok":true,"status":"BLOCKED"},"late":{"ok":false,"error":"SIDE_EFFECT_APPROVAL_TOO_LATE"},"call":"SUCCEEDED","pendingAfter":0,"request":{"ok":false,"error":"SIDE_EFFECT_CALL_NOT_FOUND"}}
+# Subtest: T7 · 产品桥 sideEffect/decideApproval：迟到 DENY 显式报错；listPending / getApprovalRequest 不再待决
+ok 31 - T7 · 产品桥 sideEffect/decideApproval：迟到 DENY 显式报错；listPending / getApprovalRequest 不再待决
+  ---
+  duration_ms: 1040.125125
+  type: 'test'
+  ...
+# T8 effectiveApproval: {"expired":"EXPIRED","rowDecision":"APPROVED","acquire":"SIDE_EFFECT_APPROVAL_EXPIRED","eligibility":"SIDE_EFFECT_APPROVAL_EXPIRED","claimSide":{"ok":false,"error":"SIDE_EFFECT_APPROVAL_EXPIRED","mutationCount":0,"call":"LEASED"},"revoked":"REVOKED","denied":"DENIED","duplicate":true,"mutation":0}
+# Subtest: T8 · effectiveApproval：TTL 过期 → EXPIRED（行不变）；未过期 / 已撤销 / 已拒绝对照不变；执行侧判定逐字不变
+ok 32 - T8 · effectiveApproval：TTL 过期 → EXPIRED（行不变）；未过期 / 已撤销 / 已拒绝对照不变；执行侧判定逐字不变
+  ---
+  duration_ms: 912.942875
+  type: 'test'
+  ...
+# T9 race: {"approve":{"ok":false,"error":"SIDE_EFFECT_CALL_STATE"},"deny":{"ok":true,"status":"BLOCKED"},"call":"BLOCKED","errorCode":"SIDE_EFFECT_APPROVAL_DENIED","latestApproval":"DENIED","approvals":["DENIED"],"lease":{"ok":false,"error":"SIDE_EFFECT_CALL_STATE"},"eligibility":"BLOCKED","mutation":0,"approvedEvents":0}
+# Subtest: T9 · 并发 DENY vs 在途 APPROVE：已被拒绝的 call 绝不能被 approve 复活（原子前置，fail closed）
+ok 33 - T9 · 并发 DENY vs 在途 APPROVE：已被拒绝的 call 绝不能被 approve 复活（原子前置，fail closed）
+  ---
+  duration_ms: 820.460083
+  type: 'test'
+  ...
+# T9-b control: {"first":{"ok":true,"status":"APPROVED"},"second":{"ok":true,"duplicate":true,"approvalIdSame":true},"approvals":["APPROVED"],"approvedEvents":1,"approvedAudit":1,"lease":{"ok":true,"status":"LEASED"},"lateApprove":{"ok":false,"error":"SIDE_EFFECT_CALL_STATE"},"mutation":0}
+# Subtest: T9-b · 正对照：无并发 DENY 时 approve 正常生效，双次 approve 幂等不变，lease 判据不变
+ok 34 - T9-b · 正对照：无并发 DENY 时 approve 正常生效，双次 approve 幂等不变，lease 判据不变
+  ---
+  duration_ms: 782.966209
+  type: 'test'
+  ...
+# T9-c concurrent approve: {"first":{"ok":true,"duplicate":false},"second":{"ok":true,"duplicate":true},"approvals":["APPROVED"],"approvedEvents":1,"approvedAudit":1,"call":"APPROVED","mutation":0}
+# Subtest: T9-c · 并发双次 APPROVE：同一绑定只允许一次 authoritative transition（原子事务内的 duplicate）
+ok 35 - T9-c · 并发双次 APPROVE：同一绑定只允许一次 authoritative transition（原子事务内的 duplicate）
+  ---
+  duration_ms: 777.361709
+  type: 'test'
+  ...
+# (node:89512) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# T1 RUNNING: {"error":"SIDE_EFFECT_CALL_STATE","callStatus":"RUNNING","leases":0}
+# T1 SUCCEEDED: {"error":"SIDE_EFFECT_CALL_STATE","callStatus":"SUCCEEDED","leases":0}
+# T1 UNKNOWN_EFFECT: {"error":"SIDE_EFFECT_CALL_STATE","callStatus":"UNKNOWN_EFFECT","leases":0}
+# T1 FAILED: {"error":"SIDE_EFFECT_CALL_STATE","callStatus":"FAILED","leases":0}
+# T1 BLOCKED: {"error":"SIDE_EFFECT_CALL_STATE","callStatus":"BLOCKED","leases":0}
+# T1 CANCELLED: {"error":"SIDE_EFFECT_CALL_STATE","callStatus":"CANCELLED","leases":0}
+# Subtest: T1 · 另一连接已推进状态的六种 call：迟到 acquire 必须被拒，call / 恢复证据 / lease 零改写
+    # Subtest: RUNNING
+    ok 1 - RUNNING
+      ---
+      duration_ms: 4.628666
+      type: 'test'
+      ...
+    # Subtest: SUCCEEDED
+    ok 2 - SUCCEEDED
+      ---
+      duration_ms: 5.613625
+      type: 'test'
+      ...
+    # Subtest: UNKNOWN_EFFECT
+    ok 3 - UNKNOWN_EFFECT
+      ---
+      duration_ms: 2.642917
+      type: 'test'
+      ...
+    # Subtest: FAILED
+    ok 4 - FAILED
+      ---
+      duration_ms: 5.214834
+      type: 'test'
+      ...
+    # Subtest: BLOCKED
+    ok 5 - BLOCKED
+      ---
+      duration_ms: 3.965792
+      type: 'test'
+      ...
+    # Subtest: CANCELLED
+    ok 6 - CANCELLED
+      ---
+      duration_ms: 4.591042
+      type: 'test'
+      ...
+    1..6
+ok 36 - T1 · 另一连接已推进状态的六种 call：迟到 acquire 必须被拒，call / 恢复证据 / lease 零改写
+  ---
+  duration_ms: 2709.547083
+  type: 'test'
+  ...
+# T2: {"error":"SIDE_EFFECT_APPROVAL_EXPIRED","leaseStatus":"ACTIVE","leases":1}
+# Subtest: T2 · 批准已过期 + 已有过期 ACTIVE lease：拒绝申请时该 lease 逐字不变（绝不提前 EXPIRED）
+ok 37 - T2 · 批准已过期 + 已有过期 ACTIVE lease：拒绝申请时该 lease 逐字不变（绝不提前 EXPIRED）
+  ---
+  duration_ms: 1233.168
+  type: 'test'
+  ...
+# T3: {"leases":["EXPIRED","ACTIVE"],"call":"LEASED"}
+# Subtest: T3 · 既有语义保留：正常申请 / 合法重复 / 不同执行器竞争 / 过期后重租
+ok 38 - T3 · 既有语义保留：正常申请 / 合法重复 / 不同执行器竞争 / 过期后重租
+  ---
+  duration_ms: 895.716375
+  type: 'test'
+  ...
+# (node:89513) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# T1 before/after 观察点: {"call":"SUCCEEDED","activeLease":null,"safety":{"ok":true,"taskId":"task_-dYYG03jCx99hA","blocked":false,"code":null}}
+# Subtest: T1 · A-4：SUCCEEDED 落定时刻 call 已是终态且无 ACTIVE lease（同一事务）
+ok 39 - T1 · A-4：SUCCEEDED 落定时刻 call 已是终态且无 ACTIVE lease（同一事务）
+  ---
+  duration_ms: 2730.5005
+  type: 'test'
+  ...
+# T2 after deny: {"call":"BLOCKED","activeLeases":0,"safety":{"ok":true,"taskId":"task_QfbQggNgMWhpPQ","blocked":false,"code":null}}
+# Subtest: T2 · A-4：denySideEffect 收敛 LEASED call 时终结其 ACTIVE lease
+ok 40 - T2 · A-4：denySideEffect 收敛 LEASED call 时终结其 ACTIVE lease
+  ---
+  duration_ms: 1065.118125
+  type: 'test'
+  ...
+# T3 after recovery: {"call":"SUCCEEDED","stale":"REVOKED","foreign":"ACTIVE"}
+# Subtest: T3 · A-4：终态 call 的遗留 ACTIVE lease 被 recoverAfterExecutorExit 回收，终态与证据不变
+ok 41 - T3 · A-4：终态 call 的遗留 ACTIVE lease 被 recoverAfterExecutorExit 回收，终态与证据不变
+  ---
+  duration_ms: 907.333917
+  type: 'test'
+  ...
+# T4 A 迟到写回: {"exec":{"ok":false,"executed":true,"suppressed":true,"error":"SIDE_EFFECT_UNKNOWN_EFFECT"},"call":"UNKNOWN_EFFECT","task":"BLOCKED","recoveryApplicable":true,"domainCalls":1,"lateEvent":{"callId":"scall_jMm2eLtcdkQ_bQ","toolId":"resource.trash","observedStatus":"UNKNOWN_EFFECT"}}
+# Subtest: T4 · S1：另一个 runtime 的 UNKNOWN_EFFECT 权威不被本 runtime 迟到终态覆盖
+ok 42 - T4 · S1：另一个 runtime 的 UNKNOWN_EFFECT 权威不被本 runtime 迟到终态覆盖
+  ---
+  duration_ms: 1116.931667
+  type: 'test'
+  ...
+# T6 收敛: {"verified":{"outcome":"APPLIED","resolved":true},"call":"SUCCEEDED","verificationStatus":"PASS","domainCalls":1}
+# Subtest: T6 · 既有恢复路径仍可用：verifyUnknownEffect → APPLIED → SUCCEEDED（0 二次执行）
+ok 43 - T6 · 既有恢复路径仍可用：verifyUnknownEffect → APPLIED → SUCCEEDED（0 二次执行）
+  ---
+  duration_ms: 1413.383459
+  type: 'test'
+  ...
+# T5 正对照: {"call":"SUCCEEDED","verificationStatus":"PASS","leases":["RELEASED"],"domainCalls":1}
+# Subtest: T5 · 正对照：单 runtime WRITE 全链 SUCCEEDED/PASS、lease RELEASED、恰好 1 次 mutation
+ok 44 - T5 · 正对照：单 runtime WRITE 全链 SUCCEEDED/PASS、lease RELEASED、恰好 1 次 mutation
+  ---
+  duration_ms: 1164.048042
+  type: 'test'
+  ...
+# T7 SUCCEEDED: {"execError":null,"call":"SUCCEEDED","leases":["RELEASED"],"boundaries":["LEASED/ACTIVE","RUNNING/ACTIVE"]}
+# T7 ambiguous→UNKNOWN_EFFECT: {"execError":"SIDE_EFFECT_UNKNOWN_EFFECT","call":"UNKNOWN_EFFECT","leases":["REVOKED"],"boundaries":["LEASED/ACTIVE","RUNNING/ACTIVE"]}
+# T7 known-no-effect→FAILED: {"execError":"SIDE_EFFECT_PRECONDITION_CHANGED","call":"FAILED","leases":["RELEASED"],"boundaries":["LEASED/ACTIVE","RUNNING/ACTIVE"]}
+# T7 非白名单→BLOCKED: {"execError":"INTERNAL_DOMAIN_FAILURE","call":"BLOCKED","leases":["RELEASED"],"boundaries":["LEASED/ACTIVE","RUNNING/ACTIVE"]}
+# Subtest: T7 · A-4：SUCCEEDED/UNKNOWN_EFFECT/FAILED/BLOCKED 四类收敛写回与 lease 终结均同一事务
+ok 45 - T7 · A-4：SUCCEEDED/UNKNOWN_EFFECT/FAILED/BLOCKED 四类收敛写回与 lease 终结均同一事务
+  ---
+  duration_ms: 3813.129417
+  type: 'test'
+  ...
+# T8 known-no-effect(FAILED 类): {"exec":{"ok":false,"executed":true,"suppressed":true,"error":"SIDE_EFFECT_PRECONDITION_CHANGED","observedStatus":"UNKNOWN_EFFECT"},"call":"UNKNOWN_EFFECT","task":"BLOCKED","recoveryApplicable":true,"domainCalls":1,"lateEvent":{"callId":"scall_-_1cJT9bc5tcfA","toolId":"resource.trash","observedStatus":"UNKNOWN_EFFECT"}}
+# Subtest: T8-a · S1-b：known-no-effect 迟到写回不覆盖 UNKNOWN_EFFECT 权威
+ok 46 - T8-a · S1-b：known-no-effect 迟到写回不覆盖 UNKNOWN_EFFECT 权威
+  ---
+  duration_ms: 951.677834
+  type: 'test'
+  ...
+# T8 non-whitelist(BLOCKED 类): {"exec":{"ok":false,"executed":true,"suppressed":true,"error":"INTERNAL_DOMAIN_FAILURE","observedStatus":"UNKNOWN_EFFECT"},"call":"UNKNOWN_EFFECT","task":"BLOCKED","recoveryApplicable":true,"domainCalls":1,"lateEvent":{"callId":"scall_icpsUDNIfV8o9w","toolId":"resource.trash","observedStatus":"UNKNOWN_EFFECT"}}
+# Subtest: T8-b · S1-b：非白名单错误迟到写回不覆盖 UNKNOWN_EFFECT 权威
+ok 47 - T8-b · S1-b：非白名单错误迟到写回不覆盖 UNKNOWN_EFFECT 权威
+  ---
+  duration_ms: 1017.089541
+  type: 'test'
+  ...
+# T9 known-no-effect→FAILED: {"exec":{"ok":false,"error":"SIDE_EFFECT_PRECONDITION_CHANGED","knownNoEffect":true},"call":"FAILED","errorCode":"SIDE_EFFECT_PRECONDITION_CHANGED","leases":["RELEASED"],"lateEvent":false}
+# T9 ambiguous→UNKNOWN_EFFECT: {"exec":{"ok":false,"error":"SIDE_EFFECT_UNKNOWN_EFFECT"},"call":"UNKNOWN_EFFECT","errorCode":"SIDE_EFFECT_UNKNOWN_EFFECT","leases":["REVOKED"],"lateEvent":false}
+# T9 非白名单→BLOCKED: {"exec":{"ok":false,"error":"INTERNAL_DOMAIN_FAILURE","knownNoEffect":false},"call":"BLOCKED","errorCode":"INTERNAL_DOMAIN_FAILURE","leases":["RELEASED"],"lateEvent":false}
+# Subtest: T9 · 正对照：单 runtime known-no-effect→FAILED / ambiguous→UNKNOWN_EFFECT / 非白名单→BLOCKED
+ok 48 - T9 · 正对照：单 runtime known-no-effect→FAILED / ambiguous→UNKNOWN_EFFECT / 非白名单→BLOCKED
+  ---
+  duration_ms: 2713.058083
+  type: 'test'
+  ...
+# (node:89514) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: D4-03 A · task/run 由后端解析并冻结 model config；renderer 自报的 id/version 一律忽略
+ok 49 - D4-03 A · task/run 由后端解析并冻结 model config；renderer 自报的 id/version 一律忽略
+  ---
+  duration_ms: 6254.284083
+  type: 'test'
+  ...
+# Subtest: D4-03 B · 无可用默认配置：task/run 明确拒绝且不创建任何任务（绝不静默回退）
+ok 50 - D4-03 B · 无可用默认配置：task/run 明确拒绝且不创建任何任务（绝不静默回退）
+  ---
+  duration_ms: 1435.627709
+  type: 'test'
+  ...
+# Subtest: D4-03 C · 配置改版后该任务的新 run：MODEL_CONFIG_CHANGED / 全量 BLOCKED / 0 call / 0 capability / 0 artifact
+ok 51 - D4-03 C · 配置改版后该任务的新 run：MODEL_CONFIG_CHANGED / 全量 BLOCKED / 0 call / 0 capability / 0 artifact
+  ---
+  duration_ms: 1235.3855
+  type: 'test'
+  ...
+# Subtest: D4-03 D1 · 改版后 appendStep：同步接收但整链 MODEL_CONFIG_CHANGED + 全量 BLOCKED + 0 执行 + 旧产物逐字段不变
+ok 52 - D4-03 D1 · 改版后 appendStep：同步接收但整链 MODEL_CONFIG_CHANGED + 全量 BLOCKED + 0 执行 + 旧产物逐字段不变
+  ---
+  duration_ms: 3491.905417
+  type: 'test'
+  ...
+# Subtest: D4-03 D2 · 改版后 resumeBudgetExhausted：明确 MODEL_CONFIG_CHANGED + 全量 BLOCKED + 0 执行 + 旧产物不变
+ok 53 - D4-03 D2 · 改版后 resumeBudgetExhausted：明确 MODEL_CONFIG_CHANGED + 全量 BLOCKED + 0 执行 + 旧产物不变
+  ---
+  duration_ms: 3238.488583
+  type: 'test'
+  ...
+# Subtest: D4-03 E · 默认切到另一个 config（原 config 未变）：原任务 append 仍成功且归属不变，新任务绑定新默认
+ok 54 - D4-03 E · 默认切到另一个 config（原 config 未变）：原任务 append 仍成功且归属不变，新任务绑定新默认
+  ---
+  duration_ms: 5839.909042
+  type: 'test'
+  ...
+# Subtest: D4-03 F1 · 绑定前创建的旧任务首个 run：同一事务懒绑定 + task.model_config_bound 事件 + run 行归属正确
+ok 55 - D4-03 F1 · 绑定前创建的旧任务首个 run：同一事务懒绑定 + task.model_config_bound 事件 + run 行归属正确
+  ---
+  duration_ms: 703.984791
+  type: 'test'
+  ...
+# Subtest: D4-03 F2 · R-8：无可用默认配置的旧任务：保持未绑定且绝不建 run（明确 MODEL_CONFIG_UNAVAILABLE）
+ok 56 - D4-03 F2 · R-8：无可用默认配置的旧任务：保持未绑定且绝不建 run（明确 MODEL_CONFIG_UNAVAILABLE）
+  ---
+  duration_ms: 685.785666
+  type: 'test'
+  ...
+# Subtest: D4-03 G · 两个同步竞态窗口（绑定→签发 / 签发→调用）：绝不以非冻结版本签发 capability，run 绝不悬挂
+ok 57 - D4-03 G · 两个同步竞态窗口（绑定→签发 / 签发→调用）：绝不以非冻结版本签发 capability，run 绝不悬挂
+  ---
+  duration_ms: 1660.755916
+  type: 'test'
+  ...
+# Subtest: D4-03 H · R-7：capability 签发同一同步点配置改版 —— 绝不以非冻结版本签发（H2 正对照正常签发）
+ok 58 - D4-03 H · R-7：capability 签发同一同步点配置改版 —— 绝不以非冻结版本签发（H2 正对照正常签发）
+  ---
+  duration_ms: 1728.047959
+  type: 'test'
+  ...
+# Subtest: D4-03 I · R-9：绑定后禁用 config → MODEL_CONFIG_UNAVAILABLE 全量 BLOCKED / 0 capability / 0 provider；恢复后可再跑
+ok 59 - D4-03 I · R-9：绑定后禁用 config → MODEL_CONFIG_UNAVAILABLE 全量 BLOCKED / 0 capability / 0 provider；恢复后可再跑
+  ---
+  duration_ms: 2147.19975
+  type: 'test'
+  ...
+# Subtest: D4-03 J · 正对照：未绑定旧任务（expected=null）capability 签发路径与既有行为逐项不变
+ok 60 - D4-03 J · 正对照：未绑定旧任务（expected=null）capability 签发路径与既有行为逐项不变
+  ---
+  duration_ms: 1669.60275
+  type: 'test'
+  ...
+# Subtest: D4-03 K · R-8：未绑定旧任务 + 无可用默认配置 —— 四条真实入口明确 MODEL_CONFIG_UNAVAILABLE；0 run/0 capability/0 call/0 请求/0 工具执行/0 artifact；Step/Task 收敛 BLOCKED
+ok 61 - D4-03 K · R-8：未绑定旧任务 + 无可用默认配置 —— 四条真实入口明确 MODEL_CONFIG_UNAVAILABLE；0 run/0 capability/0 call/0 请求/0 工具执行/0 artifact；Step/Task 收敛 BLOCKED
+  ---
+  duration_ms: 464.111042
+  type: 'test'
+  ...
+# Subtest: D4-03 L · R-8：默认配置稍后出现 —— 下一次显式运行重新解析并绑定（绑定事件 + run/call 归属 == 绑定值）并真实成功；绝不沿用未绑定的旧 run
+ok 62 - D4-03 L · R-8：默认配置稍后出现 —— 下一次显式运行重新解析并绑定（绑定事件 + run/call 归属 == 绑定值）并真实成功；绝不沿用未绑定的旧 run
+  ---
+  duration_ms: 1233.838083
+  type: 'test'
+  ...
+# Subtest: D4-03 M · R-8/并发：同一未绑定旧任务上的两个并发 run 只形成一种绑定（受控同步点，无 sleep 竞猜）；所有 run/call 归属一致，绝无第二配置
+ok 63 - D4-03 M · R-8/并发：同一未绑定旧任务上的两个并发 run 只形成一种绑定（受控同步点，无 sleep 竞猜）；所有 run/call 归属一致，绝无第二配置
+  ---
+  duration_ms: 1182.635292
+  type: 'test'
+  ...
+# Subtest: D4-03 N · R-8：历史保留 —— 未绑定的历史 run/call 行逐字段不变、绝不回填；绑定之后的新 run 才用绑定值
+ok 64 - D4-03 N · R-8：历史保留 —— 未绑定的历史 run/call 行逐字段不变、绝不回填；绑定之后的新 run 才用绑定值
+  ---
+  duration_ms: 1210.92125
+  type: 'test'
+  ...
+# Subtest: D4-03 P · R-8：解析**抛出**（真实库行 capabilities 损坏 JSON）与解析失败完全同形 —— 0 run/0 capability/0 请求/0 执行，Step/Task BLOCKED，任务仍未绑定
+ok 65 - D4-03 P · R-8：解析**抛出**（真实库行 capabilities 损坏 JSON）与解析失败完全同形 —— 0 run/0 capability/0 请求/0 执行，Step/Task BLOCKED，任务仍未绑定
+  ---
+  duration_ms: 430.045208
+  type: 'test'
+  ...
+# Subtest: D4-03 Q · R-8：已绑定 config 行损坏（解析抛出）—— 预检与 startModelCall 两个窗口都收敛 BLOCKED，绝无 STARTING/RUNNING 悬挂
+ok 66 - D4-03 Q · R-8：已绑定 config 行损坏（解析抛出）—— 预检与 startModelCall 两个窗口都收敛 BLOCKED，绝无 STARTING/RUNNING 悬挂
+  ---
+  duration_ms: 1555.765417
+  type: 'test'
+  ...
+# Subtest: D4-03 O · 正对照：modelService 为 null 的 test-only 桩装配行为与 ad5e600 逐字一致
+ok 67 - D4-03 O · 正对照：modelService 为 null 的 test-only 桩装配行为与 ad5e600 逐字一致
+  ---
+  duration_ms: 565.674917
+  type: 'test'
+  ...
+# (node:89515) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# A. 起点: task=BLOCKED call1=UNKNOWN_EFFECT calls=1
+# C. runTask(dsh on BLOCKED+UNKNOWN_EFFECT) ok=false error=RUN_BLOCKED_UNRESOLVED_SIDE_EFFECT reason=UNKNOWN_EFFECT
+# D. 出现第二条 SideEffectCall=false calls=1 task=BLOCKED steps=2 runs=2
+# E. 终态: taskStatus=BLOCKED | call1=UNKNOWN_EFFECT | recovery.applicable=true | appendable=false | resumable=false
+# Subtest: D4-03 A · BLOCKED + 真实 UNKNOWN_EFFECT：runTask 拒绝（UNKNOWN_EFFECT），0 新 run/step/call/事件
+ok 68 - D4-03 A · BLOCKED + 真实 UNKNOWN_EFFECT：runTask 拒绝（UNKNOWN_EFFECT），0 新 run/step/call/事件
+  ---
+  duration_ms: 3642.705208
+  type: 'test'
+  ...
+# Subtest: D4-03 B · 遗留 AWAITING_APPROVAL 副作用：runTask 拒绝（SIDE_EFFECT_PENDING），0 状态变化
+ok 69 - D4-03 B · 遗留 AWAITING_APPROVAL 副作用：runTask 拒绝（SIDE_EFFECT_PENDING），0 状态变化
+  ---
+  duration_ms: 1034.56125
+  type: 'test'
+  ...
+# Subtest: D4-03 C · 正对照：全新 PENDING 任务 runTask 仍正常（既有路径不受影响）
+ok 70 - D4-03 C · 正对照：全新 PENDING 任务 runTask 仍正常（既有路径不受影响）
+  ---
+  duration_ms: 4891.742875
+  type: 'test'
+  ...
+# Subtest: D4-03 D · 正对照：blockStep 造成的 BLOCKED（无任何未决副作用）runTask 仍被允许
+ok 71 - D4-03 D · 正对照：blockStep 造成的 BLOCKED（无任何未决副作用）runTask 仍被允许
+  ---
+  duration_ms: 1058.329625
+  type: 'test'
+  ...
+# Subtest: D4-03 E · LEASED 遗留 active lease：runTask 拒绝（ACTIVE_LEASE），0 状态变化
+ok 72 - D4-03 E · LEASED 遗留 active lease：runTask 拒绝（ACTIVE_LEASE），0 状态变化
+  ---
+  duration_ms: 1083.605834
+  type: 'test'
+  ...
+# Subtest: D4-03 G · 纯推理装配（无账本、无 side-effect runtime）runTask 仍正常；账本不可用只由访问器如实报告
+ok 73 - D4-03 G · 纯推理装配（无账本、无 side-effect runtime）runTask 仍正常；账本不可用只由访问器如实报告
+  ---
+  duration_ms: 1013.087084
+  type: 'test'
+  ...
+# Subtest: D4-03 F · getSideEffectSafety 契约：owner/app 归属校验、绝不改状态、无账本 fail-closed
+ok 74 - D4-03 F · getSideEffectSafety 契约：owner/app 归属校验、绝不改状态、无账本 fail-closed
+  ---
+  duration_ms: 746.613417
+  type: 'test'
+  ...
+# (node:89516) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: plan：REVERSIBLE_WRITE → AWAITING_APPROVAL，callId/idempotencyKey/planHash 全部 OpenArc 生成
+ok 75 - plan：REVERSIBLE_WRITE → AWAITING_APPROVAL，callId/idempotencyKey/planHash 全部 OpenArc 生成
+  ---
+  duration_ms: 2820.377375
+  type: 'test'
+  ...
+# Subtest: approve：绑定 planHash/tool/version/argsHash/effectClass/expectedEffects；agent 来源一律拒绝
+ok 76 - approve：绑定 planHash/tool/version/argsHash/effectClass/expectedEffects；agent 来源一律拒绝
+  ---
+  duration_ms: 1117.279167
+  type: 'test'
+  ...
+# Subtest: deny：call BLOCKED + approval DENIED，0 execution
+ok 77 - deny：call BLOCKED + approval DENIED，0 execution
+  ---
+  duration_ms: 893.678291
+  type: 'test'
+  ...
+# Subtest: expiry：approval 过期 → acquire APPROVAL_EXPIRED，eligibility APPROVAL_EXPIRED
+ok 78 - expiry：approval 过期 → acquire APPROVAL_EXPIRED，eligibility APPROVAL_EXPIRED
+  ---
+  duration_ms: 911.401416
+  type: 'test'
+  ...
+# Subtest: revoke：approval REVOKED → call BLOCKED/APPROVAL_REVOKED、lease 收敛；eligibility 由状态守卫拒绝（原因仍在 call 上）
+ok 79 - revoke：approval REVOKED → call BLOCKED/APPROVAL_REVOKED、lease 收敛；eligibility 由状态守卫拒绝（原因仍在 call 上）
+  ---
+  duration_ms: 1037.214917
+  type: 'test'
+  ...
+# Subtest: wrong user / wrong session / wrong call：approval 来源与目标必须精确
+ok 80 - wrong user / wrong session / wrong call：approval 来源与目标必须精确
+  ---
+  duration_ms: 1100.342833
+  type: 'test'
+  ...
+# Subtest: wrong planHash / wrong argsHash → PLAN_STALE，不能执行
+ok 81 - wrong planHash / wrong argsHash → PLAN_STALE，不能执行
+  ---
+  duration_ms: 997.406333
+  type: 'test'
+  ...
+# Subtest: tool version changed：approval v1 后 Registry 变 v2 → eligibility TOOL_VERSION_CHANGED
+ok 82 - tool version changed：approval v1 后 Registry 变 v2 → eligibility TOOL_VERSION_CHANGED
+  ---
+  duration_ms: 1062.958458
+  type: 'test'
+  ...
+# Subtest: 无 verificationStrategy 的 write tool → SIDE_EFFECT_VERIFICATION_UNAVAILABLE，不建 call
+ok 83 - 无 verificationStrategy 的 write tool → SIDE_EFFECT_VERIFICATION_UNAVAILABLE，不建 call
+  ---
+  duration_ms: 952.518541
+  type: 'test'
+  ...
+# Subtest: IRREVERSIBLE_WRITE / EXTERNAL_SIDE_EFFECT / PRIVILEGED → EFFECT_CLASS_BLOCKED（永不建 call）
+ok 84 - IRREVERSIBLE_WRITE / EXTERNAL_SIDE_EFFECT / PRIVILEGED → EFFECT_CLASS_BLOCKED（永不建 call）
+  ---
+  duration_ms: 891.499375
+  type: 'test'
+  ...
+# (node:89517) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Mandatory identity：缺 leaseId / holderId → LEASE_NOT_HELD + 0 mutation
+ok 85 - Mandatory identity：缺 leaseId / holderId → LEASE_NOT_HELD + 0 mutation
+  ---
+  duration_ms: 2861.94425
+  type: 'test'
+  ...
+# Subtest: execute API 不接受 caller 自报的 holderInstanceId：runtime identity 只来自 OpenArc 自身
+ok 86 - execute API 不接受 caller 自报的 holderInstanceId：runtime identity 只来自 OpenArc 自身
+  ---
+  duration_ms: 1047.473292
+  type: 'test'
+  ...
+# Subtest: Restart ownership regression：旧 lease EXPIRED，Runtime B 不能继承 execution authority
+ok 87 - Restart ownership regression：旧 lease EXPIRED，Runtime B 不能继承 execution authority
+  ---
+  duration_ms: 1097.516375
+  type: 'test'
+  ...
+# Subtest: Eligibility→Claim race：Task cancel → claim denied, 0 mutation
+ok 88 - Eligibility→Claim race：Task cancel → claim denied, 0 mutation
+  ---
+  duration_ms: 1074.003041
+  type: 'test'
+  ...
+# Subtest: Eligibility→Claim race：tool permission revoke → claim denied, 0 mutation
+ok 89 - Eligibility→Claim race：tool permission revoke → claim denied, 0 mutation
+  ---
+  duration_ms: 1267.2695
+  type: 'test'
+  ...
+# Subtest: Eligibility→Claim race：latest run changes → claim denied, 0 mutation
+ok 90 - Eligibility→Claim race：latest run changes → claim denied, 0 mutation
+  ---
+  duration_ms: 1134.839083
+  type: 'test'
+  ...
+# Subtest: Eligibility→Claim race：approval revoke → call BLOCKED/APPROVAL_REVOKED、claim denied、0 mutation
+ok 91 - Eligibility→Claim race：approval revoke → call BLOCKED/APPROVAL_REVOKED、claim denied、0 mutation
+  ---
+  duration_ms: 1161.775125
+  type: 'test'
+  ...
+# Subtest: Eligibility→Claim race：lease revoke → claim denied, 0 mutation
+ok 92 - Eligibility→Claim race：lease revoke → claim denied, 0 mutation
+  ---
+  duration_ms: 919.13925
+  type: 'test'
+  ...
+# Subtest: Deterministic duplicate claim：call 已 RUNNING 时同 identity 再次 claim → EXECUTION_CLAIM_LOST + 0 mutation
+ok 93 - Deterministic duplicate claim：call 已 RUNNING 时同 identity 再次 claim → EXECUTION_CLAIM_LOST + 0 mutation
+  ---
+  duration_ms: 895.8605
+  type: 'test'
+  ...
+# (node:89518) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Runtime instance authority：Runtime A 拥有 Lease，Runtime B（知道 instA）不能执行
+ok 94 - Runtime instance authority：Runtime A 拥有 Lease，Runtime B（知道 instA）不能执行
+  ---
+  duration_ms: 2887.620666
+  type: 'test'
+  ...
+# Subtest: Exact leaseId authority：missing / wrong leaseId → DENY + 0 mutation，正确 leaseId → 成功
+ok 95 - Exact leaseId authority：missing / wrong leaseId → DENY + 0 mutation，正确 leaseId → 成功
+  ---
+  duration_ms: 1206.000458
+  type: 'test'
+  ...
+# Subtest: Lease replacement race：lease_A revoke + lease_B acquire（同 holder/同 runtime）→ 旧 lease_A invocation DENY，fresh lease_B 才可执行
+ok 96 - Lease replacement race：lease_A revoke + lease_B acquire（同 holder/同 runtime）→ 旧 lease_A invocation DENY，fresh lease_B 才可执行
+  ---
+  duration_ms: 945.373333
+  type: 'test'
+  ...
+# Subtest: Same-runtime duplicate delivery：同一 runtime 两次 invocation → 1 claim / 1 Domain invocation / 1 mutation
+ok 97 - Same-runtime duplicate delivery：同一 runtime 两次 invocation → 1 claim / 1 Domain invocation / 1 mutation
+  ---
+  duration_ms: 1092.1125
+  type: 'test'
+  ...
+# Subtest: Cross-runtime non-owner：Runtime B 永远到不了 claim（0 Domain invocation）
+ok 98 - Cross-runtime non-owner：Runtime B 永远到不了 claim（0 Domain invocation）
+  ---
+  duration_ms: 1507.82
+  type: 'test'
+  ...
+# Subtest: Claim-time approval exact binding：toolId/version/effectClass 被篡改 → claim DENY
+ok 99 - Claim-time approval exact binding：toolId/version/effectClass 被篡改 → claim DENY
+  ---
+  duration_ms: 1184.744042
+  type: 'test'
+  ...
+# Subtest: Cross-process impersonation：Runtime B 知道 instA 字符串，仍不能执行 Runtime A 的 lease
+ok 100 - Cross-process impersonation：Runtime B 知道 instA 字符串，仍不能执行 Runtime A 的 lease
+  ---
+  duration_ms: 1242.917458
+  type: 'test'
+  ...
+# (node:89519) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: acquireLease API：caller 提供的 instanceId 被忽略，lease 永远绑定 runtime 自身 identity
+ok 101 - acquireLease API：caller 提供的 instanceId 被忽略，lease 永远绑定 runtime 自身 identity
+  ---
+  duration_ms: 2841.851125
+  type: 'test'
+  ...
+# Subtest: Same-runtime duplicate acquire：同 holderId + 同 runtime → duplicate，无第二个 ACTIVE lease
+ok 102 - Same-runtime duplicate acquire：同 holderId + 同 runtime → duplicate，无第二个 ACTIVE lease
+  ---
+  duration_ms: 1271.461125
+  type: 'test'
+  ...
+# Subtest: Cross-runtime same-holder acquire：不同 runtime instance → LEASE_CONFLICT（不是 duplicate）
+ok 103 - Cross-runtime same-holder acquire：不同 runtime instance → LEASE_CONFLICT（不是 duplicate）
+  ---
+  duration_ms: 919.710334
+  type: 'test'
+  ...
+# Subtest: recoverOnStartup API：caller instanceId 被忽略；当前 runtime 自己的 lease 保留，其它 runtime lease EXPIRED
+ok 104 - recoverOnStartup API：caller instanceId 被忽略；当前 runtime 自己的 lease 保留，其它 runtime lease EXPIRED
+  ---
+  duration_ms: 1064.112417
+  type: 'test'
+  ...
+# Subtest: Authority eligibility runtime identity = this.instanceId（caller 自报 holderInstanceId 无效）
+ok 105 - Authority eligibility runtime identity = this.instanceId（caller 自报 holderInstanceId 无效）
+  ---
+  duration_ms: 1656.227958
+  type: 'test'
+  ...
+# Subtest: Disk-backed restart impersonation：Runtime B 知道 instA 也无法保留/继承旧 lease
+ok 106 - Disk-backed restart impersonation：Runtime B 知道 instA 也无法保留/继承旧 lease
+  ---
+  duration_ms: 1195.786792
+  type: 'test'
+  ...
+# (node:89565) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Two live runtimes：不同 instanceId != dead proof；early NOT_APPLIED 不得 FAILED；late mutation 后 APPLIED
+ok 107 - Two live runtimes：不同 instanceId != dead proof；early NOT_APPLIED 不得 FAILED；late mutation 后 APPLIED
+  ---
+  duration_ms: 1576.276583
+  type: 'test'
+  ...
+# Subtest: Timeout → 真实进程死亡（mutation 未发生）→ trusted quiescence → NOT_APPLIED → FAILED
+ok 108 - Timeout → 真实进程死亡（mutation 未发生）→ trusted quiescence → NOT_APPLIED → FAILED
+  ---
+  duration_ms: 1799.863291
+  type: 'test'
+  ...
+# Subtest: Timeout → late applied → 进程死亡 → restart quiescence 升级 → APPLIED → SUCCEEDED
+ok 109 - Timeout → late applied → 进程死亡 → restart quiescence 升级 → APPLIED → SUCCEEDED
+  ---
+  duration_ms: 1443.3205
+  type: 'test'
+  ...
+# Subtest: UNKNOWN_EFFECT without proven death（self runtime）→ 保持 UNKNOWN_EFFECT，绝不 FAILED
+ok 110 - UNKNOWN_EFFECT without proven death（self runtime）→ 保持 UNKNOWN_EFFECT，绝不 FAILED
+  ---
+  duration_ms: 942.699167
+  type: 'test'
+  ...
+# Subtest: Lease EXPIRED / REVOKED 单独 != quiescence
+ok 111 - Lease EXPIRED / REVOKED 单独 != quiescence
+  ---
+  duration_ms: 1036.519458
+  type: 'test'
+  ...
+# Subtest: RuntimeId mismatch / unknown runtime 单独 != quiescence
+ok 112 - RuntimeId mismatch / unknown runtime 单独 != quiescence
+  ---
+  duration_ms: 884.16675
+  type: 'test'
+  ...
+# Subtest: APPLIED 不依赖 quiescence：可靠看到 APPLIED → SUCCEEDED
+ok 113 - APPLIED 不依赖 quiescence：可靠看到 APPLIED → SUCCEEDED
+  ---
+  duration_ms: 829.073916
+  type: 'test'
+  ...
+# (node:89583) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Crash before dispatch：restart → UNKNOWN_EFFECT → NOT_APPLIED + quiesced → FAILED，0 mutation
+ok 114 - Crash before dispatch：restart → UNKNOWN_EFFECT → NOT_APPLIED + quiesced → FAILED，0 mutation
+  ---
+  duration_ms: 1329.632
+  type: 'test'
+  ...
+# Subtest: Crash after real mutation（C3 关键 E2E）→ restart → UNKNOWN_EFFECT → APPLIED → SUCCEEDED，exactly 1 delete
+ok 115 - Crash after real mutation（C3 关键 E2E）→ restart → UNKNOWN_EFFECT → APPLIED → SUCCEEDED，exactly 1 delete
+  ---
+  duration_ms: 1115.62375
+  type: 'test'
+  ...
+# Subtest: Crash after verification before final persist → APPLIED → SUCCEEDED，无第二次 mutation
+ok 116 - Crash after verification before final persist → APPLIED → SUCCEEDED，无第二次 mutation
+  ---
+  duration_ms: 893.198125
+  type: 'test'
+  ...
+# Subtest: Crash after SUCCEEDED before lease finalize → Call remains SUCCEEDED，旧 lease EXPIRED，不重试
+ok 117 - Crash after SUCCEEDED before lease finalize → Call remains SUCCEEDED，旧 lease EXPIRED，不重试
+  ---
+  duration_ms: 1016.18275
+  type: 'test'
+  ...
+# Subtest: Idempotency across restart：same callId / idempotencyKey，无第二个 call / lease / execution
+ok 118 - Idempotency across restart：same callId / idempotencyKey，无第二个 call / lease / execution
+  ---
+  duration_ms: 1234.543
+  type: 'test'
+  ...
+# (node:89588) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Late applied result：timeout → UNKNOWN_EFFECT(quiesced=false) → mutation 晚到 → verify APPLIED → SUCCEEDED，0 retry
+ok 119 - Late applied result：timeout → UNKNOWN_EFFECT(quiesced=false) → mutation 晚到 → verify APPLIED → SUCCEEDED，0 retry
+  ---
+  duration_ms: 1187.075667
+  type: 'test'
+  ...
+# Subtest: NOT_APPLIED + quiesced（cold restart）→ FAILED；Task/Step 保持 BLOCKED
+ok 120 - NOT_APPLIED + quiesced（cold restart）→ FAILED；Task/Step 保持 BLOCKED
+  ---
+  duration_ms: 859.296
+  type: 'test'
+  ...
+# Subtest: APPLIED（cold restart，mutation 已提交）→ SUCCEEDED，0 replay / 0 retry
+ok 121 - APPLIED（cold restart，mutation 已提交）→ SUCCEEDED，0 replay / 0 retry
+  ---
+  duration_ms: 819.265541
+  type: 'test'
+  ...
+# Subtest: INDETERMINATE：并发 Domain 改动 → 保持 UNKNOWN_EFFECT
+ok 122 - INDETERMINATE：并发 Domain 改动 → 保持 UNKNOWN_EFFECT
+  ---
+  duration_ms: 883.401583
+  type: 'test'
+  ...
+# Subtest: Repeated verification idempotency：INDETERMINATE 可重复 read-only；terminal 后 duplicate
+ok 123 - Repeated verification idempotency：INDETERMINATE 可重复 read-only；terminal 后 duplicate
+  ---
+  duration_ms: 1244.302875
+  type: 'test'
+  ...
+# Subtest: Concurrent verification：两个 read-only verifier → 单一 authoritative terminal transition
+ok 124 - Concurrent verification：两个 read-only verifier → 单一 authoritative terminal transition
+  ---
+  duration_ms: 885.904708
+  type: 'test'
+  ...
+# Subtest: Historical contract：exact version 不存在 → VERIFICATION_NOT_AVAILABLE 且保持 UNKNOWN_EFFECT
+ok 125 - Historical contract：exact version 不存在 → VERIFICATION_NOT_AVAILABLE 且保持 UNKNOWN_EFFECT
+  ---
+  duration_ms: 888.888
+  type: 'test'
+  ...
+# Subtest: Tool disabled ≠ verification disabled：disabled 后仍可 read-only 收敛，但绝不再 execute
+ok 126 - Tool disabled ≠ verification disabled：disabled 后仍可 read-only 收敛，但绝不再 execute
+  ---
+  duration_ms: 805.136
+  type: 'test'
+  ...
+# Subtest: Session / App disabled 后仍可做 safe read-only recovery verification
+ok 127 - Session / App disabled 后仍可做 safe read-only recovery verification
+  ---
+  duration_ms: 784.002208
+  type: 'test'
+  ...
+# Subtest: UNKNOWN_EFFECT 不能 reacquire lease / execute（0 mutation）
+ok 128 - UNKNOWN_EFFECT 不能 reacquire lease / execute（0 mutation）
+  ---
+  duration_ms: 757.33775
+  type: 'test'
+  ...
+# Subtest: Harness spoof recovery/verification fields → TOOL_ARGUMENT_INVALID
+ok 129 - Harness spoof recovery/verification fields → TOOL_ARGUMENT_INVALID
+  ---
+  duration_ms: 761.826541
+  type: 'test'
+  ...
+# Subtest: Secret scan：C3 产物不含 Provider Secret / mpx_ / tpx_ / 绝对路径 / store root
+ok 130 - Secret scan：C3 产物不含 Provider Secret / mpx_ / tpx_ / 绝对路径 / store root
+  ---
+  duration_ms: 786.718667
+  type: 'test'
+  ...
+# Subtest: Reachability probe：real ALIVE；真实 stale endpoint（SIGKILL）/ ENOENT 一律 UNKNOWN（pathname 无死亡权威）
+ok 131 - Reachability probe：real ALIVE；真实 stale endpoint（SIGKILL）/ ENOENT 一律 UNKNOWN（pathname 无死亡权威）
+  ---
+  duration_ms: 84.09075
+  type: 'test'
+  ...
+# Subtest: Tri-state probe：timeout → UNKNOWN（不是 death proof）
+ok 132 - Tri-state probe：timeout → UNKNOWN（不是 death proof）
+  ---
+  duration_ms: 20.95775
+  type: 'test'
+  ...
+# Subtest: Tri-state probe：任意意外 OS error → UNKNOWN（EACCES / EMFILE / ENFILE / ENOBUFS / ECONNREFUSED / 未知 errno / 无 code）
+ok 133 - Tri-state probe：任意意外 OS error → UNKNOWN（EACCES / EMFILE / ENFILE / ENOBUFS / ECONNREFUSED / 未知 errno / 无 code）
+  ---
+  duration_ms: 2.408625
+  type: 'test'
+  ...
+# Subtest: Tri-state probe：probe 自身异常 / 不可信返回值一律 UNKNOWN
+ok 134 - Tri-state probe：probe 自身异常 / 不可信返回值一律 UNKNOWN
+  ---
+  duration_ms: 1.785875
+  type: 'test'
+  ...
+# Subtest: UNKNOWN probe 绝不 observeExit / 绝不 quiesced / 绝不改写 persisted record
+ok 135 - UNKNOWN probe 绝不 observeExit / 绝不 quiesced / 绝不改写 persisted record
+  ---
+  duration_ms: 3.074166
+  type: 'test'
+  ...
+# Subtest: pathname probe 无权 observeExit：自称 DEFINITELY_GONE / legacy boolean 一律 UNKNOWN；ALIVE → 0 observeExit
+ok 136 - pathname probe 无权 observeExit：自称 DEFINITELY_GONE / legacy boolean 一律 UNKNOWN；ALIVE → 0 observeExit
+  ---
+  duration_ms: 3.724583
+  type: 'test'
+  ...
+# Subtest: 真实 timeout 经 production probe seam → UNKNOWN → observeExit=0 / quiesced=false
+ok 137 - 真实 timeout 经 production probe seam → UNKNOWN → observeExit=0 / quiesced=false
+  ---
+  duration_ms: 37.659334
+  type: 'test'
+  ...
+# Subtest: 注入 EACCES / EMFILE / 自定义 errno → UNKNOWN → observeExit=0 / quiesced=false
+ok 138 - 注入 EACCES / EMFILE / 自定义 errno → UNKNOWN → observeExit=0 / quiesced=false
+  ---
+  duration_ms: 12.826708
+  type: 'test'
+  ...
+# Subtest: LIFECYCLE_NOT_READY：rehydrate 完成前 quiesced 必须 false（fail closed）
+ok 139 - LIFECYCLE_NOT_READY：rehydrate 完成前 quiesced 必须 false（fail closed）
+  ---
+  duration_ms: 1.485625
+  type: 'test'
+  ...
+# Subtest: Static Gate：probe 只回答 ALIVE / UNKNOWN（不存在死亡结论）；rehydrate 的 UNKNOWN 分支不调用 observeExit
+ok 140 - Static Gate：probe 只回答 ALIVE / UNKNOWN（不存在死亡结论）；rehydrate 的 UNKNOWN 分支不调用 observeExit
+  ---
+  duration_ms: 2.55975
+  type: 'test'
+  ...
+# (node:89592) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: E2E · cold restart + probe UNKNOWN：quiesced=false → NOT_APPLIED 也绝不 FAILED → Call 保持 UNKNOWN_EFFECT / Task·Step BLOCKED / 0 replay
+ok 141 - E2E · cold restart + probe UNKNOWN：quiesced=false → NOT_APPLIED 也绝不 FAILED → Call 保持 UNKNOWN_EFFECT / Task·Step BLOCKED / 0 replay
+  ---
+  duration_ms: 1065.42075
+  type: 'test'
+  ...
+# Subtest: Late Effect Safety · probe UNKNOWN：early NOT_APPLIED 绝不 false-negative；随后 APPLIED → SUCCEEDED
+ok 142 - Late Effect Safety · probe UNKNOWN：early NOT_APPLIED 绝不 false-negative；随后 APPLIED → SUCCEEDED
+  ---
+  duration_ms: 969.611458
+  type: 'test'
+  ...
+# Subtest: E2E · cold restart + persisted EXITED（reason=SUPERVISOR_OBSERVED_EXIT）：不是 death authority → quiesced=false → NOT_APPLIED 保持 UNKNOWN_EFFECT + BLOCK，0 retry
+ok 143 - E2E · cold restart + persisted EXITED（reason=SUPERVISOR_OBSERVED_EXIT）：不是 death authority → quiesced=false → NOT_APPLIED 保持 UNKNOWN_EFFECT + BLOCK，0 retry
+  ---
+  duration_ms: 1148.3135
+  type: 'test'
+  ...
+# Subtest: E2E · cold restart + probe ALIVE（旧 runtime 仍存活）：quiesced=false → NOT_APPLIED 保持 UNKNOWN_EFFECT
+ok 144 - E2E · cold restart + probe ALIVE（旧 runtime 仍存活）：quiesced=false → NOT_APPLIED 保持 UNKNOWN_EFFECT
+  ---
+  duration_ms: 1042.294542
+  type: 'test'
+  ...
+# Subtest: E2E · probe UNKNOWN + verifier INDETERMINATE → 保持 UNKNOWN_EFFECT（不修改 C3 语义）
+ok 145 - E2E · probe UNKNOWN + verifier INDETERMINATE → 保持 UNKNOWN_EFFECT（不修改 C3 语义）
+  ---
+  duration_ms: 1079.802375
+  type: 'test'
+  ...
+# Subtest: pathname probe 只回答 ALIVE / UNKNOWN：ENOENT / stale / timeout / 任意 errno 都不是 death proof
+ok 146 - pathname probe 只回答 ALIVE / UNKNOWN：ENOENT / stale / timeout / 任意 errno 都不是 death proof
+  ---
+  duration_ms: 88.364583
+  type: 'test'
+  ...
+# Subtest: Adversarial Live-Unlink Gate：Runtime A 仍存活时 unlink 它自己的 socket → 新 supervisor 只能 UNKNOWN，绝不 observeExit
+ok 147 - Adversarial Live-Unlink Gate：Runtime A 仍存活时 unlink 它自己的 socket → 新 supervisor 只能 UNKNOWN，绝不 observeExit
+  ---
+  duration_ms: 111.302458
+  type: 'test'
+  ...
+# Subtest: Same-supervisor exit proof：真实 child 'exit' → trusted EXITED；cold restart 不再恢复（persisted record 非 authority）
+ok 148 - Same-supervisor exit proof：真实 child 'exit' → trusted EXITED；cold restart 不再恢复（persisted record 非 authority）
+  ---
+  duration_ms: 109.074125
+  type: 'test'
+  ...
+# Subtest: Persisted Runtime Record Contract：只含 safe binding，绝不保存 socketPath / 绝对路径 / runtimeDir / dbPath / storeRoot
+ok 149 - Persisted Runtime Record Contract：只含 safe binding，绝不保存 socketPath / 绝对路径 / runtimeDir / dbPath / storeRoot
+  ---
+  duration_ms: 1.142542
+  type: 'test'
+  ...
+# Subtest: instanceId Validation：只接受 production 形态；separator / traversal / NUL / absolute / oversized 一律拒绝
+ok 150 - instanceId Validation：只接受 production 形态；separator / traversal / NUL / absolute / oversized 一律拒绝
+  ---
+  duration_ms: 0.61825
+  type: 'test'
+  ...
+# Subtest: Path traversal persisted record：忽略，绝不 probe / persist / observeExit，不能逃出 executorDir
+ok 151 - Path traversal persisted record：忽略，绝不 probe / persist / observeExit，不能逃出 executorDir
+  ---
+  duration_ms: 52.032
+  type: 'test'
+  ...
+# Subtest: Legacy socketPath Spoof：persisted socketPath 绝不被采信；probe path 只由 validated instanceId 派生
+ok 152 - Legacy socketPath Spoof：persisted socketPath 绝不被采信；probe path 只由 validated instanceId 派生
+  ---
+  duration_ms: 80.067959
+  type: 'test'
+  ...
+# (node:89594) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: ENOENT without prior EXIT proof → UNKNOWN；ACTIVE cold-restart record 绝不因 pathname probe 变成 EXITED
+ok 153 - ENOENT without prior EXIT proof → UNKNOWN；ACTIVE cold-restart record 绝不因 pathname probe 变成 EXITED
+  ---
+  duration_ms: 10.622917
+  type: 'test'
+  ...
+# Subtest: Persisted EXITED 无 death authority：任何 reason（含 SUPERVISOR_OBSERVED_EXIT / EXECUTOR_SPAWN_FAILED）一律 quiesced=false
+ok 154 - Persisted EXITED 无 death authority：任何 reason（含 SUPERVISOR_OBSERVED_EXIT / EXECUTOR_SPAWN_FAILED）一律 quiesced=false
+  ---
+  duration_ms: 6.672833
+  type: 'test'
+  ...
+# Subtest: Static Gate：源码不存在 pathname death authority；registerExecutor 不写 socketPath；probe path 由 validated instanceId 派生
+ok 155 - Static Gate：源码不存在 pathname death authority；registerExecutor 不写 socketPath；probe path 由 validated instanceId 派生
+  ---
+  duration_ms: 1.768459
+  type: 'test'
+  ...
+# Subtest: E2E · live-unlink + UNKNOWN_EFFECT：A 仍存活 → 绝不 FAILED；late mutation 真实提交 → APPLIED → SUCCEEDED；0 retry / 0 replay
+ok 156 - E2E · live-unlink + UNKNOWN_EFFECT：A 仍存活 → 绝不 FAILED；late mutation 真实提交 → APPLIED → SUCCEEDED；0 retry / 0 replay
+  ---
+  duration_ms: 1171.222333
+  type: 'test'
+  ...
+# Subtest: E2E · persisted EXITED（真实退出 + trusted-looking reason）：cold restart 仍 fail closed → NOT_APPLIED 保持 UNKNOWN_EFFECT / BLOCK（0 retry / 0 replay）
+ok 157 - E2E · persisted EXITED（真实退出 + trusted-looking reason）：cold restart 仍 fail closed → NOT_APPLIED 保持 UNKNOWN_EFFECT / BLOCK（0 retry / 0 replay）
+  ---
+  duration_ms: 1241.931417
+  type: 'test'
+  ...
+# Subtest: Real Supervisor Exit Proof：同一 supervisor lifetime 的真实 child 'exit' → quiesced=true；cold restart 不再恢复
+ok 158 - Real Supervisor Exit Proof：同一 supervisor lifetime 的真实 child 'exit' → quiesced=true；cold restart 不再恢复
+  ---
+  duration_ms: 64.941916
+  type: 'test'
+  ...
+# Subtest: Forged EXITED Record Gate：手工 SUPERVISOR_OBSERVED_EXIT / EXECUTOR_SPAWN_FAILED → observeExit=0 / quiesced=false
+ok 159 - Forged EXITED Record Gate：手工 SUPERVISOR_OBSERVED_EXIT / EXECUTOR_SPAWN_FAILED → observeExit=0 / quiesced=false
+  ---
+  duration_ms: 2.306292
+  type: 'test'
+  ...
+# Subtest: Persisted EXITED 任何 reason 都不得 observeExit / quiesced；ACTIVE 仍走 reachability probe
+ok 160 - Persisted EXITED 任何 reason 都不得 observeExit / quiesced；ACTIVE 仍走 reachability probe
+  ---
+  duration_ms: 6.693833
+  type: 'test'
+  ...
+# (node:89606) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Pathname Rules stay frozen：ENOENT / live-unlink / stale / timeout / arbitrary errno 一律 UNKNOWN
+ok 161 - Pathname Rules stay frozen：ENOENT / live-unlink / stale / timeout / arbitrary errno 一律 UNKNOWN
+  ---
+  duration_ms: 230.493208
+  type: 'test'
+  ...
+# Subtest: Persisted Record Contract Regression：无 socketPath / 绝对路径；instanceId 冻结为 ^exe_[A-Za-z0-9_-]{1,64}$
+ok 162 - Persisted Record Contract Regression：无 socketPath / 绝对路径；instanceId 冻结为 ^exe_[A-Za-z0-9_-]{1,64}$
+  ---
+  duration_ms: 0.958875
+  type: 'test'
+  ...
+# Subtest: Static Gate：rehydrate 的 EXITED 分支绝无 observeExit / reason 白名单；源码无 TRUSTED_EXIT_REASONS authority
+ok 163 - Static Gate：rehydrate 的 EXITED 分支绝无 observeExit / reason 白名单；源码无 TRUSTED_EXIT_REASONS authority
+  ---
+  duration_ms: 0.456292
+  type: 'test'
+  ...
+# Subtest: E2E · same-lifetime real EXIT + NOT_APPLIED → FAILED（quiesced=true 来自 live observation）
+ok 164 - E2E · same-lifetime real EXIT + NOT_APPLIED → FAILED（quiesced=true 来自 live observation）
+  ---
+  duration_ms: 1478.002
+  type: 'test'
+  ...
+# Subtest: E2E · live-unlink UNKNOWN：NOT_APPLIED 不 resolve → late mutation APPLIED → SUCCEEDED（0 retry / 0 replay）
+ok 165 - E2E · live-unlink UNKNOWN：NOT_APPLIED 不 resolve → late mutation APPLIED → SUCCEEDED（0 retry / 0 replay）
+  ---
+  duration_ms: 1068.094875
+  type: 'test'
+  ...
+# Subtest: E2E · persisted EXITED + UNKNOWN：NOT_APPLIED 保持 UNKNOWN_EFFECT + BLOCK（0 retry / 0 second call / 0 lease / 0 replay）
+ok 166 - E2E · persisted EXITED + UNKNOWN：NOT_APPLIED 保持 UNKNOWN_EFFECT + BLOCK（0 retry / 0 second call / 0 lease / 0 replay）
+  ---
+  duration_ms: 1011.769833
+  type: 'test'
+  ...
+# (node:89607) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Official dsh WRITE Happy Path：proposal → WAITING_APPROVAL → trusted approve → 受监督 exactly-once → verified → dsh 继续 → Task SUCCEEDED
+ok 167 - Official dsh WRITE Happy Path：proposal → WAITING_APPROVAL → trusted approve → 受监督 exactly-once → verified → dsh 继续 → Task SUCCEEDED
+  ---
+  duration_ms: 3571.570583
+  type: 'test'
+  ...
+# Subtest: Official dsh WRITE Deny Path：真实 Approval UI Deny → 0 mutation / 0 lease / Harness 得不到 success
+ok 168 - Official dsh WRITE Deny Path：真实 Approval UI Deny → 0 mutation / 0 lease / Harness 得不到 success
+  ---
+  duration_ms: 2764.97275
+  type: 'test'
+  ...
+# Subtest: Official dsh WRITE Timeout Path：用户不操作 → 0 mutation / 0 lease / call BLOCKED
+ok 169 - Official dsh WRITE Timeout Path：用户不操作 → 0 mutation / 0 lease / call BLOCKED
+  ---
+  duration_ms: 2787.233041
+  type: 'test'
+  ...
+# Subtest: Official dsh WRITE UNKNOWN_EFFECT Path：dispatched 后 executor 死亡 → 不把 unverified 结果交给 Harness；Task/Step BLOCKED；0 second call / 0 retry
+ok 170 - Official dsh WRITE UNKNOWN_EFFECT Path：dispatched 后 executor 死亡 → 不把 unverified 结果交给 Harness；Task/Step BLOCKED；0 second call / 0 retry
+  ---
+  duration_ms: 1958.183791
+  type: 'test'
+  ...
+# Subtest: Official dsh WRITE APPLIED Recovery：mutation 已提交后 executor 死亡 → recovery APPLIED → call SUCCEEDED，但 Task/Step 保持 BLOCKED（Explicit Resume = DEFERRED）
+ok 171 - Official dsh WRITE APPLIED Recovery：mutation 已提交后 executor 死亡 → recovery APPLIED → call SUCCEEDED，但 Task/Step 保持 BLOCKED（Explicit Resume = DEFERRED）
+  ---
+  duration_ms: 1789.919708
+  type: 'test'
+  ...
+# (node:89608) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Deny → 0 mutation / BLOCKED / 0 lease / 0 execution；Harness 只得到 bounded denied
+ok 172 - Deny → 0 mutation / BLOCKED / 0 lease / 0 execution；Harness 只得到 bounded denied
+  ---
+  duration_ms: 1073.699375
+  type: 'test'
+  ...
+# Subtest: Approval timeout → 0 mutation / call BLOCKED(APPROVAL_TIMEOUT) / 0 retry
+ok 173 - Approval timeout → 0 mutation / call BLOCKED(APPROVAL_TIMEOUT) / 0 retry
+  ---
+  duration_ms: 1037.516042
+  type: 'test'
+  ...
+# Subtest: Task Cancel While Waiting → 0 mutation / 0 lease / no later approval can execute
+ok 174 - Task Cancel While Waiting → 0 mutation / 0 lease / no later approval can execute
+  ---
+  duration_ms: 922.385458
+  type: 'test'
+  ...
+# Subtest: Session Revoked While Waiting → Approve DENY / 0 execution
+ok 175 - Session Revoked While Waiting → Approve DENY / 0 execution
+  ---
+  duration_ms: 1019.61775
+  type: 'test'
+  ...
+# Subtest: App Disabled While Waiting → claim-time snapshot 拒绝；0 mutation
+ok 176 - App Disabled While Waiting → claim-time snapshot 拒绝；0 mutation
+  ---
+  duration_ms: 841.891541
+  type: 'test'
+  ...
+# Subtest: Tool permission revoked While Waiting → 0 mutation
+ok 177 - Tool permission revoked While Waiting → 0 mutation
+  ---
+  duration_ms: 820.517459
+  type: 'test'
+  ...
+# Subtest: useByAgent revoked While Waiting（non-admin actor）→ 0 mutation
+ok 178 - useByAgent revoked While Waiting（non-admin actor）→ 0 mutation
+  ---
+  duration_ms: 833.438125
+  type: 'test'
+  ...
+# Subtest: Precondition changed While Waiting → SIDE_EFFECT_PRECONDITION_CHANGED；0 write / 不 silent re-plan
+ok 179 - Precondition changed While Waiting → SIDE_EFFECT_PRECONDITION_CHANGED；0 write / 不 silent re-plan
+  ---
+  duration_ms: 872.599625
+  type: 'test'
+  ...
+# Subtest: Concurrent Approve click → 单一 authoritative approval transition；1 lease / 1 execution
+ok 180 - Concurrent Approve click → 单一 authoritative approval transition；1 lease / 1 execution
+  ---
+  duration_ms: 933.30275
+  type: 'test'
+  ...
+# Subtest: Concurrent Executor → only one claim / only one ACTIVE lease；mutation exactly 1
+ok 181 - Concurrent Executor → only one claim / only one ACTIVE lease；mutation exactly 1
+  ---
+  duration_ms: 981.929584
+  type: 'test'
+  ...
+# Subtest: Approval Revocation Race：APPROVED 后 claim 前 REVOKED → 0 Domain invocation
+ok 182 - Approval Revocation Race：APPROVED 后 claim 前 REVOKED → 0 Domain invocation
+  ---
+  duration_ms: 709.543125
+  type: 'test'
+  ...
+# Subtest: Task Cancel Race：executor eligibility 窗口内 cancel → 0 Domain invocation
+ok 183 - Task Cancel Race：executor eligibility 窗口内 cancel → 0 Domain invocation
+  ---
+  duration_ms: 751.560959
+  type: 'test'
+  ...
+# Subtest: Harness spoof through production WRITE route → denied / 0 SideEffectCall
+ok 184 - Harness spoof through production WRITE route → denied / 0 SideEffectCall
+  ---
+  duration_ms: 586.869958
+  type: 'test'
+  ...
+# Subtest: Duplicate tool delivery → 只有一个 SideEffectCall / 一个 idempotencyKey；0 second mutation
+ok 185 - Duplicate tool delivery → 只有一个 SideEffectCall / 一个 idempotencyKey；0 second mutation
+  ---
+  duration_ms: 623.587834
+  type: 'test'
+  ...
+# Subtest: Trusted Approval Gateway：untrusted sender 抛错；unknown command 拒绝；Renderer 自报 actor 被忽略
+ok 186 - Trusted Approval Gateway：untrusted sender 抛错；unknown command 拒绝；Renderer 自报 actor 被忽略
+  ---
+  duration_ms: 581.003667
+  type: 'test'
+  ...
+# Subtest: Approval Snapshot：safe 投影（无 secret / 路径 / store root）；terminal 或跨 session → 不返回
+ok 187 - Approval Snapshot：safe 投影（无 secret / 路径 / store root）；terminal 或跨 session → 不返回
+  ---
+  duration_ms: 515.890166
+  type: 'test'
+  ...
+# Subtest: Tool Facade Bridge WRITE route：只产生 SideEffect Proposal；WRITE 绝不经 READ_ONLY execution route
+ok 188 - Tool Facade Bridge WRITE route：只产生 SideEffect Proposal；WRITE 绝不经 READ_ONLY execution route
+  ---
+  duration_ms: 544.494542
+  type: 'test'
+  ...
+# Subtest: No Direct Domain Bypass：resource.trash 的唯一 Domain 调用点在 allowlisted adapter + controlled execution 内
+ok 189 - No Direct Domain Bypass：resource.trash 的唯一 Domain 调用点在 allowlisted adapter + controlled execution 内
+  ---
+  duration_ms: 654.368417
+  type: 'test'
+  ...
+# Subtest: WRITE tool result 投影只含 safe 字段（无绝对路径 / DB id / lease / capability）
+ok 190 - WRITE tool result 投影只含 safe 字段（无绝对路径 / DB id / lease / capability）
+  ---
+  duration_ms: 546.940083
+  type: 'test'
+  ...
+# (node:89609) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Production assembly：主进程绝不执行 write；受监督 executor runtime 完成 exactly-once + verified SUCCEEDED
+ok 191 - Production assembly：主进程绝不执行 write；受监督 executor runtime 完成 exactly-once + verified SUCCEEDED
+  ---
+  duration_ms: 1195.629292
+  type: 'test'
+  ...
+# Subtest: RuntimeSupervisor：executor ACTIVE 时不得 quiesced；真实进程退出后自动成为 quiescence proof（测试不调用 observeExit）
+ok 192 - RuntimeSupervisor：executor ACTIVE 时不得 quiesced；真实进程退出后自动成为 quiescence proof（测试不调用 observeExit）
+  ---
+  duration_ms: 1468.03725
+  type: 'test'
+  ...
+# Subtest: Two live runtimes：live 旧 runtime 的 late mutation → restart quiescence → APPLIED → SUCCEEDED；0 second execution
+ok 193 - Two live runtimes：live 旧 runtime 的 late mutation → restart quiescence → APPLIED → SUCCEEDED；0 second execution
+  ---
+  duration_ms: 1312.984833
+  type: 'test'
+  ...
+# Subtest: TIMEout → 真实进程死亡（mutation 未发生）→ NOT_APPLIED → FAILED；Task/Step 保持 BLOCKED；0 retry
+ok 194 - TIMEout → 真实进程死亡（mutation 未发生）→ NOT_APPLIED → FAILED；Task/Step 保持 BLOCKED；0 retry
+  ---
+  duration_ms: 1176.51725
+  type: 'test'
+  ...
+# Subtest: Restart After Claim：RUNNING cold crash → 新 runtime 无 live death proof（persisted EXITED 不是 authority）→ NOT_APPLIED 保持 UNKNOWN_EFFECT + BLOCK
+ok 195 - Restart After Claim：RUNNING cold crash → 新 runtime 无 live death proof（persisted EXITED 不是 authority）→ NOT_APPLIED 保持 UNKNOWN_EFFECT + BLOCK
+  ---
+  duration_ms: 921.905291
+  type: 'test'
+  ...
+# Subtest: Cold restart rehydrate：pathname probe 只回答 reachability；persisted EXITED 无 death authority（只有真 child exit 才 quiesce）
+ok 196 - Cold restart rehydrate：pathname probe 只回答 reachability；persisted EXITED 无 death authority（只有真 child exit 才 quiesce）
+  ---
+  duration_ms: 127.873958
+  type: 'test'
+  ...
+# Subtest: observeExit / registerRuntime 不导出给 authority / Harness / IPC / Tool Facade
+ok 197 - observeExit / registerRuntime 不导出给 authority / Harness / IPC / Tool Facade
+  ---
+  duration_ms: 751.873459
+  type: 'test'
+  ...
+# Subtest: Restart While WAITING_APPROVAL：pending call → BLOCKED；0 lease / 0 execution / 0 mutation / 0 auto approve
+ok 198 - Restart While WAITING_APPROVAL：pending call → BLOCKED；0 lease / 0 execution / 0 mutation / 0 auto approve
+  ---
+  duration_ms: 790.833292
+  type: 'test'
+  ...
+# Subtest: Restart After APPROVED Before Lease：0 automatic execution
+ok 199 - Restart After APPROVED Before Lease：0 automatic execution
+  ---
+  duration_ms: 695.61125
+  type: 'test'
+  ...
+# Subtest: Restart After Lease Before Claim：旧 lease 不能被新 runtime replay；0 execution
+ok 200 - Restart After Lease Before Claim：旧 lease 不能被新 runtime replay；0 execution
+  ---
+  duration_ms: 750.760583
+  type: 'test'
+  ...
+# Subtest: C4 runtime secret scan：SideEffectCall / Approval / Lease / runtime evidence / TaskEvent 0 leak
+ok 201 - C4 runtime secret scan：SideEffectCall / Approval / Lease / runtime evidence / TaskEvent 0 leak
+  ---
+  duration_ms: 707.727833
+  type: 'test'
+  ...
+# Subtest: effectClassForRisk：READ_ONLY 不是 side effect；write 族一一对应
+ok 202 - effectClassForRisk：READ_ONLY 不是 side effect；write 族一一对应
+  ---
+  duration_ms: 0.487042
+  type: 'test'
+  ...
+# Subtest: call 状态机：最多 LEASED；RUNNING→UNKNOWN_EFFECT；终态不可逆
+ok 203 - call 状态机：最多 LEASED；RUNNING→UNKNOWN_EFFECT；终态不可逆
+  ---
+  duration_ms: 0.099167
+  type: 'test'
+  ...
+# Subtest: planHash / idempotencyKey：plan 或 args 改变即改变
+ok 204 - planHash / idempotencyKey：plan 或 args 改变即改变
+  ---
+  duration_ms: 0.545958
+  type: 'test'
+  ...
+# Subtest: evaluateExecutionEligibility：纯函数逐 gate 判定
+ok 205 - evaluateExecutionEligibility：纯函数逐 gate 判定
+  ---
+  duration_ms: 0.554583
+  type: 'test'
+  ...
+# (node:89668) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 同 call 重复 eligibility → 状态一致，0 新 call / 0 新 lease / 0 Domain
+ok 206 - 同 call 重复 eligibility → 状态一致，0 新 call / 0 新 lease / 0 Domain
+  ---
+  duration_ms: 827.245291
+  type: 'test'
+  ...
+# Subtest: 同 call 重复 acquire → duplicate，仍然只有 1 个 ACTIVE authority
+ok 207 - 同 call 重复 acquire → duplicate，仍然只有 1 个 ACTIVE authority
+  ---
+  duration_ms: 820.666458
+  type: 'test'
+  ...
+# Subtest: 同一 idempotency key 不能绑定不同 arguments；相同 binding 幂等
+ok 208 - 同一 idempotency key 不能绑定不同 arguments；相同 binding 幂等
+  ---
+  duration_ms: 884.425666
+  type: 'test'
+  ...
+# Subtest: 新 proposal 语义相同 write → 新 call（不自动合并），但只有按 call 的 authority
+ok 209 - 新 proposal 语义相同 write → 新 call（不自动合并），但只有按 call 的 authority
+  ---
+  duration_ms: 742.35725
+  type: 'test'
+  ...
+# (node:89669) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: acquire：唯一 ACTIVE lease，call → LEASED
+ok 210 - acquire：唯一 ACTIVE lease，call → LEASED
+  ---
+  duration_ms: 861.270959
+  type: 'test'
+  ...
+# Subtest: release：LEASE_RELEASED，call 回到 APPROVED，0 Domain mutation
+ok 211 - release：LEASE_RELEASED，call 回到 APPROVED，0 Domain mutation
+  ---
+  duration_ms: 788.711875
+  type: 'test'
+  ...
+# Subtest: double acquire 同 holder → duplicate；并发不同 holder → 只一个成功 LEASE_CONFLICT
+ok 212 - double acquire 同 holder → duplicate；并发不同 holder → 只一个成功 LEASE_CONFLICT
+  ---
+  duration_ms: 804.5955
+  type: 'test'
+  ...
+# Subtest: wrong holder / wrong call → LEASE_NOT_HELD
+ok 213 - wrong holder / wrong call → LEASE_NOT_HELD
+  ---
+  duration_ms: 738.1625
+  type: 'test'
+  ...
+# Subtest: expired lease → eligibility LEASE_EXPIRED
+ok 214 - expired lease → eligibility LEASE_EXPIRED
+  ---
+  duration_ms: 690.406834
+  type: 'test'
+  ...
+# Subtest: Approval != Lease：有 Approval 无 Lease 不能执行；无 Approval 不能 acquire
+ok 215 - Approval != Lease：有 Approval 无 Lease 不能执行；无 Approval 不能 acquire
+  ---
+  duration_ms: 1545.54175
+  type: 'test'
+  ...
+# Subtest: expired approval + valid lease → APPROVAL_EXPIRED（lease 不能盖过 approval）
+ok 216 - expired approval + valid lease → APPROVAL_EXPIRED（lease 不能盖过 approval）
+  ---
+  duration_ms: 750.030583
+  type: 'test'
+  ...
+# Subtest: valid approval + expired lease → LEASE_REQUIRED
+ok 217 - valid approval + expired lease → LEASE_REQUIRED
+  ---
+  duration_ms: 683.115875
+  type: 'test'
+  ...
+# Subtest: revokeLease → REVOKED，eligibility 不再 ELIGIBLE
+ok 218 - revokeLease → REVOKED，eligibility 不再 ELIGIBLE
+  ---
+  duration_ms: 704.598792
+  type: 'test'
+  ...
+# (node:89672) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: v12 -> current：side_effect_calls / tool_approvals / side_effect_leases 建立，旧数据完整
+ok 219 - v12 -> current：side_effect_calls / tool_approvals / side_effect_leases 建立，旧数据完整
+  ---
+  duration_ms: 895.595375
+  type: 'test'
+  ...
+# Subtest: v12 迁移失败 -> 整级回滚：user_version 停 12，v13/v14 结构不残留
+ok 220 - v12 迁移失败 -> 整级回滚：user_version 停 12，v13/v14 结构不残留
+  ---
+  duration_ms: 910.941791
+  type: 'test'
+  ...
+# Subtest: v13 -> v14：recovery_safe 列建立，旧数据完整
+ok 221 - v13 -> v14：recovery_safe 列建立，旧数据完整
+  ---
+  duration_ms: 810.995291
+  type: 'test'
+  ...
+# Subtest: v14 迁移失败 -> 整级回滚：user_version 停 13，recovery_safe 不残留
+ok 222 - v14 迁移失败 -> 整级回滚：user_version 停 13，recovery_safe 不残留
+  ---
+  duration_ms: 837.558167
+  type: 'test'
+  ...
+# (node:89678) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 真实 contention：两个独立 executor 同时 acquire 同一 call → 恰好 1 winner / 1 CONFLICT / 1 ACTIVE
+ok 223 - 真实 contention：两个独立 executor 同时 acquire 同一 call → 恰好 1 winner / 1 CONFLICT / 1 ACTIVE
+  ---
+  duration_ms: 1063.85275
+  type: 'test'
+  ...
+# (node:89683) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 真实 restart：RUNNING → UNKNOWN_EFFECT，Step/Task BLOCKED，旧 lease EXPIRED，0 replay / 0 retry / 0 execution
+ok 224 - 真实 restart：RUNNING → UNKNOWN_EFFECT，Step/Task BLOCKED，旧 lease EXPIRED，0 replay / 0 retry / 0 execution
+  ---
+  duration_ms: 798.966167
+  type: 'test'
+  ...
+# Subtest: Crash-before-RUNNING：APPROVED/LEASED 不进入 UNKNOWN_EFFECT，旧 lease EXPIRED，可重新 acquire
+ok 225 - Crash-before-RUNNING：APPROVED/LEASED 不进入 UNKNOWN_EFFECT，旧 lease EXPIRED，可重新 acquire
+  ---
+  duration_ms: 796.563791
+  type: 'test'
+  ...
+# Subtest: Recovery fail closed：TaskService 不可用时仍保持 UNKNOWN_EFFECT，绝不回退/重试
+ok 226 - Recovery fail closed：TaskService 不可用时仍保持 UNKNOWN_EFFECT，绝不回退/重试
+  ---
+  duration_ms: 759.655458
+  type: 'test'
+  ...
+# (node:89686) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: restart：旧进程 ACTIVE lease → EXPIRED，旧 holder 不能执行，必须重新 acquire
+ok 227 - restart：旧进程 ACTIVE lease → EXPIRED，旧 holder 不能执行，必须重新 acquire
+  ---
+  duration_ms: 862.827167
+  type: 'test'
+  ...
+# Subtest: RUNNING-after-crash → UNKNOWN_EFFECT（不是 FAILED/PLANNED/RUNNING）+ event + 0 execution
+ok 228 - RUNNING-after-crash → UNKNOWN_EFFECT（不是 FAILED/PLANNED/RUNNING）+ event + 0 execution
+  ---
+  duration_ms: 741.428417
+  type: 'test'
+  ...
+# Subtest: Crash before RUNNING：APPROVED/LEASED 不进入 UNKNOWN_EFFECT，可安全 release/reacquire
+ok 229 - Crash before RUNNING：APPROVED/LEASED 不进入 UNKNOWN_EFFECT，可安全 release/reacquire
+  ---
+  duration_ms: 803.322041
+  type: 'test'
+  ...
+# Subtest: verifyUnknownEffect：无 verifier → VERIFICATION_NOT_AVAILABLE 且保持 UNKNOWN_EFFECT
+ok 230 - verifyUnknownEffect：无 verifier → VERIFICATION_NOT_AVAILABLE 且保持 UNKNOWN_EFFECT
+  ---
+  duration_ms: 729.771416
+  type: 'test'
+  ...
+# Subtest: verifyUnknownEffect：走 allowlisted adapter 的 read-only recovery verifier（APPLIED → SUCCEEDED，NOT_APPLIED + quiesced → FAILED）
+ok 231 - verifyUnknownEffect：走 allowlisted adapter 的 read-only recovery verifier（APPLIED → SUCCEEDED，NOT_APPLIED + quiesced → FAILED）
+  ---
+  duration_ms: 1387.364834
+  type: 'test'
+  ...
+# Subtest: no auto retry：recovery 不得产生第二次 authority / execution
+ok 232 - no auto retry：recovery 不得产生第二次 authority / execution
+  ---
+  duration_ms: 693.312791
+  type: 'test'
+  ...
+# (node:89691) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Harness spoof：approved/approvalId/leaseId/callId/idempotencyKey/effectClass → TOOL_ARGUMENT_INVALID，0 call
+ok 233 - Harness spoof：approved/approvalId/leaseId/callId/idempotencyKey/effectClass → TOOL_ARGUMENT_INVALID，0 call
+  ---
+  duration_ms: 766.87725
+  type: 'test'
+  ...
+# Subtest: OpenArc 生成 callId/idempotencyKey/expectedEffects；Harness 只提供 args
+ok 234 - OpenArc 生成 callId/idempotencyKey/expectedEffects；Harness 只提供 args
+  ---
+  duration_ms: 733.045833
+  type: 'test'
+  ...
+# Subtest: WRITE execution boundary：executeSideEffect / executeReadOnly 都 WRITE_EXECUTION_DISABLED + 0 mutation
+ok 235 - WRITE execution boundary：executeSideEffect / executeReadOnly 都 WRITE_EXECUTION_DISABLED + 0 mutation
+  ---
+  duration_ms: 726.663292
+  type: 'test'
+  ...
+# Subtest: Session revoke → eligibility AUTHORIZATION_REVOKED
+ok 236 - Session revoke → eligibility AUTHORIZATION_REVOKED
+  ---
+  duration_ms: 699.297125
+  type: 'test'
+  ...
+# Subtest: App disable → eligibility APP_DISABLED
+ok 237 - App disable → eligibility APP_DISABLED
+  ---
+  duration_ms: 691.233584
+  type: 'test'
+  ...
+# Subtest: Permission revoke（tool grant）→ eligibility AUTHORIZATION_REVOKED
+ok 238 - Permission revoke（tool grant）→ eligibility AUTHORIZATION_REVOKED
+  ---
+  duration_ms: 705.168208
+  type: 'test'
+  ...
+# Subtest: useByAgent 缺失 → eligibility AUTHORIZATION_REVOKED（read 仍有效）
+ok 239 - useByAgent 缺失 → eligibility AUTHORIZATION_REVOKED（read 仍有效）
+  ---
+  duration_ms: 624.389125
+  type: 'test'
+  ...
+# Subtest: Task cancel → eligibility TASK_CANCELLED
+ok 240 - Task cancel → eligibility TASK_CANCELLED
+  ---
+  duration_ms: 554.682041
+  type: 'test'
+  ...
+# Subtest: Stale run → eligibility SIDE_EFFECT_STALE_RUN
+ok 241 - Stale run → eligibility SIDE_EFFECT_STALE_RUN
+  ---
+  duration_ms: 585.782709
+  type: 'test'
+  ...
+# Subtest: Tool disabled → planSideEffect TOOL_DISABLED
+ok 242 - Tool disabled → planSideEffect TOOL_DISABLED
+  ---
+  duration_ms: 564.883791
+  type: 'test'
+  ...
+# Subtest: Secret scan：Provider Secret / mpx_ / tpx_ / 绝对路径 / store root 0 hit
+ok 243 - Secret scan：Provider Secret / mpx_ / tpx_ / 绝对路径 / store root 0 hit
+  ---
+  duration_ms: 579.157
+  type: 'test'
+  ...
+# (node:89693) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: E2E：resource.trash 真实闭环 Proposal→APPROVAL_REQUIRED→Plan→Approve→Lease→ELIGIBLE→claim→delete→verify→SUCCEEDED
+ok 244 - E2E：resource.trash 真实闭环 Proposal→APPROVAL_REQUIRED→Plan→Approve→Lease→ELIGIBLE→claim→delete→verify→SUCCEEDED
+  ---
+  duration_ms: 892.499125
+  type: 'test'
+  ...
+# Subtest: Reversibility evidence：真实 ResourceService.restore() 证明 trash 可恢复（不开放 restore Tool）
+ok 245 - Reversibility evidence：真实 ResourceService.restore() 证明 trash 可恢复（不开放 restore Tool）
+  ---
+  duration_ms: 779.605667
+  type: 'test'
+  ...
+# Subtest: Verification 是必须的：verifier 报未生效 → FAILED + verificationStatus FAIL + 0 retry
+ok 246 - Verification 是必须的：verifier 报未生效 → FAILED + verificationStatus FAIL + 0 retry
+  ---
+  duration_ms: 721.544083
+  type: 'test'
+  ...
+# Subtest: Verifier 不可用（无法判断是否发生）→ UNKNOWN_EFFECT + Task/Step BLOCKED + 0 retry
+ok 247 - Verifier 不可用（无法判断是否发生）→ UNKNOWN_EFFECT + Task/Step BLOCKED + 0 retry
+  ---
+  duration_ms: 733.031625
+  type: 'test'
+  ...
+# Subtest: Duplicate execute：同一 callId/leaseId/holderId/holderInstanceId 执行两次 → 只 1 次 Domain mutation
+ok 248 - Duplicate execute：同一 callId/leaseId/holderId/holderInstanceId 执行两次 → 只 1 次 Domain mutation
+  ---
+  duration_ms: 635.037917
+  type: 'test'
+  ...
+# Subtest: Business optimistic concurrency：plan 后 Resource version 变化 → 0 mutation + PRECONDITION_CHANGED
+ok 249 - Business optimistic concurrency：plan 后 Resource version 变化 → 0 mutation + PRECONDITION_CHANGED
+  ---
+  duration_ms: 575.931042
+  type: 'test'
+  ...
+# Subtest: §20 production exposure boundary：只有 resource.trash 可执行；test.write 等仍 WRITE_EXECUTION_DISABLED
+ok 250 - §20 production exposure boundary：只有 resource.trash 可执行；test.write 等仍 WRITE_EXECUTION_DISABLED
+  ---
+  duration_ms: 591.930042
+  type: 'test'
+  ...
+# Subtest: Secret scan：C2 产物不含 Provider Secret / mpx_ / tpx_ / 绝对路径 / store root
+ok 251 - Secret scan：C2 产物不含 Provider Secret / mpx_ / tpx_ / 绝对路径 / store root
+  ---
+  duration_ms: 586.154459
+  type: 'test'
+  ...
+# Subtest: Crash boundary 不退化：C2 执行路径存在后，RUNNING→restart 仍 UNKNOWN_EFFECT + 0 replay
+ok 252 - Crash boundary 不退化：C2 执行路径存在后，RUNNING→restart 仍 UNKNOWN_EFFECT + 0 replay
+  ---
+  duration_ms: 598.244459
+  type: 'test'
+  ...
+# (node:89694) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: No approval → 0 mutation
+ok 253 - No approval → 0 mutation
+  ---
+  duration_ms: 817.535833
+  type: 'test'
+  ...
+# Subtest: Approval expired → 0 mutation
+ok 254 - Approval expired → 0 mutation
+  ---
+  duration_ms: 733.436667
+  type: 'test'
+  ...
+# Subtest: Approval revoke → call BLOCKED/APPROVAL_REVOKED、lease 收敛、0 mutation
+ok 255 - Approval revoke → call BLOCKED/APPROVAL_REVOKED、lease 收敛、0 mutation
+  ---
+  duration_ms: 739.431792
+  type: 'test'
+  ...
+# Subtest: No lease → 0 mutation
+ok 256 - No lease → 0 mutation
+  ---
+  duration_ms: 707.878167
+  type: 'test'
+  ...
+# Subtest: Wrong holder → 0 mutation
+ok 257 - Wrong holder → 0 mutation
+  ---
+  duration_ms: 610.121
+  type: 'test'
+  ...
+# Subtest: Lease expire → 0 mutation
+ok 258 - Lease expire → 0 mutation
+  ---
+  duration_ms: 561.639375
+  type: 'test'
+  ...
+# Subtest: Lease revoke → 0 mutation
+ok 259 - Lease revoke → 0 mutation
+  ---
+  duration_ms: 612.538875
+  type: 'test'
+  ...
+# Subtest: Wrong leaseId → 0 mutation
+ok 260 - Wrong leaseId → 0 mutation
+  ---
+  duration_ms: 594.968959
+  type: 'test'
+  ...
+# Subtest: Task cancelled → 0 mutation
+ok 261 - Task cancelled → 0 mutation
+  ---
+  duration_ms: 601.365583
+  type: 'test'
+  ...
+# Subtest: Session revoked → 0 mutation
+ok 262 - Session revoked → 0 mutation
+  ---
+  duration_ms: 526.395791
+  type: 'test'
+  ...
+# Subtest: App disable → 0 mutation
+ok 263 - App disable → 0 mutation
+  ---
+  duration_ms: 490.385583
+  type: 'test'
+  ...
+# Subtest: Tool permission revoke → 0 mutation
+ok 264 - Tool permission revoke → 0 mutation
+  ---
+  duration_ms: 478.665291
+  type: 'test'
+  ...
+# Subtest: Resource permission revoked（USER grant, non-admin）→ 0 mutation
+ok 265 - Resource permission revoked（USER grant, non-admin）→ 0 mutation
+  ---
+  duration_ms: 465.457875
+  type: 'test'
+  ...
+# Subtest: Tool disabled → 0 mutation
+ok 266 - Tool disabled → 0 mutation
+  ---
+  duration_ms: 467.374375
+  type: 'test'
+  ...
+# Subtest: Tool version change → 0 mutation
+ok 267 - Tool version change → 0 mutation
+  ---
+  duration_ms: 456.6835
+  type: 'test'
+  ...
+# Subtest: Stale run → 0 mutation
+ok 268 - Stale run → 0 mutation
+  ---
+  duration_ms: 450.219458
+  type: 'test'
+  ...
+# Subtest: Plan / approval binding changed（planHash 不匹配）→ 0 mutation
+ok 269 - Plan / approval binding changed（planHash 不匹配）→ 0 mutation
+  ---
+  duration_ms: 459.710916
+  type: 'test'
+  ...
+# Subtest: Resource version / precondition changed → 0 mutation
+ok 270 - Resource version / precondition changed → 0 mutation
+  ---
+  duration_ms: 449.2925
+  type: 'test'
+  ...
+# Subtest: Unsupported effectClass（IRREVERSIBLE / EXTERNAL / PRIVILEGED）→ 0 call / 0 mutation
+ok 271 - Unsupported effectClass（IRREVERSIBLE / EXTERNAL / PRIVILEGED）→ 0 call / 0 mutation
+  ---
+  duration_ms: 451.818
+  type: 'test'
+  ...
+# Subtest: Harness spoof on resource.trash → TOOL_ARGUMENT_INVALID / 0 call / 0 mutation
+ok 272 - Harness spoof on resource.trash → TOOL_ARGUMENT_INVALID / 0 call / 0 mutation
+  ---
+  duration_ms: 466.874667
+  type: 'test'
+  ...
+1..272
+# tests 278
+# suites 0
+# pass 278
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 78686.344042
+# --- end raw output ---
+# EXIT CODE: 0

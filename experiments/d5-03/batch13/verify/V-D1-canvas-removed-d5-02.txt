@@ -1,0 +1,37 @@
+TAP version 13
+# (node:95107) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: D5-02 · Registry：canvas.read / canvas.edit 权限、审批与执行类
+ok 1 - D5-02 · Registry：canvas.read / canvas.edit 权限、审批与执行类
+  ---
+  duration_ms: 1.229583
+  type: 'test'
+  ...
+# Subtest: D5-02 · CanvasControl adapter：plan 带基准版本，execute 用 plan，verify 读回确认
+ok 2 - D5-02 · CanvasControl adapter：plan 带基准版本，execute 用 plan，verify 读回确认
+  ---
+  duration_ms: 406.490541
+  type: 'test'
+  ...
+# Subtest: D5-02 · A38：批准后用户先改了 → AI 执行被版本检查拒绝（不覆盖用户内容）
+ok 3 - D5-02 · A38：批准后用户先改了 → AI 执行被版本检查拒绝（不覆盖用户内容）
+  ---
+  duration_ms: 388.236417
+  type: 'test'
+  ...
+# Subtest: D5-02 · A28：只读成员时 AI 工具执行被同一条权限规则拒绝
+ok 4 - D5-02 · A28：只读成员时 AI 工具执行被同一条权限规则拒绝
+  ---
+  duration_ms: 387.488083
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1250.379083
+EXIT=0

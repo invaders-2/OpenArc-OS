@@ -1,0 +1,35 @@
+$ node experiments/d5-03/batch13/red/inprocess-bypass.mjs
+# NOTE: 负向自证 A —— 临时把 "ResourceService" 加入 IN_PROCESS_EXECUTION_PROVIDERS（白名单放宽）
+# cwd: /Users/wepingli/Desktop/OpenArc OS-integration
+# git HEAD: 312dc606fee9d9c147a9d863fba7fe504961ab26
+# date: 2026-09-29T15:52:55Z
+# --- begin raw stdout+stderr ---
+(node:90462) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+propose.ok: true
+callId: scall_ZcM_7IwOac7fww
+contract.executionProvider: ResourceService
+approve.ok: true
+call.status.afterApprove: APPROVED
+before.domain: {"preconditionTrashed":false,"preconditionRegistryStatus":"active","preconditionVersion":1,"libraryTrashState":"ACTIVE","libraryDeletedAt":null,"registryStatus":"active"}
+before.deleteCalls: 0
+before.leaseCount: 0
+before.activeLeaseCount: 0
+before.auditCount: 6
+res.ok: true
+res.error: null
+res.inProcess: true
+res.call.status: SUCCEEDED
+after.domain: {"preconditionTrashed":true,"preconditionRegistryStatus":"deleted","preconditionVersion":1,"libraryTrashState":"TRASHED","libraryDeletedAt":1700000000000,"registryStatus":"deleted"}
+after.deleteCalls: 1
+after.leaseCount: 1
+after.activeLeaseCount: 0
+after.auditCount: 12
+call.status.final: SUCCEEDED
+domainMutated: true
+audit.placementRows: [{"action":"side_effect.execution_placement","decision":"IN_PROCESS","reasonCode":"PROCESS_LOCAL_DOMAIN"}]
+verdict.bypassProven: true
+verdict.guardHeld: false
+verdict: RED_BYPASS_PROVEN
+# --- end raw output ---
+# EXIT CODE: 0

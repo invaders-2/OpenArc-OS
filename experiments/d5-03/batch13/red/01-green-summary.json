@@ -1,0 +1,51 @@
+{
+  "probe": "inprocess-bypass",
+  "toolId": "resource.trash",
+  "callId": "scall_nSCKpGKQOExdhA",
+  "executionProvider": "ResourceService",
+  "directExecuteInProcess": true,
+  "res": {
+    "ok": false,
+    "error": "SIDE_EFFECT_IN_PROCESS_NOT_PERMITTED",
+    "inProcess": false,
+    "callStatus": "APPROVED"
+  },
+  "before": {
+    "domain": {
+      "preconditionTrashed": false,
+      "preconditionRegistryStatus": "active",
+      "preconditionVersion": 1,
+      "libraryTrashState": "ACTIVE",
+      "libraryDeletedAt": null,
+      "registryStatus": "active"
+    },
+    "deleteCalls": 0,
+    "leaseCount": 0,
+    "activeLeaseCount": 0,
+    "auditCount": 6
+  },
+  "after": {
+    "domain": {
+      "preconditionTrashed": false,
+      "preconditionRegistryStatus": "active",
+      "preconditionVersion": 1,
+      "libraryTrashState": "ACTIVE",
+      "libraryDeletedAt": null,
+      "registryStatus": "active"
+    },
+    "deleteCalls": 0,
+    "leaseCount": 0,
+    "activeLeaseCount": 0,
+    "auditCount": 7
+  },
+  "callStatusFinal": "APPROVED",
+  "domainMutated": false,
+  "placementAudits": [
+    {
+      "action": "side_effect.execution_placement",
+      "decision": "DENY",
+      "reasonCode": "IN_PROCESS_NOT_PERMITTED"
+    }
+  ],
+  "verdict": "GREEN_GUARD_HELD"
+}

@@ -1,0 +1,27 @@
+(node:86523) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+propose.ok: true
+callId: scall_nSCKpGKQOExdhA
+contract.executionProvider: ResourceService
+approve.ok: true
+call.status.afterApprove: APPROVED
+before.domain: {"preconditionTrashed":false,"preconditionRegistryStatus":"active","preconditionVersion":1,"libraryTrashState":"ACTIVE","libraryDeletedAt":null,"registryStatus":"active"}
+before.deleteCalls: 0
+before.leaseCount: 0
+before.activeLeaseCount: 0
+before.auditCount: 6
+res.ok: false
+res.error: SIDE_EFFECT_IN_PROCESS_NOT_PERMITTED
+res.inProcess: false
+res.call.status: APPROVED
+after.domain: {"preconditionTrashed":false,"preconditionRegistryStatus":"active","preconditionVersion":1,"libraryTrashState":"ACTIVE","libraryDeletedAt":null,"registryStatus":"active"}
+after.deleteCalls: 0
+after.leaseCount: 0
+after.activeLeaseCount: 0
+after.auditCount: 7
+call.status.final: APPROVED
+domainMutated: false
+audit.placementRows: [{"action":"side_effect.execution_placement","decision":"DENY","reasonCode":"IN_PROCESS_NOT_PERMITTED"}]
+verdict.bypassProven: false
+verdict.guardHeld: true
+verdict: GREEN_GUARD_HELD

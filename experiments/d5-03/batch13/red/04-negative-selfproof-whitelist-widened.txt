@@ -1,0 +1,46 @@
+=== 负向自证：把 ResourceService 加进 in-process 白名单，门禁必须变红 ===
+TAP version 13
+# Subtest: No Direct Domain Bypass：resource.trash 的唯一 Domain 调用点在 allowlisted adapter + controlled execution 内
+not ok 1 - No Direct Domain Bypass：resource.trash 的唯一 Domain 调用点在 allowlisted adapter + controlled execution 内
+  ---
+  duration_ms: 3.324375
+  type: 'test'
+  location: '/Users/wepingli/Desktop/OpenArc OS-integration/tests/side-effect-c4-gates.test.mjs:445:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    in-process 白名单必须恰好等于 BrowserControl + CanvasControl
+    + actual - expected
+    
+      [
+        'BrowserControl',
+        'CanvasControl',
+    +   'ResourceService'
+      ]
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    0: 'BrowserControl'
+    1: 'CanvasControl'
+  actual:
+    0: 'BrowserControl'
+    1: 'CanvasControl'
+    2: 'ResourceService'
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Users/wepingli/Desktop/OpenArc%20OS-integration/tests/side-effect-c4-gates.test.mjs:480:10)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.start (node:internal/test_runner/test:944:17)
+    startSubtestAfterBootstrap (node:internal/test_runner/harness:296:17)
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 0
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 78.912042
+[exit=1]
