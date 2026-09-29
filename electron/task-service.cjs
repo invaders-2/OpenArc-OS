@@ -421,6 +421,42 @@ class TaskService {
     return this.#callCommand({ context, taskId, callId, expectedRevision, to: "FAILED", event: TASK_EVENT.MODEL_CALL_FAILED, patch: ({ now }) => Object.assign({ status: "FAILED", completed_at: now, provider_error_code: providerErrorCode }, requestId ? { request_id: requestId } : {}) });
   }
 
+  /**
+   * D5-03 第十二批 · 用户取消的账本终态：call = CANCELLED，**绝不写成 Provider 失败**。
+   *
+   * 边界（每一条都是硬约束）：
+   *   · 只收敛**本次任务**里仍为 `STARTED` 的 call —— 已 SUCCEEDED / FAILED / CANCELLED 的历史行
+   *     一律原样保留（`#callCommand` 的 `status !== "STARTED"` 前置判定就是这条守卫）；
+   *   · 保留已观测到的真实用量（`usage` 原样落库），**不声称 Provider 从未执行 / 从未计费**；
+   *   · 与取消同一事务：call 终态、`completed_at`、安全事件一起落，绝不出现半个终态；
+   *   · 不新增 call、不改写其它任务的 call（按 task 归属过滤）。
+   */
+  cancelStartedModelCalls({ context, taskId, expectedRevision, usageByCallId = null } = {}) {
+    const guard = this.#guard(context);
+    if (!guard.ok) return guard;
+    return this.store.transactSync(() => {
+      const load = this.#load(guard, taskId);
+      if (!load.ok) return load;
+      let task = load.task;
+      const conflict = this.#conflict(task, expectedRevision);
+      if (conflict) return conflict;
+      const now = this.#now();
+      const finalized = [];
+      for (const call of this.store.callsOfTask(task.task_id)) {
+        if (call.status !== "STARTED") continue;
+        const usage = usageByCallId && usageByCallId[call.call_id] != null ? usageByCallId[call.call_id] : null;
+        const patch = { status: "CANCELLED", completed_at: now };
+        if (usage != null) patch.usage = usage;
+        this.store.updateCall(call.call_id, patch);
+        this.store.appendEvent({ taskId: task.task_id, eventType: TASK_EVENT.MODEL_CALL_CANCELLED, safePayload: sanitizeEventPayload({ callId: call.call_id, status: "CANCELLED", usageRecorded: usage != null }), at: now });
+        finalized.push(call.call_id);
+      }
+      if (!finalized.length) return { ok: true, changed: false, canceled: [], task: safeTask(task) };
+      task = this.store.updateTask(task.task_id, { updated_at: now, revision: task.revision + 1 });
+      return { ok: true, changed: true, canceled: finalized, task: safeTask(task) };
+    });
+  }
+
   // ------------------------------------------------------------------ Read
   getTask({ context, taskId } = {}) {
     const guard = this.#guard(context);

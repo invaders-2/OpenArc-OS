@@ -290,11 +290,14 @@ class TaskHarnessOrchestrator {
         const failure = this.#promptFailure(adapter, e);
         const failedCall = svc.failModelCall({ context, taskId, callId, providerErrorCode: failure.code, requestId: modelRequestId, expectedRevision: task.revision });
         const failRev = failedCall.ok ? failedCall.task.revision : task.revision;
-        if (failure.code === ERROR.HARNESS_CANCELLED) return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: failRev });
+        if (failure.code === ERROR.HARNESS_CANCELLED) return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: failRev, callUsage: this.#callUsageFor(callId) });
         return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: failure.code, event: failure.event, payload: failure.payload, expectedRevision: failRev });
       }
 
       let rawEvents = Array.isArray(res.events) ? res.events : [];
+      // D5-03 第十二批：本 turn 已观测到的真实用量先记账 —— 取消路径要保留它，
+      // 绝不声称「Provider 从未执行 / 从未计费」。
+      this.#rememberCallUsage(callId, summarizeUsage(rawEvents));
       // D4 收口：首个 prompt 成功后工具预算真实耗尽 → 立即停止，绝不当成成功收敛。
       const toolBudgetFirst = this.#toolBudgetExhausted(adapter);
       if (toolBudgetFirst) {
@@ -324,7 +327,7 @@ class TaskHarnessOrchestrator {
             const failure = this.#promptFailure(adapter, e);
             const failedCall = svc.failModelCall({ context, taskId, callId, providerErrorCode: failure.code, requestId: modelRequestId, expectedRevision: task.revision });
             const failRev = failedCall.ok ? failedCall.task.revision : task.revision;
-            if (failure.code === ERROR.HARNESS_CANCELLED) return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: failRev });
+            if (failure.code === ERROR.HARNESS_CANCELLED) return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: failRev, callUsage: this.#callUsageFor(callId) });
             return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: failure.code, event: failure.event, payload: failure.payload, expectedRevision: failRev });
           }
           res = next;
@@ -393,7 +396,7 @@ class TaskHarnessOrchestrator {
             const failure = this.#promptFailure(adapter, e);
             const failedCall = svc.failModelCall({ context, taskId, callId, providerErrorCode: failure.code, requestId: modelRequestId, expectedRevision: task.revision });
             const failRev = failedCall.ok ? failedCall.task.revision : task.revision;
-            if (failure.code === ERROR.HARNESS_CANCELLED) return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: failRev });
+            if (failure.code === ERROR.HARNESS_CANCELLED) return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: failRev, callUsage: this.#callUsageFor(callId) });
             return await this.#blockStep({ context, taskId, stepId, runId: run.runId, reason: failure.code, event: failure.event, payload: failure.payload, expectedRevision: failRev });
           }
           res = next;
@@ -415,11 +418,16 @@ class TaskHarnessOrchestrator {
       }
 
       const hasPermission = rawEvents.some((e) => e && (e.type === "permission.requested" || e.type === "permission.rejected"));
+      // D5-03 第十二批：取消优先 —— 已取消的 turn 绝不把 call 写成 SUCCEEDED（否则与取消终态矛盾）；
+      // call 的取消终态由 #finalizeCancelled 统一落，用量证据已在上面记下。
+      const latest0 = svc.getTask({ context, taskId });
+      const cancelled0 = (latest0.ok && latest0.task.cancelRequested) || res.stopReason === "cancelled";
+      if (cancelled0) return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: task.revision, callUsage: this.#callUsageFor(callId) });
       const callDone = svc.completeModelCall({ context, taskId, callId, usage: usage || null, requestId: modelRequestId, expectedRevision: task.revision });
       if (callDone.ok) task = callDone.task;
       const latest = svc.getTask({ context, taskId });
       const cancelled = (latest.ok && latest.task.cancelRequested) || res.stopReason === "cancelled";
-      if (cancelled) return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: task.revision });
+      if (cancelled) return await this.#finalizeCancelled({ context, taskId, runId: run.runId, expectedRevision: this.#rev(context, taskId, task.revision), callUsage: this.#callUsageFor(callId) });
       if (hasPermission) {
         await this.#recordEvents({ context, taskId, runId: run.runId, events: mapped.events, expectedRevision: task.revision, task });
         const fresh = svc.getTask({ context, taskId });
@@ -541,6 +549,19 @@ class TaskHarnessOrchestrator {
   }
 
   #rev(context, taskId, fallback) { const t = this.#service().getTask({ context, taskId }); return t.ok ? t.task.revision : fallback; }
+
+  /** D5-03 第十二批：本次 run 内已观测到的真实 usage（按 callId），只用于取消路径保留证据。 */
+  #rememberCallUsage(callId, usage) {
+    if (!callId || !usage) return;
+    if (!this.callUsageByCall) this.callUsageByCall = new Map();
+    this.callUsageByCall.set(callId, usage);
+  }
+
+  #callUsageFor(callId) {
+    if (!callId || !this.callUsageByCall) return null;
+    const usage = this.callUsageByCall.get(callId);
+    return usage ? { [callId]: usage } : null;
+  }
 
   /**
    * D4-06 Closure：只有 Harness 自报的失败 + 真实 capability 预算状态才能得出 BUDGET_EXHAUSTED。
@@ -765,9 +786,24 @@ class TaskHarnessOrchestrator {
     try { await entry.adapter.dispose(); } catch { /* ignore */ }
   }
 
-  async #finalizeCancelled({ context, taskId, runId, expectedRevision }) {
+  async #finalizeCancelled({ context, taskId, runId, expectedRevision, callUsage = null }) {
     const svc = this.#service();
     let runCancel = svc.cancelHarnessRun({ context, taskId, runId, expectedRevision });
+    // D5-03 第十二批：用户取消后账本必须与事实一致 —— 本任务里仍为 STARTED 的 model call
+    // 收敛成 CANCELLED（带 completed_at + 安全事件，已观测到的真实用量原样保留）；
+    // 已 SUCCEEDED / FAILED 的历史行由 TaskService 的前置判定守住，绝不改写。
+    const rev0 = runCancel.ok ? runCancel.task.revision : expectedRevision;
+    let callsFinalized = null;
+    try {
+      let finalized = svc.cancelStartedModelCalls({ context, taskId, expectedRevision: rev0, usageByCallId: callUsage });
+      // 取消竞态里 revision 一直在动：冲突就重读一次，绝不因为乐观并发 token 过期而漏收账本。
+      if (finalized && !finalized.ok && finalized.error === ERROR.TASK_REVISION_CONFLICT) {
+        const fresh = svc.getTask({ context, taskId });
+        if (fresh.ok) finalized = svc.cancelStartedModelCalls({ context, taskId, expectedRevision: fresh.task.revision, usageByCallId: callUsage });
+      }
+      if (finalized && finalized.ok && finalized.changed) callsFinalized = finalized.canceled;
+      if (finalized && finalized.ok && finalized.task) runCancel = { ...runCancel, ok: true, task: finalized.task };
+    } catch { /* 账本收敛失败绝不影响取消本身的收敛 */ }
     // 取消与启动/归并并发时 revision 可能已前进一格：重读一次，绝不因此把 run 留在非终态。
     if (!runCancel.ok && runCancel.error === ERROR.TASK_REVISION_CONFLICT) {
       const fresh = svc.getTask({ context, taskId });
@@ -775,9 +811,9 @@ class TaskHarnessOrchestrator {
     }
     const rev = runCancel.ok ? runCancel.task.revision : expectedRevision;
     const fin = svc.finalizeCancel({ context, taskId, expectedRevision: rev });
-    if (fin.ok) return { ok: false, error: ERROR.HARNESS_CANCELLED, cancelled: true, task: fin.task, run: runCancel.ok ? runCancel.run : null };
+    if (fin.ok) return { ok: false, error: ERROR.HARNESS_CANCELLED, cancelled: true, task: fin.task, run: runCancel.ok ? runCancel.run : null, callsFinalized };
     const fresh = svc.getTask({ context, taskId });
-    if (fresh.ok && fresh.task.status === TASK_STATUS.CANCELLED) return { ok: false, error: ERROR.HARNESS_CANCELLED, cancelled: true, task: fresh.task };
+    if (fresh.ok && fresh.task.status === TASK_STATUS.CANCELLED) return { ok: false, error: ERROR.HARNESS_CANCELLED, cancelled: true, task: fresh.task, callsFinalized };
     return fin;
   }
 

@@ -21,6 +21,12 @@ const path = require("node:path");
 const { HarnessModelAdapter } = require("./harness-model-adapter.cjs");
 
 const ACP_PROTOCOL_VERSION = 1;
+/**
+ * D5-03 第十二批：用户取消后等 agent 回 cancelled 的窗口。
+ * ACP 的 `session/cancel` 是**通知**，协议允许 agent 不回；没有这个窗口，runTask 会挂在
+ * 「等 agent 回话」上直到执行预算（180s）。窗口只覆盖收尾，不改变正常 turn 的语义。
+ */
+const CANCEL_SETTLE_MS = 750;
 
 const HARNESS_ERROR = Object.freeze({
   PROCESS_EXITED: "HARNESS_PROCESS_EXITED",
@@ -213,6 +219,8 @@ class HarnessAdapter {
     // D5-03 第十批：在途启动的中断 / 收尾状态（启动预算见 start 的绝对截止时间）。
     this.disposed = false;
     this.interrupted = false;
+    this._turnSettle = null;
+    this._turnSettled = false;
     this.startupSettled = false;
     this._startupSettleDeferred = null;
     this._teardownPromise = null;
@@ -432,17 +440,21 @@ class HarnessAdapter {
     return this._teardownPromise;
   }
 
-  async prompt(text, { timeoutMs = 120000 } = {}) {
+  async prompt(text, { timeoutMs = 120000, cancelSettleMs = CANCEL_SETTLE_MS } = {}) {
     if (!this.conn || !this.sessionId) throw harnessError(HARNESS_ERROR.NOT_STARTED);
     if (this.processExited) throw harnessError(HARNESS_ERROR.PROCESS_EXITED);
     this.turnCancelled = false;
+    this._turnSettle = null;
+    this._turnSettled = false;
     // D4-03B：每次 prompt 只返回本 turn 产生的事件/文本，支持多 turn tool loop（不重复处理旧事件）。
     const from = this.events.length;
+    const request = this.conn.prompt({ sessionId: this.sessionId, prompt: [{ type: "text", text: String(text) }] });
     try {
       const res = await this.#withTimeout(
-        this.conn.prompt({ sessionId: this.sessionId, prompt: [{ type: "text", text: String(text) }] }),
+        Promise.race([request, this.#awaitTurnCancelled(cancelSettleMs)]),
         timeoutMs, HARNESS_ERROR.TURN_TIMEOUT
       );
+      this._turnSettled = true;
       this.assertAlive();
       const turnEvents = this.events.slice(from);
       return { ok: true, stopReason: res.stopReason, text: this.#collectedText(turnEvents), events: turnEvents };
@@ -469,8 +481,28 @@ class HarnessAdapter {
     this.abortStart();
     if (!this.conn || !this.sessionId) return { ok: false, error: HARNESS_ERROR.NOT_STARTED };
     this.turnCancelled = true;
-    await this.conn.cancel({ sessionId: this.sessionId });
-    return { ok: true };
+    // 通知 agent（协议要求），随后等一个很小的窗口：agent 回了就按它的 stopReason 走，
+    // 不回就由 prompt 侧的取消窗口按真实取消收尾 —— 两者都不会无界等待。
+    const sent = await this.conn.cancel({ sessionId: this.sessionId }).then(() => true, () => false);
+    const settle = this._turnSettle;
+    this._turnSettle = null;
+    if (settle) settle();
+    return { ok: true, notified: sent };
+  }
+
+  /**
+   * 只等一个很小的窗口：**用户真的取消过**之后，agent 仍未回 cancelled 时按真实取消结果收尾。
+   * 没取消过就绝不武装这个窗口 —— 否则正常的慢 turn 会被误判成取消。
+   */
+  #awaitTurnCancelled(ms) {
+    if (this.turnCancelled) return Promise.resolve({ stopReason: "cancelled" });
+    const limit = Math.max(0, Number(ms) || 0);
+    return new Promise((resolve) => {
+      let timer = null;
+      const done = () => { if (timer) clearTimeout(timer); this._turnSettle = null; resolve({ stopReason: "cancelled" }); };
+      this._turnSettle = done;
+      timer = setTimeout(() => { if (this.turnCancelled) done(); }, limit);
+    });
   }
 
   /** Harness turn 一结束（success/failure/cancel/timeout/crash/conflict/blocked）立即 revoke，不等 TTL。*/

@@ -52,6 +52,8 @@ const TASK_EVENT = Object.freeze({
   MODEL_CALL_STARTED: "model.call.started",
   MODEL_CALL_COMPLETED: "model.call.completed",
   MODEL_CALL_FAILED: "model.call.failed",
+  // D5-03 第十二批：用户取消必须留下与事实一致的账本终态（绝不写成 Provider 失败）。
+  MODEL_CALL_CANCELLED: "model.call.cancelled",
   HARNESS_RUN_STARTED: "harness.run.started",
   HARNESS_RUN_SUCCEEDED: "harness.run.succeeded",
   HARNESS_RUN_BLOCKED: "harness.run.blocked",
