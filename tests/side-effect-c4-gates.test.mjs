@@ -16,6 +16,7 @@ import { createToolHarnessFixture } from "./fixtures/harness-acp/tool-harness-fi
 
 const require = createRequire(import.meta.url);
 const { createSideEffectGateway, registerSideEffectIpc } = require("../electron/side-effect-bootstrap.cjs");
+const { SIDE_EFFECT_ERROR } = require("../electron/side-effect-domain.cjs");
 
 const TRASH = "resource.trash";
 const sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); if (t && t.unref) t.unref(); });
@@ -468,10 +469,84 @@ test("No Direct Domain Bypass：resource.trash 的唯一 Domain 调用点在 all
   assert.ok(/adapter\.execute\(/.test(authority), "controlled write 必须经 adapter.execute");
   const proxy = fs.readFileSync(path.join(root, "electron/controlled-tool-proxy.cjs"), "utf8");
   assert.ok(/riskClass !== "READ_ONLY"/.test(proxy) && /adapter\.execute\(/.test(proxy), "READ_ONLY route 必须显式拒绝非 READ_ONLY");
-  // 生产 runtime 只经受监督 executor 执行，绝不在主进程 in-process 执行 write。
   const runtime = fs.readFileSync(path.join(root, "electron/side-effect-runtime.cjs"), "utf8");
+  // (a) 默认路径：只有受监督 executor 允许做 out-of-process mutation。
   assert.ok(/supervisor\.spawnExecutor\(/.test(runtime), "production write 必须经 supervisor.spawnExecutor");
-  assert.ok(!/authority\.executeSideEffect\(/.test(runtime), "主进程绝不 in-process 执行 write");
+
+  // (c) in-process 白名单是显式静态封闭集合：恰好两个进程局部 Domain，且不从 arguments / plan 解析。
+  const whitelistDecl = runtime.match(/const IN_PROCESS_EXECUTION_PROVIDERS = Object\.freeze\(new Set\(\[([^\]]*)\]\)\);/);
+  assert.ok(whitelistDecl, "IN_PROCESS_EXECUTION_PROVIDERS 必须由 Object.freeze(new Set([...])) 字面量构造");
+  assert.match(whitelistDecl[1], /^\s*"[^"]+"(\s*,\s*"[^"]+"\s*)*$/, "白名单成员只允许字符串字面量，不得从参数读入：" + whitelistDecl[1]);
+  assert.deepEqual([...whitelistDecl[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]), ["BrowserControl", "CanvasControl"], "in-process 白名单必须恰好等于 BrowserControl + CanvasControl");
+  assert.equal((runtime.match(/IN_PROCESS_EXECUTION_PROVIDERS\s*=/g) || []).length, 1, "白名单只允许一处静态声明");
+  assert.equal((runtime.match(/IN_PROCESS_EXECUTION_PROVIDERS\.has\(/g) || []).length, 2, "白名单只允许两处只读 .has()（executeInProcess 守卫 + executeApproved 分流）");
+  assert.ok(!/IN_PROCESS_EXECUTION_PROVIDERS\.(add|delete|clear)\(/.test(runtime), "白名单绝不允许运行时扩充");
+  assert.ok(!/Object\.(assign|defineProperty)\(\s*IN_PROCESS_EXECUTION_PROVIDERS/.test(runtime), "白名单绝不允许运行时改写");
+
+  // (d) in-process 路径仍经完整裁决（源码级补充：行为由 D5-01 B1–B6 覆盖）。
+  const inProcessBody = runtime.slice(runtime.indexOf("async executeInProcess("), runtime.indexOf("/** 受监督 executor runtime 执行一条已 APPROVED 的 call"));
+  assert.ok(inProcessBody.length > 0, "必须能定位 executeInProcess 方法体");
+  const iPreflight = inProcessBody.indexOf("this.authority.preflightAuthorization({ callId })");
+  const iLease = inProcessBody.indexOf("this.authority.acquireLease({ callId, holderId");
+  const iExec = inProcessBody.indexOf("this.authority.executeSideEffect({ callId, leaseId");
+  assert.ok(iPreflight > 0, "in-process 路径必须经 preflightAuthorization");
+  assert.ok(iLease > iPreflight, "in-process 路径必须先 preflight 再 acquireLease");
+  assert.ok(iExec > iLease, "in-process 路径必须先 lease 再 executeSideEffect");
+  assert.ok(/action: "side_effect\.execution_placement", decision: "IN_PROCESS"/.test(inProcessBody), "in-process 路径必须留 placement=IN_PROCESS 审计");
+
+  const ctx = await setup();
+  try {
+    const dc = countDelete(ctx.fx);
+    const placementAudits = () => ctx.fx.f.identity.connection.prepare("SELECT action, decision, reason_code FROM authorization_audit WHERE action = 'side_effect.execution_placement'").all();
+    const trashedRef = (ref) => ctx.fx.f.resourceService.sideEffectPrecondition({ resourceRef: ref }).trashed;
+    const grantTrashTarget = async (name) => {
+      const created = await ctx.fx.createResource(name);
+      ctx.fx.f.authService.grantAppResourcePermission({ context: ctx.fx.f.adminCtx(), appId: "ai", resourceId: created.resource.resourceId, actions: ["resource.delete"] });
+      ctx.fx.grantUserResource(created.resource.resourceId, ctx.fx.f.users.admin, ["resource.delete", "resource.useByAgent"]);
+      return created.resource.resourceRef;
+    };
+    const proposeOn = (r, ref) => ctx.fx.sideEffectRuntime.proposeWrite({ context: ctx.fx.ctx(), taskId: r.taskId, stepId: r.stepId, runId: r.runId, toolId: TRASH, arguments: { resourceRef: ref } });
+    const approve = (callId) => ctx.fx.sideEffectRuntime.decideApproval({ context: userCtx(ctx.fx), approvalRequestId: callId, decision: "APPROVE" });
+
+    // (b) 核心：executeInProcess 自身必须拒绝 ResourceService（不能只靠 executeApproved 分流）。
+    const bypassRef = await grantTrashTarget("C4 Gate Bypass Target");
+    const plannedB = await proposeOn(ctx.run, bypassRef);
+    assert.equal(plannedB.ok, true, JSON.stringify(plannedB));
+    assert.equal(approve(plannedB.approvalRequestId).ok, true);
+    const deleteBeforeB = dc.calls;
+    const resB = await ctx.fx.sideEffectRuntime.executeInProcess({ callId: plannedB.approvalRequestId });
+    assert.equal(resB.ok, false, JSON.stringify(resB));
+    assert.equal(resB.error, SIDE_EFFECT_ERROR.IN_PROCESS_NOT_PERMITTED);
+    assert.equal(resB.error, "SIDE_EFFECT_IN_PROCESS_NOT_PERMITTED");
+    assert.equal(resB.inProcess, false);
+    assert.equal(trashedRef(bypassRef), false, "被拒的 in-process 调用必须 0 mutation");
+    assert.equal(dc.calls, deleteBeforeB, "被拒的 in-process 调用绝不得触碰 Domain");
+    assert.equal(ctx.fx.sideEffectStore.leasesOfCall(plannedB.approvalRequestId).length, 0, "被拒的 in-process 调用绝不得建立任何 lease（不是只断 ACTIVE）");
+    assert.equal(ctx.fx.sideEffectStore.callById(plannedB.approvalRequestId).status, "APPROVED", "误路由绝不能把合法 call 打成 BLOCKED");
+    const placement = placementAudits();
+    assert.equal(placement.length, 1, "恰好 1 条 placement 审计");
+    assert.equal(placement[0].decision, "DENY");
+    assert.equal(placement[0].reason_code, "IN_PROCESS_NOT_PERMITTED");
+    // 守卫不得变成 DoS：同一条 call 仍能经受监督路径正常执行。
+    const resB2 = await ctx.fx.sideEffectRuntime.executeApproved({ callId: plannedB.approvalRequestId, holderId: "exec_1" });
+    assert.equal(resB2.ok, true, JSON.stringify(resB2));
+    assert.equal(trashedRef(bypassRef), true, "受监督路径必须仍能真实移入 Trash");
+    assert.equal(ctx.fx.sideEffectStore.callById(plannedB.approvalRequestId).status, "SUCCEEDED");
+
+    // (a) 行为：resource.trash 经受监督路径正常执行，lease 恰好 1，verification PASS。
+    const supervisedRef = await grantTrashTarget("C4 Gate Supervised Target");
+    const supervisedRun = ctx.fx.dshRunSetup();
+    const plannedA = await proposeOn(supervisedRun, supervisedRef);
+    assert.equal(plannedA.ok, true, JSON.stringify(plannedA));
+    assert.equal(approve(plannedA.approvalRequestId).ok, true);
+    const deleteBeforeA = dc.calls;
+    const resA = await ctx.fx.sideEffectRuntime.executeApproved({ callId: plannedA.approvalRequestId, holderId: "exec_1" });
+    assert.equal(resA.ok, true, JSON.stringify(resA));
+    assert.equal(trashedRef(supervisedRef), true, "resource.trash 经受监督路径必须真实移入 Trash");
+    assert.equal(dc.calls, deleteBeforeA, "out-of-process mutation 不经主进程 ResourceService 实例");
+    assert.equal(ctx.fx.sideEffectStore.leasesOfCall(plannedA.approvalRequestId).length, 1, "受监督路径恰好 1 lease");
+    assert.equal(ctx.fx.sideEffectStore.callById(plannedA.approvalRequestId).verificationStatus, "PASS", "受监督路径必须 verify PASS");
+  } finally { await teardown(ctx); }
 });
 
 test("WRITE tool result 投影只含 safe 字段（无绝对路径 / DB id / lease / capability）", async () => {

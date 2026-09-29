@@ -114,6 +114,10 @@ const SIDE_EFFECT_ERROR = Object.freeze({
   // D4-04 Closure：supervisor 真实 spawn 了 child，但 child 在进入 runtime 之前退出
   // （lifetime endpoint bind 失败 / runtime 装配失败 / 启动即崩）—— fail closed，绝不当作业务失败。
   EXECUTOR_START_FAILED: "SIDE_EFFECT_EXECUTOR_START_FAILED",
+  // D5-03 §execution placement 守卫：`executeInProcess` 是公开方法，只有
+  // IN_PROCESS_EXECUTION_PROVIDERS 里的进程局部 Domain 才允许走它；其它 provider 被误路由到
+  // 这里时必须 fail closed —— 否则等于在主进程里绕过白名单直接执行 Domain write。
+  IN_PROCESS_NOT_PERMITTED: "SIDE_EFFECT_IN_PROCESS_NOT_PERMITTED",
 });
 
 /** 产品合同冻结 TTL：Approval 默认 10 分钟；Lease 默认 60 秒。都有限期，绝不永久。 */

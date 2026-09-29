@@ -12,8 +12,12 @@
  * 永久边界：
  *   · Harness 只能 propose；它看不见本对象，也拿不到 approve / lease / execute；
  *   · Approval 只来自 trusted user action（main process 注入的 authenticated session）；
- *   · 真实 mutation 只发生在 RuntimeSupervisor 拥有并监督的 executor runtime 里，
- *     主进程绝不直接执行 write；
+ *   · 真实 mutation 的**默认**路径是 RuntimeSupervisor 拥有并监督的 executor runtime；
+ *   · 例外只有一条：Domain 权威**只存在于 main 进程内**的 provider（BrowserControl /
+ *     CanvasControl，见 IN_PROCESS_EXECUTION_PROVIDERS）走显式白名单的 in-process class。
+ *     它**不是**等价路径：放弃独立 child 的寿命证据（child exit / socket lifetime），
+ *     但 preflight / approval / lease / claim / exactly-once / verify / audit 仍由**同一个**
+ *     SideEffectAuthority 裁决。白名单是静态字面量，绝不从 arguments / plan 解析；
  *   · UNKNOWN_EFFECT 只允许 VERIFY → BLOCK；AUTO_RETRY = 0。
  *
  * 本对象不是第二套 Task / permission / approval / execution state machine：
@@ -270,6 +274,14 @@ class SideEffectRuntime {
   async executeInProcess({ callId, holderId = "oase_main", timeoutMs = null } = {}) {
     const call = this.store.callById(callId);
     if (!call) return { ok: false, error: SIDE_EFFECT_ERROR.CALL_NOT_FOUND };
+    // executeInProcess 是公开方法，不能只靠 executeApproved 的分流来保证 execution placement：
+    // 误路由必须在这里 fail closed，且不写 call 状态 —— 否则一条合法的 ResourceService call 会
+    // 因为一次错误路由而被 BLOCKED，把误路由变成对受监督路径的 DoS。
+    const contract = this.registry && typeof this.registry.get === "function" ? this.registry.get(call.toolId, call.toolVersion) : null;
+    if (!contract || !IN_PROCESS_EXECUTION_PROVIDERS.has(String(contract.executionProvider))) {
+      this.#audit({ toolRef: call.toolId, action: "side_effect.execution_placement", decision: "DENY", reasonCode: "IN_PROCESS_NOT_PERMITTED" });
+      return { ok: false, inProcess: false, error: SIDE_EFFECT_ERROR.IN_PROCESS_NOT_PERMITTED, call: this.store.callById(callId) };
+    }
     if (call.status === CALL_STATUS.SUCCEEDED) return { ok: true, duplicate: true, inProcess: true, call, safeResult: safeToolResult(call) };
     const preflight = this.authority.preflightAuthorization({ callId });
     if (!preflight || preflight.ok !== true) {
