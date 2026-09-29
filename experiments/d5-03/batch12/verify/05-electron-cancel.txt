@@ -1,0 +1,23 @@
+(node:82122) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS 真实 Electron 退出码 0 :: exit=0
+PASS 在途 harness 子进程确实存在过（不是空跑） :: maxDescendants=6
+PASS 阶段：provider 已收到请求 :: {"ok":true,"waitedMs":0,"runs":["STARTING"],"calls":0}
+PASS 真实 IPC task/cancel 返回 ok :: {"ok":true,"error":null,"via":"preload->ipc"}
+PASS runTask 有界返回且为取消 :: {"elapsedMs":2635,"done":"resolved","ok":false,"error":"HARNESS_CANCELLED","cancelled":true,"callsFinalized":["mcall_0rVFTDQLq7zcfQ"]}
+PASS runTask 收敛 < 25s 上界（实测远小） :: elapsedMs=2635
+PASS 退出前账本：call 唯一且已取消 :: [{"status":"CANCELLED","providerErrorCode":null}]
+PASS 退出后无孤儿进程 :: []
+PASS 重开库可读（integrity_check ok） :: ok
+PASS 重开后：task/step/run 三处 CANCELLED :: {"task":{"status":"CANCELLED","cancel_requested":1},"step":{"status":"CANCELLED"},"run":{"status":"CANCELLED","error_code":null}}
+PASS 重开后：恰好一个 call 且 CANCELLED + completed_at 已写 + 无 Provider 失败码 :: {"calls":{"n":1},"call":{"status":"CANCELLED","completed_at":1790692981990,"provider_error_code":null}}
+PASS 重开后：0 产物 :: {"n":0}
+PASS 重开后：有 model.call.cancelled 事件、无 model.call.failed/completed :: ["task.created","task.started","step.created","step.started","harness.run.started","model.call.started","task.cancel_requested","step.cancelled","task.cancelled","model.call.cancelled"]
+PASS 第二次启动退出码 0 :: exit=0
+PASS 重启后仍是 CANCELLED（取消终态不被恢复流程改写） :: {"task":"CANCELLED","runs":[{"status":"CANCELLED","errorCode":null,"stopReason":null}],"calls":[{"status":"CANCELLED","providerErrorCode":null}]}
+PASS 重启后 call 仍 CANCELLED 且无 Provider 失败码 :: [{"status":"CANCELLED","providerErrorCode":null}]
+PASS 第二次启动无孤儿 :: []
+PASS 本批无残留进程 :: []
+
+计数：{"total":18,"pass":18,"fail":0}
+结论：PASS

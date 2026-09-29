@@ -1,0 +1,66 @@
+TAP version 13
+# (node:78485) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 取消时序 1 · provider 请求发出前取消：call 收敛为 CANCELLED + runTask 有界返回 + 0 产物
+ok 1 - 取消时序 1 · provider 请求发出前取消：call 收敛为 CANCELLED + runTask 有界返回 + 0 产物
+  ---
+  duration_ms: 1283.058875
+  type: 'test'
+  ...
+# Subtest: 取消时序 2 · Provider 已收到请求后取消：账本与事实一致、能力撤销、0 孤儿、重开库状态一致
+ok 2 - 取消时序 2 · Provider 已收到请求后取消：账本与事实一致、能力撤销、0 孤儿、重开库状态一致
+  ---
+  duration_ms: 5017.916125
+  type: 'test'
+  ...
+# Subtest: 取消时序 3 · 正常响应与取消同刻竞争：终态唯一，绝不出现 SUCCEEDED 与 CANCELLED 并存
+ok 3 - 取消时序 3 · 正常响应与取消同刻竞争：终态唯一，绝不出现 SUCCEEDED 与 CANCELLED 并存
+  ---
+  duration_ms: 1553.588542
+  type: 'test'
+  ...
+# Subtest: 取消时序 4 · Provider 永不回应：runTask 仍有界返回，按真实取消收尾
+ok 4 - 取消时序 4 · Provider 永不回应：runTask 仍有界返回，按真实取消收尾
+  ---
+  duration_ms: 436.618625
+  type: 'test'
+  ...
+# Subtest: 取消时序 5 · 迟到 turn 结果：绝不产生成功产物、绝不翻转终态、绝不改写已取消的 call
+ok 5 - 取消时序 5 · 迟到 turn 结果：绝不产生成功产物、绝不翻转终态、绝不改写已取消的 call
+  ---
+  duration_ms: 9438.799542
+  type: 'test'
+  ...
+# Subtest: 取消时序 6 · 重复取消幂等：终态不翻转、0 二次收敛、已取消的 call 不被改写
+ok 6 - 取消时序 6 · 重复取消幂等：终态不翻转、0 二次收敛、已取消的 call 不被改写
+  ---
+  duration_ms: 5175.642084
+  type: 'test'
+  ...
+# Subtest: 正常成功对照：取消修复不得影响成功路径（call SUCCEEDED + 产物 + 任务成功）
+ok 7 - 正常成功对照：取消修复不得影响成功路径（call SUCCEEDED + 产物 + 任务成功）
+  ---
+  duration_ms: 1059.522083
+  type: 'test'
+  ...
+# Subtest: 历史 call 不被改写：已 FAILED 的旧 call 在后续取消里保持原样
+ok 8 - 历史 call 不被改写：已 FAILED 的旧 call 在后续取消里保持原样
+  ---
+  duration_ms: 1295.762916
+  type: 'test'
+  ...
+# Subtest: 副作用账本隔离：取消模型调用绝不改写独立的 side-effect call（AWAITING_APPROVAL 原样保留）
+ok 9 - 副作用账本隔离：取消模型调用绝不改写独立的 side-effect call（AWAITING_APPROVAL 原样保留）
+  ---
+  duration_ms: 1046.716208
+  type: 'test'
+  ...
+1..9
+# tests 9
+# suites 0
+# pass 9
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 51343.584125

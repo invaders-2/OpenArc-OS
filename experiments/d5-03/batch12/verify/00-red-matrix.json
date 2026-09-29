@@ -1,0 +1,505 @@
+(node:82249) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+{
+  "at": "2026-09-29T14:43:50.529Z",
+  "results": [
+    {
+      "name": "before-request",
+      "behavior": "slow",
+      "cancelWhen": "before-request",
+      "extraCancel": false,
+      "ok": true,
+      "runTaskConverged": true,
+      "runTaskSettledAtMs": 1139,
+      "runResult": {
+        "ok": false,
+        "error": "HARNESS_CANCELLED",
+        "cancelled": true
+      },
+      "task": {
+        "status": "CANCELLED",
+        "cancelRequested": false
+      },
+      "step": "CANCELLED",
+      "run": {
+        "status": "CANCELLED",
+        "errorCode": null,
+        "stopReason": null
+      },
+      "calls": [
+        {
+          "status": "CANCELLED",
+          "providerErrorCode": null,
+          "completedAt": true,
+          "usage": null
+        }
+      ],
+      "events": [
+        "task.created",
+        "task.started",
+        "step.created",
+        "step.started",
+        "harness.run.started",
+        "model.call.started",
+        "task.cancel_requested",
+        "step.cancelled",
+        "task.cancelled",
+        "model.call.cancelled"
+      ],
+      "artifacts": 0,
+      "promptSettled": "cancelled",
+      "promptError": null,
+      "cancels": 1,
+      "childExited": true,
+      "providerRequests": 0,
+      "providerClosed": 0,
+      "capabilities": [
+        "REVOKED"
+      ],
+      "registrySize": 0,
+      "marks": [
+        {
+          "n": "phase:before-request",
+          "d": "{\"requests\":0,\"calls\":1}",
+          "atMs": 974
+        },
+        {
+          "n": "cancel#1",
+          "d": "{\"ok\":true,\"error\":null}",
+          "atMs": 975
+        },
+        {
+          "n": "runTask:converged",
+          "d": "resolved",
+          "atMs": 1139
+        }
+      ]
+    },
+    {
+      "name": "sent",
+      "behavior": "slow",
+      "cancelWhen": "sent",
+      "extraCancel": false,
+      "ok": true,
+      "runTaskConverged": true,
+      "runTaskSettledAtMs": 653,
+      "runResult": {
+        "ok": false,
+        "error": "HARNESS_CANCELLED",
+        "cancelled": true
+      },
+      "task": {
+        "status": "CANCELLED",
+        "cancelRequested": false
+      },
+      "step": "CANCELLED",
+      "run": {
+        "status": "CANCELLED",
+        "errorCode": null,
+        "stopReason": null
+      },
+      "calls": [
+        {
+          "status": "CANCELLED",
+          "providerErrorCode": null,
+          "completedAt": true,
+          "usage": null
+        }
+      ],
+      "events": [
+        "task.created",
+        "task.started",
+        "step.created",
+        "step.started",
+        "harness.run.started",
+        "model.call.started",
+        "task.cancel_requested",
+        "step.cancelled",
+        "task.cancelled",
+        "model.call.cancelled"
+      ],
+      "artifacts": 0,
+      "promptSettled": "cancelled",
+      "promptError": null,
+      "cancels": 1,
+      "childExited": true,
+      "providerRequests": 1,
+      "providerClosed": 1,
+      "capabilities": [
+        "REVOKED"
+      ],
+      "registrySize": 0,
+      "marks": [
+        {
+          "n": "phase:sent",
+          "d": "{\"requests\":1,\"calls\":1}",
+          "atMs": 586
+        },
+        {
+          "n": "cancel#1",
+          "d": "{\"ok\":true,\"error\":null}",
+          "atMs": 587
+        },
+        {
+          "n": "runTask:converged",
+          "d": "resolved",
+          "atMs": 653
+        }
+      ]
+    },
+    {
+      "name": "race",
+      "behavior": "success+delay60",
+      "cancelWhen": "race",
+      "extraCancel": false,
+      "ok": true,
+      "runTaskConverged": true,
+      "runTaskSettledAtMs": 643,
+      "runResult": {
+        "ok": false,
+        "error": "HARNESS_CANCELLED",
+        "cancelled": true
+      },
+      "task": {
+        "status": "CANCELLED",
+        "cancelRequested": false
+      },
+      "step": "CANCELLED",
+      "run": {
+        "status": "CANCELLED",
+        "errorCode": null,
+        "stopReason": null
+      },
+      "calls": [
+        {
+          "status": "CANCELLED",
+          "providerErrorCode": null,
+          "completedAt": true,
+          "usage": null
+        }
+      ],
+      "events": [
+        "task.created",
+        "task.started",
+        "step.created",
+        "step.started",
+        "harness.run.started",
+        "model.call.started",
+        "task.cancel_requested",
+        "step.cancelled",
+        "task.cancelled",
+        "model.call.cancelled"
+      ],
+      "artifacts": 0,
+      "promptSettled": "cancelled",
+      "promptError": null,
+      "cancels": 1,
+      "childExited": true,
+      "providerRequests": 1,
+      "providerClosed": 0,
+      "capabilities": [
+        "REVOKED"
+      ],
+      "registrySize": 0,
+      "marks": [
+        {
+          "n": "phase:race",
+          "d": "{\"requests\":1,\"calls\":1}",
+          "atMs": 577
+        },
+        {
+          "n": "cancel#1",
+          "d": "{\"ok\":true,\"error\":null}",
+          "atMs": 578
+        },
+        {
+          "n": "runTask:converged",
+          "d": "resolved",
+          "atMs": 643
+        }
+      ]
+    },
+    {
+      "name": "never",
+      "behavior": "slow",
+      "cancelWhen": "never",
+      "extraCancel": false,
+      "ok": true,
+      "runTaskConverged": true,
+      "runTaskSettledAtMs": 634,
+      "runResult": {
+        "ok": false,
+        "error": "HARNESS_CANCELLED",
+        "cancelled": true
+      },
+      "task": {
+        "status": "CANCELLED",
+        "cancelRequested": false
+      },
+      "step": "CANCELLED",
+      "run": {
+        "status": "CANCELLED",
+        "errorCode": null,
+        "stopReason": null
+      },
+      "calls": [
+        {
+          "status": "CANCELLED",
+          "providerErrorCode": null,
+          "completedAt": true,
+          "usage": null
+        }
+      ],
+      "events": [
+        "task.created",
+        "task.started",
+        "step.created",
+        "step.started",
+        "harness.run.started",
+        "model.call.started",
+        "task.cancel_requested",
+        "step.cancelled",
+        "task.cancelled",
+        "model.call.cancelled"
+      ],
+      "artifacts": 0,
+      "promptSettled": "cancelled",
+      "promptError": null,
+      "cancels": 1,
+      "childExited": true,
+      "providerRequests": 1,
+      "providerClosed": 1,
+      "capabilities": [
+        "REVOKED"
+      ],
+      "registrySize": 0,
+      "marks": [
+        {
+          "n": "phase:never",
+          "d": "{\"requests\":1,\"calls\":1}",
+          "atMs": 569
+        },
+        {
+          "n": "cancel#1",
+          "d": "{\"ok\":true,\"error\":null}",
+          "atMs": 569
+        },
+        {
+          "n": "runTask:converged",
+          "d": "resolved",
+          "atMs": 634
+        }
+      ]
+    },
+    {
+      "name": "late",
+      "behavior": "slow",
+      "cancelWhen": "sent",
+      "extraCancel": false,
+      "ok": true,
+      "runTaskConverged": true,
+      "runTaskSettledAtMs": 643,
+      "runResult": {
+        "ok": false,
+        "error": "HARNESS_CANCELLED",
+        "cancelled": true
+      },
+      "task": {
+        "status": "CANCELLED",
+        "cancelRequested": false
+      },
+      "step": "CANCELLED",
+      "run": {
+        "status": "CANCELLED",
+        "errorCode": null,
+        "stopReason": null
+      },
+      "calls": [
+        {
+          "status": "CANCELLED",
+          "providerErrorCode": null,
+          "completedAt": true,
+          "usage": null
+        }
+      ],
+      "events": [
+        "task.created",
+        "task.started",
+        "step.created",
+        "step.started",
+        "harness.run.started",
+        "model.call.started",
+        "task.cancel_requested",
+        "step.cancelled",
+        "task.cancelled",
+        "model.call.cancelled"
+      ],
+      "artifacts": 0,
+      "promptSettled": "cancelled",
+      "promptError": null,
+      "cancels": 1,
+      "childExited": true,
+      "providerRequests": 1,
+      "providerClosed": 1,
+      "capabilities": [
+        "REVOKED"
+      ],
+      "registrySize": 0,
+      "marks": [
+        {
+          "n": "phase:sent",
+          "d": "{\"requests\":1,\"calls\":1}",
+          "atMs": 578
+        },
+        {
+          "n": "cancel#1",
+          "d": "{\"ok\":true,\"error\":null}",
+          "atMs": 579
+        },
+        {
+          "n": "runTask:converged",
+          "d": "resolved",
+          "atMs": 643
+        }
+      ]
+    },
+    {
+      "name": "repeat",
+      "behavior": "slow",
+      "cancelWhen": "sent",
+      "extraCancel": true,
+      "ok": true,
+      "runTaskConverged": true,
+      "runTaskSettledAtMs": 650,
+      "runResult": {
+        "ok": false,
+        "error": "HARNESS_CANCELLED",
+        "cancelled": true
+      },
+      "task": {
+        "status": "CANCELLED",
+        "cancelRequested": false
+      },
+      "step": "CANCELLED",
+      "run": {
+        "status": "CANCELLED",
+        "errorCode": null,
+        "stopReason": null
+      },
+      "calls": [
+        {
+          "status": "CANCELLED",
+          "providerErrorCode": null,
+          "completedAt": true,
+          "usage": null
+        }
+      ],
+      "events": [
+        "task.created",
+        "task.started",
+        "step.created",
+        "step.started",
+        "harness.run.started",
+        "model.call.started",
+        "task.cancel_requested",
+        "step.cancelled",
+        "task.cancelled",
+        "model.call.cancelled"
+      ],
+      "artifacts": 0,
+      "promptSettled": "cancelled",
+      "promptError": null,
+      "cancels": 2,
+      "childExited": true,
+      "providerRequests": 1,
+      "providerClosed": 1,
+      "capabilities": [
+        "REVOKED"
+      ],
+      "registrySize": 0,
+      "marks": [
+        {
+          "n": "phase:sent",
+          "d": "{\"requests\":1,\"calls\":1}",
+          "atMs": 583
+        },
+        {
+          "n": "cancel#1",
+          "d": "{\"ok\":true,\"error\":null}",
+          "atMs": 584
+        },
+        {
+          "n": "cancel#2",
+          "d": "{\"ok\":false,\"error\":\"TASK_REVISION_CONFLICT\"}",
+          "atMs": 585
+        },
+        {
+          "n": "runTask:converged",
+          "d": "resolved",
+          "atMs": 650
+        }
+      ]
+    },
+    {
+      "name": "success",
+      "behavior": "exact",
+      "cancelWhen": "none",
+      "extraCancel": false,
+      "ok": true,
+      "runTaskConverged": true,
+      "runTaskSettledAtMs": 646,
+      "runResult": {
+        "ok": true,
+        "error": null,
+        "cancelled": false
+      },
+      "task": {
+        "status": "SUCCEEDED",
+        "cancelRequested": false
+      },
+      "step": "SUCCEEDED",
+      "run": {
+        "status": "SUCCEEDED",
+        "errorCode": null,
+        "stopReason": "end_turn"
+      },
+      "calls": [
+        {
+          "status": "SUCCEEDED",
+          "providerErrorCode": null,
+          "completedAt": true,
+          "usage": null
+        }
+      ],
+      "artifacts": 1,
+      "events": [
+        "task.created",
+        "task.started",
+        "step.created",
+        "step.started",
+        "harness.run.started",
+        "model.call.started",
+        "model.call.completed",
+        "harness.usage",
+        "harness.text.delta",
+        "artifact.created",
+        "verification.completed",
+        "step.succeeded",
+        "task.succeeded",
+        "harness.run.succeeded"
+      ],
+      "childExited": true,
+      "capabilities": [
+        "REVOKED"
+      ],
+      "registrySize": 0,
+      "marks": [
+        {
+          "n": "runTask:done",
+          "d": "resolved",
+          "atMs": 646
+        }
+      ]
+    }
+  ]
+}

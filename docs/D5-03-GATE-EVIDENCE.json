@@ -1,4 +1,143 @@
 {
+  "batch12": {
+    "phase": "D5-03 第十二批 · 用户取消在途模型调用后的完整收敛（R2 + runTask 不返回）",
+    "at": "2026-09-29T14:45:00Z",
+    "atNote": "证据截止时点 = 第十二批证据快照写入时。**纯插入**：batch11 及其后所有旧段逐字节未改（证明方式：`git diff --numstat docs/D5-03-GATE-EVIDENCE.json` = 本段行数 / 0，且自 `\"batch11\"` 起至 EOF 与插入前同一起点至 EOF 逐字节相同）。",
+    "openarcBranch": "integration/ui-core",
+    "testedCommit": "10075b2",
+    "testedCommitNote": "单个提交（`git log --oneline 63a8ed5..10075b2` = 1 行），父提交 63a8ed5；提交时 --amend 一次（仅并入验收驱动的残留清扫，产品代码未变）；改动面 = electron/harness-adapter.cjs +40/−11、electron/task-service.cjs +36/−0、electron/task-harness-orchestrator.cjs +50/−11、electron/task-domain.cjs +2/−0、tests/task-harness-cancel-convergence.test.mjs +331/−0、tests/fixtures/harness-acp/prompt-late-agent.mjs +33/−0、experiments/d5-03/batch12/verify/** +1035/−0、.gitignore +3/−0；`src/**` 0 行改动、SCHEMA_VERSION 仍 21、预算 30000/180000 未动",
+    "scopeBoundaries": [
+      "只含 R2（model call 留在 STARTED）与第十一批登记的 runTask promise 不返回；未进入 OAuth / D5-04 / 创建组织入口",
+      "无既有断言被修改 / 放宽 / 跳过；新增用例 9 条 + 真实 Electron 取消验收 18 条",
+      "取消绝不写成 Provider 失败（provider_error_code 恒为空）；已 SUCCEEDED / FAILED 的历史 call 绝不改写；已观测 usage 原样保留"
+    ],
+    "redEvidence": {
+      "at": "父提交 63a8ed5 的产品代码",
+      "matrix": "experiments/d5-03/batch12/verify/00-red-matrix.json",
+      "result": "0 / 7 时序通过：六个取消时序下 task/step/run 都已是 CANCELLED，唯独 model call 停在 STARTED（无 completed_at、无事件）；正常成功对照也因判据含「call 必须 CANCELLED」而红",
+      "runTaskHang": "第十一批登记项在真实 Electron 场景复现：PROBE_CANCEL_CONVERGED {\"settled\":\"timeout\",\"taskStatus\":\"CANCELLED\",\"runs\":[\"CANCELLED\"]}（任务已取消、runTask 20s 不 settle）"
+    },
+    "rootCause": {
+      "ledger": "startModelCall 建信封后只有成功 completeModelCall / 失败 failModelCall 两条终态路径；用户取消走 #finalizeCancelled → cancelHarnessRun → finalizeCancel，三处都不碰 task_model_calls → call 停在 STARTED",
+      "revisionDrift": "取消竞态里 revision 连续推进（requestCancel / cancelHarnessRun / finalizeCancel 各一格），首次带旧 expectedRevision 的账本收尾被 TASK_REVISION_CONFLICT 静默拒掉（实测 rev0=7 而当前 10）→ 需冲突重读一次",
+      "acpCancelIsNotification": "ACP session/cancel 是通知，协议允许 agent 不回 cancelled；原实现 await conn.cancel(...) 后继续等 agent 回话 → runTask 只能等满执行预算 180s"
+    },
+    "fix": {
+      "taskService": "cancelStartedModelCalls({context,taskId,expectedRevision,usageByCallId})：与取消同一事务，只把**本任务仍为 STARTED** 的 call 写成 CANCELLED + completed_at + 安全事件 model.call.cancelled；已 SUCCEEDED / FAILED / CANCELLED 的行由 #callCommand 的 status !== STARTED 前置判定守住；已观测 usage 原样落库（不声称 Provider 从未执行 / 从未计费）",
+      "orchestrator": "#finalizeCancelled 先落 call 取消终态（revision 冲突重读一次）再收 run/task；正常返回路径改成取消优先，已取消的 turn 绝不把 call 写成 SUCCEEDED；本 turn 观测到的 usage 记账供取消路径保留",
+      "adapter": "prompt 侧在**用户真的取消过**之后只等 750ms 窗口，仍不回来就按真实取消结果收尾；没取消过绝不武装该窗口（开发中真实踩到：未武装判断时正常慢 turn 被误判成取消，由 tool-dsh-cancel 的 kill-dsh 用例暴露并修复）"
+    },
+    "verification": {
+      "greenMatrix": {
+        "log": "experiments/d5-03/batch12/verify/01-green-matrix.json",
+        "result": "7 / 7 通过；六个取消时序 runTask 收敛 637–972ms，call=CANCELLED + completed_at 已写 + providerErrorCode 空 + 0 产物 + registry 空 + 能力 REVOKED + 子进程退出；成功对照 call=SUCCEEDED + 产物 1"
+      },
+      "convergenceSuite": {
+        "file": "tests/task-harness-cancel-convergence.test.mjs",
+        "log": "experiments/d5-03/batch12/verify/03-convergence-suite.txt",
+        "counts": {
+          "tests": 9,
+          "pass": 9,
+          "fail": 0,
+          "ms": 51343
+        },
+        "cases": [
+          "请求发出前取消",
+          "Provider 已收到请求后取消（含只读重开库四处状态）",
+          "正常响应与取消同刻竞争",
+          "Provider 永不回应",
+          "迟到 turn 结果",
+          "重复取消幂等",
+          "正常成功对照",
+          "历史 FAILED call 不被改写",
+          "副作用账本隔离（AWAITING_APPROVAL 原样）"
+        ]
+      },
+      "realElectronCancel": {
+        "command": "node experiments/d5-03/batch12/verify/electron-cancel-e2e.mjs",
+        "log": "experiments/d5-03/batch12/verify/05-electron-cancel.txt",
+        "counts": {
+          "total": 18,
+          "pass": 18,
+          "fail": 0,
+          "exit": 0,
+          "ms": 6000,
+          "launches": 2
+        },
+        "key": "取消经真实渲染层 preload → IPC → 产品 handler：PROBE_IPC_CANCEL {\"ok\":true,\"via\":\"preload->ipc\"}；PROBE_RUN_CONVERGED {\"elapsedMs\":2861,\"done\":\"resolved\",\"error\":\"HARNESS_CANCELLED\",\"cancelled\":true,\"callsFinalized\":[\"mcall_…\"]}",
+        "dbAfterReopen": "task/step/run 三处 CANCELLED + cancel_requested=1；恰好 1 个 call = CANCELLED + completed_at 已写 + provider_error_code 空；0 产物；事件链含 model.call.cancelled，无 model.call.failed / model.call.completed",
+        "restart": "第二次启动（真实重启路径）后仍为 CANCELLED，取消终态不被恢复流程改写",
+        "processHygiene": "退出后 0 孤儿；全批残留自检 0"
+      },
+      "gateCounts": {
+        "d4-02c": {
+          "tests": 33,
+          "pass": 33,
+          "fail": 0,
+          "exit": 0,
+          "ms": 60000,
+          "log": "experiments/d5-03/batch12/verify/02-gate-d4-02c.txt"
+        },
+        "convergence": {
+          "tests": 9,
+          "pass": 9,
+          "fail": 0,
+          "exit": 0,
+          "ms": 51343
+        },
+        "relatedGates": {
+          "tests": 17,
+          "pass": 17,
+          "fail": 0,
+          "exit": 0,
+          "ms": 43000,
+          "log": "experiments/d5-03/batch12/verify/03-related-gates.txt",
+          "files": [
+            "tests/tool-dsh-cancel.test.mjs",
+            "tests/d4-06-resume.test.mjs",
+            "tests/d4-07-budget-consistency.test.mjs",
+            "tests/tool-d4-03d-audit.test.mjs"
+          ]
+        },
+        "electronCancel": {
+          "tests": 18,
+          "pass": 18,
+          "fail": 0,
+          "exit": 0,
+          "ms": 6000
+        },
+        "npmTestFull": {
+          "tests": 1408,
+          "pass": 1406,
+          "fail": 2,
+          "exit": 1,
+          "ms": 129852,
+          "log": "experiments/d5-03/batch12/verify/04-npm-test-full.txt",
+          "delta": "1399 → 1408 = 本批新增 9 条",
+          "failures": [
+            "P2 · 当前会话 = A（owner）：推送投递，载荷 = 白名单投影且与 getApprovalRequest 一致（d4-03-approval-push-isolation）",
+            "No Direct Domain Bypass：resource.trash 的唯一 Domain 调用点在 allowlisted adapter + controlled execution 内（side-effect-c4-gates）"
+          ],
+          "note": "两条 = 既有确定性失败，本批未修、未放宽断言；无 flake、无 skipped"
+        }
+      }
+    },
+    "assertionChanges": "无既有断言被修改 / 放宽 / 跳过；新增 tests/task-harness-cancel-convergence.test.mjs 9 条时序断言 + 真实 Electron 取消验收 18 条；新增探针 tests/fixtures/harness-acp/prompt-late-agent.mjs",
+    "notVerified": [
+      "迟到「Provider 真实回包」未单独构造：用例 5 的迟到结果来自 agent 侧；「provider 已收到请求后取消」由用例 2 与真实 Electron 场景覆盖",
+      "真实计费 / 实际 token 数不可观测（假 Provider 不返回 usage）；只保证「已观测到的 usage 原样保留」",
+      "假 Provider 下 usage 恒为 null，取消保留 usage 的分支只由代码路径与直接单测覆盖",
+      "应用退出与取消的交叉（退出时正在取消）未单独构造用例",
+      "未做界面截图：src/** 0 行改动"
+    ],
+    "leftovers": [
+      "两条既有确定性失败（d4-03-approval-push-isolation P2、side-effect-c4-gates No Direct Domain Bypass）未修",
+      "取消后 runTask 的「迟到真实 provider 回包」与 usage 落库分支缺真实用例",
+      "START_MARGIN_MS 与产品预算成对；跨组织真机 2 条 notVerified；OAuth；两条探针门禁既有失败；插件隔离 D5-08；D5-02 prompt() 遗留；SIGKILL 边界",
+      "本批调试留下过 24 个 Electron 探针进程（已全部清除，0 残留），残留清扫已并入验收驱动"
+    ],
+    "judgement": "D5-03 第十二批（用户取消在途模型调用后的完整收敛）= PASS（限定范围：R2 与 runTask 不返回两项均红→绿，账本与事实一致、历史 call 不改写、副作用账本隔离、真实 Electron 取消路径验收通过；未验收项如实单列）；D5-03 整体仍 = PARTIAL"
+  },
   "batch11": {
     "phase": "D5-03 第十一批 · 应用正常退出时收尾 Harness（will-quit 遗漏 orchestrator.dispose）",
     "at": "2026-09-29T13:55:00Z",

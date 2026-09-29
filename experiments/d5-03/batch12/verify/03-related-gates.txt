@@ -1,0 +1,120 @@
+TAP version 13
+# (node:81585) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: D4-06 Closure A/F · 预算停止 → 后端判定可续接 → 新 step 续接成功；副作用恰好一次、不重放、账本/关联链正确
+ok 1 - D4-06 Closure A/F · 预算停止 → 后端判定可续接 → 新 step 续接成功；副作用恰好一次、不重放、账本/关联链正确
+  ---
+  duration_ms: 3580.200167
+  type: 'test'
+  ...
+# Subtest: D4-06 Closure B · 续接后再次达到预算 → 再次停止，无额外调度、只追加一次预算
+ok 2 - D4-06 Closure B · 续接后再次达到预算 → 再次停止，无额外调度、只追加一次预算
+  ---
+  duration_ms: 7555.636125
+  type: 'test'
+  ...
+# Subtest: D4-06 Closure C · 重复点击 / 并发请求 → 一次有效续接、一次预算追加
+ok 3 - D4-06 Closure C · 重复点击 / 并发请求 → 一次有效续接、一次预算追加
+  ---
+  duration_ms: 888.444083
+  type: 'test'
+  ...
+# Subtest: D4-06 Closure D · 续接过程中撤权 → 受保护执行被拒绝并收敛；旧 approval/capability 不复活
+ok 4 - D4-06 Closure D · 续接过程中撤权 → 受保护执行被拒绝并收敛；旧 approval/capability 不复活
+  ---
+  duration_ms: 5838.586458
+  type: 'test'
+  ...
+# Subtest: D4-06 Closure E · 非预算停止 / 伪造身份 / 伪造预算 / stale revision → 后端显式拒绝
+ok 5 - D4-06 Closure E · 非预算停止 / 伪造身份 / 伪造预算 / stale revision → 后端显式拒绝
+  ---
+  duration_ms: 978.24
+  type: 'test'
+  ...
+# Subtest: D4-06 Closure E · 真实 live-unlinked 崩溃遗留 UNKNOWN_EFFECT call → 后端拒绝续接（RESUME_UNKNOWN_EFFECT_PRESENT）
+ok 6 - D4-06 Closure E · 真实 live-unlinked 崩溃遗留 UNKNOWN_EFFECT call → 后端拒绝续接（RESUME_UNKNOWN_EFFECT_PRESENT）
+  ---
+  duration_ms: 710.531625
+  type: 'test'
+  ...
+# (node:81701) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: D4 收口 · budgetExhausted：TOOL_CALLS 优先于 MODEL_CALLS，observed 脱敏且只读
+ok 7 - D4 收口 · budgetExhausted：TOOL_CALLS 优先于 MODEL_CALLS，observed 脱敏且只读
+  ---
+  duration_ms: 4.307084
+  type: 'test'
+  ...
+# Subtest: D4 收口 · 工具预算真实耗尽不得当成成功：prompt 产出 final 但 TOOL_CALLS EXHAUSTED → BUDGET_EXHAUSTED{TOOL_CALLS}，0 Artifact
+ok 8 - D4 收口 · 工具预算真实耗尽不得当成成功：prompt 产出 final 但 TOOL_CALLS EXHAUSTED → BUDGET_EXHAUSTED{TOOL_CALLS}，0 Artifact
+  ---
+  duration_ms: 1857.546375
+  type: 'test'
+  ...
+# Subtest: D4 收口 · ledger.base 用实际注入额度；nextGrant/additions 与该类实际额度一致且只追加一个 kind
+ok 9 - D4 收口 · ledger.base 用实际注入额度；nextGrant/additions 与该类实际额度一致且只追加一个 kind
+  ---
+  duration_ms: 3986.85725
+  type: 'test'
+  ...
+# (node:81734) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: §29/§30/§48 Domain Bypass Audit：Harness / Tool Facade / ACP plugin 绝不直接触达 Resource/Search Domain
+ok 10 - §29/§30/§48 Domain Bypass Audit：Harness / Tool Facade / ACP plugin 绝不直接触达 Resource/Search Domain
+  ---
+  duration_ms: 14.102208
+  type: 'test'
+  ...
+# Subtest: §48 Full Tool Proxy Security Gate：Registry / Authorization / Approval / Result / Executor / Lease / Verification / Retry 全部不可绕过
+ok 11 - §48 Full Tool Proxy Security Gate：Registry / Authorization / Approval / Result / Executor / Lease / Verification / Retry 全部不可绕过
+  ---
+  duration_ms: 609.465833
+  type: 'test'
+  ...
+# Subtest: §14/§44/§55 Capability non-persistence + Secret Scan：tpx_/mpx_/provider secret/绝对路径/store root 0 落库
+ok 12 - §14/§44/§55 Capability non-persistence + Secret Scan：tpx_/mpx_/provider secret/绝对路径/store root 0 落库
+  ---
+  duration_ms: 2146.70975
+  type: 'test'
+  ...
+# Subtest: §46/§47 Tool result / Model text 不能改变 Task state：无 tool call 的 model 文本不产生 mutation
+ok 13 - §46/§47 Tool result / Model text 不能改变 Task state：无 tool call 的 model 文本不产生 mutation
+  ---
+  duration_ms: 2055.990209
+  type: 'test'
+  ...
+# (node:81762) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Cancel 竞争：Tool 执行中 cancelTask → BLOCKED / TASK_CANCELLED，不返回数据
+ok 14 - Cancel 竞争：Tool 执行中 cancelTask → BLOCKED / TASK_CANCELLED，不返回数据
+  ---
+  duration_ms: 1147.103375
+  type: 'test'
+  ...
+# Subtest: Task CANCELLED 后再尝试 Tool → DENY + 0 Domain call
+ok 15 - Task CANCELLED 后再尝试 Tool → DENY + 0 Domain call
+  ---
+  duration_ms: 415.72675
+  type: 'test'
+  ...
+# Subtest: Tool timeout：bounded timeout → TOOL_TIMEOUT + 0 retry
+ok 16 - Tool timeout：bounded timeout → TOOL_TIMEOUT + 0 retry
+  ---
+  duration_ms: 516.008333
+  type: 'test'
+  ...
+# Subtest: Harness crash：tool chain 中 kill dsh → Task BLOCKED + capability revoked + 0 respawn
+ok 17 - Harness crash：tool chain 中 kill dsh → Task BLOCKED + capability revoked + 0 respawn
+  ---
+  duration_ms: 2558.673333
+  type: 'test'
+  ...
+1..17
+# tests 17
+# suites 0
+# pass 17
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 42476.874916

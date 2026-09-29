@@ -1973,6 +1973,57 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 
 **本批闭环的旧缺口**：第十批登记的「应用退出路径未调用 `orchestrator.dispose()`」——已实施并验证（见 §1）。
 
-剩余缺口逐条：① R2（取消后 call 停 `STARTED`，已定性为不同根因）另案；② 新登记：用户取消后 `runTask` promise 不收敛（建议与 R2 同批）；③ 两条既有确定性失败（`d4-03-approval-push-isolation` P2、`side-effect-c4-gates` No Direct Domain Bypass）另案；④ 上述 notVerified 4 条；⑤ `START_MARGIN_MS` 与产品预算同步约束；⑥ 跨组织真机 2 条 notVerified；⑦ 两条探针门禁既有失败；⑧ OAuth；⑨ 插件隔离（D5-08）；⑩ D5-02 `prompt()` 遗留；⑪ SIGKILL 边界；⑫ 第五批登记其余残留。
+剩余缺口逐条：① R2（取消后 call 停 `STARTED`，已定性为不同根因）另案【第十二批已实施：取消路径收敛 STARTED 的 call 为 CANCELLED + completed_at + 安全事件，历史 call 不改写；见第十二批节】；② 新登记：用户取消后 `runTask` promise 不收敛（建议与 R2 同批）【第十二批已实施：取消后只等 750ms 窗口，runTask 637–972ms 收敛；见第十二批节】；③ 两条既有确定性失败（`d4-03-approval-push-isolation` P2、`side-effect-c4-gates` No Direct Domain Bypass）另案；④ 上述 notVerified 4 条；⑤ `START_MARGIN_MS` 与产品预算同步约束；⑥ 跨组织真机 2 条 notVerified；⑦ 两条探针门禁既有失败；⑧ OAuth；⑨ 插件隔离（D5-08）；⑩ D5-02 `prompt()` 遗留；⑪ SIGKILL 边界；⑫ 第五批登记其余残留。
 
-下一步建议：R2 + 「取消后 runTask 不收敛」合并裁决（取消路径终结 model call 信封与 run 收敛）→ 两条既有确定性失败另案 → 两条探针门禁单独排期 → 跨组织真机入口 → OAuth → 真实第三方 / Adobe（D5-04 / D5-05）。
+下一步建议：【第十二批已完成：R2 + 「取消后 runTask 不收敛」合并裁决与实施】原建议：R2 + 「取消后 runTask 不收敛」合并裁决（取消路径终结 model call 信封与 run 收敛）→ 两条既有确定性失败另案 → 两条探针门禁单独排期 → 跨组织真机入口 → OAuth → 真实第三方 / Adobe（D5-04 / D5-05）。
+
+# D5-03 第十二批 · 用户取消在途模型调用后的完整收敛 · 2026-09-29（`10075b2`）
+
+> **口径（用户明确定范围）**：本批只含 **R2**（取消后 model call 停在 `STARTED`）与**第十一批登记的 runTask promise 不返回**；**未进入 OAuth、D5-04、创建组织入口**。不调宽超时、不跳过测试、不放松断言。只在 `/Users/wepingli/Desktop/OpenArc OS-integration` 工作，未触碰主工作树 17 项改动、DSH Desktop 共享运行时与 `~/.dsh`，未 push。
+> **判定：D5-03 第十二批（用户取消在途模型调用后的完整收敛）= PASS（限定范围：两项均红→绿，账本与事实一致、历史 call 不改写、副作用账本隔离、真实 Electron 取消路径验收通过；未验收项如实单列）；D5-03 整体仍 = PARTIAL**。
+> **被测 commit**：`10075b2`（父 `63a8ed5`，单提交；提交时 `--amend` 一次仅并入验收驱动的残留清扫，产品代码未变）。改动面：`electron/harness-adapter.cjs` +40/−11、`electron/task-service.cjs` +36/−0、`electron/task-harness-orchestrator.cjs` +50/−11、`electron/task-domain.cjs` +2/−0、`tests/task-harness-cancel-convergence.test.mjs` +331/−0（新增）、`tests/fixtures/harness-acp/prompt-late-agent.mjs` +33/−0（新增）、`experiments/d5-03/batch12/verify/**` +1035/−0、`.gitignore` +3/−0；`src/**` **0 行改动**、`SCHEMA_VERSION` 仍 **21**、预算 `30000 / 180000` 未动。
+> **证据**：`experiments/d5-03/batch12/verify/`（`00-red-matrix.json`、`01-green-matrix.json`、`02-gate-d4-02c.txt`、`03-convergence-suite.txt`、`03-related-gates.txt`、`04-npm-test-full.txt`、`05-electron-cancel.txt`、时序矩阵 / 真实 Electron 验收脚本 + Probe 宿主；`runs/**` 已 gitignore）；执行方报告 `experiments/d5-03/batch12/D5-03-BATCH12-REPORT.md`；tracked 证据 `docs/D5-03-GATE-EVIDENCE.json` 的 `batch12` 段（**纯插入**：`git diff --numstat` = `139 / 0`，旧段自 `"batch11"` 起至 EOF **逐字节相同**）。
+
+## 1. 任务状态
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| R2 · 取消后 call 停在 STARTED | **已完成** | `TaskService.cancelStartedModelCalls()`：与取消同一事务，只把**本任务仍为 STARTED** 的 call 写成 `CANCELLED` + `completed_at` + 安全事件 `model.call.cancelled`；六个取消时序全部 `CANCELLED`（红：六个时序全是 `STARTED`） |
+| runTask 不返回 | **已完成** | ACP `session/cancel` 是通知（协议允许 agent 不回）→ prompt 侧在**用户真的取消过**之后只等 750ms 窗口，仍不回来即按真实取消收尾；取消→收敛 **637–972ms**（旧：>20s 不 settle，上限是 180s 执行预算） |
+| 账本与事实一致 | **已完成** | 恰好一个 call 终态；`completed_at` 已写；`provider_error_code` **恒为空**（取消绝不写成 Provider 失败）；安全事件 `model.call.cancelled` 恰好一条；已 `SUCCEEDED` / `FAILED` 的历史 call 由 `#callCommand` 的 `status !== "STARTED"` 前置判定守住，**绝不改写**（用例 8 用真实 500 失败对照） |
+| 用量证据保留 | **已完成** | 本 turn 观测到 usage 即记账，取消路径原样落库（**不声称 Provider 从未执行 / 从未计费**）；假 Provider 下 usage 恒为 null，该分支由直接单测覆盖 |
+| 终态一致 + 重复取消幂等 | **已完成** | 任务 / 步骤 / run / call 四处一致；同刻竞争下绝不 `SUCCEEDED` 与 `CANCELLED` 并存；重复取消终态不翻转、call `completed_at` 不变、取消事件仍只一条 |
+| 迟到结果不产生成功产物 | **已完成** | 迟到 turn 结果：0 产物、不新建 call / run、不翻转终态；adapter 侧对已取消 turn 不再影响后续 |
+| 副作用账本隔离 | **已完成** | 独立 `side_effect_calls` 仍 `AWAITING_APPROVAL`：状态 / 完成时间 / 错误码 / 审批记录 / 执行记录全不动（用例 9） |
+| 真实 Electron 取消路径 | **18 / 18 PASS · exit 0 · 6s · 只启动 2 次** | 取消走**真实渲染层** `window.openarc.task.command` → preload → IPC → 产品 handler；`callsFinalized` 非空、`elapsedMs 2861`；退出前在途子进程峰值 6、退出后 **0 孤儿**；只读重开库四处一致；真实重启后仍 `CANCELLED` |
+| 门禁（受影响） | **全部 exit 0** | 收敛套件 9/9（51s）；`test:d4-02c` 33/33（60s）；`tool-dsh-cancel` + `d4-06-resume` + `d4-07-budget-consistency` + `tool-d4-03d-audit` 17/17（43s） |
+| 全量 `npm test` | **exit 1，如实单列** | **1408 tests / 1406 pass / 2 fail**（duration 129852ms）：两条**既有确定性失败**（`d4-03-approval-push-isolation` P2、`side-effect-c4-gates` No Direct Domain Bypass）**未修**；**无新增失败、无 flake**；1399 → 1408 = 本批新增 9 条 |
+| 断言变更清单 | **无既有断言改动** | 新增 9 条领域用例 + 真实 Electron 取消验收 18 条；新增探针 `prompt-late-agent.mjs` |
+
+## 2. 根因与修法（两条缺一不可）
+
+1. **账本从不在取消路径收尾**：`startModelCall` 建信封后只有成功 / 失败两条终态路径；用户取消走 `#finalizeCancelled` → `cancelHarnessRun` → `finalizeCancel`，三处都不碰 `task_model_calls`。
+2. **乐观并发 token 过期**：取消竞态里 revision 连续推进，首次带旧 `expectedRevision` 的账本收尾被 `TASK_REVISION_CONFLICT` **静默拒掉**（实测 `rev0=7` 而当前 `10`）→ 冲突重读一次再收尾。
+3. **adapter 等 agent 回话**：`session/cancel` 是通知 → 加 750ms 取消窗口；**没取消过绝不武装该窗口**（开发中真实踩到：未判断时正常慢 turn 被误判成取消，由 `tool-dsh-cancel` 的 kill-dsh 用例暴露并修复）。
+
+## 3. 三轴判定（分列）
+
+* **功能 = 通过（限定范围）**：七个时序（请求前 / 已收到 / 同刻竞争 / 永不回应 / 迟到 / 重复 / 成功对照）全部按判据通过；真实 Electron 取消路径经 preload→IPC 验收；账本四处状态一致并重开库核对；副作用账本隔离。
+* **视觉 = 本批不适用（如实披露）**：`src/**` 0 行改动，无新增界面文案；未做截图。
+* **动效 = 本批不适用（如实披露）**：无动效改动。
+
+## 4. notVerified 与缺口（如实登记）
+
+* **notVerified 5 条**：① 迟到「Provider 真实回包」未单独构造（用例 5 的迟到结果来自 agent 侧；「provider 已收到请求后取消」由用例 2 与真实 Electron 场景覆盖）；② 真实计费 / 实际 token 数不可观测（假 Provider 不返回 usage）；③ 假 Provider 下 usage 恒为 null，取消保留 usage 的分支只由代码路径与直接单测覆盖；④ 应用退出与取消的交叉未单独构造；⑤ 未做界面截图。
+* **本批工具清理（如实登记）**：调试期间多次运行留下过 **24 个 Electron 探针进程**，已全部清除（当前 0 残留）；「按命令行标记清扫」已并入验收驱动，后续批次不再外溢。
+* **继续单列**：两条既有确定性失败（未修）· `START_MARGIN_MS` 与产品预算成对 · 跨组织真机 2 条 notVerified · 两条探针门禁既有失败（`governance-ui` 1/5、`model-keychain-restart` 3/15）· OAuth · 插件隔离（D5-08）· D5-02 `prompt()` 遗留 · SIGKILL 边界 · 历史调试 run 目录。
+
+## 5. 判定与下一步
+
+**判定：D5-03 第十二批（用户取消在途模型调用后的完整收敛）= PASS（限定范围：R2 与 runTask 不返回两项均红→绿，账本与事实一致、历史 call 不改写、副作用账本隔离、真实 Electron 取消路径通过；未验收项如实单列）；D5-03 整体仍 = PARTIAL。**
+
+**本批闭环的旧缺口**：第十批登记的 R2（取消后 call 停 `STARTED`）与第十一批新登记的「用户取消后 `runTask` 不收敛」——两项均已实施并验证（见 §1）。
+
+剩余缺口逐条：① 上述 notVerified 5 条；② 两条既有确定性失败（`d4-03-approval-push-isolation` P2、`side-effect-c4-gates` No Direct Domain Bypass）另案；③ `START_MARGIN_MS` 与产品预算同步约束；④ 跨组织真机 2 条 notVerified；⑤ 两条探针门禁既有失败；⑥ OAuth；⑦ 插件隔离（D5-08）；⑧ D5-02 `prompt()` 遗留；⑨ SIGKILL 边界；⑩ 第五批登记其余残留。
+
+下一步建议：两条既有确定性失败另案 → 两条探针门禁单独排期 → 跨组织真机入口 → OAuth → 真实第三方 / Adobe（D5-04 / D5-05）。
