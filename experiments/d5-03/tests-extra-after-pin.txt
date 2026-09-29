@@ -1,0 +1,109 @@
+TAP version 13
+# (node:37576) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: READ 链：工具门 → 真实受控读取 → 有界 untrusted 正文回 dsh → 审计与日志零正文
+ok 1 - READ 链：工具门 → 真实受控读取 → 有界 untrusted 正文回 dsh → 审计与日志零正文
+  ---
+  duration_ms: 968.283583
+  type: 'test'
+  ...
+# Subtest: READ 越权：模型自报未授权 viewId → 0 次真实读取、execution FAILED、任务不成功
+ok 2 - READ 越权：模型自报未授权 viewId → 0 次真实读取、execution FAILED、任务不成功
+  ---
+  duration_ms: 929.796125
+  type: 'test'
+  ...
+# Subtest: WRITE 链：导航 propose → 用户审批（绑定目标+地址）→ lease → claim → 真实导航 → READ_AFTER_WRITE PASS
+ok 3 - WRITE 链：导航 propose → 用户审批（绑定目标+地址）→ lease → claim → 真实导航 → READ_AFTER_WRITE PASS
+  ---
+  duration_ms: 953.104375
+  type: 'test'
+  ...
+# Subtest: WRITE 拒绝：用户 DENY → 0 导航、execution 不存在、不产生任何“已回滚”式结论
+ok 4 - WRITE 拒绝：用户 DENY → 0 导航、execution 不存在、不产生任何“已回滚”式结论
+  ---
+  duration_ms: 963.109792
+  type: 'test'
+  ...
+# Subtest: 工具门：URL 协议/凭据在 propose 阶段就被拒（0 side-effect call、0 导航），未授权目标不产生 plan
+ok 5 - 工具门：URL 协议/凭据在 propose 阶段就被拒（0 side-effect call、0 导航），未授权目标不产生 plan
+  ---
+  duration_ms: 331.285292
+  type: 'test'
+  ...
+# (node:37619) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: D4-02B-L1 · 5-run lifecycle：全部自然结束，0 orphan / 0 listener 累积
+ok 6 - D4-02B-L1 · 5-run lifecycle：全部自然结束，0 orphan / 0 listener 累积
+  ---
+  duration_ms: 2922.641792
+  type: 'test'
+  ...
+# Subtest: D4-02B-L2 · 2 并发 Harness：独立 DSH_HOME / capability / session，不串
+ok 7 - D4-02B-L2 · 2 并发 Harness：独立 DSH_HOME / capability / session，不串
+  ---
+  duration_ms: 798.9965
+  type: 'test'
+  ...
+# Subtest: D4-02B-L3 · capability cross-use / exhausted：token 绑定进程内 capability，跨 proxy DENY
+ok 8 - D4-02B-L3 · capability cross-use / exhausted：token 绑定进程内 capability，跨 proxy DENY
+  ---
+  duration_ms: 4.528875
+  type: 'test'
+  ...
+# (node:37639) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Official dsh WRITE Happy Path：proposal → WAITING_APPROVAL → trusted approve → 受监督 exactly-once → verified → dsh 继续 → Task SUCCEEDED
+ok 9 - Official dsh WRITE Happy Path：proposal → WAITING_APPROVAL → trusted approve → 受监督 exactly-once → verified → dsh 继续 → Task SUCCEEDED
+  ---
+  duration_ms: 1101.682791
+  type: 'test'
+  ...
+# Subtest: Official dsh WRITE Deny Path：真实 Approval UI Deny → 0 mutation / 0 lease / Harness 得不到 success
+ok 10 - Official dsh WRITE Deny Path：真实 Approval UI Deny → 0 mutation / 0 lease / Harness 得不到 success
+  ---
+  duration_ms: 956.63125
+  type: 'test'
+  ...
+# Subtest: Official dsh WRITE Timeout Path：用户不操作 → 0 mutation / 0 lease / call BLOCKED
+ok 11 - Official dsh WRITE Timeout Path：用户不操作 → 0 mutation / 0 lease / call BLOCKED
+  ---
+  duration_ms: 1383.254583
+  type: 'test'
+  ...
+# Subtest: Official dsh WRITE UNKNOWN_EFFECT Path：dispatched 后 executor 死亡 → 不把 unverified 结果交给 Harness；Task/Step BLOCKED；0 second call / 0 retry
+ok 12 - Official dsh WRITE UNKNOWN_EFFECT Path：dispatched 后 executor 死亡 → 不把 unverified 结果交给 Harness；Task/Step BLOCKED；0 second call / 0 retry
+  ---
+  duration_ms: 1022.865584
+  type: 'test'
+  ...
+# Subtest: Official dsh WRITE APPLIED Recovery：mutation 已提交后 executor 死亡 → recovery APPLIED → call SUCCEEDED，但 Task/Step 保持 BLOCKED（Explicit Resume = DEFERRED）
+ok 13 - Official dsh WRITE APPLIED Recovery：mutation 已提交后 executor 死亡 → recovery APPLIED → call SUCCEEDED，但 Task/Step 保持 BLOCKED（Explicit Resume = DEFERRED）
+  ---
+  duration_ms: 995.397667
+  type: 'test'
+  ...
+# (node:37649) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Bridge lifecycle：start → issue → stop → listener/port/capability 全部清理
+ok 14 - Bridge lifecycle：start → issue → stop → listener/port/capability 全部清理
+  ---
+  duration_ms: 350.001333
+  type: 'test'
+  ...
+# Subtest: 5-run lifecycle：每 run 独立 dsh / DSH_HOME / capability；0 orphan / 0 listener 累积
+ok 15 - 5-run lifecycle：每 run 独立 dsh / DSH_HOME / capability；0 orphan / 0 listener 累积
+  ---
+  duration_ms: 133647.645625
+  type: 'test'
+  ...
+1..15
+# tests 15
+# suites 0
+# pass 15
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 157490.367083
+exit=0

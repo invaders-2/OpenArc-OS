@@ -1,0 +1,28 @@
+{
+  "cwd": "/Users/wepingli/Desktop/OpenArc OS-integration",
+  "envOverride": {
+    "OPENARC_DSH_RUNTIME": null,
+    "OPENARC_DSH_BIN": null
+  },
+  "runtime": {
+    "label": "resolveDshRuntime()",
+    "ok": true,
+    "value": "/Users/wepingli/Desktop/OpenArc OS-integration"
+  },
+  "bin": {
+    "label": "resolveDshBin()",
+    "ok": true,
+    "value": "/Users/wepingli/Desktop/OpenArc OS-integration/node_modules/.bin/dsh"
+  },
+  "version": {
+    "label": "dshVersion()",
+    "ok": true,
+    "value": "0.1.5-rc.2"
+  },
+  "sdk": {
+    "label": "resolveAcpSdk()",
+    "ok": true,
+    "value": "/Users/wepingli/Desktop/OpenArc OS-integration/node_modules/@agentclientprotocol/sdk/dist/acp.js"
+  },
+  "sdkPackageVersion": "1.4.0"
+}

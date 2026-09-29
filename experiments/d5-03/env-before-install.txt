@@ -1,0 +1,50 @@
+== captured-at ==
+2026-09-29T04:16:04Z
+== node/npm ==
+v22.22.3
+10.9.8
+== npm registry ==
+https://registry.npmjs.org/
+== sha256 baseline-before-pin.txt ==
+66572aa904c26b33b5f1a336e041f0943b808457614ee10aa29de7c029bf3cba  experiments/d5-03/baseline-before-pin.txt
+== sha256 resolvers-before.txt ==
+8b7d598ddd1f328c194d73272704c96508b1210219801f93bdefee600c021449  experiments/d5-03/resolvers-before.txt
+== sha256 package-lock.json (pre-install) ==
+78f2572c8fe708d88c485e1b02d922de5a3b8c3c174c82f3690a77ebe2036279  package-lock.json
+== sha256 package.json (pre-install) ==
+4c0cbf302a5a80b547c61bef56f98a62b3865d7b989f0491f2933b7b3b556620  package.json
+== npm ls (pre-install) ==
+openarc-os@0.1.0 /Users/wepingli/Desktop/OpenArc OS-integration
+`-- @agentclientprotocol/sdk@1.4.0
+
+== node_modules/.bin/dsh pre-install ==
+ls: node_modules/.bin/dsh: No such file or directory
+== node_modules/@deepseek-ai pre-install ==
+ls: node_modules/@deepseek-ai: No such file or directory
+== ACP SDK installed version ==
+1.4.0
+== lock: @agentclientprotocol/sdk entry ==
+{
+  "version": "1.4.0",
+  "resolved": "https://registry.npmjs.org/@agentclientprotocol/sdk/-/sdk-1.4.0.tgz",
+  "integrity": "sha512-/eufudw+aFY1LKLolT6yFE6UMmYRl7fMJ/DEONSIyR6wI3slHWITBsANRGqXEY8FRzqUxwh7QEaGiZHcJPVThg==",
+  "dev": true,
+  "license": "Apache-2.0",
+  "peerDependencies": {
+    "zod": "^3.25.0 || ^4.0.0"
+  }
+}
+== ~/.dsh snapshot (names+mtime, NO secrets) ==
+total 24
+drwx------@  11 wepingli  staff   352 Sep 29 10:06 .
+drwxr-x---+ 160 wepingli  staff  5120 Sep 29 09:06 ..
+-rw-r--r--@   1 wepingli  staff    37 Sep  9 11:53 .anonymous-user-id
+-rw-------@   1 wepingli  staff   223 Sep 11 09:54 .credentials.yaml
+lrwxr-xr-x@   1 wepingli  staff    25 Sep 14 14:44 AGENTS.md -> /Users/wepingli/AGENTS.md
+drwx------@   3 wepingli  staff    96 Sep  9 16:28 attachments
+drwx------@   3 wepingli  staff    96 Sep 28 18:32 llm-deepseek
+drwxr-xr-x@   6 wepingli  staff   192 Sep 14 17:31 profiles
+drwx------@   6 wepingli  staff   192 Sep 11 23:17 sessions
+-rw-------@   1 wepingli  staff   322 Sep 18 10:37 settings.yaml.imported
+drwx------@   5 wepingli  staff   160 Sep 29 09:41 storages
+1790647563 /Users/wepingli/.dsh

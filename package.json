@@ -88,6 +88,7 @@
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "1.4.0",
+    "@deepseek-ai/dsh": "0.1.5-rc.2",
     "@playwright/test": "^1.55.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19.1.0",

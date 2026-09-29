@@ -1,0 +1,56 @@
+== A. ~/.dsh 顶层元数据（只统计 metadata，绝不读取 .credentials.yaml 内容） ==
+total 24
+drwx------@  11 wepingli  staff   352 Sep 29 10:06 .
+drwxr-x---+ 160 wepingli  staff  5120 Sep 29 09:06 ..
+-rw-r--r--@   1 wepingli  staff    37 Sep  9 11:53 .anonymous-user-id
+-rw-------@   1 wepingli  staff   223 Sep 11 09:54 .credentials.yaml
+lrwxr-xr-x@   1 wepingli  staff    25 Sep 14 14:44 AGENTS.md -> /Users/wepingli/AGENTS.md
+drwx------@   3 wepingli  staff    96 Sep  9 16:28 attachments
+drwx------@   3 wepingli  staff    96 Sep 28 18:32 llm-deepseek
+drwxr-xr-x@   6 wepingli  staff   192 Sep 14 17:31 profiles
+drwx------@   6 wepingli  staff   192 Sep 11 23:17 sessions
+-rw-------@   1 wepingli  staff   322 Sep 18 10:37 settings.yaml.imported
+drwx------@   5 wepingli  staff   160 Sep 29 09:41 storages
+dir mtime(epoch, before===after): 1790647563   [安装前快照 env-before-install.txt 记录同为 1790647563]
+顶层条目数: 9   [安装前后一致，未新增/删除任何条目]
+
+== B. ~/.dsh 内 2026-09-29 12:00 之后有改动的文件（逐条归属） ==
+/Users/wepingli/.dsh/storages/session_projcache/sessions/da05fc94-e0ba-4ad8-bbbe-68344218bbe7.json
+/Users/wepingli/.dsh/storages/session_projcache/sessions/session-e8a7e264-7827-4048-bc49-213ab803b88a.json
+/Users/wepingli/.dsh/sessions/--Users-wepingli-Desktop-OpenArc~0020OS--/da05fc94-e0ba-4ad8-bbbe-68344218bbe7/session.v4.jsonl.zstd
+/Users/wepingli/.dsh/sessions/--Users-wepingli-Desktop-OpenArc~0020OS--/da05fc94-e0ba-4ad8-bbbe-68344218bbe7/session.lock
+/Users/wepingli/.dsh/sessions/--Users-wepingli-Desktop-OpenArc~0020OS--/session-e8a7e264-7827-4048-bc49-213ab803b88a/session.v4.jsonl.zstd
+
+归属说明：以上全部是 DSH Desktop 宿主进程为【正在运行的本会话】写的实时对话/缓存文件
+（session id = session-e8a7e264-... 即本执行岗所属会话；da05fc94-... 为另一并发会话），
+由宿主随对话推进自动写入，与本轮任何命令无关；.credentials.yaml / settings.yaml.imported /
+profiles/ / llm-deepseek/ 均未被改动（mtime 仍为 9 月 11/14/18/28 日）。
+
+== C. 证据：本 Adapter 的隔离 DSH_HOME 一律在 os.tmpdir()（测试内断言） ==
+68:  assert.ok(start.dshHome.startsWith(os.tmpdir()), "DSH_HOME 必须是隔离临时目录");
+
+== D. 共享运行时（只读使用，绝不写入） ==
+version: 0.2.0-rc.1  [安装前后一致，仍为 0.2.0-rc.1]
+本次会话期间被改动的文件：
+（空 = 本次会话未写入共享运行时）
+
+== E. 主工作树（用户要求绝对不要改） ==
+未提交改动条目数: 17  [任务开始时用户已声明 17 条，保持不变]
+分支/HEAD: feature/d3-02-object-authorization 9119f85
+
+== F. 集成分支自身状态 ==
+ M electron/harness-adapter.cjs
+ M package-lock.json
+ M package.json
+?? experiments/d5-03/baseline-before-pin.txt
+?? experiments/d5-03/env-before-install.txt
+?? experiments/d5-03/immutability-proof.txt
+?? experiments/d5-03/install-evidence.txt
+?? experiments/d5-03/npm-install-log.txt
+?? experiments/d5-03/probe-resolvers.cjs
+?? experiments/d5-03/resolvers-after.txt
+?? experiments/d5-03/resolvers-before.txt
+?? experiments/d5-03/tests-after-pin.txt
+?? experiments/d5-03/tests-d5-03-pin-contract.txt
+?? experiments/d5-03/tests-extra-after-pin.txt
+?? tests/d5-03-dsh-runtime-pin.test.mjs

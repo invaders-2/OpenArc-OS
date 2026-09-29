@@ -1,0 +1,214 @@
+== captured-at ==
+2026-09-29T04:49:59Z
+
+== npm install log (exit code) ==
+npm warn deprecated node-domexception@1.0.0: Use your platform's native DOMException instead
+
+added 498 packages, and audited 604 packages in 34m
+
+77 packages are looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+exit=0
+
+== npm registry ==
+https://registry.npmjs.org/
+
+== npm ls @deepseek-ai/dsh @agentclientprotocol/sdk ==
+openarc-os@0.1.0 /Users/wepingli/Desktop/OpenArc OS-integration
++-- @agentclientprotocol/sdk@1.4.0
+`-- @deepseek-ai/dsh@0.1.5-rc.2
+  `-- @deepseek-ai/dsh-acp-app@0.1.5-rc.3
+    `-- @deepseek-ai/dsh-acp@0.1.5-rc.3
+      `-- @agentclientprotocol/sdk@1.4.0 deduped
+
+
+== package.json devDependency 行 ==
+90:    "@agentclientprotocol/sdk": "1.4.0",
+91:    "@deepseek-ai/dsh": "0.1.5-rc.2",
+
+== package-lock.json: dsh 条目（resolved + integrity） ==
+{
+  "version": "0.1.5-rc.2",
+  "resolved": "https://registry.npmjs.org/@deepseek-ai/dsh/-/dsh-0.1.5-rc.2.tgz",
+  "integrity": "sha512-8Xc8hCQHcIWRmTCVU/xZdp6/qMsWMeAd2ObChKDEsfhUPJFXx6H0lgeb1DxUMD86HZrrVN+1bCvn1ppjZ/fOxw==",
+  "dev": true,
+  "license": "MIT",
+  "dependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/cordis-plugin-hmr": "^1.0.17",
+    "@deepseek-ai/cordis-plugin-include": "^1.0.7",
+    "@deepseek-ai/cordis-plugin-loader": "^1.0.3",
+    "@deepseek-ai/cordis-plugin-timer": "^1.1.4",
+    "@deepseek-ai/dsh-acp-app": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-agent-instructions": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-agent-tool-presentation": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-app-boot": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-base": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-agent-preset": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-client-ui-cordis": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-cmdline": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-command-compact": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-command-goal": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-compaction-basic": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-compaction-tool-result-pruner": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-cordis-client-runner": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-fs-local": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-goal": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-goal-round-driver": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-headless": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-home-paths": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-hooks-claude-code": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-hooks-codex": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-http-proxy": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-jobs-local": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-launch-environment": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-mcp-client": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-persona": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-plan-mode": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-pwsh-local": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-pwsh-sandbox": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-schedule": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-sdk-app": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-sdk-minimal": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-session-projection": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-session-reference": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-skill": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-skill-filesystem": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-terminal": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-terminal-bash": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-time-context": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tmux-context": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-token-meter": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-ask-user": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-bash": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-bash-persistent": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-cordis": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-fs": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-fs-search": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-goal": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-jobs": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-present": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-pwsh": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-pwsh-persistent": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-ralph": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-skill": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-str-replace-editor": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-subagent": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-subagent-control": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-todo": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-web": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tool-workflow": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-web-app": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-webhook": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-webhook-github": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-workflow-worker-thread": "^0.1.5-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.2",
+    "commander": "^15.0.0",
+    "js-yaml": "^4.2.0",
+    "node-addon-require-builtin": "^0.1.4"
+  },
+  "bin": {
+    "dsh": "lib/bin.js"
+  }
+}
+
+== package-lock.json: ACP SDK 条目（resolved + integrity） ==
+{
+  "version": "1.4.0",
+  "resolved": "https://registry.npmjs.org/@agentclientprotocol/sdk/-/sdk-1.4.0.tgz",
+  "integrity": "sha512-/eufudw+aFY1LKLolT6yFE6UMmYRl7fMJ/DEONSIyR6wI3slHWITBsANRGqXEY8FRzqUxwh7QEaGiZHcJPVThg==",
+  "dev": true,
+  "license": "Apache-2.0",
+  "peerDependencies": {
+    "zod": "^3.25.0 || ^4.0.0"
+  }
+}
+
+== node_modules/.bin/dsh 绝对路径 + realpath ==
+lrwxr-xr-x@ 1 wepingli  staff  30 Sep 29 12:49 node_modules/.bin/dsh -> ../@deepseek-ai/dsh/lib/bin.js
+/Users/wepingli/Desktop/OpenArc OS-integration/node_modules/@deepseek-ai/dsh/lib/bin.js
+
+== node_modules/@deepseek-ai/dsh/package.json version ==
+0.1.5-rc.2
+
+== node_modules/@agentclientprotocol/sdk version（必须仍为 1.4.0） ==
+1.4.0
+
+== 锁文件覆盖面：有 version 的条目是否都有 resolved + integrity ==
+{
+  "entries": 737,
+  "complete": 711,
+  "missing": [
+    "",
+    "node_modules/@esbuild/darwin-arm64",
+    "node_modules/@playwright/test",
+    "node_modules/@rollup/rollup-darwin-arm64",
+    "node_modules/@types/estree",
+    "node_modules/@types/react",
+    "node_modules/@types/react-dom",
+    "node_modules/csstype",
+    "node_modules/esbuild",
+    "node_modules/fdir",
+    "node_modules/fsevents",
+    "node_modules/lucide-react",
+    "node_modules/nanoid",
+    "node_modules/picocolors",
+    "node_modules/picomatch",
+    "node_modules/playwright",
+    "node_modules/playwright-core",
+    "node_modules/postcss",
+    "node_modules/react",
+    "node_modules/react-dom",
+    "node_modules/rollup",
+    "node_modules/scheduler",
+    "node_modules/source-map-js",
+    "node_modules/tinyglobby",
+    "node_modules/typescript",
+    "node_modules/vite"
+  ]
+}
+
+== lockfileVersion / dsh 传递依赖里的 dsh-acp-app ==
+3
+node:internal/modules/cjs/loader:1433
+  throw err;
+  ^
+
+Error: Cannot find module './node_modules/@deepseek-ai/dsh-acp-app/package.json'
+Require stack:
+- /Users/wepingli/Desktop/OpenArc OS-integration/[eval]
+    at Function._resolveFilename (node:internal/modules/cjs/loader:1430:15)
+    at defaultResolveImpl (node:internal/modules/cjs/loader:1040:19)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1045:22)
+    at Function._load (node:internal/modules/cjs/loader:1216:25)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:254:19)
+    at Module.require (node:internal/modules/cjs/loader:1527:12)
+    at require (node:internal/modules/helpers:147:16)
+    at [eval]:1:1
+    at runScriptInThisContext (node:internal/vm:209:10)
+    at node:internal/process/execution:446:12 {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [ '/Users/wepingli/Desktop/OpenArc OS-integration/[eval]' ]
+}
+
+Node.js v22.22.3
+
+== ~/.dsh（只列名与 mtime，不读 secret） ==
+total 24
+drwx------@  11 wepingli  staff   352 Sep 29 10:06 .
+drwxr-x---+ 160 wepingli  staff  5120 Sep 29 09:06 ..
+-rw-r--r--@   1 wepingli  staff    37 Sep  9 11:53 .anonymous-user-id
+-rw-------@   1 wepingli  staff   223 Sep 11 09:54 .credentials.yaml
+lrwxr-xr-x@   1 wepingli  staff    25 Sep 14 14:44 AGENTS.md -> /Users/wepingli/AGENTS.md
+drwx------@   3 wepingli  staff    96 Sep  9 16:28 attachments
+drwx------@   3 wepingli  staff    96 Sep 28 18:32 llm-deepseek
+drwxr-xr-x@   6 wepingli  staff   192 Sep 14 17:31 profiles
+drwx------@   6 wepingli  staff   192 Sep 11 23:17 sessions
+-rw-------@   1 wepingli  staff   322 Sep 18 10:37 settings.yaml.imported
+drwx------@   5 wepingli  staff   160 Sep 29 09:41 storages
+1790647563 /Users/wepingli/.dsh
+
+== 共享运行时仍未被改动（版本自证） ==
+0.2.0-rc.1

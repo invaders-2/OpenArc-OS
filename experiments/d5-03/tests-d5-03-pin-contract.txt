@@ -1,0 +1,54 @@
+TAP version 13
+# Subtest: D5-03-A · 默认解析 = 项目本地运行时根，dsh 版本 PIN 0.1.5-rc.2，bin 落在项目内
+ok 1 - D5-03-A · 默认解析 = 项目本地运行时根，dsh 版本 PIN 0.1.5-rc.2，bin 落在项目内
+  ---
+  duration_ms: 1.287042
+  type: 'test'
+  ...
+# Subtest: D5-03-B · OPENARC_DSH_RUNTIME 指向没有 dsh 的目录 → DSH_RUNTIME_MISSING
+ok 2 - D5-03-B · OPENARC_DSH_RUNTIME 指向没有 dsh 的目录 → DSH_RUNTIME_MISSING
+  ---
+  duration_ms: 0.6575
+  type: 'test'
+  ...
+# Subtest: D5-03-C · 版本不符的运行时 → DSH_VERSION_MISMATCH，且与"缺失"可区分
+ok 3 - D5-03-C · 版本不符的运行时 → DSH_VERSION_MISMATCH，且与"缺失"可区分
+  ---
+  duration_ms: 1.325792
+  type: 'test'
+  ...
+# Subtest: D5-03-D · 不回退证明：共享运行时真实存在时，项目运行时不可用也绝不返回它
+ok 4 - D5-03-D · 不回退证明：共享运行时真实存在时，项目运行时不可用也绝不返回它
+  ---
+  duration_ms: 1.362375
+  type: 'test'
+  ...
+# 回退目标真实存在（非空证明）：/Users/wepingli/Library/Application Support/DSH Desktop/runtime
+# Subtest: D5-03-E · ACP SDK 只认项目内那一份，版本 1.4.0（与锁文件一致）
+ok 5 - D5-03-E · ACP SDK 只认项目内那一份，版本 1.4.0（与锁文件一致）
+  ---
+  duration_ms: 5.326333
+  type: 'test'
+  ...
+# Subtest: D5-03-F · 源码级锁：resolveDshRuntime 默认分支不含共享运行时路径字面量
+ok 6 - D5-03-F · 源码级锁：resolveDshRuntime 默认分支不含共享运行时路径字面量
+  ---
+  duration_ms: 0.137625
+  type: 'test'
+  ...
+# Subtest: D5-03-G · OPENARC_DSH_BIN 覆盖同样校验版本，合法覆盖仍可用
+ok 7 - D5-03-G · OPENARC_DSH_BIN 覆盖同样校验版本，合法覆盖仍可用
+  ---
+  duration_ms: 2.028125
+  type: 'test'
+  ...
+1..7
+# tests 7
+# suites 0
+# pass 7
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 55.202208
+exit=0

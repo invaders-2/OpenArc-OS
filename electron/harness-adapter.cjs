@@ -33,26 +33,55 @@ const HARNESS_ERROR = Object.freeze({
   NOT_STARTED: "HARNESS_NOT_STARTED",
 });
 
-/** 运行时必须从 OpenArc 管理或冻结的等价路径启动，绝不依赖用户 PATH。 */
+/**
+ * 运行时必须来自 OpenArc 自己冻结的本地安装，绝不依赖用户 PATH，也绝不借用 DSH Desktop 共享运行时。
+ * 共享运行时随桌面端升级而漂移，是版本不确定的源头：默认分支里不得出现它的路径。
+ * 显式覆盖（OPENARC_DSH_RUNTIME / OPENARC_DSH_BIN）同样要**校验**，任何不符一律抛错，绝不回退到未知版本。
+ */
+const DSH_RUNTIME_ERROR = Object.freeze({ RUNTIME_MISSING: "DSH_RUNTIME_MISSING", VERSION_MISMATCH: "DSH_VERSION_MISMATCH" });
+const PINNED_DSH_VERSION = "0.1.5-rc.2";
+const PROJECT_RUNTIME_ROOT = path.resolve(__dirname, "..");
+function dshPackageJson(runtime) { return path.join(runtime, "node_modules", "@deepseek-ai", "dsh", "package.json"); }
+function assertDshRuntime(runtime, origin) {
+  const pkg = readJson(dshPackageJson(runtime));
+  if (!pkg || !pkg.version) throw harnessError(DSH_RUNTIME_ERROR.RUNTIME_MISSING, origin + " " + runtime + " 内没有 @deepseek-ai/dsh");
+  if (pkg.version !== PINNED_DSH_VERSION) throw harnessError(DSH_RUNTIME_ERROR.VERSION_MISMATCH, origin + " " + runtime + " 需要 " + PINNED_DSH_VERSION + "，实际 " + pkg.version);
+  return runtime;
+}
 function resolveDshRuntime() {
-  return process.env.OPENARC_DSH_RUNTIME || path.join(os.homedir(), "Library", "Application Support", "DSH Desktop", "runtime");
+  const override = process.env.OPENARC_DSH_RUNTIME;
+  return assertDshRuntime(override ? path.resolve(override) : PROJECT_RUNTIME_ROOT, override ? "OPENARC_DSH_RUNTIME" : "project runtime");
 }
+/** 该 bin 归属哪个 dsh 安装根（node_modules/.bin/dsh 是软链，必须走 realpath）。 */
+function dshRuntimeRootOf(bin) {
+  let real; try { real = fs.realpathSync(bin); } catch { return null; }
+  for (let dir = path.dirname(real); ;) {
+    if (fs.existsSync(dshPackageJson(dir))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+/** 只在已解析的运行时内找 bin；找不到返回 null（= 该运行时缺 bin，由调用方语义与 NOT_STARTED 区分）。 */
 function resolveDshBin(runtime = resolveDshRuntime()) {
-  if (process.env.OPENARC_DSH_BIN) return process.env.OPENARC_DSH_BIN;
+  const override = process.env.OPENARC_DSH_BIN;
+  if (override) {
+    const bin = path.resolve(override);
+    const owner = dshRuntimeRootOf(bin);
+    if (!owner) throw harnessError(DSH_RUNTIME_ERROR.RUNTIME_MISSING, "OPENARC_DSH_BIN " + bin + " 不属于任何 @deepseek-ai/dsh 安装");
+    assertDshRuntime(owner, "OPENARC_DSH_BIN runtime");
+    return bin;
+  }
   const managed = path.join(runtime, "node_modules", ".bin", "dsh");
-  if (fs.existsSync(managed)) return managed;
-  const local = path.join(__dirname, "..", "node_modules", ".bin", "dsh");
-  if (fs.existsSync(local)) return local;
-  return null;
+  return fs.existsSync(managed) ? managed : null;
 }
-function resolveAcpSdk(runtime = resolveDshRuntime()) {
-  try { return require.resolve("@agentclientprotocol/sdk"); } catch { /* fall through */ }
-  const p = path.join(runtime, "node_modules", "@agentclientprotocol", "sdk", "dist", "acp.js");
-  return fs.existsSync(p) ? p : null;
+/** ACP SDK 只认项目内那一份（PIN 1.4.0）；运行时切换不得改用别处副本。 */
+function resolveAcpSdk() {
+  try { return require.resolve("@agentclientprotocol/sdk"); } catch { return null; }
 }
 function readJson(p) { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return null; } }
 function dshVersion(runtime = resolveDshRuntime()) {
-  return readJson(path.join(runtime, "node_modules", "@deepseek-ai", "dsh", "package.json"))?.version || null;
+  return readJson(dshPackageJson(runtime))?.version || null;
 }
 function sdkVersion(sdkPath) {
   try { return readJson(path.join(path.dirname(path.dirname(sdkPath)), "package.json"))?.version || null; } catch { return null; }
@@ -187,7 +216,7 @@ class HarnessAdapter {
   /** Harness 只能拿到 Proxy endpoint + scoped capability + safe model metadata。 */
   /** modelConfigVersion = 本 run 的任务冻结版本；未绑定旧任务传 null（不校验，保持既有行为）。 */
   async start({ context, modelConfigId, modelConfigVersion = null, maxCalls = 4, ttlMs = 120000, workspace = null, startTimeoutMs = 30000, requestId = null, toolFacade = null, memory = null } = {}) {
-    if (!this.bin) throw harnessError(HARNESS_ERROR.NOT_STARTED, "dsh executable not found");
+    if (!this.bin) throw harnessError(HARNESS_ERROR.NOT_STARTED, "dsh executable not found in runtime " + this.runtime);
     if (!this.sdkPath) throw harnessError(HARNESS_ERROR.NOT_STARTED, "ACP SDK not found");
     const cap = this.modelProxy.issueCapability({ context, configId: modelConfigId, allowedCapabilities: ["chat"], maxCalls, ttlMs, expectedModelConfigVersion: modelConfigVersion });
     if (!cap.ok) { const e = harnessError(cap.error === "MODEL_CONFIG_UNAVAILABLE" ? HARNESS_ERROR.NOT_STARTED : cap.error); throw e; }
@@ -414,4 +443,4 @@ class HarnessAdapter {
   }
 }
 
-module.exports = { HarnessAdapter, HARNESS_ERROR, ACP_PROTOCOL_VERSION, resolveDshRuntime, resolveDshBin, resolveAcpSdk, dshVersion, buildHarnessEnv, buildAcpPatch, buildManagedToolProfile, MANAGED_TOOL_PROFILE, TOOL_FACADE_BUNDLE };
+module.exports = { HarnessAdapter, HARNESS_ERROR, DSH_RUNTIME_ERROR, ACP_PROTOCOL_VERSION, resolveDshRuntime, resolveDshBin, resolveAcpSdk, dshVersion, buildHarnessEnv, buildAcpPatch, buildManagedToolProfile, MANAGED_TOOL_PROFILE, TOOL_FACADE_BUNDLE };
