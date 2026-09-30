@@ -1,0 +1,9 @@
+=== RUN 2 ===
+run2 WALL=18.33 EXIT=0
+结论：PASS — {"pass":64,"fail":0,"total":64,"notVerified":1}
+=== RUN 3 ===
+run3 WALL=18.15 EXIT=0
+结论：PASS — {"pass":64,"fail":0,"total":64,"notVerified":1}
+=== RUN 4 ===
+run4 WALL=18.36 EXIT=0
+结论：PASS — {"pass":64,"fail":0,"total":64,"notVerified":1}

@@ -1,0 +1,59 @@
+
+> openarc-os@0.1.0 test:d5-01-boundary
+> npm run build && node experiments/d5-01/browser-inprocess-boundary-e2e.mjs
+
+
+> openarc-os@0.1.0 build
+> tsc --noEmit && vite build
+
+vite v7.3.6 building client environment for production...
+transforming...
+✓ 1638 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/design-system.html                   0.79 kB │ gzip:   0.43 kB
+dist/index.html                           0.84 kB │ gzip:   0.42 kB
+dist/assets/design-system-Wum50NZM.css    3.45 kB │ gzip:   0.95 kB
+dist/assets/page-states-CtkK1Qxt.css     87.47 kB │ gzip:  16.15 kB
+dist/assets/design-system-BKhOPsHZ.js    15.16 kB │ gzip:   5.08 kB
+dist/assets/page-states-BFPlgRhI.js     230.68 kB │ gzip:  72.24 kB
+dist/assets/main-qXEiIhXD.js            373.56 kB │ gzip: 112.99 kB
+✓ built in 1.09s
+(node:16568) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  [PASS] boot · B0 · 真实 electron . 启动并暴露 CDP
+  [PASS] boot · B1 · 真实 UI 登录 admin
+  [PASS] setup · B2 · 真实 UI 建立确定性 provider/model 并设为默认 chat
+  [PASS] setup · B3 · 治理授予 ai 两个浏览器工具权限
+  [PASS] setup · B4 · 用户在 UI 上显式授权该标签给 AI 控制
+  [PASS] P1 · P1.1 · 审批等待期间真实撤掉 ai 的工具权限（治理入口）
+  [PASS] P1 · P1.2 · claim 前撤权 → 调用不成功、绝不派发导航
+  [PASS] P1 · P1.3 · 页面零变化（真实视图仍在 /form）
+  [PASS] P1 · P1.4 · 不留 ACTIVE lease
+  [PASS] P2 · P2.1 · 已真实派发（站点收到请求）
+  [PASS] P2 · P2.2 · 停止后调用收敛为**结果未知**（不是 FAILED、更不是'未执行'）
+  [PASS] P2 · P2.3 · 任务/步骤都有终态（不悬挂）
+  [PASS] P2 · P2.4 · 停止不产生第二次派发（站点仍只有 1 次请求）
+  [PASS] P2 · P2.5 · 迟到完成确实发生了（真实视图已落到迟到页面）
+  [PASS] P2 · P2.6 · 迟到完成**绝不覆盖**已经形成的权威未知状态
+  [PASS] P2 · P2.7 · 即时只读恢复结论 = 无结论（不给假结论）
+  [PASS] P2 · P2.8 · UI 如实显示停止/未成功，绝不谎称成功
+  [PASS] P3 · P3.1 · 执行中关闭标签 → 调用判**不可知**并收敛
+  [PASS] P3 · P3.2 · 绝不转向别的标签（没有对 /page2 或管理界面的新导航）
+  [PASS] P3 · P3.3 · 任务/步骤终态一致（不悬挂）
+  [PASS] P3 · P3.4 · 结果未知时给出人工核查入口（恢复面板 / task-recovery），结论不冒充
+  [PASS] P4 · P4.0 · 本次导航已真实派发（站点收到请求）
+  [PASS] P4 · P4.1 · 用户自己的导航确实落地（真实视图在用户的页面）
+  [PASS] P4 · P4.2 · 本次执行**绝不被记成成功**（没有把自己的导航算作本次结果）
+  [PASS] P4 · P4.3 · 结论是可辩护的：未提交过我们的地址 → 明确未生效；否则不可知
+  [PASS] P4 · P4.4 · 绝不产生第二次派发
+  [PASS] P5 · P5.1 · 双击批准只产生一次派发（站点恰好 +1）
+  [PASS] P5 · P5.2 · 恰好 1 次执行 lease、调用 SUCCEEDED
+  [PASS] P6 · P6.1 · 两次导航各自用自己的批准与地址（plan 不同、各自的 plan 里就是各自的地址）
+  [PASS] P6 · P6.1b · 两次都是从**不同地址**出发的真实导航（不是同址 no-op）
+  [PASS] P6 · P6.2 · 各自真实落地到自己的地址（真实视图 = 目标）
+  [PASS] hygiene · H1 · 主进程无未处理错误
+   ? [NOT VERIFIED] 像素级可见性（本门禁只用 CDP + 站点侧证据，不含屏幕截图） — 屏幕级证据见同一轮的可见性门禁 docs/D5-01-CLOSURE3-VISIBILITY-*；本门禁不冒充像素证据。
+
+结论：PASS — {"pass":32,"fail":0,"total":32,"notVerified":1}
+WALL=24.03 EXIT=0

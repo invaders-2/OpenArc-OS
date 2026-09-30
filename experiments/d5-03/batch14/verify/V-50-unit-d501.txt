@@ -1,0 +1,237 @@
+TAP version 13
+# (node:16432) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: READ 链：工具门 → 真实受控读取 → 有界 untrusted 正文回 dsh → 审计与日志零正文
+ok 1 - READ 链：工具门 → 真实受控读取 → 有界 untrusted 正文回 dsh → 审计与日志零正文
+  ---
+  duration_ms: 1386.196916
+  type: 'test'
+  ...
+# Subtest: READ 越权：模型自报未授权 viewId → 0 次真实读取、execution FAILED、任务不成功
+ok 2 - READ 越权：模型自报未授权 viewId → 0 次真实读取、execution FAILED、任务不成功
+  ---
+  duration_ms: 980.418333
+  type: 'test'
+  ...
+# Subtest: WRITE 链：导航 propose → 用户审批（绑定目标+地址）→ lease → claim → 真实导航 → READ_AFTER_WRITE PASS
+ok 3 - WRITE 链：导航 propose → 用户审批（绑定目标+地址）→ lease → claim → 真实导航 → READ_AFTER_WRITE PASS
+  ---
+  duration_ms: 1018.910292
+  type: 'test'
+  ...
+# Subtest: WRITE 拒绝：用户 DENY → 0 导航、execution 不存在、不产生任何“已回滚”式结论
+ok 4 - WRITE 拒绝：用户 DENY → 0 导航、execution 不存在、不产生任何“已回滚”式结论
+  ---
+  duration_ms: 943.898875
+  type: 'test'
+  ...
+# Subtest: 工具门：URL 协议/凭据在 propose 阶段就被拒（0 side-effect call、0 导航），未授权目标不产生 plan
+ok 5 - 工具门：URL 协议/凭据在 propose 阶段就被拒（0 side-effect call、0 导航），未授权目标不产生 plan
+  ---
+  duration_ms: 353.55075
+  type: 'test'
+  ...
+# Subtest: allowlist：两个受控浏览器工具在册；FORBIDDEN 表未被改动或通配
+ok 6 - allowlist：两个受控浏览器工具在册；FORBIDDEN 表未被改动或通配
+  ---
+  duration_ms: 1.10525
+  type: 'test'
+  ...
+# Subtest: 正反对照：受控工具可用；内置浏览器 / 任意脚本旁路不可用
+ok 7 - 正反对照：受控工具可用；内置浏览器 / 任意脚本旁路不可用
+  ---
+  duration_ms: 1.6705
+  type: 'test'
+  ...
+# Subtest: 选择目标：必须是 trusted user + 本人分区 + 存在的标签；模型自报无效
+ok 8 - 选择目标：必须是 trusted user + 本人分区 + 存在的标签；模型自报无效
+  ---
+  duration_ms: 1.061541
+  type: 'test'
+  ...
+# Subtest: 读取：有界正文 + 不可信标记 + 审计去敏；未选择/未授权一律拒绝
+ok 9 - 读取：有界正文 + 不可信标记 + 审计去敏；未选择/未授权一律拒绝
+  ---
+  duration_ms: 0.344042
+  type: 'test'
+  ...
+# Subtest: 导航：只走 http(s)、复用产品策略；失败/未选择不产生动作
+ok 10 - 导航：只走 http(s)、复用产品策略；失败/未选择不产生动作
+  ---
+  duration_ms: 1.624167
+  type: 'test'
+  ...
+# Subtest: 标签关闭/撤销/登出/切账号：旧目标立即失效，且**不回落**到其它标签
+ok 11 - 标签关闭/撤销/登出/切账号：旧目标立即失效，且**不回落**到其它标签
+  ---
+  duration_ms: 0.444875
+  type: 'test'
+  ...
+# Subtest: 目标解析：显式 viewId 必须在授权表内；缺省只有唯一目标才可推断；多目标明确拒绝
+ok 12 - 目标解析：显式 viewId 必须在授权表内；缺省只有唯一目标才可推断；多目标明确拒绝
+  ---
+  duration_ms: 0.49325
+  type: 'test'
+  ...
+# Subtest: 导航三态：本次落地 / 302 / 能证明未生效 / 不可知 —— 一律不以'当前 URL 相等'当作成功依据
+ok 13 - 导航三态：本次落地 / 302 / 能证明未生效 / 不可知 —— 一律不以'当前 URL 相等'当作成功依据
+  ---
+  duration_ms: 1.151709
+  type: 'test'
+  ...
+# Subtest: 归因：用户自己导航到同一地址时，地址相等也不算本次成功（凭派发证据判不可知）
+ok 14 - 归因：用户自己导航到同一地址时，地址相等也不算本次成功（凭派发证据判不可知）
+  ---
+  duration_ms: 0.337333
+  type: 'test'
+  ...
+# Subtest: inspect：只读目标现状（含 URL），未授权/失效一律拒绝且不含正文
+ok 15 - inspect：只读目标现状（含 URL），未授权/失效一律拒绝且不含正文
+  ---
+  duration_ms: 0.105917
+  type: 'test'
+  ...
+# Subtest: 工具契约：读取是 READ_ONLY；导航是受控副作用（requiresApproval + CONTROLLED_REVERSIBLE_WRITE）
+ok 16 - 工具契约：读取是 READ_ONLY；导航是受控副作用（requiresApproval + CONTROLLED_REVERSIBLE_WRITE）
+  ---
+  duration_ms: 1.694208
+  type: 'test'
+  ...
+# Subtest: 去敏与截断工具函数：URL 去凭据/查询串/片段；正文去控制字符
+ok 17 - 去敏与截断工具函数：URL 去凭据/查询串/片段；正文去控制字符
+  ---
+  duration_ms: 0.355125
+  type: 'test'
+  ...
+# (node:16435) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: B1 · claim 前撤权：绝不派发（0 导航）、调用明确收敛，且不留 ACTIVE lease
+ok 18 - B1 · claim 前撤权：绝不派发（0 导航）、调用明确收敛，且不留 ACTIVE lease
+  ---
+  duration_ms: 406.744333
+  type: 'test'
+  ...
+# Subtest: B2 · 派发后停止（取消任务）：结论不是'未执行'，状态不悬挂，且不再有第二次派发
+ok 19 - B2 · 派发后停止（取消任务）：结论不是'未执行'，状态不悬挂，且不再有第二次派发
+  ---
+  duration_ms: 380.5315
+  type: 'test'
+  ...
+# Subtest: B3 · 超时后迟到完成：不覆盖权威 UNKNOWN_EFFECT、不自动重试；只读恢复才给结论
+ok 20 - B3 · 超时后迟到完成：不覆盖权威 UNKNOWN_EFFECT、不自动重试；只读恢复才给结论
+  ---
+  duration_ms: 409.252875
+  type: 'test'
+  ...
+# Subtest: B4 · 执行中目标消失：判不可知、不转向别的标签、调用与任务都有终态
+ok 21 - B4 · 执行中目标消失：判不可知、不转向别的标签、调用与任务都有终态
+  ---
+  duration_ms: 374.449333
+  type: 'test'
+  ...
+# Subtest: B5 · 结果核查归因：只认本次派发证据；无证据/被中止一律不得认领成功
+ok 22 - B5 · 结果核查归因：只认本次派发证据；无证据/被中止一律不得认领成功
+  ---
+  duration_ms: 372.74675
+  type: 'test'
+  ...
+# Subtest: B6 · 并发与重复：同一执行记录只派发一次；plan 被改后旧批准不得用于新地址
+ok 23 - B6 · 并发与重复：同一执行记录只派发一次；plan 被改后旧批准不得用于新地址
+  ---
+  duration_ms: 756.499083
+  type: 'test'
+  ...
+# Subtest: safeFilename：去掉路径分隔符与控制字符，不产生空名
+ok 24 - safeFilename：去掉路径分隔符与控制字符，不产生空名
+  ---
+  duration_ms: 0.5365
+  type: 'test'
+  ...
+# Subtest: uniquePath：同名不覆盖；safeSourceURL：去凭据
+ok 25 - uniquePath：同名不覆盖；safeSourceURL：去凭据
+  ---
+  duration_ms: 2.666667
+  type: 'test'
+  ...
+# Subtest: attach/list：记录按会话键隔离，落盘路径真实存在且可写
+ok 26 - attach/list：记录按会话键隔离，落盘路径真实存在且可写
+  ---
+  duration_ms: 3.963917
+  type: 'test'
+  ...
+# Subtest: act：跨会话键拒绝、未完成不可打开、完成状态可移除；clear 只清已完成
+ok 27 - act：跨会话键拒绝、未完成不可打开、完成状态可移除；clear 只清已完成
+  ---
+  duration_ms: 0.907
+  type: 'test'
+  ...
+# Subtest: 会话分区（A04）：同一 App 同用户共享；不同用户绝不共享；旧口径不变
+ok 28 - 会话分区（A04）：同一 App 同用户共享；不同用户绝不共享；旧口径不变
+  ---
+  duration_ms: 0.702291
+  type: 'test'
+  ...
+# Subtest: 标签模型：浏览器窗口恒有标签；非浏览器窗口没有标签字段
+ok 29 - 标签模型：浏览器窗口恒有标签；非浏览器窗口没有标签字段
+  ---
+  duration_ms: 1.21075
+  type: 'test'
+  ...
+# Subtest: 旧持久化（只有 meta.url）恢复成单标签，不丢地址
+ok 30 - 旧持久化（只有 meta.url）恢复成单标签，不丢地址
+  ---
+  duration_ms: 0.350916
+  type: 'test'
+  ...
+# Subtest: browser/tab-open / activate / close：命令语义与不变量
+ok 31 - browser/tab-open / activate / close：命令语义与不变量
+  ---
+  duration_ms: 0.30275
+  type: 'test'
+  ...
+# Subtest: 活动标签被关闭：激活邻居；持久化往返保留 tabs / activeTabId / tabSeq
+ok 32 - 活动标签被关闭：激活邻居；持久化往返保留 tabs / activeTabId / tabSeq
+  ---
+  duration_ms: 0.409166
+  type: 'test'
+  ...
+# Subtest: TAB_LIMIT：到达上限后 tab-open 不改状态；invariants 不接受超限
+ok 33 - TAB_LIMIT：到达上限后 tab-open 不改状态；invariants 不接受超限
+  ---
+  duration_ms: 0.262375
+  type: 'test'
+  ...
+# Subtest: browser/tab-state：只改目标标签；活动标签标题成为窗口标题；无变化同一引用
+ok 34 - browser/tab-state：只改目标标签；活动标签标题成为窗口标题；无变化同一引用
+  ---
+  duration_ms: 0.158417
+  type: 'test'
+  ...
+# Subtest: system/native-state 对浏览器窗口走标签路径（meta.url 不会与活动标签漂移）
+ok 35 - system/native-state 对浏览器窗口走标签路径（meta.url 不会与活动标签漂移）
+  ---
+  duration_ms: 0.19325
+  type: 'test'
+  ...
+# Subtest: nativeIntents：每个标签一条视图意图，只有活动标签 active；视口与遮挡者不变
+ok 36 - nativeIntents：每个标签一条视图意图，只有活动标签 active；视口与遮挡者不变
+  ---
+  duration_ms: 0.285458
+  type: 'test'
+  ...
+# Subtest: 浏览器命令只作用于浏览器窗口：home / ghost 一律 no-op
+ok 37 - 浏览器命令只作用于浏览器窗口：home / ghost 一律 no-op
+  ---
+  duration_ms: 0.391042
+  type: 'test'
+  ...
+1..37
+# tests 37
+# suites 0
+# pass 37
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 6886.827791
+WALL=6.94 EXIT=0

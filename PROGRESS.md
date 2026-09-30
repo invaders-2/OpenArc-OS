@@ -2082,3 +2082,78 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 剩余缺口逐条：① 真机 D5-01 受控浏览器链门禁不可达（`S0a` 失败；**回归时点未定位**，`data-app-id` 选择器被 merge `7d707ab` 删除是线索而非已定位根因；需另开批次做 D5-01 门禁修复 + 设计对齐）；② 上述 notVerified 8 条（含独立的 CanvasControl 覆盖归属更正项）；③ `docs/D5-01-RESULT.md:79` 的 59/59 计数过期需同步为 60/60；④ E1 登记的 4 项计数型/文本定位型维护约束（白名单恰好 1 处、`.has(` 恰好 2 处、(d) 注释文本定位、成员必须字符串字面量）；⑤ 环境登记两项（electron dist 修复、`ELECTRON_RUN_AS_NODE` 需调用方剥离）；⑥ 跨组织真机 2 条 notVerified；⑦ 两条探针门禁既有失败；⑧ OAuth；⑨ 插件隔离（D5-08）；⑩ D5-02 `prompt()` 遗留；⑪ SIGKILL 边界；⑫ 第五批登记其余残留。
 
 下一步建议：定位并修 `test:d5-01-control` 的 `S0a` 失败（设置界面漂移为线索、回归时点未定位；另开 D5-01 门禁修复批次）→ 补 `url` 2000 / `targetRef` 300 / `canvas.edit` 推送 / 推送目标窗口身份 / `registry.get` null 用例 → 两条探针门禁单独排期 → 跨组织真机入口 → OAuth → 真实第三方 / Adobe（D5-04 / D5-05）。
+
+# D5-03 第十四批 · D5-01 真机门禁安装段修复（陈旧 Dock 选择器 + 入口缺失立即失败）· 2026-09-30（`ac019a5`）
+
+> **口径（用户明确定范围）**：本批只含**一件事** —— 修复 D5-01 真机门禁 `test:d5-01-control` 的安装段 `S0a`/`S0b` 失败，让门禁真正跑到浏览器 S1–S6。**不调宽超时、不跳过场景、不放宽/删除任何安全判据、不把 FAIL 改成 NOT VERIFIED、不预写数据库**。只在 `/Users/wepingli/Desktop/OpenArc OS-integration` 工作，未触碰主工作树 17 项改动、DSH Desktop 共享运行时与 `~/.dsh`，未 push / 未 merge / 未 commit（提交由上级统一做）。**本批只改驱动脚本，产品代码 / 测试代码 / 设计文档零改动。**
+> **判定：D5-03 第十四批（D5-01 真机门禁安装段修复）= PASS（限定范围：`test:d5-01-control` 安装段 S0a/S0b/S0c 与浏览器场景 S1–S6 全部真机通过，**46 PASS / 0 FAIL / 2 NOT VERIFIED，EXIT=0**，与 D5-01 验收基线 46/0/2 逐项一致；根因经真机实测判定为**驱动过时**、产品代码零改动；回归 D5-01 单测 37/37、boundary 32/0/1、`npm test` 1412/1412/0 全绿；fail-fast 语义经独立对抗性验收实测成立、逐行审查未发现放宽换绿）。**D5-03 整体仍 = PARTIAL，且不因此批而通过** —— `test:d5-01-visibility` 仍 FAIL（**22 pass / 3 fail / 25 total / 1 NOT VERIFIED**），其 `V9`/`V11`/`V12b` 所测**产品行为在本机仍未被验证**（FAIL 时驱动一次点击都没发）。**
+> **被测 commit**：`ac019a5`（`git rev-parse HEAD` 实测 `ac019a598d29284e449aae7a90210fda60d56195`；父 `ae17ae9`，单提交）。改动面：`experiments/d5-01/browser-control-e2e.mjs` 9、`browser-inprocess-boundary-e2e.mjs` 9、`visibility-e2e.mjs` 9、新增只读诊断探针 `s0a-diagnose.mjs` +265；共 **4 files / +286 / −6**。**`src/**`、`electron/**`、`tests/**`、`package.json` 与设计文档零改动。**
+> **证据**：`experiments/d5-03/batch14/`（`20` 核心门禁、`30/40/70` 回归、`50/51` visibility 两次、`60/61` 主门禁两次、`diagnose/10-*` 只读诊断，全部含原始 stdout+stderr 与退出码）；执行方汇总报告 `experiments/d5-03/batch14/D5-03-BATCH14-REPORT.md`；执行岗详细报告 `…/D5-03-BATCH14-E1-REPORT.md`；独立对抗性验收 `…/verify/BATCH14-VERIFY-REPORT.md`（**他人产出，本批未改写**）；tracked 证据 `docs/D5-03-GATE-EVIDENCE.json` 的 `batch14` 段（**纯插入**：`git diff --numstat` = `336 / 0`；自 `"batch13"` 起至 EOF 与 `git show ac019a5:docs/D5-03-GATE-EVIDENCE.json` 对应区段**逐字节相同**、两侧 sha256 均 `cd9db2206c28e1a7681feb19b2dcc196ef35ab754856db683f3927ff5a679b76`、len 均 `359108`；`python3 -c "import json;json.load(...)"` 成功）。
+
+## 0. 证据溯源口径（取证时工作树 ↔ 被测 commit `ac019a5`）——必读
+
+本批全部真机/回归证据都取自**提交前的工作树**：当时 `git rev-parse HEAD` = `ae17ae9`，因此每个原始输出头部的 `### HEAD: ae17ae9da17a475f267241fae0d56804db2794d2` 即当时真实值、**未事后改写**；被测代码随后由上级提交为 `ac019a5`。
+
+**等价性自证**：`git diff --name-status ae17ae9 ac019a5` **恰好只列 4 个文件**（`M browser-control-e2e.mjs`、`M browser-inprocess-boundary-e2e.mjs`、`A s0a-diagnose.mjs`、`M visibility-e2e.mjs`），与取证时工作树相对 `ae17ae9` 的改动**是同一批**，此后未再改动；逐文件 blob 哈希两侧一致（`3af6d489…8ed` / `8a6186ca…59b` / `7570c4b8…32b` / `f15bd3b3…611`）→ **取证时的工作树内容 = 被测 commit 的对应文件（逐字节）**，证据归属成立。
+**受保护路径为空**：`git diff --stat ae17ae9 ac019a5 -- src/ electron/ tests/ package.json DESIGN_SYSTEM.md MOTION_SYSTEM.md PLAN.md` 输出为**空**（本批未改产品、测试与设计文档）。
+
+## 1. 任务状态
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| 真机实测定位（先诊断，未改代码） | **已完成** | 只读诊断探针 `experiments/d5-01/s0a-diagnose.mjs`（与门禁同源启动、隔离 userData、仅默认 CDP 端口不同 9793 / 9790）：Dock 12 项含 `settings`；`[data-dock-id="settings"]` `!!el=true`、`click()` → **`"ok"`**、点击后设置窗口**真实打开**（pane `["appearance","model","devices"]`）；`document.querySelectorAll('[data-app-id]').length` = **0**、旧选择器 `!!el=false`、`click()` → **`"missing"`**；S0a 全部选择器按 tab 实测**缺失集 `[]`**；pageerror **0** / console error **0** |
+| 根因判定 | **驱动过时（非产品缺陷）** | `src/` 中 `data-app-id` **0** 处，`src/desktop/components.tsx:334` 渲染 `data-dock-id`（引入 `b6b5aa1`）；失败机理：`click('[data-app-id="settings"]')` 返回 `missing` 但**返回值被丢弃** → 后续 `waitSel(…,20000)` 全部空转超时 → `pid=""/cid=""/defaultOk=false`，直到最后才以 S0a FAIL 暴露、看不出原因。**已知线索被证实，且独立定位到它就是首个失败点。** |
+| 最小修复 | **已完成（3 个驱动，+286/−6）** | 三驱动各 2 处选择器替换 + 立即失败守卫 `mustClick`/`mustClickDom`（`r !== "ok"` 即 `throw new Error("入口点击失败：" + label + " " + sel + " → " + r)`）；现有 `main()` 外层 `try/catch` → 抛错即 **EXIT=2** 并指名选择器。未放宽/删除任何判据 |
+| 门禁 `test:d5-01-control` | **PASS — 46 PASS / 0 FAIL / 2 NOT VERIFIED，EXIT=0** | `20-control-after-fix.txt`；**S0a** PASS `{"pid":"prv_1LuZ0Zlp7xnB9g","cid":"mcf_VHZI_oISpsuyJQ","defaultOk":true}`、**S0b** PASS `Endpoint:PASS Credential:PASS Model:PASS Inference:PASS Capabilities:NOT VERIFIED`、**S0c** PASS；**S1–S6 真实跑完未提前中止**（S1 7/0、S2 8/0、S3 5/0、S4 4/0、S5 4/0、S6 5/0）；与基线 **46/0/2 逐项一致** |
+| S2 审批三处一致 | **成立（实际值逐项对照）** | UI `[data-approval-url]` = 批准记录 `preconditions_safe.url` = 真实视图落地 = **`http://127.0.0.1:5391/page2`**（marker `PAGE2-MARKER-9f3a`）；UI `[data-approval-target]` 含 **`browser#t1`** = `preconditions_safe.targetRef`（`targetType=browser-tab`）= 主进程授权 viewId；S2.5 `{"status":"SUCCEEDED","verification":"PASS","leases":1}` |
+| 回归（node 级） | **全绿** | D5-01 六文件 **37/37**；`test:d5-01-boundary` **32/0/32 + 1 NV，EXIT=0**；`npm test` **1412/1412/0，EXIT=0** |
+| fail-fast 语义 | **独立对抗实测成立** | 独立验收注入 `[data-dock-id="settings-NOPE"]` → **EXIT=2**、错误指名选择器、**运行段仅 1.10s**（未退化成 20s 超时；阴性比阳性更快正是 fail-fast 签名） |
+| `test:d5-01-visibility` | **未通过（如实登记，未改其判定）** | **22 pass / 3 fail / 25 total / 1 NOT VERIFIED**（第 1 次更在 V4 截图处异常中止 EXIT=2）。3 项 FAIL = `V9`/`V11`/`V12b`，全部 `reason="not-frontmost:…"`，前台 layer-0 首位始终是 Google Chrome（pid 83502），驱动**拒绝发送真实点击**（`screen-geometry.mjs:192` 判据 / `:203` 返回），其安全判据在正确工作 |
+| `test:d5-01` 主门禁 | **第 1 次 EXIT=2、复跑 64/0/64 PASS** | 第 1 次在 `A04-10` 抛 `Cannot read properties of undefined (reading 'includes')`（`browser-e2e.mjs:487`）。该文件与 `src/` 均与 `ae17ae9` **逐字节相同** → **非本批引入**；但**复现频次未知**（独立验收 4/4 未复现） |
+
+## 2. 真机实测根因与修法
+
+**根因 = 驱动过时。** 产品侧入口、窗口、3 个 pane、全部 D4-01 控件均正常（0 pageerror / 0 console error），
+唯一失效点是驱动里的旧选择器 `[data-app-id="settings"]`（产品树中 0 处）；
+且原驱动**丢弃 `click` 返回值**，把"入口缺失"退化成 20s 超时后"看不出原因"的 S0a FAIL。
+
+**修法（最小、加严）**：三驱动各把 2 处入口点击换成真实选择器并改用 `mustClick`/`mustClickDom`；
+助手在返回值不是 `"ok"` 时**立刻抛错并写明选择器与返回值**。净效果是**加严而非放宽**。
+
+**修前证据（红）**：batch13 三次真机运行均 `S0a` FAIL，失败串**逐字相同** `实际 {"pid":"","cid":"","defaultOk":false}`、均 `EXIT CODE: 2`、**S1–S6 一次都未执行**（非确定性的只是失败之后的下游崩溃点 `:255` vs `:297`，属连锁反应）。
+
+## 3. 三轴判定（分列）
+
+* **功能 = 通过（限定范围）**：`test:d5-01-control` 安装段 S0a/S0b/S0c + 浏览器 S1–S6 真机通过 **46/0/2，EXIT=0**，与基线逐项一致；S2 三处一致；回归 37/37、32/0/1、1412/1412/0 全绿；fail-fast 语义独立实测成立。
+* **视觉 = 本批不适用（如实披露）**：`src/**` 0 行改动，无新增界面文案，未做截图，**无新增视觉验收**；沿用 D5-01 既有已验收基准。
+* **动效 = 本批不适用（如实披露）**：无动效改动，未录屏。
+
+## 4. notVerified 与缺口（如实登记）
+
+* **`test:d5-01-visibility` 未通过（本批最主要缺口）**：**22 pass / 3 fail / 25 total / 1 NV，EXIT=1**。
+  其**已验收基线**是 CLOSURE4 的 **25 PASS / 0 FAIL / 1 NV（exit 0）**（`docs/D5-01-CLOSURE4-RESULT.md:100`、`docs/D5-01-CLOSURE4-EVIDENCE.json` 的 `gates[0]`，commit `f9564b7`）。
+  **本批不主张对 visibility 有任何改善**；能确证的只有：安装段 `V0`/`V1`/`V2` 全 PASS，说明同一处入口选择器修复在该脚本上**同样生效**。
+  **关键缺口**：FAIL 时驱动**一次点击都没发**，所以 **`V9`（缩放后真实指针命中）/ `V11`（四边近边界命中）/ `V12b`（最大化后还原回原几何）所测的产品行为在本机仍未被验证**；闭环条件 = 一次**独占前台**的窗口期重跑。
+  **口径更正（独立验收 F1）**：batch13 **从未运行过 visibility 门禁**，此前"batch13 记录 8 项 FAIL → 本次 3 FAIL"的对照**不成立**（那是 `test:d5-01-control` 在 `48a867c` 上的结果，属跨门禁混用），已删除。
+  **归因更正（独立验收 F2）**：第 1 次硬中止**不是** macOS 权限限制 —— 独立验收只读复测全屏 `screencapture` 成功、窗口定向 `screencapture -l 160240` 成功、需辅助访问的 `osascript` 取窗口尺寸成功；当时的 `-1719` 是**一次性 TCC 拒绝**、`could not create image from window` 是**前台/backing-store 争用**。归因是**前台争用**，不是权限缺失。
+* **`test:d5-01` A04-10 的成因与频次未查明（F3/F4）**：`browser-e2e.mjs:487` 对可能为 `undefined` 的对象直接调 `.includes`，`waitView` 15s 超时 → `TypeError` **中止整段**，**A04 之后的 restore 段根本没跑** —— 它把一个**可能是真实产品症状**的信号（重新登录 + 导航 `/cookie` 后视图 15s 内未出现）变成脚本 TypeError。**归因"非本批引入"成立**（文件与 `src/` 逐字节相同），但**复现频次未知**（独立 4/4 未复现）。**本批不改它**（另一个门禁的驱动，超出授权范围）。
+* **F6（低）已知限制**：安装段**其余**入口点击（`[data-d4-01-provider-create]`、`[data-d4-01-model-create]` 等）**未加即时失败守卫**，"入口缺失立即明确失败"目前**不普适**。**上级裁定不做代码改动**（达标判据已满足、该发现为 Low、且给已独立验证过的代码加东西会作废那次验证）；建议未来用只断言存在性的 `mustExist` 并做 ≥2 次连续复跑防 flake。
+* **F5（低）使用注意事项**：`mustClick` 若被漏掉 `await`，失败路径会走 **unhandled rejection**（仍立即非 0 且指名选择器、**不会误报成功**），但绕过驱动的 `catch`/清理，**留下孤儿 electron 占住 CDP 端口**（独立验收已复现 `pid 15771 @9790` 并清理）。新加调用必须 `await`。
+* **F7（低）既有判据口径**：`S0b` 是**子串匹配**，产品自报 `Capabilities:NOT VERIFIED` 时门禁仍判绿（**既有、非本批、不构成换绿**）；本批不改。
+* **F8（低）措辞遗留**：`s0a-diagnose.mjs` 头注释称"启动方式完全一致"，实际默认 CDP 端口不同（9793 vs 9790）；报告口径已改为"同源、仅默认端口不同"，**脚本注释本身未改**（代码已冻结在 `ac019a5`）。
+* **同类陈旧选择器仍在别的门禁探针里**（本批未验证、未修改，仅列清单）：`tests/d4-main-e2e.mjs:284`；`tests/fixtures/model-isolation|model-settings|model-secret-ui-probe`（`settings`）；`tests/fixtures/resource|resource-library|resource-search|resource-preview-ui-probe`（`resource-library`）；`tests/fixtures/governance-ui-probe:82/117/136`。
+* **门禁自报的 2 项 NOT VERIFIED 依旧**：崩溃/强杀后浏览器控制目标恢复（契约外）、像素级层级真值（无法独占前台截图，层级由 domain 常量 + DOM/视口几何断言覆盖）。
+* **独立对抗性验收已完成**：独立验收岗（全新上下文、与执行方无关联、默认立场怀疑）报告 `experiments/d5-03/batch14/verify/BATCH14-VERIFY-REPORT.md`，独立判定**本批通过**：独立复现全部计数（control **2/2** 均 46/0/2 EXIT=0、单测 37/37、boundary 32/0/1、`npm test` 1412/1412/0、主门禁 **4/4** 均 64/0/1）、**自己解析 `actual` 原值**确认 S2 三处一致、独立重跑诊断 **2 次**且其 `findings.json` 与原件**逐行比对 105 行全同无一行 DIFF**、fail-fast 对抗实测成立（EXIT=2 + 运行段 1.10s）、逐行审查全 diff **未发现任何"靠放宽换绿"**、驱动**逐字还原**。它提出的 3 点不成立/不准确（F1、F2、F3/F4）**已全部接受并在本批文档中更正**。
+* **继续单列**：跨组织真机 2 条 notVerified · 两条探针门禁既有失败（`governance-ui`、`model-keychain-restart`）· OAuth · 插件隔离（D5-08）· D5-02 `prompt()` 遗留 · SIGKILL 边界 · 第五批登记其余残留。
+
+## 5. 判定与下一步
+
+**判定：D5-03 第十四批（D5-01 真机门禁安装段修复）= PASS（限定范围：`test:d5-01-control` 安装段 S0a/S0b/S0c 与浏览器场景 S1–S6 全部真机通过，46 PASS / 0 FAIL / 2 NOT VERIFIED，EXIT=0，与基线 46/0/2 逐项一致；根因经真机实测判定为驱动过时、产品代码零改动；回归 37/37、boundary 32/0/1、`npm test` 1412/1412/0 全绿；独立对抗性验收通过且未发现放宽换绿）。D5-03 整体仍 = PARTIAL，且**不因此批而通过**（visibility 仍 22/3/25；V9/V11/V12b 所测产品行为在本机仍未被验证）。**
+
+**本批闭环的旧缺口**：第十三批登记的「真机 D5-01 受控浏览器链**未取得**（`S0a` 既有失败，**回归时点未定位**，`data-app-id` 选择器是线索而非已定位根因）」—— 本批**已真机实测定位并修复**：线索成立（`src/` 中 `data-app-id` 0 处、`[data-dock-id="settings"]` 可用），门禁现已跑到 S1–S6 并全部通过。
+
+**本批不主张的部分**：① 对 `visibility` 无任何改善主张；② 未解决 F3–F8 任何一条（均按裁定登记，不做代码改动）；③ `V9`/`V11`/`V12b` 所测产品行为仍未被验证。
+
+剩余缺口逐条：① visibility 的 `V9`/`V11`/`V12b` 需独占前台重跑闭环或如实判红；② `test:d5-01` A04-10 触发条件与频次未查明（F3/F4）；③ 安装段其余入口点击无即时失败守卫（F6）；④ `tests/d4-main-e2e.mjs` + 8 个 `tests/fixtures/**-probe` 的同类陈旧选择器；⑤ 2 项 NOT VERIFIED 依旧；⑥ `mustClick` 必须 `await` 的注意事项（F5）；⑦ `S0b` 子串判据（F7）；⑧ `s0a-diagnose.mjs` 注释端口口径（F8）；⑨ 上游遗留（跨组织真机 2 条、两条探针门禁既有失败、OAuth、插件隔离 D5-08、D5-02 `prompt()` 遗留、SIGKILL 边界、第五批登记其余残留）。
+
+下一步建议：① 找一次**独占前台**的窗口期重跑 `test:d5-01-visibility`，把 `V9`/`V11`/`V12b` 的产品行为闭环或如实判红；② 单开一批处理 `browser-e2e.mjs:487`（先取 `cookie` 再判空并记 FAIL），让门禁如实暴露被掩盖的信号；③ 单开一批统一核对 `tests/` 下同类陈旧 `data-app-id` 探针；④ 若要推广"入口即时失败"，用 `mustExist` 只断言存在性并做 ≥2 次连续复跑防 flake；⑤ 收紧 `S0b` 判据（把 `Capabilities` 结论也纳入）。

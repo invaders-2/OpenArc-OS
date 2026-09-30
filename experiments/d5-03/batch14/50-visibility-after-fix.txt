@@ -1,0 +1,44 @@
+### COMMAND: env -u ELECTRON_RUN_AS_NODE npm run test:d5-01-visibility
+### HEAD: ae17ae9da17a475f267241fae0d56804db2794d2
+### START: 2026-09-30T15:08:16Z
+
+> openarc-os@0.1.0 test:d5-01-visibility
+> npm run build && node experiments/d5-01/visibility-e2e.mjs
+
+
+> openarc-os@0.1.0 build
+> tsc --noEmit && vite build
+
+vite v7.3.6 building client environment for production...
+transforming...
+✓ 1638 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/design-system.html                   0.79 kB │ gzip:   0.43 kB
+dist/index.html                           0.84 kB │ gzip:   0.42 kB
+dist/assets/design-system-Wum50NZM.css    3.45 kB │ gzip:   0.95 kB
+dist/assets/page-states-CtkK1Qxt.css     87.47 kB │ gzip:  16.15 kB
+dist/assets/design-system-BKhOPsHZ.js    15.16 kB │ gzip:   5.08 kB
+dist/assets/page-states-BFPlgRhI.js     230.68 kB │ gzip:  72.24 kB
+dist/assets/main-qXEiIhXD.js            373.56 kB │ gzip: 112.99 kB
+✓ built in 1.09s
+  [PASS] boot · V0 · 真实 electron . 启动（隔离 userData / 隔离 CDP 端口）
+  [PASS] boot · V1 · 真实 UI 登录 admin
+  [PASS] setup · V2 · 真实视图加载纯色页面（像素判定的基准）
+82:118: execution error: “System Events”遇到一个错误：“osascript”不允许辅助访问。 (-1719)
+  [PASS] safety · V3 · 真实点击前先确认「最前面的窗口就是我们自己的实例」
+could not create image from window
+门禁异常：Error: Command failed: screencapture -x -o -l 161601 /Users/wepingli/Desktop/OpenArc OS-integration/artifacts/d5-01/visibility/01-paint-before.png
+could not create image from window
+
+    at genericNodeError (node:internal/errors:983:15)
+    at wrappedFn (node:internal/errors:537:14)
+    at checkExecSyncError (node:child_process:916:11)
+    at execFileSync (node:child_process:952:15)
+    at sh (file:///Users/wepingli/Desktop/OpenArc%20OS-integration/experiments/d5-01/screen-geometry.mjs:19:34)
+    at captureTo (file:///Users/wepingli/Desktop/OpenArc%20OS-integration/experiments/d5-01/screen-geometry.mjs:85:39)
+    at capture (file:///Users/wepingli/Desktop/OpenArc%20OS-integration/experiments/d5-01/visibility-e2e.mjs:54:31)
+    at main (file:///Users/wepingli/Desktop/OpenArc%20OS-integration/experiments/d5-01/visibility-e2e.mjs:221:20)
+    at async file:///Users/wepingli/Desktop/OpenArc%20OS-integration/experiments/d5-01/visibility-e2e.mjs:558:18
+### EXIT=2
+### DONE 2026-09-30T15:08:42Z

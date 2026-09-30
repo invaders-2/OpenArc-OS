@@ -1,0 +1,87 @@
+[1] electron . 已启动，CDP 版本："Chrome/152.0.7977.78"
+[2] admin 登录：true，gate=ready
+[3] Dock 现状：{
+  "dockItemCount": 12,
+  "dockIds": [
+    "home",
+    "browser",
+    "files",
+    "resource-library",
+    "canvas",
+    "projects",
+    "organization",
+    "skills",
+    "mcp-center",
+    "settings",
+    null,
+    null
+  ],
+  "appIdCount": 0,
+  "dockIdSettingsExists": true,
+  "appIdSettingsExists": false
+}
+[4] click([data-dock-id="settings"]) → "ok"
+[5] click([data-app-id="settings"]) → "missing"，此刻 !!el=false
+[6] click([data-settings-pane="model"]) → "ok"，[data-d4-01=settings] 出现=true
+[7] S0a 驱动全部选择器存在性（按 tab）：{
+  "common": {
+    "[data-dock-id=\"settings\"]": true,
+    "[data-app-id=\"settings\"]": false,
+    "[data-settings-pane=\"model\"]": true,
+    "[data-d4-01=\"settings\"]": true,
+    "[data-d4-01-provider-name]": true,
+    "[data-d4-01-provider-scope]": true,
+    "[data-d4-01-provider-url]": true,
+    "[data-d4-01-provider-secret]": true,
+    "[data-d4-01-provider-create]": true,
+    "[data-d4-01-tab=\"models\"]": true,
+    "[data-d4-01-tab=\"defaults\"]": true,
+    "[data-d4-01-tab=\"providers\"]": true,
+    "[data-d4-01-pane=\"providers\"]": true
+  },
+  "byTab": {
+    "providers": {
+      "tabClick": "n/a（初始 tab）",
+      "selectors": {
+        "[data-d4-01-pane=\"providers\"]": true
+      }
+    },
+    "models": {
+      "tabClick": "ok",
+      "selectors": {
+        "[data-d4-01-pane=\"models\"]": true,
+        "[data-d4-01-model-provider]": true,
+        "[data-d4-01-model-scope]": true,
+        "[data-d4-01-model-remote]": true,
+        "[data-d4-01-model-name]": true,
+        "[data-d4-01-model-create]": true
+      }
+    },
+    "defaults": {
+      "tabClick": "ok",
+      "selectors": {
+        "[data-d4-01-pane=\"defaults\"]": true,
+        "[data-d4-01-default-personal-chat]": true,
+        "[data-d4-01-default-org-chat]": true
+      }
+    }
+  }
+}
+[7b] 按 tab 实测缺失的控件：[]
+[8] 主进程 stderr 尾部：
+
+DevTools listening on ws://127.0.0.1:9793/devtools/browser/ffae6162-79ba-4bea-a36b-5b1ba85f6990
+
+[9] 结论：{
+  "settingsEntryClickOk": true,
+  "settingsEntryOldSelectorExists": false,
+  "settingsWindowOpenedByDockId": true,
+  "settingsWindowOpenedByAppId": null,
+  "settingsWindowOpened": true,
+  "s0aControlsComplete": true,
+  "failureStep": "无（设置入口与控件均正常）",
+  "pageErrors": 0,
+  "consoleErrors": 0
+}
+
+[findings] /Users/wepingli/Desktop/OpenArc OS-integration/experiments/d5-03/batch14/diagnose/10-diagnose-findings.json

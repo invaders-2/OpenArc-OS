@@ -1,0 +1,13 @@
+(node:15755) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  [PASS] boot · M1 · 真实 electron . 启动并暴露 CDP
+  [PASS] boot · M2 · 真实 UI 登录 admin
+file:///Users/wepingli/Desktop/OpenArc%20OS-integration/experiments/d5-01/browser-control-e2e.mjs:132
+  if (r !== "ok") throw new Error("入口点击失败：" + label + " " + sel + " → " + r);
+                        ^
+
+Error: 入口点击失败：打开系统设置 [data-dock-id="settings-NOPE"] → missing
+    at mustClick (file:///Users/wepingli/Desktop/OpenArc%20OS-integration/experiments/d5-01/browser-control-e2e.mjs:132:25)
+
+Node.js v22.22.3
+NODE_ONLY_WALL_SECONDS=1.18 EXIT=1

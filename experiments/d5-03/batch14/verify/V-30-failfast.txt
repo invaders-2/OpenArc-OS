@@ -1,0 +1,35 @@
+
+> openarc-os@0.1.0 test:d5-01-control
+> npm run build && node experiments/d5-01/browser-control-e2e.mjs
+
+
+> openarc-os@0.1.0 build
+> tsc --noEmit && vite build
+
+vite v7.3.6 building client environment for production...
+transforming...
+✓ 1638 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/design-system.html                   0.79 kB │ gzip:   0.43 kB
+dist/index.html                           0.84 kB │ gzip:   0.42 kB
+dist/assets/design-system-Wum50NZM.css    3.45 kB │ gzip:   0.95 kB
+dist/assets/page-states-CtkK1Qxt.css     87.47 kB │ gzip:  16.15 kB
+dist/assets/design-system-BKhOPsHZ.js    15.16 kB │ gzip:   5.08 kB
+dist/assets/page-states-BFPlgRhI.js     230.68 kB │ gzip:  72.24 kB
+dist/assets/main-qXEiIhXD.js            373.56 kB │ gzip: 112.99 kB
+✓ built in 1.09s
+(node:15530) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  [PASS] boot · M1 · 真实 electron . 启动并暴露 CDP
+  [PASS] boot · M2 · 真实 UI 登录 admin
+E2E 异常：Error: 入口点击失败：打开系统设置 [data-dock-id="settings-NOPE"] → missing
+    at mustClick (file:///Users/wepingli/Desktop/OpenArc%20OS-integration/experiments/d5-01/browser-control-e2e.mjs:132:25)
+    at async main (file:///Users/wepingli/Desktop/OpenArc%20OS-integration/experiments/d5-01/browser-control-e2e.mjs:229:3)
+    at async file:///Users/wepingli/Desktop/OpenArc%20OS-integration/experiments/d5-01/browser-control-e2e.mjs:480:14
+--- main stderr tail ---
+
+DevTools listening on ws://127.0.0.1:9790/devtools/browser/70739d00-4b85-4ee4-b6bf-b62e2fd8c062
+
+START=1790781636.746655000 END=1790781641.798775000 EXIT=2
+WALL_SECONDS=5.05

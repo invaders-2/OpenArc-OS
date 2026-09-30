@@ -1,0 +1,251 @@
+{
+  "phase": "D5-03 Batch14 · S0a 只读真机诊断",
+  "at": "2026-09-30T15:06:55.136Z",
+  "env": {
+    "ELECTRON_RUN_AS_NODE": null,
+    "cdpPort": 9793,
+    "userData": "/var/folders/49/m7hfshm96vl9xkmkpjrygqqc0000gn/T/oa-d501-ctrl-diag-Xzfhvb",
+    "electron": "44.3.0",
+    "node": "v22.22.3",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "consoleErrors": [],
+  "pageErrors": [],
+  "launch": {
+    "cdpVersion": {
+      "Browser": "Chrome/152.0.7977.78",
+      "Protocol-Version": "1.3",
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) openarc-os/0.1.0 Chrome/152.0.7977.78 Electron/44.3.0 Safari/537.36",
+      "V8-Version": "15.2.124.19",
+      "WebKit-Version": "537.36 (@b7c794fcb61238604082b18bf0b3f7cf84d609fd)",
+      "webSocketDebuggerUrl": "ws://127.0.0.1:9793/devtools/browser/ffae6162-79ba-4bea-a36b-5b1ba85f6990"
+    },
+    "electronProcessAlive": true,
+    "stderrHead": "\nDevTools listening on ws://127.0.0.1:9793/devtools/browser/ffae6162-79ba-4bea-a36b-5b1ba85f6990\n",
+    "loginOk": true,
+    "gateAfterLogin": "ready"
+  },
+  "attempts": [
+    {
+      "step": "A. 点击前基线",
+      "observe": {
+        "label": "before",
+        "href": "file:///Users/wepingli/Desktop/OpenArc%20OS-integration/dist/index.html",
+        "identityGate": "ready",
+        "documentTitle": "OpenArc OS",
+        "windowTitles": [
+          "应用中心窗口|home"
+        ],
+        "bodyText400": "本机 · D1\n锁定\nD5-01 Ctrl Admin\n9月30日\n全局 AI\n未连接\n应用\n全部应用\n最近使用\n专业\n专业应用\n应用中心\n\n一个桌面，连接你的应用、创意与 AI。\n\n浏览器\n真实网页 · 隔离运行\n访达\n本地文件 · 真实存储\n资源库\n规划中 · 查看说明\nAI Studio\n规划中 · 查看说明\n项目\n规划中 · 查看说明\n组织治理\n规划中 · 查看说明\nSkill 中心\n规划中 · 查看说明\nMCP 中心\n规划中 · 查看说明\n系统设置\n外观与全局模型\n回收站\n已删除的文件 · 可恢复\n⌟\n应用中心\n浏览器\n访达\n资源库\nAI Studio\n项目\n组织治理\nSkill 中心\nMCP 中心\n系统设置\n全局 AI\n回收站",
+        "ariaLabelWithSettings": [
+          "打开系统设置"
+        ],
+        "settingsPaneIds": [],
+        "settingsActive": "",
+        "controls": {
+          "[data-settings-pane=\"model\"]": false,
+          "[data-d4-01=\"settings\"]": false,
+          "[data-d4-01-provider-name]": false,
+          "[data-d4-01-provider-create]": false,
+          "[data-d4-01-tab=\"models\"]": false,
+          "[data-d4-01-default-personal-chat]": false
+        },
+        "settingsWindowOpen": false
+      }
+    },
+    {
+      "step": "B. 只点 [data-dock-id=\"settings\"]",
+      "selector": "[data-dock-id=\"settings\"]",
+      "elementExists": true,
+      "clickReturn": "ok",
+      "settingsPaneAppeared": true,
+      "observe": {
+        "label": "after-dock-id",
+        "href": "file:///Users/wepingli/Desktop/OpenArc%20OS-integration/dist/index.html",
+        "identityGate": "ready",
+        "documentTitle": "OpenArc OS",
+        "windowTitles": [
+          "应用中心窗口|home",
+          "系统设置窗口|settings"
+        ],
+        "bodyText400": "本机 · D1\n锁定\nD5-01 Ctrl Admin\n9月30日\n全局 AI\n未连接\n应用\n全部应用\n最近使用\n专业\n专业应用\n应用中心\n\n一个桌面，连接你的应用、创意与 AI。\n\n浏览器\n真实网页 · 隔离运行\n访达\n本地文件 · 真实存储\n资源库\n规划中 · 查看说明\nAI Studio\n规划中 · 查看说明\n项目\n规划中 · 查看说明\n组织治理\n规划中 · 查看说明\nSkill 中心\n规划中 · 查看说明\nMCP 中心\n规划中 · 查看说明\n系统设置\n外观与全局模型\n回收站\n已删除的文件 · 可恢复\n⌟\n系统\n外观与交互\n模型 / AI\n设备\n外观与交互\n\n整个工作空间，遵循你的习惯。\n\n外观\n跟随系统\n浅色\n深色\n减少动态效果\n材质\n完整玻璃\n降低材质\n实色\n程序坞图标大小 拖动滑块调整 Dock 图标尺寸\n47px\n桌面图标大小 拖动滑块调整桌面文件夹与文件的尺寸\n58px\n使",
+        "ariaLabelWithSettings": [
+          "切换到系统设置",
+          "系统设置窗口",
+          "设置分类",
+          "打开系统设置"
+        ],
+        "settingsPaneIds": [
+          "appearance",
+          "model",
+          "devices"
+        ],
+        "settingsActive": "appearance",
+        "controls": {
+          "[data-settings-pane=\"model\"]": true,
+          "[data-d4-01=\"settings\"]": false,
+          "[data-d4-01-provider-name]": false,
+          "[data-d4-01-provider-create]": false,
+          "[data-d4-01-tab=\"models\"]": false,
+          "[data-d4-01-default-personal-chat]": false
+        },
+        "settingsWindowOpen": true
+      }
+    },
+    {
+      "step": "C. 再点 [data-app-id=\"settings\"]（旧选择器）",
+      "selector": "[data-app-id=\"settings\"]",
+      "elementExists": false,
+      "clickReturn": "missing",
+      "observe": {
+        "label": "after-app-id",
+        "href": "file:///Users/wepingli/Desktop/OpenArc%20OS-integration/dist/index.html",
+        "identityGate": "ready",
+        "documentTitle": "OpenArc OS",
+        "windowTitles": [
+          "应用中心窗口|home",
+          "系统设置窗口|settings"
+        ],
+        "bodyText400": "本机 · D1\n锁定\nD5-01 Ctrl Admin\n9月30日\n全局 AI\n未连接\n应用\n全部应用\n最近使用\n专业\n专业应用\n应用中心\n\n一个桌面，连接你的应用、创意与 AI。\n\n浏览器\n真实网页 · 隔离运行\n访达\n本地文件 · 真实存储\n资源库\n规划中 · 查看说明\nAI Studio\n规划中 · 查看说明\n项目\n规划中 · 查看说明\n组织治理\n规划中 · 查看说明\nSkill 中心\n规划中 · 查看说明\nMCP 中心\n规划中 · 查看说明\n系统设置\n外观与全局模型\n回收站\n已删除的文件 · 可恢复\n⌟\n系统\n外观与交互\n模型 / AI\n设备\n外观与交互\n\n整个工作空间，遵循你的习惯。\n\n外观\n跟随系统\n浅色\n深色\n减少动态效果\n材质\n完整玻璃\n降低材质\n实色\n程序坞图标大小 拖动滑块调整 Dock 图标尺寸\n47px\n桌面图标大小 拖动滑块调整桌面文件夹与文件的尺寸\n58px\n使",
+        "ariaLabelWithSettings": [
+          "切换到系统设置",
+          "系统设置窗口",
+          "设置分类",
+          "打开系统设置"
+        ],
+        "settingsPaneIds": [
+          "appearance",
+          "model",
+          "devices"
+        ],
+        "settingsActive": "appearance",
+        "controls": {
+          "[data-settings-pane=\"model\"]": true,
+          "[data-d4-01=\"settings\"]": false,
+          "[data-d4-01-provider-name]": false,
+          "[data-d4-01-provider-create]": false,
+          "[data-d4-01-tab=\"models\"]": false,
+          "[data-d4-01-default-personal-chat]": false
+        },
+        "settingsWindowOpen": true
+      }
+    },
+    {
+      "step": "D. 打开设置后切到 模型/AI pane",
+      "selector": "[data-settings-pane=\"model\"]",
+      "clickReturn": "ok",
+      "d401Appeared": true,
+      "observe": {
+        "label": "after-model-pane",
+        "href": "file:///Users/wepingli/Desktop/OpenArc%20OS-integration/dist/index.html",
+        "identityGate": "ready",
+        "documentTitle": "OpenArc OS",
+        "windowTitles": [
+          "应用中心窗口|home",
+          "系统设置窗口|settings"
+        ],
+        "bodyText400": "本机 · D1\n锁定\nD5-01 Ctrl Admin\n9月30日\n全局 AI\n未连接\n应用\n全部应用\n最近使用\n专业\n专业应用\n应用中心\n\n一个桌面，连接你的应用、创意与 AI。\n\n浏览器\n真实网页 · 隔离运行\n访达\n本地文件 · 真实存储\n资源库\n规划中 · 查看说明\nAI Studio\n规划中 · 查看说明\n项目\n规划中 · 查看说明\n组织治理\n规划中 · 查看说明\nSkill 中心\n规划中 · 查看说明\nMCP 中心\n规划中 · 查看说明\n系统设置\n外观与全局模型\n回收站\n已删除的文件 · 可恢复\n⌟\n系统\n外观与交互\n模型 / AI\n设备\n模型 / AI\n\n统一配置所有应用使用的模型服务。\n\nProviders\nModels\nDefaults\nPERSONAL\nORGANIZATION\n创建 Provider\n\nNo model providers configured\n\n⌟\n",
+        "ariaLabelWithSettings": [
+          "切换到系统设置",
+          "系统设置窗口",
+          "设置分类",
+          "模型设置分区",
+          "打开系统设置"
+        ],
+        "settingsPaneIds": [
+          "appearance",
+          "model",
+          "devices"
+        ],
+        "settingsActive": "model",
+        "controls": {
+          "[data-settings-pane=\"model\"]": true,
+          "[data-d4-01=\"settings\"]": true,
+          "[data-d4-01-provider-name]": true,
+          "[data-d4-01-provider-create]": true,
+          "[data-d4-01-tab=\"models\"]": true,
+          "[data-d4-01-default-personal-chat]": false
+        },
+        "settingsWindowOpen": true
+      }
+    }
+  ],
+  "dock": {
+    "dockItemCount": 12,
+    "dockIds": [
+      "home",
+      "browser",
+      "files",
+      "resource-library",
+      "canvas",
+      "projects",
+      "organization",
+      "skills",
+      "mcp-center",
+      "settings",
+      null,
+      null
+    ],
+    "appIdCount": 0,
+    "dockIdSettingsExists": true,
+    "appIdSettingsExists": false
+  },
+  "s0aSelectorPresence": {
+    "common": {
+      "[data-dock-id=\"settings\"]": true,
+      "[data-app-id=\"settings\"]": false,
+      "[data-settings-pane=\"model\"]": true,
+      "[data-d4-01=\"settings\"]": true,
+      "[data-d4-01-provider-name]": true,
+      "[data-d4-01-provider-scope]": true,
+      "[data-d4-01-provider-url]": true,
+      "[data-d4-01-provider-secret]": true,
+      "[data-d4-01-provider-create]": true,
+      "[data-d4-01-tab=\"models\"]": true,
+      "[data-d4-01-tab=\"defaults\"]": true,
+      "[data-d4-01-tab=\"providers\"]": true,
+      "[data-d4-01-pane=\"providers\"]": true
+    },
+    "byTab": {
+      "providers": {
+        "tabClick": "n/a（初始 tab）",
+        "selectors": {
+          "[data-d4-01-pane=\"providers\"]": true
+        }
+      },
+      "models": {
+        "tabClick": "ok",
+        "selectors": {
+          "[data-d4-01-pane=\"models\"]": true,
+          "[data-d4-01-model-provider]": true,
+          "[data-d4-01-model-scope]": true,
+          "[data-d4-01-model-remote]": true,
+          "[data-d4-01-model-name]": true,
+          "[data-d4-01-model-create]": true
+        }
+      },
+      "defaults": {
+        "tabClick": "ok",
+        "selectors": {
+          "[data-d4-01-pane=\"defaults\"]": true,
+          "[data-d4-01-default-personal-chat]": true,
+          "[data-d4-01-default-org-chat]": true
+        }
+      }
+    }
+  },
+  "byTabMissing": [],
+  "stderrTail": "\nDevTools listening on ws://127.0.0.1:9793/devtools/browser/ffae6162-79ba-4bea-a36b-5b1ba85f6990\n",
+  "conclusion": {
+    "settingsEntryClickOk": true,
+    "settingsEntryOldSelectorExists": false,
+    "settingsWindowOpenedByDockId": true,
+    "settingsWindowOpenedByAppId": null,
+    "settingsWindowOpened": true,
+    "s0aControlsComplete": true,
+    "failureStep": "无（设置入口与控件均正常）",
+    "pageErrors": 0,
+    "consoleErrors": 0
+  }
+}

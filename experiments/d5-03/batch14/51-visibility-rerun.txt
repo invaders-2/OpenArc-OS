@@ -1,0 +1,54 @@
+### COMMAND: env -u ELECTRON_RUN_AS_NODE npm run test:d5-01-visibility（复跑确认是否偶发）
+### HEAD: ae17ae9da17a475f267241fae0d56804db2794d2
+### START: 2026-09-30T15:12:18Z
+
+> openarc-os@0.1.0 test:d5-01-visibility
+> npm run build && node experiments/d5-01/visibility-e2e.mjs
+
+
+> openarc-os@0.1.0 build
+> tsc --noEmit && vite build
+
+vite v7.3.6 building client environment for production...
+transforming...
+✓ 1638 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/design-system.html                   0.79 kB │ gzip:   0.43 kB
+dist/index.html                           0.84 kB │ gzip:   0.42 kB
+dist/assets/design-system-Wum50NZM.css    3.45 kB │ gzip:   0.95 kB
+dist/assets/page-states-CtkK1Qxt.css     87.47 kB │ gzip:  16.15 kB
+dist/assets/design-system-BKhOPsHZ.js    15.16 kB │ gzip:   5.08 kB
+dist/assets/page-states-BFPlgRhI.js     230.68 kB │ gzip:  72.24 kB
+dist/assets/main-qXEiIhXD.js            373.56 kB │ gzip: 112.99 kB
+✓ built in 1.11s
+  [PASS] boot · V0 · 真实 electron . 启动（隔离 userData / 隔离 CDP 端口）
+  [PASS] boot · V1 · 真实 UI 登录 admin
+  [PASS] setup · V2 · 真实视图加载纯色页面（像素判定的基准）
+  [PASS] safety · V3 · 真实点击前先确认「最前面的窗口就是我们自己的实例」
+  [PASS] pixel · V4 · 屏幕像素证明确实「看得见」网页（视口中心是页面纯绿）
+  [PASS] pixel · V4b · 截图确实是本窗口的画面（图像尺寸 = 窗口 bounds × 缩放）
+   · 几何（屏幕 pt）：像素真值 {"left":308,"top":418,"right":1137.5,"bottom":738.5,"width":829.5,"height":320.5}；DOM 预留矩形 {"left":308,"top":417.5,"right":1138,"bottom":739}；指针反推原点 {"left":308,"top":418}；网页自报 innerWidth/Height 830×321；chrome 之下条带高度 115；banner {"cls":"browser-notices","h":114.5,"kind":"permission"}
+  [PASS] pixel · V4c · 三条独立通道一致：像素真值 = DOM 预留矩形 = 指针反推（|Δ|≤3pt，宽高也对）
+  [PASS] pixel · V4d · 提示条/错误条存在时网页**让位**（条带高度 > 0，且条带内像素不是网页绿）
+  [PASS] safety · V3c · 真实指针确实到达本实例外壳（激活后的第一下点击可能被系统用于激活窗口，先热身）
+  [PASS] safety · V3b · 真实点击只落在本实例窗口内（每次点击前重新校验前台与内容区）
+  [PASS] pointer · V6 · 统一换算给出的地址栏坐标 + 真实指针 → 焦点真的进入输入框
+  [PASS] pointer · V5 · 真实指针点击标签栏「新建标签」→ 真的多出一个标签（外壳收到该按钮的 isTrusted 点击）
+  [PASS] pointer · V5b · 真实指针点击第二个标签 → 活动标签真的切换
+  [PASS] pixel · V5c · 操作前后两帧像素确实不同（画面真的变了）
+  [PASS] pointer · V7 · 真实指针点击**网页内部**按钮 → 页面自己收到点击并计数
+  [PASS] pointer · V7b · 落点就是按钮本体（页面收到的坐标 = 目标，误差 ≤ 6px，target=paint-btn）
+  [PASS] pixel · V8 · 面板打开时网页**让位**（视口中心像素不再是页面绿）
+  [PASS] pixel · V8b · 面板关闭后网页回到可见（像素回到页面绿）
+! [FAIL] pointer · V9 · 窗口缩放后重新测量坐标，真实指针点击仍然命中页面内部（落点误差 ≤ 8px） — 期望 落点命中，实际 {"last":{"x":190,"y":185,"target":"paint-btn"},"click":{"ok":false,"reason":"not-frontmost:page-button-after-resize","trace":[{"ours":161656,"front":[{"pid":83502,"id":160240},{"pid":10403,"id":161656},{"pid":18158,"id":152537},{"pid":83940,"id":160275},{"pid":5625,"id":161511}],"activePid":83502},{"ours":161656,"front":[{"pid":83502,"id":160240},{"pid":10403,"id":161656},{"pid":18158,"id":152537},{"pid":83940,"id":160275},{"pid":5625,"id":161511}],"activePid":83502},{"ours":161656,"front":[{"pid":83502,"id":160240},{"pid":10403,"id":161656},{"pid":18158,"id":152537},{"pid":83940,"id":160275},{"pid":5625,"id":161511}],"activePid":83502}]},"viewRect":{"left":308,"top":338,"w":830,"h":321},"from":{"w":1440,"h":940},"to":{"w":1180,"h":740}}
+  [PASS] pixel · V9b · 缩放后截图尺寸随之变化（画面确实是缩放后的窗口）
+! [FAIL] pointer · V11 · 网页**四边近边界**的真实指针命中（坐标由实测视图矩形换算；落点像素独立证明在网页内） — 期望 四边都命中，实际 {"viewRect":{"left":308,"top":338,"w":830,"h":321},"probes":[{"name":"上边中点","page":{"x":415,"y":3},"screen":{"x":723,"y":341},"pixel":"56,123,83","pixelGreen":true,"click":{"ok":false,"reason":"not-frontmost:edge-上边中点","trace":[{"ours":161656,"front":[{"pid":83502,"id":160240},{"pid":10403,"id":161656},{"pid":18158,"id":152537},{"pid":83940,"id":160275},{"pid":5625,"id":161511}],"activePid":83502},{"ours":161656,"front":[{"pid":83502,"id":160240},{"pid":10403,"id":161656},{"pid":18158,"id":152537},{"pid":83940,"id":160275},{"pid":5625,"id":161511}],"activePid":83502},{"ours":161656,"front":[{"pid":83502,"id":160240},{"pid":10403,"id":161656},{"pid":18158,"id":152537},{"pid":83940,"id":160275},{"pid":5625,"id":161511}],"activePid":83502}]},"last":{"x":190,"y":185,"target":"paint-btn"}},{"name":"下边中点","page":{"x":415,"y":317},"screen":{"x":723,"y":655},"pixel":"56,123,83","pixelGreen":true,"click":{"ok":false,"reason":"not-frontmost:edge-下边中点","trace":[{"ours":161656,"front":[{"pid":83502,"id":160240},{"pid":10403,"id":161656},{"pid":18158,"id":152537},{"pid":83940,"id":160275},{"pid":5625,"id":161511}],"activePid":83502},{"ours":161656,"front":[{"pid":83502,"id":160240},{"pid":10403,"id":161656},{"pid":18158,"id":152537},{"pid":83940,"id":160275},{"pid":5625,"id":161511}],"activePid":83502},{"ours":161656,"front":[{"pid":83502,"id":160240},{"pid":10403,"id":161656},{"pid":18158,"id":152537},{"pid":83940,"id":160275},{"pid":5625,"id":161511}],"activePid":83502}]},"last":{"x":190,"y":185,"target":"paint-btn"}},{"name":"左边中点","page":{"x":3,"y":161},"screen":{"x":311,"y":499},"pixel":"56,123,83","pixelGreen":true,"click":{"ok":true,"attempt":1,"trace":[{"ours":161656,"front":[{"pid":10403,"id":161656},{"pid":83502,"id":160240},{"pid":18158,"id":152537},{"pid":83940,"id":160275},{"pid":5625,"id":161511}],"activePid":10403}]},"last":{"x":3,"y":161,"target":"BODY"}},{"name":"右边中点","page":{"x":826,"y":161},"screen":{"x":1134,"y":499},"pixel":"56,123,83","pixelGreen":true,"click":{"ok":true,"attempt":1,"trace":[{"ours":161656,"front":[{"pid":10403,"id":161656},{"pid":83502,"id":160240},{"pid":18158,"id":152537},{"pid":83940,"id":160275},{"pid":5625,"id":161511}],"activePid":10403}]},"last":{"x":826,"y":161,"target":"BODY"}},{"name":"左上角内","page":{"x":24,"y":24},"screen":{"x":332,"y":362},"pixel":"56,123,83","pixelGreen":true,"click":{"ok":true,"attempt":1,"trace":[{"o
+  [PASS] pointer · V12 · 真实指针点窗口「最大化」按钮 → 窗口状态 + 网页布局真的变化，且最大化后网页仍能被真实指针命中
+! [FAIL] pixel · V12b · 恢复后窗口矩形与网页布局回到最大化之前，且像素真值跟着回到原位 — 期望 尺寸/布局恢复，实际 {"restState":false,"click":{"ok":false,"reason":"not-received:restore","trace":[{"i":0,"click":{"ok":false,"reason":"not-frontmost:restore","trace":[{"ours":161656,"front":[{"pid":83502,"id":160240},{"pid":10403,"id":161656},{"pid":18158,"id":152537},{"pid":83940,"id":160275},{"pid":5625,"id":161511}],"activePid":83502},{"ours":161656,"front":[{"pid":83502,"id":160240},{"pid":10403,"id":161656},{"pid":18158,"id":152537},{"pid":83940,"id":160275},{"pid":5625,"id":161511}],"activePid":83502},{"ours":161656,"front":[{"pid":83502,"id":160240},{"pid":10403,"id":161656},{"pid":18158,"id":152537},{"pid":83940,"id":160275},{"pid":5625,"id":161511}],"activePid":83502}]},"received":false},{"i":1,"click":{"ok":false,"reason":"not-frontmost:restore-retry1","trace":[{"ours":161656,"front":[{"pid":83502,"id":160240},{"pid":10403,"id":161656},{"pid":18158,"id":152537},{"pid":83940,"id":160275},{"pid":5625,"id":161511}],"activePid":83502},{"ours":161656,"front":[{"pid":83502,"id":160240},{"pid":10403,"id":161656},{"pid":18158,"id":152537},{"pid":83940,"id":160275},{"pid":5625,"id":161511}],"activePid":83502},{"ours":161656,"front":[{"pid":83502,"id":160240},{"pid":10403,"id":161656},{"pid":18158,"id":152537},{"pid":83940,"id":160275},{"pid":5625,"id":161511}],"activePid":83502}]},"received":false},{"i":2,"click":{"ok":false,"reason":"not-frontmost:restore-retry2","trace":[{"ours":161656,"front":[{"pid":83502,"id":160240},{"pid":10403,"id":161656},{"pid":18158,"id":152537},{"pid":83940,"id":160275},{"pid":5625,"id":161511}],"activePid":83502},{"ours":161656,"front":[{"pid":83502,"id":160240},{"pid":10403,"id":161656},{"pid":18158,"id":152537},{"pid":83940,"id":160275},{"pid":5625,"id":161511}],"activePid":83502},{"ours":161656,"front":[{"pid":83502,"id":160240},{"pid":10403,"id":161656},{"pid":18158,"id":152537},{"pid":83940,"id":160275},{"pid":5625,"id":161511}],"activePid":83502}]},"received":false}]},"windowRect":{"before":{"left":164,"top":56,"width":830,"height":570,"cx":579,"cy":341},"restored":{"left":0,"top":38,"width":1180,"height":702,"cx":590,"cy":389},"max":{"left":0,"top":38,"width":1180,"height":702,"cx":590,"cy":389}},"pageSize":{"before":{"iw":830,"ih":321},"restored":{"iw":1180,"ih":453}},"backLayout":false,"backPage":false,"backView":true,"viewRectRestored":{"left":144,"top":320,"w":1180,"h":453},"frame":"11-restored.png"}
+   ? [NOT VERIFIED] 页面缩放（Cmd +/-） — 不适用：D5-01 原始必需项不含页面缩放（PLAN 里的『缩放』是窗口缩放，V9 已覆盖），产品无缩放入口、本轮不新增。实测补充（仅观察、不计入必需项）：真实按键 {"iw":1180,"ih":453,"dpr":2} → {"iw":1180,"ih":453,"dpr":2} → {"iw":1180,"ih":453,"dpr":2}，未改变页面缩放；缩放态下像素真值 {"left":144,"top":320,"w":1180,"h":453} 与网页自报 innerWidth×dpr 2360（未缩放时 2360）一致。
+  [PASS] pixel · V10 · 连续截图可用（一段连续操作的多帧都真实落盘）
+  [PASS] hygiene · H1 · 主进程无未处理错误
+
+结论：FAIL — {"pass":22,"fail":3,"total":25,"notVerified":1}
+### EXIT=1

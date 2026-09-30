@@ -1,0 +1,74 @@
+
+> openarc-os@0.1.0 test:d5-01-control
+> npm run build && node experiments/d5-01/browser-control-e2e.mjs
+
+
+> openarc-os@0.1.0 build
+> tsc --noEmit && vite build
+
+vite v7.3.6 building client environment for production...
+transforming...
+✓ 1638 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/design-system.html                   0.79 kB │ gzip:   0.43 kB
+dist/index.html                           0.84 kB │ gzip:   0.42 kB
+dist/assets/design-system-Wum50NZM.css    3.45 kB │ gzip:   0.95 kB
+dist/assets/page-states-CtkK1Qxt.css     87.47 kB │ gzip:  16.15 kB
+dist/assets/design-system-BKhOPsHZ.js    15.16 kB │ gzip:   5.08 kB
+dist/assets/page-states-BFPlgRhI.js     230.68 kB │ gzip:  72.24 kB
+dist/assets/main-qXEiIhXD.js            373.56 kB │ gzip: 112.99 kB
+✓ built in 1.13s
+(node:16118) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  [PASS] boot · M1 · 真实 electron . 启动并暴露 CDP
+  [PASS] boot · M2 · 真实 UI 登录 admin
+  [PASS] setup · S0a · 真实 UI 创建确定性 provider/model 并设为默认 chat
+  [PASS] setup · S0b · 真实 UI 连接测试 Inference:PASS
+  [PASS] setup · S0c · 真实治理 UI 授予 ai tool.browser.read / tool.browser.navigate
+  [PASS] ui · U1 · 从 Dock 打开浏览器窗口
+  [PASS] ui · U2 · 地址栏真实导航到恶意页面（注入样例）
+  [PASS] ui · U3 · 未授权时 AI 控制按钮为 off，且主进程授权列表为空
+  [PASS] ui · U4 · 点击按钮显式授权当前标签（真实 UI → 主进程）
+  [PASS] ui · U5 · 主进程授权目标 = 该标签的稳定身份（windowId#tabId）
+  [PASS] ui · U6 · 标签栏显示该标签已被授权
+  [PASS] S1 · S1.0 · 真实 UI 启动任务（official dsh + Tool Facade）
+  [PASS] S1 · S1.1 · 任务终态 SUCCEEDED
+  [PASS] S1 · S1.2 · 真实受控读取执行 SUCCEEDED + verification PASS
+  [PASS] S1 · S1.3 · 审计记录 browser.read.page 且**不含页面正文**
+  [PASS] S1 · S1.4 · 页面正文作为**不可信结果**回到模型（untrusted=true）
+  [PASS] S1 · S1.5 · 恶意页面正文**绝不进入高信任指令位**（system/developer）
+  [PASS] S1 · S1.6 · 恶意页面正文**绝不自动触发任何工具/导航**（0 side-effect call、地址不变）
+  [PASS] S2 · S2.0 · 真实审批面板出现（导航必须审批）
+  [PASS] S2 · S2.1 · 审批显示被批准的**地址**
+  [PASS] S2 · S2.2 · 审批显示**目标标签身份**
+  [PASS] S2 · S2.3 · 批准前 webContentsView 地址未变（0 导航）
+  [PASS] S2 · S2.4 · 批准后任务 SUCCEEDED
+  [PASS] S2 · S2.5 · SideEffectCall SUCCEEDED + READ_AFTER_WRITE PASS + lease 恰好 1
+  [PASS] S2 · S2.6 · **真实** WebContentsView 已到达被批准的地址
+  [PASS] S2 · S2.7 · 执行地址 = 被批准地址（plan 里持久化，Harness 无法在批准后换目标）
+  [PASS] S3 · S3.0 · 审批面板出现且指向真实 SideEffectCall
+  [PASS] S3 · S3.1 · 拒绝后 SideEffectCall = BLOCKED（0 执行）
+  [PASS] S3 · S3.2 · 拒绝后真实地址仍是 page2（没有任何导航发生）
+  [PASS] S3 · S3.3 · UI 不产生任何"已回滚/已撤销成功"式幻觉结论
+  [PASS] S3 · S3.4 · 被拒的 call 没有租约、没有执行记录（0 lease / 0 execution）
+  [PASS] S4 · S4.1 · 未授权 viewId → 执行 FAILED(BROWSER_CONTROL_NOT_SELECTED)
+  [PASS] S4 · S4.2 · UI 撤销后主进程授权列表为空
+  [PASS] S4 · S4.3 · 撤权后同一 viewId → 执行 FAILED（不回落、不改绑）
+  [PASS] S4 · S4.4 · 关掉被授权标签 → 主进程授权目标被摘掉（1 → 0）
+  [PASS] ui · U7 · S4 之后重新授权**新活动标签**并取到新的稳定身份（不复用已关闭标签的 id）
+  [PASS] S5 · S5.x · 工具门拒绝 file: 提案 INVALID + 0 side-effect call
+  [PASS] S5 · S5.x · 工具门拒绝 javascript: 提案 INVALID + 0 side-effect call
+  [PASS] S5 · S5.x · 工具门拒绝 https: 提案 INVALID + 0 side-effect call
+  [PASS] S5 · S5.z · 三个非法 URL 都未产生任何 SideEffectCall（也没有任何导航）
+  [PASS] S6 · S6.0 · 取消前真实出现等待审批的 SideEffectCall
+  [PASS] S6 · S6.1 · 审批等待中取消 → 任务终止（非 SUCCEEDED）且该 call 收敛为 BLOCKED(TASK_CANCELLED)
+  [PASS] S6 · S6.2 · 取消后 0 导航、0 执行 lease、地址不变
+  [PASS] S6 · S6.3 · 工具预算到限 → 有界停止（成功读取 ≤ 上限 8，且任务不假装成功）
+  [PASS] S6 · S6.4 · UI 如实显示停止原因（预算/停止），不静默
+  [PASS] hygiene · H1 · 主进程无未处理错误
+   ? [NOT VERIFIED] 崩溃 / 强杀后的浏览器控制目标恢复 — 不在本轮契约内：控制目标是会话内授权，进程重启后一律清空（不自动恢复授权，也不自动续接任务）。
+   ? [NOT VERIFIED] 像素级层级真值（截图证明原生视图压在外壳之上） — 本机屏幕被另一个正在运行的 OpenArc 实例占用，无法独占前台截图；层级由 domain 常量与 DOM/视口几何断言覆盖，不冒充像素证据。
+
+结论：PASS — {"pass":46,"fail":0,"total":46,"notVerified":2}
+WALL_SECONDS=16.64 EXIT=0

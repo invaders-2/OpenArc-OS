@@ -1,0 +1,91 @@
+### COMMAND: env -u ELECTRON_RUN_AS_NODE npm run test:d5-01（复跑确认是否偶发）
+### HEAD: ae17ae9da17a475f267241fae0d56804db2794d2
+### START: 2026-09-30T15:11:31Z
+
+> openarc-os@0.1.0 test:d5-01
+> npm run build && node experiments/d5-01/browser-e2e.mjs
+
+
+> openarc-os@0.1.0 build
+> tsc --noEmit && vite build
+
+vite v7.3.6 building client environment for production...
+transforming...
+✓ 1638 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/design-system.html                   0.79 kB │ gzip:   0.43 kB
+dist/index.html                           0.84 kB │ gzip:   0.42 kB
+dist/assets/design-system-Wum50NZM.css    3.45 kB │ gzip:   0.95 kB
+dist/assets/page-states-CtkK1Qxt.css     87.47 kB │ gzip:  16.15 kB
+dist/assets/design-system-BKhOPsHZ.js    15.16 kB │ gzip:   5.08 kB
+dist/assets/page-states-BFPlgRhI.js     230.68 kB │ gzip:  72.24 kB
+dist/assets/main-qXEiIhXD.js            373.56 kB │ gzip: 112.99 kB
+✓ built in 1.14s
+  [PASS] boot · M1 · 真实 electron . 启动并暴露 CDP
+  [PASS] boot · M2 · 真实 UI 登录 admin
+  [PASS] nav · N1 · 从 Dock 打开浏览器窗口
+  [PASS] nav · N2 · 真实网址导航（地址栏 → 真实 WebContentsView）
+  [PASS] nav · N2b · 原生视图已真实挂载到宿主（data-attached）
+  [PASS] nav · N2c · 浏览器 chrome（标签栏+地址栏）与网页视口不重叠
+  [PASS] nav · N3 · 标签 URL 与标题回灌到 Window domain
+  [PASS] nav · N4 · 第二个地址导航成功（准备后退）
+  [PASS] nav · N5 · 后退回到上一页
+  [PASS] nav · N6 · 前进按钮变为可用（可用性来自主进程 navigationHistory）
+  [PASS] nav · N7 · 前进回到 MARKER 页
+  [PASS] nav · N8 · 刷新后页面仍在（真实 reload）
+  [PASS] tabs · T1 · 新建标签（第二个原生视图随即创建）
+  [PASS] tabs · T2 · 新标签独立导航（旧标签不受影响）
+  [PASS] tabs · T3 · 非活动标签仍然存活（切回不重新加载）
+  [PASS] tabs · T4 · 活动标签 = 新建的那个
+  [PASS] tabs · T5 · 切换标签回到 t1
+  [PASS] tabs · T6 · 关闭标签后原生视图真正释放
+  [PASS] state · S1 · 加载中状态（停止按钮 / 标签 spinner 可见）
+  [PASS] state · S2 · 连接失败 → 错误状态 + 重试入口
+  [PASS] state · S3 · 重试后真实恢复（失败地址 + 服务端已可达）
+  [PASS] download · D1 · 下载入口（面板可打开）
+  [PASS] download · D2 · 下载完成 + 文件真实落盘（字节一致）
+  [PASS] download · D3 · 面板显示完成状态与落盘路径
+  [PASS] download · D4 · 下载失败（服务端中断）→ 失败态可见
+  [PASS] download · D5 · 关闭下载面板后原生视图恢复显示
+  [PASS] policy · P1 · window.open 被阻止并给出明确提示
+  [PASS] policy · P2 · 弹窗未变成新窗口（原生窗口数不变）
+  [PASS] policy · P3 · 外部协议（mailto:）需用户明确确认，不自动交给系统
+  [PASS] policy · P4 · 外部协议未导致页面跳转
+  [PASS] policy · P5 · 网站权限申请被显式拒绝并回报来源
+  [PASS] policy · P6 · 权限提示面向用户可读（不显示机器码）
+  [PASS] policy · P7 · 自签名证书 → 证书错误明确阻止（无「继续访问」旁路）
+  [PASS] policy · P8 · 证书错误页面未渲染出站点内容
+  [PASS] policy · P9 · 文件上传：网页拿到 File 对象（名称/大小）
+  [PASS] policy · P10 · 上传不泄漏本地路径给网页
+  [PASS] security · A13-1 · 外壳页有产品桥（对照）
+  [PASS] security · A13-2 · 远程页面拿不到任何桥/Node 能力
+  [PASS] security · A13-3 · 远程页面调用产品桥被拒（无桥可调）
+  [PASS] A12 · A12-1 · 指定标签页可交互（真实鼠标事件 → 页面计数器 +1）
+  [PASS] A12 · A12-2 · 菜单打开 → 原生视图整块让位
+  [PASS] A12 · A12-3 · 菜单打开时点击不穿透到网页
+  [PASS] A12 · A12-4 · 关闭菜单后视图恢复且不改输入目标
+  [PASS] A12 · A12-5 · 窗口拖动遮挡 → 快照补齐层出现（clip+snapshot / snapshot）
+  [PASS] A12 · A12-6 · 被遮挡区域的点击不落到网页
+  [PASS] A12 · A12-7 · 最小化浏览器窗口 → DOM 与原生视图一并收起
+  [PASS] A12 · A12-8 · 从 Dock 恢复窗口且原生视图回到 shown
+  [PASS] A04 · A04-1 · 用户 A 在网页建立 Cookie/存储（对照）
+  [PASS] A04 · A04-2 · 真实治理入口创建成员账号
+  [PASS] A04 · A04-3 · 退出登录
+  [PASS] A04 · A04-4 · 登录用户 B
+  [PASS] A04 · A04-5 · 新账号看不到上一个用户的浏览器窗口/标签
+  [PASS] A04 · A04-6 · 用户 B 的浏览器窗口只有一个空标签
+  [PASS] A04 · A04-7 · 用户 B 读不到 A 的 Cookie 与 localStorage
+  [PASS] A04 · A04-8 · 用户 B 的下载列表为空（不共享记录）
+  [PASS] A04 · A04-9 · 切回用户 A
+  [PASS] A04 · A04-10 · 用户 A 的会话仍在（Cookie 未被 B 覆盖/清除）
+  [PASS] restore · R0 · 重启前以正常退出结束（非强杀）
+  [PASS] restore · R1 · 重启后浏览器窗口与两个标签恢复
+  [PASS] restore · R2 · 恢复后地址栏 = 退出前的最终地址（重定向后的 /page2）
+  [PASS] restore · R3 · 活动标签恢复为退出前的活动标签
+  [PASS] restore · R4 · 每个标签的 URL 各自恢复（t2 = /page3）
+  [PASS] restore · R5 · 恢复到的是真实页面（不是只有记录对）
+  [PASS] hygiene · H1 · 主进程无未处理错误
+
+结论：PASS — {"pass":64,"fail":0,"total":64,"notVerified":1}
+### EXIT=0
