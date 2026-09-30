@@ -94,6 +94,11 @@ const text = (sel) => js("return document.querySelector(" + JSON.stringify(sel) 
 const attr = (sel, a) => js("return document.querySelector(" + JSON.stringify(sel) + ")?.getAttribute(" + JSON.stringify(a) + ") || ''");
 const isDisabled = (sel) => js("const el = document.querySelector(" + JSON.stringify(sel) + "); return el ? !!el.disabled : true;");
 const click = (sel) => js("const el = document.querySelector(" + JSON.stringify(sel) + "); if (!el) return 'missing'; if (el.disabled) return 'disabled'; el.click(); return 'ok';");
+/** 入口类点击必须立刻失败：`click` 的返回值一旦被丢弃，入口缺失只会在 20s 超时后表现为安装段 FAIL，看不出原因。 */
+async function mustClick(sel, label) {
+  const r = await click(sel);
+  if (r !== "ok") throw new Error("入口点击失败：" + label + " " + sel + " → " + r);
+}
 const setInput = (sel, v) => js("const el = document.querySelector(" + JSON.stringify(sel) + "); if (!el) return 'missing'; const proto = el.tagName === 'SELECT' ? HTMLSelectElement.prototype : (el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype); Object.getOwnPropertyDescriptor(proto,'value').set.call(el, " + JSON.stringify(v) + "); el.dispatchEvent(new Event(el.tagName==='SELECT'?'change':'input',{bubbles:true})); return 'ok';");
 const value = (sel) => js("return document.querySelector(" + JSON.stringify(sel) + ")?.value || ''");
 const gate = () => js("return document.querySelector('.desktop')?.getAttribute('data-identity-gate') || 'no-root'");
@@ -195,9 +200,9 @@ async function main() {
   record("boot", "B1 · 真实 UI 登录 admin", await login(ADMIN), "ready", await gate());
 
   /* 真实 UI：确定性 provider + 默认 chat（与 Closure-2 门禁同一条产品路径） */
-  await click('[data-app-id="settings"]');
+  await mustClick('[data-dock-id="settings"]', "打开系统设置");
   await waitSel('[data-settings-pane="model"]', 20000);
-  await click('[data-settings-pane="model"]');
+  await mustClick('[data-settings-pane="model"]', "切到模型/AI 分区");
   await waitSel('[data-d4-01="settings"]', 20000);
   await setInput('[data-d4-01-provider-name]', "D5-01 Boundary Provider");
   await setInput('[data-d4-01-provider-scope]', "ORGANIZATION");

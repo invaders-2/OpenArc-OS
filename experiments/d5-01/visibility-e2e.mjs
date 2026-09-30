@@ -59,6 +59,11 @@ const has = (sel) => js("return !!document.querySelector(" + JSON.stringify(sel)
 const attr = (sel, a) => js("return document.querySelector(" + JSON.stringify(sel) + ")?.getAttribute(" + JSON.stringify(a) + ") || ''");
 const value = (sel) => js("return document.querySelector(" + JSON.stringify(sel) + ")?.value || ''");
 const clickDom = (sel) => js("const el = document.querySelector(" + JSON.stringify(sel) + "); if (!el) return 'missing'; el.click(); return 'ok';");
+/** 入口类点击必须立刻失败：`clickDom` 的返回值一旦被丢弃，入口缺失只会在 20s 超时后表现为安装段 FAIL，看不出原因。 */
+async function mustClickDom(sel, label) {
+  const r = await clickDom(sel);
+  if (r !== "ok") throw new Error("入口点击失败：" + label + " " + sel + " → " + r);
+}
 const setInput = (sel, v) => js("const el = document.querySelector(" + JSON.stringify(sel) + "); if (!el) return 'missing'; const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : (el.tagName === 'SELECT' ? HTMLSelectElement.prototype : HTMLInputElement.prototype); Object.getOwnPropertyDescriptor(proto,'value').set.call(el, " + JSON.stringify(v) + "); el.dispatchEvent(new Event(el.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true })); return 'ok';");
 const gate = () => js("return document.querySelector('.desktop')?.getAttribute('data-identity-gate') || 'no-root'");
 async function waitFor(fn, timeout = 30000) { const t0 = Date.now(); while (Date.now() - t0 < timeout) { try { if (await Promise.resolve(fn())) return true; } catch { /* retry */ } await sleep(100); } return false; }
@@ -136,9 +141,9 @@ async function main() {
   record("boot", "V1 · 真实 UI 登录 admin", await waitFor(async () => (await gate()) === "ready", 90000), "ready", await gate());
 
   // 最小 provider（只为让审批面板能出现；可见性不依赖模型质量）
-  await clickDom('[data-app-id="settings"]');
+  await mustClickDom('[data-dock-id="settings"]', "打开系统设置");
   await waitSel('[data-settings-pane="model"]', 20000);
-  await clickDom('[data-settings-pane="model"]');
+  await mustClickDom('[data-settings-pane="model"]', "切到模型/AI 分区");
   await waitSel('[data-d4-01="settings"]', 20000);
   await setInput('[data-d4-01-provider-name]', "D5-01 Vis Provider");
   await setInput('[data-d4-01-provider-scope]', "ORGANIZATION");

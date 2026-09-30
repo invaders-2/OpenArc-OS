@@ -126,6 +126,11 @@ const attr = (sel, a) => js("return document.querySelector(" + JSON.stringify(se
 const isDisabled = (sel) => js("const el = document.querySelector(" + JSON.stringify(sel) + "); return el ? !!el.disabled : true;");
 const providerIds = () => js("return Array.from(document.querySelectorAll('[data-d4-01-provider]')).map((e) => e.getAttribute('data-d4-01-provider')).filter(Boolean)");
 const click = (sel) => js("const el = document.querySelector(" + JSON.stringify(sel) + "); if (!el) return 'missing'; if (el.disabled) return 'disabled'; el.click(); return 'ok';");
+/** 入口类点击必须立刻失败：`click` 的返回值一旦被丢弃，入口缺失只会在 20s 超时后表现为 S0a FAIL，看不出原因。 */
+async function mustClick(sel, label) {
+  const r = await click(sel);
+  if (r !== "ok") throw new Error("入口点击失败：" + label + " " + sel + " → " + r);
+}
 const setInput = (sel, value) => js("const el = document.querySelector(" + JSON.stringify(sel) + "); if (!el) return 'missing'; const proto = el.tagName === 'SELECT' ? HTMLSelectElement.prototype : (el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype); const setter = Object.getOwnPropertyDescriptor(proto, 'value').set; setter.call(el, " + JSON.stringify(value) + "); el.dispatchEvent(new Event(el.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true })); return 'ok';");
 const gate = () => js("return document.querySelector('.desktop')?.getAttribute('data-identity-gate') || 'no-root'");
 /** 输入框的**当前值**只能读 property（getAttribute("value") 永远是初始属性）。 */
@@ -221,9 +226,9 @@ async function main() {
   record("boot", "M2 · 真实 UI 登录 admin", await login(ADMIN), "ready", await gate());
 
   /* ───────────────── 真实 UI：确定性 provider + model + 默认 chat ───────────────── */
-  await click('[data-app-id="settings"]');
+  await mustClick('[data-dock-id="settings"]', "打开系统设置");
   await waitSel('[data-settings-pane="model"]', 20000);
-  await click('[data-settings-pane="model"]');
+  await mustClick('[data-settings-pane="model"]', "切到模型/AI 分区");
   await waitSel('[data-d4-01="settings"]', 20000);
   await setInput('[data-d4-01-provider-name]', "D5-01 Ctrl Provider");
   await setInput('[data-d4-01-provider-scope]', "ORGANIZATION");
