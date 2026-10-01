@@ -1,0 +1,51 @@
+=== RUN1 vs RUN2 counts ===
+run1 {"pass":25,"fail":0,"total":25} run2 {"pass":25,"fail":0,"total":25}
+
+=== V11 逐落点（run2 完整原文, 来自只读预载） ===
+viewRect {"left":308,"top":338,"w":830,"h":321}
+上边中点 | page(415,3) | screen(723,341) | pixel=56,123,83 | green=true | click.ok=true | attempt=1 | reason=- | last=(415,3) target=HTML | dx=0 | dy=0 | => PASS
+下边中点 | page(415,317) | screen(723,655) | pixel=56,123,83 | green=true | click.ok=true | attempt=1 | reason=- | last=(415,317) target=BODY | dx=0 | dy=0 | => PASS
+左边中点 | page(3,161) | screen(311,499) | pixel=56,123,83 | green=true | click.ok=true | attempt=1 | reason=- | last=(3,161) target=BODY | dx=0 | dy=0 | => PASS
+右边中点 | page(826,161) | screen(1134,499) | pixel=56,123,83 | green=true | click.ok=true | attempt=1 | reason=- | last=(826,161) target=BODY | dx=0 | dy=0 | => PASS
+左上角内 | page(24,24) | screen(332,362) | pixel=56,123,83 | green=true | click.ok=true | attempt=1 | reason=- | last=(24,24) target=title | dx=0 | dy=0 | => PASS
+右上角内 | page(806,24) | screen(1114,362) | pixel=56,123,83 | green=true | click.ok=true | attempt=1 | reason=- | last=(806,24) target=title | dx=0 | dy=0 | => PASS
+左下角内 | page(24,297) | screen(332,635) | pixel=56,123,83 | green=true | click.ok=true | attempt=1 | reason=- | last=(24,297) target=BODY | dx=0 | dy=0 | => PASS
+右下角内 | page(806,297) | screen(1114,635) | pixel=56,123,83 | green=true | click.ok=true | attempt=1 | reason=- | last=(806,297) target=BODY | dx=0 | dy=0 | => PASS
+
+=== V11 发点击统计 ===
+发出真实点击的落点数: 8 / 8 → 上边中点、下边中点、左边中点、右边中点、左上角内、右上角内、左下角内、右下角内
+未发出点击的落点: 无
+
+=== V11 每次点击前的窗口身份检查（trace 去重） ===
+ours(windowId)= 162294  front[0]= {"pid":28497,"id":162294}  front[0].pid===ours? true  activePid= 28497
+其他后台进程(在后面): [{"pid":18158,"id":152537},{"pid":24060,"id":162238},{"pid":22673,"id":162008},{"pid":83940,"id":160275}]
+
+=== run1 / run2 落点级一致性（run1 仅 1..6 落盘完整） ===
+run1 V11 原始 actual 是否被截断: 2400
+
+=== 逐条 check（run2） ===
+PASS | boot | V0 · 真实 electron . 启动（隔离 userData / 隔离 CDP 端口） | expected=CDP 可用 | actualLen=9
+PASS | boot | V1 · 真实 UI 登录 admin | expected=ready | actualLen=5
+PASS | setup | V2 · 真实视图加载纯色页面（像素判定的基准） | expected=PAINT-MARKER-2f7d | actualLen=27
+PASS | safety | V3 · 真实点击前先确认「最前面的窗口就是我们自己的实例」 | expected=本实例窗口在最前 | actualLen=113
+PASS | pixel | V4 · 屏幕像素证明确实「看得见」网页（视口中心是页面纯绿） | expected=页面纯绿（绿占优） | actualLen=9
+PASS | pixel | V4b · 截图确实是本窗口的画面（图像尺寸 = 窗口 bounds × 缩放） | expected=尺寸一致 | actualLen=69
+PASS | pixel | V4c · 三条独立通道一致：像素真值 = DOM 预留矩形 = 指针反推（|Δ|≤3pt，宽高也对） | expected=三路一致（|Δ|≤3pt） | actualLen=361
+PASS | pixel | V4d · 提示条/错误条存在时网页**让位**（条带高度 > 0，且条带内像素不是网页绿） | expected=条带让位且不被网页覆盖 | actualLen=317
+PASS | safety | V3c · 真实指针确实到达本实例外壳（激活后的第一下点击可能被系统用于激活窗口，先热身） | expected=外壳收到真实 pointerdown（≤3 次热身点击） | actualLen=123
+PASS | safety | V3b · 真实点击只落在本实例窗口内（每次点击前重新校验前台与内容区） | expected=点击被安全闸放行 | actualLen=207
+PASS | pointer | V6 · 统一换算给出的地址栏坐标 + 真实指针 → 焦点真的进入输入框 | expected=activeElement=地址栏 | actualLen=273
+PASS | pointer | V5 · 真实指针点击标签栏「新建标签」→ 真的多出一个标签（外壳收到该按钮的 isTrusted 点击） | expected=标签数 +1 且外壳收到该按钮点击 | actualLen=277
+PASS | pointer | V5b · 真实指针点击第二个标签 → 活动标签真的切换 | expected=第二个标签变为活动 | actualLen=243
+PASS | pixel | V5c · 操作前后两帧像素确实不同（画面真的变了） | expected=帧不同 | actualLen=17
+PASS | pointer | V7 · 真实指针点击**网页内部**按钮 → 页面自己收到点击并计数 | expected=页面收到真实点击并计数 | actualLen=381
+PASS | pointer | V7b · 落点就是按钮本体（页面收到的坐标 = 目标，误差 ≤ 6px，target=paint-btn） | expected=命中按钮 | actualLen=80
+PASS | pixel | V8 · 面板打开时网页**让位**（视口中心像素不再是页面绿） | expected=非页面绿 | actualLen=239
+PASS | pixel | V8b · 面板关闭后网页回到可见（像素回到页面绿） | expected=页面绿 | actualLen=9
+PASS | pointer | V9 · 窗口缩放后重新测量坐标，真实指针点击仍然命中页面内部（落点误差 ≤ 8px） | expected=落点命中 | actualLen=363
+PASS | pixel | V9b · 缩放后截图尺寸随之变化（画面确实是缩放后的窗口） | expected=比例一致 | actualLen=76
+PASS | pointer | V11 · 网页**四边近边界**的真实指针命中（坐标由实测视图矩形换算；落点像素独立证明在网页内） | expected=四边都命中 | actualLen=2400
+PASS | pointer | V12 · 真实指针点窗口「最大化」按钮 → 窗口状态 + 网页布局真的变化，且最大化后网页仍能被真实指针命中 | expected=状态/布局/命中都成立 | actualLen=817
+PASS | pixel | V12b · 恢复后窗口矩形与网页布局回到最大化之前，且像素真值跟着回到原位 | expected=尺寸/布局恢复 | actualLen=556
+PASS | pixel | V10 · 连续截图可用（一段连续操作的多帧都真实落盘） | expected=4 帧 | actualLen=118
+PASS | hygiene | H1 · 主进程无未处理错误 | expected=无错误行 | actualLen=5

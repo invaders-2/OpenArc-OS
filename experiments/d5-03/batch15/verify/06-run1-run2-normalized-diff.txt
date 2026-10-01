@@ -1,0 +1,10 @@
+=== run1 / run2 归一化逐字符比对（把隔离实例 pid/window id 归一为 PID） ===
+counts 相同: true {"pass":25,"fail":0,"total":25}
+notVerified 相同: true
+逐条 status 相同: true
+
+--- actual 归一化后仍不同的条目 ---
+[PASS/PASS] V10 · 连续截图可用（一段连续操作的多帧都真实落盘）
+  run1: {"frames":["08-burst-0.png","08-burst-1.png","08-burst-2.png","08-burst-3.png"],"bytes":[346808,346954,347041,346901]}
+  run2: {"frames":["08-burst-0.png","08-burst-1.png","08-burst-2.png","08-burst-3.png"],"bytes":[346783,346863,346958,347062]}
+差异条目数: 1

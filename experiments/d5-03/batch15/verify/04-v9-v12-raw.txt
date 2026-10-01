@@ -1,0 +1,21 @@
+run1 落盘里出现的落点名: 上边中点 | 下边中点 | 左边中点 | 右边中点 | 左上角内 | 右上角内 | 左下角内
+run1 落盘里出现的 last: "last":{"x":415,"y":3,"target":"HTML"} | "last":{"x":415,"y":317,"target":"BODY"} | "last":{"x":3,"y":161,"target":"BODY"} | "last":{"x":826,"y":161,"target":"BODY"} | "last":{"x":24,"y":24,"target":"title"} | "last":{"x":806,"y":24,"target":"title"}
+
+=== run1 V9 ===
+{"last":{"x":190,"y":185,"target":"paint-btn"},"click":{"ok":true,"attempt":1,"trace":[{"ours":162275,"front":[{"pid":25293,"id":162275},{"pid":18158,"id":152537},{"pid":24060,"id":162238},{"pid":22673,"id":162008},{"pid":83940,"id":160275}],"activePid":25293}]},"viewRect":{"left":308,"top":338,"w":830,"h":321},"from":{"w":1440,"h":940},"to":{"w":1180,"h":740}}
+--- run1 V9b ---
+{"image":[2360,1480],"win":{"w":1180,"h":740},"frame":"07-after-resize.png"}
+=== run1 V12 ===
+{"frontOk":true,"button":{"label":"最大化browser","rect":{"left":218,"top":72,"w":12,"h":12},"elementAtPoint":"最大化browser","screen":{"x":368,"y":111},"pointPixel":"97,197,84"},"shellGot":true,"shellClicks":[{"trusted":true,"x":224,"y":78,"target":"svg","button":"最大化browser"}],"click":{"ok":true,"tries":1,"trace":[{"i":0,"click":{"ok":true,"attempt":1},"received":true}]},"stateChanged":true,"windowRect":{"before":{"left":164,"top":56,"width":830,"height":570,"cx":579,"cy":341},"after":{"left":0,"top":38,"width":1180,"height":702,"cx":590,"cy":389}},"pageSize":{"before":{"iw":830,"ih":321},"after":{"iw":1180,"ih":453}},"layoutChanged":true,"pageChanged":true,"viewFollows":true,"viewRectAfter":{"left":144,"top":320,"w":1180,"h":453},"hit":{"x":590,"y":227,"target":"BODY"},"hitOk":true,"frame":"10-maximized.png"}
+=== run1 V12b ===
+{"restState":true,"click":{"ok":true,"tries":1,"trace":[{"i":0,"click":{"ok":true,"attempt":1},"received":true}]},"windowRect":{"before":{"left":164,"top":56,"width":830,"height":570,"cx":579,"cy":341},"restored":{"left":164,"top":56,"width":830,"height":570,"cx":579,"cy":341},"max":{"left":0,"top":38,"width":1180,"height":702,"cx":590,"cy":389}},"pageSize":{"before":{"iw":830,"ih":321},"restored":{"iw":830,"ih":321}},"backLayout":true,"backPage":true,"backView":true,"viewRectRestored":{"left":308,"top":338,"w":830,"h":321},"frame":"11-restored.png"}
+
+=== run2 V9 ===
+{"last":{"x":190,"y":185,"target":"paint-btn"},"click":{"ok":true,"attempt":1,"trace":[{"ours":162294,"front":[{"pid":28497,"id":162294},{"pid":18158,"id":152537},{"pid":24060,"id":162238},{"pid":22673,"id":162008},{"pid":83940,"id":160275}],"activePid":28497}]},"viewRect":{"left":308,"top":338,"w":830,"h":321},"from":{"w":1440,"h":940},"to":{"w":1180,"h":740}}
+--- run2 V9b ---
+{"image":[2360,1480],"win":{"w":1180,"h":740},"frame":"07-after-resize.png"}
+=== run2 V12 ===
+{"frontOk":true,"button":{"label":"最大化browser","rect":{"left":218,"top":72,"w":12,"h":12},"elementAtPoint":"最大化browser","screen":{"x":368,"y":111},"pointPixel":"97,197,84"},"shellGot":true,"shellClicks":[{"trusted":true,"x":224,"y":78,"target":"svg","button":"最大化browser"}],"click":{"ok":true,"tries":1,"trace":[{"i":0,"click":{"ok":true,"attempt":1},"received":true}]},"stateChanged":true,"windowRect":{"before":{"left":164,"top":56,"width":830,"height":570,"cx":579,"cy":341},"after":{"left":0,"top":38,"width":1180,"height":702,"cx":590,"cy":389}},"pageSize":{"before":{"iw":830,"ih":321},"after":{"iw":1180,"ih":453}},"layoutChanged":true,"pageChanged":true,"viewFollows":true,"viewRectAfter":{"left":144,"top":320,"w":1180,"h":453},"hit":{"x":590,"y":227,"target":"BODY"},"hitOk":true,"frame":"10-maximized.png"}
+=== run2 V12b ===
+{"restState":true,"click":{"ok":true,"tries":1,"trace":[{"i":0,"click":{"ok":true,"attempt":1},"received":true}]},"windowRect":{"before":{"left":164,"top":56,"width":830,"height":570,"cx":579,"cy":341},"restored":{"left":164,"top":56,"width":830,"height":570,"cx":579,"cy":341},"max":{"left":0,"top":38,"width":1180,"height":702,"cx":590,"cy":389}},"pageSize":{"before":{"iw":830,"ih":321},"restored":{"iw":830,"ih":321}},"backLayout":true,"backPage":true,"backView":true,"viewRectRestored":{"left":308,"top":338,"w":830,"h":321},"frame":"11-restored.png"}
+

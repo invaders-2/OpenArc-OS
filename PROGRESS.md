@@ -2157,3 +2157,90 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 剩余缺口逐条：① visibility 的 `V9`/`V11`/`V12b` 需独占前台重跑闭环或如实判红；② `test:d5-01` A04-10 触发条件与频次未查明（F3/F4）；③ 安装段其余入口点击无即时失败守卫（F6）；④ `tests/d4-main-e2e.mjs` + 8 个 `tests/fixtures/**-probe` 的同类陈旧选择器；⑤ 2 项 NOT VERIFIED 依旧；⑥ `mustClick` 必须 `await` 的注意事项（F5）；⑦ `S0b` 子串判据（F7）；⑧ `s0a-diagnose.mjs` 注释端口口径（F8）；⑨ 上游遗留（跨组织真机 2 条、两条探针门禁既有失败、OAuth、插件隔离 D5-08、D5-02 `prompt()` 遗留、SIGKILL 边界、第五批登记其余残留）。
 
 下一步建议：① 找一次**独占前台**的窗口期重跑 `test:d5-01-visibility`，把 `V9`/`V11`/`V12b` 的产品行为闭环或如实判红；② 单开一批处理 `browser-e2e.mjs:487`（先取 `cookie` 再判空并记 FAIL），让门禁如实暴露被掩盖的信号；③ 单开一批统一核对 `tests/` 下同类陈旧 `data-app-id` 探针；④ 若要推广"入口即时失败"，用 `mustExist` 只断言存在性并做 ≥2 次连续复跑防 flake；⑤ 收紧 `S0b` 判据（把 `Capabilities` 结论也纳入）。
+
+---
+
+# D5-03 第十五批 · D5-01 visibility 未验收项闭环（V9 / V11 / V12b 真机实测）· 2026-10-01（`2d50986`）
+
+> **口径（上级明确定范围）**：本批只含**一件事** —— 在**独占前台**的窗口期内重跑 D5-01 visibility 真机门禁 `test:d5-01-visibility`，把上一批（batch14 · `ac019a5`）登记为**未验收**的 `V9` / `V11` / `V12b` 真机闭环。**不改任何代码 / 判据 / 阈值 / 仪器，不跳过场景，不放宽安全闸，不把 FAIL 改成 NOT VERIFIED，不预写数据库**。只在 `/Users/wepingli/Desktop/OpenArc OS-integration` 工作，未触碰主工作树、DSH Desktop 共享运行时与 `~/.dsh`，未 push / 未 merge / 未 rebase / 未 amend / **未 commit**。**本批无代码改动（路径限定，独立验收 F1 更正）**：`git diff --stat -- src/ electron/ tests/ experiments/d5-01` 为空；`git diff --stat` 本身**非空**，只有 `PROGRESS.md` 与 `docs/D5-03-GATE-EVIDENCE.json` 两处**文档**改动。
+> **判定：本批（D5-01 visibility 未验收项闭环）= PASS（限定范围：两轮独立真机运行均 25 PASS / 0 FAIL / 25 total / 1 NOT VERIFIED，EXIT=0，与 CLOSURE4 基线 25/0/1 **汇总一致且 25 条断言名单未变** —— 据此推出逐条判定口径未变，**不是**逐条快照比对，基线逐条快照未冻结；`V9`/`V11`/`V12b` 由未验收改为**已验收**，其中 **V11 8/8 落点全部成功发出真实点击、全部 attempt=1、误差 0px**；安全闸全程零拒绝）。**D5-03 整体 = PARTIAL**（其余批次范围内项目未完成）。**
+> **被测代码树**：`2d50986`（`git rev-parse HEAD` 实测 `2d50986be46515678ad61494b09a4701565f8716`；父 `ac019a5`）。`2d50986` 是**文档提交**（`git show --stat 2d50986` 只列 `PROGRESS.md`、`docs/D5-03-GATE-EVIDENCE.json`、`experiments/d5-03/batch14/**`，**不含 `src/`、`electron/`、`tests/`、`package.json`、`experiments/d5-01/**`**）→ 本批被测代码 = `ac019a5` 的产品代码（逐字节相同），**本批不产生新提交**。
+> **证据**：`experiments/d5-03/batch15/`（`00` 运行前事实、`10/11` 两轮真机原始 stdout+stderr、`artifacts/run1|run2-visibility-e2e.json`、`artifacts/run1|run2-visibility-frames/` 各 18 张、`verify/01~06` 整理、`verify/captured/payload-001-2955.json` 只读补齐）；执行方汇总报告 `experiments/d5-03/batch15/D5-03-BATCH15-REPORT.md`；执行岗详细报告 `…/D5-03-BATCH15-E1-REPORT.md`；tracked 证据 `docs/D5-03-GATE-EVIDENCE.json` 的 `batch15` 段（**纯插入**：`git diff --numstat` = `628 / 0`，删除列 0；自 `"batch14"` 起至 EOF 与 `git show 2d50986:docs/D5-03-GATE-EVIDENCE.json` 对应区段**逐字节相同**、两侧 `len` 均 `295050`、sha256 均 `44f957e8c67b85f9a4812ae8be908e6bd79daaae7eb18729c2a3a9f8561ca957`；`python3 -c "import json;json.load(...)"` 成功）。
+
+## 0. 运行环境与「无代码改动」自证
+
+| 项 | 值 |
+| --- | --- |
+| 工作树 / 分支 | `/Users/wepingli/Desktop/OpenArc OS-integration` / `integration/ui-core` |
+| HEAD | `2d50986be46515678ad61494b09a4701565f8716` |
+| node / electron | `v22.22.3` / `44.3.0` |
+| 真机命令 | `env -u ELECTRON_RUN_AS_NODE npm run test:d5-01-visibility`（= `npm run build && node experiments/d5-01/visibility-e2e.mjs`） |
+| 前台（运行前） | run1 = `ChatGPT`(24060) → 运行后 `Claude`(18158)；run2 = `Claude`(18158) → `Claude`(18158) |
+| 并发 | 两轮**串行**；运行前进程扫描**无 electron 真机实例、无 `node --test`、无 `npm test`**（只有与本轮屏幕无关的常驻 `coze-bridge-daemon`、MCP 服务与 `agent-browser` 守护进程） |
+| 隔离实例 | 每轮门禁自拉全新 Electron（mkdtemp 隔离 userData、隔离 CDP 端口 **9794**；run1 pid 25293 / win 162275，run2 pid 28497 / win 162294） |
+
+**无代码改动自证（路径限定，独立验收 F1 更正）**：`git diff --stat -- src/ electron/ tests/ experiments/d5-01` = **空**；`git diff --stat` 本身**非空**，只有 `PROGRESS.md`（82 +）与 `docs/D5-03-GATE-EVIDENCE.json`（628 +）两处**文档**改动；`git status --porcelain` = `M PROGRESS.md` / `M docs/D5-03-GATE-EVIDENCE.json` / `?? experiments/d5-03/batch15/`（取证阶段尚未写这三份文档时 `git diff --stat` 确实为空）。
+
+## 1. 两轮 counts / EXIT 与逐条对照
+
+| 轮次 | 命令 | counts（pass/fail/total） | notVerified | EXIT | 原始输出 |
+| --- | --- | --- | --- | --- | --- |
+| run1（**纯运行，无预载**） | `env -u ELECTRON_RUN_AS_NODE npm run test:d5-01-visibility` | **25 / 0 / 25** | 1 | **0** | `batch15/10-visibility-run1.txt` |
+| run2（同一门禁 + 只读证据补齐预载） | 同上 + `NODE_OPTIONS=--import=<无空格符号链接入口>` | **25 / 0 / 25** | 1 | **0** | `batch15/11-visibility-run2.txt` |
+
+* 两轮**逐条 status 完全相同**（25 条同名同状态，差异 0 条）。把隔离实例 pid / window id 归一化后逐字符比对，**唯一 `actual` 数值差异是 `V10` 的四帧 PNG 字节数**（PNG 压缩字节逐次微变；V10 只判"每帧真实落盘且 >5000 字节"，两轮均 PASS）。比对原文：`batch15/verify/06-run1-run2-normalized-diff.txt`（`逐条 status 相同: true`、差异条目数 = 1）。
+* 唯一的 1 项 `NOT VERIFIED` 两轮相同：**页面缩放（Cmd +/-）** —— 门禁**固有不计入必需项**的既有登记项（D5-01 原始必需项不含页面缩放，PLAN 里的"缩放"指窗口缩放、已由 V9 覆盖），**不是本批新增未验收项**，本批不放宽、不改写该登记。
+
+## 2. `V9` / `V11` / `V12b` 逐项结论（由「未验收」改为「已验收」）
+
+* **`V9`（缩放后真实指针仍命中）= PASS**：窗口 `1440×940 → 1180×740`；重测 viewRect `{left:308,top:338,w:830,h:321}`；`click.ok=true`、**`attempt=1`**；`last={x:190,y:185,target:"paint-btn"}` = 目标落点，**误差 0px**（判据 ≤8px）；`V9b` 截图 `2360×1480 = 1180×740×2`（比例一致）。
+* **`V11`（四边近边界命中）= PASS，8/8 落点全部成功发出真实点击**（数据源 `batch15/verify/captured/payload-001-2955.json`，未截断、8 落点齐全；**该逐落点原始值仅 run2 有** —— run1 无预载、被 `record()` 截到 2400，**落点 7「右下角内」在 run1 无任何原始值**，run1 的 8 落点结论由门禁进程内对 8 项 `edgeOk` 求值 + 该 check PASS 支撑；`page` = 网页内坐标、`screen` = 屏幕 pt，`dx/dy = last − page`）：
+
+| 落点 | page | screen | pixel | pixelGreen | click.ok | reason | last | dx/dy | 判定 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 上边中点 | (415, 3) | (723, 341) | `56,123,83` | true | true（attempt=1） | — | (415,3) `HTML` | 0/0 | PASS |
+| 下边中点 | (415, 317) | (723, 655) | `56,123,83` | true | true（attempt=1） | — | (415,317) `BODY` | 0/0 | PASS |
+| 左边中点 | (3, 161) | (311, 499) | `56,123,83` | true | true（attempt=1） | — | (3,161) `BODY` | 0/0 | PASS |
+| 右边中点 | (826, 161) | (1134, 499) | `56,123,83` | true | true（attempt=1） | — | (826,161) `BODY` | 0/0 | PASS |
+| 左上角内 | (24, 24) | (332, 362) | `56,123,83` | true | true（attempt=1） | — | (24,24) `title` | 0/0 | PASS |
+| 右上角内 | (806, 24) | (1114, 362) | `56,123,83` | true | true（attempt=1） | — | (806,24) `title` | 0/0 | PASS |
+| 左下角内 | (24, 297) | (332, 635) | `56,123,83` | true | true（attempt=1） | — | (24,297) `BODY` | 0/0 | PASS |
+| 右下角内 | (806, 297) | (1114, 635) | `56,123,83` | true | true（attempt=1） | — | (806,297) `BODY` | 0/0 | PASS |
+
+  —— **8/8 都成功发出了真实点击，全部 `attempt=1`**，无 `not-frontmost`；8 个落点 `pixel` 均**经判据认定为网页绿色**（站点纯色 `#0a7d4f = (10,125,79)`；色彩管理后实测读数 `56,123,83`；判据为绿色启发式，阈值 40/20，余量 67/40；`pixelGreen=true` —— **独立于坐标换算**用屏幕像素证明落点在网页内；措辞更正 3 / F3，判据未放宽），误差全部 0px（判据 ≤6px）。**残余信任边界（更正 4 / F4）**：payload 第 **2400–2955** 字符（落点 6 尾 + 落点 7 全条）除该旁路文件外**无外部绑定**；支撑性交叉核对为「落点 7 与落点 3/6 构成 `830−24=806`、`321−24=297` 的镜像自洽 + 进程内对 8 项求值 + run1（无预载）同样 PASS」。
+* **`V12` / `V12b`（最大化 → 恢复）= PASS / PASS**：最大化 `click.ok=true`、`tries=1`、`received=true`，windowRect `830×570 → 1180×702`、pageSize `830×321 → 1180×453`、`viewFollows=true`；恢复后 **`restState` / `backLayout` / `backPage` / `backView` 全 true**，windowRect 回 `830×570`、pageSize 回 `830×321`、`viewRectRestored={308,338,830,321}` —— **窗口矩形 / 网页布局 / 页面尺寸 / 视图矩形四路逐值回位**。
+* **上一批对照**：batch14 同一条门禁实测 **22 pass / 3 fail / 25 total / 1 NV，EXIT=1**，3 项 FAIL 全是 `not-frontmost:…`（前台 layer-0 首位始终是 Google Chrome pid 83502 / win 160240），`V9`/`V12b` FAIL 时**一次点击都没发**；`V11` 更只是**部分落点成功**（左/右边中点等 `attempt=1`，其余被拒）、整项判 FAIL。→ 本批 8/8 全成功、三项全 PASS，差异**全部由独占前台消除**，**不是产品缺陷**。
+
+## 3. 安全闸证据（零拒绝）
+
+* `not-frontmost` **0**（run1 / run2 均 0）；`outside-content` **0**。
+* 两轮产物 JSON 各 **34 处 `attempt` 字段**（同一行数据在 `checks` 与 `operationRecord` 两处各一份）、**合计 68 处，全部 = 1，无 2、无 3** → 每次点击前的**前台身份判据第一次尝试即满足**，从未走到 `activate` 重试。
+* 两轮各自落盘 12 条完整 `{ours, front, activePid}` trace，**12/12 满足 `front[0].id === ours` 且 `front[0].pid === activePid`**；`V11` 的 8 条 trace 完全相同且均 `attempt=1`。
+
+## 4. 与 CLOSURE4 基线（25 / 0 / 1，exit 0）的对照与提交标识澄清
+
+**对照结论（更正 2 / F2，已降级表述）：汇总一致 + 断言名单未变（据此推出逐条判定口径未变）** —— (a) 汇总 counts（25/0/25）、EXIT（0）、NOT VERIFIED（1，同一项页面缩放）与 `docs/D5-01-CLOSURE4-RESULT.md:100` 表 G1 行一致；(b) 25 条 `record()` 断言**名单**在 `f9564b7`（CLOSURE4 被测版）与当前版本之间**逐条同名**（名单 diff 为空）、NV 项同名；(c) 判据/阈值（V9 ≤8px、V11 ≤6px + `pixelGreen`、V12 ≤6px、`status = ok?"PASS":"FAIL"`）**逐字未变**。
+
+**证据强度限制（如实登记，不允许高估）**：CLOSURE4 期的 **25 条逐条状态快照并未冻结** —— `artifacts/` 被 `.gitignore` 忽略且早已被后续运行覆盖，仓库内**不存在**该快照（`docs/D5-01-CLOSURE4-EVIDENCE.json` 的 `gates[0]` 只有 counts / notVerified / exitCode）。故本批**不是**与基线逐条快照的直接比对，而是「汇总一致 + 断言名单未变」的**推论**；真正**同环境实测快照对照**的对象是上一批（batch14）的 22/3/25。
+
+**提交标识澄清（避免看起来像矛盾）**：任务书引用的 CLOSURE4 标识 **`fe6c9bf` 是**文档提交**（`docs(D5-01 Closure-4): …`，2026-09-20 17:14:29 +0800；`git show --stat fe6c9bf` = `PROGRESS.md` + `docs/D5-01-CLOSURE4-EVIDENCE.json`(新增 288) + `docs/D5-01-CLOSURE4-RESULT.md`，不含产品代码）；该文档正文记录的是**代码提交**：基线 `ebc9d21`（修复前）→ 代码/测试提交 `f9564b7`（修复后）。两者都对、指代不同对象，**不是矛盾**。
+
+## 5. 证据截断登记与裁决（本批唯一新发现的工具局限）
+
+* **事实**：`experiments/d5-01/visibility-e2e.mjs:44` 的 `record()` 把 `actual` 切到 **2400 字符**（`actual: String(actual ?? "").slice(0, 2400)`）。`V11` 的 `actual` 未截断时长 **2955 字符**（8 落点），因此**门禁自己的产物 JSON 与 stdout 里**「右下角内」整条缺失、「左下角内」截在 `trace` 中间（两轮均是）。
+* **两轮证据强度不对称（更正 4 / F4）**：**未截断的逐落点原始值只有 run2 有**；**run1 的落点 7「右下角内」无任何原始值**（run1 无预载、从未落盘），run1 的 8 落点结论由门禁进程内对 8 项 `edgeOk` 求值 + 该 check PASS 支撑；payload 第 **2400–2955** 字符无外部绑定（残余信任边界，交叉核对成立）。
+* **不影响判定（写明）**：`status` 来自调用方传入的 `ok` 参数（`status: ok ? "PASS" : "FAIL"`），`failed` 计数与**退出码**也只由 `ok` 决定；`.slice(0, 2400)` **只影响落盘/打印的证据字符串**，不可能把 FAIL 变 PASS 或反之。
+* **只读补齐**：本批新增 `batch15/verify/evidence-preload.mjs`（挂在 **run2** 的 `NODE_OPTIONS=--import`），包装 `JSON.stringify` 后**返回值与原函数完全相同**，只把 >2000 字符的探针 JSON 另存一份（`verify/captured/payload-001-2955.json`）；**不改任何冻结文件、不改判据/阈值/返回值**。独立验收实测**18/18 用例输出逐字节相同**、写入范围仅该 OUT 目录，并用 `captured/` 目录 **birthtime** 独立证明 **run1 期间该目录不存在**。且 **run1 是纯运行（无预载）也 25/0/1 通过** → **结论不依赖该预载**。
+* **裁决（上级）**：本批**不改**该 2400 上限。理由：(a) 验收判据已满足；(b) 完整未截断数据已用只读方式留存并独立复算（仅 run2，残余信任边界已登记）；(c) 改动这个已冻结的仪器会**作废本批两轮绿证据**。→ 登记为遗留项；**独立验收 F7 认同本批不改，但不同意长期留作普通遗留项** → **建议尽快另开批次修**（提高上限，或按落点分段截断，使门禁自身产物即可完整回溯）。
+
+## 6. 回归复用说明（本批**未**运行回归）
+
+**本批无代码改动，故不重复运行回归**，引用上一批（batch14）仍有效的结果：`npm test` = **1412 tests / 1412 pass / 0 fail，EXIT=0**（`experiments/d5-03/batch14/70-npm-test-full.txt`）；D5-01 单测合并集 **37/37，EXIT=0**（`…/30-unit-d501-suite.txt`）；D5-01 boundary **32 pass / 0 fail / 1 NOT VERIFIED，EXIT=0**（`…/40-boundary-after-fix.txt`）。**为何仍有效（更正 1 / F1，路径限定）**：本批零代码改动 = `git diff --stat -- src/ electron/ tests/ experiments/d5-01` **为空**（`git diff --stat` 非空，只有 `PROGRESS.md` 与 `docs/D5-03-GATE-EVIDENCE.json` 两处文档改动），被测代码树与 batch14 取证时的 `ac019a5` 产品/测试代码逐字节相同；该复用归属经独立验收 **F5 用 4 个 blob 哈希复核成立**（blob 哈希与 `ac019a5:<path>` 及当前工作树三者一致）。**本批明确不主张**运行过这些命令 —— 是**复用**而非本批实测。
+
+## 7. 独立验收（F1–F7）与遗留项、判定
+
+**独立对抗性验收**：报告 `experiments/d5-03/batch15/verify/BATCH15-VERIFY-REPORT.md`（全新上下文、与执行方无关联、**全程未运行任何真机/前台脚本、未抢前台**；他人产出，本批未改写）。其独立复算确认：两轮 `25/0/25`、逐条 status 差异 0、`attempt` 取值集合 `{1}`、`not-frontmost`/`outside-content` `0/0`、**V11 8/8 且误差 0px**、V9 误差 0px、V12b 逐值回位；阈值**未放宽**（`f9564b7` ↔ 当前整文件 diff 仅 3 hunk / 49 行，全是 `ac019a5` 的向导与 dock 选择器；V9 ≤8 / V11 ≤6+`pixelGreen` / V12 ≤6 / `status = ok?"PASS":"FAIL"` 逐字未变，25 条断言名单 diff 为空）；**未发现伪造或放宽**。逐条处置：**F1** 已更正（路径限定表述）；**F2** 已降级（汇总一致 + 名单未变，并登记证据强度限制）；**F3** 已改措辞（经判据认定为网页绿色：站点纯色 `#0a7d4f`、实测读数 `56,123,83`、阈值 40/20、余量 67/40）；**F4** 已标明仅 run2 有原始值 + run1 落点 7 无原始值 + 残余信任边界；**F5** 预设疑点**已排除**（4 个 blob 哈希与 `ac019a5` 及当前工作树三者一致）；**F6** 为**任务书笔误**（`ebc9d47` 不存在，真实为 `ebc9d21`；执行方用对了）；**F7** 2400 截断仍在，本批不改（避免作废既有绿证据），**建议尽快另开批次修**。
+
+**遗留清单（均为另批范围）**：① `visibility-e2e.mjs:44` 的 2400 字符截断（**F7 建议尽快另批修**）；② 其它 **9 个仍用陈旧 `data-app-id` 的探针** —— `tests/d4-main-e2e.mjs:284`、`tests/fixtures/{model-isolation:59, model-settings:50, model-secret:90, resource:120, resource-library:127, resource-search:84, resource-preview:113}-ui-probe/main.cjs`、`tests/fixtures/governance-ui-probe/main.cjs:82/117/136`；③ `experiments/d5-01/browser-e2e.mjs:487` 的 `waitView("/cookie")` 脆弱点（超时返回 `undefined` 后直接 `.includes` → `TypeError` 中止整段，掩盖可能是真实产品症状的信号）；④ 上游继续单列（跨组织真机 2 条、`governance-ui`/`model-keychain-restart` 两条探针门禁既有失败、OAuth、插件隔离 D5-08、D5-02 `prompt()` 遗留、SIGKILL 边界、第五批登记其余残留）。另：后续复跑仍需一段**独占前台**窗口，否则会重现 `not-frontmost`（判据不得放宽）。
+
+**判定：本批（D5-01 visibility 未验收项闭环）= PASS（限定范围）** —— `test:d5-01-visibility` 两轮独立真机运行均 **25 PASS / 0 FAIL / 25 total / 1 NOT VERIFIED，EXIT=0**，与 CLOSURE4 基线 `25/0/1`（`docs/D5-01-CLOSURE4-RESULT.md:100`）**汇总一致且 25 条断言名单未变**（据此推出逐条判定口径未变；**不是**逐条快照比对 —— 基线逐条快照未冻结）；**`V9` / `V11` / `V12b` 由「未验收」改为「已验收」**（`V11` 8/8 落点、全部 `attempt=1`、误差 0px，落点像素经判据认定为网页绿色）；安全闸全程零拒绝（`not-frontmost` 0、`outside-content` 0，68 处 `attempt` 全为 1）；本批无代码改动（路径限定）、未 commit/push/merge/rebase/amend；回归复用 batch14 结果（本批未重复运行）。**本批不主张**：不改门禁仪器与判据；页面缩放 1 项 NOT VERIFIED 无改变；9 个陈旧 `data-app-id` 探针与 `browser-e2e.mjs:487` 无改善；与基线"逐条快照一致"。**D5-03 整体 = PARTIAL**（其余批次范围内项目未完成，未闭环项照上列遗留清单）。

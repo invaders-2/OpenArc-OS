@@ -1,4 +1,682 @@
 {
+  "batch15": {
+    "phase": "D5-03 第十五批 · D5-01 visibility 未验收项闭环（V9 / V11 / V12b 真机实测）",
+    "at": "2026-10-01T13:22:53Z",
+    "atNote": "证据截止时点 = 第十五批证据快照写入时（`at` 为 batch15 段回填时点；两轮真机运行时间为 2026-10-01 13:14:14Z–13:17:00Z，本地 21:14–21:17）。**纯插入**：自 `\"batch14\"` 起至 EOF 与 `git show 2d50986:docs/D5-03-GATE-EVIDENCE.json` 对应区段逐字节相同（两侧 sha256 均 `44f957e8c67b85f9a4812ae8be908e6bd79daaae7eb18729c2a3a9f8561ca957`、len 均 `295050`）；`git diff --numstat docs/D5-03-GATE-EVIDENCE.json` 的删除列 = 0（独立验收 F1 之后的更正**只发生在新增的 batch15 内容内部**，未产生任何删除）；`python3 -c \"import json;json.load(open('docs/D5-03-GATE-EVIDENCE.json'))\"` 成功、`batch15` 仍为首键且字段数 15。",
+    "openarcBranch": "integration/ui-core",
+    "testedCommit": "2d50986",
+    "testedCommitNote": "被测代码树 = `2d50986be46515678ad61494b09a4701565f8716`（`git rev-parse HEAD` 实测一致），父提交 `ac019a5`（`fix(d5-01): 第十四批 D5-01 真机门禁安装段修复`）。`2d50986` 是**文档提交**（`docs(d5-01): 第十四批结果与证据定稿`），`git show --stat 2d50986` 只列 `PROGRESS.md`、`docs/D5-03-GATE-EVIDENCE.json`、`experiments/d5-03/batch14/**`，**不含 `src/`、`electron/`、`tests/`、`package.json`、`experiments/d5-01/**`** → 本批被测代码 = `ac019a5` 的产品代码（逐字节相同），本批**不产生新提交**。\n**回归结果复用归属（独立验收 F5 疑点已排除）**：batch14 的 `experiments/d5-01/**` 驱动类结果取自**提交前工作树（HEAD=ae17ae9）**，batch14 `batch14.testedCommitNote` 已如实说明并给出 4 个 blob 哈希；独立验收逐条复核这 4 个哈希与 `ac019a5:<path>` **及当前工作树三者一致**，且 `git diff --stat ae17ae9 ac019a5 -- src/ electron/ tests/ package.json …` 为空 → **复用前提成立**。\n**基线提交标识澄清（避免看起来像矛盾）**：任务书引用的 CLOSURE4 标识 `fe6c9bf` 是**文档提交**（`docs(D5-01 Closure-4): 提示遮挡判定 + 最小修复 + 仪器收口报告与脱敏证据`，2026-09-20 17:14:29 +0800；`git show --stat fe6c9bf` = `PROGRESS.md` + `docs/D5-01-CLOSURE4-EVIDENCE.json`(新增 288) + `docs/D5-01-CLOSURE4-RESULT.md`，3 files / +449 / −32，不含产品代码）；该文档正文记录的是**代码提交**：基线 `ebc9d21`（修复前）→ 代码/测试提交 `f9564b7`（修复后，`fix(d5-01): 提示条被原生视图盖住（网页不让位）+ 可见性仪器统一坐标换算`，2026-09-20 17:10:14 +0800）。两者都对、指代不同对象，**不是矛盾**。（独立验收 F6：独立验收任务书某处引用的 `ebc9d47` **不存在** —— `fatal: ambiguous argument`；真实修复前基线为 `ebc9d21`，本批用对了。）**25/0/1 的判据出处 = `docs/D5-01-CLOSURE4-RESULT.md:100` 的表 G1 行**（`npm run test:d5-01-visibility` = 25 PASS / 0 FAIL / 1 NOT VERIFIED，退出码 0）。",
+    "scopeBoundaries": [
+      "未 push / 未 merge / 未 rebase / 未 amend / 未 commit（本批由上级统一裁定，本岗只取证 + 写文档）",
+      "未触碰 src/、electron/、tests/、package.json、DESIGN_SYSTEM.md、MOTION_SYSTEM.md、PLAN.md、experiments/d5-01/**（含被登记为截断点的 visibility-e2e.mjs）",
+      "未触碰主工作树 /Users/wepingli/Desktop/OpenArc OS、DSH Desktop 共享运行时与 ~/.dsh",
+      "未触碰 batch13（experiments/d5-03/batch13/**）与 batch14（experiments/d5-03/batch14/**）的既有证据；未触碰 verify/**（含独立验收报告 BATCH15-VERIFY-REPORT.md）、10-/11-*.txt、artifacts/**",
+      "未删除整段门禁、未跳过任何场景、未放宽或删除任何安全判据、未把 FAIL 改成 NOT VERIFIED、未改 expected 迁就实际、未新增/删除任何断言",
+      "两轮真机运行串行、无并发自动化（运行前进程扫描：无 electron 真机实例、无 node --test、无 npm test）",
+      "按上级裁决：本批**不改** visibility-e2e.mjs:44 的 2400 字符截断（理由见 verification.evidenceTruncation.decision）；独立验收 F7 建议尽快另开批次修",
+      "「本批无代码改动」为**路径限定**真陈述（独立验收 F1）：`git diff --stat -- src/ electron/ tests/ experiments/d5-01` 为空；`git diff --stat` 非空，只有 PROGRESS.md 与 docs/D5-03-GATE-EVIDENCE.json 两处**文档**改动"
+    ],
+    "redEvidence": {
+      "at": "上一批（batch14 · ac019a5）同一条门禁的实测红：22 pass / 3 fail / 25 total / 1 NOT VERIFIED，EXIT=1",
+      "logs": [
+        "experiments/d5-03/batch14/50-visibility-after-fix.txt",
+        "experiments/d5-03/batch14/51-visibility-rerun.txt"
+      ],
+      "failingChecks": [
+        "V9",
+        "V11",
+        "V12b"
+      ],
+      "reasonVerbatim": "not-frontmost:… / not-received:restore（内层 3 次重试全部 not-frontmost）",
+      "measuredForeground": "前台 layer-0 首位始终是 Google Chrome（pid 83502 / window id 160240），activePid = 83502；驱动按安全判据拒绝发送真实点击",
+      "consequence": "V9 / V12b FAIL 时驱动一次点击都没发；V11 只发出了**部分落点**的点击（左/右边中点等 attempt=1 成功），其余被拒为 not-frontmost，整项判 FAIL",
+      "note": "该红不是产品缺陷，是前台被别的 App 抢走的**环境争用**（详见 rootCause）。"
+    },
+    "rootCause": {
+      "verdict": "FOREGROUND_CONTENTION —— 前台争用（环境问题），**不是产品缺陷**；本批在独占前台条件下两轮复现为 25/0/1、EXIT=0",
+      "batch14Foreground": {
+        "front0": {
+          "pid": 83502,
+          "app": "Google Chrome",
+          "windowId": 160240
+        },
+        "activePid": 83502
+      },
+      "batch15Foreground": {
+        "run1": {
+          "oursWindowId": 162275,
+          "front0": {
+            "pid": 25293,
+            "windowId": 162275
+          },
+          "activePid": 25293,
+          "note": "front[0] = 本实例；本实例 pid = 25293 = activePid"
+        },
+        "run2": {
+          "oursWindowId": 162294,
+          "front0": {
+            "pid": 28497,
+            "windowId": 162294
+          },
+          "activePid": 28497,
+          "note": "front[0] = 本实例；本实例 pid = 28497 = activePid"
+        }
+      },
+      "otherAppsBehind": [
+        "Claude 18158",
+        "ChatGPT 24060",
+        "NOVAI 22673",
+        "DeepSeek Harness 83940"
+      ],
+      "note": "两轮中门禁自身的 ensureFrontmost / safeClick 校验**第一次尝试（attempt=1）即满足**「最前 layer-0 窗口属于本进程且本进程即活跃 App」，从未走到 activate 重试；因此上一批的 3 项 FAIL 由前台争用解释，**本批未放宽任何安全判据**。"
+    },
+    "fix": {
+      "codeChanges": "无 —— 本批产品代码 / 测试代码 / 驱动脚本零改动（独立验收 F1，路径限定）：`git diff --stat -- src/ electron/ tests/ experiments/d5-01` 为空；`git diff --stat` 本身**非空**，且**只有** `PROGRESS.md`（82 +）与 `docs/D5-03-GATE-EVIDENCE.json`（628 +）两处**文档**改动；`git status --porcelain` = `M PROGRESS.md` / `M docs/D5-03-GATE-EVIDENCE.json` / `?? experiments/d5-03/batch15/`",
+      "action": "在**独占前台**的窗口期内，对同一门禁做两轮独立真机运行：run1 纯运行（无任何预载）；run2 同一门禁 + 只读证据补齐预载（用于补齐被 2400 截断的 V11 第 7/8 个落点）",
+      "newFilesNotProduct": [
+        "experiments/d5-03/batch15/verify/evidence-preload.mjs —— 只读旁路预载（不属于产品、不属于门禁；包装 JSON.stringify 后返回值与原函数完全相同，只把 >2000 字符的探针 JSON 另存一份；独立验收实测 18/18 用例输出逐字节相同）",
+        "experiments/d5-03/batch15/D5-03-BATCH15-REPORT.md —— 本批执行方报告（含 §11 独立验收发现与处置）"
+      ],
+      "notChanged": "未改判据 / 阈值 / expected / 安全闸 / 门禁产物结构；未改 experiments/d5-01/** 一行；独立验收复核：f9564b7 ↔ 当前整文件 diff 仅 3 hunk / 49 行（全是 ac019a5 的向导与 dock 选择器），V9 ≤8 / V11 ≤6+pixelGreen / V12 ≤6 / status = ok?\"PASS\":\"FAIL\" 逐字未变，25 条断言名单 diff 为空。"
+    },
+    "verification": {
+      "gate": "test:d5-01-visibility（= npm run build && node experiments/d5-01/visibility-e2e.mjs，package.json:61）",
+      "runs": [
+        {
+          "id": "run1",
+          "command": "env -u ELECTRON_RUN_AS_NODE npm run test:d5-01-visibility",
+          "preload": null,
+          "counts": {
+            "pass": 25,
+            "fail": 0,
+            "total": 25,
+            "notVerified": 1
+          },
+          "exit": 0,
+          "foregroundBefore": {
+            "app": "ChatGPT",
+            "unixId": 24060
+          },
+          "foregroundAfter": {
+            "app": "Claude",
+            "unixId": 18158
+          },
+          "log": "experiments/d5-03/batch15/10-visibility-run1.txt",
+          "artifactSnapshot": "experiments/d5-03/batch15/artifacts/run1-visibility-e2e.json",
+          "framesDir": "experiments/d5-03/batch15/artifacts/run1-visibility-frames/ (18 张)",
+          "instance": {
+            "pid": 25293,
+            "windowId": 162275,
+            "cdpPort": 9794
+          }
+        },
+        {
+          "id": "run2",
+          "command": "env -u ELECTRON_RUN_AS_NODE NODE_OPTIONS=--import=<无空格符号链接入口> npm run test:d5-01-visibility",
+          "preload": "experiments/d5-03/batch15/verify/evidence-preload.mjs（只读旁路，返回值与原函数相同；独立验收实测 18/18 用例逐字节相同、且用 captured 目录 btime 证明 run1 期间该目录不存在）",
+          "counts": {
+            "pass": 25,
+            "fail": 0,
+            "total": 25,
+            "notVerified": 1
+          },
+          "exit": 0,
+          "foregroundBefore": {
+            "app": "Claude",
+            "unixId": 18158
+          },
+          "foregroundAfter": {
+            "app": "Claude",
+            "unixId": 18158
+          },
+          "log": "experiments/d5-03/batch15/11-visibility-run2.txt",
+          "artifactSnapshot": "experiments/d5-03/batch15/artifacts/run2-visibility-e2e.json",
+          "framesDir": "experiments/d5-03/batch15/artifacts/run2-visibility-frames/ (18 张)",
+          "instance": {
+            "pid": 28497,
+            "windowId": 162294,
+            "cdpPort": 9794
+          }
+        }
+      ],
+      "run1VsRun2": {
+        "countsIdentical": true,
+        "exitIdentical": true,
+        "perCheckStatusIdentical": true,
+        "statusDiffCount": 0,
+        "onlyActualDifference": "V10 的四帧 PNG 字节数（run1 [346808,346954,347041,346901] vs run2 [346783,346863,346958,347062]；V10 只判每帧真实落盘且 >5000 字节，两轮均 PASS）",
+        "diffEvidence": "experiments/d5-03/batch15/verify/06-run1-run2-normalized-diff.txt（逐条 status 相同: true；actual 归一化后仍不同条目数 = 1）"
+      },
+      "notVerifiedItem": {
+        "name": "页面缩放（Cmd +/-）",
+        "count": 1,
+        "kind": "门禁固有不计入必需项的既有登记项（两轮相同）",
+        "reason": "不适用：D5-01 原始必需项不含页面缩放（PLAN 里的『缩放』是窗口缩放，V9 已覆盖），产品无缩放入口、本轮不新增",
+        "changedByThisBatch": false
+      },
+      "baseline": {
+        "source": "docs/D5-01-CLOSURE4-RESULT.md:100 表 G1 行",
+        "value": {
+          "pass": 25,
+          "fail": 0,
+          "total": 25,
+          "notVerified": 1,
+          "exit": 0
+        },
+        "comparison": "**汇总一致 + 断言名单未变**（独立验收 F2：**不是**逐条快照比对）—— (a) 汇总 25/0/1 + exit 0 与 `docs/D5-01-CLOSURE4-RESULT.md:100` 的 G1 行一致；(b) 25 条 `record()` 断言**名单**在 `f9564b7`（CLOSURE4 被测版）与当前版本之间**逐条同名**（名单 diff 为空）、NV 项同名、(c) 判据/阈值（V9 ≤8px、V11 ≤6px+pixelGreen、V12 ≤6px、status = ok?\"PASS\":\"FAIL\"）逐字未变；→ 据此推出「逐条判定口径未变」。**不得**写成\"与基线逐条一致/无差异需解释\"。",
+        "evidenceStrengthLimit": "CLOSURE4 期的 **25 条逐条状态快照并未冻结** —— `artifacts/` 被 .gitignore 忽略且早已被后续运行覆盖，仓库内不存在该快照；`docs/D5-01-CLOSURE4-EVIDENCE.json` 的 `gates[0]` 只有 counts / notVerified / exitCode。故本批与基线**只有汇总级 + 名单级可比**，**没有**逐条状态快照级比对。真正**同环境实测快照对照**是 batch14（ac019a5）的 22/3/25 对照（有原始输出文件）。",
+        "commitIdClarification": "fe6c9bf = 文档提交；ebc9d21 = 修复前基线（代码提交）；f9564b7 = 修复后被测（代码/测试提交）；独立验收 F6 指出 `ebc9d47` 不存在（任务书笔误）。见 testedCommitNote。"
+      },
+      "keyChecks": {
+        "V9": {
+          "resize": "1440x940 → 1180x740",
+          "viewRectAfter": {
+            "left": 308,
+            "top": 338,
+            "w": 830,
+            "h": 321
+          },
+          "click": {
+            "ok": true,
+            "attempt": 1,
+            "reason": null
+          },
+          "last": {
+            "x": 190,
+            "y": 185,
+            "target": "paint-btn"
+          },
+          "landingErrorPx": 0,
+          "thresholdPx": 8,
+          "V9b": {
+            "image": [
+              2360,
+              1480
+            ],
+            "win": {
+              "w": 1180,
+              "h": 740
+            },
+            "scale": 2,
+            "frame": "07-after-resize.png"
+          },
+          "verdict": "PASS（由未验收改为已验收）"
+        },
+        "V11": {
+          "viewRect": {
+            "left": 308,
+            "top": 338,
+            "w": 830,
+            "h": 321
+          },
+          "dataSource": "逐落点原始值**仅 run2 有**：experiments/d5-03/batch15/verify/captured/payload-001-2955.json（run2 只读旁路捕获，未截断，2955 字符、8 落点齐全）",
+          "evidenceAsymmetry": "独立验收 F4：run1（无预载）的 actual 被 record() 截到 2400，**落点 7「右下角内」在 run1 无任何原始值**（落点 6 亦被截在 trace 中间）；run1 的 8 落点结论由「门禁进程内对 8 项 edgeOk 求值 + 该 check 为 PASS」支撑。**不得**把两轮证据强度写成等量齐观。",
+          "residualTrustBoundary": "payload 第 2400–2955 字符（落点 6 尾部 + 落点 7 全条）**除该旁路文件外无外部绑定**（冻结产物只能校验到第 2400 字符）。支撑性交叉核对：(a) 落点 7 与落点 3/6 构成 830−24=806、321−24=297 的**镜像自洽**；(b) 门禁在**进程内**对 8 项 edgeOk 做 every() 求值后才 record()，故 PASS 在进程内覆盖落点 7；(c) run1（**无预载、独立进程**）同样 PASS。→ 判定该边界不影响本批结论，但它确实存在。",
+          "clicksSent": "8 / 8 个落点全部成功发出真实点击",
+          "attemptsAllOne": true,
+          "reasons": "无（全部无 reason）",
+          "notFrontmost": 0,
+          "outsideContent": 0,
+          "pixelNote": "落点像素**经判据认定为网页绿色**（独立验收 F3）：站点纯色 #0a7d4f = (10,125,79)；色彩管理后实测读数 56,123,83（**不是**\"纯绿\"）；判据为绿色启发式，阈值 40/20，实测余量 67/40；pixelGreen=true。判据未放宽。",
+          "probes": [
+            {
+              "name": "上边中点",
+              "page": {
+                "x": 415,
+                "y": 3
+              },
+              "screen": {
+                "x": 723,
+                "y": 341
+              },
+              "pixel": "56,123,83",
+              "pixelGreen": true,
+              "clickOk": true,
+              "attempt": 1,
+              "reason": null,
+              "last": {
+                "x": 415,
+                "y": 3,
+                "target": "HTML"
+              },
+              "dx": 0,
+              "dy": 0,
+              "verdict": "PASS"
+            },
+            {
+              "name": "下边中点",
+              "page": {
+                "x": 415,
+                "y": 317
+              },
+              "screen": {
+                "x": 723,
+                "y": 655
+              },
+              "pixel": "56,123,83",
+              "pixelGreen": true,
+              "clickOk": true,
+              "attempt": 1,
+              "reason": null,
+              "last": {
+                "x": 415,
+                "y": 317,
+                "target": "BODY"
+              },
+              "dx": 0,
+              "dy": 0,
+              "verdict": "PASS"
+            },
+            {
+              "name": "左边中点",
+              "page": {
+                "x": 3,
+                "y": 161
+              },
+              "screen": {
+                "x": 311,
+                "y": 499
+              },
+              "pixel": "56,123,83",
+              "pixelGreen": true,
+              "clickOk": true,
+              "attempt": 1,
+              "reason": null,
+              "last": {
+                "x": 3,
+                "y": 161,
+                "target": "BODY"
+              },
+              "dx": 0,
+              "dy": 0,
+              "verdict": "PASS"
+            },
+            {
+              "name": "右边中点",
+              "page": {
+                "x": 826,
+                "y": 161
+              },
+              "screen": {
+                "x": 1134,
+                "y": 499
+              },
+              "pixel": "56,123,83",
+              "pixelGreen": true,
+              "clickOk": true,
+              "attempt": 1,
+              "reason": null,
+              "last": {
+                "x": 826,
+                "y": 161,
+                "target": "BODY"
+              },
+              "dx": 0,
+              "dy": 0,
+              "verdict": "PASS"
+            },
+            {
+              "name": "左上角内",
+              "page": {
+                "x": 24,
+                "y": 24
+              },
+              "screen": {
+                "x": 332,
+                "y": 362
+              },
+              "pixel": "56,123,83",
+              "pixelGreen": true,
+              "clickOk": true,
+              "attempt": 1,
+              "reason": null,
+              "last": {
+                "x": 24,
+                "y": 24,
+                "target": "title"
+              },
+              "dx": 0,
+              "dy": 0,
+              "verdict": "PASS"
+            },
+            {
+              "name": "右上角内",
+              "page": {
+                "x": 806,
+                "y": 24
+              },
+              "screen": {
+                "x": 1114,
+                "y": 362
+              },
+              "pixel": "56,123,83",
+              "pixelGreen": true,
+              "clickOk": true,
+              "attempt": 1,
+              "reason": null,
+              "last": {
+                "x": 806,
+                "y": 24,
+                "target": "title"
+              },
+              "dx": 0,
+              "dy": 0,
+              "verdict": "PASS"
+            },
+            {
+              "name": "左下角内",
+              "page": {
+                "x": 24,
+                "y": 297
+              },
+              "screen": {
+                "x": 332,
+                "y": 635
+              },
+              "pixel": "56,123,83",
+              "pixelGreen": true,
+              "clickOk": true,
+              "attempt": 1,
+              "reason": null,
+              "last": {
+                "x": 24,
+                "y": 297,
+                "target": "BODY"
+              },
+              "dx": 0,
+              "dy": 0,
+              "verdict": "PASS"
+            },
+            {
+              "name": "右下角内",
+              "page": {
+                "x": 806,
+                "y": 297
+              },
+              "screen": {
+                "x": 1114,
+                "y": 635
+              },
+              "pixel": "56,123,83",
+              "pixelGreen": true,
+              "clickOk": true,
+              "attempt": 1,
+              "reason": null,
+              "last": {
+                "x": 806,
+                "y": 297,
+                "target": "BODY"
+              },
+              "dx": 0,
+              "dy": 0,
+              "verdict": "PASS"
+            }
+          ],
+          "thresholdPx": 6,
+          "maxErrorPx": 0,
+          "allPixelGreen": true,
+          "batch14Contrast": "上一批 V11 只有部分落点成功发出点击（左/右边中点等 attempt=1），其余被拒为 not-frontmost，整项 FAIL；本批 8/8 全部成功、整项 PASS",
+          "verdict": "PASS（由未验收改为已验收；run2 逐落点原始值 + run1/run2 两轮 PASS）"
+        },
+        "V12": {
+          "button": "最大化browser",
+          "click": {
+            "ok": true,
+            "tries": 1,
+            "received": true
+          },
+          "stateChanged": true,
+          "layoutChanged": true,
+          "pageChanged": true,
+          "viewFollows": true,
+          "windowRect": {
+            "before": {
+              "left": 164,
+              "top": 56,
+              "width": 830,
+              "height": 570
+            },
+            "after": {
+              "left": 0,
+              "top": 38,
+              "width": 1180,
+              "height": 702
+            }
+          },
+          "pageSize": {
+            "before": {
+              "iw": 830,
+              "ih": 321
+            },
+            "after": {
+              "iw": 1180,
+              "ih": 453
+            }
+          },
+          "viewRectAfter": {
+            "left": 144,
+            "top": 320,
+            "w": 1180,
+            "h": 453
+          },
+          "hit": {
+            "x": 590,
+            "y": 227,
+            "target": "BODY"
+          },
+          "hitOk": true,
+          "frame": "10-maximized.png",
+          "verdict": "PASS"
+        },
+        "V12b": {
+          "click": {
+            "ok": true,
+            "tries": 1,
+            "received": true
+          },
+          "restState": true,
+          "backLayout": true,
+          "backPage": true,
+          "backView": true,
+          "windowRect": {
+            "before": {
+              "left": 164,
+              "top": 56,
+              "width": 830,
+              "height": 570
+            },
+            "restored": {
+              "left": 164,
+              "top": 56,
+              "width": 830,
+              "height": 570
+            }
+          },
+          "pageSize": {
+            "before": {
+              "iw": 830,
+              "ih": 321
+            },
+            "restored": {
+              "iw": 830,
+              "ih": 321
+            }
+          },
+          "viewRectRestored": {
+            "left": 308,
+            "top": 338,
+            "w": 830,
+            "h": 321
+          },
+          "frame": "11-restored.png",
+          "batch14Contrast": "上一批 FAIL not-received:restore（内层 3 次全 not-frontmost:restore），restState=false、窗口停在最大化态；本批 attempt=1、received=true、逐值回位",
+          "verdict": "PASS（由未验收改为已验收）"
+        }
+      },
+      "safetyGate": {
+        "notFrontmostCount": {
+          "run1": 0,
+          "run2": 0
+        },
+        "outsideContentCount": {
+          "run1": 0,
+          "run2": 0
+        },
+        "attemptFields": {
+          "perRunArtifact": 34,
+          "bothRuns": 68,
+          "distinctValues": [
+            1
+          ],
+          "anyTwoOrThree": 0,
+          "note": "产物 JSON 把同一行数据同时写进 checks 与 operationRecord，故每轮 34 处、两轮合计 68 处；全部 = 1（独立验收独立复算取值集合 {1}）"
+        },
+        "traceChecks": {
+          "run1": "12 条完整 {ours, front, activePid} trace，12/12 满足 front[0].id === ours 且 front[0].pid === activePid",
+          "run2": "同上 12/12"
+        },
+        "conclusion": "每次点击前的前台身份判据第一次尝试（attempt=1）即满足，从未走到 activate 重试；安全闸全程零拒绝，判据一条未放宽"
+      },
+      "artifacts": {
+        "gateNative": [
+          "experiments/d5-03/batch15/10-visibility-run1.txt",
+          "experiments/d5-03/batch15/11-visibility-run2.txt",
+          "experiments/d5-03/batch15/artifacts/run1-visibility-e2e.json",
+          "experiments/d5-03/batch15/artifacts/run2-visibility-e2e.json",
+          "experiments/d5-03/batch15/artifacts/run1-visibility-frames/ (18 张)",
+          "experiments/d5-03/batch15/artifacts/run2-visibility-frames/ (18 张)"
+        ],
+        "readOnlySupplement": [
+          "experiments/d5-03/batch15/verify/evidence-preload.mjs",
+          "experiments/d5-03/batch15/verify/captured/payload-001-2955.json",
+          "experiments/d5-03/batch15/verify/02-v11-full-probes.txt"
+        ],
+        "curated": [
+          "00-prerun-facts.txt",
+          "verify/01-key-checks-raw.txt",
+          "verify/03-tables.txt",
+          "verify/04-v9-v12-raw.txt",
+          "verify/05-check-table.md",
+          "verify/06-run1-run2-normalized-diff.txt"
+        ],
+        "independentVerificationReport": "experiments/d5-03/batch15/verify/BATCH15-VERIFY-REPORT.md（他人产出，本批未改写）",
+        "framesCountPerRun": 18,
+        "framesNames": [
+          "01-paint-before.png",
+          "02-tab-switch.png",
+          "03-addressbar-focus.png",
+          "04-page-click.png",
+          "05-panel-open.png",
+          "06-panel-closed.png",
+          "07-after-resize.png",
+          "08-burst-0.png",
+          "08-burst-1.png",
+          "08-burst-2.png",
+          "08-burst-3.png",
+          "09-edges-frame.png",
+          "09-edges.png",
+          "10-maximize-before.png",
+          "10-maximized.png",
+          "11-restore-before.png",
+          "11-restored.png",
+          "12-zoom.png"
+        ]
+      },
+      "evidenceTruncation": {
+        "location": "experiments/d5-01/visibility-e2e.mjs:44",
+        "code": "actual: String(actual ?? \"\").slice(0, 2400)",
+        "effect": "V11 的 actual（未截断 2955 字符、8 落点）被截到 2400 → 门禁自己的产物 JSON 与 stdout 里「右下角内」整条缺失、「左下角内」截在 trace 中间（两轮均是，实测 actual.length = 2400）",
+        "run1NoRawValue": "run1 无预载 → **落点 7「右下角内」在 run1 没有任何原始值**；未截断逐落点原始值**仅 run2 有**（独立验收 F4）",
+        "cannotAffectVerdict": "status 来自调用方传入的 ok（status: ok ? \"PASS\" : \"FAIL\"），failed 计数与退出码也只由 ok 决定；.slice(0, 2400) 只影响落盘/打印的证据字符串，不可能把 FAIL 变 PASS 或反之",
+        "supplement": "新增只读旁路预载 experiments/d5-03/batch15/verify/evidence-preload.mjs（挂在 run2 的 NODE_OPTIONS=--import），包装 JSON.stringify 后返回值与原函数完全相同，只把 >2000 字符的探针 JSON 另存一份；不改任何冻结文件、不改判据/阈值/返回值。独立验收实测：18/18 用例输出逐字节相同、写入范围只在该 OUT 目录、并以 captured 目录 btime 证明 run1 期间该目录不存在",
+        "independence": "run1 是纯运行（无预载）也 25/0/1 通过 → 结论不依赖该预载",
+        "decision": "本批不改该 2400 上限。理由：(a) 验收判据已满足；(b) 完整未截断数据已用只读方式留存并独立复算（仅 run2，残余信任边界已登记）；(c) 改动这个已冻结的仪器会作废本批两轮绿证据。登记为遗留项；独立验收 F7 与我方一致认为本批不改，但**不同意长期留作普通遗留项** —— 建议**尽快另开批次修**（提高上限或按落点分段截断，使门禁自身产物即可完整回溯）"
+      },
+      "regressionReuse": {
+        "ranInThisBatch": false,
+        "reason": "本批无代码改动（独立验收 F1，路径限定）：`git diff --stat -- src/ electron/ tests/ experiments/d5-01` 为空；`git diff --stat` 本身**非空**，且**只有** `PROGRESS.md` 与 `docs/D5-03-GATE-EVIDENCE.json` 两处**文档**改动。被测代码树与 batch14 取证时的 ac019a5 产品/测试代码逐字节相同（该归属经独立验收 F5 用 4 个 blob 哈希复核成立）。",
+        "reused": [
+          {
+            "item": "npm test 全量",
+            "value": "1412 tests / 1412 pass / 0 fail，EXIT=0",
+            "source": "experiments/d5-03/batch14/70-npm-test-full.txt"
+          },
+          {
+            "item": "D5-01 单测合并集",
+            "value": "37 / 37 / 0，EXIT=0",
+            "source": "experiments/d5-03/batch14/30-unit-d501-suite.txt"
+          },
+          {
+            "item": "D5-01 boundary 门禁",
+            "value": "32 pass / 0 fail / 32 total / 1 NOT VERIFIED，EXIT=0",
+            "source": "experiments/d5-03/batch14/40-boundary-after-fix.txt"
+          }
+        ],
+        "note": "本批**没有**运行上述命令；它们是**复用**而非本批实测。本批只重跑了 visibility 真机门禁本身。"
+      },
+      "antiCheat": "未删除整段门禁、未跳过场景、未放宽/删除安全判据、未把 FAIL 改成 NOT VERIFIED、未预写数据库、未改 expected 迁就实际；门禁仪器（experiments/d5-01/**）一行未改；run1 为无预载的纯运行，结论不依赖任何旁路。独立对抗性验收（未运行任何真机/前台脚本）复核后**未发现伪造或放宽**：f9564b7 ↔ 当前整文件 diff 仅 3 hunk / 49 行（全是 ac019a5 的向导与 dock 选择器），V9 ≤8 / V11 ≤6+pixelGreen / V12 ≤6 / status = ok?\"PASS\":\"FAIL\" 逐字未变，25 条断言名单 diff 为空。",
+      "independentVerification": {
+        "report": "experiments/d5-03/batch15/verify/BATCH15-VERIFY-REPORT.md（全新上下文、与执行方无关联；全程未运行任何真机/前台脚本、未抢前台；他人产出，本批未改写）",
+        "verdict": "未发现伪造或放宽；两轮 25/0/25、逐条 status 差异 0、attempt 取值集合 {1}、not-frontmost/outside-content 0/0、V11 8/8 且误差 0px、V9 误差 0px、V12b 逐值回位 —— 均经其重新解析 + 独立复算确认",
+        "findings": {
+          "F1": {
+            "severity": "S3 表述",
+            "issue": "\"git diff --stat 为空\" 字面不成立（工作区有 PROGRESS.md 82+ 与 docs/D5-03-GATE-EVIDENCE.json 628+ 两处文档改动）；实质主张（无代码改动）成立",
+            "disposition": "已更正为路径限定：git diff --stat -- src/ electron/ tests/ experiments/d5-01 为空；git diff --stat 非空且只有两处文档改动（三份文档 + JSON 内同类表述全部改掉）"
+          },
+          "F2": {
+            "severity": "S3 表述",
+            "issue": "\"与 CLOSURE4 基线逐条一致\" 证据强度被高估（基线逐条快照未冻结）",
+            "disposition": "已降级为\"汇总一致 + 断言名单未变（据此推出逐条判定口径未变）\"，并登记为证据强度限制（verification.baseline.evidenceStrengthLimit）"
+          },
+          "F3": {
+            "severity": "S4 措辞",
+            "issue": "\"像素纯绿 56,123,83\" 不严谨（站点纯色 #0a7d4f=(10,125,79)，实测为色彩管理后读数；判据是绿色启发式）",
+            "disposition": "已改措辞：\"经判据认定为网页绿色（站点纯色 #0a7d4f；实测读数 56,123,83；阈值 40/20、余量 67/40）\"；判据未放宽"
+          },
+          "F4": {
+            "severity": "S4 限定",
+            "issue": "\"V11 未截断原始值仅 run2 有；run1 落点 7 无原始值；两轮证据强度不对称\"",
+            "disposition": "已标明仅 run2 有原始值 + run1 落点 7 无原始值（由进程内 8 项 edgeOk every 求值 + PASS 支撑）+ 登记残余信任边界：payload 第 2400–2955 字符无外部绑定，交叉核对为镜像自洽/进程内求值/run1 同样 PASS"
+          },
+          "F5": {
+            "severity": "原疑点已排除",
+            "issue": "（独立验收预设）batch14 的 experiments/d5-01/** 驱动类结果复用归属疑似不实（batch14 日志 HEAD=ae17ae9 vs 声称被测 ac019a5）",
+            "disposition": "已排除：4 个 blob 哈希与 ac019a5:<path> 及当前工作树三者一致，且 git diff --stat ae17ae9 ac019a5 -- src/ electron/ tests/ package.json … 为空 → 复用前提成立"
+          },
+          "F6": {
+            "severity": "S4 信息",
+            "issue": "任务书引用的 ebc9d47 不存在（fatal: ambiguous argument）；真实修复前基线为 ebc9d21",
+            "disposition": "任务书笔误，执行方用对了；三份文档 + JSON 一律写 ebc9d21（见 testedCommitNote 的标识澄清）"
+          },
+          "F7": {
+            "severity": "S4 残留工具缺陷",
+            "issue": "visibility-e2e.mjs:44 的 2400 字符截断仍在，使门禁自身产物无法完整回溯 V11 最后一落点，独立验收必须依赖旁路文件",
+            "disposition": "本批按裁决不改（避免作废既有绿证据）；独立验收不同意长期留作普通遗留项 → 建议尽快另开批次修（提高上限或按落点分段截断）"
+          }
+        }
+      }
+    },
+    "assertionChanges": [
+      "本批未修改/放宽/跳过任何断言；门禁判据未变（本批无代码改动）。独立验收独立复核：f9564b7 ↔ 当前整文件 diff 仅 3 hunk / 49 行（全是 ac019a5 的向导与 dock 选择器），V9 ≤8 / V11 ≤6+pixelGreen / V12 ≤6 / status = ok?\"PASS\":\"FAIL\" 逐字未变，25 条断言名单 diff 为空。"
+    ],
+    "notVerified": [
+      "页面缩放（Cmd +/-）——门禁固有不计入必需项的既有登记项（1 项，两轮相同）；本批不放宽、不改写该登记，也不算本批新增未验收项",
+      "门禁自身的 2400 字符截断（visibility-e2e.mjs:44）——V11 第 7/8 个落点在门禁原生产物里不可读（本批用只读旁路补齐，未修仪器）",
+      "V11 证据强度限制（独立验收 F4）：未截断逐落点原始值**仅 run2 有**，run1 落点 7 无任何原始值；payload 第 2400–2955 字符**无外部绑定**（残余信任边界，交叉核对成立）",
+      "与 CLOSURE4 基线的可比性限制（独立验收 F2）：只有汇总级 + 断言名单级可比，基线逐条状态快照**未冻结**，不存在仓库内快照",
+      "tests/d4-main-e2e.mjs 与 8 个 tests/fixtures/**-probe 的陈旧 data-app-id 选择器——未验证、未修改（超出本批授权范围）",
+      "experiments/d5-01/browser-e2e.mjs:487 的 waitView(\"/cookie\") 脆弱点——未验证、未修改（属另一门禁的驱动，超出本批授权范围）",
+      "两轮运行期间机器上仍有常驻 agent-browser 守护进程与 Claude/ChatGPT/NOVAI/DeepSeek Harness 等 App；后续复跑仍需独占前台窗口，否则会重现 not-frontmost（判据不得放宽）"
+    ],
+    "leftovers": [
+      "① 仪器修复（独立验收 F7 建议**尽快另开批次**）：visibility-e2e.mjs:44 的 2400 字符截断 → 提高上限或按落点分段截断，使门禁自身产物即可完整回溯；本批按裁定不改",
+      "② 其它 9 个仍用陈旧 data-app-id 的探针（均属另批范围）：tests/d4-main-e2e.mjs:284；tests/fixtures/model-isolation-ui-probe/main.cjs:59；model-settings-ui-probe/main.cjs:50；model-secret-ui-probe/main.cjs:90；resource-ui-probe/main.cjs:120；resource-library-ui-probe/main.cjs:127；resource-search-ui-probe/main.cjs:84；resource-preview-ui-probe/main.cjs:113；governance-ui-probe/main.cjs:82/117/136",
+      "③ experiments/d5-01/browser-e2e.mjs:487 的 waitView 脆弱点（waitView 超时返回 undefined 后直接 .includes → TypeError 中止整段，掩盖可能是真实产品症状的信号）；属另批范围",
+      "④ 上游继续单列：跨组织真机 2 条 notVerified、两条探针门禁既有失败（governance-ui / model-keychain-restart）、OAuth、插件隔离（D5-08）、D5-02 prompt() 遗留、SIGKILL 边界、第五批登记其余残留"
+    ],
+    "judgement": "D5-03 第十五批（D5-01 visibility 未验收项闭环）= PASS（限定范围）：test:d5-01-visibility 两轮独立真机运行均 **25 PASS / 0 FAIL / 25 total / 1 NOT VERIFIED，EXIT=0**（run1 纯运行、run2 同一门禁 + 只读证据补齐预载），与 CLOSURE4 基线 **25/0/1（exit 0，docs/D5-01-CLOSURE4-RESULT.md:100 表 G1）汇总一致、且 25 条断言名单未变**（据此推出逐条判定口径未变；**不是**逐条快照比对，见 verification.baseline）；**V9 / V11 / V12b 三项由「未验收」改为「已验收」**（V9 落点误差 0px；V11 8/8 个落点全部成功发出真实点击、全部 attempt=1、误差 0px、落点像素经判据认定为网页绿色：站点纯色 #0a7d4f、实测读数 56,123,83；V12b 窗口矩形/pageSize/viewRect 逐值回位，restState/backLayout/backPage/backView 全 true）；安全闸全程零拒绝（not-frontmost 0、outside-content 0，两轮 68 处 attempt 字段全为 1）。本批无代码改动（路径限定：git diff --stat -- src/ electron/ tests/ experiments/d5-01 为空；git diff --stat 非空，只有 PROGRESS.md 与 docs/D5-03-GATE-EVIDENCE.json 两处文档改动）、未 commit/push/merge/rebase/amend；回归复用 batch14 结果（npm test 1412/1412/0、D5-01 单测 37/37、boundary 32/0/1），本批未重复运行。独立对抗性验收未发现伪造或放宽，其 F1–F4 已全部落笔更正、F5 疑点已排除、F6 为任务书笔误、F7 建议尽快另批修 2400 截断。**本批不主张**：不改门禁仪器与判据；页面缩放 1 项 NOT VERIFIED 无改变；9 个陈旧 data-app-id 探针与 browser-e2e.mjs:487 无改善；与基线\"逐条快照一致\"。**D5-03 整体 = PARTIAL**（其余批次范围内项目未完成）。"
+  },
   "batch14": {
     "phase": "D5-03 第十四批 · D5-01 真机门禁安装段修复（陈旧 Dock 选择器 + 入口缺失立即失败）",
     "at": "2026-09-30T15:33:38Z",
