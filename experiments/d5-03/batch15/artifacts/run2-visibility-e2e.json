@@ -1,0 +1,437 @@
+{
+  "phase": "D5-01 Closure-4",
+  "title": "本任务窗口的真实可见性（屏幕像素 + 真实指针输入；唯一坐标换算）",
+  "testedCommit": null,
+  "command": "npm run test:d5-01-visibility",
+  "env": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "node": "v22.22.3",
+    "electron": "44.3.0",
+    "instrument": "screencapture -x -o -l <CGWindowID> + cliclick（CGEvent 真实指针）"
+  },
+  "isolation": {
+    "userData": "os.tmpdir mkdtemp",
+    "note": "只按本进程 PID 定位窗口；另一个正在运行的 OpenArc 实例绝不被激活/点击/关闭"
+  },
+  "framesDir": "artifacts/d5-01/visibility",
+  "checks": [
+    {
+      "section": "boot",
+      "name": "V0 · 真实 electron . 启动（隔离 userData / 隔离 CDP 端口）",
+      "status": "PASS",
+      "expected": "CDP 可用",
+      "actual": "connected",
+      "at": 1790860579060
+    },
+    {
+      "section": "boot",
+      "name": "V1 · 真实 UI 登录 admin",
+      "status": "PASS",
+      "expected": "ready",
+      "actual": "ready",
+      "at": 1790860579451
+    },
+    {
+      "section": "setup",
+      "name": "V2 · 真实视图加载纯色页面（像素判定的基准）",
+      "status": "PASS",
+      "expected": "PAINT-MARKER-2f7d",
+      "actual": "http://127.0.0.1:5391/paint",
+      "at": 1790860579721
+    },
+    {
+      "section": "safety",
+      "name": "V3 · 真实点击前先确认「最前面的窗口就是我们自己的实例」",
+      "status": "PASS",
+      "expected": "本实例窗口在最前",
+      "actual": "{\"ours\":162294,\"front\":[{\"pid\":28497,\"id\":162294},{\"pid\":18158,\"id\":152537},{\"pid\":24060,\"id\":162238}],\"tries\":1}",
+      "at": 1790860582100
+    },
+    {
+      "section": "pixel",
+      "name": "V4 · 屏幕像素证明确实「看得见」网页（视口中心是页面纯绿）",
+      "status": "PASS",
+      "expected": "页面纯绿（绿占优）",
+      "actual": "56,123,83",
+      "at": 1790860582649
+    },
+    {
+      "section": "pixel",
+      "name": "V4b · 截图确实是本窗口的画面（图像尺寸 = 窗口 bounds × 缩放）",
+      "status": "PASS",
+      "expected": "尺寸一致",
+      "actual": "{\"image\":[2880,1880],\"win\":{\"w\":1440,\"h\":940},\"scale\":2,\"titlebar\":0}",
+      "at": 1790860582649
+    },
+    {
+      "section": "pixel",
+      "name": "V4c · 三条独立通道一致：像素真值 = DOM 预留矩形 = 指针反推（|Δ|≤3pt，宽高也对）",
+      "status": "PASS",
+      "expected": "三路一致（|Δ|≤3pt）",
+      "actual": "{\"pixels\":{\"left\":308,\"top\":418,\"right\":1137.5,\"bottom\":738.5,\"width\":829.5,\"height\":320.5},\"domReserved\":{\"left\":308,\"top\":417.5,\"right\":1138,\"bottom\":739},\"pointerOrigin\":{\"left\":308,\"top\":418},\"deltaPixelsVsDom\":{\"top\":1,\"left\":0,\"bottom\":0,\"right\":0},\"deltaPixelsVsPointer\":{\"top\":0,\"left\":0,\"bottom\":0,\"right\":0},\"sizeVsPage\":{\"iw\":830,\"ih\":321,\"ok\":true}}",
+      "at": 1790860583695
+    },
+    {
+      "section": "pixel",
+      "name": "V4d · 提示条/错误条存在时网页**让位**（条带高度 > 0，且条带内像素不是网页绿）",
+      "status": "PASS",
+      "expected": "条带让位且不被网页覆盖",
+      "actual": "{\"banner\":{\"kind\":\"permission\",\"h\":115,\"text\":\"网站权限\\n已拒绝 该网站 的 media 申请。\\n网站权限\\n已拒绝 该网站 的 web-app-installation 申请。\\n网站权限\\n已拒绝 该网站 的 \"},\"stripH\":115,\"samples\":9,\"greenSamples\":0,\"sampleRgb\":[\"245,245,245\",\"245,245,245\",\"245,245,245\",\"245,245,245\",\"245,245,245\",\"245,245,245\",\"245,245,245\",\"245,245,245\",\"245,245,245\"]}",
+      "at": 1790860584961
+    },
+    {
+      "section": "safety",
+      "name": "V3c · 真实指针确实到达本实例外壳（激活后的第一下点击可能被系统用于激活窗口，先热身）",
+      "status": "PASS",
+      "expected": "外壳收到真实 pointerdown（≤3 次热身点击）",
+      "actual": "{\"ok\":true,\"tries\":1,\"seen\":1,\"point\":{\"x\":723,\"y\":191},\"trace\":[{\"i\":0,\"click\":{\"ok\":true,\"attempt\":1},\"shellPointer\":1}]}",
+      "at": 1790860585940
+    },
+    {
+      "section": "safety",
+      "name": "V3b · 真实点击只落在本实例窗口内（每次点击前重新校验前台与内容区）",
+      "status": "PASS",
+      "expected": "点击被安全闸放行",
+      "actual": "{\"ok\":true,\"attempt\":1,\"trace\":[{\"ours\":162294,\"front\":[{\"pid\":28497,\"id\":162294},{\"pid\":18158,\"id\":152537},{\"pid\":24060,\"id\":162238},{\"pid\":22673,\"id\":162008},{\"pid\":83940,\"id\":160275}],\"activePid\":28497}]}",
+      "at": 1790860586806
+    },
+    {
+      "section": "pointer",
+      "name": "V6 · 统一换算给出的地址栏坐标 + 真实指针 → 焦点真的进入输入框",
+      "status": "PASS",
+      "expected": "activeElement=地址栏",
+      "actual": "{\"point\":{\"x\":754,\"y\":277},\"fromDom\":{\"x\":610,\"y\":243.5},\"click\":{\"ok\":true,\"attempt\":1,\"trace\":[{\"ours\":162294,\"front\":[{\"pid\":28497,\"id\":162294},{\"pid\":18158,\"id\":152537},{\"pid\":24060,\"id\":162238},{\"pid\":22673,\"id\":162008},{\"pid\":83940,\"id\":160275}],\"activePid\":28497}]}}",
+      "at": 1790860586806
+    },
+    {
+      "section": "pointer",
+      "name": "V5 · 真实指针点击标签栏「新建标签」→ 真的多出一个标签（外壳收到该按钮的 isTrusted 点击）",
+      "status": "PASS",
+      "expected": "标签数 +1 且外壳收到该按钮点击",
+      "actual": "{\"before\":1,\"after\":2,\"elementAtPoint\":\"新建标签\",\"screen\":{\"x\":424,\"y\":235},\"pointPixel\":\"110,110,115\",\"click\":{\"ok\":true,\"tries\":1,\"trace\":[{\"i\":0,\"click\":{\"ok\":true,\"attempt\":1},\"received\":true}]},\"shellClicks\":[{\"trusted\":true,\"x\":280,\"y\":202,\"target\":\"path\",\"button\":\"新建标签\"}]}",
+      "at": 1790860587998
+    },
+    {
+      "section": "pointer",
+      "name": "V5b · 真实指针点击第二个标签 → 活动标签真的切换",
+      "status": "PASS",
+      "expected": "第二个标签变为活动",
+      "actual": "{\"want\":\"t2\",\"active\":\"t2\",\"click\":{\"ok\":true,\"attempt\":1,\"trace\":[{\"ours\":162294,\"front\":[{\"pid\":28497,\"id\":162294},{\"pid\":18158,\"id\":152537},{\"pid\":24060,\"id\":162238},{\"pid\":22673,\"id\":162008},{\"pid\":83940,\"id\":160275}],\"activePid\":28497}]}}",
+      "at": 1790860588746
+    },
+    {
+      "section": "pixel",
+      "name": "V5c · 操作前后两帧像素确实不同（画面真的变了）",
+      "status": "PASS",
+      "expected": "帧不同",
+      "actual": "02-tab-switch.png",
+      "at": 1790860588746
+    },
+    {
+      "section": "pointer",
+      "name": "V7 · 真实指针点击**网页内部**按钮 → 页面自己收到点击并计数",
+      "status": "PASS",
+      "expected": "页面收到真实点击并计数",
+      "actual": "{\"button\":{\"last\":{\"x\":190,\"y\":185,\"target\":\"paint-btn\"},\"count\":\"COUNT-2\",\"click\":{\"ok\":true,\"attempt\":1,\"trace\":[{\"ours\":162294,\"front\":[{\"pid\":28497,\"id\":162294},{\"pid\":18158,\"id\":152537},{\"pid\":24060,\"id\":162238},{\"pid\":22673,\"id\":162008},{\"pid\":83940,\"id\":160275}],\"activePid\":28497}]}},\"pageGeo\":{\"scrollY\":0,\"innerH\":321,\"docH\":342,\"innerW\":830},\"frame\":\"04-page-click.png\"}",
+      "at": 1790860590920
+    },
+    {
+      "section": "pointer",
+      "name": "V7b · 落点就是按钮本体（页面收到的坐标 = 目标，误差 ≤ 6px，target=paint-btn）",
+      "status": "PASS",
+      "expected": "命中按钮",
+      "actual": "{\"got\":{\"x\":190,\"y\":185,\"target\":\"paint-btn\"},\"wantPagePoint\":{\"x\":190,\"y\":185}}",
+      "at": 1790860590920
+    },
+    {
+      "section": "pixel",
+      "name": "V8 · 面板打开时网页**让位**（视口中心像素不再是页面绿）",
+      "status": "PASS",
+      "expected": "非页面绿",
+      "actual": "{\"pixel\":\"255,255,255\",\"click\":{\"ok\":true,\"attempt\":1,\"trace\":[{\"ours\":162294,\"front\":[{\"pid\":28497,\"id\":162294},{\"pid\":18158,\"id\":152537},{\"pid\":24060,\"id\":162238},{\"pid\":22673,\"id\":162008},{\"pid\":83940,\"id\":160275}],\"activePid\":28497}]}}",
+      "at": 1790860592502
+    },
+    {
+      "section": "pixel",
+      "name": "V8b · 面板关闭后网页回到可见（像素回到页面绿）",
+      "status": "PASS",
+      "expected": "页面绿",
+      "actual": "56,123,83",
+      "at": 1790860594238
+    },
+    {
+      "section": "pointer",
+      "name": "V9 · 窗口缩放后重新测量坐标，真实指针点击仍然命中页面内部（落点误差 ≤ 8px）",
+      "status": "PASS",
+      "expected": "落点命中",
+      "actual": "{\"last\":{\"x\":190,\"y\":185,\"target\":\"paint-btn\"},\"click\":{\"ok\":true,\"attempt\":1,\"trace\":[{\"ours\":162294,\"front\":[{\"pid\":28497,\"id\":162294},{\"pid\":18158,\"id\":152537},{\"pid\":24060,\"id\":162238},{\"pid\":22673,\"id\":162008},{\"pid\":83940,\"id\":160275}],\"activePid\":28497}]},\"viewRect\":{\"left\":308,\"top\":338,\"w\":830,\"h\":321},\"from\":{\"w\":1440,\"h\":940},\"to\":{\"w\":1180,\"h\":740}}",
+      "at": 1790860598401
+    },
+    {
+      "section": "pixel",
+      "name": "V9b · 缩放后截图尺寸随之变化（画面确实是缩放后的窗口）",
+      "status": "PASS",
+      "expected": "比例一致",
+      "actual": "{\"image\":[2360,1480],\"win\":{\"w\":1180,\"h\":740},\"frame\":\"07-after-resize.png\"}",
+      "at": 1790860598401
+    },
+    {
+      "section": "pointer",
+      "name": "V11 · 网页**四边近边界**的真实指针命中（坐标由实测视图矩形换算；落点像素独立证明在网页内）",
+      "status": "PASS",
+      "expected": "四边都命中",
+      "actual": "{\"viewRect\":{\"left\":308,\"top\":338,\"w\":830,\"h\":321},\"probes\":[{\"name\":\"上边中点\",\"page\":{\"x\":415,\"y\":3},\"screen\":{\"x\":723,\"y\":341},\"pixel\":\"56,123,83\",\"pixelGreen\":true,\"click\":{\"ok\":true,\"attempt\":1,\"trace\":[{\"ours\":162294,\"front\":[{\"pid\":28497,\"id\":162294},{\"pid\":18158,\"id\":152537},{\"pid\":24060,\"id\":162238},{\"pid\":22673,\"id\":162008},{\"pid\":83940,\"id\":160275}],\"activePid\":28497}]},\"last\":{\"x\":415,\"y\":3,\"target\":\"HTML\"}},{\"name\":\"下边中点\",\"page\":{\"x\":415,\"y\":317},\"screen\":{\"x\":723,\"y\":655},\"pixel\":\"56,123,83\",\"pixelGreen\":true,\"click\":{\"ok\":true,\"attempt\":1,\"trace\":[{\"ours\":162294,\"front\":[{\"pid\":28497,\"id\":162294},{\"pid\":18158,\"id\":152537},{\"pid\":24060,\"id\":162238},{\"pid\":22673,\"id\":162008},{\"pid\":83940,\"id\":160275}],\"activePid\":28497}]},\"last\":{\"x\":415,\"y\":317,\"target\":\"BODY\"}},{\"name\":\"左边中点\",\"page\":{\"x\":3,\"y\":161},\"screen\":{\"x\":311,\"y\":499},\"pixel\":\"56,123,83\",\"pixelGreen\":true,\"click\":{\"ok\":true,\"attempt\":1,\"trace\":[{\"ours\":162294,\"front\":[{\"pid\":28497,\"id\":162294},{\"pid\":18158,\"id\":152537},{\"pid\":24060,\"id\":162238},{\"pid\":22673,\"id\":162008},{\"pid\":83940,\"id\":160275}],\"activePid\":28497}]},\"last\":{\"x\":3,\"y\":161,\"target\":\"BODY\"}},{\"name\":\"右边中点\",\"page\":{\"x\":826,\"y\":161},\"screen\":{\"x\":1134,\"y\":499},\"pixel\":\"56,123,83\",\"pixelGreen\":true,\"click\":{\"ok\":true,\"attempt\":1,\"trace\":[{\"ours\":162294,\"front\":[{\"pid\":28497,\"id\":162294},{\"pid\":18158,\"id\":152537},{\"pid\":24060,\"id\":162238},{\"pid\":22673,\"id\":162008},{\"pid\":83940,\"id\":160275}],\"activePid\":28497}]},\"last\":{\"x\":826,\"y\":161,\"target\":\"BODY\"}},{\"name\":\"左上角内\",\"page\":{\"x\":24,\"y\":24},\"screen\":{\"x\":332,\"y\":362},\"pixel\":\"56,123,83\",\"pixelGreen\":true,\"click\":{\"ok\":true,\"attempt\":1,\"trace\":[{\"ours\":162294,\"front\":[{\"pid\":28497,\"id\":162294},{\"pid\":18158,\"id\":152537},{\"pid\":24060,\"id\":162238},{\"pid\":22673,\"id\":162008},{\"pid\":83940,\"id\":160275}],\"activePid\":28497}]},\"last\":{\"x\":24,\"y\":24,\"target\":\"title\"}},{\"name\":\"右上角内\",\"page\":{\"x\":806,\"y\":24},\"screen\":{\"x\":1114,\"y\":362},\"pixel\":\"56,123,83\",\"pixelGreen\":true,\"click\":{\"ok\":true,\"attempt\":1,\"trace\":[{\"ours\":162294,\"front\":[{\"pid\":28497,\"id\":162294},{\"pid\":18158,\"id\":152537},{\"pid\":24060,\"id\":162238},{\"pid\":22673,\"id\":162008},{\"pid\":83940,\"id\":160275}],\"activePid\":28497}]},\"last\":{\"x\":806,\"y\":24,\"target\":\"title\"}},{\"name\":\"左下角内\",\"page\":{\"x\":24,\"y\":297},\"screen\":{\"x\":332,\"y\":635},\"pixel\":\"56,123,83\",\"pixelGreen\":true,\"click\":{\"ok\":true,\"attempt\":1,\"trace\":[{\"ours\":162294,\"front\":[{\"p",
+      "at": 1790860607439
+    },
+    {
+      "section": "pointer",
+      "name": "V12 · 真实指针点窗口「最大化」按钮 → 窗口状态 + 网页布局真的变化，且最大化后网页仍能被真实指针命中",
+      "status": "PASS",
+      "expected": "状态/布局/命中都成立",
+      "actual": "{\"frontOk\":true,\"button\":{\"label\":\"最大化browser\",\"rect\":{\"left\":218,\"top\":72,\"w\":12,\"h\":12},\"elementAtPoint\":\"最大化browser\",\"screen\":{\"x\":368,\"y\":111},\"pointPixel\":\"97,197,84\"},\"shellGot\":true,\"shellClicks\":[{\"trusted\":true,\"x\":224,\"y\":78,\"target\":\"svg\",\"button\":\"最大化browser\"}],\"click\":{\"ok\":true,\"tries\":1,\"trace\":[{\"i\":0,\"click\":{\"ok\":true,\"attempt\":1},\"received\":true}]},\"stateChanged\":true,\"windowRect\":{\"before\":{\"left\":164,\"top\":56,\"width\":830,\"height\":570,\"cx\":579,\"cy\":341},\"after\":{\"left\":0,\"top\":38,\"width\":1180,\"height\":702,\"cx\":590,\"cy\":389}},\"pageSize\":{\"before\":{\"iw\":830,\"ih\":321},\"after\":{\"iw\":1180,\"ih\":453}},\"layoutChanged\":true,\"pageChanged\":true,\"viewFollows\":true,\"viewRectAfter\":{\"left\":144,\"top\":320,\"w\":1180,\"h\":453},\"hit\":{\"x\":590,\"y\":227,\"target\":\"BODY\"},\"hitOk\":true,\"frame\":\"10-maximized.png\"}",
+      "at": 1790860611922
+    },
+    {
+      "section": "pixel",
+      "name": "V12b · 恢复后窗口矩形与网页布局回到最大化之前，且像素真值跟着回到原位",
+      "status": "PASS",
+      "expected": "尺寸/布局恢复",
+      "actual": "{\"restState\":true,\"click\":{\"ok\":true,\"tries\":1,\"trace\":[{\"i\":0,\"click\":{\"ok\":true,\"attempt\":1},\"received\":true}]},\"windowRect\":{\"before\":{\"left\":164,\"top\":56,\"width\":830,\"height\":570,\"cx\":579,\"cy\":341},\"restored\":{\"left\":164,\"top\":56,\"width\":830,\"height\":570,\"cx\":579,\"cy\":341},\"max\":{\"left\":0,\"top\":38,\"width\":1180,\"height\":702,\"cx\":590,\"cy\":389}},\"pageSize\":{\"before\":{\"iw\":830,\"ih\":321},\"restored\":{\"iw\":830,\"ih\":321}},\"backLayout\":true,\"backPage\":true,\"backView\":true,\"viewRectRestored\":{\"left\":308,\"top\":338,\"w\":830,\"h\":321},\"frame\":\"11-restored.png\"}",
+      "at": 1790860614787
+    },
+    {
+      "section": "pixel",
+      "name": "V10 · 连续截图可用（一段连续操作的多帧都真实落盘）",
+      "status": "PASS",
+      "expected": "4 帧",
+      "actual": "{\"frames\":[\"08-burst-0.png\",\"08-burst-1.png\",\"08-burst-2.png\",\"08-burst-3.png\"],\"bytes\":[346783,346863,346958,347062]}",
+      "at": 1790860620231
+    },
+    {
+      "section": "hygiene",
+      "name": "H1 · 主进程无未处理错误",
+      "status": "PASS",
+      "expected": "无错误行",
+      "actual": "clean",
+      "at": 1790860620231
+    }
+  ],
+  "counts": {
+    "pass": 25,
+    "fail": 0,
+    "total": 25
+  },
+  "notVerified": [
+    {
+      "name": "页面缩放（Cmd +/-）",
+      "reason": "不适用：D5-01 原始必需项不含页面缩放（PLAN 里的『缩放』是窗口缩放，V9 已覆盖），产品无缩放入口、本轮不新增。实测补充（仅观察、不计入必需项）：真实按键 {\"iw\":830,\"ih\":321,\"dpr\":2} → {\"iw\":830,\"ih\":321,\"dpr\":2} → {\"iw\":830,\"ih\":321,\"dpr\":2}，未改变页面缩放；缩放态下像素真值 {\"left\":308,\"top\":338,\"w\":830,\"h\":321} 与网页自报 innerWidth×dpr 1660（未缩放时 1660）一致。"
+    }
+  ],
+  "observations": [
+    "几何（屏幕 pt）：像素真值 {\"left\":308,\"top\":418,\"right\":1137.5,\"bottom\":738.5,\"width\":829.5,\"height\":320.5}；DOM 预留矩形 {\"left\":308,\"top\":417.5,\"right\":1138,\"bottom\":739}；指针反推原点 {\"left\":308,\"top\":418}；网页自报 innerWidth/Height 830×321；chrome 之下条带高度 115；banner {\"cls\":\"browser-notices\",\"h\":114.5,\"kind\":\"permission\"}"
+  ],
+  "operationRecord": [
+    {
+      "section": "boot",
+      "name": "V0 · 真实 electron . 启动（隔离 userData / 隔离 CDP 端口）",
+      "status": "PASS",
+      "expected": "CDP 可用",
+      "actual": "connected",
+      "at": 1790860579060
+    },
+    {
+      "section": "boot",
+      "name": "V1 · 真实 UI 登录 admin",
+      "status": "PASS",
+      "expected": "ready",
+      "actual": "ready",
+      "at": 1790860579451
+    },
+    {
+      "section": "setup",
+      "name": "V2 · 真实视图加载纯色页面（像素判定的基准）",
+      "status": "PASS",
+      "expected": "PAINT-MARKER-2f7d",
+      "actual": "http://127.0.0.1:5391/paint",
+      "at": 1790860579721
+    },
+    {
+      "section": "safety",
+      "name": "V3 · 真实点击前先确认「最前面的窗口就是我们自己的实例」",
+      "status": "PASS",
+      "expected": "本实例窗口在最前",
+      "actual": "{\"ours\":162294,\"front\":[{\"pid\":28497,\"id\":162294},{\"pid\":18158,\"id\":152537},{\"pid\":24060,\"id\":162238}],\"tries\":1}",
+      "at": 1790860582100
+    },
+    {
+      "section": "pixel",
+      "name": "V4 · 屏幕像素证明确实「看得见」网页（视口中心是页面纯绿）",
+      "status": "PASS",
+      "expected": "页面纯绿（绿占优）",
+      "actual": "56,123,83",
+      "at": 1790860582649
+    },
+    {
+      "section": "pixel",
+      "name": "V4b · 截图确实是本窗口的画面（图像尺寸 = 窗口 bounds × 缩放）",
+      "status": "PASS",
+      "expected": "尺寸一致",
+      "actual": "{\"image\":[2880,1880],\"win\":{\"w\":1440,\"h\":940},\"scale\":2,\"titlebar\":0}",
+      "at": 1790860582649
+    },
+    {
+      "section": "pixel",
+      "name": "V4c · 三条独立通道一致：像素真值 = DOM 预留矩形 = 指针反推（|Δ|≤3pt，宽高也对）",
+      "status": "PASS",
+      "expected": "三路一致（|Δ|≤3pt）",
+      "actual": "{\"pixels\":{\"left\":308,\"top\":418,\"right\":1137.5,\"bottom\":738.5,\"width\":829.5,\"height\":320.5},\"domReserved\":{\"left\":308,\"top\":417.5,\"right\":1138,\"bottom\":739},\"pointerOrigin\":{\"left\":308,\"top\":418},\"deltaPixelsVsDom\":{\"top\":1,\"left\":0,\"bottom\":0,\"right\":0},\"deltaPixelsVsPointer\":{\"top\":0,\"left\":0,\"bottom\":0,\"right\":0},\"sizeVsPage\":{\"iw\":830,\"ih\":321,\"ok\":true}}",
+      "at": 1790860583695
+    },
+    {
+      "section": "pixel",
+      "name": "V4d · 提示条/错误条存在时网页**让位**（条带高度 > 0，且条带内像素不是网页绿）",
+      "status": "PASS",
+      "expected": "条带让位且不被网页覆盖",
+      "actual": "{\"banner\":{\"kind\":\"permission\",\"h\":115,\"text\":\"网站权限\\n已拒绝 该网站 的 media 申请。\\n网站权限\\n已拒绝 该网站 的 web-app-installation 申请。\\n网站权限\\n已拒绝 该网站 的 \"},\"stripH\":115,\"samples\":9,\"greenSamples\":0,\"sampleRgb\":[\"245,245,245\",\"245,245,245\",\"245,245,245\",\"245,245,245\",\"245,245,245\",\"245,245,245\",\"245,245,245\",\"245,245,245\",\"245,245,245\"]}",
+      "at": 1790860584961
+    },
+    {
+      "section": "safety",
+      "name": "V3c · 真实指针确实到达本实例外壳（激活后的第一下点击可能被系统用于激活窗口，先热身）",
+      "status": "PASS",
+      "expected": "外壳收到真实 pointerdown（≤3 次热身点击）",
+      "actual": "{\"ok\":true,\"tries\":1,\"seen\":1,\"point\":{\"x\":723,\"y\":191},\"trace\":[{\"i\":0,\"click\":{\"ok\":true,\"attempt\":1},\"shellPointer\":1}]}",
+      "at": 1790860585940
+    },
+    {
+      "section": "safety",
+      "name": "V3b · 真实点击只落在本实例窗口内（每次点击前重新校验前台与内容区）",
+      "status": "PASS",
+      "expected": "点击被安全闸放行",
+      "actual": "{\"ok\":true,\"attempt\":1,\"trace\":[{\"ours\":162294,\"front\":[{\"pid\":28497,\"id\":162294},{\"pid\":18158,\"id\":152537},{\"pid\":24060,\"id\":162238},{\"pid\":22673,\"id\":162008},{\"pid\":83940,\"id\":160275}],\"activePid\":28497}]}",
+      "at": 1790860586806
+    },
+    {
+      "section": "pointer",
+      "name": "V6 · 统一换算给出的地址栏坐标 + 真实指针 → 焦点真的进入输入框",
+      "status": "PASS",
+      "expected": "activeElement=地址栏",
+      "actual": "{\"point\":{\"x\":754,\"y\":277},\"fromDom\":{\"x\":610,\"y\":243.5},\"click\":{\"ok\":true,\"attempt\":1,\"trace\":[{\"ours\":162294,\"front\":[{\"pid\":28497,\"id\":162294},{\"pid\":18158,\"id\":152537},{\"pid\":24060,\"id\":162238},{\"pid\":22673,\"id\":162008},{\"pid\":83940,\"id\":160275}],\"activePid\":28497}]}}",
+      "at": 1790860586806
+    },
+    {
+      "section": "pointer",
+      "name": "V5 · 真实指针点击标签栏「新建标签」→ 真的多出一个标签（外壳收到该按钮的 isTrusted 点击）",
+      "status": "PASS",
+      "expected": "标签数 +1 且外壳收到该按钮点击",
+      "actual": "{\"before\":1,\"after\":2,\"elementAtPoint\":\"新建标签\",\"screen\":{\"x\":424,\"y\":235},\"pointPixel\":\"110,110,115\",\"click\":{\"ok\":true,\"tries\":1,\"trace\":[{\"i\":0,\"click\":{\"ok\":true,\"attempt\":1},\"received\":true}]},\"shellClicks\":[{\"trusted\":true,\"x\":280,\"y\":202,\"target\":\"path\",\"button\":\"新建标签\"}]}",
+      "at": 1790860587998
+    },
+    {
+      "section": "pointer",
+      "name": "V5b · 真实指针点击第二个标签 → 活动标签真的切换",
+      "status": "PASS",
+      "expected": "第二个标签变为活动",
+      "actual": "{\"want\":\"t2\",\"active\":\"t2\",\"click\":{\"ok\":true,\"attempt\":1,\"trace\":[{\"ours\":162294,\"front\":[{\"pid\":28497,\"id\":162294},{\"pid\":18158,\"id\":152537},{\"pid\":24060,\"id\":162238},{\"pid\":22673,\"id\":162008},{\"pid\":83940,\"id\":160275}],\"activePid\":28497}]}}",
+      "at": 1790860588746
+    },
+    {
+      "section": "pixel",
+      "name": "V5c · 操作前后两帧像素确实不同（画面真的变了）",
+      "status": "PASS",
+      "expected": "帧不同",
+      "actual": "02-tab-switch.png",
+      "at": 1790860588746
+    },
+    {
+      "section": "pointer",
+      "name": "V7 · 真实指针点击**网页内部**按钮 → 页面自己收到点击并计数",
+      "status": "PASS",
+      "expected": "页面收到真实点击并计数",
+      "actual": "{\"button\":{\"last\":{\"x\":190,\"y\":185,\"target\":\"paint-btn\"},\"count\":\"COUNT-2\",\"click\":{\"ok\":true,\"attempt\":1,\"trace\":[{\"ours\":162294,\"front\":[{\"pid\":28497,\"id\":162294},{\"pid\":18158,\"id\":152537},{\"pid\":24060,\"id\":162238},{\"pid\":22673,\"id\":162008},{\"pid\":83940,\"id\":160275}],\"activePid\":28497}]}},\"pageGeo\":{\"scrollY\":0,\"innerH\":321,\"docH\":342,\"innerW\":830},\"frame\":\"04-page-click.png\"}",
+      "at": 1790860590920
+    },
+    {
+      "section": "pointer",
+      "name": "V7b · 落点就是按钮本体（页面收到的坐标 = 目标，误差 ≤ 6px，target=paint-btn）",
+      "status": "PASS",
+      "expected": "命中按钮",
+      "actual": "{\"got\":{\"x\":190,\"y\":185,\"target\":\"paint-btn\"},\"wantPagePoint\":{\"x\":190,\"y\":185}}",
+      "at": 1790860590920
+    },
+    {
+      "section": "pixel",
+      "name": "V8 · 面板打开时网页**让位**（视口中心像素不再是页面绿）",
+      "status": "PASS",
+      "expected": "非页面绿",
+      "actual": "{\"pixel\":\"255,255,255\",\"click\":{\"ok\":true,\"attempt\":1,\"trace\":[{\"ours\":162294,\"front\":[{\"pid\":28497,\"id\":162294},{\"pid\":18158,\"id\":152537},{\"pid\":24060,\"id\":162238},{\"pid\":22673,\"id\":162008},{\"pid\":83940,\"id\":160275}],\"activePid\":28497}]}}",
+      "at": 1790860592502
+    },
+    {
+      "section": "pixel",
+      "name": "V8b · 面板关闭后网页回到可见（像素回到页面绿）",
+      "status": "PASS",
+      "expected": "页面绿",
+      "actual": "56,123,83",
+      "at": 1790860594238
+    },
+    {
+      "section": "pointer",
+      "name": "V9 · 窗口缩放后重新测量坐标，真实指针点击仍然命中页面内部（落点误差 ≤ 8px）",
+      "status": "PASS",
+      "expected": "落点命中",
+      "actual": "{\"last\":{\"x\":190,\"y\":185,\"target\":\"paint-btn\"},\"click\":{\"ok\":true,\"attempt\":1,\"trace\":[{\"ours\":162294,\"front\":[{\"pid\":28497,\"id\":162294},{\"pid\":18158,\"id\":152537},{\"pid\":24060,\"id\":162238},{\"pid\":22673,\"id\":162008},{\"pid\":83940,\"id\":160275}],\"activePid\":28497}]},\"viewRect\":{\"left\":308,\"top\":338,\"w\":830,\"h\":321},\"from\":{\"w\":1440,\"h\":940},\"to\":{\"w\":1180,\"h\":740}}",
+      "at": 1790860598401
+    },
+    {
+      "section": "pixel",
+      "name": "V9b · 缩放后截图尺寸随之变化（画面确实是缩放后的窗口）",
+      "status": "PASS",
+      "expected": "比例一致",
+      "actual": "{\"image\":[2360,1480],\"win\":{\"w\":1180,\"h\":740},\"frame\":\"07-after-resize.png\"}",
+      "at": 1790860598401
+    },
+    {
+      "section": "pointer",
+      "name": "V11 · 网页**四边近边界**的真实指针命中（坐标由实测视图矩形换算；落点像素独立证明在网页内）",
+      "status": "PASS",
+      "expected": "四边都命中",
+      "actual": "{\"viewRect\":{\"left\":308,\"top\":338,\"w\":830,\"h\":321},\"probes\":[{\"name\":\"上边中点\",\"page\":{\"x\":415,\"y\":3},\"screen\":{\"x\":723,\"y\":341},\"pixel\":\"56,123,83\",\"pixelGreen\":true,\"click\":{\"ok\":true,\"attempt\":1,\"trace\":[{\"ours\":162294,\"front\":[{\"pid\":28497,\"id\":162294},{\"pid\":18158,\"id\":152537},{\"pid\":24060,\"id\":162238},{\"pid\":22673,\"id\":162008},{\"pid\":83940,\"id\":160275}],\"activePid\":28497}]},\"last\":{\"x\":415,\"y\":3,\"target\":\"HTML\"}},{\"name\":\"下边中点\",\"page\":{\"x\":415,\"y\":317},\"screen\":{\"x\":723,\"y\":655},\"pixel\":\"56,123,83\",\"pixelGreen\":true,\"click\":{\"ok\":true,\"attempt\":1,\"trace\":[{\"ours\":162294,\"front\":[{\"pid\":28497,\"id\":162294},{\"pid\":18158,\"id\":152537},{\"pid\":24060,\"id\":162238},{\"pid\":22673,\"id\":162008},{\"pid\":83940,\"id\":160275}],\"activePid\":28497}]},\"last\":{\"x\":415,\"y\":317,\"target\":\"BODY\"}},{\"name\":\"左边中点\",\"page\":{\"x\":3,\"y\":161},\"screen\":{\"x\":311,\"y\":499},\"pixel\":\"56,123,83\",\"pixelGreen\":true,\"click\":{\"ok\":true,\"attempt\":1,\"trace\":[{\"ours\":162294,\"front\":[{\"pid\":28497,\"id\":162294},{\"pid\":18158,\"id\":152537},{\"pid\":24060,\"id\":162238},{\"pid\":22673,\"id\":162008},{\"pid\":83940,\"id\":160275}],\"activePid\":28497}]},\"last\":{\"x\":3,\"y\":161,\"target\":\"BODY\"}},{\"name\":\"右边中点\",\"page\":{\"x\":826,\"y\":161},\"screen\":{\"x\":1134,\"y\":499},\"pixel\":\"56,123,83\",\"pixelGreen\":true,\"click\":{\"ok\":true,\"attempt\":1,\"trace\":[{\"ours\":162294,\"front\":[{\"pid\":28497,\"id\":162294},{\"pid\":18158,\"id\":152537},{\"pid\":24060,\"id\":162238},{\"pid\":22673,\"id\":162008},{\"pid\":83940,\"id\":160275}],\"activePid\":28497}]},\"last\":{\"x\":826,\"y\":161,\"target\":\"BODY\"}},{\"name\":\"左上角内\",\"page\":{\"x\":24,\"y\":24},\"screen\":{\"x\":332,\"y\":362},\"pixel\":\"56,123,83\",\"pixelGreen\":true,\"click\":{\"ok\":true,\"attempt\":1,\"trace\":[{\"ours\":162294,\"front\":[{\"pid\":28497,\"id\":162294},{\"pid\":18158,\"id\":152537},{\"pid\":24060,\"id\":162238},{\"pid\":22673,\"id\":162008},{\"pid\":83940,\"id\":160275}],\"activePid\":28497}]},\"last\":{\"x\":24,\"y\":24,\"target\":\"title\"}},{\"name\":\"右上角内\",\"page\":{\"x\":806,\"y\":24},\"screen\":{\"x\":1114,\"y\":362},\"pixel\":\"56,123,83\",\"pixelGreen\":true,\"click\":{\"ok\":true,\"attempt\":1,\"trace\":[{\"ours\":162294,\"front\":[{\"pid\":28497,\"id\":162294},{\"pid\":18158,\"id\":152537},{\"pid\":24060,\"id\":162238},{\"pid\":22673,\"id\":162008},{\"pid\":83940,\"id\":160275}],\"activePid\":28497}]},\"last\":{\"x\":806,\"y\":24,\"target\":\"title\"}},{\"name\":\"左下角内\",\"page\":{\"x\":24,\"y\":297},\"screen\":{\"x\":332,\"y\":635},\"pixel\":\"56,123,83\",\"pixelGreen\":true,\"click\":{\"ok\":true,\"attempt\":1,\"trace\":[{\"ours\":162294,\"front\":[{\"p",
+      "at": 1790860607439
+    },
+    {
+      "section": "pointer",
+      "name": "V12 · 真实指针点窗口「最大化」按钮 → 窗口状态 + 网页布局真的变化，且最大化后网页仍能被真实指针命中",
+      "status": "PASS",
+      "expected": "状态/布局/命中都成立",
+      "actual": "{\"frontOk\":true,\"button\":{\"label\":\"最大化browser\",\"rect\":{\"left\":218,\"top\":72,\"w\":12,\"h\":12},\"elementAtPoint\":\"最大化browser\",\"screen\":{\"x\":368,\"y\":111},\"pointPixel\":\"97,197,84\"},\"shellGot\":true,\"shellClicks\":[{\"trusted\":true,\"x\":224,\"y\":78,\"target\":\"svg\",\"button\":\"最大化browser\"}],\"click\":{\"ok\":true,\"tries\":1,\"trace\":[{\"i\":0,\"click\":{\"ok\":true,\"attempt\":1},\"received\":true}]},\"stateChanged\":true,\"windowRect\":{\"before\":{\"left\":164,\"top\":56,\"width\":830,\"height\":570,\"cx\":579,\"cy\":341},\"after\":{\"left\":0,\"top\":38,\"width\":1180,\"height\":702,\"cx\":590,\"cy\":389}},\"pageSize\":{\"before\":{\"iw\":830,\"ih\":321},\"after\":{\"iw\":1180,\"ih\":453}},\"layoutChanged\":true,\"pageChanged\":true,\"viewFollows\":true,\"viewRectAfter\":{\"left\":144,\"top\":320,\"w\":1180,\"h\":453},\"hit\":{\"x\":590,\"y\":227,\"target\":\"BODY\"},\"hitOk\":true,\"frame\":\"10-maximized.png\"}",
+      "at": 1790860611922
+    },
+    {
+      "section": "pixel",
+      "name": "V12b · 恢复后窗口矩形与网页布局回到最大化之前，且像素真值跟着回到原位",
+      "status": "PASS",
+      "expected": "尺寸/布局恢复",
+      "actual": "{\"restState\":true,\"click\":{\"ok\":true,\"tries\":1,\"trace\":[{\"i\":0,\"click\":{\"ok\":true,\"attempt\":1},\"received\":true}]},\"windowRect\":{\"before\":{\"left\":164,\"top\":56,\"width\":830,\"height\":570,\"cx\":579,\"cy\":341},\"restored\":{\"left\":164,\"top\":56,\"width\":830,\"height\":570,\"cx\":579,\"cy\":341},\"max\":{\"left\":0,\"top\":38,\"width\":1180,\"height\":702,\"cx\":590,\"cy\":389}},\"pageSize\":{\"before\":{\"iw\":830,\"ih\":321},\"restored\":{\"iw\":830,\"ih\":321}},\"backLayout\":true,\"backPage\":true,\"backView\":true,\"viewRectRestored\":{\"left\":308,\"top\":338,\"w\":830,\"h\":321},\"frame\":\"11-restored.png\"}",
+      "at": 1790860614787
+    },
+    {
+      "section": "pixel",
+      "name": "V10 · 连续截图可用（一段连续操作的多帧都真实落盘）",
+      "status": "PASS",
+      "expected": "4 帧",
+      "actual": "{\"frames\":[\"08-burst-0.png\",\"08-burst-1.png\",\"08-burst-2.png\",\"08-burst-3.png\"],\"bytes\":[346783,346863,346958,347062]}",
+      "at": 1790860620231
+    },
+    {
+      "section": "hygiene",
+      "name": "H1 · 主进程无未处理错误",
+      "status": "PASS",
+      "expected": "无错误行",
+      "actual": "clean",
+      "at": 1790860620231
+    }
+  ],
+  "at": "2026-10-01T13:17:00.232Z"
+}

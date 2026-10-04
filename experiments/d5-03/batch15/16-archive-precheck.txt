@@ -1,0 +1,175 @@
+==========================================================
+D5-03 第十六批 · batch15 证据归档补齐 — 归档前确认 (第 1 步)
+生成时间: 2026-10-04 20:10:11 +0800
+仓库根: /Users/wepingli/Desktop/OpenArc OS-integration
+说明: 本文件先写入临时路径再落地，故下方 git status 反映的是本文件创建之前的真实基线状态。
+时间口径: 上方"生成时间"= 本批归档执行日 2026-10-04；被归档的 38 个产物产生于 2026-10-01 21:14–21:17（batch15 两轮真机运行）。
+系列消歧: 本批「第十六批」属 D5-03 线（父 8b8e8ad），与 PROGRESS.md 中 D5-02 画布线的「第十六批」（宿主 sandbox 补 allow-modals）是不同系列。
+==========================================================
+
+### 1.1 git rev-parse HEAD
+8b8e8adb0b78d45accaa046eec3430e2b89d3705
+
+### 1.1 git rev-parse --abbrev-ref HEAD
+integration/ui-core
+
+### 1.1 git status --porcelain  (空 = 工作树干净，无未提交改动、无未跟踪文件)
+[git status --porcelain 结束；上方以 '?? ' 或 ' M '/'M ' 开头的行为空即表示干净]
+status 输出行数 = 0
+
+### 1.2 git check-ignore -v（证明此前被 .gitignore:3 的 artifacts/ 规则忽略）
+$ git check-ignore -v experiments/d5-03/batch15/artifacts/run1-visibility-e2e.json
+.gitignore:3:artifacts/	experiments/d5-03/batch15/artifacts/run1-visibility-e2e.json
+$ git check-ignore -v experiments/d5-03/batch15/artifacts/run2-visibility-e2e.json
+.gitignore:3:artifacts/	experiments/d5-03/batch15/artifacts/run2-visibility-e2e.json
+$ git check-ignore -v experiments/d5-03/batch15/artifacts/run1-visibility-frames/01-paint-before.png
+.gitignore:3:artifacts/	experiments/d5-03/batch15/artifacts/run1-visibility-frames/01-paint-before.png
+$ git check-ignore -v experiments/d5-03/batch15/artifacts/run2-visibility-frames/12-zoom.png
+.gitignore:3:artifacts/	experiments/d5-03/batch15/artifacts/run2-visibility-frames/12-zoom.png
+
+结论：以上 4 个代表路径的忽略来源均为 .gitignore 第 3 行规则 'artifacts/'，
+      即 'experiments/d5-03/batch15/artifacts/**' 因仓库级忽略规则未被跟踪，
+      并非因其它原因（如未 add、路径写错）而未跟踪。
+
+### 1.2b 基线 8b8e8ad 中 batch15 已跟踪文件（应为 15 个，且不含 artifacts/**）
+$ git ls-tree -r --name-only HEAD experiments/d5-03/batch15/ | wc -l
+      15
+experiments/d5-03/batch15/00-prerun-facts.txt
+experiments/d5-03/batch15/10-visibility-run1.txt
+experiments/d5-03/batch15/11-visibility-run2.txt
+experiments/d5-03/batch15/D5-03-BATCH15-E1-REPORT.md
+experiments/d5-03/batch15/D5-03-BATCH15-REPORT.md
+experiments/d5-03/batch15/verify/01-key-checks-raw.txt
+experiments/d5-03/batch15/verify/02-v11-full-probes.txt
+experiments/d5-03/batch15/verify/03-tables.txt
+experiments/d5-03/batch15/verify/04-v9-v12-raw.txt
+experiments/d5-03/batch15/verify/05-check-table.md
+experiments/d5-03/batch15/verify/06-run1-run2-normalized-diff.txt
+experiments/d5-03/batch15/verify/BATCH15-VERIFY-REPORT.md
+experiments/d5-03/batch15/verify/captured/_index.txt
+experiments/d5-03/batch15/verify/captured/payload-001-2955.json
+experiments/d5-03/batch15/verify/evidence-preload.mjs
+其中 artifacts/ 下的已跟踪文件数 = 0
+
+### 1.3 逐项存在性（38 个路径，相对仓库根，字典序）
+$ python3 enumerate.py
+     31701  experiments/d5-03/batch15/artifacts/run1-visibility-e2e.json
+    398202  experiments/d5-03/batch15/artifacts/run1-visibility-frames/01-paint-before.png
+    398415  experiments/d5-03/batch15/artifacts/run1-visibility-frames/02-tab-switch.png
+    396924  experiments/d5-03/batch15/artifacts/run1-visibility-frames/03-addressbar-focus.png
+    403205  experiments/d5-03/batch15/artifacts/run1-visibility-frames/04-page-click.png
+    418369  experiments/d5-03/batch15/artifacts/run1-visibility-frames/05-panel-open.png
+    402125  experiments/d5-03/batch15/artifacts/run1-visibility-frames/06-panel-closed.png
+    344791  experiments/d5-03/batch15/artifacts/run1-visibility-frames/07-after-resize.png
+    346808  experiments/d5-03/batch15/artifacts/run1-visibility-frames/08-burst-0.png
+    346954  experiments/d5-03/batch15/artifacts/run1-visibility-frames/08-burst-1.png
+    347041  experiments/d5-03/batch15/artifacts/run1-visibility-frames/08-burst-2.png
+    346901  experiments/d5-03/batch15/artifacts/run1-visibility-frames/08-burst-3.png
+    344655  experiments/d5-03/batch15/artifacts/run1-visibility-frames/09-edges-frame.png
+    345634  experiments/d5-03/batch15/artifacts/run1-visibility-frames/09-edges.png
+    345957  experiments/d5-03/batch15/artifacts/run1-visibility-frames/10-maximize-before.png
+    227614  experiments/d5-03/batch15/artifacts/run1-visibility-frames/10-maximized.png
+    228321  experiments/d5-03/batch15/artifacts/run1-visibility-frames/11-restore-before.png
+    346506  experiments/d5-03/batch15/artifacts/run1-visibility-frames/11-restored.png
+    346856  experiments/d5-03/batch15/artifacts/run1-visibility-frames/12-zoom.png
+     31701  experiments/d5-03/batch15/artifacts/run2-visibility-e2e.json
+    398115  experiments/d5-03/batch15/artifacts/run2-visibility-frames/01-paint-before.png
+    397944  experiments/d5-03/batch15/artifacts/run2-visibility-frames/02-tab-switch.png
+    397495  experiments/d5-03/batch15/artifacts/run2-visibility-frames/03-addressbar-focus.png
+    403944  experiments/d5-03/batch15/artifacts/run2-visibility-frames/04-page-click.png
+    419373  experiments/d5-03/batch15/artifacts/run2-visibility-frames/05-panel-open.png
+    401007  experiments/d5-03/batch15/artifacts/run2-visibility-frames/06-panel-closed.png
+    344806  experiments/d5-03/batch15/artifacts/run2-visibility-frames/07-after-resize.png
+    346783  experiments/d5-03/batch15/artifacts/run2-visibility-frames/08-burst-0.png
+    346863  experiments/d5-03/batch15/artifacts/run2-visibility-frames/08-burst-1.png
+    346958  experiments/d5-03/batch15/artifacts/run2-visibility-frames/08-burst-2.png
+    347062  experiments/d5-03/batch15/artifacts/run2-visibility-frames/08-burst-3.png
+    344971  experiments/d5-03/batch15/artifacts/run2-visibility-frames/09-edges-frame.png
+    345064  experiments/d5-03/batch15/artifacts/run2-visibility-frames/09-edges.png
+    345166  experiments/d5-03/batch15/artifacts/run2-visibility-frames/10-maximize-before.png
+    227668  experiments/d5-03/batch15/artifacts/run2-visibility-frames/10-maximized.png
+    228309  experiments/d5-03/batch15/artifacts/run2-visibility-frames/11-restore-before.png
+    346748  experiments/d5-03/batch15/artifacts/run2-visibility-frames/11-restored.png
+    346852  experiments/d5-03/batch15/artifacts/run2-visibility-frames/12-zoom.png
+
+文件计数 = 38
+断言通过：38 个路径全部存在且均为普通文件
+enumerate.py 退出码 = 0
+
+### 1.4 两份 JSON 可解析性与计数
+$ python3 jsoncheck.py
+experiments/d5-03/batch15/artifacts/run1-visibility-e2e.json
+  counts          = {"pass": 25, "fail": 0, "total": 25}
+  len(checks)     = 25
+  len(notVerified)= 1
+  断言 counts == {'pass':25,'fail':0,'total':25} -> PASS
+experiments/d5-03/batch15/artifacts/run2-visibility-e2e.json
+  counts          = {"pass": 25, "fail": 0, "total": 25}
+  len(checks)     = 25
+  len(notVerified)= 1
+  断言 counts == {'pass':25,'fail':0,'total':25} -> PASS
+
+JSON 断言总体：全部通过
+jsoncheck.py 退出码 = 0
+
+### 1.5 .gitignore sha256（用于事后证明未改）
+$ shasum -a 256 .gitignore
+4c0fdfe2d97b05490f628f84cbb450e88deb0f17233a326eeab17caddc614cfc  .gitignore
+
+### 1.5b .gitignore 前 5 行（第 3 行 = artifacts/）
+$ sed -n '1,5p' .gitignore
+node_modules/
+dist/
+artifacts/
+.DS_Store
+*.log
+
+### 1.x 第 1 步总判定
+第 1 步全部断言通过：文件计数=38；两份 JSON counts 均为 {"pass":25,"fail":0,"total":25}，checks=25，notVerified=1。
+
+==========================================================
+第 2 步：校验清单生成与自检  (16-archive-manifest.tsv)
+==========================================================
+
+### 2.1 生成清单
+$ python3 make_manifest.py
+已生成 experiments/d5-03/batch15/16-archive-manifest.tsv
+数据行数 = 38
+合计: files=38 total_bytes=12733808
+
+### 2.2 清单内容预览（前 6 行）
+path	bytes	sha256
+experiments/d5-03/batch15/artifacts/run1-visibility-e2e.json	31701	c38f731204bd189b0d8a76c1fbe2108b3eea92c805a3287dc802e7d52fd8cb03
+experiments/d5-03/batch15/artifacts/run1-visibility-frames/01-paint-before.png	398202	02caf99a48b0267522ba37f98cf7f71f5a8af5ca9545294a2dff1bfd07955a8c
+experiments/d5-03/batch15/artifacts/run1-visibility-frames/02-tab-switch.png	398415	2014b382a68f6f8b95bdf5c0852772070b10cf2bc33e92c8db314ae490e595ac
+experiments/d5-03/batch15/artifacts/run1-visibility-frames/03-addressbar-focus.png	396924	5bd74f586063da93da94f53fa7b70aea9812855e6d15f5062b5716ca6225606e
+experiments/d5-03/batch15/artifacts/run1-visibility-frames/04-page-click.png	403205	3b253211dbedeaf4c980eb7dcc9aed3e4ed63f872069a2b5b6b83b2e6e2eaf83
+  ...
+### 2.2b 清单内容预览（后 4 行）
+experiments/d5-03/batch15/artifacts/run2-visibility-frames/11-restore-before.png	228309	1657272506a85e99498d5335fc2c0450b797dc5d6ae45a4e62a265132389d86c
+experiments/d5-03/batch15/artifacts/run2-visibility-frames/11-restored.png	346748	5015cdfdcf04ce13af28fdcdeac27ea717bdf81e116204f94f235a44fffafad2
+experiments/d5-03/batch15/artifacts/run2-visibility-frames/12-zoom.png	346852	9478cecd0b7c6fe424b9a4f7dae8eec2f4dd94b7785c66c00db649ef2bd0616e
+# files=38 total_bytes=12733808
+
+### 2.3 清单自检（重新读取清单，逐行用 sha256/stat 复算并逐字段比对）
+$ python3 verify_manifest.py
+清单原始字节数 = 5670
+含 CR 字节 (0x0D) = False
+总行数（不含末尾空串） = 40
+首行 = 'path\tbytes\tsha256'
+数据行数 = 38   (断言 == 38: PASS)
+注释/合计行 = ['# files=38 total_bytes=12733808']
+排序断言：按路径字典序升序 -> PASS
+唯一性断言：38 条路径互不重复 -> PASS
+
+逐行复算（sha256 + stat）与清单逐字段比对 -> 全部一致 PASS
+复算合计行应为: # files=38 total_bytes=12733808
+清单实际合计行: # files=38 total_bytes=12733808
+合计行断言 -> PASS
+第 2 步自检全部通过。
+verify_manifest.py 退出码 = 0
+
+### 2.4 第 2 步总判定
+通过：清单 38 条数据行 + 表头 + 合计行；无 CR；末行单换行；路径字典序；
+      逐行 sha256/bytes 与文件系统复算结果完全一致；files=38 total_bytes=12733808。
+      载体位置 = experiments/d5-03/batch15/16-archive-manifest.tsv（位于 batch15/ 下，不在被忽略的 artifacts/ 内）。
