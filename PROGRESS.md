@@ -2264,3 +2264,5 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 **如何复算清单**：`16-archive-manifest.tsv` 的每一行都可用下述方式独立复算并比对 —— 单文件 `git show <commit>:<path> | shasum -a 256`，或按原路径导出 `git archive <commit> <path> | tar -xO | shasum -a 256`；批量则读清单逐行 `git show` 后比对 `sha256` 列（应零差异），并可用 `git ls-tree -r --name-only <commit> experiments/d5-03/batch15/artifacts/ | wc -l` 应 = **38** 做交叉核对。**提交号尚未产生**，本批**不编造哈希**：**本次归档提交 = 父提交为 `8b8e8ad`、主题为 `docs(d5-01): 第十六批 batch15 证据归档补齐…` 的那一次提交（不以 amend 方式产生）**。
 
 **遗留（不在本批范围）**：`experiments/d5-01/visibility-e2e.mjs:44` 的 **2400 字符截断仍在**（`record()` 里 `actual: String(actual ?? "").slice(0, 2400)`，使门禁自身产物无法完整回溯 `V11` 最后一落点，须依赖只读旁路 `verify/captured/payload-001-2955.json`）—— 本批**不改，另批修**（提高上限或按落点分段截断）；batch15 登记的其余上游遗留（9 个陈旧 `data-app-id` 探针、`browser-e2e.mjs:487` 的 `waitView("/cookie")` 脆弱点等）**一律未动**。**`D5-03` 整体仍 = `PARTIAL`** —— 本批只补齐 batch15 的**证据归档**，未闭环任何新产品 / 测试范围事项，整体判定**不因本批改变**。
+
+- 后续提交更正：归档补充说明中「合计 41 项」的算术笔误已更正为 **42**（38 产物 + 清单 + 补充说明 + 归档前确认输出 + PROGRESS.md），并把独立验收报告 `verify/BATCH16-VERIFY-REPORT.md` 一并入档。

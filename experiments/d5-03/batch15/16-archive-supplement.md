@@ -61,7 +61,7 @@
 - **未修改任何忽略规则**：`.gitignore` 本批前后 sha256 **一致**，均为
   `4c0fdfe2d97b05490f628f84cbb450e88deb0f17233a326eeab17caddc614cfc`
   （取证时记录于 `16-archive-precheck.txt` §1.5；暂存自检时再次核对一致）。本批采用 `-f` 强制纳入，**而非**放宽/删除忽略规则。
-- 本批**禁止**使用 `git add -A` / `git add .` / 目录级 `git add`：只按显式路径清单 `-f` 暂存这 38 个文件，另加 3 个新增文本文件与 `PROGRESS.md`，合计 **41** 项。
+- 本批**禁止**使用 `git add -A` / `git add .` / 目录级 `git add`：只按显式路径清单 `-f` 暂存这 38 个文件，另加 3 个新增文本文件（`16-archive-manifest.tsv` / `16-archive-supplement.md` / `16-archive-precheck.txt`）与修改 `PROGRESS.md`，合计 **42** 项（38 + 3 + 1）。（更正：本节在归档提交 `aa1512d` 中误写为 41 项；实数 38 + 3 + 1 = 42，已在后续提交更正。）
 
 ## 5. 逐字节不变：清单是唯一见证
 
