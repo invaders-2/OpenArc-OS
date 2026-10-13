@@ -156,6 +156,21 @@ contextBridge.exposeInMainWorld("openarc", {
     },
   },
   /**
+   * B3 Agent 桥。
+   *
+   * **只有两条能力**：派发受控 agent 命令、订阅 agent 下行事件（P1 信封）。
+   * 不暴露 ipcRenderer / 凭据 / 绝对路径；sessionRef 与 appId 由主进程注入，
+   * Renderer 自报的 userId / role / appId 一律忽略（与 model / task 同一条 trusted 边界）。
+   */
+  agent: {
+    command: (command) => ipcRenderer.invoke("agent:command", command),
+    onEvent: (callback) => {
+      const listener = (_, event) => callback(event);
+      ipcRenderer.on("agent:event", listener);
+      return () => ipcRenderer.removeListener("agent:event", listener);
+    },
+  },
+  /**
    * D4-03C4 Trusted Approval Gateway 桥。
    *
    * **三条能力**：提交一个 approval decision、撤销一个"已批准、尚未执行"的操作、订阅 approval 请求事件。

@@ -1,0 +1,533 @@
+"use strict";
+/**
+ * B3 · Agent 域装配 + agent:command 分发（唯一执行入口）。
+ *
+ * 装配真实模块（不 mock、不新增依赖）：
+ *   · agent-task-store.cjs          任务域 SQLite 状态机（注入 identity-store 的真实连接）
+ *   · agent-kernel.cjs              Agent 内核（prepareAgentTurn / 上下文）
+ *   · agent-kernel-store.cjs        Agent Run 持久化   ┐ 两者注入同一 db
+ *   · agent-kernel-inspection.cjs   Run 巡检            ┘
+ *   · agent-runtime-manager.cjs     运行时依赖中心（configureAgentRuntime）
+ *   · agent-react-driver.cjs        React 驱动（configureReactDriver）
+ *   · agent-tool-catalog.cjs        工具目录（configureToolCatalog）
+ *   · agent-tool-resolver.cjs       工具解析 / 权限判定
+ *   · agent-builtin-tools.cjs       runTool（B3d 唯一工具执行器）
+ *   · provider-protocol-service.cjs 模型调用出口（modelService.providerProtocol.service.call）
+ *
+ * 边界：
+ *   · 渲染层自报的 userId / role / appId / sessionRef 一律忽略；actor 由 authorization.resolveActor
+ *     从可信 sessionRef 推导（同 model-service.cjs:17 / task-service.cjs:128）。
+ *   · fsAdapter / workspaceAdapter（B6 虚拟文件树）未落地 → 保持结构化 AGENT_DEPENDENCY_UNAVAILABLE，
+ *     绝不伪造成功；workspace 模块本身已注入，但文件写真值通道仍由 fsAdapter 决定。
+ *   · 返回值统一过 agent-domain.cjs 的 redactAgentValue —— 不含 api_key / credentialRef / 绝对路径。
+ */
+const { randomUUID } = require("node:crypto");
+
+const agentDomain = require("./agent-domain.cjs");
+const foundationErrors = require("./dxos-foundation-errors.cjs");
+const { createEventChannel } = require("./dxos-foundation-events.cjs");
+
+const agentTaskStore = require("./agent-task-store.cjs");
+const agentKernel = require("./agent-kernel.cjs");
+const agentKernelStore = require("./agent-kernel-store.cjs");
+const agentKernelInspection = require("./agent-kernel-inspection.cjs");
+const agentRuntimeWorkspace = require("./agent-runtime-workspace.cjs");
+const agentRuntimeUsage = require("./agent-runtime-usage.cjs");
+const agentRuntimeEnvelope = require("./agent-runtime-envelope.cjs");
+const agentRuntime = require("./agent-runtime-manager.cjs");
+const reactDriver = require("./agent-react-driver.cjs");
+const builtinTools = require("./agent-builtin-tools.cjs");
+const toolResolver = require("./agent-tool-resolver.cjs");
+const capabilityRouter = require("./capability-router.cjs");
+const projectSnapshot = require("./agent-project-snapshot.cjs");
+const authDomain = require("./authorization-domain.cjs");
+
+const { createAgentError, normalizeAgentError, redactAgentValue, isAgentCommand, agentCommandNotAllowed, AGENT_ERR_COMMAND_NOT_ALLOWED, AGENT_ERR_INVALID_INPUT, AGENT_ERR_UNAUTHENTICATED, AGENT_ERR_FORBIDDEN, AGENT_ERR_NOT_FOUND, AGENT_ERR_DEPENDENCY_UNAVAILABLE, AGENT_ERR_INTERNAL, AGENT_EVENT_CHANNEL } = agentDomain;
+
+/** Agent 能力承载的 App Principal。任务域 / 模型域的既有约定同为 "ai"（task-bootstrap.cjs:108）。 */
+const HOST_APP_ID = "ai";
+
+const asStr = (value, max = 512) => (typeof value === "string" ? value.slice(0, max) : value == null ? undefined : String(value).slice(0, max));
+const requireStr = (value, max = 512) => { const text = asStr(value, max); return text && text.length ? text : null; };
+
+/** 惰性加载真实工具目录；接口未就绪（并行波次写入中）返回 null，命令侧结构化报缺。 */
+function loadToolCatalogModule() {
+  try {
+    const mod = require("./agent-tool-catalog.cjs");
+    return mod && typeof mod.toolCatalogSnapshot === "function" ? mod : null;
+  } catch {
+    return null;
+  }
+}
+
+/** resolver 失败对象的可透传字段（toolName / permission）— 只取显式白名单，避免把整个错误对象带过桥。 */
+function resolverErrorDetail(error, code) {
+  const detail = { causeCode: code };
+  if (error && typeof error === "object") {
+    if (typeof error.toolName === "string") detail.tool = error.toolName;
+    if (typeof error.permission === "string") detail.permission = error.permission;
+    if (Array.isArray(error.permissions)) detail.permissions = error.permissions.slice(0, 16);
+  }
+  return detail;
+}
+
+/** 解析失败映射：resolver 的 code → Agent 域错误码（不吞原始 message）。 */
+function mapResolverError(error) {
+  const code = error && error.code ? String(error.code) : "internal";
+  const message = (error && error.message) || "工具解析失败";
+  const detail = resolverErrorDetail(error, code);
+  if (code === "catalog_unavailable") return createAgentError(AGENT_ERR_DEPENDENCY_UNAVAILABLE, message, { ...detail, dependency: "toolCatalog" });
+  if (code === "auth_unavailable") return createAgentError(AGENT_ERR_DEPENDENCY_UNAVAILABLE, message, { ...detail, dependency: "toolAuth" });
+  if (code === "permission_denied") return createAgentError(AGENT_ERR_FORBIDDEN, message, detail);
+  if (code === "not_found") return createAgentError(AGENT_ERR_NOT_FOUND, message, detail);
+  if (code === "invalid_request") return createAgentError(AGENT_ERR_INVALID_INPUT, message, detail);
+  return createAgentError(AGENT_ERR_INTERNAL, message, detail);
+}
+
+/** 工具执行失败映射：ToolError.code → Agent 域码；缺 fsAdapter 归 AGENT_DEPENDENCY_UNAVAILABLE。 */
+function mapToolError(error, toolName) {
+  const code = error && error.code ? String(error.code) : "internal";
+  const message = (error && error.message) || "工具执行失败";
+  if (code === "dependency_unavailable") return createAgentError(AGENT_ERR_DEPENDENCY_UNAVAILABLE, message, { dependency: "fsAdapter", tool: toolName, causeCode: code });
+  if (code === "permission_denied") return createAgentError(AGENT_ERR_FORBIDDEN, message, { tool: toolName, causeCode: code });
+  if (code === "not_found") return createAgentError(AGENT_ERR_NOT_FOUND, message, { tool: toolName, causeCode: code });
+  if (code === "invalid_input") return createAgentError(AGENT_ERR_INVALID_INPUT, message, { tool: toolName, causeCode: code });
+  if (code === "conflict") return createAgentError("AGENT_CONFLICT", message, { tool: toolName, causeCode: code });
+  return createAgentError(AGENT_ERR_INTERNAL, message, { tool: toolName, causeCode: code });
+}
+
+/**
+ * 模型调用适配器：形状 = agent-runtime-deps.cjs:24（provider-protocol-service.cjs:151）。
+ * 出口不存在时返回 { ok:false, error:'MODEL_SERVICE_UNAVAILABLE' }，由工具循环/驱动判失败。
+ */
+function createModelAdapter({ modelService }) {
+  function protocolService() {
+    const protocol = modelService && modelService.providerProtocol ? modelService.providerProtocol : null;
+    return protocol && protocol.service && typeof protocol.service.call === "function" ? protocol.service : null;
+  }
+  return {
+    async call(input = {}) {
+      const service = protocolService();
+      if (!service) return { ok: false, error: "MODEL_SERVICE_UNAVAILABLE" };
+      return service.call({
+        providerId: input.providerId,
+        model: input.model,
+        messages: Array.isArray(input.messages) ? input.messages : [],
+        tools: input.tools == null ? null : input.tools,
+        params: input.params && typeof input.params === "object" ? input.params : {},
+        stream: input.stream === true,
+        requestId: asStr(input.requestId, 80),
+        signal: input.signal || null,
+        allowLan: false,
+        onEvent: typeof input.onEvent === "function" ? input.onEvent : () => {},
+      });
+    },
+  };
+}
+
+/**
+ * 工具执行器。两个形状都要满足：
+ *   · 服务端工具循环用 run(toolName, args, ctx)（agent-runtime-tool-loop.cjs:430）；
+ *   · React 驱动用 runTool(toolName, ctx, args) + ToolError（agent-react-driver.cjs:993）。
+ */
+function createToolRunner() {
+  const run = (toolName, ctx, args) => builtinTools.runTool(String(toolName), ctx && typeof ctx === "object" ? ctx : {}, args && typeof args === "object" ? args : {});
+  return {
+    run: (toolName, args, ctx) => run(toolName, ctx, args),
+    runTool: (toolName, ctx, args) => run(toolName, ctx, args),
+    ToolError: builtinTools.ToolError,
+  };
+}
+
+/**
+ * 工具权限适配器：agent-tool-resolver.cjs:128 需要 { canUseAppPermission(actor, permission) }。
+ * 复用既有权限真值（不建第二权限系统）：
+ *   · 受控 Tool action（authorization-domain.cjs:176）→ AuthorizationService.authorizeTool；
+ *   · 其余（如 files.read / files.write）→ App Grant 的 actions 列表（appGrantsForApp）。
+ * 适配器未装配时返回 false（保守拒绝），与 resolver 的 auth_unavailable 语义一致。
+ */
+function createToolAuthAdapter({ authStore, authorization }) {
+  return {
+    canUseAppPermission(actor, permission) {
+      const action = String(permission == null ? "" : permission);
+      if (!action) return true;
+      if (!actor || actor.id == null) return false;
+      const organizationId = actor.organizationId || actor.team_id || null;
+      if (authDomain.isToolAction(action)) {
+        if (!authorization || typeof authorization.authorizeTool !== "function") return false;
+        const decision = authorization.authorizeTool({ context: { userId: actor.id, appId: HOST_APP_ID, source: "agent" }, action, application: { appId: HOST_APP_ID } });
+        return !!(decision && decision.decision === authDomain.DECISION.ALLOW);
+      }
+      if (!authStore || typeof authStore.appGrantsForApp !== "function") return false;
+      const grants = authStore.appGrantsForApp(HOST_APP_ID, organizationId) || [];
+      for (const grant of grants) {
+        let actions = grant && grant.actions;
+        if (typeof actions === "string") { try { actions = JSON.parse(actions || "[]"); } catch { actions = []; } }
+        if (Array.isArray(actions) && actions.map(String).includes(action)) return true;
+      }
+      return false;
+    },
+  };
+}
+
+/** 任务安全投影：只暴露渲染层需要的字段（内部列名 → 驼峰）。 */
+function taskSummary(task) {
+  if (!task) return null;
+  return {
+    taskId: task.id, projectId: task.project_id, threadId: task.thread_id,
+    title: task.title, instruction: task.instruction, status: task.status, mode: task.mode,
+    executionProfile: task.execution_profile, createdAt: task.created_at, updatedAt: task.updated_at,
+    startedAt: task.started_at || null, completedAt: task.completed_at || null,
+    errorCode: task.error_code || null, errorMessage: task.error_message || null,
+    agentRunId: task.agent_run_id || null,
+  };
+}
+
+/**
+ * 装配 Agent 域 bundle。dbPath / userDataDir 只为运行时工作区与日志定位，不作为返回值。
+ * 额外可选键 toolCatalog 是测试/未来批次注入目录的 seam（production 省略即惰性 require 真实模块）。
+ */
+function createAgentBundle({ identityStore, authorization, authStore, modelService, userDataDir, logger = null, clock = null, dbPath = null, toolCatalog = null } = {}) {
+  const now = typeof clock === "function" ? clock : () => Date.now();
+  const idFactory = () => randomUUID();
+  const db = (identityStore && (identityStore.connection || identityStore.db)) || null;
+  const catalog = toolCatalog || loadToolCatalogModule();
+
+  // ---- 1) 任务域：唯一 SQLite 连接（identity-store 的连接，agent_* 表由 v23 迁移建立） ----
+  if (db) agentTaskStore.configureAgentTaskStore({ db, clock: now, idFactory });
+
+  // ---- 2) 工具执行器与模型出口（tool loop / react driver / kernel 共用同一实例） ----
+  const modelAdapter = createModelAdapter({ modelService });
+  const toolRunner = createToolRunner();
+  const toolAuth = createToolAuthAdapter({ authStore, authorization });
+  // B6 未落地：fsAdapter / workspaceAdapter 不注入（workspace 模块本身可用，但文件真值通道为空）。
+  const fsAdapter = null;
+
+  // ---- 3) 内核依赖：Run 持久化 / 巡检 / 工具解析 / 用量 / 工作区 ----
+  agentKernel.configureAgentKernel({
+    db, clock: now, logger, taskStore: agentTaskStore, workspaceStore: agentRuntimeWorkspace,
+    usageStore: agentRuntimeUsage, schemaValidator: agentRuntimeEnvelope, toolResolver,
+    modelAdapter, toolRunner, fsAdapter,
+  });
+
+  // ---- 4) 运行时依赖中心（tool loop）与 React 驱动 ----
+  agentRuntime.configureAgentRuntime({
+    db, kernel: agentKernel, taskStore: agentTaskStore, runStore: agentKernelStore,
+    modelAdapter, toolRunner, fsAdapter, workspaceAdapter: agentRuntimeWorkspace,
+    clock: now, logger, idFactory,
+  });
+  reactDriver.configureReactDriver({
+    kernel: agentKernel, kernelStore: agentKernelStore, supervisor: require("./agent-kernel-supervisor.cjs"),
+    taskStore: agentTaskStore, toolRunner, workspaceAdapter: agentRuntimeWorkspace,
+    usageAdapter: agentRuntimeUsage, fsAdapter, clock: now, logger,
+  });
+
+  // ---- 5) 工具目录 + 解析器（同一份 auth / catalog 注入，避免两套权限判定） ----
+  if (catalog && typeof catalog.configureToolCatalog === "function") catalog.configureToolCatalog({ sources: {}, auth: toolAuth, weather: null, clock: now });
+  toolResolver.configureToolResolver({ catalog, auth: toolAuth });
+
+  // ---- 6) 下行事件（P1 信封；bootstrap 的 send 经 setEventSink 注入） ----
+  const channel = createEventChannel({ domain: agentDomain.AGENT_EVENT_DOMAIN, clock: now });
+  let eventSink = null;
+  function setEventSink(fn) { eventSink = typeof fn === "function" ? fn : null; return true; }
+  function emit(kind, payload) {
+    const event = channel.emit(kind, payload);
+    if (eventSink) { try { eventSink(event); } catch { /* 事件推送失败不改变业务结果 */ } }
+    return event;
+  }
+
+  const dependencies = Object.freeze({
+    db: !!db,
+    // 键名不用 authorization：foundation 的 isSecretKey 会把它当凭据字段掩码，布尔值会丢失类型。
+    actorResolution: !!(authorization && typeof authorization.resolveActor === "function"),
+    modelAdapter: !!(modelService && modelService.providerProtocol && modelService.providerProtocol.service),
+    toolRunner: true,
+    toolCatalog: !!catalog,
+    toolAuth: true,
+    // B6 未落地：显式 false，不假装可用（agent-project-snapshot 会据此抛结构化依赖错误）。
+    fsAdapter: false,
+    workspaceAdapter: !!agentRuntimeWorkspace,
+    userDataDir: !!userDataDir,
+    dbPath: !!dbPath,
+  });
+
+  /** sessionRef → actor；不可解析时返回 { ok:false }，绝不伪造身份。 */
+  function resolveActor(context) {
+    if (!authorization || typeof authorization.resolveActor !== "function") return { ok: false, message: "授权服务未装配" };
+    try {
+      const result = authorization.resolveActor({ context });
+      if (!result || result.ok !== true || !result.user || result.user.id == null) return { ok: false, message: (result && (result.error || result.reason)) || "会话无效" };
+      return result;
+    } catch (error) {
+      return { ok: false, message: String((error && error.message) || error) };
+    }
+  }
+
+  function accessOrForbidden(projectId, userId, createTask) {
+    try { agentTaskStore.requireProjectAccess(projectId, userId, createTask); }
+    catch (error) { throw createAgentError(AGENT_ERR_FORBIDDEN, (error && error.message) || "没有该项目的访问权限", { projectId }); }
+  }
+
+  /** 命令分发。失败一律 throw（由 execute 统一规约），成功返回原始值（由 execute 统一脱敏）。 */
+  async function dispatch(command, payload, context) {
+    const userId = context.userId;
+    const actor = { ...context.actor, id: userId, organizationId: context.actor && (context.actor.organizationId || context.actor.team_id) };
+    switch (command) {
+      // ---------------- task ----------------
+      case "agent/task/create": {
+        const projectId = requireStr(payload.projectId, 160);
+        const instruction = requireStr(payload.instruction, 8000);
+        if (!projectId || !instruction) throw createAgentError(AGENT_ERR_INVALID_INPUT, "projectId 与 instruction 必填");
+        accessOrForbidden(projectId, userId, true);
+        const task = agentTaskStore.createTask({
+          projectId, instruction, createdBy: userId,
+          title: asStr(payload.title, 120), threadId: requireStr(payload.threadId, 120),
+          executionProfile: requireStr(payload.executionProfile, 20),
+          agentProfileId: requireStr(payload.agentProfileId, 80),
+          parentTaskId: requireStr(payload.parentTaskId, 120),
+          preferences: payload.preferences && typeof payload.preferences === "object" ? payload.preferences : undefined,
+          actions: Array.isArray(payload.actions) ? payload.actions : undefined,
+        });
+        return { task: taskSummary(task) };
+      }
+      case "agent/task/list": {
+        const projectId = requireStr(payload.projectId, 160) || undefined;
+        return { items: agentTaskStore.listTasks(userId, projectId).map(taskSummary) };
+      }
+      case "agent/task/get": {
+        const taskId = requireStr(payload.taskId, 160);
+        if (!taskId) throw createAgentError(AGENT_ERR_INVALID_INPUT, "taskId 必填");
+        const task = agentTaskStore.getTask(taskId);
+        if (!task) throw createAgentError(AGENT_ERR_NOT_FOUND, "任务不存在：" + taskId);
+        accessOrForbidden(task.project_id, userId);
+        return {
+          task: taskSummary(task),
+          steps: Array.isArray(task.steps) ? task.steps.map((step) => ({ id: step.id, ordinal: step.ordinal, title: step.title, tool: step.tool_name, status: step.status, startedAt: step.started_at, completedAt: step.completed_at })) : [],
+          deliverables: Array.isArray(task.deliverables) ? task.deliverables.map((item) => ({ id: item.id, name: item.name, type: item.type, createdAt: item.created_at })) : [],
+          checkpoints: Array.isArray(task.checkpoints) ? task.checkpoints.length : 0,
+        };
+      }
+      case "agent/task/events": {
+        const taskId = requireStr(payload.taskId, 160);
+        if (!taskId) throw createAgentError(AGENT_ERR_INVALID_INPUT, "taskId 必填");
+        const task = agentTaskStore.getTask(taskId);
+        if (!task) throw createAgentError(AGENT_ERR_NOT_FOUND, "任务不存在：" + taskId);
+        accessOrForbidden(task.project_id, userId);
+        const after = Number.isFinite(Number(payload.afterSequence)) ? Number(payload.afterSequence) : 0;
+        return { items: agentTaskStore.listTaskEvents(taskId, Math.max(0, after)) };
+      }
+      case "agent/task/answer": {
+        const taskId = requireStr(payload.taskId, 160);
+        const answer = requireStr(payload.answer, 4000);
+        if (!taskId || !answer) throw createAgentError(AGENT_ERR_INVALID_INPUT, "taskId 与 answer 必填");
+        agentTaskStore.answerTask(taskId, userId, answer);
+        return { task: taskSummary(agentTaskStore.getTask(taskId)) };
+      }
+      case "agent/task/continue": {
+        const taskId = requireStr(payload.taskId, 160);
+        const message = requireStr(payload.message, 4000);
+        if (!taskId || !message) throw createAgentError(AGENT_ERR_INVALID_INPUT, "taskId 与 message 必填");
+        agentTaskStore.continueTask(taskId, userId, message);
+        return { task: taskSummary(agentTaskStore.getTask(taskId)) };
+      }
+      case "agent/task/pause": {
+        const taskId = requireStr(payload.taskId, 160);
+        if (!taskId) throw createAgentError(AGENT_ERR_INVALID_INPUT, "taskId 必填");
+        const task = agentTaskStore.getTask(taskId);
+        if (!task) throw createAgentError(AGENT_ERR_NOT_FOUND, "任务不存在：" + taskId);
+        accessOrForbidden(task.project_id, userId);
+        agentTaskStore.pauseTask(taskId);
+        return { task: taskSummary(agentTaskStore.getTask(taskId)) };
+      }
+      case "agent/task/cancel": {
+        const taskId = requireStr(payload.taskId, 160);
+        if (!taskId) throw createAgentError(AGENT_ERR_INVALID_INPUT, "taskId 必填");
+        const task = agentTaskStore.getTask(taskId);
+        if (!task) throw createAgentError(AGENT_ERR_NOT_FOUND, "任务不存在：" + taskId);
+        accessOrForbidden(task.project_id, userId);
+        agentTaskStore.cancelTask(taskId);
+        return { task: taskSummary(agentTaskStore.getTask(taskId)) };
+      }
+      case "agent/task/resume": {
+        const taskId = requireStr(payload.taskId, 160);
+        if (!taskId) throw createAgentError(AGENT_ERR_INVALID_INPUT, "taskId 必填");
+        const task = agentTaskStore.getTask(taskId);
+        if (!task) throw createAgentError(AGENT_ERR_NOT_FOUND, "任务不存在：" + taskId);
+        accessOrForbidden(task.project_id, userId, true);
+        agentTaskStore.resumeTask(taskId);
+        return { task: taskSummary(agentTaskStore.getTask(taskId)) };
+      }
+      case "agent/task/delete": {
+        const taskId = requireStr(payload.taskId, 160);
+        if (!taskId) throw createAgentError(AGENT_ERR_INVALID_INPUT, "taskId 必填");
+        const task = agentTaskStore.getTask(taskId);
+        if (!task) throw createAgentError(AGENT_ERR_NOT_FOUND, "任务不存在：" + taskId);
+        accessOrForbidden(task.project_id, userId);
+        agentTaskStore.deleteTask(taskId);
+        return { taskId, deleted: true };
+      }
+      case "agent/task/trace": {
+        const taskId = requireStr(payload.taskId, 160);
+        if (!taskId) throw createAgentError(AGENT_ERR_INVALID_INPUT, "taskId 必填");
+        return agentTaskStore.taskTrace(taskId, userId);
+      }
+      case "agent/task/stats": {
+        const sinceMs = Number.isFinite(Number(payload.sinceMs)) ? Number(payload.sinceMs) : undefined;
+        return agentTaskStore.taskStats(userId, sinceMs);
+      }
+
+      // ---------------- run ----------------
+      case "agent/run/get": {
+        const runId = requireStr(payload.runId, 160);
+        if (!runId) throw createAgentError(AGENT_ERR_INVALID_INPUT, "runId 必填");
+        const run = agentKernelStore.getAgentRun(runId);
+        if (!run) throw createAgentError(AGENT_ERR_NOT_FOUND, "Agent Run 不存在：" + runId);
+        return { run };
+      }
+      case "agent/run/inspect": {
+        const runId = requireStr(payload.runId, 160);
+        if (!runId) throw createAgentError(AGENT_ERR_INVALID_INPUT, "runId 必填");
+        return { inspection: agentKernelInspection.inspectAgentRun(runId, now()) };
+      }
+      case "agent/run/list": {
+        const projectId = requireStr(payload.projectId, 160) || undefined;
+        const limit = Number.isFinite(Number(payload.limit)) ? Number(payload.limit) : 50;
+        return { items: agentKernelStore.listAgentRuns(userId, projectId, limit) };
+      }
+
+      // ---------------- tool ----------------
+      case "agent/tool/catalog": {
+        if (!catalog) throw createAgentError(AGENT_ERR_DEPENDENCY_UNAVAILABLE, "工具目录未就绪：agent-tool-catalog.cjs 不可用", { dependency: "toolCatalog" });
+        const snapshot = catalog.toolCatalogSnapshot({ actor, executableOnly: payload.executableOnly !== false, source: requireStr(payload.source, 20), sourceId: requireStr(payload.sourceId, 80), appId: requireStr(payload.appId, 80) });
+        return { descriptors: snapshot.descriptors, tools: snapshot.tools, summary: snapshot.summary };
+      }
+      case "agent/tool/describe": {
+        const name = requireStr(payload.tool, 200) || requireStr(payload.name, 200);
+        if (!name) throw createAgentError(AGENT_ERR_INVALID_INPUT, "tool 必填");
+        const resolved = toolResolver.resolveToolByName(name, { actor, executableOnly: true }, { catalog });
+        if (!resolved.ok) throw mapResolverError(resolved.error);
+        return { descriptor: resolved.descriptor, openaiTool: resolved.openaiTool, permission: resolved.permission };
+      }
+      case "agent/tool/call": {
+        const name = requireStr(payload.tool, 200) || requireStr(payload.name, 200);
+        if (!name) throw createAgentError(AGENT_ERR_INVALID_INPUT, "tool 必填");
+        const resolved = toolResolver.resolveToolByName(name, { actor, executableOnly: true }, { catalog });
+        if (!resolved.ok) throw mapResolverError(resolved.error);
+        const handler = resolved.descriptor.handler || {};
+        if (handler.type !== "file-tool") throw createAgentError(AGENT_ERR_DEPENDENCY_UNAVAILABLE, "工具执行器未接入：" + String(handler.type || "unknown"), { tool: name, handlerType: handler.type || null });
+        const args = payload.arguments && typeof payload.arguments === "object" ? payload.arguments : payload.args && typeof payload.args === "object" ? payload.args : {};
+        try {
+          const result = await builtinTools.runTool(handler.toolName || name, { userId, rootNodeId: requireStr(payload.rootNodeId, 160) || undefined, runId: requireStr(payload.runId, 160) || undefined }, args);
+          return { tool: name, result };
+        } catch (error) {
+          throw mapToolError(error, name);
+        }
+      }
+
+      // ---------------- capability ----------------
+      case "agent/capability/route": {
+        const request = {
+          instruction: asStr(payload.instruction, 4000) || "",
+          actor, hasImageInput: payload.hasImageInput === true,
+          taskId: requireStr(payload.taskId, 160), projectId: requireStr(payload.projectId, 160), rootNodeId: requireStr(payload.rootNodeId, 160),
+          preferredProviderId: requireStr(payload.preferredProviderId, 120), preferredModel: requireStr(payload.preferredModel, 200),
+          providers: Array.isArray(payload.providers) ? payload.providers : undefined,
+          requestedSources: Array.isArray(payload.requestedSources) ? payload.requestedSources.slice(0, 16).map((item) => asStr(item, 40)) : undefined,
+        };
+        return { route: capabilityRouter.resolveAgentRoute(request) };
+      }
+
+      // ---------------- project ----------------
+      case "agent/project/create": {
+        const name = requireStr(payload.name, 200);
+        const rootNodeId = requireStr(payload.rootNodeId, 200);
+        if (!name || !rootNodeId) throw createAgentError(AGENT_ERR_INVALID_INPUT, "name 与 rootNodeId 必填");
+        return { project: agentTaskStore.createProject({ name, rootNodeId, createdBy: userId }) };
+      }
+      case "agent/project/list": return { items: agentTaskStore.listProjects(userId) };
+      case "agent/project/snapshot": {
+        const projectId = requireStr(payload.projectId, 160);
+        if (!projectId) throw createAgentError(AGENT_ERR_INVALID_INPUT, "projectId 必填");
+        const project = agentTaskStore.getProject(projectId);
+        if (!project) throw createAgentError(AGENT_ERR_NOT_FOUND, "项目不存在：" + projectId);
+        accessOrForbidden(projectId, userId, true);
+        projectSnapshot.writeProjectSnapshot(projectId);
+        return { projectId, written: true };
+      }
+
+      // ---------------- memory ----------------
+      case "agent/memory/list": {
+        const projectId = requireStr(payload.projectId, 160);
+        if (!projectId) throw createAgentError(AGENT_ERR_INVALID_INPUT, "projectId 必填");
+        accessOrForbidden(projectId, userId);
+        return { items: agentTaskStore.listMemories(projectId, payload.includeSuperseded === true) };
+      }
+      case "agent/memory/save": {
+        const projectId = requireStr(payload.projectId, 160);
+        const content = requireStr(payload.content, 2000);
+        if (!projectId || !content) throw createAgentError(AGENT_ERR_INVALID_INPUT, "projectId 与 content 必填");
+        accessOrForbidden(projectId, userId, true);
+        return { memory: agentTaskStore.addMemory({ projectId, content, createdBy: userId, sourceType: requireStr(payload.sourceType, 40), sourceId: requireStr(payload.sourceId, 160), replacesId: requireStr(payload.replacesId, 160) }) };
+      }
+
+      // ---------------- react ----------------
+      case "agent/react/run": {
+        const taskId = requireStr(payload.taskId, 160);
+        if (!taskId) throw createAgentError(AGENT_ERR_INVALID_INPUT, "taskId 必填");
+        const task = agentTaskStore.getTask(taskId);
+        if (!task) throw createAgentError(AGENT_ERR_NOT_FOUND, "任务不存在：" + taskId);
+        accessOrForbidden(task.project_id, userId, true);
+        const project = agentTaskStore.getProject(task.project_id);
+        const rootNodeId = project ? project.root_node_id : null;
+        const outcome = await reactDriver.runReactTask(taskId, null, null, rootNodeId, userId);
+        return { taskId, outcome };
+      }
+
+      // ---------------- health ----------------
+      case "agent/health": return { status: dependencies.db ? "ok" : "degraded", dependencies, commands: agentDomain.listAgentCommands().length, eventChannel: AGENT_EVENT_CHANNEL };
+
+      default: throw agentCommandNotAllowed(command);
+    }
+  }
+
+  /**
+   * 唯一分发入口：白名单 → actor 解析 → dispatch → 脱敏；失败统一 normalizeAgentError。
+   * 每次执行前后各发一条 progress 事件（P1 信封），供渲染层显示与丢帧判定。
+   */
+  async function execute(command, payload, ctx = {}) {
+    if (!isAgentCommand(command)) return normalizeAgentError(agentCommandNotAllowed(command));
+    const context = {
+      sessionRef: requireStr(ctx && ctx.sessionRef, 160) || null,
+      appId: requireStr(ctx && ctx.appId, 60) || HOST_APP_ID,
+      source: "agent",
+      requestId: requireStr(ctx && ctx.requestId, 80) || null,
+    };
+    emit("progress", { command, phase: "begin", requestId: context.requestId });
+    const actorResult = resolveActor(context);
+    if (!actorResult.ok) {
+      emit("progress", { command, phase: "rejected", reason: "unauthenticated", requestId: context.requestId });
+      return normalizeAgentError(createAgentError(AGENT_ERR_UNAUTHENTICATED, actorResult.message || "当前会话未认证，agent 命令被拒绝"));
+    }
+    context.userId = String(actorResult.user.id);
+    context.actor = actorResult.user;
+    const body = payload && typeof payload === "object" ? payload : {};
+    try {
+      const value = await dispatch(command, body, context);
+      emit("progress", { command, phase: "completed", requestId: context.requestId });
+      return { ok: true, value: redactAgentValue(value) };
+    } catch (error) {
+      emit("progress", { command, phase: "failed", requestId: context.requestId });
+      return normalizeAgentError(error);
+    }
+  }
+
+  return {
+    execute,
+    setEventSink,
+    emitEvent: emit,
+    /** 只读依赖清单（供 health 与测试；不含任何路径 / 凭据值）。 */
+    dependencies,
+  };
+}
+
+module.exports = { createAgentBundle, HOST_APP_ID };

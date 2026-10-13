@@ -105,6 +105,17 @@ export interface OpenArcTaskBridge extends OpenArcCommandBridge {
   onEvent: (callback: (event: OpenArcEvent) => void) => () => void;
 }
 
+/**
+ * B3 Agent 域。
+ *
+ * 唯一入口 command(...)（受控白名单：task / run / tool / capability / project / memory / react / health），
+ * 以及 agent:event 下行（主进程封装的 P1 信封）。这里没有 raw credential / credentialRef / 本机路径 /
+ * ipcRenderer —— sessionRef 与 appId 由主进程注入，renderer 自报的身份字段一律忽略。
+ */
+export interface OpenArcAgentBridge extends OpenArcCommandBridge {
+  onEvent: (callback: (event: OpenArcEvent) => void) => () => void;
+}
+
 export interface OpenArcCanvasBridge extends OpenArcCommandBridge {
   /** P5：素材库 / .dxcanvas 打包 / 协作会话。 */
   assets?: OpenArcCommandFn;
@@ -184,6 +195,8 @@ export interface OpenArcBridge {
   /** preload 已暴露、main.tsx 既有声明遗漏的两个域（P1 补齐契约）。 */
   canvas?: OpenArcCanvasBridge;
   task?: OpenArcTaskBridge;
+  /** B3：Agent 域（与 preload.cjs 的顶层 agent 键一一对应）。 */
+  agent?: OpenArcAgentBridge;
   skill?: OpenArcSkillBridge;
   media?: OpenArcMediaBridge;
   comfy?: OpenArcComfyBridge;

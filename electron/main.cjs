@@ -25,6 +25,9 @@ const { registerCanvasIpc } = require("./canvas-bootstrap.cjs");
 const { registerTaskIpc } = require("./task-bootstrap.cjs");
 // W5：模型流式下行事件（model:event）的宿主桥接（model:command 仍由 identity-bootstrap 注册）。
 const { wireModelEvents } = require("./model-bootstrap.cjs");
+// B3：Agent 域装配（真实 SQLite = identity 的连接）与 agent:command / agent:event 通道。
+const { createAgentBundle } = require("./agent-service.cjs");
+const { registerAgentIpc } = require("./agent-bootstrap.cjs");
 // D5-03：MCP 中心的宿主命令面（连接管理 + 能力发现；本批不开放工具调用）。
 const { registerMcpIpc } = require("./mcp-bootstrap.cjs");
 // D5-03 第十一批：关应用的唯一收尾顺序（MCP → Harness → modelProxy → store）。
@@ -41,6 +44,8 @@ let files;
 let identityBootFailure = null;
 /** D5-02：画布文档服务（AI 编辑工具的执行端与渲染层命令共用同一个实例）。*/
 let canvasBundle;
+/** B3：Agent 域 bundle（createAgentBundle 的唯一实例；无身份服务时为 undefined）。 */
+let agentBundle;
 /** D5-01 Closure-2：受控浏览器目标（用户显式授权）。宿主持有唯一实例，工具链与 UI 共用同一个。 */
 let browserControl;
 
@@ -479,6 +484,29 @@ app.whenReady().then(async () => {
       identity: identity.service,
       isTrusted: trusted,
       send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("task:event", event); },
+    });
+
+    // B3：Agent 域。
+    //   · 任务/运行/工具/项目/记忆全部落到 identity-store 的同一 SQLite 连接（agent_* 表 v23 迁移已建）；
+    //   · modelAdapter 走 provider-protocol-service.call（唯一模型出口）；
+    //   · fsAdapter / workspaceAdapter 属 B6，未落地 → 命令侧保持结构化 AGENT_DEPENDENCY_UNAVAILABLE；
+    //   · agent:event 与 model:event / task:event 同一条 trusted(event) 边界，renderer 只能订阅。
+    agentBundle = createAgentBundle({
+      identityStore: identity.store,
+      authorization: identity.authorization,
+      authStore: identity.authStore,
+      modelService: identity.modelService,
+      userDataDir: app.getPath("userData"),
+      logger: null,
+      clock: null,
+      dbPath: path.join(app.getPath("userData"), "identity.db"),
+    });
+    registerAgentIpc({
+      ipcMain,
+      bundle: agentBundle,
+      identity: identity.service,
+      isTrusted: trusted,
+      send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("agent:event", event); },
     });
 
     // D3-04C：注册安全预览协议 handler（每次请求重新授权 + Range 流式返回）。
