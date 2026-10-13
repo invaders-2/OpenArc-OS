@@ -314,7 +314,7 @@ test("E8 · 覆写解析：缺 ack / 值非法 / 合法 三种情形，非法一
 });
 
 test("E9 · 默认路径未变：不注入时仍走 DEFAULT_TTL_MS / DEFAULT_IDLE_MS，schema 仍 21", async () => {
-  assert.equal(SCHEMA_VERSION, 21, "本批不得升 schema 版本");
+  assert.equal(SCHEMA_VERSION, 22, "本批不得升 schema 版本");
 
   // 只给值、不给 ack 开关：解析结果为空 → 装配层拿到的仍是默认
   const ignored = resolveSessionTtlOverride({ env: { OPENARC_SESSION_IDLE_MS: "3000" } });
@@ -322,7 +322,7 @@ test("E9 · 默认路径未变：不注入时仍走 DEFAULT_TTL_MS / DEFAULT_IDL
   try {
     assert.equal(boot.store.ttlMs, DEFAULT_TTL_MS);
     assert.equal(boot.store.idleMs, DEFAULT_IDLE_MS);
-    assert.equal(boot.store.schemaVersion, 21);
+    assert.equal(boot.store.schemaVersion, 22);
 
     await boot.service.dispatch({ type: "identity/initialize", identifier: "a@b.local", password: PW, displayName: "A" });
     const login = await boot.service.dispatch({ type: "identity/login", identifier: "a@b.local", password: PW });

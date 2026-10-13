@@ -82,7 +82,7 @@ function seedV20(dbPath) {
 test("V1 · schema 版本与唯一键：organization_id 是 app_resource_grants 唯一键的一部分", async () => {
   const f = await createFixture();
   try {
-    assert.equal(SCHEMA_VERSION, 21, "schema 冻结值（本批 v20 → v21）");
+    assert.equal(SCHEMA_VERSION, 22, "schema 冻结值（本批 v20 → v21）");
     assert.equal(f.identity.schemaVersion, SCHEMA_VERSION);
     const keys = uniqueKeysOf(f.identity.connection, "app_resource_grants");
     assert.ok(keys.some((cols) => cols.includes("organization_id")), "唯一键必须含 organization_id：" + JSON.stringify(keys));
@@ -197,7 +197,7 @@ test("V5 · v20 → v21 迁移：保数据、唯一键换掉、按证据补记�
 
     const identity = new IdentityStore({ path: dbPath }).open();
     const store = new AuthorizationStore({ identity });
-    assert.equal(identity.schemaVersion, 21);
+    assert.equal(identity.schemaVersion, 22);
     const after = plain(store.db.prepare("SELECT * FROM app_resource_grants ORDER BY id").all());
     assert.deepEqual(after, before, "迁移必须逐行保数据（id 与全部字段不变）");
     assert.equal(hasTable(store.db, "app_resource_grants_v21"), false, "重建用的临时表必须收干净");
@@ -225,7 +225,7 @@ test("V5 · v20 → v21 迁移：保数据、唯一键换掉、按证据补记�
       raw.exec("PRAGMA user_version = 20");
       raw.close();
       const replay = new AuthorizationStore({ identity: new IdentityStore({ path: dbPath }).open() });
-      assert.equal(replay.identity.schemaVersion, 21);
+      assert.equal(replay.identity.schemaVersion, 22);
       assert.deepEqual(plain(replay.db.prepare("SELECT * FROM app_resource_grants ORDER BY id").all()), before, "重放不得丢行或改行");
       assert.equal(replay.db.prepare("SELECT COUNT(*) c FROM app_policy_provisions").get().c, rows.length, "重放不得重复补记录");
       assert.deepEqual(

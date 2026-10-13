@@ -41,6 +41,7 @@
 const crypto = require("node:crypto");
 const domain = require("./identity-domain.cjs");
 const passwords = require("./password.cjs");
+const dxosFoundationSchema = require("./dxos-foundation-schema.cjs");
 
 const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domain;
 
@@ -63,9 +64,14 @@ const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domai
  *        迁移历史：session 事件里无条件重 upsert baseline → 撤销（删行）在下次登录被复活；
  *        唯一键不含 organization_id → 两个组织对同一 (app,type,scope) 的授权互相覆盖。
  * 核心线已升到 v18 的库继续往上走 v19（avatar_ref 幂等补列）；
+ *   v22（P1 · DX OS 地基）：把 DX OS 0.5.1 的表并入 identity.db（只新增，不动既有表）。
+ *        为什么并进同一个库而不是另开一个：现有各域共用同一条连接与 BEGIN IMMEDIATE 互斥队列，
+ *        跨域事务（任务 ↔ 画布 ↔ 技能）在 DX OS 里本来就是同库完成；另开库会让这些事务失去原子性。
+ *        与 OpenArc 同名的 5 张表（projects / project_members / tasks / task_steps / task_events）
+ *        刻意跳过 —— 理由与来源见 dxos-foundation-schema.cjs 顶部注释。
  * 集成线已升到 v17 的库补跑 v18/v19（画布文档层与运行归属表）。
  */
-const SCHEMA_VERSION = 21;
+const SCHEMA_VERSION = 22;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -1509,6 +1515,15 @@ function applyPolicyProvisionLayer(db) {
   rebuildAppGrantUniqueKey(db);
 }
 
+/**
+ * v22 的实现：DX 表的 DDL 只有 dxos-foundation-schema.cjs 一份真值。
+ * 全部语句是 IF NOT EXISTS（含索引），所以这一级可重放；失败时整级随外层事务回滚，
+ * 不会留下"user_version 已升到 22、DX 表只建了一半"的半状态。
+ */
+function applyDxosFoundationLayer(db) {
+  for (const statement of dxosFoundationSchema.dxosDdl()) db.exec(statement);
+}
+
 const MIGRATIONS = Object.freeze([
   { version: 1, sql: SCHEMA_SQL },
   { version: 2, sql: SCHEMA_V2_SQL },
@@ -1545,6 +1560,7 @@ const MIGRATIONS = Object.freeze([
   },
   { version: 20, sql: SCHEMA_V20_SQL },
   { version: 21, run: applyPolicyProvisionLayer },
+  { version: 22, run: applyDxosFoundationLayer },
 ]);
 
 /**

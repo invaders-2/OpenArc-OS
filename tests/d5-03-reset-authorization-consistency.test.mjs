@@ -8,7 +8,7 @@
  * 本文件把"重置 = 授权状态也归零，且与身份删除同一个事务"立成可执行的合同：
  *
  *   T1 同事务回滚：授权清理语句注入失败 / 身份最后一条语句注入失败 → 逐表逐行与重置前一致；
- *   T2 清理范围与审计保留：授权事实四表 0 行（= 全部指向已删组织的行）；27 张带
+ *   T2 清理范围与审计保留：授权事实四表 0 行（= 全部指向已删组织的行）；28 张带
  *      organization_id 的表逐表盘点；audit_log / authorization_audit / device_audit 一行不删；
  *   T3 组织 id 复用不被旧墓碑压制：同一个 id 上的 A/B 对照（重置前播种被墓碑挡 → 重置后正常播种）；
  *   T4 反向：正常路径（未重置）墓碑仍在、不被重播种覆盖、撤权不复活；
@@ -33,7 +33,7 @@
  *   · T6 旧期望「恰好四张授权表」→ 新期望「七张（四张授权 + 三张设备身份）」。
  *   · T2 旧期望「授权事实四表 0 行」→ 新期望「七张全 0 行」。
  *
- * 27 张带 organization_id 的表的逐表结论（判据都是可复核的取数路径，不是"应该没事"）：
+ * 28 张带 organization_id 的表的逐表结论（判据都是可复核的取数路径，不是"应该没事"）：
  *
  *   清（授权事实，四张）：
  *     app_policy_provisions   策略提供记录 + 撤销墓碑。取数 policyProvisionByKey(organization_id,…)；
@@ -64,6 +64,11 @@
  *     mcp_connections / mcp_credentials —— 连接配置与凭据引用；mcp 授权权威是
  *       app_resource_grants(resource_type='mcp')（已清），连接自身按 organization_id 取。
  *     model_providers / model_configs / model_defaults / model_credentials —— 模型配置与凭据。
+ *     cloud_installation_binding  DX 云侧安装绑定登记（本轮新增）。含 organization_id，但该列**可空**
+ *       （TEXT，无 NOT NULL），且 installation_id 外键指向 DX 自身的 installation_identity，**不是** OpenArc
+ *       的 installations —— 重置既不动该父表，本表也不指向任何本地授权事实；cloud 域本轮默认关闭，
+ *       本表不产生本地授权结论，因此**不纳入** reset 删除集合（T6 的"整表删"语义要求 organization_id
+ *       NOT NULL，本表本就不满足该前提）。
  *     resource_favorites / resource_recent / resource_relations / resource_tags /
  *       resource_import_jobs 等 —— 用户态数据。
  *     device_audit —— 审计，一行不删。
@@ -106,8 +111,8 @@ const RESET_DELETED_TABLES = Object.freeze([
 ]);
 /** 审计表：一行都不许删。 */
 const AUDIT_TABLES = Object.freeze(["audit_log", "authorization_audit", "device_audit"]);
-/** 当前真实 schema 里带 organization_id 的表数量（逐表结论见文件头）。 */
-const ORG_SCOPED_TABLE_COUNT = 27;
+/** 当前真实 schema 里带 organization_id 的表数量（逐表结论见文件头；cloud_installation_binding 已显式登记）。 */
+const ORG_SCOPED_TABLE_COUNT = 28;
 
 const TEMP_DIRS = [];
 test.after(() => {
@@ -307,7 +312,7 @@ test("T1b · 身份最后一条语句失败 → 授权清理同样回滚（同�
 
 /* ══════════════════════ T2 · 范围与审计保留 ══════════════════════ */
 
-test("T2 · 重置后授权事实四表 + 设备身份三表 0 行；27 张 org 表逐表盘点；审计三表一行不删", async (t) => {
+test("T2 · 重置后授权事实四表 + 设备身份三表 0 行；28 张 org 表逐表盘点；审计三表一行不删", async (t) => {
   const f = openService(tmpDir());
   try {
     const snap = await initAndLogin(f);
@@ -343,7 +348,7 @@ test("T2 · 重置后授权事实四表 + 设备身份三表 0 行；27 张 org 
 
     assert.deepEqual(f.store.invariants(), [], "重置后身份库自检仍为空");
 
-    // 目标二：27 张带 organization_id 的表逐表盘点（这张清单就是交付说明里的判据表）。
+    // 目标二：28 张带 organization_id 的表逐表盘点（这张清单就是交付说明里的判据表）。
     const inventory = orphanInventory(f.store);
     assert.equal(inventory.length, ORG_SCOPED_TABLE_COUNT, "带 organization_id 的表集合变了 → 必须重新逐表判定清理范围：" + JSON.stringify(inventory.map((r) => r.table)));
     const byTable = Object.fromEntries(inventory.map((r) => [r.table, r]));
@@ -357,7 +362,7 @@ test("T2 · 重置后授权事实四表 + 设备身份三表 0 行；27 张 org 
     // 按设计保留的内容/配置表：重置后必然有孤儿行（否则说明清理范围失控到内容表）。
     const residue = inventory.filter((r) => r.orphans > 0 && !AUDIT_TABLES.includes(r.table)).map((r) => r.table);
     assert.equal(residue.length > 0, true, "用户内容/配置表按设计不清，重置后必须仍能看到它们的孤儿行");
-    t.diagnostic("重置后 27 张 org 表孤儿行盘点：" + inventory.map((r) => r.table + "=" + r.orphans + "/" + r.rows).join(", "));
+    t.diagnostic("重置后 28 张 org 表孤儿行盘点：" + inventory.map((r) => r.table + "=" + r.orphans + "/" + r.rows).join(", "));
   } finally {
     f.store.close();
   }
@@ -708,7 +713,12 @@ test("T6 · 范围守卫：重置删除集合恰好是登记的七张表（授�
     }
     const inventory = orphanInventory(f.store).map((r) => r.table);
     assert.equal(inventory.length, ORG_SCOPED_TABLE_COUNT);
-    for (const table of tables) assert.equal(inventory.includes(table), true, table + " 必须在 27 张 org 作用域表清单里");
+    // 显式登记 cloud_installation_binding：含 organization_id，故在 org 作用域清单里；但**不在**重置删除
+    // 集合里 —— 外键指向 DX 自身的 installation_identity（不是 OpenArc 的 installations），且 cloud 域
+    // 本轮默认关闭，不产生本地授权结论。逐表理由见文件头结论。
+    assert.equal(inventory.includes("cloud_installation_binding"), true, "cloud_installation_binding 必须仍在 org 作用域清单里（含 organization_id）");
+    assert.equal(tables.includes("cloud_installation_binding"), false, "cloud_installation_binding 不得进入重置删除集合");
+    for (const table of tables) assert.equal(inventory.includes(table), true, table + " 必须在 28 张 org 作用域表清单里");
   } finally {
     f.store.close();
   }
