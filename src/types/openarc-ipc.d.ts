@@ -91,6 +91,8 @@ export interface OpenArcModelBridge extends OpenArcCommandBridge {
   /** P2：协议表 / 能力 manifest / 供应商掩码视图。 */
   protocols?: OpenArcCommandFn;
   providerView?: OpenArcCommandFn;
+  /** W5：模型流式调用下行事件（model:event，P1 信封）。 */
+  onEvent?: (callback: (event: OpenArcEvent) => void) => () => void;
 }
 
 export interface OpenArcMcpBridge extends OpenArcCommandBridge {

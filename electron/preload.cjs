@@ -110,6 +110,15 @@ contextBridge.exposeInMainWorld("openarc", {
    */
   model: {
     command: (command) => ipcRenderer.invoke("model:command", command),
+    /**
+     * W5：模型流式调用下行事件（model:event）。
+     * 事件体是主进程封装好的 P1 信封，渲染层只读；不暴露 ipcRenderer，也不新增顶层键。
+     */
+    onEvent: (callback) => {
+      const listener = (_, event) => callback(event);
+      ipcRenderer.on("model:event", listener);
+      return () => ipcRenderer.removeListener("model:event", listener);
+    },
   },
   /**
    * D5-03 第一批 MCP 桥。

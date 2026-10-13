@@ -23,6 +23,8 @@ const { registerIdentityIpc, resolveSessionTtlOverride } = require("./identity-b
 // D5-02：无限画布的宿主命令面（文档层实例由 identity-bootstrap 装配，AI 工具用同一个）。
 const { registerCanvasIpc } = require("./canvas-bootstrap.cjs");
 const { registerTaskIpc } = require("./task-bootstrap.cjs");
+// W5：模型流式下行事件（model:event）的宿主桥接（model:command 仍由 identity-bootstrap 注册）。
+const { wireModelEvents } = require("./model-bootstrap.cjs");
 // D5-03：MCP 中心的宿主命令面（连接管理 + 能力发现；本批不开放工具调用）。
 const { registerMcpIpc } = require("./mcp-bootstrap.cjs");
 // D5-03 第十一批：关应用的唯一收尾顺序（MCP → Harness → modelProxy → store）。
@@ -453,6 +455,13 @@ app.whenReady().then(async () => {
 
   // 身份 runtime 存在时才注册依赖它的能力；boot 失败时窗口仍照常加载并走 BootRetry。
   if (identity) {
+    // W5：把 provider-protocol 的流式事件接到 model:event。与 identity:event / task:event /
+    // sideeffect:event 同一条 trusted(event) 边界；send 只转发主进程已封装的 P1 信封。
+    wireModelEvents({
+      service: identity.modelService,
+      send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("model:event", event); },
+    });
+
     // ---------------------------------------------------------------------------
     // D5-02 · 无限画布：文档层 + 资源可用性 + 命令层。
     // 画布页面运行在 sandbox iframe 里（无 openarc 桥 / 无 IPC / 无 fs / 无凭据），

@@ -3,8 +3,9 @@
  * P2 · 模型与协议域纯逻辑（无 I/O）。
  *
  * 依据：
- *   · DXSRC/protocols.ts:281   PROTOCOLS（29 个模型协议）
- *   · DXSRC/protocols.ts:2589  PROVIDER_PROTOCOLS（19 个供应商协议）
+ *   · DXSRC/protocols.ts:281-2568   PROTOCOLS（29 个模型协议）
+ *   · DXSRC/protocols.ts:2589-2982  PROVIDER_PROTOCOLS（实测 20 个供应商协议；
+ *     源含 'cli:dreamina-canvas'，任务书写的 19 为漏计）
  *   · DXSRC/store.ts:24-61     Provider/ModelEntry/PublicProvider JSON 形状与掩码
  *   · DXSRC/store.ts:287-303   maskKey / toPublic
  *   · DXSRC/protocol-engine/builtins.ts  dx-protocol/v2 内置协议
@@ -16,24 +17,19 @@ const modelDomain = require("./model-domain.cjs");
 const { joinUrl } = require("./protocol-engine/compiler.cjs");
 const { BUILTIN_PROTOCOL_METADATA_V2 } = require("./protocol-engine/builtins.cjs");
 const adapter = require("./provider-adapter.cjs");
+const legacyProtocols = require("./protocol-engine/legacy-protocols.cjs");
 
-/** 源：DXSRC/protocols.ts:281-2569（顶层 key 共 29 个）。 */
-const LEGACY_MODEL_PROTOCOLS = Object.freeze([
-  "ollama", "openai", "anthropic", "gemini", "gemini-generations", "gpt-best-images", "apimart", "apimart-gemini",
-  "apimart-claude", "apimart-media", "agtoken-video", "zkki-model", "midjourney", "v2-unified", "xai", "grok",
-  "grok2api", "kling", "pixverse", "pika", "vidu", "wanxiang", "minimax", "suno", "agnes", "modelscope",
-  "volcengine", "volcengine-speech", "runninghub",
-]);
+/**
+ * Legacy key 与纯函数来自 electron/protocol-engine/legacy-protocols.cjs（源 protocols.ts）。
+ * 模型协议 29 个（源 :281-2568）；供应商协议实测 20 个（源 :2589-2982，含 'cli:dreamina-canvas'）。
+ */
+const LEGACY_MODEL_PROTOCOLS = Object.freeze(Object.keys(legacyProtocols.PROTOCOLS));
+const LEGACY_PROVIDER_PROTOCOLS = Object.freeze(Object.keys(legacyProtocols.PROVIDER_PROTOCOLS));
 
-/** 源：DXSRC/protocols.ts:2589-2980（顶层 key 共 19 个）。 */
-const LEGACY_PROVIDER_PROTOCOLS = Object.freeze([
-  "ollama", "cli:pippit", "cli:jimeng", "cli:codex", "cli:gemini", "openai", "openai-relay", "aliyun-bailian",
-  "apimart", "agtoken", "zkki", "xai", "grok2api", "agnes", "modelscope", "volcengine", "volcengine-speech",
-  "minimax", "runninghub",
-]);
-
-/** Legacy 表里需要 API Key 的协议（cli:* 与 ollama 免密）。源：protocols.ts:3586 providerRequiresApiKey。 */
-const LEGACY_NO_KEY_PROTOCOLS = Object.freeze(["ollama", "cli:pippit", "cli:jimeng", "cli:codex", "cli:gemini"]);
+/** Legacy 表里免 API Key 的协议，按源语义取 auth.type === 'none'。源：protocols.ts:3595 providerRequiresApiKey。 */
+const LEGACY_NO_KEY_PROTOCOLS = Object.freeze(
+  LEGACY_PROVIDER_PROTOCOLS.filter((id) => legacyProtocols.PROVIDER_PROTOCOLS[id].auth.type === "none"),
+);
 
 /** 统一调用出口命令/事件表。每条命令都走 model:command + trusted(event) 校验。 */
 const PROTOCOL_COMMANDS = Object.freeze({
@@ -45,6 +41,17 @@ const PROTOCOL_COMMANDS = Object.freeze({
   "provider/call": { risk: "use", credential: true, summary: "OpenAI 兼容 chat/completions 统一出口" },
   "image/generate": { risk: "use", credential: true, summary: "图像协议族调用并落盘到 dxos/media" },
   "protocol/execute": { risk: "use", credential: true, summary: "声明式协议引擎执行（compile + workflow）" },
+  // W6b · legacy 协议族统一出口（electron/protocol-engine/legacy-executor.cjs）。
+  "legacy/chat": { risk: "use", credential: true, summary: "legacy 对话调用（callChat）" },
+  "legacy/chatStream": { risk: "use", credential: true, summary: "legacy 流式对话（streamChat，增量走 model:event）" },
+  "legacy/chatTools": { risk: "use", credential: true, summary: "legacy 原生工具调用对话（chatWithTools）" },
+  "legacy/images": { risk: "use", credential: true, summary: "legacy 图像生成并落盘 dxos/media" },
+  "legacy/editImages": { risk: "use", credential: true, summary: "legacy 参考图编辑并落盘 dxos/media" },
+  "legacy/videos": { risk: "use", credential: true, summary: "legacy 视频生成（submit→poll）并落盘 dxos/media" },
+  "legacy/audio": { risk: "use", credential: true, summary: "legacy 语音合成/转写/音乐生成（intent 区分）并落盘 dxos/media" },
+  "legacy/catalog": { risk: "read", credential: true, summary: "拉取站点模型目录（fetchModelCatalog）" },
+  "legacy/describeImage": { risk: "use", credential: true, summary: "legacy 图片理解（视觉模型）" },
+  "legacy/midjourney": { risk: "use", credential: true, summary: "legacy Midjourney 提交/查询/操作/局部重绘" },
 });
 
 const PROTOCOL_EVENTS = Object.freeze({
@@ -84,12 +91,55 @@ function toPublicProvider(provider, { hasKey = false, hasWalletKey = false } = {
   };
 }
 
-/** 协议表：legacy + dx-protocol/v2 内置，统一带来源与移植状态。 */
+/**
+ * 执行可用性（D4）：ported 只表示「定义已移植」，不代表执行分支可用。
+ * 这 6 个 legacy id 的模块级执行分支未移植，移植侧返回 LEGACY_DEPENDENCY_UNAVAILABLE
+ * （见 protocol-engine/legacy-executor-media.cjs:748-1544、legacy-executor-images.cjs:823-839）。
+ * 其余 legacy 条目按可用标注；v2 条目为声明式引擎，execution="declarative"。
+ */
+const LEGACY_UNAVAILABLE_EXECUTION = Object.freeze({
+  "cli:jimeng": "CLI 桥批次（cliTools）：generateJimengVideo / generateJimengImage 未移植",
+  "cli:codex": "CLI 桥批次（agentCliTools）：editCodexImage 未移植",
+  "cli:gemini": "CLI 桥批次（agentCliTools）：editGeminiCliImage 未移植",
+  runninghub: "第三方原生适配批次（runninghub）：generateRunningHubVideos / editRunningHubImages 未移植",
+  agnes: "第三方原生适配批次（agnes）：generateAgnesVideos / editAgnesImages 未移植",
+  modelscope: "第三方原生适配批次（modelscope）：editModelScopeImages 未移植",
+});
+
+function legacyExecution(id) {
+  const unavailableReason = LEGACY_UNAVAILABLE_EXECUTION[id];
+  return unavailableReason ? { execution: "unavailable", unavailableReason } : { execution: "available" };
+}
+
+/** legacy 协议条目（供应商 + 模型，既有顺序），统一带来源、移植状态与执行可用性。 */
+function legacyProtocolEntries(kind) {
+  const legacyModel = LEGACY_MODEL_PROTOCOLS.map((id) => ({ id, kind: "model", engine: "legacy", ported: true, source: "protocols.ts:281-2568", ...legacyExecution(id) }));
+  const legacyProvider = LEGACY_PROVIDER_PROTOCOLS.map((id) => ({ id, kind: "provider", engine: "legacy", ported: true, source: "protocols.ts:2589-2982", ...legacyExecution(id) }));
+  const all = [...legacyProvider, ...legacyModel];
+  return kind ? all.filter((entry) => entry.kind === kind) : all;
+}
+
+/** v2 内置协议的 kind:id 键集，用于判定 legacy 同名分支是否被遮蔽。 */
+const V2_PROTOCOL_KEYS = new Set(BUILTIN_PROTOCOL_METADATA_V2.map((entry) => entry.kind + ":" + entry.id));
+
+/** 被 v2 同名定义遮蔽、执行链不可用的 legacy 分支：protocolTable() 按既有规则去重后不再出现，
+ * 单独列出以免「该 legacy 路径不可执行」的事实被 v2 同名定义掩盖（如 agnes 同时有 v2 声明式定义
+ * 与未移植的 legacy 执行器）。同一个 id 的 model/provider 分支都被遮蔽时归并为一条（model 优先）。 */
+function shadowedLegacyProtocols(kind) {
+  const byId = new Map();
+  for (const entry of legacyProtocolEntries(kind)) {
+    if (entry.execution !== "unavailable" || !V2_PROTOCOL_KEYS.has(entry.kind + ":" + entry.id)) continue;
+    const current = byId.get(entry.id);
+    if (!current || (current.kind !== "model" && entry.kind === "model")) byId.set(entry.id, entry);
+  }
+  return [...byId.values()].map((entry) => ({ id: entry.id, kind: entry.kind, execution: entry.execution, unavailableReason: entry.unavailableReason }));
+}
+
+/** 协议表：legacy + dx-protocol/v2 内置，统一带来源、移植状态与执行可用性。
+ * 同名同 kind 时 v2 定义优先（既有去重规则）；被遮蔽的 legacy 分支见 shadowedLegacyProtocols()。 */
 function protocolTable(kind) {
-  const legacyModel = LEGACY_MODEL_PROTOCOLS.map((id) => ({ id, kind: "model", engine: "legacy", ported: false, source: "protocols.ts:281" }));
-  const legacyProvider = LEGACY_PROVIDER_PROTOCOLS.map((id) => ({ id, kind: "provider", engine: "legacy", ported: false, source: "protocols.ts:2589" }));
-  const v2 = BUILTIN_PROTOCOL_METADATA_V2.map((entry) => ({ ...entry, engine: "v2" }));
-  const all = [...v2, ...legacyProvider, ...legacyModel];
+  const v2 = BUILTIN_PROTOCOL_METADATA_V2.map((entry) => ({ ...entry, engine: "v2", execution: "declarative" }));
+  const all = [...v2, ...legacyProtocolEntries(kind)];
   const filtered = kind ? all.filter((entry) => entry.kind === kind) : all;
   const seen = new Set();
   return filtered.filter((entry) => { const key = entry.kind + ":" + entry.id; if (seen.has(key)) return false; seen.add(key); return true; });
@@ -97,8 +147,9 @@ function protocolTable(kind) {
 
 function providerRequiresApiKey(protocolId) {
   const id = String(protocolId || "").trim().toLowerCase();
+  // 保留既有 cli:* 短路语义；其余复用 legacy-protocols.cjs 的 auth.type 判定。
   if (id.startsWith("cli:")) return false;
-  return !LEGACY_NO_KEY_PROTOCOLS.includes(id);
+  return legacyProtocols.providerRequiresApiKey(id);
 }
 
 /** OpenAI 兼容 chat/completions 请求构造（非流式与流式共用）。 */
@@ -166,6 +217,6 @@ module.exports = {
   LEGACY_MODEL_PROTOCOLS, LEGACY_PROVIDER_PROTOCOLS, LEGACY_NO_KEY_PROTOCOLS,
   PROTOCOL_COMMANDS, PROTOCOL_EVENTS, RISK_LEVELS,
   commandRisk, commandRequiresCredential, maskSecret, toPublicProvider,
-  protocolTable, providerRequiresApiKey,
+  protocolTable, shadowedLegacyProtocols, providerRequiresApiKey,
   buildChatRequest, buildImageRequest, parseChatResponse, parseImageResponse, normalizeProtocolError,
 };

@@ -83,16 +83,21 @@ const MODEL_COMMANDS = Object.freeze([
   "canvas/models",
   // P2：模型与协议域（provider-protocol-service.cjs）。全部走同一 trusted(event) 校验。
   "protocol/list", "protocol/get", "protocol/validate", "protocol/save",
-  "manifest/get", "provider/call", "image/generate", "protocol/execute",
+  "manifest/get", "provider/call", "provider/callStream", "image/generate", "protocol/execute",
+  // W6b：legacy 协议族统一出口（legacy-executor.cjs）。凭据只在主进程解析，不回传渲染层。
+  "legacy/chat", "legacy/chatStream", "legacy/chatTools", "legacy/images", "legacy/editImages",
+  "legacy/videos", "legacy/audio", "legacy/catalog", "legacy/describeImage", "legacy/midjourney",
 ]);
 const MODEL_COMMAND_NOT_ALLOWED = "MODEL_COMMAND_NOT_ALLOWED";
 
 const asStr = (v, max = 512) => (typeof v === "string" ? v.slice(0, max) : v == null ? undefined : String(v).slice(0, max));
 const requireStr = (v, max = 512) => { const s = asStr(v, max); return s && s.length ? s : null; };
 
-function registerModelIpc({ ipcMain, service, identity, isTrusted, hostAppId = HOST_APP_ID }) {
+function registerModelIpc({ ipcMain, service, identity, isTrusted, hostAppId = HOST_APP_ID, send = null }) {
   // P2 协议服务由 createModelBundle 挂载；测试里若用裸 ModelService，新命令报 PROTOCOL_NOT_READY。
   const protocolService = () => (service && service.providerProtocol ? service.providerProtocol : null);
+  // W5：宿主注入 send 时，把流式事件接到 model:event（identity-bootstrap 不转发 send，故 main.cjs 另调 wireModelEvents）。
+  if (typeof send === "function") wireModelEvents({ service, send });
   if (typeof ipcMain.removeHandler === "function") { try { ipcMain.removeHandler("model:command"); } catch { /* not registered */ } }
   ipcMain.handle("model:command", async (e, raw) => {
     if (isTrusted && !isTrusted(e)) throw Error("Forbidden");
@@ -168,6 +173,21 @@ function registerModelIpc({ ipcMain, service, identity, isTrusted, hostAppId = H
             allowLan: !!payload.allowLan,
           });
         }
+        // W5：显式流式调用动作 —— 与 provider/call 同一出口，stream 恒为 true；
+        // 增量经 provider-protocol-service 封装成 model:event 下发（见 wireModelEvents）。
+        case "provider/callStream": {
+          const protocol = protocolService();
+          if (!protocol) return { ok: false, error: "PROTOCOL_NOT_READY" };
+          return protocol.service.call({
+            providerId: requireStr(payload.providerId, 120), model: requireStr(payload.model, 200),
+            messages: Array.isArray(payload.messages) ? payload.messages.slice(0, 128) : [],
+            tools: Array.isArray(payload.tools) ? payload.tools.slice(0, 64) : null,
+            params: payload.params && typeof payload.params === "object" ? payload.params : {},
+            stream: true,
+            requestId: asStr(payload.requestId, 80),
+            allowLan: !!payload.allowLan,
+          });
+        }
         case "image/generate": {
           const protocol = protocolService();
           if (!protocol) return { ok: false, error: "PROTOCOL_NOT_READY" };
@@ -194,6 +214,37 @@ function registerModelIpc({ ipcMain, service, identity, isTrusted, hostAppId = H
             allowLan: !!payload.allowLan,
           });
         }
+        // ---- W6b：legacy 协议族统一出口。action 由命令名推导；凭据只在主进程解析 ----
+        case "legacy/chat":
+        case "legacy/chatStream":
+        case "legacy/chatTools":
+        case "legacy/images":
+        case "legacy/editImages":
+        case "legacy/videos":
+        case "legacy/audio":
+        case "legacy/catalog":
+        case "legacy/describeImage":
+        case "legacy/midjourney": {
+          const protocol = protocolService();
+          if (!protocol) return { ok: false, error: "PROTOCOL_NOT_READY" };
+          return protocol.service.legacyExecute({
+            providerId: requireStr(payload.providerId, 120),
+            action: command.slice("legacy/".length),
+            model: requireStr(payload.model, 200),
+            messages: Array.isArray(payload.messages) ? payload.messages.slice(0, 128) : [],
+            system: asStr(payload.system, 8000) || null,
+            prompt: asStr(payload.prompt, 8000) || null,
+            tools: Array.isArray(payload.tools) ? payload.tools.slice(0, 64) : null,
+            params: payload.params && typeof payload.params === "object" ? payload.params : {},
+            input: payload.input && typeof payload.input === "object" ? payload.input : null,
+            inputs: Array.isArray(payload.inputs) ? payload.inputs.slice(0, 16) : [],
+            intent: asStr(payload.intent, 60) || null,
+            dataUrl: payload.dataUrl == null ? null : payload.dataUrl,
+            timeoutMs: Number(payload.timeoutMs) > 0 ? Number(payload.timeoutMs) : null,
+            requestId: asStr(payload.requestId, 80),
+            allowLan: !!payload.allowLan,
+          });
+        }
         default: return { ok: false, error: MODEL_COMMAND_NOT_ALLOWED };
       }
     } catch {
@@ -202,8 +253,21 @@ function registerModelIpc({ ipcMain, service, identity, isTrusted, hostAppId = H
   });
 }
 
+/**
+ * W5 · B2 遗留①：模型流式下行事件。
+ * provider-protocol-service 已按 P1 信封（channel/domain/kind/sequence/at/payload）
+ * 组装好事件；这里只把它交给宿主的 webContents.send("model:event", ...)。
+ * 与 task:event / sideeffect:event 同一条 trusted 边界：只有主进程能调用。
+ */
+function wireModelEvents({ service, send } = {}) {
+  if (!service || typeof send !== "function") return false;
+  const target = service.providerProtocol && service.providerProtocol.service ? service.providerProtocol.service : null;
+  if (!target || typeof target.setEventSink !== "function") return false;
+  return target.setEventSink((event) => { try { send(event); } catch { /* 事件推送失败不改变业务路径 */ } });
+}
+
 function disposeModelIpc({ ipcMain } = {}) {
   if (ipcMain && typeof ipcMain.removeHandler === "function") { try { ipcMain.removeHandler("model:command"); } catch { /* ignore */ } }
 }
 
-module.exports = { createModelBundle, registerModelIpc, disposeModelIpc, MODEL_COMMANDS, MODEL_COMMAND_NOT_ALLOWED, HOST_APP_ID };
+module.exports = { createModelBundle, registerModelIpc, disposeModelIpc, wireModelEvents, MODEL_COMMANDS, MODEL_COMMAND_NOT_ALLOWED, HOST_APP_ID };

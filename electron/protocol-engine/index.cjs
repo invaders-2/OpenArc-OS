@@ -18,4 +18,12 @@ module.exports = {
   bindings: require("./bindings.cjs"),
   flags: require("./flags.cjs"),
   geminiToolSchema: require("./geminiToolSchema.cjs"),
+  builtinsHelpers: require("./builtins-helpers.cjs"),
+  builtinsModels: require("./builtins-models.cjs"),
+  legacyProtocols: require("./legacy-protocols.cjs"),
+  legacyExecutor: require("./legacy-executor.cjs"),
+  legacyExecutorChat: require("./legacy-executor-chat.cjs"),
+  legacyExecutorImages: require("./legacy-executor-images.cjs"),
+  legacyExecutorMedia: require("./legacy-executor-media.cjs"),
+  protocolInference: require("./protocol-inference.cjs"),
 };
