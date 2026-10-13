@@ -23,6 +23,7 @@ const workflow = require("../electron/protocol-engine/workflow.cjs");
 const builtins = require("../electron/protocol-engine/builtins.cjs");
 const repository = require("../electron/protocol-engine/repository.cjs");
 const { createModelManifestService } = require("../electron/model-manifest-service.cjs");
+const mediaExecutor = require("../electron/protocol-engine/legacy-executor-media.cjs");
 
 function startStub(handler) {
   return new Promise((resolve) => {
@@ -46,14 +47,91 @@ function bundleFor(baseUrl) {
   return { dir, bundle, provider };
 }
 
-test("协议表覆盖 DX OS legacy 29 模型 + 19 供应商，且 v2 内置标注移植状态", () => {
+test("协议表覆盖 DX OS legacy 29 模型 + 20 供应商，且 v2 内置标注移植状态", () => {
   assert.equal(domain.LEGACY_MODEL_PROTOCOLS.length, 29);
-  assert.equal(domain.LEGACY_PROVIDER_PROTOCOLS.length, 19);
+  // 源 protocols.ts:2589-2982 顶层实测 20 个；旧值 19 漏计了 protocols.ts:2659 的 'cli:dreamina-canvas'。
+  assert.equal(domain.LEGACY_PROVIDER_PROTOCOLS.length, 20);
   const table = domain.protocolTable();
   assert.ok(table.some((item) => item.id === "openai-images" && item.engine === "v2" && item.ported === true));
   assert.ok(table.some((item) => item.id === "anthropic" && item.engine === "legacy"));
-  // 未移植的 v2 模型协议必须如实标记，不能假装可用
-  assert.ok(domain.protocolTable("model").some((item) => item.id === "midjourney" && item.ported === false));
+  // 移植状态如实标注：midjourney 已有 v2 内置定义（builtins.ts:1696），ported=true
+  assert.ok(domain.protocolTable("model").some((item) => item.id === "midjourney" && item.ported === true));
+  // 模型协议里不应再残留任何 ported:false 的条目
+  assert.equal(domain.protocolTable("model").some((item) => item.ported === false), false);
+});
+
+test("执行可用性：5 个可见 legacy 分支标注 execution=unavailable，被遮蔽的 agnes 由 shadowedLegacy 单独如实暴露", async () => {
+  // 协议表/items 里可见的 legacy 不可用 id（执行分支仍返回 LEGACY_DEPENDENCY_UNAVAILABLE）。
+  const UNAVAILABLE_IDS = ["cli:jimeng", "cli:codex", "cli:gemini", "runninghub", "modelscope"];
+  // agnes 的 legacy 分支与 v2 同名定义冲突，按既有去重规则被遮蔽，不再作为重复行出现。
+  const table = domain.protocolTable();
+
+  for (const item of table.filter((entry) => entry.engine === "v2")) {
+    assert.equal(item.execution, "declarative", "v2 " + item.kind + ":" + item.id);
+    assert.equal("unavailableReason" in item, false, "v2 " + item.kind + ":" + item.id);
+  }
+  for (const item of table.filter((entry) => entry.engine === "legacy" && !UNAVAILABLE_IDS.includes(entry.id))) {
+    assert.equal(item.execution, "available", "legacy " + item.kind + ":" + item.id);
+    assert.equal("unavailableReason" in item, false, "legacy " + item.kind + ":" + item.id);
+  }
+  // 可见 legacy 条目中 execution=unavailable 的 id 集合恰好是这 5 个，各带非空 reason。
+  const markedUnavailable = [...new Set(table.filter((entry) => entry.engine === "legacy" && entry.execution === "unavailable").map((entry) => entry.id))].sort();
+  assert.deepEqual(markedUnavailable, [...UNAVAILABLE_IDS].sort());
+  for (const id of UNAVAILABLE_IDS) {
+    const legacyEntries = table.filter((entry) => entry.id === id && entry.engine === "legacy");
+    assert.ok(legacyEntries.length > 0, id + " 必须有 legacy 条目");
+    for (const item of legacyEntries) {
+      assert.equal(item.execution, "unavailable", item.kind + ":" + id);
+      assert.ok(String(item.unavailableReason || "").length > 0, item.kind + ":" + id + " 必须写明批次理由");
+    }
+  }
+  // 被遮蔽的 agnes 不再进入 protocolTable()，且表内不存在重复 kind:id。
+  assert.equal(table.some((entry) => entry.id === "agnes" && entry.engine === "legacy"), false, "agnes 的 legacy 分支应被去重遮蔽");
+  const tableKeys = table.map((entry) => entry.kind + ":" + entry.id);
+  assert.equal(tableKeys.length, new Set(tableKeys).size, "protocolTable() 不得出现重复 kind:id");
+
+  // 被遮蔽的 legacy 不可用分支清单：恰好 agnes 一条，execution=unavailable 且 reason 非空。
+  const shadowed = domain.shadowedLegacyProtocols();
+  assert.deepEqual(shadowed.map((item) => item.id), ["agnes"]);
+  assert.equal(shadowed[0].kind, "model");
+  assert.equal(shadowed[0].execution, "unavailable");
+  assert.ok(String(shadowed[0].unavailableReason || "").length > 0);
+
+  // 执行期核对：5 个可见不可用 id 与被遮蔽的 agnes 都返回结构化 LEGACY_DEPENDENCY_UNAVAILABLE。
+  const imageInputs = [{ buf: Buffer.from("x"), mime: "image/png", name: "x.png" }];
+  for (const id of [...UNAVAILABLE_IDS, "agnes"]) {
+    const provider = { protocol: id, base_url: "https://example.invalid", api_key: "FAKE_D4_TEST_KEY" };
+    const result = await mediaExecutor.editImages(provider, "m", { prompt: "x" }, imageInputs, 1000);
+    assert.equal(result.ok, false, id);
+    assert.equal(result.error, "LEGACY_DEPENDENCY_UNAVAILABLE", id);
+    assert.ok(String(result.detail || "").length > 0, id);
+  }
+
+  // 服务出口 listProtocols：既有字段与 items 形状不变，仅追加 shadowedLegacy。
+  const { bundle } = bundleFor("http://127.0.0.1:1");
+  const listed = bundle.service.listProtocols();
+  assert.equal(listed.ok, true);
+  for (const id of UNAVAILABLE_IDS) {
+    const legacyEntry = listed.items.find((item) => item.id === id && item.engine === "legacy");
+    assert.ok(legacyEntry, "listProtocols 缺少 legacy " + id);
+    assert.equal(legacyEntry.ported, true, id);
+    assert.equal(legacyEntry.execution, "unavailable", id);
+    assert.ok(String(legacyEntry.unavailableReason || "").length > 0, id);
+  }
+  assert.ok(listed.items.filter((item) => item.engine === "v2").every((item) => item.execution === "declarative"));
+  assert.equal(listed.items.some((item) => item.id === "agnes" && item.engine === "legacy"), false, "items 不得含被遮蔽的 agnes legacy 行");
+  const listedUnavailable = [...new Set(listed.items.filter((item) => item.engine === "legacy" && item.execution === "unavailable").map((item) => item.id))].sort();
+  assert.deepEqual(listedUnavailable, [...UNAVAILABLE_IDS].sort());
+  const itemKeys = listed.items.map((item) => item.kind + ":" + item.id);
+  assert.equal(itemKeys.length, new Set(itemKeys).size, "listProtocols().items 不得出现重复 kind:id");
+
+  // shadowedLegacy 附加字段：恰好 agnes 一条，execution=unavailable 且 reason 非空。
+  assert.equal(Array.isArray(listed.shadowedLegacy), true, "listProtocols 必须暴露 shadowedLegacy");
+  assert.equal(listed.shadowedLegacy.length, 1);
+  assert.equal(listed.shadowedLegacy[0].id, "agnes");
+  assert.equal(listed.shadowedLegacy[0].kind, "model");
+  assert.equal(listed.shadowedLegacy[0].execution, "unavailable");
+  assert.ok(String(listed.shadowedLegacy[0].unavailableReason || "").length > 0);
 });
 
 test("OpenAI 兼容 chat 请求体构造：path/headers/body", () => {
