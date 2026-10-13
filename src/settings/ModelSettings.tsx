@@ -16,6 +16,14 @@ const CAPABILITY_CHOICES = [
 /** 能力的中文名：只用于"已配置的默认为什么不可用"的选项文案（取值与 CAPABILITY_CHOICES 同一套）。 */
 const CAPABILITY_LABEL: Record<string, string> = { chat: "文本对话", "image-generation": "生图", "tool-calling": "工具调用", "vision-input": "图片输入" };
 
+/** P2：OpenArc 现有模型面统一走 OpenAI 兼容 wire format，manifest 也按 openai-images 协议解析。 */
+const OPENAI_COMPATIBLE_PROTOCOL = "openai-images";
+
+/** 由模型声明的能力选择 manifest 的 intent（只决定取哪份参数 schema/limits）。 */
+function manifestIntentFor(m: any): string {
+  return Array.isArray(m?.capabilities) && m.capabilities.includes("image-generation") ? "image.generate" : "llm.chat";
+}
+
 /** 显式配置的默认值不在能力过滤后的清单里时，如实点名配的是哪个模型、为什么不可用（不是"没配"）。 */
 function defaultUnavailableText(cap: string, m: any) {
   const name = m ? String(m.displayName || m.remoteModelId || m.configId) : "（该模型已不在清单里）";
@@ -37,6 +45,11 @@ export function ModelSettings({ role }: { role: string | null }) {
   const [credDraft, setCredDraft] = useState<Record<string, string>>({});
   /** 编辑已有模型能力的草稿（key = configId）；保存走 model/update。 */
   const [capsDraft, setCapsDraft] = useState<Record<string, string[]>>({});
+  /** P2：manifest 驱动的参数表单（数据来源，不动既有表单结构）。 */
+  const [manifestFields, setManifestFields] = useState<any[]>([]);
+  const [manifestDefaults, setManifestDefaults] = useState<Record<string, unknown>>({});
+  const [paramDraft, setParamDraft] = useState<Record<string, string>>({});
+  const [modelManifests, setModelManifests] = useState<Record<string, any>>({});
 
   const cmd = useCallback(async (command: string, payload: Record<string, unknown> = {}): Promise<any> => {
     const b = bridge();
@@ -53,6 +66,10 @@ export function ModelSettings({ role }: { role: string | null }) {
     if (p.ok) {
       const entries = await Promise.all(p.items.map(async (it: any) => [it.providerId, await cmd("credential/status", { providerId: it.providerId })] as const));
       setCredStatus(Object.fromEntries(entries));
+    }
+    if (m.ok) {
+      const manifests = await Promise.all(m.items.map(async (it: any) => [it.configId, await cmd("manifest/get", { protocolId: OPENAI_COMPATIBLE_PROTOCOL, model: it.remoteModelId, intent: manifestIntentFor(it) })] as const));
+      setModelManifests(Object.fromEntries(manifests));
     }
     setBusy(false);
   }, [cmd]);
@@ -97,6 +114,29 @@ export function ModelSettings({ role }: { role: string | null }) {
     if (r.ok) { setNotice("Model registered"); await load(); } else setError(r.error);
   };
   const setModelStatus = async (configId: string, status: string) => { const r = await cmd("model/setStatus", { configId, status }); if (!r.ok) setError(r.error); await load(); };
+  /** 注册表单里输入了新模型就按它取；否则退回清单里第一个已存在的模型，进页面即自动呈现参数表单。 */
+  const manifestModel = mForm.remoteModelId || (models.length ? String(models[0].remoteModelId || "") : "");
+  const manifestIntent = mForm.remoteModelId ? "image.generate" : models.length ? manifestIntentFor(models[0]) : "image.generate";
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      if (!manifestModel) { if (!cancelled) { setManifestFields([]); setManifestDefaults({}); } return; }
+      const r = await cmd("manifest/get", { protocolId: OPENAI_COMPATIBLE_PROTOCOL, model: manifestModel, intent: manifestIntent });
+      if (cancelled) return;
+      if (r.ok && r.parameterSchema && Array.isArray(r.parameterSchema.fields)) {
+        setManifestFields(r.parameterSchema.fields);
+        setManifestDefaults(r.parameterSchema.defaults || {});
+      } else { setManifestFields([]); setManifestDefaults({}); }
+    })();
+    return () => { cancelled = true; };
+  }, [cmd, manifestModel, manifestIntent]);
+  /** 配额/限制视图的数据来源：manifest 的 limits（不伪造配额数字，没有就显示 -）。 */
+  const limitsLabel = (m: any) => {
+    const entry = modelManifests[m?.configId];
+    if (!entry || !entry.ok || !entry.manifest || !entry.manifest.limits) return "-";
+    const limits = entry.manifest.limits;
+    return Object.keys(limits).length ? JSON.stringify(limits) : "-";
+  };
   const setDefault = async (capability: string, configId: string, scope: string) => { if (!configId) return; const r = await cmd("defaults/set", { capability, configId, scope }); if (!r.ok) setError(r.error); else { setNotice("Default saved"); await load(); } };
   const credLabel = (providerId: string) => { const c = credStatus[providerId]; if (!c) return "..."; if (c.manageable === false) return "—"; if (!c.storeAvailable) return "Unavailable"; return c.configured ? "Configured" : "Missing"; };
   const opts = (cap: string) => models.filter((m) => m.capabilities.includes(cap)).map((m) => <option key={m.configId} value={m.configId}>{m.displayName || m.remoteModelId}</option>);
@@ -189,6 +229,21 @@ export function ModelSettings({ role }: { role: string | null }) {
                 </label>
               ))}
             </div>
+            {manifestFields.length ? (
+              <div className="d401-caps" data-d4-01-manifest-fields role="group" aria-label="模型参数">
+                {manifestFields.map((field: any) => (
+                  <label key={String(field.key)}>
+                    {String(field.label || field.key)}
+                    <input
+                      data-d4-01-manifest-field={String(field.key)}
+                      aria-label={String(field.label || field.key)}
+                      value={paramDraft[String(field.key)] ?? String(manifestDefaults[String(field.key)] ?? field.default ?? "")}
+                      onChange={(e) => setParamDraft({ ...paramDraft, [String(field.key)]: e.target.value })}
+                    />
+                  </label>
+                ))}
+              </div>
+            ) : null}
             <Button variant="primary" size="sm" data-d4-01-model-create onClick={() => void createModel()}>注册 Model</Button>
           </div>
           {models.length === 0 ? <p className="muted" data-d4-01-models-empty>No models configured</p> : null}
@@ -199,6 +254,7 @@ export function ModelSettings({ role }: { role: string | null }) {
                 <span className="d401-meta">{m.remoteModelId} | {m.scope} | v{m.version} | {m.status}</span>
                 <span className="d401-meta" data-d4-01-model-declared={m.configId}>Declared: {m.capabilities.join(", ") || "-"}</span>
                 <span className="d401-meta" data-d4-01-model-verified={m.configId}>Verified: {m.verifiedCapabilities.join(", ") || "-"}</span>
+                <span className="d401-meta" data-d4-01-model-limits={m.configId}>Limits: {limitsLabel(m)}</span>
                 <div className="d401-caps" role="group" aria-label={"模型能力 " + (m.displayName || m.remoteModelId)}>
                   {CAPABILITY_CHOICES.map((c) => (
                     <label key={c.id}>
