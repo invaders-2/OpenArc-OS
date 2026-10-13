@@ -40,7 +40,7 @@ async function seedV1(dbPath) {
 }
 
 test("schema 版本已推进到 v16（D4-06 Closure 在 v15 之上新增 task_budgets 任务级账本）", () => {
-  assert.equal(SCHEMA_VERSION, 22);
+  assert.equal(SCHEMA_VERSION, 23);
 });
 
 test("全新数据库直接建到 v8，identity login 成立", async () => {

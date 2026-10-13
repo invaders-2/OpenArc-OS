@@ -159,7 +159,7 @@ test("TS5 · migration v8 → v10：追加 Task 与 Harness/Artifact 表；v9 �
   for (const sql of [SCHEMA_SQL, SCHEMA_V2_SQL, SCHEMA_V3_SQL, SCHEMA_V4_SQL, SCHEMA_V5_SQL, SCHEMA_V6_SQL, SCHEMA_V7_SQL, SCHEMA_V8_SQL]) raw.exec(sql);
   raw.exec("PRAGMA user_version = 8");
   raw.close();
-  assert.equal(SCHEMA_VERSION, 22);
+  assert.equal(SCHEMA_VERSION, 23);
   const store = new (require("../electron/identity-store.cjs").IdentityStore)({ path: dbPath }).open();
   assert.equal(store.schemaVersion, SCHEMA_VERSION);
   const tables = store.connection.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name);

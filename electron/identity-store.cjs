@@ -42,6 +42,7 @@ const crypto = require("node:crypto");
 const domain = require("./identity-domain.cjs");
 const passwords = require("./password.cjs");
 const dxosFoundationSchema = require("./dxos-foundation-schema.cjs");
+const dxosAgentSchema = require("./dxos-agent-schema.cjs");
 
 const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domain;
 
@@ -70,8 +71,12 @@ const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domai
  *        与 OpenArc 同名的 5 张表（projects / project_members / tasks / task_steps / task_events）
  *        刻意跳过 —— 理由与来源见 dxos-foundation-schema.cjs 顶部注释。
  * 集成线已升到 v17 的库补跑 v18/v19（画布文档层与运行归属表）。
+ *   v23（B3a · DX OS 任务域）：新增 dx_tasks / dx_task_steps / dx_task_events —— 列集取自
+ *        server/ccsDb.ts 的最终形态（基础 CREATE TABLE + 全部 ALTER TABLE ADD COLUMN），
+ *        去掉 REFERENCES 外键（P1 既定做法），并加 dx_project_roots 承接 DX projects.root_node_id
+ *        语义（OpenArc 既有 projects 没有该列，硬约束禁止改既有表）。只新增表。
  */
-const SCHEMA_VERSION = 22;
+const SCHEMA_VERSION = 23;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -1524,6 +1529,15 @@ function applyDxosFoundationLayer(db) {
   for (const statement of dxosFoundationSchema.dxosDdl()) db.exec(statement);
 }
 
+/**
+ * v23 的实现：DX 任务域三张表的 DDL 只有 dxos-agent-schema.cjs 一份真值（脚本机械抽取）。
+ * 全部语句是 IF NOT EXISTS（含索引），所以这一级可重放；失败时整级随外层事务回滚，
+ * 不会留下"user_version 已升到 23、dx_ 表只建了一半"的半状态。
+ */
+function applyDxosAgentLayer(db) {
+  for (const statement of dxosAgentSchema.dxosAgentDdl()) db.exec(statement);
+}
+
 const MIGRATIONS = Object.freeze([
   { version: 1, sql: SCHEMA_SQL },
   { version: 2, sql: SCHEMA_V2_SQL },
@@ -1561,6 +1575,7 @@ const MIGRATIONS = Object.freeze([
   { version: 20, sql: SCHEMA_V20_SQL },
   { version: 21, run: applyPolicyProvisionLayer },
   { version: 22, run: applyDxosFoundationLayer },
+  { version: 23, run: applyDxosAgentLayer },
 ]);
 
 /**

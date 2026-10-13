@@ -83,8 +83,8 @@ test("迁移：空库直接建到 v22，DX 表存在", () => {
   const dir = tempDir();
   const store = new IdentityStore({ path: path.join(dir, "identity.db") }).open();
   try {
-    assert.equal(SCHEMA_VERSION, 22);
-    assert.equal(store.schemaVersion, 22);
+    assert.equal(SCHEMA_VERSION, 23);
+    assert.equal(store.schemaVersion, 23);
     const names = tableNames(store.connection);
     assert.ok(names.includes("agent_runs"));
     assert.ok(names.includes("api_quota_rules"));
@@ -116,7 +116,7 @@ test("迁移：v21 老库升到 v22，既有数据保留、既有表结构不被
   raw.close();
   const store = new IdentityStore({ path: file }).open();
   try {
-    assert.equal(store.schemaVersion, 22);
+    assert.equal(store.schemaVersion, 23);
     assert.equal(store.connection.prepare("SELECT name FROM teams WHERE id=?").get("team_dxos_v21_marker").name, "Marker");
     assert.ok(columnNames(store.connection, "agent_runs").includes("id"));
     // tasks / projects 是"跳过不建"的表：不得被 DX 列污染
@@ -151,9 +151,9 @@ test("迁移：把 user_version 降回 21 再重放 v22 是幂等的", () => {
   first.close();
   const second = new IdentityStore({ path: file }).open();
   try {
-    assert.equal(second.schemaVersion, 22);
+    assert.equal(second.schemaVersion, 23);
     for (const statement of schema.dxosDdl()) second.connection.exec(statement);
-    assert.equal(second.schemaVersion, 22);
+    assert.equal(second.schemaVersion, 23);
   } finally {
     second.close();
   }
