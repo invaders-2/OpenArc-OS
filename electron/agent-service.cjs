@@ -184,10 +184,47 @@ function taskSummary(task) {
 }
 
 /**
+ * mcp-agent-tools 实例（createMcpAgentTools 产物）→ 工具目录 mcp 来源。
+ * agent-tool-catalog.cjs:140-144 callMcp / :333-358 mcpTools 的契约是
+ *   { list(): servers[], call(toolName, args, ctx) }，且 sourceList(:62-65) 不 await，
+ * 所以 list() 必须同步：只有调用方提供同步目录快照（mcpServersSnapshot）时才注册。
+ * 未提供实例或同步目录 → 返回 null，catalog 保持 mcp_registry 的 available:false（不伪造）。
+ */
+function buildMcpCatalogSource(mcpAgentTools, mcpServersSnapshot) {
+  if (!mcpAgentTools || typeof mcpAgentTools.callByName !== "function") return null;
+  if (typeof mcpServersSnapshot !== "function") return null;
+  return {
+    list: () => { const rows = mcpServersSnapshot(); return Array.isArray(rows) ? rows : []; },
+    call: (toolName, args, ctx) => mcpAgentTools.callByName(String(toolName), args && typeof args === "object" ? args : {}, { context: ctx && typeof ctx === "object" ? ctx : {} }),
+  };
+}
+
+/**
+ * skill-store + skill-runner → 工具目录 skill 来源。
+ * agent-tool-catalog.cjs:134-138 callSkill / :360-387 skillTools 的同类契约。
+ * list() 给 listSkills()（目录需要 id/enabled/exposure/v2 才能补 installedSkillStatus:254-260）；
+ * agentSkillTools() 的 OpenAI 函数定义无法满足该契约，作为没有 listSkills 时的兜底。
+ * 两者缺一 → null，catalog 保持 skill_registry 的 available:false（不伪造）。
+ */
+function buildSkillCatalogSource(skillStore, skillRunner) {
+  if (!skillStore || (typeof skillStore.listSkills !== "function" && typeof skillStore.agentSkillTools !== "function")) return null;
+  if (!skillRunner || typeof skillRunner.runSkill !== "function") return null;
+  // 目录契约要的是完整技能行；agentSkillTools()（OpenAI 函数定义）只在没有 listSkills 时兜底。
+  const list = typeof skillStore.listSkills === "function" ? () => skillStore.listSkills() : () => skillStore.agentSkillTools();
+  return {
+    list,
+    call: (skillId, args, ctx) => skillRunner.runSkill(String(skillId), args && typeof args === "object" ? args : {}, ctx && typeof ctx === "object" ? ctx : {}),
+  };
+}
+
+/**
  * 装配 Agent 域 bundle。dbPath / userDataDir 只为运行时工作区与日志定位，不作为返回值。
  * 额外可选键 toolCatalog 是测试/未来批次注入目录的 seam（production 省略即惰性 require 真实模块）。
+ * B4 接线：skillStore/skillRunner（或预构造 skillSource）与 mcpAgentTools/mcpServersSnapshot
+ * （或预构造 mcpSource）把 catalog 的 mcp/skill 空来源接上真实实现；未给即保持 available:false。
+ * providerAdapter 由宿主注入 provider-adapter-bridge.cjs 的只读桥（未注入即保持结构化依赖缺失，不伪造）。
  */
-function createAgentBundle({ identityStore, authorization, authStore, modelService, userDataDir, logger = null, clock = null, dbPath = null, toolCatalog = null } = {}) {
+function createAgentBundle({ identityStore, authorization, authStore, modelService, providerAdapter = null, userDataDir, logger = null, clock = null, dbPath = null, toolCatalog = null, mcpAgentTools = null, mcpServersSnapshot = null, skillStore = null, skillRunner = null, mcpSource = null, skillSource = null } = {}) {
   const now = typeof clock === "function" ? clock : () => Date.now();
   const idFactory = () => randomUUID();
   const db = (identityStore && (identityStore.connection || identityStore.db)) || null;
@@ -220,10 +257,20 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
     kernel: agentKernel, kernelStore: agentKernelStore, supervisor: require("./agent-kernel-supervisor.cjs"),
     taskStore: agentTaskStore, toolRunner, workspaceAdapter: agentRuntimeWorkspace,
     usageAdapter: agentRuntimeUsage, fsAdapter, clock: now, logger,
+    // B4 接线：provider-adapter-bridge 组装的只读 providerAdapter（agent-react-driver.cjs:33 契约）。
+    providerAdapter: providerAdapter,
   });
 
   // ---- 5) 工具目录 + 解析器（同一份 auth / catalog 注入，避免两套权限判定） ----
-  if (catalog && typeof catalog.configureToolCatalog === "function") catalog.configureToolCatalog({ sources: {}, auth: toolAuth, weather: null, clock: now });
+  // B4：把 B3 留空的 mcp/skill 来源接上真实实现。两者都用同步 list()（catalog 的
+  // sourceList 不 await），所以只接受已构造好的同步来源或"实例 + 同步目录快照"。
+  // 未落地/未配置的来源不注册键，catalog 继续给出 available:false 的 fallback descriptor。
+  const catalogSources = {};
+  const resolvedMcpSource = mcpSource || buildMcpCatalogSource(mcpAgentTools, mcpServersSnapshot);
+  if (resolvedMcpSource) catalogSources.mcp = resolvedMcpSource;
+  const resolvedSkillSource = skillSource || buildSkillCatalogSource(skillStore, skillRunner);
+  if (resolvedSkillSource) catalogSources.skill = resolvedSkillSource;
+  if (catalog && typeof catalog.configureToolCatalog === "function") catalog.configureToolCatalog({ sources: catalogSources, auth: toolAuth, weather: null, clock: now });
   toolResolver.configureToolResolver({ catalog, auth: toolAuth });
 
   // ---- 6) 下行事件（P1 信封；bootstrap 的 send 经 setEventSink 注入） ----
@@ -241,9 +288,14 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
     // 键名不用 authorization：foundation 的 isSecretKey 会把它当凭据字段掩码，布尔值会丢失类型。
     actorResolution: !!(authorization && typeof authorization.resolveActor === "function"),
     modelAdapter: !!(modelService && modelService.providerProtocol && modelService.providerProtocol.service),
+    // B4 接线：providerAdapter 只读桥是否装配（不含任何密钥值）。
+    providerAdapter: !!providerAdapter,
     toolRunner: true,
     toolCatalog: !!catalog,
     toolAuth: true,
+    // B4：catalog 里 mcp/skill 来源是否已接真实实现（false = catalog 保持 available:false）。
+    mcpSource: !!resolvedMcpSource,
+    skillSource: !!resolvedSkillSource,
     // B6 未落地：显式 false，不假装可用（agent-project-snapshot 会据此抛结构化依赖错误）。
     fsAdapter: false,
     workspaceAdapter: !!agentRuntimeWorkspace,
@@ -530,4 +582,4 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
   };
 }
 
-module.exports = { createAgentBundle, HOST_APP_ID };
+module.exports = { createAgentBundle, HOST_APP_ID, buildMcpCatalogSource, buildSkillCatalogSource };
