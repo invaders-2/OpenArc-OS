@@ -1610,8 +1610,9 @@ const MIGRATIONS = Object.freeze([
  * 安装重置（identity/reset-installation）要清的表 —— **授权事实四张 + 能恢复设备身份/权限的设备事实三张**。
  *
  * 判据（逐表可复核）：这张表里的行是不是"授权 / 权限事实"，**或者**它能不能在被重置后的安装里
- * 恢复设备身份或权限（旧密钥再登记设备、旧凭据再拿连接）。七张都满足；其余 20 张带
- * organization_id 的表是用户内容 / 配置 / 审计（判定与证据见
+ * 恢复设备身份或权限（旧密钥再登记设备、旧凭据再拿连接）。七张都满足；其余 22 张带
+ * organization_id 的表是用户内容 / 配置 / 审计（29 张带 organization_id 的表 − 7 张删除集合 = 22，
+ * 逐表判定与证据见
  * tests/d5-03-reset-authorization-consistency.test.mjs 与 tests/d5-03-reset-device-identity.test.mjs）。
  *
  *   · app_policy_provisions —— 策略提供记录 + 撤销墓碑。"首次使用才给、撤销后永不再给"

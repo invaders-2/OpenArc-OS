@@ -24,7 +24,7 @@ const SQL = {
 
   // ---- 素材条目 ----
   insertItem:
-    "INSERT INTO canvas_dxos_asset_items (id, library_id, kind, title, group_name, prompt, model, category, source, source_key, tags_json, skill_id, prompt_role, media_kind, resource_ref, checksum, mime, bytes, cover_ref, workflow_json, versions_json, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    "INSERT INTO canvas_dxos_asset_items (id, library_id, kind, title, group_name, relation_id, relation_name, relation_role, relation_primary, relation_prompt, prompt, model, category, source, source_key, tags_json, skill_id, prompt_role, media_kind, resource_ref, checksum, mime, bytes, cover_ref, workflow_json, versions_json, created_by, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
   itemById: "SELECT * FROM canvas_dxos_asset_items WHERE id = ?",
   itemsOfLibrary: "SELECT * FROM canvas_dxos_asset_items WHERE library_id = ? ORDER BY updated_at DESC, id",
   itemBySourceKey: "SELECT * FROM canvas_dxos_asset_items WHERE library_id = ? AND source_key = ?",
@@ -77,10 +77,10 @@ class CanvasDxosStore {
   librariesOwned(userId) { return this.db.prepare(SQL.librariesOwned).all(String(userId)); }
   librariesOrg(organizationId) { return this.db.prepare(SQL.librariesOrg).all(String(organizationId)); }
 
-  /** 基准版本检查写（与 canvas-store.updateDoc 同一纪律：changes=0 即冲突）。 */
+  /** 基准版本检查写（与 canvas-store.updateDoc 同一纪律：changes=0 即冲突，返回 null）。 */
   touchLibrary({ id, name, visibility, baseVersion }) {
-    this.db.prepare(SQL.touchLibrary).run(String(name), String(visibility), this.now(), String(id), Number(baseVersion));
-    return this.libraryById(id);
+    const result = this.db.prepare(SQL.touchLibrary).run(String(name), String(visibility), this.now(), String(id), Number(baseVersion));
+    return Number(result.changes) > 0 ? this.libraryById(id) : null;
   }
   softDeleteLibrary({ id }) { this.db.prepare(SQL.softDeleteLibrary).run(this.now(), this.now(), String(id)); return this.libraryById(id); }
   restoreLibrary({ id }) { this.db.prepare(SQL.restoreLibrary).run(this.now(), String(id)); return this.libraryById(id); }
@@ -91,7 +91,11 @@ class CanvasDxosStore {
   insertItem(row) {
     this.db.prepare(SQL.insertItem).run(
       String(row.id), String(row.libraryId), String(row.kind), String(row.title),
-      row.group == null ? null : String(row.group), String(row.prompt || ""),
+      row.group == null ? null : String(row.group),
+      row.relationId == null ? null : String(row.relationId), row.relationName == null ? null : String(row.relationName),
+      row.relationRole == null ? null : String(row.relationRole), row.relationPrimary ? 1 : null,
+      row.relationPrompt == null ? null : String(row.relationPrompt),
+      String(row.prompt || ""),
       row.model == null ? null : String(row.model), row.category == null ? null : String(row.category),
       row.source == null ? null : String(row.source), row.sourceKey == null ? null : String(row.sourceKey),
       JSON.stringify(Array.isArray(row.tags) ? row.tags : []), row.skillId == null ? null : String(row.skillId),
@@ -119,6 +123,8 @@ class CanvasDxosStore {
       source: "source", sourceKey: "source_key", skillId: "skill_id", promptRole: "prompt_role",
       mediaKind: "media_kind", resourceRef: "resource_ref", checksum: "checksum", mime: "mime",
       bytes: "bytes", coverRef: "cover_ref",
+      relationId: "relation_id", relationName: "relation_name", relationRole: "relation_role",
+      relationPrompt: "relation_prompt",
     };
     const sets = [];
     const values = [];
@@ -128,6 +134,8 @@ class CanvasDxosStore {
       values.push(patch[key] == null ? null : patch[key]);
     }
     if (Object.prototype.hasOwnProperty.call(patch, "tags")) { sets.push("tags_json = ?"); values.push(JSON.stringify(Array.isArray(patch.tags) ? patch.tags : [])); }
+    // relation_primary 是布尔语义，不能直接绑 boolean（node:sqlite 只收 null/number/bigint/string/Buffer）。
+    if (Object.prototype.hasOwnProperty.call(patch, "relationPrimary")) { sets.push("relation_primary = ?"); values.push(patch.relationPrimary ? 1 : null); }
     // undefined 必须落成 NULL：JSON.stringify(undefined) 本身是 undefined，直接绑定会抛 ERR_INVALID_ARG_TYPE。
     if (Object.prototype.hasOwnProperty.call(patch, "workflow")) { sets.push("workflow_json = ?"); values.push(patch.workflow == null ? null : JSON.stringify(patch.workflow)); }
     if (Object.prototype.hasOwnProperty.call(patch, "versions")) { sets.push("versions_json = ?"); values.push(patch.versions == null ? null : JSON.stringify(patch.versions)); }

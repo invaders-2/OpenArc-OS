@@ -41,6 +41,11 @@ const CANVAS_DXOS_DDL = Object.freeze([
   "  kind          TEXT NOT NULL,\n" +
   "  title         TEXT NOT NULL,\n" +
   "  group_name    TEXT,\n" +
+  "  relation_id   TEXT,\n" +
+  "  relation_name TEXT,\n" +
+  "  relation_role TEXT,\n" +
+  "  relation_primary INTEGER,\n" +
+  "  relation_prompt TEXT,\n" +
   "  prompt        TEXT NOT NULL DEFAULT '',\n" +
   "  model         TEXT,\n" +
   "  category      TEXT,\n" +
@@ -90,10 +95,32 @@ function canvasDxosDdl() {
   return [...CANVAS_DXOS_DDL];
 }
 
-/** 迁移函数：整级随外层事务回滚，可重放（全部 IF NOT EXISTS）。 */
+/**
+ * 源 canvasAssetLibrary.ts:181-187 的 relation 字段（asset 条目"关联资产"语义）。
+ * CREATE TABLE IF NOT EXISTS 不会给 v25 已建好的旧表补列，因此这里逐列探测后 ALTER；
+ * 与上面的 DDL 一起放进同一个 v25 迁移（不加版本号，可重放、幂等）。
+ */
+const CANVAS_DXOS_ITEM_COLUMNS = Object.freeze([
+  ["relation_id", "TEXT"],
+  ["relation_name", "TEXT"],
+  ["relation_role", "TEXT"],
+  ["relation_primary", "INTEGER"],
+  ["relation_prompt", "TEXT"],
+]);
+
+function ensureItemRelationColumns(db) {
+  const existing = new Set(db.prepare("PRAGMA table_info(canvas_dxos_asset_items)").all().map((column) => column.name));
+  for (const [name, type] of CANVAS_DXOS_ITEM_COLUMNS) {
+    if (existing.has(name)) continue;
+    db.exec("ALTER TABLE canvas_dxos_asset_items ADD COLUMN " + name + " " + type);
+  }
+}
+
+/** 迁移函数：整级随外层事务回滚，可重放（DDL 全部 IF NOT EXISTS，补列逐列探测）。 */
 function applyCanvasDxosLayer(db) {
   if (!db || typeof db.exec !== "function") throw new Error("applyCanvasDxosLayer 需要 sqlite 连接");
   for (const statement of CANVAS_DXOS_DDL) db.exec(statement);
+  ensureItemRelationColumns(db);
 }
 
 /**

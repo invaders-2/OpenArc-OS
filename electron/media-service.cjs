@@ -457,9 +457,17 @@ function createMediaBundle(options = {}) {
         if (!source) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "media/poster/get 需要 assetId 或 filePath");
         if (!fs.existsSync(source)) throw createMediaError(MEDIA_ERR_NOT_FOUND, "封面源文件不存在");
         if (!posterCache) throw createMediaError(MEDIA_ERR_DEPENDENCY_UNAVAILABLE, "封面缓存未装配", { dependency: "mediaDir" });
+        // cached 必须反映"调用前缓存文件是否已存在且非空"，而不是恒 true：
+        // keyFor 与 posterCache 内部同一个 key（source stat + size + poster-v1），先在目标目录探一次。
+        let cached = false;
+        try {
+          const key = await posterCache.keyFor(source, size);
+          const cachedFile = path.join(subDirs.posters, key + ".jpg");
+          cached = (await fs.promises.stat(cachedFile)).size > 0;
+        } catch { cached = false; }
         const target = await posterCache(source, size);
         const stat = fs.statSync(target);
-        return { poster: { id: path.basename(target, ".jpg"), fileName: path.basename(target), size: size, bytes: stat.size, cached: true } };
+        return { poster: { id: path.basename(target, ".jpg"), fileName: path.basename(target), size: size, bytes: stat.size, cached: cached } };
       }
       case "media/poster/invalidate": {
         const size = normalizePosterSize(payload.size === undefined ? 640 : payload.size);

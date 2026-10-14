@@ -11,6 +11,16 @@
  *   · 本机：直接调用 hub 方法（Electron IPC / 渲染层事件）；
  *   · 局域网：createLanCollabServer 惰性 require("ws") 挂 upgrade（与源同形）。
  *
+ * **鉴权口径与源的差别（默认拒绝）**：
+ *   源 canvasCollab.ts:45-49 在 upgrade 里直接调 getAuth(request) + getCanvasVersion(canvasId, auth.user)，
+ *   鉴权结论来自进程内的会话 / 画布权限，是"没有鉴权就没有房间"。
+ *   本模块不持有会话（hub 与传输层都可由测试 / 其它装配注入），因此把鉴权做成**必须显式注入**的
+ *   authorize 回调：未注入、回调抛错、返回 undefined / false / {ok:false} 一律 fail closed 拒绝，
+ *   并返回结构化错误（FORBIDDEN + detail=authorize-not-configured | authorize-error | authorize-denied）。
+ *   只有显式返回 true / {ok:true} 才放行 —— 不存在"默认放行"这一档。
+ *   局域网传输 createLanCollabServer 另有一道**构造期**检查：没有显式 authorize 直接抛错，
+ *   不允许"先起服务、再补鉴权"。
+ *
  * **OUT（一律不引入，逐条注明）**：
  *   · 源 server/canvasCloudSync.ts 与 dx-canvas-cloud 协议（云端同步、远端 diff/apply）——不 import、不转发；
  *   · 源 index.ts:2969-3009 的 /api/canvas/cloud*、canvasCloudSync 路由——不存在于本模块；
@@ -27,6 +37,30 @@ const LIMITS = Object.freeze({ MAX_PEERS_PER_ROOM: 32, MAX_ROOMS: 128, MAX_PATCH
 
 const ok = (extra = {}) => ({ ok: true, ...extra });
 const fail = (error, detail = null) => ({ ok: false, error: String(error), detail });
+
+/**
+ * 协作鉴权判定（默认拒绝）。authorize 必须是显式注入的函数：
+ *   · 未注入 → { allowed:false, detail:"authorize-not-configured" }；
+ *   · 回调抛错 → { allowed:false, detail:"authorize-error" }；
+ *   · 返回 {ok:false} → 透传其 error / detail；
+ *   · 返回 true 或 {ok:true} → 放行；
+ *   · 其余（false / undefined / null / 其它值）→ 拒绝。
+ * 与源 canvasCollab.ts:45-49 的"进程内 getAuth 结论"等价，只是结论改由调用方显式给出。
+ */
+function evaluateAuthorization(authorize, request) {
+  if (typeof authorize !== "function") return { allowed: false, error: "FORBIDDEN", detail: "authorize-not-configured" };
+  let result;
+  try {
+    result = authorize(request);
+  } catch {
+    return { allowed: false, error: "FORBIDDEN", detail: "authorize-error" };
+  }
+  if (result && typeof result === "object" && result.ok === false) {
+    return { allowed: false, error: result.error || "FORBIDDEN", detail: result.detail === undefined ? "authorize-denied" : result.detail };
+  }
+  if (result === true || (result && typeof result === "object" && result.ok === true)) return { allowed: true, error: null, detail: null };
+  return { allowed: false, error: "FORBIDDEN", detail: "authorize-denied" };
+}
 
 // ---------------------------------------------------------------------------
 // 节点补丁三方合并（源 shared/canvasCollaboration.ts:77-167 的等价实现）
@@ -168,12 +202,12 @@ const peerKey = (canvasId, clientId) => String(canvasId) + "\u0000" + String(cli
 
 class CanvasCollabHub {
   /**
-   * @param authorize ({ canvasId, userId, clientId }) => boolean | {ok:boolean,error?:string}
-   *        源 :49 的 getCanvasVersion 鉴权替换为注入；默认放行（由调用方保证）。
+   * @param authorize ({ canvasId, userId, clientId }) => true | {ok:true} | {ok:false,error?,detail?}
+   *        源 :49 的 getCanvasVersion 鉴权替换为**必须显式注入**；未注入即 fail closed（默认拒绝）。
    * @param onBroadcast (delivery) => void  可选：把广播交给真实传输（本机 IPC / 局域网 ws）。
    */
   constructor({ authorize = null, onBroadcast = null, clock = null, maxPeersPerRoom = LIMITS.MAX_PEERS_PER_ROOM, idleTimeoutMs = 0 } = {}) {
-    this.authorize = typeof authorize === "function" ? authorize : () => true;
+    this.authorize = typeof authorize === "function" ? authorize : null;
     this.onBroadcast = typeof onBroadcast === "function" ? onBroadcast : null;
     this.clock = typeof clock === "function" ? clock : () => Date.now();
     this.maxPeersPerRoom = Math.max(1, Number(maxPeersPerRoom) || LIMITS.MAX_PEERS_PER_ROOM);
@@ -205,15 +239,14 @@ class CanvasCollabHub {
     return { type: "presence", canvasId: String(canvasId || ""), users };
   }
 
-  /** 源 :50-55：鉴权 → 进房 → 广播 presence。 */
+  /** 源 :50-55：鉴权 → 进房 → 广播 presence。鉴权缺省即拒绝（fail closed）。 */
   join({ canvasId, clientId, userId, username = "", canEdit = false } = {}) {
     const key = String(canvasId || "");
     const client = String(clientId || "");
     const user = String(userId || "");
     if (!key || !client || !user) return fail("INVALID_INPUT");
-    const auth = this.authorize({ canvasId: key, clientId: client, userId: user });
-    if (auth && typeof auth === "object" && auth.ok === false) return fail(auth.error || "FORBIDDEN");
-    if (auth === false) return fail("FORBIDDEN");
+    const auth = evaluateAuthorization(this.authorize, { canvasId: key, clientId: client, userId: user });
+    if (!auth.allowed) return fail(auth.error, auth.detail);
     const room = this.#room(key, true);
     if (!room) return fail("LIMIT_EXCEEDED", "rooms");
     // 同一 clientId 重连：替换旧会话（源用 Set<Peer> + ws close 清理，这里同步处理重复 clientId）。
@@ -338,6 +371,9 @@ class CanvasCollabHub {
  */
 function createLanCollabServer({ hub, httpServer = null, path: collabPath = "/api/canvas/collab", host = "127.0.0.1", port = 0, authorize = null } = {}) {
   if (!hub) throw new Error("createLanCollabServer 需要 hub");
+  // 局域网是真实网络入口：没有显式授权判定就不允许起服务（构造期失败，不能"先起服务再补鉴权"）。
+  // 这一检查放在 require("ws") 之前，既保证 fail closed，也让缺依赖时优先暴露配置错误。
+  if (typeof authorize !== "function") throw new Error("createLanCollabServer 需要显式 authorize 回调（缺省拒绝）");
   // 惰性依赖：硬约束要求 ws 只能按需 require，不得写进 package.json。
   const { WebSocketServer, WebSocket } = require("ws");
   /** @type {Map<string, import("ws").WebSocket>} peerKey → socket */
@@ -351,7 +387,7 @@ function createLanCollabServer({ hub, httpServer = null, path: collabPath = "/ap
     const clientId = url.searchParams.get("clientId") || "";
     const userId = url.searchParams.get("userId") || "local";
     if (!canvasId || !clientId) return socket.destroy();
-    if (typeof authorize === "function" && authorize({ canvasId, clientId, userId }) === false) return socket.destroy();
+    if (!evaluateAuthorization(authorize, { canvasId, clientId, userId }).allowed) return socket.destroy();
     wss.handleUpgrade(request, socket, head, (socketPeer) => {
       const joined = hub.join({ canvasId, clientId, userId, canEdit: true });
       if (!joined.ok) return socketPeer.close();
@@ -384,5 +420,5 @@ function createLanCollabServer({ hub, httpServer = null, path: collabPath = "/ap
 module.exports = {
   CanvasCollabHub, LIMITS, safePath, diffCanvasNode, applyCanvasNodePatch,
   applyCanvasNodePatchPreservingLocal, reconcileCanvasNodesAfterSave,
-  createLanCollabServer, peerKey,
+  createLanCollabServer, peerKey, evaluateAuthorization,
 };

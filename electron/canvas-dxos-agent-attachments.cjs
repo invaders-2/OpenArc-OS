@@ -182,6 +182,18 @@ class CanvasAgentAttachmentService {
 
   /**
    * 挂载：源 index.ts:3802-3823 的抽取 + 本仓的画布节点落地。
+   *
+   * 可靠性：多附件必须**全成或全回滚**，不留"挂了一半"的节点与附件行。
+   *   ① 先把所有字节导入资源域（异步独立事务）。失败发生在任何附件行 / 画布节点之前，
+   *      detail 带第几个附件与缺失依赖（stage=import）；
+   *   ② 再把"画布节点 + 附件行"放进同一个 BEGIN IMMEDIATE 事务。canvas-store.transactSync
+   *      在本仓不是可重入的（identity.transactSync 直接 BEGIN），故事务期间临时把它换成
+   *      "已在事务内就直接跑"，结束后按原样还原 —— 沿用 agent-task-store.cjs:138 / media-store.cjs:125
+   *      的 writeTransaction 重入口径。任一步失败整事务 ROLLBACK（stage=apply / commit）。
+   *
+   * 资源域对象是独立于本事务的（与 canvas-dxos-commands.cjs package/import 的失败回滚同一口径：
+   * 资源对象交由资源域 GC，不在画布域硬删）；本事务保证附件行与画布节点全成或全回滚。
+   *
    * @param files [{ name, mime, size?, buffer }]
    */
   async mount({ context, canvasId, files = [], runId = null } = {}) {
@@ -190,38 +202,81 @@ class CanvasAgentAttachmentService {
     if (!loaded.canvas.access || !loaded.canvas.access.canEdit) return fail("READ_ONLY", loaded.canvas.access ? loaded.canvas.access.source : null);
     const extracted = extractAttachments(files);
     if (!extracted.ok) return extracted;
+    // sourceIndex 是"用户传进来的第几个附件"（空 buffer 会被跳过，但报错仍要指回原始序号）。
+    const usable = [];
+    for (let index = 0; index < extracted.attachments.length; index += 1) {
+      const attachment = extracted.attachments[index];
+      if (attachment.buffer && attachment.buffer.length) usable.push({ attachment, sourceIndex: index + 1 });
+    }
+    const staged = [];
+    for (const { attachment, sourceIndex } of usable) {
+      const imported = await this.#importBytes({ context, buffer: attachment.buffer, name: attachment.name, mime: attachment.mime });
+      if (!imported.ok) {
+        const dependency = imported.detail && imported.detail.dependency ? imported.detail.dependency
+          : imported.error === "RESOURCE_UNAVAILABLE" ? "resourceService"
+            : imported.error === "IMPORT_FAILED" ? "resourceService.importManaged" : null;
+        return fail(imported.error || "IMPORT_FAILED", {
+          stage: "import", attachmentIndex: sourceIndex, attachmentName: attachment.name,
+          ...(dependency ? { dependency } : {}), reason: imported.detail == null ? null : imported.detail,
+        });
+      }
+      staged.push({ attachment, resourceRef: imported.resourceRef, sourceIndex });
+    }
+    if (!staged.length) return ok({ attachments: [], revision: Number(loaded.canvas.revision || 1) });
+
+    const db = this.store.db;
+    const canvasStore = this.canvasService && this.canvasService.store ? this.canvasService.store : null;
+    // 只有同一条连接才能把内层事务并进外层；不同连接时保持原样（内层会各自提交，但那种装配本就不成立）。
+    const shareTransaction = !!canvasStore && !!canvasStore.identity && canvasStore.identity.connection === db;
+    const hadOwnTransact = shareTransaction ? Object.prototype.hasOwnProperty.call(canvasStore, "transactSync") : false;
+    const originalTransact = shareTransaction ? canvasStore.transactSync : null;
+    if (shareTransaction) canvasStore.transactSync = (work) => work();
+
     let revision = Number(loaded.canvas.revision || 1);
     const mounted = [];
-    for (const attachment of extracted.attachments) {
-      const buffer = attachment.buffer;
-      if (!buffer || !buffer.length) continue;
-      const imported = await this.#importBytes({ context, buffer, name: attachment.name, mime: attachment.mime });
-      if (!imported.ok) return imported;
-      const resourceRef = imported.resourceRef;
-      const nodeType = attachment.mime.startsWith("image/") ? "image" : attachment.mime.startsWith("video/") ? "video" : attachment.error ? "output" : "prompt";
-      const applied = this.canvasService.applyCommand({
-        context, canvasId, baseRevision: revision,
-        command: {
-          type: "node.add",
-          node: {
-            type: nodeType, x: 0, y: 0, name: attachment.name, mediaKind: nodeType === "image" || nodeType === "video" ? nodeType : "file",
-            ...(nodeType === "prompt" ? { text: attachment.content.slice(0, 4000) } : {}),
-            refs: ["openarc-asset:" + resourceRef],
+    try {
+      db.exec("BEGIN IMMEDIATE");
+      for (const { attachment, resourceRef, sourceIndex } of staged) {
+        const nodeType = attachment.mime.startsWith("image/") ? "image" : attachment.mime.startsWith("video/") ? "video" : attachment.error ? "output" : "prompt";
+        const applied = this.canvasService.applyCommand({
+          context, canvasId, baseRevision: revision,
+          command: {
+            type: "node.add",
+            node: {
+              type: nodeType, x: 0, y: 0, name: attachment.name, mediaKind: nodeType === "image" || nodeType === "video" ? nodeType : "file",
+              ...(nodeType === "prompt" ? { text: attachment.content.slice(0, 4000) } : {}),
+              refs: ["openarc-asset:" + resourceRef],
+            },
           },
-        },
-        actorKind: "AGENT",
-      });
-      if (!applied.ok) return applied;
-      revision = Number(applied.canvas.revision);
-      const nodeId = applied.result && applied.result.node ? applied.result.node.id : null;
-      const row = this.store.insertAttachment({
-        id: attachmentId(), canvasId, nodeId, resourceRef, name: attachment.name, mime: attachment.mime,
-        bytes: buffer.byteLength, contentChars: attachment.content.length, truncated: attachment.truncated,
-        parseError: attachment.error || null, runId, mountedBy: loaded.user.id,
-      });
-      mounted.push(this.#view(row));
+          actorKind: "AGENT",
+        });
+        if (!applied.ok) {
+          try { db.exec("ROLLBACK"); } catch { /* 已回滚 */ }
+          return fail(applied.error || "APPLY_FAILED", {
+            stage: "apply", attachmentIndex: sourceIndex, attachmentName: attachment.name,
+            reason: applied.detail == null ? null : applied.detail,
+          });
+        }
+        revision = Number(applied.canvas.revision);
+        const nodeId = applied.result && applied.result.node ? applied.result.node.id : null;
+        const row = this.store.insertAttachment({
+          id: attachmentId(), canvasId, nodeId, resourceRef, name: attachment.name, mime: attachment.mime,
+          bytes: attachment.buffer.byteLength, contentChars: attachment.content.length, truncated: attachment.truncated,
+          parseError: attachment.error || null, runId, mountedBy: loaded.user.id,
+        });
+        mounted.push(this.#view(row));
+      }
+      db.exec("COMMIT");
+      return ok({ attachments: mounted, revision });
+    } catch (error) {
+      try { db.exec("ROLLBACK"); } catch { /* 已回滚 */ }
+      return fail("MOUNT_ROLLBACK", { stage: "commit", reason: String((error && error.message) || error) });
+    } finally {
+      if (shareTransaction) {
+        if (hadOwnTransact) canvasStore.transactSync = originalTransact;
+        else delete canvasStore.transactSync;
+      }
     }
-    return ok({ attachments: mounted, revision });
   }
 
   /** 卸载：走既有 node.delete（画布 revision 前进），附件行标记 removed_at（资源本身保留）。 */

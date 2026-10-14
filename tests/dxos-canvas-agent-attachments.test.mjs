@@ -144,3 +144,66 @@ test("隔离与拒绝：无权限用户不能挂载 / 卸载；未知附件返�
     assert.equal(empty.error, "INVALID_INPUT");
   } finally { f.fx.close(); }
 });
+
+test("挂载回滚：第二个附件应用失败 → 第一个也不落库、画布无残留节点，detail 带序号与原因", async () => {
+  const f = await fixture();
+  try {
+    const ctx = f.ctx("admin");
+    const before = f.canvasService.getCanvas({ context: ctx, canvasId: f.canvasId }).canvas;
+    const originalApply = f.canvasService.applyCommand.bind(f.canvasService);
+    let calls = 0;
+    f.canvasService.applyCommand = (args) => {
+      calls += 1;
+      if (calls === 2) return { ok: false, error: "REVISION_CONFLICT", detail: { injected: true } };
+      return originalApply(args);
+    };
+    const mounted = await f.service.mount({
+      context: ctx, canvasId: f.canvasId,
+      files: [
+        { name: "一.txt", mime: "text/plain", buffer: Buffer.from("first") },
+        { name: "二.txt", mime: "text/plain", buffer: Buffer.from("second") },
+      ],
+    });
+    assert.equal(mounted.ok, false, JSON.stringify(mounted));
+    assert.equal(mounted.error, "REVISION_CONFLICT");
+    assert.equal(mounted.detail.stage, "apply");
+    assert.equal(mounted.detail.attachmentIndex, 2, "detail 必须指出第几个附件失败");
+    assert.equal(mounted.detail.attachmentName, "二.txt");
+    assert.deepEqual(mounted.detail.reason, { injected: true });
+    assert.equal(calls, 2);
+    // 附件行与画布节点都必须回滚干净。
+    assert.equal(f.store.attachmentsOfCanvas(f.canvasId).length, 0, "第一个附件也不得落库");
+    const after = f.canvasService.getCanvas({ context: ctx, canvasId: f.canvasId }).canvas;
+    assert.equal(after.doc.nodes.length, 0, "画布不得残留节点");
+    assert.equal(after.revision, before.revision, "回滚后 revision 不前进");
+  } finally { f.fx.close(); }
+});
+
+test("挂载失败 detail：第二个附件依赖缺失 → stage=import + 序号 + dependency，且不落任何行/节点", async () => {
+  const f = await fixture();
+  try {
+    const ctx = f.ctx("admin");
+    const originalImport = f.fx.resourceService.importManaged.bind(f.fx.resourceService);
+    let calls = 0;
+    f.fx.resourceService.importManaged = async (args) => {
+      calls += 1;
+      if (calls === 2) return { ok: false, error: "RESOURCE_UNAVAILABLE", detail: { dependency: "resourceService" } };
+      return originalImport(args);
+    };
+    const mounted = await f.service.mount({
+      context: ctx, canvasId: f.canvasId,
+      files: [
+        { name: "一.txt", mime: "text/plain", buffer: Buffer.from("first") },
+        { name: "二.txt", mime: "text/plain", buffer: Buffer.from("second") },
+      ],
+    });
+    assert.equal(mounted.ok, false, JSON.stringify(mounted));
+    assert.equal(mounted.error, "RESOURCE_UNAVAILABLE");
+    assert.equal(mounted.detail.stage, "import");
+    assert.equal(mounted.detail.attachmentIndex, 2);
+    assert.equal(mounted.detail.attachmentName, "二.txt");
+    assert.equal(mounted.detail.dependency, "resourceService");
+    assert.equal(f.store.attachmentsOfCanvas(f.canvasId).length, 0);
+    assert.equal(f.canvasService.getCanvas({ context: ctx, canvasId: f.canvasId }).canvas.doc.nodes.length, 0);
+  } finally { f.fx.close(); }
+});

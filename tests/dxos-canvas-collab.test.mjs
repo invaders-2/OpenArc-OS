@@ -11,8 +11,10 @@ const collab = require("../electron/canvas-dxos-collab.cjs");
 
 function hub(options = {}) {
   const delivered = [];
+  // 语义用例默认显式注入"允许"（authorize 不再有默认放行）；authorize 缺省场景由专门的 fail-closed 用例覆盖。
+  const authorize = Object.prototype.hasOwnProperty.call(options, "authorize") ? options.authorize : () => true;
   const instance = new collab.CanvasCollabHub({
-    authorize: options.authorize,
+    authorize: authorize,
     onBroadcast: (delivery) => delivered.push(delivery),
     clock: options.clock,
     maxPeersPerRoom: options.maxPeersPerRoom,
@@ -53,6 +55,47 @@ test("鉴权失败 / 参数缺失一律拒绝（源 canvasCollab.ts:48 的等价
   assert.equal(h.join({ canvasId: "", clientId: "c1", userId: "u1" }).error, "INVALID_INPUT");
   assert.equal(h.join({ canvasId: "cv1", clientId: "", userId: "u1" }).error, "INVALID_INPUT");
   assert.equal(h.presence("cv1").users.length, 0);
+});
+
+test("鉴权默认拒绝：未注入 authorize → fail closed，回结构化错误（不默认放行）", () => {
+  // 不注入 authorize：join 必须拒绝，且 detail 说明原因；不能"没配置就等于所有人都能进"。
+  const { hub: h } = hub({ authorize: null });
+  const denied = h.join({ canvasId: "cv1", clientId: "c1", userId: "u1" });
+  assert.equal(denied.ok, false);
+  assert.equal(denied.error, "FORBIDDEN");
+  assert.equal(denied.detail, "authorize-not-configured");
+  assert.equal(h.presence("cv1").users.length, 0);
+  // 回调抛错 / 返回 undefined 也必须拒绝（fail closed，不把异常吞成放行）。
+  const throwing = hub({ authorize: () => { throw new Error("boom"); } }).hub;
+  assert.equal(throwing.join({ canvasId: "cv1", clientId: "c1", userId: "u1" }).detail, "authorize-error");
+  const undefinedResult = hub({ authorize: () => undefined }).hub;
+  assert.equal(undefinedResult.join({ canvasId: "cv1", clientId: "c1", userId: "u1" }).detail, "authorize-denied");
+});
+
+test("鉴权显式判定：注入拒绝 → 拒绝；注入允许 → 通过", () => {
+  const deniedHub = hub({ authorize: () => false }).hub;
+  const denied = deniedHub.join({ canvasId: "cv1", clientId: "c1", userId: "u1" });
+  assert.equal(denied.ok, false);
+  assert.equal(denied.error, "FORBIDDEN");
+  assert.equal(denied.detail, "authorize-denied");
+  // 结构化拒绝也能透传 authorize 自己的错误码 / detail。
+  const structured = hub({ authorize: () => ({ ok: false, error: "CANVAS_FORBIDDEN", detail: "not-a-member" }) }).hub;
+  const s = structured.join({ canvasId: "cv1", clientId: "c1", userId: "u1" });
+  assert.equal(s.error, "CANVAS_FORBIDDEN");
+  assert.equal(s.detail, "not-a-member");
+
+  const allowedHub = hub({ authorize: ({ canvasId, userId }) => canvasId === "cv1" && userId === "u1" }).hub;
+  const allowed = allowedHub.join({ canvasId: "cv1", clientId: "c1", userId: "u1" });
+  assert.equal(allowed.ok, true, JSON.stringify(allowed));
+  assert.equal(allowed.peer.userId, "u1");
+  const wrongUser = allowedHub.join({ canvasId: "cv1", clientId: "c2", userId: "u2" });
+  assert.equal(wrongUser.ok, false);
+});
+
+test("局域网服务器：缺少显式 authorize 必须在构造期抛错（不能先起服务再补鉴权）", () => {
+  const fakeHub = { join() { return { ok: true }; }, leave() {}, onBroadcast: null };
+  assert.throws(() => collab.createLanCollabServer({ hub: fakeHub }), /显式 authorize/);
+  assert.throws(() => collab.createLanCollabServer({ hub: fakeHub, authorize: null }), /显式 authorize/);
 });
 
 test("房间 / 成员上限：超限明确拒绝，不静默挤掉别人", () => {

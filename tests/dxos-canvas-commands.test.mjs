@@ -56,6 +56,30 @@ test("命令登记：每条都有中文 summary / risk / credential；与既有�
   for (const entry of list) assert.ok(merged.includes(entry.command), "新增命令必须进白名单：" + entry.command);
 });
 
+test("命令表与 REGISTRY / handlers 完全一致：无未登记 handler、无登记未实现（B5f 死 handler 收口）", async () => {
+  const f = await fixture();
+  try {
+    const registryNames = commands.DXOS_CANVAS_COMMANDS.map((entry) => entry.command);
+    const handlerNames = Object.keys(f.extension.handlers);
+    assert.deepEqual([...handlerNames].sort(), [...registryNames].sort(), "handlers 与命令表必须一一对应（无死 handler / 无登记未实现）");
+    for (const entry of commands.DXOS_CANVAS_COMMANDS) {
+      assert.equal(commands.REGISTRY.has(entry.command), true, "REGISTRY 缺少 " + entry.command);
+      assert.equal(typeof f.extension.handlers[entry.command], "function", "登记未实现：" + entry.command);
+    }
+    // B5f 新增登记的两条都真实可分发。
+    assert.ok(registryNames.includes("canvas/collab/sweep"), "canvas/collab/sweep 必须登记进命令表");
+    assert.ok(registryNames.includes("canvas/assetLibrary/update"), "canvas/assetLibrary/update 必须登记进命令表");
+    const swept = f.extension.dispatch({ command: "canvas/collab/sweep", payload: {}, context: f.ctx("admin") });
+    assert.equal(swept.ok, true, JSON.stringify(swept));
+    const ensured = f.extension.dispatch({ command: "canvas/assetLibrary/ensure", payload: {}, context: f.ctx("admin") });
+    assert.equal(ensured.ok, true, JSON.stringify(ensured));
+    const updated = f.extension.dispatch({ command: "canvas/assetLibrary/update", payload: { libraryId: ensured.library.id, name: "命令改名", baseVersion: ensured.library.version }, context: f.ctx("admin") });
+    assert.equal(updated.ok, true, JSON.stringify(updated));
+    assert.equal(updated.library.name, "命令改名");
+    assert.equal(updated.library.version, ensured.library.version + 1);
+  } finally { f.fx.close(); }
+});
+
 test("未登记命令一律拒绝（不新建通道、不放行任意命令）", async () => {
   const f = await fixture();
   try {

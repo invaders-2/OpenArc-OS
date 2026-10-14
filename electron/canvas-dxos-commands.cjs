@@ -47,7 +47,8 @@ const DXOS_CANVAS_COMMANDS = Object.freeze([
   { command: "canvas/assetLibrary/get", risk: "read", credential: "none", summary: "读取素材库及其全部条目" },
   { command: "canvas/assetLibrary/items", risk: "read", credential: "none", summary: "按 kind / 关键词筛选素材库条目" },
   { command: "canvas/assetLibrary/import", risk: "write", credential: "none", summary: "导入素材字节（同 checksum 复用同一 ResourceRef 去重）" },
-  { command: "canvas/assetLibrary/upsert", risk: "write", credential: "none", summary: "写入或更新 prompt / workflow 条目（含版本历史）" },
+  { command: "canvas/assetLibrary/upsert", risk: "write", credential: "none", summary: "写入或更新 asset / prompt / workflow 条目（含版本历史与关联字段）" },
+  { command: "canvas/assetLibrary/update", risk: "write", credential: "none", summary: "按基准版本更新素材库名称 / 可见性（version+1）" },
   { command: "canvas/assetLibrary/reference", risk: "read", credential: "none", summary: "返回条目的稳定 ResourceRef 与当前引用计数" },
   { command: "canvas/assetLibrary/attach", risk: "write", credential: "none", summary: "把素材库条目作为节点挂到画布上" },
   { command: "canvas/assetLibrary/delete", risk: "delete", credential: "none", summary: "删除素材条目（系统提示词受保护不可删）" },
@@ -60,6 +61,7 @@ const DXOS_CANVAS_COMMANDS = Object.freeze([
   { command: "canvas/collab/patch", risk: "write", credential: "none", summary: "广播补丁；基准版本落后时明确返回冲突，不广播过期补丁" },
   { command: "canvas/collab/events", risk: "read", credential: "none", summary: "拉取本会话来收到过的下行事件（presence / cursor / patch）" },
   { command: "canvas/collab/rooms", risk: "read", credential: "none", summary: "列出本进程内的协作房间（本机调试）" },
+  { command: "canvas/collab/sweep", risk: "write", credential: "none", summary: "清理超过空闲超时的协作会话并广播 presence" },
   // ---- 内核能力（源 canvasKernelCapabilities.ts 的投影） ----
   { command: "canvas/capabilities/list", risk: "read", credential: "none", summary: "投影画布可被 Agent 调用的能力清单（含 risk / 副作用）" },
   // ---- Agent 附件（源 canvasAgentAttachments.ts + 本仓挂载语义） ----
@@ -90,7 +92,7 @@ function packageTempDir(dir) {
  * 扩展装配。services 里没有的依赖会让对应命令结构化失败（不做假实现）。
  * @param hub 可注入现成 hub（测试用）；不注入则本函数自建并接管 onBroadcast → 事件队列。
  */
-function createCanvasDxosExtension({ identity, store, canvasService = null, resourceService = null, assetLibrary = null, attachments = null, hub = null, tempDir = null, nodeTypes = [], clock = null } = {}) {
+function createCanvasDxosExtension({ identity, store, canvasService = null, resourceService = null, assetLibrary = null, attachments = null, hub = null, authorize = null, tempDir = null, nodeTypes = [], clock = null } = {}) {
   if (!identity) throw new Error("createCanvasDxosExtension 需要 identity");
   const events = new Map(); // "canvasId\u0000clientId" → array
   const keepEvent = (delivery) => {
@@ -103,7 +105,13 @@ function createCanvasDxosExtension({ identity, store, canvasService = null, reso
       events.set(key, queue);
     }
   };
-  const collabHub = hub || new CanvasCollabHub({ clock });
+  // hub 级 authorize 必须显式注入（CanvasCollabHub 缺省拒绝）：本扩展的 canvas/collab/join 在
+  // 命令层已经做了真实鉴权（session + getCanvas 访问判定），故这里显式给出判定，而不是依赖默认拒绝。
+  // 调用方仍可传 authorize 覆盖；注入现成 hub 时以 hub 自身配置为准。
+  const collabAuthorize = typeof authorize === "function"
+    ? authorize
+    : (request) => !!(request && request.canvasId && request.clientId && request.userId);
+  const collabHub = hub || new CanvasCollabHub({ clock, authorize: collabAuthorize });
   collabHub.onBroadcast = keepEvent;
 
   const actorOf = (context) => {
@@ -148,6 +156,7 @@ function createCanvasDxosExtension({ identity, store, canvasService = null, reso
       tags: Array.isArray(payload.tags) ? payload.tags : [], sourceKey: asStr(payload.sourceKey, 500),
     }),
     "canvas/assetLibrary/upsert": (payload, context) => assetLibrary.upsertItem({ context, libraryId: asStr(payload.libraryId, 120), item: payload.item && typeof payload.item === "object" ? payload.item : {} }),
+    "canvas/assetLibrary/update": (payload, context) => assetLibrary.updateLibrary({ context, libraryId: asStr(payload.libraryId, 120), name: asStr(payload.name, 120), visibility: asStr(payload.visibility, 20), baseVersion: num(payload.baseVersion) }),
     "canvas/assetLibrary/reference": (payload, context) => assetLibrary.referenceItem({ context, libraryId: asStr(payload.libraryId, 120), itemId: asStr(payload.itemId, 120) }),
     "canvas/assetLibrary/attach": (payload, context) => assetLibrary.attachItemToCanvas({ context, libraryId: asStr(payload.libraryId, 120), itemId: asStr(payload.itemId, 120), canvasId: asStr(payload.canvasId, 120), x: num(payload.x) || 0, y: num(payload.y) || 0 }),
     "canvas/assetLibrary/delete": (payload, context) => assetLibrary.deleteItem({ context, libraryId: asStr(payload.libraryId, 120), itemId: asStr(payload.itemId, 120) }),

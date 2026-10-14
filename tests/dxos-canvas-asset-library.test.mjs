@@ -129,10 +129,10 @@ test("条目：prompt 版本历史、系统提示词不可删、普通条目可�
   try {
     const ctx = f.ctx("admin");
     const lib = f.service.ensureDefaultLibrary({ context: ctx }).library;
-    const created = f.service.upsertItem({ context: ctx, libraryId: lib.id, item: { kind: "prompt", title: "我的提示词", prompt: "第一版", sourceKey: "p-1", tags: ["人像", "人像", "光影"] } });
+    const created = await f.service.upsertItem({ context: ctx, libraryId: lib.id, item: { kind: "prompt", title: "我的提示词", prompt: "第一版", sourceKey: "p-1", tags: ["人像", "人像", "光影"] } });
     assert.equal(created.ok, true, JSON.stringify(created));
     assert.deepEqual(created.item.tags, ["人像", "光影"], "标签去重");
-    const updated = f.service.upsertItem({ context: ctx, libraryId: lib.id, item: { kind: "prompt", id: created.item.id, title: "我的提示词", prompt: "第二版", sourceKey: "p-1" } });
+    const updated = await f.service.upsertItem({ context: ctx, libraryId: lib.id, item: { kind: "prompt", id: created.item.id, title: "我的提示词", prompt: "第二版", sourceKey: "p-1" } });
     assert.equal(updated.ok, true, JSON.stringify(updated));
     assert.equal(updated.item.prompt, "第二版");
     assert.equal(updated.item.versions.length, 1, "内容变化要保留版本历史（源 :221-228）");
@@ -173,5 +173,80 @@ test("隔离与输入防护：外组织成员不可见；非法 dataUrl / 超限
     assert.equal(tooBig.error, "LIMIT_EXCEEDED");
     const noSession = f.service.ensureDefaultLibrary({ context: { sessionRef: "nope", appId: "canvas" } });
     assert.equal(noSession.ok, false);
+  } finally { f.fx.close(); }
+});
+
+test("asset 分支：kind=asset + relation* 逐字、sourceNodeId 复制、coverDataUrl 进资源域（源 :144-244）", async () => {
+  const f = await fixture();
+  try {
+    const ctx = f.ctx("admin");
+    const lib = f.service.ensureDefaultLibrary({ context: ctx }).library;
+    // 源素材：文本资源 + 一个引用它的画布节点（供 sourceNodeId 复制）。
+    const source = await f.service.importAssetItem({ context: ctx, libraryId: lib.id, name: "note.txt", mime: "text/plain", base64: Buffer.from("hello").toString("base64"), title: "源文本" });
+    assert.equal(source.ok, true, JSON.stringify(source));
+    const created = f.canvasService.createCanvas({ context: ctx, title: "素材源画布" });
+    const added = f.canvasService.applyCommand({
+      context: ctx, canvasId: created.canvas.canvasId, baseRevision: created.canvas.revision,
+      command: { type: "node.add", node: { type: "file", x: 0, y: 0, name: "note.txt", refs: [source.item.resourceRef] } },
+    });
+    assert.equal(added.ok, true, JSON.stringify(added));
+    const sourceNodeId = added.result.node.id;
+
+    const asset = await f.service.upsertItem({ context: ctx, libraryId: lib.id, item: {
+      kind: "asset", title: "关联素材", group: "分组甲", sourceNodeId,
+      relationId: "rel-1", relationName: "关联到主素材", relationRole: "primary", relationPrimary: true,
+      relationPrompt: "把主体替换成参考图", coverDataUrl: PNG_DATA_URL,
+    } });
+    assert.equal(asset.ok, true, JSON.stringify(asset));
+    assert.equal(asset.item.kind, "asset");
+    assert.equal(asset.item.group, "分组甲");
+    assert.equal(asset.item.relationId, "rel-1");
+    assert.equal(asset.item.relationName, "关联到主素材");
+    assert.equal(asset.item.relationRole, "primary");
+    assert.equal(asset.item.relationPrimary, true);
+    assert.equal(asset.item.relationPrompt, "把主体替换成参考图");
+    assert.equal(asset.item.resourceRef, source.item.resourceRef, "sourceNodeId 复制 = 复用内容寻址的同一 ResourceRef");
+    assert.match(asset.item.coverRef, /^openarc-asset:res_/);
+    // 关系字段必须真正落库（重新读取不丢）。
+    const reread = f.service.listItems({ context: ctx, libraryId: lib.id, kind: "asset" }).items.find((item) => item.id === asset.item.id);
+    assert.equal(reread.relationId, "rel-1");
+    assert.equal(reread.relationName, "关联到主素材");
+    assert.equal(reread.relationRole, "primary");
+    assert.equal(reread.relationPrimary, true);
+    assert.equal(reread.relationPrompt, "把主体替换成参考图");
+    // relationId 显式清空 → 其余关联字段整体消失（源 :182-187 语义）。
+    const cleared = await f.service.upsertItem({ context: ctx, libraryId: lib.id, item: { kind: "asset", id: asset.item.id, title: "关联素材", relationId: "" } });
+    assert.equal(cleared.ok, true, JSON.stringify(cleared));
+    assert.equal(cleared.item.relationId, undefined);
+    assert.equal(cleared.item.relationName, undefined);
+    assert.equal(cleared.item.relationPrimary, undefined);
+    // canUseSource 显式拒绝 → FORBIDDEN（源 :208）。
+    const denied = await f.service.upsertItem({ context: ctx, libraryId: lib.id, item: { kind: "asset", title: "越权", sourceNodeId, canUseSource: () => false } });
+    assert.equal(denied.ok, false);
+    assert.equal(denied.error, "FORBIDDEN");
+    // 非法封面 → 结构化拒绝，不产生半成品条目（源 :215）。
+    const badCover = await f.service.upsertItem({ context: ctx, libraryId: lib.id, item: { kind: "asset", title: "坏封面", coverDataUrl: "not-a-data-url" } });
+    assert.equal(badCover.ok, false);
+    assert.equal(badCover.error, "INVALID_INPUT");
+    assert.equal(f.service.listItems({ context: ctx, libraryId: lib.id, kind: "asset" }).items.some((item) => item.title === "坏封面"), false);
+  } finally { f.fx.close(); }
+});
+
+test("库级更新：改名 / 可见性 version+1，基准版本落后即冲突（touchLibrary 接线）", async () => {
+  const f = await fixture();
+  try {
+    const ctx = f.ctx("admin");
+    const lib = f.service.ensureDefaultLibrary({ context: ctx }).library;
+    const renamed = f.service.updateLibrary({ context: ctx, libraryId: lib.id, name: "改后的库名", visibility: "ORGANIZATION", baseVersion: lib.version });
+    assert.equal(renamed.ok, true, JSON.stringify(renamed));
+    assert.equal(renamed.library.name, "改后的库名");
+    assert.equal(renamed.library.visibility, "ORGANIZATION");
+    assert.equal(renamed.library.version, lib.version + 1, "version+1");
+    const stale = f.service.updateLibrary({ context: ctx, libraryId: lib.id, name: "过期写", baseVersion: lib.version });
+    assert.equal(stale.ok, false);
+    assert.equal(stale.error, "REVISION_CONFLICT");
+    assert.equal(f.service.getLibrary({ context: ctx, libraryId: lib.id }).library.name, "改后的库名", "冲突不得写入");
+    const foreign = f.service.updateLibrary({ context: f.ctx("bob"), libraryId: lib.id, name: "越权" });
+    assert.equal(foreign.ok, false);
   } finally { f.fx.close(); }
 });

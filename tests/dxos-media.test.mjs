@@ -327,6 +327,26 @@ test("封面缓存：命中不重跑 render，invalidate 后重跑（源 posterC
   assert.equal(await cache.invalidate(path.join(sourceDir, "nope.mp4"), 256), false);
 });
 
+test("media/poster/get：首次生成 cached:false、命中 cached:true、invalidate 后再生成 cached:false", async () => {
+  const buffer = sampleBuffer();
+  const fx = openBundle();
+  const saved = await fx.call("media/asset/save", { projectId: PROJECT_ID, name: "poster.mp4", mime: "video/mp4", base64: buffer.toString("base64") });
+  assert.equal(saved.ok, true, JSON.stringify(saved));
+  const assetId = saved.value.asset.id;
+  const first = await fx.call("media/poster/get", { assetId, size: 640 });
+  assert.equal(first.ok, true, JSON.stringify(first));
+  assert.equal(first.value.poster.cached, false, "首次生成必须 cached:false（不能恒 true）");
+  const second = await fx.call("media/poster/get", { assetId, size: 640 });
+  assert.equal(second.ok, true, JSON.stringify(second));
+  assert.equal(second.value.poster.cached, true, "缓存命中必须 cached:true");
+  assert.equal(second.value.poster.fileName, first.value.poster.fileName);
+  const invalidated = await fx.call("media/poster/invalidate", { assetId, size: 640 });
+  assert.equal(invalidated.ok, true, JSON.stringify(invalidated));
+  const third = await fx.call("media/poster/get", { assetId, size: 640 });
+  assert.equal(third.ok, true, JSON.stringify(third));
+  assert.equal(third.value.poster.cached, false, "invalidate 后重新生成必须 cached:false");
+});
+
 // ── ⑦ 租约过期回收 ───────────────────────────────────────────────────────
 test("租约：claim → heartbeat → 过期回收为 interrupted → 再 claim", () => {
   const dir = tempDir("dxos-media-lease-");

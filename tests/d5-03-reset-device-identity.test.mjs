@@ -21,7 +21,7 @@
  *   T8  跨组织与自报组织：deviceIdentity 组织不匹配被拒；context.organizationId 不得覆盖会话组织；
  *   T9  并发单次消费：恰好 1 台设备 / 1 条凭据，输家 PAIRING_TOKEN_ALREADY_USED，无半状态残留；
  *   T10 审计保留与明文 secret 不外泄（DB 全表 + WAL + 日志 + 审计 payload 扫描）；
- *   T11 SCHEMA_VERSION 仍为 21（本批不需要 schema 变更）。
+ *   T11 SCHEMA_VERSION 仍为 25（当前真实版本，重置只删行、不升版）。
  *
  * 临时目录前缀 oa-d503g-reset-device-，与 d503e-reset- / d503d-retention- 命名空间分开。
  */
@@ -560,8 +560,8 @@ test("T10 · device_audit 重置前后逐行不变；明文 secret 在库/审计
 
 /* ══════════════════════ T11 · SCHEMA_VERSION ══════════════════════ */
 
-test("T11 · SCHEMA_VERSION 仍为 21：本批没有 schema 变更（只有行删除）", async () => {
-  assert.equal(SCHEMA_VERSION, 25, "本批不应升版：设备三表早已存在，重置只是删行");
+test("T11 · SCHEMA_VERSION 仍为 25：当前真实版本，没有 schema 变更（只有行删除）", async () => {
+  assert.equal(SCHEMA_VERSION, 25, "当前真实版本 25：设备三表早已存在，重置只是删行");
   const f = openService(tmpDir());
   try {
     const snap = await initAndLogin(f);

@@ -82,7 +82,7 @@ function seedV20(dbPath) {
 test("V1 · schema 版本与唯一键：organization_id 是 app_resource_grants 唯一键的一部分", async () => {
   const f = await createFixture();
   try {
-    assert.equal(SCHEMA_VERSION, 25, "schema 冻结值（本批 v20 → v21）");
+    assert.equal(SCHEMA_VERSION, 25, "schema 冻结值（当前真实版本 v25）");
     assert.equal(f.identity.schemaVersion, SCHEMA_VERSION);
     const keys = uniqueKeysOf(f.identity.connection, "app_resource_grants");
     assert.ok(keys.some((cols) => cols.includes("organization_id")), "唯一键必须含 organization_id：" + JSON.stringify(keys));

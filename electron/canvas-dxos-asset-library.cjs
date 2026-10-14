@@ -140,6 +140,14 @@ class CanvasAssetLibraryService {
       kind: row.kind,
       title: row.title,
       ...(row.group_name ? { group: row.group_name } : {}),
+      // 源 shared/canvasAssetLibrary.ts:39-43 的关联字段（asset 条目"关联资产"语义，先 relationId 再展开）。
+      ...(row.relation_id ? {
+        relationId: row.relation_id,
+        relationName: row.relation_name || "关联资产",
+        ...(row.relation_role ? { relationRole: row.relation_role } : {}),
+        ...(row.relation_primary ? { relationPrimary: true } : {}),
+        ...(row.relation_prompt ? { relationPrompt: row.relation_prompt } : {}),
+      } : {}),
       prompt: row.prompt || "",
       ...(row.model ? { model: row.model } : {}),
       ...(row.category ? { category: row.category } : {}),
@@ -187,6 +195,25 @@ class CanvasAssetLibraryService {
     });
     const seeded = this.#seedSystemPrompts(library, actor.user.id);
     return ok({ library: this.#libraryView(library, this.#access(library, actor.user)), items: seeded.items.map((row) => this.#itemView(row)) });
+  }
+
+  /**
+   * 源 :51-75 / developerCollabProjects.updateDeveloperCollabProject 的库级更新：
+   * 改名 / 可见性 + version+1，走基准版本检查（store.touchLibrary 的 changes=0 即冲突）。
+   * 这就是 canvas-dxos-store.cjs touchLibrary 的唯一调用点。
+   */
+  updateLibrary({ context, libraryId: id, name = null, visibility = null, baseVersion = null } = {}) {
+    const loaded = this.#load(context, id, { needEdit: true });
+    if (!loaded.ok) return loaded;
+    const current = loaded.library;
+    const base = Number.isFinite(Number(baseVersion)) ? Number(baseVersion) : Number(current.version || 1);
+    if (base !== Number(current.version || 1)) return fail("REVISION_CONFLICT", { baseVersion: base, currentVersion: Number(current.version || 1) });
+    const nextName = name == null ? current.name : (String(name).trim().slice(0, 120) || current.name);
+    const nextVisibility = visibility == null ? current.visibility
+      : (String(visibility).toUpperCase() === "ORGANIZATION" ? "ORGANIZATION" : "PRIVATE");
+    const updated = this.store.touchLibrary({ id: current.id, name: nextName, visibility: nextVisibility, baseVersion: base });
+    if (!updated) return fail("REVISION_CONFLICT", { baseVersion: base, currentVersion: Number(this.store.libraryById(current.id).version || 1) });
+    return ok({ library: this.#libraryView(updated, this.#access(updated, loaded.user)) });
   }
 
   /** 源 :77-82：列举本人库 + 组织可见库；顺带补系统提示词。 */
@@ -322,17 +349,21 @@ class CanvasAssetLibraryService {
 
   // ---------------------------------------------------------------- 条目（含 prompt / workflow）
 
-  /** 源 :144-244 的条目写入（asset 的字节导入走 importAssetItem，这里处理元数据与 prompt/workflow）。 */
-  upsertItem({ context, libraryId: id, item = {} } = {}) {
+  /**
+   * 源 :144-244 的条目写入：asset / prompt / workflow 三种 kind。
+   * 为什么是 async：源用 fs copyNode / createNode 同步落文件；本仓素材字节统一走资源域的
+   * resourceService.importManaged（异步），coverDataUrl 也必须先落成 ResourceRef，故整体改为 async。
+   */
+  async upsertItem({ context, libraryId: id, item = {} } = {}) {
     const loaded = this.#load(context, id, { needEdit: true });
     if (!loaded.ok) return loaded;
     const kind = ITEM_KINDS.includes(item.kind) ? item.kind : "prompt";
-    if (kind === "asset") return fail("INVALID_INPUT", "use-importAssetItem");
     const requestedId = str(item.id, 120);
     const requestedKey = str(item.sourceKey, 500) || null;
     const previous = requestedId ? this.store.itemById(requestedId) : requestedKey ? this.store.itemBySourceKey(loaded.library.id, requestedKey) : null;
     if (previous && previous.library_id !== loaded.library.id) return fail("NOT_FOUND");
     const title = clampText(item.title || (previous && previous.title), 160) || "未命名资产";
+    if (kind === "asset") return this.#upsertAssetItem({ context, loaded, item, previous, requestedId, title });
     const prompt = clampText(item.prompt != null ? item.prompt : previous && previous.prompt, 80000);
     const tags = tagList(item.tags != null ? item.tags : previous ? JSON.parse(previous.tags_json || "[]") : []);
     const promptRole = kind === "prompt" && PROMPT_ROLES.includes(String(item.promptRole || (previous && previous.prompt_role) || "")) ? String(item.promptRole || previous.prompt_role) : null;
@@ -341,8 +372,19 @@ class CanvasAssetLibraryService {
     const versions = kind === "prompt" && changed
       ? [{ updatedAt: Number(previous.updated_at), title: previous.title, prompt: previous.prompt }, ...(previous.versions_json ? JSON.parse(previous.versions_json) : [])].slice(0, 12)
       : previous && previous.versions_json ? JSON.parse(previous.versions_json) : undefined;
+    // 源 :212-216：coverDataUrl 对 prompt / workflow 同样生效；workflow 遇到非法封面按源静默忽略。
+    let coverRef = previous ? previous.cover_ref : null;
+    if (typeof item.coverDataUrl === "string" && item.coverDataUrl) {
+      if (/^data:image\/(?:png|jpeg|webp);base64,/.test(item.coverDataUrl)) {
+        const cover = await this.#importCover({ context, dataUrl: item.coverDataUrl, title });
+        if (!cover.ok) return cover;
+        coverRef = cover.resourceRef;
+      } else if (kind !== "workflow") {
+        return fail("INVALID_INPUT", "封面仅支持 PNG、JPEG 或 WebP");
+      }
+    }
     const payload = {
-      kind, title, prompt,
+      kind, title, prompt, coverRef,
       group: kind === "asset" ? clampText(item.group, 40) : null,
       model: kind === "prompt" ? clampText(item.model, 120) : null,
       category: kind === "prompt" ? clampText(item.category, 120) : null,
@@ -358,6 +400,105 @@ class CanvasAssetLibraryService {
       ? this.store.updateItem(previous.id, payload)
       : this.store.insertItem({ id: requestedId || itemId(), libraryId: loaded.library.id, createdBy: loaded.user.id, createdAt: this.#now(), updatedAt: this.#now(), ...payload });
     return ok({ item: this.#itemView(row) });
+  }
+
+  /**
+   * 源 :179-237 的 asset 分支：sourceNodeId 复制 + relation* + coverDataUrl 语义逐字补齐。
+   * 本仓差异：字节仍在资源域（content-addressed），复制 = 复用同一 ResourceRef 后建库内条目，
+   * 与 importAssetItem 的去重口径一致，不产生第二份内容对象。
+   */
+  async #upsertAssetItem({ context, loaded, item, previous, requestedId, title }) {
+    const hasRelationId = Object.prototype.hasOwnProperty.call(item, "relationId");
+    const relationId = String(hasRelationId ? item.relationId ?? "" : (previous && previous.relation_id) ?? "").trim().slice(0, 160);
+    const relationName = relationId ? (String(item.relationName ?? (previous && previous.relation_name) ?? "关联资产").trim().slice(0, 80) || "关联资产") : "";
+    const relationRole = relationId ? String(item.relationRole ?? (previous && previous.relation_role) ?? "").trim().slice(0, 60) : "";
+    const relationPrimary = relationId ? item.relationPrimary === true : false;
+    const relationPrompt = relationId ? String(item.relationPrompt ?? (previous && previous.relation_prompt) ?? "").trim().slice(0, 80000) : "";
+    const group = String(item.group ?? (previous && previous.group_name) ?? "未分组").trim().slice(0, 40) || "未分组";
+    const prompt = clampText(item.prompt != null ? item.prompt : previous && previous.prompt, 80000);
+
+    let resourceRef = previous ? previous.resource_ref : null;
+    let checksum = previous ? previous.checksum : null;
+    let mime = previous ? previous.mime : null;
+    let bytes = previous ? previous.bytes : null;
+    let mediaKind = previous ? previous.media_kind : null;
+    const sourceNodeId = str(item.sourceNodeId, 160).trim();
+    if (sourceNodeId) {
+      const resolved = this.#resolveSourceNode({ context, sourceNodeId, canUseSource: item.canUseSource });
+      if (!resolved.ok) return resolved;
+      resourceRef = resolved.resourceRef;
+      checksum = resolved.checksum;
+      mime = resolved.mime;
+      bytes = resolved.bytes;
+      mediaKind = resolved.mediaKind;
+    }
+
+    // 源 :212-217：coverDataUrl 优先于"图片素材自动当封面"；换源后旧封面不再适用。
+    let coverRef = sourceNodeId ? null : previous ? previous.cover_ref : null;
+    if (typeof item.coverDataUrl === "string" && item.coverDataUrl) {
+      const cover = await this.#importCover({ context, dataUrl: item.coverDataUrl, title });
+      if (!cover.ok) return cover;
+      coverRef = cover.resourceRef;
+    } else if (!coverRef && resourceRef && mediaKind === "image") {
+      coverRef = resourceRef;
+    }
+
+    const payload = {
+      kind: "asset", title, prompt, group,
+      relationId: relationId || null, relationName: relationName || null, relationRole: relationRole || null,
+      relationPrimary, relationPrompt: relationPrompt || null,
+      resourceRef, checksum, mime, bytes, mediaKind, coverRef,
+      tags: [], model: null, category: null, source: null, sourceKey: null, skillId: null, promptRole: null,
+    };
+    if (!previous && this.store.countItems(loaded.library.id) >= MAX_ITEMS) return fail("LIMIT_EXCEEDED", "items");
+    const row = previous
+      ? this.store.updateItem(previous.id, payload)
+      : this.store.insertItem({ id: requestedId || itemId(), libraryId: loaded.library.id, createdBy: loaded.user.id, createdAt: this.#now(), updatedAt: this.#now(), ...payload });
+    return ok({ item: this.#itemView(row) });
+  }
+
+  /**
+   * 源 :206-211 的 sourceNodeId 分支：源用全局 fs getNode + copyNode。
+   * 本仓节点属于某张画布，故在该用户**可见**的画布里查节点并取其 ResourceRef（getCanvas 已强制访问判定）；
+   * 显式传入 canUseSource 时以其结论为准（与源 :208 一致，返回非 true 即拒绝）。
+   */
+  #resolveSourceNode({ context, sourceNodeId, canUseSource = null }) {
+    if (typeof canUseSource === "function" && canUseSource(sourceNodeId) !== true) return fail("FORBIDDEN", "没有源文件读取权限");
+    if (!this.canvasService || typeof this.canvasService.listCanvases !== "function" || typeof this.canvasService.getCanvas !== "function") return fail("CANVAS_UNAVAILABLE");
+    const listed = this.canvasService.listCanvases({ context });
+    if (!listed || !listed.ok) return listed && listed.error ? listed : fail("NOT_FOUND");
+    for (const entry of listed.items || []) {
+      const view = this.canvasService.getCanvas({ context, canvasId: entry.canvasId });
+      if (!view || !view.ok) continue;
+      const node = (view.canvas.doc.nodes || []).find((candidate) => candidate.id === sourceNodeId);
+      if (!node) continue;
+      const ref = Array.isArray(node.refs) ? node.refs.find((value) => typeof value === "string" && value.startsWith("openarc-asset:"))
+        : (typeof node.url === "string" && node.url.startsWith("openarc-asset:") ? node.url : null);
+      if (!ref) return fail("INVALID_INPUT", "source-node-has-no-media");
+      const resourceRef = ref.replace(/^openarc-asset:/, "");
+      const resourceRow = this.resourceStore && typeof this.resourceStore.resourceRowById === "function" ? this.resourceStore.resourceRowById(resourceRef) : null;
+      if (!resourceRow) return fail("NOT_FOUND", "source-resource");
+      return ok({
+        resourceRef,
+        checksum: resourceRow.checksum || null,
+        mime: resourceRow.mime_type || null,
+        bytes: resourceRow.size == null ? null : Number(resourceRow.size),
+        mediaKind: mimeKind(resourceRow.mime_type, resourceRow.name),
+      });
+    }
+    return fail("NOT_FOUND", "source-node");
+  }
+
+  /** 源 :102-111 materializeDataUrl 的等价：封面也进资源域，条目只存 ResourceRef。 */
+  async #importCover({ context, dataUrl, title }) {
+    const match = /^data:(image\/(?:png|jpeg|webp));base64,([a-zA-Z0-9+/=]+)$/.exec(dataUrl);
+    if (!match) return fail("INVALID_INPUT", "封面仅支持 PNG、JPEG 或 WebP");
+    const buffer = Buffer.from(match[2], "base64");
+    if (!buffer.length || buffer.length > 10 * 1024 * 1024) return fail("LIMIT_EXCEEDED", "封面文件不能为空且不能超过 10 MB");
+    const extension = match[1] === "image/png" ? "png" : match[1] === "image/webp" ? "webp" : "jpg";
+    const imported = await this.#importManagedFile({ context, buffer, name: (title || "模板封面") + "." + extension, mime: match[1] });
+    if (!imported.ok) return imported;
+    return ok({ resourceRef: imported.resourceRef });
   }
 
   listItems({ context, libraryId: id, kind = null, query = "" } = {}) {
