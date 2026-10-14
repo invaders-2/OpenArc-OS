@@ -36,6 +36,16 @@ function resolveDxosPaths(userDataDir) {
   return { userDataDir: base, root, file, directory, files: DXOS_LAYOUT.files, directories: DXOS_LAYOUT.directories };
 }
 
+// B6b（dxos-fs.cjs）新增：DX 虚拟文件树数据目录 <userData>/dxos/fs（fs.json + blobs/ + cache/fs-thumbnails/）。
+// 不并入上面的 DXOS_LAYOUT.directories —— dxos-foundation.test.mjs:219 精确断言该数组内容，
+// 保持既有契约不动；dxos-fs.cjs 首次写入时会自行建目录。
+const DXOS_FS_DIR_NAME = "fs";
+
+/** 解析 <userData>/dxos/fs（不创建）。 */
+function resolveDxosFsDir(userDataDir) {
+  return path.join(resolveDxosPaths(userDataDir).root, DXOS_FS_DIR_NAME);
+}
+
 /** 只创建目录：配置文件不存在时保持不存在，交给各域自己决定是否落盘。 */
 function ensureDxosLayout(userDataDir, options = {}) {
   const paths = resolveDxosPaths(userDataDir);
@@ -47,7 +57,9 @@ function ensureDxosLayout(userDataDir, options = {}) {
 
 module.exports = {
   DXOS_DIR_NAME,
+  DXOS_FS_DIR_NAME,
   DXOS_LAYOUT,
   resolveDxosPaths,
+  resolveDxosFsDir,
   ensureDxosLayout,
 };

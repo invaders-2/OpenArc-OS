@@ -133,8 +133,10 @@ function createSkillCatalogSource() {
 
 /**
  * 装配技能域 bundle。
- * 额外注入 providerAdapter / modelAdapter / cliRuntime / mediaAdapter / fsAdapter 供执行器与包管理使用；
+ * 额外注入 providerAdapter / modelAdapter / cliRuntime / mediaAdapter / fsAdapter 供执行器使用；
  * 未注入即保持结构化依赖缺失（见 skill-runner.cjs:176-206）。
+ * B6d：fsAdapter 只喂 skillRunner（产物落盘 saveImagesToFs / saveAudiosToFs / saveVideosToFs）；
+ * 技能目录 / 技能包 / 工作空间的 fsImpl 仍是 node:fs（见下方第 1 节的注）。
  */
 function createSkillBundle({ userDataDir, identityStore = null, authorization = null, providerAdapter = null, modelAdapter = null, cliRuntime = null, mediaAdapter = null, fsAdapter = null, logger = null, clock = null } = {}) {
   const now = typeof clock === "function" ? clock : () => Date.now();
@@ -142,12 +144,16 @@ function createSkillBundle({ userDataDir, identityStore = null, authorization = 
   const dataDir = paths ? paths.root : null;
   const db = (identityStore && (identityStore.connection || identityStore.db)) || null;
   // 目录只创建、不写文件；失败不阻断装配（各域落盘时再抛结构化错误）。
-  if (userDataDir) { try { ensureDxosLayout(userDataDir, fsAdapter ? { fsImpl: fsAdapter } : {}); } catch { /* 保留真实落盘错误给具体命令 */ } }
+  if (userDataDir) { try { ensureDxosLayout(userDataDir); } catch { /* 保留真实落盘错误给具体命令 */ } }
 
   // ---- 1) 技能目录：显式 dataDir（<userData>/dxos）+ 注入 providerAdapter ----
   //      skill-store.cjs:93-101 configureSkillStore 只认这些键；providerAdapter 必须显式传 null 以清空。
+  //      B6d 注：fsAdapter 是 DX 虚拟文件树，不是 node:fs 替身 —— skill-store /
+  //      skillWorkspace / skillPack 的 fsImpl 只接受 node:fs 形状（readFileSync / mkdirSync 等），
+  //      混用只会把 DX 适配器的键并进 nodeFs 对象（静默无效）。所以 fsAdapter 只喂 skillRunner，
+  //      这三处继续用默认 node:fs（技能目录 / 包 / 工作空间落在 <userData>/dxos 真实文件里，语义不变）。
   if (dataDir) {
-    skillStore.configureSkillStore({ dataDir: dataDir, fsImpl: fsAdapter || undefined, providerAdapter: providerAdapter || null, clock: now });
+    skillStore.configureSkillStore({ dataDir: dataDir, providerAdapter: providerAdapter || null, clock: now });
   } else {
     skillStore.configureSkillStore({ providerAdapter: providerAdapter || null, clock: now });
   }
@@ -156,7 +162,7 @@ function createSkillBundle({ userDataDir, identityStore = null, authorization = 
   skillImport.configureSkillImport({ skillStore: skillStore });
 
   // ---- 3) 工作空间：先装配，再作为 skill-pack 的 agentWorkspace 端口注入 ----
-  skillWorkspace.configureSkillWorkspace({ db: db, fsImpl: fsAdapter || undefined, skillStore: skillStore, clock: now, logger: logger });
+  skillWorkspace.configureSkillWorkspace({ db: db, skillStore: skillStore, clock: now, logger: logger });
   const agentWorkspaceAdapter = {
     registerAgentWorkspace: (pack, root) => skillWorkspace.registerAgentWorkspace(pack, root),
     deleteAgentWorkspaceProfiles: (ids) => skillWorkspace.deleteAgentWorkspaceProfiles(ids),
@@ -168,7 +174,6 @@ function createSkillBundle({ userDataDir, identityStore = null, authorization = 
   skillPack.configureSkillPack({
     userDataDir: userDataDir || undefined,
     dataDir: dataDir || undefined,
-    fsImpl: fsAdapter || undefined,
     skillStore: skillStore,
     providerAdapter: providerAdapter || null,
     // 始终注入：没有多 Agent 工作空间时 registerAgentWorkspace 返回 null（skill-workspace.cjs:254-256），

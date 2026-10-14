@@ -17,15 +17,21 @@
  * 边界：
  *   · 渲染层自报的 userId / role / appId / sessionRef 一律忽略；actor 由 authorization.resolveActor
  *     从可信 sessionRef 推导（同 model-service.cjs:17 / task-service.cjs:128）。
- *   · fsAdapter / workspaceAdapter（B6 虚拟文件树）未落地 → 保持结构化 AGENT_DEPENDENCY_UNAVAILABLE，
- *     绝不伪造成功；workspace 模块本身已注入，但文件写真值通道仍由 fsAdapter 决定。
+ *   · fsAdapter（B6 虚拟文件树）由宿主注入：装配成功即接通文件工具 / project snapshot / fs_list；
+ *     未注入或装配失败（createDxosFsAdapterForUserData 抛错）→ 保持结构化
+ *     AGENT_DEPENDENCY_UNAVAILABLE，绝不伪造成功；workspace 模块本身已注入，
+ *     但文件写真值通道仍由 fsAdapter 决定。
  *   · 返回值统一过 agent-domain.cjs 的 redactAgentValue —— 不含 api_key / credentialRef / 绝对路径。
  */
 const { randomUUID } = require("node:crypto");
+const nodeFs = require("node:fs");
 
 const agentDomain = require("./agent-domain.cjs");
 const foundationErrors = require("./dxos-foundation-errors.cjs");
 const { createEventChannel } = require("./dxos-foundation-events.cjs");
+const { resolveDxosFsDir } = require("./dxos-foundation-paths.cjs");
+// B6d：宿主（main.cjs）用它把 <userData>/dxos/fs 构造成 fsAdapter 注入面。
+const { createDxosFsAdapter } = require("./dxos-fs-adapter.cjs");
 
 const agentTaskStore = require("./agent-task-store.cjs");
 const agentKernel = require("./agent-kernel.cjs");
@@ -286,46 +292,73 @@ function mapProjectModeError(error) {
 }
 
 /**
+ * B6d · 装配 <userData>/dxos/fs 上的 DX 虚拟文件树适配器（fsAdapter 注入面）。
+ *
+ * 为什么装配单独收敛成一个可导入的函数：main.cjs 依赖 electron，离线测试无法 require 它；
+ * 把「解析路径 → 建目录 → 可写探测 → 构造适配器」放在这里，装配契约就能在进程内被真实调用
+ * （不启动 Electron），且生产与测试跑的是同一段代码。
+ *
+ * 失败一律抛错、不返回半成品：调用方捕获后保持 fsAdapter = null，健康报告据此如实为 false，
+ * 命令侧继续结构化 AGENT_DEPENDENCY_UNAVAILABLE，绝不假装可用。
+ */
+function createDxosFsAdapterForUserData(userDataDir, options = {}) {
+  const dir = resolveDxosFsDir(userDataDir);
+  // dxos-fs 的构造是惰性的（首次写入才建目录）。这里先建目录并做可写探测，否则「目录不可写」
+  // 要等第一次真实写入才暴露，健康报告就没机会如实反映。
+  nodeFs.mkdirSync(dir, { recursive: true });
+  nodeFs.accessSync(dir, nodeFs.constants.W_OK);
+  return createDxosFsAdapter(Object.assign(
+    { dataDir: dir },
+    typeof options.clock === "function" ? { clock: options.clock } : {},
+    typeof options.idFactory === "function" ? { idFactory: options.idFactory } : {},
+  ));
+}
+
+/**
  * 装配 Agent 域 bundle。dbPath / userDataDir 只为运行时工作区与日志定位，不作为返回值。
  * 额外可选键 toolCatalog 是测试/未来批次注入目录的 seam（production 省略即惰性 require 真实模块）。
  * B4 接线：skillStore/skillRunner（或预构造 skillSource）与 mcpAgentTools/mcpServersSnapshot
  * （或预构造 mcpSource）把 catalog 的 mcp/skill 空来源接上真实实现；未给即保持 available:false。
  * B5d 接线：canvasExtension（画布域扩展实例）把 canvas 来源接上画布内核能力投影；未给即 available:false。
  * providerAdapter 由宿主注入 provider-adapter-bridge.cjs 的只读桥（未注入即保持结构化依赖缺失，不伪造）。
+ * fsAdapter 由宿主注入 createDxosFsAdapterForUserData 构造的虚拟文件树（未注入即保持结构化依赖缺失，不伪造）。
  */
-function createAgentBundle({ identityStore, authorization, authStore, modelService, providerAdapter = null, userDataDir, logger = null, clock = null, dbPath = null, toolCatalog = null, mcpAgentTools = null, mcpServersSnapshot = null, skillStore = null, skillRunner = null, mcpSource = null, skillSource = null, canvasExtension = null, canvasSource = null, projectAgent = null } = {}) {
+function createAgentBundle({ identityStore, authorization, authStore, modelService, providerAdapter = null, userDataDir, logger = null, clock = null, dbPath = null, toolCatalog = null, mcpAgentTools = null, mcpServersSnapshot = null, skillStore = null, skillRunner = null, mcpSource = null, skillSource = null, canvasExtension = null, canvasSource = null, projectAgent = null, fsAdapter = null } = {}) {
   const now = typeof clock === "function" ? clock : () => Date.now();
   const idFactory = () => randomUUID();
   const db = (identityStore && (identityStore.connection || identityStore.db)) || null;
   const catalog = toolCatalog || loadToolCatalogModule();
+  // B6d：DX 虚拟文件树适配器由宿主注入（main.cjs 用 createDxosFsAdapterForUserData 构造）。
+  // 未注入 / 装配失败时保持 null —— 健康报告如实 false、文件工具结构化拒绝，绝不假装可用。
+  const resolvedFsAdapter = fsAdapter || null;
 
   // ---- 1) 任务域：唯一 SQLite 连接（identity-store 的连接，agent_* 表由 v23 迁移建立） ----
-  if (db) agentTaskStore.configureAgentTaskStore({ db, clock: now, idFactory });
+  // B6d：同一份 fsAdapter 也要喂 project snapshot（agent-project-snapshot.cjs 经
+  // agent-task-store.getAgentFsAdapter() 取它）；缺它时快照抛结构化依赖错误。
+  if (db) agentTaskStore.configureAgentTaskStore({ db, fsAdapter: resolvedFsAdapter, clock: now, idFactory });
 
   // ---- 2) 工具执行器与模型出口（tool loop / react driver / kernel 共用同一实例） ----
   const modelAdapter = createModelAdapter({ modelService });
   const toolRunner = createToolRunner();
   const toolAuth = createToolAuthAdapter({ authStore, authorization });
-  // B6 未落地：fsAdapter / workspaceAdapter 不注入（workspace 模块本身可用，但文件真值通道为空）。
-  const fsAdapter = null;
 
   // ---- 3) 内核依赖：Run 持久化 / 巡检 / 工具解析 / 用量 / 工作区 ----
   agentKernel.configureAgentKernel({
     db, clock: now, logger, taskStore: agentTaskStore, workspaceStore: agentRuntimeWorkspace,
     usageStore: agentRuntimeUsage, schemaValidator: agentRuntimeEnvelope, toolResolver,
-    modelAdapter, toolRunner, fsAdapter,
+    modelAdapter, toolRunner, fsAdapter: resolvedFsAdapter,
   });
 
   // ---- 4) 运行时依赖中心（tool loop）与 React 驱动 ----
   agentRuntime.configureAgentRuntime({
     db, kernel: agentKernel, taskStore: agentTaskStore, runStore: agentKernelStore,
-    modelAdapter, toolRunner, fsAdapter, workspaceAdapter: agentRuntimeWorkspace,
+    modelAdapter, toolRunner, fsAdapter: resolvedFsAdapter, workspaceAdapter: agentRuntimeWorkspace,
     clock: now, logger, idFactory,
   });
   reactDriver.configureReactDriver({
     kernel: agentKernel, kernelStore: agentKernelStore, supervisor: require("./agent-kernel-supervisor.cjs"),
     taskStore: agentTaskStore, toolRunner, workspaceAdapter: agentRuntimeWorkspace,
-    usageAdapter: agentRuntimeUsage, fsAdapter, clock: now, logger,
+    usageAdapter: agentRuntimeUsage, fsAdapter: resolvedFsAdapter, clock: now, logger,
     // B4 接线：provider-adapter-bridge 组装的只读 providerAdapter（agent-react-driver.cjs:33 契约）。
     providerAdapter: providerAdapter,
   });
@@ -399,8 +432,9 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
     mcpSource: !!resolvedMcpSource,
     skillSource: !!resolvedSkillSource,
     canvasSource: !!resolvedCanvasSource,
-    // B6 未落地：显式 false，不假装可用（agent-project-snapshot 会据此抛结构化依赖错误）。
-    fsAdapter: false,
+    // B6d：fsAdapter 注入是否成功（不含任何路径 / 内容值，仅布尔）。false 时文件工具与
+    // project snapshot 继续结构化 AGENT_DEPENDENCY_UNAVAILABLE，不假装可用。
+    fsAdapter: !!resolvedFsAdapter,
     workspaceAdapter: !!agentRuntimeWorkspace,
     userDataDir: !!userDataDir,
     dbPath: !!dbPath,
@@ -707,4 +741,4 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
   };
 }
 
-module.exports = { createAgentBundle, HOST_APP_ID, buildMcpCatalogSource, buildSkillCatalogSource, buildCanvasCatalogSource };
+module.exports = { createAgentBundle, createDxosFsAdapterForUserData, HOST_APP_ID, buildMcpCatalogSource, buildSkillCatalogSource, buildCanvasCatalogSource };
