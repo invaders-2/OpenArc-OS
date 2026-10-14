@@ -60,6 +60,7 @@ const {
   buildAuthHeaders,
 } = require("./legacy-protocols.cjs");
 const { defaultProtocolTransport, defaultProtocolClock } = require("./transport.cjs");
+const legacyExecutorPorts = require("../legacy-executor-ports.cjs");
 
 const LEGACY_DEPENDENCY_UNAVAILABLE = "LEGACY_DEPENDENCY_UNAVAILABLE";
 
@@ -828,14 +829,21 @@ async function generateImagesUnmetered(provider, model, params, timeoutMs, trans
   if (rawProto === "cli:gemini" || rawProto === "gemini-cli") {
     return unavailable("cliTools/agentCliTools 批次：cli:gemini 图片执行器（protocols.ts:5299 generateGeminiCliImage）未移植");
   }
+  // B7e2：端口已注入则调用注入实现；未注入仍返回结构化 LEGACY_DEPENDENCY_UNAVAILABLE（B2 行为不变）。
   if (rawProto === "agnes") {
+    const port = legacyExecutorPorts.getLegacyExecutorPort("generateAgnesImages");
+    if (typeof port === "function") return port(provider, model, params, timeoutMs, net, clock);
     return unavailable("agnes 原生适配批次：generateAgnesImages（protocols.ts:5303）未移植");
   }
   if (rawProto === "modelscope") {
+    const port = legacyExecutorPorts.getLegacyExecutorPort("generateModelScopeImages");
+    if (typeof port === "function") return port(provider, model, params, timeoutMs, net, clock);
     return unavailable("modelscope 原生适配批次：generateModelScopeImages（protocols.ts:5304）未移植");
   }
   if (rawProto === "volcengine") return generateVolcengineImages(provider, model, params, [], timeoutMs, net);
   if (rawProto === "runninghub") {
+    const port = legacyExecutorPorts.getLegacyExecutorPort("generateRunningHubImages");
+    if (typeof port === "function") return port(provider, model, params, timeoutMs, net, clock);
     return unavailable("runninghub 原生适配批次：generateRunningHubImages（protocols.ts:5306）未移植");
   }
   if (rawProto === "xai" || rawProto === "grok2api") return requestGrok2ApiImages(provider, model, params, [], timeoutMs, net);

@@ -190,14 +190,14 @@ function loadPreloadSurface() {
   return exposed;
 }
 
-test("preload：platform 是最后一个顶层键，仅暴露 command，且无原始能力", () => {
+test("preload：platform 是第 22 个顶层键，仅暴露 command，且无原始能力", () => {
   const exposed = loadPreloadSurface();
   assert.ok(exposed && exposed.name === "openarc");
   const api = exposed.api;
   const topKeys = Object.keys(api);
   assert.ok(topKeys.includes("platform"), "缺少顶层键 platform");
-  assert.equal(topKeys.length, 22, "platform 是第 22 个顶层键（第 21 是 B6a automation）");
-  assert.equal(topKeys[topKeys.length - 1], "platform", "platform 必须是最后一个顶层键");
+  // B7c 起在 platform 之后追加后续批次键（integration / market / …），故只固定 platform 的位置（第 22 键，index 21）。
+  assert.ok(topKeys.length >= 22, "platform 至少是第 22 个顶层键（第 21 是 B6a automation）");
   assert.equal(topKeys.indexOf("platform"), 21);
   assert.deepEqual(Object.keys(api.platform), ["command"]);
   assert.equal(typeof api.platform.command, "function");

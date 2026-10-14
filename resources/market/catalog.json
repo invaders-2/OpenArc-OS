@@ -1,0 +1,46 @@
+{
+  "schema": "openarc.local-market-catalog/v1",
+  "version": 1,
+  "generatedAt": 0,
+  "page": {
+    "id": "local",
+    "title": "本地市场"
+  },
+  "categories": [],
+  "items": [],
+  "apps": [],
+  "skillPacks": [],
+  "fields": {
+    "schema": "清单格式标识；market-service.cjs 只按 version 校验，此字段供人阅读",
+    "version": "清单结构版本，必须为 1；不是 1 一律 MARKET_MANIFEST_INVALID",
+    "generatedAt": "清单生成时间（毫秒）。0 表示未指定，服务读取时用当前时间补；仅影响展示",
+    "page": "市场标题：{ id, title }；id 缺省回落 local",
+    "categories": "可选分类数组；为空时服务端按 software / games 兜底，不影响条目",
+    "items": "保留的条目总表，本版本恒为空；真实条目只从 apps / skillPacks 读取",
+    "apps": "本地 App 条目数组。空数组 = 本次没有可用 App（有效状态，不是错误）",
+    "skillPacks": "本地技能包条目数组。空数组 = 本次没有可用技能包"
+  },
+  "appItemFields": {
+    "id": "必填；只允许 [a-zA-Z0-9._-]",
+    "name": "必填；展示名",
+    "version": "必填；非空字符串",
+    "build": "必填；大于 0 的整数",
+    "category": "可选；games 或缺省 software",
+    "subtitle": "可选；一句话副标题",
+    "summary": "可选；详细介绍",
+    "tags": "可选；字符串数组（最多 12）",
+    "featured": "可选；布尔，是否推荐",
+    "packageSize": "可选；字节数",
+    "publishedAt": "可选；毫秒时间戳"
+  },
+  "skillPackItemFields": {
+    "id": "必填；只允许 [a-zA-Z0-9._-]",
+    "name": "必填；展示名",
+    "version": "必填；非空字符串",
+    "description": "可选；介绍",
+    "entry": "可选；相对入口路径（拒绝绝对路径与 .. 穿越）",
+    "tags": "可选；字符串数组",
+    "packageSize": "可选；字节数",
+    "publishedAt": "可选；毫秒时间戳"
+  }
+}

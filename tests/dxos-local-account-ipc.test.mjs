@@ -93,12 +93,12 @@ function wire(fx) {
 const call = (ipc, command) => ipc.invoke("identity:command", trustedEvent(), command);
 
 // ── ① 命令表 ─────────────────────────────────────────────────────────────
-test("① 命令表：14 条本地账号命令、risk/credential 合法，既有身份命令逐字不变", () => {
+test("① 命令表：15 条本地账号命令（B7f 追加 identity/audit-list）、risk/credential 合法，既有身份命令逐字不变", () => {
   const required = [
     "identity/departments-list", "identity/department-create", "identity/department-update", "identity/department-delete",
     "identity/users-list", "identity/user-create", "identity/user-update", "identity/user-delete", "identity/user-reset-password",
     "identity/app-access-rule-save", "identity/app-permission-policy-save", "identity/app-permission-snapshot", "identity/app-access-summary",
-    "identity/local-account-info",
+    "identity/local-account-info", "identity/audit-list",
   ];
   const commands = domain.listLocalAccountCommands();
   assert.deepEqual(commands.map((entry) => entry.command), required);
@@ -339,4 +339,42 @@ test("⑦ 审计：B4e 源语义事件名进入 audit_log / authorization_audit"
   const actions = authzActions(fx);
   assert.ok(actions.includes("app_access.update"));
   assert.ok(actions.includes("department.delete"));
+});
+
+// ── ⑧ B7f：identity/audit-list 只读审计行 ────────────────────────────────
+test("⑧ 审计读取：超管读真实行，分页 / 事件名 / 时间过滤生效，字段去敏，成员越权拒绝", async () => {
+  const fx = await bootstrapped();
+  const ipc = wire(fx);
+  const created = await call(ipc, { type: "identity/department-create", sessionRef: fx.adminRef, name: "审计部" });
+  assert.equal(created.ok, true);
+
+  const all = await call(ipc, { type: "identity/audit-list", sessionRef: fx.adminRef });
+  assert.equal(all.ok, true, JSON.stringify(all));
+  assert.ok(all.total >= 1);
+  const create = all.items.find((row) => row.event === "department.create");
+  assert.ok(create, "必须有真实 department.create 行");
+  assert.deepEqual(create.sources, ["audit_log"]);
+  assert.equal(create.result, "OK");
+  assert.equal(JSON.stringify(all).includes("session_ref_hash"), false, "投影必须去敏");
+
+  const filtered = await call(ipc, { type: "identity/audit-list", sessionRef: fx.adminRef, event: "department.create" });
+  assert.equal(filtered.ok, true);
+  assert.ok(filtered.items.length >= 1 && filtered.items.every((row) => row.event === "department.create"));
+
+  const paged = await call(ipc, { type: "identity/audit-list", sessionRef: fx.adminRef, limit: 1 });
+  assert.equal(paged.items.length, 1);
+  assert.equal(paged.limit, 1);
+
+  // 夹具时钟是 1_800_000_000_000 + Date.now()，用 until=1 保证早于全部行。
+  const past = await call(ipc, { type: "identity/audit-list", sessionRef: fx.adminRef, until: 1 });
+  assert.equal(past.items.length, 0, "时间过滤生效");
+  const future = await call(ipc, { type: "identity/audit-list", sessionRef: fx.adminRef, since: 1 });
+  assert.ok(future.items.length >= 1, "since=1 应包含全部行");
+
+  const memberCreate = await call(ipc, { type: "identity/user-create", sessionRef: fx.adminRef, identifier: "a1@openarc.test", password: USER_PW, displayName: "A1", role: "user" });
+  assert.equal(memberCreate.ok, true);
+  const memberLogin = await call(ipc, { type: "identity/login", identifier: "a1@openarc.test", password: USER_PW });
+  assert.equal(memberLogin.ok, true);
+  const denied = await call(ipc, { type: "identity/audit-list", sessionRef: memberLogin.snapshot.sessionRef });
+  assert.equal(denied.error, "NOT_SUPER_ADMIN");
 });

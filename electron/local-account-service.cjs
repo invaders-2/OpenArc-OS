@@ -452,6 +452,45 @@ class LocalAccountService {
     return { ok: true, items: this.identity.allUsers().map((row) => this.#publicUser(row)) };
   }
 
+  /**
+   * B7f · 审计读取（只读，超管面）。数据源是既有 audit_log / authorization_audit 的真实行：
+   *   · 字段投影去敏：不返回 session_ref_hash / request_id / old_permissions 等敏感列；
+   *   · 分页（limit / offset）+ 按事件名（audit_log.event / authorization_audit.action）与时间过滤；
+   *   · result 收敛成 UI 可分支的 OK / DENY（audit_log 的 PARTIAL / ERROR 一律记 DENY）。
+   */
+  listAuditEvents({ context, event = null, since = null, until = null, limit = 50, offset = 0 } = {}) {
+    const gate = this.#requireSuper(context);
+    if (!gate.ok) return gate;
+    const name = typeof event === "string" && event.trim() ? event.trim().slice(0, 120) : null;
+    const from = since === null || since === undefined || !Number.isFinite(Number(since)) ? null : Number(since);
+    const to = until === null || until === undefined || !Number.isFinite(Number(until)) ? null : Number(until);
+    const max = Math.max(1, Math.min(200, Math.trunc(Number(limit)) || 50));
+    const skip = Math.max(0, Math.trunc(Number(offset)) || 0);
+    const db = this.identity.connection;
+    const rows = [];
+
+    const auditSql = ["SELECT at, event, user_ref, result, error_code FROM audit_log WHERE 1=1"];
+    const auditParams = [];
+    if (name) { auditSql.push("AND event = ?"); auditParams.push(name); }
+    if (from !== null) { auditSql.push("AND at >= ?"); auditParams.push(from); }
+    if (to !== null) { auditSql.push("AND at <= ?"); auditParams.push(to); }
+    for (const row of db.prepare(auditSql.join(" ")).all(...auditParams)) {
+      rows.push({ source: "audit_log", at: Number(row.at) || 0, event: String(row.event || ""), result: String(row.result) === "OK" ? "OK" : "DENY", errorCode: row.error_code || null, actor: row.user_ref || null, target: null, sources: ["audit_log"] });
+    }
+
+    const authzSql = ["SELECT at, actor_user_id, target_user_id, app_id, department_id, action, decision, reason_code FROM authorization_audit WHERE 1=1"];
+    const authzParams = [];
+    if (name) { authzSql.push("AND action = ?"); authzParams.push(name); }
+    if (from !== null) { authzSql.push("AND at >= ?"); authzParams.push(from); }
+    if (to !== null) { authzSql.push("AND at <= ?"); authzParams.push(to); }
+    for (const row of db.prepare(authzSql.join(" ")).all(...authzParams)) {
+      rows.push({ source: "authorization_audit", at: Number(row.at) || 0, event: String(row.action || ""), result: String(row.decision) === "ALLOW" ? "OK" : "DENY", errorCode: row.reason_code || null, actor: row.actor_user_id || null, target: row.target_user_id || row.app_id || row.department_id || null, sources: ["authorization_audit"] });
+    }
+
+    rows.sort((a, b) => (b.at - a.at) || (a.source < b.source ? -1 : a.source > b.source ? 1 : 0));
+    return { ok: true, items: rows.slice(skip, skip + max), total: rows.length, limit: max, offset: skip, sources: ["audit_log", "authorization_audit"] };
+  }
+
   /** 源 auth.ts:429-448 localAccountEntitlement 的本地替代：只给真实计数，无签名权益/上限字段。 */
   localAccountInfo() {
     const deptCount = this.identity.connection.prepare("SELECT COUNT(*) AS c FROM departments").get();

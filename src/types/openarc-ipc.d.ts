@@ -247,8 +247,74 @@ export interface OpenArcMediaArtifact {
 }
 
 export interface OpenArcMediaBridge extends OpenArcCommandBridge, OpenArcEventBridge {}
-/** P5 ComfyUI：本地实例启停、工作流、运行。 */
-export interface OpenArcComfyBridge extends OpenArcCommandBridge, OpenArcEventBridge {}
+/**
+ * B7e1 ComfyUI：本地 / 局域网 / 远端实例登记与监督，API 工作流解析导入，运行提交与取消。
+ *
+ * 唯一入口 command({ command, payload })（受控白名单，见 electron/comfy-domain.cjs 的 COMFY_COMMANDS），
+ * 以及 comfy:event 下行（主进程封装的 P1 信封，channel="comfy:event"）。
+ * ComfyUI 是**可选插件、默认关闭**：未启用 → { ok:false, error:"INTEGRATION_UNAVAILABLE" }；
+ * 已启用但本机缺 Python / ComfyUI 安装路径 → { ok:false, error:"COMFY_DEPENDENCY_UNAVAILABLE",
+ * detail:{ dependency, missing, install } }（"缺什么 / 怎么装"），绝不假运行。
+ * 重活（启动实例 / 停止实例 / 提交运行）全部走受监督子进程（dxos-foundation-runner.cjs + comfy-worker.cjs）。
+ * 这里没有 ipcRenderer / Python 句柄 / 绝对路径 / 凭据 —— sessionRef 与 appId 由主进程注入，
+ * renderer 自报的 userId / role / appId 一律忽略；云发布 / 云更新 / api.dx-os.com / 云端实时房间一律 OUT。
+ */
+export type OpenArcComfyCommand =
+  | "comfy/health"
+  | "comfy/plugin/get"
+  | "comfy/plugin/enable"
+  | "comfy/plugin/disable"
+  | "comfy/dependencies/probe"
+  | "comfy/bridge/install"
+  | "comfy/bridge/archive"
+  | "comfy/instances/list"
+  | "comfy/instances/save"
+  | "comfy/instances/delete"
+  | "comfy/instances/start"
+  | "comfy/instances/stop"
+  | "comfy/workflows/list"
+  | "comfy/workflows/get"
+  | "comfy/workflows/parse"
+  | "comfy/workflows/import"
+  | "comfy/workflows/save"
+  | "comfy/workflows/delete"
+  | "comfy/workflows/agent-manifests"
+  | "comfy/run/start"
+  | "comfy/run/get"
+  | "comfy/run/list"
+  | "comfy/run/results"
+  | "comfy/run/cancel";
+
+export interface OpenArcComfyCommandRequest {
+  command: OpenArcComfyCommand;
+  payload?: Record<string, unknown>;
+}
+
+/** 依赖探测条目：detail 是人话的"缺什么"，install 是可执行的"怎么装"。 */
+export interface OpenArcComfyDependency {
+  id: string;
+  /** python：ComfyUI Python 运行时；binary：安装路径（main.py / rootDir）。 */
+  kind: "python" | "binary";
+  label: string;
+  required: boolean;
+  status: "ok" | "missing";
+  detail: string;
+  install: string;
+}
+
+/** 失败体：缺依赖时 detail.missing / detail.install 必须可读。 */
+export interface OpenArcComfyFailure {
+  ok: false;
+  error: string;
+  message: string;
+  detail?: unknown;
+}
+export type OpenArcComfyResult<T = Record<string, unknown>> = OpenArcSuccess<T> | OpenArcComfyFailure;
+
+export interface OpenArcComfyBridge extends OpenArcCommandBridge {
+  command: (command: OpenArcComfyCommandRequest) => Promise<OpenArcComfyResult<unknown>>;
+  onEvent: (callback: (event: OpenArcEvent) => void) => () => void;
+}
 /**
  * B6a 自动化域：定义 CRUD / 启停 / 调度 / 运行记录。
  *
@@ -343,12 +409,358 @@ export interface OpenArcAutomation {
 }
 
 export interface OpenArcAutomationBridge extends OpenArcCommandBridge, OpenArcEventBridge {}
-/** P7 外部集成：可选第三方插件（默认关闭）。 */
-export interface OpenArcIntegrationBridge extends OpenArcCommandBridge {}
-/** P7 开发者平台：manifest、实验室、打包、发布。 */
-export interface OpenArcDeveloperBridge extends OpenArcCommandBridge {}
-/** P7 本地市场：目录清单、安装 / 回滚。 */
-export interface OpenArcMarketBridge extends OpenArcCommandBridge {}
+
+/**
+ * B7c 集成域：**可选插件，默认关闭**。
+ *
+ * 唯一入口 command({ command, payload })（受控白名单，见 electron/plugin-service.cjs 的
+ * INTEGRATION_COMMANDS，B7f 起含 B7d 领星 / 紫鸟 / 夸克与 B7e2 RunningHub / ModelScope）。
+ * 三个内置插件 dingtalk / weather / almanac 默认全关；未启用、
+ * 或已启用但依赖缺失 / 运行时能力（fetch / safeStorage）未注入时，一律返回
+ * { ok:false, error:"INTEGRATION_UNAVAILABLE", detail:"<缺什么、怎么装>" }，绝不假实现。
+ * 开关落 <userData>/dxos/integrations.json；钉钉凭据走 safeStorage，明文不过桥。
+ */
+export type OpenArcIntegrationCommand =
+  | "integration/health"
+  | "integration/commands"
+  | "integration/plugins/list"
+  | "integration/plugins/get"
+  | "integration/plugins/enable"
+  | "integration/plugins/disable"
+  | "integration/plugins/health"
+  | "integration/dingtalk/status"
+  | "integration/dingtalk/channels"
+  | "integration/dingtalk/channels/save"
+  | "integration/dingtalk/channels/delete"
+  | "integration/dingtalk/contacts"
+  | "integration/dingtalk/contacts/record"
+  | "integration/dingtalk/send"
+  | "integration/dingtalk/send-to-user"
+  | "integration/dingtalk/agent-config/get"
+  | "integration/dingtalk/agent-config/save"
+  | "integration/weather/query"
+  | "integration/almanac/years"
+  | "integration/lingxing/status"
+  | "integration/lingxing/mapping/get"
+  | "integration/lingxing/mapping/import"
+  | "integration/lingxing/mapping/file"
+  | "integration/lingxing/cache/stats"
+  | "integration/lingxing/cache/sync/start"
+  | "integration/lingxing/cache/sync/get"
+  | "integration/lingxing/cache/rows"
+  | "integration/lingxing/cache/query"
+  | "integration/lingxing/cache/clear"
+  | "integration/lingxing/advertising/sync/start"
+  | "integration/lingxing/advertising/sync/get"
+  | "integration/lingxing/advertising/sync/stop"
+  | "integration/lingxing/advertising/cache/stats"
+  | "integration/lingxing/advertising/cache/query"
+  | "integration/lingxing/credential/save"
+  | "integration/lingxing/credential/status"
+  | "integration/ziniao/status"
+  | "integration/ziniao/jobs/list"
+  | "integration/ziniao/jobs/current"
+  | "integration/ziniao/jobs/start"
+  | "integration/ziniao/jobs/control"
+  | "integration/ziniao/jobs/delete"
+  | "integration/ziniao/jobs/recover"
+  | "integration/ziniao/vc/files"
+  | "integration/ziniao/credential/save"
+  | "integration/ziniao/credential/status"
+  | "integration/quark/status"
+  | "integration/quark/account"
+  | "integration/quark/login/start"
+  | "integration/quark/login/stop"
+  | "integration/quark/logout"
+  | "integration/quark/search"
+  | "integration/quark/browse"
+  | "integration/quark/download"
+  | "integration/quark/upload"
+  | "integration/quark/search-history/get"
+  | "integration/quark/search-history/record"
+  | "integration/quark/search-history/clear"
+  | "integration/quark/downloads/clean"
+  | "integration/quark/credential/status"
+  | "integration/runninghub/status"
+  | "integration/runninghub/credentials/save"
+  | "integration/runninghub/credentials/delete"
+  | "integration/runninghub/models"
+  | "integration/runninghub/generate-images"
+  | "integration/runninghub/edit-images"
+  | "integration/runninghub/generate-videos"
+  | "integration/modelscope/status"
+  | "integration/modelscope/credentials/save"
+  | "integration/modelscope/credentials/delete"
+  | "integration/modelscope/generate-images"
+  | "integration/modelscope/edit-images";
+
+export interface OpenArcIntegrationCommandRequest {
+  command: OpenArcIntegrationCommand;
+  payload?: Record<string, unknown>;
+}
+
+/** 插件健康报告的失败形状：detail 是人话的"缺什么、怎么装"。 */
+export interface OpenArcIntegrationFailure {
+  ok: false;
+  error: string;
+  detail: string;
+}
+export type OpenArcIntegrationResult<T = Record<string, unknown>> = OpenArcSuccess<T> | OpenArcIntegrationFailure;
+
+export interface OpenArcIntegrationDependency {
+  id: string;
+  /** binary：PATH 二进制；python：Python 包；network：网络可达性；credential：凭据已配置。 */
+  kind: "binary" | "python" | "network" | "credential";
+  label: string;
+  required: boolean;
+  status: "ok" | "missing" | "unknown";
+  detail: string;
+  install: string;
+}
+
+export interface OpenArcIntegrationPluginHealth {
+  id: string;
+  name: string;
+  kind: string;
+  version: string;
+  description: string;
+  enabled: boolean;
+  status: "disabled" | "healthy" | "degraded" | "unavailable";
+  dependencies: OpenArcIntegrationDependency[];
+  capabilities: { name: string; available: boolean }[];
+  missingRequired: string[];
+  missingOptional: string[];
+  detail: string;
+}
+
+export interface OpenArcIntegrationPluginSummary {
+  id: string;
+  name: string;
+  description: string;
+  kind: string;
+  version: string;
+  enabled: boolean;
+  requiredDependencies: string[];
+  optionalDependencies: string[];
+  capabilities: string[];
+}
+
+export interface OpenArcIntegrationBridge extends OpenArcCommandBridge {
+  command: (command: OpenArcIntegrationCommandRequest) => Promise<OpenArcIntegrationResult<unknown>>;
+}
+
+/**
+ * B7a 开发者平台域：本地 App 生命周期（装载 / 启用 / 禁用 / 回滚 / 卸载）+ 出网治理。
+ *
+ * 唯一入口 command({ command, payload })（受控白名单，见 electron/developer-domain.cjs 的 DEVELOPER_COMMANDS；
+ * B7f 起为 B7a 的 16 条 + B7b 的 lab / collab / migrations / realtime 54 条，共 70 条）。
+ * 不暴露 ipcRenderer / 包目录绝对路径 / 凭据密钥；sessionRef 与 appId 由主进程注入，
+ * renderer 自报的 userId / role / appId 一律忽略；developer:command 全部过 main.cjs 的 trusted(event)。
+ * 六张表沿用 v22：user_installed_apps / user_app_install_state / app_market_releases（本地清单缓存）/
+ * app_credential_bindings / app_runtime_events / app_network_audit，不新建第二套存储。
+ */
+export type OpenArcDeveloperCommand =
+  | "developer/install"
+  | "developer/uninstall"
+  | "developer/enable"
+  | "developer/disable"
+  | "developer/rollback"
+  | "developer/list"
+  | "developer/get"
+  | "developer/history"
+  | "developer/validate"
+  | "developer/credential/bind"
+  | "developer/credential/list"
+  | "developer/credential/unbind"
+  | "developer/network/evaluate"
+  | "developer/network/request"
+  | "developer/runtime/report"
+  | "developer/health"
+  | "developer/lab/templates"
+  | "developer/lab/example"
+  | "developer/lab/create"
+  | "developer/lab/createFromTemplate"
+  | "developer/lab/get"
+  | "developer/lab/list"
+  | "developer/lab/setOwner"
+  | "developer/lab/delete"
+  | "developer/lab/readFile"
+  | "developer/lab/writeFile"
+  | "developer/lab/setIcon"
+  | "developer/lab/zip"
+  | "developer/lab/preview"
+  | "developer/lab/verifyPreviewToken"
+  | "developer/lab/icon/normalize"
+  | "developer/lab/icon/auto"
+  | "developer/docs/catalog"
+  | "developer/docs/get"
+  | "developer/docs/status"
+  | "developer/docs/refresh"
+  | "developer/collab/create"
+  | "developer/collab/list"
+  | "developer/collab/get"
+  | "developer/collab/update"
+  | "developer/collab/setMembers"
+  | "developer/collab/applyChangeset"
+  | "developer/collab/setSharing"
+  | "developer/collab/createInvite"
+  | "developer/collab/revokeInvite"
+  | "developer/collab/redeemInvite"
+  | "developer/collab/delete"
+  | "developer/collab/roomAccess"
+  | "developer/migrations/apply"
+  | "developer/migrations/applyChain"
+  | "developer/migrations/saveSnapshot"
+  | "developer/migrations/restoreSnapshot"
+  | "developer/migrations/snapshotStatus"
+  | "developer/migrations/deleteSnapshots"
+  | "developer/migrations/deleteSnapshot"
+  | "developer/realtime/create"
+  | "developer/realtime/list"
+  | "developer/realtime/get"
+  | "developer/realtime/join"
+  | "developer/realtime/reconnect"
+  | "developer/realtime/leave"
+  | "developer/realtime/send"
+  | "developer/realtime/setState"
+  | "developer/realtime/members"
+  | "developer/realtime/close"
+  | "developer/realtime/stats"
+  | "developer/realtime/cleanup"
+  | "developer/realtime/events"
+  | "developer/realtime/transportStatus"
+  | "developer/realtime/lanServer";
+
+export interface OpenArcDeveloperCommandRequest {
+  command: OpenArcDeveloperCommand;
+  /** 装载 / 校验时携带 base64 包内容（package 或 packageBase64）；其余命令是各自参数。 */
+  payload?: Record<string, unknown>;
+}
+
+/** dx-app/v2 清单安全投影（不含 agent.toolManifest 等随包路径）。 */
+export interface OpenArcDeveloperManifest {
+  format: "dx-app/v1" | "dx-app/v2";
+  id: string;
+  version: string;
+  build: number;
+  releaseChannel: "stable" | "beta" | "dev";
+  minSystemVersion: string;
+  maxSystemVersion: string | null;
+  dataVersion: number;
+  name: string;
+  subtitle: string;
+  description: string;
+  category: "software" | "games";
+  entry: string;
+  multiInstance: boolean;
+  backgroundMode: "release" | "keep-alive";
+  permissions: string[];
+  network: { domains: string[]; methods: string[]; maxResponseBytes: number } | null;
+  hasMigrations: boolean;
+  migrations: { from: number; to: number }[];
+}
+
+export interface OpenArcDeveloperApp {
+  appId: string;
+  enabled: boolean;
+  version: string;
+  build: number;
+  releaseChannel: "stable" | "beta" | "dev";
+  installedAt: number | null;
+  updatedAt: number | null;
+  packageSize: number;
+  sha256: string;
+  historyCount: number;
+  manifest: OpenArcDeveloperManifest | null;
+  capabilities: Record<string, unknown>;
+}
+
+/** 可回滚的历史版本（卸载会清清单缓存与凭据绑定，运行时事件与网络审计保留）。 */
+export interface OpenArcDeveloperRelease {
+  version: string;
+  build: number;
+  releaseChannel: "stable" | "beta" | "dev";
+  dataVersion: number;
+  publishedAt: number;
+  revokedAt: number | null;
+}
+
+export interface OpenArcDeveloperBridge extends OpenArcCommandBridge {
+  command: (command: OpenArcDeveloperCommandRequest) => Promise<OpenArcResult<unknown>>;
+}
+
+/**
+ * B7c 本地市场域：**只读本地清单**，不联网、不下载、不安装。
+ *
+ * 云发布 / 审核 / 灰度 / 市场远端服务（api.dx-os.com）一律 OUT（任务书硬约束）。
+ * 清单结构非法 → MARKET_MANIFEST_INVALID；目录或清单缺失 → MARKET_CATALOG_MISSING。
+ */
+export type OpenArcMarketCommand =
+  | "market/catalog"
+  | "market/apps/list"
+  | "market/apps/get"
+  | "market/skillpacks/list"
+  | "market/skillpacks/get"
+  | "market/health";
+
+export interface OpenArcMarketCommandRequest {
+  command: OpenArcMarketCommand;
+  payload?: Record<string, unknown>;
+}
+
+export interface OpenArcMarketFailure {
+  ok: false;
+  error: string;
+  detail: string;
+}
+export type OpenArcMarketResult<T = Record<string, unknown>> = OpenArcSuccess<T> | OpenArcMarketFailure;
+
+/** 与 electron/market-domain.cjs 的 normalizeMarketplaceApp 一致（源 marketplace.ts:181-205）。 */
+export interface OpenArcMarketApp {
+  id: string;
+  name: string;
+  category: "software" | "games";
+  categoryIds: string[];
+  subtitle: string;
+  summary: string;
+  iconUrl?: string;
+  coverImageUrl?: string;
+  tags: string[];
+  featured: boolean;
+  version: string;
+  build: number;
+  channel: "stable" | "beta" | "dev";
+  packageSize: number;
+  minSystemVersion: string;
+  publishedAt: number;
+}
+
+export interface OpenArcMarketSkillPack {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  icon: string;
+  tags: string[];
+  packageSize: number;
+  /** 相对入口路径（拒绝绝对路径与目录穿越）；缺省表示由技能中心自行解析。 */
+  entry?: string;
+  publishedAt: number;
+}
+
+export interface OpenArcMarketCatalog {
+  generatedAt: number;
+  page: { id: string; title: string };
+  source: "local";
+  categories: { id: string; name: string; icon: string; description: string; count: number }[];
+  apps: OpenArcMarketApp[];
+  skillPacks: OpenArcMarketSkillPack[];
+  rejected: { apps: number; skillPacks: number };
+}
+
+export interface OpenArcMarketBridge extends OpenArcCommandBridge {
+  command: (command: OpenArcMarketCommandRequest) => Promise<OpenArcMarketResult<unknown>>;
+}
 /** P7 云替身：本地无对端，契约保留、默认关闭（DXOS_ERR_UNSUPPORTED）。 */
 export interface OpenArcCloudBridge extends OpenArcCommandBridge {}
 /** P6 更新：本地更新源检查。 */

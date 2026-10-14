@@ -41,6 +41,25 @@ const { registerAutomationIpc } = require("./automation-bootstrap.cjs");
 // B6c：平台域装配（诊断 / 数据保护 / 网络安全 / 供应商测试安全）与 platform:command 通道。
 const { createPlatformBundle } = require("./platform-service.cjs");
 const { registerPlatformIpc } = require("./platform-bootstrap.cjs");
+// B7a：开发者平台（本地 App 装载 / 启用 / 禁用 / 回滚 / 卸载 + 出网治理）与 developer:command 通道。
+const { createDeveloperBundle } = require("./developer-service.cjs");
+const { registerDeveloperIpc } = require("./developer-bootstrap.cjs");
+// B7f：B7b 四张命令切片（lab / collab / migrations / realtime）合流到唯一 developer:command。
+//   DeveloperLab：草稿 / 示例工程 / 离线文档 / 图标；
+//   DeveloperCollabProjects：协同项目（落既有 projects，owner 为当前会话用户）；
+//   DeveloperMigrationSnapshotStore：声明式数据迁移快照（安装 / 升级 / 回滚用）；
+//   DeveloperRealtimeHub：本机 / 局域网实时房间（缺 authorize 即结构化拒绝，不假连接）。
+const { createDeveloperDomainExtensions, DeveloperLab } = require("./developer-lab.cjs");
+const { DeveloperCollabProjects } = require("./developer-collab.cjs");
+const { DeveloperMigrationSnapshotStore } = require("./developer-migrations.cjs");
+const { DeveloperRealtimeHub } = require("./developer-realtime.cjs");
+// B7c：可选插件框架（钉钉 / 天气 / 黄历，默认全关）与本地市场目录（只读本地清单，不联网）。
+const { createPluginBundle } = require("./plugin-service.cjs");
+const { createMarketBundle } = require("./market-service.cjs");
+const { registerIntegrationIpc, registerMarketIpc } = require("./plugin-bootstrap.cjs");
+// B7e1：ComfyUI 可选插件（工作流 + 桥接 + 实例监督，默认关闭；重活走受监督子进程）。
+const { createComfyBundle } = require("./comfy-service.cjs");
+const { registerComfyIpc } = require("./comfy-bootstrap.cjs");
 // B4 · providerAdapter 桥：把 B2 的 provider-protocol store/service 投影成 B4 执行器要的只读适配器
 // （firstUsable/all/autoFallback/revealProvider/call）；只读投影绝不返回 api_key/credentialRef。
 const { createProviderAdapter } = require("./provider-adapter-bridge.cjs");
@@ -72,6 +91,14 @@ let mediaBundle;
 let automationBundle;
 /** B6c：平台域 bundle（createPlatformBundle 的唯一实例；无身份服务时为 undefined）。 */
 let platformBundle;
+/** B7a：开发者平台 bundle（createDeveloperBundle 的唯一实例；无身份服务时为 undefined）。 */
+let developerBundle;
+/** B7c：可选插件 bundle（createPluginBundle 的唯一实例；无身份服务时为 undefined）。 */
+let pluginBundle;
+/** B7c：本地市场 bundle（createMarketBundle 的唯一实例）。 */
+let marketBundle;
+/** B7e1：ComfyUI 可选插件 bundle（createComfyBundle 的唯一实例；无身份服务时为 undefined）。 */
+let comfyBundle;
 /** D5-01 Closure-2：受控浏览器目标（用户显式授权）。宿主持有唯一实例，工具链与 UI 共用同一个。 */
 let browserControl;
 
@@ -704,6 +731,117 @@ app.whenReady().then(async () => {
       bundle: platformBundle,
       identity: identity.service,
       isTrusted: trusted,
+    });
+
+    // B7a：开发者平台（本地 App 生命周期）。
+    //   · 六张表沿用 v22（user_installed_apps / user_app_install_state / app_market_releases /
+    //     app_credential_bindings / app_runtime_events / app_network_audit），零 CREATE / ALTER；
+    //   · 包字节落 <userData>/dxos/developer-apps/packages（清单缓存与当前版本指针在 app_market_releases）；
+    //   · 出网沿用 developerNetwork 口径（HTTPS + 域白名单 + DNS 公网校验 + 每分钟 60 次限流 + 审计）；
+    //     未注入 lookup / fetch 时走 node:dns 与 globalThis.fetch；测试全部注入假实现（离线）；
+    //   · developer:command 与 platform / automation 同一条 trusted(event) 边界。
+    // B7f：安装 / 升级 / 回滚的声明式迁移注入面。
+    //   · 迁移引擎需要 snapshotSubtree / restoreSubtreeSnapshot，只有 dxos-fs 完整实例有，
+    //     B6b 的窄适配器面没有；因此取 .store（同一棵树，不新建第二份数据目录）；
+    //   · snapshotRoot = <userData>/dxos/developer-apps/migrations（任务书 item 2）。
+    const userData = app.getPath("userData");
+    const developerMigrationFs = dxosFsAdapter ? dxosFsAdapter.store : null;
+    const developerMigrationSnapshotRoot = path.join(userData, "dxos", "developer-apps", "migrations");
+    // 实时房间 authorize：只认主进程会话推导出的 userId，payload 自报的 userId 必须与之一致。
+    const developerRealtimeAuthorize = ({ userId } = {}) => {
+      const sessionRef = identity.service ? identity.service.current : null;
+      if (!sessionRef) return { ok: false, error: "UNAUTHORIZED", detail: "no-session" };
+      const session = identity.store && typeof identity.store.validateSession === "function" ? identity.store.validateSession(sessionRef, { sensitive: false }) : null;
+      if (!session || session.ok !== true) return { ok: false, error: "UNAUTHORIZED", detail: "invalid-session" };
+      const sessionUserId = session.user && session.user.id != null ? session.user.id : null;
+      if (!sessionUserId || (userId && String(userId) !== String(sessionUserId))) return { ok: false, error: "FORBIDDEN", detail: "user-mismatch" };
+      return { ok: true };
+    };
+    // 装配失败不阻断启动：developer:command 保留基座，扩展命令回到 DEVELOPER_COMMAND_NOT_ALLOWED。
+    let developerDomainExtensions = null;
+    try {
+      developerDomainExtensions = createDeveloperDomainExtensions({
+        lab: new DeveloperLab({ rootDir: path.join(userData, "dxos", "developer-lab") }),
+        docsDir: null,
+        collab: new DeveloperCollabProjects({ identity: identity.store, store: identity.integrationStore, authService: identity.authorization }),
+        migrationStore: new DeveloperMigrationSnapshotStore({ snapshotRoot: developerMigrationSnapshotRoot }),
+        migrationFs: developerMigrationFs,
+        realtimeHub: new DeveloperRealtimeHub({ authorize: developerRealtimeAuthorize }),
+      });
+    } catch (error) {
+      console.warn("[openarc] 开发者扩展切片装配失败，developer:command 仅保留基座：" + ((error && error.message) || error));
+    }
+    developerBundle = createDeveloperBundle({
+      userDataDir: userData,
+      identityStore: identity.store,
+      authorization: identity.authorization,
+      systemVersion: app.getVersion(),
+      migrationFs: developerMigrationFs,
+      migrationSnapshotRoot: developerMigrationSnapshotRoot,
+      clock: null,
+      logger: null,
+    });
+    registerDeveloperIpc({
+      ipcMain,
+      bundle: developerBundle,
+      domainExtensions: developerDomainExtensions,
+      identity: identity.service,
+      isTrusted: trusted,
+      hostAppId: "ai",
+    });
+
+    // B7c：可选插件框架 + 本地市场。
+    //   · 三个插件（钉钉 / 天气 / 黄历）默认全关；开关落 <userData>/dxos/integrations.json；
+    //   · 钉钉 webhook / 加签密钥 / clientSecret 走 credential-store 的 safeStorage 后端，明文不落盘；
+    //   · 天气 / 黄历网络经注入 fetch（本机离线时不注入即结构化 INTEGRATION_UNAVAILABLE，不假实现）；
+    //   · 本地市场只读 catalog.json（随包 resources/market 或 <userData>/dxos/market），不联网、不下载；
+    //     云发布 / 审核 / 灰度 / api.dx-os.com 一律 OUT（任务书硬约束）；
+    //   · integration:command / market:command 与 platform / automation 同一条 trusted(event) 边界。
+    pluginBundle = createPluginBundle({
+      userDataDir: app.getPath("userData"),
+      safeStorage,
+      fetch: typeof fetch === "function" ? fetch.bind(globalThis) : null,
+      logger: null,
+      clock: null,
+    });
+    registerIntegrationIpc({
+      ipcMain,
+      bundle: pluginBundle,
+      identity: identity.service,
+      isTrusted: trusted,
+    });
+    marketBundle = createMarketBundle({
+      userDataDir: app.getPath("userData"),
+      appDir: path.join(__dirname, ".."),
+      logger: null,
+      clock: null,
+    });
+    registerMarketIpc({
+      ipcMain,
+      bundle: marketBundle,
+      identity: identity.service,
+      isTrusted: trusted,
+    });
+
+    // B7e1：ComfyUI 可选插件（工作流 + 桥接 + 实例监督）。
+    //   · 默认关闭：<userData>/dxos/comfy.json 的 enabled 缺省 false；
+    //   · 本机缺 Python / ComfyUI main.py → COMFY_DEPENDENCY_UNAVAILABLE（detail: missing + install），绝不假运行；
+    //   · 重活（启动实例 / 停止实例 / 提交运行）全部走 dxos-foundation-runner.cjs + comfy-worker.cjs，
+    //     主进程只编写 spec、跟踪受监督句柄、经 comfy:event 回推进度；
+    //   · 工作流解析 / 参数校验 / 节点映射复用 comfy-workflow.cjs 的纯函数（三份内置 API 工作流随包内嵌）；
+    //   · 云发布 / 云更新 / 云端实时房间 / 市场远端服务（api.dx-os.com）一律 OUT（任务书硬约束）。
+    comfyBundle = createComfyBundle({
+      userDataDir: app.getPath("userData"),
+      bundledWorkflowsDir: path.join(__dirname, "bundled-comfy-workflows"),
+      logger: null,
+      clock: null,
+    });
+    registerComfyIpc({
+      ipcMain,
+      bundle: comfyBundle,
+      identity: identity.service,
+      isTrusted: trusted,
+      send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("comfy:event", event); },
     });
 
     // D3-04C：注册安全预览协议 handler（每次请求重新授权 + Range 流式返回）。

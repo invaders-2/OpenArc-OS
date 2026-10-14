@@ -277,4 +277,53 @@ contextBridge.exposeInMainWorld("openarc", {
   platform: {
     command: (command) => ipcRenderer.invoke("platform:command", command),
   },
+  /**
+   * B7a 开发者平台桥（第 23 个顶层键；第 22 是 B6c 的 platform）。
+   *
+   * **只有一条能力**：派发受控 developer 命令（本地 App 装载 / 启用 / 禁用 / 回滚 / 卸载 / 清单校验 /
+   * 凭据引用 / 出网判定）。不暴露 ipcRenderer / 包目录绝对路径 / 凭据密钥；sessionRef 与 appId 由
+   * 主进程注入，Renderer 自报的 userId / role / appId 一律忽略（与 platform / automation 同一条 trusted 边界）。
+   */
+  developer: {
+    command: (command) => ipcRenderer.invoke("developer:command", command),
+  },
+  /**
+   * B7c 可选插件桥（平台域之后的第 24 个顶层键）。
+   *
+   * **只有一条能力**：派发受控 integration 命令（插件开关 / 依赖健康 / 钉钉·天气·黄历）。
+   * 三个插件默认全关；缺依赖或运行时能力未注入一律结构化
+   * { ok:false, error:"INTEGRATION_UNAVAILABLE", detail }，不假实现。
+   * 不暴露 ipcRenderer / 凭据 / 绝对路径；sessionRef 与 appId 由主进程注入，
+   * Renderer 自报的 userId / role / appId 一律忽略（与 platform / automation 同一条 trusted 边界）。
+   */
+  integration: {
+    command: (command) => ipcRenderer.invoke("integration:command", command),
+  },
+  /**
+   * B7c 本地市场桥（第 25 个顶层键）。
+   *
+   * **只有一条能力**：派发受控 market 命令，只读"随包 / 本地目录"的 catalog.json。
+   * **不联网、不下载、不安装**；云发布 / 审核 / 灰度 / 市场远端服务（api.dx-os.com）一律 OUT。
+   */
+  market: {
+    command: (command) => ipcRenderer.invoke("market:command", command),
+  },
+  /**
+   * B7e1 ComfyUI 桥（market 之后的第 26 个顶层键；键序按实际追加，未重排既有键）。
+   *
+   * **只有两条能力**：派发受控 comfy 命令（插件开关 / 依赖探测 / 实例监督 / 工作流解析导入 / 运行提交取消）、
+   * 订阅 comfy 下行事件（P1 信封；受监督子进程的进度经它回推）。
+   * ComfyUI 是**可选插件、默认关闭**：未启用 → INTEGRATION_UNAVAILABLE；本机缺 Python / ComfyUI 安装路径
+   * → COMFY_DEPENDENCY_UNAVAILABLE（detail 给出"缺什么 / 怎么装"），绝不假运行。
+   * 不暴露 ipcRenderer / Python 句柄 / 凭据 / 绝对路径；sessionRef 与 appId 由主进程注入，
+   * Renderer 自报的 userId / role / appId 一律忽略（与 market / integration / platform 同一条 trusted 边界）。
+   */
+  comfy: {
+    command: (command) => ipcRenderer.invoke("comfy:command", command),
+    onEvent: (callback) => {
+      const listener = (_, event) => callback(event);
+      ipcRenderer.on("comfy:event", listener);
+      return () => ipcRenderer.removeListener("comfy:event", listener);
+    },
+  },
 });

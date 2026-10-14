@@ -358,6 +358,7 @@ class IdentityService {
       case "identity/app-permission-snapshot": return account.appPermissionSnapshot({ userId: command.userId });
       case "identity/app-access-summary": return account.appAccessSummary(command.userId);
       case "identity/local-account-info": return account.localAccountInfo({ context });
+      case "identity/audit-list": return account.listAuditEvents({ context, event: command.event, since: command.since, until: command.until, limit: command.limit, offset: command.offset });
       default: return domain.fail(ERROR.INVALID_INPUT, "unhandled-local-account");
     }
   }

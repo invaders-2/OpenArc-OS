@@ -149,6 +149,8 @@ const LOCAL_ACCOUNT_COMMANDS = Object.freeze({
   "identity/app-permission-snapshot": { risk: "read", credential: false, summary: "读取用户维度的 APP 访问与权限快照" },
   "identity/app-access-summary": { risk: "read", credential: false, summary: "汇总某用户可打开的 APP" },
   "identity/local-account-info": { risk: "read", credential: false, summary: "本地账号安装级计数（用户 / 部门）" },
+  // B7f：审计区块的真实数据源（只读；字段投影去敏，分页 + 事件名 / 时间过滤）。
+  "identity/audit-list": { risk: "read", credential: false, summary: "读取审计行（audit_log / authorization_audit 去敏投影）" },
 });
 
 const LOCAL_ACCOUNT_COMMAND_NAMES = Object.freeze(Object.keys(LOCAL_ACCOUNT_COMMANDS));

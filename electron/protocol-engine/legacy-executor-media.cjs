@@ -67,6 +67,7 @@ const { randomUUID } = require("node:crypto");
 const { PROTOCOLS, normalizeProtocol, normalizeProtocolId, buildAuthHeaders, joinUrl } = require("./legacy-protocols.cjs");
 const { defaultProtocolTransport, defaultProtocolClock } = require("./transport.cjs");
 const images = require("./legacy-executor-images.cjs");
+const legacyExecutorPorts = require("../legacy-executor-ports.cjs");
 
 const LEGACY_DEPENDENCY_UNAVAILABLE = "LEGACY_DEPENDENCY_UNAVAILABLE";
 
@@ -736,9 +737,18 @@ async function generateVideosUnmetered(provider, model, params, input, timeoutMs
   if (rawProtocol === "minimax") return generateMinimaxVideos(provider, model, params, input, timeoutMs, net, time);
   if (rawProtocol === "cli:jimeng" || rawProtocol === "jimeng-cli") return unavailable(BATCH.cliTools + "：generateJimengVideo（protocols.ts:6050）");
   const declaredRuntime = DECLARED_VIDEO_RUNTIME_PROTOCOL_IDS.has(rawProtocol);
-  if (rawProtocol === "agnes") return unavailable(BATCH.agnes + "：generateAgnesVideos（protocols.ts:6063）");
+  // B7e2：端口已注入则调用注入实现；未注入仍返回结构化 LEGACY_DEPENDENCY_UNAVAILABLE（B2 行为不变）。
+  if (rawProtocol === "agnes") {
+    const port = legacyExecutorPorts.getLegacyExecutorPort("generateAgnesVideos");
+    if (typeof port === "function") return port(provider, model, params, timeoutMs, net, time);
+    return unavailable(BATCH.agnes + "：generateAgnesVideos（protocols.ts:6063）");
+  }
   if (rawProtocol === "volcengine") return generateVolcengineVideos(provider, model, params, input, timeoutMs, net, time);
-  if (rawProtocol === "runninghub") return unavailable(BATCH.runninghub + "：generateRunningHubVideos（protocols.ts:6065）");
+  if (rawProtocol === "runninghub") {
+    const port = legacyExecutorPorts.getLegacyExecutorPort("generateRunningHubVideos");
+    if (typeof port === "function") return port(provider, model, params, timeoutMs, net, time);
+    return unavailable(BATCH.runninghub + "：generateRunningHubVideos（protocols.ts:6065）");
+  }
   assertRunnableProtocol(provider.protocol, "视频生成");
   const proto = normalizeProtocol(provider.protocol);
   if (proto !== "openai" && proto !== "apimart" && proto !== "apimart-media" && !declaredRuntime) {
@@ -1527,10 +1537,23 @@ async function editImagesUnmetered(provider, model, params, inputs, timeoutMs, n
   if (rawProto === "cli:jimeng" || rawProto === "jimeng-cli") return unavailable(BATCH.cliTools + "：cli:jimeng 图片编辑（protocols.ts:6516 generateJimengImage）");
   if (rawProto === "cli:codex" || rawProto === "codex-cli") return unavailable(BATCH.agentCliTools + "：cli:codex 图片编辑（protocols.ts:6530 editCodexImage）");
   if (rawProto === "cli:gemini" || rawProto === "gemini-cli") return unavailable(BATCH.agentCliTools + "：cli:gemini 图片编辑（protocols.ts:6539 editGeminiCliImage）");
-  if (rawProto === "agnes") return unavailable(BATCH.agnes + "：editAgnesImages（protocols.ts:6545）");
-  if (rawProto === "modelscope") return unavailable(BATCH.modelscope + "：editModelScopeImages（protocols.ts:6546）");
+  // B7e2：端口已注入则调用注入实现；未注入仍返回结构化 LEGACY_DEPENDENCY_UNAVAILABLE（B2 行为不变）。
+  if (rawProto === "agnes") {
+    const port = legacyExecutorPorts.getLegacyExecutorPort("editAgnesImages");
+    if (typeof port === "function") return port(provider, model, params, inputs, timeoutMs, net, time);
+    return unavailable(BATCH.agnes + "：editAgnesImages（protocols.ts:6545）");
+  }
+  if (rawProto === "modelscope") {
+    const port = legacyExecutorPorts.getLegacyExecutorPort("editModelScopeImages");
+    if (typeof port === "function") return port(provider, model, params, inputs, timeoutMs, net, time);
+    return unavailable(BATCH.modelscope + "：editModelScopeImages（protocols.ts:6546）");
+  }
   if (rawProto === "volcengine") return images.generateVolcengineImages(provider, model, params, inputs, timeoutMs, net);
-  if (rawProto === "runninghub") return unavailable(BATCH.runninghub + "：editRunningHubImages（protocols.ts:6548）");
+  if (rawProto === "runninghub") {
+    const port = legacyExecutorPorts.getLegacyExecutorPort("editRunningHubImages");
+    if (typeof port === "function") return port(provider, model, params, inputs, timeoutMs, net, time);
+    return unavailable(BATCH.runninghub + "：editRunningHubImages（protocols.ts:6548）");
+  }
   if (rawProto === "xai" || rawProto === "grok2api") {
     if (!inputs.length) throw new Error("图像编辑需要至少一张参考图");
     return images.requestGrok2ApiImages(provider, model, params, inputs, timeoutMs, net);
