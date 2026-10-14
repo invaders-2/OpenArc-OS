@@ -105,7 +105,8 @@ const AUTOMATION_COMMANDS = Object.freeze({
 
   // ---- 运行（automation-service.cjs） ----
   "automation/runNow": { risk: "use", credential: true, summary: "立即执行一次自动化（真实动作，需权限）" },
-  "automation/cancel": { risk: "manage", credential: false, summary: "取消一次排队中或运行中的执行记录（绝不伪造完成）" },
+  // B7j：取消的实参语义是运行记录 id（runId）—— 自然字段主用，automationId 仅作解析别名。
+  "automation/cancel": { risk: "manage", credential: false, summary: "取消一次运行中的执行记录（runId 必填；automationId 仅作为可解析到运行记录的兼容别名）" },
   "automation/runs": { risk: "read", credential: false, summary: "列出某个自动化或全部最近的运行记录" },
 
   // ---- 目录 / 解析 / 健康 ----

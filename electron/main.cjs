@@ -52,6 +52,11 @@ const { registerPlatformIpc } = require("./platform-bootstrap.cjs");
 // B7a：开发者平台（本地 App 装载 / 启用 / 禁用 / 回滚 / 卸载 + 出网治理）与 developer:command 通道。
 const { createDeveloperBundle } = require("./developer-service.cjs");
 const { registerDeveloperIpc } = require("./developer-bootstrap.cjs");
+// B7j：自动化域 developerApps 适配器读取的是 developer-service 的同一份本地装载态
+// （app_market_releases / user_installed_apps + <userData>/dxos/developer-apps 包清单）。
+const { createDeveloperStore } = require("./developer-store.cjs");
+// B7j：自动化域 toolCatalog 适配器复用 agent 工具目录的唯一执行入口（与 agent 域同一套权限判定）。
+const { runCatalogTool } = require("./agent-tool-catalog.cjs");
 // B7f：B7b 四张命令切片（lab / collab / migrations / realtime）合流到唯一 developer:command。
 //   DeveloperLab：草稿 / 示例工程 / 离线文档 / 图标；
 //   DeveloperCollabProjects：协同项目（落既有 projects，owner 为当前会话用户）；
@@ -290,6 +295,120 @@ function markProductReady() {
   globalThis.__OPENARC_PRODUCT_READY__ = state;
   try { app.emit("openarc:product-ready", state); } catch { /* 没有监听者也要能启动 */ }
   return state;
+}
+
+// ---------------------------------------------------------------------------
+// B7j · 自动化域适配器（只接线，不新增业务实现）
+//   · developerApps ← developer-service 的本地装载态（同一 db + <userData>/dxos）；
+//     developer-domain 当前把清单里的 automation 字段列为「本版本不接受」，因此这里只能如实
+//     投影能力清单 capabilities.tools：有工具声明才可能有可执行动作，绝不伪造。
+//   · integrations  ← plugin-service（钉钉 / 领星 / 紫鸟）；未启用 / 未注入 transport 时抛
+//     INTEGRATION_*，由 automation-service 归一成结构化 AGENT_DEPENDENCY_UNAVAILABLE。
+//   · toolCatalog   ← agent 工具目录的唯一执行入口（与 agent 域共用权限判定）。
+//   · agent         ← agent-service.runInstruction（project agent mode 同一真值路径）。
+//   · desktop       ← 本仓没有桌面执行端实现，保持 null；缺失原因进 automation/health。
+// ---------------------------------------------------------------------------
+
+/** 适配器层的结构化错误；code 会被 automation-service 归一成依赖缺失码。 */
+function automationAdapterError(code, message, detail) {
+  const error = new Error(String(message || code));
+  error.name = "AutomationAdapterError";
+  error.code = String(code);
+  if (detail !== undefined) error.detail = detail;
+  return error;
+}
+
+/** 自动化域 developerApps 适配器：只读 developer-store 的本地装载态，不做第二份数据。 */
+function createAutomationDeveloperAppsAdapter({ db, userDataDir, clock, runTool }) {
+  const developerStore = createDeveloperStore({ db, dataRoot: path.join(userDataDir, "dxos"), clock });
+  function packOf(appId) {
+    const current = developerStore.currentRelease(appId);
+    if (!current) return null;
+    let release = null;
+    try { release = developerStore.readRelease(appId, current.packagePath); } catch { release = null; }
+    if (!release) return null;
+    const tools = release.capabilities && Array.isArray(release.capabilities.tools) ? release.capabilities.tools : [];
+    return {
+      id: appId,
+      manifest: {
+        id: release.manifest.id,
+        name: release.manifest.name,
+        version: release.manifest.version,
+        // 源 automations.ts 的 manifest.automation.actions；本仓清单校验不接受 automation 字段，
+        // 退化为能力清单里的工具声明（工具名 / handler 类型）。
+        automation: { actions: tools.map((tool) => ({ id: tool.name, title: tool.title || tool.name, toolName: tool.name, handlerType: tool.handlerType })) },
+      },
+    };
+  }
+  function listPacks() {
+    return developerStore.listAppIds().map(packOf).filter(Boolean);
+  }
+  function installedAppIds(userId) {
+    return developerStore.listInstalled(String(userId)).map((row) => row.appId);
+  }
+  function catalog(userId) {
+    const installed = new Set(installedAppIds(userId));
+    return listPacks().map((pack) => ({ appId: pack.id, name: pack.manifest.name, version: pack.manifest.version, enabled: installed.has(pack.id), actions: pack.manifest.automation.actions }));
+  }
+  /** 定义期参数规约（automation-domain.normalizeAppActionArgs 的注入面）。 */
+  function normalizeAction(args) {
+    const source = args && typeof args === "object" ? args : {};
+    const appId = String(source.appId || "");
+    const actionId = String(source.actionId || "");
+    if (!appId || !actionId) throw automationAdapterError("AUTOMATION_INVALID_INPUT", "app_action 需要 appId 与 actionId");
+    const pack = listPacks().find((item) => item.id === appId && item.manifest.automation.actions.some((action) => action.id === actionId));
+    if (!pack) throw automationAdapterError("AUTOMATION_NOT_FOUND", "APP 自动化能力不存在（本仓清单不接受 automation 声明，只有能力清单里的工具可作为动作）：" + appId + "/" + actionId, { appId, actionId });
+    return { appId, actionId, values: source.values && typeof source.values === "object" ? source.values : {} };
+  }
+  return { listPacks, installedAppIds, catalog, normalizeAction, runTool };
+}
+
+/** 自动化域 integrations 适配器：plugin-service 的真实集成实例。 */
+function createAutomationIntegrationsAdapter({ pluginBundle }) {
+  if (!pluginBundle) return null;
+  const registry = pluginBundle.registry && typeof pluginBundle.registry.get === "function" ? pluginBundle.registry : null;
+  function requireEnabled(pluginId) {
+    const plugin = registry ? registry.get(pluginId) : null;
+    if (!plugin) throw automationAdapterError("INTEGRATION_NOT_ENABLED", "集成插件未登记：" + pluginId);
+    if (!plugin.enabled) throw automationAdapterError("INTEGRATION_NOT_ENABLED", "集成插件「" + plugin.name + "」未启用（integration/plugins/enable，id=" + pluginId + "）");
+    return plugin;
+  }
+  function requireOk(result, fallback) {
+    if (!result || result.ok !== true) throw automationAdapterError((result && result.error) || "INTEGRATION_UNAVAILABLE", (result && (result.detail || result.error)) || fallback);
+    return result.value !== undefined ? result.value : result;
+  }
+  return {
+    async lingxingCacheSync(args) {
+      requireEnabled("lingxing");
+      const job = pluginBundle.lingxing.startLingxingCacheSync(args && args.days);
+      return "领星缓存同步作业已启动：" + String(job && job.id ? job.id : "") + "（" + String(job && job.cacheDays ? job.cacheDays : "") + " 天）";
+    },
+    async ziniaoDownload(args) {
+      requireEnabled("ziniao");
+      const job = pluginBundle.ziniao.startZiniaoDownloadJob(Object.assign({}, args || {}));
+      return "紫鸟下载作业已启动：" + String(job && job.id ? job.id : "") + "（店铺 " + String(job && Array.isArray(job.stores) ? job.stores.length : 0) + " 个）";
+    },
+    async dingtalkGroupNotify(channelId, message) {
+      requireEnabled("dingtalk");
+      // 业务失败原样回传 { ok:false }，由 automation-service 记 AUTOMATION_UNAVAILABLE；
+      // 依赖缺失（未启用 / 无凭据）在 requireEnabled / requireOk 处抛，归一成依赖缺失码。
+      const sent = await pluginBundle.dingtalk.send({ channelId: channelId, msg: { text: message && message.text } });
+      if (!sent || sent.ok !== true) return { ok: false, error: (sent && sent.error) || "INTEGRATION_SEND_FAILED", detail: (sent && (sent.detail || sent.error)) || "钉钉群机器人发送失败" };
+      const value = sent.value || {};
+      return { ok: true, channel: value.channel || null };
+    },
+    async dingtalkPersonNotify(recipient, text) {
+      requireEnabled("dingtalk");
+      return requireOk(await pluginBundle.dingtalk.sendToUser({ userId: recipient, text: text }), "钉钉个人消息发送失败");
+    },
+  };
+}
+
+/** 自动化域 toolCatalog 适配器：复用 agent 工具目录的唯一执行入口。 */
+function createAutomationToolCatalogAdapter() {
+  return {
+    runTool: (toolName, values, actor, options) => runCatalogTool(String(toolName), values && typeof values === "object" ? values : {}, actor, options && typeof options === "object" ? options : {}),
+  };
 }
 
 app.whenReady().then(async () => {
@@ -706,36 +825,7 @@ app.whenReady().then(async () => {
       send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("media:event", event); },
     });
 
-    // B6a：自动化域。
-    //   · 定义 / 运行记录落 identity-store 同一 SQLite 连接（v22 迁移已建 automations / automation_runs，原样使用，不改表）；
-    //   · 调度器在主进程内（无云依赖）：startScheduler 定时领取到点定义并在异步路径执行，长动作不阻塞主线程；
-    //   · 业务动作的对外依赖一律走注入适配器：本地账号用 B4 的 localAccountService；
-    //     开发者 App（B7）/ 钉钉·领星·紫鸟（第三方集成插件默认关）/ 桌面执行端 / Agent 一律传 null，
-    //     命令侧保持结构化 AGENT_DEPENDENCY_UNAVAILABLE，绝不假执行；
-    //   · automation:event 与 model:event / task:event / agent:event / skill:event / media:event 同一条 trusted(event) 边界。
-    automationBundle = createAutomationBundle({
-      identityStore: identity.store,
-      authorization: identity.authorization,
-      localAccounts: identity.localAccountService
-        ? { findUser: (userId) => { const res = identity.localAccountService.listAuthUsers(); const items = res && res.ok && Array.isArray(res.items) ? res.items : []; return items.find((user) => user.id === userId) || null; } }
-        : null,
-      developerApps: null,
-      integrations: null,
-      desktop: null,
-      agent: null,
-      toolCatalog: null,
-      logger: null,
-      clock: null,
-    });
-    registerAutomationIpc({
-      ipcMain,
-      bundle: automationBundle,
-      identity: identity.service,
-      isTrusted: trusted,
-      send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("automation:event", event); },
-    });
-    automationBundle.startScheduler();
-
+    // B6a：自动化域装配已下移到 agent / developer / plugin 之后（见下方「B7j：自动化域装配」）。
     // B6c：平台域。
     //   · 快照落 <userData>/dxos/backups（排除 credentials 目录，绝不含明文密钥）；
     //   · 诊断只读 process.env 之外的进程事实，环境变量与绝对路径都不出主进程；
@@ -870,6 +960,57 @@ app.whenReady().then(async () => {
       identity: identity.service,
       isTrusted: trusted,
     });
+
+    // B7j：自动化域装配（agent / developer / plugin 均已就绪后才装配，保证适配器非空）。
+    //   · 定义 / 运行记录落 identity-store 同一 SQLite 连接（v22 迁移已建 automations / automation_runs，不改表）；
+    //   · 调度器在主进程内（无云依赖）：到点领取并在异步路径执行，长动作不阻塞主线程；
+    //   · 业务动作依赖全部来自真实实现：
+    //       developerApps ← developer-store（已安装 App / 本地装载清单）
+    //       integrations  ← plugin-service（钉钉 / 领星 / 紫鸟；默认关，未启用 / 无 transport 结构化不可用）
+    //       toolCatalog   ← agent 工具目录唯一执行入口
+    //       agent         ← agent-service.runInstruction（project agent mode 同一路径）
+    //       desktop       ← 本仓无桌面执行端实现，保持 null（health 如实列出缺失原因）
+    //   · automation:event 与 model:event / task:event / agent:event / skill:event / media:event 同一条 trusted(event) 边界。
+    const automationToolCatalog = createAutomationToolCatalogAdapter();
+    const automationDeveloperApps = createAutomationDeveloperAppsAdapter({
+      db: identity.store ? identity.store.connection || identity.store.db || null : null,
+      userDataDir: userData,
+      clock: () => Date.now(),
+      runTool: automationToolCatalog.runTool,
+    });
+    const automationIntegrations = createAutomationIntegrationsAdapter({ pluginBundle });
+    automationBundle = createAutomationBundle({
+      identityStore: identity.store,
+      authorization: identity.authorization,
+      localAccounts: identity.localAccountService
+        ? { findUser: (userId) => { const res = identity.localAccountService.listAuthUsers(); const items = res && res.ok && Array.isArray(res.items) ? res.items : []; return items.find((user) => user.id === userId) || null; } }
+        : null,
+      developerApps: automationDeveloperApps,
+      integrations: automationIntegrations,
+      // 本仓没有桌面执行端（music_play / music_control / open_app 的客户端执行器）：如实保持 null。
+      desktop: null,
+      agent: agentBundle && typeof agentBundle.runInstruction === "function"
+        ? { runInstruction: (instruction, options) => agentBundle.runInstruction(instruction, options) }
+        : null,
+      toolCatalog: automationToolCatalog,
+      // 未装配适配器的可读原因，直接进 automation/health.dependencyDetails。
+      adapterNotes: {
+        desktop: "本仓没有桌面执行端实现（music_play / music_control / open_app 的客户端执行器未装配）",
+        integrations: automationIntegrations ? null : "plugin-service 未装配",
+        agent: agentBundle ? null : "agent-service 未装配",
+      },
+      logger: null,
+      clock: null,
+    });
+    registerAutomationIpc({
+      ipcMain,
+      bundle: automationBundle,
+      identity: identity.service,
+      isTrusted: trusted,
+      send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("automation:event", event); },
+    });
+    automationBundle.startScheduler();
+
     marketBundle = createMarketBundle({
       userDataDir: app.getPath("userData"),
       appDir: path.join(__dirname, ".."),

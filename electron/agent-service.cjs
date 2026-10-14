@@ -457,6 +457,32 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
     catch (error) { throw createAgentError(AGENT_ERR_FORBIDDEN, (error && error.message) || "没有该项目的访问权限", { projectId }); }
   }
 
+  /**
+   * B7j：自动化域注入的 Agent 执行入口（automation_instruction）。
+   * 复用 agent/project/run 的同一条 project agent mode 真值路径：为自动化指令确保一个归属于
+   * 当前用户的「自动化任务」项目（不存在才创建），再走同一套适配器 / 权限校验。
+   * 模型 / 工具依赖缺失时由 project-agent-mode 抛结构化依赖错误，绝不伪造结果。
+   * userId 来自主进程已认证会话（自动化域 run 记录取 created_by），不接受渲染层自报。
+   */
+  const AUTOMATION_PROJECT_NAME = "自动化任务";
+  async function runInstruction(instruction, options = {}) {
+    const text = requireStr(instruction, 8000);
+    if (!text) throw createAgentError(AGENT_ERR_INVALID_INPUT, "instruction 必填");
+    const userId = requireStr(options.userId, 160);
+    if (!userId) throw createAgentError(AGENT_ERR_INVALID_INPUT, "缺少 userId");
+    const actor = options.actor && typeof options.actor === "object" ? { ...options.actor, id: userId } : { id: userId };
+    let project = agentTaskStore.listProjects(userId).find((item) => item && item.name === AUTOMATION_PROJECT_NAME);
+    if (!project) project = agentTaskStore.createProject({ name: AUTOMATION_PROJECT_NAME, rootNodeId: "automation-" + randomUUID(), createdBy: userId });
+    accessOrForbidden(project.id, userId, true);
+    projectAgentMode.configureProjectAgentMode({ ...projectAdapters, clock: now, logger });
+    try {
+      const outcome = await projectAgentMode.runProjectAgentMode(project, actor, text, [], {}, {});
+      return { text: outcome && typeof outcome.text === "string" ? outcome.text : JSON.stringify(outcome), projectId: project.id, outcome };
+    } catch (error) {
+      throw mapProjectModeError(error);
+    }
+  }
+
   /** 命令分发。失败一律 throw（由 execute 统一规约），成功返回原始值（由 execute 统一脱敏）。 */
   async function dispatch(command, payload, context) {
     const userId = context.userId;
@@ -736,6 +762,8 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
     execute,
     setEventSink,
     emitEvent: emit,
+    /** B7j：自动化域注入的 Agent 执行入口（react/project agent mode 同一真值路径）。 */
+    runInstruction,
     /** 只读依赖清单（供 health 与测试；不含任何路径 / 凭据值）。 */
     dependencies,
   };

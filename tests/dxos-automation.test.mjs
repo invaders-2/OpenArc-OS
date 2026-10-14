@@ -366,6 +366,57 @@ test("取消：运行中被取消时收敛为 cancelled（不写 success）", as
   assert.equal(store.getRun(USER, claim.run.id).status, "cancelled");
 });
 
+test("B7j 取消：runId 为主字段；automationId 仅作可解析别名；缺失 / 错误值结构化拒绝", async () => {
+  const fx = openBundle();
+  let release = null;
+  const bundle = createAutomationBundle({
+    identityStore: fx.idStore,
+    authorization: makeAuth(),
+    clock: () => fx.clock.now(),
+    sleeper: async () => {},
+    integrations: { lingxingCacheSync: () => new Promise((resolve) => { release = () => resolve("迟到结果"); }) },
+  });
+  const created = store.createAutomation(USER, { instruction: "取消运行", schedule: { type: "interval", everyMs: 3600000 }, action: { type: "lingxing_cache_sync", args: {} } });
+  fx.clock.set(BASE + 1000);
+
+  // 字段缺失：结构化拒绝，并明确该传 runId。
+  const missing = await invoke(bundle, "automation/cancel", {});
+  assert.equal(missing.ok, false);
+  assert.equal(missing.error, "AUTOMATION_INVALID_INPUT");
+  assert.match(missing.message, /runId/);
+
+  // automationId 传的是"定义 id"（不是运行记录）：按真实语义解析失败 → 结构化拒绝并指明 runId。
+  const wrong = await invoke(bundle, "automation/cancel", { automationId: created.id });
+  assert.equal(wrong.ok, false);
+  assert.equal(wrong.error, "AUTOMATION_INVALID_INPUT");
+  assert.match(wrong.message, /runId/);
+  assert.equal(wrong.detail.received, "automationId");
+
+  // 自然字段 runId：运行中取消。
+  release = null;
+  const started = await invoke(bundle, "automation/runNow", { automationId: created.id });
+  assert.equal(started.ok, true);
+  const runId = started.value.run.id;
+  assert.equal(await waitFor(() => !!release), true);
+  const cancelled = await invoke(bundle, "automation/cancel", { runId });
+  assert.equal(cancelled.ok, true);
+  assert.equal(cancelled.value.status, "cancelling");
+  release();
+  assert.equal(await waitFor(() => store.getRun(USER, runId).status === "cancelled"), true);
+
+  // automationId 传"运行记录 id"：历史别名兼容（先解析到运行记录才接受）。
+  const created2 = store.createAutomation(USER, { instruction: "别名取消", schedule: { type: "interval", everyMs: 3600000 }, action: { type: "lingxing_cache_sync", args: {} } });
+  release = null;
+  const started2 = await invoke(bundle, "automation/runNow", { automationId: created2.id });
+  const runId2 = started2.value.run.id;
+  assert.equal(await waitFor(() => !!release), true);
+  const aliasCancel = await invoke(bundle, "automation/cancel", { automationId: runId2 });
+  assert.equal(aliasCancel.ok, true);
+  assert.equal(aliasCancel.value.status, "cancelling");
+  release();
+  assert.equal(await waitFor(() => store.getRun(USER, runId2).status === "cancelled"), true);
+});
+
 // ── ⑦ 业务动作依赖缺失 ─────────────────────────────────────────────────────
 test("业务动作依赖缺失：结构化 AGENT_DEPENDENCY_UNAVAILABLE，绝不假执行", async () => {
   const fx = openBundle();

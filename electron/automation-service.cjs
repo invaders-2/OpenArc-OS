@@ -82,6 +82,8 @@ function createAutomationBundle(options = {}) {
   const tickMs = Number.isFinite(options.tickMs) ? Math.max(250, options.tickMs) : DEFAULT_TICK_MS;
   // stale 阈值注入（源 automations.ts:315 的 10 分钟口径）；未给时由 store 用 DEFAULT_STALE_AFTER_MS。
   const staleAfterMs = Number.isFinite(options.staleAfterMs) && options.staleAfterMs > 0 ? Math.floor(options.staleAfterMs) : undefined;
+  // B7j：注入方为"未装配"的适配器提供人话缺失原因；automation/health 如实透出（布尔清单之外的可读状态）。
+  const adapterNotes = isPlainObject(options.adapterNotes) ? options.adapterNotes : {};
 
   const adapters = Object.freeze({
     developerApps: options.developerApps || null,
@@ -143,10 +145,47 @@ function createAutomationBundle(options = {}) {
       toolCatalog: "既有工具目录",
     }[name] || name;
   }
+  /** B7j：单个适配器的注入状态与缺失原因（不含路径 / 凭据）。 */
+  function dependencyDetail(name) {
+    const injected = !!adapters[name];
+    return {
+      name,
+      injected,
+      reason: injected ? null : (typeof adapterNotes[name] === "string" && adapterNotes[name] ? adapterNotes[name] : ("未装配：" + dependencyLabel(name))),
+    };
+  }
   function requireMethod(name, method) {
     const adapter = requireAdapter(name);
     if (typeof adapter[method] !== "function") throw dependencyError(name + "." + method, "自动化依赖未装配：" + name + "." + method);
     return adapter[method].bind(adapter);
+  }
+
+  /**
+   * B7j：适配器调用统一出口。
+   * 适配器（尤其第三方集成）抛出的"依赖/前置缺失"错误必须归一成结构化
+   * AGENT_DEPENDENCY_UNAVAILABLE，detail 指明依赖名；业务失败（例如钉钉返回非 0 的发送错误）
+   * 原样上抛，绝不把"依赖没装"与"业务没成功"混为一谈。
+   */
+  function isAdapterDependencyFailure(error) {
+    const code = error && typeof error.code === "string" ? error.code : "";
+    return code === domain.AUTOMATION_ERR_DEPENDENCY_UNAVAILABLE
+      || code === "INTEGRATION_UNAVAILABLE"
+      || code === "INTEGRATION_NOT_ENABLED"
+      || code === "INTEGRATION_DEPENDENCY_UNAVAILABLE";
+  }
+  function dependencyFromAdapter(name, method, error) {
+    const raw = error && typeof error.dependency === "string" && error.dependency ? error.dependency : "";
+    const dependency = raw ? (raw.includes(".") ? raw : name + "." + raw) : name + "." + method;
+    return domain.createAutomationError(domain.AUTOMATION_ERR_DEPENDENCY_UNAVAILABLE, String((error && error.message) || ("自动化依赖不可用：" + dependency)), { dependency, causeCode: error && error.code ? String(error.code) : undefined });
+  }
+  async function runAdapter(name, method, ...args) {
+    const fn = requireMethod(name, method);
+    try {
+      return await fn(...args);
+    } catch (error) {
+      if (isAdapterDependencyFailure(error)) throw dependencyFromAdapter(name, method, error);
+      throw error;
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -203,7 +242,14 @@ function createAutomationBundle(options = {}) {
       ? adapter.runTool.bind(adapter)
       : (typeof adapters.toolCatalog === "object" && adapters.toolCatalog && typeof adapters.toolCatalog.runTool === "function" ? adapters.toolCatalog.runTool.bind(adapters.toolCatalog) : null);
     if (!runTool) throw dependencyError("toolCatalog", "自动化依赖未装配：既有工具目录");
-    const result = await runTool(declaration.toolName, values, actor, { sourceId: appId });
+    let result;
+    try {
+      result = await runTool(declaration.toolName, values, actor, { sourceId: appId });
+    } catch (error) {
+      // B7j：工具目录的依赖缺失同样归一成结构化依赖码，detail 指明依赖名。
+      if (isAdapterDependencyFailure(error)) throw dependencyFromAdapter("toolCatalog", "runTool", error);
+      throw error;
+    }
     return result && typeof result.text === "string" ? result.text : JSON.stringify(result);
   }
 
@@ -214,44 +260,36 @@ function createAutomationBundle(options = {}) {
     if (action.type === "app_action") return executeAppAction(action, context);
 
     if (action.type === "lingxing_cache_sync") {
-      const run = requireMethod("integrations", "lingxingCacheSync");
-      return run(action.args);
+      return runAdapter("integrations", "lingxingCacheSync", action.args);
     }
     if (action.type === "ziniao_download") {
-      const run = requireMethod("integrations", "ziniaoDownload");
-      return run(action.args);
+      return runAdapter("integrations", "ziniaoDownload", action.args);
     }
     if (action.type === "ziniao_data_sync") {
-      const run = requireMethod("integrations", "ziniaoDataSync");
-      return run(action.args);
+      return runAdapter("integrations", "ziniaoDataSync", action.args);
     }
     if (action.type === "dingtalk_group_notify") {
-      const send = requireMethod("integrations", "dingtalkGroupNotify");
-      const sent = await send(String(action.args.channelId || "") || undefined, { text: notificationContent(action.args, context.previousResult) });
-      if (!sent || sent.ok !== true) throw domain.createAutomationError(domain.AUTOMATION_ERR_UNAVAILABLE, (sent && sent.error) || "钉钉群机器人发送失败");
+      // 适配器约定：成功返回 { ok:true, channel }；业务失败返回 { ok:false, error, detail }（记 AUTOMATION_UNAVAILABLE）。
+      const sent = await runAdapter("integrations", "dingtalkGroupNotify", String(action.args.channelId || "") || undefined, { text: notificationContent(action.args, context.previousResult) });
+      if (!sent || sent.ok !== true) throw domain.createAutomationError(domain.AUTOMATION_ERR_UNAVAILABLE, (sent && (sent.detail || sent.error)) || "钉钉群机器人发送失败");
       return "钉钉通知已发送到群机器人「" + String(sent.channel || "") + "」";
     }
     if (action.type === "dingtalk_person_notify") {
-      const send = requireMethod("integrations", "dingtalkPersonNotify");
       const recipient = String(action.args.recipient || "");
-      await send(recipient, notificationContent(action.args, context.previousResult));
+      await runAdapter("integrations", "dingtalkPersonNotify", recipient, notificationContent(action.args, context.previousResult));
       return "钉钉通知已发送给 " + recipient;
     }
     if (action.type === "music_play") {
-      const run = requireMethod("desktop", "musicPlay");
-      return String(await run(action.args));
+      return String(await runAdapter("desktop", "musicPlay", action.args));
     }
     if (action.type === "music_control") {
-      const run = requireMethod("desktop", "musicControl");
-      return String(await run(action.args));
+      return String(await runAdapter("desktop", "musicControl", action.args));
     }
     if (action.type === "open_app") {
-      const run = requireMethod("desktop", "openApp");
-      return String(await run(action.args));
+      return String(await runAdapter("desktop", "openApp", action.args));
     }
     if (action.type === "agent_instruction") {
-      const run = requireMethod("agent", "runInstruction");
-      const result = await run(String(action.args.instruction || ""), { userId: context.userId });
+      const result = await runAdapter("agent", "runInstruction", String(action.args.instruction || ""), { userId: context.userId });
       return result && typeof result.text === "string" ? result.text : JSON.stringify(result);
     }
     throw domain.createAutomationError(domain.AUTOMATION_ERR_INVALID_INPUT, "不支持的动作类型：" + action.type);
@@ -400,6 +438,28 @@ function createAutomationBundle(options = {}) {
     return id;
   }
 
+  /**
+   * B7j：automation/cancel 的实参语义是**运行记录 id**（runId），不是定义 id（automationId）。
+   *   · runId 是自然字段，优先；
+   *   · automationId 只作为历史兼容别名，且必须"先按其真实语义解析"——只有它确实能定位到
+   *     一条可见运行记录时才接受；定位不到就返回结构化 AUTOMATION_INVALID_INPUT，
+   *     并明确告知应传 runId（而不是把定义 id 当运行 id 用后报"对象不存在"）。
+   */
+  function requireRunId(payload, userId) {
+    const runId = requireStr(payload.runId, 120);
+    if (runId) return runId;
+    const alias = requireStr(payload.automationId, 120) || requireStr(payload.id, 120);
+    if (alias) {
+      try {
+        store.getRun(userId, alias);
+        return alias;
+      } catch {
+        throw domain.createAutomationError(domain.AUTOMATION_ERR_INVALID_INPUT, "automationId 是 automation/cancel 的兼容别名，但 " + alias + " 不是当前用户可见的运行记录；取消运行请改传 runId（automation/runs 返回的 run.id）", { field: "runId", received: "automationId" });
+      }
+    }
+    throw domain.createAutomationError(domain.AUTOMATION_ERR_INVALID_INPUT, "runId 必填：取消运行请传 runId（automation/runs 返回的 run.id）；automationId 仅作为可解析到运行记录的兼容别名", { field: "runId" });
+  }
+
   function definitionOf(payload) {
     if (isPlainObject(payload.definition)) return payload.definition;
     if (isPlainObject(payload.patch)) return payload.patch;
@@ -451,7 +511,8 @@ function createAutomationBundle(options = {}) {
         return { automation: claim.automation, run: claim.run, awaited: false };
       }
       case "automation/cancel":
-        return cancelRun(userId, requireAutomationId(payload));
+        // B7j：取消按运行记录定位（runId 为主、automationId 仅作可解析别名），不再复用定义 id 字段名。
+        return cancelRun(userId, requireRunId(payload, userId));
       case "automation/runs":
         return { runs: store.listRuns(userId, payload) };
       case "automation/catalog": {
@@ -467,6 +528,7 @@ function createAutomationBundle(options = {}) {
         return {
           status: db ? "ok" : "degraded",
           dependencies: dependencies,
+          dependencyDetails: dependencyDetails,
           schedulerRunning: schedulerTimer != null,
           tickMs: tickMs,
           commands: domain.listAutomationCommands().length,
@@ -487,6 +549,8 @@ function createAutomationBundle(options = {}) {
     toolCatalog: !!adapters.toolCatalog,
     scheduler: typeof setInterval === "function",
   });
+  /** B7j：布尔清单之外，逐个适配器给出"装没装 + 没装的原因"，供 automation/health 如实汇报。 */
+  const dependencyDetails = Object.freeze(Object.keys(adapters).map(dependencyDetail));
 
   /**
    * 唯一分发入口：白名单 → actor 解析 → dispatch → 脱敏；失败统一 normalizeAutomationError。
@@ -532,6 +596,8 @@ function createAutomationBundle(options = {}) {
     cancelRun,
     executeAction,
     dependencies,
+    /** B7j：布尔清单 + 每个适配器的注入状态 / 缺失原因（同一份快照，供 health 与测试）。 */
+    dependencyDetails,
     /** 只读依赖清单（供 health 与测试；不含任何路径 / 凭据值）。 */
     get schedulerRunning() { return schedulerTimer != null; },
   };

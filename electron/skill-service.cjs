@@ -40,10 +40,17 @@ const MAX_EXPORT_BYTES = 8 * 1024 * 1024;
 const asStr = (value, max = 512) => (typeof value === "string" ? value.slice(0, max) : value == null ? undefined : String(value).slice(0, max));
 const requireStr = (value, max = 512) => { const text = asStr(value, max); return text && text.length ? text : null; };
 
-/** 把底层 AGENT_DEPENDENCY_UNAVAILABLE 归一到技能域依赖缺失码（保留原始 dependency）。 */
+/**
+ * B7j：把"依赖 / 前置缺失"归一到技能域依赖缺失码 SKILL_DEPENDENCY_UNAVAILABLE。
+ *   · 底层 AGENT_DEPENDENCY_UNAVAILABLE（modelAdapter / providerAdapter / modelSite / cliRuntime...）；
+ *   · 已经是 SKILL_* 的结构化错误原样保留（normalizeSkillError 会照码返回）。
+ * detail 里保留 dependency 与可读 reason —— 绝不把依赖缺失伪装成 DXOS_ERR_INTERNAL。
+ */
 function toSkillError(error) {
-  if (error && error.code === "AGENT_DEPENDENCY_UNAVAILABLE") {
-    return createSkillError(SKILL_ERR_DEPENDENCY_UNAVAILABLE, (error && error.message) || "技能依赖不可用", { dependency: error.dependency || null, causeCode: error.code });
+  if (!error || typeof error !== "object") return error;
+  if (error.code === "AGENT_DEPENDENCY_UNAVAILABLE") {
+    const reason = typeof error.detail === "string" && error.detail ? error.detail : String(error.message || "") || null;
+    return createSkillError(SKILL_ERR_DEPENDENCY_UNAVAILABLE, (error && error.message) || "技能依赖不可用", { dependency: error.dependency || null, causeCode: error.code, reason });
   }
   return error;
 }

@@ -155,6 +155,40 @@ function assertNotAborted(options) {
   if (options && options.signal && options.signal.aborted) throw abortError();
 }
 
+/**
+ * B7j：模型站点解析失败是"依赖 / 前置缺失"，不是内部错误。
+ * skill-store.resolveChatTarget / resolveVisionTarget 在"没有可启用站点"时抛的是普通 Error；
+ * 这里把它归一成带 code 的依赖缺失错误（保留原始人话原因），由 skill-service.toSkillError
+ * 转成 SKILL_DEPENDENCY_UNAVAILABLE，detail 指明缺的是 modelSite。
+ */
+function modelSiteUnavailable(cause) {
+  const message = String((cause && cause.message) || cause) || "没有可用的模型站点";
+  const error = new Error(message);
+  error.name = "AgentDependencyUnavailableError";
+  error.code = AGENT_DEPENDENCY_UNAVAILABLE;
+  error.dependency = "modelSite";
+  error.detail = "没有可用的模型站点：请先在「API 设置」里添加并启用一个站点（Base URL / Key / 至少一个模型）";
+  return error;
+}
+
+function resolveChatTargetOrFail(options) {
+  try {
+    return getSkillStore().resolveChatTarget(options);
+  } catch (cause) {
+    if (cause && cause.code) throw cause;
+    throw modelSiteUnavailable(cause);
+  }
+}
+
+function resolveVisionTargetOrFail(options) {
+  try {
+    return getSkillStore().resolveVisionTarget(options);
+  } catch (cause) {
+    if (cause && cause.code) throw cause;
+    throw modelSiteUnavailable(cause);
+  }
+}
+
 // ── 适配器访问器 ────────────────────────────────────────────────────────
 let lazySkillStore = null;
 
@@ -1524,7 +1558,8 @@ async function runDescribeImage(args, opts) {
   const input = await resolveImageBytes(ref, options.rootId === undefined ? null : options.rootId);
   const dataUrl = "data:" + (input.mime || "image/png") + ";base64," + input.buf.toString("base64");
   // 源 skills.ts:2016 resolveVisionTarget(opts) 由 B4a1 skill-store 提供；describeImage(...) 属 B5 媒体。
-  const target = getSkillStore().resolveVisionTarget(options);
+  // B7j：解析不到视觉站点时归一成依赖缺失，而不是漏成内部错误。
+  const target = resolveVisionTargetOrFail(options);
   const text = await mediaMethod("describeImage")(target.provider, target.model, dataUrl, prompt);
   if (!text) throw new Error("视觉模型未返回内容（该模型可能不支持看图）");
   return { text: text, meta: { model: target.model, provider: target.providerName } };
@@ -1646,7 +1681,8 @@ async function runSkillWithQuota(id, args, opts) {
   const instruction = String(args && args.instruction !== undefined ? args.instruction : "").trim();
   if (!instruction) throw new Error("缺少 instruction");
 
-  const target = store.resolveChatTarget(opts);
+  // B7j：没有可启用站点 → 结构化依赖缺失（detail 指 modelSite），不折叠成内部错误。
+  const target = resolveChatTargetOrFail(opts);
   const r = await callChat(target.provider, target.model, { prompt: instruction, system: def.systemPrompt }, { signal: opts.signal }, 180000);
   if (!r.text) throw new Error("LLM 未返回文本");
   return { text: r.text, meta: { model: target.model, provider: target.providerName, latencyMs: r.latencyMs } };
@@ -1720,7 +1756,8 @@ async function runProcedureSkill(def, args, opts) {
   const instruction = String(args && args.instruction !== undefined ? args.instruction : "").trim();
   if (!instruction) throw new Error("缺少 instruction");
   const v2 = def.v2;
-  const target = getSkillStore().resolveChatTarget(options);
+  // B7j：同上，procedure 技能同样按依赖缺失归一。
+  const target = resolveChatTargetOrFail(options);
   const started = now();
 
   const resources = (v2 && v2.resources ? v2.resources : []).slice(0, 6)

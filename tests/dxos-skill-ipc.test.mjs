@@ -301,6 +301,25 @@ test("skill/run：真实 skill-runner 文本技能走注入的 modelAdapter", as
   assert.equal(missing.error, "SKILL_DEPENDENCY_UNAVAILABLE");
 });
 
+test("skill/run：没有可用模型站点归一到 SKILL_DEPENDENCY_UNAVAILABLE（不伪装成内部错误）", async () => {
+  // providerAdapter 已注入但没有任何可用站点：resolveChatTarget 抛普通 Error，
+  // 必须在技能域归一到依赖缺失码，而不是 DXOS_ERR_INTERNAL。
+  const emptyAdapter = { firstUsable: () => null, all: () => [], revealProvider: () => null, autoFallback: () => false };
+  const { bundle } = makeBundle({ providerAdapter: emptyAdapter, modelAdapter: makeModelAdapter() });
+  const result = await invoke(bundle, "skill/run", { skillId: "writing", arguments: { instruction: "写一句话" } });
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "SKILL_DEPENDENCY_UNAVAILABLE");
+  assert.notEqual(result.error, "DXOS_ERR_INTERNAL");
+  assert.equal(result.detail.dependency, "modelSite");
+  assert.match(String(result.detail.reason || result.message), /模型站点/);
+
+  // 连 providerAdapter 都没注入：同样归一到技能域依赖码。
+  const { bundle: bare } = makeBundle();
+  const missing = await invoke(bare, "skill/run", { skillId: "writing", arguments: { instruction: "写一句话" } });
+  assert.equal(missing.error, "SKILL_DEPENDENCY_UNAVAILABLE");
+  assert.notEqual(missing.error, "DXOS_ERR_INTERNAL");
+});
+
 test("skill/analyze：真实 skill-analyzer 的结构化 tool call 生成 v2 定义", async () => {
   const analysis = {
     id: "weekly_report", name: "周报生成", description: "根据要点生成周报",
