@@ -18,6 +18,11 @@
  *     生产装配里它们要么走受监督子进程，要么直接调用既有工具目录（app_action 的 toolName 分支）。
  *   · 领取是全局的（automation-store.claimDueAutomation 不带用户过滤），与源
  *     claimDueServerAutomation（automations.ts:349-364）同语义；执行前从运行记录取 created_by。
+ *   · 每次领取前先按源 10 分钟口径收敛 stale 运行（automation-store.recoverStaleRuns，
+ *     源 automations.ts:314-334 的 recoverStaleRuns+claimDueAutomation 链）。收敛结果经
+ *     automation:event 发 progress/stale-recovered 事件作为审计，并写 logger；阈值可经
+ *     createAutomationBundle({ staleAfterMs }) 注入（默认 store.DEFAULT_STALE_AFTER_MS）。
+ *     这是对"主进程不重启时挂起 run 长期停留 running"的修复，单进程本地调度器同样需要。
  *
  * ## 业务动作的对外依赖一律走注入适配器（未注入 = 结构化 AGENT_DEPENDENCY_UNAVAILABLE，绝不假执行）
  *   · developerApps（B7：开发者 App 清单 / 已安装判定 / 参数规约 / 工具执行 / 能力目录）
@@ -75,6 +80,8 @@ function createAutomationBundle(options = {}) {
   const authorization = options.authorization || null;
   const db = identityStore ? identityStore.connection || identityStore.db || null : null;
   const tickMs = Number.isFinite(options.tickMs) ? Math.max(250, options.tickMs) : DEFAULT_TICK_MS;
+  // stale 阈值注入（源 automations.ts:315 的 10 分钟口径）；未给时由 store 用 DEFAULT_STALE_AFTER_MS。
+  const staleAfterMs = Number.isFinite(options.staleAfterMs) && options.staleAfterMs > 0 ? Math.floor(options.staleAfterMs) : undefined;
 
   const adapters = Object.freeze({
     developerApps: options.developerApps || null,
@@ -90,7 +97,7 @@ function createAutomationBundle(options = {}) {
     ? { normalize: (args) => adapters.developerApps.normalizeAction(args) }
     : null;
 
-  if (db) store.configureAutomationStore({ db, clock, idFactory: options.idFactory, appActions });
+  if (db) store.configureAutomationStore({ db, clock, idFactory: options.idFactory, appActions, staleAfterMs });
 
   // ---- 事件（P1 信封；bootstrap 的 send 经 setEventSink 注入） ----
   const channel = createEventChannel({ domain: domain.AUTOMATION_EVENT_DOMAIN, clock });
@@ -321,10 +328,21 @@ function createAutomationBundle(options = {}) {
     }
   }
 
-  /** 领取一个到点定义（不改状态之外的东西）；没有可领取的返回 null。 */
+  /**
+   * 领取一个到点定义（不改状态之外的东西）；没有可领取的返回 null。
+   * 领取前由 store 做 stale 恢复（源 automations.ts:332）；每个被收敛的运行发一条
+   * progress/stale-recovered 事件并写 logger，作为可审计记录。
+   */
   function claimDue() {
     if (!db) throw dependencyError("db", "自动化依赖未装配：数据库");
-    return store.claimDueAutomation({ now: clock() });
+    return store.claimDueAutomation({
+      now: clock(),
+      onStaleRecovered: (item) => {
+        const detail = "run " + item.runId + " (automation " + item.automationId + ") -> failed: " + item.error;
+        log("[automation] stale recovered " + detail);
+        emit("progress", { automationId: item.automationId, runId: item.runId, phase: "stale-recovered", error: item.error });
+      },
+    });
   }
 
   /** 调度器一次推进：领取 + 执行。返回执行结果；无可执行返回 null。 */

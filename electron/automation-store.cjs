@@ -13,23 +13,32 @@
  * ## 与源不同的点（有意为之）
  *   · **不建表、不改表**：automations / automation_runs 由 identity-store.cjs:1603 的 v22 迁移
  *     （dxos-foundation-schema.cjs:196-197 的 DDL）建好；本文件没有任何 CREATE / ALTER。
- *   · **没有 server/desktop 双领取**：源把动作分成"服务端执行"和"桌面客户端领取"两条链
- *     （automations.ts:297-312 / :349-364）。本移植的调度器就在主进程内，领取只此一条：
- *     claimDueAutomation 对所有已启用且到点的定义一视同仁。
+ *   · **没有 server/desktop 双领取（有意的本地化简化）**：源把动作分成"服务端执行"和"桌面客户端领取"
+ *     两条链（automations.ts:297-312 / :349-364），各有客户端标识（client_id='server' / 桌面 id）。
+ *     本移植的调度器就在主进程内，领取只此一条：claimDueAutomation 对所有已启用且到点的定义
+ *     一视同仁，统一记 client_id='main'。源 recoverStaleRuns（:314-329）因 server 侧另有启动期
+ *     recoverInterruptedServerAutomationRuns 兜底而排除 client_id='server'；本移植没有那条独立兜底，
+ *     故 per-claim 的 stale 扫描覆盖所有 client_id —— 这是"stale 恢复不能省"的必要取舍，不是遗漏。
  *   · **视图改用 camelCase**：源 mapAutomation 直接回 snake_case 行字段；IPC 出口统一成
  *     公开投影（automationView / runView），不含 SQL 列名，便于渲染层稳定消费与脱敏。
- *   · **恢复只发生在启动**：源的 recoverStaleRuns（:314-329）按"多客户端 + 10 分钟"判定僵尸运行；
- *     本移植是单进程本地调度器，用 recoverInterruptedRuns() 在启动时把所有 running 运行置 failed
- *     （消息如实说明"主进程曾重启"），绝不伪造完成。
+ *   · **恢复分两层（都保留）**：启动期 recoverInterruptedRuns() 把上次遗留的全部 running 置 failed
+ *     （消息如实说明"主进程曾重启"，源 automations.ts:370-381）；每次领取（claimDueAutomation）前
+ *     先做 recoverStaleRuns()，按源 10 分钟口径（:315 cutoff = now - staleAfterMs，:316-317
+ *     started_at<cutoff）把僵尸 running 收敛为 failed，终结"不重启就长期挂 running"。阈值是常量
+ *     DEFAULT_STALE_AFTER_MS，可经 configureAutomationStore({ staleAfterMs }) 或
+ *     recoverStaleRuns({ staleAfterMs }) 注入。两层的 UPDATE 都带 `AND status='running'`
+ *     / `AND last_status='running'`（源 :321-322 同款），先到者生效、重复调用幂等，绝不覆盖已收敛的运行。
+ *     源的 stale 终态文案是"桌面会话中断，任务未完成"；本移植按实际阈值写成"N 分钟未完成"以便审计。
  *   · **重试属于一次运行的内部策略**：automation-service.cjs 按 action.retry 在一次运行内重试，
  *     本层只落一行运行记录（源没有重试，见 automation-domain.cjs 顶部说明）。
  *
  * ## 数据库句柄与依赖注入
- *   configureAutomationStore({ db, clock, idFactory, appActions })
- *     · db          —— node:sqlite DatabaseSync（prepare/run/get/all），即 identity-store 的连接；
- *     · clock       —— 可选，默认 Date.now（测试用假时钟驱动调度）；
- *     · idFactory   —— 可选，默认 randomUUID；
- *     · appActions  —— app_action 参数规约适配器（B7）；未注入时定义 app_action 结构化依赖缺失。
+ *   configureAutomationStore({ db, clock, idFactory, appActions, staleAfterMs })
+ *     · db           —— node:sqlite DatabaseSync（prepare/run/get/all），即 identity-store 的连接；
+ *     · clock        —— 可选，默认 Date.now（测试用假时钟驱动调度）；
+ *     · idFactory    —— 可选，默认 randomUUID；
+ *     · appActions   —— app_action 参数规约适配器（B7）；未注入时定义 app_action 结构化依赖缺失；
+ *     · staleAfterMs —— 可选，stale 阈值（默认 DEFAULT_STALE_AFTER_MS = 源 10 分钟口径）。
  *   resetAutomationStoreForTests() —— 清空注入，供测试隔离。
  *
  * 参照：electron/media-store.cjs:1-140（同形的注入 + writeTransaction）。
@@ -55,14 +64,19 @@ let automationDb = null;
 let automationClock = () => Date.now();
 let automationIdFactory = () => randomUUID();
 let automationAppActions = null;
+/** 源 automations.ts:315：stale 判定是 cutoff = now - 10 分钟，started_at 早于 cutoff 才算僵尸。 */
+const DEFAULT_STALE_AFTER_MS = 10 * 60_000;
+let automationStaleAfterMs = DEFAULT_STALE_AFTER_MS;
 
 function configureAutomationStore(options) {
   const opts = options || {};
   if (opts.db) automationDb = opts.db;
   if (typeof opts.clock === "function") automationClock = opts.clock;
   if (typeof opts.idFactory === "function") automationIdFactory = opts.idFactory;
+  // staleAfterMs 只接受正数；未给时沿用默认 10 分钟（测试注入小阈值以推进假时钟）。
+  if (Number.isFinite(opts.staleAfterMs) && opts.staleAfterMs > 0) automationStaleAfterMs = Math.floor(opts.staleAfterMs);
   automationAppActions = opts.appActions && typeof opts.appActions.normalize === "function" ? opts.appActions : null;
-  return { db: automationDb, appActions: !!automationAppActions };
+  return { db: automationDb, appActions: !!automationAppActions, staleAfterMs: automationStaleAfterMs };
 }
 
 function resetAutomationStoreForTests() {
@@ -70,6 +84,7 @@ function resetAutomationStoreForTests() {
   automationClock = () => Date.now();
   automationIdFactory = () => randomUUID();
   automationAppActions = null;
+  automationStaleAfterMs = DEFAULT_STALE_AFTER_MS;
 }
 
 function getAutomationDb() {
@@ -244,16 +259,62 @@ function getAutomation(userId, id) {
 // 调度领取（源 automations.ts:297-312 / :349-364 的本地单进程版本）
 // ---------------------------------------------------------------------------
 
+/** stale 收敛的错误文案：保留源"中断/未完成、绝不伪造成功"的语义，按实际阈值写明分钟数便于审计。 */
+function staleRunMessage(staleAfterMs) {
+  return "运行超过 " + Math.max(1, Math.round(staleAfterMs / 60000)) + " 分钟未完成，已判定为中断并置为失败";
+}
+
+/**
+ * 源 automations.ts:314-329 的本地单进程版本：把 started_at 超过 staleAfterMs 且仍为 running 的运行
+ * 收敛为 failed（源终态同样是 failed，源文案"桌面会话中断，任务未完成"）。
+ *   · 源按 (automation 归属 + 10 分钟 + client_id<>'server') 判定；本移植领取是全局的，故不加归属过滤，
+ *     且因没有 server 侧独立启动兜底，client_id 一律纳入扫描（见文件头"没有 server/desktop 双领取"）。
+ *   · automation_runs 无 heartbeat 列（DDL 见 dxos-foundation-schema.cjs:197），与源 :316-317 一致只用
+ *     started_at；started_at IS NULL 的运行不参与（等价于源的 NULL 比较）。
+ *   · UPDATE 带 `AND status='running'` / `AND last_status='running'`（源 :321-322 同款），
+ *     重复调用幂等：changes=0 的运行不计数、不改写先到者的结果。
+ *   · 返回 { count, recovered }；recovered 供调用方写事件/审计。onRecovered 在事务提交后逐个触发，
+ *     回调抛错不回滚、不影响已落库结果。
+ * options: { now?, staleAfterMs?, onRecovered?(item) }
+ */
+function recoverStaleRuns(options = {}) {
+  const at = Number.isFinite(options.now) ? options.now : now();
+  const staleAfterMs = Number.isFinite(options.staleAfterMs) && options.staleAfterMs > 0
+    ? Math.floor(options.staleAfterMs)
+    : automationStaleAfterMs;
+  const cutoff = at - staleAfterMs;
+  const result = writeTransaction(() => {
+    const db = getAutomationDb();
+    const stale = db.prepare("SELECT r.id,r.automation_id FROM automation_runs r JOIN automations a ON a.id=r.automation_id WHERE r.status='running' AND r.started_at IS NOT NULL AND r.started_at<? ORDER BY r.started_at").all(cutoff);
+    if (!stale.length) return { count: 0, recovered: [] };
+    const message = staleRunMessage(staleAfterMs);
+    const updateRun = db.prepare("UPDATE automation_runs SET status='failed',error=?,completed_at=? WHERE id=? AND status='running'");
+    const updateAutomation = db.prepare("UPDATE automations SET last_status='failed',last_error=?,updated_at=? WHERE id=? AND last_status='running'");
+    const recovered = [];
+    for (const item of stale) {
+      if (!updateRun.run(message, at, item.id).changes) continue;
+      updateAutomation.run(message, at, item.automation_id);
+      recovered.push({ runId: item.id, automationId: item.automation_id, error: message });
+    }
+    return { count: recovered.length, recovered };
+  });
+  if (typeof options.onRecovered === "function") for (const item of result.recovered) options.onRecovered(item);
+  return result;
+}
+
 /**
  * 领取一个到点的自动化运行：
+ *   · 先做 recoverStaleRuns（源 automations.ts:332 的领取前 stale 恢复，绝不可省）；
  *   · 事务内选 enabled=1 且 next_run_at <= now 的候选（按 next_run_at 升序，最多 50 个）；
  *   · INSERT OR IGNORE 落 automation_runs（唯一索引 idx_automation_runs_scheduled 防重）；
  *     若该 (automation_id, scheduled_for) 已存在则跳过候选，绝不重复触发；
  *   · 成功后推进 next_run_at 并把定义置为 running。
  * 返回 { userId, automation, run }；没有可领取的返回 null。
+ * options: { now?, staleAfterMs?, onStaleRecovered?(item) } —— staleAfterMs/回调透传给恢复步骤。
  */
 function claimDueAutomation(options = {}) {
   const at = Number.isFinite(options.now) ? options.now : now();
+  recoverStaleRuns({ now: at, staleAfterMs: options.staleAfterMs, onRecovered: options.onStaleRecovered });
   return writeTransaction(() => {
     const db = getAutomationDb();
     const candidates = db.prepare("SELECT * FROM automations WHERE enabled=1 AND next_run_at IS NOT NULL AND next_run_at<=? ORDER BY next_run_at LIMIT 50").all(at);
@@ -346,6 +407,7 @@ function recoverInterruptedRuns() {
 
 module.exports = {
   RUN_HISTORY_LIMIT,
+  DEFAULT_STALE_AFTER_MS,
   configureAutomationStore,
   resetAutomationStoreForTests,
   getAutomationDb,
@@ -363,4 +425,6 @@ module.exports = {
   completeAutomationRun,
   listRuns,
   recoverInterruptedRuns,
+  recoverStaleRuns,
+  staleRunMessage,
 };

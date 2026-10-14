@@ -20,7 +20,8 @@
  *   listChildren(parentId) -> { nodes: FsNode[] }
  *   findByPath(rootId, path) -> FsNode|null
  *   ensureSystemRoot() -> FsNode
- *   ensureFolder(name, parentId, ownerId?) -> FsNode
+ *   ensureFolder(name, parentId, ownerId?) -> string（文件夹 id，非 FsNode；以源 fs.ts:685-691 与调用点为准，
+ *     本文件 :156-158 正是把返回值直接当 parentId 用）
  *   createNode({ name, type, parentId, ownerId }) -> FsNode
  *   copyNode(nodeId, targetParentId) -> FsNode
  *   readBlob(nodeId) -> Buffer|null
