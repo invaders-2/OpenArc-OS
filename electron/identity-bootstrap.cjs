@@ -23,6 +23,11 @@ const { createGovernanceBundle, registerGovernanceIpc } = require("./governance-
 const { createModelBundle, registerModelIpc } = require("./model-bootstrap.cjs");
 const { createMcpBundle, attachMcpSessionLifecycle, attachMcpAppGrantRevocation } = require("./mcp-bootstrap.cjs");
 const { createCanvasBundle } = require("./canvas-bootstrap.cjs");
+// B5d · 画布域扩展（素材库 / 协作 / 内核能力 / Agent 附件 / .dxcanvas）：复用同一条 identity 连接。
+const { CanvasDxosStore } = require("./canvas-dxos-store.cjs");
+const { CanvasAssetLibraryService } = require("./canvas-dxos-asset-library.cjs");
+const { CanvasAgentAttachmentService } = require("./canvas-dxos-agent-attachments.cjs");
+const { createCanvasDxosExtension } = require("./canvas-dxos-commands.cjs");
 const { createTaskBundle } = require("./task-bootstrap.cjs");
 const { createSideEffectGateway, registerSideEffectIpc } = require("./side-effect-bootstrap.cjs");
 
@@ -187,6 +192,23 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
     authService: authorization,
     logger: log,
   });
+  // B5d：画布域扩展。与文档层共用同一条 identity 连接与同一个 canvasDocService；
+  // 命令面仍只有 canvas:command 一条（由 main.cjs 用 extension 挂上，不新建通道）。
+  const canvasDxosTempDir = path.join(userDataDir, "tmp", "canvas-dxos");
+  const canvasDxosStore = new CanvasDxosStore({ identity: store });
+  const canvasAssetLibrary = new CanvasAssetLibraryService({
+    identity: store, store: canvasDxosStore, resourceService, resourceStore,
+    canvasService: canvasDocService, tempDir: () => canvasDxosTempDir,
+  });
+  const canvasAgentAttachments = new CanvasAgentAttachmentService({
+    identity: store, store: canvasDxosStore, canvasService: canvasDocService,
+    resourceService, tempDir: () => canvasDxosTempDir,
+  });
+  const canvasDxosExtension = createCanvasDxosExtension({
+    identity: store, store: canvasDxosStore, canvasService: canvasDocService,
+    resourceService, assetLibrary: canvasAssetLibrary, attachments: canvasAgentAttachments,
+    tempDir: () => canvasDxosTempDir,
+  });
   // D4-01：模型 Provider / Credential / Config / Default（复用同一连接与 AuthorizationService）。
   const { modelStore, credentialStore, modelService, modelProxy, seedModelAppPolicy } = createModelBundle({
     identityStore: store,
@@ -252,10 +274,11 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
   // D5-02 Closure：画布生成运行需要任务层（预算/停止/账本）与模型层 —— 装配完成后晚绑定同一实例。
   canvasDocService.attachRuntime({ taskService, modelService, tempDir: path.join(userDataDir, "tmp", "canvas-imports") });
   try { require("node:fs").mkdirSync(path.join(userDataDir, "tmp", "canvas-imports"), { recursive: true }); } catch { /* ignore */ }
+  try { require("node:fs").mkdirSync(canvasDxosTempDir, { recursive: true }); } catch { /* ignore */ }
 
   // Trusted Approval Gateway：Renderer 只能经此通道看到安全投影并提交 decision。
   const sideEffectGateway = createSideEffectGateway({ sideEffectRuntime });
-  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, modelStore, credentialStore, modelService, modelProxy, mcpStore, mcpService, taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, sideEffectGateway, orchestrator, browserControl, canvasDocService, localAccountService };
+  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, modelStore, credentialStore, modelService, modelProxy, mcpStore, mcpService, taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, sideEffectGateway, orchestrator, browserControl, canvasDocService, localAccountService, canvasDxosStore, canvasAssetLibrary, canvasAgentAttachments, canvasDxosExtension };
 }
 
 /**

@@ -42,6 +42,7 @@ const reactDriver = require("./agent-react-driver.cjs");
 const builtinTools = require("./agent-builtin-tools.cjs");
 const toolResolver = require("./agent-tool-resolver.cjs");
 const capabilityRouter = require("./capability-router.cjs");
+const canvasCapabilities = require("./canvas-dxos-capabilities.cjs");
 const projectSnapshot = require("./agent-project-snapshot.cjs");
 const projectAgentMode = require("./project-agent-mode.cjs");
 const authDomain = require("./authorization-domain.cjs");
@@ -222,6 +223,18 @@ function buildSkillCatalogSource(skillStore, skillRunner) {
 }
 
 /**
+ * canvasExtension → 工具目录 canvas 来源（B5d）。
+ * 画布内核能力清单是静态投影（canvas-dxos-capabilities.cjs），只依赖"画布扩展是否装配"；
+ * 未装配（null）→ 返回 null，不注册来源键，catalog 保持 app_canvas_registry 的 available:false（不伪造）。
+ */
+function buildCanvasCatalogSource(canvasExtension) {
+  if (!canvasExtension) return null;
+  return canvasCapabilities.buildCanvasCatalogSource({
+    nodeTypes: Array.isArray(canvasExtension.nodeTypes) ? canvasExtension.nodeTypes : [],
+  });
+}
+
+/**
  * project-agent-mode 的 agentRuntime 适配器。
  * agent-runtime-manager.cjs:277 的 agentRunManager 是单例，prepare/create/start/append/complete/fail/cancel
  * 都读写 this.controllers / this.pipeline（agent-runtime-manager.cjs:104-105、:168-169），
@@ -277,9 +290,10 @@ function mapProjectModeError(error) {
  * 额外可选键 toolCatalog 是测试/未来批次注入目录的 seam（production 省略即惰性 require 真实模块）。
  * B4 接线：skillStore/skillRunner（或预构造 skillSource）与 mcpAgentTools/mcpServersSnapshot
  * （或预构造 mcpSource）把 catalog 的 mcp/skill 空来源接上真实实现；未给即保持 available:false。
+ * B5d 接线：canvasExtension（画布域扩展实例）把 canvas 来源接上画布内核能力投影；未给即 available:false。
  * providerAdapter 由宿主注入 provider-adapter-bridge.cjs 的只读桥（未注入即保持结构化依赖缺失，不伪造）。
  */
-function createAgentBundle({ identityStore, authorization, authStore, modelService, providerAdapter = null, userDataDir, logger = null, clock = null, dbPath = null, toolCatalog = null, mcpAgentTools = null, mcpServersSnapshot = null, skillStore = null, skillRunner = null, mcpSource = null, skillSource = null, projectAgent = null } = {}) {
+function createAgentBundle({ identityStore, authorization, authStore, modelService, providerAdapter = null, userDataDir, logger = null, clock = null, dbPath = null, toolCatalog = null, mcpAgentTools = null, mcpServersSnapshot = null, skillStore = null, skillRunner = null, mcpSource = null, skillSource = null, canvasExtension = null, canvasSource = null, projectAgent = null } = {}) {
   const now = typeof clock === "function" ? clock : () => Date.now();
   const idFactory = () => randomUUID();
   const db = (identityStore && (identityStore.connection || identityStore.db)) || null;
@@ -325,6 +339,8 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
   if (resolvedMcpSource) catalogSources.mcp = resolvedMcpSource;
   const resolvedSkillSource = skillSource || buildSkillCatalogSource(skillStore, skillRunner);
   if (resolvedSkillSource) catalogSources.skill = resolvedSkillSource;
+  const resolvedCanvasSource = canvasSource || buildCanvasCatalogSource(canvasExtension);
+  if (resolvedCanvasSource) catalogSources.canvas = resolvedCanvasSource;
   if (catalog && typeof catalog.configureToolCatalog === "function") catalog.configureToolCatalog({ sources: catalogSources, auth: toolAuth, weather: null, clock: now });
   toolResolver.configureToolResolver({ catalog, auth: toolAuth });
 
@@ -382,6 +398,7 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
     // B4：catalog 里 mcp/skill 来源是否已接真实实现（false = catalog 保持 available:false）。
     mcpSource: !!resolvedMcpSource,
     skillSource: !!resolvedSkillSource,
+    canvasSource: !!resolvedCanvasSource,
     // B6 未落地：显式 false，不假装可用（agent-project-snapshot 会据此抛结构化依赖错误）。
     fsAdapter: false,
     workspaceAdapter: !!agentRuntimeWorkspace,
@@ -690,4 +707,4 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
   };
 }
 
-module.exports = { createAgentBundle, HOST_APP_ID, buildMcpCatalogSource, buildSkillCatalogSource };
+module.exports = { createAgentBundle, HOST_APP_ID, buildMcpCatalogSource, buildSkillCatalogSource, buildCanvasCatalogSource };
