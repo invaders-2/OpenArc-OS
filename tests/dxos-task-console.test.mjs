@@ -451,18 +451,27 @@ test("UI-3 的 CSS 只追加 .task-*，不新增 token 定义", () => {
   const marker = css.indexOf("UI-3 · 任务 / Agent 控制台");
   assert.ok(marker > 0, "styles.css 必须包含 UI-3 区块");
   const start = css.lastIndexOf("/*", marker);
-  const block = css.slice(start).replace(/\/\*[\s\S]*?\*\//g, " ");
-  /* 区块内不得出现自定义属性声明（token 只能来自 tokens.css）。 */
-  assert.equal(/--[a-z0-9-]+\s*:/.test(block), false, "UI-3 区块不得新增 / 改写 token");
-  /* 区块内的选择器必须全部以 .task- 命名空间开头（@container / @keyframes / from 除外）。 */
-  const rules = block.match(/(^|\n)\s*([^\n{}@]+)\{/g) || [];
+  const tail = css.slice(start);
+  // UI-3 区块边界 = 从 UI-3 注释起，到第一条不属于 .task-* 的规则为止。
+  // 后续批次（UI-4 的 .org-*、UI-5 的 .model-proto-*）会在同一文件继续追加，不能把它们的规则
+  // 算进 UI-3 边界（旧写法切到文件末尾，后续批次一追加就误判越界）。选择器与 token 断言不放松。
+  const rule = /(^|\n)\s*([^\n{}@]+)\{/g;
+  let match;
   let checked = 0;
-  for (const raw of rules) {
-    const sel = raw.replace(/\{$/, "").trim();
+  let end = tail.length;
+  while ((match = rule.exec(tail))) {
+    const sel = match[2].trim();
     if (!sel || sel === "from" || sel === "to" || /%$/.test(sel)) continue;
+    if (!sel.split(",").every((part) => part.trim().startsWith(".task-"))) {
+      assert.notEqual(checked, 0, "UI-3 区块第一条规则必须是 .task-*：" + sel);
+      end = match.index;
+      break;
+    }
     checked += 1;
-    assert.equal(sel.split(",").every((part) => part.trim().startsWith(".task-")), true, "越界选择器：" + sel);
   }
+  /* 区块内不得出现自定义属性声明（token 只能来自 tokens.css）。 */
+  const block = tail.slice(0, end).replace(/\/\*[\s\S]*?\*\//g, " ");
+  assert.equal(/--[a-z0-9-]+\s*:/.test(block), false, "UI-3 区块不得新增 / 改写 token");
   assert.ok(checked >= 20, "至少应解析出 20 条 .task-* 规则，实际 " + checked);
 });
 
