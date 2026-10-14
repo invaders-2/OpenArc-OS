@@ -4389,6 +4389,68 @@ label {
   }
 }
 
+/* ── UI-1 补充 · 技能分析导入 / 保存更新 / 工作区 / 媒体产物 ──────────────
+   只追加 .skill-* 与 .media-skill-* 类；颜色 / 间距 / 圆角 / 时长全部取
+   tokens.css 既有 token，不新增 token，也不改写任何既有类（DESIGN_SYSTEM §3.2）。 */
+.skill-field-label {
+  margin: 0;
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+.skill-textarea {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--fs-secondary);
+  line-height: var(--lh-normal);
+  transition: background var(--dur-quick) var(--ease-standard);
+}
+.skill-textarea:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.skill-analyze {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.media-skill-artifacts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.media-skill-artifact-list {
+  list-style: none;
+  padding-left: 0;
+}
+.media-skill-artifact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-2);
+  font-size: var(--fs-caption);
+  min-width: 0;
+}
+.media-skill-artifact__kind {
+  min-width: 3em;
+  color: var(--muted);
+}
+.media-skill-artifact__name {
+  font-weight: var(--fw-medium);
+  overflow-wrap: anywhere;
+}
+.media-skill-artifact__ref {
+  color: var(--muted);
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
    UI-3 · 任务 / Agent 控制台（列表 / 详情 / 进行态 / 事件流 / 回答）
 
@@ -5542,4 +5604,89 @@ label {
     overflow-wrap: anywhere;
   }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   新入口卡片（UI-3c / UI-5c）
+   ──────────────────────────────────────────────────────────────────────────
+   范围：技能分析 / 保存 / 工作区 / 媒体运行、任务四个写入口、模型四个动作入口。
+   目标：与既有列表 / 卡片体系一致 —— 舒适密度行高 40px、同组控件间距 8px、
+   卡片内间距 12px、字阶（正文 14 / 次级 12 / 元信息 11）与 SkillCenter 同源。
+   约束：只追加；不新增自定义属性；不改既有规则；颜色 / 圆角 / 间距全部来自 token。
+   ══════════════════════════════════════════════════════════════════════════ */
+.task-entry,
+.model-proto-action,
+.skill-entry {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  background: var(--sunken);
+}
+
+.task-entry-head,
+.model-proto-action-head,
+.skill-entry-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 40px;
+}
+
+.task-entry-head strong,
+.model-proto-action-head strong,
+.skill-entry-head h4 {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-medium);
+}
+
+.task-entry-meta,
+.model-proto-action-meta {
+  margin: 0;
+  font-size: var(--fs-caption);
+  line-height: var(--lh-normal);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.task-entry-actions,
+.model-proto-action-actions,
+.skill-entry-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.task-entry-confirm,
+.model-proto-action-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  max-width: 420px;
+}
+
+.task-entry-confirm p,
+.model-proto-action-confirm p {
+  margin: 0;
+  font-size: var(--fs-caption);
+  line-height: var(--lh-normal);
+  color: var(--muted);
+}
+
+.task-entry-confirm-value,
+.model-proto-action-confirm-value {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
 

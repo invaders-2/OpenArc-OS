@@ -4,7 +4,13 @@ import { PageState } from "../design-system/page-states";
 /* page-states.css 只被设计系统 gallery 引用过；PageState 是本文件新增区块的
    加载 / 空 / 错误 / 不可用态的承接组件，必须把它的样式一并带进来。 */
 import "../design-system/page-states.css";
+/* 写类入口（protocol/save）的二次确认复用产品既有 Dialog。 */
+import { Dialog } from "../desktop/Dialog";
 import {
+  MODEL_ENTRIES,
+  MODEL_ENTRY_INPUT_LABEL,
+  MODEL_ENTRY_RISK_LABEL,
+  MODEL_ENTRY_RISK_TEXT,
   PROTOCOL_KIND_ALL,
   STREAM_FLUSH_INTERVAL_MS,
   beginStream,
@@ -15,6 +21,12 @@ import {
   filterProtocols,
   isModelEvent,
   missingFieldsText,
+  modelEntryAvailability,
+  modelEntryConfirmText,
+  modelEntryConfirmTitle,
+  modelEntryMissingInputs,
+  modelEntryMeta,
+  modelEntryNeedsConfirm,
   modelProtocolErrorState,
   modelProtocolErrorText,
   normalizeProtocolResult,
@@ -34,6 +46,7 @@ import {
   streamPhaseFeedback,
   streamSequenceText,
   type ManifestView,
+  type ModelEntryKey,
   type ModelStreamState,
   type ProtocolDetail,
   type ProtocolItem,
@@ -216,6 +229,13 @@ export function ModelSettings({ role }: { role: string | null }) {
   const [streamState, setStreamState] = useState<ModelStreamState>(() => streamInitialState());
   const [streamText, setStreamText] = useState("");
   const [streamPrompt, setStreamPrompt] = useState("");
+  /* UI-5b 动作入口：输入 / 进行中 / 失败 / 结果；凭据只提示，不回显。 */
+  const [entryInputs, setEntryInputs] = useState<Record<string, string>>({});
+  const [entryBusy, setEntryBusy] = useState<string | null>(null);
+  const [entryFailure, setEntryFailure] = useState<{ entry: ModelEntryKey; code: string; context: string } | null>(null);
+  const [entryResult, setEntryResult] = useState<{ entry: ModelEntryKey; value: unknown } | null>(null);
+  /* UI-5c 二次确认：protocol/save 待确认的载荷；非 null 时弹 Dialog，确认前不发命令。 */
+  const [pendingEntry, setPendingEntry] = useState<{ key: ModelEntryKey; payload: Record<string, unknown>; summary: string } | null>(null);
   const streamRef = useRef<ModelStreamState>(streamState);
   /* 流式文本按批渲染（MOTION_SYSTEM §7：不逐 token 补间）。reducer 仍逐事件累计，
      这里只决定"什么时候写进 DOM"。 */
@@ -262,6 +282,9 @@ export function ModelSettings({ role }: { role: string | null }) {
   const streamProvider = enabledProviders.length ? enabledProviders[0] : null;
   const streamModel = models.length ? String(models[0].remoteModelId || "") : "";
   const streamCredential = streamProvider && credStatus[streamProvider.providerId] ? !!credStatus[streamProvider.providerId].configured : null;
+  /* 动作入口的可用性凭据：与流式区块用同一个"已启用供应商 + 其凭据状态"。 */
+  const entryProviderId = streamProvider ? String(streamProvider.providerId) : null;
+  const entryCredentialConfigured = streamCredential;
   const availability = streamAvailability({
     hasBridge: !!bridge(),
     providerCount: providers.length,
@@ -326,6 +349,89 @@ export function ModelSettings({ role }: { role: string | null }) {
     const next = requestStreamStop(streamRef.current, Date.now());
     streamRef.current = next;
     setStreamState(next);
+  };
+
+  /**
+   * 本地必填 / JSON 校验 → buildProtocolPayload 按键白名单构造载荷。
+   * 失败写 entryFailure 并返回 null：不弹确认、不发命令。
+   * 需要凭据的动作缺凭据时可用性判定已经拦住，这里不会把它发出去。
+   */
+  const prepareEntry = (key: ModelEntryKey): { payload: Record<string, unknown>; summary: string } | null => {
+    const meta = modelEntryMeta(key);
+    if (!meta) return null;
+    const values: Record<string, string> = {};
+    for (const field of meta.inputs) values[field] = entryInputs[key + ":" + field] || "";
+    const missing = modelEntryMissingInputs(key, values);
+    if (missing.length) {
+      setEntryFailure({
+        entry: key,
+        code: "INVALID_INPUT",
+        context: "缺少必填内容（" + missing.map((f) => MODEL_ENTRY_INPUT_LABEL[f] || f).join("、") + "）",
+      });
+      return null;
+    }
+    const raw: Record<string, unknown> = {};
+    for (const field of meta.inputs) {
+      const value = values[field].trim();
+      if (!value) continue;
+      if (field === "protocol") {
+        try {
+          raw.protocol = JSON.parse(value);
+        } catch {
+          setEntryFailure({ entry: key, code: "PROTOCOL_INVALID", context: "协议必须是合法 JSON" });
+          return null;
+        }
+      } else if (field === "count") {
+        const n = Number(value);
+        raw.count = Number.isFinite(n) && n > 0 ? n : 1;
+      } else {
+        raw[field] = value;
+      }
+    }
+    const payload = buildProtocolPayload(meta.command, raw);
+    return { payload, summary: modelEntryConfirmText(key, payload) };
+  };
+
+  /** 点动作入口：写类入口（protocol/save）先弹二次确认；其余入口保持原语义直接发送。 */
+  const requestEntry = (key: ModelEntryKey) => {
+    setEntryFailure(null);
+    const prepared = prepareEntry(key);
+    if (!prepared) return;
+    if (!modelEntryNeedsConfirm(key)) {
+      void submitEntry(key, prepared.payload);
+      return;
+    }
+    setPendingEntry({ key, payload: prepared.payload, summary: prepared.summary });
+  };
+
+  const cancelEntryConfirm = () => setPendingEntry(null);
+
+  const confirmEntry = async () => {
+    const pending = pendingEntry;
+    setPendingEntry(null);
+    if (!pending) return;
+    await submitEntry(pending.key, pending.payload);
+  };
+
+  /** 确认后真正发送（或非写类入口直接发送）：命令 → 结构化结果 / 失败。 */
+  const submitEntry = async (key: ModelEntryKey, payload: Record<string, unknown>) => {
+    const meta = modelEntryMeta(key);
+    if (!meta) return;
+    setEntryBusy(key);
+    setEntryFailure(null);
+    setEntryResult(null);
+    setError(null);
+    setNotice(null);
+    const res = await cmd(meta.command, payload);
+    setEntryBusy(null);
+    if (res.ok !== true) {
+      const code = String(res.error || "INTERNAL_ERROR");
+      setEntryFailure({ entry: key, code, context: meta.label });
+      if (Array.isArray(res.issues)) setEntryResult({ entry: key, value: { issues: res.issues } });
+      return;
+    }
+    setEntryResult({ entry: key, value: res });
+    setNotice(meta.label + "完成");
   };
 
   const filteredProtocols = useMemo(() => filterProtocols(protocolItems, protocolKind, protocolQuery), [protocolItems, protocolKind, protocolQuery]);
@@ -854,6 +960,143 @@ export function ModelSettings({ role }: { role: string | null }) {
           </div>
           {renderStreamBlock()}
         </div>
+
+        {/* ── 4) 动作入口：协议校验 / 协议保存 / 图像生成 / 协议执行 ── */}
+        <div className="model-proto__block" data-model-proto="entries">
+          <div className="model-proto__block-head">
+            <h4 className="model-proto__block-title">动作入口</h4>
+            <span className="model-proto__facts" data-model-proto="entries-facts">
+              已启用供应商 {enabledProviders.length} 个 · 凭据 {entryCredentialConfigured === null ? "未知" : entryCredentialConfigured ? "已配置" : "缺失"}
+            </span>
+          </div>
+          <p className="model-proto__hint">
+            协议校验 / 保存是本地动作；图像生成 / 协议执行需要凭据。缺凭据时只给结构化提示，
+            不发起调用，也不回显任何密钥。
+          </p>
+          <ScrollArea label="模型动作入口" maxHeight={360}>
+            {MODEL_ENTRIES.map((meta) => {
+              const av = modelEntryAvailability(meta.key, {
+                hasBridge: !!bridge(),
+                enabledProvider: entryProviderId,
+                credentialConfigured: entryCredentialConfigured,
+                hasProtocol: !!String(
+                  entryInputs["protocol-validate:protocol"] || entryInputs["protocol-save:protocol"] || "",
+                ).trim(),
+              });
+              const busy = entryBusy === meta.key;
+              const failure = entryFailure && entryFailure.entry === meta.key ? entryFailure : null;
+              const result = entryResult && entryResult.entry === meta.key ? entryResult : null;
+              return (
+                <div
+                  className="model-proto__sub model-proto-action"
+                  key={meta.key}
+                  data-model-entry={meta.key}
+                  data-model-entry-command={meta.command}
+                  data-model-entry-state={busy ? "busy" : av.available ? "ready" : av.kind}
+                  data-model-entry-risk={meta.risk}
+                  aria-busy={busy ? "true" : undefined}
+                >
+                  <div className="model-proto__facts model-proto-action-head">
+                    <span data-model-entry-risk-badge>
+                      <Badge tone={meta.risk === "read" ? "neutral" : "warning"} size="sm">
+                        {MODEL_ENTRY_RISK_LABEL[meta.risk]}
+                      </Badge>
+                    </span>
+                    {meta.requiresCredential ? (
+                      <span data-model-entry-credential="required">
+                        <Badge tone="warning" size="sm">需要凭据</Badge>
+                      </span>
+                    ) : null}
+                    <strong>{meta.label}</strong>
+                    <span className="model-proto__mono">{meta.command}</span>
+                  </div>
+                  <p className="model-proto__desc model-proto-action-meta">{meta.description}</p>
+                  <p
+                    className={(av.available ? "model-proto__desc" : "model-proto__warn") + " model-proto-action-meta"}
+                    data-model-entry-availability={av.kind}
+                  >
+                    {av.title} · {av.description}
+                  </p>
+                  <p className="model-proto__note model-proto-action-meta" data-model-entry-risk-text>
+                    {MODEL_ENTRY_RISK_TEXT[meta.key]}
+                  </p>
+                  {meta.inputs.map((field) => (
+                    <TextField
+                      key={field}
+                      label={MODEL_ENTRY_INPUT_LABEL[field] || field}
+                      data-model-entry-field={meta.key + ":" + field}
+                      value={entryInputs[meta.key + ":" + field] || ""}
+                      onChange={(e) =>
+                        setEntryInputs((cur) => ({ ...cur, [meta.key + ":" + field]: e.target.value }))
+                      }
+                    />
+                  ))}
+                  <div className="model-stream__controls model-proto-action-actions">
+                    <Button
+                      variant={meta.risk === "read" ? "secondary" : "primary"}
+                      size="sm"
+                      data-model-entry-action={meta.key}
+                      status={busy ? "loading" : "idle"}
+                      disabled={!av.available || entryBusy !== null}
+                      onClick={() => requestEntry(meta.key)}
+                    >
+                      {meta.label}
+                    </Button>
+                    <span className="model-proto__note">{av.available ? "前置条件已满足" : "前置条件未满足"}</span>
+                  </div>
+                  {failure ? (
+                    <p
+                      className="model-proto__warn"
+                      role="alert"
+                      data-model-entry-error
+                      data-model-entry-error-code={failure.code}
+                    >
+                      {failure.context}：{modelProtocolErrorText(failure.code)}（{failure.code}）
+                    </p>
+                  ) : null}
+                  {result ? (
+                    <pre className="model-proto__pre" data-model-entry-result>
+                      {jsonText(result.value)}
+                    </pre>
+                  ) : null}
+                </div>
+              );
+            })}
+          </ScrollArea>
+        </div>
+
+        {/* 写类入口（protocol/save）二次确认：确认前不发命令；取消 / Esc 都不发送。 */}
+        <Dialog
+          open={pendingEntry !== null}
+          title={pendingEntry ? modelEntryConfirmTitle(pendingEntry.key) : "确认"}
+          onClose={cancelEntryConfirm}
+          footer={
+            <>
+              <Button variant="ghost" size="sm" data-model-entry-confirm-cancel onClick={cancelEntryConfirm}>
+                取消
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                data-model-entry-confirm-submit
+                status={entryBusy !== null ? "loading" : "idle"}
+                disabled={entryBusy !== null}
+                onClick={() => void confirmEntry()}
+              >
+                确认保存
+              </Button>
+            </>
+          }
+        >
+          {pendingEntry ? (
+            <div className="model-proto-action-confirm" data-model-entry-confirm={pendingEntry.key}>
+              <p className="model-proto-action-confirm-value" data-model-entry-confirm-summary>
+                {pendingEntry.summary}
+              </p>
+              <p className="model-proto__note">确认前不会发出任何命令；取消则命令数为 0。</p>
+            </div>
+          ) : null}
+        </Dialog>
       </section>
     </div>
   );

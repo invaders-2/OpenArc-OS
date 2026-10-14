@@ -24,12 +24,22 @@
    命令白名单 —— 界面**只能**发这些命令（model:command 的后端白名单）
    ══════════════════════════════════════════════════════════════════════════ */
 
-/** UI-5 三个新区块会发送的命令；逐条对齐 electron/model-bootstrap.cjs#MODEL_COMMANDS。 */
+/**
+ * UI-5 新区块会发送的命令；逐条对齐 electron/model-bootstrap.cjs#MODEL_COMMANDS。
+ *   只读：protocol/list、protocol/get、manifest/get；
+ *   流式：provider/callStream；
+ *   UI-5b 动作入口：protocol/validate、protocol/save、image/generate、protocol/execute。
+ * 后两条（image/generate、protocol/execute）需要凭据：渲染层只提示"缺凭据"，不回显密钥。
+ */
 export const MODEL_PROTOCOL_COMMANDS: readonly string[] = [
   "protocol/list",
   "protocol/get",
   "manifest/get",
   "provider/callStream",
+  "protocol/validate",
+  "protocol/save",
+  "image/generate",
+  "protocol/execute",
 ];
 
 /**
@@ -83,6 +93,11 @@ export const MODEL_PROTOCOL_PAYLOAD_KEYS: Record<string, readonly string[]> = {
   "protocol/get": ["kind", "id", "version"],
   "manifest/get": ["protocolId", "model", "intent"],
   "provider/callStream": ["providerId", "model", "messages", "params", "requestId"],
+  /* UI-5b：动作入口的载荷键逐条对齐 model-bootstrap.cjs 的 switch 分支。 */
+  "protocol/validate": ["protocol"],
+  "protocol/save": ["kind", "protocol"],
+  "image/generate": ["providerId", "model", "prompt", "size", "count", "params", "requestId"],
+  "protocol/execute": ["providerId", "protocolId", "model", "intent", "prompt", "params", "inputs", "requestId"],
 };
 
 /** 按命令名过滤载荷键；未登记的键直接丢弃（返回的键集合可被单测断言）。 */
@@ -249,7 +264,8 @@ export function filterProtocols(items: ProtocolItem[], kind: string, query: stri
 export type ProtocolTone = "neutral" | "success" | "warning" | "danger";
 
 /**
- * 行状态：execution 是 B2 明确附加的字段（declarative / available / unavailable）。
+ * 行状态：execution 是 B2 明确附加的字段（declarative / available / conditional / unavailable）。
+ * conditional 表示"外部依赖（可选插件 / CLI）就绪后才可执行"，原因里写明前提；
  * 没有 execution 字段时按 engine 推断为"catalog"中性态，绝不默认成可用。
  */
 export function protocolRowStatus(item: ProtocolItem): { tone: ProtocolTone; label: string; detail: string } {
@@ -258,6 +274,13 @@ export function protocolRowStatus(item: ProtocolItem): { tone: ProtocolTone; lab
       tone: "warning",
       label: "不可用",
       detail: item.unavailableReason || "该协议在当前版本没有执行链（未给出原因）",
+    };
+  }
+  if (item.execution === "conditional") {
+    return {
+      tone: "warning",
+      label: "条件可用",
+      detail: item.unavailableReason || "该协议需要外部依赖就绪后才可执行（未给出前提）",
     };
   }
   if (item.execution === "declarative") {
@@ -924,3 +947,243 @@ export function streamAvailability(input: {
     missing: [],
   };
 }
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   UI-5b · 动作入口：协议校验 / 协议保存 / 图像生成 / 协议执行
+   ──────────────────────────────────────────────────────────────────────────
+   四个入口都在 MODEL_PROTOCOL_COMMANDS 内（electron/model-bootstrap.cjs:149-216 逐条实现）。
+   可用性判据只用**已经拿到的真实投影**（provider/list、credential/status、协议详情）；
+   需要凭据的动作缺凭据时给结构化提示，绝不回显密钥、绝不假装调用成功。
+   ══════════════════════════════════════════════════════════════════════════ */
+export type ModelEntryKey = "protocol-validate" | "protocol-save" | "image-generate" | "protocol-execute";
+
+export const MODEL_ENTRY_KEYS: readonly ModelEntryKey[] = [
+  "protocol-validate",
+  "protocol-save",
+  "image-generate",
+  "protocol-execute",
+];
+
+export type ModelEntryRisk = "read" | "write" | "use";
+
+export type ModelEntryMeta = {
+  key: ModelEntryKey;
+  command: string;
+  label: string;
+  description: string;
+  risk: ModelEntryRisk;
+  /** 需要凭据的动作：缺凭据时结构化提示（provider-protocol-service.cjs#resolveProvider）。 */
+  requiresCredential: boolean;
+  requiresProvider: boolean;
+  requiresProtocol: boolean;
+  inputs: readonly string[];
+};
+
+export const MODEL_ENTRIES: readonly ModelEntryMeta[] = [
+  {
+    key: "protocol-validate",
+    command: "protocol/validate",
+    label: "协议校验",
+    description: "校验一份 declarative 协议定义，返回规范化结果或 issues；只读，不落库。",
+    risk: "read",
+    requiresCredential: false,
+    requiresProvider: false,
+    requiresProtocol: true,
+    inputs: ["protocol"],
+  },
+  {
+    key: "protocol-save",
+    command: "protocol/save",
+    label: "协议保存",
+    description: "把一份自定义 declarative 协议写入本地协议库（有校验失败或冲突就拒绝）。",
+    risk: "write",
+    requiresCredential: false,
+    requiresProvider: false,
+    requiresProtocol: true,
+    inputs: ["kind", "protocol"],
+  },
+  {
+    key: "image-generate",
+    command: "image/generate",
+    label: "图像生成",
+    description: "按图像协议真实调用供应商并把产物落盘；需要凭据。",
+    risk: "use",
+    requiresCredential: true,
+    requiresProvider: true,
+    requiresProtocol: false,
+    inputs: ["providerId", "model", "prompt", "size", "count"],
+  },
+  {
+    key: "protocol-execute",
+    command: "protocol/execute",
+    label: "协议执行",
+    description: "按声明式协议引擎 compile + workflow 真实执行；需要凭据。",
+    risk: "use",
+    requiresCredential: true,
+    requiresProvider: true,
+    requiresProtocol: false,
+    inputs: ["providerId", "protocolId", "model", "intent", "prompt"],
+  },
+];
+
+export function modelEntryMeta(key: unknown): ModelEntryMeta | null {
+  const found = MODEL_ENTRIES.find((e) => e.key === key);
+  return found || null;
+}
+
+export const MODEL_ENTRY_RISK_LABEL: Record<ModelEntryRisk, string> = {
+  read: "只读",
+  write: "写操作",
+  use: "真实调用",
+};
+
+export const MODEL_ENTRY_RISK_TEXT: Record<ModelEntryKey, string> = {
+  "protocol-validate": "只读：不写协议库、不调用模型。",
+  "protocol-save": "写操作：会写入本地协议库；保存失败时不产生半份记录。",
+  "image-generate": "真实调用 + 落盘：会调用供应商并把图片写到 dxos/media。",
+  "protocol-execute": "真实调用：会按协议引擎执行，可能产生网络请求与产物。",
+};
+
+export function modelEntryRiskText(key: unknown): string {
+  const meta = modelEntryMeta(key);
+  return meta ? MODEL_ENTRY_RISK_TEXT[meta.key] : "";
+}
+
+export type ModelEntryAvailability = {
+  available: boolean;
+  kind: "ready" | "no-bridge" | "no-provider" | "no-credential" | "no-input";
+  title: string;
+  description: string;
+  missing: string[];
+};
+
+/** 缺凭据的结构化提示：说清"没有执行"，且明确界面不回显密钥。 */
+export const MODEL_ENTRY_MISSING_CREDENTIAL_TEXT =
+  "缺凭据：该动作需要凭据，当前供应商还没有可用的凭据。命令没有执行，也没有生成任何产物；请先在供应商配置里保存凭据（界面只写不读，不回显任何密钥）。";
+
+export const MODEL_ENTRY_MISSING_PROVIDER_TEXT =
+  "没有可用的供应商：provider/list 里没有 status=enabled 的供应商。命令没有执行，也没有生成任何产物；先在 Providers 区块启用一个供应商。";
+
+export const MODEL_ENTRY_MISSING_PROTOCOL_TEXT =
+  "缺少协议定义：先粘贴一份 declarative 协议 JSON（可先用「协议校验」确认它合法）。";
+
+/**
+ * 入口可用性：桥缺失 > 无供应商 > 缺凭据 > 缺输入 > 就绪。
+ * 判据全部是调用方已经拿到的真实投影，不在这里发起任何读取。
+ */
+export function modelEntryAvailability(
+  key: unknown,
+  input: {
+    hasBridge: boolean;
+    enabledProvider: string | null;
+    credentialConfigured: boolean | null;
+    hasProtocol: boolean;
+  },
+): ModelEntryAvailability {
+  const meta = modelEntryMeta(key);
+  if (!meta) {
+    return { available: false, kind: "no-input", title: "未登记的入口", description: "界面不猜语义。", missing: [] };
+  }
+  if (!input.hasBridge) {
+    return {
+      available: false,
+      kind: "no-bridge",
+      title: meta.label + "不可用：模型桥未接入",
+      description: "当前渲染环境没有 window.openarc.model，界面不会发起任何模型命令。",
+      missing: ["window.openarc.model.command"],
+    };
+  }
+  if (meta.requiresProvider && !input.enabledProvider) {
+    return {
+      available: false,
+      kind: "no-provider",
+      title: meta.label + "不可用：没有已启用的供应商",
+      description: MODEL_ENTRY_MISSING_PROVIDER_TEXT,
+      missing: ["provider/list 至少一条 status=enabled 的供应商"],
+    };
+  }
+  if (meta.requiresCredential && input.credentialConfigured === false) {
+    return {
+      available: false,
+      kind: "no-credential",
+      title: meta.label + "不可用：缺凭据",
+      description: MODEL_ENTRY_MISSING_CREDENTIAL_TEXT,
+      missing: ["credential/status.configured=true"],
+    };
+  }
+  if (meta.requiresProtocol && input.hasProtocol !== true) {
+    return {
+      available: false,
+      kind: "no-input",
+      title: meta.label + "不可用：缺少协议定义",
+      description: MODEL_ENTRY_MISSING_PROTOCOL_TEXT,
+      missing: ["protocol（declarative JSON）"],
+    };
+  }
+  return {
+    available: true,
+    kind: "ready",
+    title: meta.label + "可用",
+    description: "前置条件已满足；命令会真实发往主进程，失败会显示稳定错误码。",
+    missing: [],
+  };
+}
+
+export const MODEL_ENTRY_REQUIRED_INPUTS: Record<ModelEntryKey, readonly string[]> = {
+  "protocol-validate": ["protocol"],
+  "protocol-save": ["kind", "protocol"],
+  "image-generate": ["providerId", "model", "prompt"],
+  "protocol-execute": ["providerId", "model", "prompt"],
+};
+
+export const MODEL_ENTRY_INPUT_LABEL: Record<string, string> = {
+  protocol: "协议 JSON",
+  kind: "协议类型（model / provider）",
+  providerId: "供应商 ID",
+  model: "模型",
+  prompt: "提示词",
+  size: "尺寸（可选，如 1024x1024）",
+  count: "张数（可选）",
+  protocolId: "协议 ID（可选）",
+  intent: "意图（可选，如 image.generate）",
+};
+
+/** 缺哪些必填项：界面先行拦截，不发空命令给后端。 */
+export function modelEntryMissingInputs(key: unknown, values: Record<string, unknown>): string[] {
+  const meta = modelEntryMeta(key);
+  if (!meta) return [];
+  const required = MODEL_ENTRY_REQUIRED_INPUTS[meta.key] || [];
+  return required.filter((field) => !String((values || {})[field] == null ? "" : (values || {})[field]).trim());
+}
+
+/* ── 写类入口的二次确认（UI-5c）────────────────────────────────────────────
+   protocol/save 会写本地协议库，属于"写"风险（MODEL_ENTRIES.risk === "write"）；
+   确认前不发命令、取消则命令数 0、确认后才发送。只读与真实调用入口不走这一步，
+   它们的风险由既有可用性判定与审批语义承担。 */
+export function modelEntryNeedsConfirm(key: unknown): boolean {
+  const meta = modelEntryMeta(key);
+  return meta != null && meta.risk === "write";
+}
+
+export function modelEntryConfirmTitle(key: unknown): string {
+  const meta = modelEntryMeta(key);
+  if (!meta) return "确认";
+  return meta.key === "protocol-save" ? "确认保存协议" : "确认" + meta.label;
+}
+
+/** 保存前摘要：只说清楚"要把哪份协议写进本地协议库"，不预告成功。 */
+export function modelEntryConfirmText(key: unknown, payload: Record<string, unknown>): string {
+  const meta = modelEntryMeta(key);
+  if (!meta) return "";
+  if (meta.key === "protocol-save") {
+    const kind = payload.kind == null ? "未填" : String(payload.kind);
+    const protocol = payload.protocol && typeof payload.protocol === "object" && !Array.isArray(payload.protocol)
+      ? (payload.protocol as Record<string, unknown>)
+      : null;
+    const id = protocol && protocol.id != null ? String(protocol.id) : "（未给出 id）";
+    return "将把协议 " + id + "（kind=" + kind + "）写入本地协议库；保存失败时不产生半份记录。取消则命令数保持 0。";
+  }
+  return meta.description;
+}
+

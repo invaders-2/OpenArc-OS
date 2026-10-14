@@ -1,5 +1,5 @@
 /**
- * B7d · 领星本地数据缓存 + 同步作业（逐函数移植 server/lingxingLocalData.ts:1-787 的本地部分）。
+ * B7d/B7e3 · 领星本地数据缓存 + 同步作业 + 业务分析 / 运营看板 / 汇率 / 紫鸟 VC（逐函数移植 server/lingxingLocalData.ts:1-1248）。
  *
  * 逐函数对应（源行号）：
  *   lingxingLocalData.ts:9-121    建库 + 全部 DDL（逐字；better-sqlite3 → node:sqlite DatabaseSync）
@@ -23,24 +23,30 @@
  *     未注入即结构化不可用（INTEGRATION_UNAVAILABLE），绝不返回假数据；
  *   · 查询/字段名与源逐字一致；失败以带 code 的 Error 抛出，由 plugin-service 转结构化。
  *
- * 未移植项（逐条登记；源中同一文件但不属本波"缓存 / 映射 / 同步作业"，待后续按需登记）：
- *   · 领星业务分析      lingxingBusinessAnalytics
- *   · 运营看板          queryLingxingOperatorDashboard
- *   · 运营看板导出      exportLingxingOperatorDashboard
- *   · 汇率              exchange-rate 相关读取 / 换算（源同域，本波零实现）
- *   · 紫鸟 VC 行级导入  importZiniaoVcFile / ziniaoVcRows / queryZiniaoVcData
- *                       （listZiniaoVcFiles 的文件列举已随紫鸟插件移植）
- * 另：agnes.ts（Agnes 原生媒体适配）与 developerOAuth.ts（开发者 OAuth / PKCE）不属本文件，
- * 已在 developer-domain.cjs 文件头的"未移植项"里逐条登记。
+ * B7e3 补齐（原"未移植项"清单已全部落地，本文件**不再有未移植项**）：
+ *   lingxingLocalData.ts:14-30      getLingxingCurrencyRates（注入 fetch；未注入即回退内置汇率，与源 catch 分支一致）
+ *   lingxingLocalData.ts:946-1044   lingxingBusinessAnalytics（区间对比 / 日趋势 / 商品 / 维度 / 分组）
+ *   lingxingLocalData.ts:1078-1158  queryLingxingOperatorDashboard（ASIN 汇总 + 广告指标 + 可选每日明细）
+ *   lingxingLocalData.ts:1160-1186  exportLingxingOperatorDashboard（注入 writeWorkbook；未注入即结构化不可用）
+ *   lingxingLocalData.ts:267-436    importZiniaoVcFile（工作簿解析走注入 readWorkbook）
+ *   lingxingLocalData.ts:1188-1247  queryZiniaoVcData / ziniaoVcRows
+ *
+ * 忠实移植说明：queryZiniaoVcData / ziniaoVcRows 读 ziniao_vc_daily；源在启动时已把该表并入
+ * lingxing_daily_sales 后清空（本文件开头的 INSERT ... SELECT + DELETE），所以它们对空表返回空是源行为；
+ * 线上路径请用 queryLingxingLocalData({ source: "ziniao" })。
+ *
+ * 另：agnes.ts / agnesEndpoint.ts 已由 B7e3 落地为 electron/plugin-agnes.cjs；
+ * developerOAuth.ts（开发者 OAuth / PKCE）不属本文件，已在 developer-domain.cjs 文件头的"未移植项"里登记。
  */
 "use strict";
 
 const fs = require("node:fs");
 const path = require("node:path");
+const os = require("node:os");
 const crypto = require("node:crypto");
 const { createHash } = crypto;
 
-const { INTEGRATION_ERR_UNAVAILABLE, INTEGRATION_ERR_INVALID_INPUT } = require("./plugin-registry.cjs");
+const { INTEGRATION_ERR_UNAVAILABLE, INTEGRATION_ERR_INVALID_INPUT, INTEGRATION_ERR_INTERNAL } = require("./plugin-registry.cjs");
 
 const DB_FILE_NAME = "lingxing-local.db";
 const ADVERTISING_SYNC_STOPPED = "LINGXING_ADVERTISING_SYNC_STOPPED";
@@ -75,6 +81,10 @@ function createLingxingLocalData(options = {}) {
   const dataDir = options.dataDir ? String(options.dataDir) : null;
   const clock = typeof options.clock === "function" ? options.clock : () => Date.now();
   const transport = typeof options.transport === "function" ? options.transport : null;
+  const fetchImpl = typeof options.fetch === "function" ? options.fetch : null;
+  const readWorkbook = typeof options.readWorkbook === "function" ? options.readWorkbook : null;
+  const writeWorkbook = typeof options.writeWorkbook === "function" ? options.writeWorkbook : null;
+  const ziniaoOutputRoot = typeof options.ziniaoOutputRoot === "function" ? options.ziniaoOutputRoot : null;
   const dbPath = dataDir ? path.join(dataDir, DB_FILE_NAME) : ":memory:";
   if (dataDir) fs.mkdirSync(dataDir, { recursive: true });
   const db = openDatabase(dbPath);
@@ -613,6 +623,422 @@ function createLingxingLocalData(options = {}) {
     return { rows, summary, total, limit, offset, start: start || null, end: end || null, groupBy };
   }
 
+
+  // ── lingxingLocalData.ts:14-30 汇率（网络经注入 fetch；未注入即回退内置汇率，与源 catch 分支一致） ──
+  const FALLBACK_CURRENCY_RATES = Object.freeze({ CNY: 1, USD: 0.14, EUR: 0.12, GBP: 0.104, JPY: 21.7, CAD: 0.193, AUD: 0.214, CHF: 0.11 });
+  let currencyRatesCache = { rates: FALLBACK_CURRENCY_RATES, updatedAt: 0, source: "fallback" };
+  async function getLingxingCurrencyRates() {
+    if (currencyRatesCache.source === "live" && Date.now() - currencyRatesCache.updatedAt < 6 * 60 * 60 * 1000) return currencyRatesCache;
+    try {
+      if (typeof fetchImpl !== "function") throw new Error("未注入 fetch");
+      const response = await fetchImpl("https://api.frankfurter.app/latest?from=CNY&to=USD,EUR,GBP,JPY,CAD,AUD,CHF", { signal: AbortSignal.timeout(5000) });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      const payload = await response.json();
+      const rates = Object.assign({ CNY: 1 }, payload.rates || {});
+      if (!["USD", "EUR", "GBP"].every((code) => Number.isFinite(rates[code]) && rates[code] > 0)) throw new Error("汇率数据不完整");
+      currencyRatesCache = { rates, updatedAt: Date.now(), source: "live" };
+    } catch {
+      currencyRatesCache = { rates: FALLBACK_CURRENCY_RATES, updatedAt: Date.now(), source: "fallback" };
+    }
+    return currencyRatesCache;
+  }
+
+  // ── lingxingLocalData.ts:946-1044 业务分析（逐字；JSON 维度直接用已物化列，避免逐行解析） ──
+  function analyticsRatio(current, previous) {
+    if (!previous) return current ? null : 0;
+    return (current - previous) / previous;
+  }
+  function lingxingBusinessAnalytics(options = {}) {
+    const validDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || "")) ? String(value) : "";
+    const latest = (db.prepare("SELECT MAX(business_date) AS date FROM lingxing_daily_sales").get() || {}).date || isoDate(new Date());
+    const end = validDate(options.end) || latest;
+    const requestedStart = validDate(options.start);
+    const defaultStart = new Date(end + "T12:00:00"); defaultStart.setDate(defaultStart.getDate() - 29);
+    const start = requestedStart || isoDate(defaultStart);
+    const dayCount = Math.max(1, Math.round((new Date(end + "T12:00:00").getTime() - new Date(start + "T12:00:00").getTime()) / 86400000) + 1);
+    const previousEndDate = new Date(start + "T12:00:00"); previousEndDate.setDate(previousEndDate.getDate() - 1);
+    const previousStartDate = new Date(previousEndDate); previousStartDate.setDate(previousStartDate.getDate() - dayCount + 1);
+    const previousStart = isoDate(previousStartDate), previousEnd = isoDate(previousEndDate);
+    const source = options.source === "lingxing" || options.source === "ziniao" ? options.source : "all";
+    const sourceWhere = source === "all" ? "" : "source_type=? AND ";
+    const sourceArgs = source === "all" ? [] : [source];
+    const baseArgs = [...sourceArgs, previousStart, end];
+    const metricSql = (prefix = "") => `SUM(CASE WHEN business_date BETWEEN ? AND ? THEN COALESCE(${prefix}amount,0) ELSE 0 END) AS amount,
+    SUM(CASE WHEN business_date BETWEEN ? AND ? THEN COALESCE(${prefix}volume,0) ELSE 0 END) AS volume,
+    SUM(CASE WHEN business_date BETWEEN ? AND ? THEN COALESCE(${prefix}orders,0) ELSE 0 END) AS orders,
+    SUM(CASE WHEN business_date BETWEEN ? AND ? THEN COALESCE(${prefix}sessions,0) ELSE 0 END) AS sessions`;
+    const metricArgs = [start, end, start, end, start, end, start, end];
+    const previousMetricSql = `SUM(CASE WHEN business_date BETWEEN ? AND ? THEN COALESCE(amount,0) ELSE 0 END) AS previousAmount,
+    SUM(CASE WHEN business_date BETWEEN ? AND ? THEN COALESCE(volume,0) ELSE 0 END) AS previousVolume,
+    SUM(CASE WHEN business_date BETWEEN ? AND ? THEN COALESCE(orders,0) ELSE 0 END) AS previousOrders,
+    SUM(CASE WHEN business_date BETWEEN ? AND ? THEN COALESCE(sessions,0) ELSE 0 END) AS previousSessions`;
+    const previousMetricArgs = [previousStart, previousEnd, previousStart, previousEnd, previousStart, previousEnd, previousStart, previousEnd];
+    const summary = db.prepare(`SELECT ${metricSql()}, ${previousMetricSql}, COUNT(DISTINCT CASE WHEN business_date BETWEEN ? AND ? THEN NULLIF(asin,'') END) AS asinCount
+    FROM lingxing_daily_sales WHERE ${sourceWhere}business_date BETWEEN ? AND ?`).get(...metricArgs, ...previousMetricArgs, start, end, ...baseArgs);
+    const current = { amount: Number(summary.amount) || 0, volume: Number(summary.volume) || 0, orders: Number(summary.orders) || 0, sessions: Number(summary.sessions) || 0, asinCount: Number(summary.asinCount) || 0 };
+    const previous = { amount: Number(summary.previousAmount) || 0, volume: Number(summary.previousVolume) || 0, orders: Number(summary.previousOrders) || 0, sessions: Number(summary.previousSessions) || 0 };
+    const daily = db.prepare(`SELECT business_date AS date, SUM(amount) AS amount, SUM(volume) AS volume, SUM(orders) AS orders, SUM(sessions) AS sessions
+    FROM lingxing_daily_sales WHERE ${sourceWhere}business_date BETWEEN ? AND ? GROUP BY business_date ORDER BY business_date`).all(...sourceArgs, start, end);
+    const products = db.prepare(`SELECT COALESCE(NULLIF(asin,''),NULLIF(sku,''),record_key) AS productKey, MAX(asin) AS asin, MAX(sku) AS sku, MAX(item_name) AS itemName, MAX(brand) AS brand,
+    ${metricSql()}, ${previousMetricSql}
+    FROM lingxing_daily_sales WHERE ${sourceWhere}business_date BETWEEN ? AND ?
+    GROUP BY COALESCE(NULLIF(asin,''),NULLIF(sku,''),record_key) ORDER BY amount DESC`).all(...metricArgs, ...previousMetricArgs, ...baseArgs);
+    const normalizedProducts = products.map((row) => {
+      const amount = Number(row.amount) || 0, previousAmount = Number(row.previousAmount) || 0;
+      const orders = Number(row.orders) || 0, sessions = Number(row.sessions) || 0;
+      return Object.assign({}, row, { asin: String(row.asin || ""), amount, previousAmount, volume: Number(row.volume) || 0, previousVolume: Number(row.previousVolume) || 0,
+        orders, sessions, cvr: sessions ? orders / sessions : 0, change: analyticsRatio(amount, previousAmount) });
+    });
+    const dimensions = {};
+    const dimensionExpressions = {
+      account: "COALESCE(NULLIF(account,''),'未分类')",
+      country: "COALESCE(NULLIF(country,''),'未分类')",
+      brand: "COALESCE(NULLIF(brand,''),'未分类')",
+    };
+    for (const key of ["account", "country", "brand"]) {
+      const expression = dimensionExpressions[key];
+      dimensions[key] = db.prepare(`SELECT ${expression} AS name, SUM(amount) AS amount, SUM(volume) AS volume
+      FROM lingxing_daily_sales WHERE ${sourceWhere}business_date BETWEEN ? AND ? GROUP BY ${expression} ORDER BY amount DESC LIMIT 20`).all(...sourceArgs, start, end);
+    }
+    const groupMap = options.groupMap && typeof options.groupMap === "object" ? options.groupMap : {};
+    const groupTotals = new Map();
+    for (const product of normalizedProducts) {
+      const name = String(groupMap[String(product.asin || "").toUpperCase()] || "未映射 ASIN");
+      const group = groupTotals.get(name) || { name, amount: 0, volume: 0, previousAmount: 0, asinCount: 0 };
+      group.amount += Number(product.amount) || 0; group.volume += Number(product.volume) || 0; group.previousAmount += Number(product.previousAmount) || 0;
+      if (product.amount || product.volume || product.orders || product.sessions) group.asinCount += 1;
+      groupTotals.set(name, group);
+    }
+    const groups = [...groupTotals.values()].map((group) => Object.assign({}, group, { change: analyticsRatio(group.amount, group.previousAmount) })).sort((a, b) => b.amount - a.amount);
+    const comparisonAvailable = previous.amount > 0;
+    const growth = comparisonAvailable
+      ? normalizedProducts.filter((row) => row.amount > 0 && row.previousAmount > 0 && Number(row.change) > 0).sort((a, b) => Number(b.change) - Number(a.change)).slice(0, 8)
+      : normalizedProducts.filter((row) => row.amount > 0).sort((a, b) => b.amount - a.amount).slice(0, 8);
+    const decline = comparisonAvailable
+      ? normalizedProducts.filter((row) => row.previousAmount > 0 && Number(row.change) < 0).sort((a, b) => Number(a.change) - Number(b.change)).slice(0, 8)
+      : normalizedProducts.filter((row) => row.sessions >= 10).sort((a, b) => a.cvr - b.cvr || b.sessions - a.sessions).slice(0, 8);
+    const productTotal = normalizedProducts.length;
+    const productLimit = Math.min(200, Math.max(1, Math.floor(Number(options.limit) || 200)));
+    const productOffset = Math.max(0, Math.floor(Number(options.offset) || 0));
+    return {
+      range: { start, end, dayCount, previousStart, previousEnd }, source, current, previous,
+      comparisonAvailable,
+      ratios: { amount: analyticsRatio(current.amount, previous.amount), volume: analyticsRatio(current.volume, previous.volume), orders: analyticsRatio(current.orders, previous.orders), sessions: analyticsRatio(current.sessions, previous.sessions) },
+      daily, products: normalizedProducts.slice(productOffset, productOffset + productLimit), productTotal, productLimit, productOffset,
+      growth, decline,
+      newProducts: normalizedProducts.filter((row) => row.amount > 0 && !row.previousAmount).sort((a, b) => b.amount - a.amount).slice(0, 8),
+      dimensions, groups: groups.slice(0, 20),
+    };
+  }
+
+  // ── lingxingLocalData.ts:1078-1158 运营看板 ──
+  function operatorNumber(data, aliases) {
+    for (const key of aliases) {
+      const value = Number(data[key]);
+      if (Number.isFinite(value)) return value;
+    }
+    return 0;
+  }
+  function addOperatorMetrics(target, row) {
+    let data = {};
+    try { data = JSON.parse(String(row.data || "{}")); } catch { /* 保持空对象 */ }
+    target.sessions += Number(row.sessions) || operatorNumber(data, ["sessions", "session"]);
+    target.volume += Number(row.volume) || 0;
+    target.orders += Number(row.orders) || 0;
+    target.amount += Number(row.amount) || 0;
+    target.impressions += operatorNumber(data, ["impressions", "impression"]);
+    target.clicks += operatorNumber(data, ["clicks", "click"]);
+    target.spend += operatorNumber(data, ["spend", "spends", "cost"]);
+    target.adOrders += operatorNumber(data, ["ad_order_quantity", "ad_orders", "ad_order"]);
+    target.adSales += operatorNumber(data, ["ad_sales_amount", "ad_sales"]);
+    target.returns += Number(row.customer_returns) || operatorNumber(data, ["return_count", "return_goods_count", "returns"]);
+    target.organicOrders += operatorNumber(data, ["nature_order_items", "organic_orders", "natural_orders"]);
+  }
+  function emptyOperatorRow(row, date) {
+    return Object.assign({}, date ? { date } : {}, {
+      asin: String(row.asin || "").toUpperCase(), sku: String(row.sku || ""),
+      itemName: String(row.item_name || ""), country: String(row.country || ""), account: String(row.account || ""),
+      sessions: 0, volume: 0, orders: 0, amount: 0, impressions: 0, clicks: 0, spend: 0,
+      adOrders: 0, adSales: 0, returns: 0, organicOrders: 0,
+    });
+  }
+  function queryLingxingOperatorDashboard(options = {}) {
+    const validDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || "")) ? String(value) : "";
+    const latest = (db.prepare("SELECT MAX(business_date) AS date FROM lingxing_daily_sales").get() || {}).date || isoDate(new Date());
+    const end = validDate(options.end) || latest;
+    const start = validDate(options.start) || end;
+    const asins = [...new Set((Array.isArray(options.asins) ? options.asins : []).map((value) => String(value || "").trim().toUpperCase()).filter(Boolean))].slice(0, 5000);
+    const asinWhere = asins.length ? " AND UPPER(asin) IN (" + asins.map(() => "?").join(",") + ")" : "";
+    const sourceRows = db.prepare(`SELECT business_date, asin, sku, item_name, country, account, sessions, volume, orders, amount, customer_returns, data
+    FROM lingxing_daily_sales WHERE business_date BETWEEN ? AND ? AND NULLIF(asin,'') IS NOT NULL${asinWhere}
+    ORDER BY business_date, asin`).all(start, end, ...asins);
+    const summaryMap = new Map();
+    const dailyMap = new Map();
+    for (const row of sourceRows) {
+      const asin = String(row.asin || "").toUpperCase();
+      const date = String(row.business_date || "");
+      const summary = summaryMap.get(asin) || emptyOperatorRow(row);
+      if (!summary.itemName && row.item_name) summary.itemName = String(row.item_name);
+      if (!summary.sku && row.sku) summary.sku = String(row.sku);
+      if (!summary.country && row.country) summary.country = String(row.country);
+      if (!summary.account && row.account) summary.account = String(row.account);
+      addOperatorMetrics(summary, row);
+      summaryMap.set(asin, summary);
+      if (options.includeDaily === true) {
+        const dailyKey = asin + "\u0000" + date;
+        const daily = dailyMap.get(dailyKey) || emptyOperatorRow(row, date);
+        addOperatorMetrics(daily, row);
+        dailyMap.set(dailyKey, daily);
+      }
+    }
+    const search = String(options.search || "").trim().toLocaleLowerCase().slice(0, 120);
+    const filteredRows = [...summaryMap.values()].filter((row) => !search || [row.asin, row.sku, row.country, row.account, row.itemName]
+      .some((value) => String(value || "").toLocaleLowerCase().includes(search)))
+      .sort((a, b) => b.amount - a.amount || b.volume - a.volume);
+    const total = filteredRows.length;
+    const limit = Math.min(200, Math.max(1, Math.floor(Number(options.limit) || 200)));
+    const offset = Math.max(0, Math.floor(Number(options.offset) || 0));
+    const rows = options.paginate === false ? filteredRows : filteredRows.slice(offset, offset + limit);
+    const pageAsins = new Set(rows.map((row) => row.asin));
+    const daily = options.includeDaily === true
+      ? [...dailyMap.values()].filter((row) => pageAsins.has(row.asin))
+        .sort((a, b) => a.asin.localeCompare(b.asin) || String(a.date).localeCompare(String(b.date)))
+      : [];
+    const summary = filteredRows.reduce((target, row) => {
+      for (const key of ["sessions", "volume", "orders", "amount", "impressions", "clicks", "spend", "adOrders", "adSales", "returns", "organicOrders"]) target[key] += Number(row[key]) || 0;
+      return target;
+    }, emptyOperatorRow({}));
+    return { start, end, rows, daily, summary, total, limit, offset, asinCount: total, sourceRows: sourceRows.length };
+  }
+
+  // ── lingxingLocalData.ts:1160-1186 运营看板导出。
+  //   源用 exceljs 写 xlsx；本仓不新增依赖，改为注入 workBookWriter（未注入即结构化不可用，绝不返回假文件）。 ──
+  async function exportLingxingOperatorDashboard(options = {}) {
+    const result = queryLingxingOperatorDashboard(Object.assign({}, options, { paginate: false, includeDaily: true }));
+    const currency = String(options.currency || "CNY").toUpperCase();
+    const rate = (await getLingxingCurrencyRates()).rates[currency] || 1;
+    const columns = [
+      ["date", "日期"], ["itemName", "产品名"], ["asin", "ASIN"], ["country", "国家"], ["sku", "SKU"], ["currency", "货币"], ["sessions", "Session"],
+      ["volume", "销量"], ["orders", "订单"], ["amount", "总销售额"], ["averageSalePerPcs", "平均销售额 / pcs"], ["impressions", "曝光"], ["clicks", "点击"], ["spend", "广告花费"],
+      ["adOrders", "广告订单"], ["adSales", "广告销售额"], ["returns", "退货"], ["organicOrders", "自然订单"],
+    ];
+    const buildSheet = (name, rows, includeDate) => {
+      const used = columns.filter(([key]) => includeDate || key !== "date");
+      return {
+        name,
+        freeze: { ySplit: 1, xSplit: includeDate ? 3 : 2 },
+        columns: used.map(([key, header]) => ({ key, header, width: key === "itemName" ? 38 : key === "asin" || key === "sku" ? 18 : 14 })),
+        rows: rows.map((row) => Object.assign({}, row, { currency, amount: row.amount * rate, averageSalePerPcs: row.volume ? row.amount / row.volume * rate : null, spend: row.spend * rate, adSales: row.adSales * rate })),
+        numberFormats: { amount: "#,##0.00", averageSalePerPcs: "#,##0.00", spend: "#,##0.00", adSales: "#,##0.00" },
+        autoFilter: true,
+        headerFont: { bold: true, color: { argb: "FFFFFFFF" } },
+        headerFill: { type: "pattern", pattern: "solid", fgColor: { argb: "FFF05A36" } },
+      };
+    };
+    if (typeof writeWorkbook !== "function") throw fail(INTEGRATION_ERR_UNAVAILABLE, "未注入工作簿写入器 writeWorkbook（本移植不新增依赖，未随包 exceljs）；注入后导出可用，绝不返回假文件");
+    let data;
+    try {
+      data = await writeWorkbook({ creator: "DX OS · 领星运营看板", sheets: [buildSheet("运营汇总", result.rows, false), buildSheet("每日明细", result.daily, true)] });
+    } catch (cause) {
+      throw fail(INTEGRATION_ERR_INTERNAL, "工作簿写入失败：" + String((cause && cause.message) || cause));
+    }
+    if (!Buffer.isBuffer(data) && !(data instanceof Uint8Array)) throw fail(INTEGRATION_ERR_INTERNAL, "工作簿写入器未返回二进制数据");
+    return { data: Buffer.from(data), fileName: "运营看板_" + currency + "_" + result.start + "_" + result.end + ".xlsx" };
+  }
+
+
+  // ── lingxingLocalData.ts:267-436 紫鸟 VC 导入（逐函数移植；工作簿解析改为注入 readWorkbook） ──
+  function normalizeVcDate(value) {
+    if (value instanceof Date && Number.isFinite(value.getTime())) return isoDate(value);
+    const text = String(value == null ? "" : value).trim();
+    const matched = text.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/);
+    if (!matched) return "";
+    return matched[1] + "-" + matched[2].padStart(2, "0") + "-" + matched[3].padStart(2, "0");
+  }
+  function resolveZiniaoVcRoot() {
+    if (ziniaoOutputRoot) {
+      const value = ziniaoOutputRoot();
+      if (value) return path.resolve(String(value));
+    }
+    return path.resolve(path.join(dataDir || os.tmpdir(), "ziniao-vc"));
+  }
+  function isInside(root, candidate) {
+    const relativePath = path.relative(root, candidate);
+    return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
+  }
+  function describeVcFile(filePath) {
+    const info = fs.statSync(filePath);
+    const fileName = path.basename(filePath);
+    const match = fileName.match(/^VC汇总_(.+)_(\d{8}-\d{8})\.xlsx$/i);
+    return { path: filePath, fileName, store: (match && match[1]) || "", dateRange: (match && match[2]) || "", bytes: info.size, updatedAt: info.mtimeMs };
+  }
+  function vcCellValue(cell) {
+    if (cell.value instanceof Date) return cell.value;
+    return cell.text || cell.value || "";
+  }
+  async function parseZiniaoVcWorkbook(filePath) {
+    if (typeof readWorkbook !== "function") throw fail(INTEGRATION_ERR_UNAVAILABLE, "未注入表格解析器 readWorkbook（本移植不新增依赖，未随包 exceljs）；注入后 VC 导入可用");
+    const buffer = fs.readFileSync(filePath);
+    const workbook = await readWorkbook(buffer, ".xlsx");
+    const result = [];
+    for (const worksheet of workbook.worksheets || []) {
+      const headers = new Map();
+      const headerRow = worksheet.getRow(1);
+      for (let column = 1; column <= Math.max(headerRow.cellCount, worksheet.columnCount); column += 1) {
+        const label = String(headerRow.getCell(column).text || "").trim().toLowerCase();
+        if (label) headers.set(label, column);
+      }
+      const required = ["日期", "账号", "asin"];
+      if (!required.every((header) => headers.has(header))) continue;
+      const read = (row, header) => {
+        const column = headers.get(header.toLowerCase());
+        return column ? vcCellValue(row.getCell(column)) : "";
+      };
+      for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber += 1) {
+        const row = worksheet.getRow(rowNumber);
+        const businessDate = normalizeVcDate(read(row, "日期"));
+        const account = String(read(row, "账号") || "").trim();
+        const asin = String(read(row, "asin") || "").trim().toUpperCase();
+        if (!businessDate || !account || !asin) continue;
+        const rawData = Object.fromEntries([...headers.entries()].map(([header, column]) => [header, vcCellValue(row.getCell(column)) instanceof Date ? row.getCell(column).text : vcCellValue(row.getCell(column))]));
+        result.push({
+          businessDate,
+          account,
+          country: String(read(row, "国家") || "").trim(),
+          asin,
+          productTitle: String(read(row, "product title") || "").trim(),
+          brand: String(read(row, "brand") || "").trim(),
+          sourceView: String(read(row, "manufacturing or sourcing") || "").trim(),
+          orderedRevenue: metricNum(read(row, "ordered revenue")),
+          orderedUnits: metricNum(read(row, "ordered units")),
+          shippedRevenue: metricNum(read(row, "shipped revenue")),
+          shippedCogs: metricNum(read(row, "shipped cogs")),
+          shippedUnits: metricNum(read(row, "shipped units")),
+          customerReturns: metricNum(read(row, "customer returns")),
+          sessions: metricNum(read(row, "session")),
+          rawData,
+        });
+      }
+    }
+    if (!result.length) throw fail(INTEGRATION_ERR_INVALID_INPUT, "没有在工作簿中找到可导入的 VC 汇总数据，请确认包含日期、账号和 Asin 列");
+    return result;
+  }
+  const importNewZiniaoVcRows = writeTransaction(db, (rows, sourceFile, importedAt) => {
+    const scopes = new Set(rows.map((row) => row.businessDate + "\u0000" + row.account));
+    const exists = db.prepare("SELECT 1 FROM lingxing_daily_sales WHERE source_type='ziniao' AND business_date=? AND account=? LIMIT 1");
+    const newScopes = new Set();
+    for (const scope of scopes) {
+      const parts = scope.split("\u0000");
+      if (!exists.get(parts[0], parts[1])) newScopes.add(scope);
+    }
+    const insert = db.prepare(`INSERT OR REPLACE INTO lingxing_daily_sales
+      (business_date,record_key,asin,sku,item_name,volume,amount,orders,sessions,currency,source_type,account,country,brand,source_view,shipped_revenue,shipped_cogs,shipped_units,customer_returns,source_file,data,synced_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+    let importedRows = 0;
+    for (const row of rows) {
+      if (!newScopes.has(row.businessDate + "\u0000" + row.account)) continue;
+      const key = "ziniao:" + row.account + ":" + row.asin + ":" + row.country + ":" + row.sourceView;
+      insert.run(row.businessDate, key, row.asin, "", row.productTitle, row.orderedUnits, row.orderedRevenue, 0, row.sessions, "",
+        "ziniao", row.account, row.country, row.brand, row.sourceView, row.shippedRevenue, row.shippedCogs, row.shippedUnits,
+        row.customerReturns, sourceFile, JSON.stringify(row.rawData), importedAt);
+      importedRows += 1;
+    }
+    return { importedRows, skippedRows: rows.length - importedRows, importedScopes: newScopes.size, skippedScopes: scopes.size - newScopes.size };
+  });
+  async function importZiniaoVcFile(rawPath) {
+    const rootPath = resolveZiniaoVcRoot();
+    let root;
+    try { root = fs.realpathSync(rootPath); } catch { throw fail(INTEGRATION_ERR_INVALID_INPUT, "紫鸟保存目录不存在：" + rootPath); }
+    const requested = path.resolve(String(rawPath || ""));
+    if (!requested || path.extname(requested).toLowerCase() !== ".xlsx") throw fail(INTEGRATION_ERR_INVALID_INPUT, "请选择紫鸟生成的 VC 汇总 XLSX 文件");
+    let target;
+    try { target = fs.realpathSync(requested); } catch { throw fail(INTEGRATION_ERR_INVALID_INPUT, "文件不存在：" + requested); }
+    if (!isInside(root, target)) throw fail(INTEGRATION_ERR_INVALID_INPUT, "只能导入当前紫鸟保存目录中的文件");
+    if (!/^VC汇总_/i.test(path.basename(target))) throw fail(INTEGRATION_ERR_INVALID_INPUT, "请选择文件名以“VC汇总_”开头的文件");
+    const rows = await parseZiniaoVcWorkbook(target);
+    const importedAt = Date.now();
+    const result = importNewZiniaoVcRows(rows, target, importedAt);
+    const dates = [...new Set(rows.map((row) => row.businessDate))].sort();
+    return {
+      file: describeVcFile(target),
+      rows: result.importedRows,
+      parsedRows: rows.length,
+      skippedRows: result.skippedRows,
+      importedScopes: result.importedScopes,
+      skippedScopes: result.skippedScopes,
+      start: dates[0],
+      end: dates[dates.length - 1],
+      dayCount: dates.length,
+      accountCount: new Set(rows.map((row) => row.account)).size,
+      asinCount: new Set(rows.map((row) => row.asin)).size,
+      importedAt,
+    };
+  }
+
+  // ── lingxingLocalData.ts:1188-1247 紫鸟 VC 查询。
+  //   忠实移植：这两段读的是 ziniao_vc_daily；源启动时已把该表并入 lingxing_daily_sales 后清空（见文件头），
+  //   因此空表是源行为本身；在线路径请用 queryLingxingLocalData({ source: "ziniao" })。 ──
+  function queryZiniaoVcData(options = {}) {
+    const validDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || "")) ? String(value) : "";
+    const start = validDate(options.start);
+    const end = validDate(options.end);
+    const where = [];
+    const args = [];
+    if (start) { where.push("business_date >= ?"); args.push(start); }
+    if (end) { where.push("business_date <= ?"); args.push(end); }
+    const search = String(options.search || "").trim().slice(0, 120);
+    if (search) {
+      where.push("(product_title LIKE ? OR asin LIKE ? OR account LIKE ? OR brand LIKE ?)");
+      const pattern = "%" + search + "%";
+      args.push(pattern, pattern, pattern, pattern);
+    }
+    const asins = [...new Set((Array.isArray(options.asins) ? options.asins : [])
+      .map((value) => String(value || "").trim().toUpperCase()).filter(Boolean))].slice(0, 5000);
+    if (asins.length) {
+      where.push("UPPER(asin) IN (" + asins.map(() => "?").join(",") + ")");
+      args.push(...asins);
+    }
+    const whereSql = where.length ? "WHERE " + where.join(" AND ") : "";
+    const groupedSql = `SELECT MIN(business_date) AS startDate, MAX(business_date) AS endDate,
+      asin, '' AS sku, MAX(product_title) AS itemName, GROUP_CONCAT(DISTINCT account) AS account,
+      GROUP_CONCAT(DISTINCT country) AS country, GROUP_CONCAT(DISTINCT brand) AS brand,
+      SUM(ordered_units) AS volume, SUM(ordered_revenue) AS amount, 0 AS orders, SUM(sessions) AS sessions,
+      SUM(shipped_revenue) AS shippedRevenue, SUM(shipped_cogs) AS shippedCogs,
+      SUM(shipped_units) AS shippedUnits, SUM(customer_returns) AS customerReturns, '' AS currency
+    FROM ziniao_vc_daily ${whereSql} GROUP BY asin`;
+    const total = db.prepare(`SELECT COUNT(*) AS n FROM (${groupedSql})`).get(...args).n;
+    const summary = db.prepare(`SELECT COUNT(*) AS sourceRows, COUNT(DISTINCT business_date) AS dayCount,
+      COUNT(DISTINCT account) AS accountCount, COUNT(DISTINCT asin) AS asinCount,
+      SUM(ordered_units) AS volume, SUM(ordered_revenue) AS amount, 0 AS orders, SUM(sessions) AS sessions,
+      SUM(shipped_revenue) AS shippedRevenue, SUM(shipped_cogs) AS shippedCogs,
+      SUM(shipped_units) AS shippedUnits, SUM(customer_returns) AS customerReturns
+      FROM ziniao_vc_daily ${whereSql}`).get(...args);
+    const sortExpressions = {
+      itemName: "itemName", asin: "asin", sku: "sku", volume: "volume", amount: "amount", orders: "orders",
+      sessions: "sessions", cvr: "(volume / NULLIF(sessions,0))", shippedRevenue: "shippedRevenue",
+      shippedCogs: "shippedCogs", shippedUnits: "shippedUnits", customerReturns: "customerReturns",
+    };
+    const sort = sortExpressions[String(options.sort || "")] || "amount";
+    const direction = options.direction === "asc" ? "ASC" : "DESC";
+    const limit = Math.min(500, Math.max(1, Math.floor(Number(options.limit) || 200)));
+    const offset = Math.max(0, Math.floor(Number(options.offset) || 0));
+    const rows = db.prepare(groupedSql + " ORDER BY " + sort + " " + direction + ", asin ASC LIMIT ? OFFSET ?").all(...args, limit, offset);
+    return { rows, summary, total, limit, offset, start: start || null, end: end || null, groupBy: "asin", source: "ziniao" };
+  }
+  function ziniaoVcRows(date, limit = 200, offset = 0) {
+    const boundedLimit = Math.min(500, Math.max(1, Math.floor(limit)));
+    const boundedOffset = Math.max(0, Math.floor(offset));
+    const where = date ? "WHERE business_date=?" : "";
+    const args = date ? [date] : [];
+    const total = db.prepare("SELECT COUNT(*) AS n FROM ziniao_vc_daily " + where).get(...args).n;
+    const rows = db.prepare("SELECT business_date AS date, account, country, asin, '' AS sku, product_title AS itemName, brand, " +
+      "ordered_units AS volume, ordered_revenue AS amount, 0 AS orders, sessions, '' AS currency, " +
+      "shipped_revenue AS shippedRevenue, shipped_cogs AS shippedCogs, shipped_units AS shippedUnits, " +
+      "customer_returns AS customerReturns, imported_at AS syncedAt " +
+      "FROM ziniao_vc_daily " + where + " ORDER BY business_date DESC, ordered_revenue DESC LIMIT ? OFFSET ?").all(...args, boundedLimit, boundedOffset);
+    return { rows, total, limit: boundedLimit, offset: boundedOffset };
+  }
+
   return {
     dbPath, db,
     getActiveJobId: () => activeJobId,
@@ -623,6 +1049,8 @@ function createLingxingLocalData(options = {}) {
     lingxingAdvertisingCacheStats, getLingxingAdvertisingCacheJob, startLingxingAdvertisingCacheSync,
     stopLingxingAdvertisingCacheJob, listCachedLingxingAdvertisingStores, queryLingxingAdvertisingCache,
     clearLingxingStoredData, lingxingLocalRows, queryLingxingLocalData,
+    getLingxingCurrencyRates, lingxingBusinessAnalytics, queryLingxingOperatorDashboard, exportLingxingOperatorDashboard,
+    normalizeVcDate, resolveZiniaoVcRoot, describeVcFile, parseZiniaoVcWorkbook, importZiniaoVcFile, queryZiniaoVcData, ziniaoVcRows,
     close: () => { try { db.close(); } catch { /* 忽略 */ } },
   };
 }

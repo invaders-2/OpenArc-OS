@@ -30,26 +30,41 @@ import { Dialog } from "../desktop/Dialog";
    唯一实现，这里按需引入它自己的样式表（不改任何既有类与 token）。 */
 import "../design-system/page-states.css";
 import {
+  SKILL_ARTIFACT_KIND_LABEL,
   SKILL_DEPENDENCY_TEXT,
   SKILL_TAB_LABEL,
+  analyzeResultOf,
+  artifactRef,
+  buildSkillRunArguments,
   classifyImportError,
+  collectSkillArtifacts,
   filterSkills,
   isAllowedSkillCommand,
+  isMediaSkillKind,
+  isValidSkillId,
+  skillAuxFeedback,
+  skillEntryAvailability,
   skillErrorState,
   skillErrorText,
+  skillFailureText,
   skillListState,
   skillProgressPhase,
-  skillRunDisabledReason,
   skillRunFeedback,
+  skillRunInputs,
   skillRunStatusFromPhase,
   skillsForTab,
+  workspaceProfilesOf,
 } from "./skillCenterLogic";
 import type {
   ImportFailureCategory,
+  SkillArtifact,
+  SkillAuxStatus,
+  SkillDependencyFlags,
   SkillPack,
   SkillRecord,
   SkillRunStatus,
   SkillTab,
+  SkillWorkspaceProfile,
 } from "./skillCenterLogic";
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -80,6 +95,10 @@ const getSkillBridge = (): SkillBridge | undefined => {
    ══════════════════════════════════════════════════════════════════════════ */
 const isObject = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === "object" && !Array.isArray(v);
+
+/** IPC 来的依赖映射不可信：只承认布尔值；出现任何非布尔值就整表按未知处理（不臆造状态）。 */
+const isDependencyFlags = (v: unknown): v is SkillDependencyFlags =>
+  isObject(v) && Object.values(v).every((flag) => typeof flag === "boolean");
 
 const asText = (v: unknown, fallback = "—"): string => {
   if (typeof v === "string") return v.trim() ? v : fallback;
@@ -173,7 +192,7 @@ const IMPORT_CATEGORY_LABEL: Record<ImportFailureCategory, string> = {
    ══════════════════════════════════════════════════════════════════════════ */
 type Failure = { code: string; context: string };
 type ListError = { code: string; context: string };
-type Health = { status: string; dependencies: Record<string, unknown> };
+type Health = { status: string; dependencies: SkillDependencyFlags };
 type DetailState =
   | { kind: "none" }
   | { kind: "loading" }
@@ -186,10 +205,31 @@ type RunState = {
   startedAt: number;
   text?: string;
   errorCode?: string;
+  /** 后端错误的 detail（依赖缺失时用来指名缺哪一个适配器）。 */
+  detail?: unknown;
+  /** fsAdapter 落盘后的产物标识（nodeId / name / url）。 */
+  artifacts?: SkillArtifact[];
 };
 type ImportState = { status: "idle" | "reading" | "uploading" | "done" | "failed"; fileName?: string };
 type ImportFailure = { category: ImportFailureCategory; label: string; detail: string };
 type ConfirmState = { kind: "delete-skill" | "uninstall-pack"; id: string; name: string } | null;
+/** 分析导入：选本机 Markdown → skill/analyze → 展示 v2 工作流。 */
+type AnalyzeState = {
+  status: SkillAuxStatus;
+  fileName?: string;
+  errorCode?: string;
+  detail?: unknown;
+  skill?: SkillRecord | null;
+  warnings?: string[];
+};
+type SaveForm = { id: string; name: string; description: string; systemPrompt: string };
+type SaveState = { status: SkillAuxStatus; errorCode?: string; detail?: unknown; savedId?: string };
+type WorkspaceState = {
+  status: SkillAuxStatus;
+  errorCode?: string;
+  detail?: unknown;
+  items: SkillWorkspaceProfile[];
+};
 
 const MISSING_DEP_LABEL: Record<string, string> = {
   chatTarget: "模型连接（providerAdapter）",
@@ -214,6 +254,7 @@ function SkillCenterBody({ tab, role }: { tab: SkillTab; role: string | null }) 
   const available = typeof bridge?.command === "function";
   const { toast } = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
+  const analyzeFileRef = useRef<HTMLInputElement>(null);
 
   /* 初值 true：首屏在 useEffect 发命令之前不先画一帧"还没有技能"（假空态）。 */
   const [loading, setLoading] = useState(true);
@@ -227,7 +268,8 @@ function SkillCenterBody({ tab, role }: { tab: SkillTab; role: string | null }) 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<DetailState>({ kind: "none" });
   const [query, setQuery] = useState("");
-  const [instruction, setInstruction] = useState("");
+  /* 运行参数按字段 key 存：文本技能是 instruction，媒体技能是 prompt / image 等。 */
+  const [runValues, setRunValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -236,8 +278,16 @@ function SkillCenterBody({ tab, role }: { tab: SkillTab; role: string | null }) 
   const [importState, setImportState] = useState<ImportState>({ status: "idle" });
   const [importFailure, setImportFailure] = useState<ImportFailure | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState>(null);
+  const [analyzeState, setAnalyzeState] = useState<AnalyzeState>({ status: "idle" });
+  const [saveForm, setSaveForm] = useState<SaveForm>({ id: "", name: "", description: "", systemPrompt: "" });
+  const [saveState, setSaveState] = useState<SaveState>({ status: "idle" });
+  /** 保存表单来自分析结果还是详情里的既有技能；内置技能不允许覆盖。 */
+  const [saveContext, setSaveContext] = useState<"analyze" | "detail" | null>(null);
+  const [workspaceState, setWorkspaceState] = useState<WorkspaceState>({ status: "idle", items: [] });
 
   const runRef = useRef<{ requestId: string; skillId: string } | null>(null);
+  /* skill/health 的依赖装配事实；health 尚未返回时是 null（未知，不据此禁用）。 */
+  const deps = health ? health.dependencies : null;
 
   const send = useCallback(
     async (command: string, payload: Record<string, unknown> = {}): Promise<SkillResult> => {
@@ -272,7 +322,7 @@ function SkillCenterBody({ tab, role }: { tab: SkillTab; role: string | null }) 
     const v = valueOf(res);
     setHealth({
       status: asText(v.status, "unknown"),
-      dependencies: isObject(v.dependencies) ? v.dependencies : {},
+      dependencies: isDependencyFlags(v.dependencies) ? v.dependencies : {},
     });
   }, [send]);
 
@@ -320,6 +370,9 @@ function SkillCenterBody({ tab, role }: { tab: SkillTab; role: string | null }) 
     async (skillId: string) => {
       setSelectedId(skillId);
       setDetail({ kind: "loading" });
+      /* 换技能时清空运行参数与上一次的运行结果，避免把 A 的输入带进 B。 */
+      setRunValues({});
+      setRun(null);
       const res = await send("skill/get", { skillId });
       if (res.ok !== true) {
         const code = codeOf(res.error);
@@ -369,6 +422,25 @@ function SkillCenterBody({ tab, role }: { tab: SkillTab; role: string | null }) 
     return off;
   }, [available, bridge]);
 
+  /* 详情里的「编辑与保存」：选中非内置技能时预填；内置技能只提示不可覆盖。 */
+  useEffect(() => {
+    if (detail.kind !== "ready") return;
+    const skill = detail.skill;
+    setSaveContext("detail");
+    /* 刚保存过的技能保留 done 回显；换成别的技能才复位。 */
+    setSaveState((cur) => (cur.status === "done" && cur.savedId === skill.id ? cur : { status: "idle" }));
+    if (skill.builtin === true) {
+      setSaveForm({ id: skill.id, name: skill.name || "", description: skill.description || "", systemPrompt: "" });
+      return;
+    }
+    setSaveForm({
+      id: skill.id,
+      name: skill.name || "",
+      description: skill.description || "",
+      systemPrompt: (skill.source && skill.source.instructions) || skill.systemPrompt || "",
+    });
+  }, [detail]);
+
   /* ── 动作 ─────────────────────────────────────────────────────────────── */
 
   const refreshAll = async () => {
@@ -395,12 +467,24 @@ function SkillCenterBody({ tab, role }: { tab: SkillTab; role: string | null }) 
   };
 
   const runSkill = async (skill: SkillRecord) => {
-    const reason = skillRunDisabledReason(skill);
-    if (reason) {
-      setFailure({ code: "LOCAL_INPUT_REQUIRED", context: reason });
+    const fields = skillRunInputs(skill);
+    const availability = skillEntryAvailability("run", skill, deps);
+    if (!availability.available) {
+      const code = availability.code || "LOCAL_INPUT_REQUIRED";
+      /* 只有"技能域整体未装配"才整页降级；单次依赖缺失在运行区就地说明。 */
+      if (code === "SKILL_NOT_READY" || code === "NO_BRIDGE") markDependency(code);
+      setRun({
+        skillId: skill.id,
+        status: code === "SKILL_DEPENDENCY_UNAVAILABLE" ? "unavailable" : "failed",
+        requestId: "",
+        startedAt: Date.now(),
+        errorCode: code,
+        detail: { dependency: availability.missing.length ? availability.missing[0].key : undefined },
+      });
       return;
     }
-    if (!instruction.trim()) {
+    const built = buildSkillRunArguments(fields, runValues);
+    if (!built.ok) {
       setRun({
         skillId: skill.id,
         status: "failed",
@@ -419,7 +503,7 @@ function SkillCenterBody({ tab, role }: { tab: SkillTab; role: string | null }) 
     setRun({ skillId: skill.id, status: "running", requestId, startedAt: Date.now() });
     const res = await send("skill/run", {
       skillId: skill.id,
-      arguments: { instruction },
+      arguments: built.args,
       requestId,
     });
     runRef.current = null;
@@ -427,7 +511,14 @@ function SkillCenterBody({ tab, role }: { tab: SkillTab; role: string | null }) 
     if (res.ok === true) {
       const v = valueOf(res);
       const text = typeof v.text === "string" ? v.text : "";
-      setRun({ skillId: skill.id, status: "success", requestId, startedAt: Date.now(), text });
+      setRun({
+        skillId: skill.id,
+        status: "success",
+        requestId,
+        startedAt: Date.now(),
+        text,
+        artifacts: collectSkillArtifacts(v),
+      });
       toast({
         kind: "success",
         title: "技能执行完成",
@@ -436,16 +527,180 @@ function SkillCenterBody({ tab, role }: { tab: SkillTab; role: string | null }) 
       return;
     }
     const code = codeOf(res.error);
-    markDependency(code);
+    const detail = (res as { detail?: unknown }).detail;
     const status: SkillRunStatus = code === "SKILL_DEPENDENCY_UNAVAILABLE" ? "unavailable" : "failed";
-    setRun({ skillId: skill.id, status, requestId, startedAt: Date.now(), errorCode: code });
+    setRun({ skillId: skill.id, status, requestId, startedAt: Date.now(), errorCode: code, detail });
     /* 失败通知常驻：错误不能只闪过几秒（DESIGN_SYSTEM §9 / MS §7）。 */
     toast({
       kind: "error",
       title: "技能执行失败",
-      description: skillErrorText(code) + "（" + code + "）",
+      description: skillFailureText(code, detail) + "（" + code + "）",
       duration: null,
     });
+  };
+
+  /* 技能分析/导入：选本机 Markdown → skill/analyze → 展示 v2 工作流，可继续保存。 */
+  const analyzeDocument = async (file: File | undefined) => {
+    if (!file) return;
+    const name = file.name || "SKILL.md";
+    setFailure(null);
+    setNotice(null);
+    setAnalyzeState({ status: "reading", fileName: name });
+    const availability = skillEntryAvailability("analyze", null, deps);
+    if (!availability.available) {
+      setAnalyzeState({
+        status: "unavailable",
+        fileName: name,
+        errorCode: availability.code || "SKILL_DEPENDENCY_UNAVAILABLE",
+        detail: { dependency: availability.missing.length ? availability.missing[0].key : undefined },
+      });
+      return;
+    }
+    let markdown = "";
+    try {
+      markdown = await file.text();
+    } catch {
+      setAnalyzeState({ status: "failed", fileName: name, errorCode: "DXOS_ERR_INTERNAL" });
+      return;
+    }
+    if (!markdown.trim()) {
+      setAnalyzeState({ status: "failed", fileName: name, errorCode: "LOCAL_INPUT_REQUIRED" });
+      return;
+    }
+    setBusy("analyze");
+    setAnalyzeState({ status: "working", fileName: name });
+    const res = await send("skill/analyze", { markdown, sourceName: name });
+    setBusy(null);
+    if (res.ok !== true) {
+      const code = codeOf(res.error);
+      const detail = (res as { detail?: unknown }).detail;
+      if (code === "SKILL_NOT_READY" || code === "NO_BRIDGE") markDependency(code);
+      setAnalyzeState({
+        status: code === "SKILL_DEPENDENCY_UNAVAILABLE" ? "unavailable" : "failed",
+        fileName: name,
+        errorCode: code,
+        detail,
+      });
+      toast({
+        kind: "error",
+        title: "技能文档分析失败",
+        description: skillFailureText(code, detail) + "（" + code + "）",
+        duration: null,
+      });
+      return;
+    }
+    const parsed = analyzeResultOf(valueOf(res));
+    setAnalyzeState({ status: "done", fileName: name, skill: parsed.skill, warnings: parsed.warnings });
+    setSaveContext("analyze");
+    setSaveState({ status: "idle" });
+    if (parsed.skill) {
+      setSaveForm({
+        id: parsed.skill.id || "",
+        name: parsed.skill.name || "",
+        description: parsed.skill.description || "",
+        systemPrompt: parsed.skill.systemPrompt || "",
+      });
+    }
+    setNotice("已分析「" + name + "」，确认后可以保存为技能");
+  };
+
+  /* 保存/更新：界面先按 skill-store.cjs:600-608 的同一条规则本地拦截，再发 skill/save。 */
+  const saveSkill = async () => {
+    const target = saveContext === "detail" ? selectedSkill : null;
+    const availability = skillEntryAvailability("save", target, deps);
+    setFailure(null);
+    setNotice(null);
+    if (!availability.available) {
+      setSaveState({ status: "unavailable", errorCode: availability.code || "SKILL_DEPENDENCY_UNAVAILABLE" });
+      return;
+    }
+    if (!isValidSkillId(saveForm.id)) {
+      setSaveState({ status: "failed", errorCode: "LOCAL_INPUT_REQUIRED" });
+      setFailure({ code: "LOCAL_INPUT_REQUIRED", context: "保存技能：ID 必须以小写字母开头，只能含小写字母、数字、下划线" });
+      return;
+    }
+    if (!saveForm.name.trim()) {
+      setSaveState({ status: "failed", errorCode: "LOCAL_INPUT_REQUIRED" });
+      setFailure({ code: "LOCAL_INPUT_REQUIRED", context: "保存技能：名称不能为空" });
+      return;
+    }
+    if (!saveForm.systemPrompt.trim()) {
+      setSaveState({ status: "failed", errorCode: "LOCAL_INPUT_REQUIRED" });
+      setFailure({ code: "LOCAL_INPUT_REQUIRED", context: "保存技能：执行说明不能为空" });
+      return;
+    }
+    setBusy("save");
+    setSaveState({ status: "working" });
+    /* 分析结果自带 v2 工作流：一起保存，技能才会以 procedure 形态执行。 */
+    const analyzedV2 = saveContext === "analyze" && analyzeState.skill ? analyzeState.skill.v2 : undefined;
+    const res = await send("skill/save", {
+      skill: Object.assign(
+        {
+          id: saveForm.id.trim().toLowerCase(),
+          name: saveForm.name.trim(),
+          description: saveForm.description.trim(),
+          systemPrompt: saveForm.systemPrompt.trim(),
+        },
+        analyzedV2 ? { v2: analyzedV2 } : {},
+      ),
+    });
+    setBusy(null);
+    if (res.ok !== true) {
+      const code = codeOf(res.error);
+      const detail = (res as { detail?: unknown }).detail;
+      setSaveState({ status: "failed", errorCode: code, detail });
+      toast({
+        kind: "error",
+        title: "保存技能失败",
+        description: skillFailureText(code, detail) + "（" + code + "）",
+        duration: null,
+      });
+      return;
+    }
+    const v = valueOf(res);
+    const saved = isObject(v.skill) ? (v.skill as unknown as SkillRecord) : null;
+    const savedId = saved && saved.id ? saved.id : saveForm.id.trim().toLowerCase();
+    setSaveState({ status: "done", savedId });
+    setNotice("已保存技能「" + (saved && saved.name ? saved.name : saveForm.name) + "」");
+    toast({ kind: "success", title: "技能已保存", description: savedId });
+    await loadList({ silent: true });
+    await loadDetail(savedId);
+  };
+
+  /* 工作区技能：skill/workspace/list；packId 来自选中技能的来源元数据。 */
+  const loadWorkspace = async () => {
+    const availability = skillEntryAvailability("workspace", selectedSkill, deps);
+    setFailure(null);
+    if (!availability.available) {
+      setWorkspaceState({
+        status: "unavailable",
+        items: [],
+        errorCode: availability.code || "SKILL_DEPENDENCY_UNAVAILABLE",
+        detail: { dependency: availability.missing.length ? availability.missing[0].key : undefined },
+      });
+      return;
+    }
+    setBusy("workspace");
+    setWorkspaceState({ status: "working", items: [] });
+    const packId =
+      selectedSkill && selectedSkill.source && selectedSkill.source.metadata
+        ? selectedSkill.source.metadata.packId
+        : undefined;
+    const res = await send("skill/workspace/list", packId ? { packId } : {});
+    setBusy(null);
+    if (res.ok !== true) {
+      const code = codeOf(res.error);
+      const detail = (res as { detail?: unknown }).detail;
+      if (code === "SKILL_NOT_READY" || code === "NO_BRIDGE") markDependency(code);
+      setWorkspaceState({
+        status: code === "SKILL_DEPENDENCY_UNAVAILABLE" ? "unavailable" : "failed",
+        items: [],
+        errorCode: code,
+        detail,
+      });
+      return;
+    }
+    setWorkspaceState({ status: "done", items: workspaceProfilesOf(valueOf(res)) });
   };
 
   const exportSkill = async (skill: SkillRecord) => {
@@ -594,6 +849,18 @@ function SkillCenterBody({ tab, role }: { tab: SkillTab; role: string | null }) 
 
   const runFeedback = skillRunFeedback(run ? run.status : "idle");
   const activeRun = run && (!selectedSkill || run.skillId === selectedSkill.id) ? run : null;
+  /* 运行参数按技能真实产物类型选择（文本 instruction / 媒体 prompt 等）。 */
+  const runFields = skillRunInputs(selectedSkill);
+  const runAvailability = skillEntryAvailability("run", selectedSkill, deps);
+  const analyzeAvailability = skillEntryAvailability("analyze", null, deps);
+  const workspaceAvailability = skillEntryAvailability("workspace", selectedSkill, deps);
+  const saveTarget = saveContext === "detail" ? selectedSkill : null;
+  const saveAvailability = skillEntryAvailability("save", saveTarget, deps);
+  const runArtifacts = activeRun && activeRun.artifacts ? activeRun.artifacts : [];
+  const isMediaSkill = !!selectedSkill && isMediaSkillKind(selectedSkill.kind);
+  const analyzeFeedback = skillAuxFeedback(analyzeState.status);
+  const saveFeedback = skillAuxFeedback(saveState.status);
+  const workspaceFeedback = skillAuxFeedback(workspaceState.status);
 
   /* ── 渲染 ─────────────────────────────────────────────────────────────── */
 
@@ -640,6 +907,17 @@ function SkillCenterBody({ tab, role }: { tab: SkillTab; role: string | null }) 
           从本机 ZIP 导入
         </Button>
         <Button
+          variant="secondary"
+          size="sm"
+          data-skill-action="analyze"
+          status={busy === "analyze" ? "loading" : "idle"}
+          disabled={!available || busy !== null || !analyzeAvailability.available}
+          title={analyzeAvailability.reason || undefined}
+          onClick={() => analyzeFileRef.current?.click()}
+        >
+          分析本地技能文档
+        </Button>
+        <Button
           variant="ghost"
           size="sm"
           data-skill-action="refresh"
@@ -655,9 +933,32 @@ function SkillCenterBody({ tab, role }: { tab: SkillTab; role: string | null }) 
               ? "正在导入 " + (importState.fileName || "") + "…"
               : importState.status === "done"
                 ? "已导入 " + (importState.fileName || "")
-                : "只接受标准 ZIP；在线获取在本版本关闭"}
+                : "只接受标准 ZIP 与 Markdown；在线获取在本版本关闭"}
         </span>
       </div>
+      {!analyzeAvailability.available && analyzeAvailability.reason ? (
+        <p
+          className="skill-warn"
+          role="status"
+          data-skill-analyze-unavailable
+          data-skill-error-code={analyzeAvailability.code || undefined}
+        >
+          {analyzeAvailability.reason}
+        </p>
+      ) : null}
+      <input
+        ref={analyzeFileRef}
+        type="file"
+        accept=".md,.markdown,.txt,text/markdown,text/plain"
+        className="skill-file-input"
+        aria-label="选择技能文档（Markdown）"
+        data-skill-analyze-input
+        onChange={(e) => {
+          const file = e.target.files && e.target.files[0] ? e.target.files[0] : undefined;
+          e.target.value = "";
+          void analyzeDocument(file);
+        }}
+      />
       {importFailure ? (
         <p
           className="skill-error"
@@ -865,35 +1166,49 @@ function SkillCenterBody({ tab, role }: { tab: SkillTab; role: string | null }) 
             ) : null}
           </header>
 
-          <section className="skill-section" aria-label="运行">
-            <div className="skill-section-head">
+          <section className="skill-section skill-entry" aria-label="运行" data-skill-run-kind={detail.skill.kind || "text"}>
+            <div className="skill-section-head skill-entry-head">
               <h4>运行</h4>
-              <span className="skill-muted">真实模型调用；参数与产物由执行器返回</span>
+              <span className="skill-muted">
+                {isMediaSkill
+                  ? "媒体类技能：调用 skill/run，产物经虚拟文件树落盘"
+                  : "真实模型调用；参数与产物由执行器返回"}
+              </span>
             </div>
-            <TextField
-              label="输入"
-              hint="作为 instruction 传给技能执行器；界面不发送身份、凭据或会话字段。"
-              data-skill-field="instruction"
-              value={instruction}
-              onChange={(e) => setInstruction(e.target.value)}
-              error={
-                activeRun && activeRun.errorCode === "LOCAL_INPUT_REQUIRED" ? "输入不能为空" : undefined
-              }
-            />
-            <div className="skill-actions">
+            {runFields.map((field) => (
+              <TextField
+                key={field.key}
+                label={field.label}
+                hint={field.hint}
+                data-skill-field={field.key}
+                value={runValues[field.key] || ""}
+                onChange={(e) => setRunValues((cur) => ({ ...cur, [field.key]: e.target.value }))}
+                error={
+                  activeRun && activeRun.errorCode === "LOCAL_INPUT_REQUIRED" && field.required
+                    ? field.label + "不能为空"
+                    : undefined
+                }
+              />
+            ))}
+            <div className="skill-actions skill-entry-actions">
               <Button
                 variant="primary"
                 size="sm"
                 data-skill-action="run"
                 status={busy === "run" ? "loading" : "idle"}
-                disabled={busy !== null || !!skillRunDisabledReason(detail.skill)}
+                disabled={busy !== null || !runAvailability.available}
+                title={runAvailability.reason || undefined}
                 onClick={() => void runSkill(detail.skill)}
               >
                 运行
               </Button>
-              {skillRunDisabledReason(detail.skill) ? (
-                <span className="skill-muted" data-skill-run-disabled-reason>
-                  {skillRunDisabledReason(detail.skill)}
+              {runAvailability.reason ? (
+                <span
+                  className={runAvailability.available ? "skill-muted" : "skill-warn"}
+                  data-skill-run-disabled-reason
+                  data-skill-run-unavailable={runAvailability.available ? undefined : runAvailability.code || "1"}
+                >
+                  {runAvailability.reason}
                 </span>
               ) : null}
             </div>
@@ -913,13 +1228,181 @@ function SkillCenterBody({ tab, role }: { tab: SkillTab; role: string | null }) 
                 ) : null}
                 {activeRun.errorCode ? (
                   <p className="skill-error" role="alert" data-skill-run-error data-skill-error-code={activeRun.errorCode}>
-                    {skillErrorText(activeRun.errorCode)}（{activeRun.errorCode}）
+                    {skillFailureText(activeRun.errorCode, activeRun.detail)}（{activeRun.errorCode}）
                   </p>
+                ) : null}
+                {runArtifacts.length ? (
+                  <div className="media-skill-artifacts" data-skill-artifacts>
+                    <span className="skill-muted" data-skill-artifact-count>
+                      产物 {runArtifacts.length} 项（经虚拟文件树落盘）
+                    </span>
+                    <ul className="skill-files media-skill-artifact-list">
+                      {runArtifacts.map((artifact, index) => (
+                        <li
+                          key={artifact.nodeId || artifact.url || index}
+                          className="media-skill-artifact"
+                          data-skill-artifact-kind={artifact.kind}
+                        >
+                          <span className="media-skill-artifact__kind">
+                            {SKILL_ARTIFACT_KIND_LABEL[artifact.kind]}
+                          </span>
+                          <span className="media-skill-artifact__name">{artifact.name || "（未命名）"}</span>
+                          <span className="skill-mono media-skill-artifact__ref" data-skill-artifact-ref>
+                            {artifactRef(artifact)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 ) : null}
                 <span className="skill-muted" data-skill-run-events>
                   最近 progress 事件：{lastPhase || "尚未收到"}
                 </span>
               </div>
+            ) : null}
+          </section>
+
+          <section className="skill-section skill-entry" aria-label="保存与更新" data-skill-save-state={saveState.status}>
+            <div className="skill-section-head skill-entry-head">
+              <h4>保存与更新</h4>
+              <span className="skill-muted">
+                {detail.skill.builtin
+                  ? "内置技能不能覆盖，只能另存为新的自定义技能"
+                  : "写回技能目录；更新后立即生效（skill/save）"}
+              </span>
+            </div>
+            {!saveAvailability.available && saveAvailability.reason ? (
+              <p
+                className="skill-warn"
+                role="status"
+                data-skill-save-unavailable
+                data-skill-error-code={saveAvailability.code || undefined}
+              >
+                {saveAvailability.reason}
+              </p>
+            ) : (
+              <>
+                <TextField
+                  label="技能 ID"
+                  hint="小写字母开头，只能含小写字母、数字、下划线。"
+                  data-skill-save-field="id"
+                  value={saveForm.id}
+                  onChange={(e) => setSaveForm((cur) => ({ ...cur, id: e.target.value }))}
+                />
+                <TextField
+                  label="名称"
+                  data-skill-save-field="name"
+                  value={saveForm.name}
+                  onChange={(e) => setSaveForm((cur) => ({ ...cur, name: e.target.value }))}
+                />
+                <TextField
+                  label="简介"
+                  data-skill-save-field="description"
+                  value={saveForm.description}
+                  onChange={(e) => setSaveForm((cur) => ({ ...cur, description: e.target.value }))}
+                />
+                <label className="skill-field-label" htmlFor="skill-save-prompt">
+                  执行说明（systemPrompt）
+                </label>
+                <textarea
+                  id="skill-save-prompt"
+                  className="skill-textarea"
+                  data-skill-save-field="systemPrompt"
+                  rows={5}
+                  value={saveForm.systemPrompt}
+                  onChange={(e) => setSaveForm((cur) => ({ ...cur, systemPrompt: e.target.value }))}
+                />
+                <div className="skill-actions skill-entry-actions">
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    data-skill-action="save"
+                    status={busy === "save" ? "loading" : "idle"}
+                    disabled={busy !== null || !saveAvailability.available}
+                    onClick={() => void saveSkill()}
+                  >
+                    保存技能
+                  </Button>
+                  <span className="skill-muted" data-skill-save-feedback>
+                    {saveFeedback.label}：{saveFeedback.detail}
+                  </span>
+                </div>
+              </>
+            )}
+            {saveState.status === "done" ? (
+              <p className="skill-notice" role="status" data-skill-save-done>
+                已保存技能 {saveState.savedId}
+              </p>
+            ) : null}
+            {saveState.status === "failed" && saveState.errorCode ? (
+              <p className="skill-error" role="alert" data-skill-save-error data-skill-error-code={saveState.errorCode}>
+                {skillFailureText(saveState.errorCode, saveState.detail)}（{saveState.errorCode}）
+              </p>
+            ) : null}
+          </section>
+
+          <section className="skill-section skill-entry" aria-label="工作区技能" data-skill-workspace-state={workspaceState.status}>
+            <div className="skill-section-head skill-entry-head">
+              <h4>工作区技能</h4>
+              <span className="skill-muted">技能包注册的多 Agent 工作空间资料（skill/workspace/list）</span>
+            </div>
+            {!workspaceAvailability.available && workspaceAvailability.reason ? (
+              <p
+                className="skill-warn"
+                role="status"
+                data-skill-workspace-unavailable
+                data-skill-error-code={workspaceAvailability.code || undefined}
+              >
+                {workspaceAvailability.reason}
+              </p>
+            ) : null}
+            <div className="skill-actions skill-entry-actions">
+              <Button
+                variant="secondary"
+                size="sm"
+                data-skill-action="workspace"
+                status={busy === "workspace" ? "loading" : "idle"}
+                disabled={busy !== null || !workspaceAvailability.available}
+                title={workspaceAvailability.reason || undefined}
+                onClick={() => void loadWorkspace()}
+              >
+                读取工作区资料
+              </Button>
+              <span className="skill-muted" data-skill-workspace-feedback>
+                {workspaceFeedback.label}：{workspaceFeedback.detail}
+              </span>
+            </div>
+            {workspaceState.status === "failed" && workspaceState.errorCode ? (
+              <p
+                className="skill-error"
+                role="alert"
+                data-skill-workspace-error
+                data-skill-error-code={workspaceState.errorCode}
+              >
+                {skillFailureText(workspaceState.errorCode, workspaceState.detail)}（{workspaceState.errorCode}）
+              </p>
+            ) : null}
+            {workspaceState.status === "done" ? (
+              workspaceState.items.length ? (
+                <ul className="skill-files" data-skill-workspace-list>
+                  {workspaceState.items.map((profile) => (
+                    <li key={profile.id}>
+                      <span className="skill-mono">{profile.id}</span>
+                      <span>{profile.name || "（未命名）"}</span>
+                      {profile.modelProfile ? (
+                        <span className="skill-muted">模型档 {profile.modelProfile}</span>
+                      ) : null}
+                      {typeof profile.enabled === "boolean" ? (
+                        <span className="skill-muted">{profile.enabled ? "已启用" : "已停用"}</span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="skill-muted" data-skill-workspace-empty>
+                  没有已注册的工作区资料
+                </p>
+              )
             ) : null}
           </section>
 
@@ -1021,6 +1504,166 @@ function SkillCenterBody({ tab, role }: { tab: SkillTab; role: string | null }) 
     </section>
   );
 
+  /* 市场页详情：技能包说明 + 技能文档分析（skill/analyze）+ 保存（skill/save）。 */
+  const marketDetailPane = (
+    <section
+      className="skill-detail-pane"
+      aria-label="技能包与文档分析"
+      data-skill-detail-state={analyzeState.status === "idle" ? "market" : "analyze"}
+    >
+      <div className="skill-detail" data-skill-market-note>
+        <h3>技能包（本机导入）</h3>
+        <p className="skill-muted">
+          技能包把一批 SKILL.md 与资源一起装进来；安装后包内技能会在「已安装」分类出现并可启停、运行。
+          联网市场与在线安装在 OUT 范围内已关闭，这里只从本机 ZIP 导入，或选一份 Markdown 做分析。
+        </p>
+        <p className="skill-muted" data-skill-pack-total>
+          当前已安装 {packs.length} 个技能包。
+        </p>
+      </div>
+
+      <section className="skill-section skill-entry" aria-label="技能文档分析" data-skill-analyze-state={analyzeState.status}>
+        <div className="skill-section-head skill-entry-head">
+          <h4>技能文档分析</h4>
+          <span className="skill-muted">选本机 Markdown → skill/analyze → 生成 v2 工作流</span>
+        </div>
+        {!analyzeAvailability.available && analyzeAvailability.reason ? (
+          <p
+            className="skill-warn"
+            role="status"
+            data-skill-analyze-unavailable
+            data-skill-error-code={analyzeAvailability.code || undefined}
+          >
+            {analyzeAvailability.reason}
+          </p>
+        ) : null}
+        {analyzeState.fileName ? (
+          <div className="skill-run" data-skill-analyze data-skill-analyze-state={analyzeState.status}>
+            <div className="skill-run__head">
+              <Badge tone={analyzeFeedback.tone} className="skill-status">
+                {analyzeFeedback.label}
+              </Badge>
+              <span className="skill-muted">
+                {analyzeState.fileName} · {analyzeFeedback.detail}
+              </span>
+              {analyzeFeedback.active ? <span className="ds-spinner" aria-hidden="true" /> : null}
+            </div>
+            {analyzeState.errorCode ? (
+              <p
+                className="skill-error"
+                role="alert"
+                data-skill-analyze-error
+                data-skill-error-code={analyzeState.errorCode}
+              >
+                {skillFailureText(analyzeState.errorCode, analyzeState.detail)}（{analyzeState.errorCode}）
+              </p>
+            ) : null}
+            {analyzeState.status === "done" && analyzeState.skill ? (
+              <div className="skill-analyze" data-skill-analyze-result>
+                <dl className="skill-kv">
+                  <dt>名称</dt>
+                  <dd>{asText(analyzeState.skill.name, "（未命名）")}</dd>
+                  <dt>ID</dt>
+                  <dd className="skill-mono">{asText(analyzeState.skill.id, "（未生成）")}</dd>
+                  <dt>说明</dt>
+                  <dd>{asText(analyzeState.skill.description, "—")}</dd>
+                </dl>
+                {analyzeState.skill.v2 && analyzeState.skill.v2.steps && analyzeState.skill.v2.steps.length ? (
+                  <ol className="skill-steps" data-skill-analyze-steps>
+                    {analyzeState.skill.v2.steps.map((step, index) => (
+                      <li key={index}>
+                        <span className="skill-step__title">{asText(step.title, "步骤 " + (index + 1))}</span>
+                        {step.detail ? <span className="skill-muted">{step.detail}</span> : null}
+                        {step.uses ? <span className="skill-muted">使用：{step.uses}</span> : null}
+                      </li>
+                    ))}
+                  </ol>
+                ) : null}
+                {analyzeState.warnings && analyzeState.warnings.length ? (
+                  <ul className="skill-files" data-skill-analyze-warnings>
+                    {analyzeState.warnings.map((warning, index) => (
+                      <li key={index} className="skill-muted">
+                        {warning}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <p className="skill-muted" data-skill-analyze-idle>
+            还没有分析结果：在左侧「分析本地技能文档」选一份 Markdown。
+          </p>
+        )}
+      </section>
+
+      {analyzeState.status === "done" && analyzeState.skill ? (
+        <section className="skill-section skill-entry" aria-label="保存分析结果" data-skill-save-state={saveState.status} data-skill-save-context="analyze">
+          <div className="skill-section-head skill-entry-head">
+            <h4>保存为技能</h4>
+            <span className="skill-muted">确认后写入技能目录（skill/save），v2 工作流一起保存</span>
+          </div>
+          <TextField
+            label="技能 ID"
+            hint="小写字母开头，只能含小写字母、数字、下划线。"
+            data-skill-save-field="id"
+            value={saveForm.id}
+            onChange={(e) => setSaveForm((cur) => ({ ...cur, id: e.target.value }))}
+          />
+          <TextField
+            label="名称"
+            data-skill-save-field="name"
+            value={saveForm.name}
+            onChange={(e) => setSaveForm((cur) => ({ ...cur, name: e.target.value }))}
+          />
+          <TextField
+            label="简介"
+            data-skill-save-field="description"
+            value={saveForm.description}
+            onChange={(e) => setSaveForm((cur) => ({ ...cur, description: e.target.value }))}
+          />
+          <label className="skill-field-label" htmlFor="skill-analyze-save-prompt">
+            执行说明（systemPrompt）
+          </label>
+          <textarea
+            id="skill-analyze-save-prompt"
+            className="skill-textarea"
+            data-skill-save-field="systemPrompt"
+            rows={5}
+            value={saveForm.systemPrompt}
+            onChange={(e) => setSaveForm((cur) => ({ ...cur, systemPrompt: e.target.value }))}
+          />
+          <div className="skill-actions skill-entry-actions">
+            <Button
+              variant="primary"
+              size="sm"
+              data-skill-action="save"
+              status={busy === "save" ? "loading" : "idle"}
+              disabled={busy !== null || !saveAvailability.available}
+              onClick={() => void saveSkill()}
+            >
+              保存技能
+            </Button>
+            <span className="skill-muted" data-skill-save-feedback>
+              {saveFeedback.label}：{saveFeedback.detail}
+            </span>
+          </div>
+          {saveState.status === "done" ? (
+            <p className="skill-notice" role="status" data-skill-save-done>
+              已保存技能 {saveState.savedId}
+            </p>
+          ) : null}
+          {saveState.status === "failed" && saveState.errorCode ? (
+            <p className="skill-error" role="alert" data-skill-save-error data-skill-error-code={saveState.errorCode}>
+              {skillFailureText(saveState.errorCode, saveState.detail)}（{saveState.errorCode}）
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+    </section>
+  );
+
   const body =
     state === "loading" ? (
       <PageState kind="loading" title="正在读取技能目录…" />
@@ -1099,7 +1742,7 @@ function SkillCenterBody({ tab, role }: { tab: SkillTab; role: string | null }) 
     ) : (
       <div className="skill-split">
         {listPane}
-        {tab === "market" ? detailPaneMarket(packs) : detailPane}
+        {tab === "market" ? marketDetailPane : detailPane}
       </div>
     );
 
@@ -1154,24 +1797,6 @@ function SkillCenterBody({ tab, role }: { tab: SkillTab; role: string | null }) 
       {body}
       {dialogs}
     </div>
-  );
-}
-
-/** 市场页的详情区：技能包没有实例详情，改为说明"包内技能去『已安装』看"。 */
-function detailPaneMarket(packs: SkillPack[]) {
-  return (
-    <section className="skill-detail-pane" aria-label="技能包说明" data-skill-detail-state="market">
-      <div className="skill-detail" data-skill-market-note>
-        <h3>技能包（本机导入）</h3>
-        <p className="skill-muted">
-          技能包把一批 SKILL.md 与资源一起装进来；安装后包内技能会在「已安装」分类出现并可启停、运行。
-          联网市场与在线安装在 OUT 范围内已关闭，这里只从本机 ZIP 导入。
-        </p>
-        <p className="skill-muted" data-skill-pack-total>
-          当前已安装 {packs.length} 个技能包。
-        </p>
-      </div>
-    </section>
   );
 }
 

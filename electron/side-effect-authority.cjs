@@ -37,9 +37,9 @@ const crypto = require("node:crypto");
 const domain = require("./side-effect-domain.cjs");
 const toolDomain = require("./tool-domain.cjs");
 const {
-  CALL_STATUS, APPROVAL_DECISION, LEASE_STATUS, ELIGIBILITY, SIDE_EFFECT_ERROR,
+  CALL_STATUS, EFFECT_CLASS, APPROVAL_DECISION, LEASE_STATUS, ELIGIBILITY, SIDE_EFFECT_ERROR,
   EXECUTION_POLICY, DEFAULT_APPROVAL_TTL_MS, DEFAULT_LEASE_TTL_MS,
-  effectClassForRisk, isC1EffectClass, planHashOf, idempotencyKeyOf, fingerprint,
+  effectClassForRisk, isC1EffectClass, executionPolicyForEffectClass, planHashOf, idempotencyKeyOf, fingerprint,
   evaluateExecutionEligibility,
 } = domain;
 const { isWellFormedToolId } = toolDomain;
@@ -282,7 +282,14 @@ class SideEffectAuthority {
     if (!validation.ok) return { ok: false, error: "TOOL_ARGUMENT_INVALID", schemaErrors: validation.errors };
     const effectClass = effectClassForRisk(contract.riskClass);
     if (!effectClass) return { ok: false, error: SIDE_EFFECT_ERROR.EFFECT_CLASS_BLOCKED, detail: "READ_ONLY uses D4-03B" };
-    if (!isC1EffectClass(effectClass)) return { ok: false, error: SIDE_EFFECT_ERROR.EFFECT_CLASS_BLOCKED };
+    // REVERSIBLE_WRITE 沿用 C1 合同（plan 即可，执行再判 policy）；EXTERNAL_SIDE_EFFECT 是 D5-04 新开的
+    // 唯一另一类：必须由 contract 显式声明 CONTROLLED_EXTERNAL_EFFECT 才准立项，否则与
+    // IRREVERSIBLE / PRIVILEGED 同样 BLOCKED —— 绝不因为存在外部 adapter 就获得执行能力。
+    if (effectClass === EFFECT_CLASS.EXTERNAL_SIDE_EFFECT) {
+      if (contract.executionPolicy !== EXECUTION_POLICY.CONTROLLED_EXTERNAL_EFFECT) return { ok: false, error: SIDE_EFFECT_ERROR.EFFECT_CLASS_BLOCKED };
+    } else if (!isC1EffectClass(effectClass)) {
+      return { ok: false, error: SIDE_EFFECT_ERROR.EFFECT_CLASS_BLOCKED };
+    }
     if (!contract.verificationStrategy) return { ok: false, error: SIDE_EFFECT_ERROR.VERIFICATION_UNAVAILABLE };
     if (contract.idempotencySupport === false) return { ok: false, error: SIDE_EFFECT_ERROR.IDEMPOTENCY_UNSUPPORTED };
     const adapter = this.adapterFor ? this.adapterFor({ executionProvider: contract.executionProvider, toolId: contract.toolId }) : null;
@@ -1034,6 +1041,10 @@ class SideEffectAuthority {
     const tool = this.#toolFor(call);
     if (!tool.ok) return failWith(tool.error === "TOOL_DISABLED" ? SIDE_EFFECT_ERROR.TOOL_DISABLED : tool.error);
     if (effectClassForRisk(tool.contract.riskClass) !== String(call.effectClass)) return failWith(SIDE_EFFECT_ERROR.TOOL_VERSION_CHANGED);
+    // claim 事务内的 executionPolicy 复核：plan 之后 contract 若被改回纯 REVERSIBLE_WRITE 合同，
+    // 旧的 EXTERNAL call 绝不因此获得执行资格。
+    const expectedPolicy = executionPolicyForEffectClass(call.effectClass);
+    if (!expectedPolicy || tool.contract.executionPolicy !== expectedPolicy) return failWith(SIDE_EFFECT_ERROR.WRITE_EXECUTION_DISABLED);
     const authorization = this.#authorizeLive({ sessionRef: task.session_ref, appId: task.app_id, preconditions: call.preconditionsSafe }, tool.contract, actor.user.id);
     if (!authorization.ok) return failWith(SIDE_EFFECT_ERROR.AUTHORIZATION_REVOKED);
     if (!this.#preconditionsOk(call)) return failWith(SIDE_EFFECT_ERROR.PRECONDITION_CHANGED);
@@ -1087,7 +1098,10 @@ class SideEffectAuthority {
     if (!call) return want(SIDE_EFFECT_ERROR.CALL_NOT_FOUND);
     const tool = this.#toolFor(call);
     if (!tool.ok) return want(tool.error === "TOOL_DISABLED" ? SIDE_EFFECT_ERROR.TOOL_DISABLED : tool.error);
-    if (tool.contract.executionPolicy !== EXECUTION_POLICY.CONTROLLED_REVERSIBLE_WRITE) return want(SIDE_EFFECT_ERROR.WRITE_EXECUTION_DISABLED);
+    // 执行位由 effectClass 精确决定：REVERSIBLE_WRITE→CONTROLLED_REVERSIBLE_WRITE，
+    // EXTERNAL_SIDE_EFFECT→CONTROLLED_EXTERNAL_EFFECT；不匹配一律 WRITE_EXECUTION_DISABLED。
+    const expectedPolicy = executionPolicyForEffectClass(call.effectClass);
+    if (!expectedPolicy || tool.contract.executionPolicy !== expectedPolicy) return want(SIDE_EFFECT_ERROR.WRITE_EXECUTION_DISABLED);
     // execution ownership = callId + exact leaseId + holderId + this.instanceId。
     if (!leaseId || !holderId) return want(SIDE_EFFECT_ERROR.LEASE_NOT_HELD, { detail: "EXECUTOR_IDENTITY_REQUIRED" });
     if (call.status === CALL_STATUS.SUCCEEDED) return { ok: true, executed: false, duplicate: true, mutationCount: 0, call, result: null, verificationStatus: call.verificationStatus, error: null };
@@ -1183,7 +1197,9 @@ class SideEffectAuthority {
     let verdict;
     // verify 与 execute / recoveryVerify 同源：**只读持久化的 trusted plan**。
     // 需要基准 revision 的 verifier（CanvasControl READ_AFTER_WRITE）看不到 preconditions 就只能判 FAIL。
-    try { verdict = await adapter.verify({ context: execCtx, args, result: execResult.result, contract: tool.contract, preconditions: call.preconditionsSafe }); }
+    // expectedEffects 一并交给 verifier：D5-04 的外部 provider 用它做 argsDigest 一致性核对
+    // （批准时持久化的 effects 必须与本次执行的 args 完全一致）。
+    try { verdict = await adapter.verify({ context: execCtx, args, result: execResult.result, contract: tool.contract, preconditions: call.preconditionsSafe, expectedEffects: call.expectedEffectsSafe }); }
     catch { return this.#finishUnknownEffect({ call, leaseId, detail: "VERIFIER_UNAVAILABLE" }); }
     if (!verdict || verdict.ok !== true) return this.#finishUnknownEffect({ call, leaseId, detail: "VERIFIER_UNAVAILABLE" });
     if (verdict.applied !== true) return this.#finishKnownNoEffect({ call, leaseId, error: SIDE_EFFECT_ERROR.VERIFICATION_FAILED, verificationStatus: "FAIL", knownNoEffect: true });

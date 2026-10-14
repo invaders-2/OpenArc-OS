@@ -21,6 +21,13 @@ import {
   AGENT_COMMANDS,
   TASK_CONSOLE_COMMANDS,
   TASK_DEPENDENCY_LABEL,
+  TASK_ENTRIES,
+  TASK_ENTRY_KEYS,
+  TASK_ENTRY_REQUIRED_INPUTS,
+  TASK_ENTRY_RISK_LABEL,
+  TASK_ENTRY_RISK_TEXT,
+  UNIFIED_READ_MODEL_COMMAND,
+  UNIFIED_SOURCES,
   TASK_DEPENDENCY_TEXT,
   TASK_ERROR_TEXT,
   TASK_NARROW_MAX,
@@ -54,9 +61,21 @@ import {
   taskErrorText,
   taskFeedback,
   taskFeedbackForStatus,
+  normalizeUnifiedList,
+  taskEntryAvailability,
+  taskEntryConfirmSummary,
+  taskEntryConfirmTitle,
+  taskEntryDependencyText,
+  taskEntryMeta,
+  taskEntryMissingInputs,
+  taskEntryRiskText,
   taskListState,
   taskPhase,
   taskEventSequenceState,
+  unifiedCountsText,
+  unifiedSourceBadge,
+  unifiedSourceIndex,
+  unifiedSourceLabel,
   waitingQuestionFromEvents,
 } from "../src/projects/taskConsoleLogic.ts";
 
@@ -75,7 +94,7 @@ const stripComments = (s) =>
    ══════════════════════════════════════════════════════════════════════════ */
 test("命令白名单逐条等于后端 agent-domain.cjs 的 AGENT_COMMANDS（含顺序与条数）", () => {
   const backend = Object.keys(domain.AGENT_COMMANDS);
-  assert.equal(backend.length, 27, "后端应有 27 条 agent 命令（26 + agent/health）");
+  assert.equal(backend.length, 28, "后端应有 28 条 agent 命令（27 + agent/health + agent/task/unified-list）");
   assert.deepEqual([...AGENT_COMMANDS], backend, "界面白名单必须与后端完全一致，不能多也不能少");
 });
 
@@ -83,7 +102,8 @@ test("白名单命令都是 agent/ 前缀且不重复", () => {
   const set = new Set(AGENT_COMMANDS);
   assert.equal(set.size, AGENT_COMMANDS.length, "白名单不能有重复项");
   for (const c of AGENT_COMMANDS) {
-    assert.match(c, /^agent\/[a-z/]+$/, c + " 必须是 agent/ 前缀命令");
+    // 后端真实命令名允许连字符（agent/task/unified-list），前缀判据同步放宽到 [a-z/-]。
+    assert.match(c, /^agent\/[a-z/-]+$/, c + " 必须是 agent/ 前缀命令");
     assert.equal(domain.isAgentCommand(c), true, c + " 必须是后端承认的命令");
   }
 });
@@ -95,14 +115,18 @@ test("isAllowedAgentCommand 拒绝非白名单输入（含原型污染与非法�
   assert.equal(isAllowedAgentCommand("agent/task/list"), true);
 });
 
-test("控制台发出的命令是后端白名单的子集，且不包含高风险调用", () => {
+test("控制台发出的命令是后端白名单的子集，写操作入口与统一读模型都在内", () => {
   for (const c of TASK_CONSOLE_COMMANDS) {
     assert.equal(AGENT_COMMANDS.indexOf(c) >= 0, true, c + " 必须属于 AGENT_COMMANDS");
     assert.equal(domain.isAgentCommand(c), true, c + " 必须被后端承认");
   }
-  for (const forbidden of ["agent/tool/call", "agent/project/run", "agent/react/run", "agent/task/create", "agent/project/snapshot"]) {
-    assert.equal(TASK_CONSOLE_COMMANDS.indexOf(forbidden), -1, "UI-3 这一波不发起 " + forbidden);
+  /* UI-3b 四个写操作入口 + 统一读模型：命令名与后端一致，界面不再只读。 */
+  for (const required of ["agent/task/create", "agent/tool/call", "agent/project/run", "agent/react/run", "agent/task/unified-list"]) {
+    assert.equal(TASK_CONSOLE_COMMANDS.indexOf(required) >= 0, true, "必须提供入口 " + required);
+    assert.equal(domain.isAgentCommand(required), true, required + " 必须被后端承认");
   }
+  /* 仍不发起的一类：项目快照（写盘）不在本波入口里。 */
+  assert.equal(TASK_CONSOLE_COMMANDS.indexOf("agent/project/snapshot"), -1, "本波不发起 agent/project/snapshot");
 });
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -427,7 +451,10 @@ test("界面只经 window.openarc.agent 取数据，命令体不含身份字段"
   assert.equal(/appId/.test(code), false, "界面不得出现 appId");
   /* 命令体只发 { command, payload }：payload 的键必须只有业务参数 + requestId。
      逐行解析 send(...) / runAction(...) 的内联载荷对象，身份字段一个都不许出现。 */
-  const allowed = ["afterSequence", "answer", "message", "requestId", "taskId"];
+  const allowed = [
+    "afterSequence", "answer", "arguments", "instruction", "message",
+    "projectId", "requestId", "taskId", "title", "tool",
+  ];
   let payloadCount = 0;
   for (const line of code.split("\n")) {
     if (!/send\(|runAction\(/.test(line)) continue;
@@ -482,3 +509,162 @@ test("main.tsx 只在 projects 分支承载任务控制台，既有 ProjectsApp 
   assert.ok(code.indexOf("<TaskConsole") >= 0 && code.indexOf("<ProjectsApp") >= 0, "两个子视图都要能渲染");
   assert.ok(code.indexOf('useState<"tasks" | "projects">') >= 0, "projects 内子视图切换状态必须存在");
 });
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   9 写操作入口（UI-3b）—— 可用性 / 风险 / 必填 / 统一读模型来源
+   ══════════════════════════════════════════════════════════════════════════ */
+test("四个写操作入口逐条落在后端白名单，命令与界面入口同源", () => {
+  assert.deepEqual([...TASK_ENTRY_KEYS], ["create", "tool-call", "project-run", "react-run"]);
+  assert.equal(TASK_ENTRIES.length, 4);
+  for (const meta of TASK_ENTRIES) {
+    assert.equal(domain.isAgentCommand(meta.command), true, meta.command + " 必须是后端命令");
+    assert.equal(TASK_CONSOLE_COMMANDS.indexOf(meta.command) >= 0, true, meta.command + " 必须在界面白名单");
+    assert.equal(taskEntryMeta(meta.key), meta);
+    assert.ok(meta.requires.length > 0, meta.key + " 必须声明依赖");
+  }
+  assert.equal(taskEntryMeta("nope"), null);
+  assert.equal(taskEntryRiskText("nope"), "");
+  assert.deepEqual(Object.keys(TASK_ENTRY_RISK_LABEL).sort(), ["external-side-effect", "model-call", "write"]);
+  for (const key of TASK_ENTRY_KEYS) assert.ok(TASK_ENTRY_RISK_TEXT[key].length > 0, key + " 必须有风险说明");
+});
+
+test("入口可用性：桥缺失 / 依赖缺失 / 就绪三态，缺哪个依赖就说哪个", () => {
+  const noBridge = taskEntryAvailability("create", { hasBridge: false, missing: [] });
+  assert.equal(noBridge.available, false);
+  assert.equal(noBridge.kind, "no-bridge");
+
+  /* 工具目录 + 虚拟文件树缺失：agent/tool/call 不可用 */
+  const toolAvail = taskEntryAvailability("tool-call", {
+    hasBridge: true,
+    missing: [
+      { key: "toolCatalog", label: TASK_DEPENDENCY_LABEL.toolCatalog },
+      { key: "fsAdapter", label: TASK_DEPENDENCY_LABEL.fsAdapter },
+    ],
+  });
+  assert.equal(toolAvail.available, false);
+  assert.equal(toolAvail.kind, "dependency");
+  assert.ok(toolAvail.title.indexOf("工具目录") >= 0, toolAvail.title);
+  assert.ok(toolAvail.description.indexOf("虚拟文件树") >= 0, toolAvail.description);
+  assert.deepEqual(toolAvail.missing.map((m) => m.key).sort(), ["fsAdapter", "toolCatalog"]);
+
+  /* 模型站点缺失：project/run 与 react/run 都要点名 */
+  for (const key of ["project-run", "react-run"]) {
+    const av = taskEntryAvailability(key, {
+      hasBridge: true,
+      missing: [
+        { key: "modelAdapter", label: TASK_DEPENDENCY_LABEL.modelAdapter },
+        { key: "providerAdapter", label: TASK_DEPENDENCY_LABEL.providerAdapter },
+      ],
+    });
+    assert.equal(av.kind, "dependency");
+    assert.ok(av.title.indexOf("模型调用出口") >= 0, key + " " + av.title);
+    assert.ok(av.description.indexOf("模型供应商只读桥") >= 0, key + " " + av.description);
+  }
+
+  /* 无关依赖缺失不影响入口（create 只依赖 db / actorResolution）。 */
+  const createReady = taskEntryAvailability("create", {
+    hasBridge: true,
+    missing: [{ key: "fsAdapter", label: TASK_DEPENDENCY_LABEL.fsAdapter }],
+  });
+  assert.equal(createReady.available, true);
+  assert.equal(createReady.kind, "ready");
+  assert.equal(createReady.missing.length, 0);
+  assert.equal(taskEntryAvailability("nope", { hasBridge: true, missing: [] }).kind, "input");
+});
+
+test("依赖缺失文案说明没有产物，且与原 task 文案同一口径", () => {
+  const text = taskEntryDependencyText(TASK_ENTRIES[1], [{ key: "toolCatalog", label: "工具目录" }]);
+  assert.ok(text.startsWith("缺少依赖："));
+  assert.ok(text.indexOf("工具目录") >= 0);
+  assert.ok(text.indexOf("没有产生任何产物") >= 0, text);
+});
+
+test("必填输入在前端就被拦下（不发空命令）", () => {
+  assert.deepEqual(TASK_ENTRY_REQUIRED_INPUTS.create, ["projectId", "instruction"]);
+  assert.deepEqual(taskEntryMissingInputs("create", { projectId: "p1" }), ["instruction"]);
+  assert.deepEqual(taskEntryMissingInputs("create", { projectId: "p1", instruction: "  " }), ["instruction"]);
+  assert.deepEqual(taskEntryMissingInputs("create", { projectId: "p1", instruction: "做点事", title: "" }), []);
+  assert.deepEqual(taskEntryMissingInputs("tool-call", { tool: "file.read" }), []);
+  assert.deepEqual(taskEntryMissingInputs("tool-call", {}), ["tool"]);
+  assert.deepEqual(taskEntryMissingInputs("react-run", { taskId: "t1" }), []);
+  assert.deepEqual(taskEntryMissingInputs("nope", {}), []);
+});
+
+test("统一读模型：来源标注 dx / core / 并列，计数不重算", () => {
+  const view = normalizeUnifiedList({
+    ok: true,
+    readModel: true,
+    boundary: "这是读模型：不写任何表、不改变任何一方状态机。",
+    sources: ["dx", "core"],
+    counts: { dx: 2, core: 1, total: 3 },
+    items: [
+      { source: "dx", id: "t1", title: "甲", status: "RUNNING", projectId: "p1" },
+      { source: "core", id: "t1", title: "甲（core）", status: "SUCCEEDED", projectId: null },
+      { source: "dx", id: "t2", title: "乙", status: null, projectId: "p1" },
+      { source: "weird", id: "" },
+    ],
+  });
+  assert.equal(view.ok, true);
+  assert.equal(view.readModel, true);
+  assert.deepEqual(view.counts, { dx: 2, core: 1, total: 3 });
+  assert.equal(view.items.length, 3, "缺 id 的行被丢弃");
+  assert.deepEqual(unifiedSourceIndex(view.items), { t1: "dx+core", t2: "dx" });
+  assert.deepEqual(unifiedSourceBadge("dx"), { label: "DX", tone: "neutral" });
+  assert.deepEqual(unifiedSourceBadge("core"), { label: "core", tone: "neutral" });
+  assert.equal(unifiedSourceBadge("dx+core").tone, "warning");
+  assert.equal(unifiedSourceBadge("weird").tone, "warning");
+  assert.ok(unifiedSourceLabel("core").indexOf("core") >= 0);
+  assert.equal(unifiedSourceLabel("weird"), "weird");
+  assert.ok(unifiedCountsText(view).indexOf("dx 2") >= 0 && unifiedCountsText(view).indexOf("core 1") >= 0);
+  assert.equal(unifiedCountsText(null), "统一读模型未返回");
+  assert.deepEqual([...UNIFIED_SOURCES], ["dx", "core"]);
+  assert.equal(UNIFIED_READ_MODEL_COMMAND, "agent/task/unified-list");
+  assert.deepEqual(normalizeUnifiedList(null).counts, { dx: 0, core: 0, total: 0 });
+});
+
+test("界面源码包含四个写操作入口与统一读模型，且不发身份字段", () => {
+  const code = stripComments(read("src/projects/TaskConsole.tsx"));
+  for (const marker of ["TASK_ENTRIES", "data-task-entry", "data-task-source", "UNIFIED_READ_MODEL_COMMAND"]) {
+    assert.ok(code.indexOf(marker) >= 0, "界面必须渲染 " + marker);
+  }
+  assert.equal(/sessionRef|userId|appId/.test(code), false, "界面不得出现身份字段");
+  const logic = stripComments(read("src/projects/taskConsoleLogic.ts"));
+  for (const c of ["agent/task/create", "agent/tool/call", "agent/project/run", "agent/react/run", "agent/task/unified-list"]) {
+    assert.ok(logic.indexOf(c) >= 0, "逻辑层必须登记 " + c);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+   写类入口二次确认（UI-3c）：确认前不发命令；取消则命令数 0；确认后才发送
+   ══════════════════════════════════════════════════════════════════════════ */
+test("四个写操作入口都有二次确认标题与副作用说明", () => {
+  for (const key of TASK_ENTRY_KEYS) {
+    const title = taskEntryConfirmTitle(key);
+    const summary = taskEntryConfirmSummary(key, {});
+    assert.ok(title && title.trim().length > 0, key + " 必须有确认标题");
+    assert.ok(summary && summary.length > 0, key + " 必须有副作用说明");
+  }
+  assert.equal(taskEntryConfirmTitle("nope"), "确认");
+  assert.equal(taskEntryConfirmSummary("nope", {}), "");
+});
+
+test("确认框摘要只列出已填字段，不编造载荷", () => {
+  const summary = taskEntryConfirmSummary("create", { projectId: "p_weekly", instruction: "写周报" });
+  assert.ok(summary.indexOf("p_weekly") >= 0 && summary.indexOf("写周报") >= 0, summary);
+  assert.equal(summary.indexOf("标题"), -1, "未填的 title 不应出现在摘要里：" + summary);
+});
+
+test("界面源码用 Dialog 做二次确认：确认前不发命令、取消按钮存在", () => {
+  const code = stripComments(read("src/projects/TaskConsole.tsx"));
+  assert.ok(code.indexOf("Dialog") >= 0, "必须复用既有 Dialog");
+  assert.ok(code.indexOf("task-entry-confirm-submit") >= 0, "必须有确认按钮");
+  assert.ok(code.indexOf("task-entry-confirm-cancel") >= 0, "必须有取消按钮");
+  assert.ok(code.indexOf("requestEntry") >= 0, "入口按钮必须先走 requestEntry（不直接 submitEntry）");
+  assert.equal(
+    /onClick=\{\(\) => void submitEntry\(meta\.key\)\}/.test(code),
+    false,
+    "入口按钮不得直接发送命令",
+  );
+});
+

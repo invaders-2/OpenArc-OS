@@ -32,6 +32,7 @@ export const AGENT_COMMANDS: readonly string[] = [
   "agent/task/delete",
   "agent/task/trace",
   "agent/task/stats",
+  "agent/task/unified-list",
   "agent/run/get",
   "agent/run/inspect",
   "agent/run/list",
@@ -54,7 +55,14 @@ export function isAllowedAgentCommand(command: unknown): command is string {
   return typeof command === "string" && AGENT_COMMANDS.indexOf(command) >= 0;
 }
 
-/** 控制台这一波真正会发出的命令（其余后端能力不在 UI-3 范围）。 */
+/**
+ * 控制台真正会发出的命令。
+ *   · 只读 / 既有动作：health / list / get / events / answer / continue / pause / cancel / resume；
+ *   · UI-3b 写操作入口：task/create、tool/call、project/run、react/run（审批在工具与权限层，
+ *     界面只按风险标注并在依赖缺失时给人话提示）；
+ *   · 统一读模型：task/unified-list（只读合并 DX 与 core 两套任务表，U1 交付）。
+ * 每一条都必须在 AGENT_COMMANDS 内，测试逐条对齐后端 agent-domain.cjs。
+ */
 export const TASK_CONSOLE_COMMANDS: readonly string[] = [
   "agent/health",
   "agent/task/list",
@@ -65,6 +73,11 @@ export const TASK_CONSOLE_COMMANDS: readonly string[] = [
   "agent/task/pause",
   "agent/task/cancel",
   "agent/task/resume",
+  "agent/task/create",
+  "agent/tool/call",
+  "agent/project/run",
+  "agent/react/run",
+  "agent/task/unified-list",
 ];
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -745,3 +758,352 @@ export function isNarrowLayout(width: number): boolean {
 export function isEmptyTaskList(count: number): boolean {
   return !Number.isFinite(count) || count <= 0;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   10. 写操作入口（UI-3b）—— 新建任务 / 调用工具 / 跑项目 / ReAct
+   ──────────────────────────────────────────────────────────────────────────
+   四条命令都在后端白名单里（agent-domain.cjs:52-97），界面这一轮补的是：
+     · 可用性判定：agent/health 的 dependencies 里缺哪个依赖就说清哪个（工具目录 / 模型站点）；
+     · 风险标注：写类 / 外部副作用在 UI 上显式标出，与既有审批语义一致（调用不绕过审批）；
+     · 进行中 / 失败：按钮 disabled + aria-busy，失败显示稳定错误码 → 人话。
+   入口本身不新增命令语义，也不替后端做权限判定。
+   ══════════════════════════════════════════════════════════════════════════ */
+export type TaskEntryKey = "create" | "tool-call" | "project-run" | "react-run";
+
+export const TASK_ENTRY_KEYS: readonly TaskEntryKey[] = [
+  "create",
+  "tool-call",
+  "project-run",
+  "react-run",
+];
+
+export type TaskEntryRisk = "write" | "external-side-effect" | "model-call";
+
+export type TaskEntryMeta = {
+  key: TaskEntryKey;
+  command: string;
+  label: string;
+  description: string;
+  /** 风险类别：写 / 外部副作用 / 真实模型调用。 */
+  risk: TaskEntryRisk;
+  /** 是否走审批（外部副作用按既有审批语义逐次确认）。 */
+  requiresApproval: boolean;
+  /** 需要的后端依赖（agent/health 的 dependencies 键）。 */
+  requires: readonly string[];
+  /** 主要输入（界面据此渲染字段并提示必填）。 */
+  inputs: readonly string[];
+};
+
+/**
+ * 依赖清单照后端真实校验写：
+ *   · task/create：createTask 需要 db / actorResolution；
+ *   · tool/call：resolveToolByName 需要 toolCatalog / toolRunner / toolAuth，文件类工具还要 fsAdapter；
+ *   · project/run：project-agent-mode.cjs:117-147 逐项 requireAdapter；
+ *   · react/run：agent-react-driver.cjs:240-263 的 REQUIRED_ADAPTERS。
+ */
+export const TASK_ENTRIES: readonly TaskEntryMeta[] = [
+  {
+    key: "create",
+    command: "agent/task/create",
+    label: "新建任务",
+    description: "登记一条 Agent 任务（固定步骤或 ReAct 由入参决定）。只写任务记录，不调用模型。",
+    risk: "write",
+    requiresApproval: false,
+    requires: ["db", "actorResolution"],
+    inputs: ["projectId", "instruction", "title"],
+  },
+  {
+    key: "tool-call",
+    command: "agent/tool/call",
+    label: "调用工具",
+    description: "真实执行一个已登记的工具；外部副作用按既有审批语义逐次确认。",
+    risk: "external-side-effect",
+    requiresApproval: true,
+    requires: ["toolCatalog", "toolRunner", "toolAuth", "fsAdapter"],
+    inputs: ["tool", "arguments"],
+  },
+  {
+    key: "project-run",
+    command: "agent/project/run",
+    label: "跑项目",
+    description: "按项目 Agent 模式跑一次完整任务：真实调用模型与工具，可能落盘产物。",
+    risk: "model-call",
+    requiresApproval: false,
+    requires: [
+      "modelAdapter",
+      "providerAdapter",
+      "toolRunner",
+      "toolCatalog",
+      "workspaceAdapter",
+      "agentRuntime",
+      "capability",
+      "usage",
+      "fallback",
+      "toolLoop",
+    ],
+    inputs: ["projectId", "instruction"],
+  },
+  {
+    key: "react-run",
+    command: "agent/react/run",
+    label: "ReAct 运行",
+    description: "对一条 ReAct 任务继续跑驱动循环：真实调用模型与工具，并消耗预算。",
+    risk: "model-call",
+    requiresApproval: false,
+    requires: [
+      "modelAdapter",
+      "providerAdapter",
+      "toolRunner",
+      "toolCatalog",
+      "workspaceAdapter",
+      "agentRuntime",
+      "capability",
+      "usage",
+      "fallback",
+    ],
+    inputs: ["taskId"],
+  },
+];
+
+export function taskEntryMeta(key: unknown): TaskEntryMeta | null {
+  const found = TASK_ENTRIES.find((e) => e.key === key);
+  return found || null;
+}
+
+/** 入口风险提示：与既有审批语义一致（写 / 外部副作用要显式说明）。 */
+export const TASK_ENTRY_RISK_TEXT: Record<TaskEntryKey, string> = {
+  create: "写操作：会新建一条任务记录（可取消 / 删除），不调用模型。",
+  "tool-call": "外部副作用：会真实执行工具；写类工具按既有审批语义逐次确认，界面不绕过审批。",
+  "project-run": "写操作 + 真实调用：会创建项目 Run，调用模型与工具并可能落盘产物。",
+  "react-run": "写操作 + 真实模型调用：ReAct 循环会消耗预算并真实调用工具。",
+};
+
+export const TASK_ENTRY_RISK_LABEL: Record<TaskEntryRisk, string> = {
+  write: "写操作",
+  "external-side-effect": "外部副作用",
+  "model-call": "真实模型调用",
+};
+
+export function taskEntryRiskText(key: unknown): string {
+  const meta = taskEntryMeta(key);
+  return meta ? TASK_ENTRY_RISK_TEXT[meta.key] : "";
+}
+
+export type TaskEntryAvailabilityKind = "ready" | "no-bridge" | "dependency" | "input";
+
+export type TaskEntryAvailability = {
+  available: boolean;
+  kind: TaskEntryAvailabilityKind;
+  title: string;
+  description: string;
+  missing: { key: string; label: string }[];
+};
+
+/**
+ * 入口可用性：桥缺失 > 依赖缺失 > 就绪。
+ * missing 只统计 agent/health 明确为 false 的依赖；health 未加载时不假设缺失。
+ */
+export function taskEntryAvailability(
+  key: unknown,
+  input: { hasBridge: boolean; missing: { key: string; label: string }[] },
+): TaskEntryAvailability {
+  const meta = taskEntryMeta(key);
+  if (!meta) {
+    return { available: false, kind: "input", title: "未登记的入口", description: "界面不猜语义。", missing: [] };
+  }
+  if (!input.hasBridge) {
+    return {
+      available: false,
+      kind: "no-bridge",
+      title: meta.label + "不可用：桌面桥未接入",
+      description: dependencyMissingText({ code: "NO_BRIDGE" }),
+      missing: [],
+    };
+  }
+  const required = new Set(meta.requires);
+  const missing = (Array.isArray(input.missing) ? input.missing : []).filter((m) => required.has(m.key));
+  if (missing.length) {
+    return {
+      available: false,
+      kind: "dependency",
+      title: meta.label + "不可用：缺少 " + missing.map((m) => m.label).join("、"),
+      description: taskEntryDependencyText(meta, missing),
+      missing,
+    };
+  }
+  return {
+    available: true,
+    kind: "ready",
+    title: meta.label + "可用",
+    description: "依赖已就绪；命令会真实发往主进程，失败会显示稳定错误码。",
+    missing: [],
+  };
+}
+
+/** 依赖缺失的结构化人话：点名缺哪个依赖，并说明没有产物。 */
+export function taskEntryDependencyText(
+  meta: TaskEntryMeta,
+  missing: { key: string; label: string }[],
+): string {
+  const labels = (Array.isArray(missing) ? missing : []).map((m) => m.label + "（" + m.key + "）");
+  const head = labels.length ? "缺少依赖：" + labels.join("、") + "。" : "缺少执行该命令所需的依赖。";
+  return head + "命令没有执行，任务也没有产生任何产物；接入后可以重试。";
+}
+
+/** 必填输入（与后端 requireStr 的必填项一致）：其余字段可留空。 */
+export const TASK_ENTRY_REQUIRED_INPUTS: Record<TaskEntryKey, readonly string[]> = {
+  create: ["projectId", "instruction"],
+  "tool-call": ["tool"],
+  "project-run": ["projectId", "instruction"],
+  "react-run": ["taskId"],
+};
+
+export const TASK_ENTRY_INPUT_LABEL: Record<string, string> = {
+  projectId: "项目 ID",
+  instruction: "指令",
+  title: "标题（可选）",
+  tool: "工具名",
+  arguments: "参数 JSON（可选）",
+  taskId: "任务 ID",
+};
+
+/** 缺哪些必填项：界面先行拦截，不发空命令给后端。 */
+export function taskEntryMissingInputs(key: unknown, values: Record<string, unknown>): string[] {
+  const meta = taskEntryMeta(key);
+  if (!meta) return [];
+  const required = TASK_ENTRY_REQUIRED_INPUTS[meta.key] || [];
+  return required.filter((field) => !String((values || {})[field] == null ? "" : (values || {})[field]).trim());
+}
+
+/* ── 写类入口的二次确认（UI-3c）────────────────────────────────────────────
+   四个入口都会产生真实副作用，按产品既有约定在发出命令前显式确认：
+     · 确认前不发命令；取消则命令数 0；确认后才发送（判据在界面 handler，文案在这里）。
+   文案只描述"将要发生什么"和"这次会发什么载荷"，不预告成功、不假装结果。 */
+export const TASK_ENTRY_CONFIRM_TITLE: Record<TaskEntryKey, string> = {
+  create: "确认新建任务",
+  "tool-call": "确认调用工具",
+  "project-run": "确认运行项目",
+  "react-run": "确认 ReAct 运行",
+};
+
+const TASK_ENTRY_CONFIRM_HEAD: Record<TaskEntryRisk, string> = {
+  write: "写操作：确认后会写入一条新的任务记录，并可能调用模型与工具。",
+  "external-side-effect": "外部副作用：确认后会真实执行该工具，写类工具的审批不会因此被绕过。",
+  "model-call": "真实调用：确认后会调用模型与工具，可能消耗预算并落盘产物。",
+};
+
+export function taskEntryConfirmTitle(key: unknown): string {
+  const meta = taskEntryMeta(key);
+  if (!meta) return "确认";
+  return TASK_ENTRY_CONFIRM_TITLE[meta.key];
+}
+
+/** 确认框正文：副作用说明 + 本次将要发送的载荷摘要（仅已填字段）。 */
+export function taskEntryConfirmSummary(key: unknown, payload: Record<string, unknown>): string {
+  const meta = taskEntryMeta(key);
+  if (!meta) return "";
+  const head = TASK_ENTRY_CONFIRM_HEAD[meta.risk] || TASK_ENTRY_CONFIRM_HEAD.write;
+  const facts = meta.inputs
+    .filter((field) => (payload || {})[field] !== undefined)
+    .map((field) => (TASK_ENTRY_INPUT_LABEL[field] || field) + "：" + String((payload || {})[field]))
+    .join("；");
+  return facts ? head + " 本次载荷——" + facts : head;
+}
+
+/* ── 统一读模型（DX 11 态 + core 7 态）：只用于列表来源标注，不改任何状态机 ── */
+export const UNIFIED_READ_MODEL_COMMAND = "agent/task/unified-list";
+export const UNIFIED_SOURCES: readonly string[] = ["dx", "core"];
+
+export type UnifiedItem = {
+  source: string;
+  id: string;
+  title: string;
+  status: string | null;
+  projectId: string | null;
+};
+
+export type UnifiedListView = {
+  ok: boolean;
+  readModel: boolean;
+  sources: string[];
+  counts: { dx: number; core: number; total: number };
+  items: UnifiedItem[];
+  boundary: string;
+};
+
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
+
+export function normalizeUnifiedList(result: unknown): UnifiedListView {
+  const root = isObj(result) ? (isObj(result.value) ? (result.value as Record<string, unknown>) : result) : {};
+  const itemsRaw = Array.isArray(root.items) ? root.items : [];
+  const items: UnifiedItem[] = [];
+  for (const raw of itemsRaw) {
+    if (!isObj(raw)) continue;
+    const source = typeof raw.source === "string" ? raw.source : "";
+    const id = typeof raw.id === "string" ? raw.id : "";
+    if (!source || !id) continue;
+    items.push({
+      source,
+      id,
+      title: typeof raw.title === "string" ? raw.title : "",
+      status: typeof raw.status === "string" ? raw.status : null,
+      projectId: typeof raw.projectId === "string" ? raw.projectId : null,
+    });
+  }
+  const countsRaw = isObj(root.counts) ? root.counts : {};
+  const counts = {
+    dx: Number.isFinite(Number(countsRaw.dx)) ? Number(countsRaw.dx) : 0,
+    core: Number.isFinite(Number(countsRaw.core)) ? Number(countsRaw.core) : 0,
+    total: Number.isFinite(Number(countsRaw.total)) ? Number(countsRaw.total) : items.length,
+  };
+  const sources = Array.isArray(root.sources)
+    ? root.sources.filter((s): s is string => typeof s === "string")
+    : [];
+  return {
+    ok: root.ok !== false,
+    readModel: root.readModel === true,
+    sources: sources.length ? sources : UNIFIED_SOURCES.slice(),
+    counts,
+    items,
+    boundary: typeof root.boundary === "string" ? root.boundary : "",
+  };
+}
+
+export const UNIFIED_SOURCE_LABEL: Record<string, string> = {
+  dx: "DX（新任务表）",
+  core: "core（既有任务表）",
+};
+
+export function unifiedSourceLabel(source: unknown): string {
+  const key = source == null ? "" : String(source);
+  return UNIFIED_SOURCE_LABEL[key] || (key || "来源未知");
+}
+
+/** id → 来源（同 id 命中两套表就并列，官方读模型本身不做优先级猜测）。 */
+export function unifiedSourceIndex(items: UnifiedItem[]): Record<string, string> {
+  const map: Record<string, Set<string>> = {};
+  for (const item of Array.isArray(items) ? items : []) {
+    if (!item || !item.id || !item.source) continue;
+    if (!map[item.id]) map[item.id] = new Set<string>();
+    map[item.id].add(item.source);
+  }
+  const out: Record<string, string> = {};
+  for (const [id, set] of Object.entries(map)) {
+    out[id] = UNIFIED_SOURCES.filter((s) => set.has(s)).join("+") || Array.from(set).join("+");
+  }
+  return out;
+}
+
+export function unifiedSourceBadge(source: unknown): { label: string; tone: TaskTone } {
+  const key = source == null ? "" : String(source);
+  if (key === "dx") return { label: "DX", tone: "neutral" };
+  if (key === "core") return { label: "core", tone: "neutral" };
+  if (key === "dx+core") return { label: "DX + core", tone: "warning" };
+  return { label: key || "来源未知", tone: "warning" };
+}
+
+export function unifiedCountsText(view: UnifiedListView | null): string {
+  if (!view || !view.ok) return "统一读模型未返回";
+  return "统一读模型：dx " + view.counts.dx + " / core " + view.counts.core + " / 共 " + view.counts.total;
+}
+

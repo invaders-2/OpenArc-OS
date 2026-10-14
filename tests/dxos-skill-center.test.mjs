@@ -17,22 +17,40 @@ import { createRequire } from "node:module";
 
 import {
   SKILL_COMMANDS,
+  SKILL_DEPENDENCY_MISSING_LABEL,
   SKILL_DEPENDENCY_TEXT,
+  SKILL_ENTRY_KINDS,
+  SKILL_ENTRY_REQUIREMENTS,
   SKILL_ERROR_TEXT,
   SKILL_PAGE_STATE_KINDS,
+  SKILL_RUN_REQUIREMENTS,
   SKILL_TABS,
   SKILL_TAB_LABEL,
+  analyzeResultOf,
+  artifactRef,
+  buildSkillRunArguments,
+  canSaveAnalyzedSkill,
   classifyImportError,
+  collectSkillArtifacts,
+  dependencyUnavailableText,
   filterSkills,
   isAllowedSkillCommand,
+  isMediaSkillKind,
+  isValidSkillId,
+  skillAuxFeedback,
+  skillEntryAvailability,
   skillErrorState,
   skillErrorText,
+  skillFailureText,
   skillListState,
   skillProgressPhase,
   skillRunDisabledReason,
   skillRunFeedback,
+  skillRunInputs,
+  skillRunRequirements,
   skillRunStatusFromPhase,
   skillsForTab,
+  workspaceProfilesOf,
 } from "../src/skills/skillCenterLogic.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -257,12 +275,16 @@ test("filterSkills 匹配 id / 名称 / 说明，空搜索返回原列表", () =
   assert.equal(filterSkills(sample, "不存在的技能").length, 0);
 });
 
-test("skillRunDisabledReason：停用 / 系统能力 / 媒体技能 / 可运行", () => {
+test("skillRunDisabledReason：停用 / 非媒体系统能力 / 媒体技能可运行 / 可运行", () => {
   assert.equal(skillRunDisabledReason(null), "先选择一个技能");
   assert.ok(skillRunDisabledReason(sample[1]).includes("已停用"));
-  assert.ok(skillRunDisabledReason(sample[2]).includes("系统能力"));
   assert.ok(
-    skillRunDisabledReason({ id: "x", kind: "image", enabled: true, layer: "preset" }).includes("媒体技能"),
+    skillRunDisabledReason({ id: "x", kind: "text", enabled: true, layer: "capability" }).includes("系统能力"),
+  );
+  assert.equal(
+    skillRunDisabledReason({ id: "x", kind: "image", enabled: true, layer: "capability" }),
+    null,
+    "媒体类技能本轮已补齐运行入口，不再在本地一律禁用",
   );
   assert.equal(skillRunDisabledReason(sample[3]), null);
   assert.equal(skillRunDisabledReason(sample[0]), null);
@@ -338,4 +360,211 @@ test("styles.css 只新增 .skill-* 类，不覆盖既有 mcp/ds 类与 token", 
   assert.equal(/\.dark\s*\{/.test(block), false, "不得改写 .dark 主题块");
   assert.equal(/--fs-[a-z-]+\s*:/.test(block), false, "不得定义新的字阶 token");
   assert.equal(/--radius-[a-z-]+\s*:/.test(block), false, "不得定义新的圆角 token");
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+   8 依赖装配事实 → 入口可用性（本轮新增：分析导入 / 保存更新 / 工作区 / 媒体运行）
+   ══════════════════════════════════════════════════════════════════════════ */
+test("入口依赖表覆盖全部入口；媒体类技能按产物类型要求 mediaAdapter/providerAdapter/fsAdapter", () => {
+  assert.deepEqual([...SKILL_ENTRY_KINDS], ["run", "analyze", "save", "workspace", "import", "export", "delete", "toggle"]);
+  for (const entry of SKILL_ENTRY_KINDS) {
+    assert.ok(Array.isArray(SKILL_ENTRY_REQUIREMENTS[entry]), entry + " 必须有依赖要求数组");
+  }
+  const mediaKinds = ["image", "image_edit", "image_batch", "image_describe", "midjourney", "image_upscale", "video", "audio_tts", "audio_music", "audio_transcribe"];
+  for (const kind of mediaKinds) {
+    assert.equal(isMediaSkillKind(kind), true, kind + " 应判为媒体类技能");
+  }
+  assert.equal(isMediaSkillKind("text"), false);
+  assert.equal(isMediaSkillKind("procedure"), false);
+  for (const kind of ["image", "image_edit", "image_batch", "video", "audio_tts", "audio_music"]) {
+    const req = skillRunRequirements({ id: "x", kind });
+    assert.ok(req.includes("mediaAdapter"), kind + " 必须要求 mediaAdapter");
+    assert.ok(req.includes("providerAdapter"), kind + " 必须要求 providerAdapter");
+    assert.ok(req.includes("fsAdapter"), kind + " 必须要求 fsAdapter（产物落盘）");
+    assert.deepEqual([...req], [...SKILL_RUN_REQUIREMENTS[kind]]);
+  }
+  assert.equal(skillRunRequirements({ id: "w", kind: "text" }).includes("modelCall"), true);
+  assert.equal(skillRunRequirements(null).length, 0, "未选中技能没有依赖要求");
+  for (const label of Object.values(SKILL_DEPENDENCY_MISSING_LABEL)) {
+    assert.ok(label.startsWith("缺少"), label + " 必须是「缺少 X」的显式文案");
+  }
+  assert.ok(SKILL_DEPENDENCY_MISSING_LABEL.mediaAdapter.includes("缺少媒体适配器"));
+});
+
+test("skillEntryAvailability：依赖缺失给结构化提示；未知依赖不误禁用", () => {
+  const media = { id: "generate_image", kind: "image", enabled: true, layer: "capability" };
+  const missing = skillEntryAvailability("run", media, { providerAdapter: true, mediaAdapter: false, fsAdapter: true });
+  assert.equal(missing.available, false);
+  assert.equal(missing.code, "SKILL_DEPENDENCY_UNAVAILABLE");
+  assert.ok(missing.reason.includes("缺少媒体适配器"), "必须显示缺少媒体适配器，而不是只有灰按钮");
+  assert.deepEqual(missing.missing.map((m) => m.key), ["mediaAdapter"]);
+
+  const ready = skillEntryAvailability("run", media, { providerAdapter: true, mediaAdapter: true, fsAdapter: true });
+  assert.equal(ready.available, true);
+  assert.equal(ready.code, null);
+  assert.equal(ready.reason, null);
+
+  /* health 尚未返回（null / 缺键） = 未知，不据此禁用。 */
+  assert.equal(skillEntryAvailability("run", media, null).available, true);
+  assert.equal(skillEntryAvailability("run", media, {}).available, true);
+  assert.equal(skillEntryAvailability("run", media, { mediaAdapter: undefined }).available, true);
+
+  const text = { id: "writing", kind: "text", enabled: true, layer: "preset" };
+  const noModel = skillEntryAvailability("run", text, { chatTarget: true, modelCall: false });
+  assert.equal(noModel.available, false);
+  assert.ok(noModel.reason.includes("缺少模型调用"));
+
+  assert.equal(skillEntryAvailability("run", null, {}).code, "LOCAL_INPUT_REQUIRED");
+  assert.ok(skillEntryAvailability("run", { id: "x", kind: "text", enabled: false, layer: "preset" }, {}).reason.includes("已停用"));
+  assert.ok(skillEntryAvailability("run", { id: "x", kind: "text", enabled: true, layer: "capability" }, {}).reason.includes("系统能力"));
+
+  assert.equal(skillEntryAvailability("analyze", null, { chatTarget: false, modelCall: true }).available, false);
+  assert.ok(skillEntryAvailability("workspace", null, { skillWorkspace: false }).reason.includes("工作空间"));
+  assert.equal(skillEntryAvailability("save", null, {}).available, true, "新建技能不依赖适配器");
+  assert.equal(skillEntryAvailability("save", { id: "x", builtin: true }, {}).available, false);
+  assert.ok(skillEntryAvailability("save", { id: "x", builtin: true }, {}).reason.includes("内置"));
+  assert.equal(skillEntryAvailability("save", { id: "x", builtin: false }, {}).available, true);
+});
+
+test("依赖缺失错误码 → 指名缺哪一个适配器；非依赖码走既有文案", () => {
+  const text = skillFailureText("SKILL_DEPENDENCY_UNAVAILABLE", { dependency: "mediaAdapter" });
+  assert.ok(text.includes("缺少媒体适配器"));
+  assert.ok(text.includes("没有产生任何产物"));
+  assert.ok(skillFailureText("SKILL_DEPENDENCY_UNAVAILABLE", { dependency: "fsAdapter" }).includes("虚拟文件树"));
+  assert.ok(skillFailureText("SKILL_DEPENDENCY_UNAVAILABLE", { dependency: "unknownThing" }).includes("unknownThing"));
+  assert.equal(skillFailureText("SKILL_FORBIDDEN"), skillErrorText("SKILL_FORBIDDEN"));
+  assert.equal(
+    skillFailureText("DXOS_ERR_INTERNAL", { dependency: "mediaAdapter" }).includes("缺少媒体适配器"),
+    false,
+    "非依赖码不套依赖文案",
+  );
+  assert.equal(dependencyUnavailableText(null), null);
+  assert.equal(dependencyUnavailableText(""), null);
+  assert.ok(dependencyUnavailableText("mediaAdapter").includes("缺少媒体适配器"));
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+   9 运行参数 / 产物 / 辅助入口状态
+   ══════════════════════════════════════════════════════════════════════════ */
+test("运行参数按技能产物类型选择；必填缺失界面拦截；list 字段按分隔符拆数组", () => {
+  assert.deepEqual(skillRunInputs({ id: "w", kind: "text" }).map((f) => f.key), ["instruction"]);
+  assert.deepEqual(skillRunInputs({ id: "g", kind: "image" }).map((f) => f.key), ["prompt", "path"]);
+  const video = skillRunInputs({ id: "v", kind: "video" });
+  assert.equal(video[0].key, "prompt");
+  assert.equal(video[0].required, true);
+  const edit = skillRunInputs({ id: "e", kind: "image_edit" });
+  assert.ok(edit.some((f) => f.key === "images" && f.list === true));
+  assert.deepEqual(skillRunInputs(null), []);
+
+  const built = buildSkillRunArguments(skillRunInputs({ id: "e", kind: "image_edit" }), {
+    prompt: "把背景换蓝",
+    images: "a.png, b.png\nc.png",
+  });
+  assert.equal(built.ok, true);
+  assert.deepEqual(built.args.images, ["a.png", "b.png", "c.png"]);
+  assert.equal(built.args.prompt, "把背景换蓝");
+
+  const missing = buildSkillRunArguments(skillRunInputs({ id: "g", kind: "image" }), { prompt: "   " });
+  assert.equal(missing.ok, false);
+  assert.deepEqual(missing.missing, ["提示词"]);
+  assert.deepEqual(missing.args, {});
+
+  const noPath = buildSkillRunArguments(skillRunInputs({ id: "g", kind: "image" }), { prompt: "猫", path: "" });
+  assert.deepEqual(noPath.args, { prompt: "猫" });
+  assert.deepEqual(buildSkillRunArguments([], null).args, {}, "空表单不抛异常");
+});
+
+test("产物投影：读 images/videos/audios，标识优先 nodeId", () => {
+  const value = {
+    images: [{ nodeId: "n1", name: "img_1.png", url: "/api/fs/raw/n1" }],
+    videos: [{ name: "clip.mp4", url: "/x" }],
+    audios: [{ nodeId: "n3" }],
+    text: "done",
+  };
+  const arts = collectSkillArtifacts(value);
+  assert.equal(arts.length, 3);
+  assert.deepEqual(arts.map((a) => a.kind), ["image", "video", "audio"]);
+  assert.equal(artifactRef(arts[0]), "/api/fs/raw/n1");
+  assert.equal(artifactRef(arts[1]), "/x");
+  assert.equal(artifactRef(arts[2]), "/api/fs/raw/n3");
+  assert.equal(collectSkillArtifacts(null).length, 0);
+  assert.equal(collectSkillArtifacts({ images: "bad" }).length, 0);
+  assert.equal(artifactRef({ kind: "image" }), "（产物缺少标识）");
+});
+
+test("辅助入口状态映射：只有 reading/working 是活动态，标签与说明都非空", () => {
+  for (const status of ["idle", "reading", "working", "done", "failed", "unavailable"]) {
+    const feedback = skillAuxFeedback(status);
+    assert.ok(feedback.label.length > 0, status + " 必须有文字标签");
+    assert.ok(feedback.detail.length > 0, status + " 必须有说明");
+  }
+  assert.equal(skillAuxFeedback("reading").active, true);
+  assert.equal(skillAuxFeedback("working").active, true);
+  assert.equal(skillAuxFeedback("idle").active, false);
+  assert.equal(skillAuxFeedback("done").tone, "success");
+  assert.equal(skillAuxFeedback("failed").tone, "danger");
+  assert.equal(skillAuxFeedback("unavailable").tone, "warning");
+});
+
+test("分析结果 / 工作区投影与保存前置校验", () => {
+  const parsed = analyzeResultOf({
+    skill: { id: "x", name: "X", systemPrompt: "p", v2: { steps: [{ title: "a" }] } },
+    warnings: ["w1", "w2"],
+  });
+  assert.equal(parsed.skill.id, "x");
+  assert.deepEqual(parsed.warnings, ["w1", "w2"]);
+  assert.equal(analyzeResultOf(null).skill, null);
+  assert.equal(canSaveAnalyzedSkill(parsed.skill).ok, true);
+  assert.equal(canSaveAnalyzedSkill(null).ok, false);
+  assert.ok(canSaveAnalyzedSkill({ id: "x", name: "X" }).reason.includes("systemPrompt"));
+
+  const profiles = workspaceProfilesOf({
+    items: [
+      { id: "wp_1", name: "研究员", modelProfile: "balanced", enabled: true, capabilityScopes: ["read"] },
+      { name: "缺少 id" },
+    ],
+  });
+  assert.equal(profiles.length, 1);
+  assert.equal(profiles[0].id, "wp_1");
+  assert.deepEqual(profiles[0].capabilityScopes, ["read"]);
+  assert.equal(workspaceProfilesOf({}).length, 0);
+  assert.equal(workspaceProfilesOf(null).length, 0);
+
+  assert.equal(isValidSkillId("my_skill"), true);
+  assert.equal(isValidSkillId("My-Skill"), false);
+  assert.equal(isValidSkillId("1bad"), false);
+  assert.equal(isValidSkillId(null), false);
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+   10 新增入口的命令面与样式边界
+   ══════════════════════════════════════════════════════════════════════════ */
+test("新入口实际调用 skill/analyze、skill/save、skill/workspace/list，且都在白名单内", () => {
+  const src = read("src/skills/SkillCenter.tsx");
+  const sent = [...src.matchAll(/send\(\s*"([^"]+)"/g)].map((m) => m[1]);
+  for (const command of ["skill/analyze", "skill/save", "skill/workspace/list"]) {
+    assert.ok(sent.includes(command), "应实际调用 " + command);
+    assert.ok(SKILL_COMMANDS.includes(command), command + " 必须在界面白名单内");
+    assert.equal(domain.isSkillCommand(command), true, command + " 必须是后端承认的命令");
+  }
+});
+
+test("styles.css 的新增块只含 .skill-* / .media-skill-* 类选择器", () => {
+  const css = read("src/styles.css");
+  const start = css.indexOf(".skill-center {");
+  const end = css.indexOf("UI-3 · 任务 / Agent 控制台");
+  assert.ok(start > 0 && end > start, "应能切出 Skill 样式块");
+  /* 去掉注释再扫，避免把 "tokens.css / styles.css" 这类说明文字当成类名。 */
+  const block = stripComments(css.slice(start, end));
+  /* 收集块内所有类选择器；只允许 skill- / media-skill- 前缀。 */
+  const classes = [...block.matchAll(/\.([a-z][a-z0-9_-]*)/gi)].map((m) => m[1]);
+  assert.ok(classes.length > 0);
+  for (const cls of classes) {
+    assert.ok(
+      cls.startsWith("skill-") || cls.startsWith("media-skill-"),
+      "Skill 块内不允许出现非 .skill-* 类：" + cls,
+    );
+  }
+  assert.ok(block.includes(".skill-textarea"));
+  assert.ok(block.includes(".media-skill-artifact"));
 });

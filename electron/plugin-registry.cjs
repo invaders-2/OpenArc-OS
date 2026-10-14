@@ -326,7 +326,7 @@ function integrationPlugins() {
 }
 
 /**
- * B7e2 · 网络型可选插件目录（RunningHub / ModelScope）。
+ * B7e2/B7e3 · 网络型可选插件目录（RunningHub / ModelScope / Agnes）。
  *
  * 与 integrationPlugins()（B7d 三个重集成）同为"默认全关、装配时显式并入"的可选集成：
  *   · 不并进 builtinPlugins()，避免改变 tests/dxos-plugin.test.mjs:60 钉住的内置目录契约；
@@ -384,6 +384,32 @@ function optionalPlugins() {
           label: "ModelScope 推理服务可达",
           required: false,
           target: "https://api-inference.modelscope.cn",
+          install: "联网后可用；离线或未注入 fetch 时返回 INTEGRATION_UNAVAILABLE",
+        },
+      ],
+    },
+    {
+      id: "agnes",
+      name: "Agnes",
+      description: "Agnes 原生图片编辑 / 视频适配（协议 agnes，2.5 / 2.5 Flash / v2.0）。",
+      kind: "integration",
+      version: "1.0.0",
+      capabilities: ["fetch", "safeStorage"],
+      dependencies: [
+        {
+          id: "agnes.credential",
+          kind: "credential",
+          label: "Agnes API Key",
+          required: false,
+          target: "agnes",
+          install: "在「集成 · Agnes」填写 API Key（写入系统安全存储，不落明文）",
+        },
+        {
+          id: "agnes.network",
+          kind: "network",
+          label: "Agnes 开放平台可达",
+          required: false,
+          target: "https://apihub.agnes-ai.com",
           install: "联网后可用；离线或未注入 fetch 时返回 INTEGRATION_UNAVAILABLE",
         },
       ],

@@ -98,7 +98,8 @@ function defaultDeps() {
     userDataDir: null,       // 必填：<userData>，用于解析 <userData>/dxos/
     dataDir: null,           // 可选：直接给出 <userData>/dxos 数据根（与 configureSkillStore 的 dataDir 同义）
     paths: null,             // 可选：resolveDxosPaths() 结果；提供时优先于 userDataDir/dataDir
-    bundledDir: null,        // 可选：bundled-skill-packages 目录
+    appDir: null,            // 可选：应用根（默认 electron/ 的上级），用于定位随包 resources/
+    bundledDir: null,        // 可选：bundled-skill-packages 目录（显式注入，优先级最高）
     fsImpl: null,            // 可选：node:fs 替身
     skillStore: null,        // B4a electron/skill-store.cjs 导出集合
     providerAdapter: null,   // B2：{ call } 或 { callChat }
@@ -173,11 +174,27 @@ function bundledStateFile() {
   return path.join(resolvePaths().root, "bundled-skill-packs.json");
 }
 
+/**
+ * 随包技能包的候选目录（先命中的目录胜出）：
+ *   ① 显式注入 deps.bundledDir（测试 / 宿主定制）
+ *   ② 环境变量 DX_BUNDLED_SKILL_PACKAGES_DIR / DX_BUNDLED_SKILL_PACKS_DIR
+ *   ③ <应用根>/resources/bundled-skill-packages（随包，优先扫描）
+ *   ④ <应用根>/electron/bundled-skill-packages（历史缺省，保留兼容）
+ * 本仓不搬运任何第三方包，目录为空是有效空态。
+ */
+function bundledPackageDirs() {
+  const dirs = [];
+  if (deps.bundledDir) dirs.push(String(deps.bundledDir));
+  if (process.env.DX_BUNDLED_SKILL_PACKAGES_DIR) dirs.push(process.env.DX_BUNDLED_SKILL_PACKAGES_DIR);
+  if (process.env.DX_BUNDLED_SKILL_PACKS_DIR) dirs.push(process.env.DX_BUNDLED_SKILL_PACKS_DIR);
+  const appDir = deps.appDir ? String(deps.appDir) : path.join(__dirname, "..");
+  dirs.push(path.join(appDir, "resources", "bundled-skill-packages"));
+  dirs.push(path.join(appDir, "electron", "bundled-skill-packages"));
+  return [...new Set(dirs.filter(Boolean).map((dir) => path.resolve(dir)))];
+}
+
 function bundledPackageDir() {
-  return deps.bundledDir
-    || process.env.DX_BUNDLED_SKILL_PACKAGES_DIR
-    || process.env.DX_BUNDLED_SKILL_PACKS_DIR
-    || path.join(__dirname, "bundled-skill-packages");
+  return bundledPackageDirs()[0];
 }
 
 function packageRoot(id) {
@@ -495,8 +512,10 @@ function ensureBundledSkillPacks() {
       continue;
     }
     if (Number((state.failed[spec.key] && state.failed[spec.key].version) || 0) >= spec.version) continue;
-    const bundledPackage = path.join(bundledPackageDir(), spec.directory + ".zip");
-    if (!resolveFs().existsSync(bundledPackage)) continue;
+    const bundledPackage = bundledPackageDirs()
+      .map((dir) => path.join(dir, spec.directory + ".zip"))
+      .find((candidate) => resolveFs().existsSync(candidate));
+    if (!bundledPackage) continue;
     state.installing[spec.key] = { version: spec.version, startedAt: deps.clock() };
     saveBundledState(state);
     try {
@@ -531,6 +550,83 @@ function ensureBundledSkillPacks() {
   }
   saveBundledState(state);
   return installed;
+}
+
+/** 随包包名只允许文件名安全字符；绝对路径与 `..` 一律结构化拒绝。 */
+const SAFE_BUNDLED_NAME_RE = /^[A-Za-z0-9._-]+$/;
+
+function ensureSafeBundledName(raw) {
+  const name = raw == null ? "" : String(raw).trim();
+  if (!name) fail("EMPTY_NAME", "请提供随包技能包名");
+  if (name.startsWith("/") || name.startsWith("\\") || /^[a-z]:/i.test(name)) {
+    fail("UNSAFE_PATH", "随包包名不能是绝对路径：" + name);
+  }
+  const base = name.replace(/\.zip$/i, "");
+  if (!base || base.includes("..") || !SAFE_BUNDLED_NAME_RE.test(base)) {
+    fail("UNSAFE_PATH", "随包包名含不安全字符：" + name);
+  }
+  return base;
+}
+
+/**
+ * 列出随包目录里的技能包（`*.zip`）。目录不存在或为空 → 空数组，是有效空态，不报错。
+ * 同名包按目录优先级去重（先命中的目录胜出）。
+ */
+function listBundledSkillPackages() {
+  const f = resolveFs();
+  const seen = new Set();
+  const items = [];
+  for (const dir of bundledPackageDirs()) {
+    let entries;
+    try { entries = f.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    for (const entry of [...entries].sort((a, b) => String(a.name).localeCompare(String(b.name)))) {
+      if (!entry.isFile() || !/\.zip$/i.test(entry.name)) continue;
+      const key = String(entry.name).toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const file = path.join(dir, entry.name);
+      let bytes = 0;
+      try { bytes = f.statSync(file).size; } catch { bytes = 0; }
+      items.push({ name: entry.name, id: entry.name.replace(/\.zip$/i, ""), file, directory: dir, bytes });
+    }
+  }
+  return items.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** 按包名（可带或不带 .zip）在当前随包目录中定位；找不到 → 结构化 NOT_FOUND（附扫描目录）。 */
+function resolveBundledSkillPackage(name) {
+  const base = ensureSafeBundledName(name);
+  const fileName = base + ".zip";
+  const found = listBundledSkillPackages().find((item) => item.name.toLowerCase() === fileName.toLowerCase());
+  if (!found) {
+    fail("NOT_FOUND", "随包目录中找不到技能包：" + fileName + "（扫描目录：" + bundledPackageDirs().join(" / ") + "）");
+  }
+  const f = resolveFs();
+  if (!f.existsSync(found.file) || !f.statSync(found.file).isFile()) {
+    fail("NOT_FOUND", "随包技能包不是可读文件：" + found.file);
+  }
+  return found;
+}
+
+/** 读取随包技能包字节（只读、不落盘、不执行包内文件）。 */
+function readBundledSkillPackage(name) {
+  const found = resolveBundledSkillPackage(name);
+  return resolveFs().readFileSync(found.file);
+}
+
+/**
+ * 导入随包技能包到本地 skill-packs 目录（`<userData>/dxos/skill-packs`）。
+ * 只做"读出 ZIP → 现有 importSkillPack 落盘/登记"；不联网、不执行包内文件。
+ * 需要注入 userDataDir / dataDir / paths（与其它 skill-pack 命令一致）。
+ */
+function importBundledSkillPack(name) {
+  const found = resolveBundledSkillPackage(name);
+  const buffer = resolveFs().readFileSync(found.file);
+  // 随包导入必须先确认是可用的技能包：空包 / 没有 SKILL.md 的一律结构化拒绝，不落半个包。
+  const files = readZip(buffer);
+  if (!files.length) fail("EMPTY_PACKAGE", "随包技能包为空：" + found.name);
+  if (!files.some((entry) => /(^|\/)SKILL\.md$/i.test(entry.name))) fail("NO_SKILL_FOUND", "随包技能包内没有 SKILL.md：" + found.name);
+  return { ...importSkillPack(buffer, found.name), bundledPath: found.file };
 }
 
 function commonTopLevel(files) {
@@ -970,6 +1066,7 @@ module.exports = {
   indexFile,
   bundledStateFile,
   bundledPackageDir,
+  bundledPackageDirs,
   packageRoot,
   sourceRoot,
   // 解析
@@ -979,6 +1076,10 @@ module.exports = {
   onlineInstallerEnvironment,
   // bundled
   ensureBundledSkillPacks,
+  listBundledSkillPackages,
+  resolveBundledSkillPackage,
+  readBundledSkillPackage,
+  importBundledSkillPack,
   loadBundledState,
   saveBundledState,
   // 包生命周期

@@ -18,6 +18,7 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const { createZiniaoIntegration, CREDENTIAL_REF, STORE_FILE_NAME, CONTROL_FILE_NAME } = require("../electron/integration-ziniao.cjs");
+const { createPluginBundle } = require("../electron/plugin-service.cjs");
 const { safeStorageCredentialBackend } = require("../electron/credential-store.cjs");
 
 const tmpDirs = [];
@@ -152,3 +153,63 @@ test("紫鸟凭据：写入 safeStorage，磁盘无明文，投影只给掩码",
   assert.equal(fs.readFileSync(file, "utf8").includes(secret), false, "磁盘上不得出现明文");
   assert.equal(JSON.stringify(integration.credentialStatus()).includes(secret), false);
 });
+
+// ── ⑦ B7e3：VC 导入 / 行级读取 / 聚合查询命令 ──────────────────────────────
+function makeWorkbook(sheets) {
+  return { worksheets: sheets.map((sheet) => ({
+    name: sheet.name,
+    rowCount: sheet.rows.length,
+    columnCount: Math.max(...sheet.rows.map((row) => row.length)),
+    getRow: (number) => {
+      const cells = sheet.rows[number - 1];
+      return { cellCount: cells.length, getCell: (column) => ({ text: String(cells[column - 1] == null ? "" : cells[column - 1]), value: cells[column - 1] }) };
+    },
+  })) };
+}
+const VC_ROWS = [
+  ["日期", "账号", "Asin", "国家", "Product Title", "Brand", "Manufacturing or Sourcing", "Ordered Revenue", "Ordered Units", "Shipped Revenue", "Shipped COGS", "Shipped Units", "Customer Returns", "Session"],
+  ["2026/01/02", "店铺A", "b0vc0001", "US", "商品一", "品牌A", "FBA", "120.5", "3", "100", "40", "2", "1", "55"],
+  ["2026-01-03", "店铺A", "B0VC0001", "US", "商品一", "品牌A", "FBA", "80", "2", "70", "30", "2", "0", "40"],
+];
+
+test("紫鸟 VC 命令：装配后 import / rows / query 可用；未启用 → INTEGRATION_UNAVAILABLE", async () => {
+  const dir = tempDir();
+  const vcRoot = path.join(dir, "vc-out");
+  fs.mkdirSync(vcRoot, { recursive: true });
+  const vcFile = path.join(vcRoot, "VC汇总_店铺A_20260102-20260103.xlsx");
+  fs.writeFileSync(vcFile, "fake-bytes");
+
+  const bundle = createPluginBundle({
+    userDataDir: dir,
+    safeStorage: null,
+    workbookReader: async () => makeWorkbook([{ name: "VC", rows: VC_ROWS }]),
+    ziniaoOutDir: vcRoot,
+    probes: { binary: () => ({ ok: true, status: "ok", detail: "" }), python: () => ({ ok: true, status: "ok", detail: "" }) },
+  });
+
+  const disabled = await bundle.execute("integration/ziniao/vc/import", { path: vcFile }, { sessionRef: "s1" });
+  assert.equal(disabled.ok, false);
+  assert.equal(disabled.error, "INTEGRATION_UNAVAILABLE");
+
+  assert.equal((await bundle.execute("integration/plugins/enable", { id: "ziniao" }, { sessionRef: "s1" })).ok, true);
+  const imported = await bundle.execute("integration/ziniao/vc/import", { path: vcFile }, { sessionRef: "s1" });
+  assert.equal(imported.ok, true, JSON.stringify(imported));
+  assert.equal(imported.value.rows, 2);
+  assert.equal(imported.value.file.store, "店铺A");
+  assert.equal(imported.value.start, "2026-01-02");
+
+  const rows = await bundle.execute("integration/ziniao/vc/rows", { date: "2026-01-02" }, { sessionRef: "s1" });
+  assert.equal(rows.ok, true);
+  assert.equal(rows.value.total, 0, "ziniao_vc_daily 在源启动时已清空，legacy 查询返回空表");
+  const query = await bundle.execute("integration/ziniao/vc/query", { start: "2026-01-01", end: "2026-01-31" }, { sessionRef: "s1" });
+  assert.equal(query.ok, true);
+  assert.equal(query.value.total, 0);
+  assert.equal(query.value.source, "ziniao");
+
+  const outside = path.join(dir, "outside.xlsx");
+  fs.writeFileSync(outside, "x");
+  const rejected = await bundle.execute("integration/ziniao/vc/import", { path: outside }, { sessionRef: "s1" });
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.error, "INTEGRATION_INVALID_INPUT");
+});
+

@@ -96,9 +96,46 @@ export interface OpenArcModelBridge extends OpenArcCommandBridge {
 }
 
 export interface OpenArcMcpBridge extends OpenArcCommandBridge {
-  /** P3：开放工具调用（经 side-effect 审批链）。 */
+  /** P3：开放工具调用（经 side-effect 审批链）。**当前仍不暴露**：preload 只给 command，调用命令一律被拒。 */
   callTool?: OpenArcCommandFn;
   onEvent?: (callback: (event: OpenArcEvent) => void) => () => void;
+}
+
+/**
+ * B4e · mcp/agentTools 的工具行。
+ *
+ * 与 electron/mcp-bootstrap.cjs 的 handleAgentTools 返回逐字段对应；
+ * fname 是 Agent 侧命名空间 `mcp__<server>__<tool>`（electron/mcp-agent-tools.cjs:507），
+ * 渲染层直接渲染，不再自行派生（原先 UI-2 在 src/mcp/McpCenter.tsx 复制了一份聚合规则）。
+ * 文本字段（description / paramText / 名称）都已在主进程走地基 redactText 脱敏；
+ * enabled 只表示显式开关当前状态，**不代表**该工具已被授权调用。
+ */
+export interface OpenArcMcpAgentTool {
+  fname: string;
+  serverId: string;
+  serverName: string;
+  toolName: string;
+  /** 连接状态（connected 表示已就绪；其余照实回投影状态）。 */
+  status: string;
+  description: string;
+  /** 参数摘要展示文案（服务端未回 inputSchema 时是明确的说明句，不是空串）。 */
+  paramText: string;
+  riskClass: "EXTERNAL_SIDE_EFFECT";
+  requiresApproval: true;
+}
+
+/** B4e · mcp/agentTools 的返回契约（只读聚合）。 */
+export interface OpenArcMcpAgentToolsResult {
+  ok: boolean;
+  /** 显式开关（<userData>/dxos/mcp.json 的 tools.invocationEnabled）当前状态。 */
+  enabled: boolean;
+  count: number;
+  /** 已启用且已连接（READY）的 server 数，用于区分"没连接"与"连接了但没工具"。 */
+  connectedServers: number;
+  truncated: boolean;
+  tools: OpenArcMcpAgentTool[];
+  error?: string;
+  detail?: string | null;
 }
 
 export interface OpenArcTaskBridge extends OpenArcCommandBridge {
@@ -490,6 +527,13 @@ export interface OpenArcIntegrationBridge extends OpenArcCommandBridge {
  * renderer 自报的 userId / role / appId 一律忽略；developer:command 全部过 main.cjs 的 trusted(event)。
  * 六张表沿用 v22：user_installed_apps / user_app_install_state / app_market_releases（本地清单缓存）/
  * app_credential_bindings / app_runtime_events / app_network_audit，不新建第二套存储。
+ *
+ * developer/health 的两个计数字段语义不同，不得互相冒充（见 electron/developer-service.cjs:566-592）：
+ *   commands         **实际可达数** = 基座 16 条 + 已装配扩展切片（lab / collab / migrations /
+ *                    realtime）的命令数。切片装配失败由 main.cjs 逐切片 try/catch 捕获，
+ *                    health 同步给出 degraded / degradedReason / extensions，commands 随之下降。
+ *   declaredCommands **静态白名单长度** = domain.listDeveloperCommands().length（B7f 起固定 70）。
+ *                    只表示契约声明了多少条，不代表运行时都装配成功或可达。
  */
 export type OpenArcDeveloperCommand =
   | "developer/install"

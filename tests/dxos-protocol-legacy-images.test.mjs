@@ -525,11 +525,11 @@ test("midjourney：generateImages 委托 media.generateMidjourneyImages（apiRoo
 
 // ── 未移植依赖与未知协议 ─────────────────────────────────────────────
 
-test("未移植依赖：返回 LEGACY_DEPENDENCY_UNAVAILABLE，不做假实现（硬约束 8）", async () => {
+test("未注入端口 / 未移植依赖：返回 LEGACY_DEPENDENCY_UNAVAILABLE，不做假实现（硬约束 8）", async () => {
   const cases = [
-    ["cli:jimeng", /cliTools/i],
-    ["cli:codex", /cliTools/i],
-    ["cli:gemini", /cliTools/i],
+    ["cli:jimeng", /cliJimeng/],
+    ["cli:codex", /cliCodex/],
+    ["cli:gemini", /cliGemini/],
     ["agnes", /agnes/i],
     ["modelscope", /modelscope/i],
     ["runninghub", /runninghub/i],

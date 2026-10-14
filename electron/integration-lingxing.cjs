@@ -3,7 +3,7 @@
  *
  * 组成（逐字对应源文件）：
  *   · server/lingxingMappings.ts:1-289   → integration-lingxing-mappings.cjs
- *   · server/lingxingLocalData.ts:1-787  → integration-lingxing-local-data.cjs
+ *   · server/lingxingLocalData.ts:1-1248 → integration-lingxing-local-data.cjs（B7e3 补齐业务分析 / 运营看板 / 导出 / 汇率 / 紫鸟 VC）
  *
  * 任务书硬约束落地：
  *   · **云 API 一律走注入 transport**（plugin-service 注入 options.transport）；未注入即
@@ -31,7 +31,13 @@ function createLingxingIntegration(options = {}) {
   const credentials = options.credentials && typeof options.credentials === "object" ? options.credentials : null;
 
   const mappings = createLingxingMappings({ dataDir, readWorkbook: options.readWorkbook, clock });
-  const localData = createLingxingLocalData({ dataDir, clock, transport });
+  const localData = createLingxingLocalData({
+    dataDir, clock, transport,
+    fetch: options.fetch,
+    readWorkbook: options.readWorkbook,
+    writeWorkbook: options.writeWorkbook,
+    ziniaoOutputRoot: options.ziniaoOutputRoot,
+  });
 
   const credentialsAvailable = () => !!credentials && typeof credentials.available === "function" && credentials.available() === true;
   function readSecret() {
@@ -97,6 +103,15 @@ function createLingxingIntegration(options = {}) {
     stopLingxingAdvertisingCacheJob: (id) => localData.stopLingxingAdvertisingCacheJob(id),
     listCachedLingxingAdvertisingStores: () => localData.listCachedLingxingAdvertisingStores(),
     queryLingxingAdvertisingCache: (queryOptions) => localData.queryLingxingAdvertisingCache(queryOptions),
+    // 业务分析 / 运营看板 / 汇率（源 lingxingLocalData.ts:14-30, 946-1186）
+    lingxingBusinessAnalytics: (analyticsOptions) => localData.lingxingBusinessAnalytics(analyticsOptions),
+    queryLingxingOperatorDashboard: (dashboardOptions) => localData.queryLingxingOperatorDashboard(dashboardOptions),
+    exportLingxingOperatorDashboard: (dashboardOptions) => localData.exportLingxingOperatorDashboard(dashboardOptions),
+    getLingxingCurrencyRates: () => localData.getLingxingCurrencyRates(),
+    // 紫鸟 VC（源 lingxingLocalData.ts:267-436, 1188-1248）
+    importZiniaoVcFile: (filePath) => localData.importZiniaoVcFile(filePath),
+    ziniaoVcRows: (date, limit, offset) => localData.ziniaoVcRows(date, limit, offset),
+    queryZiniaoVcData: (queryOptions) => localData.queryZiniaoVcData(queryOptions),
     // 凭据
     saveCredential,
     credentialStatus,

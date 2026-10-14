@@ -45,6 +45,7 @@ const dxosFoundationSchema = require("./dxos-foundation-schema.cjs");
 const dxosAgentSchema = require("./dxos-agent-schema.cjs");
 const mediaStore = require("./media-store.cjs");
 const canvasDxosSchema = require("./canvas-dxos-schema.cjs");
+const dxTaskApprovalSchema = require("./dx-task-approval-schema.cjs");
 
 const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domain;
 
@@ -83,8 +84,12 @@ const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domai
  *   v25（B5d · DX OS 画布域）：新增 canvas_dxos_asset_libraries / canvas_dxos_asset_items /
  *       canvas_dxos_agent_attachments —— DDL 只有 canvas-dxos-schema.cjs 一份真值，
  *       素材字节仍只在 resource_* 表；只新增表（IF NOT EXISTS，可重放）。
+ *   v26（D5-04 补丁 · DX→核心审批映射桥）：新增 dx_task_approval_bridge —— 只持久化
+ *       "dx 任务步骤 ↔ 核心审批任务/步骤/运行"的身份关系；DDL 只有
+ *       dx-task-approval-schema.cjs 一份真值，审批状态机仍由既有 SideEffectAuthority /
+ *       Task Runtime 唯一裁决；只新增表（IF NOT EXISTS，可重放），不动既有表结构。
  */
-const SCHEMA_VERSION = 25;
+const SCHEMA_VERSION = 26;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -1564,6 +1569,15 @@ function applyCanvasDxosLayer(db) {
   canvasDxosSchema.applyCanvasDxosLayer(db);
 }
 
+/**
+ * v26 的实现：DX→核心审批映射桥单张表的 DDL 只有 dx-task-approval-schema.cjs 一份真值
+ * （与 v22/v23/v24/v25 同一做法）。只有一条 CREATE TABLE IF NOT EXISTS，可重放；
+ * 失败时整级随外层事务回滚，不会留下"user_version 已升到 26、桥接表只建了一半"的半状态。
+ */
+function applyDxTaskApprovalLayer(db) {
+  dxTaskApprovalSchema.applyDxTaskApprovalLayer(db);
+}
+
 const MIGRATIONS = Object.freeze([
   { version: 1, sql: SCHEMA_SQL },
   { version: 2, sql: SCHEMA_V2_SQL },
@@ -1604,6 +1618,7 @@ const MIGRATIONS = Object.freeze([
   { version: 23, run: applyDxosAgentLayer },
   { version: 24, run: applyDxosMediaLayer },
   { version: 25, run: applyCanvasDxosLayer },
+  { version: 26, run: applyDxTaskApprovalLayer },
 ]);
 
 /**

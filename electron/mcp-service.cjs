@@ -379,6 +379,16 @@ class McpService {
   }
 
   /**
+   * B4e：全局"是否允许发起 MCP 工具调用"开关的写授权（risk = mcp.manage）。
+   * 开关改变的是整个 MCP 域的调用能力，不是某条连接，因此只校验 App 动作，不绑 connection。
+   * 返回结构化结果，绝不回连接数据。
+   */
+  authorizeManage({ context } = {}) {
+    const auth = this.#authorize({ context, action: domain.MCP_ACTIONS.MANAGE });
+    return auth.ok ? { ok: true } : { ok: false, error: auth.error, reason: auth.reason || null };
+  }
+
+  /**
    * 关闭全部活动连接与在途握手（宿主退出 / 登出 / 锁屏 / 测试收尾）。
    *
    * 只落"连接不再活着"这个事实，**不改写 enabled**：那是用户意图，重新登录后 connect 照常可用。

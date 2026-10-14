@@ -40,10 +40,11 @@
  *   2. 依赖尚在其它批次、不得做假实现的协议分支返回结构化错误：
  *        { ok:false, error:"LEGACY_DEPENDENCY_UNAVAILABLE", detail:"<属哪个批次>" }
  *      - cli:jimeng / jimeng-cli、cli:codex / codex-cli、cli:gemini / gemini-cli
- *        （protocols.ts:5287-5302）→ cliTools / agentCliTools 批次
- *      - agnes（protocols.ts:5303）→ agnes 原生适配批次
- *      - modelscope（protocols.ts:5304）→ modelscope 原生适配批次
- *      - runninghub（protocols.ts:5306）→ runninghub 原生适配批次
+ *        （protocols.ts:5287-5302）→ B7e2 后续：CLI 端口已注入则调用，未注入即结构化拒绝
+ *        （electron/legacy-cli-ports.cjs）
+ *      - agnes（protocols.ts:5303）→ B7e3 端口（electron/plugin-agnes.cjs）；插件关闭 / 未注入端口即结构化拒绝
+ *      - modelscope（protocols.ts:5304）→ modelscope 原生适配批次（B7e2 端口）
+ *      - runninghub（protocols.ts:5306）→ runninghub 原生适配批次（B7e2 端口）
  *      - midjourney（protocols.ts:5309）改由 legacy-executor-media.cjs 的 generateMidjourneyImages 接线（W6b）
  *   3. apiQuota 云计费（apiQuota.ts:280 withDirectApiQuota）属云计费批次，尚未移植：
  *      generateImages 不伪造准入/计费，直接执行 unmetered 路径；
@@ -64,7 +65,10 @@ const legacyExecutorPorts = require("../legacy-executor-ports.cjs");
 
 const LEGACY_DEPENDENCY_UNAVAILABLE = "LEGACY_DEPENDENCY_UNAVAILABLE";
 
-/** 结构化「依赖未移植」结果（硬约束 8）。 */
+/** CLI 协议族端口未注入时的结构化拒绝前缀（B7e2 后续；注入/调用见 electron/legacy-cli-ports.cjs）。 */
+const CLI_PORT_DETAIL = "CLI 端口未注入（需安装对应 CLI，由主进程经 electron/legacy-cli-ports.cjs 注入 cliJimeng/cliCodex/cliGemini）";
+
+/** 结构化「依赖未移植 / 端口未注入」结果（硬约束 8）。 */
 function unavailable(detail) {
   return { ok: false, error: LEGACY_DEPENDENCY_UNAVAILABLE, detail };
 }
@@ -820,14 +824,21 @@ async function generateImages(provider, model, params, timeoutMs, transport, clo
 async function generateImagesUnmetered(provider, model, params, timeoutMs, transport, clock) {
   const net = resolveTransport(transport);
   const rawProto = String(provider.protocol || "").trim().toLowerCase();
+  // B7e2 后续：CLI 协议族端口（electron/legacy-cli-ports.cjs）已注入则调用，未注入仍结构化拒绝。
   if (rawProto === "cli:jimeng" || rawProto === "jimeng-cli") {
-    return unavailable("cliTools 批次：cli:jimeng 图片执行器（protocols.ts:5287 generateJimengImage）未移植");
+    const port = legacyExecutorPorts.getLegacyExecutorPort("cliJimeng");
+    if (typeof port === "function") return port("image.generate", { provider, model, params, timeoutMs, transport: net, clock });
+    return unavailable(CLI_PORT_DETAIL + "：cli:jimeng 图片执行器（protocols.ts:5287 generateJimengImage）");
   }
   if (rawProto === "cli:codex" || rawProto === "codex-cli") {
-    return unavailable("cliTools 批次：cli:codex 图片执行器（protocols.ts:5295 generateCodexImage）未移植");
+    const port = legacyExecutorPorts.getLegacyExecutorPort("cliCodex");
+    if (typeof port === "function") return port("image.generate", { provider, model, params, timeoutMs, transport: net, clock });
+    return unavailable(CLI_PORT_DETAIL + "：cli:codex 图片执行器（protocols.ts:5295 generateCodexImage）");
   }
   if (rawProto === "cli:gemini" || rawProto === "gemini-cli") {
-    return unavailable("cliTools/agentCliTools 批次：cli:gemini 图片执行器（protocols.ts:5299 generateGeminiCliImage）未移植");
+    const port = legacyExecutorPorts.getLegacyExecutorPort("cliGemini");
+    if (typeof port === "function") return port("image.generate", { provider, model, params, timeoutMs, transport: net, clock });
+    return unavailable(CLI_PORT_DETAIL + "：cli:gemini 图片执行器（protocols.ts:5299 generateGeminiCliImage）");
   }
   // B7e2：端口已注入则调用注入实现；未注入仍返回结构化 LEGACY_DEPENDENCY_UNAVAILABLE（B2 行为不变）。
   if (rawProto === "agnes") {

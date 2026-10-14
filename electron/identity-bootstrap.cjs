@@ -132,7 +132,7 @@ function resolveSessionTtlOverride({ env = process.env } = {}) {
  * @param opts.sessionIdleMs  可选，空闲有效期（**只有显式注入才改**；默认 DEFAULT_IDLE_MS）
  * @param opts.timers         可选，到期调度用的 { setTimeout, clearTimeout }（测试注入）
  */
-function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, logger, serviceIdentity = null, nativeImage = null, executorLauncher = null, executorTestHook = null, browserControl = null, sessionTtlMs = null, sessionIdleMs = null, timers = null } = {}) {
+function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, logger, serviceIdentity = null, nativeImage = null, executorLauncher = null, executorTestHook = null, browserControl = null, sessionTtlMs = null, sessionIdleMs = null, timers = null, mcpInvocationSwitch = null } = {}) {
   fs.mkdirSync(userDataDir, { recursive: true, mode: 0o700 });
   const log = logger || new IdentityLogger();
   const store = new IdentityStore({
@@ -228,6 +228,8 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
     userDataDir,
     safeStorage,
     logger: log,
+    // B4e 收口：显式开关的**同一实例**注入到每个真实 McpClient（默认关闭）。
+    invocationGate: mcpInvocationSwitch ? () => mcpInvocationSwitch.isToolInvocationEnabled() === true : null,
   });
   // D5-03 第三批 · 生命周期接线（唯一装配路径，产品与探针共用）：
   //   · 登出 / 锁屏（identity/logged-out | identity/locked）→ 收掉活连接与在途握手；

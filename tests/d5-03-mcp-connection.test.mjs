@@ -32,8 +32,8 @@ test("A1 · mcp:command 单一通道 + 显式白名单 + 工具调用入口明�
       assert.equal(res.error, "MCP_TOOL_INVOCATION_NOT_ENABLED", command);
     }
     assert.equal(fx.mcpService.invokeTool({}).error, "MCP_TOOL_INVOCATION_NOT_ENABLED");
-    // 白名单就是产品声明的那 10 条
-    assert.deepEqual([...MCP_COMMANDS], ["mcp/list", "mcp/get", "mcp/create", "mcp/update", "mcp/delete", "mcp/setEnabled", "mcp/connect", "mcp/reconnect", "mcp/test", "mcp/testLog"]);
+    // 白名单就是产品声明的那 13 条（B4e 增 mcp/agentTools 只读聚合 + 开关写命令 + 任务内调用）
+    assert.deepEqual([...MCP_COMMANDS], ["mcp/list", "mcp/get", "mcp/create", "mcp/update", "mcp/delete", "mcp/setEnabled", "mcp/connect", "mcp/reconnect", "mcp/test", "mcp/testLog", "mcp/agentTools", "mcp/toolInvocation/set", "mcp/toolInvocation/call"]);
   });
 });
 

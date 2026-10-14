@@ -472,7 +472,7 @@ test("未移植依赖：midjourney 之外的媒体/图像分支返回 LEGACY_DEP
 
   const cli = await media.editImages({ ...p, protocol: "cli:codex" }, "m", { prompt: "x" }, [{ buf: Buffer.from("x"), mime: "image/png", name: "x.png" }], 1000);
   assert.equal(cli.ok, false);
-  assert.match(cli.detail, /agentCliTools/);
+  assert.match(cli.detail, /cliCodex/);
 });
 
 // ── 聚合出口惰性装配 ─────────────────────────────────────────────────

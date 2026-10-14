@@ -39,10 +39,90 @@ const CREDENTIAL_REF = "quark.credential";
 const asStr = (value, max = 4096) => (typeof value === "string" ? value.slice(0, max) : value == null ? "" : String(value).slice(0, max));
 function fail(code, detail) { const error = new Error(detail); error.code = code; return error; }
 
+// ══════════════════════════════════════════════════════════════════════
+// 厂商路径解析（本仓不复制 quark-drive.cjs，只按路径调用）
+//   ① 显式注入 cliPath  ② 环境变量  ③ <userData>/dxos/vendor  ④ <应用根>/resources/vendor
+// ══════════════════════════════════════════════════════════════════════
+const VENDOR_DIR_NAME = "vendor";
+const QUARK_CLI_FILE = "quark-drive.cjs";
+const QUARK_CLI_ENV_KEYS = Object.freeze(["DX_QUARK_CLI_PATH", "QUARK_DRIVE_CLI"]);
+
+/** 路径含 `..` 段即越界（绝对路径也可能是 ../ 穿过来的）。 */
+function hasTraversal(value) {
+  return String(value).split(/[\\/]+/).includes("..");
+}
+
+/** 从注入的 dataDir 反推 <userData>/dxos（仅当形如 <dxos>/integrations/<plugin> 时）。 */
+function guessDxosRootFromDataDir(dataDir) {
+  if (!dataDir) return null;
+  const dir = path.resolve(String(dataDir));
+  const integrationsDir = path.dirname(dir);
+  return path.basename(integrationsDir) === "integrations" ? path.dirname(integrationsDir) : null;
+}
+
+/** 文件放置的两个厂商根：用户级优先，随包目录次之。 */
+function vendorRoots(options = {}) {
+  const roots = [];
+  const dxosRoot = options.dxosRoot ? String(options.dxosRoot)
+    : options.userDataDir ? path.join(String(options.userDataDir), "dxos")
+    : guessDxosRootFromDataDir(options.dataDir);
+  if (dxosRoot) roots.push({ source: "userData", dir: path.join(dxosRoot, VENDOR_DIR_NAME) });
+  const appDir = options.appDir ? String(options.appDir) : path.join(__dirname, "..");
+  roots.push({ source: "bundled", dir: path.join(appDir, "resources", VENDOR_DIR_NAME) });
+  return roots;
+}
+
+/**
+ * 校验一个候选厂商路径。
+ * 显式 / 环境变量来源必须存在（不存在即结构化拒绝，不静默回落）；
+ * 放置目录来源不存在则返回 null（继续下一个来源）。
+ * 越界与非文件一律 INTEGRATION_INVALID_INPUT。
+ */
+function validateVendorCandidate(candidate, expect) {
+  const value = String(candidate.path || "");
+  if (!value) return null;
+  if (hasTraversal(value)) throw fail(INTEGRATION_ERR_INVALID_INPUT, "厂商路径含越界段（..）：" + value);
+  if (candidate.mustExist && !path.isAbsolute(value)) throw fail(INTEGRATION_ERR_INVALID_INPUT, "厂商路径必须是绝对路径：" + value);
+  let stat = null;
+  try { stat = fs.statSync(value); } catch { stat = null; }
+  if (!stat) {
+    if (candidate.mustExist) throw fail(INTEGRATION_ERR_INVALID_INPUT, "厂商路径不存在：" + value);
+    return null;
+  }
+  if (expect === "file" && !stat.isFile()) throw fail(INTEGRATION_ERR_INVALID_INPUT, "厂商路径不是文件：" + value);
+  if (expect === "dir" && !stat.isDirectory()) throw fail(INTEGRATION_ERR_INVALID_INPUT, "厂商路径不是目录：" + value);
+  if (expect === "any" && !stat.isFile() && !stat.isDirectory()) throw fail(INTEGRATION_ERR_INVALID_INPUT, "厂商路径既不是文件也不是目录：" + value);
+  return { path: value, source: candidate.source };
+}
+
+/** 夸克官方 CLI 的放置说明（缺依赖时的 detail 必须指出放哪里）。 */
+const QUARK_VENDOR_HINT = "放置方式（优先级从高到低）：① createPluginBundle({ quarkCliPath: '<绝对路径>/quark-drive.cjs' }) 注入；② 环境变量 DX_QUARK_CLI_PATH；③ <userData>/dxos/vendor/quark-drive.cjs；④ <应用根>/resources/vendor/quark-drive.cjs。本移植不复制厂商 486KB CLI。";
+
+/**
+ * 解析夸克 CLI 路径（先命中者胜出）。全部缺失返回 { path: null }。
+ * @returns {{ path: string|null, source: string|null }}
+ */
+function resolveQuarkCliPath(options = {}) {
+  const env = options.env && typeof options.env === "object" ? options.env : process.env;
+  const explicit = options.cliPath ? String(options.cliPath) : "";
+  const envKey = QUARK_CLI_ENV_KEYS.find((key) => env && env[key]);
+  const candidates = [];
+  if (explicit) candidates.push({ source: "explicit", path: explicit, mustExist: true });
+  if (envKey) candidates.push({ source: "env:" + envKey, path: String(env[envKey]), mustExist: true });
+  for (const root of vendorRoots(options)) candidates.push({ source: root.source, path: path.join(root.dir, QUARK_CLI_FILE), mustExist: false });
+  for (const candidate of candidates) {
+    const resolved = validateVendorCandidate(candidate, "file");
+    if (resolved) return resolved;
+  }
+  return { path: null, source: null };
+}
+
 function createQuarkIntegration(options = {}) {
   const dataDir = options.dataDir ? String(options.dataDir) : null;
   const clock = typeof options.clock === "function" ? options.clock : () => Date.now();
-  const cliPath = options.cliPath ? String(options.cliPath) : null;
+  const cliResolution = resolveQuarkCliPath(options);
+  const cliPath = cliResolution.path;
+  const cliSource = cliResolution.source;
   const nodePath = options.nodePath ? String(options.nodePath) : process.execPath;
   const spawnImpl = typeof options.spawnImpl === "function" ? options.spawnImpl : null;
   const spawnLoginImpl = typeof options.spawnLoginImpl === "function" ? options.spawnLoginImpl : null;
@@ -135,7 +215,7 @@ function createQuarkIntegration(options = {}) {
     const cwd = opts.cwd ? String(opts.cwd) : workDir;
     ensureDir(cwd);
     if (typeof spawnImpl === "function") return Promise.resolve(spawnImpl(args, { timeoutMs, cwd, env: quarkCliEnv() }));
-    if (!cliAvailable()) return Promise.reject(fail(INTEGRATION_ERR_UNAVAILABLE, "未配置夸克官方 CLI（quark-drive.cjs）路径，且未注入 spawnImpl；本移植不复制厂商 486KB CLI，请配置后重试"));
+    if (!cliAvailable()) return Promise.reject(fail(INTEGRATION_ERR_UNAVAILABLE, "未配置夸克官方 CLI（quark-drive.cjs），且未注入 spawnImpl；" + QUARK_VENDOR_HINT));
     return new Promise((resolve, reject) => {
       const child = spawn(nodePath, [cliPath, ...args], { cwd, windowsHide: true, env: quarkCliEnv() });
       let stdout = "";
@@ -202,7 +282,7 @@ function createQuarkIntegration(options = {}) {
   // quark.ts:231-264
   function quarkStartLogin() {
     if (loginProc && loginProc.exitCode == null) return { started: true, alreadyRunning: true };
-    if (!cliAvailable() && typeof spawnLoginImpl !== "function") throw fail(INTEGRATION_ERR_UNAVAILABLE, "未配置夸克官方 CLI（quark-drive.cjs）路径，无法启动登录");
+    if (!cliAvailable() && typeof spawnLoginImpl !== "function") throw fail(INTEGRATION_ERR_UNAVAILABLE, "未配置夸克官方 CLI（quark-drive.cjs），无法启动登录；" + QUARK_VENDOR_HINT);
     ensureDir(workDir);
     loginAuthUrl = "";
     loginLastExit = null;
@@ -387,11 +467,11 @@ function createQuarkIntegration(options = {}) {
   }
 
   function status() {
-    return { cliConfigured: !!cliPath, cliExists: !!cliPath && fs.existsSync(cliPath), spawnInjected: typeof spawnImpl === "function", workDir, downloadDir, searchHistoryEntries: Object.keys(readSearchHistoryStore()).length };
+    return { cliConfigured: !!cliPath, cliSource, cliExists: !!cliPath && fs.existsSync(cliPath), spawnInjected: typeof spawnImpl === "function", workDir, downloadDir, searchHistoryEntries: Object.keys(readSearchHistoryStore()).length };
   }
 
   return {
-    cliPath, workDir, downloadDir, cliConfigFile, searchHistoryFile, quarkPaths,
+    cliPath, cliSource, workDir, downloadDir, cliConfigFile, searchHistoryFile, quarkPaths,
     cliAvailable, normalizeFile, parseRows, lastResult, throwIfError, cliHasAccount,
     quarkCliEnv, runQuark,
     quarkSearchHistory, quarkRecordSearch, quarkClearSearchHistory,
@@ -402,4 +482,4 @@ function createQuarkIntegration(options = {}) {
   };
 }
 
-module.exports = { createQuarkIntegration, CREDENTIAL_REF, MAX_OUTPUT };
+module.exports = { createQuarkIntegration, resolveQuarkCliPath, QUARK_VENDOR_HINT, CREDENTIAL_REF, MAX_OUTPUT };

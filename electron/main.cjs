@@ -77,6 +77,15 @@ const { createProviderAdapter } = require("./provider-adapter-bridge.cjs");
 const { registerMcpIpc } = require("./mcp-bootstrap.cjs");
 // B4 收口：把已装配的 MCP 连接目录（identity.mcpService）只读投影成 agent 工具目录的 mcp 来源。
 const { createMcpAgentBridge } = require("./mcp-agent-bridge.cjs");
+// B4e：MCP 工具调用显式开关（<userData>/dxos/mcp.json，默认关闭）。
+const { createMcpSwitch } = require("./mcp-switch.cjs");
+// B4e 收口：生产真实 tools/call 传输（McpService 的活连接）+ 任务内审批端口（ControlledToolProxy）。
+const { createMcpLiveTransport } = require("./mcp-live-transport.cjs");
+const { mcpToolIdFor, MCP_TOOL_VERSION } = require("./mcp-tool-contract.cjs");
+// D5-04 补丁：DX 任务 → 核心审批任务的幂等身份映射桥（桥只映射身份，不复制审批状态机）。
+const { createDxTaskApprovalBridge, createDxBridgedApprovalPort } = require("./dx-task-approval-bridge.cjs");
+// D5-04：MCP 外部工具 → 既有 SideEffectAuthority 的 provider（plan / execute 两个方向）。
+const { createMcpSideEffectProvider } = require("./mcp-side-effect-provider.cjs");
 // D5-03 第十一批：关应用的唯一收尾顺序（MCP → Harness → modelProxy → store）。
 const { disposeAppResources } = require("./app-shutdown.cjs");
 const { createDefaultExecutorLauncher } = require("./executor-launcher.cjs");
@@ -87,6 +96,10 @@ let win;
 let controller;
 let identity;
 let files;
+// B4e：MCP → Agent 桥在 registerMcpIpc 之后才装配；先声明，聚合命令经 getter 晚绑定。
+let mcpAgentBridge = null;
+// B4e 收口：显式开关实例在 identity 创建**之前**建立并注入每个真实 McpClient（默认关闭）。
+let mcpSwitch = null;
 /** 身份服务创建失败时的人话原因；渲染层经 identity:command 的既有通道拿到它。 */
 let identityBootFailure = null;
 /** D5-02：画布文档服务（AI 编辑工具的执行端与渲染层命令共用同一个实例）。*/
@@ -442,6 +455,8 @@ app.whenReady().then(async () => {
     // 默认路径不读、不用这些变量；生效时打一条含生效值与原因的可见日志。
     const sessionTtl = resolveSessionTtlOverride({ env: process.env });
     for (const record of sessionTtl.records) console.log("[openarc] " + record.message);
+    // B4e 收口：开关实例必须先于 identity 存在 —— 每个真实 McpClient 在构造时拿到同一个 gate。
+    mcpSwitch = createMcpSwitch({ userDataDir: app.getPath("userData") });
     runtime = await createOpenArcRuntime({
       userDataDir: app.getPath("userData"),
       safeStorage,
@@ -458,6 +473,8 @@ app.whenReady().then(async () => {
       serviceIdentity: process.env.OPENARC_SERVICE_IDENTITY || null,
       // D5-01 Closure-2：受控浏览器目标的唯一实例（审计进同一张 authorization_audit）。
       browserControl,
+      // B4e 收口：MCP 工具调用显式开关（默认关闭；<userData>/dxos/mcp.json）。
+      mcpInvocationSwitch: mcpSwitch,
     });
     identity = runtime.identity;
   } catch (error) {
@@ -650,9 +667,67 @@ app.whenReady().then(async () => {
     },
   });
 
-  // D5-03：MCP 中心（mcp:command 单一通道；sessionRef/appId 由主进程注入，本批不开放工具调用）。
+  // D5-03：MCP 中心（mcp:command 单一通道；sessionRef/appId 由主进程注入）。
+  // B4e：工具调用默认关闭 —— mcpSwitch 读 <userData>/dxos/mcp.json（缺省 / 读坏 / 缺 userData 一律 false）；
+  // mcp/agentTools 只读，mcp/toolInvocation/set 是唯一写入口（trusted + mcp.manage + 审计）。
+  if (!mcpSwitch) mcpSwitch = createMcpSwitch({ userDataDir: app.getPath("userData") });
+  /** B4e：开关变更审计进既有 authorization_audit（与工具调用同源可查）。审计不可用返回 false。 */
+  const mcpAudit = (entry) => {
+    const store = identity && identity.toolStore;
+    if (!store || typeof store.insertToolAudit !== "function") return false;
+    try {
+      store.insertToolAudit({
+        at: Date.now(),
+        actorUserId: (identity.service && identity.service.snapshot && identity.service.snapshot.userId) || null,
+        appId: "mcp-center",
+        toolRef: "mcp.toolInvocation",
+        action: entry && entry.action ? String(entry.action).slice(0, 80) : "mcp.toolInvocation.set",
+        decision: entry && entry.decision ? String(entry.decision).slice(0, 120) : null,
+        reasonCode: entry && entry.reasonCode ? String(entry.reasonCode).slice(0, 120) : null,
+        requestId: (entry && entry.requestId) || null,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  /**
+   * B4e：任务内 MCP 调用的可信 taskId 解析。
+   * taskId 只用来**定位**真实 Task；归属（user/app）由这里用已认证 session + Task row 判定，
+   * 再由 ControlledToolProxy.propose 二次校验，渲染层自报的 appId/userId 一律不参与。
+   */
+  const resolveMcpTaskContext = ({ context, taskId } = {}) => {
+    if (!identity || !identity.taskStore || typeof identity.taskStore.taskById !== "function") {
+      return { ok: false, error: "MCP_TASK_CONTEXT_UNAVAILABLE" };
+    }
+    const task = identity.taskStore.taskById(String(taskId || ""));
+    if (!task) return { ok: false, error: "MCP_INVALID_INPUT", detail: "task-not-found" };
+    const sessionRef = context && context.sessionRef;
+    const session = identity.store && typeof identity.store.validateSession === "function" ? identity.store.validateSession(sessionRef, { sensitive: false }) : null;
+    if (!session || session.ok !== true) return { ok: false, error: "MCP_UNAUTHORIZED", detail: "no-session" };
+    const sessionUserId = session.user && session.user.id != null ? session.user.id : null;
+    if (!sessionUserId || String(sessionUserId) !== String(task.user_id)) return { ok: false, error: "MCP_UNAUTHORIZED", detail: "task-not-owner" };
+    return { ok: true, taskId: task.task_id, appId: task.app_id, stepId: null, runId: null };
+  };
   // boot 失败时以 service:null 注册，渲染层拿到 mcp-not-ready 的稳定错误，而不是 "No handler registered"。
-  registerMcpIpc({ ipcMain, service: identity?.mcpService ?? null, identity: identity?.service ?? null, isTrusted: trusted });
+  registerMcpIpc({
+    ipcMain,
+    service: identity?.mcpService ?? null,
+    identity: identity?.service ?? null,
+    isTrusted: trusted,
+    // B4e：聚合端口晚绑定到下面装配的 bridge（IPC 调用发生时 bridge 必已初始化）。
+    agentTools: () => (mcpAgentBridge ? mcpAgentBridge.mcpAgentTools : null),
+    mcpServersSnapshot: () => (mcpAgentBridge ? mcpAgentBridge.mcpServersSnapshot() : []),
+    toolInvocationEnabled: () => mcpSwitch.isToolInvocationEnabled(),
+    // B4e 收口：唯一开关写入口 + 任务内调用端口（晚绑定 bridge）。
+    toolInvocationSwitch: () => mcpSwitch,
+    audit: mcpAudit,
+    resolveTaskContext: resolveMcpTaskContext,
+    toolInvocation: () => (mcpAgentBridge && mcpAgentBridge.mcpAgentTools ? {
+      callByName: (fname, args, options) => mcpAgentBridge.mcpAgentTools.callByName(fname, args, options),
+      callDirect: (serverId, toolName, args, options) => mcpAgentBridge.mcpAgentTools.callDirect(serverId, toolName, args, options),
+    } : null),
+  });
 
   // 身份 runtime 存在时才注册依赖它的能力；boot 失败时窗口仍照常加载并走 BootRetry。
   if (identity) {
@@ -742,13 +817,49 @@ app.whenReady().then(async () => {
     // B4 收口：MCP → Agent 工具目录的只读桥。
     //   · 目录：mcpService.listConnections（appId=mcp-center 基线授权）→ 只列用户/组织真实可见的 server；
     //     未连接/停用/无工具一律照实投影（status 非 connected、executable:false），不伪造 connected。
-    //   · 调用：不注入 approval / transport —— createMcpAgentTools 会先 fail closed（审批缺失，0 次传输），
-    //     即便放行也回 MCP_TOOL_INVOCATION_NOT_ENABLED（mcp-client.cjs:832-834 的产品边界未放宽）。
-    const mcpAgentBridge = identity.mcpService
+    //   · 调用（B4e 收口）：真实传输 = McpService 已建立的活连接（electron/mcp-live-transport.cjs），
+    //     不再依赖测试注入的假对象；审批 = ControlledToolProxy.propose，taskId 逐调用由可信上下文解析。
+    //     开关未打开 → 0 审批 0 传输；未审批 → APPROVAL_REQUIRED（0 传输）；审批通过才发真实 tools/call。
+    const mcpLiveTransport = createMcpLiveTransport({ mcpService: identity.mcpService, switchPort: mcpSwitch });
+    // D5-04：把 MCP 接成**既有 SideEffectAuthority** 的 provider（plan/execute 两个方向），不新建第二套审批权威。
+    //   · provider 挂到既有 adapters.providers 注册表（tool-adapters.cjs adapterFor 解析）；活性由
+    //     side-effect-runtime.cjs 的 IN_PROCESS_EXECUTION_PROVIDERS 白名单认定（MCP 活连接只在 main 进程）；
+    //   · 审批端口 = createSideEffectExecutionPort（经 DX 身份映射桥包一层）：proposeWrite(plan) →
+    //     既有 sideEffect/decideApproval 作出 trusted 决定 → 既有 lease/claim/verify 真实执行 → 结果回传。
+    //     未批准/被拒/超时 0 传输。
+    const mcpSideEffectProvider = createMcpSideEffectProvider({ transport: mcpLiveTransport, registry: identity.toolRegistry || null });
+    if (identity.adapters && identity.adapters.providers && typeof identity.adapters.providers === "object") {
+      identity.adapters.providers.McpExternal = mcpSideEffectProvider;
+    }
+    // D5-04 补丁：agent 工具循环（project-agent-mode / react-driver）给出的 taskId 属于 dx_tasks，
+    // 而既有审批链按核心 tasks 定位 Task/Step/Run。桥只负责把 dx 任务步骤**幂等**映射成核心审批
+    // 任务/步骤/运行（同一 dx 步骤只产生一个核心任务），approval/lease/claim/verify/audit 仍由同一个
+    // SideEffectAuthority 裁决；sessionRef 只由主进程从已认证身份推导，渲染层 / Harness 给不了。
+    // 已是核心 taskId 的调用（mcp/toolInvocation/call）由桥原样透传，既有语义不变。
+    const dxTaskApprovalBridge = identity.store && identity.taskStore
+      ? createDxTaskApprovalBridge({
+          identity: identity.store,
+          taskStore: identity.taskStore,
+          dxTaskStore: require("./agent-task-store.cjs"),
+          authService: identity.authorization,
+          appId: "mcp-center",
+          context: () => ({ sessionRef: (identity.service && identity.service.current) || null, appId: "mcp-center" }),
+        })
+      : null;
+    const mcpApprovalPort = identity.sideEffectRuntime && dxTaskApprovalBridge
+      ? createDxBridgedApprovalPort({ bridge: dxTaskApprovalBridge, runtime: identity.sideEffectRuntime, toolIdFor: mcpToolIdFor, toolVersionFor: () => MCP_TOOL_VERSION })
+      : null;
+    mcpAgentBridge = identity.mcpService
       ? createMcpAgentBridge({
           mcpService: identity.mcpService,
           // sessionRef 只由主进程从已认证身份推导（渲染层给不了）；appId 用 MCP 中心的承载 Principal。
           context: () => ({ sessionRef: (identity.service && identity.service.current) || null, appId: "mcp-center" }),
+          // B4e：默认关闭的显式开关（<userData>/dxos/mcp.json）+ 共享 ToolRegistry。
+          // 注入 registry 后，已连接 server 的 MCP 工具被幂等登记为 EXTERNAL_SIDE_EFFECT（requiresApproval）。
+          switch: mcpSwitch,
+          registry: identity.toolRegistry || null,
+          transport: mcpLiveTransport,
+          approval: mcpApprovalPort,
         })
       : null;
     agentBundle = createAgentBundle({

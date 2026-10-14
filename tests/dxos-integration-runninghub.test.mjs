@@ -7,7 +7,8 @@
  *   ③ 未注入 fetch 或未配置 API Key → 结构化 { ok:false, error:"INTEGRATION_UNAVAILABLE", detail }；
  *   ④ 凭据走 credential-store（内存后端），只回掩码、不落明文；
  *   ⑤ B2 legacy 执行器端口：未注入 → LEGACY_DEPENDENCY_UNAVAILABLE；注入假端口 → 真的走到注入实现；
- *   ⑥ createPluginBundle 装配后启用 runninghub，legacy 图片执行器真的走新实现（不是仍返回依赖缺失）。
+ *   ⑥ createPluginBundle 装配后启用 runninghub，legacy 图片执行器真的走新实现（不是仍返回依赖缺失）；
+ *   ⑦ B7e3 后续：RunningHub 对话 / 图片理解 legacy 端口（callRunningHubChat / describeRunningHubImage）。
  *
  * 只读源：server/runninghub.ts:1-700；electron/plugin-runninghub.cjs；electron/legacy-executor-ports.cjs。
  */
@@ -21,12 +22,13 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const { createPluginRegistry, optionalPlugins } = require("../electron/plugin-registry.cjs");
-const { createPluginBundle } = require("../electron/plugin-service.cjs");
+const { createPluginBundle, INTEGRATION_COMMANDS } = require("../electron/plugin-service.cjs");
 const { createRunningHubIntegration, runningHubOutputUrls, modelTaskState, endpointForModel, fieldsFromWorkflow } = require("../electron/plugin-runninghub.cjs");
 const { memoryCredentialBackend } = require("../electron/credential-store.cjs");
 const { setLegacyExecutorPorts, clearLegacyExecutorPorts, listLegacyExecutorPorts } = require("../electron/legacy-executor-ports.cjs");
 const images = require("../electron/protocol-engine/legacy-executor-images.cjs");
 const media = require("../electron/protocol-engine/legacy-executor-media.cjs");
+const chat = require("../electron/protocol-engine/legacy-executor-chat.cjs");
 
 const tmpDirs = [];
 const servers = [];
@@ -57,8 +59,9 @@ function startStub(handler) {
 }
 
 // ── ① 注册 / 默认关闭 / 持久化 / 依赖缺失文案 ─────────────────────────────
-test("注册：optionalPlugins 含 runninghub/modelscope，默认全关且启用后跨实例保持", async () => {
-  assert.deepEqual(optionalPlugins().map((plugin) => plugin.id).sort(), ["modelscope", "runninghub"]);
+test("注册：optionalPlugins 含 runninghub/modelscope/agnes，默认全关且启用后跨实例保持", async () => {
+  // B7e3 起 Agnes 也并入 optionalPlugins（新增可选插件），三者的登记契约在此钉住。
+  assert.deepEqual(optionalPlugins().map((plugin) => plugin.id).sort(), ["agnes", "modelscope", "runninghub"]);
   const dir = tempDir();
   const registry = createPluginRegistry({ userDataDir: dir, plugins: optionalPlugins(), capabilities: { fetch: async () => ({}), safeStorage: true } });
   const runninghub = registry.get("runninghub");
@@ -235,6 +238,79 @@ test("端口：视频与图像编辑分支同样按名注入（未注入保持 B
   assert.equal(edit.images[0].value, "https://cdn.example/edit.png");
 });
 
+// ── ⑥b B7e3 后续：对话 / 图片理解 legacy 端口（callRunningHubChat / describeRunningHubImage） ──
+test("端口：对话 / 图片理解未注入 → 结构化拒绝；注入假端口 → 执行器真的调用且形状回到源协议约定", async () => {
+  clearLegacyExecutorPorts();
+  const provider = { base_url: "https://example.invalid", api_key: "k", protocol: "runninghub" };
+  const blockedChat = await chat.callChat(provider, "m", { prompt: "x" });
+  assert.equal(blockedChat.error, "LEGACY_DEPENDENCY_UNAVAILABLE");
+  assert.match(blockedChat.detail, /runninghub/);
+  const blockedStream = await chat.streamChat(provider, "m", { prompt: "x" }, {}, () => {});
+  assert.equal(blockedStream.error, "LEGACY_DEPENDENCY_UNAVAILABLE");
+  const blockedDescribe = await chat.describeImage(provider, "m", "data:image/png;base64,AA", "描述");
+  assert.equal(blockedDescribe.error, "LEGACY_DEPENDENCY_UNAVAILABLE");
+
+  const seen = [];
+  const applied = setLegacyExecutorPorts({
+    callRunningHubChat: async (...args) => { seen.push(["chat", ...args]); return { text: "port-chat", latencyMs: 7, raw: { via: "port" } }; },
+    describeRunningHubImage: async (...args) => { seen.push(["describe", ...args]); return "port-desc"; },
+  });
+  assert.deepEqual(applied.rejected, []);
+  const called = await chat.callChat(provider, "m", { prompt: "hi" }, { temperature: 0.2 }, 1000);
+  assert.equal(called.text, "port-chat");
+  assert.equal(called.latencyMs, 7);
+  assert.equal(called.raw.via, "port");
+  assert.equal(seen[0][0], "chat");
+  assert.equal(seen[0][1].protocol, "runninghub", "端口收到真实 provider");
+  assert.equal(seen[0][2], "m");
+
+  const deltas = [];
+  const streamed = await chat.streamChat(provider, "m", { prompt: "hi" }, {}, (t) => deltas.push(t), 1000);
+  assert.deepEqual(deltas, ["port-chat"]);
+  assert.equal(streamed.usage, undefined);
+  assert.equal(seen[1][0], "chat", "streamChat 复用 callRunningHubChat 端口");
+  assert.equal(await chat.describeImage(provider, "m", "data:image/png;base64,AA", "描述", 1000), "port-desc");
+  assert.equal(seen[2][0], "describe");
+  assert.equal(seen[2][1].protocol, "runninghub");
+});
+
+test("装配：启用 runninghub 后 legacy 对话 / 图片理解走插件实现（本地 stub）", async () => {
+  clearLegacyExecutorPorts();
+  const stub = await startStub((url) => {
+    if (url.pathname === "/chat/completions") return { body: { choices: [{ message: { content: "来自插件" } }], usage: { total_tokens: 2 } } };
+    return null;
+  });
+  const bundle = createPluginBundle({
+    userDataDir: tempDir(),
+    fetch,
+    credentials: memoryCredentialBackend(),
+    runninghubEndpoints: { baseUrl: stub.base, llm: stub.base, registry: stub.base + "/registry.json" },
+  });
+  assert.ok(bundle.legacyPorts.applied.includes("callRunningHubChat"), "装配必须注入对话端口");
+  assert.ok(bundle.legacyPorts.applied.includes("describeRunningHubImage"), "装配必须注入图片理解端口");
+  const provider = { base_url: stub.base, api_key: "sk-chat", protocol: "runninghub" };
+
+  // 端口已注册但插件未启用：结构化拒绝，执行器如实透传，不是假成功。
+  const disabled = await chat.callChat(provider, "m", { prompt: "x" });
+  assert.equal(disabled.error, "INTEGRATION_UNAVAILABLE");
+  assert.match(disabled.detail, /默认关闭/);
+
+  assert.equal((await bundle.registry.enable("runninghub")).ok, true);
+  const called = await chat.callChat(provider, "m", { prompt: "你好" });
+  assert.equal(called.text, "来自插件");
+  assert.equal(called.usage.total_tokens, 2);
+  const body = stub.requests.at(-1).body;
+  assert.equal(body.model, "m");
+  assert.equal(body.stream, false);
+  assert.deepEqual(body.messages, [{ role: "user", content: "你好" }]);
+
+  const described = await chat.describeImage(provider, "qwen/qwen3-vl", "data:image/png;base64,AA", "描述这张图");
+  assert.equal(described, "来自插件");
+  const descBody = stub.requests.at(-1).body;
+  assert.equal(descBody.messages[0].content[0].text, "描述这张图");
+  assert.equal(descBody.messages[0].content[1].image_url.url, "data:image/png;base64,AA");
+});
+
 // ── ⑦ 装配后启用 → legacy 执行器真的走 RunningHub 新实现 ───────────────────
 test("装配：createPluginBundle 注册端口；启用 runninghub 后 legacy 图片执行器走新实现（本地 stub）", async () => {
   clearLegacyExecutorPorts();
@@ -253,7 +329,7 @@ test("装配：createPluginBundle 注册端口；启用 runninghub 后 legacy �
     runningHubModelDefinitions: { demo: { endpoint: "demo/text-to-image", params: [] } },
   });
   assert.equal(bundle.registry.get("runninghub").enabled, false, "默认关闭");
-  assert.deepEqual(bundle.legacyPorts.applied.sort(), ["editModelScopeImages", "editRunningHubImages", "generateModelScopeImages", "generateRunningHubImages", "generateRunningHubVideos"]);
+  assert.deepEqual(bundle.legacyPorts.applied.sort(), ["callRunningHubChat", "describeRunningHubImage", "editAgnesImages", "editModelScopeImages", "editRunningHubImages", "generateAgnesImages", "generateAgnesVideos", "generateModelScopeImages", "generateRunningHubImages", "generateRunningHubVideos"]);
 
   // 未启用：端口存在但结构化拒绝（默认关语义在端口层也成立）
   const before = await images.generateImages({ base_url: stub.base, api_key: "sk", protocol: "runninghub" }, "demo", { prompt: "x" }, 5000);
@@ -270,3 +346,102 @@ test("装配：createPluginBundle 注册端口；启用 runninghub 后 legacy �
   const submit = stub.requests.find((entry) => entry.method === "POST");
   assert.equal(submit.body.prompt, "一只猫");
 });
+
+// ── ⑧ B7e3：LLM / 视觉问答（源 callRunningHubChat / describeRunningHubImage） ──
+test("LLM / 视觉：callRunningHubChat 与 describeRunningHubImage（本地 stub）", async () => {
+  const stub = await startStub((url) => {
+    if (url.pathname === "/chat/completions") return { body: { choices: [{ message: { content: "你好" } }], usage: { total_tokens: 3 } } };
+    return null;
+  });
+  const integration = createRunningHubIntegration({ fetch, endpoints: { registry: stub.base + "/registry.json", llm: stub.base } });
+  const provider = { base_url: stub.base, api_key: "sk-llm" };
+
+  const chat = await integration.callRunningHubChat(provider, "qwen/qwen-plus", { prompt: "你好" }, { temperature: 0.2 }, 5000, { fetch });
+  assert.equal(chat.ok, true, JSON.stringify(chat));
+  assert.equal(chat.value.text, "你好");
+  assert.equal(chat.value.usage.total_tokens, 3);
+  const chatBody = stub.requests.at(-1).body;
+  assert.equal(chatBody.model, "qwen/qwen-plus");
+  assert.equal(chatBody.stream, false);
+  assert.equal(chatBody.temperature, 0.2);
+  assert.deepEqual(chatBody.messages, [{ role: "user", content: "你好" }]);
+
+  const described = await integration.describeRunningHubImage(provider, "qwen/qwen3-vl", ["data:image/png;base64,AA"], "这是什么", 5000, { fetch });
+  assert.equal(described.ok, true);
+  assert.equal(described.value.text, "你好");
+  const descBody = stub.requests.at(-1).body;
+  assert.equal(descBody.messages[0].content[0].text, "这是什么");
+  assert.equal(descBody.messages[0].content[1].image_url.url, "data:image/png;base64,AA");
+
+  const noFetch = createRunningHubIntegration({ credentials: memoryCredentialBackend() });
+  const blocked = await noFetch.callRunningHubChat(provider, "m", { prompt: "x" }, {}, 1000);
+  assert.equal(blocked.error, "INTEGRATION_UNAVAILABLE");
+  assert.match(blocked.detail, /fetch/);
+});
+
+// ── ⑨ B7e3：AI 应用 / 工作流入口命令（白名单 ↔ 实现一一对应） ─────────────
+test("命令：chat / describe-image / inspect / submit / task-query / upload 全部登记且可用", async () => {
+  const commands = [
+    "integration/runninghub/chat",
+    "integration/runninghub/describe-image",
+    "integration/runninghub/inspect",
+    "integration/runninghub/submit",
+    "integration/runninghub/task/query",
+    "integration/runninghub/upload",
+  ];
+  for (const command of commands) assert.ok(INTEGRATION_COMMANDS.includes(command), "白名单缺少 " + command);
+
+  const stub = await startStub((url) => {
+    if (url.pathname === "/chat/completions") return { body: { choices: [{ message: { content: "hi" } }] } };
+    if (url.pathname === "/api/webapp/apiCallDemo") return { body: { code: 0, data: { webappId: "app-1", fields: [] } } };
+    if (url.pathname === "/api/openapi/getJsonApiFormat") return { body: { code: 0, data: { prompt: { "3": { class_type: "KSampler", inputs: { seed: 1 } } } } } };
+    if (url.pathname === "/task/openapi/ai-app/run") return { body: { code: 0, data: { taskId: "task-9" } } };
+    if (url.pathname === "/task/openapi/outputs") return { body: { code: 0, data: { url: "https://cdn.example/out.png" } } };
+    if (url.pathname === "/task/openapi/upload") return { body: { code: 0, data: { fileName: "asset.png" } } };
+    return null;
+  });
+  const bundle = createPluginBundle({
+    userDataDir: tempDir(),
+    fetch,
+    credentials: memoryCredentialBackend(),
+    runninghubEndpoints: { baseUrl: stub.base, llm: stub.base, registry: stub.base + "/registry.json" },
+  });
+  const provider = { base_url: stub.base, api_key: "sk-cmd" };
+
+  const disabled = await bundle.execute("integration/runninghub/chat", { provider, model: "m", input: { prompt: "x" } }, { sessionRef: "s" });
+  assert.equal(disabled.error, "INTEGRATION_UNAVAILABLE");
+  assert.equal((await bundle.execute("integration/plugins/enable", { id: "runninghub" }, { sessionRef: "s" })).ok, true);
+
+  const chat = await bundle.execute("integration/runninghub/chat", { provider, model: "m", input: { prompt: "你好" }, params: { temperature: 0 } }, { sessionRef: "s" });
+  assert.equal(chat.ok, true, JSON.stringify(chat));
+  assert.equal(chat.value.text, "hi");
+
+  const described = await bundle.execute("integration/runninghub/describe-image", { provider, model: "m", image: "data:image/png;base64,AA", prompt: "描述" }, { sessionRef: "s" });
+  assert.equal(described.ok, true);
+  assert.equal(described.value.text, "hi");
+
+  const app = await bundle.execute("integration/runninghub/inspect", { provider, kind: "app", id: "app-1" }, { sessionRef: "s" });
+  assert.equal(app.ok, true);
+  assert.equal(app.value.webappId, "app-1");
+
+  const workflow = await bundle.execute("integration/runninghub/inspect", { provider, kind: "workflow", id: "wf-1" }, { sessionRef: "s" });
+  assert.equal(workflow.ok, true);
+  assert.equal(workflow.value.fields.length, 1);
+
+  const submitted = await bundle.execute("integration/runninghub/submit", { provider, kind: "app", id: "app-1", fields: [{ nodeId: "3", fieldName: "seed", fieldValue: "1", enabled: true }] }, { sessionRef: "s" });
+  assert.equal(submitted.ok, true, JSON.stringify(submitted));
+  assert.equal(submitted.value.taskId, "task-9");
+
+  const queried = await bundle.execute("integration/runninghub/task/query", { provider, id: "task-9" }, { sessionRef: "s" });
+  assert.equal(queried.ok, true);
+  assert.equal(queried.value.status, "SUCCESS");
+  assert.deepEqual(queried.value.urls, ["https://cdn.example/out.png"]);
+
+  const uploaded = await bundle.execute("integration/runninghub/upload", { provider, fileName: "a.png", mime: "image/png", bufferBase64: Buffer.from("x").toString("base64") }, { sessionRef: "s" });
+  assert.equal(uploaded.ok, true);
+  assert.equal(uploaded.value.fileName, "asset.png");
+
+  const missingBuffer = await bundle.execute("integration/runninghub/upload", { provider }, { sessionRef: "s" });
+  assert.equal(missingBuffer.error, "INTEGRATION_INVALID_INPUT");
+});
+

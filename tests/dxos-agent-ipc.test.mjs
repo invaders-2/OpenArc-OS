@@ -68,7 +68,7 @@ function setup({ grants = ["files.read", "files.write"], actorId = "u1" } = {}) 
 const REQUIRED_COMMANDS = [
   "agent/task/create", "agent/task/list", "agent/task/get", "agent/task/events", "agent/task/answer",
   "agent/task/continue", "agent/task/pause", "agent/task/cancel", "agent/task/resume", "agent/task/delete",
-  "agent/task/trace", "agent/task/stats",
+  "agent/task/trace", "agent/task/stats", "agent/task/unified-list",
   "agent/run/get", "agent/run/inspect", "agent/run/list",
   "agent/tool/catalog", "agent/tool/describe", "agent/tool/call",
   "agent/capability/route",
@@ -78,10 +78,10 @@ const REQUIRED_COMMANDS = [
   "agent/health",
 ];
 
-test("命令表：27 条白名单齐备，risk ∈ read|use|manage|destructive，credential 为布尔且中文摘要", () => {
+test("命令表：28 条白名单齐备，risk ∈ read|use|manage|destructive，credential 为布尔且中文摘要", () => {
   const keys = Object.keys(agentDomain.AGENT_COMMANDS).sort();
   assert.deepEqual(keys, [...REQUIRED_COMMANDS].sort());
-  assert.equal(keys.length, 27);
+  assert.equal(keys.length, 28);
   for (const [command, entry] of Object.entries(agentDomain.AGENT_COMMANDS)) {
     assert.ok(["read", "use", "manage", "destructive"].includes(entry.risk), command + " risk=" + entry.risk);
     assert.equal(typeof entry.credential, "boolean", command + " credential 非布尔");
@@ -298,7 +298,7 @@ test("真实命令：project/task/run/tool/memory/health 全链路，B6 未接�
   assert.equal(health.value.dependencies.db, true);
   assert.equal(health.value.dependencies.modelAdapter, false);
   assert.equal(health.value.dependencies.fsAdapter, false);
-  assert.equal(health.value.commands, 27);
+  assert.equal(health.value.commands, 28);
   assert.equal(health.value.eventChannel, "agent:event");
 });
 

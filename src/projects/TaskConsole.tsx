@@ -34,8 +34,15 @@ import { PageState } from "../design-system/page-states";
 /* page-states.css 只被设计系统 gallery 引用过；PageState 是本页错误 / 空 / 加载态的
    唯一实现，这里按需引入它自己的样式表（不改任何既有类与 token）。 */
 import "../design-system/page-states.css";
+/* 写类入口的二次确认复用产品既有 Dialog（焦点陷阱 / Esc / 焦点返回都在组件内）。 */
+import { Dialog } from "../desktop/Dialog";
 import {
   TASK_CONSOLE_COMMANDS,
+  TASK_ENTRIES,
+  TASK_ENTRY_INPUT_LABEL,
+  TASK_ENTRY_RISK_LABEL,
+  TASK_ENTRY_RISK_TEXT,
+  UNIFIED_READ_MODEL_COMMAND,
   agentProgressPhase,
   canCancelTask,
   canContinueTask,
@@ -49,18 +56,33 @@ import {
   mergeTaskEvents,
   missingDependencies,
   nextEventCursor,
+  normalizeUnifiedList,
   progressSequenceState,
   stepProgress,
   stepStatusLabel,
   taskActionDisabledReason,
+  taskEntryAvailability,
+  taskEntryConfirmSummary,
+  taskEntryConfirmTitle,
+  taskEntryMeta,
+  taskEntryMissingInputs,
   taskErrorState,
   taskErrorText,
   taskEventLabel,
   taskFeedbackForStatus,
   taskListState,
+  unifiedCountsText,
+  unifiedSourceBadge,
+  unifiedSourceIndex,
   waitingQuestionFromEvents,
 } from "./taskConsoleLogic";
-import type { AgentProgressEvent, TaskEvent, TaskStep } from "./taskConsoleLogic";
+import type {
+  AgentProgressEvent,
+  TaskEntryKey,
+  TaskEvent,
+  TaskStep,
+  UnifiedListView,
+} from "./taskConsoleLogic";
 
 /* ══════════════════════════════════════════════════════════════════════════
    桥与结果形状
@@ -189,6 +211,14 @@ function TaskConsoleBody({ role }: { role: string | null }) {
   const [continueText, setContinueText] = useState("");
   const [continueOpen, setContinueOpen] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  /* UI-3b 写操作入口：四条命令同一条白名单；这里只保存输入、进行中与失败事实。 */
+  const [entryInputs, setEntryInputs] = useState<Record<string, string>>({});
+  const [entryBusy, setEntryBusy] = useState<string | null>(null);
+  const [entryFailure, setEntryFailure] = useState<{ entry: TaskEntryKey; code: string; context: string } | null>(null);
+  /* UI-3c 二次确认：待确认的入口与已构造好的载荷；非 null 时弹 Dialog，确认前不发命令。 */
+  const [pendingEntry, setPendingEntry] = useState<{ key: TaskEntryKey; payload: Record<string, unknown>; summary: string } | null>(null);
+  /* 统一读模型：只读列表来源标注（不改任何一方状态机）。 */
+  const [unified, setUnified] = useState<UnifiedListView | null>(null);
 
   const eventsRef = useRef<TaskEvent[]>([]);
 
@@ -322,6 +352,12 @@ function TaskConsoleBody({ role }: { role: string | null }) {
     [refreshSelected, loadEvents],
   );
 
+  /** 统一读模型（只读）：失败不阻塞主列表，界面照实标注来源未知。 */
+  const loadUnified = useCallback(async () => {
+    const res = await send(UNIFIED_READ_MODEL_COMMAND, {});
+    setUnified(normalizeUnifiedList(res));
+  }, [send]);
+
   useEffect(() => {
     if (!available) {
       setLoading(false);
@@ -330,6 +366,7 @@ function TaskConsoleBody({ role }: { role: string | null }) {
     }
     void loadHealth();
     void loadList();
+    void loadUnified();
     // 只在挂载时拉一次；后续由动作成功后显式刷新。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [available]);
@@ -372,6 +409,7 @@ function TaskConsoleBody({ role }: { role: string | null }) {
       await refreshSelected(selectedId, { silent: true });
       await loadEvents(selectedId);
     }
+    await loadUnified();
   };
 
   const runAction = async (
@@ -453,6 +491,89 @@ function TaskConsoleBody({ role }: { role: string | null }) {
     }
   };
 
+  /**
+   * 本地必填 / JSON 校验 + 载荷构造。失败时写 entryFailure 并返回 null：
+   * 既不弹确认框，也不发命令（与后端 requireStr 的必填项同一份清单）。
+   */
+  const prepareEntry = (key: TaskEntryKey): { payload: Record<string, unknown>; summary: string } | null => {
+    const meta = taskEntryMeta(key);
+    if (!meta) return null;
+    const values: Record<string, string> = {};
+    for (const field of meta.inputs) values[field] = entryInputs[key + ":" + field] || "";
+    const missingInputs = taskEntryMissingInputs(key, values);
+    if (missingInputs.length) {
+      setEntryFailure({
+        entry: key,
+        code: "LOCAL_INPUT_REQUIRED",
+        context: "缺少必填内容（" + missingInputs.map((f) => TASK_ENTRY_INPUT_LABEL[f] || f).join("、") + "）",
+      });
+      return null;
+    }
+    const payload: Record<string, unknown> = {};
+    for (const field of meta.inputs) {
+      const value = values[field].trim();
+      if (!value) continue;
+      if (field === "arguments") {
+        try {
+          payload.arguments = JSON.parse(value);
+        } catch {
+          setEntryFailure({ entry: key, code: "LOCAL_INPUT_REQUIRED", context: "参数必须是合法 JSON" });
+          return null;
+        }
+      } else {
+        payload[field] = value;
+      }
+    }
+    return { payload, summary: taskEntryConfirmSummary(key, payload) };
+  };
+
+  /** 点入口按钮：先本地校验，再打开二次确认；命令数保持 0。 */
+  const requestEntry = (key: TaskEntryKey) => {
+    setEntryFailure(null);
+    const prepared = prepareEntry(key);
+    if (!prepared) return;
+    setPendingEntry({ key, payload: prepared.payload, summary: prepared.summary });
+  };
+
+  const cancelEntryConfirm = () => setPendingEntry(null);
+
+  /** 确认后真正发送：白名单命令 → 结构化失败。 */
+  const submitEntry = async (key: TaskEntryKey, payload: Record<string, unknown>) => {
+    const meta = taskEntryMeta(key);
+    if (!meta) return;
+    setEntryBusy(key);
+    setEntryFailure(null);
+    setFailure(null);
+    setNotice(null);
+    const res = await send(meta.command, payload);
+    setEntryBusy(null);
+    if (res.ok !== true) {
+      const code = codeOf(res.error);
+      const message = messageOf(res.message);
+      markDependency(code, res.detail, message, meta.label);
+      setEntryFailure({ entry: key, code, context: meta.label });
+      /* 失败通知常驻：错误不能只闪过几秒（DESIGN_SYSTEM §9）。 */
+      toast({
+        kind: "error",
+        title: meta.label + "失败",
+        description: taskErrorText(code) + "（" + code + "）",
+        duration: null,
+      });
+      return;
+    }
+    setNotice(meta.label + "已提交，任务会出现在列表里");
+    toast({ kind: "success", title: meta.label + "已提交" });
+    await refreshAll();
+    await loadUnified();
+  };
+
+  const confirmEntry = async () => {
+    const pending = pendingEntry;
+    setPendingEntry(null);
+    if (!pending) return;
+    await submitEntry(pending.key, pending.payload);
+  };
+
   /* ── 派生 ─────────────────────────────────────────────────────────────── */
   const dependencyText = useMemo(
     () =>
@@ -482,6 +603,10 @@ function TaskConsoleBody({ role }: { role: string | null }) {
       ? "依赖 " + missing.length + " 项缺失"
       : "依赖已就绪"
     : "健康未知";
+  /* 统一读模型的来源索引：行内来源标注用；core-only 项单独列一行。 */
+  const sourceIndex = unifiedSourceIndex(unified ? unified.items : []);
+  const entryMissing = missingDependencies(health);
+  const coreUnified = unified ? unified.items.filter((item) => item.source === "core") : [];
 
   const selectedTask = detail.kind === "ready" ? detail.task : null;
   const feedback = taskFeedbackForStatus(selectedTask ? selectedTask.status : null);
@@ -536,6 +661,136 @@ function TaskConsoleBody({ role }: { role: string | null }) {
         ) : null}
       </div>
 
+      <section className="task-section" aria-label="写操作入口" data-task-entries>
+        <div className="task-section-head">
+          <h4>写操作入口</h4>
+          <span className="task-muted" data-task-entries-unified>
+            {unifiedCountsText(unified)}
+          </span>
+        </div>
+        <p className="task-muted" data-task-unified-boundary>
+          {unified && unified.boundary
+            ? unified.boundary
+            : "统一读模型只读合并 DX 与 core 两套任务表；来源标注见任务行。"}
+        </p>
+        <ScrollArea label="写操作入口" maxHeight={280}>
+          <div data-task-entry-list>
+            {TASK_ENTRIES.map((meta) => {
+              const av = taskEntryAvailability(meta.key, { hasBridge: available, missing: entryMissing });
+              const busy = entryBusy === meta.key;
+              const err = entryFailure && entryFailure.entry === meta.key ? entryFailure : null;
+              return (
+                <div
+                  className="task-run task-entry"
+                  key={meta.key}
+                  data-task-entry={meta.key}
+                  data-task-entry-command={meta.command}
+                  data-task-entry-state={busy ? "busy" : av.available ? "ready" : av.kind}
+                  data-task-entry-risk={meta.risk}
+                  aria-busy={busy ? "true" : undefined}
+                >
+                  <div className="task-run__head task-entry-head">
+                    <span data-task-entry-risk-badge>
+                      <Badge tone={meta.risk === "write" ? "neutral" : "warning"} className="task-status">
+                        {TASK_ENTRY_RISK_LABEL[meta.risk]}
+                      </Badge>
+                    </span>
+                    {meta.requiresApproval ? (
+                      <span data-task-entry-approval="true">
+                        <Badge tone="warning" size="sm" className="task-status">
+                          逐次审批
+                        </Badge>
+                      </span>
+                    ) : null}
+                    <strong>{meta.label}</strong>
+                    <span className="task-muted task-mono">{meta.command}</span>
+                  </div>
+                  <p className="task-muted task-entry-meta" data-task-entry-desc>
+                    {meta.description}
+                  </p>
+                  <p
+                    className={(av.available ? "task-muted" : "task-warn") + " task-entry-meta"}
+                    data-task-entry-availability={av.kind}
+                  >
+                    {av.title} · {av.description}
+                  </p>
+                  <p className="task-muted task-entry-meta" data-task-entry-risk-text>
+                    {TASK_ENTRY_RISK_TEXT[meta.key]}
+                  </p>
+                  {meta.inputs.map((field) => (
+                    <TextField
+                      key={field}
+                      label={TASK_ENTRY_INPUT_LABEL[field] || field}
+                      data-task-entry-field={meta.key + ":" + field}
+                      value={entryInputs[meta.key + ":" + field] || ""}
+                      onChange={(e) =>
+                        setEntryInputs((cur) => ({ ...cur, [meta.key + ":" + field]: e.target.value }))
+                      }
+                    />
+                  ))}
+                  <div className="task-actions task-entry-actions">
+                    <Button
+                      variant={meta.risk === "write" ? "secondary" : "primary"}
+                      size="sm"
+                      data-task-entry-action={meta.key}
+                      status={busy ? "loading" : "idle"}
+                      disabled={!av.available || entryBusy !== null}
+                      onClick={() => requestEntry(meta.key)}
+                    >
+                      {meta.label}
+                    </Button>
+                    <span className="task-muted">{av.available ? "可用" : "不可用"}</span>
+                  </div>
+                  {err ? (
+                    <p
+                      className="task-error"
+                      role="alert"
+                      data-task-entry-error
+                      data-task-entry-error-code={err.code}
+                    >
+                      {err.context}失败：{taskErrorText(err.code)}（{err.code}）
+                    </p>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </ScrollArea>
+      </section>
+
+      {/* 写类入口二次确认：确认前不发命令；取消 / Esc 都不发送（命令数保持 0）。 */}
+      <Dialog
+        open={pendingEntry !== null}
+        title={pendingEntry ? taskEntryConfirmTitle(pendingEntry.key) : "确认"}
+        onClose={cancelEntryConfirm}
+        footer={
+          <>
+            <Button variant="ghost" size="sm" data-task-entry-confirm-cancel onClick={cancelEntryConfirm}>
+              取消
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              data-task-entry-confirm-submit
+              status={entryBusy !== null ? "loading" : "idle"}
+              disabled={entryBusy !== null}
+              onClick={() => void confirmEntry()}
+            >
+              确认发送
+            </Button>
+          </>
+        }
+      >
+        {pendingEntry ? (
+          <div className="task-entry-confirm" data-task-entry-confirm={pendingEntry.key}>
+            <p className="task-entry-confirm-value" data-task-entry-confirm-summary>
+              {pendingEntry.summary}
+            </p>
+            <p className="task-muted">确认前不会发出任何命令；取消则命令数为 0。</p>
+          </div>
+        ) : null}
+      </Dialog>
+
       {listState !== "ready" ? (
         <div
           className="task-state-block"
@@ -576,6 +831,9 @@ function TaskConsoleBody({ role }: { role: string | null }) {
               <span className="task-muted" data-task-count>
                 {filteredTasks.length} / {tasks.length}
               </span>
+              <span className="task-muted" data-task-unified>
+                {unifiedCountsText(unified)}
+              </span>
             </div>
             <SearchField
               value={query}
@@ -589,6 +847,9 @@ function TaskConsoleBody({ role }: { role: string | null }) {
                 {filteredTasks.map((task) => {
                   const fb = taskFeedbackForStatus(task.status);
                   const id = asText(task.taskId, "（无 ID）");
+                  /* 来源标注来自 agent/task/unified-list；索引没有该 id 时按 DX 显示（本列表就是 DX 投影）。 */
+                  const src = sourceIndex[id] || "dx";
+                  const srcBadge = unifiedSourceBadge(src);
                   return (
                     <li key={id}>
                       <button
@@ -604,6 +865,11 @@ function TaskConsoleBody({ role }: { role: string | null }) {
                           <Badge tone={fb.tone} className="task-status">
                             {fb.glyph} {fb.label}
                           </Badge>
+                          <span data-task-source={src}>
+                            <Badge tone={srcBadge.tone} size="sm" className="task-status">
+                              {srcBadge.label}
+                            </Badge>
+                          </span>
                         </span>
                         <span className="task-row__facts">
                           <span data-task-mode>{asText(task.mode, "固定步骤")}</span>
@@ -623,6 +889,12 @@ function TaskConsoleBody({ role }: { role: string | null }) {
                 没有匹配「{query}」的任务。
               </p>
             )}
+            {coreUnified.length ? (
+              <p className="task-muted" data-task-unified-core>
+                统一读模型里的 core 来源任务：
+                {coreUnified.map((item) => " " + (item.title || item.id)).join("、")}
+              </p>
+            ) : null}
             {role !== "ADMIN" ? (
               <p className="task-muted" data-task-role-note>
                 权限口径：任务按项目成员归属；被拒绝的动作会显示稳定错误码。

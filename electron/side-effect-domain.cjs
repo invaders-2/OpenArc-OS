@@ -29,6 +29,9 @@ const C1_ALLOWED_EFFECT = Object.freeze([EFFECT_CLASS.REVERSIBLE_WRITE]);
  */
 const EXECUTION_POLICY = Object.freeze({
   CONTROLLED_REVERSIBLE_WRITE: "CONTROLLED_REVERSIBLE_WRITE",
+  // D5-04：外部 MCP 工具的受控执行合同。EXTERNAL_SIDE_EFFECT 只有显式声明本 policy 才可执行；
+  // 未声明者与 IRREVERSIBLE / PRIVILEGED 一样 BLOCKED（绝不因为 execute 路径存在就自动获得执行能力）。
+  CONTROLLED_EXTERNAL_EFFECT: "CONTROLLED_EXTERNAL_EFFECT",
 });
 const EXECUTION_POLICY_ALL = Object.freeze(Object.values(EXECUTION_POLICY));
 
@@ -147,6 +150,15 @@ function effectClassForRisk(riskClass) {
   }
 }
 function isC1EffectClass(effectClass) { return C1_ALLOWED_EFFECT.includes(String(effectClass)); }
+/**
+ * 可执行 effectClass → 该 class **唯一**允许的 executionPolicy。
+ * 不在表内的 effectClass（IRREVERSIBLE_WRITE / PRIVILEGED）永远没有执行 policy。
+ */
+const EXECUTABLE_EFFECT_POLICY = Object.freeze({
+  [EFFECT_CLASS.REVERSIBLE_WRITE]: EXECUTION_POLICY.CONTROLLED_REVERSIBLE_WRITE,
+  [EFFECT_CLASS.EXTERNAL_SIDE_EFFECT]: EXECUTION_POLICY.CONTROLLED_EXTERNAL_EFFECT,
+});
+function executionPolicyForEffectClass(effectClass) { return EXECUTABLE_EFFECT_POLICY[String(effectClass)] || null; }
 function isTerminalCall(status) { return CALL_TERMINAL.includes(String(status)); }
 function canTransitionCall(from, to) {
   const allowed = CALL_TRANSITIONS[String(from)];
@@ -194,7 +206,9 @@ function evaluateExecutionEligibility(snapshot = {}) {
   const now = Number(s.now || 0);
 
   if (!call) return fail(ELIGIBILITY.DENIED, SIDE_EFFECT_ERROR.CALL_NOT_FOUND);
-  if (!isC1EffectClass(call.effect_class)) return fail(ELIGIBILITY.BLOCKED, SIDE_EFFECT_ERROR.EFFECT_CLASS_BLOCKED);
+  // 只放行"存在受控 executionPolicy 的 effectClass"（REVERSIBLE_WRITE / EXTERNAL_SIDE_EFFECT）；
+  // 具体 policy 是否与 contract 一致由 authority 在 plan / claim / execute 三处逐段核对。
+  if (!executionPolicyForEffectClass(call.effect_class)) return fail(ELIGIBILITY.BLOCKED, SIDE_EFFECT_ERROR.EFFECT_CLASS_BLOCKED);
   if (![CALL_STATUS.APPROVED, CALL_STATUS.LEASED, CALL_STATUS.RUNNING].includes(String(call.status))) return fail(ELIGIBILITY.BLOCKED, SIDE_EFFECT_ERROR.CALL_STATE);
   pass("call");
 
@@ -279,6 +293,6 @@ module.exports = {
   APPROVAL_DECISION, APPROVAL_DECISION_ALL, LEASE_STATUS, LEASE_STATUS_ALL,
   ELIGIBILITY, ELIGIBILITY_ALL, SIDE_EFFECT_ERROR,
   DEFAULT_APPROVAL_TTL_MS, DEFAULT_LEASE_TTL_MS,
-  effectClassForRisk, isC1EffectClass, isTerminalCall, canTransitionCall,
+  effectClassForRisk, isC1EffectClass, executionPolicyForEffectClass, isTerminalCall, canTransitionCall,
   sha256, fingerprint, planHashOf, idempotencyKeyOf, evaluateExecutionEligibility,
 };

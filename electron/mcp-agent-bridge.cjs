@@ -20,8 +20,18 @@
  *     远端调用次数为 0。本桥不修改 electron/mcp-client.cjs 的产品边界。
  *   · 工具入参 schema：MCP 域落库时只保留 inputSchemaSummary（mcp-domain.cjs:157-177 sanitizeTool），
  *     完整 inputSchema 不持久化 → 这里照实不补 schema，catalog 落到空对象 schema，绝不伪造参数。
+ *
+ * B4e 增量（默认关闭，显式开关 + Registry 合同）：
+ *   · switch：注入的显式开关端口原样转交 createMcpAgentTools；产品装配（main.cjs）注入
+ *     electron/mcp-switch.cjs（默认 false）→ 关闭时在审批之前回 MCP_TOOL_INVOCATION_NOT_ENABLED。
+ *   · registry：注入 ToolRegistry 时，把"已连接 server 的工具"幂等登记为 EXTERNAL_SIDE_EFFECT
+ *     contract（electron/mcp-tool-contract.cjs）；这样 B4d 的审批适配器（toolIdFor=mcpToolIdFor）
+ *     才有 contract 可解析，否则 ControlledToolProxy.propose 会 fail closed 成 DENIED。
+ *   · proxy / sideEffectRuntime + taskId：未显式给 approval 时，自动包出既有两个审批适配器，
+ *     不新建第二套 authority。传输仍必须由调用方注入（生产不注入 = 传输边界不放宽）。
  */
-const { createMcpAgentTools, isConnectedStatus } = require("./mcp-agent-tools.cjs");
+const { createMcpAgentTools, isConnectedStatus, createControlledToolProxyApprovalPort, createSideEffectApprovalPort, createTaskApprovalPort } = require("./mcp-agent-tools.cjs");
+const { mcpToolIdFor, registerMcpToolContracts, descriptorsFromServerRows, MCP_TOOL_VERSION } = require("./mcp-tool-contract.cjs");
 
 /** MCP 中心的承载 App Principal；与 mcp-bootstrap.cjs:21 同一约定（不复制第二套常量）。 */
 const MCP_HOST_APP_ID = "mcp-center";
@@ -71,10 +81,19 @@ function projectMcpServer(projected) {
  * @param {string} [options.hostAppId]  查询连接目录所用的 App Principal（默认 mcp-center）。
  * @param {object} [options.approval]  B4d 审批端口；不注入 = fail closed（0 次传输）。
  * @param {object} [options.transport] / [options.clientFor]  tools/call 传输端口；
- *   生产不注入（产品边界仍是 MCP_TOOL_INVOCATION_NOT_ENABLED），仅测试可注入以观察调用次数。
- * @returns {{ mcpAgentTools: object, mcpServersSnapshot: () => object[], serversPort: object, snapshot: () => object, statusReason: () => string|null }|null}
+ *   生产由 main.cjs 注入 electron/mcp-live-transport.cjs（McpService 的活连接）；
+ *   未注入时 createMcpAgentTools 回 MCP_TOOL_INVOCATION_NOT_ENABLED（不伪造传输）。
+ * @param {function} [options.trustedApproval]  可信审批决定来源（APPROVED/DENIED/TIMEOUT）；
+ *   注入后审批端口为 createTaskApprovalPort（propose → 可信决定 → 执行），未注入则保持 APPROVAL_REQUIRED。
+ * @param {object} [options.switch]  B4e 显式开关端口（{ isEnabled() } / { isToolInvocationEnabled() }）。
+ * @param {object} [options.registry]  B4e ToolRegistry；注入后幂等登记 MCP 工具 contract。
+ * @param {number} [options.version]  MCP 工具 contract 版本（默认 MCP_TOOL_VERSION）。
+ * @param {object} [options.proxy]  ControlledToolProxy；与 taskId 同时给出且未显式给 approval 时自动包适配器。
+ * @param {object} [options.sideEffectRuntime]  SideEffectRuntime；与 taskId 同时给出且未显式给 approval 时自动包适配器。
+ * @param {string} [options.taskId] @param {string} [options.stepId] @param {string} [options.runId]
+ * @returns {{ mcpAgentTools: object, mcpServersSnapshot: () => object[], serversPort: object, snapshot: () => object, statusReason: () => string|null, registerToolContracts: () => object, listToolContracts: () => string[], toolContractReport: () => object }|null}
  */
-function createMcpAgentBridge({ mcpService = null, context = null, hostAppId = MCP_HOST_APP_ID, approval = null, transport = null, clientFor = null, systemServerIds = null, clock = null, logger = null } = {}) {
+function createMcpAgentBridge({ mcpService = null, context = null, hostAppId = MCP_HOST_APP_ID, approval = null, transport = null, clientFor = null, systemServerIds = null, switch: switchPort = null, registry = null, version = MCP_TOOL_VERSION, proxy = null, sideEffectRuntime = null, taskId = null, stepId = null, runId = null, trustedApproval = null, clock = null, logger = null } = {}) {
   if (!mcpService || typeof mcpService.listConnections !== "function") return null;
   const contextOf = () => {
     const base = typeof context === "function" ? context() : context;
@@ -82,7 +101,34 @@ function createMcpAgentBridge({ mcpService = null, context = null, hostAppId = M
     return { ...value, appId: value.appId || hostAppId };
   };
 
+  // B4e：只有显式注入时才把开关传给 createMcpAgentTools（保持既有单测合同不变）；
+  // 产品装配（main.cjs）永远注入 → 默认关闭。
+  const explicitSwitch = switchPort || null;
+  // B4e：未显式给 approval 时，用既有适配器包出真实审批端口（不新建第二套 authority）。
+  // taskId 可为空：MCP 的任务上下文可以逐调用传入（mcp/toolInvocation/call 经可信解析），
+  // 缺 taskId 的调用仍会在 propose 前 fail closed（0 次传输）。
+  let approvalPort = approval;
+  if (!approvalPort && proxy && typeof trustedApproval === "function") {
+    approvalPort = createTaskApprovalPort({ proxy, taskId, toolIdFor: mcpToolIdFor, toolVersionFor: () => version, stepId, runId, trustedApproval });
+  }
+  if (!approvalPort && proxy) {
+    approvalPort = createControlledToolProxyApprovalPort({ proxy, taskId, toolIdFor: mcpToolIdFor, toolVersionFor: () => version, stepId, runId });
+  }
+  if (!approvalPort && sideEffectRuntime && taskId) {
+    approvalPort = createSideEffectApprovalPort({ runtime: sideEffectRuntime, taskId, toolIdFor: mcpToolIdFor, toolVersionFor: () => version, stepId, runId });
+  }
+
   let lastReason = null;
+  const registeredToolIds = new Set();
+  let lastContractReport = { ok: true, registered: [], skipped: [], errors: [], toolIds: [] };
+
+  function registerFromRows(rows) {
+    if (!registry) return lastContractReport;
+    lastContractReport = registerMcpToolContracts(registry, descriptorsFromServerRows(rows), { version });
+    for (const id of lastContractReport.toolIds) registeredToolIds.add(id);
+    return lastContractReport;
+  }
+
   /** 同步快照（catalog 的 sourceList 不 await，agent-tool-catalog.cjs:62-65）。 */
   function snapshot() {
     let result;
@@ -98,12 +144,14 @@ function createMcpAgentBridge({ mcpService = null, context = null, hostAppId = M
     }
     lastReason = null;
     const rows = (Array.isArray(result.items) ? result.items : []).map(projectMcpServer).filter(Boolean);
+    // B4e：目录成功后才登记合同；登记失败不改变只读目录投影（如实留在 toolContractReport.errors）。
+    if (registry) { try { registerFromRows(rows); } catch { /* 登记失败由下一次报告暴露 */ } }
     return { ok: true, rows, reason: null };
   }
   function list() { return snapshot().rows; }
 
   const serversPort = { list };
-  const mcpAgentTools = createMcpAgentTools({ servers: serversPort, approval, transport, clientFor, systemServerIds, clock, logger });
+  const mcpAgentTools = createMcpAgentTools({ servers: serversPort, approval: approvalPort, transport, clientFor, switch: explicitSwitch, systemServerIds, clock, logger });
   return {
     mcpAgentTools,
     /** 与 createMcpAgentTools 共用同一份只读快照，保证目录与可调用索引看到同一批 server。 */
@@ -111,6 +159,11 @@ function createMcpAgentBridge({ mcpService = null, context = null, hostAppId = M
     serversPort,
     snapshot,
     statusReason: () => lastReason,
+    /** B4e：对当前目录主动登记一次合同（幂等），返回结构化报告。 */
+    registerToolContracts: () => registerFromRows(list()),
+    listToolContracts: () => [...registeredToolIds],
+    toolContractReport: () => ({ ...lastContractReport }),
+    approvalPortKind: approvalPort && approvalPort.kind ? approvalPort.kind : null,
   };
 }
 

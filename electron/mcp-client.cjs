@@ -1,10 +1,12 @@
 /**
  * D5-03 第一批 · 最小 MCP 客户端（JSON-RPC 2.0；stdio + streamable HTTP）。
  *
- * 只实现「连接 + 能力发现」需要的方法：
- *   initialize → notifications/initialized → tools/list（分页有界）。
- * **不实现 tools/call**：本类没有可用的调用路径，callTool() 明确返回
- * MCP_TOOL_INVOCATION_NOT_ENABLED（第一批不开放工具调用）。
+ * 连接与能力发现：initialize → notifications/initialized → tools/list（分页有界）。
+ * tools/call：**默认关闭**。callTool() 只有在两个条件同时成立时才发起真实请求：
+ *   1) 构造时注入的 invocationGate() === true（= <userData>/dxos/mcp.json 的显式开关）；
+ *   2) 本次调用带显式审批凭证 authorization.approval.decision === "ALLOWED"。
+ * 任一条件不满足一律 fail closed 返回既有的 MCP_TOOL_INVOCATION_NOT_ENABLED
+ * （形状与 D5-03 第一批完全一致，未注入 gate 的客户端行为逐字不变）。
  *
  * 约定：
  *   · 子进程只用受控 launcher 启动（createMcpStdioLauncher）：纯 Node 走 child_process；
@@ -138,8 +140,10 @@ function parseSse(text) {
 }
 
 class McpClient {
-  constructor({ launcher = null, fetchImpl = null, clock = null, logger = null, requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, maxTools = DEFAULT_MAX_TOOLS, maxPages = DEFAULT_MAX_PAGES, maxEventBytes = DEFAULT_MAX_EVENT_BYTES, maxStreamBytes = DEFAULT_MAX_STREAM_BYTES, streamReconnectAttempts = DEFAULT_STREAM_RECONNECT_ATTEMPTS, streamReconnectBackoffMs = DEFAULT_STREAM_RECONNECT_BACKOFF_MS, clientName = "openarc-mcp-center", clientVersion = "0.1.0" } = {}) {
+  constructor({ launcher = null, fetchImpl = null, clock = null, logger = null, requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, maxTools = DEFAULT_MAX_TOOLS, maxPages = DEFAULT_MAX_PAGES, maxEventBytes = DEFAULT_MAX_EVENT_BYTES, maxStreamBytes = DEFAULT_MAX_STREAM_BYTES, streamReconnectAttempts = DEFAULT_STREAM_RECONNECT_ATTEMPTS, streamReconnectBackoffMs = DEFAULT_STREAM_RECONNECT_BACKOFF_MS, invocationGate = null, clientName = "openarc-mcp-center", clientVersion = "0.1.0" } = {}) {
     this.launcher = launcher;
+    /** 显式开关端口（()=>boolean）。未注入 = 永远关闭：callTool() 不发出任何请求。 */
+    this.invocationGate = typeof invocationGate === "function" ? invocationGate : null;
     this.fetchImpl = fetchImpl || (typeof fetch === "function" ? fetch : null);
     this.clock = typeof clock === "function" ? clock : () => Date.now();
     this.logger = logger;
@@ -825,12 +829,51 @@ class McpClient {
     return { ok: true, tools: snapshot.tools, truncated: truncated || snapshot.truncated, pages, rawCount: collected.length, truncatedByTools: snapshot.truncated };
   }
 
+  /** 开关真值：未注入 / 抛错 / 非严格 true 一律 false（fail closed）。 */
+  #invocationEnabled() {
+    if (typeof this.invocationGate !== "function") return false;
+    try { return this.invocationGate() === true; } catch { return false; }
+  }
+
+  /** 双条件判据：显式开关开启 + 本次调用带"审批通过"凭证。 */
+  #invocationAuthorized(authorization) {
+    if (!this.#invocationEnabled()) return false;
+    if (!authorization || typeof authorization !== "object" || Array.isArray(authorization)) return false;
+    const approval = authorization.approval;
+    if (!approval || typeof approval !== "object" || Array.isArray(approval)) return false;
+    return String(approval.decision == null ? "" : approval.decision).toUpperCase() === "ALLOWED";
+  }
+
   /**
-   * 第一批**不开放工具调用**：没有 tools/call 传输实现，入口一律明确拒绝。
-   * 留这个方法是为了让"调用入口"有一个可断言的拒绝点，而不是缺席后靠猜。
+   * tools/call（默认关闭的真实现）。两个条件不满足时同步返回**既有错误码**，不发起任何请求：
+   *   开关未开 / 未注入 gate / 审批凭证缺失或非 ALLOWED → MCP_TOOL_INVOCATION_NOT_ENABLED。
+   * 满足时发出 JSON-RPC tools/call，把服务端 result 原样投影（content / isError / structuredContent），
+   * 协议错误照实回 { ok:false, error }。绝不伪造成功。
+   *
+   * @param {{name?:string, arguments?:object, signal?:AbortSignal, timeoutMs?:number}} params
+   * @param {{approval?:{decision?:string}}|null} authorization 由审批链签发的凭证（调用方负责）
    */
-  callTool() {
-    return { ok: false, error: domain.ERROR_CODE.MCP_TOOL_INVOCATION_NOT_ENABLED };
+  callTool(params = {}, authorization = null) {
+    if (!this.#invocationAuthorized(authorization)) {
+      // 与 D5-03 第一批逐字一致的拒绝形状（既有测试用 deepEqual 断言）。
+      return { ok: false, error: domain.ERROR_CODE.MCP_TOOL_INVOCATION_NOT_ENABLED };
+    }
+    const name = params && typeof params.name === "string" ? params.name.trim() : "";
+    if (!name) return { ok: false, error: domain.ERROR_CODE.MCP_INVALID_INPUT, detail: "toolName" };
+    const args = params && params.arguments && typeof params.arguments === "object" && !Array.isArray(params.arguments) ? params.arguments : {};
+    return this.#request("tools/call", { name, arguments: args }, { signal: (params && params.signal) || null, timeoutMs: (params && Number(params.timeoutMs) > 0 ? Number(params.timeoutMs) : this.requestTimeoutMs) })
+      .then((res) => {
+        if (!res || res.ok !== true) {
+          return { ok: false, error: (res && res.error) || domain.ERROR_CODE.MCP_UNREACHABLE, detail: res && res.detail != null ? String(res.detail).slice(0, 300) : undefined };
+        }
+        const result = res.result && typeof res.result === "object" ? res.result : {};
+        return {
+          ok: true,
+          content: Array.isArray(result.content) ? result.content : [],
+          isError: result.isError === true,
+          structuredContent: result.structuredContent === undefined ? null : result.structuredContent,
+        };
+      });
   }
 
   /** 诊断投影：绝不含 secret / endpoint 凭据；不含原始事件 id（只给"有没有"）。 */

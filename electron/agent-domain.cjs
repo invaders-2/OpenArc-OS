@@ -63,6 +63,9 @@ const AGENT_COMMANDS = Object.freeze({
   "agent/task/delete": { risk: "destructive", credential: false, summary: "删除任务记录" },
   "agent/task/trace": { risk: "read", credential: false, summary: "任务执行轨迹（步数/耗时/错误码）" },
   "agent/task/stats": { risk: "read", credential: false, summary: "跨任务聚合统计（状态/模式/用量）" },
+  // DX 11 态（dx_tasks）与既有 7 态（tasks）的统一只读投影入口（electron/task-unified-view.cjs）；
+  // 只读、不写任何表、不改任一状态机，因此 risk=read 且不触碰凭据。
+  "agent/task/unified-list": { risk: "read", credential: false, summary: "统一读模型：合并 DX 11 态与既有 7 态任务投影（只读）" },
 
   // ---- run：Agent Run 持久化与巡检（agent-kernel-store / agent-kernel-inspection） ----
   "agent/run/get": { risk: "read", credential: false, summary: "读取单个 Agent Run" },

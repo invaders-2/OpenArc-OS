@@ -47,12 +47,14 @@
  *   3) 源 collectAgentTools 不去重（同名生成名会互相覆盖 toolIndex）。本文件显式按生成名去重
  *      （首个胜），并保证索引与返回列表严格一致。
  *
- * ── 未接线声明（必须如实上报）────────────────────────────────────────────────
- *   · tools/call 传输：本仓 electron/mcp-client.cjs:832-834 的 callTool() 明确返回
- *     MCP_TOOL_INVOCATION_NOT_ENABLED（D5-03 第一批的产品边界）。B4d 不得修改既有
- *     electron/mcp-*.cjs，所以真正发出去的调用必须由 options.transport 或
- *     options.clientFor 注入；两者都没有时返回结构化 MCP_TOOL_INVOCATION_NOT_ENABLED，
- *     **绝不伪造成功**。本文件不含任何 JSON-RPC/子进程代码。
+ * ── 传输接线（B4e 收口后）────────────────────────────────────────────────────
+ *   · 本文件仍不含 JSON-RPC/子进程代码：真实请求由注入的传输发出。
+ *     生产装配点是 electron/mcp-live-transport.cjs（McpService 的活连接），由 main.cjs
+ *     注入 bridge；测试可注入假传输观察调用次数。
+ *   · 未注入 transport / clientFor 时返回结构化 MCP_TOOL_INVOCATION_NOT_ENABLED，
+ *     **绝不伪造成功**。
+ *   · 审批通过后本层签发 authorization 凭证（第二参数）交给传输；electron/mcp-client.cjs
+ *     会复核"开关开启 + 审批凭证 ALLOWED"才真正发 tools/call（双条件 fail closed）。
  *   · 审批链：options.approval 未注入时，无法证明审批 → 返回结构化
  *     AGENT_DEPENDENCY_UNAVAILABLE（fail closed，0 次远端调用）。已提供两个**真实**适配器：
  *     createControlledToolProxyApprovalPort（包 electron/controlled-tool-proxy.cjs 的
@@ -375,19 +377,21 @@ function parseLingxingGatewayTool(searchText, toolName) {
  * @param {(serverId:string, toolName:string)=>number} [opts.toolVersionFor]
  * @param {string} [opts.stepId] @param {string} [opts.runId]
  */
-function createControlledToolProxyApprovalPort({ proxy, taskId, toolIdFor, toolVersionFor = null, stepId = null, runId = null } = {}) {
+function createControlledToolProxyApprovalPort({ proxy, taskId = null, toolIdFor, toolVersionFor = null, stepId = null, runId = null } = {}) {
   return {
     kind: "controlled-tool-proxy",
-    async authorize({ context = {}, serverId, toolName, arguments: args } = {}) {
+    async authorize({ context = {}, serverId, toolName, arguments: args, taskId: callTaskId = null, stepId: callStepId = null, runId: callRunId = null } = {}) {
       if (!proxy || typeof proxy.propose !== "function") return dependencyUnavailable("controlledToolProxy", "未注入 ControlledToolProxy");
-      if (!taskId) return dependencyUnavailable("controlledToolProxy", "缺少 taskId：propose 强制要求真实 Task");
+      // 任务上下文既可在构造时固定（agent tool loop），也可逐调用传入（mcp/toolInvocation/call 经可信 taskId 解析）。
+      const effectiveTaskId = callTaskId != null && String(callTaskId) !== "" ? String(callTaskId) : (taskId ? String(taskId) : null);
+      if (!effectiveTaskId) return dependencyUnavailable("controlledToolProxy", "缺少 taskId：propose 强制要求真实 Task");
       if (typeof toolIdFor !== "function") return dependencyUnavailable("controlledToolProxy", "缺少 toolIdFor：无法把 MCP 工具映射到 Registry toolId");
       const toolId = toolIdFor(serverId, toolName);
       const res = proxy.propose({
         context: context || {},
-        taskId,
-        stepId: stepId || null,
-        runId: runId || null,
+        taskId: effectiveTaskId,
+        stepId: callStepId || stepId || null,
+        runId: callRunId || runId || null,
         toolId,
         toolVersion: toolVersionFor ? toolVersionFor(serverId, toolName) : null,
         arguments: args && typeof args === "object" ? args : {},
@@ -407,19 +411,20 @@ function createControlledToolProxyApprovalPort({ proxy, taskId, toolIdFor, toolV
  * 本层**不执行**：执行权在 SideEffectAuthority（lease/claim/verify），MCP 传输拿不到它。
  * 未登记（Registry 无 contract）时 proposeWrite 会返回失败 → 投影为 DENIED。
  */
-function createSideEffectApprovalPort({ runtime, taskId, toolIdFor, toolVersionFor = null, stepId = null, runId = null } = {}) {
+function createSideEffectApprovalPort({ runtime, taskId = null, toolIdFor, toolVersionFor = null, stepId = null, runId = null } = {}) {
   return {
     kind: "side-effect-runtime",
-    async authorize({ context = {}, serverId, toolName, arguments: args } = {}) {
+    async authorize({ context = {}, serverId, toolName, arguments: args, taskId: callTaskId = null, stepId: callStepId = null, runId: callRunId = null } = {}) {
       if (!runtime || typeof runtime.proposeWrite !== "function") return dependencyUnavailable("sideEffectRuntime", "未注入 SideEffectRuntime");
-      if (!taskId) return dependencyUnavailable("sideEffectRuntime", "缺少 taskId：proposeWrite 强制要求真实 Task");
+      const effectiveTaskId = callTaskId != null && String(callTaskId) !== "" ? String(callTaskId) : (taskId ? String(taskId) : null);
+      if (!effectiveTaskId) return dependencyUnavailable("sideEffectRuntime", "缺少 taskId：proposeWrite 强制要求真实 Task");
       if (typeof toolIdFor !== "function") return dependencyUnavailable("sideEffectRuntime", "缺少 toolIdFor：无法把 MCP 工具映射到 Registry toolId");
       const toolId = toolIdFor(serverId, toolName);
       const planned = await runtime.proposeWrite({
         context: context || {},
-        taskId,
-        stepId: stepId || null,
-        runId: runId || null,
+        taskId: effectiveTaskId,
+        stepId: callStepId || stepId || null,
+        runId: callRunId || runId || null,
         toolId,
         toolVersion: toolVersionFor ? toolVersionFor(serverId, toolName) : null,
         arguments: args && typeof args === "object" ? args : {},
@@ -428,6 +433,148 @@ function createSideEffectApprovalPort({ runtime, taskId, toolIdFor, toolVersionF
         return { decisionStatus: DECISION_STATUS.APPROVAL_REQUIRED, approvalRequestId: planned.approvalRequestId, reasonCode: null };
       }
       return { decisionStatus: DECISION_STATUS.DENIED, reasonCode: (planned && planned.error) || "SIDE_EFFECT_NO_PLAN" };
+    },
+  };
+}
+
+/**
+ * B4e 收口 · **任务内** MCP 工具调用的审批端口（生产装配点）。
+ *
+ * 两段：
+ *   1) ControlledToolProxy.propose（唯一权威裁决：session / Task 归属 / Registry 合同 / schema / risk）；
+ *   2) propose 收敛为 APPROVAL_REQUIRED 时，交给注入的 trustedApproval 取**可信用户决定**
+ *      （APPROVED / DENIED / TIMEOUT）。未注入 trustedApproval = 保持 APPROVAL_REQUIRED
+ *      （等待审批，0 次传输），绝不自动放行 —— 与仓库"external 副作用必须显式审批"一致。
+ *
+ * trustedApproval 是**宿主注入的可信决定来源**（UI / 既有审批网关）；本层不新建审批权威。
+ */
+function createTaskApprovalPort({ proxy, taskId = null, toolIdFor, toolVersionFor = null, stepId = null, runId = null, trustedApproval = null, approvalTimeoutMs = 0 } = {}) {
+  const proposePort = createControlledToolProxyApprovalPort({ proxy, taskId, toolIdFor, toolVersionFor, stepId, runId });
+  return {
+    kind: "task-approval",
+    async authorize(payload = {}) {
+      const base = await proposePort.authorize(payload);
+      if (!base || base.decisionStatus !== DECISION_STATUS.APPROVAL_REQUIRED) return base;
+      if (typeof trustedApproval !== "function") return base; // 等待审批：0 次传输
+      let outcome;
+      try {
+        outcome = await trustedApproval({
+          approvalRequestId: base.approvalRequestId || null,
+          proposalId: base.proposalId || null,
+          taskId: payload.taskId || taskId || null,
+          serverId: payload.serverId,
+          toolName: payload.toolName,
+          arguments: payload.arguments && typeof payload.arguments === "object" ? payload.arguments : {},
+          timeoutMs: approvalTimeoutMs,
+        });
+      } catch (e) {
+        return { decisionStatus: DECISION_STATUS.DENIED, reasonCode: "APPROVAL_FAILED", detail: String((e && e.message) || e).slice(0, 200) };
+      }
+      const decision = String((outcome && (outcome.decision || outcome.decisionStatus)) || "").toUpperCase();
+      if (decision === "APPROVED" || decision === DECISION_STATUS.ALLOWED) {
+        return { decisionStatus: DECISION_STATUS.ALLOWED, approvalRequestId: base.approvalRequestId || null, proposalId: base.proposalId || null, reasonCode: "APPROVED" };
+      }
+      if (decision === "TIMEOUT" || decision === "APPROVAL_TIMEOUT") {
+        return { decisionStatus: "TIMEOUT", approvalRequestId: base.approvalRequestId || null, proposalId: base.proposalId || null, reasonCode: "APPROVAL_TIMEOUT" };
+      }
+      return { decisionStatus: DECISION_STATUS.DENIED, approvalRequestId: base.approvalRequestId || null, proposalId: base.proposalId || null, reasonCode: (outcome && outcome.reasonCode) || "APPROVAL_DENIED" };
+    },
+  };
+}
+
+/**
+ * 从真实 Task 里解析"当前正在跑的 step / 最新 harness run"（**只读既有状态，不新建、不伪造**）。
+ * authority 的 execution eligibility 要求 call 绑定 RUNNING step + latest run；调用方没给时按这里取。
+ */
+function deriveRunContext(runtime, taskId) {
+  const taskStore = runtime && runtime.taskStore ? runtime.taskStore : null;
+  if (!taskStore || !taskId) return { stepId: null, runId: null };
+  let runningStep = null;
+  try {
+    const steps = typeof taskStore.stepsOfTask === "function" ? taskStore.stepsOfTask(String(taskId)) : [];
+    runningStep = (Array.isArray(steps) ? steps : []).find((s) => s && String(s.status) === "RUNNING") || null;
+  } catch { runningStep = null; }
+  let chosenRun = null;
+  try {
+    const runs = typeof taskStore.harnessRunsOfTask === "function" ? taskStore.harnessRunsOfTask(String(taskId)) : [];
+    const list = Array.isArray(runs) ? runs : [];
+    if (runningStep) chosenRun = [...list].reverse().find((r) => r && String(r.step_id) === String(runningStep.step_id)) || null;
+    if (!chosenRun) {
+      const latest = list.length ? list[list.length - 1] : null;
+      if (latest && String(latest.status) === "RUNNING") chosenRun = latest;
+    }
+  } catch { chosenRun = null; }
+  // step 与 run 必须成对：只给 step 不给 run 仍会在 eligibility 的 run gate 失败，等于没有绑定。
+  if (!chosenRun) return { stepId: null, runId: null };
+  return { stepId: chosenRun.step_id || (runningStep ? runningStep.step_id : null), runId: chosenRun.run_id };
+}
+
+/**
+ * D5-04 · **真实审批链**的任务内 MCP 审批端口（生产装配点）。
+ *
+ * 与 createTaskApprovalPort 的区别：不再要求宿主注入 trustedApproval 桩，而是把一次 MCP 调用交给
+ * **既有 SideEffectAuthority** 走完整条链：
+ *   proposeWrite（plan，electron/side-effect-runtime.cjs:102）
+ *   → 既有 trusted 审批命令 sideEffect/decideApproval（electron/side-effect-bootstrap.cjs:39）
+ *   → resolvePendingForStep（既有 lease/claim/verify 执行路径，electron/side-effect-runtime.cjs:400）
+ *   → 结果交回本层；executed=true 让 callResolved 跳过第二次传输。
+ *
+ * 未批准 / 被拒 / 超时一律 0 传输；执行失败结构化返回，绝不假成功。本层不新建审批权威。
+ */
+function createSideEffectExecutionPort({ runtime, taskId = null, toolIdFor, toolVersionFor = null, stepId = null, runId = null, approvalTimeoutMs = null } = {}) {
+  return {
+    kind: "side-effect-execution",
+    async authorize(payload = {}) {
+      const { context = {}, serverId, toolName, arguments: args, taskId: callTaskId = null, stepId: callStepId = null, runId: callRunId = null } = payload || {};
+      if (!runtime || typeof runtime.proposeWrite !== "function" || typeof runtime.resolvePendingForStep !== "function") {
+        return dependencyUnavailable("sideEffectRuntime", "未注入 SideEffectRuntime（proposeWrite / resolvePendingForStep）");
+      }
+      const effectiveTaskId = callTaskId != null && String(callTaskId) !== "" ? String(callTaskId) : (taskId ? String(taskId) : null);
+      if (!effectiveTaskId) return dependencyUnavailable("sideEffectRuntime", "缺少 taskId：proposeWrite 强制要求真实 Task");
+      if (typeof toolIdFor !== "function") return dependencyUnavailable("sideEffectRuntime", "缺少 toolIdFor：无法把 MCP 工具映射到 Registry toolId");
+      let effectiveStepId = callStepId || stepId || null;
+      let effectiveRunId = callRunId || runId || null;
+      if (!effectiveStepId || !effectiveRunId) {
+        const derived = deriveRunContext(runtime, effectiveTaskId);
+        if (!effectiveStepId) effectiveStepId = derived.stepId;
+        if (!effectiveRunId) effectiveRunId = derived.runId;
+      }
+      const toolId = toolIdFor(serverId, toolName);
+      let planned;
+      try {
+        planned = await runtime.proposeWrite({
+          context: context || {}, taskId: effectiveTaskId, stepId: effectiveStepId, runId: effectiveRunId,
+          toolId, toolVersion: toolVersionFor ? toolVersionFor(serverId, toolName) : null,
+          arguments: args && typeof args === "object" ? args : {},
+        });
+      } catch (e) {
+        return { decisionStatus: DECISION_STATUS.DENIED, reasonCode: "SIDE_EFFECT_PROPOSAL_FAILED", detail: String((e && e.message) || e).slice(0, 200) };
+      }
+      if (!planned || planned.ok !== true || !planned.approvalRequestId) {
+        return { decisionStatus: DECISION_STATUS.DENIED, reasonCode: (planned && planned.error) || "SIDE_EFFECT_NO_PLAN" };
+      }
+      // 等既有 trusted 审批决定；APPROVED 后由同一条 lease/claim/verify 路径真实执行。
+      let resolution;
+      try {
+        resolution = await runtime.resolvePendingForStep({ taskId: effectiveTaskId, stepId: effectiveStepId, runId: effectiveRunId, callIds: [planned.approvalRequestId], timeoutMs: approvalTimeoutMs });
+      } catch (e) {
+        return { decisionStatus: DECISION_STATUS.DENIED, approvalRequestId: planned.approvalRequestId, reasonCode: "SIDE_EFFECT_EXECUTION_FAILED", detail: String((e && e.message) || e).slice(0, 200) };
+      }
+      if (resolution && resolution.ok === true && resolution.decision === "APPROVED") {
+        const normalized = normalizeCallResult(resolution.result == null ? { ok: true, content: [] } : resolution.result);
+        // 成功与"已执行但结果失败"都回 executed=true：callResolved 据此绝不重复传输。
+        return { decisionStatus: normalized.ok === true ? DECISION_STATUS.ALLOWED : DECISION_STATUS.DENIED, executed: true, approvalRequestId: planned.approvalRequestId, result: normalized, reasonCode: normalized.ok === true ? "APPROVED" : (normalized.error || "MCP_TOOL_CALL_FAILED") };
+      }
+      // 已派发但结果不可知 / 执行失败：同样 executed=true（绝不再发），错误结构化回传。
+      if (resolution && (resolution.decision === "FAILED" || resolution.decision === "UNKNOWN_EFFECT")) {
+        return {
+          decisionStatus: DECISION_STATUS.DENIED, executed: true, approvalRequestId: planned.approvalRequestId,
+          reasonCode: resolution.error || resolution.decision,
+          result: { ok: false, error: resolution.error || "SIDE_EFFECT_EXECUTION_FAILED", detail: resolution.recoveredStatus || resolution.decision || null },
+        };
+      }
+      if (resolution && resolution.decision === "TIMEOUT") return { decisionStatus: "TIMEOUT", approvalRequestId: planned.approvalRequestId, reasonCode: "APPROVAL_TIMEOUT" };
+      return { decisionStatus: DECISION_STATUS.DENIED, executed: false, approvalRequestId: planned.approvalRequestId, reasonCode: (resolution && resolution.error) || "APPROVAL_DENIED" };
     },
   };
 }
@@ -464,12 +611,19 @@ function normalizeCallResult(res) {
  * @param {(serverId:string)=>object} [options.clientFor] 备选：返回 { callTool({name,arguments}) } 的活客户端。
  * @param {object} [options.approval] 审批链端口：authorize({ context, serverId, serverName, toolName, arguments })
  *    → { decisionStatus|decision, reasonCode?, approvalRequestId? }；未注入 → fail closed。
+ * @param {object} [options.switch] B4e 显式开关端口：{ isEnabled() } 或 { isToolInvocationEnabled() }。
+ *    未注入 = 保持既有组合语义（仅测试/低层组合用）；产品装配（mcp-agent-bridge.cjs）一定注入，
+ *    且开关默认关闭 —— 关闭时 callByName/callDirect 在审批与传输之前就回
+ *    MCP_TOOL_INVOCATION_NOT_ENABLED。
  * @param {Iterable<string>} [options.systemServerIds] 系统 server 白名单（源 SYSTEM_IDS）。
  * @param {()=>number} [options.clock] @param {object} [options.logger]
  */
 function createMcpAgentTools(options = {}) {
   const serversPort = options.servers || null;
   const transport = options.transport || null;
+  // B4e：MCP 工具调用显式开关端口（{ isEnabled() } 或 { isToolInvocationEnabled() }）。
+  // 未注入 = 保持 B4d 既有组合语义（审批 → 传输）；产品装配（mcp-agent-bridge.cjs）一定注入。
+  const switchPort = options.switch || null;
   const clientFor = typeof options.clientFor === "function" ? options.clientFor : null;
   const approval = options.approval || null;
   const clock = typeof options.clock === "function" ? options.clock : () => Date.now();
@@ -480,6 +634,21 @@ function createMcpAgentTools(options = {}) {
 
   function isSystem(id) {
     if (systemIds != null) return isSystemServer(id, systemIds);
+    return false;
+  }
+
+  /**
+   * B4e 开关判据：未注入 switch 端口 → null（保持 B4d 既有组合语义）；
+   * 注入后严格 === true 才放行，读取异常一律 fail closed（false）。
+   */
+  function isInvocationEnabled() {
+    if (!switchPort) return null;
+    try {
+      if (typeof switchPort.isEnabled === "function") return switchPort.isEnabled() === true;
+      if (typeof switchPort.isToolInvocationEnabled === "function") return switchPort.isToolInvocationEnabled() === true;
+    } catch {
+      return false;
+    }
     return false;
   }
 
@@ -530,7 +699,7 @@ function createMcpAgentTools(options = {}) {
   async function searchAgentTools() { return collect((cfg, tool) => isSearchTool(cfg, tool)); }
 
   // ── 审批（本批关键要求：未通过审批绝不调远端）─────────────────────────────
-  async function requestApproval({ server, serverId, toolName, args, context }) {
+  async function requestApproval({ server, serverId, toolName, args, context, taskId = null, stepId = null, runId = null }) {
     if (!approval || typeof approval.authorize !== "function") {
       return dependencyUnavailable("mcpApproval", "审批链未注入：无法证明审批，拒绝调用远端（fail closed）");
     }
@@ -541,6 +710,9 @@ function createMcpAgentTools(options = {}) {
         serverId,
         serverName: server ? server.name || null : null,
         toolName,
+        taskId: taskId == null ? null : String(taskId),
+        stepId: stepId || null,
+        runId: runId || null,
         arguments: args && typeof args === "object" ? args : {},
       });
     } catch (e) {
@@ -549,9 +721,20 @@ function createMcpAgentTools(options = {}) {
     if (decision == null) return { ok: false, error: MCP_AGENT_ERROR.MCP_APPROVAL_FAILED, detail: "审批端口返回空" };
     const status = String(decision.decisionStatus || decision.decision || "").toUpperCase();
     const reasonCode = decision.reasonCode || null;
+    // executed=true 表示"既有审批权威已经真实执行并回结果"（见 createSideEffectExecutionPort）：
+    // callResolved 据此跳过第二次传输，绝不把一次调用发两遍；失败按结构化错误回，绝不冒充 APPROVAL_DENIED。
+    if (decision.executed === true) {
+      const result = decision.result && typeof decision.result === "object" ? decision.result : null;
+      if (result && result.ok === true) return { ok: true, decisionStatus: DECISION_STATUS.ALLOWED, decision, executed: true, result };
+      return { ok: false, error: (result && result.error) || MCP_AGENT_ERROR.MCP_TOOL_CALL_FAILED, detail: result && result.detail, decisionStatus: status || DECISION_STATUS.DENIED, reasonCode: reasonCode || (result && result.error) || MCP_AGENT_ERROR.MCP_TOOL_CALL_FAILED, executed: true, result };
+    }
     if (status === DECISION_STATUS.ALLOWED) return { ok: true, decisionStatus: status, decision };
     if (status === DECISION_STATUS.APPROVAL_REQUIRED) {
       return { ok: false, error: "APPROVAL_REQUIRED", decisionStatus: status, approvalRequestId: decision.approvalRequestId || null, reasonCode };
+    }
+    // 审批超时与"拒绝"分开上报：调用方据此区分"用户点了拒绝"与"等不到人"。
+    if (status === "TIMEOUT" || status === "APPROVAL_TIMEOUT") {
+      return { ok: false, error: "APPROVAL_TIMEOUT", decisionStatus: "TIMEOUT", approvalRequestId: decision.approvalRequestId || null, reasonCode: reasonCode || "APPROVAL_TIMEOUT" };
     }
     if (status === DECISION_STATUS.DENIED || status === DECISION_STATUS.INVALID || status === DECISION_STATUS.BLOCKED) {
       return { ok: false, error: "APPROVAL_DENIED", decisionStatus: status, reasonCode };
@@ -561,21 +744,40 @@ function createMcpAgentTools(options = {}) {
   }
 
   // ── 远端调用（本文件不含传输实现；传输必须注入）──────────────────────────
-  async function invokeRemote({ serverId, toolName, args, signal }) {
+  /**
+   * 审批通过后的**审批凭证**：既交给传输（第二个参数，深照既有 transport 入参形状不变），
+   * McpClient.callTool 也据此复核"开关开启 + 审批通过"才发真实请求。
+   * 未审批时本函数根本不会被调用（callResolved 已提前返回）。
+   */
+  function authorizationFor(gate) {
+    const decision = gate && gate.decision && typeof gate.decision === "object" ? gate.decision : {};
+    return {
+      invocationEnabled: true,
+      approval: {
+        decision: "ALLOWED",
+        approvalRequestId: decision.approvalRequestId || null,
+        proposalId: decision.proposalId || null,
+        reasonCode: (gate && gate.reasonCode) || null,
+      },
+    };
+  }
+
+  async function invokeRemote({ serverId, toolName, args, signal, authorization = null }) {
+    const gate = authorization ? { authorization } : null;
     if (transport && typeof transport.callTool === "function") {
-      return await transport.callTool({ serverId, toolName, arguments: args && typeof args === "object" ? args : {}, signal: signal || null });
+      return await transport.callTool({ serverId, toolName, arguments: args && typeof args === "object" ? args : {}, signal: signal || null }, gate);
     }
     if (clientFor) {
       const client = clientFor(serverId);
       if (!client || typeof client.callTool !== "function") {
         return { ok: false, error: MCP_AGENT_ERROR.MCP_TOOL_INVOCATION_NOT_ENABLED, detail: "clientFor 未返回可调用客户端" };
       }
-      return await client.callTool({ name: toolName, arguments: args && typeof args === "object" ? args : {} });
+      return await client.callTool({ name: toolName, arguments: args && typeof args === "object" ? args : {} }, authorization);
     }
     return {
       ok: false,
       error: MCP_AGENT_ERROR.MCP_TOOL_INVOCATION_NOT_ENABLED,
-      detail: "本仓 electron/mcp-client.cjs:832 未实现 tools/call；需注入 transport 或 clientFor",
+      detail: "未注入 transport / clientFor：本仓不伪造 tools/call 传输",
     };
   }
 
@@ -593,26 +795,33 @@ function createMcpAgentTools(options = {}) {
   }
 
   /** callByName / callDirect 的共同后半段：审批 → 传输 → 断连重试一次。 */
-  async function callResolved(ref, args, { context = {}, signal = null } = {}) {
+  async function callResolved(ref, args, { context = {}, signal = null, taskId = null, stepId = null, runId = null } = {}) {
+    // B4e：开关未打开 → 在审批与传输之前就 fail closed（0 次审批、0 次传输）。
+    if (isInvocationEnabled() === false) {
+      return { ok: false, error: MCP_AGENT_ERROR.MCP_TOOL_INVOCATION_NOT_ENABLED, detail: "MCP 工具调用开关未开启（<userData>/dxos/mcp.json 的 tools.invocationEnabled）", switchEnabled: false };
+    }
     const rows = await listServers();
     if (rows === null) return dependencyUnavailable("servers", "MCP 连接目录端口未注入");
     const server = rows.find((s) => String(s.id) === String(ref.serverId));
     if (!server) return { ok: false, error: MCP_AGENT_ERROR.MCP_SERVER_NOT_FOUND, serverId: String(ref.serverId) };
     if (server.enabled === false) return { ok: false, error: MCP_AGENT_ERROR.MCP_SERVER_NOT_CONNECTED, serverId: String(ref.serverId), detail: "MCP 服务器未启用" };
 
-    const gate = await requestApproval({ server, serverId: String(ref.serverId), toolName: String(ref.toolName), args, context });
+    const gate = await requestApproval({ server, serverId: String(ref.serverId), toolName: String(ref.toolName), args, context, taskId, stepId, runId });
     if (!gate.ok) return gate; // 未通过审批：0 次远端调用
+    // 既有 SideEffectAuthority 已执行（executed=true）：直接回它的结果，不再发第二次 tools/call。
+    if (gate.executed === true) return gate.result || { ok: false, error: MCP_AGENT_ERROR.MCP_TOOL_CALL_FAILED, detail: "审批执行端口未回可识别结果" };
+    const authorization = authorizationFor(gate);
 
     let result;
     try {
-      result = await invokeRemote({ serverId: String(ref.serverId), toolName: String(ref.toolName), args, signal });
+      result = await invokeRemote({ serverId: String(ref.serverId), toolName: String(ref.toolName), args, signal, authorization });
     } catch (e) {
       if (!isMcpDisconnectedError(e)) return { ok: false, error: MCP_AGENT_ERROR.MCP_TOOL_CALL_FAILED, detail: String((e && e.message) || e) };
       // 源 :869-873：断连时重连并重放一次（只一次，不无限重试）
       const rc = await reconnect(ref.serverId);
       if (!rc.ok) return rc;
       try {
-        result = await invokeRemote({ serverId: String(ref.serverId), toolName: String(ref.toolName), args, signal });
+        result = await invokeRemote({ serverId: String(ref.serverId), toolName: String(ref.toolName), args, signal, authorization });
       } catch (e2) {
         return { ok: false, error: MCP_AGENT_ERROR.MCP_TOOL_CALL_FAILED, detail: String((e2 && e2.message) || e2) };
       }
@@ -624,23 +833,23 @@ function createMcpAgentTools(options = {}) {
   }
 
   /** 源 :862-881。 */
-  async function callByName(fname, args, { context = {}, signal = null } = {}) {
+  async function callByName(fname, args, { context = {}, signal = null, taskId = null, stepId = null, runId = null } = {}) {
     const key = String(fname || "");
     if (!index.has(key)) await agentTools(); // 确保索引已建
     const ref = index.get(key);
     if (!ref) return { ok: false, error: MCP_AGENT_ERROR.UNKNOWN_MCP_TOOL, detail: key };
-    return await callResolved(ref, args, { context, signal });
+    return await callResolved(ref, args, { context, signal, taskId, stepId, runId });
   }
 
   /** 源 :883-991（去掉领星网关分支，见文件头）。 */
-  async function callDirect(serverId, toolName, args, { context = {}, signal = null } = {}) {
+  async function callDirect(serverId, toolName, args, { context = {}, signal = null, taskId = null, stepId = null, runId = null } = {}) {
     const rows = await listServers();
     if (rows === null) return dependencyUnavailable("servers", "MCP 连接目录端口未注入");
     const id = String(serverId || "");
     const server = rows.find((s) => String(s.id) === id);
     if (!server) return { ok: false, error: MCP_AGENT_ERROR.MCP_SERVER_NOT_FOUND, serverId: id };
     if (!toolName) return { ok: false, error: ERROR_CODE.MCP_INVALID_INPUT, detail: "缺少 toolName" };
-    return await callResolved({ serverId: id, toolName: String(toolName), serverName: server.name || null }, args, { context, signal });
+    return await callResolved({ serverId: id, toolName: String(toolName), serverName: server.name || null }, args, { context, signal, taskId, stepId, runId });
   }
 
   // ── 配置/运行时（源 :801-818 / :993-1007 / :1108-1129）───────────────────
@@ -747,6 +956,8 @@ function createMcpAgentTools(options = {}) {
     isSystemServer: (id) => isSystem(id),
     /** 只读快照：便于调用方（与测试）核对索引与列表一致，不暴露内部 Map。 */
     toolIndexSnapshot: () => Object.fromEntries([...index.entries()].map(([k, v]) => [k, { ...v }])),
+    /** B4e：开关是否允许发起工具调用；未注入 switch 端口返回 null（未接线，不冒充已开启）。 */
+    toolInvocationEnabled: () => isInvocationEnabled(),
     /** 源 mcp.ts:372-434（B7 未落地）：签名 + 结构化不可用，实例上也挂一份。 */
     assertAppManagedMcpAvailable,
     syncAppManagedMcpServers,
@@ -770,6 +981,8 @@ module.exports = {
   normalizeCallResult,
   createControlledToolProxyApprovalPort,
   createSideEffectApprovalPort,
+  createTaskApprovalPort,
+  createSideEffectExecutionPort,
   assertAppManagedMcpAvailable,
   syncAppManagedMcpServers,
   removeAppManagedMcpServers,

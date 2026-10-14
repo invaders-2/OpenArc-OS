@@ -157,9 +157,14 @@ createBundle();
 
 fs.rmSync(path.join(APPX, "dist"), { recursive: true, force: true });
 fs.rmSync(path.join(APPX, "electron"), { recursive: true, force: true });
+fs.rmSync(path.join(APPX, "resources"), { recursive: true, force: true });
 fs.mkdirSync(APPX, { recursive: true });
 fs.cpSync(path.join(srcDir, "dist"), path.join(APPX, "dist"), { recursive: true });
 fs.cpSync(path.join(srcDir, "electron"), path.join(APPX, "electron"), { recursive: true });
+// 随包资源（本地市场清单 / 随包技能包 / 厂商目录约定）必须在载荷内，
+// 否则 market-service.cjs 与 skill-pack.cjs 的 <appDir>/resources 查找在打包后落空。
+const srcResources = path.join(srcDir, "resources");
+if (fs.existsSync(srcResources)) fs.cpSync(srcResources, path.join(APPX, "resources"), { recursive: true });
 fs.copyFileSync(path.join(srcDir, "package.json"), path.join(APPX, "package.json"));
 
 if (appArg) {

@@ -9,6 +9,8 @@
  *   runninghub.ts:168-181  requestJson（改为接收注入 fetch）
  *   runninghub.ts:183-234  registryItems / modelId / classifyModel / modelLabel / 注册表缓存
  *   runninghub.ts:240-268  fetchRunningHubModels
+ *   runninghub.ts:270-278  callRunningHubChat（LLM 对话）
+ *   runninghub.ts:280-289  describeRunningHubImage（视觉问答 / 图片描述）
  *   runninghub.ts:291-315  endpointForModel / runningHubModelDefinition
  *   runninghub.ts:332-343  modelTaskState
  *   runninghub.ts:345-405  buildRunningHubImage/VideoModelRequest / submit / query
@@ -25,10 +27,14 @@
  *   · 凭据（RH币 API Key / 账户余额 API Key）走 credential-store，磁盘不落明文；provider.api_key 仍可直接传入；
  *   · 轮询等待走注入 clock；模型注册表 / LLM / 站点地址可注入（测试指向本地 127.0.0.1 stub，离线可跑）。
  *
- * 声明范围外（内部实现，未暴露 integration 命令）：
- *   · AI 应用 / 工作流入口 inspect / submit / query / upload（源 runninghub.ts:667-700）在本移植里
- *     只是插件内部函数，**未登记为 integration 命令**，渲染层无法直接调用。属当前声明范围外，
- *     待后续按需登记；登记时必须同时补 integration:command 白名单与对应测试，不能只留函数。
+ * B7e3 已把 AI 应用 / 工作流入口与 LLM 全部登记为 integration 命令（白名单 ↔ 实现一一对应）：
+ *   · integration/runninghub/chat            → callRunningHubChat
+ *   · integration/runninghub/describe-image  → describeRunningHubImage
+ *   · integration/runninghub/inspect         → inspectRunningHubApp / inspectRunningHubWorkflow
+ *   · integration/runninghub/submit          → submitRunningHubEntry
+ *   · integration/runninghub/task/query      → queryRunningHubTask
+ *   · integration/runninghub/upload          → uploadRunningHubAsset
+ *   本文件不再有"已实现但未暴露"的入口。
  *
  * OUT（不引入）：api.dx-os.com、云发布 / 更新、云端实时房间。
  */
@@ -747,6 +753,48 @@ function createRunningHubIntegration(options = {}) {
     }
   }
 
+
+  // runninghub.ts:270-278 逐字移植（LLM 关闭 stream；失败归一为结构化）
+  async function callRunningHubChat(provider, model, input, params, timeoutMs, transport) {
+    const net = resolveFetch(transport);
+    if (typeof net !== "function") return unavailable("未注入 fetch（网络访问在主进程统一开关），RunningHub LLM 对话不可用");
+    const key = resolveKey(provider, true);
+    if (!key) return unavailable("未配置 RunningHub API Key");
+    const started = Date.now();
+    try {
+      const prompt = String((input && input.prompt) || "");
+      const messages = input && Array.isArray(input.messages) ? input.messages : [{ role: "user", content: prompt }];
+      const raw = await requestJson(net, String(endpoints.llm).replace(/\/+$/, "") + "/chat/completions", {
+        method: "POST", headers: authHeaders(key, true), body: JSON.stringify(Object.assign({ model, messages, stream: false }, params || {})),
+      }, Number.isFinite(timeoutMs) ? timeoutMs : defaultTimeout);
+      const choice = raw && raw.choices && raw.choices[0];
+      return { ok: true, value: { text: String((choice && choice.message && choice.message.content) || (choice && choice.text) || ""), usage: raw && raw.usage, latencyMs: Date.now() - started, raw } };
+    } catch (error) {
+      return { ok: false, error: REQUEST_FAILED, detail: asStr((error && error.message) || error, 500) };
+    }
+  }
+
+  // runninghub.ts:280-289 逐字移植
+  async function describeRunningHubImage(provider, model, dataUrl, prompt, timeoutMs, transport) {
+    const net = resolveFetch(transport);
+    if (typeof net !== "function") return unavailable("未注入 fetch（网络访问在主进程统一开关），RunningHub 图片描述不可用");
+    const key = resolveKey(provider, true);
+    if (!key) return unavailable("未配置 RunningHub API Key");
+    try {
+      const images = (Array.isArray(dataUrl) ? dataUrl : [dataUrl]).filter(Boolean);
+      const raw = await requestJson(net, String(endpoints.llm).replace(/\/+$/, "") + "/chat/completions", {
+        method: "POST", headers: authHeaders(key, true), body: JSON.stringify({
+          model, stream: false,
+          messages: [{ role: "user", content: [{ type: "text", text: prompt }, ...images.map((url) => ({ type: "image_url", image_url: { url } }))] }],
+        }),
+      }, Number.isFinite(timeoutMs) ? timeoutMs : defaultTimeout);
+      const choice = raw && raw.choices && raw.choices[0];
+      return { ok: true, value: { text: String((choice && choice.message && choice.message.content) || (choice && choice.text) || "") } };
+    } catch (error) {
+      return { ok: false, error: REQUEST_FAILED, detail: asStr((error && error.message) || error, 500) };
+    }
+  }
+
   // runninghub.ts:667-673
   async function inspectRunningHubApp(provider, appId, timeoutMs, transport) {
     const net = resolveFetch(transport);
@@ -845,6 +893,8 @@ function createRunningHubIntegration(options = {}) {
     editRunningHubImages,
     generateRunningHubVideos,
     listModels,
+    callRunningHubChat,
+    describeRunningHubImage,
     inspectRunningHubApp,
     inspectRunningHubWorkflow,
     submitRunningHubEntry,

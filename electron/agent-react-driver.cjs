@@ -986,7 +986,9 @@ async function runReactTaskWithModelAccess(taskId, workerId, leaseToken, rootNod
           if (!taskStore.finishOperation(step.operation_id, result, taskId, workerId, leaseToken)) throw new Error("工具完成时任务租约已失效，结果进入待对账状态");
         } else if (call.name.startsWith("mcp__")) {
           if (!taskStore.beginOperation(step.operation_id, taskId, call.name, workerId, leaseToken)) throw new Error("工具执行前任务租约已失效");
-          result = { message: "MCP 工具 " + call.name + " 完成", content: String(await effective.mcpAdapter.callByName(call.name, args)).slice(0, 8000) };
+          // D5-04：携带本任务上下文（taskId + 本步骤 id + 本 kernel run），让 MCP 调用经
+          // dx-task-approval-bridge 幂等映射进既有审批链；缺 taskId 会在 propose 前 fail closed。
+          result = { message: "MCP 工具 " + call.name + " 完成", content: String(await effective.mcpAdapter.callByName(call.name, args, { taskId, stepId: step.id, runId: kernelRunId || null })).slice(0, 8000) };
           if (!taskStore.finishOperation(step.operation_id, result, taskId, workerId, leaseToken)) throw new Error("工具完成时任务租约已失效，结果进入待对账状态");
         } else {
           if (!taskStore.beginOperation(step.operation_id, taskId, call.name, workerId, leaseToken)) throw new Error("工具执行前任务租约已失效");

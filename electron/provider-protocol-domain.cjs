@@ -33,7 +33,7 @@ const LEGACY_NO_KEY_PROTOCOLS = Object.freeze(
 
 /** 统一调用出口命令/事件表。每条命令都走 model:command + trusted(event) 校验。 */
 const PROTOCOL_COMMANDS = Object.freeze({
-  "protocol/list": { risk: "read", credential: false, summary: "列出 dx-protocol/v2 协议（含未移植标记）" },
+  "protocol/list": { risk: "read", credential: false, summary: "列出 dx-protocol/v2 协议（含执行可用性标记 available / conditional / declarative）" },
   "protocol/get": { risk: "read", credential: false, summary: "读取单个协议定义" },
   "protocol/validate": { risk: "read", credential: false, summary: "校验协议定义，返回 issues" },
   "protocol/save": { risk: "manage", credential: false, summary: "保存自定义 declarative 协议" },
@@ -92,21 +92,32 @@ function toPublicProvider(provider, { hasKey = false, hasWalletKey = false } = {
 }
 
 /**
- * 执行可用性（D4）：ported 只表示「定义已移植」，不代表执行分支可用。
- * 这 6 个 legacy id 的模块级执行分支未移植，移植侧返回 LEGACY_DEPENDENCY_UNAVAILABLE
- * （见 protocol-engine/legacy-executor-media.cjs:748-1544、legacy-executor-images.cjs:823-839）。
+ * 执行可用性（D4 / B7e2）：ported 只表示「定义已移植」，不代表执行分支可直接调用。
+ * execution 三值：
+ *   available    legacy 分支自身完整实现，可直接执行；
+ *   conditional  执行依赖 legacy 执行器端口注入（electron/legacy-executor-ports.cjs）；端口已注入即可执行，
+ *                未注入仍返回 LEGACY_DEPENDENCY_UNAVAILABLE，unavailableReason 写明可执行前提；
+ *   unavailable  确实未实现（只登记了端口，没有内置实现，需调用方显式注入）。
  * 其余 legacy 条目按可用标注；v2 条目为声明式引擎，execution="declarative"。
  */
-const LEGACY_UNAVAILABLE_EXECUTION = Object.freeze({
-  "cli:jimeng": "CLI 桥批次（cliTools）：generateJimengVideo / generateJimengImage 未移植",
-  "cli:codex": "CLI 桥批次（agentCliTools）：editCodexImage 未移植",
-  "cli:gemini": "CLI 桥批次（agentCliTools）：editGeminiCliImage 未移植",
-  runninghub: "第三方原生适配批次（runninghub）：generateRunningHubVideos / editRunningHubImages 未移植",
-  agnes: "第三方原生适配批次（agnes）：generateAgnesVideos / editAgnesImages 未移植",
-  modelscope: "第三方原生适配批次（modelscope）：editModelScopeImages 未移植",
+const LEGACY_CONDITIONAL_EXECUTION = Object.freeze({
+  "cli:jimeng": "需安装即梦（dreamina）CLI 并由主进程注入 cliJimeng 端口（electron/legacy-cli-ports.cjs）；未注入时端口回 LEGACY_DEPENDENCY_UNAVAILABLE",
+  "cli:codex": "需安装 OpenAI Codex CLI 并由主进程注入 cliCodex 端口（electron/legacy-cli-ports.cjs）；未注入时端口回 LEGACY_DEPENDENCY_UNAVAILABLE",
+  "cli:gemini": "需安装 Gemini / Antigravity CLI 并由主进程注入 cliGemini 端口（electron/legacy-cli-ports.cjs）；未注入时端口回 LEGACY_DEPENDENCY_UNAVAILABLE",
+  // B7e3：四类执行分支（对话 / 图片生成 / 视频生成 / 图片编辑）都已由插件端口提供，不再是"确实未实现"。
+  runninghub: "需启用 runninghub 插件并配置凭据（B7e2/B7e3 可选插件）；对话 / 图片 / 视频 / 图片编辑四类 legacy 分支均由插件端口提供，插件关闭 / 未注入端口时回 LEGACY_DEPENDENCY_UNAVAILABLE",
+  modelscope: "需启用 modelscope 插件并配置凭据（B7e2 可选插件）；插件关闭 / 未注入端口时回 LEGACY_DEPENDENCY_UNAVAILABLE",
+  // agnes 的 legacy 行被 v2 同名声明遮蔽（不动既有去重契约）；B7e3 端口见 electron/plugin-agnes.cjs，
+  // 与 runninghub / modelscope 同语义：插件端口已实现，只差"启用 + 配置 Key"。
+  agnes: "需启用 agnes 插件并配置 Key（B7e3 可选插件，electron/plugin-agnes.cjs）；未启用时端口回 LEGACY_DEPENDENCY_UNAVAILABLE",
 });
 
+/** 当前没有「确实未实现」的 legacy 条目；保留该表，后续批次按同一规约登记。 */
+const LEGACY_UNAVAILABLE_EXECUTION = Object.freeze({});
+
 function legacyExecution(id) {
+  const conditionalReason = LEGACY_CONDITIONAL_EXECUTION[id];
+  if (conditionalReason) return { execution: "conditional", unavailableReason: conditionalReason };
   const unavailableReason = LEGACY_UNAVAILABLE_EXECUTION[id];
   return unavailableReason ? { execution: "unavailable", unavailableReason } : { execution: "available" };
 }
@@ -122,13 +133,14 @@ function legacyProtocolEntries(kind) {
 /** v2 内置协议的 kind:id 键集，用于判定 legacy 同名分支是否被遮蔽。 */
 const V2_PROTOCOL_KEYS = new Set(BUILTIN_PROTOCOL_METADATA_V2.map((entry) => entry.kind + ":" + entry.id));
 
-/** 被 v2 同名定义遮蔽、执行链不可用的 legacy 分支：protocolTable() 按既有规则去重后不再出现，
- * 单独列出以免「该 legacy 路径不可执行」的事实被 v2 同名定义掩盖（如 agnes 同时有 v2 声明式定义
- * 与未移植的 legacy 执行器）。同一个 id 的 model/provider 分支都被遮蔽时归并为一条（model 优先）。 */
+/** 被 v2 同名定义遮蔽、执行链并非「直接可用」的 legacy 分支：protocolTable() 按既有规则去重后不再出现，
+ * 单独列出以免「该 legacy 路径不是直接可执行」的事实被 v2 同名定义掩盖（如 agnes 同时有 v2 声明式定义
+ * 与需插件端口才可执行的 legacy 执行器）。conditional 与 unavailable 都属此列，available 不列。
+ * 同一个 id 的 model/provider 分支都被遮蔽时归并为一条（model 优先）。 */
 function shadowedLegacyProtocols(kind) {
   const byId = new Map();
   for (const entry of legacyProtocolEntries(kind)) {
-    if (entry.execution !== "unavailable" || !V2_PROTOCOL_KEYS.has(entry.kind + ":" + entry.id)) continue;
+    if (entry.execution === "available" || !V2_PROTOCOL_KEYS.has(entry.kind + ":" + entry.id)) continue;
     const current = byId.get(entry.id);
     if (!current || (current.kind !== "model" && entry.kind === "model")) byId.set(entry.id, entry);
   }

@@ -181,3 +181,41 @@ test("凭据：经 integration:command 写入 safeStorage，磁盘无明文、�
   assert.equal(status.value.credentialSet, true);
   assert.equal(JSON.stringify(status).includes(secret), false, "投影不得回传明文");
 });
+
+// ── ⑦ B7e3 登记：新插件 / 新命令白名单 ↔ 元数据 ↔ 实现 ────────────────────
+test("插件登记：createPluginBundle 目录包含 agnes / runninghub / modelscope，默认全关", async () => {
+  const bundle = createPluginBundle({ userDataDir: tempDir(), safeStorage: null });
+  const items = bundle.registry.list();
+  const ids = items.map((item) => item.id);
+  for (const id of ["agnes", "runninghub", "modelscope"]) assert.ok(ids.includes(id), "缺少插件 " + id);
+  assert.ok(items.every((item) => item.enabled === false), "默认必须全部关闭");
+  const health = await bundle.execute("integration/health", {}, { sessionRef: "s1" });
+  assert.deepEqual(health.value.enabled, []);
+});
+
+test("命令登记：B7e3 新增命令均在白名单、有 risk/credential/中文 summary，且分发已实现", async () => {
+  const expected = [
+    "integration/agnes/status", "integration/agnes/credentials/save", "integration/agnes/credentials/delete",
+    "integration/agnes/generate-images", "integration/agnes/edit-images", "integration/agnes/generate-videos",
+    "integration/runninghub/chat", "integration/runninghub/describe-image", "integration/runninghub/inspect",
+    "integration/runninghub/submit", "integration/runninghub/task/query", "integration/runninghub/upload",
+    "integration/lingxing/analytics", "integration/lingxing/operator/dashboard",
+    "integration/lingxing/operator/export", "integration/lingxing/currency/rates",
+    "integration/ziniao/vc/import", "integration/ziniao/vc/rows", "integration/ziniao/vc/query",
+  ];
+  for (const command of expected) {
+    assert.ok(INTEGRATION_COMMANDS.includes(command), "白名单缺少 " + command);
+    const entry = INTEGRATION_COMMAND_META[command];
+    assert.ok(entry, command + " 缺少元数据");
+    assert.ok(["read", "use", "manage", "destructive"].includes(entry.risk), command + " risk");
+    assert.equal(typeof entry.credential, "boolean", command + " credential");
+    assert.ok(entry.summary.length > 0, command + " summary");
+  }
+  const bundle = createPluginBundle({ userDataDir: tempDir(), safeStorage: null });
+  for (const command of expected) {
+    const result = await bundle.execute(command, {}, { sessionRef: "s1" });
+    assert.notEqual(result.error, "INTEGRATION_COMMAND_NOT_ALLOWED", command + " 已在白名单但分发未实现");
+    assert.notEqual(result.error, "INTEGRATION_INVALID_INPUT", command + " 空载荷不应是入参错误（未启用应为不可用）");
+  }
+});
+

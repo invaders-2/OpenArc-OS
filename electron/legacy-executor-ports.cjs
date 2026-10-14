@@ -15,6 +15,14 @@
  *   editAgnesImages(provider, model, params, inputs, timeoutMs, transport, clock)
  *   editModelScopeImages(provider, model, params, inputs, timeoutMs, transport, clock)
  *   editRunningHubImages(provider, model, params, inputs, timeoutMs, transport, clock)
+ *   callRunningHubChat(provider, model, input, params, timeoutMs, transport)                  成功 { text, latencyMs, raw }
+ *   describeRunningHubImage(provider, model, dataUrl, prompt, timeoutMs, transport)           成功返回文本 string
+ * 另有一组 CLI 协议族端口（B7e2 后续，实现见 electron/legacy-cli-ports.cjs），按「一个 CLI 一个端口」
+ * 收敛，动作由第一个实参 operation 区分（image.generate / image.edit / video.generate / chat /
+ * describeImage / models）：
+ *   cliJimeng(operation, payload)  即梦（dreamina）
+ *   cliCodex(operation, payload)   OpenAI Codex
+ *   cliGemini(operation, payload)  Gemini / Antigravity
  *   · transport 是 electron/protocol-engine/transport.cjs 的形状 { fetch }；clock 是 { now, sleep }；
  *   · 成功返回值沿用源协议形状：生成图片 / 编辑 → { images, raw }，生成视频 → { videos, raw }；
  *     失败返回结构化 { ok:false, error, detail }。
@@ -38,6 +46,14 @@ const LEGACY_EXECUTOR_PORT_NAMES = Object.freeze([
   "editAgnesImages",
   "editModelScopeImages",
   "editRunningHubImages",
+  // B7e3 后续：RunningHub 对话 / 图片理解（与 integration/runninghub/chat|describe-image 同名；
+  // 插件启用时由 electron/plugin-service.cjs 注入，未注入时执行器仍结构化拒绝）。
+  "callRunningHubChat",
+  "describeRunningHubImage",
+  // B7e2 后续：CLI 协议族端口（一个 CLI 一个，动作由 operation 形参区分；实现见 legacy-cli-ports.cjs）。
+  "cliJimeng",
+  "cliCodex",
+  "cliGemini",
 ]);
 
 const LEGACY_PORT_UNKNOWN = "LEGACY_PORT_UNKNOWN";
@@ -120,6 +136,10 @@ function clearLegacyExecutorPorts(names) {
  * 从集成对象提取端口：端口名与集成方法名同名，直接绑定。
  * 集成方法返回源协议形状（生成 { images, raw } / { videos, raw }，失败 { ok:false, error, detail }），
  * 因此这里保持原样转发，不做形状转换。
+ *
+ * 注意（B7e3 后续）：RunningHub 的 callRunningHubChat / describeRunningHubImage 端口名虽与插件方法同名，
+ * 但插件方法返回 integration 形状（{ ok:true, value }），必须经 electron/plugin-service.cjs 适配成
+ * legacy 形状后再注册；不要用本函数直接绑定这两个端口（会把 integration 形状透传给 legacy 执行器）。
  */
 function portsFromIntegration(integration) {
   const result = {};

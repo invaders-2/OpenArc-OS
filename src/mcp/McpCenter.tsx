@@ -22,25 +22,25 @@ import { Badge, Button, ScrollArea, TextField } from "../design-system/primitive
 import type { Tone } from "../design-system/primitives";
 import { PageState } from "../design-system/page-states";
 import { Dialog } from "../desktop/Dialog";
+import {
+  AGENT_TOOLS_BOUNDARY,
+  MCP_AGENT_TOOLS_COMMAND,
+  agentToolApprovalText,
+  agentToolParamText,
+  agentToolRiskText,
+  agentToolsDetailText,
+  agentToolsEmptyText,
+  agentToolsInvocationText,
+  agentToolsQuery,
+  isAllowedMcpCommand,
+  normalizeAgentToolsResult,
+} from "./mcpCenterLogic";
+import type { AgentToolsView } from "./mcpCenterLogic";
 
 /* ══════════════════════════════════════════════════════════════════════════
    契约 A：记录（渲染层只读投影，不含 credentialRef）
    ══════════════════════════════════════════════════════════════════════════ */
 type McpTool = { name: string; description?: string; inputSchemaSummary?: string };
-
-/**
- * UI-2 · B4 聚合后的工具（命名空间名 + 来源连接），本页只读派生：它只描述
- * "Agent 侧会看到哪些工具"，不承载任何调用能力 —— 第一批没有调用入口，
- * 后端对任何调用命令回 MCP_TOOL_INVOCATION_NOT_ENABLED（mcp-bootstrap.cjs:83-109）。
- */
-type AggregatedTool = {
-  fname: string;
-  serverId: string;
-  serverName: string;
-  status: string;
-  description?: string;
-  paramText: string;
-};
 
 type McpConnection = {
   connectionId: string;
@@ -249,72 +249,15 @@ const toolsOf = (c: McpConnection | null): McpTool[] => {
 };
 
 /* ══════════════════════════════════════════════════════════════════════════
-   UI-2 · 工具聚合（B4 的只读投影）
+   UI-2b · 工具聚合改为**只调后端命令**
    ──────────────────────────────────────────────────────────────────────────
-   数据只来自 mcp/list 的连接记录（每条都带 tools 快照），规则照抄 B4 的
-   electron/mcp-agent-tools.cjs：命名空间 :181-183 / :507，已连接判定 :436-439，
-   聚合循环 :495-523（已启用 + 已连接、首见胜去重）。这里不新增 IPC、不发网络
-   请求、不读凭据；第一批没有调用入口（mcp-bootstrap.cjs:83-109 拒绝调用命令）。
+   旧实现在渲染层自算聚合（命名空间 / 已连接判定 / 参数文案），等于把
+   electron/mcp-agent-tools.cjs:181-183 / :436-439 / :495-523 抄了第二遍。
+   现在只发 mcp/agentTools（electron/mcp-bootstrap.cjs:115-172），
+   fname / serverId / serverName / toolName / status / description / paramText /
+   riskClass / requiresApproval 全部由主进程给出；渲染层只做契约校验与显示，
+   不再拼命名空间、不再算参数文案（投影见 ./mcpCenterLogic）。
    ══════════════════════════════════════════════════════════════════════════ */
-
-/** B4 命名空间用的安全名（electron/mcp-agent-tools.cjs:181-183）。 */
-const safeName = (v: unknown): string => String(v ?? "").replace(/[^a-zA-Z0-9_-]/g, "_");
-
-/** 只有 READY / connected 参与聚合（electron/mcp-agent-tools.cjs:436-439）。 */
-const isConnectedStatus = (status: unknown): boolean => {
-  const s = String(status || "");
-  return s === "connected" || s === "READY";
-};
-
-/**
- * 参数摘要如实标注。B4 落库只保留 inputSchemaSummary（mcp-domain.cjs:153-177）：
- *  · 服务端没返回 inputSchema → 摘要是空串；
- *  · schema 是空对象 → 摘要形如 "type=object; properties: none"。
- * 两种情况都不编造参数签名，照实说明。
- */
-const paramSummaryText = (summary: unknown): string => {
-  const text = typeof summary === "string" ? summary.trim() : "";
-  if (!text) return "未返回参数摘要（服务端未提供 inputSchema）";
-  if (/properties:\s*none/.test(text)) return text + "（参数为空对象）";
-  return text;
-};
-
-/**
- * 聚合工具清单：已启用且已连接的服务、命名空间 mcp__<server>__<tool>、首见胜。
- * 这里只描述 Agent 侧会看到什么，不承载调用能力。
- */
-const aggregateToolsOf = (connections: McpConnection[]): AggregatedTool[] => {
-  const seen = new Set<string>();
-  const out: AggregatedTool[] = [];
-  for (const c of connections) {
-    if (c.enabled === false) continue;
-    if (!isConnectedStatus(c.status)) continue;
-    const raw = toolsRawOf(c);
-    const list = Array.isArray(raw) ? raw : [];
-    const serverName = asText(c.name, c.connectionId);
-    for (const t of list) {
-      if (!isObject(t)) continue;
-      const toolName = typeof t.name === "string" ? t.name.trim() : "";
-      if (!toolName) continue;
-      const fname = "mcp__" + safeName(c.connectionId) + "__" + safeName(toolName);
-      if (seen.has(fname)) continue;
-      seen.add(fname);
-      out.push({
-        fname,
-        serverId: c.connectionId,
-        serverName,
-        status: String(c.status || ""),
-        description: typeof t.description === "string" ? t.description : undefined,
-        paramText: paramSummaryText(t.inputSchemaSummary),
-      });
-    }
-  }
-  return out;
-};
-
-/** 已启用且已连接的服务数：聚合为空时用来区分"没有连接"与"连接了但没工具"。 */
-const connectedServerCount = (connections: McpConnection[]): number =>
-  connections.filter((c) => c.enabled !== false && isConnectedStatus(c.status)).length;
 
 const statusMeta = (status: unknown): { label: string; tone: Tone } => {
   const key = typeof status === "string" ? status : "";
@@ -420,6 +363,11 @@ export function McpCenter({ role }: { role: string | null }) {
   const [form, setForm] = useState<Form>(emptyForm);
   const [newIds, setNewIds] = useState<string[]>([]);
   const [leaving, setLeaving] = useState<string[]>([]);
+  /* mcp/agentTools（只读聚合）：命名空间、参数文案、风险等级都由主进程给出，
+     界面只保存投影，不再自己算一遍（见 ./mcpCenterLogic 顶部注释）。 */
+  const [agentTools, setAgentTools] = useState<AgentToolsView | null>(null);
+  const [agentToolsLoading, setAgentToolsLoading] = useState(true);
+  const [agentToolsScope, setAgentToolsScope] = useState<string | null>(null);
 
   /* 首次成功加载的 id 先"记成已见"：进入页面不是"列表插入"，不给整列表补入场动画。
      之后新增的行才走 MS §5 的列表插入动效。 */
@@ -427,6 +375,10 @@ export function McpCenter({ role }: { role: string | null }) {
 
   const send = useCallback(
     async (command: string, payload: Record<string, unknown> = {}): Promise<McpResult> => {
+      // 白名单先在渲染层挡一次：与主进程 mcp-bootstrap.cjs 的 MCP_COMMANDS 同一条判据。
+      if (!isAllowedMcpCommand(command)) {
+        return { ok: false, error: "MCP_COMMAND_NOT_ALLOWED" };
+      }
       if (!bridge?.command) return { ok: false, error: "NO_BRIDGE" };
       try {
         const res = await bridge.command({ command, payload });
@@ -496,9 +448,21 @@ export function McpCenter({ role }: { role: string | null }) {
     [send],
   );
 
+  /** 只读聚合：serverId 为空 = 全部；只发 mcp/agentTools 的登记键。 */
+  const loadAgentTools = useCallback(
+    async (serverId?: string | null) => {
+      setAgentToolsLoading(true);
+      const res = await send(MCP_AGENT_TOOLS_COMMAND, agentToolsQuery(serverId ?? null, false));
+      setAgentTools(normalizeAgentToolsResult(res));
+      setAgentToolsLoading(false);
+    },
+    [send],
+  );
+
   useEffect(() => {
     if (!available) return;
     void loadList();
+    void loadAgentTools();
     // 只在挂载时拉一次；后续由动作成功后显式刷新。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [available]);
@@ -532,12 +496,14 @@ export function McpCenter({ role }: { role: string | null }) {
          不刷新的话右侧还是失败前的旧投影（PLAN §22「认证失败重授权」入口会被延迟）。 */
       await loadList({ silent: true });
       await loadDetail(connectionId);
+      await loadAgentTools(agentToolsScope);
       setFailure({ code: String(res.error || "INTERNAL_ERROR"), context });
       return null;
     }
     setNotice(context + "已完成");
     await loadList({ silent: true });
     await loadDetail(connectionId);
+    await loadAgentTools(agentToolsScope);
     return res;
   };
 
@@ -619,6 +585,7 @@ export function McpCenter({ role }: { role: string | null }) {
             return c ? String(c.connectionId) : null;
           })();
     if (created) await loadDetail(created);
+    await loadAgentTools(agentToolsScope);
   };
 
   const submitEdit = async () => {
@@ -668,6 +635,7 @@ export function McpCenter({ role }: { role: string | null }) {
     setNotice(rebound ? "凭据已更新" : "连接已保存");
     await loadList({ silent: true });
     await loadDetail(connectionId);
+    await loadAgentTools(agentToolsScope);
     if (rebound) {
       await runAction(
         "reconnect",
@@ -701,6 +669,13 @@ export function McpCenter({ role }: { role: string | null }) {
       setLogsError(null);
     }
     exitRow(connectionId);
+    /* 删掉的是当前聚合范围就退回"全部"，避免范围指向已不存在的连接。 */
+    if (agentToolsScope === connectionId) {
+      setAgentToolsScope(null);
+      await loadAgentTools(null);
+    } else {
+      await loadAgentTools(agentToolsScope);
+    }
   };
 
   if (!available) {
@@ -736,10 +711,6 @@ export function McpCenter({ role }: { role: string | null }) {
     (!!current && current.status === "CONNECTING");
   const activeBusy =
     busy === "connect" || busy === "reconnect" || busy === "test" || busy === "delete";
-
-  /* UI-2：B4 聚合的只读投影（规则出处见 aggregateToolsOf 上方注释）。 */
-  const aggregatedTools = aggregateToolsOf(connections);
-  const connectedServers = connectedServerCount(connections);
 
   const dialogs = (
     <>
@@ -1092,7 +1063,22 @@ export function McpCenter({ role }: { role: string | null }) {
         ) : null}
       </div>
 
-      <ToolAggregate tools={aggregatedTools} connectedServers={connectedServers} />
+      <ToolAggregate
+        view={agentTools}
+        loading={agentToolsLoading}
+        scope={agentToolsScope}
+        selectedId={selected ? String(selected.connectionId) : null}
+        selectedName={selected ? asText(selected.name, String(selected.connectionId)) : null}
+        onReload={() => void loadAgentTools(agentToolsScope)}
+        onScope={(serverId) => {
+          setAgentToolsScope(serverId);
+          void loadAgentTools(serverId);
+        }}
+        onClearScope={() => {
+          setAgentToolsScope(null);
+          void loadAgentTools(null);
+        }}
+      />
 
       <div className="mcp-split">
         <ScrollArea label="MCP 连接列表" className="mcp-list-pane">
@@ -1565,33 +1551,110 @@ function CapabilityList({ value, negotiated }: { value: unknown; negotiated: boo
 }
 
 /**
- * UI-2 · 工具聚合区块（只读）。
+ * UI-2b · 工具聚合区块（只读，数据来自 mcp/agentTools）。
  *
- * 产品边界必须显式：第一批不开放工具调用 —— 这里没有、也不会渲染任何
- * "运行工具 / 调用工具"入口；后端对任何调用命令回 MCP_TOOL_INVOCATION_NOT_ENABLED
- * （electron/mcp-bootstrap.cjs:83-109）。列表用 primitives 的 ScrollArea 承接长清单，
- * 可聚焦、方向键可滚，减少动态效果下无新增动效（MOTION_SYSTEM §8）。
+ * 产品边界必须显式：界面不提供任何"运行工具 / 调用工具"入口，调用一律走审批。
+ * enabled 是主进程的调用开关状态（默认关闭）—— 关闭时明确说清含义，而不是藏起来。
+ * 风险等级与审批要求照 riskClass / requiresApproval 显示，不在界面推断。
+ * 列表用 primitives 的 ScrollArea 承接长清单，减少动态效果下无新增动效（MOTION_SYSTEM §8）。
  */
 function ToolAggregate({
-  tools,
-  connectedServers,
+  view,
+  loading,
+  scope,
+  selectedId,
+  selectedName,
+  onReload,
+  onScope,
+  onClearScope,
 }: {
-  tools: AggregatedTool[];
-  connectedServers: number;
+  view: AgentToolsView | null;
+  loading: boolean;
+  scope: string | null;
+  selectedId: string | null;
+  selectedName: string | null;
+  onReload: () => void;
+  onScope: (serverId: string) => void;
+  onClearScope: () => void;
 }) {
+  const failed = !!view && !view.ok;
+  const errorCode = view && view.error ? view.error : "INTERNAL_ERROR";
+  const tools = view && view.ok ? view.tools : [];
+  const connectedServers = view ? view.connectedServers : 0;
+  const countText = failed
+    ? "聚合不可用"
+    : tools.length
+      ? tools.length + " 个工具 · " + connectedServers + " 个已连接服务"
+      : loading
+        ? "读取中…"
+        : "暂无";
   return (
-    <section className="mcp-aggregate" aria-label="工具聚合" data-mcp-aggregate-section>
+    <section
+      className="mcp-aggregate"
+      aria-label="工具聚合"
+      data-mcp-aggregate-section
+      data-mcp-aggregate-state={failed ? "error" : loading ? "loading" : "ready"}
+    >
       <div className="mcp-section-head">
         <h4>工具聚合</h4>
         <span className="mcp-muted" data-mcp-aggregate-count>
-          {tools.length ? tools.length + " 个工具 · " + connectedServers + " 个已连接服务" : "暂无"}
+          {countText}
         </span>
+        {scope ? (
+          <span className="mcp-muted" data-mcp-aggregate-scope-label>
+            范围：{selectedName || scope}
+          </span>
+        ) : null}
+        <Button
+          variant="ghost"
+          size="sm"
+          data-mcp-aggregate-reload
+          status={loading ? "loading" : "idle"}
+          disabled={loading}
+          onClick={onReload}
+        >
+          刷新聚合
+        </Button>
+        {scope ? (
+          <Button variant="ghost" size="sm" data-mcp-aggregate-scope-clear onClick={onClearScope} disabled={loading}>
+            查看全部
+          </Button>
+        ) : selectedId ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            data-mcp-aggregate-scope={selectedId}
+            onClick={() => onScope(selectedId)}
+            disabled={loading}
+          >
+            只看「{selectedName || selectedId}」
+          </Button>
+        ) : null}
       </div>
+      {view && !failed ? (
+        <p
+          className="mcp-notice"
+          role="status"
+          data-mcp-aggregate-invocation
+          data-mcp-aggregate-enabled={view.enabled ? "true" : "false"}
+        >
+          {agentToolsInvocationText(view.enabled)}
+        </p>
+      ) : null}
       <p className="mcp-muted" data-mcp-aggregate-boundary>
-        产品边界：第一批不开放工具调用。这里只读展示 Agent 侧聚合后的命名空间工具名
-        （mcp__服务__工具）、描述与参数摘要，界面不提供任何「运行工具 / 调用工具」入口；
-        后端对任何调用入口回 MCP_TOOL_INVOCATION_NOT_ENABLED。
+        {AGENT_TOOLS_BOUNDARY}
       </p>
+      {failed ? (
+        <p className="mcp-error" role="alert" data-mcp-aggregate-error data-mcp-aggregate-error-code={errorCode}>
+          {errorText(errorCode)}（{errorCode}）
+          {view && view.detail ? " · " + agentToolsDetailText(view) : ""}
+        </p>
+      ) : null}
+      {view && view.invalidRows > 0 ? (
+        <p className="mcp-hint" data-mcp-aggregate-invalid>
+          主进程返回里有 {view.invalidRows} 行缺少工具名，已丢弃（不补默认名、不推断来源）。
+        </p>
+      ) : null}
       {tools.length ? (
         <ScrollArea label="MCP 工具聚合清单" className="mcp-aggregate__scroll">
           <ul className="mcp-aggregate__list" data-mcp-aggregate>
@@ -1603,6 +1666,8 @@ function ToolAggregate({
                 data-mcp-aggregate-tool={t.fname}
                 data-mcp-aggregate-server={t.serverId}
                 data-mcp-aggregate-status={t.status}
+                data-mcp-aggregate-risk={t.riskClass}
+                data-mcp-aggregate-approval={t.requiresApproval ? "true" : "false"}
               >
                 <span className="mcp-aggregate__top">
                   <strong className="mcp-mono mcp-aggregate__name" data-mcp-aggregate-name>
@@ -1611,22 +1676,26 @@ function ToolAggregate({
                   <Badge tone={statusMeta(t.status).tone} className="mcp-status">
                     {t.serverName + " · " + statusMeta(t.status).label}
                   </Badge>
+                  <Badge tone="warning" className="mcp-status" data-mcp-aggregate-risk-badge>
+                    {agentToolRiskText(t.riskClass)}
+                  </Badge>
+                  <Badge tone="neutral" className="mcp-status" data-mcp-aggregate-approval-badge>
+                    {agentToolApprovalText(t.requiresApproval)}
+                  </Badge>
                 </span>
                 <span className="mcp-aggregate__desc" data-mcp-aggregate-desc>
                   {t.description || "（服务端未提供描述）"}
                 </span>
                 <span className="mcp-aggregate__params mcp-mono" data-mcp-aggregate-params>
-                  {t.paramText}
+                  {agentToolParamText(t.paramText)}
                 </span>
               </li>
             ))}
           </ul>
         </ScrollArea>
-      ) : (
+      ) : failed || loading ? null : (
         <p className="mcp-muted" data-mcp-aggregate-empty>
-          {connectedServers
-            ? "已连接的服务还没有工具快照：连接成功后由 tools/list 分页发现。"
-            : "还没有已连接（READY）的服务，所以工具聚合为空；连接成功后由 tools/list 发现。"}
+          {agentToolsEmptyText(connectedServers)}
         </p>
       )}
     </section>

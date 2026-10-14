@@ -381,10 +381,15 @@ function createToolAdapters({ resourceService = null, searchService = null, brow
   }
 
   Object.assign(providers, extra);
-  /** provider 必须声明 toolIds；providerFor 只按 executionProvider + static allowlist 解析。*/
+  /**
+   * provider 必须声明 allowlist：静态 `toolIds` 数组，或动态 `allowsTool(toolId)` 谓词
+   * （MCP 外部工具的 toolId 由服务端目录派生，无法在装配期写死）。**只按 executionProvider +
+   * static predicate 解析，绝不从 arguments 解析 module/path**。
+   */
   function adapterFor({ executionProvider, toolId }) {
     const provider = providers[String(executionProvider)];
     if (!provider) return null;
+    if (typeof provider.allowsTool === "function") return provider.allowsTool(String(toolId)) ? provider : null;
     if (!Array.isArray(provider.toolIds) || !provider.toolIds.includes(String(toolId))) return null;
     return provider;
   }

@@ -34,8 +34,10 @@
  *
  * 未移植项（逐条登记，待后续按需登记）：
  *   · developerOAuth.ts  开发者 OAuth / PKCE 回调（对应上方 oauth 字段的 fail closed）
- *   · agnes.ts           Agnes 原生媒体适配（属媒体协议批次；见 provider-protocol-domain.cjs:105
- *                        与 protocol-engine/legacy-executor-media.cjs 的 agnes 登记，本文件零引用）
+ * 已落地（B7e3，本文件仍零引用）：
+ *   · agnes.ts / agnesEndpoint.ts → electron/plugin-agnes.cjs，注册为可选插件 agnes（integration/agnes/*）
+ *     与 legacy 端口 generateAgnesImages / editAgnesImages / generateAgnesVideos；
+ *     provider-protocol-domain.cjs / protocol-engine/legacy-executor-media.cjs 的 agnes 登记随之可用。
  */
 "use strict";
 

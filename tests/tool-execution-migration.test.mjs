@@ -33,7 +33,7 @@ test("v11 -> v12：tool_executions 建立，旧数据完整", async () => {
   const { root, dbPath, storeRoot, snapshot } = await makeV11Db();
   try {
     const reopened = reopenResourceRuntime({ dbPath, storeRoot });
-    assert.equal(SCHEMA_VERSION, 25);
+    assert.equal(SCHEMA_VERSION, 26);
     assert.equal(reopened.identity.schemaVersion, SCHEMA_VERSION);
     for (const t of [...V12_TABLES, ...V13_TABLES]) assert.equal(hasTable(reopened.identity.connection, t), true, t + " 应存在");
     assert.equal(reopened.identity.allUsers().length, snapshot.users);

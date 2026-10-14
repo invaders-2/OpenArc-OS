@@ -13,6 +13,11 @@
  *   ziniaoDownloadJobs.ts:167-174  deleteZiniaoDownloadJobs
  *   ziniaoDownloadJobs.ts:175-188  recoverZiniaoDownloadJob
  *   lingxingLocalData.ts:275-315   ziniaoOutputRoot / describeVcFile / listZiniaoVcFiles
+ *   lingxingLocalData.ts:267-436 / 1188-1248
+ *                                  importZiniaoVcFile / ziniaoVcRows / queryZiniaoVcData
+ *                                  已落地到 integration-lingxing-local-data.cjs（同一张 lingxing 本地库），
+ *                                  本模块只提供 ziniaoOutputRoot 让导入定位紫鸟保存目录；
+ *                                  integration/ziniao/vc/import|rows|query 命令据此分发。
  *
  * 与源文件的差异（任务书硬约束）：
  *   · 源 MCP 调用直接 callDirect('ziniao', ...)；本移植改为**注入 transport(serverId, tool, args)**，
@@ -42,10 +47,89 @@ const MAX_AUTO_RETRIES = 3;
 const asStr = (value, max = 4096) => (typeof value === "string" ? value.slice(0, max) : value == null ? "" : String(value).slice(0, max));
 function fail(code, detail) { const error = new Error(detail); error.code = code; return error; }
 
+// ══════════════════════════════════════════════════════════════════════
+// 厂商路径解析（本仓不随附紫鸟 Python 运行时，只按路径调用）
+//   ① 显式注入 runtimePath  ② 环境变量  ③ <userData>/dxos/vendor/ziniao  ④ <应用根>/resources/vendor/ziniao
+// ══════════════════════════════════════════════════════════════════════
+const VENDOR_DIR_NAME = "vendor";
+const ZINIAO_RUNTIME_DIR_NAME = "ziniao";
+const ZINIAO_RUNTIME_ENV_KEYS = Object.freeze(["DX_ZINIAO_RUNTIME", "DX_ZINIAO_PYTHON"]);
+
+/** 路径含 `..` 段即越界。 */
+function hasTraversal(value) {
+  return String(value).split(/[\\/]+/).includes("..");
+}
+
+/** 从注入的 dataDir 反推 <userData>/dxos（仅当形如 <dxos>/integrations/<plugin> 时）。 */
+function guessDxosRootFromDataDir(dataDir) {
+  if (!dataDir) return null;
+  const dir = path.resolve(String(dataDir));
+  const integrationsDir = path.dirname(dir);
+  return path.basename(integrationsDir) === "integrations" ? path.dirname(integrationsDir) : null;
+}
+
+/** 文件放置的两个厂商根：用户级优先，随包目录次之。 */
+function vendorRoots(options = {}) {
+  const roots = [];
+  const dxosRoot = options.dxosRoot ? String(options.dxosRoot)
+    : options.userDataDir ? path.join(String(options.userDataDir), "dxos")
+    : guessDxosRootFromDataDir(options.dataDir);
+  if (dxosRoot) roots.push({ source: "userData", dir: path.join(dxosRoot, VENDOR_DIR_NAME) });
+  const appDir = options.appDir ? String(options.appDir) : path.join(__dirname, "..");
+  roots.push({ source: "bundled", dir: path.join(appDir, "resources", VENDOR_DIR_NAME) });
+  return roots;
+}
+
+/**
+ * 校验候选厂商路径。显式 / 环境变量来源必须存在（否则结构化拒绝，不静默回落）；
+ * 放置目录来源不存在则继续下一来源。越界与非文件/目录一律 INTEGRATION_INVALID_INPUT。
+ */
+function validateVendorCandidate(candidate, expect) {
+  const value = String(candidate.path || "");
+  if (!value) return null;
+  if (hasTraversal(value)) throw fail(INTEGRATION_ERR_INVALID_INPUT, "厂商路径含越界段（..）：" + value);
+  if (candidate.mustExist && !path.isAbsolute(value)) throw fail(INTEGRATION_ERR_INVALID_INPUT, "厂商路径必须是绝对路径：" + value);
+  let stat = null;
+  try { stat = fs.statSync(value); } catch { stat = null; }
+  if (!stat) {
+    if (candidate.mustExist) throw fail(INTEGRATION_ERR_INVALID_INPUT, "厂商路径不存在：" + value);
+    return null;
+  }
+  if (expect === "file" && !stat.isFile()) throw fail(INTEGRATION_ERR_INVALID_INPUT, "厂商路径不是文件：" + value);
+  if (expect === "dir" && !stat.isDirectory()) throw fail(INTEGRATION_ERR_INVALID_INPUT, "厂商路径不是目录：" + value);
+  if (expect === "any" && !stat.isFile() && !stat.isDirectory()) throw fail(INTEGRATION_ERR_INVALID_INPUT, "厂商路径既不是文件也不是目录：" + value);
+  return { path: value, source: candidate.source };
+}
+
+/** 紫鸟 Python 运行时的放置说明（缺依赖时的 detail 必须指出放哪里）。 */
+const ZINIAO_VENDOR_HINT = "放置方式（优先级从高到低）：① createZiniaoIntegration({ runtimePath: '<绝对路径>/ziniao-runtime' }) 注入；② 环境变量 DX_ZINIAO_RUNTIME；③ <userData>/dxos/vendor/ziniao/；④ <应用根>/resources/vendor/ziniao/。本移植不随附厂商 Python 运行时。";
+
+/**
+ * 解析紫鸟 Python 运行时路径（目录或可执行文件，先命中者胜出）。全部缺失返回 { path: null }。
+ * @returns {{ path: string|null, source: string|null }}
+ */
+function resolveZiniaoRuntime(options = {}) {
+  const env = options.env && typeof options.env === "object" ? options.env : process.env;
+  const explicit = options.runtimePath ? String(options.runtimePath) : "";
+  const envKey = ZINIAO_RUNTIME_ENV_KEYS.find((key) => env && env[key]);
+  const candidates = [];
+  if (explicit) candidates.push({ source: "explicit", path: explicit, mustExist: true });
+  if (envKey) candidates.push({ source: "env:" + envKey, path: String(env[envKey]), mustExist: true });
+  for (const root of vendorRoots(options)) candidates.push({ source: root.source, path: path.join(root.dir, ZINIAO_RUNTIME_DIR_NAME), mustExist: false });
+  for (const candidate of candidates) {
+    const resolved = validateVendorCandidate(candidate, "any");
+    if (resolved) return resolved;
+  }
+  return { path: null, source: null };
+}
+
 function createZiniaoIntegration(options = {}) {
   const dataDir = options.dataDir ? String(options.dataDir) : null;
   const clock = typeof options.clock === "function" ? options.clock : () => Date.now();
   const transport = typeof options.transport === "function" ? options.transport : null;
+  const runtimeResolution = resolveZiniaoRuntime(options);
+  const runtimePath = runtimeResolution.path;
+  const runtimeSource = runtimeResolution.source;
   const credentials = options.credentials && typeof options.credentials === "object" ? options.credentials : null;
   const controlDir = options.controlDir ? String(options.controlDir) : os.tmpdir();
   const outDir = options.outDir ? String(options.outDir) : null;
@@ -113,7 +197,7 @@ function createZiniaoIntegration(options = {}) {
   async function waitWhilePaused(job) { while (job.status === "paused") await new Promise((resolve) => setTimeout(resolve, 400)); }
 
   function requireTransport() {
-    if (typeof transport !== "function") throw fail(INTEGRATION_ERR_UNAVAILABLE, "未注入紫鸟 MCP 传输（transport/callDirect）；注入后可用，绝不假下载");
+    if (typeof transport !== "function") throw fail(INTEGRATION_ERR_UNAVAILABLE, "未注入紫鸟 MCP 传输（transport/callDirect）；注入后可用，绝不假下载。" + ZINIAO_VENDOR_HINT);
   }
 
   async function runJob(job) {
@@ -302,6 +386,18 @@ function createZiniaoIntegration(options = {}) {
     return { ref: CREDENTIAL_REF, credentialSet: false };
   }
 
+  /** 运行时解析状态：configured 只看是否解析到路径，available 看路径当前是否真的存在。 */
+  function runtimeStatus() {
+    return { configured: !!runtimePath, source: runtimeSource, path: runtimePath, available: !!runtimePath && fs.existsSync(runtimePath) };
+  }
+
+  /** 显式要求厂商运行时；缺失 / 失效时结构化 INTEGRATION_UNAVAILABLE，并说明放置位置。 */
+  function requireRuntime() {
+    if (!runtimePath) throw fail(INTEGRATION_ERR_UNAVAILABLE, "紫鸟 Python 运行时未配置；" + ZINIAO_VENDOR_HINT);
+    if (!fs.existsSync(runtimePath)) throw fail(INTEGRATION_ERR_UNAVAILABLE, "紫鸟 Python 运行时路径已失效：" + runtimePath + "；" + ZINIAO_VENDOR_HINT);
+    return { path: runtimePath, source: runtimeSource };
+  }
+
   function status() {
     return {
       transportInjected: typeof transport === "function",
@@ -311,6 +407,7 @@ function createZiniaoIntegration(options = {}) {
       safeStorageAvailable: credentialsAvailable(),
       credentialSet: !!readSecret(),
       activeJobId: (activeJob() || {}).id || null,
+      runtime: runtimeStatus(),
     };
   }
 
@@ -321,10 +418,11 @@ function createZiniaoIntegration(options = {}) {
     deleteZiniaoDownloadJobs, recoverZiniaoDownloadJob,
     listZiniaoVcFiles, describeVcFile, ziniaoOutputRoot,
     saveCredential, credentialStatus, clearCredential,
+    runtimePath, runtimeSource, runtimeStatus, requireRuntime,
     status,
     whenIdle: async () => { while (runners.size) await new Promise((resolve) => setTimeout(resolve, 5)); },
     clearRetry, close: () => { for (const timer of retryTimers.values()) clearTimeout(timer); retryTimers.clear(); },
   };
 }
 
-module.exports = { createZiniaoIntegration, CREDENTIAL_REF, STORE_FILE_NAME, CONTROL_FILE_NAME };
+module.exports = { createZiniaoIntegration, resolveZiniaoRuntime, ZINIAO_VENDOR_HINT, CREDENTIAL_REF, STORE_FILE_NAME, CONTROL_FILE_NAME };

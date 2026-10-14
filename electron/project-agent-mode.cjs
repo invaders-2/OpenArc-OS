@@ -439,7 +439,9 @@ async function runProjectAgentMode(project, actor, instruction, history = [], pr
             if (mediaArtifacts(value).length) filesChanged = true;
           } else if (descriptor.source === "mcp") {
             const callByName = methodOf("mcpAdapter", "callByName");
-            value = await callByName(call.name, args);
+            // D5-04：把本 Run 的任务上下文交给 MCP 适配器（审批链要求真实 Task）。缺 taskId 时由审批端口
+            // 结构化 fail closed（0 传输），绝不伪造任务身份。
+            value = await callByName(call.name, args, { taskId: session.taskId || null, stepId: session.stepId || null, runId: session.runId || null });
           } else {
             const runCatalogTool = methodOf("toolCatalog", "runCatalogTool");
             value = await runCatalogTool(call.name, {

@@ -4,7 +4,8 @@
  * 机制（任务书 item 1）：
  *   · 统一入口只有 command({ command, payload })；命令白名单在 INTEGRATION_COMMANDS（由
  *     INTEGRATION_COMMAND_META 的键生成，保证"白名单 ↔ 实现 ↔ 元数据"一一对应）；
- *   · 六个插件（钉钉 / 天气 / 黄历 / 领星 / 紫鸟 / 夸克）**默认全关**；未启用、或已启用但依赖缺失 /
+ *   · 全部可选插件（钉钉 / 天气 / 黄历 / 领星 / 紫鸟 / 夸克 / RunningHub / ModelScope / Agnes）**默认全关**；
+ *     未启用、或已启用但依赖缺失 /
  *     运行时能力未注入，一律返回结构化 { ok:false, error:"INTEGRATION_UNAVAILABLE", detail:"<缺什么、怎么装>" }，绝不假实现；
  *   · 开关落 <userData>/dxos/integrations.json（plugin-registry.cjs）；
  *   · 钉钉 / 领星 / 紫鸟凭据走 credential-store 的 safeStorage 后端；投影只给掩码，明文不落盘；
@@ -33,11 +34,14 @@ const { createDingtalkIntegration } = require("./integration-dingtalk.cjs");
 const { createWeatherIntegration } = require("./integration-weather.cjs");
 const { createAlmanacIntegration } = require("./integration-almanac.cjs");
 const { createLingxingIntegration } = require("./integration-lingxing.cjs");
-const { createZiniaoIntegration } = require("./integration-ziniao.cjs");
-const { createQuarkIntegration } = require("./integration-quark.cjs");
+const { createZiniaoIntegration, ZINIAO_VENDOR_HINT } = require("./integration-ziniao.cjs");
+const { createQuarkIntegration, QUARK_VENDOR_HINT } = require("./integration-quark.cjs");
 const { createRunningHubIntegration } = require("./plugin-runninghub.cjs");
 const { createModelScopeIntegration } = require("./plugin-modelscope.cjs");
+const { createAgnesIntegration } = require("./plugin-agnes.cjs");
 const { setLegacyExecutorPorts } = require("./legacy-executor-ports.cjs");
+// B7e2 后续：CLI 协议族（即梦 / Codex / Gemini）的 legacy 执行器端口；只在对应 CLI 已安装时注入。
+const { installLegacyCliPorts } = require("./legacy-cli-ports.cjs");
 const { resolveDxosPaths } = require("./dxos-foundation-paths.cjs");
 const { safeStorageCredentialBackend } = require("./credential-store.cjs");
 
@@ -89,6 +93,10 @@ const INTEGRATION_COMMAND_META = Object.freeze({
   "integration/lingxing/advertising/cache/query": { risk: "read", credential: false, summary: "查询领星广告缓存（按范围 / 视图 / 店铺过滤）" },
   "integration/lingxing/credential/save": { risk: "manage", credential: true, summary: "保存领星 API 凭据（写入安全存储，只回掩码）" },
   "integration/lingxing/credential/status": { risk: "read", credential: false, summary: "读取领星凭据状态（只回掩码，不回明文）" },
+  "integration/lingxing/analytics": { risk: "read", credential: false, summary: "领星业务分析（区间对比 / 日趋势 / 商品 / 维度 / 分组，源 lingxingBusinessAnalytics）" },
+  "integration/lingxing/operator/dashboard": { risk: "read", credential: false, summary: "领星运营看板（按 ASIN 汇总销售与广告指标，源 queryLingxingOperatorDashboard）" },
+  "integration/lingxing/operator/export": { risk: "read", credential: false, summary: "导出领星运营看板工作簿（需注入 workbookWriter，未注入即结构化不可用）" },
+  "integration/lingxing/currency/rates": { risk: "read", credential: false, summary: "读取领星汇率（注入 fetch 时实时，否则回退内置汇率，源 getLingxingCurrencyRates）" },
   "integration/ziniao/status": { risk: "read", credential: false, summary: "紫鸟集成状态：transport / 数据目录 / 控制文件 / 活动作业" },
   "integration/ziniao/jobs/list": { risk: "read", credential: false, summary: "列出全部紫鸟下载作业（按创建时间倒序）" },
   "integration/ziniao/jobs/current": { risk: "read", credential: false, summary: "查询当前活动或最近的紫鸟下载作业" },
@@ -97,6 +105,9 @@ const INTEGRATION_COMMAND_META = Object.freeze({
   "integration/ziniao/jobs/delete": { risk: "destructive", credential: false, summary: "删除已结束的紫鸟下载作业记录" },
   "integration/ziniao/jobs/recover": { risk: "manage", credential: false, summary: "重启后恢复未完成的紫鸟下载作业（限流则进入冷却）" },
   "integration/ziniao/vc/files": { risk: "read", credential: false, summary: "列举紫鸟保存目录中的 VC 汇总 XLSX 文件" },
+  "integration/ziniao/vc/import": { risk: "manage", credential: false, summary: "导入紫鸟 VC 汇总 XLSX 到本地缓存（需注入 workbookReader）" },
+  "integration/ziniao/vc/rows": { risk: "read", credential: false, summary: "读取紫鸟 VC 行级明细（源 ziniaoVcRows）" },
+  "integration/ziniao/vc/query": { risk: "read", credential: false, summary: "聚合查询紫鸟 VC 数据（源 queryZiniaoVcData）" },
   "integration/ziniao/credential/save": { risk: "manage", credential: true, summary: "保存紫鸟账号凭据（写入安全存储，只回掩码）" },
   "integration/ziniao/credential/status": { risk: "read", credential: false, summary: "读取紫鸟凭据状态（只回掩码，不回明文）" },
   "integration/quark/status": { risk: "read", credential: false, summary: "夸克 CLI 装配状态：路径 / 工作目录 / 搜索历史条目数" },
@@ -120,6 +131,18 @@ const INTEGRATION_COMMAND_META = Object.freeze({
   "integration/runninghub/generate-images": { risk: "use", credential: true, summary: "RunningHub 文生图 / 图生图（真实外发）" },
   "integration/runninghub/edit-images": { risk: "use", credential: true, summary: "RunningHub 图像编辑（上传参考图后执行）" },
   "integration/runninghub/generate-videos": { risk: "use", credential: true, summary: "RunningHub 视频生成（真实外发）" },
+  "integration/runninghub/chat": { risk: "use", credential: true, summary: "RunningHub LLM 对话（源 callRunningHubChat，真实外发）" },
+  "integration/runninghub/describe-image": { risk: "use", credential: true, summary: "RunningHub 图片描述 / 视觉问答（源 describeRunningHubImage，真实外发）" },
+  "integration/runninghub/inspect": { risk: "read", credential: true, summary: "解析 RunningHub AI 应用 / 工作流字段（源 inspectRunningHubApp / inspectRunningHubWorkflow）" },
+  "integration/runninghub/submit": { risk: "use", credential: true, summary: "提交 RunningHub AI 应用 / 工作流任务（源 submitRunningHubEntry，真实外发）" },
+  "integration/runninghub/task/query": { risk: "read", credential: true, summary: "查询 RunningHub 任务输出（源 queryRunningHubTask）" },
+  "integration/runninghub/upload": { risk: "use", credential: true, summary: "上传本地素材到 RunningHub（源 uploadRunningHubAsset，真实外发）" },
+  "integration/agnes/status": { risk: "read", credential: false, summary: "Agnes 集成状态：fetch / safeStorage / Key 掩码 / 模型目录" },
+  "integration/agnes/credentials/save": { risk: "manage", credential: true, summary: "保存 Agnes API Key（写入安全存储，只回掩码）" },
+  "integration/agnes/credentials/delete": { risk: "destructive", credential: false, summary: "删除 Agnes 安全存储中的 API Key" },
+  "integration/agnes/generate-images": { risk: "use", credential: true, summary: "Agnes 文生图（真实外发）" },
+  "integration/agnes/edit-images": { risk: "use", credential: true, summary: "Agnes 图像编辑 / 参考图（真实外发）" },
+  "integration/agnes/generate-videos": { risk: "use", credential: true, summary: "Agnes 视频生成 2.5 / 2.5 Flash / v2.0（真实外发）" },
   "integration/modelscope/status": { risk: "read", credential: false, summary: "ModelScope 集成状态：fetch / safeStorage / 令牌掩码" },
   "integration/modelscope/credentials/save": { risk: "manage", credential: true, summary: "保存 ModelScope 访问令牌（写入安全存储，只回掩码）" },
   "integration/modelscope/credentials/delete": { risk: "destructive", credential: false, summary: "删除 ModelScope 安全存储中的访问令牌" },
@@ -159,6 +182,7 @@ function createPluginBundle(options = {}) {
   const mcpCallDirect = typeof options.mcpCallDirect === "function" ? options.mcpCallDirect : null;
   const transportFactory = typeof options.transportFactory === "function" ? options.transportFactory : null;
   const workbookReader = typeof options.workbookReader === "function" ? options.workbookReader : null;
+  const workbookWriter = typeof options.workbookWriter === "function" ? options.workbookWriter : null;
   const quarkCliPath = options.quarkCliPath ? String(options.quarkCliPath) : null;
   const quarkSpawnImpl = typeof options.quarkSpawnImpl === "function" ? options.quarkSpawnImpl : null;
   const quarkSpawnLoginImpl = typeof options.quarkSpawnLoginImpl === "function" ? options.quarkSpawnLoginImpl : null;
@@ -191,13 +215,14 @@ function createPluginBundle(options = {}) {
   let quarkIntegration = null;
   let runninghub = null;
   let modelscope = null;
+  let agnes = null;
 
   const probes = Object.assign({}, options.probes);
   if (typeof probes.binary !== "function") {
     probes.binary = (target) => {
       if (target === "quark-drive.cjs") {
         const available = !!(quarkIntegration && quarkIntegration.cliAvailable());
-        return available ? { ok: true, status: "ok", detail: "" } : { ok: false, status: "missing", detail: "未配置夸克官方 CLI (quark-drive.cjs) 路径" };
+        return available ? { ok: true, status: "ok", detail: "" } : { ok: false, status: "missing", detail: "未配置夸克官方 CLI (quark-drive.cjs)。" + QUARK_VENDOR_HINT };
       }
       const found = resolveBinaryPath(target);
       return found ? { ok: true, status: "ok", detail: "" } : { ok: false, status: "missing", detail: "PATH 中找不到 " + target };
@@ -209,6 +234,7 @@ function createPluginBundle(options = {}) {
       // B7e2：RunningHub / ModelScope 的凭据判定由各自集成给出（RunningHub 有两个 ref，故不做通用 ref 查表）。
       if (pluginId === "runninghub" && runninghub) return runninghub.credentialProbe();
       if (pluginId === "modelscope" && modelscope) return modelscope.credentialProbe();
+      if (pluginId === "agnes" && agnes) return agnes.credentialProbe();
       const ref = refs[pluginId];
       if (!ref) return null;
       const set = credentialsAvailable && typeof credentials.get === "function" ? !!credentials.get(ref) : false;
@@ -231,10 +257,15 @@ function createPluginBundle(options = {}) {
     credentials,
     transport: resolveTransport("lingxing"),
     readWorkbook: workbookReader,
+    writeWorkbook: workbookWriter,
+    fetch: fetchImpl,
+    // 紫鸟 VC 导入需要与紫鸟插件一致的保存目录；ziniao 稍后同装配创建，闭包内延迟取用。
+    ziniaoOutputRoot: () => (ziniao ? ziniao.ziniaoOutputRoot() : null),
     clock,
   });
   const ziniao = createZiniaoIntegration({
     dataDir: integrationsRoot ? path.join(integrationsRoot, "ziniao") : null,
+    userDataDir,
     credentials,
     transport: resolveTransport("ziniao"),
     controlDir: options.controlDir,
@@ -243,6 +274,7 @@ function createPluginBundle(options = {}) {
   });
   quarkIntegration = createQuarkIntegration({
     dataDir: integrationsRoot ? path.join(integrationsRoot, "quark") : null,
+    userDataDir,
     credentials,
     cliPath: quarkCliPath,
     spawnImpl: quarkSpawnImpl,
@@ -261,6 +293,7 @@ function createPluginBundle(options = {}) {
     clock,
   });
   modelscope = createModelScopeIntegration({ fetch: fetchImpl, credentials, clock });
+  agnes = createAgnesIntegration({ fetch: fetchImpl, credentials, clock });
 
   const dingtalk = createDingtalkIntegration({
     dataDir: paths ? paths.root : null,
@@ -293,18 +326,29 @@ function createPluginBundle(options = {}) {
     return { ok: true, report };
   }
 
-  /** 闸门 + 动作：动作里的失败由 execute 外层 catch 统一转结构化。 */
+  /**
+   * 闸门 + 动作：动作里的失败统一转结构化。
+   * 注意：门内动作多为 async；若只依赖 execute 外层 catch，rejected promise 会绕过同步 try/catch。
+   * 因此这里就地 catch 并复用 normalizeIntegrationError，保证"抛带 code 的 Error"也变成 { ok:false }。
+   */
   async function gated(pluginId, action) {
     const allowed = await gate(pluginId);
     if (!allowed.ok) return allowed;
-    return action();
+    try {
+      return await action();
+    } catch (error) {
+      if (logger) { try { logger("integration-action-failed", { pluginId, message: asStr(error && error.message, 200) }); } catch { /* 忽略 */ } }
+      return normalizeIntegrationError(error);
+    }
   }
 
   /**
-   * B7e2：把 RunningHub / ModelScope 接进 B2 legacy 执行器的注入端口。
+   * B7e2/B7e3：把 RunningHub / ModelScope / Agnes 接进 B2 legacy 执行器的注入端口。
    *   · 默认关闭 —— 端口已注册但插件未启用时，端口仍返回结构化 INTEGRATION_UNAVAILABLE；
    *   · options.installLegacyPorts === false 时不注册，legacy 执行器保持 B2 的 LEGACY_DEPENDENCY_UNAVAILABLE；
-   *   · agnes 无内置实现，不注册端口（调用方仍可显式 setLegacyExecutorPorts 注入）。
+   *   · Agnes 端口直通 plugin-agnes.cjs 的真实实现（generateAgnesImages / editAgnesImages / generateAgnesVideos）；
+   *   · RunningHub 对话 / 图片理解（callRunningHubChat / describeRunningHubImage）把插件返回的
+   *     integration 形状还原成 legacy 执行器约定（对话 { text, latencyMs, raw }、图片理解 string）。
    */
   function gateLegacyPort(pluginId, fn) {
     return async (...args) => {
@@ -319,9 +363,33 @@ function createPluginBundle(options = {}) {
     generateRunningHubImages: gateLegacyPort("runninghub", runninghub.generateRunningHubImages),
     editRunningHubImages: gateLegacyPort("runninghub", runninghub.editRunningHubImages),
     generateRunningHubVideos: gateLegacyPort("runninghub", runninghub.generateRunningHubVideos),
+    // B7e3 后续：RunningHub 对话 / 图片理解（源 runninghub.ts:270-289）。插件方法回 integration 形状
+    // （{ ok:true, value:{ text, usage, latencyMs, raw } }），这里适配回 legacy 执行器约定；失败原样透传。
+    callRunningHubChat: gateLegacyPort("runninghub", async (provider, model, input, params, timeoutMs, transport) => {
+      const result = await runninghub.callRunningHubChat(provider, model, input, params, timeoutMs, transport);
+      if (result && result.ok === false) return result;
+      const value = (result && result.value) || {};
+      return { text: value.text, usage: value.usage, latencyMs: value.latencyMs, raw: value.raw };
+    }),
+    describeRunningHubImage: gateLegacyPort("runninghub", async (provider, model, dataUrl, prompt, timeoutMs, transport) => {
+      const result = await runninghub.describeRunningHubImage(provider, model, dataUrl, prompt, timeoutMs, transport);
+      if (result && result.ok === false) return result;
+      return String((result && result.value && result.value.text) || "");
+    }),
     generateModelScopeImages: gateLegacyPort("modelscope", modelscope.generateModelScopeImages),
     editModelScopeImages: gateLegacyPort("modelscope", modelscope.editModelScopeImages),
+    generateAgnesImages: gateLegacyPort("agnes", agnes.generateAgnesImages),
+    editAgnesImages: gateLegacyPort("agnes", agnes.editAgnesImages),
+    generateAgnesVideos: gateLegacyPort("agnes", agnes.generateAgnesVideos),
   });
+
+  /**
+   * B7e2 后续：CLI 协议族端口（cliJimeng / cliCodex / cliGemini）。
+   *   · 与插件端口分开成 cliPorts，不改变 legacyPorts.applied 的既有键集合；
+   *   · 只在「对应 CLI 已安装」时注册，未安装如实跳过，执行器继续回 LEGACY_DEPENDENCY_UNAVAILABLE；
+   *   · options.installLegacyPorts === false 时只探测不注册（与插件端口同一开关）。
+   */
+  const cliPorts = installLegacyCliPorts({ install: options.installLegacyPorts !== false });
 
   /** B7e2：把源协议形状（{images,raw} / {videos,raw}）包成 integration 成功形状；结构化失败原样透传。 */
   function pipelineResult(result) {
@@ -514,6 +582,26 @@ function createPluginBundle(options = {}) {
         case "integration/lingxing/credential/status":
           return gated("lingxing", () => ({ ok: true, value: lingxing.credentialStatus() }));
 
+        case "integration/lingxing/analytics":
+          return gated("lingxing", () => ({ ok: true, value: lingxing.lingxingBusinessAnalytics(body) }));
+
+        case "integration/lingxing/operator/dashboard":
+          return gated("lingxing", () => ({ ok: true, value: lingxing.queryLingxingOperatorDashboard(body) }));
+
+        case "integration/lingxing/operator/export":
+          return gated("lingxing", async () => {
+            const result = await lingxing.exportLingxingOperatorDashboard(body);
+            return { ok: true, value: {
+              fileName: result.fileName,
+              mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              bytes: result.data.length,
+              dataBase64: Buffer.from(result.data).toString("base64"),
+            } };
+          });
+
+        case "integration/lingxing/currency/rates":
+          return gated("lingxing", async () => ({ ok: true, value: await lingxing.getLingxingCurrencyRates() }));
+
         // ── B7d · 紫鸟 ──
         case "integration/ziniao/status":
           return gated("ziniao", () => ({ ok: true, value: ziniao.status() }));
@@ -548,6 +636,15 @@ function createPluginBundle(options = {}) {
 
         case "integration/ziniao/vc/files":
           return gated("ziniao", () => ({ ok: true, value: ziniao.listZiniaoVcFiles() }));
+
+        case "integration/ziniao/vc/import":
+          return gated("ziniao", async () => ({ ok: true, value: await lingxing.importZiniaoVcFile(asText(body.path, 1000)) }));
+
+        case "integration/ziniao/vc/rows":
+          return gated("ziniao", () => ({ ok: true, value: lingxing.ziniaoVcRows(asText(body.date, 20) || undefined, Number(body.limit) || 200, Number(body.offset) || 0) }));
+
+        case "integration/ziniao/vc/query":
+          return gated("ziniao", () => ({ ok: true, value: lingxing.queryZiniaoVcData(body) }));
 
         case "integration/ziniao/credential/save":
           return gated("ziniao", () => ({ ok: true, value: ziniao.saveCredential(body) }));
@@ -627,6 +724,31 @@ function createPluginBundle(options = {}) {
         case "integration/runninghub/generate-videos":
           return gated("runninghub", async () => pipelineResult(await runninghub.generateRunningHubVideos(body.provider, body.model, body.params, body.timeoutMs)));
 
+        case "integration/runninghub/chat":
+          return gated("runninghub", () => runninghub.callRunningHubChat(body.provider, body.model, body.input && typeof body.input === "object" ? body.input : { prompt: body.prompt }, body.params, body.timeoutMs));
+
+        case "integration/runninghub/describe-image":
+          return gated("runninghub", () => runninghub.describeRunningHubImage(body.provider, body.model, body.image != null ? body.image : body.images, asText(body.prompt, 4000), body.timeoutMs));
+
+        case "integration/runninghub/inspect":
+          return gated("runninghub", () => String(body.kind) === "workflow"
+            ? runninghub.inspectRunningHubWorkflow(body.provider, asText(body.workflowId || body.id, 200), body.timeoutMs)
+            : runninghub.inspectRunningHubApp(body.provider, asText(body.appId || body.id, 200), body.timeoutMs));
+
+        case "integration/runninghub/submit":
+          return gated("runninghub", () => runninghub.submitRunningHubEntry(body.provider, String(body.kind) === "workflow" ? "workflow" : "app", asText(body.id, 200), body.fields, body.useWallet === true, body.workflow, asText(body.instanceType, 80)));
+
+        case "integration/runninghub/task/query":
+          return gated("runninghub", () => runninghub.queryRunningHubTask(body.provider, asText(body.id, 200), body.useWallet === true));
+
+        case "integration/runninghub/upload":
+          // 闸门优先：未启用 / 缺依赖一律先结构化不可用，再校验入参（避免绕过插件开关）。
+          return gated("runninghub", () => {
+            const buffer = bodyBuffer(body);
+            if (!buffer) return { ok: false, error: INTEGRATION_ERR_INVALID_INPUT, detail: "runninghub/upload 需要 buffer 或 bufferBase64" };
+            return runninghub.uploadRunningHubAsset(body.provider, { buf: buffer, mime: asText(body.mime, 120) || "application/octet-stream", name: asText(body.fileName, 300) || "asset.bin" }, body.useWallet !== false, body.timeoutMs);
+          });
+
         // ── B7e2 · ModelScope ──
         case "integration/modelscope/status":
           return gated("modelscope", () => modelscope.status());
@@ -642,6 +764,25 @@ function createPluginBundle(options = {}) {
 
         case "integration/modelscope/edit-images":
           return gated("modelscope", async () => pipelineResult(await modelscope.editModelScopeImages(body.provider, body.model, body.params, body.images, body.timeoutMs)));
+
+        // ── B7e3 · Agnes ──
+        case "integration/agnes/status":
+          return gated("agnes", () => agnes.status());
+
+        case "integration/agnes/credentials/save":
+          return gated("agnes", () => agnes.saveCredential(body));
+
+        case "integration/agnes/credentials/delete":
+          return gated("agnes", () => agnes.deleteCredential());
+
+        case "integration/agnes/generate-images":
+          return gated("agnes", async () => pipelineResult(await agnes.generateAgnesImages(body.provider, body.model, body.params, body.timeoutMs)));
+
+        case "integration/agnes/edit-images":
+          return gated("agnes", async () => pipelineResult(await agnes.editAgnesImages(body.provider, body.model, body.params, body.images, body.timeoutMs)));
+
+        case "integration/agnes/generate-videos":
+          return gated("agnes", async () => pipelineResult(await agnes.generateAgnesVideos(body.provider, body.model, body.params, body.timeoutMs)));
 
         default:
           return { ok: false, error: "INTEGRATION_COMMAND_NOT_ALLOWED", detail: "未知或未授权的 integration 命令：" + String(command) };
@@ -666,7 +807,9 @@ function createPluginBundle(options = {}) {
     quark: quarkIntegration,
     runninghub,
     modelscope,
+    agnes,
     legacyPorts,
+    cliPorts,
     execute,
     isIntegrationCommand,
   };

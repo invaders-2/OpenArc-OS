@@ -37,11 +37,13 @@
  *   generateVolcengineImages / requestZkkiImages / requestGrok2ApiImages
  *
  * 未移植依赖（一律返回 { ok:false, error:"LEGACY_DEPENDENCY_UNAVAILABLE", detail:"<属哪个批次>" }，不做假实现）：
- *   1. cliTools 原生适配（cli:jimeng / jimeng-cli）：generateJimengVideo / generateJimengImage — 批次：cliTools
- *   2. agentCliTools 原生适配（cli:codex / cli:gemini）：editCodexImage / editGeminiCliImage — 批次：agentCliTools
- *   3. runninghub 原生适配：generateRunningHubVideos / editRunningHubImages — 批次：runninghub
- *   4. modelscope 原生适配：editModelScopeImages — 批次：modelscope
- *   5. agnes 原生适配：generateAgnesVideos / editAgnesImages — 批次：agnes
+ *   1. cliTools 原生适配（cli:jimeng / jimeng-cli）：generateJimengVideo / generateJimengImage —— B7e2 后续：
+ *      CLI 端口已注入则调用，未注入即结构化拒绝（electron/legacy-cli-ports.cjs）
+ *   2. agentCliTools 原生适配（cli:codex / cli:gemini）：editCodexImage / editGeminiCliImage —— 同上
+ *   3. runninghub 原生适配：generateRunningHubVideos / editRunningHubImages — 批次：runninghub（B7e2 端口）
+ *   4. modelscope 原生适配：editModelScopeImages — 批次：modelscope（B7e2 端口）
+ *   5. agnes 原生适配：generateAgnesVideos / editAgnesImages — B7e3 端口（electron/plugin-agnes.cjs）；
+ *      插件关闭 / 未注入端口时结构化拒绝
  *   6. apiQuota 云计费（apiQuota.ts:280 withDirectApiQuota）未移植：本模块只执行上游 *Unmetered 路径，
  *      不伪造预扣/结算；需要计费门禁的调用方请在调用前使用 electron/dxos-foundation-quota.cjs 自行预扣/结算。
  *   7. sharp 仅惰性 require（在 W4b legacy-executor-images.cjs 的 prepareApibEditInputs 内），未写入 package.json；
@@ -76,10 +78,11 @@ function unavailable(detail) {
   return { ok: false, error: LEGACY_DEPENDENCY_UNAVAILABLE, detail };
 }
 
+/** CLI 协议族端口未注入时的结构化拒绝前缀（B7e2 后续；注入/调用见 electron/legacy-cli-ports.cjs）。 */
+const CLI_PORT_DETAIL = "CLI 端口未注入（需安装对应 CLI，由主进程经 electron/legacy-cli-ports.cjs 注入 cliJimeng/cliCodex/cliGemini）";
+
 /** 各未移植批次的标签，供 detail 使用。 */
 const BATCH = {
-  cliTools: "cliTools 原生适配批次（未移植）",
-  agentCliTools: "agentCliTools 原生适配批次（未移植）",
   runninghub: "runninghub 原生适配批次（未移植）",
   modelscope: "modelscope 原生适配批次（未移植）",
   agnes: "agnes 原生适配批次（未移植）",
@@ -735,7 +738,12 @@ async function generateVideosUnmetered(provider, model, params, input, timeoutMs
   if (rawProtocol === "agtoken" || rawProtocol === "agtoken-video") return generateAgTokenVideos(provider, model, params, input, timeoutMs, net, time);
   if (rawProtocol === "zkki" || rawProtocol === "zkki-model") return generateZkkiVideos(provider, model, params, input, timeoutMs, net, time);
   if (rawProtocol === "minimax") return generateMinimaxVideos(provider, model, params, input, timeoutMs, net, time);
-  if (rawProtocol === "cli:jimeng" || rawProtocol === "jimeng-cli") return unavailable(BATCH.cliTools + "：generateJimengVideo（protocols.ts:6050）");
+  if (rawProtocol === "cli:jimeng" || rawProtocol === "jimeng-cli") {
+    // B7e2 后续：CLI 端口已注入则调用，未注入仍结构化拒绝。
+    const port = legacyExecutorPorts.getLegacyExecutorPort("cliJimeng");
+    if (typeof port === "function") return port("video.generate", { provider, model, params, input, timeoutMs, transport: net, clock: time });
+    return unavailable(CLI_PORT_DETAIL + "：generateJimengVideo（protocols.ts:6050）");
+  }
   const declaredRuntime = DECLARED_VIDEO_RUNTIME_PROTOCOL_IDS.has(rawProtocol);
   // B7e2：端口已注入则调用注入实现；未注入仍返回结构化 LEGACY_DEPENDENCY_UNAVAILABLE（B2 行为不变）。
   if (rawProtocol === "agnes") {
@@ -1534,9 +1542,22 @@ async function editImages(provider, model, params, inputs, timeoutMs = 300000, t
 // 源：protocols.ts:6512-6620
 async function editImagesUnmetered(provider, model, params, inputs, timeoutMs, net, time) {
   const rawProto = String(provider.protocol || "").trim().toLowerCase();
-  if (rawProto === "cli:jimeng" || rawProto === "jimeng-cli") return unavailable(BATCH.cliTools + "：cli:jimeng 图片编辑（protocols.ts:6516 generateJimengImage）");
-  if (rawProto === "cli:codex" || rawProto === "codex-cli") return unavailable(BATCH.agentCliTools + "：cli:codex 图片编辑（protocols.ts:6530 editCodexImage）");
-  if (rawProto === "cli:gemini" || rawProto === "gemini-cli") return unavailable(BATCH.agentCliTools + "：cli:gemini 图片编辑（protocols.ts:6539 editGeminiCliImage）");
+  // B7e2 后续：CLI 协议族端口已注入则调用，未注入仍结构化拒绝（B2 行为不变）。
+  if (rawProto === "cli:jimeng" || rawProto === "jimeng-cli") {
+    const port = legacyExecutorPorts.getLegacyExecutorPort("cliJimeng");
+    if (typeof port === "function") return port("image.edit", { provider, model, params, inputs, timeoutMs, transport: net, clock: time });
+    return unavailable(CLI_PORT_DETAIL + "：cli:jimeng 图片编辑（protocols.ts:6516 generateJimengImage）");
+  }
+  if (rawProto === "cli:codex" || rawProto === "codex-cli") {
+    const port = legacyExecutorPorts.getLegacyExecutorPort("cliCodex");
+    if (typeof port === "function") return port("image.edit", { provider, model, params, inputs, timeoutMs, transport: net, clock: time });
+    return unavailable(CLI_PORT_DETAIL + "：cli:codex 图片编辑（protocols.ts:6530 editCodexImage）");
+  }
+  if (rawProto === "cli:gemini" || rawProto === "gemini-cli") {
+    const port = legacyExecutorPorts.getLegacyExecutorPort("cliGemini");
+    if (typeof port === "function") return port("image.edit", { provider, model, params, inputs, timeoutMs, transport: net, clock: time });
+    return unavailable(CLI_PORT_DETAIL + "：cli:gemini 图片编辑（protocols.ts:6539 editGeminiCliImage）");
+  }
   // B7e2：端口已注入则调用注入实现；未注入仍返回结构化 LEGACY_DEPENDENCY_UNAVAILABLE（B2 行为不变）。
   if (rawProto === "agnes") {
     const port = legacyExecutorPorts.getLegacyExecutorPort("editAgnesImages");

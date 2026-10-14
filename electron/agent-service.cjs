@@ -52,6 +52,8 @@ const canvasCapabilities = require("./canvas-dxos-capabilities.cjs");
 const projectSnapshot = require("./agent-project-snapshot.cjs");
 const projectAgentMode = require("./project-agent-mode.cjs");
 const authDomain = require("./authorization-domain.cjs");
+// 任务域统一读模型（只读；不写任何表、不改任一状态机）——agent/task/unified-list 的唯一实现。
+const taskUnifiedView = require("./task-unified-view.cjs");
 
 const { createAgentError, normalizeAgentError, redactAgentValue, isAgentCommand, agentCommandNotAllowed, AGENT_ERR_COMMAND_NOT_ALLOWED, AGENT_ERR_INVALID_INPUT, AGENT_ERR_UNAUTHENTICATED, AGENT_ERR_FORBIDDEN, AGENT_ERR_NOT_FOUND, AGENT_ERR_DEPENDENCY_UNAVAILABLE, AGENT_ERR_INTERNAL, AGENT_EVENT_CHANNEL } = agentDomain;
 
@@ -105,6 +107,22 @@ function mapToolError(error, toolName) {
   if (code === "invalid_input") return createAgentError(AGENT_ERR_INVALID_INPUT, message, { tool: toolName, causeCode: code });
   if (code === "conflict") return createAgentError("AGENT_CONFLICT", message, { tool: toolName, causeCode: code });
   return createAgentError(AGENT_ERR_INTERNAL, message, { tool: toolName, causeCode: code });
+}
+
+/**
+ * 统一读模型错误 → Agent 域错误码：依赖缺失 / 输入非法 / 未找到 / 同名歧义各归其位，
+ * 不折成 AGENT_INTERNAL（否则渲染层看不出缺什么）。detail 原样透传，由 execute 统一脱敏。
+ */
+function mapUnifiedViewError(error) {
+  const code = error && error.code ? String(error.code) : "internal";
+  const message = (error && error.message) || "统一任务读模型失败";
+  const base = error && error.detail !== undefined ? error.detail : {};
+  const detail = base && typeof base === "object" && !Array.isArray(base) ? { ...base, causeCode: code } : { causeCode: code, value: base };
+  if (code === taskUnifiedView.UNIFIED_VIEW_ERR_INVALID_INPUT) return createAgentError(AGENT_ERR_INVALID_INPUT, message, detail);
+  if (code === taskUnifiedView.UNIFIED_VIEW_ERR_DEPENDENCY_UNAVAILABLE) return createAgentError(AGENT_ERR_DEPENDENCY_UNAVAILABLE, message, detail);
+  if (code === taskUnifiedView.UNIFIED_VIEW_ERR_NOT_FOUND) return createAgentError(AGENT_ERR_NOT_FOUND, message, detail);
+  if (code === taskUnifiedView.UNIFIED_VIEW_ERR_AMBIGUOUS) return createAgentError(AGENT_ERR_CONFLICT, message, detail);
+  return createAgentError(AGENT_ERR_INTERNAL, message, detail);
 }
 
 /**
@@ -387,8 +405,11 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
     : resolvedSkillSource
       ? { runSkill: (skillId, args, ctx) => resolvedSkillSource.call(String(skillId), args, ctx) }
       : null;
+  // D5-04：MCP 工具调用必须携带**任务上下文**（taskId/stepId/runId）—— 既有审批链用它在真实
+  // Task / SideEffectAuthority 里定位任务；缺 taskId 会在 propose 之前 fail closed（0 传输），
+  // 而不是伪造一个任务身份。上下文由工具循环逐调用给出（见 project-agent-mode / agent-react-driver）。
   const mcpAdapter = mcpAgentTools && typeof mcpAgentTools.callByName === "function"
-    ? { callByName: (name, args) => mcpAgentTools.callByName(String(name), args && typeof args === "object" ? args : {}, {}) }
+    ? { callByName: (name, args, taskContext) => mcpAgentTools.callByName(String(name), args && typeof args === "object" ? args : {}, taskContext && typeof taskContext === "object" ? taskContext : {}) }
     : null;
   const projectAdapters = {
     agentRuntime: bindAgentRuntimeManager(agentRuntime.agentRunManager),
@@ -589,6 +610,17 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
       case "agent/task/stats": {
         const sinceMs = Number.isFinite(Number(payload.sinceMs)) ? Number(payload.sinceMs) : undefined;
         return agentTaskStore.taskStats(userId, sinceMs);
+      }
+      // 统一读模型：DX 11 态 + 既有 7 态 → 同一投影（只读）。userId 来自主进程已认证 actor；
+      // source 可选（dx|core，省略=两套都读），limit 越界由读模型结构化报错。
+      case "agent/task/unified-list": {
+        const source = requireStr(payload.source, 10) || undefined;
+        const limit = Number.isFinite(Number(payload.limit)) ? Number(payload.limit) : undefined;
+        try {
+          return taskUnifiedView.listUnifiedTasks({ db, userId, source, limit });
+        } catch (error) {
+          throw mapUnifiedViewError(error);
+        }
       }
 
       // ---------------- run ----------------

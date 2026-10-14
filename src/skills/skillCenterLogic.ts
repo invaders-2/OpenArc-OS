@@ -346,7 +346,7 @@ export function skillsForTab(tab: SkillTab, skills: SkillRecord[]): SkillRecord[
   return [];
 }
 
-/** 媒体类技能（skill-store.cjs:179-438 的 kind 取值）：参数入口不属 UI-1。 */
+/** 媒体类技能（skill-store.cjs:179-438 的 kind 取值）：产物是图片 / 视频 / 音频。 */
 export const MEDIA_SKILL_KINDS: readonly string[] = [
   "image",
   "image_upscale",
@@ -360,13 +360,468 @@ export const MEDIA_SKILL_KINDS: readonly string[] = [
   "audio_music",
 ];
 
-/** 技能是否可运行：必须启用，且不是系统内部能力（layer=capability）。 */
+/** 按 skill run 的真实产物类型判断是否媒体类技能。 */
+export function isMediaSkillKind(kind: unknown): boolean {
+  return typeof kind === "string" && MEDIA_SKILL_KINDS.indexOf(kind) >= 0;
+}
+
+/**
+ * 技能是否可运行：必须启用，且不是"非媒体类"的系统内部能力。
+ * 媒体类技能本轮已补齐参数入口，运行与否改由 skillEntryAvailability("run", ...)
+ * 按 skill/health 的依赖装配事实判定 —— mediaAdapter 未装配时显示"缺少媒体适配器"，
+ * 而不是灰按钮 + 无解释。
+ */
 export function skillRunDisabledReason(skill: SkillRecord | null): string | null {
   if (!skill) return "先选择一个技能";
-  if (skill.layer === "capability") return "系统能力不通过技能中心运行";
-  if (skill.enabled === false) return "技能已停用：先启用再运行";
-  if (skill.kind && MEDIA_SKILL_KINDS.indexOf(skill.kind) >= 0) {
-    return "媒体技能的参数入口属后续批次，本轮只运行文本与工作流技能";
+  if (skill.layer === "capability" && !isMediaSkillKind(skill.kind)) {
+    return "系统能力不通过技能中心运行";
   }
+  if (skill.enabled === false) return "技能已停用：先启用再运行";
   return null;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   9. 依赖装配事实 → 入口可用性（对齐 electron/skill-service.cjs:208-225）
+      skill/health 返回的 dependencies 是唯一事实来源；界面只读它，不自报环境。
+      · 值为 false = 明确未装配 → 结构化提示"缺少 X"；
+      · 值为 true = 已装配；
+      · 缺键 / health 尚未返回 = 未知，不据此禁用（避免把"还没加载"当成"缺失"）。
+   ══════════════════════════════════════════════════════════════════════════ */
+export type SkillDependencyKey =
+  | "chatTarget"
+  | "providerAdapter"
+  | "modelCall"
+  | "cliRuntime"
+  | "mediaAdapter"
+  | "fsAdapter"
+  | "skillWorkspace";
+
+export const SKILL_DEPENDENCY_LABEL: Record<SkillDependencyKey, string> = {
+  chatTarget: "模型连接（providerAdapter）",
+  providerAdapter: "模型供应商只读桥（providerAdapter）",
+  modelCall: "模型调用（modelAdapter）",
+  cliRuntime: "CLI 运行时（cliRuntime）",
+  mediaAdapter: "媒体适配器（mediaAdapter）",
+  fsAdapter: "虚拟文件树（fsAdapter）",
+  skillWorkspace: "多 Agent 工作空间（skillWorkspace）",
+};
+
+/** 依赖缺失的显式文案：媒体类技能必须显示"缺少媒体适配器"，不能只给灰按钮。 */
+export const SKILL_DEPENDENCY_MISSING_LABEL: Record<SkillDependencyKey, string> = {
+  chatTarget: "缺少模型连接（providerAdapter）",
+  providerAdapter: "缺少模型供应商只读桥（providerAdapter）",
+  modelCall: "缺少模型调用（modelAdapter）",
+  cliRuntime: "缺少 CLI 运行时（cliRuntime）",
+  mediaAdapter: "缺少媒体适配器（mediaAdapter）",
+  fsAdapter: "缺少虚拟文件树（fsAdapter）",
+  skillWorkspace: "缺少多 Agent 工作空间（skillWorkspace）",
+};
+
+export type SkillDependencyFlags = Record<string, boolean | undefined>;
+
+export function dependencyMissingLabel(key: string): string {
+  return SKILL_DEPENDENCY_MISSING_LABEL[key as SkillDependencyKey] || "缺少依赖（" + key + "）";
+}
+
+/** 每种技能 kind 运行所需依赖（依据 skill-runner.cjs 的真实调用路径）。 */
+export const SKILL_RUN_REQUIREMENTS: Record<string, readonly SkillDependencyKey[]> = {
+  text: ["chatTarget", "modelCall"],
+  procedure: ["chatTarget", "modelCall"],
+  image: ["providerAdapter", "mediaAdapter", "fsAdapter"],
+  image_edit: ["providerAdapter", "mediaAdapter", "fsAdapter"],
+  image_batch: ["providerAdapter", "mediaAdapter", "fsAdapter"],
+  image_describe: ["providerAdapter", "mediaAdapter"],
+  midjourney: ["providerAdapter", "mediaAdapter", "fsAdapter"],
+  image_upscale: ["providerAdapter", "cliRuntime", "fsAdapter"],
+  video: ["providerAdapter", "mediaAdapter", "fsAdapter"],
+  audio_tts: ["providerAdapter", "mediaAdapter", "fsAdapter"],
+  audio_music: ["providerAdapter", "mediaAdapter", "fsAdapter"],
+  audio_transcribe: ["providerAdapter", "mediaAdapter"],
+};
+
+export const SKILL_DEFAULT_RUN_REQUIREMENTS: readonly SkillDependencyKey[] = ["chatTarget", "modelCall"];
+
+export function skillRunRequirements(skill: SkillRecord | null): readonly SkillDependencyKey[] {
+  if (!skill) return [];
+  return SKILL_RUN_REQUIREMENTS[skill.kind || "text"] || SKILL_DEFAULT_RUN_REQUIREMENTS;
+}
+
+/** 只把"明确为 false"的依赖算缺失；未知（缺键 / undefined）不算，避免误禁用。 */
+export function missingSkillDependencies(
+  requirements: readonly SkillDependencyKey[],
+  deps: SkillDependencyFlags | null | undefined,
+): { key: SkillDependencyKey; label: string }[] {
+  const out: { key: SkillDependencyKey; label: string }[] = [];
+  if (!deps) return out;
+  for (const key of requirements) {
+    if (deps[key] === false) out.push({ key, label: dependencyMissingLabel(key) });
+  }
+  return out;
+}
+
+/** 入口种类：运行 / 分析导入 / 保存更新 / 工作区 / 已有导入导出删除启停。 */
+export type SkillEntryKind = "run" | "analyze" | "save" | "workspace" | "import" | "export" | "delete" | "toggle";
+
+export const SKILL_ENTRY_KINDS: readonly SkillEntryKind[] = [
+  "run",
+  "analyze",
+  "save",
+  "workspace",
+  "import",
+  "export",
+  "delete",
+  "toggle",
+];
+
+/** 入口自身固定的依赖要求；run 由技能 kind 动态决定。 */
+export const SKILL_ENTRY_REQUIREMENTS: Record<SkillEntryKind, readonly SkillDependencyKey[]> = {
+  run: [],
+  analyze: ["chatTarget", "modelCall"],
+  save: [],
+  workspace: ["skillWorkspace"],
+  import: [],
+  export: [],
+  delete: [],
+  toggle: [],
+};
+
+export type SkillEntryAvailability = {
+  available: boolean;
+  /** 结构化错误码：沿 skill-service 的规约，界面不另造码。 */
+  code: string | null;
+  /** 人话原因：不可用时必须非空（DESIGN_SYSTEM §8：禁用控件不隐藏原因）。 */
+  reason: string | null;
+  missing: { key: string; label: string }[];
+};
+
+export function skillEntryRequirements(
+  entry: SkillEntryKind,
+  skill: SkillRecord | null,
+): readonly SkillDependencyKey[] {
+  if (entry === "run") return skillRunRequirements(skill);
+  return SKILL_ENTRY_REQUIREMENTS[entry] || [];
+}
+
+/**
+ * 入口可用性判定（顺序即优先级）：
+ *   1 本地硬规则（未选中 / 非媒体系统能力 / 已停用 / 内置不可覆盖）
+ *   2 依赖装配事实（health.dependencies 里明确为 false 的项）
+ *   3 可执行
+ * code 直接用于错误展示与测试断言，不把环境缺失伪装成可重试失败。
+ */
+export function skillEntryAvailability(
+  entry: SkillEntryKind,
+  skill: SkillRecord | null,
+  deps: SkillDependencyFlags | null | undefined,
+): SkillEntryAvailability {
+  const local = entry === "run" ? skillRunDisabledReason(skill) : null;
+  if (local) return { available: false, code: "LOCAL_INPUT_REQUIRED", reason: local, missing: [] };
+  if (entry === "save" && skill && skill.builtin === true) {
+    return { available: false, code: "SKILL_CONFLICT", reason: "内置技能不能覆盖：请换一个自定义技能 ID 另存。", missing: [] };
+  }
+  const missing = missingSkillDependencies(skillEntryRequirements(entry, skill), deps);
+  if (missing.length) {
+    return {
+      available: false,
+      code: "SKILL_DEPENDENCY_UNAVAILABLE",
+      reason: missing.map((m) => m.label).join("；") + "，该入口当前不可用。",
+      missing,
+    };
+  }
+  return { available: true, code: null, reason: null, missing: [] };
+}
+
+/** 从 skill-service.normalizeSkillError 的 detail.dependency 取依赖名。 */
+export function dependencyOfDetail(detail: unknown): string | null {
+  if (!detail || typeof detail !== "object") return null;
+  const value = (detail as { dependency?: unknown }).dependency;
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+/** SKILL_DEPENDENCY_UNAVAILABLE 的具体文案：指名缺哪一个依赖，并说明没有产物。 */
+export function dependencyUnavailableText(dependency: unknown): string | null {
+  const key = typeof dependency === "string" ? dependency.trim() : "";
+  if (!key) return null;
+  return dependencyMissingLabel(key) + "：该技能没有执行，也没有产生任何产物；接入后可以重试。";
+}
+
+/** 失败码 + detail → 人话；依赖缺失时优先给"缺什么"，其余走 SKILL_ERROR_TEXT。 */
+export function skillFailureText(code: string, detail?: unknown): string {
+  if (code === "SKILL_DEPENDENCY_UNAVAILABLE" || code === "DXOS_ERR_DEPENDENCY_MISSING") {
+    const specific = dependencyUnavailableText(dependencyOfDetail(detail));
+    if (specific) return specific;
+  }
+  return skillErrorText(code);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   10. 运行参数表单（文本 / 媒体共用一份契约）
+       key 直接作为 skill/run 的 arguments 字段；界面不对字段做二次命名。
+   ══════════════════════════════════════════════════════════════════════════ */
+export type SkillInputField = {
+  key: string;
+  label: string;
+  hint: string;
+  required: boolean;
+  multiline?: boolean;
+  /** 逗号 / 换行分隔为数组（参考图 / 参考音频等多引用参数）。 */
+  list?: boolean;
+};
+
+const TEXT_FIELDS: readonly SkillInputField[] = [
+  {
+    key: "instruction",
+    label: "输入",
+    hint: "作为 instruction 传给技能执行器；界面不发送身份、凭据或会话字段。",
+    required: true,
+    multiline: true,
+  },
+];
+const PROMPT_FIELD: SkillInputField = {
+  key: "prompt",
+  label: "提示词",
+  hint: "描述要生成 / 修改的内容；越具体越好。",
+  required: true,
+  multiline: true,
+};
+const PATH_FIELD: SkillInputField = {
+  key: "path",
+  label: "保存路径（可选）",
+  hint: "产物落到虚拟文件树的相对路径；留空则由执行器选默认目录。",
+  required: false,
+};
+const IMAGE_REF_FIELD: SkillInputField = {
+  key: "images",
+  label: "参考图引用",
+  hint: "虚拟文件树节点 ID、/api/fs/raw/<id> 或本机 URL；多张用逗号分隔。",
+  required: true,
+  list: true,
+};
+
+export const SKILL_RUN_INPUTS: Record<string, readonly SkillInputField[]> = {
+  text: TEXT_FIELDS,
+  procedure: TEXT_FIELDS,
+  image: [PROMPT_FIELD, PATH_FIELD],
+  video: [PROMPT_FIELD, PATH_FIELD],
+  audio_music: [PROMPT_FIELD, PATH_FIELD],
+  audio_tts: [
+    { key: "text", label: "要合成的文字", hint: "传给语音合成的正文。", required: true, multiline: true },
+    PATH_FIELD,
+  ],
+  image_edit: [PROMPT_FIELD, IMAGE_REF_FIELD],
+  image_batch: [PROMPT_FIELD, IMAGE_REF_FIELD],
+  image_describe: [
+    {
+      key: "images",
+      label: "要识别的图片",
+      hint: "节点 ID、/api/fs/raw/<id> 或本机 URL。",
+      required: true,
+      list: true,
+    },
+    { key: "prompt", label: "识别要求（可选）", hint: "留空由执行器给默认描述要求。", required: false, multiline: true },
+  ],
+  image_upscale: [
+    { key: "image", label: "待放大图片", hint: "节点 ID、/api/fs/raw/<id> 或本机 URL。", required: true },
+    { key: "resolution", label: "目标分辨率（可选）", hint: "2k / 4k / 8k；留空默认 2k。", required: false },
+  ],
+  midjourney: [
+    {
+      key: "operation",
+      label: "操作",
+      hint: "imagine / blend / edit / upscale / status 等。",
+      required: true,
+    },
+    { key: "prompt", label: "提示词", hint: "imagine / blend / edit 需要。", required: false, multiline: true },
+    { key: "task_id", label: "任务 ID（可选）", hint: "status 与后续操作需要。", required: false },
+  ],
+  audio_transcribe: [
+    { key: "audio", label: "音频引用", hint: "节点 ID、/api/fs/raw/<id> 或本机 URL。", required: true },
+    {
+      key: "operation",
+      label: "操作（可选）",
+      hint: "transcribe / translate；留空默认 transcribe。",
+      required: false,
+    },
+  ],
+};
+
+export function skillRunInputs(skill: SkillRecord | null): readonly SkillInputField[] {
+  if (!skill) return [];
+  return SKILL_RUN_INPUTS[skill.kind || "text"] || TEXT_FIELDS;
+}
+
+/**
+ * 把表单值组装成 skill/run 的 arguments。
+ * 必填缺失在界面先行拦截（LOCAL_INPUT_REQUIRED），不把空字段发给后端。
+ */
+export function buildSkillRunArguments(
+  fields: readonly SkillInputField[],
+  values: Record<string, string | undefined> | null | undefined,
+): { ok: boolean; missing: string[]; args: Record<string, unknown> } {
+  const args: Record<string, unknown> = {};
+  const missing: string[] = [];
+  for (const field of fields) {
+    const raw = values && typeof values[field.key] === "string" ? String(values[field.key]).trim() : "";
+    if (!raw) {
+      if (field.required) missing.push(field.label);
+      continue;
+    }
+    if (field.list) {
+      const items = raw
+        .split(/[,\n，]/)
+        .map((v) => v.trim())
+        .filter(Boolean);
+      if (items.length) args[field.key] = items;
+    } else {
+      args[field.key] = raw;
+    }
+  }
+  return { ok: missing.length === 0, missing, args };
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   11. 产物投影（skill-runner.cjs 的 images / videos / audios 形状）
+       fsAdapter 落盘后每项是 { nodeId, name, url:"/api/fs/raw/<nodeId>" }；
+       界面只读这些标识，不 fetch 二进制、不拼本机绝对路径。
+   ══════════════════════════════════════════════════════════════════════════ */
+export type SkillArtifactKind = "image" | "video" | "audio";
+export type SkillArtifact = {
+  kind: SkillArtifactKind;
+  nodeId?: string;
+  name?: string;
+  url?: string;
+  mime?: string;
+};
+
+const ARTIFACT_KEYS: readonly { key: string; kind: SkillArtifactKind }[] = [
+  { key: "images", kind: "image" },
+  { key: "videos", kind: "video" },
+  { key: "audios", kind: "audio" },
+];
+
+export function collectSkillArtifacts(value: unknown): SkillArtifact[] {
+  if (!value || typeof value !== "object") return [];
+  const record = value as Record<string, unknown>;
+  const out: SkillArtifact[] = [];
+  for (const { key, kind } of ARTIFACT_KEYS) {
+    const list = record[key];
+    if (!Array.isArray(list)) continue;
+    for (const item of list) {
+      if (!item || typeof item !== "object") continue;
+      const row = item as Record<string, unknown>;
+      out.push({
+        kind,
+        nodeId: typeof row.nodeId === "string" ? row.nodeId : undefined,
+        name: typeof row.name === "string" ? row.name : undefined,
+        url: typeof row.url === "string" ? row.url : undefined,
+        mime: typeof row.mime === "string" ? row.mime : undefined,
+      });
+    }
+  }
+  return out;
+}
+
+/** 产物的可核对标识：优先虚拟文件树路径，其次接口返回的 URL，最后文件名。 */
+export function artifactRef(artifact: SkillArtifact): string {
+  if (artifact.nodeId) return "/api/fs/raw/" + artifact.nodeId;
+  if (artifact.url) return artifact.url;
+  if (artifact.name) return artifact.name;
+  return "（产物缺少标识）";
+}
+
+export const SKILL_ARTIFACT_KIND_LABEL: Record<SkillArtifactKind, string> = {
+  image: "图片",
+  video: "视频",
+  audio: "音频",
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   12. 分析导入 / 保存更新 / 工作区的数据投影与状态文案
+       skill/analyze        → { skill:{id,name,description,kind,systemPrompt,v2}, warnings:[] }
+       skill/save           → { skill:{...} }
+       skill/workspace/list → { items:[profile] }
+   ══════════════════════════════════════════════════════════════════════════ */
+export type SkillWorkspaceProfile = {
+  id: string;
+  name?: string;
+  description?: string;
+  modelProfile?: string;
+  maxModelCalls?: number;
+  maxToolCalls?: number;
+  enabled?: boolean;
+  capabilityScopes?: string[];
+  packId?: string;
+};
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+}
+
+export function analyzeResultOf(value: unknown): { skill: SkillRecord | null; warnings: string[] } {
+  if (!value || typeof value !== "object") return { skill: null, warnings: [] };
+  const record = value as { skill?: unknown; warnings?: unknown };
+  const skill = record.skill && typeof record.skill === "object" ? (record.skill as unknown as SkillRecord) : null;
+  return { skill, warnings: asStringArray(record.warnings) };
+}
+
+export function workspaceProfilesOf(value: unknown): SkillWorkspaceProfile[] {
+  if (!value || typeof value !== "object") return [];
+  const items = (value as { items?: unknown }).items;
+  if (!Array.isArray(items)) return [];
+  return items
+    .filter((item) => item && typeof item === "object")
+    .map((item) => {
+      const row = item as Record<string, unknown>;
+      return {
+        id: String(row.id == null ? "" : row.id),
+        name: typeof row.name === "string" ? row.name : undefined,
+        description: typeof row.description === "string" ? row.description : undefined,
+        modelProfile: typeof row.modelProfile === "string" ? row.modelProfile : undefined,
+        maxModelCalls: typeof row.maxModelCalls === "number" ? row.maxModelCalls : undefined,
+        maxToolCalls: typeof row.maxToolCalls === "number" ? row.maxToolCalls : undefined,
+        enabled: typeof row.enabled === "boolean" ? row.enabled : undefined,
+        capabilityScopes: asStringArray(row.capabilityScopes),
+        packId: typeof row.packId === "string" ? row.packId : undefined,
+      };
+    })
+    .filter((p) => p.id);
+}
+
+export type SkillAuxStatus = "idle" | "reading" | "working" | "done" | "failed" | "unavailable";
+
+/** 分析 / 保存 / 工作区三类异步入口共用的状态反馈（MOTION_SYSTEM §7）。 */
+export function skillAuxFeedback(status: SkillAuxStatus): {
+  label: string;
+  tone: SkillTone;
+  detail: string;
+  active: boolean;
+} {
+  switch (status) {
+    case "reading":
+      return { label: "正在读取本地文件", tone: "neutral", detail: "读取只发生在本机，不上传、不联网。", active: true };
+    case "working":
+      return { label: "处理中", tone: "neutral", detail: "命令已发给主进程，等待结果。", active: true };
+    case "done":
+      return { label: "已完成", tone: "success", detail: "主进程已返回结果。", active: false };
+    case "failed":
+      return { label: "失败", tone: "danger", detail: "操作未完成，原因见错误码说明。", active: false };
+    case "unavailable":
+      return { label: "依赖缺失", tone: "warning", detail: "所需依赖未装配，入口不可用。", active: false };
+    default:
+      return { label: "未开始", tone: "neutral", detail: "选择内容后可以执行。", active: false };
+  }
+}
+
+/** 分析结果可否直接保存：必须有 name 与 systemPrompt（skill-store.cjs:600-608）。 */
+export function canSaveAnalyzedSkill(skill: SkillRecord | null): { ok: boolean; reason: string | null } {
+  if (!skill) return { ok: false, reason: "还没有分析结果" };
+  if (!String(skill.name || "").trim()) return { ok: false, reason: "分析结果缺少名称" };
+  if (!String(skill.systemPrompt || "").trim()) return { ok: false, reason: "分析结果缺少执行说明（systemPrompt）" };
+  return { ok: true, reason: null };
+}
+
+/** 保存自定义技能的 ID 规则，与 skill-store.cjs:603 同一条（小写字母开头 + 小写字母/数字/下划线）。 */
+export function isValidSkillId(id: unknown): boolean {
+  return typeof id === "string" && /^[a-z][a-z0-9_]*$/.test(id.trim().toLowerCase());
+}
+

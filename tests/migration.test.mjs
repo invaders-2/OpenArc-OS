@@ -40,7 +40,7 @@ async function seedV1(dbPath) {
 }
 
 test("schema 版本已推进到 v16（D4-06 Closure 在 v15 之上新增 task_budgets 任务级账本）", () => {
-  assert.equal(SCHEMA_VERSION, 25);
+  assert.equal(SCHEMA_VERSION, 26);
 });
 
 test("全新数据库直接建到 v8，identity login 成立", async () => {
@@ -245,7 +245,7 @@ test("空库直接建到 v25：画布域三表齐备，既有表不受影响", (
   const { dir, dbPath } = tempDbPath();
   try {
     const store = new IdentityStore({ path: dbPath }).open();
-    assert.equal(store.schemaVersion, 25);
+    assert.equal(store.schemaVersion, 26);
     for (const t of ["canvas_dxos_asset_libraries", "canvas_dxos_asset_items", "canvas_dxos_agent_attachments"]) {
       assert.ok(hasTable(store.connection, t), "缺 v25 表 " + t);
     }
@@ -274,7 +274,7 @@ test("v24 → v25：画布域三表只新增、老库升级与重放幂等、高
     raw.close();
 
     const store = new IdentityStore({ path: dbPath }).open();
-    assert.equal(store.schemaVersion, 25);
+    assert.equal(store.schemaVersion, 26);
     for (const t of ["canvas_dxos_asset_libraries", "canvas_dxos_asset_items", "canvas_dxos_agent_attachments"]) {
       assert.ok(hasTable(store.connection, t), "缺 v25 表 " + t);
     }
@@ -284,13 +284,13 @@ test("v24 → v25：画布域三表只新增、老库升级与重放幂等、高
     store.connection.exec("PRAGMA user_version = 24");
     store.close();
     const again = new IdentityStore({ path: dbPath }).open();
-    assert.equal(again.schemaVersion, 25);
+    assert.equal(again.schemaVersion, 26);
     assert.ok(hasTable(again.connection, "canvas_dxos_agent_attachments"));
     again.close();
 
-    // 高版本拒开：user_version=26 > 25。
+    // 高版本拒开：user_version=27 > 26。
     const tooNew = new DatabaseSync(dbPath);
-    tooNew.exec("PRAGMA user_version = 26");
+    tooNew.exec("PRAGMA user_version = 27");
     tooNew.close();
     assert.throws(
       () => new IdentityStore({ path: dbPath }).open(),

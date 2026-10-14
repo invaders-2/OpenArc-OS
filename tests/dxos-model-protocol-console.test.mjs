@@ -24,6 +24,13 @@ import { createRequire } from "node:module";
 
 import {
   MODEL_CONSOLE_COMMANDS,
+  MODEL_ENTRIES,
+  MODEL_ENTRY_INPUT_LABEL,
+  MODEL_ENTRY_KEYS,
+  MODEL_ENTRY_MISSING_CREDENTIAL_TEXT,
+  MODEL_ENTRY_REQUIRED_INPUTS,
+  MODEL_ENTRY_RISK_LABEL,
+  MODEL_ENTRY_RISK_TEXT,
   MODEL_IDENTITY_PAYLOAD_KEYS,
   MODEL_PROTOCOL_COMMANDS,
   MODEL_SETTINGS_EXISTING_COMMANDS,
@@ -40,6 +47,13 @@ import {
   isAllowedModelCommand,
   isModelEvent,
   missingFieldsText,
+  modelEntryAvailability,
+  modelEntryConfirmText,
+  modelEntryConfirmTitle,
+  modelEntryMeta,
+  modelEntryMissingInputs,
+  modelEntryNeedsConfirm,
+  modelEntryRiskText,
   modelProtocolErrorState,
   modelProtocolErrorText,
   normalizeProtocolResult,
@@ -81,16 +95,19 @@ service.manifest = manifestService;
 /* ══════════════════════════════════════════════════════════════════════════
    1 命令白名单
    ══════════════════════════════════════════════════════════════════════════ */
-test("UI-5 新增命令逐条落在 electron/model-bootstrap.cjs 的 MODEL_COMMANDS 内", () => {
+test("UI-5 命令逐条落在 electron/model-bootstrap.cjs 的 MODEL_COMMANDS 内", () => {
   const backend = modelBootstrap.MODEL_COMMANDS;
-  assert.equal(MODEL_PROTOCOL_COMMANDS.length, 4, "UI-5 只新增 4 条命令");
+  assert.equal(MODEL_PROTOCOL_COMMANDS.length, 8, "UI-5 区块共 8 条命令（4 只读/流式 + 4 动作入口）");
   for (const c of MODEL_PROTOCOL_COMMANDS) {
     assert.ok(backend.includes(c), c + " 必须是后端白名单命令");
   }
   assert.deepEqual(
     [...MODEL_PROTOCOL_COMMANDS],
-    ["protocol/list", "protocol/get", "manifest/get", "provider/callStream"],
-    "新增命令集合与顺序必须与文档一致",
+    [
+      "protocol/list", "protocol/get", "manifest/get", "provider/callStream",
+      "protocol/validate", "protocol/save", "image/generate", "protocol/execute",
+    ],
+    "命令集合与顺序必须与文档一致",
   );
 });
 
@@ -141,6 +158,16 @@ test("载荷按键白名单构造：身份字段与未登记键一律丢弃", ()
   assert.deepEqual(Object.keys(streamPayload).sort(), ["messages", "model", "providerId", "requestId"]);
   assert.equal(streamPayload.messages[0].content, "hi");
   assert.deepEqual(buildProtocolPayload("unknown/command", { a: 1 }), {}, "未登记命令没有任何允许键");
+
+  /* UI-5b 动作入口：按键白名单构造，secret / 身份字段一律丢。 */
+  const validate = buildProtocolPayload("protocol/validate", { protocol: { id: "x" }, secret: "sk", userId: "u" });
+  assert.deepEqual(Object.keys(validate), ["protocol"]);
+  const save = buildProtocolPayload("protocol/save", { kind: "model", protocol: { id: "x" }, secret: "sk" });
+  assert.deepEqual(Object.keys(save).sort(), ["kind", "protocol"]);
+  const image = buildProtocolPayload("image/generate", { providerId: "p", model: "m", prompt: "画一只猫", count: 2, secret: "sk", appId: "settings" });
+  assert.deepEqual(Object.keys(image).sort(), ["count", "model", "prompt", "providerId"]);
+  const exec = buildProtocolPayload("protocol/execute", { providerId: "p", model: "m", prompt: "跑", intent: "image.generate", inputs: {}, secret: "sk" });
+  assert.deepEqual(Object.keys(exec).sort(), ["inputs", "intent", "model", "prompt", "providerId"]);
 });
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -161,13 +188,18 @@ test("真实 protocol/list 回包可投影：71 条、两类 kind、v2/legacy �
   assert.equal(LIST_NORM.items.filter((i) => i.kind === "model").length, 38);
   assert.equal(LIST_NORM.items.filter((i) => i.kind === "provider").length, 33);
   assert.equal(LIST_NORM.shadowedLegacy.length, 1, "agnes 的 legacy 定义被 v2 遮蔽，单独附加");
+  assert.equal(LIST_NORM.shadowedLegacy[0].id, "agnes");
+  assert.equal(LIST_NORM.shadowedLegacy[0].execution, "conditional", "B7e3 插件端口已实现，agnes 与 runninghub / modelscope 同语义");
+  assert.match(LIST_NORM.shadowedLegacy[0].unavailableReason, /agnes 插件/);
 });
 
 test("protocol/list 不再有 ported:false（B2 结论），execution 字段如实保留", () => {
   assert.equal(LIST_NORM.items.some((i) => i.ported === false), false, "metadata 已无 ported:false");
-  const unavailable = LIST_NORM.items.filter((i) => i.execution === "unavailable");
-  assert.ok(unavailable.length >= 5, "CLI 桥 / 原生适配批次应仍是 unavailable");
-  assert.ok(unavailable.every((i) => typeof i.unavailableReason === "string" && i.unavailableReason.length > 0), "unavailable 必须带原因");
+  // B7e2 后续：CLI 桥 / 插件端口批次改标 conditional（端口注入后可用，未注入仍结构化拒绝）。
+  const conditional = LIST_NORM.items.filter((i) => i.execution === "conditional");
+  assert.ok(conditional.length >= 5, "CLI 桥 / 插件端口批次应标 conditional");
+  assert.ok(conditional.every((i) => typeof i.unavailableReason === "string" && i.unavailableReason.length > 0), "conditional 必须写明可执行前提");
+  assert.equal(LIST_NORM.items.some((i) => i.execution === "unavailable"), false, "agnes 被 v2 遮蔽，可见 legacy 已无 unavailable");
 });
 
 test("normalizeProtocolResult 对不完整回包如实标注（不拿空数组冒充没有数据）", () => {
@@ -194,12 +226,16 @@ test("filterProtocols：kind 过滤 + 搜索 id/label/能力，且不改变原�
   assert.equal(items.length, 71, "过滤不得修改入参");
 });
 
-test("protocolRowStatus：declarative / available / unavailable / 无 execution 四种都不造假", () => {
+test("protocolRowStatus：declarative / available / conditional / unavailable / 无 execution 五种都不造假", () => {
   const decl = protocolRowStatus({ id: "openai-images", kind: "model", execution: "declarative", engine: "v2" });
   assert.equal(decl.tone, "success");
   const avail = protocolRowStatus({ id: "x", kind: "model", execution: "available", engine: "legacy" });
   assert.equal(avail.tone, "neutral");
-  const bad = protocolRowStatus({ id: "cli:codex", kind: "provider", execution: "unavailable", unavailableReason: "CLI 桥批次" });
+  const cond = protocolRowStatus({ id: "cli:codex", kind: "provider", execution: "conditional", unavailableReason: "需安装 Codex CLI 并注入 cliCodex 端口" });
+  assert.equal(cond.tone, "warning");
+  assert.equal(cond.label, "条件可用");
+  assert.ok(cond.detail.includes("cliCodex"));
+  const bad = protocolRowStatus({ id: "cli:gemini", kind: "provider", execution: "unavailable", unavailableReason: "CLI 桥批次" });
   assert.equal(bad.tone, "warning");
   assert.ok(bad.detail.includes("CLI 桥批次"));
   const unknown = protocolRowStatus({ id: "y", kind: "model" });
@@ -564,8 +600,14 @@ test("界面只经 window.openarc.model 取数据，新增区块只发白名单�
   assert.ok(code.includes("openarc"), "必须通过 window.openarc");
   assert.ok(/openarc\?\.\s*model|openarc.*model/.test(code), "必须走 model 域");
   assert.equal(/openarc\s*\.\s*(agent|skill|mcp|identity|task)\b/.test(code), false, "不得越域取数据");
-  for (const c of MODEL_PROTOCOL_COMMANDS) assert.ok(code.includes('"' + c + '"'), "新增区块必须显式使用 " + c);
-  assert.equal(/protocol\/delete|protocol\/save|image\/generate/.test(code), false, "不得发送未登记 / 超出范围命令");
+  /* 命令名登记在纯逻辑层（MODEL_ENTRIES），界面只按 meta.command 发；未登记的仍被白名单拒绝。 */
+  const logicCode = read("src/settings/modelProtocolLogic.ts");
+  for (const c of MODEL_PROTOCOL_COMMANDS) assert.ok(logicCode.includes('"' + c + '"'), "白名单/登记表必须包含 " + c);
+  assert.ok(code.includes("MODEL_ENTRIES") && code.includes("meta.command"), "界面必须只按登记表发命令");
+  assert.equal(/protocol\/delete/.test(code), false, "不得发送未登记命令 protocol/delete");
+  assert.equal(isAllowedModelCommand("protocol/delete"), false);
+  assert.equal(isAllowedModelCommand("protocol/save"), true);
+  assert.equal(isAllowedModelCommand("image/generate"), true);
 });
 
 test("既有三个 pane 的 DOM、类名与交互未被改动", () => {
@@ -639,3 +681,105 @@ test("main.tsx 不改动：settings 分支仍经 SettingsContent 渲染既有 Mo
   assert.ok(code.includes('w?.appId === "settings"'), "settings 分支必须保留");
   assert.equal(code.includes("modelProtocolLogic"), false, "main.tsx 不得引入 UI-5 逻辑层");
 });
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   9 动作入口（UI-5b）—— 可用性 / 凭据提示 / 必填 / 风险
+   ══════════════════════════════════════════════════════════════════════════ */
+test("四个动作入口逐条落在后端命令表，命令与界面入口同源", () => {
+  const backend = modelBootstrap.MODEL_COMMANDS;
+  assert.deepEqual([...MODEL_ENTRY_KEYS], ["protocol-validate", "protocol-save", "image-generate", "protocol-execute"]);
+  assert.equal(MODEL_ENTRIES.length, 4);
+  for (const meta of MODEL_ENTRIES) {
+    assert.ok(backend.includes(meta.command), meta.command + " 必须是后端白名单命令");
+    assert.ok(MODEL_PROTOCOL_COMMANDS.includes(meta.command), meta.command + " 必须在 UI-5 命令表内");
+    assert.equal(isAllowedModelCommand(meta.command), true, meta.command + " 必须被界面白名单承认");
+    assert.equal(modelEntryMeta(meta.key), meta);
+    assert.ok(meta.inputs.length > 0, meta.key + " 必须声明输入");
+  }
+  assert.equal(modelEntryMeta("nope"), null);
+  assert.equal(modelEntryRiskText("nope"), "");
+  assert.deepEqual(Object.keys(MODEL_ENTRY_RISK_LABEL).sort(), ["read", "use", "write"]);
+  for (const key of MODEL_ENTRY_KEYS) assert.ok(MODEL_ENTRY_RISK_TEXT[key].length > 0, key + " 必须有风险说明");
+});
+
+test("入口可用性：桥缺失 / 无供应商 / 缺凭据 / 缺协议 / 就绪", () => {
+  const base = { hasBridge: true, enabledProvider: "prov_local", credentialConfigured: true, hasProtocol: false };
+  assert.equal(modelEntryAvailability("protocol-save", base).kind, "no-input");
+  const noBridge = modelEntryAvailability("protocol-save", { ...base, hasBridge: false });
+  assert.equal(noBridge.kind, "no-bridge");
+  const noProvider = modelEntryAvailability("image-generate", { ...base, enabledProvider: null });
+  assert.equal(noProvider.kind, "no-provider");
+  assert.ok(noProvider.description.includes("没有可用的供应商"), noProvider.description);
+
+  /* 缺凭据：结构化提示，只说缺凭据，不回显密钥。 */
+  const noCred = modelEntryAvailability("image-generate", { ...base, credentialConfigured: false });
+  assert.equal(noCred.kind, "no-credential");
+  assert.equal(noCred.title, "图像生成不可用：缺凭据");
+  assert.equal(noCred.description, MODEL_ENTRY_MISSING_CREDENTIAL_TEXT);
+  assert.ok(noCred.description.includes("没有执行"));
+  assert.equal(noCred.description.includes("sk-"), false, "不得出现任何密钥字样");
+  assert.deepEqual(noCred.missing, ["credential/status.configured=true"]);
+  assert.equal(modelEntryAvailability("protocol-execute", { ...base, credentialConfigured: false }).kind, "no-credential");
+
+  /* 协议入口不依赖凭据；缺协议才是它的前置条件。 */
+  assert.equal(modelEntryAvailability("protocol-validate", { ...base, hasProtocol: true }).available, true);
+  assert.equal(modelEntryAvailability("protocol-validate", { ...base, credentialConfigured: false, hasProtocol: true }).available, true);
+  assert.equal(modelEntryAvailability("image-generate", base).available, true);
+  assert.equal(modelEntryAvailability("nope", base).kind, "no-input");
+});
+
+test("入口必填输入在前端就被拦下（不发空命令）", () => {
+  assert.deepEqual(MODEL_ENTRY_REQUIRED_INPUTS["protocol-save"], ["kind", "protocol"]);
+  assert.deepEqual(modelEntryMissingInputs("protocol-validate", {}), ["protocol"]);
+  assert.deepEqual(modelEntryMissingInputs("protocol-save", { kind: "model" }), ["protocol"]);
+  assert.deepEqual(modelEntryMissingInputs("image-generate", { providerId: "p", model: "m" }), ["prompt"]);
+  assert.deepEqual(modelEntryMissingInputs("protocol-execute", { providerId: "p", model: "m", prompt: "跑" }), []);
+  assert.deepEqual(modelEntryMissingInputs("nope", {}), []);
+  assert.equal(typeof MODEL_ENTRY_INPUT_LABEL.protocol, "string");
+});
+
+test("界面源码包含四个动作入口，且需要凭据的入口只提示不回显密钥", () => {
+  const code = stripComments(read("src/settings/ModelSettings.tsx"));
+  for (const marker of ["MODEL_ENTRIES", "data-model-entry", "data-model-entry-action", "meta.command"]) {
+    assert.ok(code.indexOf(marker) >= 0, "界面必须渲染 " + marker);
+  }
+  assert.equal(/d401-/.test(code.slice(code.indexOf('data-model-proto="console"'))), false, "UI-5 区块不得使用既有 .d401-* 类");
+  /* 只看动作入口那一段：既有 Providers 区块写入凭据（只写不读）不属于本断言范围。 */
+  const entries = code.slice(code.indexOf('data-model-proto="entries"'));
+  assert.equal(/credentialSecret|api_key|apiKey/.test(entries), false, "动作入口不得读 / 回显密钥");
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+   写类入口二次确认（UI-5c）：protocol/save 确认前不发命令；取消则命令数 0
+   ══════════════════════════════════════════════════════════════════════════ */
+test("只有写类入口需要二次确认（protocol/save），只读与真实调用入口保持原语义", () => {
+  assert.equal(modelEntryNeedsConfirm("protocol-save"), true);
+  for (const key of ["protocol-validate", "image-generate", "protocol-execute"]) {
+    assert.equal(modelEntryNeedsConfirm(key), false, key + " 不是写类入口");
+  }
+  assert.equal(modelEntryNeedsConfirm("nope"), false);
+  assert.ok(modelEntryConfirmTitle("protocol-save").indexOf("保存") >= 0);
+});
+
+test("协议保存确认摘要点名要写入的协议与 kind，并说明取消不发送", () => {
+  const text = modelEntryConfirmText("protocol-save", { kind: "model", protocol: { id: "probe", kind: "model" } });
+  assert.ok(text.indexOf("probe") >= 0, text);
+  assert.ok(text.indexOf("本地协议库") >= 0 && text.indexOf("取消") >= 0, text);
+  const noId = modelEntryConfirmText("protocol-save", { kind: "model", protocol: {} });
+  assert.ok(noId.indexOf("未给出 id") >= 0, noId);
+});
+
+test("界面源码对写类入口走 Dialog 二次确认，其余入口保持直接发送", () => {
+  const code = stripComments(read("src/settings/ModelSettings.tsx"));
+  assert.ok(code.indexOf("Dialog") >= 0, "必须复用既有 Dialog");
+  assert.ok(code.indexOf("modelEntryNeedsConfirm") >= 0, "按风险判定是否确认");
+  assert.ok(code.indexOf("data-model-entry-confirm-submit") >= 0, "必须有确认按钮");
+  assert.ok(code.indexOf("data-model-entry-confirm-cancel") >= 0, "必须有取消按钮");
+  assert.equal(
+    /onClick=\{\(\) => void submitEntry\(meta\.key\)\}/.test(code),
+    false,
+    "入口按钮不得直接发送命令",
+  );
+});
+

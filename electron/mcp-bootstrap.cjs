@@ -16,11 +16,17 @@ const { McpClient } = require("./mcp-client.cjs");
 const { CredentialStore, safeStorageCredentialBackend } = require("./credential-store.cjs");
 const { createMcpStdioLauncher } = require("./executor-launcher.cjs");
 const domain = require("./mcp-domain.cjs");
+const { isConnectedStatus } = require("./mcp-agent-tools.cjs");
+const { paramSummaryText } = require("./mcp-tool-contract.cjs");
+// B4e：开关持久化层的稳定错误码（不另写一份字面量）。
+const { SWITCH_UNAVAILABLE } = require("./mcp-switch.cjs");
+// B4e：聚合命令对外的文本一律走地基统一脱敏（密钥形态 + 本机绝对路径）。
+const { redactText } = require("./dxos-foundation-errors.cjs");
 
 /** MCP 中心由 shell 拥有的系统 App Principal 承载（app_principals 里已内置）。 */
 const HOST_APP_ID = "mcp-center";
 
-function createMcpBundle({ identityStore, authorization, authStore, userDataDir, safeStorage = null, launcher = null, clientFactory = null, fetchImpl = null, clock = null, logger = null, requestTimeoutMs = 8000, maxTools = 200, maxPages = 10, reconnectAttempts = 3, reconnectBackoffMs = 25 } = {}) {
+function createMcpBundle({ identityStore, authorization, authStore, userDataDir, safeStorage = null, launcher = null, clientFactory = null, fetchImpl = null, invocationGate = null, clock = null, logger = null, requestTimeoutMs = 8000, maxTools = 200, maxPages = 10, reconnectAttempts = 3, reconnectBackoffMs = 25 } = {}) {
   if (!identityStore) throw new Error("createMcpBundle 需要 identityStore");
   if (!authorization) throw new Error("createMcpBundle 需要 authorization");
   if (!authStore) throw new Error("createMcpBundle 需要 authStore");
@@ -28,9 +34,10 @@ function createMcpBundle({ identityStore, authorization, authStore, userDataDir,
   // 生产路径只用 OS 安全后端；safeStorage 不可用 → credentialStore 不可用（无明文 fallback）。
   const backend = safeStorage ? safeStorageCredentialBackend({ safeStorage, dir: userDataDir }) : null;
   const credentialStore = new CredentialStore({ store: mcpStore, backend });
+  // B4e 收口：每个真实连接都带上显式开关门（invocationGate）。未注入 = 客户端永远关闭（既有一律拒绝语义）。
   const factory = typeof clientFactory === "function"
     ? clientFactory
-    : () => new McpClient({ launcher: launcher || createMcpStdioLauncher(), fetchImpl, requestTimeoutMs, maxTools, maxPages });
+    : () => new McpClient({ launcher: launcher || createMcpStdioLauncher(), fetchImpl, invocationGate, requestTimeoutMs, maxTools, maxPages });
   const mcpService = new McpService({ identity: identityStore, authService: authorization, authStore, mcpStore, credentialStore, clientFactory: factory, requestTimeoutMs, maxTools, maxPages, reconnectAttempts, reconnectBackoffMs, clock, logger });
 
   /**
@@ -74,6 +81,13 @@ const MCP_COMMANDS = Object.freeze([
   "mcp/reconnect",
   "mcp/test",
   "mcp/testLog",
+  // B4e：只读聚合（mcp__<server>__<tool>），供渲染层直接消费，消除 UI-2 的重复派生。
+  // 它不是调用入口：调用命令仍走 MCP_TOOL_INVOCATION_COMMANDS 的拒绝分支。
+  "mcp/agentTools",
+  // B4e 收口：显式开关的**唯一写命令**（trusted + risk=mcp.manage + 审计），落 <userData>/dxos/mcp.json。
+  "mcp/toolInvocation/set",
+  // B4e 收口：**任务内**的 MCP 工具调用（真实 taskId + ControlledToolProxy 审批 → 真实传输）。
+  "mcp/toolInvocation/call",
 ]);
 /**
  * 工具调用入口：第一批**不开放**。
@@ -84,6 +98,20 @@ const MCP_TOOL_INVOCATION_COMMANDS = Object.freeze(["mcp/callTool", "mcp/call", 
 
 const asStr = (v, max = 512) => (typeof v === "string" ? v.slice(0, max) : v == null ? undefined : String(v).slice(0, max));
 const requireStr = (v, max = 512) => { const s = asStr(v, max); return s && s.length ? s : null; };
+
+/**
+ * B4e · 工具调用结果 → 渲染层安全投影。
+ * text 走地基统一脱敏并截断；只回稳定错误码/审批号，绝不回传输细节或凭据。
+ */
+function projectToolCallResult(res) {
+  const out = { ok: res != null && res.ok === true };
+  if (res && res.error) out.error = asStr(res.error, 120);
+  if (res && res.decisionStatus) out.decisionStatus = asStr(res.decisionStatus, 40);
+  if (res && res.approvalRequestId) out.approvalRequestId = asStr(res.approvalRequestId, 120);
+  if (res && res.reasonCode) out.reasonCode = asStr(res.reasonCode, 120);
+  if (out.ok) out.text = redactText(String((res && res.text) || "")).slice(0, 8000);
+  return out;
+}
 
 /** patch 只接受白名单键，且值都按标量收敛；其余字段由服务层再判一次。 */
 function sanitizePatch(raw) {
@@ -99,8 +127,120 @@ function sanitizePatch(raw) {
   return patch;
 }
 
-function registerMcpIpc({ ipcMain, service, identity, isTrusted, hostAppId = HOST_APP_ID }) {
+function registerMcpIpc({ ipcMain, service, identity, isTrusted, hostAppId = HOST_APP_ID, agentTools = null, mcpServersSnapshot = null, toolInvocationEnabled = null, toolInvocationSwitch = null, audit = null, toolInvocation = null, resolveTaskContext = null }) {
   if (typeof ipcMain.removeHandler === "function") { try { ipcMain.removeHandler("mcp:command"); } catch { /* not registered */ } }
+
+  /** 端口解引用：既接受实例，也接受返回实例的 getter（main.cjs 晚绑定 bridge 用）。 */
+  const resolvePort = (port) => (typeof port === "function" ? port() : port);
+
+  /**
+   * B4e · 开关变更审计（先记意图，后记结果）。审计不可用一律拒绝写入 ——
+   * 不允许"悄悄改变全局调用能力"的状态变更。
+   * @returns {boolean} 是否真正落了一条审计
+   */
+  function auditSwitch(entry) {
+    if (typeof audit !== "function") return false;
+    try { return audit({
+      action: "mcp.toolInvocation.set",
+      decision: entry && entry.decision ? String(entry.decision) : null,
+      reasonCode: entry && entry.reasonCode ? String(entry.reasonCode) : null,
+      enabled: entry && entry.enabled === true,
+      requestId: entry && entry.requestId ? String(entry.requestId) : null,
+    }) === true; } catch { return false; }
+  }
+
+  /** B4e · 任务内工具调用：可信 taskId → 任务上下文（appId 由真实 Task 反推，渲染层自报无效）。 */
+  async function handleToolInvocation(payload, context) {
+    const port = resolvePort(toolInvocation);
+    if (!port || typeof port.callByName !== "function" || typeof port.callDirect !== "function") {
+      return { ok: false, error: domain.ERROR_CODE.MCP_TOOL_DISCOVERY_FAILED, detail: "tool-invocation-unavailable" };
+    }
+    const taskId = requireStr(payload.taskId, 120);
+    if (!taskId) return { ok: false, error: domain.ERROR_CODE.MCP_INVALID_INPUT, detail: "taskId" };
+    // 解析器是**直接函数**（不是 getter）：它需要 { context, taskId }，不能当端口实例解引用。
+    const resolver = typeof resolveTaskContext === "function" ? resolveTaskContext : null;
+    if (!resolver) return { ok: false, error: domain.ERROR_CODE.MCP_UNAUTHORIZED, detail: "task-context-unavailable" };
+    let task;
+    try { task = await resolver({ context, taskId }); } catch { task = null; }
+    if (!task || task.ok !== true) {
+      return { ok: false, error: asStr((task && task.error) || domain.ERROR_CODE.MCP_UNAUTHORIZED, 80), detail: asStr(task && task.detail, 120) || null };
+    }
+    const fname = requireStr(payload.fname, 200);
+    const serverId = requireStr(payload.serverId, 120);
+    const toolName = requireStr(payload.toolName, 120);
+    if (!fname && !(serverId && toolName)) return { ok: false, error: domain.ERROR_CODE.MCP_INVALID_INPUT, detail: "fname-or-serverId+toolName" };
+    // appId 来自真实 Task（不是 mcp-center，也不是渲染层自报）：ControlledToolProxy 会再校验 task.app_id。
+    const callContext = { sessionRef: context.sessionRef, appId: task.appId || hostAppId, source: "ui", requestId: context.requestId };
+    const options = { context: callContext, taskId: task.taskId || taskId, stepId: task.stepId || null, runId: task.runId || null };
+    const args = payload.arguments && typeof payload.arguments === "object" && !Array.isArray(payload.arguments) ? payload.arguments : {};
+    let res;
+    try {
+      res = fname ? await port.callByName(fname, args, options) : await port.callDirect(serverId, toolName, args, options);
+    } catch {
+      return { ok: false, error: domain.ERROR_CODE.MCP_INTERNAL_ERROR };
+    }
+    return projectToolCallResult(res);
+  }
+
+  /**
+   * B4e · mcp/agentTools（只读聚合）。
+   *
+   * 数据源唯一：注入的 createMcpAgentTools 实例（agentTools / agentToolsForServer / searchAgentTools）。
+   * 命令只做投影收敛：命名空间来自 mcp-agent-tools（mcp__<server>__<tool>），展示字段来自
+   * 同一份 server 快照；description / paramText 一律走地基 redactText 脱敏。
+   * 不返回本机路径、credentialRef、raw schema；enabled 只是"显式开关当前状态"，不是调用授权。
+   *
+   * 字段契约（UI-2 渲染层据此直接渲染，不再自行派生）：
+   *   { ok:true, enabled:boolean, count:number, connectedServers:number, truncated:boolean,
+   *     tools:[{ fname, serverId, serverName, toolName, status, description, paramText,
+   *              riskClass:"EXTERNAL_SIDE_EFFECT", requiresApproval:true }] }
+   */
+  async function handleAgentTools(payload) {
+    const api = resolvePort(agentTools);
+    if (!api || typeof api.agentTools !== "function") {
+      return { ok: false, error: domain.ERROR_CODE.MCP_TOOL_DISCOVERY_FAILED, detail: "mcp-agent-tools-unavailable", tools: [], count: 0, connectedServers: 0, enabled: false, truncated: false };
+    }
+    const serverId = requireStr(payload.serverId, 120);
+    const searchOnly = payload.search === true;
+    let res;
+    try {
+      res = serverId ? await api.agentToolsForServer(serverId)
+        : searchOnly ? await api.searchAgentTools()
+          : await api.agentTools();
+    } catch {
+      return { ok: false, error: domain.ERROR_CODE.MCP_TOOL_DISCOVERY_FAILED, detail: "mcp-agent-tools-failed", tools: [], count: 0, connectedServers: 0, enabled: false, truncated: false };
+    }
+    if (!res || res.ok !== true) {
+      return { ok: false, error: (res && res.error) || domain.ERROR_CODE.MCP_TOOL_DISCOVERY_FAILED, detail: redactText(res && res.detail) || null, tools: [], count: 0, connectedServers: 0, enabled: false, truncated: false };
+    }
+    const index = typeof api.toolIndexSnapshot === "function" ? api.toolIndexSnapshot() : {};
+    const rows = (() => { try { const v = resolvePort(mcpServersSnapshot); return Array.isArray(v) ? v : []; } catch { return []; } })();
+    const rowById = new Map(rows.map((row) => [String(row && row.id), row]));
+    const tools = [];
+    for (const fn of Array.isArray(res.tools) ? res.tools : []) {
+      const fname = fn && fn.function && fn.function.name;
+      if (!fname) continue;
+      const ref = index[fname] || {};
+      const row = rowById.get(String(ref.serverId == null ? "" : ref.serverId));
+      const toolRow = row && Array.isArray(row.tools) ? row.tools.find((t) => t && String(t.name) === String(ref.toolName)) : null;
+      tools.push({
+        fname: redactText(fname),
+        serverId: redactText(ref.serverId != null ? ref.serverId : (row && row.id) || ""),
+        serverName: redactText(ref.serverName || (row && row.name) || ""),
+        toolName: redactText(ref.toolName != null ? ref.toolName : ""),
+        status: String((row && row.status) || ""),
+        description: redactText(toolRow && typeof toolRow.description === "string" ? toolRow.description : ""),
+        paramText: redactText(paramSummaryText(toolRow ? toolRow.inputSchemaSummary : undefined)),
+        riskClass: "EXTERNAL_SIDE_EFFECT",
+        requiresApproval: true,
+      });
+    }
+    let enabled = false;
+    try { enabled = resolvePort(toolInvocationEnabled) === true; } catch { enabled = false; }
+    const connectedServers = rows.filter((row) => row && row.enabled !== false && isConnectedStatus(row.status)).length;
+    return { ok: true, enabled, count: tools.length, connectedServers, tools, truncated: false };
+  }
+
   ipcMain.handle("mcp:command", async (e, raw) => {
     if (isTrusted && !isTrusted(e)) throw Error("Forbidden");
     if (!service) return { ok: false, error: domain.ERROR_CODE.MCP_INTERNAL_ERROR, detail: "mcp-not-ready" };
@@ -136,6 +276,33 @@ function registerMcpIpc({ ipcMain, service, identity, isTrusted, hostAppId = HOS
         case "mcp/reconnect": return await service.reconnect({ context, connectionId: requireStr(payload.connectionId, 120) });
         case "mcp/test": return await service.test({ context, connectionId: requireStr(payload.connectionId, 120) });
         case "mcp/testLog": return service.testLog({ context, connectionId: requireStr(payload.connectionId, 120), limit: payload.limit });
+        // B4e：只读聚合，不触碰调用/传输/审批；未注入 agent-tools 端口时结构化 MCP_TOOL_DISCOVERY_FAILED。
+        case "mcp/agentTools": return await handleAgentTools(payload);
+        // B4e 收口：显式开关写命令。trusted 已在入口校验；这里再做 risk=mcp.manage 授权 + 审计。
+        case "mcp/toolInvocation/set": {
+          if (typeof payload.enabled !== "boolean") return { ok: false, error: domain.ERROR_CODE.MCP_INVALID_INPUT, detail: "enabled" };
+          const authz = typeof service.authorizeManage === "function" ? service.authorizeManage({ context }) : { ok: false, error: domain.ERROR_CODE.MCP_UNAUTHORIZED, reason: "manage-unavailable" };
+          if (!authz.ok) {
+            auditSwitch({ decision: "DENY", reasonCode: authz.reason || authz.error || "MCP_UNAUTHORIZED", enabled: payload.enabled, requestId: context.requestId });
+            return { ok: false, error: domain.ERROR_CODE.MCP_UNAUTHORIZED, reason: authz.reason || null };
+          }
+          const sw = resolvePort(toolInvocationSwitch);
+          if (!sw || typeof sw.setToolInvocationEnabled !== "function") {
+            return { ok: false, error: SWITCH_UNAVAILABLE, detail: "开关端口未注入", enabled: false };
+          }
+          // 审计不可用 → 拒绝写入（不允许无审计的全局能力变更）。
+          if (!auditSwitch({ decision: "REQUEST", reasonCode: null, enabled: payload.enabled, requestId: context.requestId })) {
+            return { ok: false, error: "MCP_AUDIT_UNAVAILABLE", detail: "审计端口未注入：拒绝无审计的开关变更", enabled: false };
+          }
+          const written = sw.setToolInvocationEnabled(payload.enabled);
+          auditSwitch({ decision: written && written.ok === true ? "ALLOW" : "DENY", reasonCode: written && written.ok === true ? null : (written && written.error) || SWITCH_UNAVAILABLE, enabled: written && written.enabled === true, requestId: context.requestId });
+          if (!written || written.ok !== true) {
+            return { ok: false, error: (written && written.error) || SWITCH_UNAVAILABLE, detail: (written && written.detail) || null, enabled: (written && written.enabled === true) };
+          }
+          return { ok: true, enabled: written.enabled === true, persisted: written.persisted === true, audited: true };
+        }
+        // B4e 收口：任务内 MCP 工具调用（真实 taskId + 审批链 → 真实传输）。
+        case "mcp/toolInvocation/call": return await handleToolInvocation(payload, context);
         default: return { ok: false, error: domain.ERROR_CODE.MCP_COMMAND_NOT_ALLOWED };
       }
     } catch {
