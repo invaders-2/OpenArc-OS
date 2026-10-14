@@ -56,6 +56,8 @@ class IdentityService {
     this.secrets = secrets || null;
     this.logger = logger || null;
     this.allowAdmin = !!allowAdmin;
+    /** B4：本地账号管理服务（identity-bootstrap.cjs 注入；未注入时本地账号命令结构化报缺）。 */
+    this.localAccount = null;
     this.listeners = new Set();
     /** 当前进程持有的会话引用。渲染进程每次启动都会重新向服务要一次。 */
     this.current = null;
@@ -79,6 +81,16 @@ class IdentityService {
   onEvent(fn) {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
+  }
+
+  /**
+   * B4 接线：挂载本地账号服务（local-account-service.cjs）。
+   * 晚绑定是因为装配顺序：IdentityService 先于 AuthorizationService 建成，
+   * 而 LocalAccountService 需要 authorization / authStore。
+   */
+  attachLocalAccount(localAccount) {
+    this.localAccount = localAccount && typeof localAccount.listAuthUsers === "function" ? localAccount : null;
+    return !!this.localAccount;
   }
 
   #emit(event, payload = {}) {
@@ -250,6 +262,15 @@ class IdentityService {
       return domain.fail(ERROR.INVALID_INPUT, "admin-command-disabled");
     }
 
+    // B4：本地账号管理命令（命令表见 identity-domain.cjs LOCAL_ACCOUNT_COMMANDS）。
+    // 与既有命令共用同一个 identity:command 通道、同一套 durationMs / 到期收敛。
+    if (domain.isLocalAccountCommand(type)) {
+      const localResult = await this.#dispatchLocalAccount(command);
+      localResult.durationMs = this.store.clock() - started;
+      this.#reconcileExpiry();
+      return localResult;
+    }
+
     let result;
     switch (type) {
       case "identity/status":
@@ -299,6 +320,46 @@ class IdentityService {
     // 按持久层权威行重排那个唯一定时器，并把懒判定看到的到期收敛成同一条终结路径。
     this.#reconcileExpiry();
     return result;
+  }
+
+  /**
+   * B4 · 本地账号命令分发（命令名单见 identity-domain.cjs LOCAL_ACCOUNT_COMMANDS）。
+   *
+   * 认证闸门统一放在这里：所有本地账号命令都要求一个可解析的登录会话，
+   * 超级管理员 / 部门管理员的具体判定沿用 local-account-service.cjs 既有实现，
+   * 不在身份服务里复制第二套权限。返回值为 local-account-service 的公开投影，
+   * 不含口令 / 哈希 / 密钥 / 绝对路径（写入的审计事件名沿用 B4e 源语义）。
+   */
+  async #dispatchLocalAccount(command) {
+    if (!this.localAccount) return domain.fail(ERROR.INTERNAL_ERROR, "local-account-not-ready");
+    // 上下文 App 固定为内置 resource-library：它承载治理动作的授权主体，
+    // 与命令里的 appId（那是"被配置的目标 APP"）是两回事，不能混用。
+    const context = {
+      sessionRef: command.sessionRef || this.current || null,
+      appId: "resource-library",
+      source: "ui",
+    };
+    const authorization = this.localAccount.authorization;
+    const actor = authorization && typeof authorization.resolveActor === "function" ? authorization.resolveActor({ context }) : null;
+    if (!actor || actor.ok !== true) return domain.fail(ERROR.SESSION_REVOKED, "local-account-unauthenticated");
+    const account = this.localAccount;
+    switch (command.type) {
+      case "identity/departments-list": return account.listAuthDepartments({ context });
+      case "identity/department-create": return account.createAuthDepartment({ context, name: command.name, description: command.description });
+      case "identity/department-update": return account.updateAuthDepartment({ context, departmentId: command.departmentId, name: command.name, description: command.description, status: command.status });
+      case "identity/department-delete": return account.deleteAuthDepartment({ context, departmentId: command.departmentId });
+      case "identity/users-list": return account.listAuthUsers({ context });
+      case "identity/user-create": return await account.createAuthUser({ context, identifier: command.identifier, password: command.password, displayName: command.displayName, departmentId: command.departmentId, role: command.role });
+      case "identity/user-update": return await account.updateAuthUser({ context, userId: command.userId, username: command.username, departmentId: command.departmentId, role: command.role, status: command.status });
+      case "identity/user-delete": return account.deleteAuthUser({ context, userId: command.userId });
+      case "identity/user-reset-password": return await account.resetAuthPassword({ context, userId: command.userId, password: command.password });
+      case "identity/app-access-rule-save": return account.saveAppAccessRule({ context, appId: command.appId, rule: command.rule });
+      case "identity/app-permission-policy-save": return account.saveAppPermissionPolicy({ context, permissionCode: command.permissionCode, policy: command.policy, appId: command.appId });
+      case "identity/app-permission-snapshot": return account.appPermissionSnapshot({ userId: command.userId });
+      case "identity/app-access-summary": return account.appAccessSummary(command.userId);
+      case "identity/local-account-info": return account.localAccountInfo({ context });
+      default: return domain.fail(ERROR.INVALID_INPUT, "unhandled-local-account");
+    }
   }
 
   // --- 各命令 ---------------------------------------------------------------

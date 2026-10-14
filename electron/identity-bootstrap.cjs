@@ -12,6 +12,8 @@ const path = require("node:path");
 const fs = require("node:fs");
 const { IdentityStore, DEFAULT_TTL_MS, DEFAULT_IDLE_MS } = require("./identity-store.cjs");
 const { IdentityService } = require("./identity-service.cjs");
+// B4 · 本地账号服务（部门 / 用户 / APP 访问 / 审计）：复用既有表与既有身份命令层。
+const { LocalAccountService } = require("./local-account-service.cjs");
 const { IdentityLogger } = require("./identity-log.cjs");
 const { SessionSecretStore, safeStorageBackend, plainFileBackend } = require("./session-secret-store.cjs");
 const { createAuthorizationService, registerAuthorizationIpc } = require("./authorization-bootstrap.cjs");
@@ -148,6 +150,10 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
   const service = new IdentityService({ store, secrets, logger: log, allowAdmin, timers });
   // D3-02：对象授权与身份共用同一条 SQLite 连接与同一套命令接线。
   const { authorization, authStore } = createAuthorizationService({ identityStore: store, logger: log });
+  // B4：本地账号管理命令（identity/departments-list … identity/local-account-info）走同一条
+  // identity:command；认证与超级管理员判定在 identity-service.cjs / local-account-service.cjs 既有实现里。
+  const localAccountService = new LocalAccountService({ identity: store, authStore, authorization, identityService: service });
+  service.attachLocalAccount(localAccountService);
   // D3-03：设备域挂在**同一条** SQLite 连接与事务队列上（迁移 v3 已在 open() 里完成）。
   const { deviceService, deviceStore } = createDeviceBundle({ identityStore: store, authorization, logger: log, serviceIdentity });
   // D3-04A：本地资源对象与 Managed Store（<userData>/library）。启动时做可解释 recovery。
@@ -249,7 +255,7 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
 
   // Trusted Approval Gateway：Renderer 只能经此通道看到安全投影并提交 decision。
   const sideEffectGateway = createSideEffectGateway({ sideEffectRuntime });
-  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, modelStore, credentialStore, modelService, modelProxy, mcpStore, mcpService, taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, sideEffectGateway, orchestrator, browserControl, canvasDocService };
+  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, modelStore, credentialStore, modelService, modelProxy, mcpStore, mcpService, taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, sideEffectGateway, orchestrator, browserControl, canvasDocService, localAccountService };
 }
 
 /**
