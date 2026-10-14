@@ -438,7 +438,12 @@ test("健康：六张 v22 表全部就绪，未装配数据库时给出结构化
   assert.equal(health.ok, true);
   assert.equal(health.value.tablesReady, true);
   assert.deepEqual(health.value.missingTables, []);
-  assert.equal(health.value.commands, 70);
+  // B7h：commands 是"实际可达数"。直接调 bundle（未接四切片）只有 16 条基座命令；
+  // 静态白名单长度仍在 declaredCommands 里可对照。
+  assert.equal(health.value.commands, 16);
+  assert.equal(health.value.declaredCommands, 70);
+  assert.equal(health.value.extensions, null, "未装配切片时不假装知道切片状态");
+  assert.equal(health.value.degraded, false);
   assert.equal(health.value.network.rateLimitPerMinute, 60);
 
   const dir = tempDir("dxos-developer-nodb-");

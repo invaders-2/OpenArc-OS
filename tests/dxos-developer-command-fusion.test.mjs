@@ -137,7 +137,12 @@ test("bootstrap 合流：扩展命令命中切片、基座回落 bundle、未认
 
     const health = await ipcMain.invoke("developer:command", trustedEvent(), { command: "developer/health", payload: {} });
     assert.equal(health.ok, true, JSON.stringify(health));
-    assert.equal(health.value.commands, 70);
+    // B7h：这里只有 lab 切片（createDeveloperDomainExtensions({}) 的默认），实际可达 = 16 + 20，
+    // 不再拿静态白名单 70 冒充；白名单长度改在 declaredCommands 对照。
+    assert.equal(health.value.commands, 36);
+    assert.equal(health.value.declaredCommands, 70);
+    assert.equal(health.value.degraded, true);
+    assert.deepEqual(health.value.extensions, { lab: "ok", collab: "missing", migrations: "missing", realtime: "missing" });
 
     const templates = await ipcMain.invoke("developer:command", trustedEvent(), { command: "developer/lab/templates", payload: {} });
     assert.equal(templates.ok, true, JSON.stringify(templates));
@@ -155,3 +160,83 @@ test("bootstrap 合流：扩展命令命中切片、基座回落 bundle、未认
     assert.equal(unauth.error, "DEVELOPER_UNAUTHENTICATED", "扩展命令也必须已认证");
   } finally { try { store.close(); } catch { /* 已关 */ } }
 });
+
+// ⑤ B7h：经 bootstrap 覆盖四切片全部命令（此前只覆盖 lab）
+test("bootstrap 四切片全命令可达：health 报 70 且 70 条逐一不被 COMMAND_NOT_ALLOWED 拒绝", async () => {
+  const dir = tempDir();
+  const store = new IdentityStore({ path: path.join(dir, "identity.db") }).open();
+  try {
+    const bundle = createDeveloperBundle({
+      userDataDir: dir,
+      identityStore: store,
+      authorization: { resolveActor: () => ({ ok: true, user: { id: "u-fusion" } }) },
+      clock: () => 1_700_000_000_000,
+    });
+    // 四个切片全部登记（依赖用最小替身：本用例验证的是"路由 + 白名单合流 + health 可达数"，
+    // 各切片内部行为由 dxos-developer-{lab,collab,migrations,realtime}.test.mjs 覆盖）。
+    const domainExtensions = lab.createDeveloperDomainExtensions({
+      lab: {}, collab: {}, migrationStore: {}, migrationFs: null, realtimeHub: {},
+    });
+    assert.equal(domainExtensions.commandNames.length, 54);
+
+    const ipcMain = makeIpcMain();
+    registerDeveloperIpc({ ipcMain, bundle, domainExtensions, isTrusted: trustedGate, identity: { current: "sess-fusion" }, hostAppId: "ai" });
+
+    const health = await ipcMain.invoke("developer:command", trustedEvent(), { command: "developer/health", payload: {} });
+    assert.equal(health.ok, true, JSON.stringify(health));
+    assert.equal(health.value.commands, 70, "四切片齐备时实际可达 = 16 + 54");
+    assert.equal(health.value.declaredCommands, 70);
+    assert.equal(health.value.degraded, false);
+    assert.deepEqual(health.value.extensions, { lab: "ok", collab: "ok", migrations: "ok", realtime: "ok" });
+
+    for (const command of Object.keys(domain.DEVELOPER_COMMANDS)) {
+      const res = await ipcMain.invoke("developer:command", trustedEvent(), { command, payload: {} });
+      assert.notEqual(res.error, "DEVELOPER_COMMAND_NOT_ALLOWED", command + " 经 bootstrap 必须可达");
+    }
+  } finally { try { store.close(); } catch { /* 已关 */ } }
+});
+
+// ⑥ B7h：模拟切片装配失败 → health 显式 degraded + 缺哪片，且缺片命令回落 COMMAND_NOT_ALLOWED
+test("切片装配失败可观测：health degraded/缺哪片，缺片命令回落 COMMAND_NOT_ALLOWED", async () => {
+  const dir = tempDir();
+  const store = new IdentityStore({ path: path.join(dir, "identity.db") }).open();
+  try {
+    const bundle = createDeveloperBundle({
+      userDataDir: dir,
+      identityStore: store,
+      authorization: { resolveActor: () => ({ ok: true, user: { id: "u-fusion" } }) },
+      clock: () => 1_700_000_000_000,
+    });
+    // migrations / realtime 模拟构造失败：不登记切片（依赖传 null）。
+    const domainExtensions = lab.createDeveloperDomainExtensions({ lab: {}, collab: {} });
+    assert.equal(domainExtensions.commandNames.length, 32);
+
+    const ipcMain = makeIpcMain();
+    registerDeveloperIpc({
+      ipcMain, bundle, domainExtensions,
+      extensionStatus: { extensions: { migrations: "missing", realtime: "missing" }, error: "模拟故障：migrations / realtime 切片装配失败" },
+      isTrusted: trustedGate, identity: { current: "sess-fusion" }, hostAppId: "ai",
+    });
+
+    const health = await ipcMain.invoke("developer:command", trustedEvent(), { command: "developer/health", payload: {} });
+    assert.equal(health.ok, true, JSON.stringify(health));
+    assert.equal(health.value.degraded, true, "任一切片失败必须显式 degraded");
+    assert.equal(health.value.commands, 48, "实际可达 = 16 + 20 lab + 12 collab");
+    assert.equal(health.value.declaredCommands, 70);
+    assert.equal(health.value.extensions.migrations, "missing");
+    assert.equal(health.value.extensions.realtime, "missing");
+    assert.match(String(health.value.degradedReason), /模拟故障/, "失败原因必须带进 health，不得只吞成 warn");
+
+    const missingMigration = await ipcMain.invoke("developer:command", trustedEvent(), { command: "developer/migrations/apply", payload: {} });
+    assert.equal(missingMigration.ok, false);
+    assert.equal(missingMigration.error, "DEVELOPER_COMMAND_NOT_ALLOWED");
+    const missingRealtime = await ipcMain.invoke("developer:command", trustedEvent(), { command: "developer/realtime/create", payload: {} });
+    assert.equal(missingRealtime.ok, false);
+    assert.equal(missingRealtime.error, "DEVELOPER_COMMAND_NOT_ALLOWED");
+
+    // 装配成功的切片不受缺片拖累。
+    const labOk = await ipcMain.invoke("developer:command", trustedEvent(), { command: "developer/lab/templates", payload: {} });
+    assert.equal(labOk.ok, true, JSON.stringify(labOk));
+  } finally { try { store.close(); } catch { /* 已关 */ } }
+});
+

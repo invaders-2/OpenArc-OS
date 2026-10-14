@@ -119,7 +119,12 @@ test("白名单：未登记命令被拒、非对象载荷 INVALID_INPUT、comman
 
   const byCommand = await ipcMain.invoke("developer:command", trustedEvent(), { command: "developer/health", payload: {} });
   assert.equal(byCommand.ok, true, JSON.stringify(byCommand));
-  assert.equal(byCommand.value.commands, 70);
+  // B7h：这里 registerDeveloperIpc 没传 domainExtensions，实际只可达 16 条基座命令；
+  // 静态白名单 70 条仍可在 declaredCommands 对照（不再用白名单长度冒充可达数）。
+  assert.equal(byCommand.value.commands, 16);
+  assert.equal(byCommand.value.declaredCommands, 70);
+  assert.equal(byCommand.value.degraded, true);
+  assert.deepEqual(byCommand.value.extensions, { lab: "missing", collab: "missing", migrations: "missing", realtime: "missing" });
 
   const byType = await ipcMain.invoke("developer:command", trustedEvent(), { type: "developer/health", payload: {} });
   assert.equal(byType.ok, true);

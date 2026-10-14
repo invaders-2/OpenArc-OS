@@ -757,19 +757,50 @@ app.whenReady().then(async () => {
       if (!sessionUserId || (userId && String(userId) !== String(sessionUserId))) return { ok: false, error: "FORBIDDEN", detail: "user-mismatch" };
       return { ok: true };
     };
-    // 装配失败不阻断启动：developer:command 保留基座，扩展命令回到 DEVELOPER_COMMAND_NOT_ALLOWED。
+    // B7h：逐切片装配并登记状态。任何一片失败只降级该片（不是整批静默消失）：
+    //   · 失败原因收集进 developerExtensionNotes，随 extensionStatus 交给 developer-bootstrap，
+    //     最终出现在 developer/health 的 degraded / degradedReason / extensions 里；
+    //   · health 的 commands 报"实际可达数"（16 基座 + 真正装配上的切片命令），不再报静态白名单 70。
+    const developerExtensionState = { lab: "missing", collab: "missing", migrations: "missing", realtime: "missing" };
+    const developerExtensionNotes = [];
+    const noteSlice = (slice, status, error) => {
+      developerExtensionState[slice] = status;
+      const detail = String((error && error.message) || error);
+      developerExtensionNotes.push(slice + "(" + status + "): " + detail);
+      console.warn("[openarc] 开发者扩展切片装配失败（" + slice + "）：" + detail);
+    };
+    let developerLab = null;
+    try { developerLab = new DeveloperLab({ rootDir: path.join(userData, "dxos", "developer-lab") }); developerExtensionState.lab = "ok"; }
+    catch (error) { developerLab = null; noteSlice("lab", "degraded", error); }
+    let developerCollab = null;
+    try { developerCollab = new DeveloperCollabProjects({ identity: identity.store, store: identity.integrationStore, authService: identity.authorization }); developerExtensionState.collab = "ok"; }
+    catch (error) { developerCollab = null; noteSlice("collab", "missing", error); }
+    let developerMigrationStore = null;
+    try {
+      developerMigrationStore = new DeveloperMigrationSnapshotStore({ snapshotRoot: developerMigrationSnapshotRoot });
+      // 迁移引擎需要 B6 完整文件树；缺 fs 时切片仍登记，但命令会返回结构化不可用 → degraded。
+      developerExtensionState.migrations = developerMigrationFs ? "ok" : "degraded";
+      if (!developerMigrationFs) developerExtensionNotes.push("migrations(degraded): 缺少 B6 虚拟文件树");
+    } catch (error) { developerMigrationStore = null; noteSlice("migrations", "missing", error); }
+    let developerRealtimeHub = null;
+    try { developerRealtimeHub = new DeveloperRealtimeHub({ authorize: developerRealtimeAuthorize }); developerExtensionState.realtime = "ok"; }
+    catch (error) { developerRealtimeHub = null; noteSlice("realtime", "missing", error); }
     let developerDomainExtensions = null;
     try {
       developerDomainExtensions = createDeveloperDomainExtensions({
-        lab: new DeveloperLab({ rootDir: path.join(userData, "dxos", "developer-lab") }),
+        lab: developerLab,
         docsDir: null,
-        collab: new DeveloperCollabProjects({ identity: identity.store, store: identity.integrationStore, authService: identity.authorization }),
-        migrationStore: new DeveloperMigrationSnapshotStore({ snapshotRoot: developerMigrationSnapshotRoot }),
+        collab: developerCollab,
+        migrationStore: developerMigrationStore,
         migrationFs: developerMigrationFs,
-        realtimeHub: new DeveloperRealtimeHub({ authorize: developerRealtimeAuthorize }),
+        realtimeHub: developerRealtimeHub,
       });
     } catch (error) {
-      console.warn("[openarc] 开发者扩展切片装配失败，developer:command 仅保留基座：" + ((error && error.message) || error));
+      developerDomainExtensions = null;
+      for (const slice of Object.keys(developerExtensionState)) developerExtensionState[slice] = "missing";
+      const detail = String((error && error.message) || error);
+      developerExtensionNotes.push("assembly(missing): " + detail);
+      console.warn("[openarc] 开发者扩展切片合流装配失败，developer:command 仅保留基座：" + detail);
     }
     developerBundle = createDeveloperBundle({
       userDataDir: userData,
@@ -785,6 +816,7 @@ app.whenReady().then(async () => {
       ipcMain,
       bundle: developerBundle,
       domainExtensions: developerDomainExtensions,
+      extensionStatus: { extensions: developerExtensionState, error: developerExtensionNotes.length ? developerExtensionNotes.join("; ") : null },
       identity: identity.service,
       isTrusted: trusted,
       hostAppId: "ai",

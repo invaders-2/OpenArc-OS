@@ -23,9 +23,15 @@
  *     未注入即结构化不可用（INTEGRATION_UNAVAILABLE），绝不返回假数据；
  *   · 查询/字段名与源逐字一致；失败以带 code 的 Error 抛出，由 plugin-service 转结构化。
  *
- * 未移植（源中同一文件但不属本波"缓存/映射/同步作业"）：lingxingBusinessAnalytics、
- * queryLingxingOperatorDashboard、exportLingxingOperatorDashboard、importZiniaoVcFile、
- * ziniaoVcRows、queryZiniaoVcData、listZiniaoVcFiles（后者的文件列举已随紫鸟插件移植）。
+ * 未移植项（逐条登记；源中同一文件但不属本波"缓存 / 映射 / 同步作业"，待后续按需登记）：
+ *   · 领星业务分析      lingxingBusinessAnalytics
+ *   · 运营看板          queryLingxingOperatorDashboard
+ *   · 运营看板导出      exportLingxingOperatorDashboard
+ *   · 汇率              exchange-rate 相关读取 / 换算（源同域，本波零实现）
+ *   · 紫鸟 VC 行级导入  importZiniaoVcFile / ziniaoVcRows / queryZiniaoVcData
+ *                       （listZiniaoVcFiles 的文件列举已随紫鸟插件移植）
+ * 另：agnes.ts（Agnes 原生媒体适配）与 developerOAuth.ts（开发者 OAuth / PKCE）不属本文件，
+ * 已在 developer-domain.cjs 文件头的"未移植项"里逐条登记。
  */
 "use strict";
 

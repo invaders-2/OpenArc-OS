@@ -31,6 +31,11 @@
  *   · canvas（画布插件清单校验模块未移植）—— DEVELOPER_ERR_MANIFEST_FIELD_REJECTED
  *   · 远端更新相关字段（appUpdates / update / updater / cloud / realtime）
  * 这些字段本来会扩大运行时权限或引入远端对端，fail closed 比"收下不实现"安全。
+ *
+ * 未移植项（逐条登记，待后续按需登记）：
+ *   · developerOAuth.ts  开发者 OAuth / PKCE 回调（对应上方 oauth 字段的 fail closed）
+ *   · agnes.ts           Agnes 原生媒体适配（属媒体协议批次；见 provider-protocol-domain.cjs:105
+ *                        与 protocol-engine/legacy-executor-media.cjs 的 agnes 登记，本文件零引用）
  */
 "use strict";
 

@@ -25,6 +25,11 @@
  *   · 凭据（RH币 API Key / 账户余额 API Key）走 credential-store，磁盘不落明文；provider.api_key 仍可直接传入；
  *   · 轮询等待走注入 clock；模型注册表 / LLM / 站点地址可注入（测试指向本地 127.0.0.1 stub，离线可跑）。
  *
+ * 声明范围外（内部实现，未暴露 integration 命令）：
+ *   · AI 应用 / 工作流入口 inspect / submit / query / upload（源 runninghub.ts:667-700）在本移植里
+ *     只是插件内部函数，**未登记为 integration 命令**，渲染层无法直接调用。属当前声明范围外，
+ *     待后续按需登记；登记时必须同时补 integration:command 白名单与对应测试，不能只留函数。
+ *
  * OUT（不引入）：api.dx-os.com、云发布 / 更新、云端实时房间。
  */
 

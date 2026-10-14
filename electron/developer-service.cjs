@@ -5,6 +5,9 @@
  *   ① install   解析 dx-app/v2 包 → 清单 / 权限 / 工具 / 入口校验 → 写包目录 → 写
  *               app_market_releases（本地清单缓存，当前版本 revoked_at IS NULL）→ 写
  *               user_installed_apps（启用）→ 落 app_runtime_events；重复/降级/数据版本变化按源拒绝。
+ *               B7h：包字节 + release.json 全部落盘（唯一可失败前置动作）之后，才在
+ *               "迁移快照 + 单个数据库事务"里执行迁移与激活；任一步失败一律回到调用前状态
+ *               （迁移快照恢复 + 安装态 / 版本不变），不再出现"数据已迁移、版本未更新"。
  *   ② enable    把当前版本写回 user_installed_apps（不改包）。
  *   ③ disable   只移除 user_installed_apps 行；包目录、清单缓存、回滚点全部保留。
  *   ④ rollback  从 app_market_releases 的历史行（revoked_at 非空）取上一版本，重新置为当前版本；
@@ -76,7 +79,9 @@ function createDeveloperBundle(options = {}) {
   const paths = userDataDir ? resolveDxosPaths(userDataDir) : null;
   const dataRoot = paths ? paths.root : null;
   const db = identityStore ? identityStore.connection || identityStore.db || null : null;
-  const store = createDeveloperStore({ db, dataRoot, clock });
+  // B7h：store 可注入（与 comfy-service.cjs:84 同一形态），测试据此在 writePackage /
+  // activateRelease 上注入故障；生产路径不传即真实落盘层。
+  const store = options.store && typeof options.store === "object" ? options.store : createDeveloperStore({ db, dataRoot, clock });
   const limiter = domain.createDeveloperRateLimiter({ now: clock });
 
   // B7f：声明式迁移的注入面（B6 虚拟文件树 + 快照目录）。
@@ -226,6 +231,26 @@ function createDeveloperBundle(options = {}) {
     throw domain.createDeveloperError(domain.DEVELOPER_ERR_CONFLICT, "历史版本 dataVersion=" + targetRelease.manifest.dataVersion + "，当前为 " + current.dataVersion + "；没有数据快照时禁止回滚");
   }
 
+  /**
+   * B7h：把"写发布记录 + 启用"合成一个数据库事务（安装失败时两者必须同生共死）。
+   * node:sqlite 的 DatabaseSync 没有 better-sqlite3 的 db.transaction()，用 BEGIN/COMMIT/ROLLBACK 复刻；
+   * 已在事务内则直接执行，避免嵌套 BEGIN 报错。
+   */
+  function transaction(fn) {
+    if (!db) return fn();
+    if (db.isTransaction || db.inTransaction) return fn();
+    if (typeof db.transaction === "function") return db.transaction(fn)();
+    db.exec("BEGIN");
+    try {
+      const result = fn();
+      db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      try { db.exec("ROLLBACK"); } catch { /* 已回滚 */ }
+      throw error;
+    }
+  }
+
   // -------------------------------------------------------------------------
   // ① 装载
   // -------------------------------------------------------------------------
@@ -246,24 +271,46 @@ function createDeveloperBundle(options = {}) {
       if (comparison < 0) throw domain.createDeveloperError(domain.DEVELOPER_ERR_CONFLICT, "不能降级安装：当前 " + domain.appReleaseKey(existingManifest) + "，安装包 " + domain.appReleaseKey(prepared.manifest));
       if (comparison === 0 && prepared.manifest.releaseChannel !== "dev" && payload.allowSameVersion !== true) throw domain.createDeveloperError(domain.DEVELOPER_ERR_CONFLICT, "已安装相同版本：" + domain.appReleaseKey(prepared.manifest));
     }
-    if (existingManifest && prepared.manifest.dataVersion !== existingManifest.dataVersion && payload.allowDataVersionChange !== true) {
-      // B7f：包里有迁移声明 → 先按 manifest.migrations 应用（快照 + 失败回滚，不半应用）；
-      // 没有声明 → 保持原来的拒绝语义（不允许静默改数据版本）。
+    // B7h：数据版本变化必须先声明迁移链；这一条在任何落盘 / 数据库副作用之前判定。
+    const dataVersionChanged = !!existingManifest && prepared.manifest.dataVersion !== existingManifest.dataVersion;
+    const needsDataMigration = dataVersionChanged && payload.allowDataVersionChange !== true;
+    if (needsDataMigration) {
       const declared = Array.isArray(prepared.manifest.migrations) && prepared.manifest.migrations.length > 0;
-      if (declared) applyDeclaredMigrations({ payload, context, appId, prepared, fromVersion: existingManifest.dataVersion });
-      else throw domain.createDeveloperError(domain.DEVELOPER_ERR_CONFLICT, "数据版本从 " + existingManifest.dataVersion + " 变为 " + prepared.manifest.dataVersion + "；该包未声明声明式数据迁移，已停止更新以保护项目文件");
+      if (!declared) throw domain.createDeveloperError(domain.DEVELOPER_ERR_CONFLICT, "数据版本从 " + existingManifest.dataVersion + " 变为 " + prepared.manifest.dataVersion + "；该包未声明声明式数据迁移，已停止更新以保护项目文件");
     }
     const sha = store.sha256(buffer);
+    // ① 可失败前置动作：包字节 + release.json 一起原子落盘。这一步失败只清理自己的暂存目录，
+    //    迁移与数据库都还没被触碰（不存在"数据已迁移、版本未更新"的中间态）。
     const written = store.writePackage(appId, prepared.manifest, prepared.files, { packageBytes: buffer.length, sha256: sha, capabilities: prepared.capabilities });
+    // ② 带快照 / 单个事务的步骤：先迁移（引擎自带项目快照），再在同一数据库事务里写发布记录与启用。
+    //    任一步失败：迁移快照恢复（项目数据回到调用前）+ 包目录清理 + 数据库事务回滚（安装态 / 版本不变）。
+    let migration = null;
     try {
-      store.activateRelease({ appId, userId, manifest: prepared.manifest, packagePath: written.storageRelPath, packageSize: buffer.length, sha256: sha, now: clock() });
-      store.setInstalled(userId, appId, prepared.manifest, clock());
+      if (needsDataMigration) migration = applyDeclaredMigrations({ payload, context, appId, prepared, fromVersion: existingManifest.dataVersion });
+      transaction(() => {
+        store.activateRelease({ appId, userId, manifest: prepared.manifest, packagePath: written.storageRelPath, packageSize: buffer.length, sha256: sha, now: clock() });
+        store.setInstalled(userId, appId, prepared.manifest, clock());
+      });
     } catch (error) {
-      try { fs.rmSync(written.absoluteDir, { recursive: true, force: true }); } catch { /* 尽力清理 */ }
+      rollbackInstall({ appId, written, migration });
       throw error;
     }
     recordEvent(userId, appId, prepared.manifest, existingManifest ? "app.upgrade" : "app.install", { source: asStr(payload.sourceName, 160) || null, from: existingManifest ? domain.appReleaseKey(existingManifest) : null });
     return projectApp(userId, appId);
+  }
+
+  /**
+   * B7h：安装失败时把已完成的可逆副作用退回调用前状态。
+   *   · 迁移已成功但后续激活失败 → 恢复迁移前项目快照（引擎只在自身失败时回滚，成功路径不会）；
+   *   · 包目录删除；数据库由本地 transaction() 回滚，这里不再动。
+   * 快照恢复失败必须出声：此时项目数据可能停在迁移后状态。
+   */
+  function rollbackInstall({ appId, written, migration }) {
+    if (migration) {
+      try { migrationStore.restoreSnapshots({ appId, historyId: migration.historyId, fsAdapter: migrationFs }); }
+      catch (error) { if (logger) logger("[OpenArc developer] 安装回滚：迁移快照恢复失败：" + String((error && error.message) || error)); }
+    }
+    try { fs.rmSync(written.absoluteDir, { recursive: true, force: true }); } catch { /* 尽力清理 */ }
   }
 
   function validatePackage(payload) {
@@ -516,9 +563,19 @@ function createDeveloperBundle(options = {}) {
     return store.recordRuntimeEvent({ userId, appId, version: current.version, build: current.build, eventType, detail: payload.detail, now: clock() });
   }
 
-  function health() {
+  /**
+   * B7h：health 不再报静态白名单长度，而是"实际可达命令数"= 基座 16 条 + 已装配切片的命令数。
+   * context.extensionStatus 由 developer-bootstrap.cjs 在装配点计算并注入：
+   *   { extensions: { lab, collab, migrations, realtime }, extensionCommands, degraded, error }。
+   * 未注入（直接调用 bundle）时只报基座可达数，不假装知道切片状态。
+   */
+  function health(context) {
     const tables = store.tableReport();
     const missing = Object.keys(tables).filter((name) => tables[name] !== true);
+    const baseCommands = Object.keys(domain.DEVELOPER_BASE_COMMANDS).length;
+    const injected = context && context.extensionStatus && typeof context.extensionStatus === "object" ? context.extensionStatus : null;
+    const extensionCommands = injected && Number.isFinite(injected.extensionCommands) ? Math.max(0, Math.trunc(injected.extensionCommands)) : 0;
+    const extensions = injected && injected.extensions && typeof injected.extensions === "object" ? injected.extensions : null;
     return {
       ok: !!db && missing.length === 0,
       tables,
@@ -526,7 +583,11 @@ function createDeveloperBundle(options = {}) {
       missingTables: missing,
       dataRootReady: !!dataRoot,
       installedApps: store.listAppIds().length,
-      commands: domain.listDeveloperCommands().length,
+      commands: baseCommands + extensionCommands,
+      declaredCommands: domain.listDeveloperCommands().length,
+      extensions,
+      degraded: injected ? injected.degraded === true : false,
+      degradedReason: injected && injected.error ? injected.error : null,
       network: { httpsOnly: true, dnsPublicCheck: true, rateLimitPerMinute: limiter.limit },
     };
   }
@@ -553,7 +614,7 @@ function createDeveloperBundle(options = {}) {
       case "developer/network/evaluate": return networkEvaluate(body);
       case "developer/network/request": return networkRequest(body, context);
       case "developer/runtime/report": return runtimeReport(body, context);
-      case "developer/health": return health();
+      case "developer/health": return health(context);
       default: throw domain.developerCommandNotAllowed(command);
     }
   }
@@ -576,6 +637,8 @@ function createDeveloperBundle(options = {}) {
       appId: requireStr(ctx && ctx.appId, 60) || HOST_APP_ID,
       source: "developer",
       requestId: requireStr(ctx && ctx.requestId, 100) || null,
+      // B7h：装配点注入的切片状态，只用于 health 投影（不参与命令分发）。
+      extensionStatus: ctx && ctx.extensionStatus && typeof ctx.extensionStatus === "object" ? ctx.extensionStatus : null,
     };
     const actorResult = resolveActor(context);
     if (!actorResult.ok) return domain.normalizeDeveloperError(domain.createDeveloperError(domain.DEVELOPER_ERR_UNAUTHENTICATED, actorResult.message || "当前会话未认证，developer 命令被拒绝"));
