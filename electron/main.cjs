@@ -26,7 +26,8 @@ const { registerTaskIpc } = require("./task-bootstrap.cjs");
 // W5：模型流式下行事件（model:event）的宿主桥接（model:command 仍由 identity-bootstrap 注册）。
 const { wireModelEvents } = require("./model-bootstrap.cjs");
 // B3：Agent 域装配（真实 SQLite = identity 的连接）与 agent:command / agent:event 通道。
-const { createAgentBundle } = require("./agent-service.cjs");
+// B6d：createDxosFsAdapterForUserData 把 <userData>/dxos/fs 装配成 B3/B4 共用的 fsAdapter。
+const { createAgentBundle, createDxosFsAdapterForUserData } = require("./agent-service.cjs");
 const { registerAgentIpc } = require("./agent-bootstrap.cjs");
 // B4：技能域装配（<userData>/dxos 下的技能目录 / 技能包 / 执行器）与 skill:command / skill:event 通道。
 const { createSkillBundle } = require("./skill-service.cjs");
@@ -34,6 +35,12 @@ const { registerSkillIpc } = require("./skill-bootstrap.cjs");
 // B5a：媒体域装配（<userData>/dxos/media 下的渲染作业 / 探测 / 封面）与 media:command / media:event 通道。
 const { createMediaBundle } = require("./media-service.cjs");
 const { registerMediaIpc } = require("./media-bootstrap.cjs");
+// B6a：自动化域装配（定义 / 运行记录 / 主进程内调度器，无云依赖）与 automation:command / automation:event 通道。
+const { createAutomationBundle } = require("./automation-service.cjs");
+const { registerAutomationIpc } = require("./automation-bootstrap.cjs");
+// B6c：平台域装配（诊断 / 数据保护 / 网络安全 / 供应商测试安全）与 platform:command 通道。
+const { createPlatformBundle } = require("./platform-service.cjs");
+const { registerPlatformIpc } = require("./platform-bootstrap.cjs");
 // B4 · providerAdapter 桥：把 B2 的 provider-protocol store/service 投影成 B4 执行器要的只读适配器
 // （firstUsable/all/autoFallback/revealProvider/call）；只读投影绝不返回 api_key/credentialRef。
 const { createProviderAdapter } = require("./provider-adapter-bridge.cjs");
@@ -61,6 +68,10 @@ let agentBundle;
 let skillBundle;
 /** B5a：媒体域 bundle（createMediaBundle 的唯一实例；无身份服务时为 undefined）。 */
 let mediaBundle;
+/** B6a：自动化域 bundle（createAutomationBundle 的唯一实例；无身份服务时为 undefined）。 */
+let automationBundle;
+/** B6c：平台域 bundle（createPlatformBundle 的唯一实例；无身份服务时为 undefined）。 */
+let platformBundle;
 /** D5-01 Closure-2：受控浏览器目标（用户显式授权）。宿主持有唯一实例，工具链与 UI 共用同一个。 */
 let browserControl;
 
@@ -138,6 +149,27 @@ function handleCanvasProtocol(request) {
   // 画布跑在 opaque origin（sandbox allow-scripts）里：字体等子资源需要 CORS 头才能加载。
   // 这是**只读静态 bundle**、无凭据、无用户数据，因此允许任意来源读取。
   return new Response(fs.readFileSync(file), { status: 200, headers: { "content-type": CANVAS_MIME[ext], "access-control-allow-origin": "*" } });
+}
+
+/**
+ * B6c：受监督子进程清单（只取 safe 记录，绝不带 executable path / pid / env）。
+ * 数据来源只有 RuntimeSupervisor.snapshot()（runtime-supervisor.cjs:466 的 safe 投影）；
+ * media runner / MCP stdio 等通道当前不暴露可枚举句柄 —— 那就返回空列表，绝不伪造条目。
+ */
+function collectSupervisedProcesses(identityRef) {
+  try {
+    const supervisor = identityRef && identityRef.supervisor;
+    const rows = supervisor && typeof supervisor.snapshot === "function" ? supervisor.snapshot() : null;
+    return Array.isArray(rows) ? rows.slice(0, 100).map((row) => ({
+      source: "runtime-supervisor",
+      instanceId: row && row.instanceId != null ? String(row.instanceId) : null,
+      status: row && row.status != null ? String(row.status) : null,
+      startedAt: row && Number.isFinite(row.startedAt) ? row.startedAt : null,
+      endedAt: row && Number.isFinite(row.endedAt) ? row.endedAt : null,
+      exitCode: row && Number.isFinite(row.exitCode) ? row.exitCode : null,
+      signal: row && row.signal != null ? String(row.signal) : null,
+    })) : [];
+  } catch { return []; }
 }
 
 /** 只接受来自本应用外壳页的调用。
@@ -503,11 +535,24 @@ app.whenReady().then(async () => {
       send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("task:event", event); },
     });
 
+    // B6d：DX 虚拟文件树（<userData>/dxos/fs）→ B3/B4 共用的 fsAdapter 注入面。
+    //   · 构造走 createDxosFsAdapterForUserData（解析路径 + 建目录 + 可写探测 + 构造适配器）；
+    //   · 装配失败（目录建不出 / 不可写等）→ 保持 null：健康报告如实 false，命令侧继续结构化
+    //     AGENT_DEPENDENCY_UNAVAILABLE，绝不假装可用；
+    //   · 同一份实例同时喂 createSkillBundle 与 createAgentBundle，两个域看到同一棵虚拟树。
+    let dxosFsAdapter = null;
+    try {
+      dxosFsAdapter = createDxosFsAdapterForUserData(app.getPath("userData"));
+    } catch (error) {
+      console.warn("[openarc] DX 虚拟文件树装配失败，文件工具将保持结构化依赖缺失：" + ((error && error.message) || error));
+    }
+
     // B4：技能域。
     //   · <userData>/dxos 注入 configureSkillStore / configureSkillPack / configureSkillRunner / configureSkillAnalyzer /
     //     configureSkillWorkspace（路径由 dxos-foundation-paths.cjs 统一解析）；
     //   · providerAdapter 由 B2 的 provider-protocol store/service 组装（provider-adapter-bridge.cjs）；
-    //     cliRuntime / mediaAdapter / fsAdapter 属 B3/B5/B6，未落地 → 传 null，命令侧保持结构化依赖缺失（绝不伪造）；
+    //     cliRuntime / mediaAdapter（B7/B5 未落地）→ 传 null，命令侧保持结构化依赖缺失（绝不伪造）；
+    //     fsAdapter 由上面的 DX 虚拟文件树提供（产物落盘）；
     //     modelAdapter 走 provider-protocol-service.call（唯一模型出口）；
     //   · skill:event 与 model:event / task:event / agent:event 同一条 trusted(event) 边界，renderer 只能订阅。
     const providerProtocol = identity.modelService && identity.modelService.providerProtocol ? identity.modelService.providerProtocol : null;
@@ -525,7 +570,7 @@ app.whenReady().then(async () => {
       modelAdapter: skillModelAdapter,
       cliRuntime: null,
       mediaAdapter: null,
-      fsAdapter: null,
+      fsAdapter: dxosFsAdapter,
       logger: null,
       clock: null,
     });
@@ -541,7 +586,9 @@ app.whenReady().then(async () => {
     //   · 任务/运行/工具/项目/记忆全部落到 identity-store 的同一 SQLite 连接（agent_* 表 v23 迁移已建）；
     //   · modelAdapter 走 provider-protocol-service.call（唯一模型出口）；
     //   · providerAdapter 复用上面 B2 组装的只读桥（模型执行出口；密钥只在 service 内部解出）；
-    //   · fsAdapter / workspaceAdapter 属 B6，未落地 → 命令侧保持结构化 AGENT_DEPENDENCY_UNAVAILABLE；
+    //   · fsAdapter 复用上面已装配的 DX 虚拟文件树（装配失败即为 null）；
+    //     workspaceAdapter 仍由 agent-runtime-workspace.cjs 提供；任一缺失 → 命令侧保持结构化
+    //     AGENT_DEPENDENCY_UNAVAILABLE，绝不假装可用；
     //   · agent:event 与 model:event / task:event 同一条 trusted(event) 边界，renderer 只能订阅。
     // B4 收口：MCP → Agent 工具目录的只读桥。
     //   · 目录：mcpService.listConnections（appId=mcp-center 基线授权）→ 只列用户/组织真实可见的 server；
@@ -572,6 +619,8 @@ app.whenReady().then(async () => {
       mcpServersSnapshot: mcpAgentBridge ? mcpAgentBridge.mcpServersSnapshot : null,
       // B5d：画布内核能力进工具目录（来源由 canvas-dxos-capabilities 投影；未装配时 catalog 保持 available:false）。
       canvasExtension: identity.canvasDxosExtension || null,
+      // B6d：DX 虚拟文件树（文件工具 / project snapshot / fs_list 的真值通道）。
+      fsAdapter: dxosFsAdapter,
     });
     registerAgentIpc({
       ipcMain,
@@ -600,6 +649,61 @@ app.whenReady().then(async () => {
       identity: identity.service,
       isTrusted: trusted,
       send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("media:event", event); },
+    });
+
+    // B6a：自动化域。
+    //   · 定义 / 运行记录落 identity-store 同一 SQLite 连接（v22 迁移已建 automations / automation_runs，原样使用，不改表）；
+    //   · 调度器在主进程内（无云依赖）：startScheduler 定时领取到点定义并在异步路径执行，长动作不阻塞主线程；
+    //   · 业务动作的对外依赖一律走注入适配器：本地账号用 B4 的 localAccountService；
+    //     开发者 App（B7）/ 钉钉·领星·紫鸟（第三方集成插件默认关）/ 桌面执行端 / Agent 一律传 null，
+    //     命令侧保持结构化 AGENT_DEPENDENCY_UNAVAILABLE，绝不假执行；
+    //   · automation:event 与 model:event / task:event / agent:event / skill:event / media:event 同一条 trusted(event) 边界。
+    automationBundle = createAutomationBundle({
+      identityStore: identity.store,
+      authorization: identity.authorization,
+      localAccounts: identity.localAccountService
+        ? { findUser: (userId) => { const res = identity.localAccountService.listAuthUsers(); const items = res && res.ok && Array.isArray(res.items) ? res.items : []; return items.find((user) => user.id === userId) || null; } }
+        : null,
+      developerApps: null,
+      integrations: null,
+      desktop: null,
+      agent: null,
+      toolCatalog: null,
+      logger: null,
+      clock: null,
+    });
+    registerAutomationIpc({
+      ipcMain,
+      bundle: automationBundle,
+      identity: identity.service,
+      isTrusted: trusted,
+      send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("automation:event", event); },
+    });
+    automationBundle.startScheduler();
+
+    // B6c：平台域。
+    //   · 快照落 <userData>/dxos/backups（排除 credentials 目录，绝不含明文密钥）；
+    //   · 诊断只读 process.env 之外的进程事实，环境变量与绝对路径都不出主进程；
+    //   · 网络判定复用 networkSafety 口径（HTTPS + 域白名单 + DNS 公网校验），不另造一套；
+    //   · platform:command 与 model / task / agent / skill / media 同一条 trusted(event) 边界。
+    platformBundle = createPlatformBundle({
+      userDataDir: app.getPath("userData"),
+      identityStore: identity.store,
+      authorization: identity.authorization,
+      appVersion: app.getVersion(),
+      appName: "OpenArc OS",
+      environment: { locale: app.getLocale(), build: null },
+      // 受监督子进程清单：只取 RuntimeSupervisor 的 safe snapshot；不暴露 pid / 路径。
+      processes: () => collectSupervisedProcesses(identity),
+      clock: null,
+      logger: null,
+    });
+    try { platformBundle.startProcessMonitor("main"); } catch { /* 诊断落盘失败不阻断启动 */ }
+    registerPlatformIpc({
+      ipcMain,
+      bundle: platformBundle,
+      identity: identity.service,
+      isTrusted: trusted,
     });
 
     // D3-04C：注册安全预览协议 handler（每次请求重新授权 + Range 流式返回）。
@@ -980,6 +1084,10 @@ app.on("will-quit", (event) => {
   event.preventDefault();
   // B5a：先停媒体子进程（绝不写 Job 状态），再走既有的 MCP → Harness → modelProxy → store 收尾。
   try { if (mediaBundle && typeof mediaBundle.dispose === "function") mediaBundle.dispose(); } catch { /* 已停 */ }
+  // B6c：停平台域的进程诊断计时器（不再写磁盘）。
+  try { if (platformBundle && typeof platformBundle.dispose === "function") platformBundle.dispose(); } catch { /* 已停 */ }
+  // B6a：只停调度器，绝不写运行状态（退出不是用户取消；遗留 running 由下次启动 recoverInterruptedRuns 置 failed）。
+  try { if (automationBundle && typeof automationBundle.stopScheduler === "function") automationBundle.stopScheduler(); } catch { /* 已停 */ }
   disposeAppResources({ identity, log: (line) => console.log(line) }).then((res) => {
     try {
       console.log("[openarc] 退出收尾：" + JSON.stringify({ ok: res.ok, harness: res.harness, mcp: res.mcp, proxyStopped: res.proxyStopped, storeClosed: res.storeClosed }));

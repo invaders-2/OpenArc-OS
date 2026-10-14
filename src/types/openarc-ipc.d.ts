@@ -249,7 +249,99 @@ export interface OpenArcMediaArtifact {
 export interface OpenArcMediaBridge extends OpenArcCommandBridge, OpenArcEventBridge {}
 /** P5 ComfyUI：本地实例启停、工作流、运行。 */
 export interface OpenArcComfyBridge extends OpenArcCommandBridge, OpenArcEventBridge {}
-/** P6 自动化：定义、调度、运行记录。 */
+/**
+ * B6a 自动化域：定义 CRUD / 启停 / 调度 / 运行记录。
+ *
+ * 唯一入口 command({ command, payload })（受控白名单，见 electron/automation-domain.cjs 的 AUTOMATION_COMMANDS），
+ * 以及 automation:event 下行（主进程封装的 P1 信封，channel="automation:event"）。
+ * 这里没有 raw SQL / 数据库句柄 / 凭据 / 绝对路径 / ipcRenderer —— sessionRef 与 appId 由主进程注入，
+ * renderer 自报的 userId / role / appId 一律忽略；automation:command 全部过 main.cjs 的 trusted(event)。
+ * 业务动作的对外依赖（B7 开发者 App / 第三方集成插件 / B4 本地账号）未装配时返回
+ * { ok:false, error:"AGENT_DEPENDENCY_UNAVAILABLE", detail:{ dependency } }，绝不假执行。
+ */
+export type OpenArcAutomationCommand =
+  | "automation/list"
+  | "automation/get"
+  | "automation/create"
+  | "automation/update"
+  | "automation/delete"
+  | "automation/enable"
+  | "automation/disable"
+  | "automation/runNow"
+  | "automation/cancel"
+  | "automation/runs"
+  | "automation/catalog"
+  | "automation/parse"
+  | "automation/health";
+
+export interface OpenArcAutomationCommandRequest {
+  command: OpenArcAutomationCommand;
+  payload?: Record<string, unknown>;
+}
+
+/** 执行时间：源的 daily/weekly/once（automations.ts:5-8）+ B6a 扩展的 cron/interval。 */
+export type OpenArcAutomationSchedule =
+  | { type: "daily"; hour: number; minute: number; timezone?: string }
+  | { type: "weekly"; weekdays: number[]; hour: number; minute: number; timezone?: string }
+  | { type: "once"; at: number; timezone?: string }
+  | { type: "cron"; expression: string; timezone?: string }
+  | { type: "interval"; everyMs: number; anchor?: number; timezone?: string };
+
+export type OpenArcAutomationActionType =
+  | "music_play"
+  | "music_control"
+  | "open_app"
+  | "agent_instruction"
+  | "ziniao_download"
+  | "lingxing_cache_sync"
+  | "ziniao_data_sync"
+  | "dingtalk_group_notify"
+  | "dingtalk_person_notify"
+  | "workflow_sequence"
+  | "app_action";
+
+/** action.retry 是 B6a 扩展：在一次运行内重试，运行记录仍只落一行（result 里带真实 attempts）。 */
+export interface OpenArcAutomationRetry {
+  maxAttempts: number;
+  delayMs: number;
+}
+
+export interface OpenArcAutomationAction {
+  type: OpenArcAutomationActionType;
+  args: Record<string, unknown>;
+  retry?: OpenArcAutomationRetry;
+}
+
+export interface OpenArcAutomationRun {
+  id: string;
+  automationId: string;
+  scheduledFor: number;
+  status: "running" | "success" | "failed" | "cancelled" | string;
+  clientId: string | null;
+  result: string | null;
+  error: string | null;
+  createdAt: number;
+  startedAt: number | null;
+  completedAt: number | null;
+}
+
+export interface OpenArcAutomation {
+  id: string;
+  userId: string;
+  title: string;
+  instruction: string;
+  action: OpenArcAutomationAction | null;
+  schedule: OpenArcAutomationSchedule | null;
+  enabled: boolean;
+  nextRunAt: number | null;
+  lastRunAt: number | null;
+  lastStatus: string | null;
+  lastError: string | null;
+  createdAt: number;
+  updatedAt: number;
+  runs?: OpenArcAutomationRun[];
+}
+
 export interface OpenArcAutomationBridge extends OpenArcCommandBridge, OpenArcEventBridge {}
 /** P7 外部集成：可选第三方插件（默认关闭）。 */
 export interface OpenArcIntegrationBridge extends OpenArcCommandBridge {}
@@ -263,6 +355,42 @@ export interface OpenArcCloudBridge extends OpenArcCommandBridge {}
 export interface OpenArcUpdateBridge extends OpenArcCommandBridge {}
 /** P6 诊断：运行时诊断、进程监控、数据快照 / 恢复。 */
 export interface OpenArcDiagnosticsBridge extends OpenArcCommandBridge {}
+
+/**
+ * B6c 平台域：诊断 / 数据保护 / 网络安全 / 供应商测试安全。
+ *
+ * 唯一入口 command({ command, payload })（受控白名单，见 electron/platform-domain.cjs 的 PLATFORM_COMMANDS）。
+ * 这里没有 raw 环境变量 / 绝对路径 / 凭据 / ipcRenderer —— sessionRef 与 appId 由主进程注入，
+ * renderer 自报的 userId / role / appId 一律忽略；platform:command 全部过 main.cjs 的 trusted(event)。
+ */
+export type OpenArcPlatformCommand =
+  | "platform/diagnostics/app"
+  | "platform/diagnostics/process"
+  | "platform/diagnostics/record"
+  | "platform/data/integrity"
+  | "platform/data/snapshot/create"
+  | "platform/data/snapshot/verify"
+  | "platform/data/snapshot/list"
+  | "platform/data/snapshot/restore"
+  | "platform/network/evaluate"
+  | "platform/provider/test-check"
+  | "platform/health";
+
+export interface OpenArcPlatformCommandRequest {
+  command: OpenArcPlatformCommand;
+  payload?: Record<string, unknown>;
+}
+
+/** 出网判定结果（electron/platform-service.cjs evaluateNetwork）：allowed=false 时 reason 非空。 */
+export interface OpenArcNetworkDecision {
+  allowed: boolean;
+  host: string;
+  origin: string;
+  reason: "DNS_FAILED" | "DNS_EMPTY" | "PRIVATE_ADDRESS" | null;
+  addresses: string[];
+}
+
+export interface OpenArcPlatformBridge extends OpenArcCommandBridge {}
 
 export interface OpenArcBridge {
   sync: (p: unknown) => Promise<{ ok?: boolean; error?: string; results?: unknown[] }>;
@@ -298,6 +426,8 @@ export interface OpenArcBridge {
   cloud?: OpenArcCloudBridge;
   update?: OpenArcUpdateBridge;
   diagnostics?: OpenArcDiagnosticsBridge;
+  /** B6c：平台域（与 preload.cjs 的第 22 个顶层键 platform 一一对应）。 */
+  platform?: OpenArcPlatformBridge;
 }
 
 declare global {

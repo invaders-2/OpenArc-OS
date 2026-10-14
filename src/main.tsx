@@ -70,6 +70,7 @@ import { GovernanceApp } from "./governance/GovernanceApp";
 import { FilesApp } from "./governance/FilesApp";
 import { CanvasHost } from "./canvas/CanvasHost";
 import { ProjectsApp } from "./governance/ProjectsApp";
+import { TaskConsole } from "./projects/TaskConsole";
 import { McpCenter } from "./mcp/McpCenter";
 import { SkillCenter } from "./skills/SkillCenter";
 import { ApprovalPrompt } from "./approval/ApprovalPrompt";
@@ -587,6 +588,9 @@ function App() {
   };
   const [appTab, setAppTab] = useState<"all" | "pro" | "recent">("all");
   const [skillTab, setSkillTab] = useState<"market" | "mine" | "installed">("market");
+  /* UI-3：projects 窗口内的子视图 —— 任务 / Agent 控制台与既有 ProjectsApp 并列，
+     不改 appId、不改 dock、不新增应用入口（Dx-UI-PLAN UI-3）。 */
+  const [projectsTab, setProjectsTab] = useState<"tasks" | "projects">("tasks");
   const [folderUI, setFolderUI] = useState<Record<string, FolderUI>>({});
   /** 文件服务里的条目（按 folderId）。渲染层只拿索引，拿不到磁盘路径。 */
   const [filesByFolder, setFilesByFolder] = useState<Record<string, FileEntry[]>>({});
@@ -2653,7 +2657,23 @@ function App() {
           }}
         />
       );
-    if (w?.appId === "projects") return <ProjectsApp />;
+    if (w?.appId === "projects")
+      return (
+        <div className="split">
+          <nav className="split-side" aria-label="项目子视图">
+            <div className="split-section">项目</div>
+            <button className="split-nav" aria-current={projectsTab === "tasks"} onClick={() => setProjectsTab("tasks")}>
+              任务控制台
+            </button>
+            <button className="split-nav" aria-current={projectsTab === "projects"} onClick={() => setProjectsTab("projects")}>
+              项目与资源
+            </button>
+          </nav>
+          <div className="split-main">
+            {projectsTab === "tasks" ? <TaskConsole role={identity.snapshot.role} /> : <ProjectsApp />}
+          </div>
+        </div>
+      );
     if (w?.appId === "mcp-center") return <McpCenter role={identity.snapshot.role} />;
     if (w?.appId === "organization") return <GovernanceApp />;
     if (w?.appId === "settings")

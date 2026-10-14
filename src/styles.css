@@ -3590,10 +3590,14 @@ label {
   flex-wrap: wrap;
   gap: var(--space-3);
 }
+/* UI-2 设计系统一致性修正 (a)：页面主标题用 --fs-title（DESIGN_SYSTEM §5 字阶，
+   负字距 --tracking-tight），与 .skill-banner__title 对齐；只改字号与字距，
+   不动颜色 / 圆角 / 材质 / 布局 / 密度。 */
 .mcp-banner__title {
   margin: 0;
-  font-size: var(--fs-heading);
+  font-size: var(--fs-title);
   font-weight: var(--fw-medium);
+  letter-spacing: var(--tracking-tight);
 }
 .mcp-muted {
   margin: 0;
@@ -3654,11 +3658,70 @@ label {
   gap: var(--space-4);
   padding: var(--space-3) var(--space-4) var(--space-4);
 }
+
+/* ── UI-2 · 工具聚合（B4 投影的只读视图）────────────────────────────────
+   只用既有 token：颜色走 --text / --muted / --sunken，间距 --space-*，
+   圆角 --radius-*；分层靠明度差，不新增发丝线框（DESIGN_SYSTEM §3.2）。
+   清单交给 primitives 的 ScrollArea（.ds-scroll）承接长列表滚动；
+   本区块不新增动效，减少动态效果下无额外空间/缩放补间（MOTION_SYSTEM §8）。 */
+.mcp-aggregate {
+  flex: none;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4) 0;
+}
+.mcp-aggregate__scroll {
+  /* 有界高度：聚合清单自身滚动，不把两栏管理区挤出窗口（DESIGN_SYSTEM §6 密度） */
+  max-height: min(32vh, 300px);
+}
+.mcp-aggregate__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.mcp-aggregate__item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+}
+.mcp-aggregate__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.mcp-aggregate__name {
+  min-width: 0;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-medium);
+  overflow-wrap: anywhere;
+}
+.mcp-aggregate__desc {
+  font-size: var(--fs-caption);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.mcp-aggregate__params {
+  font-size: var(--fs-micro);
+  color: var(--muted);
+}
+/* UI-2 设计系统一致性修正 (b)：.mcp-list-pane / .mcp-detail-pane 现在就是
+   primitives 的 ScrollArea（.ds-scroll），滚动能力由原语提供（可聚焦、方向键可滚），
+   所以这里不再自己写 overflow —— 只保留栅格项需要的 min-height / min-width。 */
 .mcp-list-pane,
 .mcp-detail-pane {
   min-height: 0;
   min-width: 0;
-  overflow: auto;
 }
 .mcp-list-pane {
   display: flex;
@@ -4321,6 +4384,400 @@ label {
   }
   .skill-row__top strong,
   .skill-detail__title h3 {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   UI-3 · 任务 / Agent 控制台（列表 / 详情 / 进行态 / 事件流 / 回答）
+
+   只用 token：颜色走 --text / --muted / --failed，间距走 --space-*，
+   圆角走 --radius-*，时长走 --dur-* / --ease-standard。
+   分层靠明度差与留白，不新增发丝线框（DESIGN_SYSTEM §3.2）；唯一的 1px 线
+   在事件流行的分隔上，属允许范围内的表格线。
+   动效只做状态反馈与页面进入（MOTION_SYSTEM §7），时长全部取 token，
+   减少动态效果下由 tokens.css 的 .reduced 规则统一归零。
+   ══════════════════════════════════════════════════════════════════════════ */
+.task-center {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  color: var(--text);
+}
+.task-banner {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.task-banner__row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.task-banner__title {
+  margin: 0;
+  font-size: var(--fs-title);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--tracking-tight);
+}
+.task-muted {
+  margin: 0;
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+.task-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.task-error {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: rgb(var(--failed-rgb) / 0.12);
+  color: var(--failed);
+  font-size: var(--fs-caption);
+  overflow-wrap: anywhere;
+  animation: task-feedback-in var(--dur-feedback) var(--ease-standard);
+}
+.task-warn {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+  color: var(--text);
+  font-size: var(--fs-caption);
+  line-height: var(--lh-normal);
+  overflow-wrap: anywhere;
+  animation: task-feedback-in var(--dur-feedback) var(--ease-standard);
+}
+.task-notice {
+  margin: 0;
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+.task-state-block {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-4) var(--space-6);
+}
+@keyframes task-feedback-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* ── 两栏：任务列表 / 详情 ─────────────────────────────────────────────── */
+.task-split {
+  display: grid;
+  grid-template-columns: minmax(0, 288px) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-4);
+}
+.task-list-pane,
+.task-detail-pane {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.task-pane-head,
+.task-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.task-pane-title,
+.task-section-head h4,
+.task-section h4 {
+  margin: 0;
+}
+.task-pane-title {
+  font-size: var(--fs-heading);
+  font-weight: var(--fw-medium);
+}
+.task-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.task-row {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  background: var(--sunken);
+  text-align: left;
+  cursor: var(--cursor-arrow, default);
+  transition: background var(--dur-quick) var(--ease-standard);
+}
+.task-row:hover {
+  background: rgb(var(--text-rgb) / 0.08);
+}
+/* 选中 = 背景明度 + 左侧标记两个通道，不只靠颜色深浅（DESIGN_SYSTEM §3）。 */
+.task-row[aria-pressed="true"] {
+  background: rgb(var(--text-rgb) / 0.14);
+  box-shadow: inset 2px 0 0 rgb(var(--text-rgb) / 0.5);
+}
+.task-row__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.task-row__top strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-medium);
+}
+.task-row__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  font-size: var(--fs-micro);
+  color: var(--muted);
+}
+.task-row__desc {
+  font-size: var(--fs-caption);
+  color: var(--muted);
+  line-height: var(--lh-normal);
+  overflow-wrap: anywhere;
+}
+.task-status {
+  transition:
+    background-color var(--dur-feedback) var(--ease-standard),
+    color var(--dur-feedback) var(--ease-standard);
+}
+
+/* ── 详情 ─────────────────────────────────────────────────────────────── */
+.task-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  animation: task-page-in var(--dur-quick) var(--ease-standard);
+  min-width: 0;
+}
+@keyframes task-page-in {
+  from {
+    opacity: 0.6;
+    transform: translateY(var(--space-1));
+  }
+}
+.task-detail__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.task-detail__title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.task-detail__title h3 {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.task-detail__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+.task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.task-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* ── 进行态（MOTION_SYSTEM §7：静态等图标 + 活动指示只在真实执行态）─── */
+.task-run {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  background: var(--sunken);
+  animation: task-feedback-in var(--dur-feedback) var(--ease-standard);
+}
+.task-run__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.task-run__glyph {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  background: rgb(var(--text-rgb) / 0.08);
+  color: var(--text);
+  font-size: var(--fs-caption);
+}
+.task-continue {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* ── 计划与步骤 ───────────────────────────────────────────────────────── */
+.task-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--fs-caption);
+}
+.task-steps li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+  min-width: 0;
+}
+.task-step__ord {
+  flex: none;
+  width: 20px;
+  text-align: right;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.task-step__title {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+  font-weight: var(--fw-medium);
+}
+.task-step__tool {
+  flex: none;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── 事件流（sequence 单调；缺口显式标注）──────────────────────────────── */
+.task-events-scroll {
+  min-width: 0;
+}
+.task-events {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.task-events li {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-caption);
+  min-width: 0;
+}
+.task-events li:last-child {
+  border-bottom: 0;
+}
+.task-event__seq {
+  flex: none;
+  font-size: var(--fs-micro);
+  color: var(--muted);
+}
+.task-event__type {
+  flex: none;
+  font-weight: var(--fw-medium);
+}
+.task-event__msg {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.task-event__time {
+  flex: none;
+  font-size: var(--fs-micro);
+  color: var(--muted);
+}
+
+/* ── 交付物 ───────────────────────────────────────────────────────────── */
+.task-deliverables {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--fs-caption);
+}
+.task-deliverable {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+  min-width: 0;
+}
+.task-deliverable__name {
+  font-weight: var(--fw-medium);
+  overflow-wrap: anywhere;
+}
+
+/* 窄窗口：列表在上、详情在下单列排布；所有列宽都带 minmax(0,*) 防溢出。
+   容器查询按窗口自身宽度响应（.window 已声明 container-type: inline-size）。 */
+@container (max-width: 900px) {
+  .task-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .task-row__top strong,
+  .task-detail__title h3 {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .task-step__tool {
+    max-width: 100%;
     white-space: normal;
     overflow-wrap: anywhere;
   }

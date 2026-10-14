@@ -251,4 +251,30 @@ contextBridge.exposeInMainWorld("openarc", {
     move: (folderId, ids, toFolderId) => ipcRenderer.invoke("files:move", { folderId, ids, toFolderId }),
     exportTo: (folderId, ids) => ipcRenderer.invoke("files:export", { folderId, ids }),
   },
+  /**
+   * B6a 自动化域桥。
+   *
+   * **只有两条能力**：派发受控 automation 命令（定义 CRUD / 启停 / 立即运行 / 取消 / 运行记录）、
+   * 订阅 automation 下行事件（P1 信封；调度领取与每次运行的进度都走它）。
+   * 不暴露 ipcRenderer / 数据库 / 凭据 / 绝对路径；sessionRef 与 appId 由主进程注入，
+   * Renderer 自报的 userId / role / appId 一律忽略（与 agent / skill / media 同一条 trusted 边界）。
+   */
+  automation: {
+    command: (command) => ipcRenderer.invoke("automation:command", command),
+    onEvent: (callback) => {
+      const listener = (_, event) => callback(event);
+      ipcRenderer.on("automation:event", listener);
+      return () => ipcRenderer.removeListener("automation:event", listener);
+    },
+  },
+  /**
+   * B6c 平台域桥（第 22 个顶层键；B6a 的 automation 是第 21 个键）。
+   *
+   * **只有一条能力**：派发受控 platform 命令（诊断 / 数据保护 / 网络安全 / 供应商测试安全）。
+   * 不暴露 ipcRenderer / 环境变量 / 绝对路径 / 凭据；sessionRef 与 appId 由主进程注入，
+   * Renderer 自报的 userId / role / appId 一律忽略（与 agent / skill / media 同一条 trusted 边界）。
+   */
+  platform: {
+    command: (command) => ipcRenderer.invoke("platform:command", command),
+  },
 });
