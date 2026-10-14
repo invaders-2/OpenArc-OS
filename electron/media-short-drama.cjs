@@ -41,7 +41,7 @@ const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 
 const mediaDomain = require("./media-domain.cjs");
-const { createMediaError, MEDIA_ERR_INVALID_INPUT, MEDIA_ERR_NOT_FOUND, MEDIA_ERR_DEPENDENCY_UNAVAILABLE } = mediaDomain;
+const { createMediaError, MEDIA_ERR_INVALID_INPUT, MEDIA_ERR_NOT_FOUND, MEDIA_ERR_CONFLICT, MEDIA_ERR_DEPENDENCY_UNAVAILABLE } = mediaDomain;
 
 const DRAMA_STAGES = Object.freeze(["script", "design", "storyboard", "generate", "timeline"]);
 const DEFAULT_CANVAS = Object.freeze({ width: 1080, height: 1920, fps: 30 });

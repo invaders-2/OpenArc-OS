@@ -32,7 +32,7 @@ const { randomUUID } = require("node:crypto");
 const mediaDomain = require("./media-domain.cjs");
 const foundationErrors = require("./dxos-foundation-errors.cjs");
 
-const { createMediaError, MEDIA_ERR_INVALID_INPUT, MEDIA_ERR_NOT_FOUND, MEDIA_ERR_CONFLICT, MEDIA_ERR_FORBIDDEN, MEDIA_ERR_DEPENDENCY_UNAVAILABLE, MEDIA_ERR_INTERNAL } = mediaDomain;
+const { createMediaError, MEDIA_ERR_INVALID_INPUT, MEDIA_ERR_NOT_FOUND, MEDIA_ERR_CONFLICT, MEDIA_ERR_FORBIDDEN, MEDIA_ERR_DEPENDENCY_UNAVAILABLE, MEDIA_ERR_POSTER_FAILED, MEDIA_ERR_INTERNAL } = mediaDomain;
 
 /** 依赖未注入时的结构化错误码（与 agent-task-store.cjs:48 同一做法）。 */
 const MEDIA_UNAVAILABLE = MEDIA_ERR_DEPENDENCY_UNAVAILABLE;

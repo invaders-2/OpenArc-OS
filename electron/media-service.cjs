@@ -267,14 +267,32 @@ function probeOnnxAvailability(options = {}) {
   return { available: !!runtime && !!modelPath, runtime: runtime, modelPath: modelPath, modelDir: modelDir, reason: reason };
 }
 
+/** 统一取 URL 文本：string / URL 对象 / Request（或任何带 url、href 的入参）。 */
+function inboundUrlText(input) {
+  if (typeof input === "string") return input;
+  if (input instanceof URL) return input.href;
+  if (input && typeof input.url === "string") return input.url;
+  if (input && typeof input.href === "string") return input.href;
+  return "";
+}
+
+/**
+ * dx-os.com 云端点判定。
+ * 为什么先规范化：只看 input.url 会漏掉 URL 对象；不剥尾随点会漏掉 api.dx-os.com.
+ * 这类 DNS 等价写法（host 大小写与端口由 URL 解析归一，尾点不会）。
+ */
+function isDxosCloudInput(input) {
+  let host = "";
+  try { host = new URL(inboundUrlText(input)).hostname; } catch { return false; /* 相对 / 非法 URL 交给 fetch 自己报错 */ }
+  host = host.toLowerCase().replace(/\.+$/, "");
+  return host === "dx-os.com" || host.endsWith(".dx-os.com");
+}
+
 /** 只允许本地 / 用户自配端点：拒绝云端点 dx-os.com（媒体域不得替用户回连 DX 云）。 */
 function createGuardedFetch(baseFetch) {
   if (typeof baseFetch !== "function") return null;
   return function mediaGuardedFetch(input, init) {
-    const url = typeof input === "string" ? input : input && typeof input.url === "string" ? input.url : "";
-    let host = "";
-    try { host = new URL(url).hostname.toLowerCase(); } catch { /* 相对 / 非法 URL 交给 fetch 自己报错 */ }
-    if (host === "dx-os.com" || host.endsWith(".dx-os.com")) {
+    if (isDxosCloudInput(input)) {
       throw createMediaError(MEDIA_ERR_FORBIDDEN, "媒体域禁止访问云端 dx-os.com 端点（只用本地 / 用户自配端点）", { host: "dx-os.com" });
     }
     return baseFetch(input, init);
