@@ -215,8 +215,7 @@ test("路径：解析 §6.1 的文件与目录", () => {
   assert.equal(resolved.file["providers.json"], "/tmp/oa-userdata/dxos/providers.json");
   assert.equal(resolved.file["mcp.system.json"], "/tmp/oa-userdata/dxos/mcp.system.json");
   assert.equal(resolved.directory["skill-packs"], "/tmp/oa-userdata/dxos/skill-packs");
-  assert.equal(resolved.directory["comfy-workflows"], "/tmp/oa-userdata/dxos/comfy-workflows");
-  assert.deepEqual([...resolved.directories], ["skills", "skill-packs", "comfy-workflows", "ai-tasks", "media", "logs", "diagnostics"]);
+  assert.deepEqual([...resolved.directories], ["skills", "skill-packs", "ai-tasks", "media", "logs", "diagnostics"]);
 });
 
 test("路径：ensureDxosLayout 只建目录，不创建任何配置文件", () => {

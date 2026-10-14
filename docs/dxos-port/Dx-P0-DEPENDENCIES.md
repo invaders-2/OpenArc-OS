@@ -8,7 +8,7 @@
 |---|---|---|---|---|
 | Node ≥ 22.5 | `node:sqlite` 的 `DatabaseSync` | 必需（现有约束） | **v22.22.3** | ✅ 满足 |
 | FFmpeg / ffprobe | 视频渲染、媒体探测 | 媒体能力必需 | **ffmpeg 7.1.1**（/opt/homebrew/bin） | ✅ 已具备 |
-| Python 3 + ComfyUI | ComfyUI 集成与桥接 | ComfyUI 能力必需 | Python **3.12.12** ✅；**ComfyUI 未在常见路径发现** | ⚠️ 缺 ComfyUI → P5 阻塞 |
+| Python 3 + ComfyUI（2026-10-14 随 B7i 从移植范围移除，原因与恢复前提见 `Dx-B7-RESULT.md` §8） | ComfyUI 集成与桥接 | ComfyUI 能力必需 | Python **3.12.12** ✅；**ComfyUI 未在常见路径发现** | ⚠️ 缺 ComfyUI → P5 阻塞 |
 | onnxruntime-node + 抠图模型 | 本地抠图 | 抠图能力必需 | **未安装**（node 侧与 python 侧均无） | ⚠️ P5 阻塞 |
 | `better-sqlite3` | DX OS 使用；OpenArc 用内置 `node:sqlite` | 建议不引入，需确认 | 未安装 | ✅ **决定：不引入**，统一 `node:sqlite` |
 | `sharp` | 图片处理 | 图像处理必需 | node_modules 中存在 0.35.5，但**仅是 devDependency `@deepseek-ai/dsh` 的传递依赖**（`npm ls` 实测），package.json 未声明 | ✅ **决定：本轮不引入直接依赖**；P5 需要时再单独确认 |
@@ -33,7 +33,7 @@ openarc-os@0.1.0
 1. **不新增任何运行时依赖**：P1/P2 均可由 Node 内置模块（`node:sqlite`、`node:http`、`node:crypto`、`node:fs`、`node:child_process`）与仓库已声明依赖完成。这样避免平台二进制与打包风险（计划 §10「新依赖引入成本」）。
 2. **`better-sqlite3` 不引入**：与计划建议一致，统一到 `node:sqlite`；迁移框架已有 21 级经验可复用。
 3. **`sharp` / `ws` 延后到 P5**：它们对应媒体处理与画布协作，属 P5 范围；届时需要显式声明为直接依赖并单独确认平台二进制随包方案。
-4. **P5 前置缺口如实登记**：ComfyUI、onnxruntime、抠图模型缺失 → 相关能力在本轮与 P5 均无法实机验证（NOT VERIFIED），不造假实现。
+4. **P5 前置缺口如实登记**：ComfyUI（2026-10-14 随 B7i 从移植范围移除，原因与恢复前提见 `Dx-B7-RESULT.md` §8）、onnxruntime、抠图模型缺失 → 相关能力在本轮与 P5 均无法实机验证（NOT VERIFIED），不造假实现。
 
 ## 3. 待用户提供
 

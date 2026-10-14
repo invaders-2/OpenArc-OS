@@ -168,7 +168,10 @@ test("preload：新增 integration / market 两个顶层键，各只暴露 comma
   // B7f：固定 index、允许其后继续追加（不再断言"最后一个顶层键"）。
   assert.equal(topKeys.indexOf("integration"), 23, "integration 固定在第 24 个顶层键（index 23）");
   assert.equal(topKeys.indexOf("market"), 24, "market 固定在第 25 个顶层键（index 24）");
-  assert.equal(topKeys.indexOf("comfy"), 25, "comfy 固定在第 26 个顶层键（index 25）");
+  // B7i：ComfyUI 已从移植范围移除 —— comfy 顶层键不存在，market 之后不再有键。
+  assert.equal(Object.prototype.hasOwnProperty.call(api, "comfy"), false, "comfy 顶层键必须不存在（B7i 移除）");
+  assert.equal(topKeys.length, 25, "顶层键恰为 25（移除 comfy 后）");
+  assert.equal(topKeys.indexOf("market"), topKeys.length - 1, "market 之后不再有顶层键");
   for (const key of ["integration", "market"]) {
     assert.deepEqual(Object.keys(api[key]), ["command"], key + " 只允许 command");
     assert.equal(typeof api[key].command, "function");

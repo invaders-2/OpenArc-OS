@@ -29,7 +29,7 @@
 |---|---|---|
 | 「现有 17 域」 | preload 顶层键 17 个；handler 域 13 个 | 口径不同：17 = 暴露面键数，13 = 命令域数。以实测两个数字并列记录 |
 | 「30 通道 / 5 下行事件」 | invoke 通道 29 条；下行事件 5 条 | 通道数差 1（`browser:action` 等拆分口径不同）。以实测为准 |
-| 「新增 12 个域」 | 计划 §4 表列出的新通道名为 10 个（skill/media/comfy/automation/integration/developer/market/cloud/update/diagnostics）+ 4 个既有域扩展（model/mcp/task/canvas） | 以计划 §4 的表格为准；「12」应理解为 10 新域 + 2 处扩展通道（canvas、task 事件域）。**此处保留为待对齐项** |
+| 「新增 12 个域」 | 计划 §4 表列出的新通道名为 10 个（skill/media/comfy/automation/integration/developer/market/cloud/update/diagnostics）+ 4 个既有域扩展（model/mcp/task/canvas） | 以计划 §4 的表格为准；「12」应理解为 10 新域 + 2 处扩展通道（canvas、task 事件域）。**此处保留为待对齐项**（其中 comfy 通道已于 2026-10-14 随 B7i 移除，原因与恢复前提见 `Dx-B7-RESULT.md` §8） |
 
 ## 3. 计划新增域（§4，实施目标）
 
@@ -37,7 +37,7 @@
 |---|---|---|
 | 技能 | `skill:command` + `skill:event` | 新增 |
 | 媒体 | `media:command` + `media:event` | 新增 |
-| ComfyUI | `comfy:command` + `comfy:event` | 新增 |
+| ComfyUI（2026-10-14 随 B7i 从移植范围移除，原因与恢复前提见 `Dx-B7-RESULT.md` §8） | `comfy:command` + `comfy:event` | 新增 |
 | 自动化 | `automation:command` + `automation:event` | 新增 |
 | 集成（可选插件，默认关） | `integration:command` | 新增 |
 | 开发者 / 市场 | `developer:command`、`market:command` | 新增 |

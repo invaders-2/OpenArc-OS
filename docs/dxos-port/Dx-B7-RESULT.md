@@ -93,3 +93,56 @@ dxos-plugin*/market* 40/40 · dxos-integration-* 34/34 · dxos-comfy* 51/51
 ## 7. 结论
 
 B7（开发者平台 + 8 个可选插件 + ComfyUI + 本地市场 + B2 端口补口）与 UI-4/UI-5 均**落地并通过门禁**：build ✅、全量测试 ✅（唯一失败为基线既有 #337）、真机 preload 探针 ✅（26 键）、design-system ✅、五套 UI 探针 33/49/45/51/66 全 PASS ✅、媒体真机探针 ✅。验证岗的六项证伪全部未推翻、约束零违规；它提出的两条实现缺口（可观测性、install 一致性）**已在本批内关闭并加故障注入用例**，其余差异已逐条登记台账。B1–B7 全部批次至此完成。
+
+---
+
+## 8. 范围变更：ComfyUI 移除（B7i，追加于 2026-10-14）
+
+> 本节是**追加说明**，不改写上面任何历史结论：§1–§7 如实记录的是移除**之前** B7e1 的交付与验证事实；自本日起 B7e1 已从移植范围移除。
+
+**用户决定**：ComfyUI **从移植范围移除**，不再作为可选插件/域提供；要求干净移除，不留半成品、不留死引用。
+
+**移除日期**：2026-10-14。
+
+**被删模块清单（12 个文件）**
+
+| 类别 | 文件 |
+|---|---|
+| 域实现（8） | `electron/comfy-domain.cjs`、`comfy-workflow.cjs`、`comfy-store.cjs`、`comfy-worker.cjs`、`comfy-service.cjs`、`comfy-bootstrap.cjs`、`comfy-bridge.cjs`、`comfy-projects.cjs` |
+| 验收测试（4） | `tests/dxos-comfy-workflow.test.mjs`、`dxos-comfy-supervisor.test.mjs`、`dxos-comfy-ipc.test.mjs`、`dxos-comfy-projects.test.mjs` |
+
+**同步清理的接线与引用**
+
+- `electron/main.cjs`：`createComfyBundle` / `registerComfyIpc` 的 require、comfy bundle 变量与整段装配；
+- `electron/preload.cjs`：顶层键 `comfy`（键数 26 → 25；`market` 之后不再有键）；
+- `src/types/openarc-ipc.d.ts`：`OpenArcComfy*` 全部类型与 P1 声明的 `comfy?` 可选键（一并去掉）；
+- `electron/dxos-foundation-paths.cjs`：`DXOS_LAYOUT.directories` 去掉 `comfy-workflows`（注释里的 ComfyUI 同步清理）；
+- `electron/developer-service.cjs`：去掉对已删 `comfy-service.cjs` 的悬空注释引用；
+- `electron/agent-cli-bridge.cjs`：去掉指向 `ComfyUI-API-Modelscope` 旧目录的 Codex OAuth 兼容候选路径；
+- `tests/dxos-foundation.test.mjs`、`tests/dxos-plugin-ipc.test.mjs`、`tests/fixtures/model-ipc-probe/main.cjs`：顶层键/目录口径改为 **25**，并把 `comfy` 位次断言改成负向口径（comfy 键不存在 + `market` 之后不再有键；负向断言不放松）。
+
+**随之丢失的能力**
+
+1. **受监督实例监督**：本地 / 局域网 / 远端 ComfyUI 实例的登记、启动、停止与运行句柄跟踪——`dxos-foundation-runner.cjs` + `comfy-worker.cjs` 的受监督子进程通道整体移除（含"依赖缺失时零子进程"的降级协议）；
+2. **工作流执行**：API 工作流的解析 / 导入 / 保存 / 删除、参数校验与节点映射，以及 `comfy/run/*` 的提交 / 查询 / 取消 / 结果回读；随包 3 份内置工作流与 `bundled-comfy-workflows` 目录装配一并移除；
+3. **桥接**：`comfy-bridge.cjs` 的随包扩展安装 / 打包，以及 `comfy:command`（24 条命令）+ `comfy:event` 两条 IPC 通道全部移除；依赖探测（Python / `main.py`）与 `COMFY_DEPENDENCY_UNAVAILABLE`、`COMFY_NOT_READY` 等失败码随之消失。
+
+**未删除、且不属于本次移除范围的引用（保留原因）**
+
+- `src/canvas/CanvasHost.tsx` 的 `comfy` 能力投影、`public/novai-canvas/openarc-canvas-guard.js` 的守卫与 `comfyui-settings` 静态页：属 D5-02 **既有画布界面**（硬约束「不改既有界面」）。画布一直把 ComfyUI 显示为「未接入（不可用）」，**不依赖**被删的 B7e1 域，移除后行为不变；
+- `electron/canvas-domain.cjs` 的 `NODE_TYPES` 含 `"comfy"`：D5-02 画布节点类型表（提交 `d875558` 引入），非 B7e1 域；
+- `electron/plugin-runninghub.cjs` 的 `ComfyUI_RH_OpenAPI` 注册表 URL：RunningHub 插件（提交 `3aa2598`）的**第三方上游地址**，改动会破坏该插件，故保留；
+- `experiments/d5-02/**` 与 `experiments/d5-03/batch13/verify/31-electron-d5-02-canvas.txt`：D5-02 画布的历史实验与 vendored 上游代码（`pruneMissingComfyWorkflows()` 是上游画布函数的调用），保留为历史证据。
+
+**历史文档的处理**：`docs/dxos-port/Dx-P0-BASELINE.md`、`Dx-P0-COMMIT-RECORD.md`、`Dx-P0-DEPENDENCIES.md`、`Dx-P0-IPC-CONTRACT.md`、`Dx-P0-LOCALIZATION-SWITCHES.md`、`Dx-ROUND-RESULT.md` 中出现的 ComfyUI 均为移除前的基线/验收记录，原文保留，并在同一处加注"2026-10-14 随 B7i 移除"；`docs/D5-02-*` 中的 ComfyUI 指**保留的画布页面**，与本次移除无关，不改写。
+
+**若要恢复需要哪些前提**
+
+1. 用户重新把 ComfyUI 纳入移植范围（产品决策）；
+2. 恢复八个 `electron/comfy-*.cjs` 与 `dxos-foundation-paths.cjs` 的 `comfy-workflows` 目录，并在 `main.cjs` / `preload.cjs` 重新装配（顶层键回到第 26 位，`openarc-ipc.d.ts` 恢复 `OpenArcComfy*`）；
+3. 恢复四个 comfy 测试，并把 `test:model-ipc-ui` 与探针口径改回 26 键；
+4. 本机具备 Python 运行时与 ComfyUI `main.py`（当前实测缺失，见 `Dx-P0-DEPENDENCIES.md`），否则只能停留在依赖缺失的降级态；
+5. 仍需遵守原硬约束：不联网云发布 / 云更新（`api.dx-os.com` OUT）、不新增依赖、DX OS 只读。
+
+**本批验证**：`npm run test:model-ipc-ui` 10/10（真实 Electron，preload **25 键**）；相关离线单测 `node --test` 62/62；代码目录 grep 已无被删域的引用（保留项如上）。
+

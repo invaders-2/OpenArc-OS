@@ -777,8 +777,6 @@ function gptImageAuthFile() {
   if (configured) return configured;
   const candidates = [
     path.join(deps.workspace, "API", "openai-gpt-account-auth.json"),
-    // 兼容原画布项目的项目级 Codex OAuth 登录；新安装仍优先使用 DX OS 自己的配置或用户目录。
-    path.join(path.dirname(deps.workspace), "ComfyUI-API-Modelscope", "API", "openai-gpt-account-auth.json"),
     path.join(homedir(), ".codex", "auth.json"),
   ];
   return candidates.find((candidate) => existsSync(candidate)) || candidates[candidates.length - 1];

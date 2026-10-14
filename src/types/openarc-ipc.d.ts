@@ -248,74 +248,6 @@ export interface OpenArcMediaArtifact {
 
 export interface OpenArcMediaBridge extends OpenArcCommandBridge, OpenArcEventBridge {}
 /**
- * B7e1 ComfyUI：本地 / 局域网 / 远端实例登记与监督，API 工作流解析导入，运行提交与取消。
- *
- * 唯一入口 command({ command, payload })（受控白名单，见 electron/comfy-domain.cjs 的 COMFY_COMMANDS），
- * 以及 comfy:event 下行（主进程封装的 P1 信封，channel="comfy:event"）。
- * ComfyUI 是**可选插件、默认关闭**：未启用 → { ok:false, error:"INTEGRATION_UNAVAILABLE" }；
- * 已启用但本机缺 Python / ComfyUI 安装路径 → { ok:false, error:"COMFY_DEPENDENCY_UNAVAILABLE",
- * detail:{ dependency, missing, install } }（"缺什么 / 怎么装"），绝不假运行。
- * 重活（启动实例 / 停止实例 / 提交运行）全部走受监督子进程（dxos-foundation-runner.cjs + comfy-worker.cjs）。
- * 这里没有 ipcRenderer / Python 句柄 / 绝对路径 / 凭据 —— sessionRef 与 appId 由主进程注入，
- * renderer 自报的 userId / role / appId 一律忽略；云发布 / 云更新 / api.dx-os.com / 云端实时房间一律 OUT。
- */
-export type OpenArcComfyCommand =
-  | "comfy/health"
-  | "comfy/plugin/get"
-  | "comfy/plugin/enable"
-  | "comfy/plugin/disable"
-  | "comfy/dependencies/probe"
-  | "comfy/bridge/install"
-  | "comfy/bridge/archive"
-  | "comfy/instances/list"
-  | "comfy/instances/save"
-  | "comfy/instances/delete"
-  | "comfy/instances/start"
-  | "comfy/instances/stop"
-  | "comfy/workflows/list"
-  | "comfy/workflows/get"
-  | "comfy/workflows/parse"
-  | "comfy/workflows/import"
-  | "comfy/workflows/save"
-  | "comfy/workflows/delete"
-  | "comfy/workflows/agent-manifests"
-  | "comfy/run/start"
-  | "comfy/run/get"
-  | "comfy/run/list"
-  | "comfy/run/results"
-  | "comfy/run/cancel";
-
-export interface OpenArcComfyCommandRequest {
-  command: OpenArcComfyCommand;
-  payload?: Record<string, unknown>;
-}
-
-/** 依赖探测条目：detail 是人话的"缺什么"，install 是可执行的"怎么装"。 */
-export interface OpenArcComfyDependency {
-  id: string;
-  /** python：ComfyUI Python 运行时；binary：安装路径（main.py / rootDir）。 */
-  kind: "python" | "binary";
-  label: string;
-  required: boolean;
-  status: "ok" | "missing";
-  detail: string;
-  install: string;
-}
-
-/** 失败体：缺依赖时 detail.missing / detail.install 必须可读。 */
-export interface OpenArcComfyFailure {
-  ok: false;
-  error: string;
-  message: string;
-  detail?: unknown;
-}
-export type OpenArcComfyResult<T = Record<string, unknown>> = OpenArcSuccess<T> | OpenArcComfyFailure;
-
-export interface OpenArcComfyBridge extends OpenArcCommandBridge {
-  command: (command: OpenArcComfyCommandRequest) => Promise<OpenArcComfyResult<unknown>>;
-  onEvent: (callback: (event: OpenArcEvent) => void) => () => void;
-}
-/**
  * B6a 自动化域：定义 CRUD / 启停 / 调度 / 运行记录。
  *
  * 唯一入口 command({ command, payload })（受控白名单，见 electron/automation-domain.cjs 的 AUTOMATION_COMMANDS），
@@ -830,7 +762,6 @@ export interface OpenArcBridge {
   agent?: OpenArcAgentBridge;
   skill?: OpenArcSkillBridge;
   media?: OpenArcMediaBridge;
-  comfy?: OpenArcComfyBridge;
   automation?: OpenArcAutomationBridge;
   integration?: OpenArcIntegrationBridge;
   developer?: OpenArcDeveloperBridge;

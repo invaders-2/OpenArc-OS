@@ -33,7 +33,15 @@ const { registerAgentIpc } = require("./agent-bootstrap.cjs");
 const { createSkillBundle } = require("./skill-service.cjs");
 const { registerSkillIpc } = require("./skill-bootstrap.cjs");
 // B5a：媒体域装配（<userData>/dxos/media 下的渲染作业 / 探测 / 封面）与 media:command / media:event 通道。
-const { createMediaBundle } = require("./media-service.cjs");
+const {
+  createMediaBundle,
+  // B5f：媒体域扩展依赖的真实装配件（复用既有模块 / B2 出口 / 依赖探测）。
+  createMediaProviderStore,
+  createMediaModelGateway,
+  createGuardedFetch,
+  probeIllustratorAvailability,
+  probeOnnxAvailability,
+} = require("./media-service.cjs");
 const { registerMediaIpc } = require("./media-bootstrap.cjs");
 // B6a：自动化域装配（定义 / 运行记录 / 主进程内调度器，无云依赖）与 automation:command / automation:event 通道。
 const { createAutomationBundle } = require("./automation-service.cjs");
@@ -57,9 +65,6 @@ const { DeveloperRealtimeHub } = require("./developer-realtime.cjs");
 const { createPluginBundle } = require("./plugin-service.cjs");
 const { createMarketBundle } = require("./market-service.cjs");
 const { registerIntegrationIpc, registerMarketIpc } = require("./plugin-bootstrap.cjs");
-// B7e1：ComfyUI 可选插件（工作流 + 桥接 + 实例监督，默认关闭；重活走受监督子进程）。
-const { createComfyBundle } = require("./comfy-service.cjs");
-const { registerComfyIpc } = require("./comfy-bootstrap.cjs");
 // B4 · providerAdapter 桥：把 B2 的 provider-protocol store/service 投影成 B4 执行器要的只读适配器
 // （firstUsable/all/autoFallback/revealProvider/call）；只读投影绝不返回 api_key/credentialRef。
 const { createProviderAdapter } = require("./provider-adapter-bridge.cjs");
@@ -97,8 +102,6 @@ let developerBundle;
 let pluginBundle;
 /** B7c：本地市场 bundle（createMarketBundle 的唯一实例）。 */
 let marketBundle;
-/** B7e1：ComfyUI 可选插件 bundle（createComfyBundle 的唯一实例；无身份服务时为 undefined）。 */
-let comfyBundle;
 /** D5-01 Closure-2：受控浏览器目标（用户显式授权）。宿主持有唯一实例，工具链与 UI 共用同一个。 */
 let browserControl;
 
@@ -663,12 +666,37 @@ app.whenReady().then(async () => {
     //   · 渲染作业落 identity-store 同一 SQLite 连接（v24 迁移已建 video_* 表）；
     //   · 曲目 / 素材 / 封面缓存全部在 <userData>/dxos/media 下，绝对路径不出主进程；
     //   · media:event 与 model:event / task:event / agent:event / skill:event 同一条 trusted(event) 边界。
+    // B5f：把上面已经装配好的真实依赖接进媒体域（只接线，不新增实现）。
+    //   · fsAdapter     复用 B6d 的 DX 虚拟文件树（同一份实例；短剧画布 / 素材按节点落 <userData>/dxos/fs）；
+    //   · fetchImpl     主进程全局 fetch + 出口护栏（拒绝云端点 dx-os.com，只用本地 / 用户自配端点）；
+    //   · providerStore / modelGateway 复用 B2 provider-protocol 的 store/service（模型唯一出口，不新造协议层）；
+    //   · viteBuild     本仓没有随包可用的 Vite 构建器（vite 只在 devDependencies）→ 保持 null，
+    //                   Figma 预览构建继续结构化不可用，不假接；
+    //   · illustratorAvailable / onnx 探测：探测不到就如实传 false / null，不放松命令侧的结构化失败。
+    const mediaFetchImpl = createGuardedFetch(typeof fetch === "function" ? fetch : null);
+    const mediaProviderStore = createMediaProviderStore({ providerProtocol: providerProtocol, providerAdapter: providerAdapter });
+    const mediaModelGateway = createMediaModelGateway({
+      providerProtocol: providerProtocol,
+      mediaDir: path.join(app.getPath("userData"), "dxos", "media"),
+    });
+    const mediaOnnxProbe = probeOnnxAvailability({ modelDir: path.join(app.getPath("userData"), "dxos", "media", "background-removal") });
     mediaBundle = createMediaBundle({
       userDataDir: app.getPath("userData"),
       identityStore: identity.store,
       authorization: identity.authorization,
       logger: null,
       clock: null,
+      // B5f：真实依赖注入面（未就绪项保持 null / false，命令侧仍 MEDIA_DEPENDENCY_UNAVAILABLE）。
+      fsAdapter: dxosFsAdapter,
+      fetchImpl: mediaFetchImpl,
+      providerStore: mediaProviderStore,
+      modelGateway: mediaModelGateway,
+      modelDir: mediaOnnxProbe.modelDir,
+      modelPath: mediaOnnxProbe.modelPath,
+      onnxRuntime: mediaOnnxProbe.runtime,
+      illustratorAvailable: probeIllustratorAvailability(),
+      // 本仓无随包 Vite 构建器（vite 仅 devDependency）→ 如实 null。
+      viteBuild: null,
     });
     registerMediaIpc({
       ipcMain,
@@ -853,27 +881,6 @@ app.whenReady().then(async () => {
       bundle: marketBundle,
       identity: identity.service,
       isTrusted: trusted,
-    });
-
-    // B7e1：ComfyUI 可选插件（工作流 + 桥接 + 实例监督）。
-    //   · 默认关闭：<userData>/dxos/comfy.json 的 enabled 缺省 false；
-    //   · 本机缺 Python / ComfyUI main.py → COMFY_DEPENDENCY_UNAVAILABLE（detail: missing + install），绝不假运行；
-    //   · 重活（启动实例 / 停止实例 / 提交运行）全部走 dxos-foundation-runner.cjs + comfy-worker.cjs，
-    //     主进程只编写 spec、跟踪受监督句柄、经 comfy:event 回推进度；
-    //   · 工作流解析 / 参数校验 / 节点映射复用 comfy-workflow.cjs 的纯函数（三份内置 API 工作流随包内嵌）；
-    //   · 云发布 / 云更新 / 云端实时房间 / 市场远端服务（api.dx-os.com）一律 OUT（任务书硬约束）。
-    comfyBundle = createComfyBundle({
-      userDataDir: app.getPath("userData"),
-      bundledWorkflowsDir: path.join(__dirname, "bundled-comfy-workflows"),
-      logger: null,
-      clock: null,
-    });
-    registerComfyIpc({
-      ipcMain,
-      bundle: comfyBundle,
-      identity: identity.service,
-      isTrusted: trusted,
-      send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("comfy:event", event); },
     });
 
     // D3-04C：注册安全预览协议 handler（每次请求重新授权 + Range 流式返回）。

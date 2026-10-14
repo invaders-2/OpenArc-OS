@@ -40,5 +40,5 @@ not ok 5 - D5-03-E · ACP SDK 只认项目内那一份，版本 1.4.0（与锁�
 - 已完成：P0（契约冻结）、P1 = B1 地基（主体）、P2 = B2 模型与协议（主体）。
 - B2 遗留：v2 模型协议仅移植 `openai-images` 1 个（余 17 个 `ported:false`）、legacy 执行器未搬、`protocolInference` 未逐条搬、真实调用凭据缺失（NOT VERIFIED）。
 - 本轮（R2）起点 = **B3 任务 / Agent / 工具**；B1、B2 已完成部分不重做。
-- 已声明但未实现的新 IPC 域：`skill` `media` `comfy` `automation` `integration` `developer` `market` `cloud` `update` `diagnostics`；
+- 已声明但未实现的新 IPC 域：`skill` `media` `comfy`（2026-10-14 随 B7i 从移植范围移除，原因与恢复前提见 `Dx-B7-RESULT.md` §8） `automation` `integration` `developer` `market` `cloud` `update` `diagnostics`；
   待补充声明：`agent`（Agent 内核/运行时/工具）、`project`（项目快照/记忆）、`platform`（安全/代理，可并入 `diagnostics`）。

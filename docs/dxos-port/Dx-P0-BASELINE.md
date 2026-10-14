@@ -31,7 +31,7 @@ git -C /Users/wepingli/.openarc-worktrees/dxos-port-r1 log -1 --format='%H %d %s
 | npm | 10.9.8 |
 | FFmpeg | 7.1.1（/opt/homebrew/bin/ffmpeg） |
 | Python | 3.12.12 |
-| ComfyUI / onnxruntime | **缺失**（见 Dx-P0-DEPENDENCIES.md） |
+| ComfyUI / onnxruntime | **缺失**（见 Dx-P0-DEPENDENCIES.md）。ComfyUI 需求已于 2026-10-14 随 B7i 移除，原因与恢复前提见 `Dx-B7-RESULT.md` §8 |
 
 ## 3. 基线验证结果（改动前证据，R15）
 
@@ -65,7 +65,7 @@ $ npm test        # node --test tests/*.test.mjs
 | 项 | 计划原文 | 实测 | 判定 |
 |---|---|---|---|
 | DX OS server 顶层 `.ts` | 76 个 | **110 个** | 不符；以实测为准 |
-| DX OS server 子目录 | 5 个 | **13 个**（agent-kernel/ agent-runtime/ ai-tasks/ baselines/ bundled-comfy-workflows/ bundled-skill-packages/ claudecode/ cli-runtime/ protocol-engine/ protocol-fixtures/ vendor/ video/ ziniao/） | 不符；以实测为准 |
+| DX OS server 子目录 | 5 个 | **13 个**（agent-kernel/ agent-runtime/ ai-tasks/ baselines/ bundled-comfy-workflows/ bundled-skill-packages/ claudecode/ cli-runtime/ protocol-engine/ protocol-fixtures/ vendor/ video/ ziniao/） | 不符；以实测为准（其中 `bundled-comfy-workflows/` 对应的移植目标已于 2026-10-14 随 B7i 移除，见 `Dx-B7-RESULT.md` §8） |
 | DX OS server 总行数 | 约 63,422 行 | 递归 `*.ts` 合计 **63,422** | **完全一致** → 同一份源码，分歧仅在计数口径 |
 | DX OS `/api` 路由 | 560–571 条 | `app.get/post/put/patch/delete` 匹配 **553** 条；`/api/*` 前缀去重 **59** 个 | 口径不同，未复现原区间 |
 | `protocol-engine/` | 12 文件 5263 行 | **15 个 `.ts`** | 不符；以实测为准 |

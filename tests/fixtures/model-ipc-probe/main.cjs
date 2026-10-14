@@ -128,10 +128,11 @@ app.whenReady().then(async () => {
      */
     const expectedModelKeys = ["command", "onEvent"];
     // 顶层键沿革：既有 17 → B3 agent 18 → B4 skill 19 → B5a media 20 → B6a automation 21 →
-    // B6c platform 22 → B7a developer 23 → B7c integration 24 / market 25 → B7e1 comfy 26。
-    // 26 键 = 实际 Object.keys(window.openarc).sort()（preload.cjs 顶层键登记），逐字写死；
+    // B6c platform 22 → B7a developer 23 → B7c integration 24 / market 25。
+    // B7i 移除 ComfyUI：原第 26 个顶层键 comfy 已删除，market 之后不再有键。
+    // 25 键 = 实际 Object.keys(window.openarc).sort()（preload.cjs 顶层键登记），逐字写死；
     // 负向断言（原始能力黑名单 / 桥值只允许 function / 不新增未登记顶层键）逐项不放松。
-    const expectedTopKeys = ["action", "agent", "authorization", "automation", "browser", "canvas", "comfy", "developer", "device", "files", "governance", "identity", "integration", "market", "mcp", "media", "model", "navigate", "onDisplay", "onNativeState", "platform", "resource", "sideEffect", "skill", "sync", "task"];
+    const expectedTopKeys = ["action", "agent", "authorization", "automation", "browser", "canvas", "developer", "device", "files", "governance", "identity", "integration", "market", "mcp", "media", "model", "navigate", "onDisplay", "onNativeState", "platform", "resource", "sideEffect", "skill", "sync", "task"];
     // 逐项列出的原始能力黑名单：桥上任一 key / 值命中即失败（等价旧的"无 getRawCredential / rawFetch"）。
     const forbiddenRaw = ["getRawCredential", "rawFetch", "ipcRenderer", "webContents", "send", "invoke", "require", "fs", "credentialRef", "rawCredential", "readFile", "writeFile", "shell", "process", "Buffer"];
     const ipc2 = await js(`
@@ -188,7 +189,7 @@ app.whenReady().then(async () => {
       ipc2.bridgeLeaks.length === 0 && ipc2.topLeaks.length === 0 && ipc2.valueLeaks.length === 0 &&
       ipc2.eventCount > 0 && ipc2.envelopeBad.length === 0 && ipc2.monotonic === true &&
       ipc2.afterUnsubDelta === 0 && ipc2.streamError === null;
-    check("IPC2 · model 桥恰为 {command,onEvent}、onEvent 返退订函数、事件为 P1 信封、无原始能力 / 顶层键恰为 26（17 既有 + agent + skill + media + automation + platform + developer + integration + market + comfy）", ipc2Ok,
+    check("IPC2 · model 桥恰为 {command,onEvent}、onEvent 返退订函数、事件为 P1 信封、无原始能力 / 顶层键恰为 25（17 既有 + agent + skill + media + automation + platform + developer + integration + market）", ipc2Ok,
       "modelKeys=" + JSON.stringify(ipc2.modelKeys) + " topKeys=" + ipc2.topKeys.length + " bridgeLeaks=" + JSON.stringify(ipc2.bridgeLeaks) + " topLeaks=" + JSON.stringify(ipc2.topLeaks) + " valueLeaks=" + JSON.stringify(ipc2.valueLeaks) + " command=" + ipc2.commandType + " onEvent=" + ipc2.onEventType + " unsub=" + ipc2.unsubType + " events=" + ipc2.eventCount + " payloadTypes=" + JSON.stringify(ipc2.payloadTypes) + " envelopeBad=" + JSON.stringify(ipc2.envelopeBad) + " monotonic=" + ipc2.monotonic + " afterUnsubDelta=" + ipc2.afterUnsubDelta + (ipc2.streamError ? " streamError=" + ipc2.streamError : ""));
     const list = await js("return await window.openarc.model.command({ command: 'provider/list' })");
     check("IPC3 · 合法命令 provider/list 可用", list && list.ok === true, JSON.stringify(list).slice(0, 120));

@@ -79,7 +79,7 @@ function createDeveloperBundle(options = {}) {
   const paths = userDataDir ? resolveDxosPaths(userDataDir) : null;
   const dataRoot = paths ? paths.root : null;
   const db = identityStore ? identityStore.connection || identityStore.db || null : null;
-  // B7h：store 可注入（与 comfy-service.cjs:84 同一形态），测试据此在 writePackage /
+  // B7h：store 可注入，测试据此在 writePackage /
   // activateRelease 上注入故障；生产路径不传即真实落盘层。
   const store = options.store && typeof options.store === "object" ? options.store : createDeveloperStore({ db, dataRoot, clock });
   const limiter = domain.createDeveloperRateLimiter({ now: clock });

@@ -15,7 +15,7 @@
 |---|---|---|
 | 供应商调用（用户自填 baseUrl/key） | `providers.call` | 无（用户自备） |
 | 技能包本地导入 | `skills.localImport` | 无 |
-| ComfyUI 本地实例 | `comfy.local` | Python + ComfyUI（本机缺失，见 Dx-P0-DEPENDENCIES） |
+| ComfyUI 本地实例（2026-10-14 随 B7i 从移植范围移除，原因与恢复前提见 `Dx-B7-RESULT.md` §8） | `comfy.local` | Python + ComfyUI（本机缺失，见 Dx-P0-DEPENDENCIES） |
 | FFmpeg 渲染 | `media.ffmpeg` | ffmpeg/ffprobe（已装 7.1.1） |
 | onnxruntime 抠图 | `media.backgroundRemoval` | onnxruntime + 模型（本机缺失） |
 | 文件系统（blob/快照） | `fs.local` | 无 |
@@ -28,7 +28,7 @@
 |---|---|---|
 | `protocolUpdates` 远程协议包更新 | 扫描本地协议包目录 | `protocol.updates.localDir` |
 | `marketplace` 远程市场 | 本地目录清单 | `market.localCatalog` |
-| 随包资源 `bundled-skill-packages/`、`bundled-comfy-workflows/`、`baselines/`、`protocol-fixtures/` | 直接作为本地源 | 无开关（始终本地） |
+| 随包资源 `bundled-skill-packages/`、`bundled-comfy-workflows/`（2026-10-14 随 B7i 从移植范围移除，原因与恢复前提见 `Dx-B7-RESULT.md` §8）、`baselines/`、`protocol-fixtures/` | 直接作为本地源 | 无开关（始终本地） |
 
 ## 4. 关闭开关（本地无对端，默认关，契约保留）
 

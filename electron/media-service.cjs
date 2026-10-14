@@ -34,6 +34,253 @@ const mediaDomain = require("./media-domain.cjs");
 const mediaStore = require("./media-store.cjs");
 const foundationErrors = require("./dxos-foundation-errors.cjs");
 
+// B5e：媒体域剩余部分（逐文件移植；依赖全部经 configureMediaExtensions 注入，未注入即结构化不可用）
+const mediaBackgroundRemoval = require("./media-background-removal.cjs");
+const mediaAiDeclaration = require("./media-ai-image-declaration.cjs");
+const mediaShortDrama = require("./media-short-drama.cjs");
+const mediaLibrary = require("./media-library.cjs");
+const mediaIllustrator = require("./media-illustrator.cjs");
+const mediaFigmaPreview = require("./media-figma-preview.cjs");
+const mediaDirector3D = require("./media-director3d.cjs");
+const mediaPublicMedia = require("./media-public-media.cjs");
+// B5f：providerStore 复用 B4 已经用过的 B2 只读桥（不新造协议层）。
+const { createProviderAdapter } = require("./provider-adapter-bridge.cjs");
+
+/**
+ * B5e 依赖注入总线：一次调用把同一批依赖分发给 8 个子模块。
+ * 任何一项缺失都不在这里兜底 —— 命令执行时各自回结构化 MEDIA_DEPENDENCY_UNAVAILABLE。
+ */
+function configureMediaExtensions(options) {
+  const ext = options && typeof options === "object" ? options : {};
+  const clock = typeof ext.clock === "function" ? ext.clock : undefined;
+  mediaBackgroundRemoval.configureBackgroundRemoval({
+    modelDir: ext.modelDir || null,
+    modelPath: ext.modelPath || null,
+    models: ext.models || undefined,
+    onnxRuntime: ext.onnxRuntime || null,
+    onnxSessionFactory: ext.onnxSessionFactory || null,
+    sharpLoader: ext.sharpLoader || null,
+  });
+  mediaAiDeclaration.configureAiImageDeclaration({ sharpLoader: ext.sharpLoader || null });
+  mediaShortDrama.configureShortDrama({
+    dataDir: ext.dataDir || null,
+    fsAdapter: ext.fsAdapter || null,
+    fetchImpl: ext.fetchImpl || null,
+    providerStore: ext.providerStore || null,
+    modelGateway: ext.modelGateway || null,
+    mediaStore: ext.mediaStore || null,
+    renderSubmit: ext.renderSubmit || null,
+    clock: clock,
+    logger: ext.logger || null,
+  });
+  mediaLibrary.configureMediaLibrary({
+    dataDir: ext.dataDir || null,
+    fetchImpl: ext.fetchImpl || null,
+    musicMetadataLoader: ext.musicMetadataLoader || null,
+    clock: clock,
+  });
+  mediaIllustrator.configureIllustrator({
+    dataDir: ext.dataDir || null,
+    tmpDir: ext.tmpDir || null,
+    illustratorAvailable: ext.illustratorAvailable === true,
+    illustratorAdapter: ext.illustratorAdapter || null,
+    clock: clock,
+  });
+  mediaFigmaPreview.configureFigmaPreview({
+    dataDir: ext.dataDir || null,
+    fetchImpl: ext.fetchImpl || null,
+    viteBuild: ext.viteBuild || null,
+    vuePlugin: ext.vuePlugin || null,
+  });
+  mediaDirector3D.configureDirector3D({
+    dataDir: ext.dataDir || null,
+    models: ext.director3dModels || undefined,
+    modelCatalog: ext.director3dCatalog || null,
+    clock: clock,
+  });
+  mediaPublicMedia.configurePublicMedia({ dataDir: ext.dataDir || null, sharpLoader: ext.sharpLoader || null, clock: clock });
+  return { configured: true };
+}
+
+// ---------------------------------------------------------------------------
+// B5f：媒体域扩展依赖的真实装配件（全部复用既有模块，不新造协议层 / 网络层）
+// ---------------------------------------------------------------------------
+
+/**
+ * 短剧选模型的只读提供方面：把 B2 provider-protocol-store/service 投影成
+ * firstUsableProvider(caps)（caps: "llm" | "image"）。
+ * 复用 B4 已经在用的 provider-adapter-bridge.cjs:171 只读桥（绝不含 api_key），
+ * 缺 store/service 即 null —— 命令侧继续 MEDIA_DEPENDENCY_UNAVAILABLE，绝不伪造。
+ */
+function createMediaProviderStore({ providerProtocol = null, providerAdapter = null } = {}) {
+  let adapter = providerAdapter;
+  if (!adapter && providerProtocol && providerProtocol.store && providerProtocol.service) {
+    try { adapter = createProviderAdapter({ store: providerProtocol.store, service: providerProtocol.service }); }
+    catch { adapter = null; }
+  }
+  if (!adapter || typeof adapter.firstUsable !== "function") return null;
+  return Object.freeze({
+    firstUsableProvider(caps) { return adapter.firstUsable(caps); },
+    allProviders() { return typeof adapter.all === "function" ? adapter.all() : []; },
+  });
+}
+
+/** 超时 → AbortSignal；未给合法 timeout 时不建 controller（沿用既有出口默认行为）。 */
+async function withTimeoutSignal(timeoutMs, run) {
+  const ms = Number(timeoutMs);
+  if (!Number.isFinite(ms) || ms <= 0) return run(null);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.max(1, Math.round(ms)));
+  try { return await run(controller.signal); }
+  finally { clearTimeout(timer); }
+}
+
+/**
+ * B5f · B2 模型出口 → 短剧要的 modelGateway（callChat / generateImages / editImages）。
+ * 三条路径全部走 provider-protocol-service 的既有出口（call / generateImage / legacyExecute），
+ * 密钥只在 service 内部解出；这里只把落盘产物读成短剧能消费的 b64。
+ * 未装配 provider-protocol（或 service 缺 call）即返回 null。
+ */
+function createMediaModelGateway({ providerProtocol = null, mediaDir = null } = {}) {
+  const service = providerProtocol && providerProtocol.service ? providerProtocol.service : null;
+  if (!service || typeof service.call !== "function") return null;
+
+  function gatewayError(what, response) {
+    const code = response && response.error === "MODEL_TIMEOUT" ? MEDIA_ERR_TIMEOUT : MEDIA_ERR_INTERNAL;
+    const detail = String((response && (response.detail || response.error)) || "unknown").slice(0, 300);
+    return createMediaError(code, what + "失败：" + detail, { dependency: "modelGateway" });
+  }
+
+  /** 产物 → 短剧 persistImages 能消费的 { type: "b64" | "url", value, mime }。 */
+  function toImage(item) {
+    if (!item || typeof item !== "object") return null;
+    const file = typeof item.mediaPath === "string" && item.mediaPath
+      ? item.mediaPath
+      : mediaDir && typeof item.fileName === "string" && item.fileName
+        ? path.join(mediaDir, item.fileName)
+        : null;
+    if (file) {
+      try { return { type: "b64", value: fs.readFileSync(file).toString("base64"), mime: item.mime || "image/png" }; }
+      catch { /* 文件已被清理：退回 URL 形态，绝不伪造图片 */ }
+    }
+    if (typeof item.dataUrl === "string" && item.dataUrl.startsWith("data:")) {
+      const comma = item.dataUrl.indexOf(",");
+      if (comma > 0) {
+        const meta = item.dataUrl.slice(5, comma);
+        return { type: "b64", value: item.dataUrl.slice(comma + 1), mime: item.mime || meta.split(";")[0] || "image/png" };
+      }
+    }
+    if (typeof item.url === "string" && item.url) return { type: "url", value: item.url };
+    if (typeof item.sourceUrl === "string" && item.sourceUrl) return { type: "url", value: item.sourceUrl };
+    return null;
+  }
+
+  return Object.freeze({
+    /** 短剧 generateDramaOutline / VisualDesign / Storyboards 的 callChat 出口。 */
+    async callChat(provider, model, input = {}, params = {}, timeoutMs) {
+      const response = await withTimeoutSignal(timeoutMs, (signal) => service.call({
+        providerId: provider && provider.id,
+        model: model,
+        messages: [{ role: "user", content: String((input && input.prompt) || "") }],
+        params: Object.assign({}, params, input && input.system ? { system: String(input.system) } : {}),
+        signal: signal,
+      }));
+      if (!response || response.ok !== true) throw gatewayError("模型对话调用", response);
+      return { text: response.text == null ? "" : String(response.text) };
+    },
+    /** 短剧 generateImages 出口（OpenAI 兼容 images/generations）。 */
+    async generateImages(provider, model, params = {}, timeoutMs) {
+      const response = await withTimeoutSignal(timeoutMs, (signal) => service.generateImage({
+        providerId: provider && provider.id,
+        model: model,
+        prompt: String((params && params.prompt) || ""),
+        size: (params && params.size) || null,
+        count: Number(params && params.n) || 1,
+        params: params && typeof params === "object" ? params : {},
+        signal: signal,
+      }));
+      if (!response || response.ok !== true) throw gatewayError("图像生成调用", response);
+      return { images: (response.images || []).map(toImage).filter(Boolean) };
+    },
+    /** 短剧 editImages 出口（legacy 协议族统一出口 legacyExecute）。 */
+    async editImages(provider, model, params = {}, inputs = [], timeoutMs) {
+      if (typeof service.legacyExecute !== "function") throw gatewayError("参考图编辑调用", { error: "MODEL_GATEWAY_UNSUPPORTED" });
+      const response = await withTimeoutSignal(timeoutMs, (signal) => service.legacyExecute({
+        providerId: provider && provider.id,
+        action: "editImages",
+        model: model,
+        prompt: String((params && params.prompt) || ""),
+        params: params && typeof params === "object" ? params : {},
+        inputs: Array.isArray(inputs) ? inputs : [],
+        timeoutMs: timeoutMs,
+        signal: signal,
+      }));
+      if (!response || response.ok !== true) throw gatewayError("参考图编辑调用", response);
+      return { images: (response.images || []).map(toImage).filter(Boolean) };
+    },
+  });
+}
+
+/**
+ * B5f · Illustrator 依赖探测：只看可执行文件（不启动、不联网、不读配置）。
+ * 显式 ILLUSTRATOR_PATH 优先；macOS 扫描 /Applications 下的 Adobe Illustrator*。
+ */
+function probeIllustratorAvailability(options = {}) {
+  const explicit = typeof options.path === "string" && options.path ? options.path : process.env.ILLUSTRATOR_PATH;
+  if (explicit) { try { return fs.statSync(explicit).isFile(); } catch { return false; } }
+  if (process.platform !== "darwin") return false;
+  let entries = [];
+  try { entries = fs.readdirSync("/Applications"); } catch { return false; }
+  for (const entry of entries) {
+    if (!/^Adobe Illustrator/i.test(entry)) continue;
+    const binary = path.join("/Applications", entry, "Adobe Illustrator.app", "Contents", "MacOS", "Adobe Illustrator");
+    try { if (fs.statSync(binary).isFile()) return true; } catch { /* 继续找下一个版本 */ }
+  }
+  return false;
+}
+
+/** 模型目录里第一个 .onnx（不下载、不校验 sha；真实校验留给 background removal 自己）。 */
+function findOnnxModelFile(modelDir) {
+  if (!modelDir) return null;
+  let entries = [];
+  try { entries = fs.readdirSync(modelDir); } catch { return null; }
+  for (const name of entries) {
+    if (!/\.onnx$/i.test(name)) continue;
+    const file = path.join(modelDir, name);
+    try { if (fs.statSync(file).isFile()) return file; } catch { /* 下一个 */ }
+  }
+  return null;
+}
+
+/**
+ * B5f · onnxruntime / 模型文件探测：惰性 require（不在模块顶层加载重原生依赖），
+ * 探测结果原样交给 bundle —— 探测到就注入真 runtime，探测不到就 null（不假接）。
+ */
+function probeOnnxAvailability(options = {}) {
+  const modelDir = typeof options.modelDir === "string" && options.modelDir ? options.modelDir : null;
+  let runtime = null;
+  let reason = null;
+  try { runtime = require("onnxruntime-node"); }
+  catch { reason = "onnxruntime-node 未安装"; }
+  const modelPath = findOnnxModelFile(modelDir);
+  if (!modelPath) reason = reason ? reason + "；模型目录没有 .onnx 文件" : "模型目录没有 .onnx 文件";
+  return { available: !!runtime && !!modelPath, runtime: runtime, modelPath: modelPath, modelDir: modelDir, reason: reason };
+}
+
+/** 只允许本地 / 用户自配端点：拒绝云端点 dx-os.com（媒体域不得替用户回连 DX 云）。 */
+function createGuardedFetch(baseFetch) {
+  if (typeof baseFetch !== "function") return null;
+  return function mediaGuardedFetch(input, init) {
+    const url = typeof input === "string" ? input : input && typeof input.url === "string" ? input.url : "";
+    let host = "";
+    try { host = new URL(url).hostname.toLowerCase(); } catch { /* 相对 / 非法 URL 交给 fetch 自己报错 */ }
+    if (host === "dx-os.com" || host.endsWith(".dx-os.com")) {
+      throw createMediaError(MEDIA_ERR_FORBIDDEN, "媒体域禁止访问云端 dx-os.com 端点（只用本地 / 用户自配端点）", { host: "dx-os.com" });
+    }
+    return baseFetch(input, init);
+  };
+}
+
 const {
   createMediaError,
   normalizeMediaError,
@@ -99,6 +346,11 @@ function decodeBase64(payload, field) {
   return buffer;
 }
 
+/** B5e：二进制出口。base64url 不含 '/'，绕开 foundation 的绝对路径替换（避免图片字节被误脱敏）。 */
+function encodeBinary(buffer) {
+  return Buffer.from(buffer).toString("base64url");
+}
+
 function normalizePosterSize(value) {
   const size = Number(value);
   if (!MEDIA_POSTER_SIZES.includes(size)) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "封面尺寸只支持 " + MEDIA_POSTER_SIZES.join(" / "));
@@ -158,6 +410,57 @@ function createMediaBundle(options = {}) {
     if (userDataDir) { try { ensureDxosLayout(userDataDir); } catch { /* 同上 */ } }
   }
   mediaStore.configureMediaStore({ db: db, mediaDir: mediaDir, clock: clock });
+
+  // B5e：把注入面分发给媒体域剩余 8 个子模块。dataDir 统一取 <userData>/dxos/media；
+  // fsAdapter / fetchImpl / modelGateway / viteBuild / illustratorAvailable 等全部来自调用方，
+  // 缺失时各命令回结构化 MEDIA_DEPENDENCY_UNAVAILABLE（绝不兜底、不假执行）。
+  // B5f：先算出**生效后**的注入面（含 mediaExtensions 覆盖），既喂给子模块，也用于
+  // dependencies / media/health 的如实上报 —— 报告与实际配置同源，不各写一份。
+  const extensionOptions = Object.assign({
+    dataDir: mediaDir,
+    fsAdapter: options.fsAdapter || null,
+    fetchImpl: options.fetchImpl || null,
+    mediaStore: mediaStore,
+    clock: clock,
+    logger: logger,
+    sharpLoader: options.sharpLoader || null,
+    onnxSessionFactory: options.onnxSessionFactory || null,
+    onnxRuntime: options.onnxRuntime || null,
+    modelPath: options.modelPath || null,
+    modelDir: options.modelDir || null,
+    models: options.models || undefined,
+    providerStore: options.providerStore || null,
+    modelGateway: options.modelGateway || null,
+    renderSubmit: options.renderSubmit || null,
+    musicMetadataLoader: options.musicMetadataLoader || null,
+    illustratorAvailable: options.illustratorAvailable === true,
+    viteBuild: options.viteBuild || null,
+    vuePlugin: options.vuePlugin || null,
+    tmpDir: options.tmpDir || null,
+    director3dModels: options.director3dModels || undefined,
+    director3dCatalog: options.director3dCatalog || null,
+  }, options.mediaExtensions || {});
+  configureMediaExtensions(extensionOptions);
+
+  /** B5f：每个注入项「是否生效 + 为空原因」；false 的项同时进 MEDIA_DEPENDENCY_UNAVAILABLE 分支。 */
+  const extensionDependencyReport = {
+    fsAdapter: { injected: !!extensionOptions.fsAdapter, reason: "缺少 fsAdapter：注入 B6 dxos-fs 适配器后短剧画布 / 素材才能落盘" },
+    fetchImpl: { injected: typeof extensionOptions.fetchImpl === "function", reason: "缺少 fetchImpl：注入主进程 fetch 后下载生成图片 / 刮削封面 / 拉取 Figma 清单才可用" },
+    providerStore: { injected: !!extensionOptions.providerStore, reason: "缺少 providerStore：注入 B2 provider-protocol 选型面后短剧 AI 生成才可用" },
+    modelGateway: { injected: !!extensionOptions.modelGateway, reason: "缺少 modelGateway：注入 B2 provider-protocol-service 出口后短剧 AI 生成才可用" },
+    viteBuild: { injected: typeof extensionOptions.viteBuild === "function", reason: "本仓无随包 Vite 构建器（vite 只在 devDependencies）：Figma 预览构建保持结构化不可用" },
+    illustratorAvailable: { injected: extensionOptions.illustratorAvailable === true, reason: "未探测到本机 Adobe Illustrator 可执行文件" },
+    onnxRuntime: { injected: !!extensionOptions.onnxRuntime, reason: "onnxruntime-node 未安装 / 未探测到：本地抠图保持结构化不可用" },
+    onnxSessionFactory: { injected: typeof extensionOptions.onnxSessionFactory === "function", reason: "未注入推理会话工厂：本地抠图保持结构化不可用" },
+    modelPath: { injected: !!extensionOptions.modelPath, reason: "未找到 .onnx 模型文件：本地抠图保持结构化不可用" },
+    modelDir: { injected: !!extensionOptions.modelDir, reason: "未装配模型目录" },
+  };
+  const extensionDependencies = Object.freeze(Object.fromEntries(
+    Object.entries(extensionDependencyReport).map(([name, entry]) => [name, entry.injected === true]),
+  ));
+  const dependencyNotes = Object.freeze(Object.fromEntries(
+    Object.entries(extensionDependencyReport).map(([name, entry]) => [name, entry.injected === true ? null : entry.reason]),
+  ));
 
   const subDirs = mediaDir ? {
     assets: path.join(mediaDir, "assets"),
@@ -535,7 +838,7 @@ function createMediaBundle(options = {}) {
           ffprobe = health ? health.ffprobe || null : null;
           workerReachable = true;
         } catch { workerReachable = false; }
-        const dependencies = {
+        const dependencies = Object.assign({
           database: !!db,
           mediaDirectory: !!mediaDir,
           identity: !!authorization,
@@ -543,9 +846,200 @@ function createMediaBundle(options = {}) {
           // 键名避开 isSecretKey 的子串（dxos-foundation-mask.cjs:12）
           ffmpegBinary: !!ffmpeg,
           ffprobeBinary: !!ffprobe,
-        };
+        }, extensionDependencies);
         const ok = dependencies.database && dependencies.mediaDirectory && workerReachable && dependencies.ffmpegBinary && dependencies.ffprobeBinary;
-        return { status: ok ? "ok" : "degraded", dependencies: dependencies, ffmpeg: ffmpeg, ffprobe: ffprobe, commands: listMediaCommands().length, eventChannel: MEDIA_EVENT_CHANNEL, leaseMs: leaseMs };
+        // B5f：每条 false 的注入项都给出为空原因（dependencyNotes 与 dependencies 同源）。
+        return { status: ok ? "ok" : "degraded", dependencies: dependencies, dependencyNotes: dependencyNotes, ffmpeg: ffmpeg, ffprobe: ffprobe, commands: listMediaCommands().length, eventChannel: MEDIA_EVENT_CHANNEL, leaseMs: leaseMs };
+      }
+
+      // ---------------- B5e：本地抠图（源 backgroundRemoval.ts） ----------------
+      case "media/background-removal/status": {
+        const probe = await mediaBackgroundRemoval.probeBackgroundRemovalDependencies();
+        if (!probe.ok) throw createMediaError(MEDIA_ERR_DEPENDENCY_UNAVAILABLE, "本地抠图依赖不可用", probe.detail);
+        return { models: await mediaBackgroundRemoval.backgroundRemovalStatus(), dependencies: { onnxruntime: true, sharp: true } };
+      }
+      case "media/background-removal/remove": {
+        const modelId = requireStr(payload.modelId, 80) || "ben2-base";
+        const buffer = decodeBase64(payload, "base64");
+        const image = await mediaBackgroundRemoval.removeImageBackground(buffer, modelId);
+        return { image: encodeBinary(image), mime: "image/png", bytes: image.length, modelId: modelId };
+      }
+
+      // ---------------- B5e：AI 图像声明（源 aiImageDeclaration.ts） ----------------
+      case "media/ai-declaration/apply": {
+        const name = requireStr(payload.name, 255);
+        if (!name) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "图片 name 必填");
+        const data = decodeBase64(payload, "base64");
+        const declared = await mediaAiDeclaration.addDeclaration(name, data);
+        if (!declared) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "不支持的图片格式：" + name + "（支持 JPG、PNG、WebP）");
+        return { fileName: mediaAiDeclaration.normalizedJpegName(name), mime: "image/jpeg", bytes: declared.length, data: encodeBinary(declared) };
+      }
+      case "media/ai-declaration/read": {
+        const name = requireStr(payload.name, 255);
+        if (!name) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "图片 name 必填");
+        const data = decodeBase64(payload, "base64");
+        return { declaration: mediaAiDeclaration.readDeclaration(name, data) };
+      }
+      case "media/ai-declaration/process": {
+        const files = (Array.isArray(payload.files) ? payload.files : []).map((file) => ({
+          name: String((file && file.name) || ""),
+          data: decodeBase64(file || {}, "base64"),
+        }));
+        const result = await mediaAiDeclaration.processDeclarationUpload(files);
+        return { fileName: result.filename, mime: result.mime, imageCount: result.imageCount, bytes: result.data.length, data: encodeBinary(result.data) };
+      }
+
+      // ---------------- B5e：短剧工坊（源 shortDrama.ts） ----------------
+      case "media/short-drama/list": {
+        return { projects: mediaShortDrama.listDramaProjects() };
+      }
+      case "media/short-drama/create": {
+        const name = requireStr(payload.name, 50);
+        if (!name) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "请输入项目名称");
+        return { project: mediaShortDrama.createDramaProject(name, userId) };
+      }
+      case "media/short-drama/update": {
+        const projectId = requireStr(payload.projectId, 80);
+        if (!projectId) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "projectId 必填");
+        return { project: mediaShortDrama.updateDramaProject(projectId, payload.patch && typeof payload.patch === "object" ? payload.patch : payload) };
+      }
+      case "media/short-drama/shot/add": {
+        const projectId = requireStr(payload.projectId, 80);
+        if (!projectId) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "projectId 必填");
+        return { shot: mediaShortDrama.addDramaShot(projectId, payload.shot && typeof payload.shot === "object" ? payload.shot : {}) };
+      }
+      case "media/short-drama/shot/update": {
+        const projectId = requireStr(payload.projectId, 80);
+        const shotId = requireStr(payload.shotId, 80);
+        if (!projectId || !shotId) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "projectId 与 shotId 必填");
+        return { shot: mediaShortDrama.updateDramaShot(projectId, shotId, payload.patch && typeof payload.patch === "object" ? payload.patch : {}) };
+      }
+      case "media/short-drama/outline": {
+        const projectId = requireStr(payload.projectId, 80);
+        if (!projectId) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "projectId 必填");
+        return { project: await mediaShortDrama.generateDramaOutline(projectId, payload.episodeCount) };
+      }
+      case "media/short-drama/visual-design": {
+        const projectId = requireStr(payload.projectId, 80);
+        if (!projectId) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "projectId 必填");
+        return { project: await mediaShortDrama.generateDramaVisualDesign(projectId) };
+      }
+      case "media/short-drama/storyboards": {
+        const projectId = requireStr(payload.projectId, 80);
+        if (!projectId) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "projectId 必填");
+        return { project: await mediaShortDrama.generateDramaStoryboards(projectId, requireStr(payload.episodeId, 80) || undefined) };
+      }
+      case "media/short-drama/shot/image": {
+        const projectId = requireStr(payload.projectId, 80);
+        const shotId = requireStr(payload.shotId, 80);
+        if (!projectId || !shotId) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "projectId 与 shotId 必填");
+        return await mediaShortDrama.generateDramaShotImage(projectId, shotId);
+      }
+      case "media/short-drama/render": {
+        const projectId = requireStr(payload.projectId, 80);
+        if (!projectId) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "projectId 必填");
+        return await mediaShortDrama.submitDramaRender(projectId, { ownerId: userId });
+      }
+
+      // ---------------- B5e：本地音乐库（源 library.ts） ----------------
+      case "media/library/config/get": {
+        return { config: mediaLibrary.getConfig() };
+      }
+      case "media/library/config/set-dirs": {
+        return mediaLibrary.setDirs(Array.isArray(payload.dirs) ? payload.dirs : []);
+      }
+      case "media/library/scan": {
+        const options = Array.isArray(payload.dirs) && payload.dirs.length ? { dirs: payload.dirs } : {};
+        return { tracks: await mediaLibrary.scan(options) };
+      }
+      case "media/library/tracks": {
+        return { tracks: await mediaLibrary.listTracks() };
+      }
+      case "media/library/artwork/targets": {
+        return await mediaLibrary.artworkTargets();
+      }
+      case "media/library/artwork/put": {
+        const scope = payload.scope === "artist" ? "artist" : payload.scope === "album" ? "album" : null;
+        const key = requireStr(payload.key, 300);
+        if (!scope || !key) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "artwork/put 需要 scope（artist / album）与 key");
+        const buffer = decodeBase64(payload, "base64");
+        const id = mediaLibrary.putArtwork(scope, key, buffer);
+        return { id: id, url: "/api/library/artwork/" + id, scope: scope, key: key };
+      }
+      case "media/library/meta/set": {
+        return { updated: mediaLibrary.setMeta(Array.isArray(payload.items) ? payload.items : []) };
+      }
+      case "media/library/lyrics": {
+        const id = requireStr(payload.trackId, 80) || requireStr(payload.id, 80);
+        if (!id) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "trackId 必填");
+        return { lyrics: await mediaLibrary.getLyrics(id, payload.online !== false) };
+      }
+
+      // ---------------- B5e：Illustrator（源 illustratorConfig.ts / illustratorTempExports.ts） ----------------
+      case "media/illustrator/config/get": {
+        const unavailable = mediaIllustrator.illustratorUnavailable("本机未安装 Adobe Illustrator，无法读取配置");
+        if (unavailable) throw unavailable;
+        return { config: mediaIllustrator.readIllustratorConfig() };
+      }
+      case "media/illustrator/config/update": {
+        const unavailable = mediaIllustrator.illustratorUnavailable("本机未安装 Adobe Illustrator，无法更新配置");
+        if (unavailable) throw unavailable;
+        return { config: mediaIllustrator.updateIllustratorConfig(payload.patch && typeof payload.patch === "object" ? payload.patch : {}) };
+      }
+      case "media/illustrator/temp-export/prepare": {
+        const unavailable = mediaIllustrator.illustratorUnavailable("本机未安装 Adobe Illustrator，无法准备临时导出");
+        if (unavailable) throw unavailable;
+        const name = requireStr(payload.name, 80) || "Illustrator";
+        const prepared = mediaIllustrator.prepareIllustratorTempExport(userId, name);
+        return { exportId: prepared.id, fileName: prepared.name };
+      }
+      case "media/illustrator/temp-export/cleanup": {
+        const unavailable = mediaIllustrator.illustratorUnavailable("本机未安装 Adobe Illustrator，无需清理临时导出");
+        if (unavailable) throw unavailable;
+        return mediaIllustrator.cleanupIllustratorTempExports(userId);
+      }
+
+      // ---------------- B5e：Figma 预览（源 figmaPreview.ts） ----------------
+      case "media/figma-preview/files": {
+        const sourceUrl = requireStr(payload.sourceUrl, 512);
+        if (!sourceUrl) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "sourceUrl 必填");
+        return await mediaFigmaPreview.fetchFigmaPreviewFiles(sourceUrl);
+      }
+      case "media/figma-preview/build": {
+        const projectId = requireStr(payload.projectId, 80);
+        if (!projectId) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "projectId 必填");
+        return await mediaFigmaPreview.buildFigmaPreview(projectId, Array.isArray(payload.files) ? payload.files : []);
+      }
+
+      // ---------------- B5e：导演台 3D 模型目录（源 director3dModels.ts） ----------------
+      case "media/director3d/models/list": {
+        return { models: mediaDirector3D.director3DModelStatus() };
+      }
+      case "media/director3d/models/file": {
+        const id = requireStr(payload.modelId, 80) || requireStr(payload.id, 80);
+        if (!id) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "modelId 必填");
+        const resolved = mediaDirector3D.director3DModelFile(id);
+        const stat = fs.statSync(resolved.path);
+        return { model: { id: resolved.model.id, version: resolved.model.version, format: resolved.model.format, kind: resolved.model.kind, size: resolved.model.size, bytes: stat.size, fileName: path.basename(resolved.path) } };
+      }
+
+      // ---------------- B5e：公共媒体（源 publicMedia.ts 本地部分） ----------------
+      case "media/public-media/list": {
+        return { items: mediaPublicMedia.listPublicMedia() };
+      }
+      case "media/public-media/url": {
+        const fileName = requireStr(payload.fileName, 255);
+        if (!fileName) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "fileName 必填");
+        return { url: mediaPublicMedia.publicMediaUrl(fileName) };
+      }
+      case "media/public-media/normalize": {
+        const buffer = decodeBase64(payload, "base64");
+        const normalized = await mediaPublicMedia.normalizePublicImageForApimartVideo({
+          buf: buffer,
+          mime: requireStr(payload.mime, 120) || "image/png",
+          name: requireStr(payload.name, 255) || "reference",
+        });
+        return { name: normalized.name, mime: normalized.mime, bytes: normalized.buf.length, data: encodeBinary(normalized.buf) };
       }
 
       default:
@@ -603,7 +1097,9 @@ function createMediaBundle(options = {}) {
     return { cancelled: cancelled };
   }
 
-  const dependencies = Object.freeze({
+  // B5f：媒体域 core 依赖 + B5e 扩展注入面（同一个 extensionDependencies 快照），
+  // dependencies 给布尔事实，dependencyNotes 给每条 false 的原因（缺失不降级成假成功）。
+  const dependencies = Object.freeze(Object.assign({
     userDataDir: !!userDataDir,
     mediaDir: !!mediaDir,
     database: !!db,
@@ -615,7 +1111,7 @@ function createMediaBundle(options = {}) {
     // 键名避开 isSecretKey 的子串（dxos-foundation-mask.cjs:12）
     ffmpegBinary: !!ffmpegPath,
     ffprobeBinary: !!ffprobePath,
-  });
+  }, extensionDependencies));
 
   return {
     execute,
@@ -625,6 +1121,7 @@ function createMediaBundle(options = {}) {
     posterCache,
     paths: mediaDir ? { root: mediaDir } : null,
     dependencies,
+    dependencyNotes,
     leaseMs,
     /** 供测试与实验直接调用（不经 IPC）：受监督 worker 一步。 */
     runWorker,
@@ -632,4 +1129,18 @@ function createMediaBundle(options = {}) {
   };
 }
 
-module.exports = { createMediaBundle, HOST_APP_ID, DEFAULT_LEASE_MS, DEFAULT_WORKER_TIMEOUT_MS, DEFAULT_POSTER_TIMEOUT_MS };
+module.exports = {
+  createMediaBundle,
+  configureMediaExtensions,
+  // B5f：真实依赖装配件 / 探测（main.cjs 用；测试可直接复用同一实现做进程内真跑）
+  createMediaProviderStore,
+  createMediaModelGateway,
+  createGuardedFetch,
+  probeIllustratorAvailability,
+  probeOnnxAvailability,
+  findOnnxModelFile,
+  HOST_APP_ID,
+  DEFAULT_LEASE_MS,
+  DEFAULT_WORKER_TIMEOUT_MS,
+  DEFAULT_POSTER_TIMEOUT_MS,
+};

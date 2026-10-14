@@ -308,22 +308,4 @@ contextBridge.exposeInMainWorld("openarc", {
   market: {
     command: (command) => ipcRenderer.invoke("market:command", command),
   },
-  /**
-   * B7e1 ComfyUI 桥（market 之后的第 26 个顶层键；键序按实际追加，未重排既有键）。
-   *
-   * **只有两条能力**：派发受控 comfy 命令（插件开关 / 依赖探测 / 实例监督 / 工作流解析导入 / 运行提交取消）、
-   * 订阅 comfy 下行事件（P1 信封；受监督子进程的进度经它回推）。
-   * ComfyUI 是**可选插件、默认关闭**：未启用 → INTEGRATION_UNAVAILABLE；本机缺 Python / ComfyUI 安装路径
-   * → COMFY_DEPENDENCY_UNAVAILABLE（detail 给出"缺什么 / 怎么装"），绝不假运行。
-   * 不暴露 ipcRenderer / Python 句柄 / 凭据 / 绝对路径；sessionRef 与 appId 由主进程注入，
-   * Renderer 自报的 userId / role / appId 一律忽略（与 market / integration / platform 同一条 trusted 边界）。
-   */
-  comfy: {
-    command: (command) => ipcRenderer.invoke("comfy:command", command),
-    onEvent: (callback) => {
-      const listener = (_, event) => callback(event);
-      ipcRenderer.on("comfy:event", listener);
-      return () => ipcRenderer.removeListener("comfy:event", listener);
-    },
-  },
 });

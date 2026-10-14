@@ -97,6 +97,56 @@ const MEDIA_COMMANDS = Object.freeze({
   // ---- 落盘产物 / 健康 ----
   "media/artifact/list": { risk: "read", credential: false, summary: "列出落盘产物（成片 / 封面 / 素材），只返回相对路径" },
   "media/health": { risk: "read", credential: false, summary: "媒体域依赖健康检查（ffmpeg / ffprobe / worker / 数据库）" },
+
+  // ---- B5e：本地抠图（源 backgroundRemoval.ts） ----
+  "media/background-removal/status": { risk: "read", credential: false, summary: "探测本地抠图依赖（onnxruntime / sharp / 模型）并列出模型状态" },
+  "media/background-removal/remove": { risk: "use", credential: false, summary: "本地抠图：注入 ONNX 会话后真实推理，缺依赖即结构化不可用，绝不返回假图" },
+
+  // ---- B5e：AI 图像声明（源 aiImageDeclaration.ts） ----
+  "media/ai-declaration/apply": { risk: "manage", credential: false, summary: "给图片写入 AI 生成声明（JPEG XMP + EXIF XPKeywords，统一输出 JPEG）" },
+  "media/ai-declaration/read": { risk: "read", credential: false, summary: "解析图片已有的 AI 生成声明（XMP 与 Windows XPKeywords）" },
+  "media/ai-declaration/process": { risk: "manage", credential: false, summary: "批量处理图片 / ZIP：统一转 JPEG 并写入声明，返回单图或 ZIP" },
+
+  // ---- B5e：短剧工坊（源 shortDrama.ts） ----
+  "media/short-drama/list": { risk: "read", credential: false, summary: "列出短剧项目（画布文件夹已被删除的隐藏）" },
+  "media/short-drama/create": { risk: "manage", credential: false, summary: "创建短剧项目及其画布文件夹结构（inputs / scripts / assets / episodes / renders）" },
+  "media/short-drama/update": { risk: "manage", credential: false, summary: "更新短剧项目阶段 / 素材文本 / 蓝图 / 视觉设定" },
+  "media/short-drama/shot/add": { risk: "manage", credential: false, summary: "新增分镜（标题 / 场景 / 脚本 / 时长）" },
+  "media/short-drama/shot/update": { risk: "manage", credential: false, summary: "修改分镜字段或图片 / 视频状态" },
+  "media/short-drama/outline": { risk: "use", credential: false, summary: "调用注入的语言模型生成分集大纲（未注入模型网关即结构化不可用）" },
+  "media/short-drama/visual-design": { risk: "use", credential: false, summary: "调用注入的语言模型生成角色 / 场景视觉设定" },
+  "media/short-drama/storyboards": { risk: "use", credential: false, summary: "调用注入的语言模型生成分镜清单" },
+  "media/short-drama/shot/image": { risk: "use", credential: false, summary: "调用注入的图像模型生成分镜图（未注入即结构化不可用）" },
+  "media/short-drama/render": { risk: "manage", credential: false, summary: "把已就绪分镜编排为时间线并提交渲染（注入 renderSubmit / mediaStore）" },
+
+  // ---- B5e：本地音乐库（源 library.ts） ----
+  "media/library/config/get": { risk: "read", credential: false, summary: "读取音乐库配置（扫描目录与曲目数量）" },
+  "media/library/config/set-dirs": { risk: "manage", credential: false, summary: "设置音乐库扫描目录（不存在的目录如实报错）" },
+  "media/library/scan": { risk: "read", credential: false, summary: "扫描音乐库（限深 6 层 / 单库 5000 首，标签缺失回文件名兜底）" },
+  "media/library/tracks": { risk: "read", credential: false, summary: "列出音乐库曲目（id 为路径哈希，不含绝对路径）" },
+  "media/library/artwork/targets": { risk: "read", credential: false, summary: "列出缺少封面 / 歌手照片的条目（供刮削或 AI 生成）" },
+  "media/library/artwork/put": { risk: "manage", credential: false, summary: "把一张图片写入本地艺术图缓存并登记" },
+  "media/library/meta/set": { risk: "manage", credential: false, summary: "写入曲名 / 歌手 / 专辑手工或 AI 整理结果（合并保存）" },
+  "media/library/lyrics": { risk: "read", credential: false, summary: "读取歌词（本地缓存优先，在线查询需注入 fetchImpl）" },
+
+  // ---- B5e：Illustrator 配置与临时导出（源 illustratorConfig.ts / illustratorTempExports.ts） ----
+  "media/illustrator/config/get": { risk: "read", credential: false, summary: "读取 Illustrator 配置（本机无 Illustrator 即结构化不可用）" },
+  "media/illustrator/config/update": { risk: "manage", credential: false, summary: "更新 Illustrator 配置（原子写）" },
+  "media/illustrator/temp-export/prepare": { risk: "manage", credential: false, summary: "准备 Illustrator 临时导出目标（PDF / 预览 PNG）" },
+  "media/illustrator/temp-export/cleanup": { risk: "destructive", credential: false, summary: "清理当前用户的 Illustrator 临时导出文件" },
+
+  // ---- B5e：Figma 预览（源 figmaPreview.ts） ----
+  "media/figma-preview/files": { risk: "read", credential: false, summary: "经注入 fetch 拉取并解析 Figma 预览文件清单（白名单过滤）" },
+  "media/figma-preview/build": { risk: "use", credential: false, summary: "用注入的 Vite 构建器打包 Figma 预览，未注入即结构化不可用" },
+
+  // ---- B5e：导演台 3D 模型目录（源 director3dModels.ts，只做本地扫描 / 投影） ----
+  "media/director3d/models/list": { risk: "read", credential: false, summary: "列出导演台 3D 模型目录（本地安装状态投影，含更新检测）" },
+  "media/director3d/models/file": { risk: "read", credential: false, summary: "解析已安装模型文件（只回文件名 / 大小，不回绝对路径）" },
+
+  // ---- B5e：公共媒体（源 publicMedia.ts 本地部分） ----
+  "media/public-media/list": { risk: "read", credential: false, summary: "列出本地公共媒体文件及其相对 URL" },
+  "media/public-media/url": { risk: "read", credential: false, summary: "把本地公共媒体文件名映射为相对 URL（拒绝路径穿越）" },
+  "media/public-media/normalize": { risk: "use", credential: false, summary: "把参考图本地转为 APIMART 兼容 JPEG（sharp 缺失即结构化不可用）" },
 });
 
 /** 风险等级序（数值越大越危险）；UI 排序 / 审批阈值使用。 */

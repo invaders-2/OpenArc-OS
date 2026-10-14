@@ -37,7 +37,7 @@ $ npm test
 | R4 | 架构确认（A+C，不采用内嵌 HTTP） | 全部新增能力走 IPC 域 + 受监督子进程（`dxos-foundation-runner.cjs` 复用 executor-launcher）；未放开 CSP、未新增 express/multer、未暴露本地端口 | ✅ DONE |
 | R5 | 是否存在独立设计文档 | 已核实：仓库内不存在任何 DXOS/DX-OS 设计文档；按计划 §1.2 与 `Dx-P0-*` 记录 | ✅ DONE（无独立文档） |
 | R6 | 依赖决策 | **不新增任何依赖**：`better-sqlite3` 不引入（统一 `node:sqlite`）；`sharp`/`ws` 延后 P5（现仅 DSH 传递依赖，证据见 `Dx-P0-DEPENDENCIES.md`） | ✅ DONE |
-| R7 | 本地依赖提供方 | 实测：ffmpeg/ffprobe 7.1.1 ✅、python 3.12.12 ✅；**ComfyUI 与 onnxruntime/抠图模型缺失** → 登记为阻塞（属 P5） | ⚠️ 部分（缺依赖，见 §3） |
+| R7 | 本地依赖提供方 | 实测：ffmpeg/ffprobe 7.1.1 ✅、python 3.12.12 ✅；**ComfyUI（2026-10-14 随 B7i 从移植范围移除，原因与恢复前提见 `Dx-B7-RESULT.md` §8） 与 onnxruntime/抠图模型缺失** → 登记为阻塞（属 P5） | ⚠️ 部分（缺依赖，见 §3） |
 | R8 | 阶段与域内顺序 | 按计划 §7：P0→P1→P2；P2 内部 模块 4→5→6 | ✅ DONE |
 | R9 | 计划数字与实测不符以谁为准 | 以实测为准，勘误表落在 `Dx-P0-BASELINE.md` §4（顶层 .ts 76→110、子目录 5→13、路由 560–571→553、表 65→64 / 51→55 等） | ✅ DONE |
 | R10 | 计划文档与项目规范优先级 | 计划为范围准绳；同时遵守项目设计规则：设计系统/host 壳零改动（`tokens.css`、`DESIGN_SYSTEM.md`、`MOTION_SYSTEM.md`、primitives/page-states 均未修改） | ✅ DONE |
@@ -66,7 +66,7 @@ $ npm test
 
 **阻塞（需用户输入）**
 1. **R11 真实调用**：无 `OPENARC_OPENAI_BASE_URL`/`OPENARC_OPENAI_API_KEY` 与图像协议凭据 → "真实打通 OpenAI 兼容 + 一种图像协议"的**真机验收无法完成**（NOT VERIFIED）。代码与脚本已就绪。
-2. **R7 / P5 前置**：ComfyUI、onnxruntime+抠图模型本机缺失 → 相关能力 NOT VERIFIED。
+2. **R7 / P5 前置**：ComfyUI（2026-10-14 随 B7i 从移植范围移除，原因与恢复前提见 `Dx-B7-RESULT.md` §8）、onnxruntime+抠图模型本机缺失 → 相关能力 NOT VERIFIED。
 
 **未验证（有明确原因）**
 3. `test:model-*` 真机探针未运行（需 Electron + CDP）。
