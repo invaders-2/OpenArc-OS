@@ -3,7 +3,7 @@
  *
  * 为什么不直接开产品 dist：本轮禁止执行 `npm run build`，而 dist 里还没有 SkillCenter。
  * 这里用 esbuild（Vite 自带依赖）把 **实验用挂载壳 harness.tsx** 打成一份本地构建产物，
- * 再用本机 Chromium（路径复用 experiments/d2-01/lib/ds.mjs，可用 OA_CHROMIUM 覆盖）打开，
+ * 再用本机 Chromium（见 experiments/lib/chromium.mjs：OA_CHROMIUM → Playwright → 系统 Chrome）打开，
  * 挂载的 DOM 结构与 src/main.tsx 的 skills 分支一致（.window > .split > .split-side/.split-main）。
  *
  * 覆盖：加载 / 空 / 就绪 / 错误 / 运行中 五类必拍状态 + 禁用 / 导入失败 / 无权 / 依赖缺失 / 窄宽，
@@ -18,6 +18,19 @@ import os from "node:os";
 import http from "node:http";
 import { build } from "esbuild";
 import { chromium } from "playwright";
+import { resolveChromium, describeChromiumCandidates } from "../lib/chromium.mjs";
+import {
+  installCrashGuard,
+  registerCleanup,
+  setStep,
+  hardenPage,
+  timingSummary,
+  launchChromiumBounded,
+  withRetries,
+  SCENARIO_ATTEMPTS,
+  TIMEOUT_SCALE,
+  SCALE_SOURCE,
+} from "../lib/probe-timing.mjs";
 
 const HERE = import.meta.dirname;
 const ROOT = path.resolve(HERE, "../..");
@@ -25,9 +38,14 @@ const ART = path.join(ROOT, "artifacts", "dxos-ui-skills");
 const BUILD = path.join(ART, "build");
 const VIDEO_DIR = path.join(ART, "video");
 const PORT = Number(process.env.OA_SKILLS_PORT || 5251);
-const CHROMIUM =
-  process.env.OA_CHROMIUM ||
-  "/Users/wepingli/Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";
+// 解析优先级：OA_CHROMIUM → Playwright 官方 chromium → 系统 Google Chrome（见 experiments/lib/chromium.mjs）。
+const CHROMIUM_INFO = resolveChromium();
+const CHROMIUM = CHROMIUM_INFO.path;
+
+/* 高负载下等待会整体变慢；这里只放大等待与加重试，不改任何断言（见 experiments/lib/probe-timing.mjs）。 */
+installCrashGuard();
+setStep("初始化");
+console.log("探针时序加固：" + timingSummary());
 
 const checks = [];
 const pageErrors = [];
@@ -116,11 +134,12 @@ const server = http.createServer((req, res) => {
   res.end("not found");
 });
 await new Promise((resolve) => server.listen(PORT, "127.0.0.1", resolve));
+registerCleanup(() => new Promise((resolve) => server.close(resolve)));
 const BASE = "http://127.0.0.1:" + PORT;
 
 /* ── 3. 浏览器 ────────────────────────────────────────────────────────────── */
-if (!fs.existsSync(CHROMIUM)) {
-  console.error("Chromium 不存在：" + CHROMIUM + "（设置 OA_CHROMIUM 指向可用二进制）");
+if (!CHROMIUM) {
+  console.error("找不到可用 Chromium，已按优先级尝试：" + describeChromiumCandidates(CHROMIUM_INFO.candidates) + "（设置 OA_CHROMIUM 指向可用二进制）");
   server.close();
   process.exit(1);
 }
@@ -135,6 +154,8 @@ const SHOT_OPTS = {
 };
 
 function watch(page, label) {
+  /* 每个 page 都在这里统一加固：waitForSelector/goto 按倍率放大并做有界重试。 */
+  hardenPage(page, label);
   page.on("console", (msg) => {
     if (msg.type() === "error") pageErrors.push(label + " console.error: " + msg.text());
   });
@@ -162,21 +183,39 @@ async function openScenario(browser, query, opts) {
   return { ctx, page };
 }
 
-const browser = await chromium.launch({ executablePath: CHROMIUM });
+const browser = await launchChromiumBounded(chromium, { executablePath: CHROMIUM });
+registerCleanup(() => browser.close());
 const screenshots = [];
 const results = [];
 
 /* ── 4. 状态截图 ─────────────────────────────────────────────────────────── */
 async function shoot(spec) {
-  const { ctx, page } = await openScenario(browser, spec.query, spec.narrow ? { viewport: { width: 640, height: 900 } } : null);
-  if (spec.setup) await spec.setup(page);
-  await page.waitForSelector(spec.expect, { timeout: 15000 });
-  await page.waitForTimeout(220);
-  const file = path.join(ART, spec.name + ".png");
-  await page.screenshot({ path: file });
-  screenshots.push(file);
-  check("状态截图 " + spec.name + " → " + spec.expect, true, file);
-  await ctx.close();
+  const label = "场景 " + spec.name;
+  const checksBefore = checks.length;
+  const screenshotsBefore = screenshots.length;
+  await withRetries(
+    label,
+    SCENARIO_ATTEMPTS,
+    async () => {
+      const { ctx, page } = await openScenario(browser, spec.query, spec.narrow ? { viewport: { width: 640, height: 900 } } : null);
+      try {
+        if (spec.setup) await spec.setup(page);
+        await page.waitForSelector(spec.expect, { timeout: 15000 });
+        await page.waitForTimeout(220);
+        const file = path.join(ART, spec.name + ".png");
+        await page.screenshot({ path: file });
+        screenshots.push(file);
+        check("状态截图 " + spec.name + " → " + spec.expect, true, file);
+      } finally {
+        await ctx.close().catch((e) => console.log("    · 关闭 context 时出错（已记录，不掩盖原错误）：" + ((e && e.message) || e)));
+      }
+    },
+    (attempt) => {
+      if (attempt > 1) console.log("  ↺ 回滚 " + label + " 上一次的部分断言 / 截图，整场景重跑（不跳过任何断言）");
+      checks.length = checksBefore;
+      screenshots.length = screenshotsBefore;
+    },
+  );
 }
 
 console.log("\n状态截图：");
@@ -254,8 +293,163 @@ await shoot({
   },
 });
 
+/* ── 4b. 本轮补齐入口的状态截图（分析 / 保存 / 工作区 / 媒体运行）────────── */
+console.log("\n新增入口状态截图：");
+
+await shoot({
+  name: "11-analyze-ready",
+  query: "scenario=ready&tab=market&deps=all",
+  expect: "[data-skill-analyze-result]",
+  setup: async (page) => {
+    await page.setInputFiles("[data-skill-analyze-input]", {
+      name: "weekly.md",
+      mimeType: "text/markdown",
+      buffer: Buffer.from("# 周报\n1. 收集素材\n2. 生成摘要"),
+    });
+    await page.waitForSelector("[data-skill-analyze-result]");
+    const steps = await page.$$eval("[data-skill-analyze-steps] li", (els) => els.length);
+    check("分析结果展示 v2 工作流步骤", steps >= 2, "steps=" + steps);
+  },
+});
+
+await shoot({
+  name: "12-analyze-dependency",
+  query: "scenario=ready&tab=market&deps=model-missing",
+  expect: "[data-skill-analyze-unavailable]",
+  setup: async (page) => {
+    const text = await page.$eval("[data-skill-analyze-unavailable]", (el) => el.textContent || "");
+    check("分析入口依赖缺失给出结构化提示", text.includes("缺少模型"), text.slice(0, 60));
+    const disabled = await page.$eval('[data-skill-action="analyze"]', (el) => el.disabled);
+    check("分析入口依赖缺失时按钮禁用", disabled === true, "disabled=" + disabled);
+  },
+});
+
+await shoot({
+  name: "13-save-done",
+  query: "scenario=ready&tab=market&deps=all",
+  expect: "[data-skill-save-done]",
+  setup: async (page) => {
+    await page.setInputFiles("[data-skill-analyze-input]", {
+      name: "weekly.md",
+      mimeType: "text/markdown",
+      buffer: Buffer.from("# 周报\n1. 收集素材\n2. 生成摘要"),
+    });
+    await page.waitForSelector("[data-skill-analyze-result]");
+    await page.waitForTimeout(150);
+    await page.click('[data-skill-action="save"]');
+    await page.waitForSelector("[data-skill-save-done]", { timeout: 10000 });
+    const text = await page.$eval("[data-skill-save-done]", (el) => el.textContent || "");
+    check("保存技能成功回显技能 ID", text.includes("weekly_digest"), text.slice(0, 60));
+  },
+});
+
+await shoot({
+  name: "14-workspace-ready",
+  query: "scenario=ready&tab=installed&deps=all",
+  expect: "[data-skill-workspace-list]",
+  setup: async (page) => {
+    await page.click('[data-skill-id="team_report"]');
+    await page.waitForSelector("[data-skill-detail]");
+    await page.click('[data-skill-action="workspace"]');
+    await page.waitForSelector("[data-skill-workspace-list]", { timeout: 10000 });
+    const count = await page.$$eval("[data-skill-workspace-list] li", (els) => els.length);
+    check("工作区技能列表展示资料", count >= 1, "count=" + count);
+  },
+});
+
+await shoot({
+  name: "15-workspace-dependency",
+  query: "scenario=ready&tab=installed&deps=workspace-missing",
+  expect: "[data-skill-workspace-unavailable]",
+  setup: async (page) => {
+    await page.click('[data-skill-id="team_report"]');
+    await page.waitForSelector("[data-skill-detail]");
+    const text = await page.$eval("[data-skill-workspace-unavailable]", (el) => el.textContent || "");
+    check("工作区入口依赖缺失给出结构化提示", text.includes("工作空间"), text.slice(0, 60));
+    const disabled = await page.$eval('[data-skill-action="workspace"]', (el) => el.disabled);
+    check("工作区入口依赖缺失时按钮禁用", disabled === true, "disabled=" + disabled);
+  },
+});
+
+await shoot({
+  name: "16-media-ready",
+  query: "scenario=ready&tab=installed&deps=all",
+  expect: '[data-skill-run-kind="image"]',
+  setup: async (page) => {
+    await page.click('[data-skill-id="generate_image"]');
+    await page.waitForSelector("[data-skill-detail]");
+    await page.waitForSelector('[data-skill-field="prompt"]');
+    const disabled = await page.$eval('[data-skill-action="run"]', (el) => el.disabled);
+    check("媒体技能就绪时运行入口可用", disabled === false, "disabled=" + disabled);
+  },
+});
+
+await shoot({
+  name: "17-media-dependency",
+  query: "scenario=ready&tab=installed&deps=media-missing",
+  expect: "[data-skill-run-unavailable]",
+  setup: async (page) => {
+    await page.click('[data-skill-id="generate_image"]');
+    await page.waitForSelector("[data-skill-detail]");
+    const text = await page.$eval("[data-skill-run-unavailable]", (el) => el.textContent || "");
+    check("媒体技能依赖缺失显示缺少媒体适配器", text.includes("缺少媒体适配器"), text.slice(0, 80));
+    const disabled = await page.$eval('[data-skill-action="run"]', (el) => el.disabled);
+    check("媒体技能依赖缺失时运行按钮禁用", disabled === true, "disabled=" + disabled);
+  },
+});
+
+await shoot({
+  name: "18-media-running",
+  query: "scenario=ready&tab=installed&deps=all&run=slow",
+  expect: '[data-skill-run-state="running"]',
+  setup: async (page) => {
+    await page.click('[data-skill-id="generate_image"]');
+    await page.waitForSelector('[data-skill-field="prompt"]');
+    await page.fill('[data-skill-field="prompt"]', "一只在图书馆看书的猫");
+    await page.click('[data-skill-action="run"]');
+    await page.waitForSelector('[data-skill-run-state="running"]');
+    const disabled = await page.$eval('[data-skill-action="run"]', (el) => el.disabled);
+    check("媒体技能运行中按钮禁用（连点不叠加）", disabled === true, "disabled=" + disabled);
+  },
+});
+
+await shoot({
+  name: "19-media-artifacts",
+  query: "scenario=ready&tab=installed&deps=all",
+  expect: "[data-skill-artifacts]",
+  setup: async (page) => {
+    await page.click('[data-skill-id="generate_image"]');
+    await page.waitForSelector('[data-skill-field="prompt"]');
+    await page.fill('[data-skill-field="prompt"]', "一只在图书馆看书的猫");
+    await page.click('[data-skill-action="run"]');
+    await page.waitForSelector("[data-skill-artifacts]", { timeout: 12000 });
+    const ref = await page.$eval("[data-skill-artifact-ref]", (el) => el.textContent || "");
+    check("媒体产物显示虚拟文件树路径", ref.includes("/api/fs/raw/probe-node-1"), ref);
+  },
+});
+
+await shoot({
+  name: "20-media-failed",
+  query: "scenario=ready&tab=installed&deps=all&media=fail",
+  expect: "[data-skill-run-error]",
+  setup: async (page) => {
+    await page.click('[data-skill-id="generate_image"]');
+    await page.waitForSelector('[data-skill-field="prompt"]');
+    await page.fill('[data-skill-field="prompt"]', "一只在图书馆看书的猫");
+    await page.click('[data-skill-action="run"]');
+    await page.waitForSelector("[data-skill-run-error]", { timeout: 10000 });
+    const text = await page.$eval("[data-skill-run-error]", (el) => el.textContent || "");
+    check(
+      "媒体技能失败给出结构化错误码→人话文案",
+      text.includes("缺少媒体适配器") && text.includes("SKILL_DEPENDENCY_UNAVAILABLE"),
+      text.slice(0, 90),
+    );
+  },
+});
+
 /* ── 5. 主流程连续录屏 ───────────────────────────────────────────────────── */
 console.log("\n主流程连续录屏：");
+setStep("主流程连续录屏");
 const videoCtx = await browser.newContext({
   viewport: { width: 1440, height: 900 },
   deviceScaleFactor: 1,
@@ -295,8 +489,59 @@ if (rawVideo && fs.existsSync(rawVideo)) {
   check("主流程连续录屏产出", false, "video.path() 为空");
 }
 
+/* 新增入口连续录屏：技能文档分析 → 保存 → 媒体运行出产物 → 工作区资料。 */
+console.log("\n新增入口连续录屏：");
+setStep("新增入口连续录屏");
+const entriesVideoCtx = await browser.newContext({
+  viewport: { width: 1440, height: 900 },
+  deviceScaleFactor: 1,
+  colorScheme: "light",
+  locale: "zh-CN",
+  recordVideo: { dir: VIDEO_DIR, size: { width: 1440, height: 900 } },
+});
+const evpage = await entriesVideoCtx.newPage();
+watch(evpage, "video-entries");
+const entriesVideo = evpage.video();
+await evpage.goto(BASE + "/?scenario=ready&tab=market&deps=all", { waitUntil: "domcontentloaded" });
+await evpage.waitForSelector("[data-skill-analyze-idle]");
+await evpage.waitForTimeout(400);
+await evpage.setInputFiles("[data-skill-analyze-input]", {
+  name: "weekly.md",
+  mimeType: "text/markdown",
+  buffer: Buffer.from("# 周报\n1. 收集素材\n2. 生成摘要"),
+});
+await evpage.waitForSelector("[data-skill-analyze-result]");
+await evpage.waitForTimeout(700);
+await evpage.click('[data-skill-action="save"]');
+await evpage.waitForSelector("[data-skill-save-done]", { timeout: 10000 });
+await evpage.waitForTimeout(600);
+await evpage.click('.split-nav:has-text("已安装")');
+await evpage.waitForSelector('[data-skill-id="generate_image"]');
+await evpage.click('[data-skill-id="generate_image"]');
+await evpage.waitForSelector('[data-skill-field="prompt"]');
+await evpage.fill('[data-skill-field="prompt"]', "一只在图书馆看书的猫");
+await evpage.waitForTimeout(300);
+await evpage.click('[data-skill-action="run"]');
+await evpage.waitForSelector("[data-skill-artifacts]", { timeout: 12000 });
+await evpage.waitForTimeout(700);
+await evpage.click('[data-skill-id="team_report"]');
+await evpage.waitForSelector('[data-skill-action="workspace"]');
+await evpage.click('[data-skill-action="workspace"]');
+await evpage.waitForSelector("[data-skill-workspace-list]", { timeout: 10000 });
+await evpage.waitForTimeout(700);
+await entriesVideoCtx.close();
+const rawEntriesVideo = await entriesVideo.path();
+const entriesFlowVideo = path.join(ART, "skill-entries-flow.webm");
+if (rawEntriesVideo && fs.existsSync(rawEntriesVideo)) {
+  fs.copyFileSync(rawEntriesVideo, entriesFlowVideo);
+  check("新增入口连续录屏产出", fs.statSync(entriesFlowVideo).size > 0, entriesFlowVideo);
+} else {
+  check("新增入口连续录屏产出", false, "video.path() 为空");
+}
+
 /* ── 6. 焦点顺序（就绪页）────────────────────────────────────────────────── */
 console.log("\n可访问焦点顺序：");
+setStep("可访问焦点顺序");
 {
   const { ctx, page } = await openScenario(browser, "scenario=ready&tab=installed");
   await page.waitForSelector(".skill-row[data-skill-id]");
@@ -354,6 +599,7 @@ console.log("\n可访问焦点顺序：");
    同 reducedMotion，分别渲染 Skill 中心（就绪态）与基准页 McpCenter 的外壳，
    两张截图 + 关键度量写进 report.json，结论写进 compare-notes.md。 */
 console.log("\n基准对照（Skill 中心 vs McpCenter）：");
+setStep("基准对照（Skill 中心 vs McpCenter）");
 
 const COMPARE_SPECS = {
   skill: {
@@ -620,6 +866,58 @@ const notesPath = path.join(ART, "compare-notes.md");
 fs.writeFileSync(notesPath, notes.join(String.fromCharCode(10)));
 check("对照笔记 compare-notes.md 产出", fs.statSync(notesPath).size > 0, notesPath);
 
+/* ── 6d. 深色同设定对照（与基准页同窗口 1440×900 / 缩放 dsf2 / reducedMotion reduce，
+      只换主题；深色在 tokens.css 里是 .dark 作用域，探针给外壳显式加 .dark）── */
+console.log("\n基准对照（深色）：");
+setStep("基准对照（深色）");
+const compareDark = {};
+async function captureDarkCompare(kind) {
+  const spec = COMPARE_SPECS[kind];
+  const ctx = await browser.newContext({ ...SHOT_OPTS, colorScheme: "dark" });
+  const page = await ctx.newPage();
+  watch(page, "compare-dark:" + kind);
+  await page.goto(BASE + "/?" + spec.query + "&theme=dark", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector(spec.root);
+  await page.waitForSelector(spec.row, { timeout: 15000 });
+  await page.waitForTimeout(220);
+  await page.click(spec.row);
+  await page.waitForSelector(spec.detail, { timeout: 15000 });
+  await page.waitForTimeout(260);
+  const darkApplied = await page.evaluate(() => !!document.querySelector(".dark"));
+  const metrics = await measurePage(page, spec.vars);
+  const file = path.join(ART, "compare-dark-" + kind + ".png");
+  await page.screenshot({ path: file });
+  compareDark[kind] = { screenshot: file, metrics, darkApplied, query: spec.query + "&theme=dark" };
+  screenshots.push(file);
+  check("深色对照截图 compare-dark-" + kind + " → " + spec.detail, true, file);
+  await ctx.close();
+}
+await captureDarkCompare("skill");
+await captureDarkCompare("mcp");
+check(
+  "深色对照两页同窗口尺寸（1440×900）且 .dark 生效",
+  !!compareDark.skill.darkApplied &&
+    !!compareDark.mcp.darkApplied &&
+    Math.round(compareDark.skill.metrics.window.width) === 1440 &&
+    Math.round(compareDark.mcp.metrics.window.width) === 1440,
+  JSON.stringify({ skill: compareDark.skill.metrics.window, mcp: compareDark.mcp.metrics.window }),
+);
+check(
+  "深色对照关键度量读出（容器 / 两栏 / 行高 / 字号）",
+  metricReady(compareDark.skill.metrics) && metricReady(compareDark.mcp.metrics),
+  JSON.stringify({ skill: compareDark.skill.metrics.row.height, mcp: compareDark.mcp.metrics.row.height }),
+);
+check(
+  "深色对照无 console error",
+  pageErrors.filter((e) => e.startsWith("compare-dark:")).length === 0,
+  pageErrors.filter((e) => e.startsWith("compare-dark:")).slice(0, 3).join(" | "),
+);
+check(
+  "深色对照无跨源 / 非本地网络请求",
+  externalRequests.filter((e) => e.startsWith("compare-dark:")).length === 0,
+  externalRequests.filter((e) => e.startsWith("compare-dark:")).slice(0, 3).join(" | "),
+);
+
 /* ── 7. 全局断言 ─────────────────────────────────────────────────────────── */
 {
   const { ctx, page } = await openScenario(browser, "scenario=ready&tab=installed&run=slow");
@@ -642,6 +940,9 @@ check("对照笔记 compare-notes.md 产出", fs.statSync(notesPath).size > 0, n
     "skill/pack/export",
     "skill/delete",
     "skill/pack/uninstall",
+    "skill/analyze",
+    "skill/save",
+    "skill/workspace/list",
   ];
   check("界面只发白名单命令", commands.every((c) => allowed.includes(c)), commands.join(", "));
   const runPayload = await page.evaluate(() => {
@@ -651,6 +952,91 @@ check("对照笔记 compare-notes.md 产出", fs.statSync(notesPath).size > 0, n
   check("skill/run 载荷不含身份字段", runPayload === "arguments,requestId,skillId", runPayload);
   const events = await page.evaluate(() => (window.__oaSkillProbe ? window.__oaSkillProbe.events.map((e) => e.payload && e.payload.phase) : []));
   check("收到 progress 下行事件（begin/completed）", events.includes("begin") && events.includes("completed"), events.join(","));
+  await ctx.close();
+}
+
+/* ── 7b. 新增入口（分析 / 保存 / 工作区 / 媒体运行）的命令面与载荷边界 ── */
+{
+  const { ctx, page } = await openScenario(browser, "scenario=ready&tab=market&deps=all");
+  await page.waitForSelector("[data-skill-analyze-idle]");
+  await page.setInputFiles("[data-skill-analyze-input]", {
+    name: "weekly.md",
+    mimeType: "text/markdown",
+    buffer: Buffer.from("# 周报\n1. 收集素材\n2. 生成摘要"),
+  });
+  await page.waitForSelector("[data-skill-analyze-result]");
+  await page.click('[data-skill-action="save"]');
+  await page.waitForSelector("[data-skill-save-done]", { timeout: 10000 });
+  await page.click('.split-nav:has-text("已安装")');
+  await page.waitForSelector('[data-skill-id="team_report"]');
+  await page.click('[data-skill-id="team_report"]');
+  await page.waitForSelector('[data-skill-action="workspace"]');
+  await page.click('[data-skill-action="workspace"]');
+  await page.waitForSelector("[data-skill-workspace-list]", { timeout: 10000 });
+  await page.click('[data-skill-id="generate_image"]');
+  await page.waitForSelector('[data-skill-field="prompt"]');
+  await page.fill('[data-skill-field="prompt"]', "一只在图书馆看书的猫");
+  await page.click('[data-skill-action="run"]');
+  await page.waitForSelector("[data-skill-artifacts]", { timeout: 12000 });
+
+  const commandList = await page.evaluate(() =>
+    window.__oaSkillProbe ? window.__oaSkillProbe.commands : [],
+  );
+  const commands = commandList.map((c) => c.command);
+  const allowed = [
+    "skill/health",
+    "skill/list",
+    "skill/pack/list",
+    "skill/get",
+    "skill/enable",
+    "skill/disable",
+    "skill/run",
+    "skill/pack/import",
+    "skill/pack/export",
+    "skill/delete",
+    "skill/pack/uninstall",
+    "skill/analyze",
+    "skill/save",
+    "skill/workspace/list",
+  ];
+  check("新增入口只发白名单命令", commands.every((c) => allowed.includes(c)), commands.join(", "));
+
+  const identityFields = ["userId", "role", "sessionRef", "appId"];
+  const offending = [];
+  for (const entry of commandList) {
+    for (const field of identityFields) {
+      if (Object.prototype.hasOwnProperty.call(entry.payload || {}, field)) offending.push(entry.command + ":" + field);
+    }
+  }
+  check("新增入口载荷不含身份字段", offending.length === 0, offending.join(","));
+
+  const analyzeEntry = commandList.find((c) => c.command === "skill/analyze");
+  check(
+    "skill/analyze 载荷只带 markdown 与来源名",
+    !!analyzeEntry && analyzeEntry.payload.markdownPresent === true && typeof analyzeEntry.payload.sourceName === "string",
+    JSON.stringify(analyzeEntry ? Object.keys(analyzeEntry.payload) : []),
+  );
+
+  const saveEntry = commandList.find((c) => c.command === "skill/save");
+  check(
+    "skill/save 载荷只带 skill 对象",
+    !!saveEntry && Object.keys(saveEntry.payload).join(",") === "skill",
+    JSON.stringify(saveEntry ? Object.keys(saveEntry.payload) : []),
+  );
+
+  const workspaceEntry = commandList.find((c) => c.command === "skill/workspace/list");
+  check(
+    "skill/workspace/list 载荷只带 packId",
+    !!workspaceEntry && Object.keys(workspaceEntry.payload).every((k) => k === "packId"),
+    JSON.stringify(workspaceEntry ? Object.keys(workspaceEntry.payload) : []),
+  );
+
+  const mediaRun = commandList.find((c) => c.command === "skill/run");
+  check(
+    "媒体 skill/run 载荷只带 arguments/requestId/skillId",
+    !!mediaRun && Object.keys(mediaRun.payload).sort().join(",") === "arguments,requestId,skillId",
+    JSON.stringify(mediaRun ? Object.keys(mediaRun.payload).sort() : []),
+  );
   await ctx.close();
 }
 
@@ -669,17 +1055,25 @@ const report = {
     os: os.type() + " " + os.release(),
     node: process.version,
     chromium: CHROMIUM,
+    chromiumSource: CHROMIUM_INFO.source,
     url: BASE,
     screenshotOptions: SHOT_OPTS,
+    timing: { scale: TIMEOUT_SCALE, source: SCALE_SOURCE, summary: timingSummary() },
   },
   screenshots,
   video: fs.existsSync(flowVideo) ? flowVideo : null,
+  videoEntries: fs.existsSync(entriesFlowVideo) ? entriesFlowVideo : null,
   compare: {
     condition: compareCondition,
     screenshots: { skill: compare.skill.screenshot, mcp: compare.mcp.screenshot },
     notes: notesPath,
     metrics: { skill: skillM, mcp: mcpM },
     differences: compareDifferences,
+    dark: {
+      condition: { ...compareCondition, colorScheme: "dark", theme: "dark" },
+      screenshots: { skill: compareDark.skill.screenshot, mcp: compareDark.mcp.screenshot },
+      metrics: { skill: compareDark.skill.metrics, mcp: compareDark.mcp.metrics },
+    },
     pageStateBeforeSelect: {
       skill: compare.skill.pageStateBeforeSelect,
       mcp: compare.mcp.pageStateBeforeSelect,
@@ -697,7 +1091,9 @@ console.log("\n" + "═".repeat(72));
 console.log("UI-1 Skill 中心探针：结论 " + report.verdict + " — " + JSON.stringify({ total: checks.length, failed: failed.length }));
 console.log("截图：" + screenshots.length + " 张 → " + ART);
 console.log("录屏：" + (report.video || "（无）"));
+console.log("新增入口录屏：" + (report.videoEntries || "（无）"));
 console.log("对照：" + compare.skill.screenshot + " ／ " + compare.mcp.screenshot);
+console.log("深色对照：" + compareDark.skill.screenshot + " ／ " + compareDark.mcp.screenshot);
 console.log(
   "对照差异（Skill−MCP）：" +
     JSON.stringify({

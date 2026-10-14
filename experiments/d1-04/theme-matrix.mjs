@@ -10,15 +10,20 @@
 // 九个采样面：Desktop / Window / WindowContent / TitleBar / TopBar / Dock /
 //             Menu / Search / AI
 import { chromium } from "playwright";
+import { resolveChromium, describeChromiumCandidates } from "../lib/chromium.mjs";
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
 const PORT = 5222;
-const EXEC =
-  process.env.OA_CHROMIUM ||
-  "/Users/wepingli/Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";
+// Chromium 解析优先级：OA_CHROMIUM → Playwright 官方 chromium → 系统 Google Chrome（见 experiments/lib/chromium.mjs）。
+const CHROMIUM_INFO = resolveChromium();
+const EXEC = CHROMIUM_INFO.path;
+if (!EXEC) {
+  console.error("找不到可用 Chromium，已按优先级尝试：" + describeChromiumCandidates(CHROMIUM_INFO.candidates) + "（设置 OA_CHROMIUM 指向可用二进制）");
+  process.exit(1);
+}
 
 const server = http
   .createServer((req, res) => {
@@ -45,7 +50,10 @@ for (const [theme, glass] of MATRIX) {
   await page.goto(`http://127.0.0.1:${PORT}/`);
   await page.evaluate(
     ([t, g]) => {
-      localStorage.setItem("oa-dark", String(t === "dark"));
+      // 应用已改读 oa-theme（"system"|"light"|"dark"，见 src/main.tsx:530-535），oa-dark 只是旧键兜底。
+      // 之前这里只写 oa-dark：首屏挂载会把 oa-theme 写成 "system"，reload 后旧键根本不参与判定，
+      // dark 格全渲染成浅色（假失败）。必须写应用真实键才能测到主题本身。
+      localStorage.setItem("oa-theme", t);
       localStorage.setItem("oa-motion", "false");
       localStorage.setItem("oa-glass", g);
     },
@@ -156,6 +164,40 @@ for (const [theme, glass] of MATRIX) {
   await page.close();
 }
 
+/* ── 旧键兼容性断言 ──────────────────────────────────────────────
+   oa-dark（布尔）是改键前的历史数据。应用读取时优先 oa-theme、缺失才回退 oa-dark
+   （src/main.tsx:530-535）。这里清掉 oa-theme、只留 oa-dark=true，证明老用户数据
+   仍被正确读成深色，而不是被静默忽略；同时验证应用回写 oa-theme 与旧键一致，
+   下一轮读取不会跳变。 */
+let legacyOk = false;
+{
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await page.goto(`http://127.0.0.1:${PORT}/`);
+  await page.evaluate(() => {
+    localStorage.removeItem("oa-theme");
+    localStorage.setItem("oa-dark", "true");
+    localStorage.setItem("oa-motion", "false");
+    localStorage.setItem("oa-glass", "full");
+  });
+  await page.reload();
+  await page.waitForSelector(".dock-item");
+  const legacy = await page.evaluate(() => ({
+    darkClass: document.querySelector(".desktop")?.classList.contains("dark") ?? null,
+    surfaceRgb: getComputedStyle(document.querySelector(".desktop"))
+      .getPropertyValue("--surface-rgb")
+      .trim()
+      .replace(/,/g, ""),
+    themeWritten: localStorage.getItem("oa-theme"),
+    darkWritten: localStorage.getItem("oa-dark"),
+  }));
+  legacyOk =
+    legacy.darkClass === true &&
+    legacy.surfaceRgb === "23 23 23" &&
+    legacy.themeWritten === "dark";
+  console.log((legacyOk ? "  [PASS] " : "! [FAIL] ") + "旧键 oa-dark 兼容性：" + JSON.stringify(legacy));
+  await page.close();
+}
+
 await browser.close();
 server.close();
 fs.writeFileSync(
@@ -165,6 +207,7 @@ fs.writeFileSync(
 
 // ── 断言 ────────────────────────────────────────────────────────
 const failures = [];
+if (!legacyOk) failures.push("旧键 oa-dark 兼容性：旧数据未被正确读取（见上方 [FAIL]）");
 const rows = [];
 for (const [theme, glass] of MATRIX) {
   const k = `${theme}-${glass}`;

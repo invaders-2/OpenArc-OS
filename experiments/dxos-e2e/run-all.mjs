@@ -36,6 +36,19 @@ import { fileURLToPath } from "node:url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..", "..");
 
+/**
+ * 可选：验收**打包产物**而不是工作区 electron .（用于验证"打包/分发链路"）。
+ *   node experiments/dxos-e2e/run-all.mjs --app-path "/path/OpenArc OS Pack.app"
+ *   OA_DXOS_E2E_APP_PATH=... node experiments/dxos-e2e/run-all.mjs
+ * 传 .app 时派生其 Contents/MacOS 可执行文件；传目录时按 electron <dir> 启动。
+ * 不传时行为与既有探针完全一致（electron .）。
+ */
+export const APP_PATH = (() => {
+  const index = process.argv.indexOf("--app-path");
+  const value = index >= 0 ? process.argv[index + 1] : process.env.OA_DXOS_E2E_APP_PATH;
+  return value ? path.resolve(String(value)) : null;
+})();
+
 /** 顶层键 25 个的真实形状（来源：electron/preload.cjs 的 contextBridge.exposeInMainWorld）。 */
 export const CONTRACT = Object.freeze({
   topLevel: Object.freeze([
@@ -155,11 +168,29 @@ function statOf(p) {
   try { const s = fs.statSync(p); return { exists: true, mtimeMs: Math.round(s.mtimeMs), size: s.size, ino: s.ino }; }
   catch { return { exists: false }; }
 }
-function resolveRealProfilePath() {
+function resolveRealProfilePath(appName) {
+  const name = appName || "openarc-os";
   const home = os.homedir();
-  if (process.platform === "darwin") return path.join(home, "Library", "Application Support", "openarc-os");
-  if (process.platform === "win32") return path.join(process.env.APPDATA || path.join(home, "AppData", "Roaming"), "openarc-os");
-  return path.join(process.env.XDG_CONFIG_HOME || path.join(home, ".config"), "openarc-os");
+  if (process.platform === "darwin") return path.join(home, "Library", "Application Support", name);
+  if (process.platform === "win32") return path.join(process.env.APPDATA || path.join(home, "AppData", "Roaming"), name);
+  return path.join(process.env.XDG_CONFIG_HOME || path.join(home, ".config"), name);
+}
+
+/** 解析启动目标：缺省 electron .；--app-path 指向 .app 直接用其可执行文件，指向目录则 electron <dir>。 */
+function resolveLaunchTarget(appPath, electronPath) {
+  if (!appPath) return { binary: electronPath, args: ["."], cwd: ROOT, payloadDir: ROOT, label: "真实 electron .（electron/main.cjs）" };
+  if (!fs.existsSync(appPath)) throw new Error("--app-path 不存在：" + appPath);
+  if (!appPath.endsWith(".app")) return { binary: electronPath, args: [appPath], cwd: appPath, payloadDir: appPath, label: "真实 electron <appDir>" };
+  const contents = path.join(appPath, "Contents");
+  let executableName = "Electron";
+  try {
+    executableName = execFileSync("plutil", ["-extract", "CFBundleExecutable", "raw", path.join(contents, "Info.plist")], { encoding: "utf8" }).trim() || "Electron";
+  } catch { /* 读不到 plist 时按 Electron 处理 */ }
+  const binary = path.join(contents, "MacOS", executableName);
+  if (!fs.existsSync(binary)) throw new Error("找不到 .app 可执行文件：" + binary);
+  const payloadDir = path.join(contents, "Resources", "app");
+  if (!fs.existsSync(path.join(payloadDir, "package.json"))) throw new Error("载荷不像应用：" + payloadDir);
+  return { binary, args: [], cwd: payloadDir, payloadDir, label: "真实打包产物 " + appPath };
 }
 /** 真实 profile 的前后对照快照：目录 + 顶层条目 + 身份库三件套（含 sha256）。 */
 function snapshotProfile(dir) {
@@ -263,11 +294,15 @@ async function main() {
   const { chromium } = require("@playwright/test");
   const electronPath = require("electron");
 
+  const launch = resolveLaunchTarget(APP_PATH, electronPath);
+  const appName = (() => {
+    try { return JSON.parse(fs.readFileSync(path.join(launch.payloadDir, "package.json"), "utf8")).name || null; } catch { return null; }
+  })();
   const runStartedAt = Date.now();
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "oa-dxos-e2e-"));
   const downloadsDir = fs.mkdtempSync(path.join(os.tmpdir(), "oa-dxos-e2e-dl-"));
   const cdpPort = Number(process.env.OA_DXOS_E2E_CDP_PORT) || (await freePort());
-  const realProfilePath = resolveRealProfilePath();
+  const realProfilePath = resolveRealProfilePath(appName);
   const profileBefore = snapshotProfile(realProfilePath);
   const preexistingProfilePids = listProcessesFor(realProfilePath);
   const BOOT_PATH = path.join(userDataDir, "openarc-e2e-boot.json");
@@ -355,12 +390,12 @@ async function main() {
 
   try {
     // ── 1) 启动（隔离 userData）────────────────────────────────────────────
-    const launchArgs = [".", "--user-data-dir=" + userDataDir, "--remote-debugging-port=" + cdpPort];
-    launchCommand = "electron " + launchArgs.map((a) => (a.includes(userDataDir) ? "--user-data-dir=<isolated>" : a)).join(" ");
+    const launchArgs = [...launch.args, "--user-data-dir=" + userDataDir, "--remote-debugging-port=" + cdpPort];
+    launchCommand = launch.label + " " + launchArgs.map((a) => (a.includes(userDataDir) ? "--user-data-dir=<isolated>" : a)).join(" ");
     const env = { ...process.env, OPENARC_E2E_OBSERVE: "1", OPENARC_DOWNLOADS_DIR: downloadsDir };
     delete env.ELECTRON_RUN_AS_NODE;
     delete env.ELECTRON_NO_ATTACH_CONSOLE;
-    child = spawn(electronPath, launchArgs, { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"], env });
+    child = spawn(launch.binary, launchArgs, { cwd: launch.cwd, stdio: ["ignore", "pipe", "pipe"], env });
     child.stdout.on("data", () => {});
     child.stderr.on("data", (d) => { stderrBuf += String(d); });
 
@@ -368,7 +403,7 @@ async function main() {
       const res = await fetch("http://127.0.0.1:" + cdpPort + "/json/version");
       return res.ok;
     }, 40000, 300);
-    record("boot", "B0 · 真实 electron .（electron/main.cjs）启动并暴露本机 CDP", cdpReady, "CDP ready", cdpReady ? "http://127.0.0.1:" + cdpPort : "timeout");
+    record("boot", "B0 · " + launch.label + " 启动并暴露本机 CDP", cdpReady, "CDP ready", cdpReady ? "http://127.0.0.1:" + cdpPort : "timeout");
     if (!cdpReady) throw new Error("CDP 未就绪：" + stderrBuf.slice(-400));
 
     browser = await chromium.connectOverCDP("http://127.0.0.1:" + cdpPort);
@@ -450,6 +485,14 @@ async function main() {
     record("health", "H3 · 全部健康 / 只读命令均无未捕获异常、无 'No handler registered'", healthAllStructured, "0 throw / 0 handler-missing", JSON.stringify({ structured: healthAllStructured, allOk: healthAllOk }));
     record("health", "H4 · 登录后 12 条健康 / 只读命令全部 ok:true", healthAllOk, "all ok:true", JSON.stringify(healthResults.map((h) => ({ id: h.id, ok: h.ok, error: h.error }))));
 
+    // 第 9 条 */health：integration/plugins/health（插件依赖探测；前 8 条是域健康投影）。
+    // 单独断言，不并入 CONTRACT.health（后者是"域健康矩阵"，通道顺序由契约测试锁死）。
+    const pluginHealth = await callDomain("integration", "integration/plugins/health");
+    const pluginHealthCls = classify(pluginHealth);
+    const pluginHealthOk = pluginHealthCls.structured && !pluginHealthCls.threw && !pluginHealthCls.handlerMissing && pluginHealth.value && pluginHealth.value.ok === true;
+    const pluginHealthItems = pluginHealth.value && pluginHealth.value.value && Array.isArray(pluginHealth.value.value.items) ? pluginHealth.value.value.items : null;
+    record("health", "H5 · 第 9 条 */health（integration/plugins/health）返回 ok:true（全部 9 条 */health 均 ok）", pluginHealthOk, "ok:true", JSON.stringify({ structured: pluginHealthCls.structured, threw: pluginHealthCls.threw, ok: pluginHealth.value && pluginHealth.value.ok, plugins: pluginHealthItems ? pluginHealthItems.length : null, ms: pluginHealth.ms }));
+
     // ── 5) 真实只读命令（覆盖每个命令通道 + files/browser/sync）───────────
     extraStructured = true;
     for (const entry of CONTRACT.extra) {
@@ -501,7 +544,8 @@ async function main() {
 
     trustedSource = (() => {
       try {
-        const src = fs.readFileSync(path.join(ROOT, "electron", "main.cjs"), "utf8");
+        const mainPath = path.join(launch.payloadDir, "electron", "main.cjs");
+        const src = fs.readFileSync(fs.existsSync(mainPath) ? mainPath : path.join(ROOT, "electron", "main.cjs"), "utf8");
         return {
           senderCheck: /event\.sender\s*!==\s*win\?\.webContents/.test(src),
           frameUrlCheck: /event\.senderFrame\?\.url/.test(src) && /url\s*===\s*uiURL/.test(src),
@@ -589,7 +633,8 @@ async function main() {
     at: nowIso(),
     runStartedAt,
     durationMs: Date.now() - runStartedAt,
-    command: "node experiments/dxos-e2e/run-all.mjs",
+    command: "node experiments/dxos-e2e/run-all.mjs" + (APP_PATH ? " --app-path " + APP_PATH : ""),
+    appPath: APP_PATH,
     environment: { platform: process.platform, arch: process.arch, node: process.version, electron: (() => { try { return createRequire(path.join(ROOT, "package.json"))("electron/package.json").version; } catch { return null; } })() },
     isolation: {
       launchCommand,
@@ -625,7 +670,7 @@ async function main() {
 
   const outDir = path.join(ROOT, "artifacts", "dxos-e2e");
   fs.mkdirSync(outDir, { recursive: true });
-  const outPath = path.join(outDir, "report.json");
+  const outPath = path.join(outDir, APP_PATH ? "report-app.json" : "report.json");
   fs.writeFileSync(outPath, JSON.stringify(report, null, 2));
 
   console.log("\n=== 结论 ===");

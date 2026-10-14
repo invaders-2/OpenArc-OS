@@ -3,7 +3,7 @@
  *
  * 为什么不直接开产品 dist：本轮禁止执行 npm run build，dist 里还没有 TaskConsole。
  * 这里用 esbuild（Vite 自带依赖）把 **实验用挂载壳 harness.tsx** 打成一份本地构建产物，
- * 再用本机 Chromium（路径复用 experiments/d2-01/lib/ds.mjs，可用 OA_CHROMIUM 覆盖）打开，
+ * 再用本机 Chromium（见 experiments/lib/chromium.mjs：OA_CHROMIUM → Playwright → 系统 Chrome）打开，
  * 挂载的 DOM 结构与 src/main.tsx 的 projects 分支一致
  * （.window > .split > .split-side 子视图导航 + .split-main）。
  *
@@ -20,6 +20,19 @@ import os from "node:os";
 import http from "node:http";
 import { build } from "esbuild";
 import { chromium } from "playwright";
+import { resolveChromium, describeChromiumCandidates } from "../lib/chromium.mjs";
+import {
+  installCrashGuard,
+  registerCleanup,
+  setStep,
+  hardenPage,
+  timingSummary,
+  launchChromiumBounded,
+  withRetries,
+  SCENARIO_ATTEMPTS,
+  TIMEOUT_SCALE,
+  SCALE_SOURCE,
+} from "../lib/probe-timing.mjs";
 import { TASK_CONSOLE_COMMANDS, AGENT_COMMANDS } from "../../src/projects/taskConsoleLogic.ts";
 
 const HERE = import.meta.dirname;
@@ -28,9 +41,14 @@ const ART = path.join(ROOT, "artifacts", "dxos-ui-tasks");
 const BUILD = path.join(ART, "build");
 const VIDEO_DIR = path.join(ART, "video");
 const PORT = Number(process.env.OA_TASKS_PORT || 5261);
-const CHROMIUM =
-  process.env.OA_CHROMIUM ||
-  "/Users/wepingli/Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";
+// 解析优先级：OA_CHROMIUM → Playwright 官方 chromium → 系统 Google Chrome（见 experiments/lib/chromium.mjs）。
+const CHROMIUM_INFO = resolveChromium();
+const CHROMIUM = CHROMIUM_INFO.path;
+
+/* 高负载下等待会整体变慢；这里只放大等待与加重试，不改任何断言（见 experiments/lib/probe-timing.mjs）。 */
+installCrashGuard();
+setStep("初始化");
+console.log("探针时序加固：" + timingSummary());
 
 const checks = [];
 const pageErrors = [];
@@ -117,11 +135,12 @@ const server = http.createServer((req, res) => {
   res.end("not found");
 });
 await new Promise((resolve) => server.listen(PORT, "127.0.0.1", resolve));
+registerCleanup(() => new Promise((resolve) => server.close(resolve)));
 const BASE = "http://127.0.0.1:" + PORT;
 
 /* ── 3. 浏览器 ────────────────────────────────────────────────────────────── */
-if (!fs.existsSync(CHROMIUM)) {
-  console.error("Chromium 不存在：" + CHROMIUM + "（设置 OA_CHROMIUM 指向可用二进制）");
+if (!CHROMIUM) {
+  console.error("找不到可用 Chromium，已按优先级尝试：" + describeChromiumCandidates(CHROMIUM_INFO.candidates) + "（设置 OA_CHROMIUM 指向可用二进制）");
   server.close();
   process.exit(1);
 }
@@ -136,6 +155,8 @@ const SHOT_OPTS = {
 };
 
 function watch(page, label) {
+  /* 每个 page 都在这里统一加固：waitForSelector/goto/waitForFunction 按倍率放大并做有界重试。 */
+  hardenPage(page, label);
   page.on("console", (msg) => {
     if (msg.type() === "error") pageErrors.push(label + " console.error: " + msg.text());
   });
@@ -163,20 +184,38 @@ async function openScenario(browser, query, opts) {
   return { ctx, page };
 }
 
-const browser = await chromium.launch({ executablePath: CHROMIUM });
+const browser = await launchChromiumBounded(chromium, { executablePath: CHROMIUM });
+registerCleanup(() => browser.close());
 const screenshots = [];
 
 /* ── 4. 状态截图 ─────────────────────────────────────────────────────────── */
 async function shoot(spec) {
-  const { ctx, page } = await openScenario(browser, spec.query, spec.narrow ? { viewport: { width: 640, height: 900 } } : null);
-  if (spec.setup) await spec.setup(page);
-  await page.waitForSelector(spec.expect, { timeout: 20000 });
-  await page.waitForTimeout(240);
-  const file = path.join(ART, spec.name + ".png");
-  await page.screenshot({ path: file });
-  screenshots.push(file);
-  check("状态截图 " + spec.name + " → " + spec.expect, true, file);
-  await ctx.close();
+  const label = "场景 " + spec.name;
+  const checksBefore = checks.length;
+  const screenshotsBefore = screenshots.length;
+  await withRetries(
+    label,
+    SCENARIO_ATTEMPTS,
+    async () => {
+      const { ctx, page } = await openScenario(browser, spec.query, spec.narrow ? { viewport: { width: 640, height: 900 } } : null);
+      try {
+        if (spec.setup) await spec.setup(page);
+        await page.waitForSelector(spec.expect, { timeout: 20000 });
+        await page.waitForTimeout(240);
+        const file = path.join(ART, spec.name + ".png");
+        await page.screenshot({ path: file });
+        screenshots.push(file);
+        check("状态截图 " + spec.name + " → " + spec.expect, true, file);
+      } finally {
+        await ctx.close().catch((e) => console.log("    · 关闭 context 时出错（已记录，不掩盖原错误）：" + ((e && e.message) || e)));
+      }
+    },
+    (attempt) => {
+      if (attempt > 1) console.log("  ↺ 回滚 " + label + " 上一次的部分断言 / 截图，整场景重跑（不跳过任何断言）");
+      checks.length = checksBefore;
+      screenshots.length = screenshotsBefore;
+    },
+  );
 }
 
 console.log(String.fromCharCode(10) + "状态截图：");
@@ -266,8 +305,135 @@ await shoot({
   },
 });
 
+/* ── 4b. 写操作入口状态截图（依赖缺失 / 就绪 / 进行中 / 失败）+ 统一读模型来源 ── */
+console.log(String.fromCharCode(10) + "写操作入口状态截图：");
+setStep("写操作入口状态截图");
+await shoot({
+  name: "10-entry-dependency",
+  query: "scenario=ready&deps=fs-missing",
+  expect: '[data-task-entry="tool-call"][data-task-entry-state="dependency"]',
+  setup: async (page) => {
+    await page.waitForSelector('[data-task-entry="tool-call"] [data-task-entry-availability="dependency"]');
+    const text = await page.$eval('[data-task-entry="tool-call"] [data-task-entry-availability="dependency"]', (el) => el.textContent || "");
+    check("工具入口依赖缺失点名「虚拟文件树」并说明没有产物", text.includes("虚拟文件树") && text.includes("没有产生任何产物"), text.slice(0, 120));
+  },
+});
+await shoot({
+  name: "11-entry-ready",
+  /* 默认态即真实 health 语义（fsAdapter 已接线）；不再需要 deps=full 修饰。 */
+  query: "scenario=ready",
+  expect: '[data-task-entry="create"][data-task-entry-state="ready"]',
+  setup: async (page) => {
+    const states = await page.$$eval("[data-task-entry]", (els) =>
+      els.map((el) => ({ key: el.getAttribute("data-task-entry"), state: el.getAttribute("data-task-entry-state") })),
+    );
+    check("依赖齐全时四个入口都就绪", states.length === 4 && states.every((s) => s.state === "ready"), JSON.stringify(states));
+    const risk = await page.$$eval("[data-task-entry-risk-badge]", (els) => els.map((el) => (el.textContent || "").trim()));
+    check("四个入口都显示风险标注", risk.length === 4 && risk.every((t) => t.length > 0), risk.join(" | "));
+    check("调用工具入口标注逐次审批", (await page.$('[data-task-entry="tool-call"] [data-task-entry-approval="true"]')) !== null);
+  },
+});
+await shoot({
+  name: "12-entry-busy",
+  query: "scenario=ready&run=slow",
+  expect: '[data-task-entry-action="create"][disabled][aria-busy="true"]',
+  setup: async (page) => {
+    await page.fill('[data-task-entry-field="create:projectId"]', "p_weekly");
+    await page.fill('[data-task-entry-field="create:instruction"]', "把本周记录整理成周报草稿");
+    await page.click('[data-task-entry-action="create"]');
+    /* 写类入口二次确认：确认前不发命令。 */
+    await page.waitForSelector("[data-task-entry-confirm-submit]");
+    await page.click("[data-task-entry-confirm-submit]");
+    await page.waitForSelector('[data-task-entry-action="create"][disabled][aria-busy="true"]', { timeout: 5000 });
+  },
+});
+await shoot({
+  name: "13-entry-failure",
+  query: "scenario=entry-error",
+  expect: '[data-task-entry-error][data-task-entry-error-code="AGENT_FORBIDDEN"]',
+  setup: async (page) => {
+    await page.fill('[data-task-entry-field="create:projectId"]', "p_weekly");
+    await page.fill('[data-task-entry-field="create:instruction"]', "新建一条会失败的演示任务");
+    await page.click('[data-task-entry-action="create"]');
+    await page.waitForSelector("[data-task-entry-confirm-submit]");
+    await page.click("[data-task-entry-confirm-submit]");
+    await page.waitForSelector("[data-task-entry-error]", { timeout: 5000 });
+    const text = await page.$eval("[data-task-entry-error]", (el) => el.textContent || "");
+    check("失败显示稳定错误码与文案", text.includes("AGENT_FORBIDDEN") && text.includes("没有"), text.slice(0, 120));
+  },
+});
+await shoot({
+  name: "14-unified-source",
+  query: "scenario=ready",
+  expect: "[data-task-source]",
+  setup: async (page) => {
+    const sources = await page.$$eval("[data-task-source]", (els) => els.map((el) => el.getAttribute("data-task-source")));
+    check("任务行带统一读模型来源标注（dx）", sources.length >= 3 && sources.every((s) => s === "dx"), JSON.stringify(Array.from(new Set(sources))));
+    const core = await page.$eval("[data-task-unified-core]", (el) => el.textContent || "");
+    check("core 来源任务单独标注", core.includes("同步素材库"), core.slice(0, 80));
+    const boundary = await page.$eval("[data-task-unified-boundary]", (el) => el.textContent || "");
+    check("统一读模型边界文本可见（只读）", boundary.includes("读模型"), boundary.slice(0, 80));
+  },
+});
+
+/* 15) 写类入口二次确认：确认前 / 取消 命令数 0；确认后正常发送。 */
+const createCount = (page) =>
+  page.evaluate(() =>
+    window.__oaTaskProbe ? window.__oaTaskProbe.commands.filter((c) => c.command === "agent/task/create").length : -1,
+  );
+await shoot({
+  name: "15-entry-confirm",
+  query: "scenario=ready&run=slow",
+  expect: "[data-task-entry-confirm-submit]",
+  setup: async (page) => {
+    await page.fill('[data-task-entry-field="create:projectId"]', "p_weekly");
+    await page.fill('[data-task-entry-field="create:instruction"]', "确认前不应发出命令");
+    await page.click('[data-task-entry-action="create"]');
+    await page.waitForSelector("[data-task-entry-confirm]", { timeout: 5000 });
+    const before = await createCount(page);
+    check("写类入口确认前不发命令", before === 0, "agent/task/create=" + before);
+    const text = await page.$eval("[data-task-entry-confirm]", (el) => el.textContent || "");
+    check("确认框说明将要发生的副作用", /写|新建/.test(text), text.slice(0, 140).replace(/\s+/g, " "));
+    await page.click("[data-task-entry-confirm-cancel]");
+    await page.waitForSelector("[data-task-entry-confirm]", { state: "detached", timeout: 5000 });
+    await page.waitForTimeout(200);
+    const afterCancel = await createCount(page);
+    check("取消后命令数仍为 0", afterCancel === 0, "agent/task/create=" + afterCancel);
+    /* 再次打开确认框并保持打开，供截图留证。 */
+    await page.click('[data-task-entry-action="create"]');
+    await page.waitForSelector("[data-task-entry-confirm-submit]");
+  },
+});
+{
+  const ctx = await browser.newContext(SHOT_OPTS);
+  const page = await ctx.newPage();
+  watch(page, "entry-confirm");
+  await page.goto(BASE + "/?scenario=ready&run=slow", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("[data-task-entry]");
+  await page.fill('[data-task-entry-field="create:projectId"]', "p_weekly");
+  await page.fill('[data-task-entry-field="create:instruction"]', "确认后应发出命令");
+  await page.click('[data-task-entry-action="create"]');
+  await page.waitForSelector("[data-task-entry-confirm-submit]");
+  await page.click("[data-task-entry-confirm-submit]");
+  let sent = false;
+  try {
+    await page.waitForFunction(
+      () => window.__oaTaskProbe && window.__oaTaskProbe.commands.some((c) => c.command === "agent/task/create"),
+      null,
+      { timeout: 5000 },
+    );
+    sent = true;
+  } catch (err) {
+    sent = false;
+  }
+  const afterConfirm = await createCount(page);
+  check("确认后命令正常发送", sent && afterConfirm === 1, "agent/task/create=" + afterConfirm);
+  await ctx.close();
+}
+
 /* ── 5. 主流程连续录屏 ───────────────────────────────────────────────────── */
 console.log(String.fromCharCode(10) + "主流程连续录屏：");
+setStep("主流程连续录屏");
 const videoCtx = await browser.newContext({
   viewport: { width: 1440, height: 900 },
   deviceScaleFactor: 1,
@@ -296,6 +462,47 @@ await vpage.click('[data-task-id="t_done"]');
 await vpage.waitForSelector("[data-task-deliverables]");
 await vpage.waitForTimeout(700);
 await videoCtx.close();
+
+/* ── 5b. 写操作入口连续录屏（就绪 → 二次确认 → 进行中 → 新任务入列 → 依赖缺失视图）── */
+const entryVideoCtx = await browser.newContext({
+  viewport: { width: 1440, height: 900 },
+  deviceScaleFactor: 1,
+  colorScheme: "light",
+  locale: "zh-CN",
+  recordVideo: { dir: VIDEO_DIR, size: { width: 1440, height: 900 } },
+});
+const epage = await entryVideoCtx.newPage();
+watch(epage, "entry-video");
+const entryVideo = epage.video();
+await epage.goto(BASE + "/?scenario=ready&run=slow", { waitUntil: "domcontentloaded" });
+await epage.waitForSelector("[data-task-entry]");
+await epage.waitForTimeout(500);
+await epage.fill('[data-task-entry-field="create:projectId"]', "p_weekly");
+await epage.fill('[data-task-entry-field="create:instruction"]', "把本周记录整理成周报草稿");
+await epage.waitForTimeout(400);
+await epage.click('[data-task-entry-action="create"]');
+await epage.waitForSelector("[data-task-entry-confirm-submit]");
+await epage.waitForTimeout(500);
+await epage.click("[data-task-entry-confirm-submit]");
+await epage.waitForSelector('[data-task-entry-action="create"][disabled][aria-busy="true"]', { timeout: 5000 });
+await epage.waitForSelector("[data-task-notice]", { timeout: 10000 });
+await epage.waitForTimeout(600);
+await epage.click('[data-task-id="t_report"]');
+await epage.waitForSelector("[data-task-detail]");
+await epage.waitForTimeout(500);
+/* 同一段录屏里切到显式的依赖缺失场景（?deps=fs-missing），录下入口降级态。 */
+await epage.goto(BASE + "/?scenario=ready&deps=fs-missing", { waitUntil: "domcontentloaded" });
+await epage.waitForSelector('[data-task-entry="tool-call"][data-task-entry-state="dependency"]');
+await epage.waitForTimeout(900);
+await entryVideoCtx.close();
+const entryRaw = await entryVideo.path();
+const entryFlowVideo = path.join(ART, "task-entries-flow.webm");
+if (entryRaw && fs.existsSync(entryRaw)) {
+  fs.copyFileSync(entryRaw, entryFlowVideo);
+  check("写操作入口连续录屏产出", fs.statSync(entryFlowVideo).size > 0, entryFlowVideo);
+} else {
+  check("写操作入口连续录屏产出", false, "video.path() 为空");
+}
 const rawVideo = await video.path();
 const flowVideo = path.join(ART, "task-console-flow.webm");
 if (rawVideo && fs.existsSync(rawVideo)) {
@@ -307,6 +514,7 @@ if (rawVideo && fs.existsSync(rawVideo)) {
 
 /* ── 6. 焦点顺序（就绪页 + 详情）────────────────────────────────────────── */
 console.log(String.fromCharCode(10) + "可访问焦点顺序：");
+setStep("可访问焦点顺序");
 {
   const { ctx, page } = await openScenario(browser, "scenario=ready");
   await page.waitForSelector(".task-row[data-task-id]");
@@ -358,6 +566,7 @@ console.log(String.fromCharCode(10) + "可访问焦点顺序：");
    同 reducedMotion，分别渲染两页就绪态的外壳，两张截图 + 关键度量写进 report.json，
    结论写进 compare-notes.md。 */
 console.log(String.fromCharCode(10) + "基准对照（任务控制台 vs Skill 中心）：");
+setStep("基准对照（任务控制台 vs Skill 中心）");
 
 const COMPARE_SPECS = {
   task: {
@@ -645,6 +854,16 @@ check("对照笔记 compare-notes.md 产出", fs.statSync(notesPath).size > 0, n
   check("回答载荷只含 taskId/answer/requestId", answerKeys === "answer,requestId,taskId", answerKeys);
   const answerCount = commands.filter((c) => c.command === "agent/task/answer").length;
   check("一次提交只发一条 answer 命令", answerCount === 1, "count=" + answerCount);
+  const unifiedCall = commands.find((c) => c.command === "agent/task/unified-list");
+  check("界面发出统一读模型命令 agent/task/unified-list", !!unifiedCall, JSON.stringify(unifiedCall || null));
+  const entryCommands = ["agent/task/create", "agent/tool/call", "agent/project/run", "agent/react/run"];
+  check(
+    "四个写操作入口命令都在界面与后端白名单内",
+    entryCommands.every((c) => TASK_CONSOLE_COMMANDS.indexOf(c) >= 0 && AGENT_COMMANDS.indexOf(c) >= 0),
+    entryCommands.join(","),
+  );
+  const sourceBadges = await page.$$eval("[data-task-source]", (els) => els.map((el) => el.getAttribute("data-task-source")));
+  check("列表行带统一读模型来源标注", sourceBadges.length >= 3, JSON.stringify(Array.from(new Set(sourceBadges))));
   const progressSequences = await page.evaluate(() => (window.__oaTaskProbe ? window.__oaTaskProbe.events.filter((e) => e.kind === "progress").map((e) => e.sequence) : []));
   const monotonic = progressSequences.every((v, i) => i === 0 || v > progressSequences[i - 1]);
   check("agent:event progress sequence 严格单调", monotonic && progressSequences.length >= 5, "n=" + progressSequences.length + " seq=" + progressSequences.slice(0, 8).join(","));
@@ -666,11 +885,14 @@ const report = {
     os: os.type() + " " + os.release(),
     node: process.version,
     chromium: CHROMIUM,
+    chromiumSource: CHROMIUM_INFO.source,
     url: BASE,
     screenshotOptions: SHOT_OPTS,
+    timing: { scale: TIMEOUT_SCALE, source: SCALE_SOURCE, summary: timingSummary() },
   },
   screenshots,
   video: fs.existsSync(flowVideo) ? flowVideo : null,
+  entryVideo: fs.existsSync(entryFlowVideo) ? entryFlowVideo : null,
   compare: {
     condition: compareCondition,
     screenshots: { task: compare.task.screenshot, skill: compare.skill.screenshot },

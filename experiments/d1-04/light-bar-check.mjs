@@ -3,6 +3,7 @@
 // 字标实际压在桌面渐变上，对比度必须重新用像素验。
 // 输出：artifacts/d1-04/lightbar-{light,dark}.{json,png}
 import { chromium } from "playwright";
+import { resolveChromium, describeChromiumCandidates } from "../lib/chromium.mjs";
 import { spawn } from "node:child_process";
 import http from "node:http";
 import fs from "node:fs";
@@ -10,9 +11,13 @@ import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
 const PORT = 5213;
-const EXEC =
-  process.env.OA_CHROMIUM ||
-  "/Users/wepingli/Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";
+// Chromium 解析优先级：OA_CHROMIUM → Playwright 官方 chromium → 系统 Google Chrome（见 experiments/lib/chromium.mjs）。
+const CHROMIUM_INFO = resolveChromium();
+const EXEC = CHROMIUM_INFO.path;
+if (!EXEC) {
+  console.error("找不到可用 Chromium，已按优先级尝试：" + describeChromiumCandidates(CHROMIUM_INFO.candidates) + "（设置 OA_CHROMIUM 指向可用二进制）");
+  process.exit(1);
+}
 
 const server = http
   .createServer((req, res) => {

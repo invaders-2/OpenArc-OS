@@ -1,15 +1,20 @@
 // D1-04 十三(b) 校验：opaque 模式下顶栏/Dock 是否会浮出一条与桌面不同色的带。
 // 判据：顶栏内与紧邻桌面的明度差应 ≤3 级（肉眼不可辨）。
 import { chromium } from "playwright";
+import { resolveChromium, describeChromiumCandidates } from "../lib/chromium.mjs";
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
 const PORT = 5217;
-const EXEC =
-  process.env.OA_CHROMIUM ||
-  "/Users/wepingli/Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";
+// Chromium 解析优先级：OA_CHROMIUM → Playwright 官方 chromium → 系统 Google Chrome（见 experiments/lib/chromium.mjs）。
+const CHROMIUM_INFO = resolveChromium();
+const EXEC = CHROMIUM_INFO.path;
+if (!EXEC) {
+  console.error("找不到可用 Chromium，已按优先级尝试：" + describeChromiumCandidates(CHROMIUM_INFO.candidates) + "（设置 OA_CHROMIUM 指向可用二进制）");
+  process.exit(1);
+}
 
 const server = http
   .createServer((req, res) => {

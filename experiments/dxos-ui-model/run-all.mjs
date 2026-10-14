@@ -4,7 +4,7 @@
  *
  * 为什么不直接开产品 dist：本轮禁止执行 npm run build，dist 里还没有 UI-5 区块。
  * 这里用 esbuild（Vite 自带依赖）把 **实验用挂载壳 harness.tsx** 打成一份本地构建产物，
- * 再用本机 Chromium（路径复用 experiments/d2-01/lib/ds.mjs，可用 OA_CHROMIUM 覆盖）打开。
+ * 再用本机 Chromium（见 experiments/lib/chromium.mjs：OA_CHROMIUM → Playwright → 系统 Chrome）打开。
  *
  * 数据不是手写的：protocol/list、protocol/get、manifest/get 的 fixture 由本脚本直接调用
  * 主进程的 protocol-engine repository 与 manifest service 生成（与 IPC 同一份结构），
@@ -26,6 +26,20 @@ import http from "node:http";
 import { createRequire } from "node:module";
 import { build } from "esbuild";
 import { chromium } from "playwright";
+import { resolveChromium, describeChromiumCandidates } from "../lib/chromium.mjs";
+import {
+  installCrashGuard,
+  registerCleanup,
+  setStep,
+  hardenPage,
+  scaled,
+  timingSummary,
+  launchChromiumBounded,
+  withRetries,
+  SCENARIO_ATTEMPTS,
+  TIMEOUT_SCALE,
+  SCALE_SOURCE,
+} from "../lib/probe-timing.mjs";
 import { MODEL_CONSOLE_COMMANDS, MODEL_PROTOCOL_COMMANDS } from "../../src/settings/modelProtocolLogic.ts";
 
 const HERE = import.meta.dirname;
@@ -34,9 +48,14 @@ const ART = path.join(ROOT, "artifacts", "dxos-ui-model");
 const BUILD = path.join(ART, "build");
 const VIDEO_DIR = path.join(ART, "video");
 const PORT = Number(process.env.OA_MODEL_PORT || 5263);
-const CHROMIUM =
-  process.env.OA_CHROMIUM ||
-  "/Users/wepingli/Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";
+// 解析优先级：OA_CHROMIUM → Playwright 官方 chromium → 系统 Google Chrome（见 experiments/lib/chromium.mjs）。
+const CHROMIUM_INFO = resolveChromium();
+const CHROMIUM = CHROMIUM_INFO.path;
+
+/* 高负载下等待会整体变慢；这里只放大等待与加重试，不改任何断言（见 experiments/lib/probe-timing.mjs）。 */
+installCrashGuard();
+setStep("初始化");
+console.log("探针时序加固：" + timingSummary());
 
 const require = createRequire(import.meta.url);
 
@@ -153,11 +172,12 @@ const server = http.createServer((req, res) => {
   res.end("not found");
 });
 await new Promise((resolve) => server.listen(PORT, "127.0.0.1", resolve));
+registerCleanup(() => new Promise((resolve) => server.close(resolve)));
 const BASE = "http://127.0.0.1:" + PORT;
 
 /* ── 3. 浏览器 ────────────────────────────────────────────────────────────── */
-if (!fs.existsSync(CHROMIUM)) {
-  console.error("Chromium 不存在：" + CHROMIUM + "（设置 OA_CHROMIUM 指向可用二进制）");
+if (!CHROMIUM) {
+  console.error("找不到可用 Chromium，已按优先级尝试：" + describeChromiumCandidates(CHROMIUM_INFO.candidates) + "（设置 OA_CHROMIUM 指向可用二进制）");
   server.close();
   process.exit(1);
 }
@@ -172,6 +192,8 @@ const SHOT_OPTS = {
 };
 
 function watch(page, label) {
+  /* 每个 page 都在这里统一加固：waitForSelector/goto/waitForFunction 按倍率放大并做有界重试。 */
+  hardenPage(page, label);
   page.on("console", (msg) => {
     if (msg.type() === "error") pageErrors.push(label + " console.error: " + msg.text());
   });
@@ -204,21 +226,39 @@ async function scrollTo(page, selector) {
   if ((await loc.count()) > 0) await loc.scrollIntoViewIfNeeded();
 }
 
-const browser = await chromium.launch({ executablePath: CHROMIUM });
+const browser = await launchChromiumBounded(chromium, { executablePath: CHROMIUM });
+registerCleanup(() => browser.close());
 const screenshots = [];
 
 /* ── 4. 状态截图 ─────────────────────────────────────────────────────────── */
 async function shoot(spec) {
-  const { ctx, page } = await openScenario(browser, spec.query, spec.narrow ? { viewport: { width: 640, height: 900 } } : null);
-  if (spec.setup) await spec.setup(page);
-  await page.waitForSelector(spec.expect, { timeout: 25000 });
-  await scrollTo(page, spec.scroll || '[data-model-proto="console"]');
-  await page.waitForTimeout(240);
-  const file = path.join(ART, spec.name + ".png");
-  await page.screenshot({ path: file });
-  screenshots.push(file);
-  check("状态截图 " + spec.name + " → " + spec.expect, true, file);
-  await ctx.close();
+  const label = "场景 " + spec.name;
+  const checksBefore = checks.length;
+  const screenshotsBefore = screenshots.length;
+  await withRetries(
+    label,
+    SCENARIO_ATTEMPTS,
+    async () => {
+      const { ctx, page } = await openScenario(browser, spec.query, spec.narrow ? { viewport: { width: 640, height: 900 } } : null);
+      try {
+        if (spec.setup) await spec.setup(page);
+        await page.waitForSelector(spec.expect, { timeout: 25000 });
+        await scrollTo(page, spec.scroll || '[data-model-proto="console"]');
+        await page.waitForTimeout(240);
+        const file = path.join(ART, spec.name + ".png");
+        await page.screenshot({ path: file });
+        screenshots.push(file);
+        check("状态截图 " + spec.name + " → " + spec.expect, true, file);
+      } finally {
+        await ctx.close().catch((e) => console.log("    · 关闭 context 时出错（已记录，不掩盖原错误）：" + ((e && e.message) || e)));
+      }
+    },
+    (attempt) => {
+      if (attempt > 1) console.log("  ↺ 回滚 " + label + " 上一次的部分断言 / 截图，整场景重跑（不跳过任何断言）");
+      checks.length = checksBefore;
+      screenshots.length = screenshotsBefore;
+    },
+  );
 }
 
 console.log(String.fromCharCode(10) + "状态截图：");
@@ -415,8 +455,67 @@ await shoot({
   },
 });
 
+/* ── 4b. 动作入口状态截图（就绪 / 缺凭据 / 进行中 / 失败）────────────────── */
+console.log(String.fromCharCode(10) + "动作入口状态截图：");
+await shoot({
+  name: "14-entry-ready",
+  query: "scenario=ready",
+  expect: '[data-model-entry="protocol-validate"][data-model-entry-state="ready"]',
+  scroll: '[data-model-proto="entries"]',
+  setup: async (page) => {
+    /* 协议类入口的 ready 需要一份协议 JSON；填一份后四个入口都应就绪。 */
+    await page.fill('[data-model-entry-field="protocol-validate:protocol"]', '{"id":"probe","kind":"model"}');
+    await page.waitForSelector('[data-model-entry="protocol-validate"][data-model-entry-state="ready"]', { timeout: 5000 });
+    const states = await page.$$eval("[data-model-entry]", (els) =>
+      els.map((el) => ({ key: el.getAttribute("data-model-entry"), state: el.getAttribute("data-model-entry-state") })),
+    );
+    check("填了协议后四个动作入口都就绪", states.length === 4 && states.every((s) => s.state === "ready"), JSON.stringify(states));
+    const risk = await page.$$eval("[data-model-entry-risk-badge]", (els) => els.map((el) => (el.textContent || "").trim()));
+    check("动作入口显示风险标注", risk.length === 4 && risk.every((t) => t.length > 0), risk.join(" | "));
+    const cred = await page.$$eval("[data-model-entry-credential]", (els) => els.map((el) => el.getAttribute("data-model-entry-credential")));
+    check("需要凭据的入口显式标注", cred.length === 2 && cred.every((c) => c === "required"), JSON.stringify(cred));
+  },
+});
+await shoot({
+  name: "15-entry-credential",
+  query: "scenario=nocred",
+  expect: '[data-model-entry="image-generate"][data-model-entry-state="no-credential"]',
+  scroll: '[data-model-entry="image-generate"]',
+  setup: async (page) => {
+    const text = await page.$eval('[data-model-entry="image-generate"] [data-model-entry-availability="no-credential"]', (el) => el.textContent || "");
+    check("缺凭据提示说明没有执行，且不出现任何密钥字样", text.includes("没有执行") && text.includes("缺凭据") && text.indexOf("sk-") < 0, text.slice(0, 140));
+  },
+});
+await shoot({
+  name: "16-entry-busy",
+  query: "scenario=ready&run=slow",
+  expect: '[data-model-entry-action="image-generate"][disabled][aria-busy="true"]',
+  scroll: '[data-model-proto="entries"]',
+  setup: async (page) => {
+    await page.fill('[data-model-entry-field="image-generate:providerId"]', "prov_local");
+    await page.fill('[data-model-entry-field="image-generate:model"]', "gpt-image");
+    await page.fill('[data-model-entry-field="image-generate:prompt"]', "离线探针：画一只猫");
+    await page.click('[data-model-entry-action="image-generate"]');
+    await page.waitForSelector('[data-model-entry-action="image-generate"][disabled][aria-busy="true"]', { timeout: 5000 });
+  },
+});
+await shoot({
+  name: "17-entry-failure",
+  query: "scenario=entry-error",
+  expect: '[data-model-entry-error][data-model-entry-error-code="PROTOCOL_INVALID"]',
+  scroll: '[data-model-entry-error]',
+  setup: async (page) => {
+    await page.fill('[data-model-entry-field="protocol-validate:protocol"]', '{"id":"custom"}');
+    await page.click('[data-model-entry-action="protocol-validate"]');
+    await page.waitForSelector("[data-model-entry-error]", { timeout: 5000 });
+    const text = await page.$eval("[data-model-entry-error]", (el) => el.textContent || "");
+    check("失败显示稳定错误码与文案", text.includes("PROTOCOL_INVALID") && text.includes("协议定义"), text.slice(0, 120));
+  },
+});
+
 /* ── 5. 主流程连续录屏：协议表 → 详情 → 过滤 → manifest → 流式 → 取消 ───── */
 console.log(String.fromCharCode(10) + "主流程连续录屏：");
+setStep("主流程连续录屏");
 const videoCtx = await browser.newContext({
   viewport: { width: 1440, height: 900 },
   deviceScaleFactor: 1,
@@ -471,8 +570,51 @@ if (rawVideo && fs.existsSync(rawVideo)) {
   check("主流程连续录屏产出", false, "video.path() 为空");
 }
 
+/* ── 5b. 动作入口连续录屏（就绪 → 校验 → 生成 → 缺凭据视图）────────────── */
+setStep("动作入口连续录屏");
+const entryVideoCtx = await browser.newContext({
+  viewport: { width: 1440, height: 900 },
+  deviceScaleFactor: 1,
+  colorScheme: "light",
+  locale: "zh-CN",
+  recordVideo: { dir: VIDEO_DIR, size: { width: 1440, height: 900 } },
+});
+const epage = await entryVideoCtx.newPage();
+watch(epage, "entry-video");
+const entryVideo = epage.video();
+await epage.goto(BASE + "/?scenario=ready", { waitUntil: "domcontentloaded" });
+await epage.waitForSelector('[data-model-proto="entries"]');
+await scrollTo(epage, '[data-model-proto="entries"]');
+await epage.waitForTimeout(500);
+await epage.fill('[data-model-entry-field="protocol-validate:protocol"]', '{"id":"probe","kind":"model"}');
+await epage.waitForTimeout(300);
+await epage.click('[data-model-entry-action="protocol-validate"]');
+await epage.waitForSelector("[data-model-entry-result]", { timeout: 10000 });
+await epage.waitForTimeout(700);
+await epage.fill('[data-model-entry-field="image-generate:providerId"]', "prov_local");
+await epage.fill('[data-model-entry-field="image-generate:model"]', "gpt-image");
+await epage.fill('[data-model-entry-field="image-generate:prompt"]', "录屏：一次图像生成入口。");
+await epage.waitForTimeout(300);
+await epage.click('[data-model-entry-action="image-generate"]');
+await epage.waitForTimeout(800);
+/* 同一段录屏切到缺凭据视图。 */
+await epage.goto(BASE + "/?scenario=nocred", { waitUntil: "domcontentloaded" });
+await epage.waitForSelector('[data-model-entry="image-generate"][data-model-entry-state="no-credential"]');
+await scrollTo(epage, '[data-model-proto="entries"]');
+await epage.waitForTimeout(900);
+await entryVideoCtx.close();
+const entryRaw = await entryVideo.path();
+const entryFlowVideo = path.join(ART, "model-entries-flow.webm");
+if (entryRaw && fs.existsSync(entryRaw)) {
+  fs.copyFileSync(entryRaw, entryFlowVideo);
+  check("动作入口连续录屏产出", fs.statSync(entryFlowVideo).size > 0, entryFlowVideo + "（" + Math.round(fs.statSync(entryFlowVideo).size / 1024) + " KB）");
+} else {
+  check("动作入口连续录屏产出", false, "video.path() 为空");
+}
+
 /* ── 6. 焦点顺序与键盘可用 ───────────────────────────────────────────────── */
 console.log(String.fromCharCode(10) + "可访问焦点顺序：");
+setStep("可访问焦点顺序");
 {
   const { ctx, page } = await openScenario(browser, "scenario=ready");
   await page.waitForSelector("[data-model-proto-item]");
@@ -626,31 +768,49 @@ const compare = {};
 
 async function captureCompare(kind) {
   const spec = COMPARE_SPECS[kind];
-  const ctx = await browser.newContext({ ...SHOT_OPTS });
-  const page = await ctx.newPage();
-  watch(page, "compare:" + kind);
-  await page.goto(BASE + "/?" + spec.query, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector(spec.root);
-  await page.waitForSelector(spec.row, { timeout: 25000 });
-  await scrollTo(page, spec.root);
-  await page.waitForTimeout(220);
-  const before = await page.evaluate(() =>
-    Array.from(document.querySelectorAll('[data-ds-comp="page-state"]')).map((el) => ({
-      kind: el.getAttribute("data-ds-kind"),
-      title: ((el.querySelector(".ds-page-state__title") || {}).textContent || "").trim(),
-    })),
+  const label = "基准对照 " + kind;
+  const checksBefore = checks.length;
+  const screenshotsBefore = screenshots.length;
+  await withRetries(
+    label,
+    SCENARIO_ATTEMPTS,
+    async () => {
+      const ctx = await browser.newContext({ ...SHOT_OPTS });
+      try {
+        const page = await ctx.newPage();
+        watch(page, "compare:" + kind);
+        await page.goto(BASE + "/?" + spec.query, { waitUntil: "domcontentloaded" });
+        await page.waitForSelector(spec.root);
+        await page.waitForSelector(spec.row, { timeout: 25000 });
+        await scrollTo(page, spec.root);
+        await page.waitForTimeout(220);
+        const before = await page.evaluate(() =>
+          Array.from(document.querySelectorAll('[data-ds-comp="page-state"]')).map((el) => ({
+            kind: el.getAttribute("data-ds-kind"),
+            title: ((el.querySelector(".ds-page-state__title") || {}).textContent || "").trim(),
+          })),
+        );
+        await page.click(spec.select);
+        await page.waitForSelector(spec.detail, { timeout: 25000 });
+        await scrollTo(page, spec.root);
+        await page.waitForTimeout(260);
+        const metrics = await measurePage(page, spec.vars);
+        const file = path.join(ART, "compare-" + kind + ".png");
+        await page.screenshot({ path: file });
+        compare[kind] = { screenshot: file, query: spec.query, pageStateBeforeSelect: before, metrics };
+        screenshots.push(file);
+        check("对照截图 compare-" + kind + " → " + spec.detail, true, file);
+      } finally {
+        await ctx.close().catch((e) => console.log("    · 关闭 context 时出错（已记录，不掩盖原错误）：" + ((e && e.message) || e)));
+      }
+    },
+    (attempt) => {
+      if (attempt > 1) console.log("  ↺ 回滚 " + label + " 上一次的部分断言 / 截图，整场景重跑（不跳过任何断言）");
+      checks.length = checksBefore;
+      screenshots.length = screenshotsBefore;
+      delete compare[kind];
+    },
   );
-  await page.click(spec.select);
-  await page.waitForSelector(spec.detail, { timeout: 25000 });
-  await scrollTo(page, spec.root);
-  await page.waitForTimeout(260);
-  const metrics = await measurePage(page, spec.vars);
-  const file = path.join(ART, "compare-" + kind + ".png");
-  await page.screenshot({ path: file });
-  compare[kind] = { screenshot: file, query: spec.query, pageStateBeforeSelect: before, metrics };
-  screenshots.push(file);
-  check("对照截图 compare-" + kind + " → " + spec.detail, true, file);
-  await ctx.close();
 }
 
 await captureCompare("model");
@@ -791,6 +951,7 @@ fs.writeFileSync(notesPath, notes.join(String.fromCharCode(10)));
 check("对照笔记 compare-notes.md 产出", fs.statSync(notesPath).size > 0, notesPath);
 
 /* ── 9. 全局断言：白名单命令 / 身份字段 / 网络 / console ─────────────────── */
+setStep("全局断言：白名单命令 / 身份字段 / 网络 / console");
 {
   const { ctx, page } = await openScenario(browser, "scenario=stream");
   await page.waitForSelector("[data-model-proto-item]");
@@ -804,7 +965,8 @@ check("对照笔记 compare-notes.md 产出", fs.statSync(notesPath).size > 0, n
   const commands = await page.evaluate(() => (window.__oaModelProbe ? window.__oaModelProbe.commands : []));
   const names = commands.map((c) => c.command);
   check("界面只发白名单命令", names.every((c) => MODEL_CONSOLE_COMMANDS.indexOf(c) >= 0), [...new Set(names)].join(", "));
-  for (const c of MODEL_PROTOCOL_COMMANDS) {
+  /* 本区块只跑协议表 / 详情 / manifest / 流式；四个动作入口在 §9b 单独驱动。 */
+  for (const c of ["protocol/list", "protocol/get", "manifest/get", "provider/callStream"]) {
     check("UI-5 区块真实发出 " + c, names.indexOf(c) >= 0, "count=" + names.filter((n) => n === c).length);
   }
   const identityKeys = ["userId", "role", "sessionRef", "appId"];
@@ -825,6 +987,68 @@ check("对照笔记 compare-notes.md 产出", fs.statSync(notesPath).size > 0, n
   await ctx.close();
 }
 
+/* ── 9b. 动作入口：命令 / 载荷白名单 / 身份与密钥字段 ─────────────────────── */
+setStep("动作入口：命令 / 载荷白名单 / 身份与密钥字段");
+{
+  const { ctx, page } = await openScenario(browser, "scenario=ready");
+  await scrollTo(page, '[data-model-proto="entries"]');
+  const act = async (field, value) => { await page.fill(field, value); };
+  await act('[data-model-entry-field="protocol-validate:protocol"]', '{"id":"probe","kind":"model"}');
+  await page.click('[data-model-entry-action="protocol-validate"]');
+  await page.waitForTimeout(350);
+  await act('[data-model-entry-field="protocol-save:kind"]', "model");
+  await act('[data-model-entry-field="protocol-save:protocol"]', '{"id":"probe","kind":"model"}');
+  /* 二次确认：确认前 / 取消 命令数 0；确认后正常发送（protocol/save 是写类入口）。 */
+  const saveCount = () =>
+    page.evaluate(() =>
+      window.__oaModelProbe ? window.__oaModelProbe.commands.filter((c) => c.command === "protocol/save").length : -1,
+    );
+  await page.click('[data-model-entry-action="protocol-save"]');
+  await page.waitForSelector("[data-model-entry-confirm]", { timeout: 5000 });
+  const beforeConfirm = await saveCount();
+  check("协议保存确认前不发命令", beforeConfirm === 0, "protocol/save=" + beforeConfirm);
+  const confirmText = await page.$eval("[data-model-entry-confirm]", (el) => el.textContent || "");
+  check("协议保存确认框说明写入本地协议库", /本地协议库/.test(confirmText), confirmText.slice(0, 140).replace(/\s+/g, " "));
+  await page.click("[data-model-entry-confirm-cancel]");
+  await page.waitForSelector("[data-model-entry-confirm]", { state: "detached", timeout: 5000 });
+  await page.waitForTimeout(200);
+  const afterCancelSave = await saveCount();
+  check("协议保存取消后命令数仍为 0", afterCancelSave === 0, "protocol/save=" + afterCancelSave);
+  await page.click('[data-model-entry-action="protocol-save"]');
+  await page.waitForSelector("[data-model-entry-confirm-submit]");
+  await page.click("[data-model-entry-confirm-submit]");
+  await page.waitForTimeout(350);
+  await act('[data-model-entry-field="image-generate:providerId"]', "prov_local");
+  await act('[data-model-entry-field="image-generate:model"]', "gpt-image");
+  await act('[data-model-entry-field="image-generate:prompt"]', "探针：画一只猫");
+  await page.click('[data-model-entry-action="image-generate"]');
+  await page.waitForTimeout(350);
+  await act('[data-model-entry-field="protocol-execute:providerId"]', "prov_local");
+  await act('[data-model-entry-field="protocol-execute:model"]', "gpt-image");
+  await act('[data-model-entry-field="protocol-execute:prompt"]', "探针：执行协议");
+  await page.click('[data-model-entry-action="protocol-execute"]');
+  await page.waitForTimeout(500);
+
+  const commands = await page.evaluate(() => window.__oaModelProbe.commands);
+  const entryCommands = ["protocol/validate", "protocol/save", "image/generate", "protocol/execute"];
+  for (const c of entryCommands) {
+    check("动作入口真实发出 " + c, commands.some((x) => x.command === c), "count=" + commands.filter((x) => x.command === c).length);
+  }
+  const keysOf = (c) => {
+    const call = commands.filter((x) => x.command === c).pop();
+    return call ? Object.keys(call.payload || {}).sort().join(",") : "";
+  };
+  check("protocol/validate 载荷只含 protocol", keysOf("protocol/validate") === "protocol", keysOf("protocol/validate"));
+  check("protocol/save 载荷只含 kind/protocol", keysOf("protocol/save") === "kind,protocol", keysOf("protocol/save"));
+  check("image/generate 载荷只含 providerId/model/prompt", keysOf("image/generate") === "model,prompt,providerId", keysOf("image/generate"));
+  check("protocol/execute 载荷只含 providerId/model/prompt", keysOf("protocol/execute") === "model,prompt,providerId", keysOf("protocol/execute"));
+  const offenders = commands.filter((c) =>
+    Object.keys(c.payload || {}).some((k) => ["userId", "role", "sessionRef", "appId", "secret", "credentialSecret"].indexOf(k) >= 0),
+  );
+  check("动作入口载荷不含身份字段与密钥字段", offenders.length === 0, JSON.stringify(offenders.slice(0, 2)));
+  await ctx.close();
+}
+
 check("无 console error", pageErrors.length === 0, pageErrors.slice(0, 3).join(" | "));
 check("无跨源 / 非本地网络请求", externalRequests.length === 0, externalRequests.slice(0, 3).join(" | "));
 
@@ -840,8 +1064,10 @@ const report = {
     os: os.type() + " " + os.release(),
     node: process.version,
     chromium: CHROMIUM,
+    chromiumSource: CHROMIUM_INFO.source,
     url: BASE,
     screenshotOptions: SHOT_OPTS,
+    timing: { scale: TIMEOUT_SCALE, source: SCALE_SOURCE, summary: timingSummary() },
   },
   fixture: {
     source: "主进程 protocol-engine repository / model-manifest-service（离线，与 IPC 同一份结构）",
@@ -852,6 +1078,7 @@ const report = {
   },
   screenshots,
   video: fs.existsSync(flowVideo) ? flowVideo : null,
+  entryVideo: fs.existsSync(entryFlowVideo) ? entryFlowVideo : null,
   compare: {
     condition: compareCondition,
     screenshots: { model: compare.model.screenshot, skill: compare.skill.screenshot },

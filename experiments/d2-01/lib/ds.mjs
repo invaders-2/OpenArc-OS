@@ -9,15 +9,16 @@ import path from "node:path";
 import os from "node:os";
 import http from "node:http";
 import { chromium } from "playwright";
+import { resolveChromium } from "../../lib/chromium.mjs";
 
 export const ROOT = path.resolve(import.meta.dirname, "../../..");
 export const ART = path.join(ROOT, "artifacts", "d2-01");
 export const DIST = path.join(ROOT, "dist");
 export const PORT = Number(process.env.OA_PORT || 5231);
 
-export const CHROMIUM =
-  process.env.OA_CHROMIUM ||
-  "/Users/wepingli/Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";
+// Chromium 解析优先级：OA_CHROMIUM → Playwright 官方 chromium → 系统 Google Chrome（见 experiments/lib/chromium.mjs）。
+const CHROMIUM_INFO = resolveChromium();
+export const CHROMIUM = CHROMIUM_INFO.path;
 
 export const VERDICT = {
   PASS: "PASS",

@@ -27,6 +27,8 @@ import "../../src/styles.css";
 const params = new URLSearchParams(location.search);
 const scenario = params.get("scenario") || "ready";
 const pageKind = params.get("page") || "model";
+/* UI-5b 动作入口的探针开关：慢调用用于进行中截图；entry-error 用于失败截图。 */
+const runMode = params.get("run") || "fast";
 
 /* ══════════════════════════════════════════════════════════════════════════
    真实 fixture（由 run-all.mjs 从主进程服务导出）
@@ -145,6 +147,8 @@ async function command(raw: any) {
         canManageOrganization: true,
       });
     case "credential/status":
+      /* ?scenario=nocred：供应商已启用但没有可用凭据（用于缺凭据提示截图）。 */
+      if (scenario === "nocred") return finish({ ok: true, configured: false, storeAvailable: true, manageable: true });
       return finish({ ok: true, configured: true, storeAvailable: true, manageable: true });
     case "model/test":
       return finish({ ok: true, reachable: true, credentialAccepted: true, inference: true, verifiedCapabilities: [] });
@@ -168,6 +172,25 @@ async function command(raw: any) {
     }
     case "provider/callStream":
       return finish(await callStream(payload));
+    /* ── UI-5b 动作入口（与 electron/provider-protocol-service.cjs 同形）── */
+    case "protocol/validate": {
+      if (scenario === "entry-error") return finish({ ok: false, error: "PROTOCOL_INVALID", issues: ["protocol.id 缺失", "workflows[0].submit 未定义"] });
+      return finish({ ok: true, protocol: payload.protocol });
+    }
+    case "protocol/save": {
+      if (scenario === "entry-error") return finish({ ok: false, error: "PROTOCOL_SAVE_REJECTED", detail: "同 id 已存在且内容冲突" });
+      return finish({ ok: true, entry: { kind: String(payload.kind || "model"), id: (payload.protocol && payload.protocol.id) || "custom", version: 1, hash: "sha256:probe" } });
+    }
+    case "image/generate": {
+      if (scenario === "entry-error") return finish({ ok: false, error: "CREDENTIAL_MISSING" });
+      if (runMode === "slow") await sleep(700);
+      return finish({ ok: true, requestId: "ireq_probe", images: [{ mime: "image/png", bytes: 128, saved: true }], snapshot: { providerId: payload.providerId, model: payload.model } });
+    }
+    case "protocol/execute": {
+      if (scenario === "entry-error") return finish({ ok: false, error: "PROTOCOL_EXECUTION_FAILED", detail: "（探针）工作流节点失败" });
+      if (runMode === "slow") await sleep(700);
+      return finish({ ok: true, requestId: "xreq_probe", taskId: "task_probe", outputs: [{ type: "image", count: 1 }], captures: [], snapshot: { providerId: payload.providerId, model: payload.model } });
+    }
     default:
       return finish({ ok: false, error: "MODEL_COMMAND_NOT_ALLOWED", detail: String(cmd) });
   }

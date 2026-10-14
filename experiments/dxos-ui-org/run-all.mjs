@@ -3,7 +3,7 @@
  *
  * 为什么不直接开产品 dist：本轮禁止执行 npm run build，dist 里还没有 UI-4 页面。
  * 这里用 esbuild（Vite 自带依赖）把**实验用挂载壳 harness.tsx**打成一份本地构建产物，
- * 再用本机 Chromium（路径复用 experiments 约定，可用 OA_CHROMIUM 覆盖）打开。
+ * 再用本机 Chromium（见 experiments/lib/chromium.mjs：OA_CHROMIUM → Playwright → 系统 Chrome）打开。
  * harness 的 DOM 与 src/main.tsx:2678 的 organization 分支一致（.window > GovernanceApp
  * 内部产出的 .split > .split-side + .split-main）。
  *
@@ -22,6 +22,19 @@ import os from "node:os";
 import http from "node:http";
 import { build } from "esbuild";
 import { chromium } from "playwright";
+import { resolveChromium, describeChromiumCandidates } from "../lib/chromium.mjs";
+import {
+  installCrashGuard,
+  registerCleanup,
+  setStep,
+  hardenPage,
+  timingSummary,
+  launchChromiumBounded,
+  withRetries,
+  SCENARIO_ATTEMPTS,
+  TIMEOUT_SCALE,
+  SCALE_SOURCE,
+} from "../lib/probe-timing.mjs";
 import { ALLOWED_PAYLOAD_KEYS, ORG_COMMANDS } from "../../src/governance/orgConsoleLogic.ts";
 
 const HERE = import.meta.dirname;
@@ -30,9 +43,14 @@ const ART = path.join(ROOT, "artifacts", "dxos-ui-org");
 const BUILD = path.join(ART, "build");
 const VIDEO_DIR = path.join(ART, "video");
 const PORT = Number(process.env.OA_ORG_PORT || 5262);
-const CHROMIUM =
-  process.env.OA_CHROMIUM ||
-  "/Users/wepingli/Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";
+// 解析优先级：OA_CHROMIUM → Playwright 官方 chromium → 系统 Google Chrome（见 experiments/lib/chromium.mjs）。
+const CHROMIUM_INFO = resolveChromium();
+const CHROMIUM = CHROMIUM_INFO.path;
+
+/* 高负载下等待会整体变慢；这里只放大等待与加重试，不改任何断言（见 experiments/lib/probe-timing.mjs）。 */
+installCrashGuard();
+setStep("初始化");
+console.log("探针时序加固：" + timingSummary());
 
 const checks = [];
 const pageErrors = [];
@@ -120,11 +138,12 @@ const server = http.createServer((req, res) => {
   res.end("not found");
 });
 await new Promise((resolve) => server.listen(PORT, "127.0.0.1", resolve));
+registerCleanup(() => new Promise((resolve) => server.close(resolve)));
 const BASE = "http://127.0.0.1:" + PORT;
 
 /* ── 3. 浏览器 ────────────────────────────────────────────────────────────── */
-if (!fs.existsSync(CHROMIUM)) {
-  console.error("Chromium 不存在：" + CHROMIUM + "（设置 OA_CHROMIUM 指向可用二进制）");
+if (!CHROMIUM) {
+  console.error("找不到可用 Chromium，已按优先级尝试：" + describeChromiumCandidates(CHROMIUM_INFO.candidates) + "（设置 OA_CHROMIUM 指向可用二进制）");
   server.close();
   process.exit(1);
 }
@@ -139,6 +158,8 @@ const SHOT_OPTS = {
 };
 
 function watch(page, label) {
+  /* 每个 page 都在这里统一加固：waitForSelector/goto/waitForFunction 按倍率放大并做有界重试。 */
+  hardenPage(page, label);
   page.on("console", (msg) => {
     if (msg.type() === "error") pageErrors.push(label + " console.error: " + msg.text());
   });
@@ -172,21 +193,41 @@ async function drain(page) {
   return cmds;
 }
 
-const browser = await chromium.launch({ executablePath: CHROMIUM });
+const browser = await launchChromiumBounded(chromium, { executablePath: CHROMIUM });
+registerCleanup(() => browser.close());
 const screenshots = [];
 
 /* ── 4. 状态截图 ─────────────────────────────────────────────────────────── */
 async function shoot(spec) {
-  const { ctx, page } = await openScenario(browser, spec.query, spec.narrow ? { viewport: { width: 640, height: 900 } } : null);
-  if (spec.setup) await spec.setup(page);
-  await page.waitForSelector(spec.expect, { timeout: 20000 });
-  await page.waitForTimeout(240);
-  const file = path.join(ART, spec.name + ".png");
-  await page.screenshot({ path: file });
-  screenshots.push(file);
-  await drain(page);
-  check("状态截图 " + spec.name + " → " + spec.expect, true, file);
-  await ctx.close();
+  const label = "场景 " + spec.name;
+  const checksBefore = checks.length;
+  const screenshotsBefore = screenshots.length;
+  const collectedBefore = collected.length;
+  await withRetries(
+    label,
+    SCENARIO_ATTEMPTS,
+    async () => {
+      const { ctx, page } = await openScenario(browser, spec.query, spec.narrow ? { viewport: { width: 640, height: 900 } } : null);
+      try {
+        if (spec.setup) await spec.setup(page);
+        await page.waitForSelector(spec.expect, { timeout: 20000 });
+        await page.waitForTimeout(240);
+        const file = path.join(ART, spec.name + ".png");
+        await page.screenshot({ path: file });
+        screenshots.push(file);
+        await drain(page);
+        check("状态截图 " + spec.name + " → " + spec.expect, true, file);
+      } finally {
+        await ctx.close().catch((e) => console.log("    · 关闭 context 时出错（已记录，不掩盖原错误）：" + ((e && e.message) || e)));
+      }
+    },
+    (attempt) => {
+      if (attempt > 1) console.log("  ↺ 回滚 " + label + " 上一次的部分断言 / 截图 / 命令记录，整场景重跑（不跳过任何断言）");
+      checks.length = checksBefore;
+      screenshots.length = screenshotsBefore;
+      collected.length = collectedBefore;
+    },
+  );
 }
 
 console.log(String.fromCharCode(10) + "状态截图：");
@@ -306,6 +347,7 @@ await shoot({
 
 /* ── 5. 主流程连续录屏 ───────────────────────────────────────────────────── */
 console.log(String.fromCharCode(10) + "主流程连续录屏：");
+setStep("主流程连续录屏");
 const videoCtx = await browser.newContext({
   viewport: { width: 1440, height: 900 },
   deviceScaleFactor: 1,
@@ -401,6 +443,7 @@ check("录屏流程发出的命令都属于白名单", videoCommands.every((c) =
 
 /* ── 6. 焦点顺序 ─────────────────────────────────────────────────────────── */
 console.log(String.fromCharCode(10) + "可访问焦点顺序：");
+setStep("可访问焦点顺序");
 {
   const { ctx, page } = await openScenario(browser, "scenario=ready");
   await page.waitForSelector("[data-org-users]");
@@ -436,6 +479,7 @@ console.log(String.fromCharCode(10) + "可访问焦点顺序：");
 
 /* ── 7. 二次确认（Dialog 焦点陷阱 + 取消不发命令 + 确认只发一次）──────────── */
 console.log(String.fromCharCode(10) + "删除类二次确认：");
+setStep("删除类二次确认");
 {
   const { ctx, page } = await openScenario(browser, "scenario=ready");
   await page.waitForSelector("[data-org-users]");
@@ -470,6 +514,7 @@ console.log(String.fromCharCode(10) + "删除类二次确认：");
 
 /* ── 8. 基准对照：组织治理 vs Skill 中心 ─────────────────────────────────── */
 console.log(String.fromCharCode(10) + "基准对照（组织治理 vs Skill 中心）：");
+setStep("基准对照（组织治理 vs Skill 中心）");
 const COMPARE_SPECS = {
   org: {
     query: "scenario=ready",
@@ -729,6 +774,7 @@ check("对照笔记 compare-notes.md 产出", fs.statSync(notesPath).size > 0, n
 
 /* ── 9. 全局边界断言 ─────────────────────────────────────────────────────── */
 console.log(String.fromCharCode(10) + "边界断言：");
+setStep("边界断言");
 {
   const { ctx, page } = await openScenario(browser, "scenario=ready&slow=1");
   await page.waitForSelector("[data-org-users]");
@@ -783,8 +829,10 @@ const report = {
     os: os.type() + " " + os.release(),
     node: process.version,
     chromium: CHROMIUM,
+    chromiumSource: CHROMIUM_INFO.source,
     url: BASE,
     screenshotOptions: SHOT_OPTS,
+    timing: { scale: TIMEOUT_SCALE, source: SCALE_SOURCE, summary: timingSummary() },
   },
   screenshots,
   video: fs.existsSync(flowVideo) ? flowVideo : null,

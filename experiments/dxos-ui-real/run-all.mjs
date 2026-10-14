@@ -38,6 +38,10 @@ const ROOT = path.resolve(HERE, "..", "..");
 const ART = path.join(ROOT, "artifacts", "dxos-ui-real");
 const SHOT = { width: 1440, height: 900, deviceScaleFactor: 2 };
 const AREA_TOP = 38;
+/* 渲染源：默认 dist/index.html（打包产物）；设置 OA_DEV_SERVER 时走 Vite 开发预览
+   （electron/main.cjs 明确支持的模式）。产物版本早于界面改动时，入口锚点只在源码里存在。 */
+const DEV_SERVER = process.env.OA_DEV_SERVER || null;
+const RENDERER_SOURCE = DEV_SERVER ? "vite-dev(" + DEV_SERVER + ")" : "dist/index.html";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const nowIso = () => new Date().toISOString();
@@ -224,6 +228,81 @@ const PAGES = [
   },
 ];
 
+/**
+ * 本轮新增入口的真实窗口留证（ready 场景 · light + dark 各一张）。
+ *   · 技能入口：技能文档分析（市场）、运行（媒体类）/ 保存与更新 / 工作区（已安装详情）；
+ *   · 任务四个写入口：新建任务 / 调用工具 / 跑项目 / ReAct 运行；
+ *   · 模型四个动作入口：协议校验 / 协议保存 / 图像生成 / 协议执行；
+ *   · MCP 工具聚合区（只读，数据来自 mcp/agentTools）。
+ * prepare 在对应页面已打开后就地准备（选技能行 / 切子视图 / 滚动到入口）；
+ * 锚点与区块必须真实出现在目标窗口里，否则该入口截图记 FAIL（不静默跳过）。
+ */
+const ENTRY_SPECS = [
+  {
+    pageId: "skills",
+    id: "entry-skill-detail",
+    windowLabel: "Skill 中心窗口",
+    anchor: "[data-skill-run-kind]",
+    blocks: ["[data-skill-run-kind]", "[data-skill-save-state]", "[data-skill-workspace-state]"],
+    note: "技能入口：运行（媒体运行）/ 保存与更新 / 工作区技能",
+    prepare: async (page) => {
+      await page.evaluate(function () {
+        const win = document.querySelector('section.window[aria-label="Skill 中心窗口"]');
+        const row = win && win.querySelector('[data-skill-id="probe_skill_one"]');
+        if (row) row.click();
+      });
+      await waitFor(async () => !!(await page.$('section.window[aria-label="Skill 中心窗口"] [data-skill-run-kind]')), 15000, 200);
+    },
+  },
+  {
+    pageId: "skills",
+    id: "entry-skill-analyze",
+    windowLabel: "Skill 中心窗口",
+    anchor: "[data-skill-analyze-state]",
+    blocks: ["[data-skill-analyze-state]"],
+    note: "技能入口：技能文档分析（skill/analyze）",
+    prepare: async (page) => {
+      await clickNavText(page, "Skill 中心窗口", "市场");
+      await waitFor(async () => !!(await page.$('section.window[aria-label="Skill 中心窗口"] [data-skill-analyze-state]')), 15000, 200);
+    },
+  },
+  {
+    pageId: "mcp",
+    id: "entry-mcp-aggregate",
+    windowLabel: "MCP 中心窗口",
+    anchor: "[data-mcp-aggregate-section]",
+    blocks: ["[data-mcp-aggregate-section]", "[data-mcp-aggregate-count]"],
+    note: "MCP 聚合区：工具聚合（只读，mcp/agentTools）",
+    prepare: async (page) => {
+      await waitFor(async () => !!(await page.$('section.window[aria-label="MCP 中心窗口"] [data-mcp-aggregate-section]')), 15000, 200);
+    },
+  },
+  {
+    pageId: "tasks",
+    id: "entry-task-writes",
+    windowLabel: "项目窗口",
+    anchor: "[data-task-entry]",
+    blocks: ["[data-task-entry]", '[data-task-entry="create"]', '[data-task-entry="tool-call"]', '[data-task-entry="project-run"]', '[data-task-entry="react-run"]'],
+    note: "任务四个写入口：新建任务 / 调用工具 / 跑项目 / ReAct 运行",
+    prepare: async (page) => {
+      await clickNavText(page, "项目窗口", "任务控制台");
+      await waitFor(async () => !!(await page.$('section.window[aria-label="项目窗口"] [data-task-entry]')), 15000, 200);
+    },
+  },
+  {
+    pageId: "model",
+    id: "entry-model-actions",
+    windowLabel: "系统设置窗口",
+    anchor: '[data-model-proto="entries"]',
+    blocks: ['[data-model-proto="entries"]', '[data-model-entry="protocol-validate"]', '[data-model-entry="protocol-save"]', '[data-model-entry="image-generate"]', '[data-model-entry="protocol-execute"]'],
+    note: "模型四个动作入口：协议校验 / 协议保存 / 图像生成 / 协议执行",
+    prepare: async (page) => {
+      await clickSelector(page, '.window[aria-label="系统设置窗口"] [data-settings-pane="model"]');
+      await waitFor(async () => !!(await page.$('section.window[aria-label="系统设置窗口"] [data-model-proto="entries"]')), 15000, 200);
+    },
+  },
+];
+
 function windowSelector(label) {
   return 'section.window[aria-label="' + label + '"]';
 }
@@ -250,6 +329,18 @@ async function clickNavText(page, windowLabel, text) {
     return false;
   }, { sel: windowSelector(windowLabel), text: text });
 }
+/** 把窗口内的入口锚点滚到可视区中部；返回锚点是否存在。 */
+async function scrollIntoView(page, winSel, anchorSel) {
+  return page.evaluate(function (arg) {
+    const win = document.querySelector(arg.win);
+    if (!win) return false;
+    const el = win.querySelector(arg.anchor);
+    if (!el) return false;
+    el.scrollIntoView({ block: "center", inline: "nearest" });
+    return true;
+  }, { win: winSel, anchor: anchorSel });
+}
+
 async function openApp(page, spec) {
   await clickSelector(page, '.dock-item[data-dock-id="' + spec.appId + '"]');
   return waitFor(async () => !!(await page.$(windowSelector(spec.windowLabel))), 12000, 200);
@@ -481,6 +572,7 @@ async function main() {
 
     console.log("\n========== 场景 " + label + " ==========");
     console.log("隔离 userData：" + userDataDir);
+    console.log("渲染源：" + RENDERER_SOURCE);
     console.log("启动：" + launchCommand);
 
     let child = null;
@@ -504,7 +596,13 @@ async function main() {
 
       browser = await chromium.connectOverCDP("http://127.0.0.1:" + port);
       const context = browser.contexts()[0];
-      const isUI = (p) => p.url().indexOf("index.html") >= 0;
+      const devBase = DEV_SERVER ? DEV_SERVER.replace(/[/]+$/, "") + "/" : null;
+      const isUI = (p) => {
+        const u = p.url();
+        if (u.indexOf("index.html") >= 0) return true;
+        if (devBase && (u === devBase || u.indexOf(devBase) === 0 || u === DEV_SERVER)) return true;
+        return false;
+      };
       const found = await waitFor(() => !!context.pages().find(isUI), 30000, 300);
       page = context.pages().find(isUI) || null;
       if (!found || !page) throw new Error("未找到真实界面页面：" + context.pages().map((p) => p.url()).join(" | "));
@@ -537,7 +635,7 @@ async function main() {
         return { url: location.href, readyState: document.readyState, innerWidth: innerWidth, innerHeight: innerHeight, devicePixelRatio: devicePixelRatio, gate: document.querySelector(".desktop") ? document.querySelector(".desktop").getAttribute("data-identity-gate") : null };
       });
       bridgeKeys = await page.evaluate(function () { return Object.keys(window.openarc); });
-      record("boot/" + label, "B1 · 真实 electron/main.cjs + preload.cjs + dist 渲染就绪", rendererReady, "readyState=complete + 25 键", JSON.stringify(windowInfo));
+      record("boot/" + label, "B1 · 真实 electron/main.cjs + preload.cjs + " + RENDERER_SOURCE + " 渲染就绪", rendererReady, "readyState=complete + 25 键", JSON.stringify(windowInfo));
       record("boot/" + label, "B2 · 桥面顶层键恰为 25", bridgeKeys.length === 25, 25, bridgeKeys.length + " → " + bridgeKeys.join(","));
       record("boot/" + label, "B3 · 视图钉到 1440×900 / deviceScaleFactor 2", windowInfo.innerWidth === 1440 && windowInfo.innerHeight === 900 && windowInfo.devicePixelRatio === 2, "1440x900@2", JSON.stringify(windowInfo));
 
@@ -556,6 +654,15 @@ async function main() {
 
       if (createData) {
         const skillSave = await callBridge(page, "skill", "skill/save", { skill: { id: "probe_skill_one", name: "探针技能一号", description: "真实窗口探针经 skill/save 创建的自定义技能", systemPrompt: "你是真实窗口探针创建的自定义技能。" } });
+        /* 技能文档分析入口只在「市场」页签有技能包时渲染；用产品自己的 export → import
+           把刚保存的技能做成一个真实技能包，不引入任何外部 ZIP 依赖。 */
+        const packExport = await callBridge(page, "skill", "skill/pack/export", { skillId: "probe_skill_one" });
+        const packBase64 = packExport.result && packExport.result.value ? packExport.result.value.base64 : null;
+        /* 用 skill/pack/install（会写技能包索引，市场页可见技能包）而不是 pack/import
+           （后者只注册包内技能、不产生技能包记录，市场页仍是空态）。 */
+        const packInstall = packBase64
+          ? await callBridge(page, "skill", "skill/pack/install", { archiveBase64: packBase64, sourceName: "probe-skill-pack.zip" })
+          : { result: null, ms: null };
         const mcpCreate = await callBridge(page, "mcp", "mcp/create", { name: "本机探针 MCP", transport: "http", location: "REMOTE_SERVICE", endpoint: { url: "http://127.0.0.1:9/probe" } });
         const projectCreate = await callBridge(page, "agent", "agent/project/create", { name: "真实窗口探针项目", rootNodeId: "probe-root" });
         const project = projectCreate.result && projectCreate.result.value && projectCreate.result.value.project;
@@ -565,6 +672,8 @@ async function main() {
         const providerCreate = await callBridge(page, "model", "provider/create", { displayName: "真实窗口探针 Provider", baseUrl: "http://127.0.0.1:9/v1", endpointScope: "LOCALHOST", scope: "PERSONAL" });
         const commands = [
           { id: "skill/save", ms: skillSave.ms, result: skillSave.result },
+          { id: "skill/pack/export", ms: packExport.ms, result: packExport.result },
+          { id: "skill/pack/install", ms: packInstall.ms, result: packInstall.result },
           { id: "mcp/create", ms: mcpCreate.ms, result: mcpCreate.result },
           { id: "agent/project/create", ms: projectCreate.ms, result: projectCreate.result },
           { id: "agent/task/create", ms: taskCreate.ms, result: taskCreate.result },
@@ -652,6 +761,45 @@ async function main() {
             const hit = banned.filter((w) => (metrics ? metrics.text : "").indexOf(w) >= 0);
             record("org/" + label + "/" + theme, "O · 组织治理页不出现 会员/权益/套餐/积分", hit.length === 0, "0 命中", JSON.stringify(hit));
             capture.orgBannedWords = hit;
+          }
+
+          /* 本轮新增入口：就地为每个入口截图（light / dark 各一张）。 */
+          if (createData) {
+            for (const entrySpec of ENTRY_SPECS.filter((e) => e.pageId === spec.id)) {
+              await entrySpec.prepare(page);
+              const scrolled = await scrollIntoView(page, windowSelector(spec.windowLabel), entrySpec.anchor);
+              await sleep(400);
+              const present = await page.evaluate(function (arg) {
+                const win = document.querySelector(arg.sel);
+                if (!win) return { anchor: false, blocks: [] };
+                return {
+                  anchor: !!win.querySelector(arg.anchor),
+                  blocks: arg.blocks.filter(function (s) { return !!win.querySelector(s); }),
+                };
+              }, { sel: windowSelector(spec.windowLabel), anchor: entrySpec.anchor, blocks: entrySpec.blocks });
+              const entryFile = path.join(ART, entrySpec.id + "-" + state + "-" + theme + ".png");
+              const entryDim = await shoot(cdp, entryFile);
+              const entryWindowText = await page.evaluate(function (sel) {
+                const win = document.querySelector(sel);
+                return win ? (win.innerText || "") : "";
+              }, windowSelector(spec.windowLabel));
+              const entryBody = await page.evaluate(function () { return document.body.innerText || ""; });
+              record("entry/" + label + "/" + theme, "E · " + entrySpec.note + " 在真实窗口可见（anchor " + entrySpec.anchor + "）", present.anchor && present.blocks.length === entrySpec.blocks.length, entrySpec.blocks.length + " 个区块", JSON.stringify(present));
+              record("entry-shot/" + label + "/" + theme, "E · " + entrySpec.id + " 截图像素 " + (SHOT.width * 2) + "x" + (SHOT.height * 2), entryDim.width === SHOT.width * 2 && entryDim.height === SHOT.height * 2, (SHOT.width * 2) + "x" + (SHOT.height * 2), entryDim.width + "x" + entryDim.height);
+              const entryBanned = ["会员", "权益"];
+              const entryHit = entryBanned.filter((w) => entryWindowText.indexOf(w) >= 0 || entryBody.indexOf(w) >= 0);
+              record("entry-banned/" + label + "/" + theme, "E · " + entrySpec.id + " 界面无「会员 / 权益」字样", entryHit.length === 0, "0 命中", JSON.stringify(entryHit));
+              record("entry-placeholder/" + label + "/" + theme, "E · " + entrySpec.id + " 页面无「尚未实现」占位", entryBody.indexOf("尚未实现") < 0, "无占位文案", "found=" + (entryBody.indexOf("尚未实现") >= 0));
+              captures.push({
+                scenario: label, state: state, theme: theme, pageId: entrySpec.id, entry: true,
+                title: entrySpec.note, windowLabel: spec.windowLabel, note: entrySpec.note,
+                topmost: await isTopmost(page, spec),
+                screenshot: path.relative(ROOT, entryFile), screenshotDims: entryDim,
+                metrics: null, settled: present.anchor,
+                diagnostics: { anchor: entrySpec.anchor, scrolled: scrolled, blocks: present.blocks },
+                bodyTextLength: entryBody.length, windowText: entryWindowText.slice(0, 6000),
+              });
+            }
           }
         }
       }
@@ -790,6 +938,10 @@ async function main() {
       viewport: { width: SHOT.width, height: SHOT.height },
       deviceScaleFactor: SHOT.deviceScaleFactor,
       screenshotPixels: { width: SHOT.width * 2, height: SHOT.height * 2 },
+      rendererSource: RENDERER_SOURCE,
+      rendererSourceNote: DEV_SERVER
+        ? "本次用 electron/main.cjs 明确支持的 OA_DEV_SERVER 开发预览模式（Vite 直接服务源码），因为 dist 打包产物早于本轮界面改动、不含新入口锚点；未执行任何构建。"
+        : "打包产物 dist/index.html（electron/main.cjs 默认路径）。",
       mechanism: "CDP Emulation.setDeviceMetricsOverride（与 Chromium 探针 newContext({viewport,deviceScaleFactor}) 同条件）+ page.emulateMedia({reducedMotion:'reduce'})",
       appReducedMotion: true,
       themes: ["light", "dark"],

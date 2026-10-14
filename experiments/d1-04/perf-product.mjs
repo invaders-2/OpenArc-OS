@@ -40,6 +40,7 @@
 // 结论看 p95 与 >33ms 长帧数，**不看平均 fps**（p50 被 120Hz vsync 截平）。
 
 import { chromium } from "playwright";
+import { resolveChromium, describeChromiumCandidates } from "../lib/chromium.mjs";
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
@@ -47,9 +48,13 @@ import os from "node:os";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
 const PORT = Number(process.env.OA_PORT || 5219);
-const EXEC =
-  process.env.OA_CHROMIUM ||
-  "/Users/wepingli/Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";
+// Chromium 解析优先级：OA_CHROMIUM → Playwright 官方 chromium → 系统 Google Chrome（见 experiments/lib/chromium.mjs）。
+const CHROMIUM_INFO = resolveChromium();
+const EXEC = CHROMIUM_INFO.path;
+if (!EXEC) {
+  console.error("找不到可用 Chromium，已按优先级尝试：" + describeChromiumCandidates(CHROMIUM_INFO.candidates) + "（设置 OA_CHROMIUM 指向可用二进制）");
+  process.exit(1);
+}
 
 const THEME = process.env.OA_THEME === "light" ? "light" : "dark";
 const KS = (process.env.OA_KS || "0,24,72,144").split(",").map(Number);
@@ -251,7 +256,11 @@ const selectTier = async (page, tier, expectSynth) => {
   const s = await page.evaluate(() => {
     const d = document.querySelector(".desktop");
     const w = document.querySelector(".window");
-    const t = document.querySelector(".window-title");
+    // 取**第一个非分栏窗口**的标题条：REDUCED 的薄玻璃只给非分栏窗口
+    // （src/styles.css 的 `.window:not(:has(.split)) .window-title`，提交 4f15a07
+    // 刻意排除分栏窗口——它的标题条窄、压在侧栏上，上材质会在红绿灯下多出一块底框）。
+    // 本脚本 setup 打开的第一个窗口是应用中心（.split），用它会量到 none。
+    const t = document.querySelector(".window:not(:has(.split)) .window-title");
     const probe = document.querySelector(".oa-synth");
     return {
       dataGlass: d?.dataset.glass ?? null,
@@ -362,31 +371,49 @@ const stats = (f) => {
   };
 };
 
-const drag = async (page, box, timed) => {
+// 拖动**目标窗口**做合成压力测试。
+//
+// 每次起手前必须重新量一次目标窗口的 boundingBox：窗口被拖走后位置就变了，
+// 沿用上一次量到的坐标，pointerdown 会落到"窗口移开后露出来的下层窗口"上。
+// 窗口把 pointerdown 解释成聚焦/置顶是产品既有语义（见 components.tsx 的
+// onPointerDown），所以这是探针取点错了，不是产品缺陷：
+// 实测设置窗口第一遍拖动后从 (164,136) 移到 (126,156)，第二遍仍按旧坐标
+// (364,154) 起手 → 该点在设置窗口新顶边之上 → 命中资源库窗口标题栏 →
+// 资源库被置顶抢走焦点 → 下一次 selectTier 点「降低材质」被它拦截。
+const drag = async (page, target, timed) => {
+  const boxOf = () => (typeof target === "function" ? target() : target.boundingBox());
   // 预热一遍完整轨迹：不预热会采到"首次进入拖动 + 合成器预热"的长帧，
   // 那不是材质成本而是冷启动噪声。
-  await page.mouse.move(box.x + 200, box.y + 18);
+  const warm = await boxOf();
+  await page.mouse.move(warm.x + 200, warm.y + 18);
   await page.mouse.down();
   for (let i = 0; i < 40; i++) {
     await page.mouse.move(
-      box.x + 200 + Math.sin(i / 4) * 120,
-      box.y + 18 + (i % 7) * 5
+      warm.x + 200 + Math.sin(i / 4) * 120,
+      warm.y + 18 + (i % 7) * 5
     );
     await page.waitForTimeout(12);
   }
+  // 轨迹两端不对称（sin(39/4)·120 ≈ -38，y 多 +20），直接抬起会把窗口每趟
+  // 往左下推固定一段；多趟之后材质按钮会滑到 Dock 下面/视口外，selectTier 就点不到
+  // （K=24 第 10 次时 window.y≈536，按钮中心≈834 落进 Dock）。抬手前先回到起点，
+  // 让窗口原地受力——拖拽压力测试要的是"不动窗口位置地在同一块区域反复拖"。
+  await page.mouse.move(warm.x + 200, warm.y + 18);
   await page.mouse.up();
   await page.waitForTimeout(200);
 
-  await page.mouse.move(box.x + 200, box.y + 18);
+  const run = await boxOf();
+  await page.mouse.move(run.x + 200, run.y + 18);
   await page.mouse.down();
   const pr = timed ? measure(page) : null;
   for (let i = 0; i < 40; i++) {
     await page.mouse.move(
-      box.x + 200 + Math.sin(i / 4) * 120,
-      box.y + 18 + (i % 7) * 5
+      run.x + 200 + Math.sin(i / 4) * 120,
+      run.y + 18 + (i % 7) * 5
     );
     await page.waitForTimeout(12);
   }
+  await page.mouse.move(run.x + 200, run.y + 18);
   const frames = pr ? await pr : null;
   await page.mouse.up();
   return frames;
@@ -415,7 +442,7 @@ for (const k of KS) {
   await setup(page, "full");
   await addSynth(page, k, LAYOUT);
   await page.waitForTimeout(400);
-  const box = await page.locator(".window").last().boundingBox();
+  const target = page.locator(".window").last();
   const perTier = { full: [], reduced: [], solid: [] };
   const filtByTier = {}; // D1-04C：每档的过滤面数 / 过滤面积
 
@@ -431,7 +458,7 @@ for (const k of KS) {
         await setup(p, tier);
         await addSynth(p, k, LAYOUT);
         await p.waitForTimeout(400);
-        const b = await p.locator(".window").last().boundingBox();
+        const target = p.locator(".window").last();
         const st0 = await selectTier(p, tier, k > 0);
         if (r === 0) {
           filtByTier[tier] = await measureFiltered(p);
@@ -448,7 +475,7 @@ for (const k of KS) {
             surfaceAlpha: st0.surfAlpha,
           });
         }
-        const frames = await drag(p, b, true);
+        const frames = await drag(p, target, true);
         const st = stats(frames);
         perTier[tier].push(st);
         out.rounds.push({ panes: k, round: r, tier, mode: "cold", ...st });
@@ -465,7 +492,7 @@ for (const k of KS) {
     // 伪造出档位差异（实测 K=72 首轮 mean 20.0ms、后续轮 8.3ms）。
     for (const tier of TIERS) {
       await selectTier(page, tier, k > 0);
-      await drag(page, box, false);
+      await drag(page, target, false);
     }
     await page.waitForTimeout(300);
 
@@ -487,7 +514,7 @@ for (const k of KS) {
             surfaceAlpha: s.surfAlpha,
           });
         }
-        const frames = await drag(page, box, true);
+        const frames = await drag(page, target, true);
         const st = stats(frames);
         perTier[tier].push(st);
         out.rounds.push({ panes: k, round: r, tier, mode: "warm", ...st });

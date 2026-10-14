@@ -2,7 +2,7 @@
  * UI-2 · MCP 中心（B4 工具聚合 + 设计系统一致性修正）Playwright 探针。
  *
  * 复用 UI-1（experiments/dxos-ui-skills）的 harness 方式：esbuild 打本地探针产物 →
- * 本地静态服务 → Playwright（OA_CHROMIUM 可覆盖）→ 截图 / 连续录屏 / 断言。
+ * 本地静态服务 → Playwright（Chromium 按 experiments/lib/chromium.mjs 解析：OA_CHROMIUM → Playwright → 系统 Chrome）→ 截图 / 连续录屏 / 断言。
  * 探针全程离线：假 mcp 桥只做内存 switch，不发网络请求、不读凭据、不写 localStorage。
  *
  * 覆盖：加载 / 空 / 错误 / 就绪 + 工具清单非空 + 长列表滚动（ScrollArea 生效）
@@ -18,6 +18,19 @@ import http from "node:http";
 import { execFileSync } from "node:child_process";
 import { build } from "esbuild";
 import { chromium } from "playwright";
+import { resolveChromium, describeChromiumCandidates } from "../lib/chromium.mjs";
+import {
+  installCrashGuard,
+  registerCleanup,
+  setStep,
+  hardenPage,
+  timingSummary,
+  launchChromiumBounded,
+  withRetries,
+  SCENARIO_ATTEMPTS,
+  TIMEOUT_SCALE,
+  SCALE_SOURCE,
+} from "../lib/probe-timing.mjs";
 
 const HERE = import.meta.dirname;
 const ROOT = path.resolve(HERE, "../..");
@@ -26,12 +39,17 @@ const BUILD = path.join(ART, "build");
 const BEFORE_DIR = path.join(BUILD, "before");
 const VIDEO_DIR = path.join(ART, "video");
 const PORT = Number(process.env.OA_MCP_PORT || 5252);
-const CHROMIUM =
-  process.env.OA_CHROMIUM ||
-  "/Users/wepingli/Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";
+// 解析优先级：OA_CHROMIUM → Playwright 官方 chromium → 系统 Google Chrome（见 experiments/lib/chromium.mjs）。
+const CHROMIUM_INFO = resolveChromium();
+const CHROMIUM = CHROMIUM_INFO.path;
 /* UI-2 起点的基线提交：改前源码与基线 CSS 都从这里取，保证改前/改后同设定可复现。 */
 const BASELINE_SHA = process.env.OA_MCP_BASELINE_SHA || "d805943";
 const NL = String.fromCharCode(10);
+
+/* 高负载下等待会整体变慢；这里只放大等待与加重试，不改任何断言（见 experiments/lib/probe-timing.mjs）。 */
+installCrashGuard();
+setStep("初始化");
+console.log("探针时序加固：" + timingSummary());
 
 const checks = [];
 const screenshots = [];
@@ -68,6 +86,10 @@ import "../../src/styles.css";
 const params = new URLSearchParams(location.search);
 const scenario = params.get("scenario") || "ready";
 const many = params.get("tools") === "many";
+/* 只读聚合的三个探针开关：全部走内存 switch，不碰网络。 */
+const toolsError = params.get("toolsError") === "1";
+const toolsLoading = params.get("toolsLoading") === "1";
+const toolsEnabled = params.get("toolsEnabled") === "1";
 const NOW = Date.parse("2026-01-05T09:00:00Z");
 
 const BASE_TOOLS = [
@@ -220,6 +242,45 @@ const LOGS = [
 const probe = { page: "mcp", scenario: scenario, many: many, commands: [] };
 window.__oaMcpProbe = probe;
 
+/* ── 假后端：mcp/agentTools 的聚合（镜像 electron/mcp-agent-tools.cjs + mcp-bootstrap.cjs）──
+   界面这一轮不再派生聚合，所以探针必须在**假后端**里算出与主进程相同的字段契约。 */
+function safeName(v) { return String(v == null ? "" : v).replace(/[^a-zA-Z0-9_-]/g, "_"); }
+function paramSummary(summary) {
+  const text = typeof summary === "string" ? summary.trim() : "";
+  if (!text) return "未返回参数摘要（服务端未提供 inputSchema）";
+  if (/properties:\\s*none/.test(text)) return text + "（参数为空对象）";
+  return text;
+}
+function collectAgentTools(serverId) {
+  const seen = new Set();
+  const tools = [];
+  let connectedServers = 0;
+  for (const c of CONNECTIONS) {
+    if (c.enabled === false) continue;
+    if (c.status !== "READY" && c.status !== "connected") continue;
+    connectedServers += 1;
+    if (serverId && String(c.connectionId) !== String(serverId)) continue;
+    for (const t of (Array.isArray(c.tools) ? c.tools : [])) {
+      if (!t || !t.name) continue;
+      const fname = "mcp__" + safeName(c.connectionId) + "__" + safeName(t.name);
+      if (seen.has(fname)) continue;
+      seen.add(fname);
+      tools.push({
+        fname: fname,
+        serverId: String(c.connectionId),
+        serverName: String(c.name || ""),
+        toolName: String(t.name),
+        status: String(c.status || ""),
+        description: typeof t.description === "string" ? t.description : "",
+        paramText: paramSummary(t.inputSchemaSummary),
+        riskClass: "EXTERNAL_SIDE_EFFECT",
+        requiresApproval: true,
+      });
+    }
+  }
+  return { tools: tools, connectedServers: connectedServers };
+}
+
 async function command(raw) {
   const cmd = raw && raw.command;
   const payload = (raw && raw.payload) || {};
@@ -236,6 +297,15 @@ async function command(raw) {
     return found ? { ok: true, connection: found } : { ok: false, error: "MCP_CONNECTION_NOT_FOUND" };
   }
   if (cmd === "mcp/testLog") return { ok: true, items: LOGS };
+  if (cmd === "mcp/agentTools") {
+    if (toolsLoading) return new Promise(function () {});
+    if (toolsError) {
+      return { ok: false, error: "MCP_TOOL_DISCOVERY_FAILED", detail: "mcp-agent-tools-unavailable", tools: [], count: 0, connectedServers: 0, enabled: false, truncated: false };
+    }
+    const all = collectAgentTools(null);
+    const scoped = payload && payload.serverId ? collectAgentTools(payload.serverId) : all;
+    return { ok: true, enabled: toolsEnabled, count: scoped.tools.length, connectedServers: all.connectedServers, truncated: false, tools: scoped.tools };
+  }
   return { ok: false, error: "MCP_COMMAND_NOT_ALLOWED" };
 }
 
@@ -371,11 +441,12 @@ const server = http.createServer(function (req, res) {
   res.end("not found");
 });
 await new Promise(function (resolve) { server.listen(PORT, "127.0.0.1", resolve); });
+registerCleanup(() => new Promise((resolve) => server.close(resolve)));
 const BASE = "http://127.0.0.1:" + PORT;
 
 /* ── 4. 浏览器 ──────────────────────────────────────────────────────────── */
-if (!fs.existsSync(CHROMIUM)) {
-  console.error("Chromium 不存在：" + CHROMIUM + "（设置 OA_CHROMIUM 指向可用二进制）");
+if (!CHROMIUM) {
+  console.error("找不到可用 Chromium，已按优先级尝试：" + describeChromiumCandidates(CHROMIUM_INFO.candidates) + "（设置 OA_CHROMIUM 指向可用二进制）");
   server.close();
   process.exit(1);
 }
@@ -389,6 +460,8 @@ const SHOT_OPTS = {
 };
 
 function watch(page, label) {
+  /* 每个 page 都在这里统一加固：waitForSelector/goto 按倍率放大并做有界重试。 */
+  hardenPage(page, label);
   page.on("console", function (msg) {
     if (msg.type() === "error") pageErrors.push(label + " console.error: " + msg.text());
   });
@@ -409,7 +482,8 @@ function watch(page, label) {
   });
 }
 
-const browser = await chromium.launch({ executablePath: CHROMIUM });
+const browser = await launchChromiumBounded(chromium, { executablePath: CHROMIUM });
+registerCleanup(() => browser.close());
 
 async function openProbe(opts) {
   const ctx = await browser.newContext(Object.assign({}, SHOT_OPTS, opts.opts || {}));
@@ -422,20 +496,37 @@ async function openProbe(opts) {
 }
 
 async function shoot(name, spec) {
-  const opened = await openProbe({
-    query: spec.query,
-    before: !!spec.before,
-    opts: spec.narrow ? { viewport: { width: 640, height: 900 } } : null,
-  });
-  const page = opened.page;
-  if (spec.setup) await spec.setup(page);
-  await page.waitForSelector(spec.expect, { timeout: 15000 });
-  await page.waitForTimeout(220);
-  const file = path.join(ART, name + ".png");
-  await page.screenshot({ path: file });
-  screenshots.push(file);
-  check("状态截图 " + name + " → " + spec.expect, true, file);
-  await opened.ctx.close();
+  const label = "场景 " + name;
+  const checksBefore = checks.length;
+  const screenshotsBefore = screenshots.length;
+  await withRetries(
+    label,
+    SCENARIO_ATTEMPTS,
+    async () => {
+      const opened = await openProbe({
+        query: spec.query,
+        before: !!spec.before,
+        opts: spec.narrow ? { viewport: { width: 640, height: 900 } } : null,
+      });
+      try {
+        const page = opened.page;
+        if (spec.setup) await spec.setup(page);
+        await page.waitForSelector(spec.expect, { timeout: 15000 });
+        await page.waitForTimeout(220);
+        const file = path.join(ART, name + ".png");
+        await page.screenshot({ path: file });
+        screenshots.push(file);
+        check("状态截图 " + name + " → " + spec.expect, true, file);
+      } finally {
+        await opened.ctx.close().catch((e) => console.log("    · 关闭 context 时出错（已记录，不掩盖原错误）：" + ((e && e.message) || e)));
+      }
+    },
+    (attempt) => {
+      if (attempt > 1) console.log("  ↺ 回滚 " + label + " 上一次的部分断言 / 截图，整场景重跑（不跳过任何断言）");
+      checks.length = checksBefore;
+      screenshots.length = screenshotsBefore;
+    },
+  );
 }
 
 /* ── 5. 状态截图（同一主题 / 窗口 / 缩放 / reducedMotion）───────────────── */
@@ -458,6 +549,7 @@ await shoot("08-detail-ready", {
 
 /* ── 6. 工具聚合正确性 + 产品边界 ──────────────────────────────────────── */
 console.log(NL + "工具聚合与产品边界：");
+setStep("工具聚合与产品边界");
 const fnameRe = new RegExp("^mcp__[A-Za-z0-9_-]+__[A-Za-z0-9_-]+$");
 {
   const opened = await openProbe({ query: "scenario=ready" });
@@ -472,6 +564,8 @@ const fnameRe = new RegExp("^mcp__[A-Za-z0-9_-]+__[A-Za-z0-9_-]+$");
         name: (r.querySelector("[data-mcp-aggregate-name]") || {}).textContent,
         desc: (r.querySelector("[data-mcp-aggregate-desc]") || {}).textContent,
         params: (r.querySelector("[data-mcp-aggregate-params]") || {}).textContent,
+        risk: r.getAttribute("data-mcp-aggregate-risk"),
+        approval: r.getAttribute("data-mcp-aggregate-approval"),
       };
     });
   });
@@ -488,8 +582,27 @@ const fnameRe = new RegExp("^mcp__[A-Za-z0-9_-]+__[A-Za-z0-9_-]+$");
   const blank = rows.filter(function (r) { return r.fname === "mcp__conn_local_echo__blank"; })[0] || null;
   check("参数摘要为空对象时如实标注", !!noop && String(noop.params).indexOf("参数为空对象") >= 0, noop ? noop.params : "缺 noop");
   check("未返回参数摘要时如实标注", !!blank && String(blank.params).indexOf("未返回参数摘要") >= 0, blank ? blank.params : "缺 blank");
+  const echoRow = rows.filter(function (r) { return r.fname === "mcp__conn_local_echo__echo"; })[0] || null;
+  check(
+    "参数摘要原文逐字透传（第三种文案）",
+    !!echoRow && String(echoRow.params) === "type=object; properties: text:string(required)",
+    echoRow ? echoRow.params : "缺 echo",
+  );
   const boundary = await page.$eval("[data-mcp-aggregate-boundary]", function (el) { return el.textContent || ""; });
-  check("产品边界显式标注（不开放工具调用）", boundary.indexOf("不开放工具调用") >= 0 && boundary.indexOf("MCP_TOOL_INVOCATION_NOT_ENABLED") >= 0, boundary.slice(0, 80));
+  check("产品边界显式标注（不提供调用入口 / 调用走审批）", boundary.indexOf("不提供") >= 0 && boundary.indexOf("审批") >= 0, boundary.slice(0, 80));
+  check(
+    "每条聚合行带外部风险等级与审批要求（字段来自主进程）",
+    rows.every(function (r) { return r.risk === "EXTERNAL_SIDE_EFFECT" && r.approval === "true"; }),
+    JSON.stringify(rows.slice(0, 2).map(function (r) { return { risk: r.risk, approval: r.approval }; })),
+  );
+  const invocation = await page.$eval("[data-mcp-aggregate-invocation]", function (el) {
+    return { text: el.textContent || "", enabled: el.getAttribute("data-mcp-aggregate-enabled") };
+  });
+  check(
+    "默认关闭时明确提示“工具调用默认关闭”及其含义",
+    invocation.enabled === "false" && invocation.text.indexOf("工具调用默认关闭") >= 0 && invocation.text.indexOf("审批") >= 0,
+    JSON.stringify(invocation).slice(0, 180),
+  );
   const invoke = await page.evaluate(function () {
     const re = new RegExp("调用工具|运行工具|执行工具|调用$");
     const els = Array.prototype.slice.call(document.querySelectorAll('button, [role="button"], a'));
@@ -502,7 +615,7 @@ const fnameRe = new RegExp("^mcp__[A-Za-z0-9_-]+__[A-Za-z0-9_-]+$");
   await page.click('.mcp-row[data-mcp-connection="conn_local_echo"]');
   await page.waitForSelector("[data-mcp-detail]");
   const cmds = await page.evaluate(function () { return window.__oaMcpProbe.commands.map(function (c) { return c.command; }); });
-  const allowed = ["mcp/list", "mcp/get", "mcp/testLog"];
+  const allowed = ["mcp/list", "mcp/get", "mcp/testLog", "mcp/agentTools"];
   check("界面只发白名单命令", cmds.every(function (c) { return allowed.indexOf(c) >= 0; }), cmds.join(","));
   const payloadKeys = await page.evaluate(function () {
     return window.__oaMcpProbe.commands.reduce(function (acc, c) { return acc.concat(Object.keys(c.payload || {})); }, []);
@@ -510,11 +623,63 @@ const fnameRe = new RegExp("^mcp__[A-Za-z0-9_-]+__[A-Za-z0-9_-]+$");
   check("上行载荷不含身份字段", payloadKeys.every(function (k) { return ["userId", "role", "sessionRef", "appId"].indexOf(k) < 0; }), payloadKeys.join(","));
   const lsLen = await page.evaluate(function () { return localStorage.length; });
   check("未写 localStorage", lsLen === 0, "length=" + lsLen);
+  const aggCalls = await page.evaluate(function () {
+    return window.__oaMcpProbe.commands.filter(function (c) { return c.command === "mcp/agentTools"; });
+  });
+  check(
+    "聚合命令载荷只含 serverId / search",
+    aggCalls.length >= 1 && aggCalls.every(function (c) {
+      return Object.keys(c.payload || {}).every(function (k) { return k === "serverId" || k === "search"; });
+    }),
+    JSON.stringify(aggCalls.slice(0, 2)),
+  );
+  const scopeBtn = await page.$("[data-mcp-aggregate-scope]");
+  check("选中连接后提供“只看该连接”的范围入口", scopeBtn !== null);
+  if (scopeBtn) {
+    await page.click("[data-mcp-aggregate-scope]");
+    await page.waitForSelector("[data-mcp-aggregate-scope-label]");
+    const scopeCalls = await page.evaluate(function () {
+      return window.__oaMcpProbe.commands.filter(function (c) {
+        return c.command === "mcp/agentTools" && c.payload && c.payload.serverId;
+      });
+    });
+    check(
+      "范围查询用 serverId（agentToolsForServer）",
+      scopeCalls.length >= 1 && scopeCalls[scopeCalls.length - 1].payload.serverId === "conn_local_echo",
+      JSON.stringify(scopeCalls.slice(-1)),
+    );
+    const scopedServers = await page.$$eval("[data-mcp-aggregate-row]", function (els) {
+      return els.map(function (el) { return el.getAttribute("data-mcp-aggregate-server"); });
+    });
+    check(
+      "范围结果只含该连接的工具",
+      scopedServers.length > 0 && scopedServers.every(function (s) { return s === "conn_local_echo"; }),
+      JSON.stringify(Array.from(new Set(scopedServers))),
+    );
+  }
   await opened.ctx.close();
 }
 
+/* ── 6b. 新增入口的状态截图（默认关闭 / 开关开启 / 依赖缺失 / 进行中 / 范围）── */
+console.log(NL + "工具聚合入口状态截图：");
+setStep("工具聚合入口状态截图");
+await shoot("09-aggregate-tools-off", { query: "scenario=ready", expect: '[data-mcp-aggregate-invocation][data-mcp-aggregate-enabled="false"]' });
+await shoot("10-aggregate-tools-on", { query: "scenario=ready&toolsEnabled=1", expect: '[data-mcp-aggregate-invocation][data-mcp-aggregate-enabled="true"]' });
+await shoot("11-aggregate-dependency", { query: "scenario=ready&toolsError=1", expect: '[data-mcp-aggregate-error][data-mcp-aggregate-error-code="MCP_TOOL_DISCOVERY_FAILED"]' });
+await shoot("12-aggregate-loading", { query: "scenario=ready&toolsLoading=1", expect: '[data-mcp-aggregate-section][data-mcp-aggregate-state="loading"]' });
+await shoot("13-aggregate-scope", {
+  query: "scenario=ready",
+  expect: "[data-mcp-aggregate-scope-label]",
+  setup: async function (page) {
+    await page.click('.mcp-row[data-mcp-connection="conn_local_echo"]');
+    await page.waitForSelector("[data-mcp-aggregate-scope]");
+    await page.click("[data-mcp-aggregate-scope]");
+  },
+});
+
 /* ── 7. ScrollArea（设计系统一致性修正 b）与滚动能力 ───────────────────── */
 console.log(NL + "ScrollArea（一致性修正 b）与长列表滚动：");
+setStep("ScrollArea（一致性修正 b）与长列表滚动");
 {
   const opened = await openProbe({ query: "scenario=ready&tools=many" });
   const page = opened.page;
@@ -572,6 +737,7 @@ console.log(NL + "ScrollArea（一致性修正 b）与长列表滚动：");
 
 /* ── 8. 窄宽 640 不溢出 ────────────────────────────────────────────────── */
 console.log(NL + "窄宽 640：");
+setStep("窄宽 640");
 {
   const opened = await openProbe({ query: "scenario=ready", opts: { viewport: { width: 640, height: 900 } } });
   const page = opened.page;
@@ -595,6 +761,7 @@ console.log(NL + "窄宽 640：");
 
 /* ── 9. 可访问焦点顺序 ────────────────────────────────────────────────── */
 console.log(NL + "可访问焦点顺序：");
+setStep("可访问焦点顺序");
 {
   const opened = await openProbe({ query: "scenario=ready" });
   const page = opened.page;
@@ -629,6 +796,7 @@ console.log(NL + "可访问焦点顺序：");
 
 /* ── 9b. 减少动态效果（MOTION_SYSTEM §8）──────────────────────────────── */
 console.log(NL + "减少动态效果：");
+setStep("减少动态效果");
 {
   const opened = await openProbe({ query: "scenario=ready" });
   const page = opened.page;
@@ -651,6 +819,7 @@ console.log(NL + "减少动态效果：");
 
 /* ── 10. 设计系统一致性修正：改前 / 改后同设定对照 ─────────────────────── */
 console.log(NL + "设计系统一致性修正：改前 / 改后同设定对照：");
+setStep("设计系统一致性修正：改前 / 改后同设定对照");
 async function capture(before) {
   const opened = await openProbe({ query: "scenario=ready", before: before });
   const page = opened.page;
@@ -699,6 +868,7 @@ check("改后新增 B4 工具聚合区块", afterCap.metric.aggregatePresent ===
 
 /* ── 11. 主流程连续录屏 ───────────────────────────────────────────────── */
 console.log(NL + "主流程连续录屏：");
+setStep("主流程连续录屏");
 const videoCtx = await browser.newContext({
   viewport: { width: 1440, height: 900 },
   deviceScaleFactor: 1,
@@ -721,7 +891,16 @@ await vpage.evaluate(function () { const el = document.querySelector(".mcp-detai
 await vpage.waitForTimeout(700);
 await vpage.click('.mcp-row[data-mcp-connection="conn_remote_docs"]');
 await vpage.waitForSelector("[data-mcp-detail-name]");
-await vpage.waitForTimeout(900);
+await vpage.waitForTimeout(700);
+/* 新增入口：刷新聚合 → 只看该连接 → 回到全部。 */
+await vpage.click("[data-mcp-aggregate-reload]");
+await vpage.waitForTimeout(500);
+await vpage.click("[data-mcp-aggregate-scope]");
+await vpage.waitForSelector("[data-mcp-aggregate-scope-label]");
+await vpage.waitForTimeout(700);
+await vpage.click("[data-mcp-aggregate-scope-clear]");
+await vpage.waitForSelector("[data-mcp-aggregate-scope]", { timeout: 10000 }).catch(function () {});
+await vpage.waitForTimeout(600);
 await videoCtx.close();
 const rawVideo = await video.path();
 const flowVideo = path.join(ART, "mcp-center-flow.webm");
@@ -730,6 +909,44 @@ if (rawVideo && fs.existsSync(rawVideo)) {
   check("主流程连续录屏产出", fs.statSync(flowVideo).size > 0, flowVideo);
 } else {
   check("主流程连续录屏产出", false, "video.path() 为空");
+}
+
+/* ── 11b. 工具聚合入口连续录屏（默认关闭 → 刷新 → 范围 → 开关开启 → 依赖缺失）── */
+const aggVideoCtx = await browser.newContext({
+  viewport: { width: 1440, height: 900 },
+  deviceScaleFactor: 1,
+  colorScheme: "light",
+  locale: "zh-CN",
+  recordVideo: { dir: VIDEO_DIR, size: { width: 1440, height: 900 } },
+});
+const apage = await aggVideoCtx.newPage();
+watch(apage, "aggregate-video");
+const aggVideo = apage.video();
+await apage.goto(BASE + "/?scenario=ready", { waitUntil: "domcontentloaded" });
+await apage.waitForSelector("[data-mcp-aggregate-invocation]");
+await apage.waitForTimeout(600);
+await apage.click("[data-mcp-aggregate-reload]");
+await apage.waitForTimeout(500);
+await apage.click('.mcp-row[data-mcp-connection="conn_local_echo"]');
+await apage.waitForSelector("[data-mcp-aggregate-scope]");
+await apage.click("[data-mcp-aggregate-scope]");
+await apage.waitForSelector("[data-mcp-aggregate-scope-label]");
+await apage.waitForTimeout(700);
+/* 同一段录屏切到「开关开启」与「依赖缺失」两个入口状态。 */
+await apage.goto(BASE + "/?scenario=ready&toolsEnabled=1", { waitUntil: "domcontentloaded" });
+await apage.waitForSelector('[data-mcp-aggregate-enabled="true"]');
+await apage.waitForTimeout(700);
+await apage.goto(BASE + "/?scenario=ready&toolsError=1", { waitUntil: "domcontentloaded" });
+await apage.waitForSelector("[data-mcp-aggregate-error]");
+await apage.waitForTimeout(900);
+await aggVideoCtx.close();
+const aggRaw = await aggVideo.path();
+const aggFlowVideo = path.join(ART, "mcp-entries-flow.webm");
+if (aggRaw && fs.existsSync(aggRaw)) {
+  fs.copyFileSync(aggRaw, aggFlowVideo);
+  check("工具聚合入口连续录屏产出", fs.statSync(aggFlowVideo).size > 0, aggFlowVideo);
+} else {
+  check("工具聚合入口连续录屏产出", false, "video.path() 为空");
 }
 
 /* ── 12. 全局断言 ─────────────────────────────────────────────────────── */
@@ -748,12 +965,14 @@ const report = {
     os: os.type() + " " + os.release(),
     node: process.version,
     chromium: CHROMIUM,
+    chromiumSource: CHROMIUM_INFO.source,
     url: BASE,
     screenshotOptions: SHOT_OPTS,
+    timing: { scale: TIMEOUT_SCALE, source: SCALE_SOURCE, summary: timingSummary() },
   },
   dataSource: {
     bridge: "window.openarc.mcp.command（只用 mcp/list | mcp/get | mcp/testLog）",
-    aggregateRule: "electron/mcp-agent-tools.cjs:181-183 / 436-439 / 495-523（读 mcp/list 记录在渲染层派生，未新增 IPC）",
+    aggregateRule: "主进程 mcp/agentTools（electron/mcp-bootstrap.cjs:115-172）；渲染层不再派生聚合规则（见 src/mcp/mcpCenterLogic.ts）",
     invocationBoundary: "无调用入口；后端对调用命令回 MCP_TOOL_INVOCATION_NOT_ENABLED（electron/mcp-bootstrap.cjs:83-109）",
   },
   designSystemFixes: {
@@ -766,6 +985,7 @@ const report = {
   },
   screenshots: screenshots,
   video: fs.existsSync(flowVideo) ? flowVideo : null,
+  entryVideo: fs.existsSync(aggFlowVideo) ? aggFlowVideo : null,
   checks: checks,
   failures: failed,
   consoleErrors: pageErrors,

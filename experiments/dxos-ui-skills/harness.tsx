@@ -24,6 +24,39 @@ const params = new URLSearchParams(location.search);
 const scenario = params.get("scenario") || "ready";
 const runMode = params.get("run") || "fast";
 const importMode = params.get("import") || "ok";
+/* 入口依赖装配模式：all / media-missing / model-missing / workspace-missing。
+   由 skill/health 返回，界面据此做可用性判定（不是探针自报）。 */
+const depsMode = params.get("deps") || "all";
+const analyzeMode = params.get("analyze") || "ok";
+const saveMode = params.get("save") || "ok";
+const mediaMode = params.get("media") || "ok";
+const workspaceMode = params.get("workspace") || "ok";
+/* 主题：tokens.css 的深色是 .dark 作用域（不是 prefers-color-scheme），
+   所以探针显式给外壳加 .dark，保证与浅色同窗口 / 同缩放 / 同降动效对照。 */
+const theme = params.get("theme") || "light";
+const windowClass = theme === "dark" ? "window dark" : "window";
+
+const MEDIA_KINDS = ["image", "image_upscale", "midjourney", "image_edit", "image_batch", "image_describe", "video", "audio_tts", "audio_transcribe", "audio_music"];
+const isMediaKind = (kind: unknown) => typeof kind === "string" && MEDIA_KINDS.indexOf(kind) >= 0;
+
+function dependencyFlags(): Record<string, boolean> {
+  const flags: Record<string, boolean> = {
+    chatTarget: true,
+    providerAdapter: true,
+    modelCall: true,
+    cliRuntime: true,
+    fsAdapter: true,
+    mediaAdapter: true,
+    skillWorkspace: true,
+  };
+  if (depsMode === "media-missing") flags.mediaAdapter = false;
+  if (depsMode === "model-missing") {
+    flags.modelCall = false;
+    flags.chatTarget = false;
+  }
+  if (depsMode === "workspace-missing") flags.skillWorkspace = false;
+  return flags;
+}
 
 const READY_SKILLS: any[] = [
   {
@@ -112,6 +145,37 @@ const READY_PACKS: any[] = [
   },
 ];
 
+/* skill/analyze 的成功形状：{ skill:{...v2}, warnings:[] }（skill-analyzer.cjs:467-477）。 */
+const ANALYZE_SKILL: any = {
+  id: "weekly_digest",
+  name: "周报摘要",
+  description: "把本周素材整理成周报摘要。",
+  kind: "procedure",
+  systemPrompt: "你是周报执行器。按工作流逐步执行。",
+  v2: {
+    version: 1,
+    steps: [
+      { title: "收集素材", detail: "读取本周记录", uses: "analysis" },
+      { title: "生成摘要", detail: "按模板输出草稿" },
+    ],
+  },
+};
+
+/* skill/workspace/list 的成功形状（skill-workspace.cjs:337-352 的投影字段）。 */
+const WORKSPACE_PROFILES: any[] = [
+  {
+    id: "workspace_team_1_coordinator",
+    name: "协调者",
+    description: "拆解任务并汇总结果。",
+    modelProfile: "balanced",
+    maxModelCalls: 8,
+    maxToolCalls: 12,
+    enabled: true,
+    capabilityScopes: ["read"],
+    packId: "pack_1",
+  },
+];
+
 const skills: any[] = READY_SKILLS.map((s) => ({ ...s }));
 const packs: any[] = READY_PACKS.map((p) => ({ ...p }));
 
@@ -141,6 +205,7 @@ const record = (command: string, payload: Record<string, unknown>) => {
   const safe: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(payload || {})) {
     if (k === "archiveBase64") safe.archiveBase64Present = typeof v === "string" && v.length > 0;
+    else if (k === "markdown") safe.markdownPresent = typeof v === "string" && v.length > 0;
     else safe[k] = v;
   }
   probe.commands.push({ command, payload: safe });
@@ -155,15 +220,8 @@ async function command(raw: any) {
       return {
         ok: true,
         value: {
-          status: scenario === "degraded" ? "degraded" : "ok",
-          dependencies: {
-            chatTarget: true,
-            modelCall: true,
-            cliRuntime: true,
-            fsAdapter: true,
-            mediaAdapter: false,
-            skillWorkspace: scenario !== "degraded",
-          },
+          status: depsMode === "all" ? "ok" : "degraded",
+          dependencies: dependencyFlags(),
         },
       };
     case "skill/list":
@@ -200,7 +258,9 @@ async function command(raw: any) {
         payload: { command: "skill/run", phase: "begin", requestId: payload.requestId },
       });
       await sleep(runMode === "slow" ? 6000 : 120);
-      if (scenario === "run-fail") {
+      const runSkillDef = skills.find((s) => s.id === payload.skillId);
+      const isMediaRun = isMediaKind(runSkillDef && runSkillDef.kind);
+      if ((isMediaRun && mediaMode === "fail") || scenario === "run-fail") {
         probe.emit({
           kind: "progress",
           domain: "skill",
@@ -208,7 +268,12 @@ async function command(raw: any) {
           at: Date.now(),
           payload: { command: "skill/run", phase: "failed", requestId: payload.requestId },
         });
-        return { ok: false, error: "SKILL_DEPENDENCY_UNAVAILABLE", message: "缺少模型适配器" };
+        return {
+          ok: false,
+          error: "SKILL_DEPENDENCY_UNAVAILABLE",
+          message: "技能依赖不可用：mediaAdapter",
+          detail: { dependency: "mediaAdapter", causeCode: "AGENT_DEPENDENCY_UNAVAILABLE", reason: "B5 媒体波次未接入" },
+        };
       }
       probe.emit({
         kind: "progress",
@@ -217,6 +282,16 @@ async function command(raw: any) {
         at: Date.now(),
         payload: { command: "skill/run", phase: "completed", requestId: payload.requestId },
       });
+      if (isMediaRun) {
+        return {
+          ok: true,
+          value: {
+            text: "已生成 1 张图片，保存在「生成图片」文件夹：\n- img_probe_1.png: /api/fs/raw/probe-node-1",
+            meta: { model: "probe-image", provider: "探针站点", count: 1 },
+            images: [{ nodeId: "probe-node-1", name: "img_probe_1.png", url: "/api/fs/raw/probe-node-1" }],
+          },
+        };
+      }
       return { ok: true, value: { text: "【" + payload.skillId + "】已按输入生成结果。", meta: { model: "probe-model" } } };
     }
     case "skill/pack/import":
@@ -230,6 +305,48 @@ async function command(raw: any) {
       return { ok: true, value: { skillId: payload.skillId, deleted: true } };
     case "skill/pack/uninstall":
       return { ok: true, value: { packId: payload.packId, deleted: true } };
+    case "skill/analyze": {
+      if (analyzeMode === "fail") {
+        return { ok: false, error: "SKILL_INVALID_INPUT", message: "解析失败：没有识别出工作流步骤" };
+      }
+      await sleep(100);
+      return { ok: true, value: { skill: ANALYZE_SKILL, warnings: ["忽略了不存在的能力：web_search"] } };
+    }
+    case "skill/save": {
+      if (saveMode === "fail") {
+        return { ok: false, error: "SKILL_INVALID_INPUT", message: "id 必须以小写字母开头，只能含小写字母、数字、下划线" };
+      }
+      const input: any = payload.skill && typeof payload.skill === "object" ? payload.skill : {};
+      const def: any = {
+        ...input,
+        builtin: false,
+        kind: input.v2 ? "procedure" : "text",
+        enabled: true,
+        layer: input.v2 ? "workflow" : "preset",
+        origin: "user",
+      };
+      const index = skills.findIndex((s) => s.id === def.id);
+      if (index >= 0) skills[index] = def;
+      else skills.push(def);
+      return { ok: true, value: { skill: def } };
+    }
+    case "skill/workspace/list": {
+      if (workspaceMode === "fail") {
+        return {
+          ok: false,
+          error: "SKILL_DEPENDENCY_UNAVAILABLE",
+          message: "技能依赖不可用：db",
+          detail: { dependency: "db", causeCode: "AGENT_DEPENDENCY_UNAVAILABLE" },
+        };
+      }
+      await sleep(60);
+      if (workspaceMode === "empty") return { ok: true, value: { items: [] } };
+      const packId = typeof payload.packId === "string" ? payload.packId : "";
+      return {
+        ok: true,
+        value: { items: WORKSPACE_PROFILES.filter((profile) => !packId || profile.packId === packId) },
+      };
+    }
     default:
       return { ok: false, error: "SKILL_COMMAND_NOT_ALLOWED", message: "未登记命令：" + String(cmd) };
   }
@@ -348,7 +465,7 @@ const mcpBridge = { command: mcpCommand };
 
 function McpHarness() {
   return (
-    <div className="window" style={{ position: "absolute", inset: 0 }}>
+    <div className={windowClass} style={{ position: "absolute", inset: 0 }}>
       <McpCenter role="ADMIN" />
     </div>
   );
@@ -357,7 +474,7 @@ function McpHarness() {
 function Harness() {
   const [tab, setTab] = useState<Tab>((params.get("tab") as Tab) || "installed");
   return (
-    <div className="window" style={{ position: "absolute", inset: 0 }}>
+    <div className={windowClass} style={{ position: "absolute", inset: 0 }}>
       <div className="split">
         <nav className="split-side" aria-label="Skill 分类">
           <div className="split-section">Skill</div>

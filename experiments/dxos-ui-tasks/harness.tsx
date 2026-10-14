@@ -22,6 +22,9 @@ import "../../src/styles.css";
 const params = new URLSearchParams(location.search);
 const scenario = params.get("scenario") || "ready";
 const runMode = params.get("run") || "fast";
+/* 入口依赖装配模式：默认 all（B6 已把 fsAdapter 真实接线）；
+   ?deps=fs-missing 是显式的依赖缺失降级场景，用于降级截图，不再是默认态。 */
+const depsMode = params.get("deps") || "all";
 
 /* ══════════════════════════════════════════════════════════════════════════
    任务数据（形状对齐 electron/agent-service.cjs:179-189 的 taskSummary 投影）
@@ -194,8 +197,10 @@ function healthValue() {
       mcpSource: true,
       skillSource: true,
       canvasSource: true,
-      // B6 未落地：如实 false，健康徽标显示依赖缺失，但不阻塞只读列表。
-      fsAdapter: false,
+      // B6 已把 fsAdapter 真实接线（agent / skill / media 共用同一实例），
+      // 默认按真实 health 语义置 true；?deps=fs-missing 才是显式的依赖缺失降级场景。
+      // （与 dxos-ui-skills/harness.tsx 的 deps=all 默认同一口径，不再让默认态反映已不存在的事实。）
+      fsAdapter: scenario !== "unavailable" && depsMode !== "fs-missing",
       workspaceAdapter: true,
       userDataDir: true,
       dbPath: true,
@@ -305,6 +310,61 @@ async function command(raw: any) {
       task.status = "queued";
       return finish({ ok: true, value: { task: { ...task } } });
     }
+    /* UI-3b 统一读模型：只读合并 dx / core 两套任务表（形状对齐 task-unified-view.cjs）。 */
+    case "agent/task/unified-list": {
+      const source = payload.source ? String(payload.source) : null;
+      const items = [
+        { source: "dx", id: "t_report", title: "整理本周周报", status: "RUNNING", projectId: "p_weekly" },
+        { source: "dx", id: "t_wait", title: "确认部署目标", status: "WAITING", projectId: "p_weekly" },
+        { source: "dx", id: "t_done", title: "生成发布说明", status: "SUCCEEDED", projectId: "p_weekly" },
+        { source: "core", id: "core_sync", title: "同步素材库（core）", status: "RUNNING", projectId: null },
+      ].filter((item) => !source || item.source === source);
+      return finish({
+        ok: true,
+        value: {
+          readModel: true,
+          boundary: "这是读模型：不写任何表、不改变任何一方状态机。",
+          sources: source ? [source] : ["dx", "core"],
+          counts: { dx: 3, core: 1, total: 4 },
+          items,
+        },
+      });
+    }
+    /* UI-3b 写操作入口：失败只在 ?scenario=entry-error 下按稳定码返回。 */
+    case "agent/task/create": {
+      if (scenario === "entry-error") return finish({ ok: false, error: "AGENT_FORBIDDEN", message: "当前账号或该应用没有被授这个动作" });
+      if (runMode === "slow") await sleep(700);
+      const taskId = "t_new_" + String(READY_TASKS.length + 1);
+      const created = {
+        taskId,
+        projectId: String(payload.projectId || "p_weekly"),
+        threadId: "th_new",
+        title: String(payload.title || "新建任务"),
+        instruction: String(payload.instruction || ""),
+        status: "queued",
+        mode: "react",
+        executionProfile: "standard",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        startedAt: null,
+        completedAt: null,
+        errorCode: null,
+        errorMessage: null,
+        agentRunId: null,
+      };
+      READY_TASKS.push(created);
+      return finish({ ok: true, value: { task: { ...created } } });
+    }
+    case "agent/tool/call":
+      if (runMode === "slow") await sleep(700);
+      return finish({ ok: true, value: { tool: String(payload.tool || ""), result: { ok: true, text: "（探针）工具已执行" } } });
+    case "agent/project/run":
+      if (scenario === "entry-error") return finish({ ok: false, error: "AGENT_DEPENDENCY_UNAVAILABLE", message: "模型调用出口未就绪", detail: { dependency: "modelAdapter" } });
+      if (runMode === "slow") await sleep(700);
+      return finish({ ok: true, value: { projectId: String(payload.projectId || ""), outcome: { kind: "completed", steps: 2 } } });
+    case "agent/react/run":
+      if (runMode === "slow") await sleep(700);
+      return finish({ ok: true, value: { taskId: String(payload.taskId || ""), outcome: { kind: "completed" } } });
     default:
       return finish({ ok: false, error: "AGENT_COMMAND_NOT_ALLOWED", message: "未登记命令：" + String(cmd) });
   }
