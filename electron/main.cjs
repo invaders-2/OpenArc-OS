@@ -28,6 +28,12 @@ const { wireModelEvents } = require("./model-bootstrap.cjs");
 // B3：Agent 域装配（真实 SQLite = identity 的连接）与 agent:command / agent:event 通道。
 const { createAgentBundle } = require("./agent-service.cjs");
 const { registerAgentIpc } = require("./agent-bootstrap.cjs");
+// B4：技能域装配（<userData>/dxos 下的技能目录 / 技能包 / 执行器）与 skill:command / skill:event 通道。
+const { createSkillBundle } = require("./skill-service.cjs");
+const { registerSkillIpc } = require("./skill-bootstrap.cjs");
+// B4 · providerAdapter 桥：把 B2 的 provider-protocol store/service 投影成 B4 执行器要的只读适配器
+// （firstUsable/all/autoFallback/revealProvider/call）；只读投影绝不返回 api_key/credentialRef。
+const { createProviderAdapter } = require("./provider-adapter-bridge.cjs");
 // D5-03：MCP 中心的宿主命令面（连接管理 + 能力发现；本批不开放工具调用）。
 const { registerMcpIpc } = require("./mcp-bootstrap.cjs");
 // D5-03 第十一批：关应用的唯一收尾顺序（MCP → Harness → modelProxy → store）。
@@ -46,6 +52,8 @@ let identityBootFailure = null;
 let canvasBundle;
 /** B3：Agent 域 bundle（createAgentBundle 的唯一实例；无身份服务时为 undefined）。 */
 let agentBundle;
+/** B4：技能域 bundle（createSkillBundle 的唯一实例；无身份服务时为 undefined）。 */
+let skillBundle;
 /** D5-01 Closure-2：受控浏览器目标（用户显式授权）。宿主持有唯一实例，工具链与 UI 共用同一个。 */
 let browserControl;
 
@@ -486,9 +494,44 @@ app.whenReady().then(async () => {
       send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("task:event", event); },
     });
 
+    // B4：技能域。
+    //   · <userData>/dxos 注入 configureSkillStore / configureSkillPack / configureSkillRunner / configureSkillAnalyzer /
+    //     configureSkillWorkspace（路径由 dxos-foundation-paths.cjs 统一解析）；
+    //   · providerAdapter 由 B2 的 provider-protocol store/service 组装（provider-adapter-bridge.cjs）；
+    //     cliRuntime / mediaAdapter / fsAdapter 属 B3/B5/B6，未落地 → 传 null，命令侧保持结构化依赖缺失（绝不伪造）；
+    //     modelAdapter 走 provider-protocol-service.call（唯一模型出口）；
+    //   · skill:event 与 model:event / task:event / agent:event 同一条 trusted(event) 边界，renderer 只能订阅。
+    const providerProtocol = identity.modelService && identity.modelService.providerProtocol ? identity.modelService.providerProtocol : null;
+    const providerAdapter = providerProtocol && providerProtocol.store && providerProtocol.service
+      ? createProviderAdapter({ store: providerProtocol.store, service: providerProtocol.service })
+      : null;
+    const skillModelAdapter = providerProtocol && providerProtocol.service
+      ? { call: (input) => providerProtocol.service.call(input || {}) }
+      : null;
+    skillBundle = createSkillBundle({
+      userDataDir: app.getPath("userData"),
+      identityStore: identity.store,
+      authorization: identity.authorization,
+      providerAdapter: providerAdapter,
+      modelAdapter: skillModelAdapter,
+      cliRuntime: null,
+      mediaAdapter: null,
+      fsAdapter: null,
+      logger: null,
+      clock: null,
+    });
+    registerSkillIpc({
+      ipcMain,
+      bundle: skillBundle,
+      identity: identity.service,
+      isTrusted: trusted,
+      send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("skill:event", event); },
+    });
+
     // B3：Agent 域。
     //   · 任务/运行/工具/项目/记忆全部落到 identity-store 的同一 SQLite 连接（agent_* 表 v23 迁移已建）；
     //   · modelAdapter 走 provider-protocol-service.call（唯一模型出口）；
+    //   · providerAdapter 复用上面 B2 组装的只读桥（模型执行出口；密钥只在 service 内部解出）；
     //   · fsAdapter / workspaceAdapter 属 B6，未落地 → 命令侧保持结构化 AGENT_DEPENDENCY_UNAVAILABLE；
     //   · agent:event 与 model:event / task:event 同一条 trusted(event) 边界，renderer 只能订阅。
     agentBundle = createAgentBundle({
@@ -496,10 +539,13 @@ app.whenReady().then(async () => {
       authorization: identity.authorization,
       authStore: identity.authStore,
       modelService: identity.modelService,
+      providerAdapter: providerAdapter,
       userDataDir: app.getPath("userData"),
       logger: null,
       clock: null,
       dbPath: path.join(app.getPath("userData"), "identity.db"),
+      // B4：把技能来源接进工具目录（listSkills + runSkill）；未装配时为 null，catalog 保持 available:false。
+      skillSource: skillBundle ? skillBundle.skillSource : null,
     });
     registerAgentIpc({
       ipcMain,
