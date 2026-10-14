@@ -154,7 +154,98 @@ export interface OpenArcFilesBridge {
 
 /** P3 技能：注册 / 启停 / 导入导出 / 执行 / 分析。 */
 export interface OpenArcSkillBridge extends OpenArcCommandBridge, OpenArcEventBridge {}
-/** P5 媒体：FFmpeg 渲染作业、探测、封面、产物。 */
+/**
+ * B5a 媒体域：FFmpeg 渲染作业、ffprobe 探测、封面缓存、租约心跳、产物落盘。
+ *
+ * 唯一入口 command({ command, payload })（受控白名单，见 electron/media-domain.cjs 的 MEDIA_COMMANDS），
+ * 以及 media:event 下行（主进程封装的 P1 信封，channel="media:event"）。
+ * 这里没有 raw ffmpeg 句柄 / 凭据 / ipcRenderer / 绝对路径 —— sessionRef 与 appId 由主进程注入，
+ * renderer 自报的 userId / role / appId 一律忽略。
+ */
+export type OpenArcMediaCommand =
+  | "media/project/ensure"
+  | "media/asset/save"
+  | "media/asset/list"
+  | "media/asset/delete"
+  | "media/probe"
+  | "media/poster/get"
+  | "media/poster/invalidate"
+  | "media/render/submit"
+  | "media/render/get"
+  | "media/render/list"
+  | "media/render/run"
+  | "media/render/cancel"
+  | "media/render/heartbeat"
+  | "media/render/recover"
+  | "media/artifact/list"
+  | "media/health";
+
+/** 命令体：{ command, payload }；payload 缺省时退化为命令体本身（与 skill/agent 域同形）。 */
+export interface OpenArcMediaCommandRequest {
+  command: OpenArcMediaCommand;
+  payload?: Record<string, unknown>;
+}
+
+/** ffprobe 探测结果（electron/media-domain.cjs parseFfprobeOutput）。 */
+export interface OpenArcMediaProbe {
+  durationMs: number;
+  sizeBytes: number;
+  formatName: string;
+  bitRate?: number;
+  hasVideo: boolean;
+  hasAudio: boolean;
+  width?: number;
+  height?: number;
+  fps?: number;
+  videoCodec?: string;
+  audioCodec?: string;
+  audioChannels?: number;
+  sampleRate?: number;
+}
+
+/** 渲染作业安全投影：绝对路径不出主进程，只回成片相对文件名。 */
+export interface OpenArcMediaRenderJob {
+  id: string;
+  projectId: string;
+  timelineVersion: number;
+  status: "queued" | "running" | "interrupted" | "completed" | "failed" | "cancelled";
+  progress: number;
+  error: string | null;
+  createdAt: number;
+  startedAt: number | null;
+  completedAt: number | null;
+  hasOutput: boolean;
+  outputRelativePath: string | null;
+  workerAssigned: boolean;
+}
+
+/** 素材安全投影（无磁盘绝对路径）。 */
+export interface OpenArcMediaAsset {
+  id: string;
+  projectId: string;
+  kind: "video" | "image" | "audio" | "subtitle";
+  name: string;
+  mime: string;
+  size: number;
+  durationMs?: number;
+  width?: number;
+  height?: number;
+  hasVideo?: boolean;
+  hasAudio?: boolean;
+  relativePath: string;
+  createdAt: number;
+}
+
+/** 落盘产物条目：relativePath 形如 "renders/<id>.mp4"，永不含绝对路径。 */
+export interface OpenArcMediaArtifact {
+  kind: "asset" | "render" | "poster";
+  id: string;
+  fileName: string;
+  relativePath: string;
+  bytes: number;
+  mtime: number;
+}
+
 export interface OpenArcMediaBridge extends OpenArcCommandBridge, OpenArcEventBridge {}
 /** P5 ComfyUI：本地实例启停、工作流、运行。 */
 export interface OpenArcComfyBridge extends OpenArcCommandBridge, OpenArcEventBridge {}

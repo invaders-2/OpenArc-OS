@@ -186,6 +186,21 @@ contextBridge.exposeInMainWorld("openarc", {
     },
   },
   /**
+   * B5a 媒体桥（第 20 个顶层键）。
+   *
+   * **只有两条能力**：派发受控 media 命令、订阅 media 下行事件（P1 信封）。
+   * 不暴露 ipcRenderer / ffmpeg 句柄 / 凭据 / 绝对路径；sessionRef 与 appId 由主进程注入，
+   * Renderer 自报的 userId / role / appId 一律忽略（与 agent / skill / model / task 同一条 trusted 边界）。
+   */
+  media: {
+    command: (command) => ipcRenderer.invoke("media:command", command),
+    onEvent: (callback) => {
+      const listener = (_, event) => callback(event);
+      ipcRenderer.on("media:event", listener);
+      return () => ipcRenderer.removeListener("media:event", listener);
+    },
+  },
+  /**
    * D4-03C4 Trusted Approval Gateway 桥。
    *
    * **三条能力**：提交一个 approval decision、撤销一个"已批准、尚未执行"的操作、订阅 approval 请求事件。

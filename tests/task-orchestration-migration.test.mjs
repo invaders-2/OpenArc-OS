@@ -37,7 +37,7 @@ test("v9 -> v10：HarnessRun / Artifact / Verification 表建立，旧数据完�
   const { root, dbPath, storeRoot, snapshot } = await makeV9Db();
   try {
     const reopened = reopenResourceRuntime({ dbPath, storeRoot });
-    assert.equal(SCHEMA_VERSION, 23);
+    assert.equal(SCHEMA_VERSION, 25);
     assert.equal(reopened.identity.schemaVersion, SCHEMA_VERSION);
     for (const t of [...V10_TABLES, ...V11_TABLES, ...V12_TABLES, ...V13_TABLES]) assert.equal(hasTable(reopened.identity.connection, t), true, t + " 应存在");
     assert.equal(reopened.identity.allUsers().length, snapshot.users);

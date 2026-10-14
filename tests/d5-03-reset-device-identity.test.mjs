@@ -561,15 +561,15 @@ test("T10 · device_audit 重置前后逐行不变；明文 secret 在库/审计
 /* ══════════════════════ T11 · SCHEMA_VERSION ══════════════════════ */
 
 test("T11 · SCHEMA_VERSION 仍为 21：本批没有 schema 变更（只有行删除）", async () => {
-  assert.equal(SCHEMA_VERSION, 23, "本批不应升版：设备三表早已存在，重置只是删行");
+  assert.equal(SCHEMA_VERSION, 25, "本批不应升版：设备三表早已存在，重置只是删行");
   const f = openService(tmpDir());
   try {
     const snap = await initAndLogin(f);
     pairOnce(f, snap, { fingerprint: "fp_d503g_t11" });
-    assert.equal(f.store.schemaVersion, 23, "打开后的 user_version 必须是 23");
-    assert.equal(f.store.connection.prepare("PRAGMA user_version").get().user_version, 23);
+    assert.equal(f.store.schemaVersion, 25, "打开后的 user_version 必须是 25");
+    assert.equal(f.store.connection.prepare("PRAGMA user_version").get().user_version, 25);
     assert.equal(f.store.resetInstallation({ confirm: CONFIRM }).ok, true);
-    assert.equal(f.store.schemaVersion, 23, "重置后 user_version 不得变化");
+    assert.equal(f.store.schemaVersion, 25, "重置后 user_version 不得变化");
     // 删除集合里没有任何 DDL：只有不带 WHERE 的 DELETE FROM <table>。
     for (const sql of RESET_AUTHORIZATION_DELETE_SQL) assert.match(String(sql), /^DELETE FROM [a-z_]+$/, "不得出现 DDL / WHERE / 拼接：" + sql);
     // 三张设备表在重置后仍然存在（表结构没动，只是行被删）。

@@ -31,6 +31,9 @@ const { registerAgentIpc } = require("./agent-bootstrap.cjs");
 // B4：技能域装配（<userData>/dxos 下的技能目录 / 技能包 / 执行器）与 skill:command / skill:event 通道。
 const { createSkillBundle } = require("./skill-service.cjs");
 const { registerSkillIpc } = require("./skill-bootstrap.cjs");
+// B5a：媒体域装配（<userData>/dxos/media 下的渲染作业 / 探测 / 封面）与 media:command / media:event 通道。
+const { createMediaBundle } = require("./media-service.cjs");
+const { registerMediaIpc } = require("./media-bootstrap.cjs");
 // B4 · providerAdapter 桥：把 B2 的 provider-protocol store/service 投影成 B4 执行器要的只读适配器
 // （firstUsable/all/autoFallback/revealProvider/call）；只读投影绝不返回 api_key/credentialRef。
 const { createProviderAdapter } = require("./provider-adapter-bridge.cjs");
@@ -56,6 +59,8 @@ let canvasBundle;
 let agentBundle;
 /** B4：技能域 bundle（createSkillBundle 的唯一实例；无身份服务时为 undefined）。 */
 let skillBundle;
+/** B5a：媒体域 bundle（createMediaBundle 的唯一实例；无身份服务时为 undefined）。 */
+let mediaBundle;
 /** D5-01 Closure-2：受控浏览器目标（用户显式授权）。宿主持有唯一实例，工具链与 UI 共用同一个。 */
 let browserControl;
 
@@ -483,7 +488,9 @@ app.whenReady().then(async () => {
     // 它的全部请求都由宿主渲染层经 canvas:command 转发到这里。
     // ---------------------------------------------------------------------------
     canvasBundle = { service: identity.canvasDocService };
-    registerCanvasIpc({ ipcMain, service: identity.canvasDocService, identity: identity.service, isTrusted: trusted });
+    // B5d：画布域扩展命令（素材库 / 协作 / 内核能力 / Agent 附件 / .dxcanvas）接在同一个 canvas:command；
+    // 未装配扩展时白名单内的扩展命令回落 CANVAS_COMMAND_NOT_ALLOWED，不新建第二套画布通道。
+    registerCanvasIpc({ ipcMain, service: identity.canvasDocService, identity: identity.service, isTrusted: trusted, extension: identity.canvasDxosExtension });
 
     // D4-04：Renderer 可发起真实 AI Task（Task Runtime + official dsh + Tool Facade），
     // sessionRef/appId 由主进程注入；进度经 task:event 推送。
@@ -563,6 +570,8 @@ app.whenReady().then(async () => {
       // B4 收口：mcp 工具目录来源（同一快照同时喂 catalog 与 createMcpAgentTools 的可调用索引）。
       mcpAgentTools: mcpAgentBridge ? mcpAgentBridge.mcpAgentTools : null,
       mcpServersSnapshot: mcpAgentBridge ? mcpAgentBridge.mcpServersSnapshot : null,
+      // B5d：画布内核能力进工具目录（来源由 canvas-dxos-capabilities 投影；未装配时 catalog 保持 available:false）。
+      canvasExtension: identity.canvasDxosExtension || null,
     });
     registerAgentIpc({
       ipcMain,
@@ -570,6 +579,27 @@ app.whenReady().then(async () => {
       identity: identity.service,
       isTrusted: trusted,
       send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("agent:event", event); },
+    });
+
+    // B5a：媒体域。
+    //   · 重活（ffmpeg 渲染 / ffprobe 探测 / 封面）全部走受监督子进程模板：
+    //     dxos-foundation-runner.cjs（超时 / 取消 / 输出上限）+ video-render-worker.cjs（唯一 worker 入口）；
+    //   · 渲染作业落 identity-store 同一 SQLite 连接（v24 迁移已建 video_* 表）；
+    //   · 曲目 / 素材 / 封面缓存全部在 <userData>/dxos/media 下，绝对路径不出主进程；
+    //   · media:event 与 model:event / task:event / agent:event / skill:event 同一条 trusted(event) 边界。
+    mediaBundle = createMediaBundle({
+      userDataDir: app.getPath("userData"),
+      identityStore: identity.store,
+      authorization: identity.authorization,
+      logger: null,
+      clock: null,
+    });
+    registerMediaIpc({
+      ipcMain,
+      bundle: mediaBundle,
+      identity: identity.service,
+      isTrusted: trusted,
+      send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("media:event", event); },
     });
 
     // D3-04C：注册安全预览协议 handler（每次请求重新授权 + Range 流式返回）。
@@ -948,6 +978,8 @@ app.on("will-quit", (event) => {
   if (quitting) return;
   quitting = true;
   event.preventDefault();
+  // B5a：先停媒体子进程（绝不写 Job 状态），再走既有的 MCP → Harness → modelProxy → store 收尾。
+  try { if (mediaBundle && typeof mediaBundle.dispose === "function") mediaBundle.dispose(); } catch { /* 已停 */ }
   disposeAppResources({ identity, log: (line) => console.log(line) }).then((res) => {
     try {
       console.log("[openarc] 退出收尾：" + JSON.stringify({ ok: res.ok, harness: res.harness, mcp: res.mcp, proxyStopped: res.proxyStopped, storeClosed: res.storeClosed }));

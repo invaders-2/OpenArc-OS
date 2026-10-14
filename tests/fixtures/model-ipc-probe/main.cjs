@@ -105,12 +105,22 @@ app.whenReady().then(async () => {
      *     · onEvent 必须返回退订函数，退订后同一 provider 的第二次流式调用不得再收到事件；
      *     · 用本地 127.0.0.1 SSE 真实触发 provider/callStream，回调收到的事件必须是 P1 信封
      *       （channel / domain / kind / sequence / at / payload 齐备，channel=model:event、domain=model）；
-     *     · window.openarc 顶层键为既有 17 个 + B3 的 agent + B4 的 skill = 19 个；除 agent/skill 外不得新增顶层键。
+     *     · window.openarc 顶层键为既有 17 个 + B3 的 agent + B4 的 skill + B5a 的 media = 20 个；
+     *       除 agent / skill / media 外不得新增顶层键。
+     *
+     * B5a · IPC2 契约再更新（为什么改）：
+     *   B5a 媒体域要求把 media.command / media.onEvent 接到渲染层，preload 因此新增 media 顶层键
+     *   （第 20 个，见 preload.cjs「B5a 媒体桥」）。与 B3 agent / B4 skill 完全同构：只做
+     *   ipcRenderer.invoke("media:command") 与 ipcRenderer.on("media:event") 订阅，**不把
+     *   ipcRenderer 本体交给渲染层**。于是旧的 19 键口径已过时 —— 再按 19 键断言会把这次
+     *   **有意的契约扩展**误判成安全回归。这里把上界更新为 20 键（既有 17 + agent + skill + media），
+     *   负向断言（无原始能力 / 桥值只允许 function / 不新增未登记顶层键）逐项不放松。
      */
     const expectedModelKeys = ["command", "onEvent"];
-    // B3 新增顶层键 agent（agent:command + agent:event）→ 18；B4 新增顶层键 skill（skill:command + skill:event）→ 19。
+    // B3 新增顶层键 agent（agent:command + agent:event）→ 18；B4 新增顶层键 skill（skill:command + skill:event）→ 19；
+    // B5a 新增顶层键 media（media:command + media:event）→ 20（既有 17 + agent + skill + media）。
     // 安全口径不放松：桥值仍只允许 function，原始能力黑名单逐项断言 undefined。
-    const expectedTopKeys = ["action", "agent", "authorization", "browser", "canvas", "device", "files", "governance", "identity", "mcp", "model", "navigate", "onDisplay", "onNativeState", "resource", "sideEffect", "skill", "sync", "task"];
+    const expectedTopKeys = ["action", "agent", "authorization", "browser", "canvas", "device", "files", "governance", "identity", "mcp", "media", "model", "navigate", "onDisplay", "onNativeState", "resource", "sideEffect", "skill", "sync", "task"];
     // 逐项列出的原始能力黑名单：桥上任一 key / 值命中即失败（等价旧的"无 getRawCredential / rawFetch"）。
     const forbiddenRaw = ["getRawCredential", "rawFetch", "ipcRenderer", "webContents", "send", "invoke", "require", "fs", "credentialRef", "rawCredential", "readFile", "writeFile", "shell", "process", "Buffer"];
     const ipc2 = await js(`
@@ -167,7 +177,7 @@ app.whenReady().then(async () => {
       ipc2.bridgeLeaks.length === 0 && ipc2.topLeaks.length === 0 && ipc2.valueLeaks.length === 0 &&
       ipc2.eventCount > 0 && ipc2.envelopeBad.length === 0 && ipc2.monotonic === true &&
       ipc2.afterUnsubDelta === 0 && ipc2.streamError === null;
-    check("IPC2 · model 桥恰为 {command,onEvent}、onEvent 返退订函数、事件为 P1 信封、无原始能力 / 顶层键恰为 18+skill", ipc2Ok,
+    check("IPC2 · model 桥恰为 {command,onEvent}、onEvent 返退订函数、事件为 P1 信封、无原始能力 / 顶层键恰为 20（17 既有 + agent + skill + media）", ipc2Ok,
       "modelKeys=" + JSON.stringify(ipc2.modelKeys) + " topKeys=" + ipc2.topKeys.length + " bridgeLeaks=" + JSON.stringify(ipc2.bridgeLeaks) + " topLeaks=" + JSON.stringify(ipc2.topLeaks) + " valueLeaks=" + JSON.stringify(ipc2.valueLeaks) + " command=" + ipc2.commandType + " onEvent=" + ipc2.onEventType + " unsub=" + ipc2.unsubType + " events=" + ipc2.eventCount + " payloadTypes=" + JSON.stringify(ipc2.payloadTypes) + " envelopeBad=" + JSON.stringify(ipc2.envelopeBad) + " monotonic=" + ipc2.monotonic + " afterUnsubDelta=" + ipc2.afterUnsubDelta + (ipc2.streamError ? " streamError=" + ipc2.streamError : ""));
     const list = await js("return await window.openarc.model.command({ command: 'provider/list' })");
     check("IPC3 · 合法命令 provider/list 可用", list && list.ok === true, JSON.stringify(list).slice(0, 120));

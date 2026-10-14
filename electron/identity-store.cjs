@@ -43,6 +43,8 @@ const domain = require("./identity-domain.cjs");
 const passwords = require("./password.cjs");
 const dxosFoundationSchema = require("./dxos-foundation-schema.cjs");
 const dxosAgentSchema = require("./dxos-agent-schema.cjs");
+const mediaStore = require("./media-store.cjs");
+const canvasDxosSchema = require("./canvas-dxos-schema.cjs");
 
 const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domain;
 
@@ -75,8 +77,14 @@ const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domai
  *        server/ccsDb.ts 的最终形态（基础 CREATE TABLE + 全部 ALTER TABLE ADD COLUMN），
  *        去掉 REFERENCES 外键（P1 既定做法），并加 dx_project_roots 承接 DX projects.root_node_id
  *        语义（OpenArc 既有 projects 没有该列，硬约束禁止改既有表）。只新增表。
+ *   v24（B5a · DX OS 媒体域）：新增 video_projects / video_assets / video_render_jobs ——
+ *       列集取自 server/video/videoStore.ts:16-58 的最终形态，三张表同属本层新建，
+ *       指向 video_projects 的外键原样保留；只新增表（IF NOT EXISTS，可重放）。
+ *   v25（B5d · DX OS 画布域）：新增 canvas_dxos_asset_libraries / canvas_dxos_asset_items /
+ *       canvas_dxos_agent_attachments —— DDL 只有 canvas-dxos-schema.cjs 一份真值，
+ *       素材字节仍只在 resource_* 表；只新增表（IF NOT EXISTS，可重放）。
  */
-const SCHEMA_VERSION = 23;
+const SCHEMA_VERSION = 25;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -1538,6 +1546,24 @@ function applyDxosAgentLayer(db) {
   for (const statement of dxosAgentSchema.dxosAgentDdl()) db.exec(statement);
 }
 
+/**
+ * v24 的实现：媒体域三张表的 DDL 只有 media-store.cjs 一份真值（与 v22/v23 同一做法）。
+ * 全部语句是 IF NOT EXISTS（含索引），所以这一级可重放；失败时整级随外层事务回滚，
+ * 不会留下"user_version 已升到 24、video_ 表只建了一半"的半状态。
+ */
+function applyDxosMediaLayer(db) {
+  mediaStore.applyDxosMediaLayer(db);
+}
+
+/**
+ * v25 的实现：画布域三张新增表的 DDL 只有 canvas-dxos-schema.cjs 一份真值（与 v22/v23/v24 同一做法）。
+ * 全部语句是 IF NOT EXISTS（含索引），所以这一级可重放；失败时整级随外层事务回滚，
+ * 不会留下"user_version 已升到 25、canvas_dxos_ 表只建了一半"的半状态。
+ */
+function applyCanvasDxosLayer(db) {
+  canvasDxosSchema.applyCanvasDxosLayer(db);
+}
+
 const MIGRATIONS = Object.freeze([
   { version: 1, sql: SCHEMA_SQL },
   { version: 2, sql: SCHEMA_V2_SQL },
@@ -1576,6 +1602,8 @@ const MIGRATIONS = Object.freeze([
   { version: 21, run: applyPolicyProvisionLayer },
   { version: 22, run: applyDxosFoundationLayer },
   { version: 23, run: applyDxosAgentLayer },
+  { version: 24, run: applyDxosMediaLayer },
+  { version: 25, run: applyCanvasDxosLayer },
 ]);
 
 /**

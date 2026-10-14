@@ -63,7 +63,7 @@ test("v2 → 最新 schema 迁移：版本推进、v3 表建立、既有身份�
   assert.equal(identity.schemaVersion, SCHEMA_VERSION);
   // 核心线：D4-06 Closure 在 v15 之上新增 task_budgets；D5-02 在 v16 之上给 canvas_boards 加文档层 + canvas_shares/canvas_commands（v17）、
   // canvas_runs 运行归属（v18）。集成线：D3-01b 的 users.avatar_ref 在合并后顺延为 v19（两条线共用同一条迁移链）。
-  assert.equal(SCHEMA_VERSION, 23);
+  assert.equal(SCHEMA_VERSION, 25);
   for (const t of ["devices", "device_pairing_credentials", "device_credentials", "device_access", "device_audit"]) {
     assert.equal(hasTable(identity.connection, t), true, "缺少 v3 表 " + t);
   }

@@ -43,14 +43,14 @@ function buildDb(file, upTo) {
 }
 
 test("迁移：SCHEMA_VERSION 推进到 23", () => {
-  assert.equal(SCHEMA_VERSION, 23);
+  assert.equal(SCHEMA_VERSION, 25);
 });
 
 test("迁移：空库直接建到 v23，dx_ 表存在，OpenArc 既有表不受影响", () => {
   const file = tempDbPath();
   const store = new IdentityStore({ path: file }).open();
   try {
-    assert.equal(store.schemaVersion, 23);
+    assert.equal(store.schemaVersion, 25);
     for (const table of schema.DXOS_AGENT_TABLES) assert.ok(hasTable(store.connection, table), "缺少 " + table);
     assert.ok(hasTable(store.connection, "dx_project_roots"));
     assert.ok(hasTable(store.connection, "tasks"));
@@ -91,7 +91,7 @@ test("迁移：v22 老库升到 v23，既有 OpenArc tasks 数据与列集原样
 
   const store = new IdentityStore({ path: file }).open();
   try {
-    assert.equal(store.schemaVersion, 23);
+    assert.equal(store.schemaVersion, 25);
     const legacy = store.connection.prepare("SELECT * FROM tasks WHERE task_id=?").get("task_b3a_legacy");
     assert.equal(legacy.goal, "legacy-goal");
     assert.equal(store.connection.prepare("SELECT title FROM threads WHERE id=?").get("thr_b3a_v22").title, "既有对话");
@@ -118,7 +118,7 @@ test("迁移：user_version 降回 22 / 21 再重放，dx_ 表与数据不重复
     raw.close();
     const reopened = new IdentityStore({ path: file }).open();
     try {
-      assert.equal(reopened.schemaVersion, 23);
+      assert.equal(reopened.schemaVersion, 25);
       assert.equal(reopened.connection.prepare("SELECT COUNT(*) AS c FROM dx_tasks").get().c, 1, "重放不得重复建行或丢行");
       assert.equal(reopened.connection.prepare("SELECT title FROM dx_tasks WHERE id=?").get("dx_task_replay").title, "t");
     } finally {
@@ -127,15 +127,15 @@ test("迁移：user_version 降回 22 / 21 再重放，dx_ 表与数据不重复
     // 再次直接重放完整 DDL：IF NOT EXISTS 幂等
     const direct = new DatabaseSync(file);
     for (const statement of schema.dxosAgentDdl()) direct.exec(statement);
-    assert.equal(direct.prepare("PRAGMA user_version").get().user_version, 23);
+    assert.equal(direct.prepare("PRAGMA user_version").get().user_version, 25);
     direct.close();
   }
 });
 
-test("迁移：库版本高于程序（user_version=24）必须拒开", () => {
+test("迁移：库版本高于程序（user_version=26）必须拒开", () => {
   const file = tempDbPath();
-  const raw = buildDb(file, 23);
-  raw.exec("PRAGMA user_version = 24");
+  const raw = buildDb(file, 24);
+  raw.exec("PRAGMA user_version = 26");
   raw.close();
   assert.throws(
     () => new IdentityStore({ path: file }).open(),
@@ -166,7 +166,7 @@ test("迁移：v23 失败时整级回滚，user_version 停在 22 且 dx_ 表不
 
   // 修复后可以正常升到 23
   const ok = new IdentityStore({ path: file }).open();
-  assert.equal(ok.schemaVersion, 23);
+  assert.equal(ok.schemaVersion, 25);
   assert.ok(hasTable(ok.connection, "dx_tasks"));
   ok.close();
 });

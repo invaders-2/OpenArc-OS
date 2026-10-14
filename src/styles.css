@@ -3976,3 +3976,353 @@ label {
   }
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   UI-1 · Skill 中心（列表 / 详情 / 运行 / 导入）
+
+   只用 token：颜色走 --text / --muted / --failed / --warning / --sunken，
+   间距走 --space-*，圆角走 --radius-*，时长走 --dur-* / --ease-standard。
+   分层靠明度差与留白，不新增发丝线框（DESIGN_SYSTEM §3.2）；唯一的 1px 线
+   在详情键值表上，属允许范围内的表格线。
+   动效只做状态反馈与页面切换（MOTION_SYSTEM §5 / §7），时长全部取 token，
+   减少动态效果下由 tokens.css 的 .reduced 规则统一归零。
+   ══════════════════════════════════════════════════════════════════════════ */
+.skill-center {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  color: var(--text);
+}
+.skill-banner {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.skill-banner__row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.skill-banner__title {
+  margin: 0;
+  font-size: var(--fs-title);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--tracking-tight);
+}
+.skill-muted {
+  margin: 0;
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+.skill-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.skill-error {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: rgb(var(--failed-rgb) / 0.12);
+  color: var(--failed);
+  font-size: var(--fs-caption);
+  animation: skill-feedback-in var(--dur-feedback) var(--ease-standard);
+}
+.skill-warn {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+  color: var(--text);
+  font-size: var(--fs-caption);
+  line-height: var(--lh-normal);
+  animation: skill-feedback-in var(--dur-feedback) var(--ease-standard);
+}
+.skill-notice {
+  margin: 0;
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+.skill-state-block {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-4) var(--space-6);
+}
+@keyframes skill-feedback-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* ── 两栏：技能（包）列表 / 详情 ───────────────────────────────────────── */
+.skill-split {
+  display: grid;
+  grid-template-columns: minmax(0, 288px) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-4);
+}
+.skill-list-pane,
+.skill-detail-pane {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.skill-pane-head,
+.skill-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.skill-pane-title,
+.skill-section-head h4,
+.skill-section h4 {
+  margin: 0;
+}
+.skill-pane-title {
+  font-size: var(--fs-heading);
+  font-weight: var(--fw-medium);
+}
+.skill-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.skill-row {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  background: var(--sunken);
+  text-align: left;
+  cursor: var(--cursor-arrow, default);
+  transition: background var(--dur-quick) var(--ease-standard);
+}
+.skill-row:hover {
+  background: rgb(var(--text-rgb) / 0.08);
+}
+/* 选中 = 背景明度 + 左侧标记两个通道，不只靠颜色深浅（DESIGN_SYSTEM §3）。 */
+.skill-row[aria-pressed="true"] {
+  background: rgb(var(--text-rgb) / 0.14);
+  box-shadow: inset 2px 0 0 rgb(var(--text-rgb) / 0.5);
+}
+.skill-row__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.skill-row__top strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-medium);
+}
+.skill-row__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  font-size: var(--fs-micro);
+  color: var(--muted);
+}
+.skill-row__desc {
+  font-size: var(--fs-caption);
+  color: var(--muted);
+  line-height: var(--lh-normal);
+  overflow-wrap: anywhere;
+}
+.skill-row__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+.skill-status {
+  transition:
+    background-color var(--dur-feedback) var(--ease-standard),
+    color var(--dur-feedback) var(--ease-standard);
+}
+
+/* ── 详情 ─────────────────────────────────────────────────────────────── */
+.skill-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  animation: skill-page-in var(--dur-quick) var(--ease-standard);
+  min-width: 0;
+}
+@keyframes skill-page-in {
+  from {
+    opacity: 0.6;
+    transform: translateY(var(--space-1));
+  }
+}
+.skill-detail__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.skill-detail__title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.skill-detail__title h3 {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.skill-detail__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+.skill-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.skill-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.skill-kv {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-1) var(--space-4);
+  font-size: var(--fs-caption);
+}
+.skill-kv dt {
+  color: var(--muted);
+}
+.skill-kv dd {
+  margin: 0;
+  min-width: 0;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: var(--space-1);
+  overflow-wrap: anywhere;
+}
+.skill-kv dd:last-of-type {
+  border-bottom: 0;
+}
+.skill-pre {
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  line-height: var(--lh-normal);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 260px;
+  overflow: auto;
+}
+.skill-steps,
+.skill-files {
+  margin: 0;
+  padding-left: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--fs-caption);
+}
+.skill-steps li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.skill-step__title {
+  font-weight: var(--fw-medium);
+}
+
+/* ── 运行（MOTION_SYSTEM §7：统一状态反馈，不靠颜色单独传意）────────── */
+.skill-run {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  background: var(--sunken);
+  animation: skill-feedback-in var(--dur-feedback) var(--ease-standard);
+}
+.skill-run__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.skill-run__text {
+  margin: 0;
+  font-size: var(--fs-caption);
+  line-height: var(--lh-relaxed);
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow: auto;
+}
+
+/* ── 导入 ─────────────────────────────────────────────────────────────── */
+.skill-import {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.skill-import__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+/* 视觉隐藏但仍留在可访问树里；真正的触发控件是它旁边的按钮。 */
+.skill-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* 窄窗口：列表在上、详情在下单列排布；所有列宽都带 minmax(0,*) 防溢出。
+   容器查询按窗口自身宽度响应（.window 已声明 container-type: inline-size）。 */
+@container (max-width: 900px) {
+  .skill-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .skill-row__top strong,
+  .skill-detail__title h3 {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+

@@ -71,6 +71,7 @@ import { FilesApp } from "./governance/FilesApp";
 import { CanvasHost } from "./canvas/CanvasHost";
 import { ProjectsApp } from "./governance/ProjectsApp";
 import { McpCenter } from "./mcp/McpCenter";
+import { SkillCenter } from "./skills/SkillCenter";
 import { ApprovalPrompt } from "./approval/ApprovalPrompt";
 import { errorText } from "./identity/types";
 import { Avatar } from "./identity/Avatar";
@@ -2913,13 +2914,7 @@ function App() {
             </button>
           </nav>
           <div className="split-main">
-            <div className="empty-content">
-              <img className="large-icon" src={icon("shortcuts")} alt="" draggable={false} />
-              <h1>Skill 中心</h1>
-              <span className="badge">尚未实现</span>
-              <p>市场、自定义技能、版本与团队分享将在后续阶段接入。</p>
-              <p className="muted">当前仅验证桌面窗口生命周期，不显示模拟业务数据。</p>
-            </div>
+            <SkillCenter tab={skillTab} role={identity.snapshot.role} />
           </div>
         </div>
       );
