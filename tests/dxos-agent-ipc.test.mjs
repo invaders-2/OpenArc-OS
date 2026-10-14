@@ -72,16 +72,16 @@ const REQUIRED_COMMANDS = [
   "agent/run/get", "agent/run/inspect", "agent/run/list",
   "agent/tool/catalog", "agent/tool/describe", "agent/tool/call",
   "agent/capability/route",
-  "agent/project/create", "agent/project/list", "agent/project/snapshot",
+  "agent/project/create", "agent/project/list", "agent/project/snapshot", "agent/project/run",
   "agent/memory/list", "agent/memory/save",
   "agent/react/run",
   "agent/health",
 ];
 
-test("命令表：26 条白名单齐备，risk ∈ read|use|manage|destructive，credential 为布尔且中文摘要", () => {
+test("命令表：27 条白名单齐备，risk ∈ read|use|manage|destructive，credential 为布尔且中文摘要", () => {
   const keys = Object.keys(agentDomain.AGENT_COMMANDS).sort();
   assert.deepEqual(keys, [...REQUIRED_COMMANDS].sort());
-  assert.equal(keys.length, 26);
+  assert.equal(keys.length, 27);
   for (const [command, entry] of Object.entries(agentDomain.AGENT_COMMANDS)) {
     assert.ok(["read", "use", "manage", "destructive"].includes(entry.risk), command + " risk=" + entry.risk);
     assert.equal(typeof entry.credential, "boolean", command + " credential 非布尔");
@@ -91,6 +91,9 @@ test("命令表：26 条白名单齐备，risk ∈ read|use|manage|destructive�
   assert.equal(agentDomain.agentCommandRequiresCredential("agent/task/list"), false);
   assert.equal(agentDomain.agentCommandRisk("agent/task/delete"), "destructive");
   assert.equal(agentDomain.agentCommandRisk("agent/run/list"), "read");
+  // B4 收口：项目级 Agent 模式入口的 risk/credential 冻结值。
+  assert.equal(agentDomain.agentCommandRisk("agent/project/run"), "use");
+  assert.equal(agentDomain.agentCommandRequiresCredential("agent/project/run"), true);
   assert.equal(agentDomain.agentCommandRisk("agent/不存在"), null);
   assert.equal(agentDomain.isAgentCommand("agent/health"), true);
   assert.equal(agentDomain.isAgentCommand("credential/getRaw"), false);
@@ -295,7 +298,7 @@ test("真实命令：project/task/run/tool/memory/health 全链路，B6 未接�
   assert.equal(health.value.dependencies.db, true);
   assert.equal(health.value.dependencies.modelAdapter, false);
   assert.equal(health.value.dependencies.fsAdapter, false);
-  assert.equal(health.value.commands, 26);
+  assert.equal(health.value.commands, 27);
   assert.equal(health.value.eventChannel, "agent:event");
 });
 

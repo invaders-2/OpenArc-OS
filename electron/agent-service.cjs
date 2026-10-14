@@ -35,11 +35,15 @@ const agentRuntimeWorkspace = require("./agent-runtime-workspace.cjs");
 const agentRuntimeUsage = require("./agent-runtime-usage.cjs");
 const agentRuntimeEnvelope = require("./agent-runtime-envelope.cjs");
 const agentRuntime = require("./agent-runtime-manager.cjs");
+const agentRuntimeFallback = require("./agent-runtime-fallback.cjs");
+const agentRuntimeToolLoop = require("./agent-runtime-tool-loop.cjs");
+const capabilityTargetResolver = require("./capability-target-resolver.cjs");
 const reactDriver = require("./agent-react-driver.cjs");
 const builtinTools = require("./agent-builtin-tools.cjs");
 const toolResolver = require("./agent-tool-resolver.cjs");
 const capabilityRouter = require("./capability-router.cjs");
 const projectSnapshot = require("./agent-project-snapshot.cjs");
+const projectAgentMode = require("./project-agent-mode.cjs");
 const authDomain = require("./authorization-domain.cjs");
 
 const { createAgentError, normalizeAgentError, redactAgentValue, isAgentCommand, agentCommandNotAllowed, AGENT_ERR_COMMAND_NOT_ALLOWED, AGENT_ERR_INVALID_INPUT, AGENT_ERR_UNAUTHENTICATED, AGENT_ERR_FORBIDDEN, AGENT_ERR_NOT_FOUND, AGENT_ERR_DEPENDENCY_UNAVAILABLE, AGENT_ERR_INTERNAL, AGENT_EVENT_CHANNEL } = agentDomain;
@@ -218,13 +222,64 @@ function buildSkillCatalogSource(skillStore, skillRunner) {
 }
 
 /**
+ * project-agent-mode 的 agentRuntime 适配器。
+ * agent-runtime-manager.cjs:277 的 agentRunManager 是单例，prepare/create/start/append/complete/fail/cancel
+ * 都读写 this.controllers / this.pipeline（agent-runtime-manager.cjs:104-105、:168-169），
+ * 直接以方法引用注入会丢 this —— 必须 bind（project-agent-mode.cjs:20-22 明确要求）。
+ * normalizeEnvelope 取 agent-runtime-envelope.cjs:50 的 V1 归一化（无 this 依赖）。
+ */
+function bindAgentRuntimeManager(manager) {
+  if (!manager || typeof manager.prepare !== "function") return null;
+  return {
+    normalizeEnvelope: agentRuntimeEnvelope.normalizeAgentRequestEnvelopeV1,
+    prepare: manager.prepare.bind(manager),
+    create: manager.create.bind(manager),
+    start: manager.start.bind(manager),
+    append: manager.append.bind(manager),
+    complete: manager.complete.bind(manager),
+    fail: manager.fail.bind(manager),
+    cancel: manager.cancel.bind(manager),
+  };
+}
+
+/**
+ * project-agent-mode 要的模型出口是 { chatWithTools, autoFallback }（project-agent-mode.cjs:34-36、:143），
+ * 而 provider-adapter-bridge.cjs 只投影 { firstUsable, all, autoFallback, revealProvider, call }（:171）。
+ * 这里只做形状投影：chatWithTools → bridge.call —— 模型出口仍只有 provider-protocol-service.call 一条，
+ * 不新建第二套调用，也不把 api_key / credentialRef 带出桥。
+ */
+function createProjectProviderAdapter(providerAdapter) {
+  if (!providerAdapter || typeof providerAdapter.call !== "function") return null;
+  return {
+    autoFallback: () => (typeof providerAdapter.autoFallback === "function" ? providerAdapter.autoFallback() !== false : true),
+    chatWithTools: (input) => providerAdapter.call(input && typeof input === "object" ? input : {}),
+  };
+}
+
+/**
+ * project-agent-mode 的依赖缺失（project-agent-mode.cjs:45 / :47-54）→ Agent 域结构化依赖错误，保留 dependency。
+ * 也覆盖真实文件工具的 dependency_unavailable（agent-builtin-tools.cjs:99 的 fsAdapter 缺失）——
+ * 与 mapToolError 同口径，不折成 DXOS_ERR_INTERNAL 那种"看不出缺什么"的失败。
+ */
+function mapProjectModeError(error) {
+  const code = error && error.code ? String(error.code) : "";
+  if (code === AGENT_ERR_DEPENDENCY_UNAVAILABLE || code === "dependency_unavailable") {
+    return createAgentError(AGENT_ERR_DEPENDENCY_UNAVAILABLE, (error && error.message) || "项目 Agent 模式依赖不可用", {
+      dependency: error.dependency ? String(error.dependency) : null,
+      causeCode: code,
+    });
+  }
+  return error;
+}
+
+/**
  * 装配 Agent 域 bundle。dbPath / userDataDir 只为运行时工作区与日志定位，不作为返回值。
  * 额外可选键 toolCatalog 是测试/未来批次注入目录的 seam（production 省略即惰性 require 真实模块）。
  * B4 接线：skillStore/skillRunner（或预构造 skillSource）与 mcpAgentTools/mcpServersSnapshot
  * （或预构造 mcpSource）把 catalog 的 mcp/skill 空来源接上真实实现；未给即保持 available:false。
  * providerAdapter 由宿主注入 provider-adapter-bridge.cjs 的只读桥（未注入即保持结构化依赖缺失，不伪造）。
  */
-function createAgentBundle({ identityStore, authorization, authStore, modelService, providerAdapter = null, userDataDir, logger = null, clock = null, dbPath = null, toolCatalog = null, mcpAgentTools = null, mcpServersSnapshot = null, skillStore = null, skillRunner = null, mcpSource = null, skillSource = null } = {}) {
+function createAgentBundle({ identityStore, authorization, authStore, modelService, providerAdapter = null, userDataDir, logger = null, clock = null, dbPath = null, toolCatalog = null, mcpAgentTools = null, mcpServersSnapshot = null, skillStore = null, skillRunner = null, mcpSource = null, skillSource = null, projectAgent = null } = {}) {
   const now = typeof clock === "function" ? clock : () => Date.now();
   const idFactory = () => randomUUID();
   const db = (identityStore && (identityStore.connection || identityStore.db)) || null;
@@ -272,6 +327,37 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
   if (resolvedSkillSource) catalogSources.skill = resolvedSkillSource;
   if (catalog && typeof catalog.configureToolCatalog === "function") catalog.configureToolCatalog({ sources: catalogSources, auth: toolAuth, weather: null, clock: now });
   toolResolver.configureToolResolver({ catalog, auth: toolAuth });
+
+  // ---- 5b) 项目级 Agent 模式（B4c）的注入点位 ----
+  // project-agent-mode.cjs:77 configureProjectAgentMode 是模块级注入点；这里先把本 bundle 的
+  // 真实适配器固定到闭包（skillRunner / mcpAdapter / providerAdapter 都来自本 bundle），
+  // 在 agent/project/run 分发时再注入 —— 避免同进程里后建的 bundle（或测试夹具）把适配器串味。
+  // projectAgent 只作为测试/装配 seam 覆盖个别适配器；未覆盖的键仍用真实模块（不 mock）。
+  const skillRunnerAdapter = skillRunner && typeof skillRunner.runSkill === "function"
+    ? { runSkill: (skillId, args, ctx) => skillRunner.runSkill(String(skillId), args, ctx) }
+    : resolvedSkillSource
+      ? { runSkill: (skillId, args, ctx) => resolvedSkillSource.call(String(skillId), args, ctx) }
+      : null;
+  const mcpAdapter = mcpAgentTools && typeof mcpAgentTools.callByName === "function"
+    ? { callByName: (name, args) => mcpAgentTools.callByName(String(name), args && typeof args === "object" ? args : {}, {}) }
+    : null;
+  const projectAdapters = {
+    agentRuntime: bindAgentRuntimeManager(agentRuntime.agentRunManager),
+    usage: agentRuntimeUsage,
+    fallback: agentRuntimeFallback,
+    toolLoop: agentRuntimeToolLoop.serverAgentToolLoops,
+    capability: capabilityTargetResolver,
+    toolRunner: { runTool: (name, ctx, args) => builtinTools.runTool(String(name), ctx && typeof ctx === "object" ? ctx : {}, args && typeof args === "object" ? args : {}) },
+    skillRunner: skillRunnerAdapter,
+    mcpAdapter,
+    toolCatalog: catalog,
+    providerAdapter: createProjectProviderAdapter(providerAdapter),
+  };
+  if (projectAgent && typeof projectAgent === "object" && !Array.isArray(projectAgent)) {
+    for (const key of Object.keys(projectAdapters)) {
+      if (Object.prototype.hasOwnProperty.call(projectAgent, key)) projectAdapters[key] = projectAgent[key];
+    }
+  }
 
   // ---- 6) 下行事件（P1 信封；bootstrap 的 send 经 setEventSink 注入） ----
   const channel = createEventChannel({ domain: agentDomain.AGENT_EVENT_DOMAIN, clock: now });
@@ -505,6 +591,28 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
         accessOrForbidden(projectId, userId, true);
         projectSnapshot.writeProjectSnapshot(projectId);
         return { projectId, written: true };
+      }
+      case "agent/project/run": {
+        const projectId = requireStr(payload.projectId, 160);
+        const instruction = requireStr(payload.instruction, 8000);
+        if (!projectId || !instruction) throw createAgentError(AGENT_ERR_INVALID_INPUT, "projectId 与 instruction 必填");
+        const project = agentTaskStore.getProject(projectId);
+        if (!project) throw createAgentError(AGENT_ERR_NOT_FOUND, "项目不存在：" + projectId);
+        // 一次运行会真实调用模型与工具，按"使用"级动作校验项目权限（与 createTask 同口径）。
+        accessOrForbidden(projectId, userId, true);
+        const history = Array.isArray(payload.history) ? payload.history : [];
+        const preferences = payload.preferences && typeof payload.preferences === "object" ? payload.preferences : {};
+        // runId / taskId 不接受渲染层自报：Run 归属由 RunManager 依 actor + projectId 自行创建。
+        const session = { requestId: context.requestId || undefined, threadId: requireStr(payload.threadId, 120) || undefined };
+        // 每次分发都重注本 bundle 的适配器（见 5b）：未注入的适配器由 project-agent-mode 抛结构化
+        // AGENT_DEPENDENCY_UNAVAILABLE（project-agent-mode.cjs:100-149），绝不伪造成功。
+        projectAgentMode.configureProjectAgentMode({ ...projectAdapters, clock: now, logger });
+        try {
+          const outcome = await projectAgentMode.runProjectAgentMode(project, actor, instruction, history, preferences, session);
+          return { projectId, outcome };
+        } catch (error) {
+          throw mapProjectModeError(error);
+        }
       }
 
       // ---------------- memory ----------------

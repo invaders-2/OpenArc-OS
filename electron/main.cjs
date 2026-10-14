@@ -36,6 +36,8 @@ const { registerSkillIpc } = require("./skill-bootstrap.cjs");
 const { createProviderAdapter } = require("./provider-adapter-bridge.cjs");
 // D5-03：MCP 中心的宿主命令面（连接管理 + 能力发现；本批不开放工具调用）。
 const { registerMcpIpc } = require("./mcp-bootstrap.cjs");
+// B4 收口：把已装配的 MCP 连接目录（identity.mcpService）只读投影成 agent 工具目录的 mcp 来源。
+const { createMcpAgentBridge } = require("./mcp-agent-bridge.cjs");
 // D5-03 第十一批：关应用的唯一收尾顺序（MCP → Harness → modelProxy → store）。
 const { disposeAppResources } = require("./app-shutdown.cjs");
 const { createDefaultExecutorLauncher } = require("./executor-launcher.cjs");
@@ -534,6 +536,18 @@ app.whenReady().then(async () => {
     //   · providerAdapter 复用上面 B2 组装的只读桥（模型执行出口；密钥只在 service 内部解出）；
     //   · fsAdapter / workspaceAdapter 属 B6，未落地 → 命令侧保持结构化 AGENT_DEPENDENCY_UNAVAILABLE；
     //   · agent:event 与 model:event / task:event 同一条 trusted(event) 边界，renderer 只能订阅。
+    // B4 收口：MCP → Agent 工具目录的只读桥。
+    //   · 目录：mcpService.listConnections（appId=mcp-center 基线授权）→ 只列用户/组织真实可见的 server；
+    //     未连接/停用/无工具一律照实投影（status 非 connected、executable:false），不伪造 connected。
+    //   · 调用：不注入 approval / transport —— createMcpAgentTools 会先 fail closed（审批缺失，0 次传输），
+    //     即便放行也回 MCP_TOOL_INVOCATION_NOT_ENABLED（mcp-client.cjs:832-834 的产品边界未放宽）。
+    const mcpAgentBridge = identity.mcpService
+      ? createMcpAgentBridge({
+          mcpService: identity.mcpService,
+          // sessionRef 只由主进程从已认证身份推导（渲染层给不了）；appId 用 MCP 中心的承载 Principal。
+          context: () => ({ sessionRef: (identity.service && identity.service.current) || null, appId: "mcp-center" }),
+        })
+      : null;
     agentBundle = createAgentBundle({
       identityStore: identity.store,
       authorization: identity.authorization,
@@ -546,6 +560,9 @@ app.whenReady().then(async () => {
       dbPath: path.join(app.getPath("userData"), "identity.db"),
       // B4：把技能来源接进工具目录（listSkills + runSkill）；未装配时为 null，catalog 保持 available:false。
       skillSource: skillBundle ? skillBundle.skillSource : null,
+      // B4 收口：mcp 工具目录来源（同一快照同时喂 catalog 与 createMcpAgentTools 的可调用索引）。
+      mcpAgentTools: mcpAgentBridge ? mcpAgentBridge.mcpAgentTools : null,
+      mcpServersSnapshot: mcpAgentBridge ? mcpAgentBridge.mcpServersSnapshot : null,
     });
     registerAgentIpc({
       ipcMain,

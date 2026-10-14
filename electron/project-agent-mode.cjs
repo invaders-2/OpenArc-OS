@@ -246,7 +246,9 @@ async function runProjectAgentMode(project, actor, instruction, history = [], pr
   core.agentRuntime.create(runtime);
   core.agentRuntime.start(runtime.runId);
   // projectAgentMode.ts:122
-  const initialRootListing = compactObservation(core.toolRunner.runTool("fs_list", { rootNodeId: project.root_node_id, userId: actor.id }, {}));
+  // toolRunner 的真实实现是异步的（agent-builtin-tools.cjs:456 async runTool），
+  // 不 await 会把 Promise 当 observation 回填（模型只看到 "{}"）；对同步桩 await 无副作用。
+  const initialRootListing = compactObservation(await core.toolRunner.runTool("fs_list", { rootNodeId: project.root_node_id, userId: actor.id }, {}));
 
   // projectAgentMode.ts:123-136
   const invokeModel = async (messages, prompt, tools) => {
@@ -425,7 +427,7 @@ async function runProjectAgentMode(project, actor, instruction, history = [], pr
           if (!descriptor) throw new Error("本轮没有激活工具：" + call.name);
           let value;
           if (descriptor.source === "file") {
-            value = core.toolRunner.runTool(call.name, { rootNodeId: project.root_node_id, userId: actor.id }, args);
+            value = await core.toolRunner.runTool(call.name, { rootNodeId: project.root_node_id, userId: actor.id }, args);
             if (descriptor.risk !== "read") filesChanged = true;
           } else if (descriptor.source === "skill") {
             const runSkill = methodOf("skillRunner", "runSkill");
