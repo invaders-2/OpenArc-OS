@@ -12,6 +12,11 @@ const ROOT = path.resolve(__dirname, "../../..");
 const { createIdentityService, registerIdentityIpc } = require(path.join(ROOT, "electron/identity-bootstrap.cjs"));
 
 const uiURL = pathToFileURL(path.join(ROOT, "dist/index.html")).href;
+// Electron 的 userData 默认在 ~/Library/Application Support/Electron，localStorage（oa-dock 等）
+// 会跨探针运行残留；残留值可把"组织治理"从程序坞里删掉，D1 之后就打不开治理 App。
+// 先把它指向本进程专属临时目录，保证程序坞 = 产品默认（DOCK_DEFAULT）。
+const electronUserData = fs.mkdtempSync(path.join(os.tmpdir(), "oa-d3-04d-electron-"));
+app.setPath("userData", electronUserData);
 const SCOPE = process.env.D3D_UI_SCOPE || "all";
 const ADMIN = "admin@openarc.test";
 const PW = "admin-password-1";
@@ -94,11 +99,20 @@ app.whenReady().then(async () => {
       check("G5 · Departments 面板显示部门与计数", await waitFn("Array.from(document.querySelectorAll('[data-org-dept]')).some(function(e){return e.textContent.indexOf('UI 部门')>=0;})"), await txt('[data-org-dept]'));
       await click('[data-org-nav="app"]');
       check("G6 · Apps 面板列出内置 App", await waitFn("document.querySelectorAll('[data-org-app]').length>=5"), await js("return document.querySelectorAll('[data-org-app]').length"));
-      // D4-03 的 App TOOL-scope 工具权限入口（data-gov-tool-*）与 Resource Access 来源视图（data-d3-04d-access-*）
-      // 已从当前组织治理 App 移除（只剩 org / app / audit 三分区，且无对应钩子）。该能力现行覆盖：
-      //   · TOOL 权限授予 / 撤销 → tests/d4-main-e2e.mjs（真实治理 UI 走产品入口）
+      // D4-03 的 App TOOL-scope 工具权限控件（data-gov-tool-*）与 Resource Access 来源视图（data-d3-04d-access-*）
+      // 已从当前组织治理 App 移除（只剩 org / app / audit 三分区，且无对应钩子）。现行覆盖：
+      //   · TOOL-scope 授予 / 撤销（仅剩产品命令白名单 governance/grantAppToolAccess 等，UI 已无入口）
+      //     → tests/governance-tool-grant.test.mjs（IPC 路由 + 授权语义逐条）
+      //   · 现行 APP 访问"权限策略"入口（权限代码 → 决策 → 保存）→ 本文件下方 G7
       //   · 资源访问来源 OWNER_POLICY → tests/governance-resource-access.test.mjs
       // 因此删除这两段已无产品对应的陈旧断言。
+      // 现行 APP 访问入口：权限策略（权限代码 → 决策）→ identity/app-permission-policy-save。
+      // 断言"某权限码的真实策略被写入、并在重新拉取快照后按权限码读回"，替代已删除的 TOOL-scope 控件断言。
+      const POLICY_CODE = "app.ai.tool.permission-probe";
+      await setValue('[data-org-field="policy-code"]', POLICY_CODE);
+      await setValue('[data-org-field="policy-decision"]', "allow");
+      await click('[data-org-action="save-policy"]');
+      check("G7 · APP 访问保存权限策略并按权限码读回", await waitFn("document.querySelector('[data-org-policy=\"" + POLICY_CODE + "\"]')!==null"), await txt('[data-org-policy-list]'));
       await click('[data-org-nav="audit"]');
       check("G8 · Audit 面板有真实治理记录", await waitFn("document.querySelectorAll('[data-org-audit-item]').length>=1"), await js("return document.querySelectorAll('[data-org-audit-item]').length"));
     }
@@ -148,6 +162,7 @@ app.whenReady().then(async () => {
   } finally {
     try { win?.destroy(); } catch { /* ignore */ }
     if (userData) { try { fs.rmSync(userData, { recursive: true, force: true }); } catch { /* ignore */ } }
+    try { fs.rmSync(electronUserData, { recursive: true, force: true }); } catch { /* ignore */ }
   }
   out("RESULT " + JSON.stringify(report));
   app.quit();
