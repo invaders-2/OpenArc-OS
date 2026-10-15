@@ -18,7 +18,34 @@
 "use strict";
 
 const path = require("node:path");
+const { AsyncLocalStorage } = require("node:async_hooks");
 const { randomUUID } = require("node:crypto");
+
+/**
+ * Z1 · 自动化定义授权在异步调用链中的传递。
+ * 只由 automationAdapter 的调用包住：定义已授权时，把定义授权翻译成 MCP 客户端认的审批凭证
+ * （approval.decision = ALLOWED，reasonCode = AUTOMATION_DEFINITION_AUTHORIZED）经既有
+ * mcpTransport.callTool(request, gate) 传入。临时发起（非自动化）的集成命令不在该上下文中，
+ * 拿不到凭证 → 既有「开关 + 审批决定」双条件原样生效，不绕过。
+ */
+const automationAuthorizationContext = new AsyncLocalStorage();
+
+/** 自动化调用链内才返回审批凭证；否则 null（fail closed）。 */
+function automationAuthorizationGate() {
+  const store = automationAuthorizationContext.getStore();
+  if (!store || store.authorized !== true) return null;
+  return {
+    authorization: {
+      invocationEnabled: true,
+      approval: {
+        decision: "ALLOWED",
+        reasonCode: "AUTOMATION_DEFINITION_AUTHORIZED",
+        definitionId: store.definitionId || null,
+        authorizationRef: store.authorizationRef || null,
+      },
+    },
+  };
+}
 
 const {
   createPluginRegistry,
@@ -243,8 +270,10 @@ function createPluginBundle(options = {}) {
     }
     if (mcpTransport) {
       // 既有 MCP tools/call 通道（createMcpLiveTransport 产物）：只做形状适配，不新造传输。
+      // gate 只来自自动化定义授权上下文（automationAuthorizationGate()）；临时发起的集成命令 gate=null，
+      // MCP 客户端「开关 + 审批决定」双条件原样生效。
       return async (server, tool, args) => {
-        try { return normalizeMcpResult(await mcpTransport.callTool({ serverId: server, toolName: tool, arguments: args && typeof args === "object" ? args : {} })); }
+        try { return normalizeMcpResult(await mcpTransport.callTool({ serverId: server, toolName: tool, arguments: args && typeof args === "object" ? args : {} }, automationAuthorizationGate())); }
         catch (error) { if (error && typeof error.code === "string" && error.code.startsWith("INTEGRATION_")) throw error; throw mcpTransportError(String((error && error.message) || error)); }
       };
     }
@@ -994,7 +1023,7 @@ function createPluginBundle(options = {}) {
    *   · Y2：领星 / 紫鸟先把作业真正启动，再按源 automationBusinessActions.ts:20-61 等到终态才返回；
    *     等待只读本地作业状态，不新增任何外发通道，与"授权通道待决策"互不冲突。
    */
-  const automationAdapter = {
+  const automationAdapterRaw = {
     async lingxingCacheSync(args) {
       await gateOrThrow("lingxing");
       // 源行 109-112：启动作业仍照旧，但对外结果改为等终态（不再"启动作业即返回"）。
@@ -1032,6 +1061,29 @@ function createPluginBundle(options = {}) {
       return sent.value !== undefined ? sent.value : sent;
     },
   };
+
+  /**
+   * Z1：automationAdapter 的对外包装。最后一个实参是 automation-service 解析出的**定义授权摘要**
+   * （{ authorized:true, definitionId, authorizationRef }）；有它才进入 automationAuthorizationContext，
+   * 让 transport 层拿到 MCP 审批凭证。直接调用（无授权摘要）时行为与从前逐字一致。
+   */
+  function withAutomationAuthorization(fn) {
+    return function (...callArgs) {
+      const authorization = callArgs.length ? callArgs[callArgs.length - 1] : undefined;
+      if (authorization && authorization.authorized === true) {
+        const rest = callArgs.slice(0, -1);
+        return automationAuthorizationContext.run(
+          { authorized: true, definitionId: authorization.definitionId, authorizationRef: authorization.authorizationRef },
+          () => fn.apply(null, rest),
+        );
+      }
+      return fn.apply(null, callArgs);
+    };
+  }
+  const automationAdapter = {};
+  for (const [name, fn] of Object.entries(automationAdapterRaw)) {
+    automationAdapter[name] = withAutomationAuthorization(fn);
+  }
 
   return {
     hostAppId: HOST_APP_ID,

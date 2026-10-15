@@ -86,6 +86,61 @@ function isServerAutomationAction(action) {
   return !!action && SERVER_ACTION_SET.has(action.type);
 }
 
+// ---------------------------------------------------------------------------
+// Z1 · 「定义即授权」的纯逻辑部分（授权记录的形状与动作范围覆盖）
+// ---------------------------------------------------------------------------
+//
+// 产品已批准：管理员（认证会话）创建并启用自动化定义 = 对该定义声明的动作范围授权；
+// 到点执行集成类动作时凭该定义的授权记录通过，不再逐次人工审批。
+// 这里只冻结"授权记录怎么落、动作范围怎么算、范围是否覆盖"三件事；
+// 落库与校验在 automation-store.cjs，执行前闸门在 automation-service.cjs。
+// 授权记录仍然写既有 authorization_audit 表（不新建第二套审批权威）。
+
+/** 授权来源标识：写进 authorization_audit.permission_source。 */
+const AUTOMATION_AUTHORIZATION_SOURCE = "automation_definition";
+/** 授权生命周期动作码（authorization_audit.action）。 */
+const AUTOMATION_AUTHORIZE_ACTION = "automation.authorize";
+const AUTOMATION_REVOKE_ACTION = "automation.revoke";
+const AUTOMATION_EXECUTE_ACTION = "automation.execute";
+/** 资源引用前缀：resource_ref = "automation:" + 定义 id。 */
+const AUTOMATION_AUTHORIZATION_REF_PREFIX = "automation:";
+
+/** 定义 id → 授权资源引用（authorization_audit.resource_ref）。 */
+function automationAuthorizationRef(id) {
+  return AUTOMATION_AUTHORIZATION_REF_PREFIX + String(id == null ? "" : id);
+}
+
+/**
+ * 定义一个动作真正会触及的动作类型集合（workflow_sequence 递归展开）。
+ * 返回排序后的去重数组；不是合法自动化动作时返回 null（调用方据此拒绝）。
+ */
+function actionTypeScope(action) {
+  if (!isAutomationAction(action)) return null;
+  const out = new Set();
+  const walk = (node) => {
+    if (!isAutomationAction(node)) return;
+    out.add(node.type);
+    if (node.type === "workflow_sequence") {
+      const children = node.args && Array.isArray(node.args.actions) ? node.args.actions : [];
+      for (const child of children) walk(child);
+    }
+  };
+  walk(action);
+  return [...out].sort();
+}
+
+/**
+ * 授权范围是否覆盖即将执行的动作：执行动作展开后的每一个类型都必须在授权范围内。
+ * scopeTypes 为 null / 非数组 / 空 → 一律不覆盖（默认拒绝）。
+ */
+function scopeCoversAction(scopeTypes, action) {
+  const needed = actionTypeScope(action);
+  if (!needed || !needed.length) return false;
+  if (!Array.isArray(scopeTypes) || !scopeTypes.length) return false;
+  const authorized = new Set(scopeTypes.map((item) => String(item)));
+  return needed.every((type) => authorized.has(type));
+}
+
 /**
  * automation:command 白名单。
  *   risk       read | use | manage | destructive（与 skill-domain.cjs:77 同级定义）
@@ -579,6 +634,14 @@ module.exports = {
   SERVER_ATOMIC_ACTIONS,
   isAutomationAction,
   isServerAutomationAction,
+  AUTOMATION_AUTHORIZATION_SOURCE,
+  AUTOMATION_AUTHORIZE_ACTION,
+  AUTOMATION_REVOKE_ACTION,
+  AUTOMATION_EXECUTE_ACTION,
+  AUTOMATION_AUTHORIZATION_REF_PREFIX,
+  automationAuthorizationRef,
+  actionTypeScope,
+  scopeCoversAction,
   isAutomationCommand,
   automationCommandEntry,
   automationCommandRisk,

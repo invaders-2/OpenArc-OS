@@ -101,7 +101,7 @@ function createAutomationBundle(options = {}) {
     ? { normalize: (args) => adapters.developerApps.normalizeAction(args) }
     : null;
 
-  if (db) store.configureAutomationStore({ db, clock, idFactory: options.idFactory, appActions, staleAfterMs });
+  if (db) store.configureAutomationStore({ db, clock, idFactory: options.idFactory, appActions, staleAfterMs, authorizationPolicy: options.authorizationPolicy });
 
   // ---- 事件（P1 信封；bootstrap 的 send 经 setEventSink 注入） ----
   const channel = createEventChannel({ domain: domain.AUTOMATION_EVENT_DOMAIN, clock });
@@ -270,23 +270,23 @@ function createAutomationBundle(options = {}) {
     if (action.type === "app_action") return executeAppAction(action, context);
 
     if (action.type === "lingxing_cache_sync") {
-      return runAdapter("integrations", "lingxingCacheSync", action.args);
+      return runAdapter("integrations", "lingxingCacheSync", action.args, context.automationAuthorization);
     }
     if (action.type === "ziniao_download") {
-      return runAdapter("integrations", "ziniaoDownload", action.args);
+      return runAdapter("integrations", "ziniaoDownload", action.args, context.automationAuthorization);
     }
     if (action.type === "ziniao_data_sync") {
-      return runAdapter("integrations", "ziniaoDataSync", action.args);
+      return runAdapter("integrations", "ziniaoDataSync", action.args, context.automationAuthorization);
     }
     if (action.type === "dingtalk_group_notify") {
       // 适配器约定：成功返回 { ok:true, channel }；业务失败返回 { ok:false, error, detail }（记 AUTOMATION_UNAVAILABLE）。
-      const sent = await runAdapter("integrations", "dingtalkGroupNotify", String(action.args.channelId || "") || undefined, { text: notificationContent(action.args, context.previousResult) });
+      const sent = await runAdapter("integrations", "dingtalkGroupNotify", String(action.args.channelId || "") || undefined, { text: notificationContent(action.args, context.previousResult) }, context.automationAuthorization);
       if (!sent || sent.ok !== true) throw domain.createAutomationError(domain.AUTOMATION_ERR_UNAVAILABLE, (sent && (sent.detail || sent.error)) || "钉钉群机器人发送失败");
       return "钉钉通知已发送到群机器人「" + String(sent.channel || "") + "」";
     }
     if (action.type === "dingtalk_person_notify") {
       const recipient = String(action.args.recipient || "");
-      await runAdapter("integrations", "dingtalkPersonNotify", recipient, notificationContent(action.args, context.previousResult));
+      await runAdapter("integrations", "dingtalkPersonNotify", recipient, notificationContent(action.args, context.previousResult), context.automationAuthorization);
       return "钉钉通知已发送给 " + recipient;
     }
     if (action.type === "music_play") {
@@ -316,6 +316,38 @@ function createAutomationBundle(options = {}) {
     return { maxAttempts, delayMs };
   }
 
+  // -------------------------------------------------------------------------
+  // Z1 · 定义即授权的执行前闸门（只对服务端/集成类动作）
+  // -------------------------------------------------------------------------
+  //
+  // 产品已批准：管理员创建并启用定义 = 授权该定义声明的动作范围；到点执行集成类动作时
+  // 凭定义授权记录通过，不再逐次人工审批。授权记录与校验在 automation-store.cjs（既有
+  // authorization_audit 表）；这里只做"执行前先过闸门、每次运行落审计"。
+  // 未过闸门 → 结构化拒绝且 0 次适配器调用（也就 0 次外发）。
+  function requiresDefinitionAuthorization(action) {
+    return domain.isServerAutomationAction(action);
+  }
+
+  /** 过闸门：成功落 execute/allow 审计；失败落 execute/deny 审计并回结构化错误。 */
+  function checkDefinitionAuthorization(userId, automation, action, run) {
+    try {
+      const info = store.assertDefinitionAuthorization(userId, automation.id, action, { at: clock() });
+      store.recordRunAuthorization(run.id, info, "allow");
+      return { denied: false, info };
+    } catch (error) {
+      const normalized = domain.isAutomationError(error)
+        ? error
+        : domain.createAutomationError(domain.AUTOMATION_ERR_INTERNAL, String((error && error.message) || error));
+      const reasonCode = normalized.detail && normalized.detail.reasonCode ? normalized.detail.reasonCode : normalized.code;
+      try {
+        store.recordRunAuthorization(run.id, { definitionId: automation.id, principal: automation.userId, scope: [] }, "deny", reasonCode);
+      } catch {
+        /* 审计失败不改变拒绝结果 */
+      }
+      return { denied: true, error: normalized };
+    }
+  }
+
   /**
    * 执行一条已领取的运行。返回 { runId, status, attempts, result?, error? }。
    * 无论成功 / 失败 / 取消，都恰好调用一次 completeAutomationRun 落库。
@@ -342,11 +374,24 @@ function createAutomationBundle(options = {}) {
       if (isCancelled()) {
         return { runId: run.id, status: "cancelled", attempts: 0, error: "运行已取消" };
       }
+      // Z1：集成类动作执行前先校验定义授权；未过闸门 → 结构化拒绝，绝不调用适配器（0 外发）。
+      // 通过后把授权摘要随 context 传进适配器，由 plugin-service 翻译成 MCP 客户端的审批凭证。
+      let automationAuthorization = null;
+      if (requiresDefinitionAuthorization(action)) {
+        const gate = checkDefinitionAuthorization(userId, automation, action, run);
+        if (gate.denied) {
+          const message = String((gate.error && gate.error.message) || "自动化定义授权校验失败");
+          store.completeAutomationRun(userId, run.id, { status: "failed", error: message });
+          emit("progress", { automationId: automation.id, runId: run.id, phase: "failed", attempts: 0, error: message, errorCode: gate.error.code });
+          return { runId: run.id, status: "failed", attempts: 0, error: message, errorCode: gate.error.code, errorDetail: gate.error.detail };
+        }
+        automationAuthorization = gate.info;
+      }
       for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         if (isCancelled()) break;
         attempts = attempt;
         try {
-          const output = await executeAction(action, { userId, previousResult: "" });
+          const output = await executeAction(action, { userId, previousResult: "", automationAuthorization });
           if (isCancelled()) break;
           const resultText = JSON.stringify({ attempts, output });
           store.completeAutomationRun(userId, run.id, { status: "success", result: resultText });
@@ -498,15 +543,18 @@ function createAutomationBundle(options = {}) {
       case "automation/get":
         return { automation: store.getAutomation(userId, requireAutomationId(payload)) };
       case "automation/create":
-        return { automation: store.createAutomation(userId, definitionOf(payload)) };
+        // Z1：认证会话创建定义 → 同刻落授权（principal = 本次解析出的 actor）。
+        return { automation: store.createAutomation(userId, definitionOf(payload), { principal: userId, sessionRef: context.sessionRef }) };
       case "automation/update":
-        return { automation: store.updateAutomation(userId, requireAutomationId(payload), definitionOf(payload)) };
+        return { automation: store.updateAutomation(userId, requireAutomationId(payload), definitionOf(payload), { principal: userId, sessionRef: context.sessionRef }) };
       case "automation/delete":
-        return store.deleteAutomation(userId, requireAutomationId(payload));
+        return store.deleteAutomation(userId, requireAutomationId(payload), { principal: userId });
       case "automation/enable":
-        return { automation: store.updateAutomation(userId, requireAutomationId(payload), { enabled: true }) };
+        // Z1：启用 = 授权（按当前动作范围重新落授权记录）。
+        return { automation: store.updateAutomation(userId, requireAutomationId(payload), { enabled: true }, { principal: userId, sessionRef: context.sessionRef }) };
       case "automation/disable":
-        return { automation: store.updateAutomation(userId, requireAutomationId(payload), { enabled: false }) };
+        // Z1：停用 = 撤销（授权即失效）。
+        return { automation: store.updateAutomation(userId, requireAutomationId(payload), { enabled: false }, { principal: userId }) };
       case "automation/runNow": {
         const claim = store.runAutomationNow(userId, requireAutomationId(payload), requireStr(payload.clientId, 60) || "manual");
         if (payload.await === true) {

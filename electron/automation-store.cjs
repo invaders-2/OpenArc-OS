@@ -46,6 +46,7 @@
 
 const { randomUUID } = require("node:crypto");
 const domain = require("./automation-domain.cjs");
+const { hashRef } = require("./identity-domain.cjs");
 
 const {
   createAutomationError,
@@ -54,8 +55,11 @@ const {
   AUTOMATION_ERR_INVALID_INPUT,
   AUTOMATION_ERR_NOT_FOUND,
   AUTOMATION_ERR_CONFLICT,
+  AUTOMATION_ERR_FORBIDDEN,
   AUTOMATION_ERR_DEPENDENCY_UNAVAILABLE,
 } = domain;
+/** 自动化承载的 App Principal；与 automation-service.cjs 的 HOST_APP_ID 同值（避免反向依赖）。 */
+const AUTHORIZATION_APP_ID = "ai";
 
 // ---------------------------------------------------------------------------
 // 依赖注入
@@ -67,6 +71,12 @@ let automationAppActions = null;
 /** 源 automations.ts:315：stale 判定是 cutoff = now - 10 分钟，started_at 早于 cutoff 才算僵尸。 */
 const DEFAULT_STALE_AFTER_MS = 10 * 60_000;
 let automationStaleAfterMs = DEFAULT_STALE_AFTER_MS;
+/**
+ * Z1：定义授权的校验策略。默认 false —— 定义授权跨会话持久（无人值守到点执行不再要求授权人在线）；
+ * 置 true 时额外要求授权人账号仍 ACTIVE 且有活跃会话（"会话已失效且策略要求有效"的失败关闭）。
+ */
+const DEFAULT_AUTHORIZATION_POLICY = Object.freeze({ requireActiveAuthorizer: false });
+let automationAuthorizationPolicy = DEFAULT_AUTHORIZATION_POLICY;
 
 function configureAutomationStore(options) {
   const opts = options || {};
@@ -76,7 +86,12 @@ function configureAutomationStore(options) {
   // staleAfterMs 只接受正数；未给时沿用默认 10 分钟（测试注入小阈值以推进假时钟）。
   if (Number.isFinite(opts.staleAfterMs) && opts.staleAfterMs > 0) automationStaleAfterMs = Math.floor(opts.staleAfterMs);
   automationAppActions = opts.appActions && typeof opts.appActions.normalize === "function" ? opts.appActions : null;
-  return { db: automationDb, appActions: !!automationAppActions, staleAfterMs: automationStaleAfterMs };
+  if (opts.authorizationPolicy && typeof opts.authorizationPolicy === "object") {
+    automationAuthorizationPolicy = Object.freeze({
+      requireActiveAuthorizer: opts.authorizationPolicy.requireActiveAuthorizer === true,
+    });
+  }
+  return { db: automationDb, appActions: !!automationAppActions, staleAfterMs: automationStaleAfterMs, authorizationPolicy: automationAuthorizationPolicy };
 }
 
 function resetAutomationStoreForTests() {
@@ -85,6 +100,7 @@ function resetAutomationStoreForTests() {
   automationIdFactory = () => randomUUID();
   automationAppActions = null;
   automationStaleAfterMs = DEFAULT_STALE_AFTER_MS;
+  automationAuthorizationPolicy = DEFAULT_AUTHORIZATION_POLICY;
 }
 
 function getAutomationDb() {
@@ -156,6 +172,10 @@ function runView(row) {
   return {
     id: row.id,
     automationId: row.automation_id,
+    // Z1：run 上如实带上授权来源（definitionId = automationId；authorizedBy = 定义授权人 principal）。
+    // 查询侧以 a.created_by AS definition_owner 提供；无 join 的旧查询该字段为 null（不猜）。
+    definitionId: row.automation_id,
+    authorizedBy: row.definition_owner == null ? null : String(row.definition_owner),
     scheduledFor: row.scheduled_for,
     status: row.status,
     clientId: row.client_id,
@@ -164,6 +184,191 @@ function runView(row) {
     createdAt: row.created_at,
     startedAt: row.started_at,
     completedAt: row.completed_at,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Z1 · 「定义即授权」的授权记录与校验（动作范围纯逻辑在 automation-domain.cjs）
+// ---------------------------------------------------------------------------
+//
+// 产品已批准：管理员（认证会话）创建并启用定义 = 对该定义声明的动作范围授权。
+// 授权记录仍写**既有** authorization_audit 表（不新增表 / 不升 SCHEMA_VERSION）：
+//   · automation.authorize / allow   —— 创建、启用、动作范围变更时落（记录 principal + 范围 + 时间）；
+//   · automation.revoke  / deny      —— 停用 / 删除时落（授权即失效）；
+//   · automation.execute / allow|deny —— 每次运行落一条（request_id = runId，供按运行追溯）。
+// 校验取"最近一条 authorize/revoke"作为当前授权状态：无记录 / 最近为 deny / 范围不覆盖 → 拒绝。
+
+const AUTHORIZATION_AUDIT_INSERT =
+  "INSERT INTO authorization_audit (at, actor_user_id, target_user_id, app_id, department_id, resource_ref, action, decision, reason_code, permission_source, request_id, old_permissions, new_permissions) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)";
+const LATEST_AUTHORIZATION_SQL =
+  "SELECT * FROM authorization_audit WHERE resource_ref=? AND action IN (?,?) ORDER BY id DESC LIMIT 1";
+
+function authorizationRef(id) {
+  return domain.automationAuthorizationRef(id);
+}
+
+function parseJsonSafe(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+/** 写入一条授权审计（形状与 authorization-store.auditAuthorization 同表同列，不新增审批权威）。 */
+function writeAuthorizationAudit(record) {
+  const db = getAutomationDb();
+  db.prepare(AUTHORIZATION_AUDIT_INSERT).run(
+    record.at,
+    record.principal == null ? null : String(record.principal),
+    record.targetUserId == null ? null : String(record.targetUserId),
+    record.appId == null ? null : String(record.appId),
+    null,
+    record.resourceRef,
+    record.action,
+    record.decision,
+    record.reasonCode == null ? null : String(record.reasonCode),
+    record.permissionSource == null ? null : String(record.permissionSource),
+    record.requestId == null ? null : String(record.requestId),
+    record.oldPermissions == null ? null : JSON.stringify(record.oldPermissions),
+    record.newPermissions == null ? null : JSON.stringify(record.newPermissions),
+  );
+  return record;
+}
+
+/** 对当前定义落一条"允许"授权（动作范围快照取自定义当前 action_json）。 */
+function recordDefinitionAuthorization(userId, id, options = {}) {
+  const row = getAutomationRow(userId, id);
+  if (!row) throw createAutomationError(AUTOMATION_ERR_NOT_FOUND, "自动化任务不存在");
+  const action = parseJsonSafe(row.action_json);
+  const scope = domain.actionTypeScope(action) || [];
+  const principal = options.principal != null ? String(options.principal) : String(userId);
+  const at = Number.isFinite(options.at) ? options.at : now();
+  return writeAuthorizationAudit({
+    at,
+    principal,
+    targetUserId: principal,
+    appId: AUTHORIZATION_APP_ID,
+    resourceRef: authorizationRef(id),
+    action: domain.AUTOMATION_AUTHORIZE_ACTION,
+    decision: "allow",
+    reasonCode: null,
+    permissionSource: domain.AUTOMATION_AUTHORIZATION_SOURCE,
+    requestId: null,
+    oldPermissions: null,
+    // scope 是"该动作会触及的动作类型集合"；sessionRefHash 仅作授权人会话的可追溯摘要，不存明文。
+    newPermissions: { definitionId: String(id), scope, sessionRefHash: options.sessionRef ? hashRef(options.sessionRef) : null },
+  });
+}
+
+/** 对该定义落一条"拒绝/撤销"授权（停用、删除）。授权即失效。 */
+function revokeDefinitionAuthorization(userId, id, reasonCode, options = {}) {
+  const principal = options.principal != null ? String(options.principal) : String(userId);
+  const at = Number.isFinite(options.at) ? options.at : now();
+  return writeAuthorizationAudit({
+    at,
+    principal,
+    targetUserId: principal,
+    appId: AUTHORIZATION_APP_ID,
+    resourceRef: authorizationRef(id),
+    action: domain.AUTOMATION_REVOKE_ACTION,
+    decision: "deny",
+    reasonCode: reasonCode || "AUTHORIZATION_REVOKED",
+    permissionSource: domain.AUTOMATION_AUTHORIZATION_SOURCE,
+    requestId: null,
+    oldPermissions: null,
+    newPermissions: null,
+  });
+}
+
+/** 当前授权状态（最近一条 authorize/revoke）。 */
+function latestDefinitionAuthorization(id) {
+  const db = getAutomationDb();
+  return db.prepare(LATEST_AUTHORIZATION_SQL).get(authorizationRef(id), domain.AUTOMATION_AUTHORIZE_ACTION, domain.AUTOMATION_REVOKE_ACTION) || null;
+}
+
+/**
+ * 执行前授权闸门（只对服务端/集成类动作调用）。
+ * 通过返回授权来源摘要；任一条件不满足抛 AUTOMATION_FORBIDDEN（结构化拒绝，绝不返回"未授权但继续"）。
+ * 拒绝原因全部落在 error.detail.reasonCode，供审计与测试稳定判别。
+ */
+function assertDefinitionAuthorization(userId, id, action, options = {}) {
+  const definitionId = String(id);
+  const deny = (reasonCode, message) => createAutomationError(AUTOMATION_ERR_FORBIDDEN, message, {
+    reasonCode,
+    definitionId,
+    action: action && action.type ? String(action.type) : null,
+  });
+  const row = getAutomationRow(userId, id);
+  if (!row) throw createAutomationError(AUTOMATION_ERR_NOT_FOUND, "自动化任务不存在");
+  if (!row.enabled) throw deny("DEFINITION_DISABLED", "自动化已停用，定义授权不生效");
+  const record = latestDefinitionAuthorization(definitionId);
+  if (!record) throw deny("NO_AUTHORIZATION_RECORD", "没有该自动化定义的授权记录，拒绝执行");
+  if (String(record.decision || "").toLowerCase() !== "allow") throw deny("AUTHORIZATION_REVOKED", "自动化定义授权已撤销或失效，拒绝执行");
+  const payload = parseJsonSafe(record.new_permissions);
+  const scope = payload && Array.isArray(payload.scope) ? payload.scope : [];
+  if (!domain.scopeCoversAction(scope, action)) throw deny("ACTION_OUT_OF_SCOPE", "动作超出该定义的授权范围，拒绝执行");
+
+  const policy = Object.assign({}, automationAuthorizationPolicy, options.policy && typeof options.policy === "object" ? options.policy : {});
+  if (policy.requireActiveAuthorizer) {
+    const at = Number.isFinite(options.at) ? options.at : now();
+    const authorizer = record.actor_user_id == null ? "" : String(record.actor_user_id);
+    const db = getAutomationDb();
+    const user = authorizer ? db.prepare("SELECT id,status FROM users WHERE id=?").get(authorizer) : null;
+    if (!user || user.status !== "ACTIVE") throw deny("AUTHORIZER_INACTIVE", "授权人账号不存在或已停用，定义授权失效");
+    const session = db.prepare("SELECT COUNT(*) AS c FROM sessions WHERE user_id=? AND revoked_at IS NULL AND expires_at>? AND idle_expires_at>?").get(authorizer, at, at);
+    if (!session || !session.c) throw deny("AUTHORIZER_SESSION_EXPIRED", "授权人会话已失效且策略要求有效，定义授权失效");
+  }
+
+  return {
+    // authorized:true 是适配器识别"这是定义授权来源"的显式标记（plugin-service 的 ALS 包装用）。
+    authorized: true,
+    definitionId,
+    principal: record.actor_user_id == null ? null : String(record.actor_user_id),
+    scope: scope.map((item) => String(item)),
+    authorizedAt: record.at,
+    authorizationId: record.id,
+    authorizationRef: record.resource_ref,
+    reasonCode: null,
+  };
+}
+
+/** 每次运行一条 execute 审计（成功授权 / 拒绝都落，request_id = runId）。 */
+function recordRunAuthorization(runId, info, decision, reasonCode) {
+  if (!info || info.definitionId == null) return null;
+  const principal = info.principal == null ? null : String(info.principal);
+  return writeAuthorizationAudit({
+    at: now(),
+    principal,
+    targetUserId: principal,
+    appId: AUTHORIZATION_APP_ID,
+    resourceRef: authorizationRef(info.definitionId),
+    action: domain.AUTOMATION_EXECUTE_ACTION,
+    decision: decision === "allow" ? "allow" : "deny",
+    reasonCode: decision === "allow" ? null : (reasonCode || "AUTHORIZATION_DENIED"),
+    permissionSource: domain.AUTOMATION_AUTHORIZATION_SOURCE,
+    requestId: String(runId),
+    oldPermissions: null,
+    newPermissions: decision === "allow" ? { definitionId: String(info.definitionId), scope: info.scope || [], runId: String(runId) } : null,
+  });
+}
+
+/** 按运行记录读取授权来源（供 UI / 测试追溯 run 的 principal 与定义）。 */
+function authorizationForRun(userId, runId) {
+  const db = getAutomationDb();
+  const run = db.prepare("SELECT r.*, a.created_by FROM automation_runs r JOIN automations a ON a.id=r.automation_id WHERE r.id=? AND a.created_by=?").get(String(runId), String(userId));
+  if (!run) throw createAutomationError(AUTOMATION_ERR_NOT_FOUND, "执行记录不存在");
+  const row = db.prepare("SELECT * FROM authorization_audit WHERE request_id=? AND action=? ORDER BY id DESC LIMIT 1").get(String(runId), domain.AUTOMATION_EXECUTE_ACTION) || null;
+  if (!row) return null;
+  const payload = parseJsonSafe(row.new_permissions);
+  return {
+    runId: String(runId),
+    definitionId: run.automation_id,
+    principal: row.actor_user_id == null ? null : String(row.actor_user_id),
+    decision: row.decision,
+    reasonCode: row.reason_code,
+    scope: payload && Array.isArray(payload.scope) ? payload.scope : [],
+    at: row.at,
   };
 }
 
@@ -181,7 +386,8 @@ function getAutomationRow(userId, id) {
 function listRunRows(automationId, limit) {
   const db = getAutomationDb();
   const capped = Math.max(1, Math.min(200, Number.isFinite(limit) ? Math.round(limit) : RUN_HISTORY_LIMIT));
-  return db.prepare("SELECT * FROM automation_runs WHERE automation_id=? ORDER BY created_at DESC LIMIT ?").all(String(automationId), capped);
+  // Z1：带出定义创建人作为 run 的授权来源 principal（authorizedBy）。
+  return db.prepare("SELECT r.*, a.created_by AS definition_owner FROM automation_runs r JOIN automations a ON a.id=r.automation_id WHERE r.automation_id=? ORDER BY r.created_at DESC LIMIT ?").all(String(automationId), capped);
 }
 
 /** 源 automations.ts:250-255 */
@@ -191,24 +397,27 @@ function listAutomations(userId) {
   return rows.map((row) => Object.assign(automationView(row), { runs: listRunRows(row.id, RUN_HISTORY_LIMIT).map(runView) }));
 }
 
-/** 源 automations.ts:257-264 */
-function createAutomation(userId, input) {
+/** 源 automations.ts:257-264；Z1：创建即落定义授权（认证会话的 principal = userId）。 */
+function createAutomation(userId, input, options = {}) {
   const db = getAutomationDb();
   const at = now();
   const value = normalizeDefinition(input, { now: at, appActions: automationAppActions });
   const id = automationIdFactory();
   db.prepare("INSERT INTO automations(id,created_by,title,instruction,action_json,schedule_json,enabled,next_run_at,created_at,updated_at) VALUES(?,?,?,?,?,?,1,?,?,?)")
     .run(id, String(userId), value.title, value.instruction, JSON.stringify(value.action), JSON.stringify(value.schedule), nextRunAt(value.schedule, at - 1), at, at);
+  // 定义已 enabled=1：同一时刻落授权记录（principal + 范围 + 时间），执行时凭它放行。
+  recordDefinitionAuthorization(userId, id, { principal: options.principal, sessionRef: options.sessionRef, at });
   return automationView(db.prepare("SELECT * FROM automations WHERE id=?").get(id));
 }
 
-/** 源 automations.ts:266-290（enabled 与定义变更一并处理）。 */
-function updateAutomation(userId, id, input) {
+/** 源 automations.ts:266-290（enabled 与定义变更一并处理）；Z1：动作范围变更 / 启停同步授权。 */
+function updateAutomation(userId, id, input, options = {}) {
   const db = getAutomationDb();
   const source = input && typeof input === "object" ? input : {};
   const row = getAutomationRow(userId, id);
   if (!row) throw createAutomationError(AUTOMATION_ERR_NOT_FOUND, "自动化任务不存在");
   const at = now();
+  const wasEnabled = !!row.enabled;
   const enabled = source.enabled === undefined ? !!row.enabled : !!source.enabled;
   const currentSchedule = json(row.schedule_json);
   const currentAction = json(row.action_json);
@@ -237,12 +446,23 @@ function updateAutomation(userId, id, input) {
       at,
       String(id),
     );
+  // Z1：显式启用（automation/enable）或动作范围变更（source.action）→ 重新落授权；
+  // 停用 → 立即撤销授权。只改标题 / 时间 / 指令时不重发授权（范围未变，沿用原授权记录）。
+  // 显式启用总是重发，保证升级前已存在、没有授权记录的定义也能被管理员一次"启用"重新授权。
+  if (enabled && (source.enabled === true || source.action !== undefined)) {
+    recordDefinitionAuthorization(userId, id, { principal: options.principal, sessionRef: options.sessionRef, at });
+  } else if (!enabled && wasEnabled) {
+    revokeDefinitionAuthorization(userId, id, "DEFINITION_DISABLED", { principal: options.principal, at });
+  }
   return automationView(db.prepare("SELECT * FROM automations WHERE id=?").get(id));
 }
 
-/** 源 automations.ts:292-295 */
-function deleteAutomation(userId, id) {
+/** 源 automations.ts:292-295；Z1：删除前先撤销授权（审计留痕，授权即失效）。 */
+function deleteAutomation(userId, id, options = {}) {
   const db = getAutomationDb();
+  const row = getAutomationRow(userId, id);
+  if (!row) throw createAutomationError(AUTOMATION_ERR_NOT_FOUND, "自动化任务不存在");
+  revokeDefinitionAuthorization(userId, id, "DEFINITION_DELETED", { principal: options.principal });
   const result = db.prepare("DELETE FROM automations WHERE id=? AND created_by=?").run(String(id), String(userId));
   if (!result.changes) throw createAutomationError(AUTOMATION_ERR_NOT_FOUND, "自动化任务不存在");
   return { id: String(id), deleted: true };
@@ -330,7 +550,7 @@ function claimDueAutomation(options = {}) {
       return {
         userId: row.created_by,
         automation: automationView(row),
-        run: runView(db.prepare("SELECT * FROM automation_runs WHERE id=?").get(runId)),
+        run: runView(db.prepare("SELECT r.*, a.created_by AS definition_owner FROM automation_runs r JOIN automations a ON a.id=r.automation_id WHERE r.id=?").get(runId)),
       };
     }
     return null;
@@ -350,13 +570,13 @@ function runAutomationNow(userId, id, clientId) {
   return {
     userId: String(userId),
     automation: automationView(db.prepare("SELECT * FROM automations WHERE id=?").get(id)),
-    run: runView(db.prepare("SELECT * FROM automation_runs WHERE id=?").get(runId)),
+    run: runView(db.prepare("SELECT r.*, a.created_by AS definition_owner FROM automation_runs r JOIN automations a ON a.id=r.automation_id WHERE r.id=?").get(runId)),
   };
 }
 
 function getRun(userId, runId) {
   const db = getAutomationDb();
-  const row = db.prepare("SELECT r.* FROM automation_runs r JOIN automations a ON a.id=r.automation_id WHERE r.id=? AND a.created_by=?").get(String(runId), String(userId));
+  const row = db.prepare("SELECT r.*, a.created_by AS definition_owner FROM automation_runs r JOIN automations a ON a.id=r.automation_id WHERE r.id=? AND a.created_by=?").get(String(runId), String(userId));
   if (!row) throw createAutomationError(AUTOMATION_ERR_NOT_FOUND, "执行记录不存在");
   return runView(row);
 }
@@ -372,7 +592,7 @@ function completeAutomationRun(userId, runId, input) {
     .run(status, (input && input.result) || null, (input && input.error) || null, at, String(runId));
   db.prepare("UPDATE automations SET last_status=?,last_error=?,updated_at=? WHERE id=?")
     .run(status, status === "failed" ? ((input && input.error) || "执行失败") : null, at, row.automation_id);
-  return runView(db.prepare("SELECT * FROM automation_runs WHERE id=?").get(runId));
+  return runView(db.prepare("SELECT r.*, a.created_by AS definition_owner FROM automation_runs r JOIN automations a ON a.id=r.automation_id WHERE r.id=?").get(runId));
 }
 
 /** automation/runs：按自动化或按用户列出运行记录（源只有定义内嵌 20 条）。 */
@@ -385,7 +605,7 @@ function listRuns(userId, input) {
     if (!row) throw createAutomationError(AUTOMATION_ERR_NOT_FOUND, "自动化任务不存在");
     return listRunRows(row.id, limit).map(runView);
   }
-  return db.prepare("SELECT r.* FROM automation_runs r JOIN automations a ON a.id=r.automation_id WHERE a.created_by=? ORDER BY r.created_at DESC LIMIT ?").all(String(userId), limit).map(runView);
+  return db.prepare("SELECT r.*, a.created_by AS definition_owner FROM automation_runs r JOIN automations a ON a.id=r.automation_id WHERE a.created_by=? ORDER BY r.created_at DESC LIMIT ?").all(String(userId), limit).map(runView);
 }
 
 /** 源 automations.ts:370-381 的本地单进程版本：启动时把遗留 running 运行如实置 failed。 */
@@ -427,4 +647,13 @@ module.exports = {
   recoverInterruptedRuns,
   recoverStaleRuns,
   staleRunMessage,
+  // Z1 · 定义即授权（既有 authorization_audit 表承载，不新增表 / 不升 SCHEMA_VERSION）
+  DEFAULT_AUTHORIZATION_POLICY,
+  authorizationRef,
+  recordDefinitionAuthorization,
+  revokeDefinitionAuthorization,
+  latestDefinitionAuthorization,
+  assertDefinitionAuthorization,
+  recordRunAuthorization,
+  authorizationForRun,
 };

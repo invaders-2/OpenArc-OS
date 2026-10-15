@@ -1,10 +1,11 @@
 /**
- * X4 · main.cjs 的 automation integrations 接线（全离线：真实 identity.db + 假时钟 + 真实 plugin-service）。
+ * X4/Z1 · main.cjs 的 automation integrations 接线（全离线：真实 identity.db + 假时钟 + 真实 plugin-service）。
  *
  * 覆盖任务书验收点：
  *   · 源码级：main.cjs 的 integrations 适配器取自 plugin-service 的唯一真值
  *     pluginBundle.automationAdapter；只有它缺失才回落旧实现，且回落必须出声（不静默）；
- *     装配 createPluginBundle 处不注入任何 MCP 传输（无人值守同步的授权通道待产品决策）。
+ *     Z1 产品已批准「定义即授权」：装配处注入**既有** MCP 活连接传输（mcpLiveTransport），
+ *     不另造通道；定义授权闸门落在 automation-service（不新建第二套审批权威）。
  *   · 运行时：完全不注入传输时，自动化同步动作一律结构化
  *     INTEGRATION_UNAVAILABLE → AGENT_DEPENDENCY_UNAVAILABLE，且 0 次网络。
  *
@@ -81,17 +82,25 @@ test("装配契约（源码级）：main.cjs 的 integrations 取 pluginBundle.a
   assert.equal(main.includes("const automationIntegrations = createAutomationIntegrationsAdapter({ pluginBundle });"), false, "不得再无条件使用旧 integrations 适配器");
 });
 
-test("装配契约（源码级）：main.cjs 装配 plugin-service 不注入 MCP 传输（授权通道待产品决策）", () => {
+test("装配契约（源码级）：main.cjs 给 plugin-service 注入既有 MCP 活连接传输（定义即授权）", () => {
   const main = fs.readFileSync(MAIN_PATH, "utf8");
   const start = main.indexOf("pluginBundle = createPluginBundle({");
   assert.notEqual(start, -1, "main.cjs 必须装配 createPluginBundle");
   const end = main.indexOf("});", start);
   assert.notEqual(end, -1);
   const block = main.slice(start, end);
-  for (const key of ["mcpTransport", "mcpCallDirect", "transportFactory"]) {
-    assert.equal(block.includes(key), false, "授权通道未决策前不得注入 " + key + "（保持 fail-closed）");
-  }
-  assert.ok(block.includes("授权通道待产品决策"), "装配处必须写明授权通道待产品决策");
+  // Z1：真实传输 = 既有 mcpLiveTransport（createMcpLiveTransport 产物），复用既有活连接，不另造通道。
+  assert.ok(block.includes("mcpTransport: mcpLiveTransport"), "装配处必须注入既有 MCP 活连接传输");
+  assert.equal(block.includes("mcpCallDirect"), false, "不得用 mcpCallDirect 另辟调用路径");
+  assert.equal(block.includes("transportFactory"), false, "不得另造 transportFactory 通道");
+  assert.ok(main.includes("createMcpLiveTransport({ mcpService: identity.mcpService, switchPort: mcpSwitch })"), "活连接传输必须由既有 createMcpLiveTransport 构造");
+  assert.equal(block.includes("授权通道待产品决策"), false, "产品已批准定义即授权，不得再留待决策口径");
+  assert.ok(block.includes("mcpTransport"), "装配处必须写明传输注入");
+  // 定义授权闸门落在 automation-service（读既有 authorization_audit 的定义授权记录），不是第二套审批权威。
+  const automationService = fs.readFileSync(path.join(process.cwd(), "electron", "automation-service.cjs"), "utf8");
+  assert.ok(automationService.includes("requiresDefinitionAuthorization"), "执行前授权闸门必须在 automation-service");
+  assert.ok(automationService.includes("store.assertDefinitionAuthorization"), "闸门必须读定义授权记录");
+  assert.ok(automationService.includes("store.recordRunAuthorization"), "每次运行必须落授权来源审计");
 });
 
 // ── 运行时：未注入传输 = 未决策前保持不可用 ───────────────────────────────
