@@ -9,8 +9,8 @@
  *     运行时能力未注入，一律返回结构化 { ok:false, error:"INTEGRATION_UNAVAILABLE", detail:"<缺什么、怎么装>" }，绝不假实现；
  *   · 开关落 <userData>/dxos/integrations.json（plugin-registry.cjs）；
  *   · 钉钉 / 领星 / 紫鸟凭据走 credential-store 的 safeStorage 后端；投影只给掩码，明文不落盘；
- *   · 绿星 / 紫鸟云 API 一律走**注入的 mcpCallDirect / transportFactory**；夸克走可注入的官方 CLI；
- *     未注入即结构化不可用；
+ *   · 领星 / 紫鸟云 API 一律走**注入的 MCP 传输**（mcpCallDirect / transportFactory / mcpTransport）；
+ *     传输在调用时复检"插件已启用 + 依赖就绪"，未注入即结构化不可用；夸克走可注入的官方 CLI；
  *   · 本域**没有** api.dx-os.com / 云端实时房间 / 远端更新（OUT，任务书硬约束）。
  *
  * 身份边界与 peers 一致：sessionRef / appId 由主进程注入（bootstrap），payload.userId / role / appId 忽略。
@@ -181,6 +181,9 @@ function createPluginBundle(options = {}) {
   const personalSender = typeof options.personalSender === "function" ? options.personalSender : null;
   const mcpCallDirect = typeof options.mcpCallDirect === "function" ? options.mcpCallDirect : null;
   const transportFactory = typeof options.transportFactory === "function" ? options.transportFactory : null;
+  // 既有 MCP 活连接端口（createMcpLiveTransport 产物：{ callTool({ serverId, toolName, arguments }) }）。
+  // 注入即复用既有 tools/call 通道，不新造传输；未注入时保持"未注入即结构化不可用"。
+  const mcpTransport = options.mcpTransport && typeof options.mcpTransport.callTool === "function" ? options.mcpTransport : null;
   const workbookReader = typeof options.workbookReader === "function" ? options.workbookReader : null;
   const workbookWriter = typeof options.workbookWriter === "function" ? options.workbookWriter : null;
   const quarkCliPath = options.quarkCliPath ? String(options.quarkCliPath) : null;
@@ -196,18 +199,72 @@ function createPluginBundle(options = {}) {
     : (options.safeStorage ? safeStorageCredentialBackend({ safeStorage: options.safeStorage, dir: userDataDir }) : null);
   const credentialsAvailable = !!credentials && typeof credentials.available === "function" && credentials.available() === true;
 
-  /** 云 API 传输：优先注入的 mcpCallDirect；否则 transportFactory（每次调用带上安全存储里的凭据）。 */
-  function resolveTransport(pluginId) {
-    if (mcpCallDirect) return mcpCallDirect;
-    if (typeof transportFactory !== "function") return null;
-    return (server, tool, args) => {
-      let credential = null;
-      if (credentialsAvailable && typeof credentials.get === "function") { try { credential = credentials.get(pluginId + ".credential"); } catch { credential = null; } }
-      const transport = transportFactory({ pluginId, server, tool, args, credential });
-      if (typeof transport !== "function") {
-        const error = new Error("transportFactory 未返回可用的传输函数"); error.code = INTEGRATION_ERR_UNAVAILABLE; throw error;
+  /** MCP 调用失败的统一结构化错误（集成把带 code 的 Error 透传给 plugin-service 归一）。 */
+  function mcpTransportError(detail) { const error = new Error(String(detail || "MCP 调用失败")); error.code = INTEGRATION_ERR_UNAVAILABLE; return error; }
+
+  /**
+   * 传输返回值归一：既有 MCP 通道的返回形状有两种 ——
+   *   · McpClient.callTool 原始形状 { ok, content:[{type:'text',text}] }（失败 { ok:false, error, detail }）；
+   *   · createMcpAgentTools.callDirect 的投影 { ok:true, text }。
+   * 集成侧契约是"返回 JSON 文本，失败抛错"，这里统一收敛；{ ok:false } 绝不冒充成功文本。
+   */
+  function normalizeMcpResult(result) {
+    if (typeof result === "string") return result;
+    if (result && typeof result === "object") {
+      if (result.ok === true) {
+        if (typeof result.text === "string") return result.text;
+        if (Array.isArray(result.content)) return result.content.map((part) => (part && part.type === "text" ? part.text : "[" + ((part && part.type) || "unknown") + "]")).join("\n") || "(无返回内容)";
+        if (typeof result.value === "string") return result.value;
+        return JSON.stringify(result.value === undefined ? result : result.value);
       }
-      return transport(server, tool, args);
+      if (result.ok === false) throw mcpTransportError(result.detail || result.error || "MCP 调用失败");
+    }
+    throw mcpTransportError("MCP 调用返回了无法识别的结果形状");
+  }
+
+  /** 未加闸门的原始传输：优先 mcpCallDirect；其次 transportFactory（每次调用带上安全存储里的凭据）；最后既有 mcpTransport 端口。 */
+  function rawTransportFor(pluginId) {
+    if (mcpCallDirect) {
+      return async (server, tool, args) => {
+        try { return normalizeMcpResult(await mcpCallDirect(server, tool, args)); }
+        catch (error) { if (error && typeof error.code === "string" && error.code.startsWith("INTEGRATION_")) throw error; throw mcpTransportError(String((error && error.message) || error)); }
+      };
+    }
+    if (typeof transportFactory === "function") {
+      return async (server, tool, args) => {
+        let credential = null;
+        if (credentialsAvailable && typeof credentials.get === "function") { try { credential = credentials.get(pluginId + ".credential"); } catch { credential = null; } }
+        const transport = transportFactory({ pluginId, server, tool, args, credential });
+        if (typeof transport !== "function") throw mcpTransportError("transportFactory 未返回可用的传输函数");
+        return normalizeMcpResult(await transport(server, tool, args));
+      };
+    }
+    if (mcpTransport) {
+      // 既有 MCP tools/call 通道（createMcpLiveTransport 产物）：只做形状适配，不新造传输。
+      return async (server, tool, args) => {
+        try { return normalizeMcpResult(await mcpTransport.callTool({ serverId: server, toolName: tool, arguments: args && typeof args === "object" ? args : {} })); }
+        catch (error) { if (error && typeof error.code === "string" && error.code.startsWith("INTEGRATION_")) throw error; throw mcpTransportError(String((error && error.message) || error)); }
+      };
+    }
+    return null;
+  }
+
+  /**
+   * 云 API 传输：真实传输 + 调用时闸门。
+   *   优先 mcpCallDirect；其次 transportFactory（每次调用带上安全存储里的凭据）；最后既有 mcpTransport。
+   *   闸门按"插件已启用 + 依赖就绪（CLI/Python/凭据）"复检：未就绪直接结构化 INTEGRATION_UNAVAILABLE，
+   *   保证默认关闭 / 缺依赖时 0 次网络；未注入任何传输时保持 null（由集成 requireTransport 结构化拒绝）。
+   */
+  function resolveTransport(pluginId) {
+    const raw = rawTransportFor(pluginId);
+    if (!raw) return null;
+    return async (server, tool, args) => {
+      const plugin = registry.get(pluginId);
+      if (!plugin) throw mcpTransportError("没有登记该插件：" + pluginId);
+      if (!plugin.enabled) throw mcpTransportError("插件「" + plugin.name + "」默认关闭；请先启用（integration/plugins/enable，id=" + pluginId + "）");
+      const report = await registry.health(pluginId);
+      if (report && report.status === "unavailable") throw mcpTransportError("插件「" + plugin.name + "」已启用但依赖缺失：" + (report.detail || "请检查依赖"));
+      return raw(server, tool, args);
     };
   }
 
@@ -252,10 +309,13 @@ function createPluginBundle(options = {}) {
     capabilities: { fetch: fetchImpl, safeStorage: credentialsAvailable, personalSender },
   });
 
+  // 捕获同一条受闸门保护的传输：自动化适配器解析紫鸟店铺列表时复用（不新造通道）。
+  const lingxingTransport = resolveTransport("lingxing");
+  const ziniaoTransport = resolveTransport("ziniao");
   const lingxing = createLingxingIntegration({
     dataDir: integrationsRoot ? path.join(integrationsRoot, "lingxing") : null,
     credentials,
-    transport: resolveTransport("lingxing"),
+    transport: lingxingTransport,
     readWorkbook: workbookReader,
     writeWorkbook: workbookWriter,
     fetch: fetchImpl,
@@ -267,7 +327,7 @@ function createPluginBundle(options = {}) {
     dataDir: integrationsRoot ? path.join(integrationsRoot, "ziniao") : null,
     userDataDir,
     credentials,
-    transport: resolveTransport("ziniao"),
+    transport: ziniaoTransport,
     controlDir: options.controlDir,
     outDir: options.ziniaoOutDir,
     clock,
@@ -810,6 +870,104 @@ function createPluginBundle(options = {}) {
     }
   }
 
+  /**
+   * 源 automationBusinessActions.ts:122-135 · 紫鸟数据同步（已有 VC 汇总文件 → 本地库）。
+   * 逐字语义：days 默认 7（源行 123），取 updatedAt >= now - days 的文件，逐个 importZiniaoVcFile 累加。
+   * 真实能力来自 ziniao.listZiniaoVcFiles（integration-ziniao.cjs:350）+ lingxing.importZiniaoVcFile
+   * （integration-lingxing-local-data.cjs:948），本方法只按源顺序编排，不新增通道。
+   */
+  async function ziniaoDataSync(rawArgs) {
+    const args = rawArgs && typeof rawArgs === "object" ? rawArgs : {};
+    const days = Math.min(365, Math.max(1, Math.floor(Number(args.days) || 7)));
+    const since = clock() - days * 24 * 60 * 60 * 1000;
+    const files = ziniao.listZiniaoVcFiles().files.filter((file) => file.updatedAt >= since);
+    let rows = 0;
+    let skippedRows = 0;
+    for (const file of files) {
+      const imported = await lingxing.importZiniaoVcFile(file.path);
+      rows += imported.rows;
+      skippedRows += imported.skippedRows;
+    }
+    if (!files.length) return "最近 " + days + " 天没有需要同步的紫鸟文件";
+    if (!rows) return "已检查 " + files.length + " 个紫鸟文件，数据均已存在，跳过 " + skippedRows + " 条重复记录";
+    return "已检查 " + files.length + " 个紫鸟文件，新增 " + rows + " 条数据" + (skippedRows ? "，跳过 " + skippedRows + " 条已有记录" : "");
+  }
+
+  /** 自动化适配器的依赖错误：沿用集成错误码（automation-service.cjs:169-175 已识别）。 */
+  function adapterDependencyError(code, detail) { const error = new Error(String(detail || code)); error.code = code; return error; }
+
+  /** 自动化动作的闸门：插件已启用 + 依赖就绪才继续；否则抛结构化依赖错误（0 次网络）。 */
+  async function gateOrThrow(pluginId) {
+    const allowed = await gate(pluginId);
+    if (!allowed.ok) throw adapterDependencyError(allowed.error || INTEGRATION_ERR_UNAVAILABLE, allowed.detail);
+    return allowed.report;
+  }
+
+  /** 源 automationBusinessActions.ts:14-18 的 localIso（用注入 clock，离线可测）。 */
+  function localIso(daysAgo = 0) {
+    const date = new Date(clock());
+    date.setDate(date.getDate() - daysAgo);
+    return date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0") + "-" + String(date.getDate()).padStart(2, "0");
+  }
+
+  /** 源 automationBusinessActions.ts:32-41：先 start_client，再 list_stores，过滤过期店铺。 */
+  async function listActiveZiniaoStores() {
+    if (typeof ziniaoTransport !== "function") throw adapterDependencyError(INTEGRATION_ERR_UNAVAILABLE, "紫鸟下载需要已注入的 MCP 传输以解析店铺列表");
+    await ziniaoTransport("ziniao", "start_client", { killExisting: false });
+    const text = await ziniaoTransport("ziniao", "list_stores", {});
+    let parsed;
+    try { parsed = JSON.parse(text); } catch { throw adapterDependencyError(INTEGRATION_ERR_UNAVAILABLE, "紫鸟 list_stores 返回了无法解析的店铺列表"); }
+    const raw = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.stores) ? parsed.stores : []);
+    return raw.filter((store) => store && store.isExpired !== true).map((store, index) => ({
+      selector: String((store && (store.browserOauth || store.browserName)) || ""),
+      name: String((store && store.browserName) || ("店铺 " + (index + 1))),
+    })).filter((store) => store.selector);
+  }
+
+  /**
+   * B6a/B7d · 自动化 integrations 适配器（唯一真值；main.cjs 的 automation 装配应直接引用本对象）。
+   *   · 每个动作先过 gateOrThrow（插件已启用 + 依赖就绪），未就绪抛 INTEGRATION_UNAVAILABLE；
+   *   · 就绪后调用真实实现：领星缓存同步 / 紫鸟下载 / 紫鸟数据同步（本文件 ziniaoDataSync）/ 钉钉通知。
+   *   · 真实传输由 resolveTransport 注入既有 MCP 通道；ziniao_data_sync 只读本地文件 + 本地库，无需网络。
+   */
+  const automationAdapter = {
+    async lingxingCacheSync(args) {
+      await gateOrThrow("lingxing");
+      const job = lingxing.startLingxingCacheSync(args && args.days);
+      return "领星缓存同步作业已启动：" + String(job && job.id ? job.id : "") + "（" + String(job && job.cacheDays ? job.cacheDays : "") + " 天）";
+    },
+    async ziniaoDownload(args) {
+      await gateOrThrow("ziniao");
+      const input = args && typeof args === "object" ? args : {};
+      // 源 automationBusinessActions.ts:113-120：days 夹取 1..90，店铺由 list_stores 解析（显式 stores 优先）。
+      const days = Math.min(90, Math.max(1, Math.floor(Number(input.days) || 1)));
+      let stores = Array.isArray(input.stores)
+        ? input.stores.map((store) => ({ selector: String((store && store.selector) || ""), name: String((store && store.name) || "") })).filter((store) => store.selector)
+        : [];
+      if (!stores.length) stores = await listActiveZiniaoStores();
+      if (!stores.length) throw adapterDependencyError(INTEGRATION_ERR_INVALID_INPUT, "紫鸟当前没有可下载的有效店铺");
+      const requestIntervalSeconds = Math.min(120, Math.max(15, Math.floor(Number(input.requestIntervalSeconds) || 30)));
+      const job = ziniao.startZiniaoDownloadJob({ from: localIso(days), to: localIso(1), outDir: String(input.outDir || ""), requestIntervalSeconds, stores });
+      return "紫鸟下载作业已启动：" + String(job && job.id ? job.id : "") + "（店铺 " + String(job && Array.isArray(job.stores) ? job.stores.length : 0) + " 个）";
+    },
+    async ziniaoDataSync(args) {
+      await gateOrThrow("ziniao");
+      return await ziniaoDataSync(args);
+    },
+    async dingtalkGroupNotify(channelId, message) {
+      await gateOrThrow("dingtalk");
+      const sent = await dingtalk.send({ channelId: channelId, msg: { text: message && message.text } });
+      if (!sent || sent.ok !== true) return { ok: false, error: (sent && sent.error) || "INTEGRATION_SEND_FAILED", detail: (sent && (sent.detail || sent.error)) || "钉钉群机器人发送失败" };
+      return { ok: true, channel: (sent.value && sent.value.channel) || null };
+    },
+    async dingtalkPersonNotify(recipient, text) {
+      await gateOrThrow("dingtalk");
+      const sent = await dingtalk.sendToUser({ userId: recipient, text: text });
+      if (!sent || sent.ok !== true) throw adapterDependencyError((sent && sent.error) || INTEGRATION_ERR_UNAVAILABLE, (sent && (sent.detail || sent.error)) || "钉钉个人消息发送失败");
+      return sent.value !== undefined ? sent.value : sent;
+    },
+  };
+
   return {
     hostAppId: HOST_APP_ID,
     commands: INTEGRATION_COMMANDS.slice(),
@@ -829,6 +987,8 @@ function createPluginBundle(options = {}) {
     cliPorts,
     execute,
     isIntegrationCommand,
+    ziniaoDataSync,
+    automationAdapter,
   };
 }
 

@@ -17,12 +17,18 @@
  *      require('./repository.cjs')，避免与 v2 仓库的模块初始化顺序耦合。
  *   5) 运行时外部依赖（runninghub/modelscope/agnes/cliTools/agentCliTools/sharp/dataPath）
  *      未移植；executor.adapter 仅作为数据原样保留，不加载本地代码。
- *   6) 自定义协议 customProtocolStore 未移植；详情列表的 origin 对内置表恒为 builtin。
+ *   6) 自定义协议 customProtocolStore 已移植到 legacy-custom-protocol-store.cjs（源 :2984-3181）：
+ *      旧版扁平仓库 <userData>/dxos/custom-protocols.json 在列表/详情读取时惰性装载进本文件的
+ *      PROTOCOLS / PROVIDER_PROTOCOLS，详情列表按 store 如实标注 origin（builtin / custom）。
+ *      这是与 dx-protocol/v2（repository.cjs）不同的一套机制，边界见该文件头说明。
  *   7) joinUrl/buildChatRequest 依赖的两个纯 URL 规范化函数
  *      normalizeAgTokenApiBaseUrl（源 agtokenEndpoint.ts:2-9）与
  *      normalizeAgnesApiBaseUrl（源 agnesEndpoint.ts:5-14）因本地无 .cjs，内联移植于本文件。
  */
 const { OPENAI_MINIMAX_VIDEO_PROFILES } = require("./openAiMinimaxProfiles.cjs");
+// 旧版自定义协议仓库（源 protocols.ts:2984-3181）。顶层 require 只依赖 foundation paths，
+// 对 legacy-protocols 的引用在 store 内部惰性解析，故不会形成模块初始化循环。
+const customProtocolStore = require("./legacy-custom-protocol-store.cjs");
 const ASPECT_OPTIONS = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9']
 const APIMART_VIDEO_ASPECT_OPTIONS = [...ASPECT_OPTIONS, 'adaptive']
 const VIDEO_SCHEMA = [
@@ -3066,6 +3072,7 @@ function listProtocols() {
 }
 
 function listProviderProtocols() {
+  customProtocolStore.ensureLoaded()
   return Object.values(PROVIDER_PROTOCOLS).map((p) => ({
     id: p.id,
     label: p.label,
@@ -3078,6 +3085,7 @@ function listProviderProtocols() {
 }
 
 function listModelProtocols() {
+  customProtocolStore.ensureLoaded()
   return Object.values(PROTOCOLS).filter((p) => !INTERNAL_MODEL_PROTOCOL_IDS.has(p.id)).map((p) => ({
     id: p.id,
     label: p.label,
@@ -3096,23 +3104,25 @@ function listProtocolDetails() {
 }
 
 function listProviderProtocolDetails() {
+  // 自建协议在装载后已进 PROVIDER_PROTOCOLS，这里按 store 如实判定来源（源 :3375；remote 分支见文件头说明 3）。
+  customProtocolStore.ensureLoaded()
   return Object.values(PROVIDER_PROTOCOLS).map((p) => ({
     ...p,
     scope: 'provider',
     builtin: BUILTIN_PROVIDER_PROTOCOL_IDS.has(p.id),
-    // 源 :3375 的 remoteProviderIds 判断已移除（见文件头说明 3）。
-    origin: BUILTIN_PROVIDER_PROTOCOL_IDS.has(p.id) ? 'builtin' : 'custom',
+    origin: customProtocolStore.originOf('provider', p.id),
   }))
 }
 
 function listModelProtocolDetails() {
+  // 自建协议在装载后已进 PROTOCOLS，这里按 store 如实判定来源（源 :3385；remote 分支见文件头说明 3）。
+  customProtocolStore.ensureLoaded()
   return Object.values(PROTOCOLS).filter((p) => !INTERNAL_MODEL_PROTOCOL_IDS.has(p.id)).map((p) => ({
     ...p,
     scope: 'model',
     runtimeProtocol: p.runtimeProtocol || p.id,
     builtin: BUILTIN_MODEL_PROTOCOL_IDS.has(p.id),
-    // 源 :3385 的 remoteModelIds 判断已移除（见文件头说明 3）。
-    origin: BUILTIN_MODEL_PROTOCOL_IDS.has(p.id) ? 'builtin' : 'custom',
+    origin: customProtocolStore.originOf('model', p.id),
   }))
 }
 
@@ -3321,6 +3331,7 @@ function parseModelCatalog(kind, payload) {
 
 // ── 平台协议 ID 与鉴权要求（源 protocols.ts:3591-3600）────────────────
 function protocolIds() {
+  customProtocolStore.ensureLoaded()
   return Object.keys(PROVIDER_PROTOCOLS)
 }
 

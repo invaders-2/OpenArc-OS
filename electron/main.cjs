@@ -313,8 +313,8 @@ function markProductReady() {
 // ---------------------------------------------------------------------------
 // B7j · 自动化域适配器（只接线，不新增业务实现）
 //   · developerApps ← developer-service 的本地装载态（同一 db + <userData>/dxos）；
-//     developer-domain 当前把清单里的 automation 字段列为「本版本不接受」，因此这里只能如实
-//     投影能力清单 capabilities.tools：有工具声明才可能有可执行动作，绝不伪造。
+//     B7x 起按已安装 App 的真实 capabilities.tools / capabilities.canvas 声明投影可执行动作
+//     （canvas 只投影 agent-tool 执行器的 run 动作）；没有可用动作时 actions 为空，绝不伪造。
 //   · integrations  ← plugin-service（钉钉 / 领星 / 紫鸟）；未启用 / 未注入 transport 时抛
 //     INTEGRATION_*，由 automation-service 归一成结构化 AGENT_DEPENDENCY_UNAVAILABLE。
 //   · toolCatalog   ← agent 工具目录的唯一执行入口（与 agent 域共用权限判定）。
@@ -333,47 +333,11 @@ function automationAdapterError(code, message, detail) {
 
 /** 自动化域 developerApps 适配器：只读 developer-store 的本地装载态，不做第二份数据。 */
 function createAutomationDeveloperAppsAdapter({ db, userDataDir, clock, runTool }) {
+  // B7x：投影规则（真实 capabilities.tools + capabilities.canvas）与适配器契约都在
+  // developer-domain.cjs（store 注入），主进程只做接线，不在这里另造一套动作判定。
+  const developerDomain = require("./developer-domain.cjs");
   const developerStore = createDeveloperStore({ db, dataRoot: path.join(userDataDir, "dxos"), clock });
-  function packOf(appId) {
-    const current = developerStore.currentRelease(appId);
-    if (!current) return null;
-    let release = null;
-    try { release = developerStore.readRelease(appId, current.packagePath); } catch { release = null; }
-    if (!release) return null;
-    const tools = release.capabilities && Array.isArray(release.capabilities.tools) ? release.capabilities.tools : [];
-    return {
-      id: appId,
-      manifest: {
-        id: release.manifest.id,
-        name: release.manifest.name,
-        version: release.manifest.version,
-        // 源 automations.ts 的 manifest.automation.actions；本仓清单校验不接受 automation 字段，
-        // 退化为能力清单里的工具声明（工具名 / handler 类型）。
-        automation: { actions: tools.map((tool) => ({ id: tool.name, title: tool.title || tool.name, toolName: tool.name, handlerType: tool.handlerType })) },
-      },
-    };
-  }
-  function listPacks() {
-    return developerStore.listAppIds().map(packOf).filter(Boolean);
-  }
-  function installedAppIds(userId) {
-    return developerStore.listInstalled(String(userId)).map((row) => row.appId);
-  }
-  function catalog(userId) {
-    const installed = new Set(installedAppIds(userId));
-    return listPacks().map((pack) => ({ appId: pack.id, name: pack.manifest.name, version: pack.manifest.version, enabled: installed.has(pack.id), actions: pack.manifest.automation.actions }));
-  }
-  /** 定义期参数规约（automation-domain.normalizeAppActionArgs 的注入面）。 */
-  function normalizeAction(args) {
-    const source = args && typeof args === "object" ? args : {};
-    const appId = String(source.appId || "");
-    const actionId = String(source.actionId || "");
-    if (!appId || !actionId) throw automationAdapterError("AUTOMATION_INVALID_INPUT", "app_action 需要 appId 与 actionId");
-    const pack = listPacks().find((item) => item.id === appId && item.manifest.automation.actions.some((action) => action.id === actionId));
-    if (!pack) throw automationAdapterError("AUTOMATION_NOT_FOUND", "APP 自动化能力不存在（本仓清单不接受 automation 声明，只有能力清单里的工具可作为动作）：" + appId + "/" + actionId, { appId, actionId });
-    return { appId, actionId, values: source.values && typeof source.values === "object" ? source.values : {} };
-  }
-  return { listPacks, installedAppIds, catalog, normalizeAction, runTool };
+  return developerDomain.createDeveloperAppActionAdapter({ store: developerStore, runTool, createError: automationAdapterError });
 }
 
 /** 自动化域 integrations 适配器：plugin-service 的真实集成实例。 */
@@ -1064,6 +1028,8 @@ app.whenReady().then(async () => {
       fetch: typeof fetch === "function" ? fetch.bind(globalThis) : null,
       logger: null,
       clock: null,
+      // X4：无人值守自动化同步的授权通道待产品决策（定义即授权 / 每次审批 / 暂不接，三选一）；
+      // 决策前刻意不注入任何 MCP 传输，未注入即由 plugin-service 结构化拒绝（fail-closed）。
     });
     registerIntegrationIpc({
       ipcMain,
@@ -1089,7 +1055,19 @@ app.whenReady().then(async () => {
       clock: () => Date.now(),
       runTool: automationToolCatalog.runTool,
     });
-    const automationIntegrations = createAutomationIntegrationsAdapter({ pluginBundle });
+    // X4：integrations 只取 plugin-service 的唯一真值 bundle.automationAdapter（含 ziniao_data_sync
+    // 与"建 job 前先过健康闸门"）；该对象缺失才回落本文件的旧实现，且必须出声记录（不静默）。
+    let automationIntegrationsNote = pluginBundle ? null : "plugin-service 未装配";
+    let automationIntegrations = null;
+    if (pluginBundle) {
+      if (pluginBundle.automationAdapter) {
+        automationIntegrations = pluginBundle.automationAdapter;
+      } else {
+        automationIntegrations = createAutomationIntegrationsAdapter({ pluginBundle });
+        automationIntegrationsNote = "plugin-service 未导出 automationAdapter，integrations 已回落旧适配器（缺 ziniao_data_sync 与建 job 前健康闸门）";
+        try { console.warn("[openarc] " + automationIntegrationsNote); } catch { /* 日志失败不改装配结果 */ }
+      }
+    }
     automationBundle = createAutomationBundle({
       identityStore: identity.store,
       authorization: identity.authorization,
@@ -1107,7 +1085,7 @@ app.whenReady().then(async () => {
       // 未装配适配器的可读原因，直接进 automation/health.dependencyDetails。
       adapterNotes: {
         desktop: "本仓没有桌面执行端实现（music_play / music_control / open_app 的客户端执行器未装配）",
-        integrations: automationIntegrations ? null : "plugin-service 未装配",
+        integrations: automationIntegrationsNote,
         agent: agentBundle ? null : "agent-service 未装配",
       },
       logger: null,

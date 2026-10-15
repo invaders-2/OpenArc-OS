@@ -28,12 +28,17 @@
  *
  * 本批刻意排除（与任务书 OUT 一致，出现即拒绝而不是静默忽略）：
  *   · oauth（开发者 OAuth / PKCE 回调）—— DEVELOPER_ERR_MANIFEST_FIELD_REJECTED
- *   · canvas（画布插件清单校验模块未移植）—— DEVELOPER_ERR_MANIFEST_FIELD_REJECTED
  *   · 远端更新相关字段（appUpdates / update / updater / cloud / realtime）
  * 这些字段本来会扩大运行时权限或引入远端对端，fail closed 比"收下不实现"安全。
  *
+ * B7x：canvas（画布插件清单）不再整字段拒绝。结构 / 节点命名空间 / 端口类型 / 执行器 /
+ *   Agent 动作 / 危险路径全部走 electron/developer-canvas-manifest.cjs 的逐字移植校验，
+ *   通过才接受；不通过按具体原因结构化拒绝（见 normalizeCanvasDeclaration）。
+ *
  * 未移植项（逐条登记，待后续按需登记）：
  *   · developerOAuth.ts  开发者 OAuth / PKCE 回调（对应上方 oauth 字段的 fail closed）
+ *   · src/apps/canvas/builtinCanvasNodes.ts 内置节点端口定义：模板连线引用 builtin.* 时
+ *     端口兼容无法验证，只跳过该条检查（见 developer-canvas-manifest.cjs 顶部说明）。
  * 已落地（B7e3，本文件仍零引用）：
  *   · agnes.ts / agnesEndpoint.ts → electron/plugin-agnes.cjs，注册为可选插件 agnes（integration/agnes/*）
  *     与 legacy 端口 generateAgnesImages / editAgnesImages / generateAgnesVideos；
@@ -43,6 +48,8 @@
 
 const path = require("node:path");
 const zipLib = require("./canvas-dxos-zip.cjs");
+// B7x：画布插件清单校验（源 shared/canvasPluginValidation.ts + canvasPortCompatibility.ts 逐字移植）。
+const canvasManifest = require("./developer-canvas-manifest.cjs");
 const platformDomain = require("./platform-domain.cjs");
 const foundationErrors = require("./dxos-foundation-errors.cjs");
 // B7f：B7b 四张命令切片的实现 registry（白名单与实现同源，见下方合流块）。
@@ -390,6 +397,68 @@ function readJsonFile(files, filePath, label) {
 }
 
 // ---------------------------------------------------------------------------
+// B7x · canvas 画布插件清单（源 developerApps.ts:379-410 + canvasPluginValidation 逐字移植）
+// ---------------------------------------------------------------------------
+
+/**
+ * 源 developerApps.ts:379-410 normalizeCanvasDeclaration。
+ * 本函数只做文件围栏（路径 / 扩展名 / 大小 / JSON）并把校验委托给
+ * electron/developer-canvas-manifest.cjs；结构、节点命名空间、端口类型、执行器、
+ * Agent 动作、危险路径的判定全在那一个模块，杜绝两套口径。
+ *
+ * 错误映射（稳定）：
+ *   · 声明结构 / 清单内容不合法 → DEVELOPER_ERR_MANIFEST_INVALID，detail.reason = 清单子码；
+ *   · 声明文件不存在 / 解析失败 / 过大 → DEVELOPER_ERR_PACKAGE_INVALID，detail.reason 同上。
+ * 通过才接受；不通过不落盘、不产生任何能力。
+ */
+function normalizeCanvasDeclaration(value, files, pluginId) {
+  if (value === undefined || value === null) return undefined;
+  let shape;
+  try {
+    // safePath 在此注入：路径越界保持 DEVELOPER_ERR_PATH_ESCAPE（与入口 / 依赖路径同一口径）。
+    shape = canvasManifest.normalizeCanvasDeclarationShape(value, safePath);
+  } catch (error) {
+    if (isDeveloperError(error)) throw error;
+    throw createDeveloperError(DEVELOPER_ERR_MANIFEST_INVALID, "dx-app.json.canvas " + String((error && error.message) || error), { field: "canvas", reason: (error && error.canvasCode) || "CANVAS_DECLARATION_INVALID" });
+  }
+  const resolveManifest = (paths, label) => paths.map((rawPath) => {
+    const filePath = safePath(rawPath);
+    const file = files.find((candidate) => candidate.name === filePath);
+    if (!file) throw createDeveloperError(DEVELOPER_ERR_PACKAGE_INVALID, "canvas." + label + " 文件不存在：" + filePath, { field: "canvas", reason: "CANVAS_MANIFEST_FILE_MISSING" });
+    if (path.posix.extname(filePath).toLowerCase() !== ".json") throw createDeveloperError(DEVELOPER_ERR_MANIFEST_INVALID, "canvas." + label + " 只允许 JSON 文件：" + filePath, { field: "canvas", reason: "CANVAS_MANIFEST_NOT_JSON_FILE" });
+    if (file.data.length > MAX_TEXT_BYTES) throw createDeveloperError(DEVELOPER_ERR_PACKAGE_INVALID, "canvas." + label + " 文件过大：" + filePath, { field: "canvas", reason: "CANVAS_MANIFEST_TOO_LARGE" });
+    return filePath;
+  });
+  const nodeManifests = resolveManifest(shape.nodeManifests, "nodeManifests");
+  const templateManifests = resolveManifest(shape.templateManifests, "templateManifests");
+  const parseManifest = (filePath, label) => {
+    const file = files.find((candidate) => candidate.name === filePath);
+    try { return JSON.parse(file.data.toString("utf8")); }
+    catch { throw createDeveloperError(DEVELOPER_ERR_PACKAGE_INVALID, "canvas." + label + " 不是有效 JSON：" + filePath, { field: "canvas", reason: "CANVAS_MANIFEST_NOT_JSON" }); }
+  };
+  const definitions = [];
+  for (const filePath of nodeManifests) {
+    try {
+      definitions.push(...canvasManifest.validateCanvasNodeManifest(parseManifest(filePath, "nodeManifests"), pluginId).nodes);
+    } catch (error) {
+      if (isDeveloperError(error)) throw error;
+      throw createDeveloperError(DEVELOPER_ERR_MANIFEST_INVALID, filePath + " 校验失败：" + String((error && error.message) || error), { field: "canvas", reason: (error && error.canvasCode) || "CANVAS_NODE_MANIFEST_INVALID" });
+    }
+  }
+  // 模板清单只拿插件节点定义做存在性 / 端口兼容判定；builtin.* 的内置端口定义本仓未移植，
+  // 由 canvasManifest 内部跳过"无法验证"的检查（不放宽成兼容）。
+  for (const filePath of templateManifests) {
+    try {
+      canvasManifest.validateCanvasTemplateManifest(parseManifest(filePath, "templateManifests"), pluginId, definitions);
+    } catch (error) {
+      if (isDeveloperError(error)) throw error;
+      throw createDeveloperError(DEVELOPER_ERR_MANIFEST_INVALID, filePath + " 校验失败：" + String((error && error.message) || error), { field: "canvas", reason: (error && error.canvasCode) || "CANVAS_TEMPLATE_MANIFEST_INVALID" });
+    }
+  }
+  return { nodeManifests, templateManifests };
+}
+
+// ---------------------------------------------------------------------------
 // 清单字段规约
 // ---------------------------------------------------------------------------
 
@@ -440,11 +509,11 @@ const DANGEROUS_PERMISSION_PATTERNS = Object.freeze([
  *   · oauth / oauthRedirect：开发者 OAuth（PKCE 回调）
  *   · appUpdates / update / updater：appUpdates 远端更新
  *   · cloud / realtime：云端实时房间 / 云替身
- *   · canvas：画布插件清单（canvas 插件校验模块未移植，本批不接受）
  *   · appApi / automation：需要画布与工具执行端，本批不实现 —— 拒绝而不是静默丢弃声明
+ * canvas 已按 B7x 走 developer-canvas-manifest.cjs 校验后才接受，不在本名单里。
  */
 const REJECTED_MANIFEST_FIELDS = Object.freeze([
-  "oauth", "oauthRedirect", "appUpdates", "update", "updater", "cloud", "realtime", "canvas", "appApi", "automation",
+  "oauth", "oauthRedirect", "appUpdates", "update", "updater", "cloud", "realtime", "appApi", "automation",
 ]);
 
 function assertPermissionAllowed(permission) {
@@ -648,6 +717,8 @@ function normalizeManifest(raw, files, options = {}) {
   const network = normalizeNetworkDeclaration(obj.network);
   const permissions = [...new Set(cleanStringList(obj.permissions, 64).map((permission) => normalizeAppPermission(permission, id)).filter(Boolean))];
   for (const permission of permissions) assertPermissionAllowed(permission);
+  // B7x：canvas 先过画布插件清单校验，通过才进入归一化清单。
+  const canvas = normalizeCanvasDeclaration(obj.canvas, files, id);
 
   const width = Math.max(420, Math.min(1400, Math.round(Number(obj.defaultSize && obj.defaultSize.width || 860))));
   const height = Math.max(300, Math.min(1000, Math.round(Number(obj.defaultSize && obj.defaultSize.height || 620))));
@@ -680,6 +751,7 @@ function normalizeManifest(raw, files, options = {}) {
     dependencies: normalizeDependencyList(obj.dependencies),
     permissions,
     network,
+    canvas,
   };
 }
 
@@ -728,6 +800,40 @@ function scanSkillDocs(files, manifest) {
     });
 }
 
+/**
+ * B7x：canvas 声明的能力投影。清单期已逐条校验；这里只重放解析，抽出
+ * 「节点类型 / 执行器 / Agent 动作」供 automation 的 app_action 适配器投影可执行动作。
+ * 重放失败按"无声明"处理（不伪造动作），不改变清单期已经做出的接受 / 拒绝结论。
+ */
+function collectCanvasCapabilities(files, manifest) {
+  const canvas = manifest && manifest.canvas;
+  if (!canvas) return null;
+  const nodes = [];
+  const templates = [];
+  for (const filePath of canvas.nodeManifests || []) {
+    const raw = readJsonFile(files, filePath, filePath);
+    if (!raw) continue;
+    let validated;
+    try { validated = canvasManifest.validateCanvasNodeManifest(raw, manifest.id); }
+    catch { continue; }
+    for (const node of validated.nodes) {
+      nodes.push({
+        type: node.type,
+        title: node.title,
+        executorType: node.executor && node.executor.type ? node.executor.type : null,
+        executorToolName: node.executor && node.executor.toolName ? node.executor.toolName : null,
+        actions: (node.agent && node.agent.actions || []).map((action) => ({ id: action.id, title: action.title, kind: action.kind })),
+      });
+    }
+  }
+  for (const filePath of canvas.templateManifests || []) {
+    const raw = readJsonFile(files, filePath, filePath);
+    if (!raw || !Array.isArray(raw.templates)) continue;
+    for (const template of raw.templates) templates.push({ id: String(template.id || ""), title: String(template.title || "").slice(0, 120), nodeCount: Array.isArray(template.nodes) ? template.nodes.length : 0 });
+  }
+  return { nodeManifests: canvas.nodeManifests.slice(), templateManifests: canvas.templateManifests.slice(), nodes, templates };
+}
+
 /** 源 developerApps.ts:780-819：能力汇总（工具 / 权限 / 依赖 / MCP / Skill / 提示）。 */
 function collectCapabilities(files, manifest) {
   const toolPath = manifest.agent && manifest.agent.toolManifest ? safePath(manifest.agent.toolManifest) : "agent.tools.json";
@@ -754,7 +860,7 @@ function collectCapabilities(files, manifest) {
   if (mcp.length) warnings.push("此包携带 MCP 元数据；本批不启动任何 MCP 子进程。");
   if (tools.length) warnings.push("此包的 Agent 工具已进入能力清单；本批不执行工具。");
   if (skills.length) warnings.push("此包包含 Skill 文档。");
-  return { agentSummary: String(manifest.agent && manifest.agent.summary || "").slice(0, 400), tools, permissions, dependencies, mcp, skills, warnings };
+  return { agentSummary: String(manifest.agent && manifest.agent.summary || "").slice(0, 400), tools, permissions, dependencies, mcp, skills, warnings, canvas: collectCanvasCapabilities(files, manifest) };
 }
 
 /** 源 developerApps.ts:829-856：完整解析一个开发者包（不落盘）。 */
@@ -877,13 +983,14 @@ function projectManifest(manifest) {
     backgroundMode: manifest.backgroundMode,
     permissions: (manifest.permissions || []).slice(0, 96),
     network: manifest.network ? { domains: manifest.network.domains.slice(0, 64), methods: manifest.network.methods.slice(0, 8), maxResponseBytes: manifest.network.maxResponseBytes } : null,
+    canvas: manifest.canvas ? { nodeManifests: manifest.canvas.nodeManifests.slice(0, 32), templateManifests: manifest.canvas.templateManifests.slice(0, 32) } : null,
     hasMigrations: !!(manifest.migrations && manifest.migrations.length),
     migrations: (manifest.migrations || []).map((item) => ({ from: item.from, to: item.to })),
   };
 }
 
 function projectCapabilities(capabilities) {
-  if (!capabilities) return { agentSummary: "", tools: [], permissions: [], dependencies: [], mcp: [], skills: [], warnings: [] };
+  if (!capabilities) return { agentSummary: "", tools: [], permissions: [], dependencies: [], mcp: [], skills: [], warnings: [], canvas: null };
   return {
     agentSummary: capabilities.agentSummary || "",
     tools: (capabilities.tools || []).map((tool) => ({ name: tool.name, title: tool.title, risk: tool.risk, handlerType: tool.handlerType, permission: tool.permission || null, hasConfirmation: !!(tool.confirmation && tool.confirmation.required) })),
@@ -892,7 +999,129 @@ function projectCapabilities(capabilities) {
     mcp: (capabilities.mcp || []).map((item) => ({ id: item.id, name: item.name, transport: item.transport, hasUrl: !!item.url, autoStart: item.autoStart === true })),
     skills: (capabilities.skills || []).map((item) => ({ path: item.path, title: item.title })),
     warnings: (capabilities.warnings || []).slice(0, 8),
+    // 画布节点动作列表刻意拍平：foundation 的 IPC 脱敏 depth 封顶是 6，嵌套 actions 会被裁成 <max-depth>。
+    canvas: capabilities.canvas ? {
+      nodeManifests: (capabilities.canvas.nodeManifests || []).slice(0, 32),
+      templateManifests: (capabilities.canvas.templateManifests || []).slice(0, 32),
+      nodes: (capabilities.canvas.nodes || []).map((node) => ({ type: node.type, title: node.title, executorType: node.executorType || null, executorToolName: node.executorToolName || null, actionCount: (node.actions || []).length })),
+      actions: (capabilities.canvas.nodes || []).flatMap((node) => (node && node.executorType === "agent-tool" && node.executorToolName ? (node.actions || []).filter((action) => action && action.kind === "run").map((action) => ({ id: node.type + "." + action.id, title: action.title || node.title, toolName: node.executorToolName, nodeType: node.type })) : [])),
+      templates: (capabilities.canvas.templates || []).map((template) => ({ id: template.id, title: template.title, nodeCount: template.nodeCount })),
+    } : null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// B7x · 已安装 App → automation app_action 可执行动作（只投影真实声明，不伪造）
+// ---------------------------------------------------------------------------
+
+/**
+ * 把一份 release（归一化清单 + 能力投影）投影成 automation 域的 pack：
+ *   { id, manifest: { id, name, version, automation: { actions: [{ id, title, toolName, ... }] } } }
+ *
+ * 只投影真正有执行出口的动作：
+ *   · capabilities.tools：每个工具名即 runTool 的 toolName（本仓既有口径不变）；
+ *   · capabilities.canvas：只有 executor.type === "agent-tool" 且声明了 kind === "run" 的
+ *     节点动作才是可执行动作，toolName 取节点的 agent-tool 名（例如 canvas.ai.generate）；
+ *     read / configure 动作不调用执行器，不投影；builtin / skill / mcp-tool / workflow /
+ *     app-bridge 执行器本仓没有 runTool 出口，**不投影**（不伪造可执行能力）。
+ * 没有任何可用动作时 actions 为空数组 —— 由调用方保持结构化拒绝。
+ */
+function projectDeveloperAppActions(input) {
+  const source = input && typeof input === "object" ? input : {};
+  const manifest = source.manifest && typeof source.manifest === "object" ? source.manifest : {};
+  const capabilities = source.capabilities && typeof source.capabilities === "object" ? source.capabilities : {};
+  const actions = [];
+  const seen = new Set();
+  const add = (id, title, toolName, extra) => {
+    const actionId = String(id || "").trim();
+    const target = String(toolName || "").trim();
+    if (!actionId || !target || seen.has(actionId)) return;
+    seen.add(actionId);
+    actions.push(Object.assign({ id: actionId, title: String(title || actionId).slice(0, 60), toolName: target }, extra));
+  };
+  for (const tool of Array.isArray(capabilities.tools) ? capabilities.tools : []) {
+    if (!tool || !tool.name) continue;
+    add(tool.name, tool.title || tool.name, tool.name, { source: "tool", handlerType: tool.handlerType || null });
+  }
+  const canvasNodes = capabilities.canvas && Array.isArray(capabilities.canvas.nodes) ? capabilities.canvas.nodes : [];
+  for (const node of canvasNodes) {
+    if (!node || node.executorType !== "agent-tool" || !node.executorToolName) continue;
+    for (const action of Array.isArray(node.actions) ? node.actions : []) {
+      if (!action || action.kind !== "run") continue;
+      add(node.type + "." + action.id, action.title || node.title, node.executorToolName, { source: "canvas", nodeType: node.type, actionKind: "run" });
+    }
+  }
+  const appId = String(source.appId || manifest.id || "");
+  return {
+    id: appId,
+    manifest: {
+      id: String(manifest.id || appId),
+      name: String(manifest.name || ""),
+      version: String(manifest.version || ""),
+      automation: { actions },
+    },
+  };
+}
+
+/** 从已投影的 pack 列表里解析 app_action 参数（源 automations.ts:122-146 的目录侧）。 */
+function normalizeDeveloperAppAction(args, packs) {
+  const source = args && typeof args === "object" ? args : {};
+  const appId = String(source.appId || "");
+  const actionId = String(source.actionId || "");
+  if (!appId || !actionId) return null;
+  const pack = (Array.isArray(packs) ? packs : []).find((item) => item && item.id === appId && item.manifest && item.manifest.automation && Array.isArray(item.manifest.automation.actions) && item.manifest.automation.actions.some((candidate) => candidate.id === actionId));
+  if (!pack) return null;
+  return { appId, actionId, values: source.values && typeof source.values === "object" && !Array.isArray(source.values) ? source.values : {} };
+}
+
+/**
+ * automation 域的 developerApps 适配器（store 注入，主进程只做接线；纯逻辑、无 I/O）。
+ * 契约与 automation-service.cjs 的 requireAdapter / executeAppAction 一致：
+ *   listPacks / installedAppIds / catalog / normalizeAction / runTool。
+ * 未提供 createError 时使用与主进程 automationAdapterError 同形状的错误（name + code + detail），
+ * automation 域据此保留 AUTOMATION_INVALID_INPUT / AUTOMATION_NOT_FOUND。
+ */
+function createDeveloperAppActionAdapter({ store, runTool, createError } = {}) {
+  if (!store || typeof store.currentRelease !== "function" || typeof store.readRelease !== "function") {
+    throw createDeveloperError(DEVELOPER_ERR_INVALID_INPUT, "createDeveloperAppActionAdapter 需要 developer-store");
+  }
+  const raise = typeof createError === "function" ? createError : (code, message, detail) => {
+    const error = new Error(String(message || code));
+    error.name = "AutomationAdapterError";
+    error.code = String(code);
+    if (detail !== undefined) error.detail = detail;
+    return error;
+  };
+  function packOf(appId) {
+    const current = store.currentRelease(appId);
+    if (!current) return null;
+    let release = null;
+    try { release = store.readRelease(appId, current.packagePath); } catch { release = null; }
+    if (!release) return null;
+    // 没有可用动作时 actions 为空数组；automation 域据此保持结构化拒绝。
+    return projectDeveloperAppActions({ appId, manifest: release.manifest, capabilities: release.capabilities });
+  }
+  function listPacks() {
+    return store.listAppIds().map(packOf).filter(Boolean);
+  }
+  function installedAppIds(userId) {
+    return typeof store.listInstalled === "function" ? store.listInstalled(String(userId)).map((row) => row.appId) : [];
+  }
+  function catalog(userId) {
+    const installed = new Set(installedAppIds(userId));
+    return listPacks().map((pack) => ({ appId: pack.id, name: pack.manifest.name, version: pack.manifest.version, enabled: installed.has(pack.id), actions: pack.manifest.automation.actions }));
+  }
+  /** 定义期参数规约（automation-domain.normalizeAppActionArgs 的注入面）。 */
+  function normalizeAction(args) {
+    const source = args && typeof args === "object" ? args : {};
+    const appId = String(source.appId || "");
+    const actionId = String(source.actionId || "");
+    if (!appId || !actionId) throw raise("AUTOMATION_INVALID_INPUT", "app_action 需要 appId 与 actionId");
+    const normalized = normalizeDeveloperAppAction(source, listPacks());
+    if (!normalized) throw raise("AUTOMATION_NOT_FOUND", "APP 自动化能力不存在（按已安装 App 的真实 capabilities.tools / capabilities.canvas 声明投影）：" + appId + "/" + actionId, { appId, actionId });
+    return normalized;
+  }
+  return { listPacks, installedAppIds, catalog, normalizeAction, runTool };
 }
 
 module.exports = {
@@ -956,6 +1185,7 @@ module.exports = {
   normalizeNetworkDeclaration,
   normalizeToolManifest,
   normalizeManifest,
+  normalizeCanvasDeclaration,
   validateDeclaredPackageFiles,
   collectCapabilities,
   prepareDeveloperApp,
@@ -967,4 +1197,7 @@ module.exports = {
   createDeveloperRateLimiter,
   projectManifest,
   projectCapabilities,
+  projectDeveloperAppActions,
+  normalizeDeveloperAppAction,
+  createDeveloperAppActionAdapter,
 };

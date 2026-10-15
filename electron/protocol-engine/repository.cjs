@@ -26,6 +26,15 @@ function configureProtocolRepository(options = {}) {
   if (options.packageDirs !== undefined) { packageDirs = Array.isArray(options.packageDirs) ? options.packageDirs.map(String) : []; packageCache = new Map(); }
 }
 
+/**
+ * v2 仓库数据目录。<userData>/dxos/custom-protocols-v2.json 的同目录下就是旧版扁平仓库
+ * custom-protocols.json（legacy-custom-protocol-store.cjs 据此解析落点）。
+ * 未配置 storeFile 时返回 null（没有数据目录，不猜路径）。
+ */
+function protocolRepositoryDataDir() {
+  return storeFile ? path.dirname(storeFile) : null;
+}
+
 function canonical(value) {
   if (Array.isArray(value)) return "[" + value.map(canonical).join(",") + "]";
   if (value && typeof value === "object") return "{" + Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => JSON.stringify(key) + ":" + canonical(item)).join(",") + "}";
@@ -252,7 +261,7 @@ function resetProtocolV2RepositoryForTests() {
 }
 
 module.exports = {
-  configureProtocolRepository, protocolV2Hash, listProtocolsV2, getProtocolV2, isCustomProtocolV2,
+  configureProtocolRepository, protocolRepositoryDataDir, protocolV2Hash, listProtocolsV2, getProtocolV2, isCustomProtocolV2,
   saveProtocolV2, saveProtocolV2Bundle, activateProtocolV2, removeProtocolV2,
   scanProtocolPackageDirectory, resetProtocolV2RepositoryForTests,
 };
