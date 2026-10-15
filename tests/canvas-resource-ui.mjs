@@ -47,4 +47,4 @@ if (failed.length) {
   process.exit(1);
 }
 assert.equal(exitCode, 0, "Electron 退出码 " + exitCode);
-console.log("PASS: Canvas 通过系统 Picker 插入 ResourceRef 节点，状态由服务端计算。");
+console.log("PASS: 打开的是现行 CanvasHost；旧的治理画布（data-d3-04d=canvas）已无渲染入口。");
