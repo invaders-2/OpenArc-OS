@@ -575,9 +575,9 @@ describe("既有审批链适配器", () => {
   });
 });
 
-// ── ⑨ 依赖后续批次 / 第三方：只保留签名 + 结构化不可用 ────────────────────
-describe("B7 依赖占位", () => {
-  it("开发者 App 托管 MCP（源 :372-434）→ AGENT_DEPENDENCY_UNAVAILABLE", () => {
+// ── ⑨ 依赖宿主能力 / 第三方：只保留签名 + 结构化不可用 ────────────────────
+describe("宿主能力依赖占位", () => {
+  it("App 托管 MCP（源 :372-434）缺宿主侧注册表 → AGENT_DEPENDENCY_UNAVAILABLE", () => {
     const a = mod.assertAppManagedMcpAvailable("app", []);
     const b = mod.syncAppManagedMcpServers("app", "/root", []);
     const c = mod.removeAppManagedMcpServers("app");

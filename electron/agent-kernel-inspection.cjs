@@ -14,7 +14,7 @@
  * 与 DX 冲突（见 docs/dxos-port/Dx-P0-TABLE-CONFLICT.md），故移除该 JOIN，
  * modelCalls/toolCalls 一律由 usageStore 事件推导，结果与源一致。
  *
- * 依赖注入（源 agent-runtime 属后续批次；未注入抛 AGENT_DEPENDENCY_UNAVAILABLE）：
+ * 依赖注入（必须由装配方注入；未注入即抛 AGENT_DEPENDENCY_UNAVAILABLE）：
  *   · usageStore.listAgentUsage   ← server/agent-runtime/usageStore.ts:93
  *   · workspaceStore.artifactReviewState ← server/agent-runtime/workspaceStore.ts:185
  */

@@ -1014,6 +1014,23 @@ app.whenReady().then(async () => {
       isTrusted: trusted,
       hostAppId: "ai",
     });
+    // B4e 收口：把 developer App 目录投影晚绑定给本地账号服务。
+    //   · identity 在 runtime-boot.cjs 里先建，developerBundle 后建，构造期无法注入；
+    //   · 数据仍是同一份（identity SQLite + <userData>/dxos），这里只做只读投影，不新建第二份目录；
+    //   · 未装配时保持 local-account 既有降级（developerApps.available=false），不伪造清单。
+    try {
+      const developerCatalogDomain = require("./developer-domain.cjs");
+      const appCatalogStore = createDeveloperStore({
+        db: identity.store ? identity.store.connection || identity.store.db || null : null,
+        dataRoot: path.join(userData, "dxos"),
+        clock: () => Date.now(),
+      });
+      const appCatalog = developerCatalogDomain.createDeveloperAppCatalogAdapter({ store: appCatalogStore });
+      const attached = identity.localAccountService ? identity.localAccountService.attachAppCatalog(appCatalog) : false;
+      if (!attached) console.warn("[openarc] 开发者 App 目录未接入本地账号服务（identity 未装配 localAccountService）");
+    } catch (error) {
+      console.warn("[openarc] 开发者 App 目录接入本地账号服务失败：" + String((error && error.message) || error));
+    }
 
     // B7c：可选插件框架 + 本地市场。
     //   · 三个插件（钉钉 / 天气 / 黄历）默认全关；开关落 <userData>/dxos/integrations.json；

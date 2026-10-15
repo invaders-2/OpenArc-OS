@@ -20,9 +20,9 @@
  *                          refreshTaskInstruction/setPermissionGrant/failQueuedTask }
  *                        默认惰性 require ./agent-task-store.cjs（B3a 产出）
  *   · workspaceStore     { ensureRunWorkspace/abandonRunWorkspace/recordReviewerDecision/artifactReviewState }
- *                        （agent-runtime 属后续批次，必须注入）
- *   · schemaValidator    { validateJsonSchemaDefinition }（agent-runtime 属后续批次，必须注入）
- *   · usageStore         { listAgentUsage }（agent-runtime 属后续批次，必须注入）
+ *                        （必须由装配方注入；未注入即 AGENT_DEPENDENCY_UNAVAILABLE）
+ *   · schemaValidator    { validateJsonSchemaDefinition }（必须由装配方注入；未注入即结构化拒绝）
+ *   · usageStore         { listAgentUsage }（必须由装配方注入；未注入即结构化拒绝）
  *   · modelResolver / modelDescriptor / toolResolver / store / providers
  *                        capabilityRouter 与 capabilityTargetResolver 的数据层依赖
  *   · auth / AuthUser    B4 未落地：本模块不 import 任何 auth 模块，需要用户信息处接收

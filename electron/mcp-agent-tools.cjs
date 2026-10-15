@@ -28,11 +28,16 @@
  *   · cloudEntitlement（权益/会员门禁）：同上，源 server/mcp.ts 无命中 → 不引入。
  *   结论：B4d 的 mcp.ts 这一段本来就不触云；三者在别批（B4a/B4b/B4c）处理，本文件不做兼容层。
  *
- * ── 依赖后续批次 / 第三方 → 只保留签名 + 结构化 AGENT_DEPENDENCY_UNAVAILABLE ──
+ * ── 依赖宿主能力 / 第三方 → 只保留签名 + 结构化 AGENT_DEPENDENCY_UNAVAILABLE ──
  *   · assertAppManagedMcpAvailable(:372-382) / syncAppManagedMcpServers(:384-426) /
- *     removeAppManagedMcpServers(:428-434)：依赖开发者 App（B7，源走 managedByAppId）。
- *     本波无法落地 → 原样保留签名，一律返回 { ok:false, error:AGENT_DEPENDENCY_UNAVAILABLE }，
- *     绝不落盘、绝不假装注册成功。
+ *     removeAppManagedMcpServers(:428-434)：源按 managedByAppId 归属读写 mcp.json 并连接/断开这些
+ *     服务器。本仓缺的**不是**开发者 App 的 MCP 声明（electron/developer-domain.cjs 的
+ *     capabilities.mcp 已随包解析并投影），而是宿主侧的 App 托管 MCP 注册表：可读写的 MCP 配置
+ *     来源 + 按 managedByAppId 归属的连接生命周期。本仓 MCP 连接是 SQLite 受控白名单
+ *     （electron/mcp-domain.cjs:72 LOCAL_SERVERS，仅 openarc-test-echo，不接受任意 command），
+ *     承载不了 App 声明的 stdio/HTTP 服务 → 原样保留签名，一律返回
+ *     { ok:false, error:AGENT_DEPENDENCY_UNAVAILABLE }，绝不落盘、绝不假装注册成功。
+ *     接上的条件：装配方提供按 managedByAppId 归属的 MCP 注册表（读写配置 + connect/disconnect）。
  *   · buildLingxingGatewayActionArgs(:155-198) / parseLingxingGatewayTool(:200-232)：
  *     领星 ERP 网关属第三方集成插件（B7，默认关）。本波不移植目录查询/缓存/版本重试
  *     （源 :120-243、:534-549 withServerCallPacing 一并留给 B7）；只保留签名 + 结构化不可用。
@@ -327,24 +332,24 @@ function parseImport(text) {
   return out;
 }
 
-// ── 依赖开发者 App（B7）→ 只保留签名 + 结构化不可用（源 mcp.ts:372-434）──────
-/** 源 :372-382。开发者 App 托管 MCP 的 ID 冲突校验；B7 落地前不可用。 */
+// ── App 托管 MCP：缺宿主侧注册表 → 只保留签名 + 结构化不可用（源 mcp.ts:372-434）──────
+/** 源 :372-382。App 托管 MCP 的 ID 冲突校验；缺宿主侧注册表（无读取来源）。 */
 function assertAppManagedMcpAvailable(appId, declarations) {
   void appId;
   void declarations;
-  return dependencyUnavailable("developerApps", "开发者 App 托管 MCP 属 B7，本波未落地");
+  return dependencyUnavailable("developerApps", "缺少宿主侧 App 托管 MCP 注册表：本仓 MCP 是 SQLite 受控白名单（mcp-domain.cjs:72 LOCAL_SERVERS），无法按 managedByAppId 读取 App 声明的服务配置做 ID 冲突校验");
 }
-/** 源 :384-426。注册/同步 App 自带 MCP；B7 落地前不可用（不落盘、不连进程）。 */
+/** 源 :384-426。注册/同步 App 自带 MCP；缺注册表与连接生命周期（不落盘、不连进程）。 */
 function syncAppManagedMcpServers(appId, sourceRoot, declarations) {
   void appId;
   void sourceRoot;
   void declarations;
-  return dependencyUnavailable("developerApps", "开发者 App 托管 MCP 属 B7，本波未落地");
+  return dependencyUnavailable("developerApps", "缺少宿主侧 App 托管 MCP 注册表与连接生命周期：无法按 managedByAppId 持久化并连接 App 声明的 stdio/HTTP 服务");
 }
-/** 源 :428-434。移除 App 托管 MCP；B7 落地前不可用。 */
+/** 源 :428-434。移除 App 托管 MCP；缺注册表（无断开/移除目标）。 */
 function removeAppManagedMcpServers(appId) {
   void appId;
-  return dependencyUnavailable("developerApps", "开发者 App 托管 MCP 属 B7，本波未落地");
+  return dependencyUnavailable("developerApps", "缺少宿主侧 App 托管 MCP 注册表：无法按 managedByAppId 断开并移除 App 声明的服务");
 }
 
 // ── 领星 ERP 网关 helper（第三方集成插件 B7，默认关）→ 签名 + 结构化不可用 ──

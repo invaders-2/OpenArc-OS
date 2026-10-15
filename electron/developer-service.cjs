@@ -488,7 +488,7 @@ function createDeveloperBundle(options = {}) {
     const bindingId = requireStr(payload.credentialId || payload.secretRef, 120);
     if (bindingId) {
       // 本批不装配 provider 密钥读取：显式拒绝，绝不假造 Authorization。
-      throw domain.createDeveloperError(domain.DEVELOPER_ERR_DEPENDENCY_UNAVAILABLE, "凭据发送尚未装配（provider 密钥读取属后续批次）", { dependency: "providerStore" });
+      throw domain.createDeveloperError(domain.DEVELOPER_ERR_DEPENDENCY_UNAVAILABLE, "凭据发送未装配：缺少 provider 密钥来源（providerId → secret 读取绑定；app_credential_bindings 只存引用不存密钥）", { dependency: "providerStore" });
     }
     let body;
     if (method !== "GET" && payload.body !== undefined) {

@@ -410,3 +410,29 @@ test("B4e-12 · 登录成功后 users/sessions/audit 都是既有表，且审计
     assert.equal(tables.includes(t), false, "不得新建第二套账号表 " + t);
   }
 });
+
+test("B4e-13 · attachAppCatalog 晚绑定：已装 App 进入 catalog；形状不符回落既有降级", async () => {
+  const fx = await bootstrapped();
+  assert.equal(fx.svc.listAppCatalog({ context: fx.adminCtx }).developerApps.available, false);
+  const fake = {
+    listInstalledApps: () => [{ id: "dev-late", name: "晚绑定应用", desc: "开发应用" }],
+    listPermissionManifests: () => [
+      { appId: "dev-late", appName: "晚绑定应用", permissions: [{ code: "app.dev-late.a", label: "a", description: "a" }] },
+    ],
+  };
+  assert.equal(fx.svc.attachAppCatalog(fake), true);
+  const catalog = fx.svc.listAppCatalog({ context: fx.adminCtx });
+  assert.equal(catalog.developerApps.available, true);
+  assert.ok(catalog.apps.some((a) => a.id === "dev-late"));
+  assert.equal(fx.svc.appPermissionSnapshot({ userId: fx.boot.user.id }).permissionManifests.length, 1);
+
+  // 形状不符：回落到"未注入"降级语义，不伪造目录
+  assert.equal(fx.svc.attachAppCatalog({}), false);
+  assert.equal(fx.svc.listAppCatalog({ context: fx.adminCtx }).developerApps.available, false);
+});
+
+test("B4e-14 · 装配点：main.cjs 在 developerBundle 之后把 App 目录晚绑定给 localAccountService", () => {
+  const src = fs.readFileSync(new URL("../electron/main.cjs", import.meta.url), "utf8");
+  assert.match(src, /createDeveloperAppCatalogAdapter\(/);
+  assert.match(src, /localAccountService\.attachAppCatalog\(/);
+});

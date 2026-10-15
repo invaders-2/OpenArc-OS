@@ -1127,6 +1127,83 @@ function createDeveloperAppActionAdapter({ store, runTool, createError } = {}) {
   return { listPacks, installedAppIds, catalog, normalizeAction, runTool };
 }
 
+/**
+ * 本地账号目录（B4e）的 developer App 来源适配器（store 注入，主进程只做接线；纯逻辑、无 I/O）。
+ *
+ * 契约与 local-account-service.cjs 的 deps.appCatalog 一致：
+ *   listInstalledApps({ userId, organizationId }) → [{ id, name, desc }]（仅该用户已启用的 App）
+ *   listPermissionManifests() → [{ appId, appName, permissions: [{ code, label, description }] }]
+ *
+ * 投影规则逐条对齐源 auth.ts:630-679：
+ *   · desc = manifest.subtitle || manifest.description || '已安装应用'（源同序）；
+ *   · 权限项 label/description 优先取同一权限声明的工具（capabilities.tools），
+ *     其次源内置标准权限表，最后回落权限码末两段 / '<appName> 声明的权限'。
+ * 无数据库时 store.listInstalled / listAppIds 返回空数组 —— 返回空目录，不伪造。
+ */
+function createDeveloperAppCatalogAdapter({ store } = {}) {
+  if (!store || typeof store.listInstalled !== "function" || typeof store.currentRelease !== "function" || typeof store.readRelease !== "function") {
+    throw createDeveloperError(DEVELOPER_ERR_INVALID_INPUT, "createDeveloperAppCatalogAdapter 需要 developer-store");
+  }
+  // 源 auth.ts:663-670 的标准权限标签表（原样保留）。
+  const STANDARD_PERMISSION_LABELS = Object.freeze({
+    "app-api.call": { label: "调用 APP API", description: "允许 Agent 调用这个 APP 对外开放的接口" },
+    "ui.notify": { label: "发送系统通知", description: "允许这个 APP 的 Agent 能力发送系统通知" },
+    "ui.external": { label: "打开外部页面", description: "允许这个 APP 的 Agent 能力打开外部页面" },
+    "file.write": { label: "写入文件", description: "允许这个 APP 的 Agent 能力写入文件" },
+    "realtime.room": { label: "使用实时房间", description: "允许这个 APP 创建、发现和加入局域网实时房间" },
+    "collab.project": { label: "使用协同项目", description: "允许这个 APP 创建持久项目并按成员或邀请口令协作" },
+  });
+  function releaseOf(appId) {
+    const current = store.currentRelease(appId);
+    if (!current) return null;
+    try { return store.readRelease(appId, current.packagePath); } catch { return null; }
+  }
+  function listInstalledApps(input) {
+    const userId = input && input.userId != null && String(input.userId) !== "" ? String(input.userId) : null;
+    if (!userId) return [];
+    const out = [];
+    for (const row of store.listInstalled(userId) || []) {
+      const appId = row && row.appId ? String(row.appId) : "";
+      if (!appId) continue;
+      const release = releaseOf(appId);
+      if (!release || !release.manifest) continue;
+      out.push({
+        id: appId,
+        name: String(release.manifest.name || appId),
+        desc: String(release.manifest.subtitle || release.manifest.description || "已安装应用"),
+      });
+    }
+    return out;
+  }
+  function listPermissionManifests() {
+    const out = [];
+    for (const appId of store.listAppIds() || []) {
+      const release = releaseOf(appId);
+      if (!release || !release.manifest) continue;
+      const raw = release.capabilities && Array.isArray(release.capabilities.permissions) ? release.capabilities.permissions : [];
+      const codes = [...new Set(raw.map(String).filter(Boolean))];
+      if (!codes.length) continue;
+      const tools = release.capabilities && Array.isArray(release.capabilities.tools) ? release.capabilities.tools : [];
+      const appName = String(release.manifest.name || appId);
+      out.push({
+        appId,
+        appName,
+        permissions: codes.map((code) => {
+          const tool = tools.find((item) => item && item.permission === code);
+          const standard = STANDARD_PERMISSION_LABELS[code.split(".").slice(-2).join(".")];
+          return {
+            code,
+            label: String((tool && tool.title) || (standard && standard.label) || code.split(".").slice(-2).join(".")),
+            description: String((tool && tool.description) || (standard && standard.description) || appName + " 声明的权限"),
+          };
+        }),
+      });
+    }
+    return out;
+  }
+  return { listInstalledApps, listPermissionManifests };
+}
+
 module.exports = {
   DEVELOPER_SYSTEM_VERSION,
   DEFAULT_DEVELOPER_APP_VERSION,
@@ -1203,4 +1280,5 @@ module.exports = {
   projectDeveloperAppActions,
   normalizeDeveloperAppAction,
   createDeveloperAppActionAdapter,
+  createDeveloperAppCatalogAdapter,
 };

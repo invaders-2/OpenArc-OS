@@ -270,7 +270,7 @@ function invokeChat(provider, model, input, params, timeoutMs, signal) {
 
 function requireAgentWorkspace() {
   if (deps.agentWorkspace) return deps.agentWorkspace;
-  throw dependencyUnavailable("agentWorkspace", "Agent Workspace 注册属后续批次（B7 开发者 App），未注入");
+  throw dependencyUnavailable("agentWorkspace", "未注入 Agent Workspace 适配器：由 skill-service 装配后注入");
 }
 
 function registerAgentWorkspace(pack, root) {

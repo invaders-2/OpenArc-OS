@@ -24,6 +24,7 @@ const { IdentityStore } = require("../electron/identity-store.cjs");
 const { writeZip } = require("../electron/canvas-dxos-zip.cjs");
 const domain = require("../electron/developer-domain.cjs");
 const { createDeveloperBundle } = require("../electron/developer-service.cjs");
+const { createDeveloperStore } = require("../electron/developer-store.cjs");
 
 const FIXED_NOW = 1_700_000_000_000;
 const PUBLIC_DNS = async () => [{ address: "93.184.216.34", family: 4 }];
@@ -451,4 +452,37 @@ test("健康：六张 v22 表全部就绪，未装配数据库时给出结构化
   const notReady = await bare.execute("developer/list", {}, { sessionRef: "s" });
   assert.equal(notReady.ok, false);
   assert.equal(notReady.error, domain.DEVELOPER_ERR_DEPENDENCY_UNAVAILABLE);
+});
+
+test("B4e 收口 · App 目录适配器：已安装 App 进入 catalog，权限清单带标签（源 auth.ts:630-679）", async () => {
+  const fx = openBundle();
+  const installed = await fx.call("developer/install", { package: buildPackage(makeManifest()).toString("base64") });
+  assert.equal(installed.ok, true, JSON.stringify(installed));
+  const appId = installed.value.appId;
+  const store = createDeveloperStore({ db: fx.db, dataRoot: path.join(fx.dir, "dxos"), clock: () => FIXED_NOW });
+  const adapter = domain.createDeveloperAppCatalogAdapter({ store });
+
+  // 未安装该 App 的用户 / 无用户：不越权、不猜用户，返回空目录
+  assert.deepEqual(adapter.listInstalledApps({ userId: "u-other" }), []);
+  assert.deepEqual(adapter.listInstalledApps({}), []);
+
+  const items = adapter.listInstalledApps({ userId: "u-developer" });
+  assert.equal(items.length, 1, JSON.stringify(items));
+  assert.equal(items[0].id, appId);
+  assert.equal(items[0].name, "Demo App");
+  assert.ok(items[0].desc.length > 0);
+
+  const manifests = adapter.listPermissionManifests();
+  assert.equal(manifests.length, 1, JSON.stringify(manifests));
+  assert.equal(manifests[0].appId, appId);
+  assert.equal(manifests[0].appName, "Demo App");
+  const perm = manifests[0].permissions.find((item) => item.code.endsWith("project.read"));
+  assert.ok(perm, JSON.stringify(manifests));
+  assert.ok(perm.label && perm.description, JSON.stringify(perm));
+
+  // 形状不符的 store：结构化拒绝，不静默降级成空目录
+  assert.throws(
+    () => domain.createDeveloperAppCatalogAdapter({ store: {} }),
+    (error) => error.code === domain.DEVELOPER_ERR_INVALID_INPUT,
+  );
 });

@@ -56,9 +56,10 @@
  *   · auth.ts:735-742 appPermissionSnapshot 的"未开会员 → 全部 mode=all、无 policies"分支
  *                                                              —— OUT：本地始终返回真实配置的快照。
  *
- * ## 依赖注入（后续批次，绝不伪造成功）
+ * ## 依赖注入（必须由装配方注入；未注入即结构化降级，绝不伪造成功）
  *
- *   · deps.appCatalog（B7 开发者 App）：
+ *   · deps.appCatalog（开发者 App 目录；装配方 = electron/developer-domain.cjs 的
+ *     createDeveloperAppCatalogAdapter，main.cjs 在 developerBundle 之后晚绑定）：
  *       listInstalledApps({ userId, organizationId }) → [{ id, name, desc }]
  *       listPermissionManifests() → [{ appId, appName, permissions: [{ code, label, description }] }]
  *     未注入时：内置 App（app_principals）照常工作；快照里
@@ -191,7 +192,7 @@ class LocalAccountService {
    * @param opts.authorization  AuthorizationService（治理闸门 + 既有治理接口）
    * @param opts.identityService 可选 IdentityService；提供时 session 生命周期走命令层（推荐），
    *                             否则回落到 IdentityStore 的既有方法
-   * @param opts.deps           后续批次注入：{ appCatalog }（B7 开发者 App）
+   * @param opts.deps           可选注入：{ appCatalog }（开发者 App 目录；也可经 attachAppCatalog 晚绑定）
    */
   constructor({ identity, authStore, authorization, identityService = null, deps = {} } = {}) {
     if (!identity) throw new Error("LocalAccountService 需要 IdentityStore");
@@ -201,8 +202,17 @@ class LocalAccountService {
     this.authStore = authStore;
     this.authorization = authorization;
     this.identityService = identityService || null;
-    this.appCatalog =
-      deps && deps.appCatalog && typeof deps.appCatalog.listInstalledApps === "function" ? deps.appCatalog : null;
+    this.attachAppCatalog(deps ? deps.appCatalog : null);
+  }
+
+  /**
+   * 晚绑定 developer App 目录：identity 先于 developerBundle 装配（main.cjs 装配点），
+   * 构造期拿不到该实例。形状不符时保持"未注入"的降级语义，不伪造目录。
+   * @returns {boolean} 是否接上
+   */
+  attachAppCatalog(appCatalog) {
+    this.appCatalog = appCatalog && typeof appCatalog.listInstalledApps === "function" ? appCatalog : null;
+    return !!this.appCatalog;
   }
 
   // -------------------------------------------------------------------------

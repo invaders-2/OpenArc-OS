@@ -3,9 +3,9 @@
  * B3c · Agent 运行时依赖注入中心。
  *
  * 为什么单独一层：源 server/agent-runtime/* 直接 import 了 ccsDb / auth / fs / agent-kernel
- * 等重量模块。移植后这些能力分属后续批次（B3a taskStore / B3d toolRunner / B6 fsAdapter /
- * B4 auth / OUT 云计费），本层把它们收敛成一个显式注入点，未注入时抛结构化
- * AGENT_DEPENDENCY_UNAVAILABLE，绝不伪造成功（硬约束 3）。
+ * 等重量模块。移植后这些能力各自落在独立模块（B3a agent-task-store / B3d agent-builtin-tools /
+ * B6 dxos-fs-adapter / B4 authorization），本层把它们收敛成一个显式注入点：必须由装配方注入，
+ * 未注入即抛结构化 AGENT_DEPENDENCY_UNAVAILABLE，绝不伪造成功（硬约束 3）。
  *
  * 对应源：server/ccsDb.ts:1-990（db）、server/agent-kernel/kernel.ts:1-52（kernel）、
  *         server/taskStore.ts:1-1069（taskStore）、server/fs.ts（fsAdapter）、
