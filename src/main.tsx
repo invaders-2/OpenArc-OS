@@ -358,7 +358,8 @@ const apps = [
   { id: "projects", name: "项目", icon: "folder" },
   { id: "organization", name: "组织治理", icon: "settings" },
   { id: "skills", name: "Skill 中心", icon: "shortcuts" },
-  // MCP 中心（D5-03 第一批：连接管理与能力发现，不开放工具调用）。
+  // MCP 中心（D5-03：连接管理与能力发现；工具调用另由 mcp/toolInvocation/set 开关控制：
+  // 默认关闭，开启后每次调用仍走审批链，未批准 0 外发；真正调用入口是 mcp/toolInvocation/call）。
   // 图标复用既有图标集里的 shortcuts：与 canvas/browser 同风格，不为它新增图标资产。
   { id: "mcp-center", name: "MCP 中心", icon: "shortcuts" },
   { id: "settings", name: "系统设置", icon: "settings" },
@@ -1870,8 +1871,8 @@ function App() {
       };
       const shown = folders.find((f) => f.id === ui.folderId) ?? folder;
       /**
-       * 文件服务（D3-04）接入前文件夹里没有真实条目，因此条目集恒为空。
-       * 搜索 / 排序的**代码路径是真实的**，只是当前没有数据可筛 —— 不放假文件。
+       * 条目集全部来自真实存储：子文件夹来自桌面虚拟树，文件来自文件服务（D3-04）已接入的
+       * filesByFolder。搜索 / 排序都作用在这些真实条目上 —— 不放假数据。
        */
       const q = ui.query.trim().toLowerCase();
       /** 子文件夹 + 文件服务条目，统一成 Row 后再排序 / 分组。 */
