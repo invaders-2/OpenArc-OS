@@ -235,8 +235,9 @@ async function main() {
   async function grantToolsViaUI(actions) {
     const c = await click('[aria-label="打开组织治理"]');
     if (c !== "ok") return { ok: false, reason: "dock-click:" + c };
-    if (!(await waitSel('[data-d3-04d="app"]', 20000))) return { ok: false, reason: "no-gov-app" };
-    await click('[data-d3-04d-tab="apps"]');
+    // 治理 App 重构后入口改用现行 data-org-* 钩子（旧 data-d3-04d 命名已移除）。
+    if (!(await waitSel('[data-org-shell]', 20000))) return { ok: false, reason: "no-gov-app" };
+    await click('[data-org-nav="app"]');
     if (!(await waitSel('[data-gov-tool-toggle="ai"]', 20000))) return { ok: false, reason: "no-ai-toggle" };
     await click('[data-gov-tool-toggle="ai"]');
     if (!(await waitSel('[data-gov-tool-access="ai"]', 20000))) return { ok: false, reason: "no-tool-panel" };
