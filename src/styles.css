@@ -4030,6 +4030,48 @@ label {
   font-size: var(--fs-secondary);
 }
 
+/* ── UI-3 · 工具调用开关（唯一写入口）────────────────────────────────────
+   只用既有 token：颜色走 --text / --muted / --failed，间距 --space-*，
+   圆角 --radius-*，时长 --dur-*；不新增发丝线框（DESIGN_SYSTEM §3.2）。
+   状态由文本 + role=switch/aria-checked 表达，颜色只是辅助（§8 Switch 行）；
+   本区块不新增动效，减少动态效果下无补间（MOTION_SYSTEM §8）。 */
+.mcp-toolswitch {
+  flex: none;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4) 0;
+}
+.mcp-toolswitch__state {
+  /* 状态行是长中文：允许收缩换行，窄宽下不把区块顶出横向溢出 */
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+.mcp-toolswitch__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.mcp-toolswitch__badge {
+  display: inline-flex;
+  flex: none;
+}
+.mcp-toolswitch__boundary {
+  flex: 1 1 22ch;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.mcp-toolswitch__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
 /* 窄窗口（560—799px 档）：列表在上、详情的空间优先，两栏改上下堆叠。
    容器查询按窗口自身宽度响应（.window 已声明 container-type: inline-size）。 */
 @container (max-width: 860px) {

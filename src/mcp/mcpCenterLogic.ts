@@ -15,16 +15,28 @@
 /** 只读聚合命令：与 electron/mcp-bootstrap.cjs#handleAgentTools 同一条。 */
 export const MCP_AGENT_TOOLS_COMMAND = "mcp/agentTools";
 
+/**
+ * 工具调用开关的**唯一写命令**（electron/mcp-bootstrap.cjs:282-303）：
+ * trusted + risk=mcp.manage 授权 + 审计，落主进程的 userData 下 mcp.json，默认关闭。
+ * 它不是调用入口：调用命令是 mcp/toolInvocation/call，界面**不发也不登记** ——
+ * 这里只翻转"允许不允许发起"，每次调用仍要过审批。
+ */
+export const MCP_TOOL_SWITCH_COMMAND = "mcp/toolInvocation/set";
+
 /** 本页会发出的命令（mcp:command 白名单的子集，逐条对齐 mcp-bootstrap.cjs 的 switch）。 */
 export const MCP_CONSOLE_COMMANDS: readonly string[] = [
   "mcp/list",
   "mcp/get",
   "mcp/testLog",
   "mcp/agentTools",
+  "mcp/toolInvocation/set",
 ];
 
 /** mcp/agentTools 的载荷键：只有业务查询参数，身份字段由主进程注入。 */
 export const MCP_AGENT_TOOLS_QUERY_KEYS: readonly string[] = ["serverId", "search"];
+
+/** 开关写命令的载荷键：只有 enabled；身份字段由主进程注入，与 agentToolsQuery 同一口径。 */
+export const MCP_TOOL_SWITCH_PAYLOAD_KEYS: readonly string[] = ["enabled"];
 
 /** 未注入 agent-tools 端口时的稳定错误码（electron/mcp-domain.cjs:59）。 */
 export const MCP_TOOL_DISCOVERY_FAILED = "MCP_TOOL_DISCOVERY_FAILED";
@@ -189,3 +201,145 @@ export function agentToolsDetailText(view: AgentToolsView): string {
   if (view.error) return view.error;
   return "主进程没有给出更多说明。";
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   UI-3 · 工具调用开关：读（mcp/agentTools.enabled）+ 写（mcp/toolInvocation/set）
+   ──────────────────────────────────────────────────────────────────────────
+   这一层只做三件可离线断言的事：
+     ① 把"读到的 enabled + 读到/没读到"映射成显式状态（加载 / 就绪 / 越权 /
+        依赖缺失 / 错误），界面不自己当权限权威；
+     ② 把写回包投影成 { ok, enabled, persisted, audited, error, detail }，
+        并明确：**回包没给布尔就是 null** —— 界面绝不做乐观翻转；
+     ③ 错误码 → 人话文案（含"状态没有改变"这一事实，禁止夸大后果）。
+   界面不提供任何"直接调用工具"的入口：调用命令不在这里出现（见单测源码级断言）。
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * 读侧状态码里按"未登录 / 越权"渲染的集合。
+ * MCP_UNAUTHORIZED 是后端主路径；后三个是渲染层既有的会话码（ERROR_LABEL 同口径）。
+ */
+export const TOOL_SWITCH_UNAUTHORIZED_CODES: readonly string[] = [
+  "MCP_UNAUTHORIZED",
+  "FORBIDDEN",
+  "UNAUTHORIZED",
+  "PERMISSION_DENIED",
+  "SESSION_EXPIRED",
+  "SESSION_REVOKED",
+];
+
+export function isToolSwitchUnauthorized(code: unknown): boolean {
+  return typeof code === "string" && TOOL_SWITCH_UNAUTHORIZED_CODES.indexOf(code) >= 0;
+}
+
+/**
+ * 读侧状态：显式五分支，未知状态不塌缩成"关着"。
+ * 加载中与"还没读到"分开；依赖缺失（MCP_TOOL_DISCOVERY_FAILED）单列，因为它不是权限问题。
+ */
+export type ToolSwitchReadState =
+  | { kind: "loading" }
+  | { kind: "ready"; enabled: boolean }
+  | { kind: "unauthorized"; code: string }
+  | { kind: "unavailable"; code: string }
+  | { kind: "error"; code: string };
+
+export function toolSwitchReadState(
+  view: AgentToolsView | null,
+  loading: boolean,
+): ToolSwitchReadState {
+  if (!view) return loading ? { kind: "loading" } : { kind: "error", code: "RESPONSE_INCOMPLETE" };
+  if (view.ok) return { kind: "ready", enabled: view.enabled };
+  const code = view.error || "INTERNAL_ERROR";
+  if (isToolSwitchUnauthorized(code)) return { kind: "unauthorized", code };
+  if (code === MCP_TOOL_DISCOVERY_FAILED) return { kind: "unavailable", code };
+  return { kind: "error", code };
+}
+
+/**
+ * 写回包投影（mcp/toolInvocation/set，electron/mcp-bootstrap.cjs:282-303）。
+ * enabled 只在后端明确回了布尔时才是布尔；其余一律 null —— 这是"不乐观切换"的根据。
+ */
+export type ToolSwitchWriteResult = {
+  ok: boolean;
+  enabled: boolean | null;
+  persisted: boolean;
+  audited: boolean;
+  error: string | null;
+  detail: string | null;
+};
+
+export function normalizeToolSwitchResult(raw: unknown): ToolSwitchWriteResult {
+  const res = isObject(raw) ? raw : {};
+  return {
+    ok: res.ok === true,
+    enabled: typeof res.enabled === "boolean" ? res.enabled : null,
+    persisted: res.persisted === true,
+    audited: res.audited === true,
+    error: typeof res.error === "string" && res.error ? res.error : null,
+    detail: typeof res.detail === "string" && res.detail ? res.detail : null,
+  };
+}
+
+/** 开关写命令的载荷：只带 enabled 布尔，身份字段与未登记键一律丢弃。 */
+export function toolSwitchPayload(enabled: unknown): { enabled: boolean } {
+  return { enabled: enabled === true };
+}
+
+/** 只有读到明确状态才允许写：状态未知/越权/依赖缺失时不发写命令。 */
+export function toolSwitchNextValue(state: ToolSwitchReadState): boolean | null {
+  return state.kind === "ready" ? !state.enabled : null;
+}
+
+/** 开关控件的可见文案：说清"按下去会发生什么"，不靠颜色表达当前态。 */
+export function toolSwitchToggleText(enabled: boolean): string {
+  return enabled ? "关闭工具调用开关" : "打开工具调用开关";
+}
+
+/** 状态行文案（role=status 播报）：每种状态都有话，避免"只剩一个颜色点"。 */
+export function toolSwitchStateText(state: ToolSwitchReadState): string {
+  switch (state.kind) {
+    case "loading":
+      return "正在读取开关状态…";
+    case "ready":
+      return state.enabled
+        ? "当前：已打开 —— 允许发起调用，每次仍要单独审批"
+        : "当前：已关闭（默认）—— 不会发起任何工具调用";
+    case "unauthorized":
+      return "当前账号无权查看或修改这个开关";
+    case "unavailable":
+      return "开关依赖缺失：主进程没有注入工具聚合端口";
+    default:
+      return "开关状态未知：界面不猜它开着还是关着";
+  }
+}
+
+/**
+ * 写侧错误码 → 人话。全部以"状态没有改变"收尾：未落盘的开关变更不产生任何后果，
+ * 也不把它说成"调用被阻止"之类的戏剧化结论。未登记的码原样带出。
+ */
+export const TOOL_SWITCH_ERROR_LABEL: Record<string, string> = {
+  MCP_INVALID_INPUT: "开关请求形状不对（enabled 必须是布尔）：状态没有改变",
+  MCP_COMMAND_NOT_ALLOWED: "命令不在 mcp:command 白名单内：状态没有改变",
+  MCP_UNAUTHORIZED: "当前账号没有管理 MCP 的权限（mcp.manage）：状态没有改变",
+  MCP_SWITCH_UNAVAILABLE: "开关无法落盘（缺少可写的配置目录）：状态没有改变",
+  MCP_AUDIT_UNAVAILABLE: "审计不可用，拒绝无审计的开关变更：状态没有改变",
+  MCP_TOOL_DISCOVERY_FAILED: "工具聚合端口未注入（依赖缺失）：读不到开关状态，也没有做任何更改",
+  MCP_INTERNAL_ERROR: "主进程内部错误：状态没有改变",
+  RESPONSE_INCOMPLETE: "主进程没有返回开关状态：界面不猜，状态没有改变",
+  NO_BRIDGE: "桌面桥未接入（当前环境没有 MCP 域）：状态没有改变",
+  INTERNAL_ERROR: "主进程返回异常：状态没有改变",
+  SESSION_EXPIRED: "会话已过期，请重新登录；状态没有改变",
+  SESSION_REVOKED: "会话已失效，请重新登录；状态没有改变",
+};
+
+export function toolSwitchErrorText(code: unknown): string {
+  const key = typeof code === "string" && code ? code : "INTERNAL_ERROR";
+  return TOOL_SWITCH_ERROR_LABEL[key] || "开关未完成（" + key + "）：状态没有改变";
+}
+
+/** 开关风险与机制的显式说明：默认关闭的含义 + 逐次审批 + 定时任务未开放。 */
+export const TOOL_SWITCH_RISK_TEXT =
+  "这个开关决定 Agent 能不能发起 MCP 工具调用，默认关闭：关着的时候，即使 Agent 看得到工具，一次都不会真的执行。打开只放开“允许发起”这一步，每次调用仍然要单独通过审批（走既有审批权威，没有批准就不会外发）。无人值守的定时任务暂不开放，目前只覆盖有人在场的调用。";
+
+/** 产品边界：本区块只有开关，没有直接调用入口。 */
+export const TOOL_SWITCH_BOUNDARY_TEXT =
+  "这里只提供开关，不提供任何「直接运行工具 / 调用工具」的入口：调用一律经既有审批链（ControlledToolProxy / SideEffectRuntime），未批准不会外发。";

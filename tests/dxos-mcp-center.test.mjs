@@ -30,6 +30,12 @@ import {
   MCP_TOOL_DISCOVERY_FAILED,
   MCP_TOOL_PARAM_EMPTY_TEXT,
   MCP_TOOL_RISK_EXTERNAL_SIDE_EFFECT,
+  MCP_TOOL_SWITCH_COMMAND,
+  MCP_TOOL_SWITCH_PAYLOAD_KEYS,
+  TOOL_SWITCH_BOUNDARY_TEXT,
+  TOOL_SWITCH_ERROR_LABEL,
+  TOOL_SWITCH_RISK_TEXT,
+  TOOL_SWITCH_UNAUTHORIZED_CODES,
   agentToolApprovalText,
   agentToolParamText,
   agentToolRiskText,
@@ -39,7 +45,15 @@ import {
   agentToolsQuery,
   isAllowedAgentToolsQueryKey,
   isAllowedMcpCommand,
+  isToolSwitchUnauthorized,
   normalizeAgentToolsResult,
+  normalizeToolSwitchResult,
+  toolSwitchErrorText,
+  toolSwitchNextValue,
+  toolSwitchPayload,
+  toolSwitchReadState,
+  toolSwitchStateText,
+  toolSwitchToggleText,
 } from "../src/mcp/mcpCenterLogic.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -55,14 +69,23 @@ const stripComments = (s) =>
 /* ══════════════════════════════════════════════════════════════════════════
    1 命令白名单与载荷键
    ══════════════════════════════════════════════════════════════════════════ */
-test("界面白名单是后端 MCP_COMMANDS 的子集，且只新增 mcp/agentTools", () => {
+test("界面白名单是后端 MCP_COMMANDS 的子集：4 条只读 + 1 条开关写命令", () => {
   const backend = bootstrap.MCP_COMMANDS;
-  assert.equal(MCP_CONSOLE_COMMANDS.length, 4);
+  assert.equal(MCP_CONSOLE_COMMANDS.length, 5);
   for (const c of MCP_CONSOLE_COMMANDS) assert.ok(backend.includes(c), c + " 必须是后端白名单命令");
   assert.equal(MCP_CONSOLE_COMMANDS.includes(MCP_AGENT_TOOLS_COMMAND), true);
   assert.equal(MCP_AGENT_TOOLS_COMMAND, "mcp/agentTools");
   assert.equal(isAllowedMcpCommand("mcp/agentTools"), true);
-  for (const bad of ["", "mcp/toolCall", "mcp/invoke", "MCP/LIST", "mcp/list ", "__proto__", undefined, 42]) {
+  /* UI-3：唯一新增的是开关**写**命令；它必须是后端命令，且界面里只有这一条写命令。 */
+  assert.equal(MCP_TOOL_SWITCH_COMMAND, "mcp/toolInvocation/set");
+  assert.equal(MCP_CONSOLE_COMMANDS.includes(MCP_TOOL_SWITCH_COMMAND), true);
+  assert.equal(isAllowedMcpCommand(MCP_TOOL_SWITCH_COMMAND), true);
+  const writes = MCP_CONSOLE_COMMANDS.filter((c) => !["mcp/list", "mcp/get", "mcp/testLog", "mcp/agentTools"].includes(c));
+  assert.deepEqual([...writes], ["mcp/toolInvocation/set"]);
+  /* 调用入口不在界面白名单里：界面连发都发不出去（不是靠按钮藏起来）。 */
+  assert.equal(MCP_CONSOLE_COMMANDS.includes("mcp/toolInvocation/call"), false);
+  assert.equal(isAllowedMcpCommand("mcp/toolInvocation/call"), false);
+  for (const bad of ["", "mcp/toolCall", "mcp/invoke", "mcp/toolInvocation/call", "MCP/LIST", "mcp/list ", "__proto__", undefined, 42]) {
     assert.equal(isAllowedMcpCommand(bad), false, JSON.stringify(bad) + " 必须被拒绝");
   }
 });
@@ -265,4 +288,198 @@ test("界面只经 window.openarc.mcp 取数据，不越域", () => {
   const code = stripComments(read("src/mcp/McpCenter.tsx"));
   assert.ok(code.includes("openarc") && code.includes(".mcp"), "必须通过 window.openarc.mcp");
   assert.equal(/openarc\s*\.\s*(agent|model|skill|identity|task)\b/.test(code), false, "不得越域取数据");
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+   6 UI-3 · 工具调用开关：状态映射 / 错误码 / 写入一致性 / 无直接调用入口
+   ══════════════════════════════════════════════════════════════════════════ */
+test("开关写命令载荷只带 enabled 布尔（身份字段无处可塞）", () => {
+  assert.deepEqual([...MCP_TOOL_SWITCH_PAYLOAD_KEYS], ["enabled"]);
+  assert.deepEqual(toolSwitchPayload(true), { enabled: true });
+  assert.deepEqual(toolSwitchPayload(false), { enabled: false });
+  assert.deepEqual(toolSwitchPayload("yes"), { enabled: false });
+  assert.deepEqual(toolSwitchPayload(undefined), { enabled: false });
+  for (const v of [true, false, "yes", 1, null, undefined, { enabled: true }, ["x"]]) {
+    assert.deepEqual(Object.keys(toolSwitchPayload(v)), ["enabled"]);
+  }
+});
+
+test("读侧状态映射：加载 / 就绪 / 越权 / 依赖缺失 / 错误分开，未知不塌缩成“关着”", () => {
+  assert.deepEqual(toolSwitchReadState(null, true), { kind: "loading" });
+  assert.deepEqual(toolSwitchReadState(null, false), { kind: "error", code: "RESPONSE_INCOMPLETE" });
+  const off = toolSwitchReadState(normalizeAgentToolsResult({ ok: true, enabled: false }), false);
+  const on = toolSwitchReadState(normalizeAgentToolsResult({ ok: true, enabled: true }), false);
+  assert.deepEqual(off, { kind: "ready", enabled: false });
+  assert.deepEqual(on, { kind: "ready", enabled: true });
+  assert.deepEqual(
+    toolSwitchReadState(normalizeAgentToolsResult({ ok: false, error: "MCP_UNAUTHORIZED" }), false),
+    { kind: "unauthorized", code: "MCP_UNAUTHORIZED" },
+  );
+  assert.deepEqual(
+    toolSwitchReadState(normalizeAgentToolsResult({ ok: false, error: "SESSION_EXPIRED" }), false),
+    { kind: "unauthorized", code: "SESSION_EXPIRED" },
+  );
+  assert.deepEqual(
+    toolSwitchReadState(normalizeAgentToolsResult({ ok: false, error: MCP_TOOL_DISCOVERY_FAILED }), false),
+    { kind: "unavailable", code: MCP_TOOL_DISCOVERY_FAILED },
+  );
+  assert.deepEqual(
+    toolSwitchReadState(normalizeAgentToolsResult({ ok: false, error: "MCP_INTERNAL_ERROR" }), false),
+    { kind: "error", code: "MCP_INTERNAL_ERROR" },
+  );
+  /* 越权 / 依赖缺失 / 错误都不得被当成“就绪且关着” */
+  for (const code of ["MCP_UNAUTHORIZED", MCP_TOOL_DISCOVERY_FAILED, "MCP_INTERNAL_ERROR"]) {
+    assert.notEqual(toolSwitchReadState(normalizeAgentToolsResult({ ok: false, error: code }), false).kind, "ready");
+  }
+});
+
+test("只有读到明确状态才允许写：未知状态一律不发写命令", () => {
+  assert.equal(toolSwitchNextValue({ kind: "ready", enabled: false }), true);
+  assert.equal(toolSwitchNextValue({ kind: "ready", enabled: true }), false);
+  assert.equal(toolSwitchNextValue({ kind: "loading" }), null);
+  assert.equal(toolSwitchNextValue({ kind: "unauthorized", code: "MCP_UNAUTHORIZED" }), null);
+  assert.equal(toolSwitchNextValue({ kind: "unavailable", code: MCP_TOOL_DISCOVERY_FAILED }), null);
+  assert.equal(toolSwitchNextValue({ kind: "error", code: "MCP_INTERNAL_ERROR" }), null);
+});
+
+test("写回包投影：只认后端明确回的布尔；没给就是 null（不乐观翻转的根据）", () => {
+  assert.deepEqual(normalizeToolSwitchResult({ ok: true, enabled: true, persisted: true, audited: true }), {
+    ok: true,
+    enabled: true,
+    persisted: true,
+    audited: true,
+    error: null,
+    detail: null,
+  });
+  const denied = normalizeToolSwitchResult({ ok: false, error: "MCP_UNAUTHORIZED" });
+  assert.equal(denied.ok, false);
+  assert.equal(denied.enabled, null, "失败回包没给布尔时不得编造 enabled");
+  assert.equal(denied.error, "MCP_UNAUTHORIZED");
+  /* 有些失败分支会带回真实状态（MCP_SWITCH_UNAVAILABLE / 写失败）：照实采用 */
+  const unavailable = normalizeToolSwitchResult({
+    ok: false,
+    error: "MCP_SWITCH_UNAVAILABLE",
+    detail: "缺少 userDataDir",
+    enabled: false,
+  });
+  assert.equal(unavailable.enabled, false);
+  assert.equal(unavailable.detail, "缺少 userDataDir");
+  /* 非布尔 / 非对象的回包不产生假状态 */
+  assert.deepEqual(normalizeToolSwitchResult({ ok: true, enabled: "true", persisted: 1, audited: "yes" }), {
+    ok: true,
+    enabled: null,
+    persisted: false,
+    audited: false,
+    error: null,
+    detail: null,
+  });
+  assert.equal(normalizeToolSwitchResult(null).ok, false);
+});
+
+test("开关写入前后的状态一致性：成功与重读一致；失败保持真实状态，不乐观切换", () => {
+  /* 写入前：读到“已关闭” */
+  const before = toolSwitchReadState(normalizeAgentToolsResult({ ok: true, enabled: false }), false);
+  assert.deepEqual(before, { kind: "ready", enabled: false });
+  assert.equal(toolSwitchNextValue(before), true);
+  /* 写入成功：后端回 enabled=true；重新读也应是 true —— 两处一致 */
+  const write = normalizeToolSwitchResult({ ok: true, enabled: true, persisted: true, audited: true });
+  const after = toolSwitchReadState(
+    normalizeAgentToolsResult({ ok: true, enabled: write.enabled }),
+    false,
+  );
+  assert.deepEqual(after, { kind: "ready", enabled: true });
+  assert.equal(write.enabled, after.enabled, "写入回包与重新读取必须一致");
+  /* 写入失败且回包没有 enabled：界面无从翻转，显示状态仍是写入前的 false */
+  const failed = normalizeToolSwitchResult({ ok: false, error: "MCP_AUDIT_UNAVAILABLE" });
+  assert.equal(failed.enabled, null);
+  assert.equal(toolSwitchNextValue(before), true, "失败不改变写入前状态");
+  assert.equal(before.enabled, false, "失败后按真实状态仍是关闭");
+});
+
+test("写侧错误码 → 人话：说清“状态没有改变”，未登记的码原样带出", () => {
+  for (const [code, text] of Object.entries(TOOL_SWITCH_ERROR_LABEL)) {
+    assert.ok(text.length > 0, code + " 必须有文案");
+    assert.equal(toolSwitchErrorText(code), text);
+  }
+  assert.ok(toolSwitchErrorText("MCP_AUDIT_UNAVAILABLE").includes("状态没有改变"));
+  assert.ok(toolSwitchErrorText("MCP_UNAUTHORIZED").includes("mcp.manage"));
+  assert.ok(toolSwitchErrorText("MCP_SWITCH_UNAVAILABLE").includes("状态没有改变"));
+  assert.ok(toolSwitchErrorText(MCP_TOOL_DISCOVERY_FAILED).includes("依赖缺失"));
+  assert.equal(toolSwitchErrorText("WAT_NEW_CODE"), "开关未完成（WAT_NEW_CODE）：状态没有改变");
+  assert.ok(toolSwitchErrorText(undefined).includes("状态没有改变"));
+});
+
+test("开关状态文案每种状态都有话，不只靠颜色", () => {
+  assert.ok(toolSwitchStateText({ kind: "loading" }).includes("读取"));
+  assert.ok(toolSwitchStateText({ kind: "ready", enabled: false }).includes("已关闭"));
+  assert.ok(toolSwitchStateText({ kind: "ready", enabled: true }).includes("已打开"));
+  assert.ok(toolSwitchStateText({ kind: "ready", enabled: true }).includes("审批"));
+  assert.ok(toolSwitchStateText({ kind: "unauthorized", code: "MCP_UNAUTHORIZED" }).includes("无权"));
+  assert.ok(toolSwitchStateText({ kind: "unavailable", code: MCP_TOOL_DISCOVERY_FAILED }).includes("依赖缺失"));
+  assert.ok(toolSwitchStateText({ kind: "error", code: "MCP_INTERNAL_ERROR" }).includes("未知"));
+  assert.equal(toolSwitchToggleText(false), "打开工具调用开关");
+  assert.equal(toolSwitchToggleText(true), "关闭工具调用开关");
+});
+
+test("开关文案讲清默认关闭 / 逐次审批 / 定时任务未开放，且不夸大", () => {
+  assert.ok(TOOL_SWITCH_RISK_TEXT.includes("默认关闭"));
+  assert.ok(TOOL_SWITCH_RISK_TEXT.includes("审批"));
+  assert.ok(TOOL_SWITCH_RISK_TEXT.includes("没有批准就不会外发"));
+  assert.ok(TOOL_SWITCH_RISK_TEXT.includes("定时任务暂不开放"));
+  assert.ok(TOOL_SWITCH_BOUNDARY_TEXT.includes("不提供"));
+  assert.ok(TOOL_SWITCH_BOUNDARY_TEXT.includes("审批"));
+  /* 不得出现“打开即可调用 / 直接执行 / 无需审批”这类夸大承诺 */
+  for (const word of ["即可调用", "直接执行", "无需审批", "免审批"]) {
+    assert.equal(TOOL_SWITCH_RISK_TEXT.includes(word), false, "夸大文案：" + word);
+    assert.equal(TOOL_SWITCH_BOUNDARY_TEXT.includes(word), false, "夸大文案：" + word);
+  }
+});
+
+test("越权码集合覆盖未登录与会话失效", () => {
+  for (const code of ["MCP_UNAUTHORIZED", "FORBIDDEN", "UNAUTHORIZED", "PERMISSION_DENIED", "SESSION_EXPIRED", "SESSION_REVOKED"]) {
+    assert.equal(isToolSwitchUnauthorized(code), true, code);
+    assert.ok(TOOL_SWITCH_UNAUTHORIZED_CODES.includes(code));
+  }
+  assert.equal(isToolSwitchUnauthorized(MCP_TOOL_DISCOVERY_FAILED), false);
+  assert.equal(isToolSwitchUnauthorized(undefined), false);
+});
+
+test("McpCenter.tsx 的开关区块不出现任何直接调用入口（源码级断言）", () => {
+  const code = stripComments(read("src/mcp/McpCenter.tsx"));
+  /* 必须真的有这个区块，且读/写都走纯逻辑层与登记常量 */
+  assert.ok(code.includes("data-mcp-toolswitch-section"), "必须有工具调用开关区块");
+  assert.ok(code.includes("data-mcp-toolswitch-toggle"), "必须有关闭/打开控件");
+  assert.ok(code.includes("MCP_TOOL_SWITCH_COMMAND"), "写命令必须走登记常量");
+  assert.ok(code.includes("toolSwitchPayload"), "载荷必须走纯逻辑层的白名单构造");
+  assert.ok(code.includes("toolSwitchReadState"), "状态必须走纯逻辑层的状态映射");
+  /* 直接调用入口：命令、端口、属性一个都不许出现 */
+  for (const absent of ["mcp/toolInvocation/call", "MCP_TOOL_INVOCATION_CALL", "callByName", "callDirect", "data-mcp-invoke"]) {
+    assert.equal(code.includes(absent), false, "不得出现直接调用痕迹：" + absent);
+  }
+  /* 按钮文案不得暗示“调用 / 运行 / 执行工具” */
+  assert.equal(/运行工具|执行工具|调用工具/.test(code), false, "不得出现直接调用的按钮文案");
+});
+
+test("开关区块只用既有 primitives 与 token，styles.css 只追加 .mcp-toolswitch-*", () => {
+  const code = read("src/mcp/McpCenter.tsx");
+  assert.ok(code.includes('from "../design-system/primitives"'), "开关控件必须来自 primitives");
+  const css = read("src/styles.css");
+  const start = css.indexOf(".mcp-toolswitch");
+  const end = css.indexOf("/* 窄窗口（560—799px 档）");
+  assert.ok(start >= 0 && end > start, "必须存在 .mcp-toolswitch 样式块");
+  const block = css.slice(start, end);
+  assert.equal(/#[0-9a-fA-F]{3,8}\b/.test(block), false, "开关样式不得写颜色字面值");
+  assert.equal(/rgb\(/.test(block), false, "开关样式不得写 rgb() 字面值");
+  const selectors = block.match(/^[^{}]*\{/gm) || [];
+  const own = selectors.filter((s) => s.includes("mcp-toolswitch"));
+  assert.equal(own.length, selectors.length, "本块只允许 .mcp-toolswitch* 选择器");
+});
+
+test("tokens.css 零改动（源码级：与 HEAD 逐字一致）", () => {
+  const { execFileSync } = require("node:child_process");
+  const baseline = execFileSync("git", ["show", "HEAD:src/design-system/tokens.css"], {
+    cwd: ROOT,
+    encoding: "utf8",
+  });
+  assert.equal(read("src/design-system/tokens.css"), baseline, "tokens.css 必须零改动");
 });

@@ -1,9 +1,9 @@
 /**
  * D5-03 第一批 · MCP 中心（连接管理与能力发现）。
  *
- * 本批**只有管理面**：连接列表、配置详情、能力表、测试日志。
- * 契约 D 明确第一批不实现 tools/call，所以这里**没有任何"运行工具 / 调用工具"入口** ——
- * 不是把它藏起来，而是它不存在；后端对任何调用入口回 MCP_TOOL_INVOCATION_NOT_ENABLED。
+ * 本页**只有管理面**：连接列表、配置详情、能力表、测试日志，以及只读的工具聚合与工具调用开关。
+ * 本页**没有任何"运行工具 / 调用工具"入口** ——
+ * 不是把它藏起来，而是它不存在：开关只放开「允许发起」，每次调用仍要走既有审批链，未批准不会外发。
  *
  * 渲染层边界（与 device / model / canvas 桥同一口径）：
  *   · 只经 preload 暴露的 window.openarc.mcp.command 发 mcp:command；
@@ -25,6 +25,9 @@ import { Dialog } from "../desktop/Dialog";
 import {
   AGENT_TOOLS_BOUNDARY,
   MCP_AGENT_TOOLS_COMMAND,
+  MCP_TOOL_SWITCH_COMMAND,
+  TOOL_SWITCH_BOUNDARY_TEXT,
+  TOOL_SWITCH_RISK_TEXT,
   agentToolApprovalText,
   agentToolParamText,
   agentToolRiskText,
@@ -33,9 +36,17 @@ import {
   agentToolsInvocationText,
   agentToolsQuery,
   isAllowedMcpCommand,
+  isToolSwitchUnauthorized,
   normalizeAgentToolsResult,
+  normalizeToolSwitchResult,
+  toolSwitchErrorText,
+  toolSwitchNextValue,
+  toolSwitchPayload,
+  toolSwitchReadState,
+  toolSwitchStateText,
+  toolSwitchToggleText,
 } from "./mcpCenterLogic";
-import type { AgentToolsView } from "./mcpCenterLogic";
+import type { AgentToolsView, ToolSwitchReadState } from "./mcpCenterLogic";
 
 /* ══════════════════════════════════════════════════════════════════════════
    契约 A：记录（渲染层只读投影，不含 credentialRef）
@@ -164,7 +175,7 @@ const ERROR_LABEL: Record<string, string> = {
   MCP_CREDENTIAL_MISSING: "该连接声明需要 Bearer 凭据，但还没有可用的凭据",
   MCP_CREDENTIAL_STORE_UNAVAILABLE: "凭据存储不可用，无法保存或读取凭据",
   MCP_TOOL_DISCOVERY_FAILED: "tools/list 没有成功返回：工具清单未发现",
-  MCP_TOOL_INVOCATION_NOT_ENABLED: "第一批不开放工具调用，这里只做连接管理与能力发现",
+  MCP_TOOL_INVOCATION_NOT_ENABLED: "工具调用未获授权：开关未开启，或本次调用没有通过审批（未批准不会外发）",
   MCP_RECONNECT_LIMIT: "重连次数已达上限，已停止重试（不空转）",
   MCP_SESSION_ENDED: "会话已结束（登出 / 锁屏 / 应用退出），连接已收掉；重新登录后可再次连接",
   MCP_INTERNAL_ERROR: "主进程内部错误",
@@ -368,6 +379,13 @@ export function McpCenter({ role }: { role: string | null }) {
   const [agentTools, setAgentTools] = useState<AgentToolsView | null>(null);
   const [agentToolsLoading, setAgentToolsLoading] = useState(true);
   const [agentToolsScope, setAgentToolsScope] = useState<string | null>(null);
+  /* UI-3 · 工具调用开关（唯一写入口 mcp/toolInvocation/set）：
+     显示状态永远来自 mcp/agentTools 的真实读取，界面不做乐观切换。 */
+  const [switchBusy, setSwitchBusy] = useState(false);
+  const [switchFailure, setSwitchFailure] = useState<{ code: string; detail: string | null } | null>(
+    null,
+  );
+  const switchState = toolSwitchReadState(agentTools, agentToolsLoading);
 
   /* 首次成功加载的 id 先"记成已见"：进入页面不是"列表插入"，不给整列表补入场动画。
      之后新增的行才走 MS §5 的列表插入动效。 */
@@ -458,6 +476,34 @@ export function McpCenter({ role }: { role: string | null }) {
     },
     [send],
   );
+
+  /**
+   * 工具调用开关：本页唯一写动作（mcp/toolInvocation/set）。
+   *
+   * 先写后读：写完立刻重新读 mcp/agentTools，界面显示的是后端真实状态；
+   * 失败时同样重新读（而不是保留/翻转到猜测值），并把结构化错误码显示出来。
+   * 状态未知 / 越权 / 依赖缺失时 toolSwitchNextValue 返回 null，直接不发命令。
+   */
+  const toggleToolSwitch = async () => {
+    if (switchBusy) return;
+    const next = toolSwitchNextValue(switchState);
+    if (next === null) return;
+    setSwitchBusy(true);
+    setSwitchFailure(null);
+    const res = await send(MCP_TOOL_SWITCH_COMMAND, toolSwitchPayload(next));
+    const parsed = normalizeToolSwitchResult(res);
+    await loadAgentTools(agentToolsScope);
+    setSwitchBusy(false);
+    if (parsed.ok !== true) {
+      setSwitchFailure({ code: parsed.error || "INTERNAL_ERROR", detail: parsed.detail });
+      return;
+    }
+    setNotice(
+      parsed.enabled === true
+        ? "已打开工具调用开关（每次调用仍需审批）"
+        : "已关闭工具调用开关（默认）",
+    );
+  };
 
   useEffect(() => {
     if (!available) return;
@@ -1025,7 +1071,7 @@ export function McpCenter({ role }: { role: string | null }) {
           <PageState
             kind="empty"
             title="还没有连接"
-            description="新建一个连接后，中心会做真实 MCP 握手（initialize → initialized → tools/list），把服务端实际协商出的版本、能力与工具写进记录。第一批不开放工具调用。"
+            description="新建一个连接后，中心会做真实 MCP 握手（initialize → initialized → tools/list），把服务端实际协商出的版本、能力与工具写进记录。工具可被发现；调用默认关闭，开启后仍需逐次审批，无人值守定时任务暂不开放。"
           />
           {/* PageState 的 empty 语义是 action='none'（共享规范，不为这一页改），
               所以空态的新建入口由本页自己渲染 —— 否则列表为空时无法建第一条连接。 */}
@@ -1049,7 +1095,7 @@ export function McpCenter({ role }: { role: string | null }) {
       <div className="mcp-banner">
         <div className="mcp-banner__row">
           <p className="mcp-banner__title">MCP 中心</p>
-          <span className="mcp-muted">连接管理与能力发现（第一批不开放工具调用）</span>
+          <span className="mcp-muted">连接管理与能力发现；工具可被发现，调用默认关闭，开启后仍需逐次审批，无人值守定时任务暂不开放</span>
         </div>
         {failure ? (
           <p className="mcp-error" role="alert" data-mcp-error data-mcp-error-code={failure.code}>
@@ -1078,6 +1124,14 @@ export function McpCenter({ role }: { role: string | null }) {
           setAgentToolsScope(null);
           void loadAgentTools(null);
         }}
+      />
+
+      <McpToolSwitch
+        state={switchState}
+        busy={switchBusy}
+        failure={switchFailure}
+        onToggle={() => void toggleToolSwitch()}
+        onReload={() => void loadAgentTools(agentToolsScope)}
       />
 
       <div className="mcp-split">
@@ -1433,7 +1487,7 @@ export function McpCenter({ role }: { role: string | null }) {
               <section className="mcp-section" aria-label="工具">
                 <div className="mcp-section-head">
                   <h4>工具</h4>
-                  <span className="mcp-muted">第一批只发现、不调用</span>
+                  <span className="mcp-muted">这里只做发现与展示；调用默认关闭，开启后仍需逐次审批，无人值守定时任务暂不开放</span>
                 </div>
                 {toolsDenied ? (
                   <p className="mcp-denied" data-mcp-tools-hidden>
@@ -1698,6 +1752,135 @@ function ToolAggregate({
           {agentToolsEmptyText(connectedServers)}
         </p>
       )}
+    </section>
+  );
+}
+
+/**
+ * UI-3 · 工具调用开关区块（本页唯一写入口）。
+ *
+ * 读 = mcp/agentTools 的 enabled；写 = mcp/toolInvocation/set（主进程做 mcp.manage
+ * 授权 + 审计）。这里**只有开关**，没有任何"直接调用工具"的按钮：调用一律走审批链。
+ * 状态用文本 + role=switch/aria-checked 双通道表达，不靠颜色（DESIGN_SYSTEM §8 Switch 行）；
+ * 写入中由 primitives Button 的 status=loading 提供 disabled + aria-busy（防连点）。
+ */
+function McpToolSwitch({
+  state,
+  busy,
+  failure,
+  onToggle,
+  onReload,
+}: {
+  state: ToolSwitchReadState;
+  busy: boolean;
+  failure: { code: string; detail: string | null } | null;
+  onToggle: () => void;
+  onReload: () => void;
+}) {
+  const ready = state.kind === "ready";
+  const enabled = ready ? state.enabled : false;
+  const writable = ready && !busy;
+  const authFailed = !!failure && isToolSwitchUnauthorized(failure.code);
+  const readFailed =
+    state.kind === "unauthorized" || state.kind === "unavailable" || state.kind === "error";
+  const badgeTone: Tone = ready
+    ? enabled
+      ? "warning"
+      : "neutral"
+    : state.kind === "loading"
+      ? "neutral"
+      : "danger";
+  const badgeText = ready
+    ? enabled
+      ? "已打开"
+      : "已关闭（默认）"
+    : state.kind === "loading"
+      ? "读取中"
+      : "状态未知";
+  return (
+    <section
+      className="mcp-toolswitch"
+      aria-label="工具调用开关"
+      data-mcp-toolswitch-section
+      data-mcp-toolswitch-state={state.kind}
+    >
+      <div className="mcp-section-head">
+        <h4>工具调用</h4>
+        <span
+          className="mcp-toolswitch__state"
+          role="status"
+          aria-live="polite"
+          data-mcp-toolswitch-state-text
+        >
+          {toolSwitchStateText(state)}
+        </span>
+      </div>
+      <p className="mcp-muted" data-mcp-toolswitch-risk>
+        {TOOL_SWITCH_RISK_TEXT}
+      </p>
+      <div className="mcp-toolswitch__row">
+        <Button
+          variant="secondary"
+          size="sm"
+          data-mcp-toolswitch-toggle
+          data-mcp-toolswitch-enabled={enabled ? "true" : "false"}
+          role={ready ? "switch" : undefined}
+          aria-checked={ready ? enabled : undefined}
+          aria-label={ready ? toolSwitchToggleText(enabled) : "工具调用开关（状态未知，暂不可操作）"}
+          status={busy ? "loading" : "idle"}
+          disabled={!writable}
+          onClick={writable ? onToggle : undefined}
+        >
+          {ready ? toolSwitchToggleText(enabled) : "开关不可用"}
+        </Button>
+        <span
+          className="mcp-toolswitch__badge"
+          data-mcp-toolswitch-badge={ready ? (enabled ? "on" : "off") : "unknown"}
+        >
+          <Badge tone={badgeTone}>{badgeText}</Badge>
+        </span>
+        <span className="mcp-toolswitch__boundary mcp-muted" data-mcp-toolswitch-boundary>
+          {TOOL_SWITCH_BOUNDARY_TEXT}
+        </span>
+      </div>
+      {failure ? (
+        <p
+          className="mcp-error"
+          role="alert"
+          data-mcp-toolswitch-error
+          data-mcp-toolswitch-error-code={failure.code}
+          data-mcp-toolswitch-unauthorized={authFailed ? "true" : undefined}
+        >
+          {authFailed ? "越权：" : "开关未更改："}
+          {toolSwitchErrorText(failure.code)}（{failure.code}）
+          {failure.detail ? " · " + failure.detail : ""}
+        </p>
+      ) : null}
+      {readFailed ? (
+        <p
+          className="mcp-error"
+          role="alert"
+          data-mcp-toolswitch-read-error
+          data-mcp-toolswitch-error-code={state.code}
+          data-mcp-toolswitch-unauthorized={state.kind === "unauthorized" ? "true" : undefined}
+        >
+          {toolSwitchErrorText(state.code)}（{state.code}）
+        </p>
+      ) : null}
+      {!ready ? (
+        <div className="mcp-toolswitch__actions">
+          <Button
+            variant="ghost"
+            size="sm"
+            data-mcp-toolswitch-reload
+            status={busy ? "loading" : "idle"}
+            disabled={busy}
+            onClick={onReload}
+          >
+            重新读取开关状态
+          </Button>
+        </div>
+      ) : null}
     </section>
   );
 }

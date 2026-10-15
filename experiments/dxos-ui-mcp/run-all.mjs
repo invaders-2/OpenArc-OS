@@ -90,6 +90,12 @@ const many = params.get("tools") === "many";
 const toolsError = params.get("toolsError") === "1";
 const toolsLoading = params.get("toolsLoading") === "1";
 const toolsEnabled = params.get("toolsEnabled") === "1";
+/* UI-3 工具调用开关：读侧场景（switchRead=denied）与写侧场景（switchWrite=slow|fail|deny|unavailable）。
+   开关状态是**页面级可变值**：假后端在 mcp/toolInvocation/set 成功后改它，mcp/agentTools 再读回来。 */
+const switchRead = params.get("switchRead") || "none";
+const switchWrite = params.get("switchWrite") || "none";
+const dark = params.get("dark") === "1";
+let invocationEnabled = toolsEnabled;
 const NOW = Date.parse("2026-01-05T09:00:00Z");
 
 const BASE_TOOLS = [
@@ -299,12 +305,26 @@ async function command(raw) {
   if (cmd === "mcp/testLog") return { ok: true, items: LOGS };
   if (cmd === "mcp/agentTools") {
     if (toolsLoading) return new Promise(function () {});
+    /* UI-3：读侧越权场景（与 mcp/get 的 unauthorized 场景同口径）。 */
+    if (switchRead === "denied") return { ok: false, error: "MCP_UNAUTHORIZED" };
     if (toolsError) {
       return { ok: false, error: "MCP_TOOL_DISCOVERY_FAILED", detail: "mcp-agent-tools-unavailable", tools: [], count: 0, connectedServers: 0, enabled: false, truncated: false };
     }
     const all = collectAgentTools(null);
     const scoped = payload && payload.serverId ? collectAgentTools(payload.serverId) : all;
-    return { ok: true, enabled: toolsEnabled, count: scoped.tools.length, connectedServers: all.connectedServers, truncated: false, tools: scoped.tools };
+    return { ok: true, enabled: invocationEnabled, count: scoped.tools.length, connectedServers: all.connectedServers, truncated: false, tools: scoped.tools };
+  }
+  /* UI-3：开关写命令。假后端镜像 electron/mcp-bootstrap.cjs 的四个分支：
+     slow=在途（截图用，永不解析）/ fail=审计不可用 / deny=越权 / unavailable=开关端口缺失；
+     其余按真实语义写内存并回 { ok, enabled, persisted, audited }。 */
+  if (cmd === "mcp/toolInvocation/set") {
+    if (switchWrite === "slow") return new Promise(function () {});
+    if (switchWrite === "deny") return { ok: false, error: "MCP_UNAUTHORIZED" };
+    if (switchWrite === "fail") return { ok: false, error: "MCP_AUDIT_UNAVAILABLE", detail: "审计端口未注入：拒绝无审计的开关变更" };
+    if (switchWrite === "unavailable") return { ok: false, error: "MCP_SWITCH_UNAVAILABLE", detail: "缺少 userDataDir：开关无法持久化", enabled: false };
+    if (typeof (payload && payload.enabled) !== "boolean") return { ok: false, error: "MCP_INVALID_INPUT", detail: "enabled" };
+    invocationEnabled = payload.enabled === true;
+    return { ok: true, enabled: invocationEnabled, persisted: true, audited: true };
   }
   return { ok: false, error: "MCP_COMMAND_NOT_ALLOWED" };
 }
@@ -314,7 +334,7 @@ if (scenario !== "nobridge") {
 }
 
 createRoot(document.getElementById("root")).render(
-  <div className="window" style={{ position: "absolute", inset: 0 }}>
+  <div className={"window" + (dark ? " dark" : "")} style={{ position: "absolute", inset: 0 }}>
     <McpCenter role="ADMIN" />
   </div>
 );
@@ -486,7 +506,11 @@ const browser = await launchChromiumBounded(chromium, { executablePath: CHROMIUM
 registerCleanup(() => browser.close());
 
 async function openProbe(opts) {
-  const ctx = await browser.newContext(Object.assign({}, SHOT_OPTS, opts.opts || {}));
+  const ctxOpts = Object.assign({}, SHOT_OPTS, opts.opts || {});
+  /* 深色对照：harness 根节点加 .dark（产品用类名切主题，不是媒体查询），
+     同时把 context 的 colorScheme 也切到 dark（滚动条 / 原生控件）。 */
+  if (opts.dark) ctxOpts.colorScheme = "dark";
+  const ctx = await browser.newContext(ctxOpts);
   const page = await ctx.newPage();
   watch(page, (opts.before ? "before:" : "") + opts.query);
   const url = opts.before ? BASE + "/before/index.html?" + opts.query : BASE + "/?" + opts.query;
@@ -506,6 +530,7 @@ async function shoot(name, spec) {
       const opened = await openProbe({
         query: spec.query,
         before: !!spec.before,
+        dark: !!spec.dark,
         opts: spec.narrow ? { viewport: { width: 640, height: 900 } } : null,
       });
       try {
@@ -527,6 +552,34 @@ async function shoot(name, spec) {
       screenshots.length = screenshotsBefore;
     },
   );
+}
+
+/* UI-3：把开关区块的所有可见/可访问事实一次性读出来，供各状态断言共用。 */
+async function readToolSwitch(page) {
+  return await page.evaluate(function () {
+    const section = document.querySelector("[data-mcp-toolswitch-section]");
+    const toggle = document.querySelector("[data-mcp-toolswitch-toggle]");
+    const stateText = document.querySelector("[data-mcp-toolswitch-state-text]");
+    const error = document.querySelector("[data-mcp-toolswitch-error]");
+    const readError = document.querySelector("[data-mcp-toolswitch-read-error]");
+    return {
+      state: section ? section.getAttribute("data-mcp-toolswitch-state") : null,
+      comp: toggle ? toggle.getAttribute("data-ds-comp") : null,
+      role: toggle ? toggle.getAttribute("role") : null,
+      checked: toggle ? toggle.getAttribute("aria-checked") : null,
+      label: toggle ? toggle.getAttribute("aria-label") : null,
+      disabled: toggle ? toggle.disabled === true : null,
+      busy: toggle ? toggle.getAttribute("aria-busy") : null,
+      text: stateText ? (stateText.textContent || "").trim() : "",
+      errorCode: error ? error.getAttribute("data-mcp-toolswitch-error-code") : null,
+      errorText: error ? (error.textContent || "").trim() : "",
+      readErrorCode: readError ? readError.getAttribute("data-mcp-toolswitch-error-code") : null,
+      readErrorText: readError ? (readError.textContent || "").trim() : "",
+      unauthorized: !!document.querySelector("[data-mcp-toolswitch-unauthorized]"),
+      riskText: (document.querySelector("[data-mcp-toolswitch-risk]") || {}).textContent || "",
+      boundary: (document.querySelector("[data-mcp-toolswitch-boundary]") || {}).textContent || "",
+    };
+  });
 }
 
 /* ── 5. 状态截图（同一主题 / 窗口 / 缩放 / reducedMotion）───────────────── */
@@ -615,7 +668,7 @@ const fnameRe = new RegExp("^mcp__[A-Za-z0-9_-]+__[A-Za-z0-9_-]+$");
   await page.click('.mcp-row[data-mcp-connection="conn_local_echo"]');
   await page.waitForSelector("[data-mcp-detail]");
   const cmds = await page.evaluate(function () { return window.__oaMcpProbe.commands.map(function (c) { return c.command; }); });
-  const allowed = ["mcp/list", "mcp/get", "mcp/testLog", "mcp/agentTools"];
+  const allowed = ["mcp/list", "mcp/get", "mcp/testLog", "mcp/agentTools", "mcp/toolInvocation/set"];
   check("界面只发白名单命令", cmds.every(function (c) { return allowed.indexOf(c) >= 0; }), cmds.join(","));
   const payloadKeys = await page.evaluate(function () {
     return window.__oaMcpProbe.commands.reduce(function (acc, c) { return acc.concat(Object.keys(c.payload || {})); }, []);
@@ -676,6 +729,182 @@ await shoot("13-aggregate-scope", {
     await page.click("[data-mcp-aggregate-scope]");
   },
 });
+
+/* ── 6c. 工具调用开关：状态截图（关闭 / 开启 / 写入中 / 失败 / 越权 / 依赖缺失 / 深色）── */
+console.log(NL + "工具调用开关状态截图：");
+setStep("工具调用开关状态截图");
+await shoot("14-toolswitch-off", { query: "scenario=ready", expect: '[data-mcp-toolswitch-toggle][aria-checked="false"]' });
+await shoot("15-toolswitch-on", { query: "scenario=ready&toolsEnabled=1", expect: '[data-mcp-toolswitch-toggle][aria-checked="true"]' });
+await shoot("16-toolswitch-writing", {
+  query: "scenario=ready&switchWrite=slow",
+  expect: '[data-mcp-toolswitch-toggle][aria-busy="true"]',
+  setup: async function (page) {
+    await page.waitForSelector("[data-mcp-toolswitch-toggle]");
+    await page.click("[data-mcp-toolswitch-toggle]");
+  },
+});
+await shoot("17-toolswitch-write-failed", {
+  query: "scenario=ready&switchWrite=fail",
+  expect: '[data-mcp-toolswitch-error][data-mcp-toolswitch-error-code="MCP_AUDIT_UNAVAILABLE"]',
+  setup: async function (page) {
+    await page.waitForSelector("[data-mcp-toolswitch-toggle]");
+    await page.click("[data-mcp-toolswitch-toggle]");
+  },
+});
+await shoot("18-toolswitch-write-unauthorized", {
+  query: "scenario=ready&switchWrite=deny",
+  expect: '[data-mcp-toolswitch-unauthorized="true"]',
+  setup: async function (page) {
+    await page.waitForSelector("[data-mcp-toolswitch-toggle]");
+    await page.click("[data-mcp-toolswitch-toggle]");
+  },
+});
+await shoot("19-toolswitch-read-unauthorized", { query: "scenario=ready&switchRead=denied", expect: '[data-mcp-toolswitch-state="unauthorized"]' });
+await shoot("20-toolswitch-dependency", { query: "scenario=ready&toolsError=1", expect: '[data-mcp-toolswitch-state="unavailable"]' });
+await shoot("21-toolswitch-dark-off", { query: "scenario=ready&dark=1", dark: true, expect: '[data-mcp-toolswitch-toggle][aria-checked="false"]' });
+await shoot("22-toolswitch-dark-on", { query: "scenario=ready&toolsEnabled=1&dark=1", dark: true, expect: '[data-mcp-toolswitch-toggle][aria-checked="true"]' });
+
+/* ── 6d. 工具调用开关：结构与功能（默认关闭 → 打开 → 关闭往返）──────────── */
+console.log(NL + "工具调用开关：结构与功能：");
+setStep("工具调用开关：结构与功能");
+{
+  const opened = await openProbe({ query: "scenario=ready" });
+  const page = opened.page;
+  await page.waitForSelector("[data-mcp-toolswitch-toggle]");
+  const s0 = await readToolSwitch(page);
+  check("开关区块存在且读到默认关闭", s0.state === "ready" && s0.checked === "false", JSON.stringify({ state: s0.state, checked: s0.checked, text: s0.text }).slice(0, 180));
+  check("开关控件来自 primitives Button（data-ds-comp=button）", s0.comp === "button", String(s0.comp));
+  check(
+    "开关用文本 + role=switch/aria-checked 表达状态（不只靠颜色）",
+    s0.role === "switch" && !!s0.label && s0.label.indexOf("工具调用开关") >= 0 && s0.text.indexOf("已关闭") >= 0,
+    JSON.stringify({ role: s0.role, label: s0.label, text: s0.text }).slice(0, 180),
+  );
+  check(
+    "开关文案讲清默认关闭 / 逐次审批 / 定时任务未开放",
+    s0.riskText.indexOf("默认关闭") >= 0 && s0.riskText.indexOf("审批") >= 0 && s0.riskText.indexOf("定时任务暂不开放") >= 0,
+    s0.riskText.slice(0, 160),
+  );
+  check(
+    "开关区块重申没有直接调用入口（不提供 + 审批）",
+    s0.boundary.indexOf("不提供") >= 0 && s0.boundary.indexOf("审批") >= 0,
+    s0.boundary.slice(0, 160),
+  );
+
+  await page.click("[data-mcp-toolswitch-toggle]");
+  await page.waitForSelector('[data-mcp-toolswitch-toggle][aria-checked="true"]');
+  const on = await readToolSwitch(page);
+  const wrote = await page.evaluate(function () {
+    return {
+      cmds: window.__oaMcpProbe.commands.map(function (c) { return c.command; }),
+      writes: window.__oaMcpProbe.commands.filter(function (c) { return c.command === "mcp/toolInvocation/set"; }).map(function (c) { return c.payload; }),
+    };
+  });
+  check("打开后 aria-checked=true 且状态文案同步", on.checked === "true" && on.text.indexOf("已打开") >= 0, JSON.stringify({ checked: on.checked, text: on.text }).slice(0, 180));
+  check("开关写命令载荷只含 enabled", wrote.writes.length === 1 && Object.keys(wrote.writes[0]).every(function (k) { return k === "enabled"; }), JSON.stringify(wrote.writes));
+  check(
+    "界面只发白名单命令（含 mcp/toolInvocation/set）",
+    wrote.cmds.every(function (c) { return ["mcp/list", "mcp/get", "mcp/testLog", "mcp/agentTools", "mcp/toolInvocation/set"].indexOf(c) >= 0; }),
+    wrote.cmds.join(","),
+  );
+  check(
+    "开关写命令上行载荷不含身份字段",
+    Object.keys(wrote.writes[0] || {}).every(function (k) { return ["userId", "role", "sessionRef", "appId"].indexOf(k) < 0; }),
+    JSON.stringify(wrote.writes),
+  );
+  await page.click("[data-mcp-toolswitch-toggle]");
+  await page.waitForSelector('[data-mcp-toolswitch-toggle][aria-checked="false"]');
+  const off = await readToolSwitch(page);
+  check("关闭后回到 aria-checked=false（往返可逆）", off.checked === "false" && off.text.indexOf("已关闭") >= 0, JSON.stringify({ checked: off.checked, text: off.text }).slice(0, 180));
+  await opened.ctx.close();
+}
+
+/* ── 6e. 工具调用开关：写入中 / 写入失败 / 写入越权 ───────────────────── */
+console.log(NL + "工具调用开关：写入中 / 失败 / 越权：");
+setStep("工具调用开关：写入中 / 失败 / 越权");
+{
+  const writing = await openProbe({ query: "scenario=ready&switchWrite=slow" });
+  await writing.page.waitForSelector("[data-mcp-toolswitch-toggle]");
+  await writing.page.click("[data-mcp-toolswitch-toggle]");
+  await writing.page.waitForSelector('[data-mcp-toolswitch-toggle][aria-busy="true"]');
+  const w = await readToolSwitch(writing.page);
+  check("写入中：控件 disabled + aria-busy 防连点", w.disabled === true && w.busy === "true", JSON.stringify({ disabled: w.disabled, busy: w.busy }));
+  await writing.ctx.close();
+
+  const failedOpen = await openProbe({ query: "scenario=ready&switchWrite=fail" });
+  const fpage = failedOpen.page;
+  await fpage.waitForSelector('[data-mcp-toolswitch-toggle][aria-checked="false"]');
+  await fpage.click("[data-mcp-toolswitch-toggle]");
+  await fpage.waitForSelector('[data-mcp-toolswitch-error][data-mcp-toolswitch-error-code="MCP_AUDIT_UNAVAILABLE"]');
+  const f = await readToolSwitch(fpage);
+  check(
+    "写入失败：结构化错误码 → 文案（说清状态没有改变）",
+    f.errorCode === "MCP_AUDIT_UNAVAILABLE" && f.errorText.indexOf("状态没有改变") >= 0,
+    f.errorText.slice(0, 140),
+  );
+  check("写入失败后开关回到真实状态（仍为关闭，不乐观切换）", f.checked === "false" && f.disabled === false, JSON.stringify({ checked: f.checked, disabled: f.disabled }));
+  await failedOpen.ctx.close();
+
+  const deniedOpen = await openProbe({ query: "scenario=ready&switchWrite=deny" });
+  const dpage = deniedOpen.page;
+  await dpage.waitForSelector('[data-mcp-toolswitch-toggle][aria-checked="false"]');
+  await dpage.click("[data-mcp-toolswitch-toggle]");
+  await dpage.waitForSelector('[data-mcp-toolswitch-unauthorized="true"]');
+  const d = await readToolSwitch(dpage);
+  check(
+    "写入越权：结构化提示（MCP_UNAUTHORIZED）且状态不变",
+    d.unauthorized === true && d.errorCode === "MCP_UNAUTHORIZED" && d.checked === "false",
+    JSON.stringify({ unauthorized: d.unauthorized, code: d.errorCode, checked: d.checked }),
+  );
+  await deniedOpen.ctx.close();
+}
+
+/* ── 6f. 工具调用开关：读侧越权 / 依赖缺失 ─────────────────────────────── */
+console.log(NL + "工具调用开关：读侧越权 / 依赖缺失：");
+setStep("工具调用开关：读侧越权 / 依赖缺失");
+{
+  const deniedOpen = await openProbe({ query: "scenario=ready&switchRead=denied" });
+  await deniedOpen.page.waitForSelector('[data-mcp-toolswitch-state="unauthorized"]');
+  const r = await readToolSwitch(deniedOpen.page);
+  check(
+    "读取越权：结构化提示 + 控件禁用且不谎报开关状态",
+    r.state === "unauthorized" && r.readErrorCode === "MCP_UNAUTHORIZED" && r.disabled === true && r.checked === null,
+    JSON.stringify({ state: r.state, code: r.readErrorCode, disabled: r.disabled, checked: r.checked }),
+  );
+  await deniedOpen.ctx.close();
+
+  const depOpen = await openProbe({ query: "scenario=ready&toolsError=1" });
+  await depOpen.page.waitForSelector('[data-mcp-toolswitch-state="unavailable"]');
+  const dep = await readToolSwitch(depOpen.page);
+  check(
+    "依赖缺失（工具聚合端口未注入）明确提示且控件禁用",
+    dep.state === "unavailable" && dep.readErrorCode === "MCP_TOOL_DISCOVERY_FAILED" && dep.disabled === true && String(dep.readErrorText).indexOf("依赖缺失") >= 0,
+    JSON.stringify({ state: dep.state, code: dep.readErrorCode, disabled: dep.disabled }),
+  );
+  await depOpen.ctx.close();
+}
+
+/* ── 6g. 工具调用开关：深色对照（与浅色同设定）─────────────────────────── */
+console.log(NL + "工具调用开关：深色对照：");
+setStep("工具调用开关：深色对照");
+{
+  const lightOpen = await openProbe({ query: "scenario=ready" });
+  await lightOpen.page.waitForSelector("[data-mcp-toolswitch-toggle]");
+  const light = await readToolSwitch(lightOpen.page);
+  const lightDarkClass = await lightOpen.page.evaluate(function () { return !!document.querySelector(".window.dark"); });
+  await lightOpen.ctx.close();
+
+  const darkOpen = await openProbe({ query: "scenario=ready&dark=1", dark: true });
+  await darkOpen.page.waitForSelector("[data-mcp-toolswitch-toggle]");
+  const darkSnap = await readToolSwitch(darkOpen.page);
+  const darkDarkClass = await darkOpen.page.evaluate(function () { return !!document.querySelector(".window.dark"); });
+  await darkOpen.ctx.close();
+
+  check(
+    "深色对照：.dark 生效，且开关状态文案 / aria 与浅色一致（状态信息不靠主题色）",
+    darkDarkClass === true && lightDarkClass === false && darkSnap.text === light.text && darkSnap.checked === light.checked && darkSnap.role === light.role,
+    JSON.stringify({ lightDarkClass: lightDarkClass, darkDarkClass: darkDarkClass, light: { text: light.text, checked: light.checked }, dark: { text: darkSnap.text, checked: darkSnap.checked } }).slice(0, 220),
+  );
+}
 
 /* ── 7. ScrollArea（设计系统一致性修正 b）与滚动能力 ───────────────────── */
 console.log(NL + "ScrollArea（一致性修正 b）与长列表滚动：");
@@ -756,6 +985,15 @@ setStep("窄宽 640");
   });
   check("窄宽 640 页面无横向溢出", m.docOverflow <= 1 && m.centerOverflow <= 1, JSON.stringify({ doc: m.docOverflow, center: m.centerOverflow }));
   check("窄宽 640 聚合清单内部无横向溢出", m.scrollOverflow <= 1 && m.itemOverflow.every(function (n) { return n <= 1; }), JSON.stringify({ scroll: m.scrollOverflow, items: m.itemOverflow.slice(0, 8) }));
+  const swNarrow = await page.evaluate(function () {
+    const row = document.querySelector(".mcp-toolswitch__row");
+    const section = document.querySelector("[data-mcp-toolswitch-section]");
+    return {
+      row: row ? row.scrollWidth - row.clientWidth : -1,
+      section: section ? section.scrollWidth - section.clientWidth : -1,
+    };
+  });
+  check("窄宽 640 开关区块内部无横向溢出", swNarrow.row <= 1 && swNarrow.section <= 1, JSON.stringify(swNarrow));
   await opened.ctx.close();
 }
 
@@ -814,6 +1052,13 @@ setStep("减少动态效果");
   });
   check("减少动态效果下既有动效被关掉（animation: none）", !!motion.detail && motion.detail.animationName === "none" && motion.row.animationName === "none", JSON.stringify(motion));
   check("工具聚合未新增动效（animation: none / 0s）", !!motion.aggItem && motion.aggItem.animationName === "none" && motion.aggItem.animationDuration === "0s", JSON.stringify(motion.aggItem));
+  const swMotion = await page.evaluate(function () {
+    const el = document.querySelector("[data-mcp-toolswitch-toggle]");
+    if (!el) return null;
+    const cs = getComputedStyle(el);
+    return { animationName: cs.animationName, transitionDuration: cs.transitionDuration };
+  });
+  check("工具调用开关未新增动效（animation: none / 0s）", !!swMotion && swMotion.animationName === "none" && swMotion.transitionDuration === "0s", JSON.stringify(swMotion));
   await opened.ctx.close();
 }
 
@@ -839,6 +1084,30 @@ async function capture(before) {
       scrollAreas: scrollers.length,
       scrollAreaClasses: scrollers.map(function (el) { return String(el.className); }),
       aggregatePresent: !!document.querySelector("[data-mcp-aggregate-section]"),
+      aggregateHeadingFontSize: (function () {
+        const el = document.querySelector("[data-mcp-aggregate-section] .mcp-section-head h4");
+        return el ? getComputedStyle(el).fontSize : null;
+      })(),
+      aggregateReloadHeight: (function () {
+        const el = document.querySelector("[data-mcp-aggregate-reload]");
+        return el ? Math.round(el.getBoundingClientRect().height) : null;
+      })(),
+      /* UI-3：开关区块的同设定度量（与既有聚合区块比字阶 / 控件高度，不比绝对像素） */
+      toolswitch: {
+        present: !!document.querySelector("[data-mcp-toolswitch-section]"),
+        headingFontSize: (function () {
+          const el = document.querySelector("[data-mcp-toolswitch-section] .mcp-section-head h4");
+          return el ? getComputedStyle(el).fontSize : null;
+        })(),
+        toggleHeight: (function () {
+          const el = document.querySelector("[data-mcp-toolswitch-toggle]");
+          return el ? Math.round(el.getBoundingClientRect().height) : null;
+        })(),
+        stateText: (function () {
+          const el = document.querySelector("[data-mcp-toolswitch-state-text]");
+          return el ? (el.textContent || "").trim() : null;
+        })(),
+      },
       rows: document.querySelectorAll(".mcp-row").length,
       window: win ? { w: Math.round(win.getBoundingClientRect().width), h: Math.round(win.getBoundingClientRect().height) } : null,
     };
@@ -861,10 +1130,22 @@ if (beforeCap) {
   check("(b) 改后列表 / 详情栏就是 ScrollArea", afterCap.metric.scrollAreaClasses.some(function (c) { return c.indexOf("mcp-list-pane") >= 0; }) && afterCap.metric.scrollAreaClasses.some(function (c) { return c.indexOf("mcp-detail-pane") >= 0; }), afterCap.metric.scrollAreaClasses.join(" | "));
   check("改前 / 改后同窗口同设定", !!beforeCap.metric.window && !!afterCap.metric.window && beforeCap.metric.window.w === afterCap.metric.window.w && beforeCap.metric.window.h === afterCap.metric.window.h, JSON.stringify({ before: beforeCap.metric.window, after: afterCap.metric.window }));
   check("改前没有工具聚合区块（对照成立）", beforeCap.metric.aggregatePresent === false, "before=" + beforeCap.metric.aggregatePresent);
+  check("改前没有工具调用开关区块（对照成立）", beforeCap.metric.toolswitch.present === false, "before=" + beforeCap.metric.toolswitch.present);
 } else {
   check("改前基线可用", false, beforeProvenance);
 }
 check("改后新增 B4 工具聚合区块", afterCap.metric.aggregatePresent === true, "aggregatePresent=" + afterCap.metric.aggregatePresent);
+check("改后新增工具调用开关区块", afterCap.metric.toolswitch.present === true, "toolswitchPresent=" + afterCap.metric.toolswitch.present);
+check(
+  "开关区块标题与既有聚合区块同字阶（同设定对照）",
+  !!afterCap.metric.toolswitch.headingFontSize && afterCap.metric.toolswitch.headingFontSize === afterCap.metric.aggregateHeadingFontSize,
+  "switch=" + afterCap.metric.toolswitch.headingFontSize + " aggregate=" + afterCap.metric.aggregateHeadingFontSize,
+);
+check(
+  "开关按钮与既有 sm Button 同高（复用 primitives，无新尺寸）",
+  !!afterCap.metric.toolswitch.toggleHeight && afterCap.metric.toolswitch.toggleHeight === afterCap.metric.aggregateReloadHeight,
+  "toggle=" + afterCap.metric.toolswitch.toggleHeight + " reload=" + afterCap.metric.aggregateReloadHeight,
+);
 
 /* ── 11. 主流程连续录屏 ───────────────────────────────────────────────── */
 console.log(NL + "主流程连续录屏：");
@@ -949,6 +1230,46 @@ if (aggRaw && fs.existsSync(aggRaw)) {
   check("工具聚合入口连续录屏产出", false, "video.path() 为空");
 }
 
+/* ── 11c. 工具调用开关连续录屏（默认关闭 → 打开 → 关闭 → 写入失败 → 越权）── */
+const swVideoCtx = await browser.newContext({
+  viewport: { width: 1440, height: 900 },
+  deviceScaleFactor: 1,
+  colorScheme: "light",
+  locale: "zh-CN",
+  recordVideo: { dir: VIDEO_DIR, size: { width: 1440, height: 900 } },
+});
+const spage = await swVideoCtx.newPage();
+watch(spage, "toolswitch-video");
+const swVideo = spage.video();
+await spage.goto(BASE + "/?scenario=ready", { waitUntil: "domcontentloaded" });
+await spage.waitForSelector("[data-mcp-toolswitch-toggle]");
+await spage.waitForTimeout(600);
+await spage.click("[data-mcp-toolswitch-toggle]");
+await spage.waitForSelector('[data-mcp-toolswitch-toggle][aria-checked="true"]');
+await spage.waitForTimeout(700);
+await spage.click("[data-mcp-toolswitch-toggle]");
+await spage.waitForSelector('[data-mcp-toolswitch-toggle][aria-checked="false"]');
+await spage.waitForTimeout(700);
+await spage.goto(BASE + "/?scenario=ready&switchWrite=fail", { waitUntil: "domcontentloaded" });
+await spage.waitForSelector("[data-mcp-toolswitch-toggle]");
+await spage.click("[data-mcp-toolswitch-toggle]");
+await spage.waitForSelector("[data-mcp-toolswitch-error]");
+await spage.waitForTimeout(900);
+await spage.goto(BASE + "/?scenario=ready&switchWrite=deny", { waitUntil: "domcontentloaded" });
+await spage.waitForSelector("[data-mcp-toolswitch-toggle]");
+await spage.click("[data-mcp-toolswitch-toggle]");
+await spage.waitForSelector('[data-mcp-toolswitch-unauthorized="true"]');
+await spage.waitForTimeout(900);
+await swVideoCtx.close();
+const swRaw = await swVideo.path();
+const swFlowVideo = path.join(ART, "mcp-toolswitch-flow.webm");
+if (swRaw && fs.existsSync(swRaw)) {
+  fs.copyFileSync(swRaw, swFlowVideo);
+  check("工具调用开关连续录屏产出", fs.statSync(swFlowVideo).size > 0, swFlowVideo);
+} else {
+  check("工具调用开关连续录屏产出", false, "video.path() 为空");
+}
+
 /* ── 12. 全局断言 ─────────────────────────────────────────────────────── */
 check("无 console error", pageErrors.length === 0, pageErrors.slice(0, 3).join(" | "));
 check("无跨源 / 非本地网络请求", externalRequests.length === 0, externalRequests.slice(0, 3).join(" | "));
@@ -959,7 +1280,7 @@ server.close();
 /* ── 13. 报告 ─────────────────────────────────────────────────────────── */
 let failed = checks.filter(function (c) { return !c.ok; });
 const report = {
-  task: "UI-2 MCP 中心扩展（B4 工具聚合）+ 设计系统一致性修正",
+  task: "UI-2 MCP 中心扩展（B4 工具聚合）+ UI-3 工具调用开关 + 设计系统一致性修正",
   verdict: failed.length ? "FAIL" : "PASS",
   environment: {
     os: os.type() + " " + os.release(),
@@ -971,9 +1292,10 @@ const report = {
     timing: { scale: TIMEOUT_SCALE, source: SCALE_SOURCE, summary: timingSummary() },
   },
   dataSource: {
-    bridge: "window.openarc.mcp.command（只用 mcp/list | mcp/get | mcp/testLog）",
+    bridge: "window.openarc.mcp.command（只读 mcp/list | mcp/get | mcp/testLog | mcp/agentTools + 唯一写 mcp/toolInvocation/set）",
     aggregateRule: "主进程 mcp/agentTools（electron/mcp-bootstrap.cjs:115-172）；渲染层不再派生聚合规则（见 src/mcp/mcpCenterLogic.ts）",
-    invocationBoundary: "无调用入口；后端对调用命令回 MCP_TOOL_INVOCATION_NOT_ENABLED（electron/mcp-bootstrap.cjs:83-109）",
+    toolSwitch: "读 mcp/agentTools.enabled；写 mcp/toolInvocation/set（trusted + risk=mcp.manage + 审计，落 <userData>/dxos/mcp.json，默认关闭）。界面不做乐观切换：写完重新读取真实状态。",
+    invocationBoundary: "无直接调用入口；调用命令 mcp/toolInvocation/call 不在界面白名单内，调用一律走既有审批链（未批准 0 传输）",
   },
   designSystemFixes: {
     scope: "仅两项：(a) .mcp-banner__title 字号 -> --fs-title（+负字距）；(b) 列表/详情滚动容器改用 primitives ScrollArea。未改配色 / 圆角 / 毛玻璃 / 布局结构 / 信息密度。",
@@ -986,6 +1308,7 @@ const report = {
   screenshots: screenshots,
   video: fs.existsSync(flowVideo) ? flowVideo : null,
   entryVideo: fs.existsSync(aggFlowVideo) ? aggFlowVideo : null,
+  toolSwitchVideo: fs.existsSync(swFlowVideo) ? swFlowVideo : null,
   checks: checks,
   failures: failed,
   consoleErrors: pageErrors,
@@ -1033,6 +1356,7 @@ console.log(NL + "═".repeat(72));
 console.log("UI-2 MCP 中心探针：结论 " + report.verdict + " — " + JSON.stringify({ total: checks.length, failed: failed.length }));
 console.log("截图：" + screenshots.length + " 张 → " + ART);
 console.log("录屏：" + (report.video || "（无）"));
+console.log("录屏（工具调用开关）：" + (report.toolSwitchVideo || "（无）"));
 console.log("对照：改前 " + (beforeCap ? beforeCap.file : "（无）") + " ／ 改后 " + afterCap.file);
 console.log("对照笔记：" + fixesPath);
 console.log("报告：" + path.join(ART, "report.json"));
