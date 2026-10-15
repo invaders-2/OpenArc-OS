@@ -28,16 +28,26 @@
  *   · cloudEntitlement（权益/会员门禁）：同上，源 server/mcp.ts 无命中 → 不引入。
  *   结论：B4d 的 mcp.ts 这一段本来就不触云；三者在别批（B4a/B4b/B4c）处理，本文件不做兼容层。
  *
- * ── 依赖宿主能力 / 第三方 → 只保留签名 + 结构化 AGENT_DEPENDENCY_UNAVAILABLE ──
+ * ── App 托管 MCP：注册表端口注入后按真实能力工作（源 mcp.ts:372-434）──────────
  *   · assertAppManagedMcpAvailable(:372-382) / syncAppManagedMcpServers(:384-426) /
  *     removeAppManagedMcpServers(:428-434)：源按 managedByAppId 归属读写 mcp.json 并连接/断开这些
  *     服务器。本仓缺的**不是**开发者 App 的 MCP 声明（electron/developer-domain.cjs 的
  *     capabilities.mcp 已随包解析并投影），而是宿主侧的 App 托管 MCP 注册表：可读写的 MCP 配置
- *     来源 + 按 managedByAppId 归属的连接生命周期。本仓 MCP 连接是 SQLite 受控白名单
- *     （electron/mcp-domain.cjs:72 LOCAL_SERVERS，仅 openarc-test-echo，不接受任意 command），
- *     承载不了 App 声明的 stdio/HTTP 服务 → 原样保留签名，一律返回
- *     { ok:false, error:AGENT_DEPENDENCY_UNAVAILABLE }，绝不落盘、绝不假装注册成功。
- *     接上的条件：装配方提供按 managedByAppId 归属的 MCP 注册表（读写配置 + connect/disconnect）。
+ *     来源 + 按 managedByAppId 归属的连接生命周期。
+ *   实现落在 electron/mcp-app-registry.cjs（createAppManagedMcpRegistry）：
+ *     · 装配方给 createMcpAgentTools 注入 options.appRegistry（模块级三个函数可传末位 registry），
+ *       三个入口即**委托**给它：assert → assertAvailable、sync、remove；
+ *     · 注册表**只补归属与生命周期，不放宽任何权限**：每条 App 声明先过既有策略
+ *       （本地 stdio 只认 mcp-domain.cjs:72 LOCAL_SERVERS 白名单 key；远程 URL 走
+ *       mcp-domain.cjs:112 validateRemoteEndpoint），不合规整批结构化拒绝并说明卡在哪条策略，
+ *       该轮 0 次落盘 / 0 次连接；
+ *     · 未注入注册表（本文件默认，也是既有产品装配接上前的形状）→ 与从前完全一致：
+ *       结构化 { ok:false, error:AGENT_DEPENDENCY_UNAVAILABLE, dependency:"developerApps" }，
+ *       绝不落盘、绝不假装注册成功。
+ *   返回形状注意：未注入时三个入口保持**同步**结构化降级（既有调用点/断言依赖这一形状）；
+ *   注入后返回注册表结果（注册表的 assertAvailable/sync/remove 为异步，调用方应 await）。
+ *
+ * ── 第三方集成（领星 ERP，B7，默认关）→ 只保留签名 + 结构化 AGENT_DEPENDENCY_UNAVAILABLE ──
  *   · buildLingxingGatewayActionArgs(:155-198) / parseLingxingGatewayTool(:200-232)：
  *     领星 ERP 网关属第三方集成插件（B7，默认关）。本波不移植目录查询/缓存/版本重试
  *     （源 :120-243、:534-549 withServerCallPacing 一并留给 B7）；只保留签名 + 结构化不可用。
@@ -332,24 +342,50 @@ function parseImport(text) {
   return out;
 }
 
-// ── App 托管 MCP：缺宿主侧注册表 → 只保留签名 + 结构化不可用（源 mcp.ts:372-434）──────
-/** 源 :372-382。App 托管 MCP 的 ID 冲突校验；缺宿主侧注册表（无读取来源）。 */
-function assertAppManagedMcpAvailable(appId, declarations) {
-  void appId;
-  void declarations;
-  return dependencyUnavailable("developerApps", "缺少宿主侧 App 托管 MCP 注册表：本仓 MCP 是 SQLite 受控白名单（mcp-domain.cjs:72 LOCAL_SERVERS），无法按 managedByAppId 读取 App 声明的服务配置做 ID 冲突校验");
+// ── App 托管 MCP：注入注册表端口后按真实能力工作（源 mcp.ts:372-434）─────────────
+/**
+ * 注册表形状守卫：三个入口只认同一批方法，形状不符按结构化不可用回（不静默降级）。
+ * 契约见 electron/mcp-app-registry.cjs 的 createAppManagedMcpRegistry。
+ */
+function appManagedRegistryOf(registry) {
+  if (!registry || typeof registry !== "object") return null;
+  if (typeof registry.assertAvailable !== "function") return null;
+  if (typeof registry.sync !== "function") return null;
+  if (typeof registry.remove !== "function") return null;
+  return registry;
 }
-/** 源 :384-426。注册/同步 App 自带 MCP；缺注册表与连接生命周期（不落盘、不连进程）。 */
-function syncAppManagedMcpServers(appId, sourceRoot, declarations) {
-  void appId;
-  void sourceRoot;
-  void declarations;
-  return dependencyUnavailable("developerApps", "缺少宿主侧 App 托管 MCP 注册表与连接生命周期：无法按 managedByAppId 持久化并连接 App 声明的 stdio/HTTP 服务");
+
+/** 未装配注册表（或形状不符）：与既有桩逐字同义 —— 不落盘、不连接、不假装注册成功。 */
+function appManagedRegistryMissing(detail) {
+  return dependencyUnavailable("developerApps", "缺少宿主侧 App 托管 MCP 注册表（" + detail + "）：未注入 electron/mcp-app-registry.cjs 前不落盘、不连接；注入后由注册表按 mcp-domain.cjs:72 LOCAL_SERVERS 与 mcp-domain.cjs:112 validateRemoteEndpoint 的既有策略判定。");
 }
-/** 源 :428-434。移除 App 托管 MCP；缺注册表（无断开/移除目标）。 */
-function removeAppManagedMcpServers(appId) {
-  void appId;
-  return dependencyUnavailable("developerApps", "缺少宿主侧 App 托管 MCP 注册表：无法按 managedByAppId 断开并移除 App 声明的服务");
+
+/**
+ * 源 :372-382。App 托管 MCP 的 ID 冲突校验（+ 既有白名单/策略预判，注册表内实现）。
+ * @param {object} [registry] 末位可选：显式传入宿主侧注册表；缺省 → 既有结构化降级不变。
+ */
+function assertAppManagedMcpAvailable(appId, declarations, registry = null) {
+  const port = appManagedRegistryOf(registry);
+  if (!port) return appManagedRegistryMissing("assertAvailable");
+  return port.assertAvailable(appId, declarations);
+}
+/**
+ * 源 :384-426。注册/同步 App 自带 MCP（managedByAppId 归属 + 持久化 + 连接生命周期）。
+ * @param {object} [registry] 末位可选：显式传入宿主侧注册表；缺省 → 既有结构化降级不变。
+ */
+function syncAppManagedMcpServers(appId, sourceRoot, declarations, registry = null) {
+  const port = appManagedRegistryOf(registry);
+  if (!port) return appManagedRegistryMissing("sync");
+  return port.sync(appId, sourceRoot, declarations);
+}
+/**
+ * 源 :428-434。移除 App 托管 MCP（断开 + 清理归属记录）。
+ * @param {object} [registry] 末位可选：显式传入宿主侧注册表；缺省 → 既有结构化降级不变。
+ */
+function removeAppManagedMcpServers(appId, registry = null) {
+  const port = appManagedRegistryOf(registry);
+  if (!port) return appManagedRegistryMissing("remove");
+  return port.remove(appId);
 }
 
 // ── 领星 ERP 网关 helper（第三方集成插件 B7，默认关）→ 签名 + 结构化不可用 ──
@@ -620,6 +656,9 @@ function normalizeCallResult(res) {
  *    未注入 = 保持既有组合语义（仅测试/低层组合用）；产品装配（mcp-agent-bridge.cjs）一定注入，
  *    且开关默认关闭 —— 关闭时 callByName/callDirect 在审批与传输之前就回
  *    MCP_TOOL_INVOCATION_NOT_ENABLED。
+ * @param {object} [options.appRegistry] Y1 宿主侧 App 托管 MCP 注册表（electron/mcp-app-registry.cjs）。
+ *    注入后 assert/sync/remove 三个入口委托给它（managedByAppId 归属 + 既有白名单/策略门 + 连接生命周期）；
+ *    未注入 = 保持既有结构化 AGENT_DEPENDENCY_UNAVAILABLE（不落盘、不连接、不假装注册成功）。
  * @param {Iterable<string>} [options.systemServerIds] 系统 server 白名单（源 SYSTEM_IDS）。
  * @param {()=>number} [options.clock] @param {object} [options.logger]
  */
@@ -629,6 +668,8 @@ function createMcpAgentTools(options = {}) {
   // B4e：MCP 工具调用显式开关端口（{ isEnabled() } 或 { isToolInvocationEnabled() }）。
   // 未注入 = 保持 B4d 既有组合语义（审批 → 传输）；产品装配（mcp-agent-bridge.cjs）一定注入。
   const switchPort = options.switch || null;
+  // Y1：宿主侧 App 托管 MCP 注册表（可选）。未注入 = 三个入口保持既有结构化降级（与从前逐字一致）。
+  const appRegistry = appManagedRegistryOf(options.appRegistry);
   const clientFor = typeof options.clientFor === "function" ? options.clientFor : null;
   const approval = options.approval || null;
   const clock = typeof options.clock === "function" ? options.clock : () => Date.now();
@@ -963,10 +1004,13 @@ function createMcpAgentTools(options = {}) {
     toolIndexSnapshot: () => Object.fromEntries([...index.entries()].map(([k, v]) => [k, { ...v }])),
     /** B4e：开关是否允许发起工具调用；未注入 switch 端口返回 null（未接线，不冒充已开启）。 */
     toolInvocationEnabled: () => isInvocationEnabled(),
-    /** 源 mcp.ts:372-434（B7 未落地）：签名 + 结构化不可用，实例上也挂一份。 */
-    assertAppManagedMcpAvailable,
-    syncAppManagedMcpServers,
-    removeAppManagedMcpServers,
+    /**
+     * 源 mcp.ts:372-434：实例级 App 托管 MCP 入口。
+     * 注入 options.appRegistry 时委托注册表（0 策略合规才落盘/连接）；未注入 = 既有结构化降级。
+     */
+    assertAppManagedMcpAvailable: (appId, declarations) => assertAppManagedMcpAvailable(appId, declarations, appRegistry),
+    syncAppManagedMcpServers: (appId, sourceRoot, declarations) => syncAppManagedMcpServers(appId, sourceRoot, declarations, appRegistry),
+    removeAppManagedMcpServers: (appId) => removeAppManagedMcpServers(appId, appRegistry),
     buildLingxingGatewayActionArgs,
     parseLingxingGatewayTool,
   };

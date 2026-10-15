@@ -87,13 +87,15 @@ function projectMcpServer(projected) {
  *   注入后审批端口为 createTaskApprovalPort（propose → 可信决定 → 执行），未注入则保持 APPROVAL_REQUIRED。
  * @param {object} [options.switch]  B4e 显式开关端口（{ isEnabled() } / { isToolInvocationEnabled() }）。
  * @param {object} [options.registry]  B4e ToolRegistry；注入后幂等登记 MCP 工具 contract。
+ * @param {object} [options.appRegistry]  Y1 宿主侧 App 托管 MCP 注册表（mcp-app-registry.cjs）；
+ *   原样转交 createMcpAgentTools。未注入时 assert/sync/remove 保持既有结构化降级。
  * @param {number} [options.version]  MCP 工具 contract 版本（默认 MCP_TOOL_VERSION）。
  * @param {object} [options.proxy]  ControlledToolProxy；与 taskId 同时给出且未显式给 approval 时自动包适配器。
  * @param {object} [options.sideEffectRuntime]  SideEffectRuntime；与 taskId 同时给出且未显式给 approval 时自动包适配器。
  * @param {string} [options.taskId] @param {string} [options.stepId] @param {string} [options.runId]
  * @returns {{ mcpAgentTools: object, mcpServersSnapshot: () => object[], serversPort: object, snapshot: () => object, statusReason: () => string|null, registerToolContracts: () => object, listToolContracts: () => string[], toolContractReport: () => object }|null}
  */
-function createMcpAgentBridge({ mcpService = null, context = null, hostAppId = MCP_HOST_APP_ID, approval = null, transport = null, clientFor = null, systemServerIds = null, switch: switchPort = null, registry = null, version = MCP_TOOL_VERSION, proxy = null, sideEffectRuntime = null, taskId = null, stepId = null, runId = null, trustedApproval = null, clock = null, logger = null } = {}) {
+function createMcpAgentBridge({ mcpService = null, context = null, hostAppId = MCP_HOST_APP_ID, approval = null, transport = null, clientFor = null, systemServerIds = null, switch: switchPort = null, registry = null, appRegistry = null, version = MCP_TOOL_VERSION, proxy = null, sideEffectRuntime = null, taskId = null, stepId = null, runId = null, trustedApproval = null, clock = null, logger = null } = {}) {
   if (!mcpService || typeof mcpService.listConnections !== "function") return null;
   const contextOf = () => {
     const base = typeof context === "function" ? context() : context;
@@ -151,7 +153,7 @@ function createMcpAgentBridge({ mcpService = null, context = null, hostAppId = M
   function list() { return snapshot().rows; }
 
   const serversPort = { list };
-  const mcpAgentTools = createMcpAgentTools({ servers: serversPort, approval: approvalPort, transport, clientFor, switch: explicitSwitch, systemServerIds, clock, logger });
+  const mcpAgentTools = createMcpAgentTools({ servers: serversPort, approval: approvalPort, transport, clientFor, switch: explicitSwitch, systemServerIds, appRegistry, clock, logger });
   return {
     mcpAgentTools,
     /** 与 createMcpAgentTools 共用同一份只读快照，保证目录与可调用索引看到同一批 server。 */
