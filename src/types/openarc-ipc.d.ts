@@ -96,7 +96,7 @@ export interface OpenArcModelBridge extends OpenArcCommandBridge {
 }
 
 export interface OpenArcMcpBridge extends OpenArcCommandBridge {
-  /** P3：开放工具调用（经 side-effect 审批链）。**当前仍不暴露**：preload 只给 command，调用命令一律被拒。 */
+  /** P3：工具调用经既有 side-effect 审批链。**不另暴露 bridge 方法**：preload 只给 command，实际入口是 mcp/toolInvocation/call（默认关闭 + 逐次审批；未批准 0 次外发）。 */
   callTool?: OpenArcCommandFn;
   onEvent?: (callback: (event: OpenArcEvent) => void) => () => void;
 }

@@ -9,7 +9,8 @@
  *   · 工具描述（能力数据）要求 mcp.use：只有 mcp.view 时列表照常给状态，但 tools 为空且 toolsHidden=true。
  * 连接（本地/远程）都真实握手：initialize → notifications/initialized → tools/list（分页有界），
  * 把**实际协商结果**写进记录；失败回稳定错误码，绝不假装成功。
- * 本批**不开放工具调用**：invokeTool 一律 MCP_TOOL_INVOCATION_NOT_ENABLED。
+ * 工具调用**默认关闭**：真实路径在 mcp-agent-tools/mcp-client（显式开关 + 逐次审批）；
+ * 本类保留的 invokeTool 是旧形状，恒回 MCP_TOOL_INVOCATION_NOT_ENABLED，不是调用路径。
  */
 "use strict";
 
@@ -375,7 +376,7 @@ class McpService {
     return { ok: true, items, connectionId };
   }
 
-  /** 第一批不开放工具调用：唯一入口明确拒绝（不是"未实现所以报错"，是显式的产品边界）。 */
+  /** 旧调用形状：恒回 MCP_TOOL_INVOCATION_NOT_ENABLED（不是"未实现所以报错"，是保留的显式拒绝）。 */
   invokeTool() {
     return { ok: false, error: domain.ERROR_CODE.MCP_TOOL_INVOCATION_NOT_ENABLED };
   }

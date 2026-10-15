@@ -82,7 +82,7 @@ const MCP_COMMANDS = Object.freeze([
   "mcp/test",
   "mcp/testLog",
   // B4e：只读聚合（mcp__<server>__<tool>），供渲染层直接消费，消除 UI-2 的重复派生。
-  // 它不是调用入口：调用命令仍走 MCP_TOOL_INVOCATION_COMMANDS 的拒绝分支。
+  // 它不是调用入口：真实调用入口是 mcp/toolInvocation/call；5 个旧命令名仍走拒绝分支。
   "mcp/agentTools",
   // B4e 收口：显式开关的**唯一写命令**（trusted + risk=mcp.manage + 审计），落 <userData>/dxos/mcp.json。
   "mcp/toolInvocation/set",
@@ -90,9 +90,13 @@ const MCP_COMMANDS = Object.freeze([
   "mcp/toolInvocation/call",
 ]);
 /**
- * 工具调用入口：第一批**不开放**。
- * 单独登记而不是落进"未知命令"，是为了让拒绝原因是产品边界而不是拼写错误 ——
- * 任何调用入口都明确回 MCP_TOOL_INVOCATION_NOT_ENABLED。
+ * 旧调用命令名：**已不是调用入口**，保留显式登记只为让拒绝原因是产品边界而不是拼写错误 ——
+ * 这 5 个名字一律回 MCP_TOOL_INVOCATION_NOT_ENABLED。
+ *
+ * 真实入口只有两个（同见上方 MCP_COMMANDS）：
+ *   · mcp/toolInvocation/set —— 显式开关的唯一写命令，默认关闭，落 <userData>/dxos/mcp.json；
+ *   · mcp/toolInvocation/call —— 任务内真实调用（可信 taskId + ControlledToolProxy 审批 → 真实传输）。
+ * 开关关闭或本次未获批准都在传输前 fail closed：**未批准 = 0 次外发**。
  */
 const MCP_TOOL_INVOCATION_COMMANDS = Object.freeze(["mcp/callTool", "mcp/call", "mcp/invoke", "mcp/invokeTool", "mcp/toolCall"]);
 

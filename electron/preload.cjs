@@ -126,7 +126,8 @@ contextBridge.exposeInMainWorld("openarc", {
    * 唯一入口 mcp.command(...)；**不暴露** raw credential / credentialRef / 本机路径 /
    * 子进程句柄 / raw HTTP / raw SQL。本地连接只能给白名单 serverKey（程序与参数由主进程固定映射），
    * sessionRef 与 appId 由主进程注入，Renderer 自报的 userId/appId/role 一律忽略。
-   * 本批**不开放工具调用**：任何调用入口都会拿到 MCP_TOOL_INVOCATION_NOT_ENABLED。
+   * 工具调用**默认关闭**（<userData>/dxos/mcp.json 的显式开关）；开关打开后每次调用仍要单独
+   * 通过审批，未批准 0 次外发（真实入口是 mcp/toolInvocation/call）。
    */
   mcp: {
     command: (command) => ipcRenderer.invoke("mcp:command", command),

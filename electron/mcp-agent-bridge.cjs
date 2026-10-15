@@ -14,10 +14,11 @@
  * 边界（与 B4d 一致，一条都不放宽）：
  *   · 目录只读：list() 调 mcpService.listConnections（沿用 D5-03 的 app grant 与可见性判定），
  *     无 session / 无授权时返回空数组并记录原因，绝不用原始数据库行绕过授权。
- *   · 工具调用：本桥默认不注入 transport / clientFor → createMcpAgentTools 的 invokeRemote
- *     返回结构化 MCP_TOOL_INVOCATION_NOT_ENABLED（mcp-agent-tools.cjs:575-579）；
- *     审批端口（approval）未注入时 requestApproval 先 fail closed（mcp-agent-tools.cjs:534-535），
- *     远端调用次数为 0。本桥不修改 electron/mcp-client.cjs 的产品边界。
+ *   · 工具调用：本桥自身不构造 transport / clientFor，也不放宽客户端的双条件门；未注入时
+ *     createMcpAgentTools 的 invokeRemote 返回结构化 MCP_TOOL_INVOCATION_NOT_ENABLED
+ *     （mcp-agent-tools.cjs:575-579）；审批端口（approval）未注入时 requestApproval 先 fail closed
+ *     （mcp-agent-tools.cjs:534-535），远端调用次数为 0。生产装配（main.cjs）注入活连接 + 审批端口，
+ *     开关默认关闭；本桥不修改 electron/mcp-client.cjs 的产品边界。
  *   · 工具入参 schema：MCP 域落库时只保留 inputSchemaSummary（mcp-domain.cjs:157-177 sanitizeTool），
  *     完整 inputSchema 不持久化 → 这里照实不补 schema，catalog 落到空对象 schema，绝不伪造参数。
  *
@@ -28,7 +29,7 @@
  *     contract（electron/mcp-tool-contract.cjs）；这样 B4d 的审批适配器（toolIdFor=mcpToolIdFor）
  *     才有 contract 可解析，否则 ControlledToolProxy.propose 会 fail closed 成 DENIED。
  *   · proxy / sideEffectRuntime + taskId：未显式给 approval 时，自动包出既有两个审批适配器，
- *     不新建第二套 authority。传输仍必须由调用方注入（生产不注入 = 传输边界不放宽）。
+ *     不新建第二套 authority。传输仍必须由调用方注入（生产由 main.cjs 注入 mcp-live-transport = 传输边界不放宽）。
  */
 const { createMcpAgentTools, isConnectedStatus, createControlledToolProxyApprovalPort, createSideEffectApprovalPort, createTaskApprovalPort } = require("./mcp-agent-tools.cjs");
 const { mcpToolIdFor, registerMcpToolContracts, descriptorsFromServerRows, MCP_TOOL_VERSION } = require("./mcp-tool-contract.cjs");

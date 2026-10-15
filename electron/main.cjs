@@ -73,7 +73,7 @@ const { registerIntegrationIpc, registerMarketIpc } = require("./plugin-bootstra
 // B4 · providerAdapter 桥：把 B2 的 provider-protocol store/service 投影成 B4 执行器要的只读适配器
 // （firstUsable/all/autoFallback/revealProvider/call）；只读投影绝不返回 api_key/credentialRef。
 const { createProviderAdapter } = require("./provider-adapter-bridge.cjs");
-// D5-03：MCP 中心的宿主命令面（连接管理 + 能力发现；本批不开放工具调用）。
+// D5-03：MCP 中心的宿主命令面（连接管理 + 能力发现；工具调用默认关闭，开启后仍需逐次审批）。
 const { registerMcpIpc } = require("./mcp-bootstrap.cjs");
 // B4 收口：把已装配的 MCP 连接目录（identity.mcpService）只读投影成 agent 工具目录的 mcp 来源。
 const { createMcpAgentBridge } = require("./mcp-agent-bridge.cjs");
