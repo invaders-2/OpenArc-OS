@@ -291,7 +291,7 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
  * @param opts.bootError 身份服务创建失败时的人话原因；有它时 service 必须为 null，
  *                       启动询问会拿到 BOOT_FAILED，渲染层据此走已有的 BootRetry
  */
-function registerIdentityIpc({ ipcMain, service, authorization, device, resource, resourceSearch, resourcePreview, governance, governanceService, projects, canvas, picker, model, sideEffect = null, dialog, BrowserWindow, shell = null, isTrusted, send, sendSideEffect = null, bootError = null }) {
+function registerIdentityIpc({ ipcMain, service, authorization, device, resource, resourceSearch, resourcePreview, governance, governanceService, projects, canvas, picker, model, sideEffect = null, dialog, BrowserWindow, shell = null, resolveFile = null, isTrusted, send, sendSideEffect = null, bootError = null }) {
   ipcMain.handle("identity:command", async (e, command) => {
     if (isTrusted && !isTrusted(e)) throw Error("Forbidden");
     if (!service)
@@ -312,7 +312,8 @@ function registerIdentityIpc({ ipcMain, service, authorization, device, resource
   // D3-03：设备域（含管理写操作；授权判断在 DeviceService 内，见 device-bootstrap 顶部注释）。
   if (device) registerDeviceIpc({ ipcMain, service: device, identity: service, isTrusted });
   // D3-04A：资源命令（无 raw fs；导入/链接经主进程 dialog）。
-  if (resource) registerResourceIpc({ ipcMain, service: resource, search: resourceSearch || null, preview: resourcePreview || null, projects: projects || null, canvas: canvas || null, picker: picker || null, identity: service, isTrusted, dialog: dialog || null, BrowserWindow: BrowserWindow || null, shell });
+  // Z2：resolveFile 由 main.cjs 注入（file-service.resolve 的窄投影），访达选中项据此加入资源库。
+  if (resource) registerResourceIpc({ ipcMain, service: resource, search: resourceSearch || null, preview: resourcePreview || null, projects: projects || null, canvas: canvas || null, picker: picker || null, identity: service, isTrusted, dialog: dialog || null, BrowserWindow: BrowserWindow || null, shell, resolveFile });
   // D3-04D：治理命令（Users / Departments / Apps / Audit / Scope / Ownership / Bulk）。
   if (governance || governanceService) registerGovernanceIpc({ ipcMain, service: governance || governanceService, authorization, identity: service, isTrusted });
   // D4-01：模型管理命令（actor sessionRef / appId 由主进程决定；无 raw credential / proxy capability）。

@@ -624,6 +624,14 @@ app.whenReady().then(async () => {
     dialog,
     shell,
     BrowserWindow,
+    // Z2：访达窗口把选中条目加入资源库时，磁盘路径只在主进程解析。
+    // file-service.resolve() 刻意不挂 preload（file-service.cjs "只给主进程用"），
+    // 这里只把 { path, name } 交给 ResourceService，渲染层仍只给 folderId + 条目 id。
+    resolveFile: (folderId, id) => {
+      if (!files) return null;
+      const hit = files.resolve(String(folderId || ""), String(id || ""));
+      return hit ? { path: hit.path, name: hit.entry ? hit.entry.name : "" } : null;
+    },
     isTrusted: trusted,
     bootError: identityBootFailure,
     send: (event) => {
@@ -1094,8 +1102,11 @@ app.whenReady().then(async () => {
       fetch: typeof fetch === "function" ? fetch.bind(globalThis) : null,
       logger: null,
       clock: null,
-      // X4：无人值守自动化同步的授权通道待产品决策（定义即授权 / 每次审批 / 暂不接，三选一）；
-      // 决策前刻意不注入任何 MCP 传输，未注入即由 plugin-service 结构化拒绝（fail-closed）。
+      // Z1（产品已批准「定义即授权」）：把**既有 MCP 活连接**端口注入集成域，使自动化同步动作
+      // 在「定义已授权 + 插件启用 + 依赖就绪」时真正走既有 tools/call 通道（不另造通道）。
+      // 定义授权闸门在 automation-service（执行前校验 authorization_audit 的定义授权记录）；
+      // MCP 客户端「开关 + 审批决定」双条件保持不变，不新建第二套审批权威。
+      mcpTransport: mcpLiveTransport,
     });
     registerIntegrationIpc({
       ipcMain,

@@ -1087,6 +1087,8 @@ export type MenuItem =
       danger?: boolean;
       disabled?: boolean;
       checked?: boolean;
+      /** 禁用原因 / 补充说明（DESIGN_SYSTEM §8：禁用控件不隐藏原因）。 */
+      title?: string;
       /** 悬停展开的子菜单（例如"壁纸"）。 */
       submenu?: MenuItem[];
       onSelect: () => void;
@@ -1218,8 +1220,10 @@ export function ContextMenu({
             <button
               key={it.id}
               role="menuitem"
+              data-menu-id={it.id}
               className={it.danger ? "danger" : undefined}
               disabled={it.disabled}
+              title={it.title}
               aria-haspopup={it.submenu ? "menu" : undefined}
               onPointerEnter={(e) => {
                 if (it.submenu) {
@@ -1264,8 +1268,10 @@ export function ContextMenu({
                 <button
                   key={it.id}
                   role="menuitem"
+                  data-menu-id={it.id}
                   className={it.danger ? "danger" : undefined}
                   disabled={it.disabled}
+                  title={it.title}
                   onClick={() => {
                     it.onSelect();
                     onClose();

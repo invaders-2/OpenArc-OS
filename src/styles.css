@@ -898,6 +898,30 @@ input[type="checkbox"] {
 .toolbar-spacer {
   margin-left: auto;
 }
+/* Z2 · 访达窗口「加入资源库 / 导出」的可见反馈（MOTION_SYSTEM §7：
+   进行中 / 成功 / 失败都必须看得见；失败不用整屏震动，也不用 Color 单独传意，
+   文案本身就说清了结果与落点）。 */
+.files-library-status {
+  margin: 0 0 10px;
+  padding: 4px 8px;
+  border-radius: var(--radius-md);
+  font-size: var(--fs-caption);
+  color: var(--muted);
+  animation: files-library-feedback-in var(--dur-feedback) var(--ease-standard);
+}
+.files-library-status[data-files-library-status="ok"] {
+  background: rgb(var(--text-rgb) / 0.06);
+  color: var(--text);
+}
+.files-library-status[data-files-library-status="error"] {
+  background: rgb(var(--failed-rgb) / 0.12);
+  color: var(--failed);
+}
+@keyframes files-library-feedback-in {
+  from {
+    opacity: 0;
+  }
+}
 .icon-button {
   display: grid;
   place-items: center;
