@@ -16,13 +16,14 @@
  *   · 因此把归属写进 endpoint_json 的附加键 managedByAppId —— 仍是同一张表、同一条记录、同一次写入；
  *   · 该键对既有解析路径不可见：mcp-domain.cjs:268 projectEndpoint 只回 serverKey / url，
  *     mcp-service.cjs:543 握手只取 serverKey / url，多出的键既不投影给渲染层也不参与连接。
- *   · 若同一条记录被 MCP 中心的通用编辑路径（updateConnection）重写端点，归属会随 endpoint_json
- *     一起被覆盖 —— 这条边界如实写在报告里，不假装它不会发生。
+ *   · Y6：MCP 中心的通用编辑路径（mcp-service.updateConnection）重写端点时，
+ *     经 mcp-domain.carryManagedByAppId 原样携带该键，归属不再随端点覆盖丢失。
  *
  * 全程离线：本文件不发网络、不 spawn 进程；真实连接由 McpService 的既有活连接负责。
  */
 "use strict";
 
+const crypto = require("node:crypto");
 const domain = require("./mcp-domain.cjs");
 
 const SS = "AGENT_DEPENDENCY_UNAVAILABLE";
@@ -73,8 +74,8 @@ function constructOrDegrade(label, build, log) {
   }
 }
 
-/** endpoint_json 里的托管归属键；对既有解析路径不可见（见文件头）。 */
-const MANAGED_KEY = "managedByAppId";
+/** endpoint_json 里的托管归属键；对既有解析路径不可见（见文件头）。单一真值在 mcp-domain。 */
+const MANAGED_KEY = domain.MANAGED_BY_APP_KEY;
 
 function parseEndpoint(row) {
   return domain.parseJson(row && row.endpoint_json, null);
@@ -220,9 +221,11 @@ function createMcpConnectionsPort({ mcpService = null, mcpStore = null, authoriz
   function save(config) {
     requireGuard();
     const raw = config && typeof config === "object" ? config : {};
-    const id = asText(raw.id != null ? raw.id : raw.connectionId, 120).trim();
-    if (!id) throw portError(PORT_ERROR.INVALID_INPUT, "id");
-    const existing = store.connectionById(id);
+    const requestedId = asText(raw.id != null ? raw.id : raw.connectionId, 120).trim();
+    const existing = requestedId ? store.connectionById(requestedId) : null;
+    // Y6：补齐"新记录可缺 id"的最小能力 —— 导入等调用点只负责 transport/location/endpoint，
+    // id 由端口生成（与 McpStore.insertConnection 同前缀）；已有记录仍按既有 id 幂等更新。
+    const id = requestedId || (existing ? String(existing.connection_id) : "mcp_" + crypto.randomBytes(10).toString("base64url"));
     const managedByAppId = raw.managedByAppId != null
       ? asText(raw.managedByAppId, 120)
       : (existing ? managedByAppIdOf(existing) : null);
@@ -313,7 +316,35 @@ function createMcpConnectionsPort({ mcpService = null, mcpStore = null, authoriz
     return { ok: true, changed: res.changed === true };
   }
 
-  return { list, save, connect, disconnect, remove, hostAppId: String(hostAppId) };
+  /**
+   * Y6：端口提供"刷新"语义（mcp-agent-tools.refreshServer 的 refresh 分支）。
+   * 复用 McpService 既有 reconnect（先收活连接再重新握手）；没有 reconnect 时才退到 connect。
+   * 关键：不碰 enabled —— 刷新不能像 disconnect 那样把启用状态翻成 false。
+   */
+  async function refresh(id) {
+    requireGuard();
+    const key = asText(id, 120).trim();
+    if (!key) throw portError(PORT_ERROR.INVALID_INPUT, "id");
+    const row = store.connectionById(key);
+    if (!row) return { ok: false, error: PORT_ERROR.NOT_FOUND, id: key, status: null };
+    const enabled = row.enabled === 1 || row.enabled === true;
+    if (!enabled) return { ok: true, id: key, status: domain.STATUS.DISABLED, error: null, refreshed: false };
+    const res = typeof mcpService.reconnect === "function"
+      ? await mcpService.reconnect({ context: contextOf(), connectionId: key })
+      : await mcpService.connect({ context: contextOf(), connectionId: key });
+    const fresh = store.connectionById(key);
+    const ok = !!(res && res.ok === true);
+    return {
+      ok,
+      id: key,
+      status: fresh ? String(fresh.status) : null,
+      error: ok ? null : ((res && res.error) || domain.ERROR_CODE.MCP_UNREACHABLE),
+      refreshed: ok,
+      attempts: res && res.attempts != null ? res.attempts : null,
+    };
+  }
+
+  return { list, save, connect, disconnect, remove, refresh, hostAppId: String(hostAppId) };
 }
 
 module.exports = { createMcpConnectionsPort, constructOrDegrade, PORT_ERROR, MANAGED_KEY, portError };

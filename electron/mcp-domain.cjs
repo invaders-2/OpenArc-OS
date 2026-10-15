@@ -148,6 +148,25 @@ function parseJson(text, fallback) {
   }
 }
 
+/** Y6：App 托管归属键。只落在 endpoint_json 的附加键上（不改表结构、不加列）。 */
+const MANAGED_BY_APP_KEY = "managedByAppId";
+
+/**
+ * Y6：端点重写时原样携带既有归属。
+ * 通用编辑路径（mcp-service.updateConnection）只重编码 serverKey / url / endpointScope；
+ * 若不显式携带，endpoint_json 上的 managedByAppId 会随覆盖丢失 —— 连接变成"无主"，
+ * 下一次 App 启用 / 禁用就再也找不到它（归属判定只看这个键）。
+ */
+function carryManagedByAppId(encoded, previousEndpointJson) {
+  if (!encoded || encoded.ok !== true || typeof encoded.json !== "string") return encoded;
+  const previous = parseJson(previousEndpointJson, null);
+  if (!previous || typeof previous !== "object" || !previous[MANAGED_BY_APP_KEY]) return encoded;
+  const next = parseJson(encoded.json, null);
+  if (!next || typeof next !== "object") return encoded;
+  next[MANAGED_BY_APP_KEY] = String(previous[MANAGED_BY_APP_KEY]);
+  return { ...encoded, json: JSON.stringify(next) };
+}
+
 const asText = (v, max) => String(v == null ? "" : v).slice(0, max);
 
 /**
@@ -330,6 +349,8 @@ module.exports = {
   validateRemoteEndpoint,
   validateEndpointFor,
   encodeEndpoint,
+  MANAGED_BY_APP_KEY,
+  carryManagedByAppId,
   sanitizeTools,
   sanitizeTool,
   summarizeInputSchema,

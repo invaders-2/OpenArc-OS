@@ -11,7 +11,8 @@
  *   ② enable    把当前版本写回 user_installed_apps（不改包）。
  *   ③ disable   只移除 user_installed_apps 行；包目录、清单缓存、回滚点全部保留。
  *   ④ rollback  从 app_market_releases 的历史行（revoked_at 非空）取上一版本，重新置为当前版本；
- *               启用状态下同步 user_installed_apps 的 installed_version/build（回滚后运行时状态一致）。
+ *               启用状态下同步 user_installed_apps 的 installed_version/build（回滚后运行时状态一致）；
+ *               Y6：与 install 同一路径重算 App 托管 MCP（syncAppMcp），并落 app.mcp.sync 重算事件。
  *   ⑤ uninstall 清 user_installed_apps + app_market_releases + 包目录 + 凭据绑定 + app_principals 身份；
  *               **运行时事件与网络审计保留**（审计事实不随卸载消失）。
  *   X7：install / enable 幂等登记 app_principals（app_id = "dev-" + manifest.id，built_in = 0），
@@ -498,7 +499,7 @@ function createDeveloperBundle(options = {}) {
   // ④ 回滚
   // -------------------------------------------------------------------------
 
-  function rollback(payload, context) {
+  async function rollback(payload, context) {
     const userId = String(context.userId);
     const appId = requireAppId(payload);
     const { current } = loadApp(appId);
@@ -518,7 +519,24 @@ function createDeveloperBundle(options = {}) {
     // 启用状态下同步 user_installed_apps，保证"回滚后运行时状态一致"。
     if (store.getInstalled(userId, appId)) store.setInstalled(userId, appId, targetRelease.manifest, clock());
     recordEvent(userId, appId, targetRelease.manifest, "app.rollback", { from: current.version + "+" + current.build, to: target.version + "+" + target.build });
-    return { ...projectApp(userId, appId), rolledBackFrom: { version: current.version, build: current.build } };
+    const projected = projectApp(userId, appId);
+    // Y6：回滚可能落到"MCP 声明不同"的版本；与 install 走同一条路径重算（复用 syncAppMcp），
+    // 让托管归属与连接随目标版本收敛，而不是只改 user_installed_apps 的版本号。
+    if (!appMcpRegistry) return { ...projected, rolledBackFrom: { version: current.version, build: current.build } };
+    const mcp = await syncAppMcp(userId, appId, target.packagePath, targetRelease.capabilities, targetRelease.manifest);
+    // 重算痕迹：成功 / 失败 / 跳过都落一条 app_runtime_events（detail.recomputed=true），不让"重算过"只活在返回值里。
+    recordEvent(userId, appId, targetRelease.manifest, "app.mcp.sync", {
+      trigger: "rollback",
+      recomputed: true,
+      skipped: (mcp && mcp.skipped) || null,
+      from: current.version + "+" + current.build,
+      to: target.version + "+" + target.build,
+      ok: !!(mcp && mcp.ok === true),
+      connected: mcp && Array.isArray(mcp.connected) ? mcp.connected.length : 0,
+      removed: mcp && Array.isArray(mcp.removed) ? mcp.removed.length : 0,
+      failed: mcp && Array.isArray(mcp.failed) ? mcp.failed.length : 0,
+    });
+    return { ...projected, rolledBackFrom: { version: current.version, build: current.build }, mcp };
   }
 
   // -------------------------------------------------------------------------

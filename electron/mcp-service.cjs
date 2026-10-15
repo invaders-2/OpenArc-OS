@@ -216,6 +216,8 @@ class McpService {
     if (patch.endpoint !== undefined) {
       encoded = domain.encodeEndpoint({ location: row.location, transport: row.transport, endpoint: patch.endpoint, allowLan: false });
       if (!encoded.ok) return encoded;
+      // Y6：通用编辑只重写端点，不能把 App 托管归属键（endpoint_json 附加键 managedByAppId）一起抹掉。
+      encoded = domain.carryManagedByAppId(encoded, row.endpoint_json);
       originChanged = encoded.origin !== this.#originOf(row);
     }
     const wantsSecret = typeof patch.credentialSecret === "string" && patch.credentialSecret.length > 0;

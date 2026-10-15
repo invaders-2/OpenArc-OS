@@ -238,3 +238,33 @@ test("授权上下文：appId 用 MCP 中心 Principal，sessionRef 由宿主提
   assert.deepEqual(unauthorized.mcpServersSnapshot(), []);
   assert.equal(unauthorized.statusReason(), "MCP_UNAUTHORIZED");
 });
+
+test("真实 McpService：updateConnection 重写端点保留托管归属键 managedByAppId（不改表结构）", async () => {
+  const { createMcpFixture, ECHO } = await import("./mcp-fixtures.mjs");
+  const fx = await createMcpFixture();
+  try {
+    const created = await fx.createLocal({ name: "归属保留" });
+    assert.equal(created.ok, true, JSON.stringify(created));
+    const id = created.connection.connectionId;
+    // 模拟 Y4 端口落归属：同一 endpoint_json 的附加键，不加列、不建表。
+    fx.mcpStore.updateConnection(id, { endpointJson: JSON.stringify({ serverKey: ECHO.serverKey, managedByAppId: "dev-a" }) });
+
+    const updated = await fx.mcpService.updateConnection({ context: fx.mcpCtx(), connectionId: id, patch: { endpoint: { serverKey: ECHO.serverKey } } });
+    assert.equal(updated.ok, true, JSON.stringify(updated));
+    const parsed = JSON.parse(fx.mcpStore.connectionById(id).endpoint_json);
+    assert.equal(parsed.managedByAppId, "dev-a", "通用编辑重写端点不得丢归属键");
+    assert.equal(parsed.serverKey, ECHO.serverKey);
+    // 归属键不进入渲染层：projectEndpoint 只回 serverKey / url。
+    assert.equal(Object.prototype.hasOwnProperty.call(updated.connection.endpoint, "managedByAppId"), false);
+
+    // 无归属的普通连接不受影响：不得凭空生成归属键。
+    const plain = await fx.createLocal({ name: "普通连接" });
+    const plainId = plain.connection.connectionId;
+    const before = fx.mcpStore.connectionById(plainId).endpoint_json;
+    const after = await fx.mcpService.updateConnection({ context: fx.mcpCtx(), connectionId: plainId, patch: { endpoint: { serverKey: ECHO.serverKey } } });
+    assert.equal(after.ok, true, JSON.stringify(after));
+    assert.equal(fx.mcpStore.connectionById(plainId).endpoint_json, before, "没有归属时不得凭空添加键");
+  } finally {
+    await fx.close();
+  }
+});

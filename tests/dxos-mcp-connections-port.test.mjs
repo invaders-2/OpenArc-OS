@@ -605,3 +605,137 @@ test("⑦ developer-service 源码级：启用/禁用/卸载绑定注册表，�
   const domain = fs.readFileSync(DOMAIN_PATH, "utf8");
   assert.ok(domain.includes("不保留 command / args"), "normalizeMcpList 注释必须写清不保留自带的命令");
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ⑧ Y6：rollback 重算托管 MCP + 三方法端口语义对齐
+// ─────────────────────────────────────────────────────────────────────────────
+test("⑧ developer-service：rollback 按 install 同一路径重算托管 MCP（v1↔v2 声明不同，留重算痕迹）", async () => {
+  const store = makeStore();
+  const service = makeService(store);
+  const port = makePort(store, service);
+  const registry = createAppManagedMcpRegistry({ connections: port, appState: { isEnabled: () => true } });
+  const fx = openBundle(registry);
+  try {
+    const v1 = buildPackage({
+      version: "1.0.0", build: 1,
+      mcp: [{ id: "echo", name: "回显", serverKey: "openarc-test-echo", autoStart: true }],
+    });
+    const v2 = buildPackage({
+      version: "2.0.0", build: 2,
+      mcp: [{ id: "echo2", name: "回显2", serverKey: "openarc-test-echo", autoStart: true }],
+    });
+
+    const i1 = await callDev(fx, "developer/install", { package: v1 });
+    assert.equal(i1.ok, true, JSON.stringify(i1));
+    assert.deepEqual([...store.rows.keys()].sort(), ["echo"]);
+    assert.equal(store.connectionById("echo").enabled, 1);
+    assert.equal(JSON.parse(store.connectionById("echo").endpoint_json).managedByAppId, "dev-demo");
+
+    const i2 = await callDev(fx, "developer/install", { package: v2 });
+    assert.equal(i2.ok, true, JSON.stringify(i2));
+    assert.deepEqual([...store.rows.keys()].sort(), ["echo2"], "升级后只保留 v2 声明的托管服务");
+    assert.equal(store.connectionById("echo2").enabled, 1);
+
+    const rb = await callDev(fx, "developer/rollback", { appId: "dev-demo" });
+    assert.equal(rb.ok, true, JSON.stringify(rb));
+    assert.equal(rb.value.version, "1.0.0");
+    // 托管连接状态与 v1 一致：echo 回来、echo2 清掉、归属与启用都在。
+    assert.deepEqual([...store.rows.keys()].sort(), ["echo"]);
+    const row = store.connectionById("echo");
+    assert.equal(row.enabled, 1);
+    assert.equal(row.status, "READY");
+    assert.equal(JSON.parse(row.endpoint_json).managedByAppId, "dev-demo");
+    assert.equal(rb.value.mcp && rb.value.mcp.ok, true);
+    assert.deepEqual(rb.value.mcp.connected, ["echo"]);
+
+    // 重算痕迹：app_runtime_events 有一条 app.mcp.sync（recomputed=true / trigger=rollback）。
+    const events = fx.identity.connection.prepare("SELECT event_type AS type, detail FROM app_runtime_events WHERE app_id='dev-demo' ORDER BY created_at").all();
+    const sync = events.find((item) => item.type === "app.mcp.sync");
+    assert.ok(sync, "回滚重算必须留痕：" + JSON.stringify(events.map((item) => item.type)));
+    const detail = JSON.parse(sync.detail);
+    assert.equal(detail.trigger, "rollback");
+    assert.equal(detail.recomputed, true);
+    assert.equal(detail.from, "2.0.0+2");
+    assert.equal(detail.to, "1.0.0+1");
+  } finally {
+    try { fx.identity.close(); } catch { /* ignore */ }
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test("⑧ setServerEnabled(true)：不得被端口 disconnect 覆盖回 enabled=false（0 次断开）", async () => {
+  const store = makeStore();
+  const service = makeService(store);
+  const port = makePort(store, service);
+  port.save({ id: "echo", name: "回显", transport: "stdio", location: "LOCAL_DEVICE", endpoint: { serverKey: "openarc-test-echo" }, enabled: false, status: "DISABLED" });
+  const api = createMcpAgentTools({ servers: port });
+
+  const on = await api.setServerEnabled("echo", true);
+  assert.equal(on.ok, true, JSON.stringify(on));
+  assert.equal(on.enabled, true);
+  assert.equal(store.connectionById("echo").enabled, 1, "启用后记录必须仍是 enabled");
+  assert.equal(store.connectionById("echo").status, "READY");
+  assert.equal(service.calls.setEnabled.filter((call) => call.enabled === false).length, 0, "启用路径不得 disconnect（会把 enabled 覆盖回 false）");
+  assert.equal(service.calls.connect.length, 1);
+
+  const off = await api.setServerEnabled("echo", false);
+  assert.equal(off.ok, true);
+  assert.equal(off.enabled, false);
+  assert.equal(store.connectionById("echo").enabled, 0);
+  assert.equal(store.connectionById("echo").status, "DISABLED");
+  assert.ok(service.calls.setEnabled.some((call) => call.enabled === false && call.connectionId === "echo"));
+
+  const missing = await api.setServerEnabled("nope", true);
+  assert.equal(missing.ok, false);
+  assert.equal(missing.error, "MCP_SERVER_NOT_FOUND");
+});
+
+test("⑧ refreshServer：走端口 refresh（不改 enabled）；端口失败结构化回传；未知 server 拒绝", async () => {
+  const store = makeStore();
+  const service = makeService(store);
+  const port = makePort(store, service);
+  port.save({ id: "echo", name: "回显", transport: "stdio", location: "LOCAL_DEVICE", endpoint: { serverKey: "openarc-test-echo" }, enabled: true, status: "DISABLED" });
+  const api = createMcpAgentTools({ servers: port });
+
+  const res = await api.refreshServer("echo");
+  assert.equal(res.ok, true, JSON.stringify(res));
+  assert.equal(res.runtime.status, "READY");
+  assert.equal(store.connectionById("echo").enabled, 1, "刷新不得翻掉 enabled");
+
+  const failService = makeService(store);
+  failService.reconnect = async () => ({ ok: false, error: "MCP_UNREACHABLE" });
+  const failPort = createMcpConnectionsPort({ mcpService: failService, mcpStore: store, context: () => ({ sessionRef: "sess-y4" }) });
+  const failed = await createMcpAgentTools({ servers: failPort }).refreshServer("echo");
+  assert.equal(failed.ok, false, "端口 refresh 失败不得报成功");
+  assert.equal(failed.error, "MCP_UNREACHABLE");
+
+  const missing = await api.refreshServer("nope");
+  assert.equal(missing.ok, false);
+  assert.equal(missing.error, "MCP_SERVER_NOT_FOUND");
+});
+
+test("⑧ importServers：https 可导入（transport/location 齐备、id 由端口生成）；任意命令拒绝且 0 落盘", async () => {
+  const store = makeStore();
+  const service = makeService(store);
+  const api = createMcpAgentTools({ servers: makePort(store, service) });
+
+  const okRes = await api.importServers(JSON.stringify({ mcpServers: { remote: { url: "https://mcp.example.com/rpc" } } }));
+  assert.equal(okRes.ok, true, JSON.stringify(okRes));
+  assert.equal(okRes.count, 1);
+  const id = okRes.saved[0].id;
+  assert.ok(id && String(id).length > 0, "端口必须回一个生成的 id");
+  const row = store.connectionById(id);
+  assert.equal(row.transport, "http");
+  assert.equal(row.location, "REMOTE_SERVICE");
+  assert.deepEqual(JSON.parse(row.endpoint_json), { url: "https://mcp.example.com/rpc", endpointScope: "REMOTE_HTTPS" });
+  assert.equal(service.calls.connect.length, 0, "导入只落配置，不连接");
+
+  const store2 = makeStore();
+  const service2 = makeService(store2);
+  const api2 = createMcpAgentTools({ servers: makePort(store2, service2) });
+  const bad = await api2.importServers("npx -y @scope/some-mcp@latest");
+  assert.equal(bad.ok, false, JSON.stringify(bad));
+  assert.equal(bad.error, "MCP_INVALID_INPUT");
+  assert.equal(store2.calls.insert.length, 0, "任意命令 0 落盘");
+  assert.equal(service2.calls.connect.length, 0);
+});

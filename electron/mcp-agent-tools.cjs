@@ -648,6 +648,9 @@ function normalizeCallResult(res) {
  *    list():  [{ id, name, enabled, status, tools:[{name,description,inputSchema}], builtin?, managedBy?, error? }]
  *    save?(cfg) / disconnect?(id) / connect?(cfg) / refresh?(id)
  *    未注入 → 聚合/调用/配置读写一律结构化 AGENT_DEPENDENCY_UNAVAILABLE。
+ *    Y6 语义对齐（以 connections 端口为准）：save 带 transport/location 且新 id 由端口生成；
+ *    setServerEnabled(true) 只 save+connect（端口 disconnect 会把 enabled 翻回 false）；
+ *    refresh 缺失时退化为 disconnect+connect，但端口提供 refresh 时优先走它（不改 enabled）。
  * @param {object} [options.transport] tools/call 传输端口：callTool({ serverId, toolName, arguments, signal })。
  * @param {(serverId:string)=>object} [options.clientFor] 备选：返回 { callTool({name,arguments}) } 的活客户端。
  * @param {object} [options.approval] 审批链端口：authorize({ context, serverId, serverName, toolName, arguments })
@@ -907,6 +910,10 @@ function createMcpAgentTools(options = {}) {
     if (!server) return { ok: false, error: MCP_AGENT_ERROR.MCP_SERVER_NOT_FOUND, serverId: String(id) };
     if (serversPort && typeof serversPort.refresh === "function") {
       const rt = await serversPort.refresh(String(id));
+      // 刷新端口如实回 ok:false 时不能报"刷新成功"：结构化错误 + 观察到的运行态一起回。
+      if (rt && rt.ok === false) {
+        return { ok: false, error: rt.error || MCP_AGENT_ERROR.MCP_SERVER_NOT_CONNECTED, serverId: String(id), runtime: { status: (rt && rt.status) || null, error: (rt && rt.error) || null } };
+      }
       return { ok: true, serverId: String(id), runtime: { status: (rt && rt.status) || null, error: (rt && rt.error) || null } };
     }
     if (typeof serversPort.disconnect !== "function" || typeof serversPort.connect !== "function") {
@@ -927,9 +934,19 @@ function createMcpAgentTools(options = {}) {
     const next = { ...server, enabled: on };
     if (typeof serversPort.save !== "function") return dependencyUnavailable("servers.save", "端口未提供 save，无法持久化启用状态");
     await serversPort.save(next);
-    if (typeof serversPort.disconnect === "function") await serversPort.disconnect(String(id));
-    if (on && typeof serversPort.connect === "function") await serversPort.connect(next);
-    return { ok: true, serverId: String(id), enabled: on };
+    if (!on) {
+      // 关闭：端口 disconnect 就是既有"enabled=false + DISABLED"语义，一次到位。
+      if (typeof serversPort.disconnect === "function") await serversPort.disconnect(String(id));
+      return { ok: true, serverId: String(id), enabled: false };
+    }
+    // 开启：save(enabled=true) 之后只 connect。绝不能在开启路径上先 disconnect ——
+    // connections 端口的 disconnect 会把 enabled 覆盖回 false，随后 connect 会被
+    // MCP_CONNECTION_DISABLED 拒绝（Y6：与端口语义对齐，不把 enabled 覆盖回 false）。
+    if (typeof serversPort.connect === "function") {
+      const link = await serversPort.connect(next);
+      if (link && link.ok === false) return { ok: false, error: link.error || MCP_AGENT_ERROR.MCP_SERVER_NOT_CONNECTED, serverId: String(id), detail: link.detail == null ? null : String(link.detail) };
+    }
+    return { ok: true, serverId: String(id), enabled: true };
   }
 
   /** 源 :993-1001。启动时 best-effort 连接全部已启用服务器。 */
@@ -956,7 +973,15 @@ function createMcpAgentTools(options = {}) {
     return { ok: true, count: rows.length };
   }
 
-  /** 源 :1108-1129。同名视为更新，避免重复导入。 */
+  /**
+   * 源 :1108-1129。同名视为更新，避免重复导入。
+   *
+   * Y6：以 connections 端口语义为准 —— 端口要求每条 save 带 transport + location（新 id 由端口生成），
+   * 本地 stdio 只认 LOCAL_SERVERS 白名单 serverKey。因此这里只把"能成为端点"的字段传下去：
+   *   · http → endpoint={url} + location=REMOTE_SERVICE；
+   *   · stdio → 仅当解析出 serverKey 时才给 endpoint；导入格式里的 command/args 不作为端点下传
+   *     （端口/白名单永远不接受任意命令）。端口按既有策略结构化拒绝时如实回传，不假装导入成功。
+   */
   async function importServers(text) {
     let parsed;
     try {
@@ -970,18 +995,23 @@ function createMcpAgentTools(options = {}) {
     const saved = [];
     for (const p of parsed) {
       const prev = rows.find((x) => x.name === p.name);
-      const cfg = await serversPort.save({
-        id: prev ? prev.id : undefined,
+      const location = p.transport === "http" ? "REMOTE_SERVICE" : "LOCAL_DEVICE";
+      const endpoint = p.transport === "http" ? (p.url ? { url: p.url } : null) : (p.serverKey ? { serverKey: p.serverKey } : null);
+      const config = {
+        ...(prev ? { id: prev.id } : {}),
         name: p.name,
         transport: p.transport,
-        command: p.command,
-        args: p.args,
-        env: p.env,
-        cwd: p.cwd,
-        url: p.url,
-        headers: p.headers,
+        location,
+        ...(endpoint ? { endpoint } : {}),
         enabled: true,
-      });
+      };
+      let cfg;
+      try {
+        cfg = await serversPort.save(config);
+      } catch (e) {
+        // 端口结构化拒绝（非白名单 serverKey / 明文远程 / 缺端点）：带 code 回传，绝不当成功。
+        return { ok: false, error: (e && e.code) || MCP_AGENT_ERROR.MCP_IMPORT_INVALID, detail: String((e && e.message) || e).slice(0, 300), saved: saved.length };
+      }
       saved.push(cfg);
     }
     return { ok: true, saved, count: saved.length };
