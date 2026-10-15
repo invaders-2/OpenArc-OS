@@ -2234,10 +2234,10 @@ function App() {
               >
                 <ArrowUpDown size={15} />
               </button>
-              <button className="icon-button" aria-label="共享" disabled title="文件服务接入后可用">
+              <button className="icon-button" aria-label="共享" disabled title="共享尚未接入">
                 <Share size={15} />
               </button>
-              <button className="icon-button" aria-label="标签" disabled title="文件服务接入后可用">
+              <button className="icon-button" aria-label="标签" disabled title="标签尚未接入">
                 <Tag size={15} />
               </button>
             </div>
@@ -2939,19 +2939,13 @@ function App() {
           </div>
         </div>
       );
+    // 已知 appId 都在上方各自渲染；走到这里只可能是未知 / 失效窗口，不能按 appId 声明能力。
     return (
       <div className="empty-content">
         <img className="large-icon" src={icon(iconOf(id))} alt="" draggable={false} />
         <h1>{apps.find((a) => a.id === w?.appId)?.name}</h1>
-        <span className="badge">尚未实现</span>
-        <p>
-          {w?.appId === "skills"
-            ? "市场、自定义技能、版本与团队分享将在后续阶段接入。"
-            : w?.appId === "canvas"
-              ? "内容块、连线和项目保存将在后续阶段接入。"
-              : "个人文件、团队项目和设备文件将在后续阶段接入。"}
-        </p>
-        <p className="muted">当前仅验证桌面窗口生命周期，不显示模拟业务数据。</p>
+        <span className="badge">未知应用</span>
+        <p>这个窗口没有对应的应用界面。</p>
       </div>
     );
   };
