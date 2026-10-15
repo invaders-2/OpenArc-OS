@@ -1,6 +1,12 @@
 import React, { useCallback, useState } from "react";
 import { Button } from "../design-system/primitives";
 
+/**
+ * 已废弃：访达（appId="files"）现在有意渲染桌面文件夹视图（见 CHANGELOG 2026-09-14「文件 → 访达」
+ * 与 src/main.tsx content() 的 folder 兜底），本组件已无渲染入口。
+ * 保留是因为它仍是 D3-04D「Files → Resource」受控 Add to Library / Export 的实现：
+ * 若要把该入口并回访达窗口，需先做设计决定，不要直接把 appId="files" 指回这里。
+ */
 /** D3-04D · Files：File ≠ Resource Library，但提供受控 Add to Library / Export。 */
 type ResBridge = { command: (c: Record<string, unknown>) => Promise<any> };
 const bridge = (): ResBridge | undefined => (window as any).openarc?.resource;

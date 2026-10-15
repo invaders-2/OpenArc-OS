@@ -67,7 +67,6 @@ import { BootRetry, BootSurface, LockScreen, LoginScreen, SetupScreen } from "./
 import { ProtectedResourceFixture } from "./authorization/ProtectedResourceFixture";
 import { SettingsContent } from "./settings/SettingsContent";
 import { GovernanceApp } from "./governance/GovernanceApp";
-import { FilesApp } from "./governance/FilesApp";
 import { CanvasHost } from "./canvas/CanvasHost";
 import { ProjectsApp } from "./governance/ProjectsApp";
 import { TaskConsole } from "./projects/TaskConsole";
@@ -2646,7 +2645,6 @@ function App() {
       );
     }
     if (w?.appId === "resource-library") return <ResourceLibraryApp />;
-    if (w?.appId === "files") return <FilesApp />;
     if (w?.appId === "canvas")
       return (
         <CanvasHost
