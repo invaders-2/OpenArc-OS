@@ -245,6 +245,7 @@ function isMcpDisconnectedError(error) {
 //   3. 单个服务器对象 {"command":"...","args":[...]} 或 {"url":"..."}
 //   4. 纯 URL（http/https 一行）
 //   5. 命令行一行（npx -y @scope/some-mcp@latest）
+// 另认本地白名单引用：{"serverKey":"..."} / {"endpoint":{"serverKey":"..."}}（只留 key，command/args 不带进来）
 
 /** 导入解析失败统一带 error.code，供 importServers 收敛成结构化结果。 */
 function importError(message) {
@@ -262,10 +263,23 @@ function toStrMap(v) {
   return Object.keys(out).length ? out : undefined;
 }
 
+/**
+ * 导入解析：识别本地 stdio 的白名单引用（平铺 serverKey 与 endpoint.serverKey 两种写法）。
+ * 只回白名单 key；导入格式里的 command/args 不参与（端口永远不接受任意命令）。
+ */
+function readImportServerKey(v) {
+  const flat = v.serverKey != null ? String(v.serverKey) : "";
+  if (flat) return flat;
+  const endpoint = v.endpoint && typeof v.endpoint === "object" ? v.endpoint : null;
+  return endpoint && endpoint.serverKey != null ? String(endpoint.serverKey) : "";
+}
+
 /** 源 mcp.ts:1018-1027。 */
 function entryToServer(name, v) {
   const url = typeof v.url === "string" ? v.url : typeof v.serverUrl === "string" ? v.serverUrl : "";
   if (url) return { name, transport: "http", url, headers: toStrMap(v.headers) };
+  const serverKey = readImportServerKey(v);
+  if (serverKey) return { name, transport: "stdio", serverKey };
   const command = typeof v.command === "string" ? v.command.trim() : "";
   if (!command) return null;
   const args = Array.isArray(v.args) ? v.args.map(String) : [];
@@ -276,7 +290,7 @@ function entryToServer(name, v) {
 /** 源 mcp.ts:1029-1035。从条目里猜一个可读名称（去掉 scope/版本号/-mcp 后缀之类）。 */
 function guessName(fallback, s) {
   if (fallback && fallback !== "mcp") return fallback;
-  const src = s.url || (s.args || []).find((a) => a.includes("/") || a.includes("mcp")) || s.command || "mcp";
+  const src = s.url || s.serverKey || (s.args || []).find((a) => a.includes("/") || a.includes("mcp")) || s.command || "mcp";
   return String(src).split("/").pop().replace(/@latest$/, "").replace(/\.(js|py)$/, "") || "mcp";
 }
 

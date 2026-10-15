@@ -187,11 +187,16 @@ function createDeveloperBundle(options = {}) {
   // 失败只如实记录（app_runtime_events + logger）并降级，绝不改写 App 的启用 / 卸载结果，
   // 也不静默吞掉原因；未注入注册表时这些函数全部跳过（既有返回形状逐字不变）。
 
-  /** 安装 / 启用：把 App 声明交给注册表（注册成功才落库 / 连接；不合规整批拒绝）。 */
+  /**
+   * 安装 / 回滚：把 App 声明交给注册表（注册成功才落库 / 连接；不合规整批拒绝）。
+   *
+   * 空声明也必须走一次同步：注册表按 managedByAppId（owned）清理"本次声明里不再出现"的旧托管
+   * 记录。若在这里按声明数为 0 提前返回（原 skipped=NO_DECLARATIONS），升级/回滚到无声明版本
+   * 时旧连接不会被断开、记录也不会被删，留成脏连接。
+   */
   async function syncAppMcp(userId, appId, sourceRoot, capabilities, manifestLike) {
     if (!appMcpRegistry || typeof appMcpRegistry.sync !== "function") return { ok: true, skipped: "NO_REGISTRY" };
     const declarations = Array.isArray(capabilities && capabilities.mcp) ? capabilities.mcp : [];
-    if (!declarations.length) return { ok: true, skipped: "NO_DECLARATIONS" };
     try {
       const res = await appMcpRegistry.sync(String(appId), sourceRoot == null ? null : String(sourceRoot), declarations);
       if (!res || res.ok !== true) {
@@ -200,7 +205,9 @@ function createDeveloperBundle(options = {}) {
         if (logger) logger("[OpenArc developer] App 托管 MCP 注册失败（已降级，不影响安装 / 启用）：" + appId + " → " + String(reason).slice(0, 200));
         return { ok: false, error: res && res.error, policy: res && res.policy, detail: res && res.detail };
       }
-      return { ok: true, connected: res.connected, servers: res.servers, skipped: res.skipped };
+      // removed 一并回传：无声明版本的"清理了几条"必须能在结果里看见（不再被 NO_DECLARATIONS 掩盖）；
+      // 回滚事件 detail.removed 也据此读数（见下方 rollback）。
+      return { ok: true, connected: res.connected, servers: res.servers, removed: res.removed, skipped: res.skipped };
     } catch (error) {
       const reason = String((error && error.message) || error);
       recordEvent(userId, appId, manifestLike || {}, "app.mcp.sync.error", { reason: reason.slice(0, 200) });

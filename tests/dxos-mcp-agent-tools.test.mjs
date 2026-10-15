@@ -384,6 +384,19 @@ describe("parseImport / importServers", () => {
     assert.equal(parseImport(JSON.stringify({ mcp: { servers: { b: { command: "uvx", args: ["mcp"] } } } }))[0].name, "b");
   });
 
+  it("serverKey 声明（平铺 / endpoint）解析为本地 stdio 白名单引用，只留 key", () => {
+    assert.deepEqual(parseImport(JSON.stringify({ mcpServers: { echo: { serverKey: "openarc-test-echo" } } })), [
+      { name: "echo", transport: "stdio", serverKey: "openarc-test-echo" },
+    ]);
+    assert.deepEqual(parseImport(JSON.stringify({ servers: { e2: { endpoint: { serverKey: "openarc-test-echo" } } } })), [
+      { name: "e2", transport: "stdio", serverKey: "openarc-test-echo" },
+    ]);
+    // 单对象：名从 serverKey 猜；即使一起带 command，也不产出可执行字段。
+    assert.deepEqual(parseImport(JSON.stringify({ serverKey: "openarc-test-echo", command: "/bin/sh", args: ["-c", "id"] })), [
+      { name: "openarc-test-echo", transport: "stdio", serverKey: "openarc-test-echo" },
+    ]);
+  });
+
   it("单个 {command,args} 对象与尾逗号容错", () => {
     const out = parseImport('{ "command": "python", "args": ["-m", "srv"], }');
     assert.equal(out.length, 1);

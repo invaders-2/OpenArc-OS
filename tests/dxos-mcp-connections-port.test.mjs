@@ -739,3 +739,142 @@ test("⑧ importServers：https 可导入（transport/location 齐备、id 由�
   assert.equal(store2.calls.insert.length, 0, "任意命令 0 落盘");
   assert.equal(service2.calls.connect.length, 0);
 });
+
+test("⑧ importServers：带 serverKey 的白名单本地 stdio 可导入并注册；白名单外 / 任意命令拒绝且 0 落盘", async () => {
+  const net = guardNetwork();
+  try {
+    const store = makeStore();
+    const service = makeService(store);
+    const api = createMcpAgentTools({ servers: makePort(store, service) });
+
+    // 平铺 serverKey：白名单内 → 落库（endpoint 只留 serverKey），导入不连接、不发网络。
+    const okFlat = await api.importServers(JSON.stringify({ mcpServers: { echo: { serverKey: "openarc-test-echo" } } }));
+    assert.equal(okFlat.ok, true, JSON.stringify(okFlat));
+    assert.equal(okFlat.count, 1);
+    const flatRow = store.connectionById(okFlat.saved[0].id);
+    assert.equal(flatRow.transport, "stdio");
+    assert.equal(flatRow.location, "LOCAL_DEVICE");
+    assert.deepEqual(JSON.parse(flatRow.endpoint_json), { serverKey: "openarc-test-echo" });
+    assert.equal(service.calls.connect.length, 0, "导入只落配置，不连接");
+
+    // endpoint.serverKey 形态同样可导入并注册。
+    const okNested = await api.importServers(JSON.stringify({ servers: { echo2: { endpoint: { serverKey: "openarc-test-echo" } } } }));
+    assert.equal(okNested.ok, true, JSON.stringify(okNested));
+    assert.equal(JSON.parse(store.connectionById(okNested.saved[0].id).endpoint_json).serverKey, "openarc-test-echo");
+
+    // 白名单外：结构化拒绝，0 落盘 / 0 连接。
+    const store2 = makeStore();
+    const service2 = makeService(store2);
+    const api2 = createMcpAgentTools({ servers: makePort(store2, service2) });
+    const badKey = await api2.importServers(JSON.stringify({ mcpServers: { evil: { serverKey: "/bin/sh" } } }));
+    assert.equal(badKey.ok, false, JSON.stringify(badKey));
+    assert.equal(badKey.error, "MCP_LOCAL_SERVER_NOT_ALLOWED");
+    assert.equal(store2.calls.insert.length, 0, "白名单外 0 落盘");
+    assert.equal(service2.calls.connect.length, 0);
+
+    // 任意 command：没有白名单 key、也没有合法 endpoint → 仍拒绝，0 落盘。
+    const badCmd = await api2.importServers(JSON.stringify({ mcpServers: { cmd: { command: "npx", args: ["-y", "fs-mcp"] } } }));
+    assert.equal(badCmd.ok, false, JSON.stringify(badCmd));
+    assert.equal(badCmd.error, "MCP_INVALID_INPUT");
+    assert.equal(store2.calls.insert.length, 0, "任意命令 0 落盘");
+    assert.equal(store2.calls.update.length, 0);
+    assert.equal(service2.calls.connect.length, 0);
+
+    assert.equal(net.calls.length, 0, "导入路径不得发网络");
+  } finally { net.restore(); }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ⑨ Y7：空声明版本也要走同步（清理旧托管记录，不留脏连接）
+// ─────────────────────────────────────────────────────────────────────────────
+test("⑨ developer-service：升级到无声明版本清理旧托管记录（断开 + 删除，0 残留）", async () => {
+  const store = makeStore();
+  const service = makeService(store);
+  const registry = createAppManagedMcpRegistry({ connections: makePort(store, service), appState: { isEnabled: () => true } });
+  const fx = openBundle(registry);
+  try {
+    const v1 = buildPackage({ version: "1.0.0", build: 1, mcp: [{ id: "echo", name: "回显", serverKey: "openarc-test-echo", autoStart: true }] });
+    const v2 = buildPackage({ version: "2.0.0", build: 2, mcp: [] });
+
+    const i1 = await callDev(fx, "developer/install", { package: v1 });
+    assert.equal(i1.ok, true, JSON.stringify(i1));
+    assert.deepEqual([...store.rows.keys()], ["echo"]);
+    assert.equal(store.connectionById("echo").enabled, 1);
+
+    const i2 = await callDev(fx, "developer/install", { package: v2 });
+    assert.equal(i2.ok, true, JSON.stringify(i2));
+    assert.deepEqual([...store.rows.keys()], [], "无声明版本必须清掉旧托管记录");
+    assert.ok(service.calls.setEnabled.some((call) => call.connectionId === "echo" && call.enabled === false), "旧连接必须先断开");
+    assert.equal(store.connectionById("echo"), null, "0 残留");
+    assert.deepEqual(i2.value.mcp.removed, ["echo"], "结果如实标注清理计数（不再是 NO_DECLARATIONS）");
+    assert.deepEqual(i2.value.mcp.skipped, []);
+  } finally {
+    try { fx.identity.close(); } catch { /* ignore */ }
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test("⑨ developer-service：连续两个无声明版本不报错也不重复清理", async () => {
+  const store = makeStore();
+  const service = makeService(store);
+  const registry = createAppManagedMcpRegistry({ connections: makePort(store, service), appState: { isEnabled: () => true } });
+  const fx = openBundle(registry);
+  try {
+    const v1 = buildPackage({ version: "1.0.0", build: 1, mcp: [] });
+    const v2 = buildPackage({ version: "2.0.0", build: 2, mcp: [] });
+
+    const i1 = await callDev(fx, "developer/install", { package: v1 });
+    assert.equal(i1.ok, true, JSON.stringify(i1));
+    assert.equal(i1.value.mcp.ok, true, JSON.stringify(i1.value.mcp));
+    assert.deepEqual(i1.value.mcp.removed, []);
+    assert.deepEqual(i1.value.mcp.skipped, []);
+
+    const i2 = await callDev(fx, "developer/install", { package: v2 });
+    assert.equal(i2.ok, true, JSON.stringify(i2));
+    assert.equal(i2.value.mcp.ok, true, JSON.stringify(i2.value.mcp));
+    assert.deepEqual(i2.value.mcp.removed, []);
+    assert.deepEqual(i2.value.mcp.skipped, []);
+
+    assert.equal(store.calls.delete.length, 0, "无旧记录时不产生清理调用（不重复清理）");
+    assert.equal(service.calls.setEnabled.length, 0, "无连接可断");
+    assert.equal(service.calls.connect.length, 0);
+  } finally {
+    try { fx.identity.close(); } catch { /* ignore */ }
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
+
+test("⑨ developer-service：回滚到无声明版本同样走清理路径（重算计数真实）", async () => {
+  const store = makeStore();
+  const service = makeService(store);
+  const registry = createAppManagedMcpRegistry({ connections: makePort(store, service), appState: { isEnabled: () => true } });
+  const fx = openBundle(registry);
+  try {
+    const v1 = buildPackage({ version: "1.0.0", build: 1, mcp: [] });
+    const v2 = buildPackage({ version: "2.0.0", build: 2, mcp: [{ id: "echo", name: "回显", serverKey: "openarc-test-echo", autoStart: true }] });
+
+    const i1 = await callDev(fx, "developer/install", { package: v1 });
+    assert.equal(i1.ok, true, JSON.stringify(i1));
+    const i2 = await callDev(fx, "developer/install", { package: v2 });
+    assert.equal(i2.ok, true, JSON.stringify(i2));
+    assert.deepEqual([...store.rows.keys()], ["echo"]);
+
+    const rb = await callDev(fx, "developer/rollback", { appId: "dev-demo" });
+    assert.equal(rb.ok, true, JSON.stringify(rb));
+    assert.equal(rb.value.version, "1.0.0");
+    assert.deepEqual([...store.rows.keys()], [], "回滚到无声明版本必须清掉托管记录");
+    assert.deepEqual(rb.value.mcp.removed, ["echo"]);
+    assert.ok(service.calls.setEnabled.some((call) => call.connectionId === "echo" && call.enabled === false), "旧连接必须先断开");
+
+    // 重算痕迹：app.mcp.sync 的 removed 计数不再恒为 0。
+    const events = fx.identity.connection.prepare("SELECT event_type AS type, detail FROM app_runtime_events WHERE app_id='dev-demo' ORDER BY created_at").all();
+    const sync = events.find((item) => item.type === "app.mcp.sync");
+    assert.ok(sync, JSON.stringify(events.map((item) => item.type)));
+    const detail = JSON.parse(sync.detail);
+    assert.equal(detail.trigger, "rollback");
+    assert.equal(detail.removed, 1, "回滚重算的清理计数必须真实");
+  } finally {
+    try { fx.identity.close(); } catch { /* ignore */ }
+    fs.rmSync(fx.dir, { recursive: true, force: true });
+  }
+});
