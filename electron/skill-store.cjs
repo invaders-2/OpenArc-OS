@@ -3,7 +3,7 @@
  * B4a1 · 技能目录与存储（CJS 移植）。
  *
  * 来源：server/skills.ts:1-703（技能目录 / skills.json 持久化 / Agent 工具聚合 / provider 选型）。
- * 执行器部分（saveImagesToFs / runSkill / runProcedureSkill 等，skills.ts:870 之后）属后续批次，本文件不含。
+ * 执行器部分（saveImagesToFs / runSkill / runProcedureSkill 等，skills.ts:870 之后）已由 B4a2 electron/skill-runner.cjs 落地；本文件不含执行器，只含目录 / 存储 / 选型。
  *
  * 逐字对应：
  *   · SkillDef                skills.ts:53-75
@@ -30,7 +30,8 @@
  *          provider.models.filter((model) => isApiModelAllowed(...))。因 apiQuota 不存在，改为不过滤
  *          （等价于全部允许），已在对应行标注。
  *   · cloudEntitlement（权益 / 会员门禁）在 skills.ts 中未被本区间引用，本文件同样不引入。
- *   · 其余 dxosProtocol 调用集中在执行器段（submitDxosAiJob 等，skills.ts:1401 起），属后续批次，不在 B4a1。
+ *   · 其余 dxosProtocol 调用集中在执行器段（submitDxosAiJob 等，skills.ts:1401 起）：执行器已在 B4a2
+ *     electron/skill-runner.cjs；该云端段按 OUT 整体删除（见 skill-runner.cjs 头部记录），本文件不含。
  *
  * 【依赖注入】按 B4 架构决策，后续批次能力一律通过注入适配器接入，未注入返回结构化错误：
  *   · fs.ts 虚拟文件树属 B6、library 属 B5、开发者 App 属 B7 —— 本文件不 import 也不使用；

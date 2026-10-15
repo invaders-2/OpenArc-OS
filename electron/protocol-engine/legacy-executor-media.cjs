@@ -44,7 +44,7 @@
  *   4. modelscope：editModelScopeImages — B7e2 端口（electron/plugin-modelscope.cjs）
  *   5. agnes 原生适配：generateAgnesVideos / editAgnesImages — B7e3 端口（electron/plugin-agnes.cjs）；
  *      插件关闭 / 未注入端口时结构化拒绝
- *   6. apiQuota 云计费（apiQuota.ts:280 withDirectApiQuota）未移植：本模块只执行上游 *Unmetered 路径，
+ *   6. apiQuota 云计费（apiQuota.ts:280 withDirectApiQuota）属 OUT，未移植：本模块只执行上游 *Unmetered 路径，
  *      不伪造预扣/结算；需要计费门禁的调用方请在调用前使用 electron/dxos-foundation-quota.cjs 自行预扣/结算。
  *   7. sharp 仅惰性 require（在 W4b legacy-executor-images.cjs 的 prepareApibEditInputs 内），未写入 package.json；
  *      缺失时返回结构化错误（见 BATCH.sharp）。

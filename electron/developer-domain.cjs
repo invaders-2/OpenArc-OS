@@ -35,10 +35,12 @@
  *   Agent 动作 / 危险路径全部走 electron/developer-canvas-manifest.cjs 的逐字移植校验，
  *   通过才接受；不通过按具体原因结构化拒绝（见 normalizeCanvasDeclaration）。
  *
- * 未移植项（逐条登记，待后续按需登记）：
- *   · developerOAuth.ts  开发者 OAuth / PKCE 回调（对应上方 oauth 字段的 fail closed）
- *   · src/apps/canvas/builtinCanvasNodes.ts 内置节点端口定义：模板连线引用 builtin.* 时
- *     端口兼容无法验证，只跳过该条检查（见 developer-canvas-manifest.cjs 顶部说明）。
+ * 未落地项（逐条登记，均为产品决定 / OUT，不是待办）：
+ *   · developerOAuth.ts  开发者 OAuth / PKCE 回调：产品决定不开放，oauth 字段出现即
+ *     DEVELOPER_ERR_MANIFEST_FIELD_REJECTED（fail closed），不改成"收下不实现"。
+ * 已落地（B7x）：src/apps/canvas/builtinCanvasNodes.ts 内置节点端口定义 →
+ *   electron/developer-canvas-builtins.cjs；模板清单的 builtin.* 引用与插件节点同一口径
+ *   做存在性 / 端口兼容校验，不再跳过（见 developer-canvas-manifest.cjs 顶部说明）。
  * 已落地（B7e3，本文件仍零引用）：
  *   · agnes.ts / agnesEndpoint.ts → electron/plugin-agnes.cjs，注册为可选插件 agnes（integration/agnes/*）
  *     与 legacy 端口 generateAgnesImages / editAgnesImages / generateAgnesVideos；
@@ -445,8 +447,9 @@ function normalizeCanvasDeclaration(value, files, pluginId) {
       throw createDeveloperError(DEVELOPER_ERR_MANIFEST_INVALID, filePath + " 校验失败：" + String((error && error.message) || error), { field: "canvas", reason: (error && error.canvasCode) || "CANVAS_NODE_MANIFEST_INVALID" });
     }
   }
-  // 模板清单只拿插件节点定义做存在性 / 端口兼容判定；builtin.* 的内置端口定义本仓未移植，
-  // 由 canvasManifest 内部跳过"无法验证"的检查（不放宽成兼容）。
+  // 模板清单把插件节点定义交给 canvasManifest；builtin.* 的内置端口定义已落地到
+  // electron/developer-canvas-builtins.cjs，canvasManifest 内部合成 allDefinitions，
+  // builtin.* 与插件节点同一口径做存在性 / 端口兼容校验，不再跳过"无法验证"的连线。
   for (const filePath of templateManifests) {
     try {
       canvasManifest.validateCanvasTemplateManifest(parseManifest(filePath, "templateManifests"), pluginId, definitions);

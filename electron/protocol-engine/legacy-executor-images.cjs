@@ -46,7 +46,7 @@
  *      - modelscope（protocols.ts:5304）→ B7e2 端口（electron/plugin-modelscope.cjs）；插件关闭 / 未注入端口即结构化拒绝
  *      - runninghub（protocols.ts:5306）→ B7e2 端口（electron/plugin-runninghub.cjs）；插件关闭 / 未注入端口即结构化拒绝
  *      - midjourney（protocols.ts:5309）改由 legacy-executor-media.cjs 的 generateMidjourneyImages 接线（W6b）
- *   3. apiQuota 云计费（apiQuota.ts:280 withDirectApiQuota）属云计费批次，尚未移植：
+ *   3. apiQuota 云计费（apiQuota.ts:280 withDirectApiQuota）属 OUT（产品决定不接云计费），未移植：
  *      generateImages 不伪造准入/计费，直接执行 unmetered 路径；
  *      接入方需在调用本函数之前自行完成准入与计费。
  *   4. sharp 仅惰性 require（见 loadSharp），且未写入 package.json；
@@ -68,7 +68,7 @@ const LEGACY_DEPENDENCY_UNAVAILABLE = "LEGACY_DEPENDENCY_UNAVAILABLE";
 /** CLI 协议族端口未注入时的结构化拒绝前缀（B7e2 后续；注入/调用见 electron/legacy-cli-ports.cjs）。 */
 const CLI_PORT_DETAIL = "CLI 端口未注入（需安装对应 CLI，由主进程经 electron/legacy-cli-ports.cjs 注入 cliJimeng/cliCodex/cliGemini）";
 
-/** 结构化「依赖未移植 / 端口未注入」结果（硬约束 8）。 */
+/** 结构化「依赖不可用 / 端口未注入」结果（硬约束 8）。 */
 function unavailable(detail) {
   return { ok: false, error: LEGACY_DEPENDENCY_UNAVAILABLE, detail };
 }

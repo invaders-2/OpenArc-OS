@@ -366,9 +366,9 @@ function parseLingxingGatewayTool(searchText, toolName) {
 /**
  * 真实适配器 1：包 electron/controlled-tool-proxy.cjs 的 propose()（READ 路由）。
  *
- * 注意（必须如实告知上层）：源 MCP 工具在本仓 ToolRegistry 里还没有 contract，
- * 因此 proxy.propose() 现在会以 Registry 解析失败收敛为 DENIED —— 这是 fail-closed，
- * 不是成功。等 MCP 工具 contract 进入 Registry（后续批次）后本适配器即可放行。
+ * 注意（必须如实告知上层）：MCP 工具 contract 已由 electron/mcp-tool-contract.cjs（B4e）在目录
+ * 快照时幂等登记进 ToolRegistry（组装见 mcp-agent-bridge.cjs，接线见 main.cjs）；未登记的工具
+ * proxy.propose() 会以 Registry 解析失败收敛为 DENIED —— 这是 fail-closed，不是成功。
  *
  * @param {object} opts
  * @param {object} opts.proxy   ControlledToolProxy 实例（必须提供）

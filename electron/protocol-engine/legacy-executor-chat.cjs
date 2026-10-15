@@ -16,7 +16,7 @@
  *   - callChat:3647      assertApiModelAccess(...)
  *   - streamChat:3746    assertApiModelAccess(...)
  *   - chatWithTools:3927 assertApiModelAccess(...)
- *   withDirectApiQuota 不属本文件（在 image/video 生成路径，本批未移植）。
+ *   withDirectApiQuota 不属本文件（在 image/video 生成路径；云计费属 OUT，未移植）。
  *
  * 以下分支在端口/实现未就绪时返回结构化错误，不做假实现：
  *   { ok:false, error:"LEGACY_DEPENDENCY_UNAVAILABLE", detail:"<缺什么>" }

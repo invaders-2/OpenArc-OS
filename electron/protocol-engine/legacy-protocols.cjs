@@ -15,8 +15,10 @@
  *      （protocolUpdates.ts），本地化不联网，故只保留内置规则。
  *   4) dx-protocol/v2 查询 getProtocolV2（源 :3391/:3400/:3597）已按源接回：在函数内惰性
  *      require('./repository.cjs')，避免与 v2 仓库的模块初始化顺序耦合。
- *   5) 运行时外部依赖（runninghub/modelscope/agnes/cliTools/agentCliTools/sharp/dataPath）
- *      未移植；executor.adapter 仅作为数据原样保留，不加载本地代码。
+ *   5) 运行时外部依赖（runninghub/modelscope/agnes/cliTools/agentCliTools/sharp/dataPath）不在本文件加载：
+ *      executor.adapter 仅作为数据原样保留；这些依赖已由 B7e2/B7e3/B3 落地为端口/适配器
+ *      （plugin-runninghub.cjs / plugin-modelscope.cjs / plugin-agnes.cjs / legacy-cli-ports.cjs /
+ *      agent-cli-tools.cjs / agent-cli-bridge.cjs），由执行器按注入端口调用，未注入即结构化拒绝。
  *   6) 自定义协议 customProtocolStore 已移植到 legacy-custom-protocol-store.cjs（源 :2984-3181）：
  *      旧版扁平仓库 <userData>/dxos/custom-protocols.json 在列表/详情读取时惰性装载进本文件的
  *      PROTOCOLS / PROVIDER_PROTOCOLS，详情列表按 store 如实标注 origin（builtin / custom）。

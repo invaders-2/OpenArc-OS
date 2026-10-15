@@ -31,7 +31,8 @@
  *   · skillPacks.ts:13 dataPaths.ts dataPath —— 用 B1 dxos-foundation-paths.cjs:41 resolveDxosPaths
  *     解析 <userData>/dxos/skill-packs 与 <userData>/dxos/bundled-skill-packs.json。
  *   · skillPacks.ts:14 agentWorkspaceSkills.ts registerAgentWorkspace /
- *     deleteAgentWorkspaceProfiles(+ForPack) —— 属后续批次（B7 开发者 App），经注入适配器接入。
+ *     deleteAgentWorkspaceProfiles(+ForPack) —— 已由 B4c electron/skill-workspace.cjs 落地，
+ *     经注入适配器接入（skill-service.cjs 装配 agentWorkspace）；未注入时结构化拒绝。
  *   · 源文件未 import dxosProtocol / apiQuota / cloudEntitlement：无云端 AI 任务、无计费、
  *     无权益门禁代码需要移除（本批 OUT 项逐条已在上方 registry 注明）。
  *   · ZIP 解压只用 node:zlib.inflateRawSync；落盘只经注入 fsImpl（默认 node:fs）。
@@ -103,7 +104,7 @@ function defaultDeps() {
     fsImpl: null,            // 可选：node:fs 替身
     skillStore: null,        // B4a electron/skill-store.cjs 导出集合
     providerAdapter: null,   // B2：{ call } 或 { callChat }
-    agentWorkspace: null,    // 后续批次 B7：registerAgentWorkspace / deleteAgentWorkspaceProfiles(+ForPack)
+    agentWorkspace: null,    // 已实现（B4c skill-workspace.cjs）：registerAgentWorkspace / deleteAgentWorkspaceProfiles(+ForPack)
     runner: null,            // 本机子进程（在线安装 / docker）；{ spawn } 或 { run }
     clock: () => Date.now(),
     idFactory: () => crypto.randomUUID(),
