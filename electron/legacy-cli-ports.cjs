@@ -2,10 +2,11 @@
  * B7e2 后续 · cli:jimeng / cli:codex / cli:gemini 的 legacy 执行器端口实现。
  *
  * 背景（只读源：server/protocols.ts）：
- *   B2 把 protocols.ts 里三个 CLI 协议的执行分支留成结构化占位，一律返回
- *   { ok:false, error:"LEGACY_DEPENDENCY_UNAVAILABLE", detail:"cliTools / agentCliTools 批次未移植" }。
- *   B3 已交付 electron/agent-cli-tools.cjs（即梦）与 electron/agent-cli-bridge.cjs（codex / gemini /
- *   antigravity），本文件把它们按源调用点适配成 3 个 legacy 执行器端口（白名单见 legacy-executor-ports.cjs）：
+ *   B2 把 protocols.ts 里三个 CLI 协议的执行分支留成结构化占位
+ *   { ok:false, error:"LEGACY_DEPENDENCY_UNAVAILABLE", detail:... }。B3 已交付 electron/agent-cli-tools.cjs（即梦）
+ *   与 electron/agent-cli-bridge.cjs（codex / gemini / antigravity），本文件把它们按源调用点适配成 3 个 legacy
+ *   执行器端口（白名单见 legacy-executor-ports.cjs）；检测到对应 CLI 时由主进程注入，未注入（CLI 未安装）时
+ *   执行器才回结构化 LEGACY_DEPENDENCY_UNAVAILABLE。
  *
  *     cliJimeng(operation, payload)
  *       · "image.generate" 源 protocols.ts:5287-5294 generateJimengImage

@@ -12,7 +12,8 @@
  *      明确拒绝 stream 时降级 stream=false）；
  *   4. describeImage 的 OpenAI 视觉与 Anthropic 视觉两种 body；
  *   5. fetchModelCatalog / fetchModels 解析 openai / anthropic / gemini 三种模型列表；
- *   6. 未移植依赖（cli:codex / runninghub / agnes）返回结构化 LEGACY_DEPENDENCY_UNAVAILABLE。
+ *   6. 端口未注入依赖（cli:codex / runninghub 对话 / runninghub 模型目录 / agnes 模型目录）返回结构化
+ *      LEGACY_DEPENDENCY_UNAVAILABLE，detail 指明「端口未注入」，不写「未移植」。
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -374,8 +375,8 @@ test("fetchModelCatalog：minimax 不发请求直接返回内置目录", async (
   assert.deepEqual(result, [{ model: "MiniMax-H3", type: "llm" }]);
 });
 
-// ── 6. 未移植依赖：结构化错误，不做假实现 ────────────────────────────
-test("未移植依赖返回 LEGACY_DEPENDENCY_UNAVAILABLE（cli:codex / runninghub）", async () => {
+// ── 6. 端口未注入依赖：结构化错误，不做假实现 ────────────────────────
+test("端口未注入依赖返回 LEGACY_DEPENDENCY_UNAVAILABLE（cli:codex / runninghub / agnes）", async () => {
   const cli = await chat.callChat(provider("http://127.0.0.1:1", "cli:codex"), "gpt-5.5", { prompt: "hi" });
   assert.equal(cli.ok, false);
   assert.equal(cli.error, "LEGACY_DEPENDENCY_UNAVAILABLE");
@@ -388,9 +389,16 @@ test("未移植依赖返回 LEGACY_DEPENDENCY_UNAVAILABLE（cli:codex / runningh
   const rhCatalog = await chat.fetchModelCatalog(provider("http://127.0.0.1:1", "runninghub"));
   assert.equal(rhCatalog.ok, false);
   assert.equal(rhCatalog.error, "LEGACY_DEPENDENCY_UNAVAILABLE");
+  assert.match(rhCatalog.detail, /runninghub/);
+  // 端口未注入时的 detail 必须准确，不得再写「未移植」（启用态见 dxos-integration-runninghub.test.mjs）
+  assert.match(rhCatalog.detail, /端口未注入/);
+  assert.doesNotMatch(rhCatalog.detail, /未移植/);
 
   const agnes = await chat.fetchModelCatalog(provider("http://127.0.0.1:1", "agnes"));
   assert.equal(agnes.ok, false);
   assert.equal(agnes.error, "LEGACY_DEPENDENCY_UNAVAILABLE");
   assert.match(agnes.detail, /agnes/);
+  // 端口未注入时的 detail 必须准确，不得再写「未移植」（启用态见 dxos-integration-agnes.test.mjs）
+  assert.match(agnes.detail, /端口未注入/);
+  assert.doesNotMatch(agnes.detail, /未移植/);
 });

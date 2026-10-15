@@ -36,12 +36,12 @@
  *   editOpenAiCompatibleGenerationImages / generateApimartImages / generateGeminiImages /
  *   generateVolcengineImages / requestZkkiImages / requestGrok2ApiImages
  *
- * 未移植依赖（一律返回 { ok:false, error:"LEGACY_DEPENDENCY_UNAVAILABLE", detail:"<属哪个批次>" }，不做假实现）：
+ * 端口未注入依赖（一律返回 { ok:false, error:"LEGACY_DEPENDENCY_UNAVAILABLE", detail:"<缺什么、怎么补>" }，不做假实现）：
  *   1. cliTools 原生适配（cli:jimeng / jimeng-cli）：generateJimengVideo / generateJimengImage —— B7e2 后续：
  *      CLI 端口已注入则调用，未注入即结构化拒绝（electron/legacy-cli-ports.cjs）
  *   2. agentCliTools 原生适配（cli:codex / cli:gemini）：editCodexImage / editGeminiCliImage —— 同上
- *   3. runninghub 原生适配：generateRunningHubVideos / editRunningHubImages — 批次：runninghub（B7e2 端口）
- *   4. modelscope 原生适配：editModelScopeImages — 批次：modelscope（B7e2 端口）
+ *   3. runninghub：generateRunningHubVideos / editRunningHubImages — B7e2 端口（electron/plugin-runninghub.cjs）
+ *   4. modelscope：editModelScopeImages — B7e2 端口（electron/plugin-modelscope.cjs）
  *   5. agnes 原生适配：generateAgnesVideos / editAgnesImages — B7e3 端口（electron/plugin-agnes.cjs）；
  *      插件关闭 / 未注入端口时结构化拒绝
  *   6. apiQuota 云计费（apiQuota.ts:280 withDirectApiQuota）未移植：本模块只执行上游 *Unmetered 路径，
@@ -73,7 +73,7 @@ const legacyExecutorPorts = require("../legacy-executor-ports.cjs");
 
 const LEGACY_DEPENDENCY_UNAVAILABLE = "LEGACY_DEPENDENCY_UNAVAILABLE";
 
-/** 结构化「依赖未移植」结果（硬约束 8）。 */
+/** 结构化「依赖不可用」结果（硬约束 8）。 */
 function unavailable(detail) {
   return { ok: false, error: LEGACY_DEPENDENCY_UNAVAILABLE, detail };
 }
@@ -81,11 +81,11 @@ function unavailable(detail) {
 /** CLI 协议族端口未注入时的结构化拒绝前缀（B7e2 后续；注入/调用见 electron/legacy-cli-ports.cjs）。 */
 const CLI_PORT_DETAIL = "CLI 端口未注入（需安装对应 CLI，由主进程经 electron/legacy-cli-ports.cjs 注入 cliJimeng/cliCodex/cliGemini）";
 
-/** 各未移植批次的标签，供 detail 使用。 */
+/** 可选插件端口未注入时的说明，供 detail 使用（只写「缺什么、怎么补」，不再写「未移植」）。 */
 const BATCH = {
-  runninghub: "runninghub 原生适配批次（未移植）",
-  modelscope: "modelscope 原生适配批次（未移植）",
-  agnes: "agnes 原生适配批次（未移植）",
+  runninghub: "runninghub 端口未注入：需启用 runninghub 插件并配置凭据（由主进程经 electron/plugin-service.cjs 注入）",
+  modelscope: "modelscope 端口未注入：需启用 modelscope 插件并配置凭据（由主进程经 electron/plugin-service.cjs 注入）",
+  agnes: "agnes 端口未注入：需启用 agnes 插件并配置凭据（由主进程经 electron/plugin-service.cjs 注入）",
   sharp: "sharp 惰性可选依赖（未安装；不得写入 package.json）",
 };
 

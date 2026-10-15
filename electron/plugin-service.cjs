@@ -346,7 +346,9 @@ function createPluginBundle(options = {}) {
    * B7e2/B7e3：把 RunningHub / ModelScope / Agnes 接进 B2 legacy 执行器的注入端口。
    *   · 默认关闭 —— 端口已注册但插件未启用时，端口仍返回结构化 INTEGRATION_UNAVAILABLE；
    *   · options.installLegacyPorts === false 时不注册，legacy 执行器保持 B2 的 LEGACY_DEPENDENCY_UNAVAILABLE；
-   *   · Agnes 端口直通 plugin-agnes.cjs 的真实实现（generateAgnesImages / editAgnesImages / generateAgnesVideos）；
+   *   · Agnes 端口直通 plugin-agnes.cjs 的真实实现（generateAgnesImages / editAgnesImages / generateAgnesVideos /
+   *     fetchAgnesModelCatalog）；模型目录成功时还原成 legacy 约定的目录数组；
+   *   · RunningHub 模型目录 fetchRunningHubModelCatalog 与 Agnes 同一适配（复用插件既有注册表定义）；
    *   · RunningHub 对话 / 图片理解（callRunningHubChat / describeRunningHubImage）把插件返回的
    *     integration 形状还原成 legacy 执行器约定（对话 { text, latencyMs, raw }、图片理解 string）。
    */
@@ -378,6 +380,21 @@ function createPluginBundle(options = {}) {
     }),
     generateModelScopeImages: gateLegacyPort("modelscope", modelscope.generateModelScopeImages),
     editModelScopeImages: gateLegacyPort("modelscope", modelscope.editModelScopeImages),
+    // B7e3 后续：Agnes 模型目录（源 protocols.ts:6763-6794 的 openai 目录路径）。插件方法回 integration 形状
+    // （{ ok:true, value:{ items } }），这里还原成 legacy 执行器约定（fetchModelCatalog 成功直接返回目录数组）；
+    // 「插件未启用」「缺凭据」由闸门与插件方法各自给出准确 detail。
+    fetchAgnesModelCatalog: gateLegacyPort("agnes", async (provider, timeoutMs, transport) => {
+      const result = await agnes.fetchAgnesModelCatalog(provider, timeoutMs, transport);
+      if (result && result.ok === false) return result;
+      return result && result.value && Array.isArray(result.value.items) ? result.value.items : [];
+    }),
+    // B7e3 后续：RunningHub 模型目录（同一适配）。插件方法回 integration 形状 { ok:true, value:{ items } }，
+    // 这里还原成 legacy 执行器约定（fetchModelCatalog 成功直接返回目录数组）；模型列表复用插件既有注册表定义。
+    fetchRunningHubModelCatalog: gateLegacyPort("runninghub", async (provider, timeoutMs, transport) => {
+      const result = await runninghub.fetchRunningHubModelCatalog(provider, timeoutMs, transport);
+      if (result && result.ok === false) return result;
+      return result && result.value && Array.isArray(result.value.items) ? result.value.items : [];
+    }),
     generateAgnesImages: gateLegacyPort("agnes", agnes.generateAgnesImages),
     editAgnesImages: gateLegacyPort("agnes", agnes.editAgnesImages),
     generateAgnesVideos: gateLegacyPort("agnes", agnes.generateAgnesVideos),

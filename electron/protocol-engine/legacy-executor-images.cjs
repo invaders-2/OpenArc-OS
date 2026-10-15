@@ -37,14 +37,14 @@
  *   1. 所有网络请求统一走 electron/protocol-engine/transport.cjs 的 transport.fetch；
  *      轮询等待走可注入 clock（默认 transport.cjs 的 defaultProtocolClock），
  *      替代源里直接使用的全局 fetch / setTimeout / Date.now。
- *   2. 依赖尚在其它批次、不得做假实现的协议分支返回结构化错误：
- *        { ok:false, error:"LEGACY_DEPENDENCY_UNAVAILABLE", detail:"<属哪个批次>" }
+ *   2. 端口未注入 / 依赖不可用、不得做假实现的协议分支返回结构化错误：
+ *        { ok:false, error:"LEGACY_DEPENDENCY_UNAVAILABLE", detail:"<缺什么、怎么补>" }
  *      - cli:jimeng / jimeng-cli、cli:codex / codex-cli、cli:gemini / gemini-cli
  *        （protocols.ts:5287-5302）→ B7e2 后续：CLI 端口已注入则调用，未注入即结构化拒绝
  *        （electron/legacy-cli-ports.cjs）
  *      - agnes（protocols.ts:5303）→ B7e3 端口（electron/plugin-agnes.cjs）；插件关闭 / 未注入端口即结构化拒绝
- *      - modelscope（protocols.ts:5304）→ modelscope 原生适配批次（B7e2 端口）
- *      - runninghub（protocols.ts:5306）→ runninghub 原生适配批次（B7e2 端口）
+ *      - modelscope（protocols.ts:5304）→ B7e2 端口（electron/plugin-modelscope.cjs）；插件关闭 / 未注入端口即结构化拒绝
+ *      - runninghub（protocols.ts:5306）→ B7e2 端口（electron/plugin-runninghub.cjs）；插件关闭 / 未注入端口即结构化拒绝
  *      - midjourney（protocols.ts:5309）改由 legacy-executor-media.cjs 的 generateMidjourneyImages 接线（W6b）
  *   3. apiQuota 云计费（apiQuota.ts:280 withDirectApiQuota）属云计费批次，尚未移植：
  *      generateImages 不伪造准入/计费，直接执行 unmetered 路径；
@@ -844,18 +844,18 @@ async function generateImagesUnmetered(provider, model, params, timeoutMs, trans
   if (rawProto === "agnes") {
     const port = legacyExecutorPorts.getLegacyExecutorPort("generateAgnesImages");
     if (typeof port === "function") return port(provider, model, params, timeoutMs, net, clock);
-    return unavailable("agnes 原生适配批次：generateAgnesImages（protocols.ts:5303）未移植");
+    return unavailable("agnes 端口未注入：需启用 agnes 插件并配置凭据（由主进程经 electron/plugin-service.cjs 在依赖就绪时注入 generateAgnesImages）；未注入时回 LEGACY_DEPENDENCY_UNAVAILABLE（源 protocols.ts:5303）");
   }
   if (rawProto === "modelscope") {
     const port = legacyExecutorPorts.getLegacyExecutorPort("generateModelScopeImages");
     if (typeof port === "function") return port(provider, model, params, timeoutMs, net, clock);
-    return unavailable("modelscope 原生适配批次：generateModelScopeImages（protocols.ts:5304）未移植");
+    return unavailable("modelscope 端口未注入：需启用 modelscope 插件并配置凭据（由主进程经 electron/plugin-service.cjs 在依赖就绪时注入 generateModelScopeImages）；未注入时回 LEGACY_DEPENDENCY_UNAVAILABLE（源 protocols.ts:5304）");
   }
   if (rawProto === "volcengine") return generateVolcengineImages(provider, model, params, [], timeoutMs, net);
   if (rawProto === "runninghub") {
     const port = legacyExecutorPorts.getLegacyExecutorPort("generateRunningHubImages");
     if (typeof port === "function") return port(provider, model, params, timeoutMs, net, clock);
-    return unavailable("runninghub 原生适配批次：generateRunningHubImages（protocols.ts:5306）未移植");
+    return unavailable("runninghub 端口未注入：需启用 runninghub 插件并配置凭据（由主进程经 electron/plugin-service.cjs 在依赖就绪时注入 generateRunningHubImages）；未注入时回 LEGACY_DEPENDENCY_UNAVAILABLE（源 protocols.ts:5306）");
   }
   if (rawProto === "xai" || rawProto === "grok2api") return requestGrok2ApiImages(provider, model, params, [], timeoutMs, net);
   if (rawProto === "zkki" || rawProto === "zkki-model") return requestZkkiImages(provider, model, params, [], timeoutMs, net);

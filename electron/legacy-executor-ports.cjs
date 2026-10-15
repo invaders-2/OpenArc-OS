@@ -1,5 +1,7 @@
 /**
- * B7e2 · legacy 执行器注入端口（B2 未移植的 runninghub / modelscope / agnes 分支的执行入口）。
+ * B7e2 · legacy 执行器注入端口（runninghub / modelscope / agnes 分支的执行入口；实现见 electron/plugin-runninghub.cjs /
+ * electron/plugin-modelscope.cjs / electron/plugin-agnes.cjs，由 electron/plugin-service.cjs 在插件启用且依赖就绪时注入；
+ * 未注入则执行器仍回结构化 { ok:false, error:"LEGACY_DEPENDENCY_UNAVAILABLE", detail:"<缺什么>" }）。
  *
  * 背景（只读源：electron/protocol-engine/legacy-executor-images.cjs / legacy-executor-media.cjs）：
  *   B2 把 protocols.ts 的图片 / 视频 / 图像编辑里 runninghub / modelscope / agnes 三条协议分支
@@ -17,6 +19,8 @@
  *   editRunningHubImages(provider, model, params, inputs, timeoutMs, transport, clock)
  *   callRunningHubChat(provider, model, input, params, timeoutMs, transport)                  成功 { text, latencyMs, raw }
  *   describeRunningHubImage(provider, model, dataUrl, prompt, timeoutMs, transport)           成功返回文本 string
+ *   fetchAgnesModelCatalog(provider, timeoutMs, transport)                                    成功返回目录数组 [{ model, ... }]
+ *   fetchRunningHubModelCatalog(provider, timeoutMs, transport)                               成功返回目录数组 [{ model, ... }]
  * 另有一组 CLI 协议族端口（B7e2 后续，实现见 electron/legacy-cli-ports.cjs），按「一个 CLI 一个端口」
  * 收敛，动作由第一个实参 operation 区分（image.generate / image.edit / video.generate / chat /
  * describeImage / models）：
@@ -50,6 +54,12 @@ const LEGACY_EXECUTOR_PORT_NAMES = Object.freeze([
   // 插件启用时由 electron/plugin-service.cjs 注入，未注入时执行器仍结构化拒绝）。
   "callRunningHubChat",
   "describeRunningHubImage",
+  // B7e3 后续：Agnes 模型目录（实现 plugin-agnes.cjs 的 fetchAgnesModelCatalog：base 归一 + 复用 openai 目录解析；
+  // 插件启用且凭据就绪时由 electron/plugin-service.cjs 注入，未启用 / 缺凭据时端口返回准确 detail）。
+  "fetchAgnesModelCatalog",
+  // B7e3 后续：RunningHub 模型目录（实现 plugin-runninghub.cjs 的 fetchRunningHubModelCatalog：复用既有注册表 /
+  // 模型定义 fetchRunningHubModelsArray 与 listModels，不复制一份；与 agnes 同一注入与适配路径）。
+  "fetchRunningHubModelCatalog",
   // B7e2 后续：CLI 协议族端口（一个 CLI 一个，动作由 operation 形参区分；实现见 legacy-cli-ports.cjs）。
   "cliJimeng",
   "cliCodex",
@@ -137,9 +147,11 @@ function clearLegacyExecutorPorts(names) {
  * 集成方法返回源协议形状（生成 { images, raw } / { videos, raw }，失败 { ok:false, error, detail }），
  * 因此这里保持原样转发，不做形状转换。
  *
- * 注意（B7e3 后续）：RunningHub 的 callRunningHubChat / describeRunningHubImage 端口名虽与插件方法同名，
- * 但插件方法返回 integration 形状（{ ok:true, value }），必须经 electron/plugin-service.cjs 适配成
- * legacy 形状后再注册；不要用本函数直接绑定这两个端口（会把 integration 形状透传给 legacy 执行器）。
+ * 注意（B7e3 后续）：RunningHub 的 callRunningHubChat / describeRunningHubImage 与 Agnes / RunningHub 的
+ * 模型目录端口（fetchAgnesModelCatalog / fetchRunningHubModelCatalog）端口名虽与插件方法同名，
+ * 但插件方法返回 integration 形状（{ ok:true, value } / { ok:true, value:{ items } }），必须经
+ * electron/plugin-service.cjs 适配成 legacy 形状后再注册；不要用本函数直接绑定这些端口
+ * （会把 integration 形状透传给 legacy 执行器）。
  */
 function portsFromIntegration(integration) {
   const result = {};

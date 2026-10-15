@@ -30,6 +30,8 @@
 "use strict";
 
 const { INTEGRATION_ERR_UNAVAILABLE, INTEGRATION_ERR_INVALID_INPUT } = require("./plugin-registry.cjs");
+// agnes 模型目录复用 legacy 协议引擎的协议表声明（endpoint / kind）与 openai 目录解析，不再复制一份。
+const { PROTOCOLS, parseModelCatalog } = require("./protocol-engine/legacy-protocols.cjs");
 
 // agnesEndpoint.ts:1-2 逐字搬运
 const AGNES_GLOBAL_API_BASE_URL = "https://apihub.agnes-ai.com";
@@ -368,6 +370,38 @@ function createAgnesIntegration(options = {}) {
     }
   }
 
+  /**
+   * agnes 模型目录：源 protocols.ts:6763-6794 的通用目录路径（PROTOCOLS.agnes.models.kind = "openai"）。
+   *   · endpoint / kind 以协议表为唯一真值，解析复用 parseModelCatalog（不复制一份）；
+   *   · base 归一复用本文件 endpoint()（agnesEndpoint.ts:5-13）；
+   *   · 未注入 fetch / 未配置 Key → 结构化不可用；网络经注入 transport。
+   * 返回沿用插件约定：成功 { ok:true, value:{ items } }，失败 { ok:false, error, detail }。
+   */
+  async function fetchAgnesModelCatalog(provider, timeoutMs, transport) {
+    const net = resolveFetch(transport);
+    if (typeof net !== "function") return unavailable("未注入 fetch（网络访问在主进程统一开关），Agnes 模型目录不可用");
+    const key = resolveApiKey(provider);
+    if (!key) return unavailable("未配置 Agnes API Key：请在「集成 · Agnes」保存，或为 provider 提供 api_key");
+    const models = PROTOCOLS.agnes && PROTOCOLS.agnes.models;
+    if (!models || !models.endpoint) return unavailable("协议表缺少 agnes.models 声明，Agnes 模型目录不可用");
+    const effectiveTimeout = Number.isFinite(timeoutMs) ? Number(timeoutMs) : 20000;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), effectiveTimeout);
+    try {
+      const response = await net(endpoint(provider && provider.base_url, models.endpoint), {
+        headers: authHeaders(Object.assign({}, provider, { api_key: key })),
+        signal: ctrl.signal,
+      });
+      const text = await response.text();
+      if (!response.ok) throw new Error("HTTP " + response.status + ": " + String(text).slice(0, 500));
+      const payload = JSON.parse(text);
+      return { ok: true, value: { items: parseModelCatalog(models.kind || "openai", payload) } };
+    } catch (error) {
+      if (ctrl.signal.aborted) return { ok: false, error: REQUEST_FAILED, detail: "Agnes 模型目录请求超时，请稍后重试。" };
+      return { ok: false, error: REQUEST_FAILED, detail: asStr((error && error.message) || error, 500) };
+    } finally { clearTimeout(timer); }
+  }
+
   return {
     credentialRef: CREDENTIAL_REF,
     constants: Object.freeze({
@@ -394,6 +428,7 @@ function createAgnesIntegration(options = {}) {
     generateAgnesImages,
     editAgnesImages,
     generateAgnesVideos,
+    fetchAgnesModelCatalog,
   };
 }
 

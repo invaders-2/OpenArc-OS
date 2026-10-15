@@ -34,6 +34,8 @@
  *   · integration/runninghub/submit          → submitRunningHubEntry
  *   · integration/runninghub/task/query      → queryRunningHubTask
  *   · integration/runninghub/upload          → uploadRunningHubAsset
+ *   · integration/runninghub/models          → listModels
+ *   · legacy 端口 fetchRunningHubModelCatalog（复用 listModels）由 electron/plugin-service.cjs 注入。
  *   本文件不再有"已实现但未暴露"的入口。
  *
  * OUT（不引入）：api.dx-os.com、云发布 / 更新、云端实时房间。
@@ -753,6 +755,17 @@ function createRunningHubIntegration(options = {}) {
     }
   }
 
+  /**
+   * runninghub 模型目录：源 protocols.ts:6763-6794 的通用目录路径（与 runninghub.ts:240-268 的列表投影同源）。
+   *   · 模型列表复用本文件既有的 fetchRunningHubModelsArray（站点 /models + GitHub 注册表 + LLM /models + 内置兜底），
+   *     不复制一份；端口名对齐 agnes 的 fetchAgnesModelCatalog；
+   *   · 未注入 fetch / 未配置 Key → 结构化不可用；网络经注入 transport。
+   * 返回沿用插件约定：成功 { ok:true, value:{ items } }，失败 { ok:false, error, detail }。
+   */
+  async function fetchRunningHubModelCatalog(provider, timeoutMs, transport) {
+    return listModels(provider, timeoutMs, transport);
+  }
+
 
   // runninghub.ts:270-278 逐字移植（LLM 关闭 stream；失败归一为结构化）
   async function callRunningHubChat(provider, model, input, params, timeoutMs, transport) {
@@ -893,6 +906,7 @@ function createRunningHubIntegration(options = {}) {
     editRunningHubImages,
     generateRunningHubVideos,
     listModels,
+    fetchRunningHubModelCatalog,
     callRunningHubChat,
     describeRunningHubImage,
     inspectRunningHubApp,

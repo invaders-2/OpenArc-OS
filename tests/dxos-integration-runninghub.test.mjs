@@ -8,7 +8,9 @@
  *   ④ 凭据走 credential-store（内存后端），只回掩码、不落明文；
  *   ⑤ B2 legacy 执行器端口：未注入 → LEGACY_DEPENDENCY_UNAVAILABLE；注入假端口 → 真的走到注入实现；
  *   ⑥ createPluginBundle 装配后启用 runninghub，legacy 图片执行器真的走新实现（不是仍返回依赖缺失）；
- *   ⑦ B7e3 后续：RunningHub 对话 / 图片理解 legacy 端口（callRunningHubChat / describeRunningHubImage）。
+ *   ⑦ B7e3 后续：RunningHub 对话 / 图片理解 legacy 端口（callRunningHubChat / describeRunningHubImage）；
+ *   ⑧ B7e3 后续：模型目录端口（fetchRunningHubModelCatalog）：未注入 / 未启用 / 缺凭据 → 准确 detail；
+ *      启用 + 凭据 → 真实目录（复用插件既有注册表 / 模型定义，本地 127.0.0.1 stub）。
  *
  * 只读源：server/runninghub.ts:1-700；electron/plugin-runninghub.cjs；electron/legacy-executor-ports.cjs。
  */
@@ -311,6 +313,71 @@ test("装配：启用 runninghub 后 legacy 对话 / 图片理解走插件实现
   assert.equal(descBody.messages[0].content[1].image_url.url, "data:image/png;base64,AA");
 });
 
+// ── ⑥c B7e3 后续：模型目录 legacy 端口（fetchRunningHubModelCatalog） ──────
+test("模型目录：未注入 / 未启用 / 缺凭据 → 准确 detail；启用 + 凭据 → 真实目录（本地 stub）", async () => {
+  clearLegacyExecutorPorts();
+  // 未注入端口：执行器回 LEGACY_DEPENDENCY_UNAVAILABLE，detail 指明「端口未注入」，不得再写「未移植」
+  const noPort = await chat.fetchModelCatalog({ base_url: "https://example.invalid", api_key: "k", protocol: "runninghub" });
+  assert.equal(noPort.ok, false);
+  assert.equal(noPort.error, "LEGACY_DEPENDENCY_UNAVAILABLE");
+  assert.match(noPort.detail, /runninghub/);
+  assert.match(noPort.detail, /端口未注入/);
+  assert.doesNotMatch(noPort.detail, /未移植/);
+
+  const stub = await startStub((url) => {
+    if (url.pathname === "/openapi/v2/models") {
+      return { body: { data: [{ name_en: "rh-real-chat", output_type: "chat", name_cn: "真实对话模型" }] } };
+    }
+    if (url.pathname === "/v1/models") {
+      return { body: { data: [{ id: "rh-llm-model" }] } };
+    }
+    return null;
+  });
+  const bundle = createPluginBundle({
+    userDataDir: tempDir(),
+    fetch,
+    credentials: memoryCredentialBackend(),
+    runninghubEndpoints: { baseUrl: stub.base, llm: stub.base + "/v1", registry: stub.base + "/registry.json" },
+  });
+
+  // 端口已注入但插件默认关闭 → detail 说清「插件未启用」，且不发网络请求
+  const disabled = await chat.fetchModelCatalog({ base_url: stub.base, api_key: "k", protocol: "runninghub" });
+  assert.equal(disabled.ok, false);
+  assert.equal(disabled.error, "INTEGRATION_UNAVAILABLE");
+  assert.match(disabled.detail, /默认关闭/);
+  assert.equal(stub.requests.length, 0, "未启用时不得发起网络请求");
+
+  // 启用但未配置凭据 → detail 说清「缺凭据」，且不发网络请求
+  assert.equal((await bundle.registry.enable("runninghub")).ok, true);
+  const noKey = await chat.fetchModelCatalog({ base_url: stub.base, protocol: "runninghub" });
+  assert.equal(noKey.ok, false);
+  assert.equal(noKey.error, "INTEGRATION_UNAVAILABLE");
+  assert.match(noKey.detail, /API Key/);
+  assert.equal(stub.requests.length, 0, "缺凭据时不得发起网络请求");
+
+  // 启用 + 凭据就绪 → 经注入 transport 拉取，返回插件既有注册表 / 模型定义的真实目录
+  const seen = [];
+  chat.setProtocolTransport({ fetch: async (url, options) => { seen.push(String(url)); return fetch(url, options); } });
+  try {
+    const saved = await bundle.execute("integration/runninghub/credentials/save", { apiKey: "RH-CATALOG-999999" }, { sessionRef: "s" });
+    assert.equal(saved.ok, true);
+    const catalog = await chat.fetchModelCatalog({ base_url: stub.base, protocol: "runninghub" });
+    assert.ok(Array.isArray(catalog), "成功必须回 legacy 约定的目录数组，而不是 integration 形状");
+    const real = catalog.find((item) => item.model === "rh-real-chat");
+    assert.ok(real, "站点 /models 返回的真实模型必须进目录：" + JSON.stringify(catalog.map((item) => item.model)));
+    assert.equal(real.name, "真实对话模型");
+    assert.equal(real.type, "llm");
+    assert.equal(real.protocol, "runninghub");
+    assert.ok(catalog.some((item) => item.model === "rh-llm-model"), "LLM /models 结果也进目录");
+    assert.ok(catalog.some((item) => item.model === "openai/gpt-5.1"), "插件既有内置兜底仍在");
+    assert.ok(seen.includes(stub.base + "/openapi/v2/models"), "目录必须经注入的 transport 拉取");
+    const request = stub.requests.find((entry) => entry.url.pathname === "/openapi/v2/models");
+    assert.equal(request.headers.authorization, "Bearer RH-CATALOG-999999", "目录请求使用安全存储里的 Key");
+  } finally {
+    chat.setProtocolTransport(null);
+  }
+});
+
 // ── ⑦ 装配后启用 → legacy 执行器真的走 RunningHub 新实现 ───────────────────
 test("装配：createPluginBundle 注册端口；启用 runninghub 后 legacy 图片执行器走新实现（本地 stub）", async () => {
   clearLegacyExecutorPorts();
@@ -329,7 +396,7 @@ test("装配：createPluginBundle 注册端口；启用 runninghub 后 legacy �
     runningHubModelDefinitions: { demo: { endpoint: "demo/text-to-image", params: [] } },
   });
   assert.equal(bundle.registry.get("runninghub").enabled, false, "默认关闭");
-  assert.deepEqual(bundle.legacyPorts.applied.sort(), ["callRunningHubChat", "describeRunningHubImage", "editAgnesImages", "editModelScopeImages", "editRunningHubImages", "generateAgnesImages", "generateAgnesVideos", "generateModelScopeImages", "generateRunningHubImages", "generateRunningHubVideos"]);
+  assert.deepEqual(bundle.legacyPorts.applied.sort(), ["callRunningHubChat", "describeRunningHubImage", "editAgnesImages", "editModelScopeImages", "editRunningHubImages", "fetchAgnesModelCatalog", "fetchRunningHubModelCatalog", "generateAgnesImages", "generateAgnesVideos", "generateModelScopeImages", "generateRunningHubImages", "generateRunningHubVideos"]);
 
   // 未启用：端口存在但结构化拒绝（默认关语义在端口层也成立）
   const before = await images.generateImages({ base_url: stub.base, api_key: "sk", protocol: "runninghub" }, "demo", { prompt: "x" }, 5000);

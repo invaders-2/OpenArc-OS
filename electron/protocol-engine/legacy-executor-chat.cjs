@@ -24,8 +24,11 @@
  *     （electron/legacy-cli-ports.cjs）已注入则调用，未注入即结构化拒绝
  *   - runninghub 对话 / 流式对话 / 图片理解 —— B7e3 后续：RunningHub 插件端口
  *     （callRunningHubChat / describeRunningHubImage，注入见 electron/plugin-service.cjs）已注入则调用，
- *     未注入即结构化拒绝；runninghub 模型目录仍属未移植批次
- *   - agnes 模型目录（agnesEndpoint.ts 的 normalizeAgnesApiBaseUrl 不在冻结接口内，agnes 原生适配批次）
+ *     未注入即结构化拒绝
+ *   - runninghub / agnes 模型目录 —— B7e3 后续：端口 fetchRunningHubModelCatalog / fetchAgnesModelCatalog
+ *     （实现 electron/plugin-runninghub.cjs / electron/plugin-agnes.cjs，复用各自插件既有的注册表 / 目录解析；
+ *     注入见 electron/plugin-service.cjs）已注入则调用，未注入即结构化拒绝；
+ *     插件未启用 / 未配置 Key 由端口返回准确 detail
  *   - apiQuota / withDirectApiQuota（apiQuota.ts 云端计费，本地模式 OUT，已按上文移除）
  *   - sharp 只允许惰性 require 并在缺失时返回结构化错误；本文件未使用 sharp，故未引入。
  *
@@ -58,9 +61,10 @@ const LEGACY_DEPENDENCY_UNAVAILABLE = "LEGACY_DEPENDENCY_UNAVAILABLE";
 const CLI_LEGACY_DETAIL = "CLI 端口未注入（需安装对应 CLI，由主进程经 electron/legacy-cli-ports.cjs 注入 cliCodex/cliGemini）";
 /** runninghub 对话 / 图片理解端口未注入（B7e3 后续；实现 electron/plugin-runninghub.cjs，注入 electron/plugin-service.cjs）。 */
 const RUNNINGHUB_CHAT_LEGACY_DETAIL = "runninghub 端口未注入（需启用 runninghub 插件并配置凭据，由主进程注入 callRunningHubChat / describeRunningHubImage）；未启用时回 LEGACY_DEPENDENCY_UNAVAILABLE";
-/** runninghub 模型目录不属本批补口范围，仍如实报未移植。 */
-const RUNNINGHUB_CATALOG_LEGACY_DETAIL = "runninghub 模型目录未移植（runninghub.ts 原生适配批次）";
-const AGNES_LEGACY_DETAIL = "agnes 原生适配尚未移植（缺少 agnesEndpoint.normalizeAgnesApiBaseUrl，属 W4 其它批次）";
+/** runninghub 模型目录端口未注入（B7e3 后续；实现 electron/plugin-runninghub.cjs，注入 electron/plugin-service.cjs）。 */
+const RUNNINGHUB_CATALOG_LEGACY_DETAIL = "runninghub 模型目录端口未注入（需启用 runninghub 插件并配置凭据，由主进程经 electron/plugin-service.cjs 注入 fetchRunningHubModelCatalog）；未启用时回 LEGACY_DEPENDENCY_UNAVAILABLE";
+/** agnes 模型目录端口未注入（B7e3 后续；实现 electron/plugin-agnes.cjs，注入 electron/plugin-service.cjs）。 */
+const AGNES_CATALOG_PORT_DETAIL = "agnes 模型目录端口未注入（需启用 agnes 插件并配置凭据，由主进程经 electron/plugin-service.cjs 注入 fetchAgnesModelCatalog）；未启用时回 LEGACY_DEPENDENCY_UNAVAILABLE";
 
 function legacyUnavailable(detail) {
   return { ok: false, error: LEGACY_DEPENDENCY_UNAVAILABLE, detail };
@@ -699,7 +703,14 @@ async function fetchModels(provider, timeoutMs = 20000) {
 /** Pull a model directory while retaining media type, operations and other advertised metadata. 源：protocols.ts:6763-6794 */
 async function fetchModelCatalog(provider, timeoutMs = 20000) {
   const proto = normalizeProtocol(provider.protocol);
-  if (proto === "runninghub") return legacyUnavailable(RUNNINGHUB_CATALOG_LEGACY_DETAIL);
+  if (proto === "runninghub") {
+    // B7e3 后续：runninghub 模型目录由插件端口提供（实现 electron/plugin-runninghub.cjs：复用既有注册表 /
+    // 模型定义 listModels）；端口内「插件未启用 / 缺凭据」返回准确 detail，未注入端口时回本文件的
+    // LEGACY_DEPENDENCY_UNAVAILABLE。
+    const port = legacyExecutorPorts.getLegacyExecutorPort("fetchRunningHubModelCatalog");
+    if (typeof port === "function") return port(provider, timeoutMs, protocolTransport);
+    return legacyUnavailable(RUNNINGHUB_CATALOG_LEGACY_DETAIL);
+  }
   if (isCliProtocol(proto)) {
     // B7e2 后续：端口已注入则用 CLI 原生模型目录（agentCliModels），未注入仍结构化拒绝。
     const port = cliPort(proto);
@@ -711,7 +722,13 @@ async function fetchModelCatalog(provider, timeoutMs = 20000) {
   if (proto === "minimax") return [{ model: "MiniMax-H3", type: "llm" }];
   // 豆包语音没有 OpenAI 风格的模型列表接口；这些是官方 HTTP 文档当前公开的资源 ID。
   if (proto === "volcengine-speech") return ["seed-tts-2.0", "seed-icl-2.0", "seed-audio-1.0"].map((model) => ({ model, type: "audio" }));
-  if (proto === "agnes") return legacyUnavailable(AGNES_LEGACY_DETAIL);
+  if (proto === "agnes") {
+    // B7e3 后续：agnes 模型目录由插件端口提供（实现 electron/plugin-agnes.cjs：base 归一 + openai kind 解析）；
+    // 端口内「插件未启用 / 缺凭据」返回准确 detail，未注入端口时回本文件的 LEGACY_DEPENDENCY_UNAVAILABLE。
+    const port = legacyExecutorPorts.getLegacyExecutorPort("fetchAgnesModelCatalog");
+    if (typeof port === "function") return port(provider, timeoutMs, protocolTransport);
+    return legacyUnavailable(AGNES_CATALOG_PORT_DETAIL);
+  }
   const def = PROTOCOLS[proto];
   if (!def) throw new Error(`协议 ${proto || provider.protocol} 不支持模型列表`);
   const url = joinUrl(provider.base_url, def.models.endpoint);

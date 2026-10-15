@@ -7,7 +7,8 @@
  *   ③ 未注入 fetch / 未配置 Key → 结构化 { ok:false, error:"INTEGRATION_UNAVAILABLE", detail }；
  *   ④ 凭据走 credential-store（内存后端），只回掩码、不落明文；
  *   ⑤ B2 legacy 执行器端口 generateAgnesImages / editAgnesImages / generateAgnesVideos 真的走新实现；
- *   ⑥ createPluginBundle 装配后 integration 命令可用（status / credentials / generate-images）。
+ *   ⑥ createPluginBundle 装配后 integration 命令可用（status / credentials / generate-images）；
+ *   ⑦ 模型目录端口：未注入 / 未启用 / 缺凭据 → 准确 detail；启用 + 凭据 → 真实目录（openai 解析）。
  *
  * 只读源：server/agnes.ts:1-196 + server/agnesEndpoint.ts:1-14。
  */
@@ -27,6 +28,7 @@ const { memoryCredentialBackend } = require("../electron/credential-store.cjs");
 const { clearLegacyExecutorPorts } = require("../electron/legacy-executor-ports.cjs");
 const images = require("../electron/protocol-engine/legacy-executor-images.cjs");
 const media = require("../electron/protocol-engine/legacy-executor-media.cjs");
+const chat = require("../electron/protocol-engine/legacy-executor-chat.cjs");
 
 const tmpDirs = [];
 const servers = [];
@@ -199,6 +201,7 @@ test("端口：未注入 → LEGACY_DEPENDENCY_UNAVAILABLE；装配后启用 agn
   assert.deepEqual(bundle.legacyPorts.applied.sort(), [
     "callRunningHubChat", "describeRunningHubImage",
     "editAgnesImages", "editModelScopeImages", "editRunningHubImages",
+    "fetchAgnesModelCatalog", "fetchRunningHubModelCatalog",
     "generateAgnesImages", "generateAgnesVideos", "generateModelScopeImages", "generateRunningHubImages", "generateRunningHubVideos",
   ]);
   const before = await images.generateImages({ base_url: stub.base, api_key: "k", protocol: "agnes" }, "m", { prompt: "x" }, 4000);
@@ -212,6 +215,56 @@ test("端口：未注入 → LEGACY_DEPENDENCY_UNAVAILABLE；装配后启用 agn
   assert.equal(result.images[0].value, "https://cdn.example/bundle.png");
   const submit = stub.requests.find((entry) => entry.method === "POST");
   assert.equal(submit.body.prompt, "一只猫");
+});
+
+test("模型目录：未注入 / 未启用 / 缺凭据 → 准确 detail；启用 + 凭据 → 真实目录（本地 stub）", async () => {
+  clearLegacyExecutorPorts();
+  // 未注入端口：执行器回 LEGACY_DEPENDENCY_UNAVAILABLE，detail 指明「端口未注入」，不得再写「未移植」
+  const noPort = await chat.fetchModelCatalog({ base_url: "https://example.invalid", api_key: "k", protocol: "agnes" });
+  assert.equal(noPort.ok, false);
+  assert.equal(noPort.error, "LEGACY_DEPENDENCY_UNAVAILABLE");
+  assert.match(noPort.detail, /端口未注入/);
+  assert.doesNotMatch(noPort.detail, /未移植/);
+
+  const stub = await startStub((url) => {
+    if (url.pathname === "/v1/models") {
+      return { body: { object: "list", data: [{ id: "agnes-chat-2.1" }, { id: "agnes-image-2.1-flash", name: "Agnes Image" }] } };
+    }
+    return null;
+  });
+  const bundle = createPluginBundle({ userDataDir: tempDir(), fetch, credentials: memoryCredentialBackend() });
+
+  // 端口已注入但插件默认关闭 → detail 说清「插件未启用」，且不发网络请求
+  const disabled = await chat.fetchModelCatalog({ base_url: stub.base, api_key: "k", protocol: "agnes" });
+  assert.equal(disabled.ok, false);
+  assert.equal(disabled.error, "INTEGRATION_UNAVAILABLE");
+  assert.match(disabled.detail, /默认关闭/);
+  assert.equal(stub.requests.length, 0, "未启用时不得发起网络请求");
+
+  // 启用但未配置凭据 → detail 说清「缺凭据」
+  assert.equal((await bundle.registry.enable("agnes")).ok, true);
+  const noKey = await chat.fetchModelCatalog({ base_url: stub.base, protocol: "agnes" });
+  assert.equal(noKey.ok, false);
+  assert.equal(noKey.error, "INTEGRATION_UNAVAILABLE");
+  assert.match(noKey.detail, /API Key/);
+
+  // 启用 + 凭据就绪 → 经注入 transport 拉取，并按 openai kind 解析成真实目录
+  const seen = [];
+  chat.setProtocolTransport({ fetch: async (url, options) => { seen.push(String(url)); return fetch(url, options); } });
+  try {
+    const saved = await bundle.execute("integration/agnes/credentials/save", { apiKey: "AGNES-CATALOG-999999" }, { sessionRef: "s" });
+    assert.equal(saved.ok, true);
+    const catalog = await chat.fetchModelCatalog({ base_url: stub.base, protocol: "agnes" });
+    assert.deepEqual(catalog, [
+      { model: "agnes-chat-2.1" },
+      { model: "agnes-image-2.1-flash", name: "Agnes Image" },
+    ]);
+    assert.deepEqual(seen, [stub.base + "/v1/models"], "目录必须经注入的 transport 拉取");
+    const request = stub.requests.find((entry) => entry.url.pathname === "/v1/models");
+    assert.equal(request.headers.authorization, "Bearer AGNES-CATALOG-999999", "目录请求使用安全存储里的 Key");
+  } finally {
+    chat.setProtocolTransport(null);
+  }
 });
 
 // ── ⑥ integration 命令 ────────────────────────────────────────────────────
