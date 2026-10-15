@@ -14,6 +14,11 @@
  *   4) 两趟隔离运行：A 趟（空态）与 B 趟（就绪态，首启即含造出的真实数据），各自 light + dark 截图五个真实页面；
  *   5) 记录每个页面的关键度量（容器宽 / 列表行高 / 标题字号 / 行标题字号 / 元信息字号），
  *      与对应 Chromium 探针 report.json 的数值逐项对照，写 compare-notes.md；
+ *   5b) 对照前先做「对照源体检」：4 个 Chromium 侧 report（skills/mcp、tasks、org、model）必须
+ *      存在 + 有生成时间戳 + 必备度量路径齐备 + 不比产出它的探针脚本旧。缺失/陈旧/残缺时
+ *      默认按既定顺序串行补跑对应 Chromium 探针（唯一空闲端口）；补齐后仍不可用则明确失败
+ *      （exit 3 + 可执行指引 + preflight.json），绝不放宽或跳过 C1/C2/C3；report/compare-notes
+ *      逐个标注对照源是「新跑」还是「复用」及其生成时间与 sha256；
  *   6) 断言：0 console error、0 pageerror、0 非本地请求；组织治理页不得出现 会员/权益/套餐/积分；全页不得出现 尚未实现；
  *   7) 收工核对真实 profile 的 identity.db / -wal / -shm 与顶层快照前后一致（只读 stat + sha256，绝不用 SQLite 打开）。
  *
@@ -23,6 +28,8 @@
  * 用法：
  *   node experiments/dxos-ui-real/run-all.mjs
  *   OA_UI_REAL_CDP_PORT=9798 node experiments/dxos-ui-real/run-all.mjs
+ *   OA_UI_REAL_CMP_AUTOFILL=0 node experiments/dxos-ui-real/run-all.mjs   # 不自动补齐，对照源不可用即明确失败
+ *   OA_UI_REAL_CMP_TIMEOUT_MS=1800000 ...                                  # 单个补跑探针的超时上限（默认 60 分钟）
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -137,14 +144,37 @@ const TASK_VARS = { root: ".task-center", split: ".task-split", list: ".task-lis
 const ORG_VARS = { root: ".org-center", split: ".org-split", list: ".org-list-pane", detail: ".org-detail-pane", row: ".org-row", rowName: ".org-row__top strong", rowFacts: ".org-row__facts", paneHead: ".org-pane-head", title: ".org-banner__title" };
 const MODEL_VARS = { root: ".model-proto", split: ".model-proto__split", list: ".model-proto__list-pane", detail: ".model-proto__detail-pane", row: ".model-proto__row", rowName: ".model-proto__row-top strong", rowFacts: ".model-proto__row-facts", paneHead: ".model-proto__title", title: ".model-proto__title", blockTitle: ".model-proto__block-title" };
 
-/** Chromium 探针的度量来源（report.json 的 compare.metrics[<key>]）。 */
+/** Chromium 探针的度量来源（report.json 的 compare.metrics[<key>]）。
+ *
+ *  同一个 report 可能同时提供多个页面的度量：dxos-ui-skills 的 report.json 里同时有 skill 与 mcp。
+ *  required 是该页面参与对照所必需的度量路径；缺任何一条即判定该「对照源」不可用 ——
+ *  绝不在度量残缺时让 C1/C2 变成空断言或干脆跳过对照。
+ *  probe / portEnv：对照源不可用时按既定顺序串行补跑的命令与端口环境变量。 */
+const REQUIRED_ROW_STYLE = [["row", "height"], ["rowNameStyle", "font-size"], ["rowFactsStyle", "font-size"]];
 const CHROMIUM_METRIC_SOURCE = {
-  skills: { report: "artifacts/dxos-ui-skills/report.json", key: "skill" },
-  mcp: { report: "artifacts/dxos-ui-skills/report.json", key: "mcp" },
-  tasks: { report: "artifacts/dxos-ui-tasks/report.json", key: "task" },
-  org: { report: "artifacts/dxos-ui-org/report.json", key: "org" },
-  model: { report: "artifacts/dxos-ui-model/report.json", key: "model" },
+  skills: { report: "artifacts/dxos-ui-skills/report.json", key: "skill", probe: "experiments/dxos-ui-skills/run-all.mjs", portEnv: "OA_SKILLS_PORT", required: REQUIRED_ROW_STYLE.concat([["titleStyle", "font-size"]]) },
+  mcp: { report: "artifacts/dxos-ui-skills/report.json", key: "mcp", probe: "experiments/dxos-ui-skills/run-all.mjs", portEnv: "OA_SKILLS_PORT", required: REQUIRED_ROW_STYLE.concat([["titleStyle", "font-size"]]) },
+  tasks: { report: "artifacts/dxos-ui-tasks/report.json", key: "task", probe: "experiments/dxos-ui-tasks/run-all.mjs", portEnv: "OA_TASKS_PORT", required: REQUIRED_ROW_STYLE.concat([["titleStyle", "font-size"]]) },
+  org: { report: "artifacts/dxos-ui-org/report.json", key: "org", probe: "experiments/dxos-ui-org/run-all.mjs", portEnv: "OA_ORG_PORT", required: REQUIRED_ROW_STYLE.concat([["titleStyle", "font-size"]]) },
+  /* 模型探针量的是 .model-proto__title，但落盘键名是 blockTitleStyle、不产出 titleStyle；
+     因此 model 页不把「页面标题字号」列为必备项（对照表里该行仍如实显示缺一侧）。 */
+  model: { report: "artifacts/dxos-ui-model/report.json", key: "model", probe: "experiments/dxos-ui-model/run-all.mjs", portEnv: "OA_MODEL_PORT", required: REQUIRED_ROW_STYLE },
 };
+
+/** 按 report 去重后的体检 / 补齐单元：一次读盘覆盖该 report 的全部 key。 */
+const CHROMIUM_REPORT_SPECS = (function () {
+  const byReport = new Map();
+  for (const [pageId, src] of Object.entries(CHROMIUM_METRIC_SOURCE)) {
+    if (!byReport.has(src.report)) byReport.set(src.report, { report: src.report, probe: src.probe, portEnv: src.portEnv, metrics: [] });
+    byReport.get(src.report).metrics.push({ pageId: pageId, key: src.key, required: src.required });
+  }
+  return Array.from(byReport.values());
+})();
+
+/* 对照源缺失/陈旧时的默认动作：自动补齐（设为 0 则改为明确失败并给指引，两者都不放宽断言）。
+   补跑单个探针的上限：模型探针含 ffmpeg 录像，宿主繁忙时单次可达数十分钟。 */
+const CMP_AUTOFILL = process.env.OA_UI_REAL_CMP_AUTOFILL !== "0";
+const CMP_TIMEOUT_MS = Number(process.env.OA_UI_REAL_CMP_TIMEOUT_MS || 60 * 60 * 1000);
 
 function settledSkill(sel) {
   const w = document.querySelector(sel);
@@ -514,6 +544,185 @@ async function shoot(cdp, file) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
+   对照源体检（Chromium 侧 report.json）
+   ── 目的：绝不拿缺失 / 陈旧 / 度量残缺的对照源去「对照」，也绝不因此放宽或
+      跳过 C1/C2/C3。缺失或陈旧时默认按既定顺序串行补跑对应 Chromium 探针
+      （唯一空闲端口），补跑后仍不可用则明确失败并给可执行指引。
+   ══════════════════════════════════════════════════════════════════════════ */
+function probeSourceFingerprint(probeRel) {
+  const probeAbs = path.join(ROOT, probeRel);
+  const candidates = [probeAbs, probeAbs.replace(/run-all\.mjs$/, "harness.tsx")];
+  const files = [];
+  const combined = crypto.createHash("sha256");
+  let newestMs = null;
+  for (const f of candidates) {
+    if (!fs.existsSync(f)) { files.push({ file: path.relative(ROOT, f), exists: false }); continue; }
+    const buf = fs.readFileSync(f);
+    const st = fs.statSync(f);
+    const sha = crypto.createHash("sha256").update(buf).digest("hex");
+    files.push({ file: path.relative(ROOT, f), exists: true, mtimeMs: Math.round(st.mtimeMs), sha256_12: sha.slice(0, 12) });
+    combined.update(path.basename(f)).update("\u0000").update(buf);
+    if (newestMs == null || st.mtimeMs > newestMs) newestMs = st.mtimeMs;
+  }
+  return { probe: probeRel, files: files, newestMs: newestMs, sha256_12: combined.digest("hex").slice(0, 12) };
+}
+
+/** 读一个对照源 report.json：存在性 / 生成时间戳 / 必备度量路径 / 是否比产出它的探针源码旧。 */
+function inspectChromiumReport(spec) {
+  const abs = path.join(ROOT, spec.report);
+  const out = { spec: spec, report: spec.report, abs: abs, exists: false, parsed: false, timestamp: null, timestampField: null, ageMs: null, mtimeMs: null, size: null, sha256: null, sha256_12: null, error: null, staleReasons: [], missingPaths: [], metricChecks: [], probeSource: null, fresh: false };
+  if (!fs.existsSync(abs)) { out.staleReasons.push("report_missing"); return out; }
+  out.exists = true;
+  let raw;
+  try { raw = fs.readFileSync(abs); } catch (err) { out.staleReasons.push("report_unreadable"); out.error = String((err && err.message) || err); return out; }
+  out.size = raw.length;
+  out.sha256 = crypto.createHash("sha256").update(raw).digest("hex");
+  out.sha256_12 = out.sha256.slice(0, 12);
+  try { out.mtimeMs = Math.round(fs.statSync(abs).mtimeMs); } catch (err) { /* 保留 null */ }
+  let j = null;
+  try { j = JSON.parse(raw.toString("utf8")); out.parsed = true; } catch (err) { out.staleReasons.push("report_unparsable"); out.error = String((err && err.message) || err); return out; }
+  for (const f of ["finishedAt", "generatedAt", "reportAt", "at"]) {
+    if (typeof j[f] === "string" && j[f].trim()) { out.timestamp = j[f]; out.timestampField = f; break; }
+  }
+  if (!out.timestamp) out.staleReasons.push("no_generation_timestamp");
+  else { const t = Date.parse(out.timestamp); out.ageMs = Number.isNaN(t) ? null : Date.now() - t; }
+  for (const m of spec.metrics) {
+    const metric = j.compare && j.compare.metrics ? j.compare.metrics[m.key] || null : null;
+    const missing = [];
+    if (!metric) missing.push("<compare.metrics." + m.key + ">");
+    else {
+      for (const p of m.required) {
+        let cur = metric;
+        for (const k of p) cur = cur == null ? null : cur[k];
+        if (cur == null || cur === "") missing.push(p.join("."));
+      }
+    }
+    if (missing.length) for (const p of missing) out.missingPaths.push(m.key + "." + p);
+    out.metricChecks.push({ pageId: m.pageId, key: m.key, ok: missing.length === 0, missing: missing, metric: metric });
+  }
+  if (out.metricChecks.some((m) => !m.ok)) out.staleReasons.push("metric_incomplete");
+  out.probeSource = probeSourceFingerprint(spec.probe);
+  if (out.mtimeMs != null && out.probeSource.newestMs != null && out.mtimeMs < out.probeSource.newestMs) out.staleReasons.push("probe_source_newer");
+  out.fresh = out.staleReasons.length === 0;
+  return out;
+}
+
+function summarizeChromiumReport(insp) {
+  return {
+    report: insp.report, exists: insp.exists, parsed: insp.parsed, fresh: insp.fresh, staleReasons: insp.staleReasons,
+    timestamp: insp.timestamp, timestampField: insp.timestampField, ageMs: insp.ageMs,
+    mtimeMs: insp.mtimeMs, size: insp.size, sha256_12: insp.sha256_12, missingPaths: insp.missingPaths,
+    probe: insp.spec.probe, probeSourceFingerprint: insp.probeSource,
+  };
+}
+
+/** 串行补跑一个 Chromium 探针：给它一个唯一空闲端口，避免与其它探针并行冲突。 */
+async function runChromiumProbe(spec) {
+  const probeAbs = path.join(ROOT, spec.probe);
+  if (!fs.existsSync(probeAbs)) return { ok: false, code: null, signal: null, timedOut: false, port: null, ms: 0, stdoutTail: "", stderrTail: "probe script missing: " + spec.probe };
+  const port = await freePort();
+  const env = Object.assign({}, process.env);
+  delete env.ELECTRON_RUN_AS_NODE;
+  delete env.ELECTRON_NO_ATTACH_CONSOLE;
+  env[spec.portEnv] = String(port);
+  const startedAt = Date.now();
+  return await new Promise((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    let child = null;
+    const finish = (payload) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(Object.assign({ port: port, ms: Date.now() - startedAt, stdoutTail: stdout.slice(-2000), stderrTail: stderr.slice(-2000) }, payload));
+    };
+    const timer = setTimeout(() => {
+      try { if (child) child.kill("SIGKILL"); } catch (err) { /* ignore */ }
+      finish({ ok: false, code: null, signal: "OA_CMP_TIMEOUT", timedOut: true });
+    }, CMP_TIMEOUT_MS);
+    try { child = spawn(process.execPath, [probeAbs], { cwd: ROOT, env: env, stdio: ["ignore", "pipe", "pipe"] }); }
+    catch (err) { finish({ ok: false, code: null, signal: null, timedOut: false, stderrTail: String((err && err.message) || err) }); return; }
+    child.stdout.on("data", (d) => { stdout += String(d); });
+    child.stderr.on("data", (d) => { stderr += String(d); });
+    child.on("error", (err) => finish({ ok: false, code: null, signal: null, timedOut: false, stderrTail: String((err && err.message) || err) }));
+    child.on("close", (code, signal) => finish({ ok: code === 0, code: code, signal: signal, timedOut: false }));
+  });
+}
+
+/**
+ * 体检全部对照源；缺失 / 陈旧 / 度量残缺时按既定顺序串行补跑。
+ * 返回 { ok, pages, reports, ran, guidance }；ok=false 表示不能拿这些对照源继续对照。
+ */
+async function ensureChromiumSources(record, note) {
+  const runLog = [];
+  const guidance = [];
+  const inspected = () => CHROMIUM_REPORT_SPECS.map((spec) => inspectChromiumReport(spec));
+
+  /* 第一遍只用来判断「要不要补跑」；不在这里记账，避免把补跑前的旧状态算进最终结论。 */
+  const initial = inspected();
+  const stale = initial.filter((i) => !i.fresh);
+  if (stale.length && CMP_AUTOFILL) {
+    for (const insp of stale) {
+      note("对照源不可用（" + insp.report + "：" + insp.staleReasons.join("、") + "）→ 自动补齐：node " + insp.spec.probe);
+      const run = await runChromiumProbe(insp.spec);
+      runLog.push({ report: insp.spec.report, probe: insp.spec.probe, port: run.port, ms: run.ms, ok: run.ok, exitCode: run.code, signal: run.signal, timedOut: run.timedOut });
+      record("preflight", "Q3 · 自动补齐对照源（node " + insp.spec.probe + "，端口 " + run.port + "）", run.ok, "exit 0", JSON.stringify({ port: run.port, ms: run.ms, code: run.code, signal: run.signal, timedOut: run.timedOut, stderrTail: String(run.stderrTail || "").slice(0, 400) }));
+      if (!run.ok) note("补齐命令输出尾部（stderr）：" + String(run.stderrTail || "(空)").slice(0, 600));
+    }
+  } else if (stale.length) {
+    note("OA_UI_REAL_CMP_AUTOFILL=0 → 不自动补齐，按明确指引失败");
+  }
+
+  /* 第二遍（补跑之后）才是最终对照源状态，Q0/Q1/Q2/Q4 都只对这个状态负责。 */
+  const now = inspected();
+  for (const insp of now) {
+    const label = insp.report;
+    record("preflight", "Q0 · 对照源 " + label + " 存在 / 可解析 / 带生成时间戳", insp.exists && insp.parsed && !!insp.timestamp, "exists + parse + 非空生成时间戳", JSON.stringify({ exists: insp.exists, parsed: insp.parsed, timestamp: insp.timestamp, timestampField: insp.timestampField, mtimeMs: insp.mtimeMs, sha256_12: insp.sha256_12, reasons: insp.staleReasons }));
+    record("preflight", "Q1 · 对照源 " + label + " 度量齐备（" + insp.spec.metrics.map((m) => m.key).join(" + ") + "）", insp.metricChecks.length > 0 && insp.metricChecks.every((m) => m.ok), "compare.metrics 必备路径齐全", JSON.stringify({ missing: insp.missingPaths, checks: insp.metricChecks.map((m) => ({ page: m.pageId, key: m.key, ok: m.ok })) }));
+    record("preflight", "Q2 · 对照源 " + label + " 不比产出它的探针源码旧", insp.exists && insp.parsed && insp.staleReasons.indexOf("probe_source_newer") < 0, "report mtime >= 探针脚本/挂载壳 mtime", JSON.stringify({ reportMtimeMs: insp.mtimeMs, probeSourceNewestMs: insp.probeSource ? insp.probeSource.newestMs : null, probeSource: insp.probeSource }));
+    if (!insp.fresh) guidance.push("  - " + label + " → " + insp.staleReasons.join("、"));
+  }
+
+  if (!now.every((i) => i.fresh)) {
+    const still = now.filter((i) => !i.fresh);
+    const cmds = Array.from(new Set(still.map((i) => "node " + i.spec.probe)));
+    for (const c of cmds) guidance.push("  " + c);
+    record("preflight", "Q4 · 对照源全部新鲜可用（缺失/陈旧/度量残缺一律失败，绝不放宽或跳过对照）", false, "全部 fresh", JSON.stringify({ problems: still.map((i) => ({ report: i.report, reasons: i.staleReasons })) }));
+    return { ok: false, guidance: guidance, reports: now.map(summarizeChromiumReport), initialStale: stale.map(summarizeChromiumReport), pages: null, ran: runLog, autofill: CMP_AUTOFILL };
+  }
+
+  const pages = {};
+  for (const insp of now) {
+    const ranFresh = runLog.some((r) => r.report === insp.report);
+    for (const m of insp.metricChecks) {
+      pages[m.pageId] = {
+        report: insp.report, key: m.key, reportAt: insp.timestamp, timestampField: insp.timestampField, metric: m.metric,
+        origin: ranFresh ? "fresh-run" : "reused",
+        mtimeMs: insp.mtimeMs, ageMs: insp.ageMs,
+        fingerprint: { sha256: insp.sha256, sha256_12: insp.sha256_12, size: insp.size, mtimeMs: insp.mtimeMs },
+        probe: insp.spec.probe, probeSourceFingerprint: insp.probeSource,
+        freshness: { fresh: insp.fresh, staleReasons: insp.staleReasons, ageMs: insp.ageMs, checkedAt: nowIso() },
+      };
+    }
+  }
+  record("preflight", "Q4 · 对照源全部新鲜可用（缺失/陈旧/度量残缺一律失败，绝不放宽或跳过对照）", true, "全部 fresh", JSON.stringify({ sources: now.map((i) => ({ report: i.report, origin: runLog.some((r) => r.report === i.report) ? "fresh-run" : "reused", timestamp: i.timestamp, sha256_12: i.sha256_12 })) }));
+  return { ok: true, guidance: [], reports: now.map(summarizeChromiumReport), initialStale: stale.map(summarizeChromiumReport), pages: pages, ran: runLog, autofill: CMP_AUTOFILL };
+}
+
+/** 把本次对照源体检落盘（成功/失败都写，避免上一次的失败快照被误读成当前状态）。 */
+function writePreflight(preflight, ok) {
+  const out = {
+    at: nowIso(), phase: "dxos-ui-real/preflight", ok: !!ok, autofill: preflight.autofill,
+    reports: preflight.reports, initialStale: preflight.initialStale || [], ran: preflight.ran, guidance: preflight.guidance,
+    note: ok
+      ? "对照源在本次启动时全部新鲜可用：存在 + 非空生成时间戳 + 必备度量路径齐备 + 不比产出它的探针源码旧。"
+      : "对照源缺失/陈旧/度量残缺：本探针不使用这些证据，也不放宽或跳过对照断言。",
+  };
+  try { fs.writeFileSync(path.join(ART, "preflight.json"), JSON.stringify(out, null, 2)); } catch (err) { /* 报告不是关键路径 */ }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
    主流程
    ══════════════════════════════════════════════════════════════════════════ */
 async function main() {
@@ -560,6 +769,23 @@ async function main() {
     }, { channel: channel, command: command, payload: payload || {} });
     return { ms: Date.now() - started, result: res };
   }
+
+  /* 启动时先体检对照源：缺失 / 陈旧 / 度量残缺 → 默认自动补齐（或按 env 明确失败），
+     绝不让后面的 C1/C2/C3 拿到 metric=null 的旧证据。 */
+  const cmpPreflight = await ensureChromiumSources(record, note);
+  if (!cmpPreflight.ok) {
+    writePreflight(cmpPreflight, false);
+    console.error("");
+    console.error("对照源体检未通过：本探针不使用缺失 / 陈旧 / 度量残缺的对照源，也不会因此放宽或跳过对照断言。");
+    console.error("请先按既定顺序串行补齐（每个探针自带唯一端口，勿并行）：");
+    for (const line of cmpPreflight.guidance) console.error(line);
+    console.error("或保持默认自动补齐（不要设置 OA_UI_REAL_CMP_AUTOFILL=0）。");
+    console.error("失败明细：" + path.relative(ROOT, path.join(ART, "preflight.json")));
+    return 3;
+  }
+  const chromiumMetrics = cmpPreflight.pages;
+  writePreflight(cmpPreflight, true);
+  note("对照源体检通过：新跑 " + cmpPreflight.ran.length + " 个探针 / 复用 " + (cmpPreflight.reports.length - cmpPreflight.ran.length) + " 个 report");
 
   async function runScenario(label, createData) {
     const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "oa-ui-real-" + label + "-"));
@@ -837,20 +1063,8 @@ async function main() {
   note("渲染层请求总数 " + requests.length + "，非本地 " + nonLocal.length + "，失败请求 " + requestFailures.length);
   note("请求样本：" + JSON.stringify(Array.from(new Set(requests.map((r) => r.url.replace(/^(file:\/\/[^/]+).*/, "$1/*")))).slice(0, 10)));
 
+  /* chromiumMetrics 已由启动时的对照源体检给出（含 origin=新跑/复用、时间戳、指纹）。 */
   const compareItems = [];
-  const chromiumMetrics = {};
-  for (const pageId of Object.keys(CHROMIUM_METRIC_SOURCE)) {
-    const src = CHROMIUM_METRIC_SOURCE[pageId];
-    const abs = path.join(ROOT, src.report);
-    let metric = null;
-    let reportAt = null;
-    try {
-      const j = JSON.parse(fs.readFileSync(abs, "utf8"));
-      metric = j.compare && j.compare.metrics ? j.compare.metrics[src.key] || null : null;
-      reportAt = j.finishedAt || null;
-    } catch (err) { metric = null; }
-    chromiumMetrics[pageId] = { report: src.report, key: src.key, reportAt: reportAt, metric: metric };
-  }
 
   function pick(m, pathList) {
     let cur = m;
@@ -871,6 +1085,14 @@ async function main() {
     containerWidth: ["splitMain", "width"], rootWidth: ["root", "width"], splitWidth: ["split", "width"], listPaneWidth: ["listPane", "width"],
     rowHeight: ["row", "height"], titleFontSize: ["titleStyle", "font-size"], rowNameFontSize: ["rowNameStyle", "font-size"], rowFactsFontSize: ["rowFactsStyle", "font-size"],
   };
+  /* 「必备字号项」直接从对照源元数据推导，避免另写一份清单漂移：
+     每页 CHROMIUM_METRIC_SOURCE.required 里的字号路径都必须两侧有值且一致。 */
+  const FONT_LABEL_TO_PATH = { "页面标题字号": ["titleStyle", "font-size"], "行标题字号": ["rowNameStyle", "font-size"], "行元信息字号": ["rowFactsStyle", "font-size"] };
+  function isRequiredFont(pageId, label) {
+    const p = FONT_LABEL_TO_PATH[label];
+    if (!p) return false;
+    return (CHROMIUM_METRIC_SOURCE[pageId].required || []).some((r) => r[0] === p[0] && r[1] === p[1]);
+  }
 
   for (const pageId of ["skills", "mcp", "tasks", "org", "model"]) {
     const cap = captures.find((c) => c.pageId === pageId && c.scenario === "ready" && c.theme === "light") || captures.find((c) => c.pageId === pageId);
@@ -887,10 +1109,16 @@ async function main() {
     }
   }
   const fontRows = compareItems.filter((i) => /字号/.test(i.metric));
-  for (const item of fontRows) item.reason = item.identical ? "设计 token 未变（--fs-title / --fs-body / --fs-micro），不随后壳变化" : "一侧数值缺失（见 actual）";
+  for (const item of fontRows) {
+    item.required = isRequiredFont(item.page, item.metric);
+    item.reason = item.identical ? "设计 token 未变（--fs-title / --fs-body / --fs-micro），不随后壳变化" : "一侧数值缺失（见 actual）";
+  }
   const fontComparable = fontRows.filter((i) => i.chromium != null);
   const fontNotComparable = fontRows.filter((i) => i.chromium == null);
-  record("compare", "C1 · 字号类关键度量与 Chromium 探针逐项一致（标题 / 行标题 / 元信息）", fontComparable.every((i) => i.identical), "凡两侧都有数值的字号项必须一致", JSON.stringify({ comparable: fontComparable.map((i) => ({ page: i.page, metric: i.metric, chromium: i.chromium, real: i.real, identical: i.identical })), notComparable: fontNotComparable.map((i) => ({ page: i.page, metric: i.metric, real: i.real })) }));
+  const requiredFontRows = fontRows.filter((i) => i.required);
+  /* 每页必备字号项都必须两侧有值且一致：对照源缺失/残缺不可能在这里退化成「无可比项 = 通过」。 */
+  const fontOk = requiredFontRows.length > 0 && requiredFontRows.every((i) => i.chromium != null && i.real != null && i.identical);
+  record("compare", "C1 · 字号类关键度量与 Chromium 探针逐项一致（标题 / 行标题 / 元信息）", fontOk, "每页必备字号项两侧数值齐备且一致", JSON.stringify({ required: requiredFontRows.map((i) => ({ page: i.page, metric: i.metric, chromium: i.chromium, real: i.real, identical: i.identical })), comparable: fontComparable.map((i) => ({ page: i.page, metric: i.metric, chromium: i.chromium, real: i.real, identical: i.identical })), notComparable: fontNotComparable.map((i) => ({ page: i.page, metric: i.metric, required: i.required, real: i.real })) }));
   const rowRows = compareItems.filter((i) => i.metric === "列表行高");
   for (const item of rowRows) {
     const cap = captures.find((c) => c.pageId === item.page && c.scenario === "ready" && c.theme === "light");
@@ -963,7 +1191,19 @@ async function main() {
     commands: commandLog,
     screenshots: captures.map((c) => ({ page: c.pageId, state: c.state, theme: c.theme, file: c.screenshot, pixels: c.screenshotDims.width + "x" + c.screenshotDims.height, bytes: c.screenshotDims.bytes })),
     captures: captures,
-    chromiumCompare: { sources: chromiumMetrics, items: compareItems },
+    chromiumCompare: {
+      sources: chromiumMetrics,
+      items: compareItems,
+      preflight: {
+        autofill: cmpPreflight.autofill,
+        checkedAt: nowIso(),
+        ranProbes: cmpPreflight.ran,
+        reports: cmpPreflight.reports,
+        initialStale: (cmpPreflight.initialStale || []).map((r) => ({ report: r.report, staleReasons: r.staleReasons, timestamp: r.timestamp, mtimeMs: r.mtimeMs })),
+        originByPage: Object.fromEntries(Object.keys(chromiumMetrics).map((pageId) => [pageId, { origin: chromiumMetrics[pageId].origin, report: chromiumMetrics[pageId].report, reportAt: chromiumMetrics[pageId].reportAt, sha256_12: chromiumMetrics[pageId].fingerprint.sha256_12 }])),
+        note: "对照源在启动时体检：存在 + 非空生成时间戳 + 必备度量路径齐备 + 不比产出它的探针源码旧；缺失/陈旧/残缺时默认串行补跑对应 Chromium 探针。",
+      },
+    },
     console: { total: consoleAll.length, errorCount: consoleErrors.length, pageErrorCount: pageErrors.length, errors: consoleErrors.slice(0, 20), pageErrors: pageErrors.slice(0, 20), byType: consoleAll.reduce((acc, m) => { acc[m.type] = (acc[m.type] || 0) + 1; return acc; }, {}) },
     network: { total: requests.length, nonLocal: nonLocal.slice(0, 20), allLocal: nonLocal.length === 0, requestFailures: requestFailures.slice(0, 10) },
     counts: { pass: passed, fail: failed, total: checks.length, notVerified: notVerified.length },
@@ -978,6 +1218,8 @@ async function main() {
   console.log("截图：" + captures.length + " 张（每页 empty/ready × light/dark）");
   console.log("console error=" + consoleErrors.length + " pageerror=" + pageErrors.length + " 非本地请求=" + nonLocal.length);
   console.log("真实 profile 身份库未变=" + profileDiff.identityUnchanged + "（identity.db sha256 前后对照见 report.json）");
+  console.log("对照源：" + Object.keys(chromiumMetrics).map((pageId) => pageId + "=" + chromiumMetrics[pageId].origin + "@" + chromiumMetrics[pageId].reportAt + "#" + chromiumMetrics[pageId].fingerprint.sha256_12).join(" · "));
+  console.log("对照源补跑：" + (cmpPreflight.ran.length ? cmpPreflight.ran.map((r) => r.probe + "(port " + r.port + "," + Math.round(r.ms / 1000) + "s," + (r.ok ? "exit0" : "exit" + r.exitCode) + ")").join(" · ") : "无（全部复用）"));
   console.log("PASS " + passed + " / FAIL " + failed);
   console.log("报告：" + path.relative(ROOT, path.join(ART, "report.json")));
   console.log("对照笔记：" + path.relative(ROOT, path.join(ART, "compare-notes.md")));
@@ -1006,6 +1248,21 @@ function writeCompareNotes(report) {
   L.push("| prefers-reduced-motion | reduce | reduce（emulateMedia）+ 应用真实「减少动态效果」开关 |");
   L.push("| 外壳 | 无（只有一个 position:absolute;inset:0 的假 .window） | 真实桌面：软件顶栏 38px + 窗口标题栏 + 最大化铺满宿主只让开顶栏 |");
   L.push("");
+  const pf = cm.preflight || { reports: [], ranProbes: [], autofill: null };
+  L.push("## 0.5 对照源体检（新跑 / 复用）");
+  L.push("");
+  L.push("> 启动时先体检每个 Chromium 侧对照源：存在 + 可解析 + 非空生成时间戳 + 必备度量路径齐备 + 不比产出它的探针源码旧。");
+  L.push("> 缺失 / 陈旧 / 度量残缺时默认按既定顺序串行补跑对应 Chromium 探针（唯一空闲端口）；本次自动补齐=" + (pf.autofill ? "开启" : "关闭（OA_UI_REAL_CMP_AUTOFILL=0）") + "。");
+  L.push("");
+  L.push("| 对照源 report | 供给页面 | 本次来源 | 生成时间 | 文件 mtimeMs | sha256(12) | 补跑命令（端口 / 耗时） |");
+  L.push("| --- | --- | --- | --- | --- | --- | --- |");
+  for (const r of pf.reports) {
+    const pages = Object.keys(cm.sources).filter((p) => cm.sources[p].report === r.report);
+    const origin = pages.length && cm.sources[pages[0]].origin === "fresh-run" ? "**新跑**" : "复用";
+    const ran = pf.ranProbes.find((x) => x.report === r.report);
+    L.push("| " + r.report + " | " + pages.join(" / ") + " | " + origin + " | " + (r.timestamp || "—") + " | " + (r.mtimeMs || "—") + " | " + (r.sha256_12 || "—") + " | " + (ran ? "node " + ran.probe + "（端口 " + ran.port + "，" + Math.round(ran.ms / 1000) + "s）" : "—（复用，未补跑）") + " |");
+  }
+  L.push("");
   L.push("## 1. 真实窗口外壳带来的差异（逐项）");
   L.push("");
   L.push("- 窗口 y 起点：Chromium 的 .window 从 (0,0) 开始；真实窗口最大化后 y = " + AREA_TOP + "（软件顶栏高度），高度 = 900 − " + AREA_TOP + " = " + (900 - AREA_TOP) + "px。");
@@ -1024,7 +1281,7 @@ function writeCompareNotes(report) {
     const src = cm.sources[pageId];
     L.push("### " + pageId);
     L.push("");
-    L.push("来源：" + src.report + " → compare.metrics." + src.key + (src.reportAt ? "（" + src.reportAt + "）" : ""));
+    L.push("来源：" + src.report + " → compare.metrics." + src.key + "（本次" + (src.origin === "fresh-run" ? "新跑" : "复用") + (src.reportAt ? "，" + src.reportAt : "") + "，sha256 " + (src.fingerprint ? src.fingerprint.sha256_12 : "—") + "）");
     L.push("");
     L.push("| 度量 | Chromium 探针 | 真实窗口 | 差值 | 结论 | 原因 |");
     L.push("| --- | --- | --- | --- | --- | --- |");
