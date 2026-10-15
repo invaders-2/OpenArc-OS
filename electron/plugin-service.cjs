@@ -176,6 +176,8 @@ function normalizeIntegrationError(err) {
 function createPluginBundle(options = {}) {
   const userDataDir = options.userDataDir ? String(options.userDataDir) : null;
   const clock = typeof options.clock === "function" ? options.clock : () => Date.now();
+  // Y2：同步动作终态等待的轮询休眠；测试注入假休眠即可离线确定超时 / 取消路径（默认真实 setTimeout）。
+  const sleeper = typeof options.sleeper === "function" ? options.sleeper : (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const logger = typeof options.logger === "function" ? options.logger : null;
   const fetchImpl = typeof options.fetch === "function" ? options.fetch : null;
   const personalSender = typeof options.personalSender === "function" ? options.personalSender : null;
@@ -332,6 +334,14 @@ function createPluginBundle(options = {}) {
     outDir: options.ziniaoOutDir,
     clock,
   });
+  // Y2：同步动作终态等待的作业源。生产即真实集成；测试可注入同形假源（start + get），
+  // 使 success / failed / cancelled / 超时 / 状态丢失 五条路径都能离线确定性验证。
+  const lingxingJobSource = options.lingxingJobSource && typeof options.lingxingJobSource.start === "function" && typeof options.lingxingJobSource.get === "function"
+    ? options.lingxingJobSource
+    : { start: (days) => lingxing.startLingxingCacheSync(days), get: (id) => lingxing.getLingxingCacheJob(id) };
+  const ziniaoJobSource = options.ziniaoJobSource && typeof options.ziniaoJobSource.start === "function" && typeof options.ziniaoJobSource.get === "function"
+    ? options.ziniaoJobSource
+    : { start: (input) => ziniao.startZiniaoDownloadJob(input), get: () => ziniao.getZiniaoDownloadJob() };
   quarkIntegration = createQuarkIntegration({
     dataDir: integrationsRoot ? path.join(integrationsRoot, "quark") : null,
     userDataDir,
@@ -924,17 +934,72 @@ function createPluginBundle(options = {}) {
     })).filter((store) => store.selector);
   }
 
+  // Y2：源 automationBusinessActions.ts:20-61 的终态等待口径（上限 / 轮询间隔逐字）。
+  const JOB_POLL_MS = 2000;                              // 源行 27 / 58 的 delay(2_000)
+  const LINGXING_WAIT_TIMEOUT_MS = 4 * 60 * 60 * 1000;   // 源行 21
+  const ZINIAO_WAIT_TIMEOUT_MS = 8 * 60 * 60 * 1000;     // 源行 44
+  // 测试可整体覆盖超时上限；生产不传即用上面的源口径。
+  const jobWaitTimeoutMs = Number.isFinite(options.jobWaitTimeoutMs) && options.jobWaitTimeoutMs > 0 ? Math.floor(options.jobWaitTimeoutMs) : null;
+  // 集成层自有的"作业被用户停止"码；automation-service.cjs 映射成 AUTOMATION_CANCELLED。
+  const INTEGRATION_ERR_CANCELLED = "INTEGRATION_CANCELLED";
+
+  /**
+   * 源 automationBusinessActions.ts:20-30 · 领星缓存同步的终态等待。
+   * 只有 status=complete 才算成功；error / 状态丢失 / 超时一律抛真实错误，超时绝不假装成功。
+   */
+  async function waitForLingxingJob(jobId) {
+    const deadline = clock() + (jobWaitTimeoutMs || LINGXING_WAIT_TIMEOUT_MS);
+    while (clock() < deadline) {
+      const job = lingxingJobSource.get(jobId);
+      if (!job) throw adapterDependencyError(INTEGRATION_ERR_NOT_FOUND, "领星缓存任务状态已丢失");
+      if (job.status === "complete") return "领星近 " + String(job.cacheDays) + " 天数据已缓存，共 " + String(job.rows) + " 条";
+      if (job.status === "error") throw adapterDependencyError(INTEGRATION_ERR_INTERNAL, String(job.error || "领星缓存失败"));
+      await sleeper(JOB_POLL_MS);
+    }
+    throw adapterDependencyError(INTEGRATION_ERR_INTERNAL, "领星缓存执行超时");
+  }
+
+  /**
+   * 源 automationBusinessActions.ts:43-61 · 紫鸟下载的终态等待。
+   * completed 才算成功；failed / stopped（用户停止=取消）/ paused 如实抛错；
+   * 状态丢失与超时同样抛出，三种失败态绝不冒充"下载完成"。
+   */
+  async function waitForZiniaoJob(jobId) {
+    const deadline = clock() + (jobWaitTimeoutMs || ZINIAO_WAIT_TIMEOUT_MS);
+    while (clock() < deadline) {
+      const job = ziniaoJobSource.get();
+      if (!job || job.id !== jobId) throw adapterDependencyError(INTEGRATION_ERR_NOT_FOUND, "紫鸟下载任务状态已丢失");
+      if (job.status === "completed") {
+        const stores = Array.isArray(job.stores) ? job.stores : [];
+        const files = stores.reduce((sum, store) => sum + ((store && store.files && store.files.length) || (store && store.file ? 1 : 0)), 0);
+        const skippedStores = stores.filter((store) => store && store.status === "skipped").length;
+        const skippedDays = stores.reduce((sum, store) => sum + ((store && store.skippedExistingDays) || 0), 0);
+        if (!files && skippedDays) return "无需启动紫鸟：已检查 " + stores.length + " 个店铺，所选日期均已有数据，跳过 " + skippedDays + " 个已有数据日";
+        if (!files && skippedStores) return "紫鸟检查完成：" + skippedStores + " 个店铺没有需要下载的新数据";
+        return "紫鸟下载完成：新增 " + files + " 个按日文件，检查 " + stores.length + " 个店铺" + (skippedDays ? "，跳过 " + skippedDays + " 个已有数据日" : "");
+      }
+      if (job.status === "failed") throw adapterDependencyError(INTEGRATION_ERR_INTERNAL, String(job.error || job.message || "紫鸟下载失败"));
+      if (job.status === "stopped") throw adapterDependencyError(INTEGRATION_ERR_CANCELLED, String(job.error || job.message || "紫鸟下载已取消"));
+      if (job.status === "paused") throw adapterDependencyError(INTEGRATION_ERR_INTERNAL, String(job.message || "紫鸟下载已暂停") + " 请在紫鸟 APP 中处理后继续。");
+      await sleeper(JOB_POLL_MS);
+    }
+    throw adapterDependencyError(INTEGRATION_ERR_INTERNAL, "紫鸟下载执行超时");
+  }
+
   /**
    * B6a/B7d · 自动化 integrations 适配器（唯一真值；main.cjs 的 automation 装配应直接引用本对象）。
    *   · 每个动作先过 gateOrThrow（插件已启用 + 依赖就绪），未就绪抛 INTEGRATION_UNAVAILABLE；
    *   · 就绪后调用真实实现：领星缓存同步 / 紫鸟下载 / 紫鸟数据同步（本文件 ziniaoDataSync）/ 钉钉通知。
    *   · 真实传输由 resolveTransport 注入既有 MCP 通道；ziniao_data_sync 只读本地文件 + 本地库，无需网络。
+   *   · Y2：领星 / 紫鸟先把作业真正启动，再按源 automationBusinessActions.ts:20-61 等到终态才返回；
+   *     等待只读本地作业状态，不新增任何外发通道，与"授权通道待决策"互不冲突。
    */
   const automationAdapter = {
     async lingxingCacheSync(args) {
       await gateOrThrow("lingxing");
-      const job = lingxing.startLingxingCacheSync(args && args.days);
-      return "领星缓存同步作业已启动：" + String(job && job.id ? job.id : "") + "（" + String(job && job.cacheDays ? job.cacheDays : "") + " 天）";
+      // 源行 109-112：启动作业仍照旧，但对外结果改为等终态（不再"启动作业即返回"）。
+      const job = lingxingJobSource.start(args && args.days);
+      return await waitForLingxingJob(job && job.id);
     },
     async ziniaoDownload(args) {
       await gateOrThrow("ziniao");
@@ -947,8 +1012,8 @@ function createPluginBundle(options = {}) {
       if (!stores.length) stores = await listActiveZiniaoStores();
       if (!stores.length) throw adapterDependencyError(INTEGRATION_ERR_INVALID_INPUT, "紫鸟当前没有可下载的有效店铺");
       const requestIntervalSeconds = Math.min(120, Math.max(15, Math.floor(Number(input.requestIntervalSeconds) || 30)));
-      const job = ziniao.startZiniaoDownloadJob({ from: localIso(days), to: localIso(1), outDir: String(input.outDir || ""), requestIntervalSeconds, stores });
-      return "紫鸟下载作业已启动：" + String(job && job.id ? job.id : "") + "（店铺 " + String(job && Array.isArray(job.stores) ? job.stores.length : 0) + " 个）";
+      const job = ziniaoJobSource.start({ from: localIso(days), to: localIso(1), outDir: String(input.outDir || ""), requestIntervalSeconds, stores });
+      return await waitForZiniaoJob(job && job.id);
     },
     async ziniaoDataSync(args) {
       await gateOrThrow("ziniao");

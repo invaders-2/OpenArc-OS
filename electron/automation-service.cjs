@@ -60,6 +60,8 @@ const TRUSTED_SERVER_ACTIONS = Object.freeze({
   lingxing: ["lingxing_cache_sync", "ziniao_data_sync"],
   dingtalk: ["dingtalk_group_notify", "dingtalk_person_notify"],
 });
+/** Y2：集成适配器对"作业被用户停止"用的取消码（plugin-service.cjs 的 INTEGRATION_ERR_CANCELLED）。 */
+const ADAPTER_CANCELLED_CODE = "INTEGRATION_CANCELLED";
 
 const asStr = (value, max = 512) => (typeof value === "string" ? value.slice(0, max) : value == null ? undefined : String(value).slice(0, max));
 const requireStr = (value, max = 512) => { const text = asStr(value, max); return text && text.length ? text : null; };
@@ -172,6 +174,14 @@ function createAutomationBundle(options = {}) {
       || code === "INTEGRATION_UNAVAILABLE"
       || code === "INTEGRATION_NOT_ENABLED"
       || code === "INTEGRATION_DEPENDENCY_UNAVAILABLE";
+  }
+  /**
+   * Y2：集成适配器"等终态"期间用户停掉了底层作业 → 适配器抛 INTEGRATION_CANCELLED。
+   * 这里映射为自动化域的取消码，让 runNow 的 errorCode 如实区分"取消"与"执行失败"，
+   * 绝不把用户取消冒充成功，也不与前缀为 AGENT_DEPENDENCY_UNAVAILABLE 的依赖缺失混淆。
+   */
+  function adapterCancellationCode(error) {
+    return error && error.code === ADAPTER_CANCELLED_CODE ? domain.AUTOMATION_ERR_CANCELLED : null;
   }
   function dependencyFromAdapter(name, method, error) {
     const raw = error && typeof error.dependency === "string" && error.dependency ? error.dependency : "";
@@ -356,7 +366,9 @@ function createAutomationBundle(options = {}) {
       }
       const message = String((lastError && lastError.message) || "执行失败");
       // 结构化错误码保留到返回值：runNow(await) 与测试据此稳定判别"依赖缺失/参数错/内部错"。
-      const errorCode = domain.isAutomationError(lastError) ? lastError.code : domain.AUTOMATION_ERR_INTERNAL;
+      const errorCode = domain.isAutomationError(lastError)
+        ? lastError.code
+        : (adapterCancellationCode(lastError) || domain.AUTOMATION_ERR_INTERNAL);
       const errorDetail = domain.isAutomationError(lastError) ? lastError.detail : undefined;
       store.completeAutomationRun(userId, run.id, { status: "failed", error: message });
       emit("progress", { automationId: automation.id, runId: run.id, phase: "failed", attempts, error: message, errorCode });

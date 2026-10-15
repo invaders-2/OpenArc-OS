@@ -486,3 +486,35 @@ test("B4e 收口 · App 目录适配器：已安装 App 进入 catalog，权限�
     (error) => error.code === domain.DEVELOPER_ERR_INVALID_INPUT,
   );
 });
+
+test("Y3 · 权限清单按用户过滤：A 用户只看自己已安装的 App，不传 user 保留源全量语义（源 auth.ts:652-679）", async () => {
+  // 源 auth.ts:632-634：installedIds 来自当前 userId 的已安装集合；这里按 sessionRef 区分两个用户。
+  const bySession = {
+    resolveActor: ({ context }) => {
+      const sessionRef = context && context.sessionRef;
+      if (!sessionRef) return { ok: false, error: "no-session" };
+      return { ok: true, user: { id: sessionRef === "sess-b" ? "u-b" : "u-developer" } };
+    },
+  };
+  const fx = openBundle({ authorization: bySession });
+  const installedA = await fx.call("developer/install", { package: buildPackage(makeManifest()).toString("base64") });
+  assert.equal(installedA.ok, true, JSON.stringify(installedA));
+  const installedB = await fx.call(
+    "developer/install",
+    { package: buildPackage(makeManifest({ id: "second", name: "Second App" })).toString("base64") },
+    { sessionRef: "sess-b" },
+  );
+  assert.equal(installedB.ok, true, JSON.stringify(installedB));
+
+  const store = createDeveloperStore({ db: fx.db, dataRoot: path.join(fx.dir, "dxos"), clock: () => FIXED_NOW });
+  const adapter = domain.createDeveloperAppCatalogAdapter({ store });
+
+  // A 用户只看自己的：u-developer 装了 demo，看不到 u-b 的 second。
+  assert.deepEqual(adapter.listPermissionManifests({ userId: "u-developer" }).map((m) => m.appId), ["dev-demo"]);
+  assert.deepEqual(adapter.listPermissionManifests({ userId: "u-b" }).map((m) => m.appId), ["dev-second"]);
+  // 没有任何安装记录的用户返回空清单，不伪造。
+  assert.deepEqual(adapter.listPermissionManifests({ userId: "u-nobody" }), []);
+  // 不传 user：源 auth.ts:686 未传 installedIds 的全量语义，既有契约不变。
+  assert.deepEqual(adapter.listPermissionManifests().map((m) => m.appId).sort(), ["dev-demo", "dev-second"]);
+  assert.deepEqual(adapter.listPermissionManifests({}).map((m) => m.appId).sort(), ["dev-demo", "dev-second"]);
+});

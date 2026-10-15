@@ -18,18 +18,32 @@ const { joinUrl } = require("./protocol-engine/compiler.cjs");
 const { BUILTIN_PROTOCOL_METADATA_V2 } = require("./protocol-engine/builtins.cjs");
 const adapter = require("./provider-adapter.cjs");
 const legacyProtocols = require("./protocol-engine/legacy-protocols.cjs");
+// 旧版扁平仓库（source protocols.ts:2984-3181）：自建协议在列表/详情读取时惰性装载进
+// legacyProtocols.PROTOCOLS / PROVIDER_PROTOCOLS；顶层 require 只依赖 foundation，不构成循环。
+const customProtocolStore = require("./protocol-engine/legacy-custom-protocol-store.cjs");
 
 /**
  * Legacy key 与纯函数来自 electron/protocol-engine/legacy-protocols.cjs（源 protocols.ts）。
- * 模型协议 29 个（源 :281-2568）；供应商协议实测 20 个（源 :2589-2982，含 'cli:dreamina-canvas'）。
+ * 模型协议内置 29 个（源 :281-2568）；供应商协议内置实测 20 个（源 :2589-2982，含 'cli:dreamina-canvas'）。
+ *
+ * 必须在读取时动态取键并先触发自建仓库惰性装载（X3，源 :3181）：模块加载时的 Object.keys
+ * 快照会把"装载晚于本模块"的自建协议挡在 protocol/list、protocolTable() 之外。
+ * ensureLoaded 自身保证不覆盖内置、不重复；返回顺序 = 内置顺序 + 自建追加顺序。
  */
-const LEGACY_MODEL_PROTOCOLS = Object.freeze(Object.keys(legacyProtocols.PROTOCOLS));
-const LEGACY_PROVIDER_PROTOCOLS = Object.freeze(Object.keys(legacyProtocols.PROVIDER_PROTOCOLS));
+function legacyModelProtocolIds() {
+  customProtocolStore.ensureLoaded();
+  return Object.keys(legacyProtocols.PROTOCOLS);
+}
+
+function legacyProviderProtocolIds() {
+  customProtocolStore.ensureLoaded();
+  return Object.keys(legacyProtocols.PROVIDER_PROTOCOLS);
+}
 
 /** Legacy 表里免 API Key 的协议，按源语义取 auth.type === 'none'。源：protocols.ts:3595 providerRequiresApiKey。 */
-const LEGACY_NO_KEY_PROTOCOLS = Object.freeze(
-  LEGACY_PROVIDER_PROTOCOLS.filter((id) => legacyProtocols.PROVIDER_PROTOCOLS[id].auth.type === "none"),
-);
+function legacyNoKeyProtocolIds() {
+  return legacyProviderProtocolIds().filter((id) => legacyProtocols.PROVIDER_PROTOCOLS[id].auth.type === "none");
+}
 
 /** 统一调用出口命令/事件表。每条命令都走 model:command + trusted(event) 校验。 */
 const PROTOCOL_COMMANDS = Object.freeze({
@@ -124,8 +138,8 @@ function legacyExecution(id) {
 
 /** legacy 协议条目（供应商 + 模型，既有顺序），统一带来源、移植状态与执行可用性。 */
 function legacyProtocolEntries(kind) {
-  const legacyModel = LEGACY_MODEL_PROTOCOLS.map((id) => ({ id, kind: "model", engine: "legacy", ported: true, source: "protocols.ts:281-2568", ...legacyExecution(id) }));
-  const legacyProvider = LEGACY_PROVIDER_PROTOCOLS.map((id) => ({ id, kind: "provider", engine: "legacy", ported: true, source: "protocols.ts:2589-2982", ...legacyExecution(id) }));
+  const legacyModel = legacyModelProtocolIds().map((id) => ({ id, kind: "model", engine: "legacy", ported: true, source: "protocols.ts:281-2568", ...legacyExecution(id) }));
+  const legacyProvider = legacyProviderProtocolIds().map((id) => ({ id, kind: "provider", engine: "legacy", ported: true, source: "protocols.ts:2589-2982", ...legacyExecution(id) }));
   const all = [...legacyProvider, ...legacyModel];
   return kind ? all.filter((entry) => entry.kind === kind) : all;
 }
@@ -226,9 +240,15 @@ function normalizeProtocolError({ status = 0, kind = "", network = false } = {})
 }
 
 module.exports = {
-  LEGACY_MODEL_PROTOCOLS, LEGACY_PROVIDER_PROTOCOLS, LEGACY_NO_KEY_PROTOCOLS,
   PROTOCOL_COMMANDS, PROTOCOL_EVENTS, RISK_LEVELS,
   commandRisk, commandRequiresCredential, maskSecret, toPublicProvider,
   protocolTable, shadowedLegacyProtocols, providerRequiresApiKey,
   buildChatRequest, buildImageRequest, parseChatResponse, parseImageResponse, normalizeProtocolError,
 };
+
+// 派生键集改为 getter：模块加载时不再是固定快照，读取时反映当前 legacy 表（含已装载的自建协议）。
+Object.defineProperties(module.exports, {
+  LEGACY_MODEL_PROTOCOLS: { enumerable: true, get: legacyModelProtocolIds },
+  LEGACY_PROVIDER_PROTOCOLS: { enumerable: true, get: legacyProviderProtocolIds },
+  LEGACY_NO_KEY_PROTOCOLS: { enumerable: true, get: legacyNoKeyProtocolIds },
+});

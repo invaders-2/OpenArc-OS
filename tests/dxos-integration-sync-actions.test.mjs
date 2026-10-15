@@ -151,18 +151,20 @@ test("启用 + 就绪：automation 适配器经 mcpTransport 真调用（领星 
   const mcp = makeMcpPort();
   const bundle = track(createPluginBundle({
     userDataDir: tempDir(), safeStorage: null, mcpTransport: mcp,
+    sleeper: (ms) => new Promise((resolve) => setTimeout(resolve, 1)),
     probes: { binary: okProbe, python: okProbe, network: okProbe },
   }));
   assert.equal((await bundle.execute("integration/plugins/enable", { id: "lingxing" }, { sessionRef: "s1" })).ok, true);
   assert.equal((await bundle.execute("integration/plugins/enable", { id: "ziniao" }, { sessionRef: "s1" })).ok, true);
 
+  // Y2：适配器等到终态才返回（源 automationBusinessActions.ts:20-61），并如实带出结果文案。
   const lingxingText = await bundle.automationAdapter.lingxingCacheSync({ days: 1 });
-  assert.match(lingxingText, /领星缓存同步作业已启动/);
+  assert.equal(lingxingText, "领星近 1 天数据已缓存，共 1 条");
   await bundle.lingxing.whenIdle();
   assert.ok(mcp.calls.some((call) => call.toolName === "query_product_performance_asin_lists"));
 
   const ziniaoText = await bundle.automationAdapter.ziniaoDownload({ from: "2026-01-01", to: "2026-01-02", stores: [{ selector: "s1", name: "店铺一" }] });
-  assert.match(ziniaoText, /紫鸟下载作业已启动：.+（店铺 1 个）/);
+  assert.equal(ziniaoText, "紫鸟下载完成：新增 1 个按日文件，检查 1 个店铺");
   await bundle.ziniao.whenIdle();
   assert.ok(mcp.calls.some((call) => call.toolName === "download_vc_summary"));
   const done = bundle.ziniao.getZiniaoDownloadJob();

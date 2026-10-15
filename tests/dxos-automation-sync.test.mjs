@@ -88,6 +88,7 @@ test("automation 同步：lingxing_cache_sync 派发到真实方法并调用真�
   const mcp = makeMcpPort();
   const pluginBundle = trackPlugin(createPluginBundle({
     userDataDir: tempDir("dxos-plugin-sync-"), safeStorage: null, mcpTransport: mcp,
+    sleeper: (ms) => new Promise((resolve) => setTimeout(resolve, 1)),
     probes: { binary: okProbe, python: okProbe, network: okProbe },
   }));
   assert.equal((await pluginBundle.execute("integration/plugins/enable", { id: "lingxing" }, { sessionRef: "s1" })).ok, true);
@@ -96,7 +97,8 @@ test("automation 同步：lingxing_cache_sync 派发到真实方法并调用真�
   const created = store.createAutomation(USER, { instruction: "每日同步领星", schedule: { type: "once", at: BASE + 1000 }, action: { type: "lingxing_cache_sync", args: { days: 1 } } });
   const result = await runAction(automation, created.id);
   assert.equal(result.ok, true, JSON.stringify(result));
-  assert.match(result.value.result.result, /领星缓存同步作业已启动/);
+  // Y2：对外结果是终态（源 automationBusinessActions.ts:25），不再是"作业已启动"。
+  assert.equal(result.value.result.result, "领星近 1 天数据已缓存，共 1 条");
   await pluginBundle.lingxing.whenIdle();
   assert.ok(mcp.calls.some((call) => call.toolName === "query_product_performance_asin_lists"), "必须真正调用领星 MCP 工具");
 });
@@ -105,6 +107,7 @@ test("automation 同步：ziniao_download 派发到真实方法并调用真实�
   const mcp = makeMcpPort();
   const pluginBundle = trackPlugin(createPluginBundle({
     userDataDir: tempDir("dxos-plugin-sync-"), safeStorage: null, mcpTransport: mcp,
+    sleeper: (ms) => new Promise((resolve) => setTimeout(resolve, 1)),
     probes: { binary: okProbe, python: okProbe, network: okProbe },
   }));
   assert.equal((await pluginBundle.execute("integration/plugins/enable", { id: "ziniao" }, { sessionRef: "s1" })).ok, true);
@@ -114,7 +117,8 @@ test("automation 同步：ziniao_download 派发到真实方法并调用真实�
   const created = store.createAutomation(USER, { instruction: "下载紫鸟", schedule: { type: "once", at: BASE + 1000 }, action: { type: "ziniao_download", args: { days: 1, stores: [{ selector: "s1", name: "店铺一" }] } } });
   const result = await runAction(automation, created.id);
   assert.equal(result.ok, true, JSON.stringify(result));
-  assert.match(result.value.result.result, /紫鸟下载作业已启动：.+（店铺 1 个）/);
+  // Y2：对外结果是终态（源 automationBusinessActions.ts:54），不再是"作业已启动"。
+  assert.equal(result.value.result.result, "紫鸟下载完成：新增 1 个按日文件，检查 1 个店铺");
   await pluginBundle.ziniao.whenIdle();
   assert.ok(mcp.calls.some((call) => call.toolName === "download_vc_summary"), "必须真正调用紫鸟 MCP 工具");
 });
@@ -123,6 +127,7 @@ test("automation 同步：ziniao_download 未给 stores 时按源 list_stores �
   const mcp = makeMcpPort();
   const pluginBundle = trackPlugin(createPluginBundle({
     userDataDir: tempDir("dxos-plugin-sync-"), safeStorage: null, mcpTransport: mcp,
+    sleeper: (ms) => new Promise((resolve) => setTimeout(resolve, 1)),
     probes: { binary: okProbe, python: okProbe, network: okProbe },
   }));
   assert.equal((await pluginBundle.execute("integration/plugins/enable", { id: "ziniao" }, { sessionRef: "s1" })).ok, true);
@@ -131,7 +136,7 @@ test("automation 同步：ziniao_download 未给 stores 时按源 list_stores �
   const created = store.createAutomation(USER, { instruction: "下载紫鸟", schedule: { type: "once", at: BASE + 1000 }, action: { type: "ziniao_download", args: { days: 1 } } });
   const result = await runAction(automation, created.id);
   assert.equal(result.ok, true, JSON.stringify(result));
-  assert.match(result.value.result.result, /紫鸟下载作业已启动：.+（店铺 1 个）/);
+  assert.equal(result.value.result.result, "紫鸟下载完成：新增 1 个按日文件，检查 1 个店铺");
   await pluginBundle.ziniao.whenIdle();
   const tools = mcp.calls.map((call) => call.toolName);
   assert.ok(tools.includes("start_client"), "必须按源先 start_client");
@@ -170,6 +175,7 @@ test("automation 同步：插件默认关 → AGENT_DEPENDENCY_UNAVAILABLE（精
   const mcp = makeMcpPort();
   const pluginBundle = trackPlugin(createPluginBundle({
     userDataDir: tempDir("dxos-plugin-sync-"), safeStorage: null, mcpTransport: mcp,
+    sleeper: (ms) => new Promise((resolve) => setTimeout(resolve, 1)),
     probes: { binary: okProbe, python: okProbe, network: okProbe },
   }));
   const automation = openAutomation(pluginBundle.automationAdapter);

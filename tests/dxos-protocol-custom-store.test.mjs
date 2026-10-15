@@ -19,6 +19,7 @@ const require = createRequire(import.meta.url);
 const legacy = require("../electron/protocol-engine/legacy-protocols.cjs");
 const store = require("../electron/protocol-engine/legacy-custom-protocol-store.cjs");
 const repository = require("../electron/protocol-engine/repository.cjs");
+const domain = require("../electron/provider-protocol-domain.cjs");
 
 const BUILTIN_PROVIDER_COUNT = 20; // 源 protocols.ts:2589-2982 实测 20（含 cli:dreamina-canvas）
 const BUILTIN_MODEL_TOTAL = 29; // 源 protocols.ts:281-2568
@@ -289,4 +290,50 @@ test("生产接线：配置 v2 仓库后，旧版 store 从同目录 custom-prot
   assert.ok(found, "v2 仓库同目录的旧版 store 必须被装载（provider-protocol-service.cjs:636-639 接线）");
   assert.equal(found.origin, "custom");
   assert.equal(store.customProtocolStoreStatus().file, path.join(dxosDir, "custom-protocols.json"));
+});
+
+test("Y3 · 协议表动态化：自建条目作为新增项进入 protocolTable()，内置键集不重排、不重复", () => {
+  store.resetCustomProtocolStoreForTests();
+  repository.configureProtocolRepository({ storeFile: null, packageDirs: null });
+
+  // 无自建仓库时的内置基线：派生键集改为读取时动态取键，模块加载时不再是固定快照。
+  const builtinModels = domain.LEGACY_MODEL_PROTOCOLS.slice();
+  const builtinProviders = domain.LEGACY_PROVIDER_PROTOCOLS.slice();
+  assert.equal(builtinModels.length, BUILTIN_MODEL_TOTAL);
+  assert.equal(builtinProviders.length, BUILTIN_PROVIDER_COUNT);
+  const tableBefore = domain.protocolTable().map((entry) => entry.kind + ":" + entry.id);
+
+  useStoreFile();
+  store.saveCustomProtocol("provider", validProvider("dyn-relay"));
+  store.saveCustomProtocol("model", validModel("dyn-image"));
+
+  // 动态键集：内置前缀原样保留（不重排），自建条目只作为新增项追加。
+  assert.deepEqual(domain.LEGACY_MODEL_PROTOCOLS.slice(0, builtinModels.length), builtinModels);
+  assert.deepEqual(domain.LEGACY_PROVIDER_PROTOCOLS.slice(0, builtinProviders.length), builtinProviders);
+  assert.deepEqual(domain.LEGACY_MODEL_PROTOCOLS.slice(builtinModels.length), ["dyn-image"]);
+  assert.deepEqual(domain.LEGACY_PROVIDER_PROTOCOLS.slice(builtinProviders.length), ["dyn-relay"]);
+
+  // 装载后 protocolTable()/protocol/list 契约能看到自建条目，内置条目集合不变。
+  const tableAfter = domain.protocolTable().map((entry) => entry.kind + ":" + entry.id);
+  assert.equal(tableAfter.length, tableBefore.length + 2);
+  assert.deepEqual(
+    tableAfter.filter((key) => !key.endsWith(":dyn-image") && !key.endsWith(":dyn-relay")),
+    tableBefore,
+    "除两条自建新增项外，内置条目必须逐项一致且保序",
+  );
+  assert.equal(new Set(tableAfter).size, tableAfter.length, "protocolTable() 不得出现重复 kind:id");
+  const addedModel = domain.protocolTable("model").find((entry) => entry.id === "dyn-image");
+  const addedProvider = domain.protocolTable("provider").find((entry) => entry.id === "dyn-relay");
+  assert.ok(addedModel, "自建 model 协议必须出现在 protocolTable('model')");
+  assert.ok(addedProvider, "自建 provider 协议必须出现在 protocolTable('provider')");
+  assert.equal(addedModel.engine, "legacy");
+  assert.equal(addedProvider.engine, "legacy");
+
+  // protocol/list 服务出口（provider-protocol-service.cjs listProtocols → domain.protocolTable）必须一并可见。
+  const { ProviderProtocolService } = require("../electron/provider-protocol-service.cjs");
+  const listed = new ProviderProtocolService({ store: { get: () => null } }).listProtocols();
+  assert.equal(listed.ok, true);
+  for (const key of ["model:dyn-image", "provider:dyn-relay"]) {
+    assert.ok(listed.items.some((item) => item.kind + ":" + item.id === key), key + " 必须出现在 protocol/list 契约");
+  }
 });

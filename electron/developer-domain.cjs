@@ -1132,7 +1132,9 @@ function createDeveloperAppActionAdapter({ store, runTool, createError } = {}) {
  *
  * 契约与 local-account-service.cjs 的 deps.appCatalog 一致：
  *   listInstalledApps({ userId, organizationId }) → [{ id, name, desc }]（仅该用户已启用的 App）
- *   listPermissionManifests() → [{ appId, appName, permissions: [{ code, label, description }] }]
+ *   listPermissionManifests({ userId }) → [{ appId, appName, permissions: [{ code, label, description }] }]
+ *     （给出 userId 时按源 auth.ts:652-655 的 installedIds 过滤，只看该用户已安装的 App；
+ *      不传 userId 即源"未传 installedIds"的全量语义 auth.ts:681-683，保持既有契约。）
  *
  * 投影规则逐条对齐源 auth.ts:630-679：
  *   · desc = manifest.subtitle || manifest.description || '已安装应用'（源同序）；
@@ -1175,9 +1177,20 @@ function createDeveloperAppCatalogAdapter({ store } = {}) {
     }
     return out;
   }
-  function listPermissionManifests() {
+
+  /**
+   * 源 auth.ts:652-655：developerPermissionManifests(installedIds) 按该用户已安装的 App 过滤。
+   * 适配器以 userId 为入口（与 listInstalledApps({ userId }) 同形），由 store.listInstalled 得到
+   * installedIds；不给 userId 时退回源 :686 调用 permissionManifests() 的全量语义。
+   */
+  function listPermissionManifests(input = {}) {
+    const rawUserId = input && typeof input === "object" ? input.userId : input;
+    const userId = rawUserId != null && String(rawUserId) !== "" ? String(rawUserId) : null;
+    const appIds = userId
+      ? (store.listInstalled(userId) || []).map((row) => row && row.appId).filter(Boolean)
+      : store.listAppIds() || [];
     const out = [];
-    for (const appId of store.listAppIds() || []) {
+    for (const appId of appIds) {
       const release = releaseOf(appId);
       if (!release || !release.manifest) continue;
       const raw = release.capabilities && Array.isArray(release.capabilities.permissions) ? release.capabilities.permissions : [];

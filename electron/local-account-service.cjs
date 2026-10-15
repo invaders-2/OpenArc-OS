@@ -789,10 +789,15 @@ class LocalAccountService {
     return { apps: [...byId.values()], developerApps: developer };
   }
 
-  #permissionManifests() {
+  /**
+   * 源 auth.ts:652-679 按用户过滤、:681-683 不过滤两条调用点分开：
+   * 给 userId 时对齐 appPermissionSnapshot 的 installedIds（只看该用户已安装的 App）；
+   * 不给时是 knownPermissionCodes / permissionHostAppId 需要的全量清单，行为不变。
+   */
+  #permissionManifests(userId) {
     if (!this.appCatalog || typeof this.appCatalog.listPermissionManifests !== "function") return [];
     try {
-      const manifests = this.appCatalog.listPermissionManifests() || [];
+      const manifests = this.appCatalog.listPermissionManifests(userId ? { userId: String(userId) } : {}) || [];
       return Array.isArray(manifests) ? manifests : [];
     } catch {
       return [];
@@ -858,7 +863,7 @@ class LocalAccountService {
       apps: catalog.apps,
       externalAppAccess,
       permissionPolicies,
-      permissionManifests: this.#permissionManifests(),
+      permissionManifests: this.#permissionManifests(row.id),
       developerApps: catalog.developerApps,
       local: true,
     };
