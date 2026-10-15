@@ -17,7 +17,7 @@
  * | auth_audit_logs（135-144）                  | audit_log（identity-store.cjs:158）+ authorization_audit（:301）| 事件名保留源语义（auth.login / department.create …）；resourceType/resource_id/detail/ip 在 audit_log 无列，治理动作的归属列进 authorization_audit |
  * | app_access_rules（146-152）                 | app_resource_grants（identity-store.cjs:284）                  | 保留字 resource_type='app-access'、scope='ACCESS'、resource_id=''；actions 存 {mode,departmentIds} |
  * | app_permission_policies（154-163）          | app_resource_grants                                            | 保留字 resource_type='app-permission'、resource_id=permission_code、scope='ACCESS'；actions 存策略对象 |
- * | app_principals（274-298）                   | app_principals（identity-store.cjs:274）                       | OpenArc 内置 App 目录直接复用；源里开发者 App 清单属 B7，走注入 |
+ * | app_principals（274-298）                   | app_principals（identity-store.cjs:287）                       | OpenArc 内置 App 目录直接复用；源里开发者 App 清单属 B7，走注入。X7：开发者 App 安装/启用时也幂等登记本表（built_in=0），让 app.<manifest.id>.* 权限码的宿主校验通过（见 #permissionHostAppId） |
  *
  * 保留字 resource_type='app-access' / 'app-permission' 与 OpenArc 既有授权家族
  * （'' / 'model' / 'mcp' / 'tool' / 具体资源类型）互不重叠，因此 baselinePolicyKeyOf /
@@ -809,6 +809,28 @@ class LocalAccountService {
     return codes;
   }
 
+  /**
+   * X7：权限码 → 宿主 App 的权威解析（先按"声明它的 App"，拿不到再回落字面量切分）。
+   *
+   * 内置 App 的权限码字面量前缀就是 app_principals.app_id（如 app.photoshop.export → photoshop），
+   * 但开发者 App 不同：安装 appId 是 "dev-" + manifest.id（developer-service.cjs install），
+   * 而 normalizeAppPermission 生成的权限码前缀是 manifest.id（developer-domain.cjs:491-493），
+   * 两者不在同一命名空间。developer Catalog 的 manifest.appId 是安装 appId，是权威映射。
+   * 注意：这里只改"怎么解析出 hostApp"，仍然要求 appById(hostApp) 真实存在 —— 校验强度不变。
+   */
+  #permissionHostAppId(code) {
+    // 只对 app.<id>.* 形态生效。无前缀的声明（如 "dev.custom"）在既有语义里宿主是 HOST_APP_ID
+    // （local-account-service.cjs:108、开发者包里的非标准权限码原样保留），不由这里改写。
+    if (!deriveAppIdOfPermission(code)) return null;
+    for (const manifest of this.#permissionManifests()) {
+      if (!manifest || !Array.isArray(manifest.permissions)) continue;
+      if (manifest.permissions.some((permission) => permission && String(permission.code) === code)) {
+        return String(manifest.appId);
+      }
+    }
+    return null;
+  }
+
   /** 源 auth.ts:732-755 appPermissionSnapshot；会员门禁分支（:735-742）已 OUT。 */
   #snapshot(row) {
     const catalog = this.#catalog(row);
@@ -973,7 +995,9 @@ class LocalAccountService {
         return this.#fail(DXOS_ERR_INVALID_INPUT, "权限目标用户不存在");
       }
     }
-    const hostApp = deriveAppIdOfPermission(code) || (appId ? String(appId) : HOST_APP_ID);
+    // X7：开发者 App 声明的权限码先按清单归到它的安装 appId（dev-<manifest.id>），
+    // 再走同一条 appById 存在性校验；host App 的既有校验（含 NOT_FOUND 拒绝）原样保留。
+    const hostApp = this.#permissionHostAppId(code) || deriveAppIdOfPermission(code) || (appId ? String(appId) : HOST_APP_ID);
     if (!this.authStore.appById(hostApp)) return this.#fail(DXOS_ERR_NOT_FOUND, "权限宿主 APP 不存在");
     this.authStore.upsertAppGrant({
       appId: hostApp,

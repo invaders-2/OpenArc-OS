@@ -12,8 +12,10 @@
  *   ③ disable   只移除 user_installed_apps 行；包目录、清单缓存、回滚点全部保留。
  *   ④ rollback  从 app_market_releases 的历史行（revoked_at 非空）取上一版本，重新置为当前版本；
  *               启用状态下同步 user_installed_apps 的 installed_version/build（回滚后运行时状态一致）。
- *   ⑤ uninstall 清 user_installed_apps + app_market_releases + 包目录 + 凭据绑定；
+ *   ⑤ uninstall 清 user_installed_apps + app_market_releases + 包目录 + 凭据绑定 + app_principals 身份；
  *               **运行时事件与网络审计保留**（审计事实不随卸载消失）。
+ *   X7：install / enable 幂等登记 app_principals（app_id = "dev-" + manifest.id，built_in = 0），
+ *       没有它 saveAppPermissionPolicy 的 appById(hostApp) 校验会拒绝开发者 App 的权限策略。
  *
  * 出网治理（源 server/developerNetwork.ts:12-128 的口径，不另造一套）：
  *   · 未声明 network.domains → DEVELOPER_ERR_NETWORK_NOT_DECLARED（拒绝而不是放行）；
@@ -47,6 +49,8 @@ const { createDeveloperStore } = require("./developer-store.cjs");
 const migrationDomain = require("./developer-migrations.cjs");
 
 const HOST_APP_ID = "ai";
+/** X7：开发者 App 在 app_principals.publisher 的来源标记（内置为 'openarc-builtin'）。 */
+const DEVELOPER_APP_PUBLISHER = "openarc-developer";
 const MAX_NETWORK_BODY_BYTES = 2 * 1024 * 1024;
 const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
 
@@ -72,6 +76,12 @@ function createDeveloperBundle(options = {}) {
   const userDataDir = options.userDataDir || null;
   const identityStore = options.identityStore || null;
   const authorization = options.authorization || null;
+  // X7：app_principals 的写入通道。与 agent-bundle 同一装配边界：主进程传 identity.authStore
+  // （main.cjs），此处也接受 authorization.store；两者都缺时保持"未登记"降级 —— 不伪造 principal，
+  // install / enable / uninstall 本身照常工作（见 registerAppPrincipal / removeAppPrincipal）。
+  const authStore = options.authStore && typeof options.authStore.upsertApp === "function"
+    ? options.authStore
+    : (authorization && authorization.store && typeof authorization.store.upsertApp === "function" ? authorization.store : null);
   const systemVersion = asStr(options.systemVersion, 60) || domain.DEVELOPER_SYSTEM_VERSION;
   const injectedLookup = typeof options.lookup === "function" ? options.lookup : null;
   const injectedFetch = typeof options.fetchImpl === "function" ? options.fetchImpl : null;
@@ -160,6 +170,33 @@ function createDeveloperBundle(options = {}) {
     } catch (error) {
       if (logger) logger("[OpenArc developer] runtime event failed: " + String((error && error.message) || error));
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // X7：app_principals 登记（开发者 App 的机器级身份）
+  // -------------------------------------------------------------------------
+  // 为什么必须登记：saveAppPermissionPolicy 用 appById(hostApp) 保证"权限宿主 App 存在"
+  // （local-account-service.cjs:1001）。内置 App 由 identity-store 播种，开发者 App 原先只存在于
+  // developer-store（user_installed_apps / app_market_releases），因此 app.<manifest.id>.* 形态的
+  // 权限策略在落库时命中 DXOS_ERR_NOT_FOUND。
+  // 幂等来源：AuthorizationStore.upsertApp 是 ON CONFLICT(app_id) DO UPDATE（authorization-store.cjs:69-70），
+  // 重复 install / enable 只更新同一行，不产生第二行。
+  function registerAppPrincipal(appId, manifest) {
+    if (!authStore) return null;
+    const name = manifest && manifest.name ? String(manifest.name) : String(appId);
+    return authStore.upsertApp({
+      appId: String(appId),
+      name,
+      publisher: DEVELOPER_APP_PUBLISHER,
+      status: "enabled",
+      builtIn: 0,
+    });
+  }
+
+  /** 卸载清理：见 authorization-store.deleteApp（先删 grant，再删 built_in = 0 的 principal）。 */
+  function removeAppPrincipal(appId) {
+    if (!authStore || typeof authStore.deleteApp !== "function") return null;
+    return authStore.deleteApp(String(appId));
   }
 
   // -------------------------------------------------------------------------
@@ -290,6 +327,9 @@ function createDeveloperBundle(options = {}) {
       transaction(() => {
         store.activateRelease({ appId, userId, manifest: prepared.manifest, packagePath: written.storageRelPath, packageSize: buffer.length, sha256: sha, now: clock() });
         store.setInstalled(userId, appId, prepared.manifest, clock());
+        // X7：principal 与"发布记录 + 启用"同一事务 —— 任一步失败则安装整体回滚，
+        // 不留下"已装载但没有 app_principals 身份"的中间态。
+        registerAppPrincipal(appId, prepared.manifest);
       });
     } catch (error) {
       rollbackInstall({ appId, written, migration });
@@ -345,9 +385,13 @@ function createDeveloperBundle(options = {}) {
   function enable(payload, context) {
     const userId = String(context.userId);
     const appId = requireAppId(payload);
-    const { current } = loadApp(appId);
+    const { current, manifest } = loadApp(appId);
     const already = store.getInstalled(userId, appId);
     store.setInstalled(userId, appId, { version: current.version, build: current.build, releaseChannel: current.channel }, clock());
+    // X7：幂等补登记 —— 覆盖本次能力之前就已安装、principal 尚未写入的 App。
+    // 登记失败不改变"启用"这一已完成的用户状态（与 recordEvent 同口径），但要让调用方看见：
+    // 抛出的错误由外层 execute 归一为结构化失败，不由这里吞掉。
+    registerAppPrincipal(appId, manifest);
     if (!already) recordEvent(userId, appId, { version: current.version, build: current.build }, "app.enable", null);
     return { ...projectApp(userId, appId), changed: !already };
   }
@@ -404,6 +448,9 @@ function createDeveloperBundle(options = {}) {
     store.purgeCredentials(appId);
     store.removeAppPackages(appId);
     store.purgeReleases(appId);
+    // X7：App 机器级身份随卸载一并清理（先删该 App 的 grant，再删 built_in = 0 的 principal）；
+    // 运行时事件与网络审计保留（审计事实不随卸载消失，源语义）。
+    removeAppPrincipal(appId);
     recordEvent(userId, appId, { version: current.version, build: current.build }, "app.uninstall", null);
     return { appId, uninstalled: true, version: current.version, build: current.build };
   }
@@ -664,6 +711,8 @@ function createDeveloperBundle(options = {}) {
       userDataDir: !!userDataDir,
       database: !!db,
       identity: !!authorization,
+      // X7：principal 登记通道是否接上（未接上时 install/enable 不写 app_principals，如实报 false）。
+      authStore: !!authStore,
       injectedLookup: typeof injectedLookup === "function",
       injectedFetch: typeof injectedFetch === "function",
     }),

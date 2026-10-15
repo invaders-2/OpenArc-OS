@@ -999,6 +999,8 @@ app.whenReady().then(async () => {
       userDataDir: userData,
       identityStore: identity.store,
       authorization: identity.authorization,
+      // X7：开发者 App 安装/启用时幂等登记 app_principals（agent-bundle 同一写入通道）。
+      authStore: identity.authStore,
       systemVersion: app.getVersion(),
       migrationFs: developerMigrationFs,
       migrationSnapshotRoot: developerMigrationSnapshotRoot,
