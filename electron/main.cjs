@@ -77,6 +77,11 @@ const { createProviderAdapter } = require("./provider-adapter-bridge.cjs");
 const { registerMcpIpc } = require("./mcp-bootstrap.cjs");
 // B4 收口：把已装配的 MCP 连接目录（identity.mcpService）只读投影成 agent 工具目录的 mcp 来源。
 const { createMcpAgentBridge } = require("./mcp-agent-bridge.cjs");
+// Y4：既有 MCP 存储/服务之上的可写 connections 端口（供宿主侧 App 托管注册表读写既有记录）。
+//   constructOrDegrade：可选项构造抛错 → null + 如实日志，不把主进程启动链拖死（见本块装配注释）。
+const { createMcpConnectionsPort, constructOrDegrade } = require("./mcp-connections-port.cjs");
+// Y4：宿主侧 App 托管 MCP 注册表（归属 + 连接生命周期；策略门不放宽）。
+const { createAppManagedMcpRegistry } = require("./mcp-app-registry.cjs");
 // B4e：MCP 工具调用显式开关（<userData>/dxos/mcp.json，默认关闭）。
 const { createMcpSwitch } = require("./mcp-switch.cjs");
 // B4e 收口：生产真实 tools/call 传输（McpService 的活连接）+ 任务内审批端口（ControlledToolProxy）。
@@ -784,6 +789,42 @@ app.whenReady().then(async () => {
     //   · 调用（B4e 收口）：真实传输 = McpService 已建立的活连接（electron/mcp-live-transport.cjs），
     //     不再依赖测试注入的假对象；审批 = ControlledToolProxy.propose，taskId 逐调用由可信上下文解析。
     //     开关未打开 → 0 审批 0 传输；未审批 → APPROVAL_REQUIRED（0 传输）；审批通过才发真实 tools/call。
+    // Y4：宿主侧 App 托管 MCP 的 connections 端口 + 注册表（策略门沿用 mcp-domain 白名单 / SSRF 口径）。
+    //   · connections 端口的 list 走 McpService.listConnections（app grant + 可见性判定），
+    //     绝不把原始数据库行直接交给调用方；save/connect/disconnect/remove 落在既有 mcp_connections 表；
+    //   · appState 来自 developer 的启用状态（user_installed_apps；无会话 = 未启用，fail-closed）；
+    //   · identity.mcpService 未装起来时不建端口 / 注册表，全部保持结构化降级，main 装配不崩。
+    // Y4 降级口径：端口 / 注册表都是可选能力。构造抛错时降到 null + 记一条原因，绝不把启动链拖死；
+    // 上层（developer bundle / mcp-agent-bridge）拿到 null 后保持既有的结构化 AGENT_DEPENDENCY_UNAVAILABLE。
+    const mcpWiringLog = (event, detail) => { try { console.warn("[openarc] " + String(event) + " " + JSON.stringify(detail)); } catch { /* 日志失败不影响主流程 */ } };
+    const mcpConnectionsPort = identity.mcpService
+      ? constructOrDegrade("MCP connections 端口", () => createMcpConnectionsPort({
+          mcpService: identity.mcpService,
+          mcpStore: identity.mcpStore || null,
+          context: () => ({ sessionRef: (identity.service && identity.service.current) || null, appId: "mcp-center" }),
+          logger: mcpWiringLog,
+        }), mcpWiringLog).value
+      : null;
+    // appState 的真实来源 = developer 的启用状态（user_installed_apps）。无会话 / 无库 / 查询失败一律
+    // fail-closed（未启用），不因为读不到就默认放行连接。
+    const developerEnabledStore = identity.store
+      ? constructOrDegrade("developer 启用态存储", () => createDeveloperStore({ db: identity.store.connection }), mcpWiringLog).value
+      : null;
+    const mcpAppState = {
+      isEnabled: (appId) => {
+        const snap = identity.service && identity.service.snapshot;
+        const userId = snap && snap.userId != null ? String(snap.userId) : null;
+        if (!userId || !developerEnabledStore) return false;
+        try { return !!developerEnabledStore.getInstalled(userId, String(appId)); } catch { return false; }
+      },
+    };
+    const appManagedMcpRegistry = mcpConnectionsPort
+      ? constructOrDegrade("App 托管 MCP 注册表", () => createAppManagedMcpRegistry({
+          connections: mcpConnectionsPort,
+          appState: mcpAppState,
+          logger: mcpWiringLog,
+        }), mcpWiringLog).value
+      : null;
     const mcpLiveTransport = createMcpLiveTransport({ mcpService: identity.mcpService, switchPort: mcpSwitch });
     // D5-04：把 MCP 接成**既有 SideEffectAuthority** 的 provider（plan/execute 两个方向），不新建第二套审批权威。
     //   · provider 挂到既有 adapters.providers 注册表（tool-adapters.cjs adapterFor 解析）；活性由
@@ -822,6 +863,10 @@ app.whenReady().then(async () => {
           // 注入 registry 后，已连接 server 的 MCP 工具被幂等登记为 EXTERNAL_SIDE_EFFECT（requiresApproval）。
           switch: mcpSwitch,
           registry: identity.toolRegistry || null,
+          // Y4：配置读写接既有 connections 端口（只读 list 仍是授权后的投影）；
+          // Y1 的 App 托管注册表原样转交 createMcpAgentTools 的三个入口。
+          connections: mcpConnectionsPort,
+          appRegistry: appManagedMcpRegistry,
           transport: mcpLiveTransport,
           approval: mcpApprovalPort,
         })
@@ -1001,6 +1046,8 @@ app.whenReady().then(async () => {
       authorization: identity.authorization,
       // X7：开发者 App 安装/启用时幂等登记 app_principals（agent-bundle 同一写入通道）。
       authStore: identity.authStore,
+      // Y4：启用 / 禁用 / 卸载绑定宿主侧 App 托管 MCP 注册表（未装起来时为 null，保持既有降级）。
+      appMcpRegistry: appManagedMcpRegistry,
       systemVersion: app.getVersion(),
       migrationFs: developerMigrationFs,
       migrationSnapshotRoot: developerMigrationSnapshotRoot,

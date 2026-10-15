@@ -85,6 +85,9 @@ function createDeveloperBundle(options = {}) {
   const systemVersion = asStr(options.systemVersion, 60) || domain.DEVELOPER_SYSTEM_VERSION;
   const injectedLookup = typeof options.lookup === "function" ? options.lookup : null;
   const injectedFetch = typeof options.fetchImpl === "function" ? options.fetchImpl : null;
+  // Y4：宿主侧 App 托管 MCP 注册表（electron/mcp-app-registry.cjs）。
+  // 未注入 = 与从前逐字一致（不注册、不连接），不假装"已绑定 MCP 生命周期"。
+  const appMcpRegistry = options.appMcpRegistry && typeof options.appMcpRegistry === "object" ? options.appMcpRegistry : null;
 
   const paths = userDataDir ? resolveDxosPaths(userDataDir) : null;
   const dataRoot = paths ? paths.root : null;
@@ -169,6 +172,77 @@ function createDeveloperBundle(options = {}) {
       });
     } catch (error) {
       if (logger) logger("[OpenArc developer] runtime event failed: " + String((error && error.message) || error));
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Y4：App 托管 MCP 生命周期（启用 / 禁用 / 卸载 与宿主注册表绑定）
+  // -------------------------------------------------------------------------
+  // 为什么放在这里：开发者 App 的 MCP 声明随包解析（capabilities.mcp：normalizeMcpList 只保留
+  // 白名单 serverKey），启用状态由 user_installed_apps 表达；两者拼起来才是"这个 App 现在托管了
+  // 哪些 MCP、该不该连"。注册表内部仍走 mcp-domain.cjs:72 LOCAL_SERVERS 与 :112
+  // validateRemoteEndpoint 的既有策略，本层不做第二套判定。
+  //
+  // 失败只如实记录（app_runtime_events + logger）并降级，绝不改写 App 的启用 / 卸载结果，
+  // 也不静默吞掉原因；未注入注册表时这些函数全部跳过（既有返回形状逐字不变）。
+
+  /** 安装 / 启用：把 App 声明交给注册表（注册成功才落库 / 连接；不合规整批拒绝）。 */
+  async function syncAppMcp(userId, appId, sourceRoot, capabilities, manifestLike) {
+    if (!appMcpRegistry || typeof appMcpRegistry.sync !== "function") return { ok: true, skipped: "NO_REGISTRY" };
+    const declarations = Array.isArray(capabilities && capabilities.mcp) ? capabilities.mcp : [];
+    if (!declarations.length) return { ok: true, skipped: "NO_DECLARATIONS" };
+    try {
+      const res = await appMcpRegistry.sync(String(appId), sourceRoot == null ? null : String(sourceRoot), declarations);
+      if (!res || res.ok !== true) {
+        const reason = (res && (res.error || res.detail)) || "SYNC_FAILED";
+        recordEvent(userId, appId, manifestLike || {}, "app.mcp.sync.error", { reason: String(reason).slice(0, 200), policy: res && res.policy ? res.policy : null });
+        if (logger) logger("[OpenArc developer] App 托管 MCP 注册失败（已降级，不影响安装 / 启用）：" + appId + " → " + String(reason).slice(0, 200));
+        return { ok: false, error: res && res.error, policy: res && res.policy, detail: res && res.detail };
+      }
+      return { ok: true, connected: res.connected, servers: res.servers, skipped: res.skipped };
+    } catch (error) {
+      const reason = String((error && error.message) || error);
+      recordEvent(userId, appId, manifestLike || {}, "app.mcp.sync.error", { reason: reason.slice(0, 200) });
+      if (logger) logger("[OpenArc developer] App 托管 MCP 注册异常（已降级）：" + appId + " → " + reason.slice(0, 200));
+      return { ok: false, error: "MCP_APP_SYNC_FAILED", detail: reason };
+    }
+  }
+
+  /** 启用 / 禁用：按已登记记录重新判定（启用才连接；禁用 = 断开 + DISABLED）。 */
+  async function setAppMcpEnabled(userId, appId, enabled, manifestLike) {
+    if (!appMcpRegistry || typeof appMcpRegistry.setAppEnabled !== "function") return { ok: true, skipped: "NO_REGISTRY" };
+    try {
+      const res = await appMcpRegistry.setAppEnabled(String(appId), enabled === true);
+      if (!res || res.ok !== true) {
+        const reason = (res && (res.error || res.detail)) || "SET_ENABLED_FAILED";
+        recordEvent(userId, appId, manifestLike || {}, "app.mcp.lifecycle.error", { action: enabled === true ? "enable" : "disable", reason: String(reason).slice(0, 200), rejected: res && Array.isArray(res.rejected) ? res.rejected.length : 0 });
+        if (logger) logger("[OpenArc developer] App 托管 MCP " + (enabled === true ? "启用" : "禁用") + "判定失败（已降级）：" + appId + " → " + String(reason).slice(0, 200));
+      }
+      return res || { ok: false, error: "SET_ENABLED_FAILED" };
+    } catch (error) {
+      const reason = String((error && error.message) || error);
+      recordEvent(userId, appId, manifestLike || {}, "app.mcp.lifecycle.error", { action: enabled === true ? "enable" : "disable", reason: reason.slice(0, 200) });
+      if (logger) logger("[OpenArc developer] App 托管 MCP 生命周期异常（已降级）：" + appId + " → " + reason.slice(0, 200));
+      return { ok: false, error: "MCP_APP_LIFECYCLE_FAILED", detail: reason };
+    }
+  }
+
+  /** 卸载：清理该 App 的全部托管记录（断开 + 删除；别的记录不动）。 */
+  async function removeAppMcp(userId, appId, manifestLike) {
+    if (!appMcpRegistry || typeof appMcpRegistry.remove !== "function") return { ok: true, skipped: "NO_REGISTRY" };
+    try {
+      const res = await appMcpRegistry.remove(String(appId));
+      if (!res || res.ok !== true) {
+        const reason = (res && (res.error || res.detail)) || "REMOVE_FAILED";
+        recordEvent(userId, appId, manifestLike || {}, "app.mcp.lifecycle.error", { action: "uninstall", reason: String(reason).slice(0, 200) });
+        if (logger) logger("[OpenArc developer] App 托管 MCP 卸载清理失败（已降级）：" + appId + " → " + String(reason).slice(0, 200));
+      }
+      return res || { ok: false, error: "REMOVE_FAILED" };
+    } catch (error) {
+      const reason = String((error && error.message) || error);
+      recordEvent(userId, appId, manifestLike || {}, "app.mcp.lifecycle.error", { action: "uninstall", reason: reason.slice(0, 200) });
+      if (logger) logger("[OpenArc developer] App 托管 MCP 卸载清理异常（已降级）：" + appId + " → " + reason.slice(0, 200));
+      return { ok: false, error: "MCP_APP_REMOVE_FAILED", detail: reason };
     }
   }
 
@@ -292,7 +366,7 @@ function createDeveloperBundle(options = {}) {
   // ① 装载
   // -------------------------------------------------------------------------
 
-  function install(payload, context) {
+  async function install(payload, context) {
     const userId = String(context.userId);
     const buffer = decodePackage(payload);
     const prepared = domain.prepareDeveloperApp(domain.readPackageEntries(buffer), { systemVersion });
@@ -336,7 +410,11 @@ function createDeveloperBundle(options = {}) {
       throw error;
     }
     recordEvent(userId, appId, prepared.manifest, existingManifest ? "app.upgrade" : "app.install", { source: asStr(payload.sourceName, 160) || null, from: existingManifest ? domain.appReleaseKey(existingManifest) : null });
-    return projectApp(userId, appId);
+    const projected = projectApp(userId, appId);
+    if (!appMcpRegistry) return projected;
+    // Y4：包字节与安装态都已提交，才注册 App 声明的托管 MCP；注册失败只记录并降级，不回滚安装本身。
+    const mcp = await syncAppMcp(userId, appId, written.storageRelPath, prepared.capabilities, prepared.manifest);
+    return { ...projected, mcp };
   }
 
   /**
@@ -382,7 +460,7 @@ function createDeveloperBundle(options = {}) {
   // ② / ③ 启用 / 禁用
   // -------------------------------------------------------------------------
 
-  function enable(payload, context) {
+  async function enable(payload, context) {
     const userId = String(context.userId);
     const appId = requireAppId(payload);
     const { current, manifest } = loadApp(appId);
@@ -393,10 +471,14 @@ function createDeveloperBundle(options = {}) {
     // 抛出的错误由外层 execute 归一为结构化失败，不由这里吞掉。
     registerAppPrincipal(appId, manifest);
     if (!already) recordEvent(userId, appId, { version: current.version, build: current.build }, "app.enable", null);
-    return { ...projectApp(userId, appId), changed: !already };
+    const projected = projectApp(userId, appId);
+    if (!appMcpRegistry) return { ...projected, changed: !already };
+    // Y4：启用 = 按既有白名单 / 策略重新判定后才连接；判定失败只记录并降级，不改"已启用"事实。
+    const mcp = await setAppMcpEnabled(userId, appId, true, current);
+    return { ...projected, changed: !already, mcp };
   }
 
-  function disable(payload, context) {
+  async function disable(payload, context) {
     const userId = String(context.userId);
     const appId = requireAppId(payload);
     const { current } = loadApp(appId);
@@ -405,7 +487,11 @@ function createDeveloperBundle(options = {}) {
       store.removeInstalled(userId, appId);
       recordEvent(userId, appId, { version: current.version, build: current.build }, "app.disable", null);
     }
-    return { ...projectApp(userId, appId), changed: !!already };
+    const projected = projectApp(userId, appId);
+    if (!appMcpRegistry) return { ...projected, changed: !!already };
+    // Y4：禁用 = 断开 + DISABLED；即使注册表失败，"已禁用"事实也已生效（连接由注册表如实收敛）。
+    const mcp = await setAppMcpEnabled(userId, appId, false, current);
+    return { ...projected, changed: !!already, mcp };
   }
 
   // -------------------------------------------------------------------------
@@ -439,7 +525,7 @@ function createDeveloperBundle(options = {}) {
   // ⑤ 卸载
   // -------------------------------------------------------------------------
 
-  function uninstall(payload, context) {
+  async function uninstall(payload, context) {
     const userId = String(context.userId);
     const appId = requireAppId(payload);
     const current = store.currentRelease(appId);
@@ -452,7 +538,10 @@ function createDeveloperBundle(options = {}) {
     // 运行时事件与网络审计保留（审计事实不随卸载消失，源语义）。
     removeAppPrincipal(appId);
     recordEvent(userId, appId, { version: current.version, build: current.build }, "app.uninstall", null);
-    return { appId, uninstalled: true, version: current.version, build: current.build };
+    if (!appMcpRegistry) return { appId, uninstalled: true, version: current.version, build: current.build };
+    // Y4：卸载 = 清理该 App 的全部托管 MCP 记录（断开 + 删除）；失败只记录并降级。
+    const mcp = await removeAppMcp(userId, appId, current);
+    return { appId, uninstalled: true, version: current.version, build: current.build, mcp };
   }
 
   // -------------------------------------------------------------------------
@@ -713,6 +802,8 @@ function createDeveloperBundle(options = {}) {
       identity: !!authorization,
       // X7：principal 登记通道是否接上（未接上时 install/enable 不写 app_principals，如实报 false）。
       authStore: !!authStore,
+      // Y4：App 托管 MCP 注册表是否接上（未接上时启用/禁用/卸载不碰 MCP 连接，如实报 false）。
+      appMcpRegistry: !!appMcpRegistry,
       injectedLookup: typeof injectedLookup === "function",
       injectedFetch: typeof injectedFetch === "function",
     }),

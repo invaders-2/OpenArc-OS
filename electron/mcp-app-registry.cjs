@@ -252,20 +252,25 @@ function createAppManagedMcpRegistry({ connections = null, appState = null, cloc
     const declaredIds = new Set(plans.map((plan) => plan.id));
 
     const removed = [];
+    const failedRemovals = [];
     if (owned.some((row) => !declaredIds.has(String(row.id)))) {
       if (typeof connections.remove !== "function") return portUnavailable("connections.remove", "端口未提供 remove：无法清理 App 不再声明的托管服务");
     }
     for (const row of owned) {
       if (declaredIds.has(String(row.id))) continue;
-      await connections.disconnect(String(row.id));
-      await connections.remove(String(row.id));
-      removed.push(String(row.id));
+      const id = String(row.id);
+      await connections.disconnect(id);
+      const drop = await connections.remove(id);
+      // 端口如实回 ok:false 时不能算清理成功（否则卸载会报"已清理"但记录还在）。
+      if (drop && drop.ok === false) { failedRemovals.push({ id, error: drop.error || "MCP_REMOVE_FAILED" }); continue; }
+      removed.push(id);
     }
 
     const appOn = appEnabled(key);
     const saved = [];
     const connected = [];
     const skipped = [];
+    const failed = [];
     for (const plan of plans) {
       const previous = existing.find((row) => String(row.id) === plan.id);
       // 源 :410：显式 autoStart 属包契约；未声明时沿用用户上次状态，新服务默认关。
@@ -289,14 +294,19 @@ function createAppManagedMcpRegistry({ connections = null, appState = null, cloc
       saved.push(stored);
       if (!wantsEnabled) { skipped.push({ id: plan.id, reason: "DISABLED" }); continue; }
       if (appOn === false) { skipped.push({ id: plan.id, reason: "APP_DISABLED" }); continue; }
-      await connections.connect(stored);
+      // 连接的失败**如实归类**（端口回 ok:false 而不是抛异常）：绝不把连不上的服务报成 connected。
+      const link = await connections.connect(stored);
+      if (link && link.ok === false) {
+        failed.push({ id: plan.id, error: link.error || "MCP_UNREACHABLE", detail: link.detail == null ? null : String(link.detail) });
+        continue;
+      }
       connected.push(plan.id);
     }
-    if (log) { try { log("mcp-app-sync", { appId: key, saved: saved.length, connected: connected.length, removed: removed.length }); } catch { /* 日志失败不影响主流程 */ } }
+    if (log) { try { log("mcp-app-sync", { appId: key, saved: saved.length, connected: connected.length, removed: removed.length, failed: failed.length, failedRemovals: failedRemovals.length }); } catch { /* 日志失败不影响主流程 */ } }
     // sourceRoot 只用于源的 cwd 越界校验（:393-396）；本仓本地程序由白名单固定映射、无 App cwd，
     // 这里如实保留签名但不假装用它做了路径校验。
     void sourceRoot;
-    return { ok: true, appId: key, servers: saved, connected, removed, skipped };
+    return { ok: failed.length === 0 && failedRemovals.length === 0, appId: key, servers: saved, connected, removed, skipped, failed, failedRemovals };
   }
 
   /** 源 mcp.ts:428-434。移除该 App 的全部托管记录；别的 App 的记录不动。 */
@@ -310,14 +320,17 @@ function createAppManagedMcpRegistry({ connections = null, appState = null, cloc
     if (!owned.length) return { ok: true, appId: key, count: 0, removed: [], disconnected: 0 };
     if (typeof connections.remove !== "function") return portUnavailable("connections.remove", "端口未提供 remove：无法清理 App 托管记录");
     const removed = [];
+    const failed = [];
     for (const row of owned) {
       const id = String(row.id);
       await connections.disconnect(id);
-      await connections.remove(id);
+      const drop = await connections.remove(id);
+      // 端口回 ok:false = 记录还在：不能报"已清理"，否则卸载后残记录会被下一次启用复活。
+      if (drop && drop.ok === false) { failed.push({ id, error: drop.error || "MCP_REMOVE_FAILED" }); continue; }
       removed.push(id);
     }
-    if (log) { try { log("mcp-app-remove", { appId: key, count: removed.length }); } catch { /* 忽略 */ } }
-    return { ok: true, appId: key, count: removed.length, removed, disconnected: removed.length };
+    if (log) { try { log("mcp-app-remove", { appId: key, count: removed.length, failed: failed.length }); } catch { /* 忽略 */ } }
+    return { ok: failed.length === 0, appId: key, count: removed.length, removed, disconnected: removed.length, failed };
   }
 
   /**
@@ -334,13 +347,15 @@ function createAppManagedMcpRegistry({ connections = null, appState = null, cloc
     const owned = ownedOf(rows, key);
     if (enabled !== true) {
       const disabled = [];
+      const failed = [];
       for (const row of owned) {
         const id = String(row.id);
         await connections.disconnect(id);
-        await connections.save({ ...row, enabled: false, status: domain.STATUS.DISABLED, updatedAt: now() });
+        const saved = await connections.save({ ...row, enabled: false, status: domain.STATUS.DISABLED, updatedAt: now() });
+        if (saved && saved.ok === false) { failed.push({ id, error: saved.error || "MCP_DISABLE_FAILED" }); continue; }
         disabled.push(id);
       }
-      return { ok: true, appId: key, enabled: false, count: owned.length, disabled };
+      return { ok: failed.length === 0, appId: key, enabled: false, count: owned.length, disabled, failed };
     }
     const connected = [];
     const rejected = [];
@@ -349,7 +364,12 @@ function createAppManagedMcpRegistry({ connections = null, appState = null, cloc
       const verdict = evaluateRecord(row);
       if (!verdict.ok) { rejected.push({ id, error: verdict.error, policy: verdict.policy || null, detail: verdict.detail }); continue; }
       const stored = (await connections.save({ ...row, enabled: true, status: "CONNECTING", updatedAt: now() })) || row;
-      await connections.connect(stored);
+      // 连接失败同样进 rejected（ok 由 rejected.length===0 决定）——"白名单通过"不等于"已经连上"。
+      const link = await connections.connect(stored);
+      if (link && link.ok === false) {
+        rejected.push({ id, error: link.error || "MCP_UNREACHABLE", policy: null, detail: link.detail == null ? null : String(link.detail) });
+        continue;
+      }
       connected.push(id);
     }
     return { ok: rejected.length === 0, appId: key, enabled: true, count: owned.length, connected, rejected };

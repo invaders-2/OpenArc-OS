@@ -87,6 +87,11 @@ function projectMcpServer(projected) {
  *   注入后审批端口为 createTaskApprovalPort（propose → 可信决定 → 执行），未注入则保持 APPROVAL_REQUIRED。
  * @param {object} [options.switch]  B4e 显式开关端口（{ isEnabled() } / { isToolInvocationEnabled() }）。
  * @param {object} [options.registry]  B4e ToolRegistry；注入后幂等登记 MCP 工具 contract。
+ * @param {object} [options.connections]  Y4 既有 MCP 配置来源之上的可写 connections 端口
+ *   （mcp-connections-port.cjs：list/save/connect/disconnect/remove）。
+ *   注入后 createMcpAgentTools 的 servers 端口**保留原来的只读 list**（授权后的投影），
+ *   另外把 save/connect/disconnect/remove 接到该端口 —— 配置读写走既有 SQLite 表，不改授权读路径。
+ *   未注入时 serversPort 与从前逐字一致（只有 list），配置读写保持既有结构化降级。
  * @param {object} [options.appRegistry]  Y1 宿主侧 App 托管 MCP 注册表（mcp-app-registry.cjs）；
  *   原样转交 createMcpAgentTools。未注入时 assert/sync/remove 保持既有结构化降级。
  * @param {number} [options.version]  MCP 工具 contract 版本（默认 MCP_TOOL_VERSION）。
@@ -95,7 +100,7 @@ function projectMcpServer(projected) {
  * @param {string} [options.taskId] @param {string} [options.stepId] @param {string} [options.runId]
  * @returns {{ mcpAgentTools: object, mcpServersSnapshot: () => object[], serversPort: object, snapshot: () => object, statusReason: () => string|null, registerToolContracts: () => object, listToolContracts: () => string[], toolContractReport: () => object }|null}
  */
-function createMcpAgentBridge({ mcpService = null, context = null, hostAppId = MCP_HOST_APP_ID, approval = null, transport = null, clientFor = null, systemServerIds = null, switch: switchPort = null, registry = null, appRegistry = null, version = MCP_TOOL_VERSION, proxy = null, sideEffectRuntime = null, taskId = null, stepId = null, runId = null, trustedApproval = null, clock = null, logger = null } = {}) {
+function createMcpAgentBridge({ mcpService = null, context = null, hostAppId = MCP_HOST_APP_ID, approval = null, transport = null, clientFor = null, systemServerIds = null, switch: switchPort = null, registry = null, connections = null, appRegistry = null, version = MCP_TOOL_VERSION, proxy = null, sideEffectRuntime = null, taskId = null, stepId = null, runId = null, trustedApproval = null, clock = null, logger = null } = {}) {
   if (!mcpService || typeof mcpService.listConnections !== "function") return null;
   const contextOf = () => {
     const base = typeof context === "function" ? context() : context;
@@ -152,7 +157,24 @@ function createMcpAgentBridge({ mcpService = null, context = null, hostAppId = M
   }
   function list() { return snapshot().rows; }
 
-  const serversPort = { list };
+  // Y4：connections 端口只补**配置读写**（save/connect/disconnect/remove），
+  // 只读 list 仍是上面的授权后投影 —— 换端口不能让原始数据库行绕过 app grant / 可见性判定。
+  const connectionsPort = connections && typeof connections.list === "function"
+    && typeof connections.save === "function"
+    && typeof connections.connect === "function"
+    && typeof connections.disconnect === "function"
+    ? connections
+    : null;
+  const serversPort = connectionsPort
+    ? {
+        list,
+        save: (config) => connectionsPort.save(config),
+        connect: (config) => connectionsPort.connect(config),
+        disconnect: (id) => connectionsPort.disconnect(id),
+        ...(typeof connectionsPort.remove === "function" ? { remove: (id) => connectionsPort.remove(id) } : {}),
+        ...(typeof connectionsPort.refresh === "function" ? { refresh: (id) => connectionsPort.refresh(id) } : {}),
+      }
+    : { list };
   const mcpAgentTools = createMcpAgentTools({ servers: serversPort, approval: approvalPort, transport, clientFor, switch: explicitSwitch, systemServerIds, appRegistry, clock, logger });
   return {
     mcpAgentTools,

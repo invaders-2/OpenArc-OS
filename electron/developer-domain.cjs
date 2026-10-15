@@ -591,6 +591,16 @@ function normalizeMigrationList(value, files, targetDataVersion) {
   return migrations;
 }
 
+/**
+ * Y4：App 声明的 MCP 服务归一化。
+ *
+ * 与源（developerApps.ts:757-819 的 MCP 投影）一致只保留"声明形状"，但落地口径按本仓既有策略：
+ *   · 本地 stdio 只保留**白名单标识** serverKey（mcp-domain.cjs:72 LOCAL_SERVERS 的 key），
+ *     兼容平铺 `serverKey` 与 `endpoint.serverKey` 两种声明写法，统一成平铺字段；
+ *   · **不保留 command / args**：App 自带命令在本仓永远没有执行面（程序与参数由主进程白名单固定映射），
+ *     归一化阶段就丢掉，杜绝"声明里带着命令"被下游误读成可执行；
+ *   · http 只保留 url，autoStart 保持可选布尔。
+ */
 function normalizeMcpList(value) {
   if (!Array.isArray(value)) return [];
   return value.slice(0, 12).map((item, index) => {
@@ -598,12 +608,13 @@ function normalizeMcpList(value) {
     const id = slug(String(obj.id || "mcp-" + (index + 1)));
     const name = String(obj.name || id).trim().slice(0, 60);
     const transport = obj.transport === "http" ? "http" : "stdio";
+    const endpoint = obj.endpoint && typeof obj.endpoint === "object" ? cleanObject(obj.endpoint) : {};
+    const serverKey = obj.serverKey || endpoint.serverKey;
     return {
       id,
       name,
       transport,
-      command: obj.command ? String(obj.command).slice(0, 180) : undefined,
-      args: cleanStringList(obj.args, 24).map((arg) => arg.slice(0, 240)),
+      serverKey: serverKey ? String(serverKey).slice(0, 120) : undefined,
       url: obj.url ? String(obj.url).slice(0, 500) : undefined,
       autoStart: typeof obj.autoStart === "boolean" ? obj.autoStart : undefined,
     };
@@ -850,7 +861,7 @@ function collectCapabilities(files, manifest) {
   const dependencyMap = new Map();
   const addDependency = (dependency) => dependencyMap.set(dependency.type + ":" + dependency.id + ":" + (dependency.toolName || ""), dependency);
   for (const dependency of manifest.dependencies || []) addDependency(dependency);
-  for (const item of mcp) addDependency({ type: "mcp", id: item.id, name: item.name, required: true, source: "bundled", installHint: item.command || item.url || "随 APP 包声明的 MCP 服务" });
+  for (const item of mcp) addDependency({ type: "mcp", id: item.id, name: item.name, required: true, source: "bundled", installHint: item.url || (item.serverKey ? "宿主白名单 MCP 服务：" + item.serverKey : "随 APP 包声明的 MCP 服务") });
   for (const skill of skills) addDependency({ type: "skill", id: slug(skill.title), name: skill.title, required: false, source: "bundled", path: skill.path, installHint: skill.preview });
   for (const tool of tools) {
     const handler = tool.handler || { type: tool.handlerType };
