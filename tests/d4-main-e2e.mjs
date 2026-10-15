@@ -281,7 +281,7 @@ async function main() {
   record("setup", "A8 · 无 test-only 播种：起始 app TOOL grant 为 0", toolGrantRows().length === 0, toolGrantRows().length, 0);
 
   // ---------------------------------------------------------------- 真实 UI：Settings → Models
-  await click('[data-app-id="settings"]');
+  await click('[data-dock-id="settings"]');
   await waitSel('[data-settings-pane="model"]', 20000);
   await click('[data-settings-pane="model"]');
   const settingsOpen = await waitSel('[data-d4-01="settings"]', 20000);

@@ -117,7 +117,7 @@ app.whenReady().then(async () => {
 
     check("U3 · resource 桥只有 command（无 raw fs）", await js("return !!window.openarc.resource && Object.keys(window.openarc.resource).join() === 'command'"), "");
 
-    await click('[data-app-id="resource-library"]');
+    await click('[data-dock-id="resource-library"]');
     const panel = await waitSel('[data-d3-04a="resource-library"]');
     check("U4 · 打开资源库 App 面板", panel, "panel");
     check("U5 · 初始为空状态", await has('[data-d3-04a-empty]'), "");

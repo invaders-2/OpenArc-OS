@@ -87,7 +87,7 @@ app.whenReady().then(async () => {
     await setValue('[data-d3-id="login-password"]', PW);
     await click('[data-d3-id="login-submit"]');
     check("UI2 · 登录", (await waitGate("ready")) === "ready", "");
-    await click('[data-app-id="settings"]');
+    await click('[data-dock-id="settings"]');
     await waitSel('[data-settings-pane="model"]');
     await click('[data-settings-pane="model"]');
     check("UI3 · 打开 Settings → 模型 / AI", await waitSel('[data-d4-01="settings"]'), "");

@@ -110,7 +110,7 @@ app.whenReady().then(async () => {
     await click('[data-d3-id="login-submit"]');
     g = await waitGate("ready");
     check("P2 · 登录进入桌面", g === "ready", "gate=" + g);
-    await click('[data-app-id="resource-library"]');
+    await click('[data-dock-id="resource-library"]');
     check("P3 · 打开资源库 App", await waitSel('[data-d3-04b="app"]'), "");
 
     const ctx = { sessionRef: identity.service.current, appId: "resource-library" };

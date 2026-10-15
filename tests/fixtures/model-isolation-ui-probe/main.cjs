@@ -56,7 +56,7 @@ async function login(id, pw) {
   return waitGate("ready");
 }
 async function openModels() {
-  await click('[data-app-id="settings"]');
+  await click('[data-dock-id="settings"]');
   await waitSel('[data-settings-pane="model"]');
   await click('[data-settings-pane="model"]');
   return waitSel('[data-d4-01="settings"]');
