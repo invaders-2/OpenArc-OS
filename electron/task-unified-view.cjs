@@ -2,9 +2,11 @@
  * 单一读模型 · 两套任务表的统一只读投影。
  *
  * ## 边界（硬约束，不因调用方而变）
- *   1. **只读读模型**：本模块只执行 SELECT；**不写任何表**（源码里不出现任何写语句关键词，
- *      也不调用 Statement.run），不 require 任何 store
+ *   1. **只读读模型**：本模块只执行 SELECT；SQL 一律落在 electron/task-unified-schema.cjs
+ *      建立的只读视图 v_task_unified 上（**不碰任何物理表、不写任何表**：源码里不出现任何
+ *      写语句关键词，也不调用 Statement.run），不 require 任何 store
  *      （task-store.cjs / agent-task-store.cjs / agent-service.cjs 一概不引入）。
+ *      视图层把两套表的 UNION 形状固定下来；本模块只做状态映射与投影。
  *   2. **不改变任何一方状态机**：不做状态迁移、不写事件、不"顺手"修数据；DX 的 11 态与
  *      core 的 7 态都原样保留在 statusRaw，本模块只额外给出统一语义。
  *   3. 统一状态词汇 = core 的 7 态（PENDING / RUNNING / WAITING / SUCCEEDED / FAILED /
@@ -130,6 +132,13 @@ const REQUIRED_TABLES = Object.freeze({
   [SOURCE_CORE]: Object.freeze(["tasks", "task_steps", "task_events"]),
 });
 
+/**
+ * 读模型实际查询的三条只读视图（DDL 真值在 electron/task-unified-schema.cjs）。
+ * 名称在这里是字面量常量：本模块零 require，不能从 schema 模块 import；
+ * 两侧名称漂移由 tests/dxos-task-unified-views.test.mjs 逐字对齐。
+ */
+const REQUIRED_VIEWS = Object.freeze(["v_task_unified", "v_task_step_unified", "v_task_event_unified"]);
+
 const DEFAULT_LIMIT = 200;
 const MAX_LIMIT = 2000;
 
@@ -178,6 +187,25 @@ function requireTables(db, source) {
   }
 }
 
+/**
+ * 视图存在性：读模型只认视图，缺视图（ensure 未执行）同样结构化报错，
+ * 绝不退化成"直查物理表"的旁路实现 —— 那会让"单一读入口"名存实亡。
+ */
+function requireViews(db) {
+  const missing = [];
+  for (const view of REQUIRED_VIEWS) {
+    const found = db.prepare("SELECT name FROM sqlite_master WHERE type = 'view' AND name = ?").get(view);
+    if (!found) missing.push(view);
+  }
+  if (missing.length) {
+    throw createUnifiedViewError(UNIFIED_VIEW_ERR_DEPENDENCY_UNAVAILABLE, "统一读模型缺少只读视图：" + missing.join(", "), {
+      dependency: "schema",
+      missingViews: missing,
+      hint: "视图由 electron/task-unified-schema.cjs 的幂等 ensure 建立；未建立时不返回任何任务",
+    });
+  }
+}
+
 /** 允许的 limit：正整数，1..MAX_LIMIT；越界即报错而不是静默截断。 */
 function normalizeLimit(value) {
   if (value === undefined || value === null) return DEFAULT_LIMIT;
@@ -186,11 +214,6 @@ function normalizeLimit(value) {
     throw createUnifiedViewError(UNIFIED_VIEW_ERR_INVALID_INPUT, "limit 必须是 1.." + MAX_LIMIT + " 的整数", { limit: value });
   }
   return n;
-}
-
-function safeJson(text) {
-  if (typeof text !== "string" || !text) return null;
-  try { return JSON.parse(text); } catch { return null; }
 }
 
 /** DX 状态 → core 状态；未知状态返回 null（不猜测）。 */
@@ -298,7 +321,7 @@ function unifiedTitle(row) {
   return row.title == null ? null : String(row.title);
 }
 
-/** 单行 → 统一投影。row 已由查询侧归一（字段名统一见 queryDx / queryCore）。 */
+/** 单行 → 统一投影。row 已由视图查询侧归一（字段名统一见 VIEW_SELECT_COLUMNS）。 */
 function projectRow(source, row) {
   const mapping = explainStatusMapping(source, row.status);
   return Object.freeze({
@@ -325,84 +348,51 @@ function projectRow(source, row) {
 }
 
 /**
- * DX 行查询（只读 SELECT）。
- *   最近事件按 dx_task_events.id DESC —— 该列是 AUTOINCREMENT（dxos-agent-schema.cjs:68），
- *   单调递增即插入顺序；sequence 允许 NULL，用它排序会把 NULL 排到末尾，故不用。
+ * 统一只读视图查询（唯一数据来源）。
+ *   · 视图 v_task_unified 已把两套表的 UNION 形状固定（DDL 在 electron/task-unified-schema.cjs）；
+ *     本模块不再拼任何物理表 SQL —— 这是"单一读入口"落到 SQL 层的关键。
+ *   · 最近事件的选择规则留在视图里（dx 按 AUTOINCREMENT id，core 按 sequence）；
+ *     core 的 safe_payload → message 也在视图里用 json_valid 守卫后取出，
+ *     与旧实现里 safeJson 的"坏 JSON 返回 null"语义一致。
  */
-const DX_SELECT_COLUMNS = [
-  "t.id AS id",
-  "t.title AS title",
-  "t.status AS status",
-  "t.created_at AS created_at",
-  "t.updated_at AS updated_at",
-  "t.started_at AS started_at",
-  "t.completed_at AS completed_at",
-  "(SELECT COUNT(*) FROM dx_task_steps s WHERE s.task_id = t.id) AS step_count",
-  "(SELECT COUNT(*) FROM dx_task_events e WHERE e.task_id = t.id) AS event_count",
-  "(SELECT e.type FROM dx_task_events e WHERE e.task_id = t.id ORDER BY e.id DESC LIMIT 1) AS last_event_type",
-  "(SELECT e.message FROM dx_task_events e WHERE e.task_id = t.id ORDER BY e.id DESC LIMIT 1) AS last_event_message",
-  "(SELECT e.created_at FROM dx_task_events e WHERE e.task_id = t.id ORDER BY e.id DESC LIMIT 1) AS last_event_at",
+const VIEW_SELECT_COLUMNS = [
+  "source AS source",
+  "id AS id",
+  "title AS title",
+  "status AS status",
+  "created_at AS created_at",
+  "updated_at AS updated_at",
+  "started_at AS started_at",
+  "completed_at AS completed_at",
+  "step_count AS step_count",
+  "event_count AS event_count",
+  "last_event_type AS last_event_type",
+  "last_event_message AS last_event_message",
+  "last_event_at AS last_event_at",
 ].join(", ");
 
-const DX_SELECT_LIST = "SELECT " + DX_SELECT_COLUMNS + " FROM dx_tasks t";
-const DX_SELECT_ONE = "SELECT " + DX_SELECT_COLUMNS + " FROM dx_tasks t WHERE t.id = ?";
+const VIEW_SELECT_LIST = "SELECT " + VIEW_SELECT_COLUMNS + " FROM v_task_unified";
+const VIEW_SELECT_ONE = "SELECT " + VIEW_SELECT_COLUMNS + " FROM v_task_unified WHERE id = ?";
 
-/** core 行查询（只读 SELECT）；最近事件按 task_events.sequence DESC（identity-store.cjs:902-906）。 */
-const CORE_SELECT_COLUMNS = [
-  "t.task_id AS id",
-  "t.goal AS title",
-  "t.status AS status",
-  "t.created_at AS created_at",
-  "t.updated_at AS updated_at",
-  "t.started_at AS started_at",
-  "t.completed_at AS completed_at",
-  "(SELECT COUNT(*) FROM task_steps s WHERE s.task_id = t.task_id) AS step_count",
-  "(SELECT COUNT(*) FROM task_events e WHERE e.task_id = t.task_id) AS event_count",
-  "(SELECT e.event_type FROM task_events e WHERE e.task_id = t.task_id ORDER BY e.sequence DESC LIMIT 1) AS last_event_type",
-  "(SELECT e.safe_payload FROM task_events e WHERE e.task_id = t.task_id ORDER BY e.sequence DESC LIMIT 1) AS last_event_payload",
-  "(SELECT e.created_at FROM task_events e WHERE e.task_id = t.task_id ORDER BY e.sequence DESC LIMIT 1) AS last_event_at",
-].join(", ");
-
-const CORE_SELECT_LIST = "SELECT " + CORE_SELECT_COLUMNS + " FROM tasks t";
-const CORE_SELECT_ONE = "SELECT " + CORE_SELECT_COLUMNS + " FROM tasks t WHERE t.task_id = ?";
-
-/** core 的 last_event_payload 里若有 message 字段，取出作为统一 message；没有就是 null。 */
-function coreLastEventMessage(row) {
-  const payload = safeJson(row.last_event_payload);
-  if (payload && typeof payload === "object" && !Array.isArray(payload) && typeof payload.message === "string") return payload.message;
-  return null;
-}
-
-function normalizeCoreRow(row) {
-  return Object.assign({}, row, { last_event_message: coreLastEventMessage(row) });
-}
-
-function queryDxList(db, options, limit) {
-  const where = [];
-  const params = [];
-  if (options.userId != null && options.userId !== "") { where.push("t.created_by = ?"); params.push(String(options.userId)); }
-  const sql = DX_SELECT_LIST + (where.length ? " WHERE " + where.join(" AND ") : "") + " ORDER BY t.created_at DESC LIMIT ?";
+/** 按来源列出视图行（每个来源各自 LIMIT，保持"两来源各取 limit 再合并"的既有计数语义）。 */
+function queryViewList(db, options, source, limit) {
+  const where = ["source = ?"];
+  const params = [source];
+  if (options.userId != null && options.userId !== "") { where.push("owner_id = ?"); params.push(String(options.userId)); }
+  const sql = VIEW_SELECT_LIST + " WHERE " + where.join(" AND ") + " ORDER BY created_at DESC LIMIT ?";
   params.push(limit);
   return db.prepare(sql).all(...params);
 }
 
-function queryDxOne(db, id) {
-  const row = db.prepare(DX_SELECT_ONE).get(String(id));
+/** 按来源取单条；source 由调用方给定，绝不跨来源猜。 */
+function queryViewOne(db, id, source) {
+  const row = db.prepare(VIEW_SELECT_ONE + " AND source = ?").get(String(id), source);
   return row || null;
 }
 
-function queryCoreList(db, options, limit) {
-  const where = [];
-  const params = [];
-  if (options.userId != null && options.userId !== "") { where.push("t.user_id = ?"); params.push(String(options.userId)); }
-  const sql = CORE_SELECT_LIST + (where.length ? " WHERE " + where.join(" AND ") : "") + " ORDER BY t.created_at DESC LIMIT ?";
-  params.push(limit);
-  return db.prepare(sql).all(...params).map(normalizeCoreRow);
-}
-
-function queryCoreOne(db, id) {
-  const row = db.prepare(CORE_SELECT_ONE).get(String(id));
-  return row ? normalizeCoreRow(row) : null;
+/** 不带 source 取单条：同名 id 在两套来源都存在时返回两行，交调用方判歧义。 */
+function queryViewById(db, id) {
+  return db.prepare(VIEW_SELECT_ONE).all(String(id));
 }
 
 /** 稳定排序：created_at DESC，其次 source 名称，再其次 id；避免同刻任务顺序不定。 */
@@ -434,8 +424,9 @@ function listUnifiedTasks(options) {
   const sources = requestedSources(opts.source);
   const limit = normalizeLimit(opts.limit);
   for (const source of sources) requireTables(db, source);
-  const rawDx = sources.includes(SOURCE_DX) ? queryDxList(db, opts, limit) : [];
-  const rawCore = sources.includes(SOURCE_CORE) ? queryCoreList(db, opts, limit) : [];
+  requireViews(db);
+  const rawDx = sources.includes(SOURCE_DX) ? queryViewList(db, opts, SOURCE_DX, limit) : [];
+  const rawCore = sources.includes(SOURCE_CORE) ? queryViewList(db, opts, SOURCE_CORE, limit) : [];
   const items = sortUnified([
     ...rawDx.map((row) => projectRow(SOURCE_DX, row)),
     ...rawCore.map((row) => projectRow(SOURCE_CORE, row)),
@@ -464,16 +455,14 @@ function getUnifiedTask(options) {
   if (opts.source !== undefined && opts.source !== null && opts.source !== "") {
     if (!isSource(opts.source)) throw createUnifiedViewError(UNIFIED_VIEW_ERR_INVALID_INPUT, "source 必须是 dx | core", { source: opts.source });
     requireTables(db, opts.source);
-    const row = opts.source === SOURCE_DX ? queryDxOne(db, id) : queryCoreOne(db, id);
+    requireViews(db);
+    const row = queryViewOne(db, id, opts.source);
     if (!row) throw createUnifiedViewError(UNIFIED_VIEW_ERR_NOT_FOUND, "任务不存在：" + id, { id, source: opts.source });
     return projectRow(opts.source, row);
   }
   for (const source of UNIFIED_SOURCES) requireTables(db, source);
-  const found = [];
-  const dxRow = queryDxOne(db, id);
-  if (dxRow) found.push(projectRow(SOURCE_DX, dxRow));
-  const coreRow = queryCoreOne(db, id);
-  if (coreRow) found.push(projectRow(SOURCE_CORE, coreRow));
+  requireViews(db);
+  const found = queryViewById(db, id).map((row) => projectRow(row.source, row));
   if (found.length === 0) throw createUnifiedViewError(UNIFIED_VIEW_ERR_NOT_FOUND, "任务不存在：" + id, { id });
   if (found.length > 1) {
     throw createUnifiedViewError(UNIFIED_VIEW_ERR_AMBIGUOUS, "同一 id 在两套表中都存在，必须显式指定 source：" + id, {
@@ -493,6 +482,7 @@ function unifiedViewSelfCheck() {
 
 module.exports = {
   UNIFIED_VIEW_BOUNDARY,
+  REQUIRED_VIEWS,
   UNIFIED_VIEW_ERROR_CODES,
   UNIFIED_VIEW_ERR_INVALID_INPUT,
   UNIFIED_VIEW_ERR_DEPENDENCY_UNAVAILABLE,

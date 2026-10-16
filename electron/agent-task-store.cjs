@@ -43,6 +43,7 @@
 
 const { createHash, randomUUID } = require("node:crypto");
 const { AGENT_CHECKPOINT_SCHEMA } = require("./agent-checkpoint-contract.cjs");
+const taskUnifiedSchema = require("./task-unified-schema.cjs");
 
 /** 依赖后续批次时的结构化错误码。 */
 const AGENT_DEPENDENCY_UNAVAILABLE = "AGENT_DEPENDENCY_UNAVAILABLE";
@@ -88,7 +89,13 @@ let agentIdFactory = () => randomUUID();
 /** 注入数据库句柄 / fs 适配器 / 时钟 / id 工厂。返回当前 db。 */
 function configureAgentTaskStore(options) {
   const opts = options || {};
-  if (opts.db) agentDb = opts.db;
+  if (opts.db) {
+    agentDb = opts.db;
+    // 读模型三条只读视图的幂等 ensure（task-unified-schema.cjs）。
+    // 为什么挂在这里：生产装配里 configureAgentTaskStore 是 agent/task/unified-list 之前
+    // 唯一必经的注入点（agent-service.createAgentBundle），且不动 SCHEMA_VERSION。
+    taskUnifiedSchema.ensureTaskUnifiedViews(agentDb);
+  }
   if (Object.prototype.hasOwnProperty.call(opts, "fsAdapter")) agentFs = opts.fsAdapter || null;
   if (typeof opts.clock === "function") agentClock = opts.clock;
   if (typeof opts.idFactory === "function") agentIdFactory = opts.idFactory;
@@ -705,6 +712,21 @@ function appendDynamicStep(taskId, title, toolName, args, stableOperationId) {
     now(),
   );
   return { id: id, ordinal: ordinal, operation_id: operationId, status: "queued" };
+}
+
+/**
+ * 产物提交写回（P1）：把已提交的 Workspace 产物坐标补写进 dx 步骤的 output_json。
+ *
+ * 与其它写函数的两点差异（都是有意为之）：
+ *   1. 不额外开事务 —— 唯一调用方 agent-runtime-workspace.finalizeCommitJournal 已在事务内，
+ *      单条 UPDATE 本身原子；再 BEGIN IMMEDIATE 会直接报"transaction within a transaction"。
+ *   2. 只更新目标行（id + task_id 双条件），不碰状态机、不写事件；返回是否真的改到行，
+ *      调用方据此把"步骤不存在"当成显式失败，而不是静默当成功。
+ */
+function attachStepOutput(taskId, stepId, output) {
+  const db = getAgentTaskDb();
+  const result = db.prepare("UPDATE dx_task_steps SET output_json=? WHERE id=? AND task_id=?").run(json(output), String(stepId), String(taskId));
+  return Number(result.changes) > 0;
 }
 
 /** taskStore.ts:398 */
@@ -1697,6 +1719,7 @@ module.exports = {
   updateTaskStatus,
   consumeBudget,
   appendDynamicStep,
+  attachStepOutput,
   // durable agent turns / checkpoints
   latestResumableAgentTurn,
   persistAgentTurn,

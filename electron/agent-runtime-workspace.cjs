@@ -54,14 +54,62 @@ function appendAgentRunEvent(runId, type, data) {
   return runStoreFunction("appendAgentRunEvent")(runId, type, data);
 }
 
-/** 源 workspaceStore.ts:4-22 的路径守卫。 */
-function safePath(value) {
+/**
+ * P1 · 任务域单一写入口：本模块不再直写任何任务表，步骤产物写回统一经 task-authority
+ * 路由到 agent-task-store。惰性构造，避免加载期与 agent-service 的装配顺序耦合。
+ */
+let taskAuthorityInstance = null;
+function taskAuthority() {
+  if (!taskAuthorityInstance) {
+    taskAuthorityInstance = require("./task-authority.cjs").createTaskAuthority({ dxStore: require("./agent-task-store.cjs") });
+  }
+  return taskAuthorityInstance;
+}
+
+/**
+ * 步骤 JSON 解析：坏数据必须出声（结构化错误），绝不静默跳过。
+ * dx 步骤的 input_json / output_json 一律由 agent-task-store 用 JSON.stringify 写入，
+ * 解析失败即结构损坏，属于必须暴露的异常。
+ */
+function parseStepJson(text, stepId, column) {
+  if (text == null || text === "") return {};
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    throw Object.assign(new Error("Agent 步骤 " + stepId + " 的 " + column + " 不是合法 JSON：" + (error instanceof Error ? error.message : String(error))), {
+      code: "AGENT_STEP_JSON_INVALID",
+      stepId: stepId,
+      column: column,
+    });
+  }
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+}
+
+/**
+ * 源 workspaceStore.ts:4-22 的路径判据，返回 null | "relative" | "reserved"（不抛错）。
+ * 单独抽出来的原因：Commit Journal 收尾时要把"这个步骤是不是文件步骤"当成分类问题，
+ * 分类不该抛异常，更不该被 catch 吞掉（P1 修 bug：写回失败必须出声）。
+ */
+function workspacePathRejection(value) {
   const path = String(value || "").replace(/\\/g, "/").trim();
   const parts = path.split("/");
-  if (!path || path.startsWith("/") || /^[a-zA-Z]:/.test(path) || parts.some((part) => !part || part === "." || part === "..")) {
-    throw Object.assign(new Error("Artifact 路径必须是 Workspace 内的规范相对路径"), { statusCode: 400 });
-  }
-  if (parts.some((part) => part === ".ccs-ai" || part === ".agent-workspaces")) throw Object.assign(new Error("Artifact 不能写入系统保留目录"), { statusCode: 400 });
+  if (!path || path.startsWith("/") || /^[a-zA-Z]:/.test(path) || parts.some((part) => !part || part === "." || part === "..")) return "relative";
+  if (parts.some((part) => part === ".ccs-ai" || part === ".agent-workspaces")) return "reserved";
+  return null;
+}
+
+/** 是否是 Workspace 内的规范相对路径（非文件步骤返回 false，不抛错）。 */
+function isWorkspaceRelativePath(value) {
+  return workspacePathRejection(value) === null;
+}
+
+/** 源 workspaceStore.ts:4-22 的路径守卫（错误文案与 statusCode 保持原样）。 */
+function safePath(value) {
+  const path = String(value || "").replace(/\\/g, "/").trim();
+  const rejection = workspacePathRejection(value);
+  if (rejection === "reserved") throw Object.assign(new Error("Artifact 不能写入系统保留目录"), { statusCode: 400 });
+  if (rejection) throw Object.assign(new Error("Artifact 路径必须是 Workspace 内的规范相对路径"), { statusCode: 400 });
   return path;
 }
 
@@ -321,14 +369,20 @@ function finalizeCommitJournal(journal) {
         const source = fs().findByPath(workspace.workspaceRootId, artifact.path);
         const steps = db().prepare("SELECT id,input_json,output_json FROM dx_task_steps WHERE task_id=?").all(run.taskId);
         for (const step of steps) {
-          try {
-            const input = JSON.parse(step.input_json || "{}");
-            const output = JSON.parse(step.output_json || "{}");
-            if (output.nodeId !== source?.id && safePath(String(input.path || "")) !== artifact.path) continue;
-            db().prepare("UPDATE task_steps SET output_json=? WHERE id=?").run(JSON.stringify({ ...output, nodeId, name: artifact.path.split("/").at(-1) }), step.id);
-          } catch {
-            /* non-file step */
-          }
+          const input = parseStepJson(step.input_json, step.id, "input_json");
+          const output = parseStepJson(step.output_json, step.id, "output_json");
+          // 非文件步骤（没有规范相对 path）不参与路径匹配；这是分类，不是错误，所以不用异常。
+          const stepPath = typeof input.path === "string" && isWorkspaceRelativePath(input.path) ? safePath(input.path) : null;
+          if (output.nodeId !== source?.id && stepPath !== artifact.path) continue;
+          // 旧实现在这里写 core 的 task_steps SET output_json WHERE id=?（该表没有 output_json 列、
+          // 也没有 id 主键），异常被外层 catch 吞掉，导致产物从未写回步骤。现在经单一写入口
+          // task-authority 路由到 dx store，写 dx_task_steps.output_json，失败直接抛（不再吞）。
+          taskAuthority().writeStepOutput({
+            source: "dx",
+            taskId: run.taskId,
+            stepId: step.id,
+            output: Object.assign({}, output, { nodeId: nodeId, name: artifact.path.split("/").at(-1) }),
+          });
         }
         if (source) db().prepare("UPDATE deliverables SET node_id=?,updated_at=? WHERE task_id=? AND node_id=?").run(nodeId, ts, run.taskId, source.id);
       }
