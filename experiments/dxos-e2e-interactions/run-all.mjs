@@ -484,11 +484,29 @@ async function reloadRenderer(page, ctx) {
 async function item1_mcpPositive(page, ctx) {
   record("1-MCP", "M1.0 打开 MCP 中心窗口（真实 dock 交互）", await openApp(page, "mcp-center", "MCP 中心窗口"), "窗口出现", "seen");
   await waitFor(() => q(page, "[data-mcp-center]"), 15000, 250);
+  // 先等真空态（不是首屏 loading 分支）稳定，避免在加载帧把空态开关误判成"不可达"。
+  const emptyUp = await waitFor(() => q(page, "[data-mcp-empty]"), 20000, 250);
   const emptyState = await page.evaluate(() => {
     const center = document.querySelector("[data-mcp-center]");
     return { center: !!center, available: center ? center.getAttribute("data-mcp-available") : null, empty: !!document.querySelector("[data-mcp-empty]"), toolswitch: !!document.querySelector("[data-mcp-toolswitch-section]") };
   });
-  record("1-MCP", "M1.1 空连接态下「工具调用」开关是否可达（McpCenter.tsx:1060-1085 空态提前 return vs 1095-1135 才渲染）", emptyState.toolswitch === true, "开关区块渲染", JSON.stringify(emptyState));
+  record("1-MCP", "M1.1 空连接态下「工具调用」开关是否可达（McpCenter.tsx:1060-1085 空态提前 return vs 1095-1135 才渲染）", emptyUp === true && emptyState.toolswitch === true, "空态 + 开关区块渲染", JSON.stringify(Object.assign({ emptyUp: emptyUp }, emptyState)));
+  // M1.1a（本波新增）：空态下开关不仅可见，而且**可写** —— 真实点一次（真实落盘 invocationEnabled=true）
+  // 再点回关闭，全程 0 条连接；后面的 M1.2 仍按"默认关闭"断言（关回后 invocationEnabled=false）。
+  const emptyReady = await waitFor(async () => { const t = await readToggle(page); return t.section === true && t.state === "ready" && t.disabled === false; }, 20000, 250);
+  const emptyToggle = await readToggle(page);
+  const clickOn = await clickSel(page, "[data-mcp-toolswitch-toggle]");
+  const wroteOn = await waitFor(async () => (await readToggle(page)).enabled === "true", 20000, 250);
+  const fileOnEmpty = readMcpJson(ctx.userData);
+  const clickOff = await clickSel(page, "[data-mcp-toolswitch-toggle]");
+  const wroteOff = await waitFor(async () => (await readToggle(page)).enabled === "false", 20000, 250);
+  const fileOffEmpty = readMcpJson(ctx.userData);
+  record("1-MCP", "M1.1a 空连接态下开关可写（真实点击 → 真实落盘 → 关回，全程 0 连接）",
+    emptyReady === true && emptyToggle.section === true && emptyToggle.state === "ready" && emptyToggle.disabled === false
+      && clickOn === "ok" && wroteOn === true && !!fileOnEmpty.value && fileOnEmpty.value.tools.invocationEnabled === true
+      && clickOff === "ok" && wroteOff === true && !!fileOffEmpty.value && fileOffEmpty.value.tools.invocationEnabled === false,
+    "空态可见 + state=ready + 可点 + 打开落盘 true + 关回落盘 false",
+    JSON.stringify({ emptyReady: emptyReady, emptyToggle: emptyToggle, clickOn: clickOn, wroteOn: wroteOn, fileOn: fileOnEmpty.value, clickOff: clickOff, wroteOff: wroteOff, fileOff: fileOffEmpty.value }));
   // 让开关区块可达：先经产品桥建一条到本机 stub 的真实 MCP 连接（真实握手），再刷新重开 MCP 中心。
   const dummy = await bridge(page, "mcp", "mcp/create", { name: "E2E Toggle Stub", transport: "http", location: "REMOTE_SERVICE", endpoint: { url: ctx.mcpStub.url, serverKey: "e2e-toggle" }, authMode: "NONE", visibility: "PERSONAL" });
   const dummyId = dummy && dummy.connection ? dummy.connection.connectionId : null;

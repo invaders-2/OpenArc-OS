@@ -228,6 +228,9 @@ function createLingxingLocalData(options = {}) {
       };
       let result = { list: null, total: 0 };
       for (let attempt = 0; attempt < 3; attempt += 1) {
+        // 第一个参数是**集成声明的服务名**（源 lingxingLocalData.ts 的 callDirect('lingxing', ...) 形状），
+        // 不是 MCP 域内的 connectionId；由 electron/mcp-live-transport.cjs 的 resolveLiveConnection
+        // 按真实语义解析到当前启用的活连接，解析不到会结构化拒绝（不静默、不伪造）。
         result = parseSalesResponse(await transport("lingxing", "query_product_performance_asin_lists", args));
         if (result.list || result.total === 0) break;
       }

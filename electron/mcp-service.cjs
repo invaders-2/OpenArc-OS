@@ -60,7 +60,7 @@ class McpService {
   #actor(context) { return this.authService.resolveActor({ context }); }
 
   /** App 动作 + 连接可见性判定。deny 时返回稳定错误码与原因，不回任何连接数据。 */
-  #authorize({ context, action, connection = null, requireApp = true, allowNotVisible = false } = {}) {
+  #authorize({ context, action, connection = null, requireApp = true, allowNotVisible = false, requireAdmin = false } = {}) {
     const actor = this.#actor(context);
     if (!actor.ok) return { ok: false, error: domain.ERROR_CODE.MCP_UNAUTHORIZED, reason: "no-session" };
     const appId = context && context.appId ? String(context.appId) : null;
@@ -70,6 +70,14 @@ class McpService {
     if (requireApp) {
       const grants = this.#grantsFor(appId, actor);
       if (!grants.some((g) => domain.mcpGrantActions(g).includes(action))) return { ok: false, error: domain.ERROR_CODE.MCP_UNAUTHORIZED, reason: "app-action-missing" };
+    }
+    // B4e 收口补丁 · 全局能力开关的写授权必须是管理员：
+    // mcp.manage 只证明"这个 App 被授了管理动作"，不代表调用者本人是管理员 ——
+    // 内置 MEMBER 角色同样持有 mcp-center 的 mcp.manage，于是普通成员能改全局开关（真实缺口）。
+    // 沿用既有治理写路径的判定（authorization-service.cjs:597-598 的 SUPER_ADMIN_ONLY、
+    // authorization-service.cjs:390 的 role!=="ADMIN" → NOT_SUPER_ADMIN）：要求 actor.isSuper。
+    if (requireAdmin && !actor.isSuper) {
+      return { ok: false, error: domain.ERROR_CODE.MCP_UNAUTHORIZED, reason: "manage-requires-admin", actor, app };
     }
     if (connection) {
       const isOrg = connection.visibility === domain.VISIBILITY.ORGANIZATION;
@@ -384,10 +392,14 @@ class McpService {
   /**
    * B4e：全局"是否允许发起 MCP 工具调用"开关的写授权（risk = mcp.manage）。
    * 开关改变的是整个 MCP 域的调用能力，不是某条连接，因此只校验 App 动作，不绑 connection。
+   *
+   * B4e 收口补丁：这是**全局**开关，收紧为管理员/超管（requireAdmin → actor.isSuper）。
+   * 审计与结构化错误码不变：调用方（mcp-bootstrap.cjs:288-292）仍会按 REQUEST/DENY/ALLOW
+   * 落 mcp.toolInvocation.set 审计；这里只回 MCP_UNAUTHORIZED + reason=manage-requires-admin。
    * 返回结构化结果，绝不回连接数据。
    */
   authorizeManage({ context } = {}) {
-    const auth = this.#authorize({ context, action: domain.MCP_ACTIONS.MANAGE });
+    const auth = this.#authorize({ context, action: domain.MCP_ACTIONS.MANAGE, requireAdmin: true });
     return auth.ok ? { ok: true } : { ok: false, error: auth.error, reason: auth.reason || null };
   }
 

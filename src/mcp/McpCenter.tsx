@@ -1029,6 +1029,19 @@ export function McpCenter({ role }: { role: string | null }) {
     </>
   );
 
+  /* UI-3：工具调用开关是页面级全局开关，不依赖连接列表。
+     在提前 return 之前只定义一次，空连接态与有连接态渲染同一份，避免两处 JSX 分叉
+     （原状：空态分支 McpCenter.tsx:1060-1085 提前 return，开关只在 1129-1135 的非空分支渲染）。 */
+  const toolSwitch = (
+    <McpToolSwitch
+      state={switchState}
+      busy={switchBusy}
+      failure={switchFailure}
+      onToggle={() => void toggleToolSwitch()}
+      onReload={() => void loadAgentTools(agentToolsScope)}
+    />
+  );
+
   /* ── 首屏与列表错误（PLAN §22 的状态位）───────────────────────────────── */
   if (listError && !connections.length && !loading) {
     return (
@@ -1079,6 +1092,8 @@ export function McpCenter({ role }: { role: string | null }) {
             新建连接
           </Button>
         </div>
+        {/* UI-3：空连接态也渲染全局开关（本区块原先只在非空分支渲染）。 */}
+        {toolSwitch}
         {dialogs}
       </div>
     );
@@ -1126,13 +1141,7 @@ export function McpCenter({ role }: { role: string | null }) {
         }}
       />
 
-      <McpToolSwitch
-        state={switchState}
-        busy={switchBusy}
-        failure={switchFailure}
-        onToggle={() => void toggleToolSwitch()}
-        onReload={() => void loadAgentTools(agentToolsScope)}
-      />
+      {toolSwitch}
 
       <div className="mcp-split">
         <ScrollArea label="MCP 连接列表" className="mcp-list-pane">
