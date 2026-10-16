@@ -612,6 +612,82 @@ await shoot({
   },
 });
 
+/* ── 4d. U1 修正 · 列表状态按统一视图两侧（DX + core）计算 ─────────────────
+   只按 DX 计数时，core-only 账号看到空态；这里逐个断言两侧组合：
+   core-only → ready 且列出 core；两侧皆空 → empty；core 侧失败 → 结构化提示（不静默成空）。 */
+console.log(String.fromCharCode(10) + "U1 修正 · 列表状态按统一视图两侧计算：");
+setStep("列表状态两侧判定");
+
+await shoot({
+  name: "24-core-only-ready",
+  query: "scenario=core-only",
+  expect: '[data-task-list-state="ready"] [data-task-core-row="core_sync"]',
+  setup: async (page) => {
+    await page.waitForSelector('[data-task-list-state="ready"] [data-task-core-row="core_sync"]', { timeout: 20000 });
+    const rows = await page.$$eval("[data-task-core-row]", (els) => els.map((el) => el.getAttribute("data-task-core-row")));
+    check("core-only：只有 core 任务时列表为 ready 且列出 core 任务", rows.indexOf("core_sync") >= 0, JSON.stringify(rows));
+    const dxRows = await page.$$("[data-task-id]");
+    check("core-only：DX 侧为空不阻止列表进入 ready", dxRows.length === 0, "dxRows=" + dxRows.length);
+    const unified = await page.$eval("[data-task-unified]", (el) => (el.textContent || "").trim());
+    check("core-only：计数口径按两侧合并（dx 0 / core 1 / 共 1）", unified.indexOf("core 1") >= 0 && unified.indexOf("dx 0") >= 0, unified);
+  },
+});
+
+await shoot({
+  name: "25-core-only-dark",
+  query: "scenario=core-only-dark&dark=1",
+  dark: true,
+  expect: '[data-task-list-state="ready"] [data-task-core-row="core_sync"]',
+  setup: async (page) => {
+    await page.waitForSelector('[data-task-list-state="ready"] [data-task-core-row="core_sync"]', { timeout: 20000 });
+    const isDark = await page.evaluate(() => !!document.querySelector(".window.dark"));
+    const row = await page.$('[data-task-core-row="core_sync"]');
+    check("深色下 core-only 仍为 ready 且列出 core 任务", isDark === true && row !== null, "dark=" + isDark + " row=" + (row !== null));
+  },
+});
+
+await shoot({
+  name: "26-both-empty",
+  query: "scenario=both-empty",
+  expect: '[data-task-list-state="empty"]',
+  setup: async (page) => {
+    await page.waitForSelector('[data-task-list-state="empty"]', { timeout: 20000 });
+    const coreList = await page.$("[data-task-core-list]");
+    const dxRows = await page.$$("[data-task-id]");
+    check("两侧皆空才是 empty（没有 core 列表也没有 DX 行）", coreList === null && dxRows.length === 0, "coreList=" + (coreList !== null) + " dxRows=" + dxRows.length);
+  },
+});
+
+await shoot({
+  name: "27-core-side-error",
+  query: "scenario=core-error",
+  expect: "[data-task-core-list-error]",
+  setup: async (page) => {
+    await page.waitForSelector("[data-task-core-list-error]", { timeout: 20000 });
+    const text = await page.$eval("[data-task-core-list-error]", (el) => el.textContent || "");
+    check(
+      "core 侧取数失败：结构化提示点名 core 与稳定错误码，且不当作没有 core 任务",
+      text.indexOf("core 任务列表读取失败") >= 0 && text.indexOf("AGENT_INTERNAL") >= 0 && text.indexOf("不当作") >= 0,
+      text.slice(0, 160),
+    );
+    const state = await page.$('[data-task-list-state="ready"]');
+    const dxRows = await page.$$("[data-task-id]");
+    check("core 侧失败但 DX 有数据：该侧失败 ≠ 整体失败，列表仍 ready", state !== null && dxRows.length >= 3, "ready=" + (state !== null) + " dxRows=" + dxRows.length);
+  },
+});
+
+await shoot({
+  name: "28-core-side-error-only",
+  query: "scenario=core-error-only",
+  expect: '[data-task-list-state="error"]',
+  setup: async (page) => {
+    await page.waitForSelector('[data-task-list-state="error"]', { timeout: 20000 });
+    const kind = await page.$eval('[data-task-list-state="error"] [data-ds-kind]', (el) => el.getAttribute("data-ds-kind"));
+    const text = await page.$eval('[data-task-list-state="error"]', (el) => el.textContent || "");
+    check("core 侧失败且无任何数据：整页 error（不是 empty），点名 core 侧", kind === "error" && text.indexOf("core 任务列表") >= 0 && text.indexOf("AGENT_INTERNAL") >= 0, "kind=" + kind + " text=" + text.slice(0, 120).replace(/\s+/g, " "));
+  },
+});
+
 /* core 命令白名单 / 载荷键：确认后按真实发出的命令断言。 */
 {
   const { ctx, page } = await openScenario(browser, "scenario=ready");

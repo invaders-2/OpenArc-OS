@@ -75,7 +75,13 @@ import {
   taskEntryMeta,
   taskEntryMissingInputs,
   taskEntryRiskText,
+  TASK_LIST_SIDE_LABEL,
+  taskListCounts,
+  taskListFailedSides,
+  taskListFailureScope,
+  taskListFailureTitle,
   taskListState,
+  taskListStateFromSides,
   taskPhase,
   taskEventSequenceState,
   unifiedCountsText,
@@ -325,6 +331,68 @@ test("列表状态优先级：依赖缺失 > 错误 > 加载 > 空 > 就绪", ()
   /* 有缓存数据时不整页盖住：错误 / 加载只作为局部刷新事实。 */
   assert.equal(taskListState({ ...base, errorCode: "AGENT_INTERNAL", count: 3 }), "ready");
   assert.equal(taskListState({ ...base, loading: true, count: 3 }), "ready");
+});
+
+/* ── 5b. 列表状态按统一视图两侧（DX + core）合并判定（U1 修正）────────────── */
+const side = (count, extra = {}) => ({ loading: false, errorCode: null, count, ...extra });
+const sides = (dx, core, dependencyUnavailable = false) => ({ dependencyUnavailable, dx, core });
+
+test("两侧组合的四种状态：只有一侧有数据也是 ready，两侧都空才是 empty", () => {
+  assert.equal(taskListStateFromSides(sides(side(0), side(0))), "empty");
+  /* core-only：U1 报出的真缺口——只有 core 任务时必须就绪，而不是空。 */
+  assert.equal(taskListStateFromSides(sides(side(0), side(2))), "ready");
+  assert.equal(taskListStateFromSides(sides(side(3), side(0))), "ready");
+  assert.equal(taskListStateFromSides(sides(side(3), side(1))), "ready");
+  /* 加载与实际数据不冲突：只要一侧已拿到数据就进就绪态（另一侧不整页盖住）。 */
+  assert.equal(taskListStateFromSides(sides(side(3, { loading: true }), side(0, { loading: true }))), "ready");
+  assert.equal(taskListStateFromSides(sides(side(0, { loading: true }), side(0, { loading: true }))), "loading");
+  /* 依赖缺失仍是先于数据态的环境事实。 */
+  assert.equal(taskListStateFromSides(sides(side(0), side(0), true)), "unavailable");
+  assert.equal(taskListStateFromSides(sides(side(3), side(0), true)), "unavailable");
+});
+
+test("单侧失败：无数据是整体失败，有数据是该侧失败（core 取数失败不得静默成空）", () => {
+  const dxFail = sides(side(0, { errorCode: "AGENT_COMMAND_NOT_ALLOWED" }), side(0));
+  const coreFail = sides(side(0), side(0, { errorCode: "AGENT_INTERNAL" }));
+  assert.equal(taskListStateFromSides(dxFail), "error");
+  assert.equal(taskListStateFromSides(coreFail), "error");
+  assert.notEqual(taskListStateFromSides(coreFail), "empty");
+  assert.deepEqual(taskListFailedSides(dxFail), ["dx"]);
+  assert.deepEqual(taskListFailedSides(coreFail), ["core"]);
+  assert.deepEqual(taskListFailedSides(sides(side(0, { errorCode: "X" }), side(0, { errorCode: "Y" }))), ["dx", "core"]);
+  assert.deepEqual(taskListFailedSides(sides(side(0), side(0))), []);
+  assert.equal(taskListFailureScope(coreFail), "overall");
+  assert.equal(taskListFailureScope(sides(side(0), side(0))), "none");
+
+  /* 该侧失败：另一侧还有数据 → 列表照常 ready，失败只作为局部事实。 */
+  const coreFailWithDx = sides(side(3), side(0, { errorCode: "AGENT_INTERNAL" }));
+  const dxFailWithCore = sides(side(0, { errorCode: "AGENT_COMMAND_NOT_ALLOWED" }), side(1));
+  assert.equal(taskListStateFromSides(coreFailWithDx), "ready");
+  assert.equal(taskListStateFromSides(dxFailWithCore), "ready");
+  assert.equal(taskListFailureScope(coreFailWithDx), "side");
+  assert.equal(taskListFailureScope(dxFailWithCore), "side");
+  assert.deepEqual(taskListFailedSides(coreFailWithDx), ["core"]);
+  /* 有缓存数据时失败不整页盖住（与 taskListState 的既有语义一致）。 */
+  assert.equal(taskListStateFromSides(sides(side(2, { errorCode: "X" }), side(1))), "ready");
+});
+
+test("计数口径：两侧有效条数相加，非法 / 负数按 0 且不制造数据", () => {
+  assert.deepEqual(taskListCounts({ dx: side(3), core: side(1) }), { dx: 3, core: 1, total: 4 });
+  assert.deepEqual(taskListCounts({ dx: side(0), core: side(2) }), { dx: 0, core: 2, total: 2 });
+  assert.deepEqual(taskListCounts({ dx: side(-1), core: side(NaN) }), { dx: 0, core: 0, total: 0 });
+  assert.deepEqual(taskListCounts({ dx: side(2.9), core: side(Infinity) }), { dx: 2, core: 0, total: 2 });
+});
+
+test("整页失败标题点名失败侧并保留稳定错误码；DX 文案保持既有口径", () => {
+  assert.equal(
+    taskListFailureTitle("dx", "AGENT_COMMAND_NOT_ALLOWED"),
+    "读取任务列表失败：" + TASK_ERROR_TEXT.AGENT_COMMAND_NOT_ALLOWED,
+  );
+  const coreTitle = taskListFailureTitle("core", "AGENT_INTERNAL");
+  assert.ok(coreTitle.indexOf("core 任务列表") >= 0, coreTitle);
+  assert.ok(coreTitle.indexOf(TASK_ERROR_TEXT.AGENT_INTERNAL) >= 0, coreTitle);
+  assert.ok(TASK_LIST_SIDE_LABEL.core.indexOf("unified-list") >= 0, TASK_LIST_SIDE_LABEL.core);
+  assert.ok(TASK_LIST_SIDE_LABEL.dx.indexOf("agent/task/list") >= 0, TASK_LIST_SIDE_LABEL.dx);
 });
 
 test("空态判定：0 或非法都算空", () => {

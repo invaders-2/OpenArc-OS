@@ -88,7 +88,10 @@ import {
   taskErrorText,
   taskEventLabel,
   taskFeedbackForStatus,
-  taskListState,
+  taskListFailureScope,
+  taskListFailureTitle,
+  taskListFailedSides,
+  taskListStateFromSides,
   unifiedCapabilityNote,
   unifiedCountsText,
   unifiedSourceBadge,
@@ -246,8 +249,11 @@ function TaskConsoleBody({ role }: { role: string | null }) {
   const [entryFailure, setEntryFailure] = useState<{ entry: TaskEntryKey; code: string; context: string } | null>(null);
   /* UI-3c 二次确认：待确认的入口与已构造好的载荷；非 null 时弹 Dialog，确认前不发命令。 */
   const [pendingEntry, setPendingEntry] = useState<{ key: TaskEntryKey; payload: Record<string, unknown>; summary: string } | null>(null);
-  /* 统一读模型：只读列表来源标注（不改任何一方状态机）。 */
+  /* 统一读模型：只读列表来源标注（不改任何一方状态机）；同时是列表里 core 来源的取数路径，
+     因此它有自己的 loading / error，供"两侧合并"判定列表状态（U1 修正）。 */
   const [unified, setUnified] = useState<UnifiedListView | null>(null);
+  const [unifiedLoading, setUnifiedLoading] = useState(true);
+  const [unifiedError, setUnifiedError] = useState<Failure | null>(null);
   /* U1 · core 任务（既有 tasks 表）：选中、详情与动作全部经 task/* 窄桥。 */
   const [selectedCore, setSelectedCore] = useState<UnifiedItem | null>(null);
   const [coreDetail, setCoreDetail] = useState<CoreDetailState>({ kind: "none" });
@@ -397,11 +403,28 @@ function TaskConsoleBody({ role }: { role: string | null }) {
     [refreshSelected, loadEvents],
   );
 
-  /** 统一读模型（只读）：失败不阻塞主列表，界面照实标注来源未知。 */
-  const loadUnified = useCallback(async () => {
-    const res = await send(UNIFIED_READ_MODEL_COMMAND, {});
-    setUnified(normalizeUnifiedList(res));
-  }, [send]);
+  /**
+   * 统一读模型（只读）：列表里 core 来源的取数路径，与 DX 的 task/list 并列为"两侧"。
+   * 失败时保留上一次读模型（与 loadList 保留 tasks 同一语义），只把失败记成该侧事实——
+   * 既不清空、也不把它当成"没有 core 任务"（U1 修正）。
+   */
+  const loadUnified = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (!opts?.silent) setUnifiedLoading(true);
+      const res = await send(UNIFIED_READ_MODEL_COMMAND, {});
+      if (res.ok !== true) {
+        const code = codeOf(res.error);
+        const message = messageOf(res.message);
+        setUnifiedError({ code, context: "读取统一读模型（core 任务来源）", message });
+        markDependency(code, res.detail, message, "读取统一读模型（core 任务来源）");
+      } else {
+        setUnified(normalizeUnifiedList(res));
+        setUnifiedError(null);
+      }
+      if (!opts?.silent) setUnifiedLoading(false);
+    },
+    [send, markDependency],
+  );
 
   /**
    * U1 · core 任务详情：一律以后端 task/get 为准，失败不阻塞列表、也不做本地拼接。
@@ -513,7 +536,7 @@ function TaskConsoleBody({ role }: { role: string | null }) {
       await loadEvents(selectedId);
     }
     if (selectedCore) await loadCoreDetail(selectedCore.id, { silent: true });
-    await loadUnified();
+    await loadUnified({ silent: true });
   };
 
   const runAction = async (
@@ -748,7 +771,7 @@ function TaskConsoleBody({ role }: { role: string | null }) {
     setNotice(meta.label + "已提交，任务会出现在列表里");
     toast({ kind: "success", title: meta.label + "已提交" });
     await refreshAll();
-    await loadUnified();
+    await loadUnified({ silent: true });
   };
 
   const confirmEntry = async () => {
@@ -772,12 +795,22 @@ function TaskConsoleBody({ role }: { role: string | null }) {
     [dependency, health],
   );
 
-  const listState = taskListState({
-    loading,
-    errorCode: listError ? listError.code : null,
+  /* 统一读模型的 core 来源：列表里的 core 行就是这一份（取数失败时保留上一次结果）。 */
+  const coreUnified = unified ? unified.items.filter((item) => item.source === "core") : [];
+
+  /* 列表状态按统一视图**两侧**合并判定：DX ← agent/task/list，core ← 统一读模型。
+     只按 DX 计数会让 core-only 账号看到假空态（U1 修正）。 */
+  const listSides = {
     dependencyUnavailable: !!dependency,
-    count: tasks.length,
-  });
+    dx: { loading, errorCode: listError ? listError.code : null, count: tasks.length },
+    core: { loading: unifiedLoading, errorCode: unifiedError ? unifiedError.code : null, count: coreUnified.length },
+  };
+  const listState = taskListStateFromSides(listSides);
+  const listFailureScope = taskListFailureScope(listSides);
+  const listFailedSides = taskListFailedSides(listSides);
+  /* 整页错误优先用 DX 的失败码（既有语义），DX 正常而 core 失败时点名 core。 */
+  const listFailure = listError || unifiedError;
+  const listFailureSide: "dx" | "core" | null = listError ? "dx" : unifiedError ? "core" : null;
 
   const filteredTasks = filterTasks(tasks, query);
   const missing = missingDependencies(health);
@@ -790,7 +823,6 @@ function TaskConsoleBody({ role }: { role: string | null }) {
   /* 统一读模型的来源索引：行内来源标注用；core-only 项单独列一行。 */
   const sourceIndex = unifiedSourceIndex(unified ? unified.items : []);
   const entryMissing = missingDependencies(health);
-  const coreUnified = unified ? unified.items.filter((item) => item.source === "core") : [];
 
   const selectedTask = detail.kind === "ready" ? detail.task : null;
   const feedback = taskFeedbackForStatus(selectedTask ? selectedTask.status : null);
@@ -846,6 +878,31 @@ function TaskConsoleBody({ role }: { role: string | null }) {
         {listError && tasks.length > 0 ? (
           <p className="task-error" role="alert" data-task-error data-task-error-code={listError.code}>
             刷新任务列表失败：{taskErrorText(listError.code)}（{listError.code}）
+          </p>
+        ) : null}
+        {/* core 侧（统一读模型）取数失败：按"该侧失败"局部提示，不静默成空、也不盖住已能看到的列表。 */}
+        {unifiedError && listFailureScope === "side" ? (
+          <p
+            className="task-error"
+            role="alert"
+            data-task-core-list-error
+            data-task-core-list-error-code={unifiedError.code}
+            data-task-core-list-error-side={listFailedSides.join("+")}
+          >
+            core 任务列表读取失败：{taskErrorText(unifiedError.code)}（{unifiedError.code}）
+            {unifiedError.message ? " · " + unifiedError.message : ""} · 失败只属于 core 一侧，不当作「没有 core 任务」。
+          </p>
+        ) : null}
+        {/* DX 侧失败但 core 还有数据：同样按该侧失败提示，不整页盖住。 */}
+        {listError && tasks.length === 0 && listFailureScope === "side" ? (
+          <p
+            className="task-error"
+            role="alert"
+            data-task-list-side-error
+            data-task-list-side-error-side="dx"
+            data-task-list-side-error-code={listError.code}
+          >
+            DX 任务列表读取失败：{taskErrorText(listError.code)}（{listError.code}）· 仍可查看 core 任务。
           </p>
         ) : null}
       </div>
@@ -1035,10 +1092,10 @@ function TaskConsoleBody({ role }: { role: string | null }) {
           ) : null}
           {listState === "error" ? (
             <PageState
-              kind={taskErrorState(listError ? listError.code : "AGENT_INTERNAL")}
-              title={"读取任务列表失败：" + taskErrorText(listError ? listError.code : "AGENT_INTERNAL")}
-              description={"后端返回的稳定错误码是 " + (listError ? listError.code : "AGENT_INTERNAL") + "。"}
-              onAction={() => void loadList()}
+              kind={taskErrorState(listFailure ? listFailure.code : "AGENT_INTERNAL")}
+              title={taskListFailureTitle(listFailureSide, listFailure ? listFailure.code : "AGENT_INTERNAL")}
+              description={"后端返回的稳定错误码是 " + (listFailure ? listFailure.code : "AGENT_INTERNAL") + "。"}
+              onAction={() => { void loadList(); void loadUnified(); }}
             />
           ) : null}
           {listState === "unavailable" ? (
@@ -1046,13 +1103,13 @@ function TaskConsoleBody({ role }: { role: string | null }) {
               kind="unavailable"
               title={"任务控制台不可用：" + (dependency ? dependency.context : "依赖缺失")}
               description={dependencyText}
-              onAction={() => { setDependency(null); void loadHealth(); void loadList(); }}
+              onAction={() => { setDependency(null); void loadHealth(); void loadList(); void loadUnified(); }}
             />
           ) : null}
 
         </div>
       ) : (
-        <div className="task-split">
+        <div className="task-split" data-task-list-state="ready">
           <section className="task-list-pane" aria-label="任务列表">
             <div className="task-pane-head">
               <h2 className="task-pane-title">任务</h2>
@@ -1112,11 +1169,11 @@ function TaskConsoleBody({ role }: { role: string | null }) {
                   );
                 })}
               </ul>
-            ) : (
+            ) : query.trim() ? (
               <p className="task-muted" data-task-filter-empty>
                 没有匹配「{query}」的任务。
               </p>
-            )}
+            ) : null}
             {coreUnified.length ? (
               <div className="task-core-list" data-task-core-list>
                 <div className="task-section-head">

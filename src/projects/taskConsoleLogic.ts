@@ -443,14 +443,70 @@ export function taskErrorState(code: string): TaskPageStateKind {
   return "error";
 }
 
+/* ── 列表状态按统一视图两侧（DX + core）合并判定 ───────────────────────────
+   为什么按两侧：列表里的 DX 行来自 agent/task/list，core 行来自统一读模型的 core 来源。
+   只按 DX 计数会让“只有 core 任务”的账号看到假空态（U1 报出的真缺口）。 */
+export type TaskListSide = {
+  loading: boolean;
+  errorCode: string | null;
+  count: number;
+};
+
+export type TaskListSideKey = "dx" | "core";
+
+export type TaskListSides = {
+  dependencyUnavailable: boolean;
+  dx: TaskListSide;
+  core: TaskListSide;
+};
+
+/** 计数口径：两侧各自有效条数相加；非法 / 负数按 0 处理，不参与“有数据”判定。 */
+export function taskListCounts(sides: { dx: TaskListSide; core: TaskListSide }): { dx: number; core: number; total: number } {
+  const norm = (n: number) => (Number.isFinite(n) && n > 0 ? Math.trunc(n) : 0);
+  const dx = norm(sides.dx.count);
+  const core = norm(sides.core.count);
+  return { dx, core, total: dx + core };
+}
+
+/** 失败的那几侧；没有失败返回空数组。 */
+export function taskListFailedSides(sides: { dx: TaskListSide; core: TaskListSide }): TaskListSideKey[] {
+  const out: TaskListSideKey[] = [];
+  if (sides.dx.errorCode) out.push("dx");
+  if (sides.core.errorCode) out.push("core");
+  return out;
+}
+
+/**
+ * 失败范围——用于区分“该侧失败”与“整体失败”：
+ *   · "overall" —— 有侧失败且两侧都没有数据：整页按错误呈现（不把取数失败静默当成空）；
+ *   · "side"    —— 有侧失败但另一侧还有数据：列表照常就绪，失败只作为该侧的局部提示；
+ *   · "none"    —— 没有失败。
+ */
+export function taskListFailureScope(sides: { dx: TaskListSide; core: TaskListSide }): "none" | "side" | "overall" {
+  if (!taskListFailedSides(sides).length) return "none";
+  return taskListCounts(sides).total > 0 ? "side" : "overall";
+}
+
 /**
  * 页面状态判定的**优先级**（顺序即规则，与 skillCenterLogic.skillListState 同一口径）：
  *   1 依赖缺失 —— 环境事实，先于一切数据态
- *   2 错误且无数据
- *   3 首屏加载且无数据
- *   4 空且无数据
- *   5 就绪
+ *   2 两侧合并有数据 —— 就绪（另一侧的 loading / 失败不挡住已能看到的任务）
+ *   3 任一侧失败且无数据 —— 整体失败（不静默成空）
+ *   4 两侧都无数据且仍在加载
+ *   5 两侧都空
  * 初值为 loading，避免先画一帧假空态。
+ */
+export function taskListStateFromSides(v: TaskListSides): TaskPageStateKind | "ready" {
+  if (v.dependencyUnavailable) return "unavailable";
+  if (taskListCounts(v).total > 0) return "ready";
+  if (taskListFailedSides(v).length) return "error";
+  if (v.dx.loading || v.core.loading) return "loading";
+  return "empty";
+}
+
+/**
+ * 旧口径：只按 DX 一侧计数（保留给只看单一来源的调用方与既有断言）。
+ * 两侧合并判定请用 taskListStateFromSides。
  */
 export function taskListState(v: {
   loading: boolean;
@@ -458,11 +514,22 @@ export function taskListState(v: {
   dependencyUnavailable: boolean;
   count: number;
 }): TaskPageStateKind | "ready" {
-  if (v.dependencyUnavailable) return "unavailable";
-  if (v.errorCode && v.count === 0) return "error";
-  if (v.loading && v.count === 0) return "loading";
-  if (v.count === 0) return "empty";
-  return "ready";
+  return taskListStateFromSides({
+    dependencyUnavailable: v.dependencyUnavailable,
+    dx: { loading: v.loading, errorCode: v.errorCode, count: v.count },
+    core: { loading: false, errorCode: null, count: 0 },
+  });
+}
+
+export const TASK_LIST_SIDE_LABEL: Record<TaskListSideKey, string> = {
+  dx: "DX 任务列表（agent/task/list）",
+  core: "core 任务列表（统一读模型 agent/task/unified-list）",
+};
+
+/** 整页失败标题：点名失败的是哪一侧，并保留稳定错误码（不塌缩成“未知错误”）。 */
+export function taskListFailureTitle(side: TaskListSideKey | null, code: string | null): string {
+  const label = side === "core" ? "core 任务列表" : "任务列表";
+  return "读取" + (side === "core" ? " " : "") + label + "失败：" + taskErrorText(code || "AGENT_INTERNAL");
 }
 
 /* ── 依赖缺失：一定指出缺的是哪一个（agent/health 的 dependencies 清单）── */

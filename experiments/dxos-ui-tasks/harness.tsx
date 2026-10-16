@@ -210,6 +210,14 @@ function coreFixture() {
 }
 
 const CORE: any = coreFixture();
+/* 统一读模型的 core 行：与 coreFixture 同一任务，保证列表与详情一致（status 每次现读，跟随场景）。 */
+const coreUnifiedItem = () => ({
+  source: "core",
+  id: CORE.task.taskId,
+  title: CORE.task.goal,
+  status: CORE.task.status,
+  projectId: null,
+});
 const coreProbe: any = { commands: [] as any[] };
 (window as any).__oaTaskCoreProbe = coreProbe;
 
@@ -300,7 +308,9 @@ async function command(raw: any) {
       return finish({ ok: true, value: healthValue() });
     case "agent/task/list":
       if (scenario === "loading") return new Promise(() => {});
-      if (scenario === "empty") return finish({ ok: true, value: { items: [] } });
+      /* core-only / both-empty / core-error-only：DX 侧确实没有任务（与统一读模型的 DX 部分一致）。 */
+      if (scenario === "empty" || scenario === "both-empty" || scenario === "core-only" || scenario === "core-only-dark" || scenario === "core-error-only")
+        return finish({ ok: true, value: { items: [] } });
       if (scenario === "error") return finish({ ok: false, error: "AGENT_COMMAND_NOT_ALLOWED", message: "命令不在 agent:command 白名单内" });
       if (scenario === "unauthorized") return finish({ ok: false, error: "SESSION_EXPIRED", message: "会话已过期，请重新登录" });
       if (scenario === "unavailable")
@@ -387,22 +397,40 @@ async function command(raw: any) {
     /* UI-3b 统一读模型：只读合并 dx / core 两套任务表（形状对齐 task-unified-view.cjs）。 */
     case "agent/task/unified-list": {
       const source = payload.source ? String(payload.source) : null;
-      const items = [
-        { source: "dx", id: "t_report", title: "整理本周周报", status: "RUNNING", projectId: "p_weekly" },
-        { source: "dx", id: "t_wait", title: "确认部署目标", status: "WAITING", projectId: "p_weekly" },
-        { source: "dx", id: "t_done", title: "生成发布说明", status: "SUCCEEDED", projectId: "p_weekly" },
-        { source: "core", id: CORE.task.taskId, title: CORE.task.goal, status: CORE.task.status, projectId: null },
-      ].filter((item) => !source || item.source === source);
-      return finish({
-        ok: true,
-        value: {
+      const unifiedValue = (all: any[], dxCount: number, coreCount: number) => {
+        const items = all.filter((item) => !source || item.source === source);
+        return {
           readModel: true,
           boundary: "这是读模型：不写任何表、不改变任何一方状态机。",
           sources: source ? [source] : ["dx", "core"],
-          counts: { dx: 3, core: 1, total: 4 },
+          counts: { dx: dxCount, core: coreCount, total: dxCount + coreCount },
           items,
-        },
-      });
+        };
+      };
+      /* 场景自洽：读模型的 DX 部分必须与 agent/task/list 同步，否则"两侧合并"会假就绪
+         （例如 empty 场景里读模型仍返回任务）；core 侧是列表里 core 行的唯一来源。 */
+      if (scenario === "loading") return new Promise(() => {});
+      if (scenario === "empty" || scenario === "both-empty") return finish({ ok: true, value: unifiedValue([], 0, 0) });
+      if (scenario === "core-only" || scenario === "core-only-dark")
+        return finish({ ok: true, value: unifiedValue([coreUnifiedItem()], 0, 1) });
+      if (scenario === "core-error" || scenario === "core-error-only")
+        return finish({ ok: false, error: "AGENT_INTERNAL", message: "统一读模型读取失败：core 来源不可用（演示）" });
+      if (scenario === "error") return finish({ ok: false, error: "AGENT_COMMAND_NOT_ALLOWED", message: "命令不在 agent:command 白名单内" });
+      if (scenario === "unauthorized") return finish({ ok: false, error: "SESSION_EXPIRED", message: "会话已过期，请重新登录" });
+      if (scenario === "unavailable")
+        return finish({
+          ok: false,
+          error: "AGENT_DEPENDENCY_UNAVAILABLE",
+          message: "工具目录未就绪：agent-tool-catalog.cjs 不可用",
+          detail: { dependency: "toolCatalog", causeCode: "catalog_unavailable" },
+        });
+      const all = [
+        { source: "dx", id: "t_report", title: "整理本周周报", status: "RUNNING", projectId: "p_weekly" },
+        { source: "dx", id: "t_wait", title: "确认部署目标", status: "WAITING", projectId: "p_weekly" },
+        { source: "dx", id: "t_done", title: "生成发布说明", status: "SUCCEEDED", projectId: "p_weekly" },
+        coreUnifiedItem(),
+      ];
+      return finish({ ok: true, value: unifiedValue(all, 3, 1) });
     }
     /* UI-3b 写操作入口：失败只在 ?scenario=entry-error 下按稳定码返回。 */
     case "agent/task/create": {
