@@ -78,6 +78,10 @@ interface OpenArcTrashEntry {
   groupId?: string;
 }
 
+interface OpenArcEventBridge {
+  command: (command: { command: string; payload?: Record<string, unknown> }) => Promise<any>;
+  onEvent?: (callback: (event: any) => void) => () => void;
+}
 interface OpenArcBridge {
   /** 唯一的原生层上行通道：把 Window Manager 结算出的意图交给主进程。 */
   sync: (payload: unknown) => Promise<{ ok?: boolean; error?: string; results?: unknown[] }>;
@@ -89,6 +93,15 @@ interface OpenArcBridge {
   /** MCP 中心：唯一入口 command({command,payload})，形状与 electron/preload.cjs 的 openarc.mcp 一致。 */
   mcp?: OpenArcCommandBridge;
   files?: OpenArcFilesBridge;
+  /** 10-16 · DX OS 后端域（形状同 preload.cjs：command({command,payload}) + 可选 onEvent，返回 {ok,value}）。 */
+  skill?: OpenArcEventBridge;
+  automation?: OpenArcEventBridge;
+  media?: OpenArcEventBridge;
+  agent?: OpenArcEventBridge;
+  developer?: OpenArcCommandBridge;
+  integration?: OpenArcCommandBridge;
+  market?: OpenArcCommandBridge;
+  platform?: OpenArcCommandBridge;
   /** 浏览器（10-15 迁入新壳层用到的四条，形状同 preload.cjs） */
   navigate?: (windowId: string, url: string, tabId?: string) => Promise<unknown>;
   action?: (windowId: string, action: string, tabId?: string) => Promise<unknown>;

@@ -259,8 +259,8 @@ app.whenReady().then(async () => {
     const modelActive = await waitAttr("[data-settings-active]", "data-settings-active", "model");
     check("V8 · 点 [data-settings-pane=model] 后 data-settings-active=model", modelActive, "active=" + (await attr("[data-settings-active]", "data-settings-active")));
     check(
-      "V9 · model pane 是 D4-01 真实实现（[data-d4-01=settings] + 3 个 [data-d4-01-tab]）",
-      (await has('[data-d4-01="settings"]')) && (await count("[data-d4-01-tab]")) === 3,
+      "V9 · model pane 是 D4-01 真实实现（[data-d4-01=settings] + 4 个 [data-d4-01-tab]：10-16 新增「协议」）",
+      (await has('[data-d4-01="settings"]')) && (await count("[data-d4-01-tab]")) === 4,
       "tabs=" + (await count("[data-d4-01-tab]")),
     );
     check(

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ModelProtocols from "./ModelProtocols.vue";
 import { computed, onMounted, reactive, ref } from "vue";
 import DsButton from "../design-system/DsButton.vue";
 
@@ -7,7 +8,7 @@ import DsButton from "../design-system/DsButton.vue";
  * 只经 window.openarc.model.command；credential write-only。
  * 所有 data-d4-01-* 契约逐项保留（tabs / panes / provider-* / model-* / defaults-*）。
  */
-type Tab = "providers" | "models" | "defaults";
+type Tab = "providers" | "models" | "defaults" | "protocols";
 
 withDefaults(defineProps<{ role?: string | null }>(), { role: null });
 
@@ -305,6 +306,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "providers", label: "服务商" },
   { id: "models", label: "模型" },
   { id: "defaults", label: "默认模型" },
+  { id: "protocols", label: "协议" },
 ];
 const providerOptions = computed(() => providers.value);
 </script>
@@ -643,6 +645,9 @@ const providerOptions = computed(() => providers.value);
         </div>
         <p v-if="role !== 'ADMIN'" class="set-cap" data-d4-01-org-hint>组织默认模型需要管理员修改。</p>
       </div>
+    </section>
+    <section v-if="tab === 'protocols'" data-d4-01-pane="protocols">
+      <ModelProtocols />
     </section>
   </div>
 </template>

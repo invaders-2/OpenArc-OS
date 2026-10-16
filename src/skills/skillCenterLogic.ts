@@ -419,8 +419,13 @@ export const SKILL_DEPENDENCY_MISSING_LABEL: Record<SkillDependencyKey, string> 
 
 export type SkillDependencyFlags = Record<string, boolean | undefined>;
 
+/** 运行时才会报的依赖（不在 health 清单里）：给出用户能照着做的说法。 */
+const RUNTIME_DEPENDENCY_LABEL: Record<string, string> = {
+  modelSite: "没有可用的模型：先到「系统设置 › 模型与服务商」添加服务商并设为默认模型",
+};
+
 export function dependencyMissingLabel(key: string): string {
-  return SKILL_DEPENDENCY_MISSING_LABEL[key as SkillDependencyKey] || "缺少依赖（" + key + "）";
+  return SKILL_DEPENDENCY_MISSING_LABEL[key as SkillDependencyKey] || RUNTIME_DEPENDENCY_LABEL[key] || "缺少依赖（" + key + "）";
 }
 
 /** 每种技能 kind 运行所需依赖（依据 skill-runner.cjs 的真实调用路径）。 */

@@ -1,276 +1,519 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
-import { Download, Package, Pencil, Play, Plus, Store, Trash2, User, X } from "lucide-vue-next";
-import { iconUrl } from "../apps";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { Download, FileUp, Layers, Package, Play, Plus, Search, Sparkles, Square, Trash2, User } from "lucide-vue-next";
 import { useShellStore } from "../stores/shell";
 import DsDialog from "../design-system/DsDialog.vue";
+import {
+  analyzeResultOf,
+  buildSkillRunArguments,
+  canSaveAnalyzedSkill,
+  classifyImportError,
+  collectSkillArtifacts,
+  filterSkills,
+  isAllowedSkillCommand,
+  isValidSkillId,
+  skillEntryAvailability,
+  skillFailureText,
+  skillRunFeedback,
+  skillRunInputs,
+  skillsForTab,
+  SKILL_ARTIFACT_KIND_LABEL,
+  type SkillArtifact,
+  type SkillDependencyFlags,
+  type SkillPack,
+  type SkillRecord,
+  type SkillRunStatus,
+  type SkillV2,
+} from "../../src/skills/skillCenterLogic";
 
 /**
- * Skill 中心（10-15，按原型 + PLAN §12）：
- *   · 我的技能 —— 真实的 SKILL.md 文件，存在桌面「Skill」文件夹（访达里可见、可拖走、可删除），
- *     格式遵循 Agent Skills（YAML frontmatter name / description + 正文步骤），保持技能包兼容；
- *   · 已安装 —— 同一批技能的启停（停用只影响新任务；状态存本机 oa-skill-disabled）；
- *   · 试运行 —— 以技能内容发起一个普通任务（task/run），模型 / 权限 / 写操作确认仍由主进程决定；
- *   · 导入 —— 把访达里其它位置带 frontmatter 的 .md 复制进「Skill」文件夹；
- *   · 市场 —— 受管理目录与团队发布需要市场后台，尚未接入，如实显示空态。
+ * Skill 中心（10-16 接后端 skill 域，取代 10-15 的「桌面 Skill 文件夹里的 SKILL.md」简化版）。
+ *
+ * 数据全部来自 window.openarc.skill.command（skill-bootstrap.cjs 的 15 条白名单命令），
+ * 错误文案 / 依赖判定 / 运行参数 / 产物投影复用 src/skills/skillCenterLogic.ts（与旧 React 页同一份逻辑、同一组单测）。
+ *   · 我的技能 = 非内置（自建 / 导入）；全部技能 = 内置 + 自建；技能包 = skill/pack/list。
+ *   · 运行 = skill/run（真实执行，模型由主进程按默认模型解析）；结果与产物如实展示，失败给原因。
+ *   · 导入：.md → skill/analyze（解析成 v2 工作流）→ 确认后 skill/save；.zip → skill/pack/import。
+ *     10-15 版存在桌面「Skill」文件夹里的 SKILL.md 也列在导入对话框里，一键走同一条分析路径。
  */
-type Skill = { key: string; folderId: string; id: string; file: string; name: string; desc: string; steps: string[]; mtime: number };
 const shell = useShellStore();
+const bridge = window.openarc?.skill;
 const files = window.openarc?.files;
-const task = window.openarc?.task;
-const tab = ref<"market" | "mine" | "installed">("mine");
-const skills = ref<Skill[]>([]);
-const loading = ref(false);
+
+type Tab = "mine" | "all" | "packs";
+type Res = { ok?: boolean; value?: any; error?: string; message?: string; detail?: unknown };
+const tab = ref<Tab>("all");
+const query = ref("");
+const skills = ref<SkillRecord[]>([]);
+const packs = ref<SkillPack[]>([]);
+const deps = ref<SkillDependencyFlags | null>(null);
+const loading = ref(true);
+const listError = ref("");
 const message = ref("");
-const DIS = "oa-skill-disabled";
-const disabled = ref<Set<string>>(
-  new Set(
-    (() => {
-      try {
-        const v = JSON.parse(localStorage.getItem(DIS) || "[]");
-        return Array.isArray(v) ? v : [];
-      } catch {
-        return [];
-      }
-    })(),
-  ),
-);
-function saveDisabled() {
+const failure = ref("");
+const busy = ref<string | null>(null);
+
+async function send(command: string, payload: Record<string, unknown> = {}): Promise<Res> {
+  if (!isAllowedSkillCommand(command)) return { ok: false, error: "SKILL_COMMAND_NOT_ALLOWED" };
+  if (!bridge?.command) return { ok: false, error: "NO_BRIDGE" };
   try {
-    localStorage.setItem(DIS, JSON.stringify([...disabled.value]));
+    const r = await bridge.command({ command, payload });
+    return r && typeof r === "object" ? r : { ok: false, error: "RESPONSE_INCOMPLETE" };
   } catch {
-    /* 存储不可用 */
+    return { ok: false, error: "SKILL_INTERNAL" };
   }
 }
+const val = (r: Res) => (r.value && typeof r.value === "object" ? r.value : (r as any));
+const errOf = (r: Res) => skillFailureText(String(r.error || "SKILL_INTERNAL"), r.detail) + "（" + String(r.error || "SKILL_INTERNAL") + "）";
 
-/* ── SKILL.md 读写 ── */
-function parse(text: string): { name: string; desc: string; steps: string[] } | null {
-  const m = /^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/.exec(text.replace(/\r\n/g, "\n"));
-  if (!m) return null;
-  const fm = Object.fromEntries(
-    m[1].split("\n").map((l) => {
-      const i = l.indexOf(":");
-      return i > 0 ? [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^["']|["']$/g, "")] : ["", ""];
-    }),
-  );
-  if (!fm.name) return null;
-  const steps = [...m[2].matchAll(/^\s*\d+[.、)]\s+(.+)$/gm)].map((x) => x[1].trim());
-  return { name: fm.name, desc: fm.description || "", steps };
-}
-function serialize(name: string, desc: string, steps: string[]) {
-  const q = (v: string) => (/[:#"'\n]/.test(v) ? JSON.stringify(v) : v);
-  return [
-    "---",
-    `name: ${q(name)}`,
-    `description: ${q(desc || name)}`,
-    "---",
-    "",
-    `# ${name}`,
-    "",
-    desc,
-    "",
-    "## 步骤",
-    "",
-    ...steps.filter((s) => s.trim()).map((s, i) => `${i + 1}. ${s.trim()}`),
-    "",
-  ].join("\n");
-}
-
-const skillFolder = () => shell.folders.find((f) => !f.parentId && f.name === "Skill") ?? null;
-async function load() {
-  if (!files) return;
+async function loadAll() {
   loading.value = true;
-  const out: Skill[] = [];
-  const folder = skillFolder();
-  if (folder) {
-    const res = await files.list(folder.id).catch(() => null);
-    for (const e of res?.entries ?? []) {
-      if (!/^md$/i.test(e.ext)) continue;
-      const r = await files.read?.(folder.id, e.id).catch(() => null);
-      const p = r?.text ? parse(r.text) : null;
-      if (p) out.push({ key: folder.id + "/" + e.id, folderId: folder.id, id: e.id, file: e.name, ...p, mtime: e.mtime ?? 0 });
-    }
+  const [h, l, p] = await Promise.all([send("skill/health"), send("skill/list"), send("skill/pack/list")]);
+  deps.value = h.ok ? (val(h).dependencies as SkillDependencyFlags) || {} : null;
+  if (l.ok) {
+    const v = val(l);
+    skills.value = (Array.isArray(v.items) ? v.items : Array.isArray(v.skills) ? v.skills : []) as SkillRecord[];
+    listError.value = "";
+  } else listError.value = errOf(l);
+  if (p.ok) {
+    const v = val(p);
+    packs.value = (Array.isArray(v.items) ? v.items : Array.isArray(v.packs) ? v.packs : []) as SkillPack[];
   }
-  skills.value = out.sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
   loading.value = false;
 }
-const enabled = (s: Skill) => !disabled.value.has(s.key);
-function toggle(s: Skill) {
-  if (enabled(s)) disabled.value.add(s.key);
-  else disabled.value.delete(s.key);
-  disabled.value = new Set(disabled.value);
-  saveDisabled();
-}
 
-/* ── 新建 / 编辑 ── */
-const editor = ref(false);
-const editing = ref<Skill | null>(null);
-const form = reactive({ name: "", desc: "", steps: [] as { k: number; t: string }[] });
-let k = 0;
-function openEditor(s: Skill | null) {
-  editing.value = s;
-  form.name = s?.name ?? "";
-  form.desc = s?.desc ?? "";
-  form.steps = (s?.steps.length ? s.steps : ["读取输入与参考", "按要求处理", "检查结果是否符合要求"]).map((t) => ({ k: ++k, t }));
-  editor.value = true;
+const visible = computed(() => {
+  const base = tab.value === "mine" ? skillsForTab("mine", skills.value) : skillsForTab("installed", skills.value);
+  return filterSkills(base, query.value);
+});
+const filteredPacks = computed(() => {
+  const q = query.value.trim().toLowerCase();
+  return packs.value.filter((p) => !q || (String(p.name || p.id) + " " + String(p.sourceName || "")).toLowerCase().includes(q));
+});
+const mineCount = computed(() => skillsForTab("mine", skills.value).length);
+
+/* ── 详情 ── */
+const selectedId = ref<string | null>(null);
+const detail = ref<SkillRecord | null>(null);
+const detailError = ref("");
+async function select(id: string) {
+  selectedId.value = id;
+  detail.value = skills.value.find((s) => s.id === id) || null;
+  detailError.value = "";
+  run.value = null;
+  for (const k of Object.keys(runValues)) delete runValues[k];
+  const r = await send("skill/get", { skillId: id });
+  if (selectedId.value !== id) return;
+  if (r.ok && val(r).skill) detail.value = val(r).skill as SkillRecord;
+  else if (!r.ok) detailError.value = errOf(r);
 }
-async function save() {
-  if (!files?.writeText || !form.name.trim()) return;
-  const text = serialize(form.name.trim(), form.desc.trim(), form.steps.map((s) => s.t));
-  const folder = editing.value ? null : shell.ensureFolder("Skill");
-  const r = editing.value
-    ? await files.writeText(editing.value.folderId, editing.value.id, "", text).catch(() => null)
-    : await files.writeText(folder!.id, null, form.name.trim() + ".md", text).catch(() => null);
-  if (!r?.ok) {
-    message.value = "保存失败：" + (r?.error ?? "写入出错");
+const instructions = (s: SkillRecord | null) => (s ? (s.source && s.source.instructions) || s.systemPrompt || "" : "");
+const KIND: Record<string, string> = { text: "文本", image: "图片", video: "视频", audio: "音频", "image-edit": "改图", procedure: "流程" };
+const LAYER: Record<string, string> = { preset: "内置", user: "自建", pack: "技能包", workspace: "工作区" };
+const kindText = (s: SkillRecord) => KIND[String(s.kind || "")] || String(s.kind || "技能");
+const originText = (s: SkillRecord) =>
+  s.builtin ? "内置" : s.source?.metadata?.packName ? "技能包 · " + s.source.metadata.packName : LAYER[String(s.layer || "")] || "自建";
+
+async function toggle(s: SkillRecord) {
+  busy.value = "toggle:" + s.id;
+  failure.value = "";
+  const r = await send(s.enabled === false ? "skill/enable" : "skill/disable", { skillId: s.id });
+  busy.value = null;
+  if (!r.ok) {
+    failure.value = errOf(r);
     return;
   }
-  editor.value = false;
-  message.value = editing.value ? `已保存「${form.name}」` : `已新建「${form.name}」，文件在桌面「Skill」文件夹`;
-  await load();
-}
-async function remove(s: Skill) {
-  const r = await files?.trash?.(s.folderId, s.id).catch(() => null);
-  if (r?.ok) {
-    message.value = `「${s.name}」已移到回收站，可以恢复`;
-    void shell.refreshTrashState?.();
-    await load();
-  }
+  await loadAll();
+  if (selectedId.value === s.id) await select(s.id);
 }
 
-/* ── 试运行：以技能内容发起普通任务 ── */
-async function trial(s: Skill) {
-  if (!task || !enabled(s)) return;
-  const goal = [`请按照 Skill「${s.name}」执行。`, s.desc ? `用途：${s.desc}` : "", "步骤：", ...s.steps.map((t, i) => `${i + 1}. ${t}`)]
-    .filter(Boolean)
-    .join("\n");
-  const r = await task.command({ command: "task/run", payload: { goal } }).catch(() => null);
-  if (r?.ok) {
-    shell.notify({ appId: "skills", title: `已试运行：${s.name}`, body: "已作为任务交给助理，结果可在「对话」里查看。" });
-    shell.activateApp("chat");
+/* ── 运行 ── */
+const runValues = reactive<Record<string, string>>({});
+const run = ref<{ status: SkillRunStatus; text?: string; artifacts?: SkillArtifact[]; error?: string; requestId: string } | null>(null);
+const fields = computed(() => skillRunInputs(detail.value));
+const runAvail = computed(() => skillEntryAvailability("run", detail.value, deps.value));
+const runFb = computed(() => skillRunFeedback(run.value ? run.value.status : "idle"));
+async function doRun() {
+  const s = detail.value;
+  if (!s || busy.value) return;
+  if (!runAvail.value.available) {
+    run.value = { status: "unavailable", error: skillFailureText(runAvail.value.code || "SKILL_DEPENDENCY_UNAVAILABLE", { dependency: runAvail.value.missing[0]?.key }), requestId: "" };
+    return;
+  }
+  const built = buildSkillRunArguments(fields.value, runValues);
+  if (!built.ok) {
+    run.value = { status: "failed", error: "请先填写：" + built.missing.join("、"), requestId: "" };
+    return;
+  }
+  const requestId = "skr_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  run.value = { status: "running", requestId };
+  busy.value = "run";
+  const r = await send("skill/run", { skillId: s.id, arguments: built.args, requestId });
+  busy.value = null;
+  if (r.ok) {
+    const v = val(r);
+    run.value = { status: "success", text: typeof v.text === "string" ? v.text : "", artifacts: collectSkillArtifacts(v), requestId };
   } else {
-    message.value =
-      r?.error === "MODEL_CONFIG_UNAVAILABLE" ? "没有可用的文本模型：请先在「系统设置 › 模型 / AI」里配置。" : `试运行被拒绝（${r?.error ?? "任务运行时不可用"}）`;
+    run.value = { status: r.error === "SKILL_DEPENDENCY_UNAVAILABLE" ? "unavailable" : "failed", error: errOf(r), requestId };
   }
 }
+let offEvent: (() => void) | null = null;
 
-/* ── 导入：访达里其它位置的 SKILL.md ── */
+/* ── 新建 / 编辑 / 分析结果保存 ── */
+const editor = ref(false);
+const form = reactive({ id: "", name: "", description: "", systemPrompt: "", editing: false });
+const analyzedV2 = ref<SkillV2 | null>(null);
+const analyzeWarnings = ref<string[]>([]);
+function openEditor(s: SkillRecord | null, v2: SkillV2 | null = null) {
+  form.id = s?.id ?? "";
+  form.name = s?.name ?? "";
+  form.description = s?.description ?? "";
+  form.systemPrompt = instructions(s);
+  form.editing = !!s && !v2 && !!skills.value.find((x) => x.id === s.id);
+  analyzedV2.value = v2;
+  editorError.value = "";
+  editor.value = true;
+}
+const editorError = ref("");
+const suggestId = () => {
+  if (form.editing || form.id) return;
+  const ascii = form.name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  form.id = /^[a-z]/.test(ascii) ? ascii.slice(0, 40) : "skill_" + Date.now().toString(36);
+};
+async function save() {
+  editorError.value = "";
+  if (!isValidSkillId(form.id)) return void (editorError.value = "ID 需以小写字母开头，只能包含小写字母、数字和下划线。");
+  if (!form.name.trim()) return void (editorError.value = "名称不能为空。");
+  if (!form.systemPrompt.trim()) return void (editorError.value = "执行说明不能为空：写清楚这个技能要怎么做。");
+  if (analyzedV2.value) {
+    const chk = canSaveAnalyzedSkill({ id: form.id, name: form.name, systemPrompt: form.systemPrompt, v2: analyzedV2.value } as SkillRecord);
+    if (!chk.ok) return void (editorError.value = chk.reason || "分析结果不完整，不能保存。");
+  }
+  busy.value = "save";
+  const r = await send("skill/save", {
+    skill: {
+      id: form.id.trim().toLowerCase(),
+      name: form.name.trim(),
+      description: form.description.trim(),
+      systemPrompt: form.systemPrompt.trim(),
+      ...(analyzedV2.value ? { v2: analyzedV2.value } : {}),
+    },
+  });
+  busy.value = null;
+  if (!r.ok) return void (editorError.value = errOf(r));
+  editor.value = false;
+  message.value = `已保存「${form.name.trim()}」`;
+  await loadAll();
+  tab.value = "mine";
+  await select(form.id.trim().toLowerCase());
+}
+
+/* ── 删除 / 卸载 ── */
+const confirmItem = ref<{ kind: "skill" | "pack"; id: string; name: string } | null>(null);
+async function confirmDelete() {
+  const c = confirmItem.value;
+  if (!c) return;
+  busy.value = "delete";
+  const r = c.kind === "pack" ? await send("skill/pack/uninstall", { packId: c.id }) : await send("skill/delete", { skillId: c.id });
+  busy.value = null;
+  confirmItem.value = null;
+  if (!r.ok) return void (failure.value = errOf(r));
+  message.value = c.kind === "pack" ? `已卸载技能包「${c.name}」` : `已删除「${c.name}」`;
+  if (c.kind === "skill" && selectedId.value === c.id) {
+    selectedId.value = null;
+    detail.value = null;
+  }
+  await loadAll();
+}
+
+/* ── 导出 ── */
+async function exportSkill(s: SkillRecord) {
+  busy.value = "export";
+  const r = await send("skill/pack/export", { skillId: s.id });
+  busy.value = null;
+  if (!r.ok) return void (failure.value = errOf(r));
+  const v = val(r);
+  const name = typeof v.fileName === "string" ? v.fileName : s.id + ".zip";
+  if (typeof v.base64 === "string" && v.base64) {
+    const bin = atob(v.base64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([bytes], { type: "application/zip" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+  message.value = `已导出 ${name}`;
+}
+
+/* ── 导入 ── */
 const importing = ref(false);
-const candidates = ref<{ key: string; folderId: string; id: string; name: string; skill: string; folder: string }[]>([]);
+const importError = ref("");
+const picker = ref<HTMLInputElement | null>(null);
+type Candidate = { key: string; folderId: string; id: string; name: string; folder: string };
+const candidates = ref<Candidate[]>([]);
 async function openImport() {
-  if (!files) return;
   importing.value = true;
-  const out: typeof candidates.value = [];
-  const skillId = skillFolder()?.id;
+  importError.value = "";
+  candidates.value = [];
+  if (!files) return;
+  // 10-15 版 Skill 中心把技能存成桌面「Skill」文件夹里的 SKILL.md：列出来方便迁移（只读访达，不改原文件）
+  const out: Candidate[] = [];
   for (const fid of ["desktop", ...shell.folders.map((f) => f.id)]) {
-    if (fid === skillId) continue;
     const res = await files.list(fid).catch(() => null);
     for (const e of res?.entries ?? []) {
-      if (!/^md$/i.test(e.ext)) continue;
-      const r = await files.read?.(fid, e.id).catch(() => null);
-      const p = r?.text ? parse(r.text) : null;
-      if (p) out.push({ key: fid + "/" + e.id, folderId: fid, id: e.id, name: e.name, skill: p.name, folder: fid === "desktop" ? "桌面" : shell.folders.find((f) => f.id === fid)?.name ?? "文件夹" });
+      if (!/^md$/i.test(String(e.ext))) continue;
+      out.push({ key: fid + "/" + e.id, folderId: fid, id: e.id, name: e.name, folder: fid === "desktop" ? "桌面" : shell.folders.find((f) => f.id === fid)?.name ?? "文件夹" });
     }
   }
-  candidates.value = out;
+  candidates.value = out.slice(0, 40);
 }
-async function importOne(c: (typeof candidates.value)[number]) {
-  const folder = shell.ensureFolder("Skill");
-  const r = await files?.copy?.(c.folderId, [c.id], folder.id).catch(() => null);
-  if (r?.ok) {
-    candidates.value = candidates.value.filter((x) => x.key !== c.key);
-    message.value = `已导入「${c.skill}」`;
-    await load();
+async function analyzeMarkdown(markdown: string, sourceName: string) {
+  if (!markdown.trim()) return void (importError.value = "文件是空的。");
+  const avail = skillEntryAvailability("analyze", null, deps.value);
+  if (!avail.available) return void (importError.value = skillFailureText(avail.code || "SKILL_DEPENDENCY_UNAVAILABLE", { dependency: avail.missing[0]?.key }));
+  busy.value = "analyze";
+  const r = await send("skill/analyze", { markdown, sourceName });
+  busy.value = null;
+  if (!r.ok) return void (importError.value = errOf(r));
+  const parsed = analyzeResultOf(val(r));
+  if (!parsed.skill) return void (importError.value = "没能从这个文档里识别出技能。");
+  analyzeWarnings.value = parsed.warnings;
+  importing.value = false;
+  openEditor(parsed.skill, parsed.skill.v2 || null);
+}
+async function importCandidate(c: Candidate) {
+  const r = await files?.read?.(c.folderId, c.id).catch(() => null);
+  if (!r?.text) return void (importError.value = "读取失败：" + c.name);
+  await analyzeMarkdown(r.text, c.name);
+}
+async function onPick(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file) return;
+  importError.value = "";
+  if (/\.zip$/i.test(file.name)) {
+    if (file.size > 32 * 1024 * 1024) return void (importError.value = "技能包超过 32 MB 上限。");
+    const buf = new Uint8Array(await file.arrayBuffer());
+    let bin = "";
+    for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+    busy.value = "import";
+    const r = await send("skill/pack/import", { archiveBase64: btoa(bin), sourceName: file.name, requestId: "ski_" + Date.now().toString(36) });
+    busy.value = null;
+    if (!r.ok) {
+      const c = classifyImportError({ code: String(r.error || ""), message: String(r.message || "") });
+      return void (importError.value = c.label + (c.detail && c.detail !== c.label ? "：" + c.detail : ""));
+    }
+    const n = Array.isArray(val(r).skills) ? val(r).skills.length : 0;
+    importing.value = false;
+    message.value = `已导入技能包「${file.name}」` + (n ? `，注册了 ${n} 个技能` : "");
+    await loadAll();
+    tab.value = "packs";
+    return;
   }
+  await analyzeMarkdown(await file.text(), file.name);
 }
 
-const title = computed(() => ({ market: "Skill 市场", mine: "我的技能", installed: "已安装" })[tab.value]);
-onMounted(load);
+const title = computed(() => ({ mine: "我的技能", all: "全部技能", packs: "技能包" })[tab.value]);
+onMounted(() => {
+  void loadAll();
+  offEvent =
+    bridge?.onEvent?.((ev: any) => {
+      const p = ev && ev.payload;
+      if (!p || p.command !== "skill/run" || !run.value || (p.requestId && p.requestId !== run.value.requestId)) return;
+      if (p.phase === "failed" || p.phase === "rejected") run.value = { ...run.value, status: "failed" };
+    }) ?? null;
+});
+onBeforeUnmount(() => offEvent?.());
 </script>
 
 <template>
-  <div class="split skills-app">
+  <div class="split skills-app" data-skill-center>
     <nav class="split-side" aria-label="Skill 分类">
+      <label class="ds-search sk-search">
+        <Search :size="14" class="ds-search__icon" />
+        <input v-model="query" class="ds-search__input" type="search" placeholder="搜索技能" aria-label="搜索技能" />
+      </label>
       <div class="split-section">Skill</div>
-      <button class="split-nav" :aria-current="tab === 'market' ? 'true' : undefined" @click="tab = 'market'">
-        <Store :size="16" /> <span class="split-nav-label">市场</span>
+      <button class="split-nav" :aria-current="tab === 'all' ? 'true' : undefined" data-skill-tab="all" @click="tab = 'all'">
+        <Layers :size="16" /> <span class="split-nav-label">全部技能</span><small class="planned-count">{{ skillsForTab("installed", skills).length }}</small>
       </button>
-      <button class="split-nav" :aria-current="tab === 'mine' ? 'true' : undefined" @click="tab = 'mine'">
-        <User :size="16" /> <span class="split-nav-label">我的技能</span><small class="planned-count">{{ skills.length }}</small>
+      <button class="split-nav" :aria-current="tab === 'mine' ? 'true' : undefined" data-skill-tab="mine" @click="tab = 'mine'">
+        <User :size="16" /> <span class="split-nav-label">我的技能</span><small class="planned-count">{{ mineCount }}</small>
       </button>
       <div class="split-section">本机</div>
-      <button class="split-nav" :aria-current="tab === 'installed' ? 'true' : undefined" @click="tab = 'installed'">
-        <Package :size="16" /> <span class="split-nav-label">已安装</span>
-        <small class="planned-count">{{ skills.filter(enabled).length }}</small>
+      <button class="split-nav" :aria-current="tab === 'packs' ? 'true' : undefined" data-skill-tab="packs" @click="tab = 'packs'">
+        <Package :size="16" /> <span class="split-nav-label">技能包</span><small class="planned-count">{{ packs.length }}</small>
       </button>
-      <p class="planned-note">Skill 描述做事的方法与步骤；安装或启用不会自动获得应用、设备或文件权限。</p>
+      <p class="planned-note">技能描述做事的方法和步骤；启用技能不会自动获得应用、设备或文件权限。在线技能市场尚未接入。</p>
     </nav>
+
     <div class="split-main sk-main">
       <div class="pane-toolbar">
         <strong class="pane-title">{{ title }}</strong>
         <div class="toolbar-spacer" />
-        <button class="planned-today sk-btn" @click="openImport"><Download :size="13" /> 导入</button>
-        <button class="planned-cta sk-btn" :disabled="!files" @click="openEditor(null)"><Plus :size="13" /> 新建 Skill</button>
+        <button class="planned-today sk-btn" data-skill-import @click="openImport"><FileUp :size="13" /> 导入</button>
+        <button class="planned-cta sk-btn" data-skill-new :disabled="!bridge" @click="openEditor(null)"><Plus :size="13" /> 新建技能</button>
       </div>
-      <p v-if="message" class="vd-msg sk-msg">{{ message }}</p>
+      <p v-if="message" class="vd-msg sk-msg" role="status">{{ message }}</p>
+      <p v-if="failure" class="vd-msg sk-msg err" role="alert">{{ failure }}</p>
 
-      <div v-if="tab === 'market'" class="empty-content">
-        <img class="large-icon" :src="iconUrl('shortcuts')" alt="" draggable="false" />
-        <h2 class="planned-title">Skill 市场尚未接入</h2>
-        <p>受管理的技能目录、团队发布、版本与更新需要市场后台。现在可以新建自己的 Skill，或从访达导入 SKILL.md。</p>
+      <div v-if="!bridge" class="empty-content">
+        <h2 class="planned-title">技能服务未接入</h2>
+        <p>主进程没有装配技能域，这台设备上暂时不能使用 Skill。</p>
+      </div>
+      <div v-else-if="listError && !skills.length" class="empty-content">
+        <h2 class="planned-title">读取技能失败</h2>
+        <p>{{ listError }}</p>
+        <button class="planned-today" @click="loadAll">重试</button>
       </div>
 
-      <div v-else class="sk-body">
-        <p v-if="!skills.length && !loading" class="set-cap">
-          还没有 Skill。把常做的事写成步骤，助理就能照着做；文件会存为桌面「Skill」文件夹里的 SKILL.md。
-        </p>
-        <div v-if="skills.length" class="set-group">
-          <div v-for="s in skills" :key="s.key" class="setting-row sk-row" :class="{ off: !enabled(s) }">
-            <span class="sk-ico"><Pencil :size="15" /></span>
+      <!-- 技能包 -->
+      <div v-else-if="tab === 'packs'" class="sk-body">
+        <p v-if="!filteredPacks.length && !loading" class="set-cap">还没有导入技能包。点右上角「导入」选择一个 .zip 技能包（≤ 32 MB）。</p>
+        <div v-if="filteredPacks.length" class="set-group">
+          <div v-for="p in filteredPacks" :key="p.id" class="setting-row sk-row" :data-skill-pack="p.id">
+            <span class="sk-ico"><Package :size="15" /></span>
             <span class="set-lab">
-              {{ s.name }}
-              <small>{{ s.desc || "—" }} · {{ s.steps.length }} 个步骤 · {{ s.file }}</small>
+              {{ p.name || p.id }}
+              <small>{{ p.skillCount ?? "—" }} 个技能 · {{ p.sourceName || "本机导入" }}{{ p.importedAt ? " · " + new Date(p.importedAt).toLocaleDateString("zh-CN") : "" }}</small>
             </span>
-            <template v-if="tab === 'mine'">
-              <button class="planned-today" :disabled="!enabled(s)" :title="enabled(s) ? '以这个 Skill 发起一个任务' : '已停用'" @click="trial(s)">
-                <Play :size="12" /> 试运行
-              </button>
-              <button class="planned-today" @click="openEditor(s)">编辑</button>
-              <button class="icon-button" :aria-label="'删除 ' + s.name" title="移到回收站" @click="remove(s)"><Trash2 :size="14" /></button>
-            </template>
-            <span v-else class="au-switch" role="switch" :aria-checked="enabled(s)" :aria-label="(enabled(s) ? '停用 ' : '启用 ') + s.name" tabindex="0" @click="toggle(s)" @keydown.enter="toggle(s)" />
+            <button class="icon-button" :aria-label="'卸载 ' + (p.name || p.id)" title="卸载" @click="confirmItem = { kind: 'pack', id: p.id, name: p.name || p.id }"><Trash2 :size="14" /></button>
           </div>
         </div>
-        <p v-if="tab === 'installed' && skills.length" class="set-cap">停用只影响之后发起的任务；已经在运行的任务继续使用原来的版本。</p>
+      </div>
+
+      <!-- 技能列表 + 详情 -->
+      <div v-else class="sk-split">
+        <div class="sk-list">
+          <p v-if="loading && !skills.length" class="set-cap">正在读取…</p>
+          <p v-else-if="!visible.length" class="set-cap">
+            {{ tab === "mine" ? "还没有自建技能。点「新建技能」，或从访达导入一份 Markdown 文档。" : "没有匹配的技能。" }}
+          </p>
+          <button
+            v-for="s in visible"
+            :key="s.id"
+            class="sk-item"
+            :class="{ on: selectedId === s.id, off: s.enabled === false }"
+            :data-skill-id="s.id"
+            @click="select(s.id)"
+          >
+            <span class="sk-item-name">{{ s.name || s.id }}</span>
+            <small>{{ originText(s) }} · {{ kindText(s) }}{{ s.enabled === false ? " · 已停用" : "" }}</small>
+          </button>
+        </div>
+
+        <section v-if="detail" class="sk-detail" :data-skill-detail="detail.id">
+          <header class="sk-detail-head">
+            <div>
+              <h2>{{ detail.name || detail.id }}</h2>
+              <p class="set-cap">{{ detail.description || "—" }}</p>
+              <p class="sk-meta"><code>{{ detail.id }}</code> · {{ originText(detail) }} · {{ kindText(detail) }}</p>
+            </div>
+            <span
+              class="au-switch"
+              role="switch"
+              tabindex="0"
+              :aria-checked="detail.enabled !== false"
+              :aria-label="(detail.enabled === false ? '启用 ' : '停用 ') + (detail.name || detail.id)"
+              data-skill-toggle
+              @click="toggle(detail)"
+              @keydown.enter="toggle(detail)"
+            />
+          </header>
+          <p v-if="detailError" class="vd-msg sk-msg err">{{ detailError }}</p>
+
+          <div v-if="detail.v2 && detail.v2.steps && detail.v2.steps.length" class="sk-block">
+            <h3>步骤</h3>
+            <ol class="sk-steps-ro">
+              <li v-for="(st, i) in detail.v2.steps" :key="i">{{ st.title || st.detail }}<small v-if="st.title && st.detail">{{ st.detail }}</small></li>
+            </ol>
+          </div>
+          <div v-if="instructions(detail)" class="sk-block">
+            <h3>执行说明</h3>
+            <pre class="sk-pre">{{ instructions(detail) }}</pre>
+          </div>
+
+          <div class="sk-block sk-run" data-skill-run>
+            <h3>运行</h3>
+            <label v-for="f in fields" :key="f.key" class="sk-field">
+              <span>{{ f.label }}<em v-if="!f.required">（可选）</em></span>
+              <textarea v-if="f.multiline" v-model="runValues[f.key]" rows="3" :placeholder="f.hint" />
+              <input v-else v-model="runValues[f.key]" :placeholder="f.hint" />
+            </label>
+            <div class="sk-run-bar">
+              <button class="planned-cta sk-btn" :disabled="detail.enabled === false || busy === 'run'" data-skill-run-go @click="doRun">
+                <component :is="busy === 'run' ? Square : Play" :size="12" /> {{ busy === "run" ? "运行中…" : "运行" }}
+              </button>
+              <span class="sk-run-state" :data-tone="runFb.tone">{{ runFb.label }}</span>
+              <span v-if="!runAvail.available" class="set-cap">{{ skillFailureText(runAvail.code || "SKILL_DEPENDENCY_UNAVAILABLE", { dependency: runAvail.missing[0]?.key }) }}</span>
+            </div>
+            <p v-if="run?.error" class="vd-msg sk-msg err" role="alert">{{ run.error }}</p>
+            <pre v-if="run?.text" class="sk-pre sk-out" data-skill-result>{{ run.text }}</pre>
+            <ul v-if="run?.artifacts?.length" class="sk-arts">
+              <li v-for="(a, i) in run.artifacts" :key="i">{{ SKILL_ARTIFACT_KIND_LABEL[a.kind] }} · {{ a.name || a.nodeId }}</li>
+            </ul>
+          </div>
+
+          <footer class="sk-detail-foot">
+            <button v-if="!detail.builtin" class="planned-today" @click="openEditor(detail)">编辑</button>
+            <button class="planned-today" :disabled="busy === 'export'" @click="exportSkill(detail)"><Download :size="12" /> 导出技能包</button>
+            <div class="toolbar-spacer" />
+            <button v-if="!detail.builtin" class="planned-today danger" @click="confirmItem = { kind: 'skill', id: detail.id, name: detail.name || detail.id }">
+              <Trash2 :size="12" /> 删除
+            </button>
+            <span v-else class="set-cap">内置技能不能修改或删除，可以停用。</span>
+          </footer>
+        </section>
+        <section v-else class="sk-detail sk-detail-empty">
+          <Sparkles :size="28" />
+          <p>选择一个技能查看说明、运行或导出。</p>
+        </section>
       </div>
     </div>
 
-    <DsDialog :open="editor" :title="editing ? '编辑 Skill' : '新建 Skill'" @close="editor = false">
+    <DsDialog :open="editor" :title="analyzedV2 ? '保存分析出的技能' : form.editing ? '编辑技能' : '新建技能'" @close="editor = false">
       <div class="sk-form">
-        <label>名称<input v-model="form.name" placeholder="例如：门店海报批量生成" /></label>
-        <label>用途说明<input v-model="form.desc" placeholder="一句话说明它做什么" /></label>
-        <div class="sk-steps">
-          <span>步骤</span>
-          <div v-for="(st, i) in form.steps" :key="st.k" class="sk-step">
-            <span class="badge">{{ i + 1 }}</span>
-            <input v-model="st.t" :aria-label="'步骤 ' + (i + 1)" />
-            <button class="icon-button" :aria-label="'删除步骤 ' + (i + 1)" @click="form.steps.splice(i, 1)"><X :size="13" /></button>
-          </div>
-          <button class="planned-today sk-add" @click="form.steps.push({ k: Date.now(), t: '' })"><Plus :size="12" /> 添加步骤</button>
-        </div>
+        <label>名称<input v-model="form.name" placeholder="例如：门店海报文案" @blur="suggestId" /></label>
+        <label>ID<input v-model="form.id" :disabled="form.editing" placeholder="小写字母开头，如 poster_copy" /></label>
+        <label>用途说明<input v-model="form.description" placeholder="一句话说明它做什么" /></label>
+        <label>执行说明<textarea v-model="form.systemPrompt" rows="7" placeholder="写清楚这个技能怎么做：输入是什么、步骤、输出要求、注意事项" /></label>
+        <p v-if="analyzedV2?.steps?.length" class="set-cap">已识别出 {{ analyzedV2.steps.length }} 个步骤，会一起保存。</p>
+        <p v-for="w in analyzeWarnings" v-show="analyzedV2" :key="w" class="set-cap">提示：{{ w }}</p>
+        <p v-if="editorError" class="vd-msg sk-msg err" role="alert">{{ editorError }}</p>
       </div>
       <template #footer>
         <button @click="editor = false">取消</button>
-        <button class="primary" :disabled="!form.name.trim()" @click="save">保存</button>
+        <button class="primary" :disabled="busy === 'save'" data-skill-save @click="save">保存</button>
       </template>
     </DsDialog>
 
-    <DsDialog :open="importing" title="从访达导入 Skill" @close="importing = false">
-      <p v-if="!candidates.length" class="set-cap">访达里没有找到带 frontmatter（name / description）的 SKILL.md。</p>
-      <div v-for="c in candidates" :key="c.key" class="sk-cand">
-        <span class="set-lab">{{ c.skill }}<small>{{ c.name }} · {{ c.folder }}</small></span>
-        <button class="planned-today" @click="importOne(c)">导入</button>
+    <DsDialog :open="importing" title="导入技能" @close="importing = false">
+      <div class="sk-import">
+        <p class="set-cap">Markdown 文档（.md）会先分析成技能步骤，确认后保存；技能包（.zip）直接安装。</p>
+        <button class="planned-cta sk-btn" :disabled="!!busy" @click="picker?.click()"><FileUp :size="13" /> 从本机选择文件…</button>
+        <input ref="picker" type="file" accept=".md,.markdown,.zip" hidden @change="onPick" />
+        <p v-if="busy === 'analyze' || busy === 'import'" class="set-cap">{{ busy === "analyze" ? "正在分析文档…" : "正在导入技能包…" }}</p>
+        <p v-if="importError" class="vd-msg sk-msg err" role="alert">{{ importError }}</p>
+        <template v-if="candidates.length">
+          <div class="split-section">访达里的 Markdown</div>
+          <div v-for="c in candidates" :key="c.key" class="sk-cand">
+            <span class="set-lab">{{ c.name }}<small>{{ c.folder }}</small></span>
+            <button class="planned-today" :disabled="!!busy" @click="importCandidate(c)">分析并导入</button>
+          </div>
+        </template>
       </div>
+    </DsDialog>
+
+    <DsDialog :open="!!confirmItem" :title="confirmItem?.kind === 'pack' ? '卸载技能包' : '删除技能'" @close="confirmItem = null">
+      <p>{{ confirmItem?.kind === "pack" ? `卸载「${confirmItem?.name}」及其包含的技能？` : `删除「${confirmItem?.name}」？删除后不能恢复，可以先导出备份。` }}</p>
+      <template #footer>
+        <button @click="confirmItem = null">取消</button>
+        <button class="primary danger" :disabled="busy === 'delete'" data-skill-confirm @click="confirmDelete">{{ confirmItem?.kind === "pack" ? "卸载" : "删除" }}</button>
+      </template>
     </DsDialog>
   </div>
 </template>

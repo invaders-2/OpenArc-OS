@@ -4,7 +4,6 @@ import { useShellStore } from "./stores/shell";
 import { useIdentityStore } from "./stores/identity";
 import { installNativeSync } from "./shell/native-sync";
 import { installBrowserRuntime } from "./shell/browser-runtime";
-import { installAutomationRuntime } from "./automation-runtime";
 import { applyCursors } from "../src/desktop/cursors";
 import Wallpaper from "./shell/Wallpaper.vue";
 import Desktop from "./shell/Desktop.vue";
@@ -114,7 +113,14 @@ onMounted(() => {
   disposeIdentityEvent = identity.subscribe();
   disposeNativeSync = installNativeSync();
   disposeBrowserRuntime = installBrowserRuntime();
-  disposeAutomation = installAutomationRuntime((n) => shell.notify(n));
+  // 10-16：自动化由主进程调度（automation 域）；这里只把后台运行结果转成通知，不再在渲染进程里定时。
+  disposeAutomation =
+    window.openarc?.automation?.onEvent?.((ev: any) => {
+      const p = ev?.payload || ev;
+      // 只认运行生命周期事件（带 runId、不带 command）；命令级 begin/completed 不算一次运行
+      if (!p || !p.runId || p.command || (p.phase !== "completed" && p.phase !== "failed")) return;
+      shell.notify({ appId: "automation", title: p.phase === "completed" ? "自动化已完成" : "自动化运行失败", body: p.phase === "failed" && p.error ? String(p.error).slice(0, 120) : "" });
+    }) ?? null;
   void identity.boot();
 });
 onBeforeUnmount(() => {

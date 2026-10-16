@@ -4,6 +4,7 @@ import DsBadge from "../design-system/DsBadge.vue";
 import DsButton from "../design-system/DsButton.vue";
 import DsPageState from "../design-system/DsPageState.vue";
 import McpCenterDialogs from "./McpCenterDialogs.vue";
+import McpToolSwitch from "./McpToolSwitch.vue";
 import {
   AUTH_ERROR_CODES,
   AUTH_MODE_LABEL,
@@ -437,7 +438,7 @@ const logRows = computed(() => logs.value.map((raw, i) => ({ i, raw, ...logOf(ra
   <div v-else-if="listError && !connections.length && !loading" class="split">
     <div class="split-main">
       <h1>MCP 中心</h1>
-      <p class="subtitle">连接管理与能力发现（第一批不开放工具调用）</p>
+      <p class="subtitle">连接管理、能力发现与工具调用（每次调用都要单独审批）</p>
       <div class="mcp-center" data-mcp-center="1" data-mcp-available="true">
         <div class="mcp-banner">
           <p class="mcp-error" role="alert" data-mcp-error :data-mcp-error-code="listError.code">
@@ -458,7 +459,7 @@ const logRows = computed(() => logs.value.map((raw, i) => ({ i, raw, ...logOf(ra
   <div v-else-if="loading && !connections.length" class="split">
     <div class="split-main">
       <h1>MCP 中心</h1>
-      <p class="subtitle">连接管理与能力发现（第一批不开放工具调用）</p>
+      <p class="subtitle">连接管理、能力发现与工具调用（每次调用都要单独审批）</p>
       <div class="mcp-center" data-mcp-center="1" data-mcp-available="true">
         <DsPageState kind="loading" title="正在读取连接…" />
       </div>
@@ -475,7 +476,7 @@ const logRows = computed(() => logs.value.map((raw, i) => ({ i, raw, ...logOf(ra
     </nav>
     <div class="split-main">
       <h1>MCP 中心</h1>
-      <p class="subtitle">连接管理与能力发现（第一批不开放工具调用）</p>
+      <p class="subtitle">连接管理、能力发现与工具调用（每次调用都要单独审批）</p>
       <div class="mcp-center" data-mcp-center="1" data-mcp-available="true">
         <div v-if="notice" class="mcp-banner">
           <p class="mcp-notice" role="status" data-mcp-notice>{{ notice }}</p>
@@ -484,11 +485,12 @@ const logRows = computed(() => logs.value.map((raw, i) => ({ i, raw, ...logOf(ra
           <DsPageState
             kind="empty"
             title="还没有连接"
-            description="新建一个连接后，中心会做真实 MCP 握手（initialize → initialized → tools/list），把服务端实际协商出的版本、能力与工具写进记录。第一批不开放工具调用。"
+            description="新建一个连接后，中心会做真实 MCP 握手（initialize → initialized → tools/list），把服务端实际协商出的版本、能力与工具写进记录。工具调用默认关闭，打开后每次调用仍要审批。"
           />
           <!-- PageState 的 empty 语义是 action='none'，所以空态的新建入口由本页自己渲染。 -->
           <DsButton variant="secondary" data-mcp-action="create" @click="openCreate">新建连接</DsButton>
         </div>
+        <McpToolSwitch />
         <McpCenterDialogs
           :dialog="dialog"
           :form="form"
@@ -549,7 +551,7 @@ const logRows = computed(() => logs.value.map((raw, i) => ({ i, raw, ...logOf(ra
 
     <div class="split-main">
       <h1>MCP 中心</h1>
-      <p class="subtitle">连接管理与能力发现（第一批不开放工具调用）</p>
+      <p class="subtitle">连接管理、能力发现与工具调用（每次调用都要单独审批）</p>
       <div class="mcp-center" data-mcp-center="1" data-mcp-available="true" :data-mcp-role="isAdmin ? 'ADMIN' : 'MEMBER'">
         <div class="mcp-banner">
           <p v-if="failure" class="mcp-error" role="alert" data-mcp-error :data-mcp-error-code="failure.code">
@@ -558,6 +560,7 @@ const logRows = computed(() => logs.value.map((raw, i) => ({ i, raw, ...logOf(ra
           <p v-if="notice" class="mcp-notice" role="status" data-mcp-notice>{{ notice }}</p>
         </div>
 
+        <McpToolSwitch />
         <section class="mcp-detail-pane" aria-label="连接详情" :data-mcp-detail-state="detail.kind">
         <DsPageState
           v-if="detail.kind === 'none'"

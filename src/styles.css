@@ -7616,3 +7616,105 @@ label {
 
 /* 审批弹窗 · 资源库写回的正文预览（10-16） */
 .approval-content { margin: 0; max-height: 180px; overflow: auto; white-space: pre-wrap; word-break: break-word; font: inherit; font-size: var(--fs-caption); line-height: 1.55; padding: 8px 10px; border-radius: var(--radius-md); background: rgb(var(--text-rgb) / 0.05); user-select: text; }
+
+/* ── Skill 中心 · 列表 + 详情（10-16 接 skill 域） ── */
+.sk-search { margin: 0 4px 6px; }
+.sk-msg.err { color: var(--failed); }
+.sk-split { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(200px, 260px) 1fr; gap: 16px; }
+.sk-list { min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 2px; padding-bottom: 16px; }
+.sk-item { text-align: left; display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: var(--radius-md); color: var(--text); background: transparent; }
+.sk-item:hover { background: rgb(var(--text-rgb) / 0.05); }
+.sk-item.on { background: rgb(var(--sidebar-selected-rgb, 224 224 224)); }
+.sk-item.off { opacity: 0.55; }
+.sk-item-name { font-size: var(--fs-secondary); font-weight: var(--fw-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sk-item small { font-size: var(--fs-micro); color: var(--muted); }
+.sk-detail { min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 14px; padding: 2px 4px 24px 0; }
+.sk-detail-empty { align-items: center; justify-content: center; color: var(--muted); gap: 8px; }
+.sk-detail-head { display: flex; align-items: flex-start; gap: 12px; }
+.sk-detail-head > div { flex: 1; min-width: 0; }
+.sk-detail-head h2 { margin: 0 0 4px; font-size: var(--fs-title); font-weight: var(--fw-medium); }
+.sk-meta { margin: 6px 0 0; font-size: var(--fs-caption); color: var(--muted); }
+.sk-block h3 { margin: 0 0 6px; font-size: var(--fs-secondary); font-weight: var(--fw-medium); }
+.sk-pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: inherit; font-size: var(--fs-caption); line-height: 1.6; padding: 10px 12px; border-radius: var(--radius-md); background: rgb(var(--text-rgb) / 0.04); max-height: 220px; overflow: auto; user-select: text; }
+.sk-out { max-height: 320px; font-size: var(--fs-secondary); }
+.sk-steps-ro { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-secondary); }
+.sk-steps-ro small { display: block; color: var(--muted); font-size: var(--fs-caption); }
+.sk-run { display: flex; flex-direction: column; gap: 8px; }
+.sk-field { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-caption); color: var(--muted); }
+.sk-field em { font-style: normal; }
+.sk-field input, .sk-field textarea, .sk-form textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: var(--fs-secondary); color: var(--text); background: var(--sunken); border: 0; border-radius: var(--radius-md); padding: 7px 10px; resize: vertical; }
+.sk-run-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sk-run-state { font-size: var(--fs-micro); padding: 2px 8px; border-radius: 999px; background: rgb(var(--text-rgb) / 0.06); color: var(--muted); }
+.sk-run-state[data-tone="success"] { color: var(--success-text, #1e7e34); }
+.sk-run-state[data-tone="danger"] { color: var(--failed); }
+.sk-arts { margin: 0; padding-left: 18px; font-size: var(--fs-caption); }
+.sk-detail-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-top: 6px; box-shadow: inset 0 0.5px 0 var(--line); }
+.planned-today.danger { color: var(--failed); }
+.sk-import { display: flex; flex-direction: column; gap: 10px; }
+.sk-import .sk-btn { align-self: flex-start; }
+.dialog:has(.sk-import) { width: min(520px, calc(100% - 64px)); }
+@container (max-width: 640px) { .sk-split { grid-template-columns: 1fr; } }
+
+/* 自动化 · 后台调度版（10-16） */
+.au-quick { display: flex; align-items: center; gap: 8px; padding: 8px 12px; margin-bottom: 12px; border-radius: var(--radius-lg); background: var(--sunken); color: var(--muted); }
+.au-quick input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; font: inherit; font-size: var(--fs-secondary); color: var(--text); }
+.au-legacy { display: flex; align-items: center; gap: 12px; padding: 10px 12px; margin-bottom: 12px; border-radius: var(--radius-md); background: color-mix(in srgb, #ff9f0a 10%, transparent); font-size: var(--fs-caption); }
+.au-legacy span { flex: 1; }
+.au-week { display: flex; gap: 6px; flex-wrap: wrap; }
+.au-day { display: inline-flex; align-items: center; justify-content: center; min-width: 34px; height: 28px; padding: 0 8px; border-radius: 999px; font-size: var(--fs-caption); background: var(--sunken); cursor: pointer; }
+.au-day input { display: none; }
+.au-day.on { background: var(--text); color: rgb(var(--content-rgb)); }
+.au-dot[data-running="true"] { background: #ff9f0a; }
+
+/* ── 短剧工坊（10-16） ── */
+.dr-side-head { display: flex; align-items: center; justify-content: space-between; }
+.dr-main { display: flex; flex-direction: column; min-height: 0; }
+.dr-crumb { color: var(--muted); font-size: var(--fs-caption); margin-left: 8px; }
+.dr-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 12px; padding: 0 4px 28px 0; }
+.dr-field { display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-caption); color: var(--muted); }
+.dr-body textarea, .dr-body input:not([type="checkbox"]) { width: 100%; box-sizing: border-box; font: inherit; font-size: var(--fs-secondary); color: var(--text); background: var(--sunken); border: 0; border-radius: var(--radius-md); padding: 7px 10px; resize: vertical; }
+.dr-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dr-inline { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-caption); color: var(--muted); white-space: nowrap; }
+.dr-body .dr-inline input { width: 58px; padding: 4px 6px; }
+.dr-card { border-radius: var(--radius-lg); background: rgb(var(--text-rgb) / 0.03); padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.dr-card h3 { margin: 0; font-size: var(--fs-secondary); font-weight: var(--fw-medium); }
+.dr-body .dr-title { background: transparent; padding: 2px 0; font-weight: var(--fw-medium); }
+.dr-body .dr-title:focus { background: var(--sunken); padding: 2px 8px; }
+.dr-desc { margin: 0; font-size: var(--fs-caption); line-height: 1.55; color: var(--text); opacity: 0.85; }
+.dr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.dr-item .planned-today { align-self: flex-start; }
+.dr-thumb { aspect-ratio: 4 / 3; border-radius: var(--radius-md); background: var(--sunken); display: grid; place-items: center; overflow: hidden; color: var(--muted); font-size: var(--fs-caption); }
+.dr-thumb.tall { aspect-ratio: 2 / 3; }
+.dr-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.dr-shot-head { display: flex; align-items: center; gap: 8px; }
+.dr-shot-head .dr-title { flex: 1; }
+.dr-next { display: flex; justify-content: flex-end; }
+.dr-strip { display: flex; gap: 4px; min-height: 120px; padding: 8px; border-radius: var(--radius-lg); background: rgb(var(--text-rgb) / 0.04); overflow-x: auto; }
+.dr-strip-item { position: relative; flex-basis: 40px; min-width: 40px; border-radius: 6px; overflow: hidden; background: var(--sunken); }
+.dr-strip-item img { width: 100%; height: 100%; object-fit: cover; }
+.dr-strip-item small { position: absolute; left: 4px; bottom: 3px; font-size: var(--fs-micro); color: #fff; text-shadow: 0 1px 2px rgb(0 0 0 / 0.6); }
+.drama-app .spin { animation: wx-spin 1s linear infinite; }
+
+/* MCP 中心 · 工具调用区块（10-16 迁入 Vue） */
+.mcp-tools { margin: 4px 0 18px; }
+.mcp-tool-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow: auto; }
+.mcp-tool-list li { padding: 8px 12px; border-radius: var(--radius-md); background: rgb(var(--text-rgb) / 0.04); }
+.mcp-tool-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--fs-secondary); }
+.mcp-tool-top small { color: var(--muted); font-size: var(--fs-caption); }
+.mcp-tool-list .set-cap { margin: 4px 0 0; }
+
+/* 模型与服务商 · 协议表（10-16 迁入 Vue） */
+.mp-bar { display: flex; align-items: center; gap: 10px; margin: 8px 0; flex-wrap: wrap; }
+.mp-kinds { display: flex; gap: 4px; }
+.mp-kind { padding: 4px 10px; border-radius: 999px; font-size: var(--fs-caption); background: var(--sunken); color: var(--text); }
+.mp-kind.on { background: var(--text); color: rgb(var(--content-rgb)); }
+.mp-search { flex: 1; min-width: 160px; }
+.mp-list { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow: auto; border-radius: var(--radius-md); background: rgb(var(--text-rgb) / 0.03); }
+.mp-list li + li { box-shadow: inset 0 0.5px 0 var(--line); }
+.mp-row { width: 100%; display: flex; align-items: center; gap: 10px; padding: 8px 12px; text-align: left; background: transparent; color: var(--text); }
+.mp-name { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: var(--fs-secondary); }
+.mp-name small { font-size: var(--fs-micro); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-caps { font-size: var(--fs-micro); color: var(--muted); max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-detail { margin: 0; padding: 0 12px 10px; }
+.mcp-tools .set-group .setting-row { padding: 11px 16px; }
+.mcp-tools .set-group .setting-row + .setting-row { box-shadow: inset 0 0.5px 0 var(--line); }
