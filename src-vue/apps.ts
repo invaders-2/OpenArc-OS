@@ -43,6 +43,8 @@ export const APPS: readonly AppEntry[] = [
   { id: "video", name: "视频剪辑", icon: "video" },
   { id: "dev", name: "开发者", icon: "terminal" },
   { id: "declare", name: "图片声明", icon: "image-tag" },
+  // 10-16 对齐 DX OS「视频工坊」：剧本 → 视觉设定 → 分镜 → 出图 → 成片（media/short-drama/*）
+  { id: "drama", name: "短剧工坊", icon: "drama" },
 ];
 
 /**
@@ -77,7 +79,7 @@ export const lineIconFor = (appId: string): Component => APP_LINE_ICON[appId] ??
 /** 应用分类（应用程序弹窗的分类条与应用市场共用口径）。没列的归「其他」。 */
 export const APP_CATEGORY: Record<string, string> = {
   files: "系统", trash: "系统", settings: "系统", dev: "系统",
-  canvas: "创作", photos: "创作", music: "创作", notes: "创作", video: "创作", declare: "创作",
+  canvas: "创作", photos: "创作", music: "创作", notes: "创作", video: "创作", declare: "创作", drama: "创作",
   chat: "效率", automation: "效率", calendar: "效率", weather: "效率", browser: "效率", market: "效率",
   projects: "团队与资源", organization: "团队与资源", "resource-library": "团队与资源", skills: "团队与资源", "mcp-center": "团队与资源",
 };

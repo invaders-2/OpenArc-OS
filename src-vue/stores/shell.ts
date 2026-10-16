@@ -96,7 +96,7 @@ const APP_SIZE: Record<string, [number, number]> = {
   files: [940, 590], "resource-library": [1080, 680], browser: [1060, 690], canvas: [1140, 730], chat: [1000, 680],
   projects: [1060, 680], skills: [1060, 690], "mcp-center": [1020, 660], market: [1060, 710], automation: [1000, 660],
   organization: [1060, 680], settings: [940, 660], calendar: [1000, 680], weather: [780, 640], music: [940, 620],
-  photos: [1020, 680], notes: [940, 640], video: [1200, 760], dev: [1200, 740], declare: [860, 600], trash: [880, 580],
+  photos: [1020, 680], notes: [940, 640], video: [1200, 760], dev: [1200, 740], declare: [860, 600], drama: [1180, 760], trash: [880, 580],
   home: [940, 640],
 };
 function defaultBounds(index: number, appId?: string) {

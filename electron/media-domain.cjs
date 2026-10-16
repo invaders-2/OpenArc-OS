@@ -118,6 +118,9 @@ const MEDIA_COMMANDS = Object.freeze({
   "media/short-drama/storyboards": { risk: "use", credential: false, summary: "调用注入的语言模型生成分镜清单" },
   "media/short-drama/shot/image": { risk: "use", credential: false, summary: "调用注入的图像模型生成分镜图（未注入即结构化不可用）" },
   "media/short-drama/render": { risk: "manage", credential: false, summary: "把已就绪分镜编排为时间线并提交渲染（注入 renderSubmit / mediaStore）" },
+  "media/short-drama/visual-image": { risk: "use", credential: false, summary: "调用注入的图像模型为角色 / 场景生成参考图（源 generateVisualReferenceImage）" },
+  "media/short-drama/get": { risk: "read", credential: false, summary: "读取单个短剧项目的前端视图（画面拍平成索引，避开 IPC 脱敏深度上限）" },
+  "media/short-drama/image": { risk: "read", credential: false, summary: "读取项目里的一张分镜 / 参考画面用于预览（只限本项目引用的画面，≤12MB）" },
 
   // ---- B5e：本地音乐库（源 library.ts） ----
   "media/library/config/get": { risk: "read", credential: false, summary: "读取音乐库配置（扫描目录与曲目数量）" },

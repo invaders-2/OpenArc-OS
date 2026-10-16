@@ -177,7 +177,8 @@ test("命令表：50 条命令（B5a 16 + B5e 34）、risk/credential/summary �
     "media/artifact/list", "media/health",
   ];
   const commands = mediaDomain.listMediaCommands();
-  assert.equal(commands.length, 50);
+  // 10-16：+3 短剧工坊前端（media/short-drama/get / image / visual-image）
+  assert.equal(commands.length, 53);
   for (const name of required) assert.ok(mediaDomain.isMediaCommand(name), "缺少命令：" + name);
   for (const entry of commands) {
     assert.ok(Object.prototype.hasOwnProperty.call(mediaDomain.RISK_LEVELS, entry.risk), "非法 risk：" + entry.risk);

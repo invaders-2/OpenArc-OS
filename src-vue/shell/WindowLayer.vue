@@ -21,6 +21,7 @@ import MarketApp from "../apps/MarketApp.vue";
 import WeatherApp from "../apps/WeatherApp.vue";
 import VideoApp from "../apps/VideoApp.vue";
 import DeclareApp from "../apps/DeclareApp.vue";
+import DramaApp from "../apps/DramaApp.vue";
 import { markRaw, toRaw } from "vue";
 import ReactIsland from "../bridge/ReactIsland.vue";
 import { CanvasHost } from "../../src/canvas/CanvasHost";
@@ -203,6 +204,7 @@ function styleOf(win: ShellWindow) {
       <WeatherApp v-else-if="win.appId === 'weather'" />
       <VideoApp v-else-if="win.appId === 'video'" />
       <DeclareApp v-else-if="win.appId === 'declare'" />
+      <DramaApp v-else-if="win.appId === 'drama'" />
       <ReactIsland
         v-else-if="win.appId === 'browser'"
         :component="BrowserAppRaw"

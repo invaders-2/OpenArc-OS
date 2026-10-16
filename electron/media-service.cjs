@@ -953,6 +953,25 @@ function createMediaBundle(options = {}) {
         if (!projectId || !shotId) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "projectId 与 shotId 必填");
         return await mediaShortDrama.generateDramaShotImage(projectId, shotId);
       }
+      case "media/short-drama/visual-image": {
+        const projectId = requireStr(payload.projectId, 80);
+        const itemId = requireStr(payload.itemId, 80);
+        const kind = payload.kind === "location" ? "location" : payload.kind === "character" ? "character" : null;
+        if (!projectId || !itemId || !kind) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "projectId、kind（character / location）与 itemId 必填");
+        const r = await mediaShortDrama.generateVisualReferenceImage(projectId, kind, itemId);
+        return { provider: r.provider, model: r.model };
+      }
+      case "media/short-drama/get": {
+        const projectId = requireStr(payload.projectId, 80);
+        if (!projectId) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "projectId 必填");
+        return mediaShortDrama.getDramaProjectView(projectId);
+      }
+      case "media/short-drama/image": {
+        const projectId = requireStr(payload.projectId, 80);
+        const nodeId = requireStr(payload.nodeId == null ? "" : String(payload.nodeId), 120);
+        if (!projectId || !nodeId) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "projectId 与 nodeId 必填");
+        return mediaShortDrama.readDramaImage(projectId, nodeId);
+      }
       case "media/short-drama/render": {
         const projectId = requireStr(payload.projectId, 80);
         if (!projectId) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "projectId 必填");

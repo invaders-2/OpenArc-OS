@@ -30,3 +30,4 @@
 | `sharing.png` | `src/apps/scalable/preferences-system-sharing.svg` | 新应用备用（代码尚未引用） |
 | `video.png` | `src/apps/scalable/pitivi.svg` | 新应用备用（代码尚未引用） |
 | `image-tag.png` | `src/apps/scalable/eog.svg` | 图片声明（10-15 新增，同一提交 `73d8040`，256×256 渲染） |
+| `drama.png` | `src/apps/scalable/flowblade.svg` | 短剧工坊（10-16 新增，同一提交 `73d8040`，256×256 渲染） |

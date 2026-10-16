@@ -247,6 +247,67 @@ function listDramaProjects(options) {
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
+/**
+ * 10-16 · 读取短剧项目里的一张画面（分镜图 / 角色与场景参考图），给 OpenArc 前端显示用。
+ * 只读、有界：nodeId 必须被这个项目的 shots / visualDesign 引用（不开放任意虚拟文件读取），≤ 12 MB。
+ */
+function readDramaImage(id, nodeId, options) {
+  const opts = effective(options);
+  const project = find(load(opts), id, opts);
+  const wanted = String(nodeId || "");
+  const refs = new Set();
+  for (const shot of project.shots || []) for (const image of shot.images || []) if (image && image.nodeId) refs.add(String(image.nodeId));
+  const design = project.visualDesign || {};
+  for (const item of [...(design.characters || []), ...(design.locations || [])]) for (const image of item.images || []) if (image && image.nodeId) refs.add(String(image.nodeId));
+  if (!wanted || !refs.has(wanted)) throw createMediaError(MEDIA_ERR_NOT_FOUND, "画面不属于这个项目");
+  const port = fsPort(opts);
+  const node = port.getNode(wanted);
+  if (!node || port.isInTrash(wanted)) throw createMediaError(MEDIA_ERR_NOT_FOUND, "画面已不存在");
+  const buf = port.readBlob(wanted);
+  if (!buf || !buf.length) throw createMediaError(MEDIA_ERR_NOT_FOUND, "画面内容缺失");
+  if (buf.length > 12 * 1024 * 1024) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "画面过大，无法预览");
+  const mime = typeof node.mime === "string" && node.mime.startsWith("image/") ? node.mime : "image/png";
+  return { nodeId: wanted, mime, bytes: buf.length, dataUrl: "data:" + mime + ";base64," + Buffer.from(buf).toString("base64") };
+}
+
+/**
+ * 10-16 · 前端视图：单个项目 + 拍平的画面索引。
+ * IPC 返回值经 foundation 脱敏，嵌套深度封顶 6（项目 → 镜头 → 画面 → 字段 已超）：
+ * 画面一律拍平到 images[]，各处只留 selectedImageId / imageCount，不靠深层嵌套传数据。
+ */
+function getDramaProjectView(id, options) {
+  const opts = effective(options);
+  const project = find(load(opts), id, opts);
+  const images = [];
+  const pushAll = (owner, ownerId, list) => {
+    for (const image of list || []) if (image && image.nodeId != null) images.push({ owner, ownerId, id: image.id, nodeId: String(image.nodeId), kind: image.kind || null, createdAt: image.createdAt || null });
+  };
+  const shots = (project.shots || []).map((shot) => {
+    pushAll("shot", shot.id, shot.images);
+    const { images: _drop, ...rest } = shot;
+    return { ...rest, characterIds: Array.isArray(shot.characterIds) ? shot.characterIds.join(",") : "", imageCount: (shot.images || []).length };
+  });
+  const design = project.visualDesign || null;
+  const flatItems = (kind, list) => (list || []).map((item) => {
+    pushAll(kind, item.id, item.images);
+    const { images: _drop, ...rest } = item;
+    return { ...rest, imageCount: (item.images || []).length };
+  });
+  const blueprint = project.blueprint
+    ? { ...project.blueprint, episodes: (project.blueprint.episodes || []).map((e) => ({ ...e, characterNames: (e.characterNames || []).join("、"), locationNames: (e.locationNames || []).join("、") })) }
+    : null;
+  return {
+    project: {
+      id: project.id, name: project.name, stage: project.stage, sourceText: project.sourceText || "",
+      createdAt: project.createdAt, updatedAt: project.updatedAt,
+      blueprint,
+      visualDesign: design ? { style: design.style || "", provider: design.provider || null, model: design.model || null, characters: flatItems("character", design.characters), locations: flatItems("location", design.locations) } : null,
+      shots,
+    },
+    images,
+  };
+}
+
 /** 源 :203-226 createDramaProject。 */
 function createDramaProject(name, ownerId, options) {
   const opts = effective(options);
@@ -684,4 +745,6 @@ module.exports = {
   editDramaShotImage,
   buildDramaTimeline,
   submitDramaRender,
+  readDramaImage,
+  getDramaProjectView,
 };

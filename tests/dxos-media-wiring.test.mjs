@@ -286,6 +286,19 @@ test("端到端：media:command 短剧分镜→生成图→渲染提交，经注
   assert.equal(generated.length, 1);
   assert.equal(generated[0].provider.id, "p-img");
 
+  // 10-16：前端预览分镜图 —— 只能读本项目引用的画面
+  const view = await call("media/short-drama/get", { projectId: projectId });
+  assert.equal(view.ok, true, JSON.stringify(view));
+  assert.equal(view.value.project.shots[0].imageCount, 1);
+  const shotImage = view.value.images.find((im) => im.owner === "shot" && im.ownerId === shotId);
+  assert.ok(shotImage && shotImage.nodeId, "画面索引里应有这张分镜图");
+  const preview = await call("media/short-drama/image", { projectId: projectId, nodeId: shotImage.nodeId });
+  assert.equal(preview.ok, true, JSON.stringify(preview));
+  assert.match(preview.value.dataUrl, /^data:image\//);
+  const foreign = await call("media/short-drama/image", { projectId: projectId, nodeId: "not-in-project" });
+  assert.equal(foreign.ok, false);
+  assert.equal(foreign.error, "MEDIA_NOT_FOUND");
+
   const render = await call("media/short-drama/render", { projectId: projectId });
   assert.equal(render.ok, true, JSON.stringify(render));
   assert.equal(submitted.length, 1);
