@@ -39,6 +39,8 @@
 "use strict";
 
 const crypto = require("node:crypto");
+const fs = require("node:fs");
+const path = require("node:path");
 const domain = require("./identity-domain.cjs");
 const passwords = require("./password.cjs");
 const dxosFoundationSchema = require("./dxos-foundation-schema.cjs");
@@ -1731,6 +1733,7 @@ class IdentityStore {
    * @param opts.busyTimeoutMs
    * @param opts.hooks      { beforeCommit?, afterInstallationInsert? } 仅测试注入用
    * @param opts.onAudit    (record) => void
+   * @param opts.backupDir  迁移 backupBefore 的备份目录（默认与库同目录；离线副本迁移可显式指定）
    */
   constructor(opts = {}) {
     this.path = opts.path || ":memory:";
@@ -1740,6 +1743,10 @@ class IdentityStore {
     this.hooks = opts.hooks || {};
     this.busyTimeoutMs = Number.isFinite(opts.busyTimeoutMs) ? opts.busyTimeoutMs : 5000;
     this.onAudit = typeof opts.onAudit === "function" ? opts.onAudit : () => {};
+    // backupBefore 迁移的落盘目录；默认与库文件同目录。离线副本迁移显式传入，避免污染源库目录。
+    this.backupDir = typeof opts.backupDir === "string" && opts.backupDir ? opts.backupDir : null;
+    // 每次 backupBefore 的文件路径流水，供失败恢复与审计取证。
+    this.migrationBackups = [];
     this.db = null;
     this.#queue = Promise.resolve();
   }
@@ -1776,6 +1783,17 @@ class IdentityStore {
    * 迁移。**每一步都真的执行**，不是"空库建表"冒充升级（§29）：
    * 每一级是一个独立的原子事务，失败只回滚该级，不会留下"user_version 升了、表没补"的半状态。
    * 迁移条目可以是 sql（整段 DDL）或 run(db)（需要条件判断时用，例如 v17 的 avatar_ref）。
+   *
+   * 迁移描述符可选字段（**默认全不开**，既有迁移走默认路径，行为与之前逐字一致）：
+   *   · backupBefore: true    —— 事务**外**执行 `VACUUM INTO` 备份。
+   *     事务内 VACUUM 会报 "cannot VACUUM from within a transaction"；Node 22 也没有
+   *     `DatabaseSync.backup`，所以只能用 `VACUUM INTO`，且必须在 BEGIN 之前。
+   *   · foreignKeysOff: true  —— 在 **BEGIN 之前** 关 FK、结束后恢复并**断言**恢复成功。
+   *     `PRAGMA foreign_keys` 在事务内是 no-op（实测值仍为 1），而 FK=ON 时
+   *     `DROP TABLE` 父表会按 ON DELETE CASCADE **静默删光子表**（见
+   *     docs/dxos-port/Dx-TASK-MERGE-PLAN.md §7.2）。重建父表的迁移因此必须走这条。
+   *   · foreignKeyCheck: true —— 事务内 `PRAGMA foreign_key_check` 自检，非空即抛错整体回滚。
+   *     foreignKeysOff 的迁移默认开启该自检（FK 关着时 DDL 不受约束，提交前必须复查）。
    */
   #migrate() {
     const current = this.schemaVersion;
@@ -1783,15 +1801,95 @@ class IdentityStore {
     if (current === SCHEMA_VERSION) return;
     for (const migration of MIGRATIONS) {
       if (migration.version <= current) continue;
-      this.transactSync(() => {
-        if (typeof migration.run === "function") migration.run(this.db);
+      this.#applyMigration(migration);
+    }
+  }
+
+  /**
+   * 执行一条迁移描述符。生产路径（#migrate）与离线副本迁移（applyExplicitMigration）
+   * 共用这一套安全语义 —— 避免"副本上验证过的安全步骤"和"真正启用时走的步骤"是两份实现。
+   */
+  #applyMigration(migration) {
+    const useForeignKeysOff = migration.foreignKeysOff === true;
+    const checkForeignKeys = migration.foreignKeyCheck === true || useForeignKeysOff;
+    if (migration.backupBefore === true) this.#backupBeforeMigration(migration.version);
+    // 关 FK 必须在 BEGIN 之前：事务内 PRAGMA foreign_keys 是 no-op。
+    if (useForeignKeysOff) this.db.exec("PRAGMA foreign_keys = OFF");
+    let out;
+    try {
+      out = this.transactSync(() => {
+        let result = null;
+        if (typeof migration.run === "function") result = migration.run(this.db);
         else this.db.exec(migration.sql);
+        if (checkForeignKeys) {
+          const violations = this.db.prepare("PRAGMA foreign_key_check").all();
+          if (violations.length > 0) {
+            throw new Error(
+              `迁移 v${migration.version} 提交前外键自检未通过：${violations.length} 条悬挂引用`,
+            );
+          }
+        }
         // 失败注入点：测试用它制造"DDL 已执行、版本尚未 bump"的崩溃，验证整级回滚。
         if (this.hooks.onMigration) this.hooks.onMigration(migration.version, this.db);
         // user_version 不能用占位符，只能整句拼；值是本文件常量，无注入面。
         this.db.exec("PRAGMA user_version = " + migration.version);
+        return result;
       });
+    } catch (e) {
+      // 回滚已由 transactSync 完成；这里只把连接级 pragma 恢复回去。
+      // 恢复本身失败也不能盖掉原始错误（连接级 pragma 下次 open 会重新置 ON）。
+      if (useForeignKeysOff) {
+        try {
+          this.#restoreForeignKeys(migration.version);
+        } catch {
+          /* 保留原始错误 */
+        }
+      }
+      throw e;
     }
+    if (useForeignKeysOff) this.#restoreForeignKeys(migration.version);
+    return out;
+  }
+
+  /** 事务外备份（`VACUUM INTO`）。返回备份文件路径，并记入 this.migrationBackups。 */
+  #backupBeforeMigration(version) {
+    const dir = this.backupDir || (this.path !== ":memory:" ? path.dirname(this.path) : null);
+    if (!dir) throw new Error("迁移 backupBefore 需要文件库路径或显式 backupDir。");
+    fs.mkdirSync(dir, { recursive: true });
+    const stem = `${path.basename(this.path)}.pre-v${version}.${Math.trunc(this.clock())}`;
+    let target = path.join(dir, `${stem}.bak`);
+    let n = 0;
+    while (fs.existsSync(target)) {
+      n += 1;
+      target = path.join(dir, `${stem}.${n}.bak`);
+    }
+    // VACUUM INTO 的目标文件必须不存在；路径是受控值，按 SQLite 单引号规则转义。
+    this.db.exec(`VACUUM INTO '${target.replace(/'/g, "''")}'`);
+    this.migrationBackups.push({ version, path: target });
+    return target;
+  }
+
+  /** 恢复并**断言**外键开关：关过没恢复，之后任意写入都可能绕过 FK 约束。 */
+  #restoreForeignKeys(version) {
+    this.db.exec("PRAGMA foreign_keys = ON");
+    const restored = Number(this.db.prepare("PRAGMA foreign_keys").get().foreign_keys);
+    if (restored !== 1) throw new Error(`迁移 v${version} 后恢复 foreign_keys=ON 失败。`);
+  }
+
+  /**
+   * 显式执行一条迁移描述符（**离线副本专用**，不参与 SCHEMA_VERSION 门禁）。
+   *
+   * 这是"默认不启用"的开关：生产 `open()` 永远只跑 MIGRATIONS；
+   * 只有调用方显式传入描述符才会执行。用于在库副本上验证合并迁移，
+   * 生产路径与 SCHEMA_VERSION 都不动。
+   */
+  applyExplicitMigration(migration) {
+    if (!this.db) throw new Error("applyExplicitMigration 需要先 open()。");
+    if (!migration || typeof migration !== "object" || !Number.isInteger(migration.version)) {
+      throw new Error("applyExplicitMigration 需要 { version, sql|run } 描述符。");
+    }
+    // 返回迁移体结果（如 { applied, reason }），便于调用方判定这次是空跑还是真搬了。
+    return this.#applyMigration(migration);
   }
 
   /**
