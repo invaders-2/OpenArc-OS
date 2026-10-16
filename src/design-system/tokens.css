@@ -52,6 +52,7 @@
   --fs-caption: 12px; /* 说明文字、标签 */
   --fs-micro: 11px; /* 元信息、状态、tooltip */
   --fs-eyebrow: 10px; /* 全大写眉标（配 --tracking-wide） */
+  --fs-numeral: 34px; /* 大数字展示（桌面日期小组件；天气当前温度取 1.5 倍），配 --fw-regular / --fw-medium */
   --fs-clock: clamp(58px, 12vh, 118px); /* 锁屏时钟：随窗口高度收敛，小窗不溢出 */
 
   --fw-regular: 400;
@@ -73,23 +74,25 @@
 
   /* ── Color · 主题原料（light 基线）────────────────────────────────────
      原料 = 通道 + alpha。合成位置由 T2 / T3 决定。 */
-  --text-rgb: 29 29 31; /* #1d1d1f */
-  --muted-rgb: 110 110 115; /* #6e6e73 */
+  /* macOS 27 中性色口径（2026-10 升级）：纯中性灰，无冷色偏。
+     labelColor = 黑 85% 合成于白 ≈ #262626；secondaryLabel 取可达 AA 的 #6e6e6e。 */
+  --text-rgb: 38 38 38; /* #262626 */
+  --muted-rgb: 110 110 110; /* #6e6e6e */
   /* placeholder 是**独立一档**，不复用 --muted。
      原因（D2-01 探针实测，不是推断）：搜索框是**下沉槽**，表面用 alpha 合成、
      合成值随上下文浮动，实测浅色下为 rgb(229,229,231)。--muted 落在上面只有
      4.03:1，达不到 AA。而"表面"随玻璃/上下文变、"文字"必须稳，所以该稳的是文字色。
      值取 --muted 再深一档，浅色 5.61:1 / 深色 7.39:1（对实测合成面）。 */
-  --placeholder-rgb: 88 88 93; /* #58585d */
-  --surface-rgb: 255 255 255;
-  --content-rgb: 255 255 255;
+  --placeholder-rgb: 88 88 88; /* #585858 */
+  --surface-rgb: 246 246 246; /* 窗口外壳 = macOS windowBackground 玻璃底 */
+  --content-rgb: 255 255 255; /* 内容区 = controlBackground 纯白 */
   --sunken-rgb: 0 0 0;
   --bar-rgb: 255 255 255;
   --pill-rgb: 255 255 255;
   --line-rgb: 0 0 0;
-  --accent-rgb: 29 29 31; /* #1d1d1f，中性单色体系里"强调"= 最深灰 */
+  --accent-rgb: 38 38 38; /* #262626，中性单色体系里"强调"= 最深灰（= 文字色） */
   --on-accent-rgb: 255 255 255;
-  --focus-rgb: 29 29 31;
+  --focus-rgb: 38 38 38;
   --failed-rgb: 215 0 21; /* #d70015，Apple 系统红近似值 */
 
   /* 页面 / 桌面**基底**色。这是最内层表面，不参与玻璃与主题叠加层级，
@@ -98,17 +101,25 @@
      同一个语义两个权威，改一处必漏另一处。
      --base-dark-rgb 单独存在的原因见下方 base reset：body 位于 .dark 子树
      **之外**，拿不到 .dark 作用域对 --base-rgb 的重定义。 */
-  --base-rgb: 245 245 247; /* #f5f5f7 */
-  --base-dark-rgb: 0 0 0; /* 桌面纯黑，见 DESIGN_SYSTEM 0.2 */
+  --base-rgb: 236 236 236; /* #ececec，macOS windowBackground */
+  --base-dark-rgb: 20 20 20; /* #141414，macOS 27 深色炭灰（不再用纯黑） */
 
-  --surface-alpha: 0.68;
-  --content-alpha: 0.94;
+  --surface-alpha: 0.78;
+  /* 内容区始终不透明：半透明正文会让壁纸渗进来、整窗发灰（用户实测"窗口不好看"的成因） */
+  --content-alpha: 1;
   --sunken-alpha: 0.04;
   --line-alpha: 0.12;
   --failed-alpha: 1;
   /* 顶栏与 Dock 无底色填充（透明度 0），与深色口径一致 */
   --bar-alpha: 0;
   --pill-alpha: 0.58;
+  /* 顶栏压在"与外观相反"的主题色壁纸上时用的字色（两档都不随主题变）：
+     深色壁纸上的浅字 = 深色 labelColor，浅色壁纸上的深字 = 浅色 labelColor。 */
+  --bar-on-dark-rgb: 223 223 223;
+  --bar-on-light-rgb: 38 38 38;
+  /* 分栏窗口侧栏底框（10-15 用户指定：浅色 #f6f6f6，选中 #e0e0e0，实色不透明） */
+  --sidebar-rgb: 246 246 246;
+  --sidebar-selected-rgb: 224 224 224;
 
   /* 主题作用域合成（T3）。只随主题变化，不随玻璃档位变化。 */
   --text: rgb(var(--text-rgb));
@@ -202,29 +213,54 @@
   /* 浮起面板（toast / 菜单）的染色面 alpha：**不随玻璃档位变**。
      浮层压在会变的内容之上，透明度必须自己兜住可读性，不能靠底。 */
   --toast-alpha: 0.96;
+
+  /* ── 壳层结构 · Shell ─────────────────────────────────────────────────
+     Vue 壳层各组件共享的结构性设计值：图标基座、控件尺寸、z 层序与桌面环境光。
+     它们跨组件复用（桌面 / 窗口层 / 程序坞 / 启动台 / 控制中心 / 快速查看读的
+     是同一份），所以权威在这里，而不是某个组件的局部变量 —— 组件层只写
+     var(--shell-*)，不得再出现尺寸、层序或透明度的字面值。
+     浅色值在此；深色只覆盖随主题变化的三项，见下方 .dark。 */
+  --shell-icon: 20px; /* 行内与工具按钮的图标基座；再大的图标另开一档，避免各处自写数字 */
+  --shell-icon-lg: 32px; /* 启动台磁贴与空态插画的大图标档 */
+  --shell-dock-icon: 48px; /* 程序坞与桌面快捷方式的可点击面；小于此值点按目标不够大 */
+  --shell-launchpad-tile: 96px; /* 启动台网格列宽下限，保证磁贴不随窗口变窄而缩水 */
+  --shell-titlebar: 36px; /* 顶栏与窗口标题条同高，两侧内容才对得齐 */
+  --shell-control-tile: 40px; /* 控制中心开关图标底与欢迎页卡片图标底共用一档 */
+  --shell-z-wallpaper: 0; /* 层序基准：桌面背景永远在最底 */
+  --shell-z-desktop: 10; /* 桌面顶栏要盖住背景光，但必须落在窗口之下 */
+  --shell-z-window: 20; /* 窗口层：浮层与程序坞都要能压住它 */
+  --shell-z-overlay: 30; /* 浮层遮罩：盖窗口，但不盖任何浮层本体 */
+  --shell-z-launchpad: 40; /* 启动台整屏铺满，需要独立于遮罩的层 */
+  --shell-z-control-center: 50; /* 控制中心要盖住启动台，两者可互斥切换 */
+  --shell-z-dock: 60; /* 程序坞常驻可见，不能被任何浮层遮住 */
+  --shell-z-quicklook: 70; /* 快速查看在最顶层；Esc 关闭顺序与层序一致 */
+  --shell-wallpaper-glow: 0.85; /* 主光强度：浅色桌面靠它从基底色里亮起来 */
+  --shell-wallpaper-edge: 0.05; /* 边角暗部：只做极淡收边，不形成可见光斑 */
+  --shell-scrim: 0.28; /* 遮罩浓度：浅色桌面本身亮，压到能读出浮层即可 */
 }
 
 /* ── Color · 主题原料（dark 覆盖）──────────────────────────────────────
    深色统一基色 #171717，层级靠 alpha 分档（合成于纯黑桌面之上）。
    T3：这里改了多少原料，下面就必须重声明多少合成值。 */
 .dark {
-  --text-rgb: 245 245 247; /* #f5f5f7 */
-  --muted-rgb: 152 152 157; /* #98989d */
-  --placeholder-rgb: 160 160 165; /* #a0a0a5，浅色那档的深色对应值 */
-  --base-rgb: 0 0 0; /* 基底也是随主题变的一档 */
-  --surface-rgb: 23 23 23;
-  --content-rgb: 23 23 23;
+  /* macOS 27 深色：labelColor = 白 85% ≈ #dfdfdf；表面为炭灰阶而非纯黑 */
+  --text-rgb: 223 223 223; /* #dfdfdf */
+  --muted-rgb: 152 152 152; /* #989898 */
+  --placeholder-rgb: 160 160 160; /* #a0a0a0，浅色那档的深色对应值 */
+  --base-rgb: 20 20 20; /* #141414 基底也是随主题变的一档 */
+  --surface-rgb: 42 42 42; /* 窗口外壳玻璃底 */
+  --content-rgb: 30 30 30; /* #1e1e1e，macOS controlBackground */
   --sunken-rgb: 0 0 0;
-  --bar-rgb: 23 23 23;
-  --pill-rgb: 23 23 23;
+  --bar-rgb: 30 30 30;
+  --pill-rgb: 40 40 40;
   --line-rgb: 255 255 255;
-  --accent-rgb: 245 245 247;
-  --on-accent-rgb: 0 0 0;
-  --focus-rgb: 255 255 255;
+  --accent-rgb: 223 223 223;
+  --on-accent-rgb: 30 30 30;
+  --focus-rgb: 223 223 223;
   --failed-rgb: 255 69 58; /* #ff453a */
 
-  --surface-alpha: 0.5;
-  --content-alpha: 0.6;
+  --surface-alpha: 0.78;
+  --content-alpha: 1;
   --sunken-alpha: 0.28;
   --line-alpha: 0.16;
   /* 顶栏与 Dock 只保留模糊，无底色填充 */
@@ -257,6 +293,17 @@
   --elevation-5: inset 0 1px 0 var(--material-top-highlight), 0 18px 46px rgb(0 0 0 / 0.7);
   --elevation-card-hover: inset 0 1px 0 var(--material-top-highlight), 0 2px 10px rgb(0 0 0 / 0.45);
   --shadow: var(--elevation-4);
+
+  /* ── 壳层结构（深色覆盖）──────────────────────────────────────────────
+     深色桌面为纯黑，环境光收敛到 DESIGN_SYSTEM §3.2 的上限（≤3%）；
+     遮罩必须更重，才能在纯黑桌面上把浮层与背景分开。
+     只覆盖随主题变化的三项 —— 尺寸与层序两个主题共用。 */
+  /* 侧栏底框深色对应值：比内容区 #1e1e1e 亮一档，选中再亮一档 */
+  --sidebar-rgb: 44 44 44;
+  --sidebar-selected-rgb: 64 64 64;
+  --shell-wallpaper-glow: 0.03; /* 纯黑桌面上的主光上限；再亮就不是环境光而是光斑 */
+  --shell-wallpaper-edge: 0.03; /* 与主光同值：纯黑下两侧对称，不做方向 */
+  --shell-scrim: 0.5; /* 黑底上把遮罩加重，否则浮层边界读不出来 */
 }
 
 /* ══ Glass · full（基线）══════════════════════════════════════════════════
@@ -267,7 +314,7 @@
    它实际压着的桌面合成色，否则会浮出一条亮/暗带。 */
 .opaque,
 [data-glass="solid"] {
-  --surface-rgb: 245 245 247;
+  --surface-rgb: 236 236 236;
   --surface-alpha: 1;
   --content-rgb: 255 255 255;
   --content-alpha: 1;
@@ -278,15 +325,15 @@
 }
 .dark.opaque,
 .dark[data-glass="solid"] {
-  --surface-rgb: 12 12 12;
+  --surface-rgb: 40 40 40;
   --surface-alpha: 1;
-  --content-rgb: 14 14 14;
+  --content-rgb: 30 30 30;
   --content-alpha: 1;
   /* D1-04B：原值 #111111 比桌面亮 17 级，在纯黑桌面上形成亮带。
      实测顶栏处真实桌面 = #000000（experiments/d1-04/opaque-probe.mjs）。 */
-  --bar-rgb: 0 0 0;
+  --bar-rgb: 20 20 20; /* = 深色基底 #141414 */
   --bar-alpha: 1;
-  --pill-rgb: 0 0 0;
+  --pill-rgb: 20 20 20;
   --pill-alpha: 1;
 }
 .opaque *,

@@ -288,8 +288,10 @@
   color: var(--placeholder);
 }
 .ds-search:focus-within {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
+  /* 用户口径（10-15）：所有搜索框**不要线框**。焦点只靠槽色加深表达（比 hover 再深一档），
+     仍然可见，但不是一圈框。 */
+  outline: none;
+  background: rgb(var(--text-rgb) / 0.12);
 }
 .ds-search__input::-webkit-search-cancel-button {
   display: none;

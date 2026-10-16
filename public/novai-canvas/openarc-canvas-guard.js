@@ -186,6 +186,10 @@
     style.id = "openarc-guard-style";
     // 只消费上游已有变量；中性灰、无描边分层、字重 ≤500、4px 间距体系。
     style.textContent = [
+      // 宿主窗口没有独立标题条：画布铺到窗口顶边，红绿灯浮在左上角 44px 内。顶部工具条整体下移 44px 让开
+      // （.topbar 带 zoom:var(--studio-ui-scale)，偏移量除以它才是真实的 44px）。
+      ".topbar{top:calc(20px + 44px / var(--studio-ui-scale,1)) !important}",
+      "@media (max-width:780px){.topbar{top:calc(14px + 44px / var(--studio-ui-scale,1)) !important}}",
       ".openarc-model-status{display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin:4px 0 0;font-size:12px;line-height:18px;font-weight:400;color:var(--text-2,#737373)}",
       ".openarc-model-status-text{font-weight:400}",
       ".openarc-guide-btn{height:24px;padding:0 8px;border-radius:var(--radius-md,8px);background:var(--nav-hover-bg,rgba(0,0,0,.05));color:var(--text,#0a0a0a);font-size:12px;font-weight:500;cursor:pointer;transition:background 100ms cubic-bezier(.2,0,0,1)}",

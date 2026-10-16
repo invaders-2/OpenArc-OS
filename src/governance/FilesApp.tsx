@@ -31,28 +31,34 @@ export function FilesApp() {
     if (!res.ok) setError(res.error);
   };
 
+  const meta = "File Manager 管理普通文件；Resource Library 管理 OpenArc Resource Object。这里是受控的 Add to Library / Export 入口。";
+
   return (
-    <div className="files" data-d3-04d="files">
-      <header className="gov-head"><h2>文件</h2></header>
-      <p className="gov-meta">File Manager 管理普通文件；Resource Library 管理 OpenArc Resource Object。这里是受控的 Add to Library / Export 入口。</p>
-      <div className="gov-form">
-        <Button variant="primary" size="sm" data-d3-04d-files-import onClick={() => void add("import")}>添加到资源库（Managed）</Button>
-        <Button variant="secondary" size="sm" data-d3-04d-files-link onClick={() => void add("link")}>链接文件（Linked）</Button>
-      </div>
-      {error ? <p className="gov-error" role="alert" data-d3-04d-files-error>{error}</p> : null}
-      {notice ? <p className="gov-notice" role="status" data-d3-04d-files-notice>{notice}</p> : null}
-      <ul className="gov-list" data-d3-04d-files-items>
-        {items.map((r) => (
-          <li key={r.resourceId} data-d3-04d-file={r.resourceId} className="gov-row">
-            <span className="gov-name">{r.name}</span>
-            <span className="gov-meta">{r.storageMode} · {r.resourceRef}</span>
-          </li>
-        ))}
-      </ul>
-      <div className="gov-form">
-        <input data-d3-04d-files-ref placeholder="resource://..." value={exportRef} onChange={(e) => setExportRef(e.target.value)} />
-        <Button variant="secondary" size="sm" data-d3-04d-files-export onClick={() => void doExport()}>导出为普通文件</Button>
-        <Button variant="ghost" size="sm" data-d3-04d-files-reveal onClick={() => void doReveal()}>显示源文件</Button>
+    <div className="split">
+      <div className="split-main">
+        <h1>文件</h1>
+        <p className="subtitle">{meta}</p>
+        <div className="files" data-d3-04d="files">
+          <div className="gov-form">
+            <Button variant="primary" size="sm" data-d3-04d-files-import onClick={() => void add("import")}>添加到资源库（Managed）</Button>
+            <Button variant="secondary" size="sm" data-d3-04d-files-link onClick={() => void add("link")}>链接文件（Linked）</Button>
+          </div>
+          {error ? <p className="gov-error" role="alert" data-d3-04d-files-error>{error}</p> : null}
+          {notice ? <p className="gov-notice" role="status" data-d3-04d-files-notice>{notice}</p> : null}
+          <ul className="gov-list" data-d3-04d-files-items>
+            {items.map((r) => (
+              <li key={r.resourceId} data-d3-04d-file={r.resourceId} className="gov-row">
+                <span className="gov-name">{r.name}</span>
+                <span className="gov-meta">{r.storageMode} · {r.resourceRef}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="gov-form">
+            <input data-d3-04d-files-ref placeholder="resource://..." value={exportRef} onChange={(e) => setExportRef(e.target.value)} />
+            <Button variant="secondary" size="sm" data-d3-04d-files-export onClick={() => void doExport()}>导出为普通文件</Button>
+            <Button variant="ghost" size="sm" data-d3-04d-files-reveal onClick={() => void doReveal()}>显示源文件</Button>
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -623,12 +623,16 @@ export function McpCenter({ role }: { role: string | null }) {
 
   if (!available) {
     return (
-      <div className="mcp-center" data-mcp-center="1" data-mcp-available="false">
-        <PageState
-          kind="unavailable"
-          title="当前环境无法访问 MCP 域"
-          description="只有在 OpenArc 桌面应用（Electron）里才会加载 MCP 桥。这里不展示任何模拟连接或模拟工具。"
-        />
+      <div className="split">
+        <div className="split-main">
+          <div className="mcp-center" data-mcp-center="1" data-mcp-available="false">
+            <PageState
+              kind="unavailable"
+              title="当前环境无法访问 MCP 域"
+              description="只有在 OpenArc 桌面应用（Electron）里才会加载 MCP 桥。这里不展示任何模拟连接或模拟工具。"
+            />
+          </div>
+        </div>
       </div>
     );
   }
@@ -929,26 +933,38 @@ export function McpCenter({ role }: { role: string | null }) {
   /* ── 首屏与列表错误（PLAN §22 的状态位）───────────────────────────────── */
   if (listError && !connections.length && !loading) {
     return (
-      <div className="mcp-center" data-mcp-center="1" data-mcp-available="true">
-        <div className="mcp-banner">
-          <p className="mcp-error" role="alert" data-mcp-error data-mcp-error-code={listError.code}>
-            {listError.context}未完成：{errorText(listError.code)}（{listError.code}）
-          </p>
+      <div className="split">
+        <div className="split-main">
+          <h1>MCP 中心</h1>
+          <p className="subtitle">连接管理与能力发现（第一批不开放工具调用）</p>
+          <div className="mcp-center" data-mcp-center="1" data-mcp-available="true">
+            <div className="mcp-banner">
+              <p className="mcp-error" role="alert" data-mcp-error data-mcp-error-code={listError.code}>
+                {listError.context}未完成：{errorText(listError.code)}（{listError.code}）
+              </p>
+            </div>
+            <PageState
+              kind="error"
+              title="读取连接列表失败"
+              description="列表是后端按权限过滤后的真实结果，这里不展示任何缓存或模拟数据。"
+              onAction={() => void loadList()}
+            />
+          </div>
         </div>
-        <PageState
-          kind="error"
-          title="读取连接列表失败"
-          description="列表是后端按权限过滤后的真实结果，这里不展示任何缓存或模拟数据。"
-          onAction={() => void loadList()}
-        />
       </div>
     );
   }
 
   if (loading && !connections.length) {
     return (
-      <div className="mcp-center" data-mcp-center="1" data-mcp-available="true">
-        <PageState kind="loading" title="正在读取连接…" />
+      <div className="split">
+        <div className="split-main">
+          <h1>MCP 中心</h1>
+          <p className="subtitle">连接管理与能力发现（第一批不开放工具调用）</p>
+          <div className="mcp-center" data-mcp-center="1" data-mcp-available="true">
+            <PageState kind="loading" title="正在读取连接…" />
+          </div>
+        </div>
       </div>
     );
   }
@@ -956,65 +972,47 @@ export function McpCenter({ role }: { role: string | null }) {
   /* 无连接可添加（PLAN §22：空状态解释下一步） */
   if (!connections.length) {
     return (
-      <div className="mcp-center" data-mcp-center="1" data-mcp-available="true">
-        {notice ? (
-          <div className="mcp-banner">
-            <p className="mcp-notice" role="status" data-mcp-notice>
-              {notice}
-            </p>
+      <div className="split">
+        <div className="split-main">
+          <h1>MCP 中心</h1>
+          <p className="subtitle">连接管理与能力发现（第一批不开放工具调用）</p>
+          <div className="mcp-center" data-mcp-center="1" data-mcp-available="true">
+            {notice ? (
+              <div className="mcp-banner">
+                <p className="mcp-notice" role="status" data-mcp-notice>
+                  {notice}
+                </p>
+              </div>
+            ) : null}
+            <div className="mcp-empty" data-mcp-empty>
+              <PageState
+                kind="empty"
+                title="还没有连接"
+                description="新建一个连接后，中心会做真实 MCP 握手（initialize → initialized → tools/list），把服务端实际协商出的版本、能力与工具写进记录。第一批不开放工具调用。"
+              />
+              {/* PageState 的 empty 语义是 action='none'（共享规范，不为这一页改），
+                  所以空态的新建入口由本页自己渲染 —— 否则列表为空时无法建第一条连接。 */}
+              <Button variant="secondary" data-mcp-action="create" onClick={openCreate}>
+                新建连接
+              </Button>
+            </div>
+            {dialogs}
           </div>
-        ) : null}
-        <div className="mcp-empty" data-mcp-empty>
-          <PageState
-            kind="empty"
-            title="还没有连接"
-            description="新建一个连接后，中心会做真实 MCP 握手（initialize → initialized → tools/list），把服务端实际协商出的版本、能力与工具写进记录。第一批不开放工具调用。"
-          />
-          {/* PageState 的 empty 语义是 action='none'（共享规范，不为这一页改），
-              所以空态的新建入口由本页自己渲染 —— 否则列表为空时无法建第一条连接。 */}
-          <Button variant="secondary" data-mcp-action="create" onClick={openCreate}>
-            新建连接
-          </Button>
         </div>
-        {dialogs}
       </div>
     );
   }
 
   return (
-    <div
-      ref={rootRef}
-      className="mcp-center"
-      data-mcp-center="1"
-      data-mcp-available="true"
-      data-mcp-role={isAdmin ? "ADMIN" : "MEMBER"}
-    >
-      <div className="mcp-banner">
-        <div className="mcp-banner__row">
-          <p className="mcp-banner__title">MCP 中心</p>
-          <span className="mcp-muted">连接管理与能力发现（第一批不开放工具调用）</span>
+    <div ref={rootRef} className="split">
+      <nav className="split-side" aria-label="MCP 连接列表">
+        <div className="mcp-pane-head">
+          <h3>连接</h3>
+          <Button variant="secondary" size="sm" data-mcp-action="create" onClick={openCreate}>
+            新建
+          </Button>
         </div>
-        {failure ? (
-          <p className="mcp-error" role="alert" data-mcp-error data-mcp-error-code={failure.code}>
-            {failure.context}未完成：{errorText(failure.code)}（{failure.code}）
-          </p>
-        ) : null}
-        {notice ? (
-          <p className="mcp-notice" role="status" data-mcp-notice>
-            {notice}
-          </p>
-        ) : null}
-      </div>
-
-      <div className="mcp-split">
-        <section className="mcp-list-pane" aria-label="MCP 连接列表">
-          <div className="mcp-pane-head">
-            <h3>连接</h3>
-            <Button variant="secondary" size="sm" data-mcp-action="create" onClick={openCreate}>
-              新建
-            </Button>
-          </div>
-          <ul className="mcp-list" data-mcp-list>
+        <ul className="mcp-list" data-mcp-list>
             {connections.map((c) => {
               const meta = statusMeta(c.status);
               const tools = toolsOf(c);
@@ -1032,6 +1030,7 @@ export function McpCenter({ role }: { role: string | null }) {
                     data-mcp-connection={c.connectionId}
                     data-mcp-status={asText(c.status, "")}
                     aria-pressed={c.connectionId === selectedId}
+                    aria-current={c.connectionId === selectedId ? "true" : undefined}
                     disabled={isLeaving}
                     onClick={() => void loadDetail(c.connectionId)}
                   >
@@ -1057,16 +1056,33 @@ export function McpCenter({ role }: { role: string | null }) {
                 </li>
               );
             })}
-          </ul>
-          {!isAdmin ? (
-            <p className="mcp-role-note" data-mcp-role-note>
-              权限口径（PLAN §27）：团队连接及授权由管理员管理；普通成员只能使用被授权给自己的连接。
-              这里列出的连接由后端按权限过滤，被拒绝的动作会显示稳定错误码。
-            </p>
-          ) : null}
-        </section>
+        </ul>
+        {!isAdmin ? (
+          <p className="mcp-role-note" data-mcp-role-note>
+            权限口径（PLAN §27）：团队连接及授权由管理员管理；普通成员只能使用被授权给自己的连接。
+            这里列出的连接由后端按权限过滤，被拒绝的动作会显示稳定错误码。
+          </p>
+        ) : null}
+      </nav>
 
-        <section className="mcp-detail-pane" aria-label="连接详情" data-mcp-detail-state={detail.kind}>
+      <div className="split-main">
+        <h1>MCP 中心</h1>
+        <p className="subtitle">连接管理与能力发现（第一批不开放工具调用）</p>
+        <div className="mcp-center" data-mcp-center="1" data-mcp-available="true" data-mcp-role={isAdmin ? "ADMIN" : "MEMBER"}>
+          <div className="mcp-banner">
+            {failure ? (
+              <p className="mcp-error" role="alert" data-mcp-error data-mcp-error-code={failure.code}>
+                {failure.context}未完成：{errorText(failure.code)}（{failure.code}）
+              </p>
+            ) : null}
+            {notice ? (
+              <p className="mcp-notice" role="status" data-mcp-notice>
+                {notice}
+              </p>
+            ) : null}
+          </div>
+
+          <section className="mcp-detail-pane" aria-label="连接详情" data-mcp-detail-state={detail.kind}>
           {detail.kind === "none" ? (
             <PageState
               kind="empty"
@@ -1379,9 +1395,10 @@ export function McpCenter({ role }: { role: string | null }) {
               </section>
             </div>
           ) : null}
-        </section>
+          </section>
+          {dialogs}
+        </div>
       </div>
-      {dialogs}
     </div>
   );
 }

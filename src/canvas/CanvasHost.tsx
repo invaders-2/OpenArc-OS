@@ -618,14 +618,28 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
    *  导航根本没走到主进程（will-frame-navigate 不触发），帧里落的是 Chromium 错误页；
    *  错误页同样会触发 iframe 的 load，所以只能按"换了文档之后还说不说话"判定：加载完成 3s 内
    *  连一条本帧消息都没有 = 换出来的不是应用页 → 立即整帧重置回入口（不用等 8s 看门狗）。*/
+  // 主题同步：上游 theme.js 自带 {type:"studio-theme"} 消息协议（iframe 间广播用），
+  // 宿主用同一协议把 OpenArc 的深浅色推给应用帧，让画布页底色与窗口标题条连成一片。
+  const postTheme = useCallback(() => {
+    const dark = !!document.querySelector(".desktop.dark");
+    try { frameRef.current?.contentWindow?.postMessage({ type: "studio-theme", theme: dark ? "dark" : "light" }, "*"); } catch { /* 帧未就绪 */ }
+  }, []);
+  useEffect(() => {
+    const desk = document.querySelector(".desktop");
+    if (!desk) return;
+    const mo = new MutationObserver(() => postTheme());
+    mo.observe(desk, { attributes: true, attributeFilter: ["class"] });
+    return () => mo.disconnect();
+  }, [postTheme]);
   const onFrameLoad = useCallback(() => {
+    postTheme();
     if (loadCheck.current) window.clearTimeout(loadCheck.current);
     const seen = beatSeq.current;
     loadCheck.current = window.setTimeout(() => {
       loadCheck.current = null;
       if (beatSeq.current === seen) resetAppFrame("应用页面被非预期导航替换，已立即重置（旧页面与旧实例 token 立即失效）");
     }, 3000);
-  }, [resetAppFrame]);
+  }, [resetAppFrame, postTheme]);
   useEffect(() => () => { if (loadCheck.current) window.clearTimeout(loadCheck.current); }, []);
 
   // 主进程拦截的应用内导航出网：证据留在宿主 notice 状态里（不再有计数徽标）

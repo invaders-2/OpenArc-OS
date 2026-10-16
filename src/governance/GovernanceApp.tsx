@@ -98,17 +98,26 @@ export function GovernanceApp() {
   };
 
   return (
-    <div className="gov" data-d3-04d="app">
-      <header className="gov-head">
-        <h2>组织治理</h2>
-        <nav className="gov-tabs" role="tablist" aria-label="治理分区">
-          {(["users", "departments", "apps", "access", "audit"] as Tab[]).map((t) => (
-            <button key={t} type="button" role="tab" aria-selected={tab === t} data-d3-04d-tab={t} onClick={() => setTab(t)}>
-              {{ users: "用户", departments: "部门", apps: "App 权限", access: "资源权限", audit: "审计" }[t]}
-            </button>
-          ))}
-        </nav>
-      </header>
+    <div className="split">
+      <nav className="split-side" role="tablist" aria-label="治理分区">
+        {(["users", "departments", "apps", "access", "audit"] as Tab[]).map((t) => (
+          <button
+            key={t}
+            type="button"
+            className="split-nav"
+            role="tab"
+            aria-selected={tab === t}
+            aria-current={tab === t ? "true" : undefined}
+            data-d3-04d-tab={t}
+            onClick={() => setTab(t)}
+          >
+            {{ users: "用户", departments: "部门", apps: "App 权限", access: "资源权限", audit: "审计" }[t]}
+          </button>
+        ))}
+      </nav>
+      <div className="split-main">
+        <h1>组织治理</h1>
+        <div className="gov" data-d3-04d="app">
       {error ? <p className="gov-error" role="alert" data-d3-04d-error>{error}</p> : null}
       {notice ? <p className="gov-notice" role="status">{notice}</p> : null}
 
@@ -240,6 +249,8 @@ export function GovernanceApp() {
           </ul>
         </section>
       ) : null}
+        </div>
+      </div>
     </div>
   );
 }

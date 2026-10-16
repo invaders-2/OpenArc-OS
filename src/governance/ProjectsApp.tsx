@@ -42,36 +42,40 @@ export function ProjectsApp() {
   };
 
   return (
-    <div className="projects" data-d3-04d="projects">
-      <header className="gov-head"><h2>项目</h2></header>
-      <div className="gov-form">
-        <input data-d3-04d-project-name placeholder="项目名" value={name} onChange={(e) => setName(e.target.value)} />
-        <Button variant="primary" size="sm" data-d3-04d-project-new onClick={() => void create()}>新建项目</Button>
-      </div>
-      {error ? <p className="gov-error" role="alert" data-d3-04d-project-error>{error}</p> : null}
-      <ul className="gov-list" data-d3-04d-projects>
-        {projects.map((p) => (
-          <li key={p.id} className="gov-row">
-            <button type="button" data-d3-04d-project={p.id} aria-pressed={projectId === p.id} onClick={() => { setProjectId(p.id); void loadResources(p.id); }}>{p.name}</button>
-          </li>
-        ))}
-      </ul>
-      {projectId ? (
-        <section data-d3-04d-project-active={projectId}>
+    <div className="split">
+      <div className="split-main">
+        <h1>项目</h1>
+        <div className="projects" data-d3-04d="projects">
           <div className="gov-form">
-            <Button variant="secondary" size="sm" data-d3-04d-project-add onClick={() => setPicking(true)}>引用资源</Button>
+            <input data-d3-04d-project-name placeholder="项目名" value={name} onChange={(e) => setName(e.target.value)} />
+            <Button variant="primary" size="sm" data-d3-04d-project-new onClick={() => void create()}>新建项目</Button>
           </div>
-          <ul className="gov-list" data-d3-04d-project-resources>
-            {resources.map((r) => (
-              <li key={r.resourceId} data-d3-04d-project-resource={r.resourceId} data-d3-04d-project-resource-authorized={r.authorized ? "true" : "false"} className="gov-row">
-                <span className="gov-name">{r.authorized ? r.resource.name : r.resourceRef}</span>
-                <span className="gov-meta">{r.authorized ? "可访问" : "无访问权限"}</span>
+          {error ? <p className="gov-error" role="alert" data-d3-04d-project-error>{error}</p> : null}
+          <ul className="gov-list" data-d3-04d-projects>
+            {projects.map((p) => (
+              <li key={p.id} className="gov-row">
+                <button type="button" data-d3-04d-project={p.id} aria-pressed={projectId === p.id} onClick={() => { setProjectId(p.id); void loadResources(p.id); }}>{p.name}</button>
               </li>
             ))}
           </ul>
-        </section>
-      ) : null}
-      {picking ? <ResourcePicker pickerAppId="resource-library" requestedActions={["resource.view"]} title="引用资源" onChoose={(ref) => void addResource(ref)} onCancel={() => setPicking(false)} /> : null}
+          {projectId ? (
+            <section data-d3-04d-project-active={projectId}>
+              <div className="gov-form">
+                <Button variant="secondary" size="sm" data-d3-04d-project-add onClick={() => setPicking(true)}>引用资源</Button>
+              </div>
+              <ul className="gov-list" data-d3-04d-project-resources>
+                {resources.map((r) => (
+                  <li key={r.resourceId} data-d3-04d-project-resource={r.resourceId} data-d3-04d-project-resource-authorized={r.authorized ? "true" : "false"} className="gov-row">
+                    <span className="gov-name">{r.authorized ? r.resource.name : r.resourceRef}</span>
+                    <span className="gov-meta">{r.authorized ? "可访问" : "无访问权限"}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+          {picking ? <ResourcePicker pickerAppId="resource-library" requestedActions={["resource.view"]} title="引用资源" onChoose={(ref) => void addResource(ref)} onCancel={() => setPicking(false)} /> : null}
+        </div>
+      </div>
     </div>
   );
 }
