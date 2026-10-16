@@ -199,3 +199,135 @@ test("依赖：未注入 coreStore 时 core 操作结构化 DEPENDENCY_UNAVAILAB
   const dxTask = noCore.createTask({ source: "dx", input: { projectId: s.project.id, instruction: "无 core 也能建 dx", createdBy: USER, title: "dx only" } });
   assert.ok(dxTask.id);
 });
+
+// ---------------------------------------------------------------------------
+// P1-A · 经 authority 与"原来直连 store"行为一致（create / pause / cancel / resume / append）
+// ---------------------------------------------------------------------------
+
+/** 跨路径可比的稳定字段：id / thread_id / root_task_id / 时间戳 / 自增列天然不同，不参与比较。 */
+function stableTask(task) {
+  return {
+    project_id: task.project_id,
+    title: task.title,
+    instruction: task.instruction,
+    status: task.status,
+    mode: task.mode,
+    execution_profile: task.execution_profile,
+    resume_safe: task.resume_safe,
+    created_by: task.created_by,
+    model_calls: task.model_calls,
+    tool_calls: task.tool_calls,
+    steps: task.steps.map((step) => ({ ordinal: step.ordinal, title: step.title, tool_name: step.tool_name, input_json: step.input_json, status: step.status })),
+  };
+}
+
+/** 事件只比语义（类型 / 文案 / 负载 JSON），id 与 sequence 天然不同。 */
+function stableEvents(taskId) {
+  return agentTaskStore.listTaskEvents(taskId, 0).map((event) => ({ type: event.type, message: event.message, data_json: event.data_json }));
+}
+
+function capturedError(run) {
+  try { run(); }
+  catch (error) { return error; }
+  return null;
+}
+
+test("等价 · create + append：identical 输入下 authority 与直连 store 产出同一任务/事件形状", async () => {
+  const s = await setup();
+  const input = {
+    projectId: s.project.id,
+    instruction: "写入「equiv.txt」",
+    createdBy: USER,
+    title: "等价任务",
+    actions: [{ tool: "file.write", path: "equiv.txt", content: "x" }],
+  };
+  const direct = agentTaskStore.createTask(Object.assign({}, input));
+  const routed = s.authority.createTask({ source: "dx", input: Object.assign({}, input) });
+  assert.deepEqual(stableTask(routed), stableTask(direct), "create 经 authority 与直连形状不一致");
+  assert.equal(routed.status, "queued");
+
+  // append：直连 appendTaskEvent(taskId,type,message,data) ↔ authority appendEvent({source,eventType,message,payload})
+  agentTaskStore.appendTaskEvent(direct.id, "authority.equiv", "直接追加", { n: 1 });
+  s.authority.appendEvent({ source: "dx", taskId: routed.id, eventType: "authority.equiv", message: "直接追加", payload: { n: 1 } });
+  assert.deepEqual(stableEvents(routed.id), stableEvents(direct.id), "append 经 authority 与直连事件流不一致");
+});
+
+test("等价 · pause / resume / cancel：两路径状态与事件流一致，领域错误文案原样穿透", async () => {
+  const s = await setup();
+  const make = (title) => ({ projectId: s.project.id, instruction: "整理等价 " + title, createdBy: USER, title: title });
+  const direct = agentTaskStore.createTask(make("直连"));
+  const routed = s.authority.createTask({ source: "dx", input: make("经 authority") });
+
+  agentTaskStore.pauseTask(direct.id);
+  s.authority.pauseTask({ taskId: routed.id });
+  assert.equal(agentTaskStore.getTask(routed.id).status, "paused");
+  assert.equal(agentTaskStore.getTask(direct.id).status, "paused");
+  assert.deepEqual(stableEvents(routed.id), stableEvents(direct.id), "pause 事件流不一致");
+
+  agentTaskStore.resumeTask(direct.id);
+  s.authority.resumeTask({ taskId: routed.id });
+  assert.equal(agentTaskStore.getTask(routed.id).status, "queued");
+  assert.equal(agentTaskStore.getTask(direct.id).status, "queued");
+  assert.deepEqual(stableEvents(routed.id), stableEvents(direct.id), "resume 事件流不一致");
+
+  agentTaskStore.cancelTask(direct.id);
+  s.authority.cancelTask({ taskId: routed.id });
+  assert.equal(agentTaskStore.getTask(routed.id).status, "cancelled");
+  assert.equal(agentTaskStore.getTask(direct.id).status, "cancelled");
+  assert.deepEqual(stableEvents(routed.id), stableEvents(direct.id), "cancel 事件流不一致");
+
+  // 已取消的任务不能再暂停：两条路径必须抛同一条领域错误，且 authority 不得包装成 TaskAuthorityError。
+  const directError = capturedError(() => agentTaskStore.pauseTask(direct.id));
+  const routedError = capturedError(() => s.authority.pauseTask({ taskId: routed.id }));
+  assert.ok(directError && routedError, "两条路径都应抛错");
+  assert.equal(routedError.message, directError.message, "领域错误文案必须原样穿透");
+  assert.equal(isTaskAuthorityError(routedError), false, "authority 不得把 store 领域错误包装成 TaskAuthorityError");
+  assert.equal(agentTaskStore.getTask(routed.id).status, "cancelled", "失败调用不得改变状态");
+});
+
+test("等价 · continue / answer / delete：两路径状态与副作用一致", async () => {
+  const s = await setup();
+  const make = (title) => ({ projectId: s.project.id, instruction: "继续等价 " + title, createdBy: USER, title: title });
+  // continueTask 只接受 react 模式（无 actions）。
+  const direct = agentTaskStore.createTask(make("直连"));
+  const routed = s.authority.createTask({ source: "dx", input: make("经 authority") });
+  agentTaskStore.pauseTask(direct.id);
+  s.authority.pauseTask({ taskId: routed.id });
+  agentTaskStore.continueTask(direct.id, USER, "再补充一条");
+  s.authority.continueTask({ taskId: routed.id, userId: USER, message: "再补充一条" });
+  assert.equal(agentTaskStore.getTask(routed.id).status, "queued");
+  assert.deepEqual(stableEvents(routed.id), stableEvents(direct.id), "continue 事件流不一致");
+
+  // answer 只接受 waiting_user：用真实连接把两条任务置到该状态（等价 worker 写入）。
+  const db = s.identity.connection;
+  db.prepare("UPDATE dx_tasks SET status='waiting_user', waiting_question=? WHERE id=?").run("继续吗", direct.id);
+  db.prepare("UPDATE dx_tasks SET status='waiting_user', waiting_question=? WHERE id=?").run("继续吗", routed.id);
+  agentTaskStore.answerTask(direct.id, USER, "继续");
+  s.authority.answerTask({ taskId: routed.id, userId: USER, answer: "继续" });
+  assert.equal(agentTaskStore.getTask(routed.id).status, "queued");
+  assert.deepEqual(stableEvents(routed.id), stableEvents(direct.id), "answer 事件流不一致");
+
+  agentTaskStore.deleteTask(direct.id);
+  s.authority.deleteTask({ taskId: routed.id });
+  assert.equal(agentTaskStore.getTask(direct.id), undefined);
+  assert.equal(agentTaskStore.getTask(routed.id), undefined);
+});
+
+test("等价 · 命令级 API 审计：create/pause/resume/cancel 各留一条不可变记录", async () => {
+  const s = await setup();
+  const seen = [];
+  const authority = createTaskAuthority({ dxStore: agentTaskStore, clock: s.clock, audit: (record) => seen.push(record) });
+  const task = authority.createTask({ source: "dx", input: { projectId: s.project.id, instruction: "审计等价", createdBy: USER, title: "审计" } });
+  authority.pauseTask({ taskId: task.id });
+  authority.resumeTask({ taskId: task.id });
+  authority.cancelTask({ taskId: task.id });
+  const operations = authority.auditLog().map((record) => record.operation);
+  assert.deepEqual(operations, ["createTask", "pauseTask", "resumeTask", "cancelTask"]);
+  assert.equal(seen.length, 4, "注入的 audit 回调也收到全部记录");
+  for (const record of authority.auditLog()) {
+    assert.equal(record.source, "dx");
+    assert.equal(record.outcome, "accepted");
+    assert.ok(Object.isFrozen(record), "审计记录必须不可变");
+  }
+});
+

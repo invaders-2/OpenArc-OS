@@ -5,7 +5,9 @@
  *   · 生产代码里对两张任务表族的**直接写 SQL 只允许出现在两个 store 内部**：
  *     electron/task-store.cjs（core 三表）与 electron/agent-task-store.cjs（dx 三表）。
  *     其它模块的任务 / 步骤 / 事件写操作一律经本模块，由它按 source 路由到对应 store。
- *     该边界由 tests/dxos-agent-task-authority.test.mjs 的源码级断言守住（白名单只有两个 store）。
+ *     该边界由两层源码守卫钉死：
+ *       - SQL 级 tests/dxos-task-unified-views.test.mjs（写六张任务表的生产文件只有两个 store）；
+ *       - 方法级 tests/dxos-agent-task-authority-guard.test.mjs（命令级写方法 0 旁路 + 文件允许列表）。
  *   · 本模块**不复制**任一状态机：
  *       - core：迁移校验复用 electron/task-domain.cjs 的 canTransitionTask（同一份迁移表）；
  *       - dx：没有公开迁移表，一律路由到 agent-task-store 里已带校验的生命周期函数
@@ -112,6 +114,21 @@ function createTaskAuthority(options = {}) {
     auditRecords.push(entry);
     if (auditSink) auditSink(entry);
     return entry;
+  }
+
+  /**
+   * DX 命令路由（P1-A 方法级收口）：只做"非空入参校验 + 审计"，**不复制状态机**。
+   *   · 状态合法性（"只有 queued/planning/running/verifying 能暂停"等）仍由
+   *     agent-task-store 的 pauseTask / cancelTask / resumeTask / deleteTask 判定；
+   *   · store 抛出的领域错误**原样穿透**，不包装成 TaskAuthorityError —— 这样
+   *     agent-service.cjs 经 normalizeAgentError 暴露的错误码 / 文案与直连时一致；
+   *   · 这些命令天然不幂等（重复暂停会改状态或报错），故不启用幂等键。
+   */
+  function routeDxLifecycle(operation, args, run) {
+    const taskId = requireText(args && args.taskId, "taskId");
+    const result = run(taskId);
+    record(SOURCE_DX, operation, "accepted", taskId, null);
+    return result;
   }
 
   /**
@@ -265,6 +282,37 @@ function createTaskAuthority(options = {}) {
     appendStep,
     updateTaskStatus,
     writeStepOutput,
+    // ---- DX 任务生命周期命令（agent-service.cjs 原有直连调用的等价 API）----
+    // 全部路由到 agent-task-store 自带的、已带校验的生命周期函数；本模块不判定状态。
+    pauseTask(args) { return routeDxLifecycle("pauseTask", args, (taskId) => resolveDxStore().pauseTask(taskId)); },
+    cancelTask(args) { return routeDxLifecycle("cancelTask", args, (taskId) => resolveDxStore().cancelTask(taskId)); },
+    resumeTask(args) { return routeDxLifecycle("resumeTask", args, (taskId) => resolveDxStore().resumeTask(taskId)); },
+    deleteTask(args) { return routeDxLifecycle("deleteTask", args, (taskId) => resolveDxStore().deleteTask(taskId)); },
+    answerTask(args) {
+      return routeDxLifecycle("answerTask", args, (taskId) => resolveDxStore().answerTask(taskId, requireText(args.userId, "userId"), requireText(args.answer, "answer")));
+    },
+    continueTask(args) {
+      return routeDxLifecycle("continueTask", args, (taskId) => resolveDxStore().continueTask(taskId, requireText(args.userId, "userId"), requireText(args.message, "message")));
+    },
+    /** dx 项目创建：形状与 agent-task-store.createProject 相同（agent/project/create 命令用）。 */
+    createProject(args) {
+      const input = args && args.input && typeof args.input === "object" ? args.input : {};
+      requireText(input.name, "input.name");
+      requireText(input.rootNodeId, "input.rootNodeId");
+      requireText(input.createdBy, "input.createdBy");
+      const project = resolveDxStore().createProject(input);
+      record(SOURCE_DX, "createProject", "accepted", (project && project.id) || null, null);
+      return project;
+    },
+    /** dx 项目记忆写入：形状与 agent-task-store.addMemory 相同（agent/memory/save 命令用）。 */
+    addMemory(args) {
+      const input = args && args.input && typeof args.input === "object" ? args.input : {};
+      requireText(input.projectId, "input.projectId");
+      requireText(input.content, "input.content");
+      const memory = resolveDxStore().addMemory(input);
+      record(SOURCE_DX, "addMemory", "accepted", (memory && memory.id) || null, null);
+      return memory;
+    },
     /** 审计读数：返回未冻结数组的浅拷贝，供测试 / 健康检查。 */
     auditLog() {
       return auditRecords.slice();

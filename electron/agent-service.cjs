@@ -350,6 +350,12 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
   // 未注入 / 装配失败时保持 null —— 健康报告如实 false、文件工具结构化拒绝，绝不假装可用。
   const resolvedFsAdapter = fsAdapter || null;
 
+  // ---- 1a) 任务域单一写入口：命令级写操作一律经 task-authority 路由到 agent-task-store ----
+  // 与 agent-runtime-workspace.cjs:61-67 同模式：本 bundle 只构造一次，dxStore 用下面注入的
+  // 生产单例；authority 不复制状态机，只做入参校验 + 审计 + 路由（领域错误原样穿透）。
+  const taskAuthorityLib = require("./task-authority.cjs");
+  const taskAuthority = taskAuthorityLib.createTaskAuthority({ dxStore: agentTaskStore, clock: now });
+
   // ---- 1) 任务域：唯一 SQLite 连接（identity-store 的连接，agent_* 表由 v23 迁移建立） ----
   // B6d：同一份 fsAdapter 也要喂 project snapshot（agent-project-snapshot.cjs 经
   // agent-task-store.getAgentFsAdapter() 取它）；缺它时快照抛结构化依赖错误。
@@ -493,7 +499,7 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
     if (!userId) throw createAgentError(AGENT_ERR_INVALID_INPUT, "缺少 userId");
     const actor = options.actor && typeof options.actor === "object" ? { ...options.actor, id: userId } : { id: userId };
     let project = agentTaskStore.listProjects(userId).find((item) => item && item.name === AUTOMATION_PROJECT_NAME);
-    if (!project) project = agentTaskStore.createProject({ name: AUTOMATION_PROJECT_NAME, rootNodeId: "automation-" + randomUUID(), createdBy: userId });
+    if (!project) project = taskAuthority.createProject({ input: { name: AUTOMATION_PROJECT_NAME, rootNodeId: "automation-" + randomUUID(), createdBy: userId } });
     accessOrForbidden(project.id, userId, true);
     projectAgentMode.configureProjectAgentMode({ ...projectAdapters, clock: now, logger });
     try {
@@ -515,14 +521,17 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
         const instruction = requireStr(payload.instruction, 8000);
         if (!projectId || !instruction) throw createAgentError(AGENT_ERR_INVALID_INPUT, "projectId 与 instruction 必填");
         accessOrForbidden(projectId, userId, true);
-        const task = agentTaskStore.createTask({
-          projectId, instruction, createdBy: userId,
-          title: asStr(payload.title, 120), threadId: requireStr(payload.threadId, 120),
-          executionProfile: requireStr(payload.executionProfile, 20),
-          agentProfileId: requireStr(payload.agentProfileId, 80),
-          parentTaskId: requireStr(payload.parentTaskId, 120),
-          preferences: payload.preferences && typeof payload.preferences === "object" ? payload.preferences : undefined,
-          actions: Array.isArray(payload.actions) ? payload.actions : undefined,
+        const task = taskAuthority.createTask({
+          source: "dx",
+          input: {
+            projectId, instruction, createdBy: userId,
+            title: asStr(payload.title, 120), threadId: requireStr(payload.threadId, 120),
+            executionProfile: requireStr(payload.executionProfile, 20),
+            agentProfileId: requireStr(payload.agentProfileId, 80),
+            parentTaskId: requireStr(payload.parentTaskId, 120),
+            preferences: payload.preferences && typeof payload.preferences === "object" ? payload.preferences : undefined,
+            actions: Array.isArray(payload.actions) ? payload.actions : undefined,
+          },
         });
         return { task: taskSummary(task) };
       }
@@ -556,14 +565,14 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
         const taskId = requireStr(payload.taskId, 160);
         const answer = requireStr(payload.answer, 4000);
         if (!taskId || !answer) throw createAgentError(AGENT_ERR_INVALID_INPUT, "taskId 与 answer 必填");
-        agentTaskStore.answerTask(taskId, userId, answer);
+        taskAuthority.answerTask({ taskId, userId, answer });
         return { task: taskSummary(agentTaskStore.getTask(taskId)) };
       }
       case "agent/task/continue": {
         const taskId = requireStr(payload.taskId, 160);
         const message = requireStr(payload.message, 4000);
         if (!taskId || !message) throw createAgentError(AGENT_ERR_INVALID_INPUT, "taskId 与 message 必填");
-        agentTaskStore.continueTask(taskId, userId, message);
+        taskAuthority.continueTask({ taskId, userId, message });
         return { task: taskSummary(agentTaskStore.getTask(taskId)) };
       }
       case "agent/task/pause": {
@@ -572,7 +581,7 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
         const task = agentTaskStore.getTask(taskId);
         if (!task) throw createAgentError(AGENT_ERR_NOT_FOUND, "任务不存在：" + taskId);
         accessOrForbidden(task.project_id, userId);
-        agentTaskStore.pauseTask(taskId);
+        taskAuthority.pauseTask({ taskId });
         return { task: taskSummary(agentTaskStore.getTask(taskId)) };
       }
       case "agent/task/cancel": {
@@ -581,7 +590,7 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
         const task = agentTaskStore.getTask(taskId);
         if (!task) throw createAgentError(AGENT_ERR_NOT_FOUND, "任务不存在：" + taskId);
         accessOrForbidden(task.project_id, userId);
-        agentTaskStore.cancelTask(taskId);
+        taskAuthority.cancelTask({ taskId });
         return { task: taskSummary(agentTaskStore.getTask(taskId)) };
       }
       case "agent/task/resume": {
@@ -590,7 +599,7 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
         const task = agentTaskStore.getTask(taskId);
         if (!task) throw createAgentError(AGENT_ERR_NOT_FOUND, "任务不存在：" + taskId);
         accessOrForbidden(task.project_id, userId, true);
-        agentTaskStore.resumeTask(taskId);
+        taskAuthority.resumeTask({ taskId });
         return { task: taskSummary(agentTaskStore.getTask(taskId)) };
       }
       case "agent/task/delete": {
@@ -599,7 +608,7 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
         const task = agentTaskStore.getTask(taskId);
         if (!task) throw createAgentError(AGENT_ERR_NOT_FOUND, "任务不存在：" + taskId);
         accessOrForbidden(task.project_id, userId);
-        agentTaskStore.deleteTask(taskId);
+        taskAuthority.deleteTask({ taskId });
         return { taskId, deleted: true };
       }
       case "agent/task/trace": {
@@ -689,7 +698,7 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
         const name = requireStr(payload.name, 200);
         const rootNodeId = requireStr(payload.rootNodeId, 200);
         if (!name || !rootNodeId) throw createAgentError(AGENT_ERR_INVALID_INPUT, "name 与 rootNodeId 必填");
-        return { project: agentTaskStore.createProject({ name, rootNodeId, createdBy: userId }) };
+        return { project: taskAuthority.createProject({ input: { name, rootNodeId, createdBy: userId } }) };
       }
       case "agent/project/list": return { items: agentTaskStore.listProjects(userId) };
       case "agent/project/snapshot": {
@@ -736,7 +745,7 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
         const content = requireStr(payload.content, 2000);
         if (!projectId || !content) throw createAgentError(AGENT_ERR_INVALID_INPUT, "projectId 与 content 必填");
         accessOrForbidden(projectId, userId, true);
-        return { memory: agentTaskStore.addMemory({ projectId, content, createdBy: userId, sourceType: requireStr(payload.sourceType, 40), sourceId: requireStr(payload.sourceId, 160), replacesId: requireStr(payload.replacesId, 160) }) };
+        return { memory: taskAuthority.addMemory({ input: { projectId, content, createdBy: userId, sourceType: requireStr(payload.sourceType, 40), sourceId: requireStr(payload.sourceId, 160), replacesId: requireStr(payload.replacesId, 160) } }) };
       }
 
       // ---------------- react ----------------
