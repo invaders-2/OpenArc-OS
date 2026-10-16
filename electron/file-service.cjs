@@ -461,6 +461,47 @@ function createFileService({ userDataDir }) {
   }
 
   /**
+   * 文稿写入（10-15，「文稿」应用用）：**只允许 .md / .txt**，单篇上限 1 MB。
+   *   · id 有值：覆盖该条目内容（物理扩展名必须是 md/txt，别的类型一律拒绝，防止借文稿通道改写图片等文件）；
+   *   · id 为空：在文件夹里新建一篇，名字重名自动加后缀，扩展名不是 md/txt 时补 .md。
+   * 与导入同一套落盘规则：物理文件名 = 条目 id + 扩展名；索引原子写。不返回任何磁盘路径。
+   */
+  const WRITABLE_TEXT = new Set(["md", "txt"]);
+  const WRITE_LIMIT = 1024 * 1024;
+  function writeText(folderId, id, name, text) {
+    const dir = dirOf(folderId);
+    if (!dir) return { ok: false, error: "INVALID_INPUT" };
+    const body = String(text ?? "");
+    if (Buffer.byteLength(body, "utf8") > WRITE_LIMIT) return { ok: false, error: "TOO_LARGE" };
+    const entries = readIndex(dir);
+    try {
+      if (id) {
+        const entry = entries.find((e) => e.id === String(id));
+        if (!entry) return { ok: false, error: "NOT_FOUND" };
+        if (!WRITABLE_TEXT.has(extOf(fileOf(entry)))) return { ok: false, error: "UNSUPPORTED" };
+        fs.writeFileSync(path.join(dir, path.basename(fileOf(entry))), body);
+        entry.size = Buffer.byteLength(body, "utf8");
+        entry.mtime = Date.now();
+        writeIndex(dir, entries);
+        return { ok: true, entry };
+      }
+      let clean = String(name ?? "").replace(/[/\\]/g, "").trim() || "未命名文稿";
+      if (!WRITABLE_TEXT.has(extOf(clean))) clean += ".md";
+      const display = uniqueName(entries, clean);
+      const ext = extOf(display);
+      const newId = "e" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      const file = newId + "." + ext;
+      fs.writeFileSync(path.join(dir, file), body);
+      const entry = { id: newId, name: display, ext, size: Buffer.byteLength(body, "utf8"), mtime: Date.now(), file };
+      entries.push(entry);
+      writeIndex(dir, entries);
+      return { ok: true, entry };
+    } catch {
+      return { ok: false, error: "INTERNAL_ERROR" };
+    }
+  }
+
+  /**
    * **只给主进程用**：拿到条目的磁盘路径（缩略图生成需要真实路径）。
    * 刻意不挂到 preload 上 —— 渲染进程永远拿不到路径。
    */
@@ -472,7 +513,7 @@ function createFileService({ userDataDir }) {
     return { path: path.join(dir, fileOf(entry)), entry };
   }
 
-  return { importPaths, list, rename, remove, read, resolve, copy, move, trash, listTrash, restore, purge, empty };
+  return { importPaths, list, rename, remove, read, writeText, resolve, copy, move, trash, listTrash, restore, purge, empty };
 }
 
 module.exports = { createFileService };

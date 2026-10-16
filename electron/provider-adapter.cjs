@@ -143,4 +143,48 @@ function mapImages(body) {
   }).filter(Boolean);
 }
 
-module.exports = { chat, chatStream, generateImage, mapImages, parseSseChunk, mapUsage, ADAPTER_TYPE: "openai-compatible" };
+/**
+ * 10-16 · 拉取服务商的模型清单（OpenAI 兼容 GET /models）。只回 id 与 owned_by，最多 500 条。
+ */
+async function listModels({ baseUrl, apiKey, signal, timeoutMs = 15000, fetchImpl = fetch }) {
+  const url = String(baseUrl).replace(/\/$/, "") + "/models";
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error("timeout")), timeoutMs);
+  const onAbort = () => controller.abort(signal.reason);
+  if (signal) signal.addEventListener("abort", onAbort, { once: true });
+  try {
+    const res = await fetchImpl(url, {
+      method: "GET",
+      headers: { authorization: "Bearer " + apiKey },
+      signal: controller.signal,
+      redirect: "error",
+    });
+    if (!res.ok) return { ok: false, status: res.status };
+    const body = await res.json().catch(() => null);
+    const data = body && Array.isArray(body.data) ? body.data : Array.isArray(body) ? body : body && Array.isArray(body.models) ? body.models : null;
+    if (!data) return { ok: false, status: 0, protocol: true };
+    const items = data
+      .map((m) => (typeof m === "string" ? { id: m } : m && typeof m === "object" ? { id: String(m.id || m.name || ""), ownedBy: typeof m.owned_by === "string" ? m.owned_by.slice(0, 80) : null } : null))
+      .filter((m) => m && m.id && m.id.length <= 200)
+      .slice(0, 500);
+    return { ok: true, items };
+  } catch (err) {
+    return { ok: false, status: 0, kind: String((err && err.message) || "").includes("timeout") ? "timeout" : "network" };
+  } finally {
+    clearTimeout(timer);
+    if (signal) signal.removeEventListener("abort", onAbort);
+  }
+}
+
+/** 按模型名粗判能力（只作为勾选时的默认值，用户可改；不等于"已验证"）。 */
+function guessCapabilities(id) {
+  const s = String(id).toLowerCase();
+  if (/(image|dall-?e|flux|seedream|stable-?diffusion|sdxl|midjourney|imagen|cogview|wanx|kolors|gpt-image)/.test(s)) return ["image-generation"];
+  if (/(video|seedance|kling|veo|sora|hailuo|wan2|cogvideo|vidu)/.test(s)) return ["video-generation"];
+  if (/(embed|rerank|whisper|tts|speech|audio|moderation)/.test(s)) return [];
+  const caps = ["chat"];
+  if (/(vl|vision|4o|4\.1|gpt-5|gemini|claude|qwen-?vl|glm-4v|o3|o4)/.test(s)) caps.push("vision-input");
+  return caps;
+}
+
+module.exports = { chat, chatStream, generateImage, listModels, guessCapabilities, mapImages, parseSseChunk, mapUsage, ADAPTER_TYPE: "openai-compatible" };

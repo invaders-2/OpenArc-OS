@@ -138,6 +138,35 @@ contextBridge.exposeInMainWorld("openarc", {
    * Renderer 不能指定 userId / role / appId / sessionRef / modelConfig / verification ——
    * 这些都由主进程从当前 authenticated session + 真实 Task Runtime 推导。
    */
+  /**
+   * 天气（10-15）：只能给城市名 / 经纬度，出网 URL 由主进程拼装（固定 Open-Meteo 两个主机）。
+   */
+  /**
+   * 视频剪辑（10-15）：只给条目引用 + 入出点；FFmpeg 参数与输出位置由主进程决定。
+   */
+  video: {
+    status: () => ipcRenderer.invoke("video:status"),
+    probe: (folderId, id) => ipcRenderer.invoke("video:probe", { folderId, id }),
+    export: (payload) => ipcRenderer.invoke("video:export", payload),
+    cancel: () => ipcRenderer.invoke("video:cancel"),
+    onProgress: (callback) => {
+      const listener = (_, event) => callback(event);
+      ipcRenderer.on("video:progress", listener);
+      return () => ipcRenderer.removeListener("video:progress", listener);
+    },
+  },
+  /** 图片声明（10-15）：只给条目引用与声明类型（ai / mix），写入与另存都在主进程。 */
+  image: {
+    declare: (items, kind) => ipcRenderer.invoke("image:declare", { items, kind }),
+  },
+  /** 系统信息（10-15）：版本、平台、磁盘与 OpenArc 数据占用的汇总数字（只读）。 */
+  system: {
+    info: () => ipcRenderer.invoke("system:info"),
+  },
+  weather: {
+    geocode: (name) => ipcRenderer.invoke("weather:geocode", { name }),
+    forecast: (lat, lon) => ipcRenderer.invoke("weather:forecast", { lat, lon }),
+  },
   task: {
     command: (command) => ipcRenderer.invoke("task:command", command),
     onEvent: (callback) => {
@@ -189,6 +218,8 @@ contextBridge.exposeInMainWorld("openarc", {
     trashPurge: (id) => ipcRenderer.invoke("files:trashPurge", { id }),
     trashEmpty: () => ipcRenderer.invoke("files:trashEmpty"),
     read: (folderId, id) => ipcRenderer.invoke("files:read", { folderId, id }),
+    // 文稿：只写 .md/.txt（主进程校验扩展名与 1MB 上限），id 为空即新建
+    writeText: (folderId, id, name, text) => ipcRenderer.invoke("files:writeText", { folderId, id, name, text }),
     thumb: (folderId, id, size) => ipcRenderer.invoke("files:thumb", { folderId, id, size }),
     info: (folderId, id) => ipcRenderer.invoke("files:info", { folderId, id }),
     /** 拖出到系统（Finder/桌面）：fire-and-forget，主进程用原生 startDrag。 */

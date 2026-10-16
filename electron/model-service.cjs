@@ -429,6 +429,31 @@ class ModelService {
   }
   recentCalls(limit = 50) { return this.store.recentCalls(limit); }
 
+  /**
+   * 10-16 · 拉取服务商的模型清单（设置 › 模型与服务商「拉取模型」）。
+   * 需要对该服务商的管理权限；凭据只在主进程内使用，且只发往创建凭据时登记的同源地址。
+   */
+  async listRemoteModels({ context, providerId }) {
+    const provider = this.store.providerById(providerId);
+    if (!provider) return { ok: false, error: domain.ERROR_CODE.INVALID_INPUT };
+    const auth = this.#authorize({ context, action: domain.MODEL_ACTIONS.MANAGE, provider });
+    if (!auth.ok) return auth;
+    if (!provider.credential_ref) return { ok: false, error: domain.ERROR_CODE.CREDENTIAL_MISSING };
+    const cred = this.credentials.resolveInternalSync({ credentialRef: provider.credential_ref });
+    if (!cred.ok) return cred;
+    if (cred.providerOrigin !== new URL(provider.base_url).origin) return { ok: false, error: domain.ERROR_CODE.ENDPOINT_BLOCKED };
+    const r = await adapter.listModels({ baseUrl: provider.base_url, apiKey: cred.secret, fetchImpl: this.fetchImpl, timeoutMs: Math.min(this.timeoutMs, 20000) });
+    if (!r.ok) {
+      const code = r.kind ? domain.normalizeError({ kind: r.kind === "timeout" ? "timeout" : "", network: r.kind === "network" }) : domain.normalizeError({ status: r.status });
+      return { ok: false, error: code };
+    }
+    const existing = new Set(this.store.configsOfOrg(provider.organization_id).filter((c) => c.provider_id === providerId).map((c) => c.remote_model_id));
+    return {
+      ok: true,
+      items: r.items.map((m) => ({ id: m.id, ownedBy: m.ownedBy || null, suggestedCapabilities: adapter.guessCapabilities(m.id), registered: existing.has(m.id) })),
+    };
+  }
+
   async testConnection({ context, configId }) {
     const resolved = this.resolveModel({ context, configId, capability: "chat" });
     if (!resolved.ok) return resolved;

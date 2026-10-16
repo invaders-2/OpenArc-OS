@@ -74,6 +74,8 @@ const MODEL_COMMANDS = Object.freeze([
   "model/list", "model/create", "model/update", "model/setStatus",
   "defaults/get", "defaults/set",
   "model/test",
+  // 10-16：拉取服务商模型清单
+  "provider/models",
   // D5-02：画布只读模型面（唯一入口；真正的生成调用走 canvas:command 的 run，见 canvas-bootstrap）。
   "canvas/models",
 ]);
@@ -106,6 +108,7 @@ function registerModelIpc({ ipcMain, service, identity, isTrusted, hostAppId = H
         case "provider/update": return service.updateProvider({ context, providerId: requireStr(payload.providerId, 120), displayName: asStr(payload.displayName, 200), baseUrl: asStr(payload.baseUrl, 2048), endpointScope: asStr(payload.endpointScope, 30), status: asStr(payload.status, 20), allowLan: !!payload.allowLan, credentialSecret });
         case "provider/setStatus": return service.setProviderStatus({ context, providerId: requireStr(payload.providerId, 120), status: asStr(payload.status, 20) });
         case "provider/delete": return service.deleteProvider({ context, providerId: requireStr(payload.providerId, 120) });
+        case "provider/models": return service.listRemoteModels({ context, providerId: requireStr(payload.providerId, 120) });
         case "credential/status": return service.credentialStatusForProvider({ context, providerId: requireStr(payload.providerId, 120) });
         case "credential/set": return service.setProviderCredential({ context, providerId: requireStr(payload.providerId, 120), secret });
         case "credential/replace": return service.replaceProviderCredential({ context, providerId: requireStr(payload.providerId, 120), secret });

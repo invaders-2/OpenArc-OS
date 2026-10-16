@@ -12,3 +12,8 @@ experiments/d5-03/batch11/verify/runs/
 
 # D5-03 第十二批：真实 Electron 取消验收的临时运行产物（隔离安装 / 数据库 / 日志），不进版本库
 experiments/d5-03/batch12/verify/runs/
+
+# 本地临时目录（数据库备份、探针输出），不进版本库
+_to_delete/
+# 事故现场的会话记录与截图，体积大且含私有会话内容，不进版本库
+docs/incidents/

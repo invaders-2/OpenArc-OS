@@ -30,6 +30,9 @@ const { disposeAppResources } = require("./app-shutdown.cjs");
 const { createDefaultExecutorLauncher } = require("./executor-launcher.cjs");
 const { createOpenArcRuntime } = require("./runtime-boot.cjs");
 const { createFileService } = require("./file-service.cjs");
+const { createWeatherService } = require("./weather-service.cjs");
+const { createVideoService } = require("./video-service.cjs");
+const { declareImage } = require("./xmp-service.cjs");
 
 let win;
 let controller;
@@ -70,7 +73,13 @@ if (!app.isReady()) {
  */
 const devURL = process.env.OA_DEV_SERVER ? new URL(process.env.OA_DEV_SERVER).href : null;
 const devOrigin = devURL ? new URL(devURL).origin : null;
-const uiURL = devURL || pathToFileURL(path.join(__dirname, "../dist/index.html")).href;
+/**
+ * 外壳入口（10-15）：默认加载新壳层 dist/vue.html（Vue，按 10-15 界面原型升级）；
+ * 设 OA_UI=react 回到旧版 dist/index.html。导航白名单 / 可信发送方判定都只认这一个 uiURL，
+ * 两个入口不会同时被信任。
+ */
+const UI_ENTRY = process.env.OA_UI === "react" ? "index.html" : "vue.html";
+const uiURL = devURL || pathToFileURL(path.join(__dirname, "../dist/" + UI_ENTRY)).href;
 
 if (devURL) console.log("[openarc] 开发预览：加载 " + devURL + "（OA_DEV_SERVER 已设置）");
 
@@ -92,6 +101,7 @@ const NATIVE_RESOURCES = {
   "siri-blob": "/System/Library/PrivateFrameworks/SiriUI.framework/Versions/A/Resources/Siri Blob.mov",
 };
 const NATIVE_TYPES = { ".mov": "video/quicktime", ".mp4": "video/mp4", ".m4v": "video/x-m4v" };
+const MEDIA_TYPES = { ...NATIVE_TYPES, ".webm": "video/webm", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".wav": "audio/wav", ".aac": "audio/aac", ".ogg": "audio/ogg", ".flac": "audio/flac" };
 
 /**
  * D5-02 · 画布 bundle 的只读协议 handler。
@@ -511,6 +521,18 @@ app.whenReady().then(async () => {
       const parts = url.pathname.split("/").filter(Boolean);
       const hit = files.resolve(decodeURIComponent(parts[0] || ""), decodeURIComponent(parts[1] || ""));
       if (!hit) return new Response("Not Found", { status: 404 });
+      // 视频 / 音频（10-15 视频剪辑预览要能拖动进度）：同 native 分支自己回 Range；其它类型照旧。
+      const mediaType = MEDIA_TYPES[path.extname(hit.path).toLowerCase()];
+      if (mediaType) {
+        const size = fs.statSync(hit.path).size;
+        const range = /^bytes=(\d*)-(\d*)$/.exec(request.headers.get("range") || "");
+        const start = range?.[1] ? Number(range[1]) : 0;
+        const end = range?.[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+        if (start > end) return new Response("Range Not Satisfiable", { status: 416 });
+        const headers = { "Content-Type": mediaType, "Accept-Ranges": "bytes", "Content-Length": String(end - start + 1) };
+        if (range) headers["Content-Range"] = `bytes ${start}-${end}/${size}`;
+        return new Response(Readable.toWeb(fs.createReadStream(hit.path, { start, end })), { status: range ? 206 : 200, headers });
+      }
       return await net.fetch(pathToFileURL(hit.path).toString());
     } catch {
       return new Response("Error", { status: 500 });
@@ -628,6 +650,145 @@ app.whenReady().then(async () => {
   ipcMain.handle("files:trashEmpty", async (e) => {
     if (!trusted(e)) throw Error("Forbidden");
     return files.empty();
+  });
+  // 视频剪辑（10-15）：本机 FFmpeg。渲染层只给条目引用 + 入出点，路径在这里解析、媒体信息在服务里重新探测。
+  const video = createVideoService();
+  ipcMain.handle("video:status", async (e) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    return video.status();
+  });
+  ipcMain.handle("video:probe", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    const hit = files.resolve(String(payload?.folderId ?? ""), String(payload?.id ?? ""));
+    if (!hit) return { ok: false, error: "NOT_FOUND" };
+    return video.probePath(hit.path);
+  });
+  ipcMain.handle("video:export", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    const outFolder = String(payload?.folderId ?? "");
+    const refs = [];
+    for (const c of Array.isArray(payload?.clips) ? payload.clips.slice(0, 51) : []) {
+      const hit = files.resolve(String(c?.folderId ?? ""), String(c?.id ?? ""));
+      if (!hit) return { ok: false, error: "NOT_FOUND" };
+      refs.push({ path: hit.path, start: Number(c?.start), end: Number(c?.end) });
+    }
+    const send = (ev) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("video:progress", ev); };
+    const r = await video.exportClips(refs, {
+      resolution: String(payload?.resolution ?? "source"),
+      name: String(payload?.name ?? ""),
+      onProgress: (ratio) => send({ ratio }),
+    });
+    if (!r.ok) return r;
+    try {
+      const imported = files.importPaths(outFolder, [r.outPath]);
+      const entry = imported.ok && imported.added && imported.added[0];
+      return entry ? { ok: true, entry, duration: r.duration } : { ok: false, error: "IMPORT_FAILED" };
+    } finally {
+      try { fs.rmSync(r.dir, { recursive: true, force: true }); } catch { /* 临时目录清理失败无所谓 */ }
+    }
+  });
+  ipcMain.handle("video:cancel", async (e) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    return video.cancel();
+  });
+  // 图片声明（10-15）：给访达里的 PNG / JPEG 写入 IPTC 数字来源类型（XMP），原图不动、另存副本到同一文件夹。
+  ipcMain.handle("image:declare", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    const kind = payload?.kind === "mix" ? "mix" : payload?.kind === "ai" ? "ai" : null;
+    if (!kind) return { ok: false, error: "INVALID_INPUT" };
+    const items = Array.isArray(payload?.items) ? payload.items.slice(0, 100) : [];
+    const results = [];
+    for (const it of items) {
+      const folderId = String(it?.folderId ?? "");
+      const hit = files.resolve(folderId, String(it?.id ?? ""));
+      if (!hit) {
+        results.push({ id: it?.id, ok: false, error: "NOT_FOUND" });
+        continue;
+      }
+      let dir = null;
+      try {
+        const ext = path.extname(hit.path).slice(1).toLowerCase();
+        const r = declareImage(fs.readFileSync(hit.path), ext, kind);
+        if (!r.ok) {
+          results.push({ id: it.id, ok: false, error: r.error });
+          continue;
+        }
+        const base = String(hit.entry.name || "图片").replace(/\.[^.]+$/, "").replace(/[\\/:*?"<>|]/g, "").slice(0, 80) || "图片";
+        dir = fs.mkdtempSync(path.join(app.getPath("temp"), "openarc-declare-"));
+        const out = path.join(dir, base + "（来源声明）." + ext);
+        fs.writeFileSync(out, r.buffer);
+        const imp = files.importPaths(folderId, [out]);
+        const entry = imp.ok && imp.added && imp.added[0];
+        results.push(entry ? { id: it.id, ok: true, entry, replaced: !!r.replaced } : { id: it.id, ok: false, error: "IMPORT_FAILED" });
+      } catch {
+        results.push({ id: it.id, ok: false, error: "INTERNAL_ERROR" });
+      } finally {
+        if (dir) try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+      }
+    }
+    return { ok: true, results };
+  });
+  // 系统信息 / 磁盘空间（10-15，系统设置用）：只读；只回汇总数字，不回路径。
+  ipcMain.handle("system:info", async (e) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    const os = require("node:os");
+    const dataDir = app.getPath("userData");
+    let disk = null;
+    try {
+      const st = await fs.promises.statfs(dataDir);
+      disk = { total: st.blocks * st.bsize, free: st.bavail * st.bsize };
+    } catch {
+      disk = null;
+    }
+    // OpenArc 数据占用：逐层累加文件大小，最多 20000 个条目，超出如实标出
+    let used = 0;
+    let count = 0;
+    let truncated = false;
+    const walk = async (dir) => {
+      let list = [];
+      try { list = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return; }
+      for (const d of list) {
+        if (count >= 20000) { truncated = true; return; }
+        count += 1;
+        const full = path.join(dir, d.name);
+        if (d.isDirectory()) await walk(full);
+        else if (d.isFile()) { try { used += (await fs.promises.stat(full)).size; } catch { /* ignore */ } }
+      }
+    };
+    await walk(dataDir);
+    return {
+      ok: true,
+      appVersion: app.getVersion(),
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+      node: process.versions.node,
+      platform: process.platform,
+      arch: process.arch,
+      osRelease: os.release(),
+      cpus: os.cpus().length,
+      memory: os.totalmem(),
+      disk,
+      data: { used, truncated },
+    };
+  });
+  // 天气（10-15）：只经主进程访问 Open-Meteo 两个固定主机；是否联网由用户在天气应用里开启。
+  const weather = createWeatherService({ fetchImpl: (url, opts) => net.fetch(url, opts) });
+  ipcMain.handle("weather:geocode", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    return weather.geocode(String(payload?.name ?? ""));
+  });
+  ipcMain.handle("weather:forecast", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    return weather.forecast(payload?.lat, payload?.lon);
+  });
+  ipcMain.handle("files:writeText", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    return files.writeText(
+      String(payload?.folderId ?? ""),
+      payload?.id ? String(payload.id) : "",
+      String(payload?.name ?? ""),
+      typeof payload?.text === "string" ? payload.text : "",
+    );
   });
   ipcMain.handle("files:read", async (e, payload) => {
     if (!trusted(e)) throw Error("Forbidden");
