@@ -24,7 +24,7 @@ import {
  * 协议 = OpenArc 和各家模型服务「怎么说话」：对话 / 生图 / 视频 / 改图的接口、工作流与模型 profile。
  *   · 列表：model:command protocol/list（72 条，模型协议 + 供应商协议，含是否可执行与前提）；
  *   · 详情：protocol/get（操作、工作流、模型 profile 的真实声明；legacy 协议没有声明体，如实显示）；
- *   · 只读：协议的校验 / 保存 / 试执行仍由后端保留，这里不提供入口；凭据在「系统设置 › 模型与服务商」。
+ *   · 只读：协议的校验 / 保存入口在「系统设置 › 模型与服务商 › 协议设置」，这里只查看；凭据也在那里。
  * 投影逻辑复用 src/settings/modelProtocolLogic.ts（与旧 React 页同一份、同一组单测）。
  */
 const shell = useShellStore();
@@ -124,7 +124,7 @@ onMounted(load);
       <button v-for="s in (['ok', 'cond', 'off'] as const)" :key="s" class="split-nav" :aria-current="status === s ? 'true' : undefined" :data-protocol-status="s" @click="status = status === s ? 'all' : s">
         <component :is="STATUS_ICON[s]" :size="16" /> <span class="split-nav-label">{{ STATUS_LABEL[s] }}</span><small class="planned-count">{{ count((it) => statusOf(it) === s) }}</small>
       </button>
-      <p class="planned-note">协议是 OpenArc 和各家模型服务的「说话方式」。密钥和服务商在「系统设置 › 模型与服务商」里配置。</p>
+      <p class="planned-note">协议是 OpenArc 和各家模型服务的「说话方式」。密钥、服务商，以及协议的自定义、校验与保存在「系统设置 › 模型与服务商」里配置。</p>
     </nav>
 
     <div class="split-main pc-main">

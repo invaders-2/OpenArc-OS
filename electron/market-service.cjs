@@ -1,12 +1,18 @@
 /**
  * B7c · 本地市场装配 + market:command 分发（唯一执行入口）。
  *
- * 只做**本地清单**（任务书 item 4）：
+ * 本地清单部分（任务书 item 4）：
  *   · 从"随包目录"或"本地目录"读取 catalog.json（默认文件名；可注入）；
  *   · 列出可用 App 与技能包；清单结构非法 → MARKET_MANIFEST_INVALID；
- *   · **不联网、不下载、不安装** —— 本文件没有 fetch / http / net，也不含任何 api.dx-os.com。
+ *   · 这一部分**不联网、不下载、不安装** —— 本文件没有 fetch / http / net，也不含任何 api.dx-os.com。
  *
- * OUT（任务书硬约束，一律不引入）：云发布 / 审核 / 灰度 / 下载 / 远端更新；
+ * Stage 1 新增：market/update/* 命令族在此**委托**注入的 updateService
+ *   （market-update-service.cjs；本文件仍不发网络请求，网络/解压/落盘全在 updateService 内）。
+ *   未注入 updateService 时回稳定的 MARKET_UPDATE_NOT_READY，绝不假装可用。
+ *   泛化后 status/check/install/rollback 的 payload 可带任意已注册 appId（缺省 canvas）；
+ *   委托层原样透传 payload，不解释 appId —— 校验/发现/安装目录都在 updateService 内按 appId 处理。
+ *
+ * OUT（任务书硬约束，一律不引入）：云发布 / 审核 / 灰度；
  *   源 marketplace.ts:1 的 DEFAULT_MARKETPLACE_API_BASE_URL 及其 request()/marketplaceExplore()
  *   /marketplaceAppDetail() 全部不做（本地部分只有纯规范化，见 market-domain.cjs）。
  *
@@ -22,6 +28,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const marketDomain = require("./market-domain.cjs");
+const marketUpdateDomain = require("./market-update-domain.cjs");
 const { resolveDxosPaths } = require("./dxos-foundation-paths.cjs");
 
 const HOST_APP_ID = "market-center";
@@ -37,6 +44,8 @@ function createMarketBundle(options = {}) {
   const manifestName = asStr(options.manifestName, 80) || DEFAULT_MANIFEST_NAME;
   const clock = typeof options.clock === "function" ? options.clock : () => Date.now();
   const logger = typeof options.logger === "function" ? options.logger : null;
+  // Stage 1：market/update/* 的真实执行端（market-update-service.cjs 的产物）；缺省即未装配。
+  const updateService = options.updateService && typeof options.updateService.execute === "function" ? options.updateService : null;
 
   function candidateDirs() {
     const dirs = [];
@@ -119,6 +128,10 @@ function createMarketBundle(options = {}) {
     try {
       const sessionRef = context && context.sessionRef ? context.sessionRef : null;
       if (!sessionRef) return { ok: false, error: marketDomain.MARKET_ERR_UNAUTHENTICATED, detail: "market:command 需要已认证会话" };
+      if (marketUpdateDomain.isMarketUpdateCommand(command)) {
+        if (!updateService) return { ok: false, error: marketUpdateDomain.MARKET_UPDATE_ERR_NOT_READY, detail: "在线更新服务尚未装配" };
+        return await updateService.execute(command, payload, context);
+      }
       if (!marketDomain.isMarketCommand(command)) return marketDomain.normalizeMarketError(marketDomain.marketCommandNotAllowed(command));
       switch (command) {
         case "market/catalog": {
@@ -157,6 +170,9 @@ function createMarketBundle(options = {}) {
     loadCatalog,
     catalogStatus,
     execute,
+    // Stage 1：只读暴露更新命令表 / 是否已装配（主进程内部与测试用；不过 IPC）。
+    updateCommands: marketUpdateDomain.MARKET_UPDATE_COMMANDS.slice(),
+    updateService,
   };
 }
 

@@ -101,6 +101,11 @@ interface OpenArcBridge {
   developer?: OpenArcCommandBridge;
   integration?: OpenArcCommandBridge;
   market?: OpenArcCommandBridge;
+  /**
+   * Stage 1 在线更新桥（第 39 个顶层键，形状同 preload.cjs）：
+   * 只有一条 command({command,payload})，派发 market/update/*（status/check/install/rollback/sources/source/set）。
+   */
+  marketUpdate?: OpenArcCommandBridge;
   platform?: OpenArcCommandBridge;
   /** 浏览器（10-15 迁入新壳层用到的四条，形状同 preload.cjs） */
   navigate?: (windowId: string, url: string, tabId?: string) => Promise<unknown>;

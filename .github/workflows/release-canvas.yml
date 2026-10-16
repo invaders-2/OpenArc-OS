@@ -1,0 +1,189 @@
+name: Release Canvas
+
+# 云端打包 + Ed25519 签名 + 发布 GitHub Release；可选同步 ModelScope 更新源。
+#
+# 密钥一律走 GitHub Secret：
+#   OA_UPDATE_SIGNING_KEY  Ed25519 私钥（PEM），必须与 resources/app-update-keys.json 的 canvas 公钥配对
+#   MODELSCOPE_TOKEN       ModelScope 访问令牌；未配置时同步步骤跳过并明确提示「更新源未同步」，不算失败
+#
+# 本机复现（CI 里用的就是这几条命令，没有只有 CI 才跑得通的隐藏魔法）：
+#   npm ci && npm run build
+#   node scripts/oa-canvas-package.mjs --check-key --keys-file resources/app-update-keys.json
+#   node scripts/oa-canvas-package.mjs --kind static-web --source dist/novai-canvas --version <ver> --keys-file resources/app-update-keys.json
+#   node scripts/oa-canvas-package.mjs --verify dist-updates/canvas-<ver>.zip --keys-file resources/app-update-keys.json
+#   node scripts/oa-modelscope-sync.mjs --dry-run
+
+on:
+  push:
+    tags:
+      - "canvas-v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "发布版本（如 0.01；支持两段/带前导零，会规范化为 tag canvas-v<version>）"
+        required: true
+        type: string
+      notes:
+        description: "Release 说明（可选）"
+        required: false
+        type: string
+
+# 创建/上传 Release 需要写权限；其余默认只读。
+permissions:
+  contents: write
+
+concurrency:
+  group: release-canvas-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: 打包 + 签名 + 发布 GitHub Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node（与仓库本机一致：22）
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: 安装依赖
+        run: |
+          set -euo pipefail
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: 构建（tsc --noEmit && vite build → dist/novai-canvas）
+        run: npm run build
+
+      - name: 解析发布版本
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="$INPUT_VERSION"
+          else
+            VERSION="${REF_NAME#canvas-v}"
+          fi
+          VERSION="$(printf '%s' "$VERSION" | tr -d '[:space:]')"
+          if [ -z "$VERSION" ]; then
+            echo "::error::解析不到发布版本（tag=$REF_NAME / input=$INPUT_VERSION）"
+            exit 1
+          fi
+          echo "value=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "发布版本：$VERSION（tag canvas-v$VERSION）"
+
+      - name: 写入签名私钥（Secret → 临时文件，0600，不回显）
+        env:
+          OA_UPDATE_SIGNING_KEY: ${{ secrets.OA_UPDATE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${OA_UPDATE_SIGNING_KEY:-}" ]; then
+            echo "::error::缺少 Secret OA_UPDATE_SIGNING_KEY：无法签名发布"
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/oa-keys"
+          printf '%s' "$OA_UPDATE_SIGNING_KEY" > "$RUNNER_TEMP/oa-keys/update-signing.key"
+          chmod 600 "$RUNNER_TEMP/oa-keys/update-signing.key"
+
+      - name: 密钥指纹校验（与 resources/app-update-keys.json 配对，不配对即失败）
+        run: node scripts/oa-canvas-package.mjs --check-key --key-file "$RUNNER_TEMP/oa-keys/update-signing.key" --keys-file resources/app-update-keys.json
+
+      - name: 打包 + 签名
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+          NOTES: ${{ inputs.notes }}
+        run: |
+          set -euo pipefail
+          ARGS=(--kind static-web --source dist/novai-canvas --version "$VERSION"
+                --key-file "$RUNNER_TEMP/oa-keys/update-signing.key"
+                --keys-file resources/app-update-keys.json)
+          if [ -n "${NOTES:-}" ]; then ARGS+=(--notes "$NOTES"); fi
+          node scripts/oa-canvas-package.mjs "${ARGS[@]}"
+
+      - name: 用仓库公钥复核产物（验签 + 逐文件 sha256）
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: node scripts/oa-canvas-package.mjs --verify "dist-updates/canvas-$VERSION.zip" --keys-file resources/app-update-keys.json
+
+      - name: 发布 GitHub Release（tag canvas-v<version>）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          set -euo pipefail
+          TAG="canvas-v$VERSION"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "无限画布 v$VERSION" --notes "无限画布 v$VERSION（GitHub Actions 云端构建 + Ed25519 签名）"
+          fi
+          gh release upload "$TAG" "dist-updates/canvas-$VERSION.zip" "dist-updates/updates/canvas/latest.json" --clobber
+          gh release view "$TAG" --json tagName,isDraft,assets --jq '{tag:.tagName,draft:.isDraft,assets:[.assets[].name]}'
+
+      - name: 保存更新包（供 ModelScope 同步 job）
+        uses: actions/upload-artifact@v4
+        with:
+          name: canvas-updates
+          path: dist-updates/updates
+          if-no-files-found: error
+
+  sync-modelscope:
+    name: 同步 ModelScope 更新源（可选）
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: 下载更新包
+        uses: actions/download-artifact@v4
+        with:
+          name: canvas-updates
+          path: dist-updates/updates
+
+      - name: 检测 MODELSCOPE_TOKEN 是否配置
+        id: token
+        env:
+          MODELSCOPE_TOKEN: ${{ secrets.MODELSCOPE_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "${MODELSCOPE_TOKEN:-}" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 产物预检（不联网，校验 latest.json 与 zip 的 sha256）
+        run: node scripts/oa-modelscope-sync.mjs --dry-run --updates dist-updates/updates
+
+      - name: 明确提示更新源未同步
+        if: steps.token.outputs.present != 'true'
+        env:
+          VERSION: ${{ needs.package.outputs.version }}
+        run: |
+          echo "::warning::更新源未同步：未配置 MODELSCOPE_TOKEN Secret，ModelScope（bllack/OpenArc-OS）未同步 v$VERSION。"
+          {
+            echo "## ⚠️ 更新源未同步"
+            echo ""
+            echo "未配置 \`MODELSCOPE_TOKEN\` Secret，ModelScope（\`bllack/OpenArc-OS\`）未同步 v$VERSION。"
+            echo ""
+            echo "应用默认更新源是 ModelScope，因此应用内「检查更新」看不到本版本；GitHub Release 已发布（可在应用里显式切到 github-releases 源）。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 同步到 ModelScope（配置了 token 才执行）
+        if: steps.token.outputs.present == 'true'
+        env:
+          MODELSCOPE_TOKEN: ${{ secrets.MODELSCOPE_TOKEN }}
+          VERSION: ${{ needs.package.outputs.version }}
+        run: node scripts/oa-modelscope-sync.mjs --version "$VERSION" --updates dist-updates/updates

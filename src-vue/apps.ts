@@ -17,36 +17,44 @@ export interface AppEntry {
   id: string;
   name: string;
   icon: string;
+  /**
+   * 随包内置版本（当前 OpenArc OS 构建里编译进来的应用代码版本）。
+   * 取值依据：本期所有内置应用与 package.json 的构建版本对齐（0.1.0）；画布已单独发过包
+   * （dist-updates/canvas-0.1.0.zip），内置版本同样从 0.1.0 起算。此后按应用各自的发布节奏递增。
+   * 与后端 electron/market-update-domain.cjs 的 APP_BUILTIN_VERSIONS 必须逐项一致
+   * （tests/dxos-market-all-apps.test.mjs 强制核对）。
+   */
+  version: string;
 }
 
 export const APPS: readonly AppEntry[] = [
-  { id: "home", name: "应用中心", icon: "apps" },
-  { id: "browser", name: "浏览器", icon: "safari" },
-  { id: "files", name: "访达", icon: "finder" },
-  { id: "resource-library", name: "资源库", icon: "finder" },
-  { id: "canvas", name: "AI Studio", icon: "freeform" },
-  { id: "projects", name: "项目", icon: "folder" },
-  { id: "organization", name: "组织", icon: "settings" },
-  { id: "skills", name: "Skill 中心", icon: "shortcuts" },
-  { id: "mcp-center", name: "MCP 中心", icon: "sharing" },
+  { id: "home", name: "应用中心", icon: "apps", version: "0.1.0" },
+  { id: "browser", name: "浏览器", icon: "safari", version: "0.1.0" },
+  { id: "files", name: "访达", icon: "finder", version: "0.1.0" },
+  { id: "resource-library", name: "资源库", icon: "finder", version: "0.1.0" },
+  { id: "canvas", name: "AI Studio", icon: "freeform", version: "0.1.0" },
+  { id: "projects", name: "项目", icon: "folder", version: "0.1.0" },
+  { id: "organization", name: "组织", icon: "settings", version: "0.1.0" },
+  { id: "skills", name: "Skill 中心", icon: "shortcuts", version: "0.1.0" },
+  { id: "mcp-center", name: "MCP 中心", icon: "sharing", version: "0.1.0" },
   // 10-16：协议中心（模型 / 供应商协议，原「模型与服务商 › 协议」标签独立成应用）
-  { id: "protocols", name: "协议中心", icon: "protocols" },
-  { id: "settings", name: "系统设置", icon: "settings" },
-  { id: "trash", name: "回收站", icon: "trash" },
+  { id: "protocols", name: "协议中心", icon: "protocols", version: "0.1.0" },
+  { id: "settings", name: "系统设置", icon: "settings", version: "0.1.0" },
+  { id: "trash", name: "回收站", icon: "trash", version: "0.1.0" },
   // ── 10-15 按界面原型补齐的应用（后台未接入的先显示真实空态，不放演示数据）──
-  { id: "chat", name: "对话", icon: "messages" },
-  { id: "automation", name: "自动化", icon: "clock" },
-  { id: "market", name: "应用市场", icon: "app-store" },
-  { id: "calendar", name: "日历", icon: "calendar" },
-  { id: "notes", name: "文稿", icon: "text-editor" },
-  { id: "photos", name: "相册", icon: "photos" },
-  { id: "music", name: "音乐", icon: "music" },
-  { id: "weather", name: "天气", icon: "weather" },
-  { id: "video", name: "视频剪辑", icon: "video" },
-  { id: "dev", name: "开发者", icon: "terminal" },
-  { id: "declare", name: "图片声明", icon: "image-tag" },
+  { id: "chat", name: "对话", icon: "messages", version: "0.1.0" },
+  { id: "automation", name: "自动化", icon: "clock", version: "0.1.0" },
+  { id: "market", name: "应用市场", icon: "app-store", version: "0.1.0" },
+  { id: "calendar", name: "日历", icon: "calendar", version: "0.1.0" },
+  { id: "notes", name: "文稿", icon: "text-editor", version: "0.1.0" },
+  { id: "photos", name: "相册", icon: "photos", version: "0.1.0" },
+  { id: "music", name: "音乐", icon: "music", version: "0.1.0" },
+  { id: "weather", name: "天气", icon: "weather", version: "0.1.0" },
+  { id: "video", name: "视频剪辑", icon: "video", version: "0.1.0" },
+  { id: "dev", name: "开发者", icon: "terminal", version: "0.1.0" },
+  { id: "declare", name: "图片声明", icon: "image-tag", version: "0.1.0" },
   // 10-16 对齐 DX OS「视频工坊」：剧本 → 视觉设定 → 分镜 → 出图 → 成片（media/short-drama/*）
-  { id: "drama", name: "短剧工坊", icon: "drama" },
+  { id: "drama", name: "短剧工坊", icon: "drama", version: "0.1.0" },
 ];
 
 /**

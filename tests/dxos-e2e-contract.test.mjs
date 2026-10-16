@@ -3,7 +3,7 @@
  *
  * 只做一件事：把 experiments/dxos-e2e/run-all.mjs 里声明的 CONTRACT / WHITELISTS
  * 与**产品真实导出**逐条对齐，防止探针的域清单 / 命令清单与 preload / bootstrap 漂移：
- *   · 域清单（29 个顶层键 + 每个键的真实形状）来自 electron/preload.cjs —— 在一个 vm 沙箱里
+ *   · 域清单（39 个顶层键 + 每个键的真实形状）来自 electron/preload.cjs —— 在一个 vm 沙箱里
  *     用假的 electron 模块执行真实 preload，读取 contextBridge.exposeInMainWorld("openarc", …)
  *     实际暴露出来的对象（不是正则猜的）；
  *   · 命令清单来自各 domain / bootstrap 的真实导出（AGENT_COMMANDS / MODEL_COMMANDS / …）；
@@ -74,13 +74,13 @@ function loadWhitelist(exportName) {
   return Array.isArray(value) ? value.slice() : Object.keys(value);
 }
 
-test("preload 真实暴露的顶层键恰为 29，且与探针契约逐字一致", () => {
+test("preload 真实暴露的顶层键恰为 39，且与探针契约逐字一致", () => {
   const { api, exposedNames } = loadExposedPreload();
   assert.deepEqual(exposedNames, ["openarc"], "preload 只应 exposeInMainWorld openarc");
   assert.ok(api && typeof api === "object", "openarc 必须是对象");
   const keys = Object.keys(api);
-  assert.equal(keys.length, 29, "顶层键必须恰为 29（当前 " + keys.length + "）");
-  assert.equal(new Set(keys).size, 29, "顶层键不得重复");
+  assert.equal(keys.length, 39, "顶层键必须恰为 39（当前 " + keys.length + "）");
+  assert.equal(new Set(keys).size, 39, "顶层键不得重复");
   assert.deepEqual(keys, CONTRACT.topLevel.map((entry) => entry.key), "探针 CONTRACT.topLevel 顺序/集合必须与 preload 真实导出一致");
 });
 
@@ -192,13 +192,25 @@ test("trusted 边界：main.cjs trusted() 双条件与 preload 无原始能力�
     { endpoint: "mcp:command", module: "electron/mcp-bootstrap.cjs" },
     { endpoint: "canvas:command", module: "electron/canvas-bootstrap.cjs" },
     { endpoint: "task:command", module: "electron/task-bootstrap.cjs" },
+    // 0.6.1 新增五域（独立通道；并入 canvas:command / platform:command 需改冻结白名单，见 main.cjs 注册块注释）。
+    { endpoint: "systemFonts:command", module: "electron/system-fonts-bootstrap.cjs" },
+    { endpoint: "ocr:command", module: "electron/ocr-bootstrap.cjs" },
+    { endpoint: "fileTransfer:command", module: "electron/file-transfer-bootstrap.cjs" },
+    { endpoint: "codexCanvas:command", module: "electron/codex-canvas-bootstrap.cjs" },
+    { endpoint: "desktop:command", module: "electron/local-proxy-bootstrap.cjs" },
+    // 0.6.2 新增三域（独立通道；命令表即各域 domain 的冻结白名单）。
+    { endpoint: "photos:command", module: "electron/photos-bootstrap.cjs" },
+    { endpoint: "photocraft:command", module: "electron/photocraft-bootstrap.cjs" },
+    { endpoint: "appExchange:command", module: "electron/app-exchange-bootstrap.cjs" },
+    // CLI 域（对齐 DX OS 0.6.1 /api/cli/*；独立通道，命令表即 cli-domain.cjs 的冻结白名单）。
+    { endpoint: "cli:command", module: "electron/cli-bootstrap.cjs" },
   ];
   for (const { endpoint, module: rel } of CHANNEL_REGISTRATIONS) {
     const abs = path.join(ROOT, rel);
     assert.ok(fs.existsSync(abs), "接线模块不存在：" + rel);
     assert.ok(fs.readFileSync(abs, "utf8").includes(endpoint), rel + " 未注册命令通道 " + endpoint);
   }
-  for (const registrar of ["registerIdentityIpc", "registerMcpIpc", "registerCanvasIpc", "registerTaskIpc", "registerSkillIpc", "registerAgentIpc", "registerMediaIpc", "registerAutomationIpc", "registerPlatformIpc", "registerDeveloperIpc", "registerIntegrationIpc", "registerMarketIpc"]) {
+  for (const registrar of ["registerIdentityIpc", "registerMcpIpc", "registerCanvasIpc", "registerTaskIpc", "registerSkillIpc", "registerAgentIpc", "registerMediaIpc", "registerAutomationIpc", "registerPlatformIpc", "registerDeveloperIpc", "registerIntegrationIpc", "registerMarketIpc", "registerSystemFontsIpc", "registerOcrIpc", "registerFileTransferIpc", "registerCodexCanvasIpc", "registerLocalProxyIpc", "registerPhotosIpc", "registerPhotocraftIpc", "registerAppExchangeIpc", "registerCliIpc"]) {
     assert.ok(main.includes(registrar), "main.cjs 未装配 " + registrar);
   }
 });
