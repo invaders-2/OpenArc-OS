@@ -2266,3 +2266,26 @@ UI E2E、GPU 性能 —— 共 14 项，均未取得证据。清单清空前 D1-
 **遗留（不在本批范围）**：`experiments/d5-01/visibility-e2e.mjs:44` 的 **2400 字符截断仍在**（`record()` 里 `actual: String(actual ?? "").slice(0, 2400)`，使门禁自身产物无法完整回溯 `V11` 最后一落点，须依赖只读旁路 `verify/captured/payload-001-2955.json`）—— 本批**不改，另批修**（提高上限或按落点分段截断）；batch15 登记的其余上游遗留（9 个陈旧 `data-app-id` 探针、`browser-e2e.mjs:487` 的 `waitView("/cookie")` 脆弱点等）**一律未动**。**`D5-03` 整体仍 = `PARTIAL`** —— 本批只补齐 batch15 的**证据归档**，未闭环任何新产品 / 测试范围事项，整体判定**不因本批改变**。
 
 - 后续提交更正：归档补充说明中「合计 41 项」的算术笔误已更正为 **42**（38 产物 + 清单 + 补充说明 + 归档前确认输出 + PROGRESS.md），并把独立验收报告 `verify/BATCH16-VERIFY-REPORT.md` 一并入档。
+
+# UI 升级 · macOS 27 外观 + 原型应用补齐（Vue 壳层）· 2026-10-15（未提交）
+
+**范围**：把 Vue 壳层（`src-vue/`，入口 `vue.html`，`electron/main.cjs` 默认改为加载它；`OA_UI=react` 仍可回到旧入口）按界面原型升级为 macOS 27 风格，并把原型里的应用全部接上真实数据 / 真实能力。**全部改动未 commit**，改动前的主进程文件备份在 `_to_delete/backup-*`。
+
+**外观**：tokens.css 换 macOS 27 中性色（浅 / 深同步）；侧栏卡片 `--sidebar-rgb` 246/44、选中 224/64；窗口正文统一实色；所有搜索框无线框（`.ds-search:focus-within` 只加深底色）；顶栏颜色随壁纸明暗；AI Studio 窗口去掉标题条底框（画布铺到窗口顶边，红绿灯浮在画布上，画布页顶部工具条经 `openarc-canvas-guard.js` 下移 44px；深浅色经上游 `studio-theme` 消息同步给画布帧）。
+
+**新应用（均无演示数据）**：
+* 文稿 —— 访达里的 .md/.txt，自动保存；新增主进程 `files:writeText`（只允许 md/txt、≤1MB、重名加后缀）。
+* 音乐 —— 播放访达里的音频；`openarc-file://media` 对音视频改为自己回 Range（可拖动、无 12MB 上限）。
+* 日历 —— 月视图 + 本机日程（localStorage `oa-calendar-events`）。
+* 开发者 —— 运行环境 / 窗口域实时状态 / 渲染进程错误日志（`src-vue/devlog.ts`）。
+* 对话 —— 直接用 task 桥（task/list、task/get、task/run、task/appendStep），与全局 AI 共用任务记录。
+* 自动化 —— 定时 / 每周 / 间隔 / 手动触发一个普通任务（`src-vue/automation-runtime.ts`）；只在应用运行时触发、错过不补跑；「文件变化」触发未接入。
+* 应用市场 —— 本机应用目录 + 加入 / 移出程序坞；第三方上架未接入。
+* 天气 —— Open-Meteo，经主进程 `electron/weather-service.cjs`（固定两个主机、渲染层仍 `connect-src 'none'`），用户在应用内明确开启联网后才请求。
+* 视频剪辑 —— 片段拼接 + 入出点 + 本机 FFmpeg 导出 MP4（`electron/video-service.cjs`，参数模板固定、可取消，成片导入桌面「视频剪辑」文件夹）。
+
+**验证**：`vue-tsc` / `vite build` / `tsc` 通过；新增 `tests/file-service-writetext.test.mjs`(2)、`tests/weather-service.test.mjs`(3)、`tests/video-service.test.mjs`(3) 全过；`window-manager`(17)、`d5-03-auth-error-contrast`(5)、`file-service-trash`(11)、`folder-trash`(11)、`governance-security`(4)、`side-effect-c4-gates`(19) 全过。各新应用在 Playwright（mock 桥）下浅 / 深色截图检查；天气在真机 Node 上实测 Open-Meteo 返回；视频在真机 FFmpeg 7.1.1 上实测导出（横屏有声 + 竖屏无声 → 720p，时长正确）；真机 app 截图确认 AI Studio 顶部无底框。**未验证**：真机上的登录 / 锁屏、浏览器原生视图遮挡、对话与自动化对真实模型的完整回路；全量 `npm test` 在真机上 = **1443 tests / 1443 pass / 0 fail**（日志 `_to_delete/npm-test.log`）。
+
+**续（同日）**：窗口拖动 / 缩放补齐（Vue 壳层此前缺手势：标题栏拖动、双击最大化、右下角缩放、分栏工具条拖动，口径同 React `startDrag/startResize`）；系统设置按原型重排（侧栏账户行 + 分组导航、顶栏小标题、分组卡片 + 小节标题；新拆「账户」页；「模型 / AI」中文化并改为卡片式，`data-d4-01-*` 钩子全部保留）；各应用首开尺寸取原型 w/h。新增：
+* Skill 中心 —— 「我的技能」= 桌面「Skill」文件夹里的 SKILL.md（Agent Skills frontmatter 格式），新建 / 编辑 / 移到回收站 / 从访达导入；「已安装」启停（只影响新任务）；「试运行」以技能内容发起普通任务；市场目录未接入，如实空态。
+* 图片声明 —— `electron/xmp-service.cjs` 为 PNG（iTXt）/ JPEG（APP1）写入 IPTC DigitalSourceType（XMP），原图不动、另存副本；新增 `tests/xmp-service.test.mjs`(3)；图标 `image-tag.png` 取 WhiteSur `eog.svg`（已登记 ICONS-SOURCE.md）。
