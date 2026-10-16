@@ -127,7 +127,7 @@ function videoTimeline(assetId, overrides = {}) {
 
 // ── ⓪ 迁移 v24（只新增表 / 幂等 / 高版本拒开 / 失败整级回滚） ─────────────
 test("迁移 v24：v23 老库升到 24、video_ 表只新增、重放幂等、高版本拒开、失败整级回滚", () => {
-  assert.equal(SCHEMA_VERSION, 26);
+  assert.equal(SCHEMA_VERSION, 28);
   const dir = tempDir("dxos-media-mig-");
   const file = path.join(dir, "identity.db");
   const raw = buildDb(file, 23);
@@ -136,21 +136,21 @@ test("迁移 v24：v23 老库升到 24、video_ 表只新增、重放幂等、�
   raw.close();
 
   const store = new IdentityStore({ path: file }).open();
-  assert.equal(store.schemaVersion, 26);
+  assert.equal(store.schemaVersion, 28);
   for (const table of ["video_projects", "video_assets", "video_render_jobs"]) assert.ok(hasTable(store.connection, table), "缺少 " + table);
   assert.equal(store.connection.prepare("SELECT COUNT(*) AS c FROM dx_tasks").get().c, 1, "既有数据必须保留");
   // 降回 23 再重放 v24：IF NOT EXISTS 幂等
   store.connection.exec("PRAGMA user_version = 23");
   store.close();
   const again = new IdentityStore({ path: file }).open();
-  assert.equal(again.schemaVersion, 26);
+  assert.equal(again.schemaVersion, 28);
   assert.ok(hasTable(again.connection, "video_render_jobs"));
   assert.ok(!!again.connection.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_video_jobs_queue'").get(), "v24 索引必须存在");
   again.close();
 
-  // 高版本拒开：user_version=27 > 26
+  // 高版本拒开：user_version=29 > 28
   const tooNew = new DatabaseSync(file);
-  tooNew.exec("PRAGMA user_version = 27");
+  tooNew.exec("PRAGMA user_version = 29");
   tooNew.close();
   assert.throws(() => new IdentityStore({ path: file }).open(), (error) => error instanceof SchemaTooNewError && error.code === "SCHEMA_TOO_NEW");
 

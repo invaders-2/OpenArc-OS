@@ -21,7 +21,7 @@
  *   T8  跨组织与自报组织：deviceIdentity 组织不匹配被拒；context.organizationId 不得覆盖会话组织；
  *   T9  并发单次消费：恰好 1 台设备 / 1 条凭据，输家 PAIRING_TOKEN_ALREADY_USED，无半状态残留；
  *   T10 审计保留与明文 secret 不外泄（DB 全表 + WAL + 日志 + 审计 payload 扫描）；
- *   T11 SCHEMA_VERSION 为 26（当前真实版本；重置只删行、不升版）。
+ *   T11 SCHEMA_VERSION 为 28（当前真实版本；重置只删行、不升版）。
  *
  * 临时目录前缀 oa-d503g-reset-device-，与 d503e-reset- / d503d-retention- 命名空间分开。
  */
@@ -560,16 +560,16 @@ test("T10 · device_audit 重置前后逐行不变；明文 secret 在库/审计
 
 /* ══════════════════════ T11 · SCHEMA_VERSION ══════════════════════ */
 
-test("T11 · SCHEMA_VERSION 为 26：当前真实版本，重置本身不升版（只有行删除）", async () => {
-  assert.equal(SCHEMA_VERSION, 26, "当前真实版本 26：设备三表早已存在，重置只是删行");
+test("T11 · SCHEMA_VERSION 为 28：当前真实版本，重置本身不升版（只有行删除）", async () => {
+  assert.equal(SCHEMA_VERSION, 28, "当前真实版本 28：设备三表早已存在，重置只是删行");
   const f = openService(tmpDir());
   try {
     const snap = await initAndLogin(f);
     pairOnce(f, snap, { fingerprint: "fp_d503g_t11" });
-    assert.equal(f.store.schemaVersion, 26, "打开后的 user_version 必须是 26");
-    assert.equal(f.store.connection.prepare("PRAGMA user_version").get().user_version, 26);
+    assert.equal(f.store.schemaVersion, 28, "打开后的 user_version 必须是 28");
+    assert.equal(f.store.connection.prepare("PRAGMA user_version").get().user_version, 28);
     assert.equal(f.store.resetInstallation({ confirm: CONFIRM }).ok, true);
-    assert.equal(f.store.schemaVersion, 26, "重置后 user_version 不得变化");
+    assert.equal(f.store.schemaVersion, 28, "重置后 user_version 不得变化");
     // 删除集合里没有任何 DDL：只有不带 WHERE 的 DELETE FROM <table>。
     for (const sql of RESET_AUTHORIZATION_DELETE_SQL) assert.match(String(sql), /^DELETE FROM [a-z_]+$/, "不得出现 DDL / WHERE / 拼接：" + sql);
     // 三张设备表在重置后仍然存在（表结构没动，只是行被删）。

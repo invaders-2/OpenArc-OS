@@ -3,7 +3,7 @@
  *
  * 被测代码：electron/task-merge-migration.cjs（迁移体）+
  *          electron/identity-store.cjs:1798（#migrate）/ 1812（#applyMigration）/ 1886（applyExplicitMigration）。
- * 本文件只在**库副本**上执行迁移；不启用生产迁移、不动 SCHEMA_VERSION（:94 仍是 26）。
+ * 本文件只在**库副本**上执行迁移；不启用生产迁移、不动 SCHEMA_VERSION（生产仍是 28）。
  */
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -14,11 +14,11 @@ import {
   DX_TABLES,
   OTHER_CHILD_TABLES,
   TASKS_CHILD_TABLES,
-  createSeededV26,
+  createSeededV28,
   makeTempDir,
   seedBulkCore,
   seedStandard,
-  snapshotV26,
+  snapshotV28,
   tableCounts,
 } from "./task-merge-fixtures.mjs";
 
@@ -38,9 +38,9 @@ function freshDir() {
   return dir;
 }
 
-/** 标准夹具：v26 真库 → 复制一份副本 → 在副本上显式迁移。 */
+/** 标准夹具：v28 真库 → 复制一份副本 → 在副本上显式迁移。 */
 function migrateCopy(dir) {
-  const source = createSeededV26(dir);
+  const source = createSeededV28(dir);
   const copy = path.join(dir, "copy.db");
   fs.copyFileSync(source, copy);
   const backupDir = path.join(dir, "backup");
@@ -186,23 +186,23 @@ test("合并迁移：行数守恒，core 与 dx 两套状态值都能读", () =>
   }
 });
 
-test("合并迁移：user_version 26 → 27；降回 26 后重放是空跑，数据不重复不丢失", () => {
+test("合并迁移：user_version 28 → 29；降回 28 后重放是空跑，数据不重复不丢失", () => {
   const dir = freshDir();
   const { store } = migrateCopy(dir);
   try {
     const db = store.connection;
-    assert.equal(store.schemaVersion, 27);
+    assert.equal(store.schemaVersion, 29);
     const before = {
       tasks: count(db, "tasks"),
       task_steps: count(db, "task_steps"),
       task_events: count(db, "task_events"),
     };
 
-    // 重放守卫：user_version 人为降回 26，但 schema 已是合并形态 → 空跑
-    db.exec("PRAGMA user_version = 26");
+    // 重放守卫：user_version 人为降回 27，但 schema 已是合并形态 → 空跑
+    db.exec("PRAGMA user_version = 28");
     const replay = store.applyExplicitMigration(merge.taskMergeMigration);
     assert.deepEqual(replay, { applied: false, reason: "already-merged" });
-    assert.equal(store.schemaVersion, 27);
+    assert.equal(store.schemaVersion, 29);
     assert.deepEqual(
       { tasks: count(db, "tasks"), task_steps: count(db, "task_steps"), task_events: count(db, "task_events") },
       before,
@@ -215,7 +215,7 @@ test("合并迁移：user_version 26 → 27；降回 26 后重放是空跑，数
 });
 
 test("合并迁移：默认不启用、不改 SCHEMA_VERSION；迁移后的副本被生产 open() 以 SCHEMA_TOO_NEW 拒开", () => {
-  assert.equal(SCHEMA_VERSION, 26, "生产 SCHEMA_VERSION 必须仍是 26");
+  assert.equal(SCHEMA_VERSION, 28, "生产 SCHEMA_VERSION 必须仍是 28");
   const dir = freshDir();
   const { copy, store } = migrateCopy(dir);
   store.close();
@@ -227,8 +227,8 @@ test("合并迁移：默认不启用、不改 SCHEMA_VERSION；迁移后的副�
       (error) => {
         assert.ok(error instanceof SchemaTooNewError);
         assert.equal(error.code, "SCHEMA_TOO_NEW");
-        assert.equal(error.found, 27);
-        assert.equal(error.supported, 26);
+        assert.equal(error.found, 29);
+        assert.equal(error.supported, 28);
         return true;
       },
     );

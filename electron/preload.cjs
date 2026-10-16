@@ -341,4 +341,128 @@ contextBridge.exposeInMainWorld("openarc", {
     geocode: (name) => ipcRenderer.invoke("weather:geocode", { name }),
     forecast: (lat, lon) => ipcRenderer.invoke("weather:forecast", { lat, lon }),
   },
+  // —— 0.6.1 新增五域：追加在既有键之后，保持前面所有键的 index 逐字不变 ——
+  /**
+   * 系统字体域桥（第 30 个顶层键）。
+   *
+   * **只有两条能力**：派发受控 systemFonts 命令（字体清单 / 按 id 读字节）、订阅 systemFonts 下行事件。
+   * 不暴露 ipcRenderer / 字体绝对路径 / 通用 fs；sessionRef 与 appId 由主进程注入，
+   * Renderer 自报的 userId / role / appId 一律忽略（与 model / media 同一条 trusted 边界）。
+   */
+  systemFonts: {
+    command: (command) => ipcRenderer.invoke("systemFonts:command", command),
+    onEvent: (callback) => {
+      const listener = (_, event) => callback(event);
+      ipcRenderer.on("systemFonts:event", listener);
+      return () => ipcRenderer.removeListener("systemFonts:event", listener);
+    },
+  },
+  /**
+   * OCR 域桥（第 31 个顶层键）。
+   *
+   * **只有两条能力**：派发受控 ocr 命令（provider/list、ocr/recognize）、订阅 ocr 下行事件。
+   * 供应商密钥只在主进程内解出并通过既有 provider-protocol store 读取，桥面拿不到
+   * api_key / credentialRef / ipcRenderer；sessionRef 由主进程注入。
+   */
+  ocr: {
+    command: (command) => ipcRenderer.invoke("ocr:command", command),
+    onEvent: (callback) => {
+      const listener = (_, event) => callback(event);
+      ipcRenderer.on("ocr:event", listener);
+      return () => ipcRenderer.removeListener("ocr:event", listener);
+    },
+  },
+  /**
+   * 文件传输域桥（第 32 个顶层键）。
+   *
+   * **只有一条能力**：派发受控 fileTransfer 命令（begin / chunk / complete / status / cancel /
+   * cleanup / health）。没有通用 fs / 任意路径读取；落盘根固定由主进程决定，
+   * 身份由主进程注入，Renderer 自报的 userId / owner 一律忽略。
+   */
+  fileTransfer: {
+    command: (command) => ipcRenderer.invoke("fileTransfer:command", command),
+  },
+  /**
+   * codex-canvas 域桥（第 33 个顶层键）。
+   *
+   * **只有两条能力**：派发受控 codexCanvas 命令（status / pair / revoke / relay / setup / install /
+   * commands）、订阅 codexCanvas 下行事件。中继只落到**既有**画布服务，不自起 HTTP、不新建画布、
+   * 不实现云能力；桥面拿不到 MCP 令牌以外的内部句柄或 ipcRenderer。
+   * 独立通道的原因（并入 canvas:command 需改冻结白名单）见 electron/main.cjs 注册块注释。
+   */
+  codexCanvas: {
+    command: (command) => ipcRenderer.invoke("codexCanvas:command", command),
+    onEvent: (callback) => {
+      const listener = (_, event) => callback(event);
+      ipcRenderer.on("codexCanvas:event", listener);
+      return () => ipcRenderer.removeListener("codexCanvas:event", listener);
+    },
+  },
+  /**
+   * 本机代理探测桥（第 34 个顶层键）。
+   *
+   * **只有一条能力**：派发受控 desktop 命令（当前唯一命令 desktop/proxy/detect）。
+   * 默认零出网（payload.probe === true 才试连）；不暴露子进程句柄 / 原始 netstat 文本 /
+   * 环境变量 / ipcRenderer。独立通道的原因（并入 platform:command 需改冻结白名单）
+   * 见 electron/main.cjs 注册块注释。
+   */
+  desktop: {
+    command: (command) => ipcRenderer.invoke("desktop:command", command),
+  },
+  // —— 0.6.2 新增三域：追加在既有键之后，保持前面所有键的 index 逐字不变 ——
+  /**
+   * photos 域桥（第 35 个顶层键）。
+   *
+   * **只有一条能力**：派发受控 photos 命令（来源 / 虚拟文件夹 / 图库 / 源字节 / 缩略图 /
+   * 导入 / 反向提示词 / 视觉模型 / 抠图 / health）。不暴露 ipcRenderer / 来源绝对路径 / 通用 fs；
+   * sessionRef 与 appId 由主进程注入，renderer 自报的 userId / owner / appId 一律忽略。
+   */
+  photos: {
+    command: (command) => ipcRenderer.invoke("photos:command", command),
+  },
+  /**
+   * PhotoCraft 域桥（第 36 个顶层键）。
+   *
+   * **只有一条能力**：派发受控 photocraft 命令（项目 / 分组 / 源文件 / 导出 / 剪贴板 / 回收站）。
+   * 不暴露 ipcRenderer / 虚拟树绝对路径；sessionRef 与 appId 由主进程注入，
+   * renderer 自报的 userId / owner / appId 一律忽略。
+   */
+  photocraft: {
+    command: (command) => ipcRenderer.invoke("photocraft:command", command),
+  },
+  /**
+   * 应用互传域桥（第 37 个顶层键）。
+   *
+   * **只有一条能力**：派发受控 appExchange 命令（targets / get / inspect / exchange /
+   * appExchange-images）。只传引用不传字节；不暴露 ipcRenderer / 宿主路径 / 凭据；
+   * sessionRef 与 appId 由主进程注入，renderer 自报的 userId / appId 一律忽略。
+   */
+  appExchange: {
+    command: (command) => ipcRenderer.invoke("appExchange:command", command),
+  },
+  // —— CLI 域：追加在既有键之后，保持前面所有键的 index 逐字不变 ——
+  /**
+   * CLI 域桥（第 38 个顶层键）。
+   *
+   * **只有一条能力**：派发受控 cli 命令（list / status / models / credit /
+   * login/start / login/status / logout）。不暴露 ipcRenderer / 子进程句柄 / 凭据；
+   * 探测与执行全部转发到既有 CLI 出口；sessionRef 与 appId 由主进程注入，
+   * renderer 自报的 userId / role / appId 一律忽略。
+   */
+  cli: {
+    command: (command) => ipcRenderer.invoke("cli:command", command),
+  },
+  // —— Stage 1 在线更新：追加在既有键之后，保持前面所有键的 index 逐字不变 ——
+  /**
+   * 画布在线更新桥（第 39 个顶层键）。
+   *
+   * **只有一条能力**：派发受控 market/update 命令（status / check / install / rollback / sources / source/set）。
+   * 命令通道复用既有 market:command（唯一通道，命令表由 market-update-domain.cjs 冻结）；
+   * 安装必须由用户显式触发并带 confirm:true，主进程再走验签→验摘要→解压围栏→原子切换→审计，
+   * 不暴露 ipcRenderer / 签名私钥 / 绝对路径 / 任意 URL；owner/repo 也不由渲染层决定，
+   * 只能从注册表里选 kind + owner/repo（不接受任意 URL）。
+   */
+  marketUpdate: {
+    command: (command) => ipcRenderer.invoke("market:command", command),
+  },
 });

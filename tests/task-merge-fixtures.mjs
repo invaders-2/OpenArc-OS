@@ -1,8 +1,8 @@
 /**
  * P2 · 任务表物理合并迁移的测试夹具。
  *
- * 关键点：v26 库**不是手写 DDL**，而是让 IdentityStore 走完整迁移链建出来 ——
- * 这样测的是产品真实库形态（131 张表、9 张 FK 指向 tasks、WAL、user_version=26）。
+ * 关键点：v28 库**不是手写 DDL**，而是让 IdentityStore 走完整迁移链建出来 ——
+ * 这样测的是产品真实库形态（131 张表、9 张 FK 指向 tasks、WAL、user_version=28）。
  */
 import { createRequire } from "node:module";
 import fs from "node:fs";
@@ -47,7 +47,7 @@ export const OTHER_CHILD_TABLES = Object.freeze([
   "task_budgets",
 ]);
 
-/** 在已建好的 v26 连接上播种：core 1 任务/1 步/1 事件，dx 1 任务/1 步/2 事件，7 张外围子表各 1 行。 */
+/** 在已建好的 v28 连接上播种：core 1 任务/1 步/1 事件，dx 1 任务/1 步/2 事件，7 张外围子表各 1 行。 */
 export function seedStandard(db, { now = SEED_NOW } = {}) {
   db.prepare(
     "INSERT INTO tasks (task_id,user_id,app_id,status,goal,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
@@ -98,12 +98,12 @@ export function seedStandard(db, { now = SEED_NOW } = {}) {
   ).run("dx_t1", "dx_s1", "dx_run_1", "core_t1", "core_s1", "core_run_1", now, now);
 }
 
-/** 建一个真实 v26 库（走完整迁移链）并播种标准数据；返回库文件路径。 */
-export function createSeededV26(dir, { now = SEED_NOW } = {}) {
+/** 建一个真实 v28 库（走完整迁移链）并播种标准数据；返回库文件路径。 */
+export function createSeededV28(dir, { now = SEED_NOW } = {}) {
   const dbPath = path.join(dir, "identity.db");
   const store = new IdentityStore({ path: dbPath }).open();
   try {
-    if (store.schemaVersion !== 26) throw new Error("夹具期望 v26，实际 " + store.schemaVersion);
+    if (store.schemaVersion !== 28) throw new Error("夹具期望 v28，实际 " + store.schemaVersion);
     seedStandard(store.connection, { now });
   } finally {
     store.close();
@@ -146,7 +146,7 @@ export function tableCounts(dbPath, tables) {
 }
 
 /** 迁移前的完整快照：行数 + user_version + 9 张子表行数。 */
-export function snapshotV26(dbPath) {
+export function snapshotV28(dbPath) {
   const db = new DatabaseSync(dbPath, { readOnly: true });
   try {
     const counts = {};

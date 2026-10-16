@@ -35,7 +35,7 @@ test("v10 -> v11：task_tool_proposals / tool_decisions 建立，旧数据完整
   const { root, dbPath, storeRoot, snapshot } = await makeV10Db();
   try {
     const reopened = reopenResourceRuntime({ dbPath, storeRoot });
-    assert.equal(SCHEMA_VERSION, 26);
+    assert.equal(SCHEMA_VERSION, 28);
     assert.equal(reopened.identity.schemaVersion, SCHEMA_VERSION);
     for (const t of [...V11_TABLES, ...V12_TABLES, ...V13_TABLES]) assert.equal(hasTable(reopened.identity.connection, t), true, t + " 应存在");
     assert.equal(hasTable(reopened.identity.connection, "tool_executions"), true, "v12 起应有 tool_executions");

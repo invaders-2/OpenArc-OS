@@ -7,7 +7,9 @@
  * ## 来源（DXSRC = <DX OS.app>/Contents/Resources/app.asar.unpacked/server）
  *   · ccsDb.ts:12                 schema_migrations（迁移运行前的建表）
  *   · ccsDb.ts:19-:990            48 级迁移里的全部 CREATE TABLE / CREATE INDEX / ALTER TABLE ADD COLUMN
+ *   · ccsDb.ts:991-:1058          0.6.1 增补的 v50/v51/v52/v53/v54 五级迁移（见文末「0.6.1 增补（v27）」）
  *   · ai-tasks/store.ts:56-:102   ai_protocol_tasks / ai_protocol_task_events
+ *   · ai-tasks/artifacts.ts:22-:34   ai_protocol_artifacts（0.6.1 增补）
  *   · ai-tasks/legacyStore.ts:28-:47  legacy_ai_tasks
  *   · apiQuota.ts:71-:85          api_quota_rules / api_quota_usage / api_model_access
  *                                 （§4 模块 3 把 apiQuota.ts 归入数据层；配额原语依赖这三张表，
@@ -42,10 +44,33 @@
  *   不抽取 —— 那是数据搬运不是 DDL，对空表也无意义；需要种子数据的域在自己的批次里补。
  *
  * 本文件是机械抽取的产物：语句顺序 = DX 源码里首次出现的顺序（表在前、索引在后）。
+ *
+ * ## 0.6.1 增补（v27 · 云表排除）
+ *   以下 6 张表在 DX OS 0.6.1 源里存在、0.5.1 抽取时缺，本文件按同一口径补齐
+ *   （基础 CREATE TABLE + 该表全部 ALTER 折叠；本次 6 张表没有指向 OpenArc 既有 5 表的外键，
+ *   故不存在需要去掉的跨域 REFERENCES）：
+ *     · ai_protocol_artifacts —— ai-tasks/artifacts.ts:23-:34（:33 索引）
+ *       字段 id/task_id/kind/mime/bytes/sha256/source_url/created_at；
+ *       外键指向 DX 自己的 ai_protocol_tasks（同一份 DX 表），按"其余外键原样保留"保留。
+ *     · photo_source_visual_features —— ccsDb.ts:993-:998（v50）；被 photoSourceVisualFeatures.ts:24/:39/:40 使用。
+ *     · photo_source_related_rankings —— ccsDb.ts:1004-:1010（v51）；同文件 :66/:129/:132 使用。
+ *     · photocraft_projects —— ccsDb.ts:1022-:1034（v53）；索引 :1035/:1036。
+ *     · photocraft_project_members —— ccsDb.ts:1037-:1041（v53）；索引 :1042；
+ *       外键指向同层新建的 photocraft_projects，保留。
+ *     · app_exchanges —— ccsDb.ts:1048-:1057（v54 的 migrations.push）；索引 :1057 idx_app_exchanges_user；
+ *       被**本地**功能 server/appExchange.ts:53/:69/:132 按 (user_id, request_id) 幂等读写，属移植范围。
+ *   另补一列（折叠进既有 user_app_install_state 建表语句的列区）：
+ *     · user_app_install_state.dataset_maker_migrated_at INTEGER —— ccsDb.ts:1016（v52 的 ALTER TABLE ADD COLUMN）。
+ *
+ *   明确不加：api_quota_rules_v2（apiQuota.ts:76-:80）。
+ *   为什么：它是 0.6.1 才出现的"按 scope_type/subject_id/provider_id/period 计量"的 v2 计费配额表，
+ *   属计费配额域（DX OS 公共计费口径），按本次"云能力 / 计费不入移植侧"的要求排除；
+ *   现有 DXOS_QUOTA_TABLES 仍只覆盖 apiQuota.ts:72-:89 的 v1 三张（api_quota_rules / api_quota_usage /
+ *   api_model_access），那三张是配额原语的本机依赖，保持不动。
  */
 "use strict";
 
-/** DX OS 抽取到的全部表名（57 = 52 张实际新建 + 5 张与 OpenArc 重名被跳过）。 */
+/** DX OS 抽取到的全部表名（63 = 58 张实际新建 + 5 张与 OpenArc 重名被跳过）。含 0.6.1 增补 6 张。 */
 const DXOS_TABLES = Object.freeze([
   "schema_migrations",
   "projects",
@@ -103,7 +128,13 @@ const DXOS_TABLES = Object.freeze([
   "api_model_access",
   "ai_protocol_tasks",
   "ai_protocol_task_events",
-  "legacy_ai_tasks"
+  "legacy_ai_tasks",
+  "ai_protocol_artifacts",
+  "photo_source_visual_features",
+  "photo_source_related_rankings",
+  "photocraft_projects",
+  "photocraft_project_members",
+  "app_exchanges"
 ]);
 
 /** 与 OpenArc identity.db 既有表重名、v22 刻意不建的 5 张。 */
@@ -115,7 +146,7 @@ const DXOS_SKIPPED_TABLES = Object.freeze([
   "task_events"
 ]);
 
-/** dxosDdl() 实际会建的 52 张（DXOS_TABLES 去掉 DXOS_SKIPPED_TABLES）。 */
+/** dxosDdl() 实际会建的 58 张（DXOS_TABLES 去掉 DXOS_SKIPPED_TABLES）。含 0.6.1 增补 6 张。 */
 const DXOS_CREATED_TABLES = Object.freeze([
   "schema_migrations",
   "threads",
@@ -168,7 +199,13 @@ const DXOS_CREATED_TABLES = Object.freeze([
   "api_model_access",
   "ai_protocol_tasks",
   "ai_protocol_task_events",
-  "legacy_ai_tasks"
+  "legacy_ai_tasks",
+  "ai_protocol_artifacts",
+  "photo_source_visual_features",
+  "photo_source_related_rankings",
+  "photocraft_projects",
+  "photocraft_project_members",
+  "app_exchanges"
 ]);
 
 /** 配额原语依赖的表（apiQuota.ts）。 */
@@ -202,7 +239,7 @@ const DXOS_DDL = Object.freeze([
   "CREATE TABLE IF NOT EXISTS user_preferences (\n        user_id TEXT PRIMARY KEY,\n        active_wallpaper_id TEXT NOT NULL DEFAULT 'system-default',\n        updated_at INTEGER NOT NULL,\n  light_wallpaper_id TEXT,\n  dark_wallpaper_id TEXT\n      )",
   "CREATE TABLE IF NOT EXISTS user_wallpapers (\n        id TEXT PRIMARY KEY,\n        user_id TEXT NOT NULL,\n        name TEXT NOT NULL,\n        mime TEXT NOT NULL,\n        size INTEGER NOT NULL,\n        created_at INTEGER NOT NULL\n      )",
   "CREATE TABLE IF NOT EXISTS user_installed_apps (\n        user_id TEXT NOT NULL,\n        app_id TEXT NOT NULL,\n        installed_at INTEGER NOT NULL,\n  installed_version TEXT NOT NULL DEFAULT '0.0.0',\n  installed_build INTEGER NOT NULL DEFAULT 0,\n  release_channel TEXT NOT NULL DEFAULT 'stable',\n  updated_at INTEGER NOT NULL DEFAULT 0,\n        PRIMARY KEY(user_id, app_id)\n      )",
-  "CREATE TABLE IF NOT EXISTS user_app_install_state (\n        user_id TEXT PRIMARY KEY,\n        migrated_at INTEGER NOT NULL,\n  catalog_migrated_at INTEGER\n      )",
+  "CREATE TABLE IF NOT EXISTS user_app_install_state (\n        user_id TEXT PRIMARY KEY,\n        migrated_at INTEGER NOT NULL,\n  catalog_migrated_at INTEGER,\n  dataset_maker_migrated_at INTEGER\n      )",
   "CREATE TABLE IF NOT EXISTS app_market_releases (\n        app_id TEXT NOT NULL,\n        version TEXT NOT NULL,\n        build INTEGER NOT NULL,\n        channel TEXT NOT NULL CHECK (channel IN ('stable','beta','dev')),\n        delivery TEXT NOT NULL DEFAULT 'dx-app' CHECK (delivery IN ('dx-app','system-bundle')),\n        package_path TEXT NOT NULL,\n        package_size INTEGER NOT NULL,\n        sha256 TEXT NOT NULL,\n        signature TEXT NOT NULL,\n        signing_key_id TEXT NOT NULL,\n        min_system_version TEXT NOT NULL,\n        max_system_version TEXT,\n        data_version INTEGER NOT NULL,\n        mandatory INTEGER NOT NULL DEFAULT 0,\n        rollout_percent INTEGER NOT NULL DEFAULT 100,\n        release_notes TEXT NOT NULL DEFAULT '',\n        publisher_user_id TEXT NOT NULL,\n        published_at INTEGER NOT NULL,\n        revoked_at INTEGER,\n  review_status TEXT NOT NULL DEFAULT 'approved',\n  reviewed_by TEXT,\n  reviewed_at INTEGER,\n        PRIMARY KEY(app_id, version, build, channel)\n      )",
   "CREATE TABLE IF NOT EXISTS app_credential_bindings (\n        user_id TEXT NOT NULL,\n        app_id TEXT NOT NULL,\n        binding_id TEXT NOT NULL,\n        provider_id TEXT NOT NULL,\n        auth_type TEXT NOT NULL DEFAULT 'bearer',\n        header_name TEXT,\n        bound_at INTEGER NOT NULL,\n        PRIMARY KEY(user_id, app_id, binding_id)\n      )",
   "CREATE TABLE IF NOT EXISTS app_oauth_tokens (\n        user_id TEXT NOT NULL,\n        app_id TEXT NOT NULL,\n        oauth_id TEXT NOT NULL,\n        access_token_enc TEXT NOT NULL,\n        refresh_token_enc TEXT,\n        token_type TEXT NOT NULL DEFAULT 'Bearer',\n        scope TEXT,\n        expires_at INTEGER,\n        updated_at INTEGER NOT NULL,\n        PRIMARY KEY(user_id, app_id, oauth_id)\n      )",
@@ -235,6 +272,12 @@ const DXOS_DDL = Object.freeze([
   "CREATE TABLE IF NOT EXISTS ai_protocol_tasks (\n  id TEXT PRIMARY KEY,\n  surface TEXT NOT NULL DEFAULT 'canvas',\n  owner_id TEXT,\n  canvas_id TEXT,\n  provider_site_id TEXT,\n  model_id TEXT,\n  base_url TEXT,\n  status TEXT NOT NULL,\n  mode TEXT NOT NULL,\n  executor_type TEXT NOT NULL DEFAULT 'declarative',\n  executor_adapter TEXT,\n  request_json TEXT NOT NULL,\n  plan_json TEXT NOT NULL,\n  plan_hash TEXT NOT NULL,\n  provider_protocol_id TEXT NOT NULL,\n  provider_protocol_version INTEGER NOT NULL,\n  provider_protocol_hash TEXT NOT NULL,\n  model_protocol_id TEXT NOT NULL,\n  model_protocol_version INTEGER NOT NULL,\n  model_protocol_hash TEXT NOT NULL,\n  profile_id TEXT NOT NULL,\n  intent TEXT NOT NULL,\n  remote_task_id TEXT,\n  result_json TEXT,\n  error_message TEXT,\n  workflow_state_json TEXT,\n  next_poll_at INTEGER,\n  poll_attempt INTEGER NOT NULL DEFAULT 0,\n  created_at INTEGER NOT NULL,\n  updated_at INTEGER NOT NULL,\n  started_at INTEGER,\n  completed_at INTEGER\n)",
   "CREATE TABLE IF NOT EXISTS ai_protocol_task_events (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  task_id TEXT NOT NULL REFERENCES ai_protocol_tasks(id) ON DELETE CASCADE,\n  sequence INTEGER NOT NULL,\n  type TEXT NOT NULL,\n  data_json TEXT NOT NULL,\n  created_at INTEGER NOT NULL,\n  UNIQUE(task_id, sequence)\n)",
   "CREATE TABLE IF NOT EXISTS legacy_ai_tasks (\n  id TEXT PRIMARY KEY,\n  owner_id TEXT NOT NULL,\n  canvas_id TEXT NOT NULL,\n  status TEXT NOT NULL,\n  request_json TEXT NOT NULL,\n  remote_task_id TEXT,\n  output_kind TEXT NOT NULL,\n  prompt TEXT NOT NULL,\n  response_json TEXT,\n  error_message TEXT,\n  http_status INTEGER,\n  created_at INTEGER NOT NULL,\n  updated_at INTEGER NOT NULL,\n  completed_at INTEGER\n)",
+  "CREATE TABLE IF NOT EXISTS ai_protocol_artifacts (\n  id TEXT PRIMARY KEY,\n  task_id TEXT NOT NULL REFERENCES ai_protocol_tasks(id) ON DELETE CASCADE,\n  kind TEXT NOT NULL,\n  mime TEXT NOT NULL,\n  bytes INTEGER NOT NULL,\n  sha256 TEXT NOT NULL,\n  source_url TEXT,\n  created_at INTEGER NOT NULL\n)",
+  "CREATE TABLE IF NOT EXISTS photo_source_visual_features (\n        source_id TEXT NOT NULL,\n        updated_ts REAL NOT NULL,\n        features_json TEXT NOT NULL,\n        PRIMARY KEY(source_id, updated_ts)\n      )",
+  "CREATE TABLE IF NOT EXISTS photo_source_related_rankings (\n        image_id TEXT NOT NULL,\n        catalog_hash TEXT NOT NULL,\n        description_hash TEXT NOT NULL,\n        ranked_ids_json TEXT NOT NULL,\n        PRIMARY KEY(image_id, catalog_hash, description_hash)\n      )",
+  "CREATE TABLE IF NOT EXISTS photocraft_projects (\n        id TEXT PRIMARY KEY,\n        group_id TEXT NOT NULL,\n        owner_id TEXT NOT NULL,\n        title TEXT NOT NULL,\n        source_node_id TEXT,\n        preview_node_id TEXT,\n        state_path TEXT,\n        visibility TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('private','public','restricted')),\n        created_at INTEGER NOT NULL,\n        updated_at INTEGER NOT NULL,\n        deleted_at INTEGER\n      )",
+  "CREATE TABLE IF NOT EXISTS photocraft_project_members (\n        project_id TEXT NOT NULL REFERENCES photocraft_projects(id) ON DELETE CASCADE,\n        user_id TEXT NOT NULL,\n        PRIMARY KEY(project_id,user_id)\n      )",
+  "CREATE TABLE IF NOT EXISTS app_exchanges (\n    id TEXT PRIMARY KEY,\n    user_id TEXT NOT NULL,\n    request_id TEXT NOT NULL,\n    fingerprint TEXT NOT NULL,\n    result_json TEXT NOT NULL,\n    created_at INTEGER NOT NULL,\n    UNIQUE(user_id, request_id)\n  )",
   "CREATE INDEX IF NOT EXISTS idx_observations_task ON task_observations(task_id, created_at)",
   "CREATE INDEX IF NOT EXISTS idx_workers_heartbeat ON worker_instances(heartbeat_at DESC)",
   "CREATE INDEX IF NOT EXISTS idx_memories_project ON project_memories(project_id, status, updated_at DESC)",
@@ -289,7 +332,12 @@ const DXOS_DDL = Object.freeze([
   "CREATE INDEX IF NOT EXISTS idx_ai_protocol_tasks_status ON ai_protocol_tasks(status, created_at)",
   "CREATE INDEX IF NOT EXISTS idx_ai_protocol_events_task ON ai_protocol_task_events(task_id, sequence)",
   "CREATE INDEX IF NOT EXISTS idx_legacy_ai_tasks_owner ON legacy_ai_tasks(owner_id, created_at)",
-  "CREATE INDEX IF NOT EXISTS idx_legacy_ai_tasks_status ON legacy_ai_tasks(status, updated_at)"
+  "CREATE INDEX IF NOT EXISTS idx_legacy_ai_tasks_status ON legacy_ai_tasks(status, updated_at)",
+  "CREATE INDEX IF NOT EXISTS idx_ai_protocol_artifacts_task ON ai_protocol_artifacts(task_id, created_at)",
+  "CREATE INDEX IF NOT EXISTS idx_photocraft_projects_owner ON photocraft_projects(owner_id,deleted_at,updated_at DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_photocraft_projects_group ON photocraft_projects(group_id,deleted_at,updated_at DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_photocraft_project_members_user ON photocraft_project_members(user_id,project_id)",
+  "CREATE INDEX IF NOT EXISTS idx_app_exchanges_user ON app_exchanges(user_id, created_at DESC)"
 ]);
 
 /** @returns {string[]} DDL 语句副本（调用方修改不影响模块内常量）。 */

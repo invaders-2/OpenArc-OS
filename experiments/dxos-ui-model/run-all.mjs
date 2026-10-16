@@ -305,12 +305,12 @@ await shoot({
   expect: "[data-model-proto-list] [data-model-proto-item]",
   setup: async (page) => {
     const rows = await page.$$eval("[data-model-proto-item]", (els) => els.length);
-    check("协议表行数来自真实 protocol/list（71 条）", rows === 71, "rows=" + rows);
+    check("协议表行数来自真实 protocol/list（72 条）", rows === 72, "rows=" + rows);
     /* kind 过滤 */
     await page.click('[data-model-proto-kind="model"]');
     await page.waitForTimeout(120);
     const modelOnly = await page.$$eval("[data-model-proto-item]", (els) => els.map((el) => el.getAttribute("data-model-proto-item")));
-    check("kind=model 过滤后只剩 model: 前缀", modelOnly.length === 38 && modelOnly.every((k) => k.startsWith("model:")), "n=" + modelOnly.length);
+    check("kind=model 过滤后只剩 model: 前缀", modelOnly.length === 39 && modelOnly.every((k) => k.startsWith("model:")), "n=" + modelOnly.length);
     await page.click('[data-model-proto-kind="all"]');
     await page.waitForTimeout(120);
     /* 打开 openai-images 详情 */
@@ -657,7 +657,7 @@ setStep("可访问焦点顺序");
   await page.waitForTimeout(150);
   const afterEsc = await page.$eval('[data-model-proto-search="protocols"]', (el) => el.value);
   const restored = await page.$$eval("[data-model-proto-item]", (els) => els.length);
-  check("搜索框 Esc 清空内容并恢复列表", valueBefore === "image" && filtered > 0 && filtered < 71 && afterEsc === "" && restored === 71, "before=" + valueBefore + " filtered=" + filtered + " after=" + afterEsc + " restored=" + restored);
+  check("搜索框 Esc 清空内容并恢复列表", valueBefore === "image" && filtered > 0 && filtered < 72 && afterEsc === "" && restored === 72, "before=" + valueBefore + " filtered=" + filtered + " after=" + afterEsc + " restored=" + restored);
 
   /* 协议行是 button：Enter 可打开详情。 */
   await page.focus('[data-model-proto-item="model:openai-images"]');

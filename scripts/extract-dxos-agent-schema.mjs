@@ -2,6 +2,11 @@
 /**
  * 机械抽取脚本：从只读的 DX OS 0.5.1 源码生成 electron/dxos-agent-schema.cjs。
  *
+ * 基准版本变更（2026-10-16）：对齐基准由 runtime-0.5.5-0b51356e-72a5-4bf1-82e1-1bfc70b3d08d
+ * 改为 runtime-0.6.1-c2699917-1363-460d-97c3-da88f6d3fbe5。依据：DXOS-Portable 的
+ * .dx-runtime/versions/ 下 0.5.5 目录已删除、只剩 0.6.1；两版 server/ccsDb.ts 抽取结果逐字节相同，
+ * 因此产物 electron/dxos-agent-schema.cjs 无需重生成（--stdout 与仓库文件 diff 为空）。
+ *
  * 为什么用脚本：B3a 的硬约束是"机械抽取、不允许手抄"。本脚本读 server/ccsDb.ts，
  * 抽 tasks / task_steps / task_events 的最终列集（基础 CREATE TABLE + 全部 ALTER TABLE
  * ADD COLUMN 折叠），去掉 REFERENCES 外键，输出 dx_ 前缀表的幂等 DDL。
@@ -18,7 +23,7 @@ import { fileURLToPath } from "node:url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
 const DEFAULT_SRC =
-  "/Users/wepingli/Downloads/DXOS-Portable-0.5.1-mac-arm64/.dx-runtime/versions/runtime-0.5.5-0b51356e-72a5-4bf1-82e1-1bfc70b3d08d/DX OS.app/Contents/Resources/app.asar.unpacked";
+  "/Users/wepingli/Downloads/DXOS-Portable-0.5.1-mac-arm64/.dx-runtime/versions/runtime-0.6.1-c2699917-1363-460d-97c3-da88f6d3fbe5/DX OS.app/Contents/Resources/app.asar.unpacked";
 const SRC_ROOT = process.env.DXOS_SRC || DEFAULT_SRC;
 const CCS_DB = path.join(SRC_ROOT, "server", "ccsDb.ts");
 const OUT = path.join(ROOT, "electron", "dxos-agent-schema.cjs");

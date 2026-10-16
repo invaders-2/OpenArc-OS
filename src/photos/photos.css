@@ -1,0 +1,572 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   照片应用（photos / photocraft / appExchange 的界面层）
+   ──────────────────────────────────────────────────────────────────────────
+   规范来源：DESIGN_SYSTEM.md §5/§6/§8（字阶、间距、组件状态）与 §3.2（禁止发丝线框）；
+   动效取 MOTION_SYSTEM.md §2 的四档时长与 §5 的列表/浮层规则。
+   本文件只写 .photos-* 作用域内的布局与状态，颜色 / 间距 / 圆角 / 阴影 / 时长
+   全部走 design-system/tokens.css 的语义 token，不出现字面色值。
+   外层 .split / .split-side / .split-nav / .split-main 与 .dialog 复用 styles.css 既有实现，
+   这里不再重复定义。
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.photos-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  gap: var(--space-3);
+}
+
+/* ── 三栏骨架（左：来源/分组，中：列表，右：详情）────────────────────────── */
+.photos-lib,
+.photos-studio {
+  display: grid;
+  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr) minmax(240px, 320px);
+  gap: var(--space-3);
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.photos-lib > *,
+.photos-studio > * {
+  min-width: 0;
+  min-height: 0;
+}
+
+.photos-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  background: rgb(var(--content-rgb) / var(--content-alpha));
+  box-shadow: var(--elevation-1);
+}
+
+.photos-pane--flat {
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.photos-pane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex: none;
+}
+
+.photos-pane-head h3,
+.photos-sub-head {
+  margin: 0;
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--tracking-normal);
+  color: var(--muted);
+}
+
+.photos-sub-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+}
+
+.photos-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* ── 列表行（来源 / 文件夹 / 项目）──────────────────────────────────────── */
+.photos-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.photos-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  border-radius: var(--radius-md);
+}
+
+.photos-row:hover {
+  background: var(--row-hover);
+}
+
+.photos-row.is-active,
+.photos-row[aria-pressed="true"] {
+  background: var(--sunken);
+}
+
+.photos-row__main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+  text-align: left;
+  font-size: var(--fs-secondary);
+  color: var(--text);
+  cursor: default;
+}
+
+.photos-row__main:disabled {
+  opacity: var(--disabled-opacity);
+}
+
+.photos-row__name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.photos-row__facts {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  flex: none;
+}
+
+.photos-folder-toggle {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+
+.photos-folder-toggle[data-empty="true"] {
+  visibility: hidden;
+}
+
+/* depth 由 --photos-depth 提供，步长取 space-3 的三分之一（仍以 4px 为基） */
+.photos-indent {
+  padding-left: calc(var(--space-1) * (1 + var(--photos-depth, 0) * 3));
+}
+
+/* ── 工具条与状态条 ────────────────────────────────────────────────────── */
+.photos-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  flex: none;
+}
+
+.photos-toolbar__grow {
+  flex: 1 1 160px;
+  min-width: 120px;
+}
+
+.photos-count {
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.photos-banner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: none;
+}
+
+.photos-error {
+  margin: 0;
+  font-size: var(--fs-caption);
+  color: var(--failed);
+}
+
+.photos-notice {
+  margin: 0;
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+
+.photos-hint {
+  margin: 0;
+  font-size: var(--fs-caption);
+  line-height: var(--lh-relaxed);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.photos-hint-box {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+  font-size: var(--fs-caption);
+  line-height: var(--lh-relaxed);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.photos-list-notices {
+  margin: 0;
+  padding-left: var(--space-4);
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+
+/* ── 图库网格 ──────────────────────────────────────────────────────────── */
+.photos-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: var(--space-3);
+  align-content: start;
+}
+
+.photos-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+  padding: var(--space-2);
+  border-radius: var(--radius-lg);
+  background: rgb(var(--content-rgb) / var(--content-alpha));
+  box-shadow: var(--elevation-1);
+  text-align: left;
+  transition: box-shadow var(--dur-quick) var(--ease-standard);
+}
+
+.photos-card:hover {
+  box-shadow: var(--elevation-card-hover);
+}
+
+.photos-card[aria-pressed="true"] {
+  background: var(--sunken);
+}
+
+.photos-card__thumb {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--sunken);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+
+.photos-card__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.photos-card__name {
+  font-size: var(--fs-caption);
+  color: var(--text);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.photos-card__meta {
+  font-size: var(--fs-micro);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.photos-card__check {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+.photos-card__kind {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+}
+
+/* 网格项是 <li>：选中框与卡片都相对它定位 */
+.photos-card-host {
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+
+.photos-card-host > .photos-card {
+  flex: 1 1 auto;
+}
+
+/* ── 详情 / 表单 ───────────────────────────────────────────────────────── */
+.photos-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+}
+
+.photos-detail__preview {
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--sunken);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+}
+
+.photos-detail__preview img {
+  max-width: 100%;
+  max-height: 260px;
+  display: block;
+  object-fit: contain;
+}
+
+.photos-kv {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  font-size: var(--fs-caption);
+}
+
+.photos-kv dt {
+  color: var(--muted);
+}
+
+.photos-kv dd {
+  margin: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.photos-kv dd.is-mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+}
+
+.photos-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.photos-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 320px;
+}
+
+.photos-form__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.photos-form__row > span,
+.photos-form__row > label {
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+
+.photos-form__inline {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.photos-textarea {
+  width: 100%;
+  min-height: 72px;
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: rgb(var(--content-rgb) / var(--content-alpha));
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+}
+
+.photos-textarea:focus-visible {
+  border-color: var(--focus);
+}
+
+/* 原生 select：与 TextField 同一套边界与填充（设计系统暂无 Select 原语） */
+.photos-select {
+  width: 100%;
+  min-height: 32px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: rgb(var(--content-rgb) / var(--content-alpha));
+  color: var(--text);
+  font: inherit;
+}
+
+.photos-select:focus-visible {
+  border-color: var(--focus);
+}
+
+/* 提示词正文：保留换行、可选中复制 */
+.photos-prompt {
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+  font-size: var(--fs-caption);
+  line-height: var(--lh-relaxed);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  max-height: 220px;
+  overflow: auto;
+}
+
+/* ── 图像工坊：分组与项目 ──────────────────────────────────────────────── */
+.photos-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-height: 0;
+}
+
+.photos-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.photos-group__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+
+.photos-group__head strong {
+  font-size: var(--fs-heading);
+  font-weight: var(--fw-medium);
+  color: var(--text);
+}
+
+.photos-project {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  text-align: left;
+  transition: background var(--dur-feedback) var(--ease-standard);
+}
+
+.photos-project:hover {
+  background: var(--row-hover);
+}
+
+.photos-project.is-active,
+.photos-project[aria-pressed="true"] {
+  background: var(--sunken);
+}
+
+.photos-project__title {
+  font-size: var(--fs-body);
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.photos-project__facts {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
+}
+
+.photos-trash-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+}
+
+.photos-trash-row:hover {
+  background: var(--row-hover);
+}
+
+.photos-trash-row__name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--fs-body);
+}
+
+.photos-trash-row__facts {
+  color: var(--muted);
+  font-size: var(--fs-micro);
+}
+
+/* ── 窄窗口：详情与侧栏先收，保留列表 ──────────────────────────────────── */
+@media (max-width: 1180px) {
+  .photos-lib,
+  .photos-studio {
+    grid-template-columns: minmax(160px, 200px) minmax(0, 1fr);
+  }
+
+  .photos-inspector,
+  .photos-studio-detail {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 820px) {
+  .photos-lib,
+  .photos-studio {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .photos-lib-side,
+  .photos-studio-side {
+    max-height: 220px;
+  }
+
+  /* 侧栏限高后改为可滚动：末尾提示段不再越出卡片压住中栏 */
+  .photos-studio-side {
+    overflow-y: auto;
+  }
+}

@@ -2436,13 +2436,16 @@ input[type="search"]:focus-visible {
   justify-content: flex-end;
   gap: 10px;
 }
-.dialog-footer button {
+/* 只兜底**没有设计系统类**的原生 <button>（.dialog-footer button 的 (0,1,1) 会压过
+   primitives.css 的 .ds-btn--primary (0,1,0)，把主按钮刷成内容底色 = 白底白字）。
+   :not(.ds-btn) 把设计系统按钮让出去，原生按钮的兜底观感一字不变。 */
+.dialog-footer button:not(.ds-btn) {
   padding: 7px 14px;
   border-radius: var(--radius-md);
   background: rgb(var(--content-rgb) / var(--content-alpha));
   font-size: var(--fs-secondary);
 }
-.dialog-footer button:hover {
+.dialog-footer button:not(.ds-btn):hover {
   background: var(--row-hover);
 }
 .dialog-footer .primary {

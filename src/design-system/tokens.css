@@ -278,6 +278,8 @@
   --on-accent: rgb(var(--on-accent-rgb));
   --focus: rgb(var(--focus-rgb));
   --failed: rgb(var(--failed-rgb) / var(--failed-alpha));
+  /* 深色 status.warning 文字色（DESIGN_SYSTEM §3）；浅色仍走消费点兜底 #a05a00 */
+  --warning-text: #FFD60A;
   --hover-tint: rgb(255 255 255 / 0.03);
   --row-hover: var(--hover-tint);
   --toast-alpha: 0.94;

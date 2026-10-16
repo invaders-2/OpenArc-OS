@@ -87,6 +87,8 @@ import { ProjectsApp } from "./governance/ProjectsApp";
 import { TaskConsole } from "./projects/TaskConsole";
 import { McpCenter } from "./mcp/McpCenter";
 import { SkillCenter } from "./skills/SkillCenter";
+// 「照片」应用：photos / photocraft / appExchange 三个域的界面（图库 + 图像工坊双视图）。
+import { PhotosApp } from "./photos/PhotosApp";
 import { ApprovalPrompt } from "./approval/ApprovalPrompt";
 import { errorText } from "./identity/types";
 import { Avatar } from "./identity/Avatar";
@@ -368,6 +370,8 @@ const apps = [
   { id: "browser", name: "浏览器", icon: "safari" },
   { id: "files", name: "访达", icon: "finder" },
   { id: "resource-library", name: "资源库", icon: "finder" },
+  // 照片：复用既有 public/icons/photos.png，不新增图标资产。
+  { id: "photos", name: "照片", icon: "photos" },
   { id: "canvas", name: "AI Studio", icon: "freeform" },
   { id: "projects", name: "项目", icon: "folder" },
   { id: "organization", name: "组织治理", icon: "settings" },
@@ -2821,6 +2825,9 @@ function App() {
       );
     }
     if (w?.appId === "resource-library") return <ResourceLibraryApp />;
+    // 照片：双视图（图库 / 图像工坊）在 PhotosApp 内部按 .split 模式渲染；
+    // 这里只挂一个分支，不动其它窗口逻辑。
+    if (w?.appId === "photos") return <PhotosApp />;
     if (w?.appId === "canvas")
       return (
         <CanvasHost

@@ -475,11 +475,44 @@ test("开关区块只用既有 primitives 与 token，styles.css 只追加 .mcp-
   assert.equal(own.length, selectors.length, "本块只允许 .mcp-toolswitch* 选择器");
 });
 
-test("tokens.css 零改动（源码级：与 HEAD 逐字一致）", () => {
+/*
+ * tokens.css 是共用设计值来源，以前被随手改过，所以这条守卫原本锁"与 HEAD 逐字一致"。
+ * 本轮按 DESIGN_SYSTEM.md §3 状态色表（status.warning 深色 = #FFD60A）给设置页警示文案补了
+ * 一个真正的深色 token：此前 --warning-text 不是 token，消费点只能写
+ * var(--warning-text, #a05a00)，深色下就落到浅色兜底值。这是**已评审的唯一一处**补充，
+ * 于是守卫从"零改动"精确到"只允许这一处，其它任何增删一律失败"：
+ *   · diff 为空（未改，或这一处已提交）→ 通过，守卫长期成立；
+ *   · 出现删除行 → 失败（把这两行挪到别处也算删除，位置变了必须重走评审）；
+ *   · 新增行必须与期望行逐行、按序、不重复地完全相等 —— 比"集合包含"更严，
+ *     重复或换序都绕不过去。
+ */
+test("tokens.css 相对 HEAD 只允许已评审的深色 --warning-text 补充（源码级 diff 守卫）", () => {
   const { execFileSync } = require("node:child_process");
-  const baseline = execFileSync("git", ["show", "HEAD:src/design-system/tokens.css"], {
-    cwd: ROOT,
-    encoding: "utf8",
-  });
-  assert.equal(read("src/design-system/tokens.css"), baseline, "tokens.css 必须零改动");
+  const diff = execFileSync(
+    "git",
+    ["diff", "-U0", "HEAD", "--", "src/design-system/tokens.css"],
+    { cwd: ROOT, encoding: "utf8" },
+  );
+  if (diff.trim() === "") return; /* 未改动或已提交：通过 */
+
+  /* DESIGN_SYSTEM.md §3 | status.warning | #8A4B00 | #FFD60A |：评审过的深色一行 + 一行说明 */
+  const REVIEWED_ADDED_LINES = [
+    "  /* 深色 status.warning 文字色（DESIGN_SYSTEM §3）；浅色仍走消费点兜底 #a05a00 */",
+    "  --warning-text: #FFD60A;",
+  ];
+
+  const added = [];
+  const removed = [];
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("+++") || line.startsWith("---")) continue; /* 文件头，不是内容 */
+    if (line.startsWith("+")) added.push(line.slice(1));
+    else if (line.startsWith("-")) removed.push(line.slice(1));
+  }
+
+  assert.deepEqual(removed, [], "tokens.css 不得删除 HEAD 里已有的任何一行");
+  assert.deepEqual(
+    added,
+    REVIEWED_ADDED_LINES,
+    "tokens.css 相对 HEAD 只允许新增已评审的深色 --warning-text 两行",
+  );
 });

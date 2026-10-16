@@ -25,6 +25,8 @@ const { registerCanvasIpc } = require("./canvas-bootstrap.cjs");
 const { registerTaskIpc } = require("./task-bootstrap.cjs");
 // W5：模型流式下行事件（model:event）的宿主桥接（model:command 仍由 identity-bootstrap 注册）。
 const { wireModelEvents } = require("./model-bootstrap.cjs");
+// 模型/协议出口的可选代理（HTTP CONNECT 隧道；默认关闭）。
+const { createEgressFetch } = require("./net-egress.cjs");
 // B3：Agent 域装配（真实 SQLite = identity 的连接）与 agent:command / agent:event 通道。
 // B6d：createDxosFsAdapterForUserData 把 <userData>/dxos/fs 装配成 B3/B4 共用的 fsAdapter。
 const { createAgentBundle, createDxosFsAdapterForUserData } = require("./agent-service.cjs");
@@ -69,6 +71,9 @@ const { DeveloperRealtimeHub } = require("./developer-realtime.cjs");
 // B7c：可选插件框架（钉钉 / 天气 / 黄历，默认全关）与本地市场目录（只读本地清单，不联网）。
 const { createPluginBundle } = require("./plugin-service.cjs");
 const { createMarketBundle } = require("./market-service.cjs");
+// Stage 1：无限画布在线更新（market/update/* 的真实执行端；走既有 market:command 通道）。
+const { createMarketUpdateBundle } = require("./market-update-service.cjs");
+const { createCanvasBundleResolver } = require("./canvas-package-resolver.cjs");
 const { registerIntegrationIpc, registerMarketIpc } = require("./plugin-bootstrap.cjs");
 // B4 · providerAdapter 桥：把 B2 的 provider-protocol store/service 投影成 B4 执行器要的只读适配器
 // （firstUsable/all/autoFallback/revealProvider/call）；只读投影绝不返回 api_key/credentialRef。
@@ -99,6 +104,35 @@ const { createFileService } = require("./file-service.cjs");
 const { createWeatherService } = require("./weather-service.cjs");
 const { createVideoService } = require("./video-service.cjs");
 const { declareImage } = require("./xmp-service.cjs");
+// 0.6.1 · 本轮新增五域（系统字体 / OCR / 文件传输 / codex-canvas / 本机代理探测）。
+//   · bootstrap 只承担 trusted 边界 + 命令白名单；装配参数由本文件注入（与 media / platform 同一接线口径）。
+//   · 字体 / OCR / 文件传输的 I/O 都在主进程内完成，渲染层只拿受控投影，绝不接触绝对路径或凭据。
+//   · 与 canvas:command / platform:command 的并入诉求：两条既有通道的 RENDERER_COMMANDS /
+//     PLATFORM_COMMANDS 都是冻结白名单，且在扩展分发之前拦截；不改那三个域实现无法并入，
+//     因此本轮保留独立通道（理由见下方注册块注释）。
+const { createSystemFontsBundle, registerSystemFontsIpc } = require("./system-fonts-bootstrap.cjs");
+const { createOcrBundle } = require("./ocr-service.cjs");
+const { registerOcrIpc } = require("./ocr-bootstrap.cjs");
+const { createFileTransferBundle } = require("./file-transfer-service.cjs");
+const { registerFileTransferIpc } = require("./file-transfer-bootstrap.cjs");
+const { createCodexCanvasDomain, registerCodexCanvasIpc } = require("./codex-canvas-bootstrap.cjs");
+const { createLocalProxyService } = require("./local-proxy-service.cjs");
+const { registerLocalProxyIpc } = require("./local-proxy-bootstrap.cjs");
+// 0.6.2 · 三个新域接线（photos / photocraft / app-exchange）：bootstrap 只承担 trusted 边界 + 命令白名单，
+//   装配参数由本文件注入（与 0.6.1 五域同一接线口径）；命令表本身即白名单，未登记命令一律 *_COMMAND_NOT_ALLOWED。
+const { createPhotosBundle } = require("./photos-service.cjs");
+const { registerPhotosIpc } = require("./photos-bootstrap.cjs");
+const { createPhotocraftBundle } = require("./photocraft-service.cjs");
+const { registerPhotocraftIpc } = require("./photocraft-bootstrap.cjs");
+const { createAppExchangeBundle } = require("./app-exchange-service.cjs");
+const { registerAppExchangeIpc } = require("./app-exchange-bootstrap.cjs");
+// 0.6.3 · canvas × photos / app-exchange 端口适配层：把既有画布 / 资源 / fs / 授权能力
+//   投影成 app-exchange 的 canvas target ports 与 photos 的 importer（双方都不改自身实现）。
+const { createCanvasExchangePorts } = require("./canvas-exchange-ports.cjs");
+// CLI 域（对齐 DX OS 0.6.1 的 /api/cli/*）：把既有 agent-cli-bridge / agent-cli-tools /
+//   agent-pippit-tools 的探测与执行出口接成 cli:command，只转发不重写。
+const { createCliBundle } = require("./cli-service.cjs");
+const { registerCliIpc } = require("./cli-bootstrap.cjs");
 
 let win;
 let controller;
@@ -128,6 +162,10 @@ let developerBundle;
 let pluginBundle;
 /** B7c：本地市场 bundle（createMarketBundle 的唯一实例）。 */
 let marketBundle;
+/** Stage 1：画布在线更新 bundle（market/update/* 的执行端；装配失败为 null → MARKET_UPDATE_NOT_READY）。 */
+let marketUpdateBundle;
+/** 模型/协议出口的**可选**代理 fetchImpl（只注入模型域；不写 globalThis，不影响其它出网）。 */
+let modelEgressFetch = null;
 /** D5-01 Closure-2：受控浏览器目标（用户显式授权）。宿主持有唯一实例，工具链与 UI 共用同一个。 */
 let browserControl;
 
@@ -190,29 +228,9 @@ const NATIVE_TYPES = { ".mov": "video/quicktime", ".mp4": "video/mp4", ".m4v": "
 const MEDIA_TYPES = { ...NATIVE_TYPES, ".webm": "video/webm", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".wav": "audio/wav", ".aac": "audio/aac", ".ogg": "audio/ogg", ".flac": "audio/flac" };
 
 /**
- * D5-02 · 画布 bundle 的只读协议 handler。
- *
- * 画布页面跑在 sandbox iframe（allow-scripts，opaque origin）里，不接触 file:// 与用户目录：
- * 它只能读到 dist/novai-canvas 下白名单扩展名的文件（其余 403/404）。
+ * D5-02 / Stage 2 · 画布 bundle 的只读协议：实现整体在 canvas-package-resolver.cjs
+ * （生效顺序：已安装版本 → dist/novai-canvas → public/novai-canvas）。
  */
-const CANVAS_MIME = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".svg": "image/svg+xml", ".gif": "image/gif", ".webp": "image/webp", ".mp4": "video/mp4", ".webm": "video/webm", ".mp3": "audio/mpeg", ".woff2": "font/woff2", ".ttf": "font/ttf", ".woff": "font/woff", ".ico": "image/x-icon" };
-function handleCanvasProtocol(request) {
-  let url;
-  try { url = new URL(request.url); } catch { return new Response("bad request", { status: 400 }); }
-  const rel = decodeURIComponent(url.pathname).replace(/^[/]+/, "");
-  if (!rel || rel.includes("..") || rel.includes("\\") || rel.includes('\0')) return new Response("forbidden", { status: 403 });
-  const ext = path.extname(rel).toLowerCase();
-  if (!Object.prototype.hasOwnProperty.call(CANVAS_MIME, ext)) return new Response("forbidden", { status: 403 });
-  const distRoot = path.join(__dirname, "../dist/novai-canvas");
-  const publicRoot = path.join(__dirname, "../public/novai-canvas");
-  const base = fs.existsSync(distRoot) ? distRoot : publicRoot;
-  const file = path.resolve(base, rel);
-  if (!file.startsWith(path.resolve(base) + path.sep)) return new Response("forbidden", { status: 403 });
-  if (!fs.existsSync(file)) return new Response("not found", { status: 404 });
-  // 画布跑在 opaque origin（sandbox allow-scripts）里：字体等子资源需要 CORS 头才能加载。
-  // 这是**只读静态 bundle**、无凭据、无用户数据，因此允许任意来源读取。
-  return new Response(fs.readFileSync(file), { status: 200, headers: { "content-type": CANVAS_MIME[ext], "access-control-allow-origin": "*" } });
-}
 
 /**
  * B6c：受监督子进程清单（只取 safe 记录，绝不带 executable path / pid / env）。
@@ -725,6 +743,26 @@ app.whenReady().then(async () => {
       send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("model:event", event); },
     });
 
+    // 模型/协议出口的**可选**代理：只注入 ModelService 与 provider-protocol-service（各 provider 适配器
+    // 都从这两处按调用取 fetchImpl），绝不写 globalThis，也不碰 market-update / developer / 集成等出口。
+    // getConfig 每次请求现读 system_preferences，因此改配置无需重启。
+    try {
+      modelEgressFetch = createEgressFetch({
+        getConfig: () => identity.modelService.readEgressProxy(),
+        baseFetch: typeof fetch === "function" ? fetch.bind(globalThis) : null,
+        logger: null,
+      });
+      identity.modelService.fetchImpl = modelEgressFetch;
+      const providerProtocolService = identity.modelService.providerProtocol && identity.modelService.providerProtocol.service
+        ? identity.modelService.providerProtocol.service
+        : null;
+      if (providerProtocolService) providerProtocolService.fetchImpl = modelEgressFetch;
+      console.log("[openarc] 模型出网代理已装配（" + JSON.stringify(modelEgressFetch.describe()) + "），仅作用于模型/协议出口");
+    } catch (error) {
+      modelEgressFetch = null;
+      console.error("[openarc] 模型出网代理装配失败，模型出口保持直连：" + String((error && error.message) || error));
+    }
+
     // ---------------------------------------------------------------------------
     // D5-02 · 无限画布：文档层 + 资源可用性 + 命令层。
     // 画布页面运行在 sandbox iframe 里（无 openarc 桥 / 无 IPC / 无 fs / 无凭据），
@@ -1187,11 +1225,29 @@ app.whenReady().then(async () => {
     });
     automationBundle.startScheduler();
 
+    // Stage 1：画布在线更新服务（用户显式触发才下载 / 安装；装配失败只降级本命令族）。
+    //   · 公钥来源 resources/app-update-keys.json；私钥永不进主进程；
+    //   · 网络只在用户触发 check/install 时发生，且只访问所选源自己的白名单主机（github-releases / modelscope-repo 各一份，互不通用）；
+    //   · 审计沿用 identity.authorization.store.auditAuthorization（与 model / mcp 同一张表）。
+    try {
+      marketUpdateBundle = createMarketUpdateBundle({
+        userDataDir: app.getPath("userData"),
+        appDir: path.join(__dirname, ".."),
+        authorization: identity.authorization,
+        fetchImpl: typeof fetch === "function" ? fetch : null,
+        logger: null,
+        clock: null,
+      });
+    } catch (error) {
+      marketUpdateBundle = null;
+      console.error("[openarc] 画布在线更新服务装配失败，market/update/* 回 MARKET_UPDATE_NOT_READY：" + String((error && error.message) || error));
+    }
     marketBundle = createMarketBundle({
       userDataDir: app.getPath("userData"),
       appDir: path.join(__dirname, ".."),
       logger: null,
       clock: null,
+      updateService: marketUpdateBundle,
     });
     registerMarketIpc({
       ipcMain,
@@ -1200,10 +1256,278 @@ app.whenReady().then(async () => {
       isTrusted: trusted,
     });
 
+    // ---------------------------------------------------------------------------
+    // 0.6.1 · 本轮新增五域接线：系统字体 / OCR / 文件传输 / codex-canvas / 本机代理探测。
+    //
+    // 为什么放在这个位置：
+    //   · 五域都复用本文件唯一的 trusted(event) 与已认证身份 identity.service；其中 OCR 另需
+    //     providerProtocol.store（B2 供应商存储，上方已装配）、文件传输需 identity.authorization、
+    //     codex-canvas 需 identity.canvasDocService（与 canvas:command 同一实例）—— 都是 identity
+    //     就绪后才存在的依赖，所以统一放在既有各域注册之后、`if (identity)` 收口之前；
+    //   · 新通道只追加，不改既有通道，也不动既有注册顺序语义；
+    //   · 每域各自 try/catch：装配/注册失败只降级该域（仍以未装配状态注册，回稳定的 *_NOT_READY，
+    //     而不是 "No handler registered"），绝不拖死整个 app 启动（同 registerIdentityIpc 启动失败
+    //     时以 service:null + bootError 交回渲染层的口径）。
+    //
+    // 并入既有顶层域的结论（逐条给理由）：
+    //   · 本机代理探测 → 优先并入 platform:command：**不可行**。platform-bootstrap.cjs 先按
+    //     platform-domain.cjs 的冻结白名单 PLATFORM_COMMANDS 拒绝未知命令，platform-service 的
+    //     dispatch 也只认这份表；且 local-proxy-domain 的命令表只有 "desktop/proxy/detect"。
+    //     要并必须改 platform-domain.cjs / platform-service.cjs / local-proxy-domain.cjs —— 均超出
+    //     本轮授权写入范围且改动面显著扩大，故保留 desktop:command。
+    //   · codex-canvas → 优先并入 canvas:command：**不可行**。canvas-bootstrap.cjs 的
+    //     RENDERER_COMMANDS 是 Object.freeze 白名单，且白名单校验在 extension.dispatch 之前拦截；
+    //     codex-canvas-bootstrap 又硬编码 codexCanvas:command。要并必须改 canvas-bootstrap.cjs /
+    //     canvas-dxos-commands.cjs / codex-canvas-bootstrap.cjs —— 同样超出授权范围，故保留
+    //     codexCanvas:command（+ 下行 codexCanvas:event）。
+    // ---------------------------------------------------------------------------
+
+    /** 单域降级：装配/注册抛错只把该域降为"未装配状态"，通道仍可达并回稳定 *_NOT_READY。 */
+    const registerDomainOrDegrade = (label, register) => {
+      try {
+        register(false);
+      } catch (error) {
+        console.error("[openarc] " + label + " 域装配/注册失败，降级为未装配：" + String((error && error.message) || error));
+        try { register(true); } catch (error2) {
+          console.error("[openarc] " + label + " 域降级注册也失败，保持既有启动链：" + String((error2 && error2.message) || error2));
+        }
+      }
+    };
+
+    // 系统字体：读本机字体目录清单 + 按 id 读字节（扫描惰性，启动期不扫盘）；命令/事件通道由 bootstrap 固定。
+    registerDomainOrDegrade("systemFonts", (degraded) => {
+      registerSystemFontsIpc(ipcMain, {
+        bundle: degraded ? null : createSystemFontsBundle({}),
+        isTrusted: trusted,
+        identity: identity.service,
+        hostAppId: "ai",
+        send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("systemFonts:event", event); },
+      });
+    });
+
+    // OCR：供应商只取 B2 provider-protocol 的既有 store（providers.json + safeStorage），不新建存储；
+    // sharp 不注入（服务内惰性 require，缺失即结构化 OCR_DEPENDENCY_UNAVAILABLE，绝不用假图兜底）。
+    registerDomainOrDegrade("ocr", (degraded) => {
+      registerOcrIpc({
+        ipcMain,
+        bundle: degraded ? null : createOcrBundle({
+          providerStore: providerProtocol ? providerProtocol.store : null,
+          fetchImpl: typeof fetch === "function" ? fetch : null,
+          authorization: identity.authorization,
+        }),
+        isTrusted: trusted,
+        identity: identity.service,
+        send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("ocr:event", event); },
+      });
+    });
+
+    // 文件传输：落盘根固定 <userData>/dxos/file-transfers；身份取自 identity.authorization，payload 身份字段一律忽略。
+    registerDomainOrDegrade("fileTransfer", (degraded) => {
+      registerFileTransferIpc(ipcMain, {
+        bundle: degraded ? null : createFileTransferBundle({ userDataDir: app.getPath("userData"), authorization: identity.authorization }),
+        identity: identity.service,
+        isTrusted: trusted,
+        hostAppId: "file-transfer",
+      });
+    });
+
+    // codex-canvas：中继落到进程内的既有 canvasDocService（唯一实例），不新建画布、不自起 HTTP、不实现云能力。
+    registerDomainOrDegrade("codexCanvas", (degraded) => {
+      const domain = degraded ? null : createCodexCanvasDomain({ identity: identity.service, canvasService: identity.canvasDocService });
+      registerCodexCanvasIpc({
+        ipcMain,
+        domain,
+        isTrusted: trusted,
+        identity: identity.service,
+        send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("codexCanvas:event", event); },
+      });
+    });
+
+    // 本机代理探测：configured 来源保持空 —— 本仓没有源 desktopConfigFile() 的对应实现，
+    // 不新造配置文件读取；env 代理与平台回环扫描不受影响（探针默认不出网，payload.probe=true 才试连）。
+    registerDomainOrDegrade("localProxy", (degraded) => {
+      registerLocalProxyIpc({
+        ipcMain,
+        service: degraded ? null : createLocalProxyService({ getConfiguredProxy: () => "" }),
+        isTrusted: trusted,
+        identity: identity.service,
+        appId: "ai",
+      });
+    });
+
+    // ---------------------------------------------------------------------------
+    // 0.6.2 · photos / photocraft / app-exchange 三域接线。
+    //
+    // 与 0.6.1 五域同一收口口径：都放在既有各域注册之后、`if (identity)` 收口之前，
+    // 每域各自 try/catch（registerDomainOrDegrade），装配失败只把该域降为未装配态并回稳定
+    // *_NOT_READY，绝不拖死 app 启动；命令面全部过唯一 trusted(event) 与 identity.service。
+    //
+    // 身份 / 落盘注入（与各 service 的真实契约对齐，不是照抄调用形状）：
+    //   · photos.db    = identity.store.connection（v27 已建视觉特征两张表）；
+    //   · photocraft   = identity.store（IdentityStore：photocraft-service 读 .connection /
+    //                    .transactSync；传 IdentityService 会因缺 .connection 在装配时直接抛错）；
+    //   · app-exchange = identity.store（同上；app_exchanges 表 v27 已建）。
+    //   渲染层自报的 userId / owner / appId 一律忽略：bootstrap 的 sessionRef 只来自
+    //   identity.service.current（主进程可信身份）。
+    // ---------------------------------------------------------------------------
+
+    let photocraftBundle = null;
+
+    // 0.6.3 · canvas-exchange 端口适配层（唯一实例，photos 与 appExchange 共用同一份既有能力）：
+    //   · 画布文档 / 权限 / 版本检查 ← identity.canvasDocService（与 canvas:command 同一实例）；
+    //   · 素材库导入（checksum 去重） ← identity.canvasAssetLibrary；
+    //   · 资源域 ← identity.resourceService / resourceStore；
+    //   · fs 虚拟树共享区可见性 ← dxosFsAdapter（B6d 同一棵 <userData>/dxos/fs）；
+    //   · sessionRef 只取 identity.service.current（主进程可信身份，不经渲染层）。
+    // 构造期不抛错；缺哪个依赖就在用到它的端口上结构化依赖不可用。
+    const canvasExchange = createCanvasExchangePorts({
+      canvasService: identity.canvasDocService || null,
+      assetLibrary: identity.canvasAssetLibrary || null,
+      resourceService: identity.resourceService || null,
+      resourceStore: identity.resourceStore || null,
+      canvasDxosStore: identity.canvasDxosStore || null,
+      fsStore: dxosFsAdapter,
+      sessionRef: () => (identity.service && identity.service.current ? identity.service.current : null),
+    });
+
+    // photos：来源 / 虚拟文件夹 / 图库 / 视觉特征 / 反向提示词 / 抠图 / 缩略图。
+    //   · fsImpl = dxosFsAdapter（B6d 的同一棵 <userData>/dxos/fs 虚拟树，只读投影）；
+    //   · providerStore = B2 provider-protocol.store（唯一供应商来源）；
+    //   · importer = canvas-exchange 适配层（canvas 节点 / 素材库条目，见 0.6.3）；videoPoster /
+    //     shareAccess / sharpLoader 未装配，真实原因见各字段处注释，缺失时由 service 回结构化
+    //     PHOTOS_DEPENDENCY_UNAVAILABLE，绝不用假实现兜底。
+    registerDomainOrDegrade("photos", (degraded) => {
+      registerPhotosIpc(ipcMain, {
+        bundle: degraded ? null : createPhotosBundle({
+          userDataDir: app.getPath("userData"),
+          authorization: identity.authorization,
+          db: identity.store.connection,
+          providerStore: providerProtocol ? providerProtocol.store : null,
+          fsImpl: dxosFsAdapter,
+          // shareAccess：本仓没有以 (user, share) 为形状的独立共享判定服务；传 null 由
+          // photos-service 的 defaultShareAccess 兜底（public / department: 两态），不新造一套。
+          shareAccess: null,
+          // videoPoster：本仓不自带 ffmpeg 封面缓存，视频缩略图保持结构化依赖缺失。
+          videoPoster: null,
+          // importer：canvas 落点走 canvas-service.importAsset（字节进资源域）+ canvas-domain 的
+          // node.add（文档只存 openarc-asset 引用）；library 落点走 canvas-dxos-asset-library
+          // 的 importAssetItem（checksum 去重）。都是既有能力，不新造导入器。
+          importer: canvasExchange.importer,
+          // sharpLoader：不注入，service 内惰性 require("sharp") 就是本仓真实装载路径。
+          sharpLoader: null,
+          fetchImpl: typeof fetch === "function" ? fetch : null,
+        }),
+        identity: identity.service,
+        isTrusted: trusted,
+        hostAppId: "photos",
+      });
+    });
+
+    // photocraft：项目 / 分组 / 源文件 / 导出 / 剪贴板 / 回收站。
+    registerDomainOrDegrade("photocraft", (degraded) => {
+      photocraftBundle = degraded ? null : createPhotocraftBundle({
+        userDataDir: app.getPath("userData"),
+        identity: identity.store,
+        authorization: identity.authorization,
+      });
+      registerPhotocraftIpc(ipcMain, {
+        bundle: photocraftBundle,
+        identity: identity.service,
+        isTrusted: trusted,
+        hostAppId: "photocraft",
+      });
+    });
+
+    // appExchange：应用互传（targets / get / inspect / exchange / appExchange-images）。
+    //   端口逐个按 app-exchange-service.cjs 文件头 JSDoc + 真实 requirePort 调用面注入；
+    //   本仓没有对应能力的端口一律留空（不注入 = 用到时结构化 APP_EXCHANGE_DEPENDENCY_UNAVAILABLE）。
+    registerDomainOrDegrade("appExchange", (degraded) => {
+      const fsStore = dxosFsAdapter;
+      const localAccount = identity.localAccountService || null;
+      const canvasDoc = identity.canvasDocService || null;
+      const canvasContext = () => ({
+        sessionRef: identity.service && identity.service.current ? identity.service.current : null,
+        appId: "app-exchange",
+        source: "app-exchange",
+      });
+      const appExchangePorts = degraded ? null : {
+        // —— canvas target 端口（0.6.3 适配层，同一份既有能力）——
+        //    getCanvas / canEditCanvas / canvasFolder / createCanvasCard / findNearestCanvasPlacement /
+        //    syncCanvas / canViewCanvasMedia / canRead；权限一律走 CanvasService.evaluateCanvasAccess
+        //    与 dxos-fs 共享区，不新增判定。
+        ...canvasExchange.ports,
+        // —— fs：同一棵 dxos 虚拟树（读引用 + 落副本）——
+        getNode: fsStore ? (id) => fsStore.getNode(id) : undefined,
+        readBlob: fsStore ? (id) => fsStore.readBlob(id) : undefined,
+        saveBlob: fsStore ? (id, bytes) => fsStore.saveBlob(id, bytes) : undefined,
+        createNode: fsStore ? (input) => fsStore.createNode(input) : undefined,
+        isInTrash: fsStore && fsStore.store ? (id) => fsStore.store.isInTrash(id) : undefined,
+        purgeNode: fsStore && fsStore.store ? (id) => fsStore.store.purgeNode(id) : undefined,
+        ensureCanvasRoot: fsStore && fsStore.store ? (ownerId) => fsStore.store.ensureCanvasRoot(ownerId) : undefined,
+        ensureFolder: fsStore ? (name, parentId, ownerId) => fsStore.ensureFolder(name, parentId, ownerId) : undefined,
+        // —— 权限：应用打开判定复用既有 LocalAccountService.canOpenApp（同 requireAppOpen 口径）——
+        canOpen: localAccount ? (viewer, appId) => localAccount.canOpenApp(viewer, appId) : undefined,
+        // —— 图像工坊等价物：photocraft 域的同一份 bundle ——
+        createPhotoCraftProject: photocraftBundle && photocraftBundle.service
+          ? (viewer, input) => photocraftBundle.service.createProject(String(viewer.id), { name: input.name, mime: input.mime, content: input.content })
+          : undefined,
+        canViewPhotoCraftFile: photocraftBundle && typeof photocraftBundle.canViewPhotoCraftFile === "function"
+          ? (nodeId, viewer, projectId) => photocraftBundle.canViewPhotoCraftFile(nodeId, viewer && viewer.id, projectId)
+          : undefined,
+        // —— 画布只读清单：CanvasService.listCanvases 的真实只读投影（只回可编辑画布）——
+        listCanvases: canvasDoc ? () => {
+          const view = canvasDoc.listCanvases({ context: canvasContext() });
+          const items = view && view.ok === true && Array.isArray(view.items) ? view.items : [];
+          return items
+            .filter((item) => item && item.access && item.access.canEdit === true)
+            .map((item) => ({ id: item.canvasId, title: item.title, access: "write" }));
+        } : undefined,
+        // —— changed：提交成功后把变更推给渲染层（appExchange:event；preload 暂未订阅 onEvent）——
+        changed: (canvasId, patch) => {
+          if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
+            win.webContents.send("appExchange:event", { type: "changed", canvasId: canvasId == null ? null : String(canvasId), patch: patch == null ? null : patch, at: Date.now() });
+          }
+        },
+        // sharpLoader 不注入：service 内部惰性 require("sharp") 即真实装载路径（缺依赖即结构化不可用）。
+      };
+      registerAppExchangeIpc(ipcMain, {
+        bundle: degraded ? null : createAppExchangeBundle({
+          identity: identity.store,
+          authorization: identity.authorization,
+          ports: appExchangePorts,
+          clock: null,
+          logger: null,
+        }),
+        identity: identity.service,
+        isTrusted: trusted,
+        hostAppId: "app-exchange",
+      });
+    });
+
+    // CLI 域（对齐 DX OS 0.6.1 的 /api/cli/* 命令出口）。
+    //   · bundle 缺省即复用三个既有 CLI 出口：agent-cli-bridge（codex / gemini）、
+    //     agent-cli-tools（即梦）、agent-pippit-tools（小云雀）——只转发，不重写探测 / 执行；
+    //   · 未安装 → CLI_UNAVAILABLE（detail 保留既有探测说明）；工具不具备的子能力 → CLI_UNSUPPORTED；
+    //   · trusted 与 sessionRef 由本文件注入，渲染层自报身份一概忽略。
+    registerDomainOrDegrade("cli", (degraded) => {
+      registerCliIpc(ipcMain, {
+        bundle: degraded ? null : createCliBundle({}),
+        identity: identity.service,
+        isTrusted: trusted,
+        hostAppId: "cli",
+      });
+    });
+
     // D3-04C：注册安全预览协议 handler（每次请求重新授权 + Range 流式返回）。
     protocol.handle("openarc-resource", (request) => identity.previewService.handleProtocolRequest(request));
-    // D5-02：画布 bundle（只读、白名单扩展名、无目录穿越）。
-    protocol.handle("openarc-canvas", (request) => handleCanvasProtocol(request));
+    // D5-02 / Stage 2：画布 bundle（只读、白名单扩展名、无目录穿越）。
+    //   生效顺序：已安装版本（<userData>/dxos/apps/canvas/current.json 指向，整包验签 + 逐文件摘要）
+    //   → dist/novai-canvas → public/novai-canvas；任何一步失败都结构化回退并打日志，绝不静默 500/白屏。
+    const canvasBundleResolver = createCanvasBundleResolver({
+      userDataDir: app.getPath("userData"),
+      logger: (record) => console.log("[openarc] canvas-bundle " + JSON.stringify(record)),
+    });
+    protocol.handle("openarc-canvas", (request) => canvasBundleResolver.handle(request));
   }
 
   // ---------------------------------------------------------------------------

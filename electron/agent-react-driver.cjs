@@ -686,7 +686,7 @@ async function runReactTaskWithModelAccess(taskId, workerId, leaseToken, rootNod
   }
   const llm = pickLlm({ providerId: task.preferred_provider_id, llmModel: task.preferred_llm_model });
   if (!llm) {
-    const message = "没有可用的模型站点：请在「API 设置」中启用一个带 LLM 模型的站点后恢复任务";
+    const message = "没有可用的模型站点：请在「系统设置 › 模型与服务商」中启用一个带 LLM 模型的站点后恢复任务";
     if (kernelRunId) kernelStore.failAgentRun(kernelRunId, message);
     return { kind: "failed", code: "no_llm_provider", message: message };
   }

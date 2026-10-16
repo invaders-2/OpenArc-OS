@@ -5,14 +5,14 @@
  * 做什么：
  *   1) 以**隔离 userData** 启动真实产品入口 electron .（真实 electron/main.cjs + 真实 electron/preload.cjs
  *      + 真实 dist/index.html），只经 CDP 驱动渲染层 window.openarc.* 命令面，不注入任何测试专用能力；
- *   2) 断言 window.openarc 顶层键**恰为 25**，逐个核对真实形状（函数 / 含 command 的域对象）；
+ *   2) 断言 window.openarc 顶层键**恰为 39**，逐个核对真实形状（函数 / 含 command 的域对象）；
  *   3) 逐域调用健康 / 只读命令，断言不抛异常且错误是结构化错误码（允许 *_DEPENDENCY_UNAVAILABLE）；
  *   4) 断言渲染层拿不到 ipcRenderer / webContents / require / process 等原始能力，并记录 trusted 的间接证据；
  *   5) 收集页面 console / pageerror，断言 0 条 error（"No handler registered" 一律视为缺陷）；
  *   6) 订阅 agent.onEvent，触发一条真实命令，断言收到 P1 信封（channel/domain/kind/sequence/at/payload 齐备且序号单调）；
  *   7) 正常关窗退出、断言无残留进程、删除隔离 userData；
  *   8) 全程监控真实 profile（~/Library/Application Support/openarc-os 的身份库）mtime/size/sha256 前后对照，
- *      并把 25 键清单 / 各域脱敏返回 / 事件样例 / console 统计 / profile 对照写入 artifacts/dxos-e2e/report.json。
+ *      并把 39 键清单 / 各域脱敏返回 / 事件样例 / console 统计 / profile 对照写入 artifacts/dxos-e2e/report.json。
  *
  * 硬约束：不联网（只连本机 CDP，断言渲染层无非本地请求）；不执行 / 修改 DX OS 业务数据之外的真实 profile；
  *         不新增依赖；失败 exit 非 0。
@@ -49,7 +49,7 @@ export const APP_PATH = (() => {
   return value ? path.resolve(String(value)) : null;
 })();
 
-/** 顶层键 29 个的真实形状（来源：electron/preload.cjs 的 contextBridge.exposeInMainWorld）。 */
+/** 顶层键 39 个的真实形状（来源：electron/preload.cjs 的 contextBridge.exposeInMainWorld；0.6.1 追加五域与 CLI 域，Stage 1 追加 marketUpdate）。 */
 export const CONTRACT = Object.freeze({
   topLevel: Object.freeze([
     { key: "sync", kind: "function" },
@@ -82,6 +82,20 @@ export const CONTRACT = Object.freeze({
     { key: "image", kind: "domain", members: ["declare"] },
     { key: "system", kind: "domain", members: ["info"] },
     { key: "weather", kind: "domain", members: ["geocode", "forecast"] },
+    // 0.6.1 本轮新增五域（preload.cjs 追加在既有键之后，保持前面所有键 index 不变）。
+    { key: "systemFonts", kind: "domain", members: ["command", "onEvent"] },
+    { key: "ocr", kind: "domain", members: ["command", "onEvent"] },
+    { key: "fileTransfer", kind: "domain", members: ["command"] },
+    { key: "codexCanvas", kind: "domain", members: ["command", "onEvent"] },
+    { key: "desktop", kind: "domain", members: ["command"] },
+    // 0.6.2 三域（preload.cjs 追加在既有键之后，保持前面所有键 index 不变）。
+    { key: "photos", kind: "domain", members: ["command"] },
+    { key: "photocraft", kind: "domain", members: ["command"] },
+    { key: "appExchange", kind: "domain", members: ["command"] },
+    // CLI 域（对齐 DX OS 0.6.1 /api/cli/*；preload.cjs 追加在既有键之后，保持前面所有键 index 不变）。
+    { key: "cli", kind: "domain", members: ["command"] },
+    // Stage 1 画布在线更新（第 39 个顶层键；命令通道复用 market:command）。
+    { key: "marketUpdate", kind: "domain", members: ["command"] },
   ]),
   /** 健康 / 只读基线：B3 agent、B4 skill、B5 media、B6a automation、B6c platform、B7a developer、B7c integration+market，以及 B2 model / mcp / canvas / task 的等价只读命令。 */
   health: Object.freeze([
@@ -426,26 +440,26 @@ async function main() {
     page.on("request", (req) => requests.push(req.url()));
     page.on("requestfailed", (req) => requestFailures.push({ url: req.url(), error: String((req.failure() && req.failure().errorText) || "") }));
 
-    // 就绪：CDP 连上 + 页面 complete + 桥面 25 键。__DSH_BOOT__ 在本产品不存在，
+    // 就绪：CDP 连上 + 页面 complete + 桥面 39 键。__DSH_BOOT__ 在本产品不存在，
     // 用主进程唯一 boot 观测文件（OPENARC_E2E_OBSERVE=1 → <userData>/openarc-e2e-boot.json）作等价信号。
     const rendererReady = await waitFor(async () => {
       const v = await js("return { rs: document.readyState, n: window.openarc && window.openarc.identity ? Object.keys(window.openarc).length : 0, url: location.href };");
-      return v && v.rs === "complete" && v.n === 25;
+      return v && v.rs === "complete" && v.n === 39;
     }, 40000, 300);
     const bootFileReady = await waitFor(() => fs.existsSync(BOOT_PATH), 40000, 300);
     if (fs.existsSync(BOOT_PATH)) { try { boot = JSON.parse(fs.readFileSync(BOOT_PATH, "utf8")); } catch { boot = null; } }
     renderer = await js("return { url: location.href, readyState: document.readyState, gate: document.querySelector('.desktop') ? document.querySelector('.desktop').getAttribute('data-identity-gate') : null, rootChildren: document.querySelector('#root') ? document.querySelector('#root').childElementCount : null, hasDSHBoot: typeof window.__DSH_BOOT__ }");
-    record("boot", "B1 · 渲染层就绪（document.readyState=complete + window.openarc 25 键）", rendererReady, "complete + 25 keys", JSON.stringify(renderer));
+    record("boot", "B1 · 渲染层就绪（document.readyState=complete + window.openarc 39 键）", rendererReady, "complete + 39 keys", JSON.stringify(renderer));
     record("boot", "B2 · 主进程 boot 观测文件落在隔离 userData（OPENARC_E2E_OBSERVE）", bootFileReady && !!boot, "openarc-e2e-boot.json in isolated userData", boot ? JSON.stringify({ bootOrder: boot.bootOrder, listening: boot.modelProxyListening }) : "missing");
     record("boot", "B3 · 隔离 userData ≠ 真实 profile", path.resolve(userDataDir) !== path.resolve(realProfilePath), "different paths", userDataDir);
     record("boot", "B4 · 隔离 userData 内真实建库（identity.db）", fs.existsSync(path.join(userDataDir, "identity.db")), "identity.db present", fs.existsSync(path.join(userDataDir, "identity.db")) ? "present" : "missing");
     note("主进程 ready 观测（boot 顺序）：" + JSON.stringify(boot || null));
     note("真实 profile 路径：" + realProfilePath + "；启动前已在用该 profile 的进程数：" + preexistingProfilePids.length);
 
-    // ── 2) 契约：25 键 + 真实形状 ─────────────────────────────────────────
+    // ── 2) 契约：39 键 + 真实形状 ─────────────────────────────────────────
     bridge = await js("const api = window.openarc; const out = {}; for (const k of Object.keys(api)) { const v = api[k]; out[k] = typeof v === 'function' ? 'function' : (v && typeof v === 'object' ? Object.keys(v) : typeof v); } return { keys: Object.keys(api), shapes: out, frozen: Object.isFrozen(api), extensible: Object.isExtensible(api) };");
     const expectedKeys = CONTRACT.topLevel.map((e) => e.key);
-    record("contract", "C0 · window.openarc 顶层键恰为 25", bridge.keys.length === 25, 25, bridge.keys.length + " → " + bridge.keys.join(","));
+    record("contract", "C0 · window.openarc 顶层键恰为 39", bridge.keys.length === 39, 39, bridge.keys.length + " → " + bridge.keys.join(","));
     record("contract", "C1 · 顶层键集合与契约（preload 真实导出顺序）一致", JSON.stringify(bridge.keys) === JSON.stringify(expectedKeys), expectedKeys.join(","), bridge.keys.join(","));
     for (const entry of CONTRACT.topLevel) {
       const actualShape = bridge.shapes[entry.key];
@@ -634,7 +648,7 @@ async function main() {
   const failed = checks.length - passed;
   const report = {
     phase: "dxos-e2e",
-    title: "B2–B7 · 真实 Electron 端到端（25 域注册 / trusted / 健康 / 真实命令 / P1 事件）",
+    title: "B2–B7 · 真实 Electron 端到端（39 域注册 / trusted / 健康 / 真实命令 / P1 事件）",
     at: nowIso(),
     runStartedAt,
     durationMs: Date.now() - runStartedAt,

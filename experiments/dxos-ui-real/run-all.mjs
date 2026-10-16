@@ -250,7 +250,7 @@ const PAGES = [
   {
     id: "model", appId: "settings", windowLabel: "系统设置窗口", title: "系统设置 → 模型与协议",
     vars: MODEL_VARS, settled: settledModel,
-    emptyNote: "Providers 未配置（.model-proto 协议表本身恒为真实 71 条）",
+    emptyNote: "Providers 未配置（.model-proto 协议表本身恒为真实 72 条）",
     readyNote: "真实 provider/create 造出的 Provider 行 + 协议表",
     subA: async (page) => clickSelector(page, '.window[aria-label="系统设置窗口"] [data-settings-pane="model"]'),
     subB: async (page) => clickSelector(page, '.window[aria-label="系统设置窗口"] [data-settings-pane="model"]'),

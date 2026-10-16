@@ -1,0 +1,7 @@
+{
+  "name": "openarc-dxos-settings-probe",
+  "version": "1.0.0",
+  "private": true,
+  "main": "main.cjs",
+  "description": "设置 › 模型与服务商：协议设置 / CLI / 服务商 logo 真机截图 + DeepSeek 真实连接取证（隔离 userData）"
+}

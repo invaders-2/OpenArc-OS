@@ -9,7 +9,7 @@
  * 逐字移植自只读源（行号为源文件行号）：
  *   · src/apps/canvas/nodes/director3d/definition.ts:6-18   DIRECTOR_3D_NODE_DEFINITION
  *   · src/apps/canvas/builtinCanvasNodes.ts:6-12            textInput / mediaInputs / generationInputs
- *   · src/apps/canvas/builtinCanvasNodes.ts:14-139          BUILTIN_CANVAS_NODES
+ *   · src/apps/canvas/builtinCanvasNodes.ts:14-146          BUILTIN_CANVAS_NODES
  *
  * 与 electron/canvas-domain.cjs 的 NODE_TYPES（source :36）不是同一套概念：
  *   前者是 OpenArc 无限画布文档里的 card kind（prompt/image/llm/generator/…），服务于
@@ -18,8 +18,8 @@
  *   两者命名空间与用途都不同，因此新建独立模块而不是复用 NODE_TYPES。
  *
  * 未移植（逐条登记，不猜测）：
- *   · registerBuiltinCanvasNodes（源 :141-144）依赖 CanvasNodeRegistry，属于编辑器运行期；
- *   · builtinNodeTypeForCard（源 :146-166）依赖 CanvasCard，属于编辑器运行期；
+ *   · registerBuiltinCanvasNodes（源 :148-151）依赖 CanvasNodeRegistry，属于编辑器运行期；
+ *   · builtinNodeTypeForCard（源 :153-174）依赖 CanvasCard，属于编辑器运行期；
  *   两者都不在清单校验路径上，本批不引入。
  */
 "use strict";
@@ -35,7 +35,11 @@ const mediaInputs = [
 /** 源 builtinCanvasNodes.ts:12 生成类节点输入端口集合。 */
 const generationInputs = [textInput, ...mediaInputs, { id: 'table', title: '表格', type: 'table' }, { id: 'artifacts', title: '通用输入', type: 'artifact', multiple: true }]
 
-/** 源 nodes/director3d/definition.ts:6-18。 */
+/**
+ * 源 nodes/director3d/definition.ts:6-18；源 builtinCanvasNodes.ts:4 只 import 一次后并入
+ * BUILTIN_CANVAS_NODES，不再对外单独导出。单独导出会形成第二条登记路径，让 builtin.director-3d
+ * 可被枚举两次，故这里只保留这一份定义作为数组元素。
+ */
 const DIRECTOR_3D_NODE_DEFINITION = {
   type: 'builtin.director-3d',
   version: 1,
@@ -50,7 +54,7 @@ const DIRECTOR_3D_NODE_DEFINITION = {
   agent: { aliases: ['3D 导演台', '导演台', '三维导演台'], discoverable: false, actions: [] },
 }
 
-/** 源 builtinCanvasNodes.ts:14-139（顺序与源一致）。 */
+/** 源 builtinCanvasNodes.ts:14-146（顺序与源一致）。 */
 const BUILTIN_CANVAS_NODES = [
   DIRECTOR_3D_NODE_DEFINITION,
   {
@@ -139,6 +143,14 @@ const BUILTIN_CANVAS_NODES = [
     executor: { type: 'builtin', id: 'canvas.image.compare' },
   },
   {
+    // 源 builtinCanvasNodes.ts:101-107（0.6.1 新增；无 capabilityVersion / semanticRoles / agent，逐字保留）。
+    type: 'builtin.mosaic', version: 1, stateVersion: 1, title: '图片拼接', category: 'image',
+    defaultSize: { width: 380, height: 300 },
+    inputs: [{ id: 'images', title: '图片', type: 'media.image[]', multiple: true }, { id: 'texts', title: '逐图文字', type: 'text', multiple: true }],
+    outputs: [{ id: 'image', title: '拼接图片', type: 'media.image' }],
+    executor: { type: 'builtin', id: 'canvas.image.mosaic' },
+  },
+  {
     type: 'builtin.group', version: 1, stateVersion: 1, title: '分组', category: 'layout',
     defaultSize: { width: 560, height: 380 }, inputs: [], outputs: [],
     executor: { type: 'builtin', id: 'canvas.group' },
@@ -178,4 +190,5 @@ const BUILTIN_CANVAS_NODES = [
   },
 ]
 
-module.exports = { DIRECTOR_3D_NODE_DEFINITION, BUILTIN_CANVAS_NODES };
+// 只导出数组：director-3d 已是数组内唯一一份，单独导出会让它出现在第二条登记路径上。
+module.exports = { BUILTIN_CANVAS_NODES };

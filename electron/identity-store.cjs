@@ -90,8 +90,17 @@ const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domai
  *       "dx 任务步骤 ↔ 核心审批任务/步骤/运行"的身份关系；DDL 只有
  *       dx-task-approval-schema.cjs 一份真值，审批状态机仍由既有 SideEffectAuthority /
  *       Task Runtime 唯一裁决；只新增表（IF NOT EXISTS，可重放），不动既有表结构。
+ *   v27（0.6.1 表结构补齐 · 云表排除）：补 ai_protocol_artifacts / photo_source_visual_features /
+ *       photo_source_related_rankings / photocraft_projects / photocraft_project_members / app_exchanges
+ *       六张 0.6.1 表（含索引），并把 user_app_install_state.dataset_maker_migrated_at 折叠列补到老库；
+ *       DDL 真值仍只有 dxos-foundation-schema.cjs 一份，全部 IF NOT EXISTS；ALTER 前查 PRAGMA table_info，
+ *       可重放；只新增表/列，不动既有表结构。api_quota_rules_v2（apiQuota.ts:76-:80）属计费配额，刻意不加。
+ *   v28（模型服务商 · 显式明文 HTTP 放行）：model_providers 增加 allow_insecure_http INTEGER NOT NULL DEFAULT 0。
+ *       默认 0 = 继续拒绝远程明文 http；只有用户在添加/编辑该服务商时显式勾选才置 1，并写授权审计。
+ *       明文 scope（REMOTE_HTTP_EXPLICIT）不塞进 endpoint_scope 的既有 CHECK，由本列承载；
+ *       ALTER 前查 PRAGMA table_info，可重放；只加列，不动既有表结构。
  */
-const SCHEMA_VERSION = 26;
+const SCHEMA_VERSION = 28;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -1580,6 +1589,34 @@ function applyDxTaskApprovalLayer(db) {
   dxTaskApprovalSchema.applyDxTaskApprovalLayer(db);
 }
 
+/**
+ * v27 的实现：0.6.1 增补 6 张表 + 1 个折叠列的 DDL 只有 dxos-foundation-schema.cjs 一份真值
+ * （与 v22..v26 同一做法）。为什么整份 dxosDdl() 重放而不是只跑新增子集：地基表的 DDL 真值只有
+ * 一份、全部是 IF NOT EXISTS，重放不会改既有表，新增的 6 张表因此天然包含在内，不必再维护第二份
+ * 子集清单。dataset_maker_migrated_at 是 ALTER 折叠列，v26 及以前建的 user_app_install_state 没有它：
+ * 先查 PRAGMA table_info 再 ALTER，保证可重放；失败时整级随外层事务回滚。
+ */
+function applyDxos061Layer(db) {
+  for (const statement of dxosFoundationSchema.dxosDdl()) db.exec(statement);
+  const columns = db.prepare("PRAGMA table_info(user_app_install_state)").all();
+  if (!columns.some((column) => column.name === "dataset_maker_migrated_at")) {
+    db.exec("ALTER TABLE user_app_install_state ADD COLUMN dataset_maker_migrated_at INTEGER");
+  }
+}
+
+/**
+ * v28 的实现：model_providers.allow_insecure_http（显式明文 HTTP 放行开关）。
+ * 默认 0：老库补列后既有服务商一律仍被 remote-requires-https 拒绝，安全底线不变。
+ * 独立列而不是复用 endpoint_scope：后者的 CHECK 只允许三个历史值，明文放行是独立维度。
+ * 先查 PRAGMA table_info 再 ALTER，可重放；失败整级随外层事务回滚。
+ */
+function applyModelProviderInsecureHttpLayer(db) {
+  const columns = db.prepare("PRAGMA table_info(model_providers)").all();
+  if (!columns.some((column) => column.name === "allow_insecure_http")) {
+    db.exec("ALTER TABLE model_providers ADD COLUMN allow_insecure_http INTEGER NOT NULL DEFAULT 0");
+  }
+}
+
 const MIGRATIONS = Object.freeze([
   { version: 1, sql: SCHEMA_SQL },
   { version: 2, sql: SCHEMA_V2_SQL },
@@ -1621,6 +1658,8 @@ const MIGRATIONS = Object.freeze([
   { version: 24, run: applyDxosMediaLayer },
   { version: 25, run: applyCanvasDxosLayer },
   { version: 26, run: applyDxTaskApprovalLayer },
+  { version: 27, run: applyDxos061Layer },
+  { version: 28, run: applyModelProviderInsecureHttpLayer },
 ]);
 
 /**

@@ -43,10 +43,10 @@ function columnNames(db, table) {
 // schema 抽取
 // ---------------------------------------------------------------------------
 
-test("schema：抽取 57 张 DX 表，跳过与 OpenArc 重名的 5 张", () => {
-  assert.equal(schema.DXOS_TABLES.length, 57);
+test("schema：抽取 63 张 DX 表，跳过与 OpenArc 重名的 5 张", () => {
+  assert.equal(schema.DXOS_TABLES.length, 63);
   assert.deepEqual([...schema.DXOS_SKIPPED_TABLES].sort(), ["project_members", "projects", "task_events", "task_steps", "tasks"]);
-  assert.equal(schema.DXOS_CREATED_TABLES.length, 52);
+  assert.equal(schema.DXOS_CREATED_TABLES.length, 58);
   for (const skipped of schema.DXOS_SKIPPED_TABLES) assert.ok(!schema.DXOS_CREATED_TABLES.includes(skipped), skipped + " 不应出现在待建清单");
   for (const expected of ["schema_migrations", "agent_runs", "canvases", "ai_protocol_tasks", "legacy_ai_tasks", "api_quota_usage"]) {
     assert.ok(schema.DXOS_TABLES.includes(expected), "缺少 DX 表 " + expected);
@@ -55,14 +55,14 @@ test("schema：抽取 57 张 DX 表，跳过与 OpenArc 重名的 5 张", () => 
 
 test("schema：dxosDdl() 全部幂等语句，重复执行两次不报错且折叠列存在", () => {
   const ddl = schema.dxosDdl();
-  assert.equal(ddl.length, 107);
+  assert.equal(ddl.length, 118);
   for (const statement of ddl) assert.match(statement, /^(CREATE TABLE IF NOT EXISTS|CREATE (UNIQUE )?INDEX IF NOT EXISTS)/);
   const db = new DatabaseSync(":memory:");
   try {
     for (const statement of ddl) db.exec(statement);
     for (const statement of ddl) db.exec(statement);
     const names = tableNames(db);
-    assert.equal(names.length, 52);
+    assert.equal(names.length, 58);
     for (const table of schema.DXOS_CREATED_TABLES) assert.ok(names.includes(table), "缺少表 " + table);
     for (const skipped of schema.DXOS_SKIPPED_TABLES) assert.ok(!names.includes(skipped), skipped + " 不应被建出来");
     // ALTER 折叠的证据：这些列来自后续迁移，必须出现在最终建表语句里
@@ -83,8 +83,8 @@ test("迁移：空库直接建到 v22，DX 表存在", () => {
   const dir = tempDir();
   const store = new IdentityStore({ path: path.join(dir, "identity.db") }).open();
   try {
-    assert.equal(SCHEMA_VERSION, 26);
-    assert.equal(store.schemaVersion, 26);
+    assert.equal(SCHEMA_VERSION, 28);
+    assert.equal(store.schemaVersion, 28);
     const names = tableNames(store.connection);
     assert.ok(names.includes("agent_runs"));
     assert.ok(names.includes("api_quota_rules"));
@@ -116,7 +116,7 @@ test("迁移：v21 老库升到 v22，既有数据保留、既有表结构不被
   raw.close();
   const store = new IdentityStore({ path: file }).open();
   try {
-    assert.equal(store.schemaVersion, 26);
+    assert.equal(store.schemaVersion, 28);
     assert.equal(store.connection.prepare("SELECT name FROM teams WHERE id=?").get("team_dxos_v21_marker").name, "Marker");
     assert.ok(columnNames(store.connection, "agent_runs").includes("id"));
     // tasks / projects 是"跳过不建"的表：不得被 DX 列污染
@@ -151,9 +151,9 @@ test("迁移：把 user_version 降回 21 再重放 v22 是幂等的", () => {
   first.close();
   const second = new IdentityStore({ path: file }).open();
   try {
-    assert.equal(second.schemaVersion, 26);
+    assert.equal(second.schemaVersion, 28);
     for (const statement of schema.dxosDdl()) second.connection.exec(statement);
-    assert.equal(second.schemaVersion, 26);
+    assert.equal(second.schemaVersion, 28);
   } finally {
     second.close();
   }

@@ -23,6 +23,7 @@ import VideoApp from "../apps/VideoApp.vue";
 import DeclareApp from "../apps/DeclareApp.vue";
 import DramaApp from "../apps/DramaApp.vue";
 import ProtocolApp from "../apps/ProtocolApp.vue";
+import PhotosApp from "../apps/PhotosApp.vue";
 import { markRaw, toRaw } from "vue";
 import ReactIsland from "../bridge/ReactIsland.vue";
 import { CanvasHost } from "../../src/canvas/CanvasHost";
@@ -213,6 +214,7 @@ function styleOf(win: ShellWindow) {
         :props="browserProps(win.id)"
       />
       <ReactIsland v-else-if="win.appId === 'canvas'" :component="CanvasHostRaw" :props="canvasProps(win.id)" />
+      <PhotosApp v-else-if="win.appId === 'photos'" />
       <PlannedApp v-else :app-id="win.appId" />
     </div>
     <!-- 快照层：原生视图被收缩 / 隐藏后，把网页画面补回 DOM（与 components.tsx:607 同一结构） -->

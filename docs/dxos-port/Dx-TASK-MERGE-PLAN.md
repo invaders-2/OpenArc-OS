@@ -445,30 +445,30 @@ BEGIN IMMEDIATE;
 -- 步骤 2：幂等守卫（已是 view 即 return）
 --   SELECT type FROM sqlite_master WHERE name='dx_tasks';
 
--- 步骤 3：重建 tasks（见 §2.2 DDL 的 CREATE TABLE tasks_v27）
-CREATE TABLE tasks_v27 ( ... );                       -- 见 §2.2
-INSERT INTO tasks_v27 ( ...core 列..., record_source)
+-- 步骤 3：重建 tasks（见 §2.2 DDL 的 CREATE TABLE tasks_v28）
+CREATE TABLE tasks_v28 ( ... );                       -- 见 §2.2
+INSERT INTO tasks_v28 ( ...core 列..., record_source)
   SELECT ...core 列..., 'core' FROM tasks;            -- core 行原样搬
-INSERT INTO tasks_v27 ( ...dx 列..., record_source)
+INSERT INTO tasks_v28 ( ...dx 列..., record_source)
   SELECT id, project_id, ... , 'dx' FROM dx_tasks;    -- dx 行 id→task_id
 DROP TABLE tasks;                                     -- FK=OFF，子表行不会被 CASCADE
-ALTER TABLE tasks_v27 RENAME TO tasks;                -- 子表 FK 仍指向 tasks（实测 §7.2 EXP4）
+ALTER TABLE tasks_v28 RENAME TO tasks;                -- 子表 FK 仍指向 tasks（实测 §7.2 EXP4）
 -- 步骤 4：重建 tasks 索引（见 §2.2）
 
 -- 步骤 5：重建 task_steps
-CREATE TABLE task_steps_v27 ( ... );                  -- 见 §2.2
-INSERT INTO task_steps_v27 (...) SELECT step_id,...,'core' FROM task_steps;
-INSERT INTO task_steps_v27 (...) SELECT id,...,'dx' FROM dx_task_steps;
+CREATE TABLE task_steps_v28 ( ... );                  -- 见 §2.2
+INSERT INTO task_steps_v28 (...) SELECT step_id,...,'core' FROM task_steps;
+INSERT INTO task_steps_v28 (...) SELECT id,...,'dx' FROM dx_task_steps;
 DROP TABLE task_steps;
-ALTER TABLE task_steps_v27 RENAME TO task_steps;
+ALTER TABLE task_steps_v28 RENAME TO task_steps;
 CREATE INDEX idx_task_steps_task_seq / task_ordinal;
 
 -- 步骤 6：重建 task_events（先搬 dx 显式 id，再搬 core 让 AUTOINCREMENT 续号）
-CREATE TABLE task_events_v27 ( ... );
-INSERT INTO task_events_v27 (id, ..., record_source) SELECT id,...,'dx' FROM dx_task_events;
-INSERT INTO task_events_v27 (event_id, ..., record_source) SELECT event_id,...,'core' FROM task_events;
+CREATE TABLE task_events_v28 ( ... );
+INSERT INTO task_events_v28 (id, ..., record_source) SELECT id,...,'dx' FROM dx_task_events;
+INSERT INTO task_events_v28 (event_id, ..., record_source) SELECT event_id,...,'core' FROM task_events;
 DROP TABLE task_events;
-ALTER TABLE task_events_v27 RENAME TO task_events;
+ALTER TABLE task_events_v28 RENAME TO task_events;
 CREATE INDEX idx_task_events_task_seq / task_id;
 
 -- 步骤 7：落掉三张旧 dx_ 表，建同名可写视图 + INSTEAD OF 触发器（见 §2.4/§7.3）
@@ -491,12 +491,12 @@ PRAGMA foreign_keys = ON;      -- 执行器在 COMMIT 后恢复
 
 - **事务边界**：备份、`PRAGMA foreign_keys` 在 BEGIN 之前；DDL+搬运+自检+COMMIT 在同一个事务内（SQLite 的 DDL 在事务内可回滚）。失败 → ROLLBACK → 恢复 FK → 库回到 v26 原状。
 - **rowid/rowid 别名**：`tasks`/`task_steps` 用 TEXT 主键，rowid 只是内部行号，重建后不保证一致；**没有任何外键或本次三张表的查询按 rowid 寻址**。全仓 `rowid` 只出现在 tool-store.cjs:15/:25 与 task-service.cjs:1388，都作用于 `task_tool_proposals` / `tool_executions`（本次不重建），可安全重建。
-- **sqlite_sequence**：`task_events_v27` 是 `AUTOINCREMENT`。**搬运时必须先插 DX 行（带显式 id）再插 core 行**（否则 core 先占 id 1..N 会与 DX 的显式 id 撞车；实验中第一次就报 `UNIQUE constraint failed: task_events_v27.id`）。带显式 id 插入 AUTOINCREMENT 表会把 `sqlite_sequence` 抬到该最大值——实测搬运后 `sqlite_sequence.seq=3`（DX 最大 id=2），随后新事件 id=4（§7.3）。
+- **sqlite_sequence**：`task_events_v28` 是 `AUTOINCREMENT`。**搬运时必须先插 DX 行（带显式 id）再插 core 行**（否则 core 先占 id 1..N 会与 DX 的显式 id 撞车；实验中第一次就报 `UNIQUE constraint failed: task_events_v28.id`）。带显式 id 插入 AUTOINCREMENT 表会把 `sqlite_sequence` 抬到该最大值——实测搬运后 `sqlite_sequence.seq=3`（DX 最大 id=2），随后新事件 id=4（§7.3）。
 
 ### 3.4 SCHEMA_VERSION 递增、幂等与可重放
 
 - `identity-store.cjs:92` `SCHEMA_VERSION` 26 → **27**。
-- `identity-store.cjs:1581-1622` `MIGRATIONS` 追加 `{ version: 27, run: applyTaskTableMergeLayer, foreignKeysOff: true, backupBefore: true }`（后两个字段是 §3.1 的执行器能力）。
+- `identity-store.cjs:1581-1622` `MIGRATIONS` 追加 `{ version: 28, run: applyTaskTableMergeLayer, foreignKeysOff: true, backupBefore: true }`（后两个字段是 §3.1 的执行器能力）。
 - 幂等：迁移体第一步查 `sqlite_master` 中 `dx_tasks` 的类型；`view` 即 return。这样把 `user_version` 人为降回 26 再开也能安全重放（与现有 "重放不丢行" 测试同一套路，dxos-agent-migration.test.mjs:107-133）。
 - 可重放：所有 `CREATE` 用 `IF NOT EXISTS` 不适用于"重建"，因此幂等只能靠上述守卫；守卫本身要覆盖半成品（若上次在 COMMIT 前失败，事务已整体回滚，不会留半成品）。
 
@@ -522,7 +522,7 @@ PRAGMA foreign_keys = ON;      -- 执行器在 COMMIT 后恢复
 |---|---|
 | 新增 electron/dx-task-merge-schema.cjs | 合并三表 DDL + 视图 + 触发器 + 索引的**唯一真值**；导出 `applyTaskTableMergeLayer(db)` |
 | identity-store.cjs:92 `SCHEMA_VERSION` | 26 → 27 |
-| identity-store.cjs:1600-1622 `MIGRATIONS` | 追加 `{version:27, run:applyTaskTableMergeLayer, foreignKeysOff:true, backupBefore:true}` |
+| identity-store.cjs:1600-1622 `MIGRATIONS` | 追加 `{version:28, run:applyTaskTableMergeLayer, foreignKeysOff:true, backupBefore:true}` |
 | identity-store.cjs:1780-1795 `#migrate()` | 支持 `foreignKeysOff`（BEGIN 前 OFF、COMMIT 后 ON）与 `backupBefore`（`VACUUM INTO`）；迁移体内新增 `PRAGMA foreign_key_check` 自检 |
 | identity-store.cjs:1753-1759 `open()` | 在 `#migrate()` 前做备份（仅当 user_version < SCHEMA_VERSION） |
 | task-unified-view.cjs:166-179 `requireTables` | 接受 `type IN ('table','view')`（阶段 1 允许 `dx_tasks` 是视图）；**不放宽**缺表就报错的语义 |
@@ -742,7 +742,7 @@ MIGRATE ROLLBACK: INJECTED_FAILURE_AFTER_DDL
 回滚后 dx_tasks 类型 = table，行数=1
 回滚后 tasks 列数 = 17
 ~~~
-（第一次运行时事件搬运顺序写反，报 `UNIQUE constraint failed: task_events_v27.id` 并整级回滚——这正好验证了事务回滚有效，也因此确定了"先 dx 显式 id、后 core"的正确顺序。）
+（第一次运行时事件搬运顺序写反，报 `UNIQUE constraint failed: task_events_v28.id` 并整级回滚——这正好验证了事务回滚有效，也因此确定了"先 dx 显式 id、后 core"的正确顺序。）
 
 ### 7.4 分源状态 CHECK 实验
 

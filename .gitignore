@@ -17,3 +17,8 @@ experiments/d5-03/batch12/verify/runs/
 _to_delete/
 # 事故现场的会话记录与截图，体积大且含私有会话内容，不进版本库
 docs/incidents/
+
+# Stage 1 画布在线更新：Ed25519 签名私钥（scripts/oa-update-keygen.mjs 生成）。
+# 私钥绝不入库；只提交 resources/app-update-keys.json 里的公钥。
+.keys/
+dist-updates/

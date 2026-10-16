@@ -23,7 +23,7 @@ const GENERATOR = path.join(ROOT, "scripts", "extract-dxos-agent-schema.mjs");
 const SCHEMA_FILE = path.join(ROOT, "electron", "dxos-agent-schema.cjs");
 const DX_SRC =
   process.env.DXOS_SRC ||
-  "/Users/wepingli/Downloads/DXOS-Portable-0.5.1-mac-arm64/.dx-runtime/versions/runtime-0.5.5-0b51356e-72a5-4bf1-82e1-1bfc70b3d08d/DX OS.app/Contents/Resources/app.asar.unpacked";
+  "/Users/wepingli/Downloads/DXOS-Portable-0.5.1-mac-arm64/.dx-runtime/versions/runtime-0.6.1-c2699917-1363-460d-97c3-da88f6d3fbe5/DX OS.app/Contents/Resources/app.asar.unpacked";
 const CCS_DB = path.join(DX_SRC, "server", "ccsDb.ts");
 
 function ddlOnlyTables() {

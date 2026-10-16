@@ -1,0 +1,317 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   OpenArc OS · Windows 标题栏候选方案 —— 纯静态示意图样式
+   只服务于 artifacts/win-titlebar-options/shots/ 的渲染，不参与产品构建，
+   也不代表产品现状：产品代码未做任何改动。
+
+   取值来源（只读复制，不改权威）：
+     · 颜色 / 字号 / 字重 / 圆角 / 时长  → src/design-system/tokens.css
+     · 顶栏结构与尺寸                    → src/styles.css 的 .topbar* 区段
+     · 壁纸渐变                          → src/styles.css 的 [data-wallpaper] 区段
+     · Windows 侧数值（标题栏 32px、caption 46×32、close hover #c42b1c、
+       Segoe Fluent 图标线宽 1px）        → Microsoft Fluent / Windows 11 公开口径
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── token（tokens.css 权威值）──────────────────────────────────────────── */
+:root {
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --fs-secondary: 13px;
+  --fs-caption: 12px;
+  --fs-body: 14px;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-window: 16px;
+  --radius-pill: 999px;
+  --dur-feedback: 100ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  --text-rgb: 38 38 38;
+  --muted-rgb: 110 110 110;
+  --text: rgb(var(--text-rgb));
+  --muted: rgb(var(--muted-rgb));
+  --bar-rgb: 255 255 255;
+  --bar-alpha: 0;
+  --bar-on-light-rgb: 38 38 38;
+  --bar-on-dark-rgb: 223 223 223;
+
+  /* Windows 系统标题栏（frame:true 时由 DWM 绘制，这里按 Windows 11 默认外观近似） */
+  --sysbar-bg: #f3f3f3;
+  --sysbar-fg: #191919;
+  --sysbar-hover: rgb(0 0 0 / 0.06);
+  --cap-fg: #191919;
+  --cap-hover: rgb(0 0 0 / 0.0605);
+  --cap-press: rgb(0 0 0 / 0.0984);
+  --cap-close-hover: #c42b1c;
+  --cap-close-press: #b32a1c;
+  --overlay-bg: #f3f3f3;
+}
+.dark {
+  --text-rgb: 223 223 223;
+  --muted-rgb: 152 152 152;
+  --text: rgb(var(--text-rgb));
+  --muted: rgb(var(--muted-rgb));
+  --bar-rgb: 30 30 30;
+  --sysbar-bg: #202020;
+  --sysbar-fg: #ffffff;
+  --sysbar-hover: rgb(255 255 255 / 0.06);
+  --cap-fg: #ffffff;
+  --cap-hover: rgb(255 255 255 / 0.0605);
+  --cap-press: rgb(255 255 255 / 0.0984);
+  --overlay-bg: #202020;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  /* 窗口圆角之外只露 ~8px：Windows 桌面。 */
+  background: radial-gradient(120% 120% at 50% -10%, #2b5c8a 0%, #13314f 45%, #08131f 100%);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+
+#stage {
+  position: relative;
+  width: 1280px;
+  height: 800px;            /* 真实窗口高度：壁纸渐变按 800px 计算，再只截顶部 */
+  display: flex;
+  flex-direction: column;
+  border-radius: 8px 8px 0 0; /* Windows 11 圆角（roundedCorners 默认 true） */
+  overflow: hidden;
+}
+
+/* ── 应用内桌面（网页内容区）───────────────────────────────────────────── */
+.desktop {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--fs-body);
+}
+.desktop[data-wallpaper="theme-light"] {
+  background:
+    radial-gradient(70% 60% at 18% 12%, #ffffff 0%, transparent 60%),
+    radial-gradient(60% 70% at 85% 90%, #dcdde3 0%, transparent 60%),
+    radial-gradient(50% 50% at 75% 20%, #eee9e4 0%, transparent 70%),
+    #ececf0;
+}
+.desktop[data-wallpaper="theme-dark"] {
+  background:
+    radial-gradient(70% 60% at 18% 12%, #1c1c20 0%, transparent 60%),
+    radial-gradient(60% 70% at 85% 90%, #0e0e10 0%, transparent 60%),
+    #060607;
+}
+/* 顶栏字色跟随壁纸（styles.css 6396-6423 同一口径） */
+.desktop[data-wallpaper="theme-light"] .topbar,
+.desktop[data-wallpaper="theme-light"] .topbar .bar-menu { color: rgb(var(--bar-on-light-rgb)); }
+.desktop[data-wallpaper="theme-light"] .topbar .local-tag { color: rgb(var(--bar-on-light-rgb) / 0.62); }
+.desktop[data-wallpaper="theme-dark"] .topbar,
+.desktop[data-wallpaper="theme-dark"] .topbar .bar-menu { color: rgb(var(--bar-on-dark-rgb)); }
+.desktop[data-wallpaper="theme-dark"] .topbar .local-tag { color: rgb(var(--bar-on-dark-rgb) / 0.62); }
+
+/* ── 应用内顶栏（src/styles.css .topbar* 的只读复刻）──────────────────── */
+.topbar {
+  height: 38px;
+  background: rgb(var(--bar-rgb) / var(--bar-alpha));
+  transform: translateZ(0);
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  padding: 0 23px 0 92px;   /* 左侧 92px = 现在给 macOS 红绿灯预留 */
+  font-size: 12px;
+  position: relative;
+  z-index: 80;
+  -webkit-app-region: drag;
+}
+.topbar button,
+.topbar a,
+.topbar input { -webkit-app-region: no-drag; }
+.topbar-menus { display: flex; align-items: center; gap: 2px; margin-left: -8px; min-width: 0; }
+.topbar button {
+  display: flex;
+  padding: 6px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  cursor: default;
+}
+.topbar .bar-menu {
+  padding: 3px 9px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-secondary);
+  color: inherit;
+  white-space: nowrap;
+  transition: background var(--dur-feedback) var(--ease);
+}
+.topbar .bar-appname { font-weight: var(--fw-medium); }
+.topbar .bar-menu:hover,
+.topbar .bar-menu.on,
+.topbar-right button.on { background: rgb(var(--text-rgb) / 0.1); }
+.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 17px; }
+.topbar-right button { border-radius: var(--radius-sm); align-items: center; gap: 5px; }
+.topbar .bar-clock {
+  padding: 4px 8px;
+  font-size: var(--fs-caption);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.topbar .bar-logo { display: inline-flex; align-items: center; gap: 5px; font-weight: var(--fw-medium); }
+.topbar .bar-user { font-size: var(--fs-caption); }
+.local-tag { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.topbar svg { flex: 0 0 auto; }
+.orb { width: 18px; height: 18px; object-fit: contain; }
+.topbar .bar-user-icon { border-radius: 50%; }
+
+/* ══ 方案 A · frame:true —— 系统标题栏 + 系统菜单栏 ══════════════════════ */
+.sys-titlebar {
+  height: 32px;
+  flex: 0 0 32px;
+  display: flex;
+  align-items: center;
+  background: var(--sysbar-bg);
+  color: var(--sysbar-fg);
+  font-size: 12px;
+  -webkit-app-region: no-drag;
+}
+.sys-titlebar__icon { width: 16px; height: 16px; margin: 0 8px 0 12px; }
+.sys-titlebar__title { flex: 1 1 auto; overflow: hidden; white-space: nowrap; }
+.sys-menubar {
+  height: 22px;
+  flex: 0 0 22px;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding-left: 6px;
+  background: var(--sysbar-bg);
+  color: var(--sysbar-fg);
+  font-size: 12px;
+  -webkit-app-region: no-drag;
+}
+.sys-menubar span { padding: 2px 9px; border-radius: 4px; }
+.sys-menubar span:hover { background: var(--sysbar-hover); }
+/* A 里应用内顶栏降级为次级工具条：不再有 OpenArc / 菜单，只保留全局入口 */
+.topbar.is-secondary { padding-left: 16px; padding-right: 16px; }
+.topbar.is-secondary .secondary-app {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: var(--fs-secondary); font-weight: var(--fw-medium);
+}
+
+/* ── Windows caption 按钮（方案 B / A / C 共用外观，尺寸由类控制）────── */
+.caption-group { display: flex; align-items: stretch; flex: 0 0 auto; -webkit-app-region: no-drag; }
+.caption-btn {
+  width: 46px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--cap-fg);
+  cursor: default;
+  transition: background var(--dur-feedback) linear;
+}
+.caption-btn svg { display: block; }
+.caption-btn:hover { background: var(--cap-hover); }
+.caption-btn:active { background: var(--cap-press); }
+.caption-btn--close:hover { background: var(--cap-close-hover); color: #ffffff; }
+.caption-btn--close:active { background: var(--cap-close-press); color: #ffffff; }
+/* 静态状态：截图里没法悬停，用类把 :hover / :active 的结果画出来 */
+.caption-btn.is-hover { background: var(--cap-hover); }
+.caption-btn.is-press { background: var(--cap-press); }
+.caption-btn--close.is-hover { background: var(--cap-close-hover); color: #ffffff; }
+.caption-btn--close.is-press { background: var(--cap-close-press); color: #ffffff; }
+.sys-titlebar .caption-btn { height: 32px; }          /* A：系统标题栏 32px，按钮满高 */
+.topbar .caption-btn { height: 32px; align-self: center; } /* B：顶栏 38px，46×32 居中 */
+.overlay-sim .caption-btn { height: 100%; }           /* C：overlay 高度 = height 参数 */
+
+/* ══ 方案 B · 自绘 Fluent caption ══════════════════════════════════════ */
+.topbar.is-win-caption { gap: 0; padding: 0 0 0 16px; }
+.topbar.is-win-caption .topbar-right { margin-right: 9px; }
+
+/* ══ 方案 C · titleBarOverlay（窗口按钮由系统绘制）══════════════════════ */
+.topbar.is-overlay { padding: 0 138px 0 16px; }        /* 138px = 3 × 46px，实际应用 env(titlebar-area-width) */
+.overlay-sim {
+  position: absolute;
+  top: 0; right: 0;
+  width: 138px; height: 38px;
+  display: flex;
+  background: var(--overlay-bg);   /* 系统按 titleBarOverlay.color 绘制，单一实色 */
+  -webkit-app-region: no-drag;
+}
+
+/* ══ 标注层（仅示意图用，不是产品 UI）══════════════════════════════════ */
+.anno {
+  position: absolute;
+  left: 16px;
+  z-index: 200;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  background: rgb(12 12 14 / 0.82);
+  color: #f2f2f4;
+  font-size: 11px;
+  line-height: 18px;
+  letter-spacing: 0.01em;
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.16), 0 2px 8px rgb(0 0 0 / 0.28);
+  white-space: nowrap;
+}
+.anno__dot { width: 6px; height: 6px; border-radius: 50%; background: #6ee787; flex: 0 0 auto; }
+.anno__dot--warn { background: #ff6b5e; }
+.anno--flag {
+  border: 1px dashed rgb(255 107 94 / 0.95);
+  background: rgb(12 12 14 / 0.6);
+}
+.zone {
+  position: absolute;
+  z-index: 190;
+  border: 1px dashed rgb(255 107 94 / 0.95);
+  border-radius: 2px;
+  pointer-events: none;
+}
+.zone--missing { top: 0; right: 0; width: 138px; height: 38px; }
+.zone--reserved { top: 0; left: 0; width: 92px; height: 38px; }
+.anno--right { left: auto; right: 16px; }
+
+/* caption 状态展示条（额外的细节图） */
+body.mode-states { background: #0d0d0f; }
+body.mode-states #stage { display: none; }
+.states {
+  position: relative;
+  width: 1280px;
+  padding: 26px 24px 30px;
+  display: flex; flex-direction: column; gap: 18px;
+  font-family: var(--font-ui);
+}
+.states__title { font-size: 14px; font-weight: var(--fw-medium); color: #f2f2f4; }
+.states .states__pane { border-radius: 10px; padding: 18px; }
+.states__row { display: flex; align-items: flex-start; justify-content: center; gap: 20px; }
+.states__cell { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+.states__label { font-size: 12px; color: var(--muted); }
+.states__frame {
+  width: 184px; height: 128px;   /* 46×32 @4× */
+  display: grid; place-items: center;
+  background: rgb(var(--bar-rgb) / var(--bar-alpha));
+  border-radius: 0;
+  overflow: hidden;
+}
+.states__frame .caption-btn { width: 184px; height: 128px; }
+.states__frame .caption-btn svg { transform: scale(4); }
+.states__pane {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(70% 60% at 18% 12%, #ffffff 0%, transparent 60%),
+    radial-gradient(60% 70% at 85% 90%, #dcdde3 0%, transparent 60%),
+    #ececf0;
+}
+.states.dark .states__pane {
+  background:
+    radial-gradient(70% 60% at 18% 12%, #1c1c20 0%, transparent 60%),
+    radial-gradient(60% 70% at 85% 90%, #0e0e10 0%, transparent 60%),
+    #060607;
+}

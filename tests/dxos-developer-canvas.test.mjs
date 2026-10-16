@@ -166,7 +166,7 @@ test("BUILTIN_CANVAS_NODES：内置节点定义与源逐字一致（id / 端口 
     "builtin.director-3d", "builtin.image-asset", "builtin.video-asset", "builtin.audio-asset",
     "builtin.file-asset", "builtin.image-generator", "builtin.midjourney-generator",
     "builtin.video-generator", "builtin.audio-generator", "builtin.llm", "builtin.table",
-    "builtin.image-compare", "builtin.group", "builtin.prompt", "builtin.sticky", "builtin.junction",
+    "builtin.image-compare", "builtin.mosaic", "builtin.group", "builtin.prompt", "builtin.sticky", "builtin.junction",
   ]);
   for (const node of builtinsModule.BUILTIN_CANVAS_NODES) assert.ok(node.type.startsWith("builtin."), node.type);
   const prompt = builtinsModule.BUILTIN_CANVAS_NODES.find((node) => node.type === "builtin.prompt");

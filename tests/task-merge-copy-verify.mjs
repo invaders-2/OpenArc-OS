@@ -2,8 +2,8 @@
  * P2 · 任务表合并迁移的**副本验证**（手工运行，不属于 node --test 套件）。
  *
  * 用法：
- *   node tests/task-merge-copy-verify.mjs [真实 v26 库路径]
- * 默认源库取 artifacts/dxos-b5 下最新的 v26 真库；全程只读源库，所有写入都在 /tmp 副本。
+ *   node tests/task-merge-copy-verify.mjs [真实 v28 库路径]
+ * 默认源库取 artifacts/dxos-b5 下的真库（打开即升到 v28）；全程只读源库，所有写入都在 /tmp 副本。
  *
  * 输出三段：成功路径 / 失败注入与备份恢复 / 反例护栏，再补一次万行级计时。
  */
@@ -11,7 +11,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { seedBulkCore, seedStandard, snapshotV26, TASKS_CHILD_TABLES } from "./task-merge-fixtures.mjs";
+import { seedBulkCore, seedStandard, snapshotV28, TASKS_CHILD_TABLES } from "./task-merge-fixtures.mjs";
 
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite");
@@ -35,11 +35,11 @@ function line(tag, value) {
   console.log(value === undefined ? tag : tag + " " + value);
 }
 
-console.log("=== P2 副本验证 · 真实 v26 库副本 ===");
+console.log("=== P2 副本验证 · 真实 v28 库副本 ===");
 if (!fs.existsSync(SOURCE)) throw new Error("源库不存在：" + SOURCE);
 
 // 1) 只读源库 → 干净副本（先拷进 /tmp，再 VACUUM INTO，源库目录零写入）
-const real = path.join(TMP, "real-v26.db");
+const real = path.join(TMP, "real-v28.db");
 {
   const staged = path.join(TMP, "staged-source.db");
   fs.copyFileSync(SOURCE, staged);
@@ -65,7 +65,7 @@ line("[副本]", real + " 已播种 core/dx 双侧数据与 9 张子表");
 console.log("\n--- [1] 成功路径 ---");
 {
   const copy = copyOf(real, "success.db");
-  const pre = snapshotV26(copy);
+  const pre = snapshotV28(copy);
   const store = new IdentityStore({ path: copy, backupDir: path.join(TMP, "backup-success") }).open();
   const result = store.applyExplicitMigration(merge.taskMergeMigration);
   const db = store.connection;
@@ -91,8 +91,8 @@ console.log("\n--- [1] 成功路径 ---");
   line("[成功] DX→core 身份桥仍在 =", JSON.stringify(db.prepare("SELECT dx_task_id,core_task_id FROM dx_task_approval_bridge").all().map((r) => ({ ...r }))));
   line("[成功] 备份 =", JSON.stringify(store.migrationBackups));
   // 重放
-  db.exec("PRAGMA user_version = 26");
-  line("[成功] 降回 26 重放 =", JSON.stringify(store.applyExplicitMigration(merge.taskMergeMigration)) +
+  db.exec("PRAGMA user_version = 28");
+  line("[成功] 降回 28 重放 =", JSON.stringify(store.applyExplicitMigration(merge.taskMergeMigration)) +
     " 行数 tasks=" + count(db, "tasks") + " events=" + count(db, "task_events"));
   store.close();
 }
@@ -101,11 +101,11 @@ console.log("\n--- [1] 成功路径 ---");
 console.log("\n--- [2] 失败注入与备份恢复 ---");
 {
   const copy = copyOf(real, "rollback.db");
-  const pre = snapshotV26(copy);
+  const pre = snapshotV28(copy);
   const store = new IdentityStore({
     path: copy,
     backupDir: path.join(TMP, "backup-rollback"),
-    hooks: { onMigration: (version, db) => { if (version === 27) throw new Error("INJECTED_FAILURE_AFTER_DDL"); } },
+    hooks: { onMigration: (version, db) => { if (version === 29) throw new Error("INJECTED_FAILURE_AFTER_DDL"); } },
   }).open();
   let threw = null;
   try {
@@ -123,13 +123,13 @@ console.log("\n--- [2] 失败注入与备份恢复 ---");
   const backupPath = store.migrationBackups[0].path;
   line("[失败] 备份文件 =", backupPath);
   line("[失败] 备份 user_version =", openRaw(backupPath).prepare("PRAGMA user_version").get().user_version);
-  line("[失败] 备份快照与迁移前一致 =", JSON.stringify(snapshotV26(backupPath)) === JSON.stringify(pre));
+  line("[失败] 备份快照与迁移前一致 =", JSON.stringify(snapshotV28(backupPath)) === JSON.stringify(pre));
   store.close();
 
   // 真的用备份恢复
   for (const suffix of ["-wal", "-shm"]) fs.rmSync(copy + suffix, { force: true });
   fs.copyFileSync(backupPath, copy);
-  line("[恢复] 恢复后快照与迁移前一致 =", JSON.stringify(snapshotV26(copy)) === JSON.stringify(pre));
+  line("[恢复] 恢复后快照与迁移前一致 =", JSON.stringify(snapshotV28(copy)) === JSON.stringify(pre));
   const restored = new IdentityStore({ path: copy, backupDir: path.join(TMP, "backup-rollback") }).open();
   line("[恢复] 恢复后 user_version =", restored.schemaVersion,
     " tasks=" + count(restored.connection, "tasks"), " dx_tasks=" + count(restored.connection, "dx_tasks"));
