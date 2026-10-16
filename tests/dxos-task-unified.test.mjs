@@ -158,6 +158,60 @@ test("投影：dx 用 title / core 用 goal；状态、时间戳、步骤数、�
 });
 
 // ---------------------------------------------------------------------------
+// U2 · 每侧真实计数 + 截断标记：共享 limit 把一侧挤掉时，绝不把截断当成空
+// ---------------------------------------------------------------------------
+
+test("计数：无截断时 counts（真实总数）== listed（实际列出），truncated=false", async () => {
+  const s = await setup();
+  const listed = view.listUnifiedTasks({ db: s.db, userId: USER });
+  assert.deepEqual(listed.counts, { dx: 1, core: 1, total: 2 });
+  assert.deepEqual(listed.listed, { dx: 1, core: 1, total: 2 });
+  assert.equal(listed.truncated, false);
+  assert.deepEqual(listed.truncatedSides, []);
+  // 只请求一侧时，计数只反映被请求的那一侧（另一侧为 0，不是"截断"）。
+  const onlyCore = view.listUnifiedTasks({ db: s.db, userId: USER, source: "core" });
+  assert.deepEqual(onlyCore.counts, { dx: 0, core: 1, total: 1 });
+  assert.deepEqual(onlyCore.listed, { dx: 0, core: 1, total: 1 });
+  assert.equal(onlyCore.truncated, false);
+});
+
+test("截断：共享 limit 把 core 行整段挤出 items 时，counts.core>0 且如标记 core 被截断", async () => {
+  const f = await createTaskFixture({ dbPath: ":memory:" });
+  fixtures.push(f);
+  const db = f.identity.connection;
+  agentTaskStore.resetAgentTaskStoreForTests();
+  agentTaskStore.configureAgentTaskStore({ db, clock: f.clock, idFactory: () => crypto.randomUUID() });
+  const project = agentTaskStore.createProject({ name: "截断项目", rootNodeId: "root_trunc", createdBy: USER });
+  // 两条 DX（clock 固定在大时间戳）+ 一条更老的 core 任务（created_at=1）。
+  const dx1 = agentTaskStore.createTask({ projectId: project.id, instruction: "dx 一", createdBy: USER, title: "DX-1", actions: [] });
+  const dx2 = agentTaskStore.createTask({ projectId: project.id, instruction: "dx 二", createdBy: USER, title: "DX-2", actions: [] });
+  const coreId = "core_older_1";
+  f.taskStore.insertTask({ taskId: coreId, userId: USER, appId: "ai", status: "PENDING", goal: "core 老任务", createdAt: 1, updatedAt: 2 });
+
+  // limit=2：两侧各取 2 行再合并排序，较新的两条 DX 占满 items，core 被共享 limit 挤出。
+  const truncated = view.listUnifiedTasks({ db, userId: USER, limit: 2 });
+  assert.deepEqual(truncated.counts, { dx: 2, core: 1, total: 3 }, "counts 必须是每侧真实总数，不是取回行数");
+  assert.deepEqual(truncated.listed, { dx: 2, core: 0, total: 2 });
+  assert.equal(truncated.truncated, true);
+  assert.deepEqual(truncated.truncatedSides, ["core"]);
+  assert.deepEqual(truncated.items.map((item) => item.source), ["dx", "dx"]);
+  assert.equal(truncated.items.some((item) => item.source === "core"), false);
+  // 截断只影响列表投影：被挤掉的那条仍能按 source 单条读到（读模型不当它不存在）。
+  assert.equal(view.getUnifiedTask({ db, id: coreId, source: "core" }).title, "core 老任务");
+
+  // limit=1：两侧都被截断（dx 真实 2 > 列出 1；core 真实 1 > 列出 0）。
+  const one = view.listUnifiedTasks({ db, userId: USER, limit: 1 });
+  assert.deepEqual(one.counts, { dx: 2, core: 1, total: 3 });
+  assert.deepEqual(one.listed, { dx: 1, core: 0, total: 1 });
+  assert.deepEqual(one.truncatedSides, ["dx", "core"]);
+
+  // 截断读数不改变只读事实：两条 DX 与那条 core 都还在（行数未动）。
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM dx_tasks WHERE created_by=?").get(USER).n, 2);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE user_id=?").get(USER).n, 1);
+  assert.ok(dx1.id && dx2.id);
+});
+
+// ---------------------------------------------------------------------------
 // (b) 两边同名 id 不互相污染
 // ---------------------------------------------------------------------------
 

@@ -147,3 +147,36 @@ test("IPC：db 缺失时命令结构化 AGENT_DEPENDENCY_UNAVAILABLE，不返回
   assert.equal(res.detail.causeCode, "UNIFIED_VIEW_DEPENDENCY_UNAVAILABLE");
   assert.equal(res.detail.dependency, "sqlite");
 });
+
+// ---------------------------------------------------------------------------
+// U2 · 每侧真实计数 + 截断标记（IPC 级）：共享 limit 挤掉一侧时不当成空
+// ---------------------------------------------------------------------------
+
+test("IPC：limit 截断时如实返回每侧真实计数与截断标记（不把截断当空）", async () => {
+  const s = setup();
+  const project = await s.call("agent/project/create", { name: "截断读模型项目", rootNodeId: "root_trunc_ipc" });
+  assert.equal(project.ok, true);
+  const projectId = project.value.project.id;
+  // 两条 DX（clock 递增，较新）+ 一条更老的 core（created_at=1）；limit=2 会把 core 整段挤出 items。
+  const first = await s.call("agent/task/create", { projectId, instruction: "dx 一" });
+  const second = await s.call("agent/task/create", { projectId, instruction: "dx 二" });
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  s.taskStore.insertTask({ taskId: "core_trunc_ipc", userId: "u1", appId: "ai", status: "PENDING", goal: "core 老任务", createdAt: 1, updatedAt: 2 });
+
+  const res = await s.call("agent/task/unified-list", { limit: 2 });
+  assert.equal(res.ok, true);
+  assert.deepEqual(res.value.counts, { dx: 2, core: 1, total: 3 }, "counts 必须是每侧真实总数，不是取回行数");
+  assert.deepEqual(res.value.listed, { dx: 2, core: 0, total: 2 });
+  assert.equal(res.value.truncated, true);
+  assert.deepEqual(res.value.truncatedSides, ["core"]);
+  assert.equal(res.value.items.some((item) => item.source === "core"), false);
+  assert.equal(res.value.items.length, 2);
+
+  // 不截断时 counts == listed。
+  const full = await s.call("agent/task/unified-list", {});
+  assert.deepEqual(full.value.listed, { dx: 2, core: 1, total: 3 });
+  assert.equal(full.value.truncated, false);
+  assert.deepEqual(full.value.truncatedSides, []);
+  s.dispose();
+});

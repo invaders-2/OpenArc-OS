@@ -384,6 +384,22 @@ function queryViewList(db, options, source, limit) {
   return db.prepare(sql).all(...params);
 }
 
+/**
+ * 按来源统计视图里的**真实总数**（只读 COUNT，仍只落在只读视图上）。
+ * 为什么要单独统计：list 的 limit 是**共享**的，两侧各取 limit 行后合并、再切到 limit，
+ * 某一侧会被另一侧整段挤出 items（counts.core > 0 但 items 里没有 core 行）；
+ * 只报"取回了几行"会让调用方把截断误判成空。这里如实给出每侧真实总数，
+ * 与 items 实际列出的条数分开暴露（视图列定义见 electron/task-unified-schema.cjs:42-76，
+ * owner_id 分别是 core 的 user_id（:58）与 dx 的 created_by（:75））。
+ */
+function queryViewCount(db, options, source) {
+  const where = ["source = ?"];
+  const params = [source];
+  if (options.userId != null && options.userId !== "") { where.push("owner_id = ?"); params.push(String(options.userId)); }
+  const row = db.prepare("SELECT COUNT(*) AS n FROM v_task_unified WHERE " + where.join(" AND ")).get(...params);
+  return row && Number.isFinite(Number(row.n)) ? Number(row.n) : 0;
+}
+
 /** 按来源取单条；source 由调用方给定，绝不跨来源猜。 */
 function queryViewOne(db, id, source) {
   const row = db.prepare(VIEW_SELECT_ONE + " AND source = ?").get(String(id), source);
@@ -415,8 +431,12 @@ function requestedSources(source) {
 
 /**
  * 只读统一列表。
+ *   · counts = 每侧**真实总数**（COUNT，不受 limit 影响）+ 两者之和；
+ *   · listed = items 里实际列出的每侧条数（受共享 limit 截断影响）；
+ *   · truncated / truncatedSides = 只要有"真实总数 > 实际列出数"就如实置位。
+ * 为什么把三者分开：共享 limit 会把某一侧整段挤出 items，只报 listed 会让调用方把截断当空。
  * @param {{ db: object, source?: "dx"|"core", userId?: string, limit?: number }} options
- * @returns {{ readModel: true, boundary: string, sources: string[], counts: object, items: object[] }}
+ * @returns {{ readModel: true, boundary: string, sources: string[], counts: object, listed: object, truncated: boolean, truncatedSides: string[], items: object[] }}
  */
 function listUnifiedTasks(options) {
   const db = requireDb(options);
@@ -431,11 +451,28 @@ function listUnifiedTasks(options) {
     ...rawDx.map((row) => projectRow(SOURCE_DX, row)),
     ...rawCore.map((row) => projectRow(SOURCE_CORE, row)),
   ]).slice(0, limit);
+  const totalDx = sources.includes(SOURCE_DX) ? queryViewCount(db, opts, SOURCE_DX) : 0;
+  const totalCore = sources.includes(SOURCE_CORE) ? queryViewCount(db, opts, SOURCE_CORE) : 0;
+  const counts = Object.freeze({ dx: totalDx, core: totalCore, total: totalDx + totalCore });
+  // listed 是 items 里**实际留下**的每侧条数（不是各侧取回的行数）：只有这一口径才能回答
+  // "某一侧是否被共享 limit 整段挤掉"（取回 200 行但 items 里 0 行，仍是截断）。
+  const listed = Object.freeze({
+    dx: items.filter((item) => item.source === SOURCE_DX).length,
+    core: items.filter((item) => item.source === SOURCE_CORE).length,
+    total: items.length,
+  });
+  // 截断标记只认"真实总数 > 实际列出数"这一条事实；不把截断当成空，也不静默丢弃。
+  const truncatedSides = [];
+  if (listed.dx < counts.dx) truncatedSides.push(SOURCE_DX);
+  if (listed.core < counts.core) truncatedSides.push(SOURCE_CORE);
   return Object.freeze({
     readModel: true,
     boundary: UNIFIED_VIEW_BOUNDARY,
     sources: Object.freeze(sources.slice()),
-    counts: Object.freeze({ dx: rawDx.length, core: rawCore.length, total: items.length }),
+    counts,
+    listed,
+    truncated: listed.total < counts.total,
+    truncatedSides: Object.freeze(truncatedSides),
     items: Object.freeze(items),
   });
 }

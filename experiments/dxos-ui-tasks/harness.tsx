@@ -309,7 +309,8 @@ async function command(raw: any) {
     case "agent/task/list":
       if (scenario === "loading") return new Promise(() => {});
       /* core-only / both-empty / core-error-only：DX 侧确实没有任务（与统一读模型的 DX 部分一致）。 */
-      if (scenario === "empty" || scenario === "both-empty" || scenario === "core-only" || scenario === "core-only-dark" || scenario === "core-error-only")
+      /* truncated-hidden：core 真实有 5 条却一条都没列进 items；DX 侧确实 0 条（与读模型的 dx 计数一致）。 */
+      if (scenario === "empty" || scenario === "both-empty" || scenario === "core-only" || scenario === "core-only-dark" || scenario === "core-error-only" || scenario === "truncated-hidden")
         return finish({ ok: true, value: { items: [] } });
       if (scenario === "error") return finish({ ok: false, error: "AGENT_COMMAND_NOT_ALLOWED", message: "命令不在 agent:command 白名单内" });
       if (scenario === "unauthorized") return finish({ ok: false, error: "SESSION_EXPIRED", message: "会话已过期，请重新登录" });
@@ -413,6 +414,46 @@ async function command(raw: any) {
       if (scenario === "empty" || scenario === "both-empty") return finish({ ok: true, value: unifiedValue([], 0, 0) });
       if (scenario === "core-only" || scenario === "core-only-dark")
         return finish({ ok: true, value: unifiedValue([coreUnifiedItem()], 0, 1) });
+      /* U2 · 共享 limit 截断：core 真实 5 条，items 里只留下 1 条；counts > 列出，truncated=true。
+         形状对齐 task-unified-view.cjs:listUnifiedTasks —— counts 是每侧真实总数，listed 是 items 实列数。 */
+      if (scenario === "truncated" || scenario === "truncated-dark") {
+        const items = [
+          { source: "dx", id: "t_report", title: "整理本周周报", status: "RUNNING", projectId: "p_weekly" },
+          { source: "dx", id: "t_wait", title: "确认部署目标", status: "WAITING", projectId: "p_weekly" },
+          { source: "dx", id: "t_done", title: "生成发布说明", status: "SUCCEEDED", projectId: "p_weekly" },
+          coreUnifiedItem(),
+        ];
+        return finish({
+          ok: true,
+          value: {
+            readModel: true,
+            boundary: "这是读模型：不写任何表、不改变任何一方状态机。",
+            sources: ["dx", "core"],
+            counts: { dx: 3, core: 5, total: 8 },
+            listed: { dx: 3, core: 1, total: 4 },
+            truncated: true,
+            truncatedSides: ["core"],
+            items,
+          },
+        });
+      }
+      /* U2 · 边界响应：真实有 core 5 条但 items 一条都没列出 —— 列表必须 ready 且有截断提示，
+         不能因为"列不出 core 行"显示成空（这正是 U2 要堵的真缺口）。 */
+      if (scenario === "truncated-hidden") {
+        return finish({
+          ok: true,
+          value: {
+            readModel: true,
+            boundary: "这是读模型：不写任何表、不改变任何一方状态机。",
+            sources: ["dx", "core"],
+            counts: { dx: 0, core: 5, total: 5 },
+            listed: { dx: 0, core: 0, total: 0 },
+            truncated: true,
+            truncatedSides: ["core"],
+            items: [],
+          },
+        });
+      }
       if (scenario === "core-error" || scenario === "core-error-only")
         return finish({ ok: false, error: "AGENT_INTERNAL", message: "统一读模型读取失败：core 来源不可用（演示）" });
       if (scenario === "error") return finish({ ok: false, error: "AGENT_COMMAND_NOT_ALLOWED", message: "命令不在 agent:command 白名单内" });

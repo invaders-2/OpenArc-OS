@@ -688,6 +688,74 @@ await shoot({
   },
 });
 
+/* ── 4e. U2 · 统一读模型 limit 截断：counts 大于 items 时列表仍 ready 且有可见提示 ─────
+   共享 limit 会把某一侧整段挤出 items（counts.core>0 但没有 core 行）；列表状态必须按
+   每侧真实计数判定，被截断时仍为 ready，并给出可见的"仅显示前 N 条 / 还有更多"提示。
+   截断与 empty 严格区分：截断不是空，空态只在两侧真实计数都为 0 时出现。 */
+console.log(String.fromCharCode(10) + "U2 · 统一读模型 limit 截断：");
+setStep("统一读模型 limit 截断");
+
+await shoot({
+  name: "29-unified-truncated",
+  query: "scenario=truncated",
+  expect: '[data-task-list-state="ready"] [data-task-unified-truncated]',
+  setup: async (page) => {
+    await page.waitForSelector('[data-task-list-state="ready"] [data-task-unified-truncated]', { timeout: 20000 });
+    const empty = await page.$('[data-task-list-state="empty"]');
+    check("截断场景不得显示为空态", empty === null, "empty=" + (empty !== null));
+    const text = await page.$eval("[data-task-unified-truncated]", (el) => (el.textContent || "").trim());
+    check(
+      "截断提示可见且给出「仅显示前 N 条 / 还有更多」",
+      text.indexOf("仅显示前 4 条") >= 0 && text.indexOf("还有 4 条未显示") >= 0,
+      text.slice(0, 160),
+    );
+    const sides = await page.$eval("[data-task-unified-truncated]", (el) => el.getAttribute("data-task-unified-truncated-sides"));
+    check("截断提示点名被截断的来源（core）", sides === "core", "sides=" + sides);
+    const counts = await page.$eval("[data-task-unified]", (el) => (el.textContent || "").trim());
+    check("计数口径按每侧真实总数（dx 3 / core 5 / 共 8）", counts.indexOf("dx 3") >= 0 && counts.indexOf("core 5") >= 0 && counts.indexOf("共 8") >= 0, counts);
+    /* 截断侧仍可被选中 / 操作。 */
+    await page.click('[data-task-core-row="core_sync"]');
+    await page.waitForSelector("[data-task-core-detail]", { timeout: 10000 });
+    const status = await page.$eval("[data-task-core-detail]", (el) => el.getAttribute("data-task-core-status"));
+    check("截断侧 core 任务仍可选中并显示详情", status === "SUCCEEDED", "status=" + status);
+    const append = await page.$('[data-task-core-action="append-step"]');
+    check("截断侧 core 任务仍可操作（追加下一步入口在）", append !== null);
+    const names = await page.evaluate(() => (window.__oaTaskProbe ? window.__oaTaskProbe.commands.map((c) => c.command) : []));
+    check(
+      "截断场景只发白名单命令",
+      names.length > 0 && names.every((c) => TASK_CONSOLE_COMMANDS.indexOf(c) >= 0 && AGENT_COMMANDS.indexOf(c) >= 0),
+      [...new Set(names)].join(", "),
+    );
+  },
+});
+
+await shoot({
+  name: "30-unified-truncated-dark",
+  query: "scenario=truncated-dark&dark=1",
+  dark: true,
+  expect: '[data-task-list-state="ready"] [data-task-unified-truncated]',
+  setup: async (page) => {
+    await page.waitForSelector('[data-task-list-state="ready"] [data-task-unified-truncated]', { timeout: 20000 });
+    const isDark = await page.evaluate(() => !!document.querySelector(".window.dark"));
+    const text = await page.$eval("[data-task-unified-truncated]", (el) => (el.textContent || "").trim());
+    check("深色下截断提示仍可读", isDark === true && text.indexOf("还有 4 条未显示") >= 0, "dark=" + isDark + " text=" + text.slice(0, 90));
+  },
+});
+
+await shoot({
+  name: "31-unified-truncated-hidden",
+  query: "scenario=truncated-hidden",
+  expect: '[data-task-list-state="ready"] [data-task-unified-truncated]',
+  setup: async (page) => {
+    await page.waitForSelector('[data-task-list-state="ready"] [data-task-unified-truncated]', { timeout: 20000 });
+    const coreRows = await page.$$("[data-task-core-row]");
+    const empty = await page.$('[data-task-list-state="empty"]');
+    check("一侧真实有数据但全被截断：列表 ready 而非 empty", empty === null && coreRows.length === 0, "empty=" + (empty !== null) + " coreRows=" + coreRows.length);
+    const text = await page.$eval("[data-task-unified-truncated]", (el) => (el.textContent || "").trim());
+    check("被整段截断时提示给出「还有 5 条未显示」", text.indexOf("仅显示前 0 条") >= 0 && text.indexOf("还有 5 条未显示") >= 0, text.slice(0, 160));
+  },
+});
+
 /* core 命令白名单 / 载荷键：确认后按真实发出的命令断言。 */
 {
   const { ctx, page } = await openScenario(browser, "scenario=ready");

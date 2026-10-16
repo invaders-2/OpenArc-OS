@@ -94,8 +94,10 @@ import {
   taskListStateFromSides,
   unifiedCapabilityNote,
   unifiedCountsText,
+  unifiedSideCount,
   unifiedSourceBadge,
   unifiedSourceIndex,
+  unifiedTruncationText,
   waitingQuestionFromEvents,
 } from "./taskConsoleLogic";
 import { hasCoreTaskBridge, sendCoreTaskCommand } from "./coreTaskConsole";
@@ -799,11 +801,17 @@ function TaskConsoleBody({ role }: { role: string | null }) {
   const coreUnified = unified ? unified.items.filter((item) => item.source === "core") : [];
 
   /* 列表状态按统一视图**两侧**合并判定：DX ← agent/task/list，core ← 统一读模型。
-     只按 DX 计数会让 core-only 账号看到假空态（U1 修正）。 */
+     只按 DX 计数会让 core-only 账号看到假空态（U1 修正）。
+     U2 修正：core 侧用读模型暴露的**真实总数**（unifiedSideCount），而不是"items 里能列出的
+     core 行数" —— 共享 limit 把 core 行整段截掉时，按 items 长度判定会显示成空。 */
   const listSides = {
     dependencyUnavailable: !!dependency,
     dx: { loading, errorCode: listError ? listError.code : null, count: tasks.length },
-    core: { loading: unifiedLoading, errorCode: unifiedError ? unifiedError.code : null, count: coreUnified.length },
+    core: {
+      loading: unifiedLoading,
+      errorCode: unifiedError ? unifiedError.code : null,
+      count: unifiedSideCount(unified, "core", coreUnified.length),
+    },
   };
   const listState = taskListStateFromSides(listSides);
   const listFailureScope = taskListFailureScope(listSides);
@@ -811,6 +819,9 @@ function TaskConsoleBody({ role }: { role: string | null }) {
   /* 整页错误优先用 DX 的失败码（既有语义），DX 正常而 core 失败时点名 core。 */
   const listFailure = listError || unifiedError;
   const listFailureSide: "dx" | "core" | null = listError ? "dx" : unifiedError ? "core" : null;
+  /* U2 · 截断提示：只列出一部分时必须有可见说明，不把截断显示成空，也不静默丢弃。 */
+  const unifiedTruncation = unifiedTruncationText(unified);
+  const unifiedTruncatedSides = unified ? unified.truncatedSides.join("+") : "";
 
   const filteredTasks = filterTasks(tasks, query);
   const missing = missingDependencies(health);
@@ -1120,6 +1131,17 @@ function TaskConsoleBody({ role }: { role: string | null }) {
                 {unifiedCountsText(unified)}
               </span>
             </div>
+            {/* U2 · 截断可见提示：真实总数 > 已列出条数时必须显示，不把截断当成空。 */}
+            {unifiedTruncation ? (
+              <p
+                className="task-warn"
+                role="status"
+                data-task-unified-truncated
+                data-task-unified-truncated-sides={unifiedTruncatedSides}
+              >
+                {unifiedTruncation}
+              </p>
+            ) : null}
             <SearchField
               value={query}
               onValueChange={setQuery}

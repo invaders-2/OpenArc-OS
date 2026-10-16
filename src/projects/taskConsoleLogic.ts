@@ -1093,17 +1093,27 @@ export type UnifiedListView = {
   ok: boolean;
   readModel: boolean;
   sources: string[];
+  /** 每侧**真实总数**（后端 COUNT，不受共享 limit 影响）。 */
   counts: { dx: number; core: number; total: number };
+  /** items 里**实际列出**的每侧条数（受共享 limit 截断影响）。 */
+  listed: { dx: number; core: number; total: number };
+  /** 是否有真实行没有被列出来。 */
+  truncated: boolean;
+  /** 被截断的来源（真实总数 > 实际列出数）；后端未标注时由 counts / listed 如实推出。 */
+  truncatedSides: string[];
   items: UnifiedItem[];
   boundary: string;
 };
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 
+const countOf = (value: unknown): number | null => (Number.isFinite(Number(value)) ? Math.trunc(Number(value)) : null);
+
 export function normalizeUnifiedList(result: unknown): UnifiedListView {
   const root = isObj(result) ? (isObj(result.value) ? (result.value as Record<string, unknown>) : result) : {};
   const itemsRaw = Array.isArray(root.items) ? root.items : [];
   const items: UnifiedItem[] = [];
+  const listedFromItems = { dx: 0, core: 0 };
   for (const raw of itemsRaw) {
     if (!isObj(raw)) continue;
     const source = typeof raw.source === "string" ? raw.source : "";
@@ -1116,13 +1126,29 @@ export function normalizeUnifiedList(result: unknown): UnifiedListView {
       status: typeof raw.status === "string" ? raw.status : null,
       projectId: typeof raw.projectId === "string" ? raw.projectId : null,
     });
+    if (source === "dx") listedFromItems.dx += 1;
+    else if (source === "core") listedFromItems.core += 1;
   }
   const countsRaw = isObj(root.counts) ? root.counts : {};
   const counts = {
-    dx: Number.isFinite(Number(countsRaw.dx)) ? Number(countsRaw.dx) : 0,
-    core: Number.isFinite(Number(countsRaw.core)) ? Number(countsRaw.core) : 0,
-    total: Number.isFinite(Number(countsRaw.total)) ? Number(countsRaw.total) : items.length,
+    dx: countOf(countsRaw.dx) ?? 0,
+    core: countOf(countsRaw.core) ?? 0,
+    total: countOf(countsRaw.total) ?? items.length,
   };
+  /* listed 缺失时按 items 现算：旧形状的响应没有这个字段，不能因此漏掉截断。 */
+  const listedRaw = isObj(root.listed) ? root.listed : {};
+  const listed = {
+    dx: countOf(listedRaw.dx) ?? listedFromItems.dx,
+    core: countOf(listedRaw.core) ?? listedFromItems.core,
+    total: countOf(listedRaw.total) ?? items.length,
+  };
+  /* 截断标记优先取后端结果；后端没给（旧 / 边界响应）时按"真实总数 > 实际列出数"如实推出。 */
+  const derivedSides = UNIFIED_SOURCES.filter((side) => listed[side as "dx" | "core"] < counts[side as "dx" | "core"]);
+  const truncated = typeof root.truncated === "boolean" ? root.truncated : listed.total < counts.total;
+  const truncatedSidesRaw = Array.isArray(root.truncatedSides) ? root.truncatedSides : null;
+  const truncatedSides = truncatedSidesRaw
+    ? truncatedSidesRaw.filter((s): s is string => typeof s === "string" && UNIFIED_SOURCES.indexOf(s) >= 0)
+    : derivedSides;
   const sources = Array.isArray(root.sources)
     ? root.sources.filter((s): s is string => typeof s === "string")
     : [];
@@ -1131,6 +1157,9 @@ export function normalizeUnifiedList(result: unknown): UnifiedListView {
     readModel: root.readModel === true,
     sources: sources.length ? sources : UNIFIED_SOURCES.slice(),
     counts,
+    listed,
+    truncated,
+    truncatedSides,
     items,
     boundary: typeof root.boundary === "string" ? root.boundary : "",
   };
@@ -1172,6 +1201,37 @@ export function unifiedSourceBadge(source: unknown): { label: string; tone: Task
 export function unifiedCountsText(view: UnifiedListView | null): string {
   if (!view || !view.ok) return "统一读模型未返回";
   return "统一读模型：dx " + view.counts.dx + " / core " + view.counts.core + " / 共 " + view.counts.total;
+}
+
+/**
+ * 某一侧在列表状态判定里要用的计数。
+ * 以读模型暴露的**真实总数**为准（不受共享 limit 截断影响）；读模型缺失 / 失败时退回该侧
+ * 实际列出的条数 —— 任何情况下都不把"截断 / 字段缺失"当成"这一侧没有任务"（U2 修正）。
+ */
+export function unifiedSideCount(view: UnifiedListView | null, side: "dx" | "core", listedFallback = 0): number {
+  const fallback = Number.isFinite(listedFallback) && listedFallback > 0 ? Math.trunc(listedFallback) : 0;
+  if (!view || !view.ok) return fallback;
+  const total = Number.isFinite(view.counts[side]) && view.counts[side] > 0 ? Math.trunc(view.counts[side]) : 0;
+  return total > fallback ? total : fallback;
+}
+
+/**
+ * 截断提示文案：只列出一部分时必须可见（不能静默、也不能显示成空）。
+ * 措辞沿用既有"统一读模型"口径；未截断时返回空串，调用方据此不渲染该提示。
+ */
+export function unifiedTruncationText(view: UnifiedListView | null): string {
+  if (!view || !view.ok || !view.truncated) return "";
+  const shown = Math.max(0, Math.trunc(view.listed.total));
+  const total = Math.max(shown, Math.trunc(view.counts.total));
+  const hidden = total - shown;
+  const sides = view.truncatedSides.length
+    ? view.truncatedSides.map((s) => unifiedSourceLabel(s)).join("、")
+    : "未标注来源";
+  const head = "统一读模型：仅显示前 " + shown + " 条";
+  const tail = hidden > 0
+    ? "，还有 " + hidden + " 条未显示（共 " + total + " 条）"
+    : "（共 " + total + " 条）";
+  return head + tail + "；被截断的来源：" + sides + "。截断只表示没显示全，不代表没有任务。";
 }
 
 

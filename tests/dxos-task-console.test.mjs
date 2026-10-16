@@ -85,9 +85,11 @@ import {
   taskPhase,
   taskEventSequenceState,
   unifiedCountsText,
+  unifiedSideCount,
   unifiedSourceBadge,
   unifiedSourceIndex,
   unifiedSourceLabel,
+  unifiedTruncationText,
   waitingQuestionFromEvents,
   coreActionConfirmSummary,
   coreActionConfirmTitle,
@@ -715,6 +717,111 @@ test("统一读模型：来源标注 dx / core / 并列，计数不重算", () =
   assert.deepEqual([...UNIFIED_SOURCES], ["dx", "core"]);
   assert.equal(UNIFIED_READ_MODEL_COMMAND, "agent/task/unified-list");
   assert.deepEqual(normalizeUnifiedList(null).counts, { dx: 0, core: 0, total: 0 });
+});
+
+/* ── U2 · 统一读模型截断边界：counts > items 时不算空，且提示可见 ───────── */
+test("统一读模型截断：counts>items 时按每侧真实计数判定，截断不等于空", () => {
+  const view = normalizeUnifiedList({
+    ok: true,
+    readModel: true,
+    boundary: "只读",
+    sources: ["dx", "core"],
+    counts: { dx: 3, core: 5, total: 8 },
+    listed: { dx: 3, core: 0, total: 3 },
+    truncated: true,
+    truncatedSides: ["core"],
+    items: [
+      { source: "dx", id: "t1", title: "甲", status: "RUNNING", projectId: "p1" },
+      { source: "dx", id: "t2", title: "乙", status: "RUNNING", projectId: "p1" },
+      { source: "dx", id: "t3", title: "丙", status: "RUNNING", projectId: "p1" },
+    ],
+  });
+  assert.deepEqual(view.counts, { dx: 3, core: 5, total: 8 });
+  assert.deepEqual(view.listed, { dx: 3, core: 0, total: 3 });
+  assert.equal(view.truncated, true);
+  assert.deepEqual(view.truncatedSides, ["core"]);
+  /* core 一条也没列出，但真实计数仍是 5 —— 状态判定不能只看 items 长度。 */
+  assert.equal(unifiedSideCount(view, "core", 0), 5);
+  assert.equal(unifiedSideCount(view, "dx", 3), 3);
+  const ready = { dependencyUnavailable: false, dx: side(3), core: side(unifiedSideCount(view, "core", 0)) };
+  assert.equal(taskListStateFromSides(ready), "ready");
+  assert.notEqual(taskListStateFromSides(ready), "empty");
+  const text = unifiedTruncationText(view);
+  assert.ok(text.indexOf("仅显示前 3 条") >= 0, text);
+  assert.ok(text.indexOf("还有 5 条未显示") >= 0, text);
+  assert.ok(text.indexOf("core") >= 0, text);
+  assert.ok(text.indexOf("不代表没有任务") >= 0, text);
+});
+
+test("统一读模型截断：后端缺 listed/truncated 时按 counts 与 items 如实推出（旧响应不漏提示）", () => {
+  const view = normalizeUnifiedList({
+    ok: true,
+    readModel: true,
+    sources: ["dx", "core"],
+    counts: { dx: 2, core: 4, total: 6 },
+    items: [
+      { source: "dx", id: "t1" },
+      { source: "dx", id: "t2" },
+    ],
+  });
+  assert.deepEqual(view.listed, { dx: 2, core: 0, total: 2 });
+  assert.equal(view.truncated, true);
+  assert.deepEqual(view.truncatedSides, ["core"]);
+  assert.ok(unifiedTruncationText(view).indexOf("还有 4 条未显示") >= 0, unifiedTruncationText(view));
+  /* 旧形状（完全没有 counts / listed）不得凭空报截断。 */
+  const legacy = normalizeUnifiedList({ ok: true, items: [{ source: "dx", id: "t1" }] });
+  assert.deepEqual(legacy.counts, { dx: 0, core: 0, total: 1 });
+  assert.deepEqual(legacy.listed, { dx: 1, core: 0, total: 1 });
+  assert.equal(legacy.truncated, false);
+  assert.equal(unifiedTruncationText(legacy), "");
+});
+
+test("统一读模型截断：两侧不同截断各自点名；截断与 empty 明确区分", () => {
+  const both = normalizeUnifiedList({
+    ok: true,
+    sources: ["dx", "core"],
+    counts: { dx: 5, core: 6, total: 11 },
+    listed: { dx: 2, core: 3, total: 5 },
+    truncated: true,
+    truncatedSides: ["dx", "core"],
+    items: [
+      { source: "dx", id: "d1" },
+      { source: "dx", id: "d2" },
+      { source: "core", id: "c1" },
+      { source: "core", id: "c2" },
+      { source: "core", id: "c3" },
+    ],
+  });
+  assert.deepEqual(both.truncatedSides, ["dx", "core"]);
+  const bothText = unifiedTruncationText(both);
+  assert.ok(bothText.indexOf("仅显示前 5 条") >= 0 && bothText.indexOf("还有 6 条未显示") >= 0, bothText);
+  assert.ok(bothText.indexOf("DX") >= 0 && bothText.indexOf("core") >= 0, bothText);
+
+  /* 空响应：不是截断、没有提示，列表状态才是 empty。 */
+  const none = normalizeUnifiedList({ ok: true, counts: { dx: 0, core: 0, total: 0 }, items: [] });
+  assert.equal(none.truncated, false);
+  assert.equal(unifiedTruncationText(none), "");
+  assert.equal(taskListStateFromSides({ dependencyUnavailable: false, dx: side(0), core: side(0) }), "empty");
+
+  /* 边界响应：真实有 4 条却一条都没列出 → ready + 提示，绝不 empty。 */
+  const hidden = normalizeUnifiedList({
+    ok: true,
+    counts: { dx: 0, core: 4, total: 4 },
+    listed: { dx: 0, core: 0, total: 0 },
+    truncated: true,
+    truncatedSides: ["core"],
+    items: [],
+  });
+  assert.equal(unifiedSideCount(hidden, "core", 0), 4);
+  const hiddenSides = { dependencyUnavailable: false, dx: side(0), core: side(unifiedSideCount(hidden, "core", 0)) };
+  assert.equal(taskListStateFromSides(hiddenSides), "ready");
+  assert.notEqual(taskListStateFromSides(hiddenSides), "empty");
+  assert.ok(unifiedTruncationText(hidden).indexOf("还有 4 条未显示") >= 0, unifiedTruncationText(hidden));
+
+  /* 读模型失败 / 未加载：退回该侧实际列出条数，不制造数据。 */
+  assert.equal(unifiedSideCount(null, "core", 2), 2);
+  assert.equal(unifiedSideCount(null, "core", -1), 0);
+  assert.equal(unifiedSideCount({ ...none, ok: false }, "core", 3), 3);
 });
 
 test("界面源码包含四个写操作入口与统一读模型，且不发身份字段", () => {
