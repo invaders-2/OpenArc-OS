@@ -1,0 +1,7 @@
+{
+  "name": "openarc-vue-wiring-shots",
+  "version": "1.0.0",
+  "private": true,
+  "main": "main.cjs",
+  "description": "Vue 壳层接线截图：真实 Electron 1280x860 下抓登录态与桌面态"
+}

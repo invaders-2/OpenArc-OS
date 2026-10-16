@@ -1,0 +1,7 @@
+{
+  "name": "openarc-vue-mcp-probe",
+  "version": "1.0.0",
+  "private": true,
+  "main": "main.cjs",
+  "description": "Vue MCP 中心 + Skill 中心迁移验收：真实 Electron 驱动 dist/vue.html，断言 18 条 data-mcp-* 契约全集、真实握手与无 console 错误"
+}

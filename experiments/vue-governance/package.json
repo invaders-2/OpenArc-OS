@@ -1,0 +1,7 @@
+{
+  "name": "openarc-vue-governance-probe",
+  "version": "1.0.0",
+  "private": true,
+  "main": "main.cjs",
+  "description": "Vue 项目 + 组织治理迁移验收：真实 Electron 驱动 dist/vue.html，断言 data-d3-04d / data-gov-tool 契约全集、真实 resource/governance 命令与无 console 错误"
+}

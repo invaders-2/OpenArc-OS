@@ -1,0 +1,7 @@
+{
+  "name": "openarc-vue-settings-probe",
+  "version": "1.0.0",
+  "private": true,
+  "main": "main.cjs",
+  "description": "Vue 设置应用迁移验收：真实 Electron 驱动 dist/vue.html，断言设置外壳 / 三个 pane / model 契约 / 无 console 错误"
+}

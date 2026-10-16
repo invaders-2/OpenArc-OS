@@ -100,6 +100,8 @@ const INPUTS = [
     fpS: '[data-ds-id="sf-states"] .ds-search',
     hoverOn: '[data-ds-id="sf-states"] .ds-search',
     emptyInput: '[data-ds-id="sf-states"] input[type="search"]',
+    // 用户口径（10-15）：搜索框不要线框，焦点用槽色加深表达 —— 验"无框 + 有填充"而不是焦点环
+    fillFocus: true,
     filledInput: null,
     error: null,
     readonly: null,
@@ -193,7 +195,7 @@ for (const theme of ["light", "dark"]) {
   /* ── 3. focus-visible：单次前向 Tab 遍历 ─────────────────────────────── */
   const focusTargets = [
     ...BUTTONS.map((t) => ({ id: t.id, sel: t.sel, ring: t.sel })),
-    ...INPUTS.map((t) => ({ id: t.id, sel: t.sel, ring: t.fpS })),
+    ...INPUTS.map((t) => ({ id: t.id, sel: t.sel, ring: t.fpS, fillFocus: !!t.fillFocus })),
   ];
   await page.mouse.move(4, 4);
   await page.evaluate(() => document.activeElement && document.activeElement.blur());
@@ -213,6 +215,7 @@ for (const theme of ["light", "dark"]) {
             outlineStyle: rs.outlineStyle,
             outlineWidth: rs.outlineWidth,
             outlineColor: rs.outlineColor,
+            bg: rs.backgroundColor,
           };
         }
       }
@@ -355,10 +358,12 @@ for (const r of rows) {
       });
       continue;
     }
-    const ringOK =
-      f.outlineStyle === "solid" &&
-      parseFloat(f.outlineWidth) >= 2 &&
-      f.outlineColor !== "rgba(0, 0, 0, 0)";
+    const ringOK = t.fillFocus
+      ? (f.outlineStyle === "none" || parseFloat(f.outlineWidth) === 0) &&
+        !!f.bg && f.bg !== "rgba(0, 0, 0, 0)" && f.bg !== "transparent"
+      : f.outlineStyle === "solid" &&
+        parseFloat(f.outlineWidth) >= 2 &&
+        f.outlineColor !== "rgba(0, 0, 0, 0)";
     cases.push({
       name: `${r.theme}/${t.id}：Tab 可达 + :focus-visible 命中 + 焦点环可见（${f.outlineWidth} ${f.outlineStyle}）`,
       status: f.focusVisible && ringOK ? VERDICT.PASS : VERDICT.FAIL,
