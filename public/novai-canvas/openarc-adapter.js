@@ -133,6 +133,25 @@
     return { ok: true, result: result, revision: now.canvas ? Number(now.canvas.revision) : 0, state: { nodeCount: now.nodes.length, edgeCount: now.connections.length } };
   }
 
+  /**
+   * 10-16 · 素材库面板里的条目 url 是稳定引用 openarc-asset:<ResourceRef>（页面没法直接显示）：
+   * 插入画布前经宿主按引用读一次原图（逐资源授权），拿到可显示的数据再交给画布原来的入口。
+   * 画布保存时宿主再把数据换回引用 —— 文档里只存引用，不复制图片。
+   */
+  (function wrapAssetInsert() {
+    var orig = window.createImageCardFromUrl;
+    if (typeof orig !== "function") return;
+    window.createImageCardFromUrl = function (url, point, name) {
+      var u = String(url || "");
+      if (u.indexOf("openarc-asset:") !== 0) return orig.apply(this, arguments);
+      var b = bridge();
+      if (!b || typeof b.call !== "function") return;
+      b.call("library.resolve", { url: u }).then(function (res) {
+        if (res && res.dataUrl) orig(res.dataUrl, point, name || res.name || "asset");
+      }).catch(function () { /* 宿主已给出提示 */ });
+    };
+  })();
+
   window.addEventListener("message", function (event) {
     var d = event.data;
     if (!d || d.ch !== CH || d.dir !== "host->canvas") return;

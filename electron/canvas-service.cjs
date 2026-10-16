@@ -20,7 +20,9 @@ const CANVAS_ID = () => "cv_" + Date.now().toString(36) + "_" + Math.random().to
 const CMD_ID = () => "cc_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
 
 class CanvasService {
-  constructor({ identity, store, resourceStore = null, authService = null, resourceService = null, clock = null, logger = null } = {}) {
+  constructor({ identity, store, resourceStore = null, authService = null, resourceService = null, clock = null, logger = null, thumbnailer = null } = {}) {
+    /** 10-16：缩略器（nativeImage 形状；测试注入，生产懒加载 electron.nativeImage）。 */
+    this.thumbnailer = thumbnailer;
     if (!identity || !store) throw new Error("CanvasService 需要 identity 与 store");
     this.identity = identity;
     this.store = store;
@@ -543,11 +545,13 @@ class CanvasService {
     // 注入的 tempDir 既可能是字符串路径，也可能是返回路径的函数（identity-bootstrap 传字符串）。
     const dir = typeof this.tempDir === "function" ? this.tempDir() : (this.tempDir || null);
     if (!dir) return fail("RESOURCE_UNAVAILABLE");
+    // 临时文件名只用 ASCII（路径安全）；资源库里显示的名字保留原文（中文名不再变成下划线），只去掉路径与控制字符。
     const safe = String(name).replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 80) || "canvas-image";
+    const display = String(name).replace(/[\/\\:*?"<>|\u0000-\u001f]/g, "_").trim().slice(0, 120) || safe;
     const file = require("node:path").join(dir, "canvas-import-" + Date.now().toString(36) + "-" + safe);
     require("node:fs").writeFileSync(file, bytes);
     try {
-      const imported = await this.resourceService.importManaged({ context: { ...context, appId: "resource-library" }, sourcePath: file, name: safe, resourceType: m[1].startsWith("video") ? "video" : "image", scope: "PERSONAL" });
+      const imported = await this.resourceService.importManaged({ context: { ...context, appId: "resource-library" }, sourcePath: file, name: display, resourceType: m[1].startsWith("video") ? "video" : "image", scope: "PERSONAL" });
       if (!imported || !imported.ok) return imported && imported.error ? imported : fail("IMPORT_FAILED");
       const ref = imported.resource && (imported.resource.resourceId || imported.resource.resourceRef);
       return ok({ ref: ref ? "openarc-asset:" + String(ref).replace(/^openarc-resource:/, "") : null, resource: imported.resource || null });
@@ -575,6 +579,68 @@ class CanvasService {
     const data = this.resourceService.readDataUrl({ context, resourceRef: id });
     if (!data || !data.ok) return fail("ASSET_UNAVAILABLE");
     return ok({ ref: "openarc-asset:" + id, dataUrl: data.dataUrl, name: row.name, version: Number(row.version || 1) });
+  }
+
+  /**
+   * 10-16 · 画布「素材库」面板：列出当前用户能在画布里引用的资源库图片（与 readAsset 同一授权口径），
+   * 每条带一张 ≤256px 的 JPEG 缩略图（data URL，按 resourceId+version 缓存）。原图不在这里传：
+   * 插入画布时再经 readAsset 按引用读取，画布文档只存 openarc-asset:<ResourceRef>。
+   */
+  libraryList({ context, limit = 60, query = "" } = {}) {
+    const r = this.#actor(context);
+    if (!r.ok) return r;
+    if (!this.resourceStore || typeof this.resourceStore.resourceRowsByOrg !== "function") return ok({ items: [] });
+    const q = String(query || "").trim().toLowerCase();
+    const rows = this.resourceStore.resourceRowsByOrg(r.user.team_id)
+      .filter((row) => row.resource_type === "image" && row.trash_state !== "TRASHED" && row.registry_status === "active")
+      .filter((row) => !q || String(row.name || "").toLowerCase().includes(q))
+      .sort((a, b) => Number(b.updated_at || 0) - Number(a.updated_at || 0));
+    const max = Math.max(1, Math.min(120, Number(limit) || 60));
+    const items = [];
+    for (const row of rows) {
+      if (items.length >= max) break;
+      if (this.authService) {
+        const auth = this.authService.authorize({ context, action: authz.ACTION.READ, resource: row.resource_id });
+        const ownerOk = row.owner_user_id != null && String(row.owner_user_id) === String(r.user.id);
+        if ((!auth || auth.decision !== "ALLOW") && !ownerOk) continue;
+      }
+      items.push({
+        ref: "openarc-asset:" + row.resource_id,
+        resourceId: row.resource_id,
+        name: String(row.name || ""),
+        mimeType: String(row.mime_type || ""),
+        generated: String(row.source || "") === "generated",
+        updatedAt: Number(row.updated_at || 0),
+        thumbnail: this.#thumbnail(context, row),
+      });
+    }
+    return ok({ items, total: rows.length });
+  }
+
+  #thumbs = new Map();
+  #thumbnail(context, row) {
+    const key = row.resource_id + "@" + Number(row.version || 1);
+    if (this.#thumbs.has(key)) return this.#thumbs.get(key);
+    let out = null;
+    try {
+      const data = this.resourceService && typeof this.resourceService.readDataUrl === "function" ? this.resourceService.readDataUrl({ context, resourceRef: row.resource_id }) : null;
+      if (data && data.ok && data.dataUrl) {
+        out = data.dataUrl;
+        const ni = this.thumbnailer || (process.versions.electron ? (() => { try { return require("electron").nativeImage; } catch { return null; } })() : null);
+        const m = /^data:([^;,]+);base64,(.*)$/s.exec(data.dataUrl);
+        if (ni && m && typeof ni.createFromBuffer === "function") {
+          const img = ni.createFromBuffer(Buffer.from(m[2], "base64"));
+          if (img && !img.isEmpty()) {
+            const { width } = img.getSize();
+            const small = width > 256 ? img.resize({ width: 256, quality: "good" }) : img;
+            out = "data:image/jpeg;base64," + small.toJPEG(82).toString("base64");
+          }
+        } else if (data.dataUrl.length > 400 * 1024) out = null; // 没有缩略器时不把大图塞进列表
+      }
+    } catch { out = null; }
+    if (this.#thumbs.size > 400) this.#thumbs.clear();
+    this.#thumbs.set(key, out);
+    return out;
   }
 
   // ---------------------------------------------------------------- 资源可用性（A08）

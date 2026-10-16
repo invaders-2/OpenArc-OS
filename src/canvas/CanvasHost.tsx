@@ -102,6 +102,25 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
     try { return await bridge.command(payload); } catch { return { ok: false, error: "INTERNAL_ERROR" }; }
   }, []);
 
+  const resourceCmd = useCallback(async (payload: Record<string, unknown>): Promise<any> => {
+    const bridge = (window as any).openarc?.resource;
+    if (!bridge) return { ok: false, error: "NO_BRIDGE" };
+    try { return await bridge.command(payload); } catch { return { ok: false, error: "INTERNAL_ERROR" }; }
+  }, []);
+  /** 10-16 · 画布素材面板的数据形状（上游 /api/asset-library 的 library 结构），来源 = OpenArc 资源库。*/
+  const libraryShape = useCallback(async () => {
+    const res = await canvasCmd({ type: "canvas/libraryList", limit: 80 });
+    const list: any[] = res && res.ok && Array.isArray(res.items) ? res.items : [];
+    const toItem = (it: any) => ({ id: it.resourceId, name: it.name || "图片", url: it.ref, thumbnail: it.thumbnail || "", kind: "image", type: "image" });
+    const all = list.map(toItem);
+    const gen = list.filter((it) => it.generated).map(toItem);
+    const categories = [
+      { id: "oa-all", name: "全部图片", type: "image", items: all },
+      { id: "oa-generated", name: "AI 生成", type: "image", items: gen },
+    ];
+    return { library: { active_library_id: "openarc", libraries: [{ id: "openarc", name: "OpenArc 资源库", categories }], categories } };
+  }, [canvasCmd]);
+
   const buildConfig = useCallback(async () => {
     const res = await modelCmd({ type: "canvas/models" });
     const models: any[] = res && res.ok && Array.isArray(res.models) ? res.models : [];
@@ -517,9 +536,63 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
         setNotice("已停止生成（后续请求不会再发出）");
         return res || { ok: false };
       }
+      // —— 10-16 · 素材库面板 = OpenArc 资源库 ——
+      case "library.get": return await libraryShape();
+      case "library.local": return { items: [], tree: null };
+      case "library.resolve": {
+        const url = String(params.url || "");
+        if (!url.startsWith(ASSET_PREFIX)) return { __status: 400, body: { error: "INVALID_INPUT" } };
+        const ref = url.slice(ASSET_PREFIX.length);
+        const cached = dataUrlByRef.current.get(ref);
+        if (cached) return { dataUrl: cached };
+        const res = await canvasCmd({ type: "canvas/readAsset", ref });
+        if (!res || !res.ok || !res.dataUrl) { setNotice("素材不可用（" + String((res && res.error) || "UNKNOWN") + "）"); return { __status: 404, body: { error: (res && res.error) || "ASSET_UNAVAILABLE" } }; }
+        dataUrlByRef.current.set(ref, res.dataUrl);
+        refByDataUrl.current.set(res.dataUrl, ASSET_PREFIX + ref);
+        return { dataUrl: res.dataUrl, name: res.name };
+      }
+      case "library.addItem":
+      case "library.addItems": {
+        const list: { url: string; name: string }[] = method === "library.addItem" ? [{ url: String(params.url || ""), name: String(params.name || "") }] : (Array.isArray(params.items) ? params.items : []).map((it: any) => ({ url: String((it && it.url) || ""), name: String((it && it.name) || "") }));
+        let saved = 0;
+        for (const it of list.slice(0, 8)) {
+          // 已经是资源库里的图（引用或其显示数据）→ 不重复入库
+          if (it.url.startsWith(ASSET_PREFIX) || refByDataUrl.current.has(it.url)) { saved += 1; continue; }
+          if (!it.url.startsWith("data:")) continue;
+          if (!canvasId) return { __status: 409, body: { detail: "请先打开一个画布" } };
+          const res = await canvasCmd({ type: "canvas/importAsset", canvasId, name: it.name || "画布素材", dataUrl: it.url });
+          if (res && res.ok && res.ref) {
+            dataUrlByRef.current.set(String(res.ref).slice(ASSET_PREFIX.length), it.url);
+            refByDataUrl.current.set(it.url, res.ref);
+            saved += 1;
+          }
+        }
+        if (!saved && list.length) return { __status: 502, body: { detail: "保存到 OpenArc 资源库失败" } };
+        setNotice("已保存到 OpenArc 资源库");
+        return await libraryShape();
+      }
+      case "library.renameItem": {
+        const name = String(params.name || "").trim();
+        if (!name) return { __status: 400, body: { detail: "名称不能为空" } };
+        const r = await resourceCmd({ type: "resource/updateMetadata", resourceRef: "resource://" + String(params.id || ""), name });
+        if (!r || !r.ok) return { __status: 502, body: { detail: "重命名失败（" + String((r && r.error) || "UNKNOWN") + "）" } };
+        return await libraryShape();
+      }
+      case "library.trashItems": {
+        const ids: string[] = Array.isArray(params.ids) ? params.ids.map(String) : [];
+        let failed = 0;
+        for (const id of ids.slice(0, 50)) {
+          const r = await resourceCmd({ type: "resource/delete", resourceRef: "resource://" + id });
+          if (!r || !r.ok) failed += 1;
+        }
+        if (failed) setNotice(failed + " 个素材没能移到回收站（可能没有权限）");
+        return await libraryShape();
+      }
+      case "library.unsupported":
+        return { __status: 501, body: { error: "OPENARC_UNSUPPORTED", detail: "素材分组由 OpenArc 资源库统一管理，请在「资源库」里整理" } };
       default: return { __status: 501, body: { error: "OPENARC_UNSUPPORTED", message: "不在 OpenArc 集成范围内的能力：" + method } };
     }
-  }, [buildConfig, canvasCmd, items, pushContext, refreshList, resolveRefs, refsBack, taskCmd, upstreamCanvas]);
+  }, [buildConfig, canvasCmd, items, libraryShape, pushContext, refreshList, resolveRefs, refsBack, resourceCmd, taskCmd, upstreamCanvas]);
 
   // 应用页面的请求 → 受控命令 → 回包（**只接受当前外壳实例**；子页由外壳中继附加 token）
   useEffect(() => {

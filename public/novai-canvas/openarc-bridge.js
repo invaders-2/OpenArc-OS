@@ -353,6 +353,16 @@
     if (m === "POST" && pathname === "/api/canvas-assets/check") return { method: "canvas.assetStates", params: { body: body } };
     if (m === "POST" && pathname === "/api/ai/upload") return { method: "canvas.upload", params: { form: body } };
     if (m === "POST" && pathname === "/api/upload") return { method: "canvas.upload", params: { form: body } };
+    // —— 10-16 · 素材库面板 = OpenArc 资源库（列表 / 存入 / 重命名 / 移到回收站；分组由资源库管理）——
+    if (m === "GET" && pathname === "/api/asset-library") return { method: "library.get" };
+    if (m === "GET" && pathname === "/api/local-assets") return { method: "library.local" };
+    if (m === "POST" && pathname === "/api/asset-library/items") return { method: "library.addItem", params: { url: body && body.url, name: body && body.name } };
+    if (m === "POST" && pathname === "/api/asset-library/items/batch") return { method: "library.addItems", params: { items: body && Array.isArray(body.items) ? body.items.slice(0, 8) : [] } };
+    if (m === "POST" && pathname === "/api/asset-library/items/delete") return { method: "library.trashItems", params: { ids: body && Array.isArray(body.ids) ? body.ids.slice(0, 50) : [] } };
+    var libItem = pathname.match(/^\/api\/asset-library\/items\/([^/]+)$/);
+    if (libItem && m === "PATCH") return { method: "library.renameItem", params: { id: decodeURIComponent(libItem[1]), name: body && body.name } };
+    if (libItem && m === "DELETE") return { method: "library.trashItems", params: { ids: [decodeURIComponent(libItem[1])] } };
+    if (pathname.indexOf("/api/asset-library/") === 0) return { method: "library.unsupported", params: { path: pathname.slice(0, 120) } };
     return null;
   }
 

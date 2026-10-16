@@ -43,6 +43,8 @@ const RENDERER_COMMANDS = extendRendererCommands([
   "canvas/modelImage",
   "canvas/importAsset",
   "canvas/readAsset",
+  // 10-16：画布「素材库」面板 = OpenArc 资源库里画布可引用的图片（缩略图 + 引用）
+  "canvas/libraryList",
 ]);
 const CANVAS_COMMAND_NOT_ALLOWED = "CANVAS_COMMAND_NOT_ALLOWED";
 
@@ -129,6 +131,8 @@ function registerCanvasIpc({ ipcMain, service, identity, isTrusted, hostAppId = 
           return service.importAsset({ context, canvasId: asStr(payload.canvasId, 120), name: asStr(payload.name, 120), dataUrl: typeof payload.dataUrl === "string" ? payload.dataUrl.slice(0, 12 * 1024 * 1024) : "" });
         case "canvas/readAsset":
           return service.readAsset({ context, ref: asStr(payload.ref, 200) });
+        case "canvas/libraryList":
+          return service.libraryList({ context, limit: Number(payload.limit) || 60, query: asStr(payload.query, 120) || "" });
         default: {
           // B5d：白名单里的扩展命令先交给同一个扩展分发；未命中/未装配一律回落既有错误码，不放行任意命令。
           if (extension && typeof extension.dispatch === "function") {
