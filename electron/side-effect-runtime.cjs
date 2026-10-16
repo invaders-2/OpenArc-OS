@@ -45,8 +45,13 @@ const EXECUTOR_TIMEOUT_MS = 15000;
  * 在受监督 executor 子进程里再造一份 CanvasService 会变成第二个写者与第二份 revision 权威 ——
  * 那正是 D5-02 §"不建第二套画布"禁止的。因此这里显式把画布写操作的 execution placement 写成 IN_PROCESS
  * （与浏览器导航同类取舍：放弃 child 寿命证据，换取唯一权威；lease/claim/exactly-once/verify 全部照旧）。
+ *
+ * D5-04 追加 `McpExternal`：MCP 工具的活连接（McpService.live）只存在于 main 进程，受监督 executor
+ * 子进程里既没有这条连接，也不应该为了执行它在 child 里再造一份传输权威。因此 MCP 外部工具与上两者
+ * 同类：execution placement 显式 IN_PROCESS，但 approval / lease / claim / exactly-once / verify / audit
+ * 仍全部由**同一个** SideEffectAuthority 裁决。
  */
-const IN_PROCESS_EXECUTION_PROVIDERS = Object.freeze(new Set(["BrowserControl", "CanvasControl"]));
+const IN_PROCESS_EXECUTION_PROVIDERS = Object.freeze(new Set(["BrowserControl", "CanvasControl", "McpExternal"]));
 
 /** approval 快照 / tool result 只允许 safe 字段。 */
 const SAFE_SNAPSHOT_SECRET_RE = /^(secret|token|authorization|api[_-]?key|credential|password|bearer|capability)/i;
@@ -57,9 +62,10 @@ function safeToolResult(call) {
   const pre = call && call.preconditionsSafe ? call.preconditionsSafe : {};
   const out = {
     resourceRef: pre.resourceRef || null,
-    trashed: true,
     verified: true,
   };
+  // trashed 只对"确实以 resourceRef 为目标"的 call 成立；外部 MCP call 不得凭空多出这个字段。
+  if (pre.resourceRef) out.trashed = true;
   if (pre.expectedVersion != null) out.version = pre.expectedVersion;
   return out;
 }
@@ -188,8 +194,15 @@ class SideEffectRuntime {
     if (ref && nameStore && typeof nameStore.resourceByRef === "function") {
       try { const row = nameStore.resourceByRef(String(ref)); if (row && typeof row.name === "string") targetName = row.name.slice(0, 120); } catch { targetName = null; }
     }
-    // 非 Resource 目标（受控浏览器标签）：显示稳定的目标身份，绝不显示页面正文。
-    if (!targetName && pre.targetRef) targetName = "浏览器标签 " + String(pre.targetRef).slice(0, 80);
+    // 非 Resource 目标：显示稳定的目标身份，绝不显示页面正文 / 原始参数值。
+    //   · mcp-tool（D5-04）：目标 = 外部 MCP 的 server · tool，参数摘要走 expectedEffects（已脱敏）；
+    //   · 其余（受控浏览器标签）：沿用既有显示。
+    if (!targetName && pre.targetRef) {
+      const first = Array.isArray(call.expectedEffectsSafe) && call.expectedEffectsSafe[0] ? call.expectedEffectsSafe[0] : null;
+      targetName = (String(pre.targetType || "") === "mcp-tool" && first && first.serverRef && first.toolRef)
+        ? "MCP " + String(first.serverRef).slice(0, 60) + " · " + String(first.toolRef).slice(0, 60)
+        : "浏览器标签 " + String(pre.targetRef).slice(0, 80);
+    }
     const approval = this.authority.effectiveApproval(call.callId);
     const allowed = new Set(["approvalRequestId", "status", "toolId", "toolDisplayName", "riskClass", "effectClass", "targetDisplayName", "resourceRef", "targetRef", "url", "expectedEffects", "expectedVersion", "currentVersion", "expiresAt", "requiresApproval"]);
     const snap = {
@@ -297,9 +310,9 @@ class SideEffectRuntime {
       if (after && !CALL_TERMINAL.includes(String(after.status)) && after.status === CALL_STATUS.APPROVED) this.#blockPending(callId, (lease && lease.error) || SIDE_EFFECT_ERROR.CALL_STATE);
       return { ok: false, inProcess: true, error: (lease && lease.error) || SIDE_EFFECT_ERROR.CALL_STATE, call: this.store.callById(callId) };
     }
-    await this.authority.executeSideEffect({ callId, leaseId: lease.lease.leaseId, holderId, timeoutMs: Number(timeoutMs) > 0 ? Number(timeoutMs) : this.executorTimeoutMs });
+    const authorityResult = await this.authority.executeSideEffect({ callId, leaseId: lease.lease.leaseId, holderId, timeoutMs: Number(timeoutMs) > 0 ? Number(timeoutMs) : this.executorTimeoutMs });
     let after = this.store.callById(callId);
-    if (after && after.status === CALL_STATUS.SUCCEEDED) return { ok: true, inProcess: true, call: after, safeResult: safeToolResult(after), error: null };
+    if (after && after.status === CALL_STATUS.SUCCEEDED) return { ok: true, inProcess: true, call: after, safeResult: safeToolResult(after), result: authorityResult ? authorityResult.result : null, error: null };
     // 与 out-of-process 路径**同一套**收敛语义：UNKNOWN_EFFECT 一律走只读恢复核查，
     // 并标记 recovered=true 让 orchestrator 走 BLOCK（§28：绝不自动续接 Harness）。
     if (after && after.status === CALL_STATUS.UNKNOWN_EFFECT) {
@@ -420,11 +433,11 @@ class SideEffectRuntime {
         continue;
       }
       // 已被 trusted user / 其它路径执行完成：orchestrator 仍需把 verified result 交回 Harness。
-      if (call.status === CALL_STATUS.SUCCEEDED) return { ok: true, decision: "APPROVED", callId: call.callId, call, safeResult: safeToolResult(call) };
+      if (call.status === CALL_STATUS.SUCCEEDED) return { ok: true, decision: "APPROVED", callId: call.callId, call, safeResult: safeToolResult(call), result: null };
       if (call.status === CALL_STATUS.APPROVED || call.status === CALL_STATUS.LEASED) {
         const res = await this.executeApproved({ callId: call.callId, holderId: "oase_1" });
         // 只有**未经 UNKNOWN_EFFECT** 的 direct verified success 才允许回到 Harness。
-        if (res.ok && res.recovered !== true) return { ok: true, decision: "APPROVED", callId: call.callId, call: res.call, safeResult: res.safeResult };
+        if (res.ok && res.recovered !== true) return { ok: true, decision: "APPROVED", callId: call.callId, call: res.call, safeResult: res.safeResult, result: res.result == null ? null : res.result };
         return { ok: false, decision: res.recovered ? "UNKNOWN_EFFECT" : (res.unknownEffect ? "UNKNOWN_EFFECT" : "FAILED"), recovered: !!res.recovered, recoveredStatus: res.recoveredStatus || null, error: res.error, callId: call.callId, call: res.call };
       }
       const denyReasons = { [CALL_STATUS.BLOCKED]: "DENIED", [CALL_STATUS.FAILED]: "FAILED", [CALL_STATUS.CANCELLED]: "CANCELLED" };

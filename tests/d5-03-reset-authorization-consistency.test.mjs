@@ -8,7 +8,7 @@
  * 本文件把"重置 = 授权状态也归零，且与身份删除同一个事务"立成可执行的合同：
  *
  *   T1 同事务回滚：授权清理语句注入失败 / 身份最后一条语句注入失败 → 逐表逐行与重置前一致；
- *   T2 清理范围与审计保留：授权事实四表 0 行（= 全部指向已删组织的行）；28 张带
+ *   T2 清理范围与审计保留：授权事实四表 0 行（= 全部指向已删组织的行）；29 张带
  *      organization_id 的表逐表盘点；audit_log / authorization_audit / device_audit 一行不删；
  *   T3 组织 id 复用不被旧墓碑压制：同一个 id 上的 A/B 对照（重置前播种被墓碑挡 → 重置后正常播种）；
  *   T4 反向：正常路径（未重置）墓碑仍在、不被重播种覆盖、撤权不复活；
@@ -33,7 +33,15 @@
  *   · T6 旧期望「恰好四张授权表」→ 新期望「七张（四张授权 + 三张设备身份）」。
  *   · T2 旧期望「授权事实四表 0 行」→ 新期望「七张全 0 行」。
  *
- * 28 张带 organization_id 的表的逐表结论（判据都是可复核的取数路径，不是"应该没事"）：
+ * B5e 变更披露（org 作用域集合 28 → 29，逐表判定后结论不变）：
+ *   · B5c/B5d 新增画布域素材库索引表 canvas_dxos_asset_libraries（organization_id NOT NULL），
+ *     于是「带 organization_id 的表」由 28 张变 29 张 —— T2/T6 的集合守卫按设计跳闸（本轮实测 29 !== 28）。
+ *   · 按守卫要求重新逐表判定重置清理范围：结论**不变**，重置删除集合仍是那七张
+ *     （授权事实四张 + 设备身份三张）。该表判为「不删」，理由见下面「不清」条目。
+ *   · T6 新增 pin 断言：把「恰好七张，且 canvas_dxos_* 三张一张都不进」固定成可执行合同，
+ *     下次表集合再变仍会跳闸，但本轮判定结论不会再被无声改写。
+ *
+ * 29 张带 organization_id 的表的逐表结论（判据都是可复核的取数路径，不是"应该没事"）：
  *
  *   清（授权事实，四张）：
  *     app_policy_provisions   策略提供记录 + 撤销墓碑。取数 policyProvisionByKey(organization_id,…)；
@@ -61,6 +69,19 @@
  *         那才是新造的不一致，故不在本批范围。第七批起 devices 本身随重置清空，不再是举例对象。）
  *     collections / resource_registry / content_objects / library_resources / resource_* /
  *       tags / projects / canvas_boards —— 用户内容，用户明令禁止整库扫删。
+ *     canvas_dxos_asset_libraries  B5c 画布域素材库索引表（B5e 显式登记；org 作用域 28 → 29 的新增项）。
+ *       判定依据（为什么计入 org 作用域、却不进重置删除集合）：
+ *         · 表作用 = 素材库的索引 / 元数据（库名 / format / visibility / owner / version），
+ *           没有任何 actions / principal / permission 列，不承载授权事实；canvas 侧鉴权走命令面
+ *           + resource 授权，取数路径不读本表。
+ *         · 素材字节仍在既有 resource_* 表（content_objects / library_resources / resource_registry）
+ *           —— canvas-dxos-schema.cjs 文件头已显式约定「这里只存索引与元数据，不建第二套素材系统」。
+ *         · 它既不是授权事实，也不能恢复设备身份 / 权限，与设备三张表没有可比路径。
+ *       处置：**不删**。重置后它可能留下指向已删组织的孤儿行（与 canvas_boards 同类用户内容），
+ *       那是历史，不产生任何授权结论（T2 的 residue 判据本就把这类残留列为预期）。
+ *       同域另两张表 canvas_dxos_asset_items / canvas_dxos_agent_attachments 没有 organization_id，
+ *       本就不在 org 作用域清单里，同样不在重置删除集合。
+ *
  *     mcp_connections / mcp_credentials —— 连接配置与凭据引用；mcp 授权权威是
  *       app_resource_grants(resource_type='mcp')（已清），连接自身按 organization_id 取。
  *     model_providers / model_configs / model_defaults / model_credentials —— 模型配置与凭据。
@@ -111,8 +132,14 @@ const RESET_DELETED_TABLES = Object.freeze([
 ]);
 /** 审计表：一行都不许删。 */
 const AUDIT_TABLES = Object.freeze(["audit_log", "authorization_audit", "device_audit"]);
-/** 当前真实 schema 里带 organization_id 的表数量（逐表结论见文件头；cloud_installation_binding 已显式登记）。 */
-const ORG_SCOPED_TABLE_COUNT = 28;
+/**
+ * 当前真实 schema 里带 organization_id 的表数量（逐表结论见文件头；cloud_installation_binding 与
+ * B5e 新增的 canvas_dxos_asset_libraries 都已显式登记）。表集合一变，这个数字与 T2/T6 的守卫必须
+ * 跟着重新逐表判定 —— 守卫跳闸是目的，不是需要放宽的噪音。
+ */
+const ORG_SCOPED_TABLE_COUNT = 29;
+/** B5c 画布域三张新表：都不在重置删除集合里（T6 的 B5e pin 断言逐张核对）。 */
+const CANVAS_DXOS_TABLES = Object.freeze(["canvas_dxos_asset_libraries", "canvas_dxos_asset_items", "canvas_dxos_agent_attachments"]);
 
 const TEMP_DIRS = [];
 test.after(() => {
@@ -312,7 +339,7 @@ test("T1b · 身份最后一条语句失败 → 授权清理同样回滚（同�
 
 /* ══════════════════════ T2 · 范围与审计保留 ══════════════════════ */
 
-test("T2 · 重置后授权事实四表 + 设备身份三表 0 行；28 张 org 表逐表盘点；审计三表一行不删", async (t) => {
+test("T2 · 重置后授权事实四表 + 设备身份三表 0 行；29 张 org 表逐表盘点；审计三表一行不删", async (t) => {
   const f = openService(tmpDir());
   try {
     const snap = await initAndLogin(f);
@@ -348,7 +375,7 @@ test("T2 · 重置后授权事实四表 + 设备身份三表 0 行；28 张 org 
 
     assert.deepEqual(f.store.invariants(), [], "重置后身份库自检仍为空");
 
-    // 目标二：28 张带 organization_id 的表逐表盘点（这张清单就是交付说明里的判据表）。
+    // 目标二：29 张带 organization_id 的表逐表盘点（这张清单就是交付说明里的判据表）。
     const inventory = orphanInventory(f.store);
     assert.equal(inventory.length, ORG_SCOPED_TABLE_COUNT, "带 organization_id 的表集合变了 → 必须重新逐表判定清理范围：" + JSON.stringify(inventory.map((r) => r.table)));
     const byTable = Object.fromEntries(inventory.map((r) => [r.table, r]));
@@ -362,7 +389,7 @@ test("T2 · 重置后授权事实四表 + 设备身份三表 0 行；28 张 org 
     // 按设计保留的内容/配置表：重置后必然有孤儿行（否则说明清理范围失控到内容表）。
     const residue = inventory.filter((r) => r.orphans > 0 && !AUDIT_TABLES.includes(r.table)).map((r) => r.table);
     assert.equal(residue.length > 0, true, "用户内容/配置表按设计不清，重置后必须仍能看到它们的孤儿行");
-    t.diagnostic("重置后 28 张 org 表孤儿行盘点：" + inventory.map((r) => r.table + "=" + r.orphans + "/" + r.rows).join(", "));
+    t.diagnostic("重置后 29 张 org 表孤儿行盘点：" + inventory.map((r) => r.table + "=" + r.orphans + "/" + r.rows).join(", "));
   } finally {
     f.store.close();
   }
@@ -688,7 +715,19 @@ test("T6 · 范围守卫：重置删除集合恰好是登记的七张表（授�
     return m[1];
   });
   assert.deepEqual(tables.slice().sort(), RESET_DELETED_TABLES.slice().sort(), "重置要删的表集合必须恰好是登记的七张表（四张授权事实 + 三张设备身份）");
+  // B5e pin：范围守卫的用途是"表集合一变就必须重新判定"，判定结论本身也必须固定下来 ——
+  // 这里硬编码七张表名（不引用 RESET_DELETED_TABLES），才能同时守住注册表与
+  // RESET_AUTHORIZATION_DELETE_SQL 两处未来的改动：重置删除集合恰好仍是这七张。
+  assert.deepEqual(
+    tables.slice().sort(),
+    ["app_policy_provisions", "app_resource_grants", "device_access", "device_credentials", "device_pairing_credentials", "devices", "resource_grants"].sort(),
+    "B5e pin：重置删除集合必须恰好是这七张（授权事实四张 + 设备身份三张）",
+  );
   for (const table of AUDIT_TABLES) assert.equal(tables.includes(table), false, "审计表不得进入重置删除集合：" + table);
+  // B5e pin：B5c 画布域三张表一张都不许进重置删除集合（本轮判定：只存索引/元数据，素材字节在 resource_*）。
+  for (const table of CANVAS_DXOS_TABLES) {
+    assert.equal(tables.includes(table), false, "B5e pin：画布域表不得进入重置删除集合：" + table);
+  }
   // 顺序约束：device_credentials.device_id REFERENCES devices(id) 且 PRAGMA foreign_keys = ON，
   // 先删父表会直接抛外键错误 —— 顺序是"能不能重置成功"的一部分，不是风格问题。
   assert.equal(
@@ -718,7 +757,14 @@ test("T6 · 范围守卫：重置删除集合恰好是登记的七张表（授�
     // 本轮默认关闭，不产生本地授权结论。逐表理由见文件头结论。
     assert.equal(inventory.includes("cloud_installation_binding"), true, "cloud_installation_binding 必须仍在 org 作用域清单里（含 organization_id）");
     assert.equal(tables.includes("cloud_installation_binding"), false, "cloud_installation_binding 不得进入重置删除集合");
-    for (const table of tables) assert.equal(inventory.includes(table), true, table + " 必须在 28 张 org 作用域表清单里");
+    // B5e 显式登记 canvas_dxos_asset_libraries：它在 29 张 org 作用域清单里（organization_id NOT NULL），
+    // 但**不在**重置删除集合里；同域另两张表没有 organization_id，本就不该出现在清单里。
+    assert.equal(inventory.includes("canvas_dxos_asset_libraries"), true, "canvas_dxos_asset_libraries 必须在 29 张 org 作用域清单里（含 organization_id NOT NULL）");
+    assert.equal(tables.includes("canvas_dxos_asset_libraries"), false, "canvas_dxos_asset_libraries 不得进入重置删除集合");
+    for (const table of ["canvas_dxos_asset_items", "canvas_dxos_agent_attachments"]) {
+      assert.equal(inventory.includes(table), false, table + " 没有 organization_id，不在 org 作用域清单里");
+    }
+    for (const table of tables) assert.equal(inventory.includes(table), true, table + " 必须在 29 张 org 作用域表清单里");
   } finally {
     f.store.close();
   }

@@ -83,8 +83,8 @@ test("迁移：空库直接建到 v22，DX 表存在", () => {
   const dir = tempDir();
   const store = new IdentityStore({ path: path.join(dir, "identity.db") }).open();
   try {
-    assert.equal(SCHEMA_VERSION, 22);
-    assert.equal(store.schemaVersion, 22);
+    assert.equal(SCHEMA_VERSION, 26);
+    assert.equal(store.schemaVersion, 26);
     const names = tableNames(store.connection);
     assert.ok(names.includes("agent_runs"));
     assert.ok(names.includes("api_quota_rules"));
@@ -116,7 +116,7 @@ test("迁移：v21 老库升到 v22，既有数据保留、既有表结构不被
   raw.close();
   const store = new IdentityStore({ path: file }).open();
   try {
-    assert.equal(store.schemaVersion, 22);
+    assert.equal(store.schemaVersion, 26);
     assert.equal(store.connection.prepare("SELECT name FROM teams WHERE id=?").get("team_dxos_v21_marker").name, "Marker");
     assert.ok(columnNames(store.connection, "agent_runs").includes("id"));
     // tasks / projects 是"跳过不建"的表：不得被 DX 列污染
@@ -151,9 +151,9 @@ test("迁移：把 user_version 降回 21 再重放 v22 是幂等的", () => {
   first.close();
   const second = new IdentityStore({ path: file }).open();
   try {
-    assert.equal(second.schemaVersion, 22);
+    assert.equal(second.schemaVersion, 26);
     for (const statement of schema.dxosDdl()) second.connection.exec(statement);
-    assert.equal(second.schemaVersion, 22);
+    assert.equal(second.schemaVersion, 26);
   } finally {
     second.close();
   }
@@ -215,8 +215,7 @@ test("路径：解析 §6.1 的文件与目录", () => {
   assert.equal(resolved.file["providers.json"], "/tmp/oa-userdata/dxos/providers.json");
   assert.equal(resolved.file["mcp.system.json"], "/tmp/oa-userdata/dxos/mcp.system.json");
   assert.equal(resolved.directory["skill-packs"], "/tmp/oa-userdata/dxos/skill-packs");
-  assert.equal(resolved.directory["comfy-workflows"], "/tmp/oa-userdata/dxos/comfy-workflows");
-  assert.deepEqual([...resolved.directories], ["skills", "skill-packs", "comfy-workflows", "ai-tasks", "media", "logs", "diagnostics"]);
+  assert.deepEqual([...resolved.directories], ["skills", "skill-packs", "ai-tasks", "media", "logs", "diagnostics"]);
 });
 
 test("路径：ensureDxosLayout 只建目录，不创建任何配置文件", () => {

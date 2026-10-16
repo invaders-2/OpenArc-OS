@@ -9,7 +9,7 @@ import { createRequire } from "node:module";
 import { tempDbPath } from "./authorization-fixtures.mjs";
 
 const require = createRequire(import.meta.url);
-const { IdentityStore, SCHEMA_SQL, SCHEMA_VERSION, MIGRATIONS } = require("../electron/identity-store.cjs");
+const { IdentityStore, SCHEMA_SQL, SCHEMA_VERSION, MIGRATIONS, SchemaTooNewError } = require("../electron/identity-store.cjs");
 const { TaskStore } = require("../electron/task-store.cjs");
 const passwords = require("../electron/password.cjs");
 const { DatabaseSync } = require("node:sqlite");
@@ -40,7 +40,7 @@ async function seedV1(dbPath) {
 }
 
 test("schema 版本已推进到 v16（D4-06 Closure 在 v15 之上新增 task_budgets 任务级账本）", () => {
-  assert.equal(SCHEMA_VERSION, 22);
+  assert.equal(SCHEMA_VERSION, 26);
 });
 
 test("全新数据库直接建到 v8，identity login 成立", async () => {
@@ -236,6 +236,66 @@ test("v14 → v15：重建 task_verifications 保留旧 PASS 行，新列可用�
     assert.equal(saved.execution_id, "exec_x");
     assert.equal(ts.verificationsOfTask("task_v14").length, 2, "旧行 + 新 FAIL 行");
     store.close();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("空库直接建到 v25：画布域三表齐备，既有表不受影响", () => {
+  const { dir, dbPath } = tempDbPath();
+  try {
+    const store = new IdentityStore({ path: dbPath }).open();
+    assert.equal(store.schemaVersion, 26);
+    for (const t of ["canvas_dxos_asset_libraries", "canvas_dxos_asset_items", "canvas_dxos_agent_attachments"]) {
+      assert.ok(hasTable(store.connection, t), "缺 v25 表 " + t);
+    }
+    assert.ok(hasTable(store.connection, "canvas_boards"), "既有画布表必须保留");
+    assert.ok(hasTable(store.connection, "video_render_jobs"), "v24 媒体表必须保留");
+    store.close();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("v24 → v25：画布域三表只新增、老库升级与重放幂等、高版本（26）拒开", () => {
+  const { dir, dbPath } = tempDbPath();
+  try {
+    // 造一个真实的 v24 库（逐级执行迁移，run/sql 都走），并确认 v25 表尚不存在。
+    const raw = new DatabaseSync(dbPath);
+    raw.exec("PRAGMA foreign_keys = ON");
+    for (const migration of MIGRATIONS) {
+      if (migration.version > 24) continue;
+      if (typeof migration.run === "function") migration.run(raw);
+      else raw.exec(migration.sql);
+    }
+    raw.exec("PRAGMA user_version = 24");
+    assert.equal(hasTable(raw, "canvas_dxos_asset_libraries"), false, "v24 库不得预置 v25 表");
+    raw.prepare("INSERT INTO teams (id,name,root,created_at) VALUES (?,?,?,?)").run("team_v25_marker", "Marker", 0, 1);
+    raw.close();
+
+    const store = new IdentityStore({ path: dbPath }).open();
+    assert.equal(store.schemaVersion, 26);
+    for (const t of ["canvas_dxos_asset_libraries", "canvas_dxos_asset_items", "canvas_dxos_agent_attachments"]) {
+      assert.ok(hasTable(store.connection, t), "缺 v25 表 " + t);
+    }
+    assert.equal(store.connection.prepare("SELECT COUNT(*) AS c FROM teams WHERE id='team_v25_marker'").get().c, 1, "老库数据必须保留");
+
+    // 降回 24 再重放 v25：DDL 全部 IF NOT EXISTS，幂等。
+    store.connection.exec("PRAGMA user_version = 24");
+    store.close();
+    const again = new IdentityStore({ path: dbPath }).open();
+    assert.equal(again.schemaVersion, 26);
+    assert.ok(hasTable(again.connection, "canvas_dxos_agent_attachments"));
+    again.close();
+
+    // 高版本拒开：user_version=27 > 26。
+    const tooNew = new DatabaseSync(dbPath);
+    tooNew.exec("PRAGMA user_version = 27");
+    tooNew.close();
+    assert.throws(
+      () => new IdentityStore({ path: dbPath }).open(),
+      (error) => error instanceof SchemaTooNewError && error.code === "SCHEMA_TOO_NEW",
+    );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

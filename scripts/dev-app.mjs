@@ -24,6 +24,12 @@
  *   npm run dev:app -- --user-data "/tmp/oa-preview"
  *   npm run dev:app -- --no-watch
  *   npm run dev:app -- --remote-debugging-port=9223   # 其余参数原样转给 Electron
+ *   npm run dev:app -- --app "/Users/.../OpenArc OS.app"      # 用某个 .app 自带的 Electron 预览
+ *
+ * --app 为什么存在：预览要与发布出去的 .app 共用同一个 Electron 运行时；同时 userData 必须
+ * 跟仓库 Electron 的预览目录错开，否则两个实例抢同一个 Chromium profile 会打不开。
+ * 它只换运行时二进制与 userData，页面仍加载仓库代码 —— 否则 electron/ 改动重启后加载的
+ * 还是 .app 里的旧载荷，热重启就失去意义。
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -48,17 +54,35 @@ const argv = process.argv.slice(2);
 const passthrough = [];
 let port = 5173;
 let userDataDir = defaultUserDataDir();
+let userDataExplicit = false;
+let appBundle = null;
 let watchMain = true;
 for (let i = 0; i < argv.length; i += 1) {
   const arg = argv[i];
   if (arg === "--port") port = Number(argv[++i]);
-  else if (arg === "--user-data") userDataDir = path.resolve(argv[++i]);
+  else if (arg === "--user-data") {
+    userDataDir = path.resolve(argv[++i]);
+    userDataExplicit = true;
+  } else if (arg === "--app") appBundle = path.resolve(argv[++i]);
   else if (arg === "--no-watch") watchMain = false;
   else passthrough.push(arg);
 }
 if (!Number.isInteger(port) || port <= 0 || port > 65535) {
   console.error("[dev:app] --port 需要一个 1-65535 的端口号");
   process.exit(2);
+}
+if (appBundle && !appBundle.endsWith(".app")) {
+  console.error("[dev:app] --app 需要一个以 .app 结尾的路径");
+  process.exit(2);
+}
+const bundleBinary = appBundle ? path.join(appBundle, "Contents/MacOS/Electron") : null;
+if (bundleBinary && !fs.existsSync(bundleBinary)) {
+  console.error("[dev:app] 找不到 " + bundleBinary + "（--app 指向的不是一个完整的 .app？）");
+  process.exit(2);
+}
+if (appBundle && !userDataExplicit) {
+  const slug = path.basename(appBundle, ".app").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  userDataDir = path.join(path.dirname(defaultUserDataDir()), slug + "-preview");
 }
 
 const devURL = `http://127.0.0.1:${port}`;
@@ -67,7 +91,8 @@ if (!fs.existsSync(viteBin)) {
   console.error("[dev:app] 找不到 Vite（" + viteBin + "），先 npm install");
   process.exit(2);
 }
-const electronPath = require("electron");
+// --app 时改用该 bundle 自带的 Electron；其余参数与工作目录不变，所以 electron/ 改动重启后仍生效。
+const electronPath = bundleBinary || require("electron");
 
 // ── 进程状态 ──────────────────────────────────────────────────────────────
 const isPosix = process.platform !== "win32";
@@ -140,11 +165,19 @@ async function waitForServer(url, timeoutMs = 30000) {
 }
 
 // ── Electron（含主进程自动重启） ──────────────────────────────────────────
+/** 从带 ELECTRON_RUN_AS_NODE 的 shell 启动会退化成纯 Node（main.cjs 里 app 为 undefined）；预览必须按 GUI 启动，两种运行时都清掉。 */
+function electronEnv() {
+  const env = { ...process.env, OA_DEV_SERVER: devURL };
+  delete env.ELECTRON_RUN_AS_NODE;
+  return env;
+}
+
 function startElectron() {
+  // 第一个参数 "." 是 app path：始终指向仓库，这样主进程代码就是被监听、可重启的那一份。
   const child = spawn(electronPath, [".", `--user-data-dir=${userDataDir}`, ...passthrough], {
     cwd: REPO,
     stdio: "inherit",
-    env: { ...process.env, OA_DEV_SERVER: devURL },
+    env: electronEnv(),
     detached: isPosix,
   });
   electronChild = child;
@@ -225,7 +258,7 @@ function watchMainProcess() {
 }
 
 // ── 启动 ──────────────────────────────────────────────────────────────────
-console.log("[dev:app] OpenArc OS 实时预览");
+console.log("[dev:app] OpenArc OS 实时预览" + (appBundle ? "（Electron 来自 " + appBundle + "）" : ""));
 console.log(`[dev:app] userData   ${userDataDir}（与产品的 openarc-os 隔离）`);
 console.log("[dev:app] src/ 改动 → Vite HMR；electron/ 改动 → " + (watchMain ? "自动重启主进程" : "需要手动重启（--no-watch）"));
 console.log("[dev:app] Ctrl+C 同时收掉 Vite 与 Electron\n");

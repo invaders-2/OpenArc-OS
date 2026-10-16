@@ -1,5 +1,57 @@
-import { useCallback, useEffect, useState } from "react";
-import { Button } from "../design-system/primitives";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Badge, Button, ScrollArea, SearchField, TextField } from "../design-system/primitives";
+import { PageState } from "../design-system/page-states";
+/* page-states.css 只被设计系统 gallery 引用过；PageState 是本文件新增区块的
+   加载 / 空 / 错误 / 不可用态的承接组件，必须把它的样式一并带进来。 */
+import "../design-system/page-states.css";
+/* 写类入口（protocol/save）的二次确认复用产品既有 Dialog。 */
+import { Dialog } from "../desktop/Dialog";
+import {
+  MODEL_ENTRIES,
+  MODEL_ENTRY_INPUT_LABEL,
+  MODEL_ENTRY_RISK_LABEL,
+  MODEL_ENTRY_RISK_TEXT,
+  PROTOCOL_KIND_ALL,
+  STREAM_FLUSH_INTERVAL_MS,
+  beginStream,
+  buildProtocolPayload,
+  createStreamBuffer,
+  describeManifest,
+  describeProtocolDetail,
+  filterProtocols,
+  isModelEvent,
+  missingFieldsText,
+  modelEntryAvailability,
+  modelEntryConfirmText,
+  modelEntryConfirmTitle,
+  modelEntryMissingInputs,
+  modelEntryMeta,
+  modelEntryNeedsConfirm,
+  modelProtocolErrorState,
+  modelProtocolErrorText,
+  normalizeProtocolResult,
+  protocolCapabilitiesText,
+  protocolFacts,
+  protocolKindLabel,
+  protocolKindOptions,
+  protocolKey,
+  protocolListState,
+  protocolRowStatus,
+  reduceModelStreamEvent,
+  requestStreamStop,
+  settleStream,
+  streamAvailability,
+  streamGapText,
+  streamInitialState,
+  streamPhaseFeedback,
+  streamSequenceText,
+  type ManifestView,
+  type ModelEntryKey,
+  type ModelStreamState,
+  type ProtocolDetail,
+  type ProtocolItem,
+  type ShadowedLegacyItem,
+} from "./modelProtocolLogic";
 
 /** D4-01 Closure C · Settings → Models / AI（只经 window.openarc.model.command；credential write-only）。 */
 type ModelBridge = { command: (c: Record<string, unknown>) => Promise<any> };
@@ -15,6 +67,14 @@ const CAPABILITY_CHOICES = [
 
 /** 能力的中文名：只用于"已配置的默认为什么不可用"的选项文案（取值与 CAPABILITY_CHOICES 同一套）。 */
 const CAPABILITY_LABEL: Record<string, string> = { chat: "文本对话", "image-generation": "生图", "tool-calling": "工具调用", "vision-input": "图片输入" };
+
+/** P2：OpenArc 现有模型面统一走 OpenAI 兼容 wire format，manifest 也按 openai-images 协议解析。 */
+const OPENAI_COMPATIBLE_PROTOCOL = "openai-images";
+
+/** 由模型声明的能力选择 manifest 的 intent（只决定取哪份参数 schema/limits）。 */
+function manifestIntentFor(m: any): string {
+  return Array.isArray(m?.capabilities) && m.capabilities.includes("image-generation") ? "image.generate" : "llm.chat";
+}
 
 /** 显式配置的默认值不在能力过滤后的清单里时，如实点名配的是哪个模型、为什么不可用（不是"没配"）。 */
 function defaultUnavailableText(cap: string, m: any) {
@@ -37,6 +97,11 @@ export function ModelSettings({ role }: { role: string | null }) {
   const [credDraft, setCredDraft] = useState<Record<string, string>>({});
   /** 编辑已有模型能力的草稿（key = configId）；保存走 model/update。 */
   const [capsDraft, setCapsDraft] = useState<Record<string, string[]>>({});
+  /** P2：manifest 驱动的参数表单（数据来源，不动既有表单结构）。 */
+  const [manifestFields, setManifestFields] = useState<any[]>([]);
+  const [manifestDefaults, setManifestDefaults] = useState<Record<string, unknown>>({});
+  const [paramDraft, setParamDraft] = useState<Record<string, string>>({});
+  const [modelManifests, setModelManifests] = useState<Record<string, any>>({});
 
   const cmd = useCallback(async (command: string, payload: Record<string, unknown> = {}): Promise<any> => {
     const b = bridge();
@@ -53,6 +118,10 @@ export function ModelSettings({ role }: { role: string | null }) {
     if (p.ok) {
       const entries = await Promise.all(p.items.map(async (it: any) => [it.providerId, await cmd("credential/status", { providerId: it.providerId })] as const));
       setCredStatus(Object.fromEntries(entries));
+    }
+    if (m.ok) {
+      const manifests = await Promise.all(m.items.map(async (it: any) => [it.configId, await cmd("manifest/get", { protocolId: OPENAI_COMPATIBLE_PROTOCOL, model: it.remoteModelId, intent: manifestIntentFor(it) })] as const));
+      setModelManifests(Object.fromEntries(manifests));
     }
     setBusy(false);
   }, [cmd]);
@@ -97,6 +166,29 @@ export function ModelSettings({ role }: { role: string | null }) {
     if (r.ok) { setNotice("Model registered"); await load(); } else setError(r.error);
   };
   const setModelStatus = async (configId: string, status: string) => { const r = await cmd("model/setStatus", { configId, status }); if (!r.ok) setError(r.error); await load(); };
+  /** 注册表单里输入了新模型就按它取；否则退回清单里第一个已存在的模型，进页面即自动呈现参数表单。 */
+  const manifestModel = mForm.remoteModelId || (models.length ? String(models[0].remoteModelId || "") : "");
+  const manifestIntent = mForm.remoteModelId ? "image.generate" : models.length ? manifestIntentFor(models[0]) : "image.generate";
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      if (!manifestModel) { if (!cancelled) { setManifestFields([]); setManifestDefaults({}); } return; }
+      const r = await cmd("manifest/get", { protocolId: OPENAI_COMPATIBLE_PROTOCOL, model: manifestModel, intent: manifestIntent });
+      if (cancelled) return;
+      if (r.ok && r.parameterSchema && Array.isArray(r.parameterSchema.fields)) {
+        setManifestFields(r.parameterSchema.fields);
+        setManifestDefaults(r.parameterSchema.defaults || {});
+      } else { setManifestFields([]); setManifestDefaults({}); }
+    })();
+    return () => { cancelled = true; };
+  }, [cmd, manifestModel, manifestIntent]);
+  /** 配额/限制视图的数据来源：manifest 的 limits（不伪造配额数字，没有就显示 -）。 */
+  const limitsLabel = (m: any) => {
+    const entry = modelManifests[m?.configId];
+    if (!entry || !entry.ok || !entry.manifest || !entry.manifest.limits) return "-";
+    const limits = entry.manifest.limits;
+    return Object.keys(limits).length ? JSON.stringify(limits) : "-";
+  };
   const setDefault = async (capability: string, configId: string, scope: string) => { if (!configId) return; const r = await cmd("defaults/set", { capability, configId, scope }); if (!r.ok) setError(r.error); else { setNotice("Default saved"); await load(); } };
   const credLabel = (providerId: string) => { const c = credStatus[providerId]; if (!c) return "..."; if (c.manageable === false) return "—"; if (!c.storeAvailable) return "Unavailable"; return c.configured ? "Configured" : "Missing"; };
   const opts = (cap: string) => models.filter((m) => m.capabilities.includes(cap)).map((m) => <option key={m.configId} value={m.configId}>{m.displayName || m.remoteModelId}</option>);
@@ -112,6 +204,496 @@ export function ModelSettings({ role }: { role: string | null }) {
         {def && !inList ? <option value={def} disabled data-d4-01-default-unavailable={cap}>{defaultUnavailableText(cap, found)}</option> : null}
         {opts(cap)}
       </>
+    );
+  };
+
+  /* ══════════════════════════════════════════════════════════════════════
+     UI-5 · 模型与协议：协议表 / 能力 manifest / 流式状态
+     既有 providers / models / defaults 三个 pane 的 DOM、类名与交互零改动；
+     本区块只作为 <section className="model-proto"> 追加在它们之后。
+     ══════════════════════════════════════════════════════════════════════ */
+
+  const [protocolItems, setProtocolItems] = useState<ProtocolItem[]>([]);
+  const [protocolShadowed, setProtocolShadowed] = useState<ShadowedLegacyItem[]>([]);
+  const [protocolLoading, setProtocolLoading] = useState(true);
+  const [protocolError, setProtocolError] = useState<string | null>(null);
+  const [protocolIncomplete, setProtocolIncomplete] = useState<string | null>(null);
+  const [protocolKind, setProtocolKind] = useState<string>(PROTOCOL_KIND_ALL);
+  const [protocolQuery, setProtocolQuery] = useState("");
+  const [selectedProtocol, setSelectedProtocol] = useState<string | null>(null);
+  const [protocolDetail, setProtocolDetail] = useState<{ loading: boolean; code: string | null; view: ProtocolDetail | null }>({ loading: false, code: null, view: null });
+  const [manifestView, setManifestView] = useState<ManifestView | null>(null);
+  const [manifestLoading, setManifestLoading] = useState(false);
+  const [manifestError, setManifestError] = useState<string | null>(null);
+  const [manifestPick, setManifestPick] = useState("");
+  const [streamState, setStreamState] = useState<ModelStreamState>(() => streamInitialState());
+  const [streamText, setStreamText] = useState("");
+  const [streamPrompt, setStreamPrompt] = useState("");
+  /* UI-5b 动作入口：输入 / 进行中 / 失败 / 结果；凭据只提示，不回显。 */
+  const [entryInputs, setEntryInputs] = useState<Record<string, string>>({});
+  const [entryBusy, setEntryBusy] = useState<string | null>(null);
+  const [entryFailure, setEntryFailure] = useState<{ entry: ModelEntryKey; code: string; context: string } | null>(null);
+  const [entryResult, setEntryResult] = useState<{ entry: ModelEntryKey; value: unknown } | null>(null);
+  /* UI-5c 二次确认：protocol/save 待确认的载荷；非 null 时弹 Dialog，确认前不发命令。 */
+  const [pendingEntry, setPendingEntry] = useState<{ key: ModelEntryKey; payload: Record<string, unknown>; summary: string } | null>(null);
+  const streamRef = useRef<ModelStreamState>(streamState);
+  /* 流式文本按批渲染（MOTION_SYSTEM §7：不逐 token 补间）。reducer 仍逐事件累计，
+     这里只决定"什么时候写进 DOM"。 */
+  const streamBuffer = useRef(createStreamBuffer());
+
+  const loadProtocols = useCallback(async () => {
+    setProtocolLoading(true);
+    const res = await cmd("protocol/list", buildProtocolPayload("protocol/list", {}));
+    const norm = normalizeProtocolResult(res);
+    setProtocolItems(norm.items);
+    setProtocolShadowed(norm.shadowedLegacy);
+    if (res.ok !== true) { setProtocolError(String(res.error || "INTERNAL_ERROR")); setProtocolIncomplete(null); }
+    else { setProtocolError(null); setProtocolIncomplete(norm.problem); }
+    setProtocolLoading(false);
+  }, [cmd]);
+  useEffect(() => { void loadProtocols(); }, [loadProtocols]);
+
+  /** protocol/get 的真实内容；legacy-only 协议会返回 PROTOCOL_NOT_FOUND，界面如实呈现。 */
+  const openProtocol = useCallback(async (item: ProtocolItem) => {
+    setSelectedProtocol(protocolKey(item));
+    setProtocolDetail({ loading: true, code: null, view: null });
+    const res = await cmd("protocol/get", buildProtocolPayload("protocol/get", { kind: item.kind, id: item.id }));
+    if (res.ok !== true) { setProtocolDetail({ loading: false, code: String(res.error || "INTERNAL_ERROR"), view: null }); return; }
+    const view = describeProtocolDetail(res);
+    setProtocolDetail(view.found ? { loading: false, code: null, view } : { loading: false, code: "RESPONSE_INCOMPLETE", view: null });
+  }, [cmd]);
+
+  const manifestModelDefault = models.length ? String(models[0].remoteModelId || "") : "";
+  useEffect(() => { if (!manifestPick && manifestModelDefault) setManifestPick(manifestModelDefault); }, [manifestPick, manifestModelDefault]);
+
+  const loadManifestBlock = useCallback(async (model: string) => {
+    if (!model) { setManifestView(null); setManifestError(null); return; }
+    setManifestLoading(true); setManifestError(null);
+    const picked = models.find((m) => String(m.remoteModelId) === model);
+    const intent = picked ? manifestIntentFor(picked) : "llm.chat";
+    const res = await cmd("manifest/get", buildProtocolPayload("manifest/get", { protocolId: OPENAI_COMPATIBLE_PROTOCOL, model, intent }));
+    if (res.ok !== true) { setManifestView(null); setManifestError(String(res.error || "INTERNAL_ERROR")); }
+    else { setManifestView(describeManifest(res)); setManifestError(null); }
+    setManifestLoading(false);
+  }, [cmd, models]);
+  useEffect(() => { void loadManifestBlock(manifestPick); }, [loadManifestBlock, manifestPick]);
+
+  const enabledProviders = providers.filter((p) => p.status === "enabled");
+  const streamProvider = enabledProviders.length ? enabledProviders[0] : null;
+  const streamModel = models.length ? String(models[0].remoteModelId || "") : "";
+  const streamCredential = streamProvider && credStatus[streamProvider.providerId] ? !!credStatus[streamProvider.providerId].configured : null;
+  /* 动作入口的可用性凭据：与流式区块用同一个"已启用供应商 + 其凭据状态"。 */
+  const entryProviderId = streamProvider ? String(streamProvider.providerId) : null;
+  const entryCredentialConfigured = streamCredential;
+  const availability = streamAvailability({
+    hasBridge: !!bridge(),
+    providerCount: providers.length,
+    modelCount: models.length,
+    enabledProvider: streamProvider ? String(streamProvider.providerId) : null,
+    credentialConfigured: streamCredential,
+  });
+  const phaseFeedback = streamPhaseFeedback(streamState.phase);
+  const streamActive = streamState.phase === "queued" || streamState.phase === "starting" || streamState.phase === "streaming" || streamState.phase === "usage" || streamState.phase === "stopping";
+
+  /* model:event（P1 信封）：只接受 model 域的 progress/log/approval；序列单调，缺口显式标注。 */
+  useEffect(() => {
+    const b = bridge() as any;
+    if (!b || typeof b.onEvent !== "function") return;
+    const off = b.onEvent((event: unknown) => {
+      if (!isModelEvent(event)) return;
+      const prev = streamRef.current;
+      const next = reduceModelStreamEvent(prev, event, Date.now());
+      if (next === prev) return;
+      const appended = next.text.length > prev.text.length ? next.text.slice(prev.text.length) : "";
+      streamRef.current = next;
+      if (appended) streamBuffer.current.push(appended);
+      setStreamState(next);
+      const terminal = next.phase === "completed" || next.phase === "error" || next.phase === "cancelled";
+      if (terminal) { const rest = streamBuffer.current.drain(); if (rest) setStreamText((cur) => cur + rest); }
+    });
+    return () => { if (typeof off === "function") off(); };
+  }, []);
+
+  useEffect(() => {
+    const handle = window.setInterval(() => {
+      if (!streamBuffer.current.size()) return;
+      const chunk = streamBuffer.current.drain();
+      if (chunk) setStreamText((prev) => prev + chunk);
+    }, STREAM_FLUSH_INTERVAL_MS);
+    return () => window.clearInterval(handle);
+  }, []);
+
+  const startStream = async () => {
+    if (!availability.available || !streamProvider) return;
+    const requestId = "ui5_" + Date.now().toString(36);
+    const started = beginStream(String(streamProvider.providerId), streamModel, requestId, Date.now());
+    streamRef.current = started;
+    streamBuffer.current = createStreamBuffer();
+    setStreamText("");
+    setStreamState(started);
+    const res = await cmd("provider/callStream", buildProtocolPayload("provider/callStream", {
+      providerId: String(streamProvider.providerId),
+      model: streamModel,
+      messages: [{ role: "user", content: streamPrompt }],
+      requestId,
+    }));
+    const settled = settleStream(streamRef.current, res, Date.now());
+    streamRef.current = settled;
+    setStreamState(settled);
+    const rest = streamBuffer.current.drain();
+    if (rest) setStreamText((cur) => cur + rest);
+  };
+
+  /** 停止请求：命令面没有中断动作，界面只停止追踪并如实标注（不假装已取消）。 */
+  const requestStop = () => {
+    const next = requestStreamStop(streamRef.current, Date.now());
+    streamRef.current = next;
+    setStreamState(next);
+  };
+
+  /**
+   * 本地必填 / JSON 校验 → buildProtocolPayload 按键白名单构造载荷。
+   * 失败写 entryFailure 并返回 null：不弹确认、不发命令。
+   * 需要凭据的动作缺凭据时可用性判定已经拦住，这里不会把它发出去。
+   */
+  const prepareEntry = (key: ModelEntryKey): { payload: Record<string, unknown>; summary: string } | null => {
+    const meta = modelEntryMeta(key);
+    if (!meta) return null;
+    const values: Record<string, string> = {};
+    for (const field of meta.inputs) values[field] = entryInputs[key + ":" + field] || "";
+    const missing = modelEntryMissingInputs(key, values);
+    if (missing.length) {
+      setEntryFailure({
+        entry: key,
+        code: "INVALID_INPUT",
+        context: "缺少必填内容（" + missing.map((f) => MODEL_ENTRY_INPUT_LABEL[f] || f).join("、") + "）",
+      });
+      return null;
+    }
+    const raw: Record<string, unknown> = {};
+    for (const field of meta.inputs) {
+      const value = values[field].trim();
+      if (!value) continue;
+      if (field === "protocol") {
+        try {
+          raw.protocol = JSON.parse(value);
+        } catch {
+          setEntryFailure({ entry: key, code: "PROTOCOL_INVALID", context: "协议必须是合法 JSON" });
+          return null;
+        }
+      } else if (field === "count") {
+        const n = Number(value);
+        raw.count = Number.isFinite(n) && n > 0 ? n : 1;
+      } else {
+        raw[field] = value;
+      }
+    }
+    const payload = buildProtocolPayload(meta.command, raw);
+    return { payload, summary: modelEntryConfirmText(key, payload) };
+  };
+
+  /** 点动作入口：写类入口（protocol/save）先弹二次确认；其余入口保持原语义直接发送。 */
+  const requestEntry = (key: ModelEntryKey) => {
+    setEntryFailure(null);
+    const prepared = prepareEntry(key);
+    if (!prepared) return;
+    if (!modelEntryNeedsConfirm(key)) {
+      void submitEntry(key, prepared.payload);
+      return;
+    }
+    setPendingEntry({ key, payload: prepared.payload, summary: prepared.summary });
+  };
+
+  const cancelEntryConfirm = () => setPendingEntry(null);
+
+  const confirmEntry = async () => {
+    const pending = pendingEntry;
+    setPendingEntry(null);
+    if (!pending) return;
+    await submitEntry(pending.key, pending.payload);
+  };
+
+  /** 确认后真正发送（或非写类入口直接发送）：命令 → 结构化结果 / 失败。 */
+  const submitEntry = async (key: ModelEntryKey, payload: Record<string, unknown>) => {
+    const meta = modelEntryMeta(key);
+    if (!meta) return;
+    setEntryBusy(key);
+    setEntryFailure(null);
+    setEntryResult(null);
+    setError(null);
+    setNotice(null);
+    const res = await cmd(meta.command, payload);
+    setEntryBusy(null);
+    if (res.ok !== true) {
+      const code = String(res.error || "INTERNAL_ERROR");
+      setEntryFailure({ entry: key, code, context: meta.label });
+      if (Array.isArray(res.issues)) setEntryResult({ entry: key, value: { issues: res.issues } });
+      return;
+    }
+    setEntryResult({ entry: key, value: res });
+    setNotice(meta.label + "完成");
+  };
+
+  const filteredProtocols = useMemo(() => filterProtocols(protocolItems, protocolKind, protocolQuery), [protocolItems, protocolKind, protocolQuery]);
+  const protocolState = protocolListState({
+    loading: protocolLoading,
+    errorCode: protocolError,
+    count: protocolItems.length,
+    dependencyUnavailable: protocolError === "PROTOCOL_NOT_READY" || protocolError === "NO_BRIDGE",
+  });
+  const jsonText = (value: unknown) => JSON.stringify(value, null, 2);
+
+  const renderProtocolDetail = () => {
+    /* 行级真实字段来自 protocol/list（source / ported / activeVersion / execution …），
+       与 protocol/get 的协议体分开呈现：即使 protocol/get 失败（legacy 定义）这些事实也照常显示。 */
+    const selectedItem = protocolItems.find((p) => protocolKey(p) === selectedProtocol) || null;
+    const factsBlock = selectedItem ? (
+      <div className="model-proto__facts-grid" data-model-proto="protocol-row-facts">
+        {protocolFacts(selectedItem).map((f) => (
+          <div key={f.label} className="model-proto__fact">
+            <span className="model-proto__factlabel">{f.label}</span>
+            <span className="model-proto__mono">{f.value}</span>
+          </div>
+        ))}
+      </div>
+    ) : null;
+    const wrap = (content: ReactNode) => (
+      <div className="model-proto__detail" data-model-proto-selected={selectedProtocol || ""}>
+        {factsBlock}
+        {content}
+      </div>
+    );
+    if (protocolDetail.loading) return wrap(<PageState kind="loading" title="正在读取 protocol/get" description="只渲染主进程真实返回的内容。" />);
+    if (protocolDetail.code) {
+      return wrap(
+        <PageState
+          kind={modelProtocolErrorState(protocolDetail.code)}
+          title={"protocol/get 失败（" + protocolDetail.code + "）"}
+          description={modelProtocolErrorText(protocolDetail.code)}
+          onAction={selectedProtocol ? () => { const item = protocolItems.find((p) => protocolKey(p) === selectedProtocol); if (item) void openProtocol(item); } : undefined}
+        />,
+      );
+    }
+    const view = protocolDetail.view;
+    if (!view) return wrap(<PageState kind="empty" title="选择一个协议查看详情" description="详情来自 protocol/get：只显示真实返回的操作 / 工作流 / 模型 profile 声明情况。" />);
+    return (
+      <div className="model-proto__detail-body" data-model-proto-detail={view.protocolId}>
+        {factsBlock}
+        <div className="model-proto__detail-head">
+          <h5 className="model-proto__detail-title">{view.label}</h5>
+          <span className="model-proto__facts">
+            <Badge size="sm">v{view.version}</Badge>
+            <Badge size="sm">executor {view.executor}</Badge>
+          </span>
+        </div>
+        <p className="model-proto__desc">{view.summary}</p>
+        <dl className="model-proto__kv">
+          <dt>protocolId</dt><dd>{view.protocolId}</dd>
+          <dt>schemaVersion</dt><dd>{view.schemaVersion}</dd>
+          <dt>hash</dt><dd className="model-proto__mono">{view.hash}</dd>
+          <dt>capabilities</dt><dd>{view.capabilities.length ? view.capabilities.join("、") : "未返回"}</dd>
+        </dl>
+        <div className="model-proto__group" data-model-proto="declared-groups" role="group" aria-label="协议声明情况">
+          {view.groups.map((g) => (
+            <span key={g.key} className="model-proto__group-item" data-model-proto-group={g.key} data-model-proto-declared={g.declared ? "true" : "false"}>
+              <Badge tone={g.declared ? "success" : "neutral"} size="sm">{g.label}：{g.declared ? g.count + " 条" : "未声明"}</Badge>
+            </span>
+          ))}
+        </div>
+        {view.operations.length ? (
+          <div className="model-proto__table-wrap">
+            <table className="model-proto__table" data-model-proto="operations">
+              <caption>操作 operations</caption>
+              <thead><tr><th>id</th><th>method</th><th>path</th><th>requestMode</th></tr></thead>
+              <tbody>
+                {view.operations.map((op) => (
+                  <tr key={op.id} data-model-proto-operation={op.id}><td className="model-proto__mono">{op.id}</td><td>{op.method}</td><td className="model-proto__mono">{op.path}</td><td>{op.requestMode}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <p className="model-proto__desc">操作 operations：未声明</p>}
+        {view.workflows.length ? (
+          <div className="model-proto__table-wrap">
+            <table className="model-proto__table" data-model-proto="workflows">
+              <caption>工作流 workflows</caption>
+              <thead><tr><th>id</th><th>submit</th></tr></thead>
+              <tbody>{view.workflows.map((wf) => (<tr key={wf.id} data-model-proto-workflow={wf.id}><td className="model-proto__mono">{wf.id}</td><td className="model-proto__mono">{wf.submit}</td></tr>))}</tbody>
+            </table>
+          </div>
+        ) : <p className="model-proto__desc">工作流 workflows：未声明</p>}
+        {view.profiles.length ? (
+          <div className="model-proto__table-wrap">
+            <table className="model-proto__table" data-model-proto="model-profiles">
+              <caption>模型 profile</caption>
+              <thead><tr><th>id</th><th>label</th><th>capabilities</th><th>workflows</th><th>uiSchemas</th><th>assets</th><th>limits</th></tr></thead>
+              <tbody>
+                {view.profiles.map((pf) => (
+                  <tr key={pf.id} data-model-proto-profile={pf.id}>
+                    <td className="model-proto__mono">{pf.id}</td><td>{pf.label}</td>
+                    <td>{pf.capabilities.length ? pf.capabilities.join("、") : "未返回"}</td>
+                    <td>{pf.workflowCount}</td>
+                    <td>{pf.uiSchemas.length ? pf.uiSchemas.join("、") : "未返回"}</td>
+                    <td>{pf.declaredAssets ? "已声明" : "未声明"}</td><td>{pf.declaredLimits ? "已声明" : "未声明"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <p className="model-proto__desc">模型 profile：未声明</p>}
+      </div>
+    );
+  };
+
+  const renderManifestBlock = () => {
+    if (manifestLoading) return <PageState kind="loading" title="正在读取 manifest/get" description="参数 schema / limits 由主进程按协议与 intent 解析。" />;
+    if (manifestError) return <PageState kind={modelProtocolErrorState(manifestError)} title={"manifest/get 失败（" + manifestError + "）"} description={modelProtocolErrorText(manifestError)} onAction={() => void loadManifestBlock(manifestPick)} />;
+    const view = manifestView;
+    if (!view) return <PageState kind="empty" title="没有可解析的模型" description="model/list 为空时不会向 manifest/get 发请求；注册模型后再看这里。" />;
+    return (
+      <div className="model-proto__detail-body" data-model-proto-manifest={view.protocolId}>
+        <dl className="model-proto__kv">
+          <dt>format</dt><dd>{view.format}</dd>
+          <dt>protocolId</dt><dd>{view.protocolId}</dd>
+          <dt>protocolVersion</dt><dd>{view.protocolVersion}</dd>
+          <dt>protocolHash</dt><dd className="model-proto__mono">{view.protocolHash}</dd>
+          <dt>model</dt><dd className="model-proto__mono">{view.model}</dd>
+          <dt>intent</dt><dd>{view.intent}</dd>
+        </dl>
+        <section className="model-proto__sub" data-model-proto="manifest-profile">
+          <h5 className="model-proto__sub-title">模型 profile（manifest 子集）</h5>
+          {view.profile.declared ? (
+            <>
+              <dl className="model-proto__kv">
+                <dt>profileId</dt><dd>{view.profile.profileId}</dd>
+                <dt>profileLabel</dt><dd>{view.profile.profileLabel}</dd>
+                <dt>capabilities</dt><dd>{view.profile.capabilities.length ? view.profile.capabilities.join("、") : "未返回"}</dd>
+                <dt>coarseCaps</dt><dd>{view.profile.coarseCaps.length ? view.profile.coarseCaps.join("、") : "未返回"}</dd>
+                <dt>uiSchemas</dt><dd>{view.profile.uiSchemas.length ? view.profile.uiSchemas.join("、") : "未返回"}</dd>
+                <dt>defaultOperations</dt><dd>{view.profile.defaultOperations.length ? view.profile.defaultOperations.map((d) => d.capability + "→" + d.operationId).join("、") : "未返回"}</dd>
+                <dt>capabilitySources</dt><dd>{view.profile.capabilitySources.length ? view.profile.capabilitySources.map((d) => d.capability + "←" + d.source).join("、") : "未返回"}</dd>
+                <dt>defaults</dt><dd className="model-proto__mono">{Object.keys(view.profile.defaults).length ? jsonText(view.profile.defaults) : "未返回"}</dd>
+              </dl>
+            </>
+          ) : <p className="model-proto__desc">manifest：未返回</p>}
+        </section>
+        <section className="model-proto__sub" data-model-proto="manifest-schema">
+          <h5 className="model-proto__sub-title">参数 schema（parameterSchema）</h5>
+          {view.parameterSchema.declared ? (
+            <>
+              <dl className="model-proto__kv">
+                <dt>operationId</dt><dd>{view.parameterSchema.operationId || "未返回"}</dd>
+                <dt>schemaId</dt><dd>{view.parameterSchema.schemaId || "未返回"}</dd>
+                <dt>source</dt><dd>{view.parameterSchema.source}</dd>
+              </dl>
+              {view.parameterSchema.fields.length ? (
+                <div className="model-proto__table-wrap">
+                  <table className="model-proto__table" data-model-proto="manifest-fields">
+                    <thead><tr><th>key</th><th>label</th><th>type</th><th>default</th><th>options</th></tr></thead>
+                    <tbody>
+                      {view.parameterSchema.fields.map((f) => (
+                        <tr key={f.key} data-model-proto-field={f.key}><td className="model-proto__mono">{f.key}</td><td>{f.label}</td><td>{f.type}</td><td className="model-proto__mono">{f.defaultValue || "未返回"}</td><td>{f.options.length ? f.options.join("、") : "未返回"}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : <p className="model-proto__desc">fields：未返回</p>}
+            </>
+          ) : <p className="model-proto__desc">parameterSchema：未返回</p>}
+        </section>
+        <section className="model-proto__sub" data-model-proto="manifest-limits">
+          <h5 className="model-proto__sub-title">limits</h5>
+          {view.limits.declared
+            ? <pre className="model-proto__pre" data-model-proto="limits-value">{jsonText(view.limits.value)}</pre>
+            : <p className="model-proto__desc" data-model-proto="limits-missing">未返回</p>}
+        </section>
+        <section className="model-proto__sub" data-model-proto="manifest-assets">
+          <h5 className="model-proto__sub-title">assets</h5>
+          {view.assets.declared
+            ? <pre className="model-proto__pre" data-model-proto="assets-value">{jsonText(view.assets.value)}</pre>
+            : <p className="model-proto__desc" data-model-proto="assets-missing">未返回</p>}
+          <p className="model-proto__note">{view.assets.note}</p>
+        </section>
+        <section className="model-proto__sub" data-model-proto="manifest-profiles-map">
+          <h5 className="model-proto__sub-title">modelProfiles 映射</h5>
+          {view.modelProfiles.declared
+            ? <pre className="model-proto__pre" data-model-proto="model-profiles-value">{jsonText(view.modelProfiles.value)}</pre>
+            : <p className="model-proto__desc" data-model-proto="model-profiles-missing">未返回</p>}
+          <p className="model-proto__note">{view.modelProfiles.note}</p>
+        </section>
+        <section className="model-proto__sub" data-model-proto="manifest-operation">
+          <h5 className="model-proto__sub-title">operation</h5>
+          {view.operation.declared
+            ? <dl className="model-proto__kv"><dt>id</dt><dd className="model-proto__mono">{view.operation.id}</dd><dt>method</dt><dd>{view.operation.method}</dd><dt>path</dt><dd className="model-proto__mono">{view.operation.path}</dd><dt>requestMode</dt><dd>{view.operation.requestMode}</dd></dl>
+            : <p className="model-proto__desc">未返回</p>}
+        </section>
+        <section className="model-proto__sub" data-model-proto="manifest-inferred">
+          <h5 className="model-proto__sub-title">inferred（可选推断）</h5>
+          {view.inferred.declared
+            ? <pre className="model-proto__pre" data-model-proto="inferred-value">{jsonText(view.inferred.value)}</pre>
+            : <p className="model-proto__desc" data-model-proto="inferred-missing">未返回</p>}
+        </section>
+        {view.missing.length ? <p className="model-proto__warn" data-model-proto="manifest-missing">{missingFieldsText(view)}</p> : null}
+      </div>
+    );
+  };
+
+  const renderStreamBlock = () => {
+    if (!availability.available) {
+      return (
+        <div className="model-proto__state" data-model-proto-state={"stream-" + availability.kind}>
+          <PageState kind="unavailable" title={availability.title} description={availability.description} missing={availability.missing} />
+        </div>
+      );
+    }
+    return (
+      <div className="model-stream" data-model-stream="console">
+        <div className="model-stream__head">
+          <span className="model-stream__phase" data-model-proto-stream-phase={streamState.phase} role="status" aria-live="polite">
+            <Badge tone={phaseFeedback.tone} size="sm">{phaseFeedback.glyph} {phaseFeedback.label}</Badge>
+          </span>
+          {phaseFeedback.active ? <span className="model-stream__activity" aria-hidden="true" /> : null}
+          <span className="model-proto__facts">
+            <span className="model-proto__mono">provider {streamState.providerId || streamProvider?.providerId || "-"}</span>
+            <span className="model-proto__mono">model {streamState.model || streamModel || "-"}</span>
+            <span className="model-proto__mono">requestId {streamState.requestId || "-"}</span>
+          </span>
+        </div>
+        <p className="model-proto__desc" data-model-proto-stream-detail>{phaseFeedback.detail}</p>
+        <div className="model-stream__controls">
+          <TextField label="调用内容" labelHidden aria-label="流式调用内容" data-model-proto-field="stream-prompt" value={streamPrompt} onChange={(e) => setStreamPrompt(e.target.value)} placeholder="用一句话说明这次流式调用" />
+          <Button variant="primary" size="sm" data-model-proto-action="stream-start" disabled={streamActive} status={streamActive ? "loading" : "idle"} onClick={() => void startStream()}>{streamText || streamActive ? "重新开始流式调用" : "开始流式调用"}</Button>
+          <Button variant="secondary" size="sm" data-model-proto-action="stream-cancel" disabled={!streamActive || streamState.phase === "stopping"} onClick={() => requestStop()}>停止</Button>
+        </div>
+        <div className="model-stream__facts">
+          <span data-model-stream-deltas>增量 {streamState.deltas}</span>
+          <span data-model-stream-tool-deltas>工具增量 {streamState.toolDeltas}</span>
+          <span data-model-stream-last-seq>最近 sequence {streamState.lastSequence || "未返回"}</span>
+          <span data-model-stream-duplicates>重复 {streamState.duplicates}</span>
+          {streamState.mutedAfterStop ? <span data-model-stream-muted>停止后丢弃 {streamState.mutedAfterStop}</span> : null}
+          {streamGapText(streamState) ? <span className="model-proto__warn" data-model-stream-gap>{streamGapText(streamState)}</span> : null}
+        </div>
+        {streamState.usage ? <pre className="model-proto__pre" data-model-stream-usage>{jsonText(streamState.usage)}</pre> : null}
+        {streamState.errorCode ? <p className="model-proto__warn" data-model-stream-error>{streamState.errorCode + "：" + modelProtocolErrorText(streamState.errorCode)}{streamState.errorDetail ? "（" + streamState.errorDetail + "）" : ""}</p> : null}
+        {streamState.resultCode ? <p className="model-proto__note" data-model-stream-result>调用结果码 {streamState.resultCode}</p> : null}
+        <p className="model-proto__desc" data-model-proto="stream-text">{streamText || (streamActive ? "（等待第一个增量…）" : "（还没有流式文本）")}</p>
+        <ScrollArea className="model-stream__events-scroll" maxHeight={220} label="流式事件">
+          {streamState.events.length ? (
+            <ol className="model-stream__events" data-model-stream-events>
+              {streamState.events.map((row) => (
+                <li key={row.key} data-model-stream-event={row.type} data-model-stream-seq={streamSequenceText(row)}>
+                  <span className="model-stream__seq">#{streamSequenceText(row)}</span>
+                  <span className="model-stream__kind">{row.kind}</span>
+                  <span className="model-stream__type">{row.type}</span>
+                  <span className="model-stream__msg">{row.summary}</span>
+                  <span className="model-stream__at">{row.at ? new Date(row.at).toLocaleTimeString("zh-CN") : "未返回"}</span>
+                </li>
+              ))}
+            </ol>
+          ) : <p className="model-proto__desc">还没有 model:event 事件。</p>}
+        </ScrollArea>
+        <p className="model-proto__note">流式区块的命令：provider/callStream；增量只来自 model:event 的 P1 信封（channel/domain/kind/sequence/at/payload）。停止只停止界面追踪，当前命令面没有中断动作。</p>
+      </div>
     );
   };
 
@@ -189,6 +771,21 @@ export function ModelSettings({ role }: { role: string | null }) {
                 </label>
               ))}
             </div>
+            {manifestFields.length ? (
+              <div className="d401-caps" data-d4-01-manifest-fields role="group" aria-label="模型参数">
+                {manifestFields.map((field: any) => (
+                  <label key={String(field.key)}>
+                    {String(field.label || field.key)}
+                    <input
+                      data-d4-01-manifest-field={String(field.key)}
+                      aria-label={String(field.label || field.key)}
+                      value={paramDraft[String(field.key)] ?? String(manifestDefaults[String(field.key)] ?? field.default ?? "")}
+                      onChange={(e) => setParamDraft({ ...paramDraft, [String(field.key)]: e.target.value })}
+                    />
+                  </label>
+                ))}
+              </div>
+            ) : null}
             <Button variant="primary" size="sm" data-d4-01-model-create onClick={() => void createModel()}>注册 Model</Button>
           </div>
           {models.length === 0 ? <p className="muted" data-d4-01-models-empty>No models configured</p> : null}
@@ -199,6 +796,7 @@ export function ModelSettings({ role }: { role: string | null }) {
                 <span className="d401-meta">{m.remoteModelId} | {m.scope} | v{m.version} | {m.status}</span>
                 <span className="d401-meta" data-d4-01-model-declared={m.configId}>Declared: {m.capabilities.join(", ") || "-"}</span>
                 <span className="d401-meta" data-d4-01-model-verified={m.configId}>Verified: {m.verifiedCapabilities.join(", ") || "-"}</span>
+                <span className="d401-meta" data-d4-01-model-limits={m.configId}>Limits: {limitsLabel(m)}</span>
                 <div className="d401-caps" role="group" aria-label={"模型能力 " + (m.displayName || m.remoteModelId)}>
                   {CAPABILITY_CHOICES.map((c) => (
                     <label key={c.id}>
@@ -243,6 +841,263 @@ export function ModelSettings({ role }: { role: string | null }) {
           {role !== "ADMIN" ? <p className="muted" data-d4-01-org-hint>Organization defaults require an authorized admin.</p> : null}
         </section>
       ) : null}
+
+      {/* ══════════════════════════════════════════════════════════════════
+          UI-5 · 模型与协议：协议表 / 能力 manifest / 流式状态
+          只按顺序追加在既有 providers / models / defaults 三个 pane 之后；
+          既有区块的 DOM、类名与交互保持原样。新增样式只到 .model-proto-* / .model-stream-*。
+          ══════════════════════════════════════════════════════════════════ */}
+      <section className="model-proto" data-model-proto="console" aria-label="模型与协议">
+        <div className="model-proto__banner">
+          <div className="model-proto__banner-row">
+            <h3 className="model-proto__title">协议与流式状态</h3>
+            <span data-model-proto="protocol-count"><Badge size="sm">协议 {protocolItems.length}</Badge></span>
+            {protocolShadowed.length ? <span data-model-proto="protocol-shadowed"><Badge tone="warning" size="sm">被 v2 遮蔽的 legacy {protocolShadowed.length}</Badge></span> : null}
+          </div>
+          <p className="model-proto__hint">
+            数据只来自 window.openarc.model 的受控命令（protocol/list、protocol/get、manifest/get、provider/callStream）；
+            流式增量只来自 model:event 的 P1 信封。后端没有返回的字段一律标注"未返回"，不补造内容。
+          </p>
+        </div>
+
+        {/* ── 1) 协议表：id/kind/label/engine/source/activeVersion/capabilities/ported/execution ── */}
+        <div className="model-proto__block" data-model-proto="protocols">
+          <div className="model-proto__block-head">
+            <h4 className="model-proto__block-title">协议表</h4>
+            <span className="model-proto__filters" role="group" aria-label="按 kind 过滤协议">
+              {protocolKindOptions(protocolItems).map((k) => (
+                <Button key={k} variant={protocolKind === k ? "secondary" : "ghost"} size="sm" aria-pressed={protocolKind === k} data-model-proto-kind={k} onClick={() => setProtocolKind(k)}>
+                  {protocolKindLabel(k)}
+                </Button>
+              ))}
+            </span>
+          </div>
+          <div className="model-proto__controls">
+            <SearchField value={protocolQuery} onValueChange={setProtocolQuery} placeholder="搜索协议 id / label / 能力" label="搜索协议" data-model-proto-search="protocols" />
+            <Button variant="secondary" size="sm" data-model-proto-action="protocol-reload" status={protocolLoading ? "loading" : "idle"} onClick={() => void loadProtocols()}>刷新协议表</Button>
+          </div>
+          {protocolIncomplete ? <p className="model-proto__warn" data-model-proto="protocol-incomplete">{protocolIncomplete}</p> : null}
+          {protocolState !== "ready" ? (
+            <div className="model-proto__state" data-model-proto-state={protocolState}>
+              <PageState
+                kind={protocolState}
+                title={protocolState === "loading" ? "正在读取协议表" : protocolState === "empty" ? "协议表为空" : protocolState === "unavailable" ? "协议域不可用" : protocolState === "unauthorized" ? "没有读取协议表的权限" : "协议表读取失败"}
+                description={protocolState === "loading" ? "等待 protocol/list 返回项目真实协议。" : modelProtocolErrorText(protocolError || "RESPONSE_INCOMPLETE")}
+                onAction={protocolState === "error" || protocolState === "unauthorized" ? () => void loadProtocols() : undefined}
+              />
+            </div>
+          ) : (
+            <div className="model-proto__split">
+              <div className="model-proto__list-pane">
+                <div className="model-proto__pane-head">
+                  <span className="model-proto__pane-title">协议</span>
+                  <span className="model-proto__facts">共 {protocolItems.length} 条 · 当前 {filteredProtocols.length} 条</span>
+                </div>
+                {filteredProtocols.length ? (
+                  <ScrollArea className="model-proto__list-scroll" maxHeight={340} label="协议列表">
+                    <ul className="model-proto__list" data-model-proto-list>
+                      {filteredProtocols.map((item) => {
+                        const status = protocolRowStatus(item);
+                        const key = protocolKey(item);
+                        return (
+                          <li key={key}>
+                            <button
+                              type="button"
+                              className="model-proto__row"
+                              data-model-proto-item={key}
+                              aria-pressed={selectedProtocol === key}
+                              onClick={() => void openProtocol(item)}
+                            >
+                              <span className="model-proto__row-top">
+                                <strong>{item.label || item.id}</strong>
+                                <Badge tone={status.tone} size="sm">{status.label}</Badge>
+                              </span>
+                              <span className="model-proto__row-facts">
+                                <span>{item.id}</span>
+                                <span>{item.kind}</span>
+                                <span>engine {item.engine || "未返回"}</span>
+                                {item.activeVersion == null ? <span>activeVersion 未返回</span> : <span>v{item.activeVersion}</span>}
+                              </span>
+                              <span className="model-proto__row-desc">{status.detail}</span>
+                              <span className="model-proto__row-cap">能力 {protocolCapabilitiesText(item)}</span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </ScrollArea>
+                ) : (
+                  <PageState
+                    kind="empty"
+                    title="没有匹配的协议"
+                    description={protocolQuery ? "当前搜索/k过滤下没有协议；清空搜索或切回「全部」。" : "protocol/list 返回了 0 条协议。"}
+                  />
+                )}
+              </div>
+              <div className="model-proto__detail-pane" data-model-proto-detail-pane>{renderProtocolDetail()}</div>
+            </div>
+          )}
+        </div>
+
+        {/* ── 2) 能力 manifest：manifest/get 的真实输出 ── */}
+        <div className="model-proto__block" data-model-proto="manifest">
+          <div className="model-proto__block-head">
+            <h4 className="model-proto__block-title">能力 manifest</h4>
+            <span className="model-proto__facts">协议 {OPENAI_COMPATIBLE_PROTOCOL}</span>
+          </div>
+          <div className="model-proto__controls">
+            <TextField label="模型" value={manifestPick} onChange={(e) => setManifestPick(e.target.value)} placeholder="remoteModelId（例如 gpt-image）" data-model-proto-field="manifest-model" />
+            <Button variant="secondary" size="sm" data-model-proto-action="manifest-load" status={manifestLoading ? "loading" : "idle"} onClick={() => void loadManifestBlock(manifestPick)}>读取 manifest</Button>
+          </div>
+          {renderManifestBlock()}
+        </div>
+
+        {/* ── 3) 流式状态：provider/callStream + model:event ── */}
+        <div className="model-proto__block" data-model-proto="stream">
+          <div className="model-proto__block-head">
+            <h4 className="model-proto__block-title">流式状态</h4>
+            <span className="model-proto__facts" data-model-proto="stream-availability">{availability.kind}</span>
+          </div>
+          {renderStreamBlock()}
+        </div>
+
+        {/* ── 4) 动作入口：协议校验 / 协议保存 / 图像生成 / 协议执行 ── */}
+        <div className="model-proto__block" data-model-proto="entries">
+          <div className="model-proto__block-head">
+            <h4 className="model-proto__block-title">动作入口</h4>
+            <span className="model-proto__facts" data-model-proto="entries-facts">
+              已启用供应商 {enabledProviders.length} 个 · 凭据 {entryCredentialConfigured === null ? "未知" : entryCredentialConfigured ? "已配置" : "缺失"}
+            </span>
+          </div>
+          <p className="model-proto__hint">
+            协议校验 / 保存是本地动作；图像生成 / 协议执行需要凭据。缺凭据时只给结构化提示，
+            不发起调用，也不回显任何密钥。
+          </p>
+          <ScrollArea label="模型动作入口" maxHeight={360}>
+            {MODEL_ENTRIES.map((meta) => {
+              const av = modelEntryAvailability(meta.key, {
+                hasBridge: !!bridge(),
+                enabledProvider: entryProviderId,
+                credentialConfigured: entryCredentialConfigured,
+                hasProtocol: !!String(
+                  entryInputs["protocol-validate:protocol"] || entryInputs["protocol-save:protocol"] || "",
+                ).trim(),
+              });
+              const busy = entryBusy === meta.key;
+              const failure = entryFailure && entryFailure.entry === meta.key ? entryFailure : null;
+              const result = entryResult && entryResult.entry === meta.key ? entryResult : null;
+              return (
+                <div
+                  className="model-proto__sub model-proto-action"
+                  key={meta.key}
+                  data-model-entry={meta.key}
+                  data-model-entry-command={meta.command}
+                  data-model-entry-state={busy ? "busy" : av.available ? "ready" : av.kind}
+                  data-model-entry-risk={meta.risk}
+                  aria-busy={busy ? "true" : undefined}
+                >
+                  <div className="model-proto__facts model-proto-action-head">
+                    <span data-model-entry-risk-badge>
+                      <Badge tone={meta.risk === "read" ? "neutral" : "warning"} size="sm">
+                        {MODEL_ENTRY_RISK_LABEL[meta.risk]}
+                      </Badge>
+                    </span>
+                    {meta.requiresCredential ? (
+                      <span data-model-entry-credential="required">
+                        <Badge tone="warning" size="sm">需要凭据</Badge>
+                      </span>
+                    ) : null}
+                    <strong>{meta.label}</strong>
+                    <span className="model-proto__mono">{meta.command}</span>
+                  </div>
+                  <p className="model-proto__desc model-proto-action-meta">{meta.description}</p>
+                  <p
+                    className={(av.available ? "model-proto__desc" : "model-proto__warn") + " model-proto-action-meta"}
+                    data-model-entry-availability={av.kind}
+                  >
+                    {av.title} · {av.description}
+                  </p>
+                  <p className="model-proto__note model-proto-action-meta" data-model-entry-risk-text>
+                    {MODEL_ENTRY_RISK_TEXT[meta.key]}
+                  </p>
+                  {meta.inputs.map((field) => (
+                    <TextField
+                      key={field}
+                      label={MODEL_ENTRY_INPUT_LABEL[field] || field}
+                      data-model-entry-field={meta.key + ":" + field}
+                      value={entryInputs[meta.key + ":" + field] || ""}
+                      onChange={(e) =>
+                        setEntryInputs((cur) => ({ ...cur, [meta.key + ":" + field]: e.target.value }))
+                      }
+                    />
+                  ))}
+                  <div className="model-stream__controls model-proto-action-actions">
+                    <Button
+                      variant={meta.risk === "read" ? "secondary" : "primary"}
+                      size="sm"
+                      data-model-entry-action={meta.key}
+                      status={busy ? "loading" : "idle"}
+                      disabled={!av.available || entryBusy !== null}
+                      onClick={() => requestEntry(meta.key)}
+                    >
+                      {meta.label}
+                    </Button>
+                    <span className="model-proto__note">{av.available ? "前置条件已满足" : "前置条件未满足"}</span>
+                  </div>
+                  {failure ? (
+                    <p
+                      className="model-proto__warn"
+                      role="alert"
+                      data-model-entry-error
+                      data-model-entry-error-code={failure.code}
+                    >
+                      {failure.context}：{modelProtocolErrorText(failure.code)}（{failure.code}）
+                    </p>
+                  ) : null}
+                  {result ? (
+                    <pre className="model-proto__pre" data-model-entry-result>
+                      {jsonText(result.value)}
+                    </pre>
+                  ) : null}
+                </div>
+              );
+            })}
+          </ScrollArea>
+        </div>
+
+        {/* 写类入口（protocol/save）二次确认：确认前不发命令；取消 / Esc 都不发送。 */}
+        <Dialog
+          open={pendingEntry !== null}
+          title={pendingEntry ? modelEntryConfirmTitle(pendingEntry.key) : "确认"}
+          onClose={cancelEntryConfirm}
+          footer={
+            <>
+              <Button variant="ghost" size="sm" data-model-entry-confirm-cancel onClick={cancelEntryConfirm}>
+                取消
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                data-model-entry-confirm-submit
+                status={entryBusy !== null ? "loading" : "idle"}
+                disabled={entryBusy !== null}
+                onClick={() => void confirmEntry()}
+              >
+                确认保存
+              </Button>
+            </>
+          }
+        >
+          {pendingEntry ? (
+            <div className="model-proto-action-confirm" data-model-entry-confirm={pendingEntry.key}>
+              <p className="model-proto-action-confirm-value" data-model-entry-confirm-summary>
+                {pendingEntry.summary}
+              </p>
+              <p className="model-proto__note">确认前不会发出任何命令；取消则命令数为 0。</p>
+            </div>
+          ) : null}
+        </Dialog>
+      </section>
     </div>
   );
 }

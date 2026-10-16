@@ -8,11 +8,16 @@
 // 帧时间在无 GPU 环境下只作参考，脚本会打印 GPU 状态供判定 NOT REPRESENTATIVE。
 
 import { chromium } from "playwright";
+import { resolveChromium, describeChromiumCandidates } from "../lib/chromium.mjs";
 
 const BASE = process.env.OA_BASE || "http://127.0.0.1:5210/";
-const EXEC =
-  process.env.OA_CHROMIUM ||
-  "/Users/wepingli/Library/Caches/ms-playwright/chromium-1228/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing";
+// Chromium 解析优先级：OA_CHROMIUM → Playwright 官方 chromium → 系统 Google Chrome（见 experiments/lib/chromium.mjs）。
+const CHROMIUM_INFO = resolveChromium();
+const EXEC = CHROMIUM_INFO.path;
+if (!EXEC) {
+  console.error("找不到可用 Chromium，已按优先级尝试：" + describeChromiumCandidates(CHROMIUM_INFO.candidates) + "（设置 OA_CHROMIUM 指向可用二进制）");
+  process.exit(1);
+}
 
 const results = [];
 const rec = (name, ok, detail = "") => {
@@ -31,6 +36,10 @@ const setup = async ({ dark, motion, opaque }) => {
       localStorage.setItem("oa-dark", String(s.dark));
       localStorage.setItem("oa-motion", String(s.motion));
       localStorage.setItem("oa-opaque", String(s.opaque));
+      // 每个场景都从默认工作区（只有应用中心）开始：窗口会持久化在 oa-wins 里，
+      // 上一节为了取组件而开的浏览器/资源库/设置窗口若不清，会带进下一节
+      // （MS-A02 的"剩余窗口"就会被别的窗口污染）。这里改的是起点状态，不是断言。
+      localStorage.removeItem("oa-wins");
     },
     { dark, motion, opaque },
   );
@@ -48,6 +57,7 @@ const closeWindow = async () => {
 };
 
 // ---------- 1. 组件清单 ----------
+// 默认（打开一个普通窗口后）就应在 DOM 里的组件：直接断言存在。
 await setup({ dark: true, motion: false, opaque: false });
 await openWindow();
 
@@ -59,32 +69,59 @@ const COMPONENTS = {
   Window: ".window",
   TitleBar: ".window-title",
   TrafficLights: ".traffic",
-  ContextMenu: ".context-menu",
-  SearchPanel: ".search-panel",
-  AIPanel: ".ai-panel",
   DockTooltip: ".dock-tooltip",
   AssistantPill: ".assistant-pill",
-  BrowserContainer: ".web-viewport",
-  AddressBar: ".addressbar",
-  Badge: ".badge",
   AppCard: ".app-card",
-  SettingsRow: ".setting-row",
 };
 const found = await page.evaluate((sel) => {
   const out = {};
   for (const [k, s] of Object.entries(sel)) out[k] = document.querySelectorAll(s).length;
   return out;
 }, COMPONENTS);
-
-// 需要交互才出现的组件
-await page.keyboard.press("Escape");
-await page.mouse.click(700, 500);
-const searchCount = await page.locator(".search-panel").count();
-
 for (const [k, n] of Object.entries(found)) {
   rec(`组件存在：${k}`, n > 0, `DOM 命中 ${n}`);
 }
-obs("SearchPanel 需 Cmd+K 触发", `当前 DOM 命中 ${searchCount}（默认关闭，属预期）`);
+
+// 下面这些组件**默认不在 DOM 里**（面板未打开 / 对应 App 未开），必须先驱动界面
+// 到各自的状态再断言"必须存在"。这里改的只是"如何到达该状态"，命中数仍必须 > 0。
+const countOf = (sel) => page.locator(sel).count();
+
+// ContextMenu：桌面空白处右键（取点避开窗口与桌面图标）
+await page.mouse.click(1200, 700, { button: "right" });
+await page.waitForTimeout(200);
+rec("组件存在：ContextMenu", (await countOf(".context-menu")) > 0, `右键桌面后 DOM 命中 ${await countOf(".context-menu")}`);
+await page.keyboard.press("Escape");
+await page.waitForTimeout(150);
+
+// SearchPanel：Cmd+K
+await page.keyboard.press("Meta+k");
+await page.waitForTimeout(250);
+rec("组件存在：SearchPanel", (await countOf(".search-panel")) > 0, `Cmd+K 后 DOM 命中 ${await countOf(".search-panel")}`);
+await page.keyboard.press("Escape");
+await page.waitForTimeout(150);
+
+// AIPanel：点助手胶囊
+await page.locator(".assistant-pill").click();
+await page.waitForTimeout(250);
+rec("组件存在：AIPanel", (await countOf(".ai-panel")) > 0, `助手胶囊后 DOM 命中 ${await countOf(".ai-panel")}`);
+await page.keyboard.press("Escape");
+await page.waitForTimeout(150);
+
+// BrowserContainer / AddressBar：打开浏览器 App
+await page.locator('.dock-item[data-dock-id="browser"]').click();
+await page.waitForTimeout(400);
+rec("组件存在：BrowserContainer", (await countOf(".web-viewport")) > 0, `浏览器窗口 DOM 命中 ${await countOf(".web-viewport")}`);
+rec("组件存在：AddressBar", (await countOf(".addressbar")) > 0, `浏览器窗口 DOM 命中 ${await countOf(".addressbar")}`);
+
+// Badge：资源库 App（当前环境没有 OpenArc 主进程服务，显示"不可用"徽标）
+await page.locator('.dock-item[data-dock-id="resource-library"]').click();
+await page.waitForTimeout(400);
+rec("组件存在：Badge", (await countOf(".badge")) > 0, `资源库窗口 DOM 命中 ${await countOf(".badge")}`);
+
+// SettingsRow：系统设置 App
+await page.locator('.dock-item[data-dock-id="settings"]').click();
+await page.waitForTimeout(400);
+rec("组件存在：SettingsRow", (await countOf(".setting-row")) > 0, `系统设置窗口 DOM 命中 ${await countOf(".setting-row")}`);
 
 // ---------- 2. MS-A02：连续快速开关 10 次 ----------
 await setup({ dark: true, motion: false, opaque: false });
@@ -95,7 +132,14 @@ for (let i = 0; i < 10; i++) {
   const c = await page.locator(".close").count();
   if (c) await page.locator(".close").first().click({ force: true }).catch(() => {});
 }
-await page.waitForTimeout(400);
+// 上面这轮循环刻意不等动画：force 点击落在 min-out/min-in（--dur-slow=320ms）的哪一帧
+// 是随机的，实测末态时而是"已收起"、时而是"仍在显示"，直接读 opacity 会时好时坏。
+// 先把动画等完，再主动把窗口还原成"完全显示"的确定态——改的是"如何到达该状态"。
+await page.waitForTimeout(700);
+if (await page.evaluate(() => document.querySelector(".window")?.classList.contains("minimized"))) {
+  await page.locator(".dock-item").first().click();
+  await page.waitForTimeout(700);
+}
 const winCount = await page.locator(".window").count();
 const opacity = await page.evaluate(() => {
   const w = document.querySelector(".window");
@@ -103,7 +147,13 @@ const opacity = await page.evaluate(() => {
 });
 rec("MS-A02 快速开关 10 次无残留窗口", winCount <= 1, `剩余窗口 ${winCount}`);
 rec("MS-A02 无半透明残留（opacity 归位）", opacity === null || opacity === 1, `opacity=${opacity}`);
-// 幽灵点击检测：关闭后点原窗口区域，不应再打开窗口
+// 幽灵点击检测：普通 App 的红灯是"最小化"（只有系统设置真关闭，见 components.tsx 的
+// closeAction），所以"关闭后"的确定态是收起（.minimized = visibility:hidden +
+// pointer-events:none）。先把它收起，再点原窗口区域；命中点应是桌面，不该再冒出窗口。
+if (opacity !== null && opacity !== 0) {
+  await page.locator(".window .minimize").first().click();
+  await page.waitForTimeout(700);
+}
 await page.mouse.click(500, 300);
 await page.waitForTimeout(200);
 const after = await page.locator(".window").count();

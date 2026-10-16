@@ -1,0 +1,5 @@
+{
+  "name": "openarc-z2-files-library-ui-probe",
+  "private": true,
+  "main": "main.cjs"
+}

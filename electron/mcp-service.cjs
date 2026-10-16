@@ -9,7 +9,8 @@
  *   · 工具描述（能力数据）要求 mcp.use：只有 mcp.view 时列表照常给状态，但 tools 为空且 toolsHidden=true。
  * 连接（本地/远程）都真实握手：initialize → notifications/initialized → tools/list（分页有界），
  * 把**实际协商结果**写进记录；失败回稳定错误码，绝不假装成功。
- * 本批**不开放工具调用**：invokeTool 一律 MCP_TOOL_INVOCATION_NOT_ENABLED。
+ * 工具调用**默认关闭**：真实路径在 mcp-agent-tools/mcp-client（显式开关 + 逐次审批）；
+ * 本类保留的 invokeTool 是旧形状，恒回 MCP_TOOL_INVOCATION_NOT_ENABLED，不是调用路径。
  */
 "use strict";
 
@@ -59,7 +60,7 @@ class McpService {
   #actor(context) { return this.authService.resolveActor({ context }); }
 
   /** App 动作 + 连接可见性判定。deny 时返回稳定错误码与原因，不回任何连接数据。 */
-  #authorize({ context, action, connection = null, requireApp = true, allowNotVisible = false } = {}) {
+  #authorize({ context, action, connection = null, requireApp = true, allowNotVisible = false, requireAdmin = false } = {}) {
     const actor = this.#actor(context);
     if (!actor.ok) return { ok: false, error: domain.ERROR_CODE.MCP_UNAUTHORIZED, reason: "no-session" };
     const appId = context && context.appId ? String(context.appId) : null;
@@ -69,6 +70,14 @@ class McpService {
     if (requireApp) {
       const grants = this.#grantsFor(appId, actor);
       if (!grants.some((g) => domain.mcpGrantActions(g).includes(action))) return { ok: false, error: domain.ERROR_CODE.MCP_UNAUTHORIZED, reason: "app-action-missing" };
+    }
+    // B4e 收口补丁 · 全局能力开关的写授权必须是管理员：
+    // mcp.manage 只证明"这个 App 被授了管理动作"，不代表调用者本人是管理员 ——
+    // 内置 MEMBER 角色同样持有 mcp-center 的 mcp.manage，于是普通成员能改全局开关（真实缺口）。
+    // 沿用既有治理写路径的判定（authorization-service.cjs:597-598 的 SUPER_ADMIN_ONLY、
+    // authorization-service.cjs:390 的 role!=="ADMIN" → NOT_SUPER_ADMIN）：要求 actor.isSuper。
+    if (requireAdmin && !actor.isSuper) {
+      return { ok: false, error: domain.ERROR_CODE.MCP_UNAUTHORIZED, reason: "manage-requires-admin", actor, app };
     }
     if (connection) {
       const isOrg = connection.visibility === domain.VISIBILITY.ORGANIZATION;
@@ -216,6 +225,8 @@ class McpService {
     if (patch.endpoint !== undefined) {
       encoded = domain.encodeEndpoint({ location: row.location, transport: row.transport, endpoint: patch.endpoint, allowLan: false });
       if (!encoded.ok) return encoded;
+      // Y6：通用编辑只重写端点，不能把 App 托管归属键（endpoint_json 附加键 managedByAppId）一起抹掉。
+      encoded = domain.carryManagedByAppId(encoded, row.endpoint_json);
       originChanged = encoded.origin !== this.#originOf(row);
     }
     const wantsSecret = typeof patch.credentialSecret === "string" && patch.credentialSecret.length > 0;
@@ -373,9 +384,23 @@ class McpService {
     return { ok: true, items, connectionId };
   }
 
-  /** 第一批不开放工具调用：唯一入口明确拒绝（不是"未实现所以报错"，是显式的产品边界）。 */
+  /** 旧调用形状：恒回 MCP_TOOL_INVOCATION_NOT_ENABLED（不是"未实现所以报错"，是保留的显式拒绝）。 */
   invokeTool() {
     return { ok: false, error: domain.ERROR_CODE.MCP_TOOL_INVOCATION_NOT_ENABLED };
+  }
+
+  /**
+   * B4e：全局"是否允许发起 MCP 工具调用"开关的写授权（risk = mcp.manage）。
+   * 开关改变的是整个 MCP 域的调用能力，不是某条连接，因此只校验 App 动作，不绑 connection。
+   *
+   * B4e 收口补丁：这是**全局**开关，收紧为管理员/超管（requireAdmin → actor.isSuper）。
+   * 审计与结构化错误码不变：调用方（mcp-bootstrap.cjs:288-292）仍会按 REQUEST/DENY/ALLOW
+   * 落 mcp.toolInvocation.set 审计；这里只回 MCP_UNAUTHORIZED + reason=manage-requires-admin。
+   * 返回结构化结果，绝不回连接数据。
+   */
+  authorizeManage({ context } = {}) {
+    const auth = this.#authorize({ context, action: domain.MCP_ACTIONS.MANAGE, requireAdmin: true });
+    return auth.ok ? { ok: true } : { ok: false, error: auth.error, reason: auth.reason || null };
   }
 
   /**

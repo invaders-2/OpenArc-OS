@@ -38,6 +38,42 @@ const baselineOf = (fx, taskId) => fx.taskStore.eventsOfTask(taskId).filter((e) 
 const ledgerOf = (fx, ctx, taskId) => fx.taskService.getBudgetLedger({ context: ctx, taskId }).ledger;
 const runs = (fx, taskId) => fx.taskStore.harnessRunsOfTask(taskId).length;
 
+/* ------------------------------------------------ 宿主停顿：harness 基础设施失败的整场景重试
+ *
+ * 这些场景用**真实 official dsh 子进程**完成 harness turn。本机 sysctl 报 25.6G swap / 已用 24G、
+ * 700+ 进程，会整机停顿数百秒：子进程挂在 ACP prompt 里，adapter 的 180s turn 预算在恢复瞬间到期，
+ * runStep 于是返回 HARNESS_TURN_TIMEOUT —— 而不是任何预算结论。实测同一份测试单独连跑 30 次：
+ * 27 次 ~5s 通过，2 次停顿后 ~930–990s 仍通过，1 次停顿中报 HARNESS_TURN_TIMEOUT。
+ *
+ * 这里只处理**前置构造**：把 harness 基础设施失败（turn/start 超时、子进程退出）标记为可重试，
+ * 用一个全新夹具把同一场景重跑；任何一条预算 / 授权断言一字未改，且仍然必须在一次真实完成的
+ * harness 运行上全部成立。重试用尽后原样抛出 —— 真实失败（含 HARNESS_TURN_TIMEOUT 的确定性复现）
+ * 绝不会被吞掉。
+ */
+const HARNESS_INFRA_FAILURES = new Set(["HARNESS_TURN_TIMEOUT", "HARNESS_START_TIMEOUT", "HARNESS_PROCESS_EXITED"]);
+function harnessStallError(label, res) {
+  const e = new Error(label + "：真实 dsh harness 基础设施失败（宿主停顿）：" + String((res && res.error) || "unknown"));
+  e.harnessStall = true;
+  return e;
+}
+/** 结果是 harness 基础设施失败 → 抛可重试标记；其余结果（含预算结论）原样返回。 */
+function throwIfHarnessStall(res, label) {
+  if (res && res.ok === false && HARNESS_INFRA_FAILURES.has(String(res.error))) throw harnessStallError(label, res);
+  return res;
+}
+/** runStep 包装：预算结论原样返回，基础设施失败抛可重试标记。 */
+async function harnessStep(orchestrator, args) { return throwIfHarnessStall(await orchestrator.runStep(args), "runStep"); }
+/** 整场景重试循环：body 自己建 / 关夹具；只有 harnessStall 标记才重跑（默认 3 次）。 */
+async function runWithHarnessRetry(body, attempts = 3) {
+  for (let attempt = 1; ; attempt += 1) {
+    try { return await body(); }
+    catch (e) { if (!e || e.harnessStall !== true || attempt >= attempts) throw e; }
+  }
+}
+function harnessTest(name, body, attempts = 3) {
+  test(name, async () => { await runWithHarnessRetry(body, attempts); });
+}
+
 const sameKinds = (a, b, kinds) => kinds.every((k) => a[k].authorized === b[k].authorized && a[k].consumed === b[k].consumed && a[k].remaining === b[k].remaining);
 
 /** step0 成功（Artifact 锚点）+ step1 真实 dsh 受控 READ → 预算停止；返回 ledger 快照前的 task 状态。 */
@@ -51,11 +87,11 @@ async function dshBudgetStop(fx, { step1Plan, verify = DSH_FINAL }) {
   const ss0 = fx.taskService.startStep({ context: ctx, taskId: t.task.taskId, stepId: s0.step.stepId, expectedRevision: s1.task.revision });
   const dsh = fx.makeDshOrchestrator();
   fx.fp.state.toolLoopPlan = [];
-  const r0 = await dsh.runStep({ context: ctx, taskId: t.task.taskId, stepId: s0.step.stepId, expectedRevision: ss0.task.revision, stepInput: null, verify: { type: "EXACT_TEXT", expected: verify } });
+  const r0 = await harnessStep(dsh, { context: ctx, taskId: t.task.taskId, stepId: s0.step.stepId, expectedRevision: ss0.task.revision, stepInput: null, verify: { type: "EXACT_TEXT", expected: verify } });
   assert.equal(r0.ok, true, "step0 必须成功：" + JSON.stringify(r0.error));
   const ss1 = fx.taskService.startStep({ context: ctx, taskId: t.task.taskId, stepId: s1.step.stepId, expectedRevision: fx.taskStore.taskById(t.task.taskId).revision });
   fx.fp.state.toolLoopPlan = step1Plan;
-  const r1 = await dsh.runStep({ context: ctx, taskId: t.task.taskId, stepId: s1.step.stepId, expectedRevision: ss1.task.revision, stepInput: null, verify: { type: "EXACT_TEXT", expected: verify } });
+  const r1 = await harnessStep(dsh, { context: ctx, taskId: t.task.taskId, stepId: s1.step.stepId, expectedRevision: ss1.task.revision, stepInput: null, verify: { type: "EXACT_TEXT", expected: verify } });
   return { ctx, taskId: t.task.taskId, s0, s1, dsh, r0, r1 };
 }
 
@@ -69,17 +105,17 @@ async function synthBudgetStop(fx, plan) {
   const s1 = fx.taskService.createStep({ context: ctx, taskId: t.task.taskId, kind: "reasoning", input: { proposeSequence: plan, finalText: SYNTH_FINAL }, expectedRevision: s0.task.revision });
   const ss0 = fx.taskService.startStep({ context: ctx, taskId: t.task.taskId, stepId: s0.step.stepId, expectedRevision: s1.task.revision });
   const orch = fx.makeToolOrchestrator();
-  const r0 = await orch.runStep({ context: ctx, taskId: t.task.taskId, stepId: s0.step.stepId, expectedRevision: ss0.task.revision, stepInput: s0.step.input, verify: { type: "EXACT_TEXT", expected: SYNTH_FINAL } });
+  const r0 = await harnessStep(orch, { context: ctx, taskId: t.task.taskId, stepId: s0.step.stepId, expectedRevision: ss0.task.revision, stepInput: s0.step.input, verify: { type: "EXACT_TEXT", expected: SYNTH_FINAL } });
   assert.equal(r0.ok, true, "step0 必须成功：" + JSON.stringify(r0.error));
   const ss1 = fx.taskService.startStep({ context: ctx, taskId: t.task.taskId, stepId: s1.step.stepId, expectedRevision: fx.taskStore.taskById(t.task.taskId).revision });
-  const r1 = await orch.runStep({ context: ctx, taskId: t.task.taskId, stepId: s1.step.stepId, expectedRevision: ss1.task.revision, stepInput: s1.step.input, verify: { type: "EXACT_TEXT", expected: SYNTH_FINAL } });
+  const r1 = await harnessStep(orch, { context: ctx, taskId: t.task.taskId, stepId: s1.step.stepId, expectedRevision: ss1.task.revision, stepInput: s1.step.input, verify: { type: "EXACT_TEXT", expected: SYNTH_FINAL } });
   assert.equal(r1.error, "BUDGET_EXHAUSTED", "step1 必须预算停止：" + JSON.stringify(r1));
   return { ctx, taskId: t.task.taskId, s0, s1, orch, r0, r1 };
 }
 
 /* ============================================================ ① 只加一个 kind，其他两种完全保留 */
 
-test("D4-08 ① MODEL_CALLS 消耗后追加 → TOOL_CALLS / TOOL_ROUNDS remaining 完全保留", async () => {
+harnessTest("D4-08 ① MODEL_CALLS 消耗后追加 → TOOL_CALLS / TOOL_ROUNDS remaining 完全保留", async () => {
   const fx = await createToolHarnessFixture({ withAdapters: true, behavior: "tool-loop", facadeMaxCalls: 100 });
   try {
     const h = await dshBudgetStop(fx, { step1Plan: searchPlan(12, "m") });
@@ -104,7 +140,7 @@ test("D4-08 ① MODEL_CALLS 消耗后追加 → TOOL_CALLS / TOOL_ROUNDS remaini
   } finally { await fx.close(); }
 });
 
-test("D4-08 ① TOOL_CALLS 消耗后追加 → MODEL_CALLS / TOOL_ROUNDS remaining 完全保留", async () => {
+harnessTest("D4-08 ① TOOL_CALLS 消耗后追加 → MODEL_CALLS / TOOL_ROUNDS remaining 完全保留", async () => {
   const fx = await createToolHarnessFixture({ withAdapters: true, behavior: "tool-loop", facadeMaxCalls: 2, modelMaxCalls: 100 });
   try {
     // model 额度显著高于 tool=2，plan 足够长 → 工具先被拒绝，停止归因 TOOL_CALLS，模型不耗尽。
@@ -128,7 +164,7 @@ test("D4-08 ① TOOL_CALLS 消耗后追加 → MODEL_CALLS / TOOL_ROUNDS remaini
   } finally { await fx.close(); }
 });
 
-test("D4-08 ① TOOL_ROUNDS 消耗后追加 → MODEL_CALLS / TOOL_CALLS remaining 完全保留", async () => {
+harnessTest("D4-08 ① TOOL_ROUNDS 消耗后追加 → MODEL_CALLS / TOOL_CALLS remaining 完全保留", async () => {
   const fx = await createToolHarnessFixture({ withAdapters: true, behavior: "tool-loop" });
   try {
     const h = await synthBudgetStop(fx, rounds(5, "r"));
@@ -151,7 +187,7 @@ test("D4-08 ① TOOL_ROUNDS 消耗后追加 → MODEL_CALLS / TOOL_CALLS remaini
 
 /* ============================================================ ② 新 run 实际调用次数受 remaining 约束 */
 
-test("D4-08 ② TOOL_CALLS：部分消耗后的新 run 实际受 remaining 约束（capability 额度 == remaining）", async () => {
+harnessTest("D4-08 ② TOOL_CALLS：部分消耗后的新 run 实际受 remaining 约束（capability 额度 == remaining）", async () => {
   const modelCaps = []; const toolCaps = [];
   const fx = await createToolHarnessFixture({
     withAdapters: true, behavior: "tool-loop", facadeMaxCalls: 3,
@@ -176,12 +212,12 @@ test("D4-08 ② TOOL_CALLS：部分消耗后的新 run 实际受 remaining 约�
     const dsh = fx.makeDshOrchestrator();
 
     fx.fp.state.toolLoopPlan = [];
-    const r0 = await dsh.runStep({ context: ctx, taskId: t.task.taskId, stepId: s0.step.stepId, expectedRevision: ss0.task.revision, stepInput: null, verify: { type: "EXACT_TEXT", expected: DSH_FINAL } });
+    const r0 = await harnessStep(dsh, { context: ctx, taskId: t.task.taskId, stepId: s0.step.stepId, expectedRevision: ss0.task.revision, stepInput: null, verify: { type: "EXACT_TEXT", expected: DSH_FINAL } });
     assert.equal(r0.ok, true, JSON.stringify(r0.error));
     // step1：2 个受控 READ（全部合法）→ 消耗 2 个 tool call，任务继续 RUNNING（step2 仍 PENDING）。
     const ss1 = fx.taskService.startStep({ context: ctx, taskId: t.task.taskId, stepId: s1.step.stepId, expectedRevision: fx.taskStore.taskById(t.task.taskId).revision });
     fx.fp.state.toolLoopPlan = searchPlan(2, "p");
-    const r1 = await dsh.runStep({ context: ctx, taskId: t.task.taskId, stepId: s1.step.stepId, expectedRevision: ss1.task.revision, stepInput: null, verify: { type: "EXACT_TEXT", expected: DSH_FINAL } });
+    const r1 = await harnessStep(dsh, { context: ctx, taskId: t.task.taskId, stepId: s1.step.stepId, expectedRevision: ss1.task.revision, stepInput: null, verify: { type: "EXACT_TEXT", expected: DSH_FINAL } });
     assert.equal(r1.ok, true, "2 个合法 tool call 后成功：" + JSON.stringify(r1.error));
     const beforeStep2 = ledgerOf(fx, ctx, t.task.taskId).kinds;
     assert.equal(beforeStep2.TOOL_CALLS.consumed, 2, JSON.stringify(beforeStep2));
@@ -190,7 +226,7 @@ test("D4-08 ② TOOL_CALLS：部分消耗后的新 run 实际受 remaining 约�
     // step2：3 个受控 READ，但任务只剩 1 → 实际只允许 1 次执行。
     const ss2 = fx.taskService.startStep({ context: ctx, taskId: t.task.taskId, stepId: s2.step.stepId, expectedRevision: fx.taskStore.taskById(t.task.taskId).revision });
     fx.fp.state.toolLoopPlan = searchPlan(3, "q");
-    const r2 = await dsh.runStep({ context: ctx, taskId: t.task.taskId, stepId: s2.step.stepId, expectedRevision: ss2.task.revision, stepInput: null, verify: { type: "EXACT_TEXT", expected: DSH_FINAL } });
+    const r2 = await harnessStep(dsh, { context: ctx, taskId: t.task.taskId, stepId: s2.step.stepId, expectedRevision: ss2.task.revision, stepInput: null, verify: { type: "EXACT_TEXT", expected: DSH_FINAL } });
     assert.equal(r2.error, "BUDGET_EXHAUSTED", JSON.stringify(r2));
     const step2Execs = fx.toolStore.executionsOfTask(t.task.taskId).filter((e) => e.step_id === s2.step.stepId);
     assert.equal(step2Execs.length, 1, "新 run 实际调用次数受 remaining 约束：" + step2Execs.length);
@@ -203,7 +239,7 @@ test("D4-08 ② TOOL_CALLS：部分消耗后的新 run 实际受 remaining 约�
   } finally { await fx.close(); }
 });
 
-test("D4-08 ② MODEL_CALLS：部分消耗后的新 run 实际受 remaining 约束（无第 remaining+1 次真实请求）", async () => {
+harnessTest("D4-08 ② MODEL_CALLS：部分消耗后的新 run 实际受 remaining 约束（无第 remaining+1 次真实请求）", async () => {
   const modelCaps = [];
   const fx = await createToolHarnessFixture({ withAdapters: true, behavior: "tool-loop", facadeMaxCalls: 100 });
   try {
@@ -220,11 +256,11 @@ test("D4-08 ② MODEL_CALLS：部分消耗后的新 run 实际受 remaining 约�
     const dsh = fx.makeDshOrchestrator();
     // step0：1 次 model 请求成功；step1：再 1 次成功。任务剩余 model = 8 - 2 = 6。
     fx.fp.state.toolLoopPlan = [];
-    const r0 = await dsh.runStep({ context: ctx, taskId: t.task.taskId, stepId: s0.step.stepId, expectedRevision: ss0.task.revision, stepInput: null, verify: { type: "EXACT_TEXT", expected: DSH_FINAL } });
+    const r0 = await harnessStep(dsh, { context: ctx, taskId: t.task.taskId, stepId: s0.step.stepId, expectedRevision: ss0.task.revision, stepInput: null, verify: { type: "EXACT_TEXT", expected: DSH_FINAL } });
     assert.equal(r0.ok, true, JSON.stringify(r0.error));
     const ss1 = fx.taskService.startStep({ context: ctx, taskId: t.task.taskId, stepId: s1.step.stepId, expectedRevision: fx.taskStore.taskById(t.task.taskId).revision });
     fx.fp.state.toolLoopPlan = [];
-    const r1 = await dsh.runStep({ context: ctx, taskId: t.task.taskId, stepId: s1.step.stepId, expectedRevision: ss1.task.revision, stepInput: null, verify: { type: "EXACT_TEXT", expected: DSH_FINAL } });
+    const r1 = await harnessStep(dsh, { context: ctx, taskId: t.task.taskId, stepId: s1.step.stepId, expectedRevision: ss1.task.revision, stepInput: null, verify: { type: "EXACT_TEXT", expected: DSH_FINAL } });
     assert.equal(r1.ok, true, JSON.stringify(r1.error));
     const before = ledgerOf(fx, ctx, t.task.taskId).kinds;
     assert.equal(before.MODEL_CALLS.remaining, DEFAULT_MAX_CALLS - 2, JSON.stringify(before));
@@ -233,7 +269,7 @@ test("D4-08 ② MODEL_CALLS：部分消耗后的新 run 实际受 remaining 约�
     const ss2 = fx.taskService.startStep({ context: ctx, taskId: t.task.taskId, stepId: s2.step.stepId, expectedRevision: fx.taskStore.taskById(t.task.taskId).revision });
     fx.fp.state.toolLoopPlan = searchPlan(12, "mc");
     const requestsBefore = fx.fp.state.requests;
-    const r2 = await dsh.runStep({ context: ctx, taskId: t.task.taskId, stepId: s2.step.stepId, expectedRevision: ss2.task.revision, stepInput: null, verify: { type: "EXACT_TEXT", expected: DSH_FINAL } });
+    const r2 = await harnessStep(dsh, { context: ctx, taskId: t.task.taskId, stepId: s2.step.stepId, expectedRevision: ss2.task.revision, stepInput: null, verify: { type: "EXACT_TEXT", expected: DSH_FINAL } });
     assert.equal(r2.error, "BUDGET_EXHAUSTED", JSON.stringify(r2));
     assert.equal(modelCaps[modelCaps.length - 1], before.MODEL_CALLS.remaining, "新 run model capability 额度 == 任务剩余：" + JSON.stringify(modelCaps));
     assert.equal(fx.fp.state.requests - requestsBefore, before.MODEL_CALLS.remaining, "真实 provider 请求数 == remaining（无第 remaining+1 次）：" + (fx.fp.state.requests - requestsBefore));
@@ -245,7 +281,7 @@ test("D4-08 ② MODEL_CALLS：部分消耗后的新 run 实际受 remaining 约�
   } finally { await fx.close(); }
 });
 
-test("D4-08 ② TOOL_ROUNDS：部分消耗后的新 run 实际轮数受 remaining 约束", async () => {
+harnessTest("D4-08 ② TOOL_ROUNDS：部分消耗后的新 run 实际轮数受 remaining 约束", async () => {
   const fx = await createToolHarnessFixture({ withAdapters: true, behavior: "tool-loop" });
   try {
     fx.grantTool("ai", ["tool.resource.search", "tool.resource.readMetadata"]);
@@ -257,17 +293,17 @@ test("D4-08 ② TOOL_ROUNDS：部分消耗后的新 run 实际轮数受 remainin
     const s2 = fx.taskService.createStep({ context: ctx, taskId: t.task.taskId, kind: "reasoning", input: { proposeSequence: rounds(5, "b"), finalText: SYNTH_FINAL }, expectedRevision: s1.task.revision });
     const ss0 = fx.taskService.startStep({ context: ctx, taskId: t.task.taskId, stepId: s0.step.stepId, expectedRevision: s2.task.revision });
     const orch = fx.makeToolOrchestrator();
-    const r0 = await orch.runStep({ context: ctx, taskId: t.task.taskId, stepId: s0.step.stepId, expectedRevision: ss0.task.revision, stepInput: s0.step.input, verify: { type: "EXACT_TEXT", expected: SYNTH_FINAL } });
+    const r0 = await harnessStep(orch, { context: ctx, taskId: t.task.taskId, stepId: s0.step.stepId, expectedRevision: ss0.task.revision, stepInput: s0.step.input, verify: { type: "EXACT_TEXT", expected: SYNTH_FINAL } });
     assert.equal(r0.ok, true, JSON.stringify(r0.error));
     const ss1 = fx.taskService.startStep({ context: ctx, taskId: t.task.taskId, stepId: s1.step.stepId, expectedRevision: fx.taskStore.taskById(t.task.taskId).revision });
-    const r1 = await orch.runStep({ context: ctx, taskId: t.task.taskId, stepId: s1.step.stepId, expectedRevision: ss1.task.revision, stepInput: s1.step.input, verify: { type: "EXACT_TEXT", expected: SYNTH_FINAL } });
+    const r1 = await harnessStep(orch, { context: ctx, taskId: t.task.taskId, stepId: s1.step.stepId, expectedRevision: ss1.task.revision, stepInput: s1.step.input, verify: { type: "EXACT_TEXT", expected: SYNTH_FINAL } });
     assert.equal(r1.ok, true, "2 轮后成功：" + JSON.stringify(r1.error));
     const before = ledgerOf(fx, ctx, t.task.taskId).kinds;
     assert.equal(before.TOOL_ROUNDS.consumed, 2);
     assert.equal(before.TOOL_ROUNDS.remaining, MAX_TOOL_ROUNDS - 2);
 
     const ss2 = fx.taskService.startStep({ context: ctx, taskId: t.task.taskId, stepId: s2.step.stepId, expectedRevision: fx.taskStore.taskById(t.task.taskId).revision });
-    const r2 = await orch.runStep({ context: ctx, taskId: t.task.taskId, stepId: s2.step.stepId, expectedRevision: ss2.task.revision, stepInput: s2.step.input, verify: { type: "EXACT_TEXT", expected: SYNTH_FINAL } });
+    const r2 = await harnessStep(orch, { context: ctx, taskId: t.task.taskId, stepId: s2.step.stepId, expectedRevision: ss2.task.revision, stepInput: s2.step.input, verify: { type: "EXACT_TEXT", expected: SYNTH_FINAL } });
     assert.equal(r2.error, "BUDGET_EXHAUSTED", JSON.stringify(r2));
     const step2Execs = fx.toolStore.executionsOfTask(t.task.taskId).filter((e) => e.step_id === s2.step.stepId);
     assert.equal(step2Execs.length, MAX_TOOL_ROUNDS - 2, "新 run 轮数上界 == 任务剩余 2：" + step2Execs.length);
@@ -280,7 +316,7 @@ test("D4-08 ② TOOL_ROUNDS：部分消耗后的新 run 实际轮数受 remainin
 
 /* ============================================================ ③ 多类同时耗尽 + 不自动补齐 */
 
-test("D4-08 ③ MODEL_CALLS 与 TOOL_CALLS 同时耗尽 → 停因/nextGrant 明确；只追加一种，其他不被补齐", async () => {
+harnessTest("D4-08 ③ MODEL_CALLS 与 TOOL_CALLS 同时耗尽 → 停因/nextGrant 明确；只追加一种，其他不被补齐", async () => {
   const fx = await createToolHarnessFixture({ withAdapters: true, behavior: "tool-loop", facadeMaxCalls: 2, modelMaxCalls: 6 });
   try {
     const h = await dshBudgetStop(fx, { step1Plan: searchPlan(8, "both") });
@@ -304,7 +340,7 @@ test("D4-08 ③ MODEL_CALLS 与 TOOL_CALLS 同时耗尽 → 停因/nextGrant 明
 
     // 续接：只追加 TOOL_CALLS；MODEL_CALLS 仍为 0 → remaining==0 的 used kind 直接停止，且不创建新 run。
     const runsBefore = runs(fx, h.taskId);
-    const rr = await h.dsh.resumeBudgetExhausted({ context: h.ctx, taskId: h.taskId, expectedRevision: fx.taskStore.taskById(h.taskId).revision, verify: { type: "EXACT_TEXT", expected: DSH_FINAL } });
+    const rr = throwIfHarnessStall(await h.dsh.resumeBudgetExhausted({ context: h.ctx, taskId: h.taskId, expectedRevision: fx.taskStore.taskById(h.taskId).revision, verify: { type: "EXACT_TEXT", expected: DSH_FINAL } }), "resumeBudgetExhausted");
     assert.equal(rr.ok, false, JSON.stringify(rr));
     assert.equal(rr.error, "BUDGET_EXHAUSTED");
     assert.equal(runs(fx, h.taskId), runsBefore, "remaining==0 时绝不创建 run：" + runs(fx, h.taskId));
@@ -323,7 +359,7 @@ test("D4-08 ③ MODEL_CALLS 与 TOOL_CALLS 同时耗尽 → 停因/nextGrant 明
 
 /* ============================================================ ④ 重复/并发续接只追加一次 */
 
-test("D4-08 ④ 并发续接 → 只追加一次、只产生一个有效运行", async () => {
+harnessTest("D4-08 ④ 并发续接 → 只追加一次、只产生一个有效运行", async () => {
   const fx = await createToolHarnessFixture({ withAdapters: true, behavior: "tool-loop" });
   try {
     const h = await synthBudgetStop(fx, rounds(5, "c"));
@@ -332,13 +368,14 @@ test("D4-08 ④ 并发续接 → 只追加一次、只产生一个有效运行",
     const rev = fx.taskStore.taskById(h.taskId).revision;
     const args = { context: h.ctx, taskId: h.taskId, expectedRevision: rev, verify: { type: "EXACT_TEXT", expected: SYNTH_FINAL } };
     const results = await Promise.all([h.orch.resumeBudgetExhausted(args), h.orch.resumeBudgetExhausted({ ...args })]);
+    for (const r of results) throwIfHarnessStall(r, "resumeBudgetExhausted");
     assert.equal(results.filter((r) => r.ok === true).length, 1, "恰好一次有效续接：" + JSON.stringify(results.map((r) => [r.ok, r.error])));
     assert.equal(grantsOf(fx, h.taskId).length, 1, "只追加一次预算");
     assert.equal(runs(fx, h.taskId), runsBefore + 1, "只产生一个有效运行");
     const after = ledgerOf(fx, h.ctx, h.taskId).kinds;
     assert.equal(after.TOOL_ROUNDS.authorized, before.TOOL_ROUNDS.authorized + MAX_TOOL_ROUNDS, "只加一次 TOOL_ROUNDS");
     // 成功后再次点击：不可续接，且不再追加。
-    const again = await h.orch.resumeBudgetExhausted({ context: h.ctx, taskId: h.taskId, expectedRevision: fx.taskStore.taskById(h.taskId).revision });
+    const again = throwIfHarnessStall(await h.orch.resumeBudgetExhausted({ context: h.ctx, taskId: h.taskId, expectedRevision: fx.taskStore.taskById(h.taskId).revision }), "resumeBudgetExhausted");
     assert.equal(again.ok, false);
     assert.equal(grantsOf(fx, h.taskId).length, 1);
   } finally { await fx.close(); }
@@ -346,7 +383,7 @@ test("D4-08 ④ 并发续接 → 只追加一次、只产生一个有效运行",
 
 /* ============================================================ ⑤ 再次耗尽 + 成功副作用不重复 */
 
-test("D4-08 ⑤ 续接后再次耗尽 → 正确停止；已成功副作用恰好一次、不重放", async () => {
+harnessTest("D4-08 ⑤ 续接后再次耗尽 → 正确停止；已成功副作用恰好一次、不重放", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "oa-d408-retain-"));
   const fx = await createToolHarnessFixture({
     withAdapters: true, behavior: "tool-loop", dbPath: path.join(root, "identity.db"), storeRoot: path.join(root, "library"), keepData: true,
@@ -374,14 +411,14 @@ test("D4-08 ⑤ 续接后再次耗尽 → 正确停止；已成功副作用恰�
     await waitFor(() => fx.sideEffectStore.callsOfTask(t.task.taskId).length === 1, 60000, "SideEffectCall 未出现");
     const call = fx.sideEffectStore.callsOfTask(t.task.taskId)[0];
     assert.equal(fx.sideEffectRuntime.decideApproval({ context: { sessionRef: fx.f.sessions.admin, source: "user" }, approvalRequestId: call.callId, decision: "APPROVE" }).ok, true);
-    const r0 = await p0;
+    const r0 = throwIfHarnessStall(await p0, "step0");
     assert.equal(r0.ok, true, "step0 WRITE 必须成功：" + JSON.stringify(r0.error));
     assert.equal(fx.f.resourceService.sideEffectPrecondition({ resourceRef }).trashed, true);
 
     // step1：合成轮次预算停止（step0 的 side-effect loop 已消耗 1 轮 → 只剩 3）。
     const toolOrch = fx.makeToolOrchestrator();
     const ss1 = fx.taskService.startStep({ context: ctx, taskId: t.task.taskId, stepId: s1.step.stepId, expectedRevision: fx.taskStore.taskById(t.task.taskId).revision });
-    const r1 = await toolOrch.runStep({ context: ctx, taskId: t.task.taskId, stepId: s1.step.stepId, expectedRevision: ss1.task.revision, stepInput: s1.step.input, verify: { type: "EXACT_TEXT", expected: SYNTH_FINAL } });
+    const r1 = await harnessStep(toolOrch, { context: ctx, taskId: t.task.taskId, stepId: s1.step.stepId, expectedRevision: ss1.task.revision, stepInput: s1.step.input, verify: { type: "EXACT_TEXT", expected: SYNTH_FINAL } });
     assert.equal(r1.error, "BUDGET_EXHAUSTED", JSON.stringify(r1));
     const stop1 = stopsOf(fx, t.task.taskId).slice(-1)[0];
     assert.equal(stop1.kind, "TOOL_ROUNDS");
@@ -391,7 +428,7 @@ test("D4-08 ⑤ 续接后再次耗尽 → 正确停止；已成功副作用恰�
     const g1 = fx.taskService.grantBudgetResume({ context: ctx, taskId: t.task.taskId, expectedRevision: fx.taskStore.taskById(t.task.taskId).revision, kind: "TOOL_ROUNDS" });
     assert.equal(g1.ok, true, JSON.stringify(g1));
     const gs1 = fx.taskService.startStep({ context: ctx, taskId: t.task.taskId, stepId: g1.step.stepId, expectedRevision: g1.task.revision });
-    const rr = await toolOrch.runStep({ context: ctx, taskId: t.task.taskId, stepId: g1.step.stepId, expectedRevision: gs1.task.revision, stepInput: { proposeSequence: rounds(5, "again"), finalText: SYNTH_FINAL }, verify: { type: "EXACT_TEXT", expected: SYNTH_FINAL } });
+    const rr = await harnessStep(toolOrch, { context: ctx, taskId: t.task.taskId, stepId: g1.step.stepId, expectedRevision: gs1.task.revision, stepInput: { proposeSequence: rounds(5, "again"), finalText: SYNTH_FINAL }, verify: { type: "EXACT_TEXT", expected: SYNTH_FINAL } });
     assert.equal(rr.error, "BUDGET_EXHAUSTED", "续接后再次耗尽仍正确停止：" + JSON.stringify(rr));
     assert.equal(stopsOf(fx, t.task.taskId).length, 2, "两次停止都留痕");
     assert.equal(fx.sideEffectStore.callsOfTask(t.task.taskId).length, 1, "成功副作用恰好一次，绝不重放");
@@ -403,7 +440,7 @@ test("D4-08 ⑤ 续接后再次耗尽 → 正确停止；已成功副作用恰�
     const g2 = fx.taskService.grantBudgetResume({ context: ctx, taskId: t.task.taskId, expectedRevision: fx.taskStore.taskById(t.task.taskId).revision, kind: "TOOL_ROUNDS" });
     assert.equal(g2.ok, true, JSON.stringify(g2));
     const gs2 = fx.taskService.startStep({ context: ctx, taskId: t.task.taskId, stepId: g2.step.stepId, expectedRevision: g2.task.revision });
-    const fin = await toolOrch.runStep({ context: ctx, taskId: t.task.taskId, stepId: g2.step.stepId, expectedRevision: gs2.task.revision, stepInput: g2.step.input, verify: { type: "EXACT_TEXT", expected: SYNTH_FINAL } });
+    const fin = await harnessStep(toolOrch, { context: ctx, taskId: t.task.taskId, stepId: g2.step.stepId, expectedRevision: gs2.task.revision, stepInput: g2.step.input, verify: { type: "EXACT_TEXT", expected: SYNTH_FINAL } });
     assert.equal(fin.ok, true, "最终续接成功：" + JSON.stringify(fin.error));
     assert.equal(fx.taskStore.taskById(t.task.taskId).status, "SUCCEEDED");
     assert.equal(fx.sideEffectStore.callsOfTask(t.task.taskId).length, 1, "副作用仍恰好一次");
@@ -412,7 +449,7 @@ test("D4-08 ⑤ 续接后再次耗尽 → 正确停止；已成功副作用恰�
 
 /* ============================================================ ⑥ 追加值 == 账本 == 运行时限制 */
 
-test("D4-08 ⑥ grant 返回值 == 账本 nextGrant/additions == 运行时 capability 额度", async () => {
+harnessTest("D4-08 ⑥ grant 返回值 == 账本 nextGrant/additions == 运行时 capability 额度", async () => {
   const toolCaps = [];
   const fx = await createToolHarnessFixture({
     withAdapters: true, behavior: "tool-loop", facadeMaxCalls: 2, modelMaxCalls: 100,
@@ -437,7 +474,7 @@ test("D4-08 ⑥ grant 返回值 == 账本 nextGrant/additions == 运行时 capab
     // 新 run 的 capability 额度必须等于账本 remaining。
     const started = fx.taskService.startStep({ context: h.ctx, taskId: h.taskId, stepId: g.step.stepId, expectedRevision: g.task.revision });
     fx.fp.state.toolLoopPlan = [];
-    const r = await h.dsh.runStep({ context: h.ctx, taskId: h.taskId, stepId: g.step.stepId, expectedRevision: started.task.revision, stepInput: g.step.input, verify: { type: "EXACT_TEXT", expected: DSH_FINAL } });
+    const r = await harnessStep(h.dsh, { context: h.ctx, taskId: h.taskId, stepId: g.step.stepId, expectedRevision: started.task.revision, stepInput: g.step.input, verify: { type: "EXACT_TEXT", expected: DSH_FINAL } });
     assert.equal(r.ok, true, JSON.stringify(r.error));
     assert.equal(toolCaps[toolCaps.length - 1], ledger1.remaining.TOOL_CALLS, "运行时 capability 额度 == 账本 remaining：" + JSON.stringify({ caps: toolCaps, remaining: ledger1.remaining }));
   } finally { await fx.close(); }
@@ -445,7 +482,7 @@ test("D4-08 ⑥ grant 返回值 == 账本 nextGrant/additions == 运行时 capab
 
 /* ============================================================ ⑦ 正反 TOOL_CALLS */
 
-test("D4-08 ⑦ 正：合法最后一次 tool call 后完成 → SUCCEEDED，不得误杀", async () => {
+harnessTest("D4-08 ⑦ 正：合法最后一次 tool call 后完成 → SUCCEEDED，不得误杀", async () => {
   const fx = await createToolHarnessFixture({ withAdapters: true, behavior: "tool-loop", facadeMaxCalls: 2 });
   try {
     fx.grantTool("ai", ["tool.resource.search", "tool.resource.readMetadata"]);
@@ -453,7 +490,7 @@ test("D4-08 ⑦ 正：合法最后一次 tool call 后完成 → SUCCEEDED，不
     fx.fp.state.toolLoopPlan = searchPlan(2, "ok");
     const ctx = fx.ctx();
     const t = fx.createTask();
-    const r = await fx.makeDshOrchestrator().runTask({ context: ctx, taskId: t.task.taskId, expectedRevision: t.task.revision, verify: { type: "EXACT_TEXT", expected: DSH_FINAL } });
+    const r = throwIfHarnessStall(await fx.makeDshOrchestrator().runTask({ context: ctx, taskId: t.task.taskId, expectedRevision: t.task.revision, verify: { type: "EXACT_TEXT", expected: DSH_FINAL } }), "runTask");
     assert.equal(r.ok, true, "最后一次合法调用完成必须成功：" + JSON.stringify(r.error));
     assert.equal(fx.taskStore.taskById(t.task.taskId).status, "SUCCEEDED");
     assert.equal(stopsOf(fx, t.task.taskId).length, 0, "不得写预算停止事件");
@@ -466,7 +503,7 @@ test("D4-08 ⑦ 正：合法最后一次 tool call 后完成 → SUCCEEDED，不
   } finally { await fx.close(); }
 });
 
-test("D4-08 ⑦ 反：仍需下一次调用但额度不足 → BUDGET_EXHAUSTED{TOOL_CALLS}，0 Artifact", async () => {
+harnessTest("D4-08 ⑦ 反：仍需下一次调用但额度不足 → BUDGET_EXHAUSTED{TOOL_CALLS}，0 Artifact", async () => {
   const fx = await createToolHarnessFixture({ withAdapters: true, behavior: "tool-loop", facadeMaxCalls: 2 });
   try {
     fx.grantTool("ai", ["tool.resource.search", "tool.resource.readMetadata"]);
@@ -474,7 +511,7 @@ test("D4-08 ⑦ 反：仍需下一次调用但额度不足 → BUDGET_EXHAUSTED{
     fx.fp.state.toolLoopPlan = searchPlan(4, "no");
     const ctx = fx.ctx();
     const t = fx.createTask();
-    const r = await fx.makeDshOrchestrator().runTask({ context: ctx, taskId: t.task.taskId, expectedRevision: t.task.revision, verify: { type: "EXACT_TEXT", expected: DSH_FINAL } });
+    const r = throwIfHarnessStall(await fx.makeDshOrchestrator().runTask({ context: ctx, taskId: t.task.taskId, expectedRevision: t.task.revision, verify: { type: "EXACT_TEXT", expected: DSH_FINAL } }), "runTask");
     assert.equal(r.ok, false, "仍有未完成工具意图时不得当成成功");
     assert.equal(r.error, "BUDGET_EXHAUSTED");
     assert.equal(fx.taskStore.taskById(t.task.taskId).status, "BLOCKED");
@@ -489,7 +526,7 @@ test("D4-08 ⑦ 反：仍需下一次调用但额度不足 → BUDGET_EXHAUSTED{
 
 /* ============================================================ 旧任务保守基线 */
 
-test("D4-08 旧任务首次建账本：不伪造历史精确余额，落 safe baseline 事件；新任务 consumed=0", async () => {
+harnessTest("D4-08 旧任务首次建账本：不伪造历史精确余额，落 safe baseline 事件；新任务 consumed=0", async () => {
   const fx = await createToolHarnessFixture({ withAdapters: true, behavior: "tool-loop" });
   try {
     fx.grantTool("ai", ["tool.resource.search", "tool.resource.readMetadata"]);
@@ -525,3 +562,4 @@ test("D4-08 旧任务首次建账本：不伪造历史精确余额，落 safe ba
     assert.equal(baselineOf(fx, legacy.task.taskId).length, 1);
   } finally { await fx.close(); }
 });
+

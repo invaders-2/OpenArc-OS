@@ -126,7 +126,65 @@ const ADMIN_COMMANDS = Object.freeze([
   "identity/reset-installation",
 ]);
 
-const ALL_COMMANDS = Object.freeze([...IDENTITY_COMMANDS, ...ADMIN_COMMANDS]);
+/**
+ * B4 · 本地账号管理命令（部门 / 用户 / APP 访问 / 计数）。
+ *
+ * 写法与 skill-domain.cjs:44-74 / agent-domain.cjs:53+ 一致：命令表本身即白名单，
+ * 每条带 risk（read | use | manage | destructive）与 credential（是否把口令等凭据带进执行路径）。
+ * 命令不接受 Renderer 自报的 userId / role：身份由 sessionRef 反查（identity-service.cjs 分发层），
+ * 具体超级管理员 / 部门管理员判定沿用 local-account-service.cjs 既有实现。
+ */
+const LOCAL_ACCOUNT_COMMANDS = Object.freeze({
+  "identity/departments-list": { risk: "read", credential: false, summary: "列出当前组织的部门" },
+  "identity/department-create": { risk: "manage", credential: false, summary: "创建部门（超级管理员）" },
+  "identity/department-update": { risk: "manage", credential: false, summary: "改名 / 启停部门（超级管理员）" },
+  "identity/department-delete": { risk: "destructive", credential: false, summary: "删除部门（超级管理员）" },
+  "identity/users-list": { risk: "read", credential: false, summary: "列出本地账号用户" },
+  "identity/user-create": { risk: "manage", credential: true, summary: "创建本地账号（携带初始口令）" },
+  "identity/user-update": { risk: "manage", credential: false, summary: "修改用户名 / 部门 / 角色 / 状态" },
+  "identity/user-delete": { risk: "destructive", credential: false, summary: "删除本地账号（保留审计行）" },
+  "identity/user-reset-password": { risk: "manage", credential: true, summary: "重置用户口令并撤销其全部会话" },
+  "identity/app-access-rule-save": { risk: "manage", credential: false, summary: "保存 APP 打开规则（all/admins/departments/superadmins）" },
+  "identity/app-permission-policy-save": { risk: "manage", credential: false, summary: "保存 APP 权限策略（决策 / 用户 / 部门 / 角色）" },
+  "identity/app-permission-snapshot": { risk: "read", credential: false, summary: "读取用户维度的 APP 访问与权限快照" },
+  "identity/app-access-summary": { risk: "read", credential: false, summary: "汇总某用户可打开的 APP" },
+  "identity/local-account-info": { risk: "read", credential: false, summary: "本地账号安装级计数（用户 / 部门）" },
+  // B7f：审计区块的真实数据源（只读；字段投影去敏，分页 + 事件名 / 时间过滤）。
+  "identity/audit-list": { risk: "read", credential: false, summary: "读取审计行（audit_log / authorization_audit 去敏投影）" },
+});
+
+const LOCAL_ACCOUNT_COMMAND_NAMES = Object.freeze(Object.keys(LOCAL_ACCOUNT_COMMANDS));
+
+const ALL_COMMANDS = Object.freeze([...IDENTITY_COMMANDS, ...ADMIN_COMMANDS, ...LOCAL_ACCOUNT_COMMAND_NAMES]);
+
+/** 未知命令一律返回 null / false，绝不猜风险或凭据属性（与 skill-domain.cjs:79-96 同形）。 */
+function isLocalAccountCommand(command) {
+  return typeof command === "string" && Object.prototype.hasOwnProperty.call(LOCAL_ACCOUNT_COMMANDS, command);
+}
+
+function localAccountCommandEntry(command) {
+  return isLocalAccountCommand(command) ? LOCAL_ACCOUNT_COMMANDS[command] : null;
+}
+
+function localAccountCommandRisk(command) {
+  const entry = localAccountCommandEntry(command);
+  return entry ? entry.risk : null;
+}
+
+function localAccountCommandRequiresCredential(command) {
+  const entry = localAccountCommandEntry(command);
+  return !!(entry && entry.credential);
+}
+
+/** 稳定顺序的命令清单（对象字面量声明顺序），供身份命令层与测试消费。 */
+function listLocalAccountCommands() {
+  return Object.keys(LOCAL_ACCOUNT_COMMANDS).map((command) => ({
+    command,
+    risk: LOCAL_ACCOUNT_COMMANDS[command].risk,
+    credential: LOCAL_ACCOUNT_COMMANDS[command].credential,
+    summary: LOCAL_ACCOUNT_COMMANDS[command].summary,
+  }));
+}
 
 // ---------------------------------------------------------------------------
 // 错误模型（§26）
@@ -479,7 +537,14 @@ module.exports = {
   REVOKE_REASON,
   IDENTITY_COMMANDS,
   ADMIN_COMMANDS,
+  LOCAL_ACCOUNT_COMMANDS,
+  LOCAL_ACCOUNT_COMMAND_NAMES,
   ALL_COMMANDS,
+  isLocalAccountCommand,
+  localAccountCommandEntry,
+  localAccountCommandRisk,
+  localAccountCommandRequiresCredential,
+  listLocalAccountCommands,
   ERROR,
   REAUTH_CODES,
   TERMINAL_CODES,

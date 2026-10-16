@@ -50,7 +50,7 @@ after(() => {
 test("schema：当前版本有 user_version 与 avatar_ref，且三张主表齐备", () => {
   const fx = fixture();
   assert.equal(fx.store.schemaVersion, SCHEMA_VERSION);
-  assert.equal(SCHEMA_VERSION, 22);
+  assert.equal(SCHEMA_VERSION, 26);
   for (const t of ["installations", "users", "sessions"])
     assert.ok(fx.store.db.prepare(`SELECT 1 FROM ${t}`).get !== undefined);
   const userCols = fx.store.db.prepare("PRAGMA table_info(users)").all().map((c) => c.name);

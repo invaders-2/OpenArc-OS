@@ -1,0 +1,8 @@
+{
+  "format": "ccs-skill/v1",
+  "kind": "text",
+  "id": "dxos-example-bundle",
+  "name": "随包示例技能包",
+  "description": "OpenArc OS 自建的最小随包技能包示例，用于验证随包目录扫描与导入链路。",
+  "systemPrompt": "你是随包示例技能。按 SKILL.md 与 references/notes.md 的内容作答；不联网、不执行任何包内文件。"
+}

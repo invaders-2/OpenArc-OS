@@ -71,6 +71,8 @@ const SQL = {
   appById: "SELECT * FROM app_principals WHERE app_id = ?",
   allApps: "SELECT * FROM app_principals ORDER BY app_id",
   setAppStatus: "UPDATE app_principals SET status = ?, updated_at = ? WHERE app_id = ?",
+  deleteAppGrants: "DELETE FROM app_resource_grants WHERE app_id = ?",
+  deleteAppPrincipal: "DELETE FROM app_principals WHERE app_id = ? AND built_in = 0",
 
   upsertAppGrant:
     "INSERT INTO app_resource_grants (id, app_id, resource_id, collection_id, resource_type, department_id, scope, actions, granted_by, organization_id, created_at, expires_at) " +
@@ -390,6 +392,34 @@ class AuthorizationStore {
   setAppStatus(appId, status) {
     const res = this.db.prepare(SQL.setAppStatus).run(String(status), this.clock(), String(appId));
     return { changed: res.changes > 0 };
+  }
+
+  /**
+   * 卸载开发者 App 时清理它自己的 principal（app_principals.built_in = 0 守卫，
+   * 内置 App 永不走删除路径）。
+   *
+   * 为什么必须先删 grant 再删 principal：app_resource_grants.app_id 有外键指向
+   * app_principals(app_id)（identity-store.cjs:1347；PRAGMA foreign_keys = ON 在 :1719），
+   * 顺序反了会直接被 SQLite 拒绝。
+   *
+   * 不动 app_policy_provisions：它没有外键，且"策略提供记录 / 撤销墓碑"按既有约定只在安装重置里清
+   * （tests/app-policy-provisions-retention.test.mjs R6 的受 watch 表白名单只登记那一条）；
+   * 开发者 App 的 app-access / app-permission 授权不是 baseline 家族，本来也不写该表。
+   *
+   * 只删开发者 App 的事实来源是 app_id 本身：install 用 "dev-" + manifest.id 命名
+   * （developer-service.cjs install），与内置 app_id 命名空间不重叠。
+   */
+  deleteApp(appId) {
+    const id = String(appId || "");
+    if (!id) return { changed: false, grants: 0 };
+    return this.transactSync(() => {
+      const grants = this.db.prepare(SQL.deleteAppGrants).run(id);
+      const principal = this.db.prepare(SQL.deleteAppPrincipal).run(id);
+      return {
+        changed: principal.changes > 0,
+        grants: grants && Number.isFinite(grants.changes) ? grants.changes : 0,
+      };
+    });
   }
 
   /**

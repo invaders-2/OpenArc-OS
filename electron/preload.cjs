@@ -110,6 +110,15 @@ contextBridge.exposeInMainWorld("openarc", {
    */
   model: {
     command: (command) => ipcRenderer.invoke("model:command", command),
+    /**
+     * W5：模型流式调用下行事件（model:event）。
+     * 事件体是主进程封装好的 P1 信封，渲染层只读；不暴露 ipcRenderer，也不新增顶层键。
+     */
+    onEvent: (callback) => {
+      const listener = (_, event) => callback(event);
+      ipcRenderer.on("model:event", listener);
+      return () => ipcRenderer.removeListener("model:event", listener);
+    },
   },
   /**
    * D5-03 第一批 MCP 桥。
@@ -117,7 +126,8 @@ contextBridge.exposeInMainWorld("openarc", {
    * 唯一入口 mcp.command(...)；**不暴露** raw credential / credentialRef / 本机路径 /
    * 子进程句柄 / raw HTTP / raw SQL。本地连接只能给白名单 serverKey（程序与参数由主进程固定映射），
    * sessionRef 与 appId 由主进程注入，Renderer 自报的 userId/appId/role 一律忽略。
-   * 本批**不开放工具调用**：任何调用入口都会拿到 MCP_TOOL_INVOCATION_NOT_ENABLED。
+   * 工具调用**默认关闭**（<userData>/dxos/mcp.json 的显式开关）；开关打开后每次调用仍要单独
+   * 通过审批，未批准 0 次外发（真实入口是 mcp/toolInvocation/call）。
    */
   mcp: {
     command: (command) => ipcRenderer.invoke("mcp:command", command),
@@ -138,41 +148,57 @@ contextBridge.exposeInMainWorld("openarc", {
    * Renderer 不能指定 userId / role / appId / sessionRef / modelConfig / verification ——
    * 这些都由主进程从当前 authenticated session + 真实 Task Runtime 推导。
    */
-  /**
-   * 天气（10-15）：只能给城市名 / 经纬度，出网 URL 由主进程拼装（固定 Open-Meteo 两个主机）。
-   */
-  /**
-   * 视频剪辑（10-15）：只给条目引用 + 入出点；FFmpeg 参数与输出位置由主进程决定。
-   */
-  video: {
-    status: () => ipcRenderer.invoke("video:status"),
-    probe: (folderId, id) => ipcRenderer.invoke("video:probe", { folderId, id }),
-    export: (payload) => ipcRenderer.invoke("video:export", payload),
-    cancel: () => ipcRenderer.invoke("video:cancel"),
-    onProgress: (callback) => {
-      const listener = (_, event) => callback(event);
-      ipcRenderer.on("video:progress", listener);
-      return () => ipcRenderer.removeListener("video:progress", listener);
-    },
-  },
-  /** 图片声明（10-15）：只给条目引用与声明类型（ai / mix），写入与另存都在主进程。 */
-  image: {
-    declare: (items, kind) => ipcRenderer.invoke("image:declare", { items, kind }),
-  },
-  /** 系统信息（10-15）：版本、平台、磁盘与 OpenArc 数据占用的汇总数字（只读）。 */
-  system: {
-    info: () => ipcRenderer.invoke("system:info"),
-  },
-  weather: {
-    geocode: (name) => ipcRenderer.invoke("weather:geocode", { name }),
-    forecast: (lat, lon) => ipcRenderer.invoke("weather:forecast", { lat, lon }),
-  },
   task: {
     command: (command) => ipcRenderer.invoke("task:command", command),
     onEvent: (callback) => {
       const listener = (_, event) => callback(event);
       ipcRenderer.on("task:event", listener);
       return () => ipcRenderer.removeListener("task:event", listener);
+    },
+  },
+  /**
+   * B3 Agent 桥。
+   *
+   * **只有两条能力**：派发受控 agent 命令、订阅 agent 下行事件（P1 信封）。
+   * 不暴露 ipcRenderer / 凭据 / 绝对路径；sessionRef 与 appId 由主进程注入，
+   * Renderer 自报的 userId / role / appId 一律忽略（与 model / task 同一条 trusted 边界）。
+   */
+  agent: {
+    command: (command) => ipcRenderer.invoke("agent:command", command),
+    onEvent: (callback) => {
+      const listener = (_, event) => callback(event);
+      ipcRenderer.on("agent:event", listener);
+      return () => ipcRenderer.removeListener("agent:event", listener);
+    },
+  },
+  /**
+   * B4 技能桥。
+   *
+   * **只有两条能力**：派发受控 skill 命令、订阅 skill 下行事件（P1 信封）。
+   * 不暴露 ipcRenderer / 凭据 / 绝对路径；sessionRef 与 appId 由主进程注入，
+   * Renderer 自报的 userId / role / appId 一律忽略（与 agent / model / task 同一条 trusted 边界）。
+   */
+  skill: {
+    command: (command) => ipcRenderer.invoke("skill:command", command),
+    onEvent: (callback) => {
+      const listener = (_, event) => callback(event);
+      ipcRenderer.on("skill:event", listener);
+      return () => ipcRenderer.removeListener("skill:event", listener);
+    },
+  },
+  /**
+   * B5a 媒体桥（第 20 个顶层键）。
+   *
+   * **只有两条能力**：派发受控 media 命令、订阅 media 下行事件（P1 信封）。
+   * 不暴露 ipcRenderer / ffmpeg 句柄 / 凭据 / 绝对路径；sessionRef 与 appId 由主进程注入，
+   * Renderer 自报的 userId / role / appId 一律忽略（与 agent / skill / model / task 同一条 trusted 边界）。
+   */
+  media: {
+    command: (command) => ipcRenderer.invoke("media:command", command),
+    onEvent: (callback) => {
+      const listener = (_, event) => callback(event);
+      ipcRenderer.on("media:event", listener);
+      return () => ipcRenderer.removeListener("media:event", listener);
     },
   },
   /**
@@ -227,5 +253,92 @@ contextBridge.exposeInMainWorld("openarc", {
     copy: (folderId, ids, toFolderId) => ipcRenderer.invoke("files:copy", { folderId, ids, toFolderId }),
     move: (folderId, ids, toFolderId) => ipcRenderer.invoke("files:move", { folderId, ids, toFolderId }),
     exportTo: (folderId, ids) => ipcRenderer.invoke("files:export", { folderId, ids }),
+  },
+  /**
+   * B6a 自动化域桥。
+   *
+   * **只有两条能力**：派发受控 automation 命令（定义 CRUD / 启停 / 立即运行 / 取消 / 运行记录）、
+   * 订阅 automation 下行事件（P1 信封；调度领取与每次运行的进度都走它）。
+   * 不暴露 ipcRenderer / 数据库 / 凭据 / 绝对路径；sessionRef 与 appId 由主进程注入，
+   * Renderer 自报的 userId / role / appId 一律忽略（与 agent / skill / media 同一条 trusted 边界）。
+   */
+  automation: {
+    command: (command) => ipcRenderer.invoke("automation:command", command),
+    onEvent: (callback) => {
+      const listener = (_, event) => callback(event);
+      ipcRenderer.on("automation:event", listener);
+      return () => ipcRenderer.removeListener("automation:event", listener);
+    },
+  },
+  /**
+   * B6c 平台域桥（第 22 个顶层键；B6a 的 automation 是第 21 个键）。
+   *
+   * **只有一条能力**：派发受控 platform 命令（诊断 / 数据保护 / 网络安全 / 供应商测试安全）。
+   * 不暴露 ipcRenderer / 环境变量 / 绝对路径 / 凭据；sessionRef 与 appId 由主进程注入，
+   * Renderer 自报的 userId / role / appId 一律忽略（与 agent / skill / media 同一条 trusted 边界）。
+   */
+  platform: {
+    command: (command) => ipcRenderer.invoke("platform:command", command),
+  },
+  /**
+   * B7a 开发者平台桥（第 23 个顶层键；第 22 是 B6c 的 platform）。
+   *
+   * **只有一条能力**：派发受控 developer 命令（本地 App 装载 / 启用 / 禁用 / 回滚 / 卸载 / 清单校验 /
+   * 凭据引用 / 出网判定）。不暴露 ipcRenderer / 包目录绝对路径 / 凭据密钥；sessionRef 与 appId 由
+   * 主进程注入，Renderer 自报的 userId / role / appId 一律忽略（与 platform / automation 同一条 trusted 边界）。
+   */
+  developer: {
+    command: (command) => ipcRenderer.invoke("developer:command", command),
+  },
+  /**
+   * B7c 可选插件桥（平台域之后的第 24 个顶层键）。
+   *
+   * **只有一条能力**：派发受控 integration 命令（插件开关 / 依赖健康 / 钉钉·天气·黄历）。
+   * 三个插件默认全关；缺依赖或运行时能力未注入一律结构化
+   * { ok:false, error:"INTEGRATION_UNAVAILABLE", detail }，不假实现。
+   * 不暴露 ipcRenderer / 凭据 / 绝对路径；sessionRef 与 appId 由主进程注入，
+   * Renderer 自报的 userId / role / appId 一律忽略（与 platform / automation 同一条 trusted 边界）。
+   */
+  integration: {
+    command: (command) => ipcRenderer.invoke("integration:command", command),
+  },
+  /**
+   * B7c 本地市场桥（第 25 个顶层键）。
+   *
+   * **只有一条能力**：派发受控 market 命令，只读"随包 / 本地目录"的 catalog.json。
+   * **不联网、不下载、不安装**；云发布 / 审核 / 灰度 / 市场远端服务（api.dx-os.com）一律 OUT。
+   */
+  market: {
+    command: (command) => ipcRenderer.invoke("market:command", command),
+  },
+  // —— 10-15 新增的本地能力键：追加在 DX OS 契约键之后，保持既有键序不变 ——
+  /**
+   * 天气（10-15）：只能给城市名 / 经纬度，出网 URL 由主进程拼装（固定 Open-Meteo 两个主机）。
+   */
+  /**
+   * 视频剪辑（10-15）：只给条目引用 + 入出点；FFmpeg 参数与输出位置由主进程决定。
+   */
+  video: {
+    status: () => ipcRenderer.invoke("video:status"),
+    probe: (folderId, id) => ipcRenderer.invoke("video:probe", { folderId, id }),
+    export: (payload) => ipcRenderer.invoke("video:export", payload),
+    cancel: () => ipcRenderer.invoke("video:cancel"),
+    onProgress: (callback) => {
+      const listener = (_, event) => callback(event);
+      ipcRenderer.on("video:progress", listener);
+      return () => ipcRenderer.removeListener("video:progress", listener);
+    },
+  },
+  /** 图片声明（10-15）：只给条目引用与声明类型（ai / mix），写入与另存都在主进程。 */
+  image: {
+    declare: (items, kind) => ipcRenderer.invoke("image:declare", { items, kind }),
+  },
+  /** 系统信息（10-15）：版本、平台、磁盘与 OpenArc 数据占用的汇总数字（只读）。 */
+  system: {
+    info: () => ipcRenderer.invoke("system:info"),
+  },
+  weather: {
+    geocode: (name) => ipcRenderer.invoke("weather:geocode", { name }),
+    forecast: (lat, lon) => ipcRenderer.invoke("weather:forecast", { lat, lon }),
   },
 });

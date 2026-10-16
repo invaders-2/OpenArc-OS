@@ -39,9 +39,15 @@
 "use strict";
 
 const crypto = require("node:crypto");
+const fs = require("node:fs");
+const path = require("node:path");
 const domain = require("./identity-domain.cjs");
 const passwords = require("./password.cjs");
 const dxosFoundationSchema = require("./dxos-foundation-schema.cjs");
+const dxosAgentSchema = require("./dxos-agent-schema.cjs");
+const mediaStore = require("./media-store.cjs");
+const canvasDxosSchema = require("./canvas-dxos-schema.cjs");
+const dxTaskApprovalSchema = require("./dx-task-approval-schema.cjs");
 
 const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domain;
 
@@ -70,8 +76,22 @@ const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domai
  *        与 OpenArc 同名的 5 张表（projects / project_members / tasks / task_steps / task_events）
  *        刻意跳过 —— 理由与来源见 dxos-foundation-schema.cjs 顶部注释。
  * 集成线已升到 v17 的库补跑 v18/v19（画布文档层与运行归属表）。
+ *   v23（B3a · DX OS 任务域）：新增 dx_tasks / dx_task_steps / dx_task_events —— 列集取自
+ *        server/ccsDb.ts 的最终形态（基础 CREATE TABLE + 全部 ALTER TABLE ADD COLUMN），
+ *        去掉 REFERENCES 外键（P1 既定做法），并加 dx_project_roots 承接 DX projects.root_node_id
+ *        语义（OpenArc 既有 projects 没有该列，硬约束禁止改既有表）。只新增表。
+ *   v24（B5a · DX OS 媒体域）：新增 video_projects / video_assets / video_render_jobs ——
+ *       列集取自 server/video/videoStore.ts:16-58 的最终形态，三张表同属本层新建，
+ *       指向 video_projects 的外键原样保留；只新增表（IF NOT EXISTS，可重放）。
+ *   v25（B5d · DX OS 画布域）：新增 canvas_dxos_asset_libraries / canvas_dxos_asset_items /
+ *       canvas_dxos_agent_attachments —— DDL 只有 canvas-dxos-schema.cjs 一份真值，
+ *       素材字节仍只在 resource_* 表；只新增表（IF NOT EXISTS，可重放）。
+ *   v26（D5-04 补丁 · DX→核心审批映射桥）：新增 dx_task_approval_bridge —— 只持久化
+ *       "dx 任务步骤 ↔ 核心审批任务/步骤/运行"的身份关系；DDL 只有
+ *       dx-task-approval-schema.cjs 一份真值，审批状态机仍由既有 SideEffectAuthority /
+ *       Task Runtime 唯一裁决；只新增表（IF NOT EXISTS，可重放），不动既有表结构。
  */
-const SCHEMA_VERSION = 22;
+const SCHEMA_VERSION = 26;
 
 /**
  * Schema。为了可读性写成整段 DDL。
@@ -1524,6 +1544,42 @@ function applyDxosFoundationLayer(db) {
   for (const statement of dxosFoundationSchema.dxosDdl()) db.exec(statement);
 }
 
+/**
+ * v23 的实现：DX 任务域三张表的 DDL 只有 dxos-agent-schema.cjs 一份真值（脚本机械抽取）。
+ * 全部语句是 IF NOT EXISTS（含索引），所以这一级可重放；失败时整级随外层事务回滚，
+ * 不会留下"user_version 已升到 23、dx_ 表只建了一半"的半状态。
+ */
+function applyDxosAgentLayer(db) {
+  for (const statement of dxosAgentSchema.dxosAgentDdl()) db.exec(statement);
+}
+
+/**
+ * v24 的实现：媒体域三张表的 DDL 只有 media-store.cjs 一份真值（与 v22/v23 同一做法）。
+ * 全部语句是 IF NOT EXISTS（含索引），所以这一级可重放；失败时整级随外层事务回滚，
+ * 不会留下"user_version 已升到 24、video_ 表只建了一半"的半状态。
+ */
+function applyDxosMediaLayer(db) {
+  mediaStore.applyDxosMediaLayer(db);
+}
+
+/**
+ * v25 的实现：画布域三张新增表的 DDL 只有 canvas-dxos-schema.cjs 一份真值（与 v22/v23/v24 同一做法）。
+ * 全部语句是 IF NOT EXISTS（含索引），所以这一级可重放；失败时整级随外层事务回滚，
+ * 不会留下"user_version 已升到 25、canvas_dxos_ 表只建了一半"的半状态。
+ */
+function applyCanvasDxosLayer(db) {
+  canvasDxosSchema.applyCanvasDxosLayer(db);
+}
+
+/**
+ * v26 的实现：DX→核心审批映射桥单张表的 DDL 只有 dx-task-approval-schema.cjs 一份真值
+ * （与 v22/v23/v24/v25 同一做法）。只有一条 CREATE TABLE IF NOT EXISTS，可重放；
+ * 失败时整级随外层事务回滚，不会留下"user_version 已升到 26、桥接表只建了一半"的半状态。
+ */
+function applyDxTaskApprovalLayer(db) {
+  dxTaskApprovalSchema.applyDxTaskApprovalLayer(db);
+}
+
 const MIGRATIONS = Object.freeze([
   { version: 1, sql: SCHEMA_SQL },
   { version: 2, sql: SCHEMA_V2_SQL },
@@ -1561,14 +1617,19 @@ const MIGRATIONS = Object.freeze([
   { version: 20, sql: SCHEMA_V20_SQL },
   { version: 21, run: applyPolicyProvisionLayer },
   { version: 22, run: applyDxosFoundationLayer },
+  { version: 23, run: applyDxosAgentLayer },
+  { version: 24, run: applyDxosMediaLayer },
+  { version: 25, run: applyCanvasDxosLayer },
+  { version: 26, run: applyDxTaskApprovalLayer },
 ]);
 
 /**
  * 安装重置（identity/reset-installation）要清的表 —— **授权事实四张 + 能恢复设备身份/权限的设备事实三张**。
  *
  * 判据（逐表可复核）：这张表里的行是不是"授权 / 权限事实"，**或者**它能不能在被重置后的安装里
- * 恢复设备身份或权限（旧密钥再登记设备、旧凭据再拿连接）。七张都满足；其余 20 张带
- * organization_id 的表是用户内容 / 配置 / 审计（判定与证据见
+ * 恢复设备身份或权限（旧密钥再登记设备、旧凭据再拿连接）。七张都满足；其余 22 张带
+ * organization_id 的表是用户内容 / 配置 / 审计（29 张带 organization_id 的表 − 7 张删除集合 = 22，
+ * 逐表判定与证据见
  * tests/d5-03-reset-authorization-consistency.test.mjs 与 tests/d5-03-reset-device-identity.test.mjs）。
  *
  *   · app_policy_provisions —— 策略提供记录 + 撤销墓碑。"首次使用才给、撤销后永不再给"
@@ -1672,6 +1733,7 @@ class IdentityStore {
    * @param opts.busyTimeoutMs
    * @param opts.hooks      { beforeCommit?, afterInstallationInsert? } 仅测试注入用
    * @param opts.onAudit    (record) => void
+   * @param opts.backupDir  迁移 backupBefore 的备份目录（默认与库同目录；离线副本迁移可显式指定）
    */
   constructor(opts = {}) {
     this.path = opts.path || ":memory:";
@@ -1681,6 +1743,10 @@ class IdentityStore {
     this.hooks = opts.hooks || {};
     this.busyTimeoutMs = Number.isFinite(opts.busyTimeoutMs) ? opts.busyTimeoutMs : 5000;
     this.onAudit = typeof opts.onAudit === "function" ? opts.onAudit : () => {};
+    // backupBefore 迁移的落盘目录；默认与库文件同目录。离线副本迁移显式传入，避免污染源库目录。
+    this.backupDir = typeof opts.backupDir === "string" && opts.backupDir ? opts.backupDir : null;
+    // 每次 backupBefore 的文件路径流水，供失败恢复与审计取证。
+    this.migrationBackups = [];
     this.db = null;
     this.#queue = Promise.resolve();
   }
@@ -1717,6 +1783,17 @@ class IdentityStore {
    * 迁移。**每一步都真的执行**，不是"空库建表"冒充升级（§29）：
    * 每一级是一个独立的原子事务，失败只回滚该级，不会留下"user_version 升了、表没补"的半状态。
    * 迁移条目可以是 sql（整段 DDL）或 run(db)（需要条件判断时用，例如 v17 的 avatar_ref）。
+   *
+   * 迁移描述符可选字段（**默认全不开**，既有迁移走默认路径，行为与之前逐字一致）：
+   *   · backupBefore: true    —— 事务**外**执行 `VACUUM INTO` 备份。
+   *     事务内 VACUUM 会报 "cannot VACUUM from within a transaction"；Node 22 也没有
+   *     `DatabaseSync.backup`，所以只能用 `VACUUM INTO`，且必须在 BEGIN 之前。
+   *   · foreignKeysOff: true  —— 在 **BEGIN 之前** 关 FK、结束后恢复并**断言**恢复成功。
+   *     `PRAGMA foreign_keys` 在事务内是 no-op（实测值仍为 1），而 FK=ON 时
+   *     `DROP TABLE` 父表会按 ON DELETE CASCADE **静默删光子表**（见
+   *     docs/dxos-port/Dx-TASK-MERGE-PLAN.md §7.2）。重建父表的迁移因此必须走这条。
+   *   · foreignKeyCheck: true —— 事务内 `PRAGMA foreign_key_check` 自检，非空即抛错整体回滚。
+   *     foreignKeysOff 的迁移默认开启该自检（FK 关着时 DDL 不受约束，提交前必须复查）。
    */
   #migrate() {
     const current = this.schemaVersion;
@@ -1724,15 +1801,95 @@ class IdentityStore {
     if (current === SCHEMA_VERSION) return;
     for (const migration of MIGRATIONS) {
       if (migration.version <= current) continue;
-      this.transactSync(() => {
-        if (typeof migration.run === "function") migration.run(this.db);
+      this.#applyMigration(migration);
+    }
+  }
+
+  /**
+   * 执行一条迁移描述符。生产路径（#migrate）与离线副本迁移（applyExplicitMigration）
+   * 共用这一套安全语义 —— 避免"副本上验证过的安全步骤"和"真正启用时走的步骤"是两份实现。
+   */
+  #applyMigration(migration) {
+    const useForeignKeysOff = migration.foreignKeysOff === true;
+    const checkForeignKeys = migration.foreignKeyCheck === true || useForeignKeysOff;
+    if (migration.backupBefore === true) this.#backupBeforeMigration(migration.version);
+    // 关 FK 必须在 BEGIN 之前：事务内 PRAGMA foreign_keys 是 no-op。
+    if (useForeignKeysOff) this.db.exec("PRAGMA foreign_keys = OFF");
+    let out;
+    try {
+      out = this.transactSync(() => {
+        let result = null;
+        if (typeof migration.run === "function") result = migration.run(this.db);
         else this.db.exec(migration.sql);
+        if (checkForeignKeys) {
+          const violations = this.db.prepare("PRAGMA foreign_key_check").all();
+          if (violations.length > 0) {
+            throw new Error(
+              `迁移 v${migration.version} 提交前外键自检未通过：${violations.length} 条悬挂引用`,
+            );
+          }
+        }
         // 失败注入点：测试用它制造"DDL 已执行、版本尚未 bump"的崩溃，验证整级回滚。
         if (this.hooks.onMigration) this.hooks.onMigration(migration.version, this.db);
         // user_version 不能用占位符，只能整句拼；值是本文件常量，无注入面。
         this.db.exec("PRAGMA user_version = " + migration.version);
+        return result;
       });
+    } catch (e) {
+      // 回滚已由 transactSync 完成；这里只把连接级 pragma 恢复回去。
+      // 恢复本身失败也不能盖掉原始错误（连接级 pragma 下次 open 会重新置 ON）。
+      if (useForeignKeysOff) {
+        try {
+          this.#restoreForeignKeys(migration.version);
+        } catch {
+          /* 保留原始错误 */
+        }
+      }
+      throw e;
     }
+    if (useForeignKeysOff) this.#restoreForeignKeys(migration.version);
+    return out;
+  }
+
+  /** 事务外备份（`VACUUM INTO`）。返回备份文件路径，并记入 this.migrationBackups。 */
+  #backupBeforeMigration(version) {
+    const dir = this.backupDir || (this.path !== ":memory:" ? path.dirname(this.path) : null);
+    if (!dir) throw new Error("迁移 backupBefore 需要文件库路径或显式 backupDir。");
+    fs.mkdirSync(dir, { recursive: true });
+    const stem = `${path.basename(this.path)}.pre-v${version}.${Math.trunc(this.clock())}`;
+    let target = path.join(dir, `${stem}.bak`);
+    let n = 0;
+    while (fs.existsSync(target)) {
+      n += 1;
+      target = path.join(dir, `${stem}.${n}.bak`);
+    }
+    // VACUUM INTO 的目标文件必须不存在；路径是受控值，按 SQLite 单引号规则转义。
+    this.db.exec(`VACUUM INTO '${target.replace(/'/g, "''")}'`);
+    this.migrationBackups.push({ version, path: target });
+    return target;
+  }
+
+  /** 恢复并**断言**外键开关：关过没恢复，之后任意写入都可能绕过 FK 约束。 */
+  #restoreForeignKeys(version) {
+    this.db.exec("PRAGMA foreign_keys = ON");
+    const restored = Number(this.db.prepare("PRAGMA foreign_keys").get().foreign_keys);
+    if (restored !== 1) throw new Error(`迁移 v${version} 后恢复 foreign_keys=ON 失败。`);
+  }
+
+  /**
+   * 显式执行一条迁移描述符（**离线副本专用**，不参与 SCHEMA_VERSION 门禁）。
+   *
+   * 这是"默认不启用"的开关：生产 `open()` 永远只跑 MIGRATIONS；
+   * 只有调用方显式传入描述符才会执行。用于在库副本上验证合并迁移，
+   * 生产路径与 SCHEMA_VERSION 都不动。
+   */
+  applyExplicitMigration(migration) {
+    if (!this.db) throw new Error("applyExplicitMigration 需要先 open()。");
+    if (!migration || typeof migration !== "object" || !Number.isInteger(migration.version)) {
+      throw new Error("applyExplicitMigration 需要 { version, sql|run } 描述符。");
+    }
+    // 返回迁移体结果（如 { applied, reason }），便于调用方判定这次是空跑还是真搬了。
+    return this.#applyMigration(migration);
   }
 
   /**

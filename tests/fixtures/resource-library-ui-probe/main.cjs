@@ -124,7 +124,7 @@ app.whenReady().then(async () => {
     g = await waitGate("ready");
     check("B2 · 登录进入桌面", g === "ready", "gate=" + g);
 
-    await click('[data-app-id="resource-library"]');
+    await click('[data-dock-id="resource-library"]');
     check("B3 · 打开资源库 App（三栏）", await waitSel('[data-d3-04b="app"]'), "app");
     check("B4 · Navigation 含固定分类", (await has('[data-d3-04b-nav="memory"]')) && (await has('[data-d3-04b-nav="trash"]')) && (await has('[data-d3-04b-nav="favorites"]')), "");
 

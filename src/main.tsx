@@ -15,6 +15,7 @@ import {
   Image as ImageIcon,
   Music,
   LayoutGrid,
+  LibraryBig,
   List,
   Lock,
   LogOut,
@@ -67,10 +68,25 @@ import { BootRetry, BootSurface, LockScreen, LoginScreen, SetupScreen } from "./
 import { ProtectedResourceFixture } from "./authorization/ProtectedResourceFixture";
 import { SettingsContent } from "./settings/SettingsContent";
 import { GovernanceApp } from "./governance/GovernanceApp";
-import { FilesApp } from "./governance/FilesApp";
+// Z2：访达窗口「加入资源库 / 导出」的纯逻辑层（取代已废弃删除的 FilesApp，全工程只此一份实现）。
+import {
+  LIBRARY_ENTRY_LABEL,
+  LIBRARY_ENTRIES,
+  libraryEntryAvailability,
+  libraryErrorText,
+  runAddFromFiles,
+  runExportResource,
+  runExportToComputer,
+  runRevealSource,
+  selectionStats,
+  toolbarEntryAvailability,
+} from "./governance/filesLibraryActions";
+import type { LibraryEntryId, LibraryRunResult } from "./governance/filesLibraryActions";
 import { CanvasHost } from "./canvas/CanvasHost";
 import { ProjectsApp } from "./governance/ProjectsApp";
+import { TaskConsole } from "./projects/TaskConsole";
 import { McpCenter } from "./mcp/McpCenter";
+import { SkillCenter } from "./skills/SkillCenter";
 import { ApprovalPrompt } from "./approval/ApprovalPrompt";
 import { errorText } from "./identity/types";
 import { Avatar } from "./identity/Avatar";
@@ -356,7 +372,8 @@ const apps = [
   { id: "projects", name: "项目", icon: "folder" },
   { id: "organization", name: "组织治理", icon: "settings" },
   { id: "skills", name: "Skill 中心", icon: "shortcuts" },
-  // MCP 中心（D5-03 第一批：连接管理与能力发现，不开放工具调用）。
+  // MCP 中心（D5-03：连接管理与能力发现；工具调用另由 mcp/toolInvocation/set 开关控制：
+  // 默认关闭，开启后每次调用仍走审批链，未批准 0 外发；真正调用入口是 mcp/toolInvocation/call）。
   // 图标复用既有图标集里的 shortcuts：与 canvas/browser 同风格，不为它新增图标资产。
   { id: "mcp-center", name: "MCP 中心", icon: "shortcuts" },
   { id: "settings", name: "系统设置", icon: "settings" },
@@ -586,6 +603,9 @@ function App() {
   };
   const [appTab, setAppTab] = useState<"all" | "pro" | "recent">("all");
   const [skillTab, setSkillTab] = useState<"market" | "mine" | "installed">("market");
+  /* UI-3：projects 窗口内的子视图 —— 任务 / Agent 控制台与既有 ProjectsApp 并列，
+     不改 appId、不改 dock、不新增应用入口（Dx-UI-PLAN UI-3）。 */
+  const [projectsTab, setProjectsTab] = useState<"tasks" | "projects">("tasks");
   const [folderUI, setFolderUI] = useState<Record<string, FolderUI>>({});
   /** 文件服务里的条目（按 folderId）。渲染层只拿索引，拿不到磁盘路径。 */
   const [filesByFolder, setFilesByFolder] = useState<Record<string, FileEntry[]>>({});
@@ -1629,6 +1649,19 @@ function App() {
   const [paneMenu, setPaneMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
 
   /**
+   * Z2 · 访达窗口的「加入资源库 / 导出」运行态（按窗口 id 存）。
+   *   libraryBusy   执行中：入口 disabled + aria-busy，成功后写 libraryRefs，失败写 libraryStatus。
+   *   libraryStatus 最近一次操作的可见反馈（成功 / 失败 / 进行中都必须看得见）。
+   *   libraryRefs   本窗口刚加入资源库的条目：folderId/entryId → 资源引用。
+   *                 「导出资源 / 显示源文件」要 ResourceRef，而访达的选中项
+   *                 是文件服务条目、本身没有 ref；只有刚加入过才有（刷新窗口即失效，属于
+   *                 「本窗口会话内可导出」的诚实边界，不猜、不按名字反查资源）。
+   */
+  const [libraryBusy, setLibraryBusy] = useState<Record<string, boolean>>({});
+  const [libraryStatus, setLibraryStatus] = useState<Record<string, { kind: "ok" | "error" | "busy"; code: string; text: string } | undefined>>({});
+  const [libraryRefs, setLibraryRefs] = useState<Record<string, { resourceRef: string; storageMode: string; name: string }>>({});
+
+  /**
    * 唯一的命令入口。**组件与未来的 AI 都只能经由它改窗口状态**（§20 / §21）。
    * 这里只是一层 dispatch 转发，没有任何"顺手也改一下"的旁路。
    */
@@ -1865,8 +1898,8 @@ function App() {
       };
       const shown = folders.find((f) => f.id === ui.folderId) ?? folder;
       /**
-       * 文件服务（D3-04）接入前文件夹里没有真实条目，因此条目集恒为空。
-       * 搜索 / 排序的**代码路径是真实的**，只是当前没有数据可筛 —— 不放假文件。
+       * 条目集全部来自真实存储：子文件夹来自桌面虚拟树，文件来自文件服务（D3-04）已接入的
+       * filesByFolder。搜索 / 排序都作用在这些真实条目上 —— 不放假数据。
        */
       const q = ui.query.trim().toLowerCase();
       /** 子文件夹 + 文件服务条目，统一成 Row 后再排序 / 分组。 */
@@ -1912,6 +1945,116 @@ function App() {
       }
       const selIds = selected[id] ?? [];
       const isSelected = (entryId: string) => selIds.includes(entryId);
+
+      /* ── Z2 · 加入资源库 / 导出（复用 D3-04D 的受控命令面，不重写导入导出逻辑） ────
+         可用性由 filesLibraryActions 的纯函数判定；这里只负责把规则接到访达窗口上。 */
+      const refKey = (entryId: string) => shown.id + "/" + entryId;
+      const knownRefOf = (entryId: string) => libraryRefs[refKey(entryId)];
+      const libCtx = {
+        hasResourceBridge: typeof window.openarc?.resource?.command === "function",
+        hasFilesBridge: typeof window.openarc?.files?.exportTo === "function",
+        busy: !!libraryBusy[id],
+      };
+      const libStatus = libraryStatus[id];
+      const setLibStatus = (s: { kind: "ok" | "error" | "busy"; code: string; text: string } | undefined) =>
+        setLibraryStatus((m) => ({ ...m, [id]: s }));
+      /** 选中集合 → 可用性输入（纯函数）。 */
+      const libSelectionFor = (ids: string[]) => {
+        const picked = rows.filter((r) => ids.includes(r.id));
+        const refs: Record<string, { storageMode?: string } | undefined> = {};
+        for (const r of picked) refs[r.id] = knownRefOf(r.id);
+        return selectionStats(picked, refs);
+      };
+      /** 一次资源库操作：执行中 disabled + aria-busy，结束后一定写入成功 / 失败反馈。 */
+      const runLibrary = async (fn: () => Promise<LibraryRunResult>, done?: (res: LibraryRunResult) => void) => {
+        if (libCtx.busy) return;
+        setLibraryBusy((m) => ({ ...m, [id]: true }));
+        setLibStatus({ kind: "busy", code: "BUSY", text: "正在处理资源库操作…" });
+        let res: LibraryRunResult;
+        try {
+          res = await fn();
+        } catch {
+          res = { ok: false, code: "INTERNAL_ERROR", text: libraryErrorText("INTERNAL_ERROR") };
+        }
+        setLibraryBusy((m) => ({ ...m, [id]: false }));
+        setLibStatus({ kind: res.ok ? "ok" : "error", code: res.code, text: res.text });
+        if (res.ok && done) done(res);
+      };
+      const fileIdsOf = (ids: string[]) => rows.filter((r) => ids.includes(r.id) && r.kind === "file").map((r) => r.id);
+      const setLibraryError = (code: string) => setLibStatus({ kind: "error", code, text: libraryErrorText(code) });
+      /** 加入资源库：Managed 复制进 OpenArc，Linked 只登记引用（路径只在主进程解析）。 */
+      const addToLibrary = (mode: "import" | "link", ids: string[]) => {
+        setPaneMenu(null);
+        const fileIds = fileIdsOf(ids);
+        if (!fileIds.length) { setLibraryError("NO_SELECTION"); return; }
+        void runLibrary(
+          () => runAddFromFiles(window.openarc?.resource, shown.id, fileIds, mode),
+          (res) => {
+            const list = Array.isArray(res.resources) ? res.resources : [];
+            setLibraryRefs((m) => {
+              const next = { ...m };
+              fileIds.forEach((entryId, i) => {
+                const r = list[i] as { resourceId?: unknown; resourceRef?: unknown; storageMode?: unknown; name?: unknown } | undefined;
+                if (!r) return;
+                next[refKey(entryId)] = {
+                  resourceRef: String(r.resourceId || r.resourceRef || ""),
+                  storageMode: String(r.storageMode || (mode === "link" ? "LINKED" : "MANAGED")),
+                  name: String(r.name || ""),
+                };
+              });
+              return next;
+            });
+          },
+        );
+      };
+      /** 导出资源为普通文件：只对本窗口刚加入过、且恰好单选的那个文件可用。 */
+      const exportResource = (ids: string[]) => {
+        setPaneMenu(null);
+        const fileIds = fileIdsOf(ids);
+        const refs = fileIds.map((entryId) => knownRefOf(entryId)).filter((r): r is { resourceRef: string; storageMode: string; name: string } => !!r && !!r.resourceRef);
+        if (fileIds.length !== 1 || refs.length !== 1) { setLibraryError("NO_SELECTION"); return; }
+        void runLibrary(() => runExportResource(window.openarc?.resource, refs[0].resourceRef));
+      };
+      /** 显示源文件：仅 LINKED 资源；路径仍只在主进程交给 shell.showItemInFolder。 */
+      const revealSource = (ids: string[]) => {
+        setPaneMenu(null);
+        const fileIds = fileIdsOf(ids);
+        const refs = fileIds.map((entryId) => knownRefOf(entryId)).filter((r): r is { resourceRef: string; storageMode: string; name: string } => !!r && !!r.resourceRef && r.storageMode === "LINKED");
+        if (fileIds.length !== 1 || refs.length !== 1) { setLibraryError("NO_SELECTION"); return; }
+        void runLibrary(() => runRevealSource(window.openarc?.resource, refs[0].resourceRef));
+      };
+      /** 导出到电脑：走既有 files.exportTo（目录由主进程 dialog 选），不是新实现。 */
+      const exportToComputer = (ids: string[]) => {
+        setPaneMenu(null);
+        const fileIds = fileIdsOf(ids);
+        if (!fileIds.length) { setLibraryError("NO_SELECTION"); return; }
+        void runLibrary(() => runExportToComputer(window.openarc?.files, shown.id, fileIds));
+      };
+      const runLibraryEntry = (entry: LibraryEntryId, ids: string[]) => {
+        if (entry === "add-managed") addToLibrary("import", ids);
+        else if (entry === "add-linked") addToLibrary("link", ids);
+        else if (entry === "export-resource") exportResource(ids);
+        else if (entry === "reveal-source") revealSource(ids);
+        else exportToComputer(ids);
+      };
+      /**
+       * 菜单项：可用性与禁用原因都来自同一份纯函数。
+       * 未选中的项把原因写进标签本身 —— 禁用的 icon 按钮不会弹 title，只有标签一定看得见。
+       */
+      const libraryMenuItems = (ids: string[]): MenuItem[] => {
+        const sel = libSelectionFor(ids);
+        return LIBRARY_ENTRIES.map((entry) => {
+          const av = libraryEntryAvailability(entry, sel, libCtx);
+          return {
+            id: "lib-" + entry,
+            label: LIBRARY_ENTRY_LABEL[entry] + (av.enabled ? "" : "（" + av.reason + "）"),
+            disabled: !av.enabled,
+            title: av.enabled ? LIBRARY_ENTRY_LABEL[entry] : av.reason,
+            onSelect: () => runLibraryEntry(entry, ids),
+          };
+        });
+      };
+      const libTrigger = toolbarEntryAvailability(libSelectionFor(selIds), libCtx);
       /** 单击：默认单选；Cmd/Ctrl = 加减选；Shift = 按当前顺序扩选。 */
       const pick = (entryId: string, e: React.MouseEvent) => {
         setSelected((m) => {
@@ -2108,6 +2251,11 @@ function App() {
                 },
               },
             ];
+        // Z2 · 资源库：与工具栏共用同一份可用性判定；未选中的项把原因写进标签（禁用项不隐藏原因）。
+        items.push(
+          { separator: true },
+          { id: "library", label: "资源库", submenu: libraryMenuItems(ids), onSelect: () => {} },
+        );
         setPaneMenu({ x, y, items });
       };
       const openPaneMenu = (x: number, y: number, which: "sort" | "content") => {
@@ -2228,13 +2376,46 @@ function App() {
               >
                 <ArrowUpDown size={15} />
               </button>
-              <button className="icon-button" aria-label="共享" disabled title="文件服务接入后可用">
+              {/* Z2 · 加入资源库 / 导出：未选中或执行中禁用；禁用原因写在 aria-label 与 title 上
+                  （DESIGN_SYSTEM §8「禁用控件不应隐藏原因」）。菜单项复用同一份可用性纯函数。 */}
+              <button
+                className="icon-button"
+                aria-label={libTrigger.enabled ? "资源库" : "资源库：" + libTrigger.reason}
+                aria-haspopup="menu"
+                aria-busy={libCtx.busy ? "true" : undefined}
+                data-files-library-entry
+                data-files-library-state={libTrigger.enabled ? "enabled" : "disabled"}
+                data-files-library-busy={libCtx.busy ? "true" : undefined}
+                disabled={!libTrigger.enabled}
+                title={libTrigger.enabled ? "加入资源库 / 导出" : libTrigger.reason}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  setPaneMenu({ x: r.left, y: r.bottom + 4, items: libraryMenuItems(selIds) });
+                }}
+              >
+                <LibraryBig size={15} />
+              </button>
+              <button className="icon-button" aria-label="共享" disabled title="共享尚未接入">
                 <Share size={15} />
               </button>
-              <button className="icon-button" aria-label="标签" disabled title="文件服务接入后可用">
+              <button className="icon-button" aria-label="标签" disabled title="标签尚未接入">
                 <Tag size={15} />
               </button>
             </div>
+            {/* Z2 · 资源库操作反馈：执行中 / 成功 / 失败都必须看得见（MOTION_SYSTEM §7）。
+                成功文案里说清结果落在「资源库」App 的哪里，失败只显示人话 + 结构化错误码。 */}
+            {libStatus ? (
+              <p
+                className="files-library-status"
+                role={libStatus.kind === "error" ? "alert" : "status"}
+                aria-live={libStatus.kind === "error" ? "assertive" : "polite"}
+                data-files-library-status={libStatus.kind}
+                data-files-library-code={libStatus.code}
+              >
+                {libStatus.text}
+              </p>
+            ) : null}
             <div
               className="folder-body"
               data-drop-folder={shown.id}
@@ -2640,7 +2821,6 @@ function App() {
       );
     }
     if (w?.appId === "resource-library") return <ResourceLibraryApp />;
-    if (w?.appId === "files") return <FilesApp />;
     if (w?.appId === "canvas")
       return (
         <CanvasHost
@@ -2652,7 +2832,23 @@ function App() {
           }}
         />
       );
-    if (w?.appId === "projects") return <ProjectsApp />;
+    if (w?.appId === "projects")
+      return (
+        <div className="split">
+          <nav className="split-side" aria-label="项目子视图">
+            <div className="split-section">项目</div>
+            <button className="split-nav" aria-current={projectsTab === "tasks"} onClick={() => setProjectsTab("tasks")}>
+              任务控制台
+            </button>
+            <button className="split-nav" aria-current={projectsTab === "projects"} onClick={() => setProjectsTab("projects")}>
+              项目与资源
+            </button>
+          </nav>
+          <div className="split-main">
+            {projectsTab === "tasks" ? <TaskConsole role={identity.snapshot.role} /> : <ProjectsApp />}
+          </div>
+        </div>
+      );
     if (w?.appId === "mcp-center") return <McpCenter role={identity.snapshot.role} />;
     if (w?.appId === "organization") return <GovernanceApp />;
     if (w?.appId === "settings")
@@ -2913,29 +3109,17 @@ function App() {
             </button>
           </nav>
           <div className="split-main">
-            <div className="empty-content">
-              <img className="large-icon" src={icon("shortcuts")} alt="" draggable={false} />
-              <h1>Skill 中心</h1>
-              <span className="badge">尚未实现</span>
-              <p>市场、自定义技能、版本与团队分享将在后续阶段接入。</p>
-              <p className="muted">当前仅验证桌面窗口生命周期，不显示模拟业务数据。</p>
-            </div>
+            <SkillCenter tab={skillTab} role={identity.snapshot.role} />
           </div>
         </div>
       );
+    // 已知 appId 都在上方各自渲染；走到这里只可能是未知 / 失效窗口，不能按 appId 声明能力。
     return (
       <div className="empty-content">
         <img className="large-icon" src={icon(iconOf(id))} alt="" draggable={false} />
         <h1>{apps.find((a) => a.id === w?.appId)?.name}</h1>
-        <span className="badge">尚未实现</span>
-        <p>
-          {w?.appId === "skills"
-            ? "市场、自定义技能、版本与团队分享将在后续阶段接入。"
-            : w?.appId === "canvas"
-              ? "内容块、连线和项目保存将在后续阶段接入。"
-              : "个人文件、团队项目和设备文件将在后续阶段接入。"}
-        </p>
-        <p className="muted">当前仅验证桌面窗口生命周期，不显示模拟业务数据。</p>
+        <span className="badge">未知应用</span>
+        <p>这个窗口没有对应的应用界面。</p>
       </div>
     );
   };

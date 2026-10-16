@@ -7,6 +7,10 @@
  *
  * 内置少量测试 Tool（test.echo / resource.read.metadata）；**绝不注册** shell / terminal /
  * filesystem.write / process.spawn / MCP / browser side-effect。
+ *
+ * B4e 例外（唯一入口）：MCP 外部工具由 electron/mcp-tool-contract.cjs 在目录快照时**幂等登记**为
+ * riskClass = EXTERNAL_SIDE_EFFECT 的 contract（requiresApproval 由 risk 推导）；它不在 BUILTIN_CONTRACTS，
+ * 也不进 dsh manifest allowlist（READ_TOOL_IDS / WRITE_TOOL_IDS 是唯一真源），执行权仍在外部 MCP 服务端。
  */
 "use strict";
 const crypto = require("node:crypto");
@@ -19,7 +23,9 @@ const CONTRACT_FIELDS = ["toolId", "version", "displayName", "description", "inp
   // D4-03C2：只有显式声明 executionPolicy 的 contract 才允许真实受控写入。
   "executionPolicy",
   // D5-02：显式声明哪些顶层参数是结构化对象（豁免 §23/§24 denylist 的同名误判）。
-  "structuredArguments"];
+  "structuredArguments",
+  // D5-04：外部 MCP 工具的反向目标（serverId/toolName），供 side-effect provider 解析执行对象。
+  "externalTarget"];
 
 /** 极简 JSON Schema 子集校验器：object/string/integer/number/boolean/array + additionalProperties:false。*/
 function validateSchema(schema, value, path = "$") {

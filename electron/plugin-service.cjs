@@ -1,0 +1,1121 @@
+/**
+ * B7c/B7d · 集成域装配 + integration:command 分发（唯一执行入口）。
+ *
+ * 机制（任务书 item 1）：
+ *   · 统一入口只有 command({ command, payload })；命令白名单在 INTEGRATION_COMMANDS（由
+ *     INTEGRATION_COMMAND_META 的键生成，保证"白名单 ↔ 实现 ↔ 元数据"一一对应）；
+ *   · 全部可选插件（钉钉 / 天气 / 黄历 / 领星 / 紫鸟 / 夸克 / RunningHub / ModelScope / Agnes）**默认全关**；
+ *     未启用、或已启用但依赖缺失 /
+ *     运行时能力未注入，一律返回结构化 { ok:false, error:"INTEGRATION_UNAVAILABLE", detail:"<缺什么、怎么装>" }，绝不假实现；
+ *   · 开关落 <userData>/dxos/integrations.json（plugin-registry.cjs）；
+ *   · 钉钉 / 领星 / 紫鸟凭据走 credential-store 的 safeStorage 后端；投影只给掩码，明文不落盘；
+ *   · 领星 / 紫鸟云 API 一律走**注入的 MCP 传输**（mcpCallDirect / transportFactory / mcpTransport）；
+ *     传输在调用时复检"插件已启用 + 依赖就绪"，未注入即结构化不可用；夸克走可注入的官方 CLI；
+ *   · 本域**没有** api.dx-os.com / 云端实时房间 / 远端更新（OUT，任务书硬约束）。
+ *
+ * 身份边界与 peers 一致：sessionRef / appId 由主进程注入（bootstrap），payload.userId / role / appId 忽略。
+ */
+"use strict";
+
+const path = require("node:path");
+const { AsyncLocalStorage } = require("node:async_hooks");
+const { randomUUID } = require("node:crypto");
+
+/**
+ * Z1 · 自动化定义授权在异步调用链中的传递。
+ * 只由 automationAdapter 的调用包住：定义已授权时，把定义授权翻译成 MCP 客户端认的审批凭证
+ * （approval.decision = ALLOWED，reasonCode = AUTOMATION_DEFINITION_AUTHORIZED）经既有
+ * mcpTransport.callTool(request, gate) 传入。临时发起（非自动化）的集成命令不在该上下文中，
+ * 拿不到凭证 → 既有「开关 + 审批决定」双条件原样生效，不绕过。
+ */
+const automationAuthorizationContext = new AsyncLocalStorage();
+
+/** 自动化调用链内才返回审批凭证；否则 null（fail closed）。 */
+function automationAuthorizationGate() {
+  const store = automationAuthorizationContext.getStore();
+  if (!store || store.authorized !== true) return null;
+  return {
+    authorization: {
+      invocationEnabled: true,
+      approval: {
+        decision: "ALLOWED",
+        reasonCode: "AUTOMATION_DEFINITION_AUTHORIZED",
+        definitionId: store.definitionId || null,
+        authorizationRef: store.authorizationRef || null,
+      },
+    },
+  };
+}
+
+const {
+  createPluginRegistry,
+  integrationPlugins,
+  optionalPlugins,
+  resolveBinaryPath,
+  INTEGRATION_ERR_UNAVAILABLE,
+  INTEGRATION_ERR_INVALID_INPUT,
+  INTEGRATION_ERR_NOT_FOUND,
+  INTEGRATION_ERR_INTERNAL,
+} = require("./plugin-registry.cjs");
+const { createDingtalkIntegration } = require("./integration-dingtalk.cjs");
+const { createWeatherIntegration } = require("./integration-weather.cjs");
+const { createAlmanacIntegration } = require("./integration-almanac.cjs");
+const { createLingxingIntegration } = require("./integration-lingxing.cjs");
+const { createZiniaoIntegration, ZINIAO_VENDOR_HINT } = require("./integration-ziniao.cjs");
+const { createQuarkIntegration, QUARK_VENDOR_HINT } = require("./integration-quark.cjs");
+const { createRunningHubIntegration } = require("./plugin-runninghub.cjs");
+const { createModelScopeIntegration } = require("./plugin-modelscope.cjs");
+const { createAgnesIntegration } = require("./plugin-agnes.cjs");
+const { setLegacyExecutorPorts } = require("./legacy-executor-ports.cjs");
+// B7e2 后续：CLI 协议族（即梦 / Codex / Gemini）的 legacy 执行器端口；只在对应 CLI 已安装时注入。
+const { installLegacyCliPorts } = require("./legacy-cli-ports.cjs");
+const { resolveDxosPaths } = require("./dxos-foundation-paths.cjs");
+const { safeStorageCredentialBackend } = require("./credential-store.cjs");
+
+const HOST_APP_ID = "ai";
+const ALMANAC_CACHE_DIR_NAME = "calendar-almanac";
+const INTEGRATIONS_DIR_NAME = "integrations";
+
+/**
+ * 命令元数据（唯一真值）：risk / credential / 中文 summary。
+ * 白名单由本表键生成；新增命令必须同时在此登记并在 execute 的 switch 中实现。
+ *   risk       read | use | manage | destructive（与 platform-domain.cjs:59-63 同级定义）
+ *   credential 该命令是否把真实凭据带进执行路径（IPC 投影里会改名 needsCredential）
+ *   summary    中文一句话，供 UI 与审计展示
+ */
+const INTEGRATION_COMMAND_META = Object.freeze({
+  "integration/health": { risk: "read", credential: false, summary: "集成域健康：命令数 / 插件数 / 已启用插件" },
+  "integration/commands": { risk: "read", credential: false, summary: "列出 integration 命令目录（risk / credential / 中文摘要）" },
+  "integration/plugins/list": { risk: "read", credential: false, summary: "列出全部集成插件与开关状态（默认全关）" },
+  "integration/plugins/get": { risk: "read", credential: false, summary: "读取单个集成插件的登记信息" },
+  "integration/plugins/enable": { risk: "manage", credential: false, summary: "启用一个插件（必需依赖缺失时结构化拒绝）" },
+  "integration/plugins/disable": { risk: "manage", credential: false, summary: "停用一个插件（保留配置，可再次启用）" },
+  "integration/plugins/health": { risk: "read", credential: false, summary: "插件依赖健康报告（二进制 / Python 包 / 凭据 / 可选网络）" },
+  "integration/dingtalk/status": { risk: "read", credential: false, summary: "钉钉集成状态：机器人数量 / safeStorage / fetch 可用性" },
+  "integration/dingtalk/channels": { risk: "read", credential: false, summary: "列出钉钉机器人（Webhook 只回掩码）" },
+  "integration/dingtalk/channels/save": { risk: "manage", credential: true, summary: "新建或更新钉钉机器人（Webhook / 加签密钥写入安全存储）" },
+  "integration/dingtalk/channels/delete": { risk: "destructive", credential: false, summary: "删除钉钉机器人及其安全存储凭据" },
+  "integration/dingtalk/contacts": { risk: "read", credential: false, summary: "列出本地记录过的钉钉联系人" },
+  "integration/dingtalk/contacts/record": { risk: "manage", credential: false, summary: "记录一个钉钉联系人（本地累计，最多 200 条）" },
+  "integration/dingtalk/send": { risk: "use", credential: true, summary: "经群机器人 Webhook 发送钉钉消息（真实外发）" },
+  "integration/dingtalk/send-to-user": { risk: "use", credential: true, summary: "发送钉钉个人消息（需注入个人消息发送器）" },
+  "integration/dingtalk/agent-config/get": { risk: "read", credential: false, summary: "读取钉钉应用配置（clientSecret 只回掩码）" },
+  "integration/dingtalk/agent-config/save": { risk: "manage", credential: true, summary: "保存钉钉应用配置（clientSecret 写入安全存储）" },
+  "integration/weather/query": { risk: "read", credential: false, summary: "查询城市 / 经纬度天气（经注入 fetch，离线不可用）" },
+  "integration/almanac/years": { risk: "read", credential: false, summary: "查询在线万年历（按年缓存，离线不可用）" },
+  "integration/lingxing/status": { risk: "read", credential: false, summary: "领星集成状态：transport / 数据目录 / 映射 / 缓存占用" },
+  "integration/lingxing/mapping/get": { risk: "read", credential: false, summary: "读取领星映射数据集（字段 / 站点聚合 / 记录）" },
+  "integration/lingxing/mapping/import": { risk: "manage", credential: false, summary: "导入领星映射表格（XLSX/CSV，经注入解析器）" },
+  "integration/lingxing/mapping/file": { risk: "read", credential: false, summary: "返回最新领星映射源文件路径与内容类型" },
+  "integration/lingxing/cache/stats": { risk: "read", credential: false, summary: "领星本地缓存统计（行数 / 天数 / 占用 / 广告 / 活动作业）" },
+  "integration/lingxing/cache/sync/start": { risk: "use", credential: true, summary: "启动领星销售缓存同步作业（云查询，需注入 transport）" },
+  "integration/lingxing/cache/sync/get": { risk: "read", credential: false, summary: "查询领星销售同步作业状态" },
+  "integration/lingxing/cache/rows": { risk: "read", credential: false, summary: "按日读取领星本地明细行" },
+  "integration/lingxing/cache/query": { risk: "read", credential: false, summary: "聚合查询领星本地数据（按 ASIN/SKU）" },
+  "integration/lingxing/cache/clear": { risk: "destructive", credential: false, summary: "清理领星本地存储（销售 / 紫鸟 / 广告 / 全部）" },
+  "integration/lingxing/advertising/sync/start": { risk: "use", credential: true, summary: "启动领星广告缓存同步作业（云查询，需注入 transport）" },
+  "integration/lingxing/advertising/sync/get": { risk: "read", credential: false, summary: "查询领星广告同步作业状态" },
+  "integration/lingxing/advertising/sync/stop": { risk: "manage", credential: false, summary: "停止领星广告同步作业" },
+  "integration/lingxing/advertising/cache/stats": { risk: "read", credential: false, summary: "领星广告缓存统计（店铺 / 视图 / 行数）" },
+  "integration/lingxing/advertising/cache/query": { risk: "read", credential: false, summary: "查询领星广告缓存（按范围 / 视图 / 店铺过滤）" },
+  "integration/lingxing/credential/save": { risk: "manage", credential: true, summary: "保存领星 API 凭据（写入安全存储，只回掩码）" },
+  "integration/lingxing/credential/status": { risk: "read", credential: false, summary: "读取领星凭据状态（只回掩码，不回明文）" },
+  "integration/lingxing/analytics": { risk: "read", credential: false, summary: "领星业务分析（区间对比 / 日趋势 / 商品 / 维度 / 分组，源 lingxingBusinessAnalytics）" },
+  "integration/lingxing/operator/dashboard": { risk: "read", credential: false, summary: "领星运营看板（按 ASIN 汇总销售与广告指标，源 queryLingxingOperatorDashboard）" },
+  "integration/lingxing/operator/export": { risk: "read", credential: false, summary: "导出领星运营看板工作簿（需注入 workbookWriter，未注入即结构化不可用）" },
+  "integration/lingxing/currency/rates": { risk: "read", credential: false, summary: "读取领星汇率（注入 fetch 时实时，否则回退内置汇率，源 getLingxingCurrencyRates）" },
+  "integration/ziniao/status": { risk: "read", credential: false, summary: "紫鸟集成状态：transport / 数据目录 / 控制文件 / 活动作业" },
+  "integration/ziniao/jobs/list": { risk: "read", credential: false, summary: "列出全部紫鸟下载作业（按创建时间倒序）" },
+  "integration/ziniao/jobs/current": { risk: "read", credential: false, summary: "查询当前活动或最近的紫鸟下载作业" },
+  "integration/ziniao/jobs/start": { risk: "use", credential: true, summary: "创建紫鸟 VC 汇总下载作业（真实抓取，需注入 transport）" },
+  "integration/ziniao/jobs/control": { risk: "manage", credential: false, summary: "暂停 / 继续 / 停止紫鸟下载作业" },
+  "integration/ziniao/jobs/delete": { risk: "destructive", credential: false, summary: "删除已结束的紫鸟下载作业记录" },
+  "integration/ziniao/jobs/recover": { risk: "manage", credential: false, summary: "重启后恢复未完成的紫鸟下载作业（限流则进入冷却）" },
+  "integration/ziniao/vc/files": { risk: "read", credential: false, summary: "列举紫鸟保存目录中的 VC 汇总 XLSX 文件" },
+  "integration/ziniao/vc/import": { risk: "manage", credential: false, summary: "导入紫鸟 VC 汇总 XLSX 到本地缓存（需注入 workbookReader）" },
+  "integration/ziniao/vc/rows": { risk: "read", credential: false, summary: "读取紫鸟 VC 行级明细（源 ziniaoVcRows）" },
+  "integration/ziniao/vc/query": { risk: "read", credential: false, summary: "聚合查询紫鸟 VC 数据（源 queryZiniaoVcData）" },
+  "integration/ziniao/credential/save": { risk: "manage", credential: true, summary: "保存紫鸟账号凭据（写入安全存储，只回掩码）" },
+  "integration/ziniao/credential/status": { risk: "read", credential: false, summary: "读取紫鸟凭据状态（只回掩码，不回明文）" },
+  "integration/quark/status": { risk: "read", credential: false, summary: "夸克 CLI 装配状态：路径 / 工作目录 / 搜索历史条目数" },
+  "integration/quark/account": { risk: "read", credential: false, summary: "查询夸克登录态（昵称 / 用户 id，不回 token）" },
+  "integration/quark/login/start": { risk: "use", credential: true, summary: "启动夸克扫码登录（派生官方 CLI，浏览器打开授权页）" },
+  "integration/quark/login/stop": { risk: "manage", credential: false, summary: "停止进行中的夸克登录进程" },
+  "integration/quark/logout": { risk: "manage", credential: true, summary: "退出夸克登录（调用官方 CLI unauthorize）" },
+  "integration/quark/search": { risk: "read", credential: false, summary: "搜索夸克网盘文件（经官方 CLI，只读）" },
+  "integration/quark/browse": { risk: "read", credential: false, summary: "浏览夸克网盘目录（CLI 不支持时降级为 search 模式）" },
+  "integration/quark/download": { risk: "use", credential: true, summary: "从夸克网盘下载文件到本地目录（真实落盘）" },
+  "integration/quark/upload": { risk: "use", credential: true, summary: "上传本地文件到夸克网盘（真实外发）" },
+  "integration/quark/search-history/get": { risk: "read", credential: false, summary: "读取当前会话的夸克搜索历史（最多 12 条）" },
+  "integration/quark/search-history/record": { risk: "manage", credential: false, summary: "记录一条夸克搜索关键词（去重、上限 12）" },
+  "integration/quark/search-history/clear": { risk: "destructive", credential: false, summary: "清空当前会话的夸克搜索历史" },
+  "integration/quark/downloads/clean": { risk: "destructive", credential: false, summary: "清理夸克下载临时产物（按保留时长）" },
+  "integration/quark/credential/status": { risk: "read", credential: false, summary: "读取夸克登录态凭据投影（只回掩码 / 存在性，不回 token）" },
+  "integration/runninghub/status": { risk: "read", credential: false, summary: "RunningHub 集成状态：fetch / safeStorage / Key 掩码" },
+  "integration/runninghub/credentials/save": { risk: "manage", credential: true, summary: "保存 RunningHub API Key（写入安全存储，只回掩码）" },
+  "integration/runninghub/credentials/delete": { risk: "destructive", credential: false, summary: "删除 RunningHub 安全存储中的 API Key" },
+  "integration/runninghub/models": { risk: "read", credential: true, summary: "列出 RunningHub 模型目录（经注入 fetch，离线不可用）" },
+  "integration/runninghub/generate-images": { risk: "use", credential: true, summary: "RunningHub 文生图 / 图生图（真实外发）" },
+  "integration/runninghub/edit-images": { risk: "use", credential: true, summary: "RunningHub 图像编辑（上传参考图后执行）" },
+  "integration/runninghub/generate-videos": { risk: "use", credential: true, summary: "RunningHub 视频生成（真实外发）" },
+  "integration/runninghub/chat": { risk: "use", credential: true, summary: "RunningHub LLM 对话（源 callRunningHubChat，真实外发）" },
+  "integration/runninghub/describe-image": { risk: "use", credential: true, summary: "RunningHub 图片描述 / 视觉问答（源 describeRunningHubImage，真实外发）" },
+  "integration/runninghub/inspect": { risk: "read", credential: true, summary: "解析 RunningHub AI 应用 / 工作流字段（源 inspectRunningHubApp / inspectRunningHubWorkflow）" },
+  "integration/runninghub/submit": { risk: "use", credential: true, summary: "提交 RunningHub AI 应用 / 工作流任务（源 submitRunningHubEntry，真实外发）" },
+  "integration/runninghub/task/query": { risk: "read", credential: true, summary: "查询 RunningHub 任务输出（源 queryRunningHubTask）" },
+  "integration/runninghub/upload": { risk: "use", credential: true, summary: "上传本地素材到 RunningHub（源 uploadRunningHubAsset，真实外发）" },
+  "integration/agnes/status": { risk: "read", credential: false, summary: "Agnes 集成状态：fetch / safeStorage / Key 掩码 / 模型目录" },
+  "integration/agnes/credentials/save": { risk: "manage", credential: true, summary: "保存 Agnes API Key（写入安全存储，只回掩码）" },
+  "integration/agnes/credentials/delete": { risk: "destructive", credential: false, summary: "删除 Agnes 安全存储中的 API Key" },
+  "integration/agnes/generate-images": { risk: "use", credential: true, summary: "Agnes 文生图（真实外发）" },
+  "integration/agnes/edit-images": { risk: "use", credential: true, summary: "Agnes 图像编辑 / 参考图（真实外发）" },
+  "integration/agnes/generate-videos": { risk: "use", credential: true, summary: "Agnes 视频生成 2.5 / 2.5 Flash / v2.0（真实外发）" },
+  "integration/modelscope/status": { risk: "read", credential: false, summary: "ModelScope 集成状态：fetch / safeStorage / 令牌掩码" },
+  "integration/modelscope/credentials/save": { risk: "manage", credential: true, summary: "保存 ModelScope 访问令牌（写入安全存储，只回掩码）" },
+  "integration/modelscope/credentials/delete": { risk: "destructive", credential: false, summary: "删除 ModelScope 安全存储中的访问令牌" },
+  "integration/modelscope/generate-images": { risk: "use", credential: true, summary: "ModelScope 图像生成（真实外发）" },
+  "integration/modelscope/edit-images": { risk: "use", credential: true, summary: "ModelScope 图像编辑（真实外发）" },
+});
+
+/** 全部可执行的 integration 命令（白名单；由元数据键生成，二者恒等）。 */
+const INTEGRATION_COMMANDS = Object.freeze(Object.keys(INTEGRATION_COMMAND_META));
+const INTEGRATION_COMMAND_SET = new Set(INTEGRATION_COMMANDS);
+function isIntegrationCommand(command) { return typeof command === "string" && INTEGRATION_COMMAND_SET.has(command); }
+function describeIntegrationCommands() {
+  return INTEGRATION_COMMANDS.map((command) => ({
+    command,
+    risk: INTEGRATION_COMMAND_META[command].risk,
+    credential: INTEGRATION_COMMAND_META[command].credential,
+    summary: INTEGRATION_COMMAND_META[command].summary,
+  }));
+}
+
+const asStr = (value, max = 200) => (typeof value === "string" ? value.slice(0, max) : value == null ? undefined : String(value).slice(0, max));
+const asText = (value, max = 4096) => (typeof value === "string" ? value.slice(0, max) : value == null ? "" : String(value).slice(0, max));
+
+function normalizeIntegrationError(err) {
+  if (err && typeof err === "object" && typeof err.code === "string" && err.code.startsWith("INTEGRATION_")) {
+    return { ok: false, error: err.code, detail: String(err.message || err.code).slice(0, 400) };
+  }
+  return { ok: false, error: INTEGRATION_ERR_INTERNAL, detail: String((err && err.message) || err || INTEGRATION_ERR_INTERNAL).slice(0, 400) };
+}
+
+function createPluginBundle(options = {}) {
+  const userDataDir = options.userDataDir ? String(options.userDataDir) : null;
+  const clock = typeof options.clock === "function" ? options.clock : () => Date.now();
+  // Y2：同步动作终态等待的轮询休眠；测试注入假休眠即可离线确定超时 / 取消路径（默认真实 setTimeout）。
+  const sleeper = typeof options.sleeper === "function" ? options.sleeper : (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const logger = typeof options.logger === "function" ? options.logger : null;
+  const fetchImpl = typeof options.fetch === "function" ? options.fetch : null;
+  const personalSender = typeof options.personalSender === "function" ? options.personalSender : null;
+  const mcpCallDirect = typeof options.mcpCallDirect === "function" ? options.mcpCallDirect : null;
+  const transportFactory = typeof options.transportFactory === "function" ? options.transportFactory : null;
+  // 既有 MCP 活连接端口（createMcpLiveTransport 产物：{ callTool({ serverId, toolName, arguments }) }）。
+  // 注入即复用既有 tools/call 通道，不新造传输；未注入时保持"未注入即结构化不可用"。
+  const mcpTransport = options.mcpTransport && typeof options.mcpTransport.callTool === "function" ? options.mcpTransport : null;
+  const workbookReader = typeof options.workbookReader === "function" ? options.workbookReader : null;
+  const workbookWriter = typeof options.workbookWriter === "function" ? options.workbookWriter : null;
+  const quarkCliPath = options.quarkCliPath ? String(options.quarkCliPath) : null;
+  const quarkSpawnImpl = typeof options.quarkSpawnImpl === "function" ? options.quarkSpawnImpl : null;
+  const quarkSpawnLoginImpl = typeof options.quarkSpawnLoginImpl === "function" ? options.quarkSpawnLoginImpl : null;
+  const quarkNodePath = options.quarkNodePath ? String(options.quarkNodePath) : undefined;
+  const paths = userDataDir ? resolveDxosPaths(userDataDir) : null;
+  const integrationsRoot = paths ? path.join(paths.root, INTEGRATIONS_DIR_NAME) : null;
+
+  // 凭据后端：生产只用 OS 安全后端；safeStorage 不可用 → 后端不可用（无明文 fallback）。
+  const credentials = options.credentials && typeof options.credentials === "object"
+    ? options.credentials
+    : (options.safeStorage ? safeStorageCredentialBackend({ safeStorage: options.safeStorage, dir: userDataDir }) : null);
+  const credentialsAvailable = !!credentials && typeof credentials.available === "function" && credentials.available() === true;
+
+  /** MCP 调用失败的统一结构化错误（集成把带 code 的 Error 透传给 plugin-service 归一）。 */
+  function mcpTransportError(detail) { const error = new Error(String(detail || "MCP 调用失败")); error.code = INTEGRATION_ERR_UNAVAILABLE; return error; }
+
+  /**
+   * 传输返回值归一：既有 MCP 通道的返回形状有两种 ——
+   *   · McpClient.callTool 原始形状 { ok, content:[{type:'text',text}] }（失败 { ok:false, error, detail }）；
+   *   · createMcpAgentTools.callDirect 的投影 { ok:true, text }。
+   * 集成侧契约是"返回 JSON 文本，失败抛错"，这里统一收敛；{ ok:false } 绝不冒充成功文本。
+   */
+  function normalizeMcpResult(result) {
+    if (typeof result === "string") return result;
+    if (result && typeof result === "object") {
+      if (result.ok === true) {
+        if (typeof result.text === "string") return result.text;
+        if (Array.isArray(result.content)) return result.content.map((part) => (part && part.type === "text" ? part.text : "[" + ((part && part.type) || "unknown") + "]")).join("\n") || "(无返回内容)";
+        if (typeof result.value === "string") return result.value;
+        return JSON.stringify(result.value === undefined ? result : result.value);
+      }
+      if (result.ok === false) throw mcpTransportError(result.detail || result.error || "MCP 调用失败");
+    }
+    throw mcpTransportError("MCP 调用返回了无法识别的结果形状");
+  }
+
+  /** 未加闸门的原始传输：优先 mcpCallDirect；其次 transportFactory（每次调用带上安全存储里的凭据）；最后既有 mcpTransport 端口。 */
+  function rawTransportFor(pluginId) {
+    if (mcpCallDirect) {
+      return async (server, tool, args) => {
+        try { return normalizeMcpResult(await mcpCallDirect(server, tool, args)); }
+        catch (error) { if (error && typeof error.code === "string" && error.code.startsWith("INTEGRATION_")) throw error; throw mcpTransportError(String((error && error.message) || error)); }
+      };
+    }
+    if (typeof transportFactory === "function") {
+      return async (server, tool, args) => {
+        let credential = null;
+        if (credentialsAvailable && typeof credentials.get === "function") { try { credential = credentials.get(pluginId + ".credential"); } catch { credential = null; } }
+        const transport = transportFactory({ pluginId, server, tool, args, credential });
+        if (typeof transport !== "function") throw mcpTransportError("transportFactory 未返回可用的传输函数");
+        return normalizeMcpResult(await transport(server, tool, args));
+      };
+    }
+    if (mcpTransport) {
+      // 既有 MCP tools/call 通道（createMcpLiveTransport 产物）：只做形状适配，不新造传输。
+      // gate 只来自自动化定义授权上下文（automationAuthorizationGate()）；临时发起的集成命令 gate=null，
+      // MCP 客户端「开关 + 审批决定」双条件原样生效。
+      return async (server, tool, args) => {
+        try { return normalizeMcpResult(await mcpTransport.callTool({ serverId: server, toolName: tool, arguments: args && typeof args === "object" ? args : {} }, automationAuthorizationGate())); }
+        catch (error) { if (error && typeof error.code === "string" && error.code.startsWith("INTEGRATION_")) throw error; throw mcpTransportError(String((error && error.message) || error)); }
+      };
+    }
+    return null;
+  }
+
+  /**
+   * 云 API 传输：真实传输 + 调用时闸门。
+   *   优先 mcpCallDirect；其次 transportFactory（每次调用带上安全存储里的凭据）；最后既有 mcpTransport。
+   *   闸门按"插件已启用 + 依赖就绪（CLI/Python/凭据）"复检：未就绪直接结构化 INTEGRATION_UNAVAILABLE，
+   *   保证默认关闭 / 缺依赖时 0 次网络；未注入任何传输时保持 null（由集成 requireTransport 结构化拒绝）。
+   */
+  function resolveTransport(pluginId) {
+    const raw = rawTransportFor(pluginId);
+    if (!raw) return null;
+    return async (server, tool, args) => {
+      const plugin = registry.get(pluginId);
+      if (!plugin) throw mcpTransportError("没有登记该插件：" + pluginId);
+      if (!plugin.enabled) throw mcpTransportError("插件「" + plugin.name + "」默认关闭；请先启用（integration/plugins/enable，id=" + pluginId + "）");
+      const report = await registry.health(pluginId);
+      if (report && report.status === "unavailable") throw mcpTransportError("插件「" + plugin.name + "」已启用但依赖缺失：" + (report.detail || "请检查依赖"));
+      return raw(server, tool, args);
+    };
+  }
+
+  // ── 新集成（B7d / B7e2）先建，供依赖探测与端口装配引用（探测只在 health/enable 时调用，闭包可后置赋值） ──
+  let quarkIntegration = null;
+  let runninghub = null;
+  let modelscope = null;
+  let agnes = null;
+
+  const probes = Object.assign({}, options.probes);
+  if (typeof probes.binary !== "function") {
+    probes.binary = (target) => {
+      if (target === "quark-drive.cjs") {
+        const available = !!(quarkIntegration && quarkIntegration.cliAvailable());
+        return available ? { ok: true, status: "ok", detail: "" } : { ok: false, status: "missing", detail: "未配置夸克官方 CLI (quark-drive.cjs)。" + QUARK_VENDOR_HINT };
+      }
+      const found = resolveBinaryPath(target);
+      return found ? { ok: true, status: "ok", detail: "" } : { ok: false, status: "missing", detail: "PATH 中找不到 " + target };
+    };
+  }
+  if (typeof probes.credential !== "function") {
+    const refs = { lingxing: "lingxing.credential", ziniao: "ziniao.credential", quark: "quark.credential" };
+    probes.credential = (dep, pluginId) => {
+      // B7e2：RunningHub / ModelScope 的凭据判定由各自集成给出（RunningHub 有两个 ref，故不做通用 ref 查表）。
+      if (pluginId === "runninghub" && runninghub) return runninghub.credentialProbe();
+      if (pluginId === "modelscope" && modelscope) return modelscope.credentialProbe();
+      if (pluginId === "agnes" && agnes) return agnes.credentialProbe();
+      const ref = refs[pluginId];
+      if (!ref) return null;
+      const set = credentialsAvailable && typeof credentials.get === "function" ? !!credentials.get(ref) : false;
+      return set ? { ok: true, status: "ok", detail: "" } : { ok: false, status: "missing", detail: "未配置「" + dep.label + "」" };
+    };
+  }
+
+  const registry = options.registry || createPluginRegistry({
+    userDataDir,
+    clock,
+    logger,
+    fetch: fetchImpl,
+    probes,
+    plugins: [...integrationPlugins(), ...optionalPlugins(), ...(Array.isArray(options.plugins) ? options.plugins : [])],
+    capabilities: { fetch: fetchImpl, safeStorage: credentialsAvailable, personalSender },
+  });
+
+  // 捕获同一条受闸门保护的传输：自动化适配器解析紫鸟店铺列表时复用（不新造通道）。
+  const lingxingTransport = resolveTransport("lingxing");
+  const ziniaoTransport = resolveTransport("ziniao");
+  const lingxing = createLingxingIntegration({
+    dataDir: integrationsRoot ? path.join(integrationsRoot, "lingxing") : null,
+    credentials,
+    transport: lingxingTransport,
+    readWorkbook: workbookReader,
+    writeWorkbook: workbookWriter,
+    fetch: fetchImpl,
+    // 紫鸟 VC 导入需要与紫鸟插件一致的保存目录；ziniao 稍后同装配创建，闭包内延迟取用。
+    ziniaoOutputRoot: () => (ziniao ? ziniao.ziniaoOutputRoot() : null),
+    clock,
+  });
+  const ziniao = createZiniaoIntegration({
+    dataDir: integrationsRoot ? path.join(integrationsRoot, "ziniao") : null,
+    userDataDir,
+    credentials,
+    transport: ziniaoTransport,
+    controlDir: options.controlDir,
+    outDir: options.ziniaoOutDir,
+    clock,
+  });
+  // Y2：同步动作终态等待的作业源。生产即真实集成；测试可注入同形假源（start + get），
+  // 使 success / failed / cancelled / 超时 / 状态丢失 五条路径都能离线确定性验证。
+  const lingxingJobSource = options.lingxingJobSource && typeof options.lingxingJobSource.start === "function" && typeof options.lingxingJobSource.get === "function"
+    ? options.lingxingJobSource
+    : { start: (days) => lingxing.startLingxingCacheSync(days), get: (id) => lingxing.getLingxingCacheJob(id) };
+  const ziniaoJobSource = options.ziniaoJobSource && typeof options.ziniaoJobSource.start === "function" && typeof options.ziniaoJobSource.get === "function"
+    ? options.ziniaoJobSource
+    : { start: (input) => ziniao.startZiniaoDownloadJob(input), get: () => ziniao.getZiniaoDownloadJob() };
+  quarkIntegration = createQuarkIntegration({
+    dataDir: integrationsRoot ? path.join(integrationsRoot, "quark") : null,
+    userDataDir,
+    credentials,
+    cliPath: quarkCliPath,
+    spawnImpl: quarkSpawnImpl,
+    spawnLoginImpl: quarkSpawnLoginImpl,
+    nodePath: quarkNodePath,
+    clock,
+  });
+
+  // ── B7e2：RunningHub / ModelScope 可选集成（默认关闭；网络经注入 fetch，凭据走 credential-store，不落明文） ──
+  runninghub = createRunningHubIntegration({
+    fetch: fetchImpl,
+    credentials,
+    cacheDir: integrationsRoot ? path.join(integrationsRoot, "runninghub") : null,
+    endpoints: options.runninghubEndpoints,
+    modelDefinitions: options.runningHubModelDefinitions,
+    clock,
+  });
+  modelscope = createModelScopeIntegration({ fetch: fetchImpl, credentials, clock });
+  agnes = createAgnesIntegration({ fetch: fetchImpl, credentials, clock });
+
+  const dingtalk = createDingtalkIntegration({
+    dataDir: paths ? paths.root : null,
+    credentials,
+    fetch: fetchImpl,
+    personalSender,
+    clock,
+  });
+  const weather = createWeatherIntegration({ fetch: fetchImpl, endpoints: options.weatherEndpoints, clock });
+  const almanac = createAlmanacIntegration({
+    fetch: fetchImpl,
+    source: options.almanacSource,
+    cacheDir: options.almanacCacheDir || (paths ? path.join(paths.root, "integrations", ALMANAC_CACHE_DIR_NAME) : null),
+    clock,
+  });
+
+  function unavailable(detail) { return { ok: false, error: INTEGRATION_ERR_UNAVAILABLE, detail }; }
+
+  /** 插件闸门：未登记 / 未启用 / 缺依赖 / 缺运行时能力 → 结构化不可用，并给出可执行提示。 */
+  async function gate(pluginId) {
+    const plugin = registry.get(pluginId);
+    if (!plugin) return { ok: false, error: INTEGRATION_ERR_NOT_FOUND, detail: "没有登记该插件：" + pluginId };
+    if (!plugin.enabled) {
+      return unavailable("插件「" + plugin.name + "」默认关闭；请先启用（integration/plugins/enable，id=" + plugin.id + "）");
+    }
+    const report = await registry.health(plugin.id);
+    if (report.status === "unavailable") {
+      return unavailable("插件「" + plugin.name + "」已启用但依赖缺失：" + (report.detail || "请检查依赖"));
+    }
+    return { ok: true, report };
+  }
+
+  /**
+   * 闸门 + 动作：动作里的失败统一转结构化。
+   * 注意：门内动作多为 async；若只依赖 execute 外层 catch，rejected promise 会绕过同步 try/catch。
+   * 因此这里就地 catch 并复用 normalizeIntegrationError，保证"抛带 code 的 Error"也变成 { ok:false }。
+   */
+  async function gated(pluginId, action) {
+    const allowed = await gate(pluginId);
+    if (!allowed.ok) return allowed;
+    try {
+      return await action();
+    } catch (error) {
+      if (logger) { try { logger("integration-action-failed", { pluginId, message: asStr(error && error.message, 200) }); } catch { /* 忽略 */ } }
+      return normalizeIntegrationError(error);
+    }
+  }
+
+  /**
+   * B7e2/B7e3：把 RunningHub / ModelScope / Agnes 接进 B2 legacy 执行器的注入端口。
+   *   · 默认关闭 —— 端口已注册但插件未启用时，端口仍返回结构化 INTEGRATION_UNAVAILABLE；
+   *   · options.installLegacyPorts === false 时不注册，legacy 执行器保持 B2 的 LEGACY_DEPENDENCY_UNAVAILABLE；
+   *   · Agnes 端口直通 plugin-agnes.cjs 的真实实现（generateAgnesImages / editAgnesImages / generateAgnesVideos /
+   *     fetchAgnesModelCatalog）；模型目录成功时还原成 legacy 约定的目录数组；
+   *   · RunningHub 模型目录 fetchRunningHubModelCatalog 与 Agnes 同一适配（复用插件既有注册表定义）；
+   *   · RunningHub 对话 / 图片理解（callRunningHubChat / describeRunningHubImage）把插件返回的
+   *     integration 形状还原成 legacy 执行器约定（对话 { text, latencyMs, raw }、图片理解 string）。
+   */
+  function gateLegacyPort(pluginId, fn) {
+    return async (...args) => {
+      const plugin = registry.get(pluginId);
+      if (!plugin || !plugin.enabled) {
+        return { ok: false, error: INTEGRATION_ERR_UNAVAILABLE, detail: "插件「" + (plugin ? plugin.name : pluginId) + "」默认关闭；请先启用（integration/plugins/enable，id=" + pluginId + "）" };
+      }
+      return fn(...args);
+    };
+  }
+  const legacyPorts = options.installLegacyPorts === false ? { applied: [] } : setLegacyExecutorPorts({
+    generateRunningHubImages: gateLegacyPort("runninghub", runninghub.generateRunningHubImages),
+    editRunningHubImages: gateLegacyPort("runninghub", runninghub.editRunningHubImages),
+    generateRunningHubVideos: gateLegacyPort("runninghub", runninghub.generateRunningHubVideos),
+    // B7e3 后续：RunningHub 对话 / 图片理解（源 runninghub.ts:270-289）。插件方法回 integration 形状
+    // （{ ok:true, value:{ text, usage, latencyMs, raw } }），这里适配回 legacy 执行器约定；失败原样透传。
+    callRunningHubChat: gateLegacyPort("runninghub", async (provider, model, input, params, timeoutMs, transport) => {
+      const result = await runninghub.callRunningHubChat(provider, model, input, params, timeoutMs, transport);
+      if (result && result.ok === false) return result;
+      const value = (result && result.value) || {};
+      return { text: value.text, usage: value.usage, latencyMs: value.latencyMs, raw: value.raw };
+    }),
+    describeRunningHubImage: gateLegacyPort("runninghub", async (provider, model, dataUrl, prompt, timeoutMs, transport) => {
+      const result = await runninghub.describeRunningHubImage(provider, model, dataUrl, prompt, timeoutMs, transport);
+      if (result && result.ok === false) return result;
+      return String((result && result.value && result.value.text) || "");
+    }),
+    generateModelScopeImages: gateLegacyPort("modelscope", modelscope.generateModelScopeImages),
+    editModelScopeImages: gateLegacyPort("modelscope", modelscope.editModelScopeImages),
+    // B7e3 后续：Agnes 模型目录（源 protocols.ts:6763-6794 的 openai 目录路径）。插件方法回 integration 形状
+    // （{ ok:true, value:{ items } }），这里还原成 legacy 执行器约定（fetchModelCatalog 成功直接返回目录数组）；
+    // 「插件未启用」「缺凭据」由闸门与插件方法各自给出准确 detail。
+    fetchAgnesModelCatalog: gateLegacyPort("agnes", async (provider, timeoutMs, transport) => {
+      const result = await agnes.fetchAgnesModelCatalog(provider, timeoutMs, transport);
+      if (result && result.ok === false) return result;
+      return result && result.value && Array.isArray(result.value.items) ? result.value.items : [];
+    }),
+    // B7e3 后续：RunningHub 模型目录（同一适配）。插件方法回 integration 形状 { ok:true, value:{ items } }，
+    // 这里还原成 legacy 执行器约定（fetchModelCatalog 成功直接返回目录数组）；模型列表复用插件既有注册表定义。
+    fetchRunningHubModelCatalog: gateLegacyPort("runninghub", async (provider, timeoutMs, transport) => {
+      const result = await runninghub.fetchRunningHubModelCatalog(provider, timeoutMs, transport);
+      if (result && result.ok === false) return result;
+      return result && result.value && Array.isArray(result.value.items) ? result.value.items : [];
+    }),
+    generateAgnesImages: gateLegacyPort("agnes", agnes.generateAgnesImages),
+    editAgnesImages: gateLegacyPort("agnes", agnes.editAgnesImages),
+    generateAgnesVideos: gateLegacyPort("agnes", agnes.generateAgnesVideos),
+  });
+
+  /**
+   * B7e2 后续：CLI 协议族端口（cliJimeng / cliCodex / cliGemini）。
+   *   · 与插件端口分开成 cliPorts，不改变 legacyPorts.applied 的既有键集合；
+   *   · 只在「对应 CLI 已安装」时注册，未安装如实跳过，执行器继续回 LEGACY_DEPENDENCY_UNAVAILABLE；
+   *   · options.installLegacyPorts === false 时只探测不注册（与插件端口同一开关）。
+   */
+  const cliPorts = installLegacyCliPorts({ install: options.installLegacyPorts !== false });
+
+  /** B7e2：把源协议形状（{images,raw} / {videos,raw}）包成 integration 成功形状；结构化失败原样透传。 */
+  function pipelineResult(result) {
+    if (result && result.ok === false) return result;
+    return { ok: true, value: result };
+  }
+
+  function bodyBuffer(body) {
+    const raw = body && body.buffer;
+    if (raw && (Buffer.isBuffer(raw) || raw instanceof Uint8Array)) return Buffer.from(raw);
+    if (typeof body.bufferBase64 === "string" && body.bufferBase64) return Buffer.from(body.bufferBase64, "base64");
+    return null;
+  }
+
+  async function execute(command, payload = {}, context = {}) {
+    try {
+      const sessionRef = context && context.sessionRef ? context.sessionRef : null;
+      if (!sessionRef) return { ok: false, error: "INTEGRATION_UNAUTHENTICATED", detail: "integration:command 需要已认证会话" };
+      if (!isIntegrationCommand(command)) {
+        return { ok: false, error: "INTEGRATION_COMMAND_NOT_ALLOWED", detail: "未知或未授权的 integration 命令：" + String(command == null ? "" : command) };
+      }
+      const body = payload && typeof payload === "object" ? payload : {};
+      const userId = asText(sessionRef, 200) || "local";
+
+      switch (command) {
+        case "integration/health":
+          return { ok: true, value: { ok: true, commands: INTEGRATION_COMMANDS.length, plugins: registry.list().length, enabled: registry.list().filter((item) => item.enabled).map((item) => item.id) } };
+
+        case "integration/commands":
+          return { ok: true, value: { items: describeIntegrationCommands() } };
+
+        case "integration/plugins/list":
+          return { ok: true, value: { items: registry.list() } };
+
+        case "integration/plugins/get": {
+          const plugin = registry.get(body.id);
+          if (!plugin) return { ok: false, error: INTEGRATION_ERR_NOT_FOUND, detail: "没有登记该插件：" + asStr(body.id, 60) };
+          return { ok: true, value: { plugin } };
+        }
+
+        case "integration/plugins/health": {
+          if (body.id) {
+            const report = await registry.health(body.id, { probeNetwork: body.probeNetwork === true, force: body.force === true });
+            if (!report) return { ok: false, error: INTEGRATION_ERR_NOT_FOUND, detail: "没有登记该插件：" + asStr(body.id, 60) };
+            return { ok: true, value: { plugin: report } };
+          }
+          return { ok: true, value: { items: await registry.listHealth({ probeNetwork: body.probeNetwork === true, force: body.force === true }) } };
+        }
+
+        case "integration/plugins/enable": {
+          const result = await registry.enable(body.id, { force: body.force === true, probeNetwork: body.probeNetwork === true });
+          return result.ok ? result : { ok: false, error: result.error, detail: result.detail };
+        }
+
+        case "integration/plugins/disable": {
+          const result = registry.disable(body.id);
+          return result.ok ? result : { ok: false, error: result.error, detail: result.detail };
+        }
+
+        case "integration/dingtalk/status": {
+          const allowed = await gate("dingtalk");
+          if (!allowed.ok) return allowed;
+          return dingtalk.status();
+        }
+
+        case "integration/dingtalk/channels": {
+          const allowed = await gate("dingtalk");
+          if (!allowed.ok) return allowed;
+          return dingtalk.listChannels();
+        }
+
+        case "integration/dingtalk/channels/save": {
+          const allowed = await gate("dingtalk");
+          if (!allowed.ok) return allowed;
+          return dingtalk.saveChannel(body);
+        }
+
+        case "integration/dingtalk/channels/delete": {
+          const allowed = await gate("dingtalk");
+          if (!allowed.ok) return allowed;
+          return dingtalk.deleteChannel(body.id);
+        }
+
+        case "integration/dingtalk/contacts": {
+          const allowed = await gate("dingtalk");
+          if (!allowed.ok) return allowed;
+          return dingtalk.listContacts();
+        }
+
+        case "integration/dingtalk/contacts/record": {
+          const allowed = await gate("dingtalk");
+          if (!allowed.ok) return allowed;
+          return dingtalk.recordContact(body.userId, body.name);
+        }
+
+        case "integration/dingtalk/send": {
+          const allowed = await gate("dingtalk");
+          if (!allowed.ok) return allowed;
+          return dingtalk.send({ channelId: body.channelId, msg: body.msg && typeof body.msg === "object" ? body.msg : { text: body.text, title: body.title, markdown: body.markdown } });
+        }
+
+        case "integration/dingtalk/send-to-user": {
+          const allowed = await gate("dingtalk");
+          if (!allowed.ok) return allowed;
+          return dingtalk.sendToUser({ userId: body.userId, text: body.text });
+        }
+
+        case "integration/dingtalk/agent-config/get": {
+          const allowed = await gate("dingtalk");
+          if (!allowed.ok) return allowed;
+          return dingtalk.getAgentConfig();
+        }
+
+        case "integration/dingtalk/agent-config/save": {
+          const allowed = await gate("dingtalk");
+          if (!allowed.ok) return allowed;
+          return dingtalk.saveAgentConfig(body);
+        }
+
+        case "integration/weather/query": {
+          const allowed = await gate("weather");
+          if (!allowed.ok) return allowed;
+          const latitude = Number(body.latitude);
+          const longitude = Number(body.longitude);
+          if (body.latitude != null && body.longitude != null && Number.isFinite(latitude) && Number.isFinite(longitude)) {
+            return weather.getWeatherAt(latitude, longitude, asStr(body.locale, 20) || "zh-CN");
+          }
+          if (body.city != null) return weather.getWeather(asStr(body.city, 120) || "", asStr(body.locale, 20) || "zh-CN");
+          return { ok: false, error: INTEGRATION_ERR_INVALID_INPUT, detail: "weather/query 需要 city，或 latitude + longitude" };
+        }
+
+        case "integration/almanac/years": {
+          const allowed = await gate("almanac");
+          if (!allowed.ok) return allowed;
+          return almanac.onlineCalendarYears(body.years);
+        }
+
+        // ── B7d · 领星 ──
+        case "integration/lingxing/status":
+          return gated("lingxing", () => ({ ok: true, value: lingxing.status() }));
+
+        case "integration/lingxing/mapping/get":
+          return gated("lingxing", () => ({ ok: true, value: { mapping: lingxing.getLingxingMapping() } }));
+
+        case "integration/lingxing/mapping/import": {
+          const buffer = bodyBuffer(body);
+          if (!buffer) return { ok: false, error: INTEGRATION_ERR_INVALID_INPUT, detail: "mapping/import 需要 buffer 或 bufferBase64" };
+          return gated("lingxing", async () => ({ ok: true, value: { mapping: await lingxing.importLingxingMapping({ originalname: asText(body.fileName, 300) || "mapping.xlsx", buffer }) } }));
+        }
+
+        case "integration/lingxing/mapping/file":
+          return gated("lingxing", () => ({ ok: true, value: lingxing.getLingxingMappingFile() }));
+
+        case "integration/lingxing/cache/stats":
+          return gated("lingxing", () => ({ ok: true, value: { cache: lingxing.lingxingCacheStats() } }));
+
+        case "integration/lingxing/cache/sync/start":
+          return gated("lingxing", () => ({ ok: true, value: { job: lingxing.startLingxingCacheSync(body.days) } }));
+
+        case "integration/lingxing/cache/sync/get":
+          return gated("lingxing", () => ({ ok: true, value: { job: lingxing.getLingxingCacheJob(asText(body.id, 80)) } }));
+
+        case "integration/lingxing/cache/rows":
+          return gated("lingxing", () => ({ ok: true, value: lingxing.lingxingLocalRows(asText(body.date, 20) || undefined, Number(body.limit) || 200, Number(body.offset) || 0) }));
+
+        case "integration/lingxing/cache/query":
+          return gated("lingxing", () => ({ ok: true, value: lingxing.queryLingxingLocalData(body) }));
+
+        case "integration/lingxing/cache/clear":
+          return gated("lingxing", () => ({ ok: true, value: { cache: lingxing.clearLingxingStoredData(body.scope) } }));
+
+        case "integration/lingxing/advertising/sync/start":
+          return gated("lingxing", () => ({ ok: true, value: { job: lingxing.startLingxingAdvertisingCacheSync(body.days, body.profileIds) } }));
+
+        case "integration/lingxing/advertising/sync/get":
+          return gated("lingxing", () => ({ ok: true, value: { job: lingxing.getLingxingAdvertisingCacheJob(asText(body.id, 80)) } }));
+
+        case "integration/lingxing/advertising/sync/stop":
+          return gated("lingxing", () => ({ ok: true, value: { job: lingxing.stopLingxingAdvertisingCacheJob(asText(body.id, 80)) } }));
+
+        case "integration/lingxing/advertising/cache/stats":
+          return gated("lingxing", () => ({ ok: true, value: { cache: lingxing.lingxingAdvertisingCacheStats() } }));
+
+        case "integration/lingxing/advertising/cache/query":
+          return gated("lingxing", () => ({ ok: true, value: lingxing.queryLingxingAdvertisingCache(body) }));
+
+        case "integration/lingxing/credential/save":
+          return gated("lingxing", () => ({ ok: true, value: lingxing.saveCredential(body) }));
+
+        case "integration/lingxing/credential/status":
+          return gated("lingxing", () => ({ ok: true, value: lingxing.credentialStatus() }));
+
+        case "integration/lingxing/analytics":
+          return gated("lingxing", () => ({ ok: true, value: lingxing.lingxingBusinessAnalytics(body) }));
+
+        case "integration/lingxing/operator/dashboard":
+          return gated("lingxing", () => ({ ok: true, value: lingxing.queryLingxingOperatorDashboard(body) }));
+
+        case "integration/lingxing/operator/export":
+          return gated("lingxing", async () => {
+            const result = await lingxing.exportLingxingOperatorDashboard(body);
+            return { ok: true, value: {
+              fileName: result.fileName,
+              mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              bytes: result.data.length,
+              dataBase64: Buffer.from(result.data).toString("base64"),
+            } };
+          });
+
+        case "integration/lingxing/currency/rates":
+          return gated("lingxing", async () => ({ ok: true, value: await lingxing.getLingxingCurrencyRates() }));
+
+        // ── B7d · 紫鸟 ──
+        case "integration/ziniao/status":
+          return gated("ziniao", () => ({ ok: true, value: ziniao.status() }));
+
+        case "integration/ziniao/jobs/list":
+          return gated("ziniao", () => ({ ok: true, value: { jobs: ziniao.listZiniaoDownloadJobs() } }));
+
+        case "integration/ziniao/jobs/current":
+          return gated("ziniao", () => ({ ok: true, value: { job: ziniao.getZiniaoDownloadJob() } }));
+
+        case "integration/ziniao/jobs/start": {
+          const stores = Array.isArray(body.stores)
+            ? body.stores.map((store) => ({ selector: asText(store && store.selector, 200), name: asText(store && store.name, 200) })).filter((store) => store.selector)
+            : [];
+          return gated("ziniao", () => ({
+            ok: true,
+            value: { job: ziniao.startZiniaoDownloadJob({ from: asText(body.from, 40), to: asText(body.to, 40), outDir: asText(body.outDir, 500), requestIntervalSeconds: Number(body.requestIntervalSeconds) || 30, stores }) },
+          }));
+        }
+
+        case "integration/ziniao/jobs/control": {
+          const action = asText(body.action, 20);
+          if (!["pause", "resume", "stop"].includes(action)) return { ok: false, error: INTEGRATION_ERR_INVALID_INPUT, detail: "不支持的任务操作：" + action };
+          return gated("ziniao", () => ({ ok: true, value: { job: ziniao.controlZiniaoDownloadJob(asText(body.id, 80), action) } }));
+        }
+
+        case "integration/ziniao/jobs/delete":
+          return gated("ziniao", () => ({ ok: true, value: ziniao.deleteZiniaoDownloadJobs(Array.isArray(body.ids) ? body.ids.map(String) : []) }));
+
+        case "integration/ziniao/jobs/recover":
+          return gated("ziniao", () => ({ ok: true, value: { job: ziniao.recoverZiniaoDownloadJob() } }));
+
+        case "integration/ziniao/vc/files":
+          return gated("ziniao", () => ({ ok: true, value: ziniao.listZiniaoVcFiles() }));
+
+        case "integration/ziniao/vc/import":
+          return gated("ziniao", async () => ({ ok: true, value: await lingxing.importZiniaoVcFile(asText(body.path, 1000)) }));
+
+        case "integration/ziniao/vc/rows":
+          return gated("ziniao", () => ({ ok: true, value: lingxing.ziniaoVcRows(asText(body.date, 20) || undefined, Number(body.limit) || 200, Number(body.offset) || 0) }));
+
+        case "integration/ziniao/vc/query":
+          return gated("ziniao", () => ({ ok: true, value: lingxing.queryZiniaoVcData(body) }));
+
+        case "integration/ziniao/credential/save":
+          return gated("ziniao", () => ({ ok: true, value: ziniao.saveCredential(body) }));
+
+        case "integration/ziniao/credential/status":
+          return gated("ziniao", () => ({ ok: true, value: ziniao.credentialStatus() }));
+
+        // ── B7d · 夸克网盘 ──
+        case "integration/quark/status":
+          return gated("quark", () => ({ ok: true, value: quarkIntegration.status() }));
+
+        case "integration/quark/account":
+          return gated("quark", async () => ({ ok: true, value: await quarkIntegration.quarkStatus() }));
+
+        case "integration/quark/login/start":
+          return gated("quark", () => ({ ok: true, value: quarkIntegration.quarkStartLogin() }));
+
+        case "integration/quark/login/stop":
+          return gated("quark", () => { quarkIntegration.quarkStopLogin(); return { ok: true, value: { stopped: true } }; });
+
+        case "integration/quark/logout":
+          return gated("quark", async () => { await quarkIntegration.quarkLogout(); return { ok: true, value: { ok: true } }; });
+
+        case "integration/quark/search":
+          return gated("quark", async () => ({ ok: true, value: await quarkIntegration.quarkSearch(asText(body.query, 120), Number.isInteger(Number(body.category)) ? Number(body.category) : undefined) }));
+
+        case "integration/quark/browse":
+          return gated("quark", async () => ({ ok: true, value: await quarkIntegration.quarkBrowse(asText(body.pdirFid, 100) || "0") }));
+
+        case "integration/quark/download": {
+          const fid = asText(body.fid, 200);
+          if (!fid) return { ok: false, error: INTEGRATION_ERR_INVALID_INPUT, detail: "quark/download 需要 fid" };
+          const outDir = asText(body.outDir, 500) || path.join(quarkIntegration.quarkPaths.downloadDir, randomUUID());
+          return gated("quark", async () => ({ ok: true, value: { file: await quarkIntegration.quarkDownload(fid, outDir) } }));
+        }
+
+        case "integration/quark/upload": {
+          const filePath = asText(body.filePath, 1000);
+          if (!filePath) return { ok: false, error: INTEGRATION_ERR_INVALID_INPUT, detail: "quark/upload 需要 filePath" };
+          return gated("quark", async () => ({ ok: true, value: await quarkIntegration.quarkUpload(body.parentFid, filePath) }));
+        }
+
+        case "integration/quark/search-history/get":
+          return gated("quark", () => ({ ok: true, value: { entries: quarkIntegration.quarkSearchHistory(userId) } }));
+
+        case "integration/quark/search-history/record":
+          return gated("quark", () => ({ ok: true, value: { entries: quarkIntegration.quarkRecordSearch(userId, asText(body.query, 200)) } }));
+
+        case "integration/quark/search-history/clear":
+          return gated("quark", () => { quarkIntegration.quarkClearSearchHistory(userId); return { ok: true, value: { entries: [] } }; });
+
+        case "integration/quark/downloads/clean":
+          return gated("quark", () => { quarkIntegration.quarkCleanDownloads(Number(body.olderThanMs) || undefined); return { ok: true, value: { cleaned: true } }; });
+
+        case "integration/quark/credential/status":
+          return gated("quark", () => ({ ok: true, value: quarkIntegration.quarkCredentialStatus() }));
+
+        // ── B7e2 · RunningHub ──
+        case "integration/runninghub/status":
+          return gated("runninghub", () => runninghub.status());
+
+        case "integration/runninghub/credentials/save":
+          return gated("runninghub", () => runninghub.saveCredential(body));
+
+        case "integration/runninghub/credentials/delete":
+          return gated("runninghub", () => runninghub.deleteCredential());
+
+        case "integration/runninghub/models":
+          return gated("runninghub", () => runninghub.listModels(body.provider, body.timeoutMs));
+
+        case "integration/runninghub/generate-images":
+          return gated("runninghub", async () => pipelineResult(await runninghub.generateRunningHubImages(body.provider, body.model, body.params, body.timeoutMs)));
+
+        case "integration/runninghub/edit-images":
+          return gated("runninghub", async () => pipelineResult(await runninghub.editRunningHubImages(body.provider, body.model, body.params, body.images, body.timeoutMs)));
+
+        case "integration/runninghub/generate-videos":
+          return gated("runninghub", async () => pipelineResult(await runninghub.generateRunningHubVideos(body.provider, body.model, body.params, body.timeoutMs)));
+
+        case "integration/runninghub/chat":
+          return gated("runninghub", () => runninghub.callRunningHubChat(body.provider, body.model, body.input && typeof body.input === "object" ? body.input : { prompt: body.prompt }, body.params, body.timeoutMs));
+
+        case "integration/runninghub/describe-image":
+          return gated("runninghub", () => runninghub.describeRunningHubImage(body.provider, body.model, body.image != null ? body.image : body.images, asText(body.prompt, 4000), body.timeoutMs));
+
+        case "integration/runninghub/inspect":
+          return gated("runninghub", () => String(body.kind) === "workflow"
+            ? runninghub.inspectRunningHubWorkflow(body.provider, asText(body.workflowId || body.id, 200), body.timeoutMs)
+            : runninghub.inspectRunningHubApp(body.provider, asText(body.appId || body.id, 200), body.timeoutMs));
+
+        case "integration/runninghub/submit":
+          return gated("runninghub", () => runninghub.submitRunningHubEntry(body.provider, String(body.kind) === "workflow" ? "workflow" : "app", asText(body.id, 200), body.fields, body.useWallet === true, body.workflow, asText(body.instanceType, 80)));
+
+        case "integration/runninghub/task/query":
+          return gated("runninghub", () => runninghub.queryRunningHubTask(body.provider, asText(body.id, 200), body.useWallet === true));
+
+        case "integration/runninghub/upload":
+          // 闸门优先：未启用 / 缺依赖一律先结构化不可用，再校验入参（避免绕过插件开关）。
+          return gated("runninghub", () => {
+            const buffer = bodyBuffer(body);
+            if (!buffer) return { ok: false, error: INTEGRATION_ERR_INVALID_INPUT, detail: "runninghub/upload 需要 buffer 或 bufferBase64" };
+            return runninghub.uploadRunningHubAsset(body.provider, { buf: buffer, mime: asText(body.mime, 120) || "application/octet-stream", name: asText(body.fileName, 300) || "asset.bin" }, body.useWallet !== false, body.timeoutMs);
+          });
+
+        // ── B7e2 · ModelScope ──
+        case "integration/modelscope/status":
+          return gated("modelscope", () => modelscope.status());
+
+        case "integration/modelscope/credentials/save":
+          return gated("modelscope", () => modelscope.saveCredential(body));
+
+        case "integration/modelscope/credentials/delete":
+          return gated("modelscope", () => modelscope.deleteCredential());
+
+        case "integration/modelscope/generate-images":
+          return gated("modelscope", async () => pipelineResult(await modelscope.generateModelScopeImages(body.provider, body.model, body.params, body.timeoutMs)));
+
+        case "integration/modelscope/edit-images":
+          return gated("modelscope", async () => pipelineResult(await modelscope.editModelScopeImages(body.provider, body.model, body.params, body.images, body.timeoutMs)));
+
+        // ── B7e3 · Agnes ──
+        case "integration/agnes/status":
+          return gated("agnes", () => agnes.status());
+
+        case "integration/agnes/credentials/save":
+          return gated("agnes", () => agnes.saveCredential(body));
+
+        case "integration/agnes/credentials/delete":
+          return gated("agnes", () => agnes.deleteCredential());
+
+        case "integration/agnes/generate-images":
+          return gated("agnes", async () => pipelineResult(await agnes.generateAgnesImages(body.provider, body.model, body.params, body.timeoutMs)));
+
+        case "integration/agnes/edit-images":
+          return gated("agnes", async () => pipelineResult(await agnes.editAgnesImages(body.provider, body.model, body.params, body.images, body.timeoutMs)));
+
+        case "integration/agnes/generate-videos":
+          return gated("agnes", async () => pipelineResult(await agnes.generateAgnesVideos(body.provider, body.model, body.params, body.timeoutMs)));
+
+        default:
+          return { ok: false, error: "INTEGRATION_COMMAND_NOT_ALLOWED", detail: "未知或未授权的 integration 命令：" + String(command) };
+      }
+    } catch (error) {
+      if (logger) { try { logger("integration-execute-failed", { message: asStr(error && error.message, 200) }); } catch { /* 忽略 */ } }
+      return normalizeIntegrationError(error);
+    }
+  }
+
+  /**
+   * 源 automationBusinessActions.ts:122-135 · 紫鸟数据同步（已有 VC 汇总文件 → 本地库）。
+   * 逐字语义：days 默认 7（源行 123），取 updatedAt >= now - days 的文件，逐个 importZiniaoVcFile 累加。
+   * 真实能力来自 ziniao.listZiniaoVcFiles（integration-ziniao.cjs:350）+ lingxing.importZiniaoVcFile
+   * （integration-lingxing-local-data.cjs:948），本方法只按源顺序编排，不新增通道。
+   */
+  async function ziniaoDataSync(rawArgs) {
+    const args = rawArgs && typeof rawArgs === "object" ? rawArgs : {};
+    const days = Math.min(365, Math.max(1, Math.floor(Number(args.days) || 7)));
+    const since = clock() - days * 24 * 60 * 60 * 1000;
+    const files = ziniao.listZiniaoVcFiles().files.filter((file) => file.updatedAt >= since);
+    let rows = 0;
+    let skippedRows = 0;
+    for (const file of files) {
+      const imported = await lingxing.importZiniaoVcFile(file.path);
+      rows += imported.rows;
+      skippedRows += imported.skippedRows;
+    }
+    if (!files.length) return "最近 " + days + " 天没有需要同步的紫鸟文件";
+    if (!rows) return "已检查 " + files.length + " 个紫鸟文件，数据均已存在，跳过 " + skippedRows + " 条重复记录";
+    return "已检查 " + files.length + " 个紫鸟文件，新增 " + rows + " 条数据" + (skippedRows ? "，跳过 " + skippedRows + " 条已有记录" : "");
+  }
+
+  /** 自动化适配器的依赖错误：沿用集成错误码（automation-service.cjs:169-175 已识别）。 */
+  function adapterDependencyError(code, detail) { const error = new Error(String(detail || code)); error.code = code; return error; }
+
+  /** 自动化动作的闸门：插件已启用 + 依赖就绪才继续；否则抛结构化依赖错误（0 次网络）。 */
+  async function gateOrThrow(pluginId) {
+    const allowed = await gate(pluginId);
+    if (!allowed.ok) throw adapterDependencyError(allowed.error || INTEGRATION_ERR_UNAVAILABLE, allowed.detail);
+    return allowed.report;
+  }
+
+  /** 源 automationBusinessActions.ts:14-18 的 localIso（用注入 clock，离线可测）。 */
+  function localIso(daysAgo = 0) {
+    const date = new Date(clock());
+    date.setDate(date.getDate() - daysAgo);
+    return date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0") + "-" + String(date.getDate()).padStart(2, "0");
+  }
+
+  /** 源 automationBusinessActions.ts:32-41：先 start_client，再 list_stores，过滤过期店铺。 */
+  async function listActiveZiniaoStores() {
+    if (typeof ziniaoTransport !== "function") throw adapterDependencyError(INTEGRATION_ERR_UNAVAILABLE, "紫鸟下载需要已注入的 MCP 传输以解析店铺列表");
+    await ziniaoTransport("ziniao", "start_client", { killExisting: false });
+    const text = await ziniaoTransport("ziniao", "list_stores", {});
+    let parsed;
+    try { parsed = JSON.parse(text); } catch { throw adapterDependencyError(INTEGRATION_ERR_UNAVAILABLE, "紫鸟 list_stores 返回了无法解析的店铺列表"); }
+    const raw = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.stores) ? parsed.stores : []);
+    return raw.filter((store) => store && store.isExpired !== true).map((store, index) => ({
+      selector: String((store && (store.browserOauth || store.browserName)) || ""),
+      name: String((store && store.browserName) || ("店铺 " + (index + 1))),
+    })).filter((store) => store.selector);
+  }
+
+  // Y2：源 automationBusinessActions.ts:20-61 的终态等待口径（上限 / 轮询间隔逐字）。
+  const JOB_POLL_MS = 2000;                              // 源行 27 / 58 的 delay(2_000)
+  const LINGXING_WAIT_TIMEOUT_MS = 4 * 60 * 60 * 1000;   // 源行 21
+  const ZINIAO_WAIT_TIMEOUT_MS = 8 * 60 * 60 * 1000;     // 源行 44
+  // 测试可整体覆盖超时上限；生产不传即用上面的源口径。
+  const jobWaitTimeoutMs = Number.isFinite(options.jobWaitTimeoutMs) && options.jobWaitTimeoutMs > 0 ? Math.floor(options.jobWaitTimeoutMs) : null;
+  // 集成层自有的"作业被用户停止"码；automation-service.cjs 映射成 AUTOMATION_CANCELLED。
+  const INTEGRATION_ERR_CANCELLED = "INTEGRATION_CANCELLED";
+
+  /**
+   * 源 automationBusinessActions.ts:20-30 · 领星缓存同步的终态等待。
+   * 只有 status=complete 才算成功；error / 状态丢失 / 超时一律抛真实错误，超时绝不假装成功。
+   */
+  async function waitForLingxingJob(jobId) {
+    const deadline = clock() + (jobWaitTimeoutMs || LINGXING_WAIT_TIMEOUT_MS);
+    while (clock() < deadline) {
+      const job = lingxingJobSource.get(jobId);
+      if (!job) throw adapterDependencyError(INTEGRATION_ERR_NOT_FOUND, "领星缓存任务状态已丢失");
+      if (job.status === "complete") return "领星近 " + String(job.cacheDays) + " 天数据已缓存，共 " + String(job.rows) + " 条";
+      if (job.status === "error") throw adapterDependencyError(INTEGRATION_ERR_INTERNAL, String(job.error || "领星缓存失败"));
+      await sleeper(JOB_POLL_MS);
+    }
+    throw adapterDependencyError(INTEGRATION_ERR_INTERNAL, "领星缓存执行超时");
+  }
+
+  /**
+   * 源 automationBusinessActions.ts:43-61 · 紫鸟下载的终态等待。
+   * completed 才算成功；failed / stopped（用户停止=取消）/ paused 如实抛错；
+   * 状态丢失与超时同样抛出，三种失败态绝不冒充"下载完成"。
+   */
+  async function waitForZiniaoJob(jobId) {
+    const deadline = clock() + (jobWaitTimeoutMs || ZINIAO_WAIT_TIMEOUT_MS);
+    while (clock() < deadline) {
+      const job = ziniaoJobSource.get();
+      if (!job || job.id !== jobId) throw adapterDependencyError(INTEGRATION_ERR_NOT_FOUND, "紫鸟下载任务状态已丢失");
+      if (job.status === "completed") {
+        const stores = Array.isArray(job.stores) ? job.stores : [];
+        const files = stores.reduce((sum, store) => sum + ((store && store.files && store.files.length) || (store && store.file ? 1 : 0)), 0);
+        const skippedStores = stores.filter((store) => store && store.status === "skipped").length;
+        const skippedDays = stores.reduce((sum, store) => sum + ((store && store.skippedExistingDays) || 0), 0);
+        if (!files && skippedDays) return "无需启动紫鸟：已检查 " + stores.length + " 个店铺，所选日期均已有数据，跳过 " + skippedDays + " 个已有数据日";
+        if (!files && skippedStores) return "紫鸟检查完成：" + skippedStores + " 个店铺没有需要下载的新数据";
+        return "紫鸟下载完成：新增 " + files + " 个按日文件，检查 " + stores.length + " 个店铺" + (skippedDays ? "，跳过 " + skippedDays + " 个已有数据日" : "");
+      }
+      if (job.status === "failed") throw adapterDependencyError(INTEGRATION_ERR_INTERNAL, String(job.error || job.message || "紫鸟下载失败"));
+      if (job.status === "stopped") throw adapterDependencyError(INTEGRATION_ERR_CANCELLED, String(job.error || job.message || "紫鸟下载已取消"));
+      if (job.status === "paused") throw adapterDependencyError(INTEGRATION_ERR_INTERNAL, String(job.message || "紫鸟下载已暂停") + " 请在紫鸟 APP 中处理后继续。");
+      await sleeper(JOB_POLL_MS);
+    }
+    throw adapterDependencyError(INTEGRATION_ERR_INTERNAL, "紫鸟下载执行超时");
+  }
+
+  /**
+   * B6a/B7d · 自动化 integrations 适配器（唯一真值；main.cjs 的 automation 装配应直接引用本对象）。
+   *   · 每个动作先过 gateOrThrow（插件已启用 + 依赖就绪），未就绪抛 INTEGRATION_UNAVAILABLE；
+   *   · 就绪后调用真实实现：领星缓存同步 / 紫鸟下载 / 紫鸟数据同步（本文件 ziniaoDataSync）/ 钉钉通知。
+   *   · 真实传输由 resolveTransport 注入既有 MCP 通道；ziniao_data_sync 只读本地文件 + 本地库，无需网络。
+   *   · Y2：领星 / 紫鸟先把作业真正启动，再按源 automationBusinessActions.ts:20-61 等到终态才返回；
+   *     等待只读本地作业状态，不新增任何外发通道，与"授权通道待决策"互不冲突。
+   */
+  const automationAdapterRaw = {
+    async lingxingCacheSync(args) {
+      await gateOrThrow("lingxing");
+      // 源行 109-112：启动作业仍照旧，但对外结果改为等终态（不再"启动作业即返回"）。
+      const job = lingxingJobSource.start(args && args.days);
+      return await waitForLingxingJob(job && job.id);
+    },
+    async ziniaoDownload(args) {
+      await gateOrThrow("ziniao");
+      const input = args && typeof args === "object" ? args : {};
+      // 源 automationBusinessActions.ts:113-120：days 夹取 1..90，店铺由 list_stores 解析（显式 stores 优先）。
+      const days = Math.min(90, Math.max(1, Math.floor(Number(input.days) || 1)));
+      let stores = Array.isArray(input.stores)
+        ? input.stores.map((store) => ({ selector: String((store && store.selector) || ""), name: String((store && store.name) || "") })).filter((store) => store.selector)
+        : [];
+      if (!stores.length) stores = await listActiveZiniaoStores();
+      if (!stores.length) throw adapterDependencyError(INTEGRATION_ERR_INVALID_INPUT, "紫鸟当前没有可下载的有效店铺");
+      const requestIntervalSeconds = Math.min(120, Math.max(15, Math.floor(Number(input.requestIntervalSeconds) || 30)));
+      const job = ziniaoJobSource.start({ from: localIso(days), to: localIso(1), outDir: String(input.outDir || ""), requestIntervalSeconds, stores });
+      return await waitForZiniaoJob(job && job.id);
+    },
+    async ziniaoDataSync(args) {
+      await gateOrThrow("ziniao");
+      return await ziniaoDataSync(args);
+    },
+    async dingtalkGroupNotify(channelId, message) {
+      await gateOrThrow("dingtalk");
+      const sent = await dingtalk.send({ channelId: channelId, msg: { text: message && message.text } });
+      if (!sent || sent.ok !== true) return { ok: false, error: (sent && sent.error) || "INTEGRATION_SEND_FAILED", detail: (sent && (sent.detail || sent.error)) || "钉钉群机器人发送失败" };
+      return { ok: true, channel: (sent.value && sent.value.channel) || null };
+    },
+    async dingtalkPersonNotify(recipient, text) {
+      await gateOrThrow("dingtalk");
+      const sent = await dingtalk.sendToUser({ userId: recipient, text: text });
+      if (!sent || sent.ok !== true) throw adapterDependencyError((sent && sent.error) || INTEGRATION_ERR_UNAVAILABLE, (sent && (sent.detail || sent.error)) || "钉钉个人消息发送失败");
+      return sent.value !== undefined ? sent.value : sent;
+    },
+  };
+
+  /**
+   * Z1：automationAdapter 的对外包装。最后一个实参是 automation-service 解析出的**定义授权摘要**
+   * （{ authorized:true, definitionId, authorizationRef }）；有它才进入 automationAuthorizationContext，
+   * 让 transport 层拿到 MCP 审批凭证。直接调用（无授权摘要）时行为与从前逐字一致。
+   */
+  function withAutomationAuthorization(fn) {
+    return function (...callArgs) {
+      const authorization = callArgs.length ? callArgs[callArgs.length - 1] : undefined;
+      if (authorization && authorization.authorized === true) {
+        const rest = callArgs.slice(0, -1);
+        return automationAuthorizationContext.run(
+          { authorized: true, definitionId: authorization.definitionId, authorizationRef: authorization.authorizationRef },
+          () => fn.apply(null, rest),
+        );
+      }
+      return fn.apply(null, callArgs);
+    };
+  }
+  const automationAdapter = {};
+  for (const [name, fn] of Object.entries(automationAdapterRaw)) {
+    automationAdapter[name] = withAutomationAuthorization(fn);
+  }
+
+  return {
+    hostAppId: HOST_APP_ID,
+    commands: INTEGRATION_COMMANDS.slice(),
+    commandMeta: describeIntegrationCommands(),
+    registry,
+    credentials,
+    dingtalk,
+    weather,
+    almanac,
+    lingxing,
+    ziniao,
+    quark: quarkIntegration,
+    runninghub,
+    modelscope,
+    agnes,
+    legacyPorts,
+    cliPorts,
+    execute,
+    isIntegrationCommand,
+    ziniaoDataSync,
+    automationAdapter,
+  };
+}
+
+module.exports = {
+  createPluginBundle,
+  INTEGRATION_COMMANDS,
+  INTEGRATION_COMMAND_META,
+  describeIntegrationCommands,
+  isIntegrationCommand,
+  normalizeIntegrationError,
+  HOST_APP_ID,
+  INTEGRATIONS_DIR_NAME,
+};

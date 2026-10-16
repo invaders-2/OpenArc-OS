@@ -30,6 +30,10 @@ const RENDERER_COMMANDS = Object.freeze([
   "resource/job",
   "resource/pickImport",
   "resource/pickLink",
+  // Z2：把访达窗口里**选中**的文件服务条目加入资源库。选中项由渲染层给 folderId + 条目 id，
+  // 真实磁盘路径只在主进程经 file-service.resolve 解析，绝不过桥（§64 §66 §14）。
+  "resource/importFromFiles",
+  "resource/linkFromFiles",
   "resource/query",
   "resource/inspector",
   "resource/create",
@@ -128,6 +132,12 @@ function createResourceBundle({ identityStore, authorization, authStore = null, 
   return { resourceService, resourceStore, managedStore, searchStore, searchService, previewService };
 }
 
+/** 访达选中项 → 资源库导入的共享入参：只认白名单 id，单批上限与 file-service 的批量口径一致。 */
+const filePickArgs = (command) => ({
+  folderId: String(command.folderId || ""),
+  ids: Array.isArray(command.ids) ? command.ids.map(String).slice(0, 200) : [],
+});
+
 const pickerArgs = (command) => ({
   name: command.name ? String(command.name) : undefined,
   description: command.description ? String(command.description) : "",
@@ -142,7 +152,7 @@ const pickerArgs = (command) => ({
  * 注册 resource:command。
  * 通道名必须是**字面量**（安全回归探针按字面量扫描 IPC 暴露面）。
  */
-function registerResourceIpc({ ipcMain, service, search = null, preview = null, projects = null, canvas = null, picker = null, identity, isTrusted, dialog = null, BrowserWindow = null, shell = null }) {
+function registerResourceIpc({ ipcMain, service, search = null, preview = null, projects = null, canvas = null, picker = null, identity, isTrusted, dialog = null, BrowserWindow = null, shell = null, resolveFile = null }) {
   ipcMain.handle("resource:command", async (e, command) => {
     if (isTrusted && !isTrusted(e)) throw Error("Forbidden");
     if (!service) return { ok: false, error: "INTERNAL_ERROR", detail: "resource-not-ready" };
@@ -188,6 +198,30 @@ function registerResourceIpc({ ipcMain, service, search = null, preview = null, 
           const picked = await pickFile();
           if (!picked || picked.canceled || !picked.filePaths || !picked.filePaths.length) return { ok: false, error: "CANCELLED" };
           return service.createLinked({ context, sourcePath: picked.filePaths[0], ...pickerArgs(command) });
+        }
+        // Z2：访达选中项 → 资源库（Managed / Linked）。文件路径由主进程解析，渲染层只给 id。
+        case "resource/importFromFiles":
+        case "resource/linkFromFiles": {
+          if (typeof resolveFile !== "function") return { ok: false, error: "IMPORTER_UNAVAILABLE" };
+          const { folderId, ids } = filePickArgs(command);
+          if (!folderId || !ids.length) return { ok: false, error: "INVALID_INPUT" };
+          const managed = type === "resource/importFromFiles";
+          const resources = [];
+          const skipped = [];
+          for (const id of ids) {
+            const hit = resolveFile(folderId, id);
+            if (!hit || !hit.path) {
+              skipped.push({ id, error: "NOT_FOUND" });
+              continue;
+            }
+            const res = managed
+              ? await service.importManaged({ context, sourcePath: hit.path, name: hit.name || undefined })
+              : service.createLinked({ context, sourcePath: hit.path, name: hit.name || undefined });
+            if (res && res.ok && res.resource) resources.push(res.resource);
+            else skipped.push({ id, error: (res && res.error) || "INTERNAL_ERROR" });
+          }
+          if (!resources.length) return { ok: false, error: skipped.length ? skipped[0].error : "INTERNAL_ERROR", skipped };
+          return { ok: true, resources, skipped, count: resources.length };
         }
         case "resource/query":
           return service.queryResources({

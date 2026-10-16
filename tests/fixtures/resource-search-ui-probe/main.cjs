@@ -81,7 +81,7 @@ app.whenReady().then(async () => {
     g = await waitGate("ready");
     check("C2 · 登录进入桌面", g === "ready", "gate=" + g);
 
-    await click('[data-app-id="resource-library"]');
+    await click('[data-dock-id="resource-library"]');
     check("C3 · 打开资源库 App", await waitSel('[data-d3-04b="app"]'), "app");
 
     // 导入中文文本

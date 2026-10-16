@@ -19,15 +19,19 @@ async function withFixture(fn, options = {}) {
 const recordOf = (fx, id) => fx.identity.connection.prepare("SELECT * FROM mcp_connections WHERE connection_id = ?").get(id);
 const modulePath = (name) => fileURLToPath(new URL("../electron/" + name, import.meta.url));
 
-test("C1 · 第一批不开放工具调用：客户端没有调用路径，任何入口都回 MCP_TOOL_INVOCATION_NOT_ENABLED", async () => {
-  // 客户端源码里没有任何 tools/call 请求字面量（只有注释说明"不实现"）
-  for (const file of ["mcp-client.cjs", "mcp-service.cjs", "mcp-bootstrap.cjs", "mcp-domain.cjs"]) {
+test("C1 · 工具调用默认关闭：客户端双条件门 + 5 个调用命令仍回 MCP_TOOL_INVOCATION_NOT_ENABLED", async () => {
+  // B4e 收口：mcp-client.cjs 现在有真实 tools/call 路径，但**默认关闭**且必须有审批凭证；
+  // 调用入口不在其余三个模块里，它们仍不得出现请求字面量。
+  for (const file of ["mcp-service.cjs", "mcp-bootstrap.cjs", "mcp-domain.cjs"]) {
     const text = fs.readFileSync(modulePath(file), "utf8");
     assert.equal(/["']tools\/call["']/.test(text), false, file + " 不得出现 tools/call 请求字面量");
   }
-  // 客户端对象的调用入口明确拒绝
+  // 客户端对象的调用入口默认明确拒绝：未注入开关 / 注入开关但没有"审批通过"凭证都一样。
   const client = new McpClient({});
   assert.deepEqual(client.callTool({ name: "echo_sum" }), { ok: false, error: "MCP_TOOL_INVOCATION_NOT_ENABLED" });
+  const gated = new McpClient({ invocationGate: () => true });
+  assert.deepEqual(gated.callTool({ name: "echo_sum" }), { ok: false, error: "MCP_TOOL_INVOCATION_NOT_ENABLED" });
+  assert.deepEqual(gated.callTool({ name: "echo_sum" }, { approval: { decision: "DENIED" } }), { ok: false, error: "MCP_TOOL_INVOCATION_NOT_ENABLED" });
   assert.equal(typeof McpClient.prototype["#" + "request"], "undefined");
   await withFixture(async (fx) => {
     assert.deepEqual(fx.mcpService.invokeTool({ connectionId: "mcp_x", name: "echo_sum" }), { ok: false, error: "MCP_TOOL_INVOCATION_NOT_ENABLED" });

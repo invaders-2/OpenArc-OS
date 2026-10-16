@@ -23,8 +23,74 @@ const { registerIdentityIpc, resolveSessionTtlOverride } = require("./identity-b
 // D5-02：无限画布的宿主命令面（文档层实例由 identity-bootstrap 装配，AI 工具用同一个）。
 const { registerCanvasIpc } = require("./canvas-bootstrap.cjs");
 const { registerTaskIpc } = require("./task-bootstrap.cjs");
-// D5-03：MCP 中心的宿主命令面（连接管理 + 能力发现；本批不开放工具调用）。
+// W5：模型流式下行事件（model:event）的宿主桥接（model:command 仍由 identity-bootstrap 注册）。
+const { wireModelEvents } = require("./model-bootstrap.cjs");
+// B3：Agent 域装配（真实 SQLite = identity 的连接）与 agent:command / agent:event 通道。
+// B6d：createDxosFsAdapterForUserData 把 <userData>/dxos/fs 装配成 B3/B4 共用的 fsAdapter。
+const { createAgentBundle, createDxosFsAdapterForUserData } = require("./agent-service.cjs");
+const { registerAgentIpc } = require("./agent-bootstrap.cjs");
+// B4：技能域装配（<userData>/dxos 下的技能目录 / 技能包 / 执行器）与 skill:command / skill:event 通道。
+const { createSkillBundle } = require("./skill-service.cjs");
+const { registerSkillIpc } = require("./skill-bootstrap.cjs");
+// B5a：媒体域装配（<userData>/dxos/media 下的渲染作业 / 探测 / 封面）与 media:command / media:event 通道。
+const {
+  createMediaBundle,
+  // B5f：媒体域扩展依赖的真实装配件（复用既有模块 / B2 出口 / 依赖探测）。
+  createMediaProviderStore,
+  createMediaModelGateway,
+  createGuardedFetch,
+  probeIllustratorAvailability,
+  probeOnnxAvailability,
+} = require("./media-service.cjs");
+const { registerMediaIpc } = require("./media-bootstrap.cjs");
+// B6a：自动化域装配（定义 / 运行记录 / 主进程内调度器，无云依赖）与 automation:command / automation:event 通道。
+const { createAutomationBundle } = require("./automation-service.cjs");
+const { registerAutomationIpc } = require("./automation-bootstrap.cjs");
+// B6c：平台域装配（诊断 / 数据保护 / 网络安全 / 供应商测试安全）与 platform:command 通道。
+const { createPlatformBundle } = require("./platform-service.cjs");
+const { registerPlatformIpc } = require("./platform-bootstrap.cjs");
+// B7a：开发者平台（本地 App 装载 / 启用 / 禁用 / 回滚 / 卸载 + 出网治理）与 developer:command 通道。
+const { createDeveloperBundle } = require("./developer-service.cjs");
+const { registerDeveloperIpc } = require("./developer-bootstrap.cjs");
+// B7j：自动化域 developerApps 适配器读取的是 developer-service 的同一份本地装载态
+// （app_market_releases / user_installed_apps + <userData>/dxos/developer-apps 包清单）。
+const { createDeveloperStore } = require("./developer-store.cjs");
+// B7j：自动化域 toolCatalog 适配器复用 agent 工具目录的唯一执行入口（与 agent 域同一套权限判定）。
+const { runCatalogTool } = require("./agent-tool-catalog.cjs");
+// B7f：B7b 四张命令切片（lab / collab / migrations / realtime）合流到唯一 developer:command。
+//   DeveloperLab：草稿 / 示例工程 / 离线文档 / 图标；
+//   DeveloperCollabProjects：协同项目（落既有 projects，owner 为当前会话用户）；
+//   DeveloperMigrationSnapshotStore：声明式数据迁移快照（安装 / 升级 / 回滚用）；
+//   DeveloperRealtimeHub：本机 / 局域网实时房间（缺 authorize 即结构化拒绝，不假连接）。
+const { createDeveloperDomainExtensions, DeveloperLab } = require("./developer-lab.cjs");
+const { DeveloperCollabProjects } = require("./developer-collab.cjs");
+const { DeveloperMigrationSnapshotStore } = require("./developer-migrations.cjs");
+const { DeveloperRealtimeHub } = require("./developer-realtime.cjs");
+// B7c：可选插件框架（钉钉 / 天气 / 黄历，默认全关）与本地市场目录（只读本地清单，不联网）。
+const { createPluginBundle } = require("./plugin-service.cjs");
+const { createMarketBundle } = require("./market-service.cjs");
+const { registerIntegrationIpc, registerMarketIpc } = require("./plugin-bootstrap.cjs");
+// B4 · providerAdapter 桥：把 B2 的 provider-protocol store/service 投影成 B4 执行器要的只读适配器
+// （firstUsable/all/autoFallback/revealProvider/call）；只读投影绝不返回 api_key/credentialRef。
+const { createProviderAdapter } = require("./provider-adapter-bridge.cjs");
+// D5-03：MCP 中心的宿主命令面（连接管理 + 能力发现；工具调用默认关闭，开启后仍需逐次审批）。
 const { registerMcpIpc } = require("./mcp-bootstrap.cjs");
+// B4 收口：把已装配的 MCP 连接目录（identity.mcpService）只读投影成 agent 工具目录的 mcp 来源。
+const { createMcpAgentBridge } = require("./mcp-agent-bridge.cjs");
+// Y4：既有 MCP 存储/服务之上的可写 connections 端口（供宿主侧 App 托管注册表读写既有记录）。
+//   constructOrDegrade：可选项构造抛错 → null + 如实日志，不把主进程启动链拖死（见本块装配注释）。
+const { createMcpConnectionsPort, constructOrDegrade } = require("./mcp-connections-port.cjs");
+// Y4：宿主侧 App 托管 MCP 注册表（归属 + 连接生命周期；策略门不放宽）。
+const { createAppManagedMcpRegistry } = require("./mcp-app-registry.cjs");
+// B4e：MCP 工具调用显式开关（<userData>/dxos/mcp.json，默认关闭）。
+const { createMcpSwitch } = require("./mcp-switch.cjs");
+// B4e 收口：生产真实 tools/call 传输（McpService 的活连接）+ 任务内审批端口（ControlledToolProxy）。
+const { createMcpLiveTransport } = require("./mcp-live-transport.cjs");
+const { mcpToolIdFor, MCP_TOOL_VERSION } = require("./mcp-tool-contract.cjs");
+// D5-04 补丁：DX 任务 → 核心审批任务的幂等身份映射桥（桥只映射身份，不复制审批状态机）。
+const { createDxTaskApprovalBridge, createDxBridgedApprovalPort } = require("./dx-task-approval-bridge.cjs");
+// D5-04：MCP 外部工具 → 既有 SideEffectAuthority 的 provider（plan / execute 两个方向）。
+const { createMcpSideEffectProvider } = require("./mcp-side-effect-provider.cjs");
 // D5-03 第十一批：关应用的唯一收尾顺序（MCP → Harness → modelProxy → store）。
 const { disposeAppResources } = require("./app-shutdown.cjs");
 const { createDefaultExecutorLauncher } = require("./executor-launcher.cjs");
@@ -38,10 +104,30 @@ let win;
 let controller;
 let identity;
 let files;
+// B4e：MCP → Agent 桥在 registerMcpIpc 之后才装配；先声明，聚合命令经 getter 晚绑定。
+let mcpAgentBridge = null;
+// B4e 收口：显式开关实例在 identity 创建**之前**建立并注入每个真实 McpClient（默认关闭）。
+let mcpSwitch = null;
 /** 身份服务创建失败时的人话原因；渲染层经 identity:command 的既有通道拿到它。 */
 let identityBootFailure = null;
 /** D5-02：画布文档服务（AI 编辑工具的执行端与渲染层命令共用同一个实例）。*/
 let canvasBundle;
+/** B3：Agent 域 bundle（createAgentBundle 的唯一实例；无身份服务时为 undefined）。 */
+let agentBundle;
+/** B4：技能域 bundle（createSkillBundle 的唯一实例；无身份服务时为 undefined）。 */
+let skillBundle;
+/** B5a：媒体域 bundle（createMediaBundle 的唯一实例；无身份服务时为 undefined）。 */
+let mediaBundle;
+/** B6a：自动化域 bundle（createAutomationBundle 的唯一实例；无身份服务时为 undefined）。 */
+let automationBundle;
+/** B6c：平台域 bundle（createPlatformBundle 的唯一实例；无身份服务时为 undefined）。 */
+let platformBundle;
+/** B7a：开发者平台 bundle（createDeveloperBundle 的唯一实例；无身份服务时为 undefined）。 */
+let developerBundle;
+/** B7c：可选插件 bundle（createPluginBundle 的唯一实例；无身份服务时为 undefined）。 */
+let pluginBundle;
+/** B7c：本地市场 bundle（createMarketBundle 的唯一实例）。 */
+let marketBundle;
 /** D5-01 Closure-2：受控浏览器目标（用户显式授权）。宿主持有唯一实例，工具链与 UI 共用同一个。 */
 let browserControl;
 
@@ -126,6 +212,27 @@ function handleCanvasProtocol(request) {
   // 画布跑在 opaque origin（sandbox allow-scripts）里：字体等子资源需要 CORS 头才能加载。
   // 这是**只读静态 bundle**、无凭据、无用户数据，因此允许任意来源读取。
   return new Response(fs.readFileSync(file), { status: 200, headers: { "content-type": CANVAS_MIME[ext], "access-control-allow-origin": "*" } });
+}
+
+/**
+ * B6c：受监督子进程清单（只取 safe 记录，绝不带 executable path / pid / env）。
+ * 数据来源只有 RuntimeSupervisor.snapshot()（runtime-supervisor.cjs:466 的 safe 投影）；
+ * media runner / MCP stdio 等通道当前不暴露可枚举句柄 —— 那就返回空列表，绝不伪造条目。
+ */
+function collectSupervisedProcesses(identityRef) {
+  try {
+    const supervisor = identityRef && identityRef.supervisor;
+    const rows = supervisor && typeof supervisor.snapshot === "function" ? supervisor.snapshot() : null;
+    return Array.isArray(rows) ? rows.slice(0, 100).map((row) => ({
+      source: "runtime-supervisor",
+      instanceId: row && row.instanceId != null ? String(row.instanceId) : null,
+      status: row && row.status != null ? String(row.status) : null,
+      startedAt: row && Number.isFinite(row.startedAt) ? row.startedAt : null,
+      endedAt: row && Number.isFinite(row.endedAt) ? row.endedAt : null,
+      exitCode: row && Number.isFinite(row.exitCode) ? row.exitCode : null,
+      signal: row && row.signal != null ? String(row.signal) : null,
+    })) : [];
+  } catch { return []; }
 }
 
 /** 只接受来自本应用外壳页的调用。
@@ -218,6 +325,84 @@ function markProductReady() {
   return state;
 }
 
+// ---------------------------------------------------------------------------
+// B7j · 自动化域适配器（只接线，不新增业务实现）
+//   · developerApps ← developer-service 的本地装载态（同一 db + <userData>/dxos）；
+//     B7x 起按已安装 App 的真实 capabilities.tools / capabilities.canvas 声明投影可执行动作
+//     （canvas 只投影 agent-tool 执行器的 run 动作）；没有可用动作时 actions 为空，绝不伪造。
+//   · integrations  ← plugin-service（钉钉 / 领星 / 紫鸟）；未启用 / 未注入 transport 时抛
+//     INTEGRATION_*，由 automation-service 归一成结构化 AGENT_DEPENDENCY_UNAVAILABLE。
+//   · toolCatalog   ← agent 工具目录的唯一执行入口（与 agent 域共用权限判定）。
+//   · agent         ← agent-service.runInstruction（project agent mode 同一真值路径）。
+//   · desktop       ← 本仓没有桌面执行端实现，保持 null；缺失原因进 automation/health。
+// ---------------------------------------------------------------------------
+
+/** 适配器层的结构化错误；code 会被 automation-service 归一成依赖缺失码。 */
+function automationAdapterError(code, message, detail) {
+  const error = new Error(String(message || code));
+  error.name = "AutomationAdapterError";
+  error.code = String(code);
+  if (detail !== undefined) error.detail = detail;
+  return error;
+}
+
+/** 自动化域 developerApps 适配器：只读 developer-store 的本地装载态，不做第二份数据。 */
+function createAutomationDeveloperAppsAdapter({ db, userDataDir, clock, runTool }) {
+  // B7x：投影规则（真实 capabilities.tools + capabilities.canvas）与适配器契约都在
+  // developer-domain.cjs（store 注入），主进程只做接线，不在这里另造一套动作判定。
+  const developerDomain = require("./developer-domain.cjs");
+  const developerStore = createDeveloperStore({ db, dataRoot: path.join(userDataDir, "dxos"), clock });
+  return developerDomain.createDeveloperAppActionAdapter({ store: developerStore, runTool, createError: automationAdapterError });
+}
+
+/** 自动化域 integrations 适配器：plugin-service 的真实集成实例。 */
+function createAutomationIntegrationsAdapter({ pluginBundle }) {
+  if (!pluginBundle) return null;
+  const registry = pluginBundle.registry && typeof pluginBundle.registry.get === "function" ? pluginBundle.registry : null;
+  function requireEnabled(pluginId) {
+    const plugin = registry ? registry.get(pluginId) : null;
+    if (!plugin) throw automationAdapterError("INTEGRATION_NOT_ENABLED", "集成插件未登记：" + pluginId);
+    if (!plugin.enabled) throw automationAdapterError("INTEGRATION_NOT_ENABLED", "集成插件「" + plugin.name + "」未启用（integration/plugins/enable，id=" + pluginId + "）");
+    return plugin;
+  }
+  function requireOk(result, fallback) {
+    if (!result || result.ok !== true) throw automationAdapterError((result && result.error) || "INTEGRATION_UNAVAILABLE", (result && (result.detail || result.error)) || fallback);
+    return result.value !== undefined ? result.value : result;
+  }
+  return {
+    async lingxingCacheSync(args) {
+      requireEnabled("lingxing");
+      const job = pluginBundle.lingxing.startLingxingCacheSync(args && args.days);
+      return "领星缓存同步作业已启动：" + String(job && job.id ? job.id : "") + "（" + String(job && job.cacheDays ? job.cacheDays : "") + " 天）";
+    },
+    async ziniaoDownload(args) {
+      requireEnabled("ziniao");
+      const job = pluginBundle.ziniao.startZiniaoDownloadJob(Object.assign({}, args || {}));
+      return "紫鸟下载作业已启动：" + String(job && job.id ? job.id : "") + "（店铺 " + String(job && Array.isArray(job.stores) ? job.stores.length : 0) + " 个）";
+    },
+    async dingtalkGroupNotify(channelId, message) {
+      requireEnabled("dingtalk");
+      // 业务失败原样回传 { ok:false }，由 automation-service 记 AUTOMATION_UNAVAILABLE；
+      // 依赖缺失（未启用 / 无凭据）在 requireEnabled / requireOk 处抛，归一成依赖缺失码。
+      const sent = await pluginBundle.dingtalk.send({ channelId: channelId, msg: { text: message && message.text } });
+      if (!sent || sent.ok !== true) return { ok: false, error: (sent && sent.error) || "INTEGRATION_SEND_FAILED", detail: (sent && (sent.detail || sent.error)) || "钉钉群机器人发送失败" };
+      const value = sent.value || {};
+      return { ok: true, channel: value.channel || null };
+    },
+    async dingtalkPersonNotify(recipient, text) {
+      requireEnabled("dingtalk");
+      return requireOk(await pluginBundle.dingtalk.sendToUser({ userId: recipient, text: text }), "钉钉个人消息发送失败");
+    },
+  };
+}
+
+/** 自动化域 toolCatalog 适配器：复用 agent 工具目录的唯一执行入口。 */
+function createAutomationToolCatalogAdapter() {
+  return {
+    runTool: (toolName, values, actor, options) => runCatalogTool(String(toolName), values && typeof values === "object" ? values : {}, actor, options && typeof options === "object" ? options : {}),
+  };
+}
+
 app.whenReady().then(async () => {
   installApplicationMenu();
   // ---------------------------------------------------------------------------
@@ -249,6 +434,8 @@ app.whenReady().then(async () => {
     // 默认路径不读、不用这些变量；生效时打一条含生效值与原因的可见日志。
     const sessionTtl = resolveSessionTtlOverride({ env: process.env });
     for (const record of sessionTtl.records) console.log("[openarc] " + record.message);
+    // B4e 收口：开关实例必须先于 identity 存在 —— 每个真实 McpClient 在构造时拿到同一个 gate。
+    mcpSwitch = createMcpSwitch({ userDataDir: app.getPath("userData") });
     runtime = await createOpenArcRuntime({
       userDataDir: app.getPath("userData"),
       safeStorage,
@@ -265,6 +452,8 @@ app.whenReady().then(async () => {
       serviceIdentity: process.env.OPENARC_SERVICE_IDENTITY || null,
       // D5-01 Closure-2：受控浏览器目标的唯一实例（审计进同一张 authorization_audit）。
       browserControl,
+      // B4e 收口：MCP 工具调用显式开关（默认关闭；<userData>/dxos/mcp.json）。
+      mcpInvocationSwitch: mcpSwitch,
     });
     identity = runtime.identity;
   } catch (error) {
@@ -445,6 +634,14 @@ app.whenReady().then(async () => {
     dialog,
     shell,
     BrowserWindow,
+    // Z2：访达窗口把选中条目加入资源库时，磁盘路径只在主进程解析。
+    // file-service.resolve() 刻意不挂 preload（file-service.cjs "只给主进程用"），
+    // 这里只把 { path, name } 交给 ResourceService，渲染层仍只给 folderId + 条目 id。
+    resolveFile: (folderId, id) => {
+      if (!files) return null;
+      const hit = files.resolve(String(folderId || ""), String(id || ""));
+      return hit ? { path: hit.path, name: hit.entry ? hit.entry.name : "" } : null;
+    },
     isTrusted: trusted,
     bootError: identityBootFailure,
     send: (event) => {
@@ -457,19 +654,86 @@ app.whenReady().then(async () => {
     },
   });
 
-  // D5-03：MCP 中心（mcp:command 单一通道；sessionRef/appId 由主进程注入，本批不开放工具调用）。
+  // D5-03：MCP 中心（mcp:command 单一通道；sessionRef/appId 由主进程注入）。
+  // B4e：工具调用默认关闭 —— mcpSwitch 读 <userData>/dxos/mcp.json（缺省 / 读坏 / 缺 userData 一律 false）；
+  // mcp/agentTools 只读，mcp/toolInvocation/set 是唯一写入口（trusted + mcp.manage + 审计）。
+  if (!mcpSwitch) mcpSwitch = createMcpSwitch({ userDataDir: app.getPath("userData") });
+  /** B4e：开关变更审计进既有 authorization_audit（与工具调用同源可查）。审计不可用返回 false。 */
+  const mcpAudit = (entry) => {
+    const store = identity && identity.toolStore;
+    if (!store || typeof store.insertToolAudit !== "function") return false;
+    try {
+      store.insertToolAudit({
+        at: Date.now(),
+        actorUserId: (identity.service && identity.service.snapshot && identity.service.snapshot.userId) || null,
+        appId: "mcp-center",
+        toolRef: "mcp.toolInvocation",
+        action: entry && entry.action ? String(entry.action).slice(0, 80) : "mcp.toolInvocation.set",
+        decision: entry && entry.decision ? String(entry.decision).slice(0, 120) : null,
+        reasonCode: entry && entry.reasonCode ? String(entry.reasonCode).slice(0, 120) : null,
+        requestId: (entry && entry.requestId) || null,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  /**
+   * B4e：任务内 MCP 调用的可信 taskId 解析。
+   * taskId 只用来**定位**真实 Task；归属（user/app）由这里用已认证 session + Task row 判定，
+   * 再由 ControlledToolProxy.propose 二次校验，渲染层自报的 appId/userId 一律不参与。
+   */
+  const resolveMcpTaskContext = ({ context, taskId } = {}) => {
+    if (!identity || !identity.taskStore || typeof identity.taskStore.taskById !== "function") {
+      return { ok: false, error: "MCP_TASK_CONTEXT_UNAVAILABLE" };
+    }
+    const task = identity.taskStore.taskById(String(taskId || ""));
+    if (!task) return { ok: false, error: "MCP_INVALID_INPUT", detail: "task-not-found" };
+    const sessionRef = context && context.sessionRef;
+    const session = identity.store && typeof identity.store.validateSession === "function" ? identity.store.validateSession(sessionRef, { sensitive: false }) : null;
+    if (!session || session.ok !== true) return { ok: false, error: "MCP_UNAUTHORIZED", detail: "no-session" };
+    const sessionUserId = session.user && session.user.id != null ? session.user.id : null;
+    if (!sessionUserId || String(sessionUserId) !== String(task.user_id)) return { ok: false, error: "MCP_UNAUTHORIZED", detail: "task-not-owner" };
+    return { ok: true, taskId: task.task_id, appId: task.app_id, stepId: null, runId: null };
+  };
   // boot 失败时以 service:null 注册，渲染层拿到 mcp-not-ready 的稳定错误，而不是 "No handler registered"。
-  registerMcpIpc({ ipcMain, service: identity?.mcpService ?? null, identity: identity?.service ?? null, isTrusted: trusted });
+  registerMcpIpc({
+    ipcMain,
+    service: identity?.mcpService ?? null,
+    identity: identity?.service ?? null,
+    isTrusted: trusted,
+    // B4e：聚合端口晚绑定到下面装配的 bridge（IPC 调用发生时 bridge 必已初始化）。
+    agentTools: () => (mcpAgentBridge ? mcpAgentBridge.mcpAgentTools : null),
+    mcpServersSnapshot: () => (mcpAgentBridge ? mcpAgentBridge.mcpServersSnapshot() : []),
+    toolInvocationEnabled: () => mcpSwitch.isToolInvocationEnabled(),
+    // B4e 收口：唯一开关写入口 + 任务内调用端口（晚绑定 bridge）。
+    toolInvocationSwitch: () => mcpSwitch,
+    audit: mcpAudit,
+    resolveTaskContext: resolveMcpTaskContext,
+    toolInvocation: () => (mcpAgentBridge && mcpAgentBridge.mcpAgentTools ? {
+      callByName: (fname, args, options) => mcpAgentBridge.mcpAgentTools.callByName(fname, args, options),
+      callDirect: (serverId, toolName, args, options) => mcpAgentBridge.mcpAgentTools.callDirect(serverId, toolName, args, options),
+    } : null),
+  });
 
   // 身份 runtime 存在时才注册依赖它的能力；boot 失败时窗口仍照常加载并走 BootRetry。
   if (identity) {
+    // W5：把 provider-protocol 的流式事件接到 model:event。与 identity:event / task:event /
+    // sideeffect:event 同一条 trusted(event) 边界；send 只转发主进程已封装的 P1 信封。
+    wireModelEvents({
+      service: identity.modelService,
+      send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("model:event", event); },
+    });
+
     // ---------------------------------------------------------------------------
     // D5-02 · 无限画布：文档层 + 资源可用性 + 命令层。
     // 画布页面运行在 sandbox iframe 里（无 openarc 桥 / 无 IPC / 无 fs / 无凭据），
     // 它的全部请求都由宿主渲染层经 canvas:command 转发到这里。
     // ---------------------------------------------------------------------------
     canvasBundle = { service: identity.canvasDocService };
-    registerCanvasIpc({ ipcMain, service: identity.canvasDocService, identity: identity.service, isTrusted: trusted });
+    // B5d：画布域扩展命令（素材库 / 协作 / 内核能力 / Agent 附件 / .dxcanvas）接在同一个 canvas:command；
+    // 未装配扩展时白名单内的扩展命令回落 CANVAS_COMMAND_NOT_ALLOWED，不新建第二套画布通道。
+    registerCanvasIpc({ ipcMain, service: identity.canvasDocService, identity: identity.service, isTrusted: trusted, extension: identity.canvasDxosExtension });
 
     // D4-04：Renderer 可发起真实 AI Task（Task Runtime + official dsh + Tool Facade），
     // sessionRef/appId 由主进程注入；进度经 task:event 推送。
@@ -480,6 +744,460 @@ app.whenReady().then(async () => {
       identity: identity.service,
       isTrusted: trusted,
       send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("task:event", event); },
+    });
+
+    // B6d：DX 虚拟文件树（<userData>/dxos/fs）→ B3/B4 共用的 fsAdapter 注入面。
+    //   · 构造走 createDxosFsAdapterForUserData（解析路径 + 建目录 + 可写探测 + 构造适配器）；
+    //   · 装配失败（目录建不出 / 不可写等）→ 保持 null：健康报告如实 false，命令侧继续结构化
+    //     AGENT_DEPENDENCY_UNAVAILABLE，绝不假装可用；
+    //   · 同一份实例同时喂 createSkillBundle 与 createAgentBundle，两个域看到同一棵虚拟树。
+    let dxosFsAdapter = null;
+    try {
+      dxosFsAdapter = createDxosFsAdapterForUserData(app.getPath("userData"));
+    } catch (error) {
+      console.warn("[openarc] DX 虚拟文件树装配失败，文件工具将保持结构化依赖缺失：" + ((error && error.message) || error));
+    }
+
+    // B4：技能域。
+    //   · <userData>/dxos 注入 configureSkillStore / configureSkillPack / configureSkillRunner / configureSkillAnalyzer /
+    //     configureSkillWorkspace（路径由 dxos-foundation-paths.cjs 统一解析）；
+    //   · providerAdapter 由 B2 的 provider-protocol store/service 组装（provider-adapter-bridge.cjs）；
+    //     cliRuntime / mediaAdapter（B7/B5 未落地）→ 传 null，命令侧保持结构化依赖缺失（绝不伪造）；
+    //     fsAdapter 由上面的 DX 虚拟文件树提供（产物落盘）；
+    //     modelAdapter 走 provider-protocol-service.call（唯一模型出口）；
+    //   · skill:event 与 model:event / task:event / agent:event 同一条 trusted(event) 边界，renderer 只能订阅。
+    const providerProtocol = identity.modelService && identity.modelService.providerProtocol ? identity.modelService.providerProtocol : null;
+    const providerAdapter = providerProtocol && providerProtocol.store && providerProtocol.service
+      ? createProviderAdapter({ store: providerProtocol.store, service: providerProtocol.service })
+      : null;
+    const skillModelAdapter = providerProtocol && providerProtocol.service
+      ? { call: (input) => providerProtocol.service.call(input || {}) }
+      : null;
+    skillBundle = createSkillBundle({
+      userDataDir: app.getPath("userData"),
+      identityStore: identity.store,
+      authorization: identity.authorization,
+      providerAdapter: providerAdapter,
+      modelAdapter: skillModelAdapter,
+      cliRuntime: null,
+      mediaAdapter: null,
+      fsAdapter: dxosFsAdapter,
+      logger: null,
+      clock: null,
+    });
+    registerSkillIpc({
+      ipcMain,
+      bundle: skillBundle,
+      identity: identity.service,
+      isTrusted: trusted,
+      send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("skill:event", event); },
+    });
+
+    // B3：Agent 域。
+    //   · 任务/运行/工具/项目/记忆全部落到 identity-store 的同一 SQLite 连接（agent_* 表 v23 迁移已建）；
+    //   · modelAdapter 走 provider-protocol-service.call（唯一模型出口）；
+    //   · providerAdapter 复用上面 B2 组装的只读桥（模型执行出口；密钥只在 service 内部解出）；
+    //   · fsAdapter 复用上面已装配的 DX 虚拟文件树（装配失败即为 null）；
+    //     workspaceAdapter 仍由 agent-runtime-workspace.cjs 提供；任一缺失 → 命令侧保持结构化
+    //     AGENT_DEPENDENCY_UNAVAILABLE，绝不假装可用；
+    //   · agent:event 与 model:event / task:event 同一条 trusted(event) 边界，renderer 只能订阅。
+    // B4 收口：MCP → Agent 工具目录的只读桥。
+    //   · 目录：mcpService.listConnections（appId=mcp-center 基线授权）→ 只列用户/组织真实可见的 server；
+    //     未连接/停用/无工具一律照实投影（status 非 connected、executable:false），不伪造 connected。
+    //   · 调用（B4e 收口）：真实传输 = McpService 已建立的活连接（electron/mcp-live-transport.cjs），
+    //     不再依赖测试注入的假对象；审批 = ControlledToolProxy.propose，taskId 逐调用由可信上下文解析。
+    //     开关未打开 → 0 审批 0 传输；未审批 → APPROVAL_REQUIRED（0 传输）；审批通过才发真实 tools/call。
+    // Y4：宿主侧 App 托管 MCP 的 connections 端口 + 注册表（策略门沿用 mcp-domain 白名单 / SSRF 口径）。
+    //   · connections 端口的 list 走 McpService.listConnections（app grant + 可见性判定），
+    //     绝不把原始数据库行直接交给调用方；save/connect/disconnect/remove 落在既有 mcp_connections 表；
+    //   · appState 来自 developer 的启用状态（user_installed_apps；无会话 = 未启用，fail-closed）；
+    //   · identity.mcpService 未装起来时不建端口 / 注册表，全部保持结构化降级，main 装配不崩。
+    // Y4 降级口径：端口 / 注册表都是可选能力。构造抛错时降到 null + 记一条原因，绝不把启动链拖死；
+    // 上层（developer bundle / mcp-agent-bridge）拿到 null 后保持既有的结构化 AGENT_DEPENDENCY_UNAVAILABLE。
+    const mcpWiringLog = (event, detail) => { try { console.warn("[openarc] " + String(event) + " " + JSON.stringify(detail)); } catch { /* 日志失败不影响主流程 */ } };
+    const mcpConnectionsPort = identity.mcpService
+      ? constructOrDegrade("MCP connections 端口", () => createMcpConnectionsPort({
+          mcpService: identity.mcpService,
+          mcpStore: identity.mcpStore || null,
+          context: () => ({ sessionRef: (identity.service && identity.service.current) || null, appId: "mcp-center" }),
+          logger: mcpWiringLog,
+        }), mcpWiringLog).value
+      : null;
+    // appState 的真实来源 = developer 的启用状态（user_installed_apps）。无会话 / 无库 / 查询失败一律
+    // fail-closed（未启用），不因为读不到就默认放行连接。
+    const developerEnabledStore = identity.store
+      ? constructOrDegrade("developer 启用态存储", () => createDeveloperStore({ db: identity.store.connection }), mcpWiringLog).value
+      : null;
+    const mcpAppState = {
+      isEnabled: (appId) => {
+        const snap = identity.service && identity.service.snapshot;
+        const userId = snap && snap.userId != null ? String(snap.userId) : null;
+        if (!userId || !developerEnabledStore) return false;
+        try { return !!developerEnabledStore.getInstalled(userId, String(appId)); } catch { return false; }
+      },
+    };
+    const appManagedMcpRegistry = mcpConnectionsPort
+      ? constructOrDegrade("App 托管 MCP 注册表", () => createAppManagedMcpRegistry({
+          connections: mcpConnectionsPort,
+          appState: mcpAppState,
+          logger: mcpWiringLog,
+        }), mcpWiringLog).value
+      : null;
+    const mcpLiveTransport = createMcpLiveTransport({ mcpService: identity.mcpService, switchPort: mcpSwitch });
+    // D5-04：把 MCP 接成**既有 SideEffectAuthority** 的 provider（plan/execute 两个方向），不新建第二套审批权威。
+    //   · provider 挂到既有 adapters.providers 注册表（tool-adapters.cjs adapterFor 解析）；活性由
+    //     side-effect-runtime.cjs 的 IN_PROCESS_EXECUTION_PROVIDERS 白名单认定（MCP 活连接只在 main 进程）；
+    //   · 审批端口 = createSideEffectExecutionPort（经 DX 身份映射桥包一层）：proposeWrite(plan) →
+    //     既有 sideEffect/decideApproval 作出 trusted 决定 → 既有 lease/claim/verify 真实执行 → 结果回传。
+    //     未批准/被拒/超时 0 传输。
+    const mcpSideEffectProvider = createMcpSideEffectProvider({ transport: mcpLiveTransport, registry: identity.toolRegistry || null });
+    if (identity.adapters && identity.adapters.providers && typeof identity.adapters.providers === "object") {
+      identity.adapters.providers.McpExternal = mcpSideEffectProvider;
+    }
+    // D5-04 补丁：agent 工具循环（project-agent-mode / react-driver）给出的 taskId 属于 dx_tasks，
+    // 而既有审批链按核心 tasks 定位 Task/Step/Run。桥只负责把 dx 任务步骤**幂等**映射成核心审批
+    // 任务/步骤/运行（同一 dx 步骤只产生一个核心任务），approval/lease/claim/verify/audit 仍由同一个
+    // SideEffectAuthority 裁决；sessionRef 只由主进程从已认证身份推导，渲染层 / Harness 给不了。
+    // 已是核心 taskId 的调用（mcp/toolInvocation/call）由桥原样透传，既有语义不变。
+    const dxTaskApprovalBridge = identity.store && identity.taskStore
+      ? createDxTaskApprovalBridge({
+          identity: identity.store,
+          taskStore: identity.taskStore,
+          dxTaskStore: require("./agent-task-store.cjs"),
+          authService: identity.authorization,
+          appId: "mcp-center",
+          context: () => ({ sessionRef: (identity.service && identity.service.current) || null, appId: "mcp-center" }),
+        })
+      : null;
+    const mcpApprovalPort = identity.sideEffectRuntime && dxTaskApprovalBridge
+      ? createDxBridgedApprovalPort({ bridge: dxTaskApprovalBridge, runtime: identity.sideEffectRuntime, toolIdFor: mcpToolIdFor, toolVersionFor: () => MCP_TOOL_VERSION })
+      : null;
+    mcpAgentBridge = identity.mcpService
+      ? createMcpAgentBridge({
+          mcpService: identity.mcpService,
+          // sessionRef 只由主进程从已认证身份推导（渲染层给不了）；appId 用 MCP 中心的承载 Principal。
+          context: () => ({ sessionRef: (identity.service && identity.service.current) || null, appId: "mcp-center" }),
+          // B4e：默认关闭的显式开关（<userData>/dxos/mcp.json）+ 共享 ToolRegistry。
+          // 注入 registry 后，已连接 server 的 MCP 工具被幂等登记为 EXTERNAL_SIDE_EFFECT（requiresApproval）。
+          switch: mcpSwitch,
+          registry: identity.toolRegistry || null,
+          // Y4：配置读写接既有 connections 端口（只读 list 仍是授权后的投影）；
+          // Y1 的 App 托管注册表原样转交 createMcpAgentTools 的三个入口。
+          connections: mcpConnectionsPort,
+          appRegistry: appManagedMcpRegistry,
+          transport: mcpLiveTransport,
+          approval: mcpApprovalPort,
+        })
+      : null;
+    agentBundle = createAgentBundle({
+      identityStore: identity.store,
+      authorization: identity.authorization,
+      authStore: identity.authStore,
+      modelService: identity.modelService,
+      providerAdapter: providerAdapter,
+      userDataDir: app.getPath("userData"),
+      logger: null,
+      clock: null,
+      dbPath: path.join(app.getPath("userData"), "identity.db"),
+      // B4：把技能来源接进工具目录（listSkills + runSkill）；未装配时为 null，catalog 保持 available:false。
+      skillSource: skillBundle ? skillBundle.skillSource : null,
+      // B4 收口：mcp 工具目录来源（同一快照同时喂 catalog 与 createMcpAgentTools 的可调用索引）。
+      mcpAgentTools: mcpAgentBridge ? mcpAgentBridge.mcpAgentTools : null,
+      mcpServersSnapshot: mcpAgentBridge ? mcpAgentBridge.mcpServersSnapshot : null,
+      // B5d：画布内核能力进工具目录（来源由 canvas-dxos-capabilities 投影；未装配时 catalog 保持 available:false）。
+      canvasExtension: identity.canvasDxosExtension || null,
+      // B6d：DX 虚拟文件树（文件工具 / project snapshot / fs_list 的真值通道）。
+      fsAdapter: dxosFsAdapter,
+    });
+    registerAgentIpc({
+      ipcMain,
+      bundle: agentBundle,
+      identity: identity.service,
+      isTrusted: trusted,
+      send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("agent:event", event); },
+    });
+
+    // B5a：媒体域。
+    //   · 重活（ffmpeg 渲染 / ffprobe 探测 / 封面）全部走受监督子进程模板：
+    //     dxos-foundation-runner.cjs（超时 / 取消 / 输出上限）+ video-render-worker.cjs（唯一 worker 入口）；
+    //   · 渲染作业落 identity-store 同一 SQLite 连接（v24 迁移已建 video_* 表）；
+    //   · 曲目 / 素材 / 封面缓存全部在 <userData>/dxos/media 下，绝对路径不出主进程；
+    //   · media:event 与 model:event / task:event / agent:event / skill:event 同一条 trusted(event) 边界。
+    // B5f：把上面已经装配好的真实依赖接进媒体域（只接线，不新增实现）。
+    //   · fsAdapter     复用 B6d 的 DX 虚拟文件树（同一份实例；短剧画布 / 素材按节点落 <userData>/dxos/fs）；
+    //   · fetchImpl     主进程全局 fetch + 出口护栏（拒绝云端点 dx-os.com，只用本地 / 用户自配端点）；
+    //   · providerStore / modelGateway 复用 B2 provider-protocol 的 store/service（模型唯一出口，不新造协议层）；
+    //   · viteBuild     本仓没有随包可用的 Vite 构建器（vite 只在 devDependencies）→ 保持 null，
+    //                   Figma 预览构建继续结构化不可用，不假接；
+    //   · illustratorAvailable / onnx 探测：探测不到就如实传 false / null，不放松命令侧的结构化失败。
+    const mediaFetchImpl = createGuardedFetch(typeof fetch === "function" ? fetch : null);
+    const mediaProviderStore = createMediaProviderStore({ providerProtocol: providerProtocol, providerAdapter: providerAdapter });
+    const mediaModelGateway = createMediaModelGateway({
+      providerProtocol: providerProtocol,
+      mediaDir: path.join(app.getPath("userData"), "dxos", "media"),
+    });
+    const mediaOnnxProbe = probeOnnxAvailability({ modelDir: path.join(app.getPath("userData"), "dxos", "media", "background-removal") });
+    mediaBundle = createMediaBundle({
+      userDataDir: app.getPath("userData"),
+      identityStore: identity.store,
+      authorization: identity.authorization,
+      logger: null,
+      clock: null,
+      // B5f：真实依赖注入面（未就绪项保持 null / false，命令侧仍 MEDIA_DEPENDENCY_UNAVAILABLE）。
+      fsAdapter: dxosFsAdapter,
+      fetchImpl: mediaFetchImpl,
+      providerStore: mediaProviderStore,
+      modelGateway: mediaModelGateway,
+      modelDir: mediaOnnxProbe.modelDir,
+      modelPath: mediaOnnxProbe.modelPath,
+      onnxRuntime: mediaOnnxProbe.runtime,
+      illustratorAvailable: probeIllustratorAvailability(),
+      // 本仓无随包 Vite 构建器（vite 仅 devDependency）→ 如实 null。
+      viteBuild: null,
+    });
+    registerMediaIpc({
+      ipcMain,
+      bundle: mediaBundle,
+      identity: identity.service,
+      isTrusted: trusted,
+      send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("media:event", event); },
+    });
+
+    // B6a：自动化域装配已下移到 agent / developer / plugin 之后（见下方「B7j：自动化域装配」）。
+    // B6c：平台域。
+    //   · 快照落 <userData>/dxos/backups（排除 credentials 目录，绝不含明文密钥）；
+    //   · 诊断只读 process.env 之外的进程事实，环境变量与绝对路径都不出主进程；
+    //   · 网络判定复用 networkSafety 口径（HTTPS + 域白名单 + DNS 公网校验），不另造一套；
+    //   · platform:command 与 model / task / agent / skill / media 同一条 trusted(event) 边界。
+    platformBundle = createPlatformBundle({
+      userDataDir: app.getPath("userData"),
+      identityStore: identity.store,
+      authorization: identity.authorization,
+      appVersion: app.getVersion(),
+      appName: "OpenArc OS",
+      environment: { locale: app.getLocale(), build: null },
+      // 受监督子进程清单：只取 RuntimeSupervisor 的 safe snapshot；不暴露 pid / 路径。
+      processes: () => collectSupervisedProcesses(identity),
+      clock: null,
+      logger: null,
+    });
+    try { platformBundle.startProcessMonitor("main"); } catch { /* 诊断落盘失败不阻断启动 */ }
+    registerPlatformIpc({
+      ipcMain,
+      bundle: platformBundle,
+      identity: identity.service,
+      isTrusted: trusted,
+    });
+
+    // B7a：开发者平台（本地 App 生命周期）。
+    //   · 六张表沿用 v22（user_installed_apps / user_app_install_state / app_market_releases /
+    //     app_credential_bindings / app_runtime_events / app_network_audit），零 CREATE / ALTER；
+    //   · 包字节落 <userData>/dxos/developer-apps/packages（清单缓存与当前版本指针在 app_market_releases）；
+    //   · 出网沿用 developerNetwork 口径（HTTPS + 域白名单 + DNS 公网校验 + 每分钟 60 次限流 + 审计）；
+    //     未注入 lookup / fetch 时走 node:dns 与 globalThis.fetch；测试全部注入假实现（离线）；
+    //   · developer:command 与 platform / automation 同一条 trusted(event) 边界。
+    // B7f：安装 / 升级 / 回滚的声明式迁移注入面。
+    //   · 迁移引擎需要 snapshotSubtree / restoreSubtreeSnapshot，只有 dxos-fs 完整实例有，
+    //     B6b 的窄适配器面没有；因此取 .store（同一棵树，不新建第二份数据目录）；
+    //   · snapshotRoot = <userData>/dxos/developer-apps/migrations（任务书 item 2）。
+    const userData = app.getPath("userData");
+    const developerMigrationFs = dxosFsAdapter ? dxosFsAdapter.store : null;
+    const developerMigrationSnapshotRoot = path.join(userData, "dxos", "developer-apps", "migrations");
+    // 实时房间 authorize：只认主进程会话推导出的 userId，payload 自报的 userId 必须与之一致。
+    const developerRealtimeAuthorize = ({ userId } = {}) => {
+      const sessionRef = identity.service ? identity.service.current : null;
+      if (!sessionRef) return { ok: false, error: "UNAUTHORIZED", detail: "no-session" };
+      const session = identity.store && typeof identity.store.validateSession === "function" ? identity.store.validateSession(sessionRef, { sensitive: false }) : null;
+      if (!session || session.ok !== true) return { ok: false, error: "UNAUTHORIZED", detail: "invalid-session" };
+      const sessionUserId = session.user && session.user.id != null ? session.user.id : null;
+      if (!sessionUserId || (userId && String(userId) !== String(sessionUserId))) return { ok: false, error: "FORBIDDEN", detail: "user-mismatch" };
+      return { ok: true };
+    };
+    // B7h：逐切片装配并登记状态。任何一片失败只降级该片（不是整批静默消失）：
+    //   · 失败原因收集进 developerExtensionNotes，随 extensionStatus 交给 developer-bootstrap，
+    //     最终出现在 developer/health 的 degraded / degradedReason / extensions 里；
+    //   · health 的 commands 报"实际可达数"（16 基座 + 真正装配上的切片命令），不再报静态白名单 70。
+    const developerExtensionState = { lab: "missing", collab: "missing", migrations: "missing", realtime: "missing" };
+    const developerExtensionNotes = [];
+    const noteSlice = (slice, status, error) => {
+      developerExtensionState[slice] = status;
+      const detail = String((error && error.message) || error);
+      developerExtensionNotes.push(slice + "(" + status + "): " + detail);
+      console.warn("[openarc] 开发者扩展切片装配失败（" + slice + "）：" + detail);
+    };
+    let developerLab = null;
+    try { developerLab = new DeveloperLab({ rootDir: path.join(userData, "dxos", "developer-lab") }); developerExtensionState.lab = "ok"; }
+    catch (error) { developerLab = null; noteSlice("lab", "degraded", error); }
+    let developerCollab = null;
+    try { developerCollab = new DeveloperCollabProjects({ identity: identity.store, store: identity.integrationStore, authService: identity.authorization }); developerExtensionState.collab = "ok"; }
+    catch (error) { developerCollab = null; noteSlice("collab", "missing", error); }
+    let developerMigrationStore = null;
+    try {
+      developerMigrationStore = new DeveloperMigrationSnapshotStore({ snapshotRoot: developerMigrationSnapshotRoot });
+      // 迁移引擎需要 B6 完整文件树；缺 fs 时切片仍登记，但命令会返回结构化不可用 → degraded。
+      developerExtensionState.migrations = developerMigrationFs ? "ok" : "degraded";
+      if (!developerMigrationFs) developerExtensionNotes.push("migrations(degraded): 缺少 B6 虚拟文件树");
+    } catch (error) { developerMigrationStore = null; noteSlice("migrations", "missing", error); }
+    let developerRealtimeHub = null;
+    try { developerRealtimeHub = new DeveloperRealtimeHub({ authorize: developerRealtimeAuthorize }); developerExtensionState.realtime = "ok"; }
+    catch (error) { developerRealtimeHub = null; noteSlice("realtime", "missing", error); }
+    let developerDomainExtensions = null;
+    try {
+      developerDomainExtensions = createDeveloperDomainExtensions({
+        lab: developerLab,
+        docsDir: null,
+        collab: developerCollab,
+        migrationStore: developerMigrationStore,
+        migrationFs: developerMigrationFs,
+        realtimeHub: developerRealtimeHub,
+      });
+    } catch (error) {
+      developerDomainExtensions = null;
+      for (const slice of Object.keys(developerExtensionState)) developerExtensionState[slice] = "missing";
+      const detail = String((error && error.message) || error);
+      developerExtensionNotes.push("assembly(missing): " + detail);
+      console.warn("[openarc] 开发者扩展切片合流装配失败，developer:command 仅保留基座：" + detail);
+    }
+    developerBundle = createDeveloperBundle({
+      userDataDir: userData,
+      identityStore: identity.store,
+      authorization: identity.authorization,
+      // X7：开发者 App 安装/启用时幂等登记 app_principals（agent-bundle 同一写入通道）。
+      authStore: identity.authStore,
+      // Y4：启用 / 禁用 / 卸载绑定宿主侧 App 托管 MCP 注册表（未装起来时为 null，保持既有降级）。
+      appMcpRegistry: appManagedMcpRegistry,
+      systemVersion: app.getVersion(),
+      migrationFs: developerMigrationFs,
+      migrationSnapshotRoot: developerMigrationSnapshotRoot,
+      clock: null,
+      logger: null,
+    });
+    registerDeveloperIpc({
+      ipcMain,
+      bundle: developerBundle,
+      domainExtensions: developerDomainExtensions,
+      extensionStatus: { extensions: developerExtensionState, error: developerExtensionNotes.length ? developerExtensionNotes.join("; ") : null },
+      identity: identity.service,
+      isTrusted: trusted,
+      hostAppId: "ai",
+    });
+    // B4e 收口：把 developer App 目录投影晚绑定给本地账号服务。
+    //   · identity 在 runtime-boot.cjs 里先建，developerBundle 后建，构造期无法注入；
+    //   · 数据仍是同一份（identity SQLite + <userData>/dxos），这里只做只读投影，不新建第二份目录；
+    //   · 未装配时保持 local-account 既有降级（developerApps.available=false），不伪造清单。
+    try {
+      const developerCatalogDomain = require("./developer-domain.cjs");
+      const appCatalogStore = createDeveloperStore({
+        db: identity.store ? identity.store.connection || identity.store.db || null : null,
+        dataRoot: path.join(userData, "dxos"),
+        clock: () => Date.now(),
+      });
+      const appCatalog = developerCatalogDomain.createDeveloperAppCatalogAdapter({ store: appCatalogStore });
+      const attached = identity.localAccountService ? identity.localAccountService.attachAppCatalog(appCatalog) : false;
+      if (!attached) console.warn("[openarc] 开发者 App 目录未接入本地账号服务（identity 未装配 localAccountService）");
+    } catch (error) {
+      console.warn("[openarc] 开发者 App 目录接入本地账号服务失败：" + String((error && error.message) || error));
+    }
+
+    // B7c：可选插件框架 + 本地市场。
+    //   · 三个插件（钉钉 / 天气 / 黄历）默认全关；开关落 <userData>/dxos/integrations.json；
+    //   · 钉钉 webhook / 加签密钥 / clientSecret 走 credential-store 的 safeStorage 后端，明文不落盘；
+    //   · 天气 / 黄历网络经注入 fetch（本机离线时不注入即结构化 INTEGRATION_UNAVAILABLE，不假实现）；
+    //   · 本地市场只读 catalog.json（随包 resources/market 或 <userData>/dxos/market），不联网、不下载；
+    //     云发布 / 审核 / 灰度 / api.dx-os.com 一律 OUT（任务书硬约束）；
+    //   · integration:command / market:command 与 platform / automation 同一条 trusted(event) 边界。
+    pluginBundle = createPluginBundle({
+      userDataDir: app.getPath("userData"),
+      safeStorage,
+      fetch: typeof fetch === "function" ? fetch.bind(globalThis) : null,
+      logger: null,
+      clock: null,
+      // Z1（产品已批准「定义即授权」）：把**既有 MCP 活连接**端口注入集成域，使自动化同步动作
+      // 在「定义已授权 + 插件启用 + 依赖就绪」时真正走既有 tools/call 通道（不另造通道）。
+      // 定义授权闸门在 automation-service（执行前校验 authorization_audit 的定义授权记录）；
+      // MCP 客户端「开关 + 审批决定」双条件保持不变，不新建第二套审批权威。
+      mcpTransport: mcpLiveTransport,
+    });
+    registerIntegrationIpc({
+      ipcMain,
+      bundle: pluginBundle,
+      identity: identity.service,
+      isTrusted: trusted,
+    });
+
+    // B7j：自动化域装配（agent / developer / plugin 均已就绪后才装配，保证适配器非空）。
+    //   · 定义 / 运行记录落 identity-store 同一 SQLite 连接（v22 迁移已建 automations / automation_runs，不改表）；
+    //   · 调度器在主进程内（无云依赖）：到点领取并在异步路径执行，长动作不阻塞主线程；
+    //   · 业务动作依赖全部来自真实实现：
+    //       developerApps ← developer-store（已安装 App / 本地装载清单）
+    //       integrations  ← plugin-service（钉钉 / 领星 / 紫鸟；默认关，未启用 / 无 transport 结构化不可用）
+    //       toolCatalog   ← agent 工具目录唯一执行入口
+    //       agent         ← agent-service.runInstruction（project agent mode 同一路径）
+    //       desktop       ← 本仓无桌面执行端实现，保持 null（health 如实列出缺失原因）
+    //   · automation:event 与 model:event / task:event / agent:event / skill:event / media:event 同一条 trusted(event) 边界。
+    const automationToolCatalog = createAutomationToolCatalogAdapter();
+    const automationDeveloperApps = createAutomationDeveloperAppsAdapter({
+      db: identity.store ? identity.store.connection || identity.store.db || null : null,
+      userDataDir: userData,
+      clock: () => Date.now(),
+      runTool: automationToolCatalog.runTool,
+    });
+    // X4：integrations 只取 plugin-service 的唯一真值 bundle.automationAdapter（含 ziniao_data_sync
+    // 与"建 job 前先过健康闸门"）；该对象缺失才回落本文件的旧实现，且必须出声记录（不静默）。
+    let automationIntegrationsNote = pluginBundle ? null : "plugin-service 未装配";
+    let automationIntegrations = null;
+    if (pluginBundle) {
+      if (pluginBundle.automationAdapter) {
+        automationIntegrations = pluginBundle.automationAdapter;
+      } else {
+        automationIntegrations = createAutomationIntegrationsAdapter({ pluginBundle });
+        automationIntegrationsNote = "plugin-service 未导出 automationAdapter，integrations 已回落旧适配器（缺 ziniao_data_sync 与建 job 前健康闸门）";
+        try { console.warn("[openarc] " + automationIntegrationsNote); } catch { /* 日志失败不改装配结果 */ }
+      }
+    }
+    automationBundle = createAutomationBundle({
+      identityStore: identity.store,
+      authorization: identity.authorization,
+      localAccounts: identity.localAccountService
+        ? { findUser: (userId) => { const res = identity.localAccountService.listAuthUsers(); const items = res && res.ok && Array.isArray(res.items) ? res.items : []; return items.find((user) => user.id === userId) || null; } }
+        : null,
+      developerApps: automationDeveloperApps,
+      integrations: automationIntegrations,
+      // 本仓没有桌面执行端（music_play / music_control / open_app 的客户端执行器）：如实保持 null。
+      desktop: null,
+      agent: agentBundle && typeof agentBundle.runInstruction === "function"
+        ? { runInstruction: (instruction, options) => agentBundle.runInstruction(instruction, options) }
+        : null,
+      toolCatalog: automationToolCatalog,
+      // 未装配适配器的可读原因，直接进 automation/health.dependencyDetails。
+      adapterNotes: {
+        desktop: "本仓没有桌面执行端实现（music_play / music_control / open_app 的客户端执行器未装配）",
+        integrations: automationIntegrationsNote,
+        agent: agentBundle ? null : "agent-service 未装配",
+      },
+      logger: null,
+      clock: null,
+    });
+    registerAutomationIpc({
+      ipcMain,
+      bundle: automationBundle,
+      identity: identity.service,
+      isTrusted: trusted,
+      send: (event) => { if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send("automation:event", event); },
+    });
+    automationBundle.startScheduler();
+
+    marketBundle = createMarketBundle({
+      userDataDir: app.getPath("userData"),
+      appDir: path.join(__dirname, ".."),
+      logger: null,
+      clock: null,
+    });
+    registerMarketIpc({
+      ipcMain,
+      bundle: marketBundle,
+      identity: identity.service,
+      isTrusted: trusted,
     });
 
     // D3-04C：注册安全预览协议 handler（每次请求重新授权 + Range 流式返回）。
@@ -1009,6 +1727,12 @@ app.on("will-quit", (event) => {
   if (quitting) return;
   quitting = true;
   event.preventDefault();
+  // B5a：先停媒体子进程（绝不写 Job 状态），再走既有的 MCP → Harness → modelProxy → store 收尾。
+  try { if (mediaBundle && typeof mediaBundle.dispose === "function") mediaBundle.dispose(); } catch { /* 已停 */ }
+  // B6c：停平台域的进程诊断计时器（不再写磁盘）。
+  try { if (platformBundle && typeof platformBundle.dispose === "function") platformBundle.dispose(); } catch { /* 已停 */ }
+  // B6a：只停调度器，绝不写运行状态（退出不是用户取消；遗留 running 由下次启动 recoverInterruptedRuns 置 failed）。
+  try { if (automationBundle && typeof automationBundle.stopScheduler === "function") automationBundle.stopScheduler(); } catch { /* 已停 */ }
   disposeAppResources({ identity, log: (line) => console.log(line) }).then((res) => {
     try {
       console.log("[openarc] 退出收尾：" + JSON.stringify({ ok: res.ok, harness: res.harness, mcp: res.mcp, proxyStopped: res.proxyStopped, storeClosed: res.storeClosed }));

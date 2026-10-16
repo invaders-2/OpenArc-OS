@@ -10,11 +10,13 @@
 
 const { CanvasStore } = require("./canvas-store.cjs");
 const { CanvasService } = require("./canvas-service.cjs");
+// B5d：画布域扩展命令（素材库 / 协作 / 内核能力 / Agent 附件 / .dxcanvas）走同一个 canvas:command。
+const { extendRendererCommands } = require("./canvas-dxos-commands.cjs");
 
 const HOST_APP_ID = "canvas";
 
-/** 宿主（渲染层）可下发的画布命令白名单。新增能力必须显式登记。 */
-const RENDERER_COMMANDS = Object.freeze([
+/** 宿主（渲染层）可下发的画布命令白名单（含 B5d 扩展命令）。新增能力必须显式登记。 */
+const RENDERER_COMMANDS = extendRendererCommands([
   "canvas/create",
   "canvas/list",
   "canvas/get",
@@ -54,7 +56,7 @@ function createCanvasBundle({ identity = null, identityStore = null, resourceSto
   return { store, service };
 }
 
-function registerCanvasIpc({ ipcMain, service, identity, isTrusted, hostAppId = HOST_APP_ID }) {
+function registerCanvasIpc({ ipcMain, service, identity, isTrusted, hostAppId = HOST_APP_ID, extension = null }) {
   if (typeof ipcMain.removeHandler === "function") {
     try { ipcMain.removeHandler("canvas:command"); } catch { /* not registered */ }
   }
@@ -127,7 +129,18 @@ function registerCanvasIpc({ ipcMain, service, identity, isTrusted, hostAppId = 
           return service.importAsset({ context, canvasId: asStr(payload.canvasId, 120), name: asStr(payload.name, 120), dataUrl: typeof payload.dataUrl === "string" ? payload.dataUrl.slice(0, 12 * 1024 * 1024) : "" });
         case "canvas/readAsset":
           return service.readAsset({ context, ref: asStr(payload.ref, 200) });
-        default: return { ok: false, error: CANVAS_COMMAND_NOT_ALLOWED };
+        default: {
+          // B5d：白名单里的扩展命令先交给同一个扩展分发；未命中/未装配一律回落既有错误码，不放行任意命令。
+          if (extension && typeof extension.dispatch === "function") {
+            // 扩展分发两种等价形状都兼容：B5c 扩展用 { command, payload, context }，
+            // 位置参数形状（dispatch(command, payload, ctx)）也接受 —— 只差在声明参数个数。
+            const dispatched = extension.dispatch.length >= 2
+              ? extension.dispatch(command, payload, context)
+              : extension.dispatch({ command, payload, context });
+            if (dispatched != null) return dispatched;
+          }
+          return { ok: false, error: CANVAS_COMMAND_NOT_ALLOWED, detail: asStr(command, 80) || null };
+        }
       }
     } catch {
       return { ok: false, error: "INTERNAL_ERROR" };

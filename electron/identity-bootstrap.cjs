@@ -12,6 +12,8 @@ const path = require("node:path");
 const fs = require("node:fs");
 const { IdentityStore, DEFAULT_TTL_MS, DEFAULT_IDLE_MS } = require("./identity-store.cjs");
 const { IdentityService } = require("./identity-service.cjs");
+// B4 · 本地账号服务（部门 / 用户 / APP 访问 / 审计）：复用既有表与既有身份命令层。
+const { LocalAccountService } = require("./local-account-service.cjs");
 const { IdentityLogger } = require("./identity-log.cjs");
 const { SessionSecretStore, safeStorageBackend, plainFileBackend } = require("./session-secret-store.cjs");
 const { createAuthorizationService, registerAuthorizationIpc } = require("./authorization-bootstrap.cjs");
@@ -21,6 +23,11 @@ const { createGovernanceBundle, registerGovernanceIpc } = require("./governance-
 const { createModelBundle, registerModelIpc } = require("./model-bootstrap.cjs");
 const { createMcpBundle, attachMcpSessionLifecycle, attachMcpAppGrantRevocation } = require("./mcp-bootstrap.cjs");
 const { createCanvasBundle } = require("./canvas-bootstrap.cjs");
+// B5d · 画布域扩展（素材库 / 协作 / 内核能力 / Agent 附件 / .dxcanvas）：复用同一条 identity 连接。
+const { CanvasDxosStore } = require("./canvas-dxos-store.cjs");
+const { CanvasAssetLibraryService } = require("./canvas-dxos-asset-library.cjs");
+const { CanvasAgentAttachmentService } = require("./canvas-dxos-agent-attachments.cjs");
+const { createCanvasDxosExtension } = require("./canvas-dxos-commands.cjs");
 const { createTaskBundle } = require("./task-bootstrap.cjs");
 const { createSideEffectGateway, registerSideEffectIpc } = require("./side-effect-bootstrap.cjs");
 
@@ -125,7 +132,7 @@ function resolveSessionTtlOverride({ env = process.env } = {}) {
  * @param opts.sessionIdleMs  可选，空闲有效期（**只有显式注入才改**；默认 DEFAULT_IDLE_MS）
  * @param opts.timers         可选，到期调度用的 { setTimeout, clearTimeout }（测试注入）
  */
-function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, logger, serviceIdentity = null, nativeImage = null, executorLauncher = null, executorTestHook = null, browserControl = null, sessionTtlMs = null, sessionIdleMs = null, timers = null } = {}) {
+function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, logger, serviceIdentity = null, nativeImage = null, executorLauncher = null, executorTestHook = null, browserControl = null, sessionTtlMs = null, sessionIdleMs = null, timers = null, mcpInvocationSwitch = null } = {}) {
   fs.mkdirSync(userDataDir, { recursive: true, mode: 0o700 });
   const log = logger || new IdentityLogger();
   const store = new IdentityStore({
@@ -148,6 +155,10 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
   const service = new IdentityService({ store, secrets, logger: log, allowAdmin, timers });
   // D3-02：对象授权与身份共用同一条 SQLite 连接与同一套命令接线。
   const { authorization, authStore } = createAuthorizationService({ identityStore: store, logger: log });
+  // B4：本地账号管理命令（identity/departments-list … identity/local-account-info）走同一条
+  // identity:command；认证与超级管理员判定在 identity-service.cjs / local-account-service.cjs 既有实现里。
+  const localAccountService = new LocalAccountService({ identity: store, authStore, authorization, identityService: service });
+  service.attachLocalAccount(localAccountService);
   // D3-03：设备域挂在**同一条** SQLite 连接与事务队列上（迁移 v3 已在 open() 里完成）。
   const { deviceService, deviceStore } = createDeviceBundle({ identityStore: store, authorization, logger: log, serviceIdentity });
   // D3-04A：本地资源对象与 Managed Store（<userData>/library）。启动时做可解释 recovery。
@@ -181,6 +192,23 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
     authService: authorization,
     logger: log,
   });
+  // B5d：画布域扩展。与文档层共用同一条 identity 连接与同一个 canvasDocService；
+  // 命令面仍只有 canvas:command 一条（由 main.cjs 用 extension 挂上，不新建通道）。
+  const canvasDxosTempDir = path.join(userDataDir, "tmp", "canvas-dxos");
+  const canvasDxosStore = new CanvasDxosStore({ identity: store });
+  const canvasAssetLibrary = new CanvasAssetLibraryService({
+    identity: store, store: canvasDxosStore, resourceService, resourceStore,
+    canvasService: canvasDocService, tempDir: () => canvasDxosTempDir,
+  });
+  const canvasAgentAttachments = new CanvasAgentAttachmentService({
+    identity: store, store: canvasDxosStore, canvasService: canvasDocService,
+    resourceService, tempDir: () => canvasDxosTempDir,
+  });
+  const canvasDxosExtension = createCanvasDxosExtension({
+    identity: store, store: canvasDxosStore, canvasService: canvasDocService,
+    resourceService, assetLibrary: canvasAssetLibrary, attachments: canvasAgentAttachments,
+    tempDir: () => canvasDxosTempDir,
+  });
   // D4-01：模型 Provider / Credential / Config / Default（复用同一连接与 AuthorizationService）。
   const { modelStore, credentialStore, modelService, modelProxy, seedModelAppPolicy } = createModelBundle({
     identityStore: store,
@@ -200,6 +228,8 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
     userDataDir,
     safeStorage,
     logger: log,
+    // B4e 收口：显式开关的**同一实例**注入到每个真实 McpClient（默认关闭）。
+    invocationGate: mcpInvocationSwitch ? () => mcpInvocationSwitch.isToolInvocationEnabled() === true : null,
   });
   // D5-03 第三批 · 生命周期接线（唯一装配路径，产品与探针共用）：
   //   · 登出 / 锁屏（identity/logged-out | identity/locked）→ 收掉活连接与在途握手；
@@ -246,10 +276,11 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
   // D5-02 Closure：画布生成运行需要任务层（预算/停止/账本）与模型层 —— 装配完成后晚绑定同一实例。
   canvasDocService.attachRuntime({ taskService, modelService, tempDir: path.join(userDataDir, "tmp", "canvas-imports") });
   try { require("node:fs").mkdirSync(path.join(userDataDir, "tmp", "canvas-imports"), { recursive: true }); } catch { /* ignore */ }
+  try { require("node:fs").mkdirSync(canvasDxosTempDir, { recursive: true }); } catch { /* ignore */ }
 
   // Trusted Approval Gateway：Renderer 只能经此通道看到安全投影并提交 decision。
   const sideEffectGateway = createSideEffectGateway({ sideEffectRuntime });
-  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, modelStore, credentialStore, modelService, modelProxy, mcpStore, mcpService, taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, sideEffectGateway, orchestrator, browserControl, canvasDocService };
+  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, modelStore, credentialStore, modelService, modelProxy, mcpStore, mcpService, taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, sideEffectGateway, orchestrator, browserControl, canvasDocService, localAccountService, canvasDxosStore, canvasAssetLibrary, canvasAgentAttachments, canvasDxosExtension };
 }
 
 /**
@@ -260,7 +291,7 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
  * @param opts.bootError 身份服务创建失败时的人话原因；有它时 service 必须为 null，
  *                       启动询问会拿到 BOOT_FAILED，渲染层据此走已有的 BootRetry
  */
-function registerIdentityIpc({ ipcMain, service, authorization, device, resource, resourceSearch, resourcePreview, governance, governanceService, projects, canvas, picker, model, sideEffect = null, dialog, BrowserWindow, shell = null, isTrusted, send, sendSideEffect = null, bootError = null }) {
+function registerIdentityIpc({ ipcMain, service, authorization, device, resource, resourceSearch, resourcePreview, governance, governanceService, projects, canvas, picker, model, sideEffect = null, dialog, BrowserWindow, shell = null, resolveFile = null, isTrusted, send, sendSideEffect = null, bootError = null }) {
   ipcMain.handle("identity:command", async (e, command) => {
     if (isTrusted && !isTrusted(e)) throw Error("Forbidden");
     if (!service)
@@ -281,7 +312,8 @@ function registerIdentityIpc({ ipcMain, service, authorization, device, resource
   // D3-03：设备域（含管理写操作；授权判断在 DeviceService 内，见 device-bootstrap 顶部注释）。
   if (device) registerDeviceIpc({ ipcMain, service: device, identity: service, isTrusted });
   // D3-04A：资源命令（无 raw fs；导入/链接经主进程 dialog）。
-  if (resource) registerResourceIpc({ ipcMain, service: resource, search: resourceSearch || null, preview: resourcePreview || null, projects: projects || null, canvas: canvas || null, picker: picker || null, identity: service, isTrusted, dialog: dialog || null, BrowserWindow: BrowserWindow || null, shell });
+  // Z2：resolveFile 由 main.cjs 注入（file-service.resolve 的窄投影），访达选中项据此加入资源库。
+  if (resource) registerResourceIpc({ ipcMain, service: resource, search: resourceSearch || null, preview: resourcePreview || null, projects: projects || null, canvas: canvas || null, picker: picker || null, identity: service, isTrusted, dialog: dialog || null, BrowserWindow: BrowserWindow || null, shell, resolveFile });
   // D3-04D：治理命令（Users / Departments / Apps / Audit / Scope / Ownership / Bulk）。
   if (governance || governanceService) registerGovernanceIpc({ ipcMain, service: governance || governanceService, authorization, identity: service, isTrusted });
   // D4-01：模型管理命令（actor sessionRef / appId 由主进程决定；无 raw credential / proxy capability）。

@@ -1,0 +1,66 @@
+{
+  "$comment": "逐图阈值覆写与隔离：默认阈值（比例 < 0.5% 且最大通道差 <= 12）对确定性截图有效；这里只登记实测不稳定、且不稳定原因与视觉回归无关的帧。每条都必须写明 reason 与 measured（重复采样实测值），run-all.mjs 会在报告的 thresholdOverride / exclusion 里逐张标注。[EXCL] 帧只测量、不纳入判定，控制台与报告都会显式列出，绝不静默通过。缺省（本文件不存在）时全部按默认阈值判定。",
+  "default": {
+    "changedRatioMax": 0.005,
+    "maxChannelDiffMax": 12,
+    "pixelTolerance": 0
+  },
+  "overrides": {
+    "skills/compare-dark-skill.png": {
+      "pixelTolerance": 4,
+      "reason": "深色主题对照图：整页存在 ±1~2 级的栅格化/合成抖动（红色斜纹铺满全图、包围盒 0,0 2880×1800，但最大通道差只有 2），偶发且与布局无关。把 pixelTolerance 提到 4 吸收该抖动；最大通道差仍受默认 12 约束，任何 >4 级的真实颜色或结构改动依旧计入变化像素比例。",
+      "measured": {
+        "samples": 4,
+        "changedRatioMax": 0.364311,
+        "maxChannelDiffMax": 2,
+        "note": "全量运行 + 单套采样中的最大值"
+      }
+    },
+    "skills/compare-dark-mcp.png": {
+      "pixelTolerance": 4,
+      "reason": "深色主题对照图（McpCenter 侧）：与 compare-dark-skill 同源的整页 ±1 级抖动，一次采样变化像素 1.23%、最大通道差 1，另一次为 0。同样用 pixelTolerance=4 吸收。",
+      "measured": {
+        "samples": 3,
+        "changedRatioMax": 0.012255,
+        "maxChannelDiffMax": 1
+      }
+    },
+    "model/09-streaming.png": {
+      "maxChannelDiffMax": 160,
+      "reason": "流式输出帧里每行带实时挂钟时间戳（如 17:39:48），两次运行相差 1 秒时相差的那几位数字就是最大通道差 142 的来源——这是时间在变，不是界面在变。变化像素比例实测仅 0.13%，远低于 0.5%；这里只放宽最大通道差到 160（留出余量），比例阈值仍是默认 0.5%。",
+      "measured": {
+        "samples": 4,
+        "changedRatioMax": 0.001581,
+        "maxChannelDiffMax": 142
+      }
+    },
+    "model/10-stream-error.png": {
+      "maxChannelDiffMax": 160,
+      "reason": "同 model/09-streaming：行内实时时间戳跨秒导致的字形差异，比例实测 0.06%，与视觉回归无关。",
+      "measured": {
+        "samples": 4,
+        "changedRatioMax": 0.000584,
+        "maxChannelDiffMax": 142
+      }
+    },
+    "model/11-cancelling.png": {
+      "exclude": true,
+      "reason": "取消中状态的滚动/布局竞态：该帧拍摄时流式行数不定，实测少数运行里正文整体纵向位移（对比图可见同一段文案上下重影），变化像素比例在 0.035%~12.28% 之间跳变、最大通道差 142~223；同一基线下约 1/5 的运行会换一种排版，这不是视觉回归。该帧只测量、不纳入判定，作为未保护的已知不稳定帧登记。",
+      "measured": {
+        "samples": 7,
+        "changedRatioMax": 0.122797,
+        "maxChannelDiffMax": 223,
+        "note": "7 次比较中 6 次 <0.05%，1 次 12.28%"
+      }
+    },
+    "model/12-cancelled-settled.png": {
+      "maxChannelDiffMax": 160,
+      "reason": "同 model/09-streaming：行内实时时间戳跨秒导致的字形差异，比例实测 0.16%，与视觉回归无关。",
+      "measured": {
+        "samples": 4,
+        "changedRatioMax": 0.001581,
+        "maxChannelDiffMax": 142
+      }
+    }
+  }
+}

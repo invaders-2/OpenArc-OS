@@ -132,7 +132,16 @@ test("D5-03-E · ACP SDK 只认项目内那一份，版本 1.4.0（与锁文件�
   const sdk = resolveAcpSdk();
   assert.ok(sdk, "ACP SDK 必须解析得到");
   assert.equal(fs.existsSync(sdk), true);
-  assert.ok(sdk.startsWith(ROOT + path.sep), "SDK 必须来自项目内：" + sdk);
+  /*
+   * worktree 下 node_modules 是指向主仓的符号链接，Node 默认 preserveSymlinks=false，
+   * require.resolve 返回的是 realpath 之后的物理路径，直接拿字面 ROOT 前缀判定必然失败。
+   * 改用「解析后的物理路径必须落在本项目 node_modules 的真实位置之下」：
+   * 主仓（node_modules 是实体目录）与 worktree（符号链接）会落到同一个物理安装根，
+   * 共享运行时 / 全局安装是另一个物理根，仍然被排除 —— 只是换成可比坐标系，不放宽范围。
+   */
+  const projectModulesReal = fs.realpathSync(path.join(ROOT, "node_modules"));
+  const sdkReal = fs.realpathSync(sdk);
+  assert.ok(sdkReal.startsWith(projectModulesReal + path.sep), "SDK 必须来自本项目 node_modules 的真实位置：" + sdkReal);
   assert.equal(sdk.startsWith(SHARED_RUNTIME + path.sep), false, "SDK 不得来自共享运行时");
 
   const sdkPkg = JSON.parse(fs.readFileSync(path.join(path.dirname(path.dirname(sdk)), "package.json"), "utf8"));

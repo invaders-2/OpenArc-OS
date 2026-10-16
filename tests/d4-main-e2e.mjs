@@ -9,23 +9,44 @@
  *   2) 只读打开隔离 userData 的 identity.db（node:sqlite readOnly）与 runtime/side-effects/executors 计数。
  * 绝不写库、绝不手工设终态。
  *
- * 工具权限一律经产品入口：优先真实治理 UI（组织治理 → App 权限 → 工具权限），
- * 或 window.openarc.governance.command 产品桥。已删除 OPENARC_E2E_SEED_TOOL_GRANTS test-only 播种。
+ * 工具权限一律经产品入口：现行组织治理 UI 只提供 APP 访问的"权限策略"（权限代码 → 决策 →
+ * identity/app-permission-policy-save，落 app_resource_grants scope=ACCESS/resource_type=app-permission）；
+ * TOOL-scope 的 data-gov-tool-* 控件已随组织治理重构移除（src/dist 均 0 处），而 authorizeTool 只认
+ * scope=TOOL grant（electron/authorization-service.cjs:359-383），故 TOOL 授予 / 撤销走仍登记在
+ * electron/governance-bootstrap.cjs:57-59 命令白名单里的 window.openarc.governance.command 产品桥。
+ * 已删除 OPENARC_E2E_SEED_TOOL_GRANTS test-only 播种。
  *
  * 必需流程与退出码契约：
  *   boot / setup / flow1 / flow2 / flow3 / flow4 / flow5 / flow6 全部必需：任一 FAIL 或 renderer/main 错误 > 0 → overallStatus FAIL 且 exit 非零。
  *   任一必需流程 NOT_VERIFIED → PARTIAL；全部 PASS → PASS 且 exitCode=0。
  *   绝不把 NOT_VERIFIED 当作通过。
  *
- * 流程 4 本轮经**真实产品入口**跑通：真实 UI 创建任务 → 出真实产物 → 经新增追加入口（[data-ai-append-*]，
- * task/appendStep）在同一 Task 追加下一步目标 → 后续 step 真实耗尽预算停止 → UI 显式续接（[data-ai-resume]，
- * task/resume）→ 完成。拒绝矩阵（并发 / 重复 revision / 陈旧 revision / 不安全状态 / 非 owner / 执行前撤权）
- * 与本条主流程同源同入口，且每条拒绝都有「可追加时确实可追加」的正对照。
+ * 产品漂移（第三处）与覆盖归属（本轮据实修正，不改产品）：
+ *   AI 面板的追加入口（[data-ai-append-block] / [data-ai-append-goal] / [data-ai-append]）、步骤列表
+ *   （[data-ai-steps] / [data-ai-step] / data-ai-step-status / data-ai-step-appended）与 denied 明细
+ *   （[data-ai-denied] / [data-ai-denied-tool] / [data-ai-denied-reason]）已随产品重构从 src+dist 下线
+ *   （现行 src/desktop/components.tsx:982-1077 只有 goal/run/cancel/status/resume/recovery/verification）。
+ *   任务控制台（src/projects/TaskConsole.tsx:991-1001 的 data-task-action="continue"、:1109-1126 的
+ *   data-task-steps）读的是**另一套任务域**：agent/task/* → dx_tasks / dx_task_steps
+ *   （electron/agent-service.cjs:529-545、electron/agent-task-store.cjs:401,578,942）；流程 4/5/6 的 core 任务
+ *   （tasks / task_steps，electron/task-bootstrap.cjs:144-182）既不出现在它的可交互列表里（unified-list 只把
+ *   core 任务当只读文本，TaskConsole.tsx:892-897），agent/task/continue 也只是把 react 任务重新排队
+ *   （agent-task-store.cjs:942-966），语义上不等于 task/appendStep。因此本条 gate 的追加改经**仍在产**的产品桥
+ *   window.openarc.task.command task/appendStep（与历史 [data-ai-append] 同一条 IPC，flow6 任务 B 一直如此），
+ *   步骤一致性以后端 task/get 为准（F4.32 / F5.9）。
+ *   取代覆盖：服务级/IPC 追加（含拒绝矩阵）→ tests/d4-09-append-step.test.mjs；预算续接 UI → tests/d4-06-resume-ui.mjs；
+ *   denied 展示已无 UI，后端由本文件 F3.5 / F3.8 保证。
+ *
+ * 流程 4 本轮经**真实产品入口**跑通：真实 UI 创建任务 → 出真实产物 → 经产品桥 task/appendStep 在同一 Task
+ * 追加下一步目标 → 后续 step 真实耗尽预算停止 → UI 显式续接（[data-ai-resume]，task/resume）→ 完成。
+ * 拒绝矩阵（并发 / 重复 revision / 陈旧 revision / 不安全状态 / 非 owner / 执行前撤权）与本条主流程同源同入口，
+ * 且每条拒绝都有「可追加时确实可追加」的正对照。
  *
  * 流程 6 本轮经**真实产品入口**验证"任务版本固定"：真实 UI 新建任务 → 后端解析并冻结默认 model config
- * （renderer 自报无效）→ 经产品桥把该 config 提升版本 → 真实 UI 追加步骤必须明确 MODEL_CONFIG_CHANGED
- * （Task/Step/run 全 BLOCKED、0 新 model call、0 新 Artifact、旧产物逐字段不变、UI 如实显示错误）→
- * 新任务绑定新版本正常成功 → 默认切到另一个 config 后，绑定原 config 的任务 append/resume 仍成功且归属不变。
+ * （renderer 自报无效）→ 经产品桥把该 config 提升版本 → 经产品桥 task/appendStep 追加步骤必须明确
+ * MODEL_CONFIG_CHANGED（Task/Step/run 全 BLOCKED、0 新 model call、0 新 Artifact、旧产物逐字段不变、
+ * 面板经 task/result 如实显示错误）→ 新任务绑定新版本正常成功 → 默认切到另一个 config 后，
+ * 绑定原 config 的任务 append/resume 仍成功且归属不变。
  */
 import { chromium } from "@playwright/test";
 import { spawn } from "node:child_process";
@@ -52,6 +73,8 @@ const TOOL_SEARCH = "tool.resource.search";
 const TOOL_META = "tool.resource.readMetadata";
 const TOOL_TRASH = "tool.resource.trash";
 const TOOL_ACTIONS = [TOOL_SEARCH, TOOL_META, TOOL_TRASH];
+// 现行 APP 访问"权限策略"的真实权限码（写 app_resource_grants scope=ACCESS/resource_type=app-permission）
+const GOV_POLICY_CODE = "app.ai.tool.permission-probe";
 const GOAL_TRASH = "MAIN-E2E WRITE: 把目标资源移入废纸篓";
 const extraArgs = (process.env.ELECTRON_EXTRA_ARGS || "").split(" ").filter(Boolean);
 
@@ -231,22 +254,34 @@ async function main() {
     return waitGate("ready", 30000);
   }
   async function logout() { const c = await click('[data-d3-id="topbar-logout"]'); return c === "ok" && await waitGate("unauthenticated", 20000); }
-  // ---------------------------------------------------------------- 真实治理 UI：授予 ai TOOL 权限
+  // ---------------------------------------------------------------- 真实治理入口：APP 访问"权限策略" UI + TOOL-scope 产品桥
+  //
+  // 现行组织治理 App 只有 org / app / audit 三分区（src/governance/GovernanceApp.tsx:881-1116）：
+  // App 分区的写入口是"权限策略"：data-org-field="policy-code" + data-org-field="policy-decision"
+  // + data-org-action="save-policy" → identity/app-permission-policy-save，落 app_resource_grants
+  // scope=ACCESS / resource_type=app-permission（electron/local-account-service.cjs:983-1026）。
+  // TOOL-scope 的 data-gov-tool-* 驱动控件已从 GovernanceApp 删除，而 authorizeTool 只认 scope=TOOL
+  // grant（electron/authorization-service.cjs:359-383），所以 TOOL 授予走仍登记在产品命令白名单
+  // （electron/governance-bootstrap.cjs:57-59）的 governance/grantAppToolAccess 产品桥，并用
+  // getAppToolAccess 产品读入口确认。断言随之改为"某权限码的真实策略被写入/读回"，不再断言旧控件存在。
   async function grantToolsViaUI(actions) {
     const c = await click('[aria-label="打开组织治理"]');
     if (c !== "ok") return { ok: false, reason: "dock-click:" + c };
-    if (!(await waitSel('[data-d3-04d="app"]', 20000))) return { ok: false, reason: "no-gov-app" };
-    await click('[data-d3-04d-tab="apps"]');
-    if (!(await waitSel('[data-gov-tool-toggle="ai"]', 20000))) return { ok: false, reason: "no-ai-toggle" };
-    await click('[data-gov-tool-toggle="ai"]');
-    if (!(await waitSel('[data-gov-tool-access="ai"]', 20000))) return { ok: false, reason: "no-tool-panel" };
-    for (const a of actions) {
-      if (!(await has('[data-gov-tool-action="' + a + '"] input[type=checkbox]'))) return { ok: false, reason: "missing-action:" + a };
-      await click('[data-gov-tool-action="' + a + '"] input[type=checkbox]');
+    if (!(await waitSel('[data-org-shell]', 20000))) return { ok: false, reason: "no-gov-app" };
+    await click('[data-org-nav="app"]');
+    if (!(await waitSel('[data-org-pane="app"]', 20000))) return { ok: false, reason: "no-app-pane" };
+    // 真实 UI：写一条权限策略 → loadApp 重新拉快照 → 按权限码读回
+    const setCode = await setInput('[data-org-field="policy-code"]', GOV_POLICY_CODE);
+    const setDecision = await setInput('[data-org-field="policy-decision"]', "allow");
+    const saved = await click('[data-org-action="save-policy"]');
+    const policyReadBack = await waitFor(async () => await has('[data-org-policy="' + GOV_POLICY_CODE + '"]'), 20000);
+    if (setCode !== "ok" || setDecision !== "ok" || saved !== "ok" || !policyReadBack) {
+      return { ok: false, reason: "policy-ui:" + JSON.stringify({ setCode, setDecision, saved, policyReadBack }) };
     }
-    await click('[data-gov-tool-grant="ai"]');
+    // TOOL-scope 授予：UI 已无入口，走产品桥；再经产品读入口确认
+    const granted = await grantToolsBridge(actions);
     const verified = await waitFor(async () => { const ta = await getToolAccess(); return !!(ta && ta.ok && actions.every((a) => (ta.grantedActions || []).includes(a))); }, 20000);
-    return { ok: verified, reason: verified ? "ui-granted" : "ui-not-verified" };
+    return { ok: !!(granted && granted.ok) && verified, reason: verified ? "policy-ui-ok+bridge-granted" : "policy-ui-ok+bridge-not-verified:" + JSON.stringify(granted) };
   }
 
   // ---------------------------------------------------------------- boot 观测（唯一 boot seam）
@@ -263,12 +298,22 @@ async function main() {
 
   // ---------------------------------------------------------------- 真实 UI：首次初始化 + 登录
   record("setup", "A1 · 真实 UI 首次初始化（FIRST RUN）", await has('[data-d3-id="setup-form"]'), "setup-form", "present");
+  // 现行初始化是三步向导（src/identity/AuthScreens.tsx:183-342 SETUP_STEPS）：第 1 步显示名 → 第 2 步账号 →
+  // 第 3 步密码 + 确认。旧的一次性单页表单（name/identifier/password/confirm 同屏、直接点 setup-submit）已不存在：
+  // setup-identifier 只在第 2 步挂载，setup-submit 只在第 3 步挂载，且每步 setup-next 有各自的启用条件。
+  const setupNameOnly = (await waitSel('[data-d3-id="setup-name"]', 15000)) && !(await has('[data-d3-id="setup-identifier"]'));
+  record("setup", "A1b · 三步向导第 1 步只呈现显示名（setup-name 在 / setup-identifier 不在）", setupNameOnly, JSON.stringify({ name: await has('[data-d3-id="setup-name"]'), identifier: await has('[data-d3-id="setup-identifier"]') }), "step1 name only");
   await setInput('[data-d3-id="setup-name"]', "Main E2E Admin");
-  await setInput('[data-d3-id="setup-identifier"]', ADMIN);
-  await setInput('[data-d3-id="setup-password"]', PW);
-  await setInput('[data-d3-id="setup-confirm"]', PW);
-  await sleep(120);
-  record("setup", "A2 · 真实 UI 提交初始化", (await click('[data-d3-id="setup-submit"]')) === "ok", "clicked", "ok");
+  await waitFor(async () => !(await isDisabled('[data-d3-id="setup-next"]')), 15000);
+  await click('[data-d3-id="setup-next"]');
+  const setupStep2 = await waitSel('[data-d3-id="setup-identifier"]', 15000);
+  if (setupStep2) await setInput('[data-d3-id="setup-identifier"]', ADMIN);
+  await waitFor(async () => !(await isDisabled('[data-d3-id="setup-next"]')), 15000);
+  await click('[data-d3-id="setup-next"]');
+  const setupStep3 = await waitSel('[data-d3-id="setup-password"]', 15000);
+  if (setupStep3) { await setInput('[data-d3-id="setup-password"]', PW); await setInput('[data-d3-id="setup-confirm"]', PW); }
+  await waitFor(async () => !(await isDisabled('[data-d3-id="setup-submit"]')), 15000);
+  record("setup", "A2 · 真实 UI 三步向导提交初始化", setupStep2 && setupStep3 && (await click('[data-d3-id="setup-submit"]')) === "ok", JSON.stringify({ step2: setupStep2, step3: setupStep3 }), "step2+step3+submit ok");
   record("setup", "A3 · 初始化后 gate=unauthenticated", await waitGate("unauthenticated", 30000), await gate(), "unauthenticated");
   await setInput('[data-d3-id="login-identifier"]', ADMIN);
   await setInput('[data-d3-id="login-password"]', PW);
@@ -281,7 +326,7 @@ async function main() {
   record("setup", "A8 · 无 test-only 播种：起始 app TOOL grant 为 0", toolGrantRows().length === 0, toolGrantRows().length, 0);
 
   // ---------------------------------------------------------------- 真实 UI：Settings → Models
-  await click('[data-app-id="settings"]');
+  await click('[data-dock-id="settings"]');
   await waitSel('[data-settings-pane="model"]', 20000);
   await click('[data-settings-pane="model"]');
   const settingsOpen = await waitSel('[data-d4-01="settings"]', 20000);
@@ -323,7 +368,7 @@ async function main() {
 
   // ================================================================ 流程 1：管理员授权 → WRITE 审批 → 一次副作用 → 成功
   const uiGrant = await grantToolsViaUI(TOOL_ACTIONS);
-  record("flow1", "F1.0a · 真实治理 UI 给 ai 授予三个 TOOL 动作", uiGrant.ok, JSON.stringify(uiGrant), "ok=true");
+  record("flow1", "F1.0a · 现行治理入口：真实 UI（组织治理 → APP 访问）保存权限策略 " + GOV_POLICY_CODE + " 并按权限码读回 + TOOL-scope 三个动作经产品桥 grantAppToolAccess 授予（UI 已无 data-gov-tool-* 控件）", uiGrant.ok, JSON.stringify(uiGrant), "ok=true");
   const taAfterGrant = await getToolAccess();
   record("flow1", "F1.0b · getAppToolAccess 反映三个 TOOL 动作全部已授予", !!(taAfterGrant && taAfterGrant.ok) && TOOL_ACTIONS.every((a) => (taAfterGrant.grantedActions || []).includes(a)), JSON.stringify(taAfterGrant && taAfterGrant.grantedActions), JSON.stringify(TOOL_ACTIONS));
 
@@ -516,12 +561,10 @@ async function main() {
   record("flow3", "F3.3 · Task/Step BLOCKED（不得 SUCCEEDED）", denyTerminal && denyStatus === "BLOCKED" && denyTask && denyTask.status === "BLOCKED" && denyStep && denyStep.status === "BLOCKED", JSON.stringify({ task: denyStatus, step: denyStep && denyStep.status }), "BLOCKED/BLOCKED");
   record("flow3", "F3.4 · 0 mutation / 无 SideEffectCall", denyResource && denyResource.status === "active" && denyCalls.length === 0, JSON.stringify({ resource: denyResource && denyResource.status, sideEffectCalls: denyCalls.length }), "active + 0 call");
   record("flow3", "F3.5 · task/get.deniedOperations 含 resource.trash + TOOL_APP_NOT_GRANTED", !!trashOp && trashOp.reasonCode === "TOOL_APP_NOT_GRANTED", JSON.stringify(denyOps.map((o) => ({ tool: o.toolId, reason: o.reasonCode }))), "trash + TOOL_APP_NOT_GRANTED");
-  const deniedVisible = await waitFor(async () => await has("[data-ai-denied]"), 20000);
-  const deniedToolText = (await text("[data-ai-denied-tool]")).trim();
-  const deniedReasonText = (await text("[data-ai-denied-reason]")).trim();
-  const statusText = (await text("[data-ai-status-text]")).trim();
+  // 原 F3.6「AI 面板 data-ai-denied 明细可见」已删除：该节点随产品重构从 src+dist 下线
+  // （现行 src/desktop/components.tsx:982-1077 无 denied 投影）。它保证的是"被拒的明确 WRITE 操作对用户可见且不假成功"，
+  // 现在由后端 deniedOperations（F3.5）+ 授权决策/0 执行（F3.8）保证；明细 UI 取代覆盖见 tests/d4-09-append-step.test.mjs。
   const resultText = (await text("[data-ai-result]")).trim();
-  record("flow3", "F3.6 · AI 面板 data-ai-denied 可见（tool/target/reason），状态 BLOCKED", deniedVisible && deniedToolText.includes("resource.trash") && deniedReasonText.includes("TOOL_APP_NOT_GRANTED") && statusText.indexOf("BLOCKED") >= 0, JSON.stringify({ deniedVisible, tool: deniedToolText, reason: deniedReasonText, status: statusText }), "data-ai-denied + BLOCKED");
   record("flow3", "F3.7 · 明确 WRITE 被拒不得假成功：无 SUCCEEDED 文案 / 无成功产物", denyStatus !== "SUCCEEDED" && !resultText.includes("完成") && denyCalls.length === 0, JSON.stringify({ status: denyStatus, result: resultText.slice(0, 40) }), "not SUCCEEDED + empty result");
   const denyProposalIds = new Set(byTask(denySnap.proposals, denyRun.taskId).map((p) => p.proposal_id));
   const denyDecisions = denySnap.decisions.filter((d) => denyProposalIds.has(d.proposal_id) && d.reason_code === "TOOL_APP_NOT_GRANTED" && d.decision === "DENIED");
@@ -545,7 +588,6 @@ async function main() {
   const runsOfTask = (s, id) => byTask(s.runs, id);
   const resourceOf = (s, id) => s.resources.find((r) => r.resource_id === id);
   const trashStateOf = (s, id) => ((s.libraryResources || []).find((r) => r.resource_id === id) || {}).trash_state;
-  const inputValue = (sel) => js("const el = document.querySelector(" + JSON.stringify(sel) + "); return el ? String(el.value) : null;");
   const appendViaBridge = (taskId, goal, expectedRevision) => bridge("task", { type: "task/appendStep", taskId, goal, expectedRevision });
   // 在途状态下 task revision 仍会随在途事件推进：始终以刚读到的 revision 重试，直到拿到确定性拒绝或接收。
   async function appendStable(taskId, goal, attempts = 8) {
@@ -713,7 +755,7 @@ async function main() {
     "BLOCKED + 2 steps + 1 artifact + APPEND_NOT_SUCCEEDED");
   R.flow4Revoke = { steps: (revGet2.steps || []).length, artifacts: (revGet2.artifacts || []).length, appendReason: revGet2.appendReason, status: revGet2.task.status };
   const regrant = await grantToolsViaUI(TOOL_ACTIONS);
-  record("flow4", "F4.23 · 14(f) 正对照：经真实治理 UI 重新授予三个 TOOL 动作（主任务的真实 WRITE 依赖它）", regrant.ok, JSON.stringify(regrant), "ok=true");
+  record("flow4", "F4.23 · 14(f) 正对照：经现行治理入口（APP 访问权限策略 UI + 产品桥 grantAppToolAccess）重新授予三个 TOOL 动作（主任务的真实 WRITE 依赖它）", regrant.ok, JSON.stringify(regrant), "ok=true");
 
   /* ---------------- 主任务（必须最后创建）：真实 UI 创建 → 追加 → 预算停止 → UI 续接 → 成功 ---------------- */
   const heroTarget = await createResource("Main E2E Flow4 Target", "text");
@@ -744,35 +786,25 @@ async function main() {
     byTask(heroSnap1.sideEffectCalls, heroRun.taskId).length === 1 && !!heroCall1 && heroCall1.status === "SUCCEEDED" && !!heroRes1 && heroRes1.status === "deleted" && trashStateOf(heroSnap1, heroTarget.id) === "TRASHED",
     JSON.stringify({ calls: byTask(heroSnap1.sideEffectCalls, heroRun.taskId).length, call: heroCall1 && heroCall1.status, resource: heroRes1 && heroRes1.status, trashState: trashStateOf(heroSnap1, heroTarget.id), mutation: heroRes1 && heroRes1.status !== "active" ? 1 : 0 }),
     "1 call SUCCEEDED + registry deleted/TRASHED + mutation=1");
-  const appendBlockVisible = await waitSel("[data-ai-append-block]", 30000);
-  const appendGoalVisible = appendBlockVisible && (await has("[data-ai-append-goal]"));
-  const appendBtnVisible = appendBlockVisible && (await has("[data-ai-append]"));
-  record("flow4", "F4.28 · task/get.appendable=true 且 UI 出现 [data-ai-append-block] + [data-ai-append-goal] + [data-ai-append]",
-    heroGet1.appendable === true && appendBlockVisible && appendGoalVisible && appendBtnVisible,
-    JSON.stringify({ appendable: heroGet1.appendable, block: appendBlockVisible, goal: appendGoalVisible, button: appendBtnVisible }), "appendable=true + 三个选择器可见");
-  const heroStep1UiStatus = await attr('[data-ai-step="1"]', "data-ai-step-status");
-  record("flow4", "F4.29 · [data-ai-steps] 内 [data-ai-step=\"1\"][data-ai-step-status=\"SUCCEEDED\"]",
-    (await has("[data-ai-steps]")) && heroStep1UiStatus === "SUCCEEDED", JSON.stringify({ steps: await has("[data-ai-steps]"), step1: heroStep1UiStatus }), "steps 容器 + step1 SUCCEEDED");
+  // 原 F4.28 的 UI 部分（[data-ai-append-*] 三选择器）与原 F4.29（[data-ai-steps]/[data-ai-step] 步骤列表）
+  // 已随产品重构下线（见文件头"产品漂移"）。F4.28 保留后端"可追加资格"这一真实依据；
+  // 步骤可见性由后端 task/get（F4.26/F4.32/F5.9）与服务级 gates/d4-09-append-step.test.mjs 承接。
+  record("flow4", "F4.28 · 主任务 task/get.appendable=true（可追加资格由后端判定，renderer 自报无效）",
+    heroGet1.appendable === true,
+    JSON.stringify({ appendable: heroGet1.appendable }), "appendable=true");
   const ledgerBefore = heroGet1.budgetLedger;
   const budgetBeforeAppend = kindSnapshot(ledgerBefore);
   const ledgerShapeOk = KINDS.every((k) => Number.isFinite(ledgerBefore.kinds[k].authorized) && Number.isFinite(ledgerBefore.kinds[k].consumed) && Number.isFinite(ledgerBefore.kinds[k].remaining) && ledgerBefore.kinds[k].consumed <= ledgerBefore.kinds[k].authorized);
   record("flow4", "F4.30 · 追加前账本快照（task/get.budgetLedger 三类 authorized/consumed/remaining，consumed<=authorized）",
     ledgerShapeOk, JSON.stringify(budgetBeforeAppend), "三类齐全且自洽");
   await setPlan("budget");
-  const heroPanelTaskBefore = await attr(".ai-panel", "data-ai-task-id");
-  await setInput("[data-ai-append-goal]", F4_APPEND_GOAL);
-  const appendReady = await waitFor(async () => !(await isDisabled("[data-ai-append]")), 15000);
-  const appendClicked = await click("[data-ai-append]");
-  const appendAcceptedSync = await waitFor(async () => { const g = await taskGet(heroRun.taskId); return !!(g && g.ok && g.task.status === "RUNNING" && (g.steps || []).length === 2); }, 15000);
-  const heroPanelTaskAfter = await attr(".ai-panel", "data-ai-task-id");
-  // 接收后后端 appendable=false（该 step 在途），UI 要么清空输入框、要么整块收起；两者都不能留下可再次提交的旧目标。
-  const appendGoalCleared = await waitFor(async () => { const v = await inputValue("[data-ai-append-goal]"); return v === "" || (v === null && !(await has("[data-ai-append-block]"))); }, 10000);
-  const appendBlockGone = !(await has("[data-ai-append-block]"));
-  const noAppendError = !(await has("[data-ai-error]"));
-  record("flow4", "F4.31 · 真实 UI 点击 [data-ai-append]：同一 Task（data-ai-task-id 不变）+ 同步接收（返回时已 2 steps / RUNNING）+ 输入框清空且无错误",
-    appendReady && appendClicked === "ok" && appendAcceptedSync && heroPanelTaskBefore === heroRun.taskId && heroPanelTaskAfter === heroRun.taskId && appendGoalCleared && noAppendError,
-    JSON.stringify({ ready: appendReady, click: appendClicked, syncAccepted: appendAcceptedSync, panelTaskId: heroPanelTaskAfter, goalClearedOrBlockGone: appendGoalCleared, appendBlockGone, noErrorElement: noAppendError }),
-    "ok + 同一 taskId + 同步 2 steps + 清空");
+  // 追加入口 UI 已随产品重构下线（见文件头"产品漂移"），改经仍在产的产品桥 task/appendStep（与历史 [data-ai-append] 同一条 IPC）。
+  const heroAppend = await appendViaBridge(heroRun.taskId, F4_APPEND_GOAL, heroGet1.task.revision);
+  const heroAppendAccepted = heroAppend && heroAppend.ok === true ? await waitStepsAtLeast(heroRun.taskId, 2) : false;
+  record("flow4", "F4.31 · 经产品桥 task/appendStep（唯一在产追加入口，与历史 [data-ai-append] 同一条 IPC）：同一 Task + 同步返回 RUNNING + 后端 step 立即 +1",
+    heroAppend && heroAppend.ok === true && heroAppend.taskId === heroRun.taskId && heroAppend.status === "RUNNING" && heroAppendAccepted === true,
+    JSON.stringify({ append: heroAppend && { ok: heroAppend.ok, taskId: heroAppend.taskId, status: heroAppend.status }, accepted: heroAppendAccepted }),
+    "ok + 同一 taskId + RUNNING + 2 steps");
   const heroSteps2 = stepsOfTask(dbSnapshot(), heroRun.taskId);
   let heroStep2Input = null; try { heroStep2Input = JSON.parse(heroSteps2[1].input); } catch { heroStep2Input = null; }
   record("flow4", "F4.32 · 追加后 task_steps 恰好 2 行；第二行 sequence=2 / input.appended=true / input.goal=用户输入",
@@ -957,18 +989,13 @@ async function main() {
   const panelRestored = await waitFor(async () => (await attr(".ai-panel", "data-ai-task-id")) === R.taskIds.flow4, 30000);
   const panelTaskId = await attr(".ai-panel", "data-ai-task-id");
   record("flow5", "F5.6 · 刷新后 AI 面板恢复到最新任务（= 流程 4 主任务）", panelOpened && panelRestored, JSON.stringify({ opened: panelOpened, panelTaskId, expected: R.taskIds.flow4 }), "panel 指向流程 4 主任务");
-  const uiSteps = await js("return Array.from(document.querySelectorAll('[data-ai-steps] [data-ai-step]')).map((el) => ({ seq: el.getAttribute('data-ai-step'), status: el.getAttribute('data-ai-step-status'), appended: el.getAttribute('data-ai-step-appended'), text: (el.textContent || '') }))");
-  const uiSeq = uiSteps.map((s) => s.seq).join(",");
-  const uiStatus = uiSteps.map((s) => s.status).join(",");
-  record("flow5", "F5.7 · 刷新后 [data-ai-steps] 3 条：sequence 1,2,3 / status SUCCEEDED,BLOCKED,SUCCEEDED / 第 2 条 data-ai-step-appended=true 且文本含追加目标",
-    uiSteps.length === 3 && uiSeq === "1,2,3" && uiStatus === "SUCCEEDED,BLOCKED,SUCCEEDED" && uiSteps[1].appended === "true" && uiSteps[1].text.includes(F4_APPEND_GOAL) && uiSteps[0].appended == null && uiSteps[2].appended == null,
-    JSON.stringify({ steps: uiSteps.map((s) => ({ seq: s.seq, status: s.status, appended: s.appended })), step2Text: (uiSteps[1] || {}).text }),
-    "1,2,3 / SUCCEEDED,BLOCKED,SUCCEEDED / step2 appended=true + 追加目标");
-  const appendBlockAfterReload = await has("[data-ai-append-block]");
+  // 原 F5.7（刷新后 [data-ai-steps] 步骤列表一致）已删除：步骤列表 UI 随产品重构下线（见文件头"产品漂移"）。
+  // 它保证的"刷新后 3 个 step 的 sequence/status/appended 与后端一致"现在由 F5.9 的权威 task/get 逐项承接
+  // （steps.length===3 + 刷新前后快照相等），服务级追加语义由 tests/d4-09-append-step.test.mjs 承接。
   const resumeAfterReload = await has("[data-ai-resume]");
-  record("flow5", "F5.8 · 刷新后 [data-ai-append-block] 可见（appendable=true）且 [data-ai-resume] 不出现（resumable=false）",
-    appendBlockAfterReload && !resumeAfterReload && heroGetBeforeReload.appendable === true && heroGetBeforeReload.resumable === false,
-    JSON.stringify({ appendBlock: appendBlockAfterReload, resume: resumeAfterReload, appendable: heroGetBeforeReload.appendable, resumable: heroGetBeforeReload.resumable }), "append 可见 + resume 不可见");
+  record("flow5", "F5.8 · 刷新后 [data-ai-resume] 不出现（resumable=false）且 task/get.appendable=true（追加资格由后端恢复；面板追加入口已下线）",
+    !resumeAfterReload && heroGetBeforeReload.appendable === true && heroGetBeforeReload.resumable === false,
+    JSON.stringify({ resume: resumeAfterReload, appendable: heroGetBeforeReload.appendable, resumable: heroGetBeforeReload.resumable }), "resume 不出现 + appendable=true + resumable=false");
   const heroGetAfterReload = await taskGet(R.taskIds.flow4);
   const heroLedgerAfterReload = { kinds: kindSnapshot(heroGetAfterReload.budgetLedger), additions: (heroGetAfterReload.budgetLedger.additions || []).length, resumeCount: heroGetAfterReload.budgetLedger.resumeCount };
   record("flow5", "F5.9 · 刷新后主任务 task/get 权威一致：3 steps / 2 artifacts / 2 verifications / 账本 authorized+consumed+remaining+additions+resumeCount 与刷新前快照逐项相等",
@@ -1071,13 +1098,6 @@ async function main() {
     const row = modelRow(s, id);
     return !!row && ["SUCCEEDED", "FAILED", "BLOCKED", "CANCELLED"].includes(row.status);
   };
-  // 写追加入口必须确认"元素已在 + 写入生效"：面板尚未渲染出入口时 setInput 只会返回 'missing'。
-  const setAppendGoal = async (sel, value) => {
-    const set = await setInput(sel, value);
-    const took = set === "ok" && await waitFor(async () => (await inputValue(sel)) === value, 10000);
-    return { set, took };
-  };
-
   // 流程 5 结束时会话是 MEMBER（F2.9）：流程 6 必须回到真实 admin 会话。
   const logout6 = await logout();
   const adminBack6 = await loginAs(ADMIN, PW);
@@ -1126,24 +1146,21 @@ async function main() {
   const artBefore6 = artsOfTask(snap6A1, run6A.taskId);
   const verBefore6 = versOfTask(snap6A1, run6A.taskId);
   const callBefore6 = calls6Of(snap6A1, run6A.taskId);
-  // 顺序：等面板真正渲染出追加入口 → 写目标并确认写入生效 → 点 → 确认已被产品入口接受（step 数 +1）→ 等终态。
-  const appendBlock6 = (await waitSel("[data-ai-append-block]", 30000)) && (await waitSel("[data-ai-append-goal]", 15000));
-  const appendGoal6 = await setAppendGoal("[data-ai-append-goal]", GOAL6_APPEND_A);
-  const appendReady6 = await waitFor(async () => !(await isDisabled("[data-ai-append]")), 15000);
-  const appendClick6 = appendReady6 ? await click("[data-ai-append]") : "not-ready";
-  const appendAccepted6 = appendClick6 === "ok" ? await waitStepsAtLeast(run6A.taskId, 2) : false;
+  // 追加入口 UI 已下线（见文件头"产品漂移"）；经仍在产的产品桥 task/appendStep 追加，再以"step 数 +1"确认被接受，最后等终态。
+  const append6 = await appendViaBridge(run6A.taskId, GOAL6_APPEND_A, (await taskGet(run6A.taskId)).task.revision);
+  const appendAccepted6 = append6 && append6.ok === true ? await waitStepsAtLeast(run6A.taskId, 2) : false;
   const appendTerm6 = await waitTaskTerminal(run6A.taskId, 180000);
   const get6A2 = await taskGet(run6A.taskId);
   const snap6A2 = dbSnapshot();
   const steps6A2 = stepsOfTask(snap6A2, run6A.taskId);
   const runs6A2 = runsOfTask(snap6A2, run6A.taskId);
   const appendRun6 = steps6A2.length > 1 ? runs6A2.filter((r) => r.step_id === steps6A2[1].step_id) : [];
-  record("flow6", "F6.4 (i) · 改版后经真实 UI 追加步骤：Task/Step/新 run 全部收敛 BLOCKED，run.error_code=MODEL_CONFIG_CHANGED（绝不留 RUNNING 悬挂、绝不静默换模型）",
-    appendBlock6 && appendGoal6.took === true && appendReady6 === true && appendClick6 === "ok" && appendAccepted6 === true && appendTerm6 && get6A2.task.status === "BLOCKED"
+  record("flow6", "F6.4 (i) · 改版后经产品桥 task/appendStep 追加步骤（面板追加入口已下线，与历史 UI 同一条 IPC）：Task/Step/新 run 全部收敛 BLOCKED，run.error_code=MODEL_CONFIG_CHANGED（绝不留 RUNNING 悬挂、绝不静默换模型）",
+    append6 && append6.ok === true && append6.status === "RUNNING" && appendAccepted6 === true && appendTerm6 && get6A2.task.status === "BLOCKED"
       && steps6A2.length === 2 && steps6A2[1].status === "BLOCKED"
       && appendRun6.length === 1 && appendRun6[0].status === "BLOCKED" && appendRun6[0].error_code === "MODEL_CONFIG_CHANGED"
       && Number(appendRun6[0].model_config_version) === frozen6,
-    JSON.stringify({ appendBlockVisible: appendBlock6, goal: appendGoal6, ready: appendReady6, click: appendClick6, accepted: appendAccepted6, task: get6A2.task.status, steps: steps6A2.map((s) => s.status), run: appendRun6[0] && { status: appendRun6[0].status, error: appendRun6[0].error_code, version: appendRun6[0].model_config_version } }),
+    JSON.stringify({ append: append6 && { ok: append6.ok, status: append6.status }, accepted: appendAccepted6, task: get6A2.task.status, steps: steps6A2.map((s) => s.status), run: appendRun6[0] && { status: appendRun6[0].status, error: appendRun6[0].error_code, version: appendRun6[0].model_config_version } }),
     "BLOCKED/BLOCKED + run MODEL_CONFIG_CHANGED");
   record("flow6", "F6.5 (i) · 该拒绝 0 执行：0 新 model call / 0 新 Artifact / 0 新 provider 请求；旧 step/artifact/verification/call 行逐字段不变",
     calls6Of(snap6A2, run6A.taskId).length === callBefore6.length
@@ -1184,27 +1201,24 @@ async function main() {
   const term6C = await waitTaskTerminal(run6C.taskId, 180000);
   const get6C = await taskGet(run6C.taskId);
   const budgetStep6 = stepsOfTask(dbSnapshot(), run6C.taskId).length;
-  // 预算计划必须先于该 step 真正启动生效；面板此刻可能还没处理完 task/result（产品桥读到终态早于 renderer 渲染），
-  // 因此先等 [data-ai-append-block] / [data-ai-append-goal] 真正渲染，再写目标、确认写入生效、点、确认已被接受，最后等终态。
+  // 预算计划必须先于该 step 真正启动生效；追加入口 UI 已下线（见文件头"产品漂移"），
+  // 经仍在产的产品桥 task/appendStep 追加，再以"step 数 +1"确认被接受，最后等终态。
   await setPlan("budget");
-  const appendCBlock6 = (await waitSel("[data-ai-append-block]", 30000)) && (await waitSel("[data-ai-append-goal]", 15000));
-  const appendCGoal6 = await setAppendGoal("[data-ai-append-goal]", GOAL6_APPEND_C);
-  const appendCReady6 = await waitFor(async () => !(await isDisabled("[data-ai-append]")), 15000);
-  const appendCClick6 = appendCReady6 ? await click("[data-ai-append]") : "not-ready";
-  const appendCAccepted6 = appendCClick6 === "ok" ? await waitStepsAtLeast(run6C.taskId, 2) : false;
+  const appendC6 = await appendViaBridge(run6C.taskId, GOAL6_APPEND_C, (await taskGet(run6C.taskId)).task.revision);
+  const appendCAccepted6 = appendC6 && appendC6.ok === true ? await waitStepsAtLeast(run6C.taskId, 2) : false;
   const appendCSteps6 = stepsOfTask(dbSnapshot(), run6C.taskId).length;
   const budgetStop6 = await waitTaskTerminal(run6C.taskId, 300000);
   const get6CStop = await taskGet(run6C.taskId);
   const resumeVisible6 = await waitSel("[data-ai-resume]", 30000);
   const stopReason6 = (await text("[data-ai-stop-reason]")).trim();
   const cRowStop6 = modelRow(dbSnapshot(), run6C.taskId);
-  record("flow6", "F6.8 (k) · 默认切换前：绑定原 config 的任务造出真实预算停止（第二步 BUDGET_EXHAUSTED + [data-ai-resume] 可见），任务归属仍是原 config",
-    appendCBlock6 === true && appendCGoal6.took === true && appendCReady6 === true && appendCClick6 === "ok" && appendCAccepted6 === true
+  record("flow6", "F6.8 (k) · 默认切换前：绑定原 config 的任务经产品桥 task/appendStep 造出真实预算停止（第二步 BUDGET_EXHAUSTED + [data-ai-resume] 可见），任务归属仍是原 config",
+    appendC6 && appendC6.ok === true && appendC6.status === "RUNNING" && appendCAccepted6 === true
       && appendCSteps6 === 2 && budgetStop6 && term6C && get6C.task.status === "SUCCEEDED"
       && get6CStop.task.status === "BLOCKED" && get6CStop.stopReason === "BUDGET_EXHAUSTED" && get6CStop.resumable === true
       && cRowStop6 && cRowStop6.model_config_id === defaultChat6 && Number(cRowStop6.model_config_version) === bumped6
       && resumeVisible6 && budgetStep6 === 1,
-    JSON.stringify({ first: get6C.task.status, appendBlockVisible: appendCBlock6, goal: appendCGoal6, ready: appendCReady6, click: appendCClick6, accepted: appendCAccepted6, stepsAfterAccept: appendCSteps6, stop: get6CStop.task.status, stopReason: get6CStop.stopReason, uiStopReason: stopReason6, resumable: get6CStop.resumable, resumeVisible: resumeVisible6, stepsBeforeBudget: budgetStep6, binding: cRowStop6 && { id: cRowStop6.model_config_id, v: cRowStop6.model_config_version } }), "BLOCKED + BUDGET_EXHAUSTED + resumable + 原 config");
+    JSON.stringify({ first: get6C.task.status, append: appendC6 && { ok: appendC6.ok, status: appendC6.status }, accepted: appendCAccepted6, stepsAfterAccept: appendCSteps6, stop: get6CStop.task.status, stopReason: get6CStop.stopReason, uiStopReason: stopReason6, resumable: get6CStop.resumable, resumeVisible: resumeVisible6, stepsBeforeBudget: budgetStep6, binding: cRowStop6 && { id: cRowStop6.model_config_id, v: cRowStop6.model_config_version } }), "BLOCKED + BUDGET_EXHAUSTED + resumable + 原 config");
 
   /* ---------------- (k) 默认切到另一个 config（原 config 未变） ---------------- */
   const newCfg6 = await productModel({ type: "model/create", providerId: pid, remoteModelId: "main-e2e-local-2", displayName: "Main E2E Local 2", capabilities: ["chat"], scope: "ORGANIZATION" });
@@ -1222,7 +1236,7 @@ async function main() {
     "默认 = 新 config 且原 config version 不变");
 
   // (k-1) 绑定原 config 的任务 append：仍成功，且任务 / run / call 行归属仍是原 config
-  // 这里用产品桥（与 AI 面板 [data-ai-append] 同一条 IPC 命令 task/appendStep）；面板此刻停在任务 C 上，
+  // 这里用产品桥 task/appendStep（面板追加入口已下线，这是唯一在产追加入口）；面板此刻停在任务 C 上，
   // 以便 (k-2) 用真实 UI [data-ai-resume] 续接。
   await setPlan("final");
   const rev6B = (await taskGet(run6B.taskId)).task.revision;
@@ -1278,9 +1292,9 @@ async function main() {
     appendAfterDefaultSwitch: get6B2.task.status, resumeAfterDefaultSwitch: get6C2.task.status,
     entries: [
       "真实 UI task/run（任务 A/B/C 全部经真实 AI 面板发起）",
-      "真实 UI [data-ai-append-goal] + [data-ai-append]（任务 A 的改版后追加与任务 C 的预算停止追加）",
+      "产品桥 task/appendStep（任务 A 的改版后追加与任务 C 的预算停止追加；面板 [data-ai-append-*] 追加入口已下线，这是唯一在产追加入口）",
       "真实 UI [data-ai-resume]（任务 C 的显式续接）",
-      "产品桥 task/appendStep（任务 B 在默认切换后的追加；与面板按钮同一条 IPC 命令）",
+      "产品桥 task/appendStep（任务 B 在默认切换后的追加；与历史面板按钮同一条 IPC 命令）",
       "产品桥 window.openarc.model.command: model/update（版本提升）、model/create、defaults/set、model/list、defaults/get",
     ],
   };
@@ -1355,23 +1369,23 @@ let gate = {
     { name: "test-only tool grant seeding", removed: true, env: "OPENARC_E2E_SEED_TOOL_GRANTS=1", effect: "已从 electron/main.cjs 删除；工具权限一律经产品治理入口" },
   ],
   productEntries: {
-    toolGrantUI: "组织治理（dock）→ App 权限 → 工具权限（data-gov-tool-*）；流程 1 与流程 4 的正对照经此真实 UI 授予",
+    toolGrantUI: "现行组织治理（dock）→ APP 访问：真实 UI 写权限策略（data-org-field=policy-code / policy-decision + data-org-action=save-policy → identity/app-permission-policy-save）并按权限码读回；TOOL-scope 的 data-gov-tool-* 控件已移除，流程 1/4 的 TOOL 授予经产品桥 window.openarc.governance.command grantAppToolAccess（governance-bootstrap.cjs:57-59 白名单）",
     governanceBridge: "window.openarc.governance.command：getAppToolAccess / grantAppToolAccess / revokeAppToolAccess（流程 2 与 14(e) 撤权）",
-    appendStepEntry: "AI 面板 [data-ai-append-block] / [data-ai-append-goal] / [data-ai-append] → window.openarc.task.command task/appendStep（同一 taskId；拒绝同步返回，接收立即返回 RUNNING，结果经 task/result 推送）",
+    appendStepEntry: "产品桥 window.openarc.task.command task/appendStep（AI 面板 [data-ai-append-*] 追加入口已随产品重构从 src+dist 下线；同一 taskId；拒绝同步返回，接收立即返回 RUNNING，结果经 task/result 推送并驱动 [data-ai-error]/[data-ai-resume]）。面板追加入口的取代覆盖：tests/d4-09-append-step.test.mjs（服务级/IPC 与拒绝矩阵）",
     resumeEntry: "AI 面板 [data-ai-resume] / [data-ai-stop-reason] / [data-ai-resume-budget] / [data-ai-resume-remaining] → window.openarc.task.command task/resume（预算续接）",
-    stepsProjection: "AI 面板 [data-ai-steps] / [data-ai-step]（sequence 属性） / data-ai-step-status / data-ai-step-appended，全部来自后端 task/get",
+    stepsProjection: "AI 面板的步骤列表 UI（[data-ai-steps] / [data-ai-step] / data-ai-step-status / data-ai-step-appended）已随产品重构下线；步骤以后端 task/get 为准（F4.32/F5.9），服务级追加语义见 tests/d4-09-append-step.test.mjs",
     modelConfigBinding: "任务 model config 由后端在 task/run 内按可信 context 解析并冻结 id+version（renderer 自报一律忽略）；Settings → 模型页只有注册 / 启停 / 默认设置，没有编辑入口，因此流程 6 的版本提升走产品桥 window.openarc.model.command { type: 'model/update' }（displayName 变更 → 真实 version bump），第二个 config 走 model/create，默认切换走 defaults/set（PERSONAL + ORGANIZATION），读取走 model/list + defaults/get",
   },
   boot: outcome.boot ? { snapshot: sanitize(outcome.boot, [PROVIDER_SECRET]), orderOk: checks.find((c) => c.name.startsWith("B1"))?.ok === true, listening: outcome.boot.modelProxyListening === true } : null,
   flows: {
-    flow1: { taskId: flow1Id || null, prerequisiteGrant: "product governance UI (grantAppToolAccess)", status: snap ? (snap.tasks.find((t) => t.task_id === flow1Id) || {}).status : null, sideEffectCalls: f1Calls.length, approvals: snap ? snap.approvals.filter((a) => f1CallIds.includes(a.call_id)).length : 0, leases: snap ? snap.leases.filter((l) => f1CallIds.includes(l.call_id)).length : 0, artifacts: f1Arts.length, verifications: f1Vers.length, mutation: 1, executorSpawned: R.exec.flow1Spawned >= 1 },
-    flow2: { taskId: flow2Id || null, prerequisiteGrant: "product governance UI (grantAppToolAccess)", revokeEntry: "product governance/revokeAppToolAccess", callStatus: snap ? (byTaskOut(snap.sideEffectCalls, flow2Id)[0] || {}).status || null : null, errorCode: snap ? (byTaskOut(snap.sideEffectCalls, flow2Id)[0] || {}).error_code || null : null, leases: snap ? byTaskOut(snap.leases, flow2Id).length : 0, mutation: 0, nonAdminGrantDenied: checks.find((c) => c.name.startsWith("F2.9"))?.ok === true },
-    flow3: { taskId: flow3Id || null, prerequisiteGrant: "product entry grantAppToolAccess (search/readMetadata only)", status: snap ? (snap.tasks.find((t) => t.task_id === flow3Id) || {}).status : null, sideEffectCalls: snap ? byTaskOut(snap.sideEffectCalls, flow3Id).length : 0, mutation: 0, deniedOperation: checks.find((c) => c.name.startsWith("F3.5"))?.ok === true, deniedUiVisible: checks.find((c) => c.name.startsWith("F3.6"))?.ok === true },
+    flow1: { taskId: flow1Id || null, prerequisiteGrant: "APP 访问权限策略真实 UI + 产品桥 grantAppToolAccess", status: snap ? (snap.tasks.find((t) => t.task_id === flow1Id) || {}).status : null, sideEffectCalls: f1Calls.length, approvals: snap ? snap.approvals.filter((a) => f1CallIds.includes(a.call_id)).length : 0, leases: snap ? snap.leases.filter((l) => f1CallIds.includes(l.call_id)).length : 0, artifacts: f1Arts.length, verifications: f1Vers.length, mutation: 1, executorSpawned: R.exec.flow1Spawned >= 1 },
+    flow2: { taskId: flow2Id || null, prerequisiteGrant: "产品桥 grantAppToolAccess（流程 1 授予）", revokeEntry: "product governance/revokeAppToolAccess", callStatus: snap ? (byTaskOut(snap.sideEffectCalls, flow2Id)[0] || {}).status || null : null, errorCode: snap ? (byTaskOut(snap.sideEffectCalls, flow2Id)[0] || {}).error_code || null : null, leases: snap ? byTaskOut(snap.leases, flow2Id).length : 0, mutation: 0, nonAdminGrantDenied: checks.find((c) => c.name.startsWith("F2.9"))?.ok === true },
+    flow3: { taskId: flow3Id || null, prerequisiteGrant: "product entry grantAppToolAccess (search/readMetadata only)", status: snap ? (snap.tasks.find((t) => t.task_id === flow3Id) || {}).status : null, sideEffectCalls: snap ? byTaskOut(snap.sideEffectCalls, flow3Id).length : 0, mutation: 0, deniedOperation: checks.find((c) => c.name.startsWith("F3.5"))?.ok === true, deniedUiVisible: null, deniedUiNote: "原 F3.6（[data-ai-denied] 明细 UI）已删除：该节点随产品重构从 src+dist 下线；denied 明细已无任何 UI，由 F3.5（后端 deniedOperations）与 F3.8（DENIED 决策 + 0 execution）保证，明细 UI 取代覆盖见 tests/d4-09-append-step.test.mjs" },
     flow4: {
       taskId: flow4Id || null,
-      entry: "真实 UI：task/run（plan write + 目标资源）→ Approve → [data-ai-append-goal] + [data-ai-append]（plan budget）→ 第二步真实预算停止 → [data-ai-resume]（plan final）→ 成功",
+      entry: "真实 UI：task/run（plan write + 目标资源）→ Approve → 产品桥 task/appendStep（plan budget；面板追加入口已下线）→ 第二步真实预算停止 → 真实 UI [data-ai-resume]（plan final）→ 成功",
       status: snap ? (snap.tasks.find((t) => t.task_id === flow4Id) || {}).status : null,
-      appendAcceptedByUI: checkOk("F4.31"),
+      appendAcceptedByProductEntry: checkOk("F4.31"),
       steps: R.flow4 ? R.flow4.steps : null,
       budgetStop: R.flow4 ? { stopReason: "BUDGET_EXHAUSTED", blockingKind: R.flow4.nextGrant.kind, artifactsOfBudgetStep: 0, runs: R.flow4.runs } : null,
       budgetBeforeAppend: R.flow4 ? R.flow4.budgetBefore : null,
@@ -1394,13 +1408,13 @@ let gate = {
     },
     flow5: {
       reloadGate: outcome.gateAfterReload || null,
-      source: "page.reload() 后仅经后端 task/get + 真实 AI 面板 [data-ai-steps]/[data-ai-append-block]/[data-ai-resume] 恢复，不依赖 renderer memory",
+      source: "page.reload() 后仅经后端 task/get（步骤/账本）+ 真实 AI 面板 [data-ai-resume] 恢复，不依赖 renderer memory；步骤列表 UI 已下线，步骤一致性由 F5.9 承接（原 F5.7 见取代覆盖 tests/d4-09-append-step.test.mjs）",
       grantsRestored: checks.find((c) => c.name.startsWith("F5.2"))?.ok === true, flow1Restored: checks.find((c) => c.name.startsWith("F5.3"))?.ok === true, flow3Restored: checks.find((c) => c.name.startsWith("F5.4"))?.ok === true, budgetRestored: checks.find((c) => c.name.startsWith("F5.5"))?.ok === true,
-      flow4PanelRestored: checkOk("F5.6"), flow4StepsRestored: checkOk("F5.7"), flow4AppendStateRestored: checkOk("F5.8"), flow4LedgerRestored: checkOk("F5.9"), flow4RevokeTaskRestored: checkOk("F5.10"),
+      flow4PanelRestored: checkOk("F5.6"), flow4StepsRestored: checkOk("F5.9"), flow4AppendStateRestored: checkOk("F5.8"), flow4LedgerRestored: checkOk("F5.9"), flow4RevokeTaskRestored: checkOk("F5.10"),
       latestTaskIsFlow4: (outcome.snap ? outcome.snap.tasks.slice().sort((a, b) => a.created_at - b.created_at).slice(-1)[0].task_id : null) === (R.taskIds.flow4 || null),
     },
     flow6: {
-      entry: "真实 UI task/run（后端解析冻结默认模型）→ 产品桥 model/update 提升该 config 版本 → 真实 UI 追加步骤 → BLOCKED/MODEL_CONFIG_CHANGED → 新任务绑定新版本成功；产品桥 defaults/set 切默认后原 config 任务的 append/resume 仍成功",
+      entry: "真实 UI task/run（后端解析冻结默认模型）→ 产品桥 model/update 提升该 config 版本 → 产品桥 task/appendStep 追加步骤（面板追加入口已下线）→ BLOCKED/MODEL_CONFIG_CHANGED，面板经 task/result 在 [data-ai-error] 如实显示 → 新任务绑定新版本成功；产品桥 defaults/set 切默认后原 config 任务的 append/resume 仍成功",
       taskIds: R.taskIds.flow6 || R.flow6 ? { taskA: (R.flow6 && R.flow6.taskA) || R.taskIds.flow6 || null, taskB: (R.flow6 && R.flow6.taskB) || R.taskIds.flow6B || null, taskC: (R.flow6 && R.flow6.taskC) || R.taskIds.flow6C || null } : null,
       defaultConfig: R.flow6 ? R.flow6.defaultConfig : null,
       frozenVersion: R.flow6 ? R.flow6.frozenVersion : null,
