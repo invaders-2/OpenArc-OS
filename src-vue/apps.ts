@@ -26,9 +26,11 @@ export const APPS: readonly AppEntry[] = [
   { id: "resource-library", name: "资源库", icon: "finder" },
   { id: "canvas", name: "AI Studio", icon: "freeform" },
   { id: "projects", name: "项目", icon: "folder" },
-  { id: "organization", name: "组织治理", icon: "settings" },
+  { id: "organization", name: "组织", icon: "settings" },
   { id: "skills", name: "Skill 中心", icon: "shortcuts" },
   { id: "mcp-center", name: "MCP 中心", icon: "sharing" },
+  // 10-16：协议中心（模型 / 供应商协议，原「模型与服务商 › 协议」标签独立成应用）
+  { id: "protocols", name: "协议中心", icon: "protocols" },
   { id: "settings", name: "系统设置", icon: "settings" },
   { id: "trash", name: "回收站", icon: "trash" },
   // ── 10-15 按界面原型补齐的应用（后台未接入的先显示真实空态，不放演示数据）──
@@ -81,6 +83,6 @@ export const APP_CATEGORY: Record<string, string> = {
   files: "系统", trash: "系统", settings: "系统", dev: "系统",
   canvas: "创作", photos: "创作", music: "创作", notes: "创作", video: "创作", declare: "创作", drama: "创作",
   chat: "效率", automation: "效率", calendar: "效率", weather: "效率", browser: "效率", market: "效率",
-  projects: "团队与资源", organization: "团队与资源", "resource-library": "团队与资源", skills: "团队与资源", "mcp-center": "团队与资源",
+  projects: "团队与资源", organization: "团队与资源", "resource-library": "团队与资源", skills: "团队与资源", "mcp-center": "团队与资源", protocols: "团队与资源",
 };
 export const APP_CATEGORIES = ["效率", "创作", "团队与资源", "系统"];

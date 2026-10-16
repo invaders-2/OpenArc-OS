@@ -214,7 +214,7 @@ function grantText(g: any): string {
 
 <template>
   <div class="split gov-app">
-    <nav class="split-side" role="tablist" aria-label="治理分区">
+    <nav class="split-side" role="tablist" aria-label="组织分区">
       <div class="split-section">组织</div>
       <button
         v-for="t in TABS"

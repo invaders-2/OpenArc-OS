@@ -259,13 +259,15 @@ app.whenReady().then(async () => {
     const modelActive = await waitAttr("[data-settings-active]", "data-settings-active", "model");
     check("V8 · 点 [data-settings-pane=model] 后 data-settings-active=model", modelActive, "active=" + (await attr("[data-settings-active]", "data-settings-active")));
     check(
-      "V9 · model pane 是 D4-01 真实实现（[data-d4-01=settings] + 4 个 [data-d4-01-tab]：10-16 新增「协议」）",
-      (await has('[data-d4-01="settings"]')) && (await count("[data-d4-01-tab]")) === 4,
+      "V9 · model pane 是 D4-01 真实实现（10-16 按原型改成单页两栏：[data-d4-01=settings]，不再有分区标签）",
+      (await has('[data-d4-01="settings"]')) && (await count("[data-d4-01-tab]")) === 0,
       "tabs=" + (await count("[data-d4-01-tab]")),
     );
     check(
-      "V10 · Providers pane 默认渲染（[data-d4-01-pane=providers] + 空态 + 表单控件）",
+      "V10 · 服务商栏默认渲染（[data-d4-01-pane=providers] + 空态 + 添加服务商表单）",
       (await has('[data-d4-01-pane="providers"]')) &&
+        (await has("[data-d4-01-providers]")) &&
+        (await has("[data-d4-01-provider-add]")) &&
         (await has("[data-d4-01-providers-empty]")) &&
         (await has("[data-d4-01-provider-name]")) &&
         (await has("[data-d4-01-provider-url]")) &&
@@ -273,21 +275,14 @@ app.whenReady().then(async () => {
         (await has("[data-d4-01-provider-create]")),
       "",
     );
-    await click('[data-d4-01-tab="models"]');
-    const modelsPane = await waitFor('[data-d4-01-pane="models"]');
     check(
-      "V11 · 点 Models tab 渲染 models pane（[data-d4-01-model-* 表单]）",
-      modelsPane &&
-        (await has("[data-d4-01-model-provider]")) &&
-        (await has("[data-d4-01-model-remote]")) &&
-        (await has("[data-d4-01-model-create]")) &&
-        (await count("[data-d4-01-model-create-cap]")) === 3,
+      "V11 · 模型表单只在选中服务商后出现（无服务商时不渲染 [data-d4-01-model-form]）",
+      !(await has("[data-d4-01-model-form]")),
       "",
     );
-    await click('[data-d4-01-tab="defaults"]');
     const defaultsPane = await waitFor('[data-d4-01-pane="defaults"]');
     check(
-      "V12 · 点 Defaults tab 渲染 defaults pane（Personal / Organization 两组）",
+      "V12 · 同页渲染默认模型（Personal / Organization 两组）",
       defaultsPane &&
         (await has("[data-d4-01-defaults-personal]")) &&
         (await has("[data-d4-01-defaults-organization]")) &&
@@ -295,8 +290,6 @@ app.whenReady().then(async () => {
         (await has("[data-d4-01-default-org-chat]")),
       "",
     );
-    await click('[data-d4-01-tab="providers"]');
-    await waitFor('[data-d4-01-pane="providers"]');
     await shoot("model.png");
 
     // ── 3. 切到「设备」：既有 data-device-* 契约 ───────────────────────────

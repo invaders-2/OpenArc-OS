@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import ModelProtocols from "./ModelProtocols.vue";
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import DsButton from "../design-system/DsButton.vue";
 
 /**
@@ -8,7 +7,6 @@ import DsButton from "../design-system/DsButton.vue";
  * 只经 window.openarc.model.command；credential write-only。
  * 所有 data-d4-01-* 契约逐项保留（tabs / panes / provider-* / model-* / defaults-*）。
  */
-type Tab = "providers" | "models" | "defaults" | "protocols";
 
 withDefaults(defineProps<{ role?: string | null }>(), { role: null });
 
@@ -32,7 +30,6 @@ function defaultUnavailableText(cap: string, m: any) {
 
 const bridge = () => (window as any).openarc?.model;
 
-const tab = ref<Tab>("providers");
 const providers = ref<any[]>([]);
 const models = ref<any[]>([]);
 const defaults = ref<any>(null);
@@ -302,352 +299,261 @@ function toggleCreateCap(cap: string) {
 function toggleModelCap(configId: string, m: any, cap: string) {
   capsDraft.value = { ...capsDraft.value, [configId]: toggleCap(draftCaps(m), cap) };
 }
-const TABS: { id: Tab; label: string }[] = [
-  { id: "providers", label: "服务商" },
-  { id: "models", label: "模型" },
-  { id: "defaults", label: "默认模型" },
-  { id: "protocols", label: "协议" },
-];
-const providerOptions = computed(() => providers.value);
+/* ── 10-16 按界面原型：两栏（服务商列表 | 服务商详情）+ 默认模型，取消分区标签 ── */
+const selected = ref<string | null>(null); // providerId 或 "new"
+const current = computed(() => providers.value.find((p) => p.providerId === selected.value) || null);
+const modelsOf = (providerId: string) => models.value.filter((m) => m.providerId === providerId);
+function providerState(p: any): { tone: "ok" | "warn" | "off"; label: string } {
+  if (p.status !== "enabled") return { tone: "off", label: "已停用" };
+  const c = credStatus.value[p.providerId];
+  if (c && c.configured === false) return { tone: "warn", label: "缺少密钥" };
+  const t = tests.value[p.providerId];
+  if (t && t.ok) return { tone: "ok", label: "连接正常" };
+  if (t && !t.ok) return { tone: "warn", label: "连接失败" };
+  return { tone: "ok", label: "已启用" };
+}
+const PALETTE = ["#0A84FF", "#30B0C7", "#34C759", "#FF9F0A", "#FF375F", "#5E5CE6", "#64D2FF", "#8E8E93"];
+function logoColor(id: string) {
+  let h = 0;
+  for (let i = 0; i < id.length; i += 1) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return PALETTE[h % PALETTE.length];
+}
+const mono = (name: string) => {
+  const n = String(name || "?").trim();
+  return /^[一-鿿]/.test(n) ? n.slice(0, 1) : n.slice(0, 2).toUpperCase();
+};
+watch(providers, (list) => {
+  if (selected.value === "new") return;
+  if (!list.length) selected.value = "new";
+  else if (!list.some((p) => p.providerId === selected.value)) selected.value = list[0].providerId;
+});
+const addingModel = ref(false);
+function startAddModel(providerId: string) {
+  mForm.providerId = providerId;
+  mForm.remoteModelId = "";
+  mForm.displayName = "";
+  mForm.capabilities = ["chat"];
+  addingModel.value = true;
+}
+async function submitModel() {
+  await createModel();
+  if (!error.value) addingModel.value = false;
+}
+async function submitProvider() {
+  const before = providers.value.map((p) => p.providerId);
+  await createProvider();
+  const added = providers.value.find((p) => !before.includes(p.providerId));
+  if (added) selected.value = added.providerId;
+}
+const editingCaps = ref<string | null>(null);
 </script>
 
 <template>
-  <div class="d401-settings" data-d4-01="settings">
+  <div class="d401-settings mp2" data-d4-01="settings">
     <p class="settings-lead">统一管理服务商、地址、密钥与模型。所有接入 OpenArc 的应用通过后台调用，不需要逐个填写；密钥只写入系统钥匙串，不会再显示。</p>
-    <nav class="segmented text d401-tabs" role="tablist" aria-label="模型设置分区">
-      <button
-        v-for="t in TABS"
-        :key="t.id"
-        type="button"
-        role="tab"
-        :aria-selected="tab === t.id"
-        :aria-pressed="tab === t.id"
-        :data-d4-01-tab="t.id"
-        @click="tab = t.id"
-      >
-        {{ t.label }}
-      </button>
-    </nav>
     <p v-if="error" class="d401-error" role="alert" data-d4-01-error :data-d4-01-error-code="error">{{ errText(error) }}</p>
     <p v-if="notice" class="d401-notice" role="status" data-d4-01-notice>{{ notice }}</p>
-    <p v-if="busy" class="muted" data-d4-01-busy>正在处理…</p>
 
-    <section v-if="tab === 'providers'" data-d4-01-pane="providers">
-      <div class="set-sec">
-        <h3>已添加的服务商</h3>
-        <p v-if="providers.length === 0" class="set-cap set-empty" data-d4-01-providers-empty>还没有服务商。在下方添加一个，填写地址与密钥。</p>
-        <ul class="d401-list" data-d4-01-providers>
-          <li v-for="p in providers" :key="p.providerId" :data-d4-01-provider="p.providerId" class="set-group d401-card">
-            <div class="setting-row">
-              <span class="d401-logo" aria-hidden="true">{{ (p.displayName || "?").slice(0, 2).toUpperCase() }}</span>
-              <span class="set-lab">
-                <span class="d401-name">{{ p.displayName }}</span>
-                <small class="d401-meta">{{ p.adapterType }} · {{ p.baseUrl }} · {{ p.scope === "ORGANIZATION" ? "组织" : "个人" }}</small>
-              </span>
-              <span class="badge" :class="{ ok: p.status === 'enabled' }" data-d4-01-provider-status>{{ p.status === "enabled" ? "已启用" : "已停用" }}</span>
-            </div>
-            <div class="setting-row">
-              <span class="set-lab">API 密钥<small :data-d4-01-cred-status="p.providerId">{{ credLabel(p.providerId) }}</small></span>
-              <input
-                class="set-input"
-                :data-d4-01-cred-input="p.providerId"
-                :aria-label="'API key for ' + p.displayName"
-                type="password"
-                placeholder="粘贴密钥（只写入，不再显示）"
-                :value="credDraft[p.providerId] || ''"
-                @input="onCredDraft(p.providerId, $event)"
-              />
-              <DsButton variant="secondary" size="sm" :data-d4-01-cred-set="p.providerId" @click="saveCred(p.providerId, false)">保存</DsButton>
-              <DsButton variant="secondary" size="sm" :data-d4-01-cred-replace="p.providerId" @click="saveCred(p.providerId, true)">替换</DsButton>
-              <DsButton variant="ghost" size="sm" :data-d4-01-cred-delete="p.providerId" @click="deleteCred(p.providerId)">删除</DsButton>
-            </div>
-            <div class="setting-row">
-              <span class="set-lab">
-                连接
-                <small v-if="tests[p.providerId]" class="d401-test" :data-d4-01-test-result="p.providerId">{{ testLabel(tests[p.providerId]) }}</small>
-              </span>
-              <DsButton variant="secondary" size="sm" :data-d4-01-test="p.providerId" @click="runTest(p.providerId)">测试连接</DsButton>
-              <DsButton
-                v-if="p.status === 'enabled'"
-                variant="ghost"
-                size="sm"
-                :data-d4-01-provider-disable="p.providerId"
-                @click="setProviderStatus(p.providerId, 'disabled')"
-              >停用</DsButton>
-              <DsButton
-                v-else
-                variant="secondary"
-                size="sm"
-                :data-d4-01-provider-enable="p.providerId"
-                @click="setProviderStatus(p.providerId, 'enabled')"
-              >启用</DsButton>
-            </div>
-            <div class="setting-row">
-              <span class="set-lab">
-                模型
-                <small>从服务商拉取可用模型（OpenAI 兼容 /models），勾选后注册</small>
-              </span>
-              <DsButton variant="secondary" size="sm" :data-d4-01-pull="p.providerId" :disabled="pulling === p.providerId" @click="pullModels(p.providerId)">
-                {{ pulling === p.providerId ? "拉取中…" : remote[p.providerId] ? "重新拉取" : "拉取模型" }}
-              </DsButton>
-            </div>
-            <div v-if="remote[p.providerId]" class="set-block d401-remote" :data-d4-01-remote="p.providerId">
-              <div class="d401-remote-head">
-                <label class="ds-search d401-remote-search">
-                  <input
-                    class="ds-search__input"
-                    type="search"
-                    placeholder="筛选模型"
-                    aria-label="筛选模型"
-                    :value="remoteFilter[p.providerId] || ''"
-                    @input="remoteFilter = { ...remoteFilter, [p.providerId]: ($event.target as HTMLInputElement).value }"
-                  />
-                </label>
-                <span class="set-val">{{ remoteList(p.providerId).length }} / {{ remote[p.providerId].length }}</span>
-                <DsButton variant="primary" size="sm" :disabled="!pickedCount(p.providerId)" @click="registerPicked(p.providerId)">
-                  注册所选{{ pickedCount(p.providerId) ? `（${pickedCount(p.providerId)}）` : "" }}
-                </DsButton>
-              </div>
-              <ul class="d401-remote-list">
-                <li v-for="m in remoteList(p.providerId)" :key="m.id">
-                  <label :class="{ done: m.registered }">
-                    <input type="checkbox" :disabled="m.registered" :checked="m.registered || !!picked[p.providerId]?.[m.id]" @change="togglePick(p.providerId, m)" />
-                    <span class="mono d401-remote-id">{{ m.id }}</span>
-                    <span v-if="m.registered" class="badge">已注册</span>
-                    <span v-else class="d401-remote-caps">{{ (m.suggestedCapabilities.length ? m.suggestedCapabilities : ['chat']).map((c) => CAP_SHORT[c] || c).join(" · ") }}</span>
-                  </label>
-                </li>
-                <li v-if="!remoteList(p.providerId).length" class="set-cap">没有匹配的模型</li>
-              </ul>
-              <p class="set-cap">能力按模型名推断，注册后可在「模型」里修改；「测试连接」通过后才算已验证。</p>
-            </div>
-          </li>
-        </ul>
+    <div class="mp2-grid" data-d4-01-pane="providers">
+      <!-- 左：服务商列表 -->
+      <div class="set-group mp2-provs" data-d4-01-providers>
+        <button
+          v-for="p in providers"
+          :key="p.providerId"
+          type="button"
+          class="mp2-prov"
+          :class="{ on: selected === p.providerId }"
+          :data-d4-01-provider="p.providerId"
+          @click="selected = p.providerId; addingModel = false"
+        >
+          <span class="mp2-logo" :style="{ background: logoColor(p.providerId) }" aria-hidden="true">{{ mono(p.displayName) }}</span>
+          <span class="mp2-prov-main">
+            <b>{{ p.displayName }}</b>
+            <small>{{ modelsOf(p.providerId).length }} 个模型</small>
+          </span>
+          <span class="mp2-dot" :data-tone="providerState(p).tone" :title="providerState(p).label" />
+        </button>
+        <button type="button" class="mp2-prov" :class="{ on: selected === 'new' }" data-d4-01-provider-add @click="selected = 'new'">
+          <span class="mp2-logo mp2-logo-add" aria-hidden="true">＋</span>
+          <span class="mp2-prov-main"><b>添加服务商</b></span>
+        </button>
       </div>
-      <div class="set-sec">
-        <h3>添加服务商</h3>
-        <div class="set-group d401-form">
-          <label class="setting-row">
-            <span class="set-lab">名称</span>
-            <input class="set-input" data-d4-01-provider-name aria-label="Provider display name" placeholder="例如 DeepSeek" :value="pForm.displayName" @input="onProviderName" />
-          </label>
-          <label class="setting-row">
-            <span class="set-lab">API 地址</span>
-            <input class="set-input mono" data-d4-01-provider-url aria-label="Provider base URL" placeholder="https://api.example.com/v1" :value="pForm.baseUrl" @input="onProviderUrl" />
-          </label>
-          <label class="setting-row">
-            <span class="set-lab">范围<small>个人只对自己生效；组织需要管理员</small></span>
-            <select class="set-select" data-d4-01-provider-scope aria-label="Provider scope" :value="pForm.scope" @change="onProviderScope">
-              <option value="PERSONAL">个人</option>
-              <option value="ORGANIZATION">组织</option>
-            </select>
-          </label>
-          <label class="setting-row">
-            <span class="set-lab">API 密钥<small>只写入系统钥匙串</small></span>
-            <input class="set-input" data-d4-01-provider-secret aria-label="Provider API key" type="password" placeholder="粘贴密钥" :value="pForm.credentialSecret" @input="onProviderSecret" />
-          </label>
-          <div class="setting-row set-actions">
-            <DsButton variant="primary" size="sm" data-d4-01-provider-create @click="createProvider">添加服务商</DsButton>
-          </div>
+
+      <!-- 右：添加服务商 -->
+      <div v-if="selected === 'new' || !current" class="set-group mp2-detail" data-d4-01-provider-form>
+        <p v-if="providers.length === 0" class="set-cap" data-d4-01-providers-empty>还没有服务商。填写地址与密钥添加第一个，常见的 OpenAI 兼容服务（DeepSeek、通义、火山方舟、硅基流动等）都可以。</p>
+        <div class="mp2-head"><b>添加服务商</b></div>
+        <label class="mp2-field"><span>名称</span>
+          <input class="set-input" data-d4-01-provider-name aria-label="服务商名称" placeholder="例如 DeepSeek" :value="pForm.displayName" @input="onProviderName" />
+        </label>
+        <label class="mp2-field"><span>API 地址</span>
+          <input class="set-input mono" data-d4-01-provider-url aria-label="API 地址" placeholder="https://api.example.com/v1" :value="pForm.baseUrl" @input="onProviderUrl" />
+        </label>
+        <label class="mp2-field"><span>API 密钥 <small>只写入系统钥匙串</small></span>
+          <input class="set-input" data-d4-01-provider-secret aria-label="API 密钥" type="password" placeholder="粘贴密钥" :value="pForm.credentialSecret" @input="onProviderSecret" />
+        </label>
+        <label class="mp2-field"><span>范围 <small>个人只对自己生效；组织需要管理员</small></span>
+          <select class="set-select" data-d4-01-provider-scope aria-label="范围" :value="pForm.scope" @change="onProviderScope">
+            <option value="PERSONAL">个人</option>
+            <option value="ORGANIZATION">组织</option>
+          </select>
+        </label>
+        <div class="mp2-actions">
+          <DsButton variant="primary" size="sm" data-d4-01-provider-create :disabled="busy || !pForm.displayName.trim() || !pForm.baseUrl.trim()" @click="submitProvider">添加服务商</DsButton>
         </div>
       </div>
-    </section>
 
-    <section v-if="tab === 'models'" data-d4-01-pane="models">
-      <div class="set-sec">
-        <h3>已注册的模型</h3>
-        <p v-if="models.length === 0" class="set-cap set-empty" data-d4-01-models-empty>还没有模型。先添加服务商，再在下方注册模型。</p>
-        <ul class="d401-list" data-d4-01-models>
-          <li v-for="m in models" :key="m.configId" :data-d4-01-model="m.configId" class="set-group d401-card">
-            <div class="setting-row">
-              <span class="set-lab">
-                <span class="d401-name">{{ m.displayName || m.remoteModelId }}</span>
-                <small class="d401-meta mono">{{ m.remoteModelId }} · {{ m.scope === "ORGANIZATION" ? "组织" : "个人" }} · v{{ m.version }}</small>
-              </span>
-              <span class="badge" :class="{ ok: m.status === 'enabled' }">{{ m.status === "enabled" ? "已启用" : "已停用" }}</span>
-              <DsButton
-                v-if="m.status === 'enabled'"
-                variant="ghost"
-                size="sm"
-                :data-d4-01-model-disable="m.configId"
-                @click="setModelStatus(m.configId, 'disabled')"
-              >停用</DsButton>
-              <DsButton
-                v-else
-                variant="secondary"
-                size="sm"
-                :data-d4-01-model-enable="m.configId"
-                @click="setModelStatus(m.configId, 'enabled')"
-              >启用</DsButton>
-            </div>
-            <div class="setting-row">
-              <span class="set-lab">
-                能力
-                <small :data-d4-01-model-declared="m.configId">声明：{{ m.capabilities.join("、") || "—" }}</small>
-                <small :data-d4-01-model-verified="m.configId">已验证：{{ m.verifiedCapabilities.join("、") || "—" }}</small>
-              </span>
-              <div class="d401-caps" role="group" :aria-label="'模型能力 ' + (m.displayName || m.remoteModelId)">
+      <!-- 右：服务商详情 -->
+      <div v-else class="set-group mp2-detail" :key="current.providerId" :data-d4-01-provider-detail="current.providerId">
+        <div class="mp2-head">
+          <span class="mp2-logo" :style="{ background: logoColor(current.providerId) }" aria-hidden="true">{{ mono(current.displayName) }}</span>
+          <b class="mp2-title">{{ current.displayName }}</b>
+          <span class="badge" :class="{ ok: providerState(current).tone === 'ok', warn: providerState(current).tone === 'warn' }" data-d4-01-provider-status>{{ providerState(current).label }}</span>
+        </div>
+        <div class="mp2-field"><span>API 地址</span>
+          <div class="mp2-static mono">{{ current.baseUrl }}<small> · {{ current.scope === "ORGANIZATION" ? "组织" : "个人" }} · {{ current.adapterType }}</small></div>
+        </div>
+        <div class="mp2-field"><span>API 密钥 <small :data-d4-01-cred-status="current.providerId">{{ credLabel(current.providerId) }}</small></span>
+          <div class="mp2-row">
+            <input
+              class="set-input"
+              :data-d4-01-cred-input="current.providerId"
+              :aria-label="'API 密钥：' + current.displayName"
+              type="password"
+              :placeholder="credStatus[current.providerId]?.configured ? '已保存（只写入，不再显示）· 粘贴新密钥可替换' : '粘贴密钥'"
+              :value="credDraft[current.providerId] || ''"
+              @input="onCredDraft(current.providerId, $event)"
+            />
+            <DsButton variant="secondary" size="sm" :data-d4-01-cred-set="current.providerId" :disabled="!credDraft[current.providerId]" @click="saveCred(current.providerId, !!credStatus[current.providerId]?.configured)">保存</DsButton>
+            <DsButton v-if="credStatus[current.providerId]?.configured" variant="ghost" size="sm" :data-d4-01-cred-delete="current.providerId" @click="deleteCred(current.providerId)">删除</DsButton>
+          </div>
+        </div>
+        <div class="mp2-row">
+          <DsButton variant="secondary" size="sm" :data-d4-01-test="current.providerId" @click="runTest(current.providerId)">测试连接</DsButton>
+          <span v-if="tests[current.providerId]" class="badge" :class="{ ok: tests[current.providerId].ok }" :data-d4-01-test-result="current.providerId">{{ tests[current.providerId].ok ? "连接成功" : "连接失败" }}</span>
+          <small v-if="tests[current.providerId]" class="set-cap">{{ testLabel(tests[current.providerId]) }}</small>
+          <span class="toolbar-spacer" />
+          <DsButton v-if="current.status === 'enabled'" variant="ghost" size="sm" :data-d4-01-provider-disable="current.providerId" @click="setProviderStatus(current.providerId, 'disabled')">停用</DsButton>
+          <DsButton v-else variant="secondary" size="sm" :data-d4-01-provider-enable="current.providerId" @click="setProviderStatus(current.providerId, 'enabled')">启用</DsButton>
+        </div>
+
+        <div class="mp2-field" data-d4-01-pane="models"><span>模型与能力</span>
+          <ul class="mp2-models" data-d4-01-models>
+            <li v-for="m in modelsOf(current.providerId)" :key="m.configId" :data-d4-01-model="m.configId" :class="{ off: m.status !== 'enabled' }">
+              <div class="mp2-model-row">
+                <span class="mono mp2-model-id" :title="m.remoteModelId">{{ m.displayName || m.remoteModelId }}</span>
+                <span v-for="c in m.capabilities" :key="c" class="badge" :class="{ ok: m.verifiedCapabilities.includes(c) }" :title="m.verifiedCapabilities.includes(c) ? '已验证' : '已声明，未验证'">{{ CAP_SHORT[c] || c }}</span>
+                <button class="mp2-link" @click="editingCaps = editingCaps === m.configId ? null : m.configId">编辑</button>
+                <button v-if="m.status === 'enabled'" class="mp2-link" :data-d4-01-model-disable="m.configId" @click="setModelStatus(m.configId, 'disabled')">停用</button>
+                <button v-else class="mp2-link" :data-d4-01-model-enable="m.configId" @click="setModelStatus(m.configId, 'enabled')">启用</button>
+              </div>
+              <div v-if="editingCaps === m.configId" class="mp2-caps-edit">
                 <label v-for="c in CAPABILITY_CHOICES" :key="c.id">
-                  <input
-                    type="checkbox"
-                    :data-d4-01-model-cap="m.configId"
-                    :data-d4-01-model-cap-id="c.id"
-                    :checked="draftCaps(m).includes(c.id)"
-                    @change="toggleModelCap(m.configId, m, c.id)"
-                  />
+                  <input type="checkbox" :data-d4-01-model-cap="m.configId" :data-d4-01-model-cap-id="c.id" :checked="draftCaps(m).includes(c.id)" @change="toggleModelCap(m.configId, m, c.id)" />
                   {{ c.label }}
                 </label>
+                <DsButton variant="secondary" size="sm" :data-d4-01-model-cap-save="m.configId" @click="saveCaps(m.configId); editingCaps = null">保存</DsButton>
               </div>
-              <DsButton variant="secondary" size="sm" :data-d4-01-model-cap-save="m.configId" @click="saveCaps(m.configId)">保存</DsButton>
-            </div>
-          </li>
-        </ul>
-      </div>
-      <div class="set-sec">
-        <h3>注册模型</h3>
-        <div class="set-group d401-form">
-          <label class="setting-row">
-            <span class="set-lab">服务商</span>
-            <select class="set-select" data-d4-01-model-provider aria-label="Model provider" :value="mForm.providerId" @change="onModelProvider">
-              <option value="">选择服务商</option>
-              <option v-for="p in providerOptions" :key="p.providerId" :value="p.providerId">{{ p.displayName }}</option>
-            </select>
+            </li>
+            <li v-if="!modelsOf(current.providerId).length" class="set-cap" data-d4-01-models-empty>还没有模型。可以从服务商拉取，或手动添加。</li>
+          </ul>
+          <div class="mp2-row">
+            <DsButton variant="secondary" size="sm" :data-d4-01-pull="current.providerId" :disabled="pulling === current.providerId" @click="pullModels(current.providerId)">
+              {{ pulling === current.providerId ? "拉取中…" : remote[current.providerId] ? "重新拉取" : "拉取模型" }}
+            </DsButton>
+            <DsButton variant="ghost" size="sm" data-d4-01-model-add @click="startAddModel(current.providerId)">添加自定义模型</DsButton>
+          </div>
+        </div>
+
+        <div v-if="addingModel && mForm.providerId === current.providerId" class="mp2-sub" data-d4-01-model-form>
+          <label class="mp2-field"><span>模型 ID <small>服务商那边的模型名</small></span>
+            <input class="set-input mono" data-d4-01-model-remote aria-label="模型 ID" placeholder="例如 deepseek-chat" :value="mForm.remoteModelId" @input="onModelRemote" />
           </label>
-          <label class="setting-row">
-            <span class="set-lab">模型 ID<small>服务商那边的模型名</small></span>
-            <input class="set-input mono" data-d4-01-model-remote aria-label="Remote model ID" placeholder="例如 deepseek-chat" :value="mForm.remoteModelId" @input="onModelRemote" />
+          <label class="mp2-field"><span>显示名称 <small>可选</small></span>
+            <input class="set-input" data-d4-01-model-name aria-label="显示名称" :value="mForm.displayName" @input="onModelName" />
           </label>
-          <label class="setting-row">
-            <span class="set-lab">显示名称</span>
-            <input class="set-input" data-d4-01-model-name aria-label="Model display name" placeholder="可选" :value="mForm.displayName" @input="onModelName" />
-          </label>
-          <label class="setting-row">
-            <span class="set-lab">范围</span>
-            <select class="set-select" data-d4-01-model-scope aria-label="Model scope" :value="mForm.scope" @change="onModelScope">
-              <option value="PERSONAL">个人</option>
-              <option value="ORGANIZATION">组织</option>
-            </select>
-          </label>
-          <div class="setting-row">
-            <span class="set-lab">能力</span>
-            <div class="d401-caps" data-d4-01-model-create-caps role="group" aria-label="模型能力">
+          <div class="mp2-field"><span>能力</span>
+            <div class="mp2-caps-edit" data-d4-01-model-create-caps>
               <label v-for="c in CAPABILITY_CHOICES" :key="c.id">
-                <input
-                  type="checkbox"
-                  :data-d4-01-model-create-cap="c.id"
-                  :checked="mForm.capabilities.includes(c.id)"
-                  @change="toggleCreateCap(c.id)"
-                />
+                <input type="checkbox" :data-d4-01-model-create-cap="c.id" :checked="mForm.capabilities.includes(c.id)" @change="toggleCreateCap(c.id)" />
                 {{ c.label }}
               </label>
             </div>
           </div>
-          <div class="setting-row set-actions">
-            <DsButton variant="primary" size="sm" data-d4-01-model-create @click="createModel">注册模型</DsButton>
+          <div class="mp2-actions">
+            <DsButton variant="ghost" size="sm" @click="addingModel = false">取消</DsButton>
+            <DsButton variant="primary" size="sm" data-d4-01-model-create :disabled="!mForm.remoteModelId.trim()" @click="submitModel">添加模型</DsButton>
           </div>
         </div>
-      </div>
-    </section>
 
-    <section v-if="tab === 'defaults' && defaults" data-d4-01-pane="defaults">
-      <div class="set-sec">
-        <h3>我的默认模型</h3>
-        <div class="set-group d401-defaults" data-d4-01-defaults-personal>
-        <label class="setting-row">
-          <span class="set-lab">文本对话</span>
-          <select class="set-select" data-d4-01-default-personal-chat :value="defaults.personal.chat || ''" @change="onDefault('chat', $event, 'PERSONAL')">
-            <option
-              v-for="o in defaultOptions('chat', defaults.personal.chat)"
-              :key="o.value + (o.disabled ? ':x' : '')"
-              :value="o.value"
-              :disabled="o.disabled"
-              :data-d4-01-default-unavailable="o.unavailableFor"
-            >{{ o.label }}</option>
-          </select>
-        </label>
-        <label class="setting-row">
-          <span class="set-lab">工具调用</span>
-          <select class="set-select" data-d4-01-default-personal-tool :value="defaults.personal['tool-calling'] || ''" @change="onDefault('tool-calling', $event, 'PERSONAL')">
-            <option
-              v-for="o in defaultOptions('tool-calling', defaults.personal['tool-calling'])"
-              :key="o.value + (o.disabled ? ':x' : '')"
-              :value="o.value"
-              :disabled="o.disabled"
-              :data-d4-01-default-unavailable="o.unavailableFor"
-            >{{ o.label }}</option>
-          </select>
-        </label>
-        <label class="setting-row">
-          <span class="set-lab">图像生成</span>
-          <select class="set-select" data-d4-01-default-personal-image :value="defaults.personal['image-generation'] || ''" @change="onDefault('image-generation', $event, 'PERSONAL')">
-            <option
-              v-for="o in defaultOptions('image-generation', defaults.personal['image-generation'])"
-              :key="o.value + (o.disabled ? ':x' : '')"
-              :value="o.value"
-              :disabled="o.disabled"
-              :data-d4-01-default-unavailable="o.unavailableFor"
-            >{{ o.label }}</option>
-          </select>
-        </label>
-        <label class="setting-row">
-          <span class="set-lab">视频生成<small>无可用传输（未接通）</small></span>
-          <select class="set-select" data-d4-01-default-personal-video disabled aria-disabled="true">
-            <option value="">未接通</option>
-          </select>
-        </label>
+        <div v-if="remote[current.providerId]" class="mp2-sub d401-remote" :data-d4-01-remote="current.providerId">
+          <div class="d401-remote-head">
+            <label class="ds-search d401-remote-search">
+              <input
+                class="ds-search__input"
+                type="search"
+                placeholder="筛选模型"
+                aria-label="筛选模型"
+                :value="remoteFilter[current.providerId] || ''"
+                @input="remoteFilter = { ...remoteFilter, [current.providerId]: ($event.target as HTMLInputElement).value }"
+              />
+            </label>
+            <span class="set-val">{{ remoteList(current.providerId).length }} / {{ remote[current.providerId].length }}</span>
+            <DsButton variant="primary" size="sm" :disabled="!pickedCount(current.providerId)" @click="registerPicked(current.providerId)">
+              注册所选{{ pickedCount(current.providerId) ? `（${pickedCount(current.providerId)}）` : "" }}
+            </DsButton>
+          </div>
+          <ul class="d401-remote-list">
+            <li v-for="m in remoteList(current.providerId)" :key="m.id">
+              <label :class="{ done: m.registered }">
+                <input type="checkbox" :disabled="m.registered" :checked="m.registered || !!picked[current.providerId]?.[m.id]" @change="togglePick(current.providerId, m)" />
+                <span class="mono d401-remote-id">{{ m.id }}</span>
+                <span v-if="m.registered" class="badge">已注册</span>
+                <span v-else class="d401-remote-caps">{{ (m.suggestedCapabilities.length ? m.suggestedCapabilities : ['chat']).map((c) => CAP_SHORT[c] || c).join(" · ") }}</span>
+              </label>
+            </li>
+            <li v-if="!remoteList(current.providerId).length" class="set-cap">没有匹配的模型</li>
+          </ul>
+          <p class="set-cap">能力按模型名推断，注册后可以点「编辑」修改；「测试连接」通过后才算已验证。</p>
         </div>
+      </div>
+    </div>
+
+    <!-- 默认模型 -->
+    <template v-if="defaults">
+      <div class="set-sec" data-d4-01-pane="defaults">
+        <h3>默认模型</h3>
+        <div class="set-group d401-defaults" data-d4-01-defaults-personal>
+          <label v-for="d in [['chat', '文本对话', 'chat'], ['tool-calling', '工具调用', 'tool'], ['image-generation', '图像生成', 'image']]" :key="d[0]" class="setting-row">
+            <span class="set-lab">{{ d[1] }}</span>
+            <select class="set-select"  v-bind="{ ['data-d4-01-default-personal-' + d[2]]: '' }" :value="defaults.personal[d[0]] || ''" @change="onDefault(d[0], $event, 'PERSONAL')">
+              <option v-for="o in defaultOptions(d[0], defaults.personal[d[0]])" :key="o.value + (o.disabled ? ':x' : '')" :value="o.value" :disabled="o.disabled" :data-d4-01-default-unavailable="o.unavailableFor">
+                {{ o.value ? o.label : "自动" }}
+              </option>
+            </select>
+          </label>
+          <label class="setting-row">
+            <span class="set-lab">视频生成<small>无可用传输（未接通）</small></span>
+            <select class="set-select" data-d4-01-default-personal-video disabled aria-disabled="true"><option value="">未接通</option></select>
+          </label>
+        </div>
+        <p class="set-cap">「自动」表示使用当前服务商下已配置、且能力匹配的模型。所有应用（AI Studio、对话、Skill、短剧工坊……）都用这里的设置。</p>
       </div>
       <div class="set-sec">
         <h3>组织默认模型 <small v-if="!defaults.canManageOrganization" class="muted">（只读）</small></h3>
         <div class="set-group d401-defaults" data-d4-01-defaults-organization>
-        <label class="setting-row">
-          <span class="set-lab">文本对话</span>
-          <select class="set-select" data-d4-01-default-org-chat :value="defaults.organization.chat || ''" @change="onDefault('chat', $event, 'ORGANIZATION')">
-            <option
-              v-for="o in defaultOptions('chat', defaults.organization.chat)"
-              :key="o.value + (o.disabled ? ':x' : '')"
-              :value="o.value"
-              :disabled="o.disabled"
-              :data-d4-01-default-unavailable="o.unavailableFor"
-            >{{ o.label }}</option>
-          </select>
-        </label>
-        <label class="setting-row">
-          <span class="set-lab">工具调用</span>
-          <select class="set-select" data-d4-01-default-org-tool :value="defaults.organization['tool-calling'] || ''" @change="onDefault('tool-calling', $event, 'ORGANIZATION')">
-            <option
-              v-for="o in defaultOptions('tool-calling', defaults.organization['tool-calling'])"
-              :key="o.value + (o.disabled ? ':x' : '')"
-              :value="o.value"
-              :disabled="o.disabled"
-              :data-d4-01-default-unavailable="o.unavailableFor"
-            >{{ o.label }}</option>
-          </select>
-        </label>
-        <label class="setting-row">
-          <span class="set-lab">图像生成</span>
-          <select class="set-select" data-d4-01-default-org-image :value="defaults.organization['image-generation'] || ''" @change="onDefault('image-generation', $event, 'ORGANIZATION')">
-            <option
-              v-for="o in defaultOptions('image-generation', defaults.organization['image-generation'])"
-              :key="o.value + (o.disabled ? ':x' : '')"
-              :value="o.value"
-              :disabled="o.disabled"
-              :data-d4-01-default-unavailable="o.unavailableFor"
-            >{{ o.label }}</option>
-          </select>
-        </label>
-        <label class="setting-row">
-          <span class="set-lab">视频生成<small>无可用传输（未接通）</small></span>
-          <select class="set-select" data-d4-01-default-org-video disabled aria-disabled="true">
-            <option value="">未接通</option>
-          </select>
-        </label>
+          <label v-for="d in [['chat', '文本对话', 'chat'], ['tool-calling', '工具调用', 'tool'], ['image-generation', '图像生成', 'image']]" :key="d[0]" class="setting-row">
+            <span class="set-lab">{{ d[1] }}</span>
+            <select class="set-select"  v-bind="{ ['data-d4-01-default-org-' + d[2]]: '' }" :disabled="!defaults.canManageOrganization" :value="defaults.organization[d[0]] || ''" @change="onDefault(d[0], $event, 'ORGANIZATION')">
+              <option v-for="o in defaultOptions(d[0], defaults.organization[d[0]])" :key="o.value + (o.disabled ? ':x' : '')" :value="o.value" :disabled="o.disabled" :data-d4-01-default-unavailable="o.unavailableFor">
+                {{ o.value ? o.label : "未设置" }}
+              </option>
+            </select>
+          </label>
         </div>
-        <p v-if="role !== 'ADMIN'" class="set-cap" data-d4-01-org-hint>组织默认模型需要管理员修改。</p>
+        <p v-if="role !== 'ADMIN'" class="set-cap" data-d4-01-org-hint>组织默认模型需要管理员修改。成员没有设置个人默认时，使用组织默认。</p>
+        <p class="set-cap">协议（各家服务的调用方式与可用状态）在「协议中心」里查看。</p>
       </div>
-    </section>
-    <section v-if="tab === 'protocols'" data-d4-01-pane="protocols">
-      <ModelProtocols />
-    </section>
+    </template>
   </div>
 </template>

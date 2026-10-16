@@ -89,8 +89,8 @@ const STATUS: Record<string, string> = { enabled: "已启用", disabled: "已停
         <button type="button" role="switch" class="switch" :aria-checked="weatherOn" aria-label="天气联网" @click="setWeather(!weatherOn)" />
       </div>
       <div class="setting-row">
-        <span class="set-lab">应用与工具权限<small>哪些应用可用、可以调用哪些工具，由组织治理统一授予</small></span>
-        <button class="planned-today" @click="shell.activateApp('organization')">打开组织治理</button>
+        <span class="set-lab">应用与工具权限<small>哪些应用可用、可以调用哪些工具，由「组织」统一授予</small></span>
+        <button class="planned-today" @click="shell.activateApp('organization')">打开组织</button>
       </div>
     </div>
     <section class="set-sec">
@@ -146,7 +146,7 @@ const STATUS: Record<string, string> = { enabled: "已启用", disabled: "已停
       </div>
       <p v-if="!apps.length" class="set-cap gov-empty">没有可管理的应用。</p>
     </div>
-    <div class="set-sec"><button class="planned-today" @click="shell.activateApp('organization')">在组织治理中管理</button></div>
+    <div class="set-sec"><button class="planned-today" @click="shell.activateApp('organization')">在「组织」中管理</button></div>
   </template>
 
   <!-- 磁盘空间 -->
