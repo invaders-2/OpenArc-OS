@@ -37,6 +37,10 @@ import "../design-system/page-states.css";
 /* 写类入口的二次确认复用产品既有 Dialog（焦点陷阱 / Esc / 焦点返回都在组件内）。 */
 import { Dialog } from "../desktop/Dialog";
 import {
+  CORE_TASK_ACTIONS,
+  CORE_TASK_ACTION_INPUT_LABEL,
+  CORE_TASK_COMMAND_DOMAIN_TEXT,
+  CORE_TASK_ROW_HINT,
   TASK_CONSOLE_COMMANDS,
   TASK_ENTRIES,
   TASK_ENTRY_INPUT_LABEL,
@@ -48,14 +52,28 @@ import {
   canContinueTask,
   canPauseTask,
   canResumeTask,
+  coreActionConfirmSummary,
+  coreActionConfirmTitle,
+  coreActionDisabledReason,
+  coreActionMissingInputs,
+  coreActionPayload,
+  coreTaskActionMeta,
+  coreTaskActionRiskText,
+  coreTaskFailureText,
+  coreTaskReasonText,
+  coreTaskStatusLabel,
+  coreTaskStatusTone,
   dependencyMissingText,
   dependencyOfDetail,
   filterTasks,
+  isActiveCoreStatus,
   isActiveTaskStatus,
   isAllowedAgentCommand,
   mergeTaskEvents,
   missingDependencies,
   nextEventCursor,
+  nextUnacknowledgedRecoveryCall,
+  normalizeCoreTaskDetail,
   normalizeUnifiedList,
   progressSequenceState,
   stepProgress,
@@ -71,16 +89,20 @@ import {
   taskEventLabel,
   taskFeedbackForStatus,
   taskListState,
+  unifiedCapabilityNote,
   unifiedCountsText,
   unifiedSourceBadge,
   unifiedSourceIndex,
   waitingQuestionFromEvents,
 } from "./taskConsoleLogic";
+import { hasCoreTaskBridge, sendCoreTaskCommand } from "./coreTaskConsole";
 import type {
   AgentProgressEvent,
+  CoreTaskDetail,
   TaskEntryKey,
   TaskEvent,
   TaskStep,
+  UnifiedItem,
   UnifiedListView,
 } from "./taskConsoleLogic";
 
@@ -173,6 +195,13 @@ type DetailState =
   | { kind: "error"; code: string; message: string }
   | { kind: "ready"; task: TaskRecord; steps: TaskStep[]; deliverables: Deliverable[]; checkpoints: number };
 
+/** U1 · core 任务详情状态（与 DX 的 DetailState 分开，字段形状不同，不互相污染）。 */
+type CoreDetailState =
+  | { kind: "none" }
+  | { kind: "loading" }
+  | { kind: "error"; code: string; message: string }
+  | { kind: "ready"; detail: CoreTaskDetail };
+
 type Failure = { code: string; context: string; message?: string };
 type DependencyState = { code: string; dependency: string | null; message: string | null; context: string };
 type Health = { status: string; dependencies: Record<string, unknown> };
@@ -219,6 +248,15 @@ function TaskConsoleBody({ role }: { role: string | null }) {
   const [pendingEntry, setPendingEntry] = useState<{ key: TaskEntryKey; payload: Record<string, unknown>; summary: string } | null>(null);
   /* 统一读模型：只读列表来源标注（不改任何一方状态机）。 */
   const [unified, setUnified] = useState<UnifiedListView | null>(null);
+  /* U1 · core 任务（既有 tasks 表）：选中、详情与动作全部经 task/* 窄桥。 */
+  const [selectedCore, setSelectedCore] = useState<UnifiedItem | null>(null);
+  const [coreDetail, setCoreDetail] = useState<CoreDetailState>({ kind: "none" });
+  const [coreBusy, setCoreBusy] = useState<string | null>(null);
+  const [coreGoal, setCoreGoal] = useState("");
+  const [coreFailure, setCoreFailure] = useState<{ key: string; code: string; context: string; message?: string } | null>(null);
+  const [coreNotice, setCoreNotice] = useState<string | null>(null);
+  const [pendingCore, setPendingCore] = useState<{ key: string; payload: Record<string, unknown>; summary: string } | null>(null);
+  const coreBridgeAvailable = hasCoreTaskBridge();
 
   const eventsRef = useRef<TaskEvent[]>([]);
 
@@ -336,6 +374,13 @@ function TaskConsoleBody({ role }: { role: string | null }) {
   const loadDetail = useCallback(
     async (taskId: string) => {
       setSelectedId(taskId);
+      /* 切回 DX 任务：清掉 core 选中态，避免两侧详情/命令混用。 */
+      setSelectedCore(null);
+      setCoreDetail({ kind: "none" });
+      setCoreBusy(null);
+      setCoreFailure(null);
+      setCoreNotice(null);
+      setPendingCore(null);
       setDetail({ kind: "loading" });
       eventsRef.current = [];
       setEvents([]);
@@ -357,6 +402,53 @@ function TaskConsoleBody({ role }: { role: string | null }) {
     const res = await send(UNIFIED_READ_MODEL_COMMAND, {});
     setUnified(normalizeUnifiedList(res));
   }, [send]);
+
+  /**
+   * U1 · core 任务详情：一律以后端 task/get 为准，失败不阻塞列表、也不做本地拼接。
+   * 成功后 appendable / resumable / recovery / revision 全部来自这一份投影。
+   */
+  const loadCoreDetail = useCallback(
+    async (taskId: string, opts?: { silent?: boolean }): Promise<CoreTaskDetail | null> => {
+      if (!opts?.silent) setCoreDetail({ kind: "loading" });
+      const res = await sendCoreTaskCommand("task/get", { taskId });
+      if (res.ok !== true) {
+        const code = codeOf(res.error);
+        const message = messageOf(res.message) || messageOf(res.detail);
+        if (!opts?.silent) setCoreDetail({ kind: "error", code, message });
+        return null;
+      }
+      const detail = normalizeCoreTaskDetail(res);
+      if (!detail) {
+        if (!opts?.silent) setCoreDetail({ kind: "error", code: "RESPONSE_INCOMPLETE", message: "" });
+        return null;
+      }
+      setCoreDetail({ kind: "ready", detail });
+      return detail;
+    },
+    [],
+  );
+
+  /** 选中一条 core 任务：清掉 DX 选中态与事件流，详情走 task/get。 */
+  const selectCoreTask = useCallback(
+    (item: UnifiedItem) => {
+      setSelectedId(null);
+      setDetail({ kind: "none" });
+      eventsRef.current = [];
+      setEvents([]);
+      setEventGap(false);
+      setFailure(null);
+      setNotice(null);
+      setSelectedCore(item);
+      setCoreDetail({ kind: "loading" });
+      setCoreBusy(null);
+      setCoreFailure(null);
+      setCoreNotice(null);
+      setCoreGoal("");
+      setPendingCore(null);
+      void loadCoreDetail(item.id);
+    },
+    [loadCoreDetail],
+  );
 
   useEffect(() => {
     if (!available) {
@@ -402,6 +494,17 @@ function TaskConsoleBody({ role }: { role: string | null }) {
     return () => window.clearInterval(timer);
   }, [available, selectedId, activeSelected, refreshSelected, loadEvents]);
 
+  const coreActive = coreDetail.kind === "ready" && isActiveCoreStatus(coreDetail.detail.task.status);
+
+  /* core 进行态：按 task/get 轮询（core 没有 afterSequence 事件游标，读的是同一份详情投影）。 */
+  useEffect(() => {
+    if (!selectedCore || !coreActive) return;
+    const timer = window.setInterval(() => {
+      void loadCoreDetail(selectedCore.id, { silent: true });
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [selectedCore, coreActive, loadCoreDetail]);
+
   /* ── 动作 ─────────────────────────────────────────────────────────────── */
   const refreshAll = async () => {
     await loadList({ silent: true });
@@ -409,6 +512,7 @@ function TaskConsoleBody({ role }: { role: string | null }) {
       await refreshSelected(selectedId, { silent: true });
       await loadEvents(selectedId);
     }
+    if (selectedCore) await loadCoreDetail(selectedCore.id, { silent: true });
     await loadUnified();
   };
 
@@ -443,6 +547,86 @@ function TaskConsoleBody({ role }: { role: string | null }) {
     await refreshAll();
     return true;
   };
+
+  /* ── core 任务动作（task/* 命令域；与 agent/* 的 DX 动作严格分开）────────── */
+  /** 可用性判定统一入口：hasBridge / 状态 / 输入都在这里给可见原因。 */
+  const coreActionDisabled = (key: string, callId?: string): string | null =>
+    coreActionDisabledReason(key, {
+      hasBridge: coreBridgeAvailable,
+      detail: coreDetail.kind === "ready" ? coreDetail.detail : null,
+      goal: coreGoal,
+      callId: callId || "",
+    });
+
+  /** 确认后真正发送：只发 core 白名单命令；成功后按后端 task/get 刷新，不做乐观拼接。 */
+  const submitCoreAction = async (key: string, payload: Record<string, unknown>) => {
+    const meta = coreTaskActionMeta(key);
+    if (!meta || !selectedCore) return;
+    setCoreBusy(key);
+    setCoreFailure(null);
+    setCoreNotice(null);
+    const res = await sendCoreTaskCommand(meta.command, payload);
+    setCoreBusy(null);
+    if (res.ok !== true) {
+      const code = codeOf(res.error);
+      const message = messageOf(res.message) || messageOf(res.detail);
+      setCoreFailure({ key, code, context: meta.label, message });
+      /* 失败通知常驻；错误码 / 拒绝原因 → 人话（DESIGN_SYSTEM §9）。 */
+      toast({
+        kind: "error",
+        title: meta.label + "失败",
+        description: coreTaskFailureText(code) + "（" + code + "）",
+        duration: null,
+      });
+      /* revision 冲突等状态漂移：按后端刷新一次，不做本地猜测。 */
+      await loadCoreDetail(selectedCore.id, { silent: true });
+      return;
+    }
+    setCoreNotice(meta.label + "已提交；详情与步骤已按后端 task/get 刷新。");
+    toast({ kind: "success", title: meta.label + "已提交" });
+    await loadCoreDetail(selectedCore.id, { silent: true });
+  };
+
+  /** 点动作按钮：本地校验 → 写类动作先弹二次确认（确认前 0 命令）。 */
+  const requestCoreAction = (key: string, callId?: string) => {
+    setCoreFailure(null);
+    const meta = coreTaskActionMeta(key);
+    if (!meta || !selectedCore) {
+      setCoreFailure({ key, code: "LOCAL_INPUT_REQUIRED", context: "没有选中的 core 任务" });
+      return;
+    }
+    const values = {
+      taskId: selectedCore.id,
+      goal: coreGoal,
+      expectedRevision: coreDetail.kind === "ready" ? coreDetail.detail.task.revision : null,
+      callId: callId || "",
+      requestId: requestIdFactory(),
+    };
+    const missing = coreActionMissingInputs(key, values);
+    if (missing.length) {
+      setCoreFailure({
+        key,
+        code: "LOCAL_INPUT_REQUIRED",
+        context: "缺少必填内容（" + missing.map((f) => CORE_TASK_ACTION_INPUT_LABEL[f] || f).join("、") + "）",
+      });
+      return;
+    }
+    const payload = coreActionPayload(key, values);
+    if (meta.requiresConfirm) {
+      setPendingCore({ key, payload, summary: coreActionConfirmSummary(key, payload) });
+      return;
+    }
+    void submitCoreAction(key, payload);
+  };
+
+  const confirmCore = async () => {
+    const pending = pendingCore;
+    setPendingCore(null);
+    if (!pending) return;
+    await submitCoreAction(pending.key, pending.payload);
+  };
+
+  const cancelCoreConfirm = () => setPendingCore(null);
 
   const submitAnswer = async () => {
     if (!selectedId) return;
@@ -619,6 +803,11 @@ function TaskConsoleBody({ role }: { role: string | null }) {
   const answerReason = taskActionDisabledReason("answer", { status: actionStatus, answer });
   const canContinue = !!selectedTask && canContinueTask(actionStatus, actionMode);
 
+  /* U1 · core 任务派生值：状态 / 步骤 / 下一条待确认副作用全部来自后端 task/get 投影。 */
+  const coreReadyDetail = coreDetail.kind === "ready" ? coreDetail.detail : null;
+  const coreStatus = coreReadyDetail ? coreReadyDetail.task.status : null;
+  const coreNextRecovery = nextUnacknowledgedRecoveryCall(coreReadyDetail);
+
   /* ══════════════════════════════════════════════════════════════════════
      渲染
      ══════════════════════════════════════════════════════════════════════ */
@@ -672,6 +861,12 @@ function TaskConsoleBody({ role }: { role: string | null }) {
           {unified && unified.boundary
             ? unified.boundary
             : "统一读模型只读合并 DX 与 core 两套任务表；来源标注见任务行。"}
+        </p>
+        {/* U1 · 按来源说明“这里能做什么”，不再用一句笼统的“只读”概括两套不同命令域。 */}
+        <p className="task-muted" data-task-capability-note>
+          <span data-task-capability-note-dx>{unifiedCapabilityNote("dx")}</span>
+          {" "}
+          <span data-task-capability-note-core>{unifiedCapabilityNote("core")}</span>
         </p>
         <ScrollArea label="写操作入口" maxHeight={280}>
           <div data-task-entry-list>
@@ -791,6 +986,39 @@ function TaskConsoleBody({ role }: { role: string | null }) {
         ) : null}
       </Dialog>
 
+      {/* U1 · core 任务写类动作二次确认：命令域是 task/*，与上面的 agent/* 入口分开。 */}
+      <Dialog
+        open={pendingCore !== null}
+        title={pendingCore ? coreActionConfirmTitle(pendingCore.key) : "确认"}
+        onClose={cancelCoreConfirm}
+        footer={
+          <>
+            <Button variant="ghost" size="sm" data-task-core-confirm-cancel onClick={cancelCoreConfirm}>
+              取消
+            </Button>
+            <Button
+              variant={coreTaskActionMeta(pendingCore ? pendingCore.key : "")?.risk === "destructive" ? "danger" : "primary"}
+              size="sm"
+              data-task-core-confirm-submit
+              status={coreBusy !== null ? "loading" : "idle"}
+              disabled={coreBusy !== null}
+              onClick={() => void confirmCore()}
+            >
+              确认发送
+            </Button>
+          </>
+        }
+      >
+        {pendingCore ? (
+          <div className="task-entry-confirm" data-task-core-confirm={pendingCore.key}>
+            <p className="task-entry-confirm-value" data-task-core-confirm-summary>
+              {pendingCore.summary}
+            </p>
+            <p className="task-muted">确认前不会发出任何命令；取消则命令数为 0。</p>
+          </div>
+        ) : null}
+      </Dialog>
+
       {listState !== "ready" ? (
         <div
           className="task-state-block"
@@ -890,8 +1118,48 @@ function TaskConsoleBody({ role }: { role: string | null }) {
               </p>
             )}
             {coreUnified.length ? (
+              <div className="task-core-list" data-task-core-list>
+                <div className="task-section-head">
+                  <h4>core 任务（既有任务表）</h4>
+                  <span className="task-muted" data-task-core-count>
+                    {coreUnified.length} 条 · 只读读模型列出的全部 core 任务
+                  </span>
+                </div>
+                <ul className="task-list" data-task-core-rows>
+                  {coreUnified.map((item) => (
+                    <li key={"core:" + item.id}>
+                      <button
+                        type="button"
+                        className="task-row task-core-row"
+                        data-task-core-row={item.id}
+                        data-task-core-status={item.status || "unknown"}
+                        data-task-core-source="core"
+                        aria-pressed={selectedCore ? selectedCore.id === item.id : false}
+                        onClick={() => selectCoreTask(item)}
+                      >
+                        <span className="task-row__top">
+                          <strong data-task-core-name>{asText(item.title, item.id)}</strong>
+                          <Badge tone={coreTaskStatusTone(item.status)} className="task-status">
+                            {coreTaskStatusLabel(item.status)}
+                          </Badge>
+                          <Badge tone="neutral" size="sm" className="task-status">
+                            core
+                          </Badge>
+                        </span>
+                        <span className="task-row__facts">
+                          <span>core 任务表</span>
+                          <span className="task-mono">ID {item.id}</span>
+                        </span>
+                        <span className="task-row__desc">{CORE_TASK_ROW_HINT}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {coreUnified.length ? (
               <p className="task-muted" data-task-unified-core>
-                统一读模型里的 core 来源任务：
+                统一读模型里的 core 来源任务（已可选中操作）：
                 {coreUnified.map((item) => " " + (item.title || item.id)).join("、")}
               </p>
             ) : null}
@@ -902,16 +1170,21 @@ function TaskConsoleBody({ role }: { role: string | null }) {
             ) : null}
           </section>
 
-          <section className="task-detail-pane" aria-label="任务详情" data-task-detail-state={detail.kind}>
-            {detail.kind === "none" ? (
+          <section
+            className="task-detail-pane"
+            aria-label="任务详情"
+            data-task-detail-state={selectedCore ? "core:" + coreDetail.kind : detail.kind}
+            data-task-detail-source={selectedCore ? "core" : "dx"}
+          >
+            {!selectedCore && detail.kind === "none" ? (
               <PageState
                 kind="empty"
                 title="选择一个任务"
                 description="左侧选中的任务会显示状态、计划与步骤、事件流、检查点与交付物。"
               />
             ) : null}
-            {detail.kind === "loading" ? <PageState kind="loading" title="正在读取任务详情…" /> : null}
-            {detail.kind === "error" ? (
+            {!selectedCore && detail.kind === "loading" ? <PageState kind="loading" title="正在读取任务详情…" /> : null}
+            {!selectedCore && detail.kind === "error" ? (
               <PageState
                 kind={taskErrorState(detail.code)}
                 title={"读取任务详情失败：" + taskErrorText(detail.code)}
@@ -919,7 +1192,238 @@ function TaskConsoleBody({ role }: { role: string | null }) {
                 onAction={selectedId ? () => void loadDetail(selectedId) : undefined}
               />
             ) : null}
-            {detail.kind === "ready" && selectedTask ? (
+            {selectedCore && coreDetail.kind === "loading" ? <PageState kind="loading" title="正在读取 core 任务详情…" /> : null}
+            {selectedCore && coreDetail.kind === "none" ? (
+              <PageState
+                kind="empty"
+                title="选择一个 core 任务"
+                description="左侧 core 任务列表里选中的任务会显示状态、步骤、产物与可执行动作。"
+              />
+            ) : null}
+            {selectedCore && coreDetail.kind === "error" ? (
+              <PageState
+                kind={taskErrorState(coreDetail.code)}
+                title={"读取 core 任务详情失败：" + coreTaskFailureText(coreDetail.code)}
+                description={"后端返回的稳定错误码是 " + coreDetail.code + "。"}
+                onAction={() => void loadCoreDetail(selectedCore.id)}
+              />
+            ) : null}
+            {selectedCore && coreDetail.kind === "ready" && coreReadyDetail ? (
+              <div
+                className="task-detail task-core-detail"
+                key={"core:" + coreReadyDetail.task.taskId}
+                data-task-core-detail
+                data-task-core-status={coreStatus}
+              >
+                <header className="task-detail__head">
+                  <div className="task-detail__title">
+                    <h3 data-task-core-detail-name>{asText(coreReadyDetail.task.goal, coreReadyDetail.task.taskId)}</h3>
+                    <Badge tone={coreTaskStatusTone(coreStatus)} className="task-status" data-task-core-status-badge>
+                      {coreTaskStatusLabel(coreStatus)}
+                    </Badge>
+                    <Badge tone="neutral" size="sm" className="task-status" data-task-core-source-badge>
+                      core
+                    </Badge>
+                  </div>
+                  <div className="task-detail__facts">
+                    <span data-task-core-detail-id>ID {coreReadyDetail.task.taskId}</span>
+                    <span>来源 core（既有 tasks / task_steps 表）</span>
+                    <span>revision {coreReadyDetail.task.revision == null ? "—" : coreReadyDetail.task.revision}</span>
+                    <span>更新 {timeText(coreReadyDetail.task.updatedAt)}</span>
+                  </div>
+                  <p className="task-muted" data-task-core-capability-detail>
+                    {unifiedCapabilityNote("core")}
+                  </p>
+                </header>
+
+                {coreFailure ? (
+                  <p className="task-error" role="alert" data-task-core-error data-task-core-error-code={coreFailure.code}>
+                    {coreFailure.context}失败：{coreTaskFailureText(coreFailure.code)}（{coreFailure.code}）
+                    {coreFailure.message ? " · " + coreFailure.message : ""}
+                  </p>
+                ) : null}
+                {coreNotice ? (
+                  <p className="task-notice" role="status" data-task-core-notice>
+                    {coreNotice}
+                  </p>
+                ) : null}
+
+                <section className="task-section" aria-label="core 任务动作">
+                  <div className="task-section-head">
+                    <h4>可执行动作</h4>
+                    <span className="task-muted" data-task-core-command-domain>
+                      {CORE_TASK_COMMAND_DOMAIN_TEXT}
+                    </span>
+                  </div>
+                  <TextField
+                    label={CORE_TASK_ACTION_INPUT_LABEL.goal}
+                    hint="只有后端 task/get 判定 appendable=true 时才能追加；写类动作先二次确认，确认前不发命令。"
+                    data-task-core-field="goal"
+                    value={coreGoal}
+                    onChange={(e) => setCoreGoal(e.target.value)}
+                    error={coreFailure && coreFailure.code === "LOCAL_INPUT_REQUIRED" ? coreFailure.context : undefined}
+                  />
+                  <div className="task-actions" data-task-core-actions>
+                    {/* 逐条动作（需要 callId 的“确认已核查”）只在下方结果未知副作用的每条记录上渲染，
+                        不放通用行里，避免出现“通用按钮说没有待确认、下面却有待确认记录”的自相矛盾。 */}
+                    {CORE_TASK_ACTIONS.filter((meta) => meta.inputs.indexOf("callId") < 0).map((meta) => {
+                      const reason = coreActionDisabled(meta.key);
+                      const busy = coreBusy === meta.key;
+                      return (
+                        <span className="task-core-action" key={meta.key} data-task-core-action-wrap={meta.key}>
+                          <Button
+                            variant={meta.risk === "destructive" ? "danger" : meta.risk === "write" ? "secondary" : "primary"}
+                            size="sm"
+                            data-task-core-action={meta.key}
+                            status={busy ? "loading" : "idle"}
+                            disabled={reason !== null || coreBusy !== null}
+                            onClick={() => requestCoreAction(meta.key)}
+                          >
+                            {meta.label}
+                          </Button>
+                          <span className="task-muted task-core-action__risk" data-task-core-action-risk={meta.key}>
+                            {coreTaskActionRiskText(meta.key)}
+                          </span>
+                          {reason ? (
+                            <span className="task-muted task-core-action__reason" data-task-core-action-reason={meta.key}>
+                              {reason}
+                            </span>
+                          ) : null}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                <section className="task-section" aria-label="core 任务步骤">
+                  <div className="task-section-head">
+                    <h4>计划与步骤</h4>
+                    <span className="task-muted" data-task-core-step-count>
+                      {coreReadyDetail.steps.length} 步 · 后端 task/get 投影
+                    </span>
+                  </div>
+                  {coreReadyDetail.steps.length ? (
+                    <ol className="task-steps" data-task-core-steps>
+                      {coreReadyDetail.steps.map((step, i) => (
+                        <li
+                          key={step.stepId || "core-step-" + i}
+                          data-task-core-step={step.sequence == null ? i : step.sequence}
+                          data-task-core-step-status={step.status || "unknown"}
+                        >
+                          <span className="task-step__ord">{step.sequence == null ? i + 1 : step.sequence}</span>
+                          <span className="task-step__title">{asText(step.kind, "步骤 " + (i + 1))}</span>
+                          <span className="task-step__tool task-mono">{asText(step.stepId)}</span>
+                          <Badge
+                            tone={step.status === "FAILED" ? "danger" : step.status === "SUCCEEDED" ? "success" : "neutral"}
+                            size="sm"
+                          >
+                            {asText(step.status, "状态未知")}
+                          </Badge>
+                        </li>
+                      ))}
+                    </ol>
+                  ) : (
+                    <p className="task-muted" data-task-core-steps-empty>
+                      任务还没有登记步骤。
+                    </p>
+                  )}
+                </section>
+
+                <section className="task-section" aria-label="core 任务产物">
+                  <div className="task-section-head">
+                    <h4>产物</h4>
+                    <span className="task-muted" data-task-core-artifact-count>
+                      {coreReadyDetail.artifacts.length} 项
+                    </span>
+                  </div>
+                  {coreReadyDetail.artifacts.length ? (
+                    <ul className="task-deliverables" data-task-core-artifacts>
+                      {coreReadyDetail.artifacts.map((a, i) => (
+                        <li key={a.artifactId || "core-artifact-" + i} className="task-deliverable">
+                          <span className="task-deliverable__name">{asText(a.type, "未命名产物")}</span>
+                          <span className="task-muted task-mono">{asText(a.artifactId)}</span>
+                          <span className="task-muted task-mono">{timeText(a.createdAt)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="task-muted" data-task-core-artifacts-empty>
+                      还没有产物；追加下一步要求任务已成功且已有产物。
+                    </p>
+                  )}
+                </section>
+
+                {coreReadyDetail.recovery.applicable ? (
+                  <section className="task-section" aria-label="结果未知副作用">
+                    <div className="task-section-head">
+                      <h4>结果未知的副作用</h4>
+                      <span className="task-muted" data-task-core-recovery-count>
+                        {coreReadyDetail.recovery.calls.length} 条
+                      </span>
+                    </div>
+                    <p className="task-warn">先核查实际效果，再人工确认；确认只追加一条账本事件，不会重试或重放。</p>
+                    <p className="task-muted" data-task-core-recovery-next>
+                      {coreNextRecovery ? "下一条待人工确认：" + coreNextRecovery.callId : "全部结果未知副作用都已人工确认。"}
+                    </p>
+                    <ul className="task-steps" data-task-core-recovery>
+                      {coreReadyDetail.recovery.calls.map((call) => {
+                        const reason = coreActionDisabled("acknowledge-unknown-effect", call.callId);
+                        const busy = coreBusy === "acknowledge-unknown-effect";
+                        return (
+                          <li
+                            key={call.callId}
+                            data-task-core-recovery-call={call.callId}
+                            data-task-core-recovery-status={call.status || "unknown"}
+                          >
+                            <span className="task-step__title task-mono">{call.callId}</span>
+                            <span className="task-step__tool">{asText(call.recoveryResult, "NO_CONCLUSION")}</span>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              data-task-core-ack={call.callId}
+                              status={busy ? "loading" : "idle"}
+                              disabled={reason !== null || coreBusy !== null}
+                              onClick={() => requestCoreAction("acknowledge-unknown-effect", call.callId)}
+                            >
+                              {call.acknowledged ? "已确认" : "确认已核查"}
+                            </Button>
+                            {reason ? (
+                              <span className="task-muted" data-task-core-ack-reason={call.callId}>
+                                {reason}
+                              </span>
+                            ) : null}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </section>
+                ) : null}
+
+                <section className="task-section" aria-label="core 任务校验">
+                  <div className="task-section-head">
+                    <h4>校验记录</h4>
+                    <span className="task-muted" data-task-core-verification-count>
+                      {coreReadyDetail.verifications.length} 条
+                    </span>
+                  </div>
+                  {coreReadyDetail.verifications.length ? (
+                    <ul className="task-deliverables" data-task-core-verifications>
+                      {coreReadyDetail.verifications.map((v, i) => (
+                        <li key={"core-verification-" + i} className="task-deliverable">
+                          <span className="task-deliverable__name">{asText(v.type, "校验")}</span>
+                          <span className="task-muted">{asText(v.status)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="task-muted" data-task-core-verifications-empty>
+                      没有校验记录。
+                    </p>
+                  )}
+                </section>
+              </div>
+            ) : null}
+            {!selectedCore && detail.kind === "ready" && selectedTask ? (
               <div className="task-detail" key={asText(selectedTask.taskId, "task")} data-task-detail>
                 <header className="task-detail__head">
                   <div className="task-detail__title">

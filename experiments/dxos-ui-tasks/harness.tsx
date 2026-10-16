@@ -25,6 +25,8 @@ const runMode = params.get("run") || "fast";
 /* 入口依赖装配模式：默认 all（B6 已把 fsAdapter 真实接线）；
    ?deps=fs-missing 是显式的依赖缺失降级场景，用于降级截图，不再是默认态。 */
 const depsMode = params.get("deps") || "all";
+/* U1 · 深色对照：harness 根节点加 .dark（产品用类名切主题，不是媒体查询）。 */
+const dark = params.get("dark") === "1";
 
 /* ══════════════════════════════════════════════════════════════════════════
    任务数据（形状对齐 electron/agent-service.cjs:179-189 的 taskSummary 投影）
@@ -138,6 +140,78 @@ const RUNNING_EXTRA = [
   "写入周报草稿.md（3.2 KB）",
   "核对交付物与验收目标",
 ];
+
+/* ══════════════════════════════════════════════════════════════════════════
+   U1 · core 任务（既有 tasks / task_steps 表）假桥
+   ──────────────────────────────────────────────────────────────────────────
+   形状对齐 task-bootstrap.cjs:152-182 的 task/get 信封与 task-domain.cjs:307-336
+   的 safeTask / safeStep；命令域是 task/*（preload.cjs:151-158），与上面的 agent/*
+   完全是两条通道，探针按两个独立列表记录命令。
+   ══════════════════════════════════════════════════════════════════════════ */
+function coreFixture() {
+  const task: any = {
+    taskId: "core_sync",
+    userId: "u_probe",
+    appId: "ai",
+    goal: "同步素材库（core）",
+    status: "SUCCEEDED",
+    revision: 7,
+    cancelRequested: false,
+    createdAt: T0,
+    updatedAt: T0 + 180000,
+    startedAt: T0,
+    completedAt: T0 + 120000,
+    modelConfigId: "mc_default",
+    modelConfigVersion: 2,
+  };
+  const steps: any[] = [
+    { stepId: "cs1", taskId: "core_sync", sequence: 1, kind: "reasoning", status: "SUCCEEDED", input: null, outputRef: null, startedAt: T0, completedAt: T0 + 60000, attempt: 1, maxAttempts: 1 },
+    { stepId: "cs2", taskId: "core_sync", sequence: 2, kind: "reasoning", status: "SUCCEEDED", input: null, outputRef: null, startedAt: T0 + 60000, completedAt: T0 + 120000, attempt: 1, maxAttempts: 1 },
+  ];
+  const artifacts: any[] = [
+    { artifactId: "ca1", taskId: "core_sync", stepId: "cs2", runId: "run_core_1", type: "text", content: "已同步 3 个素材", checksum: "sha_ca1", createdAt: T0 + 120000 },
+  ];
+  const verifications: any[] = [
+    { verificationId: "cv1", artifactId: "ca1", taskId: "core_sync", stepId: "cs2", runId: "run_core_1", type: "SCHEMA_VALID", status: "PASS", method: "SCHEMA_VALID", expected: null, actual: null, createdAt: T0 + 120000 },
+  ];
+  let appendable = true;
+  let appendReason: string | null = null;
+  let resumable = false;
+  let resumeReason: string | null = "RESUME_NOT_BLOCKED";
+  let stopReason: string | null = null;
+  let recovery: any = { applicable: false, reason: null, calls: [] };
+
+  /* core-denied：进行中 → appendable=false + 明确拒绝原因（状态不允许时禁用并给原因）。 */
+  if (scenario === "core-denied") {
+    task.status = "RUNNING";
+    task.completedAt = null;
+    steps[1].status = "RUNNING";
+    steps[1].completedAt = null;
+    appendable = false;
+    appendReason = "APPEND_IN_FLIGHT";
+  }
+  /* core-recovery：BLOCKED + 结果未知副作用 → 续接可用 + 人工确认入口。 */
+  if (scenario === "core-recovery") {
+    task.status = "BLOCKED";
+    appendable = false;
+    appendReason = "APPEND_NOT_SUCCEEDED";
+    resumable = true;
+    resumeReason = null;
+    stopReason = "RESUME_UNKNOWN_EFFECT_PRESENT";
+    recovery = {
+      applicable: true,
+      reason: "RESUME_UNKNOWN_EFFECT_PRESENT",
+      calls: [
+        { callId: "call_unknown_1", toolId: "file.write", toolVersion: "1", status: "UNKNOWN_EFFECT", errorCode: "TOOL_TIMEOUT", stepId: "cs2", runId: "run_core_1", recoveryResult: "INDETERMINATE", recoveryReason: "结果无法判定，需要人工核查", acknowledged: false, acknowledgedAt: null, acknowledgedBy: null },
+      ],
+    };
+  }
+  return { task, steps, artifacts, verifications, appendable, appendReason, resumable, resumeReason, stopReason, recovery };
+}
+
+const CORE: any = coreFixture();
+const coreProbe: any = { commands: [] as any[] };
+(window as any).__oaTaskCoreProbe = coreProbe;
 
 const listeners: Array<(e: any) => void> = [];
 let eventSequence = 0;
@@ -317,7 +391,7 @@ async function command(raw: any) {
         { source: "dx", id: "t_report", title: "整理本周周报", status: "RUNNING", projectId: "p_weekly" },
         { source: "dx", id: "t_wait", title: "确认部署目标", status: "WAITING", projectId: "p_weekly" },
         { source: "dx", id: "t_done", title: "生成发布说明", status: "SUCCEEDED", projectId: "p_weekly" },
-        { source: "core", id: "core_sync", title: "同步素材库（core）", status: "RUNNING", projectId: null },
+        { source: "core", id: CORE.task.taskId, title: CORE.task.goal, status: CORE.task.status, projectId: null },
       ].filter((item) => !source || item.source === source);
       return finish({
         ok: true,
@@ -457,14 +531,110 @@ async function skillCommand(raw: any) {
 }
 
 const skillBridge = { command: skillCommand, onEvent: () => () => {} };
-(window as any).openarc = { agent: agentBridge, skill: skillBridge };
+
+/* ══════════════════════════════════════════════════════════════════════════
+   U1 · core 任务假桥（task:command；命令域 task/*，与 agent/* 分开记录）
+   ══════════════════════════════════════════════════════════════════════════ */
+async function taskCommand(raw: any) {
+  const cmd = String(raw && (raw.type != null ? raw.type : raw.command) || "");
+  const payload = (raw && raw.payload) || {};
+  coreProbe.commands.push({ command: cmd, payload });
+  switch (cmd) {
+    case "task/list":
+      return { ok: true, items: [{ taskId: CORE.task.taskId, goal: CORE.task.goal, status: CORE.task.status }] };
+    case "task/get":
+      return {
+        ok: true,
+        task: { ...CORE.task },
+        steps: CORE.steps.map((s: any) => ({ ...s })),
+        artifacts: CORE.artifacts.map((a: any) => ({ ...a })),
+        verifications: CORE.verifications.map((v: any) => ({ ...v })),
+        deniedOperations: [],
+        appendable: CORE.appendable,
+        appendReason: CORE.appendReason,
+        resumable: CORE.resumable,
+        resumeReason: CORE.resumeReason,
+        stopReason: CORE.stopReason,
+        budgetLedger: null,
+        recovery: {
+          applicable: CORE.recovery.applicable,
+          reason: CORE.recovery.reason,
+          calls: CORE.recovery.calls.map((c: any) => ({ ...c })),
+        },
+      };
+    case "task/appendStep": {
+      if (scenario === "core-fail") return { ok: false, error: "TASK_REVISION_CONFLICT", message: "任务已被其他操作改动" };
+      if (runMode === "slow") await sleep(1600);
+      if (!CORE.appendable) return { ok: false, error: "APPEND_NOT_ALLOWED", reason: CORE.appendReason };
+      CORE.steps.push({
+        stepId: "cs" + (CORE.steps.length + 1),
+        taskId: "core_sync",
+        sequence: CORE.steps.length + 1,
+        kind: "reasoning",
+        status: "PENDING",
+        input: { appended: true },
+        outputRef: null,
+        startedAt: null,
+        completedAt: null,
+        attempt: 1,
+        maxAttempts: 1,
+      });
+      CORE.task.revision += 1;
+      CORE.task.status = "RUNNING";
+      CORE.appendable = false;
+      CORE.appendReason = "APPEND_IN_FLIGHT";
+      return { ok: true, task: { ...CORE.task }, step: { ...CORE.steps[CORE.steps.length - 1] }, appendIndex: CORE.steps.length, remaining: { MODEL_CALLS: 3 } };
+    }
+    case "task/resume": {
+      if (runMode === "slow") await sleep(700);
+      if (!CORE.resumable) return { ok: false, error: CORE.resumeReason || "RESUME_NOT_ELIGIBLE" };
+      CORE.task.status = "RUNNING";
+      CORE.task.revision += 1;
+      CORE.resumable = false;
+      return { ok: true, taskId: CORE.task.taskId, status: CORE.task.status };
+    }
+    case "task/cancel": {
+      if (runMode === "slow") await sleep(700);
+      CORE.task.status = "CANCELLED";
+      CORE.task.cancelRequested = true;
+      CORE.task.revision += 1;
+      CORE.appendable = false;
+      CORE.appendReason = "APPEND_NOT_SUCCEEDED";
+      return { ok: true, cancelled: true, task: { ...CORE.task } };
+    }
+    case "task/recovery":
+      return {
+        ok: true,
+        taskId: CORE.task.taskId,
+        applicable: CORE.recovery.applicable,
+        reason: CORE.recovery.reason,
+        calls: CORE.recovery.calls.map((c: any) => ({ ...c })),
+      };
+    case "task/acknowledgeUnknownEffect": {
+      if (runMode === "slow") await sleep(500);
+      const callId = String(payload.callId || "");
+      const call = CORE.recovery.calls.find((c: any) => c.callId === callId);
+      if (!call) return { ok: false, error: "TASK_NOT_FOUND" };
+      call.acknowledged = true;
+      call.acknowledgedAt = Date.now();
+      return { ok: true, changed: true, acknowledged: true, taskId: CORE.task.taskId, callId };
+    }
+    case "task/run":
+      return { ok: false, error: "INVALID_INPUT" };
+    default:
+      return { ok: false, error: "TASK_COMMAND_NOT_ALLOWED" };
+  }
+}
+
+const taskBridge = { command: taskCommand };
+(window as any).openarc = { agent: agentBridge, skill: skillBridge, task: taskBridge };
 
 /* ══════════════════════════════════════════════════════════════════════════
    外壳（与 main.tsx projects 分支同一 DOM 结构）
    ══════════════════════════════════════════════════════════════════════════ */
 function SplitShell({ children, current, onSelect }: { children: React.ReactNode; current: string; onSelect?: (v: string) => void }) {
   return (
-    <div className="window" style={{ position: "absolute", inset: 0 }}>
+    <div className={"window" + (dark ? " dark" : "")} style={{ position: "absolute", inset: 0 }}>
       <div className="split">
         <nav className="split-side" aria-label="项目子视图">
           <div className="split-section">项目</div>

@@ -19,6 +19,12 @@ import { createRequire } from "node:module";
 
 import {
   AGENT_COMMANDS,
+  CORE_TASK_ACTIONS,
+  CORE_TASK_ACTION_PAYLOAD_KEYS,
+  CORE_TASK_COMMANDS,
+  CORE_TASK_ERROR_TEXT,
+  CORE_TASK_REASON_TEXT,
+  CORE_TASK_STATUSES,
   TASK_CONSOLE_COMMANDS,
   TASK_DEPENDENCY_LABEL,
   TASK_ENTRIES,
@@ -77,6 +83,24 @@ import {
   unifiedSourceIndex,
   unifiedSourceLabel,
   waitingQuestionFromEvents,
+  coreActionConfirmSummary,
+  coreActionConfirmTitle,
+  coreActionDisabledReason,
+  coreActionMissingInputs,
+  coreActionPayload,
+  coreTaskActionMeta,
+  coreTaskActionRiskText,
+  coreTaskErrorText,
+  coreTaskFailureText,
+  coreTaskReasonText,
+  coreTaskStatusLabel,
+  coreTaskStatusTone,
+  isActiveCoreStatus,
+  isAllowedCoreTaskCommand,
+  isCoreTaskStatus,
+  nextUnacknowledgedRecoveryCall,
+  normalizeCoreTaskDetail,
+  unifiedCapabilityNote,
 } from "../src/projects/taskConsoleLogic.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -84,6 +108,8 @@ const ROOT = path.resolve(HERE, "..");
 const require = createRequire(import.meta.url);
 const domain = require(path.join(ROOT, "electron", "agent-domain.cjs"));
 const taskStore = require(path.join(ROOT, "electron", "agent-task-store.cjs"));
+const taskBootstrap = require(path.join(ROOT, "electron", "task-bootstrap.cjs"));
+const coreDomain = require(path.join(ROOT, "electron", "task-domain.cjs"));
 
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");
 const stripComments = (s) =>
@@ -667,4 +693,269 @@ test("界面源码用 Dialog 做二次确认：确认前不发命令、取消按
     "入口按钮不得直接发送命令",
   );
 });
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   U1 · core 任务（既有 tasks / task_steps）—— 另一套命令域与动作
+   ══════════════════════════════════════════════════════════════════════════ */
+test("core 命令白名单逐条等于后端 task-bootstrap.cjs 的 TASK_COMMANDS（含顺序与条数）", () => {
+  assert.equal(taskBootstrap.TASK_COMMANDS.length, 8, "后端 core 域应有 8 条命令");
+  assert.deepEqual([...CORE_TASK_COMMANDS], [...taskBootstrap.TASK_COMMANDS], "界面 core 白名单必须与后端完全一致");
+  for (const c of CORE_TASK_COMMANDS) {
+    assert.match(c, /^task\/[A-Za-z]+$/, c + " 必须是 task/ 前缀命令");
+    assert.equal(isAllowedCoreTaskCommand(c), true, c + " 必须被 core 白名单承认");
+  }
+  assert.equal(isAllowedCoreTaskCommand("agent/task/continue"), false, "core 白名单不得混入 agent 命令");
+  assert.equal(isAllowedCoreTaskCommand("task/appendstep"), false, "命令名大小写不匹配必须拒绝");
+  for (const bad of ["", "__proto__", "constructor", undefined, null, 42, {}, []]) {
+    assert.equal(isAllowedCoreTaskCommand(bad), false, JSON.stringify(bad) + " 必须被拒绝");
+  }
+});
+
+test("core 动作集合与 DX（agent/*）动作集合不重叠、不混用", () => {
+  for (const meta of CORE_TASK_ACTIONS) {
+    assert.equal(CORE_TASK_COMMANDS.indexOf(meta.command) >= 0, true, meta.command + " 必须在 core 白名单");
+    assert.equal(AGENT_COMMANDS.indexOf(meta.command), -1, meta.command + " 不得是 agent 命令");
+    assert.equal(TASK_CONSOLE_COMMANDS.indexOf(meta.command), -1, "DX 控制台不得发 " + meta.command);
+    assert.equal(meta.requiresConfirm, true, meta.label + " 是写/终结动作，必须二次确认");
+    assert.ok(meta.description.length > 0 && meta.label.length > 0);
+  }
+  for (const c of TASK_CONSOLE_COMMANDS) {
+    assert.equal(CORE_TASK_COMMANDS.indexOf(c), -1, "core 白名单不得包含 DX 命令 " + c);
+  }
+  assert.equal(coreTaskActionMeta("append-step").command, "task/appendStep");
+  assert.equal(coreTaskActionMeta("nope"), null);
+  assert.equal(coreTaskActionRiskText("append-step"), "写操作");
+  assert.equal(coreTaskActionRiskText("cancel"), "终结操作");
+  assert.equal(coreTaskActionRiskText("nope"), "");
+});
+
+test("core 载荷只含白名单业务键，且绝不包含身份字段", () => {
+  const payload = coreActionPayload("append-step", {
+    taskId: "core_sync",
+    goal: "  继续处理  ",
+    expectedRevision: 7,
+    requestId: "req-1",
+    userId: "u_evil",
+    role: "ADMIN",
+    appId: "ai",
+    sessionRef: "s_evil",
+  });
+  assert.deepEqual(Object.keys(payload).sort(), ["expectedRevision", "goal", "requestId", "taskId"]);
+  assert.equal(payload.goal, "继续处理", "goal 去首尾空白");
+  for (const key of Object.keys(payload)) {
+    assert.equal(CORE_TASK_ACTION_PAYLOAD_KEYS.indexOf(key) >= 0, true, key + " 必须在载荷白名单");
+  }
+  for (const bad of ["userId", "role", "appId", "sessionRef"]) {
+    assert.equal(Object.prototype.hasOwnProperty.call(payload, bad), false, "绝不发送 " + bad);
+  }
+  /* 无 taskId 时不产出任何载荷（后端会 INVALID_INPUT，界面先行拦截）。 */
+  assert.deepEqual(coreActionPayload("append-step", { goal: "x" }), {});
+  assert.deepEqual(coreActionPayload("nope", { taskId: "t" }), {});
+  /* 可选值缺失时不写入 key。 */
+  assert.deepEqual(Object.keys(coreActionPayload("resume", { taskId: "t" })), ["taskId"]);
+  assert.deepEqual(Object.keys(coreActionPayload("append-step", { taskId: "t", goal: "  " })), ["taskId"]);
+});
+
+test("core 必填输入在前端就被拦下（不发空命令）", () => {
+  assert.deepEqual(coreActionMissingInputs("append-step", { taskId: "t" }), ["goal"]);
+  assert.deepEqual(coreActionMissingInputs("append-step", { taskId: "t", goal: "x" }), []);
+  assert.deepEqual(coreActionMissingInputs("append-step", {}), ["taskId", "goal"]);
+  assert.deepEqual(coreActionMissingInputs("acknowledge-unknown-effect", { taskId: "t" }), ["callId"]);
+  assert.deepEqual(coreActionMissingInputs("acknowledge-unknown-effect", { taskId: "t", callId: "c1" }), []);
+  assert.deepEqual(coreActionMissingInputs("nope", { taskId: "t" }), []);
+  assert.ok(CORE_TASK_ACTION_PAYLOAD_KEYS.length >= 4);
+});
+
+test("core 可用性判定：桥缺失 / 详情未就绪 / 状态不允许都给出可见原因", () => {
+  const noBridge = coreActionDisabledReason("append-step", { hasBridge: false, detail: null });
+  assert.ok(noBridge.indexOf("window.openarc.task") >= 0, noBridge);
+  const noDetail = coreActionDisabledReason("append-step", { hasBridge: true, detail: null });
+  assert.ok(noDetail.indexOf("详情尚未就绪") >= 0, noDetail);
+
+  const detail = (over) =>
+    normalizeCoreTaskDetail(
+      Object.assign(
+        {
+          ok: true,
+          task: { taskId: "core_sync", goal: "同步素材库", status: "SUCCEEDED", revision: 7, cancelRequested: false },
+          steps: [{ stepId: "s1", sequence: 1, kind: "reasoning", status: "SUCCEEDED" }],
+          artifacts: [{ artifactId: "a1", type: "text" }],
+          appendable: true,
+          appendReason: null,
+          resumable: false,
+          resumeReason: "RESUME_NOT_BLOCKED",
+          recovery: { applicable: false, reason: null, calls: [] },
+        },
+        over,
+      ),
+    );
+
+  const ready = detail();
+  assert.equal(ready.task.status, "SUCCEEDED");
+  assert.equal(coreActionDisabledReason("append-step", { hasBridge: true, detail: ready, goal: "继续" }), null);
+  assert.ok(coreActionDisabledReason("append-step", { hasBridge: true, detail: ready }).indexOf("填写") >= 0);
+
+  const denied = detail({ appendable: false, appendReason: "APPEND_IN_FLIGHT" });
+  const deniedReason = coreActionDisabledReason("append-step", { hasBridge: true, detail: denied, goal: "继续" });
+  assert.ok(deniedReason.indexOf("已有步骤或 run 正在进行") >= 0, deniedReason);
+
+  const blocked = detail({ task: { taskId: "t", goal: "g", status: "BLOCKED", revision: 3 }, resumable: true, resumeReason: null });
+  assert.equal(coreActionDisabledReason("resume", { hasBridge: true, detail: blocked }), null);
+  const notResumable = detail({ resumable: false, resumeReason: "RESUME_NOT_BUDGET_STOP" });
+  assert.ok(coreActionDisabledReason("resume", { hasBridge: true, detail: notResumable }).indexOf("不是因预算耗尽停止") >= 0);
+
+  const done = detail({ task: { taskId: "t", goal: "g", status: "SUCCEEDED", revision: 1 } });
+  assert.ok(coreActionDisabledReason("cancel", { hasBridge: true, detail: done }).indexOf("不能再取消") >= 0);
+  const cancelled = detail({ task: { taskId: "t", goal: "g", status: "CANCELLED", revision: 2 } });
+  assert.ok(coreActionDisabledReason("cancel", { hasBridge: true, detail: cancelled }).indexOf("不能再取消") >= 0);
+  const running = detail({ task: { taskId: "t", goal: "g", status: "RUNNING", revision: 2 } });
+  assert.equal(coreActionDisabledReason("cancel", { hasBridge: true, detail: running }), null);
+
+  const noRecovery = detail();
+  assert.ok(coreActionDisabledReason("acknowledge-unknown-effect", { hasBridge: true, detail: noRecovery, callId: "c1" }).indexOf("没有需要人工核查") >= 0);
+  const recovery = detail({
+    task: { taskId: "t", goal: "g", status: "BLOCKED", revision: 4 },
+    recovery: {
+      applicable: true,
+      reason: "RESUME_UNKNOWN_EFFECT_PRESENT",
+      calls: [{ callId: "c1", status: "UNKNOWN_EFFECT", acknowledged: false }],
+    },
+  });
+  assert.equal(coreActionDisabledReason("acknowledge-unknown-effect", { hasBridge: true, detail: recovery, callId: "c1" }), null);
+  const acked = detail({
+    recovery: {
+      applicable: true,
+      reason: "RESUME_UNKNOWN_EFFECT_PRESENT",
+      calls: [{ callId: "c1", status: "UNKNOWN_EFFECT", acknowledged: true }],
+    },
+  });
+  assert.ok(coreActionDisabledReason("acknowledge-unknown-effect", { hasBridge: true, detail: acked, callId: "c1" }).indexOf("已经确认过") >= 0);
+});
+
+test("core 错误码全部有人话文案，拒绝原因与人话分开登记", () => {
+  const codes = [...new Set(Object.values(coreDomain.ERROR))];
+  assert.ok(codes.length >= 40, "core ERROR 码数量异常：" + codes.length);
+  for (const code of codes) {
+    const text = coreTaskErrorText(code);
+    assert.equal(text, CORE_TASK_ERROR_TEXT[code], code + " 必须逐条登记，不能落兜底");
+    assert.ok(text.length > 0 && text !== "core 任务操作失败", code);
+  }
+  const reasons = [...new Set([...Object.values(coreDomain.APPEND_REASON), ...Object.values(coreDomain.RESUME_REASON)])];
+  assert.ok(reasons.length >= 20);
+  for (const reason of reasons) {
+    const text = coreTaskReasonText(reason);
+    assert.equal(text, CORE_TASK_REASON_TEXT[reason], reason + " 必须逐条登记");
+    assert.ok(text.length > 0 && text !== reason, reason);
+  }
+  assert.equal(coreTaskReasonText("APPEND_UNKNOWN_EFFECT"), "存在结果未知的副作用，先核查再追加");
+  assert.equal(coreTaskFailureText("APPEND_IN_FLIGHT"), CORE_TASK_REASON_TEXT.APPEND_IN_FLIGHT, "拒绝原因优先于错误码");
+  assert.equal(coreTaskFailureText("TASK_REVISION_CONFLICT"), CORE_TASK_ERROR_TEXT.TASK_REVISION_CONFLICT);
+  assert.equal(coreTaskErrorText("SOMETHING_NEW"), "core 任务操作失败");
+  assert.equal(coreTaskReasonText(""), "没有给出原因");
+});
+
+test("core task/get 投影规范化：形状、取消资格与待确认副作用", () => {
+  const result = {
+    ok: true,
+    task: {
+      taskId: "core_sync", goal: "同步素材库", status: "BLOCKED", revision: 9, cancelRequested: false,
+      createdAt: 1, updatedAt: 2, startedAt: 1, completedAt: null, userId: "u_local", appId: "ai",
+    },
+    steps: [
+      { stepId: "s1", sequence: 1, kind: "reasoning", status: "BLOCKED", startedAt: 1, completedAt: 2 },
+      { stepId: "s2", sequence: 2, kind: "reasoning", status: "PENDING" },
+    ],
+    artifacts: [{ artifactId: "a1", stepId: "s1", type: "text", createdAt: 3 }],
+    verifications: [{ type: "SCHEMA_VALID", status: "PASS" }],
+    appendable: false,
+    appendReason: "APPEND_NOT_SUCCEEDED",
+    resumable: true,
+    resumeReason: null,
+    stopReason: "BUDGET_EXHAUSTED",
+    recovery: {
+      applicable: true,
+      reason: "RESUME_UNKNOWN_EFFECT_PRESENT",
+      calls: [
+        { callId: "c1", toolId: "file.write", status: "UNKNOWN_EFFECT", acknowledged: false },
+        { callId: "c2", toolId: "file.write", status: "UNKNOWN_EFFECT", acknowledged: true },
+      ],
+    },
+  };
+  const detail = normalizeCoreTaskDetail(result);
+  assert.equal(detail.task.taskId, "core_sync");
+  assert.equal(detail.task.revision, 9);
+  assert.equal(detail.steps.length, 2);
+  assert.equal(detail.artifacts.length, 1);
+  assert.equal(detail.verifications.length, 1);
+  assert.equal(detail.canCancel, true, "BLOCKED 仍可取消");
+  assert.equal(detail.appendable, false);
+  assert.equal(detail.resumable, true);
+  assert.equal(nextUnacknowledgedRecoveryCall(detail).callId, "c1");
+  /* 信封形式 { ok, value } 也要能解。 */
+  assert.equal(normalizeCoreTaskDetail({ ok: true, value: result }).task.taskId, "core_sync");
+  assert.equal(normalizeCoreTaskDetail({ ok: false, error: "TASK_NOT_FOUND" }), null);
+  assert.equal(normalizeCoreTaskDetail({ ok: true }), null);
+  assert.equal(normalizeCoreTaskDetail(null), null);
+  assert.equal(normalizeCoreTaskDetail([]), null);
+
+  const succeeded = normalizeCoreTaskDetail({ ok: true, task: { taskId: "t", status: "SUCCEEDED", cancelRequested: false } });
+  assert.equal(succeeded.canCancel, false);
+  const requested = normalizeCoreTaskDetail({ ok: true, task: { taskId: "t", status: "RUNNING", cancelRequested: true } });
+  assert.equal(requested.canCancel, false, "已请求取消就不再重复提供取消");
+  assert.equal(nextUnacknowledgedRecoveryCall(succeeded), null);
+  assert.equal(nextUnacknowledgedRecoveryCall(null), null);
+});
+
+test("core 状态词汇来自后端 7 态；进行态判定只覆盖未结束状态", () => {
+  assert.deepEqual([...CORE_TASK_STATUSES], ["PENDING", "RUNNING", "WAITING", "SUCCEEDED", "FAILED", "CANCELLED", "BLOCKED"]);
+  for (const s of CORE_TASK_STATUSES) {
+    assert.equal(isCoreTaskStatus(s), true);
+    assert.ok(coreTaskStatusLabel(s).length > 0);
+    assert.equal(["neutral", "success", "warning", "danger"].indexOf(coreTaskStatusTone(s)) >= 0, true);
+  }
+  assert.equal(isCoreTaskStatus("running"), false, "core 是大小写敏感的大写状态，DX 的小写状态不得混入");
+  assert.ok(coreTaskStatusLabel("weird").indexOf("weird") >= 0, "未登记状态原样显示");
+  assert.equal(isActiveCoreStatus("RUNNING"), true);
+  assert.equal(isActiveCoreStatus("WAITING"), true);
+  assert.equal(isActiveCoreStatus("PENDING"), true);
+  assert.equal(isActiveCoreStatus("SUCCEEDED"), false);
+  assert.equal(isActiveCoreStatus("BLOCKED"), false);
+  assert.equal(isActiveCoreStatus("FAILED"), false);
+});
+
+test("core 二次确认标题与副作用说明都非空，并带上真实目标 / callId", () => {
+  for (const meta of CORE_TASK_ACTIONS) {
+    assert.ok(coreActionConfirmTitle(meta.key).length > 0, meta.key);
+    const summary = coreActionConfirmSummary(meta.key, { taskId: "core_sync", goal: "继续处理", callId: "c1" });
+    assert.ok(summary.length > 0 && summary.indexOf("core_sync") >= 0, meta.key + " " + summary);
+  }
+  assert.ok(coreActionConfirmSummary("append-step", { taskId: "t", goal: "继续处理" }).indexOf("继续处理") >= 0);
+  assert.ok(coreActionConfirmSummary("acknowledge-unknown-effect", { taskId: "t", callId: "c9" }).indexOf("c9") >= 0);
+  assert.equal(coreActionConfirmTitle("nope"), "确认");
+  assert.equal(coreActionConfirmSummary("nope", {}), "");
+});
+
+test("统一读模型标注按来源说明能做什么，不再用一句只读概括两套命令", () => {
+  const core = unifiedCapabilityNote("core");
+  const dx = unifiedCapabilityNote("dx");
+  assert.ok(core.indexOf("task/appendStep") >= 0 && core.indexOf("agent/*") >= 0, core);
+  assert.ok(dx.indexOf("agent/") >= 0 && dx.indexOf("task/*") >= 0, dx);
+  assert.ok(core.indexOf("不能混用") >= 0 && dx.indexOf("不能混用") >= 0);
+  assert.ok(unifiedCapabilityNote("weird").indexOf("不提供任何动作") >= 0);
+});
+
+test("core 桥收敛在 coreTaskConsole.ts：TaskConsole.tsx 不出现 openarc.task", () => {
+  const bridge = stripComments(read("src/projects/coreTaskConsole.ts"));
+  assert.ok(bridge.indexOf("openarc") >= 0 && bridge.indexOf(".task") >= 0, "core 桥必须只经 window.openarc.task");
+  assert.ok(bridge.indexOf("sendCoreTaskCommand") >= 0, "必须只有一个出口");
+  assert.equal(/\bfetch\s*\(|XMLHttpRequest|WebSocket|EventSource|localStorage|sessionStorage/.test(bridge), false, "core 桥不得联网 / 写存储");
+  const consoleCode = stripComments(read("src/projects/TaskConsole.tsx"));
+  assert.equal(/openarc\s*\.\s*task\b/.test(consoleCode), false, "TaskConsole.tsx 不得直接引用 openarc.task");
+  assert.ok(consoleCode.indexOf("sendCoreTaskCommand") >= 0, "TaskConsole 必须经 core 桥出口发命令");
+  assert.ok(consoleCode.indexOf("data-task-core-action") >= 0, "必须渲染 core 动作按钮");
+  assert.ok(consoleCode.indexOf("data-task-core-confirm-submit") >= 0, "core 写类动作必须有二次确认");
+  assert.ok(consoleCode.indexOf("nextUnacknowledgedRecoveryCall") >= 0, "必须渲染待确认副作用入口");
+});
+
 

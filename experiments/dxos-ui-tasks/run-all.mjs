@@ -33,7 +33,8 @@ import {
   TIMEOUT_SCALE,
   SCALE_SOURCE,
 } from "../lib/probe-timing.mjs";
-import { TASK_CONSOLE_COMMANDS, AGENT_COMMANDS } from "../../src/projects/taskConsoleLogic.ts";
+import { TASK_CONSOLE_COMMANDS, AGENT_COMMANDS, CORE_TASK_COMMANDS } from "../../src/projects/taskConsoleLogic.ts";
+import { TASK_COMMANDS as BACKEND_TASK_COMMANDS } from "../../electron/task-bootstrap.cjs";
 
 const HERE = import.meta.dirname;
 const ROOT = path.resolve(HERE, "../..");
@@ -197,7 +198,12 @@ async function shoot(spec) {
     label,
     SCENARIO_ATTEMPTS,
     async () => {
-      const { ctx, page } = await openScenario(browser, spec.query, spec.narrow ? { viewport: { width: 640, height: 900 } } : null);
+      const contextOpts = spec.narrow
+        ? { viewport: { width: 640, height: 900 } }
+        : spec.dark
+          ? { colorScheme: "dark" }
+          : null;
+      const { ctx, page } = await openScenario(browser, spec.query, contextOpts);
       try {
         if (spec.setup) await spec.setup(page);
         await page.waitForSelector(spec.expect, { timeout: 20000 });
@@ -431,6 +437,211 @@ await shoot({
   await ctx.close();
 }
 
+/* ── 4c. U1 · core 任务（既有任务表）可操作：可见 / 选中 / 追加 / 禁用原因 / 二次确认 /
+        进行中 / 成功 / 失败 / 深色 ───────────────────────────────────────────── */
+console.log(String.fromCharCode(10) + "U1 · core 任务可操作：");
+setStep("core 任务可操作");
+
+const coreCommandList = (page) =>
+  page.evaluate(() => (window.__oaTaskCoreProbe ? window.__oaTaskCoreProbe.commands : []));
+const coreCommandCount = (page, command) =>
+  page.evaluate(
+    (c) => (window.__oaTaskCoreProbe ? window.__oaTaskCoreProbe.commands.filter((x) => x.command === c).length : -1),
+    command,
+  );
+
+check(
+  "core 命令白名单逐条等于后端 task-bootstrap.cjs 的 TASK_COMMANDS（不允许新增命令）",
+  CORE_TASK_COMMANDS.join(",") === BACKEND_TASK_COMMANDS.join(","),
+  "ui=" + CORE_TASK_COMMANDS.join(",") + " backend=" + BACKEND_TASK_COMMANDS.join(","),
+);
+
+await shoot({
+  name: "16-core-select",
+  query: "scenario=ready",
+  expect: "[data-task-core-detail]",
+  setup: async (page) => {
+    const rows = await page.$$eval("[data-task-core-row]", (els) => els.map((el) => el.getAttribute("data-task-core-row")));
+    check("core 任务在任务控制台列表可见", rows.length >= 1 && rows.indexOf("core_sync") >= 0, JSON.stringify(rows));
+    await page.click('[data-task-core-row="core_sync"]');
+    await page.waitForSelector("[data-task-core-detail]");
+    const status = await page.$eval("[data-task-core-detail]", (el) => el.getAttribute("data-task-core-status"));
+    check("core 任务可选中并显示详情", status === "SUCCEEDED", "status=" + status);
+    const stepText = await page.$eval("[data-task-core-step-count]", (el) => (el.textContent || "").trim());
+    check("core 步骤数来自后端 task/get 投影", stepText.indexOf("2") >= 0, stepText);
+    const note = await page.$eval("[data-task-core-capability-detail]", (el) => el.textContent || "");
+    check("core 详情说明命令域是 task/*（与 DX 的 agent/* 分开）", note.indexOf("task/") >= 0 && note.indexOf("agent/*") >= 0, note.slice(0, 70));
+    const sourceNote = await page.$eval("[data-task-capability-note]", (el) => el.textContent || "");
+    check("统一读模型标注按来源说明能做什么", sourceNote.indexOf("agent/*") >= 0 && sourceNote.indexOf("task/*") >= 0, sourceNote.slice(0, 90));
+    const domain = await page.$eval("[data-task-core-command-domain]", (el) => (el.textContent || "").trim());
+    check("core 详情显式标注命令域", domain.indexOf("task/*") >= 0, domain);
+  },
+});
+
+await shoot({
+  name: "17-core-append-denied",
+  query: "scenario=core-denied",
+  expect: '[data-task-core-action="append-step"][disabled]',
+  setup: async (page) => {
+    await page.click('[data-task-core-row="core_sync"]');
+    await page.waitForSelector("[data-task-core-detail]");
+    await page.waitForSelector('[data-task-core-action="append-step"][disabled]');
+    const reason = await page.$eval('[data-task-core-action-reason="append-step"]', (el) => el.textContent || "");
+    check("core 状态不允许时按钮禁用并给原因", reason.indexOf("已有步骤或 run 正在进行") >= 0, reason.slice(0, 90));
+    const calls = await coreCommandCount(page, "task/appendStep");
+    check("core 禁用状态下不发任何追加命令", calls === 0, "task/appendStep=" + calls);
+  },
+});
+
+await shoot({
+  name: "18-core-append-confirm",
+  query: "scenario=ready&run=slow",
+  expect: "[data-task-core-confirm-submit]",
+  setup: async (page) => {
+    await page.click('[data-task-core-row="core_sync"]');
+    await page.waitForSelector("[data-task-core-detail]");
+    await page.fill('[data-task-core-field="goal"]', "继续整理剩余素材");
+    await page.click('[data-task-core-action="append-step"]');
+    await page.waitForSelector("[data-task-core-confirm-submit]");
+    const before = await coreCommandCount(page, "task/appendStep");
+    check("core 写类动作确认前不发命令", before === 0, "task/appendStep=" + before);
+    const summary = await page.$eval("[data-task-core-confirm-summary]", (el) => el.textContent || "");
+    check("core 确认框说明副作用与目标", summary.indexOf("继续整理剩余素材") >= 0 && /写操作|新增一个执行步骤/.test(summary), summary.slice(0, 110));
+    await page.click("[data-task-core-confirm-cancel]");
+    await page.waitForSelector("[data-task-core-confirm]", { state: "detached", timeout: 5000 });
+    await page.waitForTimeout(200);
+    const afterCancel = await coreCommandCount(page, "task/appendStep");
+    check("core 取消后命令数仍为 0", afterCancel === 0, "task/appendStep=" + afterCancel);
+    /* 再次打开并保持打开，供截图留证。 */
+    await page.click('[data-task-core-action="append-step"]');
+    await page.waitForSelector("[data-task-core-confirm-submit]");
+  },
+});
+
+await shoot({
+  name: "19-core-append-busy",
+  query: "scenario=ready&run=slow",
+  expect: '[data-task-core-action="append-step"][disabled][aria-busy="true"]',
+  setup: async (page) => {
+    await page.click('[data-task-core-row="core_sync"]');
+    await page.waitForSelector("[data-task-core-detail]");
+    await page.fill('[data-task-core-field="goal"]', "确认后进入进行中");
+    await page.click('[data-task-core-action="append-step"]');
+    await page.waitForSelector("[data-task-core-confirm-submit]");
+    await page.click("[data-task-core-confirm-submit]");
+    await page.waitForSelector('[data-task-core-action="append-step"][disabled][aria-busy="true"]', { timeout: 5000 });
+  },
+});
+
+await shoot({
+  name: "20-core-append-ok",
+  query: "scenario=ready",
+  expect: "[data-task-core-notice]",
+  setup: async (page) => {
+    await page.click('[data-task-core-row="core_sync"]');
+    await page.waitForSelector("[data-task-core-detail]");
+    await page.fill('[data-task-core-field="goal"]', "继续处理剩余素材");
+    await page.click('[data-task-core-action="append-step"]');
+    await page.waitForSelector("[data-task-core-confirm-submit]");
+    await page.click("[data-task-core-confirm-submit]");
+    await page.waitForSelector("[data-task-core-notice]", { timeout: 10000 });
+    await page.waitForFunction(
+      () => {
+        const el = document.querySelector("[data-task-core-step-count]");
+        return !!el && (el.textContent || "").indexOf("3 步") >= 0;
+      },
+      null,
+      { timeout: 10000 },
+    );
+    const stepText = await page.$eval("[data-task-core-step-count]", (el) => (el.textContent || "").trim());
+    check("core 追加成功后步骤数以后端 task/get 为准（2 → 3）", stepText.indexOf("3 步") >= 0, stepText);
+    const calls = await coreCommandCount(page, "task/appendStep");
+    check("core 追加成功只发一条 task/appendStep", calls === 1, "task/appendStep=" + calls);
+  },
+});
+
+await shoot({
+  name: "21-core-dark",
+  query: "scenario=ready&dark=1",
+  dark: true,
+  expect: "[data-task-core-detail]",
+  setup: async (page) => {
+    await page.click('[data-task-core-row="core_sync"]');
+    await page.waitForSelector("[data-task-core-detail]");
+    const isDark = await page.evaluate(() => !!document.querySelector(".window.dark"));
+    check("深色场景使用 .dark 主题类", isDark === true, "dark=" + isDark);
+    const status = await page.$eval("[data-task-core-detail]", (el) => el.getAttribute("data-task-core-status"));
+    check("深色下 core 详情仍可读", status === "SUCCEEDED", "status=" + status);
+  },
+});
+
+await shoot({
+  name: "22-core-append-fail",
+  query: "scenario=core-fail",
+  expect: '[data-task-core-error][data-task-core-error-code="TASK_REVISION_CONFLICT"]',
+  setup: async (page) => {
+    await page.click('[data-task-core-row="core_sync"]');
+    await page.waitForSelector("[data-task-core-detail]");
+    await page.fill('[data-task-core-field="goal"]', "会失败的一次追加");
+    await page.click('[data-task-core-action="append-step"]');
+    await page.waitForSelector("[data-task-core-confirm-submit]");
+    await page.click("[data-task-core-confirm-submit]");
+    await page.waitForSelector('[data-task-core-error][data-task-core-error-code="TASK_REVISION_CONFLICT"]', { timeout: 5000 });
+    const text = await page.$eval("[data-task-core-error]", (el) => el.textContent || "");
+    check("core 失败显示稳定错误码与人话", text.indexOf("TASK_REVISION_CONFLICT") >= 0 && text.indexOf("revision 冲突") >= 0, text.slice(0, 130));
+  },
+});
+
+await shoot({
+  name: "23-core-recovery",
+  query: "scenario=core-recovery",
+  expect: "[data-task-core-recovery]",
+  setup: async (page) => {
+    await page.click('[data-task-core-row="core_sync"]');
+    await page.waitForSelector("[data-task-core-detail]");
+    const resumeDisabled = await page.$eval('[data-task-core-action="resume"]', (el) => el.disabled);
+    check("core 续接预算在 resumable=true 时可用", resumeDisabled === false, "disabled=" + resumeDisabled);
+    const appendReason = await page.$eval('[data-task-core-action-reason="append-step"]', (el) => el.textContent || "");
+    check("core 追加在 BLOCKED 时禁用并给原因", appendReason.indexOf("只有已成功完成的任务才能追加") >= 0, appendReason.slice(0, 90));
+    const calls = await page.$$eval("[data-task-core-recovery-call]", (els) => els.map((el) => el.getAttribute("data-task-core-recovery-call")));
+    check("core 结果未知副作用逐条列出", calls.length === 1 && calls[0] === "call_unknown_1", JSON.stringify(calls));
+    const ackDisabled = await page.$eval('[data-task-core-ack="call_unknown_1"]', (el) => el.disabled);
+    check("core 未确认的副作用可点击人工确认", ackDisabled === false, "disabled=" + ackDisabled);
+    const next = await page.$eval("[data-task-core-recovery-next]", (el) => (el.textContent || "").trim());
+    check("core 指出下一条待确认的副作用", next.indexOf("call_unknown_1") >= 0, next);
+  },
+});
+
+/* core 命令白名单 / 载荷键：确认后按真实发出的命令断言。 */
+{
+  const { ctx, page } = await openScenario(browser, "scenario=ready");
+  try {
+    await page.click('[data-task-core-row="core_sync"]');
+    await page.waitForSelector("[data-task-core-detail]");
+    await page.fill('[data-task-core-field="goal"]', "白名单与载荷键检查");
+    await page.click('[data-task-core-action="append-step"]');
+    await page.waitForSelector("[data-task-core-confirm-submit]");
+    await page.click("[data-task-core-confirm-submit]");
+    await page.waitForSelector("[data-task-core-notice]", { timeout: 10000 });
+    const commands = await coreCommandList(page);
+    const names = commands.map((c) => c.command);
+    check(
+      "core 只发 task/* 白名单命令",
+      names.length > 0 && names.every((c) => CORE_TASK_COMMANDS.indexOf(c) >= 0),
+      [...new Set(names)].join(", "),
+    );
+    const identityKeys = ["userId", "role", "sessionRef", "appId"];
+    const offenders = commands.filter((c) => Object.keys(c.payload || {}).some((k) => identityKeys.indexOf(k) >= 0));
+    check("core 命令载荷不含身份字段（userId/role/sessionRef/appId）", offenders.length === 0, JSON.stringify(offenders.slice(0, 2)));
+    const append = commands.find((c) => c.command === "task/appendStep");
+    const keys = append ? Object.keys(append.payload).sort().join(",") : "";
+    check("core 追加载荷只含业务键 + requestId", keys === "expectedRevision,goal,requestId,taskId", keys);
+    check("core 命令未出现新增命令", commands.every((c) => c.command.indexOf("task/") === 0), [...new Set(names)].join(", "));
+  } finally {
+    await ctx.close();
+  }
+}
+
 /* ── 5. 主流程连续录屏 ───────────────────────────────────────────────────── */
 console.log(String.fromCharCode(10) + "主流程连续录屏：");
 setStep("主流程连续录屏");
@@ -510,6 +721,46 @@ if (rawVideo && fs.existsSync(rawVideo)) {
   check("主流程连续录屏产出", fs.statSync(flowVideo).size > 0, flowVideo);
 } else {
   check("主流程连续录屏产出", false, "video.path() 为空");
+}
+
+/* ── 5c. U1 · core 任务连续录屏（选中 → 二次确认 → 追加成功；再切禁用态场景）── */
+const coreVideoCtx = await browser.newContext({
+  viewport: { width: 1440, height: 900 },
+  deviceScaleFactor: 1,
+  colorScheme: "light",
+  locale: "zh-CN",
+  recordVideo: { dir: VIDEO_DIR, size: { width: 1440, height: 900 } },
+});
+const cpage = await coreVideoCtx.newPage();
+watch(cpage, "core-video");
+const coreVideo = cpage.video();
+await cpage.goto(BASE + "/?scenario=ready&run=slow", { waitUntil: "domcontentloaded" });
+await cpage.waitForSelector("[data-task-core-row]");
+await cpage.waitForTimeout(450);
+await cpage.click('[data-task-core-row="core_sync"]');
+await cpage.waitForSelector("[data-task-core-detail]");
+await cpage.waitForTimeout(400);
+await cpage.fill('[data-task-core-field="goal"]', "录屏：继续处理剩余素材");
+await cpage.click('[data-task-core-action="append-step"]');
+await cpage.waitForSelector("[data-task-core-confirm-submit]");
+await cpage.waitForTimeout(600);
+await cpage.click("[data-task-core-confirm-submit]");
+await cpage.waitForSelector("[data-task-core-notice]", { timeout: 10000 });
+await cpage.waitForTimeout(700);
+/* 同一段录屏切到禁用态场景，录下“状态不允许时禁用并给原因”。 */
+await cpage.goto(BASE + "/?scenario=core-denied", { waitUntil: "domcontentloaded" });
+await cpage.waitForSelector('[data-task-core-row="core_sync"]');
+await cpage.click('[data-task-core-row="core_sync"]');
+await cpage.waitForSelector('[data-task-core-action="append-step"][disabled]');
+await cpage.waitForTimeout(800);
+await coreVideoCtx.close();
+const coreRaw = await coreVideo.path();
+const coreFlowVideo = path.join(ART, "task-core-flow.webm");
+if (coreRaw && fs.existsSync(coreRaw)) {
+  fs.copyFileSync(coreRaw, coreFlowVideo);
+  check("core 任务连续录屏产出", fs.statSync(coreFlowVideo).size > 0, coreFlowVideo);
+} else {
+  check("core 任务连续录屏产出", false, "video.path() 为空");
 }
 
 /* ── 6. 焦点顺序（就绪页 + 详情）────────────────────────────────────────── */
@@ -893,6 +1144,7 @@ const report = {
   screenshots,
   video: fs.existsSync(flowVideo) ? flowVideo : null,
   entryVideo: fs.existsSync(entryFlowVideo) ? entryFlowVideo : null,
+  coreVideo: fs.existsSync(coreFlowVideo) ? coreFlowVideo : null,
   compare: {
     condition: compareCondition,
     screenshots: { task: compare.task.screenshot, skill: compare.skill.screenshot },
@@ -916,6 +1168,8 @@ console.log(String.fromCharCode(10) + "═".repeat(72));
 console.log("UI-3 任务 / Agent 控制台探针：结论 " + report.verdict + " — " + JSON.stringify({ total: checks.length, failed: failed.length }));
 console.log("截图：" + screenshots.length + " 张 → " + ART);
 console.log("录屏：" + (report.video || "（无）"));
+console.log("写操作入口录屏：" + (report.entryVideo || "（无）"));
+console.log("core 任务录屏：" + (report.coreVideo || "（无）"));
 console.log("对照：" + compare.task.screenshot + " ／ " + compare.skill.screenshot);
 console.log(
   "对照差异（任务−Skill）：" + JSON.stringify({

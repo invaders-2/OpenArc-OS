@@ -4892,6 +4892,34 @@ label {
   font-weight: var(--fw-medium);
   overflow-wrap: anywhere;
 }
+/* U1 · core 任务（既有任务表）：与 .task-row / .task-detail 同源，只加这一层的排布规则。
+   命令域另一条（task/*），文案由 .task-core-action__reason 明示禁用原因。 */
+.task-core-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.task-core-row .task-row__desc {
+  color: var(--muted);
+}
+.task-core-action {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.task-core-action__risk,
+.task-core-action__reason {
+  font-size: var(--fs-micro);
+  line-height: var(--lh-normal);
+  overflow-wrap: anywhere;
+}
+.task-core-detail .task-step__tool {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 
 /* 窄窗口：列表在上、详情在下单列排布；所有列宽都带 minmax(0,*) 防溢出。
    容器查询按窗口自身宽度响应（.window 已声明 container-type: inline-size）。 */

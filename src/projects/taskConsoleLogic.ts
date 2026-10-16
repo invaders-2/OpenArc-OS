@@ -1107,3 +1107,542 @@ export function unifiedCountsText(view: UnifiedListView | null): string {
   return "统一读模型：dx " + view.counts.dx + " / core " + view.counts.core + " / 共 " + view.counts.total;
 }
 
+
+/* ══════════════════════════════════════════════════════════════════════════
+   10. core 任务域（既有 tasks / task_steps / task_events）—— 另一套命令与动作
+   ──────────────────────────────────────────────────────────────────────────
+   为什么单独一段：统一读模型把 core 任务显到同一张列表里，但它的命令通道
+   与 DX 完全不同 —— DX 走 agent/*（agent:command），core 走 task/*（task:command，
+   preload.cjs:151-158 的 window.openarc.task）。两套命令域必须分开登记、分开
+   判定、分开渲染文案，界面不允许把 agent/task/continue 当成 core 的“追加步骤”。
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/** electron/task-bootstrap.cjs:106 的 TASK_COMMANDS 全量；界面只发这些，一条不多。 */
+export const CORE_TASK_COMMANDS: readonly string[] = [
+  "task/run",
+  "task/get",
+  "task/list",
+  "task/cancel",
+  "task/resume",
+  "task/appendStep",
+  "task/recovery",
+  "task/acknowledgeUnknownEffect",
+];
+
+/** 未登记命令一律拒绝（与 task-bootstrap.cjs:115 的后端判据同一条）。 */
+export function isAllowedCoreTaskCommand(command: unknown): command is string {
+  return typeof command === "string" && (CORE_TASK_COMMANDS as readonly string[]).indexOf(command) >= 0;
+}
+
+/* ── core 7 态（task-domain.cjs:9-18）────────────────────────────────── */
+export const CORE_TASK_STATUSES: readonly string[] = [
+  "PENDING",
+  "RUNNING",
+  "WAITING",
+  "SUCCEEDED",
+  "FAILED",
+  "CANCELLED",
+  "BLOCKED",
+];
+
+export const CORE_TASK_STATUS_LABEL: Record<string, string> = {
+  PENDING: "已入队",
+  RUNNING: "执行中",
+  WAITING: "等待中",
+  SUCCEEDED: "已成功",
+  FAILED: "已失败",
+  CANCELLED: "已取消",
+  BLOCKED: "已停止（可续接）",
+};
+
+export function isCoreTaskStatus(value: unknown): value is string {
+  return typeof value === "string" && CORE_TASK_STATUSES.indexOf(value) >= 0;
+}
+
+export function coreTaskStatusLabel(status: unknown): string {
+  return isCoreTaskStatus(status) ? CORE_TASK_STATUS_LABEL[status] : status ? String(status) : "状态未知";
+}
+
+/** core 进行态：只有 PENDING / RUNNING / WAITING 需要按 task/get 轮询刷新。 */
+export function isActiveCoreStatus(status: unknown): boolean {
+  return status === "PENDING" || status === "RUNNING" || status === "WAITING";
+}
+
+export function coreTaskStatusTone(status: unknown): TaskTone {
+  if (status === "SUCCEEDED") return "success";
+  if (status === "FAILED" || status === "CANCELLED") return "danger";
+  if (status === "BLOCKED" || status === "WAITING") return "warning";
+  return "neutral";
+}
+
+/* ── 动作集合：只登记 core 白名单里对“已存在任务”真正有语义的命令 ───── */
+export type CoreTaskActionKey = "append-step" | "resume" | "cancel" | "acknowledge-unknown-effect";
+/** 风险类别：read（只读）/ write（写或启动执行）/ destructive（不可逆终结）。 */
+export type CoreTaskActionRisk = "read" | "write" | "destructive";
+
+export type CoreTaskActionMeta = {
+  key: CoreTaskActionKey;
+  command: string;
+  label: string;
+  description: string;
+  risk: CoreTaskActionRisk;
+  /** 写类动作必须走既有 Dialog 二次确认；确认前 0 命令。 */
+  requiresConfirm: boolean;
+  /** 需要构造的载荷键（taskId 恒在）。 */
+  inputs: readonly string[];
+};
+
+export const CORE_TASK_ACTIONS: readonly CoreTaskActionMeta[] = [
+  {
+    key: "append-step",
+    command: "task/appendStep",
+    label: "追加下一步",
+    description: "同一任务追加一个下一步目标（bounded 新步骤 + 一次新 run）；不重放旧工具请求，只用任务剩余额度。",
+    risk: "write",
+    requiresConfirm: true,
+    inputs: ["taskId", "goal", "expectedRevision"],
+  },
+  {
+    key: "resume",
+    command: "task/resume",
+    label: "续接预算",
+    description: "仅对“预算耗尽停止”的任务补一次额度并继续；是否可续接由后端 task/get 判定。",
+    risk: "write",
+    requiresConfirm: true,
+    inputs: ["taskId", "expectedRevision"],
+  },
+  {
+    key: "cancel",
+    command: "task/cancel",
+    label: "取消任务",
+    description: "请求停止任务并收尾在途 run；已完成步骤与产物保留，不回滚。",
+    risk: "destructive",
+    requiresConfirm: true,
+    inputs: ["taskId"],
+  },
+  {
+    key: "acknowledge-unknown-effect",
+    command: "task/acknowledgeUnknownEffect",
+    label: "确认已核查",
+    description: "对结果未知的副作用只记录一条人工确认事件；不重试、不重放、不改任务状态。",
+    risk: "write",
+    requiresConfirm: true,
+    inputs: ["taskId", "callId"],
+  },
+];
+
+export function coreTaskActionMeta(key: unknown): CoreTaskActionMeta | null {
+  const found = CORE_TASK_ACTIONS.find((a) => a.key === key);
+  return found || null;
+}
+
+export const CORE_TASK_ACTION_RISK_LABEL: Record<CoreTaskActionRisk, string> = {
+  read: "只读",
+  write: "写操作",
+  destructive: "终结操作",
+};
+
+export function coreTaskActionRiskText(key: unknown): string {
+  const meta = coreTaskActionMeta(key);
+  return meta ? CORE_TASK_ACTION_RISK_LABEL[meta.risk] : "";
+}
+
+/* ── 载荷：只允许业务参数 + requestId，绝不出现身份字段 ─────────────── */
+export const CORE_TASK_ACTION_PAYLOAD_KEYS: readonly string[] = [
+  "taskId",
+  "goal",
+  "expectedRevision",
+  "callId",
+  "requestId",
+];
+
+export const CORE_TASK_ACTION_INPUT_LABEL: Record<string, string> = {
+  goal: "下一步目标",
+  callId: "副作用记录",
+};
+
+export function coreActionMissingInputs(key: unknown, values: Record<string, unknown> = {}): string[] {
+  const meta = coreTaskActionMeta(key);
+  const missing: string[] = [];
+  if (!String(values.taskId == null ? "" : values.taskId).trim()) missing.push("taskId");
+  if (!meta) return missing;
+  if (meta.inputs.indexOf("goal") >= 0 && !String(values.goal == null ? "" : values.goal).trim()) missing.push("goal");
+  if (meta.inputs.indexOf("callId") >= 0 && !String(values.callId == null ? "" : values.callId).trim()) missing.push("callId");
+  return missing;
+}
+
+/**
+ * 载荷构造：只输出白名单键。空可选项不写入（后端按“未提供”处理），
+ * 绝不把 renderer 自报的 userId / role / appId / sessionRef 拼进来。
+ */
+export function coreActionPayload(key: unknown, values: Record<string, unknown> = {}): Record<string, unknown> {
+  const meta = coreTaskActionMeta(key);
+  const out: Record<string, unknown> = {};
+  if (!meta) return out;
+  const taskId = String(values.taskId == null ? "" : values.taskId).trim();
+  if (!taskId) return out;
+  out.taskId = taskId;
+  if (meta.inputs.indexOf("goal") >= 0) {
+    const goal = String(values.goal == null ? "" : values.goal).trim();
+    if (goal) out.goal = goal;
+  }
+  if (meta.inputs.indexOf("expectedRevision") >= 0) {
+    const rev = values.expectedRevision;
+    if (rev != null && Number.isFinite(Number(rev))) out.expectedRevision = Number(rev);
+  }
+  if (meta.inputs.indexOf("callId") >= 0) {
+    const callId = String(values.callId == null ? "" : values.callId).trim();
+    if (callId) out.callId = callId;
+  }
+  if (values.requestId != null && String(values.requestId)) out.requestId = String(values.requestId);
+  return out;
+}
+
+export const CORE_TASK_ACTION_CONFIRM_TITLE: Record<CoreTaskActionKey, string> = {
+  "append-step": "确认追加下一步",
+  resume: "确认续接预算",
+  cancel: "确认取消任务",
+  "acknowledge-unknown-effect": "确认已核查结果未知的副作用",
+};
+
+export function coreActionConfirmTitle(key: unknown): string {
+  const meta = coreTaskActionMeta(key);
+  return meta ? CORE_TASK_ACTION_CONFIRM_TITLE[meta.key] : "确认";
+}
+
+/** 确认框的副作用说明：只说这次动作真的会做什么，不夸大也不隐瞒。 */
+export function coreActionConfirmSummary(key: unknown, payload: Record<string, unknown> = {}): string {
+  const meta = coreTaskActionMeta(key);
+  if (!meta) return "";
+  const taskText = payload.taskId ? "任务 " + String(payload.taskId) : "该任务";
+  if (meta.key === "append-step") {
+    return "写操作：" + taskText + " 会新增一个执行步骤并开始一次新 run（只用剩余额度，不重放旧工具请求）。下一步目标：" + String(payload.goal || "（未填写）") + "。";
+  }
+  if (meta.key === "resume") {
+    return "写操作：为 " + taskText + " 追加一次预算并新建步骤，随后真实调用模型；是否可续接由后端判定。";
+  }
+  if (meta.key === "cancel") {
+    return "终结操作：请求停止 " + taskText + " 并收尾在途 run；已完成步骤与产物保留，不回滚。";
+  }
+  return "写操作：为 " + taskText + " 记录一条人工确认（callId " + String(payload.callId || "（缺失）") + "）；不会重试、不会重放副作用，也不会改写任务状态。";
+}
+
+/* ── task/get 投影规范化（以后端为准，不做本地拼接）────────────────────── */
+export type CoreTaskRecord = {
+  taskId: string;
+  goal: string;
+  status: string;
+  revision: number | null;
+  cancelRequested: boolean;
+  createdAt: number | null;
+  updatedAt: number | null;
+  startedAt: number | null;
+  completedAt: number | null;
+  modelConfigId: string | null;
+  modelConfigVersion: number | null;
+};
+
+export type CoreTaskStep = {
+  stepId: string | null;
+  sequence: number | null;
+  kind: string | null;
+  status: string | null;
+  input: unknown;
+  startedAt: number | null;
+  completedAt: number | null;
+};
+
+export type CoreTaskArtifact = {
+  artifactId: string | null;
+  stepId: string | null;
+  type: string | null;
+  content: unknown;
+  checksum: string | null;
+  createdAt: number | null;
+};
+
+export type CoreRecoveryCall = {
+  callId: string;
+  toolId: string | null;
+  status: string | null;
+  errorCode: string | null;
+  stepId: string | null;
+  runId: string | null;
+  recoveryResult: string | null;
+  recoveryReason: string | null;
+  acknowledged: boolean;
+  acknowledgedAt: number | null;
+};
+
+export type CoreTaskRecovery = { applicable: boolean; reason: string | null; calls: CoreRecoveryCall[] };
+
+export type CoreTaskDetail = {
+  task: CoreTaskRecord;
+  steps: CoreTaskStep[];
+  artifacts: CoreTaskArtifact[];
+  verifications: Record<string, unknown>[];
+  appendable: boolean;
+  appendReason: string | null;
+  resumable: boolean;
+  resumeReason: string | null;
+  stopReason: string | null;
+  canCancel: boolean;
+  recovery: CoreTaskRecovery;
+};
+
+const numOrNull = (v: unknown): number | null => (v == null || !Number.isFinite(Number(v)) ? null : Number(v));
+const strOrNull = (v: unknown): string | null => (v == null ? null : String(v));
+
+/** task-service.cjs:307-336 的 safeTask / safeStep + bootstrap.cjs:171-182 的 task/get 信封。 */
+export function normalizeCoreTaskDetail(result: unknown): CoreTaskDetail | null {
+  const unwrapped = isObj(result) && isObj(result.value) ? (result.value as Record<string, unknown>) : result;
+  const root = isObj(unwrapped) ? (unwrapped as Record<string, unknown>) : null;
+  if (!root || root.ok === false) return null;
+  const rawTask = isObj(root.task) ? (root.task as Record<string, unknown>) : null;
+  if (!rawTask) return null;
+  const taskId = String(rawTask.taskId == null ? "" : rawTask.taskId);
+  if (!taskId) return null;
+  const status = String(rawTask.status == null ? "" : rawTask.status);
+  const task: CoreTaskRecord = {
+    taskId,
+    goal: String(rawTask.goal == null ? "" : rawTask.goal),
+    status,
+    revision: numOrNull(rawTask.revision),
+    cancelRequested: rawTask.cancelRequested === true,
+    createdAt: numOrNull(rawTask.createdAt),
+    updatedAt: numOrNull(rawTask.updatedAt),
+    startedAt: numOrNull(rawTask.startedAt),
+    completedAt: numOrNull(rawTask.completedAt),
+    modelConfigId: strOrNull(rawTask.modelConfigId),
+    modelConfigVersion: numOrNull(rawTask.modelConfigVersion),
+  };
+  const steps: CoreTaskStep[] = [];
+  for (const s of Array.isArray(root.steps) ? root.steps : []) {
+    if (!isObj(s)) continue;
+    steps.push({
+      stepId: strOrNull((s as Record<string, unknown>).stepId),
+      sequence: numOrNull((s as Record<string, unknown>).sequence),
+      kind: strOrNull((s as Record<string, unknown>).kind),
+      status: strOrNull((s as Record<string, unknown>).status),
+      input: (s as Record<string, unknown>).input,
+      startedAt: numOrNull((s as Record<string, unknown>).startedAt),
+      completedAt: numOrNull((s as Record<string, unknown>).completedAt),
+    });
+  }
+  const artifacts: CoreTaskArtifact[] = [];
+  for (const a of Array.isArray(root.artifacts) ? root.artifacts : []) {
+    if (!isObj(a)) continue;
+    artifacts.push({
+      artifactId: strOrNull((a as Record<string, unknown>).artifactId),
+      stepId: strOrNull((a as Record<string, unknown>).stepId),
+      type: strOrNull((a as Record<string, unknown>).type),
+      content: (a as Record<string, unknown>).content,
+      checksum: strOrNull((a as Record<string, unknown>).checksum),
+      createdAt: numOrNull((a as Record<string, unknown>).createdAt),
+    });
+  }
+  const verifications = (Array.isArray(root.verifications) ? root.verifications : []).filter(isObj) as Record<string, unknown>[];
+  const recoveryRoot = isObj(root.recovery) ? (root.recovery as Record<string, unknown>) : null;
+  const calls: CoreRecoveryCall[] = [];
+  for (const c of recoveryRoot && Array.isArray(recoveryRoot.calls) ? (recoveryRoot.calls as unknown[]) : []) {
+    if (!isObj(c)) continue;
+    const callId = String((c as Record<string, unknown>).callId == null ? "" : (c as Record<string, unknown>).callId);
+    if (!callId) continue;
+    calls.push({
+      callId,
+      toolId: strOrNull((c as Record<string, unknown>).toolId),
+      status: strOrNull((c as Record<string, unknown>).status),
+      errorCode: strOrNull((c as Record<string, unknown>).errorCode),
+      stepId: strOrNull((c as Record<string, unknown>).stepId),
+      runId: strOrNull((c as Record<string, unknown>).runId),
+      recoveryResult: strOrNull((c as Record<string, unknown>).recoveryResult),
+      recoveryReason: strOrNull((c as Record<string, unknown>).recoveryReason),
+      acknowledged: (c as Record<string, unknown>).acknowledged === true,
+      acknowledgedAt: numOrNull((c as Record<string, unknown>).acknowledgedAt),
+    });
+  }
+  const canCancel = status !== "SUCCEEDED" && status !== "FAILED" && status !== "CANCELLED" && !task.cancelRequested;
+  return {
+    task,
+    steps,
+    artifacts,
+    verifications,
+    appendable: root.appendable === true,
+    appendReason: strOrNull(root.appendReason),
+    resumable: root.resumable === true,
+    resumeReason: strOrNull(root.resumeReason),
+    stopReason: strOrNull(root.stopReason),
+    canCancel,
+    recovery: {
+      applicable: recoveryRoot ? recoveryRoot.applicable === true : false,
+      reason: recoveryRoot ? strOrNull(recoveryRoot.reason) : null,
+      calls,
+    },
+  };
+}
+
+/** 详情里下一条尚未人工确认的结果未知副作用。 */
+export function nextUnacknowledgedRecoveryCall(detail: CoreTaskDetail | null): CoreRecoveryCall | null {
+  if (!detail || !detail.recovery.applicable) return null;
+  return detail.recovery.calls.find((c) => !c.acknowledged) || null;
+}
+
+/* ── 可用性判定：依赖缺失 / 状态不允许 / 输入缺失 → 禁用 + 可见原因 ──── */
+export type CoreActionContext = {
+  hasBridge: boolean;
+  detail: CoreTaskDetail | null;
+  goal?: string;
+  callId?: string;
+};
+
+export function coreActionDisabledReason(key: unknown, ctx: CoreActionContext): string | null {
+  const meta = coreTaskActionMeta(key);
+  if (!meta) return "未登记的动作";
+  if (!ctx.hasBridge) return "当前环境没有 core 任务桥（window.openarc.task），不会发送任何命令";
+  if (!ctx.detail) return "任务详情尚未就绪，先刷新 task/get 再操作";
+  const d = ctx.detail;
+  if (meta.key === "append-step") {
+    if (!d.appendable) return "追加不可用：" + coreTaskReasonText(d.appendReason || "APPEND_NOT_SUCCEEDED");
+    if (!String(ctx.goal || "").trim()) return "请先填写要追加的下一步目标";
+    return null;
+  }
+  if (meta.key === "resume") {
+    if (!d.resumable) return "续接不可用：" + coreTaskReasonText(d.resumeReason || d.stopReason || "RESUME_NOT_BLOCKED");
+    return null;
+  }
+  if (meta.key === "cancel") {
+    if (d.task.status === "SUCCEEDED" || d.task.status === "FAILED" || d.task.status === "CANCELLED") {
+      return "已完成 / 已失败 / 已取消的任务不能再取消";
+    }
+    if (d.task.cancelRequested) return "取消请求已提交，等待任务收尾";
+    return null;
+  }
+  // acknowledge-unknown-effect：只对真实的 UNKNOWN_EFFECT call 开放。
+  if (!d.recovery.applicable) return "当前任务没有需要人工核查的结果未知副作用";
+  const callId = String(ctx.callId || "");
+  if (!callId) return "没有待确认的副作用记录";
+  const call = d.recovery.calls.find((c) => c.callId === callId);
+  if (!call) return "该副作用记录不属于当前任务";
+  if (call.acknowledged) return "该副作用已经确认过（重复确认是幂等的）";
+  return null;
+}
+
+/* ── core 错误码 / 拒绝原因 → 人话 ────────────────────────────────────── */
+/** task-domain.cjs:120-173 的 ERROR 全量；逐条登记，未登记的才落兜底。 */
+export const CORE_TASK_ERROR_TEXT: Record<string, string> = {
+  TASK_NOT_FOUND: "任务不存在，或不属于当前账号 / 应用",
+  TASK_FORBIDDEN: "当前账号或该应用没有权限操作这个任务",
+  TASK_INVALID_STATE: "任务状态不允许这个操作，请刷新后按当前状态重试",
+  TASK_REVISION_CONFLICT: "任务已被其他操作改动（revision 冲突），已按后端最新状态刷新，请重试",
+  TASK_CANCELLED: "任务已请求取消，不能再执行这个动作",
+  MODEL_CONFIG_CHANGED: "任务绑定的模型配置版本已变化，为避免串用旧配置被拒绝；请刷新后处理",
+  RECOVERY_REQUIRED: "任务在上次运行中断，已标记为需要恢复核查",
+  BUDGET_EXHAUSTED: "本任务的执行预算已用尽；需要显式续接后才能继续",
+  INVALID_INPUT: "输入不完整或不符合要求",
+  INTERNAL_ERROR: "core 任务运行时内部错误，操作未完成",
+  HARNESS_PROCESS_EXITED: "推理运行时进程已退出，任务未完成",
+  HARNESS_START_TIMEOUT: "推理运行时启动超时",
+  HARNESS_TURN_TIMEOUT: "推理运行时单轮执行超时",
+  HARNESS_CANCELLED: "推理运行时已被取消",
+  TOOL_EXECUTION_NOT_AVAILABLE: "当前环境没有可用的工具执行通道",
+  PERMISSION_NOT_AVAILABLE: "缺少执行所需权限",
+  AUTHORIZATION_REVOKED: "授权已被撤销，任务不能继续执行",
+  STALE_CAPABILITY: "能力凭证已过期，未执行任何动作",
+  ARTIFACT_PERSIST_FAILED: "产物落库失败，任务没有记为成功",
+  VERIFICATION_FAILED: "产物未通过校验，任务没有记为成功",
+  MCP_NOT_AVAILABLE: "MCP 通道不可用",
+  TOOL_NOT_FOUND: "工具不存在或未登记",
+  TOOL_DISABLED: "该工具当前被关闭",
+  TOOL_VERSION_UNSUPPORTED: "工具版本不受支持",
+  TOOL_ARGUMENT_INVALID: "工具参数不合法",
+  TOOL_ARGUMENT_FORBIDDEN_FIELD: "工具参数包含被禁止的字段",
+  TOOL_FORBIDDEN: "当前账号或应用被禁止使用该工具",
+  TOOL_APP_NOT_GRANTED: "该应用没有被授予此工具",
+  TOOL_AGENT_USE_NOT_AUTHORIZED: "Agent 使用该工具未获授权",
+  TOOL_APPROVAL_REQUIRED: "该工具需要逐次审批，尚未批准",
+  TOOL_PROPOSAL_STALE: "工具提案已过期，未执行",
+  TOOL_RESOURCE_REF_REQUIRED: "该工具需要明确的资源引用",
+  TASK_TERMINAL: "任务已到终态，不能再执行这个动作",
+  TOOL_EXECUTION_STALE: "工具执行已过期，未执行",
+  TOOL_PLAN_STALE: "工具计划已过期，未执行",
+  TOOL_TIMEOUT: "工具调用超时",
+  TOOL_EXECUTION_FAILED: "工具执行失败",
+  TOOL_OUTPUT_INVALID: "工具输出不合法，未采信",
+  TOOL_VERIFICATION_FAILED: "工具报告成功但产物校验失败",
+  TOOL_AUTHORIZATION_REVOKED: "工具授权已被撤销，未执行",
+  TOOL_NOT_EXECUTABLE: "该工具不可执行",
+  RESOURCE_NOT_AVAILABLE: "所需资源不可用",
+  WRITE_EXECUTION_DISABLED: "写执行通道当前被关闭",
+  APPEND_NOT_ALLOWED: "当前状态不允许追加下一步",
+  /* 渲染层自己的事实位（前缀刻意与后端码区分） */
+  NO_CORE_BRIDGE: "桌面桥未接入 core 任务域（当前环境没有 window.openarc.task）",
+  TASK_COMMAND_NOT_ALLOWED: "命令不在 task:command 白名单内，界面不会发送未登记的命令",
+  RESPONSE_INCOMPLETE: "主进程返回的记录不完整，界面不猜内容",
+  LOCAL_INPUT_REQUIRED: "缺少必填内容（界面上先行拦截，没有发给后端）",
+  RESUME_NOT_ELIGIBLE: "按后端判定，该任务当前不可续接",
+  EXPLICIT_RESUME_DEFERRED: "非预算停止的恢复尚未开放",
+  SIDE_EFFECT_APPROVAL_UNRESOLVED: "存在尚未处理的副作用审批，任务不能继续",
+};
+
+/** 未登记的码也给出可读兜底，并保留原始码显示（不塌缩成“未知错误”）。 */
+export function coreTaskErrorText(code: unknown): string {
+  const key = code == null ? "" : String(code);
+  return CORE_TASK_ERROR_TEXT[key] || "core 任务操作失败";
+}
+
+/** APPEND_REASON / RESUME_REASON（task-domain.cjs:255-282）：为什么现在不能追加 / 续接。 */
+export const CORE_TASK_REASON_TEXT: Record<string, string> = {
+  APPEND_IN_FLIGHT: "已有步骤或 run 正在进行，等它结束后再追加",
+  APPEND_EFFECT_STATE_UNAVAILABLE: "暂时读不到副作用账本，为安全起见不追加",
+  APPEND_UNKNOWN_EFFECT: "存在结果未知的副作用，先核查再追加",
+  APPEND_SIDE_EFFECT_PENDING: "有未决副作用（等待审批 / 执行中），先处理再追加",
+  APPEND_ACTIVE_LEASE: "存在有效执行租约，先等它释放",
+  APPEND_NOT_SUCCEEDED: "只有已成功完成的任务才能追加下一步",
+  APPEND_NO_ARTIFACT: "任务还没有可参考的产物，不追加",
+  RESUME_NOT_BLOCKED: "任务不在已停止状态，无需续接",
+  RESUME_CANCELLED: "任务已请求取消，不能续接",
+  RESUME_IN_FLIGHT: "已有步骤或 run 正在进行，等它结束后再续接",
+  RESUME_NO_HARNESS_RUN: "没有可续接的 run 记录",
+  RESUME_NOT_BUDGET_STOP: "该任务不是因预算耗尽停止，当前不支持续接",
+  RESUME_UNKNOWN_BUDGET_KIND: "无法判定该补哪一类预算，拒绝续接",
+  RESUME_UNKNOWN_EFFECT_PRESENT: "存在结果未知的副作用，先核查再续接",
+  RESUME_SIDE_EFFECT_PENDING: "有未决副作用，先处理再续接",
+  RESUME_ACTIVE_LEASE: "存在有效执行租约，先等它释放",
+  RESUME_NO_SAFE_CONTINUATION: "没有可安全续接的已完成产物",
+  RESUME_LIMIT_REACHED: "已达续接次数上限",
+  RESUME_BUDGET_REMAINING: "该预算仍有余额，不是容量停止，不能循环追加",
+  RESUME_EFFECT_STATE_UNAVAILABLE: "暂时读不到副作用账本，为安全起见不续接",
+};
+
+export function coreTaskReasonText(reason: unknown): string {
+  const key = reason == null ? "" : String(reason);
+  return CORE_TASK_REASON_TEXT[key] || key || "没有给出原因";
+}
+
+/** 失败文案优先级：拒绝原因 > 错误码 > 兜底，且始终保留原始码。 */
+export function coreTaskFailureText(code: unknown): string {
+  const key = code == null ? "" : String(code);
+  if (CORE_TASK_REASON_TEXT[key]) return CORE_TASK_REASON_TEXT[key];
+  return coreTaskErrorText(key);
+}
+
+/** 详情里显式标注命令域；同样把 "/" 与 "*" 分开拼接，避免被朴素 stripComments 吞掉。 */
+export const CORE_TASK_COMMAND_DOMAIN_TEXT = "命令域 task/" + "*（与 DX 的 agent/" + "* 分开，不能混用）";
+
+/** core 列表行的能力提示（同样不出现连续的 "/" + "*"）。 */
+export const CORE_TASK_ROW_HINT = "选中后按其真实能力提供动作（task/" + "* 命令），与 DX 任务的 agent/" + "* 不混用。";
+
+/** 按 source 说明“这里能做什么”，替代过去“core 只读”的一句笼统标注。 */
+export function unifiedCapabilityNote(source: unknown): string {
+  const key = source == null ? "" : String(source);
+  /* 注意："task/" 与 "*" 必须分开拼接：本文件的消费测试用朴素的 stripComments 去掉注释，
+     字符串里出现连续的 "/" + "*" 会被误当成块注释起点，把后续代码一起吞掉。 */
+  if (key === "core") {
+    return "core 任务（既有任务表）：可选中查看；动作走 task/" + "* 命令 —— 追加下一步 task/appendStep、续接预算 task/resume、取消 task/cancel、确认结果未知副作用 task/acknowledgeUnknownEffect。与 DX 的 agent/" + "* 不是同一套命令，不能混用。";
+  }
+  if (key === "dx") {
+    return "DX 任务（新任务表）：可选中查看；动作走 agent/" + "* 命令 —— 回答 / 暂停 / 恢复 / 追加要求 / 取消。与 core 的 task/" + "* 不是同一套命令，不能混用。";
+  }
+  return "来源未登记：只显示读模型信息，不提供任何动作。";
+}
+
