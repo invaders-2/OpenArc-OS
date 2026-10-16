@@ -1,6 +1,6 @@
 /**
  * W1 · dx-protocol/v2 内置协议完整性测试（不联网、不启动 DX OS、不写用户目录）。
- * 覆盖 18 个模型协议 + 15 个供应商协议：
+ * 覆盖 19 个模型协议 + 15 个供应商协议：
  *   1. validator.validateProtocolV2 全部通过；
  *   2. 每个 workflow 的 submit/poll/download/result 与 modelProfiles 的 workflow/uiSchemas 引用有效；
  *   3. 用内置 openai-http 绑定 + compiler.compileProtocolPlan 编译每个模型协议的每个 workflow。
@@ -28,6 +28,7 @@ const EXPECTED_MODEL_ORDER = [
   "gpt-best-images",
   "fhl-images",
   "gemini",
+  "gemini-general",
   "xai",
   "minimax",
   "agtoken-videos",
@@ -67,18 +68,18 @@ function taskSelector(protocol, workflowId) {
   return { model: firstProfile || "test-model", intent: workflowId };
 }
 
-/** gemini 的 llm.tools 会走 geminiToolDefinitions，必须给数组；其余 protocol 用空 params。 */
+/** gemini / gemini-general 的 llm.tools 会走 geminiToolDefinitions，必须给数组；其余 protocol 用空 params。 */
 function paramsFor(protocol, intent) {
-  return protocol.id === "gemini" && intent === "llm.tools" ? { tools: [] } : {};
+  return (protocol.id === "gemini" || protocol.id === "gemini-general") && intent === "llm.tools" ? { tools: [] } : {};
 }
 
-test("内置 v2 协议表：18 个模型 + 15 个供应商，模型协议顺序与源一致且全部 ported:true", () => {
-  assert.equal(MODEL_PROTOCOLS.length, 18);
+test("内置 v2 协议表：19 个模型 + 15 个供应商，模型协议顺序与源一致且全部 ported:true", () => {
+  assert.equal(MODEL_PROTOCOLS.length, 19);
   assert.equal(PROVIDER_PROTOCOLS.length, 15);
   assert.deepEqual(MODEL_PROTOCOLS.map((protocol) => protocol.id), EXPECTED_MODEL_ORDER);
 
   const modelMeta = builtins.BUILTIN_PROTOCOL_METADATA_V2.filter((entry) => entry.kind === "model");
-  assert.equal(modelMeta.length, 18);
+  assert.equal(modelMeta.length, 19);
   assert.deepEqual(
     modelMeta.filter((entry) => entry.ported !== true).map((entry) => entry.id),
     [],
@@ -92,7 +93,7 @@ test("内置 v2 协议表：18 个模型 + 15 个供应商，模型协议顺序�
 test("模型协议导出顺序与源码 builtins.ts:2399-2715 一致，metadata 顺序同步", () => {
   // 源 builtins.ts:2399-2715 的数组逐字顺序：
   //   [openAiImagesProtocol, openAiChatMediaProtocol, comflyOpenAiProtocol, geminiGenerationsProtocol,
-  //    gptBestImagesProtocol, fhlImagesProtocol, geminiProtocol, xaiProtocol, minimaxProtocol,
+  //    gptBestImagesProtocol, fhlImagesProtocol, geminiProtocol, geminiGeneralProtocol, xaiProtocol, minimaxProtocol,
   //    agtokenVideosProtocol, zkkiImagesProtocol, apimartImagesProtocol, midjourneyProtocol,
   //    apibImagesProtocol, modelScopeImagesProtocol, volcengineProtocol, volcengineSpeechProtocol, agnes]
   // 其中 xai / minimax 紧跟 gemini 之后，agtoken-videos 在 zkki-images 之前。
@@ -104,6 +105,7 @@ test("模型协议导出顺序与源码 builtins.ts:2399-2715 一致，metadata 
     "gpt-best-images",
     "fhl-images",
     "gemini",
+    "gemini-general",
     "xai",
     "minimax",
     "agtoken-videos",
@@ -131,7 +133,7 @@ test("向后兼容：builtins 继续导出 openAiImagesProtocol/openAiMultipartI
   assert.equal(builtins.bearerProvider("probe-http", "Probe").schemaVersion, "dx-protocol/v2");
 });
 
-test("validator.validateProtocolV2 通过全部 18 个模型协议与 15 个供应商协议", () => {
+test("validator.validateProtocolV2 通过全部 19 个模型协议与 15 个供应商协议", () => {
   for (const protocol of [...PROVIDER_PROTOCOLS, ...MODEL_PROTOCOLS]) {
     const normalized = validator.validateProtocolV2(protocol);
     assert.equal(normalized.id, protocol.id);

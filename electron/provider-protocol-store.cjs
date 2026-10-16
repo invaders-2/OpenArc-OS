@@ -51,6 +51,8 @@ function normalizeProvider(raw) {
     ...(value.source ? { source: String(value.source) } : {}),
     ...(value.cli_tool ? { cli_tool: String(value.cli_tool) } : {}),
     custom_protocols: Array.isArray(value.custom_protocols) ? value.custom_protocols.map(String).slice(0, 30) : [],
+    // 只有显式为 true 才落字段：既有站点（未勾选）的 providers.json 形状逐字不变。
+    ...(value.allow_insecure_http === true ? { allow_insecure_http: true } : {}),
     models: normalizeModels(value.models),
     enabled: value.enabled !== false,
     sort: Number.isFinite(Number(value.sort)) ? Number(value.sort) : 0,
@@ -205,6 +207,54 @@ class ProviderProtocolStore {
 
   /** 兼容 DXSRC/store.ts:580-594 setProviderKeys 的键位语义（只改本函数，不动原模块）。 */
   setProviderKeys(id, values) { return this.setKeys(id, values); }
+
+  /* ── 单向镜像事务原语（ModelStore → providers.json，model-provider-bridge.cjs 专用）──
+   * 镜像必须"全成或全回滚"：先快照整表，失败时 replaceProviders 回滚。
+   * 只暴露给桥接模块；普通 UI 路径仍走 create/update/setKeys/remove。 */
+
+  snapshotProviders() { return JSON.parse(JSON.stringify(this.load())); }
+
+  replaceProviders(list) {
+    this.cache = (Array.isArray(list) ? list : []).map(normalizeProvider).filter((provider) => provider.id);
+    this.persist();
+  }
+
+  /**
+   * 按**显式 id** upsert（不 slugify、不按名字猜），保留既有 created_ts / sort；
+   * id 由桥接模块的持久映射决定（ModelStore prv_* ↔ providers.json id）。
+   * api_key / wallet_api_key 依旧不落 JSON（persist 里的二次断言）。
+   */
+  upsertById(id, { name, baseUrl, protocol, models, enabled, source, cliTool, allowInsecureHttp } = {}) {
+    const key = String(id || "").trim();
+    if (!key) throw new Error("upsertById 需要显式 id");
+    const list = this.load();
+    const existing = list.find((item) => item.id === key);
+    if (existing) {
+      if (name != null) existing.name = String(name);
+      if (baseUrl != null) existing.base_url = String(baseUrl);
+      if (protocol != null) existing.protocol = String(protocol).trim().toLowerCase();
+      if (models != null) existing.models = normalizeModels(models);
+      if (enabled != null) existing.enabled = !!enabled;
+      if (source != null) existing.source = String(source);
+      if (cliTool != null) existing.cli_tool = String(cliTool);
+      // 显式同步「明文放行」：置位/清零都必须落到 providers.json，否则技能/短剧出口仍按旧标记放行。
+      if (allowInsecureHttp != null) {
+        if (allowInsecureHttp === true) existing.allow_insecure_http = true;
+        else delete existing.allow_insecure_http;
+      }
+      existing.updated_ts = this.clock();
+    } else {
+      const timestamp = this.clock();
+      list.push(normalizeProvider({
+        id: key, name: name || key, base_url: baseUrl, protocol: protocol || "openai",
+        ...(source ? { source } : {}), ...(cliTool ? { cli_tool: cliTool } : {}),
+        ...(allowInsecureHttp === true ? { allow_insecure_http: true } : {}),
+        models, enabled: enabled !== false, sort: list.length + 1, created_ts: timestamp, updated_ts: timestamp,
+      }));
+    }
+    this.persist();
+    return this.get(key);
+  }
 
   remove(id) {
     const list = this.load();

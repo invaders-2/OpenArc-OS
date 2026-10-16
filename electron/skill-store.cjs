@@ -721,7 +721,7 @@ function resolveChatTarget(opts) {
     return entry ? [{ provider: provider, entry: entry }] : [];
   })[0];
   if (!hit) {
-    throw new Error("还没有可用的模型站点。请先在「API 设置」里添加并启用一个站点，填好 Base URL、Key 和至少一个模型。");
+    throw new Error("还没有可用的模型站点。请先在「系统设置 › 模型与服务商」里添加并启用一个站点，填好 Base URL、Key 和至少一个模型。");
   }
   return {
     provider: { id: hit.provider.id, base_url: hit.provider.base_url, api_key: hit.provider.api_key, protocol: hit.entry.protocol || hit.provider.protocol },
@@ -803,7 +803,7 @@ function resolveVisionTargets(opts, imageCount) {
     return maximum === null || maximum >= count;
   });
   if (!compatible.length) {
-    throw new Error("没有可用的视觉模型。请在「API 设置」中启用支持看图的模型。");
+    throw new Error("没有可用的视觉模型。请在「系统设置 › 模型与服务商」中启用支持看图的模型。");
   }
   return compatible.map((candidate) => ({
     provider: {

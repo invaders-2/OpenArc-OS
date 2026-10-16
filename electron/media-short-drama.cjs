@@ -162,8 +162,8 @@ function resolveByCaps(caps, options) {
   }
   const provider = store.firstUsableProvider(caps);
   if (!provider) throw createMediaError(MEDIA_ERR_INVALID_INPUT, caps === "llm"
-    ? "请先在「API 设置」中配置并启用一个语言模型，再使用 AI 生产流程。"
-    : "请先在「API 设置」中配置并启用一个图像模型，再生成分镜图。");
+    ? "请先在「系统设置 › 模型与服务商」中配置并启用一个语言模型，再使用 AI 生产流程。"
+    : "请先在「系统设置 › 模型与服务商」中配置并启用一个图像模型，再生成分镜图。");
   return provider;
 }
 

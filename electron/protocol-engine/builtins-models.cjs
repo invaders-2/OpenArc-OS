@@ -1,6 +1,6 @@
 "use strict";
 /**
- * dx-protocol/v2 内置模型协议：openai-images 之外的 17 个（顺序与源文件声明顺序一致）。
+ * dx-protocol/v2 内置模型协议：openai-images 之外的 18 个（顺序与源文件声明顺序一致）。
  *
  * 源：DXSRC/protocol-engine/builtins.ts
  *   · openai-chat-media  :300-365
@@ -9,6 +9,7 @@
  *   · gpt-best-images    :565-655
  *   · fhl-images         :657-675
  *   · gemini             :700-815
+ *   · gemini-general     :865-871（...spread geminiProtocol 后仅改 id/label/summary）
  *   · zkki-images        :817-1061
  *   · agtoken-videos     :1080-1182
  *   · apimart-images     :1184-1657
@@ -20,6 +21,11 @@
  *   · xai                :2046-2162
  *   · minimax            :2164-2344
  *   · agnes              :2400-2714（源 BUILTIN_MODEL_PROTOCOLS_V2 数组内联项）
+ *
+ * 云协议 OUT（不移植：DX 云能力，见铁律 2）：
+ *   · dxos-media  :296-338  模型协议；summary 明写「DX OS 公共 API」，指向 api.dx-os.com。
+ *   · dxos-http   :2476     provider 协议；bearerProvider('dxos-http', 'DX OS API')。
+ *
  * 共享 helper 见 builtins-helpers.cjs。apimartSeedanceProfile 由
  * apimartImagesProtocol 派生，为避免 require 环按源顺序留在本文件内联。
  */
@@ -522,6 +528,14 @@ const geminiProtocol = {
       { key: 'resolution', label: '清晰度', type: 'select', default: '1K', options: ['1K', '2K', '4K'].map((value) => ({ label: value, value })) },
     ],
   },
+}
+
+/** Gemini-compatible aggregate sites using the Google request/response shape with Bearer auth. */
+const geminiGeneralProtocol = {
+  ...geminiProtocol,
+  id: 'gemini-general',
+  label: 'Gemini 通用协议',
+  summary: '第三方聚合站 Gemini 通用协议：使用 generateContent 请求体，但由外层 Bearer provider 负责认证。',
 }
 
 const zkkiImagesProtocol = {
@@ -2319,6 +2333,7 @@ const BUILTIN_MODEL_PROTOCOLS_V2_EXTRA = [
   gptBestImagesProtocol,
   fhlImagesProtocol,
   geminiProtocol,
+  geminiGeneralProtocol,
   zkkiImagesProtocol,
   agtokenVideosProtocol,
   apimartImagesProtocol,

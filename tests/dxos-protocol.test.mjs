@@ -47,10 +47,10 @@ function bundleFor(baseUrl) {
   return { dir, bundle, provider };
 }
 
-test("协议表覆盖 DX OS legacy 29 模型 + 20 供应商，且 v2 内置标注移植状态", () => {
+test("协议表覆盖 DX OS legacy 29 模型 + 21 供应商（源 20 + 官方 lovart），且 v2 内置标注移植状态", () => {
   assert.equal(domain.LEGACY_MODEL_PROTOCOLS.length, 29);
-  // 源 protocols.ts:2589-2982 顶层实测 20 个；旧值 19 漏计了 protocols.ts:2659 的 'cli:dreamina-canvas'。
-  assert.equal(domain.LEGACY_PROVIDER_PROTOCOLS.length, 20);
+  // 源 protocols.ts:2589-2982 顶层实测 20 个；本仓另加官方协议 lovart 后为 21。
+  assert.equal(domain.LEGACY_PROVIDER_PROTOCOLS.length, 21);
   const table = domain.protocolTable();
   assert.ok(table.some((item) => item.id === "openai-images" && item.engine === "v2" && item.ported === true));
   assert.ok(table.some((item) => item.id === "anthropic" && item.engine === "legacy"));

@@ -70,12 +70,30 @@ class ProviderProtocolService {
     // 未注入时只保留调用方自己的 onEvent，事件通道不推进序号，业务路径不受影响。
     this.emit = typeof emit === "function" ? emit : null;
     this.eventChannel = createEventChannel({ domain: eventDomain, clock: () => this.clock() });
+    // 镜像桥注入的别名解析：ModelStore 的 prv_* id → providers.json 的 id。
+    // 设置页渲染层拿到/回传的一律是 prv_*，没有这层解析 provider/call 就仍是 PROVIDER_NOT_FOUND。
+    this.providerIdResolver = null;
   }
 
   /** 窗口在 identity bootstrap 之后才存在；宿主可后置注入下行发送口。 */
   setEventSink(emit) {
     this.emit = typeof emit === "function" ? emit : null;
     return !!this.emit;
+  }
+
+  /** model-bootstrap.cjs 在装配镜像桥后注入；未注入时只认 providers.json 原生 id。 */
+  setProviderIdResolver(resolve) {
+    this.providerIdResolver = typeof resolve === "function" ? resolve : null;
+    return !!this.providerIdResolver;
+  }
+
+  /** providers.json 原生 id 优先；查不到再经镜像映射把 prv_* 解析成镜像 id。 */
+  #canonicalProviderId(providerId) {
+    if (providerId == null || !this.providerIdResolver) return providerId;
+    try {
+      if (this.store.get(providerId)) return providerId;
+      return this.providerIdResolver(String(providerId)) || providerId;
+    } catch { return providerId; }
   }
 
   // ---------- 协议表 / 校验 / 保存 ----------
@@ -128,9 +146,11 @@ class ProviderProtocolService {
   // ---------- 统一调用出口 ----------
 
   #resolveProvider({ providerId, allowLan = false } = {}) {
-    const provider = this.store.get(providerId);
+    const provider = this.store.get(this.#canonicalProviderId(providerId));
     if (!provider) return { ok: false, error: "PROVIDER_NOT_FOUND" };
-    const endpoint = modelDomain.validateEndpoint(provider.base_url, { allowLan: !!allowLan });
+    // 明文放行只认该服务商记录上的显式标记（镜像进 providers.json 的 allow_insecure_http），
+    // 不接受调用方临时传参 —— 技能 / 短剧 / 协议 / 图像出口因此同一口径。
+    const endpoint = modelDomain.validateEndpoint(provider.base_url, { allowLan: !!allowLan, allowInsecureHttp: provider.allow_insecure_http === true });
     if (!endpoint.ok) return { ok: false, error: endpoint.error, detail: endpoint.reason };
     if (!domain.providerRequiresApiKey(provider.protocol) && !provider.api_key) {
       return { ok: true, provider: { ...provider, api_key: "" }, endpoint };
@@ -143,10 +163,57 @@ class ProviderProtocolService {
     try { return new URL(provider.base_url).origin === endpoint.origin; } catch { return false; }
   }
 
+  #hasModelCapability(provider, cap) {
+    return (Array.isArray(provider && provider.models) ? provider.models : []).some((entry) => entry && Array.isArray(entry.caps) && entry.caps.map(String).includes(cap));
+  }
+
   /**
-   * OpenAI 兼容 chat/completions。
-   * stream=false 时返回 { text, toolCalls, usage }；stream=true 时通过 onEvent 下发
-   * text.delta / usage / response.start / response.complete（IPC 侧聚合后返回最终文本）。
+   * 能力门禁：providerId 显式给出但没有该能力模型 → 结构化 CAPABILITY_UNAVAILABLE（不是 PROVIDER_NOT_FOUND，
+   * 也不拿没有能力的站点硬调）。**未声明模型清单**的站点沿用既有行为，交由协议路径判断。
+   */
+  #capabilityBlocked(provider, cap) {
+    const models = Array.isArray(provider && provider.models) ? provider.models : [];
+    if (!models.length) return false;
+    return !this.#hasModelCapability(provider, cap);
+  }
+
+  /** 未指定 providerId 时按能力选第一个"启用 + 有该能力模型 + 鉴权就绪"的站点。 */
+  #firstProviderIdByCapability(cap) {
+    let items = [];
+    try { items = this.store.listInternal() || []; } catch { items = []; }
+    const candidates = items
+      .filter((provider) => provider && provider.id && provider.enabled !== false && provider.base_url && this.#hasModelCapability(provider, cap))
+      .filter((provider) => !domain.providerRequiresApiKey(provider.protocol) || !!provider.api_key);
+    candidates.sort((a, b) => {
+      const left = Number(a.cap_sort && a.cap_sort[cap]);
+      const right = Number(b.cap_sort && b.cap_sort[cap]);
+      return (Number.isFinite(left) ? left : Number(a.sort || 0)) - (Number.isFinite(right) ? right : Number(b.sort || 0))
+        || Number(a.sort || 0) - Number(b.sort || 0)
+        || Number(a.created_ts || 0) - Number(b.created_ts || 0);
+    });
+    return candidates.length ? candidates[0].id : null;
+  }
+
+  /** 图像出口专用解析：显式 providerId 走能力门禁；未指定则按 image 能力选站点。 */
+  #resolveImageProvider({ providerId, allowLan = false } = {}) {
+    if (providerId) {
+      const resolved = this.#resolveProvider({ providerId, allowLan });
+      if (!resolved.ok) return resolved;
+      if (this.#capabilityBlocked(resolved.provider, "image")) return { ok: false, error: modelDomain.ERROR_CODE.CAPABILITY_UNAVAILABLE, detail: "provider-lacks-capability:image" };
+      return resolved;
+    }
+    const selected = this.#firstProviderIdByCapability("image");
+    if (!selected) return { ok: false, error: modelDomain.ERROR_CODE.PROVIDER_UNAVAILABLE, detail: "no-image-capable-provider" };
+    const resolved = this.#resolveProvider({ providerId: selected, allowLan });
+    if (!resolved.ok) return resolved;
+    if (this.#capabilityBlocked(resolved.provider, "image")) return { ok: false, error: modelDomain.ERROR_CODE.CAPABILITY_UNAVAILABLE, detail: "provider-lacks-capability:image" };
+    return resolved;
+  }
+
+  /**
+   * 统一对话出口：OpenAI 兼容 chat/completions，Anthropic 协议走官方 /v1/messages
+   * （x-api-key + anthropic-version，具名 SSE）。stream=false 时返回 { text, toolCalls, usage }；
+   * stream=true 时通过 onEvent 下发 text.delta / usage / response.start / response.complete。
    */
   async call({ providerId, model, messages = [], tools = null, params = {}, stream = false, requestId = null, signal = null, allowLan = false, onEvent = () => {} } = {}) {
     const resolved = this.#resolveProvider({ providerId, allowLan });
@@ -154,7 +221,15 @@ class ProviderProtocolService {
     const { provider, endpoint } = resolved;
     if (!this.#providerOriginMatches(provider, endpoint)) return { ok: false, error: modelDomain.ERROR_CODE.ENDPOINT_BLOCKED };
     const rid = requestId || "preq_" + crypto.randomBytes(8).toString("base64url");
-    const built = domain.buildChatRequest({ baseUrl: provider.base_url, apiKey: provider.api_key, model, messages, tools, params, stream: !!stream });
+    // Lovart 官方协议是 send → watch → result 的 agent 线程，不是单次 chat/completions，
+    // 因此先走专用适配器；Anthropic 走 chatProtocolFor；其余沿用 OpenAI 兼容构造。
+    if (adapter.lovartFor(provider.protocol)) return this.#lovartCall({ provider, model, messages, params, signal, requestId: rid, onEvent, stream: !!stream });
+    // Anthropic 官方协议（x-api-key + /v1/messages + 具名 SSE）走专用适配器；
+    // 其余协议沿用既有 OpenAI 兼容构造，行为逐字不变。
+    const protocolTransport = adapter.chatProtocolFor(provider.protocol);
+    const built = protocolTransport
+      ? protocolTransport.buildRequest({ baseUrl: provider.base_url, apiKey: provider.api_key, model, messages, tools, params, stream: !!stream })
+      : domain.buildChatRequest({ baseUrl: provider.base_url, apiKey: provider.api_key, model, messages, tools, params, stream: !!stream });
     const startedAt = this.clock();
     try {
       const response = await this.#fetch(built, signal);
@@ -165,11 +240,13 @@ class ProviderProtocolService {
       if (!stream) {
         const body = await response.json().catch(() => null);
         if (!body) return { ok: false, error: modelDomain.ERROR_CODE.PROVIDER_PROTOCOL_ERROR, requestId: rid };
-        const parsed = domain.parseChatResponse(body);
+        const parsed = protocolTransport ? protocolTransport.parseResponse(body) : domain.parseChatResponse(body);
         this.#record({ requestId: rid, providerId: provider.id, model, status: "ALLOW", startedAt, usage: parsed.usage });
         return { ok: true, requestId: rid, text: parsed.text, toolCalls: parsed.toolCalls, usage: parsed.usage, snapshot: this.#safeSnapshot(provider, model) };
       }
-      const parsed = await this.#readSse(response, this.#streamSink(onEvent), signal);
+      const parsed = protocolTransport
+        ? await protocolTransport.readSse(response, this.#streamSink(onEvent), signal)
+        : await this.#readSse(response, this.#streamSink(onEvent), signal);
       this.#record({ requestId: rid, providerId: provider.id, model, status: "ALLOW", startedAt, usage: parsed.usage });
       return { ok: true, requestId: rid, text: parsed.text, toolCalls: parsed.toolCalls, usage: parsed.usage, snapshot: this.#safeSnapshot(provider, model) };
     } catch (error) {
@@ -179,11 +256,13 @@ class ProviderProtocolService {
 
   /** 图像协议族：OpenAI 兼容 images/generations，产物落盘 <userData>/dxos/media/。 */
   async generateImage({ providerId, model, prompt = "", size = null, count = 1, params = {}, requestId = null, signal = null, allowLan = false } = {}) {
-    const resolved = this.#resolveProvider({ providerId, allowLan });
+    const resolved = this.#resolveImageProvider({ providerId, allowLan });
     if (!resolved.ok) return resolved;
     const { provider, endpoint } = resolved;
     if (!this.#providerOriginMatches(provider, endpoint)) return { ok: false, error: modelDomain.ERROR_CODE.ENDPOINT_BLOCKED };
     const rid = requestId || "ireq_" + crypto.randomBytes(8).toString("base64url");
+    // Lovart 图像同样是 send → watch → result；产物按白名单主机落盘。params 透传（含 mode）。
+    if (adapter.lovartFor(provider.protocol)) return this.#lovartGenerateImage({ provider, model, prompt, params, signal, requestId: rid });
     const built = domain.buildImageRequest({ baseUrl: provider.base_url, apiKey: provider.api_key, model, prompt, size, count, params });
     const startedAt = this.clock();
     try {
@@ -308,6 +387,20 @@ class ProviderProtocolService {
           return { ok: true, requestId: rid, images: await this.#saveLegacyItems(result.images, "image", signal), snapshot };
         }
         case "videos": {
+          // Lovart 视频生成同样是 send → watch → result；legacy 执行器不认识签名协议，这里直接分发。
+          const lovart = adapter.lovartFor(provider.protocol);
+          if (lovart) {
+            const out = await lovart.generateComplete({
+              baseUrl: provider.base_url, apiKey: provider.api_key, kind: "video", model,
+              prompt: String(prompt || callParams.prompt || ""),
+              signal, fetchImpl: this.fetchImpl, timeoutMs: Math.max(this.timeoutMs, 600000),
+            });
+            if (!out.ok) return { ok: false, error: out.error || modelDomain.ERROR_CODE.PROVIDER_UNAVAILABLE, detail: out.detail, requestId: rid };
+            return {
+              ok: true, requestId: rid, videos: await this.#saveLovartArtifacts(out.artifacts, provider, signal), snapshot,
+              lovart: { threadId: out.threadId || null, projectId: out.projectId || null, status: out.status || null },
+            };
+          }
           const decoded = input ? this.#legacyReference(input) : { ok: true, value: undefined };
           if (!decoded.ok) return { ...decoded, requestId: rid };
           const result = await legacyExecutor.generateVideos(legacyProvider, model, this.#legacyPromptParams(callParams, prompt), decoded.value, timeout || 600000);
@@ -611,6 +704,94 @@ class ProviderProtocolService {
     }
   }
 
+  /** Lovart 对话出口：send → watch → result；返回 text 与 agent 线程元数据（绝不含密钥）。 */
+  async #lovartCall({ provider, model, messages, params, signal, requestId, onEvent, stream }) {
+    const startedAt = this.clock();
+    const sink = this.#streamSink(onEvent);
+    const lovart = adapter.lovartFor(provider.protocol);
+    if (stream) sink({ type: "response.start" });
+    const out = await lovart.chatComplete({
+      baseUrl: provider.base_url, apiKey: provider.api_key, model,
+      messages: Array.isArray(messages) ? messages : [],
+      params: params && typeof params === "object" ? params : {},
+      signal, fetchImpl: this.fetchImpl, timeoutMs: Math.max(this.timeoutMs, 120000),
+    });
+    if (!out.ok) {
+      if (stream) sink({ type: "response.error", error: out.error || "PROVIDER_UNAVAILABLE", partial: "" });
+      this.#record({ requestId, providerId: provider.id, model, status: "ERROR", startedAt, errorCode: out.error });
+      return { ok: false, error: out.error || modelDomain.ERROR_CODE.PROVIDER_UNAVAILABLE, detail: out.detail, requestId };
+    }
+    if (stream) {
+      if (out.text) sink({ type: "text.delta", text: out.text });
+      sink({ type: "response.complete" });
+    }
+    this.#record({ requestId, providerId: provider.id, model, status: "ALLOW", startedAt, usage: null });
+    return {
+      ok: true, requestId, text: out.text || "", toolCalls: [], usage: null,
+      snapshot: this.#safeSnapshot(provider, model),
+      lovart: {
+        threadId: out.threadId || null, projectId: out.projectId || null, status: out.status || null,
+        artifacts: this.#projectLovartArtifacts(out.artifacts), failures: out.failures || [],
+      },
+    };
+  }
+
+  /** Lovart 图像出口：产物按主机白名单落盘 <userData>/dxos/media/。 */
+  async #lovartGenerateImage({ provider, model, prompt, params = {}, signal, requestId }) {
+    const startedAt = this.clock();
+    const lovart = adapter.lovartFor(provider.protocol);
+    // 官方 send 支持 mode（真实联网实测 mode:"fast" 可用）；此前服务入口把 params 丢掉了。
+    const mode = params && params.mode != null && String(params.mode).trim() ? String(params.mode).trim() : null;
+    const out = await lovart.generateComplete({
+      baseUrl: provider.base_url, apiKey: provider.api_key, kind: "image", model,
+      prompt: String(prompt == null ? "" : prompt), mode,
+      signal, fetchImpl: this.fetchImpl, timeoutMs: Math.max(this.timeoutMs, 300000),
+    });
+    if (!out.ok) {
+      this.#record({ requestId, providerId: provider.id, model, status: "ERROR", startedAt, errorCode: out.error });
+      return { ok: false, error: out.error || modelDomain.ERROR_CODE.PROVIDER_UNAVAILABLE, detail: out.detail, requestId };
+    }
+    const images = await this.#saveLovartArtifacts(out.artifacts, provider, signal);
+    if (!images.length) {
+      this.#record({ requestId, providerId: provider.id, model, status: "ERROR", startedAt, errorCode: modelDomain.ERROR_CODE.PROVIDER_PROTOCOL_ERROR });
+      return { ok: false, error: modelDomain.ERROR_CODE.PROVIDER_PROTOCOL_ERROR, detail: "lovart-no-image-artifact", requestId };
+    }
+    this.#record({ requestId, providerId: provider.id, model, status: "ALLOW", startedAt, usage: null });
+    return {
+      ok: true, requestId, images, snapshot: this.#safeSnapshot(provider, model),
+      lovart: { threadId: out.threadId || null, projectId: out.projectId || null, status: out.status || null, polls: out.polls || 0 },
+    };
+  }
+
+  /** Lovart 产物 → 无密钥投影（url/type）。 */
+  #projectLovartArtifacts(artifacts) {
+    return (Array.isArray(artifacts) ? artifacts : []).slice(0, 24).map((artifact) => ({
+      url: artifact && artifact.url ? String(artifact.url) : null,
+      type: artifact && artifact.type ? String(artifact.type) : null,
+    }));
+  }
+
+  /**
+   * Lovart 产物落盘：只有「与 provider 同源」或白名单主机才下载，其余如实标 saved:false 并给 reason。
+   * 未观察到的 CDN 主机保持拒绝（已知限制），绝不静默改成"下载失败"。
+   */
+  async #saveLovartArtifacts(artifacts, provider, signal) {
+    const lovart = adapter.lovartFor(provider.protocol);
+    const out = [];
+    for (const artifact of Array.isArray(artifacts) ? artifacts : []) {
+      if (!artifact || !artifact.url) continue;
+      const allowed = lovart ? lovart.isAllowedArtifactUrl(artifact.url, provider.base_url) : false;
+      if (!allowed) { out.push({ url: String(artifact.url), type: artifact.type || null, saved: false, reason: "artifact-host-not-allowlisted" }); continue; }
+      // 用 lovart 自己的下载器：白名单已限定主机，且不因回环地址误拒本地 mock.
+      const downloaded = await lovart.downloadArtifact({ url: artifact.url, providerBaseUrl: provider.base_url, fetchImpl: this.fetchImpl, signal });
+      if (!downloaded.ok) { out.push({ url: String(artifact.url), type: artifact.type || null, saved: false, reason: downloaded.error }); continue; }
+      const saved = this.#saveArtifact(downloaded.data, downloaded.mime);
+      // sourceUrl 一并回传：真实 CDN 主机（如 a.lovart.ai）对调用方可见，便于验收与审计。
+      out.push(saved ? { ...this.#projectArtifact(saved), type: artifact.type || null, url: downloaded.sourceUrl || String(artifact.url) } : { url: String(artifact.url), type: artifact.type || null, saved: false, reason: "ARTIFACT_SAVE_FAILED" });
+    }
+    return out;
+  }
+
   #safeSnapshot(provider, model) {
     return { providerId: provider.id, providerName: provider.name, protocol: provider.protocol, model };
   }
@@ -626,6 +807,8 @@ class ProviderProtocolService {
     if (name === "AbortError" && message.includes("timeout")) return modelDomain.ERROR_CODE.MODEL_TIMEOUT;
     if (name === "TimeoutError") return modelDomain.ERROR_CODE.MODEL_TIMEOUT;
     if (name === "PartialError") return modelDomain.ERROR_CODE.PARTIAL_RESPONSE;
+    // 流内 error 事件带出来的 HTTP 状态同样按统一规约映射（429→RATE_LIMITED、401/403→AUTH_FAILED）。
+    if (name === "ProviderHttpError") return domain.normalizeProtocolError({ status: Number(error.status) || 0 });
     return modelDomain.ERROR_CODE.PROVIDER_UNAVAILABLE;
   }
 }

@@ -12,6 +12,7 @@ const { CredentialStore, safeStorageCredentialBackend } = require("./credential-
 const { ModelService } = require("./model-service.cjs");
 const { ModelProxy } = require("./model-proxy.cjs");
 const { createProviderProtocolBundle } = require("./provider-protocol-service.cjs");
+const { createModelProviderBridge } = require("./model-provider-bridge.cjs");
 
 // Settings / Models 由 shell 拥有的系统 App Principal 承载；不借 resource-library 的权限。
 const HOST_APP_ID = "settings";
@@ -30,6 +31,15 @@ function createModelBundle({ identityStore, authorization, authStore, userDataDi
   // （identity-bootstrap.cjs 不在本任务 write scope 内）。
   const providerProtocol = createProviderProtocolBundle({ userDataDir, fetchImpl, clock: clock || (() => Date.now()), logger, safeStorage });
   modelService.providerProtocol = providerProtocol;
+  // 缺陷 2：ModelStore（identity.db）→ provider-protocol-store（providers.json）单向镜像。
+  // 技能 / 短剧 / provider/call / image-generate / protocol 都读后者，不镜像就"配了也用不了"。
+  const providerBridge = createModelProviderBridge({ modelStore, credentialStore, providerProtocol, userDataDir, clock: clock || (() => Date.now()), logger });
+  modelService.providerBridge = providerBridge;
+  // 渲染层回传的 providerId 是 ModelStore 的 prv_*；provider/call / image-generate / protocol 出口
+  // 经这层别名解析拿到 providers.json 的镜像 id，否则即便已镜像仍是 PROVIDER_NOT_FOUND。
+  if (providerProtocol && providerProtocol.service && typeof providerProtocol.service.setProviderIdResolver === "function") {
+    providerProtocol.service.setProviderIdResolver((providerId) => providerBridge.resolveProviderProtocolId(providerId));
+  }
   /**
    * 内置 Model App baseline（每个组织一份）：settings 最小管理权，resource-library / ai 可用；
    * D5-02 起 **canvas 是独立 App Principal**（画布页面的模型调用以 canvas 身份被授权与审计）；
@@ -69,7 +79,7 @@ function createModelBundle({ identityStore, authorization, authStore, userDataDi
     const admin = identityStore.allUsers().find((u) => u.role === "ADMIN") || null;
     seedModelAppPolicy({ organizationId: admin ? admin.team_id : (identityStore.allTeams()[0] ? identityStore.allTeams()[0].id : null), grantedBy: admin ? admin.id : "system:model-baseline" });
   } catch { /* baseline 失败不阻塞装配 */ }
-  return { modelStore, credentialStore, modelService, modelProxy, seedModelAppPolicy, providerProtocol };
+  return { modelStore, credentialStore, modelService, modelProxy, seedModelAppPolicy, providerProtocol, providerBridge };
 }
 
 /** Renderer 白名单。新增能力必须显式登记；未知命令一律 MODEL_COMMAND_NOT_ALLOWED。 */
@@ -79,6 +89,8 @@ const MODEL_COMMANDS = Object.freeze([
   "model/list", "model/create", "model/update", "model/setStatus",
   "defaults/get", "defaults/set",
   "model/test",
+  // 模型/协议出口的**可选**代理（默认关闭；只影响模型域出网，绝不写 globalThis，也不碰在线更新/集成）。
+  "model/proxy/get", "model/proxy/set",
   // 10-16：拉取服务商模型清单
   "provider/models",
   // D5-02：画布只读模型面（唯一入口；真正的生成调用走 canvas:command 的 run，见 canvas-bootstrap）。
@@ -118,9 +130,10 @@ function registerModelIpc({ ipcMain, service, identity, isTrusted, hostAppId = H
         case "provider/create": {
           const baseUrl = requireStr(payload.baseUrl, 2048);
           if (!baseUrl) return { ok: false, error: "INVALID_INPUT" };
-          return service.createProvider({ context, displayName: asStr(payload.displayName, 200), baseUrl, adapterType: asStr(payload.adapterType, 60), endpointScope: asStr(payload.endpointScope, 30), allowLan: !!payload.allowLan, scope: asStr(payload.scope, 20), credentialSecret });
+          return service.createProvider({ context, displayName: asStr(payload.displayName, 200), baseUrl, adapterType: asStr(payload.adapterType, 60), endpointScope: asStr(payload.endpointScope, 30), allowLan: !!payload.allowLan, allowInsecureHttp: payload.allowInsecureHttp === true, scope: asStr(payload.scope, 20), credentialSecret });
         }
-        case "provider/update": return service.updateProvider({ context, providerId: requireStr(payload.providerId, 120), displayName: asStr(payload.displayName, 200), baseUrl: asStr(payload.baseUrl, 2048), endpointScope: asStr(payload.endpointScope, 30), status: asStr(payload.status, 20), allowLan: !!payload.allowLan, credentialSecret });
+        // adapterType 缺省时 asStr 回 undefined，model-service 沿用原值（只有显式传才改协议）。
+        case "provider/update": return service.updateProvider({ context, providerId: requireStr(payload.providerId, 120), displayName: asStr(payload.displayName, 200), baseUrl: asStr(payload.baseUrl, 2048), adapterType: asStr(payload.adapterType, 60), endpointScope: asStr(payload.endpointScope, 30), status: asStr(payload.status, 20), allowLan: !!payload.allowLan, allowInsecureHttp: Object.prototype.hasOwnProperty.call(payload, "allowInsecureHttp") ? payload.allowInsecureHttp === true : undefined, credentialSecret, scope: asStr(payload.scope, 20) });
         case "provider/setStatus": return service.setProviderStatus({ context, providerId: requireStr(payload.providerId, 120), status: asStr(payload.status, 20) });
         case "provider/delete": return service.deleteProvider({ context, providerId: requireStr(payload.providerId, 120) });
         case "provider/models": return service.listRemoteModels({ context, providerId: requireStr(payload.providerId, 120) });
@@ -139,6 +152,13 @@ function registerModelIpc({ ipcMain, service, identity, isTrusted, hostAppId = H
         case "defaults/get": return service.getDefaults({ context });
         case "defaults/set": return service.setDefault({ context, capability: requireStr(payload.capability, 40), configId: requireStr(payload.configId, 120), scope: asStr(payload.scope, 20) });
         case "model/test": return service.testConnection({ context, configId: requireStr(payload.configId, 120) });
+        // 模型/协议出口代理：只读回 enabled/url（无凭据）；写入口校验 http(s)://host:port 并写授权审计。
+        case "model/proxy/get":
+          return typeof service.getEgressProxy === "function" ? service.getEgressProxy({ context }) : { ok: false, error: "PROXY_NOT_READY" };
+        case "model/proxy/set":
+          return typeof service.setEgressProxy === "function"
+            ? service.setEgressProxy({ context, enabled: payload.enabled, url: payload.url })
+            : { ok: false, error: "PROXY_NOT_READY" };
         // ---- D5-02 画布模型面：能力由 ModelService 判定，缺能力明确报错、绝不回落 ----
         case "canvas/models": return service.listModelsForUse({ context: { ...context, appId: "canvas" } });
         // ---- P2 模型与协议域：协议服务挂在 ModelService 上；缺失时明确报错，绝不静默回落 ----

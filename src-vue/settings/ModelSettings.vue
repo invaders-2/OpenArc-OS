@@ -1,6 +1,22 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
+import DsBadge from "../design-system/DsBadge.vue";
 import DsButton from "../design-system/DsButton.vue";
+import CliPanel from "./CliPanel.vue";
+import ProviderForm from "./ProviderForm.vue";
+import RemoteModelsPanel from "./RemoteModelsPanel.vue";
+import ProtocolSettingsPanel from "./ProtocolSettingsPanel.vue";
+import { classifyRemoteModel } from "./modelCategories";
+import { resolveProviderLogo } from "./providerLogos";
+import {
+  EGRESS_PROXY_DEFAULT_URL,
+  egressProxyErrorText,
+  egressProxyStatusView,
+  normalizeEgressProxyResult,
+  validateEgressProxyDraft,
+} from "./egressProxyLogic";
+import { useShellStore } from "../stores/shell";
+import { normalizeProtocolResult } from "../../src/settings/modelProtocolLogic";
 
 /**
  * D4-01 Closure C · Settings → Models / AI（对齐 src/settings/ModelSettings.tsx）。
@@ -29,6 +45,15 @@ function defaultUnavailableText(cap: string, m: any) {
 }
 
 const bridge = () => (window as any).openarc?.model;
+const shell = useShellStore();
+const logoTheme = computed<"light" | "dark">(() => (shell.dark ? "dark" : "light"));
+/** 有品牌资源就上 logo；没有就由模板回退到既有彩色首字母。键与判定见 ./providerLogos.ts。 */
+function providerLogo(p: any) {
+  return resolveProviderLogo(
+    { providerId: p?.providerId, displayName: p?.displayName, protocol: p?.protocol, adapterType: p?.adapterType },
+    logoTheme.value,
+  );
+}
 
 const providers = ref<any[]>([]);
 const models = ref<any[]>([]);
@@ -38,7 +63,6 @@ const tests = ref<Record<string, any>>({});
 const error = ref<string | null>(null);
 const notice = ref<string | null>(null);
 const busy = ref(false);
-const pForm = reactive({ displayName: "", baseUrl: "", endpointScope: "LOCALHOST", scope: "PERSONAL", credentialSecret: "" });
 const mForm = reactive({ providerId: "", remoteModelId: "", displayName: "", capabilities: ["chat"] as string[], scope: "PERSONAL" });
 const credDraft = ref<Record<string, string>>({});
 const capsDraft = ref<Record<string, string[]>>({});
@@ -71,28 +95,75 @@ async function load() {
   }
   busy.value = false;
 }
+/**
+ * 预设的协议可用性来自运行期 protocol/list（不写死：另一包把 anthropic / lovart 协议落地后自动生效）。
+ * 拿不到就保持 null —— 界面如实标「协议未确认」，不假装知道，也不静默放行。
+ */
+const knownProtocols = ref<string[] | null>(null);
+async function loadProtocols() {
+  const r = await cmd("protocol/list");
+  if (!r || r.ok !== true) {
+    knownProtocols.value = null;
+    return;
+  }
+  const view = normalizeProtocolResult(r);
+  knownProtocols.value = [...new Set(view.items.map((it: any) => String(it.id || "").trim()).filter(Boolean))];
+}
 onMounted(() => {
   void load();
+  void loadProtocols();
 });
 
-async function createProvider() {
-  const payload: Record<string, unknown> = {
-    displayName: pForm.displayName,
-    baseUrl: pForm.baseUrl,
-    endpointScope: pForm.endpointScope,
-    scope: pForm.scope,
-  };
-  if (pForm.credentialSecret) payload.credentialSecret = pForm.credentialSecret;
-  const res = await cmd("provider/create", payload);
-  if (res.ok) {
+/**
+ * 「添加 / 编辑服务商」共用 ProviderForm 的校验与 payload。
+ * 校验失败由组件 emit invalid(错误码)，这里保持既有 data-d4-01-error 的结构化展示。
+ */
+const providerFormRef = ref<{ reset: () => void } | null>(null);
+const editingProviderId = ref<string | null>(null);
+function onProviderInvalid(code: string) {
+  error.value = code;
+}
+async function onProviderSubmit(event: { mode: "create" | "edit"; payload: Record<string, unknown>; credentialSecret: string; originChanged: boolean }) {
+  error.value = null;
+  if (event.mode === "create") {
+    const before = providers.value.map((p) => p.providerId);
+    const res = await cmd("provider/create", event.payload);
+    if (!res.ok) {
+      error.value = res.error;
+      return;
+    }
     notice.value = "已添加服务商";
-    pForm.displayName = "";
-    pForm.baseUrl = "";
-    pForm.endpointScope = "LOCALHOST";
-    pForm.scope = "PERSONAL";
-    pForm.credentialSecret = "";
+    providerFormRef.value?.reset();
     await load();
-  } else error.value = res.error;
+    const added = providers.value.find((p) => !before.includes(p.providerId));
+    if (added) selected.value = added.providerId;
+    return;
+  }
+  const providerId = String(event.payload.providerId || "");
+  // 先落服务商字段（含显式 allowInsecureHttp 布尔），换密钥再走 credential/replace：
+  // 若先换密钥、后改地址，凭据会被绑到旧 origin（后端 providerOrigin 在创建时固定）。
+  const res = await cmd("provider/update", event.payload);
+  if (!res.ok) {
+    error.value = res.error;
+    return;
+  }
+  if (event.credentialSecret) {
+    const cred = await cmd("credential/replace", { providerId, secret: event.credentialSecret });
+    if (!cred.ok) {
+      // 服务商字段已保存，密钥没换成：保持编辑态让用户重试，绝不谎报整体成功。
+      error.value = cred.error;
+      notice.value = "服务商已保存，但密钥替换失败";
+      await load();
+      return;
+    }
+  }
+  if (event.originChanged && !event.credentialSecret) {
+    notice.value = "已保存服务商；API 地址 origin 已变化且未提供新密钥，旧密钥仍绑定原地址，请重新粘贴密钥后再保存。";
+  } else {
+    notice.value = event.credentialSecret ? "已保存服务商并替换密钥" : "已保存服务商";
+  }
+  editingProviderId.value = null;
+  await load();
 }
 async function setProviderStatus(providerId: string, status: string) {
   const r = await cmd("provider/setStatus", { providerId, status });
@@ -162,7 +233,7 @@ const ERR_TEXT: Record<string, string> = {
   MODEL_TIMEOUT: "请求超时",
   CREDENTIAL_MISSING: "还没保存 API 密钥",
   CREDENTIAL_STORE_UNAVAILABLE: "系统钥匙串不可用",
-  ENDPOINT_BLOCKED: "地址被安全策略拒绝（需 https，且密钥只发往登记时的地址）",
+  ENDPOINT_BLOCKED: "地址被安全策略拒绝：远程站点默认必须 https。该站点若确实使用明文 HTTP，请勾选「允许不安全 HTTP（明文直连）」。明文 HTTP 下地址、凭据与内容可能被中间人读取或篡改",
   PROXY_UNAUTHORIZED: "没有权限（组织级服务商需要超级管理员）",
   INVALID_INPUT: "输入不完整或格式不对",
   MODEL_CONFIG_UNAVAILABLE: "没有可用的模型配置",
@@ -187,29 +258,57 @@ async function pullModels(providerId: string) {
   picked.value = { ...picked.value, [providerId]: {} };
   notice.value = `拉取到 ${r.items.length} 个模型`;
 }
-function remoteList(providerId: string) {
-  const q = (remoteFilter.value[providerId] || "").trim().toLowerCase();
-  return (remote.value[providerId] || []).filter((m) => !q || m.id.toLowerCase().includes(q));
-}
-function togglePick(providerId: string, m: Remote) {
+/** 拉取结果的能力来自 provider/models 的 suggestedCapabilities（后端 guessCapabilities 推断）；空能力不再默认成 chat。 */
+function togglePick(providerId: string, m: { id: string; capabilities?: string[] }) {
   const cur = { ...(picked.value[providerId] || {}) };
   if (cur[m.id]) delete cur[m.id];
-  else cur[m.id] = m.suggestedCapabilities.length ? [...m.suggestedCapabilities] : ["chat"];
+  else cur[m.id] = [...(Array.isArray(m.capabilities) ? m.capabilities : classifyRemoteModel({ id: m.id }).capabilities)];
   picked.value = { ...picked.value, [providerId]: cur };
 }
-const pickedCount = (providerId: string) => Object.keys(picked.value[providerId] || {}).length;
-async function registerPicked(providerId: string) {
-  const entries = Object.entries(picked.value[providerId] || {});
-  let okN = 0;
-  for (const [id, caps] of entries) {
-    const r = await cmd("model/create", { providerId, remoteModelId: id, displayName: id, capabilities: caps, scope: "PERSONAL" });
-    if (r.ok) okN += 1;
-    else error.value = r.error;
+function markRegistered(providerId: string, ids: string[]) {
+  if (!ids.length) return;
+  const set = new Set(ids);
+  remote.value = { ...remote.value, [providerId]: (remote.value[providerId] || []).map((m) => (set.has(m.id) ? { ...m, registered: true } : m)) };
+}
+/** 单个模型「加入」：走 model/create，带上分类推出的真实 capabilities；失败给结构化错误码。 */
+async function addOneModel(providerId: string, m: { id: string; capabilities?: string[] }) {
+  const capabilities = [...(Array.isArray(m.capabilities) ? m.capabilities : classifyRemoteModel({ id: m.id }).capabilities)];
+  const r = await cmd("model/create", { providerId, remoteModelId: m.id, displayName: m.id, capabilities, scope: "PERSONAL" });
+  if (!r.ok) {
+    error.value = r.error;
+    return;
   }
-  notice.value = `已注册 ${okN} 个模型`;
-  remote.value = { ...remote.value, [providerId]: (remote.value[providerId] || []).map((m) => (picked.value[providerId]?.[m.id] ? { ...m, registered: true } : m)) };
+  notice.value = capabilities.length ? `已加入 ${m.id}` : `已加入 ${m.id}（未推断出能力，能力为空）`;
+  markRegistered(providerId, [m.id]);
+  await load();
+}
+/** 批量「注册所选」：逐条真实落库，部分失败如实报数，不谎报全部成功。 */
+async function registerEntries(providerId: string, entries: { id: string; capabilities: string[] }[]) {
+  const succeeded: string[] = [];
+  let firstError: string | null = null;
+  for (const entry of entries) {
+    const r = await cmd("model/create", { providerId, remoteModelId: entry.id, displayName: entry.id, capabilities: [...(entry.capabilities || [])], scope: "PERSONAL" });
+    if (r.ok) succeeded.push(entry.id);
+    else if (!firstError) firstError = r.error;
+  }
+  if (firstError) error.value = firstError;
+  notice.value = succeeded.length === entries.length ? `已注册 ${succeeded.length} 个模型` : `已注册 ${succeeded.length} / ${entries.length} 个模型（其余失败）`;
+  markRegistered(providerId, succeeded);
   picked.value = { ...picked.value, [providerId]: {} };
   await load();
+}
+function onRemoteFilter(value: string) {
+  if (!current.value) return;
+  remoteFilter.value = { ...remoteFilter.value, [current.value.providerId]: value };
+}
+function onTogglePick(m: { id: string; capabilities?: string[] }) {
+  if (current.value) togglePick(current.value.providerId, m);
+}
+function onAddOne(m: { id: string; capabilities?: string[] }) {
+  if (current.value) void addOneModel(current.value.providerId, m);
+}
+function onRegister(entries: { id: string; capabilities: string[] }[]) {
+  if (current.value) void registerEntries(current.value.providerId, entries);
 }
 const CAP_SHORT: Record<string, string> = { chat: "对话", "tool-calling": "工具", "vision-input": "看图", "image-generation": "生图", "video-generation": "视频", embedding: "向量" };
 
@@ -265,18 +364,6 @@ function defaultOptions(cap: string, current: string | null | undefined) {
     out.push({ value: m.configId, label: m.displayName || m.remoteModelId });
   }
   return out;
-}
-function onProviderName(e: Event) {
-  pForm.displayName = (e.target as HTMLInputElement).value;
-}
-function onProviderUrl(e: Event) {
-  pForm.baseUrl = (e.target as HTMLInputElement).value;
-}
-function onProviderScope(e: Event) {
-  pForm.scope = (e.target as HTMLSelectElement).value;
-}
-function onProviderSecret(e: Event) {
-  pForm.credentialSecret = (e.target as HTMLInputElement).value;
 }
 function onCredDraft(providerId: string, e: Event) {
   credDraft.value = { ...credDraft.value, [providerId]: (e.target as HTMLInputElement).value };
@@ -339,13 +426,47 @@ async function submitModel() {
   await createModel();
   if (!error.value) addingModel.value = false;
 }
-async function submitProvider() {
-  const before = providers.value.map((p) => p.providerId);
-  await createProvider();
-  const added = providers.value.find((p) => !before.includes(p.providerId));
-  if (added) selected.value = added.providerId;
-}
 const editingCaps = ref<string | null>(null);
+/* 协议设置 / CLI 区块的展开入口：默认展开，探针不必先点开才看得到。 */
+const protocolOpen = ref(true);
+const cliOpen = ref(true);
+
+/* ── 模型出网代理（默认关闭；只作用于模型与协议出口，不碰其它出网） ── */
+const egress = reactive({ enabled: false, url: "" });
+const egressBusy = ref(false);
+const egressError = ref<string | null>(null);
+const egressNotice = ref<string | null>(null);
+const egressStatus = computed(() => egressProxyStatusView({ enabled: egress.enabled, url: egress.url }));
+
+async function loadEgress() {
+  const r = await cmd("model/proxy/get");
+  const view = normalizeEgressProxyResult(r);
+  if (view.problem) { egressError.value = view.problem; return; }
+  egress.enabled = view.enabled;
+  egress.url = view.url || "";
+  egressError.value = null;
+}
+function onEgressUrl(e: Event) { egress.url = (e.target as HTMLInputElement).value; }
+function toggleEgress() {
+  egress.enabled = !egress.enabled;
+  egressError.value = null;
+  egressNotice.value = null;
+  if (egress.enabled && !egress.url) egress.url = EGRESS_PROXY_DEFAULT_URL;
+}
+async function saveEgress() {
+  const check = validateEgressProxyDraft({ enabled: egress.enabled, url: egress.url });
+  if (!check.ok) { egressError.value = check.message; return; }
+  egressBusy.value = true;
+  const r = await cmd("model/proxy/set", { enabled: egress.enabled, url: check.url });
+  egressBusy.value = false;
+  const view = normalizeEgressProxyResult(r);
+  if (view.problem) { egressError.value = view.problem; return; }
+  egress.enabled = view.enabled;
+  egress.url = view.url || "";
+  egressError.value = null;
+  egressNotice.value = view.enabled ? "已保存：模型与协议请求将经代理转发" : "已保存：模型与协议请求直连";
+}
+onMounted(() => { void loadEgress(); });
 </script>
 
 <template>
@@ -353,6 +474,39 @@ const editingCaps = ref<string | null>(null);
     <p class="settings-lead">统一管理服务商、地址、密钥与模型。所有接入 OpenArc 的应用通过后台调用，不需要逐个填写；密钥只写入系统钥匙串，不会再显示。</p>
     <p v-if="error" class="d401-error" role="alert" data-d4-01-error :data-d4-01-error-code="error">{{ errText(error) }}</p>
     <p v-if="notice" class="d401-notice" role="status" data-d4-01-notice>{{ notice }}</p>
+
+    <!-- 模型出网代理：一行紧凑设置（默认关闭；只作用于模型与协议出口） -->
+    <div class="set-group mp2-egress" data-model-egress>
+      <div class="setting-row">
+        <span class="set-lab">模型出网代理<small>仅用于模型与协议请求；默认关闭</small></span>
+        <button
+          type="button"
+          role="switch"
+          class="switch"
+          data-model-egress-switch
+          :aria-checked="egress.enabled"
+          aria-label="模型出网代理"
+          :disabled="egressBusy"
+          @click="toggleEgress"
+        />
+        <input
+          class="set-input mono"
+          data-model-egress-url
+          type="text"
+          inputmode="url"
+          spellcheck="false"
+          placeholder="http://127.0.0.1:7897"
+          aria-label="模型出网代理地址"
+          :disabled="!egress.enabled || egressBusy"
+          :value="egress.url"
+          @input="onEgressUrl"
+        />
+        <DsButton variant="secondary" size="sm" data-model-egress-save :disabled="egressBusy || !egress.enabled" @click="saveEgress">保存</DsButton>
+        <DsBadge :tone="egressStatus.tone" data-model-egress-status>{{ egressStatus.label }}</DsBadge>
+      </div>
+      <p class="set-cap" data-model-egress-hint>{{ egressNotice || egressStatus.detail }}</p>
+      <p v-if="egressError" class="d401-error" role="alert" data-model-egress-error>{{ egressError }}</p>
+    </div>
 
     <div class="mp2-grid" data-d4-01-pane="providers">
       <!-- 左：服务商列表 -->
@@ -364,51 +518,68 @@ const editingCaps = ref<string | null>(null);
           class="mp2-prov"
           :class="{ on: selected === p.providerId }"
           :data-d4-01-provider="p.providerId"
-          @click="selected = p.providerId; addingModel = false"
+          @click="selected = p.providerId; addingModel = false; editingProviderId = null"
         >
-          <span class="mp2-logo" :style="{ background: logoColor(p.providerId) }" aria-hidden="true">{{ mono(p.displayName) }}</span>
+          <span
+            class="mp2-logo"
+            :class="{ 'mp2-logo-brand': providerLogo(p) }"
+            :data-provider-logo="providerLogo(p)?.key ?? ''"
+            :data-provider-logo-kind="providerLogo(p) ? 'brand' : 'initial'"
+            :data-provider-logo-render="providerLogo(p)?.render ?? 'initial'"
+            :data-provider-logo-theme="logoTheme"
+            :style="providerLogo(p) ? { color: 'var(--text)' } : { background: logoColor(p.providerId) }"
+            aria-hidden="true"
+          >
+            <span
+              v-if="providerLogo(p)?.render === 'mask'"
+              class="mp2-logo-mark"
+              :style="{ maskImage: 'url(' + providerLogo(p)!.url + ')', WebkitMaskImage: 'url(' + providerLogo(p)!.url + ')' }"
+            />
+            <img v-else-if="providerLogo(p)" :src="providerLogo(p)!.url" :alt="providerLogo(p)!.label" />
+            <template v-else>{{ mono(p.displayName) }}</template>
+          </span>
           <span class="mp2-prov-main">
             <b>{{ p.displayName }}</b>
             <small>{{ modelsOf(p.providerId).length }} 个模型</small>
           </span>
           <span class="mp2-dot" :data-tone="providerState(p).tone" :title="providerState(p).label" />
         </button>
-        <button type="button" class="mp2-prov" :class="{ on: selected === 'new' }" data-d4-01-provider-add @click="selected = 'new'">
+        <button type="button" class="mp2-prov" :class="{ on: selected === 'new' }" data-d4-01-provider-add @click="selected = 'new'; editingProviderId = null">
           <span class="mp2-logo mp2-logo-add" aria-hidden="true">＋</span>
           <span class="mp2-prov-main"><b>添加服务商</b></span>
         </button>
       </div>
 
-      <!-- 右：添加服务商 -->
-      <div v-if="selected === 'new' || !current" class="set-group mp2-detail" data-d4-01-provider-form>
+      <!-- 右：添加服务商（与编辑共用 ProviderForm 的字段与校验） -->
+      <div v-if="selected === 'new' || !current" class="set-group mp2-detail">
         <p v-if="providers.length === 0" class="set-cap" data-d4-01-providers-empty>还没有服务商。填写地址与密钥添加第一个，常见的 OpenAI 兼容服务（DeepSeek、通义、火山方舟、硅基流动等）都可以。</p>
-        <div class="mp2-head"><b>添加服务商</b></div>
-        <label class="mp2-field"><span>名称</span>
-          <input class="set-input" data-d4-01-provider-name aria-label="服务商名称" placeholder="例如 DeepSeek" :value="pForm.displayName" @input="onProviderName" />
-        </label>
-        <label class="mp2-field"><span>API 地址</span>
-          <input class="set-input mono" data-d4-01-provider-url aria-label="API 地址" placeholder="https://api.example.com/v1" :value="pForm.baseUrl" @input="onProviderUrl" />
-        </label>
-        <label class="mp2-field"><span>API 密钥 <small>只写入系统钥匙串</small></span>
-          <input class="set-input" data-d4-01-provider-secret aria-label="API 密钥" type="password" placeholder="粘贴密钥" :value="pForm.credentialSecret" @input="onProviderSecret" />
-        </label>
-        <label class="mp2-field"><span>范围 <small>个人只对自己生效；组织需要管理员</small></span>
-          <select class="set-select" data-d4-01-provider-scope aria-label="范围" :value="pForm.scope" @change="onProviderScope">
-            <option value="PERSONAL">个人</option>
-            <option value="ORGANIZATION">组织</option>
-          </select>
-        </label>
-        <div class="mp2-actions">
-          <DsButton variant="primary" size="sm" data-d4-01-provider-create :disabled="busy || !pForm.displayName.trim() || !pForm.baseUrl.trim()" @click="submitProvider">添加服务商</DsButton>
-        </div>
+        <ProviderForm ref="providerFormRef" mode="create" :busy="busy" :known-protocols="knownProtocols" @submit="onProviderSubmit" @invalid="onProviderInvalid" />
       </div>
 
       <!-- 右：服务商详情 -->
       <div v-else class="set-group mp2-detail" :key="current.providerId" :data-d4-01-provider-detail="current.providerId">
         <div class="mp2-head">
-          <span class="mp2-logo" :style="{ background: logoColor(current.providerId) }" aria-hidden="true">{{ mono(current.displayName) }}</span>
+          <span
+            class="mp2-logo"
+            :class="{ 'mp2-logo-brand': providerLogo(current) }"
+            :data-provider-logo="providerLogo(current)?.key ?? ''"
+            :data-provider-logo-kind="providerLogo(current) ? 'brand' : 'initial'"
+            :data-provider-logo-render="providerLogo(current)?.render ?? 'initial'"
+            :data-provider-logo-theme="logoTheme"
+            :style="providerLogo(current) ? { color: 'var(--text)' } : { background: logoColor(current.providerId) }"
+            aria-hidden="true"
+          >
+            <span
+              v-if="providerLogo(current)?.render === 'mask'"
+              class="mp2-logo-mark"
+              :style="{ maskImage: 'url(' + providerLogo(current)!.url + ')', WebkitMaskImage: 'url(' + providerLogo(current)!.url + ')' }"
+            />
+            <img v-else-if="providerLogo(current)" :src="providerLogo(current)!.url" :alt="providerLogo(current)!.label" />
+            <template v-else>{{ mono(current.displayName) }}</template>
+          </span>
           <b class="mp2-title">{{ current.displayName }}</b>
           <span class="badge" :class="{ ok: providerState(current).tone === 'ok', warn: providerState(current).tone === 'warn' }" data-d4-01-provider-status>{{ providerState(current).label }}</span>
+          <span v-if="current.allowInsecureHttp" class="badge warn" data-d4-01-provider-insecure-badge title="该站点使用明文 HTTP，凭据与内容可能被中间人读取" aria-label="不安全 HTTP：该站点使用明文 HTTP，凭据与内容可能被中间人读取">不安全 HTTP</span>
         </div>
         <div class="mp2-field"><span>API 地址</span>
           <div class="mp2-static mono">{{ current.baseUrl }}<small> · {{ current.scope === "ORGANIZATION" ? "组织" : "个人" }} · {{ current.adapterType }}</small></div>
@@ -433,8 +604,32 @@ const editingCaps = ref<string | null>(null);
           <span v-if="tests[current.providerId]" class="badge" :class="{ ok: tests[current.providerId].ok }" :data-d4-01-test-result="current.providerId">{{ tests[current.providerId].ok ? "连接成功" : "连接失败" }}</span>
           <small v-if="tests[current.providerId]" class="set-cap">{{ testLabel(tests[current.providerId]) }}</small>
           <span class="toolbar-spacer" />
+          <DsButton variant="secondary" size="sm" :data-d4-01-provider-edit="current.providerId" @click="editingProviderId = current.providerId">编辑服务商</DsButton>
           <DsButton v-if="current.status === 'enabled'" variant="ghost" size="sm" :data-d4-01-provider-disable="current.providerId" @click="setProviderStatus(current.providerId, 'disabled')">停用</DsButton>
           <DsButton v-else variant="secondary" size="sm" :data-d4-01-provider-enable="current.providerId" @click="setProviderStatus(current.providerId, 'enabled')">启用</DsButton>
+        </div>
+
+        <!-- 编辑服务商：与添加同一套字段/校验（ProviderForm），密钥走 credential/replace -->
+        <div v-if="editingProviderId === current.providerId" class="mp2-sub" :data-d4-01-provider-edit-form="current.providerId">
+          <ProviderForm
+            mode="edit"
+            :busy="busy"
+            :known-protocols="knownProtocols"
+            :initial="{
+              providerId: current.providerId,
+              displayName: current.displayName,
+              baseUrl: current.baseUrl,
+              endpointScope: current.endpointScope,
+              scope: current.scope,
+              status: current.status,
+              allowInsecureHttp: current.allowInsecureHttp,
+              adapterType: current.adapterType,
+              credentialConfigured: !!credStatus[current.providerId]?.configured,
+            }"
+            @submit="onProviderSubmit"
+            @invalid="onProviderInvalid"
+            @cancel="editingProviderId = null"
+          />
         </div>
 
         <div class="mp2-field" data-d4-01-pane="models"><span>模型与能力</span>
@@ -486,36 +681,19 @@ const editingCaps = ref<string | null>(null);
           </div>
         </div>
 
-        <div v-if="remote[current.providerId]" class="mp2-sub d401-remote" :data-d4-01-remote="current.providerId">
-          <div class="d401-remote-head">
-            <label class="ds-search d401-remote-search">
-              <input
-                class="ds-search__input"
-                type="search"
-                placeholder="筛选模型"
-                aria-label="筛选模型"
-                :value="remoteFilter[current.providerId] || ''"
-                @input="remoteFilter = { ...remoteFilter, [current.providerId]: ($event.target as HTMLInputElement).value }"
-              />
-            </label>
-            <span class="set-val">{{ remoteList(current.providerId).length }} / {{ remote[current.providerId].length }}</span>
-            <DsButton variant="primary" size="sm" :disabled="!pickedCount(current.providerId)" @click="registerPicked(current.providerId)">
-              注册所选{{ pickedCount(current.providerId) ? `（${pickedCount(current.providerId)}）` : "" }}
-            </DsButton>
-          </div>
-          <ul class="d401-remote-list">
-            <li v-for="m in remoteList(current.providerId)" :key="m.id">
-              <label :class="{ done: m.registered }">
-                <input type="checkbox" :disabled="m.registered" :checked="m.registered || !!picked[current.providerId]?.[m.id]" @change="togglePick(current.providerId, m)" />
-                <span class="mono d401-remote-id">{{ m.id }}</span>
-                <span v-if="m.registered" class="badge">已注册</span>
-                <span v-else class="d401-remote-caps">{{ (m.suggestedCapabilities.length ? m.suggestedCapabilities : ['chat']).map((c) => CAP_SHORT[c] || c).join(" · ") }}</span>
-              </label>
-            </li>
-            <li v-if="!remoteList(current.providerId).length" class="set-cap">没有匹配的模型</li>
-          </ul>
-          <p class="set-cap">能力按模型名推断，注册后可以点「编辑」修改；「测试连接」通过后才算已验证。</p>
-        </div>
+        <RemoteModelsPanel
+          v-if="remote[current.providerId]"
+          class="mp2-sub"
+          :provider-id="current.providerId"
+          :items="remote[current.providerId]"
+          :picked="picked[current.providerId] || {}"
+          :pulling="pulling === current.providerId"
+          :filter="remoteFilter[current.providerId] || ''"
+          @update:filter="onRemoteFilter"
+          @toggle-pick="onTogglePick"
+          @add-one="onAddOne"
+          @register="onRegister"
+        />
       </div>
     </div>
 
@@ -552,8 +730,39 @@ const editingCaps = ref<string | null>(null);
           </label>
         </div>
         <p v-if="role !== 'ADMIN'" class="set-cap" data-d4-01-org-hint>组织默认模型需要管理员修改。成员没有设置个人默认时，使用组织默认。</p>
-        <p class="set-cap">协议（各家服务的调用方式与可用状态）在「协议中心」里查看。</p>
+        <p class="set-cap">协议（各家服务的调用方式与可用状态）可在「协议中心」查看，也可在下面的「协议设置」里校验与保存。</p>
       </div>
     </template>
+
+    <!-- 协议设置：把只读的协议中心补成可配置（列表 / 详情 / 校验 / 保存） -->
+    <section class="set-sec" data-model-settings-protocol>
+      <button type="button" class="mp2-block-head" data-model-settings-protocol-toggle @click="protocolOpen = !protocolOpen">
+        <b>协议设置</b>
+        <small>{{ protocolOpen ? "收起" : "展开" }}</small>
+      </button>
+      <div v-show="protocolOpen" data-model-settings-protocol-container>
+        <ProtocolSettingsPanel />
+      </div>
+    </section>
+
+    <!-- CLI：本机命令行工具的安装、登录、模型与额度（通道 cli:command） -->
+    <section class="set-sec" data-model-settings-cli>
+      <button type="button" class="mp2-block-head" data-model-settings-cli-toggle @click="cliOpen = !cliOpen">
+        <b>CLI</b>
+        <small>{{ cliOpen ? "收起" : "展开" }}</small>
+      </button>
+      <div v-show="cliOpen" data-model-settings-cli-container>
+        <CliPanel />
+      </div>
+    </section>
   </div>
 </template>
+
+<style scoped>
+.mp2-block-head { display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 0 0 6px; background: transparent; color: var(--text); border-bottom: 1px solid var(--line); text-align: left; }
+.mp2-block-head b { font-size: var(--fs-secondary); font-weight: var(--fw-medium); }
+.mp2-block-head small { color: var(--muted); font-size: var(--fs-micro); }
+.mp2-logo-brand { background: transparent; width: auto; min-width: 30px; max-width: 96px; padding: 0 3px; color: var(--text); }
+.mp2-logo-mark { width: 18px; height: 18px; background-color: currentColor; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; -webkit-mask-size: contain; mask-size: contain; }
+.mp2-logo img { display: block; max-width: 90px; max-height: 20px; object-fit: contain; }
+</style>

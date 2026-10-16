@@ -169,6 +169,12 @@ test("ISO10 · settings 是真实 trusted App Principal（最小四权），不�
   assert.equal(forged.ok, true, "host 仍是 settings");
   const canvasCreate = f.modelService.createProvider({ context: { sessionRef: f.sessions.alice, appId: "canvas" }, displayName: "x", baseUrl: "http://127.0.0.1:9", credentialSecret: SECRET });
   assert.equal(canvasCreate.ok, false, JSON.stringify(canvasCreate));
-  // 白名单仍无 credential 读取 / proxy 能力
-  assert.equal(MODEL_COMMANDS.some((c) => /secret|raw|token|proxy/i.test(c)), false);
+  // 白名单仍无 credential 读取 / ModelProxy 能力命令；
+  // proxy 命名只允许两条**出网代理配置**命令（model/proxy/get|set，只读写 enabled/url，无凭据无令牌）。
+  assert.deepEqual(
+    MODEL_COMMANDS.filter((c) => /proxy/i.test(c)).sort(),
+    ["model/proxy/get", "model/proxy/set"],
+    "proxy 命名只允许出网代理配置命令，不得出现 proxy 能力 / 令牌命令",
+  );
+  assert.equal(MODEL_COMMANDS.some((c) => /secret|raw|token|capability/i.test(c)), false);
 });

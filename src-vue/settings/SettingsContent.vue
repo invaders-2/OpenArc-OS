@@ -22,7 +22,7 @@ type Pane = "account" | "appearance" | "language" | "privacy" | "network" | "dev
 const props = withDefaults(
   defineProps<{
     role?: string | null;
-    /** 每次 +1 = 外部请求（画布页的"打开 OpenArc 总 API 设置"）切到「模型 / AI」pane。 */
+    /** 每次 +1 = 外部请求（画布页的"打开 OpenArc 总 API 设置"）切到「模型与服务商」pane。 */
     paneRequest?: number;
   }>(),
   { role: null, paneRequest: 0 },
@@ -57,12 +57,15 @@ const TITLES: Record<Pane, { title: string; subtitle: string }> = {
 };
 
 const pane = ref<Pane>("appearance");
-// 外部请求落在模型 pane；用户之后手动切走不会被再拽回来（与 React 同一条 useEffect）。
+// 外部请求落在模型 pane；用户之后手动切走不会被再拽回来。
+// immediate：外壳先 requestModelSettings() 再 activateApp("settings")，挂载时计数已是新值，
+// 要像 React 的 useEffect(…, [paneRequest]) 那样在挂载时跑一次才收得到。
 watch(
   () => props.paneRequest,
   (v) => {
     if (v) pane.value = "model";
   },
+  { immediate: true },
 );
 const meta = computed(() => TITLES[pane.value]);
 

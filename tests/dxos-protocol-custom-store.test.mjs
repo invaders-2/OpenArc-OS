@@ -21,7 +21,7 @@ const store = require("../electron/protocol-engine/legacy-custom-protocol-store.
 const repository = require("../electron/protocol-engine/repository.cjs");
 const domain = require("../electron/provider-protocol-domain.cjs");
 
-const BUILTIN_PROVIDER_COUNT = 20; // 源 protocols.ts:2589-2982 实测 20（含 cli:dreamina-canvas）
+const BUILTIN_PROVIDER_COUNT = 21; // 源 protocols.ts:2589-2982 实测 20（含 cli:dreamina-canvas）+ 本仓新增官方 lovart
 const BUILTIN_MODEL_TOTAL = 29; // 源 protocols.ts:281-2568
 const BUILTIN_MODEL_VISIBLE = 25; // 29 - 4 个内部协议（ollama/apimart-gemini/apimart-claude/apimart-media）
 

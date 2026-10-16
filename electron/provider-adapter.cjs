@@ -1,6 +1,8 @@
 /** D4-01 · Provider Adapter（OpenAI-compatible chat）。凭证只在本层内部使用。 */
 "use strict";
 
+const imageParams = require("./image-params.cjs");
+
 function parseSseChunk(text) {
   const events = [];
   for (const line of String(text).split("\n")) {
@@ -137,7 +139,10 @@ function mapImages(body) {
   const data = (body && Array.isArray(body.data)) ? body.data : (Array.isArray(body) ? body : []);
   return data.slice(0, 4).map((item) => {
     if (!item || typeof item !== "object") return null;
-    if (typeof item.b64_json === "string" && item.b64_json) return { b64: item.b64_json, mime: "image/png" };
+    if (typeof item.b64_json === "string" && item.b64_json) {
+      // mime 以返回体声明为准（mime_type/mimeType），缺失时按魔数嗅探，最后才回退 image/png。
+      return { b64: item.b64_json, mime: imageParams.resolveImageMime({ declared: item.mime_type || item.mimeType || null, base64: item.b64_json }) };
+    }
     if (typeof item.url === "string" && item.url) return { url: item.url };
     return null;
   }).filter(Boolean);
@@ -187,4 +192,41 @@ function guessCapabilities(id) {
   return caps;
 }
 
-module.exports = { chat, chatStream, generateImage, listModels, guessCapabilities, mapImages, parseSseChunk, mapUsage, ADAPTER_TYPE: "openai-compatible" };
+/** OpenAI 兼容响应归一（与既有内联解析逐字一致；模型服务按 adapterType 选用不同实现）。 */
+function parseChatResponse(body) {
+  const choice = body && Array.isArray(body.choices) ? body.choices[0] : null;
+  const message = choice && choice.message ? choice.message : null;
+  return {
+    text: message && typeof message.content === "string" ? message.content : "",
+    toolCalls: message && Array.isArray(message.tool_calls) ? message.tool_calls : null,
+    usage: mapUsage(body && body.usage),
+  };
+}
+
+/**
+ * adapterType → 适配器实现。只需在新增官方协议时登记一条；
+ * 未登记（含 openai-compatible / openai / 空）一律回落本模块的 OpenAI 兼容实现，
+ * 保持既有服务商行为逐字不变。
+ */
+function adapterFor(adapterType) {
+  const id = String(adapterType || "").trim().toLowerCase();
+  if (id === "anthropic" || id === "anthropic-chat") return require("./provider-adapter-anthropic.cjs");
+  if (id === "lovart") return require("./provider-adapter-lovart.cjs");
+  return module.exports;
+}
+
+/** provider.protocol → Lovart 适配器；非 lovart 返回 null（调用方走既有分支）。 */
+function lovartFor(protocol) {
+  const id = String(protocol || "").trim().toLowerCase();
+  return id === "lovart" ? require("./provider-adapter-lovart.cjs") : null;
+}
+
+/** provider.protocol → 协议引擎用的传输描述符；非 Anthropic 返回 null（调用方走既有 OpenAI 分支）。 */
+function chatProtocolFor(protocol) {
+  const id = String(protocol || "").trim().toLowerCase();
+  if (id !== "anthropic" && id !== "anthropic-chat") return null;
+  const impl = require("./provider-adapter-anthropic.cjs");
+  return { buildRequest: impl.buildRequest, parseResponse: impl.parseChatResponse, readSse: impl.readSse };
+}
+
+module.exports = { chat, chatStream, generateImage, listModels, guessCapabilities, mapImages, parseSseChunk, mapUsage, parseChatResponse, adapterFor, chatProtocolFor, lovartFor, ADAPTER_TYPE: "openai-compatible" };

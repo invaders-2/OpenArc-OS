@@ -3,16 +3,20 @@
 const crypto = require("node:crypto");
 
 const SQL = {
-  insertProvider: "INSERT INTO model_providers (provider_id, organization_id, owner_user_id, scope, display_name, adapter_type, base_url, endpoint_scope, status, credential_ref, version, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,1,?,?)",
+  insertProvider: "INSERT INTO model_providers (provider_id, organization_id, owner_user_id, scope, display_name, adapter_type, base_url, endpoint_scope, allow_insecure_http, status, credential_ref, version, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,1,?,?)",
   providerById: "SELECT * FROM model_providers WHERE provider_id = ?",
   providersOfOrg: "SELECT * FROM model_providers WHERE organization_id = ? ORDER BY created_at",
-  updateProvider: "UPDATE model_providers SET display_name = ?, adapter_type = ?, base_url = ?, endpoint_scope = ?, status = ?, credential_ref = ?, version = version + 1, updated_at = ? WHERE provider_id = ?",
+  updateProvider: "UPDATE model_providers SET display_name = ?, adapter_type = ?, base_url = ?, endpoint_scope = ?, allow_insecure_http = ?, status = ?, credential_ref = ?, version = version + 1, updated_at = ? WHERE provider_id = ?",
+  updateProviderScope: "UPDATE model_providers SET scope = ?, owner_user_id = ?, version = version + 1, updated_at = ? WHERE provider_id = ?",
   updateProviderCredential: "UPDATE model_providers SET credential_ref = ?, version = version + 1, updated_at = ? WHERE provider_id = ?",
   deleteProvider: "DELETE FROM model_providers WHERE provider_id = ?",
   insertConfig: "INSERT INTO model_configs (config_id, provider_id, organization_id, owner_user_id, scope, display_name, remote_model_id, capabilities, verified_capabilities, status, version, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,'enabled',1,?,?)",
   configById: "SELECT * FROM model_configs WHERE config_id = ?",
   configsOfOrg: "SELECT * FROM model_configs WHERE organization_id = ? ORDER BY created_at",
+  configsOfProvider: "SELECT * FROM model_configs WHERE provider_id = ? ORDER BY created_at",
   updateConfig: "UPDATE model_configs SET display_name = ?, remote_model_id = ?, capabilities = ?, status = ?, version = version + 1, updated_at = ? WHERE config_id = ?",
+  updateConfigScope: "UPDATE model_configs SET scope = ?, owner_user_id = ?, version = version + 1, updated_at = ? WHERE config_id = ?",
+  updateConfigsScopeByProvider: "UPDATE model_configs SET scope = ?, owner_user_id = ?, version = version + 1, updated_at = ? WHERE provider_id = ?",
   deleteConfig: "DELETE FROM model_configs WHERE config_id = ?",
   upsertDefault: "INSERT INTO model_defaults (organization_id, owner_user_id, capability, config_id, updated_at) VALUES (?,?,?,?,?) ON CONFLICT(organization_id, owner_user_id, capability) DO UPDATE SET config_id = excluded.config_id, updated_at = excluded.updated_at",
   defaultOf: "SELECT * FROM model_defaults WHERE organization_id = ? AND owner_user_id = ? AND capability = ?",
@@ -32,18 +36,20 @@ class ModelStore {
   }
   transactSync(fn) { return this.identity.transactSync(fn); }
 
-  insertProvider({ organizationId, ownerUserId = null, scope = "PERSONAL", displayName, adapterType = "openai-compatible", baseUrl, endpointScope, credentialRef = null, providerId = null }) {
+  insertProvider({ organizationId, ownerUserId = null, scope = "PERSONAL", displayName, adapterType = "openai-compatible", baseUrl, endpointScope, allowInsecureHttp = false, credentialRef = null, providerId = null }) {
     const id = providerId || "prv_" + crypto.randomBytes(10).toString("base64url"); const now = this.clock();
-    this.db.prepare(SQL.insertProvider).run(id, String(organizationId), ownerUserId, String(scope), String(displayName || ""), String(adapterType), String(baseUrl), String(endpointScope), "enabled", credentialRef, now, now);
+    this.db.prepare(SQL.insertProvider).run(id, String(organizationId), ownerUserId, String(scope), String(displayName || ""), String(adapterType), String(baseUrl), String(endpointScope), allowInsecureHttp ? 1 : 0, "enabled", credentialRef, now, now);
     return this.providerById(id);
   }
   providerById(id) { return this.db.prepare(SQL.providerById).get(String(id || "")) || null; }
   providersOfOrg(orgId) { return this.db.prepare(SQL.providersOfOrg).all(String(orgId || "")); }
-  updateProvider(id, { displayName, adapterType, baseUrl, endpointScope, status, credentialRef }) {
+  updateProvider(id, { displayName, adapterType, baseUrl, endpointScope, allowInsecureHttp, status, credentialRef }) {
     const c = this.providerById(id); if (!c) return null; const now = this.clock();
-    this.db.prepare(SQL.updateProvider).run(displayName == null ? c.display_name : String(displayName), adapterType == null ? c.adapter_type : String(adapterType), baseUrl == null ? c.base_url : String(baseUrl), endpointScope == null ? c.endpoint_scope : String(endpointScope), status == null ? c.status : String(status), credentialRef === undefined ? c.credential_ref : credentialRef, now, String(id));
+    const insecure = allowInsecureHttp === undefined ? (c.allow_insecure_http ? 1 : 0) : (allowInsecureHttp ? 1 : 0);
+    this.db.prepare(SQL.updateProvider).run(displayName == null ? c.display_name : String(displayName), adapterType == null ? c.adapter_type : String(adapterType), baseUrl == null ? c.base_url : String(baseUrl), endpointScope == null ? c.endpoint_scope : String(endpointScope), insecure, status == null ? c.status : String(status), credentialRef === undefined ? c.credential_ref : credentialRef, now, String(id));
     return this.providerById(id);
   }
+  setProviderScope(id, { scope, ownerUserId = null }) { this.db.prepare(SQL.updateProviderScope).run(String(scope), ownerUserId == null ? null : String(ownerUserId), this.clock(), String(id)); return this.providerById(id); }
   setProviderCredential(id, credentialRef) { this.db.prepare(SQL.updateProviderCredential).run(credentialRef, this.clock(), String(id)); return this.providerById(id); }
   deleteProvider(id) { return { changed: this.db.prepare(SQL.deleteProvider).run(String(id || "")).changes > 0 }; }
 
@@ -54,6 +60,9 @@ class ModelStore {
   }
   configById(id) { return this.db.prepare(SQL.configById).get(String(id || "")) || null; }
   configsOfOrg(orgId) { return this.db.prepare(SQL.configsOfOrg).all(String(orgId || "")); }
+  configsOfProvider(providerId) { return this.db.prepare(SQL.configsOfProvider).all(String(providerId || "")); }
+  setConfigScope(id, { scope, ownerUserId = null }) { this.db.prepare(SQL.updateConfigScope).run(String(scope), ownerUserId == null ? null : String(ownerUserId), this.clock(), String(id)); return this.configById(id); }
+  setConfigsScopeByProvider(providerId, { scope, ownerUserId = null }) { this.db.prepare(SQL.updateConfigsScopeByProvider).run(String(scope), ownerUserId == null ? null : String(ownerUserId), this.clock(), String(providerId)); return this.configsOfProvider(providerId); }
   updateConfig(id, { displayName, remoteModelId, capabilities, status, verifiedCapabilities }) {
     const c = this.configById(id); if (!c) return null; const now = this.clock();
     this.db.prepare(SQL.updateConfig).run(displayName == null ? c.display_name : String(displayName), remoteModelId == null ? c.remote_model_id : String(remoteModelId), capabilities == null ? c.capabilities : JSON.stringify(capabilities), status == null ? c.status : String(status), now, String(id));

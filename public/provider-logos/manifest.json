@@ -1,0 +1,231 @@
+{
+  "generatedAt": "2026-10-16T14:12:00.000Z",
+  "pullDate": "2026-10-16",
+  "source": "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest",
+  "note": "aliases 仅为建议的 providerId → brand 前缀映射，最终映射由前端模块决定。missing 中的品牌无可用图标，前端应回退为首字母。",
+  "items": [
+    {
+      "brand": "ollama",
+      "file": "provider-logos/ollama.svg",
+      "source": "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/ollama.svg",
+      "license": "MIT",
+      "multiColor": false,
+      "trademark": true
+    },
+    {
+      "brand": "openai",
+      "file": "provider-logos/openai.svg",
+      "source": "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/openai.svg",
+      "license": "MIT",
+      "multiColor": false,
+      "trademark": true
+    },
+    {
+      "brand": "google-gemini",
+      "file": "provider-logos/google-gemini.svg",
+      "source": "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/gemini.svg",
+      "license": "MIT",
+      "multiColor": false,
+      "trademark": true
+    },
+    {
+      "brand": "claude",
+      "file": "provider-logos/claude.svg",
+      "source": "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/claude.svg",
+      "license": "MIT",
+      "multiColor": false,
+      "trademark": true
+    },
+    {
+      "brand": "xai",
+      "file": "provider-logos/xai.svg",
+      "source": "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/xai.svg",
+      "license": "MIT",
+      "multiColor": false,
+      "trademark": true
+    },
+    {
+      "brand": "minimax",
+      "file": "provider-logos/minimax.svg",
+      "source": "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/minimax.svg",
+      "license": "MIT",
+      "multiColor": false,
+      "trademark": true
+    },
+    {
+      "brand": "aliyun-bailian",
+      "file": "provider-logos/aliyun-bailian.svg",
+      "source": "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/bailian.svg",
+      "license": "MIT",
+      "multiColor": false,
+      "trademark": true
+    },
+    {
+      "brand": "modelscope",
+      "file": "provider-logos/modelscope.svg",
+      "source": "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/modelscope.svg",
+      "license": "MIT",
+      "multiColor": false,
+      "trademark": true
+    },
+    {
+      "brand": "volcengine",
+      "file": "provider-logos/volcengine.svg",
+      "source": "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/volcengine.svg",
+      "license": "MIT",
+      "multiColor": false,
+      "trademark": true
+    },
+    {
+      "brand": "agnes",
+      "file": "provider-logos/agnes.svg",
+      "source": "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/agnesai.svg",
+      "license": "MIT",
+      "multiColor": false,
+      "trademark": true
+    },
+    {
+      "brand": "jimeng",
+      "file": "provider-logos/jimeng.svg",
+      "source": "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/jimeng.svg",
+      "license": "MIT",
+      "multiColor": false,
+      "trademark": true
+    },
+    {
+      "brand": "deepseek",
+      "file": "provider-logos/deepseek.svg",
+      "source": "https://cdn.jsdelivr.net/npm/@lobehub/icons-static-svg@latest/icons/deepseek.svg",
+      "license": "MIT",
+      "multiColor": false,
+      "trademark": true
+    },
+    {
+      "brand": "lovart",
+      "file": "provider-logos/lovart.svg",
+      "source": "https://raw.githubusercontent.com/lovartai/lovart-skill/main/assets/lovart-icon.svg",
+      "license": "MIT",
+      "multiColor": false,
+      "trademark": true
+    }
+  ],
+  "aliases": {
+    "ollama": [
+      "ollama",
+      "ollama-http"
+    ],
+    "openai": [
+      "openai",
+      "openai-http",
+      "openai-relay",
+      "cli:codex"
+    ],
+    "google-gemini": [
+      "gemini",
+      "gemini-http",
+      "google-gemini",
+      "cli:gemini"
+    ],
+    "claude": [
+      "claude",
+      "anthropic",
+      "apimart-claude"
+    ],
+    "xai": [
+      "xai",
+      "xai-http",
+      "grok",
+      "grok2api"
+    ],
+    "minimax": [
+      "minimax",
+      "minimax-http"
+    ],
+    "aliyun-bailian": [
+      "aliyun-bailian",
+      "aliyun-bailian-http",
+      "bailian"
+    ],
+    "modelscope": [
+      "modelscope",
+      "modelscope-http"
+    ],
+    "volcengine": [
+      "volcengine",
+      "volcengine-http",
+      "volcengine-speech",
+      "volcengine-speech-http"
+    ],
+    "agnes": [
+      "agnes"
+    ],
+    "jimeng": [
+      "jimeng",
+      "cli:jimeng",
+      "dreamina",
+      "cli:dreamina-canvas"
+    ],
+    "deepseek": [
+      "deepseek",
+      "deepseek-http"
+    ],
+    "lovart": [
+      "lovart"
+    ]
+  },
+  "missing": [
+    {
+      "brand": "runninghub",
+      "aliases": [
+        "runninghub",
+        "runninghub-http"
+      ],
+      "reason": "两个源均无对应 slug（lobe 404 / simple-icons 404）"
+    },
+    {
+      "brand": "fhl",
+      "aliases": [
+        "fhl",
+        "fhl-http"
+      ],
+      "reason": "两个源均无对应 slug"
+    },
+    {
+      "brand": "agtoken",
+      "aliases": [
+        "agtoken",
+        "agtoken-http",
+        "agtoken-video"
+      ],
+      "reason": "两个源均无对应 slug"
+    },
+    {
+      "brand": "zkki",
+      "aliases": [
+        "zkki",
+        "zkki-http",
+        "zkki-model"
+      ],
+      "reason": "两个源均无对应 slug"
+    },
+    {
+      "brand": "apimart",
+      "aliases": [
+        "apimart",
+        "apimart-http",
+        "apimart-gemini",
+        "apimart-claude",
+        "apimart-media"
+      ],
+      "reason": "两个源均无对应 slug"
+    },
+    {
+      "brand": "pippit",
+      "aliases": [
+        "pippit",
+        "cli:pippit"
+      ],
+      "reason": "两个源均无对应 slug（未用相近品牌冒充）"
+    }
+  ]
+}

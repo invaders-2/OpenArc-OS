@@ -167,7 +167,7 @@ function modelSiteUnavailable(cause) {
   error.name = "AgentDependencyUnavailableError";
   error.code = AGENT_DEPENDENCY_UNAVAILABLE;
   error.dependency = "modelSite";
-  error.detail = "没有可用的模型站点：请先在「API 设置」里添加并启用一个站点（Base URL / Key / 至少一个模型）";
+  error.detail = "没有可用的模型站点：请先在「系统设置 › 模型与服务商」里添加并启用一个站点（Base URL / Key / 至少一个模型）";
   return error;
 }
 
@@ -386,7 +386,7 @@ function resolveImageTarget(opts, requiredIntent) {
   const choices = candidates.flatMap((provider) => pickFrom(provider) || []);
   const hit = choices.find((choice) => choice.descriptor && choice.descriptor.execution && choice.descriptor.execution.available) || choices[0];
   if (!hit) {
-    throw new Error("没有可用的图像模型。请在「API 设置」里添加 OpenAI 兼容站点，并把一个图像模型的能力标为「图像」。");
+    throw new Error("没有可用的图像模型。请在「系统设置 › 模型与服务商」里添加 OpenAI 兼容站点，并把一个图像模型的能力标为「图像」。");
   }
   return {
     provider: { id: hit.p.id, base_url: hit.p.base_url, api_key: hit.p.api_key, protocol: hit.entry.protocol || hit.p.protocol },
@@ -444,7 +444,7 @@ function resolveImageUpscaleTarget(opts) {
     });
     if (entry) return { provider: provider, model: entry.model, providerName: provider.name };
   }
-  throw new Error("没有可用的图片放大模型。请在「API 设置」中启用支持 image.upscale 的模型（当前支持即梦 CLI）。");
+  throw new Error("没有可用的图片放大模型。请在「系统设置 › 模型与服务商」中启用支持 image.upscale 的模型（当前支持即梦 CLI）。");
 }
 
 /** skills.ts:767-798 */
@@ -474,7 +474,7 @@ function resolveMidjourneyTarget(opts) {
   const candidates = [preferred].concat((adapter.all() || []).filter((provider) => provider.id !== (preferred && preferred.id)));
   const hit = candidates.map(pickFrom).find((candidate) => !!candidate);
   if (!hit) {
-    throw new Error("没有可用的 Midjourney 模型。请在「API 设置」中添加并启用 Midjourney / APIMart 模型协议。");
+    throw new Error("没有可用的 Midjourney 模型。请在「系统设置 › 模型与服务商」中添加并启用 Midjourney / APIMart 模型协议。");
   }
   return {
     provider: { base_url: hit.provider.base_url, api_key: hit.provider.api_key, protocol: "midjourney" },
@@ -510,7 +510,7 @@ function resolveVideoTarget(opts, requiredIntent) {
   const choices = candidates.flatMap((provider) => pickFrom(provider) || []);
   const hit = choices.find((choice) => choice.descriptor && choice.descriptor.execution && choice.descriptor.execution.available) || choices[0];
   if (!hit) {
-    throw new Error("没有可用的视频模型。请在「API 设置」里添加站点，并把至少一个模型的能力标为「视频」。");
+    throw new Error("没有可用的视频模型。请在「系统设置 › 模型与服务商」里添加站点，并把至少一个模型的能力标为「视频」。");
   }
   return {
     provider: { id: hit.p.id, base_url: hit.p.base_url, api_key: hit.p.api_key, wallet_api_key: hit.p.wallet_api_key, protocol: hit.entry.protocol || hit.p.protocol },
@@ -538,7 +538,7 @@ function resolveAudioTarget(opts, requiredIntent) {
     : [preferred].concat((adapter.all() || []).filter((provider) => provider.id !== (preferred && preferred.id)));
   const choices = candidates.flatMap((provider) => pickFrom(provider) || []);
   const hit = choices.find((choice) => choice.descriptor && choice.descriptor.execution && choice.descriptor.execution.available) || choices[0];
-  if (!hit) throw new Error("没有支持 " + intent + " 的音频模型。请在「API 设置」中添加音频模型并设置正确协议。");
+  if (!hit) throw new Error("没有支持 " + intent + " 的音频模型。请在「系统设置 › 模型与服务商」中添加音频模型并设置正确协议。");
   return {
     provider: { base_url: hit.provider.base_url, api_key: hit.provider.api_key, protocol: hit.entry.protocol || hit.provider.protocol },
     site: hit.provider,

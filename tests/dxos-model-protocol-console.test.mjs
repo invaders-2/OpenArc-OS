@@ -179,22 +179,23 @@ test("载荷按键白名单构造：身份字段与未登记键一律丢弃", ()
 const REAL_LIST = service.listProtocols();
 const LIST_NORM = normalizeProtocolResult(REAL_LIST);
 
-/* 71 不是"协议表永远只有 71 条"：自建 legacy 协议（legacy-custom-protocol-store.cjs）与 v2 本地协议包
-   装载后会作为**新增项**追加进 protocol/list。原断言要保证的是"内置协议表 = 38 model + 33 provider"
-   这条基线；现在用等价方式保证：先钉住"本进程未配置任何自建仓库"的前提，再断言这条基线本身。 */
-const BUILTIN_LIST_ITEMS = 71;
+/* 73 不是"协议表永远只有 73 条"：自建 legacy 协议（legacy-custom-protocol-store.cjs）与 v2 本地协议包
+   装载后会作为**新增项**追加进 protocol/list。原断言要保证的是"内置协议表 = 39 model + 34 provider"
+   （provider 34 = 源 20 + v2 内置 15 去重 2 + 本仓新增官方 lovart）这条基线；
+   现在用等价方式保证：先钉住"本进程未配置任何自建仓库"的前提，再断言这条基线本身。 */
+const BUILTIN_LIST_ITEMS = 73;
 
-test("真实 protocol/list 回包可投影：内置基线 71 条、两类 kind、v2/legacy 两种 engine", () => {
+test("真实 protocol/list 回包可投影：内置基线 73 条、两类 kind、v2/legacy 两种 engine", () => {
   assert.equal(REAL_LIST.ok, true);
   assert.equal(LIST_NORM.incomplete, false);
   assert.deepEqual(customProtocolStore.customProtocolStoreStatus().providerIds, [], "内置基线前提：未装载自建 provider 协议");
   assert.deepEqual(customProtocolStore.customProtocolStoreStatus().modelIds, [], "内置基线前提：未装载自建 model 协议");
-  assert.equal(LIST_NORM.items.length, BUILTIN_LIST_ITEMS, "内置基线 71 条（38 model + 33 provider）；自建条目只追加");
+  assert.equal(LIST_NORM.items.length, BUILTIN_LIST_ITEMS, "内置基线 73 条（39 model + 34 provider）；自建条目只追加");
   assert.deepEqual(protocolKindOptions(LIST_NORM.items), ["all", "model", "provider"]);
   const engines = new Set(LIST_NORM.items.map((i) => i.engine));
   assert.deepEqual([...engines].sort(), ["legacy", "v2"]);
-  assert.equal(LIST_NORM.items.filter((i) => i.kind === "model").length, 38);
-  assert.equal(LIST_NORM.items.filter((i) => i.kind === "provider").length, 33);
+  assert.equal(LIST_NORM.items.filter((i) => i.kind === "model").length, 39);
+  assert.equal(LIST_NORM.items.filter((i) => i.kind === "provider").length, 34);
   assert.equal(LIST_NORM.shadowedLegacy.length, 1, "agnes 的 legacy 定义被 v2 遮蔽，单独附加");
   assert.equal(LIST_NORM.shadowedLegacy[0].id, "agnes");
   assert.equal(LIST_NORM.shadowedLegacy[0].execution, "conditional", "B7e3 插件端口已实现，agnes 与 runninghub / modelscope 同语义");
@@ -223,7 +224,7 @@ test("normalizeProtocolResult 对不完整回包如实标注（不拿空数组�
 test("filterProtocols：kind 过滤 + 搜索 id/label/能力，且不改变原始数组", () => {
   const items = LIST_NORM.items;
   const models = filterProtocols(items, "model", "");
-  assert.equal(models.length, 38);
+  assert.equal(models.length, 39);
   assert.ok(models.every((i) => i.kind === "model"));
   assert.equal(filterProtocols(items, PROTOCOL_KIND_ALL, "").length, BUILTIN_LIST_ITEMS);
   const openai = filterProtocols(items, "model", "OpenAI Unified");

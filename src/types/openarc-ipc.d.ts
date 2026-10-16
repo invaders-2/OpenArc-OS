@@ -87,12 +87,29 @@ export type OpenArcEventBridge = { onEvent: (callback: (event: OpenArcEvent) => 
 // 既有域（与 src/main.tsx 内联声明逐字同形；行为以 electron/preload.cjs 为准）
 // ---------------------------------------------------------------------------
 
+/**
+ * 模型/协议出网代理设置（model:command 的 model/proxy/get | model/proxy/set）。
+ * 只描述代理地址本身；地址必须形如 http(s)://host:port，绝不含用户名/密码。
+ */
+export interface OpenArcModelEgressProxy {
+  enabled: boolean;
+  url: string | null;
+}
+
+/** model/proxy/set 的回包：changed 表示本次是否真的改动了落库值（未变则不写审计）。 */
+export interface OpenArcModelEgressProxyResult extends OpenArcModelEgressProxy {
+  ok: true;
+  changed: boolean;
+}
+
 export interface OpenArcModelBridge extends OpenArcCommandBridge {
   /** P2：协议表 / 能力 manifest / 供应商掩码视图。 */
   protocols?: OpenArcCommandFn;
   providerView?: OpenArcCommandFn;
   /** W5：模型流式调用下行事件（model:event，P1 信封）。 */
   onEvent?: (callback: (event: OpenArcEvent) => void) => () => void;
+  /** 模型出网代理（默认关闭；只作用于模型与协议出口，不写 globalThis）。 */
+  egressProxy?: OpenArcModelEgressProxy;
 }
 
 export interface OpenArcMcpBridge extends OpenArcCommandBridge {
@@ -737,6 +754,110 @@ export interface OpenArcMarketCatalog {
 export interface OpenArcMarketBridge extends OpenArcCommandBridge {
   command: (command: OpenArcMarketCommandRequest) => Promise<OpenArcMarketResult<unknown>>;
 }
+
+/**
+ * 应用在线更新（第 39 个顶层键 marketUpdate；命令通道复用 market:command）。
+ *
+ * 泛化后：status / check / install / rollback 接受 payload.appId（任意已注册应用；缺省 = "canvas"）。
+ * 每个应用的发现约定：ModelScope updates/<appId>/latest.json + <appId>-<version>.zip，
+ * GitHub tag <appId>-v*；安装目录 <userData>/dxos/apps/<appId>/<version>/。
+ * sources / source/set 是整机级设置（payload.appId 只影响回显的 manifestPath）。
+ *
+ * 冻结包格式 openarc-app/v1：<appId>-<version>.zip 内 manifest.json（id 必须等于 appId）
+ * + manifest.sig；校验链 = Ed25519(manifest.sig, manifest.json 原始字节) → manifest.files 的 sha256。
+ * 诚实边界：渲染层未接入加载路径的应用（loadable=false）即使源里有包也不可安装，
+ * install 结构化回 MARKET_UPDATE_NOT_LOADABLE。错误码全部为 MARKET_UPDATE_*（未知异常折叠 DXOS_ERR_INTERNAL）。
+ */
+export type OpenArcMarketUpdateCommand =
+  | "market/update/status"
+  | "market/update/check"
+  | "market/update/install"
+  | "market/update/rollback"
+  | "market/update/sources"
+  | "market/update/source/set";
+
+/** 更新源注册表 kind；默认源是 modelscope-repo（默认 owner/repo = bllack/OpenArc-OS，见 market-update-domain.cjs 的 DEFAULT_SOURCE_KIND）。 */
+export type OpenArcMarketUpdateSourceKind = "github-releases" | "modelscope-repo";
+
+export interface OpenArcMarketUpdateCommandRequest {
+  command: OpenArcMarketUpdateCommand;
+  payload?: Record<string, unknown>;
+}
+
+export interface OpenArcMarketUpdateCurrent {
+  version: string;
+  digest: string | null;
+  installedAt: number;
+}
+
+export interface OpenArcMarketUpdateLatest {
+  version: string;
+  notesUrl: string | null;
+  publishedAt: number;
+}
+
+export interface OpenArcMarketUpdateRepository {
+  owner: string;
+  repo: string;
+}
+
+/** 当前选中的更新源：kind 只能在注册表内。 */
+export interface OpenArcMarketUpdateSourceRef extends OpenArcMarketUpdateRepository {
+  kind: OpenArcMarketUpdateSourceKind;
+}
+
+export interface OpenArcMarketUpdateSourceDescriptor {
+  kind: OpenArcMarketUpdateSourceKind;
+  label: string;
+  defaultRepository: OpenArcMarketUpdateRepository;
+  allowedHosts: string[];
+  configurableFields: string[];
+  manifestPath: string | null;
+}
+
+export interface OpenArcMarketUpdateStatus {
+  /** 任意已注册应用 id（缺省请求回落 "canvas"）。 */
+  appId: string;
+  current: OpenArcMarketUpdateCurrent | null;
+  builtinVersion: string;
+  source: OpenArcMarketUpdateSourceRef;
+  checkedAt: number | null;
+  latest: OpenArcMarketUpdateLatest | null;
+  updateAvailable: boolean;
+  canRollback: boolean;
+  /** 已安装包形态 / 应用声明的包形态；后端不懂就回 null，不臆造。 */
+  packageKind: string | null;
+  /** 渲染层是否已接入该应用的已安装包加载路径（本期只有 canvas 为 true）。 */
+  loadable: boolean;
+  loader: string | null;
+  loadReason: string | null;
+}
+
+export interface OpenArcMarketUpdateInstallResult {
+  installed: { appId: string; version: string; digest: string; kind?: string; entry?: string | null };
+  previous: { version: string } | null;
+}
+
+export interface OpenArcMarketUpdateRollbackResult {
+  rolledBackTo: string;
+  previous: { version: string };
+}
+
+export interface OpenArcMarketUpdateSources extends OpenArcMarketUpdateSourceRef {
+  defaultRepository: OpenArcMarketUpdateRepository;
+  defaultSource: { kind: OpenArcMarketUpdateSourceKind };
+  apiUrl: string;
+  allowedHosts: string[];
+  channel: "stable" | "beta" | "dev";
+  configurableFields: string[];
+  manifestPath: string | null;
+  selected: OpenArcMarketUpdateSourceRef;
+  sources: OpenArcMarketUpdateSourceDescriptor[];
+}
+
+export interface OpenArcMarketUpdateBridge extends OpenArcCommandBridge {
+  command: (command: OpenArcMarketUpdateCommandRequest) => Promise<OpenArcMarketResult<unknown>>;
+}
 /** P7 云替身：本地无对端，契约保留、默认关闭（DXOS_ERR_UNSUPPORTED）。 */
 export interface OpenArcCloudBridge extends OpenArcCommandBridge {}
 /** P6 更新：本地更新源检查。 */
@@ -780,6 +901,629 @@ export interface OpenArcNetworkDecision {
 
 export interface OpenArcPlatformBridge extends OpenArcCommandBridge {}
 
+/**
+ * 0.6.1 系统字体域：本机字体清单 / 按 id 读字节。
+ *
+ * 唯一入口 command({ command, payload })（受控白名单，见 electron/system-fonts-domain.cjs）；
+ * onEvent 只收主进程封装的 P1 信封。不暴露字体绝对路径 / 通用 fs / ipcRenderer；
+ * sessionRef 与 appId 由主进程注入，renderer 自报的身份字段一律忽略。
+ */
+export interface OpenArcSystemFontsBridge extends OpenArcCommandBridge, OpenArcEventBridge {}
+
+/** 0.6.1 OCR 域：provider/list、ocr/recognize；供应商密钥只在主进程内解出，不过桥。 */
+export interface OpenArcOcrBridge extends OpenArcCommandBridge, OpenArcEventBridge {}
+
+/** 0.6.1 文件传输域：begin / chunk / complete / status / cancel / cleanup / health；无通用 fs / 任意路径。 */
+export interface OpenArcFileTransferBridge extends OpenArcCommandBridge {}
+
+/**
+ * 0.6.1 codex-canvas 域：status / pair / revoke / relay / setup / install / commands。
+ *
+ * 独立通道 codexCanvas:command / codexCanvas:event（并入 canvas:command 需改 canvas-bootstrap
+ * 的冻结白名单，超出本轮授权范围）；中继只落到既有画布服务，不自起 HTTP。
+ */
+export interface OpenArcCodexCanvasBridge extends OpenArcCommandBridge, OpenArcEventBridge {}
+
+/**
+ * 0.6.1 本机代理探测域：当前唯一命令 desktop/proxy/detect（默认零出网）。
+ *
+ * 独立通道 desktop:command（并入 platform:command 需改 platform-domain 的冻结白名单，
+ * 超出本轮授权范围）。
+ */
+export interface OpenArcDesktopBridge extends OpenArcCommandBridge {}
+
+/**
+ * 0.6.2 photos 域：本地照片来源 / 虚拟文件夹 / 图库 / 视觉特征 / 反向提示词 / 抠图 / 缩略图。
+ *
+ * 唯一入口 command({ command, payload })（受控白名单，见 electron/photos-domain.cjs 的
+ * PHOTOS_COMMANDS，命令名与 /api/photos/* 路由一一对应）。source 视图只回 id / name / available，
+ * 绝不回宿主绝对路径；列表命令一律显式回 total / offset / limit / truncated。不暴露 ipcRenderer /
+ * 通用 fs；sessionRef 与 appId 由主进程注入，renderer 自报的 userId / owner / appId 一律忽略。
+ * 失败形状是统一信封 { ok:false, error, message, detail? }，error 取 PHOTOS_*（见
+ * OpenArcPhotosErrorCode）或非域错误归一后的 DXOS_* 码。
+ */
+export type OpenArcPhotosCommand =
+  | "photos/sources/list"
+  | "photos/sources/add"
+  | "photos/sources/remove"
+  | "photos/folders/create"
+  | "photos/folders/remove"
+  | "photos/folders/assign"
+  | "photos/library"
+  | "photos/sourceFile"
+  | "photos/sourceThumbnail"
+  | "photos/importImage"
+  | "photos/reversePrompt"
+  | "photos/visionModels"
+  | "photos/backgroundRemoval"
+  | "photos/health";
+
+/** photos 域自有错误码（electron/photos-domain.cjs:PHOTOS_ERROR_CODES）。 */
+export type OpenArcPhotosErrorCode =
+  | "PHOTOS_COMMAND_NOT_ALLOWED"
+  | "PHOTOS_NOT_READY"
+  | "PHOTOS_INVALID_INPUT"
+  | "PHOTOS_UNAUTHENTICATED"
+  | "PHOTOS_FORBIDDEN"
+  | "PHOTOS_NOT_FOUND"
+  | "PHOTOS_CONFLICT"
+  | "PHOTOS_PATH_ESCAPE"
+  | "PHOTOS_TOO_LARGE"
+  | "PHOTOS_DEPENDENCY_UNAVAILABLE"
+  | "PHOTOS_PROVIDER_UNAVAILABLE"
+  | "PHOTOS_PROVIDER_FAILED"
+  | "PHOTOS_INTERNAL";
+
+/** 来源条目（不含宿主路径）：sourceFile / sourceThumbnail 等也都只以小写 id 定位。 */
+export interface OpenArcPhotosItem {
+  id: string;
+  name: string;
+  sourceId: string;
+  relativePath: string;
+  folderPath: string;
+  mime: string;
+  kind: "image" | "video";
+  size: number;
+  updated_ts: number;
+  virtualFolderId: string | null;
+}
+export interface OpenArcPhotosSourceView { id: string; name: string; available: boolean; }
+export interface OpenArcPhotosFolderView { id: string; name: string; parentId: string | null; }
+export interface OpenArcPhotosSourceFolderView extends OpenArcPhotosFolderView { sourceId: string; path: string; }
+/** photos 列表命令的统一分页字段。 */
+export interface OpenArcPhotosPage { total: number; offset: number; limit: number; truncated: boolean; }
+
+/** photos/sources/list 的成功 value（store.listSources 的逐字投影）。 */
+export interface OpenArcPhotosSourceListValue extends OpenArcPhotosPage {
+  sources: OpenArcPhotosSourceView[];
+  sourcesTotal: number;
+  sourcesTruncated: boolean;
+  folders: OpenArcPhotosSourceFolderView[];
+  foldersTotal: number;
+  foldersTruncated: boolean;
+  virtualFolders: OpenArcPhotosFolderView[];
+  virtualFoldersTotal: number;
+  virtualFoldersTruncated: boolean;
+  items: OpenArcPhotosItem[];
+  walkCapReached: boolean;
+}
+export interface OpenArcPhotosSourceAddValue { source: OpenArcPhotosSourceView; created: boolean; }
+export interface OpenArcPhotosRemoveValue { id: string; removed: boolean; }
+export interface OpenArcPhotosFolderRemoveValue extends OpenArcPhotosRemoveValue { removedFolderIds: string[]; }
+export interface OpenArcPhotosFolderCreateValue { folder: OpenArcPhotosFolderView; }
+export interface OpenArcPhotosFolderAssignValue {
+  folderId: string | null;
+  assigned: number;
+  cleared: number;
+  skipped: string[];
+}
+export interface OpenArcPhotosLibraryNodeView {
+  id: string;
+  name: string;
+  type: "file";
+  parentId: string | null;
+  mime: string | null;
+  size: number;
+  created_ts: number;
+  updated_ts: number;
+}
+export interface OpenArcPhotosLibraryItem {
+  node: OpenArcPhotosLibraryNodeView;
+  folderId: string | null;
+  folderName: string;
+  path: string;
+  kind: "image" | "video";
+}
+export interface OpenArcPhotosLibraryValue extends OpenArcPhotosPage { items: OpenArcPhotosLibraryItem[]; }
+/** 内联字节出口：base64url（不含 + / =，绕开 foundation 的路径替换）。 */
+export interface OpenArcPhotosSourceFileValue {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  encoding: "base64url";
+  data: string;
+}
+export interface OpenArcPhotosThumbnailValue {
+  id: string;
+  mime: "image/jpeg";
+  size: number;
+  cached: boolean;
+  encoding: "base64url";
+  data: string;
+}
+/** 导入结果：canvas 必回 cardId，library 必回 itemId（service 侧强校验）。 */
+export interface OpenArcPhotosImportValue {
+  destination: "canvas" | "library";
+  targetId: string;
+  cardId?: string;
+  itemId?: string;
+  nodeId?: string;
+}
+export interface OpenArcPhotosReversePromptValue { text: string; providerId: string; model: string; }
+export interface OpenArcPhotosVisionModel { providerId: string; providerName: string; model: string; }
+export interface OpenArcPhotosVisionModelsValue {
+  available: boolean;
+  models: OpenArcPhotosVisionModel[];
+  hint: string | null;
+}
+export interface OpenArcPhotosBackgroundRemovalValue {
+  mime: "image/png";
+  bytes: number;
+  encoding: "base64url";
+  data: string;
+}
+export interface OpenArcPhotosHealthValue {
+  status: "ready";
+  directory: "dxos/photos";
+  sources: number;
+  libraryNodes: number;
+  pageLimitDefault: number;
+  pageLimitMax: number;
+  dependencies: {
+    identity: boolean;
+    database: boolean;
+    providerStore: boolean;
+    vision: boolean;
+    fsLibrary: boolean;
+    shareAccess: boolean;
+    sharp: boolean;
+    videoPoster: boolean;
+    importer: boolean;
+    fetch: boolean;
+  };
+}
+/** 命令 → 成功 value 的逐字映射；失败统一为 OpenArcFailure。 */
+export interface OpenArcPhotosValueByCommand {
+  "photos/sources/list": OpenArcPhotosSourceListValue;
+  "photos/sources/add": OpenArcPhotosSourceAddValue;
+  "photos/sources/remove": OpenArcPhotosRemoveValue;
+  "photos/folders/create": OpenArcPhotosFolderCreateValue;
+  "photos/folders/remove": OpenArcPhotosFolderRemoveValue;
+  "photos/folders/assign": OpenArcPhotosFolderAssignValue;
+  "photos/library": OpenArcPhotosLibraryValue;
+  "photos/sourceFile": OpenArcPhotosSourceFileValue;
+  "photos/sourceThumbnail": OpenArcPhotosThumbnailValue;
+  "photos/importImage": OpenArcPhotosImportValue;
+  "photos/reversePrompt": OpenArcPhotosReversePromptValue;
+  "photos/visionModels": OpenArcPhotosVisionModelsValue;
+  "photos/backgroundRemoval": OpenArcPhotosBackgroundRemovalValue;
+  "photos/health": OpenArcPhotosHealthValue;
+}
+
+export type OpenArcPhotosCommandRequest =
+  | { command: "photos/sources/list"; payload?: { offset?: number; limit?: number } }
+  | { command: "photos/sources/add"; payload: { path: string } }
+  | { command: "photos/sources/remove"; payload: { id: string } }
+  | { command: "photos/folders/create"; payload: { name: string; parentId?: string | null } }
+  | { command: "photos/folders/remove"; payload: { id: string } }
+  | { command: "photos/folders/assign"; payload: { ids: string[]; folderId?: string | null } }
+  | { command: "photos/library"; payload?: { offset?: number; limit?: number } }
+  | { command: "photos/sourceFile"; payload: { id: string } }
+  | { command: "photos/sourceThumbnail"; payload: { id: string; size?: number } }
+  | { command: "photos/importImage"; payload: { sourceId: string; targetId: string; destination: "canvas" | "library"; prompt?: string } }
+  | { command: "photos/reversePrompt"; payload: { imageId: string; providerId?: string; model?: string } }
+  | { command: "photos/visionModels"; payload?: Record<string, never> }
+  | {
+      command: "photos/backgroundRemoval";
+      payload: {
+        image?: string;
+        base64?: string;
+        dataUrl?: string;
+        data?: string;
+        bytes?: Uint8Array | number[];
+        model?: string;
+      };
+    }
+  | { command: "photos/health"; payload?: Record<string, never> };
+
+/** 统一信封：{ ok:true, value } | { ok:false, error, message, detail? }。 */
+export type OpenArcPhotosResult<T = unknown> = OpenArcSuccess<T> | OpenArcFailure;
+
+export interface OpenArcPhotosBridge extends OpenArcCommandBridge {
+  command: (command: OpenArcPhotosCommandRequest) => Promise<OpenArcPhotosResult<unknown>>;
+}
+
+/**
+ * 0.6.2 PhotoCraft（图像工坊）域：项目 / 分组 / 源文件 / 导出 / 剪贴板 / 回收站。
+ *
+ * 唯一入口 command({ command, payload })（受控白名单，见 electron/photocraft-domain.cjs 的
+ * PHOTOCRAFT_COMMANDS）。项目落 dxos 虚拟树，visibility 三态 private / public / restricted；
+ * 写操作（update / writeSource / export / saveClipboardTemp / trash / restore / purge）严格等价 owner。
+ * 白名单里另有 projects/saveBundle 与 projects/save-bundle 两条保留命令，固定回
+ * PHOTOCRAFT_UNSUPPORTED（由 file-transfer 域承接），不在此桥的推荐命令面内。
+ * 失败形状是统一信封 { ok:false, error, message, detail? }，error 取 PHOTOCRAFT_*。
+ */
+export type OpenArcPhotoCraftCommand =
+  | "photocraft/projects/list"
+  | "photocraft/projects/create"
+  | "photocraft/projects/get"
+  | "photocraft/projects/update"
+  | "photocraft/projects/trash"
+  | "photocraft/projects/restore"
+  | "photocraft/projects/purge"
+  | "photocraft/projects/readSource"
+  | "photocraft/projects/writeSource"
+  | "photocraft/projects/export"
+  | "photocraft/projects/saveClipboardTemp"
+  | "photocraft/trash/list"
+  | "photocraft/groups/create"
+  | "photocraft/groups/remove";
+
+/** PhotoCraft 域自有错误码（electron/photocraft-domain.cjs:PHOTOCRAFT_ERROR_CODES）。 */
+export type OpenArcPhotoCraftErrorCode =
+  | "PHOTOCRAFT_COMMAND_NOT_ALLOWED"
+  | "PHOTOCRAFT_INVALID_INPUT"
+  | "PHOTOCRAFT_UNAUTHENTICATED"
+  | "PHOTOCRAFT_NOT_FOUND"
+  | "PHOTOCRAFT_FORBIDDEN"
+  | "PHOTOCRAFT_CONFLICT"
+  | "PHOTOCRAFT_TOO_LARGE"
+  | "PHOTOCRAFT_UNSUPPORTED"
+  | "PHOTOCRAFT_NOT_READY"
+  | "PHOTOCRAFT_INTERNAL";
+
+/** dxos 虚拟树节点（非宿主路径；宿主绝对路径从不过桥）。 */
+export interface OpenArcPhotoCraftFsNode {
+  id: string;
+  name: string;
+  type: string;
+  parentId: string | null;
+  ownerId?: string | null;
+  mime?: string;
+  size?: number;
+  content?: string;
+  blobSha256?: string;
+  created_ts?: number;
+  updated_ts?: number;
+  trashed?: boolean;
+  system?: boolean;
+  share?: string;
+}
+/** 项目可见性（源三态）。 */
+export type OpenArcPhotoCraftVisibility = "private" | "public" | "restricted";
+/** 项目 summary（electron/photocraft-domain.cjs:buildProjectSummary 逐字投影）。 */
+export interface OpenArcPhotoCraftProject {
+  id: string;
+  groupId: string;
+  ownerId: string;
+  ownerName: string;
+  title: string;
+  visibility: OpenArcPhotoCraftVisibility;
+  members: string[];
+  mine: boolean;
+  access: "owner" | "read";
+  sourceNodeId: string | null;
+  sourceName: string;
+  sourceMime: string;
+  sourceSize: number;
+  sourceSha256: string;
+  previewSha256: string;
+  previewUrl: string;
+  statePath: string;
+  createdAt: number;
+  updatedAt: number;
+  /** 仅回收站中的项目带该字段。 */
+  deletedAt?: number;
+  /** 仅 projects/get 额外注入：宿主可读的源文件 URL。 */
+  sourceUrl?: string;
+}
+export interface OpenArcPhotoCraftGroup {
+  id: string;
+  name: string;
+  mine: boolean;
+  isDefault: boolean;
+}
+export interface OpenArcPhotoCraftWorkspaceValue {
+  projects: OpenArcPhotoCraftProject[];
+  groups: OpenArcPhotoCraftGroup[];
+}
+export interface OpenArcPhotoCraftProjectValue { project: OpenArcPhotoCraftProject; }
+export interface OpenArcPhotoCraftCreateValue {
+  project: OpenArcPhotoCraftProject;
+  source: OpenArcPhotoCraftFsNode | null;
+}
+export interface OpenArcPhotoCraftSourceValue {
+  name: string;
+  mime: string;
+  size: number;
+  sha256: string;
+  base64: string;
+}
+export interface OpenArcPhotoCraftWriteSourceValue {
+  node: OpenArcPhotoCraftFsNode;
+  project: OpenArcPhotoCraftProject;
+}
+export interface OpenArcPhotoCraftExportValue {
+  node: OpenArcPhotoCraftFsNode;
+  project: OpenArcPhotoCraftProject;
+}
+export interface OpenArcPhotoCraftClipboardValue { node: OpenArcPhotoCraftFsNode; }
+export interface OpenArcPhotoCraftTrashListValue { projects: OpenArcPhotoCraftProject[]; }
+export interface OpenArcPhotoCraftGroupCreateValue { group: OpenArcPhotoCraftFsNode; }
+export interface OpenArcPhotoCraftGroupRemoveValue {
+  deleted: string;
+  moved: number;
+  fallbackGroupId: string;
+}
+/** 命令 → 成功 value 的逐字映射；trash / restore / purge 成功回空对象。 */
+export interface OpenArcPhotoCraftValueByCommand {
+  "photocraft/projects/list": OpenArcPhotoCraftWorkspaceValue;
+  "photocraft/projects/create": OpenArcPhotoCraftCreateValue;
+  "photocraft/projects/get": OpenArcPhotoCraftProjectValue;
+  "photocraft/projects/update": OpenArcPhotoCraftProjectValue;
+  "photocraft/projects/trash": Record<string, never>;
+  "photocraft/projects/restore": Record<string, never>;
+  "photocraft/projects/purge": Record<string, never>;
+  "photocraft/projects/readSource": OpenArcPhotoCraftSourceValue;
+  "photocraft/projects/writeSource": OpenArcPhotoCraftWriteSourceValue;
+  "photocraft/projects/export": OpenArcPhotoCraftExportValue;
+  "photocraft/projects/saveClipboardTemp": OpenArcPhotoCraftClipboardValue;
+  "photocraft/trash/list": OpenArcPhotoCraftTrashListValue;
+  "photocraft/groups/create": OpenArcPhotoCraftGroupCreateValue;
+  "photocraft/groups/remove": OpenArcPhotoCraftGroupRemoveValue;
+}
+
+export type OpenArcPhotoCraftCommandRequest =
+  | { command: "photocraft/projects/list"; payload?: Record<string, never> }
+  | {
+      command: "photocraft/projects/create";
+      payload: { title?: string; name?: string; groupId?: string | null; mime?: string; content?: string | Uint8Array };
+    }
+  | { command: "photocraft/projects/get"; payload: { id: string } }
+  | {
+      command: "photocraft/projects/update";
+      payload: { id: string; title?: string; groupId?: string; visibility?: OpenArcPhotoCraftVisibility; members?: string[] };
+    }
+  | { command: "photocraft/projects/trash"; payload: { id: string } }
+  | { command: "photocraft/projects/restore"; payload: { id: string } }
+  | { command: "photocraft/projects/purge"; payload: { id: string } }
+  | { command: "photocraft/projects/readSource"; payload: { id: string } }
+  | { command: "photocraft/projects/writeSource"; payload: { id: string; name?: string; mime?: string; content: string | Uint8Array } }
+  | { command: "photocraft/projects/export"; payload: { id: string; name?: string; mime?: string; content: string | Uint8Array } }
+  | { command: "photocraft/projects/saveClipboardTemp"; payload: { id: string; name?: string; mime?: string; content: string | Uint8Array } }
+  | { command: "photocraft/trash/list"; payload?: Record<string, never> }
+  | { command: "photocraft/groups/create"; payload: { name: string } }
+  | { command: "photocraft/groups/remove"; payload: { id: string } };
+
+/** 统一信封：{ ok:true, value } | { ok:false, error, message, detail? }。 */
+export type OpenArcPhotoCraftResult<T = unknown> = OpenArcSuccess<T> | OpenArcFailure;
+
+export interface OpenArcPhotoCraftBridge extends OpenArcCommandBridge {
+  command: (command: OpenArcPhotoCraftCommandRequest) => Promise<OpenArcPhotoCraftResult<unknown>>;
+}
+
+/**
+ * 0.6.2 应用互传域：targets / get / inspect / exchange / appExchange-images。
+ *
+ * 唯一入口 command({ command, payload })（受控白名单，见 electron/app-exchange-domain.cjs 的
+ * APP_EXCHANGE_COMMANDS）。两条 JSON 命令只传引用（nodeId / canvasId / photoCraftProjectId），
+ * 出现 bytes / url / path 等字节或 URL 字段一律 APP_EXCHANGE_BYTES_NOT_ALLOWED；
+ * appExchange-images 是唯一允许字节的通道。target 表的 dev-photocraft 已映射为 image-studio
+ * （sourceAppId / sourceTitle 保留为只读备注）。失败形状是统一信封
+ * { ok:false, error, message, detail? }，error 取 APP_EXCHANGE_*。
+ */
+export type OpenArcAppExchangeCommand =
+  | "appExchange/targets"
+  | "appExchange/get"
+  | "appExchange/exchange"
+  | "appExchange/inspect"
+  | "appExchange-images";
+
+/** 应用互传域自有错误码（electron/app-exchange-domain.cjs:APP_EXCHANGE_ERROR_CODES）。 */
+export type OpenArcAppExchangeErrorCode =
+  | "APP_EXCHANGE_COMMAND_NOT_ALLOWED"
+  | "APP_EXCHANGE_INVALID_INPUT"
+  | "APP_EXCHANGE_UNAUTHENTICATED"
+  | "APP_EXCHANGE_NOT_FOUND"
+  | "APP_EXCHANGE_CONFLICT"
+  | "APP_EXCHANGE_FORBIDDEN"
+  | "APP_EXCHANGE_TARGET_UNSUPPORTED"
+  | "APP_EXCHANGE_BYTES_NOT_ALLOWED"
+  | "APP_EXCHANGE_STALE_REVISION"
+  | "APP_EXCHANGE_TOO_LARGE"
+  | "APP_EXCHANGE_IMAGE_INVALID"
+  | "APP_EXCHANGE_IMAGE_ENGINE_UNAVAILABLE"
+  | "APP_EXCHANGE_DEPENDENCY_UNAVAILABLE"
+  | "APP_EXCHANGE_NOT_READY"
+  | "APP_EXCHANGE_INTERNAL";
+
+export interface OpenArcAppExchangeTarget {
+  appId: string;
+  title: string;
+  action: string;
+  accepts: string[];
+  creates: string;
+  sourceAppId: string;
+  sourceTitle: string;
+  mapping: string;
+  mappingNote: string;
+}
+export interface OpenArcAppExchangeCanvasRef { id: string; title: string; }
+export interface OpenArcAppExchangeTargetsValue {
+  version: number;
+  targets: OpenArcAppExchangeTarget[];
+  canvases: OpenArcAppExchangeCanvasRef[];
+}
+export interface OpenArcAppExchangeRequestPayload {
+  requestId: string;
+  target: { appId: string; action: string; projectId?: string };
+  asset: {
+    nodeId: string;
+    canvasId?: string;
+    photoCraftProjectId?: string;
+    revision?: string;
+  };
+}
+export interface OpenArcAppExchangeTargetRef {
+  appId: string;
+  projectId: string;
+  cardId?: string;
+  assetNodeId?: string;
+}
+export interface OpenArcAppExchangeSourceRef {
+  nodeId: string;
+  canvasId?: string;
+  photoCraftProjectId?: string;
+  revision: string;
+}
+export interface OpenArcAppExchangeAssetSummary { name: string; mime: string; size: number; sha256: string; }
+export interface OpenArcAppExchangeResultValue {
+  id: string;
+  status: "completed";
+  target: OpenArcAppExchangeTargetRef;
+  source: OpenArcAppExchangeSourceRef;
+  asset: OpenArcAppExchangeAssetSummary;
+  createdAt: number;
+}
+export interface OpenArcAppExchangeInspectValue {
+  asset: { nodeId: string; name: string; size: number; mime: string; revision: string };
+}
+export interface OpenArcAppExchangeImageUploadValue { asset: { nodeId: string }; }
+/** 命令 → 成功 value 的逐字映射。 */
+export interface OpenArcAppExchangeValueByCommand {
+  "appExchange/targets": OpenArcAppExchangeTargetsValue;
+  "appExchange/get": OpenArcAppExchangeResultValue;
+  "appExchange/exchange": OpenArcAppExchangeResultValue;
+  "appExchange/inspect": OpenArcAppExchangeInspectValue;
+  "appExchange-images": OpenArcAppExchangeImageUploadValue;
+}
+
+export type OpenArcAppExchangeCommandRequest =
+  | { command: "appExchange/targets"; payload?: Record<string, never> }
+  | { command: "appExchange/get"; payload: { id: string } }
+  | { command: "appExchange/exchange"; payload: OpenArcAppExchangeRequestPayload }
+  | {
+      command: "appExchange/inspect";
+      payload: { asset: { nodeId: string; canvasId?: string; photoCraftProjectId?: string; revision?: string } };
+    }
+  | {
+      command: "appExchange-images";
+      payload: {
+        mime: string;
+        name?: string;
+        bytes?: Uint8Array | number[] | ArrayBuffer;
+        data?: string;
+        encoding?: "base64";
+      };
+    };
+
+/** 统一信封：{ ok:true, value } | { ok:false, error, message, detail? }。 */
+export type OpenArcAppExchangeResult<T = unknown> = OpenArcSuccess<T> | OpenArcFailure;
+
+export interface OpenArcAppExchangeBridge extends OpenArcCommandBridge {
+  command: (command: OpenArcAppExchangeCommandRequest) => Promise<OpenArcAppExchangeResult<unknown>>;
+}
+
+/**
+ * 0.6.1 CLI 域：list / status / models / credit / login/start / login/status / logout。
+ *
+ * 唯一入口 command({ command, payload })（受控白名单，见 electron/cli-domain.cjs 的 CLI_COMMANDS）；
+ * 四个工具 codex / gemini / jimeng / pippit：codex 与 gemini 没有 credit，gemini 没有 logout ——
+ * 对不支持的子能力一律回 CLI_UNSUPPORTED，绝不伪造成功。未安装回 CLI_UNAVAILABLE
+ * （detail 保留既有探测说明）；已确认执行失败 CLI_FAILED；会话未认证 CLI_UNAUTHENTICATED；
+ * 未知异常折叠为 DXOS_ERR_INTERNAL。
+ */
+export type OpenArcCliTool = "codex" | "gemini" | "jimeng" | "pippit";
+
+export type OpenArcCliCommand =
+  | "cli/list"
+  | "cli/status"
+  | "cli/models"
+  | "cli/credit"
+  | "cli/login/start"
+  | "cli/login/status"
+  | "cli/logout";
+
+/** CLI 域自有错误码（electron/cli-domain.cjs:CLI_ERROR_CODES）。 */
+export type OpenArcCliErrorCode =
+  | "CLI_COMMAND_NOT_ALLOWED"
+  | "CLI_NOT_READY"
+  | "CLI_INVALID_INPUT"
+  | "CLI_UNAVAILABLE"
+  | "CLI_UNSUPPORTED"
+  | "CLI_FAILED"
+  | "CLI_UNAUTHENTICATED";
+
+export interface OpenArcCliRuntime {
+  command?: string;
+  mode?: string;
+  home?: string;
+  label?: string;
+  provider?: string;
+}
+export interface OpenArcCliToolSummary {
+  id: OpenArcCliTool;
+  name: string;
+  installed: boolean;
+  version: string | null;
+  detail: string | null;
+  capabilities: string[];
+  loginRequired: boolean;
+}
+export interface OpenArcCliListValue { tools: OpenArcCliToolSummary[]; }
+export interface OpenArcCliStatusValue {
+  tool: OpenArcCliTool;
+  installed: boolean;
+  version: string | null;
+  loggedIn: boolean | null;
+  runtime?: OpenArcCliRuntime;
+  detail: string | null;
+}
+export interface OpenArcCliModel { id: string; name: string; }
+export interface OpenArcCliModelsValue { tool: OpenArcCliTool; models: OpenArcCliModel[]; cached?: boolean; }
+export interface OpenArcCliCreditValue { tool: OpenArcCliTool; credit: unknown; }
+export interface OpenArcCliLoginStartValue { tool: OpenArcCliTool; started: true; url?: string; code?: string; detail: string; }
+export interface OpenArcCliLoginStatusValue { tool: OpenArcCliTool; status: "idle" | "pending" | "authorized" | "failed"; detail: string; }
+export interface OpenArcCliLogoutValue { tool: OpenArcCliTool; loggedOut: true; }
+
+/** 命令 → 成功 value 的逐字映射。 */
+export interface OpenArcCliValueByCommand {
+  "cli/list": OpenArcCliListValue;
+  "cli/status": OpenArcCliStatusValue;
+  "cli/models": OpenArcCliModelsValue;
+  "cli/credit": OpenArcCliCreditValue;
+  "cli/login/start": OpenArcCliLoginStartValue;
+  "cli/login/status": OpenArcCliLoginStatusValue;
+  "cli/logout": OpenArcCliLogoutValue;
+}
+
+export type OpenArcCliCommandRequest =
+  | { command: "cli/list"; payload?: Record<string, never> }
+  | { command: "cli/status"; payload: { tool: OpenArcCliTool } }
+  | { command: "cli/models"; payload: { tool: OpenArcCliTool } }
+  | { command: "cli/credit"; payload: { tool: OpenArcCliTool } }
+  | { command: "cli/login/start"; payload: { tool: OpenArcCliTool } }
+  | { command: "cli/login/status"; payload: { tool: OpenArcCliTool } }
+  | { command: "cli/logout"; payload: { tool: OpenArcCliTool } };
+
+/** 统一信封：{ ok:true, value } | { ok:false, error, message, detail? }。 */
+export type OpenArcCliResult<T = unknown> = OpenArcSuccess<T> | OpenArcFailure;
+
+export interface OpenArcCliBridge extends OpenArcCommandBridge {
+  command: (command: OpenArcCliCommandRequest) => Promise<OpenArcCliResult<unknown>>;
+}
+
 export interface OpenArcBridge {
   sync: (p: unknown) => Promise<{ ok?: boolean; error?: string; results?: unknown[] }>;
   navigate: (windowId: string, url: string, tabId?: string) => Promise<{ error?: string; ok?: boolean }>;
@@ -815,6 +1559,26 @@ export interface OpenArcBridge {
   diagnostics?: OpenArcDiagnosticsBridge;
   /** B6c：平台域（与 preload.cjs 的第 22 个顶层键 platform 一一对应）。 */
   platform?: OpenArcPlatformBridge;
+  /** 0.6.1：系统字体域（与 preload.cjs 第 30 个顶层键 systemFonts 一一对应）。 */
+  systemFonts?: OpenArcSystemFontsBridge;
+  /** 0.6.1：OCR 域（第 31 个顶层键 ocr）。 */
+  ocr?: OpenArcOcrBridge;
+  /** 0.6.1：文件传输域（第 32 个顶层键 fileTransfer）。 */
+  fileTransfer?: OpenArcFileTransferBridge;
+  /** 0.6.1：codex-canvas 域（第 33 个顶层键 codexCanvas）。 */
+  codexCanvas?: OpenArcCodexCanvasBridge;
+  /** 0.6.1：本机代理探测域（第 34 个顶层键 desktop）。 */
+  desktop?: OpenArcDesktopBridge;
+  /** 0.6.2：photos 域（与 preload.cjs 第 35 个顶层键 photos 一一对应）。 */
+  photos?: OpenArcPhotosBridge;
+  /** 0.6.2：PhotoCraft 域（第 36 个顶层键 photocraft）。 */
+  photocraft?: OpenArcPhotoCraftBridge;
+  /** 0.6.2：应用互传域（第 37 个顶层键 appExchange）。 */
+  appExchange?: OpenArcAppExchangeBridge;
+  /** 0.6.1：CLI 域（第 38 个顶层键 cli，对齐 DX OS /api/cli/*）。 */
+  cli?: OpenArcCliBridge;
+  /** Stage 1：画布在线更新域（第 39 个顶层键 marketUpdate；命令通道复用 market:command）。 */
+  marketUpdate?: OpenArcMarketUpdateBridge;
 }
 
 declare global {

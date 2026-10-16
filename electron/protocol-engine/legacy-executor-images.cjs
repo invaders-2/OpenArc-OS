@@ -870,7 +870,7 @@ async function generateImagesUnmetered(provider, model, params, timeoutMs, trans
   if ((proto === "apimart" || proto === "apimart-gemini" || proto === "apimart-media") && !useApibOpenAiCompatibility) return generateApimartImages(provider, model, params, timeoutMs, [], net, clock);
   if (proto === "gemini") return generateGeminiImages(provider, model, params, timeoutMs, [], net);
   if (proto !== "openai" && !useApibOpenAiCompatibility) {
-    throw new Error("图像生成目前只支持 OpenAI 兼容站点，请在「API 设置」里用 openai 协议添加图像模型站点。");
+    throw new Error("图像生成目前只支持 OpenAI 兼容站点，请在「系统设置 › 模型与服务商」里用 openai 协议添加图像模型站点。");
   }
   const def = PROTOCOLS.openai;
   const useGptBestAsync = isGptBestAsyncImageProvider(provider);

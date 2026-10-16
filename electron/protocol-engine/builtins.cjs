@@ -5,9 +5,9 @@
  * 源：DXSRC/protocol-engine/builtins.ts:1-2725（2725 行）。
  * 本文件保留：
  *   · 全部 15 个 provider 协议（builtins.ts:2346-2397）
- *   · 模型协议聚合（BUILTIN_MODEL_PROTOCOLS_V2 = openai-images + 其余 17 个）
+ *   · 模型协议聚合（BUILTIN_MODEL_PROTOCOLS_V2 = openai-images + 其余 18 个）
  * 共享 helper 与 openai-images 协议对象见 builtins-helpers.cjs；
- * 其余 17 个模型协议见 builtins-models.cjs（源 builtins.ts:300-2720）。
+ * 其余 18 个模型协议见 builtins-models.cjs（源 builtins.ts:300-2720）。
  */
 const { PROTOCOL_V2_SCHEMA } = require("./types.cjs");
 const {
@@ -69,6 +69,7 @@ const BUILTIN_MODEL_PROTOCOL_ORDER_V2 = [
   "gpt-best-images",
   "fhl-images",
   "gemini",
+  "gemini-general",
   "xai",
   "minimax",
   "agtoken-videos",
@@ -102,6 +103,7 @@ const BUILTIN_PROTOCOL_METADATA_V2 = [
   { id: "gpt-best-images", kind: "model", label: "GPT-Best Images", ported: true, source: "protocol-engine/builtins.ts:567" },
   { id: "fhl-images", kind: "model", label: "FHL Images", ported: true, source: "protocol-engine/builtins.ts:660" },
   { id: "gemini", kind: "model", label: "Gemini", ported: true, source: "protocol-engine/builtins.ts:701" },
+  { id: "gemini-general", kind: "model", label: "Gemini 通用协议", ported: true, source: "protocol-engine/builtins.ts:866" },
   { id: "xai", kind: "model", label: "Grok 官方能力协议", ported: true, source: "protocol-engine/builtins.ts:2048" },
   { id: "minimax", kind: "model", label: "MiniMax 官方模型", ported: true, source: "protocol-engine/builtins.ts:2166" },
   { id: "agtoken-videos", kind: "model", label: "AGToken 视频", ported: true, source: "protocol-engine/builtins.ts:1081" },

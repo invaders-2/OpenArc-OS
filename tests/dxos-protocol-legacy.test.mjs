@@ -25,11 +25,11 @@ const MODEL_IDS = [
   "volcengine", "volcengine-speech", "runninghub",
 ];
 
-/** 源 protocols.ts:2589-2982 的 20 个供应商协议 key（源码顺序，含 cli:dreamina-canvas）。 */
+/** 源 protocols.ts:2589-2982 的 20 个供应商协议 key（源码顺序，含 cli:dreamina-canvas）+ 本仓新增的官方 lovart。 */
 const PROVIDER_IDS = [
   "ollama", "cli:pippit", "cli:dreamina-canvas", "cli:jimeng", "cli:codex", "cli:gemini", "openai", "openai-relay",
   "aliyun-bailian", "apimart", "agtoken", "zkki", "xai", "grok2api", "agnes", "modelscope", "volcengine",
-  "volcengine-speech", "minimax", "runninghub",
+  "volcengine-speech", "minimax", "runninghub", "lovart",
 ];
 
 test("PROTOCOLS 顶层 key 恰为 29 个（逐个列出断言）", () => {
@@ -39,9 +39,9 @@ test("PROTOCOLS 顶层 key 恰为 29 个（逐个列出断言）", () => {
   for (const id of MODEL_IDS) assert.ok(legacy.PROTOCOLS[id] && legacy.PROTOCOLS[id].id === id, id);
 });
 
-test("PROVIDER_PROTOCOLS 顶层 key 实测 20 个（任务书 19 漏计 cli:dreamina-canvas）", () => {
+test("PROVIDER_PROTOCOLS 顶层 key = 源 20 个 + 本仓新增官方 lovart = 21 个", () => {
   const keys = Object.keys(legacy.PROVIDER_PROTOCOLS);
-  assert.equal(keys.length, 20, "源 protocols.ts:2589-2982 实测 20 个；任务书写的 19 与源不符");
+  assert.equal(keys.length, 21, "源 protocols.ts:2589-2982 实测 20 个；本仓另加官方协议 lovart 后为 21");
   assert.deepEqual(keys, PROVIDER_IDS);
   assert.ok(keys.includes("cli:dreamina-canvas"), "源 :2659 的顶层 key 必须存在");
   for (const id of PROVIDER_IDS) assert.ok(legacy.PROVIDER_PROTOCOLS[id] && legacy.PROVIDER_PROTOCOLS[id].id === id, id);
@@ -270,10 +270,10 @@ test("buildChatRequest：openai/anthropic/gemini 与不支持协议", () => {
 });
 
 test("list* 与 protocolIds：来源为真实表，runnable/内置标记派生", () => {
-  assert.equal(legacy.protocolIds().length, 20);
+  assert.equal(legacy.protocolIds().length, 21);
   assert.deepEqual(legacy.protocolIds(), PROVIDER_IDS);
-  assert.equal(legacy.listProtocols().length, 20);
-  assert.equal(legacy.listProviderProtocols().length, 20);
+  assert.equal(legacy.listProtocols().length, 21);
+  assert.equal(legacy.listProviderProtocols().length, 21);
   // 29 - 4 个内部协议（ollama/apimart-gemini/apimart-claude/apimart-media）= 25
   assert.equal(legacy.listModelProtocols().length, 25);
   assert.equal(legacy.listProtocolDetails().length, 25);
@@ -306,7 +306,7 @@ test("provider-protocol-domain：legacy 两行由 legacy-protocols 真实 key �
   assert.deepEqual(domain.LEGACY_MODEL_PROTOCOLS, Object.keys(legacy.PROTOCOLS));
   assert.deepEqual(domain.LEGACY_PROVIDER_PROTOCOLS, Object.keys(legacy.PROVIDER_PROTOCOLS));
   assert.equal(domain.LEGACY_MODEL_PROTOCOLS.length, 29);
-  assert.equal(domain.LEGACY_PROVIDER_PROTOCOLS.length, 20, "源实测 20；任务书 19 漏计 cli:dreamina-canvas");
+  assert.equal(domain.LEGACY_PROVIDER_PROTOCOLS.length, 21, "源实测 20 + 本仓新增官方 lovart = 21");
   const table = domain.protocolTable();
   // kling / cli:dreamina-canvas 未被 v2 内置表遮蔽（protocolTable 里 v2 在前，同名 v2 优先——既有行为）。
   const kling = table.find((e) => e.kind === "model" && e.id === "kling");

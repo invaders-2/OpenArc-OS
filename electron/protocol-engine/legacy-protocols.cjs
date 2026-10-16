@@ -4,7 +4,7 @@
  * 源：DXSRC/protocols.ts
  *   · :78-279      常量（ASPECT_OPTIONS / *_SCHEMA / *_LIMITS / *_PROFILE）
  *   · :281-2568    PROTOCOLS（29 个模型协议）
- *   · :2589-2982   PROVIDER_PROTOCOLS（20 个供应商协议）
+ *   · :2589-2982   PROVIDER_PROTOCOLS（20 个供应商协议；本仓另加官方协议 lovart，共 21）
  *   · :3183-3636   别名/站点规则/列表/规范化/请求构造/响应解析纯函数
  *
  * 只保留本地可用语义；以下分支已移除并在调用处标注：
@@ -831,19 +831,99 @@ const PROTOCOLS = {
   anthropic: {
     id: 'anthropic',
     label: 'Anthropic Claude',
-    summary: 'Anthropic /v1/messages 协议。',
+    summary: 'Anthropic Messages 官方协议：x-api-key + anthropic-version 2023-06-01，/v1/messages 文本、视觉与具名 SSE 流式。',
+    categories: ['llm', 'vision', 'tools'],
     auth: { type: 'api_key_header', header: 'x-api-key' },
     headers: { 'anthropic-version': '2023-06-01' },
     models: { endpoint: '/v1/models', kind: 'anthropic' },
+    // 注意：这里**不设 def.stream** —— legacy-executor-chat.cjs:124 会据此强制 OpenAI 形状 SSE 累积，
+    // Anthropic 的具名事件不适用；流式声明放在 operations['llm.chat.stream']。
     capabilities: {
       llm: { endpoint: '/v1/messages', body: 'anthropic_messages', parse: 'anthropic_text' },
       vlm: { endpoint: '/v1/messages', body: 'anthropic_messages', parse: 'anthropic_text' },
+    },
+    operations: {
+      'llm.chat': {
+        label: 'Messages',
+        method: 'POST',
+        path: '/v1/messages',
+        requestMode: 'json',
+        bodyTemplate: {
+          model: '{{model}}',
+          max_tokens: '{{params.max_tokens}}',
+          system: '{{system}}',
+          messages: '{{messages}}',
+          temperature: '{{params.temperature}}',
+          top_p: '{{params.top_p}}',
+        },
+        response: {
+          text: '$.content[*].text',
+          finishReason: '$.stop_reason',
+          usage: '$.usage',
+        },
+        uiSchema: 'anthropic-chat',
+      },
+      'llm.chat.stream': {
+        label: 'Messages Stream',
+        method: 'POST',
+        path: '/v1/messages',
+        requestMode: 'json',
+        bodyTemplate: {
+          model: '{{model}}',
+          max_tokens: '{{params.max_tokens}}',
+          system: '{{system}}',
+          messages: '{{messages}}',
+          stream: true,
+          temperature: '{{params.temperature}}',
+        },
+        stream: {
+          protocol: 'sse',
+          namedEvents: true,
+          eventNames: ['message_start', 'content_block_start', 'content_block_delta', 'content_block_stop', 'message_delta', 'message_stop', 'error'],
+          usageEvents: ['message_start', 'message_delta'],
+          deltaTextEvents: ['content_block_delta'],
+          deltaText: '$.delta.text',
+          doneEvents: ['message_stop'],
+          errorEvents: ['error'],
+        },
+        uiSchema: 'anthropic-chat-stream',
+      },
+      'llm.chat.vision': {
+        label: 'Messages Vision',
+        method: 'POST',
+        path: '/v1/messages',
+        requestMode: 'json',
+        bodyTemplate: {
+          model: '{{model}}',
+          max_tokens: '{{params.max_tokens}}',
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: '{{prompt}}' },
+                { type: 'image', source: { type: 'base64', media_type: '{{inputs.mediaType}}', data: '{{inputs.base64}}' } },
+              ],
+            },
+          ],
+        },
+        response: {
+          text: '$.content[*].text',
+          usage: '$.usage',
+        },
+        uiSchema: 'anthropic-vision',
+      },
     },
     paramSchema: {
       llm: [
         { key: 'max_tokens', label: '最大输出', type: 'number', default: 1024, min: 1, max: 200000 },
       ],
     },
+    docs: [
+      { title: 'Messages', url: 'https://platform.claude.com/docs/en/api/messages' },
+      { title: 'Streaming Messages', url: 'https://platform.claude.com/docs/en/build-with-claude/streaming' },
+      { title: 'Models List', url: 'https://platform.claude.com/docs/en/api/models/list' },
+      { title: 'Model IDs and versions', url: 'https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions' },
+    ],
   },
   gemini: {
     id: 'gemini',
@@ -2892,6 +2972,52 @@ const PROVIDER_PROTOCOLS = {
     auth: PROTOCOLS.runninghub.auth,
     models: PROTOCOLS.runninghub.models,
   },
+  lovart: {
+    id: 'lovart',
+    label: 'Lovart',
+    summary: 'Lovart 官方 OpenAPI（OpenClaw）：AK/SK HMAC-SHA256 请求签名，catalog 动态模型表，chat → send/watch/result 生成图像与视频。',
+    kind: 'provider-protocol',
+    categories: ['image', 'video', 'design', 'agent'],
+    runtimeProtocol: 'lovart',
+    // 鉴权既不是 Bearer 也不是固定头，而是 AK/SK 的 HMAC-SHA256 请求签名：
+    //   sig = HMAC_SHA256(secret_key, METHOD + "\n" + path + "\n" + timestamp秒)
+    // 头 X-Access-Key / X-Timestamp / X-Signature / X-Signed-Method / X-Signed-Path。
+    // 该表只描述协议面；真正的签名与 send→watch→result 在 electron/provider-adapter-lovart.cjs。
+    auth: { type: 'hmac_sha256' },
+    models: { endpoint: '/v1/openapi/tools/catalog', kind: 'lovart' },
+    operations: {
+      'image.generate': {
+        label: '生成图像',
+        method: 'POST',
+        path: '/v1/openapi/chat',
+        requestMode: 'json',
+        bodyTemplate: { prompt: '{{prompt}}', project_id: '{{projectId}}', tool_config: { prefer_tool_categories: { IMAGE: ['{{model}}'] } } },
+        poll: { statusPath: '/v1/openapi/chat/status', resultPath: '/v1/openapi/chat/result', idField: 'thread_id', artifactField: '$.items[*].artifacts[*].content' },
+        response: { artifacts: '$.items[*].artifacts[*].content' },
+      },
+      'video.generate': {
+        label: '生成视频',
+        method: 'POST',
+        path: '/v1/openapi/chat',
+        requestMode: 'json',
+        bodyTemplate: { prompt: '{{prompt}}', project_id: '{{projectId}}', tool_config: { prefer_tool_categories: { VIDEO: ['{{model}}'] } } },
+        poll: { statusPath: '/v1/openapi/chat/status', resultPath: '/v1/openapi/chat/result', idField: 'thread_id', artifactField: '$.items[*].artifacts[*].content' },
+        response: { artifacts: '$.items[*].artifacts[*].content' },
+      },
+      'llm.chat': {
+        label: 'Agent 对话',
+        method: 'POST',
+        path: '/v1/openapi/chat',
+        requestMode: 'json',
+        bodyTemplate: { prompt: '{{prompt}}', project_id: '{{projectId}}' },
+        poll: { statusPath: '/v1/openapi/chat/status', resultPath: '/v1/openapi/chat/result', idField: 'thread_id' },
+        response: { text: '$.items[*].text' },
+      },
+    },
+    docs: [
+      { title: 'Lovart OpenClaw User Guide', url: 'https://lovart.notion.site/Lovart-OpenClaw-User-Guide-33da46b16a0f80f6a7fff8e4896b9fca' },
+    ],
+  },
 };
 // ── 内建/可运行协议集合（源 protocols.ts:3010-3016）──────────────────
 const BUILTIN_MODEL_PROTOCOL_IDS = new Set(Object.keys(PROTOCOLS))
@@ -2899,7 +3025,7 @@ const BUILTIN_PROVIDER_PROTOCOL_IDS = new Set(Object.keys(PROVIDER_PROTOCOLS))
 const DECLARED_VIDEO_RUNTIME_PROTOCOL_IDS = new Set(['v2-unified', 'grok', 'xai', 'grok2api', 'kling', 'pixverse', 'pika', 'vidu', 'wanxiang', 'minimax', 'volcengine'])
 const DECLARED_AUDIO_RUNTIME_PROTOCOL_IDS = new Set(['v2-unified', 'grok2api', 'suno', 'minimax', 'volcengine-speech'])
 const RUNNABLE_MODEL_PROTOCOL_IDS = new Set(['openai', 'anthropic', 'gemini', 'gemini-generations', 'gpt-best-images', 'xai', 'apimart', 'apimart-gemini', 'apimart-claude', 'apimart-media', 'agtoken-video', 'zkki-model', 'midjourney', 'agnes', 'modelscope', 'volcengine', 'runninghub', ...DECLARED_VIDEO_RUNTIME_PROTOCOL_IDS, ...DECLARED_AUDIO_RUNTIME_PROTOCOL_IDS])
-const RUNNABLE_PROVIDER_PROTOCOL_IDS = new Set(['cli:pippit', 'cli:jimeng', 'cli:dreamina-canvas', 'cli:codex', 'cli:gemini', 'ollama', 'openai', 'aliyun-bailian', 'xai', 'apimart', 'agtoken-video', 'zkki-model', 'grok2api', 'agnes', 'modelscope', 'volcengine', 'volcengine-speech', 'minimax', 'runninghub'])
+const RUNNABLE_PROVIDER_PROTOCOL_IDS = new Set(['cli:pippit', 'cli:jimeng', 'cli:dreamina-canvas', 'cli:codex', 'cli:gemini', 'ollama', 'openai', 'aliyun-bailian', 'xai', 'apimart', 'agtoken-video', 'zkki-model', 'grok2api', 'agnes', 'modelscope', 'volcengine', 'volcengine-speech', 'minimax', 'runninghub', 'lovart'])
 const INTERNAL_MODEL_PROTOCOL_IDS = new Set(['ollama', 'apimart-gemini', 'apimart-claude', 'apimart-media'])
 const MODEL_PROTOCOL_ALIASES = {
   'openai-chat': {
@@ -3301,6 +3427,20 @@ function catalogMediaType(model) {
 function parseModelCatalog(kind, payload) {
   if (payload?.data && typeof payload.data === 'object' && !Array.isArray(payload.data)) {
     payload = payload.data
+  }
+  // Lovart catalog：{ code, message, data: { tools: [{ name, display_name, category, is_premium }] } }。
+  // category 只有 IMAGE / VIDEO / 3D；3D 在本仓没有对应能力，如实返回无 type（不硬塞）。
+  if (kind === 'lovart') {
+    return (payload?.tools || [])
+      .map((tool) => {
+        const category = String(tool?.category || '').trim().toUpperCase()
+        return {
+          model: String(tool?.name || ''),
+          name: String(tool?.display_name || '').trim() || undefined,
+          type: category === 'IMAGE' ? 'image' : category === 'VIDEO' ? 'video' : undefined,
+        }
+      })
+      .filter((item) => !!item.model)
   }
   if (kind === 'gemini') {
     return (payload?.models || [])
