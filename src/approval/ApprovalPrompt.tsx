@@ -30,6 +30,9 @@ export type ApprovalRequest = {
   currentVersion: number | null;
   expiresAt: number | null;
   requiresApproval: boolean;
+  /** 10-16：资源库写回时批准的正文预览（≤800 字，来自主进程持久化的 plan）。 */
+  contentPreview?: string | null;
+  contentBytes?: number | null;
 };
 
 type SideEffectBridge = {
@@ -53,6 +56,8 @@ const RISK_LABEL: Record<string, string> = {
 function effectText(request: ApprovalRequest): string {
   if (request.toolId === "resource.trash") return "把该资源移入废纸篓（可通过恢复还原）";
   if (request.toolId === "browser.navigate") return "把该浏览器标签导航到下面这个地址（可通过后退还原）";
+  if (request.toolId === "resource.save.text") return "在资源库新建一个文本文件，内容如下（可移到回收站撤销）";
+  if (request.toolId === "canvas.edit") return "修改当前画布（可在画布里撤销）";
   const first = request.expectedEffects && request.expectedEffects[0];
   if (first && typeof first.action === "string") return String(first.action);
   return "执行该工具声明的副作用";
@@ -191,6 +196,14 @@ export function ApprovalPrompt({ onOpenChange }: { onOpenChange?: (open: boolean
           </dd>
           <dt>预期效果</dt>
           <dd data-approval-effect>{effectText(request)}</dd>
+          {request.contentPreview != null ? (
+            <>
+              <dt>正文</dt>
+              <dd data-approval-content>
+                <pre className="approval-content">{request.contentPreview}{request.contentBytes && request.contentBytes > new Blob([request.contentPreview]).size ? "\n…（共 " + request.contentBytes + " 字节，以上为开头部分）" : ""}</pre>
+              </dd>
+            </>
+          ) : null}
           <dt>前置条件</dt>
           <dd data-approval-version>
             {request.currentVersion == null ? "版本未知" : "版本 " + request.currentVersion}

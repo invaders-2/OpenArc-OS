@@ -13,14 +13,14 @@
  * D5-01 Closure-2：`browser.read.page` 是**受控工具**，与下面 FORBIDDEN 里的 `browser`
  * 不是同一个东西 —— 后者禁的是 Harness 内置浏览器旁路，匹配方式是**精确字符串**，不是前缀通配。
  */
-const READ_TOOL_IDS = Object.freeze(["resource.search", "resource.read.metadata", "browser.read.page", "canvas.read"]);
+const READ_TOOL_IDS = Object.freeze(["resource.search", "resource.read.metadata", "resource.read.content", "browser.read.page", "canvas.read"]);
 /**
  * 唯一允许进入 SIDE_EFFECT_PROPOSAL route 的 tool；由 Registry 的 riskClass + executionPolicy 二次确认。
  *
  * D5-02 Full-App：加入 `canvas.edit`（REVERSIBLE_WRITE + CONTROLLED_REVERSIBLE_WRITE）。
  * 没有它时，模型即使提议 canvas_edit 也会被 capability 挡在桥外 —— "AI 编辑画布"整条链断在广播面。
  */
-const WRITE_TOOL_IDS = Object.freeze(["resource.trash", "browser.navigate", "canvas.edit"]);
+const WRITE_TOOL_IDS = Object.freeze(["resource.trash", "browser.navigate", "canvas.edit", "resource.save.text"]);
 const HARNESS_VISIBLE_TOOL_IDS = Object.freeze([...READ_TOOL_IDS, ...WRITE_TOOL_IDS]);
 
 /**

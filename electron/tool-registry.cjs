@@ -280,6 +280,48 @@ const BUILTIN_CONTRACTS = Object.freeze([
     leasePolicy: "SINGLE_ACTIVE",
     executionPolicy: "CONTROLLED_REVERSIBLE_WRITE",
   },
+  {
+    // 10-16 · 素材库 AI：读正文。文本类返回有界正文；图片返回 canvasUrl（openarc-asset:<id>），
+    // 可直接作为 canvas.edit 的 node.add 图片节点 url，在画布里引用素材库原图（不复制字节）。
+    toolId: "resource.read.content",
+    version: 1,
+    displayName: "Read Resource Content",
+    description: "读取资源库里一个资源的正文（文本类最多 32000 字，超出截断）。图片返回 canvasUrl，可用于 canvas_edit 的 node.add（type:image, url:canvasUrl）在画布里引用原图；其它二进制只返回类型。READ_ONLY。",
+    inputSchema: { type: "object", additionalProperties: false, properties: { resourceRef: { type: "string", pattern: "^resource://[A-Za-z0-9_-]+$" }, maxChars: { type: "integer", minimum: 200, maximum: 32000 } }, required: ["resourceRef"] },
+    outputSchema: { type: "object", additionalProperties: false, properties: { resourceRef: { type: "string" }, name: { type: "string" }, mimeType: { type: "string" }, contentKind: { type: "string" }, text: { type: "string" }, truncated: { type: "boolean" }, size: { type: "number" }, canvasUrl: { type: "string" }, note: { type: "string" } }, required: ["resourceRef", "name", "contentKind"] },
+    riskClass: RISK_CLASS.READ_ONLY,
+    sideEffect: SIDE_EFFECT.READ,
+    requiresApproval: false,
+    requiredPermissions: ["tool.resource.readContent"],
+    resourceActions: ["resource.read"],
+    executionProvider: "ResourceContent",
+    enabled: true,
+    expectedSideEffects: ["reads bounded resource content (no mutation)"],
+  },
+  {
+    // 10-16 · 素材库 AI：把生成的文本存回素材库。新建资源 = 可逆写入（移入废纸篓即撤销），需审批。
+    // 幂等：资源记录生成来源 callId；同一 callId 重放时复用已有资源，恢复核验按 callId 三态判定。
+    toolId: "resource.save.text",
+    version: 1,
+    displayName: "Save Text To Library",
+    description: "把生成的文本结果保存为资源库里的新文本资源（REVERSIBLE_WRITE，需审批；可在资源库移入废纸篓撤销）。",
+    inputSchema: { type: "object", additionalProperties: false, properties: { name: { type: "string", minLength: 1, maxLength: 120, pattern: "^[^/\\\\:*?\"<>|\\u0000-\\u001f]+$" }, content: { type: "string", minLength: 1, maxLength: 200000 }, description: { type: "string", maxLength: 500 } }, required: ["name", "content"] },
+    outputSchema: { type: "object", additionalProperties: false, properties: { resourceRef: { type: "string" }, name: { type: "string" }, version: { type: "integer" }, size: { type: "number" }, reused: { type: "boolean" } }, required: ["resourceRef", "name"] },
+    riskClass: RISK_CLASS.REVERSIBLE_WRITE,
+    sideEffect: SIDE_EFFECT.WRITE,
+    requiresApproval: true,
+    requiredPermissions: ["tool.resource.saveText"],
+    // 新建资源没有既有 ResourceRef：创建权限由 ResourceService.importText 的 authorizeCreate 在执行时裁决。
+    resourceActions: [],
+    executionProvider: "ResourceContent",
+    enabled: true,
+    expectedSideEffects: ["creates one text resource in the library (reversible via trash)"],
+    idempotencySupport: true,
+    verificationStrategy: "READ_AFTER_WRITE",
+    approvalPolicy: "ONE_CALL",
+    leasePolicy: "SINGLE_ACTIVE",
+    executionPolicy: "CONTROLLED_REVERSIBLE_WRITE",
+  },
 ]);
 
 /** dsh tool 名必须是合法标识符：resource.search → resource_search。 */

@@ -581,6 +581,44 @@ class ResourceService {
     return ok({ path: row.source_locator });
   }
 
+  /**
+   * AI 读取资源正文（有界）：超过 maxBytes 截断而不是失败，返回 truncated 标记。
+   * 授权与 read() 同一口径（canRead + 未进废纸篓）。
+   */
+  async readTextBounded({ context, resourceRef, maxBytes = 32 * 1024 } = {}) {
+    const res = this.read({ context, resourceRef });
+    if (!res.ok) return res;
+    const chunks = [];
+    let total = 0;
+    let truncated = false;
+    for await (const chunk of res.stream) {
+      const room = maxBytes - total;
+      if (chunk.length >= room) {
+        chunks.push(chunk.subarray(0, Math.max(0, room)));
+        total += Math.max(0, room);
+        truncated = chunk.length > room || Number(res.size || 0) > maxBytes;
+        res.stream.destroy();
+        break;
+      }
+      chunks.push(chunk);
+      total += chunk.length;
+    }
+    // 截断点可能落在多字节字符中间：去掉末尾不完整的 UTF-8 替换符。
+    const text = Buffer.concat(chunks).toString("utf8").replace(/\uFFFD+$/, "");
+    return ok({ text, truncated, size: Number(res.size || total), mimeType: res.mimeType });
+  }
+
+  /**
+   * AI 写回素材库的恢复核验（只读，仅主进程 side-effect authority 调用，不经渲染层）：
+   * 按生成来源 callId 找到这次写入产生的资源。
+   */
+  generatedByCall({ callId } = {}) {
+    if (!callId) return fail(REASON.INVALID_INPUT);
+    const row = typeof this.store.resourceRowByGeneratedCall === "function" ? this.store.resourceRowByGeneratedCall(String(callId)) : null;
+    if (!row) return ok({ found: false });
+    return ok({ found: true, resourceRef: authz.toResourceRef(row.resource_id), name: row.name, version: Number(row.version || 1), size: Number(row.size || 0), checksum: row.checksum || null, trashed: row.trash_state === TRASH_STATE.TRASHED });
+  }
+
   async readText({ context, resourceRef, maxBytes = domain.MAX_READ_TEXT_BYTES } = {}) {
     const res = this.read({ context, resourceRef });
     if (!res.ok) return res;

@@ -101,9 +101,12 @@ const PRECONDITION_KEYS = new Set(["resourceRef", "expectedVersion", "expectedHa
   // D5-02：画布编辑的**基准 revision + 命令 + 命令指纹**必须随 plan 一起持久化 —— 否则 claim 之后只能从
   // Harness 入参再取一次，"批准的命令"和"执行的任务"会分叉（与 D5-01 的 url 同一口径；execute / verify /
   // recoveryVerify 都只读这份快照，commandFingerprint 还要与画布命令日志**逐字节**比对）。
-  "revision", "commandFingerprint", "command"]);
-/** 每个 key 的字符串上界；未列出的沿用 300。 */
-const PRECONDITION_STRING_MAX = Object.freeze({ url: 2000, commandFingerprint: 2000 });
+  "revision", "commandFingerprint", "command",
+  // 10-16 素材库 AI 写回（resource.save.text）：审批时看到的**正文本身**随 plan 持久化，
+  // 执行只读这份快照并按 contentSha256 复核 —— 与 url / command 同一口径，绝不再从 Harness 入参取内容。
+  "name", "contentSha256", "bytes", "content", "description"]);
+/** 每个 key 的字符串上界；未列出的沿用 300。超界一律丢弃该 key（fail closed），不截断。 */
+const PRECONDITION_STRING_MAX = Object.freeze({ url: 2000, commandFingerprint: 2000, content: 200000, description: 500, contentSha256: 64, name: 200 });
 /** command 是结构化执行入参：与 commandFingerprint 同一预算；超界一律丢弃该 key（fail closed，绝不截断）。 */
 const PRECONDITION_OBJECT_MAX = 2000;
 function sanitizePreconditions(pre) {

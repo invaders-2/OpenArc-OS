@@ -203,8 +203,15 @@ class SideEffectRuntime {
         ? "MCP " + String(first.serverRef).slice(0, 60) + " · " + String(first.toolRef).slice(0, 60)
         : "浏览器标签 " + String(pre.targetRef).slice(0, 80);
     }
+    // 10-16 · 资源库写回（resource.save.text）：目标是"新文件"，批准的就是这份正文 —— 名字与正文预览
+    // 必须让用户看见（与 browser.navigate 的 url 同一口径；正文来自持久化 plan，不来自 Harness 文案）。
+    let contentPreview = null;
+    if (call.toolId === "resource.save.text" && typeof pre.name === "string") {
+      targetName = "资源库新文件 · " + pre.name.slice(0, 120);
+      if (typeof pre.content === "string") contentPreview = pre.content.slice(0, 800);
+    }
     const approval = this.authority.effectiveApproval(call.callId);
-    const allowed = new Set(["approvalRequestId", "status", "toolId", "toolDisplayName", "riskClass", "effectClass", "targetDisplayName", "resourceRef", "targetRef", "url", "expectedEffects", "expectedVersion", "currentVersion", "expiresAt", "requiresApproval"]);
+    const allowed = new Set(["approvalRequestId", "status", "toolId", "toolDisplayName", "riskClass", "effectClass", "targetDisplayName", "resourceRef", "targetRef", "url", "expectedEffects", "expectedVersion", "currentVersion", "expiresAt", "requiresApproval", "contentPreview", "contentBytes"]);
     const snap = {
       approvalRequestId: call.callId,
       status: call.status,
@@ -222,6 +229,7 @@ class SideEffectRuntime {
       currentVersion: pre.expectedVersion == null ? null : Number(pre.expectedVersion),
       expiresAt: approval && approval.expiresAt != null ? Number(approval.expiresAt) : null,
       requiresApproval: true,
+      ...(contentPreview != null ? { contentPreview, contentBytes: Number(pre.bytes) || null } : {}),
     };
     for (const key of Object.keys(snap)) if (!allowed.has(key)) delete snap[key];
     for (const key of Object.keys(snap)) if (SAFE_SNAPSHOT_SECRET_RE.test(key)) delete snap[key];

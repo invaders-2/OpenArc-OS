@@ -271,6 +271,11 @@ class ResourceStore {
     return this.db.prepare(LIB_SELECT + " WHERE r.resource_id = ?").get(String(resourceId || "")) || null;
   }
 
+  /** AI 写回素材库的幂等/恢复核验：按生成来源 callId 找资源（最多一条）。 */
+  resourceRowByGeneratedCall(callId) {
+    return this.db.prepare(LIB_SELECT + " WHERE l.generated_source_call_id = ? ORDER BY r.created_at ASC LIMIT 1").get(String(callId || "")) || null;
+  }
+
   resourceRowsByOrg(organizationId) {
     return this.db.prepare(LIB_SELECT + " WHERE r.organization_id = ? ORDER BY r.created_at, r.resource_id").all(String(organizationId || ""));
   }

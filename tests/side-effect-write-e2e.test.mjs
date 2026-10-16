@@ -182,7 +182,9 @@ test("§20 production exposure boundary：只有 resource.trash 可执行；test
     const exec = await fx.authority.executeSideEffect({ ...execId });
     assert.equal(exec.ok, true, JSON.stringify(exec));
     assert.equal(deleteCounter.calls, 1);
-    assert.deepEqual(fx.toolRegistry.ids().filter((t) => t.startsWith("resource.")).sort(), ["resource.read.metadata", "resource.search", "resource.trash"]);
+    // 10-16：资源库 AI 有意新增 resource.read.content（只读）与 resource.save.text（可逆写入、需审批），
+    // 清单仍是显式枚举 —— 再多出任何 resource.* 工具都会让这里失败。
+    assert.deepEqual(fx.toolRegistry.ids().filter((t) => t.startsWith("resource.")).sort(), ["resource.read.content", "resource.read.metadata", "resource.save.text", "resource.search", "resource.trash"]);
   } finally { await fx.fx.close(); }
 });
 

@@ -18,6 +18,15 @@ import ControlCenter from "./shell/ControlCenter.vue";
 import QuickLook from "./shell/QuickLook.vue";
 import NotificationCenter from "./shell/NotificationCenter.vue";
 /* 全局 AI：10-16 起改为 Vue 的助理浮层（shell/AssistPanel.vue），同一条 task 桥，旧 React AIPanel 不再挂载。 */
+import { markRaw } from "vue";
+import ReactIsland from "./bridge/ReactIsland.vue";
+import { ApprovalPrompt } from "../src/approval/ApprovalPrompt";
+/**
+ * 10-16 · 审批弹窗（D4-03C4 Trusted Approval UI）：既有 React 实现原样复用。
+ * 之前只挂在 React 外壳里，Vue 外壳下 AI 的写入类操作（回收站 / 画布编辑 / 打开网址 / 存回资源库）
+ * 会一直停在「等待你确认」却看不到弹窗。登录后常驻：没有待批请求时它什么都不渲染。
+ */
+const ApprovalPromptRaw = markRaw(ApprovalPrompt);
 import BootSurface from "./identity/BootSurface.vue";
 import BootRetry from "./identity/BootRetry.vue";
 import SetupScreen from "./identity/SetupScreen.vue";
@@ -163,6 +172,7 @@ onBeforeUnmount(() => {
     <NotificationCenter v-if="showDesktop" />
     <AssistPanel v-if="showDesktop && shell.aiOpen" />
     <QuickLook v-if="showDesktop && shell.quickLookOpen" />
+    <ReactIsland v-if="showDesktop" class="approval-island" :component="ApprovalPromptRaw" :props="{}" />
     <Overlays v-if="showDesktop" />
 
     <LockScreen

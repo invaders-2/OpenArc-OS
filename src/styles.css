@@ -7610,3 +7610,9 @@ label {
 .assist-foot { display: flex; align-items: center; gap: 8px; font-size: var(--fs-micro); color: var(--muted); }
 .assist-foot > span { flex: 1; }
 .assist-foot button.ghost { background: transparent; color: var(--muted); }
+
+/* 组织治理 · 工具权限的原始代码（小字，10-16） */
+.gov-code { margin-left: 6px; color: var(--muted); font-size: var(--fs-micro); }
+
+/* 审批弹窗 · 资源库写回的正文预览（10-16） */
+.approval-content { margin: 0; max-height: 180px; overflow: auto; white-space: pre-wrap; word-break: break-word; font: inherit; font-size: var(--fs-caption); line-height: 1.55; padding: 8px 10px; border-radius: var(--radius-md); background: rgb(var(--text-rgb) / 0.05); user-select: text; }

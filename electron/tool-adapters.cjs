@@ -145,6 +145,126 @@ function createToolAdapters({ resourceService = null, searchService = null, brow
     };
   }
 
+  if (resourceService) {
+    /**
+     * 10-16 · 素材库 AI：读正文 + 文本写回。
+     * 单独一个 provider（与 ResourceService 分开），因为只读路径的 execute 不带 contract，
+     * 不能靠 contract.toolId 区分"读元数据"和"读正文"。
+     */
+    const TEXT_MIMES = ["application/json", "application/xml", "application/javascript", "application/x-yaml", "application/yaml", "application/toml", "application/x-sh", "application/sql", "application/x-ndjson", "image/svg+xml"];
+    const isTextMime = (mime) => { const m = String(mime || "").toLowerCase().split(";")[0].trim(); return m.startsWith("text/") || TEXT_MIMES.includes(m); };
+    const idOf = (ref) => String(ref || "").replace(/^resource:\/\//, "");
+    const sha256 = (text) => require("node:crypto").createHash("sha256").update(String(text), "utf8").digest("hex");
+    const MAX_SAVE_NAME = 120;
+    const saveName = (name) => {
+      const base = String(name || "").replace(/[\/\\:*?"<>|\u0000-\u001f]/g, "_").trim().slice(0, MAX_SAVE_NAME) || "AI 生成";
+      return /\.[A-Za-z0-9]{1,8}$/.test(base) ? base : base + ".md";
+    };
+    providers.ResourceContent = {
+      toolIds: ["resource.read.content", "resource.save.text"],
+      async prepare({ args }) {
+        if (args && typeof args.resourceRef === "string") return { plan: { provider: "ResourceContent", resourceRefs: [String(args.resourceRef)] } };
+        return { plan: { provider: "ResourceContent", resourceRefs: [] } };
+      },
+      /** 只读 plan（只有写回会走到这里）：0 mutation。目标是"新资源"，用内容哈希 + 名字描述。 */
+      async plan({ args, contract }) {
+        if (!contract || contract.toolId !== "resource.save.text") {
+          const ref = String((args && args.resourceRef) || "");
+          return { targets: [ref], preconditions: { resourceRef: ref, targetType: "resource" }, expectedEffects: [{ action: "readContent", resourceRef: ref }] };
+        }
+        const content = typeof (args && args.content) === "string" ? args.content : "";
+        if (!content) return null;
+        const name = saveName(args.name);
+        const contentSha256 = sha256(content);
+        const description = typeof args.description === "string" ? args.description.slice(0, 500) : "";
+        return {
+          targets: ["library:new:" + contentSha256.slice(0, 16)],
+          // 正文随 plan 持久化（执行时 authority 只给 preconditions，不给 Harness 入参）。
+          preconditions: { targetType: "resource-create", name, contentSha256, bytes: Buffer.byteLength(content, "utf8"), content, ...(description ? { description } : {}) },
+          expectedEffects: [{ action: "create", resourceType: "text", name, bytes: Buffer.byteLength(content, "utf8") }],
+        };
+      },
+      async execute({ context, args, contract, preconditions, callId }) {
+        if (contract && contract.toolId === "resource.save.text") {
+          if (typeof resourceService.importText !== "function") return { ok: false, knownNoEffect: true, error: "TOOL_EXECUTION_FAILED" };
+          // 只用审批时持久化的正文；缺失或与哈希不符 → 已知无效果，不写入。
+          const content = preconditions && typeof preconditions.content === "string" ? preconditions.content : "";
+          if (!content || !preconditions.contentSha256 || preconditions.contentSha256 !== sha256(content)) return { ok: false, knownNoEffect: true, error: "SIDE_EFFECT_PRECONDITION_CHANGED" };
+          // 幂等：同一 callId 已经写过就复用，绝不产生第二份。
+          if (callId && typeof resourceService.generatedByCall === "function") {
+            const prior = resourceService.generatedByCall({ callId });
+            if (prior && prior.ok && prior.found && !prior.trashed) return { ok: true, result: { resourceRef: prior.resourceRef, name: prior.name, version: prior.version, size: prior.size, reused: true } };
+          }
+          let res;
+          try {
+            res = await resourceService.importText({
+              // 以「资源库」App 身份入库：AI App 的 Resource baseline 只有读，写回的能力边界是
+              // tool.resource.saveText（管理员显式授予）+ 本次审批 + 用户本人的 create 授权（authorizeCreate 照常裁决），
+              // 不给 AI App 通用的 resource.create。
+              context: { ...context, appId: "resource-library" },
+              text: content, name: saveName(preconditions.name),
+              description: typeof preconditions.description === "string" ? preconditions.description : "",
+              resourceType: "text", source: "generated",
+              generated: { taskId: (context && context.taskId) || null, callId: callId || null, model: null },
+            });
+          } catch {
+            return { ok: false, ambiguous: true, error: "SIDE_EFFECT_UNKNOWN_EFFECT" };
+          }
+          if (!res || !res.ok) {
+            const err = String((res && res.error) || "RESOURCE_CREATE_FAILED");
+            return { ok: false, knownNoEffect: true, error: err };
+          }
+          const d = res.resource || {};
+          return { ok: true, result: { resourceRef: String(d.resourceRef), name: String(d.name || ""), version: Number(d.version || 1), size: Number(d.size || 0), reused: false } };
+        }
+        // —— 只读：读正文 ——
+        if (typeof resourceService.get !== "function") return { ok: false, error: "TOOL_EXECUTION_FAILED" };
+        const ref = String(args.resourceRef);
+        const meta = await resourceService.get({ context, resourceRef: ref });
+        if (!meta || !meta.ok) return { ok: false, error: (meta && meta.error) || "RESOURCE_NOT_AVAILABLE" };
+        const d = meta.resource || {};
+        const base = { resourceRef: String(d.resourceRef || ref), name: clip(String(d.name || ""), 200), mimeType: String(d.mimeType || "") };
+        if (d.size != null) base.size = Number(d.size);
+        const mime = String(d.mimeType || "").toLowerCase();
+        if (isTextMime(mime) || ["text", "memory", "prompt", "code"].includes(String(d.resourceType || ""))) {
+          const maxChars = Math.min(32000, Math.max(200, Number(args.maxChars) || 32000));
+          const r = typeof resourceService.readTextBounded === "function" ? await resourceService.readTextBounded({ context, resourceRef: ref, maxBytes: maxChars * 3 }) : null;
+          if (!r || !r.ok) return { ok: false, error: (r && r.error) || "RESOURCE_NOT_AVAILABLE" };
+          const full = String(r.text || "");
+          const text = full.length > maxChars ? full.slice(0, maxChars) : full;
+          return { ok: true, result: { ...base, contentKind: "text", text, truncated: !!r.truncated || full.length > maxChars } };
+        }
+        if (mime.startsWith("image/") || String(d.resourceType || "") === "image") {
+          return { ok: true, result: { ...base, contentKind: "image", canvasUrl: "openarc-asset:" + idOf(d.resourceRef || ref), note: "图片不返回字节；在画布里引用请用 canvas_edit 的 node.add，节点 type 为 image、url 为 canvasUrl。" } };
+        }
+        const kind = mime.startsWith("video/") ? "video" : mime.startsWith("audio/") ? "audio" : "binary";
+        return { ok: true, result: { ...base, contentKind: kind, note: "该类型没有可读文本正文。" } };
+      },
+      async verify({ args, result, contract, callId }) {
+        if (contract && contract.toolId === "resource.save.text") {
+          // 真实 Domain 复读：资源存在、未进废纸篓、名字一致才算写入成功。
+          const ref = String((result && result.resourceRef) || "");
+          if (!ref || typeof resourceService.sideEffectPrecondition !== "function") return { ok: false, detail: { reason: "VERIFIER_UNAVAILABLE" } };
+          const pre = resourceService.sideEffectPrecondition({ resourceRef: ref });
+          if (!pre || !pre.ok) return { ok: false, detail: { reason: "VERIFIER_UNAVAILABLE" } };
+          if (pre.trashed === true) return { ok: true, applied: false, confidence: "KNOWN_NO_EFFECT", detail: { resourceRef: ref, trashed: true } };
+          return { ok: true, applied: true, detail: { resourceRef: pre.resourceRef, version: pre.expectedVersion } };
+        }
+        const ok = !!(result && result.resourceRef === String(args.resourceRef) && typeof result.contentKind === "string");
+        return { ok, detail: { resourceRefMatches: ok } };
+      },
+      /** UNKNOWN_EFFECT 恢复核验：按 callId 找这次写回产生的资源（三态）。 */
+      async recoveryVerify({ call }) {
+        if (!call || call.toolId !== "resource.save.text") return { outcome: "INDETERMINATE", reason: "RECOVERY_VERIFIER_UNAVAILABLE" };
+        if (typeof resourceService.generatedByCall !== "function") return { outcome: "INDETERMINATE", reason: "VERIFIER_UNAVAILABLE" };
+        const got = resourceService.generatedByCall({ callId: call.callId });
+        if (!got || !got.ok) return { outcome: "INDETERMINATE", reason: "RESOURCE_READ_FAILED" };
+        if (got.found) return { outcome: "APPLIED", reason: "GENERATED_RESOURCE_PRESENT", detail: { resourceRef: got.resourceRef, trashed: !!got.trashed } };
+        return { outcome: "NOT_APPLIED", reason: "NO_RESOURCE_FOR_CALL" };
+      },
+    };
+  }
+
   if (searchService) {
     providers.SearchService = {
       toolIds: ["resource.search"],

@@ -186,6 +186,9 @@ const TOOL_ACTION = Object.freeze({
   // D5-02：无限画布的 Tool 权限。读取与编辑分开授予 —— 读取绝不隐含编辑。
   CANVAS_READ: "tool.canvas.read",
   CANVAS_EDIT: "tool.canvas.edit",
+  // 10-16：素材库 AI —— 读正文（只读）与把生成的文本存回素材库（可逆写入，需审批）分开授予。
+  RESOURCE_READ_CONTENT: "tool.resource.readContent",
+  RESOURCE_SAVE_TEXT: "tool.resource.saveText",
 });
 const TOOL_ACTIONS = Object.freeze(Object.values(TOOL_ACTION));
 function isToolAction(action) { return TOOL_ACTIONS.includes(String(action)); }

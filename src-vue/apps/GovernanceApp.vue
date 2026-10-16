@@ -179,6 +179,19 @@ function deptNames(u: any): string {
   const list = Array.isArray(u?.departments) ? u.departments.map((d: any) => d.name).filter(Boolean) : [];
   return list.join(", ") || "无部门";
 }
+/** 工具权限的中文名（设计语言 D6：界面只用中文，原值留在 code 小字与 data-* 里）。 */
+const TOOL_LABEL: Record<string, string> = {
+  "tool.test.echo": "测试回显",
+  "tool.resource.readMetadata": "读取资源信息",
+  "tool.resource.search": "搜索资源库",
+  "tool.resource.readContent": "读取资源正文",
+  "tool.resource.saveText": "把生成的文本存回资源库（需审批）",
+  "tool.resource.trash": "把资源移到回收站（需审批）",
+  "tool.browser.read": "读取网页内容",
+  "tool.browser.navigate": "打开网址（需审批）",
+  "tool.canvas.read": "读取画布",
+  "tool.canvas.edit": "编辑画布（需审批）",
+};
 function availableActions(ta: any): string[] {
   return Array.isArray(ta?.availableActions) ? ta.availableActions : [];
 }
@@ -297,7 +310,7 @@ function grantText(g: any): string {
             <div class="set-group" data-gov-tool-actions>
               <div v-for="action in availableActions(ta)" :key="action" :data-gov-tool-action="action" class="setting-row">
                 <label class="gov-tool-pick set-lab">
-                  <span><input type="checkbox" :checked="isChecked(appId, ta, action)" :disabled="isGranted(ta, action)" @change="toggleToolPick(appId, action)" /> <code>{{ action }}</code></span>
+                  <span><input type="checkbox" :checked="isChecked(appId, ta, action)" :disabled="isGranted(ta, action)" @change="toggleToolPick(appId, action)" /> {{ TOOL_LABEL[action] || action }} <small class="gov-code"><code>{{ action }}</code></small></span>
                 </label>
                 <span class="badge" :class="{ ok: isGranted(ta, action) }">{{ isGranted(ta, action) ? "已授予" : "未授予" }}</span>
               </div>
