@@ -37,7 +37,37 @@ const SQL = {
   runsOfCanvas: "SELECT * FROM canvas_runs WHERE canvas_id = ? ORDER BY started_at DESC, run_id DESC LIMIT ?",
   finishRun: "UPDATE canvas_runs SET status = ?, stop_reason = ?, finished_at = ? WHERE run_id = ?",
   activeRunsOfCanvas: "SELECT * FROM canvas_runs WHERE canvas_id = ? AND status = 'RUNNING' ORDER BY started_at DESC",
+  insertRunTarget:
+    "INSERT INTO canvas_run_facts (run_id, canvas_id, node_id, base_revision, target_json, created_at, updated_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(run_id) DO UPDATE SET canvas_id = excluded.canvas_id, node_id = excluded.node_id, base_revision = excluded.base_revision, target_json = excluded.target_json, updated_at = excluded.updated_at",
+  // 结果写回是**一次性**的：同一 run 重放不覆盖第一次保留的结果（幂等，不重复写图）。
+  insertRunResult:
+    "INSERT INTO canvas_run_facts (run_id, canvas_id, node_id, result_json, result_status, stop_reason, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(run_id) DO UPDATE SET result_json = excluded.result_json, result_status = excluded.result_status, stop_reason = excluded.stop_reason, updated_at = excluded.updated_at WHERE result_json IS NULL",
+  runFactById: "SELECT * FROM canvas_run_facts WHERE run_id = ?",
 };
+
+/**
+ * 异步生成 run 的写回事实（目标节点快照 + 被保留的结果）。
+ *
+ * 为什么由 CanvasStore 自己建表而不是 identity-store 的迁移链：它只服务画布 run 的写回，
+ * 是画布持久层的一部分；DDL 全部 IF NOT EXISTS，老库打开即可用，不需要新增一级 schema 迁移。
+ *   · target_json —— startRun 时目标节点的归一化快照，用于**按节点粒度**判定并发编辑；
+ *   · result_json —— 目标节点已不存在时结果仍留在这里（绝不静默丢用户的 60 秒）；
+ *   · result_status/stop_reason —— 结构化原因（TARGET_MISSING / NODE_CONFLICT）。
+ */
+const RUN_FACTS_SQL = `
+CREATE TABLE IF NOT EXISTS canvas_run_facts (
+  run_id        TEXT PRIMARY KEY,
+  canvas_id     TEXT NOT NULL,
+  node_id       TEXT,
+  base_revision INTEGER,
+  target_json   TEXT,
+  result_json   TEXT,
+  result_status TEXT,
+  stop_reason   TEXT,
+  created_at    INTEGER NOT NULL,
+  updated_at    INTEGER NOT NULL
+);
+`;
 
 class CanvasStore {
   constructor({ identity, clock } = {}) {
@@ -45,6 +75,8 @@ class CanvasStore {
     this.identity = identity;
     this.db = identity.connection;
     this.clock = typeof clock === "function" ? clock : identity.clock;
+    // 幂等建表：老库（没跑过本版本）打开画布即可用，不依赖 identity-store 的新迁移级。
+    this.db.exec(RUN_FACTS_SQL);
   }
 
   transact(fn) { return this.identity.transact(fn); }
@@ -112,6 +144,38 @@ class CanvasStore {
   finishRun({ runId, status, stopReason = null }) {
     this.db.prepare(SQL.finishRun).run(String(status), stopReason == null ? null : String(stopReason), this.now(), String(runId));
     return this.runById(runId);
+  }
+
+  /** 记录 run 的目标节点快照（startRun 时；node_id 为空则只落 base_revision）。 */
+  recordRunTarget({ runId, canvasId, nodeId = null, baseRevision = 1, target = null }) {
+    const now = this.now();
+    this.db.prepare(SQL.insertRunTarget).run(
+      String(runId), String(canvasId), nodeId == null ? null : String(nodeId), Number(baseRevision) || 1,
+      target == null ? null : JSON.stringify(target), now, now,
+    );
+    return this.runFactById(runId);
+  }
+  runFactById(runId) { return this.db.prepare(SQL.runFactById).get(String(runId || "")) || null; }
+  /** 目标已不存在时把结果留档：写一次为准（幂等）。 */
+  recordRunResult({ runId, canvasId, nodeId = null, result = null, status = "RESULT_STORED", stopReason = null }) {
+    const now = this.now();
+    this.db.prepare(SQL.insertRunResult).run(
+      String(runId), String(canvasId), nodeId == null ? null : String(nodeId),
+      result == null ? null : JSON.stringify(result), String(status), stopReason == null ? null : String(stopReason), now, now,
+    );
+    return this.runFactById(runId);
+  }
+  /** 目标节点快照（按节点粒度判定并发编辑用）。 */
+  runTargetOf(runId) {
+    const row = this.runFactById(runId);
+    if (!row || !row.target_json) return null;
+    try { return { target: JSON.parse(row.target_json), nodeId: row.node_id, baseRevision: Number(row.base_revision || 1) }; } catch { return null; }
+  }
+  /** 被保留的结果（结果可用性/内容）。 */
+  runResultOf(runId) {
+    const row = this.runFactById(runId);
+    if (!row || !row.result_json) return null;
+    try { return { result: JSON.parse(row.result_json), status: row.result_status, stopReason: row.stop_reason, at: Number(row.updated_at || 0) }; } catch { return null; }
   }
 }
 

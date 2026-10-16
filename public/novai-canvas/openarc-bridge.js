@@ -16,6 +16,8 @@
   var CH = "openarc.canvas";
   var seq = 0;
   var pending = new Map();
+  /** 流式调用（仅登记过的 stream 路由）：按 id 收 open/chunk/end/error，直到整条流结束。*/
+  var pendingStreams = new Map();
   var ctx = { ready: false, readOnly: true, canEdit: false, canvasId: null, models: null, account: null, top: false };
   /** 宿主在 hello 里发来的**本次实例 token**：每条调用都必须带回，否则宿主忽略。*/
   var token = null;
@@ -148,6 +150,15 @@
       if (!p) return;
       pending.delete(d.id);
       if (d.ok) p.resolve(d.value); else p.reject(errText((d.error && d.error.error) || "CANVAS_HOST_ERROR", d.error && (d.error.message || d.error.detail) || ""));
+      return;
+    }
+    if (d.kind === "stream-open" || d.kind === "stream-chunk" || d.kind === "stream-end" || d.kind === "stream-error") {
+      var st = pendingStreams.get(d.id);
+      if (!st) return;
+      if (d.kind === "stream-open") st.open(d);
+      else if (d.kind === "stream-chunk") st.chunk(d.data);
+      else if (d.kind === "stream-end") st.end();
+      else st.error(d.data);
     }
   });
 
@@ -304,6 +315,84 @@
     }
     return jsonResponse(501, Object.assign({ error: "OPENARC_UNSUPPORTED", message: "该功能不在 OpenArc 集成范围内：" + path }, extra || {}));
   }
+
+  /** 已流式调用：只有 route() 显式登记 stream:true 的端点会走到这里。
+   *  页面拿到的仍是一个真实 Response，但 body 是 ReadableStream —— 每一块都来自宿主的
+   *  "stream-open / stream-chunk / stream-end / stream-error" 消息（既有 postMessage 通道），
+   *  页面依旧没有直连网络、没有凭据。取消时向宿主发 abort（宿主据此中止主进程在途请求）。
+   *  没有正文时由宿主按"非流式"收口（409 → 页面退回普通接口），这里绝不自己伪造分块。*/
+  function streamCall(method, params, signal) {
+    return whenReady().then(function () { return new Promise(function (resolve, reject) {
+      seq += 1;
+      var id = seq;
+      var controller = null;
+      var opened = false;
+      var aborted = false;
+      var encoder = typeof TextEncoder !== "undefined" ? new TextEncoder() : null;
+      function abortError() {
+        // 与真实 fetch 的取消语义一致：读流以 AbortError 拒绝（页面据此走"已取消/超时"分支）。
+        try { return new DOMException("The operation was aborted.", "AbortError"); }
+        catch (e) { var err = errText("CANVAS_ABORTED", "已停止"); err.name = "AbortError"; return err; }
+      }
+      function removeAbort() { if (signal) { try { signal.removeEventListener("abort", onAbort); } catch (e) { /* ignore */ } } }
+      function abortStream(err) {
+        if (aborted) return;
+        aborted = true;
+        pendingStreams.delete(id);
+        post({ kind: "abort", id: id, method: method, token: token });
+        removeAbort();
+        if (controller) { try { controller.error(err || abortError()); } catch (e) { /* 已关闭 */ } }
+        if (!opened) { opened = true; reject(err || abortError()); }
+      }
+      var onAbort = function () { abortStream(abortError()); };
+      if (signal) {
+        if (signal.aborted) { onAbort(); return; }
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+      var body = new ReadableStream({
+        start: function (c) { controller = c; },
+        cancel: function () { abortStream(abortError()); },
+      });
+      pendingStreams.set(id, {
+        open: function (msg) {
+          if (opened) return;
+          opened = true;
+          if (msg && msg.ok) {
+            resolve(new Response(body, { status: 200, headers: { "content-type": "text/event-stream", "cache-control": "no-store" } }));
+          } else {
+            pendingStreams.delete(id);
+            removeAbort();
+            if (controller) { try { controller.close(); } catch (e) { /* ignore */ } } // 未开流：占位 body 直接关掉
+            var payload = (msg && msg.error) || { error: "STREAM_FAILED", message: "流式调用失败" };
+            resolve(jsonResponse((msg && msg.status) || 502, payload));
+          }
+        },
+        chunk: function (data) {
+          if (!controller) return;
+          try { controller.enqueue(encoder ? encoder.encode(String(data || "")) : String(data || "")); } catch (e) { /* 已关闭 */ }
+        },
+        end: function () {
+          pendingStreams.delete(id);
+          removeAbort();
+          if (controller) { try { controller.close(); } catch (e) { /* ignore */ } }
+        },
+        error: function (data) {
+          pendingStreams.delete(id);
+          removeAbort();
+          if (controller) { try { controller.enqueue(encoder ? encoder.encode(String(data || "")) : String(data || "")); controller.close(); } catch (e) { /* 已关闭 */ } }
+        },
+      });
+      post({ kind: "call", id: id, method: method, params: params || {}, token: token, stream: true });
+      setTimeout(function () {
+        if (!pendingStreams.has(id)) return;
+        pendingStreams.delete(id);
+        removeAbort();
+        var err = errText("CANVAS_HOST_TIMEOUT", method + " 超时");
+        if (opened) { if (controller) { try { controller.error(err); } catch (e) { /* ignore */ } } }
+        else { opened = true; resolve(jsonResponse(504, err)); }
+      }, 180000);
+    }); });
+  }
   /** 更新/下载上游程序：**保持禁用**，界面明确说明（绝不静默联网、绝不直连 GitHub/Gitee/ModelScope）。*/
   var UPDATE_PATHS = [/^\/api\/check-update$/, /^\/api\/update-/, /^\/api\/update-backups$/, /^\/api\/update-rollback$/, /^\/api\/update-progress$/, /^\/api\/update-from-github$/, /^\/api\/update-connectivity/];
   function isUpdatePath(pathname) { return UPDATE_PATHS.some(function (re) { return re.test(pathname); }); }
@@ -345,6 +434,12 @@
     if (purge && m === "DELETE") return { method: "canvas.purge", params: { canvasId: decodeURIComponent(purge[1]) } };
     // —— 模型（唯一来源：OpenArc 模型服务）——
     if (m === "POST" && pathname === "/api/canvas-llm") return { method: "model.chat", params: { body: body } };
+    // 智能画布（上游 1e20abe5 起）的**流式** LLM：与上面一样是**登记项**，不是放宽白名单 ——
+    // 未登记端点仍旧 501；分块只经既有 postMessage 通道回传，页面仍然拿不到网络/凭据。
+    if (m === "POST" && pathname === "/api/canvas-llm/stream") return { method: "model.chatStream", params: { body: body }, stream: true };
+    // 尺寸策略（上游 shared/size-policy.js 启动时 GET）：只把策略内容回给页面 —— 与既有 model.* 同一条受控通道。
+    // **只加登记项**：未登记端点仍旧 501、出网仍旧拒绝；策略是尺寸枚举事实，不含地址/凭据，也不放宽任何白名单。
+    if (m === "GET" && pathname === "/api/ai/size-policy") return { method: "model.sizePolicy" };
     if (m === "POST" && pathname === "/api/canvas-image-tasks") return { method: "model.imageTask", params: { body: body } };
     var task = pathname.match(/^\/api\/canvas-image-tasks\/([^/]+)$/);
     if (task && m === "GET") return { method: "model.imageTaskResult", params: { taskId: decodeURIComponent(task[1]) } };
@@ -406,6 +501,8 @@
       return Promise.resolve(jsonResponse(501, { error: "OPENARC_UPDATE_DISABLED", message: "更新/下载上游程序在 OpenArc 中已禁用（不发生任何联网）", reachable: false }));
     }
     if (!mapped) return Promise.resolve(unsupported(parsed.pathname));
+    // 登记过的流式端点：分块走 postMessage（streamCall），不走请求/应答的 call()。
+    if (mapped.stream) return streamCall(mapped.method, mapped.params || {}, init.signal || null);
     if (parsed.pathname === "/api/ai/upload" || parsed.pathname === "/api/upload") {
       return readUploadFiles(init.body).then(function (files) {
         if (!files.length) return jsonResponse(501, { error: "OPENARC_UNSUPPORTED", message: "上传里没有可导入的文件" });

@@ -20,6 +20,10 @@ const REASON = Object.freeze({
   READ_ONLY: "READ_ONLY",
   UNSUPPORTED_COMMAND: "UNSUPPORTED_COMMAND",
   LIMIT_EXCEEDED: "LIMIT_EXCEEDED",
+  /** 异步 run 的结果写回：目标节点（或整本画布）在生成期间已不存在。结果保留在 run 记录里。 */
+  CANVAS_RUN_TARGET_MISSING: "CANVAS_RUN_TARGET_MISSING",
+  /** 异步 run 的结果写回：目标节点被并发修改（按节点粒度判定），结果不覆盖用户内容。 */
+  CANVAS_RUN_NODE_CONFLICT: "CANVAS_RUN_NODE_CONFLICT",
 });
 
 /** 画布命令集合（PLAN §24：添加、编辑、移动、复制、删除、分组、连线、断开、撤销和重做）。*/

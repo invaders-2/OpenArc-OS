@@ -11,6 +11,8 @@
 
 const domain = require("./canvas-domain.cjs");
 const authz = require("./authorization-domain.cjs");
+const imageParams = require("./image-params.cjs");
+const modelLabelMigration = require("./canvas-model-label-migration.cjs");
 
 const { REASON } = domain;
 const ok = (extra = {}) => ({ ok: true, ...extra });
@@ -85,6 +87,47 @@ class CanvasService {
     return norm.ok ? norm.doc : domain.emptyDoc();
   }
 
+  /**
+   * 迁移依据：当前**可用**模型清单（与渲染层下拉同一口径，来自 ModelService）。
+   * 拿不到清单（模型层未装配 / 未授权 / 抛错）→ 返回 null：**宁可不迁移，也不猜**。
+   */
+  #canvasModelList(context) {
+    if (!this.modelService || typeof this.modelService.listModelsForUse !== "function") return null;
+    try {
+      const res = this.modelService.listModelsForUse({ context: { ...(context || {}), appId: "canvas" } });
+      if (!res || res.ok !== true || !Array.isArray(res.models)) return null;
+      return res.models;
+    } catch { return null; }
+  }
+
+  /**
+   * 加载路径上的**保真迁移**：把文档里旧格式标签（`displayName · configId 末 4 位`）按旧值
+   * 自身携带的信息反查当前清单里**同一个 configId** 的新标签。反查不唯一 / 对不上 → 原值不动
+   * 并结构化上报（绝不取"该服务商第一个模型"）。只改模型字段，不落库、不改 revision。
+   */
+  #migrateLoadedDoc(context, canvasId, doc) {
+    const models = this.#canvasModelList(context);
+    if (models == null) return doc;
+    let migrated = null;
+    try { migrated = modelLabelMigration.migrateCanvasModelLabels(doc, models); }
+    catch { return doc; } // 迁移是加载路径的增益，绝不因它失败而挡住用户打开画布
+    const report = migrated.report;
+    if (report.migrated.length || report.ambiguous.length || report.unresolved.length) {
+      try {
+        this.logger?.log?.({
+          event: "canvas-model-label-migration",
+          result: report.migrated.length ? "MIGRATED" : "SKIPPED",
+          canvasId: canvasId == null ? null : String(canvasId),
+          migrated: report.migrated,
+          ambiguous: report.ambiguous,
+          unresolved: report.unresolved,
+          at: Number(this.clock()),
+        });
+      } catch { /* 审计失败不影响加载 */ }
+    }
+    return migrated.doc;
+  }
+
   #view(board, access, { doc = null } = {}) {
     return {
       canvasId: board.id,
@@ -150,7 +193,9 @@ class CanvasService {
   getCanvas({ context, canvasId } = {}) {
     const r = this.#load(context, canvasId);
     if (!r.ok) return r;
-    return ok({ canvas: this.#view(r.board, r.access) });
+    // 加载即做旧标签 → 新标签的保真迁移（只改模型字段；详见 canvas-model-label-migration.cjs）。
+    const doc = this.#migrateLoadedDoc(context, canvasId, this.#docOf(r.board));
+    return ok({ canvas: this.#view(r.board, r.access, { doc }) });
   }
 
   /** 只读元数据：宿主状态栏与画布页 2.5s 的版本轮询（`/api/canvases/{id}/meta`）用，**不含文档正文**。*/
@@ -390,6 +435,12 @@ class CanvasService {
       canvasId, nodeId, kind: k, actorUserId: r.user.id, taskId,
       baseRevision: Number(r.board.revision || 1),
     });
+    // 目标节点快照：结果回来时用它做**按节点粒度**的并发判定（整画布 revision 前进不再等于丢弃结果）。
+    // nodeId 为空（画布页当前链路的 POST 不带节点 id）时不建快照，写回退化为"整本画布仍在"。
+    if (typeof this.store.recordRunTarget === "function") {
+      const targetNode = nodeId ? ((this.#docOf(r.board).nodes || []).find((n) => n.id === String(nodeId)) || null) : null;
+      this.store.recordRunTarget({ runId: run.run_id, canvasId, nodeId, baseRevision: Number(r.board.revision || 1), target: targetNode });
+    }
     return ok({ runId: run.run_id, taskId, kind: k, baseRevision: run.base_revision, budget: this.runBudget({ context, runId: run.run_id }) });
   }
 
@@ -434,7 +485,14 @@ class CanvasService {
 
   #runView(run) {
     if (!run) return null;
-    return { runId: run.run_id, canvasId: run.canvas_id, nodeId: run.node_id, kind: run.kind, taskId: run.task_id, status: run.status, stopReason: run.stop_reason, baseRevision: Number(run.base_revision || 1), startedAt: run.started_at, finishedAt: run.finished_at };
+    // 目标已不存在时被留档的结果：让 canvas/runState 与 canvas/runs 能把它交给上层提示"结果已生成"。
+    const saved = typeof this.store.runResultOf === "function" ? this.store.runResultOf(run.run_id) : null;
+    return {
+      runId: run.run_id, canvasId: run.canvas_id, nodeId: run.node_id, kind: run.kind, taskId: run.task_id,
+      status: run.status, stopReason: run.stop_reason, baseRevision: Number(run.base_revision || 1),
+      startedAt: run.started_at, finishedAt: run.finished_at,
+      resultAvailable: !!saved, resultStatus: saved ? saved.status : null, result: saved ? saved.result : null,
+    };
   }
 
   runState({ context, canvasId, runId } = {}) {
@@ -452,11 +510,32 @@ class CanvasService {
   }
 
   /**
+   * 图像 size 的唯一解析点：显式 size 优先级最高；没有显式 size 时，读 run.node_id 指向的
+   * 画布节点上的 ratio / resolution / customSize / customRatio，按 image-params 的表映射成 "WxH"。
+   * 两者都没有 → null（请求体不带 size 键），绝不凭空造一个尺寸。
+   */
+  #imageSizeForRun(run, { size = null, ratio = null, resolution = null, customSize = null, customRatio = null } = {}) {
+    if (size != null && String(size).trim()) return String(size).trim().slice(0, imageParams.MAX_SIZE_LEN);
+    let node = null;
+    if (run && run.node_id) {
+      const board = this.store.boardById(run.canvas_id);
+      if (board) node = (this.#docOf(board).nodes || []).find((n) => n.id === run.node_id) || null;
+    }
+    return imageParams.resolveImageSize({
+      ratio: ratio != null ? ratio : (node && node.ratio),
+      resolution: resolution != null ? resolution : (node && node.resolution),
+      customSize: customSize != null ? customSize : (node && node.customSize),
+      customRatio: customRatio != null ? customRatio : (node && node.customRatio),
+      model: node && node.model,
+    });
+  }
+
+  /**
    * 运行中的模型调用（文本 / 图片）：**唯一入口**。
    * 依次：权限（同一规则）→ run 归属与存活 → 任务停止态 → 预算 → TaskService 记账 → ModelService → 记账收口。
    * 任一前置不通过就**不发出任何请求**（provider 侧看不到调用）。
    */
-  async modelCall({ context, canvasId, runId, kind = "chat", messages = null, prompt = "", size = null, count = 1, configId = null, signal = null } = {}) {
+  async modelCall({ context, canvasId, runId, kind = "chat", messages = null, prompt = "", size = null, ratio = null, resolution = null, customSize = null, customRatio = null, count = 1, configId = null, signal = null } = {}) {
     const run = this.store.runById(runId);
     if (!run || run.canvas_id !== String(canvasId)) return fail("RUN_NOT_FOUND");
     const r = this.#load(context, canvasId, { needEdit: true });
@@ -482,8 +561,9 @@ class CanvasService {
     const onAbort = () => { try { ac.abort(); } catch { /* ignore */ } };
     if (signal) signal.addEventListener("abort", onAbort, { once: true });
     try {
+      const effectiveSize = kind === "image" ? this.#imageSizeForRun(run, { size, ratio, resolution, customSize, customRatio }) : null;
       const res = kind === "image"
-        ? await this.modelService.generateImage({ context: ctx, configId: configId || null, prompt: String(prompt || ""), size, count: Math.max(1, Math.min(4, Number(count) || 1)), signal: ac.signal, capability: "image-generation" })
+        ? await this.modelService.generateImage({ context: ctx, configId: configId || null, prompt: String(prompt || ""), size: effectiveSize, count: Math.max(1, Math.min(4, Number(count) || 1)), signal: ac.signal, capability: "image-generation" })
         : await this.modelService.chat({ context: ctx, configId: configId || null, messages: Array.isArray(messages) ? messages : [], signal: ac.signal, capability: "chat" });
       const fresh = this.taskService.getTask({ context: ctx, taskId: run.task_id });
       const rev = fresh.ok ? fresh.task.revision : task.task.revision;
@@ -497,13 +577,8 @@ class CanvasService {
       const after = this.store.runById(run.run_id);
       if (!after || after.status !== "RUNNING") return fail("RUN_STOPPED", { status: after ? after.status : "STOPPED" });
       if (!res || !res.ok) return res && res.ok === false ? res : fail("MODEL_ERROR");
-      // 画布在生成期间被改动过（版本前进）→ 结果不落回，用户内容优先。
-      const board = this.store.boardById(canvasId);
-      if (board && Number(board.revision) !== Number(run.base_revision)) {
-        this.store.finishRun({ runId: run.run_id, status: "SUPERSEDED", stopReason: "CANVAS_CHANGED" });
-        return fail("CANVAS_CHANGED", { baseRevision: Number(run.base_revision), revision: Number(board.revision) });
-      }
-      return res;
+      // 异步 run 的结果写回：按 run.node_id **定向**判定，整画布 revision 前进不再等于丢弃结果。
+      return this.#acceptRunResult(run, res, { canvasId });
     } catch (err) {
       const fresh = this.taskService.getTask({ context: ctx, taskId: run.task_id });
       this.taskService.failModelCall({ context: ctx, taskId: run.task_id, callId: call.call.callId, providerErrorCode: String((err && err.message) || "MODEL_ERROR").slice(0, 60), expectedRevision: fresh.ok ? fresh.task.revision : task.task.revision });
@@ -514,20 +589,196 @@ class CanvasService {
     }
   }
 
+  /**
+   * 画布流式模型调用（智能画布 /api/canvas-llm/stream 的宿主出口）。
+   *
+   * 与 modelCall 同一套前置（权限 / run 归属 / 停止态 / 预算 / TaskService 记账 / ModelService），
+   * 唯一区别是走 ModelService.chatStream（真实 SSE → 统一事件模型）：增量经**既有** model:event
+   * 下行通道（渲染层 window.openarc.model.onEvent）分块回传，画布页依旧没有网络与凭据。
+   * 取消走既有 canvas/runStop → abortOf 中止在途 HTTP（同一份 abortOf），不留悬挂请求。
+   * 上游没有流式能力/返回非流式时由渲染层如实收口（409 退回普通接口 / 结构化错误），这里不伪造分块。
+   */
+  async modelChatStream({ context, canvasId, runId, messages = [], configId = null, requestId = null, signal = null } = {}) {
+    const run = this.store.runById(runId);
+    if (!run || run.canvas_id !== String(canvasId)) return fail("RUN_NOT_FOUND");
+    const r = this.#load(context, canvasId, { needEdit: true });
+    if (!r.ok) return r;
+    if (run.status !== "RUNNING") return fail("RUN_STOPPED", { status: run.status });
+    if (!this.taskService || !this.modelService) return fail("RUN_UNAVAILABLE");
+    if (typeof this.modelService.chatStream !== "function") return fail("STREAM_UNAVAILABLE");
+    const ctx = { ...context, appId: "canvas" };
+    const task = this.taskService.getTask({ context: ctx, taskId: run.task_id });
+    if (!task.ok) return task;
+    if (task.task.cancelRequested) { this.store.finishRun({ runId: run.run_id, status: "STOPPED", stopReason: "TASK_CANCELLED" }); return fail("TASK_CANCELLED"); }
+    const budget = this.taskService.getTaskBudget({ context: ctx, taskId: run.task_id });
+    if (budget.ok && budget.remaining && Number(budget.remaining.MODEL_CALLS) <= 0) {
+      this.store.finishRun({ runId: run.run_id, status: "BUDGET_EXHAUSTED", stopReason: "MODEL_CALLS" });
+      return fail("BUDGET_EXHAUSTED", { remaining: budget.remaining, authorized: budget.authorized, consumed: budget.consumed });
+    }
+    const binding = this.taskService.checkModelConfig({ context: ctx, taskId: run.task_id });
+    if (!binding.ok) return binding;
+    const call = this.taskService.startModelCall({ context: ctx, taskId: run.task_id, expectedRevision: task.task.revision });
+    if (!call.ok) return call;
+    const ac = new AbortController();
+    if (this.abortOf) this.abortOf.set(run.run_id, ac);
+    const onAbort = () => { try { ac.abort(); } catch { /* ignore */ } };
+    if (signal) signal.addEventListener("abort", onAbort, { once: true });
+    const emit = (raw) => { this.#emitStream({ type: "canvas.stream", requestId, event: raw }); };
+    try {
+      const res = await this.modelService.chatStream({
+        context: ctx, configId: configId || null, messages: Array.isArray(messages) ? messages : [],
+        signal: ac.signal, capability: "chat", requestId, onEvent: emit,
+      });
+      const fresh = this.taskService.getTask({ context: ctx, taskId: run.task_id });
+      const rev = fresh.ok ? fresh.task.revision : task.task.revision;
+      if (res && res.ok) {
+        this.taskService.completeModelCall({ context: ctx, taskId: run.task_id, callId: call.call.callId, usage: res.usage || null, requestId: res.requestId || null, expectedRevision: rev });
+        this.taskService.recordBudgetConsumption({ context: ctx, taskId: run.task_id, consumption: { MODEL_CALLS: 1 } });
+      } else {
+        this.taskService.failModelCall({ context: ctx, taskId: run.task_id, callId: call.call.callId, providerErrorCode: (res && res.error) || "MODEL_ERROR", expectedRevision: rev });
+      }
+      const after = this.store.runById(run.run_id);
+      if (!after || after.status !== "RUNNING") return fail("RUN_STOPPED", { status: after ? after.status : "STOPPED" });
+      if (!res || !res.ok) return res && res.ok === false ? res : fail("MODEL_ERROR");
+      return this.#acceptRunResult(run, res, { canvasId });
+    } catch (err) {
+      const fresh = this.taskService.getTask({ context: ctx, taskId: run.task_id });
+      this.taskService.failModelCall({ context: ctx, taskId: run.task_id, callId: call.call.callId, providerErrorCode: String((err && err.message) || "MODEL_ERROR").slice(0, 60), expectedRevision: fresh.ok ? fresh.task.revision : task.task.revision });
+      return fail("MODEL_ERROR");
+    } finally {
+      if (this.abortOf) this.abortOf.delete(run.run_id);
+      if (signal) signal.removeEventListener("abort", onAbort);
+    }
+  }
+
+  /**
+   * 画布流式增量 → **既有** model:event 下行通道（渲染层 window.openarc.model.onEvent）。
+   * 未接线（providerProtocol 缺失 / 宿主未注入 send）时返回 false：不假装推送成功；
+   * 事件推送失败也不改变流式业务结果（与 provider-protocol 的下行口径一致）。
+   */
+  #emitStream(payload) {
+    try {
+      const pp = this.modelService && this.modelService.providerProtocol;
+      const svc = pp && pp.service;
+      if (!svc || typeof svc.emit !== "function" || !svc.eventChannel || typeof svc.eventChannel.progress !== "function") return false;
+      svc.emit(svc.eventChannel.progress(payload));
+      return true;
+    } catch { return false; }
+  }
+
+  /** 目标节点快照指纹：只比对用户可编辑的内容字段，忽略画布自己的运行期瞬态。 */
+  #nodeFingerprint(node) {
+    if (!node || typeof node !== "object") return "";
+    const content = {};
+    for (const key of domain.EDITABLE_NODE_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(node, key)) content[key] = node[key];
+    }
+    return JSON.stringify([String(node.type || ""), content]);
+  }
+
+  /** 结果留档的有界化：正常结果原样保存；异常大的结果退化为可提示的元数据 + 明确的 truncated。 */
+  #boundedRunResult(result) {
+    const MAX = 16 * 1024 * 1024;
+    let json = "";
+    try { json = JSON.stringify(result); } catch { json = ""; }
+    if (json && json.length <= MAX) return { value: result, bytes: json.length, truncated: false };
+    const images = Array.isArray(result && result.images) ? result.images : [];
+    const summarized = {
+      ok: !!(result && result.ok), truncated: true, imageCount: images.length,
+      images: images.slice(0, 8).map((i) => (i && i.url ? { url: String(i.url).slice(0, 2048) } : { dataUrlOmitted: true, mime: (i && i.mime) || null })),
+      requestId: (result && result.requestId) || null,
+      text: result && typeof result.text === "string" ? result.text.slice(0, 4000) : null,
+    };
+    return { value: summarized, bytes: JSON.stringify(summarized).length, truncated: true };
+  }
+
+  /**
+   * 目标节点已不存在 / 已被并发修改：结果**留档**（绝不静默丢），并把 run 收口成终态。
+   * 返回结构化错误，detail 里带 resultAvailable，让上层能提示"结果已生成但目标节点不存在"。
+   */
+  #preserveRunResult(run, res, { status, stopReason, error, detail = {} } = {}) {
+    let stored = null;
+    if (typeof this.store.recordRunResult === "function") {
+      const bounded = this.#boundedRunResult(res);
+      try {
+        this.store.recordRunResult({ runId: run.run_id, canvasId: run.canvas_id, nodeId: run.node_id, result: bounded.value, status, stopReason });
+        stored = typeof this.store.runResultOf === "function" ? this.store.runResultOf(run.run_id) : null;
+      } catch { /* 留档失败也不能静默：下面照常返回结构化错误 */ }
+    }
+    this.store.finishRun({ runId: run.run_id, status, stopReason });
+    return fail(error, {
+      ...detail,
+      runId: run.run_id,
+      baseRevision: Number(run.base_revision || 1),
+      resultAvailable: !!stored,
+      resultStatus: stored ? stored.status : null,
+    });
+  }
+
+  /**
+   * 异步 run 结果写回的唯一判定点（只放宽这一条路径，用户编辑的冲突闸在 saveCanvas/applyCommand 不动）：
+   *   1) 画布已被删 → CANVAS_RUN_TARGET_MISSING，结果留档；
+   *   2) run.node_id 指向的节点已被删 → CANVAS_RUN_TARGET_MISSING，结果留档；
+   *   3) 目标节点被并发修改（按节点粒度比对 startRun 快照）→ CANVAS_RUN_NODE_CONFLICT，结果留档；
+   *   4) 其余（包括"页面自己落盘 pending 卡片"推进了整画布 revision）→ 结果照常返回，由页面按当前
+   *      revision 定向应用到目标节点 / 输出节点。
+   * node_id 为空（画布页当前链路不带节点 id）时无从做节点粒度判定，退化为"整本画布仍在即可写回"。
+   */
+  #acceptRunResult(run, res, { canvasId } = {}) {
+    const board = this.store.boardById(canvasId);
+    if (!board || board.deleted_at) {
+      return this.#preserveRunResult(run, res, {
+        status: "SUPERSEDED", stopReason: REASON.CANVAS_RUN_TARGET_MISSING,
+        error: REASON.CANVAS_RUN_TARGET_MISSING, detail: { reason: "CANVAS_DELETED" },
+      });
+    }
+    const targetId = run.node_id == null ? null : String(run.node_id);
+    if (targetId) {
+      const doc = this.#docOf(board);
+      const node = (doc.nodes || []).find((n) => n.id === targetId) || null;
+      if (!node) {
+        return this.#preserveRunResult(run, res, {
+          status: "SUPERSEDED", stopReason: REASON.CANVAS_RUN_TARGET_MISSING,
+          error: REASON.CANVAS_RUN_TARGET_MISSING, detail: { reason: "TARGET_NODE_DELETED", nodeId: targetId },
+        });
+      }
+      const snapshot = typeof this.store.runTargetOf === "function" ? this.store.runTargetOf(run.run_id) : null;
+      if (snapshot && snapshot.target && this.#nodeFingerprint(snapshot.target) !== this.#nodeFingerprint(node)) {
+        return this.#preserveRunResult(run, res, {
+          status: "SUPERSEDED", stopReason: REASON.CANVAS_RUN_NODE_CONFLICT,
+          error: REASON.CANVAS_RUN_NODE_CONFLICT, detail: { reason: "TARGET_NODE_MODIFIED", nodeId: targetId },
+        });
+      }
+    }
+    return {
+      ...res,
+      run: {
+        runId: run.run_id, nodeId: targetId,
+        baseRevision: Number(run.base_revision || 1), revision: Number(board.revision || 1),
+        rebased: Number(board.revision || 1) !== Number(run.base_revision || 1),
+      },
+    };
+  }
+
   /** 正常收口：任务完成（结果已由画布落盘）。*/
   finishRun({ context, canvasId, runId, status = "DONE" } = {}) {
     const run = this.store.runById(runId);
     if (!run || run.canvas_id !== String(canvasId)) return fail("RUN_NOT_FOUND");
     const r = this.#load(context, canvasId, { needEdit: true });
     if (!r.ok) return r;
+    // 幂等收口：模型结果写回路径可能已经把 run 收成终态（停止/预算/目标缺失/节点冲突）。
+    // 此时 run 行不再改写，但**任务仍要收口**（否则 Task 会停在 RUNNING 泄漏预算归属）。
+    const alreadyFinished = !!(run.status && run.status !== "RUNNING");
     const ctx = { ...context, appId: "canvas" };
     if (this.taskService && run.task_id && ["DONE", "FAILED"].includes(String(status))) {
       const task = this.taskService.getTask({ context: ctx, taskId: run.task_id });
       if (task.ok && task.task.status === "RUNNING") {
-        if (status === "DONE") this.taskService.completeTask({ context: ctx, taskId: run.task_id, expectedRevision: task.task.revision });
+        const effective = alreadyFinished ? "FAILED" : String(status);
+        if (effective === "DONE") this.taskService.completeTask({ context: ctx, taskId: run.task_id, expectedRevision: task.task.revision });
         else this.taskService.failTask({ context: ctx, taskId: run.task_id, errorCode: "CANVAS_NODE_FAILED", expectedRevision: task.task.revision });
       }
     }
+    if (alreadyFinished) return ok({ run: this.#runView(run), alreadyFinished: true });
     return ok({ run: this.#runView(this.store.finishRun({ runId: run.run_id, status: String(status), stopReason: null })) });
   }
 

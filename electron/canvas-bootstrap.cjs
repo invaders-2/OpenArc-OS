@@ -40,6 +40,8 @@ const RENDERER_COMMANDS = extendRendererCommands([
   "canvas/runs",
   "canvas/runFinish",
   "canvas/modelChat",
+  // 智能画布（上游 1e20abe5 起）的流式 LLM：与 canvas/modelChat 同一套前置，增量经 model:event 下行。
+  "canvas/modelChatStream",
   "canvas/modelImage",
   "canvas/importAsset",
   "canvas/readAsset",
@@ -121,6 +123,12 @@ function registerCanvasIpc({ ipcMain, service, identity, isTrusted, hostAppId = 
           return service.modelCall({
             context, canvasId: asStr(payload.canvasId, 120), runId: asStr(payload.runId, 120), kind: "chat",
             messages: Array.isArray(payload.messages) ? payload.messages.slice(0, 64) : [], configId: asStr(payload.configId, 120),
+          });
+        case "canvas/modelChatStream":
+          return service.modelChatStream({
+            context, canvasId: asStr(payload.canvasId, 120), runId: asStr(payload.runId, 120),
+            messages: Array.isArray(payload.messages) ? payload.messages.slice(0, 64) : [], configId: asStr(payload.configId, 120),
+            requestId: asStr(payload.requestId, 80),
           });
         case "canvas/modelImage":
           return service.modelCall({

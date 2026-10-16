@@ -50,6 +50,8 @@ let child = null, browser = null, page = null, provider = null, stderrBuf = "";
 let userDataDir = null, agentProvider = null;
 const dialogs = [];
 const consoleErrors = [];
+/** bundle 请求失败（>=400 或加载失败），只统计 openarc-canvas://bundle/ 下的资源。E4 用它在伪造帧加载窗口内数 404。 */
+const netFails = [];
 const js = (code) => page.evaluate("(async () => { " + code + " })()");
 const has = (sel) => js("return !!document.querySelector(" + JSON.stringify(sel) + ")");
 const setInput = (sel, v) => js("const el = document.querySelector(" + JSON.stringify(sel) + "); if (!el) return 'missing'; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el, " + JSON.stringify(v) + "); el.dispatchEvent(new Event('input', { bubbles: true })); return 'ok';");
@@ -83,8 +85,13 @@ const shellJs = (code) => inFrame(shellFrame(), code);
 async function launch() {
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), "oa-d502-"));
   userDataDir = userData;
+  const childEnv = { ...process.env, OPENARC_IDENTITY_ADMIN: "1" };
+  // 本仓库环境 ELECTRON_RUN_AS_NODE=1 会把 Electron 当普通 Node 跑（app 未定义、CDP 不启动），必须摘掉；
+  // 与 experiments/dxos-canvas-prune/real-device-canvas.mjs 同一约定。
+  delete childEnv.ELECTRON_RUN_AS_NODE;
+  delete childEnv.ELECTRON_NO_ATTACH_CONSOLE;
   child = spawn(electronPath, [".", "--user-data-dir=" + userData, "--remote-debugging-port=" + CDP_PORT, ...extraArgs], {
-    cwd: ROOT, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, OPENARC_IDENTITY_ADMIN: "1" },
+    cwd: ROOT, stdio: ["ignore", "pipe", "pipe"], env: childEnv,
   });
   child.stdout.on("data", () => {});
   child.stderr.on("data", (d) => { stderrBuf += String(d); });
@@ -94,12 +101,24 @@ async function launch() {
   if (!version) throw new Error("CDP 未就绪");
   browser = await chromium.connectOverCDP("http://127.0.0.1:" + CDP_PORT);
   const ctx = browser.contexts()[0];
+  // 界面页 = 当前默认壳 dist/vue.html（electron/main.cjs 默认加载；OA_UI=react 才回 dist/index.html）。
+  // 两种都接受，但**都找不到时必须显式报错**，不能静默跳过（否则测试绿但其实没跑到界面）。
   const end = Date.now() + 40000;
-  while (!page && Date.now() < end) { page = ctx.pages().find((p) => p.url().includes("dist/index.html")) || null; if (!page) await sleep(300); }
-  if (!page) throw new Error("未找到界面页面");
+  const uiVue = /[\\/]dist[\\/]vue\.html/;
+  const uiIndex = /[\\/]dist[\\/]index\.html/;
+  while (!page && Date.now() < end) {
+    const pages = ctx.pages();
+    page = pages.find((p) => uiVue.test(p.url())) || pages.find((p) => uiIndex.test(p.url())) || null;
+    if (!page) await sleep(300);
+  }
+  if (!page) throw new Error("未找到界面页面（优先 dist/vue.html，回退 dist/index.html）；当前 pages=" + JSON.stringify(ctx.pages().map((p) => p.url())));
   page.on("dialog", (d) => { dialogs.push(String(d.message()).slice(0, 140)); void d.dismiss().catch(() => {}); });
   page.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text().slice(0, 200)); });
   page.on("pageerror", (e) => consoleErrors.push("pageerror:" + String(e.message).slice(0, 200)));
+  // bundle 资源失败留证（Playwright 页面事件覆盖**子帧 / OOPIF**，CDP 页面会话看不到沙箱伪造帧的请求）。
+  const isBundleUrl = (u) => String(u).indexOf("openarc-canvas://bundle/") === 0;
+  page.on("response", (r) => { if (isBundleUrl(r.url()) && r.status() >= 400) netFails.push({ status: r.status(), url: r.url() }); });
+  page.on("requestfailed", (r) => { if (isBundleUrl(r.url())) netFails.push({ status: 0, errorText: r.failure() ? r.failure().errorText : "", url: r.url() }); });
 }
 
 async function startReceiver() {
@@ -142,7 +161,23 @@ async function rightClickDockItem(appId) {
  *  标题栏红灯对非 settings 应用只做最小化（components.tsx:598），最小化不销毁 iframe，
  *  所以必须走程序坞右键菜单的「关闭应用」→ window/close（main.tsx:2927-2939 的程序坞菜单项）。
  *  关不掉（图标/菜单项缺失或 disabled）就返回 false，不伪装成功。*/
+/** Vue 壳层（默认 dist/vue.html）：程序坞右键菜单已下线，关闭非 settings 窗口的产品入口是
+ *  顶栏「文件 → 关闭窗口」（TopBar close → window/close）——与 React 的「右键程序坞图标 → 关闭应用」
+ *  同一条语义（销毁窗口，不是最小化）。*/
+async function closeAppWindowViaMenuBar() {
+  const opened = await js("const b = Array.from(document.querySelectorAll('.topbar-menus .bar-menu')).find(function (x) { return x.textContent.trim() === '文件'; }); if (!b) return false; b.click(); return true;");
+  if (opened !== true) return false;
+  const clicked = await waitFor(() => js(
+    "const menu = document.querySelector('.context-menu[role=\"menu\"]'); if (!menu) return false;" +
+    "const item = Array.from(menu.querySelectorAll('button[role=\"menuitem\"]')).find(function (b) { return (b.querySelector('.menu-label') || b).textContent.trim() === '关闭窗口'; });" +
+    "if (!item || item.disabled) return false;" +
+    "item.click(); return true;",
+  ), 8000);
+  if (!clicked) return false;
+  return await waitFor(() => allBundleFrames().length === 0, 15000);
+}
 async function closeAppWindow() {
+  if (await has(".topbar-menus .bar-menu")) return await closeAppWindowViaMenuBar();
   if (!(await rightClickDockItem("canvas"))) return false;
   const clicked = await waitFor(() => js(
     "const menu = document.querySelector('.context-menu.dock-menu[aria-label=\"程序坞菜单\"]'); if (!menu) return false;" +
@@ -361,12 +396,12 @@ async function main() {
   const n2GuideState = (await waitFor(async () => (await inFrame(canvasFrame(), n2Guide)) !== null, 15000)) ? await inFrame(canvasFrame(), n2Guide) : { opened: false, text: null };
   const n2Settings = await nSettingsWindow();
   const n2Close = await nCloseSettingsWindow();
-  record("N2", "引导真的打开 OpenArc 总 API 设置：真实点击页面里的引导按钮 → 桥把这一次请求真的送到宿主（按钮拿到 data-openarc-guide-state=opened）+ 出现设置窗口且 [data-settings-active=model]（标题「模型 / AI」、未被最小化）；随后关掉设置窗口，不留残留、不影响后续断言",
+  record("N2", "引导真的打开 OpenArc 总 API 设置：真实点击页面里的引导按钮 → 桥把这一次请求真的送到宿主（按钮拿到 data-openarc-guide-state=opened）+ 出现设置窗口且 [data-settings-active=model]（标题「模型与服务商」、未被最小化）；随后关掉设置窗口，不留残留、不影响后续断言",
     !!n2Click && n2Click.clicked === true && n2Click.text === N_GUIDE_TEXT && n2Opened === true
       && !!n2GuideState && n2GuideState.opened === true
-      && !!n2Settings && n2Settings.active === "model" && n2Settings.title === "模型 / AI" && n2Settings.minimized === false && n2Settings.hasWindow === true
+      && !!n2Settings && n2Settings.active === "model" && n2Settings.title === "模型与服务商" && n2Settings.minimized === false && n2Settings.hasWindow === true
       && !!n2Close && n2Close.closed === true,
-    "点击 → guide-state=opened + 设置窗口 data-settings-active=model（模型 / AI）+ 关闭成功",
+    "点击 → guide-state=opened + 设置窗口 data-settings-active=model（模型与服务商）+ 关闭成功",
     JSON.stringify({ click: n2Click, opened: n2Opened, guideState: n2GuideState, settings: n2Settings, close: n2Close }));
 
   const n3ReqBefore = provider.state();
@@ -606,7 +641,9 @@ async function main() {
   // N5c：跨能力状态点（生图默认被指到只有 chat 的模型）。产品契约（本批修订）：**不回落、不换模型、不隐瞒清单** ——
   // 生图区按「显式默认不可用」呈现（与未配置同一套可见口径 + data-openarc-default-unavailable），清单照旧如实投影，
   // 那个可用生图模型**不会**被自动选中；文本区不受影响。
-  const n5cImgLabel = String((imgModel && imgModel.model && (imgModel.model.displayName || imgModel.model.remoteModelId)) || "") + " · " + String(imgId).slice(-4);
+  // 标签口径跟宿主唯一真源 src/canvas/canvasModelLabels.ts 的 canvasModelBaseName：remoteModelId > displayName > configId
+  // （门禁这批夹具的 remoteModelId 各不相同，不触发撞车加后缀那条分支）。
+  const n5cImgLabel = String((imgModel && imgModel.model && (imgModel.model.remoteModelId || imgModel.model.displayName)) || imgId);
   const n5cCrossCap = await nWaitModelArea("image-unavailable", n5cImgLabel);
   await model({ type: "defaults/set", capability: "image-generation", configId: imgId });
   record("D2", "能力不支持：图片能力被指到只有 chat 的模型上 → 明确 CAPABILITY_UNAVAILABLE，provider 收不到图片请求",
@@ -669,7 +706,7 @@ async function main() {
   const beforeDisable = provider.state().chats.length;
   // N5d 前置：按宿主的 label() 口径算出**要被停用的那个模型**在页面清单里的标签（停用后它就查不到了），
   // 并当场确认它此刻真的在清单里 —— 公式错位在这里就暴露，不让后面的判定空对空。
-  const n5dLabel = String((chatModel && chatModel.model && (chatModel.model.displayName || chatModel.model.remoteModelId)) || "") + " · " + String(chatId).slice(-4);
+  const n5dLabel = String((chatModel && chatModel.model && (chatModel.model.remoteModelId || chatModel.model.displayName)) || chatId);
   const n5dManifestBefore = await inFrame(canvasFrame(), "const cfg = await (await fetch('/api/config')).json(); return { chat: cfg.chat_models || [] };");
   await model({ type: "model/setStatus", configId: chatId, status: "disabled" });
   const disabledCall = await canvas({ type: "canvas/modelChat", canvasId: currentCanvasId, runId: bindRun.runId, messages: [{ role: "user", content: "停用后不该成功" }], configId: chatId });
@@ -896,13 +933,24 @@ async function main() {
     forged && forged.ok === true && forged.count === (forgedList.items || []).length,
     "按会话身份处理", JSON.stringify({ forged, sessionListCount: (forgedList.items || []).length }));
 
+  // 伪造帧的来源必须是**保留下来的产品页**（画布入口 static/canvas-list.html），不再是已裁掉子页的非产品外壳
+  // bundle 根 index.html（它 eager 的 #frame-home 指向已删除的 static/home.html，加载一次就是 1 条 404）。
+  // 断言语义不变且更严：伪造 token / 其它 iframe / 产品页自身来源的调用一律不执行（画布数不变），
+  // **并且**伪造帧加载窗口内 bundle 资源 0 条 404、伪造帧确实加载了目标文档（不是空跑）。
+  const E4_FORGED_SRC = "openarc-canvas://bundle/static/canvas-list.html?id=cv_probe";
   const listBefore2 = (await canvas({ type: "canvas/list" })).items.length;
-  const e4res = await js("const f = document.createElement('iframe'); f.id='oa-forged-frame'; f.setAttribute('sandbox','allow-scripts'); f.src='openarc-canvas://bundle/index.html?id=cv_probe'; f.style.display='none'; document.body.appendChild(f); await new Promise(r=>setTimeout(r,2500)); const w = f.contentWindow; try { w.postMessage({ ch:'openarc.canvas', dir:'canvas->host', kind:'call', id: 991, token:'t_forged', method:'canvas.create', params:{ title:'伪造' } }, '*'); } catch(e) {} window.postMessage({ ch:'openarc.canvas', dir:'canvas->host', kind:'call', id: 992, token:'t_forged', method:'canvas.create', params:{ title:'来自外壳' } }, '*'); await new Promise(r=>setTimeout(r,1800)); f.remove(); return { done: true };");
+  const e4NetMark = netFails.length;
+  const e4res = await js("const f = document.createElement('iframe'); f.id='oa-forged-frame'; f.setAttribute('sandbox','allow-scripts'); f.src=" + JSON.stringify(E4_FORGED_SRC) + "; f.style.display='none'; document.body.appendChild(f); await new Promise(r=>setTimeout(r,2500)); const w = f.contentWindow; try { w.postMessage({ ch:'openarc.canvas', dir:'canvas->host', kind:'call', id: 991, token:'t_forged', method:'canvas.create', params:{ title:'伪造' } }, '*'); } catch(e) {} window.postMessage({ ch:'openarc.canvas', dir:'canvas->host', kind:'call', id: 992, token:'t_forged', method:'canvas.create', params:{ title:'来自产品页' } }, '*'); await new Promise(r=>setTimeout(r,1800)); const frameUrl = (function () { try { return String(f.contentWindow.location.href); } catch (e) { return 'cross-origin'; } })(); return { done: true, frameUrl: frameUrl };");
+  const e4FrameUrls = page.frames().map((f) => String(f.url())).filter((u) => u.indexOf("openarc-canvas://bundle/") === 0);
+  const e4FrameLoaded = e4FrameUrls.some((u) => u.indexOf(E4_FORGED_SRC.split("?")[0]) === 0) || String(e4res && e4res.frameUrl).indexOf(E4_FORGED_SRC.split("?")[0]) === 0;
+  await js("const f = document.getElementById('oa-forged-frame'); if (f) f.remove(); return true;");
   await sleep(500);
   const listAfter2 = (await canvas({ type: "canvas/list" })).items.length;
-  record("E4", "宿主只接受**当前应用实例**的消息：伪造 token / 其它 iframe / 外壳自身发的调用一律不执行",
-    listAfter2 === listBefore2,
-    "画布数量不变", JSON.stringify({ e4res, listBefore2, listAfter2 }));
+  const e4Fails = netFails.slice(e4NetMark);
+  const e4NotFound = e4Fails.filter((f) => f.status === 404);
+  record("E4", "宿主只接受**当前应用实例**的消息：伪造 token / 其它 iframe / 产品页（static/canvas-list.html）自身发的调用一律不执行；伪造帧加载 0 条 bundle 404",
+    listAfter2 === listBefore2 && e4FrameLoaded === true && e4NotFound.length === 0,
+    "画布数量不变 + 伪造帧 0 条 404", JSON.stringify({ e4res, listBefore2, listAfter2, e4FrameLoaded, e4FrameUrls, e4NotFound, e4Fails: e4Fails.slice(0, 8) }));
 
   /** A 账号（admin）本次挂载的存储钥匙与分桶自证：必须在导航尝试**之前**采集。
    *  E8 里 own>=1 必须有**真实、确定的来源**：这里在 A 账号页面的 scoped localStorage 写一个探针键 ——
@@ -1329,12 +1377,20 @@ async function nAddProbeNodes() {
   return { add: added.map((r) => (r && r.ok === true ? "ok" : String((r && r.error) || "noFrame"))), marked };
 }
 async function nRemoveProbeNodes() {
-  const res = await inFrame(canvasFrame(), "return await window.__openarcCanvas.applyCommand({ type:'node.delete', ids:" + JSON.stringify(N_PROBE_NODES.map((n) => n.id)) + " }, null);");
+  const ids = N_PROBE_NODES.map((n) => n.id);
+  const res = await inFrame(canvasFrame(), "return await window.__openarcCanvas.applyCommand({ type:'node.delete', ids:" + JSON.stringify(ids) + " }, null);");
   const gone = await waitFor(async () => {
     const s = await inFrame(canvasFrame(), "const it = window.__openarcCanvasInternals; return { gen: !!it.primitives.getNode('n_ng_probe_gen'), vid: !!it.primitives.getNode('n_ng_probe_vid') };");
     return !!s && s.gen === false && s.vid === false;
   }, 15000);
-  return { del: res && res.ok === true ? "ok" : String((res && res.error) || "noFrame"), gone };
+  // 页面 primitives 清掉 ≠ 存储已落库：删除是乐观本地生效 + 500ms 待保存；若此刻就导航回列表，
+  // 待保存被丢掉，重开时这两条探针节点会复活（A10 就会读到 4 个节点）。等存储真的不再含这两个 id 再走。
+  const persisted = await waitFor(async () => {
+    const got = await canvas({ type: "canvas/get", canvasId: currentCanvasId });
+    const live = got && got.ok ? ((got.canvas.doc.nodes || []).map((n) => n.id)) : null;
+    return !!live && ids.every((id) => !live.includes(id));
+  }, 20000);
+  return { del: res && res.ok === true ? "ok" : String((res && res.error) || "noFrame"), gone, persisted };
 }
 
 /** 页面内「伪造事实」扫描：outerHTML（全部属性 + 文本）、option.value（JS 属性，不一定落成 HTML 属性）、
@@ -1445,7 +1501,7 @@ const nSnapBrief = (r) => (r ? {
 } : null);
 
 /** 设置窗口（宿主顶层页 DOM）：pane 归属 + 标题 + 是否被最小化。*/
-const nSettingsWindow = () => js("const p = document.querySelector('[data-settings-active]'); if (!p) return null; const w = p.closest('.window'); return { active: String(p.getAttribute('data-settings-active') || ''), title: String((p.querySelector('.settings-pane h1') || {}).textContent || '').trim(), minimized: !!(w && w.classList.contains('minimized')), hasWindow: !!w, panes: document.querySelectorAll('[data-settings-pane]').length };");
+const nSettingsWindow = () => js("const p = document.querySelector('[data-settings-active]'); if (!p) return null; const w = p.closest('.window'); return { active: String(p.getAttribute('data-settings-active') || ''), title: String((p.querySelector('.pane-toolbar h1') || {}).textContent || '').trim(), minimized: !!(w && w.classList.contains('minimized')), hasWindow: !!w, panes: document.querySelectorAll('[data-settings-pane]').length };");
 /** 关掉设置窗口：先走窗口自己的关闭按钮（settings 的 closeAction 就是 close），不行再退回程序坞菜单「关闭应用」。*/
 async function nCloseSettingsWindow() {
   const byButton = await js("const p = document.querySelector('[data-settings-active]'); const w = p && p.closest('.window'); const b = w && w.querySelector('.window-title button.close'); if (!b) return 'missing'; b.click(); return 'clicked';");
@@ -1463,22 +1519,33 @@ const taskCmd = (payload) => js("return await window.openarc.task.command(" + JS
 const taskGet = (taskId) => taskCmd({ type: "task/get", taskId });
 const attrOf = (sel, name) => js("const el = document.querySelector(" + JSON.stringify(sel) + "); return el ? (el.getAttribute(" + JSON.stringify(name) + ") || '') : '';");
 const textOf = (sel) => js("const el = document.querySelector(" + JSON.stringify(sel) + "); return el ? (el.textContent || '') : '';");
-const setTextarea = (sel, v) => js("const el = document.querySelector(" + JSON.stringify(sel) + "); if (!el) return 'missing'; Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(el, " + JSON.stringify(v) + "); el.dispatchEvent(new Event('input', { bubbles: true })); return 'ok';");
+/** 受控输入写入：React 的 AI 面板是 <textarea>，Vue 助理浮层的 [data-ai-goal] 是 <input>；
+ *  用错 prototype 的原生 value setter 会抛 Illegal invocation，所以按元素类型选描述符。*/
+const setTextarea = (sel, v) => js("const el = document.querySelector(" + JSON.stringify(sel) + "); if (!el) return 'missing'; const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto,'value').set.call(el, " + JSON.stringify(v) + "); el.dispatchEvent(new Event('input', { bubbles: true })); return 'ok';");
 const clickSel = (sel) => js("const el = document.querySelector(" + JSON.stringify(sel) + "); if (!el) return 'missing'; if (el.disabled) return 'disabled'; el.click(); return 'ok';");
 async function openAiPanel() {
-  if (await has(".ai-panel")) return true;
-  if (await waitSel(".assistant-pill", 30000)) await clickSel(".assistant-pill");
-  return await waitSel(".ai-panel", 20000);
+  if (await has(".ai-panel") || await has("[data-ai-panel]")) return true;
+  if (await has(".assistant-pill")) await clickSel(".assistant-pill");
+  else if (await has('[aria-label="全局 AI"]')) await clickSel('[aria-label="全局 AI"]');
+  else if (await has('[aria-label="打开全局 AI"]')) await clickSel('[aria-label="打开全局 AI"]');
+  return (await waitSel("[data-ai-panel]", 20000)) || (await waitSel(".ai-panel", 5000));
 }
 async function runTaskViaUI(goal) {
   await openAiPanel();
-  const prev = await attrOf(".ai-panel", "data-ai-task-id");
+  const panelSel = (await has("[data-ai-panel]")) ? "[data-ai-panel]" : ".ai-panel";
+  const prev = await attrOf(panelSel, "data-ai-task-id");
   await setTextarea("[data-ai-goal]", goal);
-  const ready = await waitFor(async () => !(await js("const b = document.querySelector('[data-ai-run]'); return !b || b.disabled;")), 30000);
-  if (!ready) return { started: false, error: "run 按钮一直不可用" };
-  await clickSel("[data-ai-run]");
-  const started = await waitFor(async () => { const id = await attrOf(".ai-panel", "data-ai-task-id"); return typeof id === "string" && id.length > 0 && id !== prev; }, 40000);
-  return { taskId: await attrOf(".ai-panel", "data-ai-task-id"), started, status: await attrOf(".ai-panel", "data-ai-status"), stateText: (await textOf("[data-ai-state]")).replace(/\s+/g, " ").trim().slice(0, 200) };
+  const stateText = async () => ((await textOf("[data-ai-state]")) || (await textOf("[data-ai-status-text]"))).replace(/\s+/g, " ").trim().slice(0, 200);
+  if (await has("[data-ai-run]")) {
+    const ready = await waitFor(async () => !(await js("const b = document.querySelector('[data-ai-run]'); return !b || b.disabled;")), 30000);
+    if (!ready) return { started: false, error: "run 按钮一直不可用" };
+    await clickSel("[data-ai-run]");
+  } else {
+    // Vue 助理浮层没有独立运行按钮：输入框 @keydown.enter.prevent="go"，回车即提交。
+    await js("const el = document.querySelector('[data-ai-goal]'); if (!el) return 'missing'; el.focus(); el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true })); return 'ok';");
+  }
+  const started = await waitFor(async () => { const id = await attrOf(panelSel, "data-ai-task-id"); return typeof id === "string" && id.length > 0 && id !== prev; }, 40000);
+  return { taskId: await attrOf(panelSel, "data-ai-task-id"), started, status: await attrOf(panelSel, "data-ai-status"), stateText: await stateText() };
 }
 const waitApproval = (ms) => waitFor(async () => (await attrOf("[data-approval-request-id]", "data-approval-request-id")).length > 0, ms || 60000);
 async function waitTaskTerminal(taskId, timeout = 180000) {
@@ -1581,7 +1648,7 @@ async function runAiEditChain() {
       events,
       emitted: (agentProvider.state.toolCalls || []).slice(-4),
       toolExecs: dbRows("tool_executions").filter((r) => r.task_id === run1.taskId).map((r) => ({ tool: r.tool_id, status: r.status, error: r.error_code || null })).slice(-4),
-      panel: (await textOf(".ai-panel")).replace(/\s+/g, " ").trim().slice(0, 300),
+      panel: (((await textOf("[data-ai-panel]")) || (await textOf(".ai-panel")))).replace(/\s+/g, " ").trim().slice(0, 300),
     };
     details.chain1 = { run1, approval1, approvalMeta, advertised, term1, before, after1, call1: call1 ? { status: call1.status, verification: call1.verification_status, callId: call1.call_id } : null, presented, closedForF4, reopenedForF4, restored, diag1 };
 

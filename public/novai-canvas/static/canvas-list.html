@@ -3,22 +3,24 @@
 <head>
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src openarc-canvas: 'unsafe-inline'; style-src openarc-canvas: 'unsafe-inline'; img-src openarc-canvas: data: blob:; media-src openarc-canvas: data: blob:; font-src openarc-canvas:; connect-src openarc-canvas:; frame-src openarc-canvas:; child-src openarc-canvas:; object-src 'none'; form-action 'none'; base-uri 'none'">
     <script src="/openarc-bridge.js"></script>
+    <script src="/openarc-rename-modal.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <link rel="icon" href="/static/images/logo.png" type="image/png">
     <title>画布工作台</title>
     <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.117.1789606971"></script>
-    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.117.1789606971"></script>
-    <script defer src="/static/js/shared/icons.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/theme.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/shared/utils.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/shared/viewport.js?v=1.0.117.1789606971"></script>
-    <script defer src="/static/js/touch-mouse.js?v=1.0.117.1789606971"></script>
-    <script src="/static/js/i18n.js?v=1.0.117.1789606971"></script>
-    <link rel="stylesheet" href="/static/css/canvas-list.css?v=1.0.117.1789606971">
-    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.117.1789606971">
-    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.117.1789606971">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.124.1789606971"></script>
+    <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.124.1789606971"></script>
+    <script defer src="/static/js/shared/icons.js?v=1.0.124.1790685706"></script>
+    <script src="/static/js/theme.js?v=1.0.124.1789606971"></script>
+    <script src="/static/js/shared/utils.js?v=1.0.124.1790560477"></script>
+    <script src="/static/js/shared/viewport.js?v=1.0.124.1789606971"></script>
+    <script defer src="/static/js/touch-mouse.js?v=1.0.124.1789606971"></script>
+    <script src="/static/js/i18n.js?v=1.0.124.1790130330"></script>
+    <script src="/static/js/shared/morph-button.js?v=1.0.124.1789845865"></script>
+    <link rel="stylesheet" href="/static/css/canvas-list.css?v=1.0.124.1790560477">
+    <link rel="stylesheet" href="/static/css/theme.css?v=1.0.124.1790560477">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=1.0.124.1790560477">
 
     <style>
         /* ═══ V4 Apple-style Glassmorphism Design System ═══ */
@@ -139,7 +141,7 @@
         }
         .btn-primary:hover { transform: scale(1.03); box-shadow: 0 6px 20px -6px var(--v4-card-shadow-hover); }
         .btn-primary:active { transform: scale(0.97); }
-        .btn-primary:focus-visible { outline: 2px solid var(--v4-focus-ring); outline-offset: 3px; }
+        .btn-primary:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent); }
 
         .btn-secondary {
             display: inline-flex; align-items: center; gap: 8px;
@@ -147,7 +149,7 @@
             backdrop-filter: blur(20px) saturate(180%);
             -webkit-backdrop-filter: blur(20px) saturate(180%);
             color: var(--v4-text);
-            border: 1px solid transparent;
+            border: 0;
             border-radius: 12px;
             padding: 14px 32px;
             font-size: 14px; font-weight: 500;
@@ -161,11 +163,9 @@
         .btn-secondary:hover {
             transform: translateY(-1px);
             box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 24px -6px var(--v4-card-shadow-hover);
-            border-color: rgba(0,0,0,0.08);
         }
-        .theme-dark .btn-secondary:hover { border-color: rgba(255,255,255,0.08); }
         .btn-secondary:active { transform: translateY(0); }
-        .btn-secondary:focus-visible { outline: 2px solid var(--v4-focus-ring); outline-offset: 3px; }
+        .btn-secondary:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent); }
 
         /* ═══ CAROUSEL ═══ */
         .hero-carousel {
@@ -174,7 +174,7 @@
             border-radius: 16px;
             overflow: hidden;
             position: relative;
-            border: 1px solid transparent;
+            border: 0;
             box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px -4px var(--v4-card-shadow);
         }
         .carousel-slide {
@@ -212,18 +212,17 @@
             width: 100%;
             margin: 0;
             padding: 16px 20px;
-            background: rgba(255,255,255,0.22);
+            border-radius: 0;
+            background: rgba(0,0,0,0.5);
             backdrop-filter: blur(20px) saturate(180%);
             -webkit-backdrop-filter: blur(20px) saturate(180%);
             color: #fff;
-            box-shadow: 0 -1px 2px rgba(0,0,0,0.04);
-            border-top: 1px solid rgba(255,255,255,0.14);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px -4px var(--v4-card-shadow);
             display: flex; align-items: center; justify-content: space-between;
             gap: 16px;
         }
         .theme-dark .carousel-caption {
-            background: rgba(0,0,0,0.35);
-            border-top-color: rgba(255,255,255,0.08);
+            background: rgba(0,0,0,0.66);
         }
         .carousel-caption-title {
             font-size: 14px; font-weight: 600;
@@ -285,7 +284,7 @@
         }
         .btn-new-project:hover { transform: scale(1.03); box-shadow: 0 6px 20px -6px var(--v4-card-shadow-hover); }
         .btn-new-project:active { transform: scale(0.97); }
-        .btn-new-project:focus-visible { outline: 2px solid var(--v4-focus-ring); outline-offset: 3px; }
+        .btn-new-project:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent); }
 
         /* ═══ CARDS GRID ═══ */
         .cards-grid {
@@ -298,12 +297,12 @@
             background: var(--v4-card-bg);
             backdrop-filter: blur(20px) saturate(180%);
             -webkit-backdrop-filter: blur(20px) saturate(180%);
-            border: 1px solid transparent;
+            border: 0;
             border-radius: 16px;
             overflow: hidden;
             cursor: pointer;
             box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 4px 16px -4px var(--v4-card-shadow);
-            transition: transform 0.18s var(--v4-ease-out), box-shadow 0.18s var(--v4-ease-out), border-color 0.18s var(--v4-ease-out), background 0.18s var(--v4-ease-out);
+            transition: transform 0.18s var(--v4-ease-out), box-shadow 0.18s var(--v4-ease-out), background 0.18s var(--v4-ease-out);
             text-decoration: none;
             color: inherit;
             display: flex;
@@ -316,7 +315,7 @@
         }
         .theme-dark .project-card:hover { background: rgba(255, 255, 255, 0.06); box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 12px 32px -8px var(--v4-card-shadow-hover); }
         .project-card:active { transform: translateY(0) scale(0.98); }
-        .project-card:focus-visible { outline: 2px solid var(--v4-focus-ring); outline-offset: 2px; }
+        .project-card:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent); }
 
         /* 四宫格预览 */
         .card-preview {
@@ -329,6 +328,18 @@
             gap: 2px;
             background: var(--v4-bg);
         }
+        .card-preview[data-thumbs="1"] .card-preview-thumb { grid-column: 1 / -1; grid-row: 1 / -1; }
+        .card-preview[data-thumbs="2"] .card-preview-thumb { grid-row: 1 / -1; }
+        .card-preview[data-thumbs="3"] .card-preview-thumb:first-child { grid-row: 1 / -1; }
+        .canvas-list-tools { display: flex; align-items: center; gap: 8px; margin-left: auto; margin-right: 10px; }
+        .canvas-search { display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border-radius: 999px;
+            background: var(--v4-card-bg); color: var(--v4-text-3, rgba(128,128,128,.9)); box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+        .canvas-search input { width: 160px; border: 0; outline: none; background: transparent; font-size: 13px; color: var(--v4-text, inherit); }
+        .canvas-search input::-webkit-search-cancel-button { cursor: pointer; }
+        .canvas-sort { height: 34px; padding: 0 28px 0 12px; border: 0; border-radius: 999px; background-color: var(--v4-card-bg);
+            font-size: 13px; color: var(--v4-text, inherit); cursor: pointer; appearance: none; -webkit-appearance: none;
+            background-image: var(--select-caret); background-repeat: no-repeat; background-position: calc(100% - 10px) 50%; background-size: 10px; }
+        @media (max-width: 640px) { .canvas-search input { width: 96px; } }
         .card-preview-empty {
             grid-column: 1 / -1;
             grid-row: 1 / -1;
@@ -366,7 +377,7 @@
             backdrop-filter: blur(20px) saturate(150%);
             -webkit-backdrop-filter: blur(20px) saturate(150%);
             color: var(--v4-muted);
-            border: 1px solid transparent;
+            border: 0;
             display: flex; align-items: center; justify-content: center;
             cursor: pointer;
             opacity: 0;
@@ -393,11 +404,11 @@
             min-width: 130px;
             padding: 6px;
             border-radius: 12px;
-            background: var(--v4-card-bg);
-            backdrop-filter: blur(20px) saturate(180%);
-            -webkit-backdrop-filter: blur(20px) saturate(180%);
-            border: 1px solid transparent;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 12px 32px -8px var(--v4-card-shadow-hover);
+            background: color-mix(in srgb, var(--panel) 78%, transparent);
+            backdrop-filter: blur(44px) saturate(190%);
+            -webkit-backdrop-filter: blur(44px) saturate(190%);
+            border: 0;
+            box-shadow: 0 24px 56px var(--shadow), 0 8px 24px color-mix(in srgb, var(--shadow) 60%, transparent);
             opacity: 0;
             transform: translateY(-6px) scale(0.96);
             pointer-events: none;
@@ -409,6 +420,7 @@
             transform: translateY(0) scale(1);
             pointer-events: auto;
         }
+        .theme-dark .card-more-menu { background: color-mix(in srgb, var(--panel) 70%, transparent); box-shadow: 0 26px 60px rgba(0,0,0,.36), 0 8px 24px rgba(0,0,0,.24); }
         .card-more-menu-item {
             display: flex; align-items: center; gap: 8px;
             width: 100%; padding: 8px 10px;
@@ -480,8 +492,8 @@
             color: var(--v4-muted);
             display: flex; align-items: center; justify-content: center;
             cursor: pointer;
-            border: 1px solid transparent;
-            transition: transform 0.35s var(--v4-ease-out), box-shadow 0.35s var(--v4-ease-out), color 0.2s var(--v4-ease-hover), border-color 0.35s var(--v4-ease-out);
+            border: 0;
+            transition: transform 0.35s var(--v4-ease-out), box-shadow 0.35s var(--v4-ease-out), color 0.2s var(--v4-ease-hover);
             text-decoration: none;
             z-index: 50;
         }
@@ -489,11 +501,9 @@
             color: var(--v4-text);
             transform: scale(1.05);
             box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 12px 32px -8px var(--v4-card-shadow-hover);
-            border-color: rgba(0,0,0,0.08);
         }
-        .theme-dark .trash-fab:hover { border-color: rgba(255,255,255,0.08); }
         .trash-fab:active { transform: scale(0.95); }
-        .trash-fab:focus-visible { outline: 2px solid var(--v4-focus-ring); outline-offset: 3px; }
+        .trash-fab:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent); }
         .trash-fab svg { width: 20px; height: 20px; }
         .trash-fab[hidden] { display: none; }
         .trash-badge {
@@ -517,7 +527,7 @@
             backdrop-filter: blur(20px) saturate(180%);
             -webkit-backdrop-filter: blur(20px) saturate(180%);
             color: var(--v4-text);
-            border: 1px solid transparent;
+            border: 0;
             border-radius: 12px;
             padding: 12px 28px;
             font-size: 13px; font-weight: 500;
@@ -529,11 +539,9 @@
         .view-more-btn:hover {
             transform: translateY(-1px);
             box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 24px -6px var(--v4-card-shadow-hover);
-            border-color: rgba(0,0,0,0.08);
         }
-        .theme-dark .view-more-btn:hover { border-color: rgba(255,255,255,0.08); }
         .view-more-btn:active { transform: translateY(0); }
-        .view-more-btn:focus-visible { outline: 2px solid var(--v4-focus-ring); outline-offset: 3px; }
+        .view-more-btn:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent); }
         .view-more-btn svg { width: 14px; height: 14px; }
 
         /* ═══ CANVAS PICKER ═══ */
@@ -552,15 +560,16 @@
             width: 380px; max-width: calc(100vw - 48px);
             padding: 24px;
             border-radius: 20px;
-            background: var(--v4-card-bg);
-            backdrop-filter: blur(20px) saturate(180%);
-            -webkit-backdrop-filter: blur(20px) saturate(180%);
-            border: 1px solid transparent;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 20px 48px -12px var(--v4-card-shadow-hover);
+            background: color-mix(in srgb, var(--panel) 78%, transparent);
+            backdrop-filter: blur(44px) saturate(190%);
+            -webkit-backdrop-filter: blur(44px) saturate(190%);
+            border: 0;
+            box-shadow: 0 24px 56px var(--shadow), 0 8px 24px color-mix(in srgb, var(--shadow) 60%, transparent);
             transform: translateY(8px) scale(0.97);
             transition: transform 0.3s var(--v4-ease-out);
         }
         .picker-overlay.active .picker-panel { transform: translateY(0) scale(1); }
+        .theme-dark .picker-panel { background: color-mix(in srgb, var(--panel) 70%, transparent); box-shadow: 0 26px 60px rgba(0,0,0,.36), 0 8px 24px rgba(0,0,0,.24); }
         .picker-header {
             display: flex; align-items: center; justify-content: space-between;
             margin-bottom: 20px;
@@ -579,22 +588,20 @@
             display: flex; align-items: center; gap: 14px;
             width: 100%; padding: 14px 16px;
             border-radius: 14px;
-            border: 1px solid transparent;
+            border: 0;
             background: var(--v4-bg);
             color: var(--v4-text);
             cursor: pointer;
             text-align: left;
-            transition: transform 0.3s var(--v4-ease-out), box-shadow 0.3s var(--v4-ease-out), border-color 0.3s var(--v4-ease-out);
+            transition: transform 0.3s var(--v4-ease-out), box-shadow 0.3s var(--v4-ease-out);
             font-family: var(--font-sans, inherit);
         }
         .picker-option:hover {
             transform: translateY(-1px);
             box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 8px 24px -6px var(--v4-card-shadow-hover);
-            border-color: rgba(0,0,0,0.08);
         }
-        .theme-dark .picker-option:hover { border-color: rgba(255,255,255,0.08); }
         .picker-option:active { transform: translateY(0) scale(0.98); }
-        .picker-option:focus-visible { outline: 2px solid var(--v4-focus-ring); outline-offset: 2px; }
+        .picker-option:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 18%, transparent); }
         .picker-option-icon {
             width: 42px; height: 42px; border-radius: 12px;
             background: var(--v4-card-bg);
@@ -631,17 +638,18 @@
         .trash-panel-v4 {
             width: 420px; max-width: calc(100vw - 48px); max-height: 80vh;
             border-radius: 20px;
-            background: var(--v4-card-bg);
-            backdrop-filter: blur(20px) saturate(180%);
-            -webkit-backdrop-filter: blur(20px) saturate(180%);
-            border: 1px solid transparent;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 20px 48px -12px var(--v4-card-shadow-hover);
+            background: color-mix(in srgb, var(--panel) 78%, transparent);
+            backdrop-filter: blur(44px) saturate(190%);
+            -webkit-backdrop-filter: blur(44px) saturate(190%);
+            border: 0;
+            box-shadow: 0 24px 56px var(--shadow), 0 8px 24px color-mix(in srgb, var(--shadow) 60%, transparent);
             transform: translateY(8px) scale(0.97);
             transition: transform 0.3s var(--v4-ease-out);
             display: flex; flex-direction: column;
             overflow: hidden;
         }
         .trash-overlay.active .trash-panel-v4 { transform: translateY(0) scale(1); }
+        .theme-dark .trash-panel-v4 { background: color-mix(in srgb, var(--panel) 70%, transparent); box-shadow: 0 26px 60px rgba(0,0,0,.36), 0 8px 24px rgba(0,0,0,.24); }
         .trash-panel-head {
             display: flex; align-items: center; justify-content: space-between;
             padding: 20px 20px 12px;
@@ -725,16 +733,17 @@
         .purge-confirm-panel {
             width: 340px; max-width: calc(100vw - 48px);
             border-radius: 20px;
-            background: var(--v4-card-bg);
-            backdrop-filter: blur(20px) saturate(180%);
-            -webkit-backdrop-filter: blur(20px) saturate(180%);
-            border: 1px solid transparent;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 20px 48px -12px var(--v4-card-shadow-hover);
+            background: color-mix(in srgb, var(--panel) 78%, transparent);
+            backdrop-filter: blur(44px) saturate(190%);
+            -webkit-backdrop-filter: blur(44px) saturate(190%);
+            border: 0;
+            box-shadow: 0 24px 56px var(--shadow), 0 8px 24px color-mix(in srgb, var(--shadow) 60%, transparent);
             transform: translateY(8px) scale(0.97);
             transition: transform 0.3s var(--v4-ease-out);
             padding: 20px;
         }
         .purge-confirm-overlay.active .purge-confirm-panel { transform: translateY(0) scale(1); }
+        .theme-dark .purge-confirm-panel { background: color-mix(in srgb, var(--panel) 70%, transparent); box-shadow: 0 26px 60px rgba(0,0,0,.36), 0 8px 24px rgba(0,0,0,.24); }
         .purge-confirm-title { font-size: 15px; font-weight: 600; line-height: 1.4; }
         .purge-confirm-desc { font-size: 12px; color: var(--v4-muted); margin-top: 6px; line-height: 1.5; word-break: break-all; }
         .purge-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
@@ -759,6 +768,8 @@
         @media (max-width: 760px) {
             .page { padding: 48px 0 64px; gap: 32px; }
             .hero { flex-direction: column; gap: 28px; min-height: auto; }
+            /* 竖排后 align-items:center 会让 .hero-right 收缩到内容宽度（轮播 width:100% -> 0） */
+            .hero-right { width: 100%; }
             .hero-title { font-size: 40px; }
             .hero-desc { max-width: 100%; }
             .cards-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
@@ -845,6 +856,17 @@
         <!-- ═══ SECTION HEADER ═══ -->
         <div class="section-header">
             <span class="section-label" id="sectionLabel">所有画布</span>
+            <div class="canvas-list-tools">
+                <label class="canvas-search">
+                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                    <input id="canvasSearchInput" type="search" placeholder="搜索画布名称" autocomplete="off" spellcheck="false">
+                </label>
+                <select id="canvasSortSelect" class="canvas-sort" aria-label="排序方式">
+                    <option value="updated">最近更新</option>
+                    <option value="created">最近创建</option>
+                    <option value="name">按名称</option>
+                </select>
+            </div>
             <button class="btn-new-project" id="btnNewProject">
                 <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
                 新建画布
@@ -970,6 +992,12 @@
             const trashFab = document.getElementById('trashFab');
             const trashListV4 = document.getElementById('trashListV4');
             const sectionLabel = document.getElementById('sectionLabel');
+            const canvasSearchInput = document.getElementById('canvasSearchInput');
+            const canvasSortSelect = document.getElementById('canvasSortSelect');
+            try { const savedSort = localStorage.getItem('novai_canvas_list_sort'); if (savedSort && canvasSortSelect) canvasSortSelect.value = savedSort; } catch (_) {}
+            let canvasSearchTimer = 0;
+            canvasSearchInput?.addEventListener('input', () => { clearTimeout(canvasSearchTimer); canvasSearchTimer = setTimeout(() => renderV4Cards(), 120); });
+            canvasSortSelect?.addEventListener('change', () => { try { localStorage.setItem('novai_canvas_list_sort', canvasSortSelect.value); } catch (_) {} renderV4Cards(); });
 
             // ═══ CAROUSEL ═══
             let carouselCurrent = 0;
@@ -1037,8 +1065,8 @@
                 if (pickerOverlay) pickerOverlay.classList.remove('active');
             }
 
-            document.getElementById('btnStartCreate').addEventListener('click', () => createCanvasFromPicker('classic'));
-            document.getElementById('btnNewProject').addEventListener('click', () => createCanvasFromPicker('classic'));
+            document.getElementById('btnStartCreate').addEventListener('click', () => createCanvasFromPicker('smart'));
+            document.getElementById('btnNewProject').addEventListener('click', () => createCanvasFromPicker('smart'));
 
             pickerOverlay.addEventListener('click', function(e) {
                 if (e.target === pickerOverlay) closeCanvasPicker();
@@ -1092,6 +1120,17 @@
                 const div = document.createElement('div');
                 div.textContent = str;
                 return div.innerHTML;
+            }
+
+            // 卡片缩略图走服务端缩放代理（/api/media-preview，落盘缓存），列表不再直接加载原图
+            function mediaPreviewUrl(url, w) {
+                const raw = String(url || '');
+                if (!raw || raw.startsWith('data:') || raw.startsWith('blob:')) return raw;
+                let path = raw;
+                if (/^https?:\/\//i.test(raw)) { try { path = new URL(raw).pathname; } catch (e) { return raw; } }
+                if (!(path.startsWith('/assets/') || path.startsWith('/output/'))) return raw;
+                if (!/\.(png|jpe?g|webp|gif|bmp|avif|tiff?)(\?|#|$)/i.test(path)) return raw;
+                return '/api/media-preview?w=' + Math.max(64, Math.min(2048, Math.round(w || 480))) + '&url=' + encodeURIComponent(path);
             }
 
             // ═══ DATA BRIDGE — 从 canvas-list.js 读取数据 ═══
@@ -1152,19 +1191,40 @@
                 if (cardsEmpty) cardsEmpty.style.display = 'none';
 
                 if (!v4Canvases.length) {
-                    if (cardsEmpty) cardsEmpty.style.display = '';
+                    if (cardsEmpty) {
+                        cardsEmpty.style.display = '';
+                        cardsEmpty.querySelectorAll('[data-orig]').forEach(el => { el.textContent = el.dataset.orig; });
+                    }
                     viewMoreSection.style.display = 'none';
                     return;
                 }
 
-                // 按更新时间降序排列画布
-                const sortedCanvases = v4Canvases.slice().sort((a, b) => {
-                    const ta = a.updated_at || a.created_at || 0;
-                    const tb = b.updated_at || b.created_at || 0;
-                    return tb - ta;
-                });
+                // 搜索 + 排序（默认按更新时间降序）；选择记在本机
+                const query = String(canvasSearchInput?.value || '').trim().toLowerCase();
+                const sortMode = canvasSortSelect?.value || 'updated';
+                const sortedCanvases = v4Canvases
+                    .filter(c => !query || String(c.title || '').toLowerCase().includes(query))
+                    .sort((a, b) => {
+                        if (sortMode === 'name') return String(a.title || '').localeCompare(String(b.title || ''), 'zh-Hans-CN', {numeric: true});
+                        if (sortMode === 'created') return (b.created_at || 0) - (a.created_at || 0);
+                        const ta = a.updated_at || a.created_at || 0;
+                        const tb = b.updated_at || b.created_at || 0;
+                        return tb - ta;
+                    });
 
-                sectionLabel.textContent = `所有画布 · ${sortedCanvases.length} 个`;
+                sectionLabel.textContent = query
+                    ? `找到 ${sortedCanvases.length} 个 · 共 ${v4Canvases.length} 个画布`
+                    : `所有画布 · ${sortedCanvases.length} 个`;
+                if (cardsEmpty) {
+                    const t = cardsEmpty.querySelector('.cards-empty-title');
+                    const sub = cardsEmpty.querySelector('.cards-empty-sub');
+                    if (t && !t.dataset.orig) t.dataset.orig = t.textContent;
+                    if (sub && !sub.dataset.orig) sub.dataset.orig = sub.textContent;
+                    const noMatch = !sortedCanvases.length;
+                    cardsEmpty.style.display = noMatch ? '' : 'none';
+                    if (t) t.textContent = noMatch ? '没有匹配的画布' : t.dataset.orig;
+                    if (sub) sub.textContent = noMatch ? '换个关键词试试' : sub.dataset.orig;
+                }
 
                 sortedCanvases.forEach((c, idx) => {
                     const card = buildV4Card(c, idx);
@@ -1183,11 +1243,11 @@
                 const updatedAt = formatTime(c.updated_at || c.created_at);
                 const isSmart = c.kind === 'smart';
 
-                // 预览区：最多 4 张图片 2x2 网格
+                // 预览区：最多 4 张图片；按张数铺满（1 张整幅、2 张左右、3 张一大两小），不再留半边空白
                 const thumbs = (c.thumbnails || []).slice(0, 4);
                 let previewHTML = '';
                 if (thumbs.length) {
-                    previewHTML = thumbs.map(url => `<img class="card-preview-thumb" src="${escapeHtml(url)}" alt="" loading="lazy">`).join('');
+                    previewHTML = thumbs.map(url => { const src = mediaPreviewUrl(url, 480); return `<img class="card-preview-thumb" src="${escapeHtml(src)}" alt="" loading="lazy" decoding="async">`; }).join('');
                 } else {
                     previewHTML = `<div class="card-preview-empty"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="width:32px;height:32px;opacity:.4"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></div>`;
                 }
@@ -1195,7 +1255,7 @@
                 const kindBadge = isSmart ? `<span class="card-preview-count" style="background:var(--accent);color:var(--text-on-accent)">智能</span>` : `<span class="card-preview-count">画布</span>`;
 
                 card.innerHTML = `
-                    <div class="card-preview" style="aspect-ratio:16/10">
+                    <div class="card-preview" data-thumbs="${thumbs.length}" style="aspect-ratio:16/10">
                         ${previewHTML}
                         ${kindBadge}
                         <button class="card-more-btn" aria-label="更多操作">
@@ -1257,18 +1317,18 @@
             function openCanvas(c) {
                 const enc = encodeURIComponent(c.id);
                 const project = encodeURIComponent(c.project || 'default');
-                window.location.href = (c.kind === 'smart')
-                    ? `/static/smart-canvas.html?id=${enc}&project=${project}&t=1786289367`
-                    : `/static/canvas.html?id=${enc}&project=${project}&t=1786289367`;
+                // OpenArc：经典编辑器已从入口下线；所有画布一律进智能画布。
+                window.location.href = `/static/smart-canvas.html?id=${enc}&project=${project}&t=1786289367`;
             }
 
             function handleCardAction(action, c) {
                 console.log('[v4 card action]', action, c.title);
                 if (action === 'rename') {
-                    const newName = prompt('重命名画布', c.title);
-                    if (newName && newName.trim() !== '' && newName.trim() !== c.title) {
-                        renameCanvasAPI(c.id, newName.trim());
-                    }
+                    window.__openarcPrompt({
+                        title: '重命名画布', value: c.title, maxLength: 60,
+                        confirmText: '重命名', cancelText: '取消',
+                        onSubmit: function (name) { return renameCanvasAPI(c.id, name); }
+                    });
                 } else if (action === 'duplicate') {
                     if (confirm(`确定要复制画布「${c.title}」吗？`)) {
                         duplicateCanvasAPI(c);
@@ -1282,17 +1342,21 @@
 
             // ═══ API 调用（画布级） ═══
             async function renameCanvasAPI(cid, name) {
-                try {
-                    const res = await fetch(`/api/canvases/${encodeURIComponent(cid)}/meta`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ title: name })
-                    });
-                    if (!res.ok) throw new Error('rename failed');
-                    const c = v4Canvases.find(x => x.id === cid);
-                    if (c) c.title = name;
-                    renderV4Cards();
-                } catch(e) { console.error(e); alert('重命名失败'); refreshAll(); }
+                // OpenArc：失败必须把结构化原因交回调用方（模态内联提示），不再 alert + 静默 refreshAll。
+                const res = await fetch(`/api/canvases/${encodeURIComponent(cid)}/meta`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: name })
+                });
+                if (!res.ok) {
+                    const detail = await res.json().catch(function () { return {}; });
+                    const err = new Error((detail && (detail.detail || detail.error)) || ('HTTP ' + res.status));
+                    err.status = res.status;
+                    throw err;
+                }
+                const c = v4Canvases.find(x => x.id === cid);
+                if (c) c.title = name;
+                renderV4Cards();
             }
 
             async function duplicateCanvasAPI(srcCanvas) {
@@ -1331,8 +1395,9 @@
 
             async function createCanvasFromPicker(kind) {
                 closeCanvasPicker();
-                const isSmart = kind === 'smart';
-                const baseName = isSmart ? '智能画布' : '画布';
+                // OpenArc：经典编辑器已从入口下线；不论调用方传什么，新建一律是智能画布。
+                const isSmart = true;
+                const baseName = '智能画布';
                 const name = `${baseName} ${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
 
                 try {
@@ -1358,14 +1423,12 @@
                         // 直接跳转到新画布
                         const enc = encodeURIComponent(nc.id);
                         const project = encodeURIComponent(nc.project || 'default');
-                        window.location.href = (nc.kind === 'smart')
-                            ? `/static/smart-canvas.html?id=${enc}&project=${project}&t=1786289367`
-                            : `/static/canvas.html?id=${enc}&project=${project}&t=1786289367`;
+                        window.location.href = `/static/smart-canvas.html?id=${enc}&project=${project}&t=1786289367`;
                     }
                 } catch(e) { console.error(e); alert('创建失败'); }
             }
 
-            document.getElementById('pickerNormal').addEventListener('click', () => createCanvasFromPicker('classic'));
+            document.getElementById('pickerNormal').addEventListener('click', () => createCanvasFromPicker('smart'));
             document.getElementById('pickerSmart').addEventListener('click', () => createCanvasFromPicker('smart'));
 
             // ═══ 继续上次 ═══
@@ -1376,11 +1439,10 @@
                     const latest = sorted[0];
                     const enc = encodeURIComponent(latest.id);
                     const project = encodeURIComponent(latest.project || 'default');
-                    window.location.href = (latest.kind === 'smart')
-                        ? `/static/smart-canvas.html?id=${enc}&project=${project}&t=1786289367`
-                        : `/static/canvas.html?id=${enc}&project=${project}&t=1786289367`;
+                    // OpenArc：经典编辑器已从入口下线；继续上次一律进智能画布。
+                    window.location.href = `/static/smart-canvas.html?id=${enc}&project=${project}&t=1786289367`;
                 } else {
-                    createCanvasFromPicker('classic');
+                    createCanvasFromPicker('smart');
                 }
             });
 
@@ -1412,6 +1474,8 @@
                 purgeConfirmDesc.textContent = desc || '';
                 purgeConfirmDesc.style.display = desc ? '' : 'none';
                 purgeConfirmAction = action;
+                // Morph Button 在点击瞬间读走 onclick 并代它执行，动效才有状态可驱动
+                purgeConfirmOk.onclick = action;
                 purgeConfirmOverlay.classList.add('active');
             }
             function closePurgeConfirm() {
@@ -1423,6 +1487,8 @@
             });
             document.getElementById('purgeConfirmCancel').addEventListener('click', closePurgeConfirm);
             document.getElementById('purgeConfirmOk').addEventListener('click', function() {
+                // 模块接上后由它执行 onclick，这里只兜底模块缺失的情况，否则一次点击会删两次
+                if (purgeConfirmOk.__nvMorph) return;
                 const action = purgeConfirmAction;
                 if (action) action();
             });
@@ -1570,6 +1636,24 @@
             document.addEventListener('gesturechange', e => { e.preventDefault(); }, { capture: true });
             document.addEventListener('gestureend', e => { e.preventDefault(); }, { capture: true });
         })();
+    </script>
+    <script>
+    /* ═══ Morph Button 接入：彻底删除二次确认的「确定」按钮（只驱动状态，不改原有删除逻辑） ═══
+       本页逻辑全在内联脚本里、canvas-list.js 未被任何页面加载，所以接入代码只能放这里。 */
+    (function(){
+        'use strict';
+        var tries = 0;
+        var wait = setInterval(function(){
+            var m = window.NovaMorphButton;
+            tries += 1;
+            if(!m && tries <= 40) return;
+            clearInterval(wait);
+            var el = document.getElementById('purgeConfirmOk');
+            if(m && el && !el.__nvMorph){
+                try { m.attach(el, { keepWidth: true }); } catch(e){}
+            }
+        }, 250);
+    })();
     </script>
 </body>
 </html>

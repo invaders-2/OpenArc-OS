@@ -25,6 +25,10 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Window as WinDomain } from "../../electron/window-domain.cjs";
+import { buildCanvasModelLabelIndex, canvasModelBaseName } from "./canvasModelLabels";
+import { closeStreamWithoutContent, isStreamContentEvent, pageFrameFor, sseChunk, streamCloseErrorFrame } from "./canvasLlmStream";
+import { buildSizePolicyTable } from "../../electron/image-params.cjs";
+import { ASSET_PREFIX, resolveAssetRefsInDoc, restoreAssetRefsInDoc } from "./canvasAssetRefs";
 
 type Rpc = {
   ch: string; dir: string; kind: string; id?: number | string; token?: string; method?: string;
@@ -35,7 +39,6 @@ type Rpc = {
 const CH = "openarc.canvas";
 /** 入口 = 上游原版列表首页（无限画布）；画布编辑器由首页上的入口直接打开。*/
 const IFRAME_BASE = "openarc-canvas://bundle/static/canvas-list.html";
-const ASSET_PREFIX = "openarc-asset:";
 const randomToken = () => "t_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
 /** 不透明账号钥匙：账号 + 本次挂载，页面只拿它做作用域分桶，不含任何凭据。*/
 function keyOf(seed: string) {
@@ -85,6 +88,10 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
   /** 宿主 → 画布子页的请求（命令/撤销/状态），按 id 等回包。*/
   const shellPending = useRef(new Map<number, (v: any) => void>());
   const shellSeq = useRef(0);
+  /** 流式 LLM：requestId → 该条流的推送入口（model:event 增量经它转成 iframe 的 SSE 分块）。*/
+  const streams = useRef(new Map<string, { push: (ev: unknown) => void }>());
+  /** 发起的流式调用 rpc id → 中止入口：页面关闭 / 用户停止都经它把取消传到主进程。*/
+  const rpcStreams = useRef(new Map<number | string, { abort: () => void }>());
 
   const canvasCmd = useCallback(async (payload: Record<string, unknown>): Promise<any> => {
     const bridge = (window as any).openarc?.canvas;
@@ -126,8 +133,14 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
     const models: any[] = res && res.ok && Array.isArray(res.models) ? res.models : [];
     const defaults = (res && res.defaults) || { personal: {}, organization: {} };
     const usable = (cap: string) => models.filter((m) => m.status === "enabled" && Array.isArray(m.capabilities) && m.capabilities.includes(cap));
-    const label = (m: any) => String(m.displayName || m.remoteModelId || m.configId) + " · " + String(m.configId).slice(-4);
-    labelToConfig.current = new Map(models.map((m) => [label(m), m.configId] as [string, string]));
+    /**
+     * 画布下拉显示的是**供应商提供的模型名**（remoteModelId 优先，见 canvasModelLabels.ts），
+     * 重名才按供应商 / 配置后缀消歧。显示名与反向映射都出自同一份索引：单一真源，
+     * 不可能出现"下拉里是这个、反查又对不上 configId"的错位。
+     */
+    const modelLabels = buildCanvasModelLabelIndex(models);
+    const label = (m: any) => modelLabels.labelOf.get(String(m.configId)) || canvasModelBaseName(m);
+    labelToConfig.current = modelLabels.configOf;
     const chat = usable("chat");
     const image = usable("image-generation");
     /**
@@ -214,6 +227,21 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
     };
   }, [modelCmd]);
 
+  /**
+   * 尺寸策略（GET /api/ai/size-policy → model.sizePolicy）：页面 shared/size-policy.js 的 load() 只读这一张表
+   * （{format, default, models}）。值只来自唯一真源 electron/image-params.cjs 的 GPT_IMAGE_2_SIZE_POLICY；
+   * models 的键 = 画布页看到的模型显示名（与 buildConfig 用同一份 buildCanvasModelLabelIndex，即 /api/config 的
+   * image_models 标签），所以 gpt-image-2 家族在页面里是 enum 策略，其余模型走 default（free + 同一份 tiers）。
+   * 这里按需取一次清单，不做启动期缓存：页面 NovaSizePolicy.load() 可能早于 buildConfig 完成。
+   */
+  const sizePolicyTable = useCallback(async () => {
+    const res = await modelCmd({ type: "canvas/models" });
+    const models: any[] = res && res.ok && Array.isArray(res.models) ? res.models : [];
+    const labels = buildCanvasModelLabelIndex(models);
+    const imageModels = models.filter((m) => m.status === "enabled" && Array.isArray(m.capabilities) && m.capabilities.includes("image-generation"));
+    return buildSizePolicyTable(imageModels.map((m) => ({ key: labels.labelOf.get(String(m.configId)) || canvasModelBaseName(m), model: canvasModelBaseName(m) })));
+  }, [modelCmd]);
+
   const listItem = useCallback((c: any): CanvasListItem => {
     const pos = boardPos.current.get(String(c.canvasId)) || null;
     return {
@@ -245,39 +273,29 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
     };
   }, []);
 
-  /** 把文档里的稳定 ref 解析成可显示的数据（只读、逐资源授权）；解析失败保留 ref（画布显示不可用）。*/
+  /**
+   * 把文档里的稳定 ref 解析成可显示的数据（只读、逐资源授权、分批）。
+   *
+   * 承载引用的字段不止 node.url（node.refs[]、node.inputs[].url、封面/缩略图、嵌套 params 等都会出现
+   * openarc-asset:），所以按前缀深度遍历全文，而不是只看 node.url —— 否则漏掉的字段会以原始 ref 落到
+   * 页面的 <img> 上（页面 CSP 只允许 openarc-canvas: data: blob:），既 CSP 违规又图裂。
+   * 读不出来的引用换成 data: 安全占位值（引用本身仍可还原，保存不丢），绝不把 openarc-asset: 留给页面。
+   */
   const resolveRefs = useCallback(async (doc: any) => {
-    const refs: string[] = [];
-    for (const n of (doc && doc.nodes) || []) {
-      const u = typeof n.url === "string" ? n.url : "";
-      if (u.startsWith(ASSET_PREFIX) && !dataUrlByRef.current.has(u.slice(ASSET_PREFIX.length))) refs.push(u.slice(ASSET_PREFIX.length));
-    }
-    for (const ref of refs.slice(0, 20)) {
-      const res = await canvasCmd({ type: "canvas/readAsset", ref });
-      if (res && res.ok && res.dataUrl) {
-        dataUrlByRef.current.set(ref, res.dataUrl);
-        refByDataUrl.current.set(res.dataUrl, ASSET_PREFIX + ref);
-      }
-    }
-    for (const n of (doc && doc.nodes) || []) {
-      const u = typeof n.url === "string" ? n.url : "";
-      if (u.startsWith(ASSET_PREFIX)) {
-        const resolved = dataUrlByRef.current.get(u.slice(ASSET_PREFIX.length));
-        if (resolved) n.url = resolved;
-      }
-    }
-    return doc;
+    const { doc: out, unavailable } = await resolveAssetRefsInDoc(doc, {
+      cache: dataUrlByRef.current,
+      reverse: refByDataUrl.current,
+      resolve: async (ref: string) => {
+        const res = await canvasCmd({ type: "canvas/readAsset", ref });
+        return res && res.ok && res.dataUrl ? String(res.dataUrl) : null;
+      },
+    });
+    if (unavailable.length) setNotice("引用资源已删除或无权限（" + unavailable.length + " 个）：画布上按不可用显示，不会拿旧缓存顶替");
+    return out;
   }, [canvasCmd]);
 
-  /** 保存回写：显示用的 data URL 换回稳定 ref（旧 data URL 原样保留，不静默丢图）。*/
-  const refsBack = useCallback((doc: any) => {
-    for (const n of (doc && doc.nodes) || []) {
-      const u = typeof n.url === "string" ? n.url : "";
-      const ref = u ? refByDataUrl.current.get(u) : null;
-      if (ref) n.url = ref;
-    }
-    return doc;
-  }, []);
+  /** 保存回写：显示用的 data URL / 不可用占位值换回稳定 ref（旧 data URL 原样保留，不静默丢图）。*/
+  const refsBack = useCallback((doc: any) => restoreAssetRefsInDoc(doc, refByDataUrl.current), []);
 
   const bindCanvas = useCallback(async (canvasId: string, title?: string) => {
     const res = await canvasCmd({ type: "canvas/get", canvasId });
@@ -466,6 +484,8 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
       }
       // —— 模型（唯一入口，每次调用重新授权 + 任务级预算/停止/版本判定）——
       case "model.config": return await buildConfig();
+      // 尺寸策略：页面 shared/size-policy.js 启动时 GET /api/ai/size-policy；只回策略内容，不含地址/凭据。
+      case "model.sizePolicy": return await sizePolicyTable();
       case "model.chat": {
         const body = (params.body || {}) as any;
         if (!canvasId) return { __status: 502, body: { error: "CANVAS_NOT_OPEN" } };
@@ -592,7 +612,105 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
         return { __status: 501, body: { error: "OPENARC_UNSUPPORTED", detail: "素材分组由 OpenArc 资源库统一管理，请在「资源库」里整理" } };
       default: return { __status: 501, body: { error: "OPENARC_UNSUPPORTED", message: "不在 OpenArc 集成范围内的能力：" + method } };
     }
-  }, [buildConfig, canvasCmd, items, libraryShape, pushContext, refreshList, resolveRefs, refsBack, resourceCmd, taskCmd, upstreamCanvas]);
+  }, [buildConfig, canvasCmd, items, libraryShape, pushContext, refreshList, resolveRefs, refsBack, resourceCmd, sizePolicyTable, taskCmd, upstreamCanvas]);
+
+  /** 页面整帧重置 / 宿主卸载 / 窗口关闭时，把所有在途流式调用连同主进程请求一起停掉（不留悬挂）。*/
+  const abortAllStreams = useCallback(() => {
+    const list = Array.from(rpcStreams.current.values());
+    rpcStreams.current.clear();
+    for (const s of list) { try { s.abort(); } catch { /* ignore */ } }
+  }, []);
+
+  /**
+   * `POST /api/canvas-llm/stream` 的宿主侧：真实走 ModelService.chatStream（经 canvas/modelChatStream），
+   * 增量从既有 model:event 通道到达后转成页面要的 SSE 分块，经既有 postMessage 回传。
+   * 开流时机 = 第一条真实正文（response.start / usage 不算），避免把非流式响应开成空流；
+   * 一帧正文都没出过就按"这里没有流式"（409）如实收口，页面据此退回普通接口。
+   * 取消：页面 abort → 宿主 canvas/runStop → 主进程 abort 在途 HTTP。
+   */
+  const handleStreamCall = useCallback(async (rpcId: number | string, params: Record<string, any>, frameWin: Window) => {
+    const send = (msg: Record<string, unknown>) => { try { frameWin.postMessage({ ch: CH, dir: "host->canvas", ...msg }, "*"); } catch { /* 帧已失效 */ } };
+    const body = (params.body || {}) as any;
+    const cur = currentRef.current;
+    const canvasId = (cur && cur.canvasId) || null;
+    if (!canvasId) { send({ kind: "stream-open", id: rpcId, ok: false, status: 502, error: { error: "CANVAS_NOT_OPEN", message: "请先打开一个画布" } }); return; }
+    const wanted = String(body.model || "");
+    const configId = wanted ? labelToConfig.current.get(wanted) : null;
+    if (wanted && !configId) {
+      setModelNotFound((n) => n + 1);
+      setNotice("模型不在 OpenArc 清单里（已拒绝，不回落）：" + wanted);
+      const rej = rejectUnknownModel("model.chatStream", wanted);
+      send({ kind: "stream-open", id: rpcId, ok: false, status: rej.__status, error: { error: rej.body.error, message: rej.body.message } });
+      return;
+    }
+    const run = await canvasCmd({ type: "canvas/run", canvasId, kind: "chat", nodeId: body.nodeId || null });
+    if (!run || !run.ok) {
+      const code = String((run && run.error) || "RUN_FAILED");
+      setNotice("无法开始生成：" + code);
+      send({ kind: "stream-open", id: rpcId, ok: false, status: 502, error: { error: code, message: explain(code) } });
+      return;
+    }
+    const requestId = "cvstream_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    const state = { opened: false, settled: false, aborted: false, errorSent: false };
+    const open = (msg: Record<string, unknown>) => { if (state.settled) return; state.settled = true; send({ kind: "stream-open", id: rpcId, ...msg }); };
+    const chunk = (frame: Parameters<typeof sseChunk>[0]) => { send({ kind: "stream-chunk", id: rpcId, data: sseChunk(frame) }); };
+    const entry = {
+      push: (ev: unknown) => {
+        if (state.aborted) return;
+        const content = isStreamContentEvent(ev);
+        if (content) {
+          state.opened = true;
+          open({ ok: true, status: 200 });
+        } else if (!state.opened) {
+          return; // 未出正文前：start / usage / complete / 早到的 error 都交给收尾统一判定
+        }
+        const frame = pageFrameFor(ev);
+        if (frame && !(frame.type === "error" && state.errorSent)) {
+          if (frame.type === "error") state.errorSent = true;
+          chunk(frame);
+        }
+      },
+    };
+    streams.current.set(String(requestId), entry);
+    rpcStreams.current.set(rpcId, {
+      abort: () => {
+        if (state.aborted) return;
+        state.aborted = true;
+        void canvasCmd({ type: "canvas/runStop", canvasId, runId: run.runId, reason: "USER_STOP" });
+      },
+    });
+    const system = String(body.system_prompt || "You are a helpful assistant.");
+    const history = Array.isArray(body.messages) ? body.messages : [];
+    const messages = [{ role: "system", content: system }]
+      .concat(history.slice(-20).map((m: any) => ({ role: m && m.role === "assistant" ? "assistant" : "user", content: String((m && m.content) || "") })))
+      .concat([{ role: "user", content: String(body.message || "") }]);
+    let res: any = null;
+    try {
+      res = await canvasCmd({ type: "canvas/modelChatStream", canvasId, runId: run.runId, messages, configId, requestId });
+      await canvasCmd({ type: "canvas/runFinish", canvasId, runId: run.runId, status: (res && res.ok) ? "DONE" : "FAILED" });
+    } finally {
+      streams.current.delete(String(requestId));
+      rpcStreams.current.delete(rpcId);
+    }
+    if (state.aborted) return; // 页面已取消：桥那边按 AbortError 收尾，这里不再回帧
+    const finalText = String((res && res.text) || "");
+    if (!state.opened) {
+      if (res && res.ok && finalText.length > 0) {
+        open({ ok: true, status: 200 }); // 真实输出已拿到，只是首帧没赶在收尾前到达：按 200 如实交付
+      } else {
+        const decision = closeStreamWithoutContent({ ok: !!(res && res.ok), error: res && res.error });
+        if (decision.unsupported) setNotice("当前模型未返回流式正文，已自动改用普通接口（结果不会丢）：" + wanted);
+        open({ ok: false, status: decision.status, error: { error: decision.error, message: decision.unsupported ? "当前模型不支持流式返回，已改用普通接口重试" : explain(String(decision.error)) } });
+        return;
+      }
+    }
+    if (res && res.ok) {
+      chunk({ type: "done", text: finalText });
+    } else if (!state.errorSent) {
+      chunk(streamCloseErrorFrame(res && res.error));
+    }
+    send({ kind: "stream-end", id: rpcId });
+  }, [canvasCmd]);
 
   // 应用页面的请求 → 受控命令 → 回包（**只接受当前外壳实例**；子页由外壳中继附加 token）
   useEffect(() => {
@@ -606,6 +724,12 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
       lastBeat.current = Date.now();
       beatSeq.current += 1;
       if (d.kind === "alive") return;
+      // 页面取消/中断：流式调用把取消传到主进程（canvas/runStop 中止在途 HTTP），不留悬挂请求。
+      if (d.kind === "abort") {
+        const s = rpcStreams.current.get(d.id as number | string);
+        if (s) s.abort();
+        return;
+      }
       if (d.kind === "hello-request") {
         const cur = currentRef.current;
         frameWin.postMessage({
@@ -645,6 +769,8 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
         return;
       }
       if (d.kind === "call" && (typeof d.id === "number" || relayed) && d.method) {
+        // 流式调用专用分发：它要边跑边把分块推回 iframe，不能走 handleCall 的一次性回包。
+        if (d.method === "model.chatStream") { void handleStreamCall(d.id as number | string, (d.params || {}) as Record<string, any>, frameWin); return; }
         void handleCall(d.method, (d.params || {}) as Record<string, any>).then((value) => {
           frameWin.postMessage({ ch: CH, dir: "host->canvas", kind: "result", id: d.id, ok: true, value }, "*");
         }).catch((err) => {
@@ -654,11 +780,35 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [bindCanvas, frameSrc, handleCall, pushContext]);
+  }, [bindCanvas, frameSrc, handleCall, handleStreamCall, pushContext]);
+
+  // 画布流式下行：主进程把 canvas/modelChatStream 的增量经**既有** model:event 通道送来
+  //（payload.type = "canvas.stream"，带 requestId），按 requestId 路由到对应 iframe 的那条流。
+  // 端口本身没有新增：仍然是 preload 已暴露的 window.openarc.model.onEvent。
+  useEffect(() => {
+    const api = (window as any).openarc?.model;
+    if (!api || typeof api.onEvent !== "function") return;
+    const off = api.onEvent((event: any) => {
+      const payload = event && event.payload;
+      if (!payload || payload.type !== "canvas.stream") return;
+      const entry = streams.current.get(String(payload.requestId || ""));
+      if (entry) entry.push(payload.event || null);
+    });
+    return () => { try { off?.(); } catch { /* ignore */ } };
+  }, []);
+
+  // 宿主卸载 / 窗口关闭：把所有在途流式调用停掉（避免用户关窗后主进程还挂着 provider 请求）。
+  useEffect(() => {
+    const onUnload = () => abortAllStreams();
+    window.addEventListener("beforeunload", onUnload);
+    return () => { window.removeEventListener("beforeunload", onUnload); abortAllStreams(); };
+  }, [abortAllStreams]);
 
   /** 整帧重置：换新实例 token + 把应用帧重挂载回 bundle 入口（旧页面与旧 token 立即失效）。
    *  看门狗（长时间不心跳）与"iframe 换了文档"复核共用这一条路径。*/
   const resetAppFrame = useCallback((reason: string) => {
+    // 整帧重置（导航被替换/崩溃/看门狗）时，旧页面发起的流式调用一并停掉。
+    abortAllStreams();
     lastBeat.current = Date.now();
     instanceToken.current = randomToken();
     setNotice(reason);
@@ -672,7 +822,7 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
       setFrameSrc(IFRAME_BASE + "#oa=" + keyOf(seed + ":" + instanceToken.current));
       setFrameKey((k) => k + 1);
     })();
-  }, []);
+  }, [abortAllStreams]);
 
   // 应用帧看门狗：正常情况下外壳中继每 800ms 发一次心跳。若连续 8s 没有任何消息，
   // 说明该帧被非预期导航/崩溃打断（例如页面自我导航到外部站点被 CSP/宿主拦下后停在错误页）——

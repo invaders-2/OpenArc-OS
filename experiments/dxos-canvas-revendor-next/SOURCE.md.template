@@ -1,0 +1,15 @@
+<!-- OA-SOURCE-PROVENANCE:BEGIN -->
+## 来源（自动生成 · vendor 脚本写入）
+
+| 项 | 值 |
+| --- | --- |
+| 来源类型 | {{SOURCE_TYPE}} |
+| 来源标识 | `{{SOURCE_IDENTITY}}` |
+| 抓取时间 | {{CAPTURED_AT}} |
+| 源目录 | `{{SRC_ROOT}}` |
+| static/ | `{{STATIC_DIR}}` |
+| 固定 pin | `{{PINNED_COMMIT}}` |
+| 与 pin 一致 | {{MATCHES_PIN}} |
+| 工作区 | {{GIT_STATE}} |
+| 内容指纹 | `sha256:{{CONTENT_FINGERPRINT}}`（{{FILE_COUNT}} files / {{BYTES}} B） |
+<!-- OA-SOURCE-PROVENANCE:END -->

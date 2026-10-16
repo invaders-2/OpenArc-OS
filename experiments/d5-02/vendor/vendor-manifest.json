@@ -1,13 +1,296 @@
 {
-  "sourceCommit": "6ce1a64680b669b31c2ac3b32418b54decd404f2",
+  "sourceCommit": "1e20abe5145470b32f58206f692292703540107a",
   "source": "/tmp/novai-canvas-src",
-  "files": 103,
-  "pages": 14,
-  "entry": "index.html",
-  "entryShellHash": "77d1425f2108fd38",
-  "canvasJsHash": "9ae53844b6c2f0e1",
-  "canvasHtmlHash": "0c95ae19e983c18f",
-  "guardHash": "f52fb6c0196a8dea",
-  "listHtmlHash": "aacb2cf8395f7b10",
+  "sourceProvenance": {
+    "type": "git",
+    "identity": "1e20abe5145470b32f58206f692292703540107a",
+    "capturedAt": "2026-10-16T21:38:29.643Z",
+    "mode": "local-source",
+    "requestedSrc": "/tmp/novai-canvas-src",
+    "srcRoot": "/tmp/novai-canvas-src",
+    "staticDir": "/tmp/novai-canvas-src/static",
+    "pinnedCommit": "1e20abe5145470b32f58206f692292703540107a",
+    "matchesPin": true,
+    "git": {
+      "head": "1e20abe5145470b32f58206f692292703540107a",
+      "topLevel": "/private/tmp/novai-canvas-src",
+      "dirty": false,
+      "changedFileCount": 0,
+      "changedFiles": [],
+      "changedFilesTruncated": false
+    },
+    "contentFingerprint": {
+      "algorithm": "sha256",
+      "scope": "kept-files",
+      "files": 63,
+      "bytes": 12433717,
+      "value": "95d5d601d9ab90ef0cd8bb1e03fe418f0531e5c5f4f9ce65f9ba96183bd06a27"
+    }
+  },
+  "files": 63,
+  "sourceFiles": 139,
+  "prunedFiles": 76,
+  "pages": 4,
+  "pageWhitelist": [
+    "canvas-list.html",
+    "canvas.html",
+    "smart-canvas.html"
+  ],
+  "extraKeep": [
+    "system-prompts/infinite-canvas-prompt-templates.md",
+    "images/RunningHub-B.png",
+    "images/RunningHub-W.png",
+    "vendor/MANIFEST.md",
+    "tools/lossless-edit/vendor/ag-psd.js"
+  ],
+  "keepEdges": [
+    {
+      "from": "canvas-list.html",
+      "to": "images/logo.png"
+    },
+    {
+      "from": "canvas-list.html",
+      "to": "vendor/js/tailwindcss-cdn.js"
+    },
+    {
+      "from": "canvas-list.html",
+      "to": "vendor/js/lucide-subset.js"
+    },
+    {
+      "from": "canvas-list.html",
+      "to": "js/shared/icons.js"
+    },
+    {
+      "from": "canvas-list.html",
+      "to": "js/theme.js"
+    },
+    {
+      "from": "canvas-list.html",
+      "to": "js/shared/utils.js"
+    },
+    {
+      "from": "canvas-list.html",
+      "to": "js/shared/viewport.js"
+    },
+    {
+      "from": "canvas-list.html",
+      "to": "js/touch-mouse.js"
+    },
+    {
+      "from": "canvas-list.html",
+      "to": "js/i18n.js"
+    },
+    {
+      "from": "canvas-list.html",
+      "to": "js/shared/morph-button.js"
+    },
+    {
+      "from": "canvas-list.html",
+      "to": "css/canvas-list.css"
+    },
+    {
+      "from": "canvas-list.html",
+      "to": "css/theme.css"
+    },
+    {
+      "from": "canvas-list.html",
+      "to": "css/marvis-shared.css"
+    },
+    {
+      "from": "canvas-list.html",
+      "to": "images/concept/carousel-image-generation.jpg"
+    },
+    {
+      "from": "canvas-list.html",
+      "to": "images/concept/pinterest_carousel.mp4"
+    },
+    {
+      "from": "canvas-list.html",
+      "to": "images/concept/carousel-node-workflow.jpg"
+    },
+    {
+      "from": "canvas.html",
+      "to": "css/canvas.css"
+    },
+    {
+      "from": "canvas.html",
+      "to": "vendor/css/fonts.css"
+    },
+    {
+      "from": "canvas.html",
+      "to": "css/table-node.css"
+    },
+    {
+      "from": "canvas.html",
+      "to": "css/nv2-skin.css"
+    },
+    {
+      "from": "canvas.html",
+      "to": "css/image-adjust.css"
+    },
+    {
+      "from": "canvas.html",
+      "to": "css/glide.css"
+    },
+    {
+      "from": "canvas.html",
+      "to": "js/shared/size-policy.js"
+    },
+    {
+      "from": "canvas.html",
+      "to": "js/shared/media.js"
+    },
+    {
+      "from": "canvas.html",
+      "to": "js/shared/workflow-utils.js"
+    },
+    {
+      "from": "canvas.html",
+      "to": "js/shared/node-registry.js"
+    },
+    {
+      "from": "canvas.html",
+      "to": "js/shared/table-model.js"
+    },
+    {
+      "from": "canvas.html",
+      "to": "js/shared/table-node.js"
+    },
+    {
+      "from": "canvas.html",
+      "to": "js/shared/dropdown.js"
+    },
+    {
+      "from": "canvas.html",
+      "to": "js/shared/glide.js"
+    },
+    {
+      "from": "canvas.html",
+      "to": "js/image-adjust-engine.js"
+    },
+    {
+      "from": "canvas.html",
+      "to": "js/image-adjust-editor.js"
+    },
+    {
+      "from": "canvas.html",
+      "to": "js/canvas.js"
+    },
+    {
+      "from": "smart-canvas.html",
+      "to": "css/smart-canvas.css"
+    },
+    {
+      "from": "smart-canvas.html",
+      "to": "vendor/js/html-to-image.js"
+    },
+    {
+      "from": "smart-canvas.html",
+      "to": "js/shared/psd-writer.js"
+    },
+    {
+      "from": "smart-canvas.html",
+      "to": "js/smart-canvas.js"
+    },
+    {
+      "from": "js/i18n.js",
+      "to": "js/i18n-core.js"
+    },
+    {
+      "from": "js/i18n.js",
+      "to": "js/i18n/common.js"
+    },
+    {
+      "from": "js/i18n.js",
+      "to": "js/i18n/studio.js"
+    },
+    {
+      "from": "js/i18n.js",
+      "to": "js/i18n/api-settings.js"
+    },
+    {
+      "from": "js/i18n.js",
+      "to": "js/i18n/canvas.js"
+    },
+    {
+      "from": "js/i18n.js",
+      "to": "js/i18n/smart-canvas.js"
+    },
+    {
+      "from": "js/i18n.js",
+      "to": "js/i18n/comfyui-settings.js"
+    },
+    {
+      "from": "vendor/css/fonts.css",
+      "to": "vendor/fonts/Geist-Variable.woff2"
+    },
+    {
+      "from": "vendor/css/fonts.css",
+      "to": "vendor/fonts/GeistMono-Variable.woff2"
+    },
+    {
+      "from": "vendor/css/fonts.css",
+      "to": "vendor/fonts/inter-5.ttf"
+    },
+    {
+      "from": "vendor/css/fonts.css",
+      "to": "vendor/fonts/inter-4.ttf"
+    },
+    {
+      "from": "vendor/css/fonts.css",
+      "to": "vendor/fonts/inter-3.ttf"
+    },
+    {
+      "from": "vendor/css/fonts.css",
+      "to": "vendor/fonts/inter-2.ttf"
+    },
+    {
+      "from": "vendor/css/fonts.css",
+      "to": "vendor/fonts/inter-1.ttf"
+    },
+    {
+      "from": "vendor/css/fonts.css",
+      "to": "vendor/fonts/jetbrains-mono-7.ttf"
+    },
+    {
+      "from": "vendor/css/fonts.css",
+      "to": "vendor/fonts/jetbrains-mono-6.ttf"
+    },
+    {
+      "from": "js/smart-canvas.js",
+      "to": "vendor/js/three-0.160.0.module.js"
+    },
+    {
+      "from": "js/smart-canvas.js",
+      "to": "tools/lossless-edit/index.html"
+    },
+    {
+      "from": "(policy)",
+      "to": "system-prompts/infinite-canvas-prompt-templates.md"
+    },
+    {
+      "from": "(policy)",
+      "to": "images/RunningHub-B.png"
+    },
+    {
+      "from": "(policy)",
+      "to": "images/RunningHub-W.png"
+    },
+    {
+      "from": "(policy)",
+      "to": "vendor/MANIFEST.md"
+    },
+    {
+      "from": "(policy)",
+      "to": "tools/lossless-edit/vendor/ag-psd.js"
+    }
+  ],
+  "entry": "static/canvas-list.html",
+  "canvasJsHash": "b0dbe577a85ead0b",
+  "canvasHtmlHash": "aa8974786af04d13",
+  "guardHash": "3df1af30d353c0d8",
+  "modalHash": "fa91f67007271669",
+  "smartGuardHash": "726dec9c9687b71e",
+  "listHtmlHash": "b6de57c0a049f318",
   "csp": "default-src 'none'; script-src openarc-canvas: 'unsafe-inline'; style-src openarc-canvas: 'unsafe-inline'; img-src openarc-canvas: data: blob:; media-src openarc-canvas: data: blob:; font-src openarc-canvas:; connect-src openarc-canvas:; frame-src openarc-canvas:; child-src openarc-canvas:; object-src 'none'; form-action 'none'; base-uri 'none'"
 }

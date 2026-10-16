@@ -276,6 +276,7 @@ async function refreshCanvasConfigFromSettings(){
     (nodes || []).forEach(node => {
         sanitizeImageNodeProviderModel(node);
         sanitizeVideoNodeProviderModel(node);
+        sanitizeChatNodeProviderModel(node);
     });
     if(typeof render === 'function') render();
 }
@@ -558,23 +559,22 @@ const SIZE_MAP = {
     ultrawide: { '1k':'1280x544', '2k':'2048x880', '4k':'3840x1648' },
     ultratall: { '1k':'544x1280', '2k':'880x2048', '4k':'1648x3840' }
 };
-// gpt-image-2 官方 size 是离散枚举（1024x1024 / 1536x1024 / 1024x1536 / 2048x2048 /
-// 2048x1152 / 3840x2160 / 2160x3840 / auto），且长边 ≤3840、总像素 ≤8294400、宽高比 ≤3:1。
-// 它没有正方形 4K（4096² 超限、2880² 不在枚举），也没有 4:3 / 21:9 等非官方比例。
-// 用通用 SIZE_MAP 会生成 4096x4096 / 2352x3520 等非法值被上游拒，故单独映射到最近的合法档。
-const GPT_IMAGE_2_SIZE_MAP = {
-    square:       { '1k':'1024x1024', '2k':'2048x2048', '4k':'2048x2048' },
-    portrait:     { '1k':'1024x1536', '2k':'1024x1536', '4k':'2160x3840' },
-    landscape:    { '1k':'1536x1024', '2k':'2048x1152', '4k':'3840x2160' },
-    portrait43:   { '1k':'1024x1536', '2k':'1024x1536', '4k':'2160x3840' },
-    landscape43:  { '1k':'1536x1024', '2k':'2048x1152', '4k':'3840x2160' },
-    story:        { '1k':'1024x1536', '2k':'1024x1536', '4k':'2160x3840' },
-    wide:         { '1k':'1536x1024', '2k':'2048x1152', '4k':'3840x2160' },
-    ultrawide:    { '1k':'1536x1024', '2k':'2048x1152', '4k':'3840x2160' },
-    ultratall:    { '1k':'1024x1536', '2k':'1024x1536', '4k':'2160x3840' }
-};
+const API_RES_LEVELS = ['1k','2k','4k'];
+const API_RATIO_LABELS = {square:'正方形', portrait:'竖图', portrait43:'竖图', landscape:'横图', landscape43:'横图', story:'竖屏', wide:'宽屏', ultrawide:'超宽', ultratall:'超竖'};
 const RES_LONG_SIDE = { '1k':1536, '2k':2048, '4k':3840 };
-const RES_PIXEL_LIMIT = { '1k':1572864, '2k':4194304, '4k':8294400 };
+// 档位像素上限的唯一真值源是策略 tiers（shared/size-policy.js），这份常量只是策略取不到时的兜底
+const RES_PIXEL_LIMIT_FALLBACK = { '1k':1572864, '2k':4194304, '4k':8294400 };
+function resPixelLimitFor(model){
+    const limits = {};
+    const tiers = sizePolicyFor(model).tiers;
+    if(Array.isArray(tiers)) tiers.forEach(tier => {
+        const id = String(tier?.id || '').trim().toLowerCase();
+        const maxPixels = Number(tier?.maxPixels);
+        if(id && maxPixels > 0) limits[id] = maxPixels;
+    });
+    API_RES_LEVELS.forEach(level => { if(!limits[level]) limits[level] = RES_PIXEL_LIMIT_FALLBACK[level]; });
+    return limits;
+}
 const CUSTOM_IMAGE_MODELS_KEY = 'canvas_custom_image_models';
 const MANAGED_IMAGE_MODELS_KEY = 'canvas_image_models_ordered';
 const MANAGED_CHAT_MODELS_KEY = 'canvas_chat_models_ordered';
@@ -711,13 +711,13 @@ function normalizeProviderId(value){
    但服务端 generate_ai_image 本来就有 modelscope 分支，去掉排除即可让生成节点直接调它。
    排序上把 ModelScope 放最后：providers[0] 是新建节点的默认平台，不该被它抢掉。 */
 function imageApiProviders(){
-    const providers = (apiProviders.length ? apiProviders : defaultApiProviders())
-        .filter(p => p.enabled !== false && providerImageModels(p.id).length);
+    const providers = (apiProviders || [])
+        .filter(p => p.enabled !== false && p.has_key !== false && providerImageModels(p.id).length);
     return providers.filter(p => p.id !== 'modelscope').concat(providers.filter(p => p.id === 'modelscope'));
 }
 function midjourneyApiProviders(){
-    return (apiProviders.length ? apiProviders : [])
-        .filter(provider => provider.enabled !== false && (
+    return (apiProviders || [])
+        .filter(provider => provider.enabled !== false && provider.has_key !== false && (
             String(provider.protocol || '').toLowerCase() === 'apimart'
             || /(^|\.)apimart\.ai(?:\/|$)/i.test(String(provider.base_url || ''))
         ));
@@ -733,19 +733,18 @@ function midjourneyProviderOptions(selectedId){
     return providers.map(provider => `<option value="${escapeHtml(provider.id)}" ${provider.id === selected ? 'selected' : ''}>${escapeHtml(provider.name || provider.id)}</option>`).join('');
 }
 function providerById(id){
-    return (apiProviders.length ? apiProviders : defaultApiProviders()).find(p => p.id === id) || imageApiProviders()[0] || defaultApiProviders()[0];
+    return (apiProviders || []).find(p => p.id === id) || imageApiProviders()[0] || null;
 }
 function resolveProviderId(id){
-    return providerById(id)?.id || 'comfly';
+    return providerById(id)?.id || '';
 }
 function chatApiProviders(){
-    const providers = (apiProviders.length ? apiProviders : defaultApiProviders())
-        .filter(p => p.enabled !== false && (p.chat_models || []).length);
-    return providers.length ? providers : defaultApiProviders();
+    return (apiProviders || [])
+        .filter(p => p.enabled !== false && p.has_key !== false && (p.chat_models || []).length);
 }
 function resolveChatProviderId(id){
     const providers = chatApiProviders();
-    return providers.find(p => p.id === id)?.id || providers[0]?.id || 'comfly';
+    return providers.find(p => p.id === id)?.id || providers[0]?.id || '';
 }
 function chatProviderOptions(selectedId){
     const selected = resolveChatProviderId(selectedId);
@@ -773,21 +772,59 @@ function providerImageModels(providerId){
     if(!models.length && String(providerId || '').toLowerCase() === 'modelscope') return modelscopeImageModels();
     return models;
 }
+// 换平台后旧平台的模型名在新平台不存在（如 Lovart 的 generate_image_* 工具名，发出去上游必报模型不存在）：
+// 优先用该平台上一次用过的模型，没有记忆再用列表第一个；模型本身对新平台合法时保持不动。
+function correctNodeModelForProvider(node){
+    if(!node || !node.model) return '';
+    const models = providerImageModels(node.apiProvider);
+    if(!models.length) return '';
+    if(models.includes(resolveImageModel(node.model))) return '';
+    const remembered = window.NovaUtils?.rememberedProviderModel?.(node.apiProvider) || '';
+    const next = models.includes(remembered) ? remembered : (models[0] || '');
+    if(!next || next === node.model) return '';
+    node.model = next;
+    const name = providerById(node.apiProvider)?.name || node.apiProvider;
+    return `已切换到 ${name} 的模型 ${next}`;
+}
 function sanitizeImageNodeProviderModel(node){
     if(!node || node.type !== 'generator') return;
     node.apiProvider = resolveImageProviderId(node.apiProvider || '');
     const models = providerImageModels(node.apiProvider);
-    if(!models.length) node.model = '';
-    else if(!models.includes(resolveImageModel(node.model))) node.model = models[0] || '';
+    if(!node.model) node.model = models[0] || '';
+    else correctNodeModelForProvider(node);
+}
+// 换平台后旧平台的对话模型名在新平台不存在（如 Lovart 的 lovart-agent，发出去上游必报模型不存在）：
+// 优先用该平台上一次用过的对话模型，没有记忆再用列表第一个；模型本身对新平台合法时保持不动；平台没给列表时不动。
+function correctedChatModelForProvider(providerId, currentModel){
+    // 精确匹配平台，不走 resolveChatProviderId 的兜底，免得把别的平台的列表当成当前平台的
+    const models = providerChatModels(providerId);
+    const current = String(currentModel || '').trim();
+    if(!models.length || models.includes(current)) return current;
+    const remembered = window.NovaUtils?.rememberedProviderChatModel?.(providerId) || '';
+    return models.includes(remembered) ? remembered : models[0];
+}
+function correctChatNodeModelForProvider(node){
+    if(!node) return '';
+    const next = correctedChatModelForProvider(node.llmProvider, node.model);
+    if(!next || next === node.model) return '';
+    node.model = next;
+    const name = (apiProviders || []).find(p => p.id === node.llmProvider)?.name || node.llmProvider;
+    return `已切换到 ${name} 的模型 ${next}`;
+}
+function sanitizeChatNodeProviderModel(node){
+    if(!node || node.type !== 'llm') return;
+    node.llmProvider = resolveChatProviderId(node.llmProvider || '');
+    if(node.llmProvider === 'modelscope') node.model = node.llmMsModel || node.model;
+    if(!node.model) node.model = providerChatModels(node.llmProvider)[0] || node.model;
+    else correctChatNodeModelForProvider(node);
 }
 function videoApiProviders(){
-    const providers = (apiProviders.length ? apiProviders : defaultApiProviders())
-        .filter(p => p.id !== 'modelscope' && p.enabled !== false && (p.video_models || []).length);
-    return providers.length ? providers : defaultApiProviders();
+    return (apiProviders || [])
+        .filter(p => p.id !== 'modelscope' && p.enabled !== false && p.has_key !== false && (p.video_models || []).length);
 }
 function resolveVideoProviderId(id){
     const providers = videoApiProviders();
-    return providers.find(p => p.id === id)?.id || providers[0]?.id || 'comfly';
+    return providers.find(p => p.id === id)?.id || providers[0]?.id || '';
 }
 function videoProviderOptions(selectedId){
     const selected = resolveVideoProviderId(selectedId);
@@ -798,12 +835,31 @@ function providerVideoModels(providerId){
     const provider = apiProviders.find(p => p.id === providerId);
     return uniqueModels(provider?.video_models || []);
 }
+// 与智能画布视频轴同一口径：换平台后旧平台的视频模型名在新平台不存在时，优先用该平台上一次用过的
+// 视频模型，没有记忆再用列表第一个；模型本身对新平台合法时保持不动；平台没给列表时不动。
+function correctedVideoModelForProvider(providerId, currentModel){
+    // 精确匹配平台，不走 resolveVideoProviderId 的兜底，免得把别的平台的列表当成当前平台的
+    const models = providerVideoModels(providerId).map(model => String(model || '').trim()).filter(Boolean);
+    const current = String(currentModel || '').trim();
+    if(!models.length || models.includes(current)) return current;
+    const remembered = window.NovaUtils?.rememberedProviderVideoModel?.(providerId) || '';
+    return models.includes(remembered) ? remembered : models[0];
+}
+function correctVideoNodeModelForProvider(node){
+    if(!node) return '';
+    const next = correctedVideoModelForProvider(node.apiProvider, node.model);
+    if(!next || next === node.model) return '';
+    node.model = next;
+    const name = (apiProviders || []).find(p => p.id === node.apiProvider)?.name || node.apiProvider;
+    return `已切换到 ${name} 的模型 ${next}`;
+}
 function sanitizeVideoNodeProviderModel(node){
     if(!node || node.type !== 'video') return;
     node.apiProvider = resolveVideoProviderId(node.apiProvider || 'comfly');
     const models = providerVideoModels(node.apiProvider);
-    if(!models.length) node.model = '';
-    else if(!models.includes(node.model)) node.model = models[0] || '';
+    if(!node.model) node.model = models[0] || '';
+    // 历史存档或换平台可能留下不属于当前平台的视频模型（渲染阶段不能弹提示），先静默归一。
+    else correctVideoNodeModelForProvider(node);
 }
 // 视频模型支持的比例映射：键名按匹配优先级排列，model name 包含键名即命中
 // 未列出的模型默认支持全部比例
@@ -883,20 +939,18 @@ function resolveImageModel(value){
     if(value === 'nano') return models.nano;
     return value || allImageModels(managedProviderId)[0] || models.gpt;
 }
-function isGptImageAutoSizeModel(model){
-    const raw = String(model || '').trim().toLowerCase();
-    const normalized = raw.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-    const compact = raw.replace(/[^a-z0-9]+/g, '');
-    return normalized === 'gpt-image-2'
-        || normalized.startsWith('gpt-image-2-')
-        || normalized.endsWith('-gpt-image-2')
-        || normalized.includes('-gpt-image-2-')
-        || compact === 'gptimage2'
-        || compact.startsWith('gptimage2')
-        || compact.endsWith('gptimage2');
+// 尺寸策略由服务端 model_protocols.json 下发：enum 是真离散枚举，hintOnly 的模型尺寸只写进提示词。
+function sizePolicyFor(model){
+    return NovaSizePolicy.policy(resolveImageModel(model));
+}
+// auto 档由策略单独声明：hintOnly 只说尺寸是提示词，不代表这个模型能接受 "auto"
+function apiAllowsAutoSize(model){
+    return sizePolicyFor(model).autoSize === true;
 }
 function defaultApiImageResolution(model){
-    return isGptImageAutoSizeModel(resolveImageModel(model)) ? '4k' : '1k';
+    const policy = sizePolicyFor(model);
+    if(policy.defaultLevel) return policy.defaultLevel;
+    return policy.mode === 'enum' ? (enumMaxSizeLevel(model) || '1k') : '1k';
 }
 function normalizedImageQuality(value){
     const quality = String(value || 'auto').trim().toLowerCase();
@@ -1067,25 +1121,121 @@ function ratioPartsFromDimensions(width, height){
     const g = gcdInt(best.width, best.height);
     return {width:best.width / g, height:best.height / g};
 }
+function apiSizeTier(width, height, model){
+    const area = Number(width) * Number(height);
+    const pixelLimit = resPixelLimitFor(model);
+    for(const level of API_RES_LEVELS){
+        if(area <= pixelLimit[level]) return level;
+    }
+    return API_RES_LEVELS[API_RES_LEVELS.length - 1];
+}
+// 枚举模型的最高档没法从模型名推：按枚举里像素最多的一张反推
+function enumMaxSizeLevel(model){
+    let level = '';
+    (sizePolicyFor(model).options || []).forEach(option => {
+        const size = parseSizePair(option);
+        if(!size) return;
+        const tier = apiSizeTier(size.width, size.height, model);
+        if(API_RES_LEVELS.indexOf(tier) > API_RES_LEVELS.indexOf(level)) level = tier;
+    });
+    return level;
+}
+// OpenArc：任意比例 / 自定义比例都按「长边 + 该档像素上限」等比对称求解，与宿主 image-params.sizeFromRatio 同一口径。
+// 上游旧算法在 custom/source 分支只压一侧：1:1@1k 会算成 1536x1248（非方形）、4:3@1k 算成 1536x1072、
+// 1:1@4k 算成 3840x2880（超过该档像素上限）。具名比例沿用 SIZE_MAP 预设，只在预设自身超上限时等比收窄
+// （square@4k 的原生 4096x4096 收成 2880x2880），其余档位逐格不变。
+function fitApiSizePair(width, height, resolutionKey, model){
+    const longSide = RES_LONG_SIDE[resolutionKey] || 1024;
+    const pixelLimit = resPixelLimitFor(model)[resolutionKey] || (longSide * longSide);
+    let scale = 1;
+    if(longSide > 0) scale = Math.min(scale, longSide / Math.max(width, height));
+    if(pixelLimit > 0) scale = Math.min(scale, Math.sqrt(pixelLimit / (width * height)));
+    const w = Math.floor((width * scale) / 16) * 16;
+    const h = Math.floor((height * scale) / 16) * 16;
+    return `${Math.max(64, w)}x${Math.max(64, h)}`;
+}
 function apiImageSize(ratioValue, resolutionValue, customRatioValue = '', customSizeValue = '', model = ''){
     if(resolutionValue === 'auto') return 'auto';
-    if(resolutionValue === 'custom') return String(customSizeValue || '').trim();
+    const resolvedModel = resolveImageModel(model);
+    if(resolutionValue === 'custom'){
+        const custom = String(customSizeValue || '').trim();
+        return custom ? NovaSizePolicy.constrain(custom, resolvedModel) : custom;
+    }
     const resolutionKey = resolutionValue || '1k';
+    const longSide = RES_LONG_SIDE[resolutionKey] || 1024;
     if(ratioValue === 'custom' || ratioValue === 'source'){
         const parsed = parseRatioValue(customRatioValue);
-        const longSide = RES_LONG_SIDE[resolutionKey] || 1024;
         if(parsed){
-            const pixelLimit = RES_PIXEL_LIMIT[resolutionKey] || (longSide * longSide);
-            const rawWidth = parsed >= 1 ? longSide : Math.min(longSide * parsed, Math.sqrt(pixelLimit * parsed));
-            const rawHeight = parsed >= 1 ? Math.min(longSide / parsed, Math.sqrt(pixelLimit / parsed)) : longSide;
-            const width = Math.floor(rawWidth / 16) * 16;
-            const height = Math.floor(rawHeight / 16) * 16;
-            return `${Math.max(64, width)}x${Math.max(64, height)}`;
+            const width = parsed >= 1 ? longSide : longSide * parsed;
+            const height = parsed >= 1 ? longSide / parsed : longSide;
+            return NovaSizePolicy.constrain(fitApiSizePair(width, height, resolutionKey, resolvedModel), resolvedModel);
         }
     }
     const ratioKey = ratioValue && SIZE_MAP[ratioValue] ? ratioValue : 'square';
-    const table = isGptImageAutoSizeModel(model) ? GPT_IMAGE_2_SIZE_MAP : SIZE_MAP;
-    return table[ratioKey]?.[resolutionKey] || table.square[resolutionKey] || table.square['1k'];
+    const preset = SIZE_MAP[ratioKey]?.[resolutionKey] || SIZE_MAP.square[resolutionKey] || SIZE_MAP.square['1k'];
+    const presetPair = parseSizePair(preset);
+    if(!presetPair) return NovaSizePolicy.constrain(preset, resolvedModel);
+    return NovaSizePolicy.constrain(fitApiSizePair(presetPair.width, presetPair.height, resolutionKey, resolvedModel), resolvedModel);
+}
+function apiRatioLabel(ratioValue){
+    const ratioKey = ratioValue && SIZE_MAP[ratioValue] ? ratioValue : 'square';
+    return API_RATIO_LABELS[ratioValue] || API_RATIO_LABELS[ratioKey] || ratioKey;
+}
+// 枚举模型的合法尺寸有限：高位档可能没有对应尺寸，换档只改标签不改清晰度，故提前禁用。
+function apiResolutionSupport(model, ratioValue, customRatioValue = ''){
+    if(!NovaSizePolicy.enumOptions(resolveImageModel(model))) return {levels:API_RES_LEVELS.slice(), supported:API_RES_LEVELS.slice(), notes:{}};
+    const trackTiers = (ratioValue !== 'custom' && ratioValue !== 'source') || parseRatioValue(customRatioValue) > 0;
+    const supported = [];
+    const notes = {};
+    API_RES_LEVELS.forEach(level => {
+        const previous = supported.length ? apiImageSize(ratioValue, supported[supported.length - 1], customRatioValue, '', model) : '';
+        const size = apiImageSize(ratioValue, level, customRatioValue, '', model);
+        if(trackTiers && previous && size === previous){ notes[level] = `等同 ${supported[supported.length - 1].toUpperCase()}`; return; }
+        supported.push(level);
+    });
+    return {levels:API_RES_LEVELS.slice(), supported, notes};
+}
+function apiResolutionNote(model, ratioValue, level, customRatioValue = ''){
+    return apiResolutionSupport(model, ratioValue, customRatioValue).notes[level] || '';
+}
+function apiResolutionDisabledText(model, ratioValue, level, customRatioValue = ''){
+    const note = apiResolutionNote(model, ratioValue, level, customRatioValue);
+    return note ? `${level.toUpperCase()} ${apiRatioLabel(ratioValue)}尺寸不可用（${note}）` : '';
+}
+// 只有一档可用时把档位固定住，并说明原因。
+function apiResolutionFixedNote(model, ratioValue, customRatioValue = ''){
+    const info = apiResolutionSupport(model, ratioValue, customRatioValue);
+    return info.supported.length === 1 ? `${resolveImageModel(model)} 只支持 ${info.supported[0].toUpperCase()} 尺寸` : '';
+}
+// 档位失效时的落点：取不高于请求档位的最高可用档位（被禁档位本就"等同"于它，清晰度不损失、
+// 也不会让用户按更高清晰度多花点数）；只有完全没有更低档位时才往上取。
+function nearestApiResolution(model, ratioValue, level, customRatioValue = ''){
+    const info = apiResolutionSupport(model, ratioValue, customRatioValue);
+    const index = info.levels.indexOf(level);
+    for(let i = (index < 0 ? info.levels.length - 1 : index); i >= 0; i--){
+        if(info.supported.includes(info.levels[i])) return info.levels[i];
+    }
+    return info.supported.find(item => info.levels.indexOf(item) > index) || info.supported[0] || '1k';
+}
+function apiResolutionChangeNotice(model, ratioValue, level, target){
+    return `${resolveImageModel(model)} 不支持 ${level.toUpperCase()} ${apiRatioLabel(ratioValue)}尺寸，已自动调整为 ${target.toUpperCase()}`;
+}
+// 换模型/换比例后档位可能失效：自动换到该模型可用的档位并提示，避免静默出低清图。
+function applyApiResolutionLimit(node){
+    if(!node || API_RES_LEVELS.indexOf(node.resolution) < 0) return '';
+    const model = resolveImageModel(node.model);
+    const ratio = node.ratio || 'square';
+    const customRatio = node.customRatio || '';
+    if(!apiResolutionNote(model, ratio, node.resolution, customRatio)) return '';
+    const target = nearestApiResolution(model, ratio, node.resolution, customRatio);
+    const notice = apiResolutionChangeNotice(model, ratio, node.resolution, target);
+    node.resolution = target;
+    return notice;
+}
+function notifyCanvasSize(text){
+    if(!text) return;
+    if(window.NovaUtils && typeof window.NovaUtils.showToast === 'function') window.NovaUtils.showToast(text);
+    else setStatus(text);
 }
 function parseSizePair(value){
     const match = String(value || '').match(/(\d+)\s*x\s*(\d+)/i);
@@ -1111,12 +1261,14 @@ function exceedsFourKStandard(width, height){
 }
 function normalizeApiNodeSizeChoice(node){
     if(!node) return;
-    const allowAuto = isGptImageAutoSizeModel(resolveImageModel(node.model));
+    const allowAuto = apiAllowsAutoSize(node.model);
     if(allowAuto && node._apiResolutionUserSet !== true && (!node.resolution || node.resolution === '1k' || node.resolution === 'auto')) node.resolution = defaultApiImageResolution(node.model);
     else if(!node.resolution) node.resolution = defaultApiImageResolution(node.model);
     if(!allowAuto && node.resolution === 'auto') node.resolution = '1k';
 }
 async function generatorSizeForRun(gen, refs){
+    const resolution = gen.resolution || defaultApiImageResolution(gen.model);
+    let sourceSize = '';
     if((gen.ratio || 'square') === 'source'){
         const ref = refs?.[0];
         if(ref?.url){
@@ -1126,13 +1278,16 @@ async function generatorSizeForRun(gen, refs){
                 gen.customRatioWidth = String(parts.width);
                 gen.customRatioHeight = String(parts.height);
                 gen.customRatio = `${parts.width}:${parts.height}`;
+                // "适配输入"要按参考图真实像素出图，化简成比例再按档位重造会把尺寸换掉
+                if(resolution !== 'auto' && resolution !== 'custom') sourceSize = NovaSizePolicy.fitSource(dims.width, dims.height, resolveImageModel(gen.model));
             } catch(_) {}
         }
     }
+    if(sourceSize) return sourceSize;
     const ratio = (gen.ratio === 'source' && !gen.customRatio)
         ? 'square'
         : (gen.ratio ?? 'square');
-    return apiImageSize(ratio, gen.resolution || defaultApiImageResolution(gen.model), gen.customRatio || '', gen.customSize || '', resolveImageModel(gen.model));
+    return apiImageSize(ratio, resolution, gen.customRatio || '', gen.customSize || '', resolveImageModel(gen.model));
 }
 function normalizeApiNodeLayout(node){
     if(!node || node.type !== 'generator') return;
@@ -1156,7 +1311,11 @@ function chatModelOptions(selectedModel, providerId=''){
     if(!models.length){
         return `<option value="" disabled selected>${tr('canvas.noModelsHint') || '暂无模型，请到 API 设置添加'}</option>`;
     }
-    const selectedValue = resolveChatModel(selectedModel, providerId);
+    // selectedValue 先按平台校正：只有「模型本就合法」或「该平台没给列表」时才会保留当前值，
+    // 旧平台的失效模型不会再被塞进候选里。providerId 为空（无平台）时退回保留当前值。
+    const selectedValue = providerId
+        ? correctedChatModelForProvider(providerId, resolveChatModel(selectedModel, providerId))
+        : resolveChatModel(selectedModel, providerId);
     const options = models.map(model => `<option value="${escapeHtml(model)}" ${model === selectedValue ? 'selected' : ''}>${escapeHtml(model)}</option>`).join('');
     const hasSelected = models.includes(selectedValue);
     return `${hasSelected || !selectedValue ? '' : `<option value="${escapeHtml(selectedValue)}" selected>${escapeHtml(selectedValue)}</option>`}${options}`;
@@ -2900,6 +3059,25 @@ function addOutputNode(point){
     const p = point || defaultPoint(260, 0);
     return addNode({id:uid('out'), type:'output', x:p.x, y:p.y, images:[]});
 }
+/* 滑块高亮（NovaGlide = shared/glide.js）接进经典画布的弹层。
+   dropdown.js 那套 .nd-menu 是「每次开菜单新建节点」，可以 attach 一次就撒手；
+   这里五个弹层是页面上的常驻节点、内容每次打开都被 innerHTML 重写，
+   所以必须在每次写完内容（含 refreshIcons 之后）重新调一次。
+   attach 内部遇到同一个容器会先 destroy 旧的（glide.js 里 container.__nvGlide 那段），
+   所以这里不需要自己判断「是否已接线」——重调只会换掉旧滑块，不会叠出第二个。
+   存在才调：没引 glide.js 的页面 / 测试垫片里不能抛。 */
+function glideSync(container, item){
+    if(!container || !item) return null;
+    if(!window.NovaGlide || typeof window.NovaGlide.attach !== 'function') return null;
+    const glide = window.NovaGlide.attach(container, {item});
+    /* 菜单是 display:none → block 切换的：attach 那一刻布局还没算过，
+       getBoundingClientRect 全是 0，滑块会停在左上角等下一次内容/悬停事件。
+       读一次 offsetHeight 强制布局，再 refresh 一次，滑块在指针进来之前就已经到位。 */
+    void container.offsetHeight;
+    if(!glide) return null;
+    glide.refresh();
+    return glide;
+}
 function openCreateMenu(clientX, clientY){
     menuPoint = screenToWorld(clientX, clientY);
     closeLinkCreateMenu();
@@ -2907,6 +3085,7 @@ function openCreateMenu(clientX, clientY){
     createMenu.style.top = `${clientY}px`;
     createMenu.classList.add('open');
     refreshIcons();
+    glideSync(createMenu, '.menu-btn');   /* 内容是 HTML 静态标记，但每次打开都要重新量一次几何 */
 }
 function closeCreateMenu(){
     createMenu.classList.remove('open');
@@ -2956,6 +3135,7 @@ function openLinkCreateMenu(originId, originKind, clientX, clientY){
         };
     });
     refreshIcons();
+    glideSync(linkCreateMenu, '.menu-btn');   /* 每次打开都重写 innerHTML，attach 得跟在后面 */
     return true;
 }
 function openGeneratorNodeMenu(nodeId, clientX, clientY){
@@ -2999,6 +3179,10 @@ function openGeneratorNodeMenu(nodeId, clientX, clientY){
         };
     }));
     refreshIcons();
+    /* 两列 grid + .menu-section-title 分组标题：滑块几何走 getBoundingClientRect 差值，
+       所以分组标题和二维布局都能对齐（不会按 index × 行高算错行） */
+    glideSync(nodeInputMenu, '.menu-btn');
+    glideSync(nodeOutputMenu, '.menu-btn');
     return true;
 }
 function closeLinkCreateMenu(){
@@ -3049,6 +3233,7 @@ function openImageNodeMenu(nodeId, clientX, clientY){
         pickImageForNode(nodeId);
     };
     refreshIcons();
+    glideSync(imageNodeMenu, '.menu-btn');   /* 每次打开都重写 innerHTML（图片菜单 / 输出节点菜单共用此容器） */
 }
 function openImageNodePreview(nodeId){
     const node = nodes.find(n => n.id === nodeId);
@@ -5869,7 +6054,7 @@ function renderNode(node){
         return `<span class="node-run-status ${node.runStatus}"><span class="dot"></span>${escapeHtml(label)}${node._cascadeIdx?' '+node._cascadeIdx:''}</span>`;
     })() : '';
     const titleHtml = node.type === 'group' ? `<input class="group-title-input" value="${escapeAttr(displayTitle)}" aria-label="群组名称">` : `<span class="node-title">${escapeHtml(displayTitle)}</span>`;
-    const groupRunHtml = node.type === 'group' ? `<button class="group-run-btn" type="button" title="运行群组" data-run-group="${escapeAttr(node.id)}"><i data-lucide="play"></i></button>` : '';
+    const groupRunHtml = node.type === 'group' ? `<button class="group-run-btn" type="button" title="运行群组" aria-label="运行群组" data-run-group="${escapeAttr(node.id)}"><i data-lucide="arrow-up"></i></button>` : '';
     el.innerHTML = `<div class="node-head">${titleHtml}<div style="display:flex;align-items:center;gap:8px">${statusHtml}${groupRunHtml}<button onclick="deleteNodeFromButton('${node.id}', event)" class="text-gray-300 hover:text-red-500"><i data-lucide="x" class="w-4 h-4"></i></button></div></div>`;
     const groupTitleInput = el.querySelector('.group-title-input');
     if(groupTitleInput) groupTitleInput.oninput = event => { node.title = event.target.value; scheduleSave(); };
@@ -7073,9 +7258,9 @@ function syncCanvasPromptTemplateMutation(data, fallbackSelectedId=''){
 }
 async function saveCurrentCanvasPromptAsTemplate(){
     const lib = activeCanvasPromptLibrary();
-    if(!currentCanvasPromptTemplateLibraryEditable()){ setStatus('请选择可编辑的提示词库'); return; }
+    if(!currentCanvasPromptTemplateLibraryEditable()){ setStatus('请选择可编辑的提示词库'); return false; }
     const text = currentCanvasPromptTemplateNodeText();
-    if(!text){ setStatus('当前提示词为空'); return; }
+    if(!text){ setStatus('当前提示词为空'); return false; }
     try {
         const data = await fetch('/api/prompt-libraries/items', {
             method:'POST',
@@ -7097,6 +7282,7 @@ async function saveCurrentCanvasPromptAsTemplate(){
         renderPromptTemplateModal();
     } catch(err) {
         setStatus(err.message || '保存失败');
+        return false;
     }
 }
 async function createBlankCanvasPromptTemplate(){
@@ -7128,7 +7314,7 @@ async function saveCanvasPromptTemplateEdit(){
     const name = promptTemplatePanel.querySelector('[data-template-edit-name]')?.value?.trim() || '';
     const positive = promptTemplatePanel.querySelector('[data-template-edit-text]')?.value?.trim() || '';
     const category = promptTemplatePanel.querySelector('[data-template-edit-category]')?.value || 'mine';
-    if(!name || !positive){ setStatus(tr('smart.tplRequired')); return; }
+    if(!name || !positive){ setStatus(tr('smart.tplRequired')); return false; }
     try {
         // 仅当模板不是后端项（非 remote）时才退回本地覆盖；系统库现在是 remote，走下面的后端 PATCH 同步。
         if(item.builtin && !item.remote){
@@ -7164,6 +7350,7 @@ async function saveCanvasPromptTemplateEdit(){
         renderPromptTemplateModal();
     } catch(err) {
         setStatus(err.message || '保存失败');
+        return false;
     }
 }
 async function deleteCanvasPromptTemplate(){
@@ -7452,7 +7639,9 @@ function renderLLMBody(node){
     node.llmProvider = resolveChatProviderId(node.llmProvider || 'comfly');
     const llmProv = node.llmProvider;
     if(llmProv === 'modelscope') node.model = node.llmMsModel || node.model;
-    if(!providerChatModels(llmProv).includes(node.model)) node.model = providerChatModels(llmProv)[0] || node.model;
+    if(!node.model) node.model = providerChatModels(llmProv)[0] || node.model;
+    // 历史存档或换平台可能留下不属于当前平台的对话模型（渲染阶段不能弹提示），先静默归一。
+    node.model = correctedChatModelForProvider(llmProv, node.model);
     const modelOpts = chatModelOptions(node.model, llmProv);
     const imgs = llmInputImages(node);
     const videos = llmInputVideos(node);
@@ -7487,15 +7676,20 @@ function renderLLMBody(node){
         e.stopPropagation();
         node.llmProvider = e.target.value;
         const models = providerChatModels(node.llmProvider);
-        node.model = models[0] || '';
+        if(!node.model) node.model = models[0] || '';
+        // 换平台先按新平台校正模型，再记住这次用的模型，最后弹一条提示。
+        const providerModelNotice = correctChatNodeModelForProvider(node);
         if(node.llmProvider === 'modelscope') node.llmMsModel = node.model;
+        window.NovaUtils?.rememberProviderChatModel?.(node.llmProvider, node.model);
         render();
         scheduleSave();
+        if(providerModelNotice) notifyCanvasSize(providerModelNotice);
     };
     modelSelect.onchange = e => {
         e.stopPropagation();
         node.model = e.target.value;
         if((node.llmProvider||'comfly') === 'modelscope') node.llmMsModel = e.target.value;
+        window.NovaUtils?.rememberProviderChatModel?.(node.llmProvider, node.model);
         scheduleSave();
     };
     wrap.querySelector('.llm-sys-toggle:not(.llm-reverse-toggle)').onclick = e => { e.stopPropagation(); node.showSystem = !node.showSystem; render(); scheduleSave(); };
@@ -7537,7 +7731,8 @@ function renderLLMNodePane(container, node){
         <div class="gen-run-row">
             <div class="llm-run-row">
                 <div class="llm-mode llm-output-mode" role="group" aria-label="LLM 输出形式">${llmOutputModeButtonsHtml(node)}</div>
-                <button class="llm-run ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="play" class="w-4 h-4"></i>${llmRunButtonLabel(node)}</button>
+                ${llmSegmentSecondsHtml(node)}
+                <button class="llm-run ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''} title="${escapeAttr(llmRunButtonLabel(node))}" aria-label="${escapeAttr(llmRunButtonLabel(node))}"><i data-lucide="arrow-up" class="w-4 h-4"></i></button>
             </div>
             ${cascadeBtnHtml(node)}
         </div>
@@ -7567,6 +7762,13 @@ function renderLLMNodePane(container, node){
             };
         });
     }
+    // 每段秒数（只在「视频分镜表」下渲染）：存 node.segmentSeconds，出表时按它真实切段
+    const segmentSecondsEl = container.querySelector('.llm-segment-seconds');
+    if(segmentSecondsEl) segmentSecondsEl.onchange = e => {
+        e.stopPropagation();
+        node.segmentSeconds = segmentSecondsOf({segmentSeconds: e.target.value});
+        scheduleSave();
+    };
     bindCascadeButtons(container, node.id);
     const copyBtn = container.querySelector('.llm-output-copy');
     if(copyBtn){
@@ -7588,7 +7790,7 @@ function renderLLMChatPane(container, node){
         <div class="llm-chat-log">${messages.length ? messages.map((msg, mi) => `<div class="llm-bubble ${msg.role === 'user' ? 'user' : 'assistant'}" data-msg-idx="${mi}">${escapeHtml(msg.content || '')}${msg.role === 'assistant' ? `<button class="llm-bubble-copy" type="button" title="复制"><i data-lucide="copy" style="width:11px;height:11px;display:inline-block;vertical-align:middle"></i></button>` : ''}</div>`).join('') : `<div class="text-[11px] text-gray-300">${tr('canvas.startChat')}</div>`}</div>
         <div class="llm-pane-resizer" style="margin:4px 0"></div>
         <textarea class="llm-chat-input" rows="2" placeholder="${tr('canvas.chatInput')}">${escapeHtml(node.chatInput || '')}</textarea>
-        <button class="llm-run mt-2" ${node.running ? 'disabled' : ''}><i data-lucide="send" class="w-4 h-4"></i>${node.running ? tr('canvas.sending') : 'Send'}</button>
+        <button class="llm-run mt-2" ${node.running ? 'disabled' : ''} title="${node.running ? tr('canvas.sending') : 'Send'}" aria-label="${node.running ? tr('canvas.sending') : 'Send'}"><i data-lucide="arrow-up" class="w-4 h-4"></i></button>
     `;
     bindScrollableText(container.querySelector('.llm-chat-log'));
     bindScrollableText(container.querySelector('.llm-chat-input'));
@@ -7841,6 +8043,8 @@ function renderGeneratorBody(node){
     const promptInputs = ordered.filter(src => src.prompt && !src.refs?.length);
     sanitizeImageNodeProviderModel(node);
     normalizeApiNodeSizeChoice(node);
+    // 默认档位/历史存档可能对新模型无效（如正方形 4K），渲染前先归一，避免标签和实发尺寸不一致。
+    applyApiResolutionLimit(node);
     wrap.innerHTML = `
         <div class="gen-scroll">
         <div class="prompt-list mb-3"></div>
@@ -7923,12 +8127,17 @@ function renderGeneratorBody(node){
         e.stopPropagation();
         node.apiProvider = e.target.value;
         const providerModels = providerImageModels(node.apiProvider);
-        if(!providerModels.includes(resolveImageModel(node.model))) node.model = providerModels[0] || '';
-        node._apiResolutionUserSet = false;
-        node.resolution = defaultApiImageResolution(node.model);
+        if(!node.model) node.model = providerModels[0] || '';
+        const providerModelNotice = correctNodeModelForProvider(node);
+        /* 换平台不再无条件重置清晰度：用户选过就保留（对不上新模型的档位由 applyApiResolutionLimit
+           收到最近可用档并提示），否则换一次平台就把用户选的 2K 悄悄变成模型默认的 4K。 */
+        if(node._apiResolutionUserSet !== true) node.resolution = defaultApiImageResolution(node.model);
         modelSelect.innerHTML = imageModelOptions(node.model, node.apiProvider);
+        const providerSizeNotice = applyApiResolutionLimit(node);
         syncSizeControls();
         syncQualityControls();
+        const notice = [providerModelNotice, providerSizeNotice].filter(Boolean).join(' · ');
+        if(notice) notifyCanvasSize(notice);
         scheduleSave();
     };
     modelSelect.onmousedown = e => e.stopPropagation();
@@ -7936,10 +8145,13 @@ function renderGeneratorBody(node){
     modelSelect.onchange = e => {
         e.stopPropagation();
         node.model = e.target.value;
-        node._apiResolutionUserSet = false;
-        if(node.resolution !== 'custom') node.resolution = defaultApiImageResolution(node.model);
+        window.NovaUtils?.rememberProviderModel?.(node.apiProvider, node.model);
+        /* 同上：换模型保留用户选过的清晰度，只有没选过才用模型默认档 */
+        if(node._apiResolutionUserSet !== true && node.resolution !== 'custom') node.resolution = defaultApiImageResolution(node.model);
+        const modelSizeNotice = applyApiResolutionLimit(node);
         syncSizeControls();
         syncQualityControls();
+        if(modelSizeNotice) notifyCanvasSize(modelSizeNotice);
         scheduleSave();
     };
     const ratioSelect = wrap.querySelector('.ratio');
@@ -8001,8 +8213,18 @@ function renderGeneratorBody(node){
     };
     const syncSizeControls = () => {
         normalizeApiNodeSizeChoice(node);
+        const apiModel = resolveImageModel(node.model);
         const autoOption = resolutionSelect.querySelector('option[value="auto"]');
-        if(autoOption) autoOption.disabled = !isGptImageAutoSizeModel(resolveImageModel(node.model));
+        if(autoOption) autoOption.disabled = !apiAllowsAutoSize(apiModel);
+        const sizeSupport = apiResolutionSupport(apiModel, node.ratio || 'square', node.customRatio || '');
+        [...resolutionSelect.options].forEach(option => {
+            if(option.value !== '1k' && option.value !== '2k' && option.value !== '4k') return;
+            const note = sizeSupport.notes[option.value] || '';
+            option.disabled = Boolean(note);
+            option.title = apiResolutionDisabledText(apiModel, node.ratio || 'square', option.value, node.customRatio || '');
+            option.textContent = note ? `${option.value.toUpperCase()} · ${note}` : option.value.toUpperCase();
+        });
+        resolutionSelect.title = apiResolutionFixedNote(apiModel, node.ratio || 'square', node.customRatio || '');
         const squareOption = ratioSelect.querySelector('option[value="square"]');
         if(squareOption){
             squareOption.disabled = false;
@@ -8046,7 +8268,9 @@ function renderGeneratorBody(node){
             node.customRatioWidth = '';
             node.customRatioHeight = '';
         }
+        const ratioSizeNotice = applyApiResolutionLimit(node);
         syncSizeControls();
+        if(ratioSizeNotice) notifyCanvasSize(ratioSizeNotice);
         scheduleSave();
     };
     resolutionSelect.onmousedown = e => e.stopPropagation();
@@ -8209,7 +8433,7 @@ function renderMidjourneyBody(node){
             </div>
         </div>
         <div class="mj-task-line ${node.lastTaskId ? 'ready' : ''}"><i data-lucide="clock-3"></i><span>${taskText}</span></div>
-        <div class="gen-run-row"><button class="gen-btn mj-run" ${node.running || !hasProvider ? 'disabled' : ''}><i data-lucide="wand-sparkles" class="w-4 h-4"></i>${runLabel}</button>${cascadeBtnHtml(node)}</div>
+        <div class="gen-run-row"><button class="gen-btn mj-run" ${node.running || !hasProvider ? 'disabled' : ''} title="${escapeAttr(runLabel)}" aria-label="${escapeAttr(runLabel)}"><i data-lucide="arrow-up" class="w-4 h-4"></i></button>${cascadeBtnHtml(node)}</div>
         ${midjourneyContinuationHtml(node)}
         ${midjourneyModalHtml(node, maskRef)}
         ${retryBarHtml(node)}
@@ -8344,7 +8568,10 @@ function renderVideoBody(node){
         e.stopPropagation();
         node.apiProvider = e.target.value;
         const models = providerVideoModels(node.apiProvider);
-        if(!models.includes(node.model)) node.model = models[0] || node.model;
+        if(!node.model) node.model = models[0] || node.model;
+        // 换平台先按新平台的视频模型校正，再记住这次用的模型，最后弹一条提示。
+        const providerModelNotice = correctVideoNodeModelForProvider(node);
+        window.NovaUtils?.rememberProviderVideoModel?.(node.apiProvider, node.model);
         modelSelect.innerHTML = videoModelOptions(node.model, node.apiProvider);
         // Update aspect ratio options for new model
         const allowed = getVideoAspectRatios(node.model);
@@ -8357,10 +8584,12 @@ function renderVideoBody(node){
             node.aspectRatio = aspectSelect.value;
         }
         scheduleSave();
+        if(providerModelNotice) notifyCanvasSize(providerModelNotice);
     };
     modelSelect.onchange = e => {
         e.stopPropagation();
         node.model = e.target.value;
+        window.NovaUtils?.rememberProviderVideoModel?.(node.apiProvider, node.model);
         // Update aspect ratio options for new model
         const allowed = getVideoAspectRatios(node.model);
         aspectSelect.querySelectorAll('option').forEach(opt => {
@@ -8633,7 +8862,7 @@ function renderComfyBody(node){
         <div class="comfy-controls">
             <div class="gen-settings comfy-settings"></div>
             <div class="gen-run-row">
-                <button class="comfy-run ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="zap" class="w-4 h-4"></i>${node.running ? tr('canvas.comfyRunning') : tr('canvas.comfyRun')}</button>
+                <button class="comfy-run ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''} title="${node.running ? tr('canvas.comfyRunning') : tr('canvas.comfyRun')}" aria-label="${node.running ? tr('canvas.comfyRunning') : tr('canvas.comfyRun')}"><i data-lucide="arrow-up" class="w-4 h-4"></i></button>
                 ${cascadeBtnHtml(node)}
             </div>
             ${retryBarHtml(node)}
@@ -9179,7 +9408,7 @@ function renderRhBody(node){
         </div>
         <div class="rh-param-list"></div>
         <div class="gen-run-row">
-            <button class="gen-btn rh-run ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="workflow" class="w-4 h-4"></i>${node.running ? tr('canvas.rhRunning') : tr('canvas.rhRun')}</button>
+            <button class="gen-btn rh-run ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''} title="${node.running ? tr('canvas.rhRunning') : tr('canvas.rhRun')}" aria-label="${node.running ? tr('canvas.rhRunning') : tr('canvas.rhRun')}"><i data-lucide="arrow-up" class="w-4 h-4"></i></button>
             ${cascadeBtnHtml(node)}
         </div>
         ${retryBarHtml(node)}
@@ -10970,15 +11199,364 @@ async function runComfyNode(nodeId, opts={}){
         if(!opts.cascade){ node.running = false; refreshRunNodes(node, out); }
     }
 }
+
+/* ── 视频分镜表：参考视频按「每段秒数」真实切段，一段一行 ──────────────
+   每行只用它自己那一段当视频参考，产品图 / 模特穿搭图每行都带。
+   经典画布的 LLM 输入是纯文本（提示词节点 / 输入框），没有智能画布那种可以 @ 的素材 chip，
+   所以素材只有「连线」一个来源，@视频N / @图片N 的序号按连线通道的全局清单算。 */
+const SEGMENT_SHOTS_BATCH = 8;
+/* 摘帧描述比出表慢（要读 8 张图），但再慢也必须中止：fetch 永远 pending 的话
+   调用方的 finally 不会执行，节点就永远显示「运行中」。 */
+const SEGMENT_SHOTS_TIMEOUT_MS = 180000;
+const SEGMENT_STORYBOARD_COLUMNS = ['时间段(秒)', '时长(秒)', '画面描述', '运镜', '参考用法'];
+const SEGMENT_SHOT_FALLBACK = '对齐参考片段的画面与运镜';
+/* 「每段秒数」：参考视频按这个秒数切成一段一行。只在「视频分镜表」下出现 ——
+   别的输出形式没有分段这回事，多一个下拉只会让人猜它是干什么的。 */
+const LLM_SEGMENT_SECONDS_OPTIONS = [1, 2, 3, 4, 5];
+
+function canvasLlmOutputModeValue(node){
+    const model = novaTableModel();
+    if(model) return model.llmOutputModeChoice(node && node.llmOutputMode);
+    return node && (node.llmOutputMode === 'list' || node.llmOutputMode === 'list-video') ? node.llmOutputMode : 'text';
+}
+
+function segmentSecondsOf(node){
+    const model = novaTableModel();
+    const raw = node && node.segmentSeconds;
+    if(model && typeof model.segmentSeconds === 'function') return model.segmentSeconds(raw);
+    const value = Number(raw);
+    return Number.isFinite(value) ? Math.min(5, Math.max(1, value)) : 3;
+}
+
+// 下拉只在「视频分镜表」下渲染；样式内联，不为了一个下拉去动画布 CSS
+function llmSegmentSecondsHtml(node){
+    if(canvasLlmOutputModeValue(node) !== 'list-video') return '';
+    const current = segmentSecondsOf(node);
+    const unit = tr('canvas.segmentSecondsUnit');
+    return `<select class="llm-segment-seconds" style="height:28px;border-radius:var(--radius-full);padding:0 8px;border:1px solid transparent;background:var(--surface-2);color:var(--text-2);font-size:10px;font-weight:700;flex:0 0 auto;" title="${escapeAttr(tr('canvas.segmentSecondsTip'))}" aria-label="${escapeAttr(tr('canvas.segmentSeconds'))}">`
+        + LLM_SEGMENT_SECONDS_OPTIONS.map(n => `<option value="${n}"${n === current ? ' selected' : ''}>${escapeHtml(`${n} ${unit}`)}</option>`).join('')
+        + '</select>';
+}
+
+// 同一份素材的地址编码形式未必一致，按解码后的地址去重
+function segmentEntryKey(url){
+    const text = String(url || '');
+    try { return decodeURIComponent(text); } catch(error){ return text; }
+}
+
+// 条目的真实素材地址：输出节点的条目自带 url；单素材节点没有（url 在节点上）
+function segmentMediaUrlFor(entry){
+    const direct = String((entry && entry.url) || '');
+    if(direct) return direct;
+    const source = (nodes || []).find(item => item.id === (entry && entry.nodeId));
+    if(!source) return '';
+    if(source.url) return String(source.url);
+    const images = Array.isArray(source.images) ? source.images : [];
+    return String(images.map(item => outputUrlValue(item)).find(Boolean) || '');
+}
+
+/* 条目的素材名（文件名）：分类要看「DSC07792.jpg 前面写的是鞋子还是人物」，
+   连线只知道节点名，文件名得回源节点认。 */
+function segmentMediaNameFor(entry, url){
+    const source = (nodes || []).find(item => item.id === (entry && entry.nodeId));
+    if(!source) return '';
+    const images = Array.isArray(source.images) ? source.images : [];
+    const hit = images.find(item => outputUrlValue(item) && segmentEntryKey(outputUrlValue(item)) === segmentEntryKey(url));
+    if(hit && typeof hit === 'object' && hit.name) return String(hit.name);
+    if(String(source.url || '') && segmentEntryKey(source.url) === segmentEntryKey(url)) return String(source.name || '');
+    return '';
+}
+
+/* 素材清单 + 每个素材的全局 @序号（口径与表格逐行汇总那一套一致：
+   通道 ordinalBase + 组内位置 + 1）。requirement 用来按语境判角色（「鞋子替换成 XX.jpg」）。 */
+function segmentStoryboardSources(groups, requirement){
+    const model = novaTableModel();
+    const linkedGroups = [];
+    let running = 0;
+    (groups || []).forEach((group, index) => {
+        const channelId = model.channelIdAt(index);
+        const entries = [];
+        const seenKeys = new Set();
+        let count = 0;
+        (group.entries || []).forEach(entry => {
+            const url = segmentMediaUrlFor(entry);
+            const key = segmentEntryKey(url);
+            // 同一个通道里重复的素材表格侧会被合掉一项，序号口径必须跟着合
+            if(key && seenKeys.has(key)) return;
+            if(key) seenKeys.add(key);
+            const offset = count;
+            count += 1;
+            if(!url) return;
+            entries.push({
+                kind: entry.kind || 'image', url,
+                label: entry.label || '', name: segmentMediaNameFor(entry, url),
+                nodeId: entry.nodeId || '', source:'link',
+                channelId, groupIndex:index, offset, ordinal:0,
+            });
+        });
+        linkedGroups.push({channelId, groupIndex:index, count, entries});
+    });
+    linkedGroups.forEach(group => { group.ordinalBase = running; running += group.count; });
+    linkedGroups.forEach(group => group.entries.forEach(entry => { entry.ordinal = group.ordinalBase + entry.offset + 1; }));
+    return {
+        groups: linkedGroups,
+        connected: linkedGroups.flatMap(group => group.entries),
+        instructionText: String(requirement || ''),
+    };
+}
+
+/* 通道规划：参考视频通道 'sequence'（逐行取该行那一段的片段），其余一律 'all'。
+   这里必须给「其余」也设 all：非 all 的通道整行只留最先遇到的那一张主参考图，
+   产品 / 模特图就会被挤掉，表现就是「每行只有一张图」。 */
+function segmentStoryboardPlan(sources, classification){
+    const video = classification.video;
+    const videoChannelId = video ? video.channelId : '';
+    // 连线的视频通道每一行都被这一段的片段整格覆盖，它的序号就是通道第一项（ordinalBase + 1）
+    const videoBase = video && sources.groups[video.groupIndex] ? sources.groups[video.groupIndex].ordinalBase : 0;
+    const videoOrdinal = video ? videoBase + 1 : 0;
+    const modes = {};
+    sources.groups.forEach(group => {
+        modes[group.channelId] = group.channelId === videoChannelId ? 'sequence' : 'all';
+    });
+    return {
+        video, videoChannelId, videoOrdinal,
+        product: classification.product,
+        modelOutfit: classification.modelOutfit,
+        channelCount: sources.groups.length,
+        modes,
+        // materializeLlmTable 按这份回执设通道模式：per-row → sequence，every-row → all
+        inputGroups: sources.groups.map((group, index) => ({
+            group: index + 1,
+            rowMode: group.channelId === videoChannelId ? 'per-row' : 'every-row',
+        })),
+    };
+}
+
+/* 一行 = 一段：时间段(秒) / 时长(秒) / 画面描述 / 运镜 / 参考用法。
+   摘帧描述（shots）缺哪段就用兜底文案 —— 描述写不出来也得出表。 */
+function segmentStoryboardTable(plan, segments, shots, model){
+    const byIndex = new Map((shots || []).map(shot => [Number(shot.index), shot]));
+    const rows = segments.map(segment => {
+        const shot = byIndex.get(Number(segment.index)) || {};
+        return [
+            model.formatSeconds(segment.start) + '–' + model.formatSeconds(segment.end) + 's',
+            model.formatSeconds(segment.duration),
+            String(shot['画面描述'] || '').trim() || SEGMENT_SHOT_FALLBACK,
+            String(shot['运镜'] || '').trim(),
+            model.segmentReferenceLine({
+                videoOrdinal: plan.videoOrdinal || 1,
+                productOrdinals: plan.product.map(entry => entry.ordinal),
+                modelOutfitOrdinals: plan.modelOutfit.map(entry => entry.ordinal),
+                start: segment.start,
+                end: segment.end,
+            }),
+        ];
+    });
+    return {kind:'table', version:1, columns:SEGMENT_STORYBOARD_COLUMNS.slice(), rows, selectedRows:[], mergedGroups:[]};
+}
+
+/* 手动素材的存储形状与表格模块内部的那一套完全一致
+   （tableManualInputItems[channelId][row] = 数组），这样表格读得到、用户也能在格子里替换。
+   这里不直接调模块自己的写入口是因为它没从模块导出；只写数据，不碰 DOM。 */
+function setSegmentManualInputList(node, channelId, row, items){
+    const list = (items || []).filter(item => item && item.url)
+        .map(item => ({url:item.url, mediaType:item.mediaType || 'image', name:item.name || ''}));
+    const store = node.tableManualInputItems && typeof node.tableManualInputItems === 'object'
+        ? node.tableManualInputItems : (node.tableManualInputItems = {});
+    const key = String(channelId);
+    const byRow = store[key] && typeof store[key] === 'object' ? store[key] : (store[key] = {});
+    if(list.length) byRow[String(row)] = list;
+    else delete byRow[String(row)];
+    if(!Object.keys(byRow).length) delete store[key];
+    if(!Object.keys(store).length) delete node.tableManualInputItems;
+}
+
+/* 绑素材：参考视频通道逐行写这一段的片段（手动项优先于连线推出来的整条视频）；
+   产品 / 模特穿搭通道只改 mode='all'，绝不写手动覆盖 —— 它们每行都带整组。 */
+function applySegmentStoryboardChannels(tableNode, plan, segments, model){
+    const modes = tableNode.tableInputChannelModes && typeof tableNode.tableInputChannelModes === 'object'
+        ? {...tableNode.tableInputChannelModes} : {};
+    Object.keys(plan.modes).forEach(channelId => { modes[channelId] = plan.modes[channelId]; });
+    tableNode.tableInputChannelModes = modes;
+    tableNode.tableInputChannelCount = Math.max(Number(tableNode.tableInputChannelCount) || 0, plan.channelCount);
+    segments.forEach((segment, row) => {
+        const clip = String(segment.clip_url || '');
+        // 后端没给片段地址（理论上不会走到这里）绝不编造：宁可不写这一格
+        if(clip && plan.videoChannelId) setSegmentManualInputList(tableNode, plan.videoChannelId, row,
+            [{url:clip, mediaType:'video', name:'第' + segment.index + '段'}]);
+    });
+    scheduleSave();
+}
+
+/* POST /api/video/segments：后端 ffmpeg 真实切段，每段带 clip_url / frame_url。
+   失败时把后端给的中文原因带出来（node 不能卡在 running，所以必须带超时）。 */
+async function requestVideoSegments(url, seconds, maxSegments){
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 180000);
+    try {
+        const res = await fetch('/api/video/segments', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            signal: controller.signal,
+            body: JSON.stringify({url, seconds, max_segments:maxSegments}),
+        });
+        if(!res.ok){
+            let detail = '';
+            try { const data = await res.json(); detail = String((data && (data.detail || data.message)) || ''); } catch(error){ detail = ''; }
+            throw new Error(detail || ('分段接口返回 ' + res.status));
+        }
+        const data = await res.json();
+        if(!data || !data.ok || !Array.isArray(data.segments) || !data.segments.length) throw new Error('分段接口没有返回片段');
+        return data;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+/* 带图出表（视频分镜表的段首帧）：images 直接传 /assets 相对路径，后端转 data URL。
+   no_prompt_intelligence 必须开 —— 收到 images 时 Prompt Intelligence 会改写 message，
+   把「只返回一个 JSON 对象」这类结构化提示词毁掉。摘帧描述比出表慢，超时放宽到 180s。
+   不挂级联停止信号：cascadeFetch 会用自己的 signal 覆盖 init.signal，超时就不再生效。 */
+async function callCanvasLLMSegmentShots(node, message, images, options={}){
+    return callCanvasLLM(node, message, [], {
+        noMedia:true, images, targetType:'video', noPromptIntelligence:true,
+        timeoutMs:SEGMENT_SHOTS_TIMEOUT_MS, maxTokens:options.maxTokens,
+    });
+}
+
+/* 看图写描述：段首帧交给多模态模型逐段写。每次最多 8 张（后端只取前 8），段数多就分批；
+   某一批失败只影响那几段（走兜底文案），绝不因此出不了表。 */
+async function segmentShotsFor(node, requirement, segments, frames, model){
+    const shots = [];
+    /* 图与段必须成对：缺首帧的那一段整段跳过，否则批里的图会和段号错位
+       （提示词说「第 3 段」配的却是第 4 段的图）。 */
+    const pairs = (frames || []).map((frame, index) => ({frame, segment:segments[index]}))
+        .filter(pair => pair.frame && pair.frame.url && pair.segment);
+    for(let start = 0; start < pairs.length; start += SEGMENT_SHOTS_BATCH){
+        const batch = pairs.slice(start, start + SEGMENT_SHOTS_BATCH);
+        try {
+            const answer = await callCanvasLLMSegmentShots(node,
+                model.buildSegmentShotPrompt(requirement, batch.map(pair => pair.frame), batch.map(pair => pair.segment)),
+                batch.map(pair => pair.frame.url));
+            let parsed = model.parseSegmentShots(answer);
+            // 已经拿到的段不被改写：补齐请求只该补缺的那几段
+            const merge = list => {
+                const merged = new Map(parsed.map(shot => [Number(shot.index), shot]));
+                list.forEach(shot => { if(!merged.has(Number(shot.index))) merged.set(Number(shot.index), shot); });
+                parsed = Array.from(merged.values());
+            };
+            /* 每批最多多花 1 次请求，两种补救互斥：
+               ① 一条都解析不出来（模型把结构写坏了，例如字符串值里带裸换行）→ 用现成的修复提示词重发；
+               ② 条数不齐（模型只写了 3 段/5 段）→ 只对缺失的那几段再要一次，已经拿到的段不重复请求。
+               补完仍缺的段由出表那边走兜底文案。 */
+            let extraUsed = false;
+            if(!parsed.length && String(answer || '').trim()){
+                const repaired = await callCanvasLLMSegmentShots(node, model.buildRepairPrompt(answer), [],
+                    {maxTokens:model.LLM_REPAIR_MAX_TOKENS});
+                merge(model.parseSegmentShots(repaired));
+                extraUsed = true;
+            }
+            const missing = batch.filter(pair => !parsed.some(shot => Number(shot.index) === Number(pair.segment.index)));
+            if(!extraUsed && parsed.length && missing.length){
+                const fill = await callCanvasLLMSegmentShots(node,
+                    model.buildSegmentShotPrompt(requirement, missing.map(pair => pair.frame), missing.map(pair => pair.segment),
+                        {onlyIndexes:missing.map(pair => pair.segment.index)}),
+                    missing.map(pair => pair.frame.url));
+                merge(model.parseSegmentShots(fill));
+            }
+            parsed.forEach(shot => shots.push(shot));
+        } catch(error){
+            console.warn('[canvas-segment] 段首帧描述失败，这一段用兜底文案', error);
+        }
+    }
+    return shots;
+}
+
+/* 物化后把表格接到下游视频节点：视频节点的批量面板只在「上游有表格」时才出现，
+   不接这一根线用户还得手动连。只连本来就挂在 LLM 下游的视频节点（Output 是中转，要穿过去）。 */
+function connectCanvasVideoTargetsFor(tableNode){
+    const llmId = String(tableNode.llmSourceId || '');
+    if(!llmId) return [];
+    const seen = new Set([llmId]);
+    const queue = [llmId];
+    const targets = [];
+    while(queue.length){
+        const id = queue.shift();
+        connections.filter(conn => conn.from === id).forEach(conn => {
+            if(seen.has(conn.to)) return;
+            seen.add(conn.to);
+            const target = nodes.find(n => n.id === conn.to);
+            if(!target) return;
+            if(target.type === 'video'){ targets.push(target); return; }
+            if(target.type === 'output') queue.push(target.id);
+        });
+    }
+    /* 同一个 LLM 重新生成会再物化一张新表：旧表先从视频节点上摘掉，否则批量执行按连线顺序
+       取上游表格（第一张），跑的一直是旧表。只摘「同一个 LLM 生成的表」，手动连的、别的 LLM 的不碰。 */
+    const staleIds = new Set((nodes || [])
+        .filter(node => node && node.type === 'table' && node.id !== tableNode.id
+            && node.llmGeneratedOutput && String(node.llmSourceId || '') === llmId)
+        .map(node => node.id));
+    targets.forEach(target => {
+        if(staleIds.size){
+            for(let index = connections.length - 1; index >= 0; index -= 1){
+                const conn = connections[index];
+                // 原地删，不换数组：表格模块拿的是同一个 connections 引用
+                if(conn.to === target.id && staleIds.has(conn.from)){ pushUndo(); connections.splice(index, 1); }
+            }
+        }
+        connectNodes(tableNode.id, target.id);
+    });
+    return targets;
+}
+
+/* 视频分镜表主流程。返回 true = 已按参考视频分段出表；false = 没做成，调用方回退
+   「LLM 直接出分镜表」的老链路（分段接口不可用、拿不到视频地址等，都在这里提示完返回 false，
+   节点不会卡在 running）。 */
+async function runSegmentStoryboard(node, requirement, groups, api, model){
+    try {
+        const sources = segmentStoryboardSources(groups, requirement);
+        const classification = model.classifySegmentInputs(sources.connected, sources.instructionText);
+        // 没有视频参考就走老链路（不改变现状），不用报错
+        if(!classification.video) return false;
+        const plan = segmentStoryboardPlan(sources, classification);
+        const seconds = segmentSecondsOf(node);
+        const data = await requestVideoSegments(classification.video.url, seconds, model.VIDEO_SEGMENT_MAX_SEGMENTS);
+        const segments = data.segments;
+        /* 前端 planVideoSegments 是后端 plan_video_segments 的镜像：两边对不上说明有一边改了规则，
+           行数与时间段的标签就会和真实片段错位。片段地址仍以后端为准（那是真实文件），但要报出来。 */
+        const expected = model.planVideoSegments(data.duration, seconds, model.VIDEO_SEGMENT_MAX_SEGMENTS).length;
+        if(expected && expected !== segments.length) console.warn('[canvas-segment] 分段数与前端规划不一致', expected, segments.length);
+        const frames = segments.map(segment => ({url:String(segment.frame_url || ''), name:'第' + segment.index + '段'}));
+        const shots = await segmentShotsFor(node, requirement, segments, frames, model);
+        const table = segmentStoryboardTable(plan, segments, shots, model);
+        const created = api.materializeLlmTable(node, table, groups, {inputGroups: plan.inputGroups});
+        if(!created) throw new Error('表格节点创建失败');
+        applySegmentStoryboardChannels(created, plan, segments, model);
+        const targets = connectCanvasVideoTargetsFor(created);
+        refreshNodes([created.id].concat(targets.map(target => target.id)));
+        notifyCanvas('已按参考视频分解为 ' + segments.length + ' 个分镜' + (data.truncated ? '（视频较长，只保留前 ' + segments.length + ' 段）' : ''));
+        return true;
+    } catch(error){
+        notifyCanvas(('参考视频分段失败：' + String((error && error.message) || error)).slice(0, 140) + '，已改用直接出分镜表');
+        return false;
+    }
+}
+
 async function callCanvasLLM(node, message, messages=[], options={}){
     const llmProv = resolveChatProviderId(node.llmProvider || 'comfly');
     const model = resolveChatModel(node.model || node.llmMsModel, llmProv);
     /* noMedia：多维表格的规划/生成/修复遍必须屏蔽素材。
        后端 Prompt Intelligence 只要收到 images/videos/reverse 就会**改写 message**，
        那会把结构化 JSON 提示词毁掉，模型就再也返回不了合法表格。 */
-    const images = options.noMedia ? [] : llmInputImages(node);
+    /* options.images：调用方直接指定参考图（视频分镜表的段首帧），不再从节点自己的输入推导。
+       传了就以它为准（哪怕是空数组）——那一次请求要发什么图是调用方算好的。 */
+    const explicitImages = Array.isArray(options.images) ? options.images.map(url => String(url || '')).filter(Boolean) : null;
+    const images = explicitImages || (options.noMedia ? [] : llmInputImages(node));
     const videos = options.noMedia ? [] : llmInputVideos(node);
-    const target = options.noMedia ? {target_type:'', target_model:''} : llmDownstreamTarget(node);
+    const target = options.targetType
+        ? {target_type:options.targetType, target_model:''}
+        : (options.noMedia ? {target_type:'', target_model:''} : llmDownstreamTarget(node));
     const body = {
         message,
         model,
@@ -10992,18 +11570,36 @@ async function callCanvasLLM(node, message, messages=[], options={}){
         target_type:target.target_type,
         target_model:target.target_model,
     };
+    if(options.chat) body.no_prompt_intelligence = true;
+    /* 带图出表也必须关掉 Prompt Intelligence：它收到 images 就会改写 message，
+       把「只返回 JSON」这类结构化提示词毁掉（后端支持这个字段）。 */
+    if(options.noPromptIntelligence) body.no_prompt_intelligence = true;
     if(options.maxTokens) body.max_tokens = Math.max(0, Math.floor(Number(options.maxTokens) || 0));
-    const result = await cascadeFetch('/api/canvas-llm', {
+    /* 必须带超时：模型端挂住不返回时 fetch 永远 pending，调用方的 finally 不会执行，
+       node.running 就一直是 true，刷新后节点永远显示「运行中」。 */
+    const timeoutMs = Math.max(0, Number(options.timeoutMs) || 0);
+    const controller = timeoutMs ? new AbortController() : null;
+    const timeoutTimer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    const init = {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify(body)
-    }, options).then(async r => {
-        if(!r.ok){
-            throw new Error(await responseErrorMessage(r, 'LLM 运行失败'));
-        }
-        return r.json();
-    });
-    return result.text || '';
+    };
+    if(controller) init.signal = controller.signal;
+    try {
+        const result = await cascadeFetch('/api/canvas-llm', init, options).then(async r => {
+            if(!r.ok){
+                throw new Error(await responseErrorMessage(r, 'LLM 运行失败'));
+            }
+            return r.json();
+        });
+        return result.text || '';
+    } catch(error) {
+        if(controller && controller.signal.aborted) throw new Error('LLM 超过 ' + Math.round(timeoutMs / 1000) + ' 秒未返回，已中止');
+        throw error;
+    } finally {
+        if(timeoutTimer) clearTimeout(timeoutTimer);
+    }
 }
 // Prompt Intelligence：探测 LLM 节点下游最近的生成节点（经 Output 中转也算），
 // 把目标产出类型/模型带给后端，用于模型专用 Compiler。
@@ -11053,6 +11649,20 @@ async function runLLMListMode(node, opts={}){
     refreshNodes([node.id]);
 
     try {
+        /* 视频分镜表 + 有参考视频：按参考视频真实分段出表，一段一行、每行只用它自己那一段。
+           分段没做成（接口不可用 / 视频读不了）时 runSegmentStoryboard 自己提示完返回 false，
+           继续走老链路，节点不会卡在 running。 */
+        const segmented = targetKind === 'video'
+            && await runSegmentStoryboard(node, requirement, groups, tableNodeApi, model);
+        if(segmented){
+            node.llmRunStage = '';
+            node.running = false;
+            node.runStatus = 'done';
+            node.runError = '';
+            refreshNodes([node.id]);
+            scheduleSave();
+            return;
+        }
         // ① 规划遍：只做规划，不要输出最终 rows。规划失败不致命，直接进生成遍
         let plan = null;
         try {
@@ -11460,7 +12070,7 @@ async function runLLMChat(nodeId){
     node.running = true;
     refreshNodes([node.id]);
     try {
-        const text = await callCanvasLLM(node, message, history);
+        const text = await callCanvasLLM(node, message, history, {chat:true});
         node.messages.push({role:'assistant', content:text});
         node.outputText = text;
         node.running = false;
@@ -13498,10 +14108,12 @@ function openSlashMenu(ta){
                 slashSub.innerHTML=item.children.map(function(c){ return '<div class="slash-item"><span class="slash-item-icon">'+c.icon+'</span><div class="slash-item-body"><span class="slash-item-label">'+c.title+'</span><span class="slash-item-sub">'+(c.sub||'')+'</span></div></div>'; }).join('');
                 slashSub.querySelectorAll('.slash-item').forEach(function(se,si){ se.addEventListener('click',function(e){ e.stopPropagation();e.preventDefault(); selectSlashItem(item.children[si]); }); });
                 slashSub.classList.add('open');
+                glideSync(slashSub, '.slash-item');   /* 每次悬停分类项都重写 innerHTML，attach 得跟在后面 */
             });
         }else{ el.addEventListener('click',function(e){ e.stopPropagation();e.preventDefault(); selectSlashItem(item); }); }
     });
     slashMenu.classList.add('open');
+    glideSync(slashMenu, '.slash-item');   /* 每次唤出都重写 innerHTML，attach 得跟在后面 */
 }
 function selectSlashItem(item){ var t=slashTarget||{}; t.value=fillSlashTemplate(item.template,t.value||''); t.dispatchEvent(new Event('input',{bubbles:true})); closeSlashMenu(); scheduleSave(); }
 function checkSlashClose(){ slashCloseTimer=setTimeout(function(){ if(!slashMenu.matches(':hover')&&!slashSub.matches(':hover')){slashSub.classList.remove('open');slashSub.innerHTML='';} },200); }
@@ -13557,18 +14169,37 @@ function onNodeDrag(e){
     if(workflowTransferModal?.classList.contains('open')) updateWorkflowTransferMeta();
     scheduleMinimapRender();
 }
+/* 拖手柄缩放时锁死宽高比的节点：图片 / 视频 / 输出是「媒体框」；
+   生成器 / 多维表格 / RunningHub / 文本类是表单、表格、聊天容器，宽高本来就该各自独立，不锁。 */
+const CANVAS_ASPECT_LOCK_TYPES = ['image', 'video', 'output'];
+/* 等比基准比例 = 手势开始时节点渲染出来的宽高比。
+   经典画布的节点框 = 标题栏 + 说明 + 媒体区，图片是 object-fit:contain 装在框里的，
+   框比例和素材比例本来就不是一回事（出厂框 260×336，素材 2:3）。拿 natural_w/natural_h
+   套整框的话：第一次拖动就会跳形（往右拖 40px、高从 336 蹿到 450），既不合「跟手」，
+   验收要的「拖动前后宽高比一致」也会挂；而且框里含标题栏，套素材比例也换不来
+   「图片按原比例显示」。所以整框严格等比缩放，媒体区跟着等比，图片不会被拉变形。
+   素材原始宽高只在框还没量出高度时兜底（h<=0 的节点没有可用比例）。 */
+function canvasNodeResizeAspect(node, startW, startH){
+    if(startW > 0 && startH > 0) return startW / startH;
+    const naturalW = Number(node?.natural_w || node?.width || 0);
+    const naturalH = Number(node?.natural_h || node?.height || 0);
+    return naturalW > 0 && naturalH > 0 ? naturalW / naturalH : 1;
+}
 function startNodeResize(e, node){
     e.preventDefault();
     e.stopPropagation();
 
     const el = nodesEl.querySelector(`.node[data-id="${node.id}"]`);
     const rect = el?.getBoundingClientRect();
+    const startW = rect?.width ? rect.width / viewport.scale : node.w || defaultNodeSize(node.type).w;
+    const startH = rect?.height ? rect.height / viewport.scale : node.h || defaultNodeSize(node.type).h || 160;
     resizeNode = {
         node,
         sx:e.clientX,
         sy:e.clientY,
-        sw:(rect?.width ? rect.width / viewport.scale : node.w || defaultNodeSize(node.type).w),
-        sh:(rect?.height ? rect.height / viewport.scale : node.h || defaultNodeSize(node.type).h || 160)
+        sw:startW,
+        sh:startH,
+        aspect:CANVAS_ASPECT_LOCK_TYPES.includes(node.type) ? canvasNodeResizeAspect(node, startW, startH) : 0
     };
     document.body.classList.add('canvas-node-resize');
     window.onmousemove = onNodeResize;
@@ -13577,13 +14208,31 @@ function startNodeResize(e, node){
 function onNodeResize(e){
     if(!resizeNode) return;
     const min = defaultNodeSize(resizeNode.node.type);
-    const nextW = Math.max(Math.min(min.w, 220), resizeNode.sw + (e.clientX - resizeNode.sx) / viewport.scale);
-    const nextH = Math.max(96, resizeNode.sh + (e.clientY - resizeNode.sy) / viewport.scale);
-    /* 表格节点也走普通 w/h 缩放，但要打「用户手动设过」的标记：
-       否则 syncTableNodeWidth 下一次重绘就把宽度覆盖回去了。
-       拉宽 → 列宽分摊、图片跟着变大；拉高 → 表格区填满、多显示几行。 */
+    const minW = Math.min(min.w, 220), minH = 96;
+    const dx = (e.clientX - resizeNode.sx) / viewport.scale;
+    const dy = (e.clientY - resizeNode.sy) / viewport.scale;
+    let nextW, nextH;
+    if(resizeNode.aspect > 0){
+        let sw = resizeNode.sw, sh = resizeNode.sh;
+        if(!(sw > 0)) sw = sh > 0 ? sh * resizeNode.aspect : 1;
+        if(!(sh > 0)) sh = sw / resizeNode.aspect;
+        /* |dx| 与 |dy| 谁大就以谁为基准，另一边按比例算 —— 全程只算一个倍数再一起乘，
+           宽高比严格不变；下限照旧夹在倍数上，夹完仍然等比。 */
+        let scale = Math.abs(dy) > Math.abs(dx) ? (sh + dy) / sh : (sw + dx) / sw;
+        scale = Math.max(scale, minW / sw, minH / sh);
+        nextW = sw * scale;
+        nextH = sh * scale;
+    } else {
+        nextW = Math.max(minW, resizeNode.sw + dx);
+        nextH = Math.max(minH, resizeNode.sh + dy);
+    }
+    /* 打过手柄的节点都要记「用户手动设过尺寸」，否则下一次重绘就弹回去：
+       表格 —— syncTableNodeWidth 会把宽度覆盖回原宽（拉宽 → 列宽分摊、图片跟着变大；拉高 → 表格区填满、多显示几行）；
+       生成器 / 视频 —— normalizeContentHeightNode 会把高度删掉，高度弹回内容高，媒体节点刚锁好的宽高比跟着废掉。 */
     if(resizeNode.node.type === 'table'){
         resizeNode.node.tableWidthUserSet = true;
+        resizeNode.node.tableHeightUserSet = true;
+    } else if(Math.abs(nextH - resizeNode.sh) > 1){
         resizeNode.node.tableHeightUserSet = true;
     }
     resizeNode.node.w = Math.round(nextW);
@@ -13664,7 +14313,10 @@ function startLink(e, originId, originKind){
             if(bodyNode && bodyNode.dataset.id && bodyNode.dataset.id !== originId){
                 const fromId = originKind === 'out' ? originId : bodyNode.dataset.id;
                 const toId = originKind === 'out' ? bodyNode.dataset.id : originId;
-                if(canConnect(fromId, toId) && bodyNode.querySelector(`> .port.${targetKind}`)){
+                /* ':scope > ' 不能省成 '> '：querySelector 收到以组合符开头的选择器是非法 CSS，
+                   会抛 SyntaxError 并打断整个 mouseup 处理器 —— 表现为「拖到可连接节点上既不吸附也不弹菜单」。
+                   项目里表达「只看直接子元素」的既有写法就是 :scope >（见 smart-canvas.js 多处）。 */
+                if(canConnect(fromId, toId) && bodyNode.querySelector(`:scope > .port.${targetKind}`)){
                     if(connectNodes(fromId, toId, tableDropPortFor(hitEl, toId))) syncLatestGeneratedOutputToConnection(fromId, toId);
                     syncGeneratorInputs();
                     scheduleSave();
@@ -14646,6 +15298,8 @@ function markBoardWheelGesture(){
 board.onwheel = e => {
     if(!canvas) return;
     if(outputLightbox?.classList.contains('open')) return;
+    // 表格/批量节点的可滚动区：放行给浏览器原生滚动，画布不缩放/平移
+    if(e.target.closest?.('.table-node-grid, .table-batch-panel')) return;
     e.preventDefault();
     e.stopPropagation();
     const rect = board.getBoundingClientRect();
@@ -14877,6 +15531,7 @@ function escapeHtml(str){ return window.NovaUtils ? NovaUtils.escapeHtml(str) : 
 function escapeAttr(str){ return window.NovaUtils ? NovaUtils.escapeAttr(str) : escapeHtml(str); }
 
 window.onload = async () => {
+    NovaSizePolicy.load();
     applyTheme(localStorage.getItem('studio_theme') || localStorage.getItem(CANVAS_THEME_KEY) || 'light');
     applyQuickToolbarState();
     registerZoomBarIcons();
@@ -14952,13 +15607,14 @@ window.imageAdjust = {
         const node = nodes.find(n => n.id === (cropState && cropState.nodeId));
         const img = document.getElementById('cropImage');
         const url = (node && node.url) || (img && img.src);
-        return { url: url || '', name: (node && (node.name || node.title)) || 'image' };
+        /* 调色结果节点带 adjust（原图 + 参数），再次调色从原图继续 */
+        return { url: url || '', name: (node && (node.name || node.title)) || 'image', adjust: (node && node.adjust) || null };
     },
     upload: function (blob, name) { return uploadCroppedBlob(blob, name); },
-    addResult: async function (file, fromAI) {
+    addResult: async function (file, fromAI, meta) {
         const node = nodes.find(n => n.id === (cropState && cropState.nodeId));
         if (!node) return;
-        addGeneratedImageNode(file, node, fromAI ? 'ai' : 'adj', 0, { role: fromAI ? 'ai_enhance' : 'adjust' });
+        addGeneratedImageNode(file, node, fromAI ? 'ai' : 'adj', 0, Object.assign({ role: fromAI ? 'ai_enhance' : 'adjust' }, meta && meta.adjust ? { adjust: meta.adjust } : {}));
     },
     finish: function () { closeImageEditor(); render(); scheduleSave(); }
 };
@@ -14991,6 +15647,92 @@ window.imageAdjust = {
     stage.addEventListener('pointerup', endPan);
     stage.addEventListener('pointercancel', endPan);
     stage.addEventListener('pointerleave', endPan);
+})();
+
+/* ═══ Morph Button 接入：保存/确定类按钮的点击动效（只驱动状态，不改原有点击逻辑） ═══ */
+(function(){
+    'use strict';
+    var bindTimer = 0;
+
+    function api(){ return window.NovaMorphButton || null; }
+
+    function bind(el, opts){
+        var m = api();
+        if(!m || !el || el.__nvMorph) return false;
+        try { m.attach(el, opts); } catch(e){ return false; }
+        return true;
+    }
+
+    /* 提示词模板弹窗这两个按钮走面板事件委托，元素上没有 onclick：
+       swallow 完全接管这次点击，action 里复刻原委托逻辑（都是调同一个函数），保证原函数只跑一次。
+       成功后弹窗会整体重渲染、旧节点连包装层一起被替换，模块的 success 落在已移除的节点上，
+       所以把结果补到新按钮上，绿勾才看得见。 */
+    function bindTemplateSaveButton(selector, run){
+        var el = document.querySelector(selector);
+        if(!el) return;
+        bind(el, {
+            keepWidth: true,
+            swallow: true,
+            action: function(){
+                /* 面板重渲染与我这条 then 在同一批里，扫描器还没绑上新按钮，这里等它几拍 */
+                var forward = function(state){
+                    var tries = 0;
+                    var retryPaint = function(){
+                        var fresh = document.querySelector(selector);
+                        var m = api();
+                        if(fresh && fresh !== el && fresh.__nvMorph && m){ m.setState(fresh, state); return; }
+                        if(tries++ < 8) setTimeout(retryPaint, 50);
+                    };
+                    retryPaint();
+                };
+                return Promise.resolve(run()).then(function(value){
+                    forward(value === false ? 'error' : 'success');
+                    return value;
+                }, function(err){
+                    forward('error');
+                    throw err;
+                });
+            }
+        });
+    }
+
+    function bindTemplateSaveButtons(){
+        bindTemplateSaveButton('[data-template-save-current]', function(){ return saveCurrentCanvasPromptAsTemplate(); });
+        bindTemplateSaveButton('[data-template-edit-save]', function(){ return saveCanvasPromptTemplateEdit(); });
+    }
+
+    function bindAll(){
+        var m = api();
+        if(!m) return;
+        /* 白名单里本页只有 edit 工具栏的「应用XX」命中，工具栏按钮宽度 morph 会顶到邻居；
+           容器级重扫还能让模块在被 innerHTML 冲掉包装层后就地重建。 */
+        m.autoBind(document.getElementById('imageEditModal') || document, { keepWidth: true });
+        m.autoBind(document.getElementById('promptTemplatePanel') || document, { keepWidth: true });
+        bindTemplateSaveButtons();
+    }
+
+    function scheduleBind(){
+        if(bindTimer) return;
+        bindTimer = setTimeout(function(){ bindTimer = 0; bindAll(); }, 60);
+    }
+
+    function watch(el){
+        if(!el || typeof MutationObserver !== 'function') return;
+        new MutationObserver(scheduleBind).observe(el, { childList: true, subtree: true });
+    }
+
+    function start(){
+        bindAll();
+        watch(document.getElementById('imageEditModal'));
+        watch(document.getElementById('promptTemplatePanel'));
+    }
+
+    /* 模块由别的执行岗并行开发，未就绪时轮询等待；等不到就静默放弃（动效不得影响功能） */
+    var tries = 0;
+    var wait = setInterval(function(){
+        tries += 1;
+        if(api() || tries > 40){ clearInterval(wait); start(); }
+    }, 250);
 })();
 /* ══════════════════════════════════════════════════════════════════════════════
    OpenArc：画布保存冲突的**三方合并**（纯数据函数：不碰 DOM、不碰画布闭包、不读全局）
