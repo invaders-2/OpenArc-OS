@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import DsButton from "../design-system/DsButton.vue";
+import DsDialog from "../design-system/DsDialog.vue";
 import { History, KeyRound, Network, Plus, ShieldCheck, Users } from "lucide-vue-next";
 
 /**
@@ -50,6 +51,12 @@ const accessRef = ref("");
 const access = ref<any>(null);
 const toolAccess = ref<Record<string, any>>({});
 const toolPick = ref<Record<string, string[]>>({});
+/* App 级 grant（resource.* namespace）：getAppAccess / grantAppAccess / revokeAppAccess。 */
+const APP_GRANT_ACTIONS = ["resource.view", "resource.search", "resource.preview", "resource.read", "resource.create", "resource.edit", "resource.delete", "resource.restore", "resource.download", "resource.export", "resource.share", "resource.tag", "resource.move", "resource.useByAgent"];
+const appAccess = ref<Record<string, any>>({});
+const appPick = ref<Record<string, string[]>>({});
+const appAccessOpenId = ref<string | null>(null);
+const confirmState = ref<{ title: string; message: string; run: () => Promise<void> } | null>(null);
 
 async function cmd(payload: Record<string, unknown>): Promise<any> {
   const b = bridge();
@@ -170,6 +177,79 @@ async function revokeTool(appId: string, grantId: string) {
   } else {
     error.value = res.error;
   }
+}
+
+/* ── App 级授权（resource.* namespace）────────────────────────────────── */
+async function loadAppAccess(appId: string) {
+  appAccessOpenId.value = appId;
+  const res = await cmd({ type: "governance/getAppAccess", appId });
+  if (res.ok) {
+    appAccess.value = { ...appAccess.value, [appId]: res };
+    appPick.value = { ...appPick.value, [appId]: [] };
+  } else {
+    error.value = res.error;
+  }
+}
+
+function toggleAppPick(appId: string, action: string) {
+  const cur = appPick.value[appId] || [];
+  appPick.value = {
+    ...appPick.value,
+    [appId]: cur.includes(action) ? cur.filter((a) => a !== action) : [...cur, action],
+  };
+}
+
+async function grantApp(appId: string) {
+  const actions = [...(appPick.value[appId] || [])];
+  if (!actions.length) {
+    error.value = "请先选择要授予的 App 级动作。";
+    return;
+  }
+  confirmState.value = {
+    title: "授予 App 级权限",
+    message: "将给应用 " + appId + " 授予 App 级动作：" + actions.join(", ") + "。授予后该应用按这些动作访问资源；可随时在这里撤销。",
+    run: async () => {
+      const res = await cmd({ type: "governance/grantAppAccess", appId, actions });
+      if (res.ok) {
+        notice.value = "App 级权限已授予";
+        await loadAppAccess(appId);
+        await load();
+      } else {
+        error.value = res.error;
+      }
+    },
+  };
+}
+
+async function revokeApp(appId: string, grantId: string) {
+  confirmState.value = {
+    title: "撤销 App 级权限",
+    message: "将撤销这条 App 级授权（" + grantId + "）。已建立的连接会按后端规则失效；撤销后不可恢复，只能重新授予。",
+    run: async () => {
+      const res = await cmd({ type: "governance/revokeAppAccess", grantId });
+      if (res.ok) {
+        notice.value = res.changed === false ? "这条授权已不存在（无需撤销）" : "App 级权限已撤销";
+        await loadAppAccess(appId);
+        await load();
+      } else {
+        error.value = res.error;
+      }
+    },
+  };
+}
+
+async function doConfirm() {
+  const current = confirmState.value;
+  if (!current) return;
+  confirmState.value = null;
+  await current.run();
+}
+
+function appGrantsOf(appId: string): any[] {
+  return Array.isArray(appAccess.value[appId]?.grants) ? appAccess.value[appId].grants : [];
+}
+function appPickChecked(appId: string, action: string): boolean {
+  return (appPick.value[appId] || []).includes(action);
 }
 
 /* ── 投影（与 React 逐项同义）───────────────────────────────────────────── */
@@ -299,6 +379,7 @@ function grantText(g: any): string {
               <span class="set-lab">{{ a.name }}<small><code>{{ a.appId }}</code> · 授权 {{ a.grantCount }} · 记忆访问 {{ a.memoryAccess ? "允许" : "不允许" }}</small></span>
               <span class="badge" :class="{ ok: a.status === 'enabled' }">{{ STATUS[a.status] || a.status }}</span>
               <DsButton variant="secondary" size="sm" :data-gov-tool-toggle="a.appId" @click="loadToolAccess(a.appId)">工具权限</DsButton>
+              <DsButton variant="secondary" size="sm" :data-gov-app-access="a.appId" @click="loadAppAccess(a.appId)">应用授权</DsButton>
               <DsButton v-if="a.status === 'enabled'" variant="ghost" size="sm" :data-d3-04d-app-disable="a.appId" @click="toggleApp(a.appId, 'disabled')">停用</DsButton>
               <DsButton v-else variant="secondary" size="sm" :data-d3-04d-app-enable="a.appId" @click="toggleApp(a.appId, 'enabled')">启用</DsButton>
             </div>
@@ -322,6 +403,29 @@ function grantText(g: any): string {
               <div v-for="g in grantsOf(ta)" :key="g.grantId" :data-gov-tool-grant-id="g.grantId" class="gov-grant">
                 <span class="gov-meta">{{ grantText(g) }}</span>
                 <DsButton variant="ghost" size="sm" :data-gov-tool-revoke="g.grantId" @click="revokeTool(appId, g.grantId)">撤销全部工具权限</DsButton>
+              </div>
+            </div>
+          </section>
+
+          <section v-if="appAccessOpenId" class="set-sec gov-app-access" :data-gov-app-access-pane="appAccessOpenId">
+            <h3>App 级权限 · {{ appAccess[appAccessOpenId]?.app?.name || appAccessOpenId }}</h3>
+            <p class="set-cap">这是 App 级 resource.* 授权（governance/getAppAccess）；与上面的「工具权限」是同一张 App Grant 表的两个 namespace。授予/撤销都需要管理员权限，并会二次确认。</p>
+            <p v-if="appAccess[appAccessOpenId]?.memoryGrants" class="set-cap">记忆访问授权：{{ appAccess[appAccessOpenId].memoryGrants }}</p>
+            <div class="gov-grants" data-gov-app-grants>
+              <div v-for="g in appGrantsOf(appAccessOpenId)" :key="g.grantId" :data-gov-app-grant-id="g.grantId" class="gov-grant">
+                <span class="gov-meta">{{ grantText(g) }}</span>
+                <DsButton variant="ghost" size="sm" :data-gov-app-revoke="g.grantId" @click="revokeApp(appAccessOpenId, g.grantId)">撤销这条 App 级授权</DsButton>
+              </div>
+              <p v-if="!appGrantsOf(appAccessOpenId).length" class="set-cap gov-empty">该应用还没有 App 级授权。</p>
+            </div>
+            <div class="set-group" data-gov-app-actions>
+              <div v-for="action in APP_GRANT_ACTIONS" :key="action" class="setting-row">
+                <label class="gov-tool-pick set-lab">
+                  <span><input type="checkbox" :checked="appPickChecked(appAccessOpenId, action)" data-gov-app-action :data-action="action" @change="toggleAppPick(appAccessOpenId, action)" /> <code>{{ action }}</code></span>
+                </label>
+              </div>
+              <div class="setting-row set-actions">
+                <DsButton variant="primary" size="sm" :data-gov-app-grant="appAccessOpenId" @click="grantApp(appAccessOpenId)">授予所选 App 级权限</DsButton>
               </div>
             </div>
           </section>
@@ -366,5 +470,13 @@ function grantText(g: any): string {
         </section>
       </div>
     </div>
+
+    <DsDialog :open="confirmState !== null" :title="confirmState?.title || ''" @close="confirmState = null">
+      <p class="set-cap">{{ confirmState?.message }}</p>
+      <template #footer>
+        <button class="ghost" type="button" @click="confirmState = null">取消</button>
+        <button class="primary" type="button" data-gov-app-confirm @click="doConfirm">确认执行</button>
+      </template>
+    </DsDialog>
   </div>
 </template>

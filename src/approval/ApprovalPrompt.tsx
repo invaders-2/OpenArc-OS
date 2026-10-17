@@ -74,29 +74,44 @@ export function ApprovalPrompt({ onOpenChange }: { onOpenChange?: (open: boolean
   const [notice, setNotice] = useState<string | null>(null);
   // 宿主没有装配 approval IPC（例如仅验证桌面外壳的探针）时静默停用，绝不反复骚扰主进程。
   const [unavailable, setUnavailable] = useState(false);
+  // 已批准、尚未执行（APPROVED / LEASED）的请求：撤销入口读这一组；不存在时面板不出现。
+  const [revocable, setRevocable] = useState<ApprovalRequest[]>([]);
+  const [revokeBusy, setRevokeBusy] = useState(false);
+  const [revokeNotice, setRevokeNotice] = useState<string | null>(null);
+  const [revokeDismissed, setRevokeDismissed] = useState(false);
   // 提示（迟到 / 失效）必须比轮询活得久：否则 2s 后的兜底刷新会把面板连同文案一起关掉。
   const noticeRef = useRef<string | null>(null);
+  const revocableSignature = useRef<string>("");
   const showNotice = (text: string | null) => { noticeRef.current = text; setNotice(text); };
 
   /** 只信后端权威：挂载 / 兜底刷新 / 提示确认后都由它重建可见列表。 */
-  const fetchPending = useCallback(async (): Promise<ApprovalRequest[]> => {
+  const fetchPending = useCallback(async (): Promise<{ items: ApprovalRequest[]; revocable: ApprovalRequest[] }> => {
     const b = bridge();
-    if (!b) return [];
+    if (!b) return { items: [], revocable: [] };
     try {
       const res = await b.command({ type: "sideEffect/listPending" });
-      return Array.isArray(res.items) ? (res.items as ApprovalRequest[]) : [];
+      return {
+        items: Array.isArray(res.items) ? (res.items as ApprovalRequest[]) : [],
+        revocable: Array.isArray(res.revocable) ? (res.revocable as ApprovalRequest[]) : [],
+      };
     } catch {
       // 拉取失败不改变任何 authority 状态
       setUnavailable(true);
-      return [];
+      return { items: [], revocable: [] };
     }
   }, []);
 
   const refresh = useCallback(async () => {
     if (unavailable) return;
     if (noticeRef.current) return; // 用户还没确认提示：不抢占、不关闭
-    const items = await fetchPending();
-    setRequest((cur) => (cur && items.some((i) => i.approvalRequestId === cur.approvalRequestId) ? cur : items[0] || null));
+    const next = await fetchPending();
+    const signature = next.revocable.map((item) => item.approvalRequestId).join(",");
+    if (signature !== revocableSignature.current) {
+      revocableSignature.current = signature;
+      setRevokeDismissed(false);
+    }
+    setRevocable(next.revocable);
+    setRequest((cur) => (cur && next.items.some((i) => i.approvalRequestId === cur.approvalRequestId) ? cur : next.items[0] || null));
   }, [unavailable, fetchPending]);
 
   useEffect(() => {
@@ -112,7 +127,9 @@ export function ApprovalPrompt({ onOpenChange }: { onOpenChange?: (open: boolean
     return () => { off(); window.clearInterval(timer); };
   }, [refresh]);
 
-  useEffect(() => { onOpenChange?.(!!request); }, [request, onOpenChange]);
+  useEffect(() => {
+    onOpenChange?.(!!request || (revocable.length > 0 && !revokeDismissed));
+  }, [request, revocable.length, revokeDismissed, onOpenChange]);
 
   const decide = async (decision: "APPROVE" | "DENY") => {
     const current = request;
@@ -127,8 +144,9 @@ export function ApprovalPrompt({ onOpenChange }: { onOpenChange?: (open: boolean
       // 迟到：执行已开始或已有结果 —— 面板留着说清楚，绝不静默关闭，也绝不显示"未执行"。
       if (res && res.error === "SIDE_EFFECT_APPROVAL_TOO_LATE") { showNotice(LATE_NOTICE); return; }
       // 其余失败：只有后端权威确认该请求不再 actionable 才用"已失效"文案；仍待决则留在面板上重试。
-      const items = await fetchPending();
-      if (items.some((i) => i.approvalRequestId === current.approvalRequestId)) { showNotice(null); return; }
+      const next = await fetchPending();
+      setRevocable(next.revocable);
+      if (next.items.some((i) => i.approvalRequestId === current.approvalRequestId)) { showNotice(null); return; }
       showNotice(STALE_NOTICE);
     } finally {
       setBusy(false);
@@ -141,8 +159,9 @@ export function ApprovalPrompt({ onOpenChange }: { onOpenChange?: (open: boolean
     if (!current || busy) return;
     setBusy(true);
     try {
-      const items = await fetchPending();
-      const stillActionable = items.some((i) => i.approvalRequestId === current.approvalRequestId);
+      const next = await fetchPending();
+      const stillActionable = next.items.some((i) => i.approvalRequestId === current.approvalRequestId);
+      setRevocable(next.revocable);
       showNotice(null);
       if (!stillActionable) setRequest(null);
     } finally {
@@ -150,7 +169,65 @@ export function ApprovalPrompt({ onOpenChange }: { onOpenChange?: (open: boolean
     }
   };
 
-  if (!request) return null;
+  /** 撤销"已批准、尚未执行"的操作：Renderer 只给 approvalRequestId，callId/taskId 由主进程推导。 */
+  const revoke = async (target: ApprovalRequest) => {
+    if (revokeBusy) return;
+    setRevokeBusy(true);
+    setRevokeNotice(null);
+    try {
+      const b = bridge();
+      if (!b) return;
+      const res = await b.command({ type: "sideEffect/revokeApproval", approvalRequestId: target.approvalRequestId });
+      const next = await fetchPending();
+      setRevocable(next.revocable);
+      if (res && res.ok) {
+        setRevokeNotice("已撤销；这次操作不会执行。");
+        if (request && request.approvalRequestId === target.approvalRequestId) setRequest(null);
+        return;
+      }
+      if (res && res.error === "SIDE_EFFECT_APPROVAL_TOO_LATE") { setRevokeNotice(LATE_NOTICE); return; }
+      setRevokeNotice("撤销未生效：" + String((res && res.error) || "SIDE_EFFECT_REVOKE_FAILED"));
+    } finally {
+      setRevokeBusy(false);
+    }
+  };
+
+  const revocableList = (compact: boolean) => (
+    <div className={compact ? "approval-revocable" : "approval-revocable approval-revocable--solo"} data-approval-revocable={compact ? "inline" : "dialog"}>
+      <p className="approval-note" style={{ margin: "0 0 6px" }}>
+        以下操作已批准、尚未执行；撤销后不会再执行。
+      </p>
+      <ul className="approval-list" style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: "6px" }}>
+        {revocable.map((item) => (
+          <li key={item.approvalRequestId} data-approval-revocable-id={item.approvalRequestId} style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+            <span style={{ flex: "1 1 160px", minWidth: 0 }}>
+              <b>{item.toolDisplayName || item.toolId}</b>
+              <small style={{ display: "block", color: "var(--muted)" }}>{item.targetDisplayName || item.resourceRef || item.targetRef || "—"} · {item.status}</small>
+            </span>
+            <button className="ghost" type="button" disabled={revokeBusy} data-approval-revoke={item.approvalRequestId} onClick={() => void revoke(item)}>
+              撤销
+            </button>
+          </li>
+        ))}
+      </ul>
+      {revokeNotice ? <p className="approval-notice" role="status" data-approval-revoke-notice>{revokeNotice}</p> : null}
+    </div>
+  );
+
+  if (!request) {
+    if (revocable.length === 0 || revokeDismissed) return null;
+    return (
+      <Dialog
+        open
+        title="已批准、待执行的审批"
+        ariaLabel="已批准、待执行的审批"
+        onClose={() => setRevokeDismissed(true)}
+        footer={<button className="primary" type="button" onClick={() => setRevokeDismissed(true)}>关闭</button>}
+      >
+        {revocableList(false)}
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog
@@ -214,6 +291,7 @@ export function ApprovalPrompt({ onOpenChange }: { onOpenChange?: (open: boolean
         </p>
         {notice ? <p className="approval-notice" role="status" data-ai-notice>{notice}</p> : null}
       </div>
+      {revocable.length ? revocableList(true) : null}
     </Dialog>
   );
 }
