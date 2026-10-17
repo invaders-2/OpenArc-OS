@@ -1,40 +1,204 @@
 {
-  "sourceCommit": "1e20abe5145470b32f58206f692292703540107a",
-  "source": "/tmp/novai-canvas-src",
+  "sourceCommit": "22feb2988570bfce5b7476e26d7e0d313ab681db",
+  "source": "/Users/wepingli/Desktop/NOVAI-Infinite-Canvas-main/NOVAI-v16",
   "sourceProvenance": {
     "type": "git",
-    "identity": "1e20abe5145470b32f58206f692292703540107a",
-    "capturedAt": "2026-10-16T21:38:29.643Z",
+    "identity": "22feb2988570bfce5b7476e26d7e0d313ab681db",
+    "capturedAt": "2026-10-17T10:22:48.547Z",
     "mode": "local-source",
-    "requestedSrc": "/tmp/novai-canvas-src",
-    "srcRoot": "/tmp/novai-canvas-src",
-    "staticDir": "/tmp/novai-canvas-src/static",
+    "requestedSrc": "/Users/wepingli/Desktop/NOVAI-Infinite-Canvas-main/NOVAI-v16",
+    "srcRoot": "/Users/wepingli/Desktop/NOVAI-Infinite-Canvas-main/NOVAI-v16",
+    "staticDir": "/Users/wepingli/Desktop/NOVAI-Infinite-Canvas-main/NOVAI-v16/static",
     "pinnedCommit": "1e20abe5145470b32f58206f692292703540107a",
-    "matchesPin": true,
+    "matchesPin": false,
     "git": {
-      "head": "1e20abe5145470b32f58206f692292703540107a",
-      "topLevel": "/private/tmp/novai-canvas-src",
-      "dirty": false,
-      "changedFileCount": 0,
-      "changedFiles": [],
+      "head": "22feb2988570bfce5b7476e26d7e0d313ab681db",
+      "topLevel": "/Users/wepingli/Desktop/NOVAI-Infinite-Canvas-main/NOVAI-v16",
+      "dirty": true,
+      "changedFileCount": 161,
+      "changedFiles": [
+        " M .github/workflows/tests.yml",
+        " M .gitignore",
+        " M HANDOFF-v16-beta.md",
+        " M README.en.md",
+        " M README.md",
+        " M build-all.py",
+        " M build-desktop.py",
+        " M build-mac.py",
+        " M build.py",
+        " M config/providers.json",
+        " M desktop/package.json",
+        " M docs/v2/AGENT_UPGRADE_SPEC.md",
+        " M docs/v2/NOVAI_ARCHITECTURE_AUDIT.md",
+        " M docs/v2/SMART_CANVAS_TABLE_PORT.md",
+        " M installer.nsi",
+        " M main.py",
+        " M requirements.txt",
+        " M server/protocols/manifest.json",
+        " M server/protocols/model_protocols.json",
+        " M server/protocols/registry.py",
+        " M server/routes/assets.py",
+        " M static/api-settings.html",
+        " M static/asset-manager.html",
+        " M static/canvas-list.html",
+        " M static/canvas.html",
+        " M static/comfyui-settings.html",
+        " M static/css/api-settings.css",
+        " M static/css/smart-canvas.css",
+        " M static/gpt-chat.html",
+        " M static/index.html",
+        " M static/js/api-settings.js",
+        " M static/js/canvas.js",
+        " M static/js/i18n/api-settings.js",
+        " M static/js/i18n/canvas.js",
+        " M static/js/i18n/smart-canvas.js",
+        " M static/js/shared/size-policy.js",
+        " M static/js/shared/table-model.js",
+        " M static/js/shared/table-node.js",
+        " M static/js/smart-canvas.js",
+        " M static/online.html",
+        " M static/smart-canvas.html",
+        " M static/update-notes.json",
+        " D static/v2/assets/index-UKi4osjf.js",
+        " D static/v2/assets/index-kzgM2nM3.css",
+        " M static/v2/index.html",
+        " M static/zimage.html",
+        " M tests/test_agent_canvas_p0.py",
+        " M tests/test_agent_image_size.py",
+        " M tests/test_agent_ratio_and_group_refs.py",
+        " M tests/test_agent_run_plan_mode.py",
+        " M tests/test_select_menu.js",
+        " M tests/test_smart_canvas_batch_group_grid.js",
+        " M tests/test_smart_canvas_batch_row_single_output.js",
+        " M tests/test_smart_canvas_chat.js",
+        " M tests/test_smart_canvas_lossless_edit_entry.js",
+        " M tests/test_smart_canvas_pending_ratio.js",
+        " M tests/test_smart_canvas_prompt_display.js",
+        " M tests/test_smart_canvas_table_wiring.js",
+        " M tests/test_table_model.js",
+        " M tests/test_video_segment_storyboard.js",
+        " M web/REWRITE.md",
+        " M web/src/lib/i18n-en.json",
+        " M web/src/pages/chat/ChatPage.vue",
+        " M web/src/pages/chat/Composer.vue",
+        " M web/src/pages/chat/MessageItem.vue",
+        " M web/src/pages/chat/agents/CapabilityChip.vue",
+        " M web/src/pages/chat/agents/CapabilitySquare.vue",
+        " M web/src/pages/chat/agents/capState.js",
+        " M web/src/pages/chat/agents/capabilityApi.js",
+        " M web/src/pages/chat/agents/platforms.js",
+        " M web/src/pages/chat/chatState.js",
+        " M web/src/pages/chat/session.js",
+        " M web/src/pages/chat/sizes.js",
+        " M web/src/pages/online/onlineSizes.js",
+        " M web/src/pages/online/sizeData.js",
+        " M web/src/pages/online/sizePolicy.js",
+        " M web/src/pages/online/useOnline.js",
+        " M web/src/shell/settings/GeneralPanel.vue",
+        " M web/src/shell/settings/api/core/constants.js",
+        " M web/src/shell/settings/api/core/useApiStore.js",
+        " M web/src/shell/settings/api/parts/ModelBlock.vue",
+        " M web/src/shell/settings/api/parts/ProviderView.vue",
+        "?? _claude_backup/",
+        "?? _preview/",
+        "?? config/capability_inputs.json",
+        "?? config/openclaw.json",
+        "?? data/",
+        "?? docs/v2/CHANGES-20261013.md",
+        "?? docs/v2/screenshots/",
+        "?? server/agents/",
+        "?? server/integrations/",
+        "?? server/protocols/SIZE_OVERRIDES.md",
+        "?? server/routes/agents.py",
+        "?? server/routes/openai_compat.py",
+        "?? server/routes/openclaw_setup.py",
+        "?? server/skills/",
+        "?? static/images/model-pick/",
+        "?? static/images/tutorial/",
+        "?? static/v2/assets/index-0IYs-w7L.js",
+        "?? static/v2/assets/index-Cd2tJu0v.css",
+        "?? tests/__init__.py",
+        "?? tests/test_agent_catalog.py",
+        "?? tests/test_agent_image_tool.py",
+        "?? tests/test_api_image_size_bounds.js",
+        "?? tests/test_api_image_size_drift.js",
+        "?? tests/test_api_image_size_enum_snap.js",
+        "?? tests/test_api_image_size_ratio.js",
+        "?? tests/test_api_image_size_sticky.js",
+        "?? tests/test_api_settings_size_overrides.js",
+        "?? tests/test_apimart_size_resolution.py",
+        "?? tests/test_canvas_batch_row_duration.js",
+        "?? tests/test_canvas_chat_model_fallback.js",
+        "?? tests/test_canvas_preset_matrix.js",
+        "?? tests/test_chat_size_parity.js",
+        "?? tests/test_config_view_video_models.py",
+        "?? tests/test_gemini_image_endpoint.py",
+        "?? tests/test_image_data_uri_persist.py",
+        "?? tests/test_lovart_descriptor.py",
+        "?? tests/test_lovart_outpaint_honest_size.js",
+        "?? tests/test_model_capabilities.js",
+        "?? tests/test_online_sizes_official.js",
+        "?? tests/test_openai_compat_tools.py",
+        "?? tests/test_openai_gpt_image_2_bounds.py",
+        "?? tests/test_openclaw_capability_image.py",
+        "?? tests/test_openclaw_setup.js",
+        "?? tests/test_openclaw_setup.py",
+        "?? tests/test_platform_size_official.py",
+        "?? tests/test_provider_size_overrides.py",
+        "?? tests/test_runninghub_default_workflows_removed.py",
+        "?? tests/test_settings_size_overrides_ui.js",
+        "?? tests/test_size_map_official.js",
+        "?? tests/test_size_map_parity.js",
+        "?? tests/test_size_override_frontend.js",
+        "?? tests/test_size_overrides_video_removed.js",
+        "?? tests/test_size_policy_web_parity.js",
+        "?? tests/test_skill_panel_fields.py",
+        "?? tests/test_smart_canvas_composer_float_avoid.js",
+        "?? tests/test_smart_canvas_create_menu.js",
+        "?? tests/test_smart_canvas_editor_kind_by_node_type.js",
+        "?? tests/test_smart_canvas_group_media_layout.js",
+        "?? tests/test_smart_canvas_group_resize.js",
+        "?? tests/test_smart_canvas_group_tiny_frame.js",
+        "?? tests/test_smart_canvas_input_edges.js",
+        "?? tests/test_smart_canvas_pending_resume_error.js",
+        "?? tests/test_table_row_duration.js",
+        "?? tests/test_video_platform_official.py",
+        "?? tools/build_builtin_skills.py",
+        "?? web/src/pages/assets/",
+        "?? web/src/pages/chat/agents/AssetPicker.vue",
+        "?? web/src/pages/chat/agents/GenImageModelPicker.vue",
+        "?? web/src/pages/chat/agents/OpenClawInstallModal.vue",
+        "?? web/src/pages/chat/agents/OpenClawSetupBanner.vue",
+        "?? web/src/pages/chat/agents/SkillPanel.vue",
+        "?? web/src/pages/chat/agents/SuggestedQuestions.vue",
+        "?? web/src/pages/chat/agents/TutorialModal.vue",
+        "?? web/src/pages/chat/agents/genImageState.js",
+        "?? web/src/pages/chat/agents/openclawSetup.js",
+        "?? web/src/pages/chat/agents/openclawSetupCore.js",
+        "?? web/src/shell/settings/api/core/sizeOverrides.js",
+        "?? web/src/shell/settings/api/core/sizePolicySync.js",
+        "?? web/src/shell/settings/api/parts/SizeOverridesCard.vue"
+      ],
       "changedFilesTruncated": false
     },
     "contentFingerprint": {
       "algorithm": "sha256",
       "scope": "kept-files",
-      "files": 63,
-      "bytes": 12433717,
-      "value": "95d5d601d9ab90ef0cd8bb1e03fe418f0531e5c5f4f9ce65f9ba96183bd06a27"
+      "files": 60,
+      "bytes": 11539262,
+      "value": "771802e7b4e44feaacfb737d05d505fd1b45f369cb7ef0b1cd42f14881ff2b05"
     }
   },
-  "files": 63,
-  "sourceFiles": 139,
-  "prunedFiles": 76,
-  "pages": 4,
+  "files": 60,
+  "sourceFiles": 157,
+  "prunedFiles": 97,
+  "pages": 3,
   "pageWhitelist": [
     "canvas-list.html",
-    "canvas.html",
     "smart-canvas.html"
+  ],
+  "pageExclude": [
+    "canvas.html"
   ],
   "extraKeep": [
     "system-prompts/infinite-canvas-prompt-templates.md",
@@ -109,76 +273,28 @@
       "to": "images/concept/carousel-node-workflow.jpg"
     },
     {
-      "from": "canvas.html",
-      "to": "css/canvas.css"
-    },
-    {
-      "from": "canvas.html",
-      "to": "vendor/css/fonts.css"
-    },
-    {
-      "from": "canvas.html",
-      "to": "css/table-node.css"
-    },
-    {
-      "from": "canvas.html",
-      "to": "css/nv2-skin.css"
-    },
-    {
-      "from": "canvas.html",
-      "to": "css/image-adjust.css"
-    },
-    {
-      "from": "canvas.html",
-      "to": "css/glide.css"
-    },
-    {
-      "from": "canvas.html",
-      "to": "js/shared/size-policy.js"
-    },
-    {
-      "from": "canvas.html",
-      "to": "js/shared/media.js"
-    },
-    {
-      "from": "canvas.html",
-      "to": "js/shared/workflow-utils.js"
-    },
-    {
-      "from": "canvas.html",
-      "to": "js/shared/node-registry.js"
-    },
-    {
-      "from": "canvas.html",
-      "to": "js/shared/table-model.js"
-    },
-    {
-      "from": "canvas.html",
-      "to": "js/shared/table-node.js"
-    },
-    {
-      "from": "canvas.html",
-      "to": "js/shared/dropdown.js"
-    },
-    {
-      "from": "canvas.html",
-      "to": "js/shared/glide.js"
-    },
-    {
-      "from": "canvas.html",
-      "to": "js/image-adjust-engine.js"
-    },
-    {
-      "from": "canvas.html",
-      "to": "js/image-adjust-editor.js"
-    },
-    {
-      "from": "canvas.html",
-      "to": "js/canvas.js"
+      "from": "smart-canvas.html",
+      "to": "css/smart-canvas.css"
     },
     {
       "from": "smart-canvas.html",
-      "to": "css/smart-canvas.css"
+      "to": "css/table-node.css"
+    },
+    {
+      "from": "smart-canvas.html",
+      "to": "vendor/css/fonts.css"
+    },
+    {
+      "from": "smart-canvas.html",
+      "to": "css/nv2-skin.css"
+    },
+    {
+      "from": "smart-canvas.html",
+      "to": "css/image-adjust.css"
+    },
+    {
+      "from": "smart-canvas.html",
+      "to": "css/glide.css"
     },
     {
       "from": "smart-canvas.html",
@@ -186,7 +302,47 @@
     },
     {
       "from": "smart-canvas.html",
+      "to": "js/shared/size-policy.js"
+    },
+    {
+      "from": "smart-canvas.html",
+      "to": "js/shared/media.js"
+    },
+    {
+      "from": "smart-canvas.html",
       "to": "js/shared/psd-writer.js"
+    },
+    {
+      "from": "smart-canvas.html",
+      "to": "js/shared/workflow-utils.js"
+    },
+    {
+      "from": "smart-canvas.html",
+      "to": "js/shared/node-registry.js"
+    },
+    {
+      "from": "smart-canvas.html",
+      "to": "js/shared/table-model.js"
+    },
+    {
+      "from": "smart-canvas.html",
+      "to": "js/shared/table-node.js"
+    },
+    {
+      "from": "smart-canvas.html",
+      "to": "js/shared/dropdown.js"
+    },
+    {
+      "from": "smart-canvas.html",
+      "to": "js/shared/glide.js"
+    },
+    {
+      "from": "smart-canvas.html",
+      "to": "js/image-adjust-engine.js"
+    },
+    {
+      "from": "smart-canvas.html",
+      "to": "js/image-adjust-editor.js"
     },
     {
       "from": "smart-canvas.html",
@@ -286,11 +442,13 @@
     }
   ],
   "entry": "static/canvas-list.html",
-  "canvasJsHash": "b0dbe577a85ead0b",
-  "canvasHtmlHash": "aa8974786af04d13",
-  "guardHash": "3df1af30d353c0d8",
+  "smartJsHash": "e875dc4c5dd14fee",
+  "smartHtmlHash": "4902ef7b794b1ac4",
+  "smartInternalsHash": "d4b2ab7365e3bae8",
+  "smartGuardHash": "13697c8d051585d1",
+  "smartAdapterHash": "121dc846ee3f5120",
+  "smartLiveSyncHash": "26f4ee46a7ecf38e",
   "modalHash": "fa91f67007271669",
-  "smartGuardHash": "726dec9c9687b71e",
-  "listHtmlHash": "b6de57c0a049f318",
+  "listHtmlHash": "50f50e1c8ed2f0cd",
   "csp": "default-src 'none'; script-src openarc-canvas: 'unsafe-inline'; style-src openarc-canvas: 'unsafe-inline'; img-src openarc-canvas: data: blob:; media-src openarc-canvas: data: blob:; font-src openarc-canvas:; connect-src openarc-canvas:; frame-src openarc-canvas:; child-src openarc-canvas:; object-src 'none'; form-action 'none'; base-uri 'none'"
 }

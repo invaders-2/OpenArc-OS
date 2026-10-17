@@ -42,15 +42,24 @@ async function loadCanvasSizePolicy(table) {
 
 /* ─────────────────────────── ① 比例 / 分辨率 → size ─────────────────────────── */
 
-test("① ratio+resolution 显式映射：1:1 / 16:9 / 9:16（1k）", () => {
+test("① ratio+resolution 显式映射：官方 15 比例（1k）", () => {
   assert.equal(imageParams.resolveImageSize({ ratio: "1:1", resolution: "1k" }), "1024x1024");
-  assert.equal(imageParams.resolveImageSize({ ratio: "16:9", resolution: "1k" }), "1280x720");
-  assert.equal(imageParams.resolveImageSize({ ratio: "9:16", resolution: "1k" }), "720x1280");
+  assert.equal(imageParams.resolveImageSize({ ratio: "16:9", resolution: "1k" }), "1536x864");
+  assert.equal(imageParams.resolveImageSize({ ratio: "9:16", resolution: "1k" }), "864x1536");
   // 同名键与可读比例等价
-  assert.equal(imageParams.resolveImageSize({ ratio: "wide", resolution: "1k" }), "1280x720");
-  assert.equal(imageParams.resolveImageSize({ ratio: "story", resolution: "1k" }), "720x1280");
+  assert.equal(imageParams.resolveImageSize({ ratio: "wide", resolution: "1k" }), "1536x864");
+  assert.equal(imageParams.resolveImageSize({ ratio: "story", resolution: "1k" }), "864x1536");
   assert.equal(imageParams.resolveImageSize({ ratio: "portrait", resolution: "1k" }), "1024x1536");
   assert.equal(imageParams.resolveImageSize({ ratio: "landscape", resolution: "1k" }), "1536x1024");
+  // 上游 22feb298 新增的官方比例（含 5:4 / 4:5 / 3:1 / 1:3 / 2:1 / 1:2）
+  assert.equal(imageParams.resolveImageSize({ ratio: "5:4", resolution: "1k" }), "1280x1024");
+  assert.equal(imageParams.resolveImageSize({ ratio: "4:5", resolution: "1k" }), "1024x1280");
+  assert.equal(imageParams.resolveImageSize({ ratio: "3:1", resolution: "1k" }), "1536x512");
+  assert.equal(imageParams.resolveImageSize({ ratio: "1:3", resolution: "1k" }), "512x1536");
+  // 2:1 / 1:2 的官方 1k 像素超过该档像素上限，实际下发按上限等比收窄（官方原值仍在表里）
+  assert.equal(imageParams.IMAGE_SIZE_TABLE.landscape21["1k"], "2048x1024");
+  assert.equal(imageParams.resolveImageSize({ ratio: "2:1", resolution: "1k" }), "1760x880");
+  assert.equal(imageParams.resolveImageSize({ ratio: "1:2", resolution: "1k" }), "880x1760");
 });
 
 test("① 分辨率档都会进映射；未给分辨率按 1k；未知分辨率不静默乱给", () => {
@@ -91,6 +100,8 @@ test("① 无信号（既无 size 也无 ratio/resolution）返回 null，不凭
 test("① gpt-image-2 用离散枚举表，不产生非法 4096x4096", () => {
   assert.equal(imageParams.resolveImageSize({ ratio: "1:1", resolution: "4k", model: "gpt-image-2" }), "2048x2048");
   assert.equal(imageParams.resolveImageSize({ ratio: "16:9", resolution: "1k", model: "gpt-image-2" }), "1536x1024");
+  assert.equal(imageParams.resolveImageSize({ ratio: "5:4", resolution: "2k", model: "gpt-image-2" }), "3840x2160");
+  assert.equal(imageParams.resolveImageSize({ ratio: "1:2", resolution: "1k", model: "gpt-image-2" }), "1024x1536");
   // gpt-image-2.5 也算 gpt-image-2 家族（策略按 model_patterns 命中含 "gpt-image-2" 的模型名）
   assert.equal(imageParams.isGptImageModel("openai/gpt-image-2.5"), true);
   assert.equal(imageParams.isGptImageModel("gpt-image-2"), true);
@@ -125,7 +136,8 @@ test("① sizeFromRatio / parseSize / parseRatio 基础契约", () => {
 });
 
 test("① 与画布页真源对齐：SIZE_MAP / gpt-image-2 策略约束 / ratio 选项标签", async () => {
-  const pageJs = fs.readFileSync(path.join(ROOT, "public/novai-canvas/static/js/canvas.js"), "utf8");
+  // 经典 canvas.js 已随传统编辑器删除；SIZE_MAP 仍由唯一保留的编辑器 smart-canvas.js 承载，断言口径不变。
+  const pageJs = fs.readFileSync(path.join(ROOT, "public/novai-canvas/static/js/smart-canvas.js"), "utf8");
   const pickTable = (name) => {
     const block = new RegExp("const " + name + " = \\{([\\s\\S]*?)\\n\\};").exec(pageJs);
     assert.ok(block, name + " 必须能在画布页找到");
@@ -141,12 +153,44 @@ test("① 与画布页真源对齐：SIZE_MAP / gpt-image-2 策略约束 / ratio
     }
     return rows;
   };
-  // 1) 通用表逐格一致（这是 UI 与宿主的唯一口径，任何一边改了都必须同时改 / 被测试挡住）
-  assert.deepEqual(pickTable("SIZE_MAP"), { ...imageParams.IMAGE_SIZE_TABLE });
-  // 2) gpt-image-2 的离散枚举上游已从画布页静态表搬到服务端尺寸策略（canvas.js 不再有
-  //    GPT_IMAGE_2_SIZE_MAP，改由 shared/size-policy.js 消费 model_protocols.json 的
-  //    gpt-image-2-family）。用页面自己的 constrain 反向验证宿主表：每个格子都必须等于
-  //    页面策略对通用表预设做枚举吸附的结果；策略快照的原样值在此处独立钉住。
+  /* 上游 22feb298 把 SIZE_MAP 从「通用 9 比例」换成了 APIMart 官方 15 比例表，宿主
+     electron/image-params.cjs 的 IMAGE_SIZE_TABLE 已按同一张表对齐。这里仍逐格钉住官方表
+     （页面或宿主任何一格被改动都会红），并断言两边**不再有任何差异格**；13 个历史差异格的
+     逐格证据在 experiments/dxos-image-size-table-sync + artifacts/dxos-image-size-table-sync。*/
+  const PAGE_SIZE_MAP = {
+    square: { "1k": "1024x1024", "2k": "2048x2048", "4k": "2880x2880" },
+    portrait: { "1k": "1024x1536", "2k": "1360x2048", "4k": "2336x3520" },
+    portrait43: { "1k": "768x1024", "2k": "1536x2048", "4k": "2480x3312" },
+    landscape43: { "1k": "1024x768", "2k": "2048x1536", "4k": "3312x2480" },
+    landscape: { "1k": "1536x1024", "2k": "2048x1360", "4k": "3520x2336" },
+    story: { "1k": "864x1536", "2k": "1152x2048", "4k": "2160x3840" },
+    wide: { "1k": "1536x864", "2k": "2048x1152", "4k": "3840x2160" },
+    ultrawide: { "1k": "2016x864", "2k": "2688x1152", "4k": "3840x1648" },
+    ultratall: { "1k": "864x2016", "2k": "1152x2688", "4k": "1648x3840" },
+    portrait12: { "1k": "1024x2048", "2k": "1344x2688", "4k": "1920x3840" },
+    landscape21: { "1k": "2048x1024", "2k": "2688x1344", "4k": "3840x1920" },
+    landscape54: { "1k": "1280x1024", "2k": "2560x2048", "4k": "3216x2576" },
+    portrait45: { "1k": "1024x1280", "2k": "2048x2560", "4k": "2576x3216" },
+    landscape31: { "1k": "1536x512", "2k": "3072x1024", "4k": "3840x1280" },
+    portrait13: { "1k": "512x1536", "2k": "1024x3072", "4k": "1280x3840" },
+  };
+  // 1) 页面官方表逐格钉住
+  assert.deepEqual(pickTable("SIZE_MAP"), PAGE_SIZE_MAP, "smart-canvas.js 的 SIZE_MAP 必须是 APIMart 官方 15 比例表（逐格）");
+  // 2) 宿主表与页面表逐格一致：不再有差异格，比例集合也必须完全相同
+  const hostTable = JSON.parse(JSON.stringify(imageParams.IMAGE_SIZE_TABLE));
+  assert.deepEqual(hostTable, PAGE_SIZE_MAP, "宿主 IMAGE_SIZE_TABLE 必须与上游官方 15 比例表逐格一致");
+  assert.deepEqual(Object.keys(hostTable).sort(), Object.keys(PAGE_SIZE_MAP).sort(), "两边比例集合必须一致");
+  const divergence = [];
+  for (const key of Object.keys(PAGE_SIZE_MAP)) {
+    for (const level of ["1k", "2k", "4k"]) {
+      if (PAGE_SIZE_MAP[key][level] !== hostTable[key][level]) {
+        divergence.push(key + "." + level + ": " + hostTable[key][level] + " -> " + PAGE_SIZE_MAP[key][level]);
+      }
+    }
+  }
+  assert.deepEqual(divergence, [], "宿主表与上游官方表不得再有任何差异格");
+  // 3) gpt-image-2 的离散枚举上游已从画布页静态表搬到服务端尺寸策略，改用页面 constrain
+  //    反向验证宿主表；策略快照的原样值在此处独立钉住。
   assert.deepEqual(
     JSON.parse(JSON.stringify(imageParams.GPT_IMAGE_2_SIZE_POLICY)),
     {
@@ -171,19 +215,18 @@ test("① 与画布页真源对齐：SIZE_MAP / gpt-image-2 策略约束 / ratio
       );
     }
   }
-  // 3) 比例下拉的真实 value/标签 → 经本模块映射 == 该 key 的 1k 格
-  const select = /<select class="select-lite ratio compact-select"[^>]*>([\s\S]*?)<\/select>/.exec(pageJs);
-  assert.ok(select, "必须能定位画布页的比例下拉");
-  const options = [...select[1].matchAll(/<option value="([a-zA-Z0-9]+)">([^<]+)<\/option>/g)]
-    .map((m) => ({ key: m[1], label: m[2] }))
-    .filter((o) => o.key !== "custom" && o.key !== "source");
-  assert.ok(options.length >= 9, "比例下拉应有 9 个具名比例，实际 " + options.length);
-  for (const o of options) {
-    assert.equal(
-      imageParams.resolveImageSize({ ratio: o.label, resolution: "1k" }),
-      imageParams.IMAGE_SIZE_TABLE[o.key]["1k"],
-      "比例下拉 " + o.key + "(" + o.label + ") 经本模块 1k 映射必须等于表里的 " + o.key + ".1k",
-    );
+  // 4) 比例标签真源：新 UI 不再用 <select>，标签在 apiRatioText 的 map 里；
+  //    每个页面比例都必须有可被宿主解析的标签，且与页面表 1k 的宽高比一致。
+  const ratioTextSrc = /function apiRatioText\([\s\S]*?const map = \{([\s\S]*?)\};/.exec(pageJs);
+  assert.ok(ratioTextSrc, "必须能定位 apiRatioText 的比例标签表");
+  const labels = {};
+  for (const m of ratioTextSrc[1].matchAll(/(\w+):'([^']+)'/g)) labels[m[1]] = m[2];
+  for (const key of Object.keys(PAGE_SIZE_MAP)) {
+    assert.ok(labels[key], "比例 " + key + " 必须有标签");
+    const parsed = imageParams.parseRatio(labels[key]);
+    assert.ok(parsed > 0, "标签必须能被宿主解析：" + key + "=" + labels[key]);
+    const [w, h] = PAGE_SIZE_MAP[key]["1k"].split("x").map(Number);
+    assert.ok(Math.abs(w / h - parsed) < 0.02, key + " 标签比例与 1k 表不一致：" + labels[key] + " vs " + PAGE_SIZE_MAP[key]["1k"]);
   }
 });
 
@@ -321,9 +364,13 @@ test("④ modelCall：节点的 ratio/resolution 真的映射进 generateImage �
   const f = await imageFixture();
   try {
     assert.equal(await imageCall(f, { ratio: "1:1", resolution: "1k" }), "1024x1024");
-    assert.equal(await imageCall(f, { ratio: "wide", resolution: "1k" }), "1280x720");
-    assert.equal(await imageCall(f, { ratio: "story", resolution: "1k" }), "720x1280");
+    assert.equal(await imageCall(f, { ratio: "wide", resolution: "1k" }), "1536x864");
+    assert.equal(await imageCall(f, { ratio: "story", resolution: "1k" }), "864x1536");
     assert.equal(await imageCall(f, { ratio: "portrait", resolution: "2k" }), "1360x2048");
+    assert.equal(await imageCall(f, { ratio: "5:4", resolution: "1k" }), "1280x1024");
+    assert.equal(await imageCall(f, { ratio: "3:1", resolution: "1k" }), "1536x512");
+    // 官方 1k 超上限的 21:9 按该档像素上限收窄到与页面一致
+    assert.equal(await imageCall(f, { ratio: "21:9", resolution: "1k" }), "1904x816");
   } finally { f.fx.close(); }
 });
 
@@ -331,8 +378,8 @@ test("④ modelCall：显式 size 与显式 ratio 参数的优先级", async () 
   const f = await imageFixture();
   try {
     assert.equal(await imageCall(f, { ratio: "1:1", resolution: "1k" }, { size: "1536x1024" }), "1536x1024", "显式 size 压过节点比例");
-    assert.equal(await imageCall(f, { ratio: "1:1", resolution: "1k" }, { ratio: "9:16" }), "720x1280", "显式 ratio 压过节点 ratio");
-    assert.equal(await imageCall(f, { ratio: "1:1", resolution: "1k" }, { resolution: "4k" }), "4096x4096", "显式 resolution 压过节点 resolution");
+    assert.equal(await imageCall(f, { ratio: "1:1", resolution: "1k" }, { ratio: "9:16" }), "864x1536", "显式 ratio 压过节点 ratio");
+    assert.equal(await imageCall(f, { ratio: "1:1", resolution: "1k" }, { resolution: "4k" }), "2880x2880", "显式 resolution 压过节点 resolution");
   } finally { f.fx.close(); }
 });
 

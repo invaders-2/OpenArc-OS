@@ -10,8 +10,9 @@
  * 映射表是数据（IMAGE_SIZE_TABLES），不是散落在 UI 里的常量；调用方可用 tables
  * 注入自己的表，也可以改这里默认值，测试直接读同一份表。
  *
- * 通用表内容与画布页口径一致（public/novai-canvas/static/js/canvas.js 的 SIZE_MAP 是它在浏览器
- * 里的副本）。gpt-image-2 的离散枚举在上游 1e20abe51 里已从画布页静态表搬到服务端尺寸策略
+ * 通用表内容与画布页唯一编辑器 public/novai-canvas/static/js/smart-canvas.js 的 SIZE_MAP 逐格一致
+ * （APIMart 官方 gpt-image-2 15 比例 × 1k/2k/4k；上游 22feb298 起用它替换了旧 9 比例通用表）。
+ * gpt-image-2 的离散枚举在上游 1e20abe51 里已从画布页静态表搬到服务端尺寸策略
  * （static/js/shared/size-policy.js 消费 model_protocols.json 的 gpt-image-2-family）；本文件用
  * GPT_IMAGE_2_SIZE_POLICY 镜像同一份策略，GPT_IMAGE_SIZE_TABLE 是它作用在通用表上的结果。
  * 这样 UI 送 size 与宿主兜底映射不会互相矛盾。
@@ -51,22 +52,39 @@ const ASPECT_RATIO_ALIASES = Object.freeze({
   "16:9": "wide", wide: "wide",
   "21:9": "ultrawide", ultrawide: "ultrawide",
   "9:21": "ultratall", ultratall: "ultratall",
+  "1:2": "portrait12", portrait12: "portrait12",
+  "2:1": "landscape21", landscape21: "landscape21",
+  "5:4": "landscape54", landscape54: "landscape54",
+  "4:5": "portrait45", portrait45: "portrait45",
+  "3:1": "landscape31", landscape31: "landscape31",
+  "1:3": "portrait13", portrait13: "portrait13",
 });
 
 const RES_LONG_SIDE = Object.freeze({ "1k": 1536, "2k": 2048, "4k": 3840 });
 const RES_PIXEL_LIMIT = Object.freeze({ "1k": 1572864, "2k": 4194304, "4k": 8294400 });
 
-/** 通用比例表：键 = 比例，值 = 分辨率档 → "WxH"。 */
+/**
+ * APIMart 官方比例表：键 = 比例，值 = 分辨率档 → "WxH"（官方原样像素，不在这里做收口）。
+ * 与 smart-canvas.js 的 SIZE_MAP 逐格一致；同档位官方给两组等价像素时取比例精确的第一组
+ * （1:1@1k=1024x1024、3:1@1k=1536x512、1:3@1k=512x1536）。
+ * 实际下发尺寸在 resolveImageSize 里按该档位像素上限等比收窄（与页面 apiImageSize 同口径）。
+ */
 const IMAGE_SIZE_TABLE = Object.freeze({
-  square: Object.freeze({ "1k": "1024x1024", "2k": "2048x2048", "4k": "4096x4096" }),
-  portrait: Object.freeze({ "1k": "1024x1536", "2k": "1360x2048", "4k": "2352x3520" }),
-  portrait43: Object.freeze({ "1k": "1008x1344", "2k": "1536x2048", "4k": "2448x3264" }),
-  landscape43: Object.freeze({ "1k": "1344x1008", "2k": "2048x1536", "4k": "3264x2448" }),
-  landscape: Object.freeze({ "1k": "1536x1024", "2k": "2048x1360", "4k": "3520x2352" }),
-  story: Object.freeze({ "1k": "720x1280", "2k": "1152x2048", "4k": "2160x3840" }),
-  wide: Object.freeze({ "1k": "1280x720", "2k": "2048x1152", "4k": "3840x2160" }),
-  ultrawide: Object.freeze({ "1k": "1280x544", "2k": "2048x880", "4k": "3840x1648" }),
-  ultratall: Object.freeze({ "1k": "544x1280", "2k": "880x2048", "4k": "1648x3840" }),
+  square: Object.freeze({ "1k": "1024x1024", "2k": "2048x2048", "4k": "2880x2880" }),
+  portrait: Object.freeze({ "1k": "1024x1536", "2k": "1360x2048", "4k": "2336x3520" }),
+  portrait43: Object.freeze({ "1k": "768x1024", "2k": "1536x2048", "4k": "2480x3312" }),
+  landscape43: Object.freeze({ "1k": "1024x768", "2k": "2048x1536", "4k": "3312x2480" }),
+  landscape: Object.freeze({ "1k": "1536x1024", "2k": "2048x1360", "4k": "3520x2336" }),
+  story: Object.freeze({ "1k": "864x1536", "2k": "1152x2048", "4k": "2160x3840" }),
+  wide: Object.freeze({ "1k": "1536x864", "2k": "2048x1152", "4k": "3840x2160" }),
+  ultrawide: Object.freeze({ "1k": "2016x864", "2k": "2688x1152", "4k": "3840x1648" }),
+  ultratall: Object.freeze({ "1k": "864x2016", "2k": "1152x2688", "4k": "1648x3840" }),
+  portrait12: Object.freeze({ "1k": "1024x2048", "2k": "1344x2688", "4k": "1920x3840" }),
+  landscape21: Object.freeze({ "1k": "2048x1024", "2k": "2688x1344", "4k": "3840x1920" }),
+  landscape54: Object.freeze({ "1k": "1280x1024", "2k": "2560x2048", "4k": "3216x2576" }),
+  portrait45: Object.freeze({ "1k": "1024x1280", "2k": "2048x2560", "4k": "2576x3216" }),
+  landscape31: Object.freeze({ "1k": "1536x512", "2k": "3072x1024", "4k": "3840x1280" }),
+  portrait13: Object.freeze({ "1k": "512x1536", "2k": "1024x3072", "4k": "1280x3840" }),
 });
 
 /**
@@ -99,13 +117,19 @@ const GPT_IMAGE_2_SIZE_POLICY = Object.freeze({
 const GPT_IMAGE_SIZE_TABLE = Object.freeze({
   square: Object.freeze({ "1k": "1024x1024", "2k": "2048x2048", "4k": "2048x2048" }),
   portrait: Object.freeze({ "1k": "1024x1536", "2k": "1024x1536", "4k": "2160x3840" }),
-  landscape: Object.freeze({ "1k": "1536x1024", "2k": "2048x1152", "4k": "3840x2160" }),
   portrait43: Object.freeze({ "1k": "1024x1536", "2k": "1024x1536", "4k": "2160x3840" }),
   landscape43: Object.freeze({ "1k": "1536x1024", "2k": "2048x1152", "4k": "3840x2160" }),
+  landscape: Object.freeze({ "1k": "1536x1024", "2k": "2048x1152", "4k": "3840x2160" }),
   story: Object.freeze({ "1k": "1024x1536", "2k": "1024x1536", "4k": "2160x3840" }),
   wide: Object.freeze({ "1k": "1536x1024", "2k": "2048x1152", "4k": "3840x2160" }),
-  ultrawide: Object.freeze({ "1k": "1536x1024", "2k": "2048x1152", "4k": "3840x2160" }),
+  ultrawide: Object.freeze({ "1k": "2048x1152", "2k": "2048x1152", "4k": "3840x2160" }),
   ultratall: Object.freeze({ "1k": "1024x1536", "2k": "1024x1536", "4k": "2160x3840" }),
+  portrait12: Object.freeze({ "1k": "1024x1536", "2k": "1024x1536", "4k": "2160x3840" }),
+  landscape21: Object.freeze({ "1k": "2048x1152", "2k": "2048x1152", "4k": "3840x2160" }),
+  landscape54: Object.freeze({ "1k": "1536x1024", "2k": "3840x2160", "4k": "3840x2160" }),
+  portrait45: Object.freeze({ "1k": "1024x1536", "2k": "2160x3840", "4k": "2160x3840" }),
+  landscape31: Object.freeze({ "1k": "1536x1024", "2k": "2048x1152", "4k": "3840x2160" }),
+  portrait13: Object.freeze({ "1k": "1024x1536", "2k": "1024x1536", "4k": "2160x3840" }),
 });
 
 const IMAGE_SIZE_TABLES = Object.freeze({ generic: IMAGE_SIZE_TABLE, gptImage: GPT_IMAGE_SIZE_TABLE });
@@ -136,6 +160,9 @@ const SIZE_POLICY_FREE = Object.freeze({
  * 把画布模型清单展开成页面 shared/size-policy.js 期望的 { format, default, models } 表。
  * entries: [{ key: 页面模型显示名(label，与 /api/config 的 image_models 一致), model: 用来判定家族的模型名 }]
  * 只有 gpt-image-2 家族挂 GPT_IMAGE_2_SIZE_POLICY；其余走 default。策略内容只来自本文件，不另写一份。
+ *
+ * sizes / gptSizes 是同一份表的只读投影：页面 normalizeTable 只读 format/default/models，未知字段
+ * 原样忽略；宿主探针与测试用它们逐格核对 /api/ai/size-policy 下发值，不必再从页面静态表反推。
  */
 function buildSizePolicyTable(entries) {
   const models = {};
@@ -144,7 +171,7 @@ function buildSizePolicyTable(entries) {
     if (!key) continue;
     if (isGptImageModel(entry && entry.model)) models[key] = GPT_IMAGE_2_SIZE_POLICY;
   }
-  return { format: SIZE_POLICY_FORMAT, default: SIZE_POLICY_FREE, models };
+  return { format: SIZE_POLICY_FORMAT, default: SIZE_POLICY_FREE, models, sizes: IMAGE_SIZE_TABLE, gptSizes: GPT_IMAGE_SIZE_TABLE };
 }
 
 /** WxH（也接受 W*H）；只在显式尺寸判定与自定义尺寸回读时用。 */
@@ -211,6 +238,23 @@ function align16(value) {
   return Math.max(64, Math.floor(Number(value) / 16) * 16);
 }
 
+/**
+ * 命名比例的派生收口：只按该档位像素上限等比缩放 + 16 对齐（与画布页 apiImageSize 的 oaTierFit
+ * 同一口径，不做长边夹取）。官方表原样像素留在 IMAGE_SIZE_TABLE；这里产出实际下发的尺寸，
+ * 否则 ultrawide@1k（2016x864）这类官方像素会超过 1k 档上限、与页面结果差一格。
+ * gpt-image-2 的枚举收口已由 GPT_IMAGE_SIZE_TABLE 完成，不再走这里。
+ */
+function fitSizeToTier(size, resolutionKey) {
+  const pair = parseSize(size);
+  if (!pair) return size;
+  const resKey = RES_PIXEL_LIMIT[resolutionKey] ? resolutionKey : "1k";
+  const pixelLimit = RES_PIXEL_LIMIT[resKey] || 0;
+  const area = pair.width * pair.height;
+  if (!(pixelLimit > 0) || area <= pixelLimit) return pair.width + "x" + pair.height;
+  const scale = Math.sqrt(pixelLimit / area);
+  return align16(pair.width * scale) + "x" + align16(pair.height * scale);
+}
+
 function isGptImageModel(model) {
   const raw = String(model == null ? "" : model).trim().toLowerCase();
   const normalized = raw.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
@@ -258,7 +302,8 @@ function resolveImageSize({ size = null, ratio = null, resolution = null, custom
     ? alias
     : (Object.prototype.hasOwnProperty.call(table, ratioRaw) ? ratioRaw : "square");
   const row = table[key] || square;
-  return row[resKey] || square[resKey] || square["1k"] || null;
+  const cell = row[resKey] || square[resKey] || square["1k"] || null;
+  return cell && !isGptImageModel(model) ? fitSizeToTier(cell, resKey) : cell;
 }
 
 /** 从画布节点的可编辑字段解析（node.ratio / node.resolution / node.customSize / node.customRatio）。 */
@@ -350,6 +395,7 @@ module.exports = {
   parseSize,
   parseRatio,
   sizeFromRatio,
+  fitSizeToTier,
   isGptImageModel,
   resolveImageSize,
   resolveImageSizeFromNode,

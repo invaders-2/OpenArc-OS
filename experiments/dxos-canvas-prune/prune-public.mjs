@@ -26,6 +26,8 @@ const REQUIRED_ROOT = [
   "openarc-bridge.js",
   "openarc-adapter.js",
   "openarc-canvas-guard.js",
+  // 智能画布唯一保留编辑器的命令适配器（第 14 处 vendor 改动；列表页入口全改向它）。
+  "openarc-smart-adapter.js",
   // Electron 不支持 window.prompt：列表页与智能画布的重命名都靠它（vendor 脚本逐页注入）。
   "openarc-rename-modal.js",
   "SOURCE.md",
@@ -53,6 +55,16 @@ for (const rel of FORBIDDEN_ROOT) {
 
 console.log("[prune] 源 static/ 文件 " + all.length + "；保留 " + kept.length + "；删除 " + dropped.length);
 console.log("[prune] 保留 " + keptBytes + " bytes；删除 " + dropBytes + " bytes");
+/* 交叉核对 vendor 清单：上游源文件数 / 实际保留 / 已在 vendor 阶段裁掉的数量。
+   两个数字都自洽时，才说明「白名单 + 排除页集合 + 闭包」与落盘结果一致。*/
+try {
+  const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, "experiments", "d5-02", "vendor", "vendor-manifest.json"), "utf8"));
+  console.log("[prune] vendor-manifest: 源 " + manifest.sourceFiles + " / 保留 " + manifest.files + " / 裁剪 " + manifest.prunedFiles + "（本次 bundle 内再删 " + dropped.length + "）");
+  if (manifest.files !== all.length) throw new Error("vendor-manifest.files(" + manifest.files + ") 与 bundle static 实际文件数(" + all.length + ") 不一致");
+  if (manifest.sourceFiles - manifest.prunedFiles !== manifest.files) throw new Error("vendor-manifest 源-裁剪≠保留");
+} catch (e) {
+  if (e && /不一致|≠/.test(String(e.message))) throw e;
+}
 for (const f of dropped) console.log("  - " + f + "  (" + sizeOf(f) + " B)");
 
 if (!CHECK) {

@@ -3,39 +3,50 @@
  *
  * 用法：node experiments/d5-02/vendor-novai-app.mjs
  *   源：OA_NOVAI_SRC（默认 /tmp/novai-canvas-src），必须是 SOURCE_COMMIT 的干净检出。
- *   目标：public/novai-canvas/static/**（"只保留无限画布"的页面白名单 + 依赖闭包）
- *   + 四个 openarc-*.js 适配脚本。**产品入口 = static/canvas-list.html**（宿主 IFRAME_BASE 指向它）；
+ *   目标：public/novai-canvas/static/**（**只保留列表页 + 智能画布**的页面白名单 + 依赖闭包）
+ *   + bundle 根的 openarc-*.js 适配脚本。**产品入口 = static/canvas-list.html**（宿主 IFRAME_BASE 指向它）；
+ *   **唯一编辑器 = static/smart-canvas.html**（传统 canvas.html 已删，见第 13 处改动）。
  *   bundle 根 index.html 不再生成（E4 边界测试已改到该产品页，见文件末尾第 5 步）。
  *
  * 为什么**不改写 /static/ 路径**：自定义协议是 standard:true，根绝对 /static/x 会自然解析为
  * openarc-canvas://bundle/static/x。改写 14 个页面 + 动态注入 + 动态 import 的风险远大于原样服务。
  *
  * 对上游文件的改动（全部可审计、可重复生成；补丁幂等、目标缺失即报错、可反复重跑）：
- *   1) 每个页面 head 注入 CSP meta + openarc-bridge.js（最先执行）；
+ *   1) 每个保留页 head 注入 CSP meta + openarc-bridge.js（最先执行）；
  *   2) （已移除）原 bundle 根 index.html（上游 static/index.html 副本 + openarc-shell.js 中继）不再生成：
  *      E4 边界测试改用真实产品页 static/canvas-list.html，该外壳零引用 ⇒ 连旧残留一起清掉；
  *      openarc-shell.js 随之零加载（全仓无注入点），本轮裁决删除，这里一并清掉旧副本；
- *   3) static/js/canvas.js 末尾（IIFE 内）依次追加：三方合并模块（experiments/d5-02/vendor/canvas-merge.js）
- *      + AI 新增标记模块（experiments/d5-02/vendor/canvas-ai-marks.js）——两个都是纯函数、Node 单测测
- *      同一份文本 —— + OpenArc 适配层（experiments/d5-02/vendor/canvas-internals.js），
- *      static/canvas.html 在其后注入 openarc-adapter.js 与 openarc-canvas-guard.js（**只 canvas.html**：
- *      编辑器是唯一有供应商/模型下拉的页面）；
- *   4) static/canvas-list.html 的三个"新建"入口改成直接进编辑器（见下面 LIST_PATCHES，幂等且缺目标即报错）；
- *   5) static/js/canvas.js 的 saveCanvas() 三处补丁（见下面 CANVAS_JS_PATCHES）：
- *      · 记录"这次真正发出去的文档"（= 服务端接受后页面的共同祖先）；
- *      · 保存成功时把这一版交给注入层（下一次冲突做三方合并的 base）；
- *      · **409 分支交给注入层做三方合并**，不再"换基线后重发同一份旧文档"（那会静默覆盖对方改动）。
- *   6) static/js/canvas.js 的 apiImageSize() 改为「长边 + 该档像素上限」等比对称求解（见 CANVAS_JS_PATCHES
- *      第 5 条）：修上游 custom/source 只压一侧造成的非方形 / 超上限尺寸（1:1@1k 旧值 1536x1248）；
- *      具名比例沿用 SIZE_MAP 预设，只在预设自身超上限时收窄（square@4k 的 4096x4096 → 2880x2880）。
- *   7) （第 11 处改动）static/canvas-list.html 的**入口改向**：新建 / 继续上次 / 卡片点击 / 回收站恢复后进入，
- *      全部改向 static/smart-canvas.html（同一 id / project）；经典 canvas.html 已无入口可达但暂不删除；
- *   8) （第 12 处改动）static/js/smart-canvas.js 的 IIFE 末尾内联**最小封堵**
- *      （experiments/d5-02/vendor/smart-canvas-guard.js）：供应商/模型只来自宿主 /api/config 投影、
- *      未接通能力（视频 / ComfyUI）如实禁用并标注、只读画布不可编辑；不是经典守卫的移植。
- *      （V0.01 授权补齐）只读闸从"只包 pushUndo"扩到**逐条编辑路径**：事件闸（捕获阶段拦
- *      指针/拖放/剪贴板/输入/键盘编辑键）+ 173 个改文档的闭包函数闸 + fetch 写请求页面侧拒绝，
- *      并把页面提前 window.* 导出的那些重新指到包装实现；证据面新增 snapshot()/wrapped()/writeBlocked()。
+ *   3) （第 13 处改动）白名单收窄为 canvas-list.html + smart-canvas.html，并加 PAGE_EXCLUDE:
+ *      canvas.html —— extractStaticRefs 会从列表页入口改向前留下的 kind 三元里抽出
+ *      /static/canvas.html，只改白名单不够。传统编辑器连同它独占的 css/canvas.css、js/canvas.js
+ *      一起不再 vendor（闭包实测只删这 3 个）；经典 canvas.js 的补丁 / internals / merge / ai-marks
+ *      注入随之移除（语义按新源码移植到智能画布，见第 12/14 处改动）；
+ *   4) static/canvas-list.html 的"新建 / 继续上次 / 卡片点击 / 回收站恢复后进入"全部直接进
+ *      static/smart-canvas.html（第 11 处改动；LIST_PATCHES 幂等且缺目标即报错）；
+ *   5) （第 10 处改动）两个产品页 head 注入 openarc-rename-modal.js：上游 3 处 window.prompt
+ *      （列表重命名 1 / 智能画布模板分组 2）改成应用内模态；
+ *   6) （第 12 处改动，v3）static/js/smart-canvas.js 的 IIFE 末尾内联
+ *      experiments/d5-02/vendor/smart-canvas-guard.js：供应商/模型只来自宿主 /api/config 投影、
+ *      未接通能力（视频 / ComfyUI / ModelScope）如实禁用并复用 .openarc-guard-note 文案、
+ *      四把页面记忆键锁死、只读画布逐条编辑路径被拒（事件闸 + 174 个闭包函数闸 + fetch 写闸）；
+ *      **按 22feb298 新源码重写**：不再引用已删除的 #apiKindToggle / syncApiKindToggleVisibility，
+ *      视频改为创建菜单的 [data-create-type="video"]；
+ *   7) （第 14 处改动）static/js/smart-canvas.js IIFE 末尾再内联
+ *      experiments/d5-02/vendor/smart-canvas-internals.js（window.__openarcCanvasInternals），
+ *      并在 static/smart-canvas.html 的 smart-canvas.js 之后注入 openarc-smart-adapter.js
+ *      （window.__openarcCanvas：命令 / undo / redo / state / reload-doc）；
+ *   8) （第 15 处改动）static/js/smart-canvas.js 的 apiImageSize() 在新锚点重写：上游只做
+ *      「长边定档 + 等比」，free 策略不收档位像素上限（1:1@1k 1536x1536、1:1@4k 3840x3840），
+ *      这里只补「按档位像素上限等比收窄」；枚举模型仍交给 NovaSizePolicy.constrain；
+ *   9) （第 16 处改动）同 IIFE 末尾再内联 experiments/d5-02/vendor/smart-canvas-live-sync.js：
+ *      宿主推送的 doc-changed 走页面自己的三方圆并（applyMergedServerCanvas），输入/拖拽/保存中/
+ *      有未保存改动时只记 pending 不抢；按 updated_at 幂等；证据面 window.__openarcCanvasLiveSync；
+ *   10) （第 17 处改动）远端合并轮询 8000 → 2500（兜底；上游经典 canvas.js 就是 2.5s），
+ *      并把 mergeReloadCanvasNow 的早退条件接上同一条安全判定（输入/未保存时不合并）。
+ *   11) （第 18 处改动）static/canvas-list.html 的卡片菜单在「复制画布」与「删除」之间加一项「共享…」：
+ *      点击只经 openarc-bridge.js 的 window.__openarcBridge.openShare(canvasId) 向宿主发
+ *      {kind:"open-share", canvasId}，由宿主打开它自己的共享面板。**页面里不画任何共享 UI**
+ *      （没有成员列表/角色/可见性控件），列表页外观仍是上游的。补丁幂等、缺锚点即报错。
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -57,18 +68,18 @@ const OUT = path.join(ROOT, "public", "novai-canvas");
 const REAL_STATIC = path.join(OUT, "static");
 let SRC_STATIC = path.join(SRC, "static");
 let OUT_STATIC = REAL_STATIC;
-const PATCH = path.join(here, "vendor", "canvas-internals.js");
-/** 保存冲突的三方合并（纯函数）：内联进 canvas.js 的同一个 IIFE，Node 单测 require 同一份文本。*/
-const MERGE = path.join(here, "vendor", "canvas-merge.js");
-/** AI 新增节点的来源标记 / 入场去重（纯函数）：同样内联进 canvas.js，Node 单测 require 同一份文本。*/
-const AI_MARKS = path.join(here, "vendor", "canvas-ai-marks.js");
-/** D5-02 供应商/模型单一真源守卫：只注入编辑器页，在 canvas.js / openarc-adapter.js 之后执行。*/
-const GUARD = path.join(OUT, "openarc-canvas-guard.js");
 /** 应用内模态输入：Electron 不支持 window.prompt，列表页与智能画布的重命名都改用它。*/
 const MODAL = path.join(OUT, "openarc-rename-modal.js");
-/** 智能画布最小封堵（第 12 处改动）：**不移植经典守卫**，只封掉"页面自己造模型/平台"与
- *  未接通能力的假可用 + 只读闸；内联进 static/js/smart-canvas.js 的 IIFE 末尾（同域，够得到内部兜底）。*/
+/** 智能画布注入层（第 14 处改动）：把页面原语暴露成 window.__openarcCanvasInternals，
+ *  供 openarc-smart-adapter.js 的命令层使用；内联进 static/js/smart-canvas.js 的 IIFE 末尾。*/
+const SMART_INTERNALS = path.join(here, "vendor", "smart-canvas-internals.js");
+/** 智能画布守卫（第 12 处改动，v3）：单一真源 + 未接通如实禁用 + 只读闸；同样内联在同一 IIFE 末尾。*/
 const SMART_GUARD = path.join(here, "vendor", "smart-canvas-guard.js");
+/** 智能画布命令适配器（第 14 处改动）：页面脚本，注入 smart-canvas.html（smart-canvas.js 之后）。*/
+const SMART_ADAPTER = path.join(OUT, "openarc-smart-adapter.js");
+/** 智能画布宿主推送同步（第 16 处改动）：宿主 doc-changed → 页面自己的三方圆并；内联在同一 IIFE 末尾。
+ *  兜底是第 17 处改动：远端合并轮询 8000 → 2500（上游 canvas.js 的同口径）。*/
+const SMART_LIVE_SYNC = path.join(here, "vendor", "smart-canvas-live-sync.js");
 
 const CSP = [
   "default-src 'none'",
@@ -316,21 +327,25 @@ function walk(dir, base = dir, out = []) {
 /**
  * ── 「只保留无限画布」裁剪策略（页面白名单 + 依赖驱动的闭包） ──────────────────────────────
  *
- * 入口白名单 = 上游原版列表首页 + 编辑器 + 智能画布编辑器。
+ * 入口白名单 = 上游原版列表首页 + 智能画布编辑器（**只保留这两页**）。
  *   · static/canvas-list.html 是产品入口（宿主 IFRAME_BASE 指向它）；
- *   · static/canvas.html 是无限画布编辑器；
- *   · static/smart-canvas.html 是"智能画布"编辑器 —— 列表按 canvas.kind === 'smart' 直接路由到它
- *     （canvas-list.html:1260/1361/1379），canvas.js:2147 也会跳它，所以它是画布功能的一部分，不是旁支。
+ *   · static/smart-canvas.html 是唯一保留的编辑器 —— 列表页所有入口都已改向它
+ *     （第 11 处改动），参数名仍是 id / project。
+ *   · static/canvas.html（传统编辑器）**不在白名单里**，并且显式进 PAGE_EXCLUDE：
+ *     extractStaticRefs 会从列表页入口改向前留下的 kind 三元 / 注释里抽出 /static/canvas.html，
+ *     只改白名单不够；排除页集合保证它和它独占的 css/canvas.css、js/canvas.js 不再被闭包带回来。
  * 从白名单页面出发解析 /static/... 引用（script/link/img、CSS url()、JS 里的写死路径 / fetch / import()），
  * 传递闭包 = 保留集；闭包外的页面与资源一律不拷贝。换上游 commit 后重跑，结果自动是裁剪后的。
- * 注意闭包可能**合法地**带进白名单之外的页面：上游 1e20abe51 起 smart-canvas.js 用 iframe 打开
- * /static/tools/lossless-edit/index.html（无损改图），该页因此进入保留集（第 4 个 HTML 页面），
- * 它的 PSD 导出依赖走 EXTRA_KEEP。这不是"白名单破了"，是依赖真的存在。
+ * 注意闭包可能**合法地**带进白名单之外的页面：smart-canvas.js 用 iframe 打开
+ * /static/tools/lossless-edit/index.html（无损改图），该页因此进入保留集，它的 PSD 导出依赖走 EXTRA_KEEP。
+ * 这不是"白名单破了"，是依赖真的存在。
  *
  * 白名单外必须显式保留的（有页面/标签之外的引用方，脚本判不出来）：
  */
 // 路径都相对 static/ 根（与 walk/computeKeepSet 的返回值同一坐标系）。
-export const PAGE_WHITELIST = ["canvas-list.html", "canvas.html", "smart-canvas.html"];
+export const PAGE_WHITELIST = ["canvas-list.html", "smart-canvas.html"];
+/** 显式不再提取的页面（即使被别处字面量引用）：传统编辑器已下线，连同它的独占资源一起删。*/
+export const PAGE_EXCLUDE = ["canvas.html"];
 export const EXTRA_KEEP = [
   // 无限画布的提示词模板数据：不在页面标签里，属于画布功能本身
   "system-prompts/infinite-canvas-prompt-templates.md",
@@ -387,7 +402,7 @@ export function computeKeepSet(root) {
     const text = fs.readFileSync(path.join(root, rel), "utf8");
     for (const raw of extractStaticRefs(text, rel)) {
       const ref = raw.startsWith("static/") ? raw.slice("static/".length) : raw;
-      if (!allSet.has(ref) || keep.has(ref)) continue;
+      if (!allSet.has(ref) || keep.has(ref) || PAGE_EXCLUDE.includes(ref)) continue;
       keep.add(ref);
       edges.push({ from: rel, to: ref });
       queue.push(ref);
@@ -411,25 +426,35 @@ function runVendor(resolved) {
   const git = readGitProvenance(resolved.srcRoot);
   // 不传 OA_NOVAI_SRC 时行为与之前逐字一致：只接受 SOURCE_COMMIT 的检出（非 git 的 tarball 照旧不校验）。
   if (!LOCAL_SRC && git && git.head !== SOURCE_COMMIT) throw new Error("源 commit 不符：" + git.head + " != " + SOURCE_COMMIT);
-  if (!fs.existsSync(PATCH)) throw new Error("缺少适配层模板：" + PATCH);
-  if (!fs.existsSync(MERGE)) throw new Error("缺少三方合并模板：" + MERGE);
-  if (!fs.existsSync(AI_MARKS)) throw new Error("缺少 AI 标记模板：" + AI_MARKS);
-  if (!fs.existsSync(GUARD)) throw new Error("缺少画布守卫脚本：" + GUARD);
   if (!fs.existsSync(MODAL)) throw new Error("缺少应用内模态脚本：" + MODAL);
-  if (!fs.existsSync(SMART_GUARD)) throw new Error("缺少智能画布最小封堵模板：" + SMART_GUARD);
-  const patchBlock = fs.readFileSync(PATCH, "utf8").trimEnd();
-  const mergeBlock = fs.readFileSync(MERGE, "utf8").trimEnd();
-  const aiMarksBlock = fs.readFileSync(AI_MARKS, "utf8").trimEnd();
+  if (!fs.existsSync(SMART_INTERNALS)) throw new Error("缺少智能画布注入层模板：" + SMART_INTERNALS);
+  if (!fs.existsSync(SMART_GUARD)) throw new Error("缺少智能画布守卫模板：" + SMART_GUARD);
+  if (!fs.existsSync(SMART_ADAPTER)) throw new Error("缺少智能画布命令适配器：" + SMART_ADAPTER);
+  if (!fs.existsSync(SMART_LIVE_SYNC)) throw new Error("缺少智能画布推送同步模板：" + SMART_LIVE_SYNC);
+  const smartInternalsBlock = fs.readFileSync(SMART_INTERNALS, "utf8").trimEnd();
   const smartGuardBlock = fs.readFileSync(SMART_GUARD, "utf8").trimEnd();
+  const smartLiveSyncBlock = fs.readFileSync(SMART_LIVE_SYNC, "utf8").trimEnd();
 
   // 1) 「只保留无限画布」：白名单页面 + 依赖闭包，只拷贝保留集（不是整棵 static/）
   const { all: sourceFiles, keep: keepSet, edges: keepEdges } = computeKeepSet(SRC_STATIC);
   const files = [...keepSet].sort();
   const fingerprint = contentFingerprint(SRC_STATIC, files);
+  /* 幂等：源身份 + kept-set 内容指纹都没变时沿用上一次的抓取时间，连跑两次 manifest 逐字节一致；
+     源内容一变就写新时间（抓取时间仍然如实记录）。*/
+  let capturedAt = new Date().toISOString();
+  try {
+    const prev = JSON.parse(fs.readFileSync(path.join(here, "vendor", "vendor-manifest.json"), "utf8"));
+    const p = prev && prev.sourceProvenance;
+    const identity = git ? git.head : fingerprint.value;
+    if (p && p.capturedAt && p.identity === identity
+        && p.contentFingerprint && p.contentFingerprint.value === fingerprint.value) {
+      capturedAt = p.capturedAt;
+    }
+  } catch { /* 首次运行 / manifest 不可读：用当前时间 */ }
   const provenance = {
     type: git ? "git" : "content",
     identity: git ? git.head : fingerprint.value,
-    capturedAt: new Date().toISOString(),
+    capturedAt,
     mode: LOCAL_SRC ? "local-source" : "pinned-github",
     requestedSrc: LOCAL_SRC || SRC,
     srcRoot: resolved.srcRoot,
@@ -447,50 +472,9 @@ function runVendor(resolved) {
     fs.copyFileSync(path.join(SRC_STATIC, rel), dst);
   }
 
-  // 2) canvas.js：IIFE 末尾追加适配层（必须插在最后的 })(); 之前）
-  const canvasJsPath = path.join(OUT_STATIC, "js", "canvas.js");
-  let canvasJs = fs.readFileSync(canvasJsPath, "utf8");
-
-  // 2b) canvas.js 上游补丁（幂等；目标缺失即报错，不静默跳过）——D1：
-  //     saveCanvas() 真的跑起来之后必须清掉 saveTimer。上游只在 beforeunload 里清它，于是
-  //     "定时器已经触发过一次"的句柄会一直留着；applyRemoteCanvasData() 的判空条件里含 saveTimer，
-  //     恒真 ⇒ 宿主 / AI 对画布的改动永远只是延后 1s 重试，进不到**已经打开的编辑器**页面上
-  //     （实测：同一页做过一次本地编辑/保存后，宿主新增的节点 20s 都不呈现）。
-  const CANVAS_JS_PATCHES = [
-    {
-      name: "saveCanvas 清掉已触发的 saveTimer（D1）",
-      from: "async function saveCanvas(){\n    if(!canvas || applyingRemoteCanvas) return;\n    if(savingCanvasNow){\n        saveCanvasAgain = true;\n        return;\n    }\n",
-      to: "async function saveCanvas(){\n    if(!canvas || applyingRemoteCanvas) return;\n    if(savingCanvasNow){\n        saveCanvasAgain = true;\n        return;\n    }\n    // OpenArc：本次保存真的会发生；定时器已经触发过，句柄不清掉就会被 applyRemoteCanvasData()\n    // 当成「本地有未保存编辑」，远端（宿主 / AI / 其它页面）的改动永远只是延后重试。\n    if(saveTimer){ clearTimeout(saveTimer); saveTimer = null; }\n",
-    },
-    {
-      name: "saveCanvas 记录本次真正发出去的文档（三方合并的 base 来源之一）",
-      from: "    try {\n        const res = await fetch(`/api/canvases/${canvas.id}`, {",
-      to: "    try {\n        // OpenArc：这份快照就是这次请求真正发出去的文档；服务端一旦接受，它就是页面新的共同祖先\n        // （三方合并的 base）。必须深拷贝 —— 页面之后是**原地改节点对象**的。\n        const oaSentDoc = JSON.parse(JSON.stringify({ title:canvas.title, icon:canvas.icon || '🧩', nodes:serializableCanvasNodes(), connections, viewport, logs:canvas.logs || [] }));\n        const res = await fetch(`/api/canvases/${canvas.id}`, {",
-    },
-    {
-      name: "saveCanvas 保存成功时把已同步的那一版交给注入层",
-      from: "        lastCanvasUpdatedAt = canvas.updated_at;\n        localCanvasDirty = Boolean(saveCanvasAgain);",
-      to: "        lastCanvasUpdatedAt = canvas.updated_at;\n        localCanvasDirty = Boolean(saveCanvasAgain);\n        // OpenArc：服务端接受了 oaSentDoc ⇒ 它成为新的共同祖先。注意不是「现在的页面文档」：\n        // 保存期间可能又发生了本地编辑，那一部分还没同步。\n        if(window.__openarcCanvasSynced) window.__openarcCanvasSynced(oaSentDoc);",
-    },
-    {
-      name: "saveCanvas 的 409 分支：三方合并（双方内容都保留），不再换基线重发旧文档",
-      from: "        if(res.status === 409){\n            const data = await res.json().catch(() => ({}));\n            const remote = data.detail?.canvas || data.canvas;\n            if(localCanvasDirty || saveCanvasAgain){\n                lastCanvasUpdatedAt = Number(data.detail?.updated_at || data.updated_at || remote?.updated_at || lastCanvasUpdatedAt || 0);\n                saveCanvasAgain = true;\n                setStatus('Saving...');\n                return;\n            }\n            if(remote) applyRemoteCanvasData(remote);\n            setStatus('Synced');\n            return;\n        }",
-      to: "        if(res.status === 409){\n            const data = await res.json().catch(() => ({}));\n            const remote = data.detail?.canvas || data.canvas;\n            const remoteAt = Number(data.detail?.updated_at || data.updated_at || remote?.updated_at || 0);\n            // OpenArc：与别处（宿主 / AI / 其它窗口）的改动做**三方合并** —— 两边内容都保留，只重发一次\n            // 合并结果。绝不「换上新基线后把这份基于旧 revision 的旧文档再发一遍」：那正是「用户在 500ms\n            // 待保存窗口里的编辑覆盖掉对方改动」的缺陷（第八 / 十 / 十一批实测）。\n            if(window.__openarcCanvasConflict){\n                const decision = await window.__openarcCanvasConflict(remote, remoteAt);\n                if(decision === 'retry'){ saveCanvasAgain = true; localCanvasDirty = true; setStatus('Saving...'); return; }\n                return;\n            }\n            if(localCanvasDirty || saveCanvasAgain){\n                lastCanvasUpdatedAt = remoteAt || lastCanvasUpdatedAt || 0;\n                saveCanvasAgain = true;\n                setStatus('Saving...');\n                return;\n            }\n            if(remote) applyRemoteCanvasData(remote);\n            setStatus('Synced');\n            return;\n        }",
-    },
-    {
-      name: "apiImageSize 按比例对称求解并受档位像素上限约束（换上游 commit 重跑必须自动带上）",
-      from: "function apiImageSize(ratioValue, resolutionValue, customRatioValue = '', customSizeValue = '', model = ''){\n    if(resolutionValue === 'auto') return 'auto';\n    const resolvedModel = resolveImageModel(model);\n    if(resolutionValue === 'custom'){\n        const custom = String(customSizeValue || '').trim();\n        return custom ? NovaSizePolicy.constrain(custom, resolvedModel) : custom;\n    }\n    const resolutionKey = resolutionValue || '1k';\n    if(ratioValue === 'custom' || ratioValue === 'source'){\n        const parsed = parseRatioValue(customRatioValue);\n        const longSide = RES_LONG_SIDE[resolutionKey] || 1024;\n        if(parsed){\n            const pixelLimit = resPixelLimitFor(resolvedModel)[resolutionKey] || (longSide * longSide);\n            const rawWidth = parsed >= 1 ? longSide : Math.min(longSide * parsed, Math.sqrt(pixelLimit * parsed));\n            const rawHeight = parsed >= 1 ? Math.min(longSide / parsed, Math.sqrt(pixelLimit / parsed)) : longSide;\n            const width = Math.floor(rawWidth / 16) * 16;\n            const height = Math.floor(rawHeight / 16) * 16;\n            return NovaSizePolicy.constrain(`${Math.max(64, width)}x${Math.max(64, height)}`, resolvedModel);\n        }\n    }\n    const ratioKey = ratioValue && SIZE_MAP[ratioValue] ? ratioValue : 'square';\n    const preset = SIZE_MAP[ratioKey]?.[resolutionKey] || SIZE_MAP.square[resolutionKey] || SIZE_MAP.square['1k'];\n    return NovaSizePolicy.constrain(preset, resolvedModel);\n}",
-      to: "// OpenArc：任意比例 / 自定义比例都按「长边 + 该档像素上限」等比对称求解，与宿主 image-params.sizeFromRatio 同一口径。\n// 上游旧算法在 custom/source 分支只压一侧：1:1@1k 会算成 1536x1248（非方形）、4:3@1k 算成 1536x1072、\n// 1:1@4k 算成 3840x2880（超过该档像素上限）。具名比例沿用 SIZE_MAP 预设，只在预设自身超上限时等比收窄\n// （square@4k 的原生 4096x4096 收成 2880x2880），其余档位逐格不变。\nfunction fitApiSizePair(width, height, resolutionKey, model){\n    const longSide = RES_LONG_SIDE[resolutionKey] || 1024;\n    const pixelLimit = resPixelLimitFor(model)[resolutionKey] || (longSide * longSide);\n    let scale = 1;\n    if(longSide > 0) scale = Math.min(scale, longSide / Math.max(width, height));\n    if(pixelLimit > 0) scale = Math.min(scale, Math.sqrt(pixelLimit / (width * height)));\n    const w = Math.floor((width * scale) / 16) * 16;\n    const h = Math.floor((height * scale) / 16) * 16;\n    return `${Math.max(64, w)}x${Math.max(64, h)}`;\n}\nfunction apiImageSize(ratioValue, resolutionValue, customRatioValue = '', customSizeValue = '', model = ''){\n    if(resolutionValue === 'auto') return 'auto';\n    const resolvedModel = resolveImageModel(model);\n    if(resolutionValue === 'custom'){\n        const custom = String(customSizeValue || '').trim();\n        return custom ? NovaSizePolicy.constrain(custom, resolvedModel) : custom;\n    }\n    const resolutionKey = resolutionValue || '1k';\n    const longSide = RES_LONG_SIDE[resolutionKey] || 1024;\n    if(ratioValue === 'custom' || ratioValue === 'source'){\n        const parsed = parseRatioValue(customRatioValue);\n        if(parsed){\n            const width = parsed >= 1 ? longSide : longSide * parsed;\n            const height = parsed >= 1 ? longSide / parsed : longSide;\n            return NovaSizePolicy.constrain(fitApiSizePair(width, height, resolutionKey, resolvedModel), resolvedModel);\n        }\n    }\n    const ratioKey = ratioValue && SIZE_MAP[ratioValue] ? ratioValue : 'square';\n    const preset = SIZE_MAP[ratioKey]?.[resolutionKey] || SIZE_MAP.square[resolutionKey] || SIZE_MAP.square['1k'];\n    const presetPair = parseSizePair(preset);\n    if(!presetPair) return NovaSizePolicy.constrain(preset, resolvedModel);\n    return NovaSizePolicy.constrain(fitApiSizePair(presetPair.width, presetPair.height, resolutionKey, resolvedModel), resolvedModel);\n}",
-    },
-  ];
-  canvasJs = applyPatches(canvasJs, CANVAS_JS_PATCHES, "canvas.js");
-
-  const tail = "\n})();";
-  const cut = canvasJs.lastIndexOf(tail);
-  if (requireAnchor(cut >= 0, "变更2 · canvas.js IIFE 末尾注入 internals/merge/ai-marks", "找不到收尾 })();")) {
-    // 顺序：两个纯函数模块在前（适配层在冲突处理里用 __openarcCanvasMerge，在标记/淡入里用 __openarcCanvasAiMarks）。
-    fs.writeFileSync(canvasJsPath, canvasJs.slice(0, cut) + "\n" + mergeBlock + "\n" + aiMarksBlock + "\n" + patchBlock + canvasJs.slice(cut));
-  }
+  // 2) 传统编辑器已移除（第 13 处改动）：canvas.js / canvas.html / css/canvas.css 不再 vendor。
+  //    它们只服务经典编辑器数据模型；同一组语义（只读闸 / 命令面 / 冲突合并 / AI 标记）已按新源码
+  //    移植到智能画布（第 12 / 14 处改动），这里不再对 canvas.js 做任何补丁或注入。
 
   // 2c) smart-canvas.js 上游补丁（幂等；目标缺失即报错）：Electron 的 Chromium 不支持 window.prompt，
   //     智能画布的「提示词模板分组 新建/重命名」原本调用 window.prompt 会直接卡死在这里。
@@ -508,17 +492,31 @@ function runVendor(resolved) {
       from: "    const name = window.prompt(tr('smart.tplGroupNamePrompt'), group.name || '');\n    if(!String(name || '').trim()) return;",
       to: "    /* OpenArc：同上，重命名走应用内模态；空值 / 取消都不提交。 */\n    const name = await window.__openarcPrompt({\n        title: tr('smart.tplGroupNamePrompt'),\n        value: group.name || '',\n        maxLength: 24,\n        confirmText: tr('common.confirm'),\n        cancelText: tr('common.cancel')\n    });\n    if(!String(name || '').trim()) return;",
     },
+    {
+      name: "apiImageSize 补回档位像素上限（新锚点：上游只做长边+等比，free 策略不收口）",
+      from: "function apiImageSize(ratioValue, resolutionValue, customRatioValue='', customSizeValue='', model=''){\n    if(resolutionValue === 'auto') return 'auto';\n    if(resolutionValue === 'custom'){\n        const custom = String(customSizeValue || '').trim();\n        return custom ? NovaSizePolicy.constrain(custom, model) : custom;\n    }\n    const resolutionKey = resolutionValue || '1k';\n    if(ratioValue === 'custom' || ratioValue === 'source'){\n        const parsed = parseRatioValue(customRatioValue);\n        const longSide = RES_LONG_SIDE[resolutionKey] || 1024;\n        if(parsed){\n            // 档位只定长边，短边按比例等比算：单独拿像素上限夹一条边会把比例改掉（56:75@4K 曾出成 2480x3840）。\n            const rawWidth = parsed >= 1 ? longSide : longSide * parsed;\n            const rawHeight = parsed >= 1 ? longSide / parsed : longSide;\n            const width = Math.floor(rawWidth / 16) * 16;\n            const height = Math.floor(rawHeight / 16) * 16;\n            // 比例算出来的游离尺寸交给策略收口：枚举模型吸附到合法值，free/hintOnly 原样放行。\n            return NovaSizePolicy.constrain(`${Math.max(64, width)}x${Math.max(64, height)}`, model);\n        }\n    }\n    const ratioKey = ratioValue && SIZE_MAP[ratioValue] ? ratioValue : 'square';\n    const ratioCells = SIZE_MAP[ratioKey] || SIZE_MAP.square;\n    // 预置像素表只覆盖 1k/2k/4k（APIMart gpt-image-2 官方映射）。0.5k/1.5k/3k 是 Gemini / 火山 /\n    // Agnes 的官方档位：优先取 MODEL_TIER_PIXELS 里逐模型的官方参考像素（与 web 在线生图同源），\n    // 表里没有才按该档位官方长边与这一比例等比换算，避免档位被静默吞成 1k。\n    let preset = ratioCells[resolutionKey] || modelTierPixelFor(model, ratioKey, resolutionKey);\n    if(!preset){\n        const longSide = RES_LONG_SIDE[resolutionKey];\n        const nominal = parseSizeValue(ratioCells['1k'] || SIZE_MAP.square['1k']);\n        if(longSide && nominal){\n            const ratio = Number(nominal.width) / Number(nominal.height);\n            const rawWidth = ratio >= 1 ? longSide : longSide * ratio;\n            const rawHeight = ratio >= 1 ? longSide / ratio : longSide;\n            preset = `${Math.max(64, Math.floor(rawWidth / 16) * 16)}x${Math.max(64, Math.floor(rawHeight / 16) * 16)}`;\n        }\n    }\n    return NovaSizePolicy.constrain(preset || ratioCells['1k'] || SIZE_MAP.square['1k'], model);\n}",
+      to: "// OpenArc：上游这一版已经会「长边定档 + 等比」，但 NovaSizePolicy 只在宿主策略显式给了\n// maxEdge/maxPixels 时才收口；default（free）的 maxPixels 是 0，档位像素上限因此被丢掉：\n// 1:1@1k 会算成 1536x1536、4K 方图会超出该档上限，与宿主 image-params.sizeFromRatio 不一致。\n// 这里只补「按档位像素上限等比收窄」：枚举模型（gpt-image-2）仍交给 NovaSizePolicy.constrain，\n// 命名比例（SIZE_MAP 的官方像素）不再按档位长边二次收窄 —— 官方表的 2k 超宽/1k 宽屏长边本来\n// 就大于 RES_LONG_SIDE（2688 / 2016），按长边夹会把 21:9 改成 2048x864（比例漂移 3.7%）。\nfunction parseSizePair(value){\n    const match = String(value || '').trim().match(/^(\\d+)\\s*[xX*]\\s*(\\d+)$/);\n    return match ? {width:Number(match[1]), height:Number(match[2])} : null;\n}\nfunction fitApiSizePair(width, height, resolutionKey, model, clampLongSide){\n    const longSide = RES_LONG_SIDE[resolutionKey] || 1024;\n    const pixelLimit = resPixelLimitFor(model)[resolutionKey] || (longSide * longSide);\n    let scale = 1;\n    if(clampLongSide && longSide > 0) scale = Math.min(scale, longSide / Math.max(width, height));\n    if(pixelLimit > 0) scale = Math.min(scale, Math.sqrt(pixelLimit / (width * height)));\n    const w = Math.floor((width * scale) / 16) * 16;\n    const h = Math.floor((height * scale) / 16) * 16;\n    return `${Math.max(64, w)}x${Math.max(64, h)}`;\n}\nfunction oaTierFit(size, resolutionKey, model, clampLongSide){\n    if(NovaSizePolicy.isEnum(model)) return size;\n    const pair = parseSizePair(size);\n    return pair ? fitApiSizePair(pair.width, pair.height, resolutionKey, model, !!clampLongSide) : size;\n}\nfunction apiImageSize(ratioValue, resolutionValue, customRatioValue='', customSizeValue='', model=''){\n    if(resolutionValue === 'auto') return 'auto';\n    if(resolutionValue === 'custom'){\n        const custom = String(customSizeValue || '').trim();\n        return custom ? NovaSizePolicy.constrain(custom, model) : custom;\n    }\n    const resolutionKey = resolutionValue || '1k';\n    if(ratioValue === 'custom' || ratioValue === 'source'){\n        const parsed = parseRatioValue(customRatioValue);\n        const longSide = RES_LONG_SIDE[resolutionKey] || 1024;\n        if(parsed){\n            // 档位只定长边，短边按比例等比算：单独拿像素上限夹一条边会把比例改掉（56:75@4K 曾出成 2480x3840）。\n            const rawWidth = parsed >= 1 ? longSide : longSide * parsed;\n            const rawHeight = parsed >= 1 ? longSide / parsed : longSide;\n            const width = Math.floor(rawWidth / 16) * 16;\n            const height = Math.floor(rawHeight / 16) * 16;\n            // 比例算出来的游离尺寸交给策略收口：枚举模型吸附到合法值，free/hintOnly 原样放行。\n            return NovaSizePolicy.constrain(oaTierFit(`${Math.max(64, width)}x${Math.max(64, height)}`, resolutionKey, model, true), model);\n        }\n    }\n    const ratioKey = ratioValue && SIZE_MAP[ratioValue] ? ratioValue : 'square';\n    const ratioCells = SIZE_MAP[ratioKey] || SIZE_MAP.square;\n    // 预置像素表只覆盖 1k/2k/4k（APIMart gpt-image-2 官方映射）。0.5k/1.5k/3k 是 Gemini / 火山 /\n    // Agnes 的官方档位：优先取 MODEL_TIER_PIXELS 里逐模型的官方参考像素（与 web 在线生图同源），\n    // 表里没有才按该档位官方长边与这一比例等比换算，避免档位被静默吞成 1k。\n    let preset = ratioCells[resolutionKey] || modelTierPixelFor(model, ratioKey, resolutionKey);\n    if(!preset){\n        const longSide = RES_LONG_SIDE[resolutionKey];\n        const nominal = parseSizeValue(ratioCells['1k'] || SIZE_MAP.square['1k']);\n        if(longSide && nominal){\n            const ratio = Number(nominal.width) / Number(nominal.height);\n            const rawWidth = ratio >= 1 ? longSide : longSide * ratio;\n            const rawHeight = ratio >= 1 ? longSide / ratio : longSide;\n            preset = `${Math.max(64, Math.floor(rawWidth / 16) * 16)}x${Math.max(64, Math.floor(rawHeight / 16) * 16)}`;\n        }\n    }\n    return NovaSizePolicy.constrain(oaTierFit(preset || ratioCells['1k'] || SIZE_MAP.square['1k'], resolutionKey, model, false), model);\n}"
+    },
+    {
+      name: "远端合并轮询 8000ms → 2500ms（兜底；与经典 canvas.js 同口径）",
+      from: "            poll();\n        }, 8000);",
+      to: "            /* OpenArc：宿主推送是主路径（第 16 处改动）；这里只做兜底，与经典画布一致的 2.5s。*/\n            poll();\n        }, 2500);",
+    },
+    {
+      name: "mergeReloadCanvasNow 早退条件接上输入 / 未保存改动安全判定",
+      from: "    if(dragState || selectionState){\n        // 用户正在拖拽/框选，稍后再合并，别打断操作",
+      to: "    if(dragState || selectionState || oaLiveSyncMergeUnsafe()){\n        // 用户正在拖拽/框选/输入或本地还有未保存改动，稍后再合并，别打断操作",
+    },
   ];
   smartJs = applyPatches(smartJs, SMART_CANVAS_JS_PATCHES, "smart-canvas.js");
-  // 2d) 智能画布最小封堵（第 12 处改动）：内联在同一个 IIFE 的收尾之前。
-  //     必须同域 —— 页面侧兜底（DEFAULT_VIDEO_MODELS / modelscopeImageModels / resolveChatModel
-  //     的 gpt-4o-mini / initChatModel 的 gpt-4o-mini）都在闭包里，外部脚本够不到。
-  //     V0.01 授权补齐：只读闸覆盖全部编辑路径（事件闸 + 173 个函数闸 + fetch 写闸），
-  //     真机逐条用例见 experiments/dxos-canvas-scope/readonly-gate-probe.mjs。
+  // 2d) 智能画布注入层 + 守卫（第 12 / 14 处改动）：都内联在同一个 IIFE 的收尾之前。
+  //     必须同域 —— 页面侧兜底（DEFAULT_VIDEO_MODELS / modelscopeImageModels / comfyInstanceCount）
+  //     都在闭包里，外部脚本够不到。注入层先暴露原语，守卫再包装改文档的函数。
+  //     真机逐条用例见 experiments/dxos-canvas-revendor-next/revendor-probe.mjs。
   const smartTail = "\n})();";
   const smartCut = smartJs.lastIndexOf(smartTail);
-  if (requireAnchor(smartCut >= 0, "变更12 · smart-canvas.js IIFE 末尾注入 smart-canvas-guard.js（最小封堵）", "找不到收尾 })();")) {
-    smartJs = smartJs.slice(0, smartCut) + "\n" + smartGuardBlock + smartJs.slice(smartCut);
+  if (requireAnchor(smartCut >= 0, "变更12/14/16 · smart-canvas.js IIFE 末尾注入 internals + guard + live-sync", "找不到收尾 })();")) {
+    smartJs = smartJs.slice(0, smartCut) + "\n" + smartInternalsBlock + "\n" + smartGuardBlock + "\n" + smartLiveSyncBlock + smartJs.slice(smartCut);
     fs.writeFileSync(smartJsPath, smartJs);
   }
 
@@ -549,6 +547,24 @@ function runVendor(resolved) {
      "                        window.location.href = `/static/smart-canvas.html?id=${enc}&project=${project}&t=1786289367`;"],
     ["                    const project = encodeURIComponent(latest.project || 'default');\n                    window.location.href = (latest.kind === 'smart')\n                        ? `/static/smart-canvas.html?id=${enc}&project=${project}&t=1786289367`\n                        : `/static/canvas.html?id=${enc}&project=${project}&t=1786289367`;",
      "                    const project = encodeURIComponent(latest.project || 'default');\n                    // OpenArc：经典编辑器已从入口下线；继续上次一律进智能画布。\n                    window.location.href = `/static/smart-canvas.html?id=${enc}&project=${project}&t=1786289367`;"],
+    // 第 18 处改动：卡片菜单加「共享…」（列表页只发消息，共享 UI 在宿主浮层）。
+    // 目标找不到就报错退出；重跑时 to 已存在 ⇒ 幂等。
+    ["                        <button class=\"card-more-menu-item delete\" data-action=\"delete\">",
+     "                        <button class=\"card-more-menu-item\" data-action=\"share\">\n" +
+     "                            <svg fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"18\" cy=\"5\" r=\"3\"/><circle cx=\"6\" cy=\"12\" r=\"3\"/><circle cx=\"18\" cy=\"19\" r=\"3\"/><line x1=\"8.59\" y1=\"13.51\" x2=\"15.42\" y2=\"17.49\"/><line x1=\"15.41\" y1=\"6.51\" x2=\"8.59\" y2=\"10.49\"/></svg>\n" +
+     "                            共享…\n" +
+     "                        </button>\n" +
+     "                        <button class=\"card-more-menu-item delete\" data-action=\"delete\">"],
+    ["                } else if (action === 'duplicate') {",
+     "                } else if (action === 'share') {\n" +
+     "                    // OpenArc（第 18 处改动）：列表页**不画**共享 UI，只把 canvasId 交给宿主，\n" +
+     "                    // 由宿主打开同一个共享面板（入口/成员/角色/可见性全在宿主浮层）。\n" +
+     "                    if (window.__openarcBridge && typeof window.__openarcBridge.openShare === 'function') {\n" +
+     "                        window.__openarcBridge.openShare(c.id);\n" +
+     "                    } else {\n" +
+     "                        alert('共享面板不可用（OpenArc 桥未就绪）');\n" +
+     "                    }\n" +
+     "                } else if (action === 'duplicate') {"],
     ["            document.getElementById('pickerNormal').addEventListener('click', () => createCanvasFromPicker('classic'));",
      "            document.getElementById('pickerNormal').addEventListener('click', () => createCanvasFromPicker('smart'));"],
     // 重命名：Electron 的 Chromium 不支持 window.prompt（调用即 "prompt() is not supported"），
@@ -580,10 +596,11 @@ function runVendor(resolved) {
     let headOk = true;
     try { html = injectAfterHead(html, HEAD_INJECT); } catch { headOk = false; }
     requireAnchor(headOk, "变更1 · " + rel + " <head> 注入 CSP meta + openarc-bridge.js", "找不到 <head>");
-    if (rel === "canvas.html") {
-      const tag = /<script defer src="\/static\/js\/canvas\.js[^"]*"><\/script>/;
-      if (requireAnchor(tag.test(html), "变更3 · canvas.html 注入 openarc-adapter.js + openarc-canvas-guard.js", "找不到 canvas.js 脚本标签")) {
-        html = html.replace(tag, (m) => m + '\n    <script defer src="/openarc-adapter.js"></script>\n    <script defer src="/openarc-canvas-guard.js"></script>');
+    // 智能画布命令适配器（第 14 处改动）：必须在 smart-canvas.js 之后执行（defer 顺序保证）。
+    if (rel === "smart-canvas.html") {
+      const tag = /<script defer src="\/static\/js\/smart-canvas\.js[^"]*"><\/script>/;
+      if (requireAnchor(tag.test(html), "变更14 · smart-canvas.html 注入 openarc-smart-adapter.js", "找不到 smart-canvas.js 脚本标签")) {
+        html = html.replace(tag, (m) => m + '\n    <script defer src="/openarc-smart-adapter.js"></script>');
       }
     }
     // OpenArc 应用内模态输入：把上游的 window.prompt（Electron 不支持）换成页面内的输入模态。
@@ -624,14 +641,17 @@ function runVendor(resolved) {
     prunedFiles: sourceFiles.length - files.length,
     pages: injected.length,
     pageWhitelist: PAGE_WHITELIST,
+    pageExclude: PAGE_EXCLUDE,
     extraKeep: EXTRA_KEEP,
     keepEdges,
     entry: "static/canvas-list.html",
-    canvasJsHash: sha256(fs.readFileSync(canvasJsPath, "utf8")),
-    canvasHtmlHash: sha256(fs.readFileSync(path.join(OUT_STATIC, "canvas.html"), "utf8")),
-    guardHash: sha256(fs.readFileSync(GUARD, "utf8")),
-    modalHash: sha256(fs.readFileSync(MODAL, "utf8")),
+    smartJsHash: sha256(fs.readFileSync(smartJsPath, "utf8")),
+    smartHtmlHash: sha256(fs.readFileSync(path.join(OUT_STATIC, "smart-canvas.html"), "utf8")),
+    smartInternalsHash: sha256(fs.readFileSync(SMART_INTERNALS, "utf8")),
     smartGuardHash: sha256(fs.readFileSync(SMART_GUARD, "utf8")),
+    smartAdapterHash: sha256(fs.readFileSync(SMART_ADAPTER, "utf8")),
+    smartLiveSyncHash: sha256(fs.readFileSync(SMART_LIVE_SYNC, "utf8")),
+    modalHash: sha256(fs.readFileSync(MODAL, "utf8")),
     listHtmlHash: sha256(fs.readFileSync(listPath, "utf8")),
     csp: CSP,
   };

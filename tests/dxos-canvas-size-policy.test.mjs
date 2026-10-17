@@ -5,9 +5,10 @@
  *   A. 桥显式登记 GET /api/ai/size-policy → model.sizePolicy；未登记端点仍 501、出网仍拒；
  *   B. 宿主策略表与页面 shared/size-policy.js 的期望形状一致，值与 electron/image-params.cjs 唯一真源同源
  *      （同一个策略对象引用，不是又抄一份）；
- *   C. 直接执行页面真实的 apiImageSize（从 public/novai-canvas/static/js/canvas.js 抽取函数/常量文本 +
- *      加载真实的 shared/size-policy.js），断言 9 个具名比例 × 3 档位 + custom 用例比例正确且不超该档像素上限，
- *      并逐条钉住修复前的错误值（对照表）。
+ *   C. 直接执行页面真实的 apiImageSize（从 public/novai-canvas/static/js/smart-canvas.js 抽取函数/常量文本 +
+ *      加载真实的 shared/size-policy.js），断言 15 个具名比例 × 3 档位 + custom 用例比例正确且不超该档像素上限，
+ *      并逐条钉住修复前的错误值（对照表）。经典 canvas.js 已随传统编辑器删除（第 13 处 vendor 改动）；
+ *      页面算法与宿主 image-params.sizeFromRatio 的口径不变，断言未放宽。
  */
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -22,7 +23,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
 const BRIDGE_SOURCE = fs.readFileSync(path.join(ROOT, "public/novai-canvas/openarc-bridge.js"), "utf8");
 const SIZE_POLICY_SOURCE = fs.readFileSync(path.join(ROOT, "public/novai-canvas/static/js/shared/size-policy.js"), "utf8");
-const CANVAS_JS_SOURCE = fs.readFileSync(path.join(ROOT, "public/novai-canvas/static/js/canvas.js"), "utf8");
+const CANVAS_JS_SOURCE = fs.readFileSync(path.join(ROOT, "public/novai-canvas/static/js/smart-canvas.js"), "utf8");
 const imageParams = require("../electron/image-params.cjs");
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -99,6 +100,10 @@ test("A1 · 桥登记 GET /api/ai/size-policy → model.sizePolicy（带实例 t
   assert.deepEqual(Object.keys(body.models).sort(), ["gpt-image-2", "openai/gpt-image-2.5"]);
   assert.equal(body.models["gpt-image-2"].mode, "enum");
   assert.equal(body.models["flux-pro"], undefined, "非 gpt 模型走 default，不进 models");
+  // 端点同时下发尺寸表投影：页面 normalizeTable 忽略未知字段，探针/测试用它逐格核对
+  assert.deepEqual(body.sizes, JSON.parse(JSON.stringify(imageParams.IMAGE_SIZE_TABLE)), "端点 sizes 必须等于宿主官方 15 比例表");
+  assert.deepEqual(body.gptSizes, JSON.parse(JSON.stringify(imageParams.GPT_IMAGE_SIZE_TABLE)), "端点 gptSizes 必须等于宿主派生表");
+  assert.equal(Object.keys(body.sizes).length, 15);
 });
 
 test("A2 · 只加登记项：非 GET / 未登记端点仍 501，出网仍拒", async () => {
@@ -144,6 +149,9 @@ test("B1 · 策略表字段与 shared/size-policy.js 的 normalizeTable 期望�
   ]);
   const gpt = POLICY_TABLE.models["gpt-image-2"];
   assert.equal(gpt, imageParams.GPT_IMAGE_2_SIZE_POLICY, "策略必须与唯一真源同一个对象（不另写一份）");
+  assert.equal(POLICY_TABLE.sizes, imageParams.IMAGE_SIZE_TABLE, "sizes 必须与唯一真源同一个对象");
+  assert.equal(POLICY_TABLE.gptSizes, imageParams.GPT_IMAGE_SIZE_TABLE, "gptSizes 必须与唯一真源同一个对象");
+  assert.equal(Object.keys(POLICY_TABLE.sizes).length, 15);
 });
 
 test("B2 · 页面 NovaSizePolicy 按策略表生效：gpt 家族 enum，普通模型 free + 同一份 tiers", async () => {
@@ -200,9 +208,9 @@ async function loadPageApiImageSize() {
     extractConst(CANVAS_JS_SOURCE, "RES_PIXEL_LIMIT_FALLBACK"),
     extractFunction(CANVAS_JS_SOURCE, "parseRatioValue"),
     extractFunction(CANVAS_JS_SOURCE, "parseSizePair"),
-    extractFunction(CANVAS_JS_SOURCE, "sizePolicyFor"),
     extractFunction(CANVAS_JS_SOURCE, "resPixelLimitFor"),
     extractFunction(CANVAS_JS_SOURCE, "fitApiSizePair"),
+    extractFunction(CANVAS_JS_SOURCE, "oaTierFit"),
     extractFunction(CANVAS_JS_SOURCE, "apiImageSize"),
     "window.__apiImageSize = apiImageSize;",
   ].join("\n");
@@ -211,27 +219,39 @@ async function loadPageApiImageSize() {
   vm.runInContext(SIZE_POLICY_SOURCE, sandbox, { filename: "size-policy.js" });
   await sandbox.window.NovaSizePolicy.load();
   sandbox.NovaSizePolicy = sandbox.window.NovaSizePolicy;
-  sandbox.resolveImageModel = (v) => String(v || "flux-pro");
-  vm.runInContext(code, sandbox, { filename: "canvas-apiImageSize.js" });
+  /* 这两条只在「SIZE_MAP 没覆盖的 0.5k/1.5k/3k」分支才会被调用；本文件只断言 1k/2k/4k，
+     用同形状的桩保证抽取出来的函数体可执行。真正的逐档像素表由页面的 MODEL_TIER_PIXELS 承担。*/
+  sandbox.parseSizeValue = (value) => {
+    const m = /^(\d+)\s*[xX*]\s*(\d+)$/.exec(String(value || "").trim());
+    return m ? { width: m[1], height: m[2] } : null;
+  };
+  sandbox.modelTierPixelFor = () => "";
+  vm.runInContext(code, sandbox, { filename: "smart-canvas-apiImageSize.js" });
   return sandbox.window.__apiImageSize;
 }
 
 const NAMED_RATIOS = {
   square: 1,
   portrait: 2 / 3,
-  landscape: 3 / 2,
   portrait43: 3 / 4,
   landscape43: 4 / 3,
+  landscape: 3 / 2,
   story: 9 / 16,
   wide: 16 / 9,
   ultrawide: 21 / 9,
   ultratall: 9 / 21,
+  portrait12: 1 / 2,
+  landscape21: 2 / 1,
+  landscape54: 5 / 4,
+  portrait45: 4 / 5,
+  landscape31: 3 / 1,
+  portrait13: 1 / 3,
 };
 const RATIO_TOLERANCE = 0.025;
 const TIER_LIMIT = { "1k": 1572864, "2k": 4194304, "4k": 8294400 };
 const pairOf = (size) => { const m = /^(\d+)x(\d+)$/.exec(size); assert.ok(m, "尺寸形状 WxH：" + size); return { w: Number(m[1]), h: Number(m[2]) }; };
 
-test("C1 · 页面 apiImageSize：9 个具名比例 × 3 档位 = 比例正确 + 不超该档像素上限", async () => {
+test("C1 · 页面 apiImageSize：15 个具名比例 × 3 档位 = 45 格 比例正确 + 不超该档像素上限 + 与宿主逐格一致", async () => {
   const apiImageSize = await loadPageApiImageSize();
   const rows = [];
   for (const [key, ratio] of Object.entries(NAMED_RATIOS)) {
@@ -243,10 +263,22 @@ test("C1 · 页面 apiImageSize：9 个具名比例 × 3 档位 = 比例正确 +
       rows.push({ key, level, size, ratio: Number((w / h).toFixed(4)), err: Number(err.toFixed(5)), over: area > TIER_LIMIT[level] });
       assert.ok(err <= RATIO_TOLERANCE, key + "@" + level + " 比例偏差 " + err + " > " + RATIO_TOLERANCE + "（" + size + "）");
       assert.ok(area <= TIER_LIMIT[level], key + "@" + level + " 超过该档像素上限：" + size + "=" + area + " > " + TIER_LIMIT[level]);
+      assert.equal(size, imageParams.resolveImageSize({ ratio: key, resolution: level }), "宿主 resolveImageSize 必须与页面 apiImageSize 逐格一致：" + key + "@" + level);
+      assert.equal(
+        apiImageSize(key, level, "", "", "gpt-image-2"),
+        imageParams.resolveImageSize({ ratio: key, resolution: level, model: "gpt-image-2" }),
+        "gpt-image-2 宿主派生表必须与页面逐格一致：" + key + "@" + level,
+      );
     }
   }
-  assert.equal(rows.length, 27);
-  assert.equal(apiImageSize("square", "4k", "", "", "flux-pro"), "2880x2880", "square@4k 的 4096x4096 必须收窄（修复前超 4k 档上限）");
+  assert.equal(rows.length, 45);
+  assert.equal(apiImageSize("square", "4k", "", "", "flux-pro"), "2880x2880", "square@4k 官方值正好是 4k 档上限");
+  // 官方表原值留在 IMAGE_SIZE_TABLE；超过档位像素上限的格子由宿主/页面同口径收窄后再下发。
+  assert.equal(imageParams.IMAGE_SIZE_TABLE.ultrawide["1k"], "2016x864", "官方原值必须保留在表里");
+  assert.equal(apiImageSize("ultrawide", "1k", "", "", "flux-pro"), "1904x816");
+  assert.equal(imageParams.resolveImageSize({ ratio: "ultrawide", resolution: "1k" }), "1904x816");
+  // 枚举模型（gpt-image-2）仍由宿主策略吸附，不被档位收窄抢先改掉：4K 方图 → 2048x2048。
+  assert.equal(apiImageSize("square", "4k", "", "", "gpt-image-2"), "2048x2048", "gpt-image-2 的 4K 方图必须吸附到宿主策略的 2048x2048");
 });
 
 test("C2 · 页面 apiImageSize：custom/customRatio 按比例对称求解（修复前后对照表）", async () => {

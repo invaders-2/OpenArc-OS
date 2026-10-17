@@ -17,11 +17,19 @@ export type SizePolicy = {
   tiers: readonly SizePolicyTier[];
 };
 
-/** 页面 normalizeTable 的输入形状（format + 默认策略 + 按模型显示名索引的策略）。*/
+/** 比例 → 分辨率档 → "WxH"；与画布页 SIZE_MAP 逐格一致。*/
+export type ImageSizeTable = Record<string, Record<string, string>>;
+
+/**
+ * 页面 normalizeTable 的输入形状（format + 默认策略 + 按模型显示名索引的策略）。
+ * sizes / gptSizes 是宿主同一次下发的尺寸表投影；页面 normalizeTable 不读未知字段。
+ */
 export type SizePolicyTable = {
   format: string;
   default: SizePolicy;
   models: Record<string, SizePolicy>;
+  sizes: ImageSizeTable;
+  gptSizes: ImageSizeTable;
 };
 
 /** 把画布模型清单展开成页面期望的策略表；策略数值只来自本模块的 GPT_IMAGE_2_SIZE_POLICY。*/

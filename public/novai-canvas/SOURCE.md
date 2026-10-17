@@ -1,4 +1,24 @@
+<!-- OA-SOURCE-PROVENANCE:BEGIN -->
+## 来源（自动生成 · vendor 脚本写入）
+
+| 项 | 值 |
+| --- | --- |
+| 来源类型 | git 检出 |
+| 来源标识 | `22feb2988570bfce5b7476e26d7e0d313ab681db` |
+| 抓取时间 | 2026-10-17T10:22:48.547Z |
+| 源目录 | `/Users/wepingli/Desktop/NOVAI-Infinite-Canvas-main/NOVAI-v16` |
+| static/ | `/Users/wepingli/Desktop/NOVAI-Infinite-Canvas-main/NOVAI-v16/static` |
+| 固定 pin | `1e20abe5145470b32f58206f692292703540107a` |
+| 与 pin 一致 | **否**（本地源码已前进/被改） |
+| 工作区 | 脏（161 个改动文件） |
+| 内容指纹 | `sha256:771802e7b4e44feaacfb737d05d505fd1b45f369cb7ef0b1cd42f14881ff2b05`（60 files / 11539262 B） |
+<!-- OA-SOURCE-PROVENANCE:END -->
+
 # 上游来源与改动记录（D5-02 · 完整应用）
+
+> **当前状态（2026-10-17 · DXOS-CANVAS-REVENDOR-NEXT）**：传统编辑器已删除；唯一编辑器是
+> `static/smart-canvas.html`，列表页所有入口都指向它。守卫 / 适配器 / 只读闸 / 应用内模态已按新源码移植。
+> 当前口径以文末「本轮（2026-10-17 · DXOS-CANVAS-REVENDOR-NEXT）」为准；下文第 1–N 节是历史记录。
 
 - 仓库：https://github.com/invaders-2/NOVAI-Infinite-Canvas
 - **固定的源 commit：按 vendor 脚本的 `SOURCE_COMMIT` 核对（`git rev-parse HEAD`）**。本报告"只保留无限画布"的
@@ -342,4 +362,133 @@ rm -rf public/novai-canvas/static
 cp -R artifacts/dxos-canvas-revendor/backup/novai-canvas/static public/novai-canvas/static
 # 并把 experiments/d5-02/vendor-novai-app.mjs 的 SOURCE_COMMIT 改回 6ce1a64680b669b31c2ac3b32418b54decd404f2
 ```
+
+---
+
+## 本轮（2026-10-17 · DXOS-CANVAS-REVENDOR-NEXT）· 重新 vendor + 删传统编辑器 + 智能画布移植
+
+### 源身份（本地源，非固定 pin）
+
+- 本地源根：`/Users/wepingli/Desktop/NOVAI-Infinite-Canvas-main`，实际工程在 `NOVAI-v16/`。
+- git HEAD：`22feb2988570bfce5b7476e26d7e0d313ab681db`；工作区脏（**161 个改动文件**）；`matchesPin=false`
+  （固定 pin 仍是 `1e20abe5145470b32f58206f692292703540107a`）。
+- kept-set 内容指纹：`sha256:771802e7b4e44feaacfb737d05d505fd1b45f369cb7ef0b1cd42f14881ff2b05`
+  （60 files / 11,539,262 B）；抓取时间 `2026-10-17T10:22:48.547Z`。
+- 上游 `static/` 157 文件 → 保留 60 / 排除 97。vendor 幂等：连跑两次 manifest 逐字节一致（见 artifacts）。
+
+### 改动编号（沿用前包，新增从 13 起）
+
+| # | 改动 | 位置 / 结果 |
+| --- | --- | --- |
+| 10 | `prompt()` → 应用内模态（列表 + 智能画布） | `openarc-rename-modal.js`；新源码仍是 3 处 prompt（列表 1 / 智能画布 2），全部覆盖 |
+| 11 | 列表页所有打开编辑器的入口改向 `smart-canvas.html` | LIST_PATCHES 14/14 命中；改后列表页 `/static/canvas.html` 0 处、`createCanvasFromPicker('classic')` 0 处 |
+| 12 | 智能画布守卫 v3（重写） | `experiments/d5-02/vendor/smart-canvas-guard.js`，内联在 `smart-canvas.js` IIFE 尾（生成件 L34838 起）；174 个函数闸、0 缺失 |
+| 13 | 收窄白名单 + 删传统编辑器 | `PAGE_WHITELIST=[canvas-list.html,smart-canvas.html]` + `PAGE_EXCLUDE=[canvas.html]`；删除 `canvas.html`(45,629 B) / `js/canvas.js`(824,303 B) / `css/canvas.css`(168,364 B) —— 闭包实测只删这 3 个 |
+| 14 | 智能画布命令面移植 | `smart-canvas-internals.js`（L34674 起，`window.__openarcCanvasInternals`）+ `openarc-smart-adapter.js`（`smart-canvas.html:755`，`window.__openarcCanvas` / adapter-ready / command / reload-doc） |
+| 15 | apiImageSize 在新锚点重写 | 见下「尺寸处置」；上游新实现只做长边+等比，free 策略不收口，删除补丁会破坏既有口径 |
+
+### 尺寸处置（apiImageSize）· 为何不删补丁
+
+证据：`artifacts/dxos-canvas-revendor-next/api-size-evidence.json`（真实 `/api/ai/size-policy` 表 + 宿主 `image-params`）。
+
+| 用例 | 上游新实现 | 本包补丁 | 宿主 `sizeFromRatio` |
+| --- | --- | --- | --- |
+| custom 1:1 @1k | 1536x1536 | **1248x1248** | 1248x1248 |
+| custom 4:3 @1k | 1536x1152 | **1440x1072** | 1440x1072 |
+| custom 1:1 @4k | 3840x3840 | **2880x2880** | 2880x2880 |
+| square @4k（free） | 2880x2880 | 2880x2880 | 2880x2880 |
+| square @4k（gpt-image-2 enum） | 2048x2048 | 2048x2048 | 2048x2048 |
+
+结论：上游只在策略显式给了 `maxEdge/maxPixels` 时收口，default（free）的 `maxPixels=0`，所以档位像素上限丢失；
+custom 1:1@1k 仍是 1536x1536、1:1@4k 仍是 3840x3840。因此在**新锚点重写**补丁：
+保留上游「长边定档 + 等比 + 官方 SIZE_MAP + NovaSizePolicy.constrain」，只补「按档位像素上限等比收窄」；
+枚举模型（gpt-image-2）仍交给策略吸附；命名比例不按档位长边二次收窄（官方表的 2k 超宽/1k 宽屏长边
+本来就大于 `RES_LONG_SIDE`，按长边夹会把 21:9 改成 2048x864）。
+
+### 单一真源 / 未接通 / 只读 / 模态（覆盖清单）
+
+- **单一真源**：`DEFAULT_VIDEO_MODELS` 清空；`volcengineProvider`/`volcengineVideoModels`/`modelscopeImageModels` 只认宿主
+  `api_providers`；`resolveChatModel` 不回落写死模型；`unifiedPlatformEntries` 只列真实 provider；
+  `renderModelControl`/`renderVideoModelControl` 不再渲染清单外旧值；四把记忆键（`smart_chat_model`、
+  `smart_chat_provider`、`smart_agent_image_provider`、`smart_canvas_recent_run_settings_v1`）读恒 null/写丢弃；
+  `comfyInstanceCount` 在宿主未投影 ComfyUI 时置 0。
+- **未接通如实禁用**：创建菜单「视频节点」真实 disabled + `data-openarc-unavailable` + 既有
+  `.openarc-guard-note` 文案（OpenArc 未接通视频传输）；`comfy`/`modelscope`/`volcengine` 引擎 option disabled；
+  视频参数 pill、ModelScope 功能/自定义模型、ComfyUI 模式/工作流不可用时 disabled；运行入口按能力事实拒绝；
+  `/api/canvas-video` 与 `/api/canvas-comfy-tasks` 页面侧 501。
+- **只读闸四层**：宿主 context → `__openarcCanvasReadOnly`；window 捕获事件闸；174 个闭包函数闸 + `window.*` 重指；
+  fetch 非 GET/HEAD/OPTIONS → 403。真机 58 条用例全部「被拒 + 文档逐字节未变 + 0 后端写」。
+- **应用内模态**：列表页重命名 + 智能画布提示词模板分组新建/重命名；新源码没有新增 prompt 调用点。
+
+### 验证
+
+- 真机（真实 Electron + 隔离 userData + 唯一 CDP）：`entry-probe.mjs` **PASS 19 / FAIL 0**；
+  `readonly-probe.mjs` **PASS 58 / FAIL 0**；0 console error / 0 pageerror / 0 条 404 / 0 条 5xx；浅/深截图见 artifacts。
+- `node --test tests/d5-02-canvas-*.test.mjs tests/dxos-canvas-*.test.mjs tests/canvas-library-list.test.mjs
+  tests/dxos-canvas-size-policy.test.mjs tests/dxos-image-params.test.mjs` = **252 pass / 0 fail**。
+- `npm run build` exit 0；`npx tsc --noEmit` 0；`npx vue-tsc --noEmit -p tsconfig.vue.json` 0。
+- `prune-public.mjs --check`：bundle 60/60/0；vendor-manifest 源 157 / 保留 60 / 裁剪 97。
+
+### 已知差异 / 遗留
+
+- 上游 `SIZE_MAP` 已换成 APIMart 官方 15 比例表，宿主 `electron/image-params.cjs` 的 `IMAGE_SIZE_TABLE` 仍是旧通用 9 比例表；
+  `tests/dxos-image-params.test.mjs` 现在逐格钉住两边 + 13 个已知差异格（不再 deepEqual 两张不同的表）。
+  宿主要追上官方表属于 `electron/**` 的后续改动，不在本包写入范围。
+- 只读闸拦不住的项：拖动/缩放中间帧已写入坐标（capture 闸 + 快照回滚，极端时序留一帧）、
+  `contenteditable` 直改 DOM（只读时事件闸挡住输入，但它不是函数）、服务端副作用（宿主权限是最后一道）。
+- `openarc-adapter.js` / `openarc-canvas-guard.js` 仍留在 bundle 根（已无页面加载，作为移植参考与门禁重定向前的对照）；
+  真正的命令面已迁到 `openarc-smart-adapter.js`。
+
+### 门禁影响
+
+`experiments/d5-02/canvas-e2e.mjs` 本包未改；需要重定向的用例清单见
+`experiments/dxos-canvas-revendor-next/PORT-PLAN.md` 第 5 节与本轮 `RESULT.md` 的「门禁重定向清单」。
+
+---
+
+## 本轮（2026-10-17 · DXOS-CANVAS-FIX-LATENCY）· 呈现延迟 + 页面侧静默换模型
+
+目标：门禁 F3d 的唯一 FAIL（宿主 / AI 改动 7316ms 才进已打开画布，阈值 5000ms）与页面侧「显式默认不可用时
+自动选中清单里另一个模型」。**门禁阈值与断言未改**；`experiments/d5-02/canvas-e2e.mjs` 未改一行。
+
+### 改动编号（顺延）
+
+| # | 改动 | 位置 / 结果 |
+| --- | --- | --- |
+| 16 | 宿主推送接收层：`doc-changed` → 页面自己的 `applyMergedServerCanvas`；输入 / 拖拽 / 保存中 / 有未保存改动时不抢（pending 重试，15s 后交回兜底）；按 updatedAt 幂等；证据面 `window.__openarcCanvasLiveSync.stats()` | 新模板 `experiments/d5-02/vendor/smart-canvas-live-sync.js`（7,656 B）→ 内联 `static/js/smart-canvas.js` IIFE 末尾（生成件 L35937 起）；manifest `smartLiveSyncHash=26f4ee46a7ecf38e` |
+| 17 | 远端合并轮询 `setTimeout(..., 8000)` → **2500**（与经典 `canvas.js` 同口径）；`mergeReloadCanvasNow()` 早退条件接上同一条安全判定 | vendor `SMART_CANVAS_JS_PATCHES`（幂等、缺目标即报错）；生成件 L11023 / L10982 |
+| 12-v4 | 守卫 v4（`smart-canvas-guard.js`）：「显式默认不可用」如实呈现 —— 生图 pill + `.openarc-guard-note`、chat 下拉 disabled 的不可用项并保持选中、运行入口 `data-openarc-blocked=MODEL_UNAVAILABLE`；`correctedApi/ChatModelForProvider` 不再替换默认；用户显式选替代后不被掰回；默认本身变化时重置显式标记；`configured=false` 仍走既有「未配置」呈现 | 生成件 L34839 起（`version: 4`）；manifest `smartGuardHash=13697c8d051585d1` |
+
+宿主侧配合（最小）：`src/canvas/CanvasHost.tsx` 的当前画布检测 2500 → 800ms；检测到变化后推 `doc-changed`
+（按 updatedAt 去重，`resolveRefs` 后的可显示文档）；`buildConfig()` 新增 `default_models`（显式默认的标签，
+不可用也照实投影；默认已被可用清单过滤时只向 `model/list` 补一次身份，不含地址 / 凭据）。
+**没有**新增主进程事件通道、没有改画布域命令契约与权限语义（`electron/canvas-domain/store/bootstrap/service` 均未改）。
+
+### 验证
+
+- 门禁：**PASS 48 / FAIL 0 / TOTAL 48**（80.31s；修复前 47/1/48，唯一 FAIL = F3d 7316ms）；F3d 实测 **607ms**。
+- 定向探针 `experiments/dxos-canvas-fix-latency/probe.mjs`：L1 3 轮 **763 / 458 / 154ms**；L2 输入中不合并、
+  失焦后 153ms 补上；M1/M1b/M2/M2b/M2c 全 PASS（不静默换模型 + 宿主拒绝语义不变 + 显式替代不被掰回）。
+- `node --test tests/d5-02-canvas-*.test.mjs tests/dxos-canvas-*.test.mjs` = 243 pass / 0 fail；
+  `npm run build` / `npx tsc --noEmit` / `npx vue-tsc --noEmit -p tsconfig.vue.json` 全 0。
+- vendor 幂等：连跑两次 manifest sha256 相同（`cffa6565…55144d`），`--dry-run` 新增 0 / 删除 0 / 变化 0 / 相同 60。
+- 体积：bundle 67 files / 11,808,169 B；`static/` 60 files / 11,629,670 B（文件集合不变，只有 `smart-canvas.js` 变长）。
+
+证据与逐项说明：`experiments/dxos-canvas-fix-latency/RESULT.md`、`artifacts/dxos-canvas-fix-latency/**`。
+
+---
+
+## 本轮（2026-10-17 · DXOS-CANVAS-SHARING · P2）· 列表卡片「共享…」入口（第 18 处改动）
+
+- **只改一个生成件**：`static/canvas-list.html` 的卡片菜单（与「重命名 / 复制画布 / 删除」并排）
+  新增「共享…」一项；点击只经 `openarc-bridge.js` 的 `window.__openarcBridge.openShare(c.id)`
+  向宿主发 `{kind:"open-share", canvasId, token}`，由宿主打开**它自己的**共享浮层（`CanvasSharePanel`）。
+- **列表页里没有共享 UI**：没有成员列表 / 角色 / 可见性控件，也没有成员数据与共享端点；
+  菜单项沿用上游 `.card-more-menu-item` 外观。宿主未就绪时只给一句明确提示，不伪造成功。
+- 生成方式：`experiments/d5-02/vendor-novai-app.mjs` 的 `LIST_PATCHES` 第 8 条（菜单项）与
+  第 9 条（`action === 'share'` 分支）；幂等，缺锚点即报错。**文件集合不变**
+  （60 files / 11,539,262 B），只有 `canvas-list.html` 内容变化（manifest `listHtmlHash` 更新）。
+- `openarc-bridge.js` 是 OpenArc 自加脚本，不属于上游补丁，改它不触发 vendor；本次只在
+  `window.__openarcBridge` 上新增一个 `openShare(canvasId)` 方法（空 id 返回 false，不静默发空目标）。
+  不登记新端点、不加通配、不放宽出网 / CSP / 实例 token；宿主侧仍要求「本帧 + 本次实例 token」。
 

@@ -5,12 +5,13 @@
   `1e20abe5145470b32f58206f692292703540107a` 并重新 vendor（`static/` 54→63、bundle 60→69、新增
   `static/tools/lossless-edit/` 等）；下面逐文件清单描述的是 `6ce1a646` 那次裁剪。本次"删 bundle 根 index.html"
   的结论、裁剪策略与"下次 vendor 不再拷回"的保证在两次 commit 下都成立。
-- **本轮（2026-10-17）范围裁决**：用户要求最终只留 `canvas-list.html` + `smart-canvas.html`，但**经典编辑器移除未执行**（两个硬阻塞，见 `experiments/dxos-canvas-scope/README.md` 与 `SOURCE.md` 的「本轮范围裁决」）。
-  本包落盘的只有 `prompt()` → 应用内模态（`openarc-rename-modal.js`）；白名单 / 入口 / 适配脚本都未改。
-- 目标：把这个 vendor bundle 裁成**只有无限画布**，入口仍是 `static/canvas-list.html`、编辑器仍是 `static/canvas.html`，
-  `openarc-bridge.js` / `openarc-adapter.js` / `openarc-canvas-guard.js` 三个适配脚本一个不少（`openarc-shell.js`
-  本轮裁决删除：根外壳删除后全仓零加载），
-  白名单 / 只读闸 / 出网拒绝 / 单一真源守卫一律不变。
+- **最终范围（2026-10-17 · REVENDOR-NEXT，见 §6）**：只留 `canvas-list.html` + `smart-canvas.html` 两个页面；
+  传统编辑器 `static/canvas.html` / `static/js/canvas.js` / `static/css/canvas.css` **已删除**（闭包实测只删这 3 个），
+  入口全部改向智能画布；守卫 / 适配器 / 只读闸 / 应用内模态已按新源码移植到 `smart-canvas.js` + `openarc-smart-adapter.js`。
+  下文第 1–5 节是历史基线（`6ce1a646` / 三页白名单）；**当前口径以 §6 为准**。
+- 目标：把这个 vendor bundle 裁成**只有无限画布**，入口 `static/canvas-list.html`、唯一编辑器 `static/smart-canvas.html`；
+  `openarc-bridge.js` / `openarc-smart-adapter.js` / `openarc-rename-modal.js` 一个不少（经典
+  `openarc-adapter.js` / `openarc-canvas-guard.js` 已无页面加载，暂留作门禁重定向前的对照）。
 - 裁剪方式：**页面白名单 + 依赖驱动闭包**（策略在 `experiments/d5-02/vendor-novai-app.mjs`，执行器
   `experiments/dxos-canvas-prune/prune-public.mjs`），不是手工删文件；换上游 commit 重跑自动得到裁剪后的结果。
 - 实测（基线 `6ce1a646`）：文件 **109 → 60**（static/ 内 103 → 54；另删 bundle 根 1 个）；字节 **14,222,868 → 10,686,992**
@@ -200,3 +201,68 @@ node experiments/dxos-canvas-prune/prune-public.mjs
 **逐条 404**：产品画布流 0 条。原唯一的已知 404 来自**非产品入口**的 bundle 根 `index.html`：它的 `#frame-home` 是 eager `src="/static/home.html"`，而 home.html 已删 —— 只有加载这个测试用外壳时才有 1 条 `/static/home.html` 404。
 本轮把 E4 边界测试的伪造帧来源改成保留的产品页 `static/canvas-list.html`（断言语义不变，另加"伪造帧加载 0 条 bundle 404"与"伪造帧确实加载了目标文档"两条），旧外壳因此零引用并删除。
 对照证据：`artifacts/dxos-canvas-prune/E4-BOUNDARY.json`（修复前旧外壳 1 条 404 → 修复后产品页 0 条 404，边界断言都通过）；复现探针 `experiments/dxos-canvas-prune/e4-boundary-probe.mjs`。
+
+---
+
+## 6. 本轮（2026-10-17 · DXOS-CANVAS-REVENDOR-NEXT）· 白名单收窄，传统编辑器已删
+
+白名单从 3 页收窄到 2 页，并新增排除页集合（`extractStaticRefs` 会从列表页入口改向前留下的
+kind 三元 / 注释里抽出 `/static/canvas.html`，只改白名单不够）：
+
+```js
+PAGE_WHITELIST = ['canvas-list.html', 'smart-canvas.html']
+PAGE_EXCLUDE   = ['canvas.html']
+```
+
+上游 `static/` **157 文件** → 保留 **60** / 排除 **97**；bundle 共 **67 文件 / 11,784,658 B**
+（static/ 60 文件 / 11,606,625 B + bundle 根 7 个）。相比上一轮 bundle 69 文件 / 12,684,800 B，
+净减 2 文件 / 900,142 B。
+
+### 6.1 本轮真正删除的 3 个文件（闭包实测）
+
+| 文件 | 字节 | 删除前被谁引用（证据） |
+| --- | --- | --- |
+| `static/canvas.html` | 45,629 | 只被 `canvas-list.html` 的 kind 三元（`openCanvas(c)` / `createCanvasFromPicker` 内导航 / `btnContinueLast`）引用；入口改向补丁（LIST_PATCHES #4/#6/#7）落盘后列表页 **0 处** `/static/canvas.html`，且 `PAGE_EXCLUDE` 兜住源里残留的注释/三元字面量 |
+| `static/js/canvas.js` | 824,303 | 只被 `canvas.html` 的 `<script>` 标签引用（`canvas.html:535`）；智能画布用 `js/smart-canvas.js` |
+| `static/css/canvas.css` | 168,364 | 只被 `canvas.html:12` 的 `<link>` 引用 |
+
+合计删除 **1,038,296 B**。除此之外没有多删/少删：`tools/lossless-edit/index.html`（智能画布的 iframe 依赖）
+及其 PSD 依赖 `vendor/ag-psd.js` 仍由闭包 + EXTRA_KEEP 保留。
+
+### 6.2 落盘自检
+
+```
+$ node experiments/dxos-canvas-prune/prune-public.mjs --check
+[prune] 源 static/ 文件 60；保留 60；删除 0
+[prune] vendor-manifest: 源 157 / 保留 60 / 裁剪 97（本次 bundle 内再删 0）
+```
+
+bundle 里已无 `static/canvas.html` / `static/js/canvas.js` / `static/css/canvas.css`；
+列表页与智能画布对它们的引用均为 0。真机 0 条 404 见 `artifacts/dxos-canvas-revendor-next/ENTRY-RESULT.md`。
+
+### 6.3 体积对照（本轮）
+
+| 目录 | 上一轮 bundle | 本轮 bundle | 说明 |
+| --- | --- | --- | --- |
+| `public/novai-canvas/` 总体 | 69 文件 / 12,684,800 B | **67 文件 / 11,784,658 B** | 删 3 个经典页资源；上游同时改了 10 个文件；新增 `openarc-smart-adapter.js` |
+| `static/` | 63 文件 / 12,530,609 B | **60 文件 / 11,606,625 B** | −1,038,296 B 删除 + 上游 10 文件增删 |
+| `static/` 页面 | 3 个 HTML | **2 个 HTML**（canvas-list / smart-canvas）+ 闭包带入的 lossless-edit | 传统编辑器下线 |
+
+### 6.4 本轮（2026-10-17 · DXOS-CANVAS-FIX-LATENCY）· 文件集合不变
+
+- 没有新增 / 删除 bundle 文件：宿主推送接收层（第 16 处改动）内联在 `static/js/smart-canvas.js` IIFE 末尾，
+  兜底轮询（第 17 处改动）与守卫 v4 也是同文件的补丁/内联模板，不产生新的 bundle 根脚本。
+- 体积：`public/novai-canvas/` **67 文件 / 11,808,169 B**；`static/` **60 文件 / 11,629,670 B**
+  （较上一轮 +23,511 B / +23,045 B，全部是 `smart-canvas.js` 里的 live-sync + 守卫 v4）。
+- 白名单/闭包/EXCLUDE 未改；`prune-public.mjs --check` 仍 60/60/0，manifest 源 157 / 保留 60 / 裁剪 97。
+- vendor 幂等：连跑两次 manifest sha256 = `cffa65658bbe3e64273e5e6955780a7e05bba732400f0f16dd7981b2c755144d`；
+  `--dry-run` 新增 0 / 删除 0 / 内容变化 0 / 相同 60。
+
+### 6.5 本轮（2026-10-17 · DXOS-CANVAS-SHARING · P2）· 文件集合不变
+
+- 只在 `static/canvas-list.html` 的卡片菜单加一项「共享…」（第 18 处改动，见 `SOURCE.md`）；
+  共享面板/成员/角色/可见性全部在 **OpenArc 宿主浮层**，列表页只发一条消息，不新增页面或脚本。
+- 文件集合与体积基线不变：`static/` 60 文件 / 11,629,670 B（只有 canvas-list.html 内容变化）；
+  白名单/闭包/EXCLUDE 未改；`prune-public.mjs --check` 仍 60/60/0。
+- vendor 幂等：连跑两次 manifest 逐字节一致（sha256 = 5acd748a53ea439804828912ecbf44deace016bb0ca5578967c1f392923076af）；
+  `--dry-run` 新增 0 / 删除 0 / 内容变化 1（canvas-list.html）/ 相同 59。
