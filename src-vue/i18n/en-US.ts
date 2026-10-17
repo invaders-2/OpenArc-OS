@@ -1519,4 +1519,12 @@ export const EN_US: Record<string, string> = {
   "将在系统浏览器打开服务商控制台；OpenArc 不会读取或代填你的密钥。": "The provider console will open in your system browser; OpenArc never reads or fills in your key.",
   "打开控制台": "Open Console",
   "当前环境没有外部浏览器桥；请手动打开服务商控制台。": "No external browser bridge in this environment; open the provider console manually.",
+  "查看、校验与保存自定义协议": "View, validate, and save custom protocols",
+  "打开协议设置": "Open Protocol Settings",
+  "本机命令行工具的安装、登录、模型与额度": "Install, login, models, and credits for local CLI tools",
+  "打开 CLI 设置": "Open CLI Settings",
+  "已自动设置默认模型：{caps}": "Automatically set default models: {caps}",
+  "从左侧选择一个服务商查看详情，或点击「添加服务商」新建。": "Select a provider on the left to view details, or click “Add Provider” to create one.",
+  "还没有服务商。点击「添加服务商」填写地址与密钥，常见的 OpenAI 兼容服务都可以。": "No providers yet. Click “Add Provider” and fill in the URL and key; common OpenAI-compatible services work.",
+  "CLI 设置": "CLI Settings",
 };

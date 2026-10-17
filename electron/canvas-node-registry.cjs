@@ -261,7 +261,7 @@ class CanvasNodeRegistry {
     let reason = "no-executor-port";
     if (profile.kind === "asset" || profile.kind === "local") { available = true; reason = null; }
     else if (profile.kind === "generation") {
-      const port = this.ports.generation;
+      const port = type === "builtin.video-generator" && typeof this.ports.videoGeneration === "function" ? this.ports.videoGeneration : this.ports.generation;
       const supported = typeof port === "function" && (typeof port.supports !== "function" || port.supports(type));
       available = !!supported;
       reason = typeof port !== "function" ? "no-generation-port" : available ? null : "unsupported-model-kind";
@@ -390,7 +390,9 @@ class CanvasNodeRegistry {
       } else if (executor.kind === "asset") {
         outputs = { [executor.output]: validation.params.ref || validation.params.url || null };
       } else {
-        const portName = executor.kind === "generation" ? "generation" : executor.kind === "media-process" ? "mediaProcess" : "plugin";
+        const portName = executor.kind === "generation"
+          ? (resolvedType === "builtin.video-generator" && typeof this.ports.videoGeneration === "function" ? "videoGeneration" : "generation")
+          : executor.kind === "media-process" ? "mediaProcess" : "plugin";
         const port = this.ports[portName];
         if (typeof port !== "function") return fail(ERROR.NODE_EXECUTOR_UNAVAILABLE, { ...base, reason: executor.reason });
         const portResult = await port({ type: resolvedType, executorId: def.executor.id, capability: executor.capability, params: validation.params, context, canvasId, nodeId, node: targetNode });

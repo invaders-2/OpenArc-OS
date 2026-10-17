@@ -771,9 +771,14 @@ test("界面接线：添加与编辑复用同一个 ProviderForm；四类面板�
   const panel = stripComments(read("src-vue/settings/RemoteModelsPanel.vue"));
   assert.ok(settings.includes('import ProviderForm from "./ProviderForm.vue"'), "必须复用共享表单组件");
   assert.ok(settings.includes('import RemoteModelsPanel from "./RemoteModelsPanel.vue"'));
-  assert.ok(settings.includes("data-d4-01-provider-edit-form"), "详情要有编辑入口与容器");
-  assert.ok(settings.includes("data-d4-01-provider-status"), "编辑表单要有启用-停用");
+  assert.ok(settings.includes("data-d4-01-provider-status"), "详情要有启用-停用");
   assert.ok(settings.includes("data-d4-01-provider-edit"), "详情要有编辑按钮");
+  // task-56：添加/编辑改为同一个 DsDialog 内的共享 ProviderForm；不再有内联 edit-form 容器。
+  assert.ok(settings.includes("data-d4-01-provider-add") && settings.includes("openProviderCreate"), "列表页要有添加入口");
+  assert.ok(settings.includes("openProviderEdit(current.providerId)"), "详情编辑按钮要打开编辑弹窗");
+  assert.ok(settings.includes('<DsDialog class="mp2-form-dialog" :open="providerDialogOpen"'), "添加/编辑必须共用同一个 DsDialog");
+  assert.ok(settings.includes(':mode="providerDialogMode"'), "同一个 ProviderForm 要按弹窗模式切 create/edit");
+  assert.ok(settings.includes(":initial=\"providerDialogMode === 'edit' && current ?"), "编辑模式要把当前服务商预填给表单");
   for (const command of ["provider/create", "provider/update", "provider/setStatus", "credential/replace", "model/create"]) {
     assert.ok(settings.includes(command), "ModelSettings 必须真正调用 " + command);
   }

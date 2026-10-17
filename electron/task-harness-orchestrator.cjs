@@ -101,6 +101,9 @@ function classifyHarnessError(e) {
   if (code === "HARNESS_START_TIMEOUT") return ERROR.HARNESS_START_TIMEOUT;
   if (code === "HARNESS_PROTOCOL_ERROR" || code === "HARNESS_PROTOCOL_UNSUPPORTED") return code;
   if (code === "HARNESS_NOT_STARTED") return code;
+  // task-55：打包缺 DSH 运行时 / 版本漂移，保留明确原因码（不扩 core ERROR 枚举，
+  // 避免未同步前端文案表时出现「未登记错误码」；UI 对未知码有通用兜底）。
+  if (code === "DSH_RUNTIME_MISSING" || code === "DSH_VERSION_MISMATCH") return code;
   // Model 冻结版本在签发窗口内被改版：adapter 拒绝签发后原样上报明确原因码，绝不退化成 INTERNAL_ERROR。
   if (code === ERROR.MODEL_CONFIG_CHANGED) return code;
   return ERROR.INTERNAL_ERROR;

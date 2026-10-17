@@ -332,8 +332,13 @@ test("⑨ 界面接线：预设区 / 双密钥输入 / adapterType 展示 / 编�
   assert.equal(/provider\/create|provider\/update/.test(form), false, "表单只组装 payload，发命令归上层");
 
   assert.ok(settings.includes('import ProviderForm from "./ProviderForm.vue"'), "仍复用同一个 ProviderForm");
-  assert.ok(settings.includes(":known-protocols=\"knownProtocols\""), "两个 ProviderForm 都要拿到协议表");
-  assert.equal((settings.match(/:known-protocols=/g) || []).length, 2, "添加与编辑表单都要接线");
+  assert.ok(settings.includes(":known-protocols=\"knownProtocols\""), "共享 ProviderForm 要拿到协议表");
+  assert.equal((settings.match(/:known-protocols=/g) || []).length, 1, "task-56：添加与编辑共用同一个弹窗表单实例");
+  assert.ok(settings.includes("openProviderCreate") && settings.includes("openProviderEdit(current.providerId)"), "添加与编辑都有各自入口");
+  assert.ok(settings.includes('providerDialogMode = ref<"create" | "edit">("create")'), "弹窗模式必须显式区分 create/edit");
+  assert.ok(settings.includes(':mode="providerDialogMode"'), "共享表单的 mode 由弹窗模式驱动");
+  assert.ok(settings.includes(":initial=\"providerDialogMode === 'edit' && current ?"), "编辑模式必须预填当前服务商");
+  assert.ok(settings.includes('<DsDialog class="mp2-form-dialog" :open="providerDialogOpen"'), "添加/编辑必须在同一个 DsDialog 内");
   assert.ok(settings.includes('cmd("protocol/list")'), "协议可用性来自运行期 protocol/list");
   assert.ok(settings.includes("adapterType: current.adapterType"), "编辑态把当前协议传给表单（不被预设误改）");
   assert.ok(presets.includes("mapProtocol") === false, "预设模块不复制镜像桥实现，只对齐口径");

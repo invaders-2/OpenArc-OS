@@ -23,6 +23,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { copyDshRuntimeClosure } from "./dsh-runtime-closure.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(__dirname, "..");
@@ -166,6 +167,14 @@ fs.cpSync(path.join(srcDir, "electron"), path.join(APPX, "electron"), { recursiv
 const srcResources = path.join(srcDir, "resources");
 if (fs.existsSync(srcResources)) fs.cpSync(srcResources, path.join(APPX, "resources"), { recursive: true });
 fs.copyFileSync(path.join(srcDir, "package.json"), path.join(APPX, "package.json"));
+
+// task-55：打包后的 app 没有仓库 node_modules；DSH harness 必须能在 <app>/node_modules 内
+// 找到 PIN 版本的 @deepseek-ai/dsh、ACP SDK、完整依赖闭包与 .bin/dsh。
+// 只复制真实依赖闭包（不复制仓库全部 node_modules），并在复制后校验 PIN 版本。
+const appNodeModules = path.join(APPX, "node_modules");
+fs.rmSync(appNodeModules, { recursive: true, force: true });
+const dshRuntime = copyDshRuntimeClosure({ root: srcDir, destNodeModules: appNodeModules });
+console.log("[sync-app] DSH runtime closure: " + dshRuntime.packages + " packages, " + (dshRuntime.bytes / 1024 / 1024).toFixed(1) + " MiB, " + dshRuntime.versions.map((v) => v.name + "@" + v.version).join(", "));
 
 if (appArg) {
   // 只改载荷这一份拷贝：Electron 用 package.json 的 name 决定 userData 目录，

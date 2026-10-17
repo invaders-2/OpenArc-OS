@@ -111,7 +111,8 @@ function packageTempDir(dir) {
 
 /**
  * A03 默认生成执行器：image-generator / llm 接既有 canvas/run → modelCall 链路（真实 Task 预算与停止归属）。
- * 视频 / 音频 / Midjourney 没有对应 ModelService 能力，由 supports() 明确排除，命令层结构化不可用。
+ * task-55：video-generator 接 model 域的协议引擎（legacyExecute action=videos：提交/轮询/产物落库由引擎完成）。
+ * 音频 / Midjourney 仍无对应执行器，由 supports() 明确排除，命令层结构化不可用。
  */
 function createCanvasGenerationPort(canvasService) {
   const port = async ({ type, params, context, canvasId, nodeId }) => {
@@ -151,6 +152,40 @@ function createCanvasGenerationPort(canvasService) {
   return port;
 }
 
+/** task-55：画布视频节点 → model 协议引擎视频生成（提交/轮询/产物落库均复用既有 legacy 执行器）。 */
+function createCanvasVideoGenerationPort(canvasService) {
+  const port = async ({ type, params, context, canvasId, nodeId }) => {
+    if (!canvasService || !canvasService.modelService) return fail("CANVAS_NODE_EXECUTOR_UNAVAILABLE", { type, capability: "video-generation", reason: "model-service-unavailable" });
+    const modelService = canvasService.modelService;
+    const protocol = modelService.providerProtocol && modelService.providerProtocol.service;
+    if (!protocol || typeof protocol.legacyExecute !== "function") return fail("CANVAS_NODE_EXECUTOR_UNAVAILABLE", { type, capability: "video-generation", reason: "video-provider-unavailable" });
+    const resolved = modelService.resolveModel({ context, capability: "video-generation", configId: params.configId });
+    if (!resolved.ok) return fail(resolved.error || "MODEL_CONFIG_UNAVAILABLE", { capability: "video-generation", configId: params.configId || null });
+    const started = canvasService.startRun({ context, canvasId, nodeId, kind: "video" });
+    if (!started || started.ok !== true) return started && started.ok === false ? started : fail("RUN_UNAVAILABLE");
+    const runId = started.runId;
+    let terminal = "FAILED";
+    try {
+      const result = await protocol.legacyExecute({
+        providerId: resolved.snapshot.providerId,
+        action: "videos",
+        model: resolved.snapshot.modelId,
+        prompt: String(params.prompt || ""),
+        params: { size: params.size, ratio: params.ratio, resolution: params.resolution, count: params.count },
+        requestId: "canvas_video_" + runId,
+        timeoutMs: 600000,
+      });
+      if (!result || result.ok !== true) return result && result.ok === false ? result : fail("VIDEO_GENERATION_FAILED");
+      terminal = "DONE";
+      return ok({ outputs: { videos: Array.isArray(result.videos) ? result.videos : [] }, modelResult: result });
+    } finally {
+      try { canvasService.finishRun({ context, canvasId, runId, status: terminal }); } catch { /* run 已终态时幂等 */ }
+    }
+  };
+  port.supports = (type) => type === "builtin.video-generator" && !!(canvasService.modelService && canvasService.modelService.providerProtocol && canvasService.modelService.providerProtocol.service);
+  return port;
+}
+
 /**
  * 扩展装配。services 里没有的依赖会让对应命令结构化失败（不做假实现）。
  * @param hub 可注入现成 hub（测试用）；不注入则本函数自建并接管 onBroadcast → 事件队列。
@@ -162,6 +197,9 @@ function createCanvasDxosExtension({ identity, store, canvasService = null, reso
   const resolvedNodePorts = nodePorts && typeof nodePorts === "object" ? { ...nodePorts } : {};
   if (typeof resolvedNodePorts.generation !== "function" && canvasService && typeof canvasService.startRun === "function" && typeof canvasService.modelCall === "function") {
     resolvedNodePorts.generation = createCanvasGenerationPort(canvasService);
+  }
+  if (typeof resolvedNodePorts.videoGeneration !== "function" && canvasService) {
+    resolvedNodePorts.videoGeneration = createCanvasVideoGenerationPort(canvasService);
   }
   const nodeRegistry = createCanvasNodeRegistry({ extraDefinitions: Array.isArray(nodeDefinitions) ? nodeDefinitions : [], ports: resolvedNodePorts, canvasService });
   const events = new Map(); // "canvasId\u0000clientId" → array
@@ -530,4 +568,5 @@ function describeCommands() { return DXOS_CANVAS_COMMANDS.map((entry) => ({ ...e
 module.exports = {
   CHANNEL, MAX_INLINE_PACKAGE_BYTES, DXOS_CANVAS_COMMANDS, REGISTRY,
   extendRendererCommands, createCanvasDxosExtension, combineCanvasCommandHandlers, registerCanvasDxosIpc, describeCommands,
+  createCanvasGenerationPort, createCanvasVideoGenerationPort,
 };

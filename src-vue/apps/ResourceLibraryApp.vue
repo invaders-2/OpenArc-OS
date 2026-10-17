@@ -674,25 +674,27 @@ async function reindexOne() {
                 />
                 <component v-else :is="TYPE_ICON[r.resourceType] || FileText" :size="24" :stroke-width="1.5" />
               </span>
-              <div class="rl-card-top">
-                <span class="rl-type">{{ TYPE_LABEL[r.resourceType] || r.resourceType }}</span>
-                <span v-if="r.favorite" class="rl-fav" aria-label="已收藏">★</span>
+              <div class="rl-card-body">
+                <div class="rl-card-top">
+                  <span class="rl-type">{{ TYPE_LABEL[r.resourceType] || r.resourceType }}</span>
+                  <span v-if="r.favorite" class="rl-fav" aria-label="已收藏">★</span>
+                </div>
+                <div class="rl-card-name">{{ r.name }}</div>
+                <div v-if="r.snippet && r.snippet.matched" class="rl-card-snippet" data-d3-04c-snippet>
+                  <template v-for="(s, i) in r.snippet.spans" :key="i">
+                    <mark v-if="s.match">{{ s.text }}</mark>
+                    <span v-else>{{ s.text }}</span>
+                  </template>
+                  {{ r.snippet.truncated ? "…" : "" }}
+                </div>
+                <div v-if="r.matchedFields && r.matchedFields.length" class="rl-card-fields" data-d3-04c-fields>命中：{{ r.matchedFields.join(" / ") }}</div>
+                <div class="rl-card-meta">{{ r.storageMode }} · {{ r.availability === "AVAILABLE" ? "可用" : AVAILABILITY_LABEL[r.availability] }}</div>
+                <div class="rl-card-foot">
+                  <span>{{ fmtSize(r.size) }}</span>
+                  <span>v{{ r.version }}</span>
+                </div>
+                <div class="rl-card-ref">{{ r.resourceRef }}</div>
               </div>
-              <div class="rl-card-name">{{ r.name }}</div>
-              <div v-if="r.snippet && r.snippet.matched" class="rl-card-snippet" data-d3-04c-snippet>
-                <template v-for="(s, i) in r.snippet.spans" :key="i">
-                  <mark v-if="s.match">{{ s.text }}</mark>
-                  <span v-else>{{ s.text }}</span>
-                </template>
-                {{ r.snippet.truncated ? "…" : "" }}
-              </div>
-              <div v-if="r.matchedFields && r.matchedFields.length" class="rl-card-fields" data-d3-04c-fields>命中：{{ r.matchedFields.join(" / ") }}</div>
-              <div class="rl-card-meta">{{ r.storageMode }} · {{ r.availability === "AVAILABLE" ? "可用" : AVAILABILITY_LABEL[r.availability] }}</div>
-              <div class="rl-card-foot">
-                <span>{{ fmtSize(r.size) }}</span>
-                <span>v{{ r.version }}</span>
-              </div>
-              <div class="rl-card-ref">{{ r.resourceRef }}</div>
             </button>
           </div>
 
@@ -886,12 +888,52 @@ async function reindexOne() {
 
 
 <style scoped>
-/* task-50：网格缩略图裁切铺满 92px 缩略图槽；列表视图由既有 .rl-list .rl-thumb 隐藏。 */
-.rl-thumb { overflow: hidden; }
+/* task-50 / task-57：网格卡片固定结构 = 92px 缩略图槽 + 下方文字区。
+   卡片本身改成真正的纵向 flex：缩略图不可收缩/不可溢出，文字区独立内边距，
+   行高由内容自然撑开；grid 行默认 stretch，同一行卡片高度一致。
+   列表视图继续沿用既有“隐藏缩略图、行式卡片”的规则，只把内边距挪到 body 上。 */
+.rl-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  height: 100%;
+  padding: 0;
+  overflow: hidden;
+}
+.rl-card > .rl-card-body {
+  margin-left: 0;
+  margin-right: 0;
+}
+.rl-thumb {
+  flex: 0 0 92px;
+  width: 100%;
+  height: 92px;
+  min-height: 92px;
+  margin: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 .rl-thumb-img {
   display: block;
+  flex: none;
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: center;
 }
+.rl-card-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px 10px;
+}
+.rl-card-name { min-width: 0; }
+.rl-list .rl-card { height: auto; padding: 0; }
+.rl-list .rl-card .rl-thumb { display: none; }
+.rl-list .rl-card-body { padding: 10px 12px; }
 </style>

@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import DsBadge from "../design-system/DsBadge.vue";
 import DsButton from "../design-system/DsButton.vue";
+import DsDialog from "../design-system/DsDialog.vue";
 import CliPanel from "./CliPanel.vue";
 import { t as tr } from "../i18n";
 import ProviderForm from "./ProviderForm.vue";
@@ -121,6 +122,27 @@ onMounted(() => {
  */
 const providerFormRef = ref<{ reset: () => void } | null>(null);
 const editingProviderId = ref<string | null>(null);
+const providerDialogOpen = ref(false);
+const providerDialogMode = ref<"create" | "edit">("create");
+const providerDialogSeq = ref(0);
+function openProviderCreate() {
+  selected.value = "new";
+  editingProviderId.value = null;
+  providerDialogMode.value = "create";
+  providerDialogSeq.value += 1;
+  providerDialogOpen.value = true;
+}
+function openProviderEdit(providerId: string) {
+  editingProviderId.value = providerId;
+  providerDialogMode.value = "edit";
+  providerDialogSeq.value += 1;
+  providerDialogOpen.value = true;
+}
+function closeProviderDialog() {
+  providerDialogOpen.value = false;
+  editingProviderId.value = null;
+  if (selected.value === "new") selected.value = providers.value[0]?.providerId ?? null;
+}
 function onProviderInvalid(code: string) {
   error.value = code;
 }
@@ -138,6 +160,7 @@ async function onProviderSubmit(event: { mode: "create" | "edit"; payload: Recor
     await load();
     const added = providers.value.find((p) => !before.includes(p.providerId));
     if (added) selected.value = added.providerId;
+    providerDialogOpen.value = false;
     return;
   }
   const providerId = String(event.payload.providerId || "");
@@ -164,6 +187,7 @@ async function onProviderSubmit(event: { mode: "create" | "edit"; payload: Recor
     notice.value = tr(event.credentialSecret ? "已保存服务商并替换密钥" : "已保存服务商");
   }
   editingProviderId.value = null;
+  providerDialogOpen.value = false;
   await load();
 }
 async function setProviderStatus(providerId: string, status: string) {
@@ -271,14 +295,20 @@ function markRegistered(providerId: string, ids: string[]) {
   const set = new Set(ids);
   remote.value = { ...remote.value, [providerId]: (remote.value[providerId] || []).map((m) => (set.has(m.id) ? { ...m, registered: true } : m)) };
 }
-/** 注册模型后若用户还没有默认对话模型，自动选第一个可用的对话模型，避免“接了模型但应用无法使用”。 */
+/** 注册模型后若个人默认还缺 chat / image-generation / video-generation，自动补该能力第一个可用模型。 */
 async function autoDefaultAfterRegister(providerId: string) {
-  if (defaults.value?.personal?.chat) return;
-  const candidate = models.value.find((m: any) => m.providerId === providerId && m.status === "enabled" && Array.isArray(m.capabilities) && m.capabilities.includes("chat"));
-  if (!candidate) return;
-  const res = await cmd("defaults/set", { capability: "chat", configId: candidate.configId, scope: "PERSONAL" });
-  if (!res.ok) return;
-  notice.value = tr("已自动把 {name} 设为默认对话模型", { name: candidate.displayName || candidate.remoteModelId || candidate.configId });
+  const personal = defaults.value?.personal || {};
+  const wanted = ["chat", "image-generation", "video-generation"].filter((cap) => !personal[cap]);
+  if (!wanted.length) return;
+  const names: string[] = [];
+  for (const cap of wanted) {
+    const candidate = models.value.find((m: any) => m.providerId === providerId && m.status === "enabled" && Array.isArray(m.capabilities) && m.capabilities.includes(cap));
+    if (!candidate) continue;
+    const res = await cmd("defaults/set", { capability: cap, configId: candidate.configId, scope: "PERSONAL" });
+    if (res.ok) names.push(cap);
+  }
+  if (!names.length) return;
+  notice.value = tr("已自动设置默认模型：{caps}", { caps: names.join(" / ") });
   await load();
 }
 /** 单个模型「加入」：走 model/create，带上分类推出的真实 capabilities；失败给结构化错误码。 */
@@ -442,8 +472,8 @@ async function submitModel() {
 }
 const editingCaps = ref<string | null>(null);
 /* 协议设置 / CLI 区块的展开入口：默认展开，探针不必先点开才看得到。 */
-const protocolOpen = ref(true);
-const cliOpen = ref(true);
+const protocolDialogOpen = ref(false);
+const cliDialogOpen = ref(false);
 
 /* ── 模型出网代理（默认关闭；只作用于模型与协议出口，不碰其它出网） ── */
 const egress = reactive({ enabled: false, url: "" });
@@ -558,16 +588,16 @@ onMounted(() => { void loadEgress(); });
           </span>
           <span class="mp2-dot" :data-tone="providerState(p).tone" :title="tr(providerState(p).label)" />
         </button>
-        <button type="button" class="mp2-prov" :class="{ on: selected === 'new' }" data-d4-01-provider-add @click="selected = 'new'; editingProviderId = null">
+        <button type="button" class="mp2-prov" :class="{ on: selected === 'new' }" data-d4-01-provider-add @click="openProviderCreate">
           <span class="mp2-logo mp2-logo-add" aria-hidden="true">＋</span>
           <span class="mp2-prov-main"><b>{{ tr("添加服务商") }}</b></span>
         </button>
       </div>
 
-      <!-- 右：添加服务商（与编辑共用 ProviderForm 的字段与校验） -->
-      <div v-if="selected === 'new' || !current" class="set-group mp2-detail">
-        <p v-if="providers.length === 0" class="set-cap" data-d4-01-providers-empty>{{ tr("还没有服务商。填写地址与密钥添加第一个，常见的 OpenAI 兼容服务（DeepSeek、通义、火山方舟、硅基流动等）都可以。") }}</p>
-        <ProviderForm ref="providerFormRef" mode="create" :busy="busy" :known-protocols="knownProtocols" @submit="onProviderSubmit" @invalid="onProviderInvalid" />
+      <!-- 右：列表页；添加/编辑服务商改为弹窗（ProviderForm 在 DsDialog 内） -->
+      <div v-if="selected === 'new' || !current" class="set-group mp2-detail mp2-empty">
+        <p class="set-cap" data-d4-01-providers-empty>{{ providers.length === 0 ? tr("还没有服务商。点击「添加服务商」填写地址与密钥，常见的 OpenAI 兼容服务都可以。") : tr("从左侧选择一个服务商查看详情，或点击「添加服务商」新建。") }}</p>
+        <DsButton variant="primary" size="sm" data-d4-01-provider-add-empty @click="openProviderCreate">{{ tr("添加服务商") }}</DsButton>
       </div>
 
       <!-- 右：服务商详情 -->
@@ -618,32 +648,9 @@ onMounted(() => { void loadEgress(); });
           <span v-if="tests[current.providerId]" class="badge" :class="{ ok: tests[current.providerId].ok }" :data-d4-01-test-result="current.providerId">{{ tests[current.providerId].ok ? tr("连接成功") : tr("连接失败") }}</span>
           <small v-if="tests[current.providerId]" class="set-cap">{{ testLabel(tests[current.providerId]) }}</small>
           <span class="toolbar-spacer" />
-          <DsButton variant="secondary" size="sm" :data-d4-01-provider-edit="current.providerId" @click="editingProviderId = current.providerId">{{ tr("编辑服务商") }}</DsButton>
+          <DsButton variant="secondary" size="sm" :data-d4-01-provider-edit="current.providerId" @click="openProviderEdit(current.providerId)">{{ tr("编辑服务商") }}</DsButton>
           <DsButton v-if="current.status === 'enabled'" variant="ghost" size="sm" :data-d4-01-provider-disable="current.providerId" @click="setProviderStatus(current.providerId, 'disabled')">{{ tr("停用") }}</DsButton>
           <DsButton v-else variant="secondary" size="sm" :data-d4-01-provider-enable="current.providerId" @click="setProviderStatus(current.providerId, 'enabled')">{{ tr("启用") }}</DsButton>
-        </div>
-
-        <!-- 编辑服务商：与添加同一套字段/校验（ProviderForm），密钥走 credential/replace -->
-        <div v-if="editingProviderId === current.providerId" class="mp2-sub" :data-d4-01-provider-edit-form="current.providerId">
-          <ProviderForm
-            mode="edit"
-            :busy="busy"
-            :known-protocols="knownProtocols"
-            :initial="{
-              providerId: current.providerId,
-              displayName: current.displayName,
-              baseUrl: current.baseUrl,
-              endpointScope: current.endpointScope,
-              scope: current.scope,
-              status: current.status,
-              allowInsecureHttp: current.allowInsecureHttp,
-              adapterType: current.adapterType,
-              credentialConfigured: !!credStatus[current.providerId]?.configured,
-            }"
-            @submit="onProviderSubmit"
-            @invalid="onProviderInvalid"
-            @cancel="editingProviderId = null"
-          />
         </div>
 
         <div class="mp2-field" data-d4-01-pane="models"><span>{{ tr("模型与能力") }}</span>
@@ -717,17 +724,13 @@ onMounted(() => { void loadEgress(); });
         <h3>{{ tr("默认模型") }}</h3>
         <p v-if="defaults && !defaults.personal?.chat" class="set-cap" data-d4-01-default-missing>{{ tr("还没有默认对话模型：应用调用模型会失败。注册模型后会自动选择第一个可用的对话模型，也可以在下面手动指定。") }}</p>
         <div class="set-group d401-defaults" data-d4-01-defaults-personal>
-          <label v-for="d in [['chat', '文本对话', 'chat'], ['tool-calling', '工具调用', 'tool'], ['image-generation', '图像生成', 'image']]" :key="d[0]" class="setting-row">
+          <label v-for="d in [['chat', '文本对话', 'chat'], ['tool-calling', '工具调用', 'tool'], ['image-generation', '图像生成', 'image'], ['video-generation', '视频生成', 'video'], ['video-generation', '视频生成', 'video']]" :key="d[0]" class="setting-row">
             <span class="set-lab">{{ tr(d[1]) }}</span>
             <select class="set-select"  v-bind="{ ['data-d4-01-default-personal-' + d[2]]: '' }" :value="defaults.personal[d[0]] || ''" @change="onDefault(d[0], $event, 'PERSONAL')">
               <option v-for="o in defaultOptions(d[0], defaults.personal[d[0]])" :key="o.value + (o.disabled ? ':x' : '')" :value="o.value" :disabled="o.disabled" :data-d4-01-default-unavailable="o.unavailableFor">
                 {{ o.value ? o.label : tr("自动") }}
               </option>
             </select>
-          </label>
-          <label class="setting-row">
-            <span class="set-lab">{{ tr("视频生成") }}<small>{{ tr("无可用传输（未接通）") }}</small></span>
-            <select class="set-select" data-d4-01-default-personal-video disabled aria-disabled="true"><option value="">{{ tr("未接通") }}</option></select>
           </label>
         </div>
         <p class="set-cap">{{ tr("「自动」表示使用当前服务商下已配置、且能力匹配的模型。所有应用（AI Studio、对话、Skill、短剧工坊……）都用这里的设置。") }}</p>
@@ -749,27 +752,54 @@ onMounted(() => { void loadEgress(); });
       </div>
     </template>
 
-    <!-- 协议设置：把只读的协议中心补成可配置（列表 / 详情 / 校验 / 保存） -->
+    <!-- 协议设置 / CLI：列表页保留入口，内容改为弹窗 -->
     <section class="set-sec" data-model-settings-protocol>
-      <button type="button" class="mp2-block-head" data-model-settings-protocol-toggle @click="protocolOpen = !protocolOpen">
-        <b>{{ tr("协议设置") }}</b>
-        <small>{{ protocolOpen ? tr("收起") : tr("展开") }}</small>
-      </button>
-      <div v-show="protocolOpen" data-model-settings-protocol-container>
-        <ProtocolSettingsPanel />
+      <div class="setting-row">
+        <span class="set-lab">{{ tr("协议设置") }}<small>{{ tr("查看、校验与保存自定义协议") }}</small></span>
+        <DsButton variant="secondary" size="sm" data-model-settings-protocol-toggle @click="protocolDialogOpen = true">{{ tr("打开协议设置") }}</DsButton>
       </div>
     </section>
 
-    <!-- CLI：本机命令行工具的安装、登录、模型与额度（通道 cli:command） -->
     <section class="set-sec" data-model-settings-cli>
-      <button type="button" class="mp2-block-head" data-model-settings-cli-toggle @click="cliOpen = !cliOpen">
-        <b>CLI</b>
-        <small>{{ cliOpen ? tr("收起") : tr("展开") }}</small>
-      </button>
-      <div v-show="cliOpen" data-model-settings-cli-container>
-        <CliPanel />
+      <div class="setting-row">
+        <span class="set-lab">CLI<small>{{ tr("本机命令行工具的安装、登录、模型与额度") }}</small></span>
+        <DsButton variant="secondary" size="sm" data-model-settings-cli-toggle @click="cliDialogOpen = true">{{ tr("打开 CLI 设置") }}</DsButton>
       </div>
     </section>
+
+    <DsDialog class="mp2-form-dialog" :open="providerDialogOpen" :title="providerDialogMode === 'create' ? tr('添加服务商') : tr('编辑服务商')" @close="closeProviderDialog">
+      <ProviderForm
+        :key="providerDialogMode + ':' + (editingProviderId || 'new') + ':' + providerDialogSeq"
+        ref="providerFormRef"
+        :mode="providerDialogMode"
+        :busy="busy"
+        :known-protocols="knownProtocols"
+        :initial="providerDialogMode === 'edit' && current ? {
+          providerId: current.providerId,
+          displayName: current.displayName,
+          baseUrl: current.baseUrl,
+          endpointScope: current.endpointScope,
+          scope: current.scope,
+          status: current.status,
+          allowInsecureHttp: current.allowInsecureHttp,
+          adapterType: current.adapterType,
+          credentialConfigured: !!credStatus[current.providerId]?.configured,
+        } : undefined"
+        @submit="onProviderSubmit"
+        @invalid="onProviderInvalid"
+        @cancel="closeProviderDialog"
+      />
+    </DsDialog>
+
+    <DsDialog class="mp2-wide-dialog" :open="protocolDialogOpen" :title="tr('协议设置')" @close="protocolDialogOpen = false">
+      <div data-model-settings-protocol-container><ProtocolSettingsPanel /></div>
+      <template #footer><button class="primary" type="button" @click="protocolDialogOpen = false">{{ tr("关闭") }}</button></template>
+    </DsDialog>
+
+    <DsDialog class="mp2-wide-dialog" :open="cliDialogOpen" :title="tr('CLI 设置')" @close="cliDialogOpen = false">
+      <div data-model-settings-cli-container><CliPanel /></div>
+      <template #footer><button class="primary" type="button" @click="cliDialogOpen = false">{{ tr("关闭") }}</button></template>
+    </DsDialog>
   </div>
 </template>
 
@@ -780,6 +810,12 @@ onMounted(() => { void loadEgress(); });
 .mp2-logo-brand { background: transparent; width: auto; min-width: 30px; max-width: 96px; padding: 0 3px; color: var(--text); }
 .mp2-logo-mark { width: 18px; height: 18px; background-color: currentColor; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; -webkit-mask-size: contain; mask-size: contain; }
 .mp2-logo img { display: block; max-width: 90px; max-height: 20px; object-fit: contain; }
+
+/* task-56：设置弹窗尺寸与内部滚动 */
+.mp2-form-dialog :deep(.dialog) { width: min(560px, calc(100% - 64px)); max-height: calc(100% - 64px); display: flex; flex-direction: column; }
+.mp2-form-dialog :deep(.dialog-body) { overflow: auto; min-height: 0; }
+.mp2-wide-dialog :deep(.dialog) { width: min(880px, calc(100% - 64px)); max-height: calc(100% - 64px); display: flex; flex-direction: column; }
+.mp2-wide-dialog :deep(.dialog-body) { overflow: auto; min-height: 0; }
 
 /* task-47：模型页重排 —— 两栏紧凑、左栏不空荡、窄窗单栏；字阶/间距统一到设置页 token。 */
 .d401-settings { padding-bottom: var(--space-3); }

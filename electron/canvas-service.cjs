@@ -774,8 +774,8 @@ class CanvasService {
     const r = this.#load(context, canvasId, { needEdit: true });
     if (!r.ok) return r;
     if (!this.taskService || !this.modelService) return fail("RUN_UNAVAILABLE");
-    const k = kind === "image" ? "image" : "chat";
-    const capability = k === "image" ? "image-generation" : "chat";
+    const k = kind === "image" ? "image" : kind === "video" ? "video" : "chat";
+    const capability = k === "image" ? "image-generation" : k === "video" ? "video-generation" : "chat";
     const resolved = this.modelService.resolveModel({ context: { ...context, appId: "canvas" }, capability });
     if (!resolved.ok) return fail(resolved.error);
     // 任务**不绑定**模型配置：每次调用都由 ModelService 按 run 的能力重新解析并授权
