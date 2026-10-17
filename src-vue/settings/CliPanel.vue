@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import DsButton from "../design-system/DsButton.vue";
+import { ChevronDown } from "lucide-vue-next";
 import { t } from "../i18n";
 import {
   cliErrorText,
@@ -166,7 +167,7 @@ onMounted(load);
     <p v-if="!hasBridge" class="cli-msg cli-msg-bad" data-cli-no-bridge>{{ cliErrorText("NO_BRIDGE") }}</p>
     <template v-else>
       <div class="cli-bar">
-        <span class="set-cap">{{ t("列出本机命令行工具的安装状态、登录、模型与额度。CLI 由后端的 cli:command 通道提供。") }}</span>
+        <span class="set-cap">{{ t("本机安装的命令行工具：安装状态、登录、可用模型与额度。") }}</span>
         <span class="toolbar-spacer" />
         <small v-if="busyHint" class="set-cap">{{ busyHint }}</small>
         <DsButton variant="ghost" size="sm" data-cli-reload :disabled="loading" @click="load">{{ loading ? t("读取中…") : t("重新读取") }}</DsButton>
@@ -185,22 +186,19 @@ onMounted(load);
         >
           <header class="cli-head" :data-cli-expand="tool.id" @click="toggle(tool)">
             <b>{{ tool.name || tool.id }}</b>
-            <span class="cli-badge" :data-tone="tool.installed ? 'ok' : 'off'" :data-cli-state="tool.installed ? 'installed' : 'missing'">{{ cliInstalledText(tool.installed) }}</span>
-            <small v-if="tool.version" class="mono" data-cli-version>{{ tool.version }}</small>
+            <span class="ds-badge ds-badge--sm" :class="tool.installed ? 'ds-badge--neutral' : 'ds-badge--warning'" :data-tone="tool.installed ? 'ok' : 'off'" :data-cli-state="tool.installed ? 'installed' : 'missing'">{{ cliInstalledText(tool.installed) }}</span>
+            <small v-if="tool.version" class="cli-ver" data-cli-version>{{ tool.version }}</small>
             <span class="toolbar-spacer" />
-            <span class="set-cap">{{ expanded === tool.id ? t("收起") : t("展开") }}</span>
+            <ChevronDown :size="14" class="cli-chev" :class="{ open: expanded === tool.id }" />
           </header>
 
-          <p v-if="tool.detail" class="set-cap" data-cli-detail>{{ tool.detail }}</p>
+          <p v-if="tool.detail && tool.installed" class="set-cap" data-cli-detail>{{ tool.detail }}</p>
           <p v-if="!tool.installed" class="cli-hint" data-cli-install-hint>{{ cliInstallHint(tool) }}</p>
-
-          <div v-if="tool.capabilities.length" class="cli-caps" data-cli-capabilities>
-            <span v-for="cap in tool.capabilities" :key="cap" class="cli-cap">{{ cap }}</span>
-          </div>
 
           <p v-if="toolError[tool.id]" class="cli-msg cli-msg-bad" data-cli-tool-error :data-cli-error-code="toolError[tool.id]!.code">{{ toolError[tool.id]!.text }}</p>
 
           <div v-if="expanded === tool.id" class="cli-body" data-cli-body>
+            <p v-if="tool.detail && !tool.installed" class="set-cap" data-cli-detail-missing>{{ tool.detail }}</p>
             <div class="cli-actions">
               <DsButton variant="secondary" size="sm" data-cli-action="status" :disabled="isBusy(tool.id, 'cli/status')" @click="refreshStatus(tool.id)">{{ t("状态") }}</DsButton>
               <DsButton variant="secondary" size="sm" data-cli-action="models" :disabled="isBusy(tool.id, 'cli/models')" @click="loadModels(tool.id)">{{ t("模型列表") }}</DsButton>
@@ -250,7 +248,7 @@ onMounted(load);
         </article>
       </div>
 
-      <p v-if="!tools.length && !loading" class="set-cap" data-cli-empty>{{ t("后端没有返回任何 CLI 工具。") }}</p>
+      <p v-if="!tools.length && !loading" class="set-cap" data-cli-empty>{{ t("没有检测到命令行工具。") }}</p>
     </template>
   </div>
 </template>
@@ -259,18 +257,17 @@ onMounted(load);
 .cli { display: flex; flex-direction: column; gap: 10px; }
 .cli-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .cli-list { display: flex; flex-direction: column; gap: 8px; }
-.cli-card { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: var(--radius-md); background: rgb(var(--text-rgb) / 0.035); }
+.cli-card { display: flex; flex-direction: column; gap: 6px; padding: 12px 16px; border-radius: var(--radius-lg); background: rgb(var(--text-rgb) / 0.035); }
 .cli-head { display: flex; align-items: center; gap: 8px; cursor: pointer; }
-.cli-head b { font-size: var(--fs-secondary); font-weight: var(--fw-medium); }
-.cli-badge { padding: 1px 7px; border-radius: var(--radius-pill); font-size: var(--fs-micro); border: 1px solid var(--line); color: var(--muted); }
-.cli-badge[data-tone="ok"] { color: var(--accent); border-color: var(--accent); }
-.cli-badge[data-tone="off"] { color: var(--failed); border-color: var(--failed); }
-.cli-hint { font-size: var(--fs-caption); color: var(--text); padding: 6px 8px; border-radius: var(--radius-sm); background: var(--sunken); }
+.cli-head b { font-size: var(--fs-body); font-weight: var(--fw-medium); }
+.cli-card .set-cap { margin: 0; }
+.cli-ver { color: var(--muted); font-size: var(--fs-caption); }
+.cli-chev { color: var(--muted); transition: transform var(--quick, 0.15s) var(--ease, ease); }
+.cli-chev.open { transform: rotate(180deg); }
+.cli-hint { margin: 0; font-size: var(--fs-caption); color: var(--muted); }
 .cli-msg { font-size: var(--fs-caption); color: var(--text); }
 .cli-msg-bad { color: var(--failed); }
-.cli-caps { display: flex; flex-wrap: wrap; gap: 4px; }
-.cli-cap { padding: 1px 7px; border-radius: var(--radius-pill); border: 1px solid var(--line); font-size: var(--fs-micro); color: var(--muted); }
-.cli-body { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
+.cli-body { display: flex; flex-direction: column; gap: 8px; box-shadow: inset 0 0.5px 0 var(--line); padding-top: 10px; }
 .cli-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .cli-block { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-caption); }
 .cli-block b { font-weight: var(--fw-medium); font-size: var(--fs-caption); }

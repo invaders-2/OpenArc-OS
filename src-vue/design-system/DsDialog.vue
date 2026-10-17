@@ -55,7 +55,13 @@ watch(
     if (open) {
       returnTo = document.activeElement as HTMLElement;
       document.addEventListener("keydown", onKey, true);
-      requestAnimationFrame(() => focusables()[0]?.focus());
+      // 先聚焦第一个输入框；没有输入框就聚焦面板本身——不把焦点（和焦点环）放到关闭按钮上（设计语言 §3.4）
+      requestAnimationFrame(() => {
+        const field = panel.value?.querySelector<HTMLElement>(
+          ".dialog-body input:not([disabled]):not([type=hidden]),.dialog-body textarea:not([disabled])",
+        );
+        (field || panel.value)?.focus({ preventScroll: true });
+      });
     } else {
       document.removeEventListener("keydown", onKey, true);
       if (returnTo && document.contains(returnTo)) returnTo.focus();
@@ -69,7 +75,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKey, true));
 
 <template>
   <div v-if="open" class="dialog-shade" @pointerdown.self="emit('close')">
-    <div ref="panel" class="dialog" role="dialog" aria-modal="true" :aria-label="ariaLabel || title">
+    <div ref="panel" class="dialog" role="dialog" tabindex="-1" aria-modal="true" :aria-label="ariaLabel || title">
       <div class="dialog-heading">
         <strong>{{ title }}</strong>
         <button :aria-label="'关闭' + title" @click="emit('close')"><X :size="17" /></button>

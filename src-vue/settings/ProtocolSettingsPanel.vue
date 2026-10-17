@@ -20,7 +20,6 @@ import {
   parseProtocolDraft,
   protocolEngineText,
   protocolExecutionView,
-  protocolPortedText,
   protocolSaveView,
   protocolSettingsErrorText,
   protocolSourceText,
@@ -88,7 +87,6 @@ const facts = (it: ProtocolItem) => {
     ["来源", protocolSourceText(it.source)],
     ["执行方式", protocolEngineText(it.engine)],
     ["可执行性", t(execution.label)],
-    ["移植状态", protocolPortedText(it.ported)],
     ["版本", it.activeVersion == null ? t("未返回") : "v" + String(it.activeVersion)],
     ["能力", protocolCapabilitiesText(it) || t("未返回")],
   ];
@@ -183,9 +181,9 @@ onMounted(load);
 <template>
   <div class="pset" data-protocol-settings>
     <div class="pset-bar">
-      <span class="pset-filters">
+      <span class="pset-filters pset-seg">
         <button
-          v-for="k in [['all', '全部'], ['model', '模型协议'], ['provider', '供应商协议']] as const"
+          v-for="k in [['all', '全部'], ['model', '模型协议'], ['provider', '服务商协议']] as const"
           :key="k[0]"
           type="button"
           class="pset-chip"
@@ -194,7 +192,7 @@ onMounted(load);
           @click="kind = k[0]"
         >{{ t(k[1]) }} <small>{{ k[0] === "all" ? items.length : count((it) => it.kind === k[0]) }}</small></button>
       </span>
-      <span class="pset-filters">
+      <span class="pset-filters pset-seg">
         <button
           v-for="s in (['all', 'ok', 'cond', 'off'] as const)"
           :key="s"
@@ -210,7 +208,7 @@ onMounted(load);
     </div>
 
     <p v-if="errorCode" class="pset-msg pset-msg-bad" data-protocol-settings-error :data-protocol-settings-error-code="errorCode">
-      {{ modelProtocolErrorText(errorCode) }}{{ t("（原始码见 data-protocol-settings-error-code）") }}
+      {{ modelProtocolErrorText(errorCode) }}
     </p>
     <p v-else-if="problem" class="pset-msg">{{ problem }}</p>
 
@@ -247,7 +245,7 @@ onMounted(load);
           </span>
           <span class="pset-row-main">
             <b>{{ it.label || it.id }}</b>
-            <small class="mono">{{ it.id }}</small>
+            <small>{{ it.id }}</small>
           </span>
           <span class="pset-dot" :data-s="statusOf(it)">{{ t(STATUS_LABEL[statusOf(it)]) }}</span>
         </button>
@@ -256,13 +254,13 @@ onMounted(load);
       <section v-if="selected" class="pset-detail" :data-protocol-settings-detail="protocolKey(selected)">
         <header class="pset-head">
           <b>{{ selected.label || selected.id }}</b>
-          <span class="mono">{{ selected.id }}</span>
+          <span>{{ selected.id }}</span>
         </header>
 
         <div class="pset-facts">
           <div v-for="f in facts(selected)" :key="f[0]" class="pset-fact">
-            <span class="set-lab">{{ t(f[0]) }}</span>
-            <span class="set-val">{{ t(f[1]) }}</span>
+            <span class="pset-fact-k">{{ t(f[0]) }}</span>
+            <span class="pset-fact-v">{{ t(f[1]) }}</span>
           </div>
         </div>
         <p v-if="statusOf(selected) !== 'ok'" class="pset-msg" data-protocol-settings-premise>
@@ -273,32 +271,33 @@ onMounted(load);
         <p v-else-if="detailError" class="pset-msg" data-protocol-settings-detail-note>{{ detailError }}</p>
         <template v-else-if="detail && detail.found">
           <p v-if="detail.summary && detail.summary !== '未返回'" class="pset-summary">{{ detail.summary }}</p>
-          <div class="pset-groups">
-            <span v-for="g in detail.groups" :key="g.key" class="pset-chip pset-chip-static" :class="{ on: g.declared }">
+          <p class="pset-groups">
+            <span v-for="g in detail.groups" :key="g.key" class="pset-group" :class="{ on: g.declared }">
               {{ g.label.split(" ")[0] }} {{ g.declared ? g.count : t("未声明") }}
             </span>
-          </div>
+          </p>
           <table v-if="detail.operations.length" class="pset-table" data-protocol-settings-operations>
             <thead><tr><th>{{ t("接口") }}</th><th>{{ t("方法") }}</th><th>{{ t("路径") }}</th></tr></thead>
-            <tbody><tr v-for="op in detail.operations" :key="op.id"><td class="mono">{{ op.id }}</td><td>{{ op.method }}</td><td class="mono">{{ op.path }}</td></tr></tbody>
+            <tbody><tr v-for="op in detail.operations" :key="op.id"><td>{{ op.id }}</td><td>{{ op.method }}</td><td class="mono">{{ op.path }}</td></tr></tbody>
           </table>
           <table v-if="detail.workflows.length" class="pset-table" data-protocol-settings-workflows>
             <thead><tr><th>{{ t("工作流") }}</th><th>{{ t("提交接口") }}</th></tr></thead>
-            <tbody><tr v-for="wf in detail.workflows" :key="wf.id"><td class="mono">{{ wf.id }}</td><td class="mono">{{ wf.submit }}</td></tr></tbody>
+            <tbody><tr v-for="wf in detail.workflows" :key="wf.id"><td>{{ wf.id }}</td><td>{{ wf.submit }}</td></tr></tbody>
           </table>
           <table v-if="detail.profiles.length" class="pset-table" data-protocol-settings-profiles>
             <thead><tr><th>{{ t("模型") }}</th><th>{{ t("名称") }}</th><th>{{ t("能力") }}</th><th>{{ t("工作流") }}</th></tr></thead>
-            <tbody><tr v-for="pf in detail.profiles" :key="pf.id"><td class="mono">{{ pf.id }}</td><td>{{ pf.label }}</td><td>{{ pf.capabilities.length ? pf.capabilities.join("、") : t("未声明") }}</td><td>{{ pf.workflowCount }}</td></tr></tbody>
+            <tbody><tr v-for="pf in detail.profiles" :key="pf.id"><td>{{ pf.id }}</td><td>{{ pf.label }}</td><td>{{ pf.capabilities.length ? pf.capabilities.join("、") : t("未声明") }}</td><td>{{ pf.workflowCount }}</td></tr></tbody>
           </table>
           <p class="set-cap">{{ t("版本 v{version} · 校验值", { version: detail.version }) }} <code>{{ String(detail.hash).slice(0, 12) }}</code></p>
         </template>
 
-        <div class="pset-editor" data-protocol-settings-editor>
+        <details class="pset-editor" data-protocol-settings-editor>
+          <summary>{{ t("高级：校验或保存自定义协议") }}</summary>
           <div class="pset-editor-head">
-            <b>{{ t("校验 / 保存自定义协议") }}</b>
+            <span class="set-cap">{{ t("粘贴协议定义 JSON，先校验再保存；只写入本机协议库。") }}</span>
             <select class="set-select" data-protocol-settings-draft-kind :value="draftKind" @change="onDraftKind">
-              <option value="model">{{ t("模型协议（model）") }}</option>
-              <option value="provider">{{ t("供应商协议（provider）") }}</option>
+              <option value="model">{{ t("模型协议") }}</option>
+              <option value="provider">{{ t("服务商协议") }}</option>
             </select>
           </div>
           <textarea
@@ -336,7 +335,7 @@ onMounted(load);
             :data-protocol-settings-error-code="saveView.code || ''"
             :data-protocol-settings-entry-id="saveView.entryId || ''"
           >{{ saveView.text }}</p>
-        </div>
+        </details>
       </section>
       <section v-else class="pset-detail pset-detail-empty">
         <p class="set-cap">{{ t("从左边选一个协议，查看它的接口、工作流与可执行性；也可以在下方直接校验、保存自定义协议。") }}</p>
@@ -346,45 +345,53 @@ onMounted(load);
 </template>
 
 <style scoped>
-.pset { display: flex; flex-direction: column; gap: 10px; }
+.pset { display: flex; flex-direction: column; gap: 12px; }
 .pset-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.pset-filters { display: inline-flex; flex-wrap: wrap; gap: 4px; }
-.pset-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: var(--radius-pill); border: 1px solid var(--line); background: transparent; color: var(--text); font-size: var(--fs-caption); }
-.pset-chip small { color: var(--muted); }
-.pset-chip.on { border-color: var(--accent); color: var(--accent); }
-.pset-chip-static { cursor: default; }
-.pset-body { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 12px; align-items: start; }
-.pset-list { display: flex; flex-direction: column; gap: 2px; max-height: 420px; overflow: auto; padding: 4px; border-radius: var(--radius-md); background: rgb(var(--text-rgb) / 0.035); }
-.pset-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border-radius: var(--radius-sm); background: transparent; color: var(--text); text-align: left; }
+/* 筛选：分段控件（sunken 轨道 + 选中项抬起），不用描边胶囊（设计语言 §3.1 选中态 / §6 DsSegmented） */
+.pset-seg { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 2px; border-radius: var(--radius-md); background: var(--sunken); }
+.pset-chip { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: var(--fs-caption); cursor: pointer; }
+.pset-chip small { color: var(--muted); font-size: var(--fs-micro); }
+.pset-chip:hover { color: var(--text); }
+.pset-chip.on { background: rgb(var(--content-rgb) / 1); color: var(--text); font-weight: var(--fw-medium); box-shadow: 0 0.5px 2px rgb(0 0 0 / 0.12); }
+.pset-body { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.pset-list { display: flex; flex-direction: column; gap: 2px; max-height: 460px; overflow: auto; scrollbar-width: none; padding: 4px; border-radius: var(--radius-lg); background: rgb(var(--text-rgb) / 0.035); }
+.pset-list::-webkit-scrollbar { display: none; }
+.pset-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border-radius: var(--radius-md); background: transparent; color: var(--text); text-align: left; }
 .pset-row:hover { background: var(--row-hover); }
 .pset-row.on { background: rgb(var(--sidebar-selected-rgb, 224 224 224)); }
 .pset-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .pset-row-main b { font-weight: var(--fw-medium); font-size: var(--fs-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pset-row-main small { color: var(--muted); font-size: var(--fs-micro); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pset-logo { flex: none; width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: var(--sunken); color: var(--text); font-size: var(--fs-caption); font-weight: var(--fw-medium); overflow: hidden; }
-.pset-logo[data-protocol-settings-logo-kind="brand"] { background: transparent; width: auto; min-width: 30px; max-width: 96px; padding: 0 3px; color: var(--text); }
+.pset-row-main small { color: var(--muted); font-size: var(--fs-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pset-logo { flex: none; width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--sunken); color: var(--text); font-size: var(--fs-caption); font-weight: var(--fw-medium); overflow: hidden; }
+.pset-logo[data-protocol-settings-logo-kind="brand"] { background: transparent; width: auto; min-width: 28px; max-width: 96px; padding: 0 3px; color: var(--text); }
 .pset-logo-mark { width: 18px; height: 18px; background-color: currentColor; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; -webkit-mask-size: contain; mask-size: contain; }
 .pset-logo img { display: block; max-width: 90px; max-height: 20px; object-fit: contain; }
-.pset-dot { flex: none; font-size: var(--fs-micro); color: var(--muted); }
-.pset-dot[data-s="ok"] { color: var(--accent); }
+.pset-dot { flex: none; font-size: var(--fs-caption); color: var(--muted); }
 .pset-dot[data-s="off"] { color: var(--failed); }
-.pset-detail { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.pset-detail { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .pset-head { display: flex; align-items: baseline; gap: 8px; }
-.pset-head b { font-size: var(--fs-secondary); }
-.pset-head span { color: var(--muted); font-size: var(--fs-micro); }
-.pset-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; }
-.pset-fact { display: flex; gap: 6px; font-size: var(--fs-caption); }
-.pset-facts .set-lab { color: var(--muted); }
-.pset-summary { font-size: var(--fs-caption); color: var(--text); }
-.pset-groups { display: flex; flex-wrap: wrap; gap: 4px; }
+.pset-head b { font-size: var(--fs-headline); font-weight: var(--fw-medium); }
+.pset-head span { color: var(--muted); font-size: var(--fs-caption); }
+.pset-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 16px; padding: 12px 16px; border-radius: var(--radius-lg); background: rgb(var(--text-rgb) / 0.035); }
+.pset-fact { display: flex; gap: 12px; font-size: var(--fs-secondary); min-width: 0; }
+.pset-fact-k { flex: none; width: 64px; color: var(--muted); }
+.pset-fact-v { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pset-summary { margin: 0; font-size: var(--fs-secondary); color: var(--text); line-height: 1.6; }
+.pset-groups { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: var(--fs-caption); color: var(--muted); }
+.pset-group.on { color: var(--text); }
 .pset-table { width: 100%; border-collapse: collapse; font-size: var(--fs-caption); }
-.pset-table th, .pset-table td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); }
-.pset-table th { color: var(--muted); font-weight: var(--fw-medium); }
-.pset-msg { font-size: var(--fs-caption); color: var(--text); }
+.pset-table th, .pset-table td { text-align: left; padding: 6px 8px; box-shadow: inset 0 -0.5px 0 var(--line); }
+.pset-table th { color: var(--muted); font-weight: var(--fw-regular); }
+.pset-msg { margin: 0; font-size: var(--fs-caption); color: var(--text); }
 .pset-msg-bad { color: var(--failed); }
-.pset-editor { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: var(--radius-md); background: rgb(var(--text-rgb) / 0.035); }
+.pset-editor { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; border-radius: var(--radius-lg); background: rgb(var(--text-rgb) / 0.035); }
+.pset-editor > summary { cursor: pointer; font-size: var(--fs-secondary); color: var(--muted); list-style: none; }
+.pset-editor > summary::-webkit-details-marker { display: none; }
+.pset-editor[open] > summary { color: var(--text); margin-bottom: 4px; }
 .pset-editor-head { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
-.pset-draft { width: 100%; box-sizing: border-box; resize: vertical; padding: 8px; border-radius: var(--radius-sm); border: 1px solid var(--line); background: var(--sunken); color: var(--text); font-size: var(--fs-micro); line-height: var(--lh-normal); }
+.pset-editor-head .set-cap { margin: 0; }
+.pset-draft { width: 100%; box-sizing: border-box; resize: vertical; padding: 8px 10px; border: 0; border-radius: var(--radius-md); background: var(--sunken); color: var(--text); font-size: var(--fs-caption); line-height: var(--lh-normal); }
+.pset-draft:focus { outline: none; background: rgb(var(--text-rgb) / 0.1); }
 .pset-editor-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pset-issues { margin: 0; padding-left: 18px; font-size: var(--fs-caption); color: var(--failed); }
 .pset-detail-empty { padding: 10px; }

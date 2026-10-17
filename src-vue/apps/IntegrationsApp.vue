@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { Activity, ExternalLink, ListChecks, Palette, PenTool, PlugZap, RefreshCw, ShieldCheck } from "lucide-vue-next";
+import { ExternalLink, ListChecks, Palette, PenTool, PlugZap, RefreshCw, ShieldCheck } from "lucide-vue-next";
 import DsBadge from "../design-system/DsBadge.vue";
 import DsButton from "../design-system/DsButton.vue";
 import DsDialog from "../design-system/DsDialog.vue";
@@ -68,6 +68,8 @@ type LogEntry = { at: number; command: string; ok: boolean; code?: string; detai
 const bridge = domainBridge(typeof window === "undefined" ? null : window, "integration");
 const hasBridge = ref(!!bridge);
 const shell = useShellStore();
+/** 插件声明的运行时能力 → 人能看懂的名字（未知 id 原样显示）。 */
+const CAPABILITY_TEXT: Record<string, string> = { fetch: "联网", safeStorage: "系统钥匙串" };
 
 const allAudit = ref(false);
 const loading = ref(false);
@@ -626,7 +628,7 @@ onMounted(() => {
         <span class="split-nav-label">全部命令与审计</span>
         <small class="integr-count">{{ catalog.length }}</small>
       </button>
-      <p class="integr-side-note">插件默认全部关闭；启用不改依赖、不联网。连通测试只访问各服务登记的主机，不读取凭据。</p>
+      <p class="integr-side-note">服务默认全部关闭，启用后才会联网。连通测试只访问该服务自己的地址，不读取密钥。</p>
     </nav>
 
     <div class="split-main integr-main">
@@ -636,8 +638,7 @@ onMounted(() => {
         <span v-else-if="allAudit" class="badge">{{ catalog.length }} 条命令 · {{ logEntries.length }} 条记录</span>
         <div class="toolbar-spacer" />
         <DsBadge v-if="summary" size="sm" class="integr-summary">
-          <Activity :size="12" />
-          {{ summary.commands }} 条命令 · 已启用 {{ enabledCount }}/{{ plugins.length }}
+          已启用 {{ enabledCount }}/{{ plugins.length }}
         </DsBadge>
         <DsButton size="sm" variant="ghost" :status="loading ? 'loading' : 'idle'" data-integrations-refresh @click="loadOverview">
           <RefreshCw :size="13" /> 刷新
@@ -910,8 +911,8 @@ onMounted(() => {
             </section>
 
             <section class="integr-sec">
-              <h3>声明能力</h3>
-              <p class="integr-note">{{ current.capabilities.length ? current.capabilities.join(" / ") : "无运行时能力依赖" }}</p>
+              <h3>需要的系统能力</h3>
+              <p class="integr-note">{{ current.capabilities.length ? current.capabilities.map((c: string) => CAPABILITY_TEXT[c] || c).join("、") : "不需要额外的系统能力" }}</p>
               <p class="integr-note">必需依赖 {{ current.requiredDependencies.length }} 项 · 可选依赖 {{ current.optionalDependencies.length }} 项 · 版本 v{{ current.version }}</p>
             </section>
           </section>

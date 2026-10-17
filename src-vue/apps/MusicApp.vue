@@ -680,7 +680,7 @@ onMounted(() => {
             <input type="range" min="0" :max="musicState.duration || 0" step="0.1" :value="musicState.time" :aria-label="t('播放进度')" :disabled="source !== 'finder' || !currentTrack" @input="onSeek" />
             <small>{{ fmt(musicState.duration) }}</small>
           </div>
-          <p v-if="source === 'library'" class="music-playback-note" data-music-playback-unavailable>{{ t("音乐库曲目暂不能播放：媒体域没有读取曲目字节 / 流式 Range 的命令，曲目 id 是路径哈希且绝对路径不出主进程。访达来源仍可用只读文件协议播放。") }}</p>
+          <p v-if="source === 'library'" class="music-playback-note" data-music-playback-unavailable>{{ t("音乐库里的曲目暂时还不能播放；访达里的音频可以正常播放。") }}</p>
           <p v-if="source === 'library' && finderPlayingHint" class="music-playback-note" data-music-shared-player>{{ finderPlayingHint }}</p>
         </div>
       </div>

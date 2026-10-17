@@ -2594,7 +2594,10 @@ input[type="search"]:focus-visible {
 }
 .dialog {
   width: min(460px, calc(100% - 64px));
-  padding: 18px;
+  max-height: calc(100% - 48px);
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
   border-radius: var(--radius-xl);
   background: rgb(var(--surface-rgb) / var(--surface-alpha));
   backdrop-filter: var(--glass-filter-large, var(--glass-filter));
@@ -2609,8 +2612,13 @@ input[type="search"]:focus-visible {
 }
 .dialog-heading strong {
   font-weight: var(--fw-medium);
-  font-size: var(--fs-title);
+  font-size: var(--fs-headline);
+  line-height: 22px;
 }
+.dialog:focus,
+.dialog:focus-visible { outline: none; }
+.dialog-heading { flex: none; }
+.dialog-footer { flex: none; }
 .dialog-heading button {
   display: flex;
   align-items: center;
@@ -2621,10 +2629,15 @@ input[type="search"]:focus-visible {
 .dialog-heading button:hover {
   background: var(--row-hover);
 }
+.dialog-heading button:focus:not(:focus-visible) { outline: none; }
 .dialog-body {
-  margin-top: 12px;
+  margin-top: 16px;
   font-size: var(--fs-body);
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: none;
 }
+.dialog-body::-webkit-scrollbar { display: none; }
 .dialog-body p {
   margin: 0 0 8px;
 }
@@ -7506,6 +7519,8 @@ label {
   background: rgb(var(--text-rgb) / 0.06); border: 0; outline: none; border-radius: var(--radius-md); padding: 6px 10px;
 }
 .set-input:focus, .set-select:focus { background: rgb(var(--text-rgb) / 0.1); }
+/* 设计语言 §3.4：输入框获得焦点只提亮底色，不出焦点环（键盘导航由提亮的底色表达） */
+.set-input:focus-visible, .set-select:focus-visible { outline: none; }
 .set-input.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: var(--fs-caption); }
 .set-actions { justify-content: flex-end; }
 .set-empty { margin: 0 0 4px; }

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import DsButton from "./DsButton.vue";
+import { Inbox, LoaderCircle, CircleAlert, Lock, WifiOff, CircleSlash, CircleDashed } from "lucide-vue-next";
 
 /**
  * PageState 原语（对齐 src/design-system/page-states.tsx）。
@@ -44,14 +45,15 @@ const props = defineProps<{
   onAction?: () => void;
 }>();
 
-const GLYPH: Record<PageStateKind, string> = {
-  empty: "◌",
-  loading: "◌",
-  error: "!",
-  unauthorized: "⌾",
-  offline: "⊘",
-  unavailable: "—",
-  "partial-result": "◐",
+/** 线性图标 48px（设计语言 1.0 §4-B 空状态）；不用字符 glyph，小字号下看不出是什么。 */
+const GLYPH: Record<PageStateKind, unknown> = {
+  empty: Inbox,
+  loading: LoaderCircle,
+  error: CircleAlert,
+  unauthorized: Lock,
+  offline: WifiOff,
+  unavailable: CircleSlash,
+  "partial-result": CircleDashed,
 };
 
 const role = computed(() => (props.kind === "error" || props.kind === "unauthorized" ? "alert" : "status"));
@@ -65,7 +67,7 @@ const showAction = computed(
 
 <template>
   <div class="ds-page-state" :class="['ds-page-state--' + kind]" :role="role" :aria-live="live" data-ds-comp="page-state" :data-ds-kind="kind">
-    <span class="ds-page-state__glyph" aria-hidden="true">{{ glyph }}</span>
+    <span v-if="kind !== 'loading'" class="ds-page-state__glyph" aria-hidden="true"><component :is="glyph" :size="48" :stroke-width="1.25" /></span>
     <p class="ds-page-state__title">{{ title }}</p>
     <p v-if="description" class="ds-page-state__desc">{{ description }}</p>
     <span v-if="kind === 'loading'" class="ds-spinner" aria-hidden="true" />

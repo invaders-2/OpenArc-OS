@@ -44,14 +44,15 @@
     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
     monospace;
 
-  --fs-display: 27px; /* 页面主标题 h1 */
-  --fs-title: 21px; /* 区块标题 h2 */
-  --fs-heading: 14px; /* 小节标题 h3 / 强调行 */
+  --fs-display: 28px; /* 锁屏日期、欢迎页主标题（设计语言 1.0 D2） */
+  --fs-title: 20px; /* 应用页面主标题，每页最多一个 */
+  --fs-headline: 15px; /* 区域标题、卡片标题、对话框标题 */
+  --fs-heading: var(--fs-headline); /* 已废弃（D2）：14 与正文同大，统一指向 headline 15 */
   --fs-body: 14px; /* 正文与控件基座 */
   --fs-secondary: 13px; /* 次要正文、按钮、导航 */
   --fs-caption: 12px; /* 说明文字、标签 */
   --fs-micro: 11px; /* 元信息、状态、tooltip */
-  --fs-eyebrow: 10px; /* 全大写眉标（配 --tracking-wide） */
+  --fs-eyebrow: var(--fs-micro); /* 已废弃（D2）：10 号中文不可读，指向 micro 11 */
   --fs-numeral: 34px; /* 大数字展示（桌面日期小组件；天气当前温度取 1.5 倍），配 --fw-regular / --fw-medium */
   --fs-clock: clamp(58px, 12vh, 118px); /* 锁屏时钟：随窗口高度收敛，小窗不溢出 */
 

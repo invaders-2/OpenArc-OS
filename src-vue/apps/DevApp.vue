@@ -621,9 +621,9 @@ const healthTone = computed<"success" | "warning" | "danger" | "neutral">(() => 
 });
 const healthLabel = computed(() => {
   if (!health.value) return "未读取";
-  if (!health.value.tablesReady) return "数据库表未就绪";
-  if (health.value.degraded) return "部分切片降级";
-  return "全部装配";
+  if (!health.value.tablesReady) return "需要处理";
+  if (health.value.degraded) return "部分功能不可用";
+  return "就绪";
 });
 const passCount = (draft: LabDraft) => (draft.checks || []).filter((item) => item.status === "pass").length;
 const failCount = (draft: LabDraft) => (draft.checks || []).filter((item) => item.status === "fail").length;
@@ -637,7 +637,7 @@ function checkTone(status: string): "success" | "warning" | "danger" | "neutral"
   return "neutral";
 }
 const CHECK_TEXT: Record<string, string> = { pass: "通过", warn: "建议处理", fail: "不通过" };
-const EXT_TEXT: Record<string, string> = { ok: "已装配", degraded: "降级", missing: "未装配" };
+const EXT_TEXT: Record<string, string> = { ok: "可用", degraded: "部分可用", missing: "不可用" };
 
 /** 本机运行环境（只读 UA / 平台；不在模板里写类型断言）。 */
 const ua = typeof navigator === "undefined" ? "" : navigator.userAgent;
@@ -671,7 +671,7 @@ onMounted(() => {
         <small v-if="entry.id === 'lab'" class="integr-count">{{ drafts.length }}</small>
         <small v-if="entry.id === 'collab'" class="integr-count">{{ rooms.length }}</small>
       </button>
-      <p class="planned-note">{{ t("本页的所有数据都来自 developer:command；没有桥、没有会话或切片未装配时如实显示，不放演示数据。") }}</p>
+      <p class="planned-note">{{ t("这里只显示本机真实的开发数据；没有数据时如实留空。") }}</p>
     </nav>
 
     <div class="split-main dev-main">
@@ -689,7 +689,7 @@ onMounted(() => {
         v-if="!hasBridge"
         kind="unavailable"
         :title="t('当前环境没有开发者域的桥')"
-        description="浏览器预览不提供 developer:command；请在 OpenArc 桌面应用中打开开发者。"
+        description="浏览器预览里不能使用开发者工具，请在 OpenArc 桌面应用中打开。"
       />
 
       <div v-else class="dev-scroll">
@@ -705,7 +705,7 @@ onMounted(() => {
               v-else-if="!apps.length"
               kind="empty"
               :title="t('还没有装载本地开发应用')"
-              description="在「实验室」用模板创建草稿，打包 ZIP 后再走 developer/install 才能装载；当前没有可显示的已装应用。"
+              description="在「实验室」用模板创建草稿并打包，安装后会出现在这里。"
             />
             <ul v-else class="integr-rows">
               <li v-for="app in apps" :key="app.appId" class="integr-row dev-app-row" :data-dev-app="app.appId">
@@ -747,7 +747,7 @@ onMounted(() => {
               v-else-if="!drafts.length"
               kind="empty"
               :title="t('实验室里还没有草稿')"
-              description="切到「实验室（沙箱）」用示例模板创建第一份草稿；草稿保存在本机 userData 的 developer-lab 目录。"
+              description="切到「实验室（沙箱）」用示例模板创建第一份草稿；草稿只保存在这台电脑上。"
             />
             <ul v-else class="integr-rows">
               <li v-for="draft in drafts" :key="draft.id" class="integr-row dev-draft-row" :data-dev-draft="draft.id">

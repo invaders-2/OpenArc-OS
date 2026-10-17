@@ -13,19 +13,21 @@
   min-height: 180px;
 }
 .ds-page-state__glyph {
-  font-size: var(--fs-title);
+  display: flex;
   line-height: 1;
   color: var(--muted);
+  opacity: 0.7;
+  margin-bottom: var(--space-1);
 }
 .ds-page-state__title {
   margin: 0;
-  font-size: var(--fs-heading);
+  font-size: var(--fs-headline);
   font-weight: var(--fw-medium);
   color: var(--text);
 }
 .ds-page-state__desc {
   margin: 0;
-  font-size: var(--fs-caption);
+  font-size: var(--fs-secondary);
   color: var(--muted);
   max-width: 380px;
   line-height: var(--lh-relaxed);

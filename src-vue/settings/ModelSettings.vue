@@ -3,6 +3,8 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
 import DsBadge from "../design-system/DsBadge.vue";
 import DsButton from "../design-system/DsButton.vue";
 import DsDialog from "../design-system/DsDialog.vue";
+import { ChevronRight } from "lucide-vue-next";
+import { PROVIDER_PRESETS } from "./providerPresets";
 import CliPanel from "./CliPanel.vue";
 import { t as tr } from "../i18n";
 import ProviderForm from "./ProviderForm.vue";
@@ -494,6 +496,20 @@ const egressBusy = ref(false);
 const egressError = ref<string | null>(null);
 const egressNotice = ref<string | null>(null);
 const egressStatus = computed(() => egressProxyStatusView({ enabled: egress.enabled, url: egress.url }));
+/** 接口类型的人话名字；内部 adapterType 只放在 title 里。 */
+function adapterName(a: string | null | undefined): string {
+  const id = String(a || "").trim();
+  if (!id || id === "openai-compatible") return tr("OpenAI 兼容接口");
+  const preset = PROVIDER_PRESETS.find((p) => p.adapterType === id);
+  return preset ? tr("{name} 接口", { name: tr(preset.name).replace(/[（(].*$/, "").trim() }) : id;
+}
+/** 「通用」卡片里默认模型那一行显示的值：个人默认对话模型的名字，没有就是「自动」。 */
+const defaultChatLabel = computed(() => {
+  const id = defaults.value?.personal?.chat;
+  if (!id) return tr("自动");
+  const m = models.value.find((x) => x.configId === id);
+  return m ? m.displayName || m.remoteModelId : tr("自动");
+});
 
 async function loadEgress() {
   const r = await cmd("model/proxy/get");
@@ -534,12 +550,7 @@ onMounted(() => { void loadEgress(); });
 
     <!-- 模型出网代理：一行紧凑设置（默认关闭；只作用于模型与协议出口） -->
     <!-- 页面：只保留服务商列表 + 添加自定义服务商；详情/默认/代理/协议/CLI 都走弹窗 -->
-    <div class="mp2-provider-toolbar">
-      <DsButton variant="ghost" size="sm" data-model-open-defaults @click="defaultsDialogOpen = true">{{ tr("默认模型") }}</DsButton>
-      <DsButton variant="ghost" size="sm" data-model-open-egress @click="egressDialogOpen = true">{{ tr("出网代理") }}</DsButton>
-      <DsButton variant="ghost" size="sm" data-model-settings-protocol-toggle @click="protocolDialogOpen = true">{{ tr("协议设置") }}</DsButton>
-      <DsButton variant="ghost" size="sm" data-model-settings-cli-toggle @click="cliDialogOpen = true">CLI</DsButton>
-    </div>
+    <h3 class="mp2-sec-title">{{ tr("服务商") }}</h3>
     <div class="mp2-provider-list" data-d4-01-pane="providers" data-d4-01-providers>
       <button v-for="p in providers" :key="p.providerId" type="button" class="mp2-provider-card" :data-d4-01-provider="p.providerId" @click="openProviderView(p.providerId)">
         <span class="mp2-logo" :class="{ 'mp2-logo-brand': providerLogo(p) }" :style="providerLogo(p) ? { color: 'var(--text)' } : { background: logoColor(p.providerId) }" aria-hidden="true">
@@ -556,6 +567,27 @@ onMounted(() => { void loadEgress(); });
       </button>
     </div>
     <p v-if="!providers.length" class="set-cap" data-d4-01-providers-empty>{{ tr("还没有服务商。点击「添加自定义服务商」填写地址与密钥，常见的 OpenAI 兼容服务都可以。") }}</p>
+
+    <!-- 其余设置收成一张分组卡片（原型 A：标签左、值右，点一行打开对应弹窗） -->
+    <h3 class="mp2-sec-title">{{ tr("通用") }}</h3>
+    <div class="set-group mp2-more">
+      <button type="button" class="setting-row mp2-more-row" data-model-open-defaults @click="defaultsDialogOpen = true">
+        <span class="set-lab">{{ tr("默认模型") }}<small>{{ tr("各类任务默认使用的模型，所有应用共用") }}</small></span>
+        <span class="mp2-more-val">{{ defaultChatLabel }}</span><ChevronRight :size="14" class="mp2-more-chev" />
+      </button>
+      <button type="button" class="setting-row mp2-more-row" data-model-open-egress @click="egressDialogOpen = true">
+        <span class="set-lab">{{ tr("出网代理") }}<small>{{ tr("仅用于模型与协议请求") }}</small></span>
+        <span class="mp2-more-val">{{ tr(egressStatus.label) }}</span><ChevronRight :size="14" class="mp2-more-chev" />
+      </button>
+      <button type="button" class="setting-row mp2-more-row" data-model-settings-protocol-toggle @click="protocolDialogOpen = true">
+        <span class="set-lab">{{ tr("接口协议") }}<small>{{ tr("各家服务的调用方式与可用状态") }}</small></span>
+        <span class="mp2-more-val">{{ knownProtocols ? tr("{n} 个", { n: knownProtocols.length }) : "—" }}</span><ChevronRight :size="14" class="mp2-more-chev" />
+      </button>
+      <button type="button" class="setting-row mp2-more-row" data-model-settings-cli-toggle @click="cliDialogOpen = true">
+        <span class="set-lab">{{ tr("命令行工具") }}<small>{{ tr("本机安装的 Codex、Gemini 等 CLI 的登录与额度") }}</small></span>
+        <ChevronRight :size="14" class="mp2-more-chev" />
+      </button>
+    </div>
 
     <DsDialog class="mp2-pdialog" :open="providerViewOpen" :title="current?.displayName || tr('服务商')" @close="providerViewOpen = false">
             <!-- 右：服务商详情 -->
@@ -580,14 +612,14 @@ onMounted(() => { void loadEgress(); });
             <template v-else>{{ mono(current.displayName) }}</template>
           </span>
           <b class="mp2-title">{{ current.displayName }}</b>
-          <span class="badge" :class="{ ok: providerState(current).tone === 'ok', warn: providerState(current).tone === 'warn' }" data-d4-01-provider-status>{{ tr(providerState(current).label) }}</span>
-          <span v-if="current.allowInsecureHttp" class="badge warn" data-d4-01-provider-insecure-badge :title="tr('该站点使用明文 HTTP，凭据与内容可能被中间人读取')" :aria-label="tr('不安全 HTTP：该站点使用明文 HTTP，凭据与内容可能被中间人读取')">{{ tr("不安全 HTTP") }}</span>
+          <span class="ds-badge ds-badge--sm" :class="providerState(current).tone === 'ok' ? 'ds-badge--success' : providerState(current).tone === 'warn' ? 'ds-badge--warning' : 'ds-badge--neutral'" data-d4-01-provider-status>{{ tr(providerState(current).label) }}</span>
+          <span v-if="current.allowInsecureHttp" class="ds-badge ds-badge--sm ds-badge--warning" data-d4-01-provider-insecure-badge :title="tr('该站点使用明文 HTTP，凭据与内容可能被中间人读取')" :aria-label="tr('不安全 HTTP：该站点使用明文 HTTP，凭据与内容可能被中间人读取')">{{ tr("不安全 HTTP") }}</span>
         </div>
-        <h4 class="mp2-card-title">{{ tr("平台信息") }}</h4>
+        <h4 class="mp2-card-title">{{ tr("地址") }}</h4>
         <div class="mp2-field"><span>{{ tr("API 地址") }}</span>
-          <div class="mp2-static mono">{{ current.baseUrl }}<small> · {{ current.scope === "ORGANIZATION" ? tr("组织") : tr("个人") }} · {{ current.adapterType }}</small></div>
+          <div class="mp2-static">{{ current.baseUrl }}<small> · {{ current.scope === "ORGANIZATION" ? tr("组织") : tr("个人") }} · {{ adapterName(current.adapterType) }}</small></div>
         </div>
-        <h4 class="mp2-card-title">{{ tr("API Key") }}</h4>
+        <h4 class="mp2-card-title">{{ tr("密钥") }}</h4>
         <div class="mp2-field"><span>{{ tr("API 密钥") }} <small :data-d4-01-cred-status="current.providerId">{{ credLabel(current.providerId) }}</small></span>
           <div class="mp2-row">
             <input
@@ -606,7 +638,7 @@ onMounted(() => { void loadEgress(); });
         <h4 class="mp2-card-title">{{ tr("连接状态") }}</h4>
         <div class="mp2-row">
           <DsButton variant="secondary" size="sm" :data-d4-01-test="current.providerId" @click="runTest(current.providerId)">{{ tr("测试连接") }}</DsButton>
-          <span v-if="tests[current.providerId]" class="badge" :class="{ ok: tests[current.providerId].ok }" :data-d4-01-test-result="current.providerId">{{ tests[current.providerId].ok ? tr("连接成功") : tr("连接失败") }}</span>
+          <span v-if="tests[current.providerId]" class="ds-badge ds-badge--sm" :class="tests[current.providerId].ok ? 'ds-badge--success' : 'ds-badge--danger'" :data-d4-01-test-result="current.providerId">{{ tests[current.providerId].ok ? tr("连接成功") : tr("连接失败") }}</span>
           <small v-if="tests[current.providerId]" class="set-cap">{{ testLabel(tests[current.providerId]) }}</small>
           <span class="toolbar-spacer" />
           <DsButton variant="secondary" size="sm" :data-d4-01-provider-edit="current.providerId" @click="openProviderEdit(current.providerId)">{{ tr("编辑服务商") }}</DsButton>
@@ -614,20 +646,19 @@ onMounted(() => { void loadEgress(); });
           <DsButton v-else variant="secondary" size="sm" :data-d4-01-provider-enable="current.providerId" @click="setProviderStatus(current.providerId, 'enabled')">{{ tr("启用") }}</DsButton>
         </div>
 
-        <h4 class="mp2-card-title">{{ tr("协议") }}</h4>
+        <h4 class="mp2-card-title">{{ tr("接口类型") }}</h4>
         <div class="mp2-row mp2-protocol-row" data-model-provider-protocol>
-          <span class="mono">{{ current.adapterType }}</span>
-          <small class="set-cap">{{ tr("协议可用性与校验在「协议设置」中查看") }}</small>
+          <span :title="current.adapterType">{{ adapterName(current.adapterType) }}</span>
           <div class="toolbar-spacer" />
-          <DsButton variant="ghost" size="sm" @click="protocolDialogOpen = true">{{ tr("打开协议设置") }}</DsButton>
+          <DsButton variant="ghost" size="sm" @click="protocolDialogOpen = true">{{ tr("查看接口协议") }}</DsButton>
         </div>
 
         <template v-if="imageModels(current.providerId).length">
           <h4 class="mp2-card-title">{{ tr("图片接口") }}</h4>
           <div class="mp2-field" data-d4-01-image-api>
-            <div class="mp2-static mono">{{ current.baseUrl }}<small> · {{ current.adapterType }}</small></div>
+            <div class="mp2-static">{{ current.baseUrl }}<small> · {{ adapterName(current.adapterType) }}</small></div>
             <div class="mp2-row">
-              <span v-for="m in imageModels(current.providerId)" :key="m.configId" class="badge">{{ m.displayName || m.remoteModelId }}</span>
+              <span v-for="m in imageModels(current.providerId)" :key="m.configId" class="ds-badge ds-badge--sm ds-badge--neutral">{{ m.displayName || m.remoteModelId }}</span>
             </div>
           </div>
         </template>
@@ -639,8 +670,8 @@ onMounted(() => { void loadEgress(); });
             <ul class="mp2-models">
               <li v-for="m in group.items" :key="m.configId" :data-d4-01-model="m.configId" :class="{ off: m.status !== 'enabled' }">
                 <div class="mp2-model-row">
-                  <span class="mono mp2-model-id" :title="m.remoteModelId">{{ m.displayName || m.remoteModelId }}</span>
-                  <span v-for="c in m.capabilities" :key="c" class="badge" :class="{ ok: m.verifiedCapabilities.includes(c) }" :title="m.verifiedCapabilities.includes(c) ? tr('已验证') : tr('已声明，未验证')">{{ CAP_SHORT[c] ? tr(CAP_SHORT[c]) : c }}</span>
+                  <span class="mp2-model-id" :title="m.remoteModelId">{{ m.displayName || m.remoteModelId }}</span>
+                  <span v-for="c in m.capabilities" :key="c" class="ds-badge ds-badge--sm" :class="m.verifiedCapabilities.includes(c) ? 'ds-badge--success' : 'ds-badge--neutral'" :title="m.verifiedCapabilities.includes(c) ? tr('已验证') : tr('已声明，未验证')">{{ CAP_SHORT[c] ? tr(CAP_SHORT[c]) : c }}</span>
                   <button class="mp2-link" @click="editingCaps = editingCaps === m.configId ? null : m.configId">{{ tr("编辑") }}</button>
                   <button v-if="m.status === 'enabled'" class="mp2-link" :data-d4-01-model-disable="m.configId" @click="setModelStatus(m.configId, 'disabled')">{{ tr("停用") }}</button>
                   <button v-else class="mp2-link" :data-d4-01-model-enable="m.configId" @click="setModelStatus(m.configId, 'enabled')">{{ tr("启用") }}</button>
@@ -701,10 +732,11 @@ onMounted(() => { void loadEgress(); });
       </div>
     </DsDialog>
 
-    <DsDialog class="mp2-form-dialog" :open="egressDialogOpen" :title="tr('模型出网代理')" @close="egressDialogOpen = false">
-          <div class="set-group mp2-egress" data-model-egress>
+    <DsDialog class="mp2-form-dialog" :open="egressDialogOpen" :title="tr('出网代理')" @close="egressDialogOpen = false">
+          <div class="mp2-egress" data-model-egress>
+      <div class="set-group">
       <div class="setting-row">
-        <span class="set-lab">{{ tr("模型出网代理") }}<small>{{ tr("仅用于模型与协议请求；默认关闭") }}</small></span>
+        <span class="set-lab">{{ tr("通过代理访问模型服务") }}<small>{{ tr("仅用于模型与协议请求；默认关闭") }}</small></span>
         <button
           type="button"
           role="switch"
@@ -715,6 +747,9 @@ onMounted(() => { void loadEgress(); });
           :disabled="egressBusy"
           @click="toggleEgress"
         />
+      </div>
+      <label class="setting-row">
+        <span class="set-lab">{{ tr("代理地址") }}</span>
         <input
           class="set-input mono"
           data-model-egress-url
@@ -727,8 +762,11 @@ onMounted(() => { void loadEgress(); });
           :value="egress.url"
           @input="onEgressUrl"
         />
-        <DsButton variant="secondary" size="sm" data-model-egress-save :disabled="egressBusy || !egress.enabled" @click="saveEgress">{{ tr("保存") }}</DsButton>
-        <DsBadge :tone="egressStatus.tone" data-model-egress-status>{{ tr(egressStatus.label) }}</DsBadge>
+      </label>
+      </div>
+      <div class="mp2-actions mp2-egress-foot">
+        <span class="mp2-egress-state" data-model-egress-status :data-tone="egressStatus.tone">{{ tr(egressStatus.label) }}</span>
+        <DsButton variant="primary" size="sm" data-model-egress-save :disabled="egressBusy" @click="saveEgress">{{ tr("保存") }}</DsButton>
       </div>
       <p v-if="egressNotice" class="set-cap" data-model-egress-hint>{{ tr(egressNotice) }}</p>
       <p v-if="egressError" class="d401-error" role="alert" data-model-egress-error>{{ tr(egressError) }}</p>
@@ -741,10 +779,10 @@ onMounted(() => { void loadEgress(); });
           <!-- 默认模型 -->
     <template v-if="defaults">
       <div class="set-sec" data-d4-01-pane="defaults">
-        <h3>{{ tr("默认模型") }}</h3>
+        <h3>{{ tr("个人默认") }}</h3>
         <p v-if="defaults && !defaults.personal?.chat" class="set-cap" data-d4-01-default-missing>{{ tr("还没有默认对话模型：应用调用模型会失败。注册模型后会自动选择第一个可用的对话模型，也可以在下面手动指定。") }}</p>
         <div class="set-group d401-defaults" data-d4-01-defaults-personal>
-          <label v-for="d in [['chat', '文本对话', 'chat'], ['tool-calling', '工具调用', 'tool'], ['image-generation', '图像生成', 'image'], ['video-generation', '视频生成', 'video'], ['video-generation', '视频生成', 'video']]" :key="d[0]" class="setting-row">
+          <label v-for="d in [['chat', '文本对话', 'chat'], ['tool-calling', '工具调用', 'tool'], ['image-generation', '图像生成', 'image'], ['video-generation', '视频生成', 'video']]" :key="d[0]" class="setting-row">
             <span class="set-lab">{{ tr(d[1]) }}</span>
             <select class="set-select"  v-bind="{ ['data-d4-01-default-personal-' + d[2]]: '' }" :value="defaults.personal[d[0]] || ''" @change="onDefault(d[0], $event, 'PERSONAL')">
               <option v-for="o in defaultOptions(d[0], defaults.personal[d[0]])" :key="o.value + (o.disabled ? ':x' : '')" :value="o.value" :disabled="o.disabled" :data-d4-01-default-unavailable="o.unavailableFor">
@@ -756,7 +794,7 @@ onMounted(() => { void loadEgress(); });
         <p class="set-cap">{{ tr("「自动」表示使用当前服务商下已配置、且能力匹配的模型。所有应用（AI Studio、对话、Skill、短剧工坊……）都用这里的设置。") }}</p>
       </div>
       <div class="set-sec">
-        <h3>{{ tr("组织默认模型") }} <small v-if="!defaults.canManageOrganization" class="muted">{{ tr("（只读）") }}</small></h3>
+        <h3>{{ tr("组织默认") }} <small v-if="!defaults.canManageOrganization" class="muted">{{ tr("（只读）") }}</small></h3>
         <div class="set-group d401-defaults" data-d4-01-defaults-organization>
           <label v-for="d in [['chat', '文本对话', 'chat'], ['tool-calling', '工具调用', 'tool'], ['image-generation', '图像生成', 'image']]" :key="d[0]" class="setting-row">
             <span class="set-lab">{{ tr(d[1]) }}</span>
@@ -768,7 +806,6 @@ onMounted(() => { void loadEgress(); });
           </label>
         </div>
         <p v-if="role !== 'ADMIN'" class="set-cap" data-d4-01-org-hint>{{ tr("组织默认模型需要管理员修改。成员没有设置个人默认时，使用组织默认。") }}</p>
-        <p class="set-cap">{{ tr("协议（各家服务的调用方式与可用状态）可在「协议中心」查看，也可在下面的「协议设置」里校验与保存。") }}</p>
       </div>
     </template>
 
@@ -798,14 +835,12 @@ onMounted(() => { void loadEgress(); });
       />
     </DsDialog>
 
-    <DsDialog class="mp2-wide-dialog" :open="protocolDialogOpen" :title="tr('协议设置')" @close="protocolDialogOpen = false">
+    <DsDialog class="mp2-wide-dialog" :open="protocolDialogOpen" :title="tr('接口协议')" @close="protocolDialogOpen = false">
       <div data-model-settings-protocol-container><ProtocolSettingsPanel /></div>
-      <template #footer><button class="primary" type="button" @click="protocolDialogOpen = false">{{ tr("关闭") }}</button></template>
     </DsDialog>
 
-    <DsDialog class="mp2-wide-dialog" :open="cliDialogOpen" :title="tr('CLI 设置')" @close="cliDialogOpen = false">
+    <DsDialog class="mp2-wide-dialog" :open="cliDialogOpen" :title="tr('命令行工具')" @close="cliDialogOpen = false">
       <div data-model-settings-cli-container><CliPanel /></div>
-      <template #footer><button class="primary" type="button" @click="cliDialogOpen = false">{{ tr("关闭") }}</button></template>
     </DsDialog>
   </div>
 </template>
@@ -821,19 +856,31 @@ onMounted(() => { void loadEgress(); });
 /* task-60：服务商列表页 */
 .mp2-provider-toolbar { display: flex; align-items: center; gap: var(--space-1); flex-wrap: wrap; margin: 4px 0 10px; }
 .mp2-provider-list { display: flex; flex-direction: column; gap: 8px; margin: 6px 0 10px; }
-.mp2-provider-card { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: rgb(var(--text-rgb) / 0.035); color: var(--text); text-align: left; cursor: pointer; }
+.mp2-provider-card { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 16px; border: 0; border-radius: var(--radius-lg); background: rgb(var(--text-rgb) / 0.035); color: var(--text); text-align: left; cursor: pointer; }
 .mp2-provider-card:hover { background: rgb(var(--text-rgb) / 0.06); }
 .mp2-provider-card-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .mp2-provider-card-main b { font-size: var(--fs-secondary); font-weight: var(--fw-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mp2-provider-card-main small { font-size: var(--fs-micro); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mp2-provider-add { border-style: dashed; background: transparent; }
+.mp2-provider-add { background: transparent; }
+.mp2-provider-add:hover { background: rgb(var(--text-rgb) / 0.035); }
+.mp2-sec-title { margin: 18px 0 8px; font-size: var(--fs-secondary); font-weight: var(--fw-medium); color: var(--muted); }
+.mp2-more-row { width: 100%; border: 0; color: var(--text); text-align: left; cursor: pointer; font: inherit; }
+.mp2-more-row:hover { background: rgb(var(--text-rgb) / 0.03) !important; }
+.mp2-more-val { font-size: var(--fs-secondary); color: var(--muted); max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp2-more-chev { flex: none; color: var(--muted); }
+.mp2-egress { display: flex; flex-direction: column; gap: 12px; }
+.mp2-egress .set-group > .setting-row { padding: 12px 16px; }
+.mp2-egress .set-input { width: 260px; max-width: 60%; }
+.mp2-egress-foot { align-items: center; }
+.mp2-egress-state { margin-right: auto; font-size: var(--fs-caption); color: var(--muted); }
+.mp2-egress-state[data-tone="success"] { color: var(--success-text, var(--text)); }
 .mp2-provider-add .mp2-logo { background: var(--sunken); color: var(--text); }
 
 /* task-60：供应商弹窗卡片分区 */
 .mp2-pdialog :deep(.dialog) { width: min(760px, calc(100% - 64px)); max-height: calc(100% - 64px); display: flex; flex-direction: column; }
 .mp2-pdialog :deep(.dialog-body) { overflow: auto; min-height: 0; }
 .mp2-dialog-detail { gap: 10px; }
-.mp2-dialog-detail .mp2-card-title { margin: 8px 0 0; font-size: var(--fs-caption); font-weight: var(--fw-medium); color: var(--muted); }
+.mp2-dialog-detail .mp2-card-title { margin: 8px 0 0; font-size: var(--fs-secondary); font-weight: var(--fw-medium); color: var(--muted); }
 .mp2-dialog-detail > .mp2-field, .mp2-dialog-detail > .mp2-row, .mp2-dialog-detail > .mp2-sub, .mp2-dialog-detail > .mp2-model-group { padding: 10px 12px; border-radius: var(--radius-lg); background: rgb(var(--text-rgb) / 0.035); }
 .mp2-dialog-detail > .mp2-head + .mp2-card-title { margin-top: 2px; }
 .mp2-model-group-title { margin: 4px 0 2px; font-size: var(--fs-caption); font-weight: var(--fw-medium); }
@@ -848,8 +895,6 @@ onMounted(() => { void loadEgress(); });
 
 /* task-47：模型页重排 —— 两栏紧凑、左栏不空荡、窄窗单栏；字阶/间距统一到设置页 token。 */
 .d401-settings { padding-bottom: var(--space-3); }
-.mp2-egress { padding: 8px 12px; gap: 6px; }
-.mp2-egress .setting-row { gap: var(--space-2); }
 .mp2-grid { grid-template-columns: 232px minmax(0, 1fr); gap: 16px; align-items: start; }
 .mp2-provs { position: sticky; top: 8px; align-self: start; max-height: calc(100vh - 280px); overflow: auto; padding: 8px; gap: 2px; }
 .mp2-prov { padding: 7px 8px; }

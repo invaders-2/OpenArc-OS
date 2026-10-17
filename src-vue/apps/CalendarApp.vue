@@ -587,7 +587,7 @@ function addAi() {
         <button type="submit" class="planned-today cal-add-btn" :disabled="!draftTitle.trim()"><Plus :size="12" /> {{ t("添加") }}</button>
       </form>
       <p v-if="notice" class="planned-note" role="status" data-cal-notice>{{ notice }}</p>
-      <p class="planned-note">{{ t("日程与提醒保存在本机（localStorage）；提醒依赖应用运行，应用没运行时到点的提醒会在下次启动时补发并标记「错过」。") }}</p>
+      <p class="planned-note">{{ t("日程和提醒只保存在这台电脑上；应用没打开时到点的提醒，会在下次打开时补发并标记「错过」。") }}</p>
     </nav>
 
     <div class="split-main cal-main">
@@ -675,8 +675,8 @@ function addAi() {
       </section>
 
       <section class="cal-panel" data-cal-ai>
-        <div class="cal-panel-head"><strong>{{ t("AI 建日程") }}</strong><span class="cal-panel-sub">{{ t("本地规则解析") }}</span></div>
-        <p class="cal-hint">{{ t("不调用模型：当前没有模型生成日程的命令通道。这里按本地规则解析日期 / 时间 / 提醒 / 标题，结果先预览、可手改，确认后才写入本机日程。") }}</p>
+        <div class="cal-panel-head"><strong>{{ t("AI 建日程") }}</strong><span class="cal-panel-sub">{{ t("离线识别") }}</span></div>
+        <p class="cal-hint">{{ t("用一句话描述日程，这里会识别日期、时间、提醒和标题；先预览、可修改，确认后才加入日程。不调用模型。") }}</p>
         <div class="cal-ai-input">
           <input v-model="aiText" type="text" :aria-label="t('用一句话描述日程')" :placeholder="t('例如：明天下午 3 点开会，提前 10 分钟提醒')" @keydown.enter.prevent="parseAi" />
           <DsButton size="sm" @click="parseAi"><Sparkles :size="13" :stroke-width="1.5" /> {{ t("解析") }}</DsButton>

@@ -532,8 +532,7 @@ onMounted(() => {
                 <DsBadge size="sm" :tone="card(a).tone">{{ card(a).badge }}</DsBadge>
                 {{ card(a).detail }}
               </div>
-              <div v-if="statuses[a.id] && statuses[a.id]!.loadUrl" class="market-desc mono market-load-url" :data-app-load-url-text="a.id">加载地址：{{ statuses[a.id]!.loadUrl }}</div>
-              <div v-else-if="statuses[a.id] && !statuses[a.id]!.loadable" class="market-desc market-load-url" :data-app-not-loadable="a.id">{{ t("安装包加载：未接入（安装不会生效）") }}</div>
+              <div v-if="statuses[a.id] && !statuses[a.id]!.loadUrl && !statuses[a.id]!.loadable" class="market-desc market-load-url" :data-app-not-loadable="a.id">{{ t("暂不支持安装新版本") }}</div>
             </div>
             <div class="market-btns">
               <button class="market-open" :data-app-open="a.id" @click="shell.activateApp(a.id)">{{ t("打开") }}</button>

@@ -1302,20 +1302,16 @@ async function submitSend() {
       <button type="button" class="split-nav" data-photos-ocr-nav :aria-current="tab === 'ocr'" @click="tab = 'ocr'">
         <ScanText :size="16" :stroke-width="1.25" /> {{ t("文字识别") }}
       </button>
-    </nav>
-
-    <div class="split-main" :data-photos-tab="tab">
-      <div class="photos-view">
-        <!-- ═══════════════════ 图库 ═══════════════════ -->
-        <div v-if="tab === 'library'" class="photos-lib" data-photos-lib="1" :data-photos-state="libraryListState">
-          <aside class="photos-pane photos-lib-side" :aria-label="t('来源与文件夹')">
-            <div class="photos-pane-head">
-              <h3>{{ t("来源") }}</h3>
+      <!-- 图库的来源 / 子目录 / 虚拟文件夹并进左侧栏（原型 B：侧栏 · 网格 · 详情），不再在内容区另起一栏 -->
+      <template v-if="tab === 'library'">
+          <div class="photos-lib-side" :aria-label="t('来源与文件夹')">
+            <div class="split-section photos-side-head">
+              <span>{{ t("来源") }}</span>
               <button type="button" class="ds-iconbtn ds-iconbtn--ghost ds-iconbtn--sm" data-ds-comp="icon-button" data-ds-variant="ghost" data-ds-status="idle" :aria-label="t('添加照片来源')" @click="openAddSource">
                 <Plus :size="15" :stroke-width="1.5" />
               </button>
             </div>
-            <div class="ds-scroll photos-scroll" data-ds-comp="scroll-area" tabindex="0" role="region" :aria-label="t('来源与文件夹')">
+            <div class="photos-side-scroll">
               <ul class="photos-list">
                 <li class="photos-row">
                   <button type="button" class="photos-row__main" :aria-pressed="!sourceFilter && !localFilter && !virtualFilter" @click="resetFilters">
@@ -1377,7 +1373,14 @@ async function submitSend() {
                 <li v-else class="photos-hint">{{ t("还没有虚拟文件夹。新建一个后可以把照片批量归入。") }}</li>
               </ul>
             </div>
-          </aside>
+          </div>
+      </template>
+    </nav>
+
+    <div class="split-main" :data-photos-tab="tab">
+      <div class="photos-view">
+        <!-- ═══════════════════ 图库 ═══════════════════ -->
+        <div v-if="tab === 'library'" class="photos-lib" :class="{ 'has-inspector': !!libSelected }" data-photos-lib="1" :data-photos-state="libraryListState">
 
           <section class="photos-pane photos-pane--flat" :aria-label="t('照片网格')">
             <div class="photos-toolbar">
@@ -1392,14 +1395,7 @@ async function submitSend() {
               <DsButton variant="secondary" size="sm" :disabled="selection.length === 0" @click="openAssign">{{ selection.length ? t("归入文件夹（{n}）", { n: selection.length }) : t("归入文件夹") }}</DsButton>
             </div>
 
-            <p
-              v-if="office"
-              class="photos-hint photos-office"
-              :data-photos-office="office.failure ? 'unknown' : (office.docx.available && office.xlsx.available ? 'available' : 'unavailable')"
-              :data-photos-office-docx="office.docx.available ? '1' : '0'"
-              :data-photos-office-xlsx="office.xlsx.available ? '1' : '0'"
-              :title="officeCapabilityDetail(office)"
-            >{{ t(officeCapabilityLabel(office)) }} · {{ t("相册只索引图片/视频，不解析 Office 文档正文") }}</p>
+
             <p v-if="libNotice" class="photos-hint" :class="{ 'photos-error': libNotice.tone === 'error' }" :role="libNotice.tone === 'error' ? 'alert' : 'status'">{{ libNotice.text }}</p>
 
             <div v-if="libFailure && items.length > 0" class="photos-banner">
@@ -1437,7 +1433,7 @@ async function submitSend() {
             </div>
           </section>
 
-          <aside class="photos-pane photos-inspector" :aria-label="t('照片详情')">
+          <aside v-if="libSelected" class="photos-pane photos-inspector" :aria-label="t('照片详情')">
             <div class="photos-pane-head">
               <h3>{{ t("详情") }}</h3>
               <DsBadge v-if="libSelected" tone="neutral" size="sm">{{ photoKindLabel(libSelected.kind) }}</DsBadge>
@@ -1583,19 +1579,19 @@ async function submitSend() {
                 </section>
               </div>
 
-              <section v-if="dependencyRows.length" class="photos-group" :aria-label="t('能力与依赖')">
-                <div class="photos-pane-head"><h3>{{ t("能力与依赖") }}</h3></div>
+              <details v-if="dependencyRows.length" class="photos-group photos-deps" :aria-label="t('可用功能')">
+                <summary class="photos-pane-head"><h3>{{ t("可用功能") }}</h3></summary>
                 <ul class="photos-list">
                   <li v-for="row in dependencyRows" :key="row.key" class="photos-row">
                     <span class="photos-row__main">
                       <span class="photos-row__name" :title="t(row.hint)">{{ t(row.label) }}</span>
                       <span class="photos-row__facts">
-                        <DsBadge :tone="row.available ? 'success' : 'warning'" size="sm">{{ row.available ? t("已装配") : t("未装配") }}</DsBadge>
+                        <DsBadge :tone="row.available ? 'success' : 'warning'" size="sm">{{ row.available ? t("可用") : t("不可用") }}</DsBadge>
                       </span>
                     </span>
                   </li>
                 </ul>
-              </section>
+              </details>
             </div>
           </aside>
         </div>

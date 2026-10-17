@@ -129,10 +129,21 @@ function presetModeLabel(preset: ProviderPreset): string {
   return preset.credentialMode === "dual" ? t("双密钥") : t("单密钥");
 }
 function statusText(status: string): string {
-  if (status === "available") return t("协议已注册");
-  if (status === "pending") return t("协议实现中");
-  return t("协议未确认");
+  if (status === "available") return t("可直接使用");
+  if (status === "pending") return t("接入中");
+  return t("状态未知");
 }
+/** 预设名去掉括号里的补充说明，按钮上放得下；完整名称在 title 里。 */
+function shortName(name: string): string {
+  return name.replace(/[（(].*$/, "").trim() || name;
+}
+/** 接口类型用人能读懂的名字；内部 adapterType 只在 title 里给排障用。 */
+const adapterLabel = computed(() => {
+  const a = currentAdapter.value;
+  if (!a || a === "openai-compatible") return t("OpenAI 兼容接口");
+  const preset = PROVIDER_PRESETS.find((p) => p.adapterType === a);
+  return preset ? t("{name} 接口", { name: shortName(t(preset.name)) }) : a;
+});
 /** 点预设：只写表单，不建 provider、不写密钥。 */
 function applyPreset(preset: ProviderPreset) {
   const patch = presetDraftPatch(preset);
@@ -223,11 +234,9 @@ function onBaseUrl(event: Event) {
     :data-d4-01-provider-form-mode="mode"
     @submit.prevent="submit"
   >
-    <div class="mp2-head"><b>{{ mode === "edit" ? t("编辑服务商") : t("添加服务商") }}</b></div>
-
     <!-- 预设：点一下填好名称 / 地址 / adapterType / 凭据形态；不自动创建、不自动写密钥 -->
     <div class="mp2-field" data-d4-01-presets>
-      <span>{{ t("预设") }} <small>{{ t("点一下自动填名称、API 地址与协议；密钥仍需自己填并确认提交") }}</small></span>
+      <span>{{ t("常用服务商") }} <small>{{ t("点一下自动填好名称和地址，密钥仍需自己粘贴") }}</small></span>
       <div class="mp2-preset-row">
         <button
           v-for="p in PROVIDER_PRESETS"
@@ -242,7 +251,7 @@ function onBaseUrl(event: Event) {
           :data-d4-01-preset-status="presetStatus(p)"
           :data-d4-01-preset-selected="selectedPresetId === p.id ? 'true' : 'false'"
           :aria-pressed="selectedPresetId === p.id"
-          :title="t(p.name) + ' · ' + p.adapterType + ' · ' + presetModeLabel(p)"
+          :title="t(p.name) + ' · ' + presetModeLabel(p)"
           @click="applyPreset(p)"
         >
           <span
@@ -261,42 +270,41 @@ function onBaseUrl(event: Event) {
             <img v-else-if="presetLogo(p)" :src="presetLogo(p)!.url" :alt="presetLogo(p)!.label" />
             <template v-else>{{ p.name.slice(0, 1) }}</template>
           </span>
-          <span class="pform-preset-label">{{ t(p.name) }}</span>
-          <span v-if="presetStatus(p) === 'pending'" class="pform-preset-pending" :data-d4-01-preset-pending="p.id">{{ t("协议实现中") }}</span>
+          <span class="pform-preset-label">{{ shortName(t(p.name)) }}</span>
+          <span v-if="presetStatus(p) === 'pending'" class="pform-preset-pending" :data-d4-01-preset-pending="p.id">{{ t("接入中") }}</span>
         </button>
       </div>
     </div>
 
-    <!-- 协议（adapterType）：只读展示，由预设写入；编辑态即服务商当前协议 -->
-    <div class="mp2-field">
-      <span>{{ t("协议（adapterType）") }} <small>{{ t("镜像桥按它选 provider 协议；由预设决定") }}</small></span>
-      <div class="mp2-static mono" data-d4-01-provider-adapter>{{ currentAdapter }}</div>
-      <small v-if="mode === 'edit'" class="set-cap" data-d4-01-preset-current-adapter>{{ t("当前协议：{adapter}", { adapter: currentAdapter }) }}</small>
+    <!-- 接口协议：只读展示，由预设写入；编辑态即服务商当前协议（内部 id 只放在 title 里） -->
+    <div class="mp2-field pform-inline">
+      <span>{{ t("接口类型") }}</span>
+      <div class="mp2-static" data-d4-01-provider-adapter :data-d4-01-preset-current-adapter="mode === 'edit' ? currentAdapter : undefined" :title="currentAdapter">{{ adapterLabel }}</div>
     </div>
 
     <!-- 选中预设的详情：文档 / 凭据形态 / 协议状态 / 推荐模型 -->
     <div v-if="activePreset" class="mp2-preset-detail" :data-d4-01-preset-detail="activePreset.id">
       <div class="mp2-row">
-        <a class="pform-docs mono" :href="activePreset.docsUrl" target="_blank" rel="noreferrer" data-d4-01-preset-docs>{{ activePreset.docsUrl }}</a>
-        <span class="badge" data-d4-01-preset-mode-label>{{ presetModeLabel(activePreset) }}</span>
-        <span class="badge" :class="{ ok: activeStatus === 'available', warn: activeStatus === 'pending' }" data-d4-01-preset-protocol-status>{{ statusText(activeStatus) }}</span>
+        <a class="pform-docs" :href="activePreset.docsUrl" target="_blank" rel="noreferrer" data-d4-01-preset-docs>{{ activePreset.docsUrl }}</a>
+        <span class="ds-badge ds-badge--sm ds-badge--neutral" data-d4-01-preset-mode-label>{{ presetModeLabel(activePreset) }}</span>
+        <span class="ds-badge ds-badge--sm" :class="activeStatus === 'available' ? 'ds-badge--success' : activeStatus === 'pending' ? 'ds-badge--warning' : 'ds-badge--neutral'" data-d4-01-preset-protocol-status>{{ statusText(activeStatus) }}</span>
         <DsButton size="sm" variant="secondary" data-d4-01-preset-key :disabled="!activePreset.apiKeyUrl" :title="activePreset.apiKeyUrl ? t('在系统浏览器打开服务商控制台获取 API Key（需确认）') : t('该预设没有登记官方 API Key 页面')" @click="keyUrl = activePreset.apiKeyUrl || null">{{ t("获取密钥") }}</DsButton>
       </div>
-      <p v-if="!activePreset.apiKeyUrl" class="set-cap" data-d4-01-preset-key-missing>{{ t("这个预设没有登记官方 API Key 页面：请从服务商文档自行获取。") }}</p>
+      <p v-if="!activePreset.apiKeyUrl" class="set-cap" data-d4-01-preset-key-missing>{{ t("这个服务商没有登记获取密钥的页面，请到它的控制台自行获取。") }}</p>
       <p class="set-cap" data-d4-01-preset-notes>{{ t(activePreset.notes) }}</p>
       <p v-if="activeStatus === 'pending'" class="pform-warn" data-d4-01-preset-pending-notice>
-        {{ t("协议「{adapter}」还没在当前构建里注册（由另外的包实现中）：可以保存服务商，但调用会失败。", { adapter: currentAdapter }) }}
+        {{ t("这个服务商的接口还在接入中：可以先保存，但现在调用会失败。") }}
       </p>
       <p v-else-if="activeStatus === 'unknown'" class="pform-warn" data-d4-01-preset-protocol-unknown>
-        {{ t("没拿到协议表，无法确认「{adapter}」是否已落地。", { adapter: currentAdapter }) }}
+        {{ t("暂时无法确认这个服务商的接口是否可用。") }}
       </p>
       <div class="mp2-row" data-d4-01-preset-models>
         <template v-if="activePreset.models.length">
           <span class="set-cap">{{ t("推荐模型") }}</span>
-          <span v-for="m in activePreset.models.slice(0, 4)" :key="m.id" class="badge mono" :title="m.capabilities.join('、')">{{ m.id }}</span>
+          <span v-for="m in activePreset.models.slice(0, 4)" :key="m.id" class="ds-badge ds-badge--sm ds-badge--neutral" :title="m.capabilities.join('、')">{{ m.id }}</span>
           <span v-if="presetRecommendedCaps.length" class="set-cap" :data-d4-01-preset-caps="presetRecommendedCaps.join(',')">{{ t("能力：{caps}", { caps: presetRecommendedCaps.join("、") }) }}</span>
         </template>
-        <span v-else class="set-cap" data-d4-01-preset-models-catalog>{{ t("模型列表由 catalog 动态拉取（本家没有公开清单，不编造）") }}</span>
+        <span v-else class="set-cap" data-d4-01-preset-models-catalog>{{ t("没有公开的模型清单；添加后在服务商详情里「拉取模型」即可。") }}</span>
       </div>
     </div>
 
@@ -336,25 +344,25 @@ function onBaseUrl(event: Event) {
       </select>
       <small v-if="attempted && validation.fieldErrors.scope" class="pform-err" data-d4-01-provider-scope-error>{{ t(validation.fieldErrors.scope) }}</small>
     </label>
-    <label v-if="mode === 'edit'" class="mp2-field"><span>{{ t("启用-停用") }} <small>{{ t("停用后该服务商下的模型不再被调用") }}</small></span>
+    <label v-if="mode === 'edit'" class="mp2-field"><span>{{ t("状态") }} <small>{{ t("停用后该服务商下的模型不再被调用") }}</small></span>
       <select class="set-select" data-d4-01-provider-status :aria-label="t('启用状态')" :value="form.status" @change="form.status = ($event.target as HTMLSelectElement).value">
         <option v-for="o in PROVIDER_STATUS_OPTIONS" :key="o.id" :value="o.id">{{ t(o.label) }}</option>
       </select>
     </label>
     <p v-if="validation.originChanged" class="pform-hint" data-d4-01-provider-origin-hint>
-      {{ t("API 地址的 origin 变了（{url}）。凭据与 origin 绑定：旧密钥不会自动发往新地址。", { url: form.baseUrl }) }}
-      <template v-if="validation.requiresNewCredential">{{ t("请在「API 密钥」里粘贴新密钥后一起保存；若只改地址不换密钥，保存后调用可能被 ENDPOINT_BLOCKED 拒绝。") }}</template>
+      {{ t("API 地址的域名变了（{url}）。为安全起见，旧密钥不会自动发往新地址。", { url: form.baseUrl }) }}
+      <template v-if="validation.requiresNewCredential">{{ t("请在「API 密钥」里粘贴新密钥后一起保存；只改地址不换密钥，之后的调用会被拦截。") }}</template>
       <template v-else>{{ t("你已填写新密钥，保存时会按新地址重新绑定。") }}</template>
     </p>
     <div class="mp2-actions">
       <DsButton v-if="mode === 'edit'" variant="ghost" size="sm" data-d4-01-provider-cancel @click="emit('cancel')">{{ t("取消") }}</DsButton>
       <DsButton v-if="mode === 'edit'" variant="primary" size="sm" data-d4-01-provider-save :disabled="off" @click="submit">{{ busy ? t("保存中…") : t("保存修改") }}</DsButton>
-      <DsButton v-else variant="primary" size="sm" data-d4-01-provider-create :disabled="off" @click="submit">{{ t("添加服务商") }}</DsButton>
+      <DsButton v-else variant="primary" size="sm" data-d4-01-provider-create :disabled="off" @click="submit">{{ t("添加") }}</DsButton>
     </div>
 
     <DsDialog :open="keyUrl !== null" :title="t('获取 API 密钥')" @close="keyUrl = null">
       <p class="set-cap">{{ t("将在系统浏览器打开服务商控制台；OpenArc 不会读取或代填你的密钥。") }}</p>
-      <p class="mp2-static mono" data-d4-01-preset-key-url>{{ keyUrl }}</p>
+      <p class="mp2-static" data-d4-01-preset-key-url>{{ keyUrl }}</p>
       <p v-if="keyError" class="pform-err" role="alert" data-d4-01-preset-key-error>{{ keyError }}</p>
       <template #footer>
         <button class="ghost" type="button" @click="keyUrl = null">{{ t("取消") }}</button>
@@ -365,23 +373,28 @@ function onBaseUrl(event: Event) {
 </template>
 
 <style scoped>
-.mp2-formset { display: flex; flex-direction: column; gap: 12px; }
+.mp2-formset { display: flex; flex-direction: column; gap: 14px; }
+.mp2-formset :deep(.mp2-field > span) { font-size: var(--fs-secondary); color: var(--text); }
+.mp2-formset :deep(.mp2-field > span small) { margin-left: 6px; font-size: var(--fs-caption); color: var(--muted); }
+.pform-inline { flex-direction: row; align-items: baseline; justify-content: space-between; }
+.pform-inline .mp2-static { color: var(--muted); }
 .mp2-insecure { display: flex; align-items: center; gap: 8px; font-size: var(--fs-secondary); cursor: pointer; }
 .mp2-insecure input { margin: 0; }
-.mp2-insecure-warn { margin: 6px 0 0; color: var(--warning-text, #a05a00); font-size: var(--fs-micro); line-height: 1.6; }
-.pform-err { color: var(--failed, #ff453a); font-size: var(--fs-micro); line-height: 1.6; }
-.pform-hint { margin: 0; color: var(--warning-text, #a05a00); font-size: var(--fs-micro); line-height: 1.6; }
-.pform-warn { margin: 0; color: var(--warning-text, #a05a00); font-size: var(--fs-micro); line-height: 1.6; }
-/* 预设一排：沿用 .d401-tabs button / .mp2-prov 的既有形状（radius-pill + sunken + hover 提亮），不引入新视觉体系。 */
-.mp2-preset-row { display: flex; flex-wrap: wrap; gap: 6px; }
-.mp2-preset { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; border-radius: var(--radius-pill); background: var(--sunken); color: var(--text); font-size: var(--fs-micro); }
+.mp2-insecure-warn { margin: 6px 0 0; color: var(--warning-text, #a05a00); font-size: var(--fs-caption); line-height: 1.6; }
+.pform-err { color: var(--failed, #ff453a); font-size: var(--fs-caption); line-height: 1.6; }
+.pform-hint { margin: 0; color: var(--warning-text, #a05a00); font-size: var(--fs-caption); line-height: 1.6; }
+.pform-warn { margin: 0; color: var(--warning-text, #a05a00); font-size: var(--fs-caption); line-height: 1.6; }
+/* 常用服务商：四列等宽小方块（控件 8 圆角、sunken 底、无描边）；选中 = 深一级底 + 500 字重（设计语言 §3.1 选中态）。 */
+.mp2-preset-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.mp2-preset { display: flex; align-items: center; gap: 8px; min-width: 0; height: 32px; padding: 0 10px; border-radius: var(--radius-md); background: var(--sunken); color: var(--text); font-size: var(--fs-secondary); }
 .mp2-preset:hover { background: rgb(var(--text-rgb) / 0.1); }
-.mp2-preset.on { background: rgb(var(--content-rgb) / var(--content-alpha)); box-shadow: inset 0 0 0 1px var(--line); }
-.pform-preset-label { max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pform-preset-pending { font-size: var(--fs-micro); color: var(--warning-text, #a05a00); }
-.pform-logo { width: 18px; height: 18px; flex: none; display: grid; place-items: center; color: var(--muted); }
-.pform-logo img { display: block; max-width: 18px; max-height: 18px; object-fit: contain; }
+.mp2-preset.on { background: rgb(var(--text-rgb) / 0.14); font-weight: var(--fw-medium); }
+.pform-preset-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pform-preset-pending { margin-left: auto; font-size: var(--fs-micro); color: var(--muted); }
+.pform-logo { width: 16px; height: 16px; flex: none; display: grid; place-items: center; color: var(--muted); }
+.pform-logo img { display: block; max-width: 16px; max-height: 16px; object-fit: contain; }
 .pform-logo-mark { width: 16px; height: 16px; background-color: currentColor; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; -webkit-mask-size: contain; mask-size: contain; }
-.mp2-preset-detail { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: var(--radius-md); background: var(--sunken); }
-.pform-docs { font-size: var(--fs-micro); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.mp2-preset-detail { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: var(--radius-md); background: var(--sunken); }
+.pform-docs { font-size: var(--fs-caption); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; flex: 1; min-width: 0; }
+@media (max-width: 560px) { .mp2-preset-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 </style>

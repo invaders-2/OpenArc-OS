@@ -19,13 +19,47 @@
 }
 
 /* ── 三栏骨架（左：来源/分组，中：列表，右：详情）────────────────────────── */
-.photos-lib,
 .photos-studio {
   display: grid;
   grid-template-columns: minmax(180px, 220px) minmax(0, 1fr) minmax(240px, 320px);
   gap: var(--space-3);
   flex: 1 1 auto;
   min-height: 0;
+}
+/* 图库：来源并进了左侧栏，内容区只剩「网格 + 详情（选中才出现，320）」两栏（原型 B） */
+.photos-lib {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.photos-lib.has-inspector {
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+}
+.photos-lib-side {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin-top: var(--space-2);
+}
+.photos-side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.photos-side-scroll {
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: none;
+}
+.photos-side-scroll::-webkit-scrollbar { display: none; }
+.photos-lib-side .photos-sub-head {
+  padding: var(--space-3) var(--space-2) var(--space-1);
+  font-size: var(--fs-caption);
+}
+.photos-lib-side .photos-hint {
+  padding: 0 var(--space-2);
 }
 
 .photos-lib > *,
@@ -34,6 +68,7 @@
   min-height: 0;
 }
 
+/* 内容区不再叠浮起卡片（玻璃/阴影只留给外壳与浮层）：详情栏用一层极淡底色与网格区分 */
 .photos-pane {
   display: flex;
   flex-direction: column;
@@ -41,8 +76,7 @@
   min-height: 0;
   padding: var(--space-3);
   border-radius: var(--radius-lg);
-  background: rgb(var(--content-rgb) / var(--content-alpha));
-  box-shadow: var(--elevation-1);
+  background: rgb(var(--text-rgb) / 0.035);
 }
 
 .photos-pane--flat {
@@ -543,7 +577,6 @@
 
 /* ── 窄窗口：详情与侧栏先收，保留列表 ──────────────────────────────────── */
 @media (max-width: 1180px) {
-  .photos-lib,
   .photos-studio {
     grid-template-columns: minmax(160px, 200px) minmax(0, 1fr);
   }
@@ -555,12 +588,10 @@
 }
 
 @media (max-width: 820px) {
-  .photos-lib,
   .photos-studio {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .photos-lib-side,
   .photos-studio-side {
     max-height: 220px;
   }
@@ -569,4 +600,9 @@
   .photos-studio-side {
     overflow-y: auto;
   }
+}
+
+/* 窗口较窄时（容器宽度而不是屏幕宽度）：详情栏改到网格下方 */
+@container (max-width: 760px) {
+  .photos-lib.has-inspector { grid-template-columns: minmax(0, 1fr); }
 }
