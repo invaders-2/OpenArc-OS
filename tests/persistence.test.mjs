@@ -25,7 +25,7 @@ test("序列化只写跨会话成立的字段；focused / order / z 一律不写
   const raw = JSON.parse(manager.serialize(state));
 
   assert.equal(raw.v, 2, "必须有版本号，否则无法演进");
-  assert.deepEqual(Object.keys(raw).sort(), ["v", "windows"]);
+  assert.deepEqual(Object.keys(raw).sort(), ["tabGroups", "v", "windows"]);
   assert.equal("focused" in raw, false, "焦点是会话内状态，不该被持久化");
   assert.equal("order" in raw, false, "z-order 是会话内状态，不该被持久化");
   for (const w of raw.windows) {
@@ -33,7 +33,7 @@ test("序列化只写跨会话成立的字段；focused / order / z 一律不写
     assert.equal("visible" in w, false, `window ${w.id} 不应写 visible（可从 state 推导）`);
     assert.deepEqual(
       Object.keys(w).sort(),
-      ["appId", "bounds", "displayId", "id", "kind", "meta", "minSize", "restore", "state"],
+      ["appId", "bounds", "displayId", "id", "kind", "meta", "minSize", "restore", "state", "tabGroupId", "tabRestore"],
     );
   }
 });
@@ -136,6 +136,26 @@ test("持久化路径只有 Window Manager 一条：domain 自己不做 IO", () 
     assert.equal(nextJson, json, `第 ${i + 1} 轮往返后持久化内容发生变化（不是不动点）`);
     json = nextJson;
   }
+});
+
+test("tab-group 持久化往返：tabGroupId / tabGroups / active / tabRestore 无损", () => {
+  let state = manager.applyAll(domain.createState(), [
+    { type: "window/open", appId: "notes", id: "n1", bounds: { x: 90, y: 94, w: 830, h: 570 } },
+    { type: "window/open", appId: "notes", id: "n2", bounds: { x: 200, y: 200, w: 700, h: 500 } },
+  ]);
+  state = manager.reduce(state, { type: "window/tab-group-merge", ids: ["n1", "n2"] });
+  const group = domain.tabGroupOfWindow(state, "n1");
+  assert.ok(group, "合并后必须有组");
+  const raw = JSON.parse(manager.serialize(state));
+  assert.equal(raw.windows.find((w) => w.id === "n1").tabGroupId, group.id);
+  assert.ok(raw.windows.find((w) => w.id === "n2").tabRestore, "合并前几何必须持久化");
+  const back = manager.deserialize(raw, [AREA]);
+  const restoredGroup = domain.tabGroupOfWindow(back, "n1");
+  assert.ok(restoredGroup);
+  assert.equal(restoredGroup.id, group.id);
+  assert.equal(restoredGroup.activeWindowId, "n2");
+  assert.deepEqual(domain.byId(back, "n1").bounds, domain.byId(back, "n2").bounds);
+  assert.deepEqual(domain.invariants(back), []);
 });
 
 test("isPersistable：调用方用它决定「要不要回退默认」，而不是自己判结构", () => {

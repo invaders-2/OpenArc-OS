@@ -56,6 +56,10 @@ function dependencyUnavailable(name, detail) {
 /** 源 projectAgentMode.ts:309。 */
 class AgentTaskInterrupted extends Error {}
 
+/** task-34 F03：DX 0.6.1 的 30 分钟续跑窗口与继续问句。 */
+const PROJECT_AGENT_WINDOW_MS = 30 * 60 * 1000;
+const PROJECT_AGENT_CONTINUE_QUESTION = "任务仍在进行（已到 30 分钟执行窗口），是否继续任务？";
+
 // ---------------------------------------------------------------------------
 // 注入中心（源用模块级 import）
 // ---------------------------------------------------------------------------
@@ -309,14 +313,22 @@ async function runProjectAgentMode(project, actor, instruction, history = [], pr
     tools: prepared.route.tools,
     surface: "项目文件夹 Agent",
     bootstrapIntents: ["file.read"],
-    maxSteps: 18,
+    // task-34 F03：DX 0.6.1 maxSteps=null（无硬步数上限）；调用方仍可显式传上限做安全阀。
+    maxSteps: session.maxSteps === undefined ? null : session.maxSteps,
   });
+
+  // task-34 F03：30 分钟执行窗口。到期 checkpoint + 等待用户“继续任务”，续跑时传同一 checkpoint。
+  const windowStartedAt = clock();
+  const windowMs = session.windowMs === undefined ? PROJECT_AGENT_WINDOW_MS : Math.max(0, Number(session.windowMs) || 0);
+  let windowConsumed = session.continueAfterWindow === true;
+  let latestCheckpoint = session.checkpoint || null;
 
   // projectAgentMode.ts:159-163
   let observations = session.checkpoint ? session.checkpoint.observations : undefined;
   let filesChanged = !!(session.checkpoint && session.checkpoint.filesChanged);
   let toolCalls = (session.checkpoint && session.checkpoint.toolCalls) || 0;
   let reviewAttempts = (session.checkpoint && session.checkpoint.reviewAttempts) || 0;
+  let lastReviewSignature = "";
   const ledger = (session.checkpoint && session.checkpoint.ledger) || [{ toolName: "fs_list", args: {}, status: "completed", result: initialRootListing, artifacts: [] }];
 
   // projectAgentMode.ts:164
@@ -325,15 +337,35 @@ async function runProjectAgentMode(project, actor, instruction, history = [], pr
   const checkpoint = () => {
     const snapshot = core.toolLoop.snapshot(runtime.runId);
     if (snapshot) {
-      if (session.saveCheckpoint) session.saveCheckpoint({ state: snapshot, observations: observations || [], ledger, toolCalls, reviewAttempts, filesChanged });
+      latestCheckpoint = { state: snapshot, observations: observations || [], ledger, toolCalls, reviewAttempts, filesChanged };
+      if (session.saveCheckpoint) session.saveCheckpoint(latestCheckpoint);
       else core.agentRuntime.append(runtime.runId, "loop.checkpoint", snapshot);
     }
+    return latestCheckpoint;
+  };
+
+  const windowPause = () => {
+    if (windowConsumed) return null;
+    if (clock() - windowStartedAt < windowMs) return null;
+    const saved = checkpoint();
+    return {
+      text: PROJECT_AGENT_CONTINUE_QUESTION,
+      waitingForUser: true,
+      question: PROJECT_AGENT_CONTINUE_QUESTION,
+      checkpoint: saved && saved.state ? saved : latestCheckpoint,
+      filesChanged,
+      agentTrace: prepared.trace,
+      complete: false,
+    };
   };
 
   // projectAgentMode.ts:172-298
   try {
     for (;;) {
       checkActive();
+      // task-34 F03：30 分钟窗口到期 → 先持久化 checkpoint，再等待用户答复续跑。
+      const paused = windowPause();
+      if (paused) return paused;
       // projectAgentMode.ts:175-183：Worker 中断期间未回填的待执行调用按"结果未知"记账，不自动重试副作用。
       if (session.checkpoint && state.pending.length) {
         const completed = new Set((observations || []).map((item) => item.invocationId));
@@ -392,7 +424,16 @@ async function runProjectAgentMode(project, actor, instruction, history = [], pr
           if (!session.taskId) core.agentRuntime.complete(runtime.runId, { content: result.content, reason: review.reason, filesChanged, completionReview: review });
           return { text: result.content || "已完成。", filesChanged, agentTrace: prepared.trace, complete: true };
         }
-        if (reviewAttempts <= 2 && state.step < state.maxSteps) {
+        // 0.6.1 不再有 2 次验收硬上限；但完全重复的拒绝说明模型没有产生新证据，
+        // 继续循环只会烧预算，因此按"无进展"提前收口。
+        const reviewSignature = JSON.stringify({ reason: review.reason, missingActions: review.missingActions });
+        if (reviewSignature === lastReviewSignature && reviewAttempts > 1) {
+          const text = "任务尚未通过完成验收：" + review.reason + "（连续两次相同拒绝，已停止重试）";
+          if (!session.taskId) core.agentRuntime.fail(runtime.runId, text);
+          return { text, filesChanged, agentTrace: prepared.trace, complete: false };
+        }
+        lastReviewSignature = reviewSignature;
+        if (state.step < state.maxSteps) {
           state.terminal = false;
           state.content = "";
           state.messages.push({ role: "user", content: "系统完成验收未通过：" + review.reason + "\n仍需完成：" + (review.missingActions.join("；") || "重新核对原始目标并补齐缺失结果") + "。请继续调用已声明能力实际补齐，不要重复已成功的项目。" });
@@ -409,13 +450,7 @@ async function runProjectAgentMode(project, actor, instruction, history = [], pr
       observations = [];
       for (const call of result.toolCalls) {
         checkActive();
-        if (++toolCalls > 40) {
-          const error = "项目 Agent 已达到当前 Run 的 40 次工具调用安全上限。";
-          ledger.push({ toolName: call.name, args: {}, status: "failed", error, artifacts: [] });
-          observations.push({ invocationId: call.id, toolName: call.name, status: "failed", error });
-          checkpoint();
-          continue;
-        }
+        toolCalls += 1;
         const startedAt = clock();
         const usage = core.usage.beginAgentUsage({ runId: runtime.runId, kind: "tool", toolName: call.name });
         core.agentRuntime.append(runtime.runId, "capability.started", { toolName: call.name });

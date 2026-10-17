@@ -337,10 +337,81 @@ const DXOS_DDL = Object.freeze([
   "CREATE INDEX IF NOT EXISTS idx_photocraft_projects_owner ON photocraft_projects(owner_id,deleted_at,updated_at DESC)",
   "CREATE INDEX IF NOT EXISTS idx_photocraft_projects_group ON photocraft_projects(group_id,deleted_at,updated_at DESC)",
   "CREATE INDEX IF NOT EXISTS idx_photocraft_project_members_user ON photocraft_project_members(user_id,project_id)",
-  "CREATE INDEX IF NOT EXISTS idx_app_exchanges_user ON app_exchanges(user_id, created_at DESC)"
+  "CREATE INDEX IF NOT EXISTS idx_app_exchanges_user ON app_exchanges(user_id, created_at DESC)",
+  // task-34 F03：项目 Agent 后台队列（worker 领取/心跳/checkpoint 恢复）。
+  "CREATE TABLE IF NOT EXISTS project_agent_jobs (\n" +
+  "  id TEXT PRIMARY KEY,\n" +
+  "  project_id TEXT NOT NULL,\n" +
+  "  task_id TEXT,\n" +
+  "  user_id TEXT NOT NULL,\n" +
+  "  status TEXT NOT NULL CHECK (status IN ('queued','running','waiting','completed','failed','cancelled')),\n" +
+  "  instruction TEXT NOT NULL,\n" +
+  "  checkpoint_json TEXT,\n" +
+  "  result_json TEXT,\n" +
+  "  error_message TEXT,\n" +
+  "  worker_id TEXT,\n" +
+  "  lease_until INTEGER,\n" +
+  "  attempts INTEGER NOT NULL DEFAULT 0,\n" +
+  "  created_at INTEGER NOT NULL,\n" +
+  "  updated_at INTEGER NOT NULL,\n" +
+  "  finished_at INTEGER\n" +
+  ")",
+  "CREATE INDEX IF NOT EXISTS idx_project_agent_jobs_queue ON project_agent_jobs(status, created_at)",
+  "CREATE INDEX IF NOT EXISTS idx_project_agent_jobs_lease ON project_agent_jobs(status, lease_until)"
 ]);
 
 /** @returns {string[]} DDL 语句副本（调用方修改不影响模块内常量）。 */
+/**
+ * task-34 F10：DX v34 的 4 条内置 agent_profiles 种子（general/researcher/maker/reviewer）。
+ * INSERT OR IGNORE 幂等；只在表存在时执行（v22+ 已建）。委派 enum 与 reviewer 门禁依赖它。
+ */
+const AGENT_PROFILE_SEEDS = Object.freeze([
+  {
+    id: "general", name: "通用 Agent", description: "通用任务执行者，可读文件、调用技能与已披露能力。",
+    capabilityScopes: ["system:*", "media.*", "file:*", "skill:*", "mcp:*", "app:*"],
+    modelProfile: "default", maxModelCalls: 12, maxToolCalls: 40,
+    allowedRisks: ["read", "write", "delete", "external"],
+    systemPrompt: "你是 OpenArc 通用 Agent；只使用已授权能力，写操作需遵守审批边界。",
+  },
+  {
+    id: "researcher", name: "研究 Agent", description: "检索、读取与整理项目资料，产出有引用的结论。",
+    capabilityScopes: ["system:*", "file:*", "skill:*", "mcp:*"],
+    modelProfile: "reasoning", maxModelCalls: 10, maxToolCalls: 32,
+    allowedRisks: ["read"],
+    systemPrompt: "你是研究 Agent；所有结论必须能追溯到读取过的文件或工具 observation。",
+  },
+  {
+    id: "maker", name: "制作 Agent", description: "生成/编辑媒体与文件产物，负责可验证的交付。",
+    capabilityScopes: ["media.*", "file:*", "skill:*", "app:*"],
+    modelProfile: "default", maxModelCalls: 12, maxToolCalls: 48,
+    allowedRisks: ["read", "write", "delete", "external"],
+    systemPrompt: "你是制作 Agent；产物必须真实落盘并通过完成验收，不得用文字冒充产物。",
+  },
+  {
+    id: "reviewer", name: "评审 Agent", description: "只读审查产物与证据，给出 approved/rejected。",
+    capabilityScopes: ["system:*", "file:*"],
+    modelProfile: "reasoning", maxModelCalls: 4, maxToolCalls: 16,
+    allowedRisks: ["read"],
+    systemPrompt: "你是独立评审 Agent；只依据证据审查，不修改产物，不做无证据的通过。",
+  },
+]);
+
+function seedAgentProfiles(db) {
+  if (!db || typeof db.prepare !== "function") return 0;
+  try { db.prepare("SELECT 1 FROM agent_profiles LIMIT 1").get(); }
+  catch { return 0; }
+  const now = Date.now();
+  let inserted = 0;
+  const statement = db.prepare(
+    "INSERT OR IGNORE INTO agent_profiles (id,name,description,capability_scopes_json,model_profile,max_model_calls,max_tool_calls,system_prompt,builtin,enabled,created_at,updated_at,allowed_risks_json) VALUES (?,?,?,?,?,?,?,?,1,1,?,?,?)",
+  );
+  for (const profile of AGENT_PROFILE_SEEDS) {
+    const result = statement.run(profile.id, profile.name, profile.description, JSON.stringify(profile.capabilityScopes), profile.modelProfile, profile.maxModelCalls, profile.maxToolCalls, profile.systemPrompt, now, now, JSON.stringify(profile.allowedRisks));
+    if (Number(result.changes) > 0) inserted += 1;
+  }
+  return inserted;
+}
+
 function dxosDdl() {
   return DXOS_DDL.slice();
 }
@@ -352,4 +423,6 @@ module.exports = {
   DXOS_QUOTA_TABLES,
   DXOS_DDL,
   dxosDdl,
+  AGENT_PROFILE_SEEDS,
+  seedAgentProfiles,
 };

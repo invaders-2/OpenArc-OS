@@ -80,13 +80,20 @@ class ServerAgentToolLoopCoordinator {
   create(input) {
     const existing = this.states.get(input.runId);
     if (existing) return existing;
-    const state = { ...input, messages: structuredClone(input.messages), tools: structuredClone(input.tools), step: 0, pending: [], discoveryHistory: [], terminal: false, content: "" };
+    // task-34 F03：0.6.1 语义允许无步数上限（maxSteps=null）；null 用 Infinity 表达，snapshot 时由 restore 还原。
+    const maxSteps = input.maxSteps === null ? Infinity : (Number.isFinite(Number(input.maxSteps)) ? Math.max(1, Math.floor(Number(input.maxSteps))) : 8);
+    const state = { ...input, maxSteps, messages: structuredClone(input.messages), tools: structuredClone(input.tools), step: 0, pending: [], discoveryHistory: [], terminal: false, content: "" };
     this.states.set(input.runId, state);
     return state;
   }
 
   get(runId) { return this.states.get(runId); }
-  restore(state) { this.states.set(state.runId, structuredClone(state)); return this.states.get(state.runId); }
+  restore(state) {
+    const restored = structuredClone(state);
+    if (restored.maxSteps === null || restored.maxSteps === undefined) restored.maxSteps = Infinity;
+    this.states.set(restored.runId, restored);
+    return this.states.get(restored.runId);
+  }
   delete(runId) { this.states.delete(runId); }
   snapshot(runId) { const state = this.states.get(runId); return state ? structuredClone(state) : undefined; }
 
@@ -193,7 +200,7 @@ async function runServerToolLoop(input) {
   const toolRunner = input.toolRunner || requireDependency("toolRunner");
   if (!modelAdapter || typeof modelAdapter.call !== "function") throw dependencyUnavailable("modelAdapter.call");
   if (!toolRunner || typeof toolRunner.run !== "function") throw dependencyUnavailable("toolRunner.run");
-  const maxSteps = Number.isFinite(Number(input.maxSteps)) ? Math.max(1, Math.floor(Number(input.maxSteps))) : 8;
+  const maxSteps = input.maxSteps === null ? Infinity : (Number.isFinite(Number(input.maxSteps)) ? Math.max(1, Math.floor(Number(input.maxSteps))) : 8);
   const conversation = structuredClone(input.messages || []);
   const discoveryHistory = [];
   const tools = structuredClone(input.tools || []);

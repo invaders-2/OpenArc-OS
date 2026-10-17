@@ -304,6 +304,14 @@ function createTaskAuthority(options = {}) {
       record(SOURCE_DX, "createProject", "accepted", (project && project.id) || null, null);
       return project;
     },
+    /** task-34 F03：项目 Agent checkpoint 持久化（agent-service 不得直接写 store）。 */
+    saveCheckpoint(args) {
+      const taskId = requireText(args && args.taskId, "taskId");
+      const state = args && args.state && typeof args.state === "object" ? args.state : {};
+      resolveDxStore().addCheckpoint(taskId, args.stepId == null ? null : String(args.stepId), state);
+      record(SOURCE_DX, "addCheckpoint", "accepted", taskId, null);
+      return { taskId, saved: true };
+    },
     /** dx 项目记忆写入：形状与 agent-task-store.addMemory 相同（agent/memory/save 命令用）。 */
     addMemory(args) {
       const input = args && args.input && typeof args.input === "object" ? args.input : {};

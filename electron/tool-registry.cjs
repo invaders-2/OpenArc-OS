@@ -322,6 +322,57 @@ const BUILTIN_CONTRACTS = Object.freeze([
     leasePolicy: "SINGLE_ACTIVE",
     executionPolicy: "CONTROLLED_REVERSIBLE_WRITE",
   },
+  // task-34 F01：全局助理（system-jarvis）通过 agent gateway 可见的桌面/媒体/文件客户端工具。
+  // 这些 contract 的 executionProvider 是 desktop-client：Registry 只做披露；真实执行由
+  // agent/jarvis/run 返回 clientAction 交给渲染层，或由服务端 catalog/file-tool 执行器处理。
+  {
+    toolId: "desktop.open_app", version: 1, displayName: "Open App",
+    description: "打开/切换一个已安装的桌面应用。客户端执行，Registry 只做披露。",
+    inputSchema: { type: "object", additionalProperties: false, properties: { app: { type: "string", minLength: 1, maxLength: 120 } }, required: ["app"] },
+    outputSchema: { type: "object", additionalProperties: false, properties: { opened: { type: "boolean" } }, required: ["opened"] },
+    riskClass: RISK_CLASS.READ_ONLY, sideEffect: SIDE_EFFECT.NONE, requiresApproval: false, requiredPermissions: [], resourceActions: [],
+    executionProvider: "desktop-client", enabled: true, expectedSideEffects: ["open:window"],
+  },
+  {
+    toolId: "desktop.music.play", version: 1, displayName: "Play Music",
+    description: "按关键词播放本地音乐。客户端执行。",
+    inputSchema: { type: "object", additionalProperties: false, properties: { query: { type: "string", maxLength: 200 }, shuffle: { type: "boolean" } } },
+    outputSchema: { type: "object", additionalProperties: false, properties: { playing: { type: "boolean" } }, required: ["playing"] },
+    riskClass: RISK_CLASS.READ_ONLY, sideEffect: SIDE_EFFECT.NONE, requiresApproval: false, requiredPermissions: ["music.play"], resourceActions: [],
+    executionProvider: "desktop-client", enabled: true, expectedSideEffects: ["play:music"],
+  },
+  {
+    toolId: "desktop.music.control", version: 1, displayName: "Music Control",
+    description: "暂停/继续/上一首/下一首/停止音乐。客户端执行。",
+    inputSchema: { type: "object", additionalProperties: false, properties: { action: { type: "string", enum: ["pause", "resume", "next", "prev", "stop"] } }, required: ["action"] },
+    outputSchema: { type: "object", additionalProperties: false, properties: { ok: { type: "boolean" } }, required: ["ok"] },
+    riskClass: RISK_CLASS.READ_ONLY, sideEffect: SIDE_EFFECT.NONE, requiresApproval: false, requiredPermissions: ["music.play"], resourceActions: [],
+    executionProvider: "desktop-client", enabled: true, expectedSideEffects: ["control:music"],
+  },
+  {
+    toolId: "media.list", version: 1, displayName: "List Media",
+    description: "列出当前用户可见的媒体/资源，供助理选择输入。",
+    inputSchema: { type: "object", additionalProperties: false, properties: { kind: { type: "string", enum: ["image", "video", "audio"] }, limit: { type: "integer", minimum: 1 } } },
+    outputSchema: { type: "object", additionalProperties: false, properties: { items: { type: "array" } }, required: ["items"] },
+    riskClass: RISK_CLASS.READ_ONLY, sideEffect: SIDE_EFFECT.NONE, requiresApproval: false, requiredPermissions: ["tool.resource.readMetadata"], resourceActions: [],
+    executionProvider: "desktop-client", enabled: true, expectedSideEffects: [],
+  },
+  {
+    toolId: "file.read", version: 1, displayName: "Read Project File",
+    description: "读取项目根内的文件内容（项目作用域）。客户端/文件工具执行。",
+    inputSchema: { type: "object", additionalProperties: false, properties: { path: { type: "string", minLength: 1, maxLength: 500 } }, required: ["path"] },
+    outputSchema: { type: "object", additionalProperties: false, properties: { content: { type: "string" } }, required: ["content"] },
+    riskClass: RISK_CLASS.READ_ONLY, sideEffect: SIDE_EFFECT.NONE, requiresApproval: false, requiredPermissions: ["files.read"], resourceActions: [],
+    executionProvider: "desktop-client", enabled: true, expectedSideEffects: [],
+  },
+  {
+    toolId: "capability.discover", version: 1, displayName: "Discover Capabilities",
+    description: "按用户目标/意图发现当前入口可用的工具与能力（渐进披露，不执行）。",
+    inputSchema: { type: "object", additionalProperties: false, properties: { intents: { type: "array", items: { type: "string" } }, domains: { type: "array", items: { type: "string" } } } },
+    outputSchema: { type: "object", additionalProperties: false, properties: { tools: { type: "array" }, capabilities: { type: "array" } }, required: ["tools", "capabilities"] },
+    riskClass: RISK_CLASS.READ_ONLY, sideEffect: SIDE_EFFECT.NONE, requiresApproval: false, requiredPermissions: [], resourceActions: [],
+    executionProvider: "openarc-capability", enabled: true, expectedSideEffects: [],
+  },
 ]);
 
 /** dsh tool 名必须是合法标识符：resource.search → resource_search。 */

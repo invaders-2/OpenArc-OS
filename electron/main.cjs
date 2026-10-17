@@ -1196,6 +1196,8 @@ app.whenReady().then(async () => {
       clock: null,
       logger: null,
     });
+    // task-34 F04：agent bundle 早于 developer 创建；这里晚绑定 App Agent 的清单/权限真值来源。
+    try { if (agentBundle && typeof agentBundle.configureDeveloperService === "function") agentBundle.configureDeveloperService(developerBundle); } catch { /* agent bundle 未就绪时保持结构化依赖缺失 */ }
     registerDeveloperIpc({
       ipcMain,
       bundle: developerBundle,

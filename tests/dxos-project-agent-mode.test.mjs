@@ -390,3 +390,17 @@ test("project-agent 纯函数：compactObservation / mediaArtifacts / fileArtifa
   assert.equal(projectAgent.parseCompletionReview("不是 JSON").complete, false);
   assert.equal(projectAgent.parseCompletionReview('{"complete":false,"reason":"缺少产物"}').missingActions.length, 0);
 });
+
+test("project-agent 0.6.1 30 分钟窗口：到期先 checkpoint 并返回 waitingForUser", async () => {
+  const h = buildHarness({ modelPlan: () => ({ content: "完成", toolCalls: [] }) });
+  let saved = null;
+  const result = await projectAgent.runProjectAgentMode(PROJECT, ACTOR, "长任务", [], {}, {
+    windowMs: 0,
+    saveCheckpoint: (checkpoint) => { saved = checkpoint; },
+  });
+  assert.equal(result.waitingForUser, true);
+  assert.match(result.question, /继续任务/);
+  assert.ok(saved && saved.state, "窗口到期必须先持久化 checkpoint");
+  assert.ok(result.checkpoint && result.checkpoint.state, "返回的 checkpoint 必须可续跑");
+  assert.equal(h.events.some((event) => event[0] === "complete"), false, "等待用户时不得把 Run 标完成");
+});

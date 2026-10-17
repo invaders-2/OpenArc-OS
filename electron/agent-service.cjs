@@ -47,6 +47,8 @@ const capabilityTargetResolver = require("./capability-target-resolver.cjs");
 const reactDriver = require("./agent-react-driver.cjs");
 const builtinTools = require("./agent-builtin-tools.cjs");
 const toolResolver = require("./agent-tool-resolver.cjs");
+const agentGatewayEntry = require("./agent-gateway-entry.cjs");
+const { createProjectAgentWorker } = require("./project-agent-worker.cjs");
 const capabilityRouter = require("./capability-router.cjs");
 // B3b+：模型路由数据层（DX server/modelResolver.ts + modelDescriptor.ts 的本仓移植）。
 const modelResolverModule = require("./model-resolver.cjs");
@@ -343,7 +345,7 @@ function createDxosFsAdapterForUserData(userDataDir, options = {}) {
  * providerAdapter 由宿主注入 provider-adapter-bridge.cjs 的只读桥（未注入即保持结构化依赖缺失，不伪造）。
  * fsAdapter 由宿主注入 createDxosFsAdapterForUserData 构造的虚拟文件树（未注入即保持结构化依赖缺失，不伪造）。
  */
-function createAgentBundle({ identityStore, authorization, authStore, modelService, providerAdapter = null, userDataDir, logger = null, clock = null, dbPath = null, toolCatalog = null, mcpAgentTools = null, mcpServersSnapshot = null, skillStore = null, skillRunner = null, mcpSource = null, skillSource = null, canvasExtension = null, canvasSource = null, projectAgent = null, fsAdapter = null } = {}) {
+function createAgentBundle({ identityStore, authorization, authStore, modelService, providerAdapter = null, userDataDir, logger = null, clock = null, dbPath = null, toolCatalog = null, mcpAgentTools = null, mcpServersSnapshot = null, skillStore = null, skillRunner = null, mcpSource = null, skillSource = null, canvasExtension = null, canvasSource = null, projectAgent = null, fsAdapter = null, developerService = null } = {}) {
   const now = typeof clock === "function" ? clock : () => Date.now();
   const idFactory = () => randomUUID();
   const db = (identityStore && (identityStore.connection || identityStore.db)) || null;
@@ -449,6 +451,29 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
     }
   }
 
+  // task-34 F03：后台 worker（持久队列 project_agent_jobs；runJob 与 project/run 同一条 project agent 路径）。
+  const projectWorker = db ? createProjectAgentWorker({
+    db,
+    clock: now,
+    runJob: async (job, control) => {
+      const project = agentTaskStore.getProject(job.project_id);
+      if (!project) throw new Error("项目不存在：" + job.project_id);
+      try { agentTaskStore.requireProjectAccess(job.project_id, job.user_id, true); }
+      catch { throw new Error("没有该项目的任务权限"); }
+      projectAgentMode.configureProjectAgentMode({ ...projectAdapters, clock: now, logger });
+      let checkpoint = null;
+      if (job.checkpoint_json) { try { checkpoint = JSON.parse(job.checkpoint_json); } catch { checkpoint = null; } }
+      const actor = { id: job.user_id };
+      return projectAgentMode.runProjectAgentMode(project, actor, job.instruction, [], {}, {
+        taskId: job.task_id || undefined,
+        checkpoint: checkpoint || undefined,
+        continueAfterWindow: true,
+        saveCheckpoint: control.saveCheckpoint,
+        isActive: () => true,
+      });
+    },
+  }) : null;
+
   // ---- 6) 下行事件（P1 信封；bootstrap 的 send 经 setEventSink 注入） ----
   const channel = createEventChannel({ domain: agentDomain.AGENT_EVENT_DOMAIN, clock: now });
   let eventSink = null;
@@ -477,6 +502,7 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
     // project snapshot 继续结构化 AGENT_DEPENDENCY_UNAVAILABLE，不假装可用。
     fsAdapter: !!resolvedFsAdapter,
     workspaceAdapter: !!agentRuntimeWorkspace,
+    developerService: !!(developerService && typeof developerService.execute === "function"),
     userDataDir: !!userDataDir,
     dbPath: !!dbPath,
   });
@@ -493,9 +519,77 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
     }
   }
 
+  function projectWorkerSafe(job) {
+    if (!job) return null;
+    let checkpoint = null;
+    if (job.checkpoint_json) { try { checkpoint = JSON.parse(job.checkpoint_json); } catch { checkpoint = null; } }
+    return {
+      id: job.id, projectId: job.project_id, taskId: job.task_id || null, status: job.status,
+      attempts: Number(job.attempts || 0), checkpoint, error: job.error_message || null,
+      createdAt: Number(job.created_at || 0), updatedAt: Number(job.updated_at || 0),
+    };
+  }
+
   function accessOrForbidden(projectId, userId, createTask) {
     try { agentTaskStore.requireProjectAccess(projectId, userId, createTask); }
     catch (error) { throw createAgentError(AGENT_ERR_FORBIDDEN, (error && error.message) || "没有该项目的访问权限", { projectId }); }
+  }
+
+  // task-34 F01/F04：把 gateway 入口的错误映射成 agent 域稳定错误码。
+  function mapGatewayError(error) {
+    const status = Number(error && error.statusCode);
+    if (status === 403) return createAgentError(AGENT_ERR_FORBIDDEN, String((error && error.message) || "gateway 拒绝"), { statusCode: 403 });
+    if (status === 409) return createAgentError(AGENT_ERR_CONFLICT, String((error && error.message) || "gateway 冲突"), { statusCode: 409 });
+    if (status === 404) return createAgentError(AGENT_ERR_NOT_FOUND, String((error && error.message) || "gateway 未找到"), { statusCode: 404 });
+    if (status === 400) return createAgentError(AGENT_ERR_INVALID_INPUT, String((error && error.message) || "gateway 参数无效"), { statusCode: 400 });
+    return error;
+  }
+
+  function ensureGatewayProject({ userId, name, rootNodeId }) {
+    const existing = agentTaskStore.listProjects(userId).find((project) => project && project.name === name);
+    if (existing) return existing;
+    return taskAuthority.createProject({ input: { name, rootNodeId, createdBy: userId } });
+  }
+
+  async function executeGatewayAction({ prepared, actor, name, args, userId, rootNodeId, runId }) {
+    const descriptors = prepared && prepared.route && Array.isArray(prepared.route.toolDescriptors) ? prepared.route.toolDescriptors : [];
+    const descriptor = descriptors.find((item) => item && item.name === name);
+    if (!descriptor) throw createAgentError(AGENT_ERR_FORBIDDEN, "工具未在本次入口能力披露中： " + name, { tool: name });
+    const handler = descriptor.handler && typeof descriptor.handler === "object" ? descriptor.handler : {};
+    if (handler.type === "client") return { clientAction: { tool: name, arguments: args || {} } };
+    if (handler.type === "file-tool") {
+      const result = await builtinTools.runTool(handler.toolName || name, { userId, rootNodeId, runId }, args || {});
+      return { result };
+    }
+    if (catalog && typeof catalog.runCatalogTool === "function") {
+      try { return { result: await catalog.runCatalogTool(name, args || {}, actor, { sourceId: descriptor.sourceId }) }; }
+      catch (error) { throw createAgentError(AGENT_ERR_DEPENDENCY_UNAVAILABLE, String((error && error.message) || "工具执行器未接入"), { tool: name, dependency: "toolExecutor" }); }
+    }
+    throw createAgentError(AGENT_ERR_DEPENDENCY_UNAVAILABLE, "工具执行器未接入", { tool: name, dependency: "toolCatalog" });
+  }
+
+  async function runGatewayEntry({ profile, actor, envelope, rootNodeId, action = null }) {
+    if (!projectAdapters.agentRuntime || typeof projectAdapters.agentRuntime.prepare !== "function") {
+      throw createAgentError(AGENT_ERR_DEPENDENCY_UNAVAILABLE, "Agent Runtime 未装配", { dependency: "agentRuntime" });
+    }
+    let runtime;
+    try {
+      runtime = projectAdapters.agentRuntime.prepare(envelope, actor, {});
+      projectAdapters.agentRuntime.create(runtime);
+      projectAdapters.agentRuntime.start(runtime.runId);
+    } catch (error) { throw mapGatewayError(error); }
+    const disclosure = agentGatewayEntry.discloseEntryCapabilities(runtime.prepared);
+    let execution = null;
+    try {
+      if (action && action.tool) {
+        execution = await executeGatewayAction({ prepared: runtime.prepared, actor, name: String(action.tool), args: action.arguments, userId: actor.id, rootNodeId, runId: runtime.runId });
+      }
+      projectAdapters.agentRuntime.complete(runtime.runId, { profile, disclosure: { tools: disclosure.tools.length, capabilities: disclosure.capabilities.length }, execution });
+      return { runId: runtime.runId, profileId: profile, disclosure, execution };
+    } catch (error) {
+      try { projectAdapters.agentRuntime.fail(runtime.runId, error); } catch { /* run 可能已终止 */ }
+      throw error;
+    }
   }
 
   /**
@@ -727,21 +821,84 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
       case "agent/project/run": {
         const projectId = requireStr(payload.projectId, 160);
         const instruction = requireStr(payload.instruction, 8000);
-        if (!projectId || !instruction) throw createAgentError(AGENT_ERR_INVALID_INPUT, "projectId 与 instruction 必填");
-        const project = agentTaskStore.getProject(projectId);
-        if (!project) throw createAgentError(AGENT_ERR_NOT_FOUND, "项目不存在：" + projectId);
+        if (!instruction) throw createAgentError(AGENT_ERR_INVALID_INPUT, "instruction 必填");
+        const project = projectId ? agentTaskStore.getProject(projectId) : null;
+        if (projectId && !project) throw createAgentError(AGENT_ERR_NOT_FOUND, "项目不存在：" + projectId);
         // 一次运行会真实调用模型与工具，按"使用"级动作校验项目权限（与 createTask 同口径）。
-        accessOrForbidden(projectId, userId, true);
+        if (project) accessOrForbidden(projectId, userId, true);
+        // task-34 F01/F04：复用 agent/project/run 作为 gateway 入口（不扩前端冻结的 28 条白名单）。
+        if (payload.gateway === "jarvis") {
+          const gatewayProject = ensureGatewayProject({ userId, name: "全局助理", rootNodeId: "jarvis-" + userId });
+          accessOrForbidden(gatewayProject.id, userId, true);
+          let envelope;
+          try {
+            envelope = agentGatewayEntry.buildJarvisEnvelope({ actor, instruction, projectId: gatewayProject.id, threadId: requireStr(payload.threadId, 120) || undefined, requestId: context.requestId || undefined });
+          } catch (error) { throw mapGatewayError(error); }
+          const action = payload.action && typeof payload.action === "object" ? payload.action : (payload.tool ? { tool: payload.tool, arguments: payload.arguments } : null);
+          const gatewayOutcome = await runGatewayEntry({ profile: agentGatewayEntry.JARVIS_PROFILE_ID, actor, envelope, rootNodeId: gatewayProject.root_node_id, action });
+          return { gateway: "system-jarvis", projectId: gatewayProject.id, ...gatewayOutcome };
+        }
+        if (payload.gateway === "developer-app") {
+          if (!developerService || typeof developerService.execute !== "function") throw createAgentError(AGENT_ERR_DEPENDENCY_UNAVAILABLE, "开发者应用服务未装配", { dependency: "developerService" });
+          const appId = requireStr(payload.appId, 160);
+          if (!appId) throw createAgentError(AGENT_ERR_INVALID_INPUT, "appId 必填");
+          const got = await developerService.execute("developer/get", { appId }, { sessionRef: context.sessionRef, appId: "agent", requestId: context.requestId });
+          const app = got && got.ok === true ? got.value : null;
+          if (!app) throw createAgentError(AGENT_ERR_NOT_FOUND, "开发者应用不存在：" + appId);
+          let scope;
+          try {
+            scope = agentGatewayEntry.assertDeveloperAppScope({ actor, appId, app, projectId: requireStr(payload.projectId, 160) || undefined, payloadAppId: payload.appId, payloadProjectId: payload.projectId, payloadSessionId: payload.sessionId });
+          } catch (error) { throw mapGatewayError(error); }
+          const appProject = ensureGatewayProject({ userId, name: "developer-app:" + appId, rootNodeId: "devapp-" + appId + "-" + userId });
+          accessOrForbidden(appProject.id, userId, true);
+          let envelope;
+          try {
+            envelope = agentGatewayEntry.buildDeveloperAppEnvelope({ actor, app, appId, instruction, projectId: appProject.id, sessionId: scope.sessionId, requestId: context.requestId || undefined });
+          } catch (error) { throw mapGatewayError(error); }
+          const action = payload.action && typeof payload.action === "object" ? payload.action : (payload.tool ? { tool: payload.tool, arguments: payload.arguments } : null);
+          const gatewayOutcome = await runGatewayEntry({ profile: agentGatewayEntry.DEVELOPER_APP_PROFILE_ID, actor, envelope, rootNodeId: appProject.root_node_id, action });
+          return { gateway: "developer-app", appId, projectId: appProject.id, sessionId: scope.sessionId, ...gatewayOutcome };
+        }
+        if (!project) throw createAgentError(AGENT_ERR_INVALID_INPUT, "projectId 必填");
+        // task-34 F03：同一命令的 background/workerRun 分支接后台队列（不新增 IPC 命令，保持 28 条白名单）。
+        if (!projectWorker) throw createAgentError(AGENT_ERR_DEPENDENCY_UNAVAILABLE, "后台 worker 未装配", { dependency: "db" });
+        if (payload.background === true || payload.mode === "enqueue") {
+          const job = projectWorker.enqueue({ projectId, taskId: requireStr(payload.taskId, 160) || null, userId, instruction });
+          return { projectId, job: projectWorkerSafe(job), background: true };
+        }
+        if (payload.workerRun === true) {
+          const workerId = requireStr(payload.workerId, 120) || ("worker-" + userId);
+          const job = await projectWorker.runOnce(workerId);
+          return { projectId, workerId, job: projectWorkerSafe(job) };
+        }
         const history = Array.isArray(payload.history) ? payload.history : [];
         const preferences = payload.preferences && typeof payload.preferences === "object" ? payload.preferences : {};
         // runId / taskId 不接受渲染层自报：Run 归属由 RunManager 依 actor + projectId 自行创建。
-        const session = { requestId: context.requestId || undefined, threadId: requireStr(payload.threadId, 120) || undefined };
+        const taskId = requireStr(payload.taskId, 160) || null;
+        if (taskId) {
+          const task = agentTaskStore.getTask(taskId);
+          if (!task) throw createAgentError(AGENT_ERR_NOT_FOUND, "任务不存在：" + taskId);
+          if (String(task.project_id) !== String(projectId)) throw createAgentError(AGENT_ERR_FORBIDDEN, "任务不属于该项目", { taskId, projectId });
+          accessOrForbidden(task.project_id, userId, true);
+        }
+        // task-34 F03：持久化 checkpoint。resume=true 时从 task_checkpoints 最近一条恢复；
+        // 30 分钟窗口到期时 project-agent-mode 先 saveCheckpoint 再返回 waitingForUser。
+        const checkpoint = taskId && payload.resume === true ? agentTaskStore.latestCheckpoint(taskId) : null;
+        if (taskId && payload.resume === true && !checkpoint) throw createAgentError(AGENT_ERR_NOT_FOUND, "没有可恢复的检查点", { taskId });
+        const session = {
+          requestId: context.requestId || undefined,
+          threadId: requireStr(payload.threadId, 120) || undefined,
+          taskId: taskId || undefined,
+          checkpoint: checkpoint ? { state: checkpoint.state.state, observations: checkpoint.state.observations, ledger: checkpoint.state.ledger, toolCalls: checkpoint.state.toolCalls, reviewAttempts: checkpoint.state.reviewAttempts, filesChanged: checkpoint.state.filesChanged } : undefined,
+          continueAfterWindow: payload.continue === true || payload.resume === true,
+          saveCheckpoint: taskId ? ((snapshot) => { taskAuthority.saveCheckpoint({ taskId, state: snapshot }); }) : undefined,
+        };
         // 每次分发都重注本 bundle 的适配器（见 5b）：未注入的适配器由 project-agent-mode 抛结构化
         // AGENT_DEPENDENCY_UNAVAILABLE（project-agent-mode.cjs:100-149），绝不伪造成功。
         projectAgentMode.configureProjectAgentMode({ ...projectAdapters, clock: now, logger });
         try {
           const outcome = await projectAgentMode.runProjectAgentMode(project, actor, instruction, history, preferences, session);
-          return { projectId, outcome };
+          return { projectId, taskId, outcome, waitingForUser: outcome && outcome.waitingForUser === true, checkpoint: outcome && outcome.checkpoint ? outcome.checkpoint : undefined };
         } catch (error) {
           throw mapProjectModeError(error);
         }
@@ -813,8 +970,15 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
     }
   }
 
+  /** task-34 F04：主进程在 developer bundle 创建后晚绑定（agent bundle 先于 developer 创建）。 */
+  function configureDeveloperService(service) {
+    developerService = service && typeof service.execute === "function" ? service : null;
+    return !!developerService;
+  }
+
   return {
     execute,
+    configureDeveloperService,
     setEventSink,
     emitEvent: emit,
     /** B7j：自动化域注入的 Agent 执行入口（react/project agent mode 同一真值路径）。 */

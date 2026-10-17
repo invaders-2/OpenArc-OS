@@ -95,6 +95,8 @@ function configureAgentTaskStore(options) {
     // 为什么挂在这里：生产装配里 configureAgentTaskStore 是 agent/task/unified-list 之前
     // 唯一必经的注入点（agent-service.createAgentBundle），且不动 SCHEMA_VERSION。
     taskUnifiedSchema.ensureTaskUnifiedViews(agentDb);
+    // task-34 F10：每次装配都幂等补 4 条内置 agent_profiles（升级库 v34 种子曾被刻意跳过）。
+    try { require("./dxos-foundation-schema.cjs").seedAgentProfiles(agentDb); } catch { /* 表未建时不阻断任务域 */ }
   }
   if (Object.prototype.hasOwnProperty.call(opts, "fsAdapter")) agentFs = opts.fsAdapter || null;
   if (typeof opts.clock === "function") agentClock = opts.clock;
@@ -187,12 +189,21 @@ function fsAdapterMissing(fs, methods) {
 // projects / project_members 映射（见文件头）
 // ---------------------------------------------------------------------------
 
-function dxRoleToOpenArc(role) {
-  return role === "owner" ? "manager" : "editor";
+function dxRoleToOpenArc(role, canCreateTasks = true) {
+  if (role === "owner") return "manager";
+  return canCreateTasks ? "editor" : "viewer";
+}
+
+function openArcRoleToDx(role) {
+  return role === "manager" ? "owner" : "member";
 }
 
 function openArcRoleToDxCanCreate(role) {
   return role === "editor" || role === "manager" ? 1 : 0;
+}
+
+function canCreateTasksForOpenArcRole(role) {
+  return openArcRoleToDxCanCreate(role) === 1;
 }
 
 /** 统一的 ProjectRow 投影：把 OpenArc projects + dx_project_roots 还原成 DX 的 ProjectRow 形态。 */
@@ -560,6 +571,15 @@ function appendTaskEvent(taskId, type, message, data) {
       .run(taskId, type, message, data === undefined ? null : json(data), now(), taskId);
     return Number(result.lastInsertRowid);
   });
+}
+
+/** task-34 F03：恢复项目 Agent 时取最近一条持久化 checkpoint。 */
+function latestCheckpoint(taskId) {
+  const db = getAgentTaskDb();
+  const row = db.prepare("SELECT * FROM task_checkpoints WHERE task_id = ? ORDER BY iteration DESC LIMIT 1").get(String(taskId));
+  if (!row) return null;
+  try { return { iteration: Number(row.iteration), state: JSON.parse(row.state_json), createdAt: Number(row.created_at) }; }
+  catch { return null; }
 }
 
 /** taskStore.ts:290 */
@@ -1711,6 +1731,7 @@ module.exports = {
   importLegacyTask,
   appendTaskEvent,
   addCheckpoint,
+  latestCheckpoint,
   getTask,
   listTaskEvents,
   listTasks,
@@ -1778,6 +1799,11 @@ module.exports = {
   addMemory,
   removeMemory,
   threadVisibility,
+  // task-34 F15：项目角色映射（OpenArc viewer/editor/manager ↔ DX owner/member + can_create_tasks）
+  dxRoleToOpenArc,
+  openArcRoleToDx,
+  openArcRoleToDxCanCreate,
+  canCreateTasksForOpenArcRole,
 };
 
 

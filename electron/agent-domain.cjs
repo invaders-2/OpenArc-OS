@@ -86,7 +86,7 @@ const AGENT_COMMANDS = Object.freeze({
   "agent/project/snapshot": { risk: "manage", credential: false, summary: "把项目快照写入工作区（依赖 B6 虚拟文件树）" },
   // B4 收口：项目级 Agent 模式（project-agent-mode.cjs）的唯一 IPC 入口。
   // 一次运行会经能力发现→工具执行→完成验收调用模型与工具，因此 risk=use、credential=true。
-  "agent/project/run": { risk: "use", credential: true, summary: "在项目内运行一轮项目级 Agent（能力发现→工具执行→完成验收）" },
+  "agent/project/run": { risk: "use", credential: true, summary: "在项目内运行一轮项目级 Agent（能力发现→工具执行→完成验收；background/workerRun 走后台队列）" },
 
   // ---- memory：项目记忆（agent-task-store） ----
   "agent/memory/list": { risk: "read", credential: false, summary: "列出项目记忆（可选含被取代版本）" },
