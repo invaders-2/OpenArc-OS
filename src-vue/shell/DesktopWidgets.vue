@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { Pause, Play, RefreshCw, SkipBack, SkipForward, Sparkles } from "lucide-vue-next";
 import { useShellStore } from "../stores/shell";
-import { t } from "../i18n";
+import { locale, t } from "../i18n";
 import { currentTrack, ensureLoaded, musicState, step, toggle } from "../apps/music-state";
 import { deg, readWeatherCities, readWeatherConsent, requestForecast, wmo, type WeatherCity, type WeatherForecast } from "../apps/weatherShared";
 
@@ -29,11 +29,15 @@ let clockTimer = 0;
 let weatherTimer = 0;
 
 const WEEK = ["日", "一", "二", "三", "四", "五", "六"];
-const month = computed(() => `${now.value.getMonth() + 1}月`);
+const month = computed(() =>
+  locale.value === "en-US" ? now.value.toLocaleDateString("en-US", { month: "short" }) : `${now.value.getMonth() + 1}月`,
+);
 const day = computed(() => now.value.getDate());
-const week = computed(() => `星期${WEEK[now.value.getDay()]}`);
+const week = computed(() =>
+  locale.value === "en-US" ? now.value.toLocaleDateString("en-US", { weekday: "short" }) : `星期${WEEK[now.value.getDay()]}`,
+);
 
-const trackName = computed(() => (currentTrack.value ? currentTrack.value.name.replace(/\.[^.]+$/, "") : "未在播放"));
+const trackName = computed(() => (currentTrack.value ? currentTrack.value.name.replace(/\.[^.]+$/, "") : t("未在播放")));
 const fmt = (value: number) => (Number.isFinite(value) ? `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, "0")}` : "0:00");
 
 function syncWeatherPrefs() {

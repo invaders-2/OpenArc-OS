@@ -39,7 +39,9 @@ export interface CliStatusView {
   detail: string;
 }
 
-/** 冻结错误码 → 中文文案。原始码不上屏（只进 data-*）。 */
+import { t } from "../i18n";
+
+/** 冻结错误码 → 中文文案。原始码不上屏（只进 data-*）；英文经 t() 覆盖。 */
 export const CLI_ERROR_TEXT: Readonly<Record<string, string>> = {
   CLI_COMMAND_NOT_ALLOWED: "这个 CLI 命令不在允许清单里",
   CLI_NOT_READY: "CLI 后端还没有就绪",
@@ -55,8 +57,8 @@ export const CLI_ERROR_TEXT: Readonly<Record<string, string>> = {
 
 export function cliErrorText(code: unknown): string {
   const key = String(code ?? "").trim();
-  if (!key) return "CLI 操作失败（后端没有返回错误码）";
-  return CLI_ERROR_TEXT[key] ?? "CLI 操作失败（后端返回了未登记的错误码）";
+  if (!key) return t("CLI 操作失败（后端没有返回错误码）");
+  return t(CLI_ERROR_TEXT[key] ?? "CLI 操作失败（后端返回了未登记的错误码）");
 }
 
 const CLI_STATUS_VIEW: Readonly<Record<CliLoginState, CliStatusView>> = {
@@ -74,24 +76,24 @@ const CLI_STATUS_VIEW: Readonly<Record<CliLoginState, CliStatusView>> = {
 export function cliStatusView(status: unknown): CliStatusView & { state: CliLoginState | null } {
   const value = String(status ?? "").trim().toLowerCase();
   if (value === "idle" || value === "pending" || value === "authorized" || value === "failed") {
-    return { state: value, ...CLI_STATUS_VIEW[value] };
+    return { state: value, label: t(CLI_STATUS_VIEW[value].label), tone: CLI_STATUS_VIEW[value].tone, detail: t(CLI_STATUS_VIEW[value].detail) };
   }
   return {
     state: null,
-    label: "未知状态",
+    label: t("未知状态"),
     tone: "neutral",
-    detail: "后端返回了未登记的登录状态，界面不猜测它的含义。",
+    detail: t("后端返回了未登记的登录状态，界面不猜测它的含义。"),
   };
 }
 
 export function cliLoggedInText(loggedIn: unknown): string {
-  if (loggedIn === true) return "已登录";
-  if (loggedIn === false) return "未登录";
-  return "未返回";
+  if (loggedIn === true) return t("已登录");
+  if (loggedIn === false) return t("未登录");
+  return t("未返回");
 }
 
 export function cliInstalledText(installed: unknown): string {
-  return installed === true ? "已安装" : installed === false ? "未安装" : "状态未返回";
+  return installed === true ? t("已安装") : installed === false ? t("未安装") : t("状态未返回");
 }
 
 /** 「怎么装」的执行提示：未安装时绝不空白。只登记确有把握的包管理器命令，其余给通用步骤。 */
@@ -104,10 +106,10 @@ const CLI_INSTALL_HINTS: Readonly<Record<string, string>> = {
 export function cliInstallHint(tool: Partial<CliTool> | null | undefined): string {
   const id = String(tool?.id ?? "").trim().toLowerCase().replace(/^cli:/, "");
   const known = CLI_INSTALL_HINTS[id];
-  if (known) return known;
+  if (known) return t(known);
   const command = String(tool?.runtime?.command ?? "").trim() || id || "该工具的命令";
   const name = String(tool?.name ?? "").trim() || id || "该 CLI";
-  return "在终端安装 " + name + " 的命令行工具（命令：" + command + "），确认直接运行不报错后回到这里点「重新读取」。OpenArc 不会替你安装任何软件。";
+  return t("在终端安装 {name} 的命令行工具（命令：{command}），确认直接运行不报错后回到这里点「重新读取」。OpenArc 不会替你安装任何软件。", { name, command });
 }
 
 function pickValue(reply: any, key: string): any {
@@ -147,7 +149,7 @@ export function normalizeCliList(reply: any): { tools: CliTool[]; problem: strin
 }
 
 export function formatCliValue(value: unknown): string {
-  if (value == null || value === "") return "未返回";
+  if (value == null || value === "") return t("未返回");
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
   try {
     return JSON.stringify(value);

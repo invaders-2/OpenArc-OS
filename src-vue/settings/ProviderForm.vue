@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
 import DsButton from "../design-system/DsButton.vue";
+import { t } from "../i18n";
 import { useShellStore } from "../stores/shell";
 import { resolveProviderLogo } from "./providerLogos";
 import {
@@ -124,12 +125,12 @@ function presetLogo(preset: ProviderPreset) {
   return resolveProviderLogo({ providerId: preset.id, displayName: preset.name, adapterType: preset.adapterType }, logoTheme.value);
 }
 function presetModeLabel(preset: ProviderPreset): string {
-  return preset.credentialMode === "dual" ? "双密钥" : "单密钥";
+  return preset.credentialMode === "dual" ? t("双密钥") : t("单密钥");
 }
 function statusText(status: string): string {
-  if (status === "available") return "协议已注册";
-  if (status === "pending") return "协议实现中";
-  return "协议未确认";
+  if (status === "available") return t("协议已注册");
+  if (status === "pending") return t("协议实现中");
+  return t("协议未确认");
 }
 /** 点预设：只写表单，不建 provider、不写密钥。 */
 function applyPreset(preset: ProviderPreset) {
@@ -204,11 +205,11 @@ function onBaseUrl(event: Event) {
     :data-d4-01-provider-form-mode="mode"
     @submit.prevent="submit"
   >
-    <div class="mp2-head"><b>{{ mode === "edit" ? "编辑服务商" : "添加服务商" }}</b></div>
+    <div class="mp2-head"><b>{{ mode === "edit" ? t("编辑服务商") : t("添加服务商") }}</b></div>
 
     <!-- 预设：点一下填好名称 / 地址 / adapterType / 凭据形态；不自动创建、不自动写密钥 -->
     <div class="mp2-field" data-d4-01-presets>
-      <span>预设 <small>点一下自动填名称、API 地址与协议；密钥仍需自己填并确认提交</small></span>
+      <span>{{ t("预设") }} <small>{{ t("点一下自动填名称、API 地址与协议；密钥仍需自己填并确认提交") }}</small></span>
       <div class="mp2-preset-row">
         <button
           v-for="p in PROVIDER_PRESETS"
@@ -223,7 +224,7 @@ function onBaseUrl(event: Event) {
           :data-d4-01-preset-status="presetStatus(p)"
           :data-d4-01-preset-selected="selectedPresetId === p.id ? 'true' : 'false'"
           :aria-pressed="selectedPresetId === p.id"
-          :title="p.name + ' · ' + p.adapterType + ' · ' + presetModeLabel(p)"
+          :title="t(p.name) + ' · ' + p.adapterType + ' · ' + presetModeLabel(p)"
           @click="applyPreset(p)"
         >
           <span
@@ -242,17 +243,17 @@ function onBaseUrl(event: Event) {
             <img v-else-if="presetLogo(p)" :src="presetLogo(p)!.url" :alt="presetLogo(p)!.label" />
             <template v-else>{{ p.name.slice(0, 1) }}</template>
           </span>
-          <span class="pform-preset-label">{{ p.name }}</span>
-          <span v-if="presetStatus(p) === 'pending'" class="pform-preset-pending" :data-d4-01-preset-pending="p.id">协议实现中</span>
+          <span class="pform-preset-label">{{ t(p.name) }}</span>
+          <span v-if="presetStatus(p) === 'pending'" class="pform-preset-pending" :data-d4-01-preset-pending="p.id">{{ t("协议实现中") }}</span>
         </button>
       </div>
     </div>
 
     <!-- 协议（adapterType）：只读展示，由预设写入；编辑态即服务商当前协议 -->
     <div class="mp2-field">
-      <span>协议（adapterType） <small>镜像桥按它选 provider 协议；由预设决定</small></span>
+      <span>{{ t("协议（adapterType）") }} <small>{{ t("镜像桥按它选 provider 协议；由预设决定") }}</small></span>
       <div class="mp2-static mono" data-d4-01-provider-adapter>{{ currentAdapter }}</div>
-      <small v-if="mode === 'edit'" class="set-cap" data-d4-01-preset-current-adapter>当前协议：{{ currentAdapter }}</small>
+      <small v-if="mode === 'edit'" class="set-cap" data-d4-01-preset-current-adapter>{{ t("当前协议：{adapter}", { adapter: currentAdapter }) }}</small>
     </div>
 
     <!-- 选中预设的详情：文档 / 凭据形态 / 协议状态 / 推荐模型 -->
@@ -262,73 +263,73 @@ function onBaseUrl(event: Event) {
         <span class="badge" data-d4-01-preset-mode-label>{{ presetModeLabel(activePreset) }}</span>
         <span class="badge" :class="{ ok: activeStatus === 'available', warn: activeStatus === 'pending' }" data-d4-01-preset-protocol-status>{{ statusText(activeStatus) }}</span>
       </div>
-      <p class="set-cap" data-d4-01-preset-notes>{{ activePreset.notes }}</p>
+      <p class="set-cap" data-d4-01-preset-notes>{{ t(activePreset.notes) }}</p>
       <p v-if="activeStatus === 'pending'" class="pform-warn" data-d4-01-preset-pending-notice>
-        协议「{{ currentAdapter }}」还没在当前构建里注册（由另外的包实现中）：可以保存服务商，但调用会失败。
+        {{ t("协议「{adapter}」还没在当前构建里注册（由另外的包实现中）：可以保存服务商，但调用会失败。", { adapter: currentAdapter }) }}
       </p>
       <p v-else-if="activeStatus === 'unknown'" class="pform-warn" data-d4-01-preset-protocol-unknown>
-        没拿到协议表，无法确认「{{ currentAdapter }}」是否已落地。
+        {{ t("没拿到协议表，无法确认「{adapter}」是否已落地。", { adapter: currentAdapter }) }}
       </p>
       <div class="mp2-row" data-d4-01-preset-models>
         <template v-if="activePreset.models.length">
-          <span class="set-cap">推荐模型</span>
+          <span class="set-cap">{{ t("推荐模型") }}</span>
           <span v-for="m in activePreset.models.slice(0, 4)" :key="m.id" class="badge mono" :title="m.capabilities.join('、')">{{ m.id }}</span>
-          <span v-if="presetRecommendedCaps.length" class="set-cap" :data-d4-01-preset-caps="presetRecommendedCaps.join(',')">能力：{{ presetRecommendedCaps.join('、') }}</span>
+          <span v-if="presetRecommendedCaps.length" class="set-cap" :data-d4-01-preset-caps="presetRecommendedCaps.join(',')">{{ t("能力：{caps}", { caps: presetRecommendedCaps.join("、") }) }}</span>
         </template>
-        <span v-else class="set-cap" data-d4-01-preset-models-catalog>模型列表由 catalog 动态拉取（本家没有公开清单，不编造）</span>
+        <span v-else class="set-cap" data-d4-01-preset-models-catalog>{{ t("模型列表由 catalog 动态拉取（本家没有公开清单，不编造）") }}</span>
       </div>
     </div>
 
-    <label class="mp2-field"><span>名称</span>
-      <input class="set-input" data-d4-01-provider-name aria-label="服务商名称" placeholder="例如 DeepSeek" :value="form.displayName" @input="form.displayName = ($event.target as HTMLInputElement).value" />
-      <small v-if="attempted && validation.fieldErrors.displayName" class="pform-err" data-d4-01-provider-name-error>{{ validation.fieldErrors.displayName }}</small>
+    <label class="mp2-field"><span>{{ t("名称") }}</span>
+      <input class="set-input" data-d4-01-provider-name :aria-label="t('服务商名称')" :placeholder="t('例如 DeepSeek')" :value="form.displayName" @input="form.displayName = ($event.target as HTMLInputElement).value" />
+      <small v-if="attempted && validation.fieldErrors.displayName" class="pform-err" data-d4-01-provider-name-error>{{ t(validation.fieldErrors.displayName) }}</small>
     </label>
-    <label class="mp2-field"><span>API 地址</span>
-      <input class="set-input mono" data-d4-01-provider-url aria-label="API 地址" placeholder="https://api.example.com/v1" :value="form.baseUrl" @input="onBaseUrl" />
-      <small v-if="attempted && validation.fieldErrors.baseUrl" class="pform-err" data-d4-01-provider-url-error>{{ validation.fieldErrors.baseUrl }}</small>
+    <label class="mp2-field"><span>{{ t("API 地址") }}</span>
+      <input class="set-input mono" data-d4-01-provider-url :aria-label="t('API 地址')" placeholder="https://api.example.com/v1" :value="form.baseUrl" @input="onBaseUrl" />
+      <small v-if="attempted && validation.fieldErrors.baseUrl" class="pform-err" data-d4-01-provider-url-error>{{ t(validation.fieldErrors.baseUrl) }}</small>
     </label>
     <div v-if="validation.needsInsecureOptIn" class="mp2-field" data-d4-01-provider-insecure-opt>
       <label class="mp2-insecure">
-        <input type="checkbox" data-d4-01-provider-insecure-http aria-label="允许不安全 HTTP（明文直连）" :checked="form.allowInsecureHttp" @change="form.allowInsecureHttp = ($event.target as HTMLInputElement).checked" />
-        <span>允许不安全 HTTP（明文直连）</span>
+        <input type="checkbox" data-d4-01-provider-insecure-http :aria-label="t('允许不安全 HTTP（明文直连）')" :checked="form.allowInsecureHttp" @change="form.allowInsecureHttp = ($event.target as HTMLInputElement).checked" />
+        <span>{{ t("允许不安全 HTTP（明文直连）") }}</span>
       </label>
-      <p class="mp2-insecure-warn" data-d4-01-provider-insecure-warning>{{ PROVIDER_INSECURE_WARNING }}</p>
-      <small v-if="attempted && validation.fieldErrors.insecureHttp" class="pform-err" data-d4-01-provider-insecure-error>{{ validation.fieldErrors.insecureHttp }}</small>
+      <p class="mp2-insecure-warn" data-d4-01-provider-insecure-warning>{{ t(PROVIDER_INSECURE_WARNING) }}</p>
+      <small v-if="attempted && validation.fieldErrors.insecureHttp" class="pform-err" data-d4-01-provider-insecure-error>{{ t(validation.fieldErrors.insecureHttp) }}</small>
     </div>
 
     <template v-if="isDual">
-      <label class="mp2-field"><span>Access Key <small>{{ mode === "edit" ? "替换密钥：只写入系统钥匙串，留空表示不更换" : "只写入系统钥匙串" }}</small></span>
+      <label class="mp2-field"><span>Access Key <small>{{ mode === "edit" ? t("替换密钥：只写入系统钥匙串，留空表示不更换") : t("只写入系统钥匙串") }}</small></span>
         <input class="set-input mono" data-d4-01-provider-secret-access aria-label="Access Key" type="password" placeholder="ak_..." :value="dualAccess" @input="dualAccess = ($event.target as HTMLInputElement).value" />
       </label>
-      <label class="mp2-field"><span>Secret Key <small>与 Access Key 一起提交（组合成一组凭据）</small></span>
+      <label class="mp2-field"><span>Secret Key <small>{{ t("与 Access Key 一起提交（组合成一组凭据）") }}</small></span>
         <input class="set-input mono" data-d4-01-provider-secret-key aria-label="Secret Key" type="password" placeholder="sk_..." :value="dualSecret" @input="dualSecret = ($event.target as HTMLInputElement).value" />
       </label>
-      <small v-if="attempted && secretError" class="pform-err" data-d4-01-provider-secret-error>{{ secretError }}</small>
+      <small v-if="attempted && secretError" class="pform-err" data-d4-01-provider-secret-error>{{ t(secretError) }}</small>
     </template>
-    <label v-else class="mp2-field"><span>API 密钥 <small>{{ mode === "edit" ? "替换密钥：只写入系统钥匙串，留空表示不更换" : "只写入系统钥匙串" }}</small></span>
-      <input class="set-input" data-d4-01-provider-secret aria-label="API 密钥" type="password" :placeholder="secretPlaceholder" :value="form.credentialSecret" @input="form.credentialSecret = ($event.target as HTMLInputElement).value" />
+    <label v-else class="mp2-field"><span>{{ t("API 密钥") }} <small>{{ mode === "edit" ? t("替换密钥：只写入系统钥匙串，留空表示不更换") : t("只写入系统钥匙串") }}</small></span>
+      <input class="set-input" data-d4-01-provider-secret aria-label="API 密钥" type="password" :placeholder="t(secretPlaceholder)" :value="form.credentialSecret" @input="form.credentialSecret = ($event.target as HTMLInputElement).value" />
     </label>
 
-    <label class="mp2-field"><span>范围 <small data-d4-01-provider-scope-hint>{{ scopeHint }}</small></span>
-      <select class="set-select" data-d4-01-provider-scope aria-label="范围" :disabled="scopeDisabled" :value="form.scope" @change="form.scope = ($event.target as HTMLSelectElement).value">
-        <option v-for="o in PROVIDER_SCOPE_OPTIONS" :key="o.id" :value="o.id">{{ o.label }}</option>
+    <label class="mp2-field"><span>{{ t("范围") }} <small data-d4-01-provider-scope-hint>{{ t(scopeHint) }}</small></span>
+      <select class="set-select" data-d4-01-provider-scope :aria-label="t('范围')" :disabled="scopeDisabled" :value="form.scope" @change="form.scope = ($event.target as HTMLSelectElement).value">
+        <option v-for="o in PROVIDER_SCOPE_OPTIONS" :key="o.id" :value="o.id">{{ t(o.label) }}</option>
       </select>
-      <small v-if="attempted && validation.fieldErrors.scope" class="pform-err" data-d4-01-provider-scope-error>{{ validation.fieldErrors.scope }}</small>
+      <small v-if="attempted && validation.fieldErrors.scope" class="pform-err" data-d4-01-provider-scope-error>{{ t(validation.fieldErrors.scope) }}</small>
     </label>
-    <label v-if="mode === 'edit'" class="mp2-field"><span>启用-停用 <small>停用后该服务商下的模型不再被调用</small></span>
-      <select class="set-select" data-d4-01-provider-status aria-label="启用状态" :value="form.status" @change="form.status = ($event.target as HTMLSelectElement).value">
-        <option v-for="o in PROVIDER_STATUS_OPTIONS" :key="o.id" :value="o.id">{{ o.label }}</option>
+    <label v-if="mode === 'edit'" class="mp2-field"><span>{{ t("启用-停用") }} <small>{{ t("停用后该服务商下的模型不再被调用") }}</small></span>
+      <select class="set-select" data-d4-01-provider-status :aria-label="t('启用状态')" :value="form.status" @change="form.status = ($event.target as HTMLSelectElement).value">
+        <option v-for="o in PROVIDER_STATUS_OPTIONS" :key="o.id" :value="o.id">{{ t(o.label) }}</option>
       </select>
     </label>
     <p v-if="validation.originChanged" class="pform-hint" data-d4-01-provider-origin-hint>
-      API 地址的 origin 变了（{{ form.baseUrl }}）。凭据与 origin 绑定：旧密钥不会自动发往新地址。
-      <template v-if="validation.requiresNewCredential">请在「API 密钥」里粘贴新密钥后一起保存；若只改地址不换密钥，保存后调用可能被 ENDPOINT_BLOCKED 拒绝。</template>
-      <template v-else>你已填写新密钥，保存时会按新地址重新绑定。</template>
+      {{ t("API 地址的 origin 变了（{url}）。凭据与 origin 绑定：旧密钥不会自动发往新地址。", { url: form.baseUrl }) }}
+      <template v-if="validation.requiresNewCredential">{{ t("请在「API 密钥」里粘贴新密钥后一起保存；若只改地址不换密钥，保存后调用可能被 ENDPOINT_BLOCKED 拒绝。") }}</template>
+      <template v-else>{{ t("你已填写新密钥，保存时会按新地址重新绑定。") }}</template>
     </p>
     <div class="mp2-actions">
-      <DsButton v-if="mode === 'edit'" variant="ghost" size="sm" data-d4-01-provider-cancel @click="emit('cancel')">取消</DsButton>
-      <DsButton v-if="mode === 'edit'" variant="primary" size="sm" data-d4-01-provider-save :disabled="off" @click="submit">{{ busy ? "保存中…" : "保存修改" }}</DsButton>
-      <DsButton v-else variant="primary" size="sm" data-d4-01-provider-create :disabled="off" @click="submit">添加服务商</DsButton>
+      <DsButton v-if="mode === 'edit'" variant="ghost" size="sm" data-d4-01-provider-cancel @click="emit('cancel')">{{ t("取消") }}</DsButton>
+      <DsButton v-if="mode === 'edit'" variant="primary" size="sm" data-d4-01-provider-save :disabled="off" @click="submit">{{ busy ? t("保存中…") : t("保存修改") }}</DsButton>
+      <DsButton v-else variant="primary" size="sm" data-d4-01-provider-create :disabled="off" @click="submit">{{ t("添加服务商") }}</DsButton>
     </div>
   </form>
 </template>

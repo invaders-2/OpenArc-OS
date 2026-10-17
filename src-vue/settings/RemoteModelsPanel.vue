@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import DsButton from "../design-system/DsButton.vue";
+import { t } from "../i18n";
 import {
   CAPABILITY_SHORT,
   REMOTE_CLASSIFY_NOTE,
@@ -58,18 +59,18 @@ function registerPicked() {
         <input
           class="ds-search__input"
           type="search"
-          placeholder="筛选模型"
-          aria-label="筛选模型"
+          :placeholder="t('筛选模型')"
+          :aria-label="t('筛选模型')"
           :value="filter"
           @input="onFilter"
         />
       </label>
       <span class="set-val">{{ grouping.total }} / {{ (items || []).length }}</span>
       <DsButton variant="primary" size="sm" data-d4-01-remote-register :disabled="!pickedCount" @click="registerPicked">
-        注册所选{{ pickedCount ? `（${pickedCount}）` : "" }}
+        {{ t("注册所选") }}{{ pickedCount ? " (" + pickedCount + ")" : "" }}
       </DsButton>
     </div>
-    <p class="rrm-lead set-cap" data-d4-01-remote-classify-note>{{ REMOTE_CLASSIFY_NOTE }}</p>
+    <p class="rrm-lead set-cap" data-d4-01-remote-classify-note>{{ t(REMOTE_CLASSIFY_NOTE) }}</p>
     <section
       v-for="g in grouping.groups"
       :key="g.id"
@@ -78,11 +79,11 @@ function registerPicked() {
       :data-d4-01-remote-group-count="g.id"
     >
       <button type="button" class="rrm-head" :data-d4-01-remote-group-toggle="g.id" :aria-expanded="!collapsed[g.id]" @click="toggleGroup(g.id)">
-        <b>{{ g.label }}</b>
+        <b>{{ t(g.label) }}</b>
         <span class="badge rrm-count" :data-d4-01-remote-group-n="g.id">{{ g.items.length }}</span>
-        <small>{{ collapsed[g.id] ? "展开" : "收起" }}</small>
+        <small>{{ collapsed[g.id] ? t("展开") : t("收起") }}</small>
       </button>
-      <p class="rrm-note set-cap" :data-d4-01-remote-group-note="g.id">{{ g.note }}</p>
+      <p class="rrm-note set-cap" :data-d4-01-remote-group-note="g.id">{{ t(g.note) }}</p>
       <ul v-show="!collapsed[g.id]" class="d401-remote-list" :data-d4-01-remote-group-list="g.id">
         <li v-for="m in g.items" :key="m.id">
           <label :class="{ done: m.registered }">
@@ -94,8 +95,8 @@ function registerPicked() {
               @change="emit('toggle-pick', m)"
             />
             <span class="mono d401-remote-id" :title="m.id">{{ m.id }}</span>
-            <span v-if="m.registered" class="badge" :data-d4-01-remote-registered="m.id">已加入</span>
-            <span class="d401-remote-caps" :data-d4-01-remote-caps="m.id">{{ m.capabilities.length ? m.capabilities.map((c) => CAPABILITY_SHORT[c] || c).join(" · ") : "未推断出能力" }}</span>
+            <span v-if="m.registered" class="badge" :data-d4-01-remote-registered="m.id">{{ t("已加入") }}</span>
+            <span class="d401-remote-caps" :data-d4-01-remote-caps="m.id">{{ m.capabilities.length ? m.capabilities.map((c) => CAPABILITY_SHORT[c] ? t(CAPABILITY_SHORT[c]) : c).join(" · ") : t("未推断出能力") }}</span>
             <button
               v-if="!m.registered"
               type="button"
@@ -103,14 +104,14 @@ function registerPicked() {
               :data-d4-01-remote-add-item="m.id"
               @click.prevent="emit('add-one', m)"
             >
-              加入
+              {{ t("加入") }}
             </button>
           </label>
         </li>
-        <li v-if="!g.items.length" class="set-cap" :data-d4-01-remote-group-empty="g.id">{{ g.emptyText }}</li>
+        <li v-if="!g.items.length" class="set-cap" :data-d4-01-remote-group-empty="g.id">{{ t(g.emptyText) }}</li>
       </ul>
     </section>
-    <p v-if="!pulling && !(items || []).length" class="set-cap" data-d4-01-remote-hint>上游清单是空的：先点上面的「拉取模型」。</p>
+    <p v-if="!pulling && !(items || []).length" class="set-cap" data-d4-01-remote-hint>{{ t("上游清单是空的：先点上面的「拉取模型」。") }}</p>
   </div>
 </template>
 

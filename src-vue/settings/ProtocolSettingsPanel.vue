@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import DsButton from "../design-system/DsButton.vue";
+import { t } from "../i18n";
 import { useShellStore } from "../stores/shell";
 import {
   describeProtocolDetail,
@@ -86,10 +87,10 @@ const facts = (it: ProtocolItem) => {
     ["类型", protocolKindLabel(String(it.kind || ""))],
     ["来源", protocolSourceText(it.source)],
     ["执行方式", protocolEngineText(it.engine)],
-    ["可执行性", execution.label],
+    ["可执行性", t(execution.label)],
     ["移植状态", protocolPortedText(it.ported)],
-    ["版本", it.activeVersion == null ? "未返回" : "v" + String(it.activeVersion)],
-    ["能力", protocolCapabilitiesText(it) || "未返回"],
+    ["版本", it.activeVersion == null ? t("未返回") : "v" + String(it.activeVersion)],
+    ["能力", protocolCapabilitiesText(it) || t("未返回")],
   ];
 };
 
@@ -191,7 +192,7 @@ onMounted(load);
           :class="{ on: kind === k[0] }"
           :data-protocol-settings-kind="k[0]"
           @click="kind = k[0]"
-        >{{ k[1] }} <small>{{ k[0] === "all" ? items.length : count((it) => it.kind === k[0]) }}</small></button>
+        >{{ t(k[1]) }} <small>{{ k[0] === "all" ? items.length : count((it) => it.kind === k[0]) }}</small></button>
       </span>
       <span class="pset-filters">
         <button
@@ -202,21 +203,21 @@ onMounted(load);
           :class="{ on: status === s }"
           :data-protocol-settings-status="s"
           @click="status = s"
-        >{{ s === "all" ? "全部状态" : STATUS_LABEL[s] }} <small>{{ s === "all" ? items.length : count((it) => statusOf(it) === s) }}</small></button>
+        >{{ s === "all" ? t("全部状态") : t(STATUS_LABEL[s]) }} <small>{{ s === "all" ? items.length : count((it) => statusOf(it) === s) }}</small></button>
       </span>
       <span class="toolbar-spacer" />
-      <DsButton variant="ghost" size="sm" data-protocol-settings-reload :disabled="loading" @click="load">{{ loading ? "读取中…" : "重新读取" }}</DsButton>
+      <DsButton variant="ghost" size="sm" data-protocol-settings-reload :disabled="loading" @click="load">{{ loading ? t("读取中…") : t("重新读取") }}</DsButton>
     </div>
 
     <p v-if="errorCode" class="pset-msg pset-msg-bad" data-protocol-settings-error :data-protocol-settings-error-code="errorCode">
-      {{ modelProtocolErrorText(errorCode) }}（原始码见 data-protocol-settings-error-code）
+      {{ modelProtocolErrorText(errorCode) }}{{ t("（原始码见 data-protocol-settings-error-code）") }}
     </p>
     <p v-else-if="problem" class="pset-msg">{{ problem }}</p>
 
     <div class="pset-body">
       <div class="pset-list" data-protocol-settings-list>
-        <p v-if="loading && !items.length" class="set-cap">正在读取协议…</p>
-        <p v-else-if="!shown.length" class="set-cap" data-protocol-settings-empty>没有匹配的协议。</p>
+        <p v-if="loading && !items.length" class="set-cap">{{ t("正在读取协议…") }}</p>
+        <p v-else-if="!shown.length" class="set-cap" data-protocol-settings-empty>{{ t("没有匹配的协议。") }}</p>
         <button
           v-for="it in shown"
           :key="protocolKey(it)"
@@ -248,7 +249,7 @@ onMounted(load);
             <b>{{ it.label || it.id }}</b>
             <small class="mono">{{ it.id }}</small>
           </span>
-          <span class="pset-dot" :data-s="statusOf(it)">{{ STATUS_LABEL[statusOf(it)] }}</span>
+          <span class="pset-dot" :data-s="statusOf(it)">{{ t(STATUS_LABEL[statusOf(it)]) }}</span>
         </button>
       </div>
 
@@ -260,44 +261,44 @@ onMounted(load);
 
         <div class="pset-facts">
           <div v-for="f in facts(selected)" :key="f[0]" class="pset-fact">
-            <span class="set-lab">{{ f[0] }}</span>
-            <span class="set-val">{{ f[1] }}</span>
+            <span class="set-lab">{{ t(f[0]) }}</span>
+            <span class="set-val">{{ t(f[1]) }}</span>
           </div>
         </div>
         <p v-if="statusOf(selected) !== 'ok'" class="pset-msg" data-protocol-settings-premise>
-          前提：{{ protocolExecutionView(selected).detail }}
+          {{ t("前提：{detail}", { detail: protocolExecutionView(selected).detail }) }}
         </p>
 
-        <p v-if="detailLoading" class="set-cap">正在读取协议定义…</p>
+        <p v-if="detailLoading" class="set-cap">{{ t("正在读取协议定义…") }}</p>
         <p v-else-if="detailError" class="pset-msg" data-protocol-settings-detail-note>{{ detailError }}</p>
         <template v-else-if="detail && detail.found">
           <p v-if="detail.summary && detail.summary !== '未返回'" class="pset-summary">{{ detail.summary }}</p>
           <div class="pset-groups">
             <span v-for="g in detail.groups" :key="g.key" class="pset-chip pset-chip-static" :class="{ on: g.declared }">
-              {{ g.label.split(" ")[0] }} {{ g.declared ? g.count : "未声明" }}
+              {{ g.label.split(" ")[0] }} {{ g.declared ? g.count : t("未声明") }}
             </span>
           </div>
           <table v-if="detail.operations.length" class="pset-table" data-protocol-settings-operations>
-            <thead><tr><th>接口</th><th>方法</th><th>路径</th></tr></thead>
+            <thead><tr><th>{{ t("接口") }}</th><th>{{ t("方法") }}</th><th>{{ t("路径") }}</th></tr></thead>
             <tbody><tr v-for="op in detail.operations" :key="op.id"><td class="mono">{{ op.id }}</td><td>{{ op.method }}</td><td class="mono">{{ op.path }}</td></tr></tbody>
           </table>
           <table v-if="detail.workflows.length" class="pset-table" data-protocol-settings-workflows>
-            <thead><tr><th>工作流</th><th>提交接口</th></tr></thead>
+            <thead><tr><th>{{ t("工作流") }}</th><th>{{ t("提交接口") }}</th></tr></thead>
             <tbody><tr v-for="wf in detail.workflows" :key="wf.id"><td class="mono">{{ wf.id }}</td><td class="mono">{{ wf.submit }}</td></tr></tbody>
           </table>
           <table v-if="detail.profiles.length" class="pset-table" data-protocol-settings-profiles>
-            <thead><tr><th>模型</th><th>名称</th><th>能力</th><th>工作流</th></tr></thead>
-            <tbody><tr v-for="pf in detail.profiles" :key="pf.id"><td class="mono">{{ pf.id }}</td><td>{{ pf.label }}</td><td>{{ pf.capabilities.join("、") || "未声明" }}</td><td>{{ pf.workflowCount }}</td></tr></tbody>
+            <thead><tr><th>{{ t("模型") }}</th><th>{{ t("名称") }}</th><th>{{ t("能力") }}</th><th>{{ t("工作流") }}</th></tr></thead>
+            <tbody><tr v-for="pf in detail.profiles" :key="pf.id"><td class="mono">{{ pf.id }}</td><td>{{ pf.label }}</td><td>{{ pf.capabilities.length ? pf.capabilities.join("、") : t("未声明") }}</td><td>{{ pf.workflowCount }}</td></tr></tbody>
           </table>
-          <p class="set-cap">版本 v{{ detail.version }} · 校验值 <code>{{ String(detail.hash).slice(0, 12) }}</code></p>
+          <p class="set-cap">{{ t("版本 v{version} · 校验值", { version: detail.version }) }} <code>{{ String(detail.hash).slice(0, 12) }}</code></p>
         </template>
 
         <div class="pset-editor" data-protocol-settings-editor>
           <div class="pset-editor-head">
-            <b>校验 / 保存自定义协议</b>
+            <b>{{ t("校验 / 保存自定义协议") }}</b>
             <select class="set-select" data-protocol-settings-draft-kind :value="draftKind" @change="onDraftKind">
-              <option value="model">模型协议（model）</option>
-              <option value="provider">供应商协议（provider）</option>
+              <option value="model">{{ t("模型协议（model）") }}</option>
+              <option value="provider">{{ t("供应商协议（provider）") }}</option>
             </select>
           </div>
           <textarea
@@ -306,13 +307,13 @@ onMounted(load);
             data-protocol-settings-draft
             spellcheck="false"
             rows="10"
-            aria-label="协议定义 JSON"
+            :aria-label="t('协议定义 JSON')"
             placeholder='粘贴 dx-protocol/v2 定义，例如 {"schemaVersion":"dx-protocol/v2","kind":"model","id":"my-proto",...}'
           />
           <div class="pset-editor-actions">
-            <DsButton variant="secondary" size="sm" data-protocol-settings-validate :disabled="busy" @click="runValidate">校验</DsButton>
-            <DsButton variant="primary" size="sm" data-protocol-settings-save :disabled="busy" @click="runSave">保存到本机</DsButton>
-            <span v-if="rawProtocol" class="set-cap">已载入 <code>{{ String(rawProtocol.id || "") }}</code>，改动只会写入本机协议库。</span>
+            <DsButton variant="secondary" size="sm" data-protocol-settings-validate :disabled="busy" @click="runValidate">{{ t("校验") }}</DsButton>
+            <DsButton variant="primary" size="sm" data-protocol-settings-save :disabled="busy" @click="runSave">{{ t("保存到本机") }}</DsButton>
+            <span v-if="rawProtocol" class="set-cap">{{ t("已载入 {id}，改动只会写入本机协议库。", { id: String(rawProtocol.id || "") }) }}</span>
           </div>
           <p
             v-if="validateView"
@@ -338,7 +339,7 @@ onMounted(load);
         </div>
       </section>
       <section v-else class="pset-detail pset-detail-empty">
-        <p class="set-cap">从左边选一个协议，查看它的接口、工作流与可执行性；也可以在下方直接校验、保存自定义协议。</p>
+        <p class="set-cap">{{ t("从左边选一个协议，查看它的接口、工作流与可执行性；也可以在下方直接校验、保存自定义协议。") }}</p>
       </section>
     </div>
   </div>

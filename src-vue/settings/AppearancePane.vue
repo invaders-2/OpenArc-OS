@@ -225,9 +225,9 @@ async function saveProfile() {
       <div class="setting-row">
         <span class="set-lab">{{ t("窗口材质") }}<small>{{ t("外壳与浮层使用磨砂玻璃；内容区始终保持清晰") }}</small></span>
         <div class="segmented text" role="group" :aria-label="t('材质')">
-          <button :aria-pressed="shell.glass === 'full'" @click="onGlass('full')">完整玻璃</button>
-          <button :aria-pressed="shell.glass === 'reduced'" @click="onGlass('reduced')">降低材质</button>
-          <button :aria-pressed="shell.glass === 'solid'" @click="onGlass('solid')">实色</button>
+          <button :aria-pressed="shell.glass === 'full'" @click="onGlass('full')">{{ t("完整玻璃") }}</button>
+          <button :aria-pressed="shell.glass === 'reduced'" @click="onGlass('reduced')">{{ t("降低材质") }}</button>
+          <button :aria-pressed="shell.glass === 'solid'" @click="onGlass('solid')">{{ t("实色") }}</button>
         </div>
         <!-- 探针钩子：device-ui 依赖 .material-select 在设置打开时就在 DOM 里（隐藏镜像）。 -->
         <select class="material-select" hidden aria-hidden="true" tabindex="-1" :value="shell.glass" @change="onGlassSelect">
@@ -292,7 +292,7 @@ async function saveProfile() {
           :aria-pressed="shell.wallpaper === it.id"
           @click="shell.setWallpaper(it.id)"
         >
-          <span>{{ it.name }}</span>
+          <span>{{ t(it.name) }}</span>
         </button>
         <div v-else class="wallpaper-cell">
           <button
@@ -312,7 +312,7 @@ async function saveProfile() {
               playsinline
             />
             <img v-else :src="fileUrl(WALLPAPER_ID, it.id)" :style="mediaStyle(it.id)" alt="" />
-            <span>{{ it.name }}</span>
+            <span>{{ t(it.name) }}</span>
           </button>
           <button class="wallpaper-more" :aria-label="t('壁纸选项')" :title="t('壁纸选项')" @click="openMenuFromButton($event, it.id)">
             ⋯
@@ -356,7 +356,7 @@ async function saveProfile() {
           :aria-pressed="shell.lockWallpaper === it.id"
           @click="shell.setLockWallpaper(it.id)"
         >
-          <span>{{ it.name }}</span>
+          <span>{{ t(it.name) }}</span>
         </button>
         <button
           v-else
@@ -376,7 +376,7 @@ async function saveProfile() {
             playsinline
           />
           <img v-else :src="fileUrl(WALLPAPER_ID, it.id)" :style="mediaStyle(it.id)" alt="" />
-          <span>{{ it.name }}</span>
+          <span>{{ t(it.name) }}</span>
         </button>
       </template>
     </div>

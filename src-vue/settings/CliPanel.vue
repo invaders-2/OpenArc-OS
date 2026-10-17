@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import DsButton from "../design-system/DsButton.vue";
+import { t } from "../i18n";
 import {
   cliErrorText,
   cliInstallHint,
@@ -165,10 +166,10 @@ onMounted(load);
     <p v-if="!hasBridge" class="cli-msg cli-msg-bad" data-cli-no-bridge>{{ cliErrorText("NO_BRIDGE") }}</p>
     <template v-else>
       <div class="cli-bar">
-        <span class="set-cap">列出本机命令行工具的安装状态、登录、模型与额度。CLI 由后端的 cli:command 通道提供。</span>
+        <span class="set-cap">{{ t("列出本机命令行工具的安装状态、登录、模型与额度。CLI 由后端的 cli:command 通道提供。") }}</span>
         <span class="toolbar-spacer" />
         <small v-if="busyHint" class="set-cap">{{ busyHint }}</small>
-        <DsButton variant="ghost" size="sm" data-cli-reload :disabled="loading" @click="load">{{ loading ? "读取中…" : "重新读取" }}</DsButton>
+        <DsButton variant="ghost" size="sm" data-cli-reload :disabled="loading" @click="load">{{ loading ? t("读取中…") : t("重新读取") }}</DsButton>
       </div>
 
       <p v-if="loadErrorCode" class="cli-msg cli-msg-bad" data-cli-error :data-cli-error-code="loadErrorCode">{{ loadErrorText }}</p>
@@ -187,7 +188,7 @@ onMounted(load);
             <span class="cli-badge" :data-tone="tool.installed ? 'ok' : 'off'" :data-cli-state="tool.installed ? 'installed' : 'missing'">{{ cliInstalledText(tool.installed) }}</span>
             <small v-if="tool.version" class="mono" data-cli-version>{{ tool.version }}</small>
             <span class="toolbar-spacer" />
-            <span class="set-cap">{{ expanded === tool.id ? "收起" : "展开" }}</span>
+            <span class="set-cap">{{ expanded === tool.id ? t("收起") : t("展开") }}</span>
           </header>
 
           <p v-if="tool.detail" class="set-cap" data-cli-detail>{{ tool.detail }}</p>
@@ -201,20 +202,20 @@ onMounted(load);
 
           <div v-if="expanded === tool.id" class="cli-body" data-cli-body>
             <div class="cli-actions">
-              <DsButton variant="secondary" size="sm" data-cli-action="status" :disabled="isBusy(tool.id, 'cli/status')" @click="refreshStatus(tool.id)">状态</DsButton>
-              <DsButton variant="secondary" size="sm" data-cli-action="models" :disabled="isBusy(tool.id, 'cli/models')" @click="loadModels(tool.id)">模型列表</DsButton>
-              <DsButton variant="secondary" size="sm" data-cli-action="credit" :disabled="isBusy(tool.id, 'cli/credit')" @click="loadCredit(tool.id)">额度</DsButton>
-              <DsButton variant="primary" size="sm" data-cli-action="login-start" :disabled="isBusy(tool.id, 'cli/login/start')" @click="startLogin(tool.id)">发起登录</DsButton>
-              <DsButton variant="secondary" size="sm" data-cli-action="login-status" :disabled="isBusy(tool.id, 'cli/login/status')" @click="checkLogin(tool.id)">检查登录状态</DsButton>
-              <DsButton variant="ghost" size="sm" data-cli-action="logout" :disabled="isBusy(tool.id, 'cli/logout')" @click="logout(tool.id)">登出</DsButton>
+              <DsButton variant="secondary" size="sm" data-cli-action="status" :disabled="isBusy(tool.id, 'cli/status')" @click="refreshStatus(tool.id)">{{ t("状态") }}</DsButton>
+              <DsButton variant="secondary" size="sm" data-cli-action="models" :disabled="isBusy(tool.id, 'cli/models')" @click="loadModels(tool.id)">{{ t("模型列表") }}</DsButton>
+              <DsButton variant="secondary" size="sm" data-cli-action="credit" :disabled="isBusy(tool.id, 'cli/credit')" @click="loadCredit(tool.id)">{{ t("额度") }}</DsButton>
+              <DsButton variant="primary" size="sm" data-cli-action="login-start" :disabled="isBusy(tool.id, 'cli/login/start')" @click="startLogin(tool.id)">{{ t("发起登录") }}</DsButton>
+              <DsButton variant="secondary" size="sm" data-cli-action="login-status" :disabled="isBusy(tool.id, 'cli/login/status')" @click="checkLogin(tool.id)">{{ t("检查登录状态") }}</DsButton>
+              <DsButton variant="ghost" size="sm" data-cli-action="logout" :disabled="isBusy(tool.id, 'cli/logout')" @click="logout(tool.id)">{{ t("登出") }}</DsButton>
             </div>
 
             <section v-if="statusDetailFor(tool.id)" class="cli-block" data-cli-status :data-cli-logged-in="String(statusMap[tool.id]?.value?.loggedIn ?? statusMap[tool.id]?.loggedIn ?? '')">
-              <b>状态</b>
+              <b>{{ t("状态") }}</b>
               <div class="cli-rows">
-                <span>安装：{{ statusDetailFor(tool.id)!.installed }}</span>
-                <span>版本：{{ statusDetailFor(tool.id)!.version }}</span>
-                <span>登录：{{ statusDetailFor(tool.id)!.loggedIn }}</span>
+                <span>{{ t("安装：{value}", { value: statusDetailFor(tool.id)!.installed }) }}</span>
+                <span>{{ t("版本：{value}", { value: statusDetailFor(tool.id)!.version }) }}</span>
+                <span>{{ t("登录：{value}", { value: statusDetailFor(tool.id)!.loggedIn }) }}</span>
               </div>
               <p v-if="statusDetailFor(tool.id)!.detail" class="set-cap" data-cli-status-detail>{{ statusDetailFor(tool.id)!.detail }}</p>
               <div v-if="runtimeRows(statusDetailFor(tool.id)!.runtime).length" class="cli-rows" data-cli-runtime>
@@ -223,33 +224,33 @@ onMounted(load);
             </section>
 
             <section v-if="loginMap[tool.id]" class="cli-block" data-cli-login :data-cli-status-state="String(loginMap[tool.id].status || 'unknown')">
-              <b>登录</b>
-              <p class="set-cap" data-cli-login-state>{{ loginViewFor(tool.id) ? loginViewFor(tool.id)!.label + "：" + loginViewFor(tool.id)!.detail : "还没拿到登录状态，点「检查登录状态」。" }}</p>
-              <p v-if="loginMap[tool.id].url" class="cli-url" data-cli-login-url>授权链接：<a :href="String(loginMap[tool.id].url)" target="_blank" rel="noreferrer">{{ loginMap[tool.id].url }}</a></p>
-              <p v-else-if="loginMap[tool.id].code == null && loginMap[tool.id].started" class="set-cap" data-cli-login-no-url>后端没有返回授权链接，请按下面的说明或口令完成授权。</p>
-              <p v-if="loginMap[tool.id].code != null && loginMap[tool.id].code !== ''" class="cli-url" data-cli-login-code>授权口令：<code>{{ loginMap[tool.id].code }}</code></p>
+              <b>{{ t("登录") }}</b>
+              <p class="set-cap" data-cli-login-state>{{ loginViewFor(tool.id) ? loginViewFor(tool.id)!.label + "：" + loginViewFor(tool.id)!.detail : t("还没拿到登录状态，点「检查登录状态」。") }}</p>
+              <p v-if="loginMap[tool.id].url" class="cli-url" data-cli-login-url>{{ t("授权链接：") }}<a :href="String(loginMap[tool.id].url)" target="_blank" rel="noreferrer">{{ loginMap[tool.id].url }}</a></p>
+              <p v-else-if="loginMap[tool.id].code == null && loginMap[tool.id].started" class="set-cap" data-cli-login-no-url>{{ t("后端没有返回授权链接，请按下面的说明或口令完成授权。") }}</p>
+              <p v-if="loginMap[tool.id].code != null && loginMap[tool.id].code !== ''" class="cli-url" data-cli-login-code>{{ t("授权口令：") }}<code>{{ loginMap[tool.id].code }}</code></p>
               <p v-if="loginMap[tool.id].startDetail" class="set-cap" data-cli-login-detail>{{ loginMap[tool.id].startDetail }}</p>
               <p v-if="loginMap[tool.id].statusDetail" class="set-cap" data-cli-login-status-detail>{{ loginMap[tool.id].statusDetail }}</p>
             </section>
 
             <section v-if="modelsMap[tool.id]" class="cli-block" data-cli-models>
-              <b>模型列表</b>
-              <p v-if="modelsFor(tool.id).cached !== null" class="set-cap">{{ modelsFor(tool.id).cached ? "来自缓存" : "本次实时读取" }}</p>
+              <b>{{ t("模型列表") }}</b>
+              <p v-if="modelsFor(tool.id).cached !== null" class="set-cap">{{ modelsFor(tool.id).cached ? t("来自缓存") : t("本次实时读取") }}</p>
               <ul v-if="modelsFor(tool.id).models.length" class="cli-models">
                 <li v-for="model in modelsFor(tool.id).models" :key="model.id" :data-cli-model="model.id"><code>{{ model.id }}</code><span>{{ model.name }}</span></li>
               </ul>
-              <p v-else class="set-cap" data-cli-models-empty>这个工具没有返回模型，或它本身不需要模型列表。</p>
+              <p v-else class="set-cap" data-cli-models-empty>{{ t("这个工具没有返回模型，或它本身不需要模型列表。") }}</p>
             </section>
 
             <section v-if="creditMap[tool.id]" class="cli-block" data-cli-credit>
-              <b>额度</b>
+              <b>{{ t("额度") }}</b>
               <p class="set-cap" data-cli-credit-value>{{ creditFor(tool.id) }}</p>
             </section>
           </div>
         </article>
       </div>
 
-      <p v-if="!tools.length && !loading" class="set-cap" data-cli-empty>后端没有返回任何 CLI 工具。</p>
+      <p v-if="!tools.length && !loading" class="set-cap" data-cli-empty>{{ t("后端没有返回任何 CLI 工具。") }}</p>
     </template>
   </div>
 </template>
