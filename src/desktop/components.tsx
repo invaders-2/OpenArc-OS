@@ -35,6 +35,8 @@ import {
 } from "lucide-react";
 import domain from "../../electron/window-domain.cjs";
 import type { Window as WinDomain, WindowCommand } from "../../electron/window-domain.cjs";
+import { windowIdAtPoint } from "./tabGroups";
+import type { WindowTabInfo } from "./tabGroups";
 import { useDockArrange } from "./useDockArrange";
 import { useDockMagnify } from "./useDockMagnify";
 
@@ -489,6 +491,19 @@ export function FolderIcon({ size = 58, className }: { size?: number; className?
 // 6-7. Window / TitleBar
 // ===========================================================================
 
+type WindowTabActions = {
+  tabInfo: WindowTabInfo;
+  autoMerge: boolean;
+  onOpenNewWindow: () => void;
+  onMergeSameApp: () => void;
+  onActivateTab: (groupId: string, windowId: string) => void;
+  onCloseTab: (windowId: string) => void;
+  onCloseGroup: (groupId: string) => void;
+  onMergeTab: (sourceId: string, targetId: string) => void;
+  onSplitTab: (windowId: string) => void;
+  onToggleAutoMerge: () => void;
+};
+
 type TitleBarProps = {
   id: string;
   /** 是否已最大化 —— 决定"最大化"按钮与双击是放大还是还原。 */
@@ -500,13 +515,24 @@ type TitleBarProps = {
   closeAction: "close" | "minimize";
   onCommand: (c: WindowCommand) => void;
   onDragStart: (e: React.PointerEvent) => void;
+  /** task-21：标签组投影与动作（未分组时仍可显示「合并窗口 / 新建窗口」入口）。 */
+  tabs?: WindowTabActions;
 };
 
-export function TitleBar({ id, maximized, closeAction, onCommand, onDragStart }: TitleBarProps) {
+function windowElementById(id: string): HTMLElement | null {
+  const nodes = Array.from(document.querySelectorAll<HTMLElement>("[data-window-id]"));
+  return nodes.find((el) => el.getAttribute("data-window-id") === id) || null;
+}
+function clearTabDropTargets() {
+  document.querySelectorAll<HTMLElement>(".window.tab-drop-target").forEach((el) => el.classList.remove("tab-drop-target"));
+}
+
+export function TitleBar({ id, maximized, closeAction, onCommand, onDragStart, tabs }: TitleBarProps) {
   // 双向切换：双击/按钮在"放大"与"还原"之间切。只发 maximize 会让
   // window/unmaximize 成为不可达命令，用户放大后无法恢复（D2-02B 审出的缺陷）。
   const toggleMax = () =>
     onCommand(maximized ? { type: "window/unmaximize", id } : { type: "window/maximize", id, host: host() });
+  const hiddenTab = tabs?.tabInfo.hidden === true;
   return (
     <div className="window-title" onPointerDown={onDragStart} onDoubleClick={toggleMax}>
       <div className="traffic">
@@ -530,6 +556,129 @@ export function TitleBar({ id, maximized, closeAction, onCommand, onDragStart }:
           </svg>
         </button>
       </div>
+
+      {tabs && !hiddenTab && (tabs.tabInfo.canMerge || tabs.tabInfo.canOpenNew) && !tabs.tabInfo.group ? (
+        <div className="window-tab-actions" onPointerDown={(e) => e.stopPropagation()}>
+          {tabs.tabInfo.canMerge ? (
+            <button type="button" className="window-tab-merge" aria-label="合并同应用窗口" title="合并同应用窗口为标签组" data-window-merge onClick={() => tabs.onMergeSameApp()}>合并窗口</button>
+          ) : null}
+          {tabs.tabInfo.canOpenNew ? (
+            <button type="button" className="window-tab-icon" aria-label="新建同应用窗口" title="新建同应用窗口" data-window-new onClick={() => tabs.onOpenNewWindow()}>＋</button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** task-21：标签组条（在 44px 标题栏右侧同一行；组窗口内容区由 CSS 下移让位）。 */
+function WindowTabBar({ id, tabs }: { id: string; tabs: WindowTabActions }) {
+  const group = tabs.tabInfo.group;
+  if (!group || tabs.tabInfo.hidden) return null;
+
+  const beginTabDrag = (e: React.PointerEvent, tabId: string, groupId: string) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const pointerId = e.pointerId;
+    const start = { x: e.clientX, y: e.clientY };
+    let moved = false;
+    let targetId: string | null = null;
+    let hitWindowId: string | null = null;
+    document.body.dataset.tabDrag = "1";
+    const move = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return;
+      if (!moved && Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 6) return;
+      moved = true;
+      hitWindowId = windowIdAtPoint(ev.clientX, ev.clientY);
+      targetId = hitWindowId && hitWindowId !== id ? hitWindowId : null;
+      clearTabDropTargets();
+      if (targetId) windowElementById(targetId)?.classList.add("tab-drop-target");
+      document.body.dataset.tabDragTarget = targetId || "";
+    };
+    const finish = (ev: PointerEvent, cancelled: boolean) => {
+      if (ev.pointerId !== pointerId) return;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+      clearTabDropTargets();
+      delete document.body.dataset.tabDrag;
+      delete document.body.dataset.tabDragTarget;
+      if (cancelled) return;
+      if (!moved) {
+        tabs.onActivateTab(groupId, tabId);
+        return;
+      }
+      if (targetId) tabs.onMergeTab(tabId, targetId);
+      else if (hitWindowId !== id) tabs.onSplitTab(tabId); // 拖回自己窗口 = 取消，不拆组
+    };
+    const up = (ev: PointerEvent) => finish(ev, false);
+    const cancel = (ev: PointerEvent) => finish(ev, true);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+  };
+
+  return (
+    <div
+      className="window-tabbar"
+      role="tablist"
+      aria-label="窗口标签"
+      onPointerDown={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+    >
+      {group.members.map((tab) => (
+        <div
+          key={tab.id}
+          className={`window-tab ${tab.id === id ? "active" : ""}`}
+          role="tab"
+          aria-selected={tab.id === id}
+          tabIndex={tab.id === id ? 0 : -1}
+          title={tab.title}
+          data-window-tab={tab.id}
+          data-window-tab-active={tab.id === id ? "true" : undefined}
+          onPointerDown={(e) => beginTabDrag(e, tab.id, group.groupId)}
+          onClick={(e) => {
+            e.stopPropagation();
+            tabs.onActivateTab(group.groupId, tab.id);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              tabs.onActivateTab(group.groupId, tab.id);
+            }
+          }}
+        >
+          <span className="window-tab__title">{tab.title}</span>
+          <button
+            type="button"
+            className="window-tab__close"
+            aria-label={`关闭标签 ${tab.title}`}
+            data-window-tab-close={tab.id}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              tabs.onCloseTab(tab.id);
+            }}
+          >×</button>
+        </div>
+      ))}
+      <div className="window-tab-tools">
+        {tabs.tabInfo.canOpenNew ? (
+          <button type="button" className="window-tab-icon" aria-label="新建同应用窗口" title="新建同应用窗口" data-window-new onClick={() => tabs.onOpenNewWindow()}>＋</button>
+        ) : null}
+        <button type="button" className="window-tab-icon" aria-label="关闭整个标签组" title="关闭整个标签组" data-window-close-group onClick={() => tabs.onCloseGroup(group.groupId)}>×</button>
+        <button
+          type="button"
+          role="switch"
+          className="switch window-tab-auto"
+          aria-checked={tabs.autoMerge}
+          aria-label="自动合并同应用窗口"
+          title="自动合并同应用窗口"
+          data-window-auto-merge
+          onClick={() => tabs.onToggleAutoMerge()}
+        />
+      </div>
     </div>
   );
 }
@@ -541,6 +690,8 @@ type WindowProps = {
   /** 快照层：原生视图被收缩/隐藏后把网页画面补回 DOM（ADR §12）。 */
   snapshots?: { rect: { x: number; y: number; width: number; height: number }; dataUrl: string }[];
   onResizeStart: (e: React.PointerEvent) => void;
+  /** task-21：标签组投影与动作。 */
+  tabs?: WindowTabActions;
   children: React.ReactNode;
 };
 
@@ -549,11 +700,14 @@ type WindowProps = {
  * 位置尺寸来自 `window.bounds`，层级来自 `window.z`，聚焦来自 `focused`，
  * 它自己只有"拖拽中"这一个纯交互状态，且不回写域（域在 pointermove 里更新）。
  */
-export function Window({ window: w, focused, onCommand, snapshots, onResizeStart, children }: WindowProps) {
+export function Window({ window: w, focused, onCommand, snapshots, onResizeStart, tabs, children }: WindowProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLElement>(null);
   const wasVisible = useRef(w.visible);
+  /** 被同组其它标签遮挡：保持挂载（应用状态不丢），只 display:none，且不播最小化动画。 */
+  const tabHidden = tabs?.tabInfo.hidden === true;
+  const wasTabHidden = useRef(tabHidden);
 
   /**
    * 最小化 / 恢复的动效几何。
@@ -563,6 +717,15 @@ export function Window({ window: w, focused, onCommand, snapshots, onResizeStart
    * 量不到图标（文件夹窗口之类）时退化成"向下收走"。
    */
   useLayoutEffect(() => {
+    const justRevealedTab = wasTabHidden.current && !tabHidden;
+    const justHidTab = !wasTabHidden.current && tabHidden;
+    wasTabHidden.current = tabHidden;
+    /* 切标签不是最小化：进入/离开标签组隐藏态都不播 Dock 动画，
+       否则切换标签会从程序坞缩放着打开（探针在 tab rect 上抓到 0.05 变换）。 */
+    if (tabHidden || justRevealedTab || justHidTab) {
+      wasVisible.current = w.visible;
+      return;
+    }
     if (wasVisible.current === w.visible) return;
     wasVisible.current = w.visible;
     const el = rootRef.current;
@@ -581,14 +744,17 @@ export function Window({ window: w, focused, onCommand, snapshots, onResizeStart
     // appear 动画会立刻被重新触发（恢复时闪一下）。
     el.classList.toggle("min-out", !w.visible);
     el.classList.toggle("min-in", w.visible);
-  }, [w.visible, w.appId]);
+  }, [w.visible, w.appId, tabHidden]);
 
   return (
     <section
       ref={rootRef}
       data-window-id={w.id}
+      data-window-tab-group={w.tabGroupId || undefined}
+      data-window-tab-hidden={tabHidden ? "true" : undefined}
       aria-label={`${w.meta.title}窗口`}
-      className={`window ${focused ? "active" : ""} ${w.visible ? "" : "minimized"}`}
+      aria-hidden={tabHidden ? true : undefined}
+      className={`window ${focused ? "active" : ""} ${w.visible && !tabHidden ? "" : "minimized"} ${tabHidden ? "tab-hidden" : ""}`}
       style={{ left: w.bounds.x, top: w.bounds.y, width: w.bounds.w, height: w.bounds.h, zIndex: 10 + w.z }}
       onPointerDown={() => !focused && onCommand({ type: "window/focus", id: w.id })}
     >
@@ -598,7 +764,9 @@ export function Window({ window: w, focused, onCommand, snapshots, onResizeStart
         closeAction={w.appId === "settings" ? "close" : "minimize"}
         onCommand={onCommand}
         onDragStart={(e) => startDrag(e, w, onCommand)}
+        tabs={tabs}
       />
+      {tabs ? <WindowTabBar id={w.id} tabs={tabs} /> : null}
       <div className="window-body" ref={bodyRef}>
         {children}
       </div>

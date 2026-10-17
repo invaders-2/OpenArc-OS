@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { appDisplayNameById } from "../apps";
 import { useShellStore, type ShellWindow } from "../stores/shell";
+import { windowIdAtPoint } from "../../src/desktop/tabGroups";
 import { t } from "../i18n";
 import { useIdentityStore } from "../stores/identity";
 import SettingsContent from "../settings/SettingsContent.vue";
@@ -27,7 +28,7 @@ import DramaApp from "../apps/DramaApp.vue";
 import ProtocolApp from "../apps/ProtocolApp.vue";
 import PhotosApp from "../apps/PhotosApp.vue";
 import IntegrationsApp from "../apps/IntegrationsApp.vue";
-import { markRaw, toRaw } from "vue";
+import { markRaw, ref, toRaw } from "vue";
 import ReactIsland from "../bridge/ReactIsland.vue";
 import { CanvasHost } from "../../src/canvas/CanvasHost";
 import { BrowserApp } from "../../src/browser/BrowserApp";
@@ -151,6 +152,71 @@ function styleOf(win: ShellWindow) {
     zIndex: 10 + win.z,
   };
 }
+
+/* ── task-21 · 标签拖拽：拖到同应用窗口 = 合并；拖到桌面空白 = 拆出 ── */
+type TabDrag = { sourceId: string; sourceWindowId: string; groupId: string; startX: number; startY: number; moved: boolean; targetId: string | null; hitId: string | null };
+const tabDrag = ref<TabDrag | null>(null);
+const tabDragTargetId = ref<string | null>(null);
+function onTabPointerDown(e: PointerEvent, win: ShellWindow, tabId: string) {
+  if (e.button !== 0) return;
+  const group = shell.tabInfoOf(win.id).group;
+  if (!group) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const pointerId = e.pointerId;
+  const drag: TabDrag = {
+    sourceId: tabId,
+    sourceWindowId: win.id,
+    groupId: group.groupId,
+    startX: e.clientX,
+    startY: e.clientY,
+    moved: false,
+    targetId: null,
+    hitId: null,
+  };
+  tabDrag.value = drag;
+  document.body.dataset.tabDrag = "1";
+  const move = (ev: PointerEvent) => {
+    if (ev.pointerId !== pointerId || !tabDrag.value) return;
+    if (!drag.moved && Math.hypot(ev.clientX - drag.startX, ev.clientY - drag.startY) < 6) return;
+    drag.moved = true;
+    const hit = windowIdAtPoint(ev.clientX, ev.clientY);
+    drag.hitId = hit;
+    drag.targetId = hit && hit !== drag.sourceWindowId ? hit : null;
+    tabDragTargetId.value = drag.targetId;
+    document.body.dataset.tabDragTarget = drag.targetId || "";
+  };
+  const finish = (ev: PointerEvent, cancelled: boolean) => {
+    if (ev.pointerId !== pointerId) return;
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    window.removeEventListener("pointercancel", cancel);
+    const current = tabDrag.value;
+    tabDrag.value = null;
+    tabDragTargetId.value = null;
+    delete document.body.dataset.tabDrag;
+    delete document.body.dataset.tabDragTarget;
+    if (!current || cancelled) return;
+    if (!current.moved) {
+      shell.activateTab(current.groupId, tabId);
+      return;
+    }
+    if (current.targetId) {
+      if (!shell.mergeTab(current.sourceId, current.targetId)) {
+        shell.notify({ appId: "system", title: "不能合并这两个标签", body: "只有同一应用的窗口可以合并为标签组；两个已有标签组之间不能直接互并。" });
+      }
+      return;
+    }
+    /* 拖回自己窗口 = 取消，不拆组；只有落在桌面空白处才拆出。 */
+    if (current.hitId === current.sourceWindowId) return;
+    shell.splitTab(current.sourceId);
+  };
+  const up = (ev: PointerEvent) => finish(ev, false);
+  const cancel = (ev: PointerEvent) => finish(ev, true);
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+  window.addEventListener("pointercancel", cancel);
+}
 </script>
 
 <template>
@@ -158,9 +224,17 @@ function styleOf(win: ShellWindow) {
     v-for="win in shell.windows"
     :key="win.id"
     :data-window-id="win.id"
+    :data-window-tab-group="win.tabGroupId || undefined"
+    :data-window-tab-hidden="win.tabHidden ? 'true' : undefined"
     :aria-label="t('{title}窗口', { title: appDisplayNameById(win.appId) || win.title })"
+    :aria-hidden="win.tabHidden ? 'true' : undefined"
     class="window"
-    :class="{ active: win.id === shell.focusedWindowId, minimized: !win.visible }"
+    :class="{
+      active: win.id === shell.focusedWindowId,
+      minimized: !win.visible && !win.tabHidden,
+      'tab-hidden': win.tabHidden,
+      'tab-drop-target': tabDragTargetId === win.id,
+    }"
     :style="styleOf(win)"
     @pointerdown="shell.focusWindow(win.id)"
   >
@@ -184,7 +258,93 @@ function styleOf(win: ShellWindow) {
           </svg>
         </button>
       </div>
+
+      <div v-if="!win.tabHidden && !shell.tabInfoOf(win.id).group" class="window-tab-actions" @pointerdown.stop>
+        <button
+          v-if="shell.tabInfoOf(win.id).canMerge"
+          type="button"
+          class="window-tab-merge"
+          :aria-label="t('合并同应用窗口')"
+          title="合并同应用窗口为标签组"
+          data-window-merge
+          @click.stop="shell.mergeSameApp(win.appId)"
+        >合并窗口</button>
+        <button
+          v-if="shell.tabInfoOf(win.id).canOpenNew"
+          type="button"
+          class="window-tab-icon"
+          :aria-label="t('新建同应用窗口')"
+          title="新建同应用窗口"
+          data-window-new
+          @click.stop="shell.openNewWindow(win.appId)"
+        >＋</button>
+      </div>
     </div>
+      <!-- task-21：标签组（标题栏右侧同一行；不新增窗口几何，非 active 成员只隐藏不卸载） -->
+      <div
+        v-if="!win.tabHidden && shell.tabInfoOf(win.id).group"
+        class="window-tabbar"
+        role="tablist"
+        :aria-label="t('窗口标签')"
+        @pointerdown.stop
+        @dblclick.stop
+      >
+        <div
+          v-for="tab in shell.tabInfoOf(win.id).group?.members || []"
+          :key="tab.id"
+          class="window-tab"
+          :class="{ active: tab.id === win.id }"
+          role="tab"
+          :aria-selected="tab.id === win.id"
+          :tabindex="tab.id === win.id ? 0 : -1"
+          :title="tab.title"
+          :data-window-tab="tab.id"
+          :data-window-tab-active="tab.id === win.id ? 'true' : undefined"
+          @pointerdown="onTabPointerDown($event, win, tab.id)"
+          @click.stop="shell.activateTab(shell.tabInfoOf(win.id).group?.groupId || '', tab.id)"
+          @keydown.enter.prevent="shell.activateTab(shell.tabInfoOf(win.id).group?.groupId || '', tab.id)"
+          @keydown.space.prevent="shell.activateTab(shell.tabInfoOf(win.id).group?.groupId || '', tab.id)"
+        >
+          <span class="window-tab__title">{{ tab.title }}</span>
+          <button
+            type="button"
+            class="window-tab__close"
+            :aria-label="t('关闭标签 {title}', { title: tab.title })"
+            :data-window-tab-close="tab.id"
+            @pointerdown.stop
+            @click.stop="shell.closeTab(tab.id)"
+          >×</button>
+        </div>
+        <div class="window-tab-tools">
+          <button
+            v-if="shell.tabInfoOf(win.id).canOpenNew"
+            type="button"
+            class="window-tab-icon"
+            :aria-label="t('新建同应用窗口')"
+            title="新建同应用窗口"
+            data-window-new
+            @click.stop="shell.openNewWindow(win.appId)"
+          >＋</button>
+          <button
+            type="button"
+            class="window-tab-icon"
+            :aria-label="t('关闭整个标签组')"
+            title="关闭整个标签组"
+            data-window-close-group
+            @click.stop="shell.closeTabGroup(shell.tabInfoOf(win.id).group?.groupId || '')"
+          >×</button>
+          <button
+            type="button"
+            role="switch"
+            class="switch window-tab-auto"
+            :aria-checked="shell.tabAutoMerge"
+            aria-label="自动合并同应用窗口"
+            title="自动合并同应用窗口"
+            data-window-auto-merge
+            @click.stop="shell.setTabAutoMerge(!shell.tabAutoMerge)"
+          />
+        </div>
+      </div>
     <div class="window-body" @pointerdown="onBodyPointerDown($event, win)" @dblclick="onBodyDblClick($event, win)">
       <HomeApp v-if="win.appId === 'home'" />
       <SettingsContent

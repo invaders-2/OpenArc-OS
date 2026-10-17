@@ -69,8 +69,35 @@ function defaultWorkspace(): WindowStateModel {
 /** 持久化形态的默认工作区（system/hydrate 吃 persisted，不吃领域对象）。 */
 const defaultPersisted = () => JSON.parse(manager.serialize(defaultWorkspace()));
 
+/**
+ * task-21：旧版本把访达文件夹窗口的 appId 记成 folder:<id>；标签组合并规则要求
+ * 同一应用 appId 完全一致，因此统一迁成 files（id 仍保留 folder: 前缀，内容分发不变）。
+ */
+function normalizePersistedAppIds(parsed: unknown): unknown {
+  if (!domain.isPersistable(parsed)) return parsed;
+  const value = parsed as { windows?: unknown[]; tabGroups?: Record<string, { appId?: string }> };
+  const windows = Array.isArray(value.windows)
+    ? value.windows.map((raw) => {
+        const w = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
+        if (!w || typeof w.appId !== "string") return raw;
+        return w.appId.startsWith(domain.FOLDER_PREFIX) ? { ...w, appId: "files" } : raw;
+      })
+    : value.windows;
+  const tabGroups = value.tabGroups && typeof value.tabGroups === "object"
+    ? Object.fromEntries(
+        Object.entries(value.tabGroups).map(([id, group]) => [
+          id,
+          group && typeof group === "object" && typeof group.appId === "string" && group.appId.startsWith(domain.FOLDER_PREFIX)
+            ? { ...group, appId: "files" }
+            : group,
+        ]),
+      )
+    : value.tabGroups;
+  return { ...value, windows, tabGroups };
+}
+
 function restore(sessionKey: string | null): WindowStateModel {
-  const parsed = readPersisted(storageKeyFor(sessionKey));
+  const parsed = normalizePersistedAppIds(readPersisted(storageKeyFor(sessionKey)));
   // 首次启动 / 数据不可信 → 给一份默认工作区，而不是空桌面
   if (!domain.isPersistable(parsed)) return defaultWorkspace();
   return manager.deserialize(parsed, [workArea(host())]);
@@ -118,7 +145,7 @@ export function useDesktop(opts: { locked?: boolean; sessionKey?: string | null 
   useEffect(() => {
     if (keyRef.current === storageKey) return;
     keyRef.current = storageKey;
-    const parsed = readPersisted(storageKey);
+    const parsed = normalizePersistedAppIds(readPersisted(storageKey));
     dispatch({
       type: "system/hydrate",
       persisted: domain.isPersistable(parsed) ? parsed : defaultPersisted(),

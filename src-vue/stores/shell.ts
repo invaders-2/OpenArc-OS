@@ -3,6 +3,19 @@ import domain from "../../electron/window-domain.cjs";
 import manager from "../../electron/window-manager.cjs";
 import folderTrashLib from "../../electron/folder-trash.cjs";
 import type { WindowCommand, WindowStateModel } from "../../electron/window-domain.cjs";
+import {
+  activateTabCommand,
+  autoMergeCommands,
+  closeGroupCommand,
+  closeTabCommand,
+  isHiddenByTabGroup,
+  mergeTabCommands,
+  newWindowPlan,
+  readAutoMerge,
+  splitTabOnDropCommands,
+  windowTabInfo,
+  writeAutoMerge,
+} from "../../src/desktop/tabGroups";
 import { APPS, appById, DOCK_DEFAULT } from "../apps";
 import { CURSOR_SIZE_DEFAULT, CURSOR_SIZE_MAX, CURSOR_SIZE_MIN } from "../../src/desktop/cursors";
 import {
@@ -55,6 +68,12 @@ export interface ShellWindow {
   z: number;
   visible: boolean;
   maximized: boolean;
+  /** task-21 · 所属标签组（null = 未分组）。 */
+  tabGroupId: string | null;
+  /** 被同组其它标签遮挡：只隐藏 DOM，不卸载应用组件（与应用内标签一致）。 */
+  tabHidden: boolean;
+  /** 组内 active 成员（未分组窗口恒为 true）。 */
+  tabActive: boolean;
 }
 
 export interface DesktopFolder {
@@ -221,6 +240,8 @@ export const useShellStore = defineStore("shell", {
     model: defaultWorkspace() as WindowStateModel,
     /** 与 `src/desktop/useDesktop.ts:79` 的 host() 同义：原生视图结算要用宿主尺寸。 */
     hostSize: { width: window.innerWidth, height: window.innerHeight },
+    /** task-21：同应用新窗口自动合并为标签组（与 React 入口共用 localStorage 键）。 */
+    tabAutoMerge: readAutoMerge(),
 
     /**
      * 程序坞成员与顺序：与既有产品同一个持久化键 oa-dock，读取规则逐条一致
@@ -272,15 +293,25 @@ export const useShellStore = defineStore("shell", {
     },
     /** 域的 `windows` 是稳定创建序（DOM 节点顺序），z/visible 都是它的投影。 */
     windows(state): ShellWindow[] {
-      return state.model.windows.map((w) => ({
-        id: w.id,
-        appId: w.appId,
-        title: w.meta.title,
-        bounds: w.bounds,
-        z: w.z,
-        visible: w.visible,
-        maximized: w.state === domain.WSTATE.MAXIMIZED,
-      }));
+      return state.model.windows.map((w) => {
+        const tab = windowTabInfo(state.model, w.id);
+        return {
+          id: w.id,
+          appId: w.appId,
+          title: w.meta.title,
+          bounds: w.bounds,
+          z: w.z,
+          visible: w.visible,
+          maximized: w.state === domain.WSTATE.MAXIMIZED,
+          tabGroupId: w.tabGroupId || null,
+          tabHidden: tab.hidden,
+          tabActive: !tab.hidden,
+        };
+      });
+    },
+    /** 模板里按窗口取标签组投影（成员/能否合并/新建窗口）。 */
+    tabInfoOf(state) {
+      return (windowId: string) => windowTabInfo(state.model, windowId);
     },
     focusedWindowId(state): string | null {
       return state.model.focused;
@@ -521,7 +552,10 @@ export const useShellStore = defineStore("shell", {
         /* 存储不可用 */
       }
       const mine = domain.windowsOfApp(this.model, appId);
-      const visibleId = [...mine].reverse().find((id) => domain.byId(this.model, id)?.state !== domain.WSTATE.MINIMIZED);
+      /* 标签组的非 active 成员虽然 state=NORMAL，但不是"用户现在看到的窗口"：不能选它。 */
+      const visibleId = [...mine].reverse().find(
+        (id) => domain.byId(this.model, id)?.state !== domain.WSTATE.MINIMIZED && !isHiddenByTabGroup(this.model, id),
+      );
       const topId = mine[mine.length - 1];
       if (visibleId) this.dispatch({ type: "window/focus", id: visibleId });
       else if (topId) this.dispatch({ type: "window/restore", id: topId });
@@ -663,6 +697,47 @@ export const useShellStore = defineStore("shell", {
     },
     minimizeWindow(id: string) {
       this.dispatch({ type: "window/minimize", id });
+    },
+    /* ── task-21：窗口标签组（命令生成在 src/desktop/tabGroups.ts，两入口共用） ── */
+    dispatchAll(commands: WindowCommand[]) {
+      for (const command of commands) this.dispatch(command);
+    },
+    /** 新建同应用窗口；自动合并开启时紧跟着合并成标签组。 */
+    openNewWindow(appId: string) {
+      const app = appById(appId);
+      const plan = newWindowPlan(this.model, appId, app?.name || appId, {
+        autoMerge: this.tabAutoMerge,
+      });
+      this.dispatchAll(plan.commands);
+      return plan.id;
+    },
+    setTabAutoMerge(next: boolean) {
+      this.tabAutoMerge = next;
+      writeAutoMerge(next);
+    },
+    activateTab(groupId: string, windowId: string) {
+      this.dispatch(activateTabCommand(groupId, windowId));
+    },
+    closeTab(windowId: string) {
+      this.dispatch(closeTabCommand(windowId));
+    },
+    closeTabGroup(groupId: string) {
+      this.dispatch(closeGroupCommand(groupId));
+    },
+    mergeSameApp(appId: string) {
+      this.dispatchAll(autoMergeCommands(this.model, appId));
+    },
+    mergeTab(sourceId: string, targetId: string): boolean {
+      const commands = mergeTabCommands(this.model, sourceId, targetId);
+      if (!commands || !commands.length) return false;
+      this.dispatchAll(commands);
+      return true;
+    },
+    splitTab(windowId: string): boolean {
+      const commands = splitTabOnDropCommands(this.model, windowId);
+      if (!commands || !commands.length) return false;
+      this.dispatchAll(commands);
+      return true;
     },
     toggleMaximize(id: string) {
       const w = domain.byId(this.model, id);

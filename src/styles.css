@@ -8069,3 +8069,150 @@ label {
 .topbar.is-win .bar-caption.caption-close:active:focus-visible {
   outline-color: #ffffff;
 }
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   task-21 · 窗口标签组（标题栏内，Vue 壳层与 React 入口共用同一套类）
+   ─────────────────────────────────────────────────────────────────────────
+   标签条放在已有 44px 标题栏里，不额外占用窗口几何 —— 原生网页视图的
+   裁剪只按 TITLE_BAR_H 结算，多一条 DOM 条带会被原生视图盖住。
+   非 active 成员用 display:none（不是 .minimized）：不能让组件卸载，
+   否则切换标签会丢应用内未保存状态，也不应触发最小化动画。
+   ══════════════════════════════════════════════════════════════════════════ */
+/* 标签组条：放在 44px 标题栏的右侧同一行（标题栏本身只占左侧 228px，
+   这样不与 .pane-toolbar 重叠）；组窗口的内容区下移 52px 让出这一行。 */
+.window-tabbar {
+  position: absolute;
+  left: 244px;
+  right: 12px;
+  top: 7px;
+  height: 30px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.window:has(.window-tabbar) .split-main,
+.window:has(.window-tabbar):has(.pane-toolbar) .split-main {
+  padding-top: 52px;
+}
+.window-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 180px;
+  height: 30px;
+  padding: 0 6px 0 12px;
+  border-radius: var(--radius-md);
+  color: var(--muted);
+  font-size: var(--fs-caption);
+  cursor: default;
+}
+.window-tab:hover {
+  background: rgb(var(--text-rgb) / 0.06);
+}
+.window-tab.active {
+  background: rgb(var(--text-rgb) / 0.1);
+  color: var(--text);
+}
+/* MOTION §5：标签切换用 160ms 轻淡变，不做位移补间；减少动态时 token 归 0ms。 */
+.window-tab {
+  transition:
+    background var(--dur-quick) var(--ease-standard),
+    color var(--dur-quick) var(--ease-standard);
+}
+.window[data-window-tab-group]:not(.tab-hidden) > .window-body {
+  animation: window-tab-content-in var(--dur-quick) var(--ease-standard);
+}
+@keyframes window-tab-content-in {
+  from { opacity: 0.72; transform: translateY(2px); }
+  to { opacity: 1; transform: none; }
+}
+.window-tab__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.window-tab__close {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+}
+.window-tab__close:hover {
+  background: var(--row-hover);
+  color: var(--text);
+}
+.window-tab-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  flex: none;
+}
+.window-tab-icon {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+}
+.window-tab-icon:hover {
+  background: var(--row-hover);
+  color: var(--text);
+}
+.window-tab-merge {
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  white-space: nowrap;
+}
+.window-tab-merge:hover {
+  background: var(--row-hover);
+  color: var(--text);
+}
+.window-tab-actions {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.window-tabbar .window-tab-auto {
+  width: 30px;
+  height: 18px;
+}
+.window-tabbar .window-tab-auto::after {
+  width: 14px;
+  height: 14px;
+}
+.window-tabbar .window-tab-auto[aria-checked="true"]::after {
+  transform: translateX(12px);
+}
+/* 被同组其它标签遮挡：保留 DOM（组件状态不丢），只是不可见 */
+.window.tab-hidden {
+  display: none;
+}
+/* 拖拽悬停目标：中性焦点环 + 原有阴影，不用彩色高亮 */
+.window.tab-drop-target {
+  box-shadow:
+    inset 0 0 0 2px var(--focus),
+    var(--shadow);
+}
+

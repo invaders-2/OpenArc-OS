@@ -45,6 +45,20 @@ import type { WindowCommand } from "../electron/window-domain.cjs";
 import folderTrashLib from "../electron/folder-trash.cjs";
 import type { FolderTrashRecord } from "../electron/folder-trash.cjs";
 import { useDesktop } from "./desktop/useDesktop";
+import {
+  activateTabCommand,
+  autoMergeCommands,
+  closeGroupCommand,
+  closeTabCommand,
+  folderWindowPlan,
+  isHiddenByTabGroup,
+  mergeTabCommands,
+  newWindowPlan,
+  readAutoMerge,
+  splitTabOnDropCommands,
+  windowTabInfo,
+  writeAutoMerge,
+} from "./desktop/tabGroups";
 import { applyCursors, CURSOR_SIZE_DEFAULT, CURSOR_SIZE_MAX, CURSOR_SIZE_MIN } from "./desktop/cursors";
 // 别名导入：本模块里有 `declare global { interface Window }`，
 // 直接叫 Window 会在类型位置与全局 Window 撞名。
@@ -440,6 +454,9 @@ function App() {
     browserCommand,
     reportViewportReserve,
   } = useDesktop({ locked, sessionKey: identity.snapshot.userId });
+
+  /** task-21：同应用新窗口自动合并（与 Vue 壳层共用 localStorage 键与 reducer）。 */
+  const [tabAutoMerge, setTabAutoMerge] = useState(readAutoMerge);
 
   // ---------------------------------------------------------------------------
   // 桌面对象（文件夹）仍是独立的一类状态：它们不是窗口，不进 Window Manager。
@@ -1728,7 +1745,9 @@ function App() {
     bounce(appId);
     const mine = domain.windowsOfApp(state, appId);
     // order 是自底向上的唯一真值，因此"最近的窗口"就是末尾那个
-    const visibleId = [...mine].reverse().find((id) => domain.byId(state, id)?.state !== domain.WSTATE.MINIMIZED);
+    const visibleId = [...mine].reverse().find(
+      (id) => domain.byId(state, id)?.state !== domain.WSTATE.MINIMIZED && !isHiddenByTabGroup(state, id),
+    );
     const topId = mine[mine.length - 1];
     if (visibleId) {
       onCommand({ type: "window/focus", id: visibleId });
@@ -1744,8 +1763,33 @@ function App() {
 
   const openFolder = (f: Folder) => {
     setMenu(null);
-    const id = FOLDER_PREFIX + f.id;
-    onCommand({ type: "window/open", appId: id, meta: { title: f.name, icon: "folder" } });
+    const plan = folderWindowPlan(state, f.id, f.name, FOLDER_PREFIX, { autoMerge: tabAutoMerge });
+    for (const command of plan.commands) onCommand(command);
+  };
+
+  /* ── task-21 · 标签组动作（命令规划在 src/desktop/tabGroups.ts，Vue 入口共用） ── */
+  const openNewWindow = (appId: string) => {
+    const app = apps.find((a) => a.id === appId);
+    const plan = newWindowPlan(state, appId, app?.name || appId, { autoMerge: tabAutoMerge });
+    for (const command of plan.commands) onCommand(command);
+  };
+  const mergeSameApp = (appId: string) => {
+    for (const command of autoMergeCommands(state, appId)) onCommand(command);
+  };
+  const mergeTabInto = (sourceId: string, targetId: string) => {
+    const commands = mergeTabCommands(state, sourceId, targetId);
+    if (!commands) return;
+    for (const command of commands) onCommand(command);
+  };
+  const splitTabOut = (windowId: string) => {
+    const commands = splitTabOnDropCommands(state, windowId);
+    if (!commands) return;
+    for (const command of commands) onCommand(command);
+  };
+  const toggleTabAutoMerge = () => {
+    const next = !tabAutoMerge;
+    setTabAutoMerge(next);
+    writeAutoMerge(next);
   };
 
   // ---------------------------------------------------------------------------
@@ -1854,7 +1898,9 @@ function App() {
     return out;
   }, [state.windows]);
   /** 任一窗口全屏 → Dock 自动隐藏；指针碰到底部才唤回。 */
-  const anyMaximized = state.windows.some((w) => w.state === domain.WSTATE.MAXIMIZED);
+  const anyMaximized = state.windows.some(
+    (w) => w.state === domain.WSTATE.MAXIMIZED && w.visible && !isHiddenByTabGroup(state, w.id),
+  );
   const [dockPeek, setDockPeek] = useState(false);
 
   // 文件夹窗口打开 / 切换目录后，向文件服务取一次条目（每个 folderId 只取一次）
@@ -3738,6 +3784,18 @@ function App() {
             onCommand={onCommand}
             onResizeStart={(e) => startResize(e, w, onCommand)}
             snapshots={snapshotLayers.filter((s) => s.windowId === w.id)}
+            tabs={{
+              tabInfo: windowTabInfo(state, w.id),
+              autoMerge: tabAutoMerge,
+              onOpenNewWindow: () => openNewWindow(w.appId),
+              onMergeSameApp: () => mergeSameApp(w.appId),
+              onActivateTab: (groupId, windowId) => onCommand(activateTabCommand(groupId, windowId)),
+              onCloseTab: (windowId) => onCommand(closeTabCommand(windowId)),
+              onCloseGroup: (groupId) => onCommand(closeGroupCommand(groupId)),
+              onMergeTab: (sourceId, targetId) => mergeTabInto(sourceId, targetId),
+              onSplitTab: (windowId) => splitTabOut(windowId),
+              onToggleAutoMerge: toggleTabAutoMerge,
+            }}
           >
             {content(w.id)}
           </DesktopWindow>
