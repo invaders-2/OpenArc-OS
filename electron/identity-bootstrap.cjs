@@ -24,6 +24,7 @@ const { createResourceBundle, registerResourceIpc } = require("./resource-bootst
 const { createGovernanceBundle, registerGovernanceIpc } = require("./governance-bootstrap.cjs");
 const { createModelBundle, registerModelIpc } = require("./model-bootstrap.cjs");
 const { createMcpBundle, attachMcpSessionLifecycle, attachMcpAppGrantRevocation } = require("./mcp-bootstrap.cjs");
+const { seedBuiltinAppToolGrants } = require("./builtin-app-grants.cjs");
 const { createCanvasBundle } = require("./canvas-bootstrap.cjs");
 // B5d · 画布域扩展（素材库 / 协作 / 内核能力 / Agent 附件 / .dxcanvas）：复用同一条 identity 连接。
 const { CanvasDxosStore } = require("./canvas-dxos-store.cjs");
@@ -178,6 +179,11 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
   const service = new IdentityService({ store, secrets, logger: log, allowAdmin, timers });
   // D3-02：对象授权与身份共用同一条 SQLite 连接与同一套命令接线。
   const { authorization, authStore } = createAuthorizationService({ identityStore: store, logger: log });
+  // task-68：已有安装启动时立即补内置工具基线（不依赖用户重新登录）；新安装由登录事件补。
+  try {
+    const bootAdmin = store.allUsers().find((user) => user.role === "ADMIN" && user.team_id) || null;
+    if (bootAdmin) seedBuiltinAppToolGrants({ authStore, organizationId: bootAdmin.team_id, grantedBy: bootAdmin.id });
+  } catch { /* 基线失败不阻塞启动；登录事件会再尝试 */ }
   // B4：本地账号管理命令（identity/departments-list … identity/local-account-info）走同一条
   // identity:command；认证与超级管理员判定在 identity-service.cjs / local-account-service.cjs 既有实现里。
   const localAccountService = new LocalAccountService({ identity: store, authStore, authorization, identityService: service });
@@ -299,6 +305,8 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
       const admin = store.allUsers().find((u) => u.role === "ADMIN" && u.team_id === teamId) || null;
       seedModelAppPolicy({ organizationId: teamId, grantedBy: admin ? admin.id : "system:model-baseline" });
       seedMcpAppPolicy({ organizationId: teamId, grantedBy: admin ? admin.id : "system:mcp-baseline" });
+      // task-68：AI/画布/文件/MCP 等内置工具基线权限（只补 grant；审批/lease 不在这里）。
+      seedBuiltinAppToolGrants({ authStore, organizationId: teamId, grantedBy: admin ? admin.id : "system:builtin-tool-baseline" });
     });
   } catch { /* ignore */ }
 

@@ -168,11 +168,34 @@ function extractMcpProviders(sources) {
   return [resolveAppIdExpression(src, expr, rel)];
 }
 
+/** tool 族提供者 = builtin-app-grants.cjs BUILTIN_APP_PERMISSIONS 的键。 */
+function extractBuiltinToolProviders(sources) {
+  const rel = "builtin-app-grants.cjs";
+  const src = sources.get(rel);
+  if (typeof src !== "string") throw new Error("读不到 " + rel + "（守卫 fail-closed）");
+  const anchor = "const BUILTIN_APP_PERMISSIONS = Object.freeze({";
+  const start = src.indexOf(anchor);
+  if (start < 0) throw new Error("找不到 " + rel + " 的 BUILTIN_APP_PERMISSIONS 锚点（守卫 fail-closed）");
+  const end = src.indexOf("});", start + anchor.length);
+  if (end < 0) throw new Error("BUILTIN_APP_PERMISSIONS 字面量未闭合（守卫 fail-closed）");
+  const appIds = [];
+  for (const raw of src.slice(start + anchor.length, end).split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = /^(?:"([A-Za-z0-9._-]+)"|([A-Za-z_$][A-Za-z0-9_$]*)):\s*Object\.freeze\(/.exec(line);
+    if (!m) throw new Error("BUILTIN_APP_PERMISSIONS 出现无法解析的行（守卫 fail-closed）：" + JSON.stringify(line));
+    appIds.push(m[1] || m[2]);
+  }
+  if (!appIds.length) throw new Error("BUILTIN_APP_PERMISSIONS 解析出 0 个 App（守卫 fail-closed）");
+  return appIds;
+}
+
 /** 已登记的政策播种点。新播种点必须在这里登记，否则 T3 FAIL。 */
 const REGISTERED_SEEDING_SITES = Object.freeze({
   "resource-service.cjs": { policyKey: "resource", extract: extractResourceProviders },
   "model-bootstrap.cjs": { policyKey: "model", extract: extractModelProviders },
   "mcp-bootstrap.cjs": { policyKey: "mcp", extract: extractMcpProviders },
+  "builtin-app-grants.cjs": { policyKey: "tool", extract: extractBuiltinToolProviders },
 });
 /** 政策提供记录 SQL / 读写入口的拥有者：它定义规则，本身不是播种点。 */
 const PROVISION_GATE_OWNER = "authorization-store.cjs";

@@ -1439,7 +1439,7 @@ const BASELINE_POLICY_PROVIDERS = Object.freeze({
   resource: Object.freeze(["resource-library", "canvas", "browser", "ai", "image-generator", "video-generator", "photoshop", "illustrator", "mcp-center", "skill-runtime"]),
   model: Object.freeze(["settings", "resource-library", "ai", "canvas"]),
   mcp: Object.freeze(["mcp-center"]),
-  tool: Object.freeze([]),
+  tool: Object.freeze(["ai", "canvas", "browser", "resource-library", "skill-runtime", "image-generator", "video-generator", "photoshop", "illustrator"]),
 });
 
 /**

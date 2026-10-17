@@ -109,6 +109,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const { createIdentityService } = require(path.join(ROOT, "electron", "identity-bootstrap.cjs"));
 const { RESET_AUTHORIZATION_DELETE_SQL } = require(path.join(ROOT, "electron", "identity-store.cjs"));
 const { createModelBundle } = require(path.join(ROOT, "electron", "model-bootstrap.cjs"));
+const { seedBuiltinAppToolGrants } = require(path.join(ROOT, "electron", "builtin-app-grants.cjs"));
 const { createMcpBundle } = require(path.join(ROOT, "electron", "mcp-bootstrap.cjs"));
 
 const CONFIRM = "DELETE-ALL-IDENTITY-DATA";
@@ -410,7 +411,7 @@ test("T3 · 组织 id 复用不被旧墓碑压制：同一个 id 上的重置前
     await seedFirstUse(a, snap);
     beforePairs = pairList(a.authStore, oldOrg);
     beforeShapes = grantShapes(a.authStore, oldOrg);
-    assert.equal(beforePairs.length, 15, "首次使用必须播满 10 resource + 4 model + 1 mcp：" + JSON.stringify(beforePairs));
+    assert.equal(beforePairs.length, 24, "首次使用必须播满 10 resource + 4 model + 1 mcp + 9 tool：" + JSON.stringify(beforePairs));
 
     const mcpGrant = a.authStore.appGrantsForApp("mcp-center", oldOrg).find((g) => g.resource_type === "mcp");
     assert.ok(mcpGrant, "mcp baseline 必须先存在");
@@ -455,13 +456,15 @@ test("T3 · 组织 id 复用不被旧墓碑压制：同一个 id 上的重置前
     // B 侧（重置后，同一个 id）：不被压制，首次播种真的发生。
     assert.deepEqual(seedsB.seedMcp(oldOrg, snapNew.userId), { ok: true, seeded: true }, "同一个 id：旧墓碑必须已消失，首次 mcp 播种必须真的发生");
     assert.deepEqual(seedsB.seedModel(oldOrg, snapNew.userId), { ok: true, seeded: true }, "同一个 id：首次 model 播种必须真的发生");
+    // tool 族与 mcp/model 同一条"登录事件播种"路径；这里受控改 id 后不重登，按同一真实播种实现补一次。
+    assert.equal(seedBuiltinAppToolGrants({ authStore: b.authStore, organizationId: oldOrg, grantedBy: snapNew.userId }).ok, true, "tool 族首次播种必须发生");
     await seedFirstUse(b, snapNew);
 
     const reusePairs = pairList(b.authStore, oldOrg);
     assert.deepEqual(reusePairs, beforePairs, "复用 id 的新组织必须拿到与重置前同一套完整授权");
     assert.deepEqual(grantShapes(b.authStore, oldOrg), beforeShapes, "复用 id 的新组织必须拿到与重置前同一套 app grant");
     const reuseProvisions = b.authStore.allPolicyProvisions().filter((r) => r.organization_id === oldOrg);
-    assert.equal(reuseProvisions.length, 15, "复用 id 的新组织必须有完整 15 条提供记录");
+    assert.equal(reuseProvisions.length, 24, "复用 id 的新组织必须有完整 24 条提供记录");
     assert.deepEqual(reuseProvisions.filter((r) => r.revoked_at != null), [], "复用 id 的新组织不得继承任何墓碑");
     assert.equal(provisionOf(b.authStore, oldOrg, "mcp-center", "mcp").revoked_at, null, "新组织的 mcp 是首次使用，不是旧撤销的复活");
 

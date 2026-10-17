@@ -293,7 +293,7 @@ test("R5 · resetInstallation 是唯一「组织整体消失」路径：授权�
     const trigger = await a.resourceService.createResource({ context: { sessionRef: login.snapshot.sessionRef, appId: "resource-library", source: "ui" }, resourceType: "text", name: "ResetSeed", content: "x" });
     assert.equal(trigger.ok, true, JSON.stringify(trigger));
     beforePairs = pairList(a.authStore, oldOrg);
-    assert.equal(beforePairs.length, 15, "首次使用必须播满 10 resource + 4 model + 1 mcp：" + JSON.stringify(beforePairs));
+    assert.equal(beforePairs.length, 24, "首次使用必须播满 10 resource + 4 model + 1 mcp + 9 tool：" + JSON.stringify(beforePairs));
 
     const mcpGrant = a.authStore.appGrantsForApp("mcp-center", oldOrg).find((g) => g.resource_type === "mcp");
     assert.ok(mcpGrant, "mcp baseline 必须先存在");

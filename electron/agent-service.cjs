@@ -186,9 +186,11 @@ function createToolAuthAdapter({ authStore, authorization }) {
       if (!action) return true;
       if (!actor || actor.id == null) return false;
       const organizationId = actor.organizationId || actor.team_id || null;
+      // 会话引用只来自可信 actor（主进程从当前会话解析后注入），绝不接受渲染层自报。
+      const sessionRef = actor.sessionRef || actor.session_ref || null;
       if (authDomain.isToolAction(action)) {
         if (!authorization || typeof authorization.authorizeTool !== "function") return false;
-        const decision = authorization.authorizeTool({ context: { userId: actor.id, appId: HOST_APP_ID, source: "agent" }, action, application: { appId: HOST_APP_ID } });
+        const decision = authorization.authorizeTool({ context: { sessionRef, userId: actor.id, appId: HOST_APP_ID, source: "agent" }, action, application: { appId: HOST_APP_ID } });
         return !!(decision && decision.decision === authDomain.DECISION.ALLOW);
       }
       if (!authStore || typeof authStore.appGrantsForApp !== "function") return false;
@@ -621,7 +623,7 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
   /** 命令分发。失败一律 throw（由 execute 统一规约），成功返回原始值（由 execute 统一脱敏）。 */
   async function dispatch(command, payload, context) {
     const userId = context.userId;
-    const actor = { ...context.actor, id: userId, organizationId: context.actor && (context.actor.organizationId || context.actor.team_id) };
+    const actor = { ...context.actor, id: userId, organizationId: context.actor && (context.actor.organizationId || context.actor.team_id), sessionRef: context.actor && context.actor.sessionRef };
     switch (command) {
       // ---------------- task ----------------
       case "agent/task/create": {
@@ -958,7 +960,9 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
       return normalizeAgentError(createAgentError(AGENT_ERR_UNAUTHENTICATED, actorResult.message || "当前会话未认证，agent 命令被拒绝"));
     }
     context.userId = String(actorResult.user.id);
-    context.actor = actorResult.user;
+    // task-68：把可信会话引用一并带给工具权限适配器；canUseAppPermission 的 authorizeTool
+    // 需要 sessionRef，否则即使 App Grant 已种入也会被判成未认证而拒绝。
+    context.actor = { ...actorResult.user, sessionRef: context.sessionRef, organizationId: actorResult.organizationId || actorResult.user.team_id || null };
     const body = payload && typeof payload === "object" ? payload : {};
     try {
       const value = await dispatch(command, body, context);
@@ -988,4 +992,4 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
   };
 }
 
-module.exports = { createAgentBundle, createDxosFsAdapterForUserData, HOST_APP_ID, buildMcpCatalogSource, buildSkillCatalogSource, buildCanvasCatalogSource };
+module.exports = { createAgentBundle, createDxosFsAdapterForUserData, createToolAuthAdapter, HOST_APP_ID, buildMcpCatalogSource, buildSkillCatalogSource, buildCanvasCatalogSource };
