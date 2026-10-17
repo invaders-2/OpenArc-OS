@@ -8,7 +8,7 @@
 
 - 构建来源：`main @ 9c14bb0`，`dirty=false`，`builtAt 2026-10-17T14:34:51Z`（`openarc-build.json`）。目录内容 sha256（逐文件 sha 排序后再 sha）与 lead 给定一致：`ec9214cdbf9f21d2b9acadfb571bc75570c6d5d9f2449fed86226db3763b933a`。
 - 关键文件 sha256：`package.json` = `ba4473cf…7f584c`、`electron/main.cjs` = `9a7cca12…b40e9809c`、`dist/vue.html` = `0baf1aeb…4242efb8`（均与 lead 给值一致）。
-- 验收项：**49 条（A8 + B8 + C8 + D12 + E13）** → **通过 47、部分通过 2（B7、C4）、不通过 0、未知 0**。
+- 验收项：**49 条（A8 + B8 + C8 + D12 + E13）** → **通过 47、部分通过 2（B7、C4）、不通过 0、未知 0**；**a0740a1 复验后 B7/C4 转通过，最终 49/49 通过（见 §11 Addendum）**。
 - 产品 OUT / 不适用：A14 画布云同步、F17 云账号权益、D02 云市场审核灰度、F14 本地计费配额（`electron/ai-org-parity-notes.cjs:8-10`）、F16 桌面自动超管（有意差异，`:12-13`）、D07 开发者 OAuth/发布（既有产品决定）。
 - 已知部分/差异（不算失败，按 task-13 口径）：A02 画布文档模型仍是 nodes/edges（未检出 Card 三槽转换）、A11 未检出 `canViewCanvasMedia` 等价放宽、A13 .dxcanvas 内联导出仍受 32MB 限制（包解析上限 500MB/1GB 存在）、A18 docx/xlsx 默认解析器不可用（可注入 parser，缺省结构化拒绝）。
 - 关键观察：preload 40 个顶层键与 57 个唯一 invoke/send 通道全部在主进程侧有注册；58 个 `ipcMain.handle` 中 100% 在上下文内出现 `trusted(`/`isTrusted`（静态邻近检查，0 例外）。
@@ -103,6 +103,8 @@
 
 ## 7. 部分通过明细（2 条，不判失败）
 
+> 2026-10-17 a0740a1 复验：B7/C4 两处均已修复并通过，见 §11 Addendum；本节保留 9c14bb0 时点的记录。
+
 ### 7.1 B7 审批/撤销
 
 - 观察：preload `sideEffect` 键（`preload.cjs:212-221`）暴露 `command` 与 `revokeApproval`；electron 侧命令含 `sideEffect/approvalRequested`、`decideApproval`、`listPending`、`revokeApproval`（`side-effect-*` / approval 相关 24 个文件出现 `sideEffect`）；dist 命中 `sideEffect/approvalRequested`、`decideApproval`、`listPending` 与 ApprovalPrompt 块，但**未命中 `revokeApproval`**。
@@ -143,7 +145,40 @@
 4. **dirty 状态**：构建 `dirty=false`，结论只对该 commit（9c14bb0）与上述 sha256 的产物有效。
 5. **产品 OUT 项**按 lead 决策与产物口径记“不适用”，不从“缺失/失败”统计。
 
-## 11. 证据台账
+## 11. Addendum：a0740a1 聚焦复验（B7/C4 修复）
+
+### 11.1 构建与证据
+
+| 项 | 9c14bb0（首验） | a0740a1（复验） |
+|---|---|---|
+| 构建目录 sha256 | `ec9214cdbf9f21d2b9acadfb571bc75570c6d5d9f2449fed86226db3763b933a` | `3934d24598b85676fcdc1e8515106ec23f9528a7e14562acea3a883ca71cc94c` |
+| dirty / builtAt | false / 2026-10-17T14:34:51Z | false / 2026-10-17T14:49:26Z |
+| electron/main.cjs | `9a7cca12…b40e9809c` | `9a7cca12…b40e9809c`（未变） |
+| dist/vue.html | `0baf1aeb…4242efb8` | `08207f64fbc1a8e123a85dace61c601b96760081ec102ab1a4bc751734ead194` |
+| REA 主进程 | `ev_a85d2fcb…8a1bfc`（digest eed43c76） | 重新分析 digest 仍为 `eed43c76dbed9c3b5e1f0f686e51d02fcc7c5147585fb1b0d812f95b63a89cb2` → 按复用规则继续用 `ev_a85d2fcb…8a1bfc`（新记录 ev_62f39ef4… 仅为同一 digest 的重复分析） |
+| REA 渲染层 | `ev_ee028b59…dcb9a`（digest 933dea85） | 新 digest `1872ae3729d14ebf784f10f1f1f407f1cbd64cb061441ac1553ad5abcc47fda5` → 新 Evidence `ev_db677751c8ee35ff9646d9d80d3a04ea75e62ad15b691dd90bb53b4736a75e60`；summary `ev_3b55aac9ae0f6d84481b290d022c1ec10fd9b93bf2a2e4c744ee9fd3d9516109`；modules `ev_75cf20b3dc160a6433e6a69c026c861a89f0a3f872f3b69094a9e6871dce2c9e` |
+| 变更 chunk | — | `ApprovalPrompt-BDsWYXk0.js`、`vue-DGjggzKl.js`、`main-luqkwsX-.js`（旧 BB / DVBZ6OQI 等） |
+
+### 11.2 聚焦复验结果
+
+| # | 检查点 | 观察（a0740a1 产物） | 结论 | Evidence |
+|---|---|---|---|---|
+| B7 | 审批撤销入口 | `ApprovalPrompt-BDsWYXk0.js` 命中 `sideEffect/revokeApproval`（撤销处理器：command type=sideEffect/revokeApproval）、`approval-revocable`、`data-approval-revocable`、`SIDE_EFFECT_APPROVAL_TOO_LATE`、提示“已撤销；这次操作不会执行。”；`ApprovalPrompt` 被 `main-luqkwsX-.js` 与 `vue-DGjggzKl.js` 引用；electron 侧 `preload.cjs:215` 暴露 `revokeApproval`，`side-effect-bootstrap.cjs:20,70` 有命令与分支 | **通过**（静态） | EV_DIST2 `ev_db6777…5e60`；ApprovalPrompt item `ev_93eda6be4e0ded75bc45985bc2cd48a461f49e50cfb1276165affc23ddf8792f`；EV_MAIN `ev_a85d…` |
+| C4 | App 级授权 UI | `vue-DGjggzKl.js` 命中 `governance/getAppAccess`、`governance/grantAppAccess`、`governance/revokeAppAccess`，含确认对话框“授予 App 级权限”“撤销 App 级权限”、动作多选与说明；electron 侧 `governance-bootstrap.cjs:54-56,99-101` 命令与分支完整 | **通过**（静态） | EV_DIST2；vue item `ev_faf0fde4b80188ff369c69f486876aebba740f06f82fd160dcc7797927b80245`；EV_MAIN `ev_a85d…` |
+
+### 11.3 复验后计数
+
+- **49/49 通过**（原 47 通过 + B7/C4 两处转通过）；部分通过 0、不通过 0、未知 0。
+- 原先为 B7/C4 建的 task-43 已按“已修复并静态复验”关闭（见任务板）。
+- 复用规则：electron digest 未变 → 沿用 `ev_a85d2fcb…`；dist digest 变化 → 新证据 `ev_db6777…`，旧 `ev_ee028b59…` 保留为 9c14bb0 baseline。
+
+### 11.4 本次复验限制
+
+- 仍是静态分析：未启动应用、未点击撤销/授权按钮；UI 入口通过“命令字面量 + 处理器上下文 + chunk 被主入口引用”判定，不等于运行交互通过。
+- 新 dist summary coverage examined 674/837；REA 覆盖 partial 的既有结论不变（见 §10）。
+- 结论只对 a0740a1 与上述产物 sha256 有效。
+
+## 12. 证据台账
 
 - 机读台账：`docs/dxos-rea/openarc-verify-evidence.json`（build、产物 sha256、REA evidence/view id、49 项结论、OUT/部分/未知、限制）。
 - 复用规则：本报告引用的 `EV_MAIN`/`EV_DIST` 与各 view id 已在本 REA 会话留存；同一产物 sha256 的复验可直接 `inspect_analysis_view` 复用，产物变化时按 VERIFY-PLAN §1.3 重新分析或 `compare_application_versions`。

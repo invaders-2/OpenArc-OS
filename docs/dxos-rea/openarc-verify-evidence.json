@@ -5,10 +5,11 @@
     "build": {
       "path": "/Users/wepingli/Desktop/OpenArc OS.app/Contents/Resources/app",
       "branch": "main",
-      "commit": "9c14bb0",
-      "commitFull": "9c14bb076056a81fe627a6049082147bad0ecec4",
+      "commit": "a0740a1",
       "dirty": false,
-      "builtAt": "2026-10-17T14:34:51.209Z"
+      "builtAt": "2026-10-17T14:49:26.636Z",
+      "dirSha256": "3934d24598b85676fcdc1e8515106ec23f9528a7e14562acea3a883ca71cc94c",
+      "vueHtmlSha256": "08207f64fbc1a8e123a85dace61c601b96760081ec102ab1a4bc751734ead194"
     },
     "artifact": {
       "dirContentSha256": "ec9214cdbf9f21d2b9acadfb571bc75570c6d5d9f2449fed86226db3763b933a",
@@ -48,6 +49,25 @@
         "relevantFiles": 49,
         "parsedJs": 42,
         "findings": 1229
+      },
+      "dist2": {
+        "input": ".../app/dist",
+        "digest": "1872ae3729d14ebf784f10f1f1f407f1cbd64cb061441ac1553ad5abcc47fda5",
+        "evidenceId": "ev_db677751c8ee35ff9646d9d80d3a04ea75e62ad15b691dd90bb53b4736a75e60",
+        "summaryView": "ev_3b55aac9ae0f6d84481b290d022c1ec10fd9b93bf2a2e4c744ee9fd3d9516109",
+        "modulesView": "ev_75cf20b3dc160a6433e6a69c026c861a89f0a3f872f3b69094a9e6871dce2c9e",
+        "relevantFiles": 49,
+        "parsedJs": 42,
+        "findings": 1229,
+        "coverage": {
+          "examined": 674,
+          "total": 837
+        }
+      },
+      "electronReused": {
+        "evidenceId": "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc",
+        "digest": "eed43c76dbed9c3b5e1f0f686e51d02fcc7c5147585fb1b0d812f95b63a89cb2",
+        "reason": "a0740a1 重新分析 digest 未变（eed43c76…），按复用规则沿用首验 Evidence"
       }
     },
     "views": {
@@ -76,14 +96,46 @@
       "APPROVAL": "ev_401033deb9bacb10c0469d0e6d673f765b955f0b3e5c027137bb91345a868f14",
       "ADAPTER": "ev_9eb6df4636993b713221dfac4dc1b51c083661cd3ebe0da9d58595bdd2699295"
     },
-    "method": "rea analyze-javascript-application (CLI 6.4.0) → bundle import → MCP inspect_analysis_view；另有产物 file:line 静态核对"
+    "method": "rea analyze-javascript-application (CLI 6.4.0) → bundle import → MCP inspect_analysis_view；另有产物 file:line 静态核对",
+    "buildHistory": [
+      {
+        "build": 1,
+        "commit": "9c14bb0",
+        "commitFull": "9c14bb076056a81fe627a6049082147bad0ecec4",
+        "dirty": false,
+        "builtAt": "2026-10-17T14:34:51.209Z",
+        "dirSha256": "ec9214cdbf9f21d2b9acadfb571bc75570c6d5d9f2449fed86226db3763b933a",
+        "mainCjsSha256": "9a7cca128a86a2eb4d579a495b3bd52565c4b47e81933cd6b78f126b40e9809c",
+        "vueHtmlSha256": "0baf1aebbdf38712137be0f85560d7b1d8ab29e183da2a74670b5bc14242efb8",
+        "result": {
+          "pass": 47,
+          "partial": 2,
+          "fail": 0
+        }
+      },
+      {
+        "build": 2,
+        "commit": "a0740a1",
+        "dirty": false,
+        "builtAt": "2026-10-17T14:49:26.636Z",
+        "dirSha256": "3934d24598b85676fcdc1e8515106ec23f9528a7e14562acea3a883ca71cc94c",
+        "mainCjsSha256": "9a7cca128a86a2eb4d579a495b3bd52565c4b47e81933cd6b78f126b40e9809c",
+        "vueHtmlSha256": "08207f64fbc1a8e123a85dace61c601b96760081ec102ab1a4bc751734ead194",
+        "result": {
+          "pass": 49,
+          "partial": 0,
+          "fail": 0
+        }
+      }
+    ]
   },
   "summary": {
     "total": 49,
-    "pass": 47,
-    "partial": 2,
+    "pass": 49,
+    "partial": 0,
     "fail": 0,
-    "unknown": 0
+    "unknown": 0,
+    "verifiedBuild": "a0740a1"
   },
   "items": [
     {
@@ -285,16 +337,18 @@
       "id": "B7",
       "area": "AI",
       "checkpoint": "审批/确认 sideEffect",
-      "status": "部分",
+      "status": "通过",
       "evidence": [
         "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc",
-        "ev_401033deb9bacb10c0469d0e6d673f765b955f0b3e5c027137bb91345a868f14"
+        "ev_db677751c8ee35ff9646d9d80d3a04ea75e62ad15b691dd90bb53b4736a75e60",
+        "ev_93eda6be4e0ded75bc45985bc2cd48a461f49e50cfb1276165affc23ddf8792f"
       ],
       "artifactRefs": [
-        "preload.cjs:212",
-        "sideEffect/decideApproval 在 dist",
-        "revokeApproval 未在 dist"
-      ]
+        "dist/assets/ApprovalPrompt-BDsWYXk0.js: sideEffect/revokeApproval + approval-revocable + SIDE_EFFECT_APPROVAL_TOO_LATE",
+        "electron/preload.cjs:215 revokeApproval",
+        "electron/side-effect-bootstrap.cjs:20,70"
+      ],
+      "resolvedInBuild": "a0740a1"
     },
     {
       "id": "B8",
@@ -353,16 +407,17 @@
       "id": "C4",
       "area": "组织",
       "checkpoint": "App 级/工具级授权",
-      "status": "部分",
+      "status": "通过",
       "evidence": [
         "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc",
-        "ev_cc4326271d075ee3c78274cf83cbc8e2838f13d2ff5b9a333a3d057980d63775"
+        "ev_db677751c8ee35ff9646d9d80d3a04ea75e62ad15b691dd90bb53b4736a75e60",
+        "ev_faf0fde4b80188ff369c69f486876aebba740f06f82fd160dcc7797927b80245"
       ],
       "artifactRefs": [
-        "governance-bootstrap.cjs:55,100",
-        "grantAppAccess 在 electron",
-        "grantAppAccess 未在 dist"
-      ]
+        "dist/assets/vue-DGjggzKl.js: governance/getAppAccess + grantAppAccess + revokeAppAccess + 授予/撤销 App 级权限",
+        "electron/governance-bootstrap.cjs:54-56,99-101"
+      ],
+      "resolvedInBuild": "a0740a1"
     },
     {
       "id": "C5",
@@ -818,5 +873,24 @@
     "REA 覆盖 partial：主进程 summary 393/972、dist 679/834；主进程 limitations 580、dist 62；sender_validation_observations=0 属识别限制。",
     "字符串探测对动态拼接命令可能漏检；未命中不等于未接线。",
     "结论只对 commit 9c14bb0 与上述产物 sha256 有效。"
-  ]
+  ],
+  "addendum": {
+    "build": "a0740a1",
+    "dirSha256": "3934d24598b85676fcdc1e8515106ec23f9528a7e14562acea3a883ca71cc94c",
+    "changedChunks": [
+      "ApprovalPrompt-BDsWYXk0.js",
+      "vue-DGjggzKl.js",
+      "main-luqkwsX-.js"
+    ],
+    "results": {
+      "B7": "通过",
+      "C4": "通过"
+    },
+    "finalCounts": {
+      "pass": 49,
+      "partial": 0,
+      "fail": 0
+    },
+    "note": "electron digest 未变→复用 ev_a85d…；dist digest 变化→新证据 ev_db6777…；task-43 已关闭；仅静态复验，未点击 UI"
+  }
 }
