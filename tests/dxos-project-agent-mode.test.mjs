@@ -58,7 +58,7 @@ const REVIEW_JSON = '{"complete":true,"reason":"账本与原始目标一致","mi
  * 装配测试台。modelPlan(request, planCount) 只在非验收的模型调用上触发；
  * 验收调用（tools 为空）固定返回 REVIEW_JSON。
  */
-function buildHarness({ modelPlan, toolRunner, skillRunner, mcpAdapter, toolCatalog, capability, reviewJson } = {}) {
+function buildHarness({ modelPlan, toolRunner, skillRunner, mcpAdapter, toolCatalog, capability, reviewJson, tools = null, descriptors = null } = {}) {
   const runId = nextRunId();
   const events = [];
   const usageEvents = [];
@@ -71,8 +71,8 @@ function buildHarness({ modelPlan, toolRunner, skillRunner, mcpAdapter, toolCata
     route: {
       model: { providerId: "p1", model: "m-primary", provider: { id: "p1", name: "主站点" } },
       modelRoutes: [{ providerId: "p1", model: "m-primary", provider: { id: "p1", name: "主站点" } }],
-      tools: TOOLS,
-      toolDescriptors: DESCRIPTORS,
+      tools: tools || TOOLS,
+      toolDescriptors: descriptors || DESCRIPTORS,
     },
   };
   const runtime = { runId, signal: new AbortController().signal, prepared };
@@ -403,4 +403,35 @@ test("project-agent 0.6.1 30 分钟窗口：到期先 checkpoint 并返回 waiti
   assert.ok(saved && saved.state, "窗口到期必须先持久化 checkpoint");
   assert.ok(result.checkpoint && result.checkpoint.state, "返回的 checkpoint 必须可续跑");
   assert.equal(h.events.some((event) => event[0] === "complete"), false, "等待用户时不得把 Run 标完成");
+});
+
+test("project-agent 缺画布上下文：结构化 TOOL_CONTEXT_UNAVAILABLE 立即收口，不无界重试", async () => {
+  const canvasTool = capTool("canvas_run", "canvas.run", "app.canvas");
+  const canvasDescriptor = {
+    name: "canvas_run", source: "app", sourceId: "canvas", risk: "write",
+    requiredContext: ["app.canvas.current"],
+    handler: { type: "client", command: "canvas/run" },
+  };
+  const h = buildHarness({
+    tools: [canvasTool],
+    descriptors: [canvasDescriptor],
+    modelPlan: () => ({ content: "", toolCalls: [{ id: "c1", name: "canvas_run", arguments: "{}" }] }),
+    toolCatalog: {
+      runCatalogTool: async () => {
+        const error = new Error("该工具需要画布前台上下文（app.canvas.current）。当前任务没有可用画布窗口，已停止重试。");
+        error.code = "TOOL_CONTEXT_UNAVAILABLE";
+        error.retryable = false;
+        error.requiredContext = ["app.canvas.current"];
+        throw error;
+      },
+    },
+  });
+  const result = await projectAgent.runProjectAgentMode(PROJECT, ACTOR, "在画布画一只猫");
+  assert.equal(result.complete, false);
+  assert.equal(result.errorCode, "TOOL_CONTEXT_UNAVAILABLE");
+  assert.deepEqual(result.requiredContext, ["app.canvas.current"]);
+  assert.match(result.text, /app\.canvas\.current/);
+  assert.equal(planCalls(h).length, 1, "上下文确定缺失时只允许一次模型计划，不得无限重试");
+  assert.ok(h.events.some((event) => event[0] === "capability.failed" && event[1].toolName === "canvas_run"));
+  assert.equal(h.events.some((event) => event[0] === "planned" && event[1].phase === "completion-review"), false, "立即收口，不进入完成验收循环");
 });

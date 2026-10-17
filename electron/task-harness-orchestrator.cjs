@@ -80,7 +80,12 @@ function mapAcpEvents(events = [], { maxPersisted = DEFAULT_MAX_PERSISTED_EVENTS
     if (out.length >= maxPersisted) { dropped += 1; continue; }
     const payload = { acpType: e.raw || e.type };
     if (e.type === "usage") payload.usage = e.usage || null;
-    if (e.type === "tool.proposed") payload.toolCallId = e.toolCallId || null;
+    if (e.type === "tool.proposed") {
+      // task-69：只投影 toolId/name（title 即工具标识），绝不投影 arguments/rawInput。
+      payload.toolCallId = e.toolCallId || null;
+      const toolId = String(e.toolId || e.title || "").trim();
+      if (toolId) { payload.toolId = toolId.slice(0, 160); payload.name = toolId.slice(0, 160); }
+    }
     if (e.type === "plan" && Array.isArray(e.plan)) payload.itemCount = e.plan.length;
     out.push({ eventType, safePayload: payload });
   }
@@ -110,7 +115,7 @@ function classifyHarnessError(e) {
 }
 
 class TaskHarnessOrchestrator {
-  constructor({ taskService, adapterFactory = null, toolProxy = null, sideEffectRuntime = null, clock = null, logger = null, turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS, startTimeoutMs = DEFAULT_START_TIMEOUT_MS, maxPersistedHarnessEvents = DEFAULT_MAX_PERSISTED_EVENTS, toolFacade = null, memoryContext = null } = {}) {
+  constructor({ taskService, adapterFactory = null, toolProxy = null, sideEffectRuntime = null, clock = null, logger = null, turnTimeoutMs = DEFAULT_TURN_TIMEOUT_MS, startTimeoutMs = DEFAULT_START_TIMEOUT_MS, maxPersistedHarnessEvents = DEFAULT_MAX_PERSISTED_EVENTS, toolFacade = null, memoryContext = null, maxToolRounds = MAX_TOOL_ROUNDS } = {}) {
     if (!taskService) throw new Error("TaskHarnessOrchestrator 需要 TaskService");
     this.taskService = taskService;
     // D4-05 S4 / A36：可选受控记忆装配。null → 不接线，行为完全不变。
@@ -128,6 +133,8 @@ class TaskHarnessOrchestrator {
     this.turnTimeoutMs = turnTimeoutMs;
     this.startTimeoutMs = startTimeoutMs;
     this.maxPersistedHarnessEvents = maxPersistedHarnessEvents;
+    // task-69：内置 AI 任务用更高 round 预算；普通/通用装配不传则仍是 MAX_TOOL_ROUNDS。
+    this.maxToolRounds = Number.isFinite(Number(maxToolRounds)) && Number(maxToolRounds) > 0 ? Number(maxToolRounds) : MAX_TOOL_ROUNDS;
     this.registry = new Map(); // runId -> { taskId, stepId, capabilityId, adapter, starting }
     // runId -> Set<callId>：已经作为 verified result 交回过 Harness 的 side-effect call。
     this.resolvedSideEffectCalls = new Map();
@@ -209,7 +216,7 @@ class TaskHarnessOrchestrator {
     }
     const modelQuota = remaining[BUDGET_KIND.MODEL_CALLS];
     const toolQuota = toolsEnabled ? remaining[BUDGET_KIND.TOOL_CALLS] : null;
-    const roundsQuota = Math.max(0, Math.min(MAX_TOOL_ROUNDS, remaining[BUDGET_KIND.TOOL_ROUNDS]));
+    const roundsQuota = Math.max(0, Math.min(this.maxToolRounds, remaining[BUDGET_KIND.TOOL_ROUNDS]));
 
     const runRes = svc.startHarnessRun({ context, taskId, stepId, expectedRevision: task.revision });
     if (!runRes.ok) {

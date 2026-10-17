@@ -510,7 +510,20 @@ function ensurePermissions(actor, permissions) {
 async function runCatalogTool(name, args, actor, options = {}) {
   const descriptor = listToolDescriptors(actor).find((tool) => tool.name === name && (!options.sourceId || tool.sourceId === options.sourceId));
   if (!descriptor) throw new Error(`未知工具：${name}`);
-  if (descriptor.handler.type === 'client') throw new Error('此工具由桌面客户端执行，不能通过服务端直接运行。');
+  if (descriptor.handler.type === 'client') {
+    // task-69：客户端工具需要宿主上下文（如 app.canvas.current）。后台任务没有该上下文时
+    // 给出非重试的结构化错误，避免模型把"当前无法执行"当成暂时失败而无界重试。
+    const requiredContext = Array.isArray(descriptor.requiredContext) ? descriptor.requiredContext.filter(Boolean).map(String) : [];
+    const error = new Error(requiredContext.includes('app.canvas.current')
+      ? '该工具需要画布前台上下文（app.canvas.current）。当前任务没有可用画布窗口，已停止重试；请先在画布中打开目标后再发起。'
+      : '此工具由桌面客户端执行，不能通过服务端直接运行。');
+    if (requiredContext.length) {
+      error.code = 'TOOL_CONTEXT_UNAVAILABLE';
+      error.retryable = false;
+      error.requiredContext = requiredContext;
+    }
+    throw error;
+  }
   if (descriptor.handler.type === 'system-capability' && descriptor.handler.skillId) {
     if (!actor) throw new Error('请先登录');
     return callSkill(descriptor.handler.skillId, args, {

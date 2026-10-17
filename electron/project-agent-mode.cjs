@@ -506,6 +506,20 @@ async function runProjectAgentMode(project, actor, instruction, history = [], pr
           ledger.push({ toolName: call.name, args: callArgs, status: runtime.signal.aborted ? "cancelled" : "failed", error: message, artifacts: [] });
           observations.push({ invocationId: call.id, toolName: call.name, status: runtime.signal.aborted ? "cancelled" : "failed", error: message, latencyMs: clock() - startedAt });
           checkpoint();
+          // task-69：客户端工具缺宿主上下文（如画布未打开）是确定失败，不是暂时错误；立即结构化收口，
+          // 不让模型把同一个已提议调用无界重试。
+          if (error && (error.code === "TOOL_CONTEXT_UNAVAILABLE" || error.retryable === false)) {
+            const text = message + "\n请先在画布中打开目标画布后再重试。";
+            if (!session.taskId) core.agentRuntime.fail(runtime.runId, text);
+            return {
+              text,
+              filesChanged,
+              agentTrace: prepared.trace,
+              complete: false,
+              errorCode: error.code || "TOOL_CONTEXT_UNAVAILABLE",
+              requiredContext: Array.isArray(error.requiredContext) ? error.requiredContext : [],
+            };
+          }
         }
       }
     }

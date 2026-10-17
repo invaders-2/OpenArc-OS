@@ -27,11 +27,11 @@ const { SideEffectAuthority } = require("./side-effect-authority.cjs");
 const { SideEffectRuntime } = require("./side-effect-runtime.cjs");
 const { RuntimeSupervisor } = require("./runtime-supervisor.cjs");
 const { READ_TOOL_IDS, WRITE_TOOL_IDS } = require("./dsh-tool-profile.cjs");
-const { DEFAULT_MAX_CALLS, MAX_TOOL_ROUNDS } = require("./task-domain.cjs");
+const { AI_TASK_BUDGET } = require("./task-domain.cjs");
 
 /** D4-04 / D4-06：官方 dsh Tool Facade 的 run 级预算（与 orchestrator 实际使用同一份配置）。 */
 // toolIds / writeToolIds 一律取 allowlist 常量（唯一真源；不在装配处再写一份字面量）。
-const TOOL_FACADE_CONFIG = Object.freeze({ enabled: true, toolIds: READ_TOOL_IDS, writeToolIds: WRITE_TOOL_IDS, maxCalls: 8, ttlMs: 300000 });
+const TOOL_FACADE_CONFIG = Object.freeze({ enabled: true, toolIds: READ_TOOL_IDS, writeToolIds: WRITE_TOOL_IDS, maxCalls: AI_TASK_BUDGET.TOOL_CALLS, ttlMs: 300000 });
 
 function createTaskBundle({ identityStore, authorization, authStore, modelService = null, modelProxy = null, logger = null, clock = null, adapterFactory = null, resourceService = null, searchService = null, browserControl = null, canvasService = null, dbPath = null, storeRoot = null, runtimeDir = null, sideEffectApprovalWaitMs = null, executorLauncher = null, executorTestHook = null } = {}) {
   if (!identityStore) throw new Error("createTaskBundle 需要 identityStore");
@@ -40,7 +40,7 @@ function createTaskBundle({ identityStore, authorization, authStore, modelServic
   const taskService = new TaskService({ identity: identityStore, authService: authorization, authStore, taskStore, modelService, clock, logger });
   const taskRecovery = taskService.recoverRunning();
   // D4 收口：账本 base 用实际生效额度（model=DEFAULT_MAX_CALLS / tool=facade maxCalls / rounds=MAX_TOOL_ROUNDS）。
-  taskService.attachBudgetConfig({ modelMaxCalls: DEFAULT_MAX_CALLS, toolMaxCalls: TOOL_FACADE_CONFIG.maxCalls, maxToolRounds: MAX_TOOL_ROUNDS });
+  taskService.attachBudgetConfig({ modelMaxCalls: AI_TASK_BUDGET.MODEL_CALLS, toolMaxCalls: AI_TASK_BUDGET.TOOL_CALLS, maxToolRounds: AI_TASK_BUDGET.TOOL_ROUNDS });
   // D4-03A：Controlled Tool Proxy（Registry 权威 + D3 授权 + decision）。
   const toolStore = new ToolStore({ identity: identityStore, clock });
   const toolRegistry = new ToolRegistry();
@@ -93,9 +93,9 @@ function createTaskBundle({ identityStore, authorization, authStore, modelServic
     const factory = typeof adapterFactory === "function" ? adapterFactory : () => new HarnessAdapter({ modelProxy, logger, clock });
     orchestrator = new TaskHarnessOrchestrator({
       taskService, adapterFactory: factory, toolProxy, sideEffectRuntime, clock, logger,
-      // D4-04：真实观测到每任务最多 2 次受控 tool call（READ: search+read；WRITE: search+trash）。
-      // 预算回到 D4-03D 冻结默认 8（bounded，且 AUTO_RETRY 恒为 0）。
+      // task-69：内置 AI/chat 任务预算（16 model / 32 tool / 8 rounds）；普通通用装配仍用 BUDGET_BASE。
       toolFacade: TOOL_FACADE_CONFIG,
+      maxToolRounds: AI_TASK_BUDGET.TOOL_ROUNDS,
       memoryContext,
     });
   }
@@ -243,4 +243,4 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
   });
 }
 
-module.exports = { createTaskBundle, registerTaskIpc, TASK_COMMANDS };
+module.exports = { createTaskBundle, registerTaskIpc, TASK_COMMANDS, TOOL_FACADE_CONFIG };

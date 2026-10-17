@@ -117,13 +117,80 @@ const messages = computed<Msg[]>(() => {
   if (!steps.length) { out.push({ key: "goal", role: "user", text: d.task.goal }); out.push({ key: "wait", role: "assistant", text: running(d.task.status) ? "思考中…" : STATUS[d.task.status] ?? "", pending: running(d.task.status) }); }
   return out;
 });
+const TOOL_STATUS: Record<string, string> = { "tool.proposed": "已提议", "tool.validated": "已校验", "tool.denied": "已拒绝", "tool.approval_required": "等待审批", "tool.execution.started": "执行中", "tool.execution.succeeded": "执行完成", "tool.execution.failed": "执行失败", "tool.execution.blocked": "执行被阻止", "harness.tool_proposed": "已提议", "harness.permission_requested": "等待权限", "harness.permission_rejected": "权限被拒" };
+const TOOL_RANK: Record<string, number> = { "已提议": 1, "已校验": 2, "等待审批": 3, "等待权限": 3, "执行中": 4, "执行完成": 5, "执行失败": 5, "执行被阻止": 5, "已拒绝": 5, "权限被拒": 5 };
+const toolNameOf = (p: any) => {
+  const values = [p?.toolDisplayName, p?.toolName, p?.name, p?.safeToolName, p?.tool?.displayName, p?.tool?.name, p?.safeToolId, p?.toolId, p?.toolCallId];
+  for (const v of values) {
+    const s = String(v == null ? "" : v).trim();
+    if (s && !/^tool_call(_update)?$/i.test(s) && s !== "工具调用") return s;
+  }
+  return "工具调用";
+};
 const toolCards = computed(() => {
   const evs = detail.value?.events || [];
-  const map: Record<string, string> = { "tool.proposed": "已提议", "tool.validated": "已校验", "tool.denied": "已拒绝", "tool.approval_required": "等待审批", "tool.execution.started": "执行中", "tool.execution.succeeded": "执行完成", "tool.execution.failed": "执行失败", "tool.execution.blocked": "执行被阻止", "harness.tool_proposed": "已提议", "harness.permission_requested": "等待权限", "harness.permission_rejected": "权限被拒" };
-  return evs.filter((e) => /^(tool\.|harness\.tool|harness\.permission)/.test(e.eventType)).slice(-12).map((e) => {
-    const p = e.safePayload || {}; return { key: e.eventId, title: String(p.toolId || p.toolDisplayName || p.acpType || e.eventType), status: map[e.eventType] || e.eventType, detail: p.reasonCode || p.decision || p.reason || "" };
-  });
+  const byKey = new Map<string, { key: string; title: string; toolId: string; status: string; detail: string; rank: number; sequence: number }>();
+  for (const e of evs) {
+    if (!/^(tool\.|harness\.tool|harness\.permission)/.test(e.eventType)) continue;
+    const p = e.safePayload || {};
+    const title = toolNameOf(p);
+    // tool-69 的 safe toolId/toolName 优先；没有 proposalId 时用 eventId，绝不把 12 个提议折叠成一个。
+    const key = String(p.proposalId || p.toolCallId || p.executionId || (p.toolId ? p.toolId + ":" + e.eventId : e.eventId));
+    const status = TOOL_STATUS[e.eventType] || e.eventType;
+    const rank = TOOL_RANK[status] || 0;
+    const detail = String(p.reasonCode || p.decision || p.reason || (p.toolVersion != null ? "v" + p.toolVersion : "") || "");
+    const toolId = String(p.toolId || p.safeToolId || "");
+    const prev = byKey.get(key);
+    if (!prev) byKey.set(key, { key, title, toolId, status, detail, rank, sequence: e.sequence });
+    else if (rank >= prev.rank) { prev.title = title !== "工具调用" ? title : prev.title; prev.status = status; prev.detail = detail || prev.detail; prev.rank = rank; prev.toolId = toolId || prev.toolId; prev.sequence = e.sequence; }
+    else if (title !== "工具调用") prev.title = title;
+  }
+  return [...byKey.values()].sort((a, b) => a.sequence - b.sequence).slice(-24).map((card) => ({
+    ...card,
+    // 提议事件的 title 可能是 call_3_0（ACP toolCallId）；执行事件带真实 toolId（如 browser_read_page）时以它为准。
+    title: (/^call[_-]/i.test(card.title) && card.toolId ? card.toolId : card.title),
+  }));
 });
+const BUDGET_LABEL: Record<string, string> = { TOOL_CALLS: "工具调用", TOOL_ROUNDS: "工具轮次", MODEL_CALLS: "模型调用" };
+const RESUME_REASON_TEXT: Record<string, string> = {
+  RESUME_NOT_BLOCKED: "任务未处于可续接的阻塞状态。", RESUME_CANCELLED: "任务已取消，不能续接。", RESUME_IN_FLIGHT: "任务仍在执行，稍后再试。",
+  RESUME_NO_HARNESS_RUN: "没有可续接的运行记录。", RESUME_NOT_BUDGET_STOP: "当前阻塞不是预算耗尽。", RESUME_UNKNOWN_BUDGET_KIND: "预算类型未知，不能自动续接。",
+  RESUME_UNKNOWN_EFFECT_PRESENT: "存在结果未知的副作用，先核查后才能续接。", RESUME_SIDE_EFFECT_PENDING: "有审批/执行中的副作用，先处理再续接。",
+  RESUME_ACTIVE_LEASE: "有正在执行的受控操作，稍后再试。", RESUME_LIMIT_REACHED: "续接次数已达上限（3 次）。", RESUME_NO_SAFE_CONTINUATION: "没有可用于续接的已完成产物。",
+};
+const budgetInfo = computed(() => {
+  const d = detail.value; const ledger = d?.budgetLedger; if (!d || !ledger) return null;
+  const exhaust = [...(d.events || [])].reverse().find((e) => e.eventType === "task.budget_exhausted");
+  const exhausted = d.task.status === "BLOCKED" && (d.stopReason === "BUDGET_EXHAUSTED" || ledger.stopReason === "BUDGET_EXHAUSTED" || !!exhaust);
+  if (!exhausted) return null;
+  const kinds = ledger.kinds || {};
+  const kind = String(ledger.nextGrant?.kind || exhaust?.safePayload?.kind || "TOOL_CALLS");
+  const rows = Object.keys(BUDGET_LABEL).map((k) => ({ key: k, label: BUDGET_LABEL[k], consumed: Number(kinds[k]?.consumed) || 0, authorized: Number(kinds[k]?.authorized) || 0, remaining: Number(kinds[k]?.remaining) || 0 }));
+  const focus = rows.find((r) => r.key === kind) || rows.find((r) => r.consumed >= r.authorized) || rows[0];
+  const nextGrant = ledger.nextGrant && ledger.nextGrant.kind === kind ? ledger.nextGrant : null;
+  const add = Number(nextGrant?.amount) || 0;
+  const reason = String(ledger.reason || "");
+  return {
+    kind, label: BUDGET_LABEL[kind] || kind, rows, focus, nextGrant, add,
+    exhaustedText: focus.label + "已用 " + focus.consumed + " / " + focus.authorized + "，剩余 " + focus.remaining + "。",
+    resumeText: "续接次数 " + (Number(ledger.resumeCount) || 0) + " / " + (Number(ledger.maxResumes) || 3) + "（剩余 " + (Number(ledger.remainingResumes) || 0) + " 次）",
+    resumable: d.resumable === true && !!nextGrant,
+    reasonText: RESUME_REASON_TEXT[reason] || (reason ? "后端拒绝续接（" + reason + "）" : "当前不可续接。"),
+  };
+});
+const resuming = ref(false);
+const budgetError = ref("");
+const budgetNotice = ref("");
+async function resumeBudget() {
+  if (!taskBridge || !currentId.value || !detail.value || resuming.value) return;
+  resuming.value = true; budgetError.value = ""; budgetNotice.value = "";
+  try {
+    const r = await taskBridge.command({ command: "task/resume", payload: { taskId: currentId.value, expectedRevision: detail.value.task.revision } }).catch(() => null);
+    if (!r?.ok) { budgetError.value = errText(r?.error) + (r?.detail ? "（" + String(r.detail).slice(0, 160) + "）" : ""); return; }
+    budgetNotice.value = "已追加 " + (budgetInfo.value?.add || 0) + " 次" + (budgetInfo.value?.label || "预算") + "，任务继续执行…";
+    await Promise.all([loadList(), loadDetail()]);
+  } finally { resuming.value = false; }
+}
 const eventRows = computed(() => (detail.value?.events || []).slice(-40));
 const recoveryCalls = computed<any[]>(() => Array.isArray(detail.value?.recovery?.calls) ? detail.value!.recovery.calls : []);
 const needsAck = computed(() => detail.value?.recovery?.applicable === true && recoveryCalls.value.some((c) => !c.acknowledged));
@@ -210,13 +277,28 @@ onBeforeUnmount(() => { off?.(); offApproval?.(); window.clearInterval(poll); })
         <section v-if="detail && (toolCards.length || eventRows.length)" class="chat-process" data-chat-process>
           <button type="button" class="chat-process-head" :aria-expanded="processOpen" @click="processOpen = !processOpen"><ChevronDown :size="13" :class="{ closed: !processOpen }" /><span>过程 · 工具 {{ toolCards.length }} · 事件 {{ eventRows.length }}</span><small>task/get 快照增量</small></button>
           <template v-if="processOpen">
-            <div v-if="toolCards.length" class="chat-tools" data-chat-tools><div v-for="card in toolCards" :key="card.key" class="chat-tool" :data-chat-tool="card.title" :data-chat-tool-status="card.status"><Wrench :size="13" /><strong>{{ card.title }}</strong><span>{{ card.status }}</span><small v-if="card.detail">{{ card.detail }}</small></div></div>
+            <div v-if="toolCards.length" class="chat-tools" data-chat-tools><div v-for="card in toolCards" :key="card.key" class="chat-tool" :data-chat-tool="card.title" :data-chat-tool-id="card.toolId" :data-chat-tool-status="card.status"><Wrench :size="13" /><strong>{{ card.title }}</strong><span :data-chat-tool-state="card.status">{{ card.status }}</span><small v-if="card.toolId && card.toolId !== card.title" class="chat-tool-id">{{ card.toolId }}</small><small v-if="card.detail">{{ card.detail }}</small></div></div>
             <ol v-if="eventRows.length" class="chat-events" data-chat-events><li v-for="e in eventRows" :key="e.eventId" :data-chat-event="e.eventType"><span class="chat-event-seq">#{{ e.sequence }}</span><span class="chat-event-type">{{ e.eventType }}</span><small>{{ when(e.createdAt) }}</small><code v-if="e.safePayload" class="chat-event-payload">{{ JSON.stringify(e.safePayload).slice(0, 220) }}</code></li></ol>
           </template>
         </section>
         <div v-if="approvals.length" class="chat-approvals" data-chat-approvals><div v-for="a in approvals" :key="a.approvalRequestId" class="chat-approval" :data-chat-approval="a.approvalRequestId"><ShieldQuestion :size="15" /><div><strong>等待你的审批</strong><p>{{ a.toolDisplayName || a.toolId }} · {{ a.riskClass || a.effectClass || "副作用" }}<span v-if="a.targetDisplayName"> · {{ a.targetDisplayName }}</span></p><small>审批入口在系统审批浮层（复用 ApprovalPrompt）；批准/拒绝后这里刷新真实状态。</small></div></div></div>
         <p v-if="approvalError" class="chat-error" data-chat-approval-error>审批请求暂不可用（{{ approvalError }}）</p>
-        <div v-if="detail && detail.task.status === 'BLOCKED'" class="chat-blocked" data-chat-blocked><CircleAlert :size="16" /><div><strong>任务已阻塞{{ detail.stopReason ? "：" + detail.stopReason : "" }}</strong><p v-if="needsAck">有工具结果未知：先核对实际影响并确认，才能恢复。</p><div v-for="c in recoveryCalls" :key="c.callId" class="chat-recovery" :data-chat-recovery-call="c.callId"><span>{{ c.toolId }} · {{ c.recoveryResult }}</span><button v-if="!c.acknowledged" type="button" class="chat-mini" :data-chat-ack="c.callId" @click="acknowledge(c.callId)">我已核查</button><small v-else>已人工确认</small></div><button v-if="detail.resumable" type="button" class="chat-mini" data-chat-resume @click="resume">恢复任务</button></div></div>
+        <section v-if="budgetInfo" class="chat-budget" data-chat-budget :data-chat-budget-kind="budgetInfo.kind" :data-chat-budget-resumable="budgetInfo.resumable">
+          <CircleAlert :size="16" />
+          <div>
+            <strong>任务已暂停：{{ budgetInfo.label }}预算用完</strong>
+            <p data-chat-budget-summary>{{ budgetInfo.exhaustedText }}</p>
+            <div class="chat-budget-metrics">
+              <span v-for="row in budgetInfo.rows" :key="row.key" :data-chat-budget-row="row.key">消耗 {{ row.consumed }} / {{ row.authorized }} · 剩余 {{ row.remaining }}</span>
+            </div>
+            <p class="chat-budget-resume-meta" data-chat-budget-resume-meta>{{ budgetInfo.resumeText }}<span v-if="budgetInfo.add"> · 继续执行追加 +{{ budgetInfo.add }}</span></p>
+            <p v-if="budgetError" class="chat-error" role="alert" data-chat-budget-error>{{ budgetError }}</p>
+            <button v-if="budgetInfo.resumable" type="button" class="chat-mini chat-budget-resume" data-chat-budget-resume :disabled="resuming" @click="resumeBudget">{{ resuming ? "正在续接…" : "继续执行（追加 +" + budgetInfo.add + "）" }}</button>
+            <small v-else class="chat-budget-reason" data-chat-budget-reason>{{ budgetInfo.reasonText }}</small>
+          </div>
+        </section>
+        <p v-if="budgetNotice" class="chat-hint chat-budget-notice" data-chat-budget-notice>{{ budgetNotice }}</p>
+        <div v-if="detail && detail.task.status === 'BLOCKED' && !budgetInfo" class="chat-blocked" data-chat-blocked><CircleAlert :size="16" /><div><strong>任务已阻塞{{ detail.stopReason ? "：" + detail.stopReason : "" }}</strong><p v-if="needsAck">有工具结果未知：先核对实际影响并确认，才能恢复。</p><div v-for="c in recoveryCalls" :key="c.callId" class="chat-recovery" :data-chat-recovery-call="c.callId"><span>{{ c.toolId }} · {{ c.recoveryResult }}</span><button v-if="!c.acknowledged" type="button" class="chat-mini" :data-chat-ack="c.callId" @click="acknowledge(c.callId)">我已核查</button><small v-else>已人工确认</small></div><button v-if="detail.resumable" type="button" class="chat-mini" data-chat-resume @click="resume">恢复任务</button></div></div>
       </div>
       <p v-if="error" class="chat-error" role="alert" data-chat-error>{{ error }}</p>
       <p v-else-if="detail && !detail.appendable && terminal(detail.task.status) && detail.appendReason" class="chat-hint" data-chat-append-hint>这段对话不能继续追加（{{ detail.appendReason }}）；可以新建对话。</p>
@@ -257,6 +339,19 @@ onBeforeUnmount(() => { off?.(); offApproval?.(); window.clearInterval(poll); })
 .chat-tool strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-tool span { margin-left: auto; color: var(--muted); font-size: var(--fs-micro); white-space: nowrap; }
 .chat-tool small { flex-basis: 100%; color: var(--muted); font-size: var(--fs-micro); }
+.chat-tool-id { font-family: var(--font-mono); }
+.chat-tool[data-chat-tool-state="执行完成"] span { color: var(--success-text, #1e7e34); }
+.chat-tool[data-chat-tool-state="执行失败"] span, .chat-tool[data-chat-tool-state="已拒绝"] span, .chat-tool[data-chat-tool-state="权限被拒"] span, .chat-tool[data-chat-tool-state="执行被阻止"] span { color: var(--failed); }
+.chat-budget { display: flex; gap: 8px; padding: 11px 12px; border-radius: var(--radius-md); background: color-mix(in srgb, #ff9f0a 12%, transparent); font-size: var(--fs-caption); }
+.chat-budget strong { display: block; font-weight: var(--fw-medium); }
+.chat-budget p { margin: 3px 0; color: var(--muted); }
+.chat-budget-metrics { display: flex; flex-wrap: wrap; gap: 5px; margin: 6px 0 3px; }
+.chat-budget-metrics span { padding: 2px 7px; border-radius: var(--radius-sm); background: rgb(var(--text-rgb) / 0.06); color: var(--text); font-size: var(--fs-micro); }
+.chat-budget-resume-meta { font-size: var(--fs-micro); }
+.chat-budget-notice { color: var(--success-text, #1e7e34) !important; }
+.chat-budget-resume { margin-top: 6px; }
+.chat-budget-resume:disabled { opacity: 0.55; }
+.chat-budget-reason { display: block; margin-top: 5px; color: var(--muted); font-size: var(--fs-micro); }
 .chat-events { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; max-height: 210px; overflow: auto; }
 .chat-events li { display: flex; align-items: baseline; gap: 7px; font-size: var(--fs-micro); }
 .chat-event-seq { color: var(--muted); min-width: 24px; }
