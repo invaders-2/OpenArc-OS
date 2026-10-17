@@ -894,6 +894,18 @@ class CanvasService {
    * 依次：权限（同一规则）→ run 归属与存活 → 任务停止态 → 预算 → TaskService 记账 → ModelService → 记账收口。
    * 任一前置不通过就**不发出任何请求**（provider 侧看不到调用）。
    */
+  /** task-25 A20：按画布查询协议任务三元组（只回状态/协议 id/hash，不回请求正文）。 */
+  protocolTasks({ context, canvasId, limit = 50 } = {}) {
+    const r = this.#load(context, canvasId);
+    if (!r.ok) return r;
+    return ok({ tasks: this.store.protocolTasksByCanvas(canvasId, limit).map((row) => ({
+      id: row.id, status: row.status, mode: row.mode, intent: row.intent, profileId: row.profile_id,
+      providerProtocol: { id: row.provider_protocol_id, version: Number(row.provider_protocol_version), hash: row.provider_protocol_hash },
+      modelProtocol: { id: row.model_protocol_id, version: Number(row.model_protocol_version), hash: row.model_protocol_hash },
+      error: row.error_message || null, createdAt: Number(row.created_at), updatedAt: Number(row.updated_at),
+    })) });
+  }
+
   async modelCall({ context, canvasId, runId, kind = "chat", messages = null, prompt = "", size = null, ratio = null, resolution = null, customSize = null, customRatio = null, count = 1, configId = null, signal = null } = {}) {
     const run = this.store.runById(runId);
     if (!run || run.canvas_id !== String(canvasId)) return fail("RUN_NOT_FOUND");
@@ -915,6 +927,21 @@ class CanvasService {
     if (!binding.ok) return binding;
     const call = this.taskService.startModelCall({ context: ctx, taskId: run.task_id, expectedRevision: task.task.revision });
     if (!call.ok) return call;
+    // task-25 A20：每次画布生成落一条 ai_protocol_tasks 三元组（provider/model protocol id/version/hash + profile + intent）。
+    const protocolTaskId = "apt_" + run.run_id;
+    const requestSnapshot = { kind, prompt: String(prompt || "").slice(0, 20000), messages: Array.isArray(messages) ? messages.slice(0, 60) : [], size, count: Number(count) || 1 };
+    const planSnapshot = { mode: kind === "image" ? "image-generate" : "chat", steps: 1, executor: "canvas-host" };
+    const planHash = crypto.createHash("sha256").update(JSON.stringify(planSnapshot)).digest("hex");
+    try {
+      this.store.insertProtocolTask({
+        id: protocolTaskId, ownerId: r.user.id, canvasId, status: "RUNNING", mode: kind === "image" ? "image" : "chat",
+        intent: kind === "image" ? "image-generation" : "chat", requestJson: JSON.stringify(requestSnapshot), planJson: JSON.stringify(planSnapshot), planHash,
+        providerProtocolId: "openarc-model-host", providerProtocolVersion: 1, providerProtocolHash: crypto.createHash("sha256").update("openarc-model-host@1").digest("hex"),
+        modelProtocolId: "canvas-model", modelProtocolVersion: 1, modelProtocolHash: crypto.createHash("sha256").update("canvas-model@1").digest("hex"),
+        profileId: "canvas-default",
+      });
+      this.store.appendProtocolTaskEvent({ taskId: protocolTaskId, type: "started", data: { runId: run.run_id, kind } });
+    } catch { /* 协议三元组写入失败不阻断生成；状态仍由 TaskService 记账 */ }
     const ac = new AbortController();
     if (this.abortOf) this.abortOf.set(run.run_id, ac);
     const onAbort = () => { try { ac.abort(); } catch { /* ignore */ } };
@@ -932,15 +959,32 @@ class CanvasService {
       } else {
         this.taskService.failModelCall({ context: ctx, taskId: run.task_id, callId: call.call.callId, providerErrorCode: (res && res.error) || "MODEL_ERROR", expectedRevision: rev });
       }
+      // task-25 A20：协议任务三元组结果/失败状态与事件。
+      try {
+        if (res && res.ok) {
+          this.store.updateProtocolTask({ id: protocolTaskId, status: "SUCCEEDED", resultJson: { usage: res.usage || null, requestId: res.requestId || null } });
+          this.store.appendProtocolTaskEvent({ taskId: protocolTaskId, type: "completed", data: { usage: res.usage || null } });
+        } else {
+          this.store.updateProtocolTask({ id: protocolTaskId, status: "FAILED", errorMessage: String((res && res.error) || "MODEL_ERROR").slice(0, 200) });
+          this.store.appendProtocolTaskEvent({ taskId: protocolTaskId, type: "failed", data: { error: (res && res.error) || "MODEL_ERROR" } });
+        }
+      } catch { /* 协议任务状态写入失败不改变既有 Task/Model 结果 */ }
       // 迟到 / 停止后的结果一律不返回给画布（诚实：不把已停止的任务改成成功）。
       const after = this.store.runById(run.run_id);
-      if (!after || after.status !== "RUNNING") return fail("RUN_STOPPED", { status: after ? after.status : "STOPPED" });
+      if (!after || after.status !== "RUNNING") {
+        try { this.store.updateProtocolTask({ id: protocolTaskId, status: "CANCELLED", errorMessage: "RUN_STOPPED" }); } catch { /* ignore */ }
+        return fail("RUN_STOPPED", { status: after ? after.status : "STOPPED" });
+      }
       if (!res || !res.ok) return res && res.ok === false ? res : fail("MODEL_ERROR");
       // 异步 run 的结果写回：按 run.node_id **定向**判定，整画布 revision 前进不再等于丢弃结果。
       return this.#acceptRunResult(run, res, { canvasId });
     } catch (err) {
       const fresh = this.taskService.getTask({ context: ctx, taskId: run.task_id });
       this.taskService.failModelCall({ context: ctx, taskId: run.task_id, callId: call.call.callId, providerErrorCode: String((err && err.message) || "MODEL_ERROR").slice(0, 60), expectedRevision: fresh.ok ? fresh.task.revision : task.task.revision });
+      try {
+        this.store.updateProtocolTask({ id: protocolTaskId, status: "FAILED", errorMessage: String((err && err.message) || "MODEL_ERROR").slice(0, 200) });
+        this.store.appendProtocolTaskEvent({ taskId: protocolTaskId, type: "failed", data: { error: "MODEL_ERROR" } });
+      } catch { /* ignore */ }
       return fail("MODEL_ERROR");
     } finally {
       if (this.abortOf) this.abortOf.delete(run.run_id);
@@ -1170,23 +1214,52 @@ class CanvasService {
     }
   }
 
-  /** 解析引用（受控加载路径）：只有当前用户有读权限、且未被回收时才会返回内容。*/
+  /**
+   * task-25 A11：DX canViewCanvasMedia 的等价——只对**当前用户可见画布文档实际引用**的 ResourceRef 放行。
+   * 不授予相邻/同目录资源权限：逐画布逐节点精确比对 openarc-asset:<id>。
+   */
+  #resourceReferencedByVisibleCanvas(context, resourceId) {
+    if (!this.store || typeof this.listCanvases !== "function") return false;
+    const listed = this.listCanvases({ context });
+    if (!listed || !listed.ok) return false;
+    const needle = "openarc-asset:" + String(resourceId);
+    for (const entry of (listed.canvases || []).slice(0, 200)) {
+      const view = this.getCanvas({ context, canvasId: entry.canvasId });
+      if (!view || !view.ok) continue;
+      const nodes = view.canvas && view.canvas.doc && Array.isArray(view.canvas.doc.nodes) ? view.canvas.doc.nodes : [];
+      for (const node of nodes) {
+        if (!node || typeof node !== "object") continue;
+        if (Array.isArray(node.refs) && node.refs.some((ref) => String(ref) === needle)) return true;
+        if (typeof node.url === "string" && node.url === needle) return true;
+        if (typeof node.coverRef === "string" && node.coverRef === needle) return true;
+        if (node.media && typeof node.media === "object" && ("openarc-asset:" + String(node.media.resourceId || "")) === needle) return true;
+      }
+    }
+    return false;
+  }
+
+  /** 解析引用（受控加载路径）：读权限 / 资源 owner / 可见画布文档引用 三选一，且未回收才返回内容。*/
   readAsset({ context, ref } = {}) {
     const r = this.#actor(context);
     if (!r.ok) return r;
-    const id = authz.parseResourceRef(String(ref || ""));
+    // 接受 openarc-asset:<id> 与裸 ResourceRef 两种写法（前端节点 refs 是前者）。
+    const id = authz.parseResourceRef(String(ref || "").replace(/^openarc-asset:/, ""));
     if (!id) return fail(REASON.INVALID_INPUT);
     const row = this.resourceStore ? this.resourceStore.resourceRowById(id) : null;
     if (!row || row.trash_state === "TRASHED" || row.registry_status !== "active") return fail("ASSET_UNAVAILABLE");
-    // 授权：应用授权 OR **资源属于当前用户本人**（与画布 OWNER_POLICY 同一口径）。
-    // 之前只查 canvas 应用对资源的 grant，导致"自己刚导入的图，重开画布就变成不可用"。
+    let referencedByCanvas = false;
     if (this.authService) {
       const auth = this.authService.authorize({ context, action: authz.ACTION.READ, resource: id });
       const ownerOk = row.owner_user_id != null && String(row.owner_user_id) === String(r.user.id);
-      if ((!auth || auth.decision !== "ALLOW") && !ownerOk) return fail("ASSET_FORBIDDEN");
+      // task-25 A11：A 把资源共享进画布后，能看到该画布的 B 也能读这条被引用的媒体；
+      // 未引用资源（相邻/同目录）仍然 ASSET_FORBIDDEN。
+      referencedByCanvas = !ownerOk && (!auth || auth.decision !== "ALLOW") ? this.#resourceReferencedByVisibleCanvas(context, id) : false;
+      if ((!auth || auth.decision !== "ALLOW") && !ownerOk && !referencedByCanvas) return fail("ASSET_FORBIDDEN");
     }
-    if (typeof this.resourceService.readDataUrl !== "function") return fail("ASSET_UNAVAILABLE");
-    const data = this.resourceService.readDataUrl({ context, resourceRef: id });
+    // 引用放宽只绕过资源 ACL 这一步；画布访问判定已在 #resourceReferencedByVisibleCanvas 完成。
+    const readFn = referencedByCanvas && typeof this.resourceService.readDataUrlInternal === "function" ? this.resourceService.readDataUrlInternal : this.resourceService.readDataUrl;
+    if (typeof readFn !== "function") return fail("ASSET_UNAVAILABLE");
+    const data = readFn.call(this.resourceService, referencedByCanvas ? { resourceRef: id } : { context, resourceRef: id });
     if (!data || !data.ok) return fail("ASSET_UNAVAILABLE");
     return ok({ ref: "openarc-asset:" + id, dataUrl: data.dataUrl, name: row.name, version: Number(row.version || 1) });
   }

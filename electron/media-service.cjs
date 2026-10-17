@@ -545,6 +545,7 @@ function createMediaBundle(options = {}) {
     assets: path.join(mediaDir, "assets"),
     renders: path.join(mediaDir, "renders"),
     posters: path.join(mediaDir, "posters"),
+    audio: path.join(mediaDir, "audio"),
     tmp: path.join(mediaDir, "tmp"),
   } : null;
 
@@ -888,7 +889,7 @@ function createMediaBundle(options = {}) {
   function listArtifacts() {
     if (!subDirs) return [];
     const out = [];
-    const groups = [["asset", subDirs.assets], ["render", subDirs.renders], ["poster", subDirs.posters]];
+    const groups = [["asset", subDirs.assets], ["render", subDirs.renders], ["poster", subDirs.posters], ["audio", subDirs.audio]];
     for (const [kind, dir] of groups) {
       if (!fs.existsSync(dir)) continue;
       for (const name of fs.readdirSync(dir)) {
@@ -1071,6 +1072,22 @@ function createMediaBundle(options = {}) {
       case "media/probe": {
         const timeoutMs = boundedTimeout(payload.timeoutMs, workerTimeoutMs, 3600000);
         return { probe: await probeAsset(payload, userId, timeoutMs) };
+      }
+      case "media/audio/extract":
+      case "media/audio/trim": {
+        const source = sourcePathFor(payload, userId);
+        if (!source) throw createMediaError(MEDIA_ERR_INVALID_INPUT, command + " 需要 assetId 或 filePath");
+        if (!fs.existsSync(source)) throw createMediaError(MEDIA_ERR_NOT_FOUND, "音频源文件不存在");
+        const startMs = payload.startMs == null ? null : Number(payload.startMs);
+        const durationMs = payload.durationMs == null ? null : Number(payload.durationMs);
+        if (startMs != null && (!Number.isFinite(startMs) || startMs < 0)) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "startMs 必须为非负数");
+        if (durationMs != null && (!Number.isFinite(durationMs) || durationMs < 100)) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "durationMs 至少 100ms");
+        const dirs = ensureDirs();
+        const name = randomUUID() + ".m4a";
+        const target = path.join(dirs.audio, name);
+        const op = command === "media/audio/extract" ? "audio-extract" : "audio-trim";
+        const result = await runWorker(op, { source, target, startMs, durationMs, timeoutMs: workerTimeoutMs }, { timeoutMs: workerTimeoutMs });
+        return { audio: { kind: "audio", relativePath: "audio/" + name, bytes: result.bytes, startMs: result.startMs, durationMs: result.durationMs } };
       }
       case "media/poster/get": {
         const size = normalizePosterSize(payload.size === undefined ? 640 : payload.size);
@@ -1426,6 +1443,21 @@ function createMediaBundle(options = {}) {
           name: requireStr(payload.name, 255) || "reference",
         });
         return { name: normalized.name, mime: normalized.mime, bytes: normalized.buf.length, data: encodeBinary(normalized.buf) };
+      }
+      case "media/public-media/fetch": {
+        return { media: await mediaPublicMedia.fetchPublicMedia({
+          url: requireStr(payload.url, 2048),
+          fetchImpl: typeof options.publicMediaFetchImpl === "function" ? options.publicMediaFetchImpl : null,
+          // 白名单只能由宿主装配注入；渲染层 payload 不能自行放开目标主机。
+          allowedHosts: Array.isArray(options.publicMediaAllowedHosts) ? options.publicMediaAllowedHosts.map((host) => String(host)).filter(Boolean) : [],
+          maxBytes: 20 * 1024 * 1024,
+        }) };
+      }
+      case "media/public-media/upload": {
+        return { media: await mediaPublicMedia.uploadPublicMedia({
+          fileName: requireStr(payload.fileName, 255),
+          uploader: typeof options.publicMediaUploader === "function" ? options.publicMediaUploader : null,
+        }) };
       }
 
       default:

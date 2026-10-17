@@ -145,7 +145,7 @@ function createSkillCatalogSource() {
  * B6d：fsAdapter 只喂 skillRunner（产物落盘 saveImagesToFs / saveAudiosToFs / saveVideosToFs）；
  * 技能目录 / 技能包 / 工作空间的 fsImpl 仍是 node:fs（见下方第 1 节的注）。
  */
-function createSkillBundle({ userDataDir, identityStore = null, authorization = null, providerAdapter = null, modelAdapter = null, cliRuntime = null, mediaAdapter = null, fsAdapter = null, logger = null, clock = null } = {}) {
+function createSkillBundle({ userDataDir, identityStore = null, authorization = null, providerAdapter = null, modelAdapter = null, cliRuntime = null, mediaAdapter = null, fsAdapter = null, onlineInstaller = null, logger = null, clock = null } = {}) {
   const now = typeof clock === "function" ? clock : () => Date.now();
   const paths = userDataDir ? resolveDxosPaths(userDataDir) : null;
   const dataDir = paths ? paths.root : null;
@@ -188,6 +188,8 @@ function createSkillBundle({ userDataDir, identityStore = null, authorization = 
     agentWorkspace: agentWorkspaceAdapter,
     clock: now,
     logger: logger,
+    // task-25 D09：ModelScope 在线安装器只接受显式注入；未注入时 importOnlineSkillPack 结构化依赖缺失。
+    runner: onlineInstaller || null,
   });
 
   // ---- 5) 执行器 / 分析器：模型出口、CLI、媒体、虚拟文件树 ----
@@ -211,6 +213,7 @@ function createSkillBundle({ userDataDir, identityStore = null, authorization = 
     skillStore: true,
     skillImport: true,
     skillPack: true,
+    onlineInstaller: !!onlineInstaller,
     skillRunner: true,
     skillAnalyzer: true,
     skillWorkspace: !!db,
@@ -287,6 +290,8 @@ function createSkillBundle({ userDataDir, identityStore = null, authorization = 
         return { items: skillPack.listSkillPacks() };
       }
       case "skill/pack/install": {
+        // task-25 D09：在线安装复用 install 命令（不扩前端冻结白名单）；缺安装器即结构化缺失。
+        if (payload.onlineSource != null) return skillPack.importOnlineSkillPack(requireStr(payload.onlineSource, 12000));
         return skillPack.importRegisteredSkillPack(archiveBuffer(payload, "archiveBase64"), requireStr(payload.sourceName, 200) || "skill-pack.zip");
       }
       case "skill/pack/import": {

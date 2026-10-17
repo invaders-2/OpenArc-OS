@@ -37,6 +37,22 @@ const TEXT_EXTENSIONS = Object.freeze([
 ]);
 const BINARY_PARSERS_UNAVAILABLE = Object.freeze([".docx", ".xlsx", ".xlsm"]);
 
+/**
+ * task-25 A18：docx/xlsx 解析器注入。宿主若已有等价依赖（如外部文档服务）可通过
+ * configureAttachmentParsers({ docx: (buffer, name) => string, xlsx: ... }) 注入；
+ * 未注入时保持原有结构化 parseError（不新增重依赖、不做假解析）。
+ */
+let injectedParsers = Object.freeze({});
+function configureAttachmentParsers(parsers) {
+  injectedParsers = parsers && typeof parsers === "object" ? Object.freeze({ ...parsers }) : Object.freeze({});
+  return injectedParsers;
+}
+function parserFor(extension) {
+  if (extension === ".docx") return typeof injectedParsers.docx === "function" ? injectedParsers.docx : null;
+  if (extension === ".xlsx" || extension === ".xlsm") return typeof injectedParsers.xlsx === "function" ? injectedParsers.xlsx : null;
+  return null;
+}
+
 const ok = (extra = {}) => ({ ok: true, ...extra });
 const fail = (error, detail = null) => ({ ok: false, error: String(error), detail });
 const attachmentId = () => "caa_" + Date.now().toString(36) + "_" + crypto.randomBytes(4).toString("hex");
@@ -77,7 +93,15 @@ function extractAttachment(input = {}) {
   let error = "";
   try {
     if (BINARY_PARSERS_UNAVAILABLE.includes(extension)) {
-      error = "当前构建未包含 " + extension + " 解析依赖，请把内容另存为文本/CSV/Markdown 后重新挂载";
+      const parser = parserFor(extension);
+      if (parser) {
+        const parsed = parser(buffer, name);
+        if (parsed && typeof parsed === "object" && typeof parsed.text === "string") content = parsed.text;
+        else if (typeof parsed === "string") content = parsed;
+        else error = "注入的 " + extension + " 解析器没有返回文本";
+      } else {
+        error = "当前构建未包含 " + extension + " 解析依赖，请把内容另存为文本/CSV/Markdown 后重新挂载";
+      }
     } else if (extension === ".csv" || extension === ".tsv" || mime === "text/csv") {
       content = decodeText(buffer);
     } else if (isTextLike(name, mime, extension)) {
@@ -302,6 +326,7 @@ class CanvasAgentAttachmentService {
 
 module.exports = {
   CanvasAgentAttachmentService, extractAttachment, extractAttachments, decodeText, isTextLike, extensionOf,
+  configureAttachmentParsers,
   MAX_ATTACHMENT_TEXT_CHARS, MAX_TOTAL_CHARS, MAX_ATTACHMENT_FILES, MAX_ATTACHMENT_BYTES,
   TEXT_EXTENSIONS, BINARY_PARSERS_UNAVAILABLE,
 };

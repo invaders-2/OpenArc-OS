@@ -565,6 +565,29 @@ class ResourceService {
     return ok({ dataUrl: "data:" + mime + ";base64," + buf.toString("base64"), name: row.name, mimeType: mime, version: Number(row.version || 1) });
   }
 
+  /**
+   * task-25 A11：仅供**已通过画布文档引用判定**的主进程内部调用（不经过 resource:command 白名单，
+   * 渲染层无法直接触达）。调用方必须先完成自己的可见性校验，本方法不重复 ACL。
+   */
+  readDataUrlInternal({ resourceRef, maxBytes = 8 * 1024 * 1024 } = {}) {
+    const row = this.#resolveRow(resourceRef);
+    if (!row || row.trash_state === TRASH_STATE.TRASHED) return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
+    const object = row.content_object_id ? this.store.contentObjectById(row.content_object_id) : null;
+    if (!object) return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
+    let bytes = null;
+    try {
+      const objectPath = this.fs.objectPath(object.checksum);
+      const stat = objectPath ? fs.statSync(objectPath) : null;
+      if (stat && stat.isFile() && stat.size > Number(maxBytes)) return fail(REASON.INVALID_INPUT, "too-large");
+      bytes = stat && stat.isFile() ? fs.readFileSync(objectPath) : null;
+    } catch { bytes = null; }
+    if (!bytes) return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
+    const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
+    if (buf.length > Number(maxBytes)) return fail(REASON.INVALID_INPUT, "too-large");
+    const mime = row.mime_type || "application/octet-stream";
+    return ok({ dataUrl: "data:" + mime + ";base64," + buf.toString("base64"), name: row.name, mimeType: mime, version: Number(row.version || 1) });
+  }
+
   /** D3-04D：LINKED Resource 的受控 Reveal Source（路径只在本方法内返回给主进程，绝不回 Renderer）。 */
   resolveRevealPath({ context, resourceRef } = {}) {
     this.#ensureBuiltinPolicy(context);

@@ -31,6 +31,23 @@ const DEFAULT_NAME = "我的资产库";
 const MAX_ITEMS = 1000;
 const MAX_ASSET_BYTES = 8 * 1024 * 1024;
 const ITEM_KINDS = Object.freeze(["asset", "prompt", "workflow"]);
+// task-25 A10：DX 的 visibility private|public|restricted + publicAccess read|edit + 逐成员 ACL。
+// ORGANIZATION 保留为既有兼容档（同组织只读）。
+const LIBRARY_VISIBILITIES = Object.freeze(["PRIVATE", "ORGANIZATION", "PUBLIC", "RESTRICTED"]);
+const PUBLIC_ACCESS = Object.freeze(["READ", "EDIT"]);
+const MEMBER_ROLES = Object.freeze(["read", "edit"]);
+function normalizeVisibility(value, fallback = "PRIVATE") {
+  const raw = String(value || "").trim().toUpperCase();
+  return LIBRARY_VISIBILITIES.includes(raw) ? raw : fallback;
+}
+function normalizePublicAccess(value, fallback = "READ") {
+  const raw = String(value || "").trim().toUpperCase();
+  return PUBLIC_ACCESS.includes(raw) ? raw : fallback;
+}
+function normalizeMemberRole(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  return MEMBER_ROLES.includes(raw) ? raw : null;
+}
 const PROMPT_ROLES = Object.freeze(["image-describe", "prompt-polish"]);
 
 /** 源 shared/canvasAssetLibrary.ts:7-22 的两条系统推理提示词（不可删除，只能改内容或换 Skill）。 */
@@ -107,10 +124,22 @@ class CanvasAssetLibraryService {
 
   #now() { return Number(this.clock()); }
 
-  /** 源 :263-268 的等价：owner 可编辑；组织可见库对其余成员只读。 */
+  /**
+   * task-25 A10：owner / 逐成员 / publicAccess / 组织可见四层判定。
+   * 非成员访问 restricted 返回 null（调用方回 NOT_FOUND_OR_FORBIDDEN，不泄露存在性）。
+   */
   #access(library, user) {
     if (!library) return null;
     if (library.owner_user_id === user.id) return { level: "owner", canEdit: true, canView: true };
+    const member = this.store && typeof this.store.memberOfLibrary === "function" ? this.store.memberOfLibrary(library.id, user.id) : null;
+    if (member) {
+      const role = normalizeMemberRole(member.role) || "read";
+      return { level: role === "edit" ? "edit" : "read", canEdit: role === "edit", canView: true };
+    }
+    if (library.visibility === "PUBLIC") {
+      const canEdit = normalizePublicAccess(library.public_access) === "EDIT";
+      return { level: canEdit ? "edit" : "read", canEdit, canView: true };
+    }
     if (library.visibility === "ORGANIZATION" && library.organization_id === user.team_id) return { level: "read", canEdit: false, canView: true };
     return null;
   }
@@ -134,8 +163,9 @@ class CanvasAssetLibraryService {
       organizationId: library.organization_id,
       format: library.format,
       visibility: library.visibility,
+      publicAccess: normalizePublicAccess(library.public_access),
       version: Number(library.version || 1),
-      access: access ? (access.canEdit ? "owner" : "read") : "read",
+      access: access ? (access.level === "owner" ? "owner" : access.canEdit ? "edit" : "read") : "read",
       itemCount: this.store.countItems(library.id),
       updatedAt: Number(library.updated_at || 0),
       createdAt: Number(library.created_at || 0),
@@ -194,14 +224,15 @@ class CanvasAssetLibraryService {
     return ok({ library: this.#libraryView(library, access), items: seeded.items.map((row) => this.#itemView(row)) });
   }
 
-  createLibrary({ context, name = DEFAULT_NAME, visibility = "PRIVATE" } = {}) {
+  createLibrary({ context, name = DEFAULT_NAME, visibility = "PRIVATE", publicAccess = "READ" } = {}) {
     const actor = this.#actor(context);
     if (!actor.ok) return actor;
     const library = this.store.insertLibrary({
       id: libraryId(), organizationId: actor.user.team_id, ownerUserId: actor.user.id,
       name: String(name || DEFAULT_NAME).trim().slice(0, 120) || DEFAULT_NAME,
       format: LIBRARY_FORMAT,
-      visibility: String(visibility).toUpperCase() === "ORGANIZATION" ? "ORGANIZATION" : "PRIVATE",
+      visibility: normalizeVisibility(visibility),
+      publicAccess: normalizePublicAccess(publicAccess).toLowerCase(),
     });
     const seeded = this.#seedSystemPrompts(library, actor.user.id);
     return ok({ library: this.#libraryView(library, this.#access(library, actor.user)), items: seeded.items.map((row) => this.#itemView(row)) });
@@ -212,21 +243,53 @@ class CanvasAssetLibraryService {
    * 改名 / 可见性 + version+1，走基准版本检查（store.touchLibrary 的 changes=0 即冲突）。
    * 这就是 canvas-dxos-store.cjs touchLibrary 的唯一调用点。
    */
-  updateLibrary({ context, libraryId: id, name = null, visibility = null, baseVersion = null } = {}) {
+  updateLibrary({ context, libraryId: id, name = null, visibility = null, publicAccess = null, baseVersion = null } = {}) {
     const loaded = this.#load(context, id, { needEdit: true });
     if (!loaded.ok) return loaded;
+    // 可见性 / publicAccess 是共享设置：edit 成员只能改名称与内容，不能自行放开共享范围。
+    if ((visibility != null || publicAccess != null) && loaded.access.level !== "owner") return fail("FORBIDDEN", "只有所有者可以修改共享设置");
     const current = loaded.library;
     const base = Number.isFinite(Number(baseVersion)) ? Number(baseVersion) : Number(current.version || 1);
     if (base !== Number(current.version || 1)) return fail("REVISION_CONFLICT", { baseVersion: base, currentVersion: Number(current.version || 1) });
     const nextName = name == null ? current.name : (String(name).trim().slice(0, 120) || current.name);
-    const nextVisibility = visibility == null ? current.visibility
-      : (String(visibility).toUpperCase() === "ORGANIZATION" ? "ORGANIZATION" : "PRIVATE");
-    const updated = this.store.touchLibrary({ id: current.id, name: nextName, visibility: nextVisibility, baseVersion: base });
+    const nextVisibility = visibility == null ? current.visibility : normalizeVisibility(visibility, current.visibility);
+    const nextPublicAccess = publicAccess == null ? normalizePublicAccess(current.public_access) : normalizePublicAccess(publicAccess);
+    const updated = this.store.touchLibrary({ id: current.id, name: nextName, visibility: nextVisibility, publicAccess: nextPublicAccess.toLowerCase(), baseVersion: base });
     if (!updated) return fail("REVISION_CONFLICT", { baseVersion: base, currentVersion: Number(this.store.libraryById(current.id).version || 1) });
     return ok({ library: this.#libraryView(updated, this.#access(updated, loaded.user)) });
   }
 
-  /** 源 :77-82：列举本人库 + 组织可见库；顺带补系统提示词。 */
+  /** task-25 A10：逐成员 ACL（仅 owner 可改）。 */
+  listMembers({ context, libraryId: id } = {}) {
+    const loaded = this.#load(context, id);
+    if (!loaded.ok) return loaded;
+    if (loaded.access.level !== "owner") return fail("NOT_FOUND_OR_FORBIDDEN");
+    return ok({ members: this.store.membersOfLibrary(loaded.library.id).map((row) => ({ userId: row.user_id, role: row.role, createdAt: Number(row.created_at || 0), updatedAt: Number(row.updated_at || 0) })) });
+  }
+
+  setMember({ context, libraryId: id, userId, role = "read" } = {}) {
+    const loaded = this.#load(context, id);
+    if (!loaded.ok) return loaded;
+    if (loaded.access.level !== "owner") return fail("NOT_FOUND_OR_FORBIDDEN");
+    const target = String(userId || "").trim();
+    const normalizedRole = normalizeMemberRole(role);
+    if (!target) return fail("INVALID_INPUT", "userId");
+    if (!normalizedRole) return fail("INVALID_INPUT", "role 只支持 read / edit");
+    if (target === loaded.library.owner_user_id) return fail("INVALID_INPUT", "owner 不需要成员授权");
+    const row = this.store.upsertMember({ libraryId: loaded.library.id, userId: target, role: normalizedRole });
+    return ok({ member: { userId: row.user_id, role: row.role } });
+  }
+
+  removeMember({ context, libraryId: id, userId } = {}) {
+    const loaded = this.#load(context, id);
+    if (!loaded.ok) return loaded;
+    if (loaded.access.level !== "owner") return fail("NOT_FOUND_OR_FORBIDDEN");
+    const target = String(userId || "").trim();
+    if (!target) return fail("INVALID_INPUT", "userId");
+    return ok({ removed: this.store.deleteMember({ libraryId: loaded.library.id, userId: target }) });
+  }
+
+  /** 源 :77-82：列举本人库 + 组织可见库 + 成员库；顺带补系统提示词。 */
   listLibraries({ context } = {}) {
     const actor = this.#actor(context);
     if (!actor.ok) return actor;
@@ -237,7 +300,15 @@ class CanvasAssetLibraryService {
     }
     for (const row of this.store.librariesOrg(actor.user.team_id)) {
       if (seen.has(row.id)) continue;
-      seen.set(row.id, this.#libraryView(row, this.#access(row, actor.user)));
+      const access = this.#access(row, actor.user);
+      if (!access) continue;
+      seen.set(row.id, this.#libraryView(row, access));
+    }
+    for (const row of this.store.librariesByMember(actor.user.id)) {
+      if (seen.has(row.id)) continue;
+      const access = this.#access(row, actor.user);
+      if (!access) continue;
+      seen.set(row.id, this.#libraryView(row, access));
     }
     return ok({ libraries: [...seen.values()].sort((a, b) => b.updatedAt - a.updatedAt) });
   }
@@ -450,6 +521,12 @@ class CanvasAssetLibraryService {
         return fail("INVALID_INPUT", "封面仅支持 PNG、JPEG 或 WebP");
       }
     }
+    let workflow = kind === "workflow" ? item.workflow : undefined;
+    if (kind === "workflow" && item.workflow != null) {
+      const materialized = await this.#materializeWorkflowMedia({ context, user: loaded.user, workflow: item.workflow });
+      if (!materialized.ok) return materialized;
+      workflow = materialized.workflow;
+    }
     const payload = {
       kind, title, prompt, coverRef,
       group: kind === "asset" ? clampText(item.group, 40) : null,
@@ -459,7 +536,7 @@ class CanvasAssetLibraryService {
       sourceKey: kind === "prompt" ? requestedKey : null,
       tags, skillId: kind === "prompt" ? clampText(item.skillId, 160) : null,
       promptRole, mediaKind: kind === "prompt" ? (item.mediaKind === "video" ? "video" : "image") : null,
-      workflow: kind === "workflow" ? item.workflow : undefined,
+      workflow,
       versions,
     };
     if (!previous && this.store.countItems(loaded.library.id) >= MAX_ITEMS) return fail("LIMIT_EXCEEDED", "items");
@@ -625,6 +702,124 @@ class CanvasAssetLibraryService {
     const imported = await this.#importManagedFile({ context, buffer, name: (title || "模板封面") + "." + extension, mime: match[1] });
     if (!imported.ok) return imported;
     return ok({ resourceRef: imported.resourceRef });
+  }
+
+  /**
+   * task-25 A07：workflow 内媒体递归复制（源 canvasAssetLibrary.ts:113-143 materializeWorkflowMedia）。
+   * data: 媒体 / 已有 ResourceRef / nodeId 三类递归处理；任一无权限整单拒绝；返回新对象不改入参。
+   */
+  async #materializeWorkflowMedia({ context, user, workflow }) {
+    let source;
+    try { source = JSON.parse(JSON.stringify(workflow)); }
+    catch { return fail("INVALID_INPUT", "workflow-not-json"); }
+    if (!source || typeof source !== "object") return fail("INVALID_INPUT", "workflow-not-object");
+    let mediaCount = 0;
+    const refCache = new Map();
+    const importDataUrl = async (dataUrl, name) => {
+      const match = /^data:((?:image|audio|video)\/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+      if (!match) return fail("INVALID_INPUT", "workflow-media-data-url");
+      const buffer = Buffer.from(match[2], "base64");
+      if (!buffer.length || buffer.length > 12 * 1024 * 1024) return fail("LIMIT_EXCEEDED", "workflow-media-too-large");
+      const ext = match[1] === "image/png" ? "png" : match[1] === "image/webp" ? "webp" : match[1] === "image/jpeg" ? "jpg" : match[1].startsWith("audio/") ? "m4a" : "mp4";
+      const imported = await this.#importManagedFile({ context, buffer, name: (name || "workflow-media") + "." + ext, mime: match[1] });
+      return imported.ok ? ok({ ref: "openarc-asset:" + imported.resourceRef }) : imported;
+    };
+    const importRef = async (ref) => {
+      if (refCache.has(ref)) return refCache.get(ref);
+      const resourceId = String(ref).replace(/^(?:openarc-asset:|resource:\/\/)/, "");
+      if (!this.resourceService || typeof this.resourceService.readDataUrl !== "function") return fail("RESOURCE_UNAVAILABLE");
+      const data = this.resourceService.readDataUrl({ context: { ...context, appId: "resource-library" }, resourceRef: resourceId });
+      if (!data || !data.ok) return fail("FORBIDDEN", "workflow-media-forbidden");
+      const imported = await importDataUrl(data.dataUrl, "workflow-media");
+      if (!imported || !imported.ok) return imported || fail("IMPORT_FAILED");
+      refCache.set(ref, imported);
+      return imported;
+    };
+    const rewriteUrlFields = (object, ref) => {
+      for (const key of ["url", "src", "image", "imageUrl", "video", "audio", "path"]) {
+        if (typeof object[key] === "string" && /^(?:data:|openarc-asset:|resource:\/\/)/.test(object[key])) object[key] = ref;
+      }
+      object.resourceRef = ref;
+    };
+    const walk = async (node, seen) => {
+      if (node == null) return ok();
+      if (typeof node === "string") {
+        if (/^data:/.test(node)) {
+          mediaCount += 1;
+          if (mediaCount > 32) return fail("LIMIT_EXCEEDED", "workflow-media-count");
+          const imported = await importDataUrl(node, "workflow-media");
+          return imported;
+        }
+        if (/^(?:openarc-asset:|resource:\/\/)/.test(node)) {
+          mediaCount += 1;
+          if (mediaCount > 32) return fail("LIMIT_EXCEEDED", "workflow-media-count");
+          return importRef(node);
+        }
+        return ok();
+      }
+      if (typeof node !== "object") return ok();
+      if (seen.has(node)) return fail("INVALID_INPUT", "workflow-circular");
+      seen.add(node);
+      if (Array.isArray(node)) {
+        for (let i = 0; i < node.length; i += 1) {
+          const item = node[i];
+          if (typeof item === "string" && /^data:/.test(item)) {
+            mediaCount += 1;
+            if (mediaCount > 32) return fail("LIMIT_EXCEEDED", "workflow-media-count");
+            const imported = await importDataUrl(item, "workflow-media");
+            if (!imported.ok) return imported;
+            node[i] = imported.ref;
+            continue;
+          }
+          if (typeof item === "string" && /^(?:openarc-asset:|resource:\/\/)/.test(item)) {
+            mediaCount += 1;
+            if (mediaCount > 32) return fail("LIMIT_EXCEEDED", "workflow-media-count");
+            const imported = await importRef(item);
+            if (!imported.ok) return imported;
+            node[i] = imported.ref;
+            continue;
+          }
+          const nested = await walk(item, seen);
+          if (!nested.ok) return nested;
+        }
+        seen.delete(node);
+        return ok();
+      }
+      const nodeId = typeof node.nodeId === "string" ? node.nodeId : typeof node.sourceNodeId === "string" ? node.sourceNodeId : "";
+      if (nodeId && !/^(?:data:|openarc-asset:|resource:\/\/)/.test(nodeId)) {
+        mediaCount += 1;
+        if (mediaCount > 32) return fail("LIMIT_EXCEEDED", "workflow-media-count");
+        const resolved = await this.#resolveSourceNode({ context, user, sourceNodeId: nodeId });
+        if (!resolved.ok) return resolved;
+        rewriteUrlFields(node, "openarc-asset:" + resolved.resourceRef);
+      }
+      for (const [key, value] of Object.entries(node)) {
+        if (key === "resourceRef" || key === "nodeId" || key === "sourceNodeId") continue;
+        if (typeof value === "string" && /^data:/.test(value)) {
+          mediaCount += 1;
+          if (mediaCount > 32) return fail("LIMIT_EXCEEDED", "workflow-media-count");
+          const imported = await importDataUrl(value, "workflow-media");
+          if (!imported.ok) return imported;
+          node[key] = imported.ref;
+          continue;
+        }
+        if (typeof value === "string" && /^(?:openarc-asset:|resource:\/\/)/.test(value)) {
+          mediaCount += 1;
+          if (mediaCount > 32) return fail("LIMIT_EXCEEDED", "workflow-media-count");
+          const imported = await importRef(value);
+          if (!imported.ok) return imported;
+          node[key] = imported.ref;
+          continue;
+        }
+        const nested = await walk(value, seen);
+        if (!nested.ok) return nested;
+      }
+      seen.delete(node);
+      return ok();
+    };
+    const walked = await walk(source, new Set());
+    if (!walked.ok) return walked;
+    return ok({ workflow: source, mediaCount });
   }
 
   listItems({ context, libraryId: id, kind = null, query = "" } = {}) {

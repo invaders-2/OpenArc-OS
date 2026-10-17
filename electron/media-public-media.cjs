@@ -113,8 +113,53 @@ function resolvePublicMediaPath(fileName, options) {
   return resolved;
 }
 
+/**
+ * task-25 B16：远端抓取 / 上传只经**显式注入**，默认无网络。
+ *   · fetchImpl 必须由宿主注入；allowedHosts 必须是显式 https 白名单（不做"任意公网"）。
+ *   · 响应 ≤ 20MB，落本地 public-media 目录，文件名由 sha256 生成，绝不回绝对路径。
+ *   · uploader 必须由宿主注入；本模块不内置 Litterbox / 任何图床地址。
+ */
+async function fetchPublicMedia({ url, fetchImpl = null, allowedHosts = [], maxBytes = 20 * 1024 * 1024 } = {}, options) {
+  const opts = effective(options);
+  const fetcher = fetchImpl || opts.fetchImpl;
+  if (typeof fetcher !== "function") throw createMediaError(MEDIA_ERR_DEPENDENCY_UNAVAILABLE, "远端抓取未注入 fetchImpl", "缺少 fetchImpl：由宿主显式注入后重试（默认不联网）。");
+  let parsed;
+  try { parsed = new URL(String(url || "")); } catch { throw createMediaError(MEDIA_ERR_INVALID_INPUT, "公共媒体 URL 无效"); }
+  if (parsed.protocol !== "https:") throw createMediaError(MEDIA_ERR_INVALID_INPUT, "公共媒体只允许 https");
+  const hosts = (Array.isArray(allowedHosts) && allowedHosts.length ? allowedHosts : opts.allowedHosts || []).map((host) => String(host).toLowerCase());
+  if (!hosts.length) throw createMediaError(MEDIA_ERR_DEPENDENCY_UNAVAILABLE, "远端抓取未配置 allowedHosts", "空白名单即拒绝，绝不默认放开公网。");
+  if (!hosts.includes(parsed.hostname.toLowerCase())) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "公共媒体主机不在白名单");
+  const response = await fetcher(parsed.toString(), { method: "GET", redirect: "error" });
+  if (!response || !response.ok) throw createMediaError(MEDIA_ERR_NOT_FOUND, "远端公共媒体抓取失败");
+  const length = Number(response.headers && typeof response.headers.get === "function" ? response.headers.get("content-length") : 0);
+  if (Number.isFinite(length) && length > maxBytes) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "公共媒体超过大小上限");
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (!bytes.length || bytes.length > maxBytes) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "公共媒体为空或超过大小上限");
+  const mime = String(response.headers && typeof response.headers.get === "function" ? response.headers.get("content-type") : "application/octet-stream").split(";")[0].trim() || "application/octet-stream";
+  if (!/^(image|video|audio)\//.test(mime)) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "公共媒体只接受图片/音频/视频");
+  const ext = mime === "image/png" ? ".png" : mime === "image/jpeg" ? ".jpg" : mime === "image/webp" ? ".webp" : mime.startsWith("video/") ? ".mp4" : mime.startsWith("audio/") ? ".m4a" : ".bin";
+  const name = require("node:crypto").createHash("sha256").update(bytes).digest("hex") + ext;
+  const dir = publicMediaDir(opts);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, name), bytes);
+  return { id: name, fileName: name, bytes: bytes.length, mime, url: publicMediaUrl(name), fetchedFrom: parsed.hostname };
+}
+
+async function uploadPublicMedia({ fileName, uploader = null } = {}, options) {
+  const opts = effective(options);
+  const impl = uploader || opts.uploader;
+  if (typeof impl !== "function") throw createMediaError(MEDIA_ERR_DEPENDENCY_UNAVAILABLE, "公共媒体上传未注入 uploader", "缺少 uploader：由宿主显式注入后重试（本模块不内置外部图床）。");
+  const full = resolvePublicMediaPath(fileName, opts);
+  const bytes = fs.readFileSync(full);
+  const result = await impl({ fileName: path.basename(full), bytes, mime: "application/octet-stream" });
+  if (!result || !result.url) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "上传器未返回 URL");
+  return { fileName: path.basename(full), url: String(result.url), bytes: bytes.length };
+}
+
 module.exports = {
   PUBLIC_MEDIA_UPLOAD_REMOVED,
+  fetchPublicMedia,
+  uploadPublicMedia,
   configurePublicMedia,
   publicMediaDir,
   normalizePublicImageForApimartVideo,

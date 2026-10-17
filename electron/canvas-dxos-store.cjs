@@ -13,11 +13,18 @@ const { ensureCanvasDxosSchema } = require("./canvas-dxos-schema.cjs");
 const SQL = {
   // ---- 素材库 ----
   insertLibrary:
-    "INSERT INTO canvas_dxos_asset_libraries (id, organization_id, owner_user_id, name, format, visibility, version, deleted_at, created_at, updated_at) VALUES (?,?,?,?,?,?,?,NULL,?,?)",
+    "INSERT INTO canvas_dxos_asset_libraries (id, organization_id, owner_user_id, name, format, visibility, public_access, version, deleted_at, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,NULL,?,?)",
   libraryById: "SELECT * FROM canvas_dxos_asset_libraries WHERE id = ?",
   librariesOwned: "SELECT * FROM canvas_dxos_asset_libraries WHERE owner_user_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC, id",
-  librariesOrg: "SELECT * FROM canvas_dxos_asset_libraries WHERE organization_id = ? AND visibility = 'ORGANIZATION' AND deleted_at IS NULL ORDER BY updated_at DESC, id",
-  touchLibrary: "UPDATE canvas_dxos_asset_libraries SET name = ?, visibility = ?, version = version + 1, updated_at = ? WHERE id = ? AND version = ?",
+  librariesOrg: "SELECT * FROM canvas_dxos_asset_libraries WHERE organization_id = ? AND visibility IN ('ORGANIZATION','PUBLIC') AND deleted_at IS NULL ORDER BY updated_at DESC, id",
+  librariesByMember:
+    "SELECT l.* FROM canvas_dxos_asset_libraries l JOIN canvas_dxos_asset_library_members m ON m.library_id = l.id WHERE m.user_id = ? AND l.deleted_at IS NULL ORDER BY l.updated_at DESC, l.id",
+  touchLibrary: "UPDATE canvas_dxos_asset_libraries SET name = ?, visibility = ?, public_access = ?, version = version + 1, updated_at = ? WHERE id = ? AND version = ?",
+  memberOfLibrary: "SELECT * FROM canvas_dxos_asset_library_members WHERE library_id = ? AND user_id = ?",
+  membersOfLibrary: "SELECT * FROM canvas_dxos_asset_library_members WHERE library_id = ? ORDER BY role, user_id",
+  upsertMember: "INSERT INTO canvas_dxos_asset_library_members (library_id, user_id, role, created_at, updated_at) VALUES (?,?,?,?,?) ON CONFLICT(library_id, user_id) DO UPDATE SET role = excluded.role, updated_at = excluded.updated_at",
+  deleteMember: "DELETE FROM canvas_dxos_asset_library_members WHERE library_id = ? AND user_id = ?",
+  deleteMembersOfLibrary: "DELETE FROM canvas_dxos_asset_library_members WHERE library_id = ?",
   softDeleteLibrary: "UPDATE canvas_dxos_asset_libraries SET deleted_at = ?, updated_at = ? WHERE id = ?",
   restoreLibrary: "UPDATE canvas_dxos_asset_libraries SET deleted_at = NULL, updated_at = ? WHERE id = ?",
   purgeLibrary: "DELETE FROM canvas_dxos_asset_libraries WHERE id = ?",
@@ -68,23 +75,33 @@ class CanvasDxosStore {
 
   // -------------------------------------------------------------- 素材库
 
-  insertLibrary({ id, organizationId, ownerUserId, name, format, visibility = "PRIVATE" }) {
+  insertLibrary({ id, organizationId, ownerUserId, name, format, visibility = "PRIVATE", publicAccess = "read" }) {
     const now = this.now();
-    this.db.prepare(SQL.insertLibrary).run(String(id), String(organizationId), String(ownerUserId), String(name), String(format), String(visibility), 1, now, now);
+    this.db.prepare(SQL.insertLibrary).run(String(id), String(organizationId), String(ownerUserId), String(name), String(format), String(visibility), String(publicAccess), 1, now, now);
     return this.libraryById(id);
   }
   libraryById(id) { return this.db.prepare(SQL.libraryById).get(String(id || "")) || null; }
   librariesOwned(userId) { return this.db.prepare(SQL.librariesOwned).all(String(userId)); }
   librariesOrg(organizationId) { return this.db.prepare(SQL.librariesOrg).all(String(organizationId)); }
+  librariesByMember(userId) { return this.db.prepare(SQL.librariesByMember).all(String(userId)); }
 
   /** 基准版本检查写（与 canvas-store.updateDoc 同一纪律：changes=0 即冲突，返回 null）。 */
-  touchLibrary({ id, name, visibility, baseVersion }) {
-    const result = this.db.prepare(SQL.touchLibrary).run(String(name), String(visibility), this.now(), String(id), Number(baseVersion));
+  touchLibrary({ id, name, visibility, publicAccess, baseVersion }) {
+    const result = this.db.prepare(SQL.touchLibrary).run(String(name), String(visibility), String(publicAccess), this.now(), String(id), Number(baseVersion));
     return Number(result.changes) > 0 ? this.libraryById(id) : null;
   }
+
+  memberOfLibrary(libraryId, userId) { return this.db.prepare(SQL.memberOfLibrary).get(String(libraryId), String(userId)) || null; }
+  membersOfLibrary(libraryId) { return this.db.prepare(SQL.membersOfLibrary).all(String(libraryId)); }
+  upsertMember({ libraryId, userId, role }) {
+    const now = this.now();
+    this.db.prepare(SQL.upsertMember).run(String(libraryId), String(userId), String(role), now, now);
+    return this.memberOfLibrary(libraryId, userId);
+  }
+  deleteMember({ libraryId, userId }) { return this.db.prepare(SQL.deleteMember).run(String(libraryId), String(userId)).changes > 0; }
   softDeleteLibrary({ id }) { this.db.prepare(SQL.softDeleteLibrary).run(this.now(), this.now(), String(id)); return this.libraryById(id); }
   restoreLibrary({ id }) { this.db.prepare(SQL.restoreLibrary).run(this.now(), String(id)); return this.libraryById(id); }
-  purgeLibrary({ id }) { this.transactSync(() => { this.db.prepare(SQL.deleteItemsOfLibrary).run(String(id)); this.db.prepare(SQL.purgeLibrary).run(String(id)); }); return true; }
+  purgeLibrary({ id }) { this.transactSync(() => { this.db.prepare(SQL.deleteItemsOfLibrary).run(String(id)); this.db.prepare(SQL.deleteMembersOfLibrary).run(String(id)); this.db.prepare(SQL.purgeLibrary).run(String(id)); }); return true; }
 
   // -------------------------------------------------------------- 素材条目
 

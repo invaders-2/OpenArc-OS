@@ -139,6 +139,7 @@ const { applyWindowCommandBatch } = require("./window-command-ipc.cjs");
 // 0.6.2 · 三个新域接线（photos / photocraft / app-exchange）：bootstrap 只承担 trusted 边界 + 命令白名单，
 //   装配参数由本文件注入（与 0.6.1 五域同一接线口径）；命令表本身即白名单，未登记命令一律 *_COMMAND_NOT_ALLOWED。
 const { createPhotosBundle } = require("./photos-service.cjs");
+const { createPhotosShareAccess } = require("./photos-share-access.cjs");
 const { registerPhotosIpc } = require("./photos-bootstrap.cjs");
 const { createPhotocraftBundle } = require("./photocraft-service.cjs");
 const { registerPhotocraftIpc } = require("./photocraft-bootstrap.cjs");
@@ -1597,9 +1598,12 @@ app.whenReady().then(async () => {
           db: identity.store.connection,
           providerStore: providerProtocol ? providerProtocol.store : null,
           fsImpl: dxosFsAdapter,
-          // shareAccess：本仓没有以 (user, share) 为形状的独立共享判定服务；传 null 由
-          // photos-service 的 defaultShareAccess 兜底（public / department: 两态），不新造一套。
-          shareAccess: null,
+          // task-25 B02：shareZoneOf → canSeeShare 的等价判定；canvas: / asset-library: 两区
+          // 分别复用 board 共享与素材库 ACL，不新造第二套权限模型。
+          shareAccess: createPhotosShareAccess({
+            canvasStore: identity.canvasDocService && identity.canvasDocService.store ? identity.canvasDocService.store : null,
+            assetLibraryStore: identity.canvasDxosStore || null,
+          }),
           // videoPoster：本仓不自带 ffmpeg 封面缓存，视频缩略图保持结构化依赖缺失。
           videoPoster: null,
           // importer：canvas 落点走 canvas-service.importAsset（字节进资源域）+ canvas-domain 的

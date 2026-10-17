@@ -53,6 +53,15 @@ const SQL = {
   insertRunResult:
     "INSERT INTO canvas_run_facts (run_id, canvas_id, node_id, result_json, result_status, stop_reason, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(run_id) DO UPDATE SET result_json = excluded.result_json, result_status = excluded.result_status, stop_reason = excluded.stop_reason, updated_at = excluded.updated_at WHERE result_json IS NULL",
   runFactById: "SELECT * FROM canvas_run_facts WHERE run_id = ?",
+  // task-25 A20：DX 协议任务三元组写入（表由 dxos-foundation-schema 建好）。
+  insertProtocolTask:
+    "INSERT INTO ai_protocol_tasks (id, surface, owner_id, canvas_id, provider_site_id, model_id, base_url, status, mode, executor_type, executor_adapter, request_json, plan_json, plan_hash, provider_protocol_id, provider_protocol_version, provider_protocol_hash, model_protocol_id, model_protocol_version, model_protocol_hash, profile_id, intent, remote_task_id, result_json, error_message, workflow_state_json, next_poll_at, poll_attempt, created_at, updated_at, started_at, completed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+  updateProtocolTask:
+    "UPDATE ai_protocol_tasks SET status = ?, result_json = ?, error_message = ?, workflow_state_json = ?, updated_at = ?, completed_at = ? WHERE id = ?",
+  insertProtocolTaskEvent: "INSERT INTO ai_protocol_task_events (task_id, sequence, type, data_json, created_at) VALUES (?,?,?,?,?)",
+  nextProtocolTaskEventSequence: "SELECT COALESCE(MAX(sequence), 0) + 1 AS seq FROM ai_protocol_task_events WHERE task_id = ?",
+  protocolTaskById: "SELECT * FROM ai_protocol_tasks WHERE id = ?",
+  protocolTasksByCanvas: "SELECT * FROM ai_protocol_tasks WHERE canvas_id = ? ORDER BY created_at DESC, id LIMIT ?",
   // ---- 邀请码（canvas_invites 只存 sha256(code)，明文只在创建响应里出现一次）----
   revokeInvitesOfCanvas: "UPDATE canvas_invites SET revoked_at = ? WHERE canvas_id = ? AND revoked_at IS NULL",
   insertInvite: "INSERT INTO canvas_invites (id, canvas_id, code_hash, code_hint, permission, created_by, created_at) VALUES (?,?,?,?,?,?,?)",
@@ -194,6 +203,35 @@ class CanvasStore {
     return this.runFactById(runId);
   }
   runFactById(runId) { return this.db.prepare(SQL.runFactById).get(String(runId || "")) || null; }
+
+  // ---- task-25 A20：协议任务三元组（ai_protocol_tasks） ----
+  insertProtocolTask(row) {
+    const now = this.now();
+    this.db.prepare(SQL.insertProtocolTask).run(
+      String(row.id), String(row.surface || "canvas"), row.ownerId == null ? null : String(row.ownerId), String(row.canvasId),
+      row.providerSiteId == null ? null : String(row.providerSiteId), row.modelId == null ? null : String(row.modelId), row.baseUrl == null ? null : String(row.baseUrl),
+      String(row.status || "RUNNING"), String(row.mode || "generate"), String(row.executorType || "canvas-host"), row.executorAdapter == null ? null : String(row.executorAdapter),
+      String(row.requestJson || "{}"), String(row.planJson || "{}"), String(row.planHash || ""),
+      String(row.providerProtocolId || "canvas-host"), Number(row.providerProtocolVersion) || 1, String(row.providerProtocolHash || "canvas-host-v1"),
+      String(row.modelProtocolId || "canvas-model"), Number(row.modelProtocolVersion) || 1, String(row.modelProtocolHash || "canvas-model-v1"),
+      String(row.profileId || "canvas-default"), String(row.intent || row.mode || "generate"), row.remoteTaskId == null ? null : String(row.remoteTaskId),
+      row.resultJson == null ? null : String(row.resultJson), row.errorMessage == null ? null : String(row.errorMessage), row.workflowStateJson == null ? null : String(row.workflowStateJson),
+      row.nextPollAt == null ? null : Number(row.nextPollAt), Number(row.pollAttempt) || 0, now, now, row.status === "RUNNING" ? now : null, row.completedAt == null ? null : Number(row.completedAt),
+    );
+    return this.protocolTaskById(row.id);
+  }
+  updateProtocolTask({ id, status, resultJson = null, errorMessage = null, workflowStateJson = null, completedAt = null }) {
+    const now = this.now();
+    this.db.prepare(SQL.updateProtocolTask).run(String(status), resultJson == null ? null : JSON.stringify(resultJson), errorMessage == null ? null : String(errorMessage), workflowStateJson == null ? null : JSON.stringify(workflowStateJson), now, completedAt == null ? now : Number(completedAt), String(id));
+    return this.protocolTaskById(id);
+  }
+  appendProtocolTaskEvent({ taskId, type, data = null }) {
+    const seq = Number(this.db.prepare(SQL.nextProtocolTaskEventSequence).get(String(taskId)).seq) || 1;
+    this.db.prepare(SQL.insertProtocolTaskEvent).run(String(taskId), seq, String(type), JSON.stringify(data == null ? {} : data), this.now());
+    return { taskId, sequence: seq, type: String(type) };
+  }
+  protocolTaskById(id) { return this.db.prepare(SQL.protocolTaskById).get(String(id || "")) || null; }
+  protocolTasksByCanvas(canvasId, limit = 50) { return this.db.prepare(SQL.protocolTasksByCanvas).all(String(canvasId), Number(limit) || 50); }
   /** 目标已不存在时把结果留档：写一次为准（幂等）。 */
   recordRunResult({ runId, canvasId, nodeId = null, result = null, status = "RESULT_STORED", stopReason = null }) {
     const now = this.now();

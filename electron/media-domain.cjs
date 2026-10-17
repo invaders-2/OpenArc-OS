@@ -89,6 +89,8 @@ const MEDIA_COMMANDS = Object.freeze({
   "media/timeline/validate": { risk: "read", credential: false, summary: "校验多轨时间线并做时长对齐（视频/音频/字幕轨、片段入出点、转场）" },
   "media/render/plan": { risk: "read", credential: false, summary: "编译多轨渲染计划预览（输入/轨道/转场/对齐后时长，不含磁盘路径）" },
   "media/rough-cut": { risk: "use", credential: false, summary: "Agent 粗剪入口：把指令 + 素材交给注入的脚本/模型适配器生成多轨时间线（缺依赖结构化不可用）" },
+  "media/audio/extract": { risk: "use", credential: false, summary: "从视频/音频素材抽取 AAC 音频（M4A，落媒体库音频目录）" },
+  "media/audio/trim": { risk: "use", credential: false, summary: "按 startMs/durationMs 裁剪音频（M4A，落媒体库音频目录）" },
   "media/render/submit": { risk: "manage", credential: false, summary: "提交视频渲染任务（编译渲染计划，入队等待执行）" },
   "media/render/get": { risk: "read", credential: false, summary: "查询单个渲染任务的状态 / 进度 / 结构化错误" },
   "media/render/list": { risk: "read", credential: false, summary: "列出渲染任务（按项目 / 状态过滤）" },
@@ -155,6 +157,8 @@ const MEDIA_COMMANDS = Object.freeze({
   "media/public-media/list": { risk: "read", credential: false, summary: "列出本地公共媒体文件及其相对 URL" },
   "media/public-media/url": { risk: "read", credential: false, summary: "把本地公共媒体文件名映射为相对 URL（拒绝路径穿越）" },
   "media/public-media/normalize": { risk: "use", credential: false, summary: "把参考图本地转为 APIMART 兼容 JPEG（sharp 缺失即结构化不可用）" },
+  "media/public-media/fetch": { risk: "use", credential: false, summary: "经注入 fetchImpl + https 主机白名单抓取远端公共媒体（默认不联网）" },
+  "media/public-media/upload": { risk: "manage", credential: false, summary: "经注入 uploader 上传本地公共媒体（不内置外部图床）" },
 });
 
 /** 风险等级序（数值越大越危险）；UI 排序 / 审批阈值使用。 */

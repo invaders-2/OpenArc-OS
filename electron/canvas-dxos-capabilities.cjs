@@ -53,6 +53,40 @@ const STATIC_TOOLS = Object.freeze([
   { name: "canvas.agent_attachments.unmount", title: "卸载 Agent 附件", summary: "从画布移除附件节点并标记卸载（资源本身保留）。", command: "canvas/agentAttachments/unmount", profile: remove, commandType: null },
 ]);
 
+/**
+ * task-25 A17：DX canvasKernelCapabilities 14 个客户端工具 → 本仓真实能力映射。
+ * 不伪造不存在的动态节点枚举/工作流执行：没有对应命令的显式标 unsupported。
+ */
+const DX_CANVAS_TOOL_ALIASES = Object.freeze([
+  { dxName: "canvas_create_node", openarcTools: ["canvas.create_node"], status: "mapped" },
+  { dxName: "canvas_operate_node", openarcTools: ["canvas.edit_node"], status: "partial" },
+  { dxName: "canvas_execute_node", openarcTools: ["canvas.run_generation"], status: "partial" },
+  { dxName: "canvas_run_workflow", openarcTools: [], status: "unsupported" },
+  { dxName: "canvas_compose_workflow", openarcTools: [], status: "unsupported" },
+  { dxName: "canvas_rename_node", openarcTools: ["canvas.edit_node"], status: "mapped" },
+  { dxName: "canvas_move_node", openarcTools: ["canvas.move_node"], status: "mapped" },
+  { dxName: "canvas_resize_node", openarcTools: ["canvas.edit_node"], status: "partial" },
+  { dxName: "canvas_group_nodes", openarcTools: ["canvas.group_nodes"], status: "mapped" },
+  { dxName: "canvas_ungroup_nodes", openarcTools: [], status: "unsupported" },
+  { dxName: "canvas_connect_nodes", openarcTools: ["canvas.connect_nodes"], status: "mapped" },
+  { dxName: "canvas_disconnect_nodes", openarcTools: ["canvas.disconnect_nodes"], status: "mapped" },
+  { dxName: "canvas_delete_nodes", openarcTools: ["canvas.delete_nodes"], status: "mapped" },
+  { dxName: "canvas_arrange", openarcTools: [], status: "unsupported" },
+]);
+
+function dxToolsFor(toolName) {
+  return DX_CANVAS_TOOL_ALIASES.filter((alias) => alias.openarcTools.includes(toolName)).map((alias) => ({ dxName: alias.dxName, status: alias.status }));
+}
+
+function buildDxToolCoverage(capabilities) {
+  const available = new Set((Array.isArray(capabilities) ? capabilities : []).map((capability) => capability.name));
+  return DX_CANVAS_TOOL_ALIASES.map((alias) => ({
+    dxName: alias.dxName,
+    status: alias.status,
+    openarcTools: alias.openarcTools.map((name) => ({ name, available: available.has(name.replace(/\./g, "_")) })),
+  }));
+}
+
 function schemaForTool(tool, nodeTypes) {
   switch (tool.name) {
     case "canvas.read":
@@ -123,6 +157,7 @@ function capabilityDescriptor(tool, { nodeTypes }) {
     inputSchema: schemaForTool(tool, nodeTypes),
     requiredContext: ["app.canvas.current"],
     handler: { type: "client", command: tool.command, commandType: tool.commandType || null },
+    dxTools: dxToolsFor(tool.name),
   };
 }
 
@@ -139,6 +174,7 @@ function buildCanvasKernelCapabilities({ nodeTypes = [], extraTools = [] } = {})
     nodeTypes: types,
     agentCommands: [...domain.AGENT_COMMANDS].sort(),
     capabilities: tools.map((tool) => capabilityDescriptor(tool, { nodeTypes: types })),
+    dxToolCoverage: buildDxToolCoverage(tools.map((tool) => capabilityDescriptor(tool, { nodeTypes: types }))),
   };
 }
 
@@ -175,6 +211,6 @@ function buildCanvasCatalogSource({ nodeTypes = [], extraTools = [] } = {}) {
 }
 
 module.exports = {
-  FORMAT, SOURCE_ID, STATIC_TOOLS,
-  buildCanvasKernelCapabilities, toCatalogDescriptors, buildCanvasCatalogSource, capabilityDescriptor,
+  FORMAT, SOURCE_ID, STATIC_TOOLS, DX_CANVAS_TOOL_ALIASES,
+  buildCanvasKernelCapabilities, toCatalogDescriptors, buildCanvasCatalogSource, capabilityDescriptor, buildDxToolCoverage,
 };

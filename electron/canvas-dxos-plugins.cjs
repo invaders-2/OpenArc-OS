@@ -24,7 +24,7 @@ const ACTIONS = Object.freeze(["list", "get", "set", "delete"]);
 const ok = (extra = {}) => ({ ok: true, ...extra });
 const fail = (error, detail = null) => ({ ok: false, error: String(error), detail });
 
-function createCanvasPluginHost({ developerStore = null, developerService = null, dataRoot = null, clock = null } = {}) {
+function createCanvasPluginHost({ developerStore = null, developerService = null, dataRoot = null, clock = null, pluginExecutor = null } = {}) {
   if (!developerStore || typeof developerStore.currentRelease !== "function" || typeof developerStore.readRelease !== "function") {
     throw new Error("createCanvasPluginHost 需要 developerStore");
   }
@@ -151,7 +151,90 @@ function createCanvasPluginHost({ developerStore = null, developerService = null
     return ok({ response: result.value });
   }
 
-  return Object.freeze({ data, network, policyOf });
+  // -------------------------------------------------------------------------
+  // task-25 A15：插件运行期注册表（registry.json + tombstone）与 execute 分派
+  // -------------------------------------------------------------------------
+  const registryFile = path.join(path.resolve(String(dataRoot), DATA_DIR_NAME), "registry.json");
+
+  function readRegistry() {
+    try { return JSON.parse(fs.readFileSync(registryFile, "utf8")); }
+    catch { return { version: 1, updatedAt: 0, plugins: [], tombstones: [] }; }
+  }
+
+  function rebuildRegistry(userId) {
+    const current = readRegistry();
+    const previous = new Map((current.plugins || []).map((entry) => [entry.pluginId, entry]));
+    const seen = new Set();
+    const plugins = [];
+    let installed = [];
+    try { installed = developerStore.listInstalled(userId) || []; } catch { installed = []; }
+    for (const item of installed) {
+      const id = String(item && (item.appId || item.id) || "");
+      if (!PLUGIN_ID_RE.test(id) || item.enabled === false) continue;
+      const release = developerStore.currentRelease(id);
+      if (!release) continue;
+      let read;
+      try { read = developerStore.readRelease(id, release.packagePath); } catch { continue; }
+      const manifest = read && read.manifest ? read.manifest : null;
+      if (!manifest || !manifest.canvas) continue;
+      const sourceDir = path.resolve(String(dataRoot), String(release.packagePath || ""));
+      const nodeTypes = [];
+      const templates = [];
+      for (const relative of Array.isArray(manifest.canvas.nodeManifests) ? manifest.canvas.nodeManifests : []) {
+        let parsed;
+        try { parsed = JSON.parse(fs.readFileSync(path.join(sourceDir, relative), "utf8")); } catch { continue; }
+        for (const node of Array.isArray(parsed.nodes) ? parsed.nodes : []) {
+          const type = String((node && (node.nodeType || node.type)) || "").trim();
+          if (type) nodeTypes.push({ type, title: String(node.title || type), manifest: relative });
+        }
+      }
+      for (const relative of Array.isArray(manifest.canvas.templateManifests) ? manifest.canvas.templateManifests : []) {
+        let parsed;
+        try { parsed = JSON.parse(fs.readFileSync(path.join(sourceDir, relative), "utf8")); } catch { continue; }
+        for (const template of Array.isArray(parsed.templates) ? parsed.templates : []) {
+          const id = String((template && (template.id || template.templateId)) || "").trim();
+          if (id) templates.push({ id, title: String(template.title || id), manifest: relative });
+        }
+      }
+      if (!nodeTypes.length && !templates.length) continue;
+      seen.add(id);
+      plugins.push({ pluginId: id, appId: id, version: String(release.version || ""), nodeTypes, templates, updatedAt: now() });
+    }
+    const tombstones = [];
+    for (const entry of previous.values()) if (!seen.has(entry.pluginId) && !(current.tombstones || []).some((t) => t.pluginId === entry.pluginId)) tombstones.push({ pluginId: entry.pluginId, removedAt: now() });
+    tombstones.push(...(current.tombstones || []));
+    const next = { version: 1, updatedAt: now(), plugins, tombstones };
+    try {
+      fs.mkdirSync(path.dirname(registryFile), { recursive: true });
+      const temporary = registryFile + "." + process.pid + ".tmp";
+      fs.writeFileSync(temporary, JSON.stringify(next, null, 2));
+      fs.renameSync(temporary, registryFile);
+    } catch (error) { return fail("INTERNAL_ERROR", String((error && error.message) || error)); }
+    return ok({ registry: next });
+  }
+
+  function registry({ rebuild = false, userId = null } = {}) {
+    if (rebuild) { const rebuilt = rebuildRegistry(userId); if (!rebuilt.ok) return rebuilt; }
+    return ok({ registry: readRegistry() });
+  }
+
+  async function execute({ userId, pluginId, executorType = "workflow", action = "execute", input = null } = {}) {
+    const auth = policyOf(userId, pluginId);
+    if (!auth.ok) return auth;
+    const kind = String(executorType || "workflow").toLowerCase();
+    if (kind === "builtin") return fail("FORBIDDEN", "builtin 执行器不可由插件调用");
+    if (kind === "app-bridge" || kind === "app_bridge") return fail("CONFLICT", "app-bridge 执行器不可用");
+    if (!["skill", "mcp-tool", "mcp_tool", "agent-tool", "agent_tool", "workflow"].includes(kind)) return fail("INVALID_INPUT", "executorType 只支持 skill / mcp-tool / agent-tool / workflow");
+    if (typeof pluginExecutor !== "function") return fail("DEPENDENCY_UNAVAILABLE", "pluginExecutor");
+    try {
+      const result = await pluginExecutor({ pluginId: auth.pluginId, manifest: auth.manifest, executorType: kind, action: String(action || "execute"), input });
+      return ok({ result: result == null ? null : result });
+    } catch (error) {
+      return fail(String((error && error.code) || "PLUGIN_EXECUTION_FAILED"), String((error && error.message) || error));
+    }
+  }
+
+  return Object.freeze({ data, network, policyOf, registry, rebuildRegistry, execute });
 }
 
 module.exports = { createCanvasPluginHost };

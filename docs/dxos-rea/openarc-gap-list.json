@@ -14,13 +14,26 @@
       "部分": "主能力存在但有明确缺口/依赖未装配",
       "缺失": "无实现或明确 OUT",
       "不适用": "产品决定不移植"
+    },
+    "decisions": {
+      "at": "2026-10-17",
+      "by": "lead",
+      "productOut": [
+        "A14",
+        "F17",
+        "D02(云市场审核/灰度子项)"
+      ],
+      "newTasks": {
+        "task-25": "A02/A03/A07/A10/A11/A15/A17/A18/A20/A21",
+        "task-26": "B02/B15/B16/D09/E03",
+        "task-27": "F01/F03/F04/F05/F06/F10/F14/F15/F16"
+      }
     }
   },
   "statusCounts": {
-    "部分": 34,
-    "已实现": 36,
-    "缺失": 6,
-    "不适用": 1
+    "部分": 35,
+    "已实现": 39,
+    "不适用": 3
   },
   "items": [
     {
@@ -36,7 +49,10 @@
       ],
       "status": "部分",
       "gap": "画布以内置 React 岛屿（AI Studio）替代 dx-app 沙箱包，缺少运行时包安装/加载通路。",
-      "confidence": "观察"
+      "confidence": "观察",
+      "ownerTasks": [
+        "task-19"
+      ]
     },
     {
       "id": "A02",
@@ -50,7 +66,10 @@
       ],
       "status": "部分",
       "gap": "文档是 nodes/edges/viewport/logs，不是 Card 三槽；DX 旧画布/.dxcanvas 需转换层。",
-      "confidence": "观察"
+      "confidence": "观察",
+      "ownerTasks": [
+        "task-25"
+      ]
     },
     {
       "id": "A03",
@@ -63,7 +82,10 @@
       ],
       "status": "部分",
       "gap": "命令层只有 10 类 card kind；DX 17 个 builtin.* 仅作清单校验数据，未进入画布运行期注册/执行。",
-      "confidence": "观察"
+      "confidence": "观察",
+      "ownerTasks": [
+        "task-25"
+      ]
     },
     {
       "id": "A04",
@@ -100,9 +122,14 @@
       "openarc": [
         "electron/canvas-dxos-commands.cjs:42-52"
       ],
-      "status": "缺失",
-      "gap": "无 sync-sources 等价命令；批量从画布/文件夹来源入库未迁移。",
-      "confidence": "观察"
+      "status": "已实现",
+      "gap": "已实现：canvas/assetLibrary/syncSources（owner/可见性校验 + sourceKey 去重）",
+      "confidence": "观察",
+      "note": "task-16 completed + task-12 in_progress",
+      "ownerTasks": [
+        "task-16",
+        "task-12"
+      ]
     },
     {
       "id": "A07",
@@ -115,7 +142,10 @@
       ],
       "status": "部分",
       "gap": "upsert/update/delete 已有；DX 的 sourceNodeId 复制、封面 data URL、workflow 递归重写等复合语义未逐项核对。",
-      "confidence": "推断"
+      "confidence": "推断",
+      "ownerTasks": [
+        "task-25"
+      ]
     },
     {
       "id": "A08",
@@ -138,9 +168,14 @@
       "openarc": [
         "electron/canvas-dxos-commands.cjs:42-83"
       ],
-      "status": "缺失",
-      "gap": "无邀请码/兑换命令，共享通过成员/角色直接授予。",
-      "confidence": "观察"
+      "status": "已实现",
+      "gap": "已实现：canvas/invites/get|create|revoke|redeem（只存 sha256 + 末4位，明文只返回一次）",
+      "confidence": "观察",
+      "note": "task-16 completed + task-12 in_progress",
+      "ownerTasks": [
+        "task-16",
+        "task-12"
+      ]
     },
     {
       "id": "A10",
@@ -153,7 +188,10 @@
       ],
       "status": "部分",
       "gap": "资产库仅 PRIVATE/ORGANIZATION 两档，无 publicAccess 与逐成员 ACL。",
-      "confidence": "观察"
+      "confidence": "观察",
+      "ownerTasks": [
+        "task-25"
+      ]
     },
     {
       "id": "A11",
@@ -166,7 +204,10 @@
       ],
       "status": "部分",
       "gap": "画布侧未检出等价“文档引用即可见”放宽；媒体可见性主要走资源域授权，交叉边界未验证。",
-      "confidence": "推断"
+      "confidence": "推断",
+      "ownerTasks": [
+        "task-25"
+      ]
     },
     {
       "id": "A12",
@@ -180,7 +221,11 @@
       ],
       "status": "部分",
       "gap": "有同进程房间/事件/补丁命令，但无网络传输层（DX 用 WebSocket，跨机需局域网服务）。",
-      "confidence": "观察"
+      "confidence": "观察",
+      "ownerTasks": [
+        "task-8",
+        "task-15"
+      ]
     },
     {
       "id": "A13",
@@ -193,7 +238,11 @@
       ],
       "status": "部分",
       "gap": "有 package/export|import（内联 ≤32MB）；DX 的 multipart 大包通道与 1GB 上限未等价。",
-      "confidence": "观察"
+      "confidence": "观察",
+      "ownerTasks": [
+        "task-15",
+        "task-6"
+      ]
     },
     {
       "id": "A14",
@@ -203,9 +252,10 @@
       "openarc": [
         "electron/canvas-dxos-commands.cjs:16"
       ],
-      "status": "缺失",
-      "gap": "明确 OUT：无云同步/云备份（仅本机/局域网协作与在线更新，不涉画布云同步）。",
-      "confidence": "观察"
+      "status": "不适用",
+      "gap": "产品 OUT：本地部署 + 在线更新，不接 api.dx-os.com；DX 的画布云同步/云备份不适用",
+      "confidence": "观察",
+      "note": "lead 决策 2026-10-17"
     },
     {
       "id": "A15",
@@ -219,7 +269,10 @@
       ],
       "status": "部分",
       "gap": "清单/内置节点/模板校验已移植；运行期插件注册表与插件节点执行未迁移。",
-      "confidence": "观察"
+      "confidence": "观察",
+      "ownerTasks": [
+        "task-25"
+      ]
     },
     {
       "id": "A16",
@@ -229,9 +282,14 @@
       "openarc": [
         "electron/developer-domain.cjs:223-280"
       ],
-      "status": "缺失",
-      "gap": "无画布插件数据/网络命令；开发者域的网络白名单只覆盖 App 出网。",
-      "confidence": "观察"
+      "status": "已实现",
+      "gap": "已实现：canvas/plugins/data 与 canvas/plugins/network（pluginHost 在 main.cjs 装配）",
+      "confidence": "观察",
+      "note": "task-16 completed + task-12 in_progress",
+      "ownerTasks": [
+        "task-16",
+        "task-12"
+      ]
     },
     {
       "id": "A17",
@@ -244,7 +302,10 @@
       ],
       "status": "部分",
       "gap": "有能力投影与 canvas/run/modelCall，但客户端工具集与 DX canvas_* 的语义/数量未对齐。",
-      "confidence": "推断"
+      "confidence": "推断",
+      "ownerTasks": [
+        "task-25"
+      ]
     },
     {
       "id": "A18",
@@ -257,7 +318,10 @@
       ],
       "status": "部分",
       "gap": "docx/xlsx 因缺 adm-zip/exceljs 依赖被显式标为不可用（仅文本/CSV 可用）。",
-      "confidence": "观察"
+      "confidence": "观察",
+      "ownerTasks": [
+        "task-25"
+      ]
     },
     {
       "id": "A19",
@@ -286,7 +350,10 @@
       ],
       "status": "部分",
       "gap": "走 model/task 域 + protocol-engine，但 DX 的 protocol-tasks.db 固定三元组与 legacy Comfy/CLI 分支未逐项等价。",
-      "confidence": "推断"
+      "confidence": "推断",
+      "ownerTasks": [
+        "task-25"
+      ]
     },
     {
       "id": "A21",
@@ -299,7 +366,10 @@
       ],
       "status": "部分",
       "gap": "本地公共媒体映射/归一有；独立音频抽取/裁剪命令缺失（仅在渲染计划内 atrim）。",
-      "confidence": "观察"
+      "confidence": "观察",
+      "ownerTasks": [
+        "task-25"
+      ]
     },
     {
       "id": "B01",
@@ -325,7 +395,10 @@
       ],
       "status": "部分",
       "gap": "仅 public/department 两态共享判定；DX 的 canvas/asset-library 共享区判定未等价。",
-      "confidence": "观察"
+      "confidence": "观察",
+      "ownerTasks": [
+        "task-26"
+      ]
     },
     {
       "id": "B03",
@@ -379,7 +452,10 @@
       ],
       "status": "部分",
       "gap": "两域与传输中心已存在且可从访达进入；DX 的 dev-photocraft 等价物 image-studio 未注册为应用入口，appExchange 的 image.edit/receive target 可能不可达。",
-      "confidence": "观察"
+      "confidence": "观察",
+      "ownerTasks": [
+        "task-24"
+      ]
     },
     {
       "id": "B07",
@@ -423,7 +499,11 @@
       ],
       "status": "已实现",
       "gap": "等价实现且更严格：默认零出网，probe=true 才试连。",
-      "confidence": "观察"
+      "confidence": "观察",
+      "ownerTasks": [
+        "task-17",
+        "task-22"
+      ]
     },
     {
       "id": "B10",
@@ -436,7 +516,11 @@
       ],
       "status": "部分",
       "gap": "扫描/曲目/歌词/封面写入有；DX 的 iTunes/Deezer 在线封面与 AI 整理后处理未逐项等价。",
-      "confidence": "推断"
+      "confidence": "推断",
+      "ownerTasks": [
+        "task-14",
+        "task-5"
+      ]
     },
     {
       "id": "B11",
@@ -504,7 +588,10 @@
       ],
       "status": "部分",
       "gap": "媒体辅助模块存在，但无 Figma/Illustrator 应用入口，插件注册表也未登记这两个 MCP。",
-      "confidence": "观察"
+      "confidence": "观察",
+      "ownerTasks": [
+        "task-26"
+      ]
     },
     {
       "id": "B16",
@@ -517,7 +604,10 @@
       ],
       "status": "部分",
       "gap": "本地公共媒体列出/URL/JPEG 归一有；DX 的远端抓取/上传语义未等价。",
-      "confidence": "观察"
+      "confidence": "观察",
+      "ownerTasks": [
+        "task-26"
+      ]
     },
     {
       "id": "C01",
@@ -544,7 +634,11 @@
       ],
       "status": "部分",
       "gap": "本地 dx-app 安装/回滚/凭据/出网有；画布宿主式 dx-app 加载容器（DX DeveloperAppHost）未见等价入口。",
-      "confidence": "推断"
+      "confidence": "推断",
+      "ownerTasks": [
+        "task-19",
+        "task-7"
+      ]
     },
     {
       "id": "C03",
@@ -641,9 +735,14 @@
         "electron/market-service.cjs",
         "electron/market-update-sources.cjs:1-20"
       ],
-      "status": "缺失",
-      "gap": "无云端市场目录/审核/灰度；更新源是 GitHub Releases/ModelScope 仓库。",
-      "confidence": "观察"
+      "status": "部分",
+      "gap": "第三方目录/安装/回滚已实现（task-19）；云端市场目录/审核/灰度=产品 OUT；替代为本地 catalog + 第三方目录 + GitHub/ModelScope 在线更新",
+      "confidence": "观察",
+      "ownerTasks": [
+        "task-19",
+        "task-24",
+        "task-7"
+      ]
     },
     {
       "id": "D03",
@@ -728,7 +827,11 @@
       ],
       "status": "部分",
       "gap": "5 条命令已移植；DX 的 dev-photocraft target 映射到 image-studio，但 image-studio 未注册为应用。",
-      "confidence": "观察"
+      "confidence": "观察",
+      "ownerTasks": [
+        "task-19",
+        "task-24"
+      ]
     },
     {
       "id": "D09",
@@ -742,7 +845,10 @@
       ],
       "status": "部分",
       "gap": "本地 catalog skillPacks 与导入逻辑存在；在线来源/授权与 DX 的 ModelScope 在线导入未逐项核对。",
-      "confidence": "推断"
+      "confidence": "推断",
+      "ownerTasks": [
+        "task-26"
+      ]
     },
     {
       "id": "E01",
@@ -786,7 +892,10 @@
       ],
       "status": "部分",
       "gap": "作业/导入/恢复命令齐全，但依赖 python3+requests+selenium+openpyxl，缺依赖时结构化拒绝。",
-      "confidence": "观察"
+      "confidence": "观察",
+      "ownerTasks": [
+        "task-26"
+      ]
     },
     {
       "id": "E04",
@@ -857,7 +966,10 @@
       ],
       "status": "部分",
       "gap": "agent 域与任务控制台在 React 侧；Vue 壳层未检出 Jarvis 悬浮入口与 agent 桥调用。",
-      "confidence": "观察"
+      "confidence": "观察",
+      "ownerTasks": [
+        "task-27"
+      ]
     },
     {
       "id": "F02",
@@ -886,7 +998,10 @@
       ],
       "status": "部分",
       "gap": "任务/项目域与 React 任务控制台存在；Vue 项目应用只接 resource 桥，Agent 入口待接。",
-      "confidence": "观察"
+      "confidence": "观察",
+      "ownerTasks": [
+        "task-27"
+      ]
     },
     {
       "id": "F04",
@@ -900,7 +1015,10 @@
       ],
       "status": "部分",
       "gap": "App 清单可声明并投影 agent-tool，运行期 agent 入口与 DX 的 developer-app profile 未逐项对齐。",
-      "confidence": "推断"
+      "confidence": "推断",
+      "ownerTasks": [
+        "task-27"
+      ]
     },
     {
       "id": "F05",
@@ -915,7 +1033,10 @@
       ],
       "status": "部分",
       "gap": "envelope/profile/准入分层存在；profile 集与能力边界是否 1:1 未逐项核对。",
-      "confidence": "推断"
+      "confidence": "推断",
+      "ownerTasks": [
+        "task-27"
+      ]
     },
     {
       "id": "F06",
@@ -930,7 +1051,10 @@
       ],
       "status": "部分",
       "gap": "工具目录与能力发现存在；7 类覆盖度与 schema 投影未逐条对齐。",
-      "confidence": "推断"
+      "confidence": "推断",
+      "ownerTasks": [
+        "task-27"
+      ]
     },
     {
       "id": "F07",
@@ -944,7 +1068,10 @@
       ],
       "status": "部分",
       "gap": "桌面执行端与画布能力存在；客户端执行器集合/回传 observations 语义未核对（desktop-executor 为并行新增文件）。",
-      "confidence": "推断"
+      "confidence": "推断",
+      "ownerTasks": [
+        "task-3"
+      ]
     },
     {
       "id": "F08",
@@ -960,7 +1087,10 @@
       ],
       "status": "部分",
       "gap": "路由/回退代码存在；modelResolver 为并行新增（工作树未提交），能力依赖不可用问题由 task-3 收口中。",
-      "confidence": "观察"
+      "confidence": "观察",
+      "ownerTasks": [
+        "task-3"
+      ]
     },
     {
       "id": "F09",
@@ -989,7 +1119,10 @@
       ],
       "status": "部分",
       "gap": "监督与检查点模块存在；深度/并行/每 Run 上限与 reviewer 门禁未逐项核对。",
-      "confidence": "推断"
+      "confidence": "推断",
+      "ownerTasks": [
+        "task-27"
+      ]
     },
     {
       "id": "F11",
@@ -1046,7 +1179,10 @@
       ],
       "status": "部分",
       "gap": "本地配额账本（reserved→spent/released）存在；部门×平台规则/模型白名单与 DX 计量口径未逐项对齐。",
-      "confidence": "推断"
+      "confidence": "推断",
+      "ownerTasks": [
+        "task-27"
+      ]
     },
     {
       "id": "F15",
@@ -1061,7 +1197,10 @@
       ],
       "status": "部分",
       "gap": "各域各自实现隔离；跨域统一口径未逐表核对（integration-service 实际是 Projects/Canvas 集成服务）。",
-      "confidence": "推断"
+      "confidence": "推断",
+      "ownerTasks": [
+        "task-27"
+      ]
     },
     {
       "id": "F16",
@@ -1075,7 +1214,10 @@
       ],
       "status": "部分",
       "gap": "本地账号/绑定流程存在；是否等价“桌面壳自动超管会话 + 短期 secret”未核对。",
-      "confidence": "推断"
+      "confidence": "推断",
+      "ownerTasks": [
+        "task-27"
+      ]
     },
     {
       "id": "F17",
@@ -1083,9 +1225,10 @@
       "dx": "AI-ORG §4.5/7.1（云权益/兑换/席位）",
       "dxSummary": "api.dx-os.com Ed25519 权益、兑换码、席位/部门上限",
       "openarc": [],
-      "status": "缺失",
-      "gap": "无云账号/权益/兑换/席位链路（本地部署形态）。",
-      "confidence": "观察"
+      "status": "不适用",
+      "gap": "产品 OUT：本地部署形态无云账号/权益/兑换/席位链路",
+      "confidence": "观察",
+      "note": "lead 决策 2026-10-17"
     }
   ],
   "appMatrix": [

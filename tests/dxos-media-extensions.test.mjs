@@ -55,11 +55,11 @@ async function exec(bundle, command, payload = {}) {
 }
 
 // ── ① 命令表一致性 ────────────────────────────────────────────────────────
-test("命令表：共 58 条，risk/summary/needsCredential 合法", () => {
+test("命令表：共 62 条，risk/summary/needsCredential 合法", () => {
   const commands = mediaDomain.listMediaCommands();
   // 10-16：+3 media/short-drama/get / image（只读视图与画面预览）、visual-image（角色 / 场景参考图）
   // task-9：+2 media/render/export / short-drama/export（成片导出到访达 / 资源库）
-  assert.equal(commands.length, 58);
+  assert.equal(commands.length, 62);
   for (const entry of commands) {
     assert.ok(Object.prototype.hasOwnProperty.call(mediaDomain.RISK_LEVELS, entry.risk), "非法 risk：" + entry.command);
     assert.equal(entry.needsCredential, false);
@@ -84,7 +84,7 @@ test("命令表 ↔ dispatch：每条新命令都被分发（绝不落 COMMAND_N
       || command.startsWith("media/short-drama/") || command.startsWith("media/library/")
       || command.startsWith("media/illustrator/") || command.startsWith("media/figma-preview/")
       || command.startsWith("media/director3d/") || command.startsWith("media/public-media/"));
-  assert.equal(newCommands.length, 38); // 10-16 +3；task-9 +1 media/short-drama/export
+  assert.equal(newCommands.length, 40); // 10-16 +3；task-9 +1；task-25 +2 公共媒体 fetch/upload
   for (const command of newCommands) {
     const result = await exec(bundle, command, {});
     assert.notEqual(result.error, "MEDIA_COMMAND_NOT_ALLOWED", "未登记 dispatch：" + command);

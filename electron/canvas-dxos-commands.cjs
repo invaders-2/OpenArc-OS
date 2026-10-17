@@ -48,6 +48,9 @@ const DXOS_CANVAS_COMMANDS = Object.freeze([
   { command: "canvas/assetLibrary/items", risk: "read", credential: "none", summary: "按 kind / 关键词筛选素材库条目" },
   { command: "canvas/assetLibrary/import", risk: "write", credential: "none", summary: "导入素材字节（同 checksum 复用同一 ResourceRef 去重）" },
   { command: "canvas/assetLibrary/syncSources", risk: "write", credential: "none", summary: "从文件 / 画布节点同步素材进资产库（所有者 + 可见性权限 + sourceKey 去重）" },
+  { command: "canvas/assetMembers/list", risk: "read", credential: "none", summary: "列出素材库逐成员 ACL（仅所有者可见）" },
+  { command: "canvas/assetMembers/set", risk: "write", credential: "none", summary: "设置素材库成员 read/edit 权限（仅所有者）" },
+  { command: "canvas/assetMembers/remove", risk: "delete", credential: "none", summary: "移除素材库成员 ACL（仅所有者）" },
   { command: "canvas/assetLibrary/upsert", risk: "write", credential: "none", summary: "写入或更新 asset / prompt / workflow 条目（含版本历史与关联字段）" },
   { command: "canvas/assetLibrary/update", risk: "write", credential: "none", summary: "按基准版本更新素材库名称 / 可见性（version+1）" },
   { command: "canvas/assetLibrary/reference", risk: "read", credential: "none", summary: "返回条目的稳定 ResourceRef 与当前引用计数" },
@@ -71,8 +74,11 @@ const DXOS_CANVAS_COMMANDS = Object.freeze([
   // ---- 画布插件：数据 / 受控网络（必须已安装、已启用且声明 canvas 清单） ----
   { command: "canvas/plugins/data", risk: "write", credential: "none", summary: "读写画布插件的用户数据（容量取 Manifest host.storage，key 白名单字符）" },
   { command: "canvas/plugins/network", risk: "external", credential: "none", summary: "按插件 Manifest 网络白名单发起受控请求（复用 developerNetwork 策略与审计）" },
+  { command: "canvas/plugins/registry", risk: "read", credential: "none", summary: "读取/重建画布插件运行期注册表 registry.json（含 tombstone）" },
+  { command: "canvas/plugins/execute", risk: "external", credential: "none", summary: "按 executor.type 分派插件执行（skill/mcp-tool/agent-tool/workflow；builtin 403、app-bridge 409）" },
   // ---- 内核能力（源 canvasKernelCapabilities.ts 的投影） ----
   { command: "canvas/capabilities/list", risk: "read", credential: "none", summary: "投影画布可被 Agent 调用的能力清单（含 risk / 副作用）" },
+  { command: "canvas/protocolTasks/list", risk: "read", credential: "none", summary: "查询画布生成的 ai_protocol_tasks 三元组状态（provider/model protocol + profile + intent）" },
   // ---- Agent 附件（源 canvasAgentAttachments.ts + 本仓挂载语义） ----
   { command: "canvas/agentAttachments/list", risk: "read", credential: "none", summary: "列举挂载到画布上的 Agent 附件" },
   { command: "canvas/agentAttachments/extract", risk: "read", credential: "none", summary: "把 Agent 附件抽取为文本（不落盘、不挂载）" },
@@ -167,7 +173,7 @@ function createCanvasDxosExtension({ identity, store, canvasService = null, reso
       tags: Array.isArray(payload.tags) ? payload.tags : [], sourceKey: asStr(payload.sourceKey, 500),
     }),
     "canvas/assetLibrary/upsert": (payload, context) => assetLibrary.upsertItem({ context, libraryId: asStr(payload.libraryId, 120), item: payload.item && typeof payload.item === "object" ? payload.item : {} }),
-    "canvas/assetLibrary/update": (payload, context) => assetLibrary.updateLibrary({ context, libraryId: asStr(payload.libraryId, 120), name: asStr(payload.name, 120), visibility: asStr(payload.visibility, 20), baseVersion: num(payload.baseVersion) }),
+    "canvas/assetLibrary/update": (payload, context) => assetLibrary.updateLibrary({ context, libraryId: asStr(payload.libraryId, 120), name: asStr(payload.name, 120), visibility: asStr(payload.visibility, 20), publicAccess: asStr(payload.publicAccess, 20), baseVersion: num(payload.baseVersion) }),
     "canvas/assetLibrary/reference": (payload, context) => assetLibrary.referenceItem({ context, libraryId: asStr(payload.libraryId, 120), itemId: asStr(payload.itemId, 120) }),
     "canvas/assetLibrary/attach": (payload, context) => assetLibrary.attachItemToCanvas({ context, libraryId: asStr(payload.libraryId, 120), itemId: asStr(payload.itemId, 120), canvasId: asStr(payload.canvasId, 120), x: num(payload.x) || 0, y: num(payload.y) || 0 }),
     "canvas/assetLibrary/delete": (payload, context) => assetLibrary.deleteItem({ context, libraryId: asStr(payload.libraryId, 120), itemId: asStr(payload.itemId, 120) }),
@@ -175,6 +181,9 @@ function createCanvasDxosExtension({ identity, store, canvasService = null, reso
       context, libraryId: asStr(payload.libraryId, 120),
       items: Array.isArray(payload.items) ? payload.items.slice(0, 600) : [],
     }),
+    "canvas/assetMembers/list": (payload, context) => assetLibrary.listMembers({ context, libraryId: asStr(payload.libraryId, 120) }),
+    "canvas/assetMembers/set": (payload, context) => assetLibrary.setMember({ context, libraryId: asStr(payload.libraryId, 120), userId: asStr(payload.userId, 120), role: asStr(payload.role, 20) }),
+    "canvas/assetMembers/remove": (payload, context) => assetLibrary.removeMember({ context, libraryId: asStr(payload.libraryId, 120), userId: asStr(payload.userId, 120) }),
 
     "canvas/collab/join": (payload, context) => {
       const user = actorOf(context);
@@ -249,7 +258,29 @@ function createCanvasDxosExtension({ identity, store, canvasService = null, reso
         request: payload.request && typeof payload.request === "object" ? payload.request : {},
       });
     },
+    "canvas/plugins/registry": (payload, context) => {
+      const user = actorOf(context);
+      if (!user) return fail("NOT_FOUND_OR_FORBIDDEN");
+      if (!pluginHost) return fail("DEPENDENCY_UNAVAILABLE", "canvasPluginHost");
+      return pluginHost.registry({ rebuild: payload.rebuild === true, userId: user.id });
+    },
+    "canvas/plugins/execute": (payload, context) => {
+      const user = actorOf(context);
+      if (!user) return fail("NOT_FOUND_OR_FORBIDDEN");
+      if (!pluginHost) return fail("DEPENDENCY_UNAVAILABLE", "canvasPluginHost");
+      return pluginHost.execute({
+        userId: user.id,
+        pluginId: asStr(payload.pluginId, 80),
+        executorType: asStr(payload.executorType, 40) || "workflow",
+        action: asStr(payload.action, 80) || "execute",
+        input: payload.input == null ? null : payload.input,
+      });
+    },
 
+    "canvas/protocolTasks/list": (payload, context) => {
+      if (!canvasService || typeof canvasService.protocolTasks !== "function") return fail("CANVAS_UNAVAILABLE");
+      return canvasService.protocolTasks({ context, canvasId: asStr(payload.canvasId, 120), limit: num(payload.limit) || 50 });
+    },
     "canvas/capabilities/list": () => {
       const projection = buildCanvasKernelCapabilities({ nodeTypes });
       return ok({ projection, descriptors: toCatalogDescriptors(projection.capabilities), registry: DXOS_CANVAS_COMMANDS.map((entry) => ({ ...entry })) });

@@ -171,6 +171,34 @@ async function opPoster(spec) {
 }
 
 // ---------------------------------------------------------------------------
+// task-25 A21 · op: audio-extract / audio-trim（独立音频抽取/裁剪，不进渲染计划）
+// ---------------------------------------------------------------------------
+async function opAudio(spec) {
+  const source = String(spec.source || "");
+  const target = String(spec.target || "");
+  if (!source || !fs.existsSync(source)) return { ok: false, error: mediaDomain.MEDIA_ERR_NOT_FOUND, message: "音频源文件不存在" };
+  if (!target) return { ok: false, error: mediaDomain.MEDIA_ERR_INVALID_INPUT, message: "音频目标路径为空" };
+  const startMs = spec.startMs == null ? null : Math.max(0, Math.round(Number(spec.startMs)));
+  const durationMs = spec.durationMs == null ? null : Math.round(Number(spec.durationMs));
+  if (startMs != null && !Number.isFinite(startMs)) return { ok: false, error: mediaDomain.MEDIA_ERR_INVALID_INPUT, message: "startMs 非法" };
+  if (durationMs != null && (!Number.isFinite(durationMs) || durationMs < 100)) return { ok: false, error: mediaDomain.MEDIA_ERR_INVALID_INPUT, message: "durationMs 至少 100ms" };
+  const args = [
+    "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-threads", "1",
+    "-protocol_whitelist", "file,pipe",
+    "-format_whitelist", "mov,matroska,webm,avi,mpegts,mpeg,ogg,flv,mp3,wav,aac,m4a",
+  ];
+  if (startMs) args.push("-ss", (startMs / 1000).toFixed(3));
+  args.push("-i", source, "-map", "0:a:0", "-vn", "-c:a", "aac", "-b:a", "192k");
+  if (durationMs != null) args.push("-t", (durationMs / 1000).toFixed(3));
+  args.push(target);
+  const result = await runProcess(ffmpegCommand(), args, { timeoutMs: spec.timeoutMs });
+  if (!result.ok) return errorResult(result, mediaDomain.MEDIA_ERR_RENDER_FAILED);
+  const stat = fs.existsSync(target) ? fs.statSync(target) : null;
+  if (!stat || stat.size <= 0) return { ok: false, error: mediaDomain.MEDIA_ERR_RENDER_FAILED, message: "音频产物为空" };
+  return { ok: true, result: { bytes: stat.size, startMs: startMs || 0, durationMs: durationMs == null ? null : durationMs } };
+}
+
+// ---------------------------------------------------------------------------
 // op: render（源 videoWorker.ts:15-55 + :68-72）
 // ---------------------------------------------------------------------------
 async function opRender(spec) {
@@ -242,7 +270,7 @@ async function opHealth() {
   };
 }
 
-const OPS = Object.freeze({ probe: opProbe, poster: opPoster, render: opRender, health: opHealth });
+const OPS = Object.freeze({ probe: opProbe, poster: opPoster, render: opRender, health: opHealth, "audio-extract": opAudio, "audio-trim": opAudio });
 
 async function main() {
   const op = process.argv[2];

@@ -9,9 +9,9 @@
 | DX 证据 | `CANVAS-APPS-CONNECTIVITY.md`（30 应用+画布连通性）、`app-connectivity-matrix.json`（机读）、`AI-ORG-CONNECTIVITY.md`（AI/组织 10 行结论+链路表） |
 | OpenArc 证据 | 当前工作树：`electron/*.cjs`（268 个文件）、`electron/preload.cjs`（40 个顶层桥）、`src-vue/`（Vue 壳与应用）、`src/`（既有 React 域/画布/相册） |
 | OpenArc 快照 | 2026-10-17 工作树，含并行未提交改动：`electron/model-resolver.cjs`、`electron/desktop-executor.cjs`、`src-vue/apps/{IntegrationsApp,OcrPanel,TransferCenter,DevApp}.vue`、`src-vue/bridge/domain.ts` 等；这些条目的状态以当前文件为准，可能随并行任务变化 |
-| 状态口径 | `已实现`=等价实现（口径差异已注明）；`部分`=主能力存在但有明确缺口/依赖未装配；`缺失`=无实现或明确 OUT；`不适用`=产品决定不移植 |
+| 状态口径 | `已实现`=等价实现（口径差异已注明）；`部分`=主能力存在但有明确缺口/依赖未装配；`缺失`=无实现；`不适用`=产品决定不移植（含明确 OUT） |
 
-**统计（77 条连通关系）**：已实现 36、部分 34、缺失 6、不适用 1。应用一一对照（32 行，含 OpenArc 新增/合并项）见 §7。
+**统计（77 条连通关系）**：已实现 39、部分 35、缺失 0、不适用 3。应用一一对照（32 行，含 OpenArc 新增/合并项）见 §7。
 
 三条总判断（观察/推断）：
 
@@ -28,17 +28,17 @@
 | A03 | 17 个内置节点（16 个 builtin.* + director-3d）（CANVAS §2.6 / developer-canvas-builtins.cjs 头注释） | electron/canvas-domain.cjs:40；electron/developer-canvas-builtins.cjs:39-194 | 部分 | 命令层只有 10 类 card kind；DX 17 个 builtin.* 仅作清单校验数据，未进入画布运行期注册/执行。 |
 | A04 | 素材库=developer_collab_projects(kind=asset-library)+fs 目录；CRUD/系统提示词保护（CANVAS §2.2 / server/canvasAssetLibrary.ts:20-261） | electron/canvas-dxos-asset-library.cjs；electron/canvas-dxos-commands.cjs:42-52 | 已实现 | 等价实现（库条目以 ResourceRef+引用计数代替 fs nodeId；系统提示词保护保留）。 |
 | A05 | 引用方式=FS nodeId + /api/fs/raw/<nodeId> URL（CANVAS §2.2 / server/canvas.ts:18-43） | electron/canvas-dxos-asset-library.cjs:541；src/canvas/canvasAssetRefs.ts；electron/canvas-service.cjs | 已实现 | 等价口径：引用为不透明 ResourceRef/openarc-asset:，字节经 IPC/resource 域读取；未提供 /api/fs/raw 这类 HTTP URL。 |
-| A06 | 画布/文件夹来源→素材库：sync-sources（owner-only、≤600、copyNode、sourceKey 去重）（CANVAS §2.2 / server/index.ts:5844-5873） | electron/canvas-dxos-commands.cjs:42-52 | 缺失 | 无 sync-sources 等价命令；批量从画布/文件夹来源入库未迁移。 |
+| A06 | 画布/文件夹来源→素材库：sync-sources（owner-only、≤600、copyNode、sourceKey 去重）（CANVAS §2.2 / server/index.ts:5844-5873） | electron/canvas-dxos-commands.cjs:42-52 | 已实现 | 已实现：canvas/assetLibrary/syncSources（owner/可见性校验 + sourceKey 去重） |
 | A07 | 库项新增/更新/删除/重命名/分组/封面/工作流克隆（CANVAS §2.2 / server/canvasAssetLibrary.ts:144-254） | electron/canvas-dxos-commands.cjs:42-52；electron/canvas-dxos-asset-library.cjs | 部分 | upsert/update/delete 已有；DX 的 sourceNodeId 复制、封面 data URL、workflow 递归重写等复合语义未逐项核对。 |
 | A08 | 画布可见性 private/public/restricted + members（邀请码见 A09）（CANVAS §2.2 / server/canvas.ts:721-728） | electron/canvas-domain.cjs:315-331；electron/canvas-bootstrap.cjs:19-46 | 已实现 | 等价且更细（OWNER/SHARE 角色/ORGANIZATION 只读底线）；public=全员可编辑 与 ORGANIZATION=同组织只读 的语义差异需映射。 |
-| A09 | 邀请码 XXXX-XXXX（只存 code_hash）+ redeem（CANVAS §2.5 / server/canvas.ts:1221-1276） | electron/canvas-dxos-commands.cjs:42-83 | 缺失 | 无邀请码/兑换命令，共享通过成员/角色直接授予。 |
+| A09 | 邀请码 XXXX-XXXX（只存 code_hash）+ redeem（CANVAS §2.5 / server/canvas.ts:1221-1276） | electron/canvas-dxos-commands.cjs:42-83 | 已实现 | 已实现：canvas/invites/get\|create\|revoke\|redeem（只存 sha256 + 末4位，明文只返回一次） |
 | A10 | 资产库 visibility private/public/restricted + publicAccess + members(read/edit)（shared/canvasAssetLibrary.ts:74-86 / index.ts:3151-3153） | electron/canvas-dxos-asset-library.cjs:104；electron/canvas-dxos-asset-library.cjs:180-214 | 部分 | 资产库仅 PRIVATE/ORGANIZATION 两档，无 publicAccess 与逐成员 ACL。 |
 | A11 | canViewCanvasMedia：画布文档引用的 nodeId 单独放行，不授予父目录（CANVAS §2.2 / server/canvas.ts:758-764） | electron/canvas-service.cjs；electron/canvas-dxos-asset-library.cjs:104 | 部分 | 画布侧未检出等价“文档引用即可见”放宽；媒体可见性主要走资源域授权，交叉边界未验证。 |
 | A12 | WS /api/canvas/collab：presence/cursor/patch 广播，客户端仅 cursor 上行（CANVAS §2.5 / server/canvasCollab.ts:40-80） | electron/canvas-dxos-collab.cjs:239；electron/canvas-dxos-collab.cjs:314-338；electron/canvas-dxos-commands.cjs:54-62 | 部分 | 有同进程房间/事件/补丁命令，但无网络传输层（DX 用 WebSocket，跨机需局域网服务）。 |
 | A13 | .dxcanvas 导出/导入（ZIP+canvas.json+assets，≤5000 文件/单 500MB/总 1GB）（CANVAS §2.4 / server/canvasPackage.ts） | electron/canvas-dxos-package.cjs；electron/canvas-dxos-commands.cjs:74-77 | 部分 | 有 package/export\|import（内联 ≤32MB）；DX 的 multipart 大包通道与 1GB 上限未等价。 |
-| A14 | 云备份/同步 + canvas_cloud_sync_baselines + /api/canvas/cloud*（CANVAS §2.7 / server/canvasCloudSync.ts） | electron/canvas-dxos-commands.cjs:16 | 缺失 | 明确 OUT：无云同步/云备份（仅本机/局域网协作与在线更新，不涉画布云同步）。 |
+| A14 | 云备份/同步 + canvas_cloud_sync_baselines + /api/canvas/cloud*（CANVAS §2.7 / server/canvasCloudSync.ts） | electron/canvas-dxos-commands.cjs:16 | 不适用 | 产品 OUT：本地部署 + 在线更新，不接 api.dx-os.com；DX 的画布云同步/云备份不适用 |
 | A15 | 插件只来自开发者应用 manifest.canvas，注册表 registry.json + tombstone（CANVAS §2.6 / server/canvasPlugins.ts:62-135） | electron/developer-canvas-manifest.cjs:38-41；electron/developer-canvas-manifest.cjs:320-407；electron/developer-domain.cjs:424-458 | 部分 | 清单/内置节点/模板校验已移植；运行期插件注册表与插件节点执行未迁移。 |
-| A16 | 插件数据 get/set/delete/list（host.storage.maxBytes）与插件网络白名单（CANVAS §2.6 / server/index.ts:3290-3303） | electron/developer-domain.cjs:223-280 | 缺失 | 无画布插件数据/网络命令；开发者域的网络白名单只覆盖 App 出网。 |
+| A16 | 插件数据 get/set/delete/list（host.storage.maxBytes）与插件网络白名单（CANVAS §2.6 / server/index.ts:3290-3303） | electron/developer-domain.cjs:223-280 | 已实现 | 已实现：canvas/plugins/data 与 canvas/plugins/network（pluginHost 在 main.cjs 装配） |
 | A17 | 画布 14 个 canvas_* Agent 客户端工具（run/operate/execute/布局等）（CANVAS §2.6 / server/canvasKernelCapabilities.ts:25-67） | electron/canvas-dxos-capabilities.cjs:59-73；electron/agent-tool-catalog.cjs | 部分 | 有能力投影与 canvas/run/modelCall，但客户端工具集与 DX canvas_* 的语义/数量未对齐。 |
 | A18 | Agent 附件读取：docx/xlsx/csv/text，PDF 不支持，≤40000 字符（CANVAS §2.6 / server/canvasAgentAttachments.ts:80-104） | electron/canvas-dxos-agent-attachments.cjs:6-13；electron/canvas-dxos-agent-attachments.cjs:38-85 | 部分 | docx/xlsx 因缺 adm-zip/exceljs 依赖被显式标为不可用（仅文本/CSV 可用）。 |
 | A19 | Codex Canvas 桥：安装/配对/回环 API/AES-GCM 中继/MCP 文件（CANVAS §2.8 / server/index.ts:1191-1310） | electron/preload.cjs:393-400；electron/codex-canvas-bootstrap.cjs:25-31；electron/codex-canvas-relay.cjs:2,254 | 已实现 | 等价实现（IPC 命令 + 注入 dispatch 替代 HTTP；中继语义保留）。 |
@@ -83,7 +83,7 @@
 | # | DX 连通关系（证据） | OpenArc 落点 | 状态 | 缺口 |
 |---|---|---|---|---|
 | D01 | 应用市场本地目录（随包/本地 catalog.json）（matrix market（本地注册表 + 内置包）） | electron/market-domain.cjs:44-52；electron/market-service.cjs:5,19-35；src-vue/apps/MarketApp.vue | 已实现 | 等价实现（只读本地 catalog，不联网/不安装）。 |
-| D02 | 云端目录 api.dx-os.com/v1/market/explore、apps/:id、灰度发布、审核（CANVAS §2.7 / version_diff.market） | electron/market-service.cjs；electron/market-update-sources.cjs:1-20 | 缺失 | 无云端市场目录/审核/灰度；更新源是 GitHub Releases/ModelScope 仓库。 |
+| D02 | 云端目录 api.dx-os.com/v1/market/explore、apps/:id、灰度发布、审核（CANVAS §2.7 / version_diff.market） | electron/market-service.cjs；electron/market-update-sources.cjs:1-20 | 部分 | 第三方目录/安装/回滚已实现（task-19）；云端市场目录/审核/灰度=产品 OUT；替代为本地 catalog + 第三方目录 + GitHub/ModelScope 在线更新 |
 | D03 | 应用在线更新（发现/下载/验签/安装/回滚）（version_diff（应用更新/在线更新）） | electron/market-update-domain.cjs:61-66；electron/market-update-service.cjs；electron/market-update-sources.cjs | 已实现 | 等价实现（验签→摘要→解压围栏→原子切换→回滚；两源适配器）。 |
 | D04 | dx-app/v2 安装/启用/禁用/回滚/清单校验/凭据绑定/出网判定/运行时事件（matrix developer-studio（开发者平台本地能力）） | electron/developer-domain.cjs:223-262；electron/developer-service.cjs；src-vue/apps/DevApp.vue | 已实现 | 等价实现（16 条基础命令 + 健康检查）。 |
 | D05 | 开发者实验室草稿/模板/模拟安装/zip（matrix developer-studio（实验室/沙箱）） | electron/developer-lab.cjs；electron/developer-domain.cjs:272-280；src-vue/apps/DevApp.vue:39-42 | 已实现 | 等价实现（lab 命令族并入 developer:command 白名单）。 |
@@ -126,7 +126,7 @@
 | F14 | api-quotas.db：部门×平台金额/次数、模型白名单、reserve/settle（AI-ORG §4.5（配额）） | electron/dxos-foundation-quota.cjs；electron/dxos-foundation-schema.cjs | 部分 | 本地配额账本（reserved→spent/released）存在；部门×平台规则/模型白名单与 DX 计量口径未逐项对齐。 |
 | F15 | fs ownerId+共享区、画布 ACL、资产库 ACL、线程可见性、project_members（AI-ORG §4.6（数据隔离）） | electron/resource-domain.cjs；electron/canvas-domain.cjs:315-331；electron/integration-service.cjs；electron/authorization-store.cjs | 部分 | 各域各自实现隔离；跨域统一口径未逐表核对（integration-service 实际是 Projects/Canvas 集成服务）。 |
 | F16 | 0.6.1 新增 ensureLocalAdminSession → /api/auth/desktop-session（AI-ORG §1 结论 9（桌面自动超管会话）） | src-vue/identity/SetupScreen.vue:16,135；electron/local-account-service.cjs；electron/preload.cjs:50-57 | 部分 | 本地账号/绑定流程存在；是否等价“桌面壳自动超管会话 + 短期 secret”未核对。 |
-| F17 | api.dx-os.com Ed25519 权益、兑换码、席位/部门上限（AI-ORG §4.5/7.1（云权益/兑换/席位）） | — | 缺失 | 无云账号/权益/兑换/席位链路（本地部署形态）。 |
+| F17 | api.dx-os.com Ed25519 权益、兑换码、席位/部门上限（AI-ORG §4.5/7.1（云权益/兑换/席位）） | — | 不适用 | 产品 OUT：本地部署形态无云账号/权益/兑换/席位链路 |
 
 ## 7. 30 个 DX 应用 → OpenArc 落点
 
@@ -167,21 +167,17 @@
 
 ## 8. 缺口清单摘要
 
-### 8.1 缺失（6 条）
+### 8.1 缺失（0 条）
 
-- **A06 画布**：无 sync-sources 等价命令；批量从画布/文件夹来源入库未迁移。（DX：CANVAS §2.2 / server/index.ts:5844-5873；OpenArc：electron/canvas-dxos-commands.cjs:42-52）
-- **A09 画布**：无邀请码/兑换命令，共享通过成员/角色直接授予。（DX：CANVAS §2.5 / server/canvas.ts:1221-1276；OpenArc：electron/canvas-dxos-commands.cjs:42-83）
-- **A14 画布**：明确 OUT：无云同步/云备份（仅本机/局域网协作与在线更新，不涉画布云同步）。（DX：CANVAS §2.7 / server/canvasCloudSync.ts；OpenArc：electron/canvas-dxos-commands.cjs:16）
-- **A16 画布**：无画布插件数据/网络命令；开发者域的网络白名单只覆盖 App 出网。（DX：CANVAS §2.6 / server/index.ts:3290-3303；OpenArc：electron/developer-domain.cjs:223-280）
-- **D02 市场**：无云端市场目录/审核/灰度；更新源是 GitHub Releases/ModelScope 仓库。（DX：CANVAS §2.7 / version_diff.market；OpenArc：electron/market-service.cjs；electron/market-update-sources.cjs:1-20）
-- **F17 组织**：无云账号/权益/兑换/席位链路（本地部署形态）。（DX：AI-ORG §4.5/7.1（云权益/兑换/席位）；OpenArc：无）
+> 0 条：A06/A09/A16 已由 task-16/task-12 关闭；A14、F17 按产品 OUT 记“不适用”；D02 的云市场审核/灰度子项同属产品 OUT（第三方目录/安装/回滚已实现）。
 
-### 8.2 部分（34 条，按域）
+
+### 8.2 部分（35 条，按域）
 
 - **画布**：A01 画布以内置 React 岛屿（AI Studio）替代 dx-app 沙箱包，缺少运行时包安装/加载通路；A02 文档是 nodes/edges/viewport/logs，不是 Card 三槽；DX 旧画布/.dxcanvas 需转换层；A03 命令层只有 10 类 card kind；DX 17 个 builtin.* 仅作清单校验数据，未进入画布运行期注册/执行；A07 upsert/update/delete 已有；DX 的 sourceNodeId 复制、封面 data URL、workflow 递归重写等复合语义未逐项核对；A10 资产库仅 PRIVATE/ORGANIZATION 两档，无 publicAccess 与逐成员 ACL；A11 画布侧未检出等价“文档引用即可见”放宽；媒体可见性主要走资源域授权，交叉边界未验证；A12 有同进程房间/事件/补丁命令，但无网络传输层（DX 用 WebSocket，跨机需局域网服务）；A13 有 package/export|import（内联 ≤32MB）；DX 的 multipart 大包通道与 1GB 上限未等价；A15 清单/内置节点/模板校验已移植；运行期插件注册表与插件节点执行未迁移；A17 有能力投影与 canvas/run/modelCall，但客户端工具集与 DX canvas_* 的语义/数量未对齐；A18 docx/xlsx 因缺 adm-zip/exceljs 依赖被显式标为不可用（仅文本/CSV 可用）；A20 走 model/task 域 + protocol-engine，但 DX 的 protocol-tasks.db 固定三元组与 legacy Comfy/CLI 分支未逐项等价；A21 本地公共媒体映射/归一有；独立音频抽取/裁剪命令缺失（仅在渲染计划内 atrim）
 - **媒体**：B02 仅 public/department 两态共享判定；DX 的 canvas/asset-library 共享区判定未等价；B06 两域与传输中心已存在且可从访达进入；DX 的 dev-photocraft 等价物 image-studio 未注册为应用入口，appExchange 的 image.edit/receive target 可能不可达；B10 扫描/曲目/歌词/封面写入有；DX 的 iTunes/Deezer 在线封面与 AI 整理后处理未逐项等价；B15 媒体辅助模块存在，但无 Figma/Illustrator 应用入口，插件注册表也未登记这两个 MCP；B16 本地公共媒体列出/URL/JPEG 归一有；DX 的远端抓取/上传语义未等价
 - **应用**：C01 OpenArc 25 个应用（合并/新增/缺失见 appMatrix），不是 30 项一一对应；C02 本地 dx-app 安装/回滚/凭据/出网有；画布宿主式 dx-app 加载容器（DX DeveloperAppHost）未见等价入口
-- **市场**：D08 5 条命令已移植；DX 的 dev-photocraft target 映射到 image-studio，但 image-studio 未注册为应用；D09 本地 catalog skillPacks 与导入逻辑存在；在线来源/授权与 DX 的 ModelScope 在线导入未逐项核对
+- **市场**：D02 第三方目录/安装/回滚已实现（task-19）；云端市场目录/审核/灰度=产品 OUT；替代为本地 catalog + 第三方目录 + GitHub/ModelScope 在线更新；D08 5 条命令已移植；DX 的 dev-photocraft target 映射到 image-studio，但 image-studio 未注册为应用；D09 本地 catalog skillPacks 与导入逻辑存在；在线来源/授权与 DX 的 ModelScope 在线导入未逐项核对
 - **集成**：E03 作业/导入/恢复命令齐全，但依赖 python3+requests+selenium+openpyxl，缺依赖时结构化拒绝
 - **AI**：F01 agent 域与任务控制台在 React 侧；Vue 壳层未检出 Jarvis 悬浮入口与 agent 桥调用；F03 任务/项目域与 React 任务控制台存在；Vue 项目应用只接 resource 桥，Agent 入口待接；F04 App 清单可声明并投影 agent-tool，运行期 agent 入口与 DX 的 developer-app profile 未逐项对齐；F05 envelope/profile/准入分层存在；profile 集与能力边界是否 1:1 未逐项核对；F06 工具目录与能力发现存在；7 类覆盖度与 schema 投影未逐条对齐；F07 桌面执行端与画布能力存在；客户端执行器集合/回传 observations 语义未核对（desktop-executor 为并行新增文件）；F08 路由/回退代码存在；modelResolver 为并行新增（工作树未提交），能力依赖不可用问题由 task-3 收口中；F10 监督与检查点模块存在；深度/并行/每 Run 上限与 reviewer 门禁未逐项核对
 - **组织**：F14 本地配额账本（reserved→spent/released）存在；部门×平台规则/模型白名单与 DX 计量口径未逐项对齐；F15 各域各自实现隔离；跨域统一口径未逐表核对（integration-service 实际是 Projects/Canvas 集成服务）；F16 本地账号/绑定流程存在；是否等价“桌面壳自动超管会话 + 短期 secret”未核对

@@ -27,6 +27,7 @@ const CANVAS_DXOS_DDL = Object.freeze([
   "  name            TEXT NOT NULL,\n" +
   "  format          TEXT NOT NULL,\n" +
   "  visibility      TEXT NOT NULL DEFAULT 'PRIVATE',\n" +
+  "  public_access   TEXT NOT NULL DEFAULT 'read',\n" +
   "  version         INTEGER NOT NULL DEFAULT 1,\n" +
   "  deleted_at      INTEGER,\n" +
   "  created_at      INTEGER NOT NULL,\n" +
@@ -34,6 +35,16 @@ const CANVAS_DXOS_DDL = Object.freeze([
   ")",
   "CREATE INDEX IF NOT EXISTS idx_canvas_dxos_libraries_owner ON canvas_dxos_asset_libraries(owner_user_id, deleted_at, updated_at DESC)",
   "CREATE INDEX IF NOT EXISTS idx_canvas_dxos_libraries_org ON canvas_dxos_asset_libraries(organization_id, visibility, deleted_at)",
+  // task-25 A10：逐成员 ACL（restricted / publicAccess 之外的 read|edit 授权）。
+  "CREATE TABLE IF NOT EXISTS canvas_dxos_asset_library_members (\n" +
+  "  library_id      TEXT NOT NULL,\n" +
+  "  user_id         TEXT NOT NULL,\n" +
+  "  role            TEXT NOT NULL CHECK (role IN ('read','edit')),\n" +
+  "  created_at      INTEGER NOT NULL,\n" +
+  "  updated_at      INTEGER NOT NULL,\n" +
+  "  PRIMARY KEY (library_id, user_id)\n" +
+  ")",
+  "CREATE INDEX IF NOT EXISTS idx_canvas_dxos_library_members_user ON canvas_dxos_asset_library_members(user_id, role)",
   // 素材库条目（asset / prompt / workflow，字段对齐源 shared/canvasAssetLibrary.ts:33-67）
   "CREATE TABLE IF NOT EXISTS canvas_dxos_asset_items (\n" +
   "  id            TEXT PRIMARY KEY,\n" +
@@ -108,6 +119,16 @@ const CANVAS_DXOS_ITEM_COLUMNS = Object.freeze([
   ["relation_prompt", "TEXT"],
 ]);
 
+const CANVAS_DXOS_LIBRARY_COLUMNS = Object.freeze([["public_access", "TEXT NOT NULL DEFAULT 'read'"]]);
+
+function ensureLibraryColumns(db) {
+  const existing = new Set(db.prepare("PRAGMA table_info(canvas_dxos_asset_libraries)").all().map((column) => column.name));
+  for (const [name, type] of CANVAS_DXOS_LIBRARY_COLUMNS) {
+    if (existing.has(name)) continue;
+    db.exec("ALTER TABLE canvas_dxos_asset_libraries ADD COLUMN " + name + " " + type);
+  }
+}
+
 function ensureItemRelationColumns(db) {
   const existing = new Set(db.prepare("PRAGMA table_info(canvas_dxos_asset_items)").all().map((column) => column.name));
   for (const [name, type] of CANVAS_DXOS_ITEM_COLUMNS) {
@@ -120,6 +141,7 @@ function ensureItemRelationColumns(db) {
 function applyCanvasDxosLayer(db) {
   if (!db || typeof db.exec !== "function") throw new Error("applyCanvasDxosLayer 需要 sqlite 连接");
   for (const statement of CANVAS_DXOS_DDL) db.exec(statement);
+  ensureLibraryColumns(db);
   ensureItemRelationColumns(db);
 }
 
