@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from "../i18n";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import {
   ArrowLeft,
@@ -19,6 +20,8 @@ import {
   Music,
   RefreshCw,
   Search,
+  Sparkles,
+  X,
 } from "lucide-vue-next";
 import DsButton from "../design-system/DsButton.vue";
 import DsContextMenu, { type MenuEntry } from "../design-system/DsContextMenu.vue";
@@ -26,6 +29,7 @@ import FolderIcon from "../shell/FolderIcon.vue";
 import SharedDrivePanel from "./SharedDrivePanel.vue";
 import TransferCenter from "./TransferCenter.vue";
 import { useShellStore } from "../stores/shell";
+import { failureText, invokeDomain, resultFailure, resultValue, type FailureView } from "../bridge/domain";
 import { platformCommand, platformErrorCode, platformErrorText, shareLabel, sharedNodesOf } from "./sharedDrive";
 import type { SharedNode } from "./sharedDrive";
 import { kindOfExt } from "../wallpapers";
@@ -76,6 +80,98 @@ const group = ref(true);
 const query = ref("");
 const selected = ref<string[]>([]);
 const renaming = ref<string | null>(null);
+
+/* ── 项目 Agent 侧栏（task-35 第二部分）：真实 agent 命令 ───────────────── */
+type AgentProject = { id: string; name: string; root_node_id?: string };
+type AgentTask = {
+  taskId: string; projectId: string; title?: string; instruction?: string;
+  status?: string; mode?: string; executionProfile?: string; updatedAt?: number; errorCode?: string | null;
+};
+const agentAvailable = ref(!!window.openarc?.agent);
+const agentOpen = ref(false);
+const agentLoading = ref(false);
+const agentError = ref<FailureView | null>(null);
+const agentNotice = ref("");
+const agentProjects = ref<AgentProject[]>([]);
+const agentProjectId = ref("");
+const agentTasks = ref<AgentTask[]>([]);
+const agentInstruction = ref("");
+const agentMode = ref<"assistant" | "thinking" | "agent">("thinking");
+const agentBusy = ref<string | null>(null);
+const agentDetail = ref<{ task?: AgentTask; steps?: { id: string; title?: string; status?: string }[]; checkpoints?: number; deliverables?: { id: string; name?: string }[] } | null>(null);
+
+async function loadAgentProjects() {
+  if (!agentAvailable.value) {
+    agentError.value = { code: "AGENT_UNAVAILABLE", message: "当前环境没有 Agent 桥（浏览器预览）" };
+    return;
+  }
+  agentLoading.value = true;
+  agentError.value = null;
+  const reply = await invokeDomain("agent", "agent/project/list", {});
+  agentLoading.value = false;
+  const value = resultValue<{ items: AgentProject[] }>(reply);
+  if (!value) {
+    agentError.value = resultFailure(reply);
+    return;
+  }
+  agentProjects.value = Array.isArray(value.items) ? value.items : [];
+  if (!agentProjectId.value && agentProjects.value.length) agentProjectId.value = agentProjects.value[0].id;
+  if (agentProjectId.value) await loadAgentTasks();
+}
+async function loadAgentTasks() {
+  if (!agentProjectId.value) {
+    agentTasks.value = [];
+    return;
+  }
+  const reply = await invokeDomain("agent", "agent/task/list", { projectId: agentProjectId.value });
+  const value = resultValue<{ items: AgentTask[] }>(reply);
+  if (value) agentTasks.value = Array.isArray(value.items) ? value.items : [];
+  else agentError.value = resultFailure(reply);
+}
+async function toggleAgent() {
+  agentOpen.value = !agentOpen.value;
+  if (agentOpen.value) await loadAgentProjects();
+}
+async function createAgentTask() {
+  if (!agentProjectId.value || !agentInstruction.value.trim() || agentBusy.value) return;
+  agentBusy.value = "create";
+  agentError.value = null;
+  agentNotice.value = "";
+  const reply = await invokeDomain("agent", "agent/task/create", {
+    projectId: agentProjectId.value,
+    instruction: agentInstruction.value.trim(),
+    executionProfile: agentMode.value,
+  });
+  agentBusy.value = null;
+  const value = resultValue<{ task: AgentTask }>(reply);
+  if (!value?.task) {
+    agentError.value = resultFailure(reply);
+    return;
+  }
+  agentNotice.value = t("已创建任务：{title}（{status}）", { title: value.task.title || value.task.taskId, status: value.task.status || "queued" });
+  agentInstruction.value = "";
+  await loadAgentTasks();
+}
+async function agentTaskAction(taskId: string, action: "pause" | "resume") {
+  if (agentBusy.value) return;
+  agentBusy.value = action + ":" + taskId;
+  agentError.value = null;
+  const reply = await invokeDomain("agent", "agent/task/" + action, { taskId });
+  agentBusy.value = null;
+  const value = resultValue<{ task: AgentTask }>(reply);
+  if (!value?.task) {
+    agentError.value = resultFailure(reply);
+    return;
+  }
+  agentNotice.value = action === "pause" ? t("已暂停：{title}", { title: value.task.title || taskId }) : t("已恢复：{title}", { title: value.task.title || taskId });
+  await loadAgentTasks();
+}
+async function openAgentTask(taskId: string) {
+  const reply = await invokeDomain("agent", "agent/task/get", { taskId });
+  const value = resultValue<typeof agentDetail.value>(reply);
+  if (value) agentDetail.value = value;
+  else agentError.value = resultFailure(reply);
+}
 
 /* ── 数据：子文件夹（本地）+ 文件服务条目 ─────────────────────────────── */
 const entries = ref<Record<string, OpenArcFileEntry[]>>({});
@@ -530,8 +626,8 @@ async function doReveal() {
 
 <template>
   <div class="split finder">
-    <nav class="split-side" aria-label="访达边栏">
-      <div class="split-section">个人收藏</div>
+    <nav class="split-side" :aria-label="t('访达边栏')">
+      <div class="split-section">{{ t("个人收藏") }}</div>
       <button
         type="button"
         class="split-nav"
@@ -542,10 +638,10 @@ async function doReveal() {
         @dragleave="dropTarget = null"
         @drop="onDropTarget($event, 'desktop')"
       >
-        <Monitor :size="16" /> <span class="split-nav-label">桌面</span>
+        <Monitor :size="16" /> <span class="split-nav-label">{{ t("桌面") }}</span>
       </button>
       <template v-if="topFolders.length">
-        <div class="split-section">桌面文件夹</div>
+        <div class="split-section">{{ t("桌面文件夹") }}</div>
         <button
           v-for="f in topFolders"
           :key="f.id"
@@ -561,13 +657,13 @@ async function doReveal() {
           <Folder :size="16" /> <span class="split-nav-label">{{ f.name }}</span>
         </button>
       </template>
-      <div class="split-section">共享盘</div>
+      <div class="split-section">{{ t("共享盘") }}</div>
       <div class="finder-shared" data-finder-shared>
-        <p v-if="sharedLoading" class="finder-shared-hint" data-shared-roots-loading>正在读取共享盘…</p>
+        <p v-if="sharedLoading" class="finder-shared-hint" data-shared-roots-loading>{{ t("正在读取共享盘…") }}</p>
         <div v-else-if="sharedFailure" class="finder-shared-block">
           <p class="finder-shared-error" role="alert" :data-shared-roots-error="sharedFailureCode">{{ sharedFailure }}</p>
           <DsButton size="sm" variant="secondary" :status="sharedLoading ? 'loading' : 'idle'" @click="loadSharedRoots">
-            <RefreshCw :size="13" :stroke-width="1.5" /> 重新读取
+            <RefreshCw :size="13" :stroke-width="1.5" /> {{ t("重新读取") }}
           </DsButton>
         </div>
         <template v-else-if="sharedRoots.length">
@@ -586,10 +682,10 @@ async function doReveal() {
             <small class="planned-count">{{ shareLabel(node.share) }}</small>
           </button>
         </template>
-        <p v-else class="finder-shared-hint" data-shared-roots-empty>没有可见的共享盘：公共盘为空，且你不属于任何部门。权限由后端判定，界面不伪造入口。</p>
+        <p v-else class="finder-shared-hint" data-shared-roots-empty>{{ t("没有可见的共享盘：公共盘为空，且你不属于任何部门。权限由后端判定，界面不伪造入口。") }}</p>
       </div>
-      <div class="split-section">位置</div>
-      <div class="split-nav finder-location"><HardDrive :size="16" /> <span class="split-nav-label">本机 · D1</span></div>
+      <div class="split-section">{{ t("位置") }}</div>
+      <div class="split-nav finder-location"><HardDrive :size="16" /> <span class="split-nav-label">{{ t("本机 · D1") }}</span></div>
       <button
         type="button"
         class="split-nav"
@@ -597,7 +693,7 @@ async function doReveal() {
         :aria-current="mode === 'transfers' ? 'true' : undefined"
         @click="mode = 'transfers'; sharedRoot = null"
       >
-        <ArrowUpDown :size="16" /> <span class="split-nav-label">传输中心</span>
+        <ArrowUpDown :size="16" /> <span class="split-nav-label">{{ t("传输中心") }}</span>
       </button>
     </nav>
 
@@ -606,25 +702,28 @@ async function doReveal() {
       <SharedDrivePanel v-else-if="mode === 'shared' && sharedRoot" :key="sharedRoot.id" :root="sharedRoot" />
       <template v-else>
       <div class="pane-toolbar">
-        <button class="icon-button" aria-label="后退" :disabled="at <= 0" @click="at -= 1">
+        <button class="icon-button" :aria-label="t('后退')" :disabled="at <= 0" @click="at -= 1">
           <ArrowLeft :size="15" />
         </button>
-        <button class="icon-button" aria-label="前进" :disabled="at >= history.length - 1" @click="at += 1">
+        <button class="icon-button" :aria-label="t('前进')" :disabled="at >= history.length - 1" @click="at += 1">
           <ArrowRight :size="15" />
         </button>
         <strong class="pane-title">{{ title }}</strong>
         <div class="toolbar-spacer" />
-        <div class="segmented" role="group" aria-label="查看方式">
-          <button :aria-pressed="view === 'grid'" aria-label="图标" @click="view = 'grid'"><LayoutGrid :size="15" /></button>
-          <button :aria-pressed="view === 'list'" aria-label="列表" @click="view = 'list'"><List :size="15" /></button>
+        <div class="segmented" role="group" :aria-label="t('查看方式')">
+          <button :aria-pressed="view === 'grid'" :aria-label="t('图标')" @click="view = 'grid'"><LayoutGrid :size="15" /></button>
+          <button :aria-pressed="view === 'list'" :aria-label="t('列表')" @click="view = 'list'"><List :size="15" /></button>
         </div>
-        <button class="icon-button" aria-label="排序方式" aria-haspopup="menu" @click="paneMenu($event, 'sort')">
+        <button class="icon-button" :aria-label="t('排序方式')" aria-haspopup="menu" @click="paneMenu($event, 'sort')">
           <ArrowUpDown :size="15" />
         </button>
         <label class="search-field">
           <Search :size="13" />
-          <input v-model="query" type="search" aria-label="搜索此文件夹" placeholder="搜索" />
+          <input v-model="query" type="search" :aria-label="t('搜索此文件夹')" :placeholder="t('搜索')" />
         </label>
+        <button class="icon-button" :aria-label="t('项目 Agent')" :aria-pressed="agentOpen" data-finder-agent-toggle @click="toggleAgent">
+          <Sparkles :size="15" />
+        </button>
       </div>
 
       <div
@@ -643,13 +742,13 @@ async function doReveal() {
       >
         <div v-if="!rows.length" class="empty-content">
           <FolderIcon :size="64" />
-          <span class="badge">{{ query ? "无匹配项" : "暂无内容" }}</span>
+          <span class="badge">{{ query ? t("无匹配项") : t("暂无内容") }}</span>
           <p v-if="query">没有匹配「{{ query }}」的项目。</p>
-          <p v-else>把电脑里的文件、图片、视频、文档拖到这里即可存入；右键可新建子文件夹。</p>
+          <p v-else>{{ t("把电脑里的文件、图片、视频、文档拖到这里即可存入；右键可新建子文件夹。") }}</p>
         </div>
         <div v-else class="file-groups">
           <div v-if="view === 'list'" class="file-list-head" aria-hidden="true">
-            <span>名称</span><span>修改日期</span><span>大小</span>
+            <span>{{ t("名称") }}</span><span>{{ t("修改日期") }}</span><span>{{ t("大小") }}</span>
           </div>
           <div v-for="g in groups" :key="g.label || 'all'" class="file-group-block">
             <div v-if="g.label" class="split-section">{{ g.label }}</div>
@@ -687,7 +786,7 @@ async function doReveal() {
                 <input
                   v-if="renaming === r.id"
                   class="folder-rename"
-                  aria-label="名称"
+                  :aria-label="t('名称')"
                   :value="r.name"
                   autofocus
                   @click.stop
@@ -699,7 +798,7 @@ async function doReveal() {
                 <span v-else class="file-name">{{ r.name }}</span>
                 <template v-if="view === 'list'">
                   <span class="file-meta">{{ r.kind === "folder" ? "—" : fmtDate(r.mtime) }}</span>
-                  <span class="file-meta">{{ r.kind === "folder" ? "文件夹" : fmtSize(r.size) }}</span>
+                  <span class="file-meta">{{ r.kind === "folder" ? t("文件夹") : fmtSize(r.size) }}</span>
                 </template>
               </div>
             </div>
@@ -715,19 +814,73 @@ async function doReveal() {
 
       <footer class="finder-status">
         <span>{{ status }}</span>
-        <span>本机 · D1</span>
+        <span>{{ t("本机 · D1") }}</span>
       </footer>
 
+      <aside v-if="agentOpen" class="finder-agent" data-finder-agent :aria-label="t('项目 Agent')">
+        <header class="finder-agent-head">
+          <b>{{ t("项目 Agent") }}</b>
+          <small>{{ t("会话绑定项目；任务与检查点来自 agent 命令") }}</small>
+          <div class="toolbar-spacer" />
+          <button class="icon-button" type="button" :aria-label="t('关闭')" @click="agentOpen = false"><X :size="14" /></button>
+        </header>
+        <p v-if="!agentAvailable" class="finder-agent-error" data-finder-agent-unavailable>{{ t("当前环境没有 Agent 桥；请在 OpenArc 桌面应用中打开。") }}</p>
+        <p v-if="agentError" class="finder-agent-error" role="alert" :data-finder-agent-error="agentError.code">{{ failureText(agentError) }}<span v-if="agentError.detail" class="finder-agent-detail"> · {{ String(agentError.detail) }}</span></p>
+        <p v-if="agentNotice" class="finder-agent-note" role="status" data-finder-agent-notice>{{ agentNotice }}</p>
+        <div class="finder-agent-row">
+          <label class="finder-agent-field">{{ t("项目") }}
+            <select v-model="agentProjectId" data-finder-agent-project @change="loadAgentTasks">
+              <option v-for="project in agentProjects" :key="project.id" :value="project.id">{{ project.name }}</option>
+            </select>
+          </label>
+          <button class="finder-agent-mini" type="button" :disabled="agentLoading" @click="loadAgentProjects">{{ agentLoading ? t("读取中…") : t("重新读取") }}</button>
+        </div>
+        <p v-if="!agentLoading && !agentProjects.length" class="finder-agent-note">{{ t("还没有项目：先在「项目」里创建项目，Agent 会话需要 projectId。") }}</p>
+        <div class="finder-agent-row">
+          <label class="finder-agent-field">{{ t("模式") }}
+            <select v-model="agentMode" data-finder-agent-mode>
+              <option value="assistant">assistant</option>
+              <option value="thinking">thinking</option>
+              <option value="agent">agent</option>
+            </select>
+          </label>
+        </div>
+        <textarea v-model="agentInstruction" class="finder-agent-input" rows="3" data-finder-agent-instruction :placeholder="t('描述要在当前项目里完成的任务…')"></textarea>
+        <div class="finder-agent-row">
+          <button class="finder-agent-primary" type="button" :disabled="!agentProjectId || !agentInstruction.trim() || agentBusy !== null" data-finder-agent-create @click="createAgentTask">{{ agentBusy === "create" ? t("创建中…") : t("创建任务") }}</button>
+        </div>
+        <h4 class="finder-agent-sub">{{ t("项目任务（{n}）", { n: agentTasks.length }) }}</h4>
+        <ul v-if="agentTasks.length" class="finder-agent-tasks">
+          <li v-for="task in agentTasks" :key="task.taskId" class="finder-agent-task" :data-finder-agent-task="task.taskId">
+            <button type="button" class="finder-agent-task-main" @click="openAgentTask(task.taskId)">
+              <b>{{ task.title || task.instruction || task.taskId }}</b>
+              <small>{{ task.executionProfile || task.mode || "thinking" }} · {{ task.status || "—" }}</small>
+            </button>
+            <button v-if="task.status === 'paused' || task.status === 'interrupted'" class="finder-agent-mini" type="button" @click="agentTaskAction(task.taskId, 'resume')">{{ t("恢复") }}</button>
+            <button v-else class="finder-agent-mini" type="button" @click="agentTaskAction(task.taskId, 'pause')">{{ t("暂停") }}</button>
+          </li>
+        </ul>
+        <p v-else-if="agentProjectId" class="finder-agent-note">{{ t("这个项目还没有 Agent 任务。") }}</p>
+        <div v-if="agentDetail?.task" class="finder-agent-detail-box" data-finder-agent-detail>
+          <b>{{ agentDetail.task.title || agentDetail.task.taskId }}</b>
+          <p>{{ t("状态：{status} · 检查点：{n}", { status: agentDetail.task.status || "—", n: agentDetail.checkpoints ?? 0 }) }}</p>
+          <ol v-if="agentDetail.steps?.length" class="finder-agent-steps">
+            <li v-for="step in agentDetail.steps" :key="step.id">{{ step.title || step.id }} · {{ step.status || "—" }}</li>
+          </ol>
+          <p v-if="!agentDetail.steps?.length" class="finder-agent-note">{{ t("还没有步骤记录。") }}</p>
+        </div>
+      </aside>
+
       <!-- D3-04D 受控资源库入口：契约原样保留 -->
-      <section class="finder-library" data-d3-04d="files" aria-label="资源库">
+      <section class="finder-library" data-d3-04d="files" :aria-label="t('资源库')">
         <div class="gov-form">
-          <b class="finder-library-label">资源库</b>
-          <DsButton variant="primary" size="sm" data-d3-04d-files-import @click="add('import')" title="复制一份由资源库管理">添加到资源库</DsButton>
-          <DsButton variant="secondary" size="sm" data-d3-04d-files-link @click="add('link')" title="不复制，只记录原文件位置">链接原文件</DsButton>
+          <b class="finder-library-label">{{ t("资源库") }}</b>
+          <DsButton variant="primary" size="sm" data-d3-04d-files-import @click="add('import')" :title="t('复制一份由资源库管理')">{{ t("添加到资源库") }}</DsButton>
+          <DsButton variant="secondary" size="sm" data-d3-04d-files-link @click="add('link')" :title="t('不复制，只记录原文件位置')">{{ t("链接原文件") }}</DsButton>
           <div class="toolbar-spacer" />
           <input v-model="exportRef" data-d3-04d-files-ref placeholder="resource://..." />
-          <DsButton variant="secondary" size="sm" data-d3-04d-files-export @click="doExport">导出为普通文件</DsButton>
-          <DsButton variant="ghost" size="sm" data-d3-04d-files-reveal @click="doReveal">显示源文件</DsButton>
+          <DsButton variant="secondary" size="sm" data-d3-04d-files-export @click="doExport">{{ t("导出为普通文件") }}</DsButton>
+          <DsButton variant="ghost" size="sm" data-d3-04d-files-reveal @click="doReveal">{{ t("显示源文件") }}</DsButton>
         </div>
         <p v-if="libError" class="gov-error" role="alert" data-d3-04d-files-error>{{ libError }}</p>
         <p v-if="libNotice" class="gov-notice" role="status" data-d3-04d-files-notice>{{ libNotice }}</p>
@@ -780,4 +933,45 @@ async function doReveal() {
 .finder-shared .split-nav {
   width: 100%;
 }
+.finder-main { position: relative; }
+.finder-agent {
+  position: absolute;
+  top: 44px;
+  right: 12px;
+  bottom: 12px;
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: rgb(var(--content-rgb) / 0.94);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.18);
+  backdrop-filter: blur(24px);
+  z-index: 5;
+}
+.finder-agent-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.finder-agent-head b { font-size: var(--fs-caption); font-weight: var(--fw-medium); }
+.finder-agent-head small { color: var(--muted); font-size: var(--fs-micro); }
+.finder-agent-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.finder-agent-field { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-micro); color: var(--muted); }
+.finder-agent-field select { min-height: 24px; padding: 0 6px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: rgb(var(--content-rgb) / 0.5); color: var(--text); font-size: var(--fs-micro); }
+.finder-agent-input { width: 100%; box-sizing: border-box; resize: vertical; min-height: 56px; padding: 6px; border: 1px solid var(--line); border-radius: var(--radius-md); background: rgb(var(--content-rgb) / 0.5); color: var(--text); font-size: var(--fs-micro); }
+.finder-agent-primary { min-height: 26px; padding: 0 10px; border: 1px solid transparent; border-radius: var(--radius-pill); background: var(--text); color: var(--content, #fff); font-size: var(--fs-micro); cursor: pointer; }
+.finder-agent-primary:disabled { opacity: 0.45; }
+.finder-agent-mini { min-height: 22px; padding: 0 8px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: transparent; color: var(--muted); font-size: var(--fs-micro); cursor: pointer; }
+.finder-agent-mini:disabled { opacity: 0.45; }
+.finder-agent-sub { margin: 6px 0 0; font-size: var(--fs-micro); font-weight: var(--fw-medium); color: var(--muted); }
+.finder-agent-tasks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.finder-agent-task { display: flex; align-items: center; gap: 6px; }
+.finder-agent-task-main { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 4px 6px; border: 0; border-radius: var(--radius-sm); background: rgb(var(--text-rgb) / 0.05); color: var(--text); text-align: left; cursor: pointer; }
+.finder-agent-task-main b { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-micro); font-weight: var(--fw-regular); }
+.finder-agent-task-main small { color: var(--muted); font-size: var(--fs-micro); }
+.finder-agent-note, .finder-agent-detail { margin: 0; color: var(--muted); font-size: var(--fs-micro); overflow-wrap: anywhere; }
+.finder-agent-error { margin: 0; color: var(--failed); font-size: var(--fs-micro); overflow-wrap: anywhere; }
+.finder-agent-detail-box { padding: 6px; border-radius: var(--radius-sm); background: rgb(var(--text-rgb) / 0.05); }
+.finder-agent-detail-box p { margin: 2px 0; color: var(--muted); font-size: var(--fs-micro); }
+.finder-agent-steps { margin: 2px 0 0; padding-left: 16px; color: var(--muted); font-size: var(--fs-micro); }
 </style>

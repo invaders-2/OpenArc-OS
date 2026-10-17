@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from "../i18n";
 import { computed, onMounted, ref } from "vue";
 import {
   Boxes,
@@ -9,6 +10,7 @@ import {
   RefreshCw,
   RotateCcw,
   ScrollText,
+  Sparkles,
   TerminalSquare,
   Trash2,
   Users,
@@ -28,6 +30,7 @@ import {
   formatTime,
   invokeDomain,
   resultFailure,
+  resultValue,
   type CommandReply,
   type FailureView,
 } from "../bridge/domain";
@@ -174,6 +177,55 @@ const notice = ref("");
 const actionError = ref<FailureView | null>(null);
 const commandLog = ref<LogEntry[]>([]);
 const confirmState = ref<{ title: string; message: string; run: () => Promise<void> } | null>(null);
+
+/* ── 开发者 App Agent 会话入口（task-35 第二部分）：真实 agent 命令 ──────── */
+type DevAgentOutcome = {
+  gateway?: string;
+  appId?: string;
+  projectId?: string;
+  sessionId?: string;
+  text?: string;
+  outcome?: { text?: string; [key: string]: unknown };
+  [key: string]: unknown;
+};
+const agentAvailable = ref(!!window.openarc?.agent);
+const agentApp = ref<{ appId: string; name: string } | null>(null);
+const agentInstruction = ref("");
+const agentMode = ref<"assistant" | "thinking" | "agent">("thinking");
+const agentBusy = ref(false);
+const agentError = ref<FailureView | null>(null);
+const agentResult = ref<DevAgentOutcome | null>(null);
+const agentResultText = computed(() => {
+  const value = agentResult.value;
+  if (!value) return "";
+  if (typeof value.text === "string" && value.text) return value.text;
+  if (value.outcome && typeof value.outcome.text === "string" && value.outcome.text) return value.outcome.text;
+  return "";
+});
+function openAppAgent(app: InstalledApp) {
+  agentApp.value = { appId: app.appId, name: app.manifest?.name || app.appId };
+  agentInstruction.value = "";
+  agentError.value = null;
+  agentResult.value = null;
+}
+async function runAppAgent() {
+  if (!agentApp.value || !agentInstruction.value.trim() || agentBusy.value) return;
+  agentBusy.value = true;
+  agentError.value = null;
+  agentResult.value = null;
+  const reply = await invokeDomain("agent", "agent/developer-app/run", {
+    appId: agentApp.value.appId,
+    instruction: agentInstruction.value.trim(),
+    executionProfile: agentMode.value,
+  });
+  agentBusy.value = false;
+  const value = resultValue<DevAgentOutcome>(reply);
+  if (!value) {
+    agentError.value = resultFailure(reply);
+    return;
+  }
+  agentResult.value = value;
+}
 
 const APP_SECTION_TITLE: Record<Tab, string> = {
   projects: "开发项目",
@@ -602,8 +654,8 @@ onMounted(() => {
 
 <template>
   <div class="split planned-app dev-app">
-    <nav class="split-side" aria-label="开发者">
-      <div class="split-section">开发者</div>
+    <nav class="split-side" :aria-label="t('开发者')">
+      <div class="split-section">{{ t("开发者") }}</div>
       <button
         v-for="entry in TABS"
         :key="entry.id"
@@ -619,7 +671,7 @@ onMounted(() => {
         <small v-if="entry.id === 'lab'" class="integr-count">{{ drafts.length }}</small>
         <small v-if="entry.id === 'collab'" class="integr-count">{{ rooms.length }}</small>
       </button>
-      <p class="planned-note">本页的所有数据都来自 developer:command；没有桥、没有会话或切片未装配时如实显示，不放演示数据。</p>
+      <p class="planned-note">{{ t("本页的所有数据都来自 developer:command；没有桥、没有会话或切片未装配时如实显示，不放演示数据。") }}</p>
     </nav>
 
     <div class="split-main dev-main">
@@ -629,14 +681,14 @@ onMounted(() => {
         <DsBadge v-if="tab !== 'cli'" size="sm" :tone="healthTone">{{ healthLabel }}</DsBadge>
         <DsBadge v-if="identity.snapshot.sessionRef && userId" size="sm">{{ userName || userId }}</DsBadge>
         <DsButton v-if="tab !== 'cli'" size="sm" variant="ghost" :status="loading ? 'loading' : 'idle'" data-dev-refresh @click="loadTab">
-          <RefreshCw :size="13" /> 刷新
+          <RefreshCw :size="13" /> {{ t("刷新") }}
         </DsButton>
       </div>
 
       <DsPageState
         v-if="!hasBridge"
         kind="unavailable"
-        title="当前环境没有开发者域的桥"
+        :title="t('当前环境没有开发者域的桥')"
         description="浏览器预览不提供 developer:command；请在 OpenArc 桌面应用中打开开发者。"
       />
 
@@ -647,12 +699,12 @@ onMounted(() => {
         <!-- ═══════════ 开发项目 ═══════════ -->
         <template v-if="tab === 'projects'">
           <section class="integr-sec">
-            <h3>已装载的本地开发应用</h3>
-            <DsPageState v-if="appsError" kind="error" title="读不到本地开发应用" :description="devFailure(appsError)" :on-action="loadApps" />
+            <h3>{{ t("已装载的本地开发应用") }}</h3>
+            <DsPageState v-if="appsError" kind="error" :title="t('读不到本地开发应用')" :description="devFailure(appsError)" :on-action="loadApps" />
             <DsPageState
               v-else-if="!apps.length"
               kind="empty"
-              title="还没有装载本地开发应用"
+              :title="t('还没有装载本地开发应用')"
               description="在「实验室」用模板创建草稿，打包 ZIP 后再走 developer/install 才能装载；当前没有可显示的已装应用。"
             />
             <ul v-else class="integr-rows">
@@ -661,7 +713,7 @@ onMounted(() => {
                   <div class="dev-app-title">
                     <b>{{ app.manifest?.name || app.appId }}</b>
                     <span class="mono">{{ app.appId }} · v{{ app.version }}{{ app.build ? "+" + app.build : "" }}</span>
-                    <DsBadge size="sm" :tone="app.enabled ? 'success' : 'neutral'">{{ app.enabled ? "已启用" : "已停用" }}</DsBadge>
+                    <DsBadge size="sm" :tone="app.enabled ? 'success' : 'neutral'">{{ app.enabled ? t("已启用") : t("已停用") }}</DsBadge>
                     <DsBadge v-if="app.releaseChannel" size="sm">{{ app.releaseChannel }}</DsBadge>
                   </div>
                   <p v-if="app.manifest?.description" class="dev-app-desc">{{ app.manifest.description }}</p>
@@ -672,26 +724,29 @@ onMounted(() => {
                   <p v-if="app.capabilities?.warnings?.length" class="dev-app-warn">{{ app.capabilities.warnings.join("；") }}</p>
                 </div>
                 <div class="dev-app-actions">
+                  <DsButton size="sm" variant="secondary" data-dev-app-agent :disabled="!agentAvailable" :title="agentAvailable ? t('打开 App Agent 会话') : t('当前环境没有 Agent 桥')" @click="openAppAgent(app)">
+                    <Sparkles :size="13" /> {{ t("Agent 会话") }}
+                  </DsButton>
                   <DsButton size="sm" variant="secondary" :status="busy === 'toggle-app' ? 'loading' : 'idle'" @click="toggleApp(app)">
                     <PowerOff v-if="app.enabled" :size="13" /><Power v-else :size="13" />
-                    {{ app.enabled ? "停用" : "启用" }}
+                    {{ app.enabled ? t("停用") : t("启用") }}
                   </DsButton>
-                  <DsButton size="sm" variant="ghost" :disabled="(app.historyCount ?? 0) === 0" :title="(app.historyCount ?? 0) === 0 ? '没有可回滚的历史版本' : '回滚到上一版本'" @click="rollbackApp(app)">
-                    <RotateCcw :size="13" /> 回滚
+                  <DsButton size="sm" variant="ghost" :disabled="(app.historyCount ?? 0) === 0" :title="(app.historyCount ?? 0) === 0 ? t('没有可回滚的历史版本') : t('回滚到上一版本')" @click="rollbackApp(app)">
+                    <RotateCcw :size="13" /> {{ t("回滚") }}
                   </DsButton>
-                  <DsButton size="sm" variant="danger" @click="uninstallApp(app)"><Trash2 :size="13" /> 卸载</DsButton>
+                  <DsButton size="sm" variant="danger" @click="uninstallApp(app)"><Trash2 :size="13" /> {{ t("卸载") }}</DsButton>
                 </div>
               </li>
             </ul>
           </section>
 
           <section class="integr-sec">
-            <h3>开发草稿</h3>
-            <DsPageState v-if="labError" kind="error" title="读不到开发草稿" :description="devFailure(labError)" :on-action="loadLab" />
+            <h3>{{ t("开发草稿") }}</h3>
+            <DsPageState v-if="labError" kind="error" :title="t('读不到开发草稿')" :description="devFailure(labError)" :on-action="loadLab" />
             <DsPageState
               v-else-if="!drafts.length"
               kind="empty"
-              title="实验室里还没有草稿"
+              :title="t('实验室里还没有草稿')"
               description="切到「实验室（沙箱）」用示例模板创建第一份草稿；草稿保存在本机 userData 的 developer-lab 目录。"
             />
             <ul v-else class="integr-rows">
@@ -702,8 +757,8 @@ onMounted(() => {
                   <span class="dev-draft-meta">{{ formatTime(draft.createdAt) }} · {{ draft.files?.length ?? 0 }} 个文件 · 检查 {{ passCount(draft) }} 通过 / {{ warnCount(draft) }} 建议 / {{ failCount(draft) }} 不通过</span>
                 </button>
                 <div class="dev-app-actions">
-                  <DsButton size="sm" variant="ghost" :status="busy === 'zip-draft' ? 'loading' : 'idle'" @click="exportDraft(draft)"><Download :size="13" /> 导出 ZIP</DsButton>
-                  <DsButton size="sm" variant="danger" @click="deleteDraft(draft)"><Trash2 :size="13" /> 删除</DsButton>
+                  <DsButton size="sm" variant="ghost" :status="busy === 'zip-draft' ? 'loading' : 'idle'" @click="exportDraft(draft)"><Download :size="13" /> {{ t("导出 ZIP") }}</DsButton>
+                  <DsButton size="sm" variant="danger" @click="deleteDraft(draft)"><Trash2 :size="13" /> {{ t("删除") }}</DsButton>
                 </div>
               </li>
             </ul>
@@ -713,11 +768,11 @@ onMounted(() => {
                 <b>{{ selectedDraft.name }}</b>
                 <span class="mono">{{ selectedDraft.appId }}</span>
                 <span class="toolbar-spacer" />
-                <DsButton size="sm" variant="ghost" @click="selectedDraft = null; draftFile = null">收起</DsButton>
+                <DsButton size="sm" variant="ghost" @click="selectedDraft = null; draftFile = null">{{ t("收起") }}</DsButton>
               </div>
               <div class="dev-draft-cols">
                 <div>
-                  <h4>检查项</h4>
+                  <h4>{{ t("检查项") }}</h4>
                   <ul class="integr-rows">
                     <li v-for="check in selectedDraft.checks || []" :key="check.id" class="integr-row">
                       <span class="integr-dep-label">{{ check.label }}</span>
@@ -727,7 +782,7 @@ onMounted(() => {
                   </ul>
                 </div>
                 <div>
-                  <h4>文件</h4>
+                  <h4>{{ t("文件") }}</h4>
                   <ul class="integr-rows">
                     <li v-for="file in draftFileList" :key="file.path" class="integr-row">
                       <button type="button" class="dev-file-open mono" @click="readDraftFile(selectedDraft, file.path)">{{ file.path }}</button>
@@ -745,44 +800,43 @@ onMounted(() => {
         <!-- ═══════════ 实验室 ═══════════ -->
         <template v-else-if="tab === 'lab'">
           <section class="integr-sec">
-            <h3>示例工程模板</h3>
-            <DsPageState v-if="templatesError" kind="error" title="读不到示例模板" :description="devFailure(templatesError)" />
-            <DsPageState v-else-if="!templates.length" kind="empty" title="没有提供的示例模板" description="实验室的模板目录由主进程随包提供；空目录时不会编造模板。" />
+            <h3>{{ t("示例工程模板") }}</h3>
+            <DsPageState v-if="templatesError" kind="error" :title="t('读不到示例模板')" :description="devFailure(templatesError)" />
+            <DsPageState v-else-if="!templates.length" kind="empty" :title="t('没有提供的示例模板')" description="实验室的模板目录由主进程随包提供；空目录时不会编造模板。" />
             <ul v-else class="integr-rows">
               <li v-for="template in templates" :key="template.id" class="integr-row" :data-dev-template="template.id">
                 <div class="dev-app-main">
-                  <div class="dev-app-title"><b>{{ template.name }}</b><span class="dev-app-meta">{{ template.subtitle || "" }}</span><DsBadge size="sm">{{ template.category || "示例" }}</DsBadge><span class="mono">{{ template.fileCount ?? 0 }} 个文件</span></div>
+                  <div class="dev-app-title"><b>{{ template.name }}</b><span class="dev-app-meta">{{ template.subtitle || "" }}</span><DsBadge size="sm">{{ template.category || t("示例") }}</DsBadge><span class="mono">{{ template.fileCount ?? 0 }} 个文件</span></div>
                   <p class="dev-app-desc">{{ template.description || "" }}</p>
                 </div>
-                <DsButton size="sm" variant="primary" :status="busy === 'create-draft' ? 'loading' : 'idle'" @click="createFromTemplate(template)">用模板新建草稿</DsButton>
+                <DsButton size="sm" variant="primary" :status="busy === 'create-draft' ? 'loading' : 'idle'" @click="createFromTemplate(template)">{{ t("用模板新建草稿") }}</DsButton>
               </li>
             </ul>
           </section>
 
           <section class="integr-sec">
-            <h3>草稿与沙箱边界</h3>
+            <h3>{{ t("草稿与沙箱边界") }}</h3>
             <p class="integr-note">
-              草稿只允许 .html/.css/.js/.mjs/.json/.txt/.md/.svg，单份不超过 8 MB；入口文件必须在草稿内。
-              沙箱预览只回原始字节与 MIME，不注入运行时桥；跨域父窗口属性访问会被检查项标为不通过。
+              {{ t("草稿只允许 .html/.css/.js/.mjs/.json/.txt/.md/.svg，单份不超过 8 MB；入口文件必须在草稿内。 沙箱预览只回原始字节与 MIME，不注入运行时桥；跨域父窗口属性访问会被检查项标为不通过。") }}
             </p>
-            <DsPageState v-if="labError" kind="error" title="读不到开发草稿" :description="devFailure(labError)" :on-action="loadLab" />
-            <DsPageState v-else-if="!drafts.length" kind="empty" title="还没有草稿" description="用上方模板创建第一份草稿。" />
+            <DsPageState v-if="labError" kind="error" :title="t('读不到开发草稿')" :description="devFailure(labError)" :on-action="loadLab" />
+            <DsPageState v-else-if="!drafts.length" kind="empty" :title="t('还没有草稿')" description="用上方模板创建第一份草稿。" />
             <ul v-else class="integr-rows">
               <li v-for="draft in drafts" :key="draft.id" class="integr-row">
                 <button type="button" class="dev-draft-open" @click="openDraft(draft)">
                   <b>{{ draft.name }}</b><span class="mono">{{ draft.appId }}</span>
                   <span class="dev-draft-meta">{{ formatTime(draft.createdAt) }} · {{ draft.files?.length ?? 0 }} 个文件</span>
                 </button>
-                <DsButton size="sm" variant="ghost" @click="openDraft(draft)">查看检查项与文件</DsButton>
+                <DsButton size="sm" variant="ghost" @click="openDraft(draft)">{{ t("查看检查项与文件") }}</DsButton>
               </li>
             </ul>
             <div v-if="selectedDraft" class="dev-draft-detail">
               <div class="dev-draft-head">
-                <b>{{ selectedDraft.name }}</b><span class="mono">{{ selectedDraft.appId }}</span><span class="toolbar-spacer" /><DsButton size="sm" variant="ghost" @click="selectedDraft = null; draftFile = null">收起</DsButton>
+                <b>{{ selectedDraft.name }}</b><span class="mono">{{ selectedDraft.appId }}</span><span class="toolbar-spacer" /><DsButton size="sm" variant="ghost" @click="selectedDraft = null; draftFile = null">{{ t("收起") }}</DsButton>
               </div>
               <div class="dev-draft-cols">
                 <div>
-                  <h4>检查项</h4>
+                  <h4>{{ t("检查项") }}</h4>
                   <ul class="integr-rows">
                     <li v-for="check in selectedDraft.checks || []" :key="check.id" class="integr-row">
                       <span class="integr-dep-label">{{ check.label }}</span>
@@ -792,7 +846,7 @@ onMounted(() => {
                   </ul>
                 </div>
                 <div>
-                  <h4>文件</h4>
+                  <h4>{{ t("文件") }}</h4>
                   <ul class="integr-rows">
                     <li v-for="file in draftFileList" :key="file.path" class="integr-row">
                       <button type="button" class="dev-file-open mono" @click="readDraftFile(selectedDraft, file.path)">{{ file.path }}</button>
@@ -807,26 +861,26 @@ onMounted(() => {
           </section>
 
           <section class="integr-sec">
-            <h3>离线开发文档</h3>
-            <DsPageState v-if="docsError" kind="unavailable" title="离线开发文档不可用" :description="devFailure(docsError)" />
+            <h3>{{ t("离线开发文档") }}</h3>
+            <DsPageState v-if="docsError" kind="unavailable" :title="t('离线开发文档不可用')" :description="devFailure(docsError)" />
             <dl v-else-if="docsStatus" class="integr-kv">
-              <dt>缓存可用</dt><dd>{{ docsStatus.available ? "是" : "否" }}</dd>
-              <dt>最近刷新</dt><dd>{{ formatTime(docsStatus.refreshedAt) }}</dd>
+              <dt>{{ t("缓存可用") }}</dt><dd>{{ docsStatus.available ? t("是") : t("否") }}</dd>
+              <dt>{{ t("最近刷新") }}</dt><dd>{{ formatTime(docsStatus.refreshedAt) }}</dd>
             </dl>
-            <p class="integr-note">文档刷新走远端已停用；这里只报告本机缓存事实。</p>
+            <p class="integr-note">{{ t("文档刷新走远端已停用；这里只报告本机缓存事实。") }}</p>
           </section>
         </template>
 
         <!-- ═══════════ 协作与实时房间 ═══════════ -->
         <template v-else-if="tab === 'collab'">
           <section class="integr-sec">
-            <h3>协同项目</h3>
+            <h3>{{ t("协同项目") }}</h3>
             <form class="integr-form" @submit.prevent="createProject">
-              <label class="integr-field"><span>新协同项目名称</span><input v-model="projectName" placeholder="例如：商品详情页改版" /></label>
-              <DsButton type="submit" size="sm" variant="primary" :status="busy === 'create-project' ? 'loading' : 'idle'" :disabled="!projectName.trim()">创建项目</DsButton>
+              <label class="integr-field"><span>{{ t("新协同项目名称") }}</span><input v-model="projectName" :placeholder="t('例如：商品详情页改版')" /></label>
+              <DsButton type="submit" size="sm" variant="primary" :status="busy === 'create-project' ? 'loading' : 'idle'" :disabled="!projectName.trim()">{{ t("创建项目") }}</DsButton>
             </form>
-            <DsPageState v-if="projectsError" kind="error" title="读不到协同项目" :description="devFailure(projectsError)" :on-action="loadCollab" />
-            <DsPageState v-else-if="!projects.length" kind="empty" title="还没有协同项目" description="创建后项目落在既有 projects 表，owner 是当前会话用户；没有成员时只对自己可见。" />
+            <DsPageState v-if="projectsError" kind="error" :title="t('读不到协同项目')" :description="devFailure(projectsError)" :on-action="loadCollab" />
+            <DsPageState v-else-if="!projects.length" kind="empty" :title="t('还没有协同项目')" description="创建后项目落在既有 projects 表，owner 是当前会话用户；没有成员时只对自己可见。" />
             <ul v-else class="integr-rows">
               <li v-for="project in projects" :key="project.id" class="integr-row" :data-dev-project="project.id">
                 <button type="button" class="dev-draft-open" @click="openProject(project)">
@@ -834,7 +888,7 @@ onMounted(() => {
                   <span class="mono">{{ project.id }}</span>
                   <span class="dev-draft-meta">v{{ project.version ?? 1 }} · {{ project.access }} · {{ project.members?.length ?? 0 }} 名成员 · 更新 {{ formatTime(project.updatedAt) }}</span>
                 </button>
-                <DsBadge size="sm">{{ project.visibility === "public" ? "公开" : project.visibility === "restricted" ? "受限" : "私有" }}</DsBadge>
+                <DsBadge size="sm">{{ project.visibility === "public" ? t("公开") : project.visibility === "restricted" ? t("受限") : t("私有") }}</DsBadge>
               </li>
             </ul>
             <p v-if="projectError" class="integr-error" role="alert">{{ devFailure(projectError) }}</p>
@@ -843,53 +897,52 @@ onMounted(() => {
                 <b>{{ selectedProject.name }}</b>
                 <span class="mono">{{ selectedProject.id }}</span>
                 <span class="toolbar-spacer" />
-                <DsButton size="sm" variant="ghost" @click="selectedProject = null">收起</DsButton>
+                <DsButton size="sm" variant="ghost" @click="selectedProject = null">{{ t("收起") }}</DsButton>
               </div>
               <dl class="integr-kv">
-                <dt>版本</dt><dd>{{ selectedProject.version ?? 1 }}</dd>
-                <dt>可见性</dt><dd>{{ selectedProject.visibility || "—" }}（公开访问：{{ selectedProject.publicAccess || "—" }}）</dd>
-                <dt>我的权限</dt><dd>{{ selectedProject.access || "—" }}</dd>
-                <dt>成员版本</dt><dd class="mono">{{ selectedProject.revision || "—" }}</dd>
-                <dt>邀请</dt><dd>{{ selectedProject.invite ? "口令末位 " + selectedProject.invite.codeHint : "当前没有有效邀请" }}</dd>
+                <dt>{{ t("版本") }}</dt><dd>{{ selectedProject.version ?? 1 }}</dd>
+                <dt>{{ t("可见性") }}</dt><dd>{{ selectedProject.visibility || "—" }}（公开访问：{{ selectedProject.publicAccess || "—" }}）</dd>
+                <dt>{{ t("我的权限") }}</dt><dd>{{ selectedProject.access || "—" }}</dd>
+                <dt>{{ t("成员版本") }}</dt><dd class="mono">{{ selectedProject.revision || "—" }}</dd>
+                <dt>{{ t("邀请") }}</dt><dd>{{ selectedProject.invite ? t("口令末位 ") + selectedProject.invite.codeHint : t("当前没有有效邀请") }}</dd>
               </dl>
-              <h4>成员</h4>
+              <h4>{{ t("成员") }}</h4>
               <ul class="integr-rows">
                 <li v-for="member in selectedProject.members || []" :key="member.userId" class="integr-row">
                   <span class="mono">{{ member.userId }}</span><DsBadge size="sm">{{ member.access }}</DsBadge>
                 </li>
               </ul>
-              <p v-if="!selectedProject.members?.length" class="integr-note">没有成员；这份项目目前只对 owner 可见。</p>
+              <p v-if="!selectedProject.members?.length" class="integr-note">{{ t("没有成员；这份项目目前只对 owner 可见。") }}</p>
             </div>
           </section>
 
           <section class="integr-sec">
-            <h3>实时房间</h3>
+            <h3>{{ t("实时房间") }}</h3>
             <p class="integr-note">
-              传输：<template v-if="transport?.configured">已装配（{{ transport.kind || "注入传输" }}）</template><template v-else-if="transportError">未装配 —— {{ devFailure(transportError) }}</template><template v-else>未读取</template>。
-              传输未装配时房间只存在于本机进程内，界面不会声称已经连到局域网。
+              {{ t("传输：") }}<template v-if="transport?.configured">已装配（{{ transport.kind || t("注入传输") }}）</template><template v-else-if="transportError">未装配 —— {{ devFailure(transportError) }}</template><template v-else>{{ t("未读取") }}</template>{{ t("。 传输未装配时房间只存在于本机进程内，界面不会声称已经连到局域网。") }}
             </p>
             <dl v-if="realtimeStats" class="integr-kv">
-              <dt>进程内房间</dt><dd>{{ realtimeStats.rooms }}</dd>
-              <dt>在线成员</dt><dd>{{ realtimeStats.peers }}</dd>
-              <dt>断线待重连</dt><dd>{{ realtimeStats.detached }}</dd>
+              <dt>{{ t("进程内房间") }}</dt><dd>{{ realtimeStats.rooms }}</dd>
+              <dt>{{ t("在线成员") }}</dt><dd>{{ realtimeStats.peers }}</dd>
+              <dt>{{ t("断线待重连") }}</dt><dd>{{ realtimeStats.detached }}</dd>
             </dl>
             <form class="integr-form" @submit.prevent="createRoom">
-              <label class="integr-field"><span>新房间名称</span><input v-model="roomName" placeholder="例如：设计评审" /></label>
-              <DsButton type="submit" size="sm" variant="primary" :status="busy === 'create-room' ? 'loading' : 'idle'">创建本机房间</DsButton>
+              <label class="integr-field"><span>{{ t("新房间名称") }}</span><input v-model="roomName" :placeholder="t('例如：设计评审')" /></label>
+              <DsButton type="submit" size="sm" variant="primary" :status="busy === 'create-room' ? 'loading' : 'idle'">{{ t("创建本机房间") }}</DsButton>
             </form>
-            <DsPageState v-if="roomsError" kind="error" title="读不到实时房间" :description="devFailure(roomsError)" :on-action="loadRealtime" />
-            <DsPageState v-else-if="!rooms.length" kind="empty" title="还没有可见的实时房间" description="房间按当前会话用户过滤；没有身份用户 ID 时只能看到 discoverable 房间。" />
+            <DsPageState v-if="roomsError" kind="error" :title="t('读不到实时房间')" :description="devFailure(roomsError)" :on-action="loadRealtime" />
+            <DsPageState v-else-if="!rooms.length" kind="empty" :title="t('还没有可见的实时房间')" description="房间按当前会话用户过滤；没有身份用户 ID 时只能看到 discoverable 房间。" />
             <ul v-else class="integr-rows">
               <li v-for="room in rooms" :key="room.id" class="integr-row" :data-dev-room="room.id">
                 <button type="button" class="dev-draft-open" @click="openRoom(room)">
                   <b>{{ room.name }}</b>
                   <span class="mono">{{ room.id }}</span>
-                  <span class="dev-draft-meta">成员 {{ room.members }}/{{ room.maxMembers }} · 序号 {{ room.seq }} · {{ room.discoverable ? "可发现" : "仅受邀请者可见" }}</span>
+                  <span class="dev-draft-meta">成员 {{ room.members }}/{{ room.maxMembers }} · 序号 {{ room.seq }} · {{ room.discoverable ? t("可发现") : t("仅受邀请者可见") }}</span>
                 </button>
                 <div class="dev-app-actions">
-                  <DsButton size="sm" variant="secondary" :status="busy === 'join-room' ? 'loading' : 'idle'" @click="joinRoom(room)">加入</DsButton>
-                  <DsButton size="sm" variant="ghost" :disabled="!myClientIds[room.id]" @click="leaveRoom(room)">离开</DsButton>
-                  <DsButton size="sm" variant="danger" :disabled="room.ownerId !== userId" :title="room.ownerId !== userId ? '只有房主可以关闭' : '关闭房间'" @click="closeRoom(room)">关闭</DsButton>
+                  <DsButton size="sm" variant="secondary" :status="busy === 'join-room' ? 'loading' : 'idle'" @click="joinRoom(room)">{{ t("加入") }}</DsButton>
+                  <DsButton size="sm" variant="ghost" :disabled="!myClientIds[room.id]" @click="leaveRoom(room)">{{ t("离开") }}</DsButton>
+                  <DsButton size="sm" variant="danger" :disabled="room.ownerId !== userId" :title="room.ownerId !== userId ? t('只有房主可以关闭') : t('关闭房间')" @click="closeRoom(room)">{{ t("关闭") }}</DsButton>
                 </div>
               </li>
             </ul>
@@ -899,12 +952,12 @@ onMounted(() => {
                 <b>{{ selectedRoom.name }}</b>
                 <span class="mono">{{ selectedRoom.id }}</span>
                 <span class="toolbar-spacer" />
-                <DsButton size="sm" variant="ghost" @click="selectedRoom = null">收起</DsButton>
+                <DsButton size="sm" variant="ghost" @click="selectedRoom = null">{{ t("收起") }}</DsButton>
               </div>
               <dl class="integr-kv">
-                <dt>房主</dt><dd class="mono">{{ selectedRoom.ownerId }}</dd>
-                <dt>序号</dt><dd>{{ selectedRoom.seq }}</dd>
-                <dt>成员</dt><dd>{{ selectedRoom.memberList?.length ?? 0 }} 人</dd>
+                <dt>{{ t("房主") }}</dt><dd class="mono">{{ selectedRoom.ownerId }}</dd>
+                <dt>{{ t("序号") }}</dt><dd>{{ selectedRoom.seq }}</dd>
+                <dt>{{ t("成员") }}</dt><dd>{{ selectedRoom.memberList?.length ?? 0 }} 人</dd>
               </dl>
               <ul class="integr-rows">
                 <li v-for="member in selectedRoom.memberList || []" :key="member.clientId" class="integr-row">
@@ -912,7 +965,7 @@ onMounted(() => {
                   <span class="integr-row-desc mono">{{ member.clientId }}</span>
                 </li>
               </ul>
-              <p v-if="!selectedRoom.memberList?.length" class="integr-note">房间里还没有成员。</p>
+              <p v-if="!selectedRoom.memberList?.length" class="integr-note">{{ t("房间里还没有成员。") }}</p>
             </div>
           </section>
         </template>
@@ -920,45 +973,45 @@ onMounted(() => {
         <!-- ═══════════ 命令与日志 ═══════════ -->
         <template v-else-if="tab === 'commands'">
           <section class="integr-sec">
-            <h3>开发者平台健康</h3>
-            <DsPageState v-if="healthError" kind="error" title="读不到开发者平台健康" :description="devFailure(healthError)" :on-action="loadHealth" />
+            <h3>{{ t("开发者平台健康") }}</h3>
+            <DsPageState v-if="healthError" kind="error" :title="t('读不到开发者平台健康')" :description="devFailure(healthError)" :on-action="loadHealth" />
             <template v-else-if="health">
               <dl class="integr-kv">
-                <dt>六张 v22 表</dt><dd>{{ health.tablesReady ? "全部就绪" : "缺少 " + (health.missingTables || []).join(", ") }}</dd>
-                <dt>数据根目录</dt><dd>{{ health.dataRootReady ? "可用" : "不可用" }}</dd>
-                <dt>实际可达命令</dt><dd>{{ health.commands ?? 0 }} / 白名单 {{ health.declaredCommands ?? 0 }}</dd>
-                <dt>已装载应用</dt><dd>{{ health.installedApps ?? 0 }}</dd>
-                <dt>出网策略</dt><dd>HTTPS {{ health.network?.httpsOnly ? "强制" : "—" }} · DNS 公网校验 {{ health.network?.dnsPublicCheck ? "开启" : "—" }} · 限流 {{ health.network?.rateLimitPerMinute ?? "—" }}/分钟</dd>
-                <dt>降级原因</dt><dd>{{ health.degradedReason || (health.degraded ? "装配期间有切片失败，详见下列状态" : "无") }}</dd>
+                <dt>{{ t("六张 v22 表") }}</dt><dd>{{ health.tablesReady ? t("全部就绪") : t("缺少 ") + (health.missingTables || []).join(", ") }}</dd>
+                <dt>{{ t("数据根目录") }}</dt><dd>{{ health.dataRootReady ? t("可用") : t("不可用") }}</dd>
+                <dt>{{ t("实际可达命令") }}</dt><dd>{{ health.commands ?? 0 }} / 白名单 {{ health.declaredCommands ?? 0 }}</dd>
+                <dt>{{ t("已装载应用") }}</dt><dd>{{ health.installedApps ?? 0 }}</dd>
+                <dt>{{ t("出网策略") }}</dt><dd>HTTPS {{ health.network?.httpsOnly ? t("强制") : "—" }} · DNS 公网校验 {{ health.network?.dnsPublicCheck ? t("开启") : "—" }} · 限流 {{ health.network?.rateLimitPerMinute ?? "—" }}/分钟</dd>
+                <dt>{{ t("降级原因") }}</dt><dd>{{ health.degradedReason || (health.degraded ? t("装配期间有切片失败，详见下列状态") : t("无")) }}</dd>
               </dl>
-              <h4>扩展切片</h4>
+              <h4>{{ t("扩展切片") }}</h4>
               <ul class="integr-rows">
                 <li v-for="row in extensionRows" :key="row.name" class="integr-row">
                   <span class="integr-dep-label">{{ row.name }}</span>
                   <DsBadge size="sm" :tone="row.status === 'ok' ? 'success' : row.status === 'degraded' ? 'warning' : 'neutral'">{{ EXT_TEXT[row.status] || row.status }}</DsBadge>
                 </li>
               </ul>
-              <p v-if="!extensionRows.length" class="integr-note">健康投影没有返回切片状态；这通常意味着只有 B7a 基座装配。</p>
+              <p v-if="!extensionRows.length" class="integr-note">{{ t("健康投影没有返回切片状态；这通常意味着只有 B7a 基座装配。") }}</p>
             </template>
           </section>
 
           <section class="integr-sec">
-            <h3>本机运行环境</h3>
+            <h3>{{ t("本机运行环境") }}</h3>
             <dl class="integr-kv">
-              <dt>原生桥</dt><dd>{{ hasBridge ? "已连接（preload）" : "未连接" }}</dd>
-              <dt>会话</dt><dd>{{ identity.snapshot.sessionRef ? (userName || userId) : "没有已认证会话" }}</dd>
+              <dt>{{ t("原生桥") }}</dt><dd>{{ hasBridge ? t("已连接（preload）") : t("未连接") }}</dd>
+              <dt>{{ t("会话") }}</dt><dd>{{ identity.snapshot.sessionRef ? (userName || userId) : t("没有已认证会话") }}</dd>
               <dt>Electron / Chromium</dt><dd class="mono">{{ electronVersion }} / {{ chromiumVersion }}</dd>
-              <dt>平台</dt><dd>{{ platformName }}</dd>
+              <dt>{{ t("平台") }}</dt><dd>{{ platformName }}</dd>
             </dl>
           </section>
 
           <section class="integr-sec">
-            <h3>本次窗口的命令记录</h3>
-            <DsPageState v-if="!commandLog.length" kind="empty" title="还没有调用过开发者命令" description="刷新页面上的数据或执行任何动作后，这里会出现真实的成功 / 失败结果。" />
+            <h3>{{ t("本次窗口的命令记录") }}</h3>
+            <DsPageState v-if="!commandLog.length" kind="empty" :title="t('还没有调用过开发者命令')" description="刷新页面上的数据或执行任何动作后，这里会出现真实的成功 / 失败结果。" />
             <ul v-else class="integr-rows">
               <li v-for="(entry, index) in commandLog" :key="entry.at + '-' + index" class="integr-row" :data-dev-log="entry.command">
                 <span class="mono integr-log-time">{{ formatTime(entry.at) }}</span>
-                <DsBadge size="sm" :tone="entry.ok ? 'success' : 'danger'">{{ entry.ok ? "成功" : "失败" }}</DsBadge>
+                <DsBadge size="sm" :tone="entry.ok ? 'success' : 'danger'">{{ entry.ok ? t("成功") : t("失败") }}</DsBadge>
                 <span class="mono integr-command-name">{{ entry.command }}</span>
                 <span class="integr-row-desc">{{ entry.ok ? "" : entry.code + (entry.detail ? " · " + entry.detail : "") }}</span>
               </li>
@@ -966,12 +1019,12 @@ onMounted(() => {
           </section>
 
           <section class="integr-sec">
-            <h3>渲染进程运行日志</h3>
-            <DsPageState v-if="!devlog.items.length" kind="empty" title="启动以来没有错误或警告" description="只收集真实发生的未捕获错误、未处理拒绝与 console.error / console.warn。" />
+            <h3>{{ t("渲染进程运行日志") }}</h3>
+            <DsPageState v-if="!devlog.items.length" kind="empty" :title="t('启动以来没有错误或警告')" description="只收集真实发生的未捕获错误、未处理拒绝与 console.error / console.warn。" />
             <ul v-else class="integr-rows">
               <li v-for="(entry, index) in [...devlog.items].reverse().slice(0, 60)" :key="entry.t + '-' + index" class="integr-row" :data-dev-runtime-log="entry.level">
                 <span class="mono integr-log-time">{{ formatTime(entry.t) }}</span>
-                <DsBadge size="sm" :tone="entry.level === 'warn' ? 'warning' : 'danger'">{{ entry.level === "warn" ? "警告" : entry.level === "reject" ? "拒绝" : "错误" }}</DsBadge>
+                <DsBadge size="sm" :tone="entry.level === 'warn' ? 'warning' : 'danger'">{{ entry.level === "warn" ? t("警告") : entry.level === "reject" ? t("拒绝") : t("错误") }}</DsBadge>
                 <pre class="dev-runtime-msg mono">{{ entry.msg }}</pre>
               </li>
             </ul>
@@ -988,8 +1041,32 @@ onMounted(() => {
     <DsDialog :open="confirmState !== null" :title="confirmState?.title || ''" @close="confirmState = null">
       <p class="dev-confirm-text">{{ confirmState?.message }}</p>
       <template #footer>
-        <button class="ghost" @click="confirmState = null">取消</button>
-        <button class="primary" data-dev-confirm @click="doConfirm">确认执行</button>
+        <button class="ghost" @click="confirmState = null">{{ t("取消") }}</button>
+        <button class="primary" data-dev-confirm @click="doConfirm">{{ t("确认执行") }}</button>
+      </template>
+    </DsDialog>
+
+    <DsDialog :open="agentApp !== null" :title="t('App Agent 会话')" @close="agentApp = null">
+      <p class="dev-confirm-text">{{ agentApp?.name }} · <span class="mono">{{ agentApp?.appId }}</span></p>
+      <p class="integr-detail">{{ t("Agent 只在当前开发者 App 的会话隔离与能力边界内运行；缺依赖时后端会如实返回结构化错误。") }}</p>
+      <label class="integr-field">{{ t("模式") }}
+        <select v-model="agentMode" data-dev-agent-mode>
+          <option value="assistant">assistant</option>
+          <option value="thinking">thinking</option>
+          <option value="agent">agent</option>
+        </select>
+      </label>
+      <textarea v-model="agentInstruction" class="integr-input dev-agent-input" rows="4" data-dev-agent-instruction :placeholder="t('描述要让这个 App Agent 完成的动作…')"></textarea>
+      <p v-if="!agentAvailable" class="integr-error" data-dev-agent-unavailable>{{ t("当前环境没有 Agent 桥；请在 OpenArc 桌面应用中打开。") }}</p>
+      <p v-if="agentError" class="integr-error" role="alert" :data-dev-agent-error="agentError.code">{{ failureText(agentError) }}<span v-if="agentError.detail" class="integr-detail"> · {{ detailText(agentError.detail) }}</span></p>
+      <div v-if="agentResult" class="dev-agent-result" data-dev-agent-result>
+        <p>{{ t("项目：{project} · 会话：{session}", { project: agentResult.projectId || "—", session: agentResult.sessionId || "—" }) }}</p>
+        <p v-if="agentResult.gateway">{{ t("入口：{gateway}", { gateway: agentResult.gateway }) }}</p>
+        <pre v-if="agentResultText" class="dev-agent-output">{{ agentResultText }}</pre>
+      </div>
+      <template #footer>
+        <button class="ghost" @click="agentApp = null">{{ t("取消") }}</button>
+        <button class="primary" :disabled="agentBusy || !agentInstruction.trim()" data-dev-agent-run @click="runAppAgent">{{ agentBusy ? t("运行中…") : t("开始会话") }}</button>
       </template>
     </DsDialog>
   </div>
@@ -1063,4 +1140,8 @@ onMounted(() => {
 @media (max-width: 900px) {
   .dev-draft-cols { grid-template-columns: 1fr; }
 }
+.dev-agent-input { width: 100%; box-sizing: border-box; resize: vertical; min-height: 72px; margin: 6px 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius-md); background: rgb(var(--content-rgb) / 0.5); color: var(--text); font-size: var(--fs-caption); }
+.dev-agent-result { display: flex; flex-direction: column; gap: 4px; padding: 8px; border-radius: var(--radius-md); background: rgb(var(--text-rgb) / 0.05); }
+.dev-agent-result p { margin: 0; font-size: var(--fs-micro); color: var(--muted); }
+.dev-agent-output { margin: 0; max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--text); }
 </style>

@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { Check, CircleAlert, LoaderCircle, Square } from "lucide-vue-next";
 import { useShellStore } from "../stores/shell";
 import Orb from "./Orb.vue";
+import { agentBridge, agentCommand, agentErrorText, prettyDetail } from "../agent/agentClient";
 
 /**
  * 全局 AI · 助理浮层（10-16，按界面原型 assist-panel 与设计语言 §5.3）：
@@ -41,6 +42,81 @@ const resumable = ref(false);
 const stopReason = ref<string | null>(null);
 const recovery = ref<any>(null);
 const verifications = ref<any[]>([]);
+
+/* task-35 · Jarvis 能力面：真实读 agent/tool/catalog + agent/health，能力发现走 agent/jarvis/run。 */
+const agent = agentBridge();
+const capOpen = ref(false);
+const capLoading = ref(false);
+const capError = ref("");
+const capFilter = ref("");
+const agentHealth = ref<any>(null);
+const catalog = ref<any>(null);
+const jarvisRun = ref<any>(null);
+const routeResult = ref<any>(null);
+const routeError = ref("");
+
+async function loadCapabilities() {
+  if (!agent) {
+    capError.value = "Agent 桥不可用：只能在桌面应用内查看能力。";
+    return;
+  }
+  capLoading.value = true;
+  capError.value = "";
+  try {
+    const [health, tools] = await Promise.all([
+      agentCommand("agent/health", {}, agent),
+      agentCommand("agent/tool/catalog", { executableOnly: false }, agent),
+    ]);
+    if (health.ok) agentHealth.value = health.value;
+    else capError.value = agentErrorText(health.error, health.message);
+    if (tools.ok) catalog.value = tools.value;
+    else capError.value = agentErrorText(tools.error, tools.message);
+  } finally {
+    capLoading.value = false;
+  }
+}
+function openCapabilities() {
+  capOpen.value = !capOpen.value;
+  if (capOpen.value) void loadCapabilities();
+}
+async function discoverJarvis() {
+  if (!agent) return;
+  capLoading.value = true;
+  capError.value = "";
+  try {
+    const res = await agentCommand("agent/jarvis/run", { instruction: q.value.trim() || "查看当前可用的桌面能力" }, agent);
+    if (res.ok) jarvisRun.value = res.value;
+    else capError.value = agentErrorText(res.error, res.message);
+  } finally {
+    capLoading.value = false;
+  }
+}
+async function routePreview() {
+  if (!agent) return;
+  capLoading.value = true;
+  routeError.value = "";
+  routeResult.value = null;
+  try {
+    const res = await agentCommand("agent/capability/route", { instruction: q.value.trim() || "查看当前可用的桌面能力" }, agent);
+    if (res.ok) routeResult.value = res.value?.route ?? res.value;
+    else routeError.value = agentErrorText(res.error, res.message);
+  } finally {
+    capLoading.value = false;
+  }
+}
+const toolRows = computed(() => {
+  const items = Array.isArray(catalog.value?.descriptors) ? catalog.value.descriptors : [];
+  const needle = capFilter.value.trim().toLowerCase();
+  return items.filter((tool: any) => !needle || String(tool.name + " " + (tool.title || "") + " " + (tool.source || "")).toLowerCase().includes(needle));
+});
+const sourceCounts = computed(() => {
+  const counts: Record<string, number> = {};
+  for (const tool of Array.isArray(catalog.value?.descriptors) ? catalog.value.descriptors : []) {
+    counts[tool.source || "other"] = (counts[tool.source || "other"] || 0) + 1;
+  }
+  return counts;
+});
+const disclosure = computed(() => jarvisRun.value?.disclosure ?? null);
 
 const chips = ["总结一下我桌面上的文稿", "帮我列一份本周工作计划", "用资源库里的图片写一段产品介绍", "解释一下 MCP 是什么"];
 
@@ -181,9 +257,53 @@ onBeforeUnmount(() => {
 
       <div v-if="!taskId" class="assist-chips">
         <button v-for="c in chips" :key="c" type="button" class="assist-chip" @click="pick(c)">{{ c }}</button>
+        <button type="button" class="assist-chip assist-chip-cap" data-ai-capabilities @click="openCapabilities">{{ capOpen ? "收起能力" : "能力与工具" }}</button>
       </div>
 
-      <div v-else class="assist-body">
+      <div v-if="capOpen" class="assist-caps" data-ai-caps>
+        <div class="assist-caps-head">
+          <strong>Jarvis 能力面</strong>
+          <span class="badge" :data-ai-agent-health="agentHealth?.status || ''">{{ agentHealth ? "运行时 " + agentHealth.status : "运行时状态未知" }}</span>
+          <button type="button" :disabled="capLoading" data-ai-caps-refresh @click="loadCapabilities">{{ capLoading ? "读取中…" : "刷新" }}</button>
+        </div>
+        <div class="assist-caps-actions">
+          <button type="button" :disabled="capLoading" data-ai-caps-discover @click="discoverJarvis">能力发现（agent/jarvis/run）</button>
+          <button type="button" :disabled="capLoading" data-ai-caps-route @click="routePreview">按当前指令路由能力</button>
+        </div>
+        <p v-if="capError" class="assist-err" role="alert" data-ai-agent-error>{{ capError }}</p>
+
+        <div v-if="catalog" class="assist-caps-summary" data-ai-caps-summary>
+          <span>工具 {{ catalog.summary?.total ?? 0 }} · 就绪 {{ catalog.summary?.ready ?? 0 }} · 待配置 {{ catalog.summary?.pending ?? 0 }}</span>
+          <span v-for="(count, source) in sourceCounts" :key="source" class="assist-source-count">{{ source }} {{ count }}</span>
+        </div>
+
+        <div v-if="disclosure" class="assist-caps-block" data-ai-jarvis-disclosure>
+          <div class="assist-caps-label">Agent 网关披露 · {{ jarvisRun?.profileId || "system-jarvis" }}</div>
+          <p>run {{ jarvisRun?.runId || "—" }} · 能力 {{ disclosure.capabilities?.length ?? 0 }} · 工具 {{ disclosure.tools?.length ?? 0 }}</p>
+          <p v-if="disclosure.clientTools?.length">客户端执行：{{ disclosure.clientTools.map((t: any) => t.name).join("、") }}</p>
+          <p v-if="disclosure.serverTools?.length">服务端工具：{{ disclosure.serverTools.map((t: any) => t.name).join("、") }}</p>
+          <p class="assist-caps-muted">客户端动作只返回待执行动作，界面不会假装已经执行。</p>
+        </div>
+
+        <div v-if="routeResult" class="assist-caps-block" data-ai-route>
+          <div class="assist-caps-label">能力路由</div>
+          <p>模型 {{ routeResult.model?.providerId || "—" }} / {{ routeResult.model?.model || "—" }} · 工具 {{ routeResult.toolDescriptors?.length ?? 0 }}</p>
+          <p v-if="routeResult.warnings?.length" class="assist-caps-warn">{{ routeResult.warnings.join("；") }}</p>
+        </div>
+        <p v-if="routeError" class="assist-err" role="alert" data-ai-route-error>{{ routeError }}</p>
+
+        <input v-model="capFilter" class="assist-caps-filter" data-ai-caps-filter placeholder="筛选工具名 / 来源" aria-label="筛选 Agent 工具" />
+        <ul v-if="toolRows.length" class="assist-tool-list">
+          <li v-for="tool in toolRows" :key="tool.name" :data-ai-tool="tool.name" :data-ai-tool-status="tool.status" :data-ai-tool-source="tool.source">
+            <span class="assist-tool-status" :data-s="tool.status">{{ tool.status }}</span>
+            <span class="assist-tool-name">{{ tool.name }}</span>
+            <span class="assist-tool-desc">{{ tool.title }} · {{ tool.statusText || tool.description }}</span>
+          </li>
+        </ul>
+        <p v-else class="assist-caps-muted" data-ai-tools-empty>{{ catalog ? "没有符合条件的工具。" : "工具目录未返回。" }}</p>
+      </div>
+
+      <div v-if="taskId" class="assist-body">
         <div class="assist-card">
           <div class="assist-card-head">
             <strong class="assist-goal">{{ goal }}</strong>
@@ -216,6 +336,7 @@ onBeforeUnmount(() => {
         </div>
         <div class="assist-foot">
           <span>与手动操作走同一套权限；写入、删除等操作都会先问你。</span>
+          <button data-ai-capabilities @click="openCapabilities">{{ capOpen ? "收起能力" : "能力" }}</button>
           <button @click="toChat">在对话中打开</button>
           <button class="ghost" :disabled="running" @click="newTask">新任务</button>
         </div>
@@ -223,3 +344,29 @@ onBeforeUnmount(() => {
     </section>
   </div>
 </template>
+
+<style scoped>
+.assist-chip-cap { color: var(--muted); }
+.assist-caps { border-top: 0.5px solid rgb(var(--text-rgb) / 0.08); padding: 10px 16px 14px; max-height: 34vh; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+.assist-caps-head { display: flex; align-items: center; gap: 8px; }
+.assist-caps-head strong { flex: 1; font-size: var(--fs-secondary); font-weight: var(--fw-medium); }
+.assist-caps-head button, .assist-caps-actions button { padding: 3px 9px; border-radius: var(--radius-md); font-size: var(--fs-micro); background: rgb(var(--text-rgb) / 0.08); color: var(--text); }
+.assist-caps-head button:disabled, .assist-caps-actions button:disabled { opacity: 0.45; }
+.assist-caps-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.assist-caps-summary { display: flex; flex-wrap: wrap; gap: 6px; color: var(--muted); font-size: var(--fs-micro); }
+.assist-source-count { padding: 0 6px; border-radius: 999px; background: rgb(var(--text-rgb) / 0.05); }
+.assist-caps-block { display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border-radius: var(--radius-md); background: rgb(var(--text-rgb) / 0.05); font-size: var(--fs-caption); }
+.assist-caps-block p { margin: 0; }
+.assist-caps-label { color: var(--muted); font-size: var(--fs-micro); }
+.assist-caps-muted { margin: 0; color: var(--muted); font-size: var(--fs-micro); }
+.assist-caps-warn { color: var(--failed); }
+.assist-caps-filter { width: 100%; box-sizing: border-box; padding: 6px 9px; border-radius: var(--radius-md); background: rgb(var(--text-rgb) / 0.05); color: var(--text); font: inherit; font-size: var(--fs-caption); outline: none; }
+.assist-caps-filter:focus { box-shadow: 0 0 0 2px var(--focus); }
+.assist-tool-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.assist-tool-list li { display: grid; grid-template-columns: 52px minmax(90px, 0.5fr) minmax(0, 1fr); gap: 8px; align-items: baseline; font-size: var(--fs-micro); }
+.assist-tool-status { color: var(--muted); }
+.assist-tool-status[data-s="ready"] { color: var(--success-text, #1e7e34); }
+.assist-tool-status[data-s="unavailable"], .assist-tool-status[data-s="disabled"] { color: var(--failed); }
+.assist-tool-name { font-family: var(--font-mono); overflow-wrap: anywhere; }
+.assist-tool-desc { color: var(--muted); overflow-wrap: anywhere; }
+</style>

@@ -1,5 +1,5 @@
 import type { Component } from "vue";
-import { locale } from "./i18n";
+import { locale } from "./i18n/index.ts";
 import {
   Compass,
   Folder,
