@@ -24,6 +24,7 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
+  ScanText,
   Scissors,
   Send,
   Sparkles,
@@ -37,6 +38,7 @@ import DsDialog from "../design-system/DsDialog.vue";
 import DsPageState from "../design-system/DsPageState.vue";
 import DsSearchField from "../design-system/DsSearchField.vue";
 import DsTextField from "../design-system/DsTextField.vue";
+import OcrPanel from "./OcrPanel.vue";
 import {
   IMPORT_DESTINATIONS,
   PHOTOS_PAGE_LIMIT_DEFAULT,
@@ -116,7 +118,7 @@ import type {
 } from "../../src/photos/types";
 import "../../src/photos/photos.css";
 
-type Tab = "library" | "studio";
+type Tab = "library" | "studio" | "ocr";
 const tab = ref<Tab>("library");
 
 const host: unknown = typeof window === "undefined" ? null : window;
@@ -1173,6 +1175,9 @@ async function submitSend() {
       <button type="button" class="split-nav" :aria-current="tab === 'studio'" @click="tab = 'studio'">
         <Wand2 :size="16" :stroke-width="1.25" /> 图像工坊
       </button>
+      <button type="button" class="split-nav" data-photos-ocr-nav :aria-current="tab === 'ocr'" @click="tab = 'ocr'">
+        <ScanText :size="16" :stroke-width="1.25" /> 文字识别
+      </button>
     </nav>
 
     <div class="split-main" :data-photos-tab="tab">
@@ -1409,7 +1414,7 @@ async function submitSend() {
         </div>
 
         <!-- ═══════════════════ 图像工坊 ═══════════════════ -->
-        <div v-else class="photos-studio" data-photos-studio="1" :data-photos-state="studioListState">
+        <div v-else-if="tab === 'studio'" class="photos-studio" data-photos-studio="1" :data-photos-state="studioListState">
           <aside class="photos-pane photos-studio-side" aria-label="图像工坊视图">
             <div class="photos-pane-head"><h3>图像工坊</h3></div>
             <ul class="photos-list">
@@ -1579,6 +1584,11 @@ async function submitSend() {
               </div>
             </div>
           </aside>
+        </div>
+
+        <!-- ═══════════════ 文字识别（0.6.1 · ocr:command） ═══════════════ -->
+        <div v-else-if="tab === 'ocr'" class="photos-ocr" data-photos-ocr="1">
+          <OcrPanel />
         </div>
 
         <!-- ═══════════════════ 图库弹窗 ═══════════════════ -->

@@ -48,6 +48,7 @@ const META: Record<string, { cat: string; desc: string; planned?: boolean }> = {
   "resource-library": { cat: "团队与资源", desc: "可被助理引用的资源" },
   skills: { cat: "团队与资源", desc: "技能的安装与管理" },
   "mcp-center": { cat: "团队与资源", desc: "连接外部工具与数据源（MCP）" },
+  integrations: { cat: "团队与资源", desc: "领星、紫鸟、钉钉、夸克、天气与黄历等可选服务的开关与凭据" },
 };
 const CATS = ["全部", "系统", "创作", "效率", "团队与资源"];
 const meta = (a: AppEntry) => META[a.id] ?? { cat: "其他", desc: "" };

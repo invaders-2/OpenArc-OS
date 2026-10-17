@@ -20,6 +20,7 @@ import {
 import DsButton from "../design-system/DsButton.vue";
 import DsContextMenu, { type MenuEntry } from "../design-system/DsContextMenu.vue";
 import FolderIcon from "../shell/FolderIcon.vue";
+import TransferCenter from "./TransferCenter.vue";
 import { useShellStore } from "../stores/shell";
 import { kindOfExt } from "../wallpapers";
 
@@ -47,7 +48,10 @@ type Row = { id: string; name: string; kind: "folder" | "file"; ext?: string; si
 const history = ref<string[]>([DESKTOP_ID]);
 const at = ref(0);
 const folderId = computed(() => history.value[at.value]);
+/** 传输中心与文件浏览共用同一个窗口：files = 文件、transfers = 0.6.1 的文件传输域。 */
+const mode = ref<"files" | "transfers">("files");
 function go(fid: string) {
+  mode.value = "files";
   if (fid === folderId.value) return;
   history.value = [...history.value.slice(0, at.value + 1), fid];
   at.value = history.value.length - 1;
@@ -521,9 +525,20 @@ async function doReveal() {
       </template>
       <div class="split-section">位置</div>
       <div class="split-nav finder-location"><HardDrive :size="16" /> <span class="split-nav-label">本机 · D1</span></div>
+      <button
+        type="button"
+        class="split-nav"
+        data-finder-transfers
+        :aria-current="mode === 'transfers' ? 'true' : undefined"
+        @click="mode = 'transfers'"
+      >
+        <ArrowUpDown :size="16" /> <span class="split-nav-label">传输中心</span>
+      </button>
     </nav>
 
     <div class="split-main finder-main" @click.self="clearSelection">
+      <TransferCenter v-if="mode === 'transfers'" />
+      <template v-else>
       <div class="pane-toolbar">
         <button class="icon-button" aria-label="后退" :disabled="at <= 0" @click="at -= 1">
           <ArrowLeft :size="15" />
@@ -657,6 +672,7 @@ async function doReveal() {
           </li>
         </ul>
       </section>
+      </template>
     </div>
 
     <Teleport v-if="menu" to=".desktop">

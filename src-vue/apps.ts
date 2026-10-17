@@ -37,6 +37,9 @@ export const APPS: readonly AppEntry[] = [
   { id: "organization", name: "组织", icon: "settings", version: "0.1.0" },
   { id: "skills", name: "Skill 中心", icon: "shortcuts", version: "0.1.0" },
   { id: "mcp-center", name: "MCP 中心", icon: "sharing", version: "0.1.0" },
+  // 0.6.1：第三方集成入口（领星 / 紫鸟 / 钉钉 / 夸克 / 天气 / 黄历等可选插件）。
+  // 图标复用随包的 sharing 身份图标：本批只允许改 src-vue / src/types，不新增 public 资产。
+  { id: "integrations", name: "第三方集成", icon: "sharing", version: "0.1.0" },
   // 10-16：协议中心（模型 / 供应商协议，原「模型与服务商 › 协议」标签独立成应用）
   { id: "protocols", name: "协议中心", icon: "protocols", version: "0.1.0" },
   { id: "settings", name: "系统设置", icon: "settings", version: "0.1.0" },
@@ -89,6 +92,7 @@ export const lineIconFor = (appId: string): Component => APP_LINE_ICON[appId] ??
 /** 应用分类（应用程序弹窗的分类条与应用市场共用口径）。没列的归「其他」。 */
 export const APP_CATEGORY: Record<string, string> = {
   files: "系统", trash: "系统", settings: "系统", dev: "系统",
+  integrations: "团队与资源",
   canvas: "创作", photos: "创作", music: "创作", notes: "创作", video: "创作", declare: "创作", drama: "创作",
   chat: "效率", automation: "效率", calendar: "效率", weather: "效率", browser: "效率", market: "效率",
   projects: "团队与资源", organization: "团队与资源", "resource-library": "团队与资源", skills: "团队与资源", "mcp-center": "团队与资源", protocols: "团队与资源",

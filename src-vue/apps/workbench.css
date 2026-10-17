@@ -1,0 +1,144 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   0.6.1 · 开发者工作台 / 第三方集成 共用的工作区组件层
+   ══════════════════════════════════════════════════════════════════════════
+
+   为什么单独一份：这两个应用共用同一套「服务 / 依赖 / 命令 / 记录」行式布局
+   （IntegrationsApp.vue 与 DevApp.vue），Vue 的 scoped 样式无法跨组件复用；
+   把同一组 class 在两处各写一份会出现「一处改了另一处没改」的漂移。
+
+   只消费 tokens.css 的 token：不新增颜色、圆角、间距或时长字面值。
+   与 styles.css 的 .gov-* / .market-* 同一层级（应用页组件样式），不覆盖既有 class。 */
+
+.integr-count {
+  margin-left: auto;
+  font-size: var(--fs-micro);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.integr-service-state { margin-left: auto; display: inline-flex; }
+.integr-side-note {
+  margin: var(--space-4) var(--space-3) var(--space-2);
+  padding-top: var(--space-3);
+  font-size: var(--fs-micro);
+  line-height: var(--lh-relaxed);
+  color: var(--muted);
+}
+
+.integr-body { flex: 1; min-height: 0; overflow: auto; padding-bottom: var(--space-6); }
+.integr-hero { padding: var(--space-4) var(--space-5) var(--space-2); }
+.integr-hero-head { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.integr-hero-head h1 {
+  margin: 0;
+  font-size: var(--fs-title);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--tracking-tight);
+}
+.integr-version { font-size: var(--fs-micro); color: var(--muted); font-variant-numeric: tabular-nums; }
+.integr-desc {
+  margin: var(--space-2) 0 0;
+  font-size: var(--fs-secondary);
+  color: var(--muted);
+  line-height: var(--lh-relaxed);
+  max-width: 720px;
+}
+.integr-actions { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-3); }
+.integr-note {
+  margin: var(--space-2) 0;
+  font-size: var(--fs-caption);
+  color: var(--muted);
+  line-height: var(--lh-relaxed);
+}
+
+.integr-sec { padding: 0 var(--space-5); margin-top: var(--space-4); }
+.integr-sec h3 { margin: 0 0 var(--space-2); font-size: var(--fs-heading); font-weight: var(--fw-medium); }
+.integr-sec h4 { margin: var(--space-3) 0 var(--space-2); font-size: var(--fs-caption); font-weight: var(--fw-medium); }
+
+.integr-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.integr-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: rgb(var(--text-rgb) / 0.035);
+}
+.integr-row:hover { background: rgb(var(--text-rgb) / 0.06); }
+.integr-row-desc {
+  font-size: var(--fs-caption);
+  color: var(--muted);
+  flex: 1 1 240px;
+  min-width: 160px;
+  overflow-wrap: anywhere;
+}
+.integr-dep-label { font-size: var(--fs-secondary); font-weight: var(--fw-medium); }
+.integr-command-name { font-size: var(--fs-caption); }
+.integr-log-time { font-size: var(--fs-micro); color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.integr-kv { margin: 0; display: grid; grid-template-columns: minmax(140px, 0.5fr) 1fr; }
+.integr-kv dt,
+.integr-kv dd {
+  margin: 0;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid rgb(var(--text-rgb) / 0.07);
+  overflow-wrap: anywhere;
+  font-size: var(--fs-secondary);
+}
+.integr-kv dt { color: var(--muted); }
+
+.integr-form { display: flex; align-items: flex-end; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-3); }
+.integr-form-col { flex-direction: column; align-items: stretch; max-width: 520px; }
+.integr-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--fs-caption);
+  color: var(--muted);
+  flex: 1 1 220px;
+}
+.integr-field input {
+  min-height: 30px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: rgb(var(--content-rgb) / 0.5);
+  color: var(--text);
+  font-size: var(--fs-secondary);
+}
+.integr-field input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.integr-filter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5) 0;
+  font-size: var(--fs-caption);
+  color: var(--muted);
+}
+.integr-filter input {
+  flex: 1 1 220px;
+  max-width: 360px;
+  min-height: 30px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: rgb(var(--content-rgb) / 0.5);
+  color: var(--text);
+  font-size: var(--fs-secondary);
+}
+.integr-filter input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.integr-error {
+  margin: var(--space-2) var(--space-5) 0;
+  color: var(--failed);
+  font-size: var(--fs-caption);
+  line-height: var(--lh-relaxed);
+}
+.integr-ok { margin: var(--space-2) var(--space-5) 0; color: var(--muted); font-size: var(--fs-caption); }
+.integr-detail { color: var(--muted); }
+
+@media (max-width: 760px) {
+  .integr-kv { grid-template-columns: 1fr; }
+  .integr-kv dt { padding-bottom: 0; border-bottom: 0; }
+}

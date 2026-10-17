@@ -24,6 +24,7 @@ import DeclareApp from "../apps/DeclareApp.vue";
 import DramaApp from "../apps/DramaApp.vue";
 import ProtocolApp from "../apps/ProtocolApp.vue";
 import PhotosApp from "../apps/PhotosApp.vue";
+import IntegrationsApp from "../apps/IntegrationsApp.vue";
 import { markRaw, toRaw } from "vue";
 import ReactIsland from "../bridge/ReactIsland.vue";
 import { CanvasHost } from "../../src/canvas/CanvasHost";
@@ -208,6 +209,7 @@ function styleOf(win: ShellWindow) {
       <DeclareApp v-else-if="win.appId === 'declare'" />
       <DramaApp v-else-if="win.appId === 'drama'" />
       <ProtocolApp v-else-if="win.appId === 'protocols'" />
+      <IntegrationsApp v-else-if="win.appId === 'integrations'" />
       <ReactIsland
         v-else-if="win.appId === 'browser'"
         :component="BrowserAppRaw"

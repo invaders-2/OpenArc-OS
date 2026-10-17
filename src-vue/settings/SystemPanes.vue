@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useShellStore } from "../stores/shell";
+import LocalProxyPanel from "./LocalProxyPanel.vue";
 
 /**
  * 系统设置的其余分区（10-15 按原型补齐）。原则同其它应用：只显示真实能读到的信息，
@@ -111,11 +112,9 @@ const STATUS: Record<string, string> = { enabled: "已启用", disabled: "已停
         <span class="set-lab">界面联网<small>窗口界面本身不直接访问网络；联网只经后台的固定通道（模型服务商、浏览器、天气）</small></span>
         <span class="badge ok">已隔离</span>
       </div>
-      <div class="setting-row">
-        <span class="set-lab">代理<small>后台服务使用系统网络设置；手动代理尚未接入</small></span>
-        <span class="set-val">跟随系统</span>
-      </div>
     </div>
+    <!-- 0.6.1：本机代理探测（desktop/proxy/detect；默认零出网，显式 probe 才访问 Google） -->
+    <LocalProxyPanel />
   </template>
 
   <!-- 系统信息 -->

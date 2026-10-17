@@ -7,6 +7,8 @@ import "../src/design-system/tokens.css";
 import "../src/design-system/primitives.css";
 import "../src/design-system/page-states.css";
 import "../src/styles.css";
+// 0.6.1 · 开发者工作台 / 第三方集成 共用的工作区组件层（只消费 token，见文件头）。
+import "./apps/workbench.css";
 import App from "./App.vue";
 import { installDevLog } from "./devlog";
 

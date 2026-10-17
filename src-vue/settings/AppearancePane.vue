@@ -18,6 +18,7 @@ import Avatar from "../identity/Avatar.vue";
 import AvatarPicker from "../identity/AvatarPicker.vue";
 import DsDialog from "../design-system/DsDialog.vue";
 import DsContextMenu from "../design-system/DsContextMenu.vue";
+import SystemFontsPanel from "./SystemFontsPanel.vue";
 
 /**
  * 「外观与交互」pane 正文（对齐 src/main.tsx:2663-2891 的 appearanceBody）。
@@ -457,6 +458,9 @@ async function saveProfile() {
       </div>
       </div>
     </section>
+
+    <!-- 0.6.1：系统字体（只读本机字体清单，按需预览；systemFonts:command） -->
+    <SystemFontsPanel />
   </template>
 
   <template v-else>

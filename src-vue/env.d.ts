@@ -99,6 +99,22 @@ interface OpenArcEventBridge {
   command: (command: { command: string; payload?: Record<string, unknown> }) => Promise<any>;
   onEvent?: (callback: (event: any) => void) => () => void;
 }
+/** 0.6.1 · CLI 域桥（形状同 preload.cjs 的 openarc.cli）：只有 command。 */
+interface OpenArcCliBridge {
+  command: (command: { command: string; payload?: Record<string, unknown> }) => Promise<any>;
+}
+/** 0.6.1 · 带下行事件的域桥（ocr / systemFonts）：形状同 preload.cjs。 */
+interface OpenArcDomainEventBridge {
+  command: (command: { command: string; payload?: Record<string, unknown> }) => Promise<any>;
+  onEvent?: (callback: (event: any) => void) => () => void;
+}
+/** 0.6.1 · 文件传输 / 本机代理：只有 command。 */
+interface OpenArcFileTransferBridge {
+  command: (command: { command: string; payload?: Record<string, unknown> }) => Promise<any>;
+}
+interface OpenArcDesktopBridge {
+  command: (command: { command: string; payload?: Record<string, unknown> }) => Promise<any>;
+}
 interface OpenArcBridge {
   /** 唯一的原生层上行通道：把 Window Manager 结算出的意图交给主进程。 */
   sync: (payload: unknown) => Promise<{ ok?: boolean; error?: string; results?: unknown[] }>;
@@ -158,6 +174,16 @@ interface OpenArcBridge {
     geocode: (name: string) => Promise<any>;
     forecast: (lat: number, lon: number) => Promise<any>;
   };
+  /** 0.6.1 · CLI 域（形状同 preload.cjs）：列出 / 状态 / 模型 / 积分 / 登录 / 登出。 */
+  cli?: OpenArcCliBridge;
+  /** 0.6.1 · OCR 域（形状同 preload.cjs）：供应商列表 + 识别，另有下行事件。 */
+  ocr?: OpenArcDomainEventBridge;
+  /** 0.6.1 · 系统字体域（形状同 preload.cjs）：本机字体清单 + 按 id 读字节，另有下行事件。 */
+  systemFonts?: OpenArcDomainEventBridge;
+  /** 0.6.1 · 文件传输域（形状同 preload.cjs）：begin / chunk / complete / status / cancel / cleanup / health。 */
+  fileTransfer?: OpenArcFileTransferBridge;
+  /** 0.6.1 · 本机代理探测（形状同 preload.cjs）：唯一命令 desktop/proxy/detect。 */
+  desktop?: OpenArcDesktopBridge;
   /** D4-04 Task 桥（形状同 preload.cjs）：受控命令 + 进度事件。对话应用与全局 AI 共用。 */
   task?: {
     command: (command: { command: string; payload?: Record<string, unknown> }) => Promise<any>;
