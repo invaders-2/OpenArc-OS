@@ -1,29 +1,23 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { Cloud, CloudDrizzle, CloudFog, CloudLightning, CloudRain, CloudSnow, CloudSun, Moon, Plus, RefreshCw, Search, Sun, X } from "lucide-vue-next";
+import { Plus, RefreshCw, Search, X } from "lucide-vue-next";
 import { iconUrl } from "../apps";
+import { WEATHER_CITIES_KEY, WEATHER_CONSENT_KEY, deg, readWeatherCities, readWeatherConsent, wmo, type WeatherCity } from "./weatherShared";
 
 /**
  * 天气（10-15）：数据来自 Open-Meteo，经主进程取（渲染层 CSP 禁止出网）。
  * 第一次使用必须由用户明确开启联网；开启前不发任何请求，也不显示示例温度。
  * 城市列表存本机 localStorage「oa-weather-cities」。
  */
-type City = { name: string; admin: string; country: string; lat: number; lon: number };
+/** 与桌面小组件共用的类型/偏好键/天气码映射都在 weatherShared；这里只保留请求与视图状态。 */
+type City = WeatherCity;
 type Hour = { time: string; temp: number | null; code: number | null; pop: number | null };
 type Day = { date: string; code: number | null; max: number | null; min: number | null; pop: number | null; sunrise: string; sunset: string };
 type Fc = { current: { temp: number | null; feels: number | null; humidity: number | null; code: number | null; wind: number | null; isDay: boolean; time: string }; hourly: Hour[]; daily: Day[] };
 
 const bridge = window.openarc?.weather;
-const CONSENT = "oa-weather-consent";
-const CITIES = "oa-weather-cities";
-const load = <T,>(k: string, d: T): T => {
-  try {
-    const v = localStorage.getItem(k);
-    return v === null ? d : (JSON.parse(v) as T);
-  } catch {
-    return d;
-  }
-};
+const CONSENT = WEATHER_CONSENT_KEY;
+const CITIES = WEATHER_CITIES_KEY;
 const save = (k: string, v: unknown) => {
   try {
     localStorage.setItem(k, JSON.stringify(v));
@@ -32,8 +26,8 @@ const save = (k: string, v: unknown) => {
   }
 };
 
-const consent = ref<boolean>(load(CONSENT, false));
-const cities = ref<City[]>(load(CITIES, []));
+const consent = ref<boolean>(readWeatherConsent());
+const cities = ref<City[]>(readWeatherCities());
 const idx = ref(0);
 const fc = ref<Record<string, Fc>>({});
 const loading = ref(false);
@@ -102,20 +96,7 @@ function removeCity(i: number) {
   idx.value = Math.min(idx.value, Math.max(0, cities.value.length - 1));
 }
 
-/* WMO 天气代码 → 中文 + 图标 */
-function wmo(code: number | null, day = true) {
-  const c = code ?? -1;
-  if (c === 0) return { text: "晴", icon: day ? Sun : Moon };
-  if (c <= 2) return { text: c === 1 ? "大部晴朗" : "局部多云", icon: CloudSun };
-  if (c === 3) return { text: "阴", icon: Cloud };
-  if (c === 45 || c === 48) return { text: "雾", icon: CloudFog };
-  if (c >= 51 && c <= 57) return { text: "毛毛雨", icon: CloudDrizzle };
-  if ((c >= 61 && c <= 67) || (c >= 80 && c <= 82)) return { text: c >= 65 || c === 82 ? "大雨" : c === 61 || c === 80 ? "小雨" : "中雨", icon: CloudRain };
-  if ((c >= 71 && c <= 77) || c === 85 || c === 86) return { text: "雪", icon: CloudSnow };
-  if (c >= 95) return { text: "雷阵雨", icon: CloudLightning };
-  return { text: "—", icon: Cloud };
-}
-const deg = (v: number | null) => (v === null ? "—" : `${Math.round(v)}°`);
+/* 天气码映射与 deg() 已抽到 weatherShared.ts，与桌面小组件共用同一口径。 */
 const hours = computed(() => {
   const d = data.value;
   if (!d) return [];

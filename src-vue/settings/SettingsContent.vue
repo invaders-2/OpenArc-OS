@@ -6,6 +6,7 @@ import AppearancePane from "./AppearancePane.vue";
 import ModelSettings from "./ModelSettings.vue";
 import DevicePane from "./DevicePane.vue";
 import SystemPanes from "./SystemPanes.vue";
+import { t } from "../i18n";
 
 /**
  * 系统设置分栏（对齐 src/settings/SettingsContent.tsx）。
@@ -29,6 +30,10 @@ const props = withDefaults(
 );
 
 /** 侧栏分组（10-15 按原型）：系统 / AI 与服务。账户在顶部的账户行里。 */
+/**
+ * 侧栏与标题保存**中文源语言**（词典键）；渲染时再经 t()。
+ * 不能在这里先 t() 再存数组：语言切换后数组不会重建，界面会停在旧语言。
+ */
 const PANES: { id: Pane; label: string; icon: unknown; group: string }[] = [
   { id: "appearance", label: "外观", icon: Palette, group: "系统" },
   { id: "language", label: "语言与地区", icon: Languages, group: "系统" },
@@ -67,7 +72,7 @@ watch(
   },
   { immediate: true },
 );
-const meta = computed(() => TITLES[pane.value]);
+const meta = computed(() => ({ title: t(TITLES[pane.value].title), subtitle: t(TITLES[pane.value].subtitle) }));
 
 /**
  * 侧栏顶部（10-15 按界面原型补齐，macOS 系统设置口径）：
@@ -82,14 +87,14 @@ const account = computed(() => {
   return {
     name: s.displayName,
     initial: s.displayName.slice(0, 1).toUpperCase(),
-    sub: s.role ? ROLE_LABEL[s.role] || s.role : s.identifier || "",
+    sub: s.role ? t(ROLE_LABEL[s.role] || s.role) : s.identifier || "",
   };
 });
 const query = ref("");
 const visiblePanes = computed(() => {
   const q = query.value.trim().toLowerCase();
   if (!q) return PANES;
-  return PANES.filter((p) => (p.label + TITLES[p.id].subtitle).toLowerCase().includes(q));
+  return PANES.filter((p) => (t(p.label) + t(TITLES[p.id].subtitle)).toLowerCase().includes(q));
 });
 const groups = computed(() => {
   const out: { name: string; panes: typeof PANES }[] = [];
@@ -104,10 +109,10 @@ const groups = computed(() => {
 
 <template>
   <div class="split settings-split">
-    <nav class="split-side" aria-label="设置分类">
+    <nav class="split-side" :aria-label="t('设置分类')">
       <label class="ds-search settings-search">
         <Search class="ds-search__icon" :size="13" />
-        <input v-model="query" class="ds-search__input" type="search" aria-label="搜索设置" placeholder="搜索设置" />
+        <input v-model="query" class="ds-search__input" type="search" :aria-label="t('搜索设置')" :placeholder="t('搜索设置')" />
       </label>
       <button
         type="button"
@@ -118,13 +123,13 @@ const groups = computed(() => {
       >
         <span class="settings-avatar" aria-hidden="true">{{ account?.initial ?? "我" }}</span>
         <span class="settings-account-text">
-          <b>{{ account?.name ?? "账户" }}</b>
-          <small>{{ account?.sub || "头像与显示名" }}</small>
+          <b>{{ account?.name ?? t("账户") }}</b>
+          <small>{{ account?.sub || t("头像与显示名") }}</small>
         </span>
       </button>
-      <p v-if="!visiblePanes.length" class="settings-noresult">没有匹配的设置</p>
+      <p v-if="!visiblePanes.length" class="settings-noresult">{{ t("没有匹配的设置") }}</p>
       <template v-for="g in groups" :key="g.name">
-        <div class="split-section">{{ g.name }}</div>
+        <div class="split-section">{{ t(g.name) }}</div>
         <button
           v-for="p in g.panes"
           :key="p.id"
@@ -134,7 +139,7 @@ const groups = computed(() => {
           :aria-current="pane === p.id ? 'true' : undefined"
           @click="pane = p.id"
         >
-          <component :is="p.icon" :size="16" /> {{ p.label }}
+          <component :is="p.icon" :size="16" /> {{ t(p.label) }}
         </button>
       </template>
     </nav>

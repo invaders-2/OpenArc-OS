@@ -8,6 +8,7 @@ import DesktopWidgets from "./DesktopWidgets.vue";
 import FolderIcon from "./FolderIcon.vue";
 import Orb from "./Orb.vue";
 import TopBar from "./TopBar.vue";
+import { t } from "../i18n";
 
 const shell = useShellStore();
 
@@ -82,17 +83,17 @@ const files = computed(() =>
  */
 const menu = ref<{ x: number; y: number } | null>(null);
 const menuItems = computed<MenuEntry[]>(() => [
-  { id: "new-folder", label: "新建文件夹" },
+  { id: "new-folder", label: t("新建文件夹") },
   { separator: true },
-  { id: "arrange", label: "整理" },
-  { id: "widgets", label: shell.widgets ? "隐藏小组件" : "显示小组件" },
+  { id: "arrange", label: t("整理") },
+  { id: "widgets", label: shell.widgets ? t("隐藏小组件") : t("显示小组件") },
   { separator: true },
-  { header: "壁纸" },
+  { header: t("壁纸") },
   ...shell.wallpaperItems.map((w) => {
     const id = w.kind === "custom" ? "custom:" + w.id : w.id;
     return { id: "wp:" + id, label: w.name, checked: shell.wallpaper === id };
   }),
-  { id: "wallpaper-settings", label: "壁纸与外观设置…" },
+  { id: "wallpaper-settings", label: t("壁纸与外观设置…") },
 ]);
 function openMenu(e: MouseEvent) {
   menu.value = { x: e.clientX, y: e.clientY };
@@ -119,16 +120,16 @@ const itemMenu = ref<{ x: number; y: number; kind: "folder" | "file"; id: string
 const itemMenuItems = computed<MenuEntry[]>(() =>
   itemMenu.value?.kind === "folder"
     ? [
-        { id: "open", label: "打开" },
-        { id: "rename", label: "重命名" },
+        { id: "open", label: t("打开") },
+        { id: "rename", label: t("重命名") },
         { separator: true },
-        { id: "trash", label: "移到回收站", danger: true },
+        { id: "trash", label: t("移到回收站"), danger: true },
       ]
     : [
-        { id: "preview", label: "快速查看" },
-        { id: "reveal", label: "在访达中显示" },
+        { id: "preview", label: t("快速查看") },
+        { id: "reveal", label: t("在访达中显示") },
         { separator: true },
-        { id: "trash", label: "移到回收站", danger: true },
+        { id: "trash", label: t("移到回收站"), danger: true },
       ],
 );
 function openItemMenu(e: MouseEvent, kind: "folder" | "file", id: string) {
@@ -224,7 +225,7 @@ function dragFolder(event: PointerEvent, folder: DesktopFolder) {
     :data-folder-id="folder.id"
     :data-drop-folder="folder.id"
     :class="{ selected: selectedId === folder.id }"
-    :aria-label="'文件夹 ' + folder.name"
+    :aria-label="t('文件夹 {name}', { name: folder.name })"
     @pointerdown="dragFolder($event, folder)"
     @dblclick="shell.openFolder(folder.id)"
     @keydown="onFolderKey($event, folder.id)"
@@ -235,7 +236,7 @@ function dragFolder(event: PointerEvent, folder: DesktopFolder) {
       v-if="renamingId === folder.id"
       v-model="renameText"
       class="folder-rename"
-      aria-label="文件夹名称"
+      :aria-label="t('文件夹名称')"
       autofocus
       @pointerdown.stop
       @keydown.enter.prevent="commitRename"
@@ -253,7 +254,7 @@ function dragFolder(event: PointerEvent, folder: DesktopFolder) {
     :data-entry-id="file.id"
     tabindex="0"
     :class="{ selected: selectedId === file.id }"
-    :aria-label="'文件 ' + file.name"
+    :aria-label="t('文件 {name}', { name: file.name })"
     @pointerdown="dragFile($event, file)"
     @dblclick="openFile(file)"
     @keydown.space.prevent="openFile(file)"
@@ -269,8 +270,8 @@ function dragFolder(event: PointerEvent, folder: DesktopFolder) {
   <!-- 10-15 按界面原型：桌面中央的「全局 AI」胶囊去掉，入口统一在顶栏与程序坞 -->
   <button v-if="false" class="assistant-pill" @click="shell.toggleAI()">
     <Orb :size="19" class="pill-icon" :animated="!shell.reduced" />
-    <span>全局 AI</span>
-    <span class="pill-status">未连接</span>
+    <span>{{ t("全局 AI") }}</span>
+    <span class="pill-status">{{ t("未连接") }}</span>
   </button>
 
   <DsContextMenu
@@ -278,7 +279,7 @@ function dragFolder(event: PointerEvent, folder: DesktopFolder) {
     :x="menu.x"
     :y="menu.y"
     :items="menuItems"
-    label="桌面"
+    :label="t('桌面')"
     @select="onMenu"
     @close="menu = null"
   />
@@ -287,7 +288,7 @@ function dragFolder(event: PointerEvent, folder: DesktopFolder) {
     :x="itemMenu.x"
     :y="itemMenu.y"
     :items="itemMenuItems"
-    :label="itemMenu.kind === 'folder' ? '文件夹' : '文件'"
+    :label="itemMenu.kind === 'folder' ? t('文件夹') : t('文件')"
     @select="onItemMenu"
     @close="itemMenu = null"
   />

@@ -12,6 +12,7 @@ import {
   resultValue,
   type FailureView,
 } from "../bridge/domain";
+import { t } from "../i18n";
 
 /**
  * 本机代理（0.6.1 · 设置 › 网络，接既有 desktop:command 的 desktop/proxy/detect）。
@@ -78,80 +79,100 @@ onMounted(() => {
 <template>
   <section class="set-sec proxy-sec" data-local-proxy>
     <div class="set-sh">
-      <h3>本机代理</h3>
+      <h3>{{ t("本机代理") }}</h3>
       <span class="proxy-actions">
         <DsButton size="sm" variant="ghost" :status="loading ? 'loading' : 'idle'" data-proxy-scan @click="detect(false)">
-          <RefreshCw :size="13" /> 重新扫描（不出网）
+          <RefreshCw :size="13" /> {{ t("重新扫描（不出网）") }}
         </DsButton>
         <DsButton size="sm" variant="secondary" :status="probing ? 'loading' : 'idle'" data-proxy-probe @click="detect(true)">
-          <Wifi :size="13" /> 连通测试（会出网）
+          <Wifi :size="13" /> {{ t("连通测试（会出网）") }}
         </DsButton>
       </span>
     </div>
-    <p class="set-cap">
-      默认只在本机扫描回环监听、系统代理与环境变量，不联网。「连通测试」会经候选代理访问
-      {{ value?.target?.url || "Google Gemini 模型列表" }}，属于显式出网动作。
-    </p>
+    <p class="set-cap">{{ t("默认只在本机扫描回环监听、系统代理与环境变量，不联网。「连通测试」会经候选代理访问 {url}，属于显式出网动作。", { url: value?.target?.url || t("Google Gemini 模型列表") }) }}</p>
+
+    <!-- 0.6.1：手动代理。按 local-proxy-domain.cjs 的白名单，desktop 域只有 desktop/proxy/detect（只读），
+         没有 set / clear 命令；因此这里只展示状态与「未接入」原因，不提供会假装生效的输入。 -->
+    <h4 class="proxy-h">{{ t("手动代理") }}</h4>
+    <div class="set-group">
+      <div class="setting-row">
+        <span class="set-lab">{{ t("当前代理来源") }}<small>{{ t("系统代理 / 启动环境 / 本机代理进程，由只读探测汇总") }}</small></span>
+        <span class="set-val">{{ candidates.length ? t("检测到 {n} 个候选", { n: candidates.length }) : t("未检测到候选") }}</span>
+      </div>
+      <div class="setting-row">
+        <span class="set-lab">{{ t("手动代理地址") }}<small>{{ t("缺少 desktop/proxy/set 保存命令，本项未接入") }}</small></span>
+        <input class="proxy-manual-input" disabled :placeholder="t('未接入：没有保存命令')" :aria-label="t('手动代理地址（未接入）')" />
+      </div>
+      <div class="setting-row">
+        <span class="set-lab">{{ t("保存并生效") }}<small>{{ t("需要主进程新增受控写入命令并处理权限与回滚；当前不存在") }}</small></span>
+        <button type="button" class="planned-today" disabled :title="t('主进程未提供 desktop/proxy/set')">{{ t("保存（未接入）") }}</button>
+      </div>
+      <div class="setting-row">
+        <span class="set-lab">{{ t("恢复系统默认") }}<small>{{ t("同样依赖写入命令；当前不可用") }}</small></span>
+        <button type="button" class="planned-today" disabled :title="t('主进程未提供 desktop/proxy/clear')">{{ t("恢复（未接入）") }}</button>
+      </div>
+    </div>
+    <p class="set-cap">{{ t("能力清单：读取探测 = 可用（desktop/proxy/detect）；手动配置 / 保存 / 清除 = 不可用。界面不会把地址写进 localStorage 或任何地方，也不会假装已经接管应用出网。") }}</p>
 
     <DsPageState
       v-if="!hasBridge"
       kind="unavailable"
-      title="当前环境没有本机代理探测的桥"
-      description="浏览器预览不提供 desktop:command；请在 OpenArc 桌面应用中打开设置。"
+      :title="t('当前环境没有本机代理探测的桥')"
+      :description="t('浏览器预览不提供 desktop:command；请在 OpenArc 桌面应用中打开设置。')"
     />
-    <DsPageState v-else-if="error" kind="error" title="代理探测失败" :description="failureText(error)" :on-action="() => void detect(false)" />
+    <DsPageState v-else-if="error" kind="error" :title="t('代理探测失败')" :description="failureText(error)" :on-action="() => void detect(false)" />
     <template v-else-if="value">
       <div class="set-group">
         <div class="setting-row">
-          <span class="set-lab">探测目标<small>{{ value.target?.label || "未登记" }} · {{ value.target?.url || "—" }}</small></span>
+          <span class="set-lab">{{ t("探测目标") }}<small>{{ value.target?.label || t("未登记") }} · {{ value.target?.url || "—" }}</small></span>
           <span class="set-val mono">{{ value.target?.id || "—" }}</span>
         </div>
         <div class="setting-row">
-          <span class="set-lab">扫描范围<small>只扫回环地址，不枚举其它进程</small></span>
-          <span class="set-val">{{ value.loopbackOnly ? "本机回环" : "—" }}</span>
+          <span class="set-lab">{{ t("扫描范围") }}<small>{{ t("只扫回环地址，不枚举其它进程") }}</small></span>
+          <span class="set-val">{{ value.loopbackOnly ? t("本机回环") : "—" }}</span>
         </div>
         <div class="setting-row">
-          <span class="set-lab">这次是否出网</span>
-          <DsBadge :tone="networkAttempted ? 'warning' : 'neutral'">{{ networkAttempted ? "已出网（显式 probe）" : "未出网" }}</DsBadge>
+          <span class="set-lab">{{ t("这次是否出网") }}</span>
+          <DsBadge :tone="networkAttempted ? 'warning' : 'neutral'">{{ networkAttempted ? t("已出网（显式 probe）") : t("未出网") }}</DsBadge>
         </div>
         <div class="setting-row">
-          <span class="set-lab">生效方式</span>
-          <span class="set-val">{{ value.requiresRestart ? "探测结果只作诊断，改动需要在系统里设置后才生效" : "—" }}</span>
+          <span class="set-lab">{{ t("生效方式") }}</span>
+          <span class="set-val">{{ value.requiresRestart ? t("探测结果只作诊断，改动需要在系统里设置后才生效") : "—" }}</span>
         </div>
       </div>
 
-      <h4 class="proxy-h">发现的本机代理（{{ candidates.length }}）</h4>
+      <h4 class="proxy-h">{{ t("发现的本机代理（{n}）", { n: candidates.length }) }}</h4>
       <DsPageState
         v-if="!candidates.length"
         kind="empty"
-        title="没有发现本机代理"
-        description="系统代理、HTTPS_PROXY 环境变量与常见代理进程（mihomo / clash / v2ray 等）都没有返回候选；界面不会编造一个可用的代理。"
+        :title="t('没有发现本机代理')"
+        :description="t('系统代理、HTTPS_PROXY 环境变量与常见代理进程（mihomo / clash / v2ray 等）都没有返回候选；界面不会编造一个可用的代理。')"
       />
       <ul v-else class="proxy-rows">
         <li v-for="candidate in candidates" :key="candidate.url" class="proxy-row" :data-proxy-candidate="candidate.url">
           <span class="mono proxy-url">{{ candidate.url }}</span>
-          <DsBadge size="sm">{{ KIND_TEXT[candidate.kind] || candidate.kind }}</DsBadge>
+          <DsBadge size="sm">{{ KIND_TEXT[candidate.kind] ? t(KIND_TEXT[candidate.kind]) : candidate.kind }}</DsBadge>
           <span class="proxy-source">{{ candidate.source }}</span>
         </li>
       </ul>
 
       <template v-if="networkAttempted">
-        <h4 class="proxy-h">连通测试结果（{{ probes.length }}）</h4>
+        <h4 class="proxy-h">{{ t("连通测试结果（{n}）", { n: probes.length }) }}</h4>
         <ul v-if="probes.length" class="proxy-rows">
           <li v-for="probe in probes" :key="probe.url" class="proxy-row" :data-proxy-probe="probe.url">
             <span class="mono proxy-url">{{ probe.url }}</span>
-            <DsBadge size="sm" :tone="probe.reachable ? 'success' : 'warning'">{{ probe.reachable ? "可达" : "不可达" }}</DsBadge>
+            <DsBadge size="sm" :tone="probe.reachable ? 'success' : 'warning'">{{ probe.reachable ? t("可达") : t("不可达") }}</DsBadge>
             <span class="proxy-source">
               <template v-if="probe.reachable">HTTP {{ probe.status ?? "?" }} · {{ probe.latencyMs ?? "?" }} ms</template>
-              <template v-else>{{ probe.error || "连接失败" }}</template>
+              <template v-else>{{ probe.error || t("连接失败") }}</template>
             </span>
           </li>
         </ul>
-        <p v-else class="set-cap">没有候选可测试；因此这次没有发出任何请求。</p>
+        <p v-else class="set-cap">{{ t("没有候选可测试；因此这次没有发出任何请求。") }}</p>
       </template>
 
       <template v-if="unavailable.length">
-        <h4 class="proxy-h">不可用的探测来源（{{ unavailable.length }}）</h4>
+        <h4 class="proxy-h">{{ t("不可用的探测来源（{n}）", { n: unavailable.length }) }}</h4>
         <ul class="proxy-rows">
           <li v-for="item in unavailable" :key="item.source" class="proxy-row">
             <Globe :size="14" />
@@ -160,12 +181,9 @@ onMounted(() => {
         </ul>
       </template>
 
-      <p class="set-cap">
-        这里只做诊断，不修改系统代理、也不接管应用出网；候选来自当前设置 / 启动环境 / 系统代理 / 代理进程，
-        结果不保证重启后仍然存在。
-      </p>
+      <p class="set-cap">{{ t("这里只做诊断，不修改系统代理、也不接管应用出网；候选来自当前设置 / 启动环境 / 系统代理 / 代理进程，结果不保证重启后仍然存在。") }}</p>
     </template>
-    <DsPageState v-else kind="loading" title="正在扫描本机代理" description="只读本机回环监听与系统设置，不联网。" />
+    <DsPageState v-else kind="loading" :title="t('正在扫描本机代理')" :description="t('只读本机回环监听与系统设置，不联网。')" />
   </section>
 </template>
 
@@ -177,4 +195,15 @@ onMounted(() => {
 .proxy-row { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; padding: var(--space-2); border-radius: var(--radius-sm); background: rgb(var(--text-rgb) / 0.03); }
 .proxy-url { font-size: var(--fs-caption); overflow-wrap: anywhere; }
 .proxy-source { font-size: var(--fs-micro); color: var(--muted); flex: 1 1 200px; overflow-wrap: anywhere; }
+.proxy-manual-input {
+  width: 220px;
+  min-height: 30px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: rgb(var(--text-rgb) / 0.04);
+  color: var(--muted);
+  font-size: var(--fs-caption);
+}
+.proxy-manual-input:disabled { cursor: not-allowed; opacity: 0.75; }
 </style>

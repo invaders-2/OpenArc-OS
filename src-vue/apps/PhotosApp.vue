@@ -20,6 +20,7 @@ import {
   Download,
   Film,
   FolderPlus,
+  Grid2x2,
   Image as ImageIcon,
   Plus,
   RefreshCw,
@@ -96,6 +97,8 @@ import {
   visibilityUpdatePayload,
 } from "../../src/photos/studioLogic";
 import type { Visibility } from "../../src/photos/studioLogic";
+import { buildZip, gridArchiveName, gridTileName, gridTiles } from "./photoGridSlice";
+import type { SliceGrid } from "./photoGridSlice";
 import type {
   AppExchangeTargetsValue,
   ExchangeCanvas,
@@ -241,6 +244,116 @@ const visionPick = ref("");
 const promptState = ref<PromptState>({ status: "idle" });
 const removal = ref<RemovalState>({ status: "idle" });
 
+/* ── 宫格切片：真实原图在本地 canvas 切分；扩图没有后端命令，按不可用呈现 ── */
+type SliceTile = { key: string; name: string; row: number; col: number; width: number; height: number; bytes: Uint8Array; url: string };
+type SliceState =
+  | { status: "idle" }
+  | { status: "loading"; grid: SliceGrid }
+  | { status: "error"; grid: SliceGrid; text: string }
+  | { status: "ready"; grid: SliceGrid; tiles: SliceTile[] };
+const sliceGrid = ref<SliceGrid>(2);
+const sliceState = ref<SliceState>({ status: "idle" });
+const sliceSection = ref<HTMLElement | null>(null);
+
+const OUTPAINT_MISSING = [
+  "主进程缺少扩图命令：照片域白名单（photos/…）里没有扩图入口，主进程也没有可注入的图像扩图 / 生成适配器。",
+  "缺少图像生成模型与出图协议：扩图需要目标比例、提示词和回写入参，目前都没有定义。",
+  "因此这里不会发送图片、不会生成占位图，也不会把「不可用」伪装成处理中。",
+];
+
+function resetSliceState() {
+  sliceState.value = { status: "idle" };
+}
+function focusSliceSection() {
+  const section = sliceSection.value;
+  if (!section) return;
+  /* 只滚动详情面板自己的滚动容器：scrollIntoView 会连带滚动外层可视区，实测会让窗口内容整体上移。 */
+  const scroller = section.closest(".photos-scroll") as HTMLElement | null;
+  if (!scroller) return;
+  const target = section.getBoundingClientRect();
+  const box = scroller.getBoundingClientRect();
+  scroller.scrollTo({ top: scroller.scrollTop + target.top - box.top - 8, behavior: "smooth" });
+}
+function loadImageElement(dataUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("图片解码失败，无法切片"));
+    image.src = dataUrl;
+  });
+}
+function canvasToPng(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("切片编码失败"))), "image/png");
+  });
+}
+async function generateSlices() {
+  const d = detail.value;
+  const grid = sliceGrid.value;
+  if (d.status !== "ready") return;
+  if (!d.hasRaw) {
+    sliceState.value = { status: "error", grid, text: "当前条目只拿到缩略图，没有原图字节，不能在本地切片。" };
+    return;
+  }
+  resetSliceState();
+  sliceState.value = { status: "loading", grid };
+  try {
+    const image = await loadImageElement(d.preview);
+    const bounds = gridTiles(image.naturalWidth, image.naturalHeight, grid);
+    if (bounds.length !== grid * grid) {
+      throw new Error("原图只有 " + image.naturalWidth + "×" + image.naturalHeight + "，切不出 " + grid + "×" + grid + " 宫格");
+    }
+    const tiles: SliceTile[] = [];
+    for (const tile of bounds) {
+      const canvas = document.createElement("canvas");
+      canvas.width = tile.width;
+      canvas.height = tile.height;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("本机渲染层不可用（缺少 2d canvas 上下文）");
+      context.drawImage(image, tile.x, tile.y, tile.width, tile.height, 0, 0, tile.width, tile.height);
+      const blob = await canvasToPng(canvas);
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      /* CSP 的 img-src 不含 blob:，预览必须用 data: URL；字节仍用 Blob 打包下载。 */
+      const url = canvas.toDataURL("image/png");
+      tiles.push({
+        key: tile.row + "-" + tile.col,
+        name: gridTileName(d.item.name, grid, tile.row, tile.col),
+        row: tile.row,
+        col: tile.col,
+        width: tile.width,
+        height: tile.height,
+        bytes,
+        url,
+      });
+    }
+    sliceState.value = { status: "ready", grid, tiles };
+  } catch (error) {
+    sliceState.value = { status: "error", grid, text: String((error as Error)?.message || error) };
+  }
+}
+function downloadSlice(tile: SliceTile) {
+  try {
+    saveBytes(tile.name, tile.bytes, "image/png");
+    notifyLib("success", "已开始下载", tile.name);
+  } catch (error) {
+    notifyLib("error", "下载切片失败", String((error as Error)?.message || error));
+  }
+}
+function downloadSlicesZip() {
+  const state = sliceState.value;
+  if (state.status !== "ready") return;
+  const d = detail.value;
+  const sourceName = d.status === "ready" ? d.item.name : "photo";
+  try {
+    const zip = buildZip(state.tiles.map((tile) => ({ name: tile.name, bytes: tile.bytes })));
+    const name = gridArchiveName(sourceName, state.grid);
+    saveBytes(name, zip, "application/zip");
+    notifyLib("success", "已打包全部切片", name + "（" + state.tiles.length + " 张，共 " + formatBytes(zip.length) + "）");
+  } catch (error) {
+    notifyLib("error", "打包失败", String((error as Error)?.message || error));
+  }
+}
+
 const thumbUrls = reactive<Record<string, string>>({});
 const thumbFailedIds = reactive<Record<string, boolean>>({});
 const thumbCache = new Map<string, string>();
@@ -355,6 +468,7 @@ async function openItem(item: PhotoItem) {
   detail.value = { status: "loading", item };
   promptState.value = { status: "idle" };
   removal.value = { status: "idle" };
+  resetSliceState();
   const rawRes = item.kind === "image" ? await callPhotos("photos/sourceFile", { id: item.id }) : null;
   if (detailSeq !== seq) return;
   const rawValue = rawRes ? resultValue<PhotosSourceFileValue>(rawRes) : null;
@@ -1344,6 +1458,9 @@ async function submitSend() {
                   <DsButton size="sm" @click="openImport">
                     <Send :size="14" :stroke-width="1.5" /> 导入到画布 / 素材库
                   </DsButton>
+                  <DsButton size="sm" variant="secondary" :disabled="!detail.hasRaw || !detail.item.mime.startsWith('image/')" @click="focusSliceSection">
+                    <Grid2x2 :size="14" :stroke-width="1.5" /> 宫格切片
+                  </DsButton>
                 </div>
 
                 <section class="photos-group" aria-label="反推提示词">
@@ -1392,6 +1509,58 @@ async function submitSend() {
                   </div>
                   <div v-if="removal.status === 'ready'" class="photos-detail__preview">
                     <img :src="removal.dataUrl" alt="抠图结果" />
+                  </div>
+                </section>
+
+                <section ref="sliceSection" class="photos-group photos-tools" aria-label="扩图与宫格切片" data-photos-tools="1" :data-photos-slice-state="sliceState.status">
+                  <div class="photos-pane-head"><h3>扩图与宫格切片</h3></div>
+
+                  <div class="photos-tools__block" data-photos-outpaint="unavailable">
+                    <div class="photos-tools__head">
+                      <strong>扩图</strong>
+                      <DsBadge tone="warning" size="sm">不可用</DsBadge>
+                    </div>
+                    <DsPageState kind="unavailable" title="扩图暂不可用" description="这是后端能力缺失，不是加载失败；界面不会伪造扩图结果，也不会把原图发给任何模型。" :missing="OUTPAINT_MISSING" />
+                  </div>
+
+                  <div class="photos-tools__block" data-photos-slice="1">
+                    <div class="photos-tools__head">
+                      <strong>宫格切片</strong>
+                      <span>本地 canvas</span>
+                    </div>
+                    <p class="photos-hint">把这张原图切成 {{ sliceGrid }}×{{ sliceGrid }} 张等分小图。全部在渲染层用 canvas 完成，不联网、不写回来源目录；导出统一打包成 ZIP。</p>
+                    <div class="photos-form__row">
+                      <span>切片规格</span>
+                      <div class="segmented text" role="group" aria-label="切片规格">
+                        <button type="button" :aria-pressed="sliceGrid === 2" @click="sliceGrid = 2; resetSliceState()">2×2</button>
+                        <button type="button" :aria-pressed="sliceGrid === 3" @click="sliceGrid = 3; resetSliceState()">3×3</button>
+                      </div>
+                    </div>
+                    <div class="photos-actions">
+                      <DsButton size="sm" :status="sliceState.status === 'loading' ? 'loading' : 'idle'" :disabled="!detail.hasRaw || !detail.item.mime.startsWith('image/')" @click="generateSlices">
+                        <Grid2x2 :size="14" :stroke-width="1.5" /> 切成 {{ sliceGrid }}×{{ sliceGrid }}
+                      </DsButton>
+                      <DsButton v-if="sliceState.status === 'ready'" size="sm" variant="secondary" @click="downloadSlicesZip">
+                        <Download :size="14" :stroke-width="1.5" /> 下载 ZIP（{{ sliceState.tiles.length }} 张）
+                      </DsButton>
+                    </div>
+                    <p v-if="!detail.hasRaw" class="photos-hint" data-photos-slice-blocked>当前条目没有原图字节（视频或缩略图回退），不能切片。视频请用「下载原片」或在文件传输域处理。</p>
+                    <p v-if="sliceState.status === 'error'" class="photos-error" role="alert" data-photos-slice-error>{{ sliceState.text }}</p>
+                    <div v-if="sliceState.status === 'ready'" class="photos-slices" data-photos-slices>
+                      <figure v-for="tile in sliceState.tiles" :key="tile.key" class="photos-slice">
+                        <img :src="tile.url" :alt="'切片 ' + (tile.row + 1) + '-' + (tile.col + 1)" />
+                        <figcaption>
+                          <span>{{ tile.width }}×{{ tile.height }}</span>
+                          <button type="button" class="photos-slice__save" :aria-label="'下载切片 ' + tile.name" @click="downloadSlice(tile)">
+                            <Download :size="12" :stroke-width="1.5" />
+                          </button>
+                        </figcaption>
+                      </figure>
+                    </div>
+                    <div v-else-if="sliceState.status === 'loading'" class="photos-hint photos-tools__busy" role="status">
+                      <span class="ds-spinner" aria-hidden="true" /> 正在本地切片…
+                    </div>
+                    <p class="photos-hint" data-photos-slice-library-note>保存到资源库暂不可用：资源域只接受 memory / text / code / prompt 内容，没有从渲染层写入图片字节的命令；这里先提供 ZIP 下载，不回假资源 ref。</p>
                   </div>
                 </section>
               </div>
@@ -1776,3 +1945,96 @@ async function submitSend() {
     </div>
   </div>
 </template>
+
+
+<style scoped>
+/* 只写 .photos-tools 作用域内的布局与状态；颜色 / 间距 / 圆角 / 时长全部走 token。 */
+.photos-tools {
+  gap: var(--space-3);
+}
+.photos-tools__block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.photos-tools__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--fs-micro);
+  color: var(--muted);
+}
+.photos-tools__head strong {
+  font-size: var(--fs-secondary);
+  font-weight: var(--fw-medium);
+  color: var(--text);
+}
+.photos-tools__busy {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+/* PageState 在窄检查器里按内容收缩，不占满 180px 的内容位。 */
+.photos-tools :deep(.ds-page-state) {
+  padding: var(--space-4) var(--space-2);
+  min-height: 0;
+  align-items: flex-start;
+  text-align: left;
+}
+.photos-tools :deep(.ds-page-state__desc) {
+  max-width: none;
+}
+.photos-slices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+.photos-slice {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+  overflow: hidden;
+  animation: photos-slice-in var(--dur-quick) var(--ease-standard) both;
+}
+.photos-slice img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+}
+.photos-slice figcaption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+  padding: 2px 4px 2px 6px;
+  font-size: var(--fs-micro);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.photos-slice__save {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  transition: background var(--dur-feedback) var(--ease-standard), color var(--dur-feedback) var(--ease-standard);
+}
+.photos-slice__save:hover {
+  background: var(--row-hover);
+  color: var(--text);
+}
+.photos-slice__save:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+@keyframes photos-slice-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+</style>
+

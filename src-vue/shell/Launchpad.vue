@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { ArrowRight, Contrast, Lock, Search, SlidersHorizontal, Sparkles } from "lucide-vue-next";
-import { APPS, iconUrl } from "../apps";
+import { APPS, appDisplayName, iconUrl } from "../apps";
 import { useShellStore } from "../stores/shell";
 import { useIdentityStore } from "../stores/identity";
+import { t } from "../i18n";
 
 const shell = useShellStore();
 const identity = useIdentityStore();
@@ -15,7 +16,7 @@ const input = ref<HTMLInputElement | null>(null);
  * 全局搜索面板（聚焦搜索）。10-15 按界面原型升级：
  *   - 结果分组：应用 / 动作 / 交给全局 AI；空查询时列出全部应用（与既有产品一致）
  *   - ↑↓ 选择、回车执行、Esc 关闭（Esc 由 Overlays 统一处理）
- * DOM 与 class（.search-shade / .search-panel / .search-input / .search-result）沿用既有产品。
+ * 0.6.1：应用名与固定文案经 i18n；搜索同时匹配中英文应用名。
  */
 interface Hit {
   key: string;
@@ -33,41 +34,42 @@ interface Group {
 const groups = computed<Group[]>(() => {
   const raw = query.value.trim();
   const q = raw.toLowerCase();
-  const apps: Hit[] = APPS.filter((a) => !q || a.name.toLowerCase().includes(q)).map((a) => ({
+  const apps: Hit[] = APPS.filter((a) => !q || appDisplayName(a).toLowerCase().includes(q) || a.name.toLowerCase().includes(q)).map((a) => ({
     key: "app:" + a.id,
-    label: a.name,
-    hint: "应用",
+    label: appDisplayName(a),
+    hint: t("应用"),
     icon: iconUrl(a.icon),
     run: () => shell.activateApp(a.id),
   }));
-  if (!q) return [{ head: "应用", items: apps }];
+  if (!q) return [{ head: t("应用"), items: apps }];
 
   const acts: Hit[] = [];
-  if ("切换深色浅色外观主题".includes(q))
+  const hits = (terms: string) => terms.toLowerCase().includes(q);
+  if (hits("切换深色浅色外观主题 dark light theme appearance"))
     acts.push({
       key: "theme",
-      label: shell.dark ? "切换到浅色外观" : "切换到深色外观",
-      hint: "动作",
+      label: shell.dark ? t("切换到浅色外观") : t("切换到深色外观"),
+      hint: t("动作"),
       glyph: Contrast,
       run: () => shell.setTheme(shell.dark ? "light" : "dark"),
     });
-  if ("控制中心材质玻璃".includes(q))
-    acts.push({ key: "cc", label: "打开控制中心", hint: "动作", glyph: SlidersHorizontal, run: () => shell.toggleControlCenter() });
-  if (identity.available && "锁定屏幕".includes(q))
-    acts.push({ key: "lock", label: "锁定屏幕", hint: "动作", glyph: Lock, run: () => identity.lock() });
+  if (hits("控制中心材质玻璃 control center material glass"))
+    acts.push({ key: "cc", label: t("打开控制中心"), hint: t("动作"), glyph: SlidersHorizontal, run: () => shell.toggleControlCenter() });
+  if (identity.available && hits("锁定屏幕 lock screen"))
+    acts.push({ key: "lock", label: t("锁定屏幕"), hint: t("动作"), glyph: Lock, run: () => identity.lock() });
   const ai: Hit[] = [
     {
       key: "ai",
-      label: `让全局 AI 处理："${raw}"`,
-      hint: "全局 AI",
+      label: t("让全局 AI 处理：{query}", { query: raw }),
+      hint: t("全局 AI"),
       glyph: Sparkles,
       run: () => shell.toggleAI(),
     },
   ];
   return [
-    { head: "应用", items: apps },
-    { head: "动作", items: acts },
-    { head: "全局 AI", items: ai },
+    { head: t("应用"), items: apps },
+    { head: t("动作"), items: acts },
+    { head: t("全局 AI"), items: ai },
   ].filter((g) => g.items.length);
 });
 const flat = computed(() => groups.value.flatMap((g) => g.items));
@@ -99,7 +101,7 @@ function onKey(e: KeyboardEvent) {
       class="search-panel"
       role="dialog"
       aria-modal="true"
-      aria-label="搜索应用"
+      :aria-label="t('搜索应用')"
       @click.stop
     >
       <div class="search-input">
@@ -108,8 +110,8 @@ function onKey(e: KeyboardEvent) {
           ref="input"
           v-model="query"
           type="search"
-          aria-label="搜索应用名称"
-          placeholder="搜索应用、动作，或直接交给全局 AI"
+          :aria-label="t('搜索应用名称')"
+          :placeholder="t('搜索应用、动作，或直接交给全局 AI')"
           @keydown="onKey"
         />
         <kbd class="search-kbd">esc</kbd>

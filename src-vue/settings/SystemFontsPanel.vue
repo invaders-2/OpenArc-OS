@@ -13,6 +13,7 @@ import {
   resultValue,
   type FailureView,
 } from "../bridge/domain";
+import { t } from "../i18n";
 
 /**
  * 系统字体（0.6.1 · 设置 › 外观，接既有 systemFonts:command）。
@@ -123,39 +124,37 @@ onBeforeUnmount(() => {
 <template>
   <section class="set-sec font-sec" data-system-fonts>
     <div class="set-sh">
-      <h3>系统字体</h3>
+      <h3>{{ t("系统字体") }}</h3>
       <span class="font-actions">
         <label class="font-search">
-          <span class="font-search-label">搜索</span>
-          <input v-model="query" type="search" placeholder="字体族或 id" aria-label="搜索本机字体" />
+          <span class="font-search-label">{{ t("搜索") }}</span>
+          <input v-model="query" type="search" :placeholder="t('字体族或 id')" :aria-label="t('搜索本机字体')" />
         </label>
         <DsButton size="sm" variant="ghost" :status="loading ? 'loading' : 'idle'" data-system-fonts-refresh @click="load(false)">
-          <RefreshCw :size="13" /> 刷新清单
+          <RefreshCw :size="13" /> {{ t("刷新清单") }}
         </DsButton>
       </span>
     </div>
-    <p class="set-cap">
-      只读本机字体目录：清单由主进程扫描，字体字节按需读取，单个字体上限 64 MB；界面拿不到文件路径，也不安装、不替换系统字体。
-    </p>
+    <p class="set-cap">{{ t("只读本机字体目录：清单由主进程扫描，字体字节按需读取，单个字体上限 64 MB；界面拿不到文件路径，也不安装、不替换系统字体。") }}</p>
 
     <DsPageState
       v-if="!hasBridge"
       kind="unavailable"
-      title="当前环境没有系统字体域的桥"
-      description="浏览器预览不提供 systemFonts:command；请在 OpenArc 桌面应用中打开设置。"
+      :title="t('当前环境没有系统字体域的桥')"
+      :description="t('浏览器预览不提供 systemFonts:command；请在 OpenArc 桌面应用中打开设置。')"
     />
-    <DsPageState v-else-if="error" kind="error" title="读不到本机字体" :description="failureText(error)" :on-action="() => void load(false)" />
+    <DsPageState v-else-if="error" kind="error" :title="t('读不到本机字体')" :description="failureText(error)" :on-action="() => void load(false)" />
     <DsPageState
       v-else-if="!fonts.length && !loading"
       kind="empty"
-      title="本机字体目录里没有可读取的字体"
-      :description="meta ? '扫描到 ' + meta.rootCount + ' 个字体目录，但没有返回字体文件。' : '扫描结果为空。'"
+      :title="t('本机字体目录里没有可读取的字体')"
+      :description="meta ? t('扫描到 {n} 个字体目录，但没有返回字体文件。', { n: meta.rootCount }) : t('扫描结果为空。')"
     />
 
     <template v-else>
       <div v-if="meta" class="font-meta">
-        共 {{ meta.total }} 个字体 · 当前载入 {{ fonts.length }} 个 · 每次 {{ meta.limit }} 个
-        <template v-if="query.trim()"> · 搜索命中 {{ visible.length }} 个（只作用于已载入的页）</template>
+        {{ t("共 {total} 个字体 · 当前载入 {loaded} 个 · 每次 {limit} 个", { total: meta.total, loaded: fonts.length, limit: meta.limit }) }}
+        <template v-if="query.trim()"> · {{ t("搜索命中 {n} 个（只作用于已载入的页）", { n: visible.length }) }}</template>
       </div>
 
       <ul class="font-list" data-system-fonts-list>
@@ -163,30 +162,30 @@ onBeforeUnmount(() => {
           <span class="font-family">{{ font.families.length ? font.families.join(" / ") : font.id }}</span>
           <span class="font-bytes">{{ formatBytes(font.bytes) }}</span>
           <DsButton size="sm" variant="ghost" :status="previewBusy === font.id ? 'loading' : 'idle'" @click="preview(font)">
-            <Eye :size="13" /> 预览
+            <Eye :size="13" /> {{ t("预览") }}
           </DsButton>
         </li>
       </ul>
-      <p v-if="!visible.length" class="set-cap">当前这页没有匹配的字体；可以继续载入下一页再搜索。</p>
+      <p v-if="!visible.length" class="set-cap">{{ t("当前这页没有匹配的字体；可以继续载入下一页再搜索。") }}</p>
 
       <div v-if="meta?.hasMore" class="font-more">
         <DsButton size="sm" variant="secondary" :status="loading ? 'loading' : 'idle'" @click="load(true)">
-          <Download :size="13" /> 载入更多（{{ fonts.length }} / {{ meta.total }}）
+          <Download :size="13" /> {{ t("载入更多（{loaded} / {total}）", { loaded: fonts.length, total: meta.total }) }}
         </DsButton>
       </div>
 
       <div v-if="previewFamily" class="font-preview" data-system-fonts-preview>
         <div class="font-preview-head">
-          <span>预览：{{ previewName }}</span>
+          <span>{{ t("预览：{name}", { name: previewName }) }}</span>
           <span class="toolbar-spacer" />
           <label class="font-size">
-            字号
-            <input v-model.number="previewSize" type="range" min="12" max="40" step="1" aria-label="预览字号" />
+            {{ t("字号") }}
+            <input v-model.number="previewSize" type="range" min="12" max="40" step="1" :aria-label="t('预览字号')" />
             <span class="font-size-value">{{ previewSize }}px</span>
           </label>
         </div>
         <p class="font-sample" :style="{ fontFamily: previewFamily, fontSize: previewSize + 'px' }">{{ SAMPLE }}</p>
-        <p class="set-cap">预览只在本窗口内临时注册，离开后自动移除；不会替换系统或界面字体。</p>
+        <p class="set-cap">{{ t("预览只在本窗口内临时注册，离开后自动移除；不会替换系统或界面字体。") }}</p>
       </div>
       <p v-if="previewError" class="font-error" role="alert">{{ failureText(previewError) }}</p>
     </template>

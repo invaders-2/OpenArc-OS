@@ -1,4 +1,5 @@
 import type { Component } from "vue";
+import { locale } from "./i18n";
 import {
   Compass,
   Folder,
@@ -70,6 +71,50 @@ export const DOCK_DEFAULT: readonly string[] = [
 ];
 
 export const appById = (id: string): AppEntry | undefined => APPS.find((a) => a.id === id);
+
+/**
+ * 0.6.1 · 应用显示名（英文界面）。
+ * 注册表里的 name 仍是中文源语言（与既有产品逐项一致，tests/dxos-market-all-apps 也按该行解析）；
+ * 英文只在渲染层通过这里覆盖，不改数据、不影响市场/更新用的 appId。
+ */
+const APP_NAME_EN: Record<string, string> = {
+  home: "App Center",
+  browser: "Browser",
+  files: "Finder",
+  "resource-library": "Resource Library",
+  canvas: "AI Studio",
+  projects: "Projects",
+  organization: "Organization",
+  skills: "Skill Center",
+  "mcp-center": "MCP Center",
+  integrations: "Integrations",
+  protocols: "Protocols",
+  settings: "System Settings",
+  trash: "Trash",
+  chat: "Chat",
+  automation: "Automation",
+  market: "App Store",
+  calendar: "Calendar",
+  notes: "Notes",
+  photos: "Photos",
+  music: "Music",
+  weather: "Weather",
+  video: "Video Editor",
+  dev: "Developer",
+  declare: "Image Declaration",
+  drama: "Short Drama Studio",
+};
+
+/** 当前语言的显示名；没有英文条目时回退注册表 name。 */
+export function appDisplayName(entry: AppEntry | undefined): string {
+  if (!entry) return "";
+  return locale.value === "en-US" ? APP_NAME_EN[entry.id] ?? entry.name : entry.name;
+}
+
+/** 按 appId 取显示名（窗口标题 / 通知 / 搜索共用）。 */
+export function appDisplayNameById(id: string): string {
+  return appDisplayName(appById(id));
+}
 
 /** 图标地址：与既有产品一致的相对路径（dev 下由 Vite 服务 public/）。 */
 export const iconUrl = (name: string): string => "./icons/" + name + ".png";

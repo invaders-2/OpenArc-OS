@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { Clapperboard, Film, Image as ImageIcon, LoaderCircle, Palette, Plus, ScrollText, Sparkles } from "lucide-vue-next";
+import { Clapperboard, Download, Film, Image as ImageIcon, Library, LoaderCircle, Palette, Plus, RefreshCw, ScrollText, Sparkles } from "lucide-vue-next";
 import { iconUrl } from "../apps";
 import DsDialog from "../design-system/DsDialog.vue";
 
@@ -12,7 +12,9 @@ import DsDialog from "../design-system/DsDialog.vue";
  *   · 每一步的结果都可以手动改（update / shot/update），手改的标为「手动编辑」；
  *   · 画面经 media/short-drama/image 按项目读取（只读、只限本项目引用的画面）；
  *   · 项目数据用 media/short-drama/get 的拍平视图（IPC 返回值有深度上限，嵌套的画面列表会被裁掉）；
- *   · 成片 = 把已有画面的分镜按时长拼成竖屏视频，交给本机 FFmpeg 渲染队列（media/render/*）。
+ *   · 成片 = 把已有画面的分镜按时长拼成竖屏视频，交给本机 FFmpeg 渲染队列（media/render/*）；
+ *   · 成片完成后经 media/short-drama/export 导出到访达导出目录或 OpenArc 资源库，并展示真实的
+ *     relativePath / resourceRef（入口以 media/render/list 里的已完成任务为准，不靠本地猜测）。
  */
 const bridge = window.openarc?.media;
 type Res = { ok?: boolean; value?: any; error?: string; message?: string; detail?: unknown };
@@ -40,6 +42,12 @@ function errText(r: Res) {
     msg = "没有可用的模型：先到「系统设置 › 模型与服务商」添加服务商并设好默认的文本 / 生图模型";
   return (msg || ERR[code] || "操作失败") + "（" + code + "）";
 }
+function formatBytes(value: unknown) {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes < 0) return "大小未知";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+  return (bytes / (1024 * 1024)).toFixed(2) + " MB";
+}
 
 type Episode = { id: string; number: number; title: string; summary: string; hook: string; characterNames: string; locationNames: string };
 type Character = { id: string; name: string; role: string; appearance: string; costume: string; signature: string; imageCount: number; selectedImageId?: string };
@@ -52,6 +60,18 @@ type View = {
   shots: Shot[];
 };
 type Img = { owner: "shot" | "character" | "location"; ownerId: string; id: string; nodeId: string; kind: string | null };
+type RenderJob = { id: string; status: string; progress: number | null; error: string | null; hasOutput: boolean; outputRelativePath: string | null };
+type ExportResult = {
+  target: "finder" | "library" | string;
+  jobId: string;
+  fileName: string;
+  bytes: number;
+  relativePath?: string | null;
+  resourceRef?: string | null;
+  resourceId?: string | null;
+  deduped?: boolean;
+  revealed?: boolean;
+};
 
 const projects = ref<{ id: string; name: string; stage: string; updatedAt: number }[]>([]);
 const currentId = ref<string | null>(null);
@@ -78,6 +98,29 @@ async function loadList() {
   if (!r.ok) return void (failure.value = errText(r));
   projects.value = (val(r).projects || []).map((p: any) => ({ id: p.id, name: p.name, stage: p.stage, updatedAt: p.updatedAt }));
 }
+
+/**
+ * 成片导出的可用性事实：media/render/list 里这个项目最近一条 completed 且 hasOutput 的任务。
+ * 不是本地推断：没有完成渲染时导出按钮保持禁用，并说明原因（不伪造可用入口）。
+ */
+async function loadCompletedRender() {
+  if (!currentId.value) {
+    exportJob.value = null;
+    return null;
+  }
+  exportRefreshBusy.value = true;
+  const r = await send("media/render/list", { projectId: currentId.value, statuses: ["completed"], limit: 1 });
+  exportRefreshBusy.value = false;
+  if (!r.ok) {
+    exportError.value = errText(r);
+    return null;
+  }
+  const jobs = (val(r).jobs || []) as RenderJob[];
+  const completed = jobs.find((entry) => entry.status === "completed" && entry.hasOutput) || null;
+  exportJob.value = completed;
+  return completed;
+}
+
 async function loadView(id = currentId.value) {
   if (!id) return;
   const r = await send("media/short-drama/get", { projectId: id });
@@ -86,15 +129,26 @@ async function loadView(id = currentId.value) {
   view.value = val(r).project as View;
   images.value = (val(r).images || []) as Img[];
   draft.sourceText = view.value.sourceText;
+  await loadCompletedRender();
 }
 async function open(id: string) {
   currentId.value = id;
   view.value = null;
   failure.value = "";
   message.value = "";
+  exportJob.value = null;
+  exportResult.value = null;
+  exportError.value = "";
   await loadView(id);
   const v = view.value as View | null;
   if (v) stage.value = (STAGES.some((s) => s.id === v.stage) ? v.stage : "script") as StageId;
+}
+async function selectStage(id: StageId) {
+  stage.value = id;
+  if (id === "timeline") {
+    exportError.value = "";
+    await loadCompletedRender();
+  }
 }
 
 /* ── 新建 ── */
@@ -198,12 +252,20 @@ watch(images, (list) => {
 const thumbOf = (im: Img | null) => (im && thumbs[im.nodeId] && thumbs[im.nodeId] !== "loading" ? thumbs[im.nodeId] : "");
 
 /* ── 5 成片 ── */
-const job = ref<{ id: string; status: string; progress: number | null; error: string | null; hasOutput: boolean; outputRelativePath: string | null } | null>(null);
+const job = ref<RenderJob | null>(null);
+/** 已完成渲染（导出入口的事实来源）；渲染轮询完成后同步更新。 */
+const exportJob = ref<RenderJob | null>(null);
+const exportRefreshBusy = ref(false);
+const exporting = ref<"finder" | "library" | null>(null);
+const exportResult = ref<ExportResult | null>(null);
+const exportError = ref("");
 let poll = 0;
 async function render() {
   if (!currentId.value || busy.value) return;
   busy.value = "render";
   failure.value = "";
+  exportError.value = "";
+  exportResult.value = null;
   const r = await send("media/short-drama/render", { projectId: currentId.value });
   busy.value = null;
   if (!r.ok) return void (failure.value = errText(r));
@@ -213,9 +275,24 @@ async function render() {
   poll = window.setInterval(async () => {
     if (!job.value) return;
     const g = await send("media/render/get", { jobId: job.value.id });
-    if (g.ok) job.value = val(g).job;
+    if (g.ok) {
+      const next = val(g).job as RenderJob;
+      job.value = next;
+      if (next && next.status === "completed" && next.hasOutput) exportJob.value = next;
+    }
     if (!job.value || ["completed", "failed", "cancelled"].includes(job.value.status)) window.clearInterval(poll);
   }, 1500);
+}
+async function exportMovie(target: "finder" | "library") {
+  if (!currentId.value || !exportJob.value || exporting.value) return;
+  exporting.value = target;
+  exportError.value = "";
+  exportResult.value = null;
+  const r = await send("media/short-drama/export", { projectId: currentId.value, jobId: exportJob.value.id, target });
+  exporting.value = null;
+  if (!r.ok) return void (exportError.value = errText(r));
+  exportResult.value = val(r) as ExportResult;
+  message.value = target === "finder" ? "成片已导出到访达导出目录（相对路径见下方）" : "成片已登记到 OpenArc 资源库（资源引用见下方）";
 }
 const JOB: Record<string, string> = { queued: "排队中", running: "渲染中", completed: "已完成", failed: "失败", cancelled: "已取消" };
 const readyShots = computed(() => (view.value?.shots || []).filter((s) => s.imageCount > 0));
@@ -227,7 +304,7 @@ const stageDone = (id: StageId) => {
   if (id === "design") return !!v.visualDesign;
   if (id === "storyboard") return v.shots.length > 0;
   if (id === "generate") return v.shots.length > 0 && readyShots.value.length === v.shots.length;
-  return !!job.value?.hasOutput;
+  return !!exportJob.value?.hasOutput;
 };
 const epTitle = (id?: string) => view.value?.blueprint?.episodes.find((e) => e.id === id)?.title || "";
 
@@ -261,7 +338,7 @@ onBeforeUnmount(() => window.clearInterval(poll));
           class="split-nav"
           :aria-current="stage === s.id ? 'true' : undefined"
           :data-drama-stage="s.id"
-          @click="stage = s.id"
+          @click="selectStage(s.id)"
         >
           <component :is="s.icon" :size="16" /> <span class="split-nav-label">{{ i + 1 }}. {{ s.label }}</span>
           <small v-if="stageDone(s.id)" class="planned-count">✓</small>
@@ -427,6 +504,43 @@ onBeforeUnmount(() => window.clearInterval(poll));
           <span v-if="job?.error" class="vd-msg sk-msg err">{{ job.error }}</span>
           <span v-if="job?.hasOutput" class="set-cap">已生成 {{ job.outputRelativePath }}（保存在 OpenArc 媒体目录）</span>
         </div>
+
+        <div class="dr-card dr-export" data-drama-export>
+          <div class="dr-export-head">
+            <h3>成片导出</h3>
+            <button class="planned-today" :disabled="exportRefreshBusy" data-drama-export-refresh @click="loadCompletedRender">
+              <component :is="exportRefreshBusy ? LoaderCircle : RefreshCw" :size="12" :class="{ spin: exportRefreshBusy }" /> {{ exportRefreshBusy ? "读取中…" : "刷新成片状态" }}
+            </button>
+          </div>
+          <p v-if="exportJob" class="set-cap" data-drama-export-ready>
+            可导出成片：{{ exportJob.outputRelativePath || exportJob.id }}（渲染任务 {{ exportJob.id }}）
+          </p>
+          <p v-else class="set-cap" data-drama-export-unavailable>
+            还没有已完成的成片：先给分镜出图并点「渲染成片」；已有渲染任务时用「刷新成片状态」从本机媒体库重新读取。
+          </p>
+          <div class="dr-bar">
+            <button class="planned-cta sk-btn" :disabled="!exportJob || !!exporting" data-drama-export-finder @click="exportMovie('finder')">
+              <component :is="exporting === 'finder' ? LoaderCircle : Download" :size="13" :class="{ spin: exporting === 'finder' }" /> {{ exporting === "finder" ? "导出中…" : "导出到访达" }}
+            </button>
+            <button class="planned-today" :disabled="!exportJob || !!exporting" data-drama-export-library @click="exportMovie('library')">
+              <component :is="exporting === 'library' ? LoaderCircle : Library" :size="13" :class="{ spin: exporting === 'library' }" /> {{ exporting === "library" ? "登记中…" : "导出到资源库" }}
+            </button>
+          </div>
+          <p v-if="exportError" class="vd-msg sk-msg err" role="alert" data-drama-export-error>{{ exportError }}</p>
+          <div v-if="exportResult" class="dr-export-result" data-drama-export-result :data-drama-export-target="exportResult.target">
+            <p class="set-cap">
+              目标：{{ exportResult.target === "finder" ? "访达导出目录" : "OpenArc 资源库" }} · 文件：{{ exportResult.fileName }} · {{ formatBytes(exportResult.bytes) }}
+            </p>
+            <p v-if="exportResult.relativePath" class="set-cap">
+              相对路径：<code class="dr-export-path" data-drama-export-relative-path>{{ exportResult.relativePath }}</code>
+            </p>
+            <p v-if="exportResult.resourceRef" class="set-cap">
+              资源引用：<code class="dr-export-path" data-drama-export-resource-ref>{{ exportResult.resourceRef }}</code>
+            </p>
+            <p v-if="exportResult.resourceRef && exportResult.deduped" class="set-cap">资源库已有相同内容：复用同一个资源引用，没有重复登记。</p>
+            <p v-if="exportResult.target === 'finder' && exportResult.revealed === false" class="set-cap">系统访达没有确认打开（导出文件仍已写入导出目录）。</p>
+          </div>
+        </div>
       </section>
     </div>
 
@@ -441,3 +555,25 @@ onBeforeUnmount(() => window.clearInterval(poll));
     </DsDialog>
   </div>
 </template>
+
+<style scoped>
+.dr-export-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.dr-export-result {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+/* 只给"资源引用 / 相对路径"这类机器可读值用等宽；颜色、字号仍取既有 token。 */
+.dr-export-path {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: var(--fs-micro);
+  color: var(--text);
+  word-break: break-all;
+}
+</style>

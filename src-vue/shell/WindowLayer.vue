@@ -1,5 +1,7 @@
 <script setup lang="ts">
+import { appDisplayNameById } from "../apps";
 import { useShellStore, type ShellWindow } from "../stores/shell";
+import { t } from "../i18n";
 import { useIdentityStore } from "../stores/identity";
 import SettingsContent from "../settings/SettingsContent.vue";
 import FilesApp from "../apps/FilesApp.vue";
@@ -156,7 +158,7 @@ function styleOf(win: ShellWindow) {
     v-for="win in shell.windows"
     :key="win.id"
     :data-window-id="win.id"
-    :aria-label="win.title + '窗口'"
+    :aria-label="t('{title}窗口', { title: appDisplayNameById(win.appId) || win.title })"
     class="window"
     :class="{ active: win.id === shell.focusedWindowId, minimized: !win.visible }"
     :style="styleOf(win)"
@@ -167,15 +169,15 @@ function styleOf(win: ShellWindow) {
         <!-- 红灯语义同 React（components.tsx closeAction）：App 窗口收进 Dock，只有系统设置真的关闭 -->
         <button
           class="close"
-          :aria-label="(win.appId === 'settings' ? '关闭' : '最小化') + win.id"
+          :aria-label="t(win.appId === 'settings' ? '关闭{title}' : '最小化{title}', { title: appDisplayNameById(win.appId) || win.id })"
           @click="win.appId === 'settings' ? shell.closeWindow(win.id) : shell.minimizeWindow(win.id)"
         >
           <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
         </button>
-        <button class="minimize" :aria-label="'最小化' + win.id" @click="shell.minimizeWindow(win.id)">
+        <button class="minimize" :aria-label="t('最小化{title}', { title: appDisplayNameById(win.appId) || win.id })" @click="shell.minimizeWindow(win.id)">
           <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14" /></svg>
         </button>
-        <button class="maximize" :aria-label="(win.maximized ? '还原' : '最大化') + win.id" @click="shell.toggleMaximize(win.id)">
+        <button class="maximize" :aria-label="t(win.maximized ? '还原{title}' : '最大化{title}', { title: appDisplayNameById(win.appId) || win.id })" @click="shell.toggleMaximize(win.id)">
           <svg width="8" height="8" viewBox="0 0 10 10" aria-hidden="true">
             <path d="M1 4.6 L4.6 4.6 L4.6 1 Z" fill="currentColor" />
             <path d="M9 5.4 L5.4 5.4 L5.4 9 Z" fill="currentColor" />
@@ -239,7 +241,7 @@ function styleOf(win: ShellWindow) {
     <button
       v-if="!win.maximized"
       class="resize"
-      :aria-label="'调整' + win.id + '大小'"
+      :aria-label="t('调整{title}大小', { title: appDisplayNameById(win.appId) || win.id })"
       @pointerdown="startResize($event, win)"
       @keydown="resizeByKey($event, win)"
     >⌟</button>

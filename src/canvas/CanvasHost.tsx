@@ -28,7 +28,9 @@ import type { Window as WinDomain } from "../../electron/window-domain.cjs";
 import { buildCanvasModelLabelIndex, canvasModelBaseName } from "./canvasModelLabels";
 import { closeStreamWithoutContent, isStreamContentEvent, pageFrameFor, sseChunk, streamCloseErrorFrame } from "./canvasLlmStream";
 import { buildSizePolicyTable } from "../../electron/image-params.cjs";
+import { Package, Users } from "lucide-react";
 import { ASSET_PREFIX, resolveAssetRefsInDoc, restoreAssetRefsInDoc } from "./canvasAssetRefs";
+import { CanvasCollabPanel, CanvasHostPanelEntry, CanvasPackagePanel } from "./CanvasDxosPanels";
 import { CanvasShareEntry, CanvasSharePanel } from "./CanvasSharePanel";
 import { accessChange, accessSignature, isAccessLostError, parseShareTargetMessage } from "./canvasShareModel";
 
@@ -80,6 +82,10 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
   const [shareTarget, setShareTarget] = useState<{ canvasId: string; title: string; origin: "canvas" | "list" } | null>(null);
   /** 面板重读计数：权限事实一变就让面板按服务端最新能力重画（例如转移后变编辑者）。*/
   const [shareRefresh, setShareRefresh] = useState(0);
+  /** 宿主动作浮层（协作 / .dxcanvas 打包）：同一时刻只开一个，且绑定打开时的那本画布。*/
+  const [hostPanel, setHostPanel] = useState<{ kind: "collab" | "package"; canvasId: string } | null>(null);
+  const collabEntryRef = useRef<HTMLButtonElement | null>(null);
+  const packageEntryRef = useRef<HTMLButtonElement | null>(null);
   // 宿主不再有状态行与提示横幅（那是 chrome），但 status/notice 的**写点全部保留**：
   // notice 另以根节点上的只读属性暴露给探针（资源失效复核 F3c 的证据通道），status 由看门狗与适配器路径写入。
   const [status, setStatus] = useState("初始化…");
@@ -463,6 +469,31 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
       try { frameRef.current?.focus(); } catch { /* ignore */ }
     }, 0);
   }, []);
+
+  /** 协作 / 打包是宿主动作浮层：与共享面板互斥，只对打开时那本画布生效。*/
+  const toggleHostPanel = useCallback((kind: "collab" | "package") => {
+    const cur = currentRef.current;
+    if (!cur) return;
+    setShareTarget(null);
+    setHostPanel((previous) => (previous && previous.kind === kind && previous.canvasId === cur.canvasId ? null : { kind, canvasId: cur.canvasId }));
+  }, []);
+
+  /** 关闭协作 / 打包面板：焦点回到对应入口按钮。*/
+  const closeHostPanel = useCallback(() => {
+    const kind = hostPanel?.kind || null;
+    setHostPanel(null);
+    window.setTimeout(() => {
+      const btn = kind === "collab" ? collabEntryRef.current : kind === "package" ? packageEntryRef.current : null;
+      if (btn) { try { btn.focus(); return; } catch { /* ignore */ } }
+      try { frameRef.current?.focus(); } catch { /* ignore */ }
+    }, 0);
+  }, [hostPanel]);
+
+  // 当前画布被关掉 / 换成另一本时，宿主浮层不能停在旧画布上（否则导出/协作会指向已不可见的画布）。
+  useEffect(() => {
+    if (!hostPanel) return;
+    if (!current || current.canvasId !== hostPanel.canvasId) setHostPanel(null);
+  }, [current, hostPanel]);
 
   // 宿主「减少动态效果」是实时开关：sandbox iframe 读不到外壳的类名，只能由宿主把事实重新推过去
   //（应用页的守卫按 data-openarc-reduced-motion 关掉自己的动效）。
@@ -900,6 +931,7 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
         const cur = currentRef.current;
         const fromCurrent = !!cur && cur.canvasId === id;
         const title = fromCurrent ? cur!.title : (itemsRef.current.find((it) => it.canvasId === id)?.title || "");
+        setHostPanel(null);
         setShareTarget({ canvasId: id, title, origin: fromCurrent ? "canvas" : "list" });
         return;
       }
@@ -1156,6 +1188,8 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
       data-canvas-asset-notice-text={notice || undefined}
       // 清单外模型名的拒绝计数（只读证据：配合"0 次 provider 请求"，证明没有静默回落）
       data-canvas-model-not-found={modelNotFound}
+      // 当前打开的画布 id（只读证据通道：宿主浮层/探针据此判断"协作/打包作用于哪一本"）
+      data-canvas-current-id={current ? current.canvasId : ""}
     >
       {frameSrc ? (
         <iframe
@@ -1175,23 +1209,43 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
       ) : (
         <div className="web-viewport" data-canvas-frame-pending>正在准备应用…</div>
       )}
-      {/* 共享入口与面板是**宿主浮层**：不修改 iframe 里的页面 DOM，列表页只多一个菜单项。*/}
-      {current || shareTarget ? (
+      {/* 共享 / 协作 / 打包入口与面板都是**宿主浮层**：不修改 iframe 里的页面 DOM。
+          三个入口在同一行（右上角），同一时刻只开一个面板；协作与打包只对当前打开的这本画布生效。*/}
+      {current || shareTarget || hostPanel ? (
         <div
           className={"canvas-share-layer" + (reducedMotion() ? " reduced" : "")}
           data-canvas-share-layer
           data-canvas-share-open={shareTarget ? shareTarget.canvasId : ""}
           data-canvas-share-entry-source={current?.source || ""}
           data-canvas-share-reduced={reducedMotion() ? "1" : "0"}
+          data-canvas-host-panel={hostPanel ? hostPanel.kind : ""}
         >
           {current ? (
-            <CanvasShareEntry
-              canManage={!!current.canManage}
-              source={current.source}
-              expanded={!!shareTarget && shareTarget.canvasId === current.canvasId}
-              buttonRef={shareEntryRef}
-              onOpen={() => setShareTarget({ canvasId: current.canvasId, title: current.title, origin: "canvas" })}
-            />
+            <div className="canvas-host-actions" data-canvas-host-actions>
+              <CanvasShareEntry
+                canManage={!!current.canManage}
+                source={current.source}
+                expanded={!!shareTarget && shareTarget.canvasId === current.canvasId}
+                buttonRef={shareEntryRef}
+                onOpen={() => { setHostPanel(null); setShareTarget({ canvasId: current.canvasId, title: current.title, origin: "canvas" }); }}
+              />
+              <CanvasHostPanelEntry
+                kind="collab"
+                label="协作"
+                icon={<Users size={14} aria-hidden="true" />}
+                expanded={!!hostPanel && hostPanel.kind === "collab" && hostPanel.canvasId === current.canvasId}
+                buttonRef={collabEntryRef}
+                onOpen={() => toggleHostPanel("collab")}
+              />
+              <CanvasHostPanelEntry
+                kind="package"
+                label="打包"
+                icon={<Package size={14} aria-hidden="true" />}
+                expanded={!!hostPanel && hostPanel.kind === "package" && hostPanel.canvasId === current.canvasId}
+                buttonRef={packageEntryRef}
+                onOpen={() => toggleHostPanel("package")}
+              />
+            </div>
           ) : null}
           {shareTarget ? (
             <CanvasSharePanel
@@ -1202,6 +1256,19 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
               onClose={closeSharePanel}
               onAccessChanged={() => { void refreshCurrentAccess(shareTarget.canvasId, false); }}
               onFatalAccessLost={(code) => { void accessLost(code, shareTarget.canvasId); }}
+            />
+          ) : null}
+          {hostPanel && current && hostPanel.canvasId === current.canvasId && hostPanel.kind === "collab" ? (
+            <CanvasCollabPanel key={"collab:" + hostPanel.canvasId} canvasId={hostPanel.canvasId} title={current.title} cmd={canvasCmd} onClose={closeHostPanel} />
+          ) : null}
+          {hostPanel && current && hostPanel.canvasId === current.canvasId && hostPanel.kind === "package" ? (
+            <CanvasPackagePanel
+              key={"package:" + hostPanel.canvasId}
+              canvasId={hostPanel.canvasId}
+              title={current.title}
+              cmd={canvasCmd}
+              onClose={closeHostPanel}
+              onImported={() => { void refreshList(); }}
             />
           ) : null}
         </div>

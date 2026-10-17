@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted } from "vue";
 import { useShellStore } from "../stores/shell";
+import { t } from "../i18n";
 
 const shell = useShellStore();
 
@@ -25,7 +26,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
     class="quicklook"
     role="dialog"
     aria-modal="true"
-    aria-label="显示简介"
+    :aria-label="t('显示简介')"
     @click="shell.closeQuickLook()"
   >
     <div class="quicklook-card info-card" @click.stop>
@@ -37,10 +38,10 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
           <dd>{{ row.v }}</dd>
         </div>
       </dl>
-      <p class="muted">点击任意处关闭</p>
+      <p class="muted">{{ t("点击任意处关闭") }}</p>
     </div>
   </div>
-  <div v-else class="quicklook" role="dialog" aria-modal="true" aria-label="快速查看" @click="shell.closeQuickLook()">
+  <div v-else class="quicklook" role="dialog" aria-modal="true" :aria-label="t('快速查看')" @click="shell.closeQuickLook()">
     <div class="quicklook-card" @click.stop>
       <div class="quicklook-body">
         <template v-if="shell.preview">
@@ -48,14 +49,14 @@ onBeforeUnmount(() => window.removeEventListener("keydown", onKey));
           <video v-else-if="shell.preview.kind === 'video' && shell.preview.src" :src="shell.preview.src" controls autoplay />
           <audio v-else-if="shell.preview.kind === 'audio' && shell.preview.src" :src="shell.preview.src" controls autoplay />
           <pre v-else-if="shell.preview.kind === 'text'" class="quicklook-text">{{ shell.preview.text }}</pre>
-          <p v-else-if="shell.preview.kind === 'pdf'" class="muted">PDF 预览需要后续接入只读文件协议（当前不开放 data: 框架）。</p>
-          <p v-else class="muted">暂不支持预览该格式{{ shell.preview.ext ? "（." + shell.preview.ext + "）" : "" }}。</p>
+          <p v-else-if="shell.preview.kind === 'pdf'" class="muted">{{ t("PDF 预览需要后续接入只读文件协议（当前不开放 data: 框架）。") }}</p>
+          <p v-else class="muted">{{ t("暂不支持预览该格式") }}{{ shell.preview.ext ? "（." + shell.preview.ext + "）" : "" }}。</p>
         </template>
-        <p v-else class="muted">在访达里选中一个文件，按空格即可快速查看。</p>
+        <p v-else class="muted">{{ t("在访达里选中一个文件，按空格即可快速查看。") }}</p>
       </div>
       <div class="quicklook-name">
-        {{ shell.preview?.name || "快速查看" }}
-        <span class="muted">空格 / Esc 关闭</span>
+        {{ shell.preview?.name || t("快速查看") }}
+        <span class="muted">{{ t("空格 / Esc 关闭") }}</span>
       </div>
     </div>
   </div>

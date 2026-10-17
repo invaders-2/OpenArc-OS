@@ -1,0 +1,121 @@
+/**
+ * 画布宿主 · 协作 / .dxcanvas 打包浮层（React 岛）。
+ *
+ * 与 CanvasSharePanel 同一形态：位置在画布宿主段（.canvas-share-layer 内），
+ * **只做浮层布局**，颜色 / 圆角 / 阴影 / 字号全部消费既有 token 与既有类
+ * （.canvas-share-panel / .canvas-share-section / .ds-btn / .ds-badge / .gov-row）。
+ * 不改上游 iframe 的 DOM，也不新造第二套视觉值。
+ */
+
+.canvas-host-actions {
+  position: absolute;
+  top: 66px;
+  right: 16px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: auto;
+}
+
+/* 共享入口原来是绝对定位（styles.css 的 .canvas-share-entry）；并入统一动作行后
+   在同一行里按流式排布，位置与点击区仍由这一行决定。 */
+.canvas-host-actions .canvas-share-entry {
+  position: static;
+  top: auto;
+  right: auto;
+}
+
+.canvas-dxos-entry {
+  flex: none;
+}
+.canvas-dxos-entry__label {
+  display: inline-block;
+}
+
+/* 打包面板要显示 64 位 sha256 / 相对路径，比共享面板宽一点（仍受窄窗规则约束）。
+   面板从动作行下方展开（top 112）：三个入口始终可见、可再次点击收起，不会透过玻璃
+   在面板顶部留下重影。 */
+.canvas-share-panel.canvas-dxos-panel {
+  width: 380px;
+  top: 112px;
+}
+
+.canvas-dxos-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.canvas-dxos-code {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+  font-size: var(--fs-micro);
+  color: var(--text);
+  word-break: break-all;
+  user-select: text;
+}
+
+.canvas-dxos-client {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: var(--fs-micro);
+  color: var(--muted);
+}
+
+.canvas-dxos-rooms,
+.canvas-dxos-events {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.canvas-dxos-room,
+.canvas-dxos-event {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: var(--radius-md);
+  background: rgb(var(--text-rgb) / 0.035);
+  font-size: var(--fs-micro);
+  color: var(--muted);
+}
+
+.canvas-dxos-room.is-current {
+  background: rgb(var(--text-rgb) / 0.07);
+  color: var(--text);
+}
+
+.canvas-dxos-event__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 窄窗（与共享入口同一容器查询口径）：入口收成 40px 图标按钮，标签隐藏。 */
+@container (max-width: 900px) {
+  .canvas-dxos-entry {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    justify-content: center;
+  }
+  .canvas-dxos-entry__label {
+    display: none;
+  }
+}
+
+@container (max-width: 760px) {
+  .canvas-host-actions {
+    top: 66px;
+    right: 12px;
+  }
+}

@@ -11,7 +11,9 @@ import "../src/styles.css";
 import "./apps/workbench.css";
 import App from "./App.vue";
 import { installDevLog } from "./devlog";
+import { initI18n } from "./i18n";
 
 installDevLog();
+initI18n();
 
 createApp(App).use(createPinia()).mount("#app");
