@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { Activity, ListChecks, PlugZap, RefreshCw, ShieldCheck } from "lucide-vue-next";
+import { Activity, ExternalLink, ListChecks, Palette, PenTool, PlugZap, RefreshCw, ShieldCheck } from "lucide-vue-next";
 import DsBadge from "../design-system/DsBadge.vue";
 import DsButton from "../design-system/DsButton.vue";
+import DsDialog from "../design-system/DsDialog.vue";
 import DsPageState from "../design-system/DsPageState.vue";
+import { useShellStore } from "../stores/shell";
 import {
   detailText,
   domainBridge,
@@ -65,6 +67,7 @@ type LogEntry = { at: number; command: string; ok: boolean; code?: string; detai
 
 const bridge = domainBridge(typeof window === "undefined" ? null : window, "integration");
 const hasBridge = ref(!!bridge);
+const shell = useShellStore();
 
 const tab = ref<"services" | "audit">("services");
 const loading = ref(false);
@@ -92,6 +95,126 @@ const auditFilter = ref("");
 
 const credentialSecret = ref("");
 const channelForm = ref({ name: "", webhook: "", secret: "" });
+
+/* ── 设计工具（Figma / Illustrator）：不是 integration 插件，单独一栏 ──────────
+   数据面：MCP 配置来自 mcp/list（没有登记就如实显示）；来源与启动能力来自既有 media / browser 命令。
+   Figma：预览文件清单 / 构建（构建器未注入时结构化不可用）+ 系统浏览器打开（用户二次确认）。
+   Illustrator：本机检测（未安装时 media/illustrator/config/get 结构化不可用）+ 启动命令未注册。 */
+type DesignToolId = "figma" | "illustrator";
+type DesignProbe = { ok: boolean; code: string; detail: string; value: Record<string, unknown> | null };
+type McpItem = {
+  connectionId: string; name: string; transport: string; location: string; enabled: boolean;
+  status: string; serverName: string | null; endpoint: Record<string, unknown> | null;
+};
+const DESIGN_TOOLS: { id: DesignToolId; name: string; description: string; sourceHint: string }[] = [
+  { id: "figma", name: "Figma", description: "设计稿预览：拉取 Figma 预览文件清单、用注入的构建器打包成可预览页面。", sourceHint: "预览文件清单走 media/figma-preview/files；打包走 media/figma-preview/build（需要主进程注入 Vite 构建器）。" },
+  { id: "illustrator", name: "Adobe Illustrator", description: "本机 Illustrator：读取/写入 Illustrator 配置、准备临时导出与预览。", sourceHint: "配置与临时导出走 media/illustrator/*（需要本机安装 Illustrator 并注入适配器）。" },
+];
+const designSelected = ref<DesignToolId | null>(null);
+const mcpItems = ref<McpItem[]>([]);
+const mcpError = ref<FailureView | null>(null);
+const designBusy = ref<string | null>(null);
+const designProbes = ref<Record<DesignToolId, DesignProbe | null>>({ figma: null, illustrator: null });
+const figmaSourceUrl = ref("");
+const figmaFetchBusy = ref(false);
+const figmaFetch = ref<{ ok: boolean; count: number; code: string; detail: string } | null>(null);
+const figmaOpenAsk = ref(false);
+const launchNotice = ref("");
+const launchError = ref("");
+
+async function callDomain(domain: string, command: string, payload: Record<string, unknown> = {}): Promise<Record<string, any>> {
+  const api = typeof window === "undefined" ? null : (window as any).openarc?.[domain];
+  if (!api || typeof api.command !== "function") return { ok: false, error: "BRIDGE_ABSENT" };
+  try {
+    const reply = await api.command({ command, payload });
+    return reply && typeof reply === "object" ? reply : { ok: false, error: "MALFORMED_REPLY" };
+  } catch (error) {
+    return { ok: false, error: "BRIDGE_ERROR", detail: error instanceof Error ? error.message : String(error) };
+  }
+}
+function toProbe(reply: Record<string, any>): DesignProbe {
+  return {
+    ok: reply.ok === true,
+    code: typeof reply.error === "string" ? reply.error : (reply.ok === true ? "" : "DXOS_ERR_INTERNAL"),
+    detail: typeof reply.detail === "string" ? reply.detail : (reply.detail == null ? "" : JSON.stringify(reply.detail)),
+    value: reply.value && typeof reply.value === "object" ? reply.value : null,
+  };
+}
+async function loadMcpConfig() {
+  const reply = await callDomain("mcp", "mcp/list", {});
+  if (reply.ok === true && Array.isArray(reply.items)) {
+    mcpItems.value = reply.items.map((item: any) => ({
+      connectionId: String(item && item.connectionId || ""),
+      name: String(item && item.name || ""),
+      transport: String(item && item.transport || ""),
+      location: String(item && item.location || ""),
+      enabled: item && item.enabled === true,
+      status: String(item && item.status || ""),
+      serverName: item && typeof item.serverName === "string" ? item.serverName : null,
+      endpoint: item && item.endpoint && typeof item.endpoint === "object" ? item.endpoint : null,
+    }));
+    mcpError.value = null;
+  } else {
+    mcpItems.value = [];
+    mcpError.value = resultFailure(reply) || { code: "MCP_UNAVAILABLE", message: "" };
+  }
+}
+function mcpMatches(tool: DesignToolId): McpItem[] {
+  const pattern = tool === "figma" ? /figma/i : /illustrator|adobe/i;
+  return mcpItems.value.filter((item) => {
+    const haystack = [item.name, item.serverName || "", JSON.stringify(item.endpoint || {})].join(" ");
+    return pattern.test(haystack);
+  });
+}
+async function probeDesign(tool: DesignToolId) {
+  designBusy.value = tool;
+  launchNotice.value = "";
+  launchError.value = "";
+  const reply = tool === "figma"
+    ? await callDomain("media", "media/figma-preview/build", { projectId: "designprobe", files: [] })
+    : await callDomain("media", "media/illustrator/config/get", {});
+  designProbes.value = { ...designProbes.value, [tool]: toProbe(reply) };
+  designBusy.value = null;
+}
+function mcpMatchesSelected(): McpItem[] {
+  return designSelected.value ? mcpMatches(designSelected.value) : [];
+}
+async function probeSelectedDesign(): Promise<void> {
+  if (designSelected.value) await probeDesign(designSelected.value);
+}
+async function selectDesign(tool: DesignToolId) {
+  designSelected.value = tool;
+  actionError.value = null;
+  actionNotice.value = "";
+  await Promise.all([loadMcpConfig(), probeDesign(tool)]);
+}
+function leaveDesign() {
+  designSelected.value = null;
+  launchNotice.value = "";
+  launchError.value = "";
+}
+async function fetchFigmaFiles() {
+  const url = figmaSourceUrl.value.trim();
+  figmaFetch.value = null;
+  if (!/^https:\/\//i.test(url)) {
+    figmaFetch.value = { ok: false, count: 0, code: "INVALID_INPUT", detail: "预览清单地址必须是 HTTPS" };
+    return;
+  }
+  figmaFetchBusy.value = true;
+  const reply = await callDomain("media", "media/figma-preview/files", { sourceUrl: url });
+  figmaFetchBusy.value = false;
+  const probe = toProbe(reply);
+  const files = reply.ok === true && Array.isArray(reply.value && reply.value.files) ? reply.value.files.length : 0;
+  figmaFetch.value = { ok: probe.ok, count: files, code: probe.code, detail: probe.detail };
+}
+async function openFigmaExternal() {
+  figmaOpenAsk.value = false;
+  launchNotice.value = "";
+  launchError.value = "";
+  const reply = await callDomain("browser", "browser/openExternal", { url: "https://www.figma.com/" });
+  if (reply && reply.ok === true) launchNotice.value = "已请求系统浏览器打开 Figma（实际打开由系统浏览器决定）。";
+  else launchError.value = (reply && typeof reply.error === "string" ? reply.error : "BROWSER_UNAVAILABLE") + (reply && typeof reply.detail === "string" ? "：" + reply.detail : "");
+}
 
 /** 每个服务自己的状态命令；表里没有的服务只读依赖健康，不臆造状态。 */
 const STATUS_COMMAND: Record<string, string> = {
@@ -253,6 +376,9 @@ async function loadDetail() {
 }
 
 async function selectPlugin(id: string) {
+  designSelected.value = null;
+  launchNotice.value = "";
+  launchError.value = "";
   selected.value = id;
   actionNotice.value = "";
   await loadDetail();
@@ -429,6 +555,7 @@ const enabledCount = computed(() => plugins.value.filter((item) => item.enabled)
 
 onMounted(() => {
   void loadOverview();
+  void loadMcpConfig();
 });
 </script>
 
@@ -475,6 +602,21 @@ onMounted(() => {
           </span>
         </button>
         <p v-if="!plugins.length && !loading" class="planned-note">主进程没有登记任何集成插件。</p>
+        <div class="split-section">设计工具</div>
+        <button
+          v-for="tool in DESIGN_TOOLS"
+          :key="tool.id"
+          type="button"
+          class="split-nav"
+          :data-design-tool-entry="tool.id"
+          :aria-current="designSelected === tool.id ? 'true' : undefined"
+          @click="selectDesign(tool.id)"
+        >
+          <PenTool v-if="tool.id === 'figma'" :size="16" />
+          <Palette v-else :size="16" />
+          <span class="split-nav-label">{{ tool.name }}</span>
+          <DsBadge size="sm" :tone="mcpMatches(tool.id).length ? 'success' : 'neutral'">{{ mcpMatches(tool.id).length ? "MCP 已登记" : "未登记 MCP" }}</DsBadge>
+        </button>
       </template>
 
       <p class="integr-side-note">插件默认全部关闭；启用不改依赖、不联网。连通测试只访问各服务登记的主机，不读取凭据。</p>
@@ -482,7 +624,7 @@ onMounted(() => {
 
     <div class="split-main integr-main">
       <div class="pane-toolbar">
-        <strong class="pane-title">{{ tab === "audit" ? "命令与审计" : "第三方集成" }}</strong>
+        <strong class="pane-title">{{ tab === "audit" ? "命令与审计" : designSelected ? "设计工具" : "第三方集成" }}</strong>
         <div class="toolbar-spacer" />
         <DsBadge v-if="summary" size="sm">
           <Activity :size="12" />
@@ -540,6 +682,86 @@ onMounted(() => {
               <span class="integr-row-desc">{{ entry.ok ? "" : entry.code + (entry.detail ? " · " + entry.detail : "") }}</span>
             </li>
           </ul>
+        </section>
+      </div>
+
+      <div v-else-if="designSelected" class="integr-body" :data-design-tool-panel="designSelected">
+        <header class="integr-hero">
+          <div class="integr-hero-head">
+            <h1>{{ designSelected === "figma" ? "Figma" : "Adobe Illustrator" }}</h1>
+            <DsBadge :tone="mcpMatchesSelected().length ? 'success' : 'warning'">{{ mcpMatchesSelected().length ? "MCP 已登记" : "未登记 MCP" }}</DsBadge>
+            <DsBadge size="sm" tone="neutral">{{ designSelected === "figma" ? "设计稿预览" : "本机 Illustrator" }}</DsBadge>
+            <span class="integr-version">{{ designSelected === "figma" ? "media/figma-preview" : "media/illustrator" }}</span>
+          </div>
+          <p class="integr-desc">{{ designSelected === "figma" ? DESIGN_TOOLS[0].description : DESIGN_TOOLS[1].description }}</p>
+          <div class="integr-actions">
+            <DsButton size="sm" variant="ghost" data-design-back @click="leaveDesign">返回服务</DsButton>
+            <DsButton size="sm" variant="secondary" :status="designBusy === designSelected ? 'loading' : 'idle'" data-design-refresh @click="probeSelectedDesign()">
+              <RefreshCw :size="13" /> 重新检查
+            </DsButton>
+            <DsButton v-if="designSelected === 'figma'" size="sm" variant="primary" data-design-open-figma @click="figmaOpenAsk = true">
+              <ExternalLink :size="13" /> 在系统浏览器打开 Figma
+            </DsButton>
+            <DsButton v-else size="sm" variant="primary" disabled data-design-launch-unavailable>启动 Illustrator（未注册命令）</DsButton>
+          </div>
+          <p v-if="launchNotice" class="integr-ok" role="status" data-design-launch-notice>{{ launchNotice }}</p>
+          <p v-if="launchError" class="integr-error" role="alert" data-design-launch-error>{{ launchError }}</p>
+        </header>
+
+        <section class="integr-sec" data-design-mcp>
+          <h3>MCP 配置</h3>
+          <DsPageState v-if="mcpError" kind="error" title="MCP 配置读不到" :description="failureText(mcpError)" />
+          <template v-else-if="mcpMatchesSelected().length">
+            <ul class="integr-rows">
+              <li v-for="conn in mcpMatchesSelected()" :key="conn.connectionId" class="integr-row" :data-design-mcp-connection="conn.connectionId">
+                <span class="integr-dep-label">{{ conn.name }}</span>
+                <DsBadge size="sm">{{ conn.transport }}</DsBadge>
+                <DsBadge size="sm" :tone="conn.enabled ? 'success' : 'neutral'">{{ conn.enabled ? "已启用" : "未启用" }}</DsBadge>
+                <span class="integr-row-desc">{{ conn.serverName || conn.status }}</span>
+              </li>
+            </ul>
+            <div class="integr-actions"><DsButton size="sm" variant="secondary" data-design-open-mcp @click="shell.activateApp('mcp-center')">去 MCP 中心管理</DsButton></div>
+          </template>
+          <template v-else>
+            <DsPageState
+              kind="empty"
+              title="未登记 MCP"
+              :description="designSelected === 'figma' ? 'MCP 中心里没有名称 / 端点包含 figma 的连接；添加 stdio 或 HTTP server 后才会在这里出现。' : 'MCP 中心里没有名称 / 端点包含 illustrator 或 adobe 的连接；添加后才会在这里出现。'"
+            />
+            <div class="integr-actions"><DsButton size="sm" variant="secondary" data-design-open-mcp @click="shell.activateApp('mcp-center')">去 MCP 中心添加</DsButton></div>
+          </template>
+        </section>
+
+        <section class="integr-sec" data-design-source>
+          <h3>来源与能力</h3>
+          <p class="integr-note">{{ designSelected === "figma" ? DESIGN_TOOLS[0].sourceHint : DESIGN_TOOLS[1].sourceHint }}</p>
+          <template v-if="designSelected === 'figma'">
+            <div class="integr-row" data-design-probe="figma" :data-design-probe-ok="designProbes.figma?.ok ? '1' : '0'">
+              <span class="integr-dep-label">预览构建器</span>
+              <DsBadge size="sm" :tone="designProbes.figma?.ok ? 'success' : 'warning'">{{ designProbes.figma ? (designProbes.figma.ok ? "可用" : "不可用") : "未探测" }}</DsBadge>
+              <span class="integr-row-desc" data-design-probe-detail="figma">{{ designProbes.figma && !designProbes.figma.ok ? designProbes.figma.code + (designProbes.figma.detail ? " · " + designProbes.figma.detail : "") : (designProbes.figma ? "构建器已注入" : "尚未检查") }}</span>
+            </div>
+            <form class="integr-form" @submit.prevent="fetchFigmaFiles">
+              <label class="integr-field"><span>Figma 预览文件清单地址（HTTPS）</span><input v-model="figmaSourceUrl" placeholder="https://…/preview.json" data-design-figma-url /></label>
+              <DsButton type="submit" size="sm" variant="secondary" :status="figmaFetchBusy ? 'loading' : 'idle'" data-design-figma-fetch>拉取清单</DsButton>
+            </form>
+            <p v-if="figmaFetch" :class="figmaFetch.ok ? 'integr-ok' : 'integr-error'" :data-design-figma-result="figmaFetch.ok ? 'ok' : 'error'">
+              {{ figmaFetch.ok ? "已拉取 " + figmaFetch.count + " 个白名单文件" : "拉取失败：" + figmaFetch.code + (figmaFetch.detail ? " · " + figmaFetch.detail : "") }}
+            </p>
+          </template>
+          <template v-else>
+            <div class="integr-row" data-design-probe="illustrator" :data-design-probe-ok="designProbes.illustrator?.ok ? '1' : '0'">
+              <span class="integr-dep-label">本机 Illustrator</span>
+              <DsBadge size="sm" :tone="designProbes.illustrator?.ok ? 'success' : 'warning'">{{ designProbes.illustrator ? (designProbes.illustrator.ok ? "可用" : "不可用") : "未探测" }}</DsBadge>
+              <span class="integr-row-desc" data-design-probe-detail="illustrator">{{ designProbes.illustrator && !designProbes.illustrator.ok ? designProbes.illustrator.code + (designProbes.illustrator.detail ? " · " + designProbes.illustrator.detail : "") : (designProbes.illustrator ? "本机 Illustrator 可用" : "尚未检查") }}</span>
+            </div>
+          </template>
+        </section>
+
+        <section class="integr-sec" data-design-launch>
+          <h3>启动 / 打开</h3>
+          <p v-if="designSelected === 'figma'" class="integr-note">Figma 没有本机客户端启动命令，这里用系统浏览器打开 figma.com；只在你点确认后调用 browser/openExternal。</p>
+          <p v-else class="integr-note">当前构建没有注册启动 Adobe Illustrator 的命令（media/illustrator 只提供配置与临时导出）；检测到本机安装后仍可在系统中启动 Illustrator。</p>
         </section>
       </div>
 
@@ -680,6 +902,15 @@ onMounted(() => {
         </template>
       </div>
     </div>
+
+    <DsDialog :open="figmaOpenAsk" title="在系统浏览器打开 Figma" @close="figmaOpenAsk = false">
+      <p>这会在系统默认浏览器里打开 <code class="mono">https://www.figma.com/</code>。Figma 没有本机客户端启动命令；当前版本也不会自动登录或读取 Figma 凭据。</p>
+      <p class="integr-note">只在你确认后调用 browser/openExternal；打开结果由系统浏览器决定，应用不跟踪外部标签页。</p>
+      <template #footer>
+        <DsButton size="sm" variant="ghost" @click="figmaOpenAsk = false">取消</DsButton>
+        <DsButton size="sm" variant="primary" data-design-open-confirm @click="openFigmaExternal">确认打开</DsButton>
+      </template>
+    </DsDialog>
   </div>
 </template>
 

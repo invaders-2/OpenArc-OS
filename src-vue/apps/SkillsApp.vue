@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
-import { Download, FileUp, Layers, Package, Play, Plus, Search, Sparkles, Square, Trash2, User } from "lucide-vue-next";
+import { Download, FileUp, Globe, Layers, Package, Play, Plus, Search, Sparkles, Square, Trash2, User } from "lucide-vue-next";
 import { useShellStore } from "../stores/shell";
+import DsBadge from "../design-system/DsBadge.vue";
 import DsDialog from "../design-system/DsDialog.vue";
 import {
   analyzeResultOf,
@@ -29,7 +30,7 @@ import {
 /**
  * Skill 中心（10-16 接后端 skill 域，取代 10-15 的「桌面 Skill 文件夹里的 SKILL.md」简化版）。
  *
- * 数据全部来自 window.openarc.skill.command（skill-bootstrap.cjs 的 15 条白名单命令），
+ * 数据全部来自 window.openarc.skill.command（skill-bootstrap.cjs 的冻结白名单命令；数量以 skill/health 为准），
  * 错误文案 / 依赖判定 / 运行参数 / 产物投影复用 src/skills/skillCenterLogic.ts（与旧 React 页同一份逻辑、同一组单测）。
  *   · 我的技能 = 非内置（自建 / 导入）；全部技能 = 内置 + 自建；技能包 = skill/pack/list。
  *   · 运行 = skill/run（真实执行，模型由主进程按默认模型解析）；结果与产物如实展示，失败给原因。
@@ -53,6 +54,15 @@ const message = ref("");
 const failure = ref("");
 const busy = ref<string | null>(null);
 
+/* ── 在线来源（ModelScope）：当前构建的 skill 命令白名单没有在线源命令 ──────
+   这里只展示后端真实事实：skill/health 的 commands 数（15 条）里没有 skill/source/*；
+   列表与安装入口保持禁用，并把"需要主进程先注册命令"写清楚，不用本地假数据填充。 */
+const skillCommandCount = ref<number | null>(null);
+const onlineOpen = ref(false);
+function openOnlineSource() {
+  onlineOpen.value = true;
+}
+
 async function send(command: string, payload: Record<string, unknown> = {}): Promise<Res> {
   if (!isAllowedSkillCommand(command)) return { ok: false, error: "SKILL_COMMAND_NOT_ALLOWED" };
   if (!bridge?.command) return { ok: false, error: "NO_BRIDGE" };
@@ -70,6 +80,7 @@ async function loadAll() {
   loading.value = true;
   const [h, l, p] = await Promise.all([send("skill/health"), send("skill/list"), send("skill/pack/list")]);
   deps.value = h.ok ? (val(h).dependencies as SkillDependencyFlags) || {} : null;
+  skillCommandCount.value = h.ok && Number.isFinite(Number(val(h).commands)) ? Number(val(h).commands) : null;
   if (l.ok) {
     const v = val(l);
     skills.value = (Array.isArray(v.items) ? v.items : Array.isArray(v.skills) ? v.skills : []) as SkillRecord[];
@@ -348,6 +359,10 @@ onBeforeUnmount(() => offEvent?.());
       <button class="split-nav" :aria-current="tab === 'packs' ? 'true' : undefined" data-skill-tab="packs" @click="tab = 'packs'">
         <Package :size="16" /> <span class="split-nav-label">技能包</span><small class="planned-count">{{ packs.length }}</small>
       </button>
+      <div class="split-section">在线来源</div>
+      <button class="split-nav" :aria-current="onlineOpen ? 'true' : undefined" data-skill-source-nav="modelscope" @click="openOnlineSource">
+        <Globe :size="16" /> <span class="split-nav-label">ModelScope</span><small class="planned-count">未接入</small>
+      </button>
       <p class="planned-note">技能描述做事的方法和步骤；启用技能不会自动获得应用、设备或文件权限。在线技能市场尚未接入。</p>
     </nav>
 
@@ -360,6 +375,32 @@ onBeforeUnmount(() => offEvent?.());
       </div>
       <p v-if="message" class="vd-msg sk-msg" role="status">{{ message }}</p>
       <p v-if="failure" class="vd-msg sk-msg err" role="alert">{{ failure }}</p>
+
+      <section v-if="bridge && onlineOpen" class="set-group" data-skill-online-source :data-skill-online-commands="skillCommandCount === null ? '' : String(skillCommandCount)">
+        <div class="setting-row">
+          <span class="set-lab">
+            在线来源 · ModelScope
+            <small>在线技能源列表与安装</small>
+          </span>
+          <DsBadge size="sm" tone="warning">未接入</DsBadge>
+          <span class="set-cap" data-skill-online-state>当前构建没有在线的 Skill 源命令，列表与安装都不可用。</span>
+          <button type="button" class="icon-button" aria-label="关闭在线来源状态" data-skill-online-close @click="onlineOpen = false">×</button>
+        </div>
+        <div class="setting-row">
+          <span class="set-lab">来源<small>只接主进程真实返回的来源清单</small></span>
+          <span class="set-val">ModelScope（计划接入）</span>
+        </div>
+        <div class="setting-row">
+          <span class="set-lab">列表命令<small>skill/source/list</small></span>
+          <span class="set-val">未登记（后端 skill 命令 {{ skillCommandCount === null ? "未知" : skillCommandCount }} 条，白名单里没有在线源命令）</span>
+          <DsBadge size="sm" tone="neutral">不可用</DsBadge>
+        </div>
+        <div class="setting-row">
+          <span class="set-lab">安装入口<small>skill/source/install</small></span>
+          <span class="set-val" data-skill-online-install="unavailable">安装按钮保持禁用；不会用本地示例或远端猜测填充在线列表。</span>
+          <button type="button" class="planned-today" disabled data-skill-online-install-button>安装（不可用）</button>
+        </div>
+      </section>
 
       <div v-if="!bridge" class="empty-content">
         <h2 class="planned-title">技能服务未接入</h2>
