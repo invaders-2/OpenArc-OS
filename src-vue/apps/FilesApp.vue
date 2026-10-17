@@ -5,6 +5,8 @@ import {
   ArrowRight,
   ArrowUpDown,
   Archive,
+  Building2,
+  Cloud,
   File as FileIcon,
   FileText,
   Film,
@@ -15,13 +17,17 @@ import {
   List,
   Monitor,
   Music,
+  RefreshCw,
   Search,
 } from "lucide-vue-next";
 import DsButton from "../design-system/DsButton.vue";
 import DsContextMenu, { type MenuEntry } from "../design-system/DsContextMenu.vue";
 import FolderIcon from "../shell/FolderIcon.vue";
+import SharedDrivePanel from "./SharedDrivePanel.vue";
 import TransferCenter from "./TransferCenter.vue";
 import { useShellStore } from "../stores/shell";
+import { platformCommand, platformErrorCode, platformErrorText, shareLabel, sharedNodesOf } from "./sharedDrive";
+import type { SharedNode } from "./sharedDrive";
 import { kindOfExt } from "../wallpapers";
 
 /**
@@ -48,10 +54,11 @@ type Row = { id: string; name: string; kind: "folder" | "file"; ext?: string; si
 const history = ref<string[]>([DESKTOP_ID]);
 const at = ref(0);
 const folderId = computed(() => history.value[at.value]);
-/** 传输中心与文件浏览共用同一个窗口：files = 文件、transfers = 0.6.1 的文件传输域。 */
-const mode = ref<"files" | "transfers">("files");
+/** 传输中心 / 共享盘与文件浏览共用同一个窗口：files = 文件、transfers = 传输中心、shared = 共享盘。 */
+const mode = ref<"files" | "transfers" | "shared">("files");
 function go(fid: string) {
   mode.value = "files";
+  sharedRoot.value = null;
   if (fid === folderId.value) return;
   history.value = [...history.value.slice(0, at.value + 1), fid];
   at.value = history.value.length - 1;
@@ -92,7 +99,38 @@ async function refresh(fid = folderId.value) {
     entries.value = { ...entries.value, [fid]: [] };
   }
 }
-onMounted(() => void refresh());
+onMounted(() => {
+  void refresh();
+  void loadSharedRoots();
+});
+
+/* ── 共享盘 / 部门盘（platform/fs/shared/*，只读安全节点投影）──────────── */
+const sharedRoots = ref<SharedNode[]>([]);
+const sharedRoot = ref<SharedNode | null>(null);
+const sharedLoading = ref(false);
+const sharedFailure = ref<string | null>(null);
+const sharedFailureCode = ref("");
+
+async function loadSharedRoots() {
+  sharedLoading.value = true;
+  sharedFailure.value = null;
+  sharedFailureCode.value = "";
+  const res = await platformCommand("platform/fs/shared/roots");
+  sharedLoading.value = false;
+  if (!res.ok) {
+    sharedRoots.value = [];
+    sharedFailure.value = platformErrorText(res);
+    sharedFailureCode.value = platformErrorCode(res);
+    return;
+  }
+  const value = res.value && typeof res.value === "object" ? (res.value as Record<string, unknown>) : {};
+  sharedRoots.value = sharedNodesOf(value.roots);
+}
+function openSharedRoot(node: SharedNode) {
+  sharedRoot.value = node;
+  mode.value = "shared";
+}
+
 /* 10-16：桌面双击文件夹 → 访达打开到那里（同一窗口复用，已开着就直接跳转） */
 function takeFinderRequest() {
   if (!shell.finderRequest.pending) return;
@@ -523,6 +561,33 @@ async function doReveal() {
           <Folder :size="16" /> <span class="split-nav-label">{{ f.name }}</span>
         </button>
       </template>
+      <div class="split-section">共享盘</div>
+      <div class="finder-shared" data-finder-shared>
+        <p v-if="sharedLoading" class="finder-shared-hint" data-shared-roots-loading>正在读取共享盘…</p>
+        <div v-else-if="sharedFailure" class="finder-shared-block">
+          <p class="finder-shared-error" role="alert" :data-shared-roots-error="sharedFailureCode">{{ sharedFailure }}</p>
+          <DsButton size="sm" variant="secondary" :status="sharedLoading ? 'loading' : 'idle'" @click="loadSharedRoots">
+            <RefreshCw :size="13" :stroke-width="1.5" /> 重新读取
+          </DsButton>
+        </div>
+        <template v-else-if="sharedRoots.length">
+          <button
+            v-for="node in sharedRoots"
+            :key="node.id"
+            type="button"
+            class="split-nav"
+            :aria-current="mode === 'shared' && sharedRoot && sharedRoot.id === node.id ? 'true' : undefined"
+            :data-shared-root="node.id"
+            @click="openSharedRoot(node)"
+          >
+            <Building2 v-if="node.share && node.share.startsWith('department:')" :size="16" />
+            <Cloud v-else :size="16" />
+            <span class="split-nav-label" :title="node.name">{{ node.name }}</span>
+            <small class="planned-count">{{ shareLabel(node.share) }}</small>
+          </button>
+        </template>
+        <p v-else class="finder-shared-hint" data-shared-roots-empty>没有可见的共享盘：公共盘为空，且你不属于任何部门。权限由后端判定，界面不伪造入口。</p>
+      </div>
       <div class="split-section">位置</div>
       <div class="split-nav finder-location"><HardDrive :size="16" /> <span class="split-nav-label">本机 · D1</span></div>
       <button
@@ -530,7 +595,7 @@ async function doReveal() {
         class="split-nav"
         data-finder-transfers
         :aria-current="mode === 'transfers' ? 'true' : undefined"
-        @click="mode = 'transfers'"
+        @click="mode = 'transfers'; sharedRoot = null"
       >
         <ArrowUpDown :size="16" /> <span class="split-nav-label">传输中心</span>
       </button>
@@ -538,6 +603,7 @@ async function doReveal() {
 
     <div class="split-main finder-main" @click.self="clearSelection">
       <TransferCenter v-if="mode === 'transfers'" />
+      <SharedDrivePanel v-else-if="mode === 'shared' && sharedRoot" :key="sharedRoot.id" :root="sharedRoot" />
       <template v-else>
       <div class="pane-toolbar">
         <button class="icon-button" aria-label="后退" :disabled="at <= 0" @click="at -= 1">
@@ -680,3 +746,38 @@ async function doReveal() {
     </Teleport>
   </div>
 </template>
+
+
+<style scoped>
+/* 共享盘入口只写侧栏状态；主体在 SharedDrivePanel（自带 scoped 样式）。 */
+.finder-shared {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.finder-shared-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+}
+.finder-shared-hint {
+  margin: 0;
+  padding: 4px var(--space-2);
+  font-size: var(--fs-micro);
+  line-height: var(--lh-relaxed);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.finder-shared-error {
+  margin: 0;
+  font-size: var(--fs-micro);
+  line-height: var(--lh-relaxed);
+  color: var(--failed);
+  overflow-wrap: anywhere;
+}
+.finder-shared .split-nav {
+  width: 100%;
+}
+</style>
