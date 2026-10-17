@@ -169,9 +169,12 @@
         });
       }
       // 未接通的能力：在**页面侧**就给出明确错误（不发任何请求），而不是让它撞上 501。
+      // task-67：available=true 时交给宿主（bridge 已登记 /api/canvas-video → model.videoTask），不再无条件拦截。
       if (path === "/api/canvas-video" || path === "/api/canvas-comfy-tasks" || path.indexOf("/api/canvas-comfy-tasks/") === 0) {
         var cap = path === "/api/canvas-video" ? "video-generation" : "comfy";
-        var reason = (capabilityOf(cap).reason) || UNAVAILABLE_TEXT[cap];
+        var availability = capabilityOf(cap);
+        if (availability.available) return realFetch.apply(this, arguments);
+        var reason = availability.reason || UNAVAILABLE_TEXT[cap];
         flashNotes(cap);
         return Promise.resolve(jsonResponse(501, { error: "CAPABILITY_UNAVAILABLE", detail: reason, capability: cap, message: reason, available: false, transport: null }));
       }

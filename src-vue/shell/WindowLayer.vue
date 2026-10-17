@@ -31,7 +31,6 @@ import IntegrationsApp from "../apps/IntegrationsApp.vue";
 import { markRaw, ref, toRaw } from "vue";
 import ReactIsland from "../bridge/ReactIsland.vue";
 import { CanvasHost } from "../../src/canvas/CanvasHost";
-import CanvasModelPanel from "../apps/CanvasModelPanel.vue";
 import { BrowserApp } from "../../src/browser/BrowserApp";
 import {
   browserCommand,
@@ -346,7 +345,6 @@ function onTabPointerDown(e: PointerEvent, win: ShellWindow, tabId: string) {
           />
         </div>
       </div>
-    <CanvasModelPanel v-if="win.appId === 'canvas'" :panel-key="win.id" />
     <div class="window-body" @pointerdown="onBodyPointerDown($event, win)" @dblclick="onBodyDblClick($event, win)">
       <HomeApp v-if="win.appId === 'home'" />
       <SettingsContent

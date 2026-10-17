@@ -770,6 +770,36 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
         if (!r.ok) return { status: "failed", error: String(r.error) };
         return { status: "succeeded", result: { images: r.images, task_id: params.taskId, provider: "openarc" } };
       }
+      case "model.videoTask": {
+        const body = (params.body || {}) as any;
+        if (!canvasId) return { __status: 502, body: { error: "CANVAS_NOT_OPEN" } };
+        const wantedVideo = String(body.model || "");
+        const videoConfigId = wantedVideo ? labelToConfig.current.get(wantedVideo) : null;
+        if (wantedVideo && !videoConfigId) { setModelNotFound((n) => n + 1); setNotice("模型不在 OpenArc 清单里（已拒绝，不回落）：" + wantedVideo); return rejectUnknownModel("model.videoTask", wantedVideo); }
+        if (!videoConfigId) return { __status: 400, body: { error: "MODEL_REQUIRED", message: "节点未选择视频模型" } };
+        // canvas/nodes/execute 内部完成 startRun / legacyExecute / 产物落库；宿主只负责把页面标签映射成 configId。
+        const exec = await canvasCmd({
+          type: "canvas/nodes/execute",
+          payload: {
+            type: "builtin.video-generator", canvasId, nodeId: body.nodeId || null,
+            params: {
+              prompt: String(body.prompt || ""), configId: videoConfigId,
+              ...(body.size ? { size: String(body.size) } : {}),
+              ...(body.aspect_ratio || body.ratio ? { ratio: String(body.aspect_ratio || body.ratio) } : {}),
+              ...(body.resolution ? { resolution: String(body.resolution) } : {}),
+              count: Number(body.batch_size || body.count) || 1,
+            },
+          },
+        });
+        if (!exec || exec.ok !== true) {
+          const code = String((exec && exec.error) || "VIDEO_GENERATION_FAILED");
+          setNotice("视频生成失败：" + explain(code));
+          return { __status: 502, body: { error: code, message: explain(code), detail: exec && exec.detail ? exec.detail : null } };
+        }
+        const videos = (exec.outputs && exec.outputs.videos) || (exec.result && exec.result.videos) || [];
+        const urls = (Array.isArray(videos) ? videos : []).map((v: any) => typeof v === "string" ? v : String((v && (v.url || v.value || v.sourceUrl)) || "")).filter(Boolean);
+        return { urls, canvas_meta: {} };
+      }
       case "model.queryTask": {
         const entry = runByTask.current.get(String((params.body || {}).task_id));
         if (!entry) return { status: "failed", error: "任务不存在" };

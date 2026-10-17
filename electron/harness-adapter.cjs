@@ -85,6 +85,16 @@ function resolveDshBin(runtime = resolveDshRuntime()) {
 function resolveAcpSdk() {
   try { return require.resolve("@agentclientprotocol/sdk"); } catch { return null; }
 }
+/**
+ * task-66：优先使用随包 Node（app/node_modules/.bin/node，由 sync-app 复制）。
+ * 没有随包 Node 时返回 null，调用方回退 process.execPath。
+ */
+function resolveDshNode(runtime = resolveDshRuntime()) {
+  const explicit = process.env.OPENARC_DSH_NODE ? path.resolve(process.env.OPENARC_DSH_NODE) : null;
+  if (explicit) return fs.existsSync(explicit) ? explicit : null;
+  const bundled = path.join(runtime, "node_modules", ".bin", "node");
+  try { return fs.existsSync(bundled) && fs.statSync(bundled).isFile() ? bundled : null; } catch { return null; }
+}
 function readJson(p) { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return null; } }
 function dshVersion(runtime = resolveDshRuntime()) {
   return readJson(dshPackageJson(runtime))?.version || null;
@@ -94,6 +104,45 @@ function sdkVersion(sdkPath) {
 }
 
 function harnessError(code, detail) { const e = new Error(code + (detail ? ": " + detail : "")); e.code = code; return e; }
+
+/**
+ * task-66：DSH bin 带 #!/usr/bin/env node，Finder 启动的 GUI PATH 没有 node 时直接 127。
+ * 永远用不依赖用户 PATH 的解释器执行 JS bin：
+ *   · 打包 app 优先 app/node_modules/.bin/node（sync-app 随包复制，PATH 首位）；
+ *   · 无随包 Node 时 Electron main 用 process.execPath + ELECTRON_RUN_AS_NODE=1；
+ *   · Node（测试/CLI）用 process.execPath。
+ * 自定义 dshBin 是可执行二进制（如 process.execPath）时按 direct 原样 spawn，不再套 Node。
+ * 显式注入的 execPath/versions 供单测，不改变产品调用。
+ */
+function isJsBin(bin) {
+  try {
+    const real = fs.realpathSync(bin);
+    if (/\.(?:m|c)?js$/.test(real)) return true;
+    const fd = fs.openSync(real, "r");
+    const head = Buffer.alloc(80);
+    const n = fs.readSync(fd, head, 0, head.length, 0);
+    try { fs.closeSync(fd); } catch { /* ignore */ }
+    return /^#!.*\bnode\b/.test(head.subarray(0, n).toString("utf8"));
+  } catch {
+    return /\.(?:m|c)?js$/.test(String(bin)) || /node_modules[\\/]\.bin[\\/]/.test(String(bin));
+  }
+}
+
+function buildDshSpawn({ bin, args = [], env = {}, execPath = process.execPath, versions = process.versions, nodeBin = null, jsBin = true } = {}) {
+  if (!bin) throw new Error("buildDshSpawn 需要 bin");
+  const isElectron = !!(versions && versions.electron);
+  const childEnv = { ...env };
+  // 自定义 dshBin 可能是可执行二进制 / process.execPath 本身，不能再套一层 Node。
+  if (!jsBin) return { command: String(bin), args: [...args], env: childEnv, interpreter: "direct" };
+  if (nodeBin) {
+    // 随包 Node：直接执行，并把它的目录放到 PATH 首位，让 dsh 的孙进程也能找到 node。
+    const dir = path.dirname(nodeBin);
+    childEnv.PATH = [dir, childEnv.PATH].filter(Boolean).join(path.delimiter);
+    return { command: nodeBin, args: [String(bin), ...args], env: childEnv, interpreter: "bundled-node" };
+  }
+  if (isElectron) childEnv.ELECTRON_RUN_AS_NODE = "1";
+  return { command: execPath, args: [String(bin), ...args], env: childEnv, interpreter: isElectron ? "electron-node" : "node" };
+}
 
 /** 显式 allowlist；其余一律不继承。 */
 const ENV_ALLOWLIST = ["PATH", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "SHELL"];
@@ -194,6 +243,8 @@ class HarnessAdapter {
     this.clock = typeof clock === "function" ? clock : () => Date.now();
     this.runtime = dshRuntime || resolveDshRuntime();
     this.bin = dshBin || resolveDshBin(this.runtime);
+    this.dshBinIsScript = isJsBin(this.bin);
+    this.node = resolveDshNode(this.runtime);
     this.sdkPath = sdkPath || resolveAcpSdk(this.runtime);
     this.dshArgs = dshArgs;
     this.keepTemp = keepTemp;
@@ -290,7 +341,9 @@ class HarnessAdapter {
       fs.writeFileSync(patchPath, buildAcpPatch(), { mode: 0o600 });
       args = profileArgs ? [...profileArgs, "--patch", patchPath] : ["--profile", "acp", "--patch", patchPath];
     }
-    this.child = spawn(this.bin, args, { env, cwd: this.workspace, stdio: ["pipe", "pipe", "pipe"] });
+    // task-66：不用 shebang（GUI 最小 PATH 无 node 会 127），显式用运行时自带 Node。
+    const invocation = buildDshSpawn({ bin: this.bin, args, env, nodeBin: this.node, jsBin: this.dshBinIsScript });
+    this.child = spawn(invocation.command, invocation.args, { env: invocation.env, cwd: this.workspace, stdio: ["pipe", "pipe", "pipe"] });
     this.started = true;
     this.child.stderr.on("data", (d) => { this.stderr += String(d); if (this.stderr.length > 200000) this.stderr = this.stderr.slice(-200000); });
     this.child.on("exit", (code, signal) => { this.processExited = true; this.exitCode = code; for (const w of this._exitWaiters.splice(0)) w({ code, signal }); });
@@ -577,4 +630,4 @@ class HarnessAdapter {
   }
 }
 
-module.exports = { HarnessAdapter, HARNESS_ERROR, DSH_RUNTIME_ERROR, ACP_PROTOCOL_VERSION, resolveDshRuntime, resolveDshBin, resolveAcpSdk, dshVersion, buildHarnessEnv, buildAcpPatch, buildManagedToolProfile, MANAGED_TOOL_PROFILE, TOOL_FACADE_BUNDLE };
+module.exports = { HarnessAdapter, HARNESS_ERROR, DSH_RUNTIME_ERROR, ACP_PROTOCOL_VERSION, resolveDshRuntime, resolveDshBin, resolveDshNode, resolveAcpSdk, dshVersion, buildHarnessEnv, buildDshSpawn, buildAcpPatch, buildManagedToolProfile, MANAGED_TOOL_PROFILE, TOOL_FACADE_BUNDLE };

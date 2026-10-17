@@ -453,6 +453,8 @@
     // **只加登记项**：未登记端点仍旧 501、出网仍旧拒绝；策略是尺寸枚举事实，不含地址/凭据，也不放宽任何白名单。
     if (m === "GET" && pathname === "/api/ai/size-policy") return { method: "model.sizePolicy" };
     if (m === "POST" && pathname === "/api/canvas-image-tasks") return { method: "model.imageTask", params: { body: body } };
+    // task-67：视频节点生成统一走宿主 model.videoTask；body.model 是页面清单标签，由宿主映射 configId。
+    if (m === "POST" && pathname === "/api/canvas-video") return { method: "model.videoTask", params: { body: body } };
     var task = pathname.match(/^\/api\/canvas-image-tasks\/([^/]+)$/);
     if (task && m === "GET") return { method: "model.imageTaskResult", params: { taskId: decodeURIComponent(task[1]) } };
     if (m === "POST" && pathname === "/api/image-task-query") return { method: "model.queryTask", params: { body: body } };

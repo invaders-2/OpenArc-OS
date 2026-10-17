@@ -29,6 +29,8 @@ const executable = (() => {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const userData = fs.mkdtempSync(path.join(os.tmpdir(), "oa-task55-packaged-"));
 const childEnv = { ...process.env }; delete childEnv.ELECTRON_RUN_AS_NODE;
+// task-66：模拟 Finder 启动的最小 PATH（没有 node/npm/homebrew）；harness 必须仍能跑 DSH。
+if (process.env.OPENARC_PACKAGED_MINIMAL_PATH === "1") childEnv.PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
 const app = spawn(executable, ["--remote-debugging-port=" + PORT, "--user-data-dir=" + userData, "--no-sandbox", "--disable-gpu-sandbox", "--in-process-gpu"], { stdio: ["ignore", "pipe", "pipe"], env: childEnv });
 const log = [];
 app.stdout.on("data", (d) => log.push(String(d)));

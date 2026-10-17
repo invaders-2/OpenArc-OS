@@ -176,6 +176,18 @@ fs.rmSync(appNodeModules, { recursive: true, force: true });
 const dshRuntime = copyDshRuntimeClosure({ root: srcDir, destNodeModules: appNodeModules });
 console.log("[sync-app] DSH runtime closure: " + dshRuntime.packages + " packages, " + (dshRuntime.bytes / 1024 / 1024).toFixed(1) + " MiB, " + dshRuntime.versions.map((v) => v.name + "@" + v.version).join(", "));
 
+// task-66：随包 Node。GUI 由 Finder 启动时 PATH 里没有 node；DSH 绝不能依赖用户 PATH。
+// 直接复制当前构建所用 Node（与 dsh 版本兼容）到 app/node_modules/.bin/node，harness 会优先使用它。
+const bundledNode = path.join(appNodeModules, ".bin", "node");
+try {
+  const sourceNode = fs.realpathSync(process.execPath);
+  fs.copyFileSync(sourceNode, bundledNode);
+  fs.chmodSync(bundledNode, 0o755);
+  console.log("[sync-app] bundled node: " + sourceNode + " → " + bundledNode);
+} catch (error) {
+  throw new Error("无法随包复制 Node: " + ((error && error.message) || error));
+}
+
 if (appArg) {
   // 只改载荷这一份拷贝：Electron 用 package.json 的 name 决定 userData 目录，
   // 从而与参照应用各自一份数据、可同时运行；仓库里的 package.json 一个字不动。
