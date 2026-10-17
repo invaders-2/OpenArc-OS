@@ -56,23 +56,63 @@ function redactText(value) {
   return redactSecrets(String(value)).replace(POSIX_ABS_PATH_RE, "<path>").replace(WINDOWS_ABS_PATH_RE, "<path>");
 }
 
-/** 递归脱敏任意 IPC 返回值（对象/数组深度封顶，避免把大对象原样搬过桥）。 */
-function redactValue(value, depth = 0, seen = new WeakSet()) {
+/**
+ * 递归脱敏任意 IPC 返回值（对象/数组深度封顶，避免把大对象原样搬过桥）。
+ *
+ * 深度上限可配置：默认 24，可用 configureRedaction({ maxDepth }) 调整，也可以按调用
+ * 传 redactValue(value, { maxDepth }) 覆盖。上限只影响"超过多少层后折叠成 <max-depth>"，
+ * 密钥键掩码 / 循环引用 / 数组 100 项截断这些既有行为保持不变。
+ */
+const DEFAULT_REDACT_MAX_DEPTH = 24;
+const MAX_REDACT_DEPTH_LIMIT = 1000;
+let redactMaxDepth = DEFAULT_REDACT_MAX_DEPTH;
+
+function normalizeRedactMaxDepth(value) {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 1) return DEFAULT_REDACT_MAX_DEPTH;
+  return Math.min(number, MAX_REDACT_DEPTH_LIMIT);
+}
+
+/** 进程级配置（返回生效值）；非法值回落默认 24，不静默接受 0 / 负数 / 小数。 */
+function configureRedaction(options = {}) {
+  if (options && typeof options === "object" && Object.prototype.hasOwnProperty.call(options, "maxDepth")) {
+    redactMaxDepth = normalizeRedactMaxDepth(options.maxDepth);
+  }
+  return { maxDepth: redactMaxDepth };
+}
+
+/** 仅供测试：恢复默认深度。 */
+function resetRedactionForTests() {
+  redactMaxDepth = DEFAULT_REDACT_MAX_DEPTH;
+  return { maxDepth: redactMaxDepth };
+}
+
+function redactValueAt(value, depth, seen, maxDepth) {
   if (value == null) return value;
   if (typeof value === "string") return redactText(value);
   if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") return value;
   if (typeof value !== "object") return String(value);
-  if (depth >= 6) return "<max-depth>";
+  if (depth >= maxDepth) return "<max-depth>";
   if (seen.has(value)) return "<circular>";
   seen.add(value);
-  if (Array.isArray(value)) return value.slice(0, 100).map((item) => redactValue(item, depth + 1, seen));
+  const next = (item) => redactValueAt(item, depth + 1, seen, maxDepth);
+  if (Array.isArray(value)) return value.slice(0, 100).map(next);
   const out = {};
   for (const [key, item] of Object.entries(value).slice(0, 100)) {
     // 密钥字段按字段名掩码：只靠文本形态识别会漏掉 { apiKey: "裸串" } 这种最普通的返回值。
     if (isSecretKey(key) && item != null) out[key] = maskSecret(typeof item === "object" ? JSON.stringify(item) : item);
-    else out[key] = redactValue(item, depth + 1, seen);
+    else out[key] = next(item);
   }
   return out;
+}
+
+function redactValue(value, options = {}) {
+  const config = typeof options === "number"
+    ? { depth: options }
+    : (options && typeof options === "object" ? options : {});
+  const startDepth = Number.isInteger(config.depth) && config.depth >= 0 ? config.depth : 0;
+  const maxDepth = config.maxDepth == null ? redactMaxDepth : normalizeRedactMaxDepth(config.maxDepth);
+  return redactValueAt(value, startDepth, new WeakSet(), maxDepth);
 }
 
 function isDxosError(err) {
@@ -131,6 +171,9 @@ module.exports = {
   DXOS_ERROR_CODES,
   redactText,
   redactValue,
+  DEFAULT_REDACT_MAX_DEPTH,
+  configureRedaction,
+  resetRedactionForTests,
   isDxosError,
   createDxosError,
   normalizeError,

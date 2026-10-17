@@ -70,6 +70,8 @@ function configureMediaExtensions(options) {
     modelGateway: ext.modelGateway || null,
     mediaStore: ext.mediaStore || null,
     renderSubmit: ext.renderSubmit || null,
+    // 出图落盘后登记资源库（未注入时短剧仍可出图，但 resourceRef 如实为 null）。
+    resourceRegistrar: ext.resourceRegistrar || null,
     clock: clock,
     logger: ext.logger || null,
   });
@@ -407,6 +409,10 @@ function createMediaBundle(options = {}) {
   const userDataDir = options.userDataDir || null;
   const identityStore = options.identityStore || null;
   const authorization = options.authorization || null;
+  // 出图 / 成片导出 → 资源库（由宿主注入 media-resource-registrar；未注入时如实降级）。
+  const resourceRegistrar = options.resourceRegistrar || null;
+  // 导出到访达：只把最终绝对路径交给主进程的 shell.showItemInFolder，绝不回渲染层。
+  const revealExport = typeof options.revealExport === "function" ? options.revealExport : null;
   const runner = options.runner && typeof options.runner.start === "function" ? options.runner : createSupervisedRunner({ clock: clock });
   const workerEntry = options.workerEntry || path.join(__dirname, "video-render-worker.cjs");
   const leaseMs = Number.isFinite(options.leaseMs) ? Math.max(1000, options.leaseMs) : DEFAULT_LEASE_MS;
@@ -450,6 +456,7 @@ function createMediaBundle(options = {}) {
     providerStore: options.providerStore || null,
     modelGateway: options.modelGateway || null,
     renderSubmit: options.renderSubmit || null,
+    resourceRegistrar: resourceRegistrar,
     musicMetadataLoader: options.musicMetadataLoader || null,
     illustratorAvailable: options.illustratorAvailable === true,
     viteBuild: options.viteBuild || null,
@@ -466,6 +473,7 @@ function createMediaBundle(options = {}) {
     fetchImpl: { injected: typeof extensionOptions.fetchImpl === "function", reason: "缺少 fetchImpl：注入主进程 fetch 后下载生成图片 / 刮削封面 / 拉取 Figma 清单才可用" },
     providerStore: { injected: !!extensionOptions.providerStore, reason: "缺少 providerStore：注入 B2 provider-protocol 选型面后短剧 AI 生成才可用" },
     modelGateway: { injected: !!extensionOptions.modelGateway, reason: "缺少 modelGateway：注入 B2 provider-protocol-service 出口后短剧 AI 生成才可用" },
+    resourceRegistrar: { injected: !!extensionOptions.resourceRegistrar, reason: "缺少 resourceRegistrar：短剧出图 / 成片导出无法登记进 OpenArc 资源库" },
     viteBuild: { injected: typeof extensionOptions.viteBuild === "function", reason: "本仓无随包 Vite 构建器（vite 只在 devDependencies）：Figma 预览构建保持结构化不可用" },
     illustratorAvailable: { injected: extensionOptions.illustratorAvailable === true, reason: "未探测到本机 Adobe Illustrator 可执行文件" },
     onnxRuntime: { injected: !!extensionOptions.onnxRuntime, reason: "onnxruntime-node 未安装 / 未探测到：本地抠图保持结构化不可用" },
@@ -491,6 +499,122 @@ function createMediaBundle(options = {}) {
     if (!subDirs) throw createMediaError(MEDIA_ERR_DEPENDENCY_UNAVAILABLE, "媒体目录未装配（缺少 userDataDir）", { dependency: "mediaDir" });
     for (const dir of Object.values(subDirs)) fs.mkdirSync(dir, { recursive: true });
     return subDirs;
+  }
+
+  // -------------------------------------------------------------------------
+  // 成片导出（finder / library）：只回安全相对路径或资源 ref，绝不回绝对路径。
+  // -------------------------------------------------------------------------
+  function ensureExportsDir() {
+    if (!paths) throw createMediaError(MEDIA_ERR_DEPENDENCY_UNAVAILABLE, "导出目录未装配（缺少 userDataDir）", { dependency: "userDataDir" });
+    const dir = path.join(paths.root, "exports");
+    fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
+  /** 导出文件名：拒绝路径分隔符 / 控制字符 / ..，统一补 .mp4。 */
+  function safeExportFileName(requested, fallback) {
+    if (requested !== undefined && requested !== null && typeof requested !== "string") {
+      throw createMediaError(MEDIA_ERR_INVALID_INPUT, "导出文件名必须是字符串");
+    }
+    const raw = (requested == null ? String(fallback || "成片") : requested).trim();
+    if (!raw) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "导出文件名不能为空");
+    if (/[\/\\\u0000-\u001f\u007f]/.test(raw) || raw.includes("..")) {
+      throw createMediaError(MEDIA_ERR_INVALID_INPUT, "导出文件名不能包含路径分隔符、控制字符或 ..");
+    }
+    const stem = raw.replace(/\.mp4$/i, "").trim();
+    if (!stem || stem === "." || stem === ".." || stem.length > 100) {
+      throw createMediaError(MEDIA_ERR_INVALID_INPUT, "导出文件名不合法");
+    }
+    return stem + ".mp4";
+  }
+
+  /** 同名文件不覆盖：追加 -1 / -2 …（上限 50，避免无限循环）。 */
+  function uniqueExportPath(dir, fileName) {
+    const extension = path.extname(fileName).toLowerCase() || ".mp4";
+    const stem = path.basename(fileName, extension);
+    for (let index = 0; index < 50; index += 1) {
+      const candidate = index === 0 ? stem + extension : stem + "-" + index + extension;
+      const absolute = path.join(dir, candidate);
+      if (!fs.existsSync(absolute)) return { name: candidate, absolute };
+    }
+    throw createMediaError(MEDIA_ERR_CONFLICT, "导出目录里同名文件过多，请先清理");
+  }
+
+  /** 找出要导出的已完成渲染任务：显式 jobId 优先，否则按 projectId 取最近一条已完成。 */
+  function completedRenderJobForExport({ jobId, projectId, userId }) {
+    let job = null;
+    if (jobId) {
+      job = mediaStore.getVideoRenderJob(jobId, userId);
+      if (!job) throw createMediaError(MEDIA_ERR_NOT_FOUND, "渲染任务不存在");
+    } else if (projectId) {
+      job = mediaStore.listVideoRenderJobs({ ownerId: userId, projectId: projectId, statuses: ["completed"], limit: 1 })[0] || null;
+      if (!job) throw createMediaError(MEDIA_ERR_NOT_FOUND, "这个项目还没有可导出的成片（请先完成渲染）");
+    } else {
+      throw createMediaError(MEDIA_ERR_INVALID_INPUT, "导出需要 jobId 或 projectId");
+    }
+    if (job.status !== "completed" || !job.output_path) {
+      throw createMediaError(MEDIA_ERR_INVALID_INPUT, "渲染任务尚未完成，不能导出");
+    }
+    if (!fs.existsSync(job.output_path)) throw createMediaError(MEDIA_ERR_NOT_FOUND, "成片文件已不存在");
+    return job;
+  }
+
+  function exportTargetOf(value) {
+    const target = value === "finder" || value === "library" ? value : null;
+    if (!target) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "target 必须是 finder 或 library");
+    return target;
+  }
+
+  /**
+   * 把一条已完成的渲染成片导出到访达导出目录或资源库。
+   * finder：复制到 <userData>/dxos/exports，返回 relativePath（不返回绝对路径）；
+   * library：登记为资源库资源，返回 resourceRef。
+   */
+  async function exportCompletedRender({ payload, context, fallbackProjectId = null }) {
+    const target = exportTargetOf(payload.target);
+    const jobId = requireStr(payload.jobId, 80);
+    const projectId = requireStr(payload.projectId, 80) || fallbackProjectId;
+    const job = completedRenderJobForExport({ jobId, projectId, userId: context.userId });
+    const fileName = safeExportFileName(payload.name, "render-" + job.id);
+    if (target === "library") {
+      if (!resourceRegistrar || typeof resourceRegistrar.registerBuffer !== "function") {
+        throw createMediaError(MEDIA_ERR_DEPENDENCY_UNAVAILABLE, "资源库登记未装配", { dependency: "resourceRegistrar" });
+      }
+      const buffer = fs.readFileSync(job.output_path);
+      const registered = await resourceRegistrar.registerBuffer({
+        context: { sessionRef: context.sessionRef, appId: context.appId },
+        buffer,
+        name: fileName,
+        mime: "video/mp4",
+        description: "渲染成片导出",
+        resourceType: "video",
+      });
+      if (!registered || registered.ok !== true) {
+        throw createMediaError(MEDIA_ERR_INTERNAL, "导出到资源库失败：" + String((registered && registered.error) || "REGISTER_FAILED"), {
+          jobId: job.id, reason: registered && registered.error ? String(registered.error) : null,
+        });
+      }
+      return {
+        target: "library", jobId: job.id, fileName,
+        resourceRef: registered.resourceRef || null,
+        resourceId: registered.resourceId || null,
+        deduped: registered.dedupe === true,
+        bytes: fs.statSync(job.output_path).size,
+      };
+    }
+    const dir = ensureExportsDir();
+    const chosen = uniqueExportPath(dir, fileName);
+    fs.copyFileSync(job.output_path, chosen.absolute);
+    let revealed = false;
+    if (revealExport) {
+      try { revealed = revealExport(chosen.absolute) !== false; } catch { revealed = false; }
+    }
+    return {
+      target: "finder", jobId: job.id, fileName: chosen.name,
+      relativePath: "exports/" + chosen.name,
+      bytes: fs.statSync(chosen.absolute).size,
+      revealed,
+    };
   }
 
   // ---- 事件（P1 信封；bootstrap 的 send 经 setEventSink 注入） ----
@@ -841,6 +965,10 @@ function createMediaBundle(options = {}) {
       case "media/render/recover": {
         return { recovered: mediaStore.recoverExpiredVideoJobs() };
       }
+      case "media/render/export": {
+        // 渲染成片导出：显式 jobId 优先；未给时按 projectId 取最近一条已完成。
+        return await exportCompletedRender({ payload, context });
+      }
 
       // ---------------- 产物 / 健康 ----------------
       case "media/artifact/list": {
@@ -951,14 +1079,19 @@ function createMediaBundle(options = {}) {
         const projectId = requireStr(payload.projectId, 80);
         const shotId = requireStr(payload.shotId, 80);
         if (!projectId || !shotId) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "projectId 与 shotId 必填");
-        return await mediaShortDrama.generateDramaShotImage(projectId, shotId);
+        // 出图后登记资源库：context 只取可信 sessionRef / appId，不把渲染层自报身份带进去。
+        return await mediaShortDrama.generateDramaShotImage(projectId, shotId, {
+          resourceContext: { sessionRef: context.sessionRef, appId: context.appId },
+        });
       }
       case "media/short-drama/visual-image": {
         const projectId = requireStr(payload.projectId, 80);
         const itemId = requireStr(payload.itemId, 80);
         const kind = payload.kind === "location" ? "location" : payload.kind === "character" ? "character" : null;
         if (!projectId || !itemId || !kind) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "projectId、kind（character / location）与 itemId 必填");
-        const r = await mediaShortDrama.generateVisualReferenceImage(projectId, kind, itemId);
+        const r = await mediaShortDrama.generateVisualReferenceImage(projectId, kind, itemId, {
+          resourceContext: { sessionRef: context.sessionRef, appId: context.appId },
+        });
         return { provider: r.provider, model: r.model };
       }
       case "media/short-drama/get": {
@@ -977,13 +1110,25 @@ function createMediaBundle(options = {}) {
         if (!projectId) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "projectId 必填");
         return await mediaShortDrama.submitDramaRender(projectId, { ownerId: userId });
       }
+      case "media/short-drama/export": {
+        // 短剧成片导出：项目最近一条已完成渲染；也接受显式 jobId（仍按 owner 校验）。
+        const projectId = requireStr(payload.projectId, 80);
+        if (!projectId) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "projectId 必填");
+        return await exportCompletedRender({ payload, context, fallbackProjectId: projectId });
+      }
 
       // ---------------- B5e：本地音乐库（源 library.ts） ----------------
       case "media/library/config/get": {
-        return { config: mediaLibrary.getConfig() };
+        const config = mediaLibrary.getConfig();
+        // 绝对路径不出主进程：只给目录名与是否存在，完整路径仅留在模块内部。
+        return { config: Object.assign({}, config, {
+          configured: Array.isArray(config.dirs) && config.dirs.length > 0,
+          dirNames: (Array.isArray(config.dirs) ? config.dirs : []).map((dir) => path.basename(String(dir))),
+        }) };
       }
       case "media/library/config/set-dirs": {
-        return mediaLibrary.setDirs(Array.isArray(payload.dirs) ? payload.dirs : []);
+        const updated = mediaLibrary.setDirs(Array.isArray(payload.dirs) ? payload.dirs : []);
+        return Object.assign({}, updated, { dirNames: (updated.dirs || []).map((dir) => path.basename(String(dir))) });
       }
       case "media/library/scan": {
         const options = Array.isArray(payload.dirs) && payload.dirs.length ? { dirs: payload.dirs } : {};

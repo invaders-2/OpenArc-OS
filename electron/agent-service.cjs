@@ -48,6 +48,8 @@ const reactDriver = require("./agent-react-driver.cjs");
 const builtinTools = require("./agent-builtin-tools.cjs");
 const toolResolver = require("./agent-tool-resolver.cjs");
 const capabilityRouter = require("./capability-router.cjs");
+// B3b+：模型路由数据层（DX server/modelResolver.ts + modelDescriptor.ts 的本仓移植）。
+const modelResolverModule = require("./model-resolver.cjs");
 const canvasCapabilities = require("./canvas-dxos-capabilities.cjs");
 const projectSnapshot = require("./agent-project-snapshot.cjs");
 const projectAgentMode = require("./project-agent-mode.cjs");
@@ -365,12 +367,24 @@ function createAgentBundle({ identityStore, authorization, authStore, modelServi
   const modelAdapter = createModelAdapter({ modelService });
   const toolRunner = createToolRunner();
   const toolAuth = createToolAuthAdapter({ authStore, authorization });
+  // capabilityRouter / capabilityTargetResolver 的数据层依赖：providers() 取
+  // provider-protocol-store 的进程内视图（带真实 key，不出主进程），模型路由与描述符
+  // 由 model-resolver.cjs 提供。只有 providerProtocol 已装配时才注入；否则保持
+  // AGENT_DEPENDENCY_UNAVAILABLE（未装配 != 没有可用模型，两者不混为一谈）。
+  const providerProtocol = modelService && modelService.providerProtocol ? modelService.providerProtocol : null;
+  const modelRouteDeps = providerProtocol ? modelResolverModule.createModelResolverBundle({ providerProtocol }) : null;
 
   // ---- 3) 内核依赖：Run 持久化 / 巡检 / 工具解析 / 用量 / 工作区 ----
   agentKernel.configureAgentKernel({
     db, clock: now, logger, taskStore: agentTaskStore, workspaceStore: agentRuntimeWorkspace,
     usageStore: agentRuntimeUsage, schemaValidator: agentRuntimeEnvelope, toolResolver,
     modelAdapter, toolRunner, fsAdapter: resolvedFsAdapter,
+    ...(modelRouteDeps ? {
+      modelResolver: modelRouteDeps.modelResolver,
+      modelDescriptor: modelRouteDeps.modelDescriptor,
+      providers: modelRouteDeps.providers,
+      store: modelRouteDeps.store,
+    } : {}),
   });
 
   // ---- 4) 运行时依赖中心（tool loop）与 React 驱动 ----

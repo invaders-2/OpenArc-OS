@@ -45,9 +45,13 @@ const {
   probeOnnxAvailability,
 } = require("./media-service.cjs");
 const { registerMediaIpc } = require("./media-bootstrap.cjs");
+// 媒体 → 资源库登记桥（短剧出图 / 成片导出共用；只经 resourceService.importManaged 入库）。
+const { createMediaResourceRegistrar } = require("./media-resource-registrar.cjs");
 // B6a：自动化域装配（定义 / 运行记录 / 主进程内调度器，无云依赖）与 automation:command / automation:event 通道。
 const { createAutomationBundle } = require("./automation-service.cjs");
 const { registerAutomationIpc } = require("./automation-bootstrap.cjs");
+// B7j+：桌面执行端（music_play / music_control / open_app）：受控系统 API + 应用白名单。
+const { createDesktopExecutor, createSystemMusicController, MAC_SYSTEM_APPS } = require("./desktop-executor.cjs");
 // B6c：平台域装配（诊断 / 数据保护 / 网络安全 / 供应商测试安全）与 platform:command 通道。
 const { createPlatformBundle } = require("./platform-service.cjs");
 const { registerPlatformIpc } = require("./platform-bootstrap.cjs");
@@ -368,7 +372,8 @@ function markProductReady() {
 //     INTEGRATION_*，由 automation-service 归一成结构化 AGENT_DEPENDENCY_UNAVAILABLE。
 //   · toolCatalog   ← agent 工具目录的唯一执行入口（与 agent 域共用权限判定）。
 //   · agent         ← agent-service.runInstruction（project agent mode 同一真值路径）。
-//   · desktop       ← 本仓没有桌面执行端实现，保持 null；缺失原因进 automation/health。
+//   · desktop       ← desktop-executor.cjs（受控系统 API + 应用白名单）；装配失败保留 null
+//     并把可读原因写进 automation/health.dependencyDetails，绝不假装可用。
 // ---------------------------------------------------------------------------
 
 /** 适配器层的结构化错误；code 会被 automation-service 归一成依赖缺失码。 */
@@ -428,6 +433,20 @@ function createAutomationIntegrationsAdapter({ pluginBundle }) {
       return requireOk(await pluginBundle.dingtalk.sendToUser({ userId: recipient, text: text }), "钉钉个人消息发送失败");
     },
   };
+}
+
+/**
+ * 自动化域 desktop 适配器：受控系统 API（shell.openPath / 固定 AppleScript）+ 应用白名单。
+ *   · 白名单只收当前平台真实存在的系统应用（macOS 路径见 desktop-executor.cjs 的 MAC_SYSTEM_APPS）；
+ *   · 音乐控制器只在 macOS 构造（固定脚本 + argv，不经 shell）；
+ *   · 构造失败由调用方降级为 null + 可读原因（进 automation/health.dependencyDetails），不拖死启动链。
+ */
+function createAutomationDesktopAdapter() {
+  const apps = process.platform === "darwin"
+    ? MAC_SYSTEM_APPS.filter((app) => { try { return fs.existsSync(app.path); } catch { return false; } })
+    : [];
+  const musicController = createSystemMusicController({ platform: process.platform });
+  return createDesktopExecutor({ shell, apps, musicController });
 }
 
 /** 自动化域 toolCatalog 适配器：复用 agent 工具目录的唯一执行入口。 */
@@ -994,6 +1013,15 @@ app.whenReady().then(async () => {
       mediaDir: path.join(app.getPath("userData"), "dxos", "media"),
     });
     const mediaOnnxProbe = probeOnnxAvailability({ modelDir: path.join(app.getPath("userData"), "dxos", "media", "background-removal") });
+    // 短剧出图 / 成片导出 → OpenArc 资源库（幂等：同 checksum 复用既有 active 资源）。
+    // resourceStore 只读查询用于去重；session 身份由 media-service 的可信 context 提供。
+    const mediaResourceRegistrar = createMediaResourceRegistrar({
+      resourceService: identity.resourceService || null,
+      resourceStore: identity.resourceStore || null,
+      identity: identity.store || null,
+      tempDir: path.join(app.getPath("userData"), "dxos", "media", "tmp"),
+      clock: () => Date.now(),
+    });
     mediaBundle = createMediaBundle({
       userDataDir: app.getPath("userData"),
       identityStore: identity.store,
@@ -1011,6 +1039,12 @@ app.whenReady().then(async () => {
       illustratorAvailable: probeIllustratorAvailability(),
       // 本仓无随包 Vite 构建器（vite 仅 devDependency）→ 如实 null。
       viteBuild: null,
+      // 出图 / 成片导出 → 资源库（未装配时命令侧如实回 MEDIA_DEPENDENCY_UNAVAILABLE）。
+      resourceRegistrar: mediaResourceRegistrar,
+      // 导出到访达：绝对路径只交给 shell.showItemInFolder，渲染层只拿 relativePath。
+      revealExport: (absolutePath) => {
+        try { shell.showItemInFolder(String(absolutePath)); return true; } catch { return false; }
+      },
     });
     registerMediaIpc({
       ipcMain,
@@ -1190,7 +1224,7 @@ app.whenReady().then(async () => {
     //       integrations  ← plugin-service（钉钉 / 领星 / 紫鸟；默认关，未启用 / 无 transport 结构化不可用）
     //       toolCatalog   ← agent 工具目录唯一执行入口
     //       agent         ← agent-service.runInstruction（project agent mode 同一路径）
-    //       desktop       ← 本仓无桌面执行端实现，保持 null（health 如实列出缺失原因）
+    //       desktop       ← desktop-executor.cjs（musicPlay / musicControl / openApp；受控系统 API）
     //   · automation:event 与 model:event / task:event / agent:event / skill:event / media:event 同一条 trusted(event) 边界。
     const automationToolCatalog = createAutomationToolCatalogAdapter();
     const automationDeveloperApps = createAutomationDeveloperAppsAdapter({
@@ -1212,6 +1246,15 @@ app.whenReady().then(async () => {
         try { console.warn("[openarc] " + automationIntegrationsNote); } catch { /* 日志失败不改装配结果 */ }
       }
     }
+    // B7j+：桌面执行端（music_play / music_control / open_app）——受控系统 API，不是任意命令。
+    let automationDesktop = null;
+    let automationDesktopNote = null;
+    try {
+      automationDesktop = createAutomationDesktopAdapter();
+    } catch (error) {
+      automationDesktopNote = "桌面执行端装配失败：" + String((error && error.message) || error);
+      try { console.warn("[openarc] " + automationDesktopNote); } catch { /* 日志失败不改装配结果 */ }
+    }
     automationBundle = createAutomationBundle({
       identityStore: identity.store,
       authorization: identity.authorization,
@@ -1220,15 +1263,14 @@ app.whenReady().then(async () => {
         : null,
       developerApps: automationDeveloperApps,
       integrations: automationIntegrations,
-      // 本仓没有桌面执行端（music_play / music_control / open_app 的客户端执行器）：如实保持 null。
-      desktop: null,
+      desktop: automationDesktop,
       agent: agentBundle && typeof agentBundle.runInstruction === "function"
         ? { runInstruction: (instruction, options) => agentBundle.runInstruction(instruction, options) }
         : null,
       toolCatalog: automationToolCatalog,
       // 未装配适配器的可读原因，直接进 automation/health.dependencyDetails。
       adapterNotes: {
-        desktop: "本仓没有桌面执行端实现（music_play / music_control / open_app 的客户端执行器未装配）",
+        desktop: automationDesktopNote,
         integrations: automationIntegrationsNote,
         agent: agentBundle ? null : "agent-service 未装配",
       },

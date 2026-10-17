@@ -93,6 +93,7 @@ const MEDIA_COMMANDS = Object.freeze({
   "media/render/cancel": { risk: "manage", credential: false, summary: "取消排队 / 运行 / 中断态的渲染任务" },
   "media/render/heartbeat": { risk: "manage", credential: false, summary: "续租渲染任务租约（workerId 不匹配即拒绝，返回 renewed=false）" },
   "media/render/recover": { risk: "manage", credential: false, summary: "回收租约过期的 running 任务（置为 interrupted，绝不伪造完成）" },
+  "media/render/export": { risk: "manage", credential: false, summary: "导出已完成的渲染成片到访达导出目录或资源库（只回相对路径 / 资源 ref）" },
 
   // ---- 落盘产物 / 健康 ----
   "media/artifact/list": { risk: "read", credential: false, summary: "列出落盘产物（成片 / 封面 / 素材），只返回相对路径" },
@@ -118,6 +119,7 @@ const MEDIA_COMMANDS = Object.freeze({
   "media/short-drama/storyboards": { risk: "use", credential: false, summary: "调用注入的语言模型生成分镜清单" },
   "media/short-drama/shot/image": { risk: "use", credential: false, summary: "调用注入的图像模型生成分镜图（未注入即结构化不可用）" },
   "media/short-drama/render": { risk: "manage", credential: false, summary: "把已就绪分镜编排为时间线并提交渲染（注入 renderSubmit / mediaStore）" },
+  "media/short-drama/export": { risk: "manage", credential: false, summary: "导出短剧成片（最近一条已完成渲染）到访达导出目录或资源库" },
   "media/short-drama/visual-image": { risk: "use", credential: false, summary: "调用注入的图像模型为角色 / 场景生成参考图（源 generateVisualReferenceImage）" },
   "media/short-drama/get": { risk: "read", credential: false, summary: "读取单个短剧项目的前端视图（画面拍平成索引，避开 IPC 脱敏深度上限）" },
   "media/short-drama/image": { risk: "read", credential: false, summary: "读取项目里的一张分镜 / 参考画面用于预览（只限本项目引用的画面，≤12MB）" },

@@ -34,6 +34,13 @@ const SQL = {
     "INSERT OR IGNORE INTO content_objects (content_id, checksum_algorithm, checksum, size, internal_key, ref_count, status, organization_id, created_at, updated_at) VALUES (?,?,?,?,?,?, 'OBJECT_READY', ?,?,?)",
   contentById: "SELECT * FROM content_objects WHERE content_id = ?",
   contentByChecksum: "SELECT * FROM content_objects WHERE checksum_algorithm = ? AND checksum = ? AND size = ?",
+  /** 去重依据：同 checksum+size 且未被回收的既有资源（只读查询，不写 resource_* 表）。 */
+  resourceByChecksum:
+    "SELECT l.resource_id AS resource_id, l.name AS name, l.mime_type AS mime_type, l.size AS size, l.checksum AS checksum, " +
+    "l.trash_state AS trash_state, r.owner_user_id AS owner_user_id, r.organization_id AS organization_id, r.status AS registry_status " +
+    "FROM library_resources l JOIN resource_registry r ON r.resource_id = l.resource_id " +
+    "WHERE l.checksum = ? AND l.size = ? AND l.trash_state = 'ACTIVE' AND r.status = 'active' " +
+    "ORDER BY l.created_at, l.resource_id LIMIT 1",
   contentByInternalKey: "SELECT * FROM content_objects WHERE internal_key = ?",
   setContentStatus: "UPDATE content_objects SET status = ?, updated_at = ? WHERE content_id = ?",
   setContentRefCount: "UPDATE content_objects SET ref_count = ?, updated_at = ? WHERE content_id = ?",
@@ -164,6 +171,12 @@ class ResourceStore {
 
   contentObjectByChecksum(checksum, size, algorithm = "sha256") {
     return this.db.prepare(SQL.contentByChecksum).get(algorithm, String(checksum || ""), size) || null;
+  }
+
+  /** 资源域去重查询：同 checksum+size 且 active 的既有资源（供导入侧避免重复 resource_registry 行）。 */
+  resourceByChecksum(checksum, size) {
+    if (!checksum || !Number.isFinite(Number(size))) return null;
+    return this.db.prepare(SQL.resourceByChecksum).get(String(checksum), Number(size)) || null;
   }
 
   contentObjectByInternalKey(internalKey) {

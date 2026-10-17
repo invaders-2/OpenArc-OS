@@ -125,6 +125,7 @@ const APP_BUILTIN_VERSIONS = Object.freeze({
   dev: "0.1.0",
   declare: "0.1.0",
   drama: "0.1.0",
+  integrations: "0.1.0",
 });
 
 /**

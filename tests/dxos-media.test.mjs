@@ -168,7 +168,7 @@ test("迁移 v24：v23 老库升到 24、video_ 表只新增、重放幂等、�
 });
 
 // ── ① 命令表 ─────────────────────────────────────────────────────────────
-test("命令表：50 条命令（B5a 16 + B5e 34）、risk/credential/summary 合法", () => {
+test("命令表：55 条命令（B5a 16 + B5e 34 + task-9 2）、risk/credential/summary 合法", () => {
   const required = [
     "media/project/ensure", "media/asset/save", "media/asset/list", "media/asset/delete",
     "media/probe", "media/poster/get", "media/poster/invalidate",
@@ -178,7 +178,8 @@ test("命令表：50 条命令（B5a 16 + B5e 34）、risk/credential/summary �
   ];
   const commands = mediaDomain.listMediaCommands();
   // 10-16：+3 短剧工坊前端（media/short-drama/get / image / visual-image）
-  assert.equal(commands.length, 53);
+  // task-9：+2 成片导出（media/render/export / media/short-drama/export）
+  assert.equal(commands.length, 55);
   for (const name of required) assert.ok(mediaDomain.isMediaCommand(name), "缺少命令：" + name);
   for (const entry of commands) {
     assert.ok(Object.prototype.hasOwnProperty.call(mediaDomain.RISK_LEVELS, entry.risk), "非法 risk：" + entry.risk);

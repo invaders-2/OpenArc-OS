@@ -22,6 +22,9 @@
  *   · fetchImpl   —— 下载模型返回的图片 URL；缺 → 结构化不可用
  *   · providerStore.firstUsableProvider(caps) —— 语言/图像模型提供方
  *   · modelGateway.callChat / generateImages / editImages —— 云模型调用面（调用方注入）
+ *   · resourceRegistrar.registerBuffer —— 出图落盘后同时登记进 OpenArc 资源库（调用方注入；
+ *     未注入时画面仍落 fs，但资源 ref 如实为 null，绝不假装已登记）
+ *   · resourceContext —— 资源登记所需的可信 sessionRef / appId（由 media-service 从 IPC 上下文传入）
  *
  * 与既有 B5a 渲染对接（编排为本仓新增，源没有该函数）：
  *   buildDramaTimeline(project) 把"已就绪分镜图"顺序编排成 media-domain 认可的
@@ -206,6 +209,38 @@ function imagePrompt(project, shot) {
   ].filter(Boolean).join("\n\n");
 }
 
+/**
+ * 出图落盘后登记资源库。registrar 未注入 → unavailable（不伪造已登记）；
+ * 登记失败 → failed + 错误码，但已落盘的画面保留（不因资源库故障丢素材）。
+ */
+async function registerImageResource(opts, { buffer, name, mime, prompt }) {
+  const registrar = opts.resourceRegistrar;
+  if (!registrar || typeof registrar.registerBuffer !== "function") return { status: "unavailable" };
+  const generatedModel = typeof opts.generatedModel === "string" ? opts.generatedModel : null;
+  let result;
+  try {
+    result = await registrar.registerBuffer({
+      context: opts.resourceContext && typeof opts.resourceContext === "object" ? opts.resourceContext : null,
+      buffer,
+      name,
+      mime,
+      description: prompt,
+      resourceType: "image",
+      generated: generatedModel ? { model: generatedModel } : null,
+    });
+  } catch (error) {
+    return { status: "failed", error: String((error && error.code) || "RESOURCE_REGISTER_FAILED") };
+  }
+  if (result && result.ok === true) {
+    return {
+      status: result.dedupe === true ? "deduped" : "registered",
+      resourceId: result.resourceId == null ? null : String(result.resourceId),
+      resourceRef: result.resourceRef == null ? null : String(result.resourceRef),
+    };
+  }
+  return { status: "failed", error: String((result && result.error) || "RESOURCE_REGISTER_FAILED") };
+}
+
 /** 源 :172-195 persistImages。 */
 async function persistImages(project, owner, label, images, prompt, kind, folderName, options) {
   const opts = effective(options);
@@ -231,7 +266,15 @@ async function persistImages(project, owner, label, images, prompt, kind, folder
     const extension = mime.includes("jpeg") ? "jpg" : mime.includes("webp") ? "webp" : "png";
     const node = port.createNode({ name: (label.replace(/[\\/:*?"<>|]/g, "_").slice(0, 30) || "image") + "-" + Date.now() + "-" + (index + 1) + "." + extension, type: "file", parentId: frameFolder, mime, size: buf.length });
     port.saveBlob(node.id, buf);
-    saved.push({ id: randomUUID(), nodeId: node.id, url: "/api/fs/raw/" + node.id, prompt, kind, createdAt: (opts.clock || (() => Date.now()))() });
+    const registration = await registerImageResource(opts, { buffer: buf, name: node.name, mime, prompt });
+    saved.push({
+      id: randomUUID(), nodeId: node.id, url: "/api/fs/raw/" + node.id, prompt, kind,
+      createdAt: (opts.clock || (() => Date.now()))(),
+      resourceRef: registration.resourceRef || null,
+      resourceId: registration.resourceId || null,
+      resourceStatus: registration.status,
+      ...(registration.error ? { resourceError: registration.error } : {}),
+    });
   }
   owner.images.push(...saved);
   owner.selectedImageId = saved.at(-1) ? saved.at(-1).id : owner.selectedImageId;
@@ -280,7 +323,10 @@ function getDramaProjectView(id, options) {
   const project = find(load(opts), id, opts);
   const images = [];
   const pushAll = (owner, ownerId, list) => {
-    for (const image of list || []) if (image && image.nodeId != null) images.push({ owner, ownerId, id: image.id, nodeId: String(image.nodeId), kind: image.kind || null, createdAt: image.createdAt || null });
+    for (const image of list || []) if (image && image.nodeId != null) images.push({
+      owner, ownerId, id: image.id, nodeId: String(image.nodeId), kind: image.kind || null, createdAt: image.createdAt || null,
+      resourceRef: image.resourceRef || null, resourceId: image.resourceId || null, resourceStatus: image.resourceStatus || "unavailable",
+    });
   };
   const shots = (project.shots || []).map((shot) => {
     pushAll("shot", shot.id, shot.images);
@@ -494,7 +540,7 @@ async function generateVisualReferenceImage(id, kind, itemId, options) {
   const prompt = visualDesignImagePrompt(project, kind, item);
   const { images } = await modelGateway(opts).generateImages(resolved, model, { prompt, size: "1024x1536", n: 1 }, 300000);
   if (!images.length) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "图像模型未返回图片。");
-  await persistImages(project, item, item.name, images, prompt, "generated", kind === "character" ? "character-designs" : "location-designs", opts);
+  await persistImages(project, item, item.name, images, prompt, "generated", kind === "character" ? "character-designs" : "location-designs", Object.assign({}, opts, { generatedModel: model }));
   touch(project, opts);
   syncProjectFile(project, "assets/visual-reference-manifest.json", visualReferenceManifest(design), opts);
   save(projects, opts);
@@ -523,7 +569,7 @@ async function editVisualReferenceImage(id, kind, itemId, imageId, instruction, 
   const prompt = visualDesignImagePrompt(project, kind, item) + "\n\n基于参考图修改：" + note + "\n保持未要求变化的角色设定、服装、场景和整体风格一致。";
   const { images } = await modelGateway(opts).editImages(resolved, model, { prompt, size: "1024x1536", n: 1 }, [{ buf, mime: node.mime || "image/png", name: node.name || "reference.png" }], 300000);
   if (!images.length) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "图像模型未返回修改后的图片。");
-  await persistImages(project, item, item.name, images, prompt, "edited", kind === "character" ? "character-designs" : "location-designs", opts);
+  await persistImages(project, item, item.name, images, prompt, "edited", kind === "character" ? "character-designs" : "location-designs", Object.assign({}, opts, { generatedModel: model }));
   touch(project, opts);
   syncProjectFile(project, "assets/visual-reference-manifest.json", visualReferenceManifest(design), opts);
   save(projects, opts);
@@ -622,7 +668,7 @@ async function generateDramaShotImage(id, shotId, options) {
   const prompt = imagePrompt(project, shot);
   const { images } = await modelGateway(opts).generateImages(resolved, model, { prompt, size: "1024x1536", n: 1 }, 300000);
   if (!images.length) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "图像模型未返回图片。");
-  await persistImages(project, shot, shot.title, images, prompt, "generated", "frames", opts);
+  await persistImages(project, shot, shot.title, images, prompt, "generated", "frames", Object.assign({}, opts, { generatedModel: model }));
   shot.imageStatus = "ready";
   touch(project, opts);
   syncProjectFile(project, "assets/image-manifest.json", JSON.stringify(project.shots.map((item) => ({ shotId: item.id, title: item.title, selectedImageId: item.selectedImageId, images: item.images })), null, 2), opts);
@@ -649,7 +695,7 @@ async function editDramaShotImage(id, shotId, imageId, instruction, options) {
   const prompt = imagePrompt(project, shot) + "\n\n基于参考图修改：" + note + "\n保持角色身份、服化道和场景连续性，除非修改要求明确改变。";
   const { images } = await modelGateway(opts).editImages(resolved, model, { prompt, size: "1024x1536", n: 1 }, [{ buf, mime: node.mime || "image/png", name: node.name || "reference.png" }], 300000);
   if (!images.length) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "图像模型未返回修改后的图片。");
-  await persistImages(project, shot, shot.title, images, prompt, "edited", "frames", opts);
+  await persistImages(project, shot, shot.title, images, prompt, "edited", "frames", Object.assign({}, opts, { generatedModel: model }));
   shot.imageStatus = "ready";
   touch(project, opts);
   syncProjectFile(project, "assets/image-manifest.json", JSON.stringify(project.shots.map((item) => ({ shotId: item.id, title: item.title, selectedImageId: item.selectedImageId, images: item.images })), null, 2), opts);
@@ -661,21 +707,67 @@ async function editDramaShotImage(id, shotId, imageId, instruction, options) {
 // 渲染编排（本仓新增：源没有这一层；复用 media-domain 的 Timeline V1 校验）
 // ---------------------------------------------------------------------------
 
+function selectedShotImage(shot) {
+  const images = Array.isArray(shot && shot.images) ? shot.images : [];
+  return images.find((image) => image.id === shot.selectedImageId) || images.at(-1) || null;
+}
+
+/**
+ * 把选中的分镜图登记成 mediaStore 的 video_assets（真实文件写 <userData>/dxos/media/assets）。
+ * 为什么需要：createVideoRenderJob 只认 video_assets 的 file_path，DX 虚拟文件树的 nodeId
+ * 不在素材表里，不先落成 video_asset 就永远"服务端缺少素材"。
+ * 已登记的 image.renderAssetId 直接复用，重复提交渲染不会重复写素材。
+ */
+function materializeRenderAssets(project, options) {
+  const opts = effective(options);
+  const store = opts.mediaStore;
+  if (!store || typeof store.saveVideoAsset !== "function" || typeof store.getVideoAssetRow !== "function") return null;
+  if (!opts.ownerId) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "提交渲染缺少 ownerId");
+  const port = fsPort(opts);
+  const canvas = Object.assign({}, DEFAULT_CANVAS, opts.canvas || {});
+  const byShot = new Map();
+  for (const shot of Array.isArray(project.shots) ? project.shots : []) {
+    const selected = selectedShotImage(shot);
+    if (!selected || !selected.nodeId) continue;
+    const existingAssetId = selected.renderAssetId ? String(selected.renderAssetId) : null;
+    if (existingAssetId) {
+      const existing = store.getVideoAssetRow(existingAssetId, opts.ownerId);
+      if (existing) { byShot.set(shot.id, existing.id); continue; }
+    }
+    const buffer = port.readBlob(selected.nodeId);
+    if (!buffer || !buffer.length) throw createMediaError(MEDIA_ERR_NOT_FOUND, "分镜图内容缺失，无法提交渲染：" + (shot.title || shot.id));
+    const node = port.getNode(selected.nodeId);
+    const mime = node && typeof node.mime === "string" && node.mime.startsWith("image/") ? node.mime : "image/png";
+    const extension = mime.includes("jpeg") ? ".jpg" : mime.includes("webp") ? ".webp" : ".png";
+    const durationMs = Math.max(1000, Math.min(30000, Math.round((Number(shot.duration) || 5) * 1000)));
+    const asset = store.saveVideoAsset({
+      projectId: project.id, ownerId: opts.ownerId, projectName: project.name,
+      name: (String(shot.title || "分镜").replace(/[\\/:*?"<>|]/g, "_").slice(0, 60) || "分镜") + extension,
+      mime, buffer,
+      probe: { durationMs, width: canvas.width, height: canvas.height, hasVideo: false, hasAudio: false, formatName: "image" },
+    });
+    selected.renderAssetId = asset.id;
+    byShot.set(shot.id, asset.id);
+  }
+  return byShot;
+}
+
 /**
  * 把"已选图分镜"顺序编排为 Timeline V1 + assets。
  * 每个分镜时长 = shot.duration 秒（1..30s），画面用选中的分镜图。
+ * assetIdFor 由 submitDramaRender 注入（video_assets id）；默认测试路径仍用虚拟树 nodeId。
  */
 function buildDramaTimeline(project, options) {
   const opts = effective(options);
+  const assetIdFor = typeof opts.assetIdFor === "function" ? opts.assetIdFor : null;
   const canvas = Object.assign({}, DEFAULT_CANVAS, opts.canvas || {});
   const assets = [];
   const clips = [];
   let cursor = 0;
   for (const shot of Array.isArray(project.shots) ? project.shots : []) {
-    const images = Array.isArray(shot.images) ? shot.images : [];
-    const selected = images.find((image) => image.id === shot.selectedImageId) || images.at(-1);
+    const selected = selectedShotImage(shot);
     if (!selected) continue;
-    const assetId = selected.assetId || selected.nodeId || selected.id;
+    const assetId = (assetIdFor ? assetIdFor(shot, selected) : null) || selected.assetId || selected.nodeId || selected.id;
     const durationMs = Math.max(1000, Math.min(30000, Math.round((Number(shot.duration) || 5) * 1000)));
     assets.push({ id: assetId, name: shot.title || "分镜", kind: "image", hasAudio: false, durationMs });
     clips.push({ id: shot.id, trackId: "video-1", assetId, name: shot.title || "分镜", timelineStartMs: cursor, durationMs, sourceInMs: 0, sourceOutMs: durationMs, volume: 1 });
@@ -704,13 +796,21 @@ async function submitDramaRender(projectId, options) {
   const opts = effective(options);
   const projects = load(opts);
   const project = find(projects, projectId, opts);
-  const plan = buildDramaTimeline(project, opts);
-  if (!plan.shotCount) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "没有已就绪的分镜图，无法提交渲染。");
   let submit = null;
   if (typeof opts.renderSubmit === "function") submit = opts.renderSubmit;
   else if (opts.mediaStore && typeof opts.mediaStore.createVideoRenderJob === "function") submit = (input) => opts.mediaStore.createVideoRenderJob(input);
   if (!submit) {
     throw createMediaError(MEDIA_ERR_DEPENDENCY_UNAVAILABLE, "渲染提交面未装配（缺少 renderSubmit / mediaStore）", "缺少 renderSubmit 或 mediaStore.createVideoRenderJob：注入后重试。");
+  }
+  // 只有走真实 mediaStore 时才需要把虚拟树画面落成 video_assets；显式 renderSubmit 的
+  // 测试 / 外部执行器自己决定素材形态，保持原样。
+  const materialized = typeof opts.renderSubmit === "function" || !opts.ownerId ? null : materializeRenderAssets(project, opts);
+  const plan = buildDramaTimeline(project, Object.assign({}, opts, materialized ? { assetIdFor: (shot) => materialized.get(shot.id) || null } : {}));
+  if (!plan.shotCount) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "没有已就绪的分镜图，无法提交渲染。");
+  if (materialized) {
+    // 先记住 renderAssetId，再提交；重复提交渲染不会重复写同一份素材。
+    touch(project, opts);
+    save(projects, opts);
   }
   const job = await submit({ projectId: project.id, ownerId: opts.ownerId, projectName: project.name, timeline: plan.timeline, assets: plan.assets });
   return { job, plan: { shotCount: plan.shotCount, durationMs: plan.durationMs } };

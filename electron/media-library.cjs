@@ -306,6 +306,10 @@ function setDirs(dirs, options) {
     if (!valid.includes(abs)) valid.push(abs);
   }
   persist({ dirs: valid }, options);
+  // 目录变了就必须让下一次 listTracks 重新扫描：否则 5 分钟缓存会把新目录藏起来。
+  pathIndex.clear();
+  trackCache = [];
+  lastScan = 0;
   return { dirs: valid, errors };
 }
 

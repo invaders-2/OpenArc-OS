@@ -2,7 +2,7 @@
  * B5e · 媒体域剩余部分测试（全离线，无网络、无 Electron）。
  *
  * 覆盖：
- *   ① 命令表一致性（50 条；命令表 ↔ dispatch 一一对应，无 COMMAND_NOT_ALLOWED 漏网）
+ *   ① 命令表一致性（55 条；命令表 ↔ dispatch 一一对应，无 COMMAND_NOT_ALLOWED 漏网）
  *   ② 抠图：依赖缺失结构化不可用；注入假 runtime/sharp/session 的真实推理路径；sharp 缺失
  *   ③ AI 声明：JPEG / PNG / WebP 写入→解析往返；processDeclarationUpload 单图与 ZIP；sharp 缺失
  *   ④ 短剧：编排 Timeline → 注入假渲染提交（对接 B5a worker 面）
@@ -55,10 +55,11 @@ async function exec(bundle, command, payload = {}) {
 }
 
 // ── ① 命令表一致性 ────────────────────────────────────────────────────────
-test("命令表：共 50 条，risk/summary/needsCredential 合法", () => {
+test("命令表：共 55 条，risk/summary/needsCredential 合法", () => {
   const commands = mediaDomain.listMediaCommands();
   // 10-16：+3 media/short-drama/get / image（只读视图与画面预览）、visual-image（角色 / 场景参考图）
-  assert.equal(commands.length, 53);
+  // task-9：+2 media/render/export / short-drama/export（成片导出到访达 / 资源库）
+  assert.equal(commands.length, 55);
   for (const entry of commands) {
     assert.ok(Object.prototype.hasOwnProperty.call(mediaDomain.RISK_LEVELS, entry.risk), "非法 risk：" + entry.command);
     assert.equal(entry.needsCredential, false);
@@ -83,7 +84,7 @@ test("命令表 ↔ dispatch：每条新命令都被分发（绝不落 COMMAND_N
       || command.startsWith("media/short-drama/") || command.startsWith("media/library/")
       || command.startsWith("media/illustrator/") || command.startsWith("media/figma-preview/")
       || command.startsWith("media/director3d/") || command.startsWith("media/public-media/"));
-  assert.equal(newCommands.length, 37); // 10-16 +3 media/short-drama/get、image、visual-image
+  assert.equal(newCommands.length, 38); // 10-16 +3；task-9 +1 media/short-drama/export
   for (const command of newCommands) {
     const result = await exec(bundle, command, {});
     assert.notEqual(result.error, "MEDIA_COMMAND_NOT_ALLOWED", "未登记 dispatch：" + command);
@@ -366,7 +367,11 @@ test("音乐库：扫描根注入、标签兜底、元数据覆盖、artwork 目
   const setResult = library.setDirs([root, path.join(dir, "missing")]);
   assert.deepEqual(setResult.errors, ["目录不存在：" + path.join(dir, "missing")]);
   assert.deepEqual(setResult.dirs, [root]);
-  assert.equal(library.getConfig().trackCount, finalTracks.length);
+  // setDirs 改目录后必须让下一次扫描重算（旧曲目缓存与新目录不对应）。
+  assert.equal(library.getConfig().trackCount, 0, "目录变更后曲目缓存必须失效");
+  const rescanAfterSetDirs = await library.scan();
+  assert.equal(rescanAfterSetDirs.length, 2, "setDirs 后不带 dirs 的 scan 使用新配置目录");
+  assert.equal(library.getConfig().trackCount, 2);
 });
 
 // ── ⑥ Illustrator ────────────────────────────────────────────────────────
