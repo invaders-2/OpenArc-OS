@@ -49,7 +49,7 @@ test("文本抽取：UTF-8 / UTF-16 BOM / CSV / 代码；超长截断在 40k（�
   assert.equal(nul.content, "ab");
 });
 
-test("不支持的格式给出结构化错误，不做假解析（源 :91-93；docx/xlsx 依赖不在本仓）", () => {
+test("不支持的格式给出结构化错误，不做假解析（源 :91-93；损坏 docx/xlsx 零依赖解析失败）", () => {
   const pdf = attachments.extractAttachment({ buffer: Buffer.from("%PDF-1.7"), name: "a.pdf", mime: "application/pdf" });
   assert.equal(pdf.content, "");
   assert.match(pdf.error, /PDF/);
@@ -266,3 +266,18 @@ test("task-36：docx/xlsx 零依赖 ZIP+XML 最小解析（正文/共享字符�
   assert.equal(xlsxRead.content, "姓名\t张三");
 });
 
+
+test("task-36：默认零依赖解析；注入解析器优先覆盖默认", () => {
+  const docx = makeZip({ "word/document.xml": '<w:document><w:body><w:p><w:r><w:t>默认正文</w:t></w:r></w:p></w:body></w:document>' });
+  const byDefault = attachments.extractAttachment({ buffer: docx, name: "default.docx", mime: "application/octet-stream" });
+  assert.equal(byDefault.error, undefined);
+  assert.equal(byDefault.content, "默认正文");
+  attachments.configureAttachmentParsers({ docx: () => "注入覆盖正文" });
+  try {
+    const overridden = attachments.extractAttachment({ buffer: docx, name: "override.docx", mime: "application/octet-stream" });
+    assert.equal(overridden.error, undefined);
+    assert.equal(overridden.content, "注入覆盖正文");
+  } finally { attachments.configureAttachmentParsers({}); }
+  const corrupt = attachments.extractAttachment({ buffer: Buffer.from("not-a-zip"), name: "bad.docx", mime: "application/octet-stream" });
+  assert.match(corrupt.error, /文件解析失败/);
+});

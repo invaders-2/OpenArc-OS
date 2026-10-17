@@ -48,9 +48,13 @@ function configureAttachmentParsers(parsers) {
   injectedParsers = parsers && typeof parsers === "object" ? Object.freeze({ ...parsers }) : Object.freeze({});
   return injectedParsers;
 }
+/**
+ * task-36 A18：默认使用零依赖解析器；宿主注入同扩展名解析器时优先注入（可覆盖默认）。
+ * 解析器抛错由 extractAttachment 统一转成结构化“文件解析失败”。
+ */
 function parserFor(extension) {
-  if (extension === ".docx") return typeof injectedParsers.docx === "function" ? injectedParsers.docx : null;
-  if (extension === ".xlsx" || extension === ".xlsm") return typeof injectedParsers.xlsx === "function" ? injectedParsers.xlsx : null;
+  if (extension === ".docx") return typeof injectedParsers.docx === "function" ? injectedParsers.docx : parseDocxText;
+  if (extension === ".xlsx" || extension === ".xlsm") return typeof injectedParsers.xlsx === "function" ? injectedParsers.xlsx : parseXlsxText;
   return null;
 }
 
@@ -201,22 +205,18 @@ function extractAttachment(input = {}) {
   let error = "";
   try {
     if (BINARY_PARSERS_UNAVAILABLE.includes(extension)) {
-      // task-36 A18：先用零依赖 ZIP+XML 最小解析；失败再走注入解析器；都不行才结构化拒绝。
-      let builtinError = null;
-      try {
-        const parsedText = parseOfficeText(buffer, extension);
-        if (parsedText != null && parsedText !== "") content = parsedText;
-        else builtinError = "文档没有可读文本";
-      } catch (cause) { builtinError = String((cause && cause.message) || cause); }
-      if (!content) {
-        const parser = parserFor(extension);
-        if (parser) {
+      // task-36 A18：默认零依赖 ZIP+XML；注入解析器优先覆盖。损坏包/损坏 XML 一律结构化。
+      const parser = parserFor(extension);
+      if (!parser) {
+        error = "当前构建未包含 " + extension + " 解析依赖，请把内容另存为文本/CSV/Markdown 后重新挂载";
+      } else {
+        try {
           const parsed = parser(buffer, name);
           if (parsed && typeof parsed === "object" && typeof parsed.text === "string") content = parsed.text;
           else if (typeof parsed === "string") content = parsed;
-          else error = "注入的 " + extension + " 解析器没有返回文本";
-        } else {
-          error = builtinError ? "文件解析失败：" + builtinError : "当前构建未包含 " + extension + " 解析依赖，请把内容另存为文本/CSV/Markdown 后重新挂载";
+          else error = "解析器没有返回文本";
+        } catch (cause) {
+          error = "文件解析失败：" + String((cause && cause.message) || cause);
         }
       }
     } else if (extension === ".csv" || extension === ".tsv" || mime === "text/csv") {
