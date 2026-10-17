@@ -3,6 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import DsBadge from "../design-system/DsBadge.vue";
 import DsButton from "../design-system/DsButton.vue";
 import DsPageState from "../design-system/DsPageState.vue";
+import LanPanel from "./LanPanel.vue";
+import { t } from "../i18n";
 
 /**
  * D3-03 · 设备管理 Pane（对齐 src/device/DevicePane.tsx）。
@@ -124,7 +126,7 @@ async function loadDevices() {
     devices.value = asArray<PublicDevice>(res.items);
     return true;
   }
-  error.value = { code: String(res.error || "INTERNAL_ERROR"), context: "读取设备列表" };
+  error.value = { code: String(res.error || "INTERNAL_ERROR"), context: t("读取设备列表") };
   return false;
 }
 async function loadPairings() {
@@ -133,7 +135,7 @@ async function loadPairings() {
     pairings.value = asArray<Pairing>(res.items);
     return true;
   }
-  error.value = { code: String(res.error || "INTERNAL_ERROR"), context: "读取配对凭据" };
+  error.value = { code: String(res.error || "INTERNAL_ERROR"), context: t("读取配对凭据") };
   return false;
 }
 async function loadAudit() {
@@ -142,7 +144,7 @@ async function loadAudit() {
     audit.value = asArray<AuditItem>(res.items);
     return true;
   }
-  error.value = { code: String(res.error || "INTERNAL_ERROR"), context: "读取设备审计" };
+  error.value = { code: String(res.error || "INTERNAL_ERROR"), context: t("读取设备审计") };
   return false;
 }
 async function refresh() {
@@ -177,14 +179,14 @@ async function startPairing() {
   busy.value = null;
   const pairing = (res.pairing as Pairing | undefined) || undefined;
   if (!res.ok || !pairing || typeof res.secret !== "string" || !res.secret) {
-    error.value = { code: String(res.error || "INTERNAL_ERROR"), context: "开始配对" };
+    error.value = { code: String(res.error || "INTERNAL_ERROR"), context: t("开始配对") };
     return;
   }
   secret.value = { pairingId: pairing.id, value: res.secret, expiresAt: pairing.expiresAt ?? null };
   await refresh();
 }
 async function revokePairing(pairingId: string) {
-  const res = await runAction("pairing:" + pairingId, { type: "device/pairing.revoke", pairingId }, "撤销配对");
+  const res = await runAction("pairing:" + pairingId, { type: "device/pairing.revoke", pairingId }, t("撤销配对"));
   if (res && secret.value?.pairingId === pairingId) secret.value = null;
 }
 async function submitRename() {
@@ -193,7 +195,7 @@ async function submitRename() {
   const res = await runAction(
     "rename:" + current.deviceId,
     { type: "device/rename", deviceId: current.deviceId, displayName: current.value },
-    "重命名设备",
+    t("重命名设备"),
   );
   if (res) renaming.value = null;
 }
@@ -202,12 +204,12 @@ function pairingStatusOf(p: Pairing): string {
   return p.status;
 }
 function statusMeta(d: PublicDevice) {
-  return STATUS_META[d.status] || { label: d.status + "（未知状态）", tone: "neutral" as Tone };
+  return STATUS_META[d.status] ? { label: t(STATUS_META[d.status].label), tone: STATUS_META[d.status].tone } : { label: d.status + "（" + t("未知状态") + "）", tone: "neutral" as Tone };
 }
 function connMeta(d: PublicDevice) {
-  return CONNECTIVITY_META[d.connectivity] || { label: d.connectivity + "（未知连接）", tone: "neutral" as Tone };
+  return CONNECTIVITY_META[d.connectivity] ? { label: t(CONNECTIVITY_META[d.connectivity].label), tone: CONNECTIVITY_META[d.connectivity].tone } : { label: d.connectivity + "（" + t("未知连接") + "）", tone: "neutral" as Tone };
 }
-const failureText = computed(() => (error.value ? REASON_LABEL[error.value.code] || "设备操作失败" : ""));
+const failureText = computed(() => (error.value ? t(REASON_LABEL[error.value.code] || "设备操作失败") : ""));
 
 function onRenameInput(e: Event) {
   if (renaming.value) renaming.value = { deviceId: renaming.value.deviceId, value: (e.target as HTMLInputElement).value };
@@ -221,32 +223,34 @@ function cancelRename() {
 </script>
 
 <template>
-  <div v-if="!available" class="device-pane" data-device-pane="devices" data-device-available="false">
-    <DsPageState
-      kind="unavailable"
-      title="当前环境无法访问设备域"
-      description="只有在 OpenArc 桌面应用（Electron）里才会加载设备桥。这里不展示任何模拟设备。"
-    />
-  </div>
-
   <div
-    v-else
     class="device-pane"
     data-device-pane="devices"
-    data-device-available="true"
+    :data-device-available="available ? 'true' : 'false'"
     :data-device-role="isSuperAdmin ? 'ADMIN' : 'MEMBER'"
   >
+    <LanPanel />
+
+    <template v-if="!available">
+      <DsPageState
+        kind="unavailable"
+        :title="t('当前环境无法访问设备域')"
+        :description="t('只有在 OpenArc 桌面应用（Electron）里才会加载设备桥。这里不展示任何模拟设备。')"
+      />
+    </template>
+
+    <template v-else>
     <p v-if="error" class="device-error" role="alert" data-device-error :data-device-reason="error.code">
-      {{ error.context }}未完成：{{ failureText }}（{{ error.code }}）
+      {{ error.context }}{{ t("未完成：{reason}（{code}）", { reason: failureText, code: error.code }) }}
     </p>
 
     <p v-if="!isSuperAdmin" class="device-note" data-device-role-note>
-      当前账号不是 Super Admin：设备管理入口不可用，后端也会拒绝这些操作。
+      {{ t("当前账号不是 Super Admin：设备管理入口不可用，后端也会拒绝这些操作。") }}
     </p>
 
-    <section class="device-section" aria-label="设备配对">
+    <section class="device-section" :aria-label="t('设备配对')">
       <div class="device-section-head">
-        <h3>配对</h3>
+        <h3>{{ t("配对") }}</h3>
         <DsButton
           v-if="isSuperAdmin"
           variant="secondary"
@@ -254,14 +258,14 @@ function cancelRename() {
           data-device-action="pair"
           :status="busy === 'pair' ? 'loading' : 'idle'"
           @click="startPairing"
-        >开始配对</DsButton>
+        >{{ t("开始配对") }}</DsButton>
       </div>
 
       <div v-if="secret" class="device-pairing-secret" data-device-pairing-panel>
-        <p class="device-note">加入码只显示这一次，关闭后无法再查看。</p>
+        <p class="device-note">{{ t("加入码只显示这一次，关闭后无法再查看。") }}</p>
         <code class="device-secret" data-device-pairing-secret>{{ secret.value }}</code>
         <p class="device-meta" data-device-pairing-expires>
-          剩余 {{ countdownText(secret.expiresAt, now) }} · 到期 {{ timeText(secret.expiresAt) }}
+          {{ t("剩余 {left} · 到期 {at}", { left: countdownText(secret.expiresAt, now), at: timeText(secret.expiresAt) }) }}
         </p>
       </div>
 
@@ -275,15 +279,15 @@ function cancelRename() {
             :data-device-pairing-status="pairingStatusOf(p)"
             data-device-pairing-single="true"
           >
-            <span class="device-meta">配对 {{ p.id.slice(0, 12) }}…</span>
+            <span class="device-meta">{{ t("配对 {id}…", { id: p.id.slice(0, 12) }) }}</span>
             <DsBadge
               :tone="pairingStatusOf(p) === 'ISSUED' ? 'neutral' : pairingStatusOf(p) === 'REVOKED' || pairingStatusOf(p) === 'EXPIRED' ? 'warning' : 'neutral'"
             >
-              {{ PAIRING_STATUS_LABEL[pairingStatusOf(p)] || pairingStatusOf(p) }}
+              {{ PAIRING_STATUS_LABEL[pairingStatusOf(p)] ? t(PAIRING_STATUS_LABEL[pairingStatusOf(p)]) : pairingStatusOf(p) }}
             </DsBadge>
             <span class="device-meta" data-device-pairing-expiry>
-              到期 {{ timeText(p.expiresAt) }}
-              <template v-if="pairingStatusOf(p) === 'ISSUED'"> · 剩余 {{ countdownText(p.expiresAt, now) }}</template>
+              {{ t("到期 {at}", { at: timeText(p.expiresAt) }) }}
+              <template v-if="pairingStatusOf(p) === 'ISSUED'"> · {{ t("剩余 {left}", { left: countdownText(p.expiresAt, now) }) }}</template>
             </span>
             <DsButton
               v-if="isSuperAdmin && pairingStatusOf(p) === 'ISSUED'"
@@ -292,25 +296,25 @@ function cancelRename() {
               :data-device-pairing-revoke="p.id"
               :disabled="busy === 'pairing:' + p.id"
               @click="revokePairing(p.id)"
-            >撤销</DsButton>
+            >{{ t("撤销") }}</DsButton>
           </div>
         </template>
-        <p v-else class="device-meta">没有待使用的配对凭据。</p>
+        <p v-else class="device-meta">{{ t("没有待使用的配对凭据。") }}</p>
       </div>
     </section>
 
-    <section class="device-section" aria-label="设备列表">
+    <section class="device-section" :aria-label="t('设备列表')">
       <div class="device-section-head">
-        <h3>已注册设备</h3>
-        <DsButton variant="ghost" size="sm" data-device-action="refresh" :status="loading ? 'loading' : 'idle'" @click="refresh">刷新</DsButton>
+        <h3>{{ t("已注册设备") }}</h3>
+        <DsButton variant="ghost" size="sm" data-device-action="refresh" :status="loading ? 'loading' : 'idle'" @click="refresh">{{ t("刷新") }}</DsButton>
       </div>
 
-      <p v-if="loading && !devices.length" class="device-meta">正在读取设备…</p>
+      <p v-if="loading && !devices.length" class="device-meta">{{ t("正在读取设备…") }}</p>
       <DsPageState
         v-if="!loading && !devices.length && !error"
         kind="empty"
-        title="还没有设备"
-        description="使用「开始配对」生成加入码，在目标设备上注册。"
+        :title="t('还没有设备')"
+        :description="t('使用「开始配对」生成加入码，在目标设备上注册。')"
       />
 
       <div class="device-list" data-device-list>
@@ -326,9 +330,9 @@ function cancelRename() {
           <div class="device-row__main">
             <strong data-device-display-name>{{ d.displayName }}</strong>
             <span class="device-meta" data-device-platform>{{ d.platform }} · {{ d.architecture }}</span>
-            <span class="device-meta" data-device-last-seen>最近在线 {{ timeText(d.lastSeenAt) }}</span>
+            <span class="device-meta" data-device-last-seen>{{ t("最近在线 {at}", { at: timeText(d.lastSeenAt) }) }}</span>
             <span class="device-meta" data-device-credential-version>
-              凭据 v{{ Number.isFinite(Number(d.credentialVersion)) ? d.credentialVersion : 0 }}
+              {{ t("凭据 v{n}", { n: Number.isFinite(Number(d.credentialVersion)) ? String(d.credentialVersion) : "0" }) }}
             </span>
           </div>
           <div class="device-row__badges">
@@ -342,7 +346,7 @@ function cancelRename() {
               data-device-action="rename"
               :data-device-id="d.deviceId"
               @click="startRename(d)"
-            >重命名</DsButton>
+            >{{ t("重命名") }}</DsButton>
             <DsButton
               v-if="d.status === 'ACTIVE'"
               variant="ghost"
@@ -350,8 +354,8 @@ function cancelRename() {
               data-device-action="disable"
               :data-device-id="d.deviceId"
               :disabled="busy === 'disable:' + d.deviceId"
-              @click="runAction('disable:' + d.deviceId, { type: 'device/disable', deviceId: d.deviceId }, '禁用设备')"
-            >禁用</DsButton>
+              @click="runAction('disable:' + d.deviceId, { type: 'device/disable', deviceId: d.deviceId }, t('禁用设备'))"
+            >{{ t("禁用") }}</DsButton>
             <DsButton
               v-if="d.status === 'DISABLED'"
               variant="ghost"
@@ -359,8 +363,8 @@ function cancelRename() {
               data-device-action="enable"
               :data-device-id="d.deviceId"
               :disabled="busy === 'enable:' + d.deviceId"
-              @click="runAction('enable:' + d.deviceId, { type: 'device/enable', deviceId: d.deviceId }, '启用设备')"
-            >启用</DsButton>
+              @click="runAction('enable:' + d.deviceId, { type: 'device/enable', deviceId: d.deviceId }, t('启用设备'))"
+            >{{ t("启用") }}</DsButton>
             <DsButton
               v-if="d.status !== 'REVOKED'"
               variant="danger"
@@ -368,8 +372,8 @@ function cancelRename() {
               data-device-action="revoke"
               :data-device-id="d.deviceId"
               :disabled="busy === 'revoke:' + d.deviceId"
-              @click="runAction('revoke:' + d.deviceId, { type: 'device/revoke', deviceId: d.deviceId }, '撤销设备')"
-            >撤销</DsButton>
+              @click="runAction('revoke:' + d.deviceId, { type: 'device/revoke', deviceId: d.deviceId }, t('撤销设备'))"
+            >{{ t("撤销") }}</DsButton>
           </div>
           <form
             v-if="renaming?.deviceId === d.deviceId"
@@ -379,20 +383,20 @@ function cancelRename() {
             <input
               class="device-rename-input"
               data-device-rename-input
-              aria-label="设备名称"
+              :aria-label="t('设备名称')"
               :value="renaming.value"
               @input="onRenameInput"
             />
-            <DsButton variant="secondary" size="sm" type="submit" data-device-rename-confirm>保存</DsButton>
-            <DsButton variant="ghost" size="sm" @click="cancelRename">取消</DsButton>
+            <DsButton variant="secondary" size="sm" type="submit" data-device-rename-confirm>{{ t("保存") }}</DsButton>
+            <DsButton variant="ghost" size="sm" @click="cancelRename">{{ t("取消") }}</DsButton>
           </form>
         </article>
       </div>
     </section>
 
-    <section v-if="isSuperAdmin" class="device-section" aria-label="设备审计">
+    <section v-if="isSuperAdmin" class="device-section" :aria-label="t('设备审计')">
       <div class="device-section-head">
-        <h3>审计</h3>
+        <h3>{{ t("审计") }}</h3>
       </div>
       <div class="device-audit" data-device-audit>
         <template v-if="audit.length">
@@ -403,8 +407,9 @@ function cancelRename() {
             <span class="device-meta">{{ a.actor_user_id || "—" }}</span>
           </div>
         </template>
-        <p v-else class="device-meta">暂无设备审计事件。</p>
+        <p v-else class="device-meta">{{ t("暂无设备审计事件。") }}</p>
       </div>
     </section>
+    </template>
   </div>
 </template>
