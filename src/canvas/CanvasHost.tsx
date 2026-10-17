@@ -28,9 +28,12 @@ import type { Window as WinDomain } from "../../electron/window-domain.cjs";
 import { buildCanvasModelLabelIndex, canvasModelBaseName } from "./canvasModelLabels";
 import { closeStreamWithoutContent, isStreamContentEvent, pageFrameFor, sseChunk, streamCloseErrorFrame } from "./canvasLlmStream";
 import { buildSizePolicyTable } from "../../electron/image-params.cjs";
-import { Package, Users } from "lucide-react";
+import { Images, Package, Puzzle, Ticket, Users } from "lucide-react";
 import { ASSET_PREFIX, resolveAssetRefsInDoc, restoreAssetRefsInDoc } from "./canvasAssetRefs";
 import { CanvasCollabPanel, CanvasHostPanelEntry, CanvasPackagePanel } from "./CanvasDxosPanels";
+import { CanvasAssetSyncPanel } from "./CanvasAssetSyncPanel";
+import { CanvasInvitePanel } from "./CanvasInvitePanel";
+import { CanvasPluginsPanel } from "./CanvasPluginsPanel";
 import { CanvasShareEntry, CanvasSharePanel } from "./CanvasSharePanel";
 import { accessChange, accessSignature, isAccessLostError, parseShareTargetMessage } from "./canvasShareModel";
 
@@ -82,10 +85,14 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
   const [shareTarget, setShareTarget] = useState<{ canvasId: string; title: string; origin: "canvas" | "list" } | null>(null);
   /** 面板重读计数：权限事实一变就让面板按服务端最新能力重画（例如转移后变编辑者）。*/
   const [shareRefresh, setShareRefresh] = useState(0);
-  /** 宿主动作浮层（协作 / .dxcanvas 打包）：同一时刻只开一个，且绑定打开时的那本画布。*/
-  const [hostPanel, setHostPanel] = useState<{ kind: "collab" | "package"; canvasId: string } | null>(null);
+  /** 宿主动作浮层（协作 / 打包 / 素材同步 / 邀请 / 插件）：同一时刻只开一个，且绑定打开时的那本画布。*/
+  type HostPanelKind = "collab" | "package" | "assets" | "invite" | "plugins";
+  const [hostPanel, setHostPanel] = useState<{ kind: HostPanelKind; canvasId: string } | null>(null);
   const collabEntryRef = useRef<HTMLButtonElement | null>(null);
   const packageEntryRef = useRef<HTMLButtonElement | null>(null);
+  const assetsEntryRef = useRef<HTMLButtonElement | null>(null);
+  const inviteEntryRef = useRef<HTMLButtonElement | null>(null);
+  const pluginsEntryRef = useRef<HTMLButtonElement | null>(null);
   // 宿主不再有状态行与提示横幅（那是 chrome），但 status/notice 的**写点全部保留**：
   // notice 另以根节点上的只读属性暴露给探针（资源失效复核 F3c 的证据通道），status 由看门狗与适配器路径写入。
   const [status, setStatus] = useState("初始化…");
@@ -470,20 +477,27 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
     }, 0);
   }, []);
 
-  /** 协作 / 打包是宿主动作浮层：与共享面板互斥，只对打开时那本画布生效。*/
-  const toggleHostPanel = useCallback((kind: "collab" | "package") => {
+  /** 宿主动作浮层：与共享面板互斥，只对打开时那本画布生效。*/
+  const toggleHostPanel = useCallback((kind: HostPanelKind) => {
     const cur = currentRef.current;
     if (!cur) return;
     setShareTarget(null);
     setHostPanel((previous) => (previous && previous.kind === kind && previous.canvasId === cur.canvasId ? null : { kind, canvasId: cur.canvasId }));
   }, []);
 
-  /** 关闭协作 / 打包面板：焦点回到对应入口按钮。*/
+  /** 关闭宿主动作面板：焦点回到对应入口按钮。*/
   const closeHostPanel = useCallback(() => {
     const kind = hostPanel?.kind || null;
     setHostPanel(null);
     window.setTimeout(() => {
-      const btn = kind === "collab" ? collabEntryRef.current : kind === "package" ? packageEntryRef.current : null;
+      const byKind: Record<string, HTMLButtonElement | null> = {
+        collab: collabEntryRef.current,
+        package: packageEntryRef.current,
+        assets: assetsEntryRef.current,
+        invite: inviteEntryRef.current,
+        plugins: pluginsEntryRef.current,
+      };
+      const btn = kind ? byKind[kind] || null : null;
       if (btn) { try { btn.focus(); return; } catch { /* ignore */ } }
       try { frameRef.current?.focus(); } catch { /* ignore */ }
     }, 0);
@@ -1245,6 +1259,30 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
                 buttonRef={packageEntryRef}
                 onOpen={() => toggleHostPanel("package")}
               />
+              <CanvasHostPanelEntry
+                kind="assets"
+                label="素材"
+                icon={<Images size={14} aria-hidden="true" />}
+                expanded={!!hostPanel && hostPanel.kind === "assets" && hostPanel.canvasId === current.canvasId}
+                buttonRef={assetsEntryRef}
+                onOpen={() => toggleHostPanel("assets")}
+              />
+              <CanvasHostPanelEntry
+                kind="invite"
+                label="邀请"
+                icon={<Ticket size={14} aria-hidden="true" />}
+                expanded={!!hostPanel && hostPanel.kind === "invite" && hostPanel.canvasId === current.canvasId}
+                buttonRef={inviteEntryRef}
+                onOpen={() => toggleHostPanel("invite")}
+              />
+              <CanvasHostPanelEntry
+                kind="plugins"
+                label="插件"
+                icon={<Puzzle size={14} aria-hidden="true" />}
+                expanded={!!hostPanel && hostPanel.kind === "plugins" && hostPanel.canvasId === current.canvasId}
+                buttonRef={pluginsEntryRef}
+                onOpen={() => toggleHostPanel("plugins")}
+              />
             </div>
           ) : null}
           {shareTarget ? (
@@ -1270,6 +1308,23 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
               onClose={closeHostPanel}
               onImported={() => { void refreshList(); }}
             />
+          ) : null}
+          {hostPanel && current && hostPanel.canvasId === current.canvasId && hostPanel.kind === "assets" ? (
+            <CanvasAssetSyncPanel key={"assets:" + hostPanel.canvasId} canvasId={hostPanel.canvasId} title={current.title} cmd={canvasCmd} onClose={closeHostPanel} />
+          ) : null}
+          {hostPanel && current && hostPanel.canvasId === current.canvasId && hostPanel.kind === "invite" ? (
+            <CanvasInvitePanel
+              key={"invite:" + hostPanel.canvasId}
+              canvasId={hostPanel.canvasId}
+              title={current.title}
+              canManage={!!current.canManage}
+              cmd={canvasCmd}
+              onClose={closeHostPanel}
+              onRedeemed={() => { void refreshList(); }}
+            />
+          ) : null}
+          {hostPanel && current && hostPanel.canvasId === current.canvasId && hostPanel.kind === "plugins" ? (
+            <CanvasPluginsPanel key={"plugins:" + hostPanel.canvasId} cmd={canvasCmd} onClose={closeHostPanel} />
           ) : null}
         </div>
       ) : null}

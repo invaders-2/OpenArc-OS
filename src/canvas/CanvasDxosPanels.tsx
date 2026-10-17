@@ -39,7 +39,7 @@ export function CanvasHostPanelEntry({
   onOpen,
   buttonRef,
 }: {
-  kind: "collab" | "package";
+  kind: "collab" | "package" | "assets" | "invite" | "plugins";
   label: string;
   icon: ReactNode;
   expanded?: boolean;

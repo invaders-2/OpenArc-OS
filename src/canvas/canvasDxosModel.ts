@@ -89,3 +89,61 @@ export function collabEventView(event: any, index: number): CollabEventView {
   if (type === "presence") return { key: type + ":" + index, text: "在线状态变化" };
   return { key: type + ":" + index, text: type };
 }
+
+/** 跨域只读/受控调用（photos 图库、developer 插件清单）：同样只在宿主里用，失败一律结构化。 */
+export async function callBridge(channel: string, payload: Record<string, unknown>): Promise<any> {
+  const api = (window as any).openarc && (window as any).openarc[channel];
+  if (!api || typeof api.command !== "function") return { ok: false, error: "NO_BRIDGE", detail: channel };
+  try {
+    return (await api.command(payload)) || { ok: false, error: "INTERNAL_ERROR" };
+  } catch {
+    return { ok: false, error: "INTERNAL_ERROR" };
+  }
+}
+
+/** media / photos / developer 等域命令统一是 { ok, value } 信封；这里只做解包，不改语义。 */
+export function unwrapValue(res: any): any {
+  return res && res.value && typeof res.value === "object" ? res.value : res;
+}
+
+export const INVITE_PERMISSIONS = [
+  { value: "read", label: "查看者" },
+  { value: "edit", label: "编辑者" },
+] as const;
+
+export function invitePermissionLabel(value: string | null | undefined): string {
+  return value === "edit" ? "编辑者" : "查看者";
+}
+
+/** 邀请码错误 → 中文原因（保留后端错误码，不把失败当成功）。 */
+export function inviteErrorText(res: any, fallback: string): string {
+  const code = res && typeof res === "object" ? String(res.error || "") : "";
+  if (code === "READ_ONLY") return "只有所有者或「管理共享」成员可以管理邀请码（READ_ONLY）";
+  if (code === "NOT_FOUND") return "邀请口令不存在或已失效（NOT_FOUND）";
+  if (code === "INVALID_INPUT") return "邀请口令格式不正确：8 位字母数字，可带一个「-」（INVALID_INPUT）";
+  if (code === "FORBIDDEN") return "不能兑换其他组织的邀请口令，或没有权限执行这个操作（FORBIDDEN）";
+  return hostCommandError(res, fallback);
+}
+
+export function formatJsonText(value: unknown): string {
+  try { return JSON.stringify(value == null ? null : value, null, 2); } catch { return String(value); }
+}
+
+/** JSON 文本框解析：只接受合法 JSON，空文本视为 null（后端按 null 存储）。 */
+export function parseJsonText(text: string): { ok: true; value: unknown } | { ok: false; error: string } {
+  const raw = String(text || "").trim();
+  if (!raw) return { ok: true, value: null };
+  try { return { ok: true, value: JSON.parse(raw) }; }
+  catch (caught) { return { ok: false, error: "不是合法 JSON：" + (caught instanceof Error ? caught.message : String(caught)) }; }
+}
+
+/** 复制口令 / 引用：宿主有剪贴板权限时直接写；失败返回原因，界面提供手动复制兜底。 */
+export async function copyToClipboard(text: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") return { ok: false, error: "剪贴板不可用" };
+    await navigator.clipboard.writeText(String(text || ""));
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "剪贴板写入被拒绝" };
+  }
+}

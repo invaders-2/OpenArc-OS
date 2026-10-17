@@ -118,4 +118,161 @@
     top: 66px;
     right: 12px;
   }
+  .canvas-share-panel.canvas-dxos-panel--wide {
+    width: calc(100cqw - 16px);
+  }
+}
+
+/* ── 素材同步 / 邀请 / 插件（task-12）：只消费既有 token，不新造颜色或圆角 ── */
+
+.canvas-share-panel.canvas-dxos-panel--wide {
+  width: 440px;
+}
+
+.canvas-dxos-rule {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: var(--radius-md);
+  background: rgb(var(--text-rgb) / 0.035);
+  font-size: var(--fs-micro);
+  color: var(--muted);
+}
+
+.canvas-dxos-input,
+.canvas-dxos-textarea,
+.canvas-dxos-select {
+  box-sizing: border-box;
+  min-height: 28px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-secondary);
+}
+
+.canvas-dxos-input {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+.canvas-dxos-input:focus,
+.canvas-dxos-textarea:focus,
+.canvas-dxos-select:focus {
+  outline: 2px solid var(--text);
+  outline-offset: 1px;
+}
+.canvas-dxos-textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+}
+.canvas-dxos-select {
+  max-width: 100%;
+  flex: 1 1 200px;
+}
+
+.canvas-dxos-source-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.canvas-dxos-source,
+.canvas-dxos-plugin {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font-size: var(--fs-secondary);
+}
+.canvas-dxos-source:hover,
+.canvas-dxos-plugin:hover {
+  background: rgb(var(--text-rgb) / 0.06);
+}
+.canvas-dxos-plugin.is-current {
+  background: rgb(var(--text-rgb) / 0.1);
+}
+.canvas-dxos-source input[type="checkbox"] {
+  flex: none;
+  accent-color: var(--text);
+}
+.canvas-dxos-source__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.canvas-dxos-source__meta {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-micro);
+  color: var(--muted);
+}
+
+.canvas-dxos-invite-code {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border-radius: var(--radius-md);
+  background: rgb(var(--text-rgb) / 0.045);
+}
+.canvas-dxos-invite-code__value {
+  flex: 1 1 auto;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+  font-size: var(--fs-caption);
+  letter-spacing: 0.08em;
+  user-select: text;
+}
+
+.canvas-dxos-pre {
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 8px;
+  border-radius: var(--radius-md);
+  background: var(--sunken);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+.canvas-dxos-spin {
+  animation: canvas-dxos-spin 1s linear infinite;
+}
+@keyframes canvas-dxos-spin {
+  to { transform: rotate(360deg); }
+}
+.reduced .canvas-dxos-spin {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .canvas-dxos-spin {
+    animation: none;
+  }
 }
