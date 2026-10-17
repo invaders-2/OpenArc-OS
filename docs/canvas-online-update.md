@@ -86,10 +86,16 @@ downloadAsset(candidate)              → { bytes, sourceSha256 }
    **激活前**把落盘后的整包再验一次签名 + 再比一次文件摘要（防止落地后被改）。
 7. **审计**：每次 `install` / `rollback`（成功 ALLOW、失败 DENY）写
    `authStore.auditAuthorization`（`action=canvas.update.install|canvas.update.rollback`）。
+   `rollback` 额外用既有 `oldPermissions` / `newPermissions` 两列留痕 from → to
+   （已安装目标 `{kind:"installed",version}`，内置目标 `{kind:"builtin",version:"0.1.0"}`，
+   `resourceRef` 记为 `<appId>@builtin`）。详见 5.1。
 
 安装目录：`<userData>/dxos/apps/canvas/<version>/`；
-指针：`<userData>/dxos/apps/canvas/current.json`（`{version,digest,installedAt}`）；
+指针：`<userData>/dxos/apps/canvas/current.json`（正常 `{version,digest,kind,entry,installedAt}`；
+回退到内置版本后为内置标记 `{mode:"builtin",version:null,builtinVersion,rolledBackFrom,clearedAt}`）；
 历史：`history.json`（回滚依据）；最近检查结果：`check.json`；源选择：`source.json`。
+回退到内置版本**只原子替换 `current.json` 这一个文件**，版本目录与 `history.json` 一律保留 ——
+想切回已安装版本，重新 `install` 同一版本即可。
 
 ## 3. 冻结的包格式（`openarc-app/v1`）
 
@@ -137,6 +143,8 @@ manifest.sig
 `openarc-canvas://` 协议（`electron/canvas-package-resolver.cjs`）按下面顺序取根目录：
 
 1. `<userData>/dxos/apps/canvas/current.json` 指向的已安装版本目录（整包校验通过才用）；
+   指针是回退到内置版本时写入的内置标记 `{mode:"builtin",version:null,...}` 时，
+   按 `pointer-cleared` 直接走 2 / 3（这是用户显式选择的状态，**不是损坏**）；
 2. `dist/novai-canvas`（构建产物）；
 3. `public/novai-canvas`（随仓库内置，保底、离线可用）。
 
@@ -147,6 +155,7 @@ manifest.sig
 | 失败原因（`fallbackReason`） | 触发条件 |
 | --- | --- |
 | `pointer-missing` | `current.json` 不存在 |
+| `pointer-cleared` | `current.json` 是「回退到内置版本」写入的内置标记（`mode:"builtin"`），属正常状态而非故障 |
 | `pointer-invalid` | JSON 损坏 / `version` 非语义化版本 |
 | `pointer-digest-mismatch` | `current.json.digest` 与 `manifest.json` 原始字节不符 |
 | `version-dir-missing` | 版本目录不存在 |
@@ -289,10 +298,10 @@ node scripts/oa-canvas-package.mjs --version 0.01 --source dist/novai-canvas
 
 | 命令 | payload | 成功 value | 主要错误码 |
 | --- | --- | --- | --- |
-| `market/update/status` | `{}` | `{appId,current,builtinVersion,source:{kind,owner,repo},checkedAt,latest,updateAvailable,canRollback}` | `MARKET_UPDATE_UNAUTHENTICATED` |
+| `market/update/status` | `{}` | `{appId,current,builtinVersion,source:{kind,owner,repo},checkedAt,latest,updateAvailable,canRollback,rollbackTarget}` | `MARKET_UPDATE_UNAUTHENTICATED` |
 | `market/update/check` | `{appId?}` | status 形状（含 `latest` / `updateAvailable`） | `MARKET_UPDATE_DOWNLOAD_FAILED`、`..._NOT_FOUND`、`..._INVALID_INPUT` |
 | `market/update/install` | `{appId?,version?,confirm:true}` | `{installed:{version,digest},previous:{version}\|null}` | `..._SIGNATURE_INVALID`、`..._DIGEST_MISMATCH`、`..._SOURCE_DIGEST_MISMATCH`、`..._HOST_NOT_ALLOWED`、`..._INVALID_INPUT`、`..._NO_RELEASE`、`..._NOT_FOUND`、`..._CONFLICT`、`..._DOWNLOAD_FAILED` |
-| `market/update/rollback` | `{appId?}` | `{rolledBackTo,previous:{version}}` | `..._ROLLBACK_UNAVAILABLE`、`..._DIGEST_MISMATCH`、`..._SIGNATURE_INVALID` |
+| `market/update/rollback` | `{appId?}` | `{rolledBackTo,previous:{version}\|null}`；`rolledBackTo` 是版本号或字面量 `"builtin"` | `..._DIGEST_MISMATCH`、`..._SIGNATURE_INVALID`、`..._INVALID_INPUT`、`..._UNAUTHENTICATED` |
 | `market/update/sources` | `{}` | `{kind,owner,repo,defaultRepository,defaultSource,apiUrl,allowedHosts,channel,configurableFields,manifestPath,selected,sources:[{kind,label,defaultRepository,allowedHosts,configurableFields,manifestPath}]}` | `MARKET_UPDATE_UNAUTHENTICATED` |
 | `market/update/source/set` | `{kind,owner?,repo?}` | 同 `sources` 的成功 value（当前选择已更新并持久化） | `..._INVALID_INPUT`（未知 kind / 非法 owner/repo / 任意 URL）、`..._UNAUTHENTICATED` |
 
@@ -302,6 +311,34 @@ node scripts/oa-canvas-package.mjs --version 0.01 --source dist/novai-canvas
 - 统一失败形状：`{ ok:false, error:"MARKET_UPDATE_*", detail }`；未知异常折叠 `DXOS_ERR_INTERNAL`。
 - 全部命令都要求已认证会话（`sessionRef` 由主进程注入）；`install` 必须 `confirm:true`，
   **不会后台静默安装**。
+
+### 5.1 回滚 / 回退到内置版本（三分支）
+
+`market/update/rollback` 不再只认「上一版已安装版本」，按当前状态走三条分支，**三条都返回 `ok:true`**：
+
+| 分支 | 触发条件 | 行为 | 返回 |
+| --- | --- | --- | --- |
+| ① 回上一版（既有语义，优先） | `history.json` 里有可用的上一版已安装目录 | 整包重新验签 + 验摘要后原子切回该版本 | `{rolledBackTo:"<版本号>",previous:{version:"<原版本>"}}` |
+| ② 幂等 | 当前已经是内置版本（从没装过 / 已经回退过） | 不写盘、不报错 | `{rolledBackTo:"builtin",previous:null}` |
+| ③ 回退到内置版本 | 装过版本但没有可用的上一版（只装过一个版本 / 上一版目录缺失 / 指针被改坏） | 把 `current.json` 原子替换成内置标记 | `{rolledBackTo:"builtin",previous:{version:"<原版本>"}}` |
+
+- **`status.rollbackTarget`** 是回滚入口真正的去向，渲染层据此决定按钮文案与能否点击：
+  `{kind:"installed",version}` = 回上一版；`{kind:"builtin",version:"0.1.0"}` = 回退到内置版本；
+  `null` = 当前就是内置版本，没有可回退的东西。
+  `canRollback` 语义**不变**（只表示「有上一版已安装版本可回滚」）；回退到内置版本不看它。
+- **内置标记**：分支 ③ 把 `current.json` 写成
+  `{mode:"builtin",version:null,builtinVersion:"0.1.0",rolledBackFrom:"0.01",clearedAt}`，
+  只换这一个文件（临时文件 + rename 原子替换）；**版本目录与 `history.json` 全部保留**，
+  随时可以重新 `install` 同一版本切回去，已下载的包不丢。
+- **解析器回退**：`openarc-canvas://` 读到内置标记即按 `pointer-cleared` 走 3.4 的回退矩阵
+  （`dist/novai-canvas` → `public/novai-canvas`），响应头如实带
+  `x-openarc-canvas-source=dist|public`（不再是 `installed`）、`x-openarc-canvas-fallback=pointer-cleared`，
+  且不再带已安装版本号；画布两页照常可用，不白屏、不 500。
+- **审计**：成功 / 失败都写 `<appId>.update.rollback`；成功时 `oldPermissions` = `[{kind:"installed",version:<原版本>}]`
+  （本来就内置时为 `null`）、`newPermissions` = `[{kind:"builtin",version:"0.1.0"}]`，
+  `resourceRef` = `<appId>@builtin`。分支 ① 的 `newPermissions` 是 `[{kind:"installed",version:<上一版>}]`。
+- `MARKET_UPDATE_ROLLBACK_UNAVAILABLE` 作为**保留码**仍在冻结错误清单里（不破坏既有文案表），
+  但回滚已不再返回它。
 
 ## 6. 换密钥 = 换这个文件
 
@@ -335,6 +372,8 @@ node --test tests/dxos-market-update.test.mjs tests/d5-02-canvas-*.test.mjs test
 - `tests/d5-02-canvas-static-web.test.mjs`：static-web manifest 校验 / 已安装优先 / 回退矩阵 / 目录穿越与 MIME 边界。
 - `tests/dxos-canvas-online-update.test.mjs`：真实打包脚本产物 → `market/update/install`（离线 fixture 源）→ 协议优先加载；
   `current.json` 改坏自动回退；应用内 `rollback`；老 js-module 兼容回归；占位包拒装。
+- `tests/dxos-market-rollback-builtin.test.mjs`：回滚三分支（回上一版 / 幂等 / 回退到内置版本）、
+  `current.json` 内置标记、解析器 `pointer-cleared`、审计 `oldPermissions`/`newPermissions`、回退后可再装回。
 
 ### V0.01 云端发版链路新增测试
 
@@ -362,3 +401,13 @@ npm run build && node tests/dxos-canvas-update-e2e.mjs
 
 覆盖：① 无安装包走内置；② 真实 static-web 包安装后画布加载 `apps/canvas/<version>`（协议头 + 包内 marker + 主进程根目录日志）；
 ④ 应用内 rollback 回到上一版；③ `current.json` 改坏自动回退内置且不白屏。
+
+回退到内置版本的真机 + 真联网验收（真实 `electron .` + 隔离 userData + 真实 ModelScope 源）：
+
+```bash
+node experiments/dxos-update-rollback-builtin/run.mjs
+# → artifacts/dxos-update-rollback-builtin/report.json + shots/*.png
+```
+
+覆盖：装 0.01 后回退到内置 0.1.0（`rolledBackTo:"builtin"`、`current.json` 内置标记、
+画布改由 `dist` 服务且 `fallback=pointer-cleared`）、重复回退幂等、版本目录保留后可再装回、审计留痕。

@@ -227,6 +227,54 @@ test("回退：current.json 改坏 → 自动回内置 bundle，画布入口仍�
   assert.equal(marker.status, 404, "内置 bundle 没有画布包里的 marker");
 });
 
+test("回退到内置版本：只装过一个版本 → rollback 后协议回 dist（pointer-cleared），版本目录保留，可再装回", async () => {
+  const keys = makeKeyFixture(tempDir());
+  const userData = tempDir();
+  const out = path.join(tempDir(), "out");
+  const pack = runPack(["--version", "0.2.0", "--source", makeStaticSource(path.join(tempDir(), "src"), "A"), "--key-file", keys.keyFile, "--out", out]);
+  assert.equal(pack.status, 0, pack.stderr);
+  const zipBytes = fs.readFileSync(path.join(out, "canvas-0.2.0.zip"));
+  const service = makeService(userData, keys.keysFile, { "0.2.0": zipBytes });
+  const builtinRoot = builtinTree(path.join(tempDir(), "builtin"), "BUILTIN");
+  const resolver = makeResolver(userData, keys.keysFile, builtinRoot);
+
+  assert.equal((await install(service, "0.2.0")).ok, true);
+  const installed = await resolver.handle("openarc-canvas://bundle/static/canvas-list.html");
+  assert.equal(installed.headers.get("x-openarc-canvas-source"), "installed");
+  assert.equal(installed.headers.get("x-openarc-canvas-version"), "0.2.0");
+
+  // 只装过一个版本 → 回退到内置版本（不是 ROLLBACK_UNAVAILABLE）
+  const rolled = await service.execute("market/update/rollback", {}, session);
+  assert.equal(rolled.ok, true, JSON.stringify(rolled));
+  assert.deepEqual(rolled.value, { rolledBackTo: "builtin", previous: { version: "0.2.0" } });
+  assert.equal(JSON.parse(fs.readFileSync(path.join(stateDirOf(userData), "current.json"), "utf8")).mode, "builtin");
+
+  // 协议必须真的改用内置 bundle，且把原因如实写进响应头
+  const fallback = await resolver.handle("openarc-canvas://bundle/static/canvas-list.html");
+  assert.equal(fallback.status, 200);
+  assert.equal(fallback.headers.get("x-openarc-canvas-source"), "dist", "回退后不得再由已安装包服务");
+  assert.equal(fallback.headers.get("x-openarc-canvas-version"), null, "内置 bundle 没有已安装版本号");
+  assert.equal(fallback.headers.get("x-openarc-canvas-fallback"), "pointer-cleared");
+  assert.match(await fallback.text(), /BUILTIN/);
+  // 已安装包里的 marker 不该再被内置 bundle 提供（证明真的换了来源）
+  assert.equal((await resolver.handle("openarc-canvas://bundle/static/openarc-marker.json")).status, 404);
+
+  const resolved = resolver.resolve();
+  assert.equal(resolved.source, "dist");
+  assert.equal(resolved.fallbackReason, "pointer-cleared");
+
+  // 不删用户已安装的版本目录：再装回同一版本仍然成功，协议切回 installed。
+  assert.ok(fs.existsSync(path.join(stateDirOf(userData), "0.2.0", "manifest.json")), "回退不得删已安装版本目录");
+  const again = await service.execute("market/update/install", { confirm: true, version: "0.2.0" }, session);
+  assert.equal(again.ok, true, JSON.stringify(again));
+  assert.deepEqual(again.value.previous, null);
+  const reInstalled = await resolver.handle("openarc-canvas://bundle/static/openarc-marker.json");
+  assert.equal(reInstalled.status, 200);
+  assert.equal(JSON.parse(await reInstalled.text()).marker, "A");
+  assert.equal(reInstalled.headers.get("x-openarc-canvas-source"), "installed");
+  assert.equal(reInstalled.headers.get("x-openarc-canvas-version"), "0.2.0");
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // ③ 兼容回归 & 占位包拒绝
 // ═══════════════════════════════════════════════════════════════════════════

@@ -607,26 +607,31 @@ async function main() {
   steps.rollback = { response: rollback, trace: summarizeTrace(traceSince(rollbackMark)) };
   const rolled = rollback.result && rollback.result.ok === true ? rollback.result.value : null;
   const rollbackRaw = rollback.result;
-  check("F1", "rollback 回到内置版本（0.1.0）",
-    !!rolled && rolled.rolledBackTo === EXPECT.builtinVersion,
-    { rolledBackTo: EXPECT.builtinVersion, previous: { version: EXPECT.version } },
+  const isBuiltinPointer = (pointer) => !!pointer && pointer.mode === "builtin" && pointer.version === null;
+  check("F1", "rollback 回退到内置版本：rolledBackTo=\"builtin\"、previous={version:\"0.01\"}",
+    !!rolled && rolled.rolledBackTo === "builtin" && !!rolled.previous && rolled.previous.version === EXPECT.version,
+    { rolledBackTo: "builtin", previous: { version: EXPECT.version } },
     rollbackRaw);
   const currentAfterRollback = readJson(currentFile);
   steps.currentAfterRollback = { exists: fs.existsSync(currentFile), value: currentAfterRollback };
-  check("F2", "rollback 后 current.json 指向内置版本（不存在 / version=0.1.0）",
-    currentAfterRollback === null || currentAfterRollback.version === EXPECT.builtinVersion,
-    "current.json 缺失或 version=0.1.0",
+  check("F2", "rollback 后 current.json 变成内置标记：mode=builtin、version=null、rolledBackFrom=0.01、builtinVersion=0.1.0",
+    isBuiltinPointer(currentAfterRollback) && currentAfterRollback.rolledBackFrom === EXPECT.version
+      && currentAfterRollback.builtinVersion === EXPECT.builtinVersion,
+    { mode: "builtin", version: null, rolledBackFrom: EXPECT.version, builtinVersion: EXPECT.builtinVersion },
     { exists: fs.existsSync(currentFile), value: currentAfterRollback });
 
   const statusAfterRollback = await market("market/update/status", { appId: "canvas" });
   steps.statusAfterRollback = statusAfterRollback;
   const sr = statusAfterRollback.result && statusAfterRollback.result.ok === true ? statusAfterRollback.result.value : null;
   const pointerAfterRollback = readJson(currentFile);
-  const consistentWithDisk = (pointerAfterRollback === null && !!sr && sr.current === null)
-    || (pointerAfterRollback !== null && !!sr && !!sr.current && sr.current.version === pointerAfterRollback.version);
-  check("F3", "回滚后 status 如实：latest=0.01、updateAvailable=false、canRollback=false，current 与磁盘指针一致",
+  const consistentWithDisk = isBuiltinPointer(pointerAfterRollback)
+    ? !!sr && sr.current === null && sr.rollbackTarget === null
+    : pointerAfterRollback === null
+      ? !!sr && sr.current === null
+      : !!sr && !!sr.current && sr.current.version === pointerAfterRollback.version;
+  check("F3", "回滚后 status 如实：latest=0.01、updateAvailable=false、canRollback=false、rollbackTarget=null，current 与磁盘指针一致（内置标记 → current=null）",
     !!sr && sr.latest && sr.latest.version === EXPECT.version && sr.updateAvailable === false && sr.canRollback === false && consistentWithDisk,
-    { latest: "0.01", updateAvailable: false, canRollback: false, current: pointerAfterRollback === null ? null : pointerAfterRollback.version },
+    { latest: "0.01", updateAvailable: false, canRollback: false, rollbackTarget: null, current: null },
     { status: sr, pointer: pointerAfterRollback });
 
   /* 回滚后（无论成功或如实失败）画布必须仍可用：整页重载 -> 首页 + 智能画布 */
@@ -636,12 +641,14 @@ async function main() {
   })();
   steps.canvasAfterRollback = passAfterRollback;
   const pointerNow = readJson(currentFile);
-  const expectedSource = pointerNow && pointerNow.version === EXPECT.version ? "installed" : "dist";
-  check("F4", "回滚后重载，画布仍能打开（首页 + 智能画布）：来源与服务指针一致（" + expectedSource + "）",
+  const builtinNow = isBuiltinPointer(pointerNow);
+  const expectedSource = !builtinNow && pointerNow && pointerNow.version === EXPECT.version ? "installed" : "dist";
+  check("F4", "回滚后重载，画布仍能打开（首页 + 智能画布）：来源从 installed 变为 " + expectedSource + (builtinNow ? "、fallback=pointer-cleared、无已安装版本号" : ""),
     passAfterRollback.opened === true && passAfterRollback.listUp === true && passAfterRollback.smartUp === true
       && passAfterRollback.smartReady === true && passAfterRollback.backToList === true
-      && !!passAfterRollback.served && passAfterRollback.served.status === 200 && passAfterRollback.served.source === expectedSource,
-    { source: expectedSource, list: true, smart: true, backToList: true },
+      && !!passAfterRollback.served && passAfterRollback.served.status === 200 && passAfterRollback.served.source === expectedSource
+      && (!builtinNow || (passAfterRollback.served.fallback === "pointer-cleared" && !passAfterRollback.served.version)),
+    { source: expectedSource, fallback: builtinNow ? "pointer-cleared" : null, version: null, list: true, smart: true, backToList: true },
     { served: passAfterRollback.served, list: passAfterRollback.list, smart: passAfterRollback.smart });
   check("F5", "回滚后画布两页：0 console error / 0 pageerror / 0 条 404 / 0 条 5xx",
     passAfterRollback.errorCounts && passAfterRollback.errorCounts.consoleErrors === 0 && passAfterRollback.errorCounts.pageErrors === 0
@@ -657,12 +664,15 @@ async function main() {
   steps.checkAfterRollback = { response: check2, trace: check2Trace, hosts: hostsOf(check2Trace), ms: Date.now() - check2Start };
   const c2 = check2.result && check2.result.ok === true ? check2.result.value : null;
   const pointerFinal = readJson(currentFile);
-  const currentText = pointerFinal ? pointerFinal.version : null;
-  const consistentFinal = (pointerFinal === null && !!c2 && c2.current === null)
-    || (pointerFinal !== null && !!c2 && !!c2.current && c2.current.version === pointerFinal.version);
-  check("G1", "回滚后再检查：latest=0.01、updateAvailable=false、canRollback=false、current 与磁盘指针一致（" + String(currentText) + "）",
+  const currentText = isBuiltinPointer(pointerFinal) ? "builtin" : (pointerFinal ? pointerFinal.version : null);
+  const consistentFinal = isBuiltinPointer(pointerFinal)
+    ? !!c2 && c2.current === null && c2.rollbackTarget === null
+    : pointerFinal === null
+      ? !!c2 && c2.current === null
+      : !!c2 && !!c2.current && c2.current.version === pointerFinal.version;
+  check("G1", "回滚后再检查：latest=0.01、updateAvailable=false、canRollback=false、rollbackTarget=null、current 与磁盘指针一致（" + String(currentText) + "）",
     !!c2 && c2.latest && c2.latest.version === EXPECT.version && c2.updateAvailable === false && c2.canRollback === false && consistentFinal,
-    { latest: "0.01", updateAvailable: false, canRollback: false, current: currentText },
+    { latest: "0.01", updateAvailable: false, canRollback: false, rollbackTarget: null, current: currentText },
     { status: c2, pointer: pointerFinal });
   check("G2", "回滚后检查仍只访问白名单主机",
     hostsOf(check2Trace).length > 0 && hostsOf(check2Trace).every((host) => MODELSCOPE_HOSTS.has(host)),

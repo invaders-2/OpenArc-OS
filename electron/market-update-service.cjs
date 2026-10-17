@@ -20,12 +20,18 @@
  *   ⑤ 原子切换：先解压到 <appId> 目录下的 staging，再 rename；current.json 用 tmp + rename 原子替换；
  *      激活前把落盘后的整包重新验签 + 重新比对摘要（防落地后被改）；
  *   ⑥ 审计：每次 install / rollback（成功 ALLOW，失败 DENY）写 authStore.auditAuthorization，
- *      action = "<appId>.update.install|rollback"。
+ *      action = "<appId>.update.install|rollback"；rollback 额外用 oldPermissions / newPermissions
+ *      留痕 from→to（内置目标记为 { kind:"builtin" }）。
+ *   ⑦ 回退到内置版本：没有可用的"上一版已安装版本"时（只装过一个版本 / 指针已损坏），rollback 不再报
+ *      ROLLBACK_UNAVAILABLE，而是把 current.json 原子替换成内置标记 { mode:"builtin", version:null }。
+ *      画布解析器读到内置标记即按既有顺序回 dist / public（见 canvas-package-resolver.cjs）。
+ *      版本目录与 history.json 一律保留：用户随时可以再装回同一版本，不丢已下载的包。
  *
  * 诚实边界：只有"渲染层已接入加载路径"的应用可安装（本期只有 canvas，见 domain.APP_PACKAGE_LOADERS）；
  * 其余应用有发布包时 check 仍如实报 updateAvailable，但 install 结构化回 MARKET_UPDATE_NOT_LOADABLE。
  *
- * 安装目录：<userData>/dxos/apps/<appId>/<version>/；指针 <...>/current.json；
+ * 安装目录：<userData>/dxos/apps/<appId>/<version>/；指针 <...>/current.json
+ * （正常形态 { version, digest, kind, entry, installedAt }；回退内置后为 { mode:"builtin", version:null, … }）；
  * 历史 <...>/history.json（回滚依据）；最近一次检查结果 <...>/check.json。
  * 私钥永不进本进程：本文件只读公钥。
  */
@@ -98,16 +104,28 @@ function createMarketUpdateBundle(options = {}) {
   // ── 落盘工具 ──────────────────────────────────────────────────────────────
   function ensureDir(dir) { fs.mkdirSync(dir, { recursive: true }); }
 
+  /**
+   * 原子写：先写同目录临时文件，再一次 rename 覆盖目标。
+   * 任一步失败都清掉临时文件再抛出 —— 目标文件只会是「完全没动」或「完全替换」，没有中间态。
+   */
   function writeJsonAtomic(file, value) {
     ensureDir(path.dirname(file));
     const tmp = file + ".tmp-" + process.pid + "-" + crypto.randomBytes(4).toString("hex");
-    fs.writeFileSync(tmp, JSON.stringify(value));
-    fs.renameSync(tmp, file);
+    try {
+      fs.writeFileSync(tmp, JSON.stringify(value));
+      fs.renameSync(tmp, file);
+    } catch (error) {
+      try { fs.rmSync(tmp, { force: true }); } catch { /* 清理失败不掩盖原始错误 */ }
+      throw error;
+    }
   }
 
   function readJson(file) {
     try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return null; }
   }
+
+  /** current.json 内置标记的 mode 值（画布解析器读同一个值，见 canvas-package-resolver.cjs）。 */
+  const BUILTIN_POINTER_MODE = "builtin";
 
   function readCurrent(appId) {
     const raw = readJson(currentFileFor(appId));
@@ -119,6 +137,23 @@ function createMarketUpdateBundle(options = {}) {
       entry: typeof raw.entry === "string" ? raw.entry : null,
       installedAt: Number.isFinite(Number(raw.installedAt)) ? Number(raw.installedAt) : 0,
     };
+  }
+
+  /**
+   * current.json 的现状（回退到内置版本要用）：
+   *   "missing"    —— 从没装过（等价于内置）；
+   *   "builtin"    —— 已被显式回退到内置（mode:"builtin" 标记）；
+   *   "installed"  —— 正常已安装指针；
+   *   "unreadable" —— 文件在但内容不合法（改坏/写一半），需要修复。
+   */
+  function readPointerState(appId) {
+    let text;
+    try { text = fs.readFileSync(currentFileFor(appId), "utf8"); }
+    catch { return "missing"; }
+    let raw = null;
+    try { raw = JSON.parse(text); } catch { return "unreadable"; }
+    if (raw && typeof raw === "object" && raw.mode === BUILTIN_POINTER_MODE) return "builtin";
+    return readCurrent(appId) ? "installed" : "unreadable";
   }
 
   function readHistory(appId) {
@@ -199,9 +234,23 @@ function createMarketUpdateBundle(options = {}) {
     return candidates.length ? candidates[candidates.length - 1] : null;
   }
 
-  function canRollback(appId, current) {
+  /**
+   * 回滚/回退目标：
+   *   · { kind:"installed", version } —— 有可用的上一版已安装目录（既有语义，优先）；
+   *   · { kind:"builtin", version }   —— 已装了某个版本但没有可用的上一版：目标改为随包内置版本；
+   *   · null                          —— 当前就是内置版本，没有可回退的东西。
+   */
+  function rollbackTargetFor(appId, current) {
+    if (!current) return null;
     const previous = previousVersion(current, readHistory(appId));
-    return !!previous && fs.existsSync(installedDir(appId, previous));
+    if (previous && fs.existsSync(installedDir(appId, previous))) return { kind: "installed", version: previous };
+    return { kind: "builtin", version: builtinVersionFor(appId) };
+  }
+
+  /** 既有字段语义不变：canRollback = 有上一版已安装目录可回滚。 */
+  function canRollback(appId, current) {
+    const target = rollbackTargetFor(appId, current);
+    return !!target && target.kind === "installed";
   }
 
   // ── 内置公钥（按 appId 取；缺谁的公钥就结构化 NOT_READY，不借别的应用的公钥） ──
@@ -217,7 +266,12 @@ function createMarketUpdateBundle(options = {}) {
   }
 
   // ── 审计（沿用 authStore.auditAuthorization 既有用法） ─────────────────────
-  function writeAudit(actor, { appId, action, decision, reasonCode, version = null, requestId = null }) {
+  /**
+   * 审计一行。from→to 记在既有 oldPermissions / newPermissions 两列（同一张表、同一次写入，
+   * 不新增表也不新增审批权威）：from = [{ kind, version }]，to = [{ kind, version }]，
+   * 内置目标 kind = "builtin"。resourceRef 仍是 "<appId>@<version>"，内置目标记为 "@builtin"。
+   */
+  function writeAudit(actor, { appId, action, decision, reasonCode, version = null, fromVersion = null, to = null, requestId = null }) {
     const store = authorization && authorization.store;
     if (!store || typeof store.auditAuthorization !== "function") return false;
     try {
@@ -232,6 +286,8 @@ function createMarketUpdateBundle(options = {}) {
         reasonCode,
         permissionSource: actor && actor.isSuper ? "SUPER_ADMIN" : "USER",
         requestId: requestId || null,
+        oldPermissions: fromVersion ? [{ kind: "installed", version: fromVersion }] : null,
+        newPermissions: to ? [to] : null,
       });
       return true;
     } catch {
@@ -258,6 +314,7 @@ function createMarketUpdateBundle(options = {}) {
     const latest = checkState.latest;
     const selection = readSourceSelection();
     const load = loadSupportFor(appId);
+    const target = rollbackTargetFor(appId, current);
     return {
       appId,
       current: current ? { version: current.version, digest: current.digest, kind: current.kind, entry: current.entry, installedAt: current.installedAt } : null,
@@ -266,7 +323,9 @@ function createMarketUpdateBundle(options = {}) {
       checkedAt: checkState.checkedAt,
       latest,
       updateAvailable: !!latest && domain.compareSemver(latest.version, baseVersion) > 0,
-      canRollback: canRollback(appId, current),
+      canRollback: !!target && target.kind === "installed",
+      /** 回滚按钮真正的去向；null = 当前就是内置版本，没有可回退的东西。 */
+      rollbackTarget: target,
       packageKind: current ? current.kind : domain.appPackageKind(appId),
       loadable: load.loadable,
       loader: load.loader,
@@ -502,31 +561,66 @@ function createMarketUpdateBundle(options = {}) {
     }
   }
 
+  /**
+   * 回退到随包内置版本：只替换 current.json 这一个文件（原子 rename），
+   * 版本目录与 history.json 一律不动 —— 用户随时可以再装回来，不丢已下载的包。
+   */
+  function writeBuiltinPointer(appId, fromVersion) {
+    writeJsonAtomic(currentFileFor(appId), {
+      mode: BUILTIN_POINTER_MODE,
+      version: null,
+      builtinVersion: builtinVersionFor(appId),
+      rolledBackFrom: fromVersion || null,
+      clearedAt: Number(clock()),
+    });
+  }
+
   function rollback(payload = {}, actor, context) {
     const requestId = context.requestId || null;
     let appId = null;
+    let fromVersion = null;
     try {
       appId = domain.normalizeAppId(payload.appId);
       if (!appId) throw domain.createMarketUpdateError(domain.MARKET_UPDATE_ERR_INVALID_INPUT, "appId 非法或未注册：" + asStr(payload.appId, 60));
       const current = readCurrent(appId);
       const history = readHistory(appId);
       const previous = previousVersion(current, history);
-      if (!current || !previous) throw domain.createMarketUpdateError(domain.MARKET_UPDATE_ERR_ROLLBACK_UNAVAILABLE, "没有可回滚的上一版");
-      const dir = installedDir(appId, previous);
-      if (!fs.existsSync(dir)) throw domain.createMarketUpdateError(domain.MARKET_UPDATE_ERR_ROLLBACK_UNAVAILABLE, "上一版安装目录不存在");
-      const publicKey = loadPublicKey(appId);
-      if (!publicKey.ok) throw publicKey.error;
-      const verified = verifyInstalledDirectory(appId, dir, publicKey.value);
-      if (!verified.ok) throw verified.error;
-      if (verified.version !== previous) throw domain.createMarketUpdateError(domain.MARKET_UPDATE_ERR_DIGEST_MISMATCH, "上一版目录内容与版本不一致");
-      writeJsonAtomic(historyFileFor(appId), { versions: history.versions.slice(0, history.versions.lastIndexOf(previous) + 1) });
-      writeJsonAtomic(currentFileFor(appId), { version: previous, digest: verified.digest, kind: verified.kind, entry: verified.entry, installedAt: Number(clock()) });
-      writeAudit(actor, { appId, action: appId + ".update.rollback", requestId, decision: "ALLOW", reasonCode: "ALLOW", version: previous });
-      return { ok: true, value: { rolledBackTo: previous, previous: { version: current.version } } };
+      const previousUsable = !!previous && fs.existsSync(installedDir(appId, previous));
+
+      // ① 既有语义不变：有上一版已安装版本就优先回到那一版。
+      if (current && previousUsable) {
+        const dir = installedDir(appId, previous);
+        const publicKey = loadPublicKey(appId);
+        if (!publicKey.ok) throw publicKey.error;
+        const verified = verifyInstalledDirectory(appId, dir, publicKey.value);
+        if (!verified.ok) throw verified.error;
+        if (verified.version !== previous) throw domain.createMarketUpdateError(domain.MARKET_UPDATE_ERR_DIGEST_MISMATCH, "上一版目录内容与版本不一致");
+        fromVersion = current.version;
+        writeJsonAtomic(historyFileFor(appId), { versions: history.versions.slice(0, history.versions.lastIndexOf(previous) + 1) });
+        writeJsonAtomic(currentFileFor(appId), { version: previous, digest: verified.digest, kind: verified.kind, entry: verified.entry, installedAt: Number(clock()) });
+        writeAudit(actor, { appId, action: appId + ".update.rollback", requestId, decision: "ALLOW", reasonCode: "ALLOW", version: previous, fromVersion, to: { kind: "installed", version: previous } });
+        return { ok: true, value: { rolledBackTo: previous, previous: { version: current.version } } };
+      }
+
+      const builtin = builtinVersionFor(appId);
+      const pointer = readPointerState(appId);
+
+      // ② 已经是内置版本（从没装过 / 已经回退过）：幂等成功，不写盘、不报错。
+      if (!current && (pointer === "missing" || pointer === "builtin")) {
+        writeAudit(actor, { appId, action: appId + ".update.rollback", requestId, decision: "ALLOW", reasonCode: "ALLOW", version: BUILTIN_POINTER_MODE, to: { kind: "builtin", version: builtin } });
+        return { ok: true, value: { rolledBackTo: "builtin", previous: null } };
+      }
+
+      // ③ 装过版本但没有可用的上一版（只装过一个 / 上一版目录缺失 / 指针被改坏）：
+      //    回退到内置版本。单文件原子替换，崩溃只会留下「旧指针」或「内置标记」二者之一。
+      fromVersion = current ? current.version : null;
+      writeBuiltinPointer(appId, fromVersion);
+      writeAudit(actor, { appId, action: appId + ".update.rollback", requestId, decision: "ALLOW", reasonCode: "ALLOW", version: BUILTIN_POINTER_MODE, fromVersion, to: { kind: "builtin", version: builtin } });
+      return { ok: true, value: { rolledBackTo: "builtin", previous: fromVersion ? { version: fromVersion } : null } };
     } catch (error) {
       const normalized = domain.normalizeMarketUpdateError(error);
       const auditAppId = appId || "unknown";
-      writeAudit(actor, { appId: auditAppId, action: auditAppId + ".update.rollback", requestId, decision: "DENY", reasonCode: normalized.error, version: null });
+      writeAudit(actor, { appId: auditAppId, action: auditAppId + ".update.rollback", requestId, decision: "DENY", reasonCode: normalized.error, version: null, fromVersion });
       return normalized;
     }
   }

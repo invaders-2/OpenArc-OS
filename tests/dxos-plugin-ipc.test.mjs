@@ -170,8 +170,8 @@ test("preload：新增 integration / market 两个顶层键，各只暴露 comma
   assert.equal(topKeys.indexOf("market"), 24, "market 固定在第 25 个顶层键（index 24）");
   // B7i：ComfyUI 已从移植范围移除 —— comfy 顶层键不存在，market 之后不再有键。
   assert.equal(Object.prototype.hasOwnProperty.call(api, "comfy"), false, "comfy 顶层键必须不存在（B7i 移除）");
-  // 合并 ui-core 后 market 之后追加了 10-15 的 4 个本地能力键，0.6.1 追加 5 个新域桥，0.6.2 再追加 3 个，CLI 域再追加 1 个，Stage 1 再追加画布在线更新 1 个。
-  assert.deepEqual(topKeys.slice(25), ["video", "image", "system", "weather", "systemFonts", "ocr", "fileTransfer", "codexCanvas", "desktop", "photos", "photocraft", "appExchange", "cli", "marketUpdate"], "market 之后只允许 10-15 的 4 个本地能力键、0.6.1 的 5 个新域桥、0.6.2 的 3 个新域、CLI 域与 Stage 1 的画布在线更新键");
+  // 合并 ui-core 后 market 之后追加了 10-15 的 4 个本地能力键，0.6.1 追加 5 个新域桥，0.6.2 再追加 3 个，CLI 域再追加 1 个，Stage 1 追加画布在线更新 1 个，Windows 标题栏再追加窗口控制 1 个。
+  assert.deepEqual(topKeys.slice(25), ["video", "image", "system", "weather", "systemFonts", "ocr", "fileTransfer", "codexCanvas", "desktop", "photos", "photocraft", "appExchange", "cli", "marketUpdate", "windowControl"], "market 之后只允许 10-15 的 4 个本地能力键、0.6.1 的 5 个新域桥、0.6.2 的 3 个新域、CLI 域、Stage 1 的画布在线更新键与 Windows 自绘标题栏的窗口控制键");
   assert.deepEqual(Object.keys(api.cli), ["command"], "cli 只允许 command");
   for (const key of ["integration", "market"]) {
     assert.deepEqual(Object.keys(api[key]), ["command"], key + " 只允许 command");

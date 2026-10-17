@@ -845,7 +845,13 @@ export interface OpenArcMarketUpdateStatus {
   checkedAt: number | null;
   latest: OpenArcMarketUpdateLatest | null;
   updateAvailable: boolean;
+  /** 有「上一版已安装版本」可回滚（既有语义不变）。回退到内置版本不看这个字段。 */
   canRollback: boolean;
+  /**
+   * 回滚入口的真实去向：installed = 回到上一版已安装版本；builtin = 回退到随包内置版本
+   * （只装过一个版本 / 上一版目录不可用）；null = 当前已是内置版本。
+   */
+  rollbackTarget: OpenArcMarketUpdateRollbackTarget | null;
   /** 已安装包形态 / 应用声明的包形态；后端不懂就回 null，不臆造。 */
   packageKind: string | null;
   /** 渲染层是否已接入该应用的已安装包加载路径（本期只有 canvas 为 true）。 */
@@ -859,9 +865,16 @@ export interface OpenArcMarketUpdateInstallResult {
   previous: { version: string } | null;
 }
 
+/** 回滚/回退目标：已安装版本号，或字面量 "builtin"（随包内置版本）。 */
+export type OpenArcMarketUpdateRollbackTarget =
+  | { kind: "installed"; version: string }
+  | { kind: "builtin"; version: string };
+
 export interface OpenArcMarketUpdateRollbackResult {
+  /** 回到的版本号，或 "builtin"（回退到随包内置版本）。 */
   rolledBackTo: string;
-  previous: { version: string };
+  /** 回滚前正在生效的已安装版本；本来就在内置版本时为 null。 */
+  previous: { version: string } | null;
 }
 
 export interface OpenArcMarketUpdateSources extends OpenArcMarketUpdateSourceRef {

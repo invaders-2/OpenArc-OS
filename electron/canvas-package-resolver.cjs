@@ -6,6 +6,8 @@
  *        —— 必须整包校验通过：current.json 合法 → 目录存在 → manifest.sig Ed25519 验签
  *           → manifest 合法且 kind:"static-web" 且非占位包 → current.json.digest 与 manifest 原始字节一致
  *           → 逐个文件 sha256 → entry 落盘；
+ *        指针被显式写成内置标记（{ mode:"builtin", version:null }，market/update/rollback 的
+ *        「回退到内置版本」）时，直接按 fallbackReason "pointer-cleared" 回 ② / ③ —— 不当作损坏；
  *   ② dist/novai-canvas（构建产物）；
  *   ③ public/novai-canvas（随仓库内置，保底/离线）。
  *
@@ -51,6 +53,8 @@ const CANVAS_MIME = Object.freeze({
 /** 已安装版本不可用时的结构化回退原因（穷举；测试逐条覆盖）。 */
 const CANVAS_BUNDLE_FALLBACK_REASONS = Object.freeze([
   "pointer-missing",
+  /** 用户显式回退到内置版本（market/update/rollback 写入的内置标记），不是故障。 */
+  "pointer-cleared",
   "pointer-invalid",
   "pointer-digest-mismatch",
   "version-dir-missing",
@@ -92,6 +96,10 @@ function readCanvasPointer(stateDir) {
   try { raw = JSON.parse(text); }
   catch { return { ok: false, reason: "pointer-invalid", detail: "current.json 不是合法 JSON" }; }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ok: false, reason: "pointer-invalid", detail: "current.json 不是对象" };
+  // 显式回退到内置版本的标记：market/update/rollback 写入，属于正常状态而非损坏。
+  if (raw.mode === "builtin" && (raw.version == null || raw.version === null)) {
+    return { ok: false, reason: "pointer-cleared", detail: "已回退到随包内置版本（current.json.mode=builtin）" };
+  }
   const parsed = typeof raw.version === "string" ? domain.parseSemver(raw.version) : null;
   if (!parsed) return { ok: false, reason: "pointer-invalid", detail: "current.json.version 不是合法语义化版本" };
   return { ok: true, version: parsed.version, digest: typeof raw.digest === "string" ? raw.digest : null };

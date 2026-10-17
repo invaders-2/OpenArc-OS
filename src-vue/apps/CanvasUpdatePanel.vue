@@ -243,6 +243,7 @@ onMounted(() => {
     :data-canvas-update-published="status && status.latest ? formatTimestamp(status.latest.publishedAt) : '—'"
     :data-canvas-update-available="status && status.updateAvailable ? 'true' : 'false'"
     :data-canvas-update-can-rollback="status && status.canRollback ? 'true' : 'false'"
+    :data-canvas-update-rollback-target="view.rollbackTarget ? view.rollbackTarget.kind : 'none'"
     :data-canvas-update-source="status ? status.source.kind : ''"
     :data-canvas-update-source-repo="status ? repositoryText(status.source) : ''"
     :data-canvas-update-checked-at="status ? formatTimestamp(status.checkedAt) : '—'"
@@ -285,7 +286,7 @@ onMounted(() => {
         data-canvas-update-progress
       >
         <span class="ds-spinner" aria-hidden="true" />
-        <span>{{ view.installBusy ? "正在下载并校验更新包…（验签 → 校验摘要 → 解压 → 切换到新版本）" : "正在回滚到上一个版本…" }}</span>
+        <span>{{ view.installBusy ? "正在下载并校验更新包…（验签 → 校验摘要 → 解压 → 切换到新版本）" : view.rollbackBusyText }}</span>
       </div>
       <p
         v-if="errorCode"
@@ -312,10 +313,10 @@ onMounted(() => {
         variant="secondary"
         data-canvas-update-rollback
         :status="view.rollbackBusy ? 'loading' : 'idle'"
-        :disabled="!view.canRollback || anyBusy"
+        :disabled="!view.canRollbackTarget || anyBusy"
         @click="askRollback"
       >
-        <RotateCcw :size="13" :stroke-width="1.5" /> 回滚到上一版
+        <RotateCcw :size="13" :stroke-width="1.5" /> {{ view.rollbackLabel }}
       </DsButton>
     </div>
 
@@ -358,8 +359,8 @@ onMounted(() => {
           <span class="set-val">{{ view.loadable ? "已接入（安装后生效）" : "未接入（安装不会生效）" }}</span>
         </div>
         <div class="setting-row">
-          <span class="set-lab">回滚<small>装过两个及以上版本才能回滚</small></span>
-          <span class="set-val">{{ status && status.canRollback ? "可以回滚" : "暂不可回滚" }}</span>
+          <span class="set-lab">回滚<small>{{ view.rollbackStateHint }}</small></span>
+          <span class="set-val" data-canvas-update-rollback-state>{{ view.rollbackStateText }}</span>
         </div>
       </div>
     </section>

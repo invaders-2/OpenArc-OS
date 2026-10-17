@@ -410,6 +410,124 @@ test("组件复用既有页面类名（不发明新布局体系）", () => {
   assert.ok(PANEL.indexOf("DsButton") >= 0 && PANEL.indexOf("DsBadge") >= 0 && PANEL.indexOf("DsDialog") >= 0, "应复用 DsButton / DsBadge / DsDialog 原语");
 });
 
+/* ══════════════════════════════════════════════════════════════════════════
+   7. 回退到内置版本（2026-10 可靠性修复：只装过一个版本也能退回去）
+   ══════════════════════════════════════════════════════════════════════════ */
+
+test("normalize：rollbackTarget 只信后端明确形状，形状不对回 null（不猜）", () => {
+  const s = (rollbackTarget) => normalizeCanvasUpdateStatus({ builtinVersion: "0.1.0", rollbackTarget });
+  assert.equal(s(undefined).rollbackTarget, null);
+  assert.deepEqual(s({ kind: "builtin", version: "0.1.0" }).rollbackTarget, { kind: "builtin", version: "0.1.0" });
+  assert.deepEqual(s({ kind: "installed", version: "0.2.0" }).rollbackTarget, { kind: "installed", version: "0.2.0" });
+  for (const bad of [{ kind: "installed" }, { kind: "other", version: "1.0.0" }, "builtin", 3, [], null]) {
+    assert.equal(s(bad).rollbackTarget, null, JSON.stringify(bad));
+  }
+});
+
+test("只装过一个版本：回滚入口是「回退到内置版本」，可点、二次确认后发 rollback", () => {
+  const status = statusOf({
+    current: { version: "0.2.0", digest: null, installedAt: 1 },
+    builtinVersion: "0.1.0",
+    checkedAt: 1_700_000_000_000,
+    latest: { version: "0.2.0", notesUrl: null, publishedAt: 1_700_000_000_000 },
+    updateAvailable: false,
+    canRollback: false,
+    rollbackTarget: { kind: "builtin", version: "0.1.0" },
+  });
+  const v = canvasUpdateView({ status, busy: null, errorCode: null });
+  assert.equal(v.canRollback, false, "canRollback 的既有语义不变：没有上一版已安装版本");
+  assert.equal(v.canRollbackTarget, true, "回退到内置版本必须可点，不能灰掉");
+  assert.equal(v.rollbackTarget.kind, "builtin");
+  assert.match(v.rollbackLabel, /回退到内置版本/);
+  assert.match(v.rollbackLabel, /0\.1\.0/);
+  assert.match(v.rollbackStateText, /可以回退到内置版本/);
+  assert.match(v.rollbackStateHint, /版本目录仍保留/);
+
+  const action = pendingRollbackAction(status);
+  assert.deepEqual(action, { kind: "rollback-builtin", toVersion: "0.1.0" });
+  const decision = confirmDecision(action, "confirm");
+  assert.equal(decision.invoke, true);
+  assert.equal(decision.command, "market/update/rollback");
+  assert.deepEqual(decision.payload, { appId: "canvas" }, "回退内置不带任何静默参数");
+  assert.deepEqual(confirmDecision(action, "cancel"), { invoke: false, reason: "cancelled" }, "取消不发命令");
+
+  const copy = confirmCopy(action, status);
+  assert.equal(copy.kind, "rollback-builtin");
+  assert.match(copy.title, /回退无限画布到内置版本/);
+  assert.match(copy.body, /0\.2\.0/);
+  assert.match(copy.body, /0\.1\.0/);
+  assert.match(copy.body, /版本目录会保留/);
+  assert.match(copy.body, /点击确认后才会开始/);
+  assert.equal(copy.primary, "确认回退到内置版本");
+});
+
+test("有上一版：文案仍是回到上一版，确认层仍叫「确认回滚」", () => {
+  const status = statusOf({
+    current: { version: "0.3.0", digest: null, installedAt: 1 },
+    checkedAt: 1_700_000_000_000,
+    latest: { version: "0.3.0", notesUrl: null, publishedAt: 1 },
+    canRollback: true,
+    rollbackTarget: { kind: "installed", version: "0.2.0" },
+  });
+  const v = canvasUpdateView({ status, busy: null, errorCode: null });
+  assert.equal(v.canRollbackTarget, true);
+  assert.match(v.rollbackLabel, /回滚到上一版/);
+  assert.match(v.rollbackLabel, /0\.2\.0/, "有上一版时把目标版本说清楚");
+  assert.match(v.rollbackStateText, /可以回滚到 0\.2\.0/);
+  assert.deepEqual(pendingRollbackAction(status), { kind: "rollback", toVersion: "0.2.0" });
+  const copy = confirmCopy(pendingRollbackAction(status), status);
+  assert.equal(copy.kind, "rollback");
+  assert.equal(copy.primary, "确认回滚", "既有回滚文案不变");
+  assert.match(copy.body, /上一个已安装的版本 0\.2\.0/);
+});
+
+test("老回包没有 rollbackTarget：按 canRollback 兼容推导，绝不凭空造回退目标", () => {
+  const legacyRollable = statusOf({ current: { version: "0.2.0", digest: null, installedAt: 1 }, checkedAt: 1, canRollback: true });
+  const v1 = canvasUpdateView({ status: legacyRollable, busy: null, errorCode: null });
+  assert.equal(v1.rollbackTarget, null);
+  assert.equal(v1.canRollbackTarget, true);
+  assert.equal(v1.rollbackLabel, "回滚到上一版");
+  assert.deepEqual(pendingRollbackAction(legacyRollable), { kind: "rollback", toVersion: null });
+
+  const legacyStuck = statusOf({ current: { version: "0.2.0", digest: null, installedAt: 1 }, checkedAt: 1, canRollback: false });
+  const v2 = canvasUpdateView({ status: legacyStuck, busy: null, errorCode: null });
+  assert.equal(v2.canRollbackTarget, false, "老回包不知道内置目标，不得擅自放行");
+});
+
+test("已经在用内置版本：入口禁用且文案如实，不再说「暂不可回滚」", () => {
+  const status = statusOf({ current: null, checkedAt: 1_700_000_000_000, canRollback: false, rollbackTarget: null });
+  const v = canvasUpdateView({ status, busy: null, errorCode: null });
+  assert.equal(v.canRollbackTarget, false);
+  assert.equal(v.rollbackLabel, "已在用内置版本");
+  assert.equal(v.rollbackStateText, "已在内置版本，无需回退");
+  assert.equal(pendingRollbackAction(status), null);
+});
+
+test("回滚中：进行中的文字按去向区分（回退内置不说成回滚到上一版）", () => {
+  const builtin = canvasUpdateView({ status: statusOf({ current: { version: "0.2.0", digest: null, installedAt: 1 }, rollbackTarget: { kind: "builtin", version: "0.1.0" } }), busy: "rollback", errorCode: null });
+  assert.equal(builtin.rollbackBusy, true);
+  assert.match(builtin.rollbackBusyText, /回退到内置版本/);
+  const installed = canvasUpdateView({ status: statusOf({ current: { version: "0.2.0", digest: null, installedAt: 1 }, canRollback: true, rollbackTarget: { kind: "installed", version: "0.1.0" } }), busy: "rollback", errorCode: null });
+  assert.match(installed.rollbackBusyText, /回滚到上一个版本/);
+});
+
+test("回退成功文案区分 builtin 与具体版本号", () => {
+  assert.equal(rollbackSuccessText({ rolledBackTo: "builtin", previous: { version: "0.2.0" } }), "已回退到内置版本。");
+  assert.equal(rollbackSuccessText({ rolledBackTo: "builtin", previous: null }), "已回退到内置版本。");
+  assert.equal(rollbackSuccessText({ rolledBackTo: "0.1.0", previous: { version: "0.2.0" } }), "已回滚到 0.1.0。");
+  assert.equal(rollbackSuccessText({}), "回滚已完成。");
+});
+
+test("静态：面板的回滚入口由 view 的文案与可用性驱动，旧的「暂不可回滚」已删除", () => {
+  assert.ok(PANEL.indexOf("data-canvas-update-rollback-target") >= 0, "面板缺少回退去向取证属性");
+  assert.ok(PANEL.indexOf("data-canvas-update-rollback-state") >= 0, "面板缺少回退状态取证属性");
+  assert.ok(/view\.rollbackLabel/.test(PANEL), "回滚按钮文案必须来自 view.rollbackLabel");
+  assert.ok(/!view\.canRollbackTarget/.test(PANEL), "可用性必须来自 view.canRollbackTarget（回退内置也要可点）");
+  assert.ok(PANEL.indexOf("view.rollbackBusyText") >= 0, "进行中的文字必须按去向区分");
+  assert.equal(PANEL.indexOf("暂不可回滚"), -1, "旧文案「暂不可回滚」必须去掉");
+  assert.equal(PANEL.indexOf("回滚到上一版"), -1, "写死的按钮文案必须去掉（改为 view.rollbackLabel）");
+});
+
 test("安装/回滚按钮永远走二次确认弹层，且完成前按钮保持原名称", () => {
   assert.ok(/@click="askInstall"/.test(PANEL), "更新按钮必须只打开确认弹层");
   assert.ok(/@click="askRollback"/.test(PANEL), "回滚按钮必须只打开确认弹层");

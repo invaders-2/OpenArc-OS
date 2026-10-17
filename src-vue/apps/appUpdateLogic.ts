@@ -49,6 +49,17 @@ export interface AppUpdateCurrent {
   installedAt: number;
 }
 
+/**
+ * 回滚按钮真正的去向（后端 status.rollbackTarget 的忠实投影）：
+ *   · installed —— 有上一版已安装版本，回到那一版（既有语义，优先）；
+ *   · builtin   —— 只装过这一个版本 / 上一版目录不可用，回退到随包内置版本；
+ *   · null      —— 当前就是随包内置版本，没有可回退的东西。
+ */
+export type AppUpdateRollbackTarget =
+  | { kind: "installed"; version: string }
+  | { kind: "builtin"; version: string }
+  | null;
+
 export interface AppUpdateStatus {
   appId: string;
   current: AppUpdateCurrent | null;
@@ -57,7 +68,10 @@ export interface AppUpdateStatus {
   checkedAt: number | null;
   latest: AppUpdateLatest | null;
   updateAvailable: boolean;
+  /** 既有两个含义不变：有「上一版已安装版本」可回滚。回退内置不靠这个字段判断。 */
   canRollback: boolean;
+  /** 回滚/回退的去向；后端老回包没有该字段时按 canRollback 兼容推导。 */
+  rollbackTarget: AppUpdateRollbackTarget;
   /** 已安装包形态 / 应用声明的包形态；后端不懂就回 null，不臆造。 */
   packageKind: string | null;
   /** 渲染层是否已接入该应用的已安装包加载路径（后端 domain.APP_PACKAGE_LOADERS 决定）。 */
@@ -146,6 +160,17 @@ export function formatTimestamp(value: unknown): string {
   return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
 }
 
+/** 只信任后端明确给出的 kind/version；形状不对回 null，绝不猜。 */
+function normalizeRollbackTarget(value: unknown): AppUpdateRollbackTarget {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  const kind = asString(raw.kind);
+  const version = asString(raw.version);
+  if (kind === "builtin") return { kind: "builtin", version: version || "" };
+  if (kind === "installed" && version) return { kind: "installed", version };
+  return null;
+}
+
 function normalizeSource(value: unknown): AppUpdateSource {
   const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   return { kind: asString(raw.kind), owner: asString(raw.owner), repo: asString(raw.repo) };
@@ -173,6 +198,7 @@ export function normalizeAppUpdateStatus(value: unknown): AppUpdateStatus | null
       : null,
     updateAvailable: raw.updateAvailable === true,
     canRollback: raw.canRollback === true,
+    rollbackTarget: normalizeRollbackTarget(raw.rollbackTarget),
     packageKind: asString(raw.packageKind) || null,
     loadable: raw.loadable !== false,
     loader: asString(raw.loader) || null,
@@ -270,7 +296,15 @@ export interface AppUpdateView {
   detail: string;
   canCheck: boolean;
   canInstall: boolean;
+  /** 有「上一版已安装版本」可回滚（既有语义，原样保留）。 */
   canRollback: boolean;
+  /** 回滚/回退入口是否真的能点 —— 回退到内置版本也算能点。 */
+  canRollbackTarget: boolean;
+  rollbackTarget: AppUpdateRollbackTarget;
+  rollbackLabel: string;
+  rollbackStateText: string;
+  rollbackStateHint: string;
+  rollbackBusyText: string;
   busy: AppUpdateBusy;
   installBusy: boolean;
   rollbackBusy: boolean;
@@ -290,12 +324,30 @@ export function appUpdateView(input: AppUpdateViewInput): AppUpdateView {
   const status = input.status;
   const busy = input.busy;
   const loadable = !status || status.loadable !== false;
+  // 老回包没有 rollbackTarget 时退回 canRollback（有上一版就按上一版说，没有就如实说不可回退），
+  // 绝不凭 current 是否存在臆造一个回退目标。
+  const target: AppUpdateRollbackTarget = status && status.rollbackTarget ? status.rollbackTarget : null;
+  const legacyCanRollback = !!(status && status.canRollback);
+  const canRollbackTarget = !!target || legacyCanRollback;
+  const rollbackTargetCopy = target && target.kind === "installed"
+    ? { label: target.version ? "回滚到上一版 " + target.version : "回滚到上一版", state: target.version ? "可以回滚到 " + target.version : "可以回滚", hint: "装过两个及以上版本时，优先回到上一版已安装版本", busy: "正在回滚到上一个版本…" }
+    : target
+      ? { label: target.version ? "回退到内置版本 " + target.version : "回退到内置版本", state: "可以回退到内置版本 " + target.version, hint: "只装过这一个版本；回退后改用随包内置版本，已安装的版本目录仍保留", busy: "正在回退到内置版本…" }
+      : legacyCanRollback
+        ? { label: "回滚到上一版", state: "可以回滚", hint: "装过两个及以上版本时，优先回到上一版已安装版本", busy: "正在回滚到上一个版本…" }
+        : { label: "已在用内置版本", state: "已在内置版本，无需回退", hint: "当前就是随包内置版本", busy: "正在回滚到上一个版本…" };
   const base = {
     busy,
     installBusy: busy === "install",
     rollbackBusy: busy === "rollback",
     canInstall: false,
     canRollback: false,
+    canRollbackTarget,
+    rollbackTarget: target,
+    rollbackLabel: rollbackTargetCopy.label,
+    rollbackStateText: rollbackTargetCopy.state,
+    rollbackStateHint: rollbackTargetCopy.hint,
+    rollbackBusyText: rollbackTargetCopy.busy,
     appId,
     appName,
     loadable,
@@ -393,10 +445,13 @@ export function appUpdateView(input: AppUpdateViewInput): AppUpdateView {
 
 export type AppUpdatePendingAction =
   | { kind: "install"; version: string }
-  | { kind: "rollback"; toVersion: string | null };
+  /** 回到上一版已安装版本（既有语义）；老回包没有目标版本时 toVersion = null。 */
+  | { kind: "rollback"; toVersion: string | null }
+  /** 没有上一版可用：回退到随包内置版本，toVersion = 内置版本号。 */
+  | { kind: "rollback-builtin"; toVersion: string };
 
 export interface AppUpdateConfirm {
-  kind: "install" | "rollback";
+  kind: "install" | "rollback" | "rollback-builtin";
   title: string;
   body: string;
   primary: string;
@@ -407,19 +462,38 @@ export function pendingInstallAction(status: AppUpdateStatus | null): AppUpdateP
   return { kind: "install", version: status.latest.version };
 }
 
+/**
+ * 回滚动作：后端给了 rollbackTarget 就照它走（installed / builtin），
+ * 老回包没有该字段时退回 canRollback 的既有语义（toVersion = null）。
+ */
 export function pendingRollbackAction(status: AppUpdateStatus | null): AppUpdatePendingAction | null {
-  if (!status || !status.canRollback) return null;
+  if (!status) return null;
+  const target = status.rollbackTarget || null;
+  if (target && target.kind === "builtin") return { kind: "rollback-builtin", toVersion: target.version };
+  if (target && target.kind === "installed") return { kind: "rollback", toVersion: target.version };
+  if (!status.canRollback) return null;
   return { kind: "rollback", toVersion: null };
 }
 
 /** 二次确认的文案：把「会动什么、从哪来」讲清楚，不用颜色单独承担危险语义。 */
 export function appConfirmCopy(action: AppUpdatePendingAction | null, status: AppUpdateStatus | null, sources?: AppUpdateSources | null, appName = CANVAS_APP_NAME): AppUpdateConfirm {
   if (!action || action.kind === "rollback") {
+    const to = action && action.toVersion ? " " + action.toVersion : "";
     return {
       kind: "rollback",
       title: "回滚" + appName,
-      body: "将把" + appName + "从当前版本 " + runningVersion(status) + " 回滚到上一个已安装的版本。回滚只在你点击确认后才会开始。",
+      body: "将把" + appName + "从当前版本 " + runningVersion(status) + " 回滚到上一个已安装的版本" + to + "。回滚只在你点击确认后才会开始。",
       primary: "确认回滚",
+    };
+  }
+  if (action.kind === "rollback-builtin") {
+    const builtin = action.toVersion || (status ? status.builtinVersion : "");
+    return {
+      kind: "rollback-builtin",
+      title: "回退" + appName + "到内置版本",
+      body: "将把" + appName + "从当前已安装的 " + runningVersion(status) + " 切回随包内置的 " + builtin
+        + "。已安装的版本目录会保留，之后想切回去重新安装即可。回退只在你点击确认后才会开始。",
+      primary: "确认回退到内置版本",
     };
   }
   return {
@@ -475,6 +549,7 @@ export function installSuccessText(result: unknown): string {
 export function rollbackSuccessText(result: unknown): string {
   const value = result && typeof result === "object" ? (result as Record<string, unknown>) : null;
   const to = asString(value && value.rolledBackTo);
+  if (to === "builtin") return "已回退到内置版本。";
   return to ? "已回滚到 " + to + "。" : "回滚已完成。";
 }
 
@@ -525,6 +600,8 @@ export const CANVAS_UPDATE_SELECTORS = Object.freeze([
   '[data-canvas-update-published]',
   '[data-canvas-update-available]',
   '[data-canvas-update-can-rollback]',
+  '[data-canvas-update-rollback-target]',
+  '[data-canvas-update-rollback-state]',
   '[data-canvas-update-source]',
   '[data-canvas-update-source-repo]',
   '[data-canvas-update-checked-at]',

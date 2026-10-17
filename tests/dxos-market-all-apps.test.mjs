@@ -236,12 +236,15 @@ test("④ 有包但渲染层不支持加载：check 如实报有更新，install
   assert.equal(fs.existsSync(path.join(appStateDir(dir, "notes"), "current.json")), false, "拒绝时不得切换指针");
 });
 
-test("⑤ 回滚：任意 appId 无历史 → ROLLBACK_UNAVAILABLE（结构化，不是崩溃）", async () => {
-  const { bundle } = makeBundle();
+test("⑤ 回滚：任意 appId 从没装过 → 幂等回「就在内置版本」（结构化回包，不是崩溃）", async () => {
+  // 2026-10 可靠性修复：没有可回退的已安装版本时，rollback 不再报 ROLLBACK_UNAVAILABLE，
+  // 而是幂等成功并如实回报 rolledBackTo="builtin" / previous=null（不写盘、不造指针）。
+  const { bundle, dir } = makeBundle();
   for (const appId of ["notes", "canvas", "photos"]) {
     const rollback = await bundle.execute("market/update/rollback", { appId }, session);
-    assert.equal(rollback.ok, false);
-    assert.equal(rollback.error, "MARKET_UPDATE_ROLLBACK_UNAVAILABLE", appId + " → " + JSON.stringify(rollback));
+    assert.equal(rollback.ok, true, appId + " → " + JSON.stringify(rollback));
+    assert.deepEqual(rollback.value, { rolledBackTo: "builtin", previous: null }, appId);
+    assert.equal(fs.existsSync(path.join(appStateDir(dir, appId), "current.json")), false, appId + " 本来就没装过，不得凭空写指针");
   }
 });
 

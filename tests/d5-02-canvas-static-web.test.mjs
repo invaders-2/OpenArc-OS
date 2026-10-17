@@ -176,6 +176,8 @@ test("回退矩阵：任一环失败都回落内置 bundle，并给出结构化 
   const cases = [
     { reason: "pointer-missing", mutate: ({ stateDir }) => fs.rmSync(path.join(stateDir, "current.json")) },
     { reason: "pointer-invalid", mutate: ({ stateDir }) => fs.writeFileSync(path.join(stateDir, "current.json"), "{ not json") },
+    // 显式回退到内置版本（market/update/rollback 写的内置标记）：正常状态，不是损坏。
+    { reason: "pointer-cleared", mutate: ({ stateDir }) => fs.writeFileSync(path.join(stateDir, "current.json"), JSON.stringify({ mode: "builtin", version: null, builtinVersion: "0.1.0", rolledBackFrom: "0.2.0", clearedAt: 1 })) },
     { reason: "version-dir-missing", mutate: ({ dir }) => fs.rmSync(dir, { recursive: true, force: true }) },
     { reason: "pointer-digest-mismatch", mutate: ({ stateDir }) => { const f = path.join(stateDir, "current.json"); const raw = JSON.parse(fs.readFileSync(f, "utf8")); raw.digest = "f".repeat(64); fs.writeFileSync(f, JSON.stringify(raw)); } },
     { reason: "signature-invalid", mutate: ({ dir }) => fs.writeFileSync(path.join(dir, "manifest.sig"), "AAAA") },
