@@ -27,8 +27,8 @@
  *      画布解析器读到内置标记即按既有顺序回 dist / public（见 canvas-package-resolver.cjs）。
  *      版本目录与 history.json 一律保留：用户随时可以再装回同一版本，不丢已下载的包。
  *
- * 诚实边界：只有"渲染层已接入加载路径"的应用可安装（本期只有 canvas，见 domain.APP_PACKAGE_LOADERS）；
- * 其余应用有发布包时 check 仍如实报 updateAvailable，但 install 结构化回 MARKET_UPDATE_NOT_LOADABLE。
+ * 诚实边界：每个已注册应用都有加载路径（canvas 专用协议 + openarc-app:// 通用协议）；
+ * install 落盘并切换指针后会经注入的 packageResolver 复核"真的能加载"，复核失败即原子恢复旧指针并清掉新版本。
  *
  * 安装目录：<userData>/dxos/apps/<appId>/<version>/；指针 <...>/current.json
  * （正常形态 { version, digest, kind, entry, installedAt }；回退内置后为 { mode:"builtin", version:null, … }）；
@@ -76,17 +76,37 @@ function createMarketUpdateBundle(options = {}) {
   const logger = typeof options.logger === "function" ? options.logger : null;
   const fetchImpl = typeof options.fetchImpl === "function" ? options.fetchImpl : (typeof fetch === "function" ? fetch : null);
   const authorization = options.authorization && typeof options.authorization === "object" ? options.authorization : null;
+  // 通用已安装包解析器（app-package-resolver.cjs）：安装后真正能加载的验收标准；
+  // 未注入时 health 回退到本进程内的同口径目录校验，但 install 不再宣称"装完即生效"。
+  const packageResolver = options.packageResolver && typeof options.packageResolver.health === "function" ? options.packageResolver : null;
   const maxPackageBytes = Number.isFinite(Number(options.maxPackageBytes)) && Number(options.maxPackageBytes) > 0
     ? Number(options.maxPackageBytes)
     : domain.MAX_PACKAGE_BYTES;
-  // 加载路径注册表：默认 = domain.APP_PACKAGE_LOADERS（本期只有 canvas）。主进程注入用；
-  // 生产路径（main.cjs）不传，所以"只有画布能真正生效"的边界不因这个测试接缝而放宽。
+  // 加载路径注册表：默认 = domain.APP_PACKAGE_LOADERS（canvas 专用 + 其余通用）。主进程注入用；
+  // 测试可通过 packageLoaders 覆盖，用同一套安装/回滚机制验证任意应用。
   const packageLoaders = options.packageLoaders && typeof options.packageLoaders === "object" && !Array.isArray(options.packageLoaders)
     ? { ...options.packageLoaders }
     : { ...domain.APP_PACKAGE_LOADERS };
+  // 第三方 App 注册表（task-19 B）：域名仍是 <dxos>/apps/<appId>/，加载路径是通用 openarc-app://；
+  // isKnownApp 由宿主注入并随安装/卸载动态变化，内置应用仍走 domain 的注册表校验。
+  const isRegisteredExtraApp = typeof options.isKnownApp === "function"
+    ? (value) => { try { const result = options.isKnownApp(value); return typeof result === "string" ? result : null; } catch { return null; } }
+    : () => null;
+  const extraAppIds = new Set((Array.isArray(options.extraAppIds) ? options.extraAppIds : []).filter((id) => typeof id === "string" && domain.APP_ID_RE.test(id)));
+  const normalizeAnyAppId = (value) => {
+    const builtin = domain.normalizeAppId(value);
+    if (builtin) return builtin;
+    if (typeof value !== "string") return null;
+    const id = value.trim();
+    if (!domain.APP_ID_RE.test(id)) return null;
+    if (extraAppIds.has(id)) return id;
+    return isRegisteredExtraApp(id) === id ? id : null;
+  };
   const loadSupportFor = (appId) => {
-    const loader = packageLoaders[appId] || null;
-    return loader ? { loadable: true, loader, reason: null } : domain.appLoadSupport(appId);
+    const loader = packageLoaders[appId] || (normalizeAnyAppId(appId) && !domain.normalizeAppId(appId) ? domain.GENERIC_APP_LOADER : null);
+    if (!loader) return domain.appLoadSupport(appId);
+    const loadUrl = loader === "openarc-canvas" ? "openarc-canvas://bundle/" : domain.GENERIC_APP_LOADER + "://" + appId + "/";
+    return { loadable: true, loader, loadUrl, reason: null };
   };
   // 每个应用一个状态目录：<userData>/dxos/apps/<appId>/（指针 / 历史 / 最近检查）。
   const dxosRoot = resolveDxosPaths(userDataDir).root;
@@ -329,8 +349,38 @@ function createMarketUpdateBundle(options = {}) {
       packageKind: current ? current.kind : domain.appPackageKind(appId),
       loadable: load.loadable,
       loader: load.loader,
+      loadUrl: load.loadUrl || null,
       loadReason: load.reason,
     };
+  }
+
+  /**
+   * 加载健康检查（按 appId）：已安装版本是否真的能被加载 + 当前生效来源。
+   * 注入了通用解析器就用它（与协议服务同一份判定）；否则用本进程内的同口径目录校验兜底。
+   */
+  function healthFor(appId) {
+    if (packageResolver) {
+      try { return packageResolver.health(appId); }
+      catch (error) { return { ok: false, appId, error: domain.MARKET_UPDATE_ERR_INTERNAL, detail: asStr(error && error.message, 200) }; }
+    }
+    const support = loadSupportFor(appId);
+    const current = readCurrent(appId);
+    const pointer = readPointerState(appId);
+    const base = {
+      ok: true, appId, builtinVersion: builtinVersionFor(appId),
+      loader: support.loader, loadUrl: support.loadUrl || null,
+    };
+    if (!current) {
+      const reason = pointer === "builtin" ? "pointer-cleared" : pointer === "missing" ? "pointer-missing" : "pointer-invalid";
+      return { ...base, effectiveSource: "builtin", installedLoadable: false, installed: { version: null, digest: null, kind: null, entry: null, reason, detail: null }, fallbackReason: reason };
+    }
+    const key = loadPublicKey(appId);
+    const verified = key.ok ? verifyInstalledDirectory(appId, installedDir(appId, current.version), key.value) : { ok: false, error: key.error };
+    if (verified.ok) {
+      return { ...base, effectiveSource: "installed", installedLoadable: true, installed: { version: verified.version, digest: verified.digest, kind: verified.kind, entry: verified.entry, reason: null, detail: null }, fallbackReason: null };
+    }
+    const reason = verified.error && verified.error.code ? String(verified.error.code) : "verify-failed";
+    return { ...base, effectiveSource: "builtin", installedLoadable: false, installed: { version: current.version, digest: current.digest || null, kind: current.kind || null, entry: current.entry || null, reason, detail: verified.error ? asStr(verified.error.message, 200) : null }, fallbackReason: reason };
   }
 
   /**
@@ -440,7 +490,7 @@ function createMarketUpdateBundle(options = {}) {
     if (!signature.ok) return fail(domain.MARKET_UPDATE_ERR_SIGNATURE_INVALID, "激活前签名校验失败");
     let manifestRaw;
     try { manifestRaw = JSON.parse(manifestBytes.toString("utf8")); } catch { return fail(domain.MARKET_UPDATE_ERR_INVALID_INPUT, "激活前 manifest.json 不是合法 JSON"); }
-    const normalized = domain.normalizeManifest(manifestRaw, { appId });
+    const normalized = domain.normalizeManifest(manifestRaw, { appId, allowUnknownAppId: true });
     if (!normalized.ok) return { ok: false, error: normalized.error };
     const manifest = normalized.value;
     for (const [name, hash] of Object.entries(manifest.files)) {
@@ -478,7 +528,7 @@ function createMarketUpdateBundle(options = {}) {
 
     let manifestRaw;
     try { manifestRaw = JSON.parse(manifestBytes.toString("utf8")); } catch { throw domain.createMarketUpdateError(domain.MARKET_UPDATE_ERR_INVALID_INPUT, "manifest.json 不是合法 JSON"); }
-    const normalized = domain.normalizeManifest(manifestRaw, { appId });
+    const normalized = domain.normalizeManifest(manifestRaw, { appId, allowUnknownAppId: true });
     if (!normalized.ok) throw normalized.error;
     const manifest = normalized.value;
     if (manifest.placeholder) throw domain.createMarketUpdateError(domain.MARKET_UPDATE_ERR_UNSUPPORTED, "占位包（manifest.placeholder=true）不允许安装");
@@ -516,6 +566,21 @@ function createMarketUpdateBundle(options = {}) {
     const history = readHistory(appId);
     writeJsonAtomic(historyFileFor(appId), { versions: [...history.versions.filter((value) => value !== manifest.version), manifest.version] });
     writeJsonAtomic(currentFileFor(appId), { version: manifest.version, digest: activated.digest, kind: manifest.kind, entry: manifest.entry, installedAt: Number(clock()) });
+    // 「装到磁盘必须真的能被加载」：指针切换后立刻用真实加载路径复核；失败则原子恢复旧指针并清掉这次的新版本，
+    // 不留下"指针指向一个加载不了的新版本"的半坏状态。
+    if (packageResolver) {
+      let loaded = null;
+      try { loaded = packageResolver.health(appId); } catch { loaded = null; }
+      if (!loaded || loaded.ok === false || loaded.installedLoadable !== true) {
+        try {
+          if (previous) writeJsonAtomic(currentFileFor(appId), previous);
+          else writeBuiltinPointer(appId, manifest.version);
+        } catch { /* 指针恢复失败也要把原始原因报出来 */ }
+        try { fs.rmSync(finalDir, { recursive: true, force: true }); } catch { /* 清理失败不掩盖加载失败 */ }
+        const reason = loaded && loaded.fallbackReason ? loaded.fallbackReason : "load-path-unavailable";
+        throw domain.createMarketUpdateError(domain.MARKET_UPDATE_ERR_NOT_LOADABLE, "安装后加载路径校验失败，已回滚到上一状态：" + reason);
+      }
+    }
     return { installed: { appId, version: manifest.version, digest: activated.digest, kind: manifest.kind, entry: manifest.entry }, previous: previous ? { version: previous.version } : null };
   }
 
@@ -524,7 +589,7 @@ function createMarketUpdateBundle(options = {}) {
     let appId = null;
     let requestedVersion = null;
     try {
-      appId = domain.normalizeAppId(payload.appId);
+      appId = normalizeAnyAppId(payload.appId);
       if (!appId) throw domain.createMarketUpdateError(domain.MARKET_UPDATE_ERR_INVALID_INPUT, "appId 非法或未注册：" + asStr(payload.appId, 60));
       // 诚实边界：没有加载路径的应用，装了也不会生效 —— 在下载之前结构化拒绝，绝不假装升级成功。
       const load = loadSupportFor(appId);
@@ -580,7 +645,7 @@ function createMarketUpdateBundle(options = {}) {
     let appId = null;
     let fromVersion = null;
     try {
-      appId = domain.normalizeAppId(payload.appId);
+      appId = normalizeAnyAppId(payload.appId);
       if (!appId) throw domain.createMarketUpdateError(domain.MARKET_UPDATE_ERR_INVALID_INPUT, "appId 非法或未注册：" + asStr(payload.appId, 60));
       const current = readCurrent(appId);
       const history = readHistory(appId);
@@ -626,7 +691,7 @@ function createMarketUpdateBundle(options = {}) {
   }
 
   async function check(payload = {}) {
-    const appId = domain.normalizeAppId(payload.appId);
+    const appId = normalizeAnyAppId(payload.appId);
     if (!appId) throw domain.createMarketUpdateError(domain.MARKET_UPDATE_ERR_INVALID_INPUT, "appId 非法或未注册：" + asStr(payload.appId, 60));
     const source = currentSource(appId);
     const candidates = await source.adapter.listReleases({ channel });
@@ -647,15 +712,20 @@ function createMarketUpdateBundle(options = {}) {
       const body = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
       switch (command) {
         case "market/update/status": {
-          const appId = domain.normalizeAppId(body.appId);
+          const appId = normalizeAnyAppId(body.appId);
           if (!appId) throw domain.createMarketUpdateError(domain.MARKET_UPDATE_ERR_INVALID_INPUT, "appId 非法或未注册：" + asStr(body.appId, 60));
           return { ok: true, value: statusFor(appId) };
         }
         case "market/update/check": return { ok: true, value: await check(body) };
         case "market/update/install": return await install(body, actor, context);
         case "market/update/rollback": return rollback(body, actor, context);
+        case "market/update/health": {
+          const appId = normalizeAnyAppId(body.appId);
+          if (!appId) throw domain.createMarketUpdateError(domain.MARKET_UPDATE_ERR_INVALID_INPUT, "appId 非法或未注册：" + asStr(body.appId, 60));
+          return { ok: true, value: healthFor(appId) };
+        }
         case "market/update/sources": {
-          const appId = domain.normalizeAppId(body.appId);
+          const appId = normalizeAnyAppId(body.appId);
           if (!appId) throw domain.createMarketUpdateError(domain.MARKET_UPDATE_ERR_INVALID_INPUT, "appId 非法或未注册：" + asStr(body.appId, 60));
           return { ok: true, value: sources(appId) };
         }
@@ -682,13 +752,47 @@ function createMarketUpdateBundle(options = {}) {
     // 主进程内部 / 测试用；不经过 IPC。
     appStateDir,
     installedDir,
-    status: (value) => statusFor(domain.normalizeAppId(value) || domain.CANVAS_APP_ID),
+    status: (value) => {
+      const id = value == null || value === "" ? domain.CANVAS_APP_ID : normalizeAnyAppId(value);
+      return id ? statusFor(id) : null;
+    },
+    healthFor,
+    packageResolver,
+    /** 第三方安装失败 / 用户回滚复用同一实现（appId 已由第三方注册表登记）。 */
+    rollback: (payload, actor, context) => rollback(payload, actor, context),
+    /**
+     * 供第三方安装复用同一条信任链 / 原子切换 / 加载复核：
+     * 已下载并验过 sha256 的包字节 → 安装；返回 { installed, previous }。
+     * 调用方（市场第三方安装）负责下载、目录登记与审计。
+     */
+    installPackageBuffer: ({ appId, bytes, version } = {}) => {
+      const id = normalizeAnyAppId(appId);
+      if (!id) throw domain.createMarketUpdateError(domain.MARKET_UPDATE_ERR_INVALID_INPUT, "appId 非法或未注册：" + asStr(appId, 60));
+      let expected = null;
+      if (version != null) {
+        const parsed = domain.parseSemver(version);
+        if (!parsed) throw domain.createMarketUpdateError(domain.MARKET_UPDATE_ERR_INVALID_INPUT, "version 不是合法语义化版本");
+        expected = parsed.version;
+      }
+      const buffer = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes || []);
+      if (!buffer.length) throw domain.createMarketUpdateError(domain.MARKET_UPDATE_ERR_INVALID_INPUT, "安装包字节为空");
+      return installVerifiedPackage(id, buffer, expected);
+    },
     sources,
     setSource,
     readSourceSelection,
-    readCurrent: (value) => readCurrent(domain.normalizeAppId(value) || domain.CANVAS_APP_ID),
-    readHistory: (value) => readHistory(domain.normalizeAppId(value) || domain.CANVAS_APP_ID),
-    canRollback: () => canRollback(domain.CANVAS_APP_ID, readCurrent(domain.CANVAS_APP_ID)),
+    readCurrent: (value) => {
+      const id = value == null || value === "" ? domain.CANVAS_APP_ID : normalizeAnyAppId(value);
+      return id ? readCurrent(id) : null;
+    },
+    readHistory: (value) => {
+      const id = value == null || value === "" ? domain.CANVAS_APP_ID : normalizeAnyAppId(value);
+      return id ? readHistory(id) : { versions: [] };
+    },
+    canRollback: (value) => {
+      const id = value == null || value === "" ? domain.CANVAS_APP_ID : normalizeAnyAppId(value);
+      return id ? canRollback(id, readCurrent(id)) : false;
+    },
   };
 }
 

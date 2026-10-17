@@ -110,7 +110,7 @@ test("白名单：未登记命令被拒、无需对象载荷、command / type �
   const byCommand = await ipcMain.invoke("platform:command", trustedEvent(), { command: "platform/health", payload: {} });
   assert.equal(byCommand.ok, true, JSON.stringify(byCommand));
   assert.equal(byCommand.value.ok, true);
-  assert.equal(byCommand.value.commands, 11);
+  assert.equal(byCommand.value.commands, 17);
 
   const byType = await ipcMain.invoke("platform:command", trustedEvent(), { type: "platform/health", payload: {} });
   assert.equal(byType.ok, true);

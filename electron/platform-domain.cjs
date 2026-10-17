@@ -68,6 +68,14 @@ const PLATFORM_COMMANDS = Object.freeze({
   "platform/diagnostics/process": { risk: "read", credential: false, summary: "进程诊断：主进程与受监督子进程清单 + 内存 / 句柄摘要（不含环境变量）" },
   "platform/diagnostics/record": { risk: "manage", credential: false, summary: "记录一条应用运行时事件（脱敏后落 app_runtime_events）" },
 
+  // ---- DX 虚拟文件树：共享盘 / 部门盘 / 子树快照 / 搜索 / 统计（受控只读桥；不返回绝对路径） ----
+  "platform/fs/shared/roots": { risk: "read", credential: false, summary: "列出当前用户可见的共享盘 / 部门盘根（public 与 department:*）" },
+  "platform/fs/shared/list": { risk: "read", credential: false, summary: "列出共享盘目录子项（安全节点投影，不含 blob / 磁盘路径）" },
+  "platform/fs/search": { risk: "read", credential: false, summary: "在可见共享盘子树内按名称 / 内容搜索（结果不含绝对路径）" },
+  "platform/fs/stats": { risk: "read", credential: false, summary: "统计可见共享盘子树的字节数与条目数（不含文件名清单）" },
+  "platform/fs/snapshot/create": { risk: "manage", credential: false, summary: "为可见子树创建内存快照（只回 snapshotId 与 nodeCount，不回 blob）" },
+  "platform/fs/snapshot/restore": { risk: "destructive", credential: false, summary: "恢复本人创建的子树快照（需超管 / owner / 部门管理员）" },
+
   // ---- 数据保护（源 systemDataProtection.ts） ----
   "platform/data/integrity": { risk: "read", credential: false, summary: "检查 dxos 数据目录 JSON 完整性（不读取凭据目录）" },
   "platform/data/snapshot/create": { risk: "manage", credential: false, summary: "创建系统数据快照（落 <userData>/dxos/backups，排除凭据目录）" },

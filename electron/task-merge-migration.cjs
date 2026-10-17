@@ -31,8 +31,13 @@
  */
 "use strict";
 
+const fs = require("node:fs");
+const path = require("node:path");
+
 /** 合并后的目标版本号（**不是** SCHEMA_VERSION；生产仍是 28）。 */
 const TASK_MERGE_VERSION = 29;
+/** 启动开关文件：<userData>/dxos/settings/task-merge-v29.json（{ "enabled": true }）。 */
+const TASK_MERGE_SWITCH_FILE = "task-merge-v29.json";
 
 /** 合并后三张表的列数基线（PRAGMA table_info 计数，含判别列 record_source）。 */
 const TASK_MERGE_COLUMN_COUNTS = Object.freeze({ tasks: 50, task_steps: 22, task_events: 11 });
@@ -357,8 +362,77 @@ const taskMergeMigration = Object.freeze({
   foreignKeyCheck: true,
 });
 
+function switchFileFor(userDataDir) {
+  return userDataDir ? path.join(String(userDataDir), "dxos", "settings", TASK_MERGE_SWITCH_FILE) : null;
+}
+
+/**
+ * task-8 B：v29 合并的启动开关。
+ * 优先级：显式 enabled 选项 > 开关文件布尔值 > 环境变量 OPENARC_TASK_MERGE_V29 > 默认关闭。
+ * 默认关闭；切换需要重启（迁移只在启动路径执行）。
+ */
+function taskMergeSwitchState({ userDataDir = null, env = process.env, enabled = null } = {}) {
+  if (typeof enabled === "boolean") return { enabled, source: "option", path: null, error: null };
+  const file = switchFileFor(userDataDir);
+  if (file) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+      if (raw && typeof raw.enabled === "boolean") return { enabled: raw.enabled, source: "file", path: file, error: null };
+    } catch (error) {
+      if (!error || error.code !== "ENOENT") return { enabled: false, source: "file", path: file, error: "开关文件不可读，按关闭处理" };
+    }
+  }
+  const rawEnv = env && env.OPENARC_TASK_MERGE_V29 != null ? String(env.OPENARC_TASK_MERGE_V29).trim().toLowerCase() : "";
+  if (["1", "true", "yes", "on"].includes(rawEnv)) return { enabled: true, source: "env", path: file, error: null };
+  if (["0", "false", "no", "off"].includes(rawEnv)) return { enabled: false, source: "env", path: file, error: null };
+  return { enabled: false, source: "default", path: file, error: null };
+}
+
+/**
+ * 启动路径执行器：开关关闭 → 不动库；已合并 → 幂等返回；开启且未合并 →
+ * 走 store.applyExplicitMigration（VACUUM INTO 备份 / BEGIN 前关 FK / foreign_key_check / 原子回滚）。
+ * **绝不把失败抛给启动流程**：失败时库仍是 v28，返回结构化 error 供日志与状态展示。
+ */
+function applyTaskMergeAtStartup({ store, userDataDir = null, env = process.env, enabled = null, logger = null, migration = taskMergeMigration } = {}) {
+  if (!store || !store.connection || typeof store.applyExplicitMigration !== "function") {
+    throw new Error("applyTaskMergeAtStartup 需要已 open 的 IdentityStore");
+  }
+  const switchState = taskMergeSwitchState({ userDataDir, env, enabled });
+  const db = store.connection;
+  if (!switchState.enabled) {
+    return { enabled: false, applied: false, state: isTaskMergeApplied(db) ? "v29" : "v28", reason: "switch-off", source: switchState.source, backup: null, error: switchState.error };
+  }
+  if (isTaskMergeApplied(db)) {
+    return { enabled: true, applied: false, state: "v29", reason: "already-merged", source: switchState.source, backup: null, error: null };
+  }
+  try {
+    const result = store.applyExplicitMigration(migration);
+    const backups = Array.isArray(store.migrationBackups) ? store.migrationBackups.filter((item) => item && item.version === TASK_MERGE_VERSION) : [];
+    const backup = backups.length ? { version: TASK_MERGE_VERSION, count: backups.length } : null;
+    const out = { enabled: true, applied: true, state: "v29", reason: null, source: switchState.source, backup, result, error: null };
+    if (typeof logger === "function") {
+      try { logger({ event: "task-merge-v29", result: "ALLOW", error_code: null, detail: { version: TASK_MERGE_VERSION, backupCount: backups.length } }); } catch { /* 日志失败不改结果 */ }
+    }
+    return out;
+  } catch (error) {
+    const code = error && typeof error.code === "string" ? error.code : "TASK_MERGE_FAILED";
+    const out = {
+      enabled: true, applied: false, state: "v28", reason: "migration-failed", source: switchState.source,
+      backup: null, rolledBack: true,
+      error: { code, message: String((error && error.message) || error).slice(0, 300) },
+    };
+    if (typeof logger === "function") {
+      try { logger({ event: "task-merge-v29", result: "DENY", error_code: code, detail: { message: out.error.message } }); } catch { /* 日志失败不改结果 */ }
+    }
+    return out;
+  }
+}
+
 module.exports = {
   TASK_MERGE_VERSION,
+  TASK_MERGE_SWITCH_FILE,
+  taskMergeSwitchState,
+  applyTaskMergeAtStartup,
   TASK_MERGE_COLUMN_COUNTS,
   TASKS_V29_DDL,
   TASK_STEPS_V29_DDL,

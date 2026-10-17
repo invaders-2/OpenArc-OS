@@ -9,6 +9,7 @@
  */
 "use strict";
 
+const crypto = require("node:crypto");
 const domain = require("./canvas-domain.cjs");
 const authz = require("./authorization-domain.cjs");
 const { AuthorizationStore } = require("./authorization-store.cjs");
@@ -21,6 +22,10 @@ const fail = (error, detail = null) => ({ ok: false, error: String(error), detai
 
 const CANVAS_ID = () => "cv_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
 const CMD_ID = () => "cc_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
+/** 邀请码归一化 / 哈希：数据库只存 sha256，明文只在创建响应里出现一次。 */
+const normalizeInviteCode = (value) => String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+const inviteCodeHash = (value) => crypto.createHash("sha256").update(normalizeInviteCode(value)).digest("hex");
+const INVITE_PERMISSIONS = Object.freeze(["read", "edit"]);
 
 class CanvasService {
   constructor({ identity, store, resourceStore = null, authService = null, authStore = null, resourceService = null, clock = null, logger = null, thumbnailer = null } = {}) {
@@ -401,6 +406,7 @@ class CanvasService {
       this.store.deleteSharesOfCanvas(canvasId);
       this.store.deleteCommandsOfCanvas(canvasId);
       this.store.deleteRunsOfCanvas(canvasId);
+      if (typeof this.store.purgeInvitesOfCanvas === "function") this.store.purgeInvitesOfCanvas(canvasId);
       this.store.purge({ canvasId });
     });
     return ok({ purged: canvasId });
@@ -1270,6 +1276,119 @@ class CanvasService {
       exists[ref] = { state: "AVAILABLE", name: row.name, version: Number(row.version || 1) };
     }
     return ok({ exists });
+  }
+
+  // ---------------------------------------------------------------- 邀请码（DX canvas.ts:1221-1270 的移植）
+
+  #inviteSummary(row) {
+    if (!row) return null;
+    return {
+      id: row.id,
+      codeHint: row.code_hint,
+      permission: row.permission === "edit" ? "edit" : "read",
+      joinCount: Number(row.join_count || 0),
+      createdAt: Number(row.created_at || 0),
+    };
+  }
+
+  /** 读取画布当前有效邀请（仅 canManage 可见；没有邀请时如实返回 null）。 */
+  getCanvasInvite({ context, canvasId } = {}) {
+    const l = this.#writeLoad(context, canvasId);
+    if (!l.ok) return l.response;
+    if (!domain.canManage(l.access)) {
+      this.#auditDenied({ context, userId: l.user.id, action: "canvas.invite.get", canvasId, reasonCode: REASON.READ_ONLY, source: l.access.source });
+      return fail(REASON.READ_ONLY, l.access.source);
+    }
+    return ok({ invite: this.#inviteSummary(this.store.latestInviteOfCanvas(canvasId)) });
+  }
+
+  /**
+   * 生成新邀请码：先撤销该画布所有未撤销邀请（同一时刻只有一条有效口令），
+   * 数据库只写 sha256(normalized) 与末 4 位提示；明文 code 只在本次响应返回一次。
+   */
+  createCanvasInvite({ context, canvasId, permission = "read" } = {}) {
+    const l = this.#writeLoad(context, canvasId);
+    if (!l.ok) return l.response;
+    if (!domain.canManage(l.access)) {
+      this.#auditDenied({ context, userId: l.user.id, action: "canvas.invite.create", canvasId, reasonCode: REASON.READ_ONLY, source: l.access.source });
+      return fail(REASON.READ_ONLY, l.access.source);
+    }
+    const requested = String(permission == null ? "read" : permission).trim().toLowerCase();
+    const normalizedPermission = INVITE_PERMISSIONS.includes(requested) ? requested : null;
+    if (!normalizedPermission) {
+      this.#auditDenied({ context, userId: l.user.id, action: "canvas.invite.create", canvasId, reasonCode: "INVALID_INPUT", source: l.access.source });
+      return fail("INVALID_INPUT", "permission");
+    }
+    const raw = crypto.randomBytes(6).toString("base64url").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8).padEnd(8, "X");
+    const code = raw.slice(0, 4) + "-" + raw.slice(4);
+    const inviteId = crypto.randomUUID();
+    try {
+      this.store.transactSync(() => {
+        this.store.revokeInvitesOfCanvas(canvasId);
+        this.store.insertInvite({ id: inviteId, canvasId, codeHash: inviteCodeHash(code), codeHint: code.slice(-4), permission: normalizedPermission, createdBy: l.user.id });
+        this.#auditAllowed({ context, userId: l.user.id, action: "canvas.invite.create", canvasId, source: l.access.source, newPermissions: [normalizedPermission] });
+      });
+    } catch {
+      return fail("INTERNAL_ERROR", "audit");
+    }
+    return ok({ invite: this.#inviteSummary(this.store.latestInviteOfCanvas(canvasId)), code });
+  }
+
+  /** 撤销画布当前邀请（幂等：没有有效邀请也返回 revoked=false）。 */
+  revokeCanvasInvite({ context, canvasId } = {}) {
+    const l = this.#writeLoad(context, canvasId);
+    if (!l.ok) return l.response;
+    if (!domain.canManage(l.access)) {
+      this.#auditDenied({ context, userId: l.user.id, action: "canvas.invite.revoke", canvasId, reasonCode: REASON.READ_ONLY, source: l.access.source });
+      return fail(REASON.READ_ONLY, l.access.source);
+    }
+    const changed = this.store.transactSync(() => {
+      const revoked = this.store.revokeInvitesOfCanvas(canvasId) > 0;
+      this.#auditAllowed({ context, userId: l.user.id, action: "canvas.invite.revoke", canvasId, source: l.access.source });
+      return revoked;
+    });
+    return ok({ revoked: !!changed });
+  }
+
+  /**
+   * 兑换邀请码：只接受 8 位归一化口令（允许带分隔符/小写）；无效 / 撤销 / 画布已删一律结构化拒绝。
+   * 兑换成功 = 写 canvas_invite_members + 建一条 canvas_shares（只读→VIEWER、编辑→EDITOR），
+   * 权限模型仍是既有 share 三档，不新建第二套授权权威。跨组织口令拒绝。
+   */
+  redeemCanvasInvite({ context, code } = {}) {
+    const actor = this.#actor(context);
+    if (!actor.ok) return actor;
+    const normalized = normalizeInviteCode(code);
+    if (normalized.length !== 8) return fail("INVALID_INPUT", "邀请口令格式不正确");
+    const invite = this.store.inviteByCodeHash(inviteCodeHash(normalized));
+    if (!invite || invite.revoked_at != null || invite.canvas_deleted_at != null) return fail("NOT_FOUND", "邀请口令不存在或已失效");
+    const board = this.store.boardById(invite.canvas_id);
+    if (!board || board.deleted_at != null) return fail("NOT_FOUND", "邀请口令不存在或已失效");
+    if (!board.organization_id || board.organization_id !== actor.user.team_id) return fail("FORBIDDEN", "不能兑换其他组织的邀请口令");
+    const role = invite.permission === "edit" ? "EDITOR" : "VIEWER";
+    const before = this.store.shareOf({ canvasId: board.id, userId: actor.user.id });
+    const existingRole = before ? domain.normalizeShareRole(before.role) : null;
+    // 邀请只能加权限、不能降级：已有 EDITOR/MANAGER 兑换只读邀请时保留原角色；owner 不写 share 行。
+    const isOwner = board.owner_user_id === actor.user.id;
+    const effectiveRole = !isOwner && existingRole && domain.roleRank(existingRole) >= domain.roleRank(role) ? existingRole : role;
+    try {
+      this.store.transactSync(() => {
+        this.store.joinInvite({ inviteId: invite.id, userId: actor.user.id });
+        if (!isOwner) this.store.upsertShare({ canvasId: board.id, userId: actor.user.id, role: effectiveRole, grantedBy: invite.created_by });
+        this.#auditAllowed({
+          context, userId: actor.user.id, action: "canvas.invite.redeem", canvasId: board.id, source: "INVITE",
+          oldPermissions: existingRole ? [existingRole] : [], newPermissions: [isOwner ? "OWNER" : effectiveRole],
+        });
+      });
+    } catch {
+      return fail("INTERNAL_ERROR", "audit");
+    }
+    const fresh = this.store.boardById(board.id);
+    const a = this.#access(context, fresh);
+    return ok({
+      canvas: this.#view(fresh, a.ok ? a.access : { allow: false, actions: [], source: "NO_GRANT" }),
+      permission: invite.permission === "edit" ? "edit" : "read",
+    });
   }
 }
 

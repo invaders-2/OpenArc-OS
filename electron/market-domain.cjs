@@ -48,6 +48,12 @@ const MARKET_COMMANDS = Object.freeze([
   "market/skillpacks/list",
   "market/skillpacks/get",
   "market/health",
+  // task-19 B：第三方应用目录 / 安装 / 回滚 / 在线目录源（执行端是 market-third-party-service.cjs）。
+  "market/thirdparty/list",
+  "market/thirdparty/install",
+  "market/thirdparty/rollback",
+  "market/thirdparty/source/get",
+  "market/thirdparty/source/set",
 ]);
 
 const MARKET_COMMAND_SET = new Set(MARKET_COMMANDS);

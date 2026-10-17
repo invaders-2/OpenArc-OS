@@ -55,11 +55,13 @@ const LINUX_LOOPBACK_HEX = Object.freeze({
 const LOCAL_PROXY_ERR_COMMAND_NOT_ALLOWED = "LOCAL_PROXY_COMMAND_NOT_ALLOWED";
 const LOCAL_PROXY_ERR_INVALID_INPUT = "LOCAL_PROXY_INVALID_INPUT";
 const LOCAL_PROXY_ERR_INTERNAL = "LOCAL_PROXY_INTERNAL";
+const LOCAL_PROXY_ERR_DEPENDENCY_UNAVAILABLE = "LOCAL_PROXY_DEPENDENCY_UNAVAILABLE";
 
 const LOCAL_PROXY_ERROR_CODES = Object.freeze([
   LOCAL_PROXY_ERR_COMMAND_NOT_ALLOWED,
   LOCAL_PROXY_ERR_INVALID_INPUT,
   LOCAL_PROXY_ERR_INTERNAL,
+  LOCAL_PROXY_ERR_DEPENDENCY_UNAVAILABLE,
 ]);
 
 /** 探测目标的中文标签（源 index.ts:5897 的 target 字段）。 */
@@ -80,6 +82,91 @@ const LOCAL_PROXY_TARGET = Object.freeze({
  *   network    出网边界的显式声明，供 UI / 审计展示。
  */
 const LOCAL_PROXY_COMMANDS = Object.freeze({
+  // task-22：手动代理保存 / 清除 / 状态读取（只登记 + 可选出网层应用；不接触凭据）。
+  "desktop/proxy/set": {
+    risk: "write",
+    credential: false,
+    probesExternal: false,
+    network: Object.freeze({ default: "off", note: "保存代理配置；若宿主注入 applyProxy，会应用到 Electron 网络栈（模型域仍走 model/proxy/set）" }),
+    summary: "保存手动代理地址（仅 http/https、无内嵌凭据）；写入 userData 配置（safeStorage 可用时加密），并尽力应用到 Electron 网络栈",
+  },
+  "desktop/proxy/clear": {
+    risk: "delete",
+    credential: false,
+    probesExternal: false,
+    network: Object.freeze({ default: "off", note: "删除手动代理配置并恢复直连" }),
+    summary: "清除手动代理配置，并在宿主注入 applyProxy 时恢复 Electron 网络栈直连",
+  },
+  "desktop/proxy/state": {
+    risk: "read",
+    credential: false,
+    probesExternal: false,
+    network: Object.freeze({ default: "off" }),
+    summary: "读取手动代理状态：是否已配置、地址、是否已作用到出网层、存储方式",
+  },
+  // task-8 A：局域网协作（默认关闭；显式 start 才监听 0.0.0.0 随机端口；一次性配对码/令牌）。
+  "desktop/lan/status": {
+    risk: "read", credential: false, probesExternal: false,
+    network: Object.freeze({ default: "off", note: "只读局域网协作状态（不发起网络请求）" }),
+    summary: "读取局域网协作状态：是否监听、端口、配对码有效期、在线客户端与令牌数量",
+  },
+  "desktop/lan/start": {
+    risk: "write", credential: false, probesExternal: false,
+    network: Object.freeze({ default: "off", note: "显式开启后才在 0.0.0.0 随机端口监听；默认关闭" }),
+    summary: "显式开启局域网协作服务（opt-in）：监听 0.0.0.0 随机端口；未配对连接一律拒绝",
+  },
+  "desktop/lan/stop": {
+    risk: "write", credential: false, probesExternal: false,
+    network: Object.freeze({ default: "off" }),
+    summary: "关闭局域网协作服务并清空配对码 / 令牌 / 房间",
+  },
+  "desktop/lan/pairing/create": {
+    risk: "write", credential: false, probesExternal: false,
+    network: Object.freeze({ default: "off" }),
+    summary: "生成一次性局域网配对码（10 分钟有效，只返回一次；可绑定单个画布）",
+  },
+  "desktop/lan/pair": {
+    risk: "write", credential: false, probesExternal: false,
+    network: Object.freeze({ default: "off" }),
+    summary: "用一次性配对码换取局域网令牌（只返回一次；默认只读，可绑定单个画布）",
+  },
+  // task-22：缓存清理（只删 dxos 下 cache/temp 目录内容；不碰凭据 / 数据库）。
+  "desktop/cache/clear": {
+    risk: "destructive",
+    credential: false,
+    probesExternal: false,
+    network: Object.freeze({ default: "off" }),
+    summary: "扫描并清理 <userData>/dxos 下的 cache/temp/tmp 目录（跳过凭据、数据库与备份），返回释放字节数",
+  },
+  // task-22：系统更新检查（只检查 / 下载，绝不静默安装）。
+  "desktop/update/check": {
+    risk: "external",
+    credential: false,
+    probesExternal: true,
+    network: Object.freeze({ default: "off", enableWith: "explicit-call", note: "仅用户显式检查时访问配置的更新源（GitHub Releases / ModelScope）" }),
+    summary: "检查系统更新：读取当前版本与可配置的更新源，返回是否有新版本与下载信息（不安装）",
+  },
+  "desktop/update/download": {
+    risk: "external",
+    credential: false,
+    probesExternal: true,
+    network: Object.freeze({ default: "off", enableWith: "explicit-call", note: "只下载安装包到 <userData>/dxos/updates/downloads，不执行、不安装" }),
+    summary: "下载系统更新安装包到本地目录（只下载，不静默安装）",
+  },
+  "desktop/update/source/get": {
+    risk: "read",
+    credential: false,
+    probesExternal: false,
+    network: Object.freeze({ default: "off" }),
+    summary: "读取系统更新源配置（kind / owner / repo / channel）",
+  },
+  "desktop/update/source/set": {
+    risk: "write",
+    credential: false,
+    probesExternal: false,
+    network: Object.freeze({ default: "off" }),
+    summary: "配置系统更新源（github-releases 或 modelscope-repo，只允许白名单仓库与主机）",
+  },
   "desktop/proxy/detect": {
     risk: "external",
     credential: false,
@@ -152,6 +239,25 @@ function proxyUrl(value) {
     if (!["http:", "https:"].includes(parsed.protocol) || !parsed.hostname || parsed.username || parsed.password) return "";
     return parsed.toString().replace(/\/$/, "");
   } catch { return ""; }
+}
+
+/**
+ * task-22：手动代理地址校验（比探测用的 proxyUrl 更严格，因为要落配置）。
+ * 只接受 http/https 源、必须有主机名、不得内嵌凭据、不得带路径/查询/片段；
+ * 返回 {ok,url} 或 {ok:false,reason}（reason 给用户看，不含原始输入里的敏感部分）。
+ */
+function normalizeManualProxyUrl(value) {
+  if (typeof value !== "string" || !value.trim()) return { ok: false, reason: "代理地址不能为空" };
+  let parsed;
+  try { parsed = new URL(value.trim()); }
+  catch { return { ok: false, reason: "代理地址不是合法 URL" }; }
+  if (!["http:", "https:"].includes(parsed.protocol)) return { ok: false, reason: "代理地址只允许 http:// 或 https://" };
+  if (!parsed.hostname) return { ok: false, reason: "代理地址缺少主机名" };
+  if (parsed.username || parsed.password) return { ok: false, reason: "代理地址不能内嵌用户名/密码" };
+  if (parsed.search || parsed.hash) return { ok: false, reason: "代理地址不能带查询参数或片段" };
+  if (parsed.pathname && parsed.pathname !== "/") return { ok: false, reason: "代理地址只能是源（不要带路径）" };
+  const port = parsed.port ? ":" + parsed.port : "";
+  return { ok: true, url: parsed.protocol + "//" + parsed.hostname + port };
 }
 
 /** 源:47-54 —— 逐字：reg query 输出解析（ProxyEnable REG_DWORD 0x1 + ProxyServer）。 */
@@ -343,11 +449,13 @@ module.exports = {
   LOCAL_PROXY_ERR_COMMAND_NOT_ALLOWED,
   LOCAL_PROXY_ERR_INVALID_INPUT,
   LOCAL_PROXY_ERR_INTERNAL,
+  LOCAL_PROXY_ERR_DEPENDENCY_UNAVAILABLE,
   parseWindowsLoopbackListeners,
   parseWindowsProcessNames,
   parseMacLoopbackListeners,
   parseMacSystemProxy,
   proxyUrl,
+  normalizeManualProxyUrl,
   parseWindowsSystemProxy,
   parseLinuxProcNetLoopbackListeners,
   parseProcFdTarget,

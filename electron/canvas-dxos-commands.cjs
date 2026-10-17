@@ -47,6 +47,7 @@ const DXOS_CANVAS_COMMANDS = Object.freeze([
   { command: "canvas/assetLibrary/get", risk: "read", credential: "none", summary: "读取素材库及其全部条目" },
   { command: "canvas/assetLibrary/items", risk: "read", credential: "none", summary: "按 kind / 关键词筛选素材库条目" },
   { command: "canvas/assetLibrary/import", risk: "write", credential: "none", summary: "导入素材字节（同 checksum 复用同一 ResourceRef 去重）" },
+  { command: "canvas/assetLibrary/syncSources", risk: "write", credential: "none", summary: "从文件 / 画布节点同步素材进资产库（所有者 + 可见性权限 + sourceKey 去重）" },
   { command: "canvas/assetLibrary/upsert", risk: "write", credential: "none", summary: "写入或更新 asset / prompt / workflow 条目（含版本历史与关联字段）" },
   { command: "canvas/assetLibrary/update", risk: "write", credential: "none", summary: "按基准版本更新素材库名称 / 可见性（version+1）" },
   { command: "canvas/assetLibrary/reference", risk: "read", credential: "none", summary: "返回条目的稳定 ResourceRef 与当前引用计数" },
@@ -62,6 +63,14 @@ const DXOS_CANVAS_COMMANDS = Object.freeze([
   { command: "canvas/collab/events", risk: "read", credential: "none", summary: "拉取本会话来收到过的下行事件（presence / cursor / patch）" },
   { command: "canvas/collab/rooms", risk: "read", credential: "none", summary: "列出本进程内的协作房间（本机调试）" },
   { command: "canvas/collab/sweep", risk: "write", credential: "none", summary: "清理超过空闲超时的协作会话并广播 presence" },
+  // ---- 邀请码（只存 hash；兑换后落既有 canvas_shares，权限仍走同一套三档） ----
+  { command: "canvas/invites/get", risk: "read", credential: "none", summary: "读取画布当前有效邀请（仅管理员/所有者可见，无邀请返回 null）" },
+  { command: "canvas/invites/create", risk: "write", credential: "none", summary: "生成邀请口令（只存 sha256 与末 4 位提示，明文只返回一次）" },
+  { command: "canvas/invites/revoke", risk: "delete", credential: "none", summary: "撤销画布当前邀请口令" },
+  { command: "canvas/invites/redeem", risk: "write", credential: "none", summary: "兑换邀请口令并加入画布（只读→VIEWER、编辑→EDITOR）" },
+  // ---- 画布插件：数据 / 受控网络（必须已安装、已启用且声明 canvas 清单） ----
+  { command: "canvas/plugins/data", risk: "write", credential: "none", summary: "读写画布插件的用户数据（容量取 Manifest host.storage，key 白名单字符）" },
+  { command: "canvas/plugins/network", risk: "external", credential: "none", summary: "按插件 Manifest 网络白名单发起受控请求（复用 developerNetwork 策略与审计）" },
   // ---- 内核能力（源 canvasKernelCapabilities.ts 的投影） ----
   { command: "canvas/capabilities/list", risk: "read", credential: "none", summary: "投影画布可被 Agent 调用的能力清单（含 risk / 副作用）" },
   // ---- Agent 附件（源 canvasAgentAttachments.ts + 本仓挂载语义） ----
@@ -95,6 +104,8 @@ function packageTempDir(dir) {
 function createCanvasDxosExtension({ identity, store, canvasService = null, resourceService = null, assetLibrary = null, attachments = null, hub = null, authorize = null, tempDir = null, nodeTypes = [], clock = null } = {}) {
   if (!identity) throw new Error("createCanvasDxosExtension 需要 identity");
   const events = new Map(); // "canvasId\u0000clientId" → array
+  // 画布插件宿主（数据 / 受控网络）：依赖 developerBundle，宿主在装配后晚绑定。
+  let pluginHost = null;
   const keepEvent = (delivery) => {
     const recipients = Array.isArray(delivery.to) ? delivery.to : [];
     for (const clientId of recipients) {
@@ -160,6 +171,10 @@ function createCanvasDxosExtension({ identity, store, canvasService = null, reso
     "canvas/assetLibrary/reference": (payload, context) => assetLibrary.referenceItem({ context, libraryId: asStr(payload.libraryId, 120), itemId: asStr(payload.itemId, 120) }),
     "canvas/assetLibrary/attach": (payload, context) => assetLibrary.attachItemToCanvas({ context, libraryId: asStr(payload.libraryId, 120), itemId: asStr(payload.itemId, 120), canvasId: asStr(payload.canvasId, 120), x: num(payload.x) || 0, y: num(payload.y) || 0 }),
     "canvas/assetLibrary/delete": (payload, context) => assetLibrary.deleteItem({ context, libraryId: asStr(payload.libraryId, 120), itemId: asStr(payload.itemId, 120) }),
+    "canvas/assetLibrary/syncSources": (payload, context) => assetLibrary.syncSources({
+      context, libraryId: asStr(payload.libraryId, 120),
+      items: Array.isArray(payload.items) ? payload.items.slice(0, 600) : [],
+    }),
 
     "canvas/collab/join": (payload, context) => {
       const user = actorOf(context);
@@ -191,6 +206,49 @@ function createCanvasDxosExtension({ identity, store, canvasService = null, reso
     },
     "canvas/collab/rooms": () => ok({ rooms: collabHub.liveRooms() }),
     "canvas/collab/sweep": () => collabHub.sweepIdle(),
+
+    // ---- 邀请码（canvas-service 内与 share 同一事务/审计；只存 sha256） ----
+    "canvas/invites/get": (payload, context) => {
+      if (!canvasService || typeof canvasService.getCanvasInvite !== "function") return fail("DEPENDENCY_UNAVAILABLE", "canvasService.getCanvasInvite");
+      return canvasService.getCanvasInvite({ context, canvasId: asStr(payload.canvasId, 120) });
+    },
+    "canvas/invites/create": (payload, context) => {
+      if (!canvasService || typeof canvasService.createCanvasInvite !== "function") return fail("DEPENDENCY_UNAVAILABLE", "canvasService.createCanvasInvite");
+      return canvasService.createCanvasInvite({ context, canvasId: asStr(payload.canvasId, 120), permission: asStr(payload.permission, 20) });
+    },
+    "canvas/invites/revoke": (payload, context) => {
+      if (!canvasService || typeof canvasService.revokeCanvasInvite !== "function") return fail("DEPENDENCY_UNAVAILABLE", "canvasService.revokeCanvasInvite");
+      return canvasService.revokeCanvasInvite({ context, canvasId: asStr(payload.canvasId, 120) });
+    },
+    "canvas/invites/redeem": (payload, context) => {
+      if (!canvasService || typeof canvasService.redeemCanvasInvite !== "function") return fail("DEPENDENCY_UNAVAILABLE", "canvasService.redeemCanvasInvite");
+      return canvasService.redeemCanvasInvite({ context, code: asStr(payload.code, 40) });
+    },
+
+    // ---- 画布插件数据 / 受控网络（宿主晚绑定 developerBundle；未绑定即结构化不可用） ----
+    "canvas/plugins/data": (payload, context) => {
+      const user = actorOf(context);
+      if (!user) return fail("NOT_FOUND_OR_FORBIDDEN");
+      if (!pluginHost) return fail("DEPENDENCY_UNAVAILABLE", "canvasPluginHost");
+      return pluginHost.data({
+        userId: user.id,
+        pluginId: asStr(payload.pluginId, 80),
+        action: asStr(payload.action, 20),
+        key: asStr(payload.key, 160),
+        value: payload.value,
+      });
+    },
+    "canvas/plugins/network": (payload, context) => {
+      const user = actorOf(context);
+      if (!user) return fail("NOT_FOUND_OR_FORBIDDEN");
+      if (!pluginHost) return fail("DEPENDENCY_UNAVAILABLE", "canvasPluginHost");
+      return pluginHost.network({
+        sessionRef: context && context.sessionRef,
+        userId: user.id,
+        pluginId: asStr(payload.pluginId, 80),
+        request: payload.request && typeof payload.request === "object" ? payload.request : {},
+      });
+    },
 
     "canvas/capabilities/list": () => {
       const projection = buildCanvasKernelCapabilities({ nodeTypes });
@@ -290,6 +348,11 @@ function createCanvasDxosExtension({ identity, store, canvasService = null, reso
   return {
     channel: CHANNEL,
     registry: DXOS_CANVAS_COMMANDS.map((entry) => ({ ...entry })),
+    /** 晚绑定画布插件宿主（main 在 developerBundle 装配后调用；未绑定即命令结构化不可用）。 */
+    configurePlugins({ pluginHost: next = null } = {}) {
+      pluginHost = next && typeof next.data === "function" && typeof next.network === "function" ? next : null;
+      return { configured: !!pluginHost };
+    },
     commandNames: DXOS_CANVAS_COMMANDS.map((entry) => entry.command),
     extendRendererCommands: () => extendRendererCommands([]),
     hub: collabHub,

@@ -75,16 +75,26 @@ function resourceTypeOf(mime, name) {
 }
 
 class CanvasAssetLibraryService {
-  constructor({ identity, store, resourceService = null, resourceStore = null, canvasService = null, tempDir = null, clock = null, logger = null } = {}) {
+  constructor({ identity, store, resourceService = null, resourceStore = null, canvasService = null, fsStore = null, authorization = null, tempDir = null, clock = null, logger = null } = {}) {
     if (!identity || !store) throw new Error("CanvasAssetLibraryService 需要 identity 与 store");
     this.identity = identity;
     this.store = store;
     this.resourceService = resourceService;
     this.resourceStore = resourceStore;
     this.canvasService = canvasService;
+    // DX 虚拟文件树（共享盘/部门盘/用户目录）与授权服务：同步导入"文件节点"时用；
+    // 由宿主在装配后按需注入（createDxosFsAdapter 晚于画布域创建）。
+    this.fsStore = fsStore;
+    this.authorization = authorization;
     this.tempDir = tempDir;
     this.clock = typeof clock === "function" ? clock : () => Date.now();
     this.logger = logger;
+  }
+
+  /** 晚绑定 dxos-fs 实例（宿主在 createDxosFsAdapter 之后调用；未注入时文件节点同步结构化不可用）。 */
+  configureFs(fsStore) {
+    this.fsStore = fsStore && typeof fsStore.getNode === "function" ? fsStore : null;
+    return { configured: !!this.fsStore };
   }
 
   // ---------------------------------------------------------------- 内部
@@ -350,6 +360,63 @@ class CanvasAssetLibraryService {
   // ---------------------------------------------------------------- 条目（含 prompt / workflow）
 
   /**
+   * 源 canvasAssetLibrary sync-sources（index.ts:5844-5875 的领域层实现）：
+   * 从文件 / 画布节点同步素材进资产库。规则逐条对齐：
+   *   · 只有资产库所有者可同步；
+   *   · 单次最多 600 项，按 nodeId 去重；已存在 sourceKey=asset-source:<nodeId> 的条目跳过；
+   *   · 资产库条目上限 1000；
+   *   · 先对所有来源做权限判定（任一不可读即整体拒绝，不产生半写），再逐条建条目；
+   *   · 字节只在资源域存一份，条目引用同一个 ResourceRef（同 checksum 复用 content object）。
+   * 返回 { library, imported }；空来源如实返回 imported=0。
+   */
+  async syncSources({ context, libraryId: id, items = [] } = {}) {
+    const loaded = this.#load(context, id, { needEdit: true });
+    if (!loaded.ok) return loaded;
+    if (loaded.access.level !== "owner") return fail("FORBIDDEN", "只有资产库所有者可以同步导入来源");
+    if (!Array.isArray(items) || items.length > 600) return fail("INVALID_INPUT", "单次最多同步 600 项素材");
+    const unique = new Map();
+    for (const raw of items) {
+      const entry = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+      const nodeId = str(entry.nodeId, 160).trim();
+      if (!nodeId) continue;
+      if (!unique.has(nodeId)) unique.set(nodeId, { nodeId, name: str(entry.name, 160).trim() || null, canvasId: str(entry.canvasId, 120).trim() || null });
+    }
+    const existing = new Set(this.store.itemsOfLibrary(loaded.library.id).map((row) => row.source_key).filter(Boolean));
+    const additions = [...unique.values()].filter((entry) => !existing.has("asset-source:" + entry.nodeId));
+    if (this.store.countItems(loaded.library.id) + additions.length > MAX_ITEMS) {
+      return fail("LIMIT_EXCEEDED", "共享资产库容量不足，请减少导入来源素材后重试");
+    }
+    if (!additions.length) return ok({ library: this.#libraryView(loaded.library, loaded.access), imported: 0 });
+
+    // 先全部解析并做权限判定：任一失败就整体拒绝，避免"一半已导入"。
+    const resolved = [];
+    for (const entry of additions) {
+      const source = await this.#resolveSourceNode({ context, user: loaded.user, sourceNodeId: entry.nodeId });
+      if (!source.ok) return source;
+      resolved.push({ entry, source });
+    }
+
+    let imported = 0;
+    let library = loaded.library;
+    for (const { entry, source } of resolved) {
+      const title = entry.name || source.name || "未命名素材";
+      const written = await this.#upsertAssetItem({
+        context,
+        loaded: { ...loaded, library },
+        item: { kind: "asset", title, group: "未分组", prompt: "", sourceNodeId: entry.nodeId, sourceKey: "asset-source:" + entry.nodeId },
+        previous: null,
+        requestedId: null,
+        title,
+        resolvedSource: source,
+      });
+      if (!written.ok) return written;
+      imported += 1;
+    }
+    const fresh = this.store.libraryById(loaded.library.id);
+    return ok({ library: this.#libraryView(fresh, this.#access(fresh, loaded.user)), imported });
+  }
+
+  /**
    * 源 :144-244 的条目写入：asset / prompt / workflow 三种 kind。
    * 为什么是 async：源用 fs copyNode / createNode 同步落文件；本仓素材字节统一走资源域的
    * resourceService.importManaged（异步），coverDataUrl 也必须先落成 ResourceRef，故整体改为 async。
@@ -407,7 +474,7 @@ class CanvasAssetLibraryService {
    * 本仓差异：字节仍在资源域（content-addressed），复制 = 复用同一 ResourceRef 后建库内条目，
    * 与 importAssetItem 的去重口径一致，不产生第二份内容对象。
    */
-  async #upsertAssetItem({ context, loaded, item, previous, requestedId, title }) {
+  async #upsertAssetItem({ context, loaded, item, previous, requestedId, title, resolvedSource = null }) {
     const hasRelationId = Object.prototype.hasOwnProperty.call(item, "relationId");
     const relationId = String(hasRelationId ? item.relationId ?? "" : (previous && previous.relation_id) ?? "").trim().slice(0, 160);
     const relationName = relationId ? (String(item.relationName ?? (previous && previous.relation_name) ?? "关联资产").trim().slice(0, 80) || "关联资产") : "";
@@ -424,7 +491,7 @@ class CanvasAssetLibraryService {
     let mediaKind = previous ? previous.media_kind : null;
     const sourceNodeId = str(item.sourceNodeId, 160).trim();
     if (sourceNodeId) {
-      const resolved = this.#resolveSourceNode({ context, sourceNodeId, canUseSource: item.canUseSource });
+      const resolved = resolvedSource || await this.#resolveSourceNode({ context, user: loaded.user, sourceNodeId, canUseSource: item.canUseSource });
       if (!resolved.ok) return resolved;
       resourceRef = resolved.resourceRef;
       checksum = resolved.checksum;
@@ -448,7 +515,7 @@ class CanvasAssetLibraryService {
       relationId: relationId || null, relationName: relationName || null, relationRole: relationRole || null,
       relationPrimary, relationPrompt: relationPrompt || null,
       resourceRef, checksum, mime, bytes, mediaKind, coverRef,
-      tags: [], model: null, category: null, source: null, sourceKey: null, skillId: null, promptRole: null,
+      tags: [], model: null, category: null, source: null, sourceKey: str(item.sourceKey, 500) || (previous && previous.source_key) || null, skillId: null, promptRole: null,
     };
     if (!previous && this.store.countItems(loaded.library.id) >= MAX_ITEMS) return fail("LIMIT_EXCEEDED", "items");
     const row = previous
@@ -459,34 +526,93 @@ class CanvasAssetLibraryService {
 
   /**
    * 源 :206-211 的 sourceNodeId 分支：源用全局 fs getNode + copyNode。
-   * 本仓节点属于某张画布，故在该用户**可见**的画布里查节点并取其 ResourceRef（getCanvas 已强制访问判定）；
+   * 本仓两类节点都支持：
+   *   · 画布节点：在该用户**可见**的画布里查节点并取其 ResourceRef（getCanvas 已强制访问判定）；
+   *   · DX 虚拟文件树节点（共享盘 / 部门盘 / 个人目录）：先做 fs 可见性判定，再把字节导入资源域，
+   *     条目只引用 ResourceRef（与 importAssetItem 的去重口径一致）。
    * 显式传入 canUseSource 时以其结论为准（与源 :208 一致，返回非 true 即拒绝）。
    */
-  #resolveSourceNode({ context, sourceNodeId, canUseSource = null }) {
+  async #resolveSourceNode({ context, user, sourceNodeId, canUseSource = null }) {
     if (typeof canUseSource === "function" && canUseSource(sourceNodeId) !== true) return fail("FORBIDDEN", "没有源文件读取权限");
-    if (!this.canvasService || typeof this.canvasService.listCanvases !== "function" || typeof this.canvasService.getCanvas !== "function") return fail("CANVAS_UNAVAILABLE");
-    const listed = this.canvasService.listCanvases({ context });
-    if (!listed || !listed.ok) return listed && listed.error ? listed : fail("NOT_FOUND");
-    for (const entry of listed.items || []) {
-      const view = this.canvasService.getCanvas({ context, canvasId: entry.canvasId });
-      if (!view || !view.ok) continue;
-      const node = (view.canvas.doc.nodes || []).find((candidate) => candidate.id === sourceNodeId);
-      if (!node) continue;
-      const ref = Array.isArray(node.refs) ? node.refs.find((value) => typeof value === "string" && value.startsWith("openarc-asset:"))
-        : (typeof node.url === "string" && node.url.startsWith("openarc-asset:") ? node.url : null);
-      if (!ref) return fail("INVALID_INPUT", "source-node-has-no-media");
-      const resourceRef = ref.replace(/^openarc-asset:/, "");
-      const resourceRow = this.resourceStore && typeof this.resourceStore.resourceRowById === "function" ? this.resourceStore.resourceRowById(resourceRef) : null;
-      if (!resourceRow) return fail("NOT_FOUND", "source-resource");
+    // 1) 画布节点（含跨画布可见性判定）。
+    if (this.canvasService && typeof this.canvasService.listCanvases === "function" && typeof this.canvasService.getCanvas === "function") {
+      const listed = this.canvasService.listCanvases({ context });
+      if (listed && listed.ok) {
+        for (const entry of listed.items || []) {
+          const view = this.canvasService.getCanvas({ context, canvasId: entry.canvasId });
+          if (!view || !view.ok) continue;
+          const node = (view.canvas.doc.nodes || []).find((candidate) => candidate.id === sourceNodeId);
+          if (!node) continue;
+          const ref = Array.isArray(node.refs) ? node.refs.find((value) => typeof value === "string" && value.startsWith("openarc-asset:"))
+            : (typeof node.url === "string" && node.url.startsWith("openarc-asset:") ? node.url : null);
+          if (!ref) return fail("INVALID_INPUT", "source-node-has-no-media");
+          const resourceRef = ref.replace(/^openarc-asset:/, "");
+          const resourceRow = this.resourceStore && typeof this.resourceStore.resourceRowById === "function" ? this.resourceStore.resourceRowById(resourceRef) : null;
+          if (!resourceRow) return fail("NOT_FOUND", "source-resource");
+          return ok({
+            resourceRef,
+            name: node.name || null,
+            checksum: resourceRow.checksum || null,
+            mime: resourceRow.mime_type || null,
+            bytes: resourceRow.size == null ? null : Number(resourceRow.size),
+            mediaKind: mimeKind(resourceRow.mime_type, resourceRow.name),
+          });
+        }
+      }
+    }
+    // 2) DX 虚拟文件树节点（共享盘 / 部门盘 / 个人目录）。
+    const port = this.fsStore;
+    if (port && typeof port.getNode === "function" && typeof port.readBlob === "function") {
+      const node = port.getNode(sourceNodeId);
+      if (!node) return fail("NOT_FOUND", "source-node");
+      const trashed = typeof port.isInTrash === "function" ? !!port.isInTrash(sourceNodeId) : node.trashed === true;
+      if (trashed) return fail("NOT_FOUND", "source-node-trashed");
+      if (!this.#canReadFsNode(node, context, user)) return fail("FORBIDDEN", "没有源文件读取权限");
+      const buffer = port.readBlob(sourceNodeId);
+      if (!buffer || !buffer.length) return fail("NOT_FOUND", "source-blob");
+      const mime = typeof node.mime === "string" && node.mime ? node.mime : "application/octet-stream";
+      const imported = await this.#importManagedFile({ context, buffer, name: node.name || "source", mime });
+      if (!imported.ok) return imported;
+      const resourceRow = this.resourceStore && typeof this.resourceStore.resourceRowById === "function" ? this.resourceStore.resourceRowById(imported.resourceRef) : null;
       return ok({
-        resourceRef,
-        checksum: resourceRow.checksum || null,
-        mime: resourceRow.mime_type || null,
-        bytes: resourceRow.size == null ? null : Number(resourceRow.size),
-        mediaKind: mimeKind(resourceRow.mime_type, resourceRow.name),
+        resourceRef: imported.resourceRef,
+        name: node.name || null,
+        checksum: (resourceRow && resourceRow.checksum) || null,
+        mime,
+        bytes: buffer.length,
+        mediaKind: mimeKind(mime, node.name),
       });
     }
     return fail("NOT_FOUND", "source-node");
+  }
+
+  /**
+   * DX 虚拟文件树可见性：自己的文件 / public 共享盘 / 本部门（含超管）的部门盘。
+   * canvas:* 与 asset-library:* 标记属于画布/素材库文件夹共享，不在这里当全局共享盘放行。
+   */
+  #canReadFsNode(node, context, user) {
+    if (!node || !user) return false;
+    if (node.ownerId && String(node.ownerId) === String(user.id)) return true;
+    let share = typeof node.share === "string" ? node.share : null;
+    if (!share && this.fsStore && typeof this.fsStore.shareZoneOf === "function") {
+      try { share = this.fsStore.shareZoneOf(node.id) || null; } catch { share = null; }
+    }
+    if (!share) return false;
+    if (share === "public") return true;
+    if (!share.startsWith("department:")) return false;
+    const departmentId = share.slice("department:".length);
+    let isSuper = user.role === "ADMIN";
+    let departmentIds = [];
+    if (this.authorization && typeof this.authorization.resolveActor === "function") {
+      try {
+        const actor = this.authorization.resolveActor({ context });
+        if (actor && actor.ok) {
+          isSuper = isSuper || actor.isSuper === true;
+          departmentIds = Array.isArray(actor.departmentIds) ? actor.departmentIds.map(String) : [];
+        }
+      } catch { /* 授权服务失败按拒绝处理 */ }
+    }
+    return isSuper || departmentIds.includes(departmentId);
   }
 
   /** 源 :102-111 materializeDataUrl 的等价：封面也进资源域，条目只存 ResourceRef。 */

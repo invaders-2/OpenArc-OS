@@ -173,7 +173,7 @@ test("①b 后端版本表本身：全部是合法 semver，且默认 canvas 内
    ② 任意 appId 的 status / check / install / rollback
    ══════════════════════════════════════════════════════════════════════════ */
 
-test("② status：任意已注册 appId 都返回版本与加载支持字段；canvas 可加载、notes 不可", async () => {
+test("② status：任意已注册 appId 都返回版本与加载支持字段；canvas / notes 都有加载路径", async () => {
   const { bundle } = makeBundle();
   const notes = await bundle.execute("market/update/status", { appId: "notes" }, session);
   assert.equal(notes.ok, true, JSON.stringify(notes));
@@ -183,10 +183,11 @@ test("② status：任意已注册 appId 都返回版本与加载支持字段；
   assert.equal(notes.value.latest, null);
   assert.equal(notes.value.updateAvailable, false);
   assert.equal(notes.value.canRollback, false);
-  assert.equal(notes.value.loadable, false);
-  assert.equal(notes.value.loader, null);
-  assert.equal(notes.value.packageKind, null);
-  assert.ok(notes.value.loadReason && notes.value.loadReason.indexOf("暂不支持安装包加载") >= 0);
+  assert.equal(notes.value.loadable, true);
+  assert.equal(notes.value.loader, "openarc-app");
+  assert.equal(notes.value.loadUrl, "openarc-app://notes/");
+  assert.equal(notes.value.packageKind, null, "预装前不臆造包形态");
+  assert.equal(notes.value.loadReason, null);
 
   const canvas = await bundle.execute("market/update/status", { appId: "canvas" }, session);
   assert.equal(canvas.value.loadable, true);
@@ -217,23 +218,24 @@ test("③ 无发布包：check 对任意 appId 都如实回「无可用更新」
   assert.equal(check.value.appId, "notes");
   const install = await bundle.execute("market/update/install", { appId: "notes", confirm: true }, session);
   assert.equal(install.ok, false);
-  assert.equal(install.error, "MARKET_UPDATE_NOT_LOADABLE", "没有加载路径的应用在下载之前就被结构化拒绝");
+  assert.equal(install.error, "MARKET_UPDATE_NO_RELEASE", "可加载但没有发布包时必须在下载前如实拒绝");
 });
 
-test("④ 有包但渲染层不支持加载：check 如实报有更新，install → NOT_LOADABLE，且不落任何文件", async () => {
+test("④ 有包且已接入加载路径：check 如实报有更新，install 落盘并切换指针", async () => {
   const fixture = msAppRoutes("notes", "0.2.0");
   const { bundle, dir } = makeBundle({ ...msRevisionsRoute(), ...fixture.routes });
   const check = await bundle.execute("market/update/check", { appId: "notes" }, session);
   assert.equal(check.ok, true, JSON.stringify(check));
   assert.equal(check.value.latest.version, "0.2.0");
   assert.equal(check.value.updateAvailable, true, "有发布包必须如实报有新版本");
-  assert.equal(check.value.loadable, false, "但渲染层不支持加载");
+  assert.equal(check.value.loadable, true, "全部已注册应用都接入了加载路径");
 
   const install = await bundle.execute("market/update/install", { appId: "notes", confirm: true }, session);
-  assert.equal(install.ok, false, JSON.stringify(install));
-  assert.equal(install.error, "MARKET_UPDATE_NOT_LOADABLE");
-  assert.equal(fs.existsSync(path.join(appStateDir(dir, "notes"), "0.2.0")), false, "拒绝时必须不落地版本目录");
-  assert.equal(fs.existsSync(path.join(appStateDir(dir, "notes"), "current.json")), false, "拒绝时不得切换指针");
+  assert.equal(install.ok, true, JSON.stringify(install));
+  assert.equal(install.value.installed.version, "0.2.0");
+  assert.equal(fs.existsSync(path.join(appStateDir(dir, "notes"), "0.2.0")), true, "安装必须真的落盘");
+  const pointer = JSON.parse(fs.readFileSync(path.join(appStateDir(dir, "notes"), "current.json"), "utf8"));
+  assert.equal(pointer.version, "0.2.0", "指针必须切到新版本");
 });
 
 test("⑤ 回滚：任意 appId 从没装过 → 幂等回「就在内置版本」（结构化回包，不是崩溃）", async () => {

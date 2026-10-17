@@ -29,6 +29,7 @@ const path = require("node:path");
 
 const marketDomain = require("./market-domain.cjs");
 const marketUpdateDomain = require("./market-update-domain.cjs");
+const thirdPartyDomain = require("./market-third-party-domain.cjs");
 const { resolveDxosPaths } = require("./dxos-foundation-paths.cjs");
 
 const HOST_APP_ID = "market-center";
@@ -46,6 +47,8 @@ function createMarketBundle(options = {}) {
   const logger = typeof options.logger === "function" ? options.logger : null;
   // Stage 1：market/update/* 的真实执行端（market-update-service.cjs 的产物）；缺省即未装配。
   const updateService = options.updateService && typeof options.updateService.execute === "function" ? options.updateService : null;
+  // task-19 B：第三方目录 / 安装执行端（market/thirdparty/*）；未装配时命令结构化 NOT_READY。
+  const thirdPartyService = options.thirdPartyService && typeof options.thirdPartyService.execute === "function" ? options.thirdPartyService : null;
 
   function candidateDirs() {
     const dirs = [];
@@ -128,6 +131,10 @@ function createMarketBundle(options = {}) {
     try {
       const sessionRef = context && context.sessionRef ? context.sessionRef : null;
       if (!sessionRef) return { ok: false, error: marketDomain.MARKET_ERR_UNAUTHENTICATED, detail: "market:command 需要已认证会话" };
+      if (thirdPartyDomain.isThirdPartyCommand(command)) {
+        if (!thirdPartyService) return { ok: false, error: thirdPartyDomain.MARKET_THIRDPARTY_ERR_NOT_READY, detail: "第三方市场服务尚未装配" };
+        return await thirdPartyService.execute(command, payload, context);
+      }
       if (marketUpdateDomain.isMarketUpdateCommand(command)) {
         if (!updateService) return { ok: false, error: marketUpdateDomain.MARKET_UPDATE_ERR_NOT_READY, detail: "在线更新服务尚未装配" };
         return await updateService.execute(command, payload, context);
@@ -173,6 +180,7 @@ function createMarketBundle(options = {}) {
     // Stage 1：只读暴露更新命令表 / 是否已装配（主进程内部与测试用；不过 IPC）。
     updateCommands: marketUpdateDomain.MARKET_UPDATE_COMMANDS.slice(),
     updateService,
+    thirdPartyService,
   };
 }
 

@@ -53,6 +53,18 @@ const SQL = {
   insertRunResult:
     "INSERT INTO canvas_run_facts (run_id, canvas_id, node_id, result_json, result_status, stop_reason, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(run_id) DO UPDATE SET result_json = excluded.result_json, result_status = excluded.result_status, stop_reason = excluded.stop_reason, updated_at = excluded.updated_at WHERE result_json IS NULL",
   runFactById: "SELECT * FROM canvas_run_facts WHERE run_id = ?",
+  // ---- 邀请码（canvas_invites 只存 sha256(code)，明文只在创建响应里出现一次）----
+  revokeInvitesOfCanvas: "UPDATE canvas_invites SET revoked_at = ? WHERE canvas_id = ? AND revoked_at IS NULL",
+  insertInvite: "INSERT INTO canvas_invites (id, canvas_id, code_hash, code_hint, permission, created_by, created_at) VALUES (?,?,?,?,?,?,?)",
+  inviteByCodeHash: "SELECT i.*, c.deleted_at AS canvas_deleted_at FROM canvas_invites i JOIN canvas_boards c ON c.id = i.canvas_id WHERE i.code_hash = ? AND i.revoked_at IS NULL",
+  inviteById: "SELECT * FROM canvas_invites WHERE id = ?",
+  latestInviteOfCanvas:
+    "SELECT i.id, i.code_hint, i.permission, i.created_at, COUNT(m.user_id) AS join_count FROM canvas_invites i " +
+    "LEFT JOIN canvas_invite_members m ON m.invite_id = i.id " +
+    "WHERE i.canvas_id = ? AND i.revoked_at IS NULL GROUP BY i.id ORDER BY i.created_at DESC LIMIT 1",
+  joinInvite: "INSERT OR REPLACE INTO canvas_invite_members (invite_id, user_id, joined_at) VALUES (?,?,?)",
+  deleteInviteMembersOfCanvas: "DELETE FROM canvas_invite_members WHERE invite_id IN (SELECT id FROM canvas_invites WHERE canvas_id = ?)",
+  deleteInvitesOfCanvas: "DELETE FROM canvas_invites WHERE canvas_id = ?",
 };
 
 /**
@@ -197,6 +209,25 @@ class CanvasStore {
     if (!row || !row.target_json) return null;
     try { return { target: JSON.parse(row.target_json), nodeId: row.node_id, baseRevision: Number(row.base_revision || 1) }; } catch { return null; }
   }
+  // ---------------------------------------------------------------- 邀请码
+
+  /** 撤销该画布所有未撤销邀请（创建新邀请前调用：同一画布同一时刻只有一个有效口令）。 */
+  revokeInvitesOfCanvas(canvasId) { return this.db.prepare(SQL.revokeInvitesOfCanvas).run(this.now(), String(canvasId)).changes; }
+  insertInvite({ id, canvasId, codeHash, codeHint, permission, createdBy }) {
+    this.db.prepare(SQL.insertInvite).run(String(id), String(canvasId), String(codeHash), String(codeHint), String(permission), String(createdBy), this.now());
+    return this.inviteById(id);
+  }
+  inviteByCodeHash(codeHash) { return this.db.prepare(SQL.inviteByCodeHash).get(String(codeHash)) || null; }
+  inviteById(id) { return this.db.prepare(SQL.inviteById).get(String(id || "")) || null; }
+  latestInviteOfCanvas(canvasId) { return this.db.prepare(SQL.latestInviteOfCanvas).get(String(canvasId)) || null; }
+  joinInvite({ inviteId, userId }) { this.db.prepare(SQL.joinInvite).run(String(inviteId), String(userId), this.now()); return true; }
+  /** 永久删除画布时清掉邀请与成员（canvas_invites 没有 FK，不清理会留下无法兑换的孤儿行）。 */
+  purgeInvitesOfCanvas(canvasId) {
+    this.db.prepare(SQL.deleteInviteMembersOfCanvas).run(String(canvasId));
+    this.db.prepare(SQL.deleteInvitesOfCanvas).run(String(canvasId));
+    return true;
+  }
+
   /** 被保留的结果（结果可用性/内容）。 */
   runResultOf(runId) {
     const row = this.runFactById(runId);

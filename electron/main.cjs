@@ -4,6 +4,7 @@ const {
   ipcMain,
   safeStorage,
   screen,
+  session,
   Menu,
   nativeImage,
   protocol,
@@ -61,6 +62,8 @@ const { registerDeveloperIpc } = require("./developer-bootstrap.cjs");
 // B7j：自动化域 developerApps 适配器读取的是 developer-service 的同一份本地装载态
 // （app_market_releases / user_installed_apps + <userData>/dxos/developer-apps 包清单）。
 const { createDeveloperStore } = require("./developer-store.cjs");
+// 画布插件宿主（数据 / 受控网络）：依赖 developerBundle，装配后晚绑定到 canvas 扩展。
+const { createCanvasPluginHost } = require("./canvas-dxos-plugins.cjs");
 // B7j：自动化域 toolCatalog 适配器复用 agent 工具目录的唯一执行入口（与 agent 域同一套权限判定）。
 const { runCatalogTool } = require("./agent-tool-catalog.cjs");
 // B7f：B7b 四张命令切片（lab / collab / migrations / realtime）合流到唯一 developer:command。
@@ -78,6 +81,10 @@ const { createMarketBundle } = require("./market-service.cjs");
 // Stage 1：无限画布在线更新（market/update/* 的真实执行端；走既有 market:command 通道）。
 const { createMarketUpdateBundle } = require("./market-update-service.cjs");
 const { createCanvasBundleResolver } = require("./canvas-package-resolver.cjs");
+// task-19 A：全部已注册应用的已安装包解析 + 通用只读协议 openarc-app://<appId>/。
+const { createAppPackageResolver } = require("./app-package-resolver.cjs");
+// task-19 B：第三方应用目录（本地 + 在线源）/ 安装 / 回滚，安装后复用同一条包加载路径。
+const { createThirdPartyRegistry, createThirdPartyMarket } = require("./market-third-party-service.cjs");
 const { registerIntegrationIpc, registerMarketIpc } = require("./plugin-bootstrap.cjs");
 // B4 · providerAdapter 桥：把 B2 的 provider-protocol store/service 投影成 B4 执行器要的只读适配器
 // （firstUsable/all/autoFallback/revealProvider/call）；只读投影绝不返回 api_key/credentialRef。
@@ -122,6 +129,11 @@ const { registerFileTransferIpc } = require("./file-transfer-bootstrap.cjs");
 const { createCodexCanvasDomain, registerCodexCanvasIpc } = require("./codex-canvas-bootstrap.cjs");
 const { createLocalProxyService } = require("./local-proxy-service.cjs");
 const { registerLocalProxyIpc } = require("./local-proxy-bootstrap.cjs");
+// task-22：设置页真实能力（缓存清理 / 系统更新检查，均挂 desktop:command）。
+const { createDesktopCacheService } = require("./desktop-cache-service.cjs");
+const { createDesktopUpdateService } = require("./desktop-update-service.cjs");
+// task-8 A：局域网协作（opt-in；0.0.0.0 + 随机端口；配对码/令牌）。
+const { createLanCollabService } = require("./lan-collab-service.cjs");
 // 0.6.2 · 三个新域接线（photos / photocraft / app-exchange）：bootstrap 只承担 trusted 边界 + 命令白名单，
 //   装配参数由本文件注入（与 0.6.1 五域同一接线口径）；命令表本身即白名单，未登记命令一律 *_COMMAND_NOT_ALLOWED。
 const { createPhotosBundle } = require("./photos-service.cjs");
@@ -168,6 +180,11 @@ let pluginBundle;
 let marketBundle;
 /** Stage 1：画布在线更新 bundle（market/update/* 的执行端；装配失败为 null → MARKET_UPDATE_NOT_READY）。 */
 let marketUpdateBundle;
+/** task-19 A：通用已安装包解析器（market install 的加载复核 + openarc-app:// 协议共用同一实例）。 */
+let appPackageResolver = null;
+/** task-19 B：第三方应用注册表 / 目录安装服务（market/thirdparty/*）。 */
+let thirdPartyRegistry = null;
+let thirdPartyMarket = null;
 /** 模型/协议出口的**可选**代理 fetchImpl（只注入模型域；不写 globalThis，不影响其它出网）。 */
 let modelEgressFetch = null;
 /** D5-01 Closure-2：受控浏览器目标（用户显式授权）。宿主持有唯一实例，工具链与 UI 共用同一个。 */
@@ -218,6 +235,8 @@ protocol.registerSchemesAsPrivileged([
   // D5-02：无限画布 bundle 的自定义协议（iframe 用；**只读**目录白名单，无目录穿越）。
   // corsEnabled：画布 iframe 是 opaque origin，字体等子资源必须能跨源取（静态只读 bundle）。
   { scheme: "openarc-canvas", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } },
+  // task-19 A：通用已安装应用包协议（只读；每次请求重新读 current.json，安装/回滚立即生效）。
+  { scheme: "openarc-app", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } },
 ]);
 
 /**
@@ -833,6 +852,15 @@ app.whenReady().then(async () => {
     } catch (error) {
       console.warn("[openarc] DX 虚拟文件树装配失败，文件工具将保持结构化依赖缺失：" + ((error && error.message) || error));
     }
+    // 画布素材库的 sync-sources 需要读 DX 虚拟文件树的"文件节点"：画布域创建早于 fsAdapter，
+    // 这里晚绑定同一个 store（未装配时 sync-sources 对文件节点如实结构化不可用）。
+    try {
+      if (identity.canvasAssetLibrary && typeof identity.canvasAssetLibrary.configureFs === "function") {
+        identity.canvasAssetLibrary.configureFs(dxosFsAdapter ? dxosFsAdapter.store : null);
+      }
+    } catch (error) {
+      console.warn("[openarc] 画布素材库文件节点同步未接上 DX 虚拟文件树：" + ((error && error.message) || error));
+    }
 
     // B4：技能域。
     //   · <userData>/dxos 注入 configureSkillStore / configureSkillPack / configureSkillRunner / configureSkillAnalyzer /
@@ -1069,6 +1097,8 @@ app.whenReady().then(async () => {
       environment: { locale: app.getLocale(), build: null },
       // 受监督子进程清单：只取 RuntimeSupervisor 的 safe snapshot；不暴露 pid / 路径。
       processes: () => collectSupervisedProcesses(identity),
+      // 共享盘 / 部门盘 / 子树快照 / 搜索 / 统计：复用同一棵 DX 虚拟文件树（只读桥，不返回绝对路径）。
+      fsStore: dxosFsAdapter ? dxosFsAdapter.store : null,
       clock: null,
       logger: null,
     });
@@ -1172,6 +1202,26 @@ app.whenReady().then(async () => {
       isTrusted: trusted,
       hostAppId: "ai",
     });
+    // 画布插件宿主：只读复用 developer-store 的已安装版本/清单；网络委托 developer/network/request。
+    // 晚绑定到 canvas 扩展（canvas 域创建早于 developerBundle）；未绑定则 canvas/plugins/* 结构化不可用。
+    try {
+      const canvasPluginStore = createDeveloperStore({
+        db: identity.store ? identity.store.connection || identity.store.db || null : null,
+        dataRoot: path.join(app.getPath("userData"), "dxos"),
+        clock: () => Date.now(),
+      });
+      const canvasPluginHost = createCanvasPluginHost({
+        developerStore: canvasPluginStore,
+        developerService: developerBundle,
+        dataRoot: path.join(app.getPath("userData"), "dxos"),
+        clock: () => Date.now(),
+      });
+      if (identity.canvasDxosExtension && typeof identity.canvasDxosExtension.configurePlugins === "function") {
+        identity.canvasDxosExtension.configurePlugins({ pluginHost: canvasPluginHost });
+      }
+    } catch (error) {
+      console.warn("[openarc] 画布插件宿主装配失败，canvas/plugins/* 保持结构化不可用：" + ((error && error.message) || error));
+    }
     // B4e 收口：把 developer App 目录投影晚绑定给本地账号服务。
     //   · identity 在 runtime-boot.cjs 里先建，developerBundle 后建，构造期无法注入；
     //   · 数据仍是同一份（identity SQLite + <userData>/dxos），这里只做只读投影，不新建第二份目录；
@@ -1290,12 +1340,33 @@ app.whenReady().then(async () => {
     //   · 公钥来源 resources/app-update-keys.json；私钥永不进主进程；
     //   · 网络只在用户触发 check/install 时发生，且只访问所选源自己的白名单主机（github-releases / modelscope-repo 各一份，互不通用）；
     //   · 审计沿用 identity.authorization.store.auditAuthorization（与 model / mcp 同一张表）。
+    // task-19 B：第三方注册表先建；A 的解析器与更新服务都通过它动态识别第三方 appId。
+    try {
+      thirdPartyRegistry = createThirdPartyRegistry({ userDataDir: app.getPath("userData"), clock: null });
+    } catch (error) {
+      thirdPartyRegistry = null;
+      console.warn("[openarc] 第三方应用注册表装配失败，market/thirdparty/* 保持结构化不可用：" + String((error && error.message) || error));
+    }
+    // task-19 A：通用包加载路径先装配；market install 的加载复核与 openarc-app:// 协议共用同一实例。
+    try {
+      appPackageResolver = createAppPackageResolver({
+        userDataDir: app.getPath("userData"),
+        appDir: path.join(__dirname, ".."),
+        isKnownApp: (value) => (thirdPartyRegistry && thirdPartyRegistry.has(value) ? String(value) : null),
+      });
+    } catch (error) {
+      appPackageResolver = null;
+      console.warn("[openarc] 通用应用包解析器装配失败，openarc-app:// 与安装后加载复核保持不可用：" + String((error && error.message) || error));
+    }
     try {
       marketUpdateBundle = createMarketUpdateBundle({
         userDataDir: app.getPath("userData"),
         appDir: path.join(__dirname, ".."),
         authorization: identity.authorization,
         fetchImpl: typeof fetch === "function" ? fetch : null,
+        packageResolver: appPackageResolver,
+        isKnownApp: (value) => (thirdPartyRegistry && thirdPartyRegistry.has(value) ? String(value) : null),
+        extraAppIds: thirdPartyRegistry ? thirdPartyRegistry.ids() : [],
         logger: null,
         clock: null,
       });
@@ -1303,12 +1374,29 @@ app.whenReady().then(async () => {
       marketUpdateBundle = null;
       console.error("[openarc] 画布在线更新服务装配失败，market/update/* 回 MARKET_UPDATE_NOT_READY：" + String((error && error.message) || error));
     }
+    // task-19 B：第三方目录 / 安装（本地 catalog + 在线源）；复用 updateService 的签名/摘要/原子切换/回滚。
+    try {
+      thirdPartyMarket = createThirdPartyMarket({
+        userDataDir: app.getPath("userData"),
+        appDir: path.join(__dirname, ".."),
+        updateService: marketUpdateBundle,
+        registry: thirdPartyRegistry,
+        fetchImpl: typeof fetch === "function" ? fetch : null,
+        authorization: identity.authorization,
+        systemVersion: app.getVersion(),
+        clock: null,
+      });
+    } catch (error) {
+      thirdPartyMarket = null;
+      console.warn("[openarc] 第三方应用市场装配失败，market/thirdparty/* 保持结构化不可用：" + String((error && error.message) || error));
+    }
     marketBundle = createMarketBundle({
       userDataDir: app.getPath("userData"),
       appDir: path.join(__dirname, ".."),
       logger: null,
       clock: null,
       updateService: marketUpdateBundle,
+      thirdPartyService: thirdPartyMarket,
     });
     registerMarketIpc({
       ipcMain,
@@ -1404,12 +1492,54 @@ app.whenReady().then(async () => {
       });
     });
 
-    // 本机代理探测：configured 来源保持空 —— 本仓没有源 desktopConfigFile() 的对应实现，
-    // 不新造配置文件读取；env 代理与平台回环扫描不受影响（探针默认不出网，payload.probe=true 才试连）。
+    // 本机代理探测 + task-22 设置能力：手动代理（落 userData/settings）、缓存清理、系统更新检查。
+    //   · 手动代理配置写 <userData>/dxos/settings/proxy.json；safeStorage 可用时加密，否则明文 JSON；
+    //   · applyProxy 尽力作用到 Electron 网络栈（session.setProxy）；模型域仍有自己的 model/proxy/set，
+    //     状态里如实区分 appliedScope；没有适配器时标 registration-only；
+    //   · 缓存清理只删 dxos 下 cache/temp/tmp 内容，跳过凭据/数据库/备份；
+    //   · 系统更新只检查/下载到 dxos/updates/downloads，不执行、不安装。
     registerDomainOrDegrade("localProxy", (degraded) => {
+      let service = null;
+      if (!degraded) {
+        const cacheService = createDesktopCacheService({ userDataDir: app.getPath("userData") });
+        const updateService = createDesktopUpdateService({
+          userDataDir: app.getPath("userData"),
+          currentVersion: app.getVersion(),
+          fetchImpl: typeof fetch === "function" ? fetch : null,
+        });
+        const lanService = createLanCollabService({
+          canvasService: identity.canvasDocService || null,
+          assetLibrary: identity.canvasAssetLibrary || null,
+          authorization: identity.authorization,
+        });
+        app.once("before-quit", () => { try { lanService.dispose(); } catch { /* 已关闭 */ } });
+        service = createLocalProxyService({
+          userDataDir: app.getPath("userData"),
+          safeStorage,
+          cacheService,
+          updateService,
+          lanService,
+          applyProxy: async ({ url, enabled }) => {
+            try {
+              const target = session && session.defaultSession ? session.defaultSession : null;
+              if (!target || typeof target.setProxy !== "function") {
+                return { applied: false, scope: "electron-session", note: "当前 Electron 运行时不支持 session.setProxy" };
+              }
+              await target.setProxy(enabled && url ? { proxyRules: url, proxyBypassRules: "<local>" } : { mode: "direct" });
+              return { applied: true, scope: "electron-session", note: "已应用到 Electron 网络栈（模型域走 model/proxy/set）" };
+            } catch (error) {
+              return { applied: false, scope: "electron-session", note: "应用代理失败：" + String((error && error.message) || error).slice(0, 120) };
+            }
+          },
+        });
+        // 启动时把已保存配置重新应用到 Electron 网络栈；失败只记录，不阻断启动。
+        service.applyPersistedProxy().catch((error) => {
+          console.warn("[openarc] 已保存的手动代理未能应用：" + String((error && error.message) || error));
+        });
+      }
       registerLocalProxyIpc({
         ipcMain,
-        service: degraded ? null : createLocalProxyService({ getConfiguredProxy: () => "" }),
+        service,
         isTrusted: trusted,
         identity: identity.service,
         appId: "ai",
@@ -1589,6 +1719,10 @@ app.whenReady().then(async () => {
       logger: (record) => console.log("[openarc] canvas-bundle " + JSON.stringify(record)),
     });
     protocol.handle("openarc-canvas", (request) => canvasBundleResolver.handle(request));
+    // task-19 A：全部已注册应用的已安装包只读协议（未安装 / 校验失败回 404，渲染层回退内置应用）。
+    if (appPackageResolver) {
+      protocol.handle("openarc-app", (request) => appPackageResolver.handle(request));
+    }
   }
 
   // ---------------------------------------------------------------------------

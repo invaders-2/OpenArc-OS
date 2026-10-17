@@ -62,6 +62,7 @@ const MARKET_UPDATE_COMMANDS = Object.freeze([
   "market/update/check",
   "market/update/install",
   "market/update/rollback",
+  "market/update/health",
   "market/update/sources",
   "market/update/source/set",
 ]);
@@ -129,14 +130,19 @@ const APP_BUILTIN_VERSIONS = Object.freeze({
 });
 
 /**
- * 渲染层已接入「已安装包加载路径」的应用 → 协议 / 加载器 ID。
- * 本期只有画布：openarc-canvas:// 会先解析 <userData>/dxos/apps/canvas/<version>/（见 canvas-package-resolver.cjs）。
- * 其它应用即使更新源里有包，装到磁盘也不会被任何加载路径读取 —— 所以 install 结构化拒绝
- * （MARKET_UPDATE_NOT_LOADABLE），界面必须如实说明。
+ * 已安装包加载路径（泛化）：每个已注册应用都有加载路径。
+ *   · canvas 走历史专用协议 openarc-canvas://bundle/（渲染层已接入，保持不变）；
+ *   · 其余应用走通用只读协议 openarc-app://<appId>/（app-package-resolver.cjs），支持
+ *     js-module 与 static-web 两种包形态，入口由 manifest.entry 决定。
+ * 未在注册表里的 appId 仍然不可安装（normalizeAppId 拒绝），第三方 App 由 task-19 B 的
+ * 第三方注册表另行登记后复用同一套加载路径。
  */
-const APP_PACKAGE_LOADERS = Object.freeze({ canvas: "openarc-canvas" });
+const GENERIC_APP_LOADER = "openarc-app";
+const APP_PACKAGE_LOADERS = Object.freeze(Object.fromEntries(
+  Object.keys(APP_BUILTIN_VERSIONS).map((id) => [id, id === CANVAS_APP_ID ? "openarc-canvas" : GENERIC_APP_LOADER]),
+));
 
-/** 应用声明的包形态（仅"已接入加载路径"的应用有值；其余一律 null，不臆造）。 */
+/** 应用声明的包形态：画布是历史 static-web；其余应用由安装后的 manifest.kind 决定（预装前不臆造）。 */
 const APP_PACKAGE_KINDS = Object.freeze({ canvas: MANIFEST_KIND_STATIC_WEB });
 
 /** appId 语法：小写字母开头，后跟小写字母 / 数字 / 连字符；且必须是注册表里的应用。 */
@@ -243,20 +249,24 @@ function builtinVersionForApp(value) {
   return (id && APP_BUILTIN_VERSIONS[id]) || DEFAULT_BUILTIN_VERSION;
 }
 
-/** 渲染层是否已接入该应用的已安装包加载路径。 */
+/** 应用是否可加载已安装包；同时给出协议入口（渲染层拿到的加载路径）。 */
 function appLoadSupport(value) {
   const id = normalizeAppId(value);
   const loader = id ? APP_PACKAGE_LOADERS[id] || null : null;
-  if (loader) return { appId: id, loadable: true, loader, reason: null };
+  if (loader) {
+    const loadUrl = loader === "openarc-canvas" ? "openarc-canvas://bundle/" : GENERIC_APP_LOADER + "://" + id + "/";
+    return { appId: id, loadable: true, loader, loadUrl, reason: null };
+  }
   return {
     appId: id,
     loadable: false,
     loader: null,
-    reason: "该应用暂不支持安装包加载（本期只有无限画布接入了已安装包的加载路径）",
+    loadUrl: null,
+    reason: "appId 非法或未注册",
   };
 }
 
-/** 应用声明的包形态；未接入加载路径的应用回 null（不臆造）。 */
+/** 应用声明的包形态；未知应用回 null（不臆造）。安装前未声明 kind 的应用由 manifest.kind 决定。 */
 function appPackageKind(value) {
   const id = normalizeAppId(value);
   return (id && APP_PACKAGE_KINDS[id]) || null;
@@ -468,7 +478,10 @@ function isSafeEntryName(name) {
  * options.appId 缺省 = canvas（历史行为不变）；传入后 manifest.id 必须与之一致。
  */
 function normalizeManifest(raw, options = {}) {
-  const appId = normalizeAppId(options && options.appId) || CANVAS_APP_ID;
+  // allowUnknownAppId：第三方注册表已登记但不是内置应用；只允许受信任的安装/解析路径显式开启。
+  const requestedAppId = typeof (options && options.appId) === "string" ? options.appId.trim() : "";
+  const appId = normalizeAppId(requestedAppId)
+    || (options && options.allowUnknownAppId === true && APP_ID_RE.test(requestedAppId) ? requestedAppId : CANVAS_APP_ID);
   const fail = (detail) => ({ ok: false, error: createMarketUpdateError(MARKET_UPDATE_ERR_INVALID_INPUT, detail) });
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return fail("manifest 必须是 JSON 对象");
   if (raw.format !== MANIFEST_FORMAT) return fail("manifest.format 必须是 " + MANIFEST_FORMAT);
@@ -605,7 +618,7 @@ module.exports = {
   createMarketUpdateError, normalizeMarketUpdateError, marketUpdateCommandNotAllowed, normalizeAppId,
   CANVAS_APP_ID, CANVAS_ENTRY, CANVAS_STYLE, MANIFEST_FORMAT, MANIFEST_NAME, MANIFEST_SIGNATURE_NAME,
   MANIFEST_KIND_JS, MANIFEST_KIND_STATIC_WEB, CANVAS_STATIC_ENTRY,
-  APP_BUILTIN_VERSIONS, APP_PACKAGE_LOADERS, APP_PACKAGE_KINDS, APP_ID_RE,
+  APP_BUILTIN_VERSIONS, APP_PACKAGE_LOADERS, APP_PACKAGE_KINDS, GENERIC_APP_LOADER, APP_ID_RE,
   appIds, builtinVersionForApp, appLoadSupport, appPackageKind,
   DEFAULT_BUILTIN_VERSION, DEFAULT_CHANNEL, DEFAULT_REPOSITORY, DEFAULT_MODELSCOPE_REPOSITORY,
   SOURCE_KINDS, DEFAULT_SOURCE_KIND, MODELSCOPE_MANIFEST_PATH, modelscopeManifestPath, appAssetName, SOURCE_SEGMENT_RE,

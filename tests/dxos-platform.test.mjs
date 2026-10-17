@@ -70,9 +70,9 @@ function openBundle(overrides = {}) {
 }
 
 // ── ① 命令表 ─────────────────────────────────────────────────────────────
-test("命令表：11 条，risk 合法、needsCredential 为布尔、未知命令不猜风险", () => {
+test("命令表：17 条（含 task-16 的 6 条 DX 文件树命令），risk 合法、needsCredential 为布尔、未知命令不猜风险", () => {
   const commands = platformDomain.listPlatformCommands();
-  assert.equal(commands.length, 11);
+  assert.equal(commands.length, 17);
   const allowedRisks = new Set(Object.keys(platformDomain.RISK_LEVELS));
   for (const entry of commands) {
     assert.ok(allowedRisks.has(entry.risk), entry.command + " risk=" + entry.risk);

@@ -30,6 +30,7 @@ const { createHash, randomUUID } = require("node:crypto");
 const { resolveDxosPaths, ensureDxosLayout } = require("./dxos-foundation-paths.cjs");
 const platformDomain = require("./platform-domain.cjs");
 const foundationErrors = require("./dxos-foundation-errors.cjs");
+const { createFilesSharedBridge } = require("./files-shared-bridge.cjs");
 
 const {
   createPlatformError,
@@ -101,6 +102,9 @@ function createPlatformBundle(options = {}) {
   const processesProvider = typeof options.processes === "function" ? options.processes : () => [];
   const metricsProvider = typeof options.metrics === "function" ? options.metrics : () => ({});
   const injectedLookup = typeof options.lookup === "function" ? options.lookup : null;
+  // DX 虚拟文件树（共享盘 / 部门盘 / 快照 / 搜索 / 统计）：由宿主注入 store；未注入即命令结构化不可用。
+  const fsStore = options.fsStore && typeof options.fsStore.getNode === "function" ? options.fsStore : null;
+  const filesShared = createFilesSharedBridge({ fsStore, clock });
 
   const paths = userDataDir ? resolveDxosPaths(userDataDir) : null;
   const dataRoot = paths ? paths.root : null;
@@ -541,8 +545,29 @@ function createPlatformBundle(options = {}) {
       storage: { dataRootReady: !!dataRoot, backupsReady: !!backupsRoot },
       database: { available: !!db },
       processMonitor: { running: !!processMonitor },
+      filesShared: { available: filesShared.available === true },
       commands: listPlatformCommands().length,
     };
+  }
+
+  /**
+   * 文件共享桥 → 平台错误码映射。桥自身不抛异常（返回 {ok:false,error,detail}），
+   * 这里统一折成平台域结构化错误，保证渲染层拿到稳定的 PLATFORM_* 码。
+   */
+  function filesSharedCommand(method, payload, context) {
+    // 桥方法签名是 ({ context, ...payload })：context 由主进程可信 actor 注入，渲染层同名字段被覆盖。
+    const result = filesShared[method](Object.assign({}, payload, { context }));
+    if (result && result.ok === true) return result;
+    const raw = result && result.error ? String(result.error) : "INTERNAL";
+    const code = raw === "INVALID_INPUT" ? PLATFORM_ERR_INVALID_INPUT
+      : raw === "UNAUTHENTICATED" ? PLATFORM_ERR_UNAUTHENTICATED
+        : raw === "NOT_FOUND" ? platformDomain.PLATFORM_ERR_NOT_FOUND
+          : raw === "FORBIDDEN" ? platformDomain.PLATFORM_ERR_FORBIDDEN
+            : raw === "LIMIT_EXCEEDED" ? PLATFORM_ERR_INVALID_INPUT
+              : raw === "CONFLICT" ? platformDomain.PLATFORM_ERR_CONFLICT
+                : raw === "DEPENDENCY_UNAVAILABLE" ? PLATFORM_ERR_DEPENDENCY_UNAVAILABLE
+                  : platformDomain.PLATFORM_ERR_INTERNAL;
+    throw createPlatformError(code, (result && (result.detail || raw)) || raw, result && result.detail ? { reason: String(result.detail) } : undefined);
   }
 
   async function dispatch(command, payload, context) {
@@ -556,6 +581,12 @@ function createPlatformBundle(options = {}) {
       case "platform/data/snapshot/verify": return verifySnapshot(body.id);
       case "platform/data/snapshot/list": return listSnapshots();
       case "platform/data/snapshot/restore": return restoreSnapshot(body.id, body.databasesClosed === true);
+      case "platform/fs/shared/roots": return filesSharedCommand("roots", body, context);
+      case "platform/fs/shared/list": return filesSharedCommand("list", body, context);
+      case "platform/fs/search": return filesSharedCommand("search", body, context);
+      case "platform/fs/stats": return filesSharedCommand("stats", body, context);
+      case "platform/fs/snapshot/create": return filesSharedCommand("snapshotCreate", body, context);
+      case "platform/fs/snapshot/restore": return filesSharedCommand("snapshotRestore", body, context);
       case "platform/network/evaluate": return evaluateNetwork(body);
       case "platform/provider/test-check": return platformDomain.checkProviderTest(body);
       case "platform/health": return health();
@@ -588,6 +619,10 @@ function createPlatformBundle(options = {}) {
     if (!actorResult.ok) return normalizePlatformError(createPlatformError(PLATFORM_ERR_UNAUTHENTICATED, actorResult.message || "当前会话未认证，platform 命令被拒绝"));
     context.userId = String(actorResult.user.id);
     context.actor = actorResult.user;
+    // 共享盘可见性所需的真实成员关系（由 AuthorizationService.resolveActor 提供；不信任渲染层自报）。
+    context.isSuper = actorResult.isSuper === true;
+    context.departmentIds = Array.isArray(actorResult.departmentIds) ? actorResult.departmentIds.map(String) : [];
+    context.adminDeptIds = Array.isArray(actorResult.adminDeptIds) ? actorResult.adminDeptIds.map(String) : [];
     const body = payload && typeof payload === "object" ? payload : {};
     try {
       const value = await dispatch(command, body, context);

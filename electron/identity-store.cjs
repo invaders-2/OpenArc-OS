@@ -1831,6 +1831,9 @@ class IdentityStore {
     this.onAudit = typeof opts.onAudit === "function" ? opts.onAudit : () => {};
     // backupBefore 迁移的落盘目录；默认与库文件同目录。离线副本迁移显式传入，避免污染源库目录。
     this.backupDir = typeof opts.backupDir === "string" && opts.backupDir ? opts.backupDir : null;
+    // task-8 B：v29 任务合并是显式 opt-in 迁移。默认仍拒绝超前版本；
+    // 装配层（identity-bootstrap）在已合并库上显式传 true，避免迁移后启动被旧版本检查挡住。
+    this.allowMergedV29 = opts.allowMergedV29 === true;
     // 每次 backupBefore 的文件路径流水，供失败恢复与审计取证。
     this.migrationBackups = [];
     this.db = null;
@@ -1883,7 +1886,17 @@ class IdentityStore {
    */
   #migrate() {
     const current = this.schemaVersion;
-    if (current > SCHEMA_VERSION) throw new SchemaTooNewError(current, SCHEMA_VERSION);
+    if (current > SCHEMA_VERSION) {
+      // task-8 B：v29 任务表合并是显式 opt-in 迁移（不在 MIGRATIONS），成功后 user_version=29。
+      // 已合并的库（dx_tasks 已是只读视图）允许继续打开；其它超前版本仍然拒绝（fail closed）。
+      let merged = false;
+      try {
+        merged = current === 29 && this.allowMergedV29 === true
+          && (this.db.prepare("SELECT type FROM sqlite_master WHERE name = 'dx_tasks'").get() || {}).type === "view";
+      } catch { merged = false; }
+      if (!merged) throw new SchemaTooNewError(current, SCHEMA_VERSION);
+      return;
+    }
     if (current === SCHEMA_VERSION) return;
     for (const migration of MIGRATIONS) {
       if (migration.version <= current) continue;

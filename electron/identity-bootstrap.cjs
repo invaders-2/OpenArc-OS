@@ -11,6 +11,8 @@
 const path = require("node:path");
 const fs = require("node:fs");
 const { IdentityStore, DEFAULT_TTL_MS, DEFAULT_IDLE_MS } = require("./identity-store.cjs");
+// task-8 B：任务双表 v29 合并的启动开关与安全执行器（默认关闭；失败不阻断启动）。
+const { applyTaskMergeAtStartup } = require("./task-merge-migration.cjs");
 const { IdentityService } = require("./identity-service.cjs");
 // B4 · 本地账号服务（部门 / 用户 / APP 访问 / 审计）：复用既有表与既有身份命令层。
 const { LocalAccountService } = require("./local-account-service.cjs");
@@ -132,16 +134,37 @@ function resolveSessionTtlOverride({ env = process.env } = {}) {
  * @param opts.sessionIdleMs  可选，空闲有效期（**只有显式注入才改**；默认 DEFAULT_IDLE_MS）
  * @param opts.timers         可选，到期调度用的 { setTimeout, clearTimeout }（测试注入）
  */
-function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, logger, serviceIdentity = null, nativeImage = null, executorLauncher = null, executorTestHook = null, browserControl = null, sessionTtlMs = null, sessionIdleMs = null, timers = null, mcpInvocationSwitch = null } = {}) {
+function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, logger, serviceIdentity = null, nativeImage = null, executorLauncher = null, executorTestHook = null, browserControl = null, sessionTtlMs = null, sessionIdleMs = null, timers = null, mcpInvocationSwitch = null, taskMergeV29 = null } = {}) {
   fs.mkdirSync(userDataDir, { recursive: true, mode: 0o700 });
   const log = logger || new IdentityLogger();
   const store = new IdentityStore({
     path: path.join(userDataDir, "identity.db"),
+    // task-8 B：迁移前备份统一落 <userData>/dxos/backups（VACUUM INTO；普通迁移默认无 backupBefore）。
+    backupDir: path.join(userDataDir, "dxos", "backups"),
+    // 已合并库（v29 + dx_tasks 视图）允许打开；直接 new IdentityStore() 仍保持 fail closed。
+    allowMergedV29: true,
     // 非有限值（未注入 / null / 非法）一律落回 store 的默认有效期 —— 默认路径一个字节都不变。
     ttlMs: Number.isFinite(sessionTtlMs) ? sessionTtlMs : undefined,
     idleMs: Number.isFinite(sessionIdleMs) ? sessionIdleMs : undefined,
     onAudit: (r) => log.log(r),
   }).open();
+
+  // task-8 B：v29 任务表合并（默认关闭）。失败只记录，不阻断启动；库保持 v28 + 备份可恢复。
+  let taskMergeV29Result = null;
+  try {
+    taskMergeV29Result = applyTaskMergeAtStartup({
+      store,
+      userDataDir,
+      enabled: taskMergeV29,
+      logger: (event) => log.log(event),
+    });
+  } catch (error) {
+    taskMergeV29Result = {
+      enabled: typeof taskMergeV29 === "boolean" ? taskMergeV29 : false,
+      applied: false, state: "unknown", reason: "startup-helper-failed",
+      error: { code: "TASK_MERGE_STARTUP_FAILED", message: String((error && error.message) || error).slice(0, 300) },
+    };
+  }
 
   let backend;
   if (safeStorage && safeStorage.isEncryptionAvailable()) backend = safeStorageBackend({ safeStorage, dir: userDataDir });
@@ -200,7 +223,11 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
   const canvasDxosStore = new CanvasDxosStore({ identity: store });
   const canvasAssetLibrary = new CanvasAssetLibraryService({
     identity: store, store: canvasDxosStore, resourceService, resourceStore,
-    canvasService: canvasDocService, tempDir: () => canvasDxosTempDir,
+    canvasService: canvasDocService,
+    // sync-sources 的部门盘可见性需要真实成员关系（AuthorizationService.resolveActor）；
+    // dxos-fs 晚绑定由 main.cjs 在 createDxosFsAdapter 之后调用 configureFs。
+    authorization,
+    tempDir: () => canvasDxosTempDir,
   });
   const canvasAgentAttachments = new CanvasAgentAttachmentService({
     identity: store, store: canvasDxosStore, canvasService: canvasDocService,
@@ -282,7 +309,7 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
 
   // Trusted Approval Gateway：Renderer 只能经此通道看到安全投影并提交 decision。
   const sideEffectGateway = createSideEffectGateway({ sideEffectRuntime });
-  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, modelStore, credentialStore, modelService, modelProxy, mcpStore, mcpService, taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, sideEffectGateway, orchestrator, browserControl, canvasDocService, localAccountService, canvasDxosStore, canvasAssetLibrary, canvasAgentAttachments, canvasDxosExtension };
+  return { service, store, secrets, logger: log, backend, downgraded: !!backend.downgraded, authorization, authStore, deviceService, deviceStore, resourceService, resourceStore, managedStore, searchStore, searchService, previewService, integrationStore, projectService, canvasService, governanceService, pickerService, modelStore, credentialStore, modelService, modelProxy, mcpStore, mcpService, taskStore, taskService, taskRecovery, toolStore, toolRegistry, toolProxy, adapters, supervisor, sideEffectStore, sideEffectAuthority, sideEffectRuntime, sideEffectRecovery, sideEffectReady, sideEffectGateway, orchestrator, browserControl, canvasDocService, localAccountService, canvasDxosStore, canvasAssetLibrary, canvasAgentAttachments, canvasDxosExtension, taskMergeV29: taskMergeV29Result };
 }
 
 /**

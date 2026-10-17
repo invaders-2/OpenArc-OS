@@ -21,8 +21,11 @@
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
 const fs = require("node:fs");
+const path = require("node:path");
+const crypto = require("node:crypto");
 
 const localProxyDomain = require("./local-proxy-domain.cjs");
+const { resolveDxosPaths } = require("./dxos-foundation-paths.cjs");
 
 const {
   GOOGLE_MODELS_URL,
@@ -49,10 +52,16 @@ const {
   redactLocalProxyValue,
   listLocalProxyCommands,
   LOCAL_PROXY_ERR_INVALID_INPUT,
+  LOCAL_PROXY_ERR_DEPENDENCY_UNAVAILABLE,
+  normalizeManualProxyUrl,
 } = localProxyDomain;
 
 /** 本文件唯一实现的命令（命令表由 local-proxy-domain.cjs 冻结）。 */
 const DETECT_COMMAND = "desktop/proxy/detect";
+const PROXY_SET_COMMAND = "desktop/proxy/set";
+const PROXY_CLEAR_COMMAND = "desktop/proxy/clear";
+const PROXY_STATE_COMMAND = "desktop/proxy/state";
+const PROXY_CONFIG_VERSION = 1;
 
 /** 源 index.ts:5897 的 target / requiresRestart 字段。 */
 const PROBE_HOST = "generativelanguage.googleapis.com";
@@ -80,8 +89,21 @@ function createLocalProxyService(options = {}) {
   const platform = typeof options.platform === "string" && options.platform ? options.platform : process.platform;
   const baseEnv = options.env && typeof options.env === "object" ? options.env : process.env;
   const execPath = typeof options.execPath === "string" && options.execPath ? options.execPath : process.execPath;
-  const getConfiguredProxy = typeof options.getConfiguredProxy === "function" ? options.getConfiguredProxy : () => "";
   const logger = typeof options.logger === "function" ? options.logger : null;
+  // task-22：手动代理配置 / 缓存 / 系统更新。
+  const userDataDir = options.userDataDir ? String(options.userDataDir) : "";
+  const settingsDir = userDataDir ? path.join(resolveDxosPaths(userDataDir).root, "settings") : null;
+  const proxyConfigFile = settingsDir ? path.join(settingsDir, "proxy.json") : null;
+  const safeStorage = options.safeStorage && typeof options.safeStorage === "object" ? options.safeStorage : null;
+  const applyProxy = typeof options.applyProxy === "function" ? options.applyProxy : null;
+  const cacheService = options.cacheService && typeof options.cacheService.execute === "function" ? options.cacheService : null;
+  const updateService = options.updateService && typeof options.updateService.execute === "function" ? options.updateService : null;
+  const lanService = options.lanService && typeof options.lanService.execute === "function" ? options.lanService : null;
+  const clock = typeof options.clock === "function" ? options.clock : () => Date.now();
+  let lastApply = null;
+  const getConfiguredProxy = typeof options.getConfiguredProxy === "function"
+    ? options.getConfiguredProxy
+    : () => { const state = readProxyConfig(); return state.configured && state.enabled ? state.url : ""; };
 
   // -------------------------------------------------------------------------
   // 候选枚举（configured / env / 平台分支）—— 源:69-94
@@ -287,6 +309,121 @@ function createLocalProxyService(options = {}) {
   }
 
   // -------------------------------------------------------------------------
+  // task-22：手动代理配置（userData JSON；safeStorage 可用时加密）
+  // -------------------------------------------------------------------------
+
+  function readProxyConfig() {
+    const missing = { configured: false, url: null, enabled: false, storage: null, updatedAt: null, error: null };
+    if (!proxyConfigFile) return missing;
+    let raw;
+    try { raw = JSON.parse(fs.readFileSync(proxyConfigFile, "utf8")); }
+    catch (error) { return error && error.code === "ENOENT" ? missing : { ...missing, error: "代理配置不可读" }; }
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ...missing, error: "代理配置格式非法" };
+    let payload = null;
+    let storage = raw.enc;
+    try {
+      if (raw.enc === "safeStorage") {
+        if (!safeStorage || typeof safeStorage.decryptString !== "function") return { ...missing, storage, error: "safeStorage 不可用，无法解密代理配置" };
+        payload = JSON.parse(safeStorage.decryptString(Buffer.from(String(raw.cipher || ""), "base64")));
+      } else {
+        payload = { url: raw.url, enabled: raw.enabled };
+        storage = "file";
+      }
+    } catch { return { ...missing, storage, error: "代理配置解密失败" }; }
+    const validated = normalizeManualProxyUrl(payload && payload.url);
+    if (!validated.ok) return { ...missing, storage, error: "已保存的代理地址不合法" };
+    return {
+      configured: true, url: validated.url, enabled: payload.enabled !== false,
+      storage: raw.enc === "safeStorage" ? "safeStorage" : "file",
+      updatedAt: Number.isFinite(Number(raw.updatedAt)) ? Number(raw.updatedAt) : null, error: null,
+    };
+  }
+
+  function writeProxyConfig(url, enabled) {
+    if (!proxyConfigFile || !settingsDir) throw createLocalProxyError(localProxyDomain.LOCAL_PROXY_ERR_INTERNAL, "缺少 userDataDir，无法保存代理配置");
+    fs.mkdirSync(settingsDir, { recursive: true });
+    let raw;
+    if (safeStorage && typeof safeStorage.isEncryptionAvailable === "function" && safeStorage.isEncryptionAvailable() && typeof safeStorage.encryptString === "function") {
+      raw = { version: PROXY_CONFIG_VERSION, enc: "safeStorage", cipher: Buffer.from(safeStorage.encryptString(JSON.stringify({ url, enabled }))).toString("base64"), updatedAt: Number(clock()) };
+    } else {
+      raw = { version: PROXY_CONFIG_VERSION, enc: "plain", url, enabled, updatedAt: Number(clock()) };
+    }
+    const tmp = proxyConfigFile + ".tmp-" + process.pid + "-" + crypto.randomBytes(4).toString("hex");
+    fs.writeFileSync(tmp, JSON.stringify(raw, null, 2), "utf8");
+    fs.renameSync(tmp, proxyConfigFile);
+    return { storage: raw.enc === "safeStorage" ? "safeStorage" : "file", updatedAt: raw.updatedAt };
+  }
+
+  function clearProxyConfig() {
+    if (!proxyConfigFile) return;
+    try { fs.rmSync(proxyConfigFile, { force: true }); } catch { /* 删除失败由调用方结构化 */ }
+  }
+
+  /** 尽量作用到出网层；没有适配器就如实标注"仅登记"。 */
+  async function applyManualProxy(url, enabled) {
+    if (!applyProxy) return { applied: false, scope: "registration-only", note: "仅登记配置：未接入出网层，需要宿主注入 applyProxy 才会生效", error: null };
+    try {
+      const result = await applyProxy({ url: enabled ? url : null, enabled: !!enabled });
+      const applied = !!result && result.applied !== false;
+      return { applied, scope: result && result.scope ? String(result.scope) : "electron-session", note: result && result.note ? String(result.note) : null, error: null };
+    } catch (error) {
+      return { applied: false, scope: "electron-session", note: null, error: describeError(error, "应用到出网层失败") };
+    }
+  }
+
+  function proxyState() {
+    const config = readProxyConfig();
+    const apply = lastApply || (applyProxy
+      ? { applied: false, scope: "electron-session", note: "本次进程尚未应用；调用 set 或重启时自动应用", error: null }
+      : { applied: false, scope: "registration-only", note: "仅登记配置，未接管出网层", error: null });
+    return {
+      command: PROXY_STATE_COMMAND,
+      configured: config.configured,
+      url: config.url,
+      enabled: config.enabled,
+      storage: config.storage,
+      updatedAt: config.updatedAt,
+      configError: config.error,
+      applied: config.configured && config.enabled ? apply.applied : false,
+      appliedScope: apply.scope,
+      applyNote: apply.note,
+      applyError: apply.error,
+      scopes: {
+        electronSession: applyProxy ? "available" : "registration-only",
+        modelEgress: "separate:model/proxy/set",
+      },
+    };
+  }
+
+  async function setManualProxy(payload) {
+    const input = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
+    const validated = normalizeManualProxyUrl(input.url);
+    if (!validated.ok) throw createLocalProxyError(LOCAL_PROXY_ERR_INVALID_INPUT, validated.reason);
+    if (input.enabled != null && typeof input.enabled !== "boolean") throw createLocalProxyError(LOCAL_PROXY_ERR_INVALID_INPUT, "enabled 必须是布尔值");
+    const enabled = input.enabled !== false;
+    const stored = writeProxyConfig(validated.url, enabled);
+    const applied = await applyManualProxy(validated.url, enabled);
+    lastApply = applied;
+    return { ...proxyState(), storage: stored.storage, updatedAt: stored.updatedAt, changed: true, apply: applied };
+  }
+
+  async function clearManualProxy() {
+    const existed = readProxyConfig().configured;
+    clearProxyConfig();
+    const applied = await applyManualProxy(null, false);
+    lastApply = applied;
+    return { ...proxyState(), changed: existed, apply: applied };
+  }
+
+  /** 启动 / 重启后把已保存配置重新应用到出网层（没有适配器时只是读回状态）。 */
+  async function applyPersistedProxy() {
+    const config = readProxyConfig();
+    if (!config.configured || !config.enabled) return proxyState();
+    lastApply = await applyManualProxy(config.url, true);
+    return proxyState();
+  }
+
+  // -------------------------------------------------------------------------
   // 命令体
   // -------------------------------------------------------------------------
 
@@ -320,10 +457,32 @@ function createLocalProxyService(options = {}) {
   }
 
   /** 唯一执行入口：白名单 → 分发 → 成功 {ok:true,value} / 失败 normalizeLocalProxyError。 */
-  async function execute(command, payload) {
+  async function execute(command, payload, context = {}) {
     try {
-      if (!isLocalProxyCommand(command) || command !== DETECT_COMMAND) throw localProxyCommandNotAllowed(command);
-      return { ok: true, value: redactLocalProxyValue(await detect(payload)) };
+      if (!isLocalProxyCommand(command)) throw localProxyCommandNotAllowed(command);
+      switch (command) {
+        case DETECT_COMMAND: return { ok: true, value: redactLocalProxyValue(await detect(payload)) };
+        case PROXY_SET_COMMAND: return { ok: true, value: redactLocalProxyValue(await setManualProxy(payload)) };
+        case PROXY_CLEAR_COMMAND: return { ok: true, value: redactLocalProxyValue(await clearManualProxy()) };
+        case PROXY_STATE_COMMAND: return { ok: true, value: redactLocalProxyValue(proxyState()) };
+        case "desktop/lan/status":
+        case "desktop/lan/start":
+        case "desktop/lan/stop":
+        case "desktop/lan/pairing/create":
+        case "desktop/lan/pair":
+          if (!lanService) throw createLocalProxyError(LOCAL_PROXY_ERR_DEPENDENCY_UNAVAILABLE, "局域网协作服务尚未装配");
+          return lanService.execute(command, payload, context || {});
+        case "desktop/cache/clear":
+          if (!cacheService) throw createLocalProxyError(LOCAL_PROXY_ERR_DEPENDENCY_UNAVAILABLE, "缓存清理服务尚未装配");
+          return cacheService.execute(command, payload);
+        case "desktop/update/check":
+        case "desktop/update/download":
+        case "desktop/update/source/get":
+        case "desktop/update/source/set":
+          if (!updateService) throw createLocalProxyError(LOCAL_PROXY_ERR_DEPENDENCY_UNAVAILABLE, "系统更新服务尚未装配");
+          return updateService.execute(command, payload);
+        default: throw localProxyCommandNotAllowed(command);
+      }
     } catch (error) {
       if (logger) { try { logger("[OpenArc local-proxy] " + describeError(error, "执行失败")); } catch { /* 日志失败不改变行为 */ } }
       return normalizeLocalProxyError(error);
@@ -334,6 +493,10 @@ function createLocalProxyService(options = {}) {
     platform,
     execute,
     detect,
+    proxyState,
+    setManualProxy,
+    clearManualProxy,
+    applyPersistedProxy,
     listCommands: listLocalProxyCommands,
   };
 }

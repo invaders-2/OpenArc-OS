@@ -329,16 +329,22 @@ test("linux：lsof 可用时用 lsof；失败则退回 /proc 并只保留代理�
 });
 
 // ── ⑤ / ⑦ bootstrap：未知命令 / trusted / dispose ────────────────────────
-test("⑤ 命令元数据：risk=external、默认零出网、credential=false", () => {
+test("⑤ 命令元数据：探测 risk=external、默认零出网、credential=false；task-22 设置命令已登记", () => {
   const commands = domain.listLocalProxyCommands();
-  assert.equal(commands.length, 1);
-  assert.equal(commands[0].command, "desktop/proxy/detect");
-  assert.equal(commands[0].risk, "external");
-  assert.equal(commands[0].credential, false);
-  assert.equal(commands[0].probesExternal, true);
-  assert.equal(commands[0].network.default, "off");
-  assert.equal(commands[0].network.enableWith, "probe=true");
-  assert.match(commands[0].summary, /出网/);
+  assert.ok(commands.length >= 9, "desktop:command 应包含探测 + 代理设置 + 缓存 + 更新命令");
+  const detect = commands.find((entry) => entry.command === "desktop/proxy/detect");
+  assert.ok(detect);
+  assert.equal(detect.risk, "external");
+  assert.equal(detect.credential, false);
+  assert.equal(detect.probesExternal, true);
+  assert.equal(detect.network.default, "off");
+  assert.equal(detect.network.enableWith, "probe=true");
+  assert.match(detect.summary, /出网/);
+  for (const command of ["desktop/proxy/set", "desktop/proxy/clear", "desktop/proxy/state", "desktop/cache/clear", "desktop/update/check", "desktop/update/download", "desktop/update/source/get", "desktop/update/source/set"]) {
+    const entry = commands.find((item) => item.command === command);
+    assert.ok(entry, "缺少命令登记：" + command);
+    assert.equal(entry.credential, false, command + " 不得持凭据");
+  }
   assert.equal(domain.isLocalProxyCommand("desktop/proxy/detect"), true);
   assert.equal(domain.isLocalProxyCommand("desktop/nope"), false);
 });
