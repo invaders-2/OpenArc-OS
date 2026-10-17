@@ -26,6 +26,7 @@ const { buildCanvasPackage, parseCanvasPackage, remapCanvasPackageDocument, sha2
 const { CanvasCollabHub } = require("./canvas-dxos-collab.cjs");
 const { buildCanvasKernelCapabilities, toCatalogDescriptors } = require("./canvas-dxos-capabilities.cjs");
 const { extractAttachments } = require("./canvas-dxos-agent-attachments.cjs");
+const { createCanvasNodeRegistry, ERROR: NODE_ERROR } = require("./canvas-node-registry.cjs");
 
 const CHANNEL = "canvas:command";
 const MAX_INLINE_PACKAGE_BYTES = 32 * 1024 * 1024;
@@ -76,6 +77,11 @@ const DXOS_CANVAS_COMMANDS = Object.freeze([
   { command: "canvas/plugins/network", risk: "external", credential: "none", summary: "按插件 Manifest 网络白名单发起受控请求（复用 developerNetwork 策略与审计）" },
   { command: "canvas/plugins/registry", risk: "read", credential: "none", summary: "读取/重建画布插件运行期注册表 registry.json（含 tombstone）" },
   { command: "canvas/plugins/execute", risk: "external", credential: "none", summary: "按 executor.type 分派插件执行（skill/mcp-tool/agent-tool/workflow；builtin 403、app-bridge 409）" },
+  // ---- A03：17 个 builtin.* 节点的运行期注册表 / 参数校验 / 执行器分派 ----
+  { command: "canvas/nodes/list", risk: "read", credential: "none", summary: "列举画布节点运行期注册表（17 个 builtin.* + 已注册插件节点，含参数 schema / 端口 / 执行器可用性）" },
+  { command: "canvas/nodes/get", risk: "read", credential: "none", summary: "读取单个节点类型的定义、参数 schema 与执行器可用性" },
+  { command: "canvas/nodes/validate", risk: "read", credential: "none", summary: "校验节点参数或 from→to 端口连接；不合法返回结构化错误，不落文档" },
+  { command: "canvas/nodes/execute", risk: "external", credential: "none", summary: "执行一个节点（本地节点纯计算；生成 / 媒体 / 客户端渲染未注入执行器时结构化不可用）" },
   // ---- 内核能力（源 canvasKernelCapabilities.ts 的投影） ----
   { command: "canvas/capabilities/list", risk: "read", credential: "none", summary: "投影画布可被 Agent 调用的能力清单（含 risk / 副作用）" },
   { command: "canvas/protocolTasks/list", risk: "read", credential: "none", summary: "查询画布生成的 ai_protocol_tasks 三元组状态（provider/model protocol + profile + intent）" },
@@ -104,11 +110,60 @@ function packageTempDir(dir) {
 }
 
 /**
+ * A03 默认生成执行器：image-generator / llm 接既有 canvas/run → modelCall 链路（真实 Task 预算与停止归属）。
+ * 视频 / 音频 / Midjourney 没有对应 ModelService 能力，由 supports() 明确排除，命令层结构化不可用。
+ */
+function createCanvasGenerationPort(canvasService) {
+  const port = async ({ type, params, context, canvasId, nodeId }) => {
+    if (!canvasService || typeof canvasService.startRun !== "function" || typeof canvasService.modelCall !== "function") return fail("DEPENDENCY_UNAVAILABLE", "canvasService");
+    if (type !== "builtin.image-generator" && type !== "builtin.llm") return fail("CANVAS_NODE_EXECUTOR_UNAVAILABLE", { type, capability: "model-generation", reason: "unsupported-model-kind" });
+    if (!canvasId) return fail("INVALID_INPUT", "canvasId");
+    const kind = type === "builtin.llm" ? "chat" : "image";
+    const started = canvasService.startRun({ context, canvasId, nodeId, kind });
+    if (!started || started.ok !== true) return started && started.ok === false ? started : fail("RUN_UNAVAILABLE");
+    const runId = started.runId;
+    let terminal = "FAILED";
+    try {
+      const result = kind === "image"
+        ? await canvasService.modelCall({
+          context, canvasId, runId, kind: "image", prompt: String(params.prompt || ""),
+          size: params.size, ratio: params.ratio, resolution: params.resolution,
+          customSize: params.customSize, customRatio: params.customRatio,
+          count: params.count, configId: params.configId,
+        })
+        : await canvasService.modelCall({
+          context, canvasId, runId, kind: "chat", configId: params.configId,
+          messages: Array.isArray(params.messages) && params.messages.length ? params.messages : [{ role: "user", content: String(params.prompt || "") }],
+        });
+      if (!result || result.ok !== true) return result && result.ok === false ? result : fail("MODEL_ERROR");
+      terminal = "DONE";
+      if (kind === "image") {
+        const images = Array.isArray(result.images) ? result.images : (result.value && Array.isArray(result.value.images) ? result.value.images : []);
+        return ok({ outputs: { images }, modelResult: result });
+      }
+      const text = typeof result.text === "string" ? result.text : (result.value && typeof result.value.text === "string" ? result.value.text : "");
+      return ok({ outputs: { text }, modelResult: result });
+    } finally {
+      try { canvasService.finishRun({ context, canvasId, runId, status: terminal }); } catch { /* run 已终态时幂等 */ }
+    }
+  };
+  port.supports = (type) => type === "builtin.image-generator" || type === "builtin.llm";
+  return port;
+}
+
+/**
  * 扩展装配。services 里没有的依赖会让对应命令结构化失败（不做假实现）。
  * @param hub 可注入现成 hub（测试用）；不注入则本函数自建并接管 onBroadcast → 事件队列。
  */
-function createCanvasDxosExtension({ identity, store, canvasService = null, resourceService = null, assetLibrary = null, attachments = null, hub = null, authorize = null, tempDir = null, nodeTypes = [], clock = null } = {}) {
+function createCanvasDxosExtension({ identity, store, canvasService = null, resourceService = null, assetLibrary = null, attachments = null, hub = null, authorize = null, tempDir = null, nodeTypes = [], nodeDefinitions = [], nodePorts = null, clock = null } = {}) {
   if (!identity) throw new Error("createCanvasDxosExtension 需要 identity");
+  // A03：内置节点注册表在装配时建好；生成 / 媒体处理端口可选注入，未注入即结构化不可用。
+  // 装配了真实 canvasService 时，image-generator / llm 走默认生成端口（复用 canvas/run + modelCall 链路）。
+  const resolvedNodePorts = nodePorts && typeof nodePorts === "object" ? { ...nodePorts } : {};
+  if (typeof resolvedNodePorts.generation !== "function" && canvasService && typeof canvasService.startRun === "function" && typeof canvasService.modelCall === "function") {
+    resolvedNodePorts.generation = createCanvasGenerationPort(canvasService);
+  }
+  const nodeRegistry = createCanvasNodeRegistry({ extraDefinitions: Array.isArray(nodeDefinitions) ? nodeDefinitions : [], ports: resolvedNodePorts, canvasService });
   const events = new Map(); // "canvasId\u0000clientId" → array
   // 画布插件宿主（数据 / 受控网络）：依赖 developerBundle，宿主在装配后晚绑定。
   let pluginHost = null;
@@ -286,6 +341,35 @@ function createCanvasDxosExtension({ identity, store, canvasService = null, reso
       return ok({ projection, descriptors: toCatalogDescriptors(projection.capabilities), registry: DXOS_CANVAS_COMMANDS.map((entry) => ({ ...entry })) });
     },
 
+    "canvas/nodes/list": () => ok({ registry: nodeRegistry.summary(), nodes: nodeRegistry.list() }),
+    "canvas/nodes/get": (payload) => {
+      const type = asStr(payload.type, 120);
+      if (!type) return fail("INVALID_INPUT", "type");
+      const node = nodeRegistry.describe(type);
+      return node ? ok({ node }) : fail(NODE_ERROR.NODE_TYPE_UNKNOWN, { type });
+    },
+    "canvas/nodes/validate": (payload) => {
+      if (payload.connection && typeof payload.connection === "object") {
+        return nodeRegistry.validateConnection({
+          from: asStr(payload.connection.from, 120), fromPort: asStr(payload.connection.fromPort, 80),
+          to: asStr(payload.connection.to, 120), toPort: asStr(payload.connection.toPort, 80),
+        });
+      }
+      const type = asStr(payload.type, 120);
+      if (!type) return fail("INVALID_INPUT", "type");
+      if (payload.ports && typeof payload.ports === "object") return nodeRegistry.validatePorts(type, payload.ports);
+      return nodeRegistry.validateParams(type, payload.params == null ? {} : payload.params);
+    },
+    "canvas/nodes/execute": (payload, context) => {
+      const user = actorOf(context);
+      if (!user) return fail("NOT_FOUND_OR_FORBIDDEN");
+      return nodeRegistry.execute({
+        type: asStr(payload.type, 120), params: payload.params, context,
+        canvasId: asStr(payload.canvasId, 120), nodeId: asStr(payload.nodeId, 120),
+        writeBack: payload.writeBack === true, node: payload.node && typeof payload.node === "object" ? payload.node : null,
+      });
+    },
+
     "canvas/agentAttachments/list": (payload, context) => attachments.list({ context, canvasId: asStr(payload.canvasId, 120), includeRemoved: !!payload.includeRemoved }),
     "canvas/agentAttachments/extract": (payload) => {
       const files = Array.isArray(payload.files) ? payload.files : [];
@@ -398,6 +482,13 @@ function createCanvasDxosExtension({ identity, store, canvasService = null, reso
     },
     dispatch,
     handlers,
+    /** A03：运行期节点注册表（内置 + 本次装配传入的插件定义，同一 register 路径）。 */
+    nodes: {
+      registry: () => nodeRegistry.summary(),
+      list: () => nodeRegistry.list(),
+      get: (type) => nodeRegistry.describe(type),
+      register: (definition) => nodeRegistry.register(definition, { origin: "plugin" }),
+    },
   };
 }
 

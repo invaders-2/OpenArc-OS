@@ -54,9 +54,9 @@ test("不支持的格式给出结构化错误，不做假解析（源 :91-93；d
   assert.equal(pdf.content, "");
   assert.match(pdf.error, /PDF/);
   const docx = attachments.extractAttachment({ buffer: Buffer.from("PK\u0003\u0004"), name: "a.docx" });
-  assert.match(docx.error, /解析依赖/);
+  assert.match(docx.error, /文件解析失败/);
   const xlsx = attachments.extractAttachment({ buffer: Buffer.from("PK\u0003\u0004"), name: "a.xlsx" });
-  assert.match(xlsx.error, /解析依赖/);
+  assert.match(xlsx.error, /文件解析失败/);
   const bin = attachments.extractAttachment({ buffer: Buffer.from([0, 1, 2, 3]), name: "a.bin", mime: "application/octet-stream" });
   assert.match(bin.error, /二进制/);
 });
@@ -207,3 +207,62 @@ test("挂载失败 detail：第二个附件依赖缺失 → stage=import + 序�
     assert.equal(f.canvasService.getCanvas({ context: ctx, canvasId: f.canvasId }).canvas.doc.nodes.length, 0);
   } finally { f.fx.close(); }
 });
+
+/** task-36：构造最小 stored ZIP（无需第三方依赖），供 DOCX/XLSX 零依赖解析测试。 */
+function makeZip(entries) {
+  const locals = [];
+  const centrals = [];
+  let offset = 0;
+  for (const [name, content] of Object.entries(entries)) {
+    const data = Buffer.isBuffer(content) ? content : Buffer.from(String(content));
+    const nameBuf = Buffer.from(name, "utf8");
+    const local = Buffer.alloc(30 + nameBuf.length + data.length);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0, 6);
+    local.writeUInt16LE(0, 8);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(nameBuf.length, 26);
+    nameBuf.copy(local, 30);
+    data.copy(local, 30 + nameBuf.length);
+    const central = Buffer.alloc(46 + nameBuf.length);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(0, 10);
+    central.writeUInt32LE(data.length, 20);
+    central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(nameBuf.length, 28);
+    central.writeUInt32LE(offset, 42);
+    nameBuf.copy(central, 46);
+    locals.push(local);
+    centrals.push(central);
+    offset += local.length;
+  }
+  const centralOffset = offset;
+  const centralSize = centrals.reduce((sum, item) => sum + item.length, 0);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(centrals.length, 8);
+  eocd.writeUInt16LE(centrals.length, 10);
+  eocd.writeUInt32LE(centralSize, 12);
+  eocd.writeUInt32LE(centralOffset, 16);
+  return Buffer.concat([...locals, ...centrals, eocd]);
+}
+
+test("task-36：docx/xlsx 零依赖 ZIP+XML 最小解析（正文/共享字符串/单元格）", () => {
+  const docx = makeZip({ "word/document.xml": '<w:document><w:body><w:p><w:r><w:t>Hello 世界</w:t></w:r></w:p><w:p><w:r><w:t>第二段</w:t></w:r></w:p></w:body></w:document>' });
+  const docxRead = attachments.extractAttachment({ buffer: docx, name: "a.docx", mime: "application/octet-stream" });
+  assert.equal(docxRead.error, undefined, docxRead.error);
+  assert.match(docxRead.content, /Hello 世界/);
+  assert.match(docxRead.content, /第二段/);
+  const xlsx = makeZip({
+    "xl/sharedStrings.xml": '<sst><si><t>姓名</t></si><si><t>张三</t></si></sst>',
+    "xl/worksheets/sheet1.xml": '<worksheet><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row></sheetData></worksheet>',
+  });
+  const xlsxRead = attachments.extractAttachment({ buffer: xlsx, name: "a.xlsx", mime: "application/octet-stream" });
+  assert.equal(xlsxRead.error, undefined, xlsxRead.error);
+  assert.equal(xlsxRead.content, "姓名\t张三");
+});
+
