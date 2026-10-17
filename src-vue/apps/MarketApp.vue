@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from "../i18n";
 import { computed, onMounted, reactive, ref } from "vue";
 import { Download, RefreshCw, RotateCcw, Search } from "lucide-vue-next";
 import { APPS, appById, iconUrl, type AppEntry } from "../apps";
@@ -15,6 +16,7 @@ import type { AppUpdateStatus } from "./appUpdateLogic";
  *
  * 三个视图（同一个应用窗口内切换，不新开窗口）：
  *   · 应用：注册表里的内置应用，显示内置版本与本机更新状态；点「版本与更新」进通用更新面板；
+ *     画布卡片保留历史「在线更新」入口（data-canvas-update-open），打开同一个通用面板；
  *   · 第三方：market/thirdparty/list｜install｜rollback｜source/get｜source/set。目录条目展示来源
  *     （本地 / 在线）、版本、兼容性、包 sha256 与签名校验口径；安装必须二次确认；安装失败/目录失败/
  *     无公钥/不可加载都按后端结构化结果如实展示，不伪造商品与成功。
@@ -458,34 +460,34 @@ onMounted(() => {
 
 <template>
   <div class="split market-app">
-    <nav class="split-side" aria-label="应用市场">
+    <nav class="split-side" :aria-label="t('应用市场')">
       <label class="ds-search notes-search">
         <Search class="ds-search__icon" :size="13" />
-        <input v-model="query" class="ds-search__input" type="search" placeholder="搜索应用" aria-label="搜索应用" />
+        <input v-model="query" class="ds-search__input" type="search" :placeholder="t('搜索应用')" :aria-label="t('搜索应用')" />
       </label>
-      <div class="split-section">市场</div>
+      <div class="split-section">{{ t("市场") }}</div>
       <button type="button" class="split-nav" :aria-current="view === 'apps' ? 'true' : undefined" data-market-view="apps" @click="switchView('apps')">
-        <span class="split-nav-label">内置应用</span>
+        <span class="split-nav-label">{{ t("内置应用") }}</span>
       </button>
       <button type="button" class="split-nav" :aria-current="view === 'thirdparty' ? 'true' : undefined" data-market-view="thirdparty" @click="switchView('thirdparty')">
-        <span class="split-nav-label">第三方应用</span>
+        <span class="split-nav-label">{{ t("第三方应用") }}</span>
         <small v-if="thirdList" class="planned-count">{{ installedApps.length }}</small>
       </button>
       <button type="button" class="split-nav" :aria-current="view === 'health' ? 'true' : undefined" data-market-view="health" @click="switchView('health')">
-        <span class="split-nav-label">更新健康</span>
+        <span class="split-nav-label">{{ t("更新健康") }}</span>
       </button>
       <template v-if="view === 'apps'">
-        <div class="split-section">分类</div>
+        <div class="split-section">{{ t("分类") }}</div>
         <button v-for="c in CATS" :key="c" type="button" class="split-nav" :aria-current="cat === c ? 'true' : undefined" @click="cat = c">
           <span class="split-nav-label">{{ c }}</span>
         </button>
       </template>
       <p class="planned-note">
         {{ view === 'apps'
-          ? '内置应用来自 OpenArc 注册表；版本与更新只读本机记录，检查更新才会联网。'
+          ? t('内置应用来自 OpenArc 注册表；版本与更新只读本机记录，检查更新才会联网。')
           : view === 'thirdparty'
-            ? '第三方应用来自本地目录或白名单 HTTPS 在线目录；安装需要二次确认，失败会如实显示错误码。'
-            : '逐应用展示已安装包的加载路径、生效来源与回退原因；缺公钥/无发布包/不可加载都会单独说明。' }}
+            ? t('第三方应用来自本地目录或白名单 HTTPS 在线目录；安装需要二次确认，失败会如实显示错误码。')
+            : t('逐应用展示已安装包的加载路径、生效来源与回退原因；缺公钥/无发布包/不可加载都会单独说明。') }}
       </p>
     </nav>
     <div class="split-main market-main">
@@ -499,11 +501,11 @@ onMounted(() => {
       />
       <template v-else-if="view === 'apps'">
         <div class="pane-toolbar">
-          <strong class="pane-title">{{ cat === "全部" ? "全部应用" : cat }}</strong>
+          <strong class="pane-title">{{ cat === "全部" ? t("全部应用") : cat }}</strong>
           <span class="badge">{{ apps.length }} 个</span>
           <div class="toolbar-spacer" />
           <DsButton size="sm" variant="secondary" data-market-refresh-status :status="statusBusy ? 'loading' : 'idle'" :disabled="statusBusy" @click="loadStatuses">
-            <RefreshCw :size="13" :stroke-width="1.5" /> 刷新全部状态
+            <RefreshCw :size="13" :stroke-width="1.5" /> {{ t("刷新全部状态") }}
           </DsButton>
         </div>
         <div class="market-grid" data-market-apps>
@@ -531,23 +533,24 @@ onMounted(() => {
                 {{ card(a).detail }}
               </div>
               <div v-if="statuses[a.id] && statuses[a.id]!.loadUrl" class="market-desc mono market-load-url" :data-app-load-url-text="a.id">加载地址：{{ statuses[a.id]!.loadUrl }}</div>
-              <div v-else-if="statuses[a.id] && !statuses[a.id]!.loadable" class="market-desc market-load-url" :data-app-not-loadable="a.id">安装包加载：未接入（安装不会生效）</div>
+              <div v-else-if="statuses[a.id] && !statuses[a.id]!.loadable" class="market-desc market-load-url" :data-app-not-loadable="a.id">{{ t("安装包加载：未接入（安装不会生效）") }}</div>
             </div>
             <div class="market-btns">
-              <button class="market-open" :data-app-open="a.id" @click="shell.activateApp(a.id)">打开</button>
+              <button class="market-open" :data-app-open="a.id" @click="shell.activateApp(a.id)">{{ t("打开") }}</button>
               <button
                 class="market-pin"
                 :data-app-update-open="a.id"
+                :data-canvas-update-open="a.id === 'canvas' ? a.id : undefined"
                 :data-app-update-upgrade="card(a).canUpgrade ? 'true' : 'false'"
                 @click="openDetail(a.id, card(a).canUpgrade)"
-              >{{ card(a).canUpgrade ? "升级" : "版本与更新" }}</button>
+              >{{ a.id === "canvas" ? t("在线更新") : card(a).canUpgrade ? t("升级") : t("版本与更新") }}</button>
               <button
                 v-if="a.id !== 'trash'"
                 class="market-pin"
                 :aria-pressed="inDock(a.id)"
-                :title="inDock(a.id) ? '从程序坞移除' : '添加到程序坞'"
+                :title="inDock(a.id) ? t('从程序坞移除') : t('添加到程序坞')"
                 @click="shell.toggleDock(a.id)"
-              >{{ inDock(a.id) ? "已在程序坞" : "加到程序坞" }}</button>
+              >{{ inDock(a.id) ? t("已在程序坞") : t("加到程序坞") }}</button>
             </div>
           </div>
         </div>
@@ -555,12 +558,12 @@ onMounted(() => {
 
       <template v-else-if="view === 'thirdparty'">
         <div class="pane-toolbar">
-          <strong class="pane-title">第三方应用</strong>
+          <strong class="pane-title">{{ t("第三方应用") }}</strong>
           <span class="badge" data-third-count>{{ localApps.length + onlineApps.length }} 个目录条目</span>
           <span class="badge" data-third-installed-count>{{ installedApps.length }} 已安装</span>
           <div class="toolbar-spacer" />
           <DsButton size="sm" variant="secondary" data-third-refresh :status="thirdBusy === 'list' ? 'loading' : 'idle'" :disabled="!!thirdBusy" @click="loadThirdParty">
-            <RefreshCw :size="13" :stroke-width="1.5" /> 刷新
+            <RefreshCw :size="13" :stroke-width="1.5" /> {{ t("刷新") }}
           </DsButton>
         </div>
 
@@ -574,26 +577,25 @@ onMounted(() => {
           <code class="tp-code">{{ thirdListError?.code }}</code>
         </p>
         <p class="set-cap" data-third-load-support>
-          加载支持：第三方应用由通用 openarc-app:// 解析器判定是否可加载；安装时后端会做签名、摘要与加载复核，
-          缺公钥 / 不可加载会结构化拒绝，界面不会把安装失败显示成生效。
+          {{ t("加载支持：第三方应用由通用 openarc-app:// 解析器判定是否可加载；安装时后端会做签名、摘要与加载复核， 缺公钥 / 不可加载会结构化拒绝，界面不会把安装失败显示成生效。") }}
         </p>
 
         <section class="set-sec">
-          <h3>在线目录来源</h3>
+          <h3>{{ t("在线目录来源") }}</h3>
           <div class="tp-source">
             <input
               v-model="thirdSourceDraft"
               class="tp-input"
               type="url"
-              placeholder="https://（白名单主机的在线目录 JSON；留空只用本地目录）"
-              aria-label="在线目录地址"
+              :placeholder="t('https://（白名单主机的在线目录 JSON；留空只用本地目录）')"
+              :aria-label="t('在线目录地址')"
               data-third-source-input
             />
-            <DsButton size="sm" variant="secondary" data-third-source-save :status="thirdBusy === 'source' ? 'loading' : 'idle'" :disabled="!!thirdBusy" @click="saveThirdSource">保存来源</DsButton>
-            <DsButton size="sm" variant="ghost" data-third-source-clear :disabled="!!thirdBusy" @click="thirdSourceDraft = ''; saveThirdSource()">清除</DsButton>
+            <DsButton size="sm" variant="secondary" data-third-source-save :status="thirdBusy === 'source' ? 'loading' : 'idle'" :disabled="!!thirdBusy" @click="saveThirdSource">{{ t("保存来源") }}</DsButton>
+            <DsButton size="sm" variant="ghost" data-third-source-clear :disabled="!!thirdBusy" @click="thirdSourceDraft = ''; saveThirdSource()">{{ t("清除") }}</DsButton>
           </div>
           <p class="set-cap" data-third-source-current>
-            当前在线目录：{{ thirdSourceUrl || "未设置（只读取本地目录）" }}。只允许 HTTPS + 白名单主机；在线目录读取失败不影响本地目录与已安装列表。
+            当前在线目录：{{ thirdSourceUrl || t("未设置（只读取本地目录）") }}。只允许 HTTPS + 白名单主机；在线目录读取失败不影响本地目录与已安装列表。
           </p>
           <p v-if="thirdSourceError" class="tp-error" role="alert" :data-third-source-error="thirdSourceError?.code">
             {{ thirdErrorText(thirdSourceError?.code || "") }}<span v-if="thirdSourceError?.detail">：{{ thirdSourceError?.detail }}</span>
@@ -602,25 +604,25 @@ onMounted(() => {
         </section>
 
         <section class="set-sec">
-          <h3>已安装的第三方应用</h3>
-          <p v-if="!installedApps.length" class="set-cap" data-third-installed-empty>还没有通过第三方目录安装的应用。</p>
+          <h3>{{ t("已安装的第三方应用") }}</h3>
+          <p v-if="!installedApps.length" class="set-cap" data-third-installed-empty>{{ t("还没有通过第三方目录安装的应用。") }}</p>
           <div v-else class="tp-list" data-third-installed>
             <div v-for="item in installedApps" :key="item.id" class="tp-row" :data-third-installed-app="item.id">
               <div class="tp-main">
                 <div class="tp-name">{{ item.name || item.id }} <small class="market-tag">{{ item.version || "—" }}</small></div>
                 <div class="tp-meta">
-                  id {{ item.id }} · 状态 {{ item.status }} · 来源 {{ item.source || "—" }} · 生效 {{ item.effectiveSource === "installed" ? "已安装版本" : "随包内置版本" }}
+                  id {{ item.id }} · 状态 {{ item.status }} · 来源 {{ item.source || "—" }} · 生效 {{ item.effectiveSource === "installed" ? t("已安装版本") : t("随包内置版本") }}
                   <span v-if="item.installedAt"> · 安装于 {{ formatTimestamp(item.installedAt) }}</span>
                 </div>
                 <div class="tp-meta" :data-third-health="item.id">
                   {{ installedHealthText(item.id) }}
                   <span v-if="thirdHealth[item.id]?.fallbackReason"> · 回退原因 {{ healthFallbackText(thirdHealth[item.id]?.fallbackReason) }}</span>
-                  <span v-if="thirdHealth[item.id]?.loadUrl"> · 加载地址 <code class="tp-code">{{ thirdHealth[item.id]?.loadUrl }}</code></span>
+                  <span v-if="thirdHealth[item.id]?.loadUrl"> {{ t("· 加载地址") }} <code class="tp-code">{{ thirdHealth[item.id]?.loadUrl }}</code></span>
                 </div>
               </div>
               <div class="tp-actions">
                 <DsButton size="sm" variant="secondary" :data-third-rollback="item.id" :status="thirdBusy === 'rollback:' + item.id ? 'loading' : 'idle'" :disabled="!!thirdBusy" @click="askRollback(item)">
-                  <RotateCcw :size="13" :stroke-width="1.5" /> 回滚
+                  <RotateCcw :size="13" :stroke-width="1.5" /> {{ t("回滚") }}
                 </DsButton>
               </div>
             </div>
@@ -628,7 +630,7 @@ onMounted(() => {
         </section>
 
         <section class="set-sec">
-          <h3>本地目录</h3>
+          <h3>{{ t("本地目录") }}</h3>
           <p class="set-cap" data-third-local-state>
             {{ localStateText }}
           </p>
@@ -639,13 +641,13 @@ onMounted(() => {
           <div v-if="localApps.length" class="tp-list" data-third-local-list>
             <div v-for="app in localApps" :key="'local-' + app.id" class="tp-row" :data-third-app="app.id" data-third-app-source="local">
               <div class="tp-main">
-                <div class="tp-name">{{ app.name }} <small class="market-tag">v{{ app.version }}</small> <DsBadge size="sm" tone="neutral">本地</DsBadge></div>
-                <div class="tp-meta">id {{ app.id }} · {{ app.description || "没有描述" }}<span v-if="app.author"> · 作者 {{ app.author }}</span></div>
+                <div class="tp-name">{{ app.name }} <small class="market-tag">v{{ app.version }}</small> <DsBadge size="sm" tone="neutral">{{ t("本地") }}</DsBadge></div>
+                <div class="tp-meta">id {{ app.id }} · {{ app.description || t("没有描述") }}<span v-if="app.author"> · 作者 {{ app.author }}</span></div>
                 <div class="tp-meta" :data-third-package="app.id">
-                  {{ packageText(app) }} · {{ app.size ? app.size + " 字节" : "未声明体积" }} · sha256 <code class="tp-code">{{ shaShort(app) }}</code>
+                  {{ packageText(app) }} · {{ app.size ? app.size + " 字节" : t("未声明体积") }} · sha256 <code class="tp-code">{{ shaShort(app) }}</code>
                 </div>
                 <div class="tp-meta" :data-third-compat="app.id" :data-third-compat-ok="compatibilityOf(app).ok ? '1' : '0'">
-                  <DsBadge size="sm" :tone="compatTone(app)">{{ compatibilityOf(app).ok ? "兼容" : "不兼容" }}</DsBadge>
+                  <DsBadge size="sm" :tone="compatTone(app)">{{ compatibilityOf(app).ok ? t("兼容") : t("不兼容") }}</DsBadge>
                   {{ compatibilityOf(app).text }}
                 </div>
                 <div class="tp-meta tp-sig" :data-third-signature="app.id">{{ signatureText(app) }}</div>
@@ -659,7 +661,7 @@ onMounted(() => {
                   :disabled="!!thirdBusy || !compatibilityOf(app).ok"
                   @click="askInstall(app)"
                 >
-                  <Download :size="13" :stroke-width="1.5" /> {{ installedOf(app.id)?.version === app.version ? "重新安装" : "安装" }}
+                  <Download :size="13" :stroke-width="1.5" /> {{ installedOf(app.id)?.version === app.version ? t("重新安装") : t("安装") }}
                 </DsButton>
               </div>
             </div>
@@ -667,8 +669,8 @@ onMounted(() => {
         </section>
 
         <section class="set-sec">
-          <h3>在线目录</h3>
-          <p v-if="!thirdSourceUrl" class="set-cap" data-third-online-unconfigured>未设置在线目录（只读取本地目录）。</p>
+          <h3>{{ t("在线目录") }}</h3>
+          <p v-if="!thirdSourceUrl" class="set-cap" data-third-online-unconfigured>{{ t("未设置在线目录（只读取本地目录）。") }}</p>
           <p v-else-if="thirdList?.online.error" class="tp-error" role="alert" :data-third-online-error="thirdList?.online.error">
             {{ thirdErrorText(thirdList?.online.error || "") }}<span v-if="thirdList?.online.detail">：{{ thirdList?.online.detail }}</span>
             <code class="tp-code">{{ thirdList?.online.error }}</code>
@@ -679,13 +681,13 @@ onMounted(() => {
           <div v-if="onlineApps.length" class="tp-list" data-third-online-list>
             <div v-for="app in onlineApps" :key="'online-' + app.id" class="tp-row" :data-third-app="app.id" data-third-app-source="online">
               <div class="tp-main">
-                <div class="tp-name">{{ app.name }} <small class="market-tag">v{{ app.version }}</small> <DsBadge size="sm" tone="neutral">在线</DsBadge></div>
-                <div class="tp-meta">id {{ app.id }} · {{ app.description || "没有描述" }}<span v-if="app.author"> · 作者 {{ app.author }}</span></div>
+                <div class="tp-name">{{ app.name }} <small class="market-tag">v{{ app.version }}</small> <DsBadge size="sm" tone="neutral">{{ t("在线") }}</DsBadge></div>
+                <div class="tp-meta">id {{ app.id }} · {{ app.description || t("没有描述") }}<span v-if="app.author"> · 作者 {{ app.author }}</span></div>
                 <div class="tp-meta" :data-third-package="app.id">
-                  {{ packageText(app) }} · {{ app.size ? app.size + " 字节" : "未声明体积" }} · sha256 <code class="tp-code">{{ shaShort(app) }}</code>
+                  {{ packageText(app) }} · {{ app.size ? app.size + " 字节" : t("未声明体积") }} · sha256 <code class="tp-code">{{ shaShort(app) }}</code>
                 </div>
                 <div class="tp-meta" :data-third-compat="app.id" :data-third-compat-ok="compatibilityOf(app).ok ? '1' : '0'">
-                  <DsBadge size="sm" :tone="compatTone(app)">{{ compatibilityOf(app).ok ? "兼容" : "不兼容" }}</DsBadge>
+                  <DsBadge size="sm" :tone="compatTone(app)">{{ compatibilityOf(app).ok ? t("兼容") : t("不兼容") }}</DsBadge>
                   {{ compatibilityOf(app).text }}
                 </div>
                 <div class="tp-meta tp-sig" :data-third-signature="app.id">{{ signatureText(app) }}</div>
@@ -699,7 +701,7 @@ onMounted(() => {
                   :disabled="!!thirdBusy || !compatibilityOf(app).ok"
                   @click="askInstall(app)"
                 >
-                  <Download :size="13" :stroke-width="1.5" /> {{ installedOf(app.id)?.version === app.version ? "重新安装" : "安装" }}
+                  <Download :size="13" :stroke-width="1.5" /> {{ installedOf(app.id)?.version === app.version ? t("重新安装") : t("安装") }}
                 </DsButton>
               </div>
             </div>
@@ -707,77 +709,76 @@ onMounted(() => {
         </section>
 
         <section v-if="rejectedEntries.length" class="set-sec" data-third-rejected>
-          <h3>目录中被拒绝的条目</h3>
-          <p class="set-cap">这些条目没有通过目录校验，不会出现在可安装列表里（逐条如实列出原因）。</p>
+          <h3>{{ t("目录中被拒绝的条目") }}</h3>
+          <p class="set-cap">{{ t("这些条目没有通过目录校验，不会出现在可安装列表里（逐条如实列出原因）。") }}</p>
           <ul class="tp-rejected">
             <li v-for="(item, index) in rejectedEntries" :key="index">
-              <code class="tp-code">{{ item.id || "<无 id>" }}</code> — {{ item.reason }}
+              <code class="tp-code">{{ item.id || t("<无 id>") }}</code> — {{ item.reason }}
             </li>
           </ul>
         </section>
 
-        <DsDialog :open="!!installPick" title="安装第三方应用" @close="installPick = null">
+        <DsDialog :open="!!installPick" :title="t('安装第三方应用')" @close="installPick = null">
           <template v-if="installPick">
-            <p>将安装 <strong>{{ installPick.name }}</strong>（{{ installPick.id }}）v{{ installPick.version }}。</p>
+            <p>{{ t("将安装") }} <strong>{{ installPick.name }}</strong>（{{ installPick.id }}）v{{ installPick.version }}。</p>
             <p class="set-cap">{{ packageText(installPick) }}；{{ compatibilityOf(installPick).text }}。</p>
             <p class="set-cap">{{ signatureText(installPick) }}</p>
-            <p class="set-cap">安装只在你点击确认后开始；失败会如实返回错误码，不会把失败当成安装成功。</p>
+            <p class="set-cap">{{ t("安装只在你点击确认后开始；失败会如实返回错误码，不会把失败当成安装成功。") }}</p>
           </template>
           <template #footer>
-            <DsButton variant="ghost" size="sm" @click="installPick = null">取消</DsButton>
-            <DsButton variant="primary" size="sm" data-third-install-confirm @click="acceptInstall">确认安装</DsButton>
+            <DsButton variant="ghost" size="sm" @click="installPick = null">{{ t("取消") }}</DsButton>
+            <DsButton variant="primary" size="sm" data-third-install-confirm @click="acceptInstall">{{ t("确认安装") }}</DsButton>
           </template>
         </DsDialog>
 
-        <DsDialog :open="!!rollbackPick" title="回滚第三方应用" @close="rollbackPick = null">
+        <DsDialog :open="!!rollbackPick" :title="t('回滚第三方应用')" @close="rollbackPick = null">
           <template v-if="rollbackPick">
-            <p>将把 <strong>{{ rollbackPick.name || rollbackPick.id }}</strong> 从当前版本回滚到上一个可用的已安装版本 / 内置版本（由更新服务判定）。</p>
-            <p class="set-cap">回滚只在你点击确认后开始；没有可回滚目标时后端会结构化拒绝。</p>
+            <p>{{ t("将把") }} <strong>{{ rollbackPick.name || rollbackPick.id }}</strong> {{ t("从当前版本回滚到上一个可用的已安装版本 / 内置版本（由更新服务判定）。") }}</p>
+            <p class="set-cap">{{ t("回滚只在你点击确认后开始；没有可回滚目标时后端会结构化拒绝。") }}</p>
           </template>
           <template #footer>
-            <DsButton variant="ghost" size="sm" @click="rollbackPick = null">取消</DsButton>
-            <DsButton variant="primary" size="sm" data-third-rollback-confirm @click="acceptRollback">确认回滚</DsButton>
+            <DsButton variant="ghost" size="sm" @click="rollbackPick = null">{{ t("取消") }}</DsButton>
+            <DsButton variant="primary" size="sm" data-third-rollback-confirm @click="acceptRollback">{{ t("确认回滚") }}</DsButton>
           </template>
         </DsDialog>
       </template>
 
       <template v-else>
         <div class="pane-toolbar">
-          <strong class="pane-title">更新健康</strong>
+          <strong class="pane-title">{{ t("更新健康") }}</strong>
           <span class="badge">{{ healthRows.length }} 个应用</span>
           <div class="toolbar-spacer" />
           <DsButton size="sm" variant="secondary" data-health-refresh :status="healthBusy ? 'loading' : 'idle'" :disabled="healthBusy" @click="loadHealthRows">
-            <RefreshCw :size="13" :stroke-width="1.5" /> 重新检查
+            <RefreshCw :size="13" :stroke-width="1.5" /> {{ t("重新检查") }}
           </DsButton>
         </div>
         <p class="set-cap">
-          逐应用读取本机安装状态（market/update/health，不联网）。缺公钥、无安装包、不可加载都会明确说明；
-          检查更新（联网）仍在「版本与更新」里按需触发。
+          {{ t("逐应用读取本机安装状态（market/update/health，不联网）。缺公钥、无安装包、不可加载都会明确说明； 检查更新（联网）仍在「版本与更新」里按需触发。") }}
         </p>
         <div class="hp-list" data-health-list>
           <div v-for="row in healthRows" :key="row.app.id" class="hp-row" :data-health-app="row.app.id" :data-health-source="row.health ? row.health?.effectiveSource : ''" :data-health-loadable="row.health ? (row.health.installedLoadable ? '1' : '0') : ''">
             <div class="hp-name">{{ row.app.name }} <small class="market-tag">{{ healthVersionText(row) }}</small></div>
             <div class="hp-cell">
-              <DsBadge v-if="row.error" size="sm" tone="danger">健康检查失败</DsBadge>
-              <DsBadge v-else-if="row.health" size="sm" :tone="row.health.installedLoadable ? 'success' : 'neutral'">{{ row.health.installedLoadable ? "已安装包可加载" : "使用内置/不可加载" }}</DsBadge>
-              <span v-else class="set-cap">未读取</span>
+              <DsBadge v-if="row.error" size="sm" tone="danger">{{ t("健康检查失败") }}</DsBadge>
+              <DsBadge v-else-if="row.health" size="sm" :tone="row.health.installedLoadable ? 'success' : 'neutral'">{{ row.health.installedLoadable ? t("已安装包可加载") : t("使用内置/不可加载") }}</DsBadge>
+              <span v-else class="set-cap">{{ t("未读取") }}</span>
             </div>
             <div class="hp-detail">
               <template v-if="row.error">
                 <span class="tp-error">{{ thirdErrorText(row.error?.code || "") }} <code class="tp-code">{{ row.error?.code }}</code><span v-if="row.error?.detail"> · {{ row.error?.detail }}</span></span>
               </template>
               <template v-else-if="row.health">
-                <span>生效来源：{{ row.health?.effectiveSource === "installed" ? "已安装版本" : "随包内置版本" }}</span>
-                <span v-if="row.health?.loader"> · 加载器 <code class="tp-code">{{ row.health?.loader }}</code></span>
-                <span v-if="row.health?.loadUrl"> · 加载地址 <code class="tp-code">{{ row.health?.loadUrl }}</code></span>
+                <span>生效来源：{{ row.health?.effectiveSource === "installed" ? t("已安装版本") : t("随包内置版本") }}</span>
+                <span v-if="row.health?.loader"> {{ t("· 加载器") }} <code class="tp-code">{{ row.health?.loader }}</code></span>
+                <span v-if="row.health?.loadUrl"> {{ t("· 加载地址") }} <code class="tp-code">{{ row.health?.loadUrl }}</code></span>
                 <span v-if="row.health?.installed && row.health.installed.version"> · 已安装 v{{ row.health.installed.version }}<span v-if="row.health?.installed?.digest">（摘要 {{ row.health?.installed?.digest.slice(0, 12) }}…）</span></span>
                 <span v-if="row.health?.fallbackReason"> · 回退原因 {{ healthFallbackText(row.health?.fallbackReason) }}</span>
                 <span v-if="row.health?.installed && row.health.installed.detail"> · {{ row.health.installed.detail }}</span>
               </template>
-              <span v-else class="set-cap">还没有读取到健康结果。</span>
+              <span v-else class="set-cap">{{ t("还没有读取到健康结果。") }}</span>
             </div>
           </div>
-          <p v-if="!healthRows.length && healthBusy" class="set-cap" role="status">正在读取全部应用的加载健康…</p>
+          <p v-if="!healthRows.length && healthBusy" class="set-cap" role="status">{{ t("正在读取全部应用的加载健康…") }}</p>
         </div>
       </template>
     </div>

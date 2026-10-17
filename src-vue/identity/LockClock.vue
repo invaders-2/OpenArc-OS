@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from "vue";
+import { locale } from "../i18n";
 
 /** 锁屏/登录页的时钟（对齐 src/identity/AuthScreens.tsx:105-120 的 LockClock）。 */
 const now = ref(new Date());
@@ -16,11 +17,11 @@ onBeforeUnmount(() => {
 <template>
   <div class="lock-clock" aria-hidden="true">
     <div class="lock-date">
-      {{ now.toLocaleDateString("zh-CN", { month: "long", day: "numeric" }) }}
-      {{ now.toLocaleDateString("zh-CN", { weekday: "long" }) }}
+      {{ now.toLocaleDateString(locale, { month: "long", day: "numeric" }) }}
+      {{ now.toLocaleDateString(locale, { weekday: "long" }) }}
     </div>
     <div class="lock-time">
-      {{ now.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }) }}
+      {{ now.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", hour12: false }) }}
     </div>
   </div>
 </template>

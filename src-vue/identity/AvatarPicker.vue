@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
+import { t } from "../i18n";
 import Avatar from "./Avatar.vue";
 
 /**
@@ -60,31 +61,31 @@ async function pickFile(event: Event) {
   if (!file) return;
   localError.value = null;
   if (!file.type.startsWith("image/")) {
-    localError.value = "请选择图片文件（PNG / JPEG / WebP）。";
+    localError.value = t("请选择图片文件（PNG / JPEG / WebP）。");
     return;
   }
   try {
     const dataUrl = await fileToAvatarDataUrl(file);
     if (dataUrl.length > MAX_AVATAR_REF_LENGTH) {
-      localError.value = "图片处理后仍然过大，换一张更小的试试。";
+      localError.value = t("图片处理后仍然过大，换一张更小的试试。");
       return;
     }
     emit("change", dataUrl);
   } catch {
-    localError.value = "这张图片读取失败，换一张试试。";
+    localError.value = t("这张图片读取失败，换一张试试。");
   }
 }
 </script>
 
 <template>
-  <div class="profile-presets" role="group" aria-label="预设头像">
+  <div class="profile-presets" role="group" :aria-label="t('预设头像')">
     <button
       v-for="id in AVATAR_PRESET_IDS"
       :key="id"
       type="button"
       class="profile-preset"
       :aria-pressed="avatarRef === 'preset:' + id"
-      :aria-label="'预设头像 ' + id"
+      :aria-label="t('预设头像 {id}', { id })"
       :disabled="disabled"
       :data-d3-id="(idPrefix ?? 'avatar') + '-' + id"
       @click="localError = null; emit('change', 'preset:' + id)"
@@ -93,7 +94,7 @@ async function pickFile(event: Event) {
     </button>
   </div>
   <button type="button" class="profile-upload" :disabled="disabled" @click="fileInput?.click()">
-    从本机选择图片…
+    {{ t("从本机选择图片…") }}
   </button>
   <input
     ref="fileInput"

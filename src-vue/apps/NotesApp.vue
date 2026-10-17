@@ -1,8 +1,11 @@
 <script setup lang="ts">
+import { t } from "../i18n";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { FilePlus2, Search } from "lucide-vue-next";
 import { iconUrl } from "../apps";
 import { useShellStore } from "../stores/shell";
+import { officeCapabilityDetail, officeCapabilityLabel, probeOfficeCapability } from "./officeCapability";
+import type { OfficeCapability } from "./officeCapability";
 
 /**
  * 文稿（10-15）：真实的本地文本文稿。
@@ -108,18 +111,24 @@ const when = (t: number) => {
     : `${d.getMonth() + 1}/${d.getDate()}`;
 };
 
+/* ── Office 能力状态：docx/xlsx 解析依赖不在本仓，如实显示（真实命令探测，不靠前端猜） ── */
+const office = ref<OfficeCapability | null>(null);
+async function loadOfficeCapability() {
+  office.value = await probeOfficeCapability();
+}
 onMounted(load);
+onMounted(loadOfficeCapability);
 onBeforeUnmount(() => void flush());
 </script>
 
 <template>
   <div class="split notes-app">
-    <nav class="split-side" aria-label="文稿">
+    <nav class="split-side" :aria-label="t('文稿')">
       <label class="ds-search notes-search">
         <Search class="ds-search__icon" :size="13" />
-        <input v-model="query" class="ds-search__input" type="search" placeholder="搜索文稿" aria-label="搜索文稿" />
+        <input v-model="query" class="ds-search__input" type="search" :placeholder="t('搜索文稿')" :aria-label="t('搜索文稿')" />
       </label>
-      <div class="split-section">全部文稿 <small class="planned-count">{{ docs.length }}</small></div>
+      <div class="split-section">{{ t("全部文稿") }} <small class="planned-count">{{ docs.length }}</small></div>
       <div class="notes-list">
         <button
           v-for="d in shown"
@@ -132,7 +141,7 @@ onBeforeUnmount(() => void flush());
           <span class="notes-item-name">{{ baseName(d.name) }}</span>
           <small>{{ when(d.mtime) }} · {{ d.folder }}</small>
         </button>
-        <p v-if="!loading && !shown.length" class="planned-note">{{ query ? "没有匹配的文稿" : "访达里还没有 .md / .txt 文稿" }}</p>
+        <p v-if="!loading && !shown.length" class="planned-note">{{ query ? t("没有匹配的文稿") : t("访达里还没有 .md / .txt 文稿") }}</p>
       </div>
     </nav>
     <div class="split-main notes-main">
@@ -141,29 +150,46 @@ onBeforeUnmount(() => void flush());
           v-if="current"
           v-model="title"
           class="notes-title"
-          aria-label="文稿名称"
+          :aria-label="t('文稿名称')"
           @blur="rename"
           @keydown.enter="($event.target as HTMLInputElement).blur()"
         />
-        <strong v-else class="pane-title">文稿</strong>
+        <strong v-else class="pane-title">{{ t("文稿") }}</strong>
         <div class="toolbar-spacer" />
-        <span v-if="status" class="notes-status">{{ { saving: "正在保存…", saved: "已保存", error: "保存失败" }[status] }}</span>
-        <button class="icon-button" aria-label="新建文稿" title="新建文稿" @click="create"><FilePlus2 :size="15" /></button>
+        <span v-if="status" class="notes-status">{{ { saving: t("正在保存…"), saved: t("已保存"), error: t("保存失败") }[status] }}</span>
+        <span
+          class="notes-office set-cap"
+          :data-notes-office="!office ? 'checking' : office.failure ? 'unknown' : (office.docx.available && office.xlsx.available ? 'available' : 'unavailable')"
+          :data-notes-office-docx="office ? (office.docx.available ? '1' : '0') : ''"
+          :data-notes-office-xlsx="office ? (office.xlsx.available ? '1' : '0') : ''"
+          :title="officeCapabilityDetail(office)"
+        >{{ officeCapabilityLabel(office) }}</span>
+        <button class="icon-button" :aria-label="t('新建文稿')" :title="t('新建文稿')" @click="create"><FilePlus2 :size="15" /></button>
       </div>
       <textarea
         v-if="current"
         v-model="text"
         class="notes-editor"
         spellcheck="false"
-        placeholder="开始写点什么…"
-        aria-label="文稿内容"
+        :placeholder="t('开始写点什么…')"
+        :aria-label="t('文稿内容')"
         @input="onInput"
       />
       <div v-else class="empty-content">
         <img class="large-icon" :src="iconUrl('text-editor')" alt="" draggable="false" />
-        <p>选择左侧的文稿，或新建一篇。新文稿保存在桌面「文稿」文件夹里。</p>
-        <button class="planned-cta" @click="create"><FilePlus2 :size="14" /> 新建文稿</button>
+        <p>{{ t("选择左侧的文稿，或新建一篇。新文稿保存在桌面「文稿」文件夹里。") }}</p>
+        <button class="planned-cta" @click="create"><FilePlus2 :size="14" /> {{ t("新建文稿") }}</button>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Office 能力状态只在工具栏占一行；结论很短，原始错误放 title，不挤占正文。 */
+.notes-office {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+</style>

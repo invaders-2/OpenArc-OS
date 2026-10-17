@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
+import { t } from "../i18n";
 import AuthErrorLine from "./AuthErrorLine.vue";
 import AvatarPicker from "./AvatarPicker.vue";
 
@@ -77,12 +78,12 @@ function submit() {
   <div class="auth-screen" data-d3-id="auth-screen">
     <div class="auth-card" role="main">
       <div class="eyebrow">FIRST RUN</div>
-      <h1>初始化这台机器</h1>
-      <p class="subtitle">创建本机的第一个管理员。初始化只能成功一次。</p>
+      <h1>{{ t("初始化这台机器") }}</h1>
+      <p class="subtitle">{{ t("创建本机的第一个管理员。初始化只能成功一次。") }}</p>
 
       <form data-d3-id="setup-form" @submit.prevent="submit">
         <!-- 被动进度：disableStepIndicators 语义，容器内不放任何可点元素 -->
-        <ol class="setup-steps" aria-label="初始化步骤">
+        <ol class="setup-steps" :aria-label="t('初始化步骤')">
           <li
             v-for="(s, i) in SETUP_STEPS"
             :key="s.title"
@@ -91,7 +92,7 @@ function submit() {
               i < step ? 'setup-step--done' : i === step ? 'setup-step--active' : '',
             ]"
             :aria-current="i === step ? 'step' : undefined"
-            :aria-label="'第 ' + (i + 1) + ' 步：' + s.title"
+            :aria-label="t('第 {n} 步：{title}', { n: i + 1, title: t(s.title) })"
           >
             <span
               v-if="i > 0"
@@ -107,20 +108,20 @@ function submit() {
             :key="step"
             :class="['setup-step-pane', 'setup-step-pane--' + (direction === 1 ? 'forward' : 'back')]"
           >
-            <h2 class="setup-step-title">{{ SETUP_STEPS[step].title }}</h2>
-            <p class="setup-step-desc">{{ SETUP_STEPS[step].desc }}</p>
+            <h2 class="setup-step-title">{{ t(SETUP_STEPS[step].title) }}</h2>
+            <p class="setup-step-desc">{{ t(SETUP_STEPS[step].desc) }}</p>
             <template v-if="step === 0">
               <label class="field">
-                管理员显示名
+                {{ t("管理员显示名") }}
                 <input
                   v-model="displayName"
-                  placeholder="例如：Weping"
+                  :placeholder="t('例如：Weping')"
                   autocomplete="off"
                   data-d3-id="setup-name"
                 />
               </label>
               <div class="field">
-                <span>头像</span>
+                <span>{{ t("头像") }}</span>
                 <AvatarPicker
                   :avatar-ref="avatarRef"
                   id-prefix="setup-avatar"
@@ -129,7 +130,7 @@ function submit() {
               </div>
             </template>
             <label v-else-if="step === 1" class="field">
-              账号
+              {{ t("账号") }}
               <input
                 v-model="identifier"
                 placeholder="name@openarc.local"
@@ -139,21 +140,21 @@ function submit() {
             </label>
             <template v-else>
               <label class="field">
-                密码
+                {{ t("密码") }}
                 <input
                   v-model="password"
                   type="password"
-                  placeholder="至少 8 位"
+                  :placeholder="t('至少 8 位')"
                   autocomplete="new-password"
                   data-d3-id="setup-password"
                 />
               </label>
               <label class="field">
-                确认密码
+                {{ t("确认密码") }}
                 <input
                   v-model="confirm"
                   type="password"
-                  placeholder="再输入一次"
+                  :placeholder="t('再输入一次')"
                   autocomplete="new-password"
                   data-d3-id="setup-confirm"
                 />
@@ -172,7 +173,7 @@ function submit() {
             data-d3-id="setup-back"
             @click="goBack"
           >
-            上一步
+            {{ t("上一步") }}
           </button>
           <button
             v-if="!last"
@@ -182,7 +183,7 @@ function submit() {
             data-d3-id="setup-next"
             @click="goNext"
           >
-            下一步
+            {{ t("下一步") }}
           </button>
           <button
             v-else
@@ -191,11 +192,11 @@ function submit() {
             :disabled="busy || !password || !confirm"
             data-d3-id="setup-submit"
           >
-            {{ busy ? "正在初始化…" : "创建管理员" }}
+            {{ busy ? t("正在初始化…") : t("创建管理员") }}
           </button>
         </div>
         <p class="footnote">
-          密码使用 scrypt 派生后存储，明文不落盘、不进入界面状态。初始化成功后需再用该密码登录一次。
+          {{ t("密码使用 scrypt 派生后存储，明文不落盘、不进入界面状态。初始化成功后需再用该密码登录一次。") }}
         </p>
       </form>
     </div>

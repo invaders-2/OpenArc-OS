@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from "../i18n";
 /**
  * 日历（0.6.1）：月视图 + 本机日程 + 农历/黄历 + 提醒 + 本地规则建日程。
  *
@@ -557,63 +558,63 @@ function addAi() {
 
 <template>
   <div class="split cal-app" data-calendar-app="1" :data-cal-almanac="almanacState">
-    <nav class="split-side" aria-label="日历">
-      <div class="split-section">日历</div>
+    <nav class="split-side" :aria-label="t('日历')">
+      <div class="split-section">{{ t("日历") }}</div>
       <button type="button" class="split-nav" aria-current="true">
         <CalendarClock :size="15" aria-hidden="true" />
-        <span class="split-nav-label">本机日历</span><small class="planned-count">{{ events.length }}</small>
+        <span class="split-nav-label">{{ t("本机日历") }}</span><small class="planned-count">{{ events.length }}</small>
       </button>
       <div class="split-section">{{ selectedLabel }}</div>
       <div class="cal-agenda" data-cal-agenda>
         <div v-for="event in agenda" :key="event.id" class="cal-agenda-item">
-          <span class="cal-agenda-time">{{ event.time || "全天" }}</span>
+          <span class="cal-agenda-time">{{ event.time || t("全天") }}</span>
           <span class="cal-agenda-title" :title="event.title">{{ event.title }}</span>
           <span v-if="reminderStatus(event)" class="cal-reminder-chip" :data-cal-reminder-status="event.id">
             <Bell :size="10" aria-hidden="true" /> {{ reminderStatus(event) }}
           </span>
           <button class="cal-agenda-del" :aria-label="'删除 ' + event.title" @click="remove(event.id)"><X :size="12" /></button>
         </div>
-        <p v-if="!agenda.length" class="planned-note">这一天没有日程。</p>
+        <p v-if="!agenda.length" class="planned-note">{{ t("这一天没有日程。") }}</p>
       </div>
       <form class="cal-add" @submit.prevent="add">
-        <input ref="titleInput" v-model="draftTitle" class="cal-add-title" placeholder="新日程" aria-label="日程标题" />
+        <input ref="titleInput" v-model="draftTitle" class="cal-add-title" :placeholder="t('新日程')" :aria-label="t('日程标题')" />
         <div class="cal-add-row">
-          <input v-model="draftTime" type="time" class="cal-add-time" aria-label="时间（留空为全天）" />
-          <select v-model="draftReminder" class="cal-add-select" :disabled="!draftTime" aria-label="提前提醒">
+          <input v-model="draftTime" type="time" class="cal-add-time" :aria-label="t('时间（留空为全天）')" />
+          <select v-model="draftReminder" class="cal-add-select" :disabled="!draftTime" :aria-label="t('提前提醒')">
             <option v-for="option in REMINDER_OPTIONS" :key="String(option.value)" :value="option.value">{{ option.label }}</option>
           </select>
         </div>
-        <button type="submit" class="planned-today cal-add-btn" :disabled="!draftTitle.trim()"><Plus :size="12" /> 添加</button>
+        <button type="submit" class="planned-today cal-add-btn" :disabled="!draftTitle.trim()"><Plus :size="12" /> {{ t("添加") }}</button>
       </form>
       <p v-if="notice" class="planned-note" role="status" data-cal-notice>{{ notice }}</p>
-      <p class="planned-note">日程与提醒保存在本机（localStorage）；提醒依赖应用运行，应用没运行时到点的提醒会在下次启动时补发并标记「错过」。</p>
+      <p class="planned-note">{{ t("日程与提醒保存在本机（localStorage）；提醒依赖应用运行，应用没运行时到点的提醒会在下次启动时补发并标记「错过」。") }}</p>
     </nav>
 
     <div class="split-main cal-main">
       <div class="pane-toolbar">
         <strong class="pane-title">{{ monthLabel }}</strong>
         <div class="toolbar-spacer" />
-        <button class="icon-button" aria-label="上个月" @click="shift(-1)"><ChevronLeft :size="15" /></button>
-        <button class="planned-today" @click="goToday">今天</button>
-        <button class="icon-button" aria-label="下个月" @click="shift(1)"><ChevronRight :size="15" /></button>
+        <button class="icon-button" :aria-label="t('上个月')" @click="shift(-1)"><ChevronLeft :size="15" /></button>
+        <button class="planned-today" @click="goToday">{{ t("今天") }}</button>
+        <button class="icon-button" :aria-label="t('下个月')" @click="shift(1)"><ChevronRight :size="15" /></button>
       </div>
 
       <div class="cal-almanac-banner" :data-cal-almanac-banner="almanacState">
         <span class="cal-almanac-text">{{ almanacStateText }}</span>
         <template v-if="almanacState === 'disabled'">
           <DsButton size="sm" variant="secondary" :status="enableBusy ? 'loading' : 'idle'" @click="enableAlmanac" data-cal-enable-almanac>
-            <Sparkles :size="13" :stroke-width="1.5" /> 启用黄历插件
+            <Sparkles :size="13" :stroke-width="1.5" /> {{ t("启用黄历插件") }}
           </DsButton>
           <span v-if="enableFailure" class="cal-almanac-error" role="alert">{{ integrationErrorText(enableFailure) }}</span>
         </template>
         <DsButton v-else-if="almanacState === 'check-failed' || almanacState === 'error'" size="sm" variant="secondary" :status="almanacLoading ? 'loading' : 'idle'" @click="initAlmanac(); ensureVisibleAlmanac()">
-          <RefreshCw :size="13" :stroke-width="1.5" /> 重新读取
+          <RefreshCw :size="13" :stroke-width="1.5" /> {{ t("重新读取") }}
         </DsButton>
       </div>
 
       <p v-if="missedCount > 0 && !missedDismissed" class="cal-missed" role="status" data-cal-missed>
         检测到 {{ missedCount }} 条在应用未运行时到点的提醒，已补发应用内通知并标记为「错过」；系统通知可能没有弹出。
-        <button type="button" class="cal-missed__close" aria-label="知道了" @click="missedDismissed = true"><X :size="12" /></button>
+        <button type="button" class="cal-missed__close" :aria-label="t('知道了')" @click="missedDismissed = true"><X :size="12" /></button>
       </p>
 
       <div class="cal-grid" role="grid" :aria-label="monthLabel">
@@ -637,7 +638,7 @@ function addAi() {
       </div>
     </div>
 
-    <aside class="cal-side" aria-label="当天详情与提醒">
+    <aside class="cal-side" :aria-label="t('当天详情与提醒')">
       <section class="cal-panel" data-cal-day-detail>
         <div class="cal-panel-head">
           <strong>{{ selectedLabel }}</strong>
@@ -650,12 +651,12 @@ function addAi() {
           </template>
         </dl>
         <p v-else class="cal-hint" data-cal-day-detail-empty>
-          {{ almanacState === "ready" ? "这一天没有返回农历字段。" : "农历 / 黄历数据未加载；本机日程与提醒不受影响。" }}
+          {{ almanacState === "ready" ? t("这一天没有返回农历字段。") : t("农历 / 黄历数据未加载；本机日程与提醒不受影响。") }}
         </p>
       </section>
 
       <section class="cal-panel" data-cal-reminders>
-        <div class="cal-panel-head"><strong>提醒</strong><DsButton size="sm" variant="ghost" @click="collectDue(false)">检查一次</DsButton></div>
+        <div class="cal-panel-head"><strong>{{ t("提醒") }}</strong><DsButton size="sm" variant="ghost" @click="collectDue(false)">{{ t("检查一次") }}</DsButton></div>
         <p class="cal-hint" data-cal-permission>{{ permissionText }}</p>
         <ul v-if="upcomingReminders.length" class="cal-upcoming" data-cal-upcoming>
           <li v-for="row in upcomingReminders" :key="row.event.id" class="cal-upcoming-row">
@@ -664,21 +665,21 @@ function addAi() {
             <span class="cal-upcoming-time">{{ formatDue(row.due) }}</span>
           </li>
         </ul>
-        <p v-else class="cal-hint" data-cal-upcoming-empty>没有待触发的提醒。给日程设时间并选择「提前 N 分钟」即可。</p>
+        <p v-else class="cal-hint" data-cal-upcoming-empty>{{ t("没有待触发的提醒。给日程设时间并选择「提前 N 分钟」即可。") }}</p>
         <div v-if="reminderLog.length" class="cal-reminder-log" data-cal-reminder-log>
           <div v-for="row in reminderLog" :key="row.id" class="cal-reminder-log-row">
-            <span class="cal-reminder-log-title">{{ row.title }}{{ row.late ? "（错过补发）" : "" }}</span>
+            <span class="cal-reminder-log-title">{{ row.title }}{{ row.late ? t("（错过补发）") : "" }}</span>
             <span class="cal-reminder-log-status">{{ SYSTEM_NOTIFY_LABEL[row.system] }} · 应用内已入队</span>
           </div>
         </div>
       </section>
 
       <section class="cal-panel" data-cal-ai>
-        <div class="cal-panel-head"><strong>AI 建日程</strong><span class="cal-panel-sub">本地规则解析</span></div>
-        <p class="cal-hint">不调用模型：当前没有模型生成日程的命令通道。这里按本地规则解析日期 / 时间 / 提醒 / 标题，结果先预览、可手改，确认后才写入本机日程。</p>
+        <div class="cal-panel-head"><strong>{{ t("AI 建日程") }}</strong><span class="cal-panel-sub">{{ t("本地规则解析") }}</span></div>
+        <p class="cal-hint">{{ t("不调用模型：当前没有模型生成日程的命令通道。这里按本地规则解析日期 / 时间 / 提醒 / 标题，结果先预览、可手改，确认后才写入本机日程。") }}</p>
         <div class="cal-ai-input">
-          <input v-model="aiText" type="text" aria-label="用一句话描述日程" placeholder="例如：明天下午 3 点开会，提前 10 分钟提醒" @keydown.enter.prevent="parseAi" />
-          <DsButton size="sm" @click="parseAi"><Sparkles :size="13" :stroke-width="1.5" /> 解析</DsButton>
+          <input v-model="aiText" type="text" :aria-label="t('用一句话描述日程')" :placeholder="t('例如：明天下午 3 点开会，提前 10 分钟提醒')" @keydown.enter.prevent="parseAi" />
+          <DsButton size="sm" @click="parseAi"><Sparkles :size="13" :stroke-width="1.5" /> {{ t("解析") }}</DsButton>
         </div>
         <p v-if="aiError" class="cal-error" role="alert" data-cal-ai-error>{{ aiError }}</p>
         <template v-if="aiDraft">
@@ -687,27 +688,27 @@ function addAi() {
           </ul>
           <div class="cal-ai-preview" data-cal-ai-preview>
             <label class="cal-ai-field">
-              <span>标题</span>
-              <input v-model="aiTitle" type="text" aria-label="解析后的日程标题" />
+              <span>{{ t("标题") }}</span>
+              <input v-model="aiTitle" type="text" :aria-label="t('解析后的日程标题')" />
             </label>
             <label class="cal-ai-field">
-              <span>日期</span>
-              <input v-model="aiDate" type="date" aria-label="解析后的日期" />
+              <span>{{ t("日期") }}</span>
+              <input v-model="aiDate" type="date" :aria-label="t('解析后的日期')" />
             </label>
             <label class="cal-ai-field">
-              <span>时间（留空全天）</span>
-              <input v-model="aiTime" type="time" aria-label="解析后的时间" />
+              <span>{{ t("时间（留空全天）") }}</span>
+              <input v-model="aiTime" type="time" :aria-label="t('解析后的时间')" />
             </label>
             <label class="cal-ai-field">
-              <span>提醒</span>
-              <select v-model="aiReminder" :disabled="!aiTime" aria-label="解析后的提醒">
+              <span>{{ t("提醒") }}</span>
+              <select v-model="aiReminder" :disabled="!aiTime" :aria-label="t('解析后的提醒')">
                 <option v-for="option in REMINDER_OPTIONS" :key="String(option.value)" :value="option.value">{{ option.label }}</option>
               </select>
             </label>
           </div>
           <div class="cal-ai-actions">
-            <DsButton size="sm" @click="addAi">加入日程</DsButton>
-            <DsButton size="sm" variant="ghost" @click="aiDraft = null; aiError = ''">取消</DsButton>
+            <DsButton size="sm" @click="addAi">{{ t("加入日程") }}</DsButton>
+            <DsButton size="sm" variant="ghost" @click="aiDraft = null; aiError = ''">{{ t("取消") }}</DsButton>
           </div>
         </template>
         <p v-if="aiNotice" class="cal-hint" data-cal-ai-notice>{{ aiNotice }}</p>

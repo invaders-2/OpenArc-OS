@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { t } from "../i18n";
 import { ArrowRight } from "lucide-vue-next";
 import AuthErrorLine from "./AuthErrorLine.vue";
 import LockClock from "./LockClock.vue";
@@ -45,14 +46,14 @@ function submit() {
         <span class="brand-mark" />
       </span>
       <strong class="lock-name">OpenArc</strong>
-      <span class="lock-identifier">使用初始化时创建的管理员凭据</span>
+      <span class="lock-identifier">{{ t("使用初始化时创建的管理员凭据") }}</span>
       <form class="lock-form" data-d3-id="login-form" @submit.prevent="submit">
         <div class="lock-input">
           <input
             ref="first"
             v-model="identifier"
-            placeholder="账号"
-            aria-label="账号"
+            :placeholder="t('账号')"
+            :aria-label="t('账号')"
             autocomplete="username"
             data-d3-id="login-identifier"
           />
@@ -61,8 +62,8 @@ function submit() {
           <input
             v-model="password"
             type="password"
-            placeholder="密码"
-            aria-label="密码"
+            :placeholder="t('密码')"
+            :aria-label="t('密码')"
             autocomplete="current-password"
             data-d3-id="login-password"
           />
@@ -70,7 +71,7 @@ function submit() {
             class="lock-submit"
             type="submit"
             :disabled="busy || !identifier || !password"
-            aria-label="登录"
+            :aria-label="t('登录')"
             data-d3-id="login-submit"
           >
             <ArrowRight :size="16" />
@@ -78,7 +79,7 @@ function submit() {
         </div>
         <AuthErrorLine :error="error" />
       </form>
-      <p class="lock-footnote">账号不存在与密码错误返回同一个错误，不透露账号是否存在。</p>
+      <p class="lock-footnote">{{ t("账号不存在与密码错误返回同一个错误，不透露账号是否存在。") }}</p>
     </div>
   </div>
 </template>

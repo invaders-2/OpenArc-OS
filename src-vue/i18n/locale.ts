@@ -9,7 +9,7 @@
  *   · 不翻译用户内容（文件名、项目名、消息正文等）—— 它们不经过 t()。
  */
 import { ref } from "vue";
-import { EN_US } from "./en-US";
+import { EN_US } from "./en-US.ts";
 
 export type Locale = "zh-CN" | "en-US";
 export const SUPPORTED_LOCALES: Locale[] = ["zh-CN", "en-US"];

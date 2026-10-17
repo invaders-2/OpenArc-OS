@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from "../i18n";
 /**
  * 音乐（Vue 壳层）· 本地音乐库 + 访达来源。
  *
@@ -556,51 +557,51 @@ onMounted(() => {
 
 <template>
   <div class="split music-app" data-music-app="1" :data-music-source="source" :data-music-library-state="libState">
-    <nav class="split-side" aria-label="音乐">
-      <div class="split-section">来源</div>
+    <nav class="split-side" :aria-label="t('音乐')">
+      <div class="split-section">{{ t("来源") }}</div>
       <button type="button" class="split-nav" :aria-current="source === 'library' ? 'true' : undefined" @click="selectSource('library')">
         <Music2 :size="16" :stroke-width="1.25" />
-        <span class="split-nav-label">音乐库</span>
-        <small class="music-count">{{ libConfigured ? libTracks.length : "未配置" }}</small>
+        <span class="split-nav-label">{{ t("音乐库") }}</span>
+        <small class="music-count">{{ libConfigured ? libTracks.length : t("未配置") }}</small>
       </button>
       <button type="button" class="split-nav" :aria-current="source === 'finder' ? 'true' : undefined" @click="selectSource('finder')">
         <FolderOpen :size="16" :stroke-width="1.25" />
-        <span class="split-nav-label">访达</span>
+        <span class="split-nav-label">{{ t("访达") }}</span>
         <small class="music-count">{{ finderTracks.length }}</small>
       </button>
 
       <template v-if="source === 'library'">
-        <div class="split-section">扫描目录</div>
+        <div class="split-section">{{ t("扫描目录") }}</div>
         <ul v-if="libDirs.length" class="music-dirs" data-music-dirs>
           <li v-for="(dir, i) in libDirs" :key="dir" class="music-dir">
             <ListMusic :size="12" :stroke-width="1.5" aria-hidden="true" />
             <span class="music-dir__name" :title="dir">{{ libDirNames[i] || baseName(dir) }}</span>
           </li>
         </ul>
-        <p v-else class="music-side-note">还没有扫描目录。加一个本机文件夹后，应用会索引其中的音频（只读）。</p>
+        <p v-else class="music-side-note">{{ t("还没有扫描目录。加一个本机文件夹后，应用会索引其中的音频（只读）。") }}</p>
         <div class="music-side-actions">
           <DsButton size="sm" variant="secondary" @click="openDirs">
-            <Settings2 :size="13" :stroke-width="1.5" /> 管理扫描目录
+            <Settings2 :size="13" :stroke-width="1.5" /> {{ t("管理扫描目录") }}
           </DsButton>
         </div>
       </template>
       <template v-else>
-        <p class="music-side-note">桌面与各文件夹里的音频，经只读文件协议播放，不暴露磁盘路径。</p>
+        <p class="music-side-note">{{ t("桌面与各文件夹里的音频，经只读文件协议播放，不暴露磁盘路径。") }}</p>
       </template>
     </nav>
 
     <div class="split-main music-main">
       <div class="music-toolbar">
-        <strong class="music-title">{{ source === "library" ? "全部歌曲" : "访达音频" }}</strong>
+        <strong class="music-title">{{ source === "library" ? t("全部歌曲") : t("访达音频") }}</strong>
         <div class="music-search">
-          <DsSearchField :value="query" :placeholder="source === 'library' ? '按曲名 / 歌手 / 专辑筛选' : '按文件名筛选'" label="筛选曲目" @update:value="query = $event" />
+          <DsSearchField :value="query" :placeholder="source === 'library' ? t('按曲名 / 歌手 / 专辑筛选') : t('按文件名筛选')" label="筛选曲目" @update:value="query = $event" />
         </div>
-        <span class="music-count-label">{{ source === "library" ? libCountLabel : musicState.loading ? "正在读取…" : finderTracks.length + " 首" }}</span>
+        <span class="music-count-label">{{ source === "library" ? libCountLabel : musicState.loading ? t("正在读取…") : finderTracks.length + " 首" }}</span>
         <DsButton v-if="source === 'library'" size="sm" variant="secondary" :status="libScanning ? 'loading' : 'idle'" :disabled="!mediaBridge || !libConfigured" @click="scanLibrary()">
-          <RefreshCw :size="14" :stroke-width="1.5" /> 扫描
+          <RefreshCw :size="14" :stroke-width="1.5" /> {{ t("扫描") }}
         </DsButton>
         <DsButton v-else size="sm" variant="secondary" :status="musicState.loading ? 'loading' : 'idle'" @click="loadFinder">
-          <RefreshCw :size="14" :stroke-width="1.5" /> 刷新
+          <RefreshCw :size="14" :stroke-width="1.5" /> {{ t("刷新") }}
         </DsButton>
       </div>
 
@@ -608,13 +609,13 @@ onMounted(() => {
       <p v-if="source === 'finder' && finderFailure" class="music-banner" role="alert" data-music-finder-error>{{ finderFailure }}</p>
 
       <template v-if="source === 'library'">
-        <DsPageState v-if="libState === 'unavailable'" kind="unavailable" title="音乐库不可用" description="当前环境没有 window.openarc.media 媒体桥；访达来源仍然可用。" data-music-unavailable="media-bridge" />
-        <DsPageState v-else-if="libState === 'loading'" kind="loading" title="正在读取音乐库…" description="第一次读取会扫描目录并解析标签，曲目多时需要一会儿；界面不显示假进度。" />
-        <DsPageState v-else-if="libState === 'error'" kind="error" title="读取音乐库失败" :description="libFailure || ''" :on-action="() => loadLibraryTracks()" />
-        <DsPageState v-else-if="libState === 'unconfigured'" kind="empty" title="还没有设置音乐库目录" description="音乐库只读取你指定的本机文件夹（限深 6 层、单库 5000 首）；标签缺失时用文件名兜底。" action-label="设置扫描目录" :on-action="openDirs" data-music-empty="unconfigured" />
-        <DsPageState v-else-if="libState === 'empty'" kind="empty" title="扫描目录里没有可识别的音频" description="支持 mp3 / flac / wav / m4a / aac / ogg / opus / wma。换一个目录或把音频放进去后重新扫描。" action-label="重新扫描" :on-action="scanLibrary" data-music-empty="no-tracks" />
+        <DsPageState v-if="libState === 'unavailable'" kind="unavailable" :title="t('音乐库不可用')" description="当前环境没有 window.openarc.media 媒体桥；访达来源仍然可用。" data-music-unavailable="media-bridge" />
+        <DsPageState v-else-if="libState === 'loading'" kind="loading" :title="t('正在读取音乐库…')" description="第一次读取会扫描目录并解析标签，曲目多时需要一会儿；界面不显示假进度。" />
+        <DsPageState v-else-if="libState === 'error'" kind="error" :title="t('读取音乐库失败')" :description="libFailure || ''" :on-action="() => loadLibraryTracks()" />
+        <DsPageState v-else-if="libState === 'unconfigured'" kind="empty" :title="t('还没有设置音乐库目录')" description="音乐库只读取你指定的本机文件夹（限深 6 层、单库 5000 首）；标签缺失时用文件名兜底。" action-label="设置扫描目录" :on-action="openDirs" data-music-empty="unconfigured" />
+        <DsPageState v-else-if="libState === 'empty'" kind="empty" :title="t('扫描目录里没有可识别的音频')" description="支持 mp3 / flac / wav / m4a / aac / ogg / opus / wma。换一个目录或把音频放进去后重新扫描。" action-label="重新扫描" :on-action="scanLibrary" data-music-empty="no-tracks" />
         <div v-else class="music-list" role="list" data-music-library-list>
-          <div v-if="libNoResult" class="music-empty-inline">没有匹配的曲目；搜索只作用于已载入的列表。</div>
+          <div v-if="libNoResult" class="music-empty-inline">{{ t("没有匹配的曲目；搜索只作用于已载入的列表。") }}</div>
           <button
             v-for="track in filteredLibTracks"
             :key="track.id"
@@ -629,19 +630,19 @@ onMounted(() => {
               <span class="music-name">{{ track.title }}</span>
               <span class="music-sub">{{ trackSubLine(track) }}</span>
             </span>
-            <span class="music-meta">{{ track.folder || "根目录" }}</span>
+            <span class="music-meta">{{ track.folder || t("根目录") }}</span>
             <span class="music-meta">{{ fmt(track.duration) }}</span>
-            <span class="music-meta music-ext">{{ track.ext.toUpperCase() }}<template v-if="track.hasLyrics"> · 歌词</template></span>
+            <span class="music-meta music-ext">{{ track.ext.toUpperCase() }}<template v-if="track.hasLyrics"> {{ t("· 歌词") }}</template></span>
           </button>
         </div>
       </template>
 
       <template v-else>
-        <DsPageState v-if="musicState.loading && !finderTracks.length" kind="loading" title="正在读取访达里的音频…" />
-        <DsPageState v-else-if="finderFailure" kind="unavailable" title="访达来源不可用" :description="finderFailure" />
-        <DsPageState v-else-if="finderEmpty" kind="empty" title="访达里还没有音频" description="把 mp3 / m4a / wav 等音频拖进访达（桌面或任意文件夹），刷新后就能在这里播放。" :on-action="loadFinder" action-label="重新读取" />
+        <DsPageState v-if="musicState.loading && !finderTracks.length" kind="loading" :title="t('正在读取访达里的音频…')" />
+        <DsPageState v-else-if="finderFailure" kind="unavailable" :title="t('访达来源不可用')" :description="finderFailure" />
+        <DsPageState v-else-if="finderEmpty" kind="empty" :title="t('访达里还没有音频')" description="把 mp3 / m4a / wav 等音频拖进访达（桌面或任意文件夹），刷新后就能在这里播放。" :on-action="loadFinder" action-label="重新读取" />
         <div v-else class="music-list" role="list" data-music-finder-list>
-          <div v-if="finderNoResult" class="music-empty-inline">没有匹配的音频；搜索只作用于已载入的列表。</div>
+          <div v-if="finderNoResult" class="music-empty-inline">{{ t("没有匹配的音频；搜索只作用于已载入的列表。") }}</div>
           <button
             v-for="(track, i) in filteredFinderTracks"
             :key="track.key"
@@ -663,129 +664,129 @@ onMounted(() => {
 
       <div class="music-bar" data-music-player :data-music-player-mode="source">
         <div class="music-ctrls">
-          <button class="icon-button" aria-label="上一首" :disabled="source !== 'finder' || !finderTracks.length" @click="stepFinder(-1)"><SkipBack :size="15" /></button>
-          <button class="music-play" :aria-label="source === 'library' ? '音乐库曲目暂不能播放' : musicState.playing ? '暂停' : '播放'" :disabled="source !== 'finder' || !currentTrack" @click="toggleFinder">
+          <button class="icon-button" :aria-label="t('上一首')" :disabled="source !== 'finder' || !finderTracks.length" @click="stepFinder(-1)"><SkipBack :size="15" /></button>
+          <button class="music-play" :aria-label="source === 'library' ? t('音乐库曲目暂不能播放') : musicState.playing ? t('暂停') : t('播放')" :disabled="source !== 'finder' || !currentTrack" @click="toggleFinder">
             <Pause v-if="source === 'finder' && musicState.playing" :size="16" /><Play v-else :size="16" />
           </button>
-          <button class="icon-button" aria-label="下一首" :disabled="source !== 'finder' || !finderTracks.length" @click="stepFinder(1)"><SkipForward :size="15" /></button>
+          <button class="icon-button" :aria-label="t('下一首')" :disabled="source !== 'finder' || !finderTracks.length" @click="stepFinder(1)"><SkipForward :size="15" /></button>
         </div>
         <div class="music-now">
           <div class="music-now-name">{{ playerTitle }}</div>
           <div class="music-now-meta">{{ playerMeta }}</div>
           <div class="music-progress">
             <small>{{ fmt(musicState.time) }}</small>
-            <input type="range" min="0" :max="musicState.duration || 0" step="0.1" :value="musicState.time" aria-label="播放进度" :disabled="source !== 'finder' || !currentTrack" @input="onSeek" />
+            <input type="range" min="0" :max="musicState.duration || 0" step="0.1" :value="musicState.time" :aria-label="t('播放进度')" :disabled="source !== 'finder' || !currentTrack" @input="onSeek" />
             <small>{{ fmt(musicState.duration) }}</small>
           </div>
-          <p v-if="source === 'library'" class="music-playback-note" data-music-playback-unavailable>音乐库曲目暂不能播放：媒体域没有读取曲目字节 / 流式 Range 的命令，曲目 id 是路径哈希且绝对路径不出主进程。访达来源仍可用只读文件协议播放。</p>
+          <p v-if="source === 'library'" class="music-playback-note" data-music-playback-unavailable>{{ t("音乐库曲目暂不能播放：媒体域没有读取曲目字节 / 流式 Range 的命令，曲目 id 是路径哈希且绝对路径不出主进程。访达来源仍可用只读文件协议播放。") }}</p>
           <p v-if="source === 'library' && finderPlayingHint" class="music-playback-note" data-music-shared-player>{{ finderPlayingHint }}</p>
         </div>
       </div>
     </div>
 
-    <DsDialog :open="dirsDialog" title="音乐库扫描目录" @close="dirsDialog = false">
+    <DsDialog :open="dirsDialog" :title="t('音乐库扫描目录')" @close="dirsDialog = false">
       <div class="music-dialog-body">
-        <p class="music-hint">目录必须是本机存在的绝对路径；保存时主进程会重新校验，不存在的目录会被丢弃并在下面列出。目录清单会替换整个扫描列表。</p>
+        <p class="music-hint">{{ t("目录必须是本机存在的绝对路径；保存时主进程会重新校验，不存在的目录会被丢弃并在下面列出。目录清单会替换整个扫描列表。") }}</p>
         <ul v-if="libDirs.length" class="music-dir-list" data-music-dir-list>
           <li v-for="(dir, i) in libDirs" :key="dir" class="music-dir-row">
             <span class="music-dir-row__name" :title="dir">{{ libDirNames[i] || baseName(dir) }}</span>
-            <button type="button" class="music-dir-row__remove" :aria-label="'移除目录 ' + (libDirNames[i] || baseName(dir))" :disabled="dirsBusy" @click="removeDir(i)">移除</button>
+            <button type="button" class="music-dir-row__remove" :aria-label="'移除目录 ' + (libDirNames[i] || baseName(dir))" :disabled="dirsBusy" @click="removeDir(i)">{{ t("移除") }}</button>
           </li>
         </ul>
-        <p v-else class="music-hint">还没有目录。</p>
-        <DsTextField label="添加目录（绝对路径）" :model-value="dirsDraft" placeholder="/Users/你的名字/Music" hint="添加后会立刻重新扫描；完整路径只在主进程与这个输入框里使用。" @update:model-value="dirsDraft = $event" />
+        <p v-else class="music-hint">{{ t("还没有目录。") }}</p>
+        <DsTextField label="添加目录（绝对路径）" :model-value="dirsDraft" :placeholder="t('/Users/你的名字/Music')" hint="添加后会立刻重新扫描；完整路径只在主进程与这个输入框里使用。" @update:model-value="dirsDraft = $event" />
         <div class="music-actions">
           <DsButton size="sm" :status="dirsBusy ? 'loading' : 'idle'" :disabled="!dirsDraft.trim()" @click="addDir">
-            <FolderOpen :size="14" :stroke-width="1.5" /> 添加并扫描
+            <FolderOpen :size="14" :stroke-width="1.5" /> {{ t("添加并扫描") }}
           </DsButton>
           <DsButton size="sm" variant="secondary" :disabled="dirsBusy" @click="scanLibrary()">
-            <RefreshCw :size="14" :stroke-width="1.5" /> 重新扫描现有目录
+            <RefreshCw :size="14" :stroke-width="1.5" /> {{ t("重新扫描现有目录") }}
           </DsButton>
         </div>
         <p v-if="dirsError" class="music-error" role="alert" data-music-dirs-error>{{ dirsError }}</p>
         <ul v-if="dirsErrors.length" class="music-error-list" role="alert" data-music-dirs-errors>
           <li v-for="line in dirsErrors" :key="line">{{ line }}</li>
         </ul>
-        <p class="music-hint">绝对路径不会出现在曲目列表里；接口只回目录名与是否存在。</p>
+        <p class="music-hint">{{ t("绝对路径不会出现在曲目列表里；接口只回目录名与是否存在。") }}</p>
       </div>
       <template #footer>
-        <DsButton variant="ghost" @click="dirsDialog = false">关闭</DsButton>
+        <DsButton variant="ghost" @click="dirsDialog = false">{{ t("关闭") }}</DsButton>
       </template>
     </DsDialog>
 
     <DsDialog class="music-track-dialog" :open="trackDialog" :title="trackDialogTitle" @close="trackDialog = false">
       <div v-if="selectedLib" class="music-dialog-body" data-music-track-detail>
         <dl class="music-kv">
-          <dt>歌手</dt>
+          <dt>{{ t("歌手") }}</dt>
           <dd>{{ selectedLib.artist || "—" }}</dd>
-          <dt>专辑</dt>
+          <dt>{{ t("专辑") }}</dt>
           <dd>{{ selectedLib.album || "—" }}</dd>
-          <dt>格式</dt>
+          <dt>{{ t("格式") }}</dt>
           <dd>{{ selectedLib.ext.toUpperCase() }} · {{ sizeText(selectedLib.size) }} · {{ fmt(selectedLib.duration) }}</dd>
-          <dt>子目录</dt>
-          <dd>{{ selectedLib.folder || "根目录" }}</dd>
-          <dt>歌词</dt>
-          <dd>{{ selectedLib.hasLyrics ? "扫描时已找到" : "扫描时未找到" }}</dd>
-          <dt>封面</dt>
-          <dd>{{ selectedLib.albumImage || selectedLib.artistImage ? "缓存里已登记（当前不能预览）" : "还没有登记" }}</dd>
+          <dt>{{ t("子目录") }}</dt>
+          <dd>{{ selectedLib.folder || t("根目录") }}</dd>
+          <dt>{{ t("歌词") }}</dt>
+          <dd>{{ selectedLib.hasLyrics ? t("扫描时已找到") : t("扫描时未找到") }}</dd>
+          <dt>{{ t("封面") }}</dt>
+          <dd>{{ selectedLib.albumImage || selectedLib.artistImage ? t("缓存里已登记（当前不能预览）") : t("还没有登记") }}</dd>
         </dl>
 
-        <section class="music-section" aria-label="歌词" data-music-lyrics :data-music-lyrics-state="lyrics.status">
+        <section class="music-section" :aria-label="t('歌词')" data-music-lyrics :data-music-lyrics-state="lyrics.status">
           <div class="music-section-head">
-            <strong>歌词</strong>
+            <strong>{{ t("歌词") }}</strong>
             <DsButton size="sm" variant="secondary" :status="lyrics.status === 'loading' ? 'loading' : 'idle'" @click="loadLyrics">
-              <FileText :size="13" :stroke-width="1.5" /> 读取歌词
+              <FileText :size="13" :stroke-width="1.5" /> {{ t("读取歌词") }}
             </DsButton>
           </div>
-          <p v-if="lyrics.status === 'idle'" class="music-hint">打开曲目时会自动读取；本地同名 .lrc 与内嵌歌词优先，在线查询需要主进程注入网络请求。</p>
-          <p v-else-if="lyrics.status === 'loading'" class="music-hint">正在读取歌词…</p>
+          <p v-if="lyrics.status === 'idle'" class="music-hint">{{ t("打开曲目时会自动读取；本地同名 .lrc 与内嵌歌词优先，在线查询需要主进程注入网络请求。") }}</p>
+          <p v-else-if="lyrics.status === 'loading'" class="music-hint">{{ t("正在读取歌词…") }}</p>
           <p v-else-if="lyrics.status === 'empty'" class="music-hint" data-music-lyrics-empty>
-            {{ lyrics.message || "没有找到歌词：既没有同名 .lrc，也没有内嵌歌词。" }}
+            {{ lyrics.message || t("没有找到歌词：既没有同名 .lrc，也没有内嵌歌词。") }}
           </p>
           <p v-else-if="lyrics.status === 'error'" class="music-error" role="alert">{{ lyrics.message }}</p>
           <template v-else>
-            <p class="music-hint">来源：{{ LYRICS_SOURCE[lyrics.source] || lyrics.source || "未知" }}</p>
+            <p class="music-hint">来源：{{ LYRICS_SOURCE[lyrics.source] || lyrics.source || t("未知") }}</p>
             <pre class="music-lyrics">{{ lyrics.text }}</pre>
           </template>
         </section>
 
-        <section class="music-section" aria-label="元数据" data-music-meta>
-          <div class="music-section-head"><strong>元数据</strong></div>
-          <p class="music-hint">只写本机音乐库覆盖层（library-meta.json），不改音频文件；保存后会重新扫描以应用。</p>
+        <section class="music-section" :aria-label="t('元数据')" data-music-meta>
+          <div class="music-section-head"><strong>{{ t("元数据") }}</strong></div>
+          <p class="music-hint">{{ t("只写本机音乐库覆盖层（library-meta.json），不改音频文件；保存后会重新扫描以应用。") }}</p>
           <DsTextField label="曲名" :model-value="metaTitle" @update:model-value="metaTitle = $event" />
           <DsTextField label="歌手" :model-value="metaArtist" @update:model-value="metaArtist = $event" />
           <DsTextField label="专辑" :model-value="metaAlbum" @update:model-value="metaAlbum = $event" />
           <div class="music-actions">
-            <DsButton size="sm" :status="metaBusy ? 'loading' : 'idle'" :disabled="!metaTitle.trim()" @click="saveMeta">保存元数据</DsButton>
+            <DsButton size="sm" :status="metaBusy ? 'loading' : 'idle'" :disabled="!metaTitle.trim()" @click="saveMeta">{{ t("保存元数据") }}</DsButton>
           </div>
           <p v-if="metaError" class="music-error" role="alert" data-music-meta-error>{{ metaError }}</p>
           <p v-if="metaNotice" class="music-hint" data-music-meta-notice>{{ metaNotice }}</p>
         </section>
 
-        <section class="music-section" aria-label="封面" data-music-artwork :data-music-artwork-state="artworkState">
+        <section class="music-section" :aria-label="t('封面')" data-music-artwork :data-music-artwork-state="artworkState">
           <div class="music-section-head">
-            <strong>封面与歌手照片</strong>
-            <DsButton size="sm" variant="secondary" :status="artLoading ? 'loading' : 'idle'" @click="loadArtworkTargets">重新读取缺少清单</DsButton>
+            <strong>{{ t("封面与歌手照片") }}</strong>
+            <DsButton size="sm" variant="secondary" :status="artLoading ? 'loading' : 'idle'" @click="loadArtworkTargets">{{ t("重新读取缺少清单") }}</DsButton>
           </div>
-          <p class="music-hint">封面字节写入本机缓存；当前版本没有读取封面字节的命令，所以列表与这里都不展示封面图，也不放占位假图。可先用清单确认缺哪些，再从本机选图登记。</p>
+          <p class="music-hint">{{ t("封面字节写入本机缓存；当前版本没有读取封面字节的命令，所以列表与这里都不展示封面图，也不放占位假图。可先用清单确认缺哪些，再从本机选图登记。") }}</p>
           <p v-if="artError" class="music-error" role="alert" data-music-artwork-error>{{ artError }}</p>
-          <p v-else-if="artworkState === 'loading'" class="music-hint">正在读取缺少封面的条目…</p>
-          <p v-else-if="artworkState === 'idle'" class="music-hint">还没有读取缺少清单。</p>
+          <p v-else-if="artworkState === 'loading'" class="music-hint">{{ t("正在读取缺少封面的条目…") }}</p>
+          <p v-else-if="artworkState === 'idle'" class="music-hint">{{ t("还没有读取缺少清单。") }}</p>
           <template v-else-if="artworkState === 'empty'">
-            <p class="music-hint" data-music-artwork-empty>没有缺少封面或歌手照片的条目。若曲库为空，检查扫描目录与标签。</p>
+            <p class="music-hint" data-music-artwork-empty>{{ t("没有缺少封面或歌手照片的条目。若曲库为空，检查扫描目录与标签。") }}</p>
           </template>
           <template v-else>
             <p class="music-hint" data-music-artwork-summary>缺少歌手照片 {{ artTargets?.artists.length || 0 }} 项、缺少专辑封面 {{ artTargets?.albums.length || 0 }} 项。</p>
             <p class="music-hint">
-              当前曲目：{{ missingArtist ? "缺少歌手照片" : "歌手照片已登记" }} · {{ missingAlbum ? "缺少专辑封面" : "专辑封面已登记或缺少歌手/专辑标签" }}
+              当前曲目：{{ missingArtist ? t("缺少歌手照片") : t("歌手照片已登记") }} · {{ missingAlbum ? t("缺少专辑封面") : t("专辑封面已登记或缺少歌手/专辑标签") }}
             </p>
           </template>
           <div class="music-actions">
             <DsButton size="sm" variant="secondary" :disabled="!canUploadArtist || artBusy" @click="pickArtwork('artist')">
-              <Upload :size="13" :stroke-width="1.5" /> 本机选图设为歌手照片
+              <Upload :size="13" :stroke-width="1.5" /> {{ t("本机选图设为歌手照片") }}
             </DsButton>
             <DsButton size="sm" variant="secondary" :disabled="!canUploadAlbum || artBusy" @click="pickArtwork('album')">
-              <Upload :size="13" :stroke-width="1.5" /> 本机选图设为专辑封面
+              <Upload :size="13" :stroke-width="1.5" /> {{ t("本机选图设为专辑封面") }}
             </DsButton>
             <input ref="artFileInput" type="file" accept="image/*" hidden aria-hidden="true" tabindex="-1" @change="onArtworkFile" />
           </div>
@@ -793,7 +794,7 @@ onMounted(() => {
         </section>
       </div>
       <template #footer>
-        <DsButton variant="ghost" @click="trackDialog = false">关闭</DsButton>
+        <DsButton variant="ghost" @click="trackDialog = false">{{ t("关闭") }}</DsButton>
       </template>
     </DsDialog>
   </div>

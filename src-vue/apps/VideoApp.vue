@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from "../i18n";
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { ChevronLeft, ChevronRight, Download, Pause, Play, Plus, Trash2, X } from "lucide-vue-next";
 import { iconUrl } from "../apps";
@@ -614,56 +615,56 @@ onBeforeUnmount(() => offProgress?.());
 
 <template>
   <div class="split video-app">
-    <nav class="split-side" aria-label="素材">
-      <div class="split-section">素材 <small class="planned-count">{{ assets.length }}</small></div>
+    <nav class="split-side" :aria-label="t('素材')">
+      <div class="split-section">{{ t("素材") }} <small class="planned-count">{{ assets.length }}</small></div>
       <div class="notes-list">
         <button v-for="a in assets" :key="a.key" type="button" class="notes-item vd-asset" :disabled="!ff?.available || mediaBusy !== null" @click="mode === 'quick' ? add(a) : importAsset(a)">
           <span class="notes-item-name">{{ baseName(a.name) }}</span>
-          <small>{{ mediaBusy === "import:" + a.key ? "正在导入…" : adding === a.key ? "正在读取…" : mode === "quick" ? "点按加入快速剪辑" : "点按导入多轨并加入" }}</small>
+          <small>{{ mediaBusy === "import:" + a.key ? t("正在导入…") : adding === a.key ? t("正在读取…") : mode === "quick" ? t("点按加入快速剪辑") : t("点按导入多轨并加入") }}</small>
           <Plus class="vd-asset-plus" :size="13" />
         </button>
-        <p v-if="!assets.length" class="planned-note">访达里还没有视频。把 mp4 / mov 拖进访达即可在这里使用。</p>
+        <p v-if="!assets.length" class="planned-note">{{ t("访达里还没有视频。把 mp4 / mov 拖进访达即可在这里使用。") }}</p>
       </div>
       <template v-if="mode === 'multi'">
-        <div class="split-section">多轨素材 <small class="planned-count">{{ mediaAssets.length }}</small></div>
+        <div class="split-section">{{ t("多轨素材") }} <small class="planned-count">{{ mediaAssets.length }}</small></div>
         <div class="notes-list">
           <div v-for="a in mediaAssets" :key="a.id" class="notes-item mt-asset" :data-media-asset="a.id">
             <span class="notes-item-name">{{ baseName(a.name) }}</span>
             <small>{{ trackLabel(a.kind) }} · {{ fmtMs(Number(a.durationMs) || 0) }}</small>
-            <button class="mt-mini" type="button" @click="addAssetClip(a)">加入时间线</button>
+            <button class="mt-mini" type="button" @click="addAssetClip(a)">{{ t("加入时间线") }}</button>
           </div>
-          <p v-if="!mediaAssets.length" class="planned-note">还没有导入多轨素材。从上方访达素材点按导入（单文件 ≤ 12 MB）。</p>
+          <p v-if="!mediaAssets.length" class="planned-note">{{ t("还没有导入多轨素材。从上方访达素材点按导入（单文件 ≤ 12 MB）。") }}</p>
         </div>
       </template>
       <p class="planned-note">
-        {{ !bridge ? "需要 OpenArc 桌面应用。" : ff === null ? "正在检测 FFmpeg…" : ff.available ? "本机 " + ff.version : "没有找到 FFmpeg：请先安装（例如 brew install ffmpeg）。" }}
+        {{ !bridge ? t("需要 OpenArc 桌面应用。") : ff === null ? t("正在检测 FFmpeg…") : ff.available ? t("本机 ") + ff.version : t("没有找到 FFmpeg：请先安装（例如 brew install ffmpeg）。") }}
       </p>
     </nav>
 
     <div class="split-main vd-main">
       <div class="pane-toolbar">
-        <div class="segmented text" role="group" aria-label="剪辑模式" data-video-mode>
-          <button :aria-pressed="mode === 'quick'" data-video-mode-quick @click="setMode('quick')">快速单轨</button>
-          <button :aria-pressed="mode === 'multi'" data-video-mode-multi @click="setMode('multi')">多轨编辑</button>
+        <div class="segmented text" role="group" :aria-label="t('剪辑模式')" data-video-mode>
+          <button :aria-pressed="mode === 'quick'" data-video-mode-quick @click="setMode('quick')">{{ t("快速单轨") }}</button>
+          <button :aria-pressed="mode === 'multi'" data-video-mode-multi @click="setMode('multi')">{{ t("多轨编辑") }}</button>
         </div>
-        <input v-model="project.name" class="notes-title" aria-label="剪辑名称" />
+        <input v-model="project.name" class="notes-title" :aria-label="t('剪辑名称')" />
         <div class="toolbar-spacer" />
-        <select v-model="project.resolution" class="vd-select" aria-label="导出分辨率">
+        <select v-model="project.resolution" class="vd-select" :aria-label="t('导出分辨率')">
           <option value="1080p">1080p</option>
           <option value="720p">720p</option>
           <option value="480p">480p</option>
-          <option value="source">与首个片段一致</option>
+          <option value="source">{{ t("与首个片段一致") }}</option>
         </select>
         <template v-if="mode === 'quick'">
-          <button v-if="exporting" class="planned-today" @click="bridge?.cancel()"><X :size="12" /> 取消</button>
+          <button v-if="exporting" class="planned-today" @click="bridge?.cancel()"><X :size="12" /> {{ t("取消") }}</button>
           <button v-else class="planned-cta vd-export" :disabled="!project.clips.length || !ff?.available" @click="exportVideo">
-            <Download :size="13" /> 导出
+            <Download :size="13" /> {{ t("导出") }}
           </button>
         </template>
         <template v-else>
-          <button class="planned-today" :disabled="mediaBusy !== null" data-mt-validate @click="validateTimeline">校验时间线</button>
-          <button class="planned-today" :disabled="mediaBusy !== null" data-mt-plan @click="planPreview">预览渲染计划</button>
-          <button class="planned-cta" :disabled="mediaBusy !== null || !timeline.tracks.some((t) => t.clips.length)" data-mt-submit @click="submitRender">提交渲染</button>
+          <button class="planned-today" :disabled="mediaBusy !== null" data-mt-validate @click="validateTimeline">{{ t("校验时间线") }}</button>
+          <button class="planned-today" :disabled="mediaBusy !== null" data-mt-plan @click="planPreview">{{ t("预览渲染计划") }}</button>
+          <button class="planned-cta" :disabled="mediaBusy !== null || !timeline.tracks.some((t) => t.clips.length)" data-mt-submit @click="submitRender">{{ t("提交渲染") }}</button>
         </template>
       </div>
       <div v-if="exporting" class="vd-progress" role="progressbar" :aria-valuenow="Math.round(progress * 100)"><span :style="{ width: progress * 100 + '%' }" /></div>
@@ -673,8 +674,8 @@ onBeforeUnmount(() => offProgress?.());
       <template v-if="mode === 'quick'">
         <div v-if="!project.clips.length" class="empty-content">
           <img class="large-icon" :src="iconUrl('video')" alt="" draggable="false" />
-          <h2 class="planned-title">从左侧加入片段</h2>
-          <p>按顺序拼接多个视频，裁剪每段的入点和出点，然后导出成一个 MP4。</p>
+          <h2 class="planned-title">{{ t("从左侧加入片段") }}</h2>
+          <p>{{ t("按顺序拼接多个视频，裁剪每段的入点和出点，然后导出成一个 MP4。") }}</p>
         </div>
         <template v-else>
           <div class="vd-stage">
@@ -692,18 +693,18 @@ onBeforeUnmount(() => offProgress?.());
             />
           </div>
           <div class="vd-controls">
-            <button class="music-play" :aria-label="playing ? '暂停' : '播放片段'" @click="togglePlay"><Pause v-if="playing" :size="15" /><Play v-else :size="15" /></button>
-            <button class="planned-today" @click="previewAll">预览全片</button>
+            <button class="music-play" :aria-label="playing ? t('暂停') : t('播放片段')" @click="togglePlay"><Pause v-if="playing" :size="15" /><Play v-else :size="15" /></button>
+            <button class="planned-today" @click="previewAll">{{ t("预览全片") }}</button>
             <span class="mono vd-time">{{ fmt(now) }}</span>
             <div class="toolbar-spacer" />
             <template v-if="clip">
-              <label class="vd-field">入点 <input v-model.number="clip.start" type="number" step="0.1" min="0" @change="clamp(clip)" /></label>
-              <button class="planned-today" title="把入点设为当前播放位置" @click="setIn">设为当前</button>
-              <label class="vd-field">出点 <input v-model.number="clip.end" type="number" step="0.1" min="0" @change="clamp(clip)" /></label>
-              <button class="planned-today" title="把出点设为当前播放位置" @click="setOut">设为当前</button>
+              <label class="vd-field">{{ t("入点") }} <input v-model.number="clip.start" type="number" step="0.1" min="0" @change="clamp(clip)" /></label>
+              <button class="planned-today" :title="t('把入点设为当前播放位置')" @click="setIn">{{ t("设为当前") }}</button>
+              <label class="vd-field">{{ t("出点") }} <input v-model.number="clip.end" type="number" step="0.1" min="0" @change="clamp(clip)" /></label>
+              <button class="planned-today" :title="t('把出点设为当前播放位置')" @click="setOut">{{ t("设为当前") }}</button>
             </template>
           </div>
-          <div class="vd-timeline" role="list" aria-label="时间线">
+          <div class="vd-timeline" role="list" :aria-label="t('时间线')">
             <button
               v-for="c in project.clips"
               :key="c.uid"
@@ -722,9 +723,9 @@ onBeforeUnmount(() => offProgress?.());
             <span>{{ project.clips.length }} 个片段 · 总长 {{ fmt(total) }}</span>
             <div class="toolbar-spacer" />
             <template v-if="clip">
-              <button class="icon-button" aria-label="前移" title="前移" @click="move(-1)"><ChevronLeft :size="15" /></button>
-              <button class="icon-button" aria-label="后移" title="后移" @click="move(1)"><ChevronRight :size="15" /></button>
-              <button class="icon-button" aria-label="移出时间线" title="移出时间线" @click="remove(clip.uid)"><Trash2 :size="14" /></button>
+              <button class="icon-button" :aria-label="t('前移')" :title="t('前移')" @click="move(-1)"><ChevronLeft :size="15" /></button>
+              <button class="icon-button" :aria-label="t('后移')" :title="t('后移')" @click="move(1)"><ChevronRight :size="15" /></button>
+              <button class="icon-button" :aria-label="t('移出时间线')" :title="t('移出时间线')" @click="remove(clip.uid)"><Trash2 :size="14" /></button>
             </template>
           </div>
         </template>
@@ -737,16 +738,16 @@ onBeforeUnmount(() => offProgress?.());
 
         <section class="mt-rough" data-mt-rough>
           <header class="mt-rough-head">
-            <b>Agent 粗剪</b>
-            <small>文案 → 候选时间线 → 预览确认 → 采用 → 提交渲染</small>
+            <b>{{ t("Agent 粗剪") }}</b>
+            <small>{{ t("文案 → 候选时间线 → 预览确认 → 采用 → 提交渲染") }}</small>
             <div class="toolbar-spacer" />
-            <button class="mt-mini" type="button" @click="roughOpen = !roughOpen">{{ roughOpen ? "收起" : "展开" }}</button>
+            <button class="mt-mini" type="button" @click="roughOpen = !roughOpen">{{ roughOpen ? t("收起") : t("展开") }}</button>
           </header>
           <template v-if="roughOpen">
-            <textarea v-model="roughInstruction" class="mt-input mt-textarea" rows="3" data-mt-rough-instruction placeholder="例如：把已导入素材按 3 秒节奏粗剪，配乐淡入，字幕只在开头出现"></textarea>
+            <textarea v-model="roughInstruction" class="mt-input mt-textarea" rows="3" data-mt-rough-instruction :placeholder="t('例如：把已导入素材按 3 秒节奏粗剪，配乐淡入，字幕只在开头出现')"></textarea>
             <div class="mt-rough-actions">
-              <label class="mt-field">目标时长（秒）<input v-model.number="roughSeconds" type="number" min="1" max="7200" /></label>
-              <button class="planned-cta" :disabled="roughBusy || !roughInstruction.trim()" data-mt-rough-run @click="runRoughCut">{{ roughBusy ? "生成中…" : "生成粗剪" }}</button>
+              <label class="mt-field">{{ t("目标时长（秒）") }}<input v-model.number="roughSeconds" type="number" min="1" max="7200" /></label>
+              <button class="planned-cta" :disabled="roughBusy || !roughInstruction.trim()" data-mt-rough-run @click="runRoughCut">{{ roughBusy ? t("生成中…") : t("生成粗剪") }}</button>
             </div>
             <p v-if="roughError" class="mt-error" data-mt-rough-error>{{ roughError }}</p>
             <div v-if="roughCandidate" class="mt-candidate" data-mt-rough-candidate>
@@ -755,8 +756,8 @@ onBeforeUnmount(() => offProgress?.());
                 <li v-for="i in roughCandidate.issues" :key="i.code" :data-severity="i.severity">{{ i.severity }} · {{ i.code }} · {{ i.message }}</li>
               </ul>
               <div class="mt-rough-actions">
-                <button class="planned-cta" data-mt-rough-adopt @click="adoptRoughCut">采用并预览</button>
-                <button class="planned-today" @click="roughCandidate = null">放弃</button>
+                <button class="planned-cta" data-mt-rough-adopt @click="adoptRoughCut">{{ t("采用并预览") }}</button>
+                <button class="planned-today" @click="roughCandidate = null">{{ t("放弃") }}</button>
               </div>
             </div>
           </template>
@@ -764,7 +765,7 @@ onBeforeUnmount(() => offProgress?.());
 
         <p v-if="alignHint" class="mt-hint" data-mt-align-hint>
           <span>{{ alignHint }}</span>
-          <button class="mt-mini" type="button" @click="validateTimeline">对齐全片</button>
+          <button class="mt-mini" type="button" @click="validateTimeline">{{ t("对齐全片") }}</button>
         </p>
 
         <section class="mt-tracks" data-mt-tracks>
@@ -774,8 +775,8 @@ onBeforeUnmount(() => offProgress?.());
               <b>{{ track.name }}</b>
               <small>{{ trackLabel(track.type) }}</small>
               <div class="toolbar-spacer" />
-              <button class="mt-mini" type="button" :aria-pressed="track.muted" @click="setTrackFlag(track, 'muted')">{{ track.muted ? "取消静音" : "静音" }}</button>
-              <button class="mt-mini" type="button" :aria-pressed="track.hidden" @click="setTrackFlag(track, 'hidden')">{{ track.hidden ? "显示" : "隐藏" }}</button>
+              <button class="mt-mini" type="button" :aria-pressed="track.muted" @click="setTrackFlag(track, 'muted')">{{ track.muted ? t("取消静音") : t("静音") }}</button>
+              <button class="mt-mini" type="button" :aria-pressed="track.hidden" @click="setTrackFlag(track, 'hidden')">{{ track.hidden ? t("显示") : t("隐藏") }}</button>
             </div>
             <div class="mt-lane">
               <button
@@ -792,39 +793,39 @@ onBeforeUnmount(() => offProgress?.());
                 <span>{{ baseName(c.name) }}</span>
                 <i v-if="c.transitionIn && c.transitionIn.type !== 'none'">{{ c.transitionIn.type }}</i>
               </button>
-              <p v-if="!track.clips.length" class="mt-empty">空轨 · 从左侧「加入时间线」</p>
+              <p v-if="!track.clips.length" class="mt-empty">{{ t("空轨 · 从左侧「加入时间线」") }}</p>
             </div>
           </div>
           <div v-if="timeline.tracks.find((t) => t.type === 'subtitle')" class="mt-sub-add">
-            <input v-model="subtitleDraft" class="mt-input" placeholder="字幕文本（占位，不进入渲染计划）" aria-label="字幕文本" data-mt-subtitle />
-            <button class="mt-mini" type="button" :disabled="!subtitleDraft.trim()" data-mt-subtitle-add @click="addSubtitleClip">添加字幕片段</button>
+            <input v-model="subtitleDraft" class="mt-input" :placeholder="t('字幕文本（占位，不进入渲染计划）')" :aria-label="t('字幕文本')" data-mt-subtitle />
+            <button class="mt-mini" type="button" :disabled="!subtitleDraft.trim()" data-mt-subtitle-add @click="addSubtitleClip">{{ t("添加字幕片段") }}</button>
           </div>
         </section>
 
         <section v-if="selectedMClip" class="mt-editor" data-mt-clip-editor>
           <header class="mt-editor-head">
             <b>{{ selectedMClip.track.name }} · {{ baseName(selectedMClip.clip.name) }}</b>
-            <small v-if="!selectedMClip.clip.assetId">无素材（仅占位）</small>
+            <small v-if="!selectedMClip.clip.assetId">{{ t("无素材（仅占位）") }}</small>
             <div class="toolbar-spacer" />
-            <button class="mt-mini" type="button" data-mt-clip-remove @click="removeMClip">移出时间线</button>
+            <button class="mt-mini" type="button" data-mt-clip-remove @click="removeMClip">{{ t("移出时间线") }}</button>
           </header>
           <div class="mt-editor-grid">
-            <label class="mt-field">入点（秒）<input v-model.number="clipIn" type="number" step="0.1" min="0" data-mt-clip-in /></label>
-            <label class="mt-field">出点（秒）<input v-model.number="clipOut" type="number" step="0.1" min="0" data-mt-clip-out /></label>
-            <label class="mt-field">时间线起点（秒）<input v-model.number="clipStart" type="number" step="0.1" min="0" data-mt-clip-start /></label>
-            <span class="mt-field">时长 <b class="mono">{{ fmtMs(selectedMClip.clip.durationMs) }}</b></span>
-            <label class="mt-field">转场
+            <label class="mt-field">{{ t("入点（秒）") }}<input v-model.number="clipIn" type="number" step="0.1" min="0" data-mt-clip-in /></label>
+            <label class="mt-field">{{ t("出点（秒）") }}<input v-model.number="clipOut" type="number" step="0.1" min="0" data-mt-clip-out /></label>
+            <label class="mt-field">{{ t("时间线起点（秒）") }}<input v-model.number="clipStart" type="number" step="0.1" min="0" data-mt-clip-start /></label>
+            <span class="mt-field">{{ t("时长") }} <b class="mono">{{ fmtMs(selectedMClip.clip.durationMs) }}</b></span>
+            <label class="mt-field">{{ t("转场") }}
               <select v-model="clipTransition" class="vd-select" data-mt-clip-transition>
                 <option v-for="type in transitionChoices" :key="type" :value="type">{{ type }}</option>
               </select>
             </label>
-            <label v-if="clipTransition !== 'none'" class="mt-field">转场时长（毫秒）<input v-model.number="clipTransitionMs" type="number" step="50" min="0" max="5000" data-mt-clip-transition-ms /></label>
+            <label v-if="clipTransition !== 'none'" class="mt-field">{{ t("转场时长（毫秒）") }}<input v-model.number="clipTransitionMs" type="number" step="50" min="0" max="5000" data-mt-clip-transition-ms /></label>
           </div>
           <div v-if="previewClip" class="mt-preview">
             <video :key="previewClip.id + selectedMClip.clip.id" class="mt-preview-video" :src="fileUrl(previewClip.folderId, previewClip.id)" preload="metadata" muted />
-            <small>源素材预览（可拖动）；多轨合成预览请看渲染计划。</small>
+            <small>{{ t("源素材预览（可拖动）；多轨合成预览请看渲染计划。") }}</small>
           </div>
-          <p v-else class="mt-note">这段片段没有本地源素材（例如粗剪结果里的素材尚未导入），因此不能在这里预览源画面。</p>
+          <p v-else class="mt-note">{{ t("这段片段没有本地源素材（例如粗剪结果里的素材尚未导入），因此不能在这里预览源画面。") }}</p>
         </section>
 
         <section v-if="issues.length" class="mt-issues-box" data-mt-issues>
@@ -832,15 +833,15 @@ onBeforeUnmount(() => offProgress?.());
           <ul class="mt-issues">
             <li v-for="i in issues" :key="i.code + i.message" :data-severity="i.severity">{{ i.severity }} · {{ i.code }} · {{ i.message }}</li>
           </ul>
-          <p class="mt-note">error 会阻止渲染；warning 只提示重叠等情况。</p>
+          <p class="mt-note">{{ t("error 会阻止渲染；warning 只提示重叠等情况。") }}</p>
         </section>
 
         <section v-if="plan" class="mt-plan" data-mt-plan-result>
-          <h4>渲染计划预览</h4>
+          <h4>{{ t("渲染计划预览") }}</h4>
           <div class="mt-plan-rows">
-            <span>总长 <b class="mono">{{ fmtMs(plan.durationMs || 0) }}</b></span>
-            <span>输入 <b>{{ plan.inputCount || 0 }}</b> 个</span>
-            <span>{{ plan.durationAligned ? "时长已对齐" : "已声明时长，无需对齐" }}</span>
+            <span>{{ t("总长") }} <b class="mono">{{ fmtMs(plan.durationMs || 0) }}</b></span>
+            <span>{{ t("输入") }} <b>{{ plan.inputCount || 0 }}</b> {{ t("个") }}</span>
+            <span>{{ plan.durationAligned ? t("时长已对齐") : t("已声明时长，无需对齐") }}</span>
           </div>
           <ul v-if="plan.plan?.inputs?.length" class="mt-inputs">
             <li v-for="input in plan.plan.inputs" :key="input.clipId">
@@ -849,16 +850,16 @@ onBeforeUnmount(() => offProgress?.());
               <span v-if="input.transition">{{ input.transition.type }} {{ input.transition.durationMs }}ms</span>
             </li>
           </ul>
-          <p class="mt-note">计划不含磁盘路径；提交后进入队列，不会自动执行。</p>
+          <p class="mt-note">{{ t("计划不含磁盘路径；提交后进入队列，不会自动执行。") }}</p>
         </section>
 
         <section v-if="job" class="mt-job" data-mt-job>
-          <h4>渲染任务</h4>
+          <h4>{{ t("渲染任务") }}</h4>
           <div class="mt-plan-rows">
             <span class="mono">{{ job.id }}</span>
-            <span>状态 <b>{{ job.status }}</b></span>
+            <span>{{ t("状态") }} <b>{{ job.status }}</b></span>
             <span v-if="typeof job.progress === 'number'">进度 {{ Math.round((job.progress || 0) * 100) }}%</span>
-            <button class="mt-mini" type="button" @click="refreshJob">刷新状态</button>
+            <button class="mt-mini" type="button" @click="refreshJob">{{ t("刷新状态") }}</button>
           </div>
         </section>
       </div>

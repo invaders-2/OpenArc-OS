@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import { t } from "../i18n";
 import { ArrowRight } from "lucide-vue-next";
 import AuthErrorLine from "./AuthErrorLine.vue";
 import Avatar from "./Avatar.vue";
@@ -60,11 +61,11 @@ function onTab(event: KeyboardEvent) {
   >
     <LockStageWallpaper :wallpaper="wallpaper" />
     <LockClock />
-    <div ref="panel" class="lock-panel" role="dialog" aria-modal="true" aria-label="屏幕已锁定">
+    <div ref="panel" class="lock-panel" role="dialog" aria-modal="true" :aria-label="t('屏幕已锁定')">
       <span class="lock-avatar" aria-hidden="true">
         <Avatar :avatar-ref="snapshot.avatarRef" :name="snapshot.displayName" />
       </span>
-      <strong class="lock-name">{{ snapshot.displayName || "本地用户" }}</strong>
+      <strong class="lock-name">{{ snapshot.displayName || t("本地用户") }}</strong>
       <span class="lock-identifier">{{ snapshot.identifier }}</span>
       <form class="lock-form" data-d3-id="unlock-form" @submit.prevent="submit">
         <div class="lock-input lock-input--act">
@@ -73,8 +74,8 @@ function onTab(event: KeyboardEvent) {
             v-model="password"
             type="password"
             autocomplete="current-password"
-            placeholder="输入密码以解锁"
-            aria-label="密码"
+            :placeholder="t('输入密码以解锁')"
+            :aria-label="t('密码')"
             data-d3-id="unlock-password"
             @keydown="onTab"
           />
@@ -82,7 +83,7 @@ function onTab(event: KeyboardEvent) {
             class="lock-submit"
             type="submit"
             :disabled="busy || !password"
-            aria-label="解锁"
+            :aria-label="t('解锁')"
             data-d3-id="unlock-submit"
           >
             <ArrowRight :size="16" />
@@ -90,10 +91,10 @@ function onTab(event: KeyboardEvent) {
         </div>
         <AuthErrorLine :error="error" />
         <button class="lock-alt" type="button" :disabled="busy" data-d3-id="lock-logout" @click="emit('logout')">
-          退出登录
+          {{ t("退出登录") }}
         </button>
       </form>
-      <p class="lock-footnote">锁定不等于退出登录：会话仍然有效，但受保护的操作会被拒绝，必须重新验证密码。</p>
+      <p class="lock-footnote">{{ t("锁定不等于退出登录：会话仍然有效，但受保护的操作会被拒绝，必须重新验证密码。") }}</p>
     </div>
   </div>
 </template>

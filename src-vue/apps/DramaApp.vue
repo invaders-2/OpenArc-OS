@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from "../i18n";
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { Clapperboard, Download, Film, Image as ImageIcon, Library, LoaderCircle, Palette, Plus, RefreshCw, ScrollText, Sparkles } from "lucide-vue-next";
 import { iconUrl } from "../apps";
@@ -314,10 +315,10 @@ onBeforeUnmount(() => window.clearInterval(poll));
 
 <template>
   <div class="split drama-app" data-drama-app>
-    <nav class="split-side" aria-label="短剧项目">
+    <nav class="split-side" :aria-label="t('短剧项目')">
       <div class="split-section dr-side-head">
-        <span>项目</span>
-        <button class="icon-button" aria-label="新建项目" title="新建项目" data-drama-new @click="creating = true"><Plus :size="14" /></button>
+        <span>{{ t("项目") }}</span>
+        <button class="icon-button" :aria-label="t('新建项目')" :title="t('新建项目')" data-drama-new @click="creating = true"><Plus :size="14" /></button>
       </div>
       <button
         v-for="p in projects"
@@ -329,9 +330,9 @@ onBeforeUnmount(() => window.clearInterval(poll));
       >
         <Film :size="16" /> <span class="split-nav-label">{{ p.name }}</span>
       </button>
-      <p v-if="!projects.length && !loading" class="planned-note">还没有项目。</p>
+      <p v-if="!projects.length && !loading" class="planned-note">{{ t("还没有项目。") }}</p>
       <template v-if="view">
-        <div class="split-section">流程</div>
+        <div class="split-section">{{ t("流程") }}</div>
         <button
           v-for="(s, i) in STAGES"
           :key="s.id"
@@ -344,12 +345,12 @@ onBeforeUnmount(() => window.clearInterval(poll));
           <small v-if="stageDone(s.id)" class="planned-count">✓</small>
         </button>
       </template>
-      <p class="planned-note">AI 步骤使用「系统设置 › 模型与服务商」里的默认模型；每一步的结果都可以手动修改。</p>
+      <p class="planned-note">{{ t("AI 步骤使用「系统设置 › 模型与服务商」里的默认模型；每一步的结果都可以手动修改。") }}</p>
     </nav>
 
     <div class="split-main dr-main">
       <div class="pane-toolbar">
-        <strong class="pane-title">{{ view ? view.name : "短剧工坊" }}</strong>
+        <strong class="pane-title">{{ view ? view.name : t("短剧工坊") }}</strong>
         <small v-if="view" class="dr-crumb">{{ STAGES.find((s) => s.id === stage)?.label }}</small>
         <div class="toolbar-spacer" />
       </div>
@@ -357,39 +358,39 @@ onBeforeUnmount(() => window.clearInterval(poll));
       <p v-if="failure" class="vd-msg sk-msg err" role="alert" data-drama-error>{{ failure }}</p>
 
       <div v-if="!bridge" class="empty-content">
-        <h2 class="planned-title">媒体服务未接入</h2>
+        <h2 class="planned-title">{{ t("媒体服务未接入") }}</h2>
       </div>
       <div v-else-if="!view" class="empty-content">
         <img class="large-icon" :src="iconUrl('drama')" alt="" draggable="false" />
-        <h2 class="planned-title">短剧工坊</h2>
-        <p>从一段剧情素材开始：AI 拆解分集集纲，设计角色与场景，生成分镜和画面，最后拼成竖屏短片。</p>
-        <button class="planned-cta" @click="creating = true"><Plus :size="14" /> 新建项目</button>
+        <h2 class="planned-title">{{ t("短剧工坊") }}</h2>
+        <p>{{ t("从一段剧情素材开始：AI 拆解分集集纲，设计角色与场景，生成分镜和画面，最后拼成竖屏短片。") }}</p>
+        <button class="planned-cta" @click="creating = true"><Plus :size="14" /> {{ t("新建项目") }}</button>
       </div>
 
       <!-- 1 剧本 -->
       <section v-else-if="stage === 'script'" class="dr-body" data-drama-panel="script">
         <label class="dr-field">
-          <span>剧情素材（小说片段、故事梗概或已有剧本，至少 30 字）</span>
-          <textarea v-model="draft.sourceText" rows="9" placeholder="把故事贴在这里…" @blur="saveSource" />
+          <span>{{ t("剧情素材（小说片段、故事梗概或已有剧本，至少 30 字）") }}</span>
+          <textarea v-model="draft.sourceText" rows="9" :placeholder="t('把故事贴在这里…')" @blur="saveSource" />
         </label>
         <div class="dr-bar">
-          <label class="dr-inline">分成<input v-model.number="draft.episodes" type="number" min="1" max="30" />集</label>
+          <label class="dr-inline">{{ t("分成") }}<input v-model.number="draft.episodes" type="number" min="1" max="30" />{{ t("集") }}</label>
           <button class="planned-cta sk-btn" :disabled="!!busy || draft.sourceText.trim().length < 30" data-drama-outline @click="outline">
-            <component :is="busy === 'outline' ? LoaderCircle : Sparkles" :size="13" :class="{ spin: busy === 'outline' }" /> AI 拆解集纲
+            <component :is="busy === 'outline' ? LoaderCircle : Sparkles" :size="13" :class="{ spin: busy === 'outline' }" /> {{ t("AI 拆解集纲") }}
           </button>
           <span class="set-cap">{{ draft.sourceText.trim().length }} 字</span>
         </div>
         <template v-if="view.blueprint">
           <div class="dr-card">
-            <h3>{{ view.blueprint.logline || "（没有卖点）" }}</h3>
+            <h3>{{ view.blueprint.logline || t("（没有卖点）") }}</h3>
             <p class="set-cap">基调：{{ view.blueprint.tone || "—" }} · 来源：{{ view.blueprint.model || "—" }}</p>
           </div>
           <div v-for="e in view.blueprint.episodes" :key="e.id" class="dr-card dr-ep">
-            <input class="dr-title" :value="e.title" aria-label="集名" @change="saveEpisode(e, { title: ($event.target as HTMLInputElement).value })" />
-            <textarea :value="e.summary" rows="3" aria-label="本集剧情" @change="saveEpisode(e, { summary: ($event.target as HTMLTextAreaElement).value })" />
+            <input class="dr-title" :value="e.title" :aria-label="t('集名')" @change="saveEpisode(e, { title: ($event.target as HTMLInputElement).value })" />
+            <textarea :value="e.summary" rows="3" :aria-label="t('本集剧情')" @change="saveEpisode(e, { summary: ($event.target as HTMLTextAreaElement).value })" />
             <p class="set-cap">结尾钩子：{{ e.hook || "—" }}　出场：{{ e.characterNames || "—" }}　场景：{{ e.locationNames || "—" }}</p>
           </div>
-          <div class="dr-next"><button class="planned-today" @click="stage = 'design'">下一步：视觉设定 →</button></div>
+          <div class="dr-next"><button class="planned-today" @click="stage = 'design'">{{ t("下一步：视觉设定 →") }}</button></div>
         </template>
       </section>
 
@@ -397,42 +398,42 @@ onBeforeUnmount(() => window.clearInterval(poll));
       <section v-else-if="stage === 'design'" class="dr-body" data-drama-panel="design">
         <div class="dr-bar">
           <button class="planned-cta sk-btn" :disabled="!!busy || !view.blueprint?.episodes.length" data-drama-design @click="design">
-            <component :is="busy === 'design' ? LoaderCircle : Sparkles" :size="13" :class="{ spin: busy === 'design' }" /> {{ view.visualDesign ? "重新生成设定" : "AI 生成角色与场景" }}
+            <component :is="busy === 'design' ? LoaderCircle : Sparkles" :size="13" :class="{ spin: busy === 'design' }" /> {{ view.visualDesign ? t("重新生成设定") : t("AI 生成角色与场景") }}
           </button>
-          <span v-if="!view.blueprint?.episodes.length" class="set-cap">先在「剧本」里拆出集纲。</span>
+          <span v-if="!view.blueprint?.episodes.length" class="set-cap">{{ t("先在「剧本」里拆出集纲。") }}</span>
         </div>
         <template v-if="view.visualDesign">
           <p class="set-cap">整体风格：{{ view.visualDesign.style || "—" }}</p>
-          <div class="split-section">角色</div>
+          <div class="split-section">{{ t("角色") }}</div>
           <div class="dr-grid">
             <div v-for="c in view.visualDesign.characters" :key="c.id" class="dr-card dr-item">
               <div class="dr-thumb">
                 <img v-if="thumbOf(imageOf('character', c.id, c.selectedImageId))" :src="thumbOf(imageOf('character', c.id, c.selectedImageId))" alt="" />
-                <span v-else>{{ c.imageCount ? "加载中…" : "暂无参考图" }}</span>
+                <span v-else>{{ c.imageCount ? t("加载中…") : t("暂无参考图") }}</span>
               </div>
               <h3>{{ c.name }}</h3>
               <p class="set-cap">{{ c.role }}</p>
               <p class="dr-desc">{{ c.appearance }}<br />服装：{{ c.costume }}</p>
               <button class="planned-today" :disabled="!!busy" @click="refImage('character', c.id)">
-                <component :is="busy === 'ref:' + c.id ? LoaderCircle : ImageIcon" :size="12" :class="{ spin: busy === 'ref:' + c.id }" /> 生成参考图
+                <component :is="busy === 'ref:' + c.id ? LoaderCircle : ImageIcon" :size="12" :class="{ spin: busy === 'ref:' + c.id }" /> {{ t("生成参考图") }}
               </button>
             </div>
           </div>
-          <div class="split-section">场景</div>
+          <div class="split-section">{{ t("场景") }}</div>
           <div class="dr-grid">
             <div v-for="l in view.visualDesign.locations" :key="l.id" class="dr-card dr-item">
               <div class="dr-thumb">
                 <img v-if="thumbOf(imageOf('location', l.id, l.selectedImageId))" :src="thumbOf(imageOf('location', l.id, l.selectedImageId))" alt="" />
-                <span v-else>{{ l.imageCount ? "加载中…" : "暂无参考图" }}</span>
+                <span v-else>{{ l.imageCount ? t("加载中…") : t("暂无参考图") }}</span>
               </div>
               <h3>{{ l.name }}</h3>
               <p class="dr-desc">{{ l.atmosphere }}<br />{{ l.visual }}</p>
               <button class="planned-today" :disabled="!!busy" @click="refImage('location', l.id)">
-                <component :is="busy === 'ref:' + l.id ? LoaderCircle : ImageIcon" :size="12" :class="{ spin: busy === 'ref:' + l.id }" /> 生成参考图
+                <component :is="busy === 'ref:' + l.id ? LoaderCircle : ImageIcon" :size="12" :class="{ spin: busy === 'ref:' + l.id }" /> {{ t("生成参考图") }}
               </button>
             </div>
           </div>
-          <div class="dr-next"><button class="planned-today" @click="stage = 'storyboard'">下一步：分镜 →</button></div>
+          <div class="dr-next"><button class="planned-today" @click="stage = 'storyboard'">{{ t("下一步：分镜 →") }}</button></div>
         </template>
       </section>
 
@@ -440,24 +441,24 @@ onBeforeUnmount(() => window.clearInterval(poll));
       <section v-else-if="stage === 'storyboard'" class="dr-body" data-drama-panel="storyboard">
         <div class="dr-bar">
           <button class="planned-cta sk-btn" :disabled="!!busy || !view.visualDesign" data-drama-storyboards @click="storyboards()">
-            <component :is="busy === 'storyboards' ? LoaderCircle : Sparkles" :size="13" :class="{ spin: busy === 'storyboards' }" /> AI 生成全部分镜
+            <component :is="busy === 'storyboards' ? LoaderCircle : Sparkles" :size="13" :class="{ spin: busy === 'storyboards' }" /> {{ t("AI 生成全部分镜") }}
           </button>
-          <button class="planned-today" :disabled="!!busy" data-drama-add-shot @click="addShot"><Plus :size="12" /> 手动添加镜头</button>
-          <span v-if="!view.visualDesign" class="set-cap">AI 分镜需要先完成视觉设定；也可以手动添加。</span>
+          <button class="planned-today" :disabled="!!busy" data-drama-add-shot @click="addShot"><Plus :size="12" /> {{ t("手动添加镜头") }}</button>
+          <span v-if="!view.visualDesign" class="set-cap">{{ t("AI 分镜需要先完成视觉设定；也可以手动添加。") }}</span>
         </div>
-        <p v-if="!view.shots.length" class="set-cap">还没有分镜。</p>
+        <p v-if="!view.shots.length" class="set-cap">{{ t("还没有分镜。") }}</p>
         <div v-for="(s, i) in view.shots" :key="s.id" class="dr-card dr-shot" :data-drama-shot="s.id">
           <div class="dr-shot-head">
             <span class="badge">{{ i + 1 }}</span>
-            <input class="dr-title" :value="s.title" aria-label="镜头标题" @change="saveShot(s, { title: ($event.target as HTMLInputElement).value })" />
+            <input class="dr-title" :value="s.title" :aria-label="t('镜头标题')" @change="saveShot(s, { title: ($event.target as HTMLInputElement).value })" />
             <small v-if="epTitle(s.episodeId)" class="set-cap">{{ epTitle(s.episodeId) }}</small>
-            <label class="dr-inline">时长<input type="number" min="1" max="30" :value="s.duration" @change="saveShot(s, { duration: Number(($event.target as HTMLInputElement).value) })" />秒</label>
+            <label class="dr-inline">{{ t("时长") }}<input type="number" min="1" max="30" :value="s.duration" @change="saveShot(s, { duration: Number(($event.target as HTMLInputElement).value) })" />{{ t("秒") }}</label>
           </div>
-          <input :value="s.scene" placeholder="场景" aria-label="场景" @change="saveShot(s, { scene: ($event.target as HTMLInputElement).value })" />
-          <textarea :value="s.script" rows="2" placeholder="台词 / 动作" aria-label="台词与动作" @change="saveShot(s, { script: ($event.target as HTMLTextAreaElement).value })" />
-          <textarea :value="s.prompt" rows="2" placeholder="画面提示词（出图用）" aria-label="画面提示词" @change="saveShot(s, { prompt: ($event.target as HTMLTextAreaElement).value })" />
+          <input :value="s.scene" :placeholder="t('场景')" :aria-label="t('场景')" @change="saveShot(s, { scene: ($event.target as HTMLInputElement).value })" />
+          <textarea :value="s.script" rows="2" :placeholder="t('台词 / 动作')" :aria-label="t('台词与动作')" @change="saveShot(s, { script: ($event.target as HTMLTextAreaElement).value })" />
+          <textarea :value="s.prompt" rows="2" :placeholder="t('画面提示词（出图用）')" :aria-label="t('画面提示词')" @change="saveShot(s, { prompt: ($event.target as HTMLTextAreaElement).value })" />
         </div>
-        <div v-if="view.shots.length" class="dr-next"><button class="planned-today" @click="stage = 'generate'">下一步：出图 →</button></div>
+        <div v-if="view.shots.length" class="dr-next"><button class="planned-today" @click="stage = 'generate'">{{ t("下一步：出图 →") }}</button></div>
       </section>
 
       <!-- 4 出图 -->
@@ -472,31 +473,31 @@ onBeforeUnmount(() => window.clearInterval(poll));
           <div v-for="(s, i) in view.shots" :key="s.id" class="dr-card dr-item">
             <div class="dr-thumb tall">
               <img v-if="thumbOf(imageOf('shot', s.id, s.selectedImageId))" :src="thumbOf(imageOf('shot', s.id, s.selectedImageId))" alt="" />
-              <span v-else>{{ s.imageCount ? "加载中…" : "还没有画面" }}</span>
+              <span v-else>{{ s.imageCount ? t("加载中…") : t("还没有画面") }}</span>
             </div>
             <h3>{{ i + 1 }}. {{ s.title }}</h3>
             <p class="set-cap">{{ s.duration }} 秒 · {{ s.imageCount }} 张</p>
             <button class="planned-today" :disabled="!!busy" @click="shotImage(s)">
-              <component :is="busy === 'img:' + s.id ? LoaderCircle : ImageIcon" :size="12" :class="{ spin: busy === 'img:' + s.id }" /> {{ s.imageCount ? "重新出图" : "出图" }}
+              <component :is="busy === 'img:' + s.id ? LoaderCircle : ImageIcon" :size="12" :class="{ spin: busy === 'img:' + s.id }" /> {{ s.imageCount ? t("重新出图") : t("出图") }}
             </button>
           </div>
         </div>
-        <div v-if="readyShots.length" class="dr-next"><button class="planned-today" @click="stage = 'timeline'">下一步：成片 →</button></div>
+        <div v-if="readyShots.length" class="dr-next"><button class="planned-today" @click="stage = 'timeline'">{{ t("下一步：成片 →") }}</button></div>
       </section>
 
       <!-- 5 成片 -->
       <section v-else class="dr-body" data-drama-panel="timeline">
-        <p class="set-cap">按分镜顺序把已有画面的镜头拼成竖屏短片，用本机 FFmpeg 渲染。没有画面的镜头会被跳过。</p>
+        <p class="set-cap">{{ t("按分镜顺序把已有画面的镜头拼成竖屏短片，用本机 FFmpeg 渲染。没有画面的镜头会被跳过。") }}</p>
         <div class="dr-strip">
           <div v-for="s in readyShots" :key="s.id" class="dr-strip-item" :style="{ flexGrow: s.duration }">
             <img v-if="thumbOf(imageOf('shot', s.id, s.selectedImageId))" :src="thumbOf(imageOf('shot', s.id, s.selectedImageId))" alt="" />
             <small>{{ s.duration }}s</small>
           </div>
-          <p v-if="!readyShots.length" class="set-cap">还没有出过图的镜头。</p>
+          <p v-if="!readyShots.length" class="set-cap">{{ t("还没有出过图的镜头。") }}</p>
         </div>
         <div class="dr-bar">
           <button class="planned-cta sk-btn" :disabled="!!busy || !readyShots.length || (!!job && ['queued', 'running'].includes(job.status))" data-drama-render @click="render">
-            <component :is="busy === 'render' ? LoaderCircle : Film" :size="13" :class="{ spin: busy === 'render' }" /> 渲染成片
+            <component :is="busy === 'render' ? LoaderCircle : Film" :size="13" :class="{ spin: busy === 'render' }" /> {{ t("渲染成片") }}
           </button>
           <span v-if="job" class="sk-run-state" :data-tone="job.status === 'completed' ? 'success' : job.status === 'failed' ? 'danger' : 'neutral'" data-drama-job>
             {{ JOB[job.status] || job.status }}{{ job.progress != null && job.status === "running" ? " " + Math.round(job.progress * (job.progress <= 1 ? 100 : 1)) + "%" : "" }}
@@ -507,50 +508,50 @@ onBeforeUnmount(() => window.clearInterval(poll));
 
         <div class="dr-card dr-export" data-drama-export>
           <div class="dr-export-head">
-            <h3>成片导出</h3>
+            <h3>{{ t("成片导出") }}</h3>
             <button class="planned-today" :disabled="exportRefreshBusy" data-drama-export-refresh @click="loadCompletedRender">
-              <component :is="exportRefreshBusy ? LoaderCircle : RefreshCw" :size="12" :class="{ spin: exportRefreshBusy }" /> {{ exportRefreshBusy ? "读取中…" : "刷新成片状态" }}
+              <component :is="exportRefreshBusy ? LoaderCircle : RefreshCw" :size="12" :class="{ spin: exportRefreshBusy }" /> {{ exportRefreshBusy ? t("读取中…") : t("刷新成片状态") }}
             </button>
           </div>
           <p v-if="exportJob" class="set-cap" data-drama-export-ready>
             可导出成片：{{ exportJob.outputRelativePath || exportJob.id }}（渲染任务 {{ exportJob.id }}）
           </p>
           <p v-else class="set-cap" data-drama-export-unavailable>
-            还没有已完成的成片：先给分镜出图并点「渲染成片」；已有渲染任务时用「刷新成片状态」从本机媒体库重新读取。
+            {{ t("还没有已完成的成片：先给分镜出图并点「渲染成片」；已有渲染任务时用「刷新成片状态」从本机媒体库重新读取。") }}
           </p>
           <div class="dr-bar">
             <button class="planned-cta sk-btn" :disabled="!exportJob || !!exporting" data-drama-export-finder @click="exportMovie('finder')">
-              <component :is="exporting === 'finder' ? LoaderCircle : Download" :size="13" :class="{ spin: exporting === 'finder' }" /> {{ exporting === "finder" ? "导出中…" : "导出到访达" }}
+              <component :is="exporting === 'finder' ? LoaderCircle : Download" :size="13" :class="{ spin: exporting === 'finder' }" /> {{ exporting === "finder" ? t("导出中…") : t("导出到访达") }}
             </button>
             <button class="planned-today" :disabled="!exportJob || !!exporting" data-drama-export-library @click="exportMovie('library')">
-              <component :is="exporting === 'library' ? LoaderCircle : Library" :size="13" :class="{ spin: exporting === 'library' }" /> {{ exporting === "library" ? "登记中…" : "导出到资源库" }}
+              <component :is="exporting === 'library' ? LoaderCircle : Library" :size="13" :class="{ spin: exporting === 'library' }" /> {{ exporting === "library" ? t("登记中…") : t("导出到资源库") }}
             </button>
           </div>
           <p v-if="exportError" class="vd-msg sk-msg err" role="alert" data-drama-export-error>{{ exportError }}</p>
           <div v-if="exportResult" class="dr-export-result" data-drama-export-result :data-drama-export-target="exportResult.target">
             <p class="set-cap">
-              目标：{{ exportResult.target === "finder" ? "访达导出目录" : "OpenArc 资源库" }} · 文件：{{ exportResult.fileName }} · {{ formatBytes(exportResult.bytes) }}
+              目标：{{ exportResult.target === "finder" ? t("访达导出目录") : t("OpenArc 资源库") }} · 文件：{{ exportResult.fileName }} · {{ formatBytes(exportResult.bytes) }}
             </p>
             <p v-if="exportResult.relativePath" class="set-cap">
-              相对路径：<code class="dr-export-path" data-drama-export-relative-path>{{ exportResult.relativePath }}</code>
+              {{ t("相对路径：") }}<code class="dr-export-path" data-drama-export-relative-path>{{ exportResult.relativePath }}</code>
             </p>
             <p v-if="exportResult.resourceRef" class="set-cap">
-              资源引用：<code class="dr-export-path" data-drama-export-resource-ref>{{ exportResult.resourceRef }}</code>
+              {{ t("资源引用：") }}<code class="dr-export-path" data-drama-export-resource-ref>{{ exportResult.resourceRef }}</code>
             </p>
-            <p v-if="exportResult.resourceRef && exportResult.deduped" class="set-cap">资源库已有相同内容：复用同一个资源引用，没有重复登记。</p>
-            <p v-if="exportResult.target === 'finder' && exportResult.revealed === false" class="set-cap">系统访达没有确认打开（导出文件仍已写入导出目录）。</p>
+            <p v-if="exportResult.resourceRef && exportResult.deduped" class="set-cap">{{ t("资源库已有相同内容：复用同一个资源引用，没有重复登记。") }}</p>
+            <p v-if="exportResult.target === 'finder' && exportResult.revealed === false" class="set-cap">{{ t("系统访达没有确认打开（导出文件仍已写入导出目录）。") }}</p>
           </div>
         </div>
       </section>
     </div>
 
-    <DsDialog :open="creating" title="新建短剧项目" @close="creating = false">
+    <DsDialog :open="creating" :title="t('新建短剧项目')" @close="creating = false">
       <div class="sk-form">
-        <label>项目名称<input v-model="newName" maxlength="50" placeholder="例如：重生之我在横店当群演" data-drama-name @keydown.enter.prevent="create" /></label>
+        <label>{{ t("项目名称") }}<input v-model="newName" maxlength="50" :placeholder="t('例如：重生之我在横店当群演')" data-drama-name @keydown.enter.prevent="create" /></label>
       </div>
       <template #footer>
-        <button @click="creating = false">取消</button>
-        <button class="primary" :disabled="!newName.trim() || busy === 'create'" data-drama-create @click="create">创建</button>
+        <button @click="creating = false">{{ t("取消") }}</button>
+        <button class="primary" :disabled="!newName.trim() || busy === 'create'" data-drama-create @click="create">{{ t("创建") }}</button>
       </template>
     </DsDialog>
   </div>

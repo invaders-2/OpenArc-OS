@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from "../i18n";
 /**
  * 照片应用（Vue 壳层）· 图库 + 图像工坊。
  *
@@ -38,6 +39,8 @@ import DsButton from "../design-system/DsButton.vue";
 import DsDialog from "../design-system/DsDialog.vue";
 import DsPageState from "../design-system/DsPageState.vue";
 import DsSearchField from "../design-system/DsSearchField.vue";
+import { officeCapabilityDetail, officeCapabilityLabel, probeOfficeCapability } from "./officeCapability";
+import type { OfficeCapability } from "./officeCapability";
 import DsTextField from "../design-system/DsTextField.vue";
 import OcrPanel from "./OcrPanel.vue";
 import {
@@ -936,11 +939,18 @@ async function loadTrash() {
   studioLoading.value = false;
 }
 
+/* Office（docx/xlsx）能力：相册本身只索引图片/视频；导入/预览 Office 文件时用真实命令探测依赖是否在构建里。 */
+const office = ref<OfficeCapability | null>(null);
+async function loadOfficeCapability() {
+  office.value = await probeOfficeCapability();
+}
+
 onMounted(() => {
   void loadPage(0);
   void loadHealth();
   void loadProjects();
   void loadTrash();
+  void loadOfficeCapability();
   void nextTick(() => observeCards());
 });
 onBeforeUnmount(() => {
@@ -1281,16 +1291,16 @@ async function submitSend() {
 
 <template>
   <div class="split" data-photos-app="1">
-    <nav class="split-side" aria-label="照片子视图">
-      <div class="split-section">照片</div>
+    <nav class="split-side" :aria-label="t('照片子视图')">
+      <div class="split-section">{{ t("照片") }}</div>
       <button type="button" class="split-nav" :aria-current="tab === 'library'" @click="tab = 'library'">
-        <ImageIcon :size="16" :stroke-width="1.25" /> 图库
+        <ImageIcon :size="16" :stroke-width="1.25" /> {{ t("图库") }}
       </button>
       <button type="button" class="split-nav" :aria-current="tab === 'studio'" @click="tab = 'studio'">
-        <Wand2 :size="16" :stroke-width="1.25" /> 图像工坊
+        <Wand2 :size="16" :stroke-width="1.25" /> {{ t("图像工坊") }}
       </button>
       <button type="button" class="split-nav" data-photos-ocr-nav :aria-current="tab === 'ocr'" @click="tab = 'ocr'">
-        <ScanText :size="16" :stroke-width="1.25" /> 文字识别
+        <ScanText :size="16" :stroke-width="1.25" /> {{ t("文字识别") }}
       </button>
     </nav>
 
@@ -1298,19 +1308,19 @@ async function submitSend() {
       <div class="photos-view">
         <!-- ═══════════════════ 图库 ═══════════════════ -->
         <div v-if="tab === 'library'" class="photos-lib" data-photos-lib="1" :data-photos-state="libraryListState">
-          <aside class="photos-pane photos-lib-side" aria-label="来源与文件夹">
+          <aside class="photos-pane photos-lib-side" :aria-label="t('来源与文件夹')">
             <div class="photos-pane-head">
-              <h3>来源</h3>
-              <button type="button" class="ds-iconbtn ds-iconbtn--ghost ds-iconbtn--sm" data-ds-comp="icon-button" data-ds-variant="ghost" data-ds-status="idle" aria-label="添加照片来源" @click="openAddSource">
+              <h3>{{ t("来源") }}</h3>
+              <button type="button" class="ds-iconbtn ds-iconbtn--ghost ds-iconbtn--sm" data-ds-comp="icon-button" data-ds-variant="ghost" data-ds-status="idle" :aria-label="t('添加照片来源')" @click="openAddSource">
                 <Plus :size="15" :stroke-width="1.5" />
               </button>
             </div>
-            <div class="ds-scroll photos-scroll" data-ds-comp="scroll-area" tabindex="0" role="region" aria-label="来源与文件夹">
+            <div class="ds-scroll photos-scroll" data-ds-comp="scroll-area" tabindex="0" role="region" :aria-label="t('来源与文件夹')">
               <ul class="photos-list">
                 <li class="photos-row">
                   <button type="button" class="photos-row__main" :aria-pressed="!sourceFilter && !localFilter && !virtualFilter" @click="resetFilters">
                     <ImageIcon :size="14" :stroke-width="1.5" />
-                    <span class="photos-row__name">全部照片</span>
+                    <span class="photos-row__name">{{ t("全部照片") }}</span>
                     <span class="photos-row__facts">{{ page.total }}</span>
                   </button>
                 </li>
@@ -1318,7 +1328,7 @@ async function submitSend() {
                   <button type="button" class="photos-row__main" :aria-pressed="sourceFilter === source.id" :disabled="!source.available" @click="toggleSource(source.id)">
                     <span class="photos-row__name" :title="source.name">{{ source.name }}</span>
                     <span class="photos-row__facts">
-                      <DsBadge v-if="!source.available" tone="warning" size="sm">不可用</DsBadge>
+                      <DsBadge v-if="!source.available" tone="warning" size="sm">{{ t("不可用") }}</DsBadge>
                     </span>
                   </button>
                   <button type="button" class="ds-iconbtn ds-iconbtn--ghost ds-iconbtn--sm" data-ds-comp="icon-button" data-ds-variant="ghost" data-ds-status="idle" :aria-label="'移除来源 ' + source.name" @click="openRemoveSource(source)">
@@ -1327,7 +1337,7 @@ async function submitSend() {
                 </li>
               </ul>
 
-              <div class="photos-sub-head"><span>来源子目录</span></div>
+              <div class="photos-sub-head"><span>{{ t("来源子目录") }}</span></div>
               <ul class="photos-list">
                 <template v-if="localRows.length">
                   <li v-for="node in localRows" :key="node.id" class="photos-row" :class="{ 'is-active': !!localFilter && localFilter.id === node.id }">
@@ -1336,25 +1346,25 @@ async function submitSend() {
                     </button>
                   </li>
                 </template>
-                <li v-else class="photos-hint">还没有可用的子目录（来源未添加或不可访问）。</li>
+                <li v-else class="photos-hint">{{ t("还没有可用的子目录（来源未添加或不可访问）。") }}</li>
               </ul>
 
               <div class="photos-sub-head">
-                <span>虚拟文件夹</span>
-                <button type="button" class="ds-iconbtn ds-iconbtn--ghost ds-iconbtn--sm" data-ds-comp="icon-button" data-ds-variant="ghost" data-ds-status="idle" aria-label="新建虚拟文件夹" @click="openNewFolder(null)">
+                <span>{{ t("虚拟文件夹") }}</span>
+                <button type="button" class="ds-iconbtn ds-iconbtn--ghost ds-iconbtn--sm" data-ds-comp="icon-button" data-ds-variant="ghost" data-ds-status="idle" :aria-label="t('新建虚拟文件夹')" @click="openNewFolder(null)">
                   <FolderPlus :size="14" :stroke-width="1.5" />
                 </button>
               </div>
               <ul class="photos-list">
                 <template v-if="virtualRows.length">
                   <li v-for="row in virtualRows" :key="row.node.id" class="photos-row" :class="{ 'is-active': !!virtualFilter && virtualFilter.id === row.node.id }">
-                    <button type="button" class="photos-folder-toggle" :data-empty="row.node.children.length === 0" :aria-label="(expandedVirtual.has(row.node.id) ? '收起 ' : '展开 ') + row.node.name" @click="toggleVirtualExpand(row.node.id)">
+                    <button type="button" class="photos-folder-toggle" :data-empty="row.node.children.length === 0" :aria-label="(expandedVirtual.has(row.node.id) ? t('收起 ') : t('展开 ')) + row.node.name" @click="toggleVirtualExpand(row.node.id)">
                       <ChevronDown v-if="expandedVirtual.has(row.node.id)" :size="13" />
                       <ChevronRight v-else :size="13" />
                     </button>
                     <button type="button" class="photos-row__main photos-indent" :style="{ '--photos-depth': row.depth }" :aria-pressed="!!virtualFilter && virtualFilter.id === row.node.id" @click="toggleVirtual(row.node)">
                       <span class="photos-row__name">{{ row.node.name }}</span>
-                      <DsBadge v-if="row.node.orphan" tone="warning" size="sm">上级缺失</DsBadge>
+                      <DsBadge v-if="row.node.orphan" tone="warning" size="sm">{{ t("上级缺失") }}</DsBadge>
                     </button>
                     <button type="button" class="ds-iconbtn ds-iconbtn--ghost ds-iconbtn--sm" data-ds-comp="icon-button" data-ds-variant="ghost" data-ds-status="idle" :aria-label="'新建子文件夹 ' + row.node.name" @click="openNewFolder(row.node.id)">
                       <Plus :size="13" :stroke-width="1.5" />
@@ -1364,24 +1374,32 @@ async function submitSend() {
                     </button>
                   </li>
                 </template>
-                <li v-else class="photos-hint">还没有虚拟文件夹。新建一个后可以把照片批量归入。</li>
+                <li v-else class="photos-hint">{{ t("还没有虚拟文件夹。新建一个后可以把照片批量归入。") }}</li>
               </ul>
             </div>
           </aside>
 
-          <section class="photos-pane photos-pane--flat" aria-label="照片网格">
+          <section class="photos-pane photos-pane--flat" :aria-label="t('照片网格')">
             <div class="photos-toolbar">
               <div class="photos-toolbar__grow">
-                <DsSearchField :value="query" placeholder="按文件名筛选已载入的照片" label="筛选照片" @update:value="query = $event" />
+                <DsSearchField :value="query" :placeholder="t('按文件名筛选已载入的照片')" label="筛选照片" @update:value="query = $event" />
               </div>
-              <span class="photos-count">{{ page.label }}{{ page.truncated ? "（还有更多）" : "" }}</span>
+              <span class="photos-count">{{ page.label }}{{ page.truncated ? t("（还有更多）") : "" }}</span>
               <DsButton variant="secondary" size="sm" :status="libBusy === 'reload' ? 'loading' : 'idle'" @click="loadPage(0)">
-                <RefreshCw :size="14" :stroke-width="1.5" /> 刷新
+                <RefreshCw :size="14" :stroke-width="1.5" /> {{ t("刷新") }}
               </DsButton>
-              <DsButton variant="secondary" size="sm" :disabled="!page.hasNext || libBusy !== null" @click="loadPage(page.nextOffset)">加载更多</DsButton>
+              <DsButton variant="secondary" size="sm" :disabled="!page.hasNext || libBusy !== null" @click="loadPage(page.nextOffset)">{{ t("加载更多") }}</DsButton>
               <DsButton variant="secondary" size="sm" :disabled="selection.length === 0" @click="openAssign">归入文件夹{{ selection.length ? "（" + selection.length + "）" : "" }}</DsButton>
             </div>
 
+            <p
+              v-if="office"
+              class="photos-hint photos-office"
+              :data-photos-office="office.failure ? 'unknown' : (office.docx.available && office.xlsx.available ? 'available' : 'unavailable')"
+              :data-photos-office-docx="office.docx.available ? '1' : '0'"
+              :data-photos-office-xlsx="office.xlsx.available ? '1' : '0'"
+              :title="officeCapabilityDetail(office)"
+            >{{ officeCapabilityLabel(office) }} · 相册只索引图片/视频，不解析 Office 文档正文</p>
             <p v-if="libNotice" class="photos-hint" :class="{ 'photos-error': libNotice.tone === 'error' }" :role="libNotice.tone === 'error' ? 'alert' : 'status'">{{ libNotice.text }}</p>
 
             <div v-if="libFailure && items.length > 0" class="photos-banner">
@@ -1394,11 +1412,11 @@ async function submitSend() {
 
             <p v-if="filterActive && items.length" class="photos-hint" data-photos-filter-note>筛选与搜索只作用于已载入的 {{ items.length }} 张照片；要继续用「加载更多」把后面的页取回来。</p>
 
-            <DsPageState v-if="libraryListState === 'loading'" kind="loading" title="正在读取照片目录…" description="来源、子目录与照片清单都由主进程按当前账号索引，界面不缓存宿主路径。" />
-            <DsPageState v-else-if="libraryListState === 'error'" kind="error" title="读取照片目录失败" :description="libFailure ? photosErrorText(libFailure.code) : ''" :on-action="() => loadPage(0)" />
-            <DsPageState v-else-if="libraryListState === 'empty'" kind="empty" :title="filterActive ? '当前筛选没有照片' : '还没有照片'" :description="filterActive ? '换一个来源或文件夹筛选，或者清空搜索词。列表里只统计已载入的页。' : '添加一个本机文件夹作为来源后，应用会索引其中的图片与视频（只读，不改动原文件）。'" />
-            <DsPageState v-else-if="visibleItems.length === 0" kind="empty" title="当前筛选没有照片" description="换一个来源或文件夹筛选，或者清空搜索词。筛选与搜索只作用于已载入的页。" />
-            <div v-else class="ds-scroll photos-scroll" data-ds-comp="scroll-area" tabindex="0" role="region" aria-label="照片网格">
+            <DsPageState v-if="libraryListState === 'loading'" kind="loading" :title="t('正在读取照片目录…')" description="来源、子目录与照片清单都由主进程按当前账号索引，界面不缓存宿主路径。" />
+            <DsPageState v-else-if="libraryListState === 'error'" kind="error" :title="t('读取照片目录失败')" :description="libFailure ? photosErrorText(libFailure.code) : ''" :on-action="() => loadPage(0)" />
+            <DsPageState v-else-if="libraryListState === 'empty'" kind="empty" :title="filterActive ? t('当前筛选没有照片') : t('还没有照片')" :description="filterActive ? t('换一个来源或文件夹筛选，或者清空搜索词。列表里只统计已载入的页。') : t('添加一个本机文件夹作为来源后，应用会索引其中的图片与视频（只读，不改动原文件）。')" />
+            <DsPageState v-else-if="visibleItems.length === 0" kind="empty" :title="t('当前筛选没有照片')" description="换一个来源或文件夹筛选，或者清空搜索词。筛选与搜索只作用于已载入的页。" />
+            <div v-else class="ds-scroll photos-scroll" data-ds-comp="scroll-area" tabindex="0" role="region" :aria-label="t('照片网格')">
               <ul ref="gridRoot" class="photos-grid" data-photos-grid>
                 <li v-for="item in visibleItems" :key="item.id" class="photos-card-host" :data-photo-id="item.id">
                   <button type="button" class="photos-card" :aria-pressed="!!libSelected && libSelected.id === item.id" :aria-label="'查看 ' + item.name" @click="openItem(item)">
@@ -1407,7 +1425,7 @@ async function submitSend() {
                       <ImageIcon v-else-if="thumbFailedIds[item.id]" :size="20" :stroke-width="1.25" />
                       <span v-else class="ds-spinner" aria-hidden="true" />
                       <span v-if="item.kind === 'video'" class="photos-card__kind">
-                        <DsBadge tone="neutral" size="sm"><Film :size="11" :stroke-width="1.5" /> 视频</DsBadge>
+                        <DsBadge tone="neutral" size="sm"><Film :size="11" :stroke-width="1.5" /> {{ t("视频") }}</DsBadge>
                       </span>
                     </span>
                     <span class="photos-card__name" :title="item.name">{{ item.name }}</span>
@@ -1419,63 +1437,63 @@ async function submitSend() {
             </div>
           </section>
 
-          <aside class="photos-pane photos-inspector" aria-label="照片详情">
+          <aside class="photos-pane photos-inspector" :aria-label="t('照片详情')">
             <div class="photos-pane-head">
-              <h3>详情</h3>
+              <h3>{{ t("详情") }}</h3>
               <DsBadge v-if="libSelected" tone="neutral" size="sm">{{ photoKindLabel(libSelected.kind) }}</DsBadge>
             </div>
-            <div class="ds-scroll photos-scroll" data-ds-comp="scroll-area" tabindex="0" role="region" aria-label="照片详情">
-              <p v-if="detail.status === 'none'" class="photos-hint">在网格里选一张照片，可以看原图、下载、导入到画布或素材库、反推提示词、一键抠图。</p>
-              <DsPageState v-else-if="detail.status === 'loading'" kind="loading" title="正在读取照片…" />
-              <DsPageState v-else-if="detail.status === 'error'" :kind="photosErrorState(detail.code)" title="读取照片失败" :description="detail.text" :on-action="retryDetail" />
+            <div class="ds-scroll photos-scroll" data-ds-comp="scroll-area" tabindex="0" role="region" :aria-label="t('照片详情')">
+              <p v-if="detail.status === 'none'" class="photos-hint">{{ t("在网格里选一张照片，可以看原图、下载、导入到画布或素材库、反推提示词、一键抠图。") }}</p>
+              <DsPageState v-else-if="detail.status === 'loading'" kind="loading" :title="t('正在读取照片…')" />
+              <DsPageState v-else-if="detail.status === 'error'" :kind="photosErrorState(detail.code)" :title="t('读取照片失败')" :description="detail.text" :on-action="retryDetail" />
               <div v-else-if="detail.status === 'ready'" class="photos-detail" data-photos-detail="1">
                 <div class="photos-detail__preview">
                   <img :src="detail.preview" :alt="detail.item.name" />
                 </div>
                 <dl class="photos-kv">
-                  <dt>文件名</dt>
+                  <dt>{{ t("文件名") }}</dt>
                   <dd>{{ detail.item.name }}</dd>
-                  <dt>类型</dt>
+                  <dt>{{ t("类型") }}</dt>
                   <dd>{{ detail.item.mime || photoKindLabel(detail.item.kind) }}</dd>
-                  <dt>大小</dt>
+                  <dt>{{ t("大小") }}</dt>
                   <dd>{{ formatBytes(detail.size || detail.item.size) }}</dd>
-                  <dt>修改时间</dt>
+                  <dt>{{ t("修改时间") }}</dt>
                   <dd>{{ formatTimestamp(detail.item.updated_ts) }}</dd>
-                  <dt>相对路径</dt>
+                  <dt>{{ t("相对路径") }}</dt>
                   <dd>{{ detail.item.relativePath }}</dd>
-                  <dt>虚拟文件夹</dt>
+                  <dt>{{ t("虚拟文件夹") }}</dt>
                   <dd>{{ virtualFolderName }}</dd>
                   <template v-if="detail.note">
-                    <dt>提示</dt>
+                    <dt>{{ t("提示") }}</dt>
                     <dd>{{ detail.note }}</dd>
                   </template>
                 </dl>
 
                 <div class="photos-actions">
                   <DsButton size="sm" :disabled="!detail.hasRaw" @click="downloadDetailRaw">
-                    <Download :size="14" :stroke-width="1.5" /> {{ detail.item.kind === "video" ? "原片不可内联" : "下载原图" }}
+                    <Download :size="14" :stroke-width="1.5" /> {{ detail.item.kind === "video" ? t("原片不可内联") : t("下载原图") }}
                   </DsButton>
                   <DsButton size="sm" @click="openImport">
-                    <Send :size="14" :stroke-width="1.5" /> 导入到画布 / 素材库
+                    <Send :size="14" :stroke-width="1.5" /> {{ t("导入到画布 / 素材库") }}
                   </DsButton>
                   <DsButton size="sm" variant="secondary" :disabled="!detail.hasRaw || !detail.item.mime.startsWith('image/')" @click="focusSliceSection">
-                    <Grid2x2 :size="14" :stroke-width="1.5" /> 宫格切片
+                    <Grid2x2 :size="14" :stroke-width="1.5" /> {{ t("宫格切片") }}
                   </DsButton>
                 </div>
 
-                <section class="photos-group" aria-label="反推提示词">
-                  <div class="photos-pane-head"><h3>反推提示词</h3></div>
-                  <p class="photos-hint">用已配置的视觉模型描述这张图。结果只是一段可编辑的提示词，不会写回任何项目；模型调用会外发这张图。</p>
+                <section class="photos-group" :aria-label="t('反推提示词')">
+                  <div class="photos-pane-head"><h3>{{ t("反推提示词") }}</h3></div>
+                  <p class="photos-hint">{{ t("用已配置的视觉模型描述这张图。结果只是一段可编辑的提示词，不会写回任何项目；模型调用会外发这张图。") }}</p>
                   <div v-if="vision && !vision.available" class="photos-hint-box" data-photos-vision-unavailable>
                     <span>{{ photosErrorText("PHOTOS_PROVIDER_UNAVAILABLE") }}</span>
                     <span>{{ vision.hint }}</span>
                     <div class="photos-actions">
-                      <DsButton size="sm" variant="secondary" @click="vision = null">重新检查供应商</DsButton>
+                      <DsButton size="sm" variant="secondary" @click="vision = null">{{ t("重新检查供应商") }}</DsButton>
                     </div>
                   </div>
                   <template v-else>
                     <div v-if="vision && vision.available" class="photos-form__row">
-                      <label for="photos-vision-model">视觉模型</label>
+                      <label for="photos-vision-model">{{ t("视觉模型") }}</label>
                       <select id="photos-vision-model" class="photos-select" v-model="visionPick">
                         <option v-for="model in vision.models" :key="modelKey(model)" :value="modelKey(model)">
                           {{ model.providerName }} · {{ model.model }}
@@ -1484,54 +1502,54 @@ async function submitSend() {
                     </div>
                     <div class="photos-actions">
                       <DsButton size="sm" :status="promptState.status === 'loading' ? 'loading' : 'idle'" :disabled="!detail.item.mime.startsWith('image/')" @click="runReversePrompt">
-                        <Sparkles :size="14" :stroke-width="1.5" /> {{ vision ? "反推提示词" : "检查视觉模型并反推" }}
+                        <Sparkles :size="14" :stroke-width="1.5" /> {{ vision ? t("反推提示词") : t("检查视觉模型并反推") }}
                       </DsButton>
-                      <DsButton v-if="promptState.status === 'ready'" size="sm" variant="secondary" @click="copyPrompt">复制</DsButton>
+                      <DsButton v-if="promptState.status === 'ready'" size="sm" variant="secondary" @click="copyPrompt">{{ t("复制") }}</DsButton>
                     </div>
                   </template>
                   <p v-if="promptState.status === 'error'" class="photos-error" role="alert" :data-photos-prompt-error="promptState.code">{{ promptState.text }}</p>
                   <p v-if="promptState.status === 'ready'" class="photos-prompt" data-photos-prompt>{{ promptState.text }}</p>
                 </section>
 
-                <section class="photos-group" aria-label="一键抠图">
-                  <div class="photos-pane-head"><h3>一键抠图</h3></div>
-                  <p class="photos-hint">在本地抠掉背景并输出 PNG。图片不会离开这台机器；依赖缺失时不会返回假图。</p>
+                <section class="photos-group" :aria-label="t('一键抠图')">
+                  <div class="photos-pane-head"><h3>{{ t("一键抠图") }}</h3></div>
+                  <p class="photos-hint">{{ t("在本地抠掉背景并输出 PNG。图片不会离开这台机器；依赖缺失时不会返回假图。") }}</p>
                   <div class="photos-actions">
                     <DsButton size="sm" :status="removal.status === 'loading' ? 'loading' : 'idle'" :disabled="!detail.hasRaw || !detail.item.mime.startsWith('image/')" @click="runRemoval">
-                      <Scissors :size="14" :stroke-width="1.5" /> 抠图
+                      <Scissors :size="14" :stroke-width="1.5" /> {{ t("抠图") }}
                     </DsButton>
                     <DsButton v-if="removal.status === 'ready'" size="sm" variant="secondary" @click="downloadRemovalRaw">
-                      <Download :size="14" :stroke-width="1.5" /> 下载 PNG
+                      <Download :size="14" :stroke-width="1.5" /> {{ t("下载 PNG") }}
                     </DsButton>
                   </div>
                   <div v-if="removal.status === 'error'" class="photos-hint-box" role="alert" :data-photos-removal-error="removal.code">
                     <span>{{ removal.text }}</span>
                   </div>
                   <div v-if="removal.status === 'ready'" class="photos-detail__preview">
-                    <img :src="removal.dataUrl" alt="抠图结果" />
+                    <img :src="removal.dataUrl" :alt="t('抠图结果')" />
                   </div>
                 </section>
 
-                <section ref="sliceSection" class="photos-group photos-tools" aria-label="扩图与宫格切片" data-photos-tools="1" :data-photos-slice-state="sliceState.status">
-                  <div class="photos-pane-head"><h3>扩图与宫格切片</h3></div>
+                <section ref="sliceSection" class="photos-group photos-tools" :aria-label="t('扩图与宫格切片')" data-photos-tools="1" :data-photos-slice-state="sliceState.status">
+                  <div class="photos-pane-head"><h3>{{ t("扩图与宫格切片") }}</h3></div>
 
                   <div class="photos-tools__block" data-photos-outpaint="unavailable">
                     <div class="photos-tools__head">
-                      <strong>扩图</strong>
-                      <DsBadge tone="warning" size="sm">不可用</DsBadge>
+                      <strong>{{ t("扩图") }}</strong>
+                      <DsBadge tone="warning" size="sm">{{ t("不可用") }}</DsBadge>
                     </div>
-                    <DsPageState kind="unavailable" title="扩图暂不可用" description="这是后端能力缺失，不是加载失败；界面不会伪造扩图结果，也不会把原图发给任何模型。" :missing="OUTPAINT_MISSING" />
+                    <DsPageState kind="unavailable" :title="t('扩图暂不可用')" description="这是后端能力缺失，不是加载失败；界面不会伪造扩图结果，也不会把原图发给任何模型。" :missing="OUTPAINT_MISSING" />
                   </div>
 
                   <div class="photos-tools__block" data-photos-slice="1">
                     <div class="photos-tools__head">
-                      <strong>宫格切片</strong>
-                      <span>本地 canvas</span>
+                      <strong>{{ t("宫格切片") }}</strong>
+                      <span>{{ t("本地 canvas") }}</span>
                     </div>
                     <p class="photos-hint">把这张原图切成 {{ sliceGrid }}×{{ sliceGrid }} 张等分小图。全部在渲染层用 canvas 完成，不联网、不写回来源目录；导出统一打包成 ZIP。</p>
                     <div class="photos-form__row">
-                      <span>切片规格</span>
-                      <div class="segmented text" role="group" aria-label="切片规格">
+                      <span>{{ t("切片规格") }}</span>
+                      <div class="segmented text" role="group" :aria-label="t('切片规格')">
                         <button type="button" :aria-pressed="sliceGrid === 2" @click="sliceGrid = 2; resetSliceState()">2×2</button>
                         <button type="button" :aria-pressed="sliceGrid === 3" @click="sliceGrid = 3; resetSliceState()">3×3</button>
                       </div>
@@ -1544,7 +1562,7 @@ async function submitSend() {
                         <Download :size="14" :stroke-width="1.5" /> 下载 ZIP（{{ sliceState.tiles.length }} 张）
                       </DsButton>
                     </div>
-                    <p v-if="!detail.hasRaw" class="photos-hint" data-photos-slice-blocked>当前条目没有原图字节（视频或缩略图回退），不能切片。视频请用「下载原片」或在文件传输域处理。</p>
+                    <p v-if="!detail.hasRaw" class="photos-hint" data-photos-slice-blocked>{{ t("当前条目没有原图字节（视频或缩略图回退），不能切片。视频请用「下载原片」或在文件传输域处理。") }}</p>
                     <p v-if="sliceState.status === 'error'" class="photos-error" role="alert" data-photos-slice-error>{{ sliceState.text }}</p>
                     <div v-if="sliceState.status === 'ready'" class="photos-slices" data-photos-slices>
                       <figure v-for="tile in sliceState.tiles" :key="tile.key" class="photos-slice">
@@ -1558,21 +1576,21 @@ async function submitSend() {
                       </figure>
                     </div>
                     <div v-else-if="sliceState.status === 'loading'" class="photos-hint photos-tools__busy" role="status">
-                      <span class="ds-spinner" aria-hidden="true" /> 正在本地切片…
+                      <span class="ds-spinner" aria-hidden="true" /> {{ t("正在本地切片…") }}
                     </div>
-                    <p class="photos-hint" data-photos-slice-library-note>保存到资源库暂不可用：资源域只接受 memory / text / code / prompt 内容，没有从渲染层写入图片字节的命令；这里先提供 ZIP 下载，不回假资源 ref。</p>
+                    <p class="photos-hint" data-photos-slice-library-note>{{ t("保存到资源库暂不可用：资源域只接受 memory / text / code / prompt 内容，没有从渲染层写入图片字节的命令；这里先提供 ZIP 下载，不回假资源 ref。") }}</p>
                   </div>
                 </section>
               </div>
 
-              <section v-if="dependencyRows.length" class="photos-group" aria-label="能力与依赖">
-                <div class="photos-pane-head"><h3>能力与依赖</h3></div>
+              <section v-if="dependencyRows.length" class="photos-group" :aria-label="t('能力与依赖')">
+                <div class="photos-pane-head"><h3>{{ t("能力与依赖") }}</h3></div>
                 <ul class="photos-list">
                   <li v-for="row in dependencyRows" :key="row.key" class="photos-row">
                     <span class="photos-row__main">
                       <span class="photos-row__name" :title="row.hint">{{ row.label }}</span>
                       <span class="photos-row__facts">
-                        <DsBadge :tone="row.available ? 'success' : 'warning'" size="sm">{{ row.available ? "已装配" : "未装配" }}</DsBadge>
+                        <DsBadge :tone="row.available ? 'success' : 'warning'" size="sm">{{ row.available ? t("已装配") : t("未装配") }}</DsBadge>
                       </span>
                     </span>
                   </li>
@@ -1584,33 +1602,33 @@ async function submitSend() {
 
         <!-- ═══════════════════ 图像工坊 ═══════════════════ -->
         <div v-else-if="tab === 'studio'" class="photos-studio" data-photos-studio="1" :data-photos-state="studioListState">
-          <aside class="photos-pane photos-studio-side" aria-label="图像工坊视图">
-            <div class="photos-pane-head"><h3>图像工坊</h3></div>
+          <aside class="photos-pane photos-studio-side" :aria-label="t('图像工坊视图')">
+            <div class="photos-pane-head"><h3>{{ t("图像工坊") }}</h3></div>
             <ul class="photos-list">
               <li class="photos-row">
                 <button type="button" class="photos-row__main" :aria-pressed="studioView === 'projects'" @click="selectStudioView('projects')">
-                  <span class="photos-row__name">项目</span>
+                  <span class="photos-row__name">{{ t("项目") }}</span>
                   <span class="photos-row__facts">{{ projects.length }}</span>
                 </button>
               </li>
               <li class="photos-row">
                 <button type="button" class="photos-row__main" :aria-pressed="studioView === 'trash'" @click="selectStudioView('trash')">
-                  <span class="photos-row__name">回收站</span>
+                  <span class="photos-row__name">{{ t("回收站") }}</span>
                   <span class="photos-row__facts">{{ trashed.length }}</span>
                 </button>
               </li>
             </ul>
 
             <div class="photos-sub-head">
-              <span>分组</span>
-              <button type="button" class="ds-iconbtn ds-iconbtn--ghost ds-iconbtn--sm" data-ds-comp="icon-button" data-ds-variant="ghost" data-ds-status="idle" aria-label="新建分组" @click="openNewGroup">
+              <span>{{ t("分组") }}</span>
+              <button type="button" class="ds-iconbtn ds-iconbtn--ghost ds-iconbtn--sm" data-ds-comp="icon-button" data-ds-variant="ghost" data-ds-status="idle" :aria-label="t('新建分组')" @click="openNewGroup">
                 <FolderPlus :size="14" :stroke-width="1.5" />
               </button>
             </div>
             <ul class="photos-list">
               <li v-for="group in studioGroupOptions" :key="group.id" class="photos-row">
                 <span class="photos-row__main">
-                  <span class="photos-row__name" :title="group.label">{{ group.label }}{{ group.isDefault ? "（默认）" : "" }}</span>
+                  <span class="photos-row__name" :title="group.label">{{ group.label }}{{ group.isDefault ? t("（默认）") : "" }}</span>
                   <span class="photos-row__facts">{{ projects.filter((project) => project.groupId === group.id).length }}</span>
                 </span>
                 <button v-if="!group.isDefault && group.mine" type="button" class="ds-iconbtn ds-iconbtn--ghost ds-iconbtn--sm" data-ds-comp="icon-button" data-ds-variant="ghost" data-ds-status="idle" :aria-label="'删除分组 ' + group.label" @click="openRemoveGroup({ id: group.id, name: group.label, mine: group.mine, isDefault: group.isDefault })">
@@ -1618,46 +1636,46 @@ async function submitSend() {
                 </button>
               </li>
             </ul>
-            <p class="photos-hint">可见性是三态：私有 / 公开 / 指定成员。后端按 owner 与成员表过滤列表；共享项目对你是只读的。</p>
+            <p class="photos-hint">{{ t("可见性是三态：私有 / 公开 / 指定成员。后端按 owner 与成员表过滤列表；共享项目对你是只读的。") }}</p>
           </aside>
 
-          <section class="photos-pane photos-pane--flat" aria-label="项目列表">
+          <section class="photos-pane photos-pane--flat" :aria-label="t('项目列表')">
             <div class="photos-toolbar">
-              <DsButton size="sm" @click="openCreateDialog"><Plus :size="14" :stroke-width="1.5" /> 新建项目</DsButton>
+              <DsButton size="sm" @click="openCreateDialog"><Plus :size="14" :stroke-width="1.5" /> {{ t("新建项目") }}</DsButton>
               <DsButton size="sm" variant="secondary" :status="studioLoading ? 'loading' : 'idle'" @click="studioReload">
-                <RefreshCw :size="14" :stroke-width="1.5" /> 刷新
+                <RefreshCw :size="14" :stroke-width="1.5" /> {{ t("刷新") }}
               </DsButton>
-              <span class="photos-count">{{ studioView === "trash" ? "回收站 " + trashed.length + " 个项目" : "共 " + projects.length + " 个项目 / " + groups.length + " 个分组" }}</span>
+              <span class="photos-count">{{ studioView === "trash" ? t("回收站 ") + trashed.length + " 个项目" : t("共 ") + projects.length + " 个项目 / " + groups.length + " 个分组" }}</span>
             </div>
 
             <p v-if="studioNotice" class="photos-hint" :class="{ 'photos-error': studioNotice.tone === 'error' }" :role="studioNotice.tone === 'error' ? 'alert' : 'status'">{{ studioNotice.text }}</p>
 
             <p v-if="studioFailure && studioPool.length" class="photos-error" role="alert" :data-photos-error-code="studioFailure.code">刷新项目未完成：{{ photocraftErrorText(studioFailure.code) }}</p>
 
-            <DsPageState v-if="studioListState === 'loading'" kind="loading" title="正在读取项目…" />
-            <DsPageState v-else-if="studioListState === 'error' || studioListState === 'unavailable' || studioListState === 'unauthorized'" :kind="studioErrorKind" title="读取项目失败" :description="studioFailure ? photocraftErrorText(studioFailure.code) : ''" :on-action="studioReload" />
-            <DsPageState v-else-if="studioListState === 'empty'" kind="empty" :title="studioView === 'trash' ? '回收站是空的' : '还没有项目'" :description="studioView === 'trash' ? '移入回收站的项目会出现在这里，可以恢复或彻底删除。' : '新建一个项目开始：可以只建空项目，也可以带上一个本地文件作为源文件。'" />
-            <div v-else-if="studioView === 'trash'" class="ds-scroll photos-scroll" data-ds-comp="scroll-area" tabindex="0" role="region" aria-label="回收站项目">
+            <DsPageState v-if="studioListState === 'loading'" kind="loading" :title="t('正在读取项目…')" />
+            <DsPageState v-else-if="studioListState === 'error' || studioListState === 'unavailable' || studioListState === 'unauthorized'" :kind="studioErrorKind" :title="t('读取项目失败')" :description="studioFailure ? photocraftErrorText(studioFailure.code) : ''" :on-action="studioReload" />
+            <DsPageState v-else-if="studioListState === 'empty'" kind="empty" :title="studioView === 'trash' ? t('回收站是空的') : t('还没有项目')" :description="studioView === 'trash' ? t('移入回收站的项目会出现在这里，可以恢复或彻底删除。') : t('新建一个项目开始：可以只建空项目，也可以带上一个本地文件作为源文件。')" />
+            <div v-else-if="studioView === 'trash'" class="ds-scroll photos-scroll" data-ds-comp="scroll-area" tabindex="0" role="region" :aria-label="t('回收站项目')">
               <ul class="photos-list">
                 <li v-for="project in trashed" :key="project.id" class="photos-trash-row">
                   <span class="photos-trash-row__name" :title="project.title">{{ project.title }}</span>
                   <span class="photos-trash-row__facts">{{ formatBytes(project.sourceSize) }} · 删除于 {{ formatTimestamp(Number(project.deletedAt || 0) / 1000) }}</span>
                   <div class="photos-actions">
                     <DsButton size="sm" variant="secondary" :status="studioBusy === 'restore:' + project.id ? 'loading' : 'idle'" @click="runRestore(project)">
-                      <RotateCcw :size="14" :stroke-width="1.5" /> 恢复
+                      <RotateCcw :size="14" :stroke-width="1.5" /> {{ t("恢复") }}
                     </DsButton>
-                    <DsButton size="sm" variant="danger" :disabled="!canPurge(project)" @click="openPurgeDialog(project)">彻底删除</DsButton>
+                    <DsButton size="sm" variant="danger" :disabled="!canPurge(project)" @click="openPurgeDialog(project)">{{ t("彻底删除") }}</DsButton>
                   </div>
                 </li>
               </ul>
             </div>
-            <div v-else class="ds-scroll photos-scroll" data-ds-comp="scroll-area" tabindex="0" role="region" aria-label="项目列表">
+            <div v-else class="ds-scroll photos-scroll" data-ds-comp="scroll-area" tabindex="0" role="region" :aria-label="t('项目列表')">
               <div class="photos-groups">
                 <section v-for="bucket in buckets" :key="bucket.group.id" class="photos-group" :aria-label="'分组 ' + bucket.group.name">
                   <div class="photos-group__head">
                     <strong>{{ bucket.group.name }}</strong>
-                    <DsBadge v-if="bucket.isDefault" tone="neutral" size="sm">默认</DsBadge>
-                    <DsBadge v-if="!bucket.mine" tone="neutral" size="sm">共享</DsBadge>
+                    <DsBadge v-if="bucket.isDefault" tone="neutral" size="sm">{{ t("默认") }}</DsBadge>
+                    <DsBadge v-if="!bucket.mine" tone="neutral" size="sm">{{ t("共享") }}</DsBadge>
                     <span>{{ bucket.projects.length }} 个项目</span>
                   </div>
                   <ul v-if="bucket.projects.length" class="photos-list">
@@ -1666,89 +1684,89 @@ async function submitSend() {
                         <span class="photos-project__title" :title="project.title">{{ project.title }}</span>
                         <span class="photos-project__facts">
                           <DsBadge :tone="project.visibility === 'public' ? 'success' : project.visibility === 'restricted' ? 'warning' : 'neutral'" size="sm">{{ visibilityLabel(project.visibility) }}</DsBadge>
-                          <span>{{ project.mine ? "我的" : "共享" }}</span>
+                          <span>{{ project.mine ? t("我的") : t("共享") }}</span>
                           <span>{{ formatBytes(project.sourceSize) }}</span>
                           <span>{{ formatTimestamp(Number(project.updatedAt || 0) / 1000) }}</span>
                         </span>
                       </button>
                     </li>
                   </ul>
-                  <p v-else class="photos-hint">这个分组还没有项目。</p>
+                  <p v-else class="photos-hint">{{ t("这个分组还没有项目。") }}</p>
                 </section>
               </div>
             </div>
           </section>
 
-          <aside class="photos-pane photos-studio-detail" aria-label="项目详情">
+          <aside class="photos-pane photos-studio-detail" :aria-label="t('项目详情')">
             <div class="photos-pane-head">
-              <h3>项目详情</h3>
-              <DsBadge v-if="studioSelected" :tone="studioSelected.access === 'owner' ? 'neutral' : 'warning'" size="sm">{{ studioSelected.access === "owner" ? "所有者" : "只读共享" }}</DsBadge>
+              <h3>{{ t("项目详情") }}</h3>
+              <DsBadge v-if="studioSelected" :tone="studioSelected.access === 'owner' ? 'neutral' : 'warning'" size="sm">{{ studioSelected.access === "owner" ? t("所有者") : t("只读共享") }}</DsBadge>
             </div>
-            <div class="ds-scroll photos-scroll" data-ds-comp="scroll-area" tabindex="0" role="region" aria-label="项目详情">
-              <p v-if="!studioSelected" class="photos-hint">从中间选择一个项目，可以改信息、下载源文件、写入导出目录、发送到画布，或移入回收站。</p>
+            <div class="ds-scroll photos-scroll" data-ds-comp="scroll-area" tabindex="0" role="region" :aria-label="t('项目详情')">
+              <p v-if="!studioSelected" class="photos-hint">{{ t("从中间选择一个项目，可以改信息、下载源文件、写入导出目录、发送到画布，或移入回收站。") }}</p>
               <div v-else class="photos-detail" :data-photos-project-detail="studioSelected.id">
                 <dl class="photos-kv">
-                  <dt>所有者</dt>
+                  <dt>{{ t("所有者") }}</dt>
                   <dd>{{ studioSelected.ownerName || "—" }}</dd>
-                  <dt>分组</dt>
+                  <dt>{{ t("分组") }}</dt>
                   <dd>{{ studioGroupName }}</dd>
-                  <dt>可见性</dt>
+                  <dt>{{ t("可见性") }}</dt>
                   <dd>{{ visibilityLabel(studioSelected.visibility) }}（{{ studioSelected.visibility }}）</dd>
-                  <dt>成员</dt>
+                  <dt>{{ t("成员") }}</dt>
                   <dd>{{ studioSelected.members.length ? studioSelected.members.join("、") : "—" }}</dd>
-                  <dt>源文件</dt>
-                  <dd>{{ studioSelected.sourceName || "（无源文件）" }}</dd>
-                  <dt>大小</dt>
+                  <dt>{{ t("源文件") }}</dt>
+                  <dd>{{ studioSelected.sourceName || t("（无源文件）") }}</dd>
+                  <dt>{{ t("大小") }}</dt>
                   <dd>{{ formatBytes(studioSelected.sourceSize) }}</dd>
                   <dt>SHA-256</dt>
                   <dd class="is-mono" :title="studioSelected.sourceSha256">{{ studioSelected.sourceSha256 || "—" }}</dd>
-                  <dt>更新时间</dt>
+                  <dt>{{ t("更新时间") }}</dt>
                   <dd>{{ formatTimestamp(Number(studioSelected.updatedAt || 0) / 1000) }}</dd>
                 </dl>
 
-                <p v-if="!studioOwners" class="photos-hint-box" data-photos-readonly>你不是这个项目的所有者，只能查看与下载；改名、可见性、成员、导出与移入回收站都不可用。</p>
+                <p v-if="!studioOwners" class="photos-hint-box" data-photos-readonly>{{ t("你不是这个项目的所有者，只能查看与下载；改名、可见性、成员、导出与移入回收站都不可用。") }}</p>
 
-                <section class="photos-group" aria-label="项目设置">
-                  <div class="photos-pane-head"><h3>设置</h3></div>
+                <section class="photos-group" :aria-label="t('项目设置')">
+                  <div class="photos-pane-head"><h3>{{ t("设置") }}</h3></div>
                   <DsTextField label="项目名称" :model-value="projectTitle" :disabled="!studioOwners" hint="最多 120 个字；后端会清掉文件名里的非法字符。" @update:model-value="projectTitle = $event" />
                   <div class="photos-form__row">
-                    <label for="photos-project-group">分组</label>
+                    <label for="photos-project-group">{{ t("分组") }}</label>
                     <select id="photos-project-group" class="photos-select" v-model="projectGroupDraft" :disabled="!studioOwners">
-                      <option v-for="group in studioGroupOptions" :key="group.id" :value="group.id">{{ group.label }}{{ group.isDefault ? "（默认）" : "" }}</option>
+                      <option v-for="group in studioGroupOptions" :key="group.id" :value="group.id">{{ group.label }}{{ group.isDefault ? t("（默认）") : "" }}</option>
                     </select>
                   </div>
                   <div class="photos-form__row">
-                    <span>可见性</span>
-                    <div class="segmented text" role="group" aria-label="可见性">
+                    <span>{{ t("可见性") }}</span>
+                    <div class="segmented text" role="group" :aria-label="t('可见性')">
                       <button v-for="option in studioControl.options" :key="option.id" type="button" :aria-pressed="option.selected" :disabled="option.disabled" :title="option.hint" @click="projectVisibility = option.id">{{ option.label }}</button>
                     </div>
                     <p class="photos-hint" data-photos-visibility-note>{{ studioControl.note }}</p>
                   </div>
                   <div v-if="studioControl.requiresMembers" class="photos-form__row">
-                    <label for="photos-members">成员账号 ID（一行一个，也接受空格或逗号分隔）</label>
+                    <label for="photos-members">{{ t("成员账号 ID（一行一个，也接受空格或逗号分隔）") }}</label>
                     <textarea id="photos-members" class="photos-textarea" v-model="projectMembersText" :disabled="!studioOwners" placeholder="usr_xxx" />
                   </div>
                   <div class="photos-actions">
-                    <DsButton size="sm" :status="studioBusy === 'save' ? 'loading' : 'idle'" :disabled="!studioOwners" @click="saveProject">保存设置</DsButton>
+                    <DsButton size="sm" :status="studioBusy === 'save' ? 'loading' : 'idle'" :disabled="!studioOwners" @click="saveProject">{{ t("保存设置") }}</DsButton>
                   </div>
                 </section>
 
-                <section class="photos-group" aria-label="文件与发送">
-                  <div class="photos-pane-head"><h3>文件与发送</h3></div>
+                <section class="photos-group" :aria-label="t('文件与发送')">
+                  <div class="photos-pane-head"><h3>{{ t("文件与发送") }}</h3></div>
                   <div class="photos-actions">
                     <DsButton size="sm" variant="secondary" :disabled="!studioSelected.sourceNodeId || studioBusy === 'download'" :status="studioBusy === 'download' ? 'loading' : 'idle'" @click="studioDownloadSource">
-                      <Download :size="14" :stroke-width="1.5" /> 下载源文件
+                      <Download :size="14" :stroke-width="1.5" /> {{ t("下载源文件") }}
                     </DsButton>
                     <DsButton size="sm" variant="secondary" :disabled="!studioOwners" :status="studioBusy === 'export' ? 'loading' : 'idle'" @click="exportFileInput?.click()">
-                      <Upload :size="14" :stroke-width="1.5" /> 写入导出目录
+                      <Upload :size="14" :stroke-width="1.5" /> {{ t("写入导出目录") }}
                     </DsButton>
                     <DsButton size="sm" :disabled="!studioSelected.sourceNodeId" @click="openSend">
-                      <Send :size="14" :stroke-width="1.5" /> 发送到画布
+                      <Send :size="14" :stroke-width="1.5" /> {{ t("发送到画布") }}
                     </DsButton>
-                    <DsButton v-if="studioView === 'projects'" size="sm" variant="danger" :disabled="!studioOwners" @click="openTrashDialog(studioSelected)">移入回收站</DsButton>
+                    <DsButton v-if="studioView === 'projects'" size="sm" variant="danger" :disabled="!studioOwners" @click="openTrashDialog(studioSelected)">{{ t("移入回收站") }}</DsButton>
                   </div>
                   <input ref="exportFileInput" type="file" hidden aria-hidden="true" tabindex="-1" @change="submitExport" />
-                  <p class="photos-hint">「写入导出目录」把本机选中的文件写进项目的「导出/」目录并刷新预览（后端 photocraft/projects/export）。</p>
+                  <p class="photos-hint">{{ t("「写入导出目录」把本机选中的文件写进项目的「导出/」目录并刷新预览（后端 photocraft/projects/export）。") }}</p>
                 </section>
               </div>
             </div>
@@ -1761,166 +1779,166 @@ async function submitSend() {
         </div>
 
         <!-- ═══════════════════ 图库弹窗 ═══════════════════ -->
-        <DsDialog :open="libDialog?.kind === 'add-source'" title="添加照片来源" @close="libDialog = null">
+        <DsDialog :open="libDialog?.kind === 'add-source'" :title="t('添加照片来源')" @close="libDialog = null">
           <div class="photos-form">
-            <DsTextField label="本机文件夹绝对路径" hint="主进程会做 realpath 与目录校验；同一个真实目录重复添加只保留一条来源。宿主路径不会回渲染层。" placeholder="/Users/你的名字/Pictures" :model-value="addPath" @update:model-value="addPath = $event" />
+            <DsTextField label="本机文件夹绝对路径" hint="主进程会做 realpath 与目录校验；同一个真实目录重复添加只保留一条来源。宿主路径不会回渲染层。" :placeholder="t('/Users/你的名字/Pictures')" :model-value="addPath" @update:model-value="addPath = $event" />
           </div>
           <template #footer>
-            <DsButton variant="ghost" @click="libDialog = null">取消</DsButton>
-            <DsButton :status="libBusy === 'add-source' ? 'loading' : 'idle'" @click="submitAddSource">添加</DsButton>
+            <DsButton variant="ghost" @click="libDialog = null">{{ t("取消") }}</DsButton>
+            <DsButton :status="libBusy === 'add-source' ? 'loading' : 'idle'" @click="submitAddSource">{{ t("添加") }}</DsButton>
           </template>
         </DsDialog>
 
-        <DsDialog :open="libDialog?.kind === 'new-folder'" title="新建虚拟文件夹" @close="libDialog = null">
+        <DsDialog :open="libDialog?.kind === 'new-folder'" :title="t('新建虚拟文件夹')" @close="libDialog = null">
           <div class="photos-form">
             <DsTextField label="文件夹名称" required hint="最多 80 个字。" :model-value="folderName" @update:model-value="folderName = $event" />
             <div class="photos-form__row">
-              <label for="photos-folder-parent">上级文件夹</label>
+              <label for="photos-folder-parent">{{ t("上级文件夹") }}</label>
               <select id="photos-folder-parent" class="photos-select" v-model="folderParent">
-                <option value="">（顶层）</option>
+                <option value="">{{ t("（顶层）") }}</option>
                 <option v-for="option in virtualFolderOptions" :key="option.id" :value="option.id">{{ "　".repeat(option.depth) + option.label }}</option>
               </select>
             </div>
           </div>
           <template #footer>
-            <DsButton variant="ghost" @click="libDialog = null">取消</DsButton>
-            <DsButton :status="libBusy === 'folder' ? 'loading' : 'idle'" @click="submitFolder">新建</DsButton>
+            <DsButton variant="ghost" @click="libDialog = null">{{ t("取消") }}</DsButton>
+            <DsButton :status="libBusy === 'folder' ? 'loading' : 'idle'" @click="submitFolder">{{ t("新建") }}</DsButton>
           </template>
         </DsDialog>
 
-        <DsDialog :open="libDialog?.kind === 'remove-folder'" title="删除虚拟文件夹" @close="libDialog = null">
+        <DsDialog :open="libDialog?.kind === 'remove-folder'" :title="t('删除虚拟文件夹')" @close="libDialog = null">
           <p class="photos-hint">删除「{{ pendingRemoveFolder ? pendingRemoveFolder.name : "" }}」会级联删除它的全部子文件夹，并清空这些文件夹上的照片归类。照片本身不会被删除（来源里的原文件不动）。</p>
           <template #footer>
-            <DsButton variant="ghost" @click="libDialog = null">取消</DsButton>
-            <DsButton variant="danger" :status="libBusy === 'remove-folder' ? 'loading' : 'idle'" @click="pendingRemoveFolder && submitRemoveFolder(pendingRemoveFolder)">删除</DsButton>
+            <DsButton variant="ghost" @click="libDialog = null">{{ t("取消") }}</DsButton>
+            <DsButton variant="danger" :status="libBusy === 'remove-folder' ? 'loading' : 'idle'" @click="pendingRemoveFolder && submitRemoveFolder(pendingRemoveFolder)">{{ t("删除") }}</DsButton>
           </template>
         </DsDialog>
 
-        <DsDialog :open="libDialog?.kind === 'remove-source'" title="移除照片来源" @close="libDialog = null">
+        <DsDialog :open="libDialog?.kind === 'remove-source'" :title="t('移除照片来源')" @close="libDialog = null">
           <p class="photos-hint">只从应用的来源清单里移除「{{ pendingRemoveSource ? pendingRemoveSource.name : "" }}」；磁盘上的照片不会被删除，重新添加同一目录即可恢复。</p>
           <template #footer>
-            <DsButton variant="ghost" @click="libDialog = null">取消</DsButton>
-            <DsButton variant="danger" :status="libBusy === 'remove-source' ? 'loading' : 'idle'" @click="submitRemoveSource">移除</DsButton>
+            <DsButton variant="ghost" @click="libDialog = null">{{ t("取消") }}</DsButton>
+            <DsButton variant="danger" :status="libBusy === 'remove-source' ? 'loading' : 'idle'" @click="submitRemoveSource">{{ t("移除") }}</DsButton>
           </template>
         </DsDialog>
 
         <DsDialog :open="libDialog?.kind === 'assign'" :title="'把 ' + selection.length + ' 张照片归入文件夹'" @close="libDialog = null">
           <div class="photos-form">
             <div class="photos-form__row">
-              <label for="photos-assign-target">目标文件夹</label>
+              <label for="photos-assign-target">{{ t("目标文件夹") }}</label>
               <select id="photos-assign-target" class="photos-select" v-model="assignTarget">
-                <option value="">移出文件夹（取消归类）</option>
+                <option value="">{{ t("移出文件夹（取消归类）") }}</option>
                 <option v-for="option in virtualFolderOptions" :key="option.id" :value="option.id">{{ "　".repeat(option.depth) + option.label }}</option>
               </select>
             </div>
-            <p class="photos-hint">单次最多归类 100 张；已经不在来源里的照片会计入「跳过」，不会中断整批操作。</p>
+            <p class="photos-hint">{{ t("单次最多归类 100 张；已经不在来源里的照片会计入「跳过」，不会中断整批操作。") }}</p>
           </div>
           <template #footer>
-            <DsButton variant="ghost" @click="libDialog = null">取消</DsButton>
-            <DsButton :status="libBusy === 'assign' ? 'loading' : 'idle'" @click="submitAssign">归类</DsButton>
+            <DsButton variant="ghost" @click="libDialog = null">{{ t("取消") }}</DsButton>
+            <DsButton :status="libBusy === 'assign' ? 'loading' : 'idle'" @click="submitAssign">{{ t("归类") }}</DsButton>
           </template>
         </DsDialog>
 
-        <DsDialog :open="libDialog?.kind === 'import'" title="导入照片" @close="libDialog = null">
+        <DsDialog :open="libDialog?.kind === 'import'" :title="t('导入照片')" @close="libDialog = null">
           <div class="photos-form">
             <div class="photos-form__row">
-              <span>导入目标</span>
-              <div class="segmented text" role="group" aria-label="导入目标">
+              <span>{{ t("导入目标") }}</span>
+              <div class="segmented text" role="group" :aria-label="t('导入目标')">
                 <button v-for="destination in IMPORT_DESTINATIONS" :key="destination.id" type="button" :aria-pressed="importDestination === destination.id" @click="importDestination = destination.id; importTargetId = ''">{{ destination.label }}</button>
               </div>
             </div>
             <div v-if="importDestination === 'canvas' && canvases.length" class="photos-form__row">
-              <label for="photos-import-canvas">目标画布</label>
+              <label for="photos-import-canvas">{{ t("目标画布") }}</label>
               <select id="photos-import-canvas" class="photos-select" v-model="importTargetId">
-                <option value="">请选择画布</option>
+                <option value="">{{ t("请选择画布") }}</option>
                 <option v-for="canvas in canvases" :key="canvas.id" :value="canvas.id">{{ canvas.title }}</option>
               </select>
             </div>
-            <DsTextField v-else :label="importDestination === 'canvas' ? '目标画布 ID' : '目标素材库位置 ID'" :hint="IMPORT_DESTINATIONS.find((entry) => entry.id === importDestination)?.hint" :model-value="importTargetId" @update:model-value="importTargetId = $event" />
+            <DsTextField v-else :label="importDestination === 'canvas' ? t('目标画布 ID') : t('目标素材库位置 ID')" :hint="IMPORT_DESTINATIONS.find((entry) => entry.id === importDestination)?.hint" :model-value="importTargetId" @update:model-value="importTargetId = $event" />
             <p v-if="exchangeNote" class="photos-hint" data-photos-exchange-note>{{ exchangeNote }}</p>
-            <p class="photos-hint">导入由主进程注入的导入器执行；未装配时不会执行，也不会留下半个产物。</p>
+            <p class="photos-hint">{{ t("导入由主进程注入的导入器执行；未装配时不会执行，也不会留下半个产物。") }}</p>
           </div>
           <template #footer>
-            <DsButton variant="ghost" @click="libDialog = null">取消</DsButton>
-            <DsButton :status="libBusy === 'import' ? 'loading' : 'idle'" @click="submitImport">导入</DsButton>
+            <DsButton variant="ghost" @click="libDialog = null">{{ t("取消") }}</DsButton>
+            <DsButton :status="libBusy === 'import' ? 'loading' : 'idle'" @click="submitImport">{{ t("导入") }}</DsButton>
           </template>
         </DsDialog>
 
         <!-- ═══════════════════ 图像工坊弹窗 ═══════════════════ -->
-        <DsDialog :open="studioDialog?.kind === 'create'" title="新建图像工坊项目" @close="studioDialog = null">
+        <DsDialog :open="studioDialog?.kind === 'create'" :title="t('新建图像工坊项目')" @close="studioDialog = null">
           <div class="photos-form">
             <DsTextField label="项目名称" required hint="最多 120 个字；留空时后端会用「未命名项目」。" :model-value="createTitle" @update:model-value="createTitle = $event" />
             <div class="photos-form__row">
-              <label for="photos-create-group">分组</label>
+              <label for="photos-create-group">{{ t("分组") }}</label>
               <select id="photos-create-group" class="photos-select" v-model="createGroup">
-                <option value="">默认分组</option>
+                <option value="">{{ t("默认分组") }}</option>
                 <option v-for="group in studioGroupOptions" :key="group.id" :value="group.id">{{ group.label }}</option>
               </select>
             </div>
             <div class="photos-form__row">
-              <label for="photos-create-file">源文件（可选，最大 24 MB）</label>
+              <label for="photos-create-file">{{ t("源文件（可选，最大 24 MB）") }}</label>
               <input id="photos-create-file" ref="createFileInput" type="file" accept="image/*" @change="onCreateFileChange" />
-              <p class="photos-hint">{{ createFileName ? "将写入：" + createFileName : "不选文件则创建一个空项目。" }}　文件以 base64 内联过桥（后端上限 24 MB），超过会被拒绝并提示文件过大。</p>
+              <p class="photos-hint">{{ createFileName ? t("将写入：") + createFileName : t("不选文件则创建一个空项目。") }}　文件以 base64 内联过桥（后端上限 24 MB），超过会被拒绝并提示文件过大。</p>
             </div>
           </div>
           <template #footer>
-            <DsButton variant="ghost" @click="studioDialog = null">取消</DsButton>
-            <DsButton :status="studioBusy === 'create' ? 'loading' : 'idle'" @click="submitCreate">新建</DsButton>
+            <DsButton variant="ghost" @click="studioDialog = null">{{ t("取消") }}</DsButton>
+            <DsButton :status="studioBusy === 'create' ? 'loading' : 'idle'" @click="submitCreate">{{ t("新建") }}</DsButton>
           </template>
         </DsDialog>
 
-        <DsDialog :open="studioDialog?.kind === 'new-group'" title="新建分组" @close="studioDialog = null">
+        <DsDialog :open="studioDialog?.kind === 'new-group'" :title="t('新建分组')" @close="studioDialog = null">
           <div class="photos-form">
             <DsTextField label="分组名称" hint="同名分组会直接复用，不会重复创建。" :model-value="groupName" @update:model-value="groupName = $event" />
           </div>
           <template #footer>
-            <DsButton variant="ghost" @click="studioDialog = null">取消</DsButton>
-            <DsButton :status="studioBusy === 'group' ? 'loading' : 'idle'" @click="submitCreateGroup">新建</DsButton>
+            <DsButton variant="ghost" @click="studioDialog = null">{{ t("取消") }}</DsButton>
+            <DsButton :status="studioBusy === 'group' ? 'loading' : 'idle'" @click="submitCreateGroup">{{ t("新建") }}</DsButton>
           </template>
         </DsDialog>
 
-        <DsDialog :open="studioDialog?.kind === 'remove-group'" title="删除分组" @close="studioDialog = null">
+        <DsDialog :open="studioDialog?.kind === 'remove-group'" :title="t('删除分组')" @close="studioDialog = null">
           <p class="photos-hint">删除「{{ pendingRemoveGroup ? pendingRemoveGroup.name : "" }}」后，里面的项目会被移回默认分组，项目本身不会被删除。</p>
           <template #footer>
-            <DsButton variant="ghost" @click="studioDialog = null">取消</DsButton>
-            <DsButton variant="danger" :status="studioBusy === 'remove-group' ? 'loading' : 'idle'" @click="pendingRemoveGroup && submitRemoveGroup(pendingRemoveGroup)">删除</DsButton>
+            <DsButton variant="ghost" @click="studioDialog = null">{{ t("取消") }}</DsButton>
+            <DsButton variant="danger" :status="studioBusy === 'remove-group' ? 'loading' : 'idle'" @click="pendingRemoveGroup && submitRemoveGroup(pendingRemoveGroup)">{{ t("删除") }}</DsButton>
           </template>
         </DsDialog>
 
-        <DsDialog :open="studioDialog?.kind === 'trash'" title="移入回收站" @close="studioDialog = null">
+        <DsDialog :open="studioDialog?.kind === 'trash'" :title="t('移入回收站')" @close="studioDialog = null">
           <p class="photos-hint">「{{ pendingTrashProject ? pendingTrashProject.title : "" }}」会连同缓存目录进入回收站，之后可以恢复。</p>
           <template #footer>
-            <DsButton variant="ghost" @click="studioDialog = null">取消</DsButton>
-            <DsButton variant="danger" :status="studioBusy === 'trash' ? 'loading' : 'idle'" @click="runTrash">移入回收站</DsButton>
+            <DsButton variant="ghost" @click="studioDialog = null">{{ t("取消") }}</DsButton>
+            <DsButton variant="danger" :status="studioBusy === 'trash' ? 'loading' : 'idle'" @click="runTrash">{{ t("移入回收站") }}</DsButton>
           </template>
         </DsDialog>
 
-        <DsDialog :open="studioDialog?.kind === 'purge'" title="彻底删除项目" @close="studioDialog = null">
+        <DsDialog :open="studioDialog?.kind === 'purge'" :title="t('彻底删除项目')" @close="studioDialog = null">
           <p class="photos-hint">{{ TRASH_PURGE_HINT }}<br />目标：「{{ pendingPurgeProject ? pendingPurgeProject.title : "" }}」</p>
           <template #footer>
-            <DsButton variant="ghost" @click="studioDialog = null">取消</DsButton>
-            <DsButton variant="danger" :status="studioBusy === 'purge' ? 'loading' : 'idle'" @click="runPurge">彻底删除</DsButton>
+            <DsButton variant="ghost" @click="studioDialog = null">{{ t("取消") }}</DsButton>
+            <DsButton variant="danger" :status="studioBusy === 'purge' ? 'loading' : 'idle'" @click="runPurge">{{ t("彻底删除") }}</DsButton>
           </template>
         </DsDialog>
 
-        <DsDialog :open="studioDialog?.kind === 'send'" title="发送到应用" @close="studioDialog = null">
+        <DsDialog :open="studioDialog?.kind === 'send'" :title="t('发送到应用')" @close="studioDialog = null">
           <div class="photos-form">
-            <p v-if="!studioSelected" class="photos-hint">没有选中的项目。</p>
+            <p v-if="!studioSelected" class="photos-hint">{{ t("没有选中的项目。") }}</p>
             <template v-else>
-              <p class="photos-hint">发送只传引用（nodeId + 项目 ID + revision），不传图片字节；目标列表由后端按打开权限过滤，界面不硬编码。</p>
+              <p class="photos-hint">{{ t("发送只传引用（nodeId + 项目 ID + revision），不传图片字节；目标列表由后端按打开权限过滤，界面不硬编码。") }}</p>
               <template v-if="sendPanelState.kind === 'ready'">
                 <div class="photos-form__row">
-                  <label for="photos-target">目标应用</label>
+                  <label for="photos-target">{{ t("目标应用") }}</label>
                   <select id="photos-target" class="photos-select" v-model="sendTargetKey" @change="sendError = ''">
-                    <option v-for="item in projectedTargets.targets" :key="item.key" :value="item.key" :disabled="item.disabled">{{ targetOptionLabel(item.target) }}{{ item.disabled ? "（不支持当前格式）" : "" }}</option>
+                    <option v-for="item in projectedTargets.targets" :key="item.key" :value="item.key" :disabled="item.disabled">{{ targetOptionLabel(item.target) }}{{ item.disabled ? t("（不支持当前格式）") : "" }}</option>
                   </select>
                   <p v-if="pickedTarget && pickedTarget.disabled" class="photos-hint">{{ pickedTarget.disabledReason }}</p>
                   <p v-if="pickedTarget && pickedTarget.note" class="photos-hint">{{ pickedTarget.note }}</p>
                 </div>
                 <div v-if="pickedTarget && pickedTarget.needsCanvas" class="photos-form__row">
-                  <label for="photos-target-canvas">目标画布</label>
+                  <label for="photos-target-canvas">{{ t("目标画布") }}</label>
                   <select id="photos-target-canvas" class="photos-select" v-model="sendCanvasId">
-                    <option value="">请选择画布</option>
+                    <option value="">{{ t("请选择画布") }}</option>
                     <option v-for="canvas in sendTargets?.canvases || []" :key="canvas.id" :value="canvas.id">{{ canvas.title }}</option>
                   </select>
                 </div>
@@ -1929,7 +1947,7 @@ async function submitSend() {
                 <span>{{ sendPanelState.title }}</span>
                 <span>{{ sendPanelState.description }}</span>
                 <div class="photos-actions">
-                  <DsButton size="sm" variant="secondary" @click="openSend">重新读取目标</DsButton>
+                  <DsButton size="sm" variant="secondary" @click="openSend">{{ t("重新读取目标") }}</DsButton>
                 </div>
               </div>
               <p v-if="sendError" class="photos-error" role="alert" data-photos-send-error>{{ sendError }}</p>
@@ -1937,8 +1955,8 @@ async function submitSend() {
             </template>
           </div>
           <template #footer>
-            <DsButton variant="ghost" @click="studioDialog = null">关闭</DsButton>
-            <DsButton :status="studioBusy === 'send' ? 'loading' : 'idle'" :disabled="!pickedTarget || pickedTarget.disabled || (pickedTarget.needsCanvas && !sendCanvasId)" @click="submitSend">发送</DsButton>
+            <DsButton variant="ghost" @click="studioDialog = null">{{ t("关闭") }}</DsButton>
+            <DsButton :status="studioBusy === 'send' ? 'loading' : 'idle'" :disabled="!pickedTarget || pickedTarget.disabled || (pickedTarget.needsCanvas && !sendCanvasId)" @click="submitSend">{{ t("发送") }}</DsButton>
           </template>
         </DsDialog>
       </div>
@@ -2035,6 +2053,12 @@ async function submitSend() {
 @keyframes photos-slice-in {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: none; }
+}
+/* Office 能力结论只占一行；原始错误放 title，不挤占相册主体。 */
+.photos-office {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-micro);
 }
 </style>
 

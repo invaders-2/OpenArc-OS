@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { t } from "../i18n";
 import { errorText } from "../../src/identity/types";
 
 /**
@@ -11,5 +12,5 @@ const text = computed(() => (props.error ? errorText(props.error.code, props.err
 </script>
 
 <template>
-  <p v-if="error" class="auth-error" role="alert" data-d3-id="auth-error">{{ text }}</p>
+  <p v-if="error" class="auth-error" role="alert" data-d3-id="auth-error">{{ t(text) }}</p>
 </template>
