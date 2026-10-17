@@ -198,6 +198,15 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
     };
     const chat = usable("chat");
     const image = usable("image-generation");
+    const video = usable("video-generation");
+    /** task-65：视频传输由后端 canvas/models.transports 决定，不再写死不可用。 */
+    const transports = (res && res.transports) || {};
+    const transportOf = (cap: string, fallback: boolean) => {
+      if (transports[cap] === true) return "openarc-model-service";
+      if (transports[cap] === false) return null;
+      return fallback ? "openarc-model-service" : null;
+    };
+    const videoTransport = transportOf("video-generation", false);
     /**
      * 默认值只认 OpenArc 的**显式配置**，两种情况必须分开（这是"禁止静默换模型"的落点）：
      *   · def == null —— OpenArc 里根本没配该能力默认：回落到清单第一个可用模型只是**展示便利**
@@ -231,7 +240,7 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
      * **不投影** baseUrl / protocol / credentialRef / has_key：页面既拿不到地址也拿不到凭据，
      * 因此不可能出现"看着连上了"的伪造供应商。
      */
-    const providersOf = (cap: "chat" | "image-generation") => {
+    const providersOf = (cap: "chat" | "image-generation" | "video-generation") => {
       const out = new Map<string, { id: string; name: string; models: string[] }>();
       for (const m of usable(cap)) {
         const id = String(m.providerId || "");
@@ -243,10 +252,11 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
     };
     const chatProviders = providersOf("chat");
     const imageProviders = providersOf("image-generation");
-    const apiProviders = Array.from(new Set([...chatProviders.keys(), ...imageProviders.keys()])).map((id) => ({
-      id, name: String((chatProviders.get(id) || imageProviders.get(id))!.name), enabled: true,
+    const videoProviders = providersOf("video-generation");
+    const apiProviders = Array.from(new Set([...chatProviders.keys(), ...imageProviders.keys(), ...videoProviders.keys()])).map((id) => ({
+      id, name: String((chatProviders.get(id) || imageProviders.get(id) || videoProviders.get(id))!.name), enabled: true,
       chat_models: chatProviders.get(id)?.models || [], image_models: imageProviders.get(id)?.models || [],
-      video_models: [],
+      video_models: videoProviders.get(id)?.models || [],
     }));
     /**
      * 能力事实三件套，语义互不重叠（守卫脚本按它决定"未接通"还是"未配置"）：
@@ -256,15 +266,15 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
      * 第四个事实 defaultUsable/defaultReason 见 defaultFact()：显式默认坏了也是"不可用"，但原因不同
      * （CAPABILITY_UNAVAILABLE / MODEL_DISABLED / MODEL_NOT_FOUND / MODEL_UNAUTHORIZED）。
      */
-    const capability = (transport: string | null, configured: boolean, reason: string | null) => ({ available: !!transport, transport, configured, reason });
+    const capability = (transport: string | null, configured: boolean, reason: string | null, reasonCode: string | null = null) => ({ available: !!transport, transport, configured, reason, reasonCode });
     /**
      * 显式默认不可用且它已不在"可用清单"里（停用 / provider 停用 / 跨能力）时，标签也要能如实显示。
      * 可用清单 models 是**可用模型**（停用的被过滤掉），所以这里只在"默认确实不可用且标签为空"时，
      * 向模型管理面补一次身份查询（只取 displayName / remoteModelId，不取地址、不取凭据），
      * **不会**把停用模型重新投影成可用模型。
      */
-    const defaultModels = { chat: defaultLabelOf("chat"), "image-generation": defaultLabelOf("image-generation") };
-    const missingLabelCaps = (["chat", "image-generation"] as const).filter((cap) => {
+    const defaultModels = { chat: defaultLabelOf("chat"), "image-generation": defaultLabelOf("image-generation"), "video-generation": defaultLabelOf("video-generation") };
+    const missingLabelCaps = (["chat", "image-generation", "video-generation"] as const).filter((cap) => {
       const def = defaults.personal?.[cap] || defaults.organization?.[cap] || null;
       return !!def && !defaultModels[cap] && defaultFact(cap).defaultUsable === false;
     });
@@ -280,26 +290,29 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
     return {
       chat_models: chat.map(label),
       image_models: image.map(label),
-      // 视频/ComfyUI 在 OpenArc 里没有传输：投影一律为空，并把原因交给守卫脚本（绝不显示为已连接）。
-      video_models: [], ms_chat_models: [], comfy_instances: [],
+      // task-65：视频模型按后端真实清单投影；传输由 capabilities["video-generation"].transport 表达。
+      video_models: video.map(label), ms_chat_models: [], comfy_instances: [],
       api_providers: apiProviders,
       image_model: pick("image-generation", image),
       chat_model: pick("chat", chat),
+      video_model: pick("video-generation", video),
       /** 显式默认的标签（只给"不可用"呈现用；空 = 没配默认或默认模型已不在清单里）。*/
       default_models: defaultModels,
       provider_count: apiProviders.length,
       chat_model_count: chat.length,
       image_model_count: image.length,
+      video_model_count: video.length,
       /**
        * 能力可用性事实。**守卫脚本真的读它**（public/novai-canvas/openarc-canvas-guard.js 按
        * available / transport / reason 决定禁用哪些下拉、写什么说明、给不给"打开 OpenArc 总 API 设置"）。
        * 未接通的能力一律 available:false + reason —— 不是装饰字段。
        */
       capabilities: {
-        chat: { ...capability("openarc-model-service", chat.length > 0, chat.length ? null : "OpenArc 总 API 设置里还没有可用的文本模型"), ...defaultFact("chat") },
-        "image-generation": { ...capability("openarc-model-service", image.length > 0, image.length ? null : "OpenArc 总 API 设置里还没有可用的生图模型"), ...defaultFact("image-generation") },
-        "video-generation": capability(null, false, "OpenArc 未接通视频传输（不可用）"),
-        comfy: capability(null, false, "OpenArc 未接入 ComfyUI（不可用）"),
+        chat: { ...capability(transportOf("chat", true), chat.length > 0, chat.length ? null : "OpenArc 总 API 设置里还没有可用的文本模型", chat.length ? null : "NO_MODEL"), ...defaultFact("chat") },
+        "image-generation": { ...capability(transportOf("image-generation", true), image.length > 0, image.length ? null : "OpenArc 总 API 设置里还没有可用的生图模型", image.length ? null : "NO_MODEL"), ...defaultFact("image-generation") },
+        // 视频：transport 读取后端真实装配；模型缺失与传输缺失分开给结构化原因。
+        "video-generation": { ...capability(videoTransport, video.length > 0, videoTransport ? (video.length ? null : "OpenArc 总 API 设置里还没有可用的视频模型") : "OpenArc 后端未接通视频传输", videoTransport ? (video.length ? null : "NO_MODEL") : "TRANSPORT_UNAVAILABLE"), ...defaultFact("video-generation") },
+        comfy: capability(null, false, "OpenArc 未接入 ComfyUI（不可用）", "TRANSPORT_UNAVAILABLE"),
       },
     };
   }, [modelCmd]);

@@ -15,6 +15,7 @@ const fsp = require("node:fs/promises");
 const path = require("node:path");
 const domain = require("./resource-domain.cjs");
 const authz = require("./authorization-domain.cjs");
+const { readMediaMetadata } = require("./media-metadata.cjs");
 
 const { ok, fail, REASON, STORAGE_MODE, AVAILABILITY, IMPORT_PHASE, TRASH_STATE, CONTENT_STATUS, SOURCE, INDEX_STATUS, LOCAL_DEVICE_ID, TAG_SOURCE, CATEGORY } = domain;
 
@@ -248,6 +249,63 @@ class ResourceService {
     };
   }
 
+  /** task-63：详情媒体元数据。解析不出就是 unknown，绝不猜尺寸/时长。 */
+  #mediaMetadata(row) {
+    const sourcePath = row.storage_mode === STORAGE_MODE.MANAGED
+      ? (this.fs && row.checksum ? this.fs.objectPath(row.checksum) : null)
+      : ((!row.storage_device_id || row.storage_device_id === LOCAL_DEVICE_ID) ? row.source_locator : null);
+    return readMediaMetadata({ filePath: sourcePath, mimeType: row.mime_type, name: row.name, resourceType: row.resource_type });
+  }
+
+  /** task-63：来源 / 集合 / 项目 / 画布引用（只读，绝不回传绝对路径）。 */
+  #grouping(row, context) {
+    const actor = this.#actor(context);
+    const storage = domain.presentSource({ storageMode: row.storage_mode, storageDeviceId: row.storage_device_id });
+    const sourceInfo = {
+      origin: row.source || "unknown",
+      storage,
+      generated: row.generated_source_task_id || row.generated_source_call_id || row.generated_source_model
+        ? { taskId: row.generated_source_task_id || null, callId: row.generated_source_call_id || null, model: row.generated_source_model || null }
+        : null,
+    };
+    let collection = null;
+    if (row.collection_id && this.authStore) {
+      try {
+        const col = this.authStore.collectionById(row.collection_id);
+        if (col) collection = { collectionId: col.id, name: col.name, scope: col.scope || null };
+      } catch { /* 集合表不可用时保持 unknown */ }
+    }
+    const projects = [];
+    const canvasNodes = [];
+    if (actor.ok && this.identity && this.identity.connection) {
+      try {
+        const rows = this.identity.connection.prepare(
+          "SELECT p.id AS id, p.name AS name FROM projects p JOIN project_resources pr ON pr.project_id = p.id " +
+          "WHERE pr.resource_id = ? AND (p.owner_user_id = ? OR EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = p.id AND pm.user_id = ?)) " +
+          "ORDER BY p.updated_at DESC, p.id"
+        ).all(row.resource_id, actor.user.id, actor.user.id);
+        for (const item of rows) projects.push({ projectId: item.id, name: item.name });
+      } catch { /* projects 表缺失时 unknown */ }
+      try {
+        const rows = this.identity.connection.prepare(
+          "SELECT cn.id AS node_id, cn.board_id, cn.x, cn.y, cn.resource_version, cn.version_mode, cb.name AS board_name, cb.updated_at AS board_updated_at " +
+          "FROM canvas_resource_nodes cn JOIN canvas_boards cb ON cb.id = cn.board_id WHERE cn.resource_id = ? AND cb.organization_id = ? " +
+          "ORDER BY cb.updated_at DESC, cn.created_at, cn.id"
+        ).all(row.resource_id, row.organization_id);
+        for (const item of rows) canvasNodes.push({
+          nodeId: item.node_id,
+          boardId: item.board_id,
+          boardName: item.board_name,
+          x: Number(item.x) || 0,
+          y: Number(item.y) || 0,
+          resourceVersion: Number(item.resource_version),
+          versionMode: item.version_mode,
+        });
+      } catch { /* canvas 表缺失时 unknown */ }
+    }
+    return { sourceInfo, collection, projects, canvasNodes };
+  }
+
   #load({ context, resourceRef, action, allowInactiveResource = false, agent = undefined, opaque = false }) {
     const row = this.#resolveRow(resourceRef);
     if (!row) return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
@@ -458,7 +516,17 @@ class ResourceService {
     if (!caps.ok) return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
     const actor = this.#actor(context);
     const favorite = actor.ok ? this.store.isFavorite(actor.user.id, row.resource_id) : false;
-    return ok({ resource: this.#descriptor(row, context, { favorite }), location: this.#location(row, context) });
+    const grouping = this.#grouping(row, context);
+    return ok({
+      resource: this.#descriptor(row, context, { favorite }),
+      location: this.#location(row, context),
+      // task-63：详情页需要真实媒体元数据；无法解析时字段为 null + status=unknown。
+      media: this.#mediaMetadata(row),
+      sourceInfo: grouping.sourceInfo,
+      collection: grouping.collection,
+      projects: grouping.projects,
+      canvasNodes: grouping.canvasNodes,
+    });
   }
 
   /**
@@ -531,6 +599,48 @@ class ResourceService {
       return fail(REASON.INTERNAL_ERROR, "export-failed");
     }
     return ok({ bytes, mimeType: r.mimeType, size: bytes });
+  }
+
+  /**
+   * task-63：下载到渲染层（无绝对路径）。同时要求 export + read；有界，超限结构化拒绝。
+   * 返回 base64/dataUrl 供 UI 触发保存；大文件请走 resource/export（主进程 dialog 落盘）。
+   */
+  async exportBytes({ context, resourceRef, maxBytes = 32 * 1024 * 1024 } = {}) {
+    this.#ensureBuiltinPolicy(context);
+    const id = this.#parseRef(resourceRef);
+    const row = id ? this.store.resourceRowById(id) : null;
+    if (!row) return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
+    const exportAuth = this.authService.authorize({ context, action: authz.ACTION.EXPORT, resource: id });
+    if (exportAuth.decision !== "ALLOW") return fail(REASON.NOT_FOUND_OR_FORBIDDEN);
+    const cap = Number(maxBytes);
+    const limit = Number.isFinite(cap) && cap > 0 ? Math.min(cap, 64 * 1024 * 1024) : 32 * 1024 * 1024;
+    if (row.size != null && Number(row.size) > limit) return fail("RESOURCE_TOO_LARGE", { size: Number(row.size), maxBytes: limit });
+    const r = this.read({ context, resourceRef });
+    if (!r.ok) return r;
+    const chunks = [];
+    let total = 0;
+    try {
+      for await (const chunk of r.stream) {
+        total += chunk.length;
+        if (total > limit) {
+          try { r.stream.destroy(); } catch { /* ignore */ }
+          return fail("RESOURCE_TOO_LARGE", { size: total, maxBytes: limit });
+        }
+        chunks.push(Buffer.from(chunk));
+      }
+    } catch {
+      return fail(REASON.INTERNAL_ERROR, "download-failed");
+    }
+    const buf = Buffer.concat(chunks);
+    const mimeType = r.mimeType || row.mime_type || "application/octet-stream";
+    return ok({
+      base64: buf.toString("base64"),
+      dataUrl: "data:" + mimeType + ";base64," + buf.toString("base64"),
+      mimeType,
+      size: buf.length,
+      fileName: String(row.name || "resource").slice(0, 200),
+      truncated: false,
+    });
   }
 
   /**

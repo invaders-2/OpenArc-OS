@@ -63,6 +63,8 @@ const RENDERER_COMMANDS = Object.freeze([
   "resource/reindex",
   "resource/preview",
   "resource/thumbnail",
+  // task-63：资源详情下载/导出（安全字节，无绝对路径）
+  "resource/download",
   // D3-04D：集成 / Picker / Export
   "resource/export",
   "resource/revealSource",
@@ -331,6 +333,8 @@ function registerResourceIpc({ ipcMain, service, search = null, preview = null, 
           // task-52：同一命令支持批量（resourceRefs）供对话/资源面板一次取多张缩略图。
           if (Array.isArray(command.resourceRefs)) return preview.thumbnailBatch({ context, resourceRefs: command.resourceRefs });
           return preview.thumbnail({ context, resourceRef });
+        case "resource/download":
+          return service.exportBytes({ context, resourceRef, maxBytes: Number(command.maxBytes) || undefined });
         // ---- D3-04D：Resource Picker ----
         case "resource/pickerQuery":
           if (!picker) return { ok: false, error: "PICKER_UNAVAILABLE", items: [] };

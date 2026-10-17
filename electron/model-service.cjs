@@ -530,11 +530,16 @@ class ModelService {
     };
     const defaultsState = {};
     for (const cap of capabilities) defaultsState[cap] = defaultState(cap);
+    // task-64：视频传输不再写死 false。按真实装配判断——只有 model 域已挂载
+    // providerProtocol.service 且它确实能执行视频时才算接通；否则如实 false。
+    const videoTransport = !!(this.providerProtocol
+      && this.providerProtocol.service
+      && typeof this.providerProtocol.service.legacyExecute === "function");
     return {
       ok: true, models, capabilities, defaultsState,
       defaults: defaults && defaults.ok ? { personal: defaults.personal, organization: defaults.organization } : { personal: {}, organization: {} },
       // 供应商地址/凭据一律不出主进程：画布只看到"能用的模型"和供应商显示名。
-      transports: { chat: true, "image-generation": true, "video-generation": false },
+      transports: { chat: true, "image-generation": true, "video-generation": videoTransport },
     };
   }
 
