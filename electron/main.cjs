@@ -134,6 +134,8 @@ const { createDesktopCacheService } = require("./desktop-cache-service.cjs");
 const { createDesktopUpdateService } = require("./desktop-update-service.cjs");
 // task-8 A：局域网协作（opt-in；0.0.0.0 + 随机端口；配对码/令牌）。
 const { createLanCollabService } = require("./lan-collab-service.cjs");
+// task-21：窗口标签组命令批处理（复用既有 windows:sync 通道，不新增 preload 成员）。
+const { applyWindowCommandBatch } = require("./window-command-ipc.cjs");
 // 0.6.2 · 三个新域接线（photos / photocraft / app-exchange）：bootstrap 只承担 trusted 边界 + 命令白名单，
 //   装配参数由本文件注入（与 0.6.1 五域同一接线口径）；命令表本身即白名单，未登记命令一律 *_COMMAND_NOT_ALLOWED。
 const { createPhotosBundle } = require("./photos-service.cjs");
@@ -2122,6 +2124,17 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("windows:sync", async (e, payload) => {
     if (!trusted(e)) throw Error("Forbidden");
+    // task-21：标签组命令批处理。沿用既有通道，输入输出都是窗口域的 persisted 形态；
+    // 没有 commands 时行为与既有 windows:sync 完全一致（空 intents 契约不变）。
+    let windowBatch = null;
+    if (Array.isArray(payload?.commands)) {
+      windowBatch = applyWindowCommandBatch({
+        state: payload.windowState !== undefined ? payload.windowState : payload.state,
+        commands: payload.commands,
+        areas: Array.isArray(payload.areas) ? payload.areas : null,
+      });
+      if (!windowBatch.ok) return windowBatch;
+    }
     const intents = Array.isArray(payload?.intents) ? payload.intents : [];
     if (intents.length > 32) return { error: "窗口数量超出上限" };
     const results = await controller.sync(intents, {
@@ -2132,7 +2145,7 @@ app.whenReady().then(async () => {
     });
     // 标签关闭 / 被替换：把死掉的目标从授权表摘掉（绝不是"换个标签继续"）。
     try { browserControl?.pruneDead(); } catch { /* ignore */ }
-    return { ok: true, results };
+    return windowBatch ? { ok: true, results, windowBatch } : { ok: true, results };
   });
 
   // ---------------------------------------------------------------------------

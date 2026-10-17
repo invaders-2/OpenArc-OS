@@ -70,6 +70,202 @@ function raise(state, id) {
   return { ...state, order: [...state.order.filter((x) => x !== id), id] };
 }
 
+// ---------------------------------------------------------------------------
+// task-21 · 标签组（tabGroupId）
+//
+// 组是**窗口关系**，不是第二套窗口状态：每个窗口仍有自己的 bounds/state/meta，
+// 组只记录 appId + activeWindowId；active 成员可见，其余成员 visible=false。
+// 几何规则：合并时以 active/目标窗口的 bounds 为准，所有成员继承；合并前各自的
+// bounds/state 存进 window.tabRestore，拆分时逐窗口恢复。
+// ---------------------------------------------------------------------------
+
+const sameApp = (windows) => new Set(windows.map((w) => w.appId)).size === 1;
+const uniqueIds = (values) => [...new Set((Array.isArray(values) ? values : []).map((value) => String(value || "")).filter(Boolean))];
+
+function nextGroupId(state) {
+  let seq = Number(state.seq) || 0;
+  for (;;) {
+    seq += 1;
+    const id = "tg:" + seq;
+    if (!state.tabGroups || !state.tabGroups[id]) return { id, seq };
+  }
+}
+
+function restoreSnapshot(w) {
+  return w.tabRestore && typeof w.tabRestore === "object"
+    ? { bounds: domain.normalizeBounds(w.tabRestore.bounds, w.bounds), state: w.tabRestore.state || WSTATE.NORMAL, restore: w.tabRestore.restore || null }
+    : { bounds: { ...w.bounds }, state: WSTATE.NORMAL, restore: null };
+}
+
+function withGroupMembers(state, groupId, mapMember) {
+  return { ...state, windows: state.windows.map((w) => (w.tabGroupId === groupId ? mapMember(w) : w)) };
+}
+
+function setGroupGeometry(state, groupId, bounds) {
+  return withGroupMembers(state, groupId, (w) => ({ ...w, bounds: { ...bounds } }));
+}
+
+/** 组成员被关闭 / 拆出后修组：剩 1 个就拆组并恢复几何，0 个删组。 */
+function reconcileGroupAfterRemoval(state, groupId, removedId) {
+  const group = state.tabGroups && state.tabGroups[groupId];
+  if (!group) return state;
+  const members = domain.windowsOfTabGroup(state, groupId);
+  const nextGroups = { ...state.tabGroups };
+  if (members.length >= 2) {
+    nextGroups[groupId] = { ...group, activeWindowId: group.activeWindowId === removedId ? members[members.length - 1] : group.activeWindowId };
+    return { ...state, tabGroups: nextGroups };
+  }
+  delete nextGroups[groupId];
+  let next = { ...state, tabGroups: nextGroups };
+  for (const id of members) {
+    const member = domain.byId(next, id);
+    if (!member) continue;
+    const snap = restoreSnapshot(member);
+    next = {
+      ...next,
+      windows: next.windows.map((w) => (w.id === id ? { ...w, tabGroupId: null, tabRestore: null, bounds: snap.bounds, state: snap.state, restore: snap.restore } : w)),
+    };
+  }
+  return next;
+}
+
+function activateGroupWindow(state, id, { focus = true } = {}) {
+  const w = domain.byId(state, id);
+  if (!w) return state;
+  const group = domain.tabGroupOfWindow(state, id);
+  if (!group) return state;
+  const bounds = { ...w.bounds };
+  let next = {
+    ...state,
+    tabGroups: { ...state.tabGroups, [group.id]: { ...group, activeWindowId: id } },
+    windows: state.windows.map((item) => (item.tabGroupId === group.id ? {
+      ...item,
+      bounds: { ...bounds },
+      state: item.id === id && item.state === WSTATE.MINIMIZED ? WSTATE.NORMAL : item.state,
+      restore: item.id === id && item.state === WSTATE.MINIMIZED ? null : item.restore,
+    } : item)),
+  };
+  if (focus) {
+    next = { ...next, focused: id };
+    return domain.reindex(raise(next, id));
+  }
+  return domain.reindex(next);
+}
+
+function tabGroupMerge(state, cmd) {
+  const requestedIds = uniqueIds([...(Array.isArray(cmd.ids) ? cmd.ids : []), cmd.windowId, cmd.targetWindowId]);
+  const requestedWindows = requestedIds.map((id) => domain.byId(state, id)).filter(Boolean);
+  const explicitGroupId = cmd.groupId ? String(cmd.groupId) : null;
+  const targetGroup = explicitGroupId ? state.tabGroups && state.tabGroups[explicitGroupId] : null;
+  // 显式 groupId = 向已有组追加成员：允许只传新窗口，自动补上原成员。
+  let ids = requestedIds;
+  let windows = requestedWindows;
+  if (targetGroup) {
+    ids = uniqueIds([...domain.windowsOfTabGroup(state, targetGroup.id), ...requestedIds]);
+    windows = ids.map((id) => domain.byId(state, id)).filter(Boolean);
+  }
+  if (windows.length < 2) return state;
+  if (!sameApp(windows)) return state;
+  const groupedIds = windows.filter((w) => w.tabGroupId);
+  if (targetGroup) {
+    if (targetGroup.appId !== windows[0].appId) return state;
+    if (groupedIds.some((w) => w.tabGroupId !== targetGroup.id)) return state;
+  } else if (groupedIds.length) {
+    return state; // 合并已存在的组需要显式 groupId；否则先拆组，避免隐式并组。
+  }
+  let groupId;
+  let seq = Number(state.seq) || 0;
+  if (targetGroup) groupId = targetGroup.id;
+  else { const created = nextGroupId(state); groupId = created.id; seq = created.seq; }
+
+  const requestedActive = cmd.activeId ? String(cmd.activeId) : null;
+  const active = windows.find((w) => w.id === requestedActive)
+    || windows.find((w) => w.id === state.focused)
+    || windows[windows.length - 1];
+  const bounds = { ...active.bounds };
+  const next = {
+    ...state,
+    seq,
+    tabGroups: {
+      ...state.tabGroups,
+      [groupId]: {
+        id: groupId,
+        appId: windows[0].appId,
+        activeWindowId: active.id,
+        createdAt: targetGroup ? targetGroup.createdAt : seq,
+      },
+    },
+    windows: state.windows.map((w) => {
+      if (!ids.includes(w.id)) return w;
+      const tabRestore = w.tabRestore || { bounds: { ...w.bounds }, state: w.state, restore: w.restore ? { ...w.restore } : null };
+      return { ...w, tabGroupId: groupId, tabRestore, bounds: { ...bounds }, state: WSTATE.NORMAL, restore: null };
+    }),
+  };
+  next.focused = active.id;
+  return domain.reindex(raise(next, active.id));
+}
+
+/** 同应用自动合并：把该 App 的所有窗口并进一个组（已有一个组则把未分组窗口加进去）。 */
+function tabGroupAuto(state, cmd) {
+  const appId = String(cmd.appId || "");
+  if (!appId) return state;
+  const ids = domain.windowsOfApp(state, appId);
+  if (ids.length < 2) return state;
+  const groups = Object.values(state.tabGroups || {}).filter((group) => group.appId === appId);
+  if (groups.length > 1) return state;
+  if (groups.length === 1) {
+    const ungrouped = ids.filter((id) => !domain.byId(state, id).tabGroupId);
+    if (!ungrouped.length) return state;
+    return tabGroupMerge(state, { groupId: groups[0].id, ids: [...domain.windowsOfTabGroup(state, groups[0].id), ...ungrouped], activeId: groups[0].activeWindowId });
+  }
+  return tabGroupMerge(state, { ids });
+}
+
+function tabGroupActivate(state, cmd) {
+  const group = cmd.groupId ? state.tabGroups && state.tabGroups[cmd.groupId] : null;
+  const id = String(cmd.id || cmd.windowId || (group && group.activeWindowId) || "");
+  if (!id || !domain.byId(state, id)) return state;
+  return activateGroupWindow(state, id, { focus: cmd.focus !== false });
+}
+
+function tabGroupSplit(state, cmd) {
+  const id = cmd.id != null ? String(cmd.id) : "";
+  const groupId = cmd.groupId != null ? String(cmd.groupId) : (id ? (domain.tabGroupOfWindow(state, id)?.id || "") : "");
+  const group = groupId ? state.tabGroups && state.tabGroups[groupId] : null;
+  if (!group) return state;
+  const members = domain.windowsOfTabGroup(state, groupId);
+  // 拆分整个组，或组成员只剩 2 个时拆任意一个都等价于解散。
+  const splitWhole = !id || members.length <= 2;
+  let next = { ...state, tabGroups: { ...state.tabGroups } };
+  const targets = splitWhole ? members : [id];
+  if (!splitWhole && !members.includes(id)) return state;
+  for (const memberId of targets) {
+    const member = domain.byId(next, memberId);
+    if (!member) continue;
+    const snap = restoreSnapshot(member);
+    next = {
+      ...next,
+      windows: next.windows.map((w) => (w.id === memberId ? { ...w, tabGroupId: null, tabRestore: null, bounds: snap.bounds, state: snap.state, restore: snap.restore } : w)),
+    };
+  }
+  if (splitWhole) delete next.tabGroups[groupId];
+  else {
+    const remaining = members.filter((memberId) => memberId !== id);
+    next.tabGroups[groupId] = { ...group, activeWindowId: group.activeWindowId === id ? remaining[0] : group.activeWindowId };
+    if (next.focused === id) next.focused = remaining[0] || null;
+  }
+  return domain.reindex(next);
+}
+
+function tabGroupClose(state, cmd) {
+  const groupId = cmd.groupId != null ? String(cmd.groupId) : domain.tabGroupOfWindow(state, String(cmd.id || ""))?.id;
+  if (!groupId || !state.tabGroups || !state.tabGroups[groupId]) return state;
+  const members = domain.windowsOfTabGroup(state, groupId);
+  let next = state;
+  for (const id of members) next = close(next, { id });
+  return next;
+}
+
 /**
  * 置顶 + 聚焦（+ 取消最小化）。
  *
@@ -81,14 +277,23 @@ function raise(state, id) {
 function topAndFocus(state, id) {
   const w = domain.byId(state, id);
   if (!w) return state;
+  const group = domain.tabGroupOfWindow(state, id);
   const alreadyTop = state.order[state.order.length - 1] === id;
-  if (alreadyTop && state.focused === id && w.state !== WSTATE.MINIMIZED) return state;
-  const next = {
+  if (alreadyTop && state.focused === id && w.state !== WSTATE.MINIMIZED && (!group || group.activeWindowId === id)) return state;
+  let next = {
     ...state,
     windows: state.windows.map((x) =>
       x.id === id && x.state === WSTATE.MINIMIZED ? { ...x, state: WSTATE.NORMAL } : x,
     ),
   };
+  if (group) {
+    // task-21：聚焦组内成员 = 切 active 并继承组几何；其余成员保持隐藏。
+    next = {
+      ...next,
+      tabGroups: { ...state.tabGroups, [group.id]: { ...group, activeWindowId: id } },
+      windows: next.windows.map((x) => (x.tabGroupId === group.id ? { ...x, bounds: { ...w.bounds } } : x)),
+    };
+  }
   next.focused = id;
   return domain.reindex(raise(next, id));
 }
@@ -129,19 +334,37 @@ function open(state, cmd) {
     order: [...state.order, id],
   };
   next.focused = id;
-  return domain.reindex(next);
+  const opened = domain.reindex(next);
+  if (cmd.tabGroupId && opened.tabGroups && opened.tabGroups[cmd.tabGroupId] && opened.tabGroups[cmd.tabGroupId].appId === appId) {
+    return tabGroupMerge(opened, { groupId: cmd.tabGroupId, ids: [...domain.windowsOfTabGroup(opened, cmd.tabGroupId), id], activeId: id });
+  }
+  return opened;
 }
 
-/** CLOSE。被关闭者若是聚焦窗口，焦点落到最上层剩余可见窗口（可能为 null）。 */
+/** CLOSE。被关闭者若是聚焦窗口，焦点落到组内剩余 active / 最上层剩余可见窗口（可能为 null）。 */
 function close(state, cmd) {
   const id = String(cmd.id ?? "");
-  if (!domain.byId(state, id)) return state;
-  const next = {
+  const target = domain.byId(state, id);
+  if (!target) return state;
+  const groupId = target.tabGroupId;
+  const groupMembersBefore = groupId ? domain.windowsOfTabGroup(state, groupId) : [];
+  const closingGroupActive = !!groupId && !!state.tabGroups[groupId] && state.tabGroups[groupId].activeWindowId === id;
+  let next = {
     ...state,
     windows: state.windows.filter((w) => w.id !== id),
     order: state.order.filter((x) => x !== id),
   };
-  if (state.focused === id) next.focused = topmostVisible(next, null);
+  if (groupId) next = reconcileGroupAfterRemoval(next, groupId, id);
+  if (state.focused === id) {
+    const group = groupId ? next.tabGroups && next.tabGroups[groupId] : null;
+    if (group) next.focused = group.activeWindowId;
+    else if (closingGroupActive) {
+      // 组被解散且关的是 active：焦点回到同组剩下的那个窗口，而不是无关的后台 App。
+      const survivor = groupMembersBefore.find((memberId) => memberId !== id && domain.byId(next, memberId));
+      if (survivor) next = raise(next, survivor);
+      next.focused = survivor || topmostVisible(next, null);
+    } else next.focused = topmostVisible(next, null);
+  }
   return domain.reindex(next);
 }
 
@@ -164,10 +387,12 @@ function move(state, cmd) {
   const y = Math.max(AREA_TOP, Math.min(Math.round(host.height || 0) - 140, Math.round(cmd.y)));
   if (!Number.isFinite(x) || !Number.isFinite(y)) return state;
   if (x === w.bounds.x && y === w.bounds.y) return state;
-  return domain.reindex({
+  const targetBounds = { ...w.bounds, x, y };
+  const next = w.tabGroupId ? setGroupGeometry(state, w.tabGroupId, targetBounds) : {
     ...state,
-    windows: state.windows.map((item) => (item.id === id ? { ...item, bounds: { ...item.bounds, x, y } } : item)),
-  });
+    windows: state.windows.map((item) => (item.id === id ? { ...item, bounds: targetBounds } : item)),
+  };
+  return domain.reindex(next);
 }
 
 /** RESIZE。clamp 到 [minSize, host]，并保证不越出工作区。 */
@@ -182,10 +407,12 @@ function resize(state, cmd) {
   const nh = Math.max(w.minSize.h, Math.min(maxH, Math.round(cmd.h)));
   if (!Number.isFinite(nw) || !Number.isFinite(nh)) return state;
   if (nw === w.bounds.w && nh === w.bounds.h) return state;
-  return domain.reindex({
+  const targetBounds = { ...w.bounds, w: nw, h: nh };
+  const next = w.tabGroupId ? setGroupGeometry(state, w.tabGroupId, targetBounds) : {
     ...state,
-    windows: state.windows.map((item) => (item.id === id ? { ...item, bounds: { ...item.bounds, w: nw, h: nh } } : item)),
-  });
+    windows: state.windows.map((item) => (item.id === id ? { ...item, bounds: targetBounds } : item)),
+  };
+  return domain.reindex(next);
 }
 
 /** MINIMIZE。焦点交还最上层剩余可见窗口。 */
@@ -193,9 +420,12 @@ function minimize(state, cmd) {
   const id = String(cmd.id ?? "");
   const w = domain.byId(state, id);
   if (!w || w.state === WSTATE.MINIMIZED) return state;
+  // task-21：最小化组成员 = 最小化整个组；恢复时只恢复被激活的那个成员。
   const next = {
     ...state,
-    windows: state.windows.map((item) => (item.id === id ? { ...item, state: WSTATE.MINIMIZED } : item)),
+    windows: state.windows.map((item) =>
+      item.id === id || (w.tabGroupId && item.tabGroupId === w.tabGroupId) ? { ...item, state: WSTATE.MINIMIZED } : item,
+    ),
   };
   if (state.focused === id) next.focused = topmostVisible(next, id);
   return domain.reindex(next);
@@ -214,15 +444,16 @@ function maximize(state, cmd) {
   const id = String(cmd.id ?? "");
   const w = domain.byId(state, id);
   if (!w || w.state === WSTATE.MAXIMIZED) return state;
+  const maxRect = maximizedBounds(cmd.host);
   const next = {
     ...state,
     windows: state.windows.map((item) =>
-      item.id === id
+      item.id === id || (w.tabGroupId && item.tabGroupId === w.tabGroupId)
         ? {
             ...item,
             state: WSTATE.MAXIMIZED,
             restore: { ...item.bounds },
-            bounds: maximizedBounds(cmd.host),
+            bounds: { ...maxRect },
           }
         : item,
     ),
@@ -240,7 +471,9 @@ function unmaximize(state, cmd) {
   const next = {
     ...state,
     windows: state.windows.map((item) =>
-      item.id === id ? { ...item, state: WSTATE.NORMAL, bounds: target, restore: null } : item,
+      item.id === id || (w.tabGroupId && item.tabGroupId === w.tabGroupId)
+        ? { ...item, state: WSTATE.NORMAL, bounds: { ...target }, restore: null }
+        : item,
     ),
   };
   next.focused = id;
@@ -281,8 +514,17 @@ function reflow(state, cmd) {
           return { x: r.x, y: r.y, w: r.w, h: r.h };
         })()
       : null;
-    return { ...w, bounds: domain.normalizeBounds(bounds, w.bounds), restore };
+    const tabRestore = w.tabRestore && w.tabRestore.bounds
+      ? { ...w.tabRestore, bounds: domain.normalizeBounds(w.tabRestore.bounds, w.bounds) }
+      : w.tabRestore;
+    return { ...w, bounds: domain.normalizeBounds(bounds, w.bounds), restore, tabRestore };
   });
+  // task-21：组几何以 active 成员为准；reflow 后重新同步全部成员，避免组内 bounds 漂移。
+  for (const [groupId, group] of Object.entries(state.tabGroups || {})) {
+    const active = next.find((w) => w.id === group.activeWindowId);
+    if (!active) continue;
+    for (const w of next) if (w.tabGroupId === groupId) w.bounds = { ...active.bounds };
+  }
   // 无变化时返回原状态：尺寸变化事件会持续触发 reflow，
   // 每次都产生新对象会让持久化与重渲染跟着空转（这是 reduce 的全局性质）。
   const same = next.every((w, i) => {
@@ -292,7 +534,8 @@ function reflow(state, cmd) {
       w.bounds.y === old.bounds.y &&
       w.bounds.w === old.bounds.w &&
       w.bounds.h === old.bounds.h &&
-      JSON.stringify(w.restore) === JSON.stringify(old.restore)
+      JSON.stringify(w.restore) === JSON.stringify(old.restore) &&
+      JSON.stringify(w.tabRestore) === JSON.stringify(old.tabRestore)
     );
   });
   if (same) return state;
@@ -435,6 +678,12 @@ const REDUCERS = {
   "window/restore": restore,
   "window/maximize": maximize,
   "window/unmaximize": unmaximize,
+  // task-21：标签组（窗口关系；不改 9 条 Window Command 契约）
+  "window/tab-group-merge": tabGroupMerge,
+  "window/tab-group-auto": tabGroupAuto,
+  "window/tab-group-split": tabGroupSplit,
+  "window/tab-group-activate": tabGroupActivate,
+  "window/tab-group-close": tabGroupClose,
   "system/hydrate": hydrate,
   "system/reflow": reflow,
   "system/native-state": nativeState,
@@ -451,6 +700,15 @@ const WINDOW_COMMANDS = Object.freeze([
   "window/restore",
   "window/maximize",
   "window/unmaximize",
+]);
+
+/** task-21：标签组命令（窗口关系，不是 App 内标签；与 9 条冻结命令分开登记）。 */
+const TAB_GROUP_COMMANDS = Object.freeze([
+  "window/tab-group-merge",
+  "window/tab-group-auto",
+  "window/tab-group-split",
+  "window/tab-group-activate",
+  "window/tab-group-close",
 ]);
 
 /**
@@ -497,6 +755,8 @@ const deserialize = (raw, areas) => hydrate(domain.createState(), { persisted: r
 function nativeIntents(state, host, reserves = {}) {
   return state.windows
     .filter((w) => domain.isNativeKind(w.kind))
+    // task-21：标签组只有 active 成员参与原生视图/遮挡结算。
+    .filter((w) => !w.tabGroupId || (domain.tabGroupOfWindow(state, w.id) || {}).activeWindowId === w.id)
     .map((w) => {
       const chrome = w.kind === domain.KIND.BROWSER ? domain.BROWSER_CHROME_H : 0;
       const reserve = w.kind === domain.KIND.BROWSER ? Math.max(0, Math.round(Number((reserves || {})[w.id]) || 0)) : 0;
@@ -538,6 +798,7 @@ module.exports = {
   deserialize,
   nativeIntents,
   WINDOW_COMMANDS,
+  TAB_GROUP_COMMANDS,
   BROWSER_COMMANDS,
   SYSTEM_MUTATIONS,
   REDUCERS,

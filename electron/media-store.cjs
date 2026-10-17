@@ -268,6 +268,36 @@ function ensureOwnedProject(projectId, ownerId) {
   return row.id;
 }
 
+/**
+ * task-20：多轨时间线的 plan 预览/校验（只服务主进程内部命令；路径绝不过 IPC）。
+ * 先对齐时长，再校验并编译；返回对齐后的时间线、issues、plan 与素材只读视图。
+ */
+function compileVideoTimelinePlan({ projectId, ownerId, timeline } = {}) {
+  ensureOwnedProject(projectId, ownerId);
+  const rows = listVideoAssetRows(projectId, ownerId);
+  const assets = rows.map(videoAssetView);
+  const aligned = mediaDomain.alignTimelineDuration(timeline);
+  const issues = mediaDomain.validateTimeline(aligned.timeline, assets);
+  const plan = mediaDomain.compileRenderPlan(aligned.timeline, assets, (asset) => {
+    const row = rows.find((candidate) => candidate.id === asset.id);
+    if (!row) throw createMediaError(MEDIA_ERR_NOT_FOUND, "服务端缺少素材：" + asset.name);
+    return row.file_path;
+  });
+  return { timeline: aligned.timeline, changed: aligned.changed, issues, plan };
+}
+
+/** task-20：只校验 + 对齐（不编译、不要求有可视片段），供前端多轨编辑器即时反馈。 */
+function validateVideoTimeline({ projectId, ownerId, timeline } = {}) {
+  ensureOwnedProject(projectId, ownerId);
+  const assets = listVideoAssetRows(projectId, ownerId).map(videoAssetView);
+  const aligned = mediaDomain.alignTimelineDuration(timeline);
+  return {
+    timeline: aligned.timeline, changed: aligned.changed,
+    issues: mediaDomain.validateTimeline(aligned.timeline, assets),
+    assetCount: assets.length,
+  };
+}
+
 /** 返回素材的绝对磁盘路径（只在主进程内部使用，绝不过 IPC）。 */
 function mediaAssetAbsolutePath(id, ownerId) {
   const row = getVideoAssetRow(id, ownerId);
@@ -285,7 +315,10 @@ function createVideoRenderJob(input) {
   ensureVideoProject({ id: input.projectId, ownerId: input.ownerId, name: input.projectName });
   const rows = listVideoAssetRows(input.projectId, input.ownerId);
   const assets = rows.map(videoAssetView);
-  mediaDomain.compileRenderPlan(input.timeline, assets, (asset) => {
+  // task-20：入队前先把时长对齐到片段最大结束时间（不改片段位置），再编译/校验。
+  const aligned = mediaDomain.alignTimelineDuration(input.timeline);
+  const timeline = aligned.timeline;
+  mediaDomain.compileRenderPlan(timeline, assets, (asset) => {
     const row = rows.find((candidate) => candidate.id === asset.id);
     if (!row) throw createMediaError(MEDIA_ERR_NOT_FOUND, "服务端缺少素材：" + asset.name);
     return row.file_path;
@@ -293,7 +326,7 @@ function createVideoRenderJob(input) {
   const id = mediaIdFactory();
   const ts = now();
   db.prepare("INSERT INTO video_render_jobs(id,project_id,owner_id,timeline_json,timeline_version,status,progress,created_at,updated_at) VALUES (?,?,?,?,?,'queued',0,?,?)")
-    .run(id, input.projectId, input.ownerId, json(input.timeline), Number(input.timeline && input.timeline.version) || 0, ts, ts);
+    .run(id, input.projectId, input.ownerId, json(timeline), Number(timeline && timeline.version) || 0, ts, ts);
   return getVideoRenderJob(id, input.ownerId);
 }
 
@@ -534,5 +567,7 @@ module.exports = {
   failVideoRenderJob,
   cancelVideoRenderJob,
   renderJobExecutionData,
+  compileVideoTimelinePlan,
+  validateVideoTimeline,
   createVideoPosterCache,
 };

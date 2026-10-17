@@ -23,6 +23,9 @@ export type WindowMeta = {
   tabSeq?: number;
 };
 
+/** task-21：标签组（窗口关系）；activeWindowId 决定哪个成员可见/参与原生视图。 */
+export type TabGroup = { id: string; appId: AppId; activeWindowId: WindowId; createdAt: number };
+
 export type Window = {
   id: WindowId;
   appId: AppId;
@@ -37,6 +40,10 @@ export type Window = {
   visible: boolean;
   /** 多显示器归属；本轮单屏恒为 null。 */
   displayId: number | string | null;
+  /** task-21：所属标签组；null = 独立窗口。 */
+  tabGroupId: string | null;
+  /** task-21：合并前的几何/状态快照；拆分时恢复。 */
+  tabRestore: { bounds: Bounds; state: WindowStateName; restore: Bounds | null } | null;
   /** z-order 缓存，真值是 state.order 下标，由 reindex 写回。 */
   z: number;
 };
@@ -47,6 +54,8 @@ export type WindowStateModel = {
   order: WindowId[];
   focused: WindowId | null;
   seq: number;
+  /** task-21：groupId → 组。 */
+  tabGroups: Record<string, TabGroup>;
 };
 
 export type Host = { width: number; height: number };
@@ -68,7 +77,13 @@ export type WindowCommand =
   | { type: "browser/tab-open"; id: WindowId; tabId: string; url?: string }
   | { type: "browser/tab-close"; id: WindowId; tabId: string }
   | { type: "browser/tab-activate"; id: WindowId; tabId: string }
-  | { type: "browser/tab-state"; windowId: WindowId; tabId?: string; url?: string; title?: string };
+  | { type: "browser/tab-state"; windowId: WindowId; tabId?: string; url?: string; title?: string }
+  // task-21：标签组
+  | { type: "window/tab-group-merge"; ids?: WindowId[]; windowId?: WindowId; targetWindowId?: WindowId; groupId?: string; activeId?: WindowId }
+  | { type: "window/tab-group-auto"; appId: AppId }
+  | { type: "window/tab-group-split"; id?: WindowId; groupId?: string }
+  | { type: "window/tab-group-activate"; id?: WindowId; windowId?: WindowId; groupId?: string; focus?: boolean }
+  | { type: "window/tab-group-close"; id?: WindowId; groupId?: string };
 
 export const MIN_WINDOW_W: number;
 export const MIN_WINDOW_H: number;
@@ -94,6 +109,9 @@ export function createState(): WindowStateModel;
 export function reindex(state: WindowStateModel): WindowStateModel;
 export function byId(state: WindowStateModel, id: WindowId): Window | null;
 export function windowsOfApp(state: WindowStateModel, appId: AppId): WindowId[];
+export function tabGroupOfWindow(state: WindowStateModel, id: WindowId): TabGroup | null;
+export function windowsOfTabGroup(state: WindowStateModel, groupId: string): WindowId[];
+export function activeTabGroupWindow(state: WindowStateModel, groupId: string): Window | null;
 export function visibleWindows(state: WindowStateModel): WindowId[];
 export function focusedWindow(state: WindowStateModel): Window | null;
 export function actionableId(state: WindowStateModel): WindowId | null;
@@ -104,7 +122,7 @@ export function aboveWindows(
   id: WindowId,
 ): { id: WindowId; x: number; y: number; width: number; height: number }[];
 export function invariants(state: WindowStateModel): string[];
-export function toPersisted(state: WindowStateModel): { v: number; windows: unknown[] };
+export function toPersisted(state: WindowStateModel): { v: number; windows: unknown[]; tabGroups: Record<string, TabGroup> };
 export function fromPersisted(raw: unknown, clampAreas?: Area[]): WindowStateModel;
 export function isPersistable(raw: unknown): boolean;
 export function clamp(v: number, lo: number, hi: number): number;
@@ -133,6 +151,9 @@ declare const domain: {
   reindex: typeof reindex;
   byId: typeof byId;
   windowsOfApp: typeof windowsOfApp;
+  tabGroupOfWindow: typeof tabGroupOfWindow;
+  windowsOfTabGroup: typeof windowsOfTabGroup;
+  activeTabGroupWindow: typeof activeTabGroupWindow;
   visibleWindows: typeof visibleWindows;
   focusedWindow: typeof focusedWindow;
   actionableId: typeof actionableId;

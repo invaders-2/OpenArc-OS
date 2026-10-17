@@ -29,6 +29,8 @@ export function deserialize(raw: unknown, areas?: Area[]): WindowStateModel;
 /** `reserves`：浏览器窗口 chrome 之下、网页之上的 DOM 条带高度（windowId → pt）。 */
 export function nativeIntents(state: WindowStateModel, host?: Host, reserves?: Record<string, number>): NativeIntent[];
 export const WINDOW_COMMANDS: readonly string[];
+/** task-21：标签组命令（独立于冻结的 9 条 Window Command）。 */
+export const TAB_GROUP_COMMANDS: readonly string[];
 export const BROWSER_COMMANDS: readonly string[];
 export const SYSTEM_MUTATIONS: readonly string[];
 export const REDUCERS: Record<string, (state: WindowStateModel, command: unknown) => WindowStateModel>;
@@ -45,6 +47,7 @@ declare const manager: {
   deserialize: typeof deserialize;
   nativeIntents: typeof nativeIntents;
   WINDOW_COMMANDS: typeof WINDOW_COMMANDS;
+  TAB_GROUP_COMMANDS: typeof TAB_GROUP_COMMANDS;
   BROWSER_COMMANDS: typeof BROWSER_COMMANDS;
   SYSTEM_MUTATIONS: typeof SYSTEM_MUTATIONS;
   REDUCERS: typeof REDUCERS;

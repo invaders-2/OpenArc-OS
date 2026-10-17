@@ -200,13 +200,16 @@ function createWindow(spec, index = 0) {
     visible: state !== WSTATE.MINIMIZED,
     // 多显示器归属。本轮单屏，null = 主屏；字段先落位，D2-03 之后才有非 null 值。
     displayId: spec.displayId ?? null,
+    // task-21：标签组。null = 独立窗口；tabRestore 保存合并前的几何/状态，拆分时恢复。
+    tabGroupId: typeof spec.tabGroupId === "string" && spec.tabGroupId ? spec.tabGroupId : null,
+    tabRestore: spec.tabRestore && typeof spec.tabRestore === "object" ? spec.tabRestore : null,
     z: index,
   };
 }
 
-/** 初始（空）状态。 */
+/** 初始（空）状态。tabGroups: groupId → { id, appId, activeWindowId, createdAt }。 */
 function createState() {
-  return { windows: [], order: [], focused: null, seq: 0 };
+  return { windows: [], order: [], focused: null, seq: 0, tabGroups: {} };
 }
 
 /**
@@ -254,15 +257,20 @@ function reindex(state) {
   // order 下标 → z。**只在窗口的 z 真的变了时才换对象**，
   // 让"没动过的窗口保持同一引用"这个性质继续成立（下面第 3 条的判据依赖它）。
   const zOf = new Map(order.map((id, i) => [id, i]));
+  const tabGroups = state.tabGroups && typeof state.tabGroups === "object" ? state.tabGroups : {};
   const windows = state.windows.map((w) => {
     const z = zOf.get(w.id);
-    const visible = w.state !== WSTATE.MINIMIZED;
+    const group = w.tabGroupId ? tabGroups[w.tabGroupId] : null;
+    // task-21：标签组只有 active 成员可见（最小化优先）；组缺失时 fail open，交给 invariants 报错。
+    const visible = w.state !== WSTATE.MINIMIZED && (!w.tabGroupId || !group || group.activeWindowId === w.id);
     return w.z === z && w.visible === visible ? w : { ...w, z, visible };
   });
-  const focused =
-    state.focused && byId.has(state.focused) && byId.get(state.focused).state !== WSTATE.MINIMIZED
-      ? state.focused
-      : null;
+  const focusedWindow = state.focused ? byId.get(state.focused) : null;
+  const focusedGroup = focusedWindow && focusedWindow.tabGroupId ? tabGroups[focusedWindow.tabGroupId] : null;
+  const focusedVisible = !!focusedWindow
+    && focusedWindow.state !== WSTATE.MINIMIZED
+    && (!focusedWindow.tabGroupId || !focusedGroup || focusedGroup.activeWindowId === focusedWindow.id);
+  const focused = focusedVisible ? state.focused : null;
 
   // 无变化时返回**原对象**。
   //
@@ -290,9 +298,33 @@ const byId = (state, id) => state.windows.find((w) => w.id === id) || null;
 const windowsOfApp = (state, appId) =>
   state.order.filter((id) => byId(state, id)?.appId === appId);
 
-/** 自底向上、未最小化的窗口 id。 */
+/** task-21：窗口所属标签组（无组/组失效返回 null）。 */
+const tabGroupOfWindow = (state, id) => {
+  const w = byId(state, id);
+  if (!w || !w.tabGroupId) return null;
+  const group = state.tabGroups && state.tabGroups[w.tabGroupId];
+  return group && group.id === w.tabGroupId ? group : null;
+};
+
+/** task-21：标签组成员 id（按 order 自底向上；不含已删除窗口）。 */
+const windowsOfTabGroup = (state, groupId) =>
+  state.order.filter((id) => {
+    const w = byId(state, id);
+    return w && w.tabGroupId === groupId;
+  });
+
+/** task-21：当前 active 的标签组成员窗口。 */
+const activeTabGroupWindow = (state, groupId) => {
+  const group = state.tabGroups && state.tabGroups[groupId];
+  return group && group.activeWindowId ? byId(state, group.activeWindowId) : null;
+};
+
+/** 自底向上、未最小化且未被标签组隐藏的窗口 id。 */
 const visibleWindows = (state) =>
-  state.order.filter((id) => byId(state, id)?.state !== WSTATE.MINIMIZED);
+  state.order.filter((id) => {
+    const w = byId(state, id);
+    return !!w && w.state !== WSTATE.MINIMIZED && w.visible !== false;
+  });
 
 /** 当前聚焦窗口对象（无则 null）。 */
 function focusedWindow(state) {
@@ -335,7 +367,10 @@ function invariants(state) {
     const i = state.order.indexOf(w.id);
     if (i < 0) bad.push(`window ${w.id} 不在 order 中`);
     else if (w.z !== i) bad.push(`window ${w.id} 的 z=${w.z} 与 order 下标 ${i} 不一致`);
-    if (w.visible !== (w.state !== WSTATE.MINIMIZED)) bad.push(`window ${w.id} 的 visible 与 state 不一致`);
+    const group = w.tabGroupId ? (state.tabGroups && state.tabGroups[w.tabGroupId]) : null;
+    const expectVisible = w.state !== WSTATE.MINIMIZED && (!w.tabGroupId || !group || group.activeWindowId === w.id);
+    if (w.visible !== expectVisible) bad.push(`window ${w.id} 的 visible 与 state/标签组不一致`);
+    if (w.tabGroupId && !group) bad.push(`window ${w.id} 引用了不存在的标签组 ${w.tabGroupId}`);
     if (w.bounds.w < w.minSize.w || w.bounds.h < w.minSize.h)
       bad.push(`window ${w.id} 小于最小尺寸`);
     if (w.kind === KIND.BROWSER) {
@@ -352,10 +387,27 @@ function invariants(state) {
     }
     if (w.state === WSTATE.MAXIMIZED && !w.restore) bad.push(`window ${w.id} 最大化但没有 restore`);
   }
+  // task-21：标签组结构性不变量。
+  const groups = state.tabGroups && typeof state.tabGroups === "object" ? state.tabGroups : {};
+  for (const [groupId, group] of Object.entries(groups)) {
+    if (!group || typeof group !== "object") { bad.push("标签组 " + groupId + " 不是对象"); continue; }
+    if (group.id !== groupId) bad.push("标签组 " + groupId + " 的 id 不一致");
+    const members = windowsOfTabGroup(state, groupId);
+    if (members.length < 2) bad.push("标签组 " + groupId + " 成员少于 2");
+    const appIds = new Set(members.map((id) => byId(state, id).appId));
+    if (appIds.size > 1) bad.push("标签组 " + groupId + " 混入不同 App");
+    if (group.appId && !appIds.has(group.appId)) bad.push("标签组 " + groupId + " 的 appId 与成员不一致");
+    if (!group.activeWindowId || !members.includes(group.activeWindowId)) bad.push("标签组 " + groupId + " 的 activeWindowId 不在成员内");
+    if (!Number.isInteger(group.createdAt)) bad.push("标签组 " + groupId + " 缺少 createdAt");
+  }
+  for (const groupId of Object.keys(groups)) {
+    if (windowsOfTabGroup(state, groupId).length === 0) bad.push("标签组 " + groupId + " 没有成员");
+  }
   if (state.focused) {
     const f = byId(state, state.focused);
     if (!f) bad.push("focused 指向不存在的窗口");
     else if (f.state === WSTATE.MINIMIZED) bad.push("focused 指向已最小化的窗口");
+    else if (!f.visible) bad.push("focused 指向标签组非 active 窗口");
   }
   return bad;
 }
@@ -386,7 +438,10 @@ function toPersisted(state) {
       minSize: { ...w.minSize },
       meta: { ...w.meta },
       displayId: w.displayId,
+      tabGroupId: w.tabGroupId || null,
+      tabRestore: w.tabRestore ? { ...w.tabRestore, bounds: w.tabRestore.bounds ? { ...w.tabRestore.bounds } : null } : null,
     })),
+    tabGroups: Object.fromEntries(Object.entries(state.tabGroups || {}).map(([id, group]) => [id, { ...group }])),
   };
 }
 
@@ -420,10 +475,43 @@ function fromPersisted(raw, clampAreas) {
           minSize: item.minSize,
           meta: item.meta,
           displayId: item.displayId,
+          tabGroupId: item.tabGroupId,
+          tabRestore: item.tabRestore,
         },
         restored.length,
       ),
     );
+  }
+
+  // task-21：恢复标签组。坏组 / 成员不足 / 跨 App / active 失效一律降级为"拆组"，
+  // 绝不因为一份坏持久化让整窗系统打不开。
+  const rawGroups = raw && typeof raw.tabGroups === "object" && !Array.isArray(raw.tabGroups) ? raw.tabGroups : {};
+  const groups = {};
+  for (const [groupId, rawGroup] of Object.entries(rawGroups)) {
+    if (!rawGroup || typeof rawGroup !== "object") continue;
+    const members = restored.filter((w) => w.tabGroupId === groupId);
+    if (members.length < 2) continue;
+    const appIds = new Set(members.map((w) => w.appId));
+    if (appIds.size > 1) continue;
+    const active = members.find((w) => w.id === rawGroup.activeWindowId) || members[0];
+    groups[groupId] = {
+      id: groupId,
+      appId: members[0].appId,
+      activeWindowId: active.id,
+      createdAt: Number.isInteger(rawGroup.createdAt) ? rawGroup.createdAt : 0,
+    };
+  }
+  for (const w of restored) {
+    if (!w.tabGroupId) continue;
+    if (!groups[w.tabGroupId]) {
+      w.tabGroupId = null;
+      w.tabRestore = null;
+    } else {
+      // 组成员几何必须继承 active；恢复时以 active 的 bounds 为准。
+      const group = groups[w.tabGroupId];
+      const active = restored.find((x) => x.id === group.activeWindowId);
+      if (active) w.bounds = { ...active.bounds };
+    }
   }
   if (clampAreas && clampAreas.length && restored.length) {
     // A05：恢复时必须重新收拢到当前可见工作区。
@@ -442,8 +530,20 @@ function fromPersisted(raw, clampAreas) {
       if (w.restore) w.restore = normalizeBounds({ x: s.x, y: s.y, w: s.w, h: s.h }, w.restore);
     });
   }
+  // 收拢后重新同步组几何：组成员必须继承 active 的最终 bounds（clamp 可能改变 active）。
+  for (const group of Object.values(groups)) {
+    const active = restored.find((w) => w.id === group.activeWindowId);
+    if (!active) continue;
+    for (const w of restored) if (w.tabGroupId === group.id) w.bounds = { ...active.bounds };
+  }
+  for (const w of restored) {
+    if (w.tabRestore && w.tabRestore.bounds) {
+      w.tabRestore = { ...w.tabRestore, bounds: normalizeBounds(w.tabRestore.bounds, w.bounds) };
+    }
+  }
   state.windows = restored;
   state.order = restored.map((w) => w.id);
+  state.tabGroups = groups;
   // 恢复后不假设焦点：让用户或首个命令决定谁在前。
   state.focused = null;
   return reindex(state);
@@ -478,6 +578,9 @@ module.exports = {
   reindex,
   byId,
   windowsOfApp,
+  tabGroupOfWindow,
+  windowsOfTabGroup,
+  activeTabGroupWindow,
   visibleWindows,
   focusedWindow,
   actionableId,

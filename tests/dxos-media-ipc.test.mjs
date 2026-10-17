@@ -198,5 +198,5 @@ test("bootstrap：dispose 移除 handler，可重复注册", async () => {
   // 重复注册不抛
   registerMediaIpc({ ipcMain, bundle: fx.bundle, isTrusted: trustedGate, identity: fx.identity });
   assert.equal(ipcMain.handlers.has("media:command"), true);
-  assert.equal(mediaDomain.listMediaCommands().length, 55); // 10-16 +3；task-9 +2 成片导出
+  assert.equal(mediaDomain.listMediaCommands().length, 58); // task-20 +3 多轨/粗剪
 });

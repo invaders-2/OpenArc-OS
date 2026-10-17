@@ -1,4 +1,51 @@
 /**
+ * task-20 · Agent 粗剪的模型适配器（可注入脚本的等价替代）：
+ * providerStore.firstUsableProvider("llm") 选一个已启用语言模型，要求它只输出 JSON 时间线。
+ * 未注入 providerStore / modelGateway 即返回 null（命令侧结构化 MEDIA_DEPENDENCY_UNAVAILABLE）。
+ */
+function createRoughCutModelAdapter({ providerStore = null, modelGateway = null, timeoutMs = 60000 } = {}) {
+  if (!providerStore || typeof providerStore.firstUsableProvider !== "function") return null;
+  if (!modelGateway || typeof modelGateway.callChat !== "function") return null;
+  function parseTimeline(text) {
+    let raw = String(text || "").trim();
+    if (raw.startsWith("```")) raw = raw.replace(/^```[a-z]*s*/i, "").replace(/```s*$/, "");
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start < 0 || end <= start) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "模型没有返回 JSON 时间线");
+    let parsed;
+    try { parsed = JSON.parse(raw.slice(start, end + 1)); } catch { throw createMediaError(MEDIA_ERR_INVALID_INPUT, "模型返回的时间线不是合法 JSON"); }
+    const timeline = parsed && typeof parsed === "object" && parsed.timeline ? parsed.timeline : parsed;
+    if (!timeline || typeof timeline !== "object" || !Array.isArray(timeline.tracks)) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "模型返回的时间线缺少 tracks");
+    return timeline;
+  }
+  return async function roughCutWithModel(input) {
+    const provider = providerStore.firstUsableProvider("llm");
+    if (!provider) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "请先在「系统设置 › 模型与服务商」配置并启用一个语言模型，再使用 Agent 粗剪。");
+    const entry = Array.isArray(provider.models) ? provider.models.find((item) => item && Array.isArray(item.caps) && item.caps.includes("llm")) : null;
+    const model = entry && entry.model;
+    if (!model) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "当前语言模型站点没有可用模型。");
+    const assetLines = (input.assets || []).map((asset) => ({
+      id: asset.id, name: asset.name, kind: asset.kind,
+      durationMs: asset.durationMs || null, hasAudio: asset.hasAudio === true, hasVideo: asset.hasVideo === true,
+    }));
+    const prompt = [
+      "你是视频剪辑助手。请把素材粗剪成多轨时间线，只输出 JSON（不要解释）。",
+      "输出结构：{\"tracks\":[{\"id\":\"tv\",\"type\":\"video\",\"name\":\"主视频\",\"order\":0,\"clips\":[...]}]}",
+      "clip 字段：id, trackId, assetId, name, timelineStartMs, durationMs, sourceInMs, sourceOutMs, volume, 可选 transitionIn:{type:\"fade\"|\"dissolve\",durationMs}。",
+      "轨道 type 只能是 video / voice / music / subtitle / graphics；assetId 必须来自提供的素材；总时长不能超过目标时长。",
+      "目标时长：" + (input.durationMs || "未指定") + "ms；画布：" + JSON.stringify(input.canvas || {}),
+      "用户指令：" + String(input.instruction || ""),
+      "可用素材：" + JSON.stringify(assetLines),
+    ].join("\n");
+    const response = await modelGateway.callChat(
+      { id: provider.id, base_url: provider.base_url, api_key: provider.api_key, protocol: provider.protocol },
+      model, { prompt }, { temperature: 0.3, max_tokens: 4000 }, timeoutMs,
+    );
+    return { provider: "model", timeline: parseTimeline(response && response.text) };
+  };
+}
+
+/**
  * B5a · 媒体域装配 + media:command 分发（唯一执行入口）。
  *
  * 装配真实模块（不 mock、不新增依赖）：
@@ -413,6 +460,12 @@ function createMediaBundle(options = {}) {
   const resourceRegistrar = options.resourceRegistrar || null;
   // 导出到访达：只把最终绝对路径交给主进程的 shell.showItemInFolder，绝不回渲染层。
   const revealExport = typeof options.revealExport === "function" ? options.revealExport : null;
+  // task-20：Agent 粗剪入口。优先注入脚本；未注入但有 providerStore + modelGateway 时走语言模型适配器；
+  // 两者都没有即结构化 MEDIA_DEPENDENCY_UNAVAILABLE。
+  const roughCutTimeoutMs = Number.isFinite(options.roughCutTimeoutMs) ? Math.max(100, options.roughCutTimeoutMs) : 60000;
+  const roughCut = typeof options.roughCut === "function"
+    ? options.roughCut
+    : createRoughCutModelAdapter({ providerStore: options.providerStore || null, modelGateway: options.modelGateway || null, timeoutMs: roughCutTimeoutMs });
   const runner = options.runner && typeof options.runner.start === "function" ? options.runner : createSupervisedRunner({ clock: clock });
   const workerEntry = options.workerEntry || path.join(__dirname, "video-render-worker.cjs");
   const leaseMs = Number.isFinite(options.leaseMs) ? Math.max(1000, options.leaseMs) : DEFAULT_LEASE_MS;
@@ -860,6 +913,128 @@ function createMediaBundle(options = {}) {
     return mediaStore.ensureVideoProject({ id: projectId, ownerId: userId, name: requireStr(payload.projectName, 120) || undefined });
   }
 
+  // -------------------------------------------------------------------------
+  // task-20：多轨时间线预览 / 渲染计划 / Agent 粗剪
+  // -------------------------------------------------------------------------
+
+  function safeTimelineProjection(timeline) {
+    const source = timeline && typeof timeline === "object" ? timeline : {};
+    const tracks = (Array.isArray(source.tracks) ? source.tracks : []).map((track) => ({
+      id: track.id, type: track.type, name: track.name, order: track.order,
+      locked: track.locked === true, muted: track.muted === true, hidden: track.hidden === true,
+      clips: (Array.isArray(track.clips) ? track.clips : []).map((clip) => ({
+        id: clip.id, trackId: clip.trackId, assetId: clip.assetId, name: clip.name,
+        timelineStartMs: clip.timelineStartMs, durationMs: clip.durationMs,
+        sourceInMs: clip.sourceInMs, sourceOutMs: clip.sourceOutMs,
+        volume: Number.isFinite(clip.volume) ? clip.volume : 1,
+        transform: clip.transform && typeof clip.transform === "object" ? clip.transform : {},
+        transitionIn: mediaDomain.normalizeTransition(clip.transitionIn),
+      })),
+    }));
+    const transitions = (Array.isArray(source.transitions) ? source.transitions : []).map((transition) => ({
+      fromClipId: transition.fromClipId, toClipId: transition.toClipId, type: transition.type, durationMs: transition.durationMs,
+    }));
+    return {
+      schemaVersion: source.schemaVersion, projectId: source.projectId, version: source.version,
+      timebase: source.timebase, canvas: source.canvas ? { width: source.canvas.width, height: source.canvas.height, fps: source.canvas.fps } : null,
+      durationMs: source.durationMs, outputProfileId: source.outputProfileId || null, updatedAt: source.updatedAt || null,
+      tracks, transitions,
+    };
+  }
+
+  function safePlanProjection(plan) {
+    return {
+      schemaVersion: plan.schemaVersion,
+      timelineVersion: plan.timelineVersion,
+      durationMs: plan.durationMs,
+      durationAligned: plan.durationAligned === true,
+      canvas: { ...plan.canvas },
+      outputProfileId: plan.outputProfileId || null,
+      inputs: (plan.inputs || []).map((input) => ({
+        index: input.index, clipId: input.clipId, assetId: input.assetId, kind: input.kind, trackType: input.trackType,
+        timelineStartMs: input.timelineStartMs, durationMs: input.durationMs, sourceInMs: input.sourceInMs, sourceOutMs: input.sourceOutMs,
+        volume: input.volume, transition: input.transition || null,
+      })),
+    };
+  }
+
+  function deadline(ms, work) {
+    if (!Number.isFinite(ms) || ms <= 0) return work();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(createMediaError(mediaDomain.MEDIA_ERR_TIMEOUT, "粗剪适配器超时")), Math.max(1, Math.round(ms)));
+      Promise.resolve().then(work).then((value) => { clearTimeout(timer); resolve(value); }, (error) => { clearTimeout(timer); reject(error); });
+    });
+  }
+
+  async function roughCutTimeline(payload, context) {
+    const userId = context.userId;
+    const projectId = requireStr(payload.projectId, 80);
+    if (!projectId) throw createMediaError(mediaDomain.MEDIA_ERR_INVALID_INPUT, "projectId 必填");
+    mediaStore.ensureOwnedProject(projectId, userId);
+    const instruction = requireStr(payload.instruction != null ? payload.instruction : payload.prompt, 4000);
+    if (!instruction) throw createMediaError(mediaDomain.MEDIA_ERR_INVALID_INPUT, "粗剪需要 instruction");
+    if (!roughCut) {
+      throw createMediaError(mediaDomain.MEDIA_ERR_DEPENDENCY_UNAVAILABLE, "Agent 粗剪未装配（可注入脚本或模型适配器）", { dependency: "roughCut" });
+    }
+    const assets = mediaStore.listVideoAssetRows(projectId, userId).map(mediaStore.videoAssetView);
+    const assetView = assets.map((asset) => ({
+      id: asset.id, name: asset.name, kind: asset.kind, durationMs: asset.durationMs,
+      width: asset.width, height: asset.height, hasAudio: asset.hasAudio, hasVideo: asset.hasVideo,
+    }));
+    const canvasInput = payload.canvas && typeof payload.canvas === "object" ? payload.canvas : {};
+    const canvasWidth = Number(canvasInput.width);
+    const canvasHeight = Number(canvasInput.height);
+    const canvasFps = Number(canvasInput.fps);
+    const canvas = {
+      width: Number.isInteger(canvasWidth) && canvasWidth > 0 ? canvasWidth : 1920,
+      height: Number.isInteger(canvasHeight) && canvasHeight > 0 ? canvasHeight : 1080,
+      fps: Number.isFinite(canvasFps) && canvasFps > 0 && canvasFps <= 120 ? canvasFps : 30,
+    };
+    const targetDurationMs = Number.isInteger(Number(payload.durationMs)) && Number(payload.durationMs) > 0 ? Number(payload.durationMs) : null;
+    let produced;
+    try {
+      produced = await deadline(roughCutTimeoutMs, () => roughCut({
+        context,
+        projectId, instruction, assets: assetView, durationMs: targetDurationMs, canvas, mode: "rough-cut",
+      }));
+    } catch (error) {
+      if (error && typeof error.code === "string" && error.code.startsWith("MEDIA_")) throw error;
+      throw createMediaError(mediaDomain.MEDIA_ERR_INTERNAL, "粗剪适配器失败：" + String((error && error.message) || error).slice(0, 200), { dependency: "roughCut" });
+    }
+    const candidate = produced && typeof produced === "object" && produced.timeline ? produced.timeline : produced;
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+      throw createMediaError(mediaDomain.MEDIA_ERR_INVALID_INPUT, "粗剪适配器没有返回时间线");
+    }
+    let timeline = {
+      ...candidate,
+      schemaVersion: candidate.schemaVersion || mediaDomain.MEDIA_TIMELINE_SCHEMA_VERSION,
+      projectId,
+      version: Number.isInteger(candidate.version) ? candidate.version : 1,
+      timebase: 1000,
+      canvas: candidate.canvas && typeof candidate.canvas === "object" ? candidate.canvas : canvas,
+      durationMs: Number.isInteger(candidate.durationMs) && candidate.durationMs >= 0 ? candidate.durationMs : (targetDurationMs || 0),
+      tracks: Array.isArray(candidate.tracks) ? candidate.tracks : [],
+    };
+    timeline = mediaDomain.alignTimelineDuration(timeline).timeline;
+    const issues = mediaDomain.validateTimeline(timeline, assets);
+    const errors = issues.filter((entry) => entry.severity === "error");
+    if (errors.length) {
+      throw createMediaError(mediaDomain.MEDIA_ERR_INVALID_INPUT, "粗剪时间线校验失败：" + errors.map((entry) => entry.code).join(", "), { issues: errors.map((entry) => ({ code: entry.code, message: entry.message })) });
+    }
+    const hasVisualClip = timeline.tracks.some((track) => (track.type === "video" || track.type === "graphics")
+      && Array.isArray(track.clips) && track.clips.some((clip) => clip && clip.assetId));
+    if (!hasVisualClip) throw createMediaError(mediaDomain.MEDIA_ERR_INVALID_INPUT, "粗剪时间线没有可视片段（video / graphics 轨道为空）");
+    return {
+      mode: "rough-cut",
+      timeline: safeTimelineProjection(timeline),
+      durationMs: timeline.durationMs,
+      aligned: true,
+      issues,
+      assetCount: assets.length,
+      adapter: produced && typeof produced === "object" && typeof produced.provider === "string" ? produced.provider.slice(0, 80) : null,
+    };
+  }
+
   async function dispatch(command, payload, context) {
     const userId = context.userId;
     switch (command) {
@@ -890,6 +1065,7 @@ function createMediaBundle(options = {}) {
         if (!id) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "assetId 必填");
         return { deleted: mediaStore.deleteVideoAsset(id, userId) };
       }
+      case "media/rough-cut": return await roughCutTimeline(payload, context);
 
       // ---------------- 探测 / 封面 ----------------
       case "media/probe": {
@@ -965,6 +1141,33 @@ function createMediaBundle(options = {}) {
       case "media/render/recover": {
         return { recovered: mediaStore.recoverExpiredVideoJobs() };
       }
+      case "media/timeline/validate": {
+        const projectId = requireStr(payload.projectId, 80);
+        if (!projectId) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "projectId 必填");
+        if (!payload.timeline || typeof payload.timeline !== "object") throw createMediaError(MEDIA_ERR_INVALID_INPUT, "timeline 必填");
+        const checked = mediaStore.validateVideoTimeline({ projectId, ownerId: userId, timeline: payload.timeline });
+        return {
+          timeline: safeTimelineProjection(checked.timeline),
+          durationMs: checked.timeline.durationMs,
+          changed: checked.changed,
+          issues: checked.issues,
+          assetCount: checked.assetCount,
+        };
+      }
+      case "media/render/plan": {
+        const projectId = requireStr(payload.projectId, 80);
+        if (!projectId) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "projectId 必填");
+        if (!payload.timeline || typeof payload.timeline !== "object") throw createMediaError(MEDIA_ERR_INVALID_INPUT, "timeline 必填");
+        const compiled = mediaStore.compileVideoTimelinePlan({ projectId, ownerId: userId, timeline: payload.timeline });
+        return {
+          plan: safePlanProjection(compiled.plan),
+          timeline: safeTimelineProjection(compiled.timeline),
+          durationMs: compiled.plan.durationMs,
+          durationAligned: compiled.changed === true || compiled.plan.durationAligned === true,
+          issues: compiled.issues,
+          inputCount: compiled.plan.inputs.length,
+        };
+      }
       case "media/render/export": {
         // 渲染成片导出：显式 jobId 优先；未给时按 projectId 取最近一条已完成。
         return await exportCompletedRender({ payload, context });
@@ -992,6 +1195,7 @@ function createMediaBundle(options = {}) {
           // 键名避开 isSecretKey 的子串（dxos-foundation-mask.cjs:12）
           ffmpegBinary: !!ffmpeg,
           ffprobeBinary: !!ffprobe,
+          roughCut: !!roughCut,
         }, extensionDependencies);
         const ok = dependencies.database && dependencies.mediaDirectory && workerReachable && dependencies.ffmpegBinary && dependencies.ffprobeBinary;
         // B5f：每条 false 的注入项都给出为空原因（dependencyNotes 与 dependencies 同源）。

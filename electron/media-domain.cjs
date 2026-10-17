@@ -86,6 +86,9 @@ const MEDIA_COMMANDS = Object.freeze({
   "media/poster/invalidate": { risk: "manage", credential: false, summary: "失效某个视频的封面缓存（下次请求重新生成）" },
 
   // ---- 渲染作业（受监督子进程 + 租约） ----
+  "media/timeline/validate": { risk: "read", credential: false, summary: "校验多轨时间线并做时长对齐（视频/音频/字幕轨、片段入出点、转场）" },
+  "media/render/plan": { risk: "read", credential: false, summary: "编译多轨渲染计划预览（输入/轨道/转场/对齐后时长，不含磁盘路径）" },
+  "media/rough-cut": { risk: "use", credential: false, summary: "Agent 粗剪入口：把指令 + 素材交给注入的脚本/模型适配器生成多轨时间线（缺依赖结构化不可用）" },
   "media/render/submit": { risk: "manage", credential: false, summary: "提交视频渲染任务（编译渲染计划，入队等待执行）" },
   "media/render/get": { risk: "read", credential: false, summary: "查询单个渲染任务的状态 / 进度 / 结构化错误" },
   "media/render/list": { risk: "read", credential: false, summary: "列出渲染任务（按项目 / 状态过滤）" },
@@ -247,6 +250,42 @@ function issue(severity, code, message, extra) {
   return Object.assign({ severity, code, message }, extra || {});
 }
 
+// task-20：转场（视频 fade/dissolve；音频 fade）与时长对齐。
+const MEDIA_TRANSITION_TYPES = Object.freeze(["none", "fade", "dissolve"]);
+const MAX_TRANSITION_MS = 5000;
+
+/** 规整一个 transitionIn 描述；非法返回 null（由 validateTimeline 报 issue，不在这里抛）。 */
+function normalizeTransition(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const type = typeof value.type === "string" ? value.type : "none";
+  if (!MEDIA_TRANSITION_TYPES.includes(type)) return null;
+  const durationMs = Number(value.durationMs);
+  if (!Number.isInteger(durationMs) || durationMs < 0 || durationMs > MAX_TRANSITION_MS) return null;
+  if (type === "none") return { type: "none", durationMs: 0 };
+  if (durationMs <= 0) return null;
+  return { type, durationMs };
+}
+
+/**
+ * 时长对齐（task-20）：把 timeline.durationMs 抬到所有片段的最大结束时间；
+ * 不裁剪片段、不移动片段。显式 duration 比所有片段更长时保留（黑场尾巴）。
+ */
+function alignTimelineDuration(timeline) {
+  if (!timeline || typeof timeline !== "object" || Array.isArray(timeline)) return { timeline, changed: false, maxEndMs: 0, declaredMs: 0 };
+  const declared = Number.isInteger(timeline.durationMs) && timeline.durationMs >= 0 ? timeline.durationMs : 0;
+  let maxEnd = 0;
+  for (const track of Array.isArray(timeline.tracks) ? timeline.tracks : []) {
+    for (const clip of Array.isArray(track && track.clips) ? track.clips : []) {
+      if (!clip || !Number.isInteger(clip.timelineStartMs) || !Number.isInteger(clip.durationMs)) continue;
+      if (clip.timelineStartMs < 0 || clip.durationMs <= 0) continue;
+      maxEnd = Math.max(maxEnd, clip.timelineStartMs + clip.durationMs);
+    }
+  }
+  const aligned = Math.max(declared, maxEnd);
+  if (aligned === timeline.durationMs) return { timeline, changed: false, maxEndMs: maxEnd, declaredMs: declared };
+  return { timeline: { ...timeline, durationMs: aligned }, changed: true, maxEndMs: maxEnd, declaredMs: declared };
+}
+
 /**
  * 源 validateTimeline(timeline) —— 逐条移植。
  * 与源唯一区别：入口先做形状防御（源假定调用方给的是合法对象；IPC 载荷来自渲染层，
@@ -266,6 +305,7 @@ function validateTimeline(timeline, assets) {
   const assetIds = new Set(assetMap.keys());
   const trackIds = new Set();
   const clipIds = new Set();
+  const clipById = new Map();
 
   if (timeline.schemaVersion !== MEDIA_TIMELINE_SCHEMA_VERSION) {
     issues.push(issue("error", "schema.unsupported", "不支持的时间线协议：" + String(timeline.schemaVersion)));
@@ -311,6 +351,52 @@ function validateTimeline(timeline, assets) {
       if (previous && previous.timelineStartMs + previous.durationMs > clip.timelineStartMs && track.type !== "graphics") {
         issues.push(issue("warning", "clip.overlap", track.name + "存在重叠片段", { trackId: track.id, clipId: clip.id }));
       }
+      if (clip.transitionIn !== undefined) {
+        const transition = normalizeTransition(clip.transitionIn);
+        if (!transition) {
+          issues.push(issue("error", "clip.transition.invalid", "转场定义无效（type/durationMs）", { trackId: track.id, clipId: clip.id }));
+        } else if (transition.type !== "none") {
+          if (transition.durationMs > (Number.isInteger(clip.durationMs) ? clip.durationMs : 0)) {
+            issues.push(issue("error", "clip.transition.too_long", "转场时长不能超过片段时长", { trackId: track.id, clipId: clip.id }));
+          }
+          const audioTrack = track.type === "voice" || track.type === "music";
+          if (audioTrack && transition.type !== "fade") {
+            issues.push(issue("error", "clip.transition.unsupported", "音频轨只支持 fade 转场", { trackId: track.id, clipId: clip.id }));
+          }
+          if (!audioTrack && track.type !== "video" && track.type !== "graphics") {
+            issues.push(issue("error", "clip.transition.unsupported", "该轨道不支持转场", { trackId: track.id, clipId: clip.id }));
+          }
+        }
+      }
+      if (clip.id != null && !clipById.has(clip.id)) clipById.set(clip.id, { clip, track, previous });
+    }
+  }
+
+  // 顶层 transitions：按 toClipId 归一到进入片段；与 per-clip transitionIn 二选一（顶层优先）。
+  const transitions = [];
+  let transitionSeen = new Set();
+  if (timeline.transitions !== undefined) {
+    if (!Array.isArray(timeline.transitions)) {
+      issues.push(issue("error", "transitions.invalid", "transitions 必须是数组"));
+    } else {
+      for (const raw of timeline.transitions) {
+        if (!raw || typeof raw !== "object") { issues.push(issue("error", "transition.invalid", "转场必须是对象")); continue; }
+        const transition = normalizeTransition(raw);
+        if (!transition || transition.type === "none") { issues.push(issue("error", "transition.invalid", "转场定义无效")); continue; }
+        const from = clipById.get(raw.fromClipId);
+        const to = clipById.get(raw.toClipId);
+        if (!from || !to) { issues.push(issue("error", "transition.clip_missing", "转场引用的片段不存在")); continue; }
+        if (from.track !== to.track) { issues.push(issue("error", "transition.cross_track", "转场两端必须在同一轨道")); continue; }
+        if (!finiteInteger(to.clip.timelineStartMs) || !finiteInteger(from.clip.timelineStartMs) || to.clip.timelineStartMs < from.clip.timelineStartMs) {
+          issues.push(issue("error", "transition.order", "转场进入片段必须在离开片段之后")); continue;
+        }
+        if (transition.durationMs > to.clip.durationMs || (Number.isInteger(from.clip.durationMs) && transition.durationMs > from.clip.durationMs)) {
+          issues.push(issue("error", "transition.too_long", "转场时长不能超过两端片段时长")); continue;
+        }
+        if (transitionSeen.has(to.clip.id)) { issues.push(issue("error", "transition.duplicate", "同一进入片段只能有一个转场")); continue; }
+        transitionSeen.add(to.clip.id);
+        transitions.push({ fromClipId: raw.fromClipId, toClipId: raw.toClipId, type: transition.type, durationMs: transition.durationMs });
+      }
     }
   }
   return issues;
@@ -351,13 +437,21 @@ function escapeSubtitlePath(path) {
  * resolveAssetPath(asset) 由调用方给出（服务端从素材表取绝对路径，绝不信任渲染层给的 path）。
  */
 function compileRenderPlan(timeline, assets, resolveAssetPath) {
-  const errors = validateTimeline(timeline, assets).filter((entry) => entry.severity === "error");
+  // task-20：先把时长对齐到片段最大结束时间，再做校验；前端漏算总时长不会导致渲染被误拒。
+  const aligned = alignTimelineDuration(timeline);
+  const normalizedTimeline = aligned.timeline;
+  const errors = validateTimeline(normalizedTimeline, assets).filter((entry) => entry.severity === "error");
   if (errors.length) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "Timeline 校验失败：" + errors.map((entry) => entry.code).join(", "), { issues: errors.map((entry) => ({ code: entry.code, message: entry.message })) });
   if (typeof resolveAssetPath !== "function") throw createMediaError(MEDIA_ERR_INVALID_INPUT, "compileRenderPlan 需要 resolveAssetPath");
   const assetMap = new Map((Array.isArray(assets) ? assets : []).map((asset) => [asset.id, asset]));
+  const transitionByToClip = new Map();
+  for (const raw of Array.isArray(normalizedTimeline.transitions) ? normalizedTimeline.transitions : []) {
+    const transition = normalizeTransition(raw);
+    if (transition && transition.type !== "none" && raw && raw.toClipId != null) transitionByToClip.set(raw.toClipId, transition);
+  }
   const inputs = [];
   const supportedTracks = new Set(["video", "voice", "music", "subtitle", "graphics"]);
-  for (const track of [...timeline.tracks].sort((a, b) => a.order - b.order)) {
+  for (const track of [...normalizedTimeline.tracks].sort((a, b) => a.order - b.order)) {
     if (!supportedTracks.has(track.type) || track.hidden || (track.muted && (track.type === "voice" || track.type === "music"))) continue;
     for (const clip of [...(Array.isArray(track.clips) ? track.clips : [])].sort((a, b) => a.timelineStartMs - b.timelineStartMs)) {
       if (!clip.assetId) continue;
@@ -365,6 +459,8 @@ function compileRenderPlan(timeline, assets, resolveAssetPath) {
       if (!asset) throw createMediaError(MEDIA_ERR_NOT_FOUND, "缺少素材：" + clip.assetId);
       if (!clipAllowedOnTrack(clip, track.type, asset.kind)) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "素材 " + asset.name + " 与轨道 " + track.name + " 不兼容");
       if ((track.type === "voice" || track.type === "music") && asset.hasAudio === false) throw createMediaError(MEDIA_ERR_INVALID_INPUT, "素材 " + asset.name + " 不含音轨");
+      const perClipTransition = normalizeTransition(clip.transitionIn);
+      const transition = transitionByToClip.get(clip.id) || (perClipTransition && perClipTransition.type !== "none" ? perClipTransition : null);
       inputs.push({
         index: inputs.length,
         clipId: clip.id,
@@ -377,6 +473,7 @@ function compileRenderPlan(timeline, assets, resolveAssetPath) {
         sourceInMs: clip.sourceInMs,
         sourceOutMs: clip.sourceOutMs,
         volume: Number.isFinite(clip.volume) ? clip.volume : 1,
+        transition: transition ? { type: transition.type, durationMs: transition.durationMs } : null,
       });
     }
   }
@@ -387,10 +484,11 @@ function compileRenderPlan(timeline, assets, resolveAssetPath) {
   }
   return {
     schemaVersion: "1.0",
-    timelineVersion: timeline.version,
-    durationMs: timeline.durationMs,
-    canvas: { width: timeline.canvas.width, height: timeline.canvas.height, fps: timeline.canvas.fps },
-    outputProfileId: timeline.outputProfileId,
+    timelineVersion: normalizedTimeline.version,
+    durationMs: normalizedTimeline.durationMs,
+    durationAligned: aligned.changed,
+    canvas: { width: normalizedTimeline.canvas.width, height: normalizedTimeline.canvas.height, fps: normalizedTimeline.canvas.fps },
+    outputProfileId: normalizedTimeline.outputProfileId,
     inputs,
   };
 }
@@ -415,7 +513,15 @@ function buildFfmpegArgs(plan, outputPath) {
     const prepared = "vprep" + index;
     const overlaid = "vover" + index;
     const trim = input.kind === "image" ? "trim=duration=" + seconds(input.durationMs) : "trim=start=" + seconds(input.sourceInMs) + ":duration=" + seconds(input.durationMs);
-    filters.push("[" + input.index + ":v:0]" + trim + ",setpts=PTS-STARTPTS+" + seconds(input.timelineStartMs) + "/TB,scale=" + width + ":" + height + ":force_original_aspect_ratio=decrease,pad=" + width + ":" + height + ":(ow-iw)/2:(oh-ih)/2:black,fps=" + plan.canvas.fps + "[" + prepared + "]");
+    let chain = trim + ",setpts=PTS-STARTPTS+" + seconds(input.timelineStartMs) + "/TB,scale=" + width + ":" + height + ":force_original_aspect_ratio=decrease,pad=" + width + ":" + height + ":(ow-iw)/2:(oh-ih)/2:black,fps=" + plan.canvas.fps;
+    if (input.transition && input.transition.durationMs > 0) {
+      const startSec = seconds(input.timelineStartMs);
+      const durationSec = seconds(input.transition.durationMs);
+      chain += input.transition.type === "dissolve"
+        ? ",format=yuva420p,fade=t=in:st=" + startSec + ":d=" + durationSec + ":alpha=1"
+        : ",fade=t=in:st=" + startSec + ":d=" + durationSec;
+    }
+    filters.push("[" + input.index + ":v:0]" + chain + "[" + prepared + "]");
     filters.push("[" + videoLabel + "][" + prepared + "]overlay=eof_action=pass:shortest=0[" + overlaid + "]");
     videoLabel = overlaid;
   });
@@ -432,7 +538,11 @@ function buildFfmpegArgs(plan, outputPath) {
   const audioLabels = [];
   audios.forEach((input, index) => {
     const label = "aprep" + index;
-    filters.push("[" + input.index + ":a:0]atrim=start=" + seconds(input.sourceInMs) + ":duration=" + seconds(input.durationMs) + ",asetpts=PTS-STARTPTS,adelay=delays=" + input.timelineStartMs + ":all=1,volume=" + input.volume.toFixed(3) + "[" + label + "]");
+    let audioChain = "[" + input.index + ":a:0]atrim=start=" + seconds(input.sourceInMs) + ":duration=" + seconds(input.durationMs) + ",asetpts=PTS-STARTPTS,adelay=delays=" + input.timelineStartMs + ":all=1,volume=" + input.volume.toFixed(3);
+    if (input.transition && input.transition.durationMs > 0) {
+      audioChain += ",afade=t=in:st=" + seconds(input.timelineStartMs) + ":d=" + seconds(input.transition.durationMs);
+    }
+    filters.push(audioChain + "[" + label + "]");
     audioLabels.push("[" + label + "]");
   });
   if (audioLabels.length) filters.push(audioLabels.join("") + "amix=inputs=" + audioLabels.length + ":duration=longest:normalize=0[aout]");
@@ -516,6 +626,10 @@ module.exports = {
   MEDIA_EVENT_CHANNEL,
   MEDIA_EVENT_DOMAIN,
   MEDIA_TIMELINE_SCHEMA_VERSION,
+  MEDIA_TRANSITION_TYPES,
+  MAX_TRANSITION_MS,
+  normalizeTransition,
+  alignTimelineDuration,
   MEDIA_COMMANDS,
   MEDIA_ERROR_CODES,
   MEDIA_POSTER_SIZES,

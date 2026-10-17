@@ -55,11 +55,11 @@ async function exec(bundle, command, payload = {}) {
 }
 
 // ── ① 命令表一致性 ────────────────────────────────────────────────────────
-test("命令表：共 55 条，risk/summary/needsCredential 合法", () => {
+test("命令表：共 58 条，risk/summary/needsCredential 合法", () => {
   const commands = mediaDomain.listMediaCommands();
   // 10-16：+3 media/short-drama/get / image（只读视图与画面预览）、visual-image（角色 / 场景参考图）
   // task-9：+2 media/render/export / short-drama/export（成片导出到访达 / 资源库）
-  assert.equal(commands.length, 55);
+  assert.equal(commands.length, 58);
   for (const entry of commands) {
     assert.ok(Object.prototype.hasOwnProperty.call(mediaDomain.RISK_LEVELS, entry.risk), "非法 risk：" + entry.command);
     assert.equal(entry.needsCredential, false);
