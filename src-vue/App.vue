@@ -174,7 +174,13 @@ onBeforeUnmount(() => {
 
     <ControlCenter v-if="showDesktop && shell.controlCenterOpen" />
     <Launchpad v-if="showDesktop && shell.searchOpen" />
-    <AppsPopover v-if="showDesktop && shell.appsOpen" />
+    <!-- task-51：应用中心关闭时先淡出再卸载。否则点击 App 的同一帧 popover 立刻消失、
+         新窗口的 appear 才从 0 透明度开始，会露出一帧空桌面（闪屏）。 -->
+    <Transition name="apps-fade">
+      <div v-if="showDesktop && shell.appsOpen" class="apps-layer">
+        <AppsPopover />
+      </div>
+    </Transition>
     <NotificationCenter v-if="showDesktop" />
     <AssistPanel v-if="showDesktop && shell.aiOpen" />
     <QuickLook v-if="showDesktop && shell.quickLookOpen" />
@@ -192,3 +198,20 @@ onBeforeUnmount(() => {
     />
   </div>
 </template>
+
+<style scoped>
+.apps-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 83;
+}
+/* 关闭时的交接：popover 保留一层不透明画面，新窗口在下面完成 appear，避免露出空桌面。
+   减少动态效果时 --dur-quick = 0ms，退化为立即关闭。 */
+.apps-fade-leave-active {
+  transition: opacity var(--dur-quick) var(--ease-standard);
+  pointer-events: none;
+}
+.apps-fade-leave-to {
+  opacity: 0;
+}
+</style>

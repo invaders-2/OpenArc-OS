@@ -752,14 +752,34 @@ class ModelService {
       const proxyError = this.#proxyError();
       return { ok: false, error: probe.error, reachable: probe.reachable !== false, credentialAccepted: probe.credentialAccepted !== false, inference: false, probe: probe.probe || "catalog", ...(proxyError ? { proxyError: proxyError.code } : {}) };
     }
-    const resolved = this.resolveModel({ context, configId, capability: "chat" });
-    if (!resolved.ok) return resolved;
-    const r = await this.chat({ context, configId, messages: [{ role: "user", content: "ping" }], capability: "chat" });
-    if (r.ok) {
-      this.setVerifiedCapabilities({ context, configId, verifiedCapabilities: ["chat"] });
-      return { ok: true, reachable: true, credentialAccepted: true, inference: true };
+    // task-52：不再硬编码 chat。chat 模型做真实对话探针；图像/视频/音频模型只做
+    // endpoint+credential 探针（listModels），返回 inference:false，绝不把"没有 chat 能力"误报成接入失败。
+    const configCaps = probeConfig && Array.isArray(JSON.parse(probeConfig.capabilities || "[]")) ? JSON.parse(probeConfig.capabilities || "[]") : [];
+    const capability = configCaps.includes("chat") ? "chat" : null;
+    if (capability) {
+      const resolved = this.resolveModel({ context, configId, capability: "chat" });
+      if (!resolved.ok) return resolved;
+      const r = await this.chat({ context, configId, messages: [{ role: "user", content: "ping" }], capability: "chat" });
+      if (r.ok) {
+        this.setVerifiedCapabilities({ context, configId, verifiedCapabilities: ["chat"] });
+        return { ok: true, reachable: true, credentialAccepted: true, inference: true };
+      }
+      return { ok: false, error: r.error, reachable: r.error !== domain.ERROR_CODE.PROVIDER_UNAVAILABLE, credentialAccepted: r.error !== domain.ERROR_CODE.AUTH_FAILED, inference: false };
     }
-    return { ok: false, error: r.error, reachable: r.error !== domain.ERROR_CODE.PROVIDER_UNAVAILABLE, credentialAccepted: r.error !== domain.ERROR_CODE.AUTH_FAILED, inference: false };
+    // 非 chat 模型：只验证服务商地址/密钥可用性；能力推断仍需真实生成调用，这里不冒充。
+    if (!probeProvider || !probeConfig) return { ok: false, error: domain.ERROR_CODE.MODEL_CONFIG_UNAVAILABLE };
+    const auth = this.#authorize({ context, action: domain.MODEL_ACTIONS.TEST, config: probeConfig, provider: probeProvider });
+    if (!auth.ok) return auth;
+    if (!probeProvider.credential_ref) return { ok: false, error: domain.ERROR_CODE.CREDENTIAL_MISSING };
+    const cred = this.credentials.resolveInternalSync({ credentialRef: probeProvider.credential_ref });
+    if (!cred.ok) return { ok: false, error: domain.ERROR_CODE.CREDENTIAL_MISSING };
+    if (cred.providerOrigin !== new URL(probeProvider.base_url).origin) return { ok: false, error: domain.ERROR_CODE.ENDPOINT_BLOCKED };
+    const listed = await adapter.adapterFor(probeProvider.adapter_type).listModels({ baseUrl: probeProvider.base_url, apiKey: cred.secret, fetchImpl: this.fetchImpl, timeoutMs: Math.min(this.timeoutMs, 20000) });
+    if (!listed.ok) {
+      const code = listed.kind ? domain.normalizeError({ timeout: listed.kind === "timeout", network: listed.kind === "network" }) : domain.normalizeError({ status: listed.status });
+      return { ok: false, error: code, reachable: listed.kind !== "network", credentialAccepted: listed.status !== 401 && listed.status !== 403, inference: false, capability: configCaps[0] || null, probe: "models" };
+    }
+    return { ok: true, reachable: true, credentialAccepted: true, inference: false, capability: configCaps[0] || null, probe: "models" };
   }
 
   async #record({ requestId, context, snapshot, startedAt, status, errorCode = null, usage = null }) {

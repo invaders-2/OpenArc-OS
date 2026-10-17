@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import DsButton from "../design-system/DsButton.vue";
 import DsDialog from "../design-system/DsDialog.vue";
 import DsSearchField from "../design-system/DsSearchField.vue";
@@ -138,6 +138,73 @@ const direction = ref("desc");
 const filterCollection = ref<string | null>(null);
 const filterTag = ref<string | null>(null);
 const items = ref<Descriptor[]>([]);
+
+/* ── task-50：网格真实缩略图（resource/thumbnail）──────────────────────────
+   只在网格视图、且资源确实是图片时才请求；进入视口才请求（IntersectionObserver），
+   失败/过期回退类型图标；列表视图完全不请求、也不渲染图片。 */
+type ThumbEntry = { state: "idle" | "loading" | "loaded" | "failed"; url?: string; error?: string; requested?: boolean };
+const thumbs = ref<Record<string, ThumbEntry>>({});
+const thumbElements = new WeakMap<Element, Descriptor>();
+const thumbInflight = new Set<string>();
+let thumbObserver: IntersectionObserver | null = null;
+
+function isImageResource(r: Descriptor): boolean {
+  return r.resourceType === "image" || /^image\//i.test(r.mimeType || "");
+}
+function thumbOf(r: Descriptor): ThumbEntry {
+  return thumbs.value[r.resourceRef] || { state: "idle", requested: false };
+}
+function thumbStateOf(r: Descriptor): string {
+  return isImageResource(r) ? thumbOf(r).state : "skipped";
+}
+function thumbUrlOf(r: Descriptor): string {
+  const entry = thumbOf(r);
+  return entry.state === "loaded" && entry.url ? entry.url : "";
+}
+function setThumb(resourceRef: string, entry: ThumbEntry) {
+  thumbs.value = { ...thumbs.value, [resourceRef]: entry };
+}
+async function requestThumb(r: Descriptor) {
+  const resourceRef = r.resourceRef;
+  if (!isImageResource(r) || thumbInflight.has(resourceRef)) return;
+  const current = thumbOf(r);
+  if (current.state === "loaded" || current.state === "failed" || current.state === "loading") return;
+  thumbInflight.add(resourceRef);
+  setThumb(resourceRef, { state: "loading", requested: true });
+  const res = await cmd({ type: "resource/thumbnail", resourceRef });
+  thumbInflight.delete(resourceRef);
+  if (res && res.ok && typeof res.url === "string" && res.url) setThumb(resourceRef, { state: "loaded", url: res.url, requested: true });
+  else setThumb(resourceRef, { state: "failed", requested: true, error: String((res && res.error) || "THUMBNAIL_UNAVAILABLE") });
+}
+function ensureThumbObserver(): IntersectionObserver | null {
+  if (thumbObserver || typeof IntersectionObserver === "undefined") return thumbObserver;
+  thumbObserver = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      const descriptor = thumbElements.get(entry.target);
+      if (descriptor) void requestThumb(descriptor);
+      thumbObserver?.unobserve(entry.target);
+    }
+  }, { rootMargin: "240px 0px" });
+  return thumbObserver;
+}
+/** 模板 ref 回调：列表视图直接跳过（零请求）；网格里状态已定的卡片不再重复观察。 */
+function bindThumb(el: unknown, r: Descriptor) {
+  if (view.value !== "grid") return;
+  if (!el || typeof el !== "object" || !isImageResource(r)) return;
+  const state = thumbOf(r).state;
+  if (state === "loaded" || state === "failed" || state === "loading") return;
+  thumbElements.set(el as Element, r);
+  const observer = ensureThumbObserver();
+  if (observer) observer.observe(el as Element);
+  else void requestThumb(r);
+}
+function markThumbFailed(r: Descriptor) {
+  if (!isImageResource(r)) return;
+  setThumb(r.resourceRef, { state: "failed", requested: true, error: "IMAGE_LOAD_FAILED" });
+}
+onBeforeUnmount(() => { thumbObserver?.disconnect(); thumbObserver = null; });
+
 const total = ref(0);
 const hasMore = ref(false);
 const offset = ref(0);
@@ -583,11 +650,30 @@ async function reindexOne() {
               :class="{ 'is-selected': selectedId === r.resourceId }"
               :data-d3-04a-item="r.resourceId"
               :data-d3-04b-item="r.resourceId"
+              :ref="(el) => bindThumb(el, r)"
               :aria-label="r.name + '，' + r.resourceType + '，' + AVAILABILITY_LABEL[r.availability]"
               @click="select(r.resourceId)"
               @dblclick="openEditor(r.resourceRef)"
             >
-              <span class="rl-thumb" aria-hidden="true"><component :is="TYPE_ICON[r.resourceType] || FileText" :size="24" :stroke-width="1.5" /></span>
+              <span
+                class="rl-thumb"
+                aria-hidden="true"
+                :data-rl-thumb-ref="r.resourceRef"
+                :data-rl-thumb-type="isImageResource(r) ? 'image' : 'other'"
+                :data-rl-thumb-state="thumbStateOf(r)"
+                :data-rl-thumb-requested="thumbOf(r).requested ? '1' : '0'"
+              >
+                <img
+                  v-if="thumbUrlOf(r)"
+                  class="rl-thumb-img"
+                  :src="thumbUrlOf(r)"
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                  @error="markThumbFailed(r)"
+                />
+                <component v-else :is="TYPE_ICON[r.resourceType] || FileText" :size="24" :stroke-width="1.5" />
+              </span>
               <div class="rl-card-top">
                 <span class="rl-type">{{ TYPE_LABEL[r.resourceType] || r.resourceType }}</span>
                 <span v-if="r.favorite" class="rl-fav" aria-label="已收藏">★</span>
@@ -797,3 +883,15 @@ async function reindexOne() {
     </div>
   </div>
 </template>
+
+
+<style scoped>
+/* task-50：网格缩略图裁切铺满 92px 缩略图槽；列表视图由既有 .rl-list .rl-thumb 隐藏。 */
+.rl-thumb { overflow: hidden; }
+.rl-thumb-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+</style>

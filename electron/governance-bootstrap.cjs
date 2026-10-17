@@ -32,6 +32,7 @@ const GOVERNANCE_COMMANDS = Object.freeze([
   "governance/createUser",
   "governance/setUserStatus",
   "governance/setUserRole",
+  "governance/updateUser",
   "governance/moveUserDepartment",
   "governance/resetPassword",
   "governance/listDepartments",
@@ -77,6 +78,7 @@ function registerGovernanceIpc({ ipcMain, service, authorization, identity, isTr
         case "governance/createUser": return authorization.createUser({ context, identifier: command.identifier, password: command.password, displayName: command.displayName, role: command.role });
         case "governance/setUserStatus": return authorization.setUserStatus({ context, userId: command.userId, status: command.status });
         case "governance/setUserRole": return authorization.setUserRole({ context, userId: command.userId, role: command.role });
+        case "governance/updateUser": return gov.updateUser({ context, userId: command.userId, displayName: command.displayName, role: command.role, departmentId: command.departmentId, status: command.status });
         case "governance/moveUserDepartment": return gov.moveUserDepartment({ context, userId: command.userId, fromDepartmentId: command.fromDepartmentId, toDepartmentId: command.toDepartmentId });
         case "governance/resetPassword": return gov.initiatePasswordReset({ context, userId: command.userId });
         case "governance/listDepartments": return gov.listDepartments({ context });

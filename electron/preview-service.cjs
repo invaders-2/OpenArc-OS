@@ -193,8 +193,14 @@ class PreviewService {
     if (this.#availability(row) !== "AVAILABLE") return { ok: false, error: this.#availability(row) };
     const key = domain.previewCacheKey({ resourceId: row.resource_id, resourceVersion: row.version, checksum: row.checksum, kind: "thumbnail" });
     const cached = this.searchStore ? this.searchStore.previewByKey(key) : null;
-    if (cached && cached.storage_key && fs.existsSync(cached.storage_key)) {
-      const minted = this.mintCapability({ context: { ...context, userId: auth.caps.userId || (context && context.userId) }, row, kind: "thumbnail", action: authz.ACTION.PREVIEW, storageKey: cached.storage_key, mimeType: "image/png", size: cached.size });
+    const cacheFile = this.thumbnailDir ? path.join(this.thumbnailDir, key + ".png") : null;
+    // task-52：没有 searchStore 时也直接复用磁盘缓存（避免 Node / 资源库面板每次重解码大图）。
+    const cachedPath = cached && cached.storage_key && fs.existsSync(cached.storage_key)
+      ? cached.storage_key
+      : cacheFile && fs.existsSync(cacheFile) ? cacheFile : null;
+    if (cachedPath) {
+      const size = cached ? cached.size : (() => { try { return fs.statSync(cachedPath).size; } catch { return 0; } })();
+      const minted = this.mintCapability({ context: { ...context, userId: auth.caps.userId || (context && context.userId) }, row, kind: "thumbnail", action: authz.ACTION.PREVIEW, storageKey: cachedPath, mimeType: "image/png", size });
       return { ok: true, cached: true, url: minted.url, width: 256 };
     }
     if (!this.nativeImage || typeof this.nativeImage.createFromPath !== "function") return { ok: false, error: domain.REASON.PREVIEW_UNSUPPORTED, node: true };
@@ -214,6 +220,26 @@ class PreviewService {
     } catch {
       return { ok: false, error: domain.REASON.PREVIEW_UNAVAILABLE };
     }
+  }
+
+  /** task-52：批量缩略图（≤64，4 路并发）；逐项保留成功/失败，缓存命中不重复编码。 */
+  async thumbnailBatch({ context, resourceRefs = [] } = {}) {
+    const refs = [...new Set((Array.isArray(resourceRefs) ? resourceRefs : []).map((ref) => String(ref || "")).filter(Boolean))].slice(0, 64);
+    if (!refs.length) return { ok: false, error: domain.REASON.INVALID_INPUT };
+    const items = [];
+    for (let i = 0; i < refs.length; i += 4) {
+      const chunk = refs.slice(i, i + 4);
+      const results = await Promise.all(chunk.map(async (resourceRef) => {
+        try {
+          const result = await this.thumbnail({ context, resourceRef });
+          return { resourceRef, ...result };
+        } catch (error) {
+          return { resourceRef, ok: false, error: domain.REASON.PREVIEW_UNAVAILABLE };
+        }
+      }));
+      items.push(...results);
+    }
+    return { ok: true, items };
   }
 
   async handleProtocolRequest(request) {

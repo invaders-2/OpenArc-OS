@@ -127,6 +127,12 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
         verification: r && r.verification ? { type: r.verification.type, status: r.verification.status } : null,
         error: r && r.error ? String(r.error).slice(0, 120) : null,
       });
+      // task-52：运行结束后把步骤/模型/工具事件一次性推给对话 UI（safeEvent/safeCall，不含密钥）。
+      if (taskId && typeof taskService.getEvents === "function") {
+        const events = taskService.getEvents({ context, taskId });
+        const calls = typeof taskService.getCalls === "function" ? taskService.getCalls({ context, taskId }) : null;
+        if (events && events.ok) send({ type: "task/event", taskId, events: events.items, calls: calls && calls.ok ? calls.items : [] });
+      }
     };
     try {
       switch (command) {
@@ -168,8 +174,12 @@ function registerTaskIpc({ ipcMain, taskService, orchestrator, identity, isTrust
           const denied = typeof taskService.getDeniedRequiredWriteOperations === "function"
             ? taskService.getDeniedRequiredWriteOperations({ context, taskId })
             : { ok: false };
+          // task-52：对话 UI 需要步骤/模型/工具事件；只回 safeEvent / safeCall（无密钥/无绝对路径）。
+          const events = typeof taskService.getEvents === "function" ? taskService.getEvents({ context, taskId }) : null;
+          const calls = typeof taskService.getCalls === "function" ? taskService.getCalls({ context, taskId }) : null;
           return {
             ok: true, task: got.task, steps: steps.ok ? steps.items : [], artifacts: artifacts.ok ? artifacts.items : [],
+            events: events && events.ok ? events.items : [], calls: calls && calls.ok ? calls.items : [],
             verifications: verifications.ok ? verifications.items : [],
             deniedOperations: denied.ok && Array.isArray(denied.unresolved) ? denied.unresolved : [],
             resumable: !!(eligibility.ok && eligibility.resumable),

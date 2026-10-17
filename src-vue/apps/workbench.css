@@ -142,3 +142,174 @@
   .integr-kv { grid-template-columns: 1fr; }
   .integr-kv dt { padding-bottom: 0; border-bottom: 0; }
 }
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   task-49 · 第三方集成：左服务列表 / 右详情 + 状态与依赖 + 审计三区
+   只作用于 .integrations-app，DevApp 继续用上面的基础行式布局。
+   目标：统一字阶与 4pt 间距、按钮与表单基线对齐、去掉拥挤和错位、窄窗单列。
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.integrations-app .integr-main { overflow: hidden; }
+.integrations-app .integr-body { padding: 0; }
+
+.integrations-app .integr-service-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.integrations-app .integr-service .ds-badge { margin-left: auto; flex-shrink: 0; }
+
+.integrations-app .integr-detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  grid-template-areas:
+    "detail status"
+    "audit audit";
+  align-items: start;
+  gap: var(--space-4) var(--space-5);
+  padding: var(--space-4) var(--space-5) var(--space-6);
+}
+.integrations-app .integr-detail-layout--wide {
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  grid-template-areas: "detail audit";
+  padding-top: 0;
+}
+
+.integrations-app .integr-zone {
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid rgb(var(--text-rgb) / 0.06);
+  border-radius: var(--radius-lg);
+  background: rgb(var(--text-rgb) / 0.026);
+}
+.integrations-app .integr-zone--detail { grid-area: detail; }
+.integrations-app .integr-zone--status { grid-area: status; }
+.integrations-app .integr-zone--audit { grid-area: audit; }
+.integrations-app .integr-detail-layout--wide .integr-zone:first-child { grid-area: detail; }
+.integrations-app .integr-detail-layout--wide .integr-zone:last-child { grid-area: audit; }
+
+.integrations-app .integr-zone-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  font-size: var(--fs-heading);
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--tracking-normal);
+  line-height: var(--lh-normal);
+}
+.integrations-app .integr-zone-head { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); }
+.integrations-app .integr-zone-head .integr-zone-title { margin: 0; }
+.integrations-app .integr-zone-head .ds-btn { margin-left: auto; }
+.integrations-app .integr-zone-count {
+  margin-left: var(--space-2);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: rgb(var(--text-rgb) / 0.05);
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  font-weight: var(--fw-regular);
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+}
+
+.integrations-app .integr-zone .integr-hero {
+  padding: 0 0 var(--space-3);
+  margin: 0 0 var(--space-3);
+  border-bottom: 1px solid rgb(var(--text-rgb) / 0.06);
+}
+.integrations-app .integr-hero-head { gap: var(--space-2); row-gap: var(--space-1); }
+.integrations-app .integr-hero-head h1 { font-size: var(--fs-title); }
+.integrations-app .integr-desc { margin-top: var(--space-2); max-width: 68ch; font-size: var(--fs-secondary); }
+.integrations-app .integr-actions { margin-top: var(--space-3); gap: var(--space-2); }
+
+.integrations-app .integr-sec { padding: 0; margin-top: var(--space-4); }
+.integrations-app .integr-zone > .integr-sec:first-child,
+.integrations-app .integr-hero + .integr-sec { margin-top: 0; }
+.integrations-app .integr-sec h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+  color: var(--text);
+  font-size: var(--fs-secondary);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-normal);
+}
+.integrations-app .integr-note {
+  margin: var(--space-2) 0;
+  max-width: 68ch;
+  font-size: var(--fs-caption);
+  line-height: var(--lh-relaxed);
+}
+.integrations-app .integr-zone .integr-note:first-child { margin-top: 0; }
+.integrations-app .integr-zone .integr-ok,
+.integrations-app .integr-zone .integr-error { margin: var(--space-2) 0; }
+
+.integrations-app .integr-rows { gap: 2px; }
+.integrations-app .integr-row {
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: rgb(var(--text-rgb) / 0.04);
+}
+.integrations-app .integr-row:hover { background: rgb(var(--text-rgb) / 0.06); }
+.integrations-app .integr-row-desc { flex: 1 1 180px; min-width: 140px; line-height: var(--lh-normal); }
+.integrations-app .integr-dep-label { flex-shrink: 0; }
+.integrations-app .integr-dep-row .integr-dep-label { min-width: 112px; }
+.integrations-app .integr-log-row .integr-row-desc { flex-basis: 220px; }
+.integrations-app .integr-command-name { overflow-wrap: anywhere; }
+
+.integrations-app .integr-kv { grid-template-columns: minmax(120px, 0.42fr) 1fr; }
+.integrations-app .integr-kv dt,
+.integrations-app .integr-kv dd { padding: var(--space-2) 0; font-size: var(--fs-secondary); line-height: var(--lh-normal); }
+
+.integrations-app .integr-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+.integrations-app .integr-form-col { grid-template-columns: minmax(0, 1fr); max-width: 520px; }
+.integrations-app .integr-form .ds-btn { align-self: end; justify-self: start; min-height: 32px; }
+.integrations-app .integr-field { flex: none; min-width: 0; font-size: var(--fs-caption); }
+.integrations-app .integr-field input { min-height: 32px; font-size: var(--fs-secondary); }
+
+.integrations-app .integr-filter { padding: 0; flex: 1 1 260px; font-size: var(--fs-caption); }
+.integrations-app .integr-filter input { max-width: none; min-height: 32px; }
+.integrations-app .integr-audit-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5) 0;
+}
+.integrations-app .integr-audit-bar .integr-filter { margin: 0; }
+.integrations-app .integr-page-note { padding: 0 var(--space-5); margin-top: var(--space-2); }
+.integrations-app .integr-summary { white-space: nowrap; }
+
+@media (max-width: 1180px) {
+  .integrations-app .integr-detail-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "detail"
+      "status"
+      "audit";
+    gap: var(--space-3);
+    padding: var(--space-4) var(--space-4) var(--space-6);
+  }
+  .integrations-app .integr-detail-layout--wide { grid-template-areas: "detail" "audit"; }
+}
+
+@media (max-width: 900px) {
+  .integrations-app .integr-zone { padding: var(--space-3); }
+  .integrations-app .integr-form { grid-template-columns: minmax(0, 1fr); }
+  .integrations-app .integr-form .ds-btn { justify-self: start; }
+  .integrations-app .integr-audit-bar { flex-wrap: wrap; padding: var(--space-3) var(--space-4) 0; }
+  .integrations-app .integr-page-note { padding: 0 var(--space-4); }
+  .integrations-app .integr-summary { display: none; }
+  .integrations-app .integr-dep-row .integr-dep-label { min-width: 88px; }
+}

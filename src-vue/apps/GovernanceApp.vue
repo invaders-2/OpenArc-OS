@@ -32,6 +32,9 @@ const GERR: Record<string, string> = {
   NO_BRIDGE: "组织服务只在 OpenArc 桌面应用里可用。",
   INTERNAL_ERROR: "组织服务暂时不可用。",
   FORBIDDEN: "需要管理员权限。",
+  NOT_SUPER_ADMIN: "需要超级管理员权限。",
+  NOT_FOUND_OR_FORBIDDEN: "目标不存在，或你没有访问权限。",
+  CROSS_DEPARTMENT_DENIED: "不能操作其他部门的成员。",
   AUTH_REQUIRED: "请先登录。",
 };
 const errText = (e: string) => GERR[e] ?? `操作被拒绝（${e}）`;
@@ -57,6 +60,29 @@ const appAccess = ref<Record<string, any>>({});
 const appPick = ref<Record<string, string[]>>({});
 const appAccessOpenId = ref<string | null>(null);
 const confirmState = ref<{ title: string; message: string; run: () => Promise<void> } | null>(null);
+
+/* task-48 · 成员编辑弹窗。只调用 governance 白名单里真实存在的命令；
+   后端没有 updateUser，显示名输入框保持只读并明确写出缺失，不伪造“已保存”。 */
+type EditUser = any;
+const editUser = ref<EditUser | null>(null);
+const editRole = ref("MEMBER");
+const editStatus = ref("ACTIVE");
+const editDeptId = ref("");
+const editDisplayName = ref("");
+const editSaving = ref(false);
+const editError = ref("");
+const editPassword = ref<string | null>(null);
+const editResourceRef = ref("");
+const editAccess = ref<any>(null);
+const editAccessLoading = ref(false);
+const editAccessError = ref("");
+const editGrantPick = ref<string[]>([]);
+const EDIT_RESOURCE_ACTIONS = ["resource.view", "resource.search", "resource.preview", "resource.read", "resource.create", "resource.edit", "resource.delete", "resource.restore", "resource.download", "resource.export", "resource.share", "resource.tag", "resource.move", "resource.useByAgent"];
+const editDeptCurrent = computed(() => (Array.isArray(editUser.value?.departments) ? editUser.value.departments[0] : null));
+const editUserGrants = computed(() => {
+  const rows = Array.isArray(editAccess.value?.grants) ? editAccess.value.grants : [];
+  return rows.filter((g: any) => String(g.principalType || "").toUpperCase() === "USER" && String(g.principalId || "") === String(editUser.value?.userId || ""));
+});
 
 async function cmd(payload: Record<string, unknown>): Promise<any> {
   const b = bridge();
@@ -124,6 +150,125 @@ async function setStatus(userId: string, status: string) {
   const res = await cmd({ type: "governance/setUserStatus", userId, status });
   if (!res.ok) error.value = res.error;
   else await load();
+}
+
+async function loadDepartmentsIfNeeded() {
+  if (departments.value.length) return;
+  const res = await cmd({ type: "governance/listDepartments" });
+  if (res.ok) departments.value = Array.isArray(res.items) ? res.items : [];
+}
+
+async function openEdit(u: any) {
+  editUser.value = u;
+  editRole.value = u.role || "MEMBER";
+  editStatus.value = u.status || "ACTIVE";
+  editDisplayName.value = u.displayName || "";
+  editDeptId.value = Array.isArray(u.departments) && u.departments[0]?.departmentId ? u.departments[0].departmentId : "";
+  editSaving.value = false;
+  editError.value = "";
+  editPassword.value = null;
+  editResourceRef.value = "";
+  editAccess.value = null;
+  editAccessError.value = "";
+  editGrantPick.value = [];
+  await loadDepartmentsIfNeeded();
+}
+
+function closeEdit() {
+  editUser.value = null;
+  editPassword.value = null;
+  editError.value = "";
+  editAccess.value = null;
+  editAccessError.value = "";
+}
+
+async function saveMemberFields() {
+  const user = editUser.value;
+  if (!user) return;
+  const displayName = editDisplayName.value.trim();
+  if (!displayName) { editError.value = "显示名不能为空。"; return; }
+  editSaving.value = true;
+  editError.value = "";
+  try {
+    const current = user.departments?.[0];
+    const targetDept = editDeptId.value;
+    // 后端 updateUser 一次更新显示名/角色/状态/部门；departmentId 为空表示“不传”，
+    // 所以“移出部门”仍需在后端不支持 null 的情况下单独走 removeDepartmentMember。
+    const payload: Record<string, unknown> = { type: "governance/updateUser", userId: user.userId };
+    if (displayName !== user.displayName) payload.displayName = displayName;
+    if (editRole.value !== user.role) payload.role = editRole.value;
+    if (editStatus.value !== user.status) payload.status = editStatus.value;
+    if (targetDept && targetDept !== (current?.departmentId || "")) payload.departmentId = targetDept;
+    const hasUpdate = ["displayName", "role", "status", "departmentId"].some((key) => payload[key] !== undefined);
+    if (hasUpdate) {
+      const res = await cmd(payload);
+      if (!res.ok) { editError.value = errText(res.error); return; }
+    }
+    if (!targetDept && current?.departmentId) {
+      const removed = await cmd({ type: "governance/removeDepartmentMember", departmentId: current.departmentId, userId: user.userId });
+      if (!removed.ok) { editError.value = errText(removed.error); return; }
+    }
+    notice.value = "成员信息已保存（显示名 / 角色 / 状态 / 部门取后端真实结果）";
+    await load();
+    const refreshed = users.value.find((x) => x.userId === user.userId);
+    if (refreshed) editUser.value = refreshed;
+  } finally {
+    editSaving.value = false;
+  }
+}
+
+async function resetMemberPassword() {
+  const user = editUser.value;
+  if (!user) return;
+  editError.value = "";
+  const res = await cmd({ type: "governance/resetPassword", userId: user.userId });
+  if (!res.ok) { editError.value = errText(res.error); return; }
+  editPassword.value = String(res.temporaryPassword || "");
+  notice.value = "临时口令已生成；关闭弹窗后不再显示";
+}
+
+async function loadMemberResourceAccess() {
+  const user = editUser.value;
+  const ref = editResourceRef.value.trim();
+  if (!user || !ref) return;
+  editAccessLoading.value = true;
+  editAccessError.value = "";
+  editAccess.value = null;
+  try {
+    const res = await cmd({ type: "governance/listResourceAccess", resourceRef: ref });
+    if (res.ok) {
+      editAccess.value = res;
+      editGrantPick.value = [];
+    } else editAccessError.value = errText(res.error);
+  } finally {
+    editAccessLoading.value = false;
+  }
+}
+
+async function grantMemberResource() {
+  const user = editUser.value;
+  const resourceId = editAccess.value?.resource?.resourceId;
+  const actions = [...editGrantPick.value];
+  if (!user || !resourceId || !actions.length) return;
+  editAccessError.value = "";
+  const res = await cmd({ type: "governance/grantResourceAccess", principalType: "USER", principalId: user.userId, resourceId, actions });
+  if (!res.ok) { editAccessError.value = errText(res.error); return; }
+  notice.value = "已给该成员授予资源权限";
+  await loadMemberResourceAccess();
+}
+
+async function revokeMemberResource(grantId: string) {
+  editAccessError.value = "";
+  const res = await cmd({ type: "governance/revokeResourceAccess", grantId });
+  if (!res.ok) { editAccessError.value = errText(res.error); return; }
+  notice.value = "已撤销该成员的资源授权";
+  await loadMemberResourceAccess();
+}
+
+function toggleGrantAction(action: string) {
+  editGrantPick.value = editGrantPick.value.includes(action)
+    ? editGrantPick.value.filter((a) => a !== action)
+    : [...editGrantPick.value, action];
 }
 
 async function toggleApp(appId: string, status: string) {
@@ -345,6 +490,7 @@ function grantText(g: any): string {
               <span class="gov-meta">{{ deptNames(u) || "—" }}</span>
               <span class="gov-status"><i :data-on="u.status === 'ACTIVE'" />{{ STATUS[u.status] || u.status }}</span>
               <span class="gov-act">
+                <DsButton variant="secondary" size="sm" :data-d3-04d-user-edit="u.userId" @click="openEdit(u)">编辑</DsButton>
                 <DsButton v-if="u.status === 'ACTIVE'" variant="ghost" size="sm" :data-d3-04d-user-disable="u.userId" @click="setStatus(u.userId, 'DISABLED')">停用</DsButton>
                 <DsButton v-else variant="secondary" size="sm" :data-d3-04d-user-enable="u.userId" @click="setStatus(u.userId, 'ACTIVE')">启用</DsButton>
               </span>
@@ -471,6 +617,85 @@ function grantText(g: any): string {
       </div>
     </div>
 
+    <DsDialog :open="editUser !== null" :title="'编辑成员 · ' + (editUser?.displayName || editUser?.identifier || '')" @close="closeEdit">
+      <div v-if="editUser" class="gov-edit" data-gov-edit-dialog :data-gov-edit-user="editUser.userId">
+        <div class="gov-edit-who">
+          <span class="gov-av">{{ initial(editUser) }}</span>
+          <span class="gov-name">{{ editUser.displayName || editUser.identifier }}<small>{{ editUser.identifier }} · {{ editUser.userId }}</small></span>
+        </div>
+
+        <div class="set-group gov-edit-group">
+          <label class="setting-row">
+            <span class="set-lab">显示名<small>与角色/状态/部门一次提交 governance/updateUser</small></span>
+            <input class="set-input" data-gov-edit-display v-model="editDisplayName" placeholder="显示名" maxlength="120" />
+          </label>
+          <label class="setting-row">
+            <span class="set-lab">角色</span>
+            <select class="set-select" data-gov-edit-role v-model="editRole">
+              <option value="MEMBER">成员</option>
+              <option value="ADMIN">管理员</option>
+            </select>
+          </label>
+          <label class="setting-row">
+            <span class="set-lab">状态</span>
+            <select class="set-select" data-gov-edit-status v-model="editStatus">
+              <option value="ACTIVE">在线可用</option>
+              <option value="DISABLED">已停用</option>
+            </select>
+          </label>
+          <label class="setting-row">
+            <span class="set-lab">部门<small>当前 {{ editDeptCurrent?.name || "无部门" }}</small></span>
+            <select class="set-select" data-gov-edit-dept v-model="editDeptId">
+              <option value="">无部门</option>
+              <option v-for="d in departments" :key="d.departmentId" :value="d.departmentId">{{ d.name }}</option>
+            </select>
+          </label>
+          <div class="setting-row set-actions">
+            <DsButton variant="primary" size="sm" data-gov-edit-save :status="editSaving ? 'loading' : 'idle'" @click="saveMemberFields">保存成员信息</DsButton>
+            <DsButton variant="secondary" size="sm" data-gov-edit-reset :disabled="editSaving" @click="resetMemberPassword">重置密码</DsButton>
+          </div>
+        </div>
+
+        <p v-if="editPassword" class="gov-edit-secret" data-gov-edit-temp-password>临时口令（只显示这一次，关闭后失效）：<code>{{ editPassword }}</code></p>
+        <p v-if="editError" class="gov-error" role="alert" data-gov-edit-error>{{ editError }}</p>
+
+        <section class="set-sec gov-edit-access">
+          <h3>资源权限</h3>
+          <p class="set-cap">输入资源引用后读取真实授权表；只展示 principal=USER 且是该成员的授权。授予 / 撤销都走 governance 写命令。</p>
+          <div class="gov-edit-ref">
+            <input class="set-input" data-gov-edit-resource-ref placeholder="resource://..." v-model="editResourceRef" />
+            <DsButton variant="secondary" size="sm" data-gov-edit-load-access :status="editAccessLoading ? 'loading' : 'idle'" @click="loadMemberResourceAccess">读取该成员的资源授权</DsButton>
+          </div>
+          <p v-if="editAccessError" class="gov-error" role="alert" data-gov-edit-access-error>{{ editAccessError }}</p>
+          <div v-if="editAccess" class="gov-edit-grant-block" data-gov-edit-access>
+            <p class="gov-meta">资源 {{ editAccess.resource?.name || editAccess.resource?.resourceRef }} · 所有者 {{ editAccess.resource?.ownerUserId || "—" }}</p>
+            <div v-if="editUserGrants.length" class="gov-grants" data-gov-edit-grants>
+              <div v-for="g in editUserGrants" :key="g.grantId" class="gov-grant" :data-gov-edit-grant-id="g.grantId">
+                <span class="gov-meta">{{ grantText(g) }}</span>
+                <DsButton variant="ghost" size="sm" :data-gov-edit-revoke="g.grantId" @click="revokeMemberResource(g.grantId)">撤销该成员这条授权</DsButton>
+              </div>
+            </div>
+            <p v-else class="set-cap gov-empty" data-gov-edit-grants-empty>该成员没有这个资源的直接授权。</p>
+            <div class="gov-edit-actions" data-gov-edit-access-actions>
+              <label v-for="action in EDIT_RESOURCE_ACTIONS" :key="action" class="gov-edit-action">
+                <input type="checkbox" :checked="editGrantPick.includes(action)" :data-gov-edit-action="action" @change="toggleGrantAction(action)" />
+                <code>{{ action }}</code>
+              </label>
+              <DsButton variant="primary" size="sm" data-gov-edit-grant :disabled="!editGrantPick.length" @click="grantMemberResource">授予所选动作</DsButton>
+            </div>
+          </div>
+        </section>
+
+        <section class="set-sec gov-edit-apps">
+          <h3>App 权限</h3>
+          <p class="set-cap" data-gov-edit-app-unavailable>后端没有「按成员查询/编辑 App 授权」的 governance 命令：getAppAccess 只按 App 聚合，无法定位到某个成员。这里如实标为不可用，不伪造分配；资源级权限可在上方真实编辑。</p>
+        </section>
+      </div>
+      <template #footer>
+        <button class="ghost" type="button" @click="closeEdit">关闭</button>
+      </template>
+    </DsDialog>
+
     <DsDialog :open="confirmState !== null" :title="confirmState?.title || ''" @close="confirmState = null">
       <p class="set-cap">{{ confirmState?.message }}</p>
       <template #footer>
@@ -480,3 +705,32 @@ function grantText(g: any): string {
     </DsDialog>
   </div>
 </template>
+
+<style scoped>
+/* 编辑弹窗是表单型对话框：复用 DsDialog，但按内容宽度/可读性局部收紧（不新增颜色）。 */
+:deep(.dialog:has(.gov-edit)) {
+  width: min(720px, calc(100% - 64px));
+  background: rgb(var(--content-rgb) / 0.96);
+  backdrop-filter: blur(28px) saturate(1.5);
+  -webkit-backdrop-filter: blur(28px) saturate(1.5);
+}
+.gov-edit { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.gov-edit-who { display: flex; align-items: center; gap: 10px; }
+.gov-edit-who .gov-name { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.gov-edit-who small { color: var(--muted); font-size: var(--fs-micro); overflow-wrap: anywhere; }
+.gov-edit-group { margin: 0; }
+.gov-edit-group .setting-row { padding-left: 0; padding-right: 0; }
+.gov-edit-secret { margin: 0; padding: 10px 12px; border-radius: var(--radius-md); background: rgb(var(--text-rgb) / 0.06); font-size: var(--fs-caption); line-height: var(--lh-normal); }
+.gov-edit-secret code { display: inline-block; margin-left: 6px; padding: 2px 7px; border-radius: 6px; background: rgb(var(--text-rgb) / 0.08); font-family: var(--font-mono); user-select: text; overflow-wrap: anywhere; }
+.gov-edit-ref { display: flex; align-items: center; gap: 8px; }
+.gov-edit-ref .set-input { flex: 1; min-width: 0; }
+.gov-edit-grant-block { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.gov-edit-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 8px; }
+.gov-edit-action { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-micro); color: var(--muted); }
+.gov-edit-action code { font-family: var(--font-mono); color: var(--text); }
+.gov-edit-apps { margin-top: 2px; }
+@container (max-width: 760px) {
+  .gov-edit { min-width: 0; max-width: none; }
+  .gov-edit-ref { flex-wrap: wrap; }
+}
+</style>

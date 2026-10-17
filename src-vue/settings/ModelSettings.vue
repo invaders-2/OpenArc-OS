@@ -271,6 +271,16 @@ function markRegistered(providerId: string, ids: string[]) {
   const set = new Set(ids);
   remote.value = { ...remote.value, [providerId]: (remote.value[providerId] || []).map((m) => (set.has(m.id) ? { ...m, registered: true } : m)) };
 }
+/** 注册模型后若用户还没有默认对话模型，自动选第一个可用的对话模型，避免“接了模型但应用无法使用”。 */
+async function autoDefaultAfterRegister(providerId: string) {
+  if (defaults.value?.personal?.chat) return;
+  const candidate = models.value.find((m: any) => m.providerId === providerId && m.status === "enabled" && Array.isArray(m.capabilities) && m.capabilities.includes("chat"));
+  if (!candidate) return;
+  const res = await cmd("defaults/set", { capability: "chat", configId: candidate.configId, scope: "PERSONAL" });
+  if (!res.ok) return;
+  notice.value = tr("已自动把 {name} 设为默认对话模型", { name: candidate.displayName || candidate.remoteModelId || candidate.configId });
+  await load();
+}
 /** 单个模型「加入」：走 model/create，带上分类推出的真实 capabilities；失败给结构化错误码。 */
 async function addOneModel(providerId: string, m: { id: string; capabilities?: string[] }) {
   const capabilities = [...(Array.isArray(m.capabilities) ? m.capabilities : classifyRemoteModel({ id: m.id }).capabilities)];
@@ -282,6 +292,7 @@ async function addOneModel(providerId: string, m: { id: string; capabilities?: s
   notice.value = capabilities.length ? tr("已加入 {id}", { id: m.id }) : tr("已加入 {id}（未推断出能力，能力为空）", { id: m.id });
   markRegistered(providerId, [m.id]);
   await load();
+  await autoDefaultAfterRegister(providerId);
 }
 /** 批量「注册所选」：逐条真实落库，部分失败如实报数，不谎报全部成功。 */
 async function registerEntries(providerId: string, entries: { id: string; capabilities: string[] }[]) {
@@ -297,6 +308,7 @@ async function registerEntries(providerId: string, entries: { id: string; capabi
   markRegistered(providerId, succeeded);
   picked.value = { ...picked.value, [providerId]: {} };
   await load();
+  await autoDefaultAfterRegister(providerId);
 }
 function onRemoteFilter(value: string) {
   if (!current.value) return;
@@ -324,6 +336,7 @@ async function createModel() {
   if (r.ok) {
     notice.value = tr("已注册模型");
     await load();
+    await autoDefaultAfterRegister(mForm.providerId);
   } else error.value = r.error;
 }
 async function setModelStatus(configId: string, status: string) {
@@ -505,7 +518,7 @@ onMounted(() => { void loadEgress(); });
         <DsButton variant="secondary" size="sm" data-model-egress-save :disabled="egressBusy || !egress.enabled" @click="saveEgress">{{ tr("保存") }}</DsButton>
         <DsBadge :tone="egressStatus.tone" data-model-egress-status>{{ tr(egressStatus.label) }}</DsBadge>
       </div>
-      <p class="set-cap" data-model-egress-hint>{{ tr(egressNotice || egressStatus.detail) }}</p>
+      <p v-if="egressNotice" class="set-cap" data-model-egress-hint>{{ tr(egressNotice) }}</p>
       <p v-if="egressError" class="d401-error" role="alert" data-model-egress-error>{{ tr(egressError) }}</p>
     </div>
 
@@ -702,6 +715,7 @@ onMounted(() => { void loadEgress(); });
     <template v-if="defaults">
       <div class="set-sec" data-d4-01-pane="defaults">
         <h3>{{ tr("默认模型") }}</h3>
+        <p v-if="defaults && !defaults.personal?.chat" class="set-cap" data-d4-01-default-missing>{{ tr("还没有默认对话模型：应用调用模型会失败。注册模型后会自动选择第一个可用的对话模型，也可以在下面手动指定。") }}</p>
         <div class="set-group d401-defaults" data-d4-01-defaults-personal>
           <label v-for="d in [['chat', '文本对话', 'chat'], ['tool-calling', '工具调用', 'tool'], ['image-generation', '图像生成', 'image']]" :key="d[0]" class="setting-row">
             <span class="set-lab">{{ tr(d[1]) }}</span>
@@ -766,4 +780,23 @@ onMounted(() => { void loadEgress(); });
 .mp2-logo-brand { background: transparent; width: auto; min-width: 30px; max-width: 96px; padding: 0 3px; color: var(--text); }
 .mp2-logo-mark { width: 18px; height: 18px; background-color: currentColor; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; -webkit-mask-size: contain; mask-size: contain; }
 .mp2-logo img { display: block; max-width: 90px; max-height: 20px; object-fit: contain; }
+
+/* task-47：模型页重排 —— 两栏紧凑、左栏不空荡、窄窗单栏；字阶/间距统一到设置页 token。 */
+.d401-settings { padding-bottom: var(--space-3); }
+.mp2-egress { padding: 8px 12px; gap: 6px; }
+.mp2-egress .setting-row { gap: var(--space-2); }
+.mp2-grid { grid-template-columns: 232px minmax(0, 1fr); gap: 16px; align-items: start; }
+.mp2-provs { position: sticky; top: 8px; align-self: start; max-height: calc(100vh - 280px); overflow: auto; padding: 8px; gap: 2px; }
+.mp2-prov { padding: 7px 8px; }
+.mp2-prov-main b { font-size: var(--fs-caption); }
+.mp2-detail { padding: 14px 16px; gap: 12px; }
+.mp2-detail .mp2-field { gap: 5px; }
+.mp2-detail .set-cap { margin: 0; }
+.mp2-head { min-height: 28px; }
+@media (max-width: 880px) {
+  .mp2-grid { grid-template-columns: 1fr; }
+  .mp2-provs { position: static; max-height: none; flex-direction: row; flex-wrap: wrap; overflow: visible; }
+  .mp2-prov { width: auto; flex: 1 1 180px; }
+  .mp2-detail { padding: 12px; }
+}
 </style>

@@ -328,6 +328,8 @@ function registerResourceIpc({ ipcMain, service, search = null, preview = null, 
           return preview.preview({ context, resourceRef });
         case "resource/thumbnail":
           if (!preview) return { ok: false, error: "PREVIEW_UNAVAILABLE" };
+          // task-52：同一命令支持批量（resourceRefs）供对话/资源面板一次取多张缩略图。
+          if (Array.isArray(command.resourceRefs)) return preview.thumbnailBatch({ context, resourceRefs: command.resourceRefs });
           return preview.thumbnail({ context, resourceRef });
         // ---- D3-04D：Resource Picker ----
         case "resource/pickerQuery":

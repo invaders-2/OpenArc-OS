@@ -95,6 +95,68 @@ class GovernanceService {
 
   setUserStatus({ context, userId, status } = {}) { return this.authService.setUserStatus({ context, userId, status }); }
   setUserRole({ context, userId, role } = {}) { return this.authService.setUserRole({ context, userId, role }); }
+
+  /**
+   * task-52：一次更新显示名 / 角色 / 部门 / 状态。
+   * 权限：Super Admin 或目标用户所在部门的 Department Admin；不能自我提权到 ADMIN；
+   * 非 Super Admin 不能把用户移出其管理的部门。成功/失败都写 authorization_audit。
+   */
+  async updateUser({ context, userId, displayName = undefined, role = undefined, departmentId = undefined, status = undefined } = {}) {
+    const actor = this.#adminGate(context);
+    if (!actor.ok) return { ok: false, error: actor.error };
+    const user = this.identity.userById(userId);
+    if (!user || user.team_id !== actor.organizationId) return { ok: false, error: "NOT_FOUND_OR_FORBIDDEN" };
+    const memberships = this.authStore.membershipsOfUser(user.id);
+    if (!actor.isSuper && !memberships.some((m) => actor.adminDeptIds.includes(m.department_id))) return { ok: false, error: "NOT_FOUND_OR_FORBIDDEN" };
+    const fields = { displayName, role, departmentId, status };
+    const provided = ["displayName", "role", "departmentId", "status"].filter((key) => fields[key] !== undefined);
+    if (!provided.length) return { ok: false, error: "INVALID_INPUT" };
+    if (displayName !== undefined && (typeof displayName !== "string" || !displayName.trim() || displayName.trim().length > 120)) return { ok: false, error: "INVALID_INPUT" };
+    if (role !== undefined && !["ADMIN", "MEMBER"].includes(String(role).toUpperCase())) return { ok: false, error: "INVALID_INPUT" };
+    if (status !== undefined && !["ACTIVE", "DISABLED"].includes(String(status).toUpperCase())) return { ok: false, error: "INVALID_INPUT" };
+    if (!actor.isSuper && String(role || "").toUpperCase() === "ADMIN") return { ok: false, error: "NOT_SUPER_ADMIN" };
+    if (!actor.isSuper && departmentId !== undefined && !actor.adminDeptIds.includes(String(departmentId))) return { ok: false, error: "CROSS_DEPARTMENT_DENIED" };
+    const before = { displayName: user.display_name, role: user.role, status: user.status, departments: memberships.map((m) => m.department_id) };
+    const changed = {};
+    try {
+      if (displayName !== undefined && displayName.trim() !== user.display_name) {
+        const updated = this.identity.updateProfile({ userId: user.id, displayName: displayName.trim() });
+        if (!updated || updated.ok !== true) return { ok: false, error: (updated && updated.error) || "UPDATE_FAILED" };
+        changed.displayName = displayName.trim();
+      }
+      if (role !== undefined && String(role).toUpperCase() !== String(user.role).toUpperCase()) {
+        const res = await this.setUserRole({ context, userId: user.id, role: String(role).toUpperCase() });
+        if (!res.ok) return res;
+        changed.role = res.role;
+      }
+      if (status !== undefined && String(status).toUpperCase() !== String(user.status).toUpperCase()) {
+        const res = await this.setUserStatus({ context, userId: user.id, status: String(status).toUpperCase() });
+        if (!res.ok) return res;
+        changed.status = res.status;
+      }
+      if (departmentId !== undefined) {
+        const target = this.authStore.departmentById(String(departmentId));
+        if (!target || target.organization_id !== actor.organizationId) return { ok: false, error: "CROSS_DEPARTMENT_DENIED" };
+        const current = memberships[0] ? memberships[0].department_id : undefined;
+        if (current !== target.id) {
+          const moved = this.moveUserDepartment({ context, userId: user.id, fromDepartmentId: current, toDepartmentId: target.id });
+          if (!moved.ok) return moved;
+          changed.departmentId = target.id;
+        }
+      }
+    } catch (error) {
+      this.authStore.auditAuthorization({ actorUserId: actor.user.id, targetUserId: user.id, appId: null, departmentId: actor.departmentIds[0] || null, resourceRef: null, action: "governance.updateUser", decision: "DENY", reasonCode: "UPDATE_FAILED", permissionSource: actor.isSuper ? authzDom.ALLOW_SOURCE.SUPER_ADMIN : authzDom.ALLOW_SOURCE.DEPARTMENT_ADMIN, oldPermissions: [before.role], newPermissions: Object.values(changed) });
+      return { ok: false, error: "UPDATE_FAILED" };
+    }
+    const afterUser = this.identity.userById(user.id);
+    this.authStore.auditAuthorization({
+      actorUserId: actor.user.id, targetUserId: user.id, appId: null, departmentId: actor.departmentIds[0] || null, resourceRef: null,
+      action: "governance.updateUser", decision: "ALLOW", reasonCode: "ALLOW",
+      permissionSource: actor.isSuper ? authzDom.ALLOW_SOURCE.SUPER_ADMIN : authzDom.ALLOW_SOURCE.DEPARTMENT_ADMIN,
+      oldPermissions: [before.role, before.status, ...before.departments], newPermissions: [afterUser.role, afterUser.status, ...this.authStore.membershipsOfUser(user.id).map((m) => m.department_id)],
+    });
+    return { ok: true, user: this.#safeUser(afterUser, this.authStore.membershipsOfUser(user.id)), changed };
+  }
   createDepartment({ context, name, description } = {}) { return this.authService.createDepartment({ context, name, description }); }
   updateDepartment({ context, departmentId, name, description, status } = {}) { return this.authService.updateDepartment({ context, departmentId, name, description, status }); }
   addDepartmentMember({ context, departmentId, userId, membershipRole } = {}) { return this.authService.addDepartmentMember({ context, departmentId, userId, membershipRole }); }

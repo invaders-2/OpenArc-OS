@@ -69,7 +69,7 @@ const bridge = domainBridge(typeof window === "undefined" ? null : window, "inte
 const hasBridge = ref(!!bridge);
 const shell = useShellStore();
 
-const tab = ref<"services" | "audit">("services");
+const allAudit = ref(false);
 const loading = ref(false);
 const overviewError = ref<FailureView | null>(null);
 const plugins = ref<PluginItem[]>([]);
@@ -183,6 +183,7 @@ async function probeSelectedDesign(): Promise<void> {
   if (designSelected.value) await probeDesign(designSelected.value);
 }
 async function selectDesign(tool: DesignToolId) {
+  allAudit.value = false;
   designSelected.value = tool;
   actionError.value = null;
   actionNotice.value = "";
@@ -376,6 +377,7 @@ async function loadDetail() {
 }
 
 async function selectPlugin(id: string) {
+  allAudit.value = false;
   designSelected.value = null;
   launchNotice.value = "";
   launchError.value = "";
@@ -552,6 +554,24 @@ const pluginCatalog = computed(() => {
   return catalog.value.filter((item) => item.command.startsWith("integration/" + id + "/") || item.command.startsWith("integration/plugins/"));
 });
 const enabledCount = computed(() => plugins.value.filter((item) => item.enabled).length);
+/** 详情页第三区只列与当前服务相关的真实调用；全部记录在「全部命令与审计」里。 */
+const serviceLogs = computed(() => {
+  const id = selected.value;
+  if (!id) return [];
+  return logEntries.value.filter((entry) => entry.command.startsWith("integration/" + id + "/") || entry.command.startsWith("integration/plugins/"));
+});
+const pageTitle = computed(() => {
+  if (allAudit.value) return "全部命令与审计";
+  if (designSelected.value) return "设计工具";
+  return current.value ? current.value.name : "第三方集成";
+});
+function openAllAudit() {
+  allAudit.value = true;
+  designSelected.value = null;
+}
+function closeAllAudit() {
+  allAudit.value = false;
+}
 
 onMounted(() => {
   void loadOverview();
@@ -562,71 +582,60 @@ onMounted(() => {
 <template>
   <div class="split integrations-app">
     <nav class="split-side" aria-label="第三方集成">
-      <div class="split-section">集成</div>
+      <div class="split-section">全部服务</div>
       <button
+        v-for="item in plugins"
+        :key="item.id"
         type="button"
-        class="split-nav"
-        :aria-current="tab === 'services' ? 'true' : undefined"
-        data-integrations-tab="services"
-        @click="tab = 'services'"
+        class="split-nav integr-service"
+        :data-integration-service="item.id"
+        :data-integration-enabled="item.enabled ? 'true' : 'false'"
+        :aria-current="selected === item.id && !allAudit && !designSelected ? 'true' : undefined"
+        @click="selectPlugin(item.id)"
       >
-        <PlugZap :size="16" /> <span class="split-nav-label">服务</span>
-        <small class="integr-count">{{ plugins.length }}</small>
+        <span class="split-nav-label integr-service-name">{{ item.name }}</span>
+        <DsBadge size="sm" :tone="healthTone(healthById[item.id] ?? null)">{{ healthLabel(healthById[item.id] ?? null) }}</DsBadge>
       </button>
+      <p v-if="!plugins.length && !loading" class="planned-note">主进程没有登记任何集成插件。</p>
+
+      <div class="split-section">设计工具</div>
+      <button
+        v-for="tool in DESIGN_TOOLS"
+        :key="tool.id"
+        type="button"
+        class="split-nav integr-service"
+        :data-design-tool-entry="tool.id"
+        :aria-current="designSelected === tool.id && !allAudit ? 'true' : undefined"
+        @click="selectDesign(tool.id)"
+      >
+        <PenTool v-if="tool.id === 'figma'" :size="16" />
+        <Palette v-else :size="16" />
+        <span class="split-nav-label integr-service-name">{{ tool.name }}</span>
+        <DsBadge size="sm" :tone="mcpMatches(tool.id).length ? 'success' : 'neutral'">{{ mcpMatches(tool.id).length ? "MCP 已登记" : "未登记 MCP" }}</DsBadge>
+      </button>
+
+      <div class="split-section">审计</div>
       <button
         type="button"
-        class="split-nav"
-        :aria-current="tab === 'audit' ? 'true' : undefined"
-        data-integrations-tab="audit"
-        @click="tab = 'audit'"
+        class="split-nav integr-audit-link"
+        :aria-current="allAudit ? 'true' : undefined"
+        data-integrations-all-audit-link
+        @click="openAllAudit"
       >
-        <ListChecks :size="16" /> <span class="split-nav-label">审计</span>
+        <ListChecks :size="16" />
+        <span class="split-nav-label">全部命令与审计</span>
         <small class="integr-count">{{ catalog.length }}</small>
       </button>
-
-      <template v-if="tab === 'services'">
-        <div class="split-section">全部服务</div>
-        <button
-          v-for="item in plugins"
-          :key="item.id"
-          type="button"
-          class="split-nav integr-service"
-          :data-integration-service="item.id"
-          :data-integration-enabled="item.enabled ? 'true' : 'false'"
-          :aria-current="selected === item.id && tab === 'services' ? 'true' : undefined"
-          @click="selectPlugin(item.id)"
-        >
-          <span class="split-nav-label">{{ item.name }}</span>
-          <span class="integr-service-state">
-            <DsBadge size="sm" :tone="healthTone(healthById[item.id] ?? null)">{{ healthLabel(healthById[item.id] ?? null) }}</DsBadge>
-          </span>
-        </button>
-        <p v-if="!plugins.length && !loading" class="planned-note">主进程没有登记任何集成插件。</p>
-        <div class="split-section">设计工具</div>
-        <button
-          v-for="tool in DESIGN_TOOLS"
-          :key="tool.id"
-          type="button"
-          class="split-nav"
-          :data-design-tool-entry="tool.id"
-          :aria-current="designSelected === tool.id ? 'true' : undefined"
-          @click="selectDesign(tool.id)"
-        >
-          <PenTool v-if="tool.id === 'figma'" :size="16" />
-          <Palette v-else :size="16" />
-          <span class="split-nav-label">{{ tool.name }}</span>
-          <DsBadge size="sm" :tone="mcpMatches(tool.id).length ? 'success' : 'neutral'">{{ mcpMatches(tool.id).length ? "MCP 已登记" : "未登记 MCP" }}</DsBadge>
-        </button>
-      </template>
-
       <p class="integr-side-note">插件默认全部关闭；启用不改依赖、不联网。连通测试只访问各服务登记的主机，不读取凭据。</p>
     </nav>
 
     <div class="split-main integr-main">
       <div class="pane-toolbar">
-        <strong class="pane-title">{{ tab === "audit" ? "命令与审计" : designSelected ? "设计工具" : "第三方集成" }}</strong>
+        <strong class="pane-title">{{ pageTitle }}</strong>
+        <span v-if="!allAudit && !designSelected && current" class="badge">{{ current.enabled ? "已启用" : "未启用" }}</span>
+        <span v-else-if="allAudit" class="badge">{{ catalog.length }} 条命令 · {{ logEntries.length }} 条记录</span>
         <div class="toolbar-spacer" />
-        <DsBadge v-if="summary" size="sm">
+        <DsBadge v-if="summary" size="sm" class="integr-summary">
           <Activity :size="12" />
           {{ summary.commands }} 条命令 · 已启用 {{ enabledCount }}/{{ plugins.length }}
         </DsBadge>
@@ -650,248 +659,24 @@ onMounted(() => {
         :on-action="loadOverview"
       />
 
-      <div v-else-if="tab === 'audit'" class="integr-body" data-integrations-audit>
-        <label class="integr-filter">
-          <span>过滤命令</span>
-          <input v-model="auditFilter" type="search" placeholder="命令 / 摘要 / 风险" aria-label="过滤集成命令" />
-        </label>
-        <p class="integr-note">
-          命令目录由主进程冻结（risk / credential 是后端登记值），右侧是本次窗口内真实调用过的命令与结果。这里不做“调用成功”的推定。
+      <div v-else-if="allAudit" class="integr-body" data-integrations-audit="all">
+        <div class="integr-audit-bar">
+          <DsButton size="sm" variant="ghost" data-integration-audit-back @click="closeAllAudit">返回服务</DsButton>
+          <label class="integr-filter">
+            <span>过滤命令</span>
+            <input v-model="auditFilter" type="search" placeholder="命令 / 摘要 / 风险" aria-label="过滤集成命令" />
+          </label>
+        </div>
+        <p class="integr-note integr-page-note">
+          命令目录与 risk / credential 都由主进程冻结；右侧是本次窗口真实调用过的命令与结果。不把“调用过”推定成“调用成功”。
         </p>
-        <section class="integr-sec">
-          <h3>命令目录</h3>
-          <DsPageState v-if="catalogError" kind="error" title="命令目录读不到" :description="failureText(catalogError)" />
-          <DsPageState v-else-if="!catalog.length" kind="empty" title="没有登记任何集成命令" />
-          <ul v-else class="integr-rows">
-            <li v-for="item in filteredCatalog" :key="item.command" class="integr-row integr-command" :data-integration-command="item.command">
-              <span class="mono integr-command-name">{{ item.command }}</span>
-              <DsBadge size="sm">{{ RISK_TEXT[item.risk] || item.risk }}</DsBadge>
-              <DsBadge v-if="item.credential" size="sm" tone="warning">触碰凭据</DsBadge>
-              <span class="integr-row-desc">{{ item.summary }}</span>
-            </li>
-          </ul>
-        </section>
-        <section class="integr-sec">
-          <h3>本次窗口的调用记录</h3>
-          <DsPageState v-if="!logEntries.length" kind="empty" title="还没有调用过集成命令" description="刷新、启用、测试连通性或保存凭据后，这里会出现真实结果。" />
-          <ul v-else class="integr-rows">
-            <li v-for="(entry, index) in logEntries" :key="entry.at + '-' + index" class="integr-row" :data-integration-log="entry.command">
-              <span class="mono integr-log-time">{{ formatTime(entry.at) }}</span>
-              <DsBadge size="sm" :tone="entry.ok ? 'success' : 'danger'">{{ entry.ok ? "成功" : "失败" }}</DsBadge>
-              <span class="mono integr-command-name">{{ entry.command }}</span>
-              <span class="integr-row-desc">{{ entry.ok ? "" : entry.code + (entry.detail ? " · " + entry.detail : "") }}</span>
-            </li>
-          </ul>
-        </section>
-      </div>
-
-      <div v-else-if="designSelected" class="integr-body" :data-design-tool-panel="designSelected">
-        <header class="integr-hero">
-          <div class="integr-hero-head">
-            <h1>{{ designSelected === "figma" ? "Figma" : "Adobe Illustrator" }}</h1>
-            <DsBadge :tone="mcpMatchesSelected().length ? 'success' : 'warning'">{{ mcpMatchesSelected().length ? "MCP 已登记" : "未登记 MCP" }}</DsBadge>
-            <DsBadge size="sm" tone="neutral">{{ designSelected === "figma" ? "设计稿预览" : "本机 Illustrator" }}</DsBadge>
-            <span class="integr-version">{{ designSelected === "figma" ? "media/figma-preview" : "media/illustrator" }}</span>
-          </div>
-          <p class="integr-desc">{{ designSelected === "figma" ? DESIGN_TOOLS[0].description : DESIGN_TOOLS[1].description }}</p>
-          <div class="integr-actions">
-            <DsButton size="sm" variant="ghost" data-design-back @click="leaveDesign">返回服务</DsButton>
-            <DsButton size="sm" variant="secondary" :status="designBusy === designSelected ? 'loading' : 'idle'" data-design-refresh @click="probeSelectedDesign()">
-              <RefreshCw :size="13" /> 重新检查
-            </DsButton>
-            <DsButton v-if="designSelected === 'figma'" size="sm" variant="primary" data-design-open-figma @click="figmaOpenAsk = true">
-              <ExternalLink :size="13" /> 在系统浏览器打开 Figma
-            </DsButton>
-            <DsButton v-else size="sm" variant="primary" disabled data-design-launch-unavailable>启动 Illustrator（未注册命令）</DsButton>
-          </div>
-          <p v-if="launchNotice" class="integr-ok" role="status" data-design-launch-notice>{{ launchNotice }}</p>
-          <p v-if="launchError" class="integr-error" role="alert" data-design-launch-error>{{ launchError }}</p>
-        </header>
-
-        <section class="integr-sec" data-design-mcp>
-          <h3>MCP 配置</h3>
-          <DsPageState v-if="mcpError" kind="error" title="MCP 配置读不到" :description="failureText(mcpError)" />
-          <template v-else-if="mcpMatchesSelected().length">
-            <ul class="integr-rows">
-              <li v-for="conn in mcpMatchesSelected()" :key="conn.connectionId" class="integr-row" :data-design-mcp-connection="conn.connectionId">
-                <span class="integr-dep-label">{{ conn.name }}</span>
-                <DsBadge size="sm">{{ conn.transport }}</DsBadge>
-                <DsBadge size="sm" :tone="conn.enabled ? 'success' : 'neutral'">{{ conn.enabled ? "已启用" : "未启用" }}</DsBadge>
-                <span class="integr-row-desc">{{ conn.serverName || conn.status }}</span>
-              </li>
-            </ul>
-            <div class="integr-actions"><DsButton size="sm" variant="secondary" data-design-open-mcp @click="shell.activateApp('mcp-center')">去 MCP 中心管理</DsButton></div>
-          </template>
-          <template v-else>
-            <DsPageState
-              kind="empty"
-              title="未登记 MCP"
-              :description="designSelected === 'figma' ? 'MCP 中心里没有名称 / 端点包含 figma 的连接；添加 stdio 或 HTTP server 后才会在这里出现。' : 'MCP 中心里没有名称 / 端点包含 illustrator 或 adobe 的连接；添加后才会在这里出现。'"
-            />
-            <div class="integr-actions"><DsButton size="sm" variant="secondary" data-design-open-mcp @click="shell.activateApp('mcp-center')">去 MCP 中心添加</DsButton></div>
-          </template>
-        </section>
-
-        <section class="integr-sec" data-design-source>
-          <h3>来源与能力</h3>
-          <p class="integr-note">{{ designSelected === "figma" ? DESIGN_TOOLS[0].sourceHint : DESIGN_TOOLS[1].sourceHint }}</p>
-          <template v-if="designSelected === 'figma'">
-            <div class="integr-row" data-design-probe="figma" :data-design-probe-ok="designProbes.figma?.ok ? '1' : '0'">
-              <span class="integr-dep-label">预览构建器</span>
-              <DsBadge size="sm" :tone="designProbes.figma?.ok ? 'success' : 'warning'">{{ designProbes.figma ? (designProbes.figma.ok ? "可用" : "不可用") : "未探测" }}</DsBadge>
-              <span class="integr-row-desc" data-design-probe-detail="figma">{{ designProbes.figma && !designProbes.figma.ok ? designProbes.figma.code + (designProbes.figma.detail ? " · " + designProbes.figma.detail : "") : (designProbes.figma ? "构建器已注入" : "尚未检查") }}</span>
-            </div>
-            <form class="integr-form" @submit.prevent="fetchFigmaFiles">
-              <label class="integr-field"><span>Figma 预览文件清单地址（HTTPS）</span><input v-model="figmaSourceUrl" placeholder="https://…/preview.json" data-design-figma-url /></label>
-              <DsButton type="submit" size="sm" variant="secondary" :status="figmaFetchBusy ? 'loading' : 'idle'" data-design-figma-fetch>拉取清单</DsButton>
-            </form>
-            <p v-if="figmaFetch" :class="figmaFetch.ok ? 'integr-ok' : 'integr-error'" :data-design-figma-result="figmaFetch.ok ? 'ok' : 'error'">
-              {{ figmaFetch.ok ? "已拉取 " + figmaFetch.count + " 个白名单文件" : "拉取失败：" + figmaFetch.code + (figmaFetch.detail ? " · " + figmaFetch.detail : "") }}
-            </p>
-          </template>
-          <template v-else>
-            <div class="integr-row" data-design-probe="illustrator" :data-design-probe-ok="designProbes.illustrator?.ok ? '1' : '0'">
-              <span class="integr-dep-label">本机 Illustrator</span>
-              <DsBadge size="sm" :tone="designProbes.illustrator?.ok ? 'success' : 'warning'">{{ designProbes.illustrator ? (designProbes.illustrator.ok ? "可用" : "不可用") : "未探测" }}</DsBadge>
-              <span class="integr-row-desc" data-design-probe-detail="illustrator">{{ designProbes.illustrator && !designProbes.illustrator.ok ? designProbes.illustrator.code + (designProbes.illustrator.detail ? " · " + designProbes.illustrator.detail : "") : (designProbes.illustrator ? "本机 Illustrator 可用" : "尚未检查") }}</span>
-            </div>
-          </template>
-        </section>
-
-        <section class="integr-sec" data-design-launch>
-          <h3>启动 / 打开</h3>
-          <p v-if="designSelected === 'figma'" class="integr-note">Figma 没有本机客户端启动命令，这里用系统浏览器打开 figma.com；只在你点确认后调用 browser/openExternal。</p>
-          <p v-else class="integr-note">当前构建没有注册启动 Adobe Illustrator 的命令（media/illustrator 只提供配置与临时导出）；检测到本机安装后仍可在系统中启动 Illustrator。</p>
-        </section>
-      </div>
-
-      <div v-else class="integr-body" data-integrations-services>
-        <DsPageState v-if="!plugins.length && !loading" kind="empty" title="没有可管理的集成服务" description="主进程的插件登记表为空。" />
-        <template v-else-if="current">
-          <header class="integr-hero">
-            <div class="integr-hero-head">
-              <h1>{{ current.name }}</h1>
-              <DsBadge :tone="healthTone(currentHealth)">{{ healthLabel(currentHealth) }}</DsBadge>
-              <DsBadge v-if="current.enabled" size="sm" tone="neutral">已启用</DsBadge>
-              <span class="integr-version">v{{ current.version }}</span>
-            </div>
-            <p class="integr-desc">{{ current.description }}</p>
-            <div class="integr-actions">
-              <DsButton
-                :variant="current.enabled ? 'secondary' : 'primary'"
-                size="sm"
-                :status="actionBusy === 'toggle' ? 'loading' : 'idle'"
-                :data-integration-toggle="current.id"
-                @click="toggleEnabled"
-              >
-                {{ current.enabled ? "停用" : "启用" }}
-              </DsButton>
-              <DsButton size="sm" variant="secondary" :status="actionBusy === 'probe' ? 'loading' : 'idle'" data-integration-probe @click="testConnectivity">
-                <ShieldCheck :size="13" /> 连通测试
-              </DsButton>
-              <DsButton size="sm" variant="ghost" :status="detailLoading ? 'loading' : 'idle'" @click="loadDetail">重新读取</DsButton>
-            </div>
-            <p class="integr-note">
-              服务声明能力：{{ current.capabilities.length ? current.capabilities.join(" / ") : "无运行时能力依赖" }} ·
-              必需依赖 {{ current.requiredDependencies.length }} 项、可选依赖 {{ current.optionalDependencies.length }} 项
-            </p>
-          </header>
-
-          <p v-if="actionError" class="integr-error" role="alert" :data-integration-error="actionError.code">{{ failureText(actionError) }}<span v-if="actionError.detail" class="integr-detail"> · {{ detailText(actionError.detail) }}</span></p>
-          <p v-if="actionNotice" class="integr-ok" role="status">{{ actionNotice }}</p>
-          <p v-if="detailError" class="integr-error" role="alert">{{ failureText(detailError) }}</p>
-          <p v-if="detailNote" class="integr-note">{{ detailNote }}</p>
-
-          <section class="integr-sec">
-            <h3>依赖与状态</h3>
-            <DsPageState v-if="!currentHealth" kind="loading" title="正在读取依赖健康" />
-            <template v-else>
-              <ul class="integr-rows">
-                <li v-for="dep in currentHealth.dependencies" :key="dep.id" class="integr-row" :data-integration-dep="dep.id">
-                  <span class="integr-dep-label">{{ dep.label }}</span>
-                  <DsBadge size="sm">{{ DEP_KIND_TEXT[dep.kind] || dep.kind }}</DsBadge>
-                  <DsBadge size="sm" :tone="STATUS_TONE[dep.status] ?? 'neutral'">{{ statusText(dep.status) }}</DsBadge>
-                  <DsBadge v-if="dep.required" size="sm" tone="neutral">必需</DsBadge>
-                  <span class="integr-row-desc">{{ dep.detail || dep.install || "" }}</span>
-                </li>
-              </ul>
-              <p v-if="currentHealth.detail" class="integr-note">{{ currentHealth.detail }}</p>
-            </template>
-          </section>
-
-          <section v-if="statusRows.length" class="integr-sec">
-            <h3>服务状态</h3>
-            <dl class="integr-kv">
-              <template v-for="row in statusRows" :key="row.key">
-                <dt>{{ row.key }}</dt>
-                <dd>{{ row.text }}</dd>
-              </template>
-            </dl>
-          </section>
-
-          <section v-if="credentialForm || credentialRows.length" class="integr-sec">
-            <h3>凭据</h3>
-            <div v-if="credentialRows.length" class="integr-kv-wrap">
-              <dl class="integr-kv">
-                <template v-for="row in credentialRows" :key="row.key">
-                  <dt>{{ row.key }}</dt>
-                  <dd>{{ row.text }}</dd>
-                </template>
-              </dl>
-            </div>
-            <p v-if="!credentialRows.length" class="integr-note">还没有读到凭据状态；保存一次后这里只显示掩码，不显示明文。</p>
-            <form v-if="credentialForm" class="integr-form" @submit.prevent="saveCredential">
-              <label class="integr-field">
-                <span>{{ credentialForm.label }}</span>
-                <input v-model="credentialSecret" type="password" autocomplete="off" :placeholder="credentialForm.label" />
-              </label>
-              <DsButton type="submit" size="sm" variant="primary" :status="actionBusy === 'credential' ? 'loading' : 'idle'" :disabled="!credentialSecret.trim()">保存到安全存储</DsButton>
-            </form>
-            <p class="integr-note">{{ credentialForm?.hint || "凭据只交给主进程写入系统安全存储。" }}</p>
-          </section>
-
-          <section v-if="current.id === 'dingtalk'" class="integr-sec">
-            <h3>钉钉群机器人</h3>
-            <DsPageState v-if="!dingtalkChannels.length" kind="empty" title="还没有添加机器人" description="在下方填写群机器人的 Webhook（与加签密钥）；未配置时消息发送保持不可用。" />
+        <div class="integr-detail-layout integr-detail-layout--wide">
+          <section class="integr-zone" data-integration-zone="detail">
+            <h2 class="integr-zone-title">命令目录<span class="integr-zone-count">{{ filteredCatalog.length }}</span></h2>
+            <DsPageState v-if="catalogError" kind="error" title="命令目录读不到" :description="failureText(catalogError)" />
+            <DsPageState v-else-if="!catalog.length" kind="empty" title="没有登记任何集成命令" />
             <ul v-else class="integr-rows">
-              <li v-for="channel in dingtalkChannels" :key="String(channel.id)" class="integr-row" :data-dingtalk-channel="String(channel.id)">
-                <span class="integr-dep-label">{{ channel.name }}</span>
-                <DsBadge size="sm" :tone="channel.enabled ? 'success' : 'neutral'">{{ channel.enabled ? "启用" : "停用" }}</DsBadge>
-                <span class="integr-row-desc mono">{{ channel.webhookMask || "" }} {{ channel.secretSet ? "· 加签已保存" : "· 未设置加签" }}</span>
-                <DsButton size="sm" variant="danger" :status="actionBusy === 'channel' ? 'loading' : 'idle'" @click="deleteDingtalkChannel(String(channel.id))">删除</DsButton>
-              </li>
-            </ul>
-            <form class="integr-form integr-form-col" @submit.prevent="saveDingtalkChannel">
-              <label class="integr-field"><span>名称</span><input v-model="channelForm.name" placeholder="例如：运营群" /></label>
-              <label class="integr-field"><span>Webhook</span><input v-model="channelForm.webhook" placeholder="https://oapi.dingtalk.com/robot/send?access_token=…" /></label>
-              <label class="integr-field"><span>加签密钥（可选）</span><input v-model="channelForm.secret" type="password" autocomplete="off" placeholder="SEC…" /></label>
-              <DsButton type="submit" size="sm" variant="primary" :status="actionBusy === 'channel' ? 'loading' : 'idle'" :disabled="!channelForm.webhook.trim()">保存机器人</DsButton>
-            </form>
-          </section>
-
-          <section v-if="current.id === 'quark'" class="integr-sec">
-            <h3>夸克登录态</h3>
-            <div v-if="quarkAccount" class="integr-kv-wrap">
-              <dl class="integr-kv">
-                <template v-for="row in scalarRows(quarkAccount)" :key="row.key">
-                  <dt>{{ row.key }}</dt>
-                  <dd>{{ row.text }}</dd>
-                </template>
-              </dl>
-            </div>
-            <p v-else class="integr-note">没有读到登录态（官方 CLI 未配置或尚未登录时如实为空）。</p>
-            <div class="integr-actions">
-              <DsButton size="sm" variant="secondary" :status="actionBusy === 'quark' ? 'loading' : 'idle'" @click="quarkLogin">扫码登录</DsButton>
-              <DsButton size="sm" variant="ghost" @click="quarkStopLogin">停止登录</DsButton>
-              <DsButton size="sm" variant="danger" @click="quarkLogout">退出登录</DsButton>
-            </div>
-            <p class="integr-note">登录态由夸克官方 CLI 自己保存；桥面拿不到 token。</p>
-          </section>
-
-          <section v-if="pluginCatalog.length" class="integr-sec">
-            <h3>相关命令</h3>
-            <ul class="integr-rows">
-              <li v-for="item in pluginCatalog" :key="item.command" class="integr-row integr-command">
+              <li v-for="item in filteredCatalog" :key="item.command" class="integr-row integr-command" :data-integration-command="item.command">
                 <span class="mono integr-command-name">{{ item.command }}</span>
                 <DsBadge size="sm">{{ RISK_TEXT[item.risk] || item.risk }}</DsBadge>
                 <DsBadge v-if="item.credential" size="sm" tone="warning">触碰凭据</DsBadge>
@@ -899,7 +684,269 @@ onMounted(() => {
               </li>
             </ul>
           </section>
-        </template>
+          <section class="integr-zone" data-integration-zone="audit">
+            <h2 class="integr-zone-title">本次窗口的调用记录<span class="integr-zone-count">{{ logEntries.length }}</span></h2>
+            <DsPageState v-if="!logEntries.length" kind="empty" title="还没有调用过集成命令" description="刷新、启用、测试连通性或保存凭据后，这里会出现真实结果。" />
+            <ul v-else class="integr-rows">
+              <li v-for="(entry, index) in logEntries" :key="entry.at + '-' + index" class="integr-row integr-log-row" :data-integration-log="entry.command">
+                <span class="mono integr-log-time">{{ formatTime(entry.at) }}</span>
+                <DsBadge size="sm" :tone="entry.ok ? 'success' : 'danger'">{{ entry.ok ? "成功" : "失败" }}</DsBadge>
+                <span class="mono integr-command-name">{{ entry.command }}</span>
+                <span class="integr-row-desc">{{ entry.ok ? "" : entry.code + (entry.detail ? " · " + entry.detail : "") }}</span>
+              </li>
+            </ul>
+          </section>
+        </div>
+      </div>
+
+      <div v-else-if="designSelected" class="integr-body" :data-design-tool-panel="designSelected">
+        <div class="integr-detail-layout">
+          <section class="integr-zone" data-integration-zone="detail">
+            <header class="integr-hero">
+              <div class="integr-hero-head">
+                <h1>{{ designSelected === "figma" ? "Figma" : "Adobe Illustrator" }}</h1>
+                <DsBadge :tone="mcpMatchesSelected().length ? 'success' : 'warning'">{{ mcpMatchesSelected().length ? "MCP 已登记" : "未登记 MCP" }}</DsBadge>
+                <DsBadge size="sm" tone="neutral">{{ designSelected === "figma" ? "设计稿预览" : "本机 Illustrator" }}</DsBadge>
+                <span class="integr-version">{{ designSelected === "figma" ? "media/figma-preview" : "media/illustrator" }}</span>
+              </div>
+              <p class="integr-desc">{{ designSelected === "figma" ? DESIGN_TOOLS[0].description : DESIGN_TOOLS[1].description }}</p>
+              <div class="integr-actions">
+                <DsButton size="sm" variant="ghost" data-design-back @click="leaveDesign">返回服务</DsButton>
+                <DsButton size="sm" variant="secondary" :status="designBusy === designSelected ? 'loading' : 'idle'" data-design-refresh @click="probeSelectedDesign()">
+                  <RefreshCw :size="13" /> 重新检查
+                </DsButton>
+                <DsButton v-if="designSelected === 'figma'" size="sm" variant="primary" data-design-open-figma @click="figmaOpenAsk = true">
+                  <ExternalLink :size="13" /> 在系统浏览器打开 Figma
+                </DsButton>
+                <DsButton v-else size="sm" variant="primary" disabled data-design-launch-unavailable>启动 Illustrator（未注册命令）</DsButton>
+              </div>
+              <p v-if="launchNotice" class="integr-ok" role="status" data-design-launch-notice>{{ launchNotice }}</p>
+              <p v-if="launchError" class="integr-error" role="alert" data-design-launch-error>{{ launchError }}</p>
+            </header>
+          </section>
+
+          <section class="integr-zone" data-integration-zone="status">
+            <h2 class="integr-zone-title">状态与依赖</h2>
+            <section class="integr-sec" data-design-mcp>
+              <h3>MCP 配置</h3>
+              <DsPageState v-if="mcpError" kind="error" title="MCP 配置读不到" :description="failureText(mcpError)" />
+              <template v-else-if="mcpMatchesSelected().length">
+                <ul class="integr-rows">
+                  <li v-for="conn in mcpMatchesSelected()" :key="conn.connectionId" class="integr-row" :data-design-mcp-connection="conn.connectionId">
+                    <span class="integr-dep-label">{{ conn.name }}</span>
+                    <DsBadge size="sm">{{ conn.transport }}</DsBadge>
+                    <DsBadge size="sm" :tone="conn.enabled ? 'success' : 'neutral'">{{ conn.enabled ? "已启用" : "未启用" }}</DsBadge>
+                    <span class="integr-row-desc">{{ conn.serverName || conn.status }}</span>
+                  </li>
+                </ul>
+                <div class="integr-actions"><DsButton size="sm" variant="secondary" data-design-open-mcp @click="shell.activateApp('mcp-center')">去 MCP 中心管理</DsButton></div>
+              </template>
+              <template v-else>
+                <DsPageState
+                  kind="empty"
+                  title="未登记 MCP"
+                  :description="designSelected === 'figma' ? 'MCP 中心里没有名称 / 端点包含 figma 的连接；添加 stdio 或 HTTP server 后才会在这里出现。' : 'MCP 中心里没有名称 / 端点包含 illustrator 或 adobe 的连接；添加后才会在这里出现。'"
+                />
+                <div class="integr-actions"><DsButton size="sm" variant="secondary" data-design-open-mcp @click="shell.activateApp('mcp-center')">去 MCP 中心添加</DsButton></div>
+              </template>
+            </section>
+
+            <section class="integr-sec" data-design-source>
+              <h3>来源与能力</h3>
+              <p class="integr-note">{{ designSelected === "figma" ? DESIGN_TOOLS[0].sourceHint : DESIGN_TOOLS[1].sourceHint }}</p>
+              <template v-if="designSelected === 'figma'">
+                <div class="integr-row" data-design-probe="figma" :data-design-probe-ok="designProbes.figma?.ok ? '1' : '0'">
+                  <span class="integr-dep-label">预览构建器</span>
+                  <DsBadge size="sm" :tone="designProbes.figma?.ok ? 'success' : 'warning'">{{ designProbes.figma ? (designProbes.figma.ok ? "可用" : "不可用") : "未探测" }}</DsBadge>
+                  <span class="integr-row-desc" data-design-probe-detail="figma">{{ designProbes.figma && !designProbes.figma.ok ? designProbes.figma.code + (designProbes.figma.detail ? " · " + designProbes.figma.detail : "") : (designProbes.figma ? "构建器已注入" : "尚未检查") }}</span>
+                </div>
+                <form class="integr-form" @submit.prevent="fetchFigmaFiles">
+                  <label class="integr-field"><span>Figma 预览文件清单地址（HTTPS）</span><input v-model="figmaSourceUrl" placeholder="https://…/preview.json" data-design-figma-url /></label>
+                  <DsButton type="submit" size="sm" variant="secondary" :status="figmaFetchBusy ? 'loading' : 'idle'" data-design-figma-fetch>拉取清单</DsButton>
+                </form>
+                <p v-if="figmaFetch" :class="figmaFetch.ok ? 'integr-ok' : 'integr-error'" :data-design-figma-result="figmaFetch.ok ? 'ok' : 'error'">
+                  {{ figmaFetch.ok ? "已拉取 " + figmaFetch.count + " 个白名单文件" : "拉取失败：" + figmaFetch.code + (figmaFetch.detail ? " · " + figmaFetch.detail : "") }}
+                </p>
+              </template>
+              <template v-else>
+                <div class="integr-row" data-design-probe="illustrator" :data-design-probe-ok="designProbes.illustrator?.ok ? '1' : '0'">
+                  <span class="integr-dep-label">本机 Illustrator</span>
+                  <DsBadge size="sm" :tone="designProbes.illustrator?.ok ? 'success' : 'warning'">{{ designProbes.illustrator ? (designProbes.illustrator.ok ? "可用" : "不可用") : "未探测" }}</DsBadge>
+                  <span class="integr-row-desc" data-design-probe-detail="illustrator">{{ designProbes.illustrator && !designProbes.illustrator.ok ? designProbes.illustrator.code + (designProbes.illustrator.detail ? " · " + designProbes.illustrator.detail : "") : (designProbes.illustrator ? "本机 Illustrator 可用" : "尚未检查") }}</span>
+                </div>
+              </template>
+            </section>
+
+            <section class="integr-sec" data-design-launch>
+              <h3>启动 / 打开</h3>
+              <p v-if="designSelected === 'figma'" class="integr-note">Figma 没有本机客户端启动命令，这里用系统浏览器打开 figma.com；只在你确认后调用 browser/openExternal。</p>
+              <p v-else class="integr-note">当前构建没有注册启动 Adobe Illustrator 的命令（media/illustrator 只提供配置与临时导出）；检测到本机安装后仍可在系统中启动 Illustrator。</p>
+            </section>
+          </section>
+        </div>
+      </div>
+
+      <div v-else class="integr-body" data-integrations-services>
+        <DsPageState v-if="!plugins.length && !loading" kind="empty" title="没有可管理的集成服务" description="主进程的插件登记表为空。" />
+        <div v-else-if="current" class="integr-detail-layout">
+          <section class="integr-zone integr-zone--detail" data-integration-zone="detail">
+            <header class="integr-hero">
+              <div class="integr-hero-head">
+                <h1>{{ current.name }}</h1>
+                <DsBadge :tone="healthTone(currentHealth)">{{ healthLabel(currentHealth) }}</DsBadge>
+                <DsBadge v-if="current.enabled" size="sm" tone="neutral">已启用</DsBadge>
+                <span class="integr-version">v{{ current.version }}</span>
+              </div>
+              <p class="integr-desc">{{ current.description }}</p>
+              <div class="integr-actions">
+                <DsButton
+                  :variant="current.enabled ? 'secondary' : 'primary'"
+                  size="sm"
+                  :status="actionBusy === 'toggle' ? 'loading' : 'idle'"
+                  :data-integration-toggle="current.id"
+                  @click="toggleEnabled"
+                >
+                  {{ current.enabled ? "停用" : "启用" }}
+                </DsButton>
+                <DsButton size="sm" variant="secondary" :status="actionBusy === 'probe' ? 'loading' : 'idle'" data-integration-probe @click="testConnectivity">
+                  <ShieldCheck :size="13" /> 连通测试
+                </DsButton>
+                <DsButton size="sm" variant="ghost" :status="detailLoading ? 'loading' : 'idle'" @click="loadDetail">重新读取</DsButton>
+              </div>
+            </header>
+
+            <p v-if="actionError" class="integr-error" role="alert" :data-integration-error="actionError.code">{{ failureText(actionError) }}<span v-if="actionError.detail" class="integr-detail"> · {{ detailText(actionError.detail) }}</span></p>
+            <p v-if="actionNotice" class="integr-ok" role="status">{{ actionNotice }}</p>
+            <p v-if="detailError" class="integr-error" role="alert">{{ failureText(detailError) }}</p>
+            <p v-if="detailNote" class="integr-note">{{ detailNote }}</p>
+
+            <section v-if="credentialForm || credentialRows.length" class="integr-sec">
+              <h3>凭据</h3>
+              <div v-if="credentialRows.length" class="integr-kv-wrap">
+                <dl class="integr-kv">
+                  <template v-for="row in credentialRows" :key="row.key">
+                    <dt>{{ row.key }}</dt>
+                    <dd>{{ row.text }}</dd>
+                  </template>
+                </dl>
+              </div>
+              <p v-if="!credentialRows.length" class="integr-note">还没有读到凭据状态；保存一次后这里只显示掩码，不显示明文。</p>
+              <form v-if="credentialForm" class="integr-form" @submit.prevent="saveCredential">
+                <label class="integr-field">
+                  <span>{{ credentialForm.label }}</span>
+                  <input v-model="credentialSecret" type="password" autocomplete="off" :placeholder="credentialForm.label" />
+                </label>
+                <DsButton type="submit" size="sm" variant="primary" :status="actionBusy === 'credential' ? 'loading' : 'idle'" :disabled="!credentialSecret.trim()">保存到安全存储</DsButton>
+              </form>
+              <p class="integr-note">{{ credentialForm?.hint || "凭据只交给主进程写入系统安全存储。" }}</p>
+            </section>
+
+            <section v-if="current.id === 'dingtalk'" class="integr-sec">
+              <h3>钉钉群机器人</h3>
+              <DsPageState v-if="!dingtalkChannels.length" kind="empty" title="还没有添加机器人" description="在下方填写群机器人的 Webhook（与加签密钥）；未配置时消息发送保持不可用。" />
+              <ul v-else class="integr-rows">
+                <li v-for="channel in dingtalkChannels" :key="String(channel.id)" class="integr-row" :data-dingtalk-channel="String(channel.id)">
+                  <span class="integr-dep-label">{{ channel.name }}</span>
+                  <DsBadge size="sm" :tone="channel.enabled ? 'success' : 'neutral'">{{ channel.enabled ? "启用" : "停用" }}</DsBadge>
+                  <span class="integr-row-desc mono">{{ channel.webhookMask || "" }} {{ channel.secretSet ? "· 加签已保存" : "· 未设置加签" }}</span>
+                  <DsButton size="sm" variant="danger" :status="actionBusy === 'channel' ? 'loading' : 'idle'" @click="deleteDingtalkChannel(String(channel.id))">删除</DsButton>
+                </li>
+              </ul>
+              <form class="integr-form integr-form-col" @submit.prevent="saveDingtalkChannel">
+                <label class="integr-field"><span>名称</span><input v-model="channelForm.name" placeholder="例如：运营群" /></label>
+                <label class="integr-field"><span>Webhook</span><input v-model="channelForm.webhook" placeholder="https://oapi.dingtalk.com/robot/send?access_token=…" /></label>
+                <label class="integr-field"><span>加签密钥（可选）</span><input v-model="channelForm.secret" type="password" autocomplete="off" placeholder="SEC…" /></label>
+                <DsButton type="submit" size="sm" variant="primary" :status="actionBusy === 'channel' ? 'loading' : 'idle'" :disabled="!channelForm.webhook.trim()">保存机器人</DsButton>
+              </form>
+            </section>
+
+            <section v-if="current.id === 'quark'" class="integr-sec">
+              <h3>夸克登录态</h3>
+              <div v-if="quarkAccount" class="integr-kv-wrap">
+                <dl class="integr-kv">
+                  <template v-for="row in scalarRows(quarkAccount)" :key="row.key">
+                    <dt>{{ row.key }}</dt>
+                    <dd>{{ row.text }}</dd>
+                  </template>
+                </dl>
+              </div>
+              <p v-else class="integr-note">没有读到登录态（官方 CLI 未配置或尚未登录时如实为空）。</p>
+              <div class="integr-actions">
+                <DsButton size="sm" variant="secondary" :status="actionBusy === 'quark' ? 'loading' : 'idle'" @click="quarkLogin">扫码登录</DsButton>
+                <DsButton size="sm" variant="ghost" @click="quarkStopLogin">停止登录</DsButton>
+                <DsButton size="sm" variant="danger" @click="quarkLogout">退出登录</DsButton>
+              </div>
+              <p class="integr-note">登录态由夸克官方 CLI 自己保存；桥面拿不到 token。</p>
+            </section>
+          </section>
+
+          <section class="integr-zone integr-zone--status" data-integration-zone="status">
+            <h2 class="integr-zone-title">状态与依赖</h2>
+            <section class="integr-sec">
+              <h3>依赖健康</h3>
+              <DsPageState v-if="!currentHealth" kind="loading" title="正在读取依赖健康" />
+              <template v-else>
+                <ul class="integr-rows">
+                  <li v-for="dep in currentHealth.dependencies" :key="dep.id" class="integr-row integr-dep-row" :data-integration-dep="dep.id">
+                    <span class="integr-dep-label">{{ dep.label }}</span>
+                    <DsBadge size="sm">{{ DEP_KIND_TEXT[dep.kind] || dep.kind }}</DsBadge>
+                    <DsBadge size="sm" :tone="STATUS_TONE[dep.status] ?? 'neutral'">{{ statusText(dep.status) }}</DsBadge>
+                    <DsBadge v-if="dep.required" size="sm" tone="neutral">必需</DsBadge>
+                    <span class="integr-row-desc">{{ dep.detail || dep.install || "" }}</span>
+                  </li>
+                </ul>
+                <p v-if="currentHealth.detail" class="integr-note">{{ currentHealth.detail }}</p>
+              </template>
+            </section>
+
+            <section v-if="statusRows.length" class="integr-sec">
+              <h3>服务状态</h3>
+              <dl class="integr-kv">
+                <template v-for="row in statusRows" :key="row.key">
+                  <dt>{{ row.key }}</dt>
+                  <dd>{{ row.text }}</dd>
+                </template>
+              </dl>
+            </section>
+
+            <section class="integr-sec">
+              <h3>声明能力</h3>
+              <p class="integr-note">{{ current.capabilities.length ? current.capabilities.join(" / ") : "无运行时能力依赖" }}</p>
+              <p class="integr-note">必需依赖 {{ current.requiredDependencies.length }} 项 · 可选依赖 {{ current.optionalDependencies.length }} 项 · 版本 v{{ current.version }}</p>
+            </section>
+          </section>
+
+          <section class="integr-zone integr-zone--audit" data-integration-zone="audit" data-integrations-audit="service">
+            <div class="integr-zone-head">
+              <h2 class="integr-zone-title">命令与审计</h2>
+              <DsButton size="sm" variant="ghost" data-integration-audit-all @click="openAllAudit">全部命令与审计</DsButton>
+            </div>
+            <section class="integr-sec">
+              <h3>相关命令<span class="integr-zone-count">{{ pluginCatalog.length }}</span></h3>
+              <DsPageState v-if="!pluginCatalog.length" kind="empty" title="没有与此服务关联的命令" description="命令目录来自主进程 integration/commands；这里只列真实登记项。" />
+              <ul v-else class="integr-rows">
+                <li v-for="item in pluginCatalog" :key="item.command" class="integr-row integr-command" :data-integration-command="item.command">
+                  <span class="mono integr-command-name">{{ item.command }}</span>
+                  <DsBadge size="sm">{{ RISK_TEXT[item.risk] || item.risk }}</DsBadge>
+                  <DsBadge v-if="item.credential" size="sm" tone="warning">触碰凭据</DsBadge>
+                  <span class="integr-row-desc">{{ item.summary }}</span>
+                </li>
+              </ul>
+            </section>
+            <section class="integr-sec">
+              <h3>本次窗口调用<span class="integr-zone-count">{{ serviceLogs.length }}</span></h3>
+              <DsPageState v-if="!serviceLogs.length" kind="empty" title="还没有调用过这个服务的命令" description="启用、连通测试、保存凭据或读取状态后，这里会出现真实结果。" />
+              <ul v-else class="integr-rows">
+                <li v-for="(entry, index) in serviceLogs" :key="entry.at + '-' + index" class="integr-row integr-log-row" :data-integration-log="entry.command">
+                  <span class="mono integr-log-time">{{ formatTime(entry.at) }}</span>
+                  <DsBadge size="sm" :tone="entry.ok ? 'success' : 'danger'">{{ entry.ok ? "成功" : "失败" }}</DsBadge>
+                  <span class="mono integr-command-name">{{ entry.command }}</span>
+                  <span class="integr-row-desc">{{ entry.ok ? "" : entry.code + (entry.detail ? " · " + entry.detail : "") }}</span>
+                </li>
+              </ul>
+            </section>
+          </section>
+        </div>
       </div>
     </div>
 
@@ -913,4 +960,3 @@ onMounted(() => {
     </DsDialog>
   </div>
 </template>
-

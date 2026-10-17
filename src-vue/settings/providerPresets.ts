@@ -55,6 +55,8 @@ export interface ProviderPreset {
   readonly baseUrl: string;
   readonly adapterType: string;
   readonly docsUrl: string;
+  /** 官方 API Key / 控制台页面；缺失时界面禁用「获取密钥」。 */
+  readonly apiKeyUrl?: string;
   readonly credentialMode: PresetCredentialMode;
   readonly models: readonly PresetModel[];
   readonly modelsSource: PresetModelsSource;
@@ -71,6 +73,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     baseUrl: "https://api-inference.modelscope.cn/v1",
     adapterType: "modelscope",
     docsUrl: "https://www.modelscope.cn/docs/model-service/API-Inference/intro",
+    apiKeyUrl: "https://modelscope.cn/my/myaccesstoken",
     credentialMode: "single",
     modelsSource: "official",
     models: [
@@ -115,6 +118,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
     adapterType: "volcengine",
     docsUrl: "https://ark.volcengine.com/region:cn-beijing/docs/base-url-and-authentication",
+    apiKeyUrl: "https://console.volcengine.com/ark",
     credentialMode: "single",
     modelsSource: "official",
     models: [
@@ -133,6 +137,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     baseUrl: "https://api.deepseek.com",
     adapterType: "openai-compatible",
     docsUrl: "https://api-docs.deepseek.com/",
+    apiKeyUrl: "https://platform.deepseek.com/api_keys",
     credentialMode: "single",
     modelsSource: "official",
     models: [
@@ -147,6 +152,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     baseUrl: "https://api.openai.com/v1",
     adapterType: "openai-compatible",
     docsUrl: "https://developers.openai.com/api/reference/overview",
+    apiKeyUrl: "https://platform.openai.com/api-keys",
     credentialMode: "single",
     modelsSource: "official",
     models: [
@@ -164,6 +170,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     baseUrl: "https://generativelanguage.googleapis.com",
     adapterType: "gemini",
     docsUrl: "https://ai.google.dev/gemini-api/docs/openai",
+    apiKeyUrl: "https://aistudio.google.com/app/apikey",
     credentialMode: "single",
     modelsSource: "official",
     models: [
@@ -180,6 +187,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     baseUrl: "https://api.anthropic.com",
     adapterType: "anthropic",
     docsUrl: "https://platform.claude.com/docs/en/api/messages",
+    apiKeyUrl: "https://console.anthropic.com/settings/keys",
     credentialMode: "single",
     modelsSource: "official",
     models: [

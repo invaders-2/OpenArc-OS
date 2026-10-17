@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
 import DsButton from "../design-system/DsButton.vue";
+import DsDialog from "../design-system/DsDialog.vue";
 import { t } from "../i18n";
 import { useShellStore } from "../stores/shell";
 import { resolveProviderLogo } from "./providerLogos";
@@ -146,6 +147,23 @@ function applyPreset(preset: ProviderPreset) {
   selectedPresetId.value = preset.id;
 }
 
+/* 「获取密钥」：先二次确认，再交给主进程 browser/openExternal 在系统浏览器打开。 */
+const keyUrl = ref<string | null>(null);
+const keyError = ref("");
+async function openKeyUrl() {
+  const url = keyUrl.value;
+  keyUrl.value = null;
+  keyError.value = "";
+  if (!url) return;
+  const browser = (window as any).openarc?.browser;
+  if (!browser || typeof browser.command !== "function") {
+    keyError.value = t("当前环境没有外部浏览器桥；请手动打开服务商控制台。");
+    return;
+  }
+  const res = await browser.command({ type: "browser/openExternal", url }).catch(() => null);
+  if (res && res.error) keyError.value = String(res.error);
+}
+
 const secretPlaceholder = computed(() => {
   if (props.mode === "edit") {
     return props.initial.credentialConfigured === true
@@ -262,7 +280,9 @@ function onBaseUrl(event: Event) {
         <a class="pform-docs mono" :href="activePreset.docsUrl" target="_blank" rel="noreferrer" data-d4-01-preset-docs>{{ activePreset.docsUrl }}</a>
         <span class="badge" data-d4-01-preset-mode-label>{{ presetModeLabel(activePreset) }}</span>
         <span class="badge" :class="{ ok: activeStatus === 'available', warn: activeStatus === 'pending' }" data-d4-01-preset-protocol-status>{{ statusText(activeStatus) }}</span>
+        <DsButton size="sm" variant="secondary" data-d4-01-preset-key :disabled="!activePreset.apiKeyUrl" :title="activePreset.apiKeyUrl ? t('在系统浏览器打开服务商控制台获取 API Key（需确认）') : t('该预设没有登记官方 API Key 页面')" @click="keyUrl = activePreset.apiKeyUrl || null">{{ t("获取密钥") }}</DsButton>
       </div>
+      <p v-if="!activePreset.apiKeyUrl" class="set-cap" data-d4-01-preset-key-missing>{{ t("这个预设没有登记官方 API Key 页面：请从服务商文档自行获取。") }}</p>
       <p class="set-cap" data-d4-01-preset-notes>{{ t(activePreset.notes) }}</p>
       <p v-if="activeStatus === 'pending'" class="pform-warn" data-d4-01-preset-pending-notice>
         {{ t("协议「{adapter}」还没在当前构建里注册（由另外的包实现中）：可以保存服务商，但调用会失败。", { adapter: currentAdapter }) }}
@@ -331,6 +351,16 @@ function onBaseUrl(event: Event) {
       <DsButton v-if="mode === 'edit'" variant="primary" size="sm" data-d4-01-provider-save :disabled="off" @click="submit">{{ busy ? t("保存中…") : t("保存修改") }}</DsButton>
       <DsButton v-else variant="primary" size="sm" data-d4-01-provider-create :disabled="off" @click="submit">{{ t("添加服务商") }}</DsButton>
     </div>
+
+    <DsDialog :open="keyUrl !== null" :title="t('获取 API 密钥')" @close="keyUrl = null">
+      <p class="set-cap">{{ t("将在系统浏览器打开服务商控制台；OpenArc 不会读取或代填你的密钥。") }}</p>
+      <p class="mp2-static mono" data-d4-01-preset-key-url>{{ keyUrl }}</p>
+      <p v-if="keyError" class="pform-err" role="alert" data-d4-01-preset-key-error>{{ keyError }}</p>
+      <template #footer>
+        <button class="ghost" type="button" @click="keyUrl = null">{{ t("取消") }}</button>
+        <button class="primary" type="button" data-d4-01-preset-key-confirm @click="openKeyUrl">{{ t("打开控制台") }}</button>
+      </template>
+    </DsDialog>
   </form>
 </template>
 
