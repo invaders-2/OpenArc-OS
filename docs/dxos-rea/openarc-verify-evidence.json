@@ -1,0 +1,822 @@
+{
+  "meta": {
+    "task": "task-13",
+    "note": "REA 静态验收；未启动应用、未改产物。",
+    "build": {
+      "path": "/Users/wepingli/Desktop/OpenArc OS.app/Contents/Resources/app",
+      "branch": "main",
+      "commit": "9c14bb0",
+      "commitFull": "9c14bb076056a81fe627a6049082147bad0ecec4",
+      "dirty": false,
+      "builtAt": "2026-10-17T14:34:51.209Z"
+    },
+    "artifact": {
+      "dirContentSha256": "ec9214cdbf9f21d2b9acadfb571bc75570c6d5d9f2449fed86226db3763b933a",
+      "packageJsonSha256": "ba4473cf12478aa779dcc5d77a0510b0d62743a4c2fe570c7a461fda2e7f584c",
+      "mainCjsSha256": "9a7cca128a86a2eb4d579a495b3bd52565c4b47e81933cd6b78f126b40e9809c",
+      "vueHtmlSha256": "0baf1aebbdf38712137be0f85560d7b1d8ab29e183da2a74670b5bc14242efb8",
+      "fileCount": 477
+    },
+    "baseline": {
+      "npmTest": "3604/3604/0",
+      "buildExit": 0,
+      "probe": "48/48 (artifacts/fe-acceptance/report.json)"
+    },
+    "rea": {
+      "electron": {
+        "input": ".../app/electron",
+        "digest": "eed43c76dbed9c3b5e1f0f686e51d02fcc7c5147585fb1b0d812f95b63a89cb2",
+        "evidenceId": "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc",
+        "relevantFiles": 307,
+        "parsedJs": 306,
+        "findings": 1604,
+        "ipc": {
+          "literalChannels": 72,
+          "rendererTransmissions": 62,
+          "mainHandlers": 30,
+          "paired": 33,
+          "unpaired": 29,
+          "preloadEntrypoints": 1,
+          "exposedApiMembers": 112,
+          "senderValidationObservations": 0
+        }
+      },
+      "dist": {
+        "input": ".../app/dist",
+        "digest": "933dea8523f90202f169b2e5474225c5c105e5cd7f5460e9f9d2a4eeb94513d4",
+        "evidenceId": "ev_ee028b590873d3a4da746a783b6ec235d002f6586ed094c52a7238fa42dbcb9a",
+        "relevantFiles": 49,
+        "parsedJs": 42,
+        "findings": 1229
+      }
+    },
+    "views": {
+      "MAIN": "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc",
+      "DIST": "ev_ee028b590873d3a4da746a783b6ec235d002f6586ed094c52a7238fa42dbcb9a",
+      "VS_MAIN": "ev_d713cddec47b9f46977c7e8185498d637a0d9bea7ba04a3073fe0d10aabd76f0",
+      "VS_DIST": "ev_d30e21fe8e7de5221c9ad1c9f883e62678b56971e55a4e32836b32d3e78bd85a",
+      "VM_MAIN": "ev_9e3c9abf72d71a1cb19eb1beeaf832686777d08027dbc5962b44404aed80fad1",
+      "VM_DIST": "ev_cc665322a02e0be487ba5182321dc0ffedd10f07a3c2ac1c35afa22c97cff2a0",
+      "PRELOAD": "ev_61cbce8716a7271faa9f5feac8ed57bf88000773c943005f3028c4568bfada3b",
+      "MAINJS": "ev_cce0145236a335bf8cac16ec8342d0e9a0f1598636b968cbe60b1f6760525422",
+      "CANVAS_CMDS": "ev_31839811fba8e6e72093dc765e238acce97d33929f6d5bcd4776fdf13065a95e",
+      "ASSET_LIB": "ev_bd9b8ae6074cefe8c43ab59af88613c75dcf888ced188ea917dd24dcb39f21c9",
+      "PLUGINS": "ev_27df3cde67478c149b01d1f793be0160da9e6eef437b7c172fdce264e78f513d",
+      "AGENT": "ev_137f46b3a968417a1cb55d0e93ab0adfb7d7feb79a896011e9cc4398a323b613",
+      "GOV": "ev_cc4326271d075ee3c78274cf83cbc8e2838f13d2ff5b9a333a3d057980d63775",
+      "PLUGIN_SVC": "ev_df2b9def8d3df540522b7c13a57348111c49e96ca7aaafbcccccb0128e8966f0",
+      "MARKET": "ev_ada633c5568481636b747d29228429e02043669cd1809269ed864b81e93e17b2",
+      "PHOTOS": "ev_ebf42dcb4ccba0a6ad40c626ea8c65a1664f8004971b7b175301776785af771f",
+      "OCR": "ev_0ed35569e09231da5c2232d283ea6b535c96d49eaab18b2295e6c399a4cdd8f5",
+      "FONTS": "ev_7bb0e6eaac6bd452c04402c10ebf94ab4b2bd1674f5a7529b505ee94dc6a271a",
+      "FT": "ev_eff9ba31b48afc1d4b27c1ce1b81cf4483437800610dce5b4f0a9dc795a1d1a6",
+      "WINDOW": "ev_5db92e324cb5f7154b69bd1fddf630965231bb425fe38e798c0266226af94935",
+      "VUE": "ev_abb07fbf447b29c846ea1e059eedb7f40725c11b797ee47961d6baf5cb120282",
+      "DIST_MAIN": "ev_ea2c7214cec1ef37430312beb7716c2754cdfd5f34c311917bcdef8518ad1e59",
+      "APPROVAL": "ev_401033deb9bacb10c0469d0e6d673f765b955f0b3e5c027137bb91345a868f14",
+      "ADAPTER": "ev_9eb6df4636993b713221dfac4dc1b51c083661cd3ebe0da9d58595bdd2699295"
+    },
+    "method": "rea analyze-javascript-application (CLI 6.4.0) → bundle import → MCP inspect_analysis_view；另有产物 file:line 静态核对"
+  },
+  "summary": {
+    "total": 49,
+    "pass": 47,
+    "partial": 2,
+    "fail": 0,
+    "unknown": 0
+  },
+  "items": [
+    {
+      "id": "A1",
+      "area": "画布",
+      "checkpoint": "canvas 命令桥",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc",
+        "ev_61cbce8716a7271faa9f5feac8ed57bf88000773c943005f3028c4568bfada3b",
+        "ev_ee028b590873d3a4da746a783b6ec235d002f6586ed094c52a7238fa42dbcb9a"
+      ],
+      "artifactRefs": [
+        "electron/preload.cjs:141",
+        "canvas:command 注册 8 文件",
+        "dist openarc.canvas"
+      ]
+    },
+    {
+      "id": "A2",
+      "area": "画布",
+      "checkpoint": "素材库命令族 11 条",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc",
+        "ev_31839811fba8e6e72093dc765e238acce97d33929f6d5bcd4776fdf13065a95e"
+      ],
+      "artifactRefs": [
+        "canvas-dxos-commands.cjs:44-55,223-235"
+      ]
+    },
+    {
+      "id": "A3",
+      "area": "画布",
+      "checkpoint": "syncSources",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc",
+        "ev_31839811fba8e6e72093dc765e238acce97d33929f6d5bcd4776fdf13065a95e"
+      ],
+      "artifactRefs": [
+        "canvas-dxos-commands.cjs:51,235",
+        "dist 命中"
+      ]
+    },
+    {
+      "id": "A4",
+      "area": "画布",
+      "checkpoint": "画布↔资源域引用",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc",
+        "ev_ee028b590873d3a4da746a783b6ec235d002f6586ed094c52a7238fa42dbcb9a"
+      ],
+      "artifactRefs": [
+        "canvas-dxos-commands.cjs:195-204",
+        "openarc-asset e11/d3"
+      ]
+    },
+    {
+      "id": "A5",
+      "area": "画布",
+      "checkpoint": "素材库 ACL/可见性",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc",
+        "ev_bd9b8ae6074cefe8c43ab59af88613c75dcf888ced188ea917dd24dcb39f21c9"
+      ],
+      "artifactRefs": [
+        "canvas-dxos-asset-library.cjs:36-37,134-139,262-280"
+      ]
+    },
+    {
+      "id": "A6",
+      "area": "画布",
+      "checkpoint": "相册导入画布/素材库",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc",
+        "ev_ebf42dcb4ccba0a6ad40c626ea8c65a1664f8004971b7b175301776785af771f"
+      ],
+      "artifactRefs": [
+        "photos-domain.cjs:183",
+        "main canvas-exchange 装配"
+      ]
+    },
+    {
+      "id": "A7",
+      "area": "画布",
+      "checkpoint": "插件数据/网络",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc",
+        "ev_27df3cde67478c149b01d1f793be0160da9e6eef437b7c172fdce264e78f513d"
+      ],
+      "artifactRefs": [
+        "canvas-dxos-commands.cjs:76-77,293-305"
+      ]
+    },
+    {
+      "id": "A8",
+      "area": "画布",
+      "checkpoint": "邀请码",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc",
+        "ev_31839811fba8e6e72093dc765e238acce97d33929f6d5bcd4776fdf13065a95e"
+      ],
+      "artifactRefs": [
+        "canvas-dxos-commands.cjs:67-70,279"
+      ]
+    },
+    {
+      "id": "B1",
+      "area": "AI",
+      "checkpoint": "agent 桥与命令面",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc",
+        "ev_137f46b3a968417a1cb55d0e93ab0adfb7d7feb79a896011e9cc4398a323b613"
+      ],
+      "artifactRefs": [
+        "preload.cjs:166",
+        "agent-service.cjs:775,792,821"
+      ]
+    },
+    {
+      "id": "B2",
+      "area": "AI",
+      "checkpoint": "工具目录/能力发现",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc"
+      ],
+      "artifactRefs": [
+        "agent-tool-catalog.cjs",
+        "tool-registry.cjs 7 源",
+        "capability-discovery.cjs"
+      ]
+    },
+    {
+      "id": "B3",
+      "area": "AI",
+      "checkpoint": "能力路由与模型回退",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc"
+      ],
+      "artifactRefs": [
+        "capability-router.cjs",
+        "model-resolver.cjs",
+        "capability-target-resolver.cjs"
+      ]
+    },
+    {
+      "id": "B4",
+      "area": "AI",
+      "checkpoint": "模型/协议引擎",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc"
+      ],
+      "artifactRefs": [
+        "protocol-engine/ 30 文件",
+        "provider-protocol-*"
+      ]
+    },
+    {
+      "id": "B5",
+      "area": "AI",
+      "checkpoint": "task 运行时",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc",
+        "ev_ee028b590873d3a4da746a783b6ec235d002f6586ed094c52a7238fa42dbcb9a",
+        "ev_abb07fbf447b29c846ea1e059eedb7f40725c11b797ee47961d6baf5cb120282"
+      ],
+      "artifactRefs": [
+        "preload.cjs:151",
+        "task/run",
+        "task/appendStep"
+      ]
+    },
+    {
+      "id": "B6",
+      "area": "AI",
+      "checkpoint": "skill/media/mcp 接入",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc"
+      ],
+      "artifactRefs": [
+        "skill-domain.cjs",
+        "media-domain.cjs",
+        "mcp-bootstrap.cjs"
+      ]
+    },
+    {
+      "id": "B7",
+      "area": "AI",
+      "checkpoint": "审批/确认 sideEffect",
+      "status": "部分",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc",
+        "ev_401033deb9bacb10c0469d0e6d673f765b955f0b3e5c027137bb91345a868f14"
+      ],
+      "artifactRefs": [
+        "preload.cjs:212",
+        "sideEffect/decideApproval 在 dist",
+        "revokeApproval 未在 dist"
+      ]
+    },
+    {
+      "id": "B8",
+      "area": "AI",
+      "checkpoint": "画布 Agent 能力投影",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc"
+      ],
+      "artifactRefs": [
+        "canvas-dxos-commands.cjs:86,339",
+        "canvas/run",
+        "canvas_* 工具"
+      ]
+    },
+    {
+      "id": "C1",
+      "area": "组织",
+      "checkpoint": "identity",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc"
+      ],
+      "artifactRefs": [
+        "preload.cjs:50",
+        "identity-service.cjs:276-312"
+      ]
+    },
+    {
+      "id": "C2",
+      "area": "组织",
+      "checkpoint": "authorization",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc"
+      ],
+      "artifactRefs": [
+        "preload.cjs:67",
+        "authorization-bootstrap.cjs:23-29"
+      ]
+    },
+    {
+      "id": "C3",
+      "area": "组织",
+      "checkpoint": "governance 用户/部门/角色",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc",
+        "ev_cc4326271d075ee3c78274cf83cbc8e2838f13d2ff5b9a333a3d057980d63775"
+      ],
+      "artifactRefs": [
+        "governance-bootstrap.cjs:30-61"
+      ]
+    },
+    {
+      "id": "C4",
+      "area": "组织",
+      "checkpoint": "App 级/工具级授权",
+      "status": "部分",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc",
+        "ev_cc4326271d075ee3c78274cf83cbc8e2838f13d2ff5b9a333a3d057980d63775"
+      ],
+      "artifactRefs": [
+        "governance-bootstrap.cjs:55,100",
+        "grantAppAccess 在 electron",
+        "grantAppAccess 未在 dist"
+      ]
+    },
+    {
+      "id": "C5",
+      "area": "组织",
+      "checkpoint": "资源 scope/隔离",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc"
+      ],
+      "artifactRefs": [
+        "preload.cjs:90",
+        "resource-bootstrap.cjs:20-60 63 命令"
+      ]
+    },
+    {
+      "id": "C6",
+      "area": "组织",
+      "checkpoint": "审计",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc"
+      ],
+      "artifactRefs": [
+        "governance-bootstrap.cjs:61",
+        "identity/audit-list",
+        "app_network_audit"
+      ]
+    },
+    {
+      "id": "C7",
+      "area": "组织",
+      "checkpoint": "trusted(event) 边界",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc",
+        "ev_cce0145236a335bf8cac16ec8342d0e9a0f1598636b968cbe60b1f6760525422"
+      ],
+      "artifactRefs": [
+        "main.cjs:285",
+        "58 handler 0 例外"
+      ]
+    },
+    {
+      "id": "C8",
+      "area": "组织",
+      "checkpoint": "首启/本地会话",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc",
+        "ev_ee028b590873d3a4da746a783b6ec235d002f6586ed094c52a7238fa42dbcb9a"
+      ],
+      "artifactRefs": [
+        "identity/initialize",
+        "local-account-service.cjs"
+      ]
+    },
+    {
+      "id": "D1",
+      "area": "开发者/市场",
+      "checkpoint": "developer 本地装载/回滚",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc"
+      ],
+      "artifactRefs": [
+        "developer-domain.cjs:223-280"
+      ]
+    },
+    {
+      "id": "D2",
+      "area": "开发者/市场",
+      "checkpoint": "lab/collab/realtime",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc"
+      ],
+      "artifactRefs": [
+        "developer-realtime.cjs:408-422"
+      ]
+    },
+    {
+      "id": "D3",
+      "area": "开发者/市场",
+      "checkpoint": "凭据/出网审计",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc"
+      ],
+      "artifactRefs": [
+        "developer/credential/bind",
+        "developer/network/request"
+      ]
+    },
+    {
+      "id": "D4",
+      "area": "开发者/市场",
+      "checkpoint": "market 目录/第三方/更新",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc",
+        "ev_ada633c5568481636b747d29228429e02043669cd1809269ed864b81e93e17b2"
+      ],
+      "artifactRefs": [
+        "market-domain.cjs:44-56",
+        "market-update-domain.cjs:61-67"
+      ]
+    },
+    {
+      "id": "D5",
+      "area": "开发者/市场",
+      "checkpoint": "integration 插件",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc",
+        "ev_df2b9def8d3df540522b7c13a57348111c49e96ca7aaafbcccccb0128e8966f0"
+      ],
+      "artifactRefs": [
+        "plugin-service.cjs:87-153",
+        "plugin-registry.cjs"
+      ]
+    },
+    {
+      "id": "D6",
+      "area": "开发者/市场",
+      "checkpoint": "media/video/image/weather",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc"
+      ],
+      "artifactRefs": [
+        "media-domain.cjs:92-94",
+        "image:declare",
+        "weather:*"
+      ]
+    },
+    {
+      "id": "D7",
+      "area": "开发者/市场",
+      "checkpoint": "photos/photocraft/fileTransfer/appExchange",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc",
+        "ev_ebf42dcb4ccba0a6ad40c626ea8c65a1664f8004971b7b175301776785af771f",
+        "ev_eff9ba31b48afc1d4b27c1ce1b81cf4483437800610dce5b4f0a9dc795a1d1a6"
+      ],
+      "artifactRefs": [
+        "photos-domain.cjs:183",
+        "file-transfer-domain.cjs:158-159",
+        "app-exchange-domain.cjs:209"
+      ]
+    },
+    {
+      "id": "D8",
+      "area": "开发者/市场",
+      "checkpoint": "files IPC + 共享盘/快照",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc"
+      ],
+      "artifactRefs": [
+        "files 16 handler",
+        "platform-domain.cjs:72-77"
+      ]
+    },
+    {
+      "id": "D9",
+      "area": "开发者/市场",
+      "checkpoint": "0.6.1 五域",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc",
+        "ev_7bb0e6eaac6bd452c04402c10ebf94ab4b2bd1674f5a7529b505ee94dc6a271a",
+        "ev_0ed35569e09231da5c2232d283ea6b535c96d49eaab18b2295e6c399a4cdd8f5"
+      ],
+      "artifactRefs": [
+        "preload.cjs:352,367,382,393,409"
+      ]
+    },
+    {
+      "id": "D10",
+      "area": "开发者/市场",
+      "checkpoint": "CLI",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc"
+      ],
+      "artifactRefs": [
+        "preload.cjs:452",
+        "cli-runtime/"
+      ]
+    },
+    {
+      "id": "D11",
+      "area": "开发者/市场",
+      "checkpoint": "桥/通道一致性",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc",
+        "ev_61cbce8716a7271faa9f5feac8ed57bf88000773c943005f3028c4568bfada3b"
+      ],
+      "artifactRefs": [
+        "40 键",
+        "57 唯一通道 57 注册"
+      ]
+    },
+    {
+      "id": "D12",
+      "area": "开发者/市场",
+      "checkpoint": "market thirdparty/更新源",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc"
+      ],
+      "artifactRefs": [
+        "market-domain.cjs:52-56",
+        "market-update-domain.cjs:61-67"
+      ]
+    },
+    {
+      "id": "E1",
+      "area": "扩展",
+      "checkpoint": "i18n/英文界面",
+      "status": "通过",
+      "evidence": [
+        "ev_ee028b590873d3a4da746a783b6ec235d002f6586ed094c52a7238fa42dbcb9a"
+      ],
+      "artifactRefs": [
+        "en-US 2 文件",
+        "locale 6"
+      ]
+    },
+    {
+      "id": "E2",
+      "area": "扩展",
+      "checkpoint": "相册扩图/宫格",
+      "status": "通过",
+      "evidence": [
+        "ev_ee028b590873d3a4da746a783b6ec235d002f6586ed094c52a7238fa42dbcb9a"
+      ],
+      "artifactRefs": [
+        "宫格 7/扩图 13/grid 17"
+      ]
+    },
+    {
+      "id": "E3",
+      "area": "扩展",
+      "checkpoint": "日历提醒/农历/AI 建日程",
+      "status": "通过",
+      "evidence": [
+        "ev_ee028b590873d3a4da746a783b6ec235d002f6586ed094c52a7238fa42dbcb9a",
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc"
+      ],
+      "artifactRefs": [
+        "almanac/Notification/提醒"
+      ]
+    },
+    {
+      "id": "E4",
+      "area": "扩展",
+      "checkpoint": "访达共享盘 UI",
+      "status": "通过",
+      "evidence": [
+        "ev_ee028b590873d3a4da746a783b6ec235d002f6586ed094c52a7238fa42dbcb9a",
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc"
+      ],
+      "artifactRefs": [
+        "共享盘 17/快照 32",
+        "platform/fs/shared/*"
+      ]
+    },
+    {
+      "id": "E5",
+      "area": "扩展",
+      "checkpoint": "视频多轨/Agent 粗剪",
+      "status": "通过",
+      "evidence": [
+        "ev_ee028b590873d3a4da746a783b6ec235d002f6586ed094c52a7238fa42dbcb9a",
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc"
+      ],
+      "artifactRefs": [
+        "多轨 14/trackType 9/timeline 92"
+      ]
+    },
+    {
+      "id": "E6",
+      "area": "扩展",
+      "checkpoint": "短剧登记/成片导出",
+      "status": "通过",
+      "evidence": [
+        "ev_ee028b590873d3a4da746a783b6ec235d002f6586ed094c52a7238fa42dbcb9a",
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc"
+      ],
+      "artifactRefs": [
+        "成片 20/登记 42/资源库 28"
+      ]
+    },
+    {
+      "id": "E7",
+      "area": "扩展",
+      "checkpoint": "画布打包/协作/邀请 UI",
+      "status": "通过",
+      "evidence": [
+        "ev_ee028b590873d3a4da746a783b6ec235d002f6586ed094c52a7238fa42dbcb9a",
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc"
+      ],
+      "artifactRefs": [
+        "canvas/package/export",
+        "canvas/collab/join",
+        "canvas/invites/create"
+      ]
+    },
+    {
+      "id": "E8",
+      "area": "扩展",
+      "checkpoint": "市场第三方 UI/更新",
+      "status": "通过",
+      "evidence": [
+        "ev_ee028b590873d3a4da746a783b6ec235d002f6586ed094c52a7238fa42dbcb9a",
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc"
+      ],
+      "artifactRefs": [
+        "market/thirdparty/list",
+        "market/update/check"
+      ]
+    },
+    {
+      "id": "E9",
+      "area": "扩展",
+      "checkpoint": "设置代理/缓存/更新",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc",
+        "ev_ee028b590873d3a4da746a783b6ec235d002f6586ed094c52a7238fa42dbcb9a"
+      ],
+      "artifactRefs": [
+        "desktop/proxy/{set,clear,state}",
+        "desktop/cache/clear",
+        "desktop/update/*"
+      ]
+    },
+    {
+      "id": "E10",
+      "area": "扩展",
+      "checkpoint": "桌面小组件音乐/天气",
+      "status": "通过",
+      "evidence": [
+        "ev_ee028b590873d3a4da746a783b6ec235d002f6586ed094c52a7238fa42dbcb9a"
+      ],
+      "artifactRefs": [
+        "widget 68/小组件 10"
+      ]
+    },
+    {
+      "id": "E11",
+      "area": "扩展",
+      "checkpoint": "窗口标签合并",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc",
+        "ev_5db92e324cb5f7154b69bd1fddf630965231bb425fe38e798c0266226af94935"
+      ],
+      "artifactRefs": [
+        "window-domain.cjs:204,210-212,260-265"
+      ]
+    },
+    {
+      "id": "E12",
+      "area": "扩展",
+      "checkpoint": "任务双表 v29 + LAN 协作",
+      "status": "通过",
+      "evidence": [
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc"
+      ],
+      "artifactRefs": [
+        "task-merge-migration.cjs:20,40,45",
+        "lan-collab-service.cjs:31"
+      ]
+    },
+    {
+      "id": "E13",
+      "area": "扩展",
+      "checkpoint": "开发者/集成/0.6.1 五域 UI",
+      "status": "通过",
+      "evidence": [
+        "ev_ee028b590873d3a4da746a783b6ec235d002f6586ed094c52a7238fa42dbcb9a",
+        "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc"
+      ],
+      "artifactRefs": [
+        "各域命令在 dist 命中"
+      ]
+    }
+  ],
+  "outOfScope": [
+    {
+      "id": "O1",
+      "item": "A14 画布云同步",
+      "verdict": "不适用（产品 OUT）"
+    },
+    {
+      "id": "O2",
+      "item": "F17 云账号/权益/兑换/席位",
+      "verdict": "不适用（产品 OUT）"
+    },
+    {
+      "id": "O3",
+      "item": "D02 云市场审核/灰度",
+      "verdict": "不适用（产品 OUT）；第三方/在线更新已通过 D4/D12"
+    },
+    {
+      "id": "O4",
+      "item": "F14 本地计费/配额",
+      "verdict": "不适用（产品 OUT；ai-org-parity-notes.cjs:8-10）"
+    },
+    {
+      "id": "O5",
+      "item": "F16 桌面自动超管",
+      "verdict": "有意差异（ai-org-parity-notes.cjs:12-13）"
+    },
+    {
+      "id": "O6",
+      "item": "D07 开发者 OAuth/发布/灰度",
+      "verdict": "不适用（产品决定；developer-domain.cjs:30,39,519,545）"
+    }
+  ],
+  "knownPartial": [
+    {
+      "id": "P1",
+      "item": "A02 画布文档模型",
+      "observation": "canvas-domain.cjs 仍为 nodes/edges，未检出 Card 三槽转换",
+      "verdict": "已知差异"
+    },
+    {
+      "id": "P2",
+      "item": "A11 画布媒体可见性放宽",
+      "observation": "未检出 canViewCanvasMedia 等价实现",
+      "verdict": "已知差异/未知"
+    },
+    {
+      "id": "P3",
+      "item": "A13 .dxcanvas 大包",
+      "observation": "内联导出 32MB 上限；解析 500MB/1GB",
+      "verdict": "已知限制"
+    },
+    {
+      "id": "P4",
+      "item": "A18 docx/xlsx 附件",
+      "observation": "默认 parser 不可用（BINARY_PARSERS_UNAVAILABLE），可注入",
+      "verdict": "如实不可用"
+    }
+  ],
+  "limitations": [
+    "静态分析，未运行应用；运行期权限拒绝、LAN 鉴权、迁移执行、模型/网络调用、UI 交互均未验证。",
+    "REA 覆盖 partial：主进程 summary 393/972、dist 679/834；主进程 limitations 580、dist 62；sender_validation_observations=0 属识别限制。",
+    "字符串探测对动态拼接命令可能漏检；未命中不等于未接线。",
+    "结论只对 commit 9c14bb0 与上述产物 sha256 有效。"
+  ]
+}
