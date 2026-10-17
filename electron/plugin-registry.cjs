@@ -389,6 +389,34 @@ function optionalPlugins() {
       ],
     },
     {
+      id: "figma",
+      name: "Figma",
+      description: "Figma 预览 / 设计稿读取；Framelink MCP（figma-developer-mcp）由本机 npx 启动，需 Figma 访问令牌。",
+      kind: "integration",
+      version: "1.0.0",
+      capabilities: ["fetch"],
+      mcp: { serverId: "figma", transport: "stdio", command: "npx", args: ["-y", "figma-developer-mcp", "--stdio"], credentialRef: "figma.token", toolPrefix: "figma" },
+      dependencies: [
+        { id: "figma.mcp", kind: "binary", label: "Framelink MCP（figma-developer-mcp）", required: true, target: "figma-developer-mcp", install: "安装 figma-developer-mcp（npx / npm i -g）后重试" },
+        { id: "figma.credential", kind: "credential", label: "Figma 访问令牌", required: true, target: "figma", install: "在「集成 · Figma」填写 Figma API Token（写入系统安全存储）" },
+        { id: "figma.network", kind: "network", label: "Figma API 可达", required: false, target: "https://api.figma.com", install: "联网后可用；离线返回 INTEGRATION_UNAVAILABLE" },
+      ],
+    },
+    {
+      id: "illustrator",
+      name: "Illustrator",
+      description: "Illustrator 预览 / 模板 / 临时导出；Adobe Illustrator MCP 与本机 Adobe 为外部依赖。",
+      kind: "integration",
+      version: "1.0.0",
+      capabilities: ["fetch"],
+      mcp: { serverId: "illustrator", transport: "stdio", command: "illustrator-mcp", args: [], toolPrefix: "illustrator" },
+      dependencies: [
+        { id: "illustrator.mcp", kind: "binary", label: "Illustrator MCP", required: true, target: "illustrator-mcp", install: "配置 Illustrator MCP（本机 Adobe + MCP server）后重试" },
+        { id: "illustrator.adobe", kind: "binary", label: "Adobe Illustrator", required: true, target: "Adobe Illustrator", install: "安装 Adobe Illustrator；本机无 Adobe 时预览/导出结构化不可用" },
+        { id: "illustrator.network", kind: "network", label: "Adobe 服务可达", required: false, target: "https://www.adobe.com", install: "联网后可用；离线返回 INTEGRATION_UNAVAILABLE" },
+      ],
+    },
+    {
       id: "agnes",
       name: "Agnes",
       description: "Agnes 原生图片编辑 / 视频适配（协议 agnes，2.5 / 2.5 Flash / v2.0）。",
@@ -446,6 +474,15 @@ function createPluginRegistry(options = {}) {
         install: asStr(dep.install, 400),
       })) : [],
       probes: plugin.probes && typeof plugin.probes === "object" ? plugin.probes : {},
+      // task-36 B15：把插件声明的 MCP 服务登记为可发现的模板（不自动连接/不执行）。
+      mcp: plugin.mcp && typeof plugin.mcp === "object" ? {
+        serverId: asStr(plugin.mcp.serverId, 80),
+        transport: asStr(plugin.mcp.transport, 20),
+        command: asStr(plugin.mcp.command, 200),
+        args: Array.isArray(plugin.mcp.args) ? plugin.mcp.args.map((arg) => asStr(arg, 200)).filter(Boolean).slice(0, 32) : [],
+        credentialRef: plugin.mcp.credentialRef ? asStr(plugin.mcp.credentialRef, 120) : null,
+        toolPrefix: plugin.mcp.toolPrefix ? asStr(plugin.mcp.toolPrefix, 80) : null,
+      } : null,
     });
   }
 
@@ -597,6 +634,7 @@ function createPluginRegistry(options = {}) {
       capabilities: plugin.capabilities.map((name) => ({ name, available: !capabilityMissingList.includes(name) })),
       missingRequired,
       missingOptional,
+      mcp: plugin.mcp,
       detail: installHints.join("；"),
     };
   }

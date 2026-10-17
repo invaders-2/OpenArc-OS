@@ -24,6 +24,7 @@ const skillDomain = require("./skill-domain.cjs");
 const skillStore = require("./skill-store.cjs");
 const skillImport = require("./skill-import.cjs");
 const skillPack = require("./skill-pack.cjs");
+const { createOnlineSourceConfig } = require("./skill-online-source.cjs");
 const skillRunner = require("./skill-runner.cjs");
 const skillAnalyzer = require("./skill-analyzer.cjs");
 const skillWorkspace = require("./skill-workspace.cjs");
@@ -149,6 +150,7 @@ function createSkillBundle({ userDataDir, identityStore = null, authorization = 
   const now = typeof clock === "function" ? clock : () => Date.now();
   const paths = userDataDir ? resolveDxosPaths(userDataDir) : null;
   const dataDir = paths ? paths.root : null;
+  const onlineSourceConfig = userDataDir ? createOnlineSourceConfig({ userDataDir }) : null;
   const db = (identityStore && (identityStore.connection || identityStore.db)) || null;
   // 目录只创建、不写文件；失败不阻断装配（各域落盘时再抛结构化错误）。
   if (userDataDir) { try { ensureDxosLayout(userDataDir); } catch { /* 保留真实落盘错误给具体命令 */ } }
@@ -287,10 +289,25 @@ function createSkillBundle({ userDataDir, identityStore = null, authorization = 
 
       // ---------------- 技能包 ----------------
       case "skill/pack/list": {
-        return { items: skillPack.listSkillPacks() };
+        const items = skillPack.listSkillPacks();
+        // task-36 D09：在线来源查询复用 list（不新增命令）；只有显式请求时才附加字段。
+        if (payload.onlineSourceAction === "get" || payload.onlineSource === true) {
+          return { items, onlineSource: onlineSourceConfig ? onlineSourceConfig.get() : { enabled: false, source: "", unavailable: true } };
+        }
+        return { items };
       }
       case "skill/pack/install": {
-        // task-25 D09：在线安装复用 install 命令（不扩前端冻结白名单）；缺安装器即结构化缺失。
+        // task-36 D09：在线来源设置/清理复用 install（不扩前端冻结的 15 条命令白名单）。
+        if (payload.onlineSourceAction === "set") {
+          if (!onlineSourceConfig) throw createSkillError(SKILL_ERR_DEPENDENCY_UNAVAILABLE, "在线来源配置未装配", { dependency: "userDataDir" });
+          try { return { onlineSource: onlineSourceConfig.set({ enabled: payload.enabled === true, source: requireStr(payload.source, 12000) || "" }) }; }
+          catch (error) { throw createSkillError(SKILL_ERR_INVALID_INPUT, String((error && error.message) || error)); }
+        }
+        if (payload.onlineSourceAction === "clear") {
+          if (!onlineSourceConfig) throw createSkillError(SKILL_ERR_DEPENDENCY_UNAVAILABLE, "在线来源配置未装配", { dependency: "userDataDir" });
+          return { onlineSource: onlineSourceConfig.clear() };
+        }
+        // task-25 D09：在线安装复用 install 命令；缺安装器即结构化缺失。
         if (payload.onlineSource != null) return skillPack.importOnlineSkillPack(requireStr(payload.onlineSource, 12000));
         return skillPack.importRegisteredSkillPack(archiveBuffer(payload, "archiveBase64"), requireStr(payload.sourceName, 200) || "skill-pack.zip");
       }

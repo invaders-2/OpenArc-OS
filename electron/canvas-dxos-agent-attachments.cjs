@@ -23,6 +23,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const { inflateRawSync } = require("node:zlib");
 
 const MAX_ATTACHMENT_TEXT_CHARS = 40000;   // 源 canvasAgentAttachments.ts:5
 const MAX_TOTAL_CHARS = 80000;             // 源 index.ts:3814
@@ -50,6 +51,113 @@ function configureAttachmentParsers(parsers) {
 function parserFor(extension) {
   if (extension === ".docx") return typeof injectedParsers.docx === "function" ? injectedParsers.docx : null;
   if (extension === ".xlsx" || extension === ".xlsm") return typeof injectedParsers.xlsx === "function" ? injectedParsers.xlsx : null;
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// task-36 A18：零依赖 ZIP + XML 最小解析（node:zlib，不新增 adm-zip/exceljs）。
+// 只支持 stored/deflate、单层 ZIP（DOCX/XLSX 的标准结构），有总量上限；加密/ZIP64 明确报错。
+// ---------------------------------------------------------------------------
+const MAX_ZIP_ENTRIES = 512;
+const MAX_ZIP_OUTPUT = 64 * 1024 * 1024;
+
+function readZipEntries(buffer) {
+  const source = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || []);
+  if (source.length < 22 || source.readUInt32LE(0) !== 0x04034b50) {
+    // 允许带任意前缀的 ZIP（docx 通常从 0 开始；这里只按 EOCD 定位，不做自解压）
+  }
+  let eocd = -1;
+  for (let i = source.length - 22; i >= Math.max(0, source.length - 65557); i -= 1) {
+    if (source.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("ZIP 缺少中央目录");
+  const count = source.readUInt16LE(eocd + 10);
+  const centralOffset = source.readUInt32LE(eocd + 16);
+  if (count > MAX_ZIP_ENTRIES) throw new Error("ZIP 条目过多");
+  const entries = new Map();
+  let offset = centralOffset;
+  let total = 0;
+  for (let index = 0; index < count; index += 1) {
+    if (offset + 46 > source.length || source.readUInt32LE(offset) !== 0x02014b50) throw new Error("ZIP 中央目录损坏");
+    const method = source.readUInt16LE(offset + 10);
+    const compressedSize = source.readUInt32LE(offset + 20);
+    const uncompressedSize = source.readUInt32LE(offset + 24);
+    const nameLength = source.readUInt16LE(offset + 28);
+    const extraLength = source.readUInt16LE(offset + 30);
+    const commentLength = source.readUInt16LE(offset + 32);
+    const localOffset = source.readUInt32LE(offset + 42);
+    const name = source.slice(offset + 46, offset + 46 + nameLength).toString("utf8");
+    if (uncompressedSize > MAX_ZIP_OUTPUT || total + uncompressedSize > MAX_ZIP_OUTPUT) throw new Error("ZIP 解压超过上限");
+    if (localOffset + 30 > source.length || source.readUInt32LE(localOffset) !== 0x04034b50) throw new Error("ZIP 本地头损坏");
+    const localNameLength = source.readUInt16LE(localOffset + 26);
+    const localExtraLength = source.readUInt16LE(localOffset + 28);
+    const dataStart = localOffset + 30 + localNameLength + localExtraLength;
+    const compressed = source.slice(dataStart, dataStart + compressedSize);
+    let data;
+    if (method === 0) data = compressed;
+    else if (method === 8) data = inflateRawSync(compressed, { maxOutputLength: MAX_ZIP_OUTPUT });
+    else throw new Error("ZIP 压缩方式不支持：" + method);
+    entries.set(name, data);
+    total += data.length;
+    offset += 46 + nameLength + extraLength + commentLength;
+  }
+  return entries;
+}
+
+function decodeXmlText(xml) {
+  return String(xml || "")
+    .replace(/<w:tab\s*\/>/g, "\t")
+    .replace(/<w:br\s*\/>/g, "\n")
+    .replace(/<\/w:p>/g, "\n")
+    .replace(/<\/a:p>/g, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(Number(dec)))
+    .replace(/&amp;/g, "&");
+}
+
+function parseDocxText(buffer) {
+  const entries = readZipEntries(buffer);
+  const xml = entries.get("word/document.xml");
+  if (!xml) throw new Error("DOCX 缺少 word/document.xml");
+  return decodeXmlText(xml.toString("utf8")).replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function parseXlsxText(buffer) {
+  const entries = readZipEntries(buffer);
+  const sharedXml = entries.get("xl/sharedStrings.xml");
+  const shared = [];
+  if (sharedXml) {
+    const text = sharedXml.toString("utf8");
+    for (const match of text.matchAll(/<si[^>]*>([\s\S]*?)<\/si>/g)) shared.push(decodeXmlText(match[1]).replace(/\n/g, " ").trim());
+  }
+  const sheets = [...entries.keys()].filter((name) => /^xl\/worksheets\/sheet\d+\.xml$/.test(name)).sort();
+  if (!sheets.length) throw new Error("XLSX 缺少 worksheet");
+  const lines = [];
+  for (const sheet of sheets) {
+    const xml = entries.get(sheet).toString("utf8");
+    for (const rowMatch of xml.matchAll(/<row[^>]*>([\s\S]*?)<\/row>/g)) {
+      const cells = [];
+      for (const cellMatch of rowMatch[1].matchAll(/<c([^>]*)>([\s\S]*?)<\/c>/g)) {
+        const attrs = cellMatch[1] || "";
+        const inner = cellMatch[2] || "";
+        const valueMatch = /<v[^>]*>([\s\S]*?)<\/v>/.exec(inner);
+        const inlineMatch = /<is[^>]*>([\s\S]*?)<\/is>/.exec(inner);
+        if (/t="s"/.test(attrs) && valueMatch) cells.push(shared[Number(valueMatch[1])] || "");
+        else if (inlineMatch) cells.push(decodeXmlText(inlineMatch[1]).trim());
+        else if (valueMatch) cells.push(decodeXmlText(valueMatch[1]).trim());
+        else cells.push("");
+      }
+      if (cells.some((cell) => cell !== "")) lines.push(cells.join("\t"));
+    }
+  }
+  return lines.join("\n").trim();
+}
+
+function parseOfficeText(buffer, extension) {
+  if (extension === ".docx") return parseDocxText(buffer);
+  if (extension === ".xlsx" || extension === ".xlsm") return parseXlsxText(buffer);
   return null;
 }
 
@@ -93,14 +201,23 @@ function extractAttachment(input = {}) {
   let error = "";
   try {
     if (BINARY_PARSERS_UNAVAILABLE.includes(extension)) {
-      const parser = parserFor(extension);
-      if (parser) {
-        const parsed = parser(buffer, name);
-        if (parsed && typeof parsed === "object" && typeof parsed.text === "string") content = parsed.text;
-        else if (typeof parsed === "string") content = parsed;
-        else error = "注入的 " + extension + " 解析器没有返回文本";
-      } else {
-        error = "当前构建未包含 " + extension + " 解析依赖，请把内容另存为文本/CSV/Markdown 后重新挂载";
+      // task-36 A18：先用零依赖 ZIP+XML 最小解析；失败再走注入解析器；都不行才结构化拒绝。
+      let builtinError = null;
+      try {
+        const parsedText = parseOfficeText(buffer, extension);
+        if (parsedText != null && parsedText !== "") content = parsedText;
+        else builtinError = "文档没有可读文本";
+      } catch (cause) { builtinError = String((cause && cause.message) || cause); }
+      if (!content) {
+        const parser = parserFor(extension);
+        if (parser) {
+          const parsed = parser(buffer, name);
+          if (parsed && typeof parsed === "object" && typeof parsed.text === "string") content = parsed.text;
+          else if (typeof parsed === "string") content = parsed;
+          else error = "注入的 " + extension + " 解析器没有返回文本";
+        } else {
+          error = builtinError ? "文件解析失败：" + builtinError : "当前构建未包含 " + extension + " 解析依赖，请把内容另存为文本/CSV/Markdown 后重新挂载";
+        }
       }
     } else if (extension === ".csv" || extension === ".tsv" || mime === "text/csv") {
       content = decodeText(buffer);
@@ -326,7 +443,7 @@ class CanvasAgentAttachmentService {
 
 module.exports = {
   CanvasAgentAttachmentService, extractAttachment, extractAttachments, decodeText, isTextLike, extensionOf,
-  configureAttachmentParsers,
+  configureAttachmentParsers, parseDocxText, parseXlsxText, readZipEntries,
   MAX_ATTACHMENT_TEXT_CHARS, MAX_TOTAL_CHARS, MAX_ATTACHMENT_FILES, MAX_ATTACHMENT_BYTES,
   TEXT_EXTENSIONS, BINARY_PARSERS_UNAVAILABLE,
 };
