@@ -99,6 +99,12 @@ const { ERROR, INIT, USER_STATUS, USER_ROLE, REVOKE_REASON, RATE_LIMIT } = domai
  *       默认 0 = 继续拒绝远程明文 http；只有用户在添加/编辑该服务商时显式勾选才置 1，并写授权审计。
  *       明文 scope（REMOTE_HTTP_EXPLICIT）不塞进 endpoint_scope 的既有 CHECK，由本列承载；
  *       ALTER 前查 PRAGMA table_info，可重放；只加列，不动既有表结构。
+ * 画布共享 · 三档角色（**不占新版本号**）：canvas_shares 需要放宽 role CHECK 到 MANAGER、补
+ *       created_at、加 canvas_id → canvas_boards 的 FK ON DELETE CASCADE。SQLite 改不了 CHECK，只能重建表。
+ *       为什么不做成 v29：v29 已被在途的任务表合并包按显式迁移占用（tests/migration-task-merge.test.mjs），
+ *       且全仓多处"生产 SCHEMA_VERSION 仍是 28"的冻结断言不属于本包；canvas_run_facts 已有先例
+ *       （CanvasStore 构造时幂等建表，不新增迁移级）。实现为 applyCanvasSharingRolesLayer(db)，
+ *       由 CanvasStore 在 identity.transactSync 内调用：可重复执行、失败整级回滚。
  */
 const SCHEMA_VERSION = 28;
 
@@ -1617,6 +1623,47 @@ function applyModelProviderInsecureHttpLayer(db) {
   }
 }
 
+/**
+ * canvas_shares 目标形态（三档角色 + created_at + FK）。独立常量方便测试逐字核对。
+ * 刻意不在这里建索引：重建顺序是 建新表 → 搬行 → 删旧表 → 改名，旧表上的索引名要等删掉后才能复用。
+ */
+const CANVAS_SHARES_TARGET_SQL = `
+CREATE TABLE canvas_shares_next (
+  canvas_id  TEXT NOT NULL REFERENCES canvas_boards(id) ON DELETE CASCADE,
+  user_id    TEXT NOT NULL,
+  role       TEXT NOT NULL CHECK (role IN ('VIEWER','CONTRIBUTOR','EDITOR','MANAGER')),
+  granted_by TEXT,
+  at         INTEGER NOT NULL,
+  created_at INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (canvas_id, user_id)
+);
+`;
+
+function applyCanvasSharingRolesLayer(db) {
+  const table = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='canvas_shares'").get();
+  const columns = table ? db.prepare("PRAGMA table_info(canvas_shares)").all() : [];
+  const hasCreatedAt = columns.some((column) => column.name === "created_at");
+  const allowsManager = !!table && /'MANAGER'/.test(String(table.sql || ""));
+  if (!table) {
+    db.exec(CANVAS_SHARES_TARGET_SQL);
+    db.exec("ALTER TABLE canvas_shares_next RENAME TO canvas_shares");
+  } else if (!hasCreatedAt || !allowsManager) {
+    // 孤儿共享行（board 已不存在）本来就不可访问；带 FK 的新表不允许它们，先清掉再搬。
+    db.exec("DELETE FROM canvas_shares WHERE canvas_id NOT IN (SELECT id FROM canvas_boards)");
+    const createdExpr = hasCreatedAt ? "COALESCE(created_at, at, 0)" : "COALESCE(at, 0)";
+    db.exec("DROP TABLE IF EXISTS canvas_shares_next");
+    db.exec(CANVAS_SHARES_TARGET_SQL);
+    db.exec(
+      "INSERT INTO canvas_shares_next (canvas_id, user_id, role, granted_by, at, created_at) " +
+      "SELECT canvas_id, user_id, role, granted_by, at, " + createdExpr + " FROM canvas_shares",
+    );
+    db.exec("DROP TABLE canvas_shares");
+    db.exec("ALTER TABLE canvas_shares_next RENAME TO canvas_shares");
+  }
+  db.exec("CREATE INDEX IF NOT EXISTS idx_canvas_shares_user ON canvas_shares(user_id)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_canvas_boards_org_visibility ON canvas_boards(organization_id, visibility)");
+}
+
 const MIGRATIONS = Object.freeze([
   { version: 1, sql: SCHEMA_SQL },
   { version: 2, sql: SCHEMA_V2_SQL },
@@ -3087,6 +3134,7 @@ module.exports = {
   policyFamilyOfAppGrant,
   MIGRATIONS,
   IdentityStore,
+  applyCanvasSharingRolesLayer,
   DEFAULT_TTL_MS,
   DEFAULT_IDLE_MS,
   RESET_AUTHORIZATION_DELETE_SQL,

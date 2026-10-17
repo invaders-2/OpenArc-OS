@@ -190,6 +190,8 @@ function createIdentityService({ userDataDir, safeStorage, allowAdmin = false, l
     resourceStore,
     resourceService,
     authService: authorization,
+    // 共享/可见性/转移的审计与治理域共用同一个 AuthorizationStore 实例（同一条连接/事务）。
+    authStore,
     logger: log,
   });
   // B5d：画布域扩展。与文档层共用同一条 identity 连接与同一个 canvasDocService；

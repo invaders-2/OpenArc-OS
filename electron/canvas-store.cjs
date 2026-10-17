@@ -7,6 +7,8 @@
  */
 "use strict";
 
+const { applyCanvasSharingRolesLayer } = require("./identity-store.cjs");
+
 const SQL = {
   insertBoard:
     "INSERT INTO canvas_boards (id, organization_id, owner_user_id, name, created_at, updated_at, icon, kind, doc, revision, visibility) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
@@ -22,11 +24,19 @@ const SQL = {
   softDelete: "UPDATE canvas_boards SET deleted_at = ?, deleted_by = ? WHERE id = ?",
   restore: "UPDATE canvas_boards SET deleted_at = NULL, deleted_by = NULL WHERE id = ?",
   purge: "DELETE FROM canvas_boards WHERE id = ?",
-  setVisibility: "UPDATE canvas_boards SET visibility = ?, updated_at = ? WHERE id = ?",
-  insertShare: "INSERT INTO canvas_shares (canvas_id, user_id, role, granted_by, at) VALUES (?,?,?,?,?) ON CONFLICT(canvas_id, user_id) DO UPDATE SET role = excluded.role, granted_by = excluded.granted_by, at = excluded.at",
+  // 共享/可见性/所有权转移**不碰 updated_at / revision**：宿主用 updated_at 精确映射保存基线，
+  // 改这里会让下一次页面保存拿到旧基线（见 DESIGN §6.2）。
+  setVisibility: "UPDATE canvas_boards SET visibility = ? WHERE id = ?",
+  updateOwner: "UPDATE canvas_boards SET owner_user_id = ? WHERE id = ?",
+  insertShare: "INSERT INTO canvas_shares (canvas_id, user_id, role, granted_by, at, created_at) VALUES (?,?,?,?,?,?) ON CONFLICT(canvas_id, user_id) DO UPDATE SET role = excluded.role, granted_by = excluded.granted_by, at = excluded.at",
   shareOf: "SELECT * FROM canvas_shares WHERE canvas_id = ? AND user_id = ?",
   sharesOf: "SELECT * FROM canvas_shares WHERE canvas_id = ? ORDER BY at, user_id",
   deleteShare: "DELETE FROM canvas_shares WHERE canvas_id = ? AND user_id = ?",
+  deleteSharesOfCanvas: "DELETE FROM canvas_shares WHERE canvas_id = ?",
+  deleteCommandsOfCanvas: "DELETE FROM canvas_commands WHERE canvas_id = ?",
+  deleteRunFactsOfCanvas: "DELETE FROM canvas_run_facts WHERE canvas_id = ?",
+  deleteRunsOfCanvas: "DELETE FROM canvas_runs WHERE canvas_id = ?",
+  usersOfTeam: "SELECT id, team_id, identifier, display_name, role, status FROM users WHERE team_id = ? ORDER BY display_name, id",
   insertCommand:
     "INSERT INTO canvas_commands (id, canvas_id, actor_user_id, actor_kind, command, base_revision, result_revision, outcome, before_doc, at) VALUES (?,?,?,?,?,?,?,?,?,?)",
   recentCommands: "SELECT * FROM canvas_commands WHERE canvas_id = ? ORDER BY at DESC, id DESC LIMIT ?",
@@ -77,6 +87,9 @@ class CanvasStore {
     this.clock = typeof clock === "function" ? clock : identity.clock;
     // 幂等建表：老库（没跑过本版本）打开画布即可用，不依赖 identity-store 的新迁移级。
     this.db.exec(RUN_FACTS_SQL);
+    // 共享三档（canvas_shares 的 CHECK/created_at/FK）同样在画布域就绪时显式迁移：
+    // 独立函数、事务内执行、已是新形态就空跑；失败整级回滚，不留下半张表。
+    this.identity.transactSync(() => applyCanvasSharingRolesLayer(this.db));
   }
 
   transact(fn) { return this.identity.transact(fn); }
@@ -112,16 +125,29 @@ class CanvasStore {
 
   softDelete({ canvasId, by }) { this.db.prepare(SQL.softDelete).run(this.now(), by == null ? null : String(by), String(canvasId)); return this.boardById(canvasId); }
   restore({ canvasId }) { this.db.prepare(SQL.restore).run(String(canvasId)); return this.boardById(canvasId); }
+  /** 永久删除：调用方负责在同一事务里先清共享/命令/运行；board 上的 FK 也会级联清 canvas_shares。*/
   purge({ canvasId }) { this.db.prepare(SQL.purge).run(String(canvasId)); return true; }
-  setVisibility({ canvasId, visibility }) { this.db.prepare(SQL.setVisibility).run(String(visibility), this.now(), String(canvasId)); return this.boardById(canvasId); }
+  setVisibility({ canvasId, visibility }) { this.db.prepare(SQL.setVisibility).run(String(visibility), String(canvasId)); return this.boardById(canvasId); }
+  /** 所有权转移：只改 owner，不改 updated_at / revision（与共享/可见性同一纪律）。*/
+  updateOwner({ canvasId, ownerUserId }) { this.db.prepare(SQL.updateOwner).run(String(ownerUserId), String(canvasId)); return this.boardById(canvasId); }
 
   upsertShare({ canvasId, userId, role, grantedBy }) {
-    this.db.prepare(SQL.insertShare).run(String(canvasId), String(userId), String(role), grantedBy == null ? null : String(grantedBy), this.now());
+    const now = this.now();
+    this.db.prepare(SQL.insertShare).run(String(canvasId), String(userId), String(role), grantedBy == null ? null : String(grantedBy), now, now);
     return this.shareOf({ canvasId, userId });
   }
   shareOf({ canvasId, userId }) { return this.db.prepare(SQL.shareOf).get(String(canvasId), String(userId)) || null; }
   sharesOf(canvasId) { return this.db.prepare(SQL.sharesOf).all(String(canvasId)); }
   deleteShare({ canvasId, userId }) { this.db.prepare(SQL.deleteShare).run(String(canvasId), String(userId)); return true; }
+  deleteSharesOfCanvas(canvasId) { this.db.prepare(SQL.deleteSharesOfCanvas).run(String(canvasId)); return true; }
+  deleteCommandsOfCanvas(canvasId) { this.db.prepare(SQL.deleteCommandsOfCanvas).run(String(canvasId)); return true; }
+  deleteRunsOfCanvas(canvasId) {
+    this.db.prepare(SQL.deleteRunFactsOfCanvas).run(String(canvasId));
+    this.db.prepare(SQL.deleteRunsOfCanvas).run(String(canvasId));
+    return true;
+  }
+  /** 同组织用户（共享候选人用；包含 DISABLED，由服务层过滤并给结构化原因）。*/
+  usersOfTeam(teamId) { return this.db.prepare(SQL.usersOfTeam).all(String(teamId || "")); }
 
   insertCommand({ id, canvasId, actorUserId, actorKind, command, baseRevision = null, resultRevision = null, outcome, beforeDoc = null }) {
     this.db.prepare(SQL.insertCommand).run(

@@ -27,7 +27,13 @@ const RENDERER_COMMANDS = extendRendererCommands([
   "canvas/restore",
   "canvas/purge",
   "canvas/share",
+  // 共享的独立入口：改角色 / 移除 / 成员列表 / 候选人 / 访问查询 / 所有权转移（同一 envelope + 审计）
+  "canvas/share/update",
+  "canvas/share/remove",
+  "canvas/share/candidates",
   "canvas/shares",
+  "canvas/access/get",
+  "canvas/owner/transfer",
   "canvas/visibility",
   "canvas/command",
   "canvas/undo",
@@ -52,11 +58,12 @@ const CANVAS_COMMAND_NOT_ALLOWED = "CANVAS_COMMAND_NOT_ALLOWED";
 
 const asStr = (v, max = 512) => (typeof v === "string" ? v.slice(0, max) : v == null ? undefined : String(v).slice(0, max));
 
-function createCanvasBundle({ identity = null, identityStore = null, resourceStore = null, resourceService = null, authService = null, clock = null, logger = null } = {}) {
+function createCanvasBundle({ identity = null, identityStore = null, resourceStore = null, resourceService = null, authService = null, authStore = null, clock = null, logger = null } = {}) {
   const idStore = identityStore || identity;
   if (!idStore) throw new Error("createCanvasBundle 需要 identityStore");
   const store = new CanvasStore({ identity: idStore, clock });
-  const service = new CanvasService({ identity: idStore, store, resourceStore, resourceService, authService, clock, logger });
+  // authStore 与治理/资源域共用同一个实例：共享/可见性/转移的审计与业务写入同一条连接、同一个事务。
+  const service = new CanvasService({ identity: idStore, store, resourceStore, resourceService, authService, authStore, clock, logger });
   return { store, service };
 }
 
@@ -95,8 +102,22 @@ function registerCanvasIpc({ ipcMain, service, identity, isTrusted, hostAppId = 
         case "canvas/trash": return service.trashCanvas({ context, canvasId: asStr(payload.canvasId, 120) });
         case "canvas/restore": return service.restoreCanvas({ context, canvasId: asStr(payload.canvasId, 120) });
         case "canvas/purge": return service.purgeCanvas({ context, canvasId: asStr(payload.canvasId, 120) });
-        case "canvas/share": return service.shareCanvas({ context, canvasId: asStr(payload.canvasId, 120), userId: asStr(payload.userId, 120), role: asStr(payload.role, 20) });
+        case "canvas/share":
+          return service.shareCanvas({ context, canvasId: asStr(payload.canvasId, 120), userId: asStr(payload.userId, 120), role: asStr(payload.role, 20) });
+        case "canvas/share/update":
+          return service.updateShareRole({ context, canvasId: asStr(payload.canvasId, 120), userId: asStr(payload.userId, 120), role: asStr(payload.role, 20) });
+        case "canvas/share/remove":
+          return service.removeShare({ context, canvasId: asStr(payload.canvasId, 120), userId: asStr(payload.userId, 120) });
+        case "canvas/share/candidates":
+          return service.shareCandidates({
+            context, canvasId: asStr(payload.canvasId, 120),
+            query: asStr(payload.query, 120) || "",
+            limit: Math.max(1, Math.min(50, Number(payload.limit) || 20)),
+          });
         case "canvas/shares": return service.listShares({ context, canvasId: asStr(payload.canvasId, 120) });
+        case "canvas/access/get": return service.accessGet({ context, canvasId: asStr(payload.canvasId, 120) });
+        case "canvas/owner/transfer":
+          return service.transferOwner({ context, canvasId: asStr(payload.canvasId, 120), newOwnerUserId: asStr(payload.newOwnerUserId, 120) });
         case "canvas/visibility": return service.setVisibility({ context, canvasId: asStr(payload.canvasId, 120), visibility: asStr(payload.visibility, 20) });
         case "canvas/command":
           return service.applyCommand({

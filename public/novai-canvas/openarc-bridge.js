@@ -166,6 +166,18 @@
     call: call,
     /** 唯一被登记的页面动作（无参数）：打开 OpenArc 总 API 设置。*/
     openModelSettings: function () { return callPageAction("app.openModelSettings"); },
+    /**
+     * 列表卡片菜单「共享…」：只把目标画布 id 交给宿主，由宿主打开**它自己的**共享面板。
+     * 页面里没有任何共享 UI / 成员数据；宿主侧只接受本帧 + 本实例 token 的 open-share 消息。
+     * 返回 false = 没有合法 canvasId（不静默发空目标）。
+     */
+    openShare: function (canvasId) {
+      var id = String(canvasId == null ? "" : canvasId).trim().slice(0, 120);
+      if (!id) return false;
+      // 与 call() 同一道实例 token 闸门：宿主只接受本帧 + 本次挂载的 open-share。
+      post({ kind: "open-share", canvasId: id, token: token });
+      return true;
+    },
     pageActions: function () { return Object.keys(PAGE_ACTIONS); },
     context: ctx,
     accountKey: function () { return accountKey; },

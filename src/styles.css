@@ -1364,6 +1364,204 @@ input[type="checkbox"] {
   width: 100%;
   border: 0;
 }
+
+/* D5-02 · 画布共享面板（宿主浮层 · React 岛）。
+   位置：画布宿主段（.canvas-host-frame 之后）。只消费既有 token 与既有类
+   （.ds-btn / .ds-field / .segmented.text / .gov-row / .ds-badge），这里只负责浮层布局；
+   不定义新的颜色/圆角/阴影值。入口与面板都不改上游页面 DOM。 */
+.canvas-share-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  container-type: inline-size;
+}
+.canvas-share-entry {
+  position: absolute;
+  top: 66px;
+  right: 16px;
+  z-index: 2;
+  pointer-events: auto;
+  box-shadow: var(--elevation-2);
+}
+.canvas-share-entry__label { display: inline-block; }
+.canvas-share-panel {
+  position: absolute;
+  top: 66px;
+  right: 12px;
+  bottom: 12px;
+  width: 340px;
+  max-width: calc(100% - 24px);
+  z-index: 3;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  overflow: hidden;
+  border-radius: var(--radius-xl);
+  background: rgb(var(--surface-rgb) / var(--surface-alpha));
+  backdrop-filter: var(--glass-filter-large, var(--glass-filter));
+  -webkit-backdrop-filter: var(--glass-filter-large, var(--glass-filter));
+  box-shadow: var(--shadow);
+  animation: canvas-share-in var(--standard) var(--ease);
+}
+@keyframes canvas-share-in {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: none; }
+}
+.canvas-share-panel__head { display: flex; align-items: flex-start; gap: 10px; }
+.canvas-share-panel__titles { min-width: 0; flex: 1; }
+.canvas-share-panel__title { margin: 0; font-size: var(--fs-heading); font-weight: var(--fw-medium); }
+.canvas-share-panel__subject {
+  margin: 2px 0 0;
+  font-size: var(--fs-micro);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.canvas-share-panel__body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+  scrollbar-width: thin;
+}
+.canvas-share-section { display: flex; flex-direction: column; gap: 8px; }
+.canvas-share-section__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-regular);
+  color: var(--muted);
+}
+.canvas-share-hint { margin: 0; font-size: var(--fs-micro); line-height: var(--lh-normal); color: var(--muted); }
+.canvas-share-flash {
+  margin: 0;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: rgb(var(--text-rgb) / 0.06);
+  font-size: var(--fs-micro);
+  color: var(--text);
+}
+.canvas-share-visibility { margin: 0; font-size: var(--fs-secondary); }
+.canvas-share-members, .canvas-share-candidates { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.canvas-share-member { flex-wrap: wrap; }
+/* 成员行：名字 + 角色/移除在第一行，账号/状态/加入时间在第二行；
+   340px 的面板里也不会把控件挤到第三行（owner 行仍是普通 flex）。 */
+.canvas-share-member[data-share-member] {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "avatar name role remove"
+    "avatar sub sub sub";
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 2px;
+}
+.canvas-share-member[data-share-member] .canvas-share-avatar { grid-area: avatar; }
+.canvas-share-member[data-share-member] .canvas-share-ident { grid-area: name; }
+.canvas-share-member[data-share-member] .canvas-share-select { grid-area: role; }
+.canvas-share-member[data-share-member] .canvas-share-remove { grid-area: remove; }
+.canvas-share-sub {
+  grid-area: sub;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-micro);
+  color: var(--muted);
+}
+.canvas-share-avatar {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-pill);
+  background: rgb(var(--text-rgb) / 0.08);
+  color: var(--muted);
+  font-size: var(--fs-micro);
+}
+.canvas-share-ident { display: flex; flex-direction: column; min-width: 0; flex: 1 1 60px; }
+.canvas-share-ident .gov-name, .canvas-share-ident .gov-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.canvas-share-status { color: var(--muted); }
+.canvas-share-status.is-off { color: var(--failed); }
+.canvas-share-select {
+  flex: none;
+  max-width: 96px;
+  min-height: 26px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-caption);
+}
+.canvas-share-select:disabled { opacity: var(--disabled-opacity); cursor: var(--cursor-not-allowed, not-allowed); }
+.canvas-share-remove { flex: none; }
+.canvas-share-confirm {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-micro);
+  color: var(--muted);
+}
+.canvas-share-member[data-share-member] .canvas-share-confirm { grid-column: 3 / 5; grid-row: 1; justify-self: end; }
+.canvas-share-member[data-share-member] .canvas-share-row-error { grid-column: 1 / -1; }
+.canvas-share-row-error { flex-basis: 100%; margin: 0; font-size: var(--fs-micro); color: var(--failed); }
+.canvas-share-empty { margin: 0; font-size: var(--fs-micro); color: var(--muted); }
+.canvas-share-add { display: flex; flex-direction: column; gap: 8px; }
+.canvas-share-add__controls { display: flex; align-items: center; gap: 6px; }
+.canvas-share-add__search { flex: 1 1 auto; min-width: 0; }
+.canvas-share-add__role { flex: none; }
+.canvas-share-add__role .ds-field__box { padding: 0 4px; }
+.canvas-share-candidate {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--radius-md);
+  background: rgb(var(--text-rgb) / 0.035);
+  color: var(--text);
+  text-align: left;
+}
+.canvas-share-candidate:hover:not(:disabled) { background: rgb(var(--text-rgb) / 0.07); }
+.canvas-share-candidate:disabled { opacity: var(--disabled-opacity); }
+.canvas-share-candidate__add { margin-left: auto; font-size: var(--fs-micro); color: var(--muted); white-space: nowrap; }
+.canvas-share-inline { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.canvas-share-transfer__pick {
+  flex: 1 1 140px;
+  max-width: 100%;
+  padding: 4px 6px;
+  border-radius: var(--radius-md);
+  background: rgb(var(--content-rgb) / var(--content-alpha));
+  box-shadow: inset 0 0 0 1px rgb(var(--line-rgb) / var(--line-alpha));
+}
+.canvas-share-skeleton { display: flex; flex-direction: column; gap: 6px; }
+.canvas-share-skeleton .gov-row { height: 44px; }
+.canvas-share-fatal { display: flex; flex-direction: column; gap: 10px; }
+/* 窄窗：入口收成 40px 图标按钮，面板铺满可用宽度；成员行允许换行，不横向滚动。 */
+@container (max-width: 760px) {
+  .canvas-share-entry { top: 66px; right: 12px; width: 40px; height: 40px; padding: 0; justify-content: center; }
+  .canvas-share-entry__label { display: none; }
+  .canvas-share-panel { top: 60px; right: 8px; bottom: 8px; width: calc(100cqw - 16px); max-width: none; padding: 14px; }
+  .canvas-share-add__controls { flex-wrap: wrap; }
+  .canvas-share-add__role { flex: 1 1 auto; }
+}
+/* 减少动态效果：面板只呈现终态（不播放位移/淡入）。 */
+.reduced .canvas-share-panel { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .canvas-share-panel { animation: none; }
+}
 /* 高度与 electron/window-domain.cjs 的 BROWSER_CHROME_H（标签栏 37 + 地址栏 53 = 90）一致：
    原生视图从这个高度下面开始；改这里必须同时改那个常量。 */
 .addressbar {

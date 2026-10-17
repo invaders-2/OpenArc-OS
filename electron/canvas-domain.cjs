@@ -257,8 +257,60 @@ function applyCommand(doc, command, opts = {}) {
 }
 
 /**
+ * 共享角色（存储值 → 画布能力档位）。
+ *
+ *   VIEWER    查看者：只读
+ *   EDITOR    编辑者：读/改/保存/命令/撤销/运行 AI —— **不是** authorization 的 EDITOR_ACTIONS
+ *             （那一档含 resource.delete/restore/share，误用会给编辑者删画布/改共享的权力）
+ *   MANAGER   管理共享：编辑者的全部能力 + 改共享 + 改可见性；**不含**删画布/恢复/永久删除/转移所有者
+ *   CONTRIBUTOR 是旧存储值，读时等价 EDITOR（不强制迁移旧行，新写只写 VIEWER/EDITOR/MANAGER）
+ */
+const SHARE_ROLES = Object.freeze(["VIEWER", "EDITOR", "MANAGER"]);
+const SHARE_ROLE_ALIASES = Object.freeze({ CONTRIBUTOR: "EDITOR" });
+/** 角色优先级：VIEWER < EDITOR < MANAGER < OWNER。只用于比较，不等于动作集合。*/
+const ROLE_RANK = Object.freeze({ VIEWER: 1, EDITOR: 2, MANAGER: 3, OWNER: 4 });
+
+/** 管理共享档位：编辑能力 + share/manageAccess；刻意不含 delete/restore/permanentDelete。*/
+const CANVAS_MANAGER_ACTIONS = Object.freeze([
+  ...authz.PERMISSION_SET.CONTRIBUTOR,
+  authz.ACTION.SHARE,
+  authz.ACTION.MANAGE_ACCESS,
+]);
+
+/** 把存储/输入角色归一为三档之一；未知值返回 null（调用方决定拒绝还是兜底）。*/
+function normalizeShareRole(value) {
+  const raw = str(value, 40).toUpperCase();
+  const role = SHARE_ROLE_ALIASES[raw] || raw;
+  return SHARE_ROLES.includes(role) ? role : null;
+}
+
+function roleRank(value) {
+  const role = normalizeShareRole(value);
+  return role ? ROLE_RANK[role] : 0;
+}
+
+/** 角色 → 画布动作集合。owner 不在这里：它是 board.owner_user_id 的隐式身份。*/
+function actionsForShareRole(value) {
+  const role = normalizeShareRole(value);
+  if (role === "MANAGER") return [...CANVAS_MANAGER_ACTIONS];
+  if (role === "EDITOR") return [...authz.PERMISSION_SET.CONTRIBUTOR];
+  if (role === "VIEWER") return [...authz.PERMISSION_SET.VIEWER];
+  return null;
+}
+
+/**
  * 画布权限规则（**只有一份**）：鼠标路径（保存/命令）与 AI 路径（工具）都调用它。
- * 返回 { allow, actions, source }。
+ * 返回 { allow, actions, source, role? }。
+ *
+ * 判定顺序（显式授权优先于组织可见）：
+ *   1. 超管             → OWNER_ACTIONS / SUPER_ADMIN
+ *   2. 所有者           → OWNER_ACTIONS / OWNER_POLICY
+ *   3. 显式 share       → 按角色（最高档） / SHARE_<role>
+ *   4. ORGANIZATION 同组织 → VIEWER / ORG_POLICY（只读底线）
+ *   5. 其余             → NO_GRANT
+ *
+ * 组织可见**不会**把显式 EDITOR/MANAGER 降级：第 3 步先于第 4 步。
+ * 显式 share 分支要求同组织：历史脏行（跨组织）不得成为读取后门。
  */
 function evaluateCanvasAccess({ actor = {}, entry = null, share = null } = {}) {
   const userId = str(actor.userId || actor.user_id, 120);
@@ -266,20 +318,32 @@ function evaluateCanvasAccess({ actor = {}, entry = null, share = null } = {}) {
   if (!entry) return { allow: false, actions: [], source: "NOT_FOUND" };
   if (isSuper) return { allow: true, actions: [...authz.OWNER_ACTIONS], source: "SUPER_ADMIN" };
   if (entry.owner_user_id === userId) return { allow: true, actions: [...authz.OWNER_ACTIONS], source: "OWNER_POLICY" };
+  if (share && share.user_id === userId) {
+    const role = normalizeShareRole(share.role);
+    const sameOrg = !!entry.organization_id && entry.organization_id === actor.organizationId;
+    if (role && sameOrg) {
+      return { allow: true, actions: actionsForShareRole(role), source: "SHARE_" + role, role };
+    }
+  }
   if (entry.visibility === "ORGANIZATION" && entry.organization_id && entry.organization_id === actor.organizationId)
     return { allow: true, actions: [...authz.PERMISSION_SET.VIEWER], source: "ORG_POLICY" };
-  if (share && share.user_id === userId) {
-    const role = String(share.role || "VIEWER").toUpperCase();
-    const actions = role === "EDITOR" || role === "CONTRIBUTOR" ? [...authz.PERMISSION_SET.CONTRIBUTOR] : [...authz.PERMISSION_SET.VIEWER];
-    return { allow: true, actions, source: "SHARE_" + role };
-  }
   return { allow: false, actions: [], source: "NO_GRANT" };
 }
 
-const canView = (access) => !!access.allow && access.actions.includes(authz.ACTION.READ);
-const canEdit = (access) => !!access.allow && access.actions.includes(authz.ACTION.EDIT);
+const hasAction = (access, action) => !!access && !!access.allow && Array.isArray(access.actions) && access.actions.includes(action);
+const canView = (access) => hasAction(access, authz.ACTION.READ);
+const canEdit = (access) => hasAction(access, authz.ACTION.EDIT);
+/** canManage = resource.manageAccess；owner/super/MANAGER 都从这里推导，不再各写一套 owner 判断。*/
+const canManage = (access) => hasAction(access, authz.ACTION.MANAGE_ACCESS);
+const canShare = (access) => hasAction(access, authz.ACTION.SHARE);
+const canTrash = (access) => hasAction(access, authz.ACTION.DELETE);
+const canRestore = (access) => hasAction(access, authz.ACTION.RESTORE);
+const canPurge = (access) => hasAction(access, authz.ACTION.PERMANENT_DELETE);
 
 module.exports = {
   REASON, COMMANDS, AGENT_COMMANDS, LIMITS, NODE_TYPES, EDITABLE_NODE_KEYS,
-  emptyDoc, normalizeDoc, normalizeCommand, applyCommand, evaluateCanvasAccess, canView, canEdit,
+  SHARE_ROLES, ROLE_RANK, CANVAS_MANAGER_ACTIONS,
+  emptyDoc, normalizeDoc, normalizeCommand, applyCommand, evaluateCanvasAccess,
+  normalizeShareRole, roleRank, actionsForShareRole,
+  canView, canEdit, canManage, canShare, canTrash, canRestore, canPurge,
 };

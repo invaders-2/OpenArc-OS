@@ -11,7 +11,7 @@
     <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
     <script src="/static/vendor/js/tailwindcss-cdn.js?v=1.0.124.1789606971"></script>
     <script defer src="/static/vendor/js/lucide-subset.js?v=1.0.124.1789606971"></script>
-    <script defer src="/static/js/shared/icons.js?v=1.0.124.1790685706"></script>
+    <script defer src="/static/js/shared/icons.js?v=1.0.124.1791729997"></script>
     <script src="/static/js/theme.js?v=1.0.124.1789606971"></script>
     <script src="/static/js/shared/utils.js?v=1.0.124.1790560477"></script>
     <script src="/static/js/shared/viewport.js?v=1.0.124.1789606971"></script>
@@ -1271,6 +1271,10 @@
                             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                             复制画布
                         </button>
+                        <button class="card-more-menu-item" data-action="share">
+                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                            共享…
+                        </button>
                         <button class="card-more-menu-item delete" data-action="delete">
                             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                             删除
@@ -1329,6 +1333,14 @@
                         confirmText: '重命名', cancelText: '取消',
                         onSubmit: function (name) { return renameCanvasAPI(c.id, name); }
                     });
+                } else if (action === 'share') {
+                    // OpenArc（第 18 处改动）：列表页**不画**共享 UI，只把 canvasId 交给宿主，
+                    // 由宿主打开同一个共享面板（入口/成员/角色/可见性全在宿主浮层）。
+                    if (window.__openarcBridge && typeof window.__openarcBridge.openShare === 'function') {
+                        window.__openarcBridge.openShare(c.id);
+                    } else {
+                        alert('共享面板不可用（OpenArc 桥未就绪）');
+                    }
                 } else if (action === 'duplicate') {
                     if (confirm(`确定要复制画布「${c.title}」吗？`)) {
                         duplicateCanvasAPI(c);

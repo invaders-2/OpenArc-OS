@@ -11,6 +11,7 @@
 
 const domain = require("./canvas-domain.cjs");
 const authz = require("./authorization-domain.cjs");
+const { AuthorizationStore } = require("./authorization-store.cjs");
 const imageParams = require("./image-params.cjs");
 const modelLabelMigration = require("./canvas-model-label-migration.cjs");
 
@@ -22,7 +23,7 @@ const CANVAS_ID = () => "cv_" + Date.now().toString(36) + "_" + Math.random().to
 const CMD_ID = () => "cc_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
 
 class CanvasService {
-  constructor({ identity, store, resourceStore = null, authService = null, resourceService = null, clock = null, logger = null, thumbnailer = null } = {}) {
+  constructor({ identity, store, resourceStore = null, authService = null, authStore = null, resourceService = null, clock = null, logger = null, thumbnailer = null } = {}) {
     /** 10-16：缩略器（nativeImage 形状；测试注入，生产懒加载 electron.nativeImage）。 */
     this.thumbnailer = thumbnailer;
     if (!identity || !store) throw new Error("CanvasService 需要 identity 与 store");
@@ -32,6 +33,11 @@ class CanvasService {
     this.resourceService = resourceService;
     this.authService = authService;
     this.clock = typeof clock === "function" ? clock : () => Date.now();
+    /**
+     * 授权审计。生产装配把 authStore 传进来（与治理/资源域同一条连接、同一个实例）；
+     * 测试/旧装配没传时建一个同连接的薄包装（AuthorizationStore 无状态，写入同一张表）。
+     */
+    this.authStore = authStore || new AuthorizationStore({ identity, clock: this.clock });
     this.logger = logger;
     /** 生成运行 → AbortController（停止时中止在途 HTTP；迟到结果一律丢弃）。*/
     this.abortOf = new Map();
@@ -141,8 +147,121 @@ class CanvasService {
       ownerUserId: board.owner_user_id,
       visibility: board.visibility || "PRIVATE",
       trashed: !!board.deleted_at,
-      access: { canEdit: domain.canEdit(access), canView: domain.canView(access), source: access.source },
+      access: {
+        canEdit: domain.canEdit(access),
+        canView: domain.canView(access),
+        canManage: domain.canManage(access),
+        canShare: domain.canShare(access),
+        source: access.source,
+      },
     };
+  }
+
+  // ---------------------------------------------------------------- 共享/审计辅助
+
+  #isSuper(user) { return !!user && String(user.role) === "ADMIN"; }
+
+  /** access 的原始投影（allow/actions/source）：给 canvas/access/get 与成员列表共用。*/
+  #accessView(access) {
+    return { allow: !!access.allow, actions: [...(access.actions || [])], source: access.source };
+  }
+
+  /** 能力投影：一律从同一份 actions 推导，避免再写一套 if owner。*/
+  #capabilities(access) {
+    return {
+      canView: domain.canView(access),
+      canEdit: domain.canEdit(access),
+      canManage: domain.canManage(access),
+      canShare: domain.canShare(access),
+      canTrash: domain.canTrash(access),
+      canRestore: domain.canRestore(access),
+      canPurge: domain.canPurge(access),
+    };
+  }
+
+  #userBrief(user) {
+    if (!user) return null;
+    return { userId: user.id, displayName: user.display_name, username: user.identifier, status: user.status };
+  }
+
+  #shareView(row) {
+    const user = this.identity.userById(row.user_id);
+    const grantedBy = row.granted_by ? this.identity.userById(row.granted_by) : null;
+    return {
+      userId: row.user_id,
+      displayName: user ? user.display_name : null,
+      username: user ? user.identifier : null,
+      role: domain.normalizeShareRole(row.role) || "VIEWER",
+      grantedBy: row.granted_by || null,
+      grantedByName: grantedBy ? grantedBy.display_name : null,
+      createdAt: Number(row.created_at || 0),
+      at: Number(row.at || 0),
+      status: user ? (String(user.status) === "ACTIVE" ? "ACTIVE" : "DISABLED") : "MISSING",
+    };
+  }
+
+  #shareViews(canvasId) { return this.store.sharesOf(canvasId).map((row) => this.#shareView(row)); }
+
+  /**
+   * 成功的共享/可见性/转移写入：auditAuthorization(strict) 与写操作在**同一个事务**里。
+   * 审计失败会抛出，外层 store.transactSync 回滚并返回 INTERNAL_ERROR。
+   */
+  #auditAllowed({ context, userId, action, canvasId, targetUserId = null, source = null, oldPermissions = null, newPermissions = null }) {
+    this.authStore.auditAuthorization({
+      actorUserId: userId,
+      targetUserId,
+      appId: "canvas",
+      resourceRef: canvasId ? "canvas:" + canvasId : null,
+      action,
+      decision: "ALLOW",
+      reasonCode: "OK",
+      permissionSource: source,
+      requestId: context && context.requestId ? context.requestId : null,
+      oldPermissions,
+      newPermissions,
+      strict: true,
+    });
+  }
+
+  /** 被拒绝的写尝试：记 DENY，但不改变拒绝结果（审计本身失败也不伪装成别的错误）。*/
+  #auditDenied({ context, userId, action, canvasId, targetUserId = null, reasonCode, source = null }) {
+    if (!userId) return;
+    try {
+      this.authStore.auditAuthorization({
+        actorUserId: userId,
+        targetUserId,
+        appId: "canvas",
+        resourceRef: canvasId ? "canvas:" + canvasId : null,
+        action,
+        decision: "DENY",
+        reasonCode: String(reasonCode || "DENY"),
+        permissionSource: source,
+        requestId: context && context.requestId ? context.requestId : null,
+      });
+    } catch { /* DENY 审计是留痕，不改变拒绝结果 */ }
+  }
+
+  /** 写命令的统一加载：返回用户（用于 DENY 审计）、board 与 access。*/
+  #writeLoad(context, canvasId) {
+    const actor = this.#actor(context);
+    if (!actor.ok) return { ok: false, response: actor };
+    const board = canvasId ? this.store.boardById(canvasId) : null;
+    if (!board || board.deleted_at) return { ok: false, response: fail("NOT_FOUND"), user: actor.user };
+    const a = this.#access(context, board);
+    if (!a.ok) return { ok: false, response: a, user: actor.user };
+    return { ok: true, board, user: a.user, access: a.access, share: a.share };
+  }
+
+  /** 共享目标校验（存在 / ACTIVE / 同组织 / 非 owner）。缺一不可。*/
+  #validateShareTarget(board, userId) {
+    const target = String(userId == null ? "" : userId).trim().slice(0, 120);
+    if (!target) return { error: "INVALID_INPUT", detail: "target" };
+    if (target === board.owner_user_id) return { error: "INVALID_INPUT", detail: "owner" };
+    const user = this.identity.userById(target);
+    if (!user) return { error: "INVALID_INPUT", detail: "target" };
+    if (String(user.status) !== "ACTIVE") return { error: "INVALID_INPUT", detail: "target-disabled" };
+    if (String(user.team_id) !== String(board.organization_id)) return { error: "INVALID_INPUT", detail: "target-org" };
+    return { ok: true, target, user };
   }
 
   // ---------------------------------------------------------------- 渲染层命令
@@ -180,7 +299,7 @@ class CanvasService {
         share,
       });
       if (!domain.canView(access)) return;
-      seen.set(board.id, { ...this.#view(board, access), shareRole: share ? share.role : null });
+      seen.set(board.id, { ...this.#view(board, access), shareRole: share ? domain.normalizeShareRole(share.role) : null });
     };
     const owned = this.store.boardsOwned(userId).filter((b) => (includeTrashed ? true : !b.deleted_at));
     owned.forEach((b) => push(b));
@@ -212,8 +331,15 @@ class CanvasService {
         updated_at: Number(board.updated_at || 0), updatedAt: Number(board.updated_at || 0),
         created_at: Number(board.created_at || 0),
         trashed: !!board.deleted_at,
+        visibility: board.visibility || "PRIVATE",
         node_count: (doc.nodes || []).length, connection_count: (doc.connections || []).length,
-        access: { canEdit: domain.canEdit(r.access), canView: domain.canView(r.access), source: r.access.source },
+        access: {
+          canEdit: domain.canEdit(r.access),
+          canView: domain.canView(r.access),
+          canManage: domain.canManage(r.access),
+          canShare: domain.canShare(r.access),
+          source: r.access.source,
+        },
       },
     });
   }
@@ -259,6 +385,8 @@ class CanvasService {
   restoreCanvas({ context, canvasId } = {}) {
     const r = this.#load(context, canvasId, { needEdit: true, allowTrashed: true });
     if (!r.ok) return r;
+    // 三档矩阵：恢复 = 所有者/超管（canRestore）；EDITOR/MANAGER 能编辑但不能把画布从回收站拿回来。
+    if (!domain.canRestore(r.access)) return fail(REASON.READ_ONLY, r.access.source);
     return ok({ canvas: this.#view(this.store.restore({ canvasId }), r.access) });
   }
 
@@ -267,42 +395,267 @@ class CanvasService {
     if (!board) return fail("NOT_FOUND");
     const a = this.#access(context, board);
     if (!a.ok) return a;
-    if (board.owner_user_id !== a.user.id && String(a.user.role) !== "ADMIN") return fail(REASON.READ_ONLY, a.access.source);
-    this.store.purge({ canvasId });
+    if (board.owner_user_id !== a.user.id && !this.#isSuper(a.user)) return fail(REASON.READ_ONLY, a.access.source);
+    // 同一事务里先清共享/命令/运行，再删 board：canvas_shares 无 FK 的老库也不会留孤儿。
+    this.store.transactSync(() => {
+      this.store.deleteSharesOfCanvas(canvasId);
+      this.store.deleteCommandsOfCanvas(canvasId);
+      this.store.deleteRunsOfCanvas(canvasId);
+      this.store.purge({ canvasId });
+    });
     return ok({ purged: canvasId });
   }
 
-  /** 共享角色（A28 的只读成员由此产生）。只有owner/管理员能改共享面。*/
+  // ---------------------------------------------------------------- 共享（owner / 超管 / MANAGER）
+
+  /**
+   * canvas/share：upsert（新增或改角色）。返回 changed: CREATED | UPDATED。
+   * 只有 canManage（owner / 超管 / MANAGER）可调用；不能改 owner 的角色。
+   * 审计与写共享在同一事务（strict）：审计失败 → 回滚 → INTERNAL_ERROR。
+   */
   shareCanvas({ context, canvasId, userId = null, role = "VIEWER" } = {}) {
-    const board = this.store.boardById(canvasId);
-    if (!board) return fail("NOT_FOUND");
-    const a = this.#access(context, board);
-    if (!a.ok) return a;
-    const isOwner = board.owner_user_id === a.user.id || String(a.user.role) === "ADMIN";
-    if (!isOwner) return fail(REASON.READ_ONLY, a.access.source);
-    const target = String(userId || "").trim();
-    if (!target) return ok({ shares: this.store.sharesOf(canvasId) });
-    if (target === board.owner_user_id) return fail("INVALID_INPUT", "owner");
-    const r = String(role || "VIEWER").toUpperCase();
-    if (!["VIEWER", "CONTRIBUTOR", "EDITOR"].includes(r)) return fail("INVALID_INPUT", "role");
-    this.store.upsertShare({ canvasId, userId: target, role: r, grantedBy: a.user.id });
-    return ok({ shares: this.store.sharesOf(canvasId) });
+    const l = this.#writeLoad(context, canvasId);
+    if (!l.ok) return l.response;
+    if (!domain.canManage(l.access)) {
+      this.#auditDenied({ context, userId: l.user.id, action: "canvas.share.grant", canvasId, targetUserId: userId || null, reasonCode: REASON.READ_ONLY, source: l.access.source });
+      return fail(REASON.READ_ONLY, l.access.source);
+    }
+    const normalized = domain.normalizeShareRole(role);
+    if (!normalized) {
+      this.#auditDenied({ context, userId: l.user.id, action: "canvas.share.grant", canvasId, targetUserId: userId || null, reasonCode: "INVALID_INPUT", source: l.access.source });
+      return fail("INVALID_INPUT", "role");
+    }
+    const t = this.#validateShareTarget(l.board, userId);
+    if (!t.ok) {
+      this.#auditDenied({ context, userId: l.user.id, action: "canvas.share.grant", canvasId, targetUserId: String(userId || "").trim() || null, reasonCode: "INVALID_INPUT", source: l.access.source });
+      return fail("INVALID_INPUT", t.detail);
+    }
+    const before = this.store.shareOf({ canvasId, userId: t.target });
+    const changed = before ? "UPDATED" : "CREATED";
+    const action = before ? "canvas.share.update" : "canvas.share.grant";
+    try {
+      this.store.transactSync(() => {
+        this.store.upsertShare({ canvasId, userId: t.target, role: normalized, grantedBy: l.user.id });
+        this.#auditAllowed({
+          context, userId: l.user.id, action, canvasId, targetUserId: t.target, source: l.access.source,
+          oldPermissions: before ? [domain.normalizeShareRole(before.role) || "VIEWER"] : [],
+          newPermissions: [normalized],
+        });
+      });
+    } catch {
+      return fail("INTERNAL_ERROR", "audit");
+    }
+    return ok({ changed, share: this.#shareView(this.store.shareOf({ canvasId, userId: t.target })), shares: this.#shareViews(canvasId) });
   }
 
-  setVisibility({ context, canvasId, visibility = "PRIVATE" } = {}) {
-    const board = this.store.boardById(canvasId);
-    if (!board) return fail("NOT_FOUND");
-    const a = this.#access(context, board);
-    if (!a.ok) return a;
-    if (board.owner_user_id !== a.user.id && String(a.user.role) !== "ADMIN") return fail(REASON.READ_ONLY, a.access.source);
-    const v = String(visibility).toUpperCase() === "ORGANIZATION" ? "ORGANIZATION" : "PRIVATE";
-    return ok({ canvas: this.#view(this.store.setVisibility({ canvasId, visibility: v }), a.access) });
+  /** canvas/share/update：独立改角色（不改 upsert 语义；目标必须已有共享行）。*/
+  updateShareRole({ context, canvasId, userId = null, role = "VIEWER" } = {}) {
+    const l = this.#writeLoad(context, canvasId);
+    if (!l.ok) return l.response;
+    if (!domain.canManage(l.access)) {
+      this.#auditDenied({ context, userId: l.user.id, action: "canvas.share.update", canvasId, targetUserId: userId || null, reasonCode: REASON.READ_ONLY, source: l.access.source });
+      return fail(REASON.READ_ONLY, l.access.source);
+    }
+    const normalized = domain.normalizeShareRole(role);
+    if (!normalized) {
+      this.#auditDenied({ context, userId: l.user.id, action: "canvas.share.update", canvasId, targetUserId: userId || null, reasonCode: "INVALID_INPUT", source: l.access.source });
+      return fail("INVALID_INPUT", "role");
+    }
+    const t = this.#validateShareTarget(l.board, userId);
+    if (!t.ok) {
+      this.#auditDenied({ context, userId: l.user.id, action: "canvas.share.update", canvasId, targetUserId: String(userId || "").trim() || null, reasonCode: "INVALID_INPUT", source: l.access.source });
+      return fail("INVALID_INPUT", t.detail);
+    }
+    const before = this.store.shareOf({ canvasId, userId: t.target });
+    if (!before) return fail("NOT_FOUND", "share");
+    try {
+      this.store.transactSync(() => {
+        this.store.upsertShare({ canvasId, userId: t.target, role: normalized, grantedBy: l.user.id });
+        this.#auditAllowed({
+          context, userId: l.user.id, action: "canvas.share.update", canvasId, targetUserId: t.target, source: l.access.source,
+          oldPermissions: [domain.normalizeShareRole(before.role) || "VIEWER"],
+          newPermissions: [normalized],
+        });
+      });
+    } catch {
+      return fail("INTERNAL_ERROR", "audit");
+    }
+    return ok({ changed: true, share: this.#shareView(this.store.shareOf({ canvasId, userId: t.target })), shares: this.#shareViews(canvasId) });
   }
 
+  /** canvas/share/remove：幂等移除；不能移除 owner。removed=false 时不写审计（避免噪声）。*/
+  removeShare({ context, canvasId, userId = null } = {}) {
+    const l = this.#writeLoad(context, canvasId);
+    if (!l.ok) return l.response;
+    if (!domain.canManage(l.access)) {
+      this.#auditDenied({ context, userId: l.user.id, action: "canvas.share.revoke", canvasId, targetUserId: userId || null, reasonCode: REASON.READ_ONLY, source: l.access.source });
+      return fail(REASON.READ_ONLY, l.access.source);
+    }
+    const target = String(userId == null ? "" : userId).trim().slice(0, 120);
+    if (!target) {
+      this.#auditDenied({ context, userId: l.user.id, action: "canvas.share.revoke", canvasId, reasonCode: "INVALID_INPUT", source: l.access.source });
+      return fail("INVALID_INPUT", "target");
+    }
+    if (target === l.board.owner_user_id) {
+      this.#auditDenied({ context, userId: l.user.id, action: "canvas.share.revoke", canvasId, targetUserId: target, reasonCode: "INVALID_INPUT", source: l.access.source });
+      return fail("INVALID_INPUT", "owner");
+    }
+    const before = this.store.shareOf({ canvasId, userId: target });
+    if (!before) return ok({ removed: false, shares: this.#shareViews(canvasId) });
+    try {
+      this.store.transactSync(() => {
+        this.store.deleteShare({ canvasId, userId: target });
+        this.#auditAllowed({
+          context, userId: l.user.id, action: "canvas.share.revoke", canvasId, targetUserId: target, source: l.access.source,
+          oldPermissions: [domain.normalizeShareRole(before.role) || "VIEWER"],
+          newPermissions: [],
+        });
+      });
+    } catch {
+      return fail("INTERNAL_ERROR", "audit");
+    }
+    return ok({ removed: true, shares: this.#shareViews(canvasId) });
+  }
+
+  /**
+   * canvas/shares：canView 可调用。
+   * 有管理权 → 完整成员列表（显示名/状态/加入时间）；无管理权 → 只给共享成员数 + 自己的角色，
+   * **不返回成员 ID 列表**。
+   */
   listShares({ context, canvasId } = {}) {
     const r = this.#load(context, canvasId);
     if (!r.ok) return r;
-    return ok({ shares: this.store.sharesOf(canvasId) });
+    const rows = this.store.sharesOf(canvasId);
+    const canManage = domain.canManage(r.access);
+    const owner = this.identity.userById(r.board.owner_user_id);
+    const base = {
+      canvasId: r.board.id,
+      visibility: r.board.visibility || "PRIVATE",
+      owner: this.#userBrief(owner) || { userId: r.board.owner_user_id, displayName: null, username: null, status: "MISSING" },
+      canManage,
+      access: this.#accessView(r.access),
+      shareCount: rows.length,
+    };
+    if (!canManage) {
+      const mine = rows.find((row) => row.user_id === r.user.id) || null;
+      return ok({ ...base, shares: null, myRole: mine ? domain.normalizeShareRole(mine.role) : null });
+    }
+    return ok({ ...base, shares: this.#shareViews(canvasId) });
+  }
+
+  /** canvas/share/candidates：同组织 ACTIVE、排除 owner 与已共享成员。只有 canManage 可调用。*/
+  shareCandidates({ context, canvasId, query = "", limit = 20 } = {}) {
+    const r = this.#load(context, canvasId);
+    if (!r.ok) return r;
+    if (!domain.canManage(r.access)) return fail(REASON.READ_ONLY, r.access.source);
+    const q = String(query == null ? "" : query).trim().toLowerCase();
+    const max = Math.max(1, Math.min(50, Number(limit) || 20));
+    const shared = new Set(this.store.sharesOf(canvasId).map((row) => row.user_id));
+    const items = this.store.usersOfTeam(r.board.organization_id)
+      .filter((u) => String(u.status) === "ACTIVE" && u.id !== r.board.owner_user_id && !shared.has(u.id))
+      .filter((u) => !q || String(u.display_name || "").toLowerCase().includes(q) || String(u.identifier || "").toLowerCase().includes(q))
+      .slice(0, max)
+      .map((u) => this.#userBrief(u));
+    return ok({ items });
+  }
+
+  /** canvas/access/get：canView 可调用；只给 owner + 自己的角色 + 能力投影，不给成员列表。*/
+  accessGet({ context, canvasId } = {}) {
+    const r = this.#load(context, canvasId);
+    if (!r.ok) return r;
+    const owner = this.identity.userById(r.board.owner_user_id);
+    const mine = r.share ? domain.normalizeShareRole(r.share.role) : null;
+    return ok({
+      canvasId: r.board.id,
+      visibility: r.board.visibility || "PRIVATE",
+      owner: this.#userBrief(owner) || { userId: r.board.owner_user_id, displayName: null, username: null, status: "MISSING" },
+      share: mine ? { role: mine } : null,
+      access: this.#accessView(r.access),
+      capabilities: this.#capabilities(r.access),
+    });
+  }
+
+  /** canvas/visibility：非法值拒绝（不再静默变 PRIVATE）；不更新 updated_at / revision；写审计。*/
+  setVisibility({ context, canvasId, visibility = "" } = {}) {
+    const l = this.#writeLoad(context, canvasId);
+    if (!l.ok) return l.response;
+    if (!domain.canManage(l.access)) {
+      this.#auditDenied({ context, userId: l.user.id, action: "canvas.visibility.set", canvasId, reasonCode: REASON.READ_ONLY, source: l.access.source });
+      return fail(REASON.READ_ONLY, l.access.source);
+    }
+    const v = String(visibility == null ? "" : visibility).trim().toUpperCase();
+    if (v !== "PRIVATE" && v !== "ORGANIZATION") {
+      this.#auditDenied({ context, userId: l.user.id, action: "canvas.visibility.set", canvasId, reasonCode: "INVALID_INPUT", source: l.access.source });
+      return fail("INVALID_INPUT", "visibility");
+    }
+    const old = String(l.board.visibility || "PRIVATE").toUpperCase();
+    if (old === v) return ok({ canvas: this.#view(l.board, l.access), changed: false });
+    let updated = null;
+    try {
+      updated = this.store.transactSync(() => {
+        const board = this.store.setVisibility({ canvasId, visibility: v });
+        this.#auditAllowed({
+          context, userId: l.user.id, action: "canvas.visibility.set", canvasId, source: l.access.source,
+          oldPermissions: [old], newPermissions: [v],
+        });
+        return board;
+      });
+    } catch {
+      return fail("INTERNAL_ERROR", "audit");
+    }
+    return ok({ canvas: this.#view(updated, l.access), changed: true });
+  }
+
+  /**
+   * canvas/owner/transfer：只有当前 owner 或超管。
+   * 单事务：改 owner（不动 updated_at/revision）→ 删目标原 share → 旧 owner 降为 EDITOR → 审计两行。
+   * 并发：事务内重读 owner，已变化 → READ_ONLY detail='owner-changed'，不覆盖别人的转移。
+   */
+  transferOwner({ context, canvasId, newOwnerUserId = null } = {}) {
+    const l = this.#writeLoad(context, canvasId);
+    if (!l.ok) return l.response;
+    const isOwner = l.board.owner_user_id === l.user.id || this.#isSuper(l.user);
+    if (!isOwner) {
+      this.#auditDenied({ context, userId: l.user.id, action: "canvas.owner.grant", canvasId, targetUserId: newOwnerUserId || null, reasonCode: REASON.READ_ONLY, source: l.access.source });
+      return fail(REASON.READ_ONLY, l.access.source);
+    }
+    const t = this.#validateShareTarget(l.board, newOwnerUserId);
+    if (!t.ok) {
+      this.#auditDenied({ context, userId: l.user.id, action: "canvas.owner.grant", canvasId, targetUserId: String(newOwnerUserId || "").trim() || null, reasonCode: "INVALID_INPUT", source: l.access.source });
+      return fail("INVALID_INPUT", t.detail);
+    }
+    const previousOwner = l.board.owner_user_id;
+    const targetShare = this.store.shareOf({ canvasId, userId: t.target });
+    try {
+      this.store.transactSync(() => {
+        const fresh = this.store.boardById(canvasId);
+        if (!fresh || fresh.owner_user_id !== previousOwner) {
+          const err = new Error("OWNER_CHANGED");
+          err.code = "OWNER_CHANGED";
+          throw err;
+        }
+        this.store.updateOwner({ canvasId, ownerUserId: t.target });
+        if (targetShare) this.store.deleteShare({ canvasId, userId: t.target });
+        this.store.upsertShare({ canvasId, userId: previousOwner, role: "EDITOR", grantedBy: l.user.id });
+        this.#auditAllowed({
+          context, userId: l.user.id, action: "canvas.owner.revoke", canvasId, targetUserId: previousOwner, source: l.access.source,
+          oldPermissions: ["OWNER"], newPermissions: ["EDITOR"],
+        });
+        this.#auditAllowed({
+          context, userId: l.user.id, action: "canvas.owner.grant", canvasId, targetUserId: t.target, source: l.access.source,
+          oldPermissions: targetShare ? [domain.normalizeShareRole(targetShare.role) || "VIEWER"] : [], newPermissions: ["OWNER"],
+        });
+      });
+    } catch (err) {
+      if (err && err.code === "OWNER_CHANGED") return fail(REASON.READ_ONLY, "owner-changed");
+      return fail("INTERNAL_ERROR", "audit");
+    }
+    const board = this.store.boardById(canvasId);
+    const a = this.#access(context, board);
+    return ok({
+      canvas: this.#view(board, a.ok ? a.access : { allow: false, actions: [], source: "NO_GRANT" }),
+      shares: this.#shareViews(canvasId),
+    });
   }
 
   // ---------------------------------------------------------------- 共享命令层（手工 + AI 同一入口）

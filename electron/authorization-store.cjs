@@ -555,6 +555,11 @@ class AuthorizationStore {
     requestId = null,
     oldPermissions = null,
     newPermissions = null,
+    /**
+     * strict=true：审计是这次写入的**一部分**，插入失败必须抛出，让外层事务回滚。
+     * 共享/可见性/所有权转移这类"改权限"的写入必须用 strict；读取类审计保持 best-effort。
+     */
+    strict = false,
   } = {}) {
     const row = {
       at: this.clock(),
@@ -589,8 +594,10 @@ class AuthorizationStore {
           row.old_permissions,
           row.new_permissions,
         );
-    } catch {
-      /* 审计失败不该让授权决策失败；但它本身要能被探针看见 */
+    } catch (err) {
+      // 默认：审计失败不该让授权决策失败；但它本身要能被探针看见。
+      // strict：调用方（画布共享/可见性/转移）把审计当写入的一部分，失败必须回滚整个事务。
+      if (strict) throw err;
     }
     return row;
   }

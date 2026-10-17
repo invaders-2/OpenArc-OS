@@ -29,6 +29,8 @@ import { buildCanvasModelLabelIndex, canvasModelBaseName } from "./canvasModelLa
 import { closeStreamWithoutContent, isStreamContentEvent, pageFrameFor, sseChunk, streamCloseErrorFrame } from "./canvasLlmStream";
 import { buildSizePolicyTable } from "../../electron/image-params.cjs";
 import { ASSET_PREFIX, resolveAssetRefsInDoc, restoreAssetRefsInDoc } from "./canvasAssetRefs";
+import { CanvasShareEntry, CanvasSharePanel } from "./CanvasSharePanel";
+import { accessChange, accessSignature, isAccessLostError, parseShareTargetMessage } from "./canvasShareModel";
 
 type Rpc = {
   ch: string; dir: string; kind: string; id?: number | string; token?: string; method?: string;
@@ -49,6 +51,16 @@ function keyOf(seed: string) {
 
 type CanvasListItem = { canvasId: string; title: string; icon: string; updatedAt: number; createdAt?: number; kind?: string; access?: { canEdit: boolean; source: string }; boardX?: number | null; boardY?: number | null; nodes?: number; edges?: number };
 
+/** 服务端 access 投影 → 宿主 current 的权限字段（唯一映射，轮询/打开/保存共用）。*/
+function accessFields(access: any) {
+  return {
+    canEdit: !!access?.canEdit,
+    canManage: !!access?.canManage,
+    canShare: !!access?.canShare,
+    source: String(access?.source || ""),
+  };
+}
+
 export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpenModelSettings?: () => void }) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   /** "打开 OpenArc 总 API 设置"是宿主能力，不是页面能力：页面只能请求这一个固定动作（无参数）。*/
@@ -59,7 +71,15 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
   const [items, setItems] = useState<CanvasListItem[]>([]);
   const [frameKey, setFrameKey] = useState(0);
   const [frameSrc, setFrameSrc] = useState<string>("");
-  const [current, setCurrent] = useState<{ canvasId: string; title: string; revision: number; updatedAt: number; canEdit: boolean } | null>(null);
+  /** 当前画布 + 服务端投影的权限事实：canManage/canShare/source 与 canEdit 一起驱动入口与只读闸。*/
+  const [current, setCurrent] = useState<{
+    canvasId: string; title: string; revision: number; updatedAt: number;
+    canEdit: boolean; canManage?: boolean; canShare?: boolean; source?: string;
+  } | null>(null);
+  /** 共享面板：画布页入口与列表卡片菜单（经桥 open-share）打开的是同一个宿主浮层。*/
+  const [shareTarget, setShareTarget] = useState<{ canvasId: string; title: string; origin: "canvas" | "list" } | null>(null);
+  /** 面板重读计数：权限事实一变就让面板按服务端最新能力重画（例如转移后变编辑者）。*/
+  const [shareRefresh, setShareRefresh] = useState(0);
   // 宿主不再有状态行与提示横幅（那是 chrome），但 status/notice 的**写点全部保留**：
   // notice 另以根节点上的只读属性暴露给探针（资源失效复核 F3c 的证据通道），status 由看门狗与适配器路径写入。
   const [status, setStatus] = useState("初始化…");
@@ -70,6 +90,8 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
   const lastBeat = useRef(Date.now());
   /** 本帧说过的消息条数：iframe 换了文档之后用它判断"换出来的还是不是应用页"。*/
   const beatSeq = useRef(0);
+  /** 最近一次推给 iframe 的文档版本（按 updatedAt 去重）：同一次改动只推一遍，推送失败由页面兜底轮询补齐。*/
+  const lastPushed = useRef<{ canvasId: string; updatedAt: number } | null>(null);
   /** 帧加载后的说话窗口（见 onFrameLoad）。*/
   const loadCheck = useRef<number | null>(null);
 
@@ -83,6 +105,16 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
   const labelToConfig = useRef(new Map<string, string>());
   const currentRef = useRef<typeof current>(null);
   currentRef.current = current;
+  /** 上一轮已知的权限签名：canEdit / canManage / canShare / source 任一变化 = 权限被改过。*/
+  const accessSig = useRef<string>("");
+  /** 列表项（列表卡片的「共享…」消息只带 canvasId，标题从当前清单取）。*/
+  const itemsRef = useRef<CanvasListItem[]>([]);
+  itemsRef.current = items;
+  const shareTargetRef = useRef<typeof shareTarget>(null);
+  shareTargetRef.current = shareTarget;
+  const shareEntryRef = useRef<HTMLButtonElement | null>(null);
+  /** 整帧重置入口（accessLost 在 resetAppFrame 之前声明，用 ref 避免时序依赖）。*/
+  const resetFrameRef = useRef<(reason: string) => void>(() => {});
   /** 画布卡片位置：会话内记忆（宿主不建第二套项目模型；刷新后由上游自动布局）。*/
   const boardPos = useRef(new Map<string, { x: number; y: number }>());
   /** 宿主 → 画布子页的请求（命令/撤销/状态），按 id 等回包。*/
@@ -141,6 +173,16 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
     const modelLabels = buildCanvasModelLabelIndex(models);
     const label = (m: any) => modelLabels.labelOf.get(String(m.configId)) || canvasModelBaseName(m);
     labelToConfig.current = modelLabels.configOf;
+    /**
+     * 显式默认的**标签**（即使它不可用也照实投影）：页面要如实显示"你默认的那个模型不可用"，
+     * 不能拿清单里另一个模型冒充。可用性事实仍由 defaultFact() 给出（唯一真源）。
+     */
+    const defaultLabelOf = (cap: string) => {
+      const def = defaults.personal?.[cap] || defaults.organization?.[cap] || null;
+      if (!def) return "";
+      const found = models.find((m) => m.configId === def);
+      return found ? label(found) : "";
+    };
     const chat = usable("chat");
     const image = usable("image-generation");
     /**
@@ -202,6 +244,26 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
      * （CAPABILITY_UNAVAILABLE / MODEL_DISABLED / MODEL_NOT_FOUND / MODEL_UNAUTHORIZED）。
      */
     const capability = (transport: string | null, configured: boolean, reason: string | null) => ({ available: !!transport, transport, configured, reason });
+    /**
+     * 显式默认不可用且它已不在"可用清单"里（停用 / provider 停用 / 跨能力）时，标签也要能如实显示。
+     * 可用清单 models 是**可用模型**（停用的被过滤掉），所以这里只在"默认确实不可用且标签为空"时，
+     * 向模型管理面补一次身份查询（只取 displayName / remoteModelId，不取地址、不取凭据），
+     * **不会**把停用模型重新投影成可用模型。
+     */
+    const defaultModels = { chat: defaultLabelOf("chat"), "image-generation": defaultLabelOf("image-generation") };
+    const missingLabelCaps = (["chat", "image-generation"] as const).filter((cap) => {
+      const def = defaults.personal?.[cap] || defaults.organization?.[cap] || null;
+      return !!def && !defaultModels[cap] && defaultFact(cap).defaultUsable === false;
+    });
+    if (missingLabelCaps.length) {
+      const all = await modelCmd({ type: "model/list" });
+      const items: any[] = all && all.ok && Array.isArray(all.items) ? all.items : [];
+      for (const cap of missingLabelCaps) {
+        const def = defaults.personal?.[cap] || defaults.organization?.[cap] || null;
+        const hit = items.find((m) => String(m.configId) === String(def));
+        if (hit) defaultModels[cap] = canvasModelBaseName(hit);
+      }
+    }
     return {
       chat_models: chat.map(label),
       image_models: image.map(label),
@@ -210,6 +272,8 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
       api_providers: apiProviders,
       image_model: pick("image-generation", image),
       chat_model: pick("chat", chat),
+      /** 显式默认的标签（只给"不可用"呈现用；空 = 没配默认或默认模型已不在清单里）。*/
+      default_models: defaultModels,
       provider_count: apiProviders.length,
       chat_model_count: chat.length,
       image_model_count: image.length,
@@ -301,7 +365,8 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
     const res = await canvasCmd({ type: "canvas/get", canvasId });
     if (!res || !res.ok) { setStatus("打开画布失败：" + String(res && res.error)); return null; }
     const c = res.canvas;
-    const next = { canvasId: c.canvasId, title: title || c.title, revision: Number(c.revision || 1), updatedAt: Number(c.updatedAt || 0), canEdit: !!c.access?.canEdit };
+    const next = { canvasId: c.canvasId, title: title || c.title, revision: Number(c.revision || 1), updatedAt: Number(c.updatedAt || 0), ...accessFields(c.access) };
+    accessSig.current = accessSignature(c.access);
     setCurrent(next);
     setStatus("已打开 " + next.title + "（revision " + next.revision + "）");
     return next;
@@ -324,6 +389,80 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
   const pushContext = useCallback(async (c: { canEdit: boolean; canvasId: string } | null) => {
     await toShell({ kind: "context", canEdit: c ? c.canEdit : false, readOnly: c ? !c.canEdit : true, canvasId: c ? c.canvasId : null, reducedMotion: reducedMotion() });
   }, [toShell]);
+
+  /**
+   * 权限事实变了就把新的 canEdit 推给页面（bug3 前端部分）。
+   * 比较的是**服务端投影**（canEdit/canManage/canShare/source），不是 revision：
+   * 撤销共享、降级、转移所有权都不会改 revision，只改 access。
+   */
+  const notifyAccess = useCallback((canvasId: string, access: any) => {
+    const change = accessChange(accessSig.current, access);
+    accessSig.current = change.signature;
+    if (change.changed) {
+      void pushContext({ canvasId, canEdit: !!access?.canEdit });
+      if (shareTargetRef.current && shareTargetRef.current.canvasId === canvasId) setShareRefresh((n) => n + 1);
+    }
+    return change.changed;
+  }, [pushContext]);
+
+  /**
+   * 权限已经不在（READ_ONLY / NOT_FOUND_OR_FORBIDDEN）：
+   *   · READ_ONLY          → 立刻切只读并 pushContext（页面只读闸关上），面板保留只读视图；
+   *   · NOT_FOUND_OR_FORBIDDEN → 关闭面板、提示并返回列表（不能停在"看起来还能编辑"的旧文档上）。
+   * 只处理"当前打开的那一本"：别的画布打开失败不影响当前上下文。
+   */
+  const accessLost = useCallback(async (code: string, canvasId: string) => {
+    const cur = currentRef.current;
+    if (!cur || (canvasId && cur.canvasId !== canvasId)) return false;
+    const signatureAccess = { canView: !!cur.canEdit, canEdit: false, canManage: false, canShare: false, source: code };
+    accessSig.current = accessSignature(signatureAccess);
+    setCurrent({ ...cur, canEdit: false, canManage: false, canShare: false, source: code });
+    await pushContext({ canvasId: cur.canvasId, canEdit: false });
+    if (shareTargetRef.current && shareTargetRef.current.canvasId === cur.canvasId) setShareTarget(null);
+    if (code === "NOT_FOUND_OR_FORBIDDEN") {
+      setNotice("这本画布已不可访问（可能被移出共享），已返回列表");
+      setCurrent(null);
+      accessSig.current = "";
+      resetFrameRef.current("画布已不可访问（可能被移出共享），已返回列表");
+    } else {
+      setNotice(cur.canEdit ? "权限已变更：现在是只读（编辑会被拒绝）" : "当前是只读状态");
+    }
+    return true;
+  }, [pushContext]);
+
+  /** 面板操作改变了我的权限（例如转移所有权）后，立刻按服务端事实刷新只读闸。*/
+  const refreshCurrentAccess = useCallback(async (canvasId: string, bumpPanel = true) => {
+    const res = await canvasCmd({ type: "canvas/meta", canvasId });
+    if (res && res.ok && res.meta) {
+      const a = res.meta.access || {};
+      const change = accessChange(accessSig.current, a);
+      accessSig.current = change.signature;
+      const cur = currentRef.current;
+      if (!cur || cur.canvasId !== canvasId) return;
+      setCurrent({
+        ...cur, ...accessFields(a),
+        title: res.meta.title || cur.title,
+        revision: Number(res.meta.revision || cur.revision),
+        updatedAt: Number(res.meta.updatedAt || cur.updatedAt),
+      });
+      if (change.changed) {
+        await pushContext({ canvasId, canEdit: !!a.canEdit });
+        if (bumpPanel && shareTargetRef.current && shareTargetRef.current.canvasId === canvasId) setShareRefresh((n) => n + 1);
+      }
+      return;
+    }
+    if (res && !res.ok && isAccessLostError(res.error)) await accessLost(res.error, canvasId);
+  }, [accessLost, canvasCmd, pushContext]);
+
+  /** 关闭共享面板：焦点回到入口按钮；从列表打开时回到应用帧。*/
+  const closeSharePanel = useCallback(() => {
+    setShareTarget(null);
+    window.setTimeout(() => {
+      const btn = shareEntryRef.current;
+      if (btn) { try { btn.focus(); return; } catch { /* ignore */ } }
+      try { frameRef.current?.focus(); } catch { /* ignore */ }
+    }, 0);
+  }, []);
 
   // 宿主「减少动态效果」是实时开关：sandbox iframe 读不到外壳的类名，只能由宿主把事实重新推过去
   //（应用页的守卫按 data-openarc-reduced-motion 关掉自己的动效）。
@@ -365,8 +504,17 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
       }
       case "project.list":
         return { projects: [{ id: "default", name: "默认画布", order: 0, canvas_count: items.length }] };
-      case "canvas.list":
+      case "canvas.list": {
+        // 页面回到列表（入口页每次加载/刷新都会走这里）：宿主不再认为"有当前画布"。
+        // 否则列表页右上角会残留上一本的共享入口，轮询也还在读一本已经不在屏幕上的画布。
+        if (currentRef.current) {
+          accessSig.current = "";
+          setCurrent(null);
+          setShareTarget((t) => (t && t.origin === "canvas" ? null : t));
+          void pushContext(null);
+        }
         return { canvases: items.map((c) => ({ ...upstreamCanvas({ canvasId: c.canvasId, title: c.title, icon: c.icon, kind: c.kind, updatedAt: c.updatedAt, createdAt: c.createdAt, access: c.access, doc: { nodes: new Array(c.nodes || 0), connections: new Array(c.edges || 0) } }), nodes: [], connections: [] })) };
+      }
       case "canvas.trashList": {
         const res = await canvasCmd({ type: "canvas/list", includeTrashed: true });
         const trashed = res && res.ok ? (res.items || []).filter((c: any) => c.trashed) : [];
@@ -378,15 +526,23 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
         if (!res.ok) return { __status: 502, body: { error: res.error } };
         if (params.boardX != null && params.boardY != null) boardPos.current.set(String(res.canvas.canvasId), { x: Number(params.boardX) || 0, y: Number(params.boardY) || 0 });
         await refreshList();
-        setCurrent({ canvasId: res.canvas.canvasId, title: res.canvas.title, revision: res.canvas.revision, updatedAt: Number(res.canvas.updatedAt || 0), canEdit: true });
+        const createdAccess = { canEdit: true, canManage: true, canShare: true, canView: true, source: "OWNER_POLICY" };
+        accessSig.current = accessSignature(createdAccess);
+        setCurrent({ canvasId: res.canvas.canvasId, title: res.canvas.title, revision: res.canvas.revision, updatedAt: Number(res.canvas.updatedAt || 0), ...accessFields(createdAccess) });
         await pushContext({ canvasId: res.canvas.canvasId, canEdit: true });
         return { canvas: upstreamCanvas(res.canvas) };
       }
       case "canvas.get": {
         const res = await canvasCmd({ type: "canvas/get", canvasId: params.canvasId });
-        if (!res.ok) return { __status: 404, body: { error: res.error } };
-        const canEdit = !!res.canvas.access?.canEdit;
-        setCurrent({ canvasId: res.canvas.canvasId, title: res.canvas.title, revision: res.canvas.revision, updatedAt: Number(res.canvas.updatedAt || 0), canEdit });
+        if (!res.ok) {
+          // 被撤销共享后打开：页面拿 404；当前上下文的只读闸同步关上（不再"看起来能编辑"）。
+          if (isAccessLostError(res.error)) await accessLost(res.error, String(params.canvasId || ""));
+          return { __status: 404, body: { error: res.error } };
+        }
+        const access = res.canvas.access || {};
+        const canEdit = !!access.canEdit;
+        accessSig.current = accessSignature(access);
+        setCurrent({ canvasId: res.canvas.canvasId, title: res.canvas.title, revision: res.canvas.revision, updatedAt: Number(res.canvas.updatedAt || 0), ...accessFields(access) });
         // 页面自己发起的打开（列表卡片 / 直链）与 canvas.create 同一口径：current 变了就立刻把
         // 只读事实推给页面，否则页面停在 hello 那一刻的 canEdit:false 上（重开的画布改不动、也存不了）。
         await pushContext({ canvasId: res.canvas.canvasId, canEdit });
@@ -399,7 +555,10 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
           boardPos.current.set(String(params.canvasId), { x: Number(body.board_x) || 0, y: Number(body.board_y) || 0 });
         }
         const meta = await canvasCmd({ type: "canvas/meta", canvasId: params.canvasId });
-        if (!meta || !meta.ok) return { __status: 404, body: { error: (meta && meta.error) || "NOT_FOUND" } };
+        if (!meta || !meta.ok) {
+          if (meta && isAccessLostError(meta.error)) await accessLost(meta.error, String(params.canvasId || ""));
+          return { __status: 404, body: { error: (meta && meta.error) || "NOT_FOUND" } };
+        }
         if (body && (body.title != null || body.icon != null)) {
           const r = await canvasCmd({ type: "canvas/save", canvasId: params.canvasId, baseRevision: cur ? cur.revision : null, doc: null, title: body.title, icon: body.icon });
           if (r.ok) { await refreshList(); return { canvas: upstreamCanvas(r.canvas) }; }
@@ -428,8 +587,10 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
         if (snapshot && want !== Number(snapshot.updatedAt) && (!snapshot.canvasId || snapshot.canvasId === target)) {
           const fresh = await canvasCmd({ type: "canvas/meta", canvasId: target });
           if (fresh && fresh.ok && fresh.meta) {
-            snapshot = { canvasId: target, title: fresh.meta.title, revision: Number(fresh.meta.revision || 1), updatedAt: Number(fresh.meta.updatedAt || 0), canEdit: !!fresh.meta.access?.canEdit };
+            snapshot = { canvasId: target, title: fresh.meta.title, revision: Number(fresh.meta.revision || 1), updatedAt: Number(fresh.meta.updatedAt || 0), ...accessFields(fresh.meta.access) };
             setCurrent(snapshot);
+          } else if (fresh && !fresh.ok && isAccessLostError(fresh.error)) {
+            await accessLost(fresh.error, target);
           }
         }
         const base = snapshot && want === Number(snapshot.updatedAt) ? snapshot.revision : -1;
@@ -447,8 +608,15 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
           const doc = c ? await resolveRefs(c.doc) : null;
           return { __conflict: true, detail: { canvas: c ? upstreamCanvas(c, doc) : null, updated_at: c ? c.updatedAt : 0 } };
         }
-        if (!res.ok) { setStatus("保存失败：" + String(res.error)); return { __status: 502, body: { error: res.error } }; }
-        setCurrent({ canvasId: res.canvas.canvasId, title: res.canvas.title, revision: res.canvas.revision, updatedAt: Number(res.canvas.updatedAt || 0), canEdit: !!res.canvas.access?.canEdit });
+        if (!res.ok) {
+          setStatus("保存失败：" + String(res.error));
+          // 撤销/降级后的第一次保存：服务端已经拒绝，页面必须立刻切成只读（不等下一次轮询）。
+          if (isAccessLostError(res.error)) await accessLost(res.error, target);
+          return { __status: 502, body: { error: res.error } };
+        }
+        const savedAccess = res.canvas.access || {};
+        notifyAccess(res.canvas.canvasId, savedAccess);
+        setCurrent({ canvasId: res.canvas.canvasId, title: res.canvas.title, revision: res.canvas.revision, updatedAt: Number(res.canvas.updatedAt || 0), ...accessFields(savedAccess) });
         setStatus("已保存（revision " + res.canvas.revision + "）");
         return { canvas: upstreamCanvas(res.canvas) };
       }
@@ -612,7 +780,7 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
         return { __status: 501, body: { error: "OPENARC_UNSUPPORTED", detail: "素材分组由 OpenArc 资源库统一管理，请在「资源库」里整理" } };
       default: return { __status: 501, body: { error: "OPENARC_UNSUPPORTED", message: "不在 OpenArc 集成范围内的能力：" + method } };
     }
-  }, [buildConfig, canvasCmd, items, libraryShape, pushContext, refreshList, resolveRefs, refsBack, resourceCmd, sizePolicyTable, taskCmd, upstreamCanvas]);
+  }, [accessLost, buildConfig, canvasCmd, items, libraryShape, notifyAccess, pushContext, refreshList, resolveRefs, refsBack, resourceCmd, sizePolicyTable, taskCmd, upstreamCanvas]);
 
   /** 页面整帧重置 / 宿主卸载 / 窗口关闭时，把所有在途流式调用连同主进程请求一起停掉（不留悬挂）。*/
   const abortAllStreams = useCallback(() => {
@@ -724,6 +892,17 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
       lastBeat.current = Date.now();
       beatSeq.current += 1;
       if (d.kind === "alive") return;
+      // 列表卡片菜单「共享…」（openarc-bridge.js 的 openShare）：只带 canvasId，面板由宿主打开；
+      // 页面里没有任何共享 UI。token 校验已在上面的消息闸门做过。
+      if (d.kind === "open-share") {
+        const id = parseShareTargetMessage(d);
+        if (!id) return;
+        const cur = currentRef.current;
+        const fromCurrent = !!cur && cur.canvasId === id;
+        const title = fromCurrent ? cur!.title : (itemsRef.current.find((it) => it.canvasId === id)?.title || "");
+        setShareTarget({ canvasId: id, title, origin: fromCurrent ? "canvas" : "list" });
+        return;
+      }
       // 页面取消/中断：流式调用把取消传到主进程（canvas/runStop 中止在途 HTTP），不留悬挂请求。
       if (d.kind === "abort") {
         const s = rpcStreams.current.get(d.id as number | string);
@@ -823,6 +1002,7 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
       setFrameKey((k) => k + 1);
     })();
   }, [abortAllStreams]);
+  resetFrameRef.current = resetAppFrame;
 
   // 应用帧看门狗：正常情况下外壳中继每 800ms 发一次心跳。若连续 8s 没有任何消息，
   // 说明该帧被非预期导航/崩溃打断（例如页面自我导航到外部站点被 CSP/宿主拦下后停在错误页）——
@@ -898,39 +1078,72 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
   }, [buildConfig, refreshList]);
 
   // 当前画布轮询：revision 跟着 OpenArc 存储走；同时做**引用资源可用性复核**
-  // （删除 / 撤权之后，宿主的显示缓存必须失效，不能继续拿旧 data URL 顶替 —— 缺项 3）。
+  //（删除 / 撤权之后，宿主的显示缓存必须失效，不能继续拿旧 data URL 顶替 —— 缺项 3）。
+  // revision 检测 800ms：检测到"别处改了"就向已打开的 iframe **推送** doc-changed（页面按 updated_at
+  // 幂等合并，输入/未保存改动时延后），页面不必再等自己的 2.5s 兜底轮询；引用资源复核保持原 2.5s 量级。
   useEffect(() => {
+    let tick = 0;
+    let busy = false;
     const timer = setInterval(() => {
       const cur = currentRef.current;
-      if (!cur) return;
+      if (!cur || busy) return;
+      busy = true;
+      tick += 1;
       void (async () => {
-        const res = await canvasCmd({ type: "canvas/meta", canvasId: cur.canvasId });
-        if (res && res.ok && res.meta) {
-          const rev = Number(res.meta.revision || 1);
-          if (rev !== cur.revision || Number(res.meta.updatedAt || 0) !== cur.updatedAt) {
-            setCurrent({ ...cur, revision: rev, updatedAt: Number(res.meta.updatedAt || 0), canEdit: !!res.meta.access?.canEdit, title: res.meta.title || cur.title });
+        try {
+          const res = await canvasCmd({ type: "canvas/meta", canvasId: cur.canvasId });
+          if (res && res.ok && res.meta) {
+            const rev = Number(res.meta.revision || 1);
+            const updatedAt = Number(res.meta.updatedAt || 0);
+            /* 权限事实每轮都比一次：撤销共享 / 降级 / 转移所有权都不会改 revision，
+               只改 access（canEdit/canManage/canShare/source）。变了就立刻 pushContext，
+               页面只读闸当场关上，不等用户刷新页面。*/
+            const accessChangedNow = notifyAccess(cur.canvasId, res.meta.access);
+            const dataChanged = rev !== cur.revision || updatedAt !== cur.updatedAt;
+            if (dataChanged || accessChangedNow) {
+              setCurrent({ ...cur, revision: rev, updatedAt, ...accessFields(res.meta.access), title: res.meta.title || cur.title });
+            }
+            if (dataChanged) {
+              /* 宿主推送（主路径）：AI / 宿主 IPC / 其它窗口的写入已经进存储，这里把**可显示形态**的文档
+                 直接推给已打开的编辑器。push 失败 / iframe 忙时页面自己的 2.5s 轮询会补齐，内容不丢。*/
+              const last = lastPushed.current;
+              if (updatedAt && (!last || last.canvasId !== cur.canvasId || last.updatedAt !== updatedAt)) {
+                const got = await canvasCmd({ type: "canvas/get", canvasId: cur.canvasId });
+                if (got && got.ok) {
+                  const doc = await resolveRefs(got.canvas.doc);
+                  lastPushed.current = { canvasId: cur.canvasId, updatedAt };
+                  void toShell({ kind: "doc-changed", canvasId: cur.canvasId, revision: Number(got.canvas.revision || rev), updatedAt, doc, title: got.canvas.title });
+                }
+              }
+            }
+          } else if (res && !res.ok && isAccessLostError(res.error)) {
+            await accessLost(res.error, cur.canvasId);
+            return; // 已切只读/返回列表：本轮不再做资源复核
           }
+          if (tick % 3 !== 0) return;
+          const refs = Array.from(dataUrlByRef.current.keys());
+          if (!refs.length) return;
+          const st = await canvasCmd({ type: "canvas/assetStates", refs });
+          const exists = (st && st.exists) || {};
+          const dead = refs.filter((r) => !(exists[r] && exists[r].state === "AVAILABLE"));
+          if (!dead.length) return;
+          for (const r of dead) {
+            const url = dataUrlByRef.current.get(r);
+            if (url) refByDataUrl.current.delete(url);
+            dataUrlByRef.current.delete(r);
+          }
+          setNotice("引用资源已删除或无权限（" + dead.length + " 个）：画布上按不可用显示，不会拿旧缓存顶替");
+          const got = await canvasCmd({ type: "canvas/get", canvasId: cur.canvasId });
+          if (!got || !got.ok) return;
+          const doc = await resolveRefs(got.canvas.doc);
+          await toShell({ kind: "reload-doc", doc, updatedAt: Number(got.canvas.updatedAt || 0), title: got.canvas.title }, true);
+        } finally {
+          busy = false;
         }
-        const refs = Array.from(dataUrlByRef.current.keys());
-        if (!refs.length) return;
-        const st = await canvasCmd({ type: "canvas/assetStates", refs });
-        const exists = (st && st.exists) || {};
-        const dead = refs.filter((r) => !(exists[r] && exists[r].state === "AVAILABLE"));
-        if (!dead.length) return;
-        for (const r of dead) {
-          const url = dataUrlByRef.current.get(r);
-          if (url) refByDataUrl.current.delete(url);
-          dataUrlByRef.current.delete(r);
-        }
-        setNotice("引用资源已删除或无权限（" + dead.length + " 个）：画布上按不可用显示，不会拿旧缓存顶替");
-        const got = await canvasCmd({ type: "canvas/get", canvasId: cur.canvasId });
-        if (!got || !got.ok) return;
-        const doc = await resolveRefs(got.canvas.doc);
-        await toShell({ kind: "reload-doc", doc, updatedAt: Number(got.canvas.updatedAt || 0), title: got.canvas.title }, true);
       })();
-    }, 2500);
+    }, 800);
     return () => clearInterval(timer);
-  }, [canvasCmd, resolveRefs, toShell]);
+  }, [accessLost, canvasCmd, notifyAccess, resolveRefs, toShell]);
 
   return (
     <div
@@ -962,6 +1175,37 @@ export function CanvasHost({ win, onOpenModelSettings }: { win: WinDomain; onOpe
       ) : (
         <div className="web-viewport" data-canvas-frame-pending>正在准备应用…</div>
       )}
+      {/* 共享入口与面板是**宿主浮层**：不修改 iframe 里的页面 DOM，列表页只多一个菜单项。*/}
+      {current || shareTarget ? (
+        <div
+          className={"canvas-share-layer" + (reducedMotion() ? " reduced" : "")}
+          data-canvas-share-layer
+          data-canvas-share-open={shareTarget ? shareTarget.canvasId : ""}
+          data-canvas-share-entry-source={current?.source || ""}
+          data-canvas-share-reduced={reducedMotion() ? "1" : "0"}
+        >
+          {current ? (
+            <CanvasShareEntry
+              canManage={!!current.canManage}
+              source={current.source}
+              expanded={!!shareTarget && shareTarget.canvasId === current.canvasId}
+              buttonRef={shareEntryRef}
+              onOpen={() => setShareTarget({ canvasId: current.canvasId, title: current.title, origin: "canvas" })}
+            />
+          ) : null}
+          {shareTarget ? (
+            <CanvasSharePanel
+              canvasId={shareTarget.canvasId}
+              title={shareTarget.title}
+              cmd={canvasCmd}
+              refreshToken={shareRefresh}
+              onClose={closeSharePanel}
+              onAccessChanged={() => { void refreshCurrentAccess(shareTarget.canvasId, false); }}
+              onFatalAccessLost={(code) => { void accessLost(code, shareTarget.canvasId); }}
+            />
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
