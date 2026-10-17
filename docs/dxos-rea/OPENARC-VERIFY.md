@@ -10,7 +10,7 @@
 - 关键文件 sha256：`package.json` = `ba4473cf…7f584c`、`electron/main.cjs` = `9a7cca12…b40e9809c`、`dist/vue.html` = `0baf1aeb…4242efb8`（均与 lead 给值一致）。
 - 验收项：**49 条（A8 + B8 + C8 + D12 + E13）** → **通过 47、部分通过 2（B7、C4）、不通过 0、未知 0**；**a0740a1 复验后 B7/C4 转通过，最终 49/49 通过（见 §11 Addendum）**。
 - 产品 OUT / 不适用：A14 画布云同步、F17 云账号权益、D02 云市场审核灰度、F14 本地计费配额（`electron/ai-org-parity-notes.cjs:8-10`）、F16 桌面自动超管（有意差异，`:12-13`）、D07 开发者 OAuth/发布（既有产品决定）。
-- 已知部分/差异（不算失败，按 task-13 口径）：A02 画布文档模型仍是 nodes/edges（未检出 Card 三槽转换）、A11 未检出 `canViewCanvasMedia` 等价放宽、A13 .dxcanvas 内联导出仍受 32MB 限制（包解析上限 500MB/1GB 存在）、A18 docx/xlsx 默认解析器不可用（可注入 parser，缺省结构化拒绝）。
+- 已知部分/差异（不算失败，按 task-13 口径）：A02 画布文档模型仍是 nodes/edges（未检出 Card 三槽转换）、A11 未检出 `canViewCanvasMedia` 等价放宽、A13 .dxcanvas 内联导出仍受 32MB 限制（包解析上限 500MB/1GB 存在）、A18 docx/xlsx 已在 80ce2a9 修复（默认零依赖 ZIP+XML parser，损坏结构化，注入可覆盖；见 §12 Addendum II）。
 - 关键观察：preload 40 个顶层键与 57 个唯一 invoke/send 通道全部在主进程侧有注册；58 个 `ipcMain.handle` 中 100% 在上下文内出现 `trusted(`/`isTrusted`（静态邻近检查，0 例外）。
 - 未确证：运行期行为（权限实际拒绝、LAN 鉴权、迁移实际执行、模型/网络调用、UI 交互）不在静态分析范围内；REA 覆盖为 partial（见 §10）。**本报告所有“通过”仅指静态连通（观察）；是否运行可用属推断/未知，不等同于功能验收通过。**
 
@@ -135,7 +135,7 @@
 | P1 | A02 画布文档模型（Card 三槽） | `canvas-domain.cjs` 仍为 nodes/edges/viewport/logs；未检出 Card 的 inputs/params/result/history 转换层（仅通用 params/result 字符串命中） | 已知差异（task-25 已审计；未等价） |
 | P2 | A11 画布媒体可见性放宽 | 未检出 `canViewCanvasMedia` 等价实现；媒体可见性主要走 resource/authorization | 已知差异/未知（静态未检出） |
 | P3 | A13 .dxcanvas 大包 | `canvas-dxos-commands.cjs:32,403` 内联上限 32MB；`canvas-dxos-package.cjs:29-32` 解析上限 500MB/1GB（导出走内联仍受限） | 已知限制，不算断链 |
-| P4 | A18 docx/xlsx 附件 | `canvas-dxos-agent-attachments.cjs:39` `BINARY_PARSERS_UNAVAILABLE`；支持注入 parser，缺省结构化 parseError（如实不可用） | 按“已实现/如实不可用”判通过，不判失败 |
+| P4 | A18 docx/xlsx 附件 | **80ce2a9 已修复**：`parserFor` 默认 `parseDocxText`/`parseXlsxText`（零依赖 ZIP+XML），注入可覆盖，损坏包结构化（见 §12） | 已转通过（静态复验） |
 
 ## 10. 未确认与限制
 
@@ -178,7 +178,46 @@
 - 新 dist summary coverage examined 674/837；REA 覆盖 partial 的既有结论不变（见 §10）。
 - 结论只对 a0740a1 与上述产物 sha256 有效。
 
-## 12. 证据台账
+## 12. Addendum II：80ce2a9 聚焦复验（A18 docx/xlsx）
+
+### 12.1 构建与证据
+
+| 项 | a0740a1（前次） | 80ce2a9（本次） |
+|---|---|---|
+| 目录 sha256 | `3934d245…cc94c` | `e8e94dd808ec934c1282384d6797fec9cdc8393ffb336ce8f74c3d38ec488b2c` |
+| dirty / builtAt | false / 14:49:26Z | false / 2026-10-17T14:53:56Z |
+| electron/main.cjs | `9a7cca12…` | `9a7cca12…`（未变） |
+| dist/vue.html | `08207f64fbc1a8e123a85dace61c601b96760081ec102ab1a4bc751734ead194` | `08207f64…`（未变）；dist assets 同名同集合 |
+| REA 主进程 | `ev_a85d2fcb…`（digest eed43c76） | digest 变化为 `1ed9ac7d8c437f7da3e8bc05d6ec730a9ebc41ed62aefcf1edc70cdc160b5e41` → 新 Evidence `ev_1619cf89b8cce6c5bbdfd556ebdad4efc98fb34e93657e68426f8610b6768c73`；summary `ev_1d4fb7f8297c017e9069e9ad266772f01ab8864f0c6d8dc33d59515bdf72a836` |
+| REA 渲染层 | `ev_db6777…`（digest 1872ae37） | dist 未变，按复用规则沿用 `ev_db677751c8ee35ff9646d9d80d3a04ea75e62ad15b691dd90bb53b4736a75e60` |
+
+### 12.2 A18 聚焦观察
+
+产物：`electron/canvas-dxos-agent-attachments.cjs`（449 行）。
+
+| 检查点 | 观察 | 结论 |
+|---|---|---|
+| `parserFor` 默认解析器 | `:55-60`：`.docx` → `injectedParsers.docx` 或默认 `parseDocxText`；`.xlsx/.xlsm` → 注入或默认 `parseXlsxText` | 通过 |
+| 注入覆盖 | `configureAttachmentParsers({docx,xlsx})`（`:43-49`）冻结注入；`parserFor` 优先注入（`:56-57`） | 通过 |
+| 零依赖 ZIP+XML | `:62-190`：EOCD/中央目录/本地头校验、stored/deflate（`inflateRawSync`，`:102`）、512 条目/64MB 上限；DOCX 取 `word/document.xml`（`:124-129`）；XLSX 取 `sharedStrings.xml`+`worksheets/sheetN.xml`（`:131-160`） | 通过 |
+| 损坏结构化 | `readZipEntries` 抛出“ZIP 缺少中央目录/中央目录损坏/本地头损坏/压缩方式不支持/条目过多/解压超过上限”（`:85-109`）；`extractAttachment` 内层 try/catch 转 `文件解析失败：…`（`:207-224`）；不抛裸异常 | 通过 |
+| 导出面 | `module.exports` 含 `parserFor` 相关：`configureAttachmentParsers`、`parseDocxText`、`parseXlsxText`、`readZipEntries`（`:446-448`） | 通过 |
+| 注释一致性 | 文件头 `:12-15` 仍写“adm-zip/exceljs 不可用 → 一律 parseError”，与 task-36 实现不一致（旧注释未更新） | 观察：文档陈旧，不影响功能；报告记录，不判失败 |
+
+### 12.3 结论与计数
+
+- **A18 由“已知差异/如实不可用”转为“通过（静态）”**（原 §9 P4）。
+- 第 49 项验收计数不变：**49/49 通过**（A18 属于已知部分项，不在 49 项清单内）；已知未解决部分项减为 A02/A11/A13 三项。
+- task-46 已关闭（本复验完成）。
+- Evidence：EV_MAIN3 `ev_1619cf89b8cce6c5bbdfd556ebdad4efc98fb34e93657e68426f8610b6768c73`；item `ev_a6595d5abf2d0613620f4c44a31e178a00840fbab8e5a62f2004d3603affaf34`；summary `ev_1d4fb7f8…a836`；渲染层沿用 `ev_db6777…`。
+
+### 12.4 限制
+
+- 静态复验：未实际解析真实 DOCX/XLSX/损坏包，只验证代码分支/上限/错误路径存在；运行期解析质量（复杂表格、样式、超大文件）未知。
+- 文件头注释陈旧（见 12.2 最后一行），不构成功能缺口。
+- 结论只对 80ce2a9 与上述产物 sha256 有效。
+
+## 13. 证据台账
 
 - 机读台账：`docs/dxos-rea/openarc-verify-evidence.json`（build、产物 sha256、REA evidence/view id、49 项结论、OUT/部分/未知、限制）。
 - 复用规则：本报告引用的 `EV_MAIN`/`EV_DIST` 与各 view id 已在本 REA 会话留存；同一产物 sha256 的复验可直接 `inspect_analysis_view` 复用，产物变化时按 VERIFY-PLAN §1.3 重新分析或 `compare_application_versions`。

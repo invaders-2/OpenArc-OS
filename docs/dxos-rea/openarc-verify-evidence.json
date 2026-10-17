@@ -5,10 +5,11 @@
     "build": {
       "path": "/Users/wepingli/Desktop/OpenArc OS.app/Contents/Resources/app",
       "branch": "main",
-      "commit": "a0740a1",
+      "commit": "80ce2a9",
       "dirty": false,
-      "builtAt": "2026-10-17T14:49:26.636Z",
-      "dirSha256": "3934d24598b85676fcdc1e8515106ec23f9528a7e14562acea3a883ca71cc94c",
+      "builtAt": "2026-10-17T14:53:56.954Z",
+      "dirSha256": "e8e94dd808ec934c1282384d6797fec9cdc8393ffb336ce8f74c3d38ec488b2c",
+      "mainCjsSha256": "9a7cca128a86a2eb4d579a495b3bd52565c4b47e81933cd6b78f126b40e9809c",
       "vueHtmlSha256": "08207f64fbc1a8e123a85dace61c601b96760081ec102ab1a4bc751734ead194"
     },
     "artifact": {
@@ -68,6 +69,22 @@
         "evidenceId": "ev_a85d2fcb10a8007d1cbcb992e29a781d0027990fc1bc1b216793e455df8a1bfc",
         "digest": "eed43c76dbed9c3b5e1f0f686e51d02fcc7c5147585fb1b0d812f95b63a89cb2",
         "reason": "a0740a1 重新分析 digest 未变（eed43c76…），按复用规则沿用首验 Evidence"
+      },
+      "electron2": {
+        "input": ".../app/electron",
+        "digest": "1ed9ac7d8c437f7da3e8bc05d6ec730a9ebc41ed62aefcf1edc70cdc160b5e41",
+        "evidenceId": "ev_1619cf89b8cce6c5bbdfd556ebdad4efc98fb34e93657e68426f8610b6768c73",
+        "summaryView": "ev_1d4fb7f8297c017e9069e9ad266772f01ab8864f0c6d8dc33d59515bdf72a836",
+        "attachmentItemView": "ev_a6595d5abf2d0613620f4c44a31e178a00840fbab8e5a62f2004d3603affaf34",
+        "relevantFiles": 307,
+        "parsedJs": 306,
+        "findings": 1605,
+        "note": "80ce2a9 electron digest 变化（A18 修复），dist 未变沿用 dist2"
+      },
+      "distReused2": {
+        "evidenceId": "ev_db677751c8ee35ff9646d9d80d3a04ea75e62ad15b691dd90bb53b4736a75e60",
+        "digest": "1872ae3729d14ebf784f10f1f1f407f1cbd64cb061441ac1553ad5abcc47fda5",
+        "reason": "80ce2a9 dist/vue.html 与 assets 集合未变"
       }
     },
     "views": {
@@ -126,6 +143,23 @@
           "partial": 0,
           "fail": 0
         }
+      },
+      {
+        "build": 3,
+        "commit": "80ce2a9",
+        "dirty": false,
+        "builtAt": "2026-10-17T14:53:56.954Z",
+        "dirSha256": "e8e94dd808ec934c1282384d6797fec9cdc8393ffb336ce8f74c3d38ec488b2c",
+        "mainCjsSha256": "9a7cca128a86a2eb4d579a495b3bd52565c4b47e81933cd6b78f126b40e9809c",
+        "vueHtmlSha256": "08207f64fbc1a8e123a85dace61c601b96760081ec102ab1a4bc751734ead194",
+        "result": {
+          "pass": 49,
+          "partial": 0,
+          "fail": 0,
+          "knownPartialResolved": [
+            "A18"
+          ]
+        }
       }
     ]
   },
@@ -135,7 +169,15 @@
     "partial": 0,
     "fail": 0,
     "unknown": 0,
-    "verifiedBuild": "a0740a1"
+    "verifiedBuild": "80ce2a9",
+    "knownPartialResolved": [
+      "A18"
+    ],
+    "knownPartialOpen": [
+      "P1",
+      "P2",
+      "P3"
+    ]
   },
   "items": [
     {
@@ -864,8 +906,14 @@
     {
       "id": "P4",
       "item": "A18 docx/xlsx 附件",
-      "observation": "默认 parser 不可用（BINARY_PARSERS_UNAVAILABLE），可注入",
-      "verdict": "如实不可用"
+      "observation": "parserFor 默认 parseDocxText/parseXlsxText（零依赖 ZIP+XML），注入可覆盖，损坏包结构化；文件头注释陈旧",
+      "verdict": "如实不可用",
+      "status": "resolved",
+      "resolvedInBuild": "80ce2a9",
+      "evidence": [
+        "ev_1619cf89b8cce6c5bbdfd556ebdad4efc98fb34e93657e68426f8610b6768c73",
+        "ev_a6595d5abf2d0613620f4c44a31e178a00840fbab8e5a62f2004d3603affaf34"
+      ]
     }
   ],
   "limitations": [
@@ -892,5 +940,38 @@
       "fail": 0
     },
     "note": "electron digest 未变→复用 ev_a85d…；dist digest 变化→新证据 ev_db6777…；task-43 已关闭；仅静态复验，未点击 UI"
+  },
+  "knownPartialOpen": [
+    "P1",
+    "P2",
+    "P3"
+  ],
+  "addendum2": {
+    "build": "80ce2a9",
+    "dirSha256": "e8e94dd808ec934c1282384d6797fec9cdc8393ffb336ce8f74c3d38ec488b2c",
+    "changed": {
+      "electron": "digest eed43c76→1ed9ac7d；canvas-dxos-agent-attachments.cjs 改为零依赖 ZIP+XML 默认解析",
+      "dist": "未变（vue.html 08207f64…、assets 同名同集合）"
+    },
+    "result": {
+      "A18": "通过（静态）"
+    },
+    "counts": {
+      "pass": 49,
+      "partial": 0,
+      "fail": 0,
+      "knownPartialOpen": [
+        "P1",
+        "P2",
+        "P3"
+      ]
+    },
+    "evidence": {
+      "main": "ev_1619cf89b8cce6c5bbdfd556ebdad4efc98fb34e93657e68426f8610b6768c73",
+      "summaryView": "ev_1d4fb7f8297c017e9069e9ad266772f01ab8864f0c6d8dc33d59515bdf72a836",
+      "attachmentItemView": "ev_a6595d5abf2d0613620f4c44a31e178a00840fbab8e5a62f2004d3603affaf34",
+      "distReused": "ev_db677751c8ee35ff9646d9d80d3a04ea75e62ad15b691dd90bb53b4736a75e60"
+    },
+    "note": "仅静态复验，未解析真实 DOCX/XLSX/损坏包；task-46 已关闭；文件头 :12-15 注释陈旧"
   }
 }
