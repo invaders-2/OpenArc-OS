@@ -22,10 +22,52 @@ const locked = computed(() => identity.phase === "locked");
 
 const now = ref(new Date());
 let timer = 0;
+
+/* ── 平台与原生窗口控制（Windows 自绘 caption） ─────────────────────────
+ * 平台只来自 window.openarc.system.info()（既有通道，不新开通道）。
+ * 只有 Windows 渲染三枚 caption；macOS 保留原生红绿灯，DOM 里不出重复按钮。
+ * 最大化态由主进程推（window:state），首帧先查一次 window:control/state。
+ * 桥缺失时按"无平台信息"处理：不渲染按钮，也不影响 macOS 布局。 */
+const platform = ref("");
+const isWin = computed(() => platform.value === "win32");
+const maxed = ref(false);
+let offWindowState: (() => void) | null = null;
+
+function applyWindowState(state: { maximized?: boolean } | null | undefined) {
+  if (typeof state?.maximized === "boolean") maxed.value = state.maximized;
+}
+
+async function detectPlatform() {
+  try {
+    const info = await window.openarc?.system?.info?.();
+    platform.value = typeof info?.platform === "string" ? info.platform : "";
+  } catch {
+    platform.value = "";
+  }
+  if (!isWin.value) return;
+  try {
+    applyWindowState((await window.openarc?.windowControl?.state?.())?.value);
+  } catch {
+    /* 桥缺失：按钮仍在，状态以主进程推送为准 */
+  }
+}
+
+/** 关闭会让窗口立即销毁，这次 invoke 的回包可能拿不到：失败即按"已关闭"处理。 */
+function windowCommand(action: "minimize" | "toggleMaximize" | "close") {
+  const pending = window.openarc?.windowControl?.[action]?.();
+  if (pending && typeof pending.catch === "function") void pending.catch(() => {});
+}
+
 onMounted(() => {
   timer = window.setInterval(() => (now.value = new Date()), 15000);
+  offWindowState = window.openarc?.windowControl?.onStateChange?.(applyWindowState) ?? null;
+  void detectPlatform();
 });
-onBeforeUnmount(() => window.clearInterval(timer));
+onBeforeUnmount(() => {
+  window.clearInterval(timer);
+  offWindowState?.();
+  offWindowState = null;
+});
 
 const WEEK = ["日", "一", "二", "三", "四", "五", "六"];
 const dateText = computed(
@@ -196,7 +238,7 @@ function select(id: string) {
 </script>
 
 <template>
-  <header class="topbar">
+  <header class="topbar" :class="{ 'is-win': isWin }" :data-platform="platform || undefined">
     <nav class="topbar-menus" aria-label="应用菜单">
       <button
         class="bar-menu bar-logo"
@@ -277,6 +319,51 @@ function select(id: string) {
         @click="shell.toggleNotifications()"
       >
         {{ dateText }}&nbsp;&nbsp;{{ timeText }}
+      </button>
+    </div>
+    <!-- Windows caption：贴窗口右上角，46×38 满高（方案 B，用户已拍板）。
+         macOS 不渲染这一组（保留原生红绿灯，绝不出重复按钮）。 -->
+    <div v-if="isWin" class="topbar-caption" role="group" aria-label="窗口控制">
+      <button
+        class="bar-caption"
+        type="button"
+        data-caption="minimize"
+        aria-label="最小化"
+        title="最小化"
+        @click="windowCommand('minimize')"
+      >
+        <svg class="caption-glyph" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true" focusable="false">
+          <path d="M0 5h10" fill="none" stroke="currentColor" stroke-width="1" />
+        </svg>
+      </button>
+      <button
+        class="bar-caption"
+        type="button"
+        data-caption="maximize"
+        :data-caption-state="maxed ? 'restore' : 'maximize'"
+        :aria-label="maxed ? '还原' : '最大化'"
+        :title="maxed ? '还原' : '最大化'"
+        @click="windowCommand('toggleMaximize')"
+      >
+        <svg v-if="maxed" class="caption-glyph" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true" focusable="false">
+          <path d="M3.5 1.5h5v5" fill="none" stroke="currentColor" stroke-width="1" />
+          <path d="M1.5 3.5h5v5h-5z" fill="none" stroke="currentColor" stroke-width="1" />
+        </svg>
+        <svg v-else class="caption-glyph" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true" focusable="false">
+          <rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1" />
+        </svg>
+      </button>
+      <button
+        class="bar-caption caption-close"
+        type="button"
+        data-caption="close"
+        aria-label="关闭窗口"
+        title="关闭"
+        @click="windowCommand('close')"
+      >
+        <svg class="caption-glyph" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true" focusable="false">
+          <path d="M0.5 0.5l9 9M9.5 0.5l-9 9" fill="none" stroke="currentColor" stroke-width="1" />
+        </svg>
       </button>
     </div>
     <!-- 顶栏带 transform（见 styles.css .topbar），fixed 遮罩会被它裁进 38px 高：

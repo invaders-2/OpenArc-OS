@@ -7776,3 +7776,98 @@ label {
 .pc-table { width: 100%; border-collapse: collapse; font-size: var(--fs-caption); }
 .pc-table th { text-align: left; font-weight: var(--fw-medium); color: var(--muted); padding: 6px 8px; box-shadow: inset 0 -0.5px 0 var(--line); }
 .pc-table td { padding: 6px 8px; box-shadow: inset 0 -0.5px 0 var(--line); word-break: break-all; }
+
+/* ===========================================================================
+   Windows 自绘窗口控制（caption）· 方案 B · 46×38 满高
+   ---------------------------------------------------------------------------
+   来源与取舍：
+     · 顶栏仍 38px、仍全透明、整条仍 -webkit-app-region: drag；
+     · 三枚按钮 46×38 贴窗口右上角（方案 B 的 (b) 口径，用户已拍板）；
+     · 左侧取消 macOS 红绿灯预留，改 16px 起；macOS 规则一个字节不动。
+   状态取值（DS §3.2 / §5 / §6 / §8 / §10，MS §8）：
+     · 默认无底色、直角（caption 不加圆角；字号/线宽用 10px 1px 字形）；
+     · hover 6% 中性、按下 10% 中性（跟随主题字色 token，不新造色板）；
+     · close hover #c42b1c / 按下 #b32a1c + 白字形 —— Windows 平台约定色，
+       只允许出现在 close 的 hover/按下（DS §3 平台约定例外），不进语义 token；
+     · 焦点环 2px var(--focus) + 2px 间隔；满高按钮贴窗口边缘，间隔收到按钮内侧
+       （outline-offset:-4px），否则外扩 2px 会被窗口裁掉；
+     · 减少动态：transition 走 var(--dur-feedback)，.reduced / 系统偏好都为 0ms。
+   =========================================================================== */
+.topbar.is-win {
+  /* 不用再给红绿灯让位：Windows 从左侧 16px 起 */
+  padding: 0 0 0 16px;
+  gap: 0;
+  --caption-close: #c42b1c;
+  --caption-close-active: #b32a1c;
+}
+.topbar.is-win .topbar-menus {
+  margin-left: 0;
+}
+/* 顶栏整条是 drag 区；caption 容器自身也显式退出 no-drag（按钮另有 .topbar button 规则） */
+.topbar-caption {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  margin-left: 9px;
+  -webkit-app-region: no-drag;
+}
+/* 覆盖 .topbar button 的通用 padding:6px —— 命中区就是 46×38 满高 */
+.topbar.is-win .bar-caption {
+  width: 46px;
+  height: 100%;
+  padding: 0;
+  border-radius: 0;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+  background: transparent;
+  transition:
+    background var(--dur-feedback) var(--ease),
+    color var(--dur-feedback) var(--ease);
+}
+/* 全局 button:active 的 brightness 会在 close 的红底上再压一档；改用显式底色 */
+.topbar.is-win .bar-caption:active {
+  filter: none;
+}
+.caption-glyph {
+  display: block;
+  flex: none;
+}
+.topbar.is-win .bar-caption:hover {
+  background: rgb(var(--text-rgb) / 0.06);
+}
+.topbar.is-win .bar-caption:active {
+  background: rgb(var(--text-rgb) / 0.1);
+}
+/* 外观与壁纸明暗相反时，顶栏文字跟随壁纸（既有 --bar-on-* 口径），hover 也必须反过来 */
+.desktop:not(.dark)[data-wallpaper="theme-dark"] .topbar.is-win .bar-caption:hover {
+  background: rgb(var(--bar-on-dark-rgb) / 0.06);
+}
+.desktop:not(.dark)[data-wallpaper="theme-dark"] .topbar.is-win .bar-caption:active {
+  background: rgb(var(--bar-on-dark-rgb) / 0.1);
+}
+.desktop.dark[data-wallpaper="theme-light"] .topbar.is-win .bar-caption:hover {
+  background: rgb(var(--bar-on-light-rgb) / 0.06);
+}
+.desktop.dark[data-wallpaper="theme-light"] .topbar.is-win .bar-caption:active {
+  background: rgb(var(--bar-on-light-rgb) / 0.1);
+}
+/* 平台约定例外：close 的 hover / 按下用 Windows caption 红 + 白字形 */
+.topbar.is-win .bar-caption.caption-close:hover,
+.topbar.is-win .bar-caption.caption-close:active {
+  background: var(--caption-close);
+  color: #ffffff;
+}
+.topbar.is-win .bar-caption.caption-close:active {
+  background: var(--caption-close-active);
+}
+/* 2px 环 + 2px 间隔，整体收在按钮内侧（不越过窗口右上角） */
+.topbar.is-win .bar-caption:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -4px;
+}
+/* close 在 hover / 按下时底色是红：焦点环换成白，避免中性灰落在红上低于 3:1（DS §10） */
+.topbar.is-win .bar-caption.caption-close:hover:focus-visible,
+.topbar.is-win .bar-caption.caption-close:active:focus-visible {
+  outline-color: #ffffff;
+}

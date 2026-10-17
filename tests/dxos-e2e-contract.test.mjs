@@ -3,7 +3,7 @@
  *
  * 只做一件事：把 experiments/dxos-e2e/run-all.mjs 里声明的 CONTRACT / WHITELISTS
  * 与**产品真实导出**逐条对齐，防止探针的域清单 / 命令清单与 preload / bootstrap 漂移：
- *   · 域清单（39 个顶层键 + 每个键的真实形状）来自 electron/preload.cjs —— 在一个 vm 沙箱里
+ *   · 域清单（40 个顶层键 + 每个键的真实形状）来自 electron/preload.cjs —— 在一个 vm 沙箱里
  *     用假的 electron 模块执行真实 preload，读取 contextBridge.exposeInMainWorld("openarc", …)
  *     实际暴露出来的对象（不是正则猜的）；
  *   · 命令清单来自各 domain / bootstrap 的真实导出（AGENT_COMMANDS / MODEL_COMMANDS / …）；
@@ -74,13 +74,13 @@ function loadWhitelist(exportName) {
   return Array.isArray(value) ? value.slice() : Object.keys(value);
 }
 
-test("preload 真实暴露的顶层键恰为 39，且与探针契约逐字一致", () => {
+test("preload 真实暴露的顶层键恰为 40，且与探针契约逐字一致", () => {
   const { api, exposedNames } = loadExposedPreload();
   assert.deepEqual(exposedNames, ["openarc"], "preload 只应 exposeInMainWorld openarc");
   assert.ok(api && typeof api === "object", "openarc 必须是对象");
   const keys = Object.keys(api);
-  assert.equal(keys.length, 39, "顶层键必须恰为 39（当前 " + keys.length + "）");
-  assert.equal(new Set(keys).size, 39, "顶层键不得重复");
+  assert.equal(keys.length, 40, "顶层键必须恰为 40（当前 " + keys.length + "）");
+  assert.equal(new Set(keys).size, 40, "顶层键不得重复");
   assert.deepEqual(keys, CONTRACT.topLevel.map((entry) => entry.key), "探针 CONTRACT.topLevel 顺序/集合必须与 preload 真实导出一致");
 });
 

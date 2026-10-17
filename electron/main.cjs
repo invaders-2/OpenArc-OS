@@ -266,6 +266,22 @@ function trusted(event) {
 }
 
 const isMac = process.platform === "darwin";
+/**
+ * 仅测试用的平台覆盖（截图 / 自动化验收）：在任意宿主上渲染指定平台的窗口 chrome。
+ *
+ * 只认 win32 / darwin 两个字面值，其它值一律忽略；不设置时等于真实平台，
+ * 所以生产路径与改动前完全等价（tests/win-titlebar.test.mjs 锁住这一点）。
+ * 它只决定**窗口 chrome 与上报的平台**；应用菜单的角色跟随真实 OS（那是系统级行为），
+ * 玻璃材质也跟随真实 OS（mica 只有 Windows 有）。
+ */
+const FORCED_PLATFORM =
+  process.env.OA_FORCE_PLATFORM === "win32" || process.env.OA_FORCE_PLATFORM === "darwin"
+    ? process.env.OA_FORCE_PLATFORM
+    : "";
+const uiPlatform = FORCED_PLATFORM || process.platform;
+const isMacChrome = uiPlatform === "darwin";
+if (FORCED_PLATFORM)
+  console.warn("[openarc] OA_FORCE_PLATFORM=" + FORCED_PLATFORM + "（仅测试用平台覆盖；真实平台 " + process.platform + "）");
 const glass = isMac
   ? { transparent: true, vibrancy: "under-window", backgroundColor: "#00000000" }
   : { backgroundMaterial: "mica", backgroundColor: "#00000000" };
@@ -498,8 +514,11 @@ app.whenReady().then(async () => {
     // transparent 下它会变成一条透出后方的空带，并把内容整体下推 32px（实测 inset=32）。
     // macOS 用 titleBarStyle:"hidden"：内容仍全屏铺满（实测 inset 0），但**保留原生红绿灯**，
     // 它们操作 OpenArc 窗口本身（关闭/最小化/缩放），DOM 顶栏左侧相应留出位置。
-    // Windows 没有等价"保留控件"的方式，直接 frame:false（Windows 尚未验证）。
-    ...(isMac
+    // Windows 没有等价"保留控件"的方式，直接 frame:false，caption 由 DOM 自绘
+    // （TopBar.vue 的 .topbar-caption → windowControl 桥）。
+    // isMacChrome 而非 isMac：仅测试用的 OA_FORCE_PLATFORM 也要能切换窗口 chrome，
+    // 否则在 macOS 上截出来的"Windows 布局"会同时带真实红绿灯与自绘按钮。
+    ...(isMacChrome
       // 灯组 y 的三次实测口径（顶栏 38px，DOM 内容中心实测 = 19）：
       //   y=16 → 灯心 22（偏低 3px，用户第一次反馈"没居中"）
       //   y=13 → 灯心 19（几何正中，用户第二次反馈"有点偏上"）
@@ -1804,7 +1823,8 @@ app.whenReady().then(async () => {
       electron: process.versions.electron,
       chrome: process.versions.chrome,
       node: process.versions.node,
-      platform: process.platform,
+      // 真实平台；只有测试用 OA_FORCE_PLATFORM 会让它等于被覆盖的平台。
+      platform: uiPlatform,
       arch: process.arch,
       osRelease: os.release(),
       cpus: os.cpus().length,
@@ -1938,6 +1958,59 @@ app.whenReady().then(async () => {
     try { browserControl?.pruneDead(); } catch { /* ignore */ }
     return { ok: true, results };
   });
+
+  // ---------------------------------------------------------------------------
+  // 窗口控制（Windows 自绘 caption，方案 B）。
+  //
+  //   · 动作是冻结白名单：state / minimize / toggleMaximize / close；
+  //     renderer 给不出别的，也没有 BrowserWindow / ipcRenderer 句柄。
+  //   · close 只调 win.close()：与既有退出路径**完全等价**（本文件末尾只监听 closed，
+  //     不拦截 close、不弹确认框，随后 window-all-closed → app.quit()）。
+  //     回包先发出、关闭放到 setImmediate：否则窗口先销毁会把这次 invoke 的回包吞掉。
+  //   · 状态由主进程主动推 window:state（maximize / unmaximize / 全屏 / 最小化 / 焦点），
+  //     渲染层不轮询；查询与推送同形。
+  // ---------------------------------------------------------------------------
+  const windowState = () => ({
+    maximized: !!win && !win.isDestroyed() && win.isMaximized(),
+    fullScreen: !!win && !win.isDestroyed() && win.isFullScreen(),
+    minimized: !!win && !win.isDestroyed() && win.isMinimized(),
+    focused: !!win && !win.isDestroyed() && win.isFocused(),
+  });
+  const pushWindowState = () => {
+    const state = windowState();
+    if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
+      try { win.webContents.send("window:state", state); } catch { /* 窗口正在销毁 */ }
+    }
+    return state;
+  };
+  const WINDOW_CONTROL_ACTIONS = Object.freeze(["state", "minimize", "toggleMaximize", "close"]);
+  ipcMain.handle("window:control", async (e, payload) => {
+    if (!trusted(e)) throw Error("Forbidden");
+    const action = typeof payload?.action === "string" ? payload.action : "";
+    if (!WINDOW_CONTROL_ACTIONS.includes(action))
+      return { ok: false, error: "WINDOW_CONTROL_UNKNOWN_ACTION", message: "未知窗口命令" };
+    if (!win || win.isDestroyed())
+      return { ok: false, error: "WINDOW_CONTROL_UNAVAILABLE", message: "窗口不可用" };
+    if (action === "state") return { ok: true, value: windowState() };
+    if (action === "close") {
+      const before = windowState();
+      console.log("[openarc] 窗口命令 close → " + JSON.stringify(before));
+      setImmediate(() => {
+        try { if (win && !win.isDestroyed()) win.close(); } catch { /* 已关闭 */ }
+      });
+      return { ok: true, value: { ...before, closing: true } };
+    }
+    if (action === "minimize") win.minimize();
+    else if (win.isMaximized()) win.unmaximize();
+    else win.maximize();
+    // maximize / unmaximize 的回调会再推一次；这里等一个 tick 让宿主先落定再取快照。
+    await new Promise((resolve) => setImmediate(resolve));
+    const state = pushWindowState();
+    console.log("[openarc] 窗口命令 " + action + " → " + JSON.stringify(state));
+    return { ok: true, value: { ...state, closing: false } };
+  });
+  for (const event of ["maximize", "unmaximize", "enter-full-screen", "leave-full-screen", "minimize", "restore", "focus", "blur"])
+    win.on(event, pushWindowState);
 
   // ---------------------------------------------------------------------------
   // D5-01 · 浏览器命令面（受控白名单）。

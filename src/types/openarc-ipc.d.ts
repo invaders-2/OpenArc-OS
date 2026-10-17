@@ -75,6 +75,27 @@ export type OpenArcDisplayInfo = {
   primary: boolean;
 };
 
+/**
+ * 原生窗口状态（主进程权威投影）。
+ * window:control/state 的 value 与 window:state 下行同形；渲染层不从 DOM 猜最大化。
+ */
+export interface OpenArcWindowState {
+  maximized: boolean;
+  fullScreen: boolean;
+  minimized: boolean;
+  focused: boolean;
+}
+export type OpenArcWindowControlValue = OpenArcWindowState & { closing?: boolean };
+export type OpenArcWindowControlResult = OpenArcResult<OpenArcWindowControlValue>;
+/** 窗口控制桥（第 40 个顶层键；动作由 main.cjs 的冻结白名单校验）。 */
+export interface OpenArcWindowControlBridge {
+  state: () => Promise<OpenArcWindowControlResult>;
+  minimize: () => Promise<OpenArcWindowControlResult>;
+  toggleMaximize: () => Promise<OpenArcWindowControlResult>;
+  close: () => Promise<OpenArcWindowControlResult>;
+  onStateChange: (callback: (state: OpenArcWindowState) => void) => () => void;
+}
+
 /** 文件服务条目（不含磁盘路径 —— 路径永不过桥）。 */
 export type OpenArcFileEntry = { id: string; name: string; ext: string; size: number; mtime: number };
 
@@ -1579,6 +1600,8 @@ export interface OpenArcBridge {
   cli?: OpenArcCliBridge;
   /** Stage 1：画布在线更新域（第 39 个顶层键 marketUpdate；命令通道复用 market:command）。 */
   marketUpdate?: OpenArcMarketUpdateBridge;
+  /** Windows 自绘 caption：窗口控制域（第 40 个顶层键 windowControl）。 */
+  windowControl?: OpenArcWindowControlBridge;
 }
 
 declare global {

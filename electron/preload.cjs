@@ -465,4 +465,25 @@ contextBridge.exposeInMainWorld("openarc", {
   marketUpdate: {
     command: (command) => ipcRenderer.invoke("market:command", command),
   },
+  // —— Windows 自绘 caption：追加在既有键之后，保持前面所有键的 index 逐字不变 ——
+  /**
+   * 窗口控制桥（第 40 个顶层键）。
+   *
+   * **只有五个成员**：最小化 / 最大化↔还原 / 关闭 / 状态查询 / 状态订阅。
+   * 动作名由 electron/main.cjs 的冻结白名单校验；这里拿不到 BrowserWindow /
+   * ipcRenderer / webContents，也没有任意 IPC 通道。
+   * 关闭只走主进程的 win.close()（与既有关闭路径完全等价，没有确认弹窗）；
+   * 状态由主进程在 maximize / unmaximize / 全屏 / 最小化 / 焦点变化时主动推送。
+   */
+  windowControl: {
+    state: () => ipcRenderer.invoke("window:control", { action: "state" }),
+    minimize: () => ipcRenderer.invoke("window:control", { action: "minimize" }),
+    toggleMaximize: () => ipcRenderer.invoke("window:control", { action: "toggleMaximize" }),
+    close: () => ipcRenderer.invoke("window:control", { action: "close" }),
+    onStateChange: (callback) => {
+      const listener = (_, state) => callback(state);
+      ipcRenderer.on("window:state", listener);
+      return () => ipcRenderer.removeListener("window:state", listener);
+    },
+  },
 });

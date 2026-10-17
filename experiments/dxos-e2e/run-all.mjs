@@ -96,6 +96,8 @@ export const CONTRACT = Object.freeze({
     { key: "cli", kind: "domain", members: ["command"] },
     // Stage 1 画布在线更新（第 39 个顶层键；命令通道复用 market:command）。
     { key: "marketUpdate", kind: "domain", members: ["command"] },
+    // Windows 自绘 caption（第 40 个顶层键；动作走 window:control 冻结白名单）。
+    { key: "windowControl", kind: "domain", members: ["state", "minimize", "toggleMaximize", "close", "onStateChange"] },
   ]),
   /** 健康 / 只读基线：B3 agent、B4 skill、B5 media、B6a automation、B6c platform、B7a developer、B7c integration+market，以及 B2 model / mcp / canvas / task 的等价只读命令。 */
   health: Object.freeze([

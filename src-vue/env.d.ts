@@ -78,6 +78,23 @@ interface OpenArcTrashEntry {
   groupId?: string;
 }
 
+/** 原生窗口状态（main.cjs 的 window:control/state 与 window:state 同形）。 */
+interface OpenArcWindowState {
+  maximized: boolean;
+  fullScreen: boolean;
+  minimized: boolean;
+  focused: boolean;
+}
+
+/** 窗口控制桥（第 40 个顶层键，形状同 preload.cjs 的 windowControl）。 */
+interface OpenArcWindowControlBridge {
+  state: () => Promise<{ ok: boolean; value?: OpenArcWindowState & { closing?: boolean }; error?: string; message?: string }>;
+  minimize: () => Promise<{ ok: boolean; value?: OpenArcWindowState & { closing?: boolean }; error?: string; message?: string }>;
+  toggleMaximize: () => Promise<{ ok: boolean; value?: OpenArcWindowState & { closing?: boolean }; error?: string; message?: string }>;
+  close: () => Promise<{ ok: boolean; value?: OpenArcWindowState & { closing?: boolean }; error?: string; message?: string }>;
+  onStateChange?: (callback: (state: OpenArcWindowState) => void) => () => void;
+}
+
 interface OpenArcEventBridge {
   command: (command: { command: string; payload?: Record<string, unknown> }) => Promise<any>;
   onEvent?: (callback: (event: any) => void) => () => void;
@@ -134,6 +151,8 @@ interface OpenArcBridge {
   };
   /** 系统信息（形状同 preload.cjs） */
   system?: { info: () => Promise<any> };
+  /** Windows 自绘 caption：窗口控制（形状同 preload.cjs） */
+  windowControl?: OpenArcWindowControlBridge;
   /** 天气（形状同 preload.cjs）：出网只在主进程，固定 Open-Meteo。 */
   weather?: {
     geocode: (name: string) => Promise<any>;
