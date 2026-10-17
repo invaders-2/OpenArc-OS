@@ -417,8 +417,17 @@ function createToolAdapters({ resourceService = null, searchService = null, brow
       if (!canvasId) return { ok: false, error: "INVALID_INPUT" };
       return { ok: true, actorUserId, canvasId };
     }
+    function canvasActor(context) {
+      return context && context.actorUserId ? String(context.actorUserId) : "";
+    }
+    /** task-71：无 canvasId 时优先最近可编辑画布；没有则由执行端新建。 */
+    function pickEditableCanvas(context) {
+      const listed = canvasService.listCanvases({ context });
+      if (!listed || !listed.ok) return null;
+      return (listed.canvases || listed.items || []).find((entry) => entry && entry.access && entry.access.canEdit) || null;
+    }
     providers.CanvasControl = {
-      toolIds: ["canvas.read", "canvas.edit"],
+      toolIds: ["canvas.read", "canvas.edit", "canvas.list", "canvas.generate.image"],
       async prepare({ args }) { return { plan: { dryRun: false, provider: "CanvasControl", hasCanvasId: !!(args && args.canvasId) } }; },
       /**
        * 只读 plan：目标画布 + **基准 revision** 与命令指纹一起进 SideEffectPlan（0 mutation）。
@@ -426,6 +435,45 @@ function createToolAdapters({ resourceService = null, searchService = null, brow
        * 版本检查会让这次 AI 编辑失败并保留用户内容（A38）。
        */
       async plan({ context, args, contract }) {
+        const toolId = contract && contract.toolId;
+        if (toolId === "canvas.list") {
+          if (!canvasActor(context)) return null;
+          return { targets: ["canvas:list"], preconditions: { targetRef: "canvas:list", targetType: "canvas-list" }, expectedEffects: [{ action: "read", target: "canvas:list", from: "list", to: "summary" }] };
+        }
+        if (toolId === "canvas.generate.image") {
+          if (!canvasActor(context)) return null;
+          const requested = String((args && args.canvasId) || "");
+          let target = requested || null;
+          let doc = null;
+          if (target) {
+            doc = canvasService.getCanvas({ context, canvasId: target });
+            if (!doc || !doc.ok || !doc.canvas.access || !doc.canvas.access.canEdit) return null;
+          } else {
+            const chosen = pickEditableCanvas(context);
+            target = chosen ? String(chosen.canvasId) : null;
+            if (target) {
+              doc = canvasService.getCanvas({ context, canvasId: target });
+              if (!doc || !doc.ok || !doc.canvas.access || !doc.canvas.access.canEdit) return null;
+            }
+          }
+          // 没有默认图像模型时不要发起审批；执行端也会返回 MODEL_CONFIG_UNAVAILABLE。
+          if (!canvasService.modelService || typeof canvasService.modelService.resolveModel !== "function") return null;
+          const resolved = canvasService.modelService.resolveModel({ context: { ...context, appId: "canvas" }, capability: "image-generation" });
+          if (!resolved || !resolved.ok) return null;
+          const prompt = String((args && args.prompt) || "").slice(0, 4000);
+          return {
+            targets: [target || "canvas:new"],
+            preconditions: {
+              targetRef: target || "canvas:new", targetType: "canvas", canvasId: target,
+              revision: doc ? Number(doc.canvas.revision) : null,
+              prompt, count: Math.max(1, Math.min(4, Number(args && args.count) || 1)),
+              size: args && args.size ? String(args.size).slice(0, 32) : null,
+              createIfMissing: !target,
+              modelConfigId: resolved.snapshot.modelConfigId,
+            },
+            expectedEffects: [{ action: "image.generate", target: target || "canvas:new", from: "prompt", to: "image-node+resource" }],
+          };
+        }
         const t = canvasTarget({ context, args });
         if (!t.ok) return null;
         const doc = canvasService.getCanvas({ context: { ...context, sessionRef: context && context.sessionRef }, canvasId: t.canvasId });
@@ -450,6 +498,58 @@ function createToolAdapters({ resourceService = null, searchService = null, brow
       async execute({ context, args, contract, preconditions }) {
         const actorUserId = context && context.actorUserId ? String(context.actorUserId) : "";
         if (!actorUserId) return { ok: false, knownNoEffect: true, error: "CANVAS_FORBIDDEN" };
+        const toolId = contract && contract.toolId;
+        if (toolId === "canvas.list") {
+          const listed = canvasService.listCanvases({ context });
+          if (!listed || !listed.ok) return { ok: false, knownNoEffect: true, error: listed && listed.error ? listed.error : "CANVAS_UNAVAILABLE" };
+          const limit = Math.max(1, Math.min(50, Number(args && args.limit) || 20));
+          const canvases = (listed.canvases || listed.items || []).slice(0, limit).map((entry) => ({
+            canvasId: entry.canvasId, title: entry.title, revision: entry.revision, updatedAt: entry.updatedAt,
+            canEdit: !!(entry.access && entry.access.canEdit), accessSource: entry.access ? entry.access.source || null : null,
+          }));
+          return { ok: true, result: { canvases, count: canvases.length } };
+        }
+        if (toolId === "canvas.generate.image") {
+          const modelService = canvasService.modelService;
+          if (!modelService || typeof modelService.generateImage !== "function") return { ok: false, knownNoEffect: true, error: "CANVAS_MODEL_UNAVAILABLE" };
+          const resolved = typeof modelService.resolveModel === "function"
+            ? modelService.resolveModel({ context: { ...context, appId: "canvas" }, capability: "image-generation" })
+            : null;
+          if (!resolved || !resolved.ok) return { ok: false, knownNoEffect: true, error: (resolved && resolved.error) || "MODEL_CONFIG_UNAVAILABLE" };
+          let canvasId = String((preconditions && preconditions.canvasId) || (args && args.canvasId) || "");
+          if (!canvasId) {
+            const chosen = pickEditableCanvas(context);
+            canvasId = chosen ? String(chosen.canvasId) : "";
+          }
+          if (!canvasId) {
+            const created = canvasService.createCanvas({ context, title: "AI 生成画布" });
+            if (!created || !created.ok) return { ok: false, knownNoEffect: true, error: created && created.error ? created.error : "CANVAS_CREATE_FAILED" };
+            canvasId = created.canvas.canvasId;
+          }
+          const prompt = String((preconditions && preconditions.prompt) || (args && args.prompt) || "").slice(0, 4000);
+          if (!prompt) return { ok: false, knownNoEffect: true, error: "INVALID_INPUT" };
+          const gen = await modelService.generateImage({
+            context: { ...context, appId: "canvas" }, prompt,
+            size: (preconditions && preconditions.size) || (args && args.size) || null,
+            count: Math.max(1, Math.min(4, Number((preconditions && preconditions.count) || (args && args.count) || 1))),
+            capability: "image-generation",
+          });
+          if (!gen || gen.ok !== true) return { ok: false, knownNoEffect: true, error: (gen && gen.error) || "MODEL_ERROR" };
+          const images = Array.isArray(gen.images) ? gen.images : [];
+          const first = images.find((image) => image && typeof image.dataUrl === "string" && image.dataUrl.startsWith("data:image/"));
+          if (!first) return { ok: false, knownNoEffect: true, error: "IMAGE_ARTIFACT_UNSUPPORTED" };
+          const imported = await canvasService.importAsset({ context, canvasId, name: "AI 生成图片", dataUrl: first.dataUrl });
+          if (!imported || !imported.ok) return { ok: false, knownNoEffect: true, error: imported && imported.error ? imported.error : "RESOURCE_IMPORT_FAILED" };
+          const resourceRef = imported.ref;
+          const applied = canvasService.applyCommand({
+            context, canvasId,
+            command: { type: "node.add", node: { type: "image", url: resourceRef, name: "AI 生成图片", prompt, model: resolved.snapshot ? resolved.snapshot.modelId : null } },
+            actorKind: "AGENT",
+          });
+          if (!applied || !applied.ok) return { ok: false, knownNoEffect: false, error: applied && applied.error ? applied.error : "CANVAS_NODE_ADD_FAILED" };
+          const nodeId = applied.touched && applied.touched.nodeIds ? applied.touched.nodeIds[0] : (applied.result && applied.result.node ? applied.result.node.id : null);
+          return { ok: true, result: { canvasId, nodeId, resourceRef, revision: applied.canvas.revision, images: images.map((image) => (image.dataUrl ? { dataUrl: image.dataUrl } : { url: image.url })) } };
+        }
         const canvasId = preconditions && preconditions.targetRef;
         if (!canvasId) return { ok: false, knownNoEffect: true, error: "CANVAS_TARGET_GONE" };
         if (contract && contract.toolId === "canvas.read") {
@@ -469,10 +569,21 @@ function createToolAdapters({ resourceService = null, searchService = null, brow
       },
       /** READ_AFTER_WRITE：读回画布，确认 revision 前进且目标节点/连线确实存在（或确实被删）。*/
       async verify({ context, result, preconditions, contract }) {
+        const toolId = contract && contract.toolId;
+        if (toolId === "canvas.list") return { ok: true, applied: true, detail: { count: result && result.count } };
         const canvasId = (result && result.canvasId) || (preconditions && preconditions.targetRef);
-        if (!canvasId) return { ok: false, detail: { reason: "NO_TARGET" } };
+        if (!canvasId || canvasId === "canvas:new") return { ok: false, detail: { reason: "NO_TARGET" } };
         const got = canvasService.getCanvas({ context, canvasId });
         if (!got || !got.ok) return { ok: false, detail: { reason: "READ_BACK_FAILED" } };
+        if (toolId === "canvas.generate.image") {
+          const nodeId = result && result.nodeId;
+          const resourceRef = result && result.resourceRef;
+          const node = nodeId && Array.isArray(got.canvas.doc.nodes) ? got.canvas.doc.nodes.find((item) => item.id === nodeId) : null;
+          const resourceOk = resourceRef && resourceService && typeof resourceService.get === "function"
+            ? (() => { const id = String(resourceRef).replace(/^openarc-asset:/, ""); const r = resourceService.get({ context, resourceRef: id }); return !!(r && r.ok); })()
+            : true;
+          return { ok: !!(node && resourceOk), applied: !!(node && resourceOk), detail: { nodeId: nodeId || null, nodePresent: !!node, resourceRef: resourceRef || null, resourceOk } };
+        }
         if (contract && contract.toolId === "canvas.read") return { ok: true, applied: true, detail: { revision: got.canvas.revision } };
         const revisionOk = Number(got.canvas.revision) > Number(preconditions && preconditions.revision);
         const touched = (result && result.touched) || {};

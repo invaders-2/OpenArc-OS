@@ -202,6 +202,23 @@ const BUILTIN_CONTRACTS = Object.freeze([
     executionPolicy: "CONTROLLED_REVERSIBLE_WRITE",
   },
   {
+    // task-71：服务端列出当前账号可编辑/可见的画布，供全局 AI 无 canvasId 时选择目标。
+    toolId: "canvas.list",
+    version: 1,
+    displayName: "List Canvases",
+    description: "列出当前账号可查看/可编辑的画布（含最近编辑时间与 canEdit；READ_ONLY）。",
+    inputSchema: { type: "object", additionalProperties: false, properties: { limit: { type: "integer", minimum: 1, maximum: 50 } } },
+    outputSchema: { type: "object", additionalProperties: false, properties: { canvases: { type: "array" }, count: { type: "integer" } }, required: ["canvases", "count"] },
+    riskClass: RISK_CLASS.READ_ONLY,
+    sideEffect: SIDE_EFFECT.READ,
+    requiresApproval: false,
+    requiredPermissions: ["tool.canvas.read"],
+    resourceActions: [],
+    executionProvider: "CanvasControl",
+    enabled: true,
+    expectedSideEffects: ["reads the canvas list (no mutation)"],
+  },
+  {
     // D5-02：读取画布（节点/连线摘要，READ_ONLY）。目标画布必须属于当前账号或被共享给它。
     toolId: "canvas.read",
     version: 1,
@@ -253,6 +270,43 @@ const BUILTIN_CONTRACTS = Object.freeze([
     structuredArguments: ["command"],
     // 如实声明：recovery/verify 都已实现（READ_AFTER_WRITE + 画布命令日志 fingerprint 的 recoveryVerify），
     // idempotencyKey = callId+toolId+version+argumentsHash+targets，不引入自动重试（AUTO_RETRY 恒为 0）。
+    idempotencySupport: true,
+    verificationStrategy: "READ_AFTER_WRITE",
+    approvalPolicy: "ONE_CALL",
+    leasePolicy: "SINGLE_ACTIVE",
+    executionPolicy: "CONTROLLED_REVERSIBLE_WRITE",
+  },
+  {
+    // task-71：全局 AI 直接生成图片到画布。canvasId 可省略（最近可编辑画布 / 自动新建）。
+    // 外部模型调用 + 画布节点/资源写入必须在审批后执行；risk 事实按 external 呈现，权限仍走 tool.canvas.edit。
+    toolId: "canvas.generate.image",
+    version: 1,
+    displayName: "Generate Image On Canvas",
+    description: "在指定画布（或最近可编辑画布，没有则新建）生成一张图片，创建 image 节点并把产物登记到资源库。外部模型生成，需审批。",
+    inputSchema: {
+      type: "object", additionalProperties: false,
+      properties: {
+        prompt: { type: "string", minLength: 1, maxLength: 4000 },
+        canvasId: { type: "string", pattern: "^[A-Za-z0-9_.#:-]{1,120}$" },
+        size: { type: "string", maxLength: 32 },
+        count: { type: "integer", minimum: 1, maximum: 4 },
+      },
+      required: ["prompt"],
+    },
+    outputSchema: {
+      type: "object", additionalProperties: false,
+      properties: { canvasId: { type: "string" }, nodeId: { type: "string" }, resourceRef: { type: "string" }, revision: { type: "integer" }, images: { type: "array" } },
+      required: ["canvasId", "nodeId", "resourceRef"],
+    },
+    riskClass: RISK_CLASS.REVERSIBLE_WRITE,
+    sideEffect: SIDE_EFFECT.WRITE,
+    requiresApproval: true,
+    risk: "external",
+    requiredPermissions: ["tool.canvas.edit"],
+    resourceActions: [],
+    executionProvider: "CanvasControl",
+    enabled: true,
+    expectedSideEffects: ["calls an external image-generation model and adds a reversible image node/resource"],
     idempotencySupport: true,
     verificationStrategy: "READ_AFTER_WRITE",
     approvalPolicy: "ONE_CALL",
