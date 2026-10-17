@@ -77,6 +77,8 @@ export interface AppUpdateStatus {
   /** 渲染层是否已接入该应用的已安装包加载路径（后端 domain.APP_PACKAGE_LOADERS 决定）。 */
   loadable: boolean;
   loader: string | null;
+  /** 已安装版本真正可用的加载地址（后端 loadSupportFor 的投影）；不可加载时为 null。 */
+  loadUrl: string | null;
   loadReason: string | null;
 }
 
@@ -202,6 +204,7 @@ export function normalizeAppUpdateStatus(value: unknown): AppUpdateStatus | null
     packageKind: asString(raw.packageKind) || null,
     loadable: raw.loadable !== false,
     loader: asString(raw.loader) || null,
+    loadUrl: asString(raw.loadUrl) || null,
     loadReason: asString(raw.loadReason) || null,
   };
 }
