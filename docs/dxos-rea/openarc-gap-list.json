@@ -1,0 +1,1317 @@
+{
+  "meta": {
+    "title": "DX OS 0.6.1 连通性 → OpenArc 域映射与缺口清单",
+    "generatedAt": "2026-10-17T12:46:25.502Z",
+    "dxSources": [
+      "docs/dxos-rea/CANVAS-APPS-CONNECTIVITY.md",
+      "docs/dxos-rea/app-connectivity-matrix.json",
+      "docs/dxos-rea/AI-ORG-CONNECTIVITY.md"
+    ],
+    "openarcSnapshot": "当前工作树（含并行未提交改动：electron/model-resolver.cjs、desktop-executor.cjs、src-vue/apps/* 等）",
+    "method": "只读：DX 证据取自三份 REA 报告/矩阵；OpenArc 证据取自 electron/*.cjs、src-vue、src 的 file:line；未改产品代码、未运行目标",
+    "statusLegend": {
+      "已实现": "等价实现（可含口径差异，已注明）",
+      "部分": "主能力存在但有明确缺口/依赖未装配",
+      "缺失": "无实现或明确 OUT",
+      "不适用": "产品决定不移植"
+    }
+  },
+  "statusCounts": {
+    "部分": 34,
+    "已实现": 36,
+    "缺失": 6,
+    "不适用": 1
+  },
+  "items": [
+    {
+      "id": "A01",
+      "area": "画布",
+      "dx": "matrix canvas.frontend / CANVAS §2.1",
+      "dxSummary": "画布是 dx-app 包，由 DeveloperAppHost iframe + 运行时令牌加载",
+      "openarc": [
+        "src-vue/apps.ts:35",
+        "src-vue/shell/WindowLayer.vue:218",
+        "src/canvas/CanvasHost.tsx",
+        "electron/preload.cjs:141-143"
+      ],
+      "status": "部分",
+      "gap": "画布以内置 React 岛屿（AI Studio）替代 dx-app 沙箱包，缺少运行时包安装/加载通路。",
+      "confidence": "观察"
+    },
+    {
+      "id": "A02",
+      "area": "画布",
+      "dx": "CANVAS §2.1 / server/canvas.ts:111-175",
+      "dxSummary": "Card 三槽 inputs/params/result/history + connections/viewport 的文档模型",
+      "openarc": [
+        "electron/canvas-domain.cjs:8-10",
+        "electron/canvas-domain.cjs:43-47",
+        "electron/canvas-domain.cjs:53-92"
+      ],
+      "status": "部分",
+      "gap": "文档是 nodes/edges/viewport/logs，不是 Card 三槽；DX 旧画布/.dxcanvas 需转换层。",
+      "confidence": "观察"
+    },
+    {
+      "id": "A03",
+      "area": "画布",
+      "dx": "CANVAS §2.6 / developer-canvas-builtins.cjs 头注释",
+      "dxSummary": "17 个内置节点（16 个 builtin.* + director-3d）",
+      "openarc": [
+        "electron/canvas-domain.cjs:40",
+        "electron/developer-canvas-builtins.cjs:39-194"
+      ],
+      "status": "部分",
+      "gap": "命令层只有 10 类 card kind；DX 17 个 builtin.* 仅作清单校验数据，未进入画布运行期注册/执行。",
+      "confidence": "观察"
+    },
+    {
+      "id": "A04",
+      "area": "画布",
+      "dx": "CANVAS §2.2 / server/canvasAssetLibrary.ts:20-261",
+      "dxSummary": "素材库=developer_collab_projects(kind=asset-library)+fs 目录；CRUD/系统提示词保护",
+      "openarc": [
+        "electron/canvas-dxos-asset-library.cjs",
+        "electron/canvas-dxos-commands.cjs:42-52"
+      ],
+      "status": "已实现",
+      "gap": "等价实现（库条目以 ResourceRef+引用计数代替 fs nodeId；系统提示词保护保留）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "A05",
+      "area": "画布",
+      "dx": "CANVAS §2.2 / server/canvas.ts:18-43",
+      "dxSummary": "引用方式=FS nodeId + /api/fs/raw/<nodeId> URL",
+      "openarc": [
+        "electron/canvas-dxos-asset-library.cjs:541",
+        "src/canvas/canvasAssetRefs.ts",
+        "electron/canvas-service.cjs"
+      ],
+      "status": "已实现",
+      "gap": "等价口径：引用为不透明 ResourceRef/openarc-asset:，字节经 IPC/resource 域读取；未提供 /api/fs/raw 这类 HTTP URL。",
+      "confidence": "观察"
+    },
+    {
+      "id": "A06",
+      "area": "画布",
+      "dx": "CANVAS §2.2 / server/index.ts:5844-5873",
+      "dxSummary": "画布/文件夹来源→素材库：sync-sources（owner-only、≤600、copyNode、sourceKey 去重）",
+      "openarc": [
+        "electron/canvas-dxos-commands.cjs:42-52"
+      ],
+      "status": "缺失",
+      "gap": "无 sync-sources 等价命令；批量从画布/文件夹来源入库未迁移。",
+      "confidence": "观察"
+    },
+    {
+      "id": "A07",
+      "area": "画布",
+      "dx": "CANVAS §2.2 / server/canvasAssetLibrary.ts:144-254",
+      "dxSummary": "库项新增/更新/删除/重命名/分组/封面/工作流克隆",
+      "openarc": [
+        "electron/canvas-dxos-commands.cjs:42-52",
+        "electron/canvas-dxos-asset-library.cjs"
+      ],
+      "status": "部分",
+      "gap": "upsert/update/delete 已有；DX 的 sourceNodeId 复制、封面 data URL、workflow 递归重写等复合语义未逐项核对。",
+      "confidence": "推断"
+    },
+    {
+      "id": "A08",
+      "area": "画布",
+      "dx": "CANVAS §2.2 / server/canvas.ts:721-728",
+      "dxSummary": "画布可见性 private/public/restricted + members（邀请码见 A09）",
+      "openarc": [
+        "electron/canvas-domain.cjs:315-331",
+        "electron/canvas-bootstrap.cjs:19-46"
+      ],
+      "status": "已实现",
+      "gap": "等价且更细（OWNER/SHARE 角色/ORGANIZATION 只读底线）；public=全员可编辑 与 ORGANIZATION=同组织只读 的语义差异需映射。",
+      "confidence": "观察"
+    },
+    {
+      "id": "A09",
+      "area": "画布",
+      "dx": "CANVAS §2.5 / server/canvas.ts:1221-1276",
+      "dxSummary": "邀请码 XXXX-XXXX（只存 code_hash）+ redeem",
+      "openarc": [
+        "electron/canvas-dxos-commands.cjs:42-83"
+      ],
+      "status": "缺失",
+      "gap": "无邀请码/兑换命令，共享通过成员/角色直接授予。",
+      "confidence": "观察"
+    },
+    {
+      "id": "A10",
+      "area": "画布",
+      "dx": "shared/canvasAssetLibrary.ts:74-86 / index.ts:3151-3153",
+      "dxSummary": "资产库 visibility private/public/restricted + publicAccess + members(read/edit)",
+      "openarc": [
+        "electron/canvas-dxos-asset-library.cjs:104",
+        "electron/canvas-dxos-asset-library.cjs:180-214"
+      ],
+      "status": "部分",
+      "gap": "资产库仅 PRIVATE/ORGANIZATION 两档，无 publicAccess 与逐成员 ACL。",
+      "confidence": "观察"
+    },
+    {
+      "id": "A11",
+      "area": "画布",
+      "dx": "CANVAS §2.2 / server/canvas.ts:758-764",
+      "dxSummary": "canViewCanvasMedia：画布文档引用的 nodeId 单独放行，不授予父目录",
+      "openarc": [
+        "electron/canvas-service.cjs",
+        "electron/canvas-dxos-asset-library.cjs:104"
+      ],
+      "status": "部分",
+      "gap": "画布侧未检出等价“文档引用即可见”放宽；媒体可见性主要走资源域授权，交叉边界未验证。",
+      "confidence": "推断"
+    },
+    {
+      "id": "A12",
+      "area": "画布",
+      "dx": "CANVAS §2.5 / server/canvasCollab.ts:40-80",
+      "dxSummary": "WS /api/canvas/collab：presence/cursor/patch 广播，客户端仅 cursor 上行",
+      "openarc": [
+        "electron/canvas-dxos-collab.cjs:239",
+        "electron/canvas-dxos-collab.cjs:314-338",
+        "electron/canvas-dxos-commands.cjs:54-62"
+      ],
+      "status": "部分",
+      "gap": "有同进程房间/事件/补丁命令，但无网络传输层（DX 用 WebSocket，跨机需局域网服务）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "A13",
+      "area": "画布",
+      "dx": "CANVAS §2.4 / server/canvasPackage.ts",
+      "dxSummary": ".dxcanvas 导出/导入（ZIP+canvas.json+assets，≤5000 文件/单 500MB/总 1GB）",
+      "openarc": [
+        "electron/canvas-dxos-package.cjs",
+        "electron/canvas-dxos-commands.cjs:74-77"
+      ],
+      "status": "部分",
+      "gap": "有 package/export|import（内联 ≤32MB）；DX 的 multipart 大包通道与 1GB 上限未等价。",
+      "confidence": "观察"
+    },
+    {
+      "id": "A14",
+      "area": "画布",
+      "dx": "CANVAS §2.7 / server/canvasCloudSync.ts",
+      "dxSummary": "云备份/同步 + canvas_cloud_sync_baselines + /api/canvas/cloud*",
+      "openarc": [
+        "electron/canvas-dxos-commands.cjs:16"
+      ],
+      "status": "缺失",
+      "gap": "明确 OUT：无云同步/云备份（仅本机/局域网协作与在线更新，不涉画布云同步）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "A15",
+      "area": "画布",
+      "dx": "CANVAS §2.6 / server/canvasPlugins.ts:62-135",
+      "dxSummary": "插件只来自开发者应用 manifest.canvas，注册表 registry.json + tombstone",
+      "openarc": [
+        "electron/developer-canvas-manifest.cjs:38-41",
+        "electron/developer-canvas-manifest.cjs:320-407",
+        "electron/developer-domain.cjs:424-458"
+      ],
+      "status": "部分",
+      "gap": "清单/内置节点/模板校验已移植；运行期插件注册表与插件节点执行未迁移。",
+      "confidence": "观察"
+    },
+    {
+      "id": "A16",
+      "area": "画布",
+      "dx": "CANVAS §2.6 / server/index.ts:3290-3303",
+      "dxSummary": "插件数据 get/set/delete/list（host.storage.maxBytes）与插件网络白名单",
+      "openarc": [
+        "electron/developer-domain.cjs:223-280"
+      ],
+      "status": "缺失",
+      "gap": "无画布插件数据/网络命令；开发者域的网络白名单只覆盖 App 出网。",
+      "confidence": "观察"
+    },
+    {
+      "id": "A17",
+      "area": "画布",
+      "dx": "CANVAS §2.6 / server/canvasKernelCapabilities.ts:25-67",
+      "dxSummary": "画布 14 个 canvas_* Agent 客户端工具（run/operate/execute/布局等）",
+      "openarc": [
+        "electron/canvas-dxos-capabilities.cjs:59-73",
+        "electron/agent-tool-catalog.cjs"
+      ],
+      "status": "部分",
+      "gap": "有能力投影与 canvas/run/modelCall，但客户端工具集与 DX canvas_* 的语义/数量未对齐。",
+      "confidence": "推断"
+    },
+    {
+      "id": "A18",
+      "area": "画布",
+      "dx": "CANVAS §2.6 / server/canvasAgentAttachments.ts:80-104",
+      "dxSummary": "Agent 附件读取：docx/xlsx/csv/text，PDF 不支持，≤40000 字符",
+      "openarc": [
+        "electron/canvas-dxos-agent-attachments.cjs:6-13",
+        "electron/canvas-dxos-agent-attachments.cjs:38-85"
+      ],
+      "status": "部分",
+      "gap": "docx/xlsx 因缺 adm-zip/exceljs 依赖被显式标为不可用（仅文本/CSV 可用）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "A19",
+      "area": "画布",
+      "dx": "CANVAS §2.8 / server/index.ts:1191-1310",
+      "dxSummary": "Codex Canvas 桥：安装/配对/回环 API/AES-GCM 中继/MCP 文件",
+      "openarc": [
+        "electron/preload.cjs:393-400",
+        "electron/codex-canvas-bootstrap.cjs:25-31",
+        "electron/codex-canvas-relay.cjs:2,254"
+      ],
+      "status": "已实现",
+      "gap": "等价实现（IPC 命令 + 注入 dispatch 替代 HTTP；中继语义保留）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "A20",
+      "area": "画布",
+      "dx": "CANVAS §2.3 / server/index.ts:5203-5209,3651-3690",
+      "dxSummary": "画布生成任务：非 comfy/CLI→dx-ai-task/v2（protocol-tasks.db 三元组），产物落画布生成目录回传 MediaRef",
+      "openarc": [
+        "electron/canvas-service.cjs:770-950",
+        "electron/model-service.cjs",
+        "electron/task-service.cjs",
+        "electron/protocol-engine/index.cjs"
+      ],
+      "status": "部分",
+      "gap": "走 model/task 域 + protocol-engine，但 DX 的 protocol-tasks.db 固定三元组与 legacy Comfy/CLI 分支未逐项等价。",
+      "confidence": "推断"
+    },
+    {
+      "id": "A21",
+      "area": "画布",
+      "dx": "CANVAS §2.2 / server/index.ts:3827-3894",
+      "dxSummary": "extract-audio/trim-audio/public-media 媒体工具",
+      "openarc": [
+        "electron/media-domain.cjs:149-152",
+        "electron/media-domain.cjs:415-436"
+      ],
+      "status": "部分",
+      "gap": "本地公共媒体映射/归一有；独立音频抽取/裁剪命令缺失（仅在渲染计划内 atrim）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "B01",
+      "area": "媒体",
+      "dx": "matrix photos（/api/photos/sources|folders|library）",
+      "dxSummary": "相册来源/虚拟文件夹/图库",
+      "openarc": [
+        "electron/photos-domain.cjs:174-181",
+        "src-vue/apps/PhotosApp.vue"
+      ],
+      "status": "已实现",
+      "gap": "等价实现（来源绝对路径只在主进程，IPC 回 base64/缩略图）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "B02",
+      "area": "媒体",
+      "dx": "matrix photos + server/index.ts:6028-6036",
+      "dxSummary": "图库按共享区可见性过滤（public/department/canvas/asset-library）",
+      "openarc": [
+        "electron/photos-domain.cjs:180",
+        "electron/main.cjs:1451-1453"
+      ],
+      "status": "部分",
+      "gap": "仅 public/department 两态共享判定；DX 的 canvas/asset-library 共享区判定未等价。",
+      "confidence": "观察"
+    },
+    {
+      "id": "B03",
+      "area": "媒体",
+      "dx": "matrix photos（reverse-prompt/vision-models）",
+      "dxSummary": "视觉模型反推提示词",
+      "openarc": [
+        "electron/photos-domain.cjs:188-189",
+        "electron/photos-service.cjs"
+      ],
+      "status": "已实现",
+      "gap": "等价实现（无供应商时结构化不可用）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "B04",
+      "area": "媒体",
+      "dx": "matrix photos（background-removal + models）",
+      "dxSummary": "本地 ONNX 抠图（ben2-base，模型从 api.dx-os.com 下载）",
+      "openarc": [
+        "electron/photos-domain.cjs:190",
+        "electron/media-background-removal.cjs"
+      ],
+      "status": "已实现",
+      "gap": "等价实现；模型下载源/云依赖与 DX 不同（是否仍走 api.dx-os.com 未核对）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "B05",
+      "area": "媒体",
+      "dx": "matrix photos（import-image→canvas|library）",
+      "dxSummary": "相册图片导入画布卡片/资产库（复制文件+定位+广播）",
+      "openarc": [
+        "electron/photos-domain.cjs:183",
+        "electron/main.cjs:1456-1459",
+        "electron/canvas-exchange-ports.cjs"
+      ],
+      "status": "已实现",
+      "gap": "等价实现（importer=canvas-exchange 适配层，画布节点+素材库两落点）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "B06",
+      "area": "媒体",
+      "dx": "matrix photos + version_diff.file_transfer/photocraft",
+      "dxSummary": "photocraft 项目 + 分块文件传输（source/preview，revision 校验）",
+      "openarc": [
+        "electron/photocraft-domain.cjs:132-351",
+        "electron/file-transfer-domain.cjs:157",
+        "src-vue/apps/TransferCenter.vue"
+      ],
+      "status": "部分",
+      "gap": "两域与传输中心已存在且可从访达进入；DX 的 dev-photocraft 等价物 image-studio 未注册为应用入口，appExchange 的 image.edit/receive target 可能不可达。",
+      "confidence": "观察"
+    },
+    {
+      "id": "B07",
+      "area": "媒体",
+      "dx": "matrix api-settings（/api/ocr/*）+ 0.6.1 OCR",
+      "dxSummary": "PaddleOCR-VL OCR（providers/recognize，32MB，并发限制）",
+      "openarc": [
+        "electron/ocr-domain.cjs:94-354",
+        "electron/ocr-service.cjs",
+        "src-vue/apps/OcrPanel.vue",
+        "src-vue/apps/PhotosApp.vue:1591"
+      ],
+      "status": "已实现",
+      "gap": "等价实现；入口在相册内（PhotosApp.vue:1591 挂 OcrPanel），非独立应用。",
+      "confidence": "观察"
+    },
+    {
+      "id": "B08",
+      "area": "媒体",
+      "dx": "0.6.1 系统字体（/api/system/fonts*）",
+      "dxSummary": "系统字体清单/按 id 读字节",
+      "openarc": [
+        "electron/system-fonts-domain.cjs:91",
+        "electron/system-fonts-service.cjs",
+        "src-vue/settings/SystemFontsPanel.vue",
+        "src-vue/settings/AppearancePane.vue:462"
+      ],
+      "status": "已实现",
+      "gap": "等价实现并已挂设置›外观。",
+      "confidence": "观察"
+    },
+    {
+      "id": "B09",
+      "area": "媒体",
+      "dx": "0.6.1 本机代理（/api/desktop/proxy/detect）",
+      "dxSummary": "本机/系统/VPN 代理候选探测（默认探测 Gemini 端点）",
+      "openarc": [
+        "electron/local-proxy-domain.cjs:82",
+        "electron/local-proxy-service.cjs",
+        "src-vue/settings/LocalProxyPanel.vue"
+      ],
+      "status": "已实现",
+      "gap": "等价实现且更严格：默认零出网，probe=true 才试连。",
+      "confidence": "观察"
+    },
+    {
+      "id": "B10",
+      "area": "媒体",
+      "dx": "matrix music（/api/library/*）",
+      "dxSummary": "本地音乐库：扫描/曲目/歌词/封面/AI 整理",
+      "openarc": [
+        "electron/media-domain.cjs:126-133",
+        "src-vue/apps/MusicApp.vue"
+      ],
+      "status": "部分",
+      "gap": "扫描/曲目/歌词/封面写入有；DX 的 iTunes/Deezer 在线封面与 AI 整理后处理未逐项等价。",
+      "confidence": "推断"
+    },
+    {
+      "id": "B11",
+      "area": "媒体",
+      "dx": "matrix short-drama（/api/short-drama/*）",
+      "dxSummary": "短剧项目/大纲/视觉设定/分镜/出图",
+      "openarc": [
+        "electron/media-domain.cjs:104-125",
+        "electron/media-short-drama.cjs",
+        "src-vue/apps/DramaApp.vue"
+      ],
+      "status": "已实现",
+      "gap": "等价实现（模型网关未注入时结构化不可用）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "B12",
+      "area": "媒体",
+      "dx": "matrix video-editor（/api/video/*）",
+      "dxSummary": "视频项目/素材/渲染任务 + 成片文件",
+      "openarc": [
+        "electron/media-domain.cjs:76-100",
+        "electron/video-service.cjs",
+        "src-vue/apps/VideoApp.vue"
+      ],
+      "status": "已实现",
+      "gap": "等价实现（ffmpeg 受监督子进程 + 租约/恢复）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "B13",
+      "area": "媒体",
+      "dx": "matrix ai-image-declaration（/api/ai-image-declaration/process）",
+      "dxSummary": "AI 图片声明（XMP/IPTC，批量 ZIP）",
+      "openarc": [
+        "electron/media-domain.cjs:139-144",
+        "electron/media-ai-image-declaration.cjs",
+        "src-vue/apps/DeclareApp.vue"
+      ],
+      "status": "已实现",
+      "gap": "等价实现。",
+      "confidence": "观察"
+    },
+    {
+      "id": "B14",
+      "area": "媒体",
+      "dx": "matrix photos（source-features/source-related）",
+      "dxSummary": "视觉特征 192 维 + 相关排序缓存（迁移 50/51）",
+      "openarc": [
+        "electron/photos-domain.cjs:184-187"
+      ],
+      "status": "已实现",
+      "gap": "等价实现。",
+      "confidence": "观察"
+    },
+    {
+      "id": "B15",
+      "area": "媒体",
+      "dx": "matrix figma/illustrator（应用+媒体后端）",
+      "dxSummary": "Figma 预览/生成 Vue、Illustrator 模板/预览/导出（MCP 驱动）",
+      "openarc": [
+        "electron/media-figma-preview.cjs",
+        "electron/media-illustrator.cjs",
+        "electron/plugin-registry.cjs"
+      ],
+      "status": "部分",
+      "gap": "媒体辅助模块存在，但无 Figma/Illustrator 应用入口，插件注册表也未登记这两个 MCP。",
+      "confidence": "观察"
+    },
+    {
+      "id": "B16",
+      "area": "媒体",
+      "dx": "CANVAS §2.2 / server/index.ts:3895-3986",
+      "dxSummary": "公共媒体（本地/远端 URL 归一为生成输入）",
+      "openarc": [
+        "electron/media-domain.cjs:149-152",
+        "electron/media-public-media.cjs"
+      ],
+      "status": "部分",
+      "gap": "本地公共媒体列出/URL/JPEG 归一有；DX 的远端抓取/上传语义未等价。",
+      "confidence": "观察"
+    },
+    {
+      "id": "C01",
+      "area": "应用",
+      "dx": "matrix apps[30] / app-connectivity-matrix.json",
+      "dxSummary": "30 个内置应用注册表与分发形态",
+      "openarc": [
+        "src-vue/apps.ts:32-57",
+        "src-vue/shell/WindowLayer.vue:187-219"
+      ],
+      "status": "部分",
+      "gap": "OpenArc 25 个应用（合并/新增/缺失见 appMatrix），不是 30 项一一对应。",
+      "confidence": "观察"
+    },
+    {
+      "id": "C02",
+      "area": "应用",
+      "dx": "matrix canvas.comfyui/snake；version_diff.apps",
+      "dxSummary": "dx-app（dx-app/v2）运行时包分发与加载",
+      "openarc": [
+        "electron/developer-domain.cjs:223-280",
+        "electron/developer-service.cjs",
+        "src-vue/apps/DevApp.vue"
+      ],
+      "status": "部分",
+      "gap": "本地 dx-app 安装/回滚/凭据/出网有；画布宿主式 dx-app 加载容器（DX DeveloperAppHost）未见等价入口。",
+      "confidence": "推断"
+    },
+    {
+      "id": "C03",
+      "area": "应用",
+      "dx": "matrix 应用级闸门 requireAppOpen",
+      "dxSummary": "按应用开关拦截 API 前缀（providers/cli/dingtalk/market/comfyui/quark/…）",
+      "openarc": [
+        "electron/preload.cjs:13-489",
+        "electron/authorization-bootstrap.cjs:23-29",
+        "electron/governance-bootstrap.cjs:53-60"
+      ],
+      "status": "已实现",
+      "gap": "等价安全边界：每域命令过 trusted(event)+sessionRef+授权；语义是能力授权而非“应用已打开”。",
+      "confidence": "观察"
+    },
+    {
+      "id": "C04",
+      "area": "应用",
+      "dx": "matrix 窗口/状态（window store）",
+      "dxSummary": "应用窗口实例/多实例/窗口几何/Dock/Launchpad",
+      "openarc": [
+        "src-vue/shell/WindowLayer.vue",
+        "src-vue/stores/shell.ts",
+        "electron/window-domain.cjs"
+      ],
+      "status": "已实现",
+      "gap": "等价实现（既有壳层 8 模块）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "C05",
+      "area": "应用",
+      "dx": "matrix api-settings（路由/协议/模型）",
+      "dxSummary": "API 设置：供应商/协议/模型/CLI/RunningHub",
+      "openarc": [
+        "src-vue/apps/ProtocolApp.vue",
+        "src-vue/settings/ModelSettings.vue",
+        "electron/provider-protocol-domain.cjs",
+        "electron/model-service.cjs"
+      ],
+      "status": "已实现",
+      "gap": "拆分到“协议中心 + 设置›模型”，能力等价；DX 的 cli 登录入口在 OpenArc CliPanel（未逐项核对）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "C06",
+      "area": "应用",
+      "dx": "matrix accounts（/api/accounts/*）",
+      "dxSummary": "账户/部门/角色/App 授权",
+      "openarc": [
+        "src-vue/apps/GovernanceApp.vue",
+        "electron/governance-bootstrap.cjs:30-61",
+        "electron/authorization-service.cjs"
+      ],
+      "status": "已实现",
+      "gap": "等价且更细（资源授权/App 工具授权/审计）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "C07",
+      "area": "应用",
+      "dx": "matrix welcome/text-editor/projects",
+      "dxSummary": "欢迎/文稿/项目/组织等基础入口",
+      "openarc": [
+        "src-vue/apps/HomeApp.vue",
+        "src-vue/apps/NotesApp.vue",
+        "src-vue/apps/ProjectsApp.vue",
+        "src-vue/apps/GovernanceApp.vue"
+      ],
+      "status": "已实现",
+      "gap": "以应用中心/文稿/项目/组织呈现，等价合并。",
+      "confidence": "观察"
+    },
+    {
+      "id": "D01",
+      "area": "市场",
+      "dx": "matrix market（本地注册表 + 内置包）",
+      "dxSummary": "应用市场本地目录（随包/本地 catalog.json）",
+      "openarc": [
+        "electron/market-domain.cjs:44-52",
+        "electron/market-service.cjs:5,19-35",
+        "src-vue/apps/MarketApp.vue"
+      ],
+      "status": "已实现",
+      "gap": "等价实现（只读本地 catalog，不联网/不安装）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "D02",
+      "area": "市场",
+      "dx": "CANVAS §2.7 / version_diff.market",
+      "dxSummary": "云端目录 api.dx-os.com/v1/market/explore、apps/:id、灰度发布、审核",
+      "openarc": [
+        "electron/market-service.cjs",
+        "electron/market-update-sources.cjs:1-20"
+      ],
+      "status": "缺失",
+      "gap": "无云端市场目录/审核/灰度；更新源是 GitHub Releases/ModelScope 仓库。",
+      "confidence": "观察"
+    },
+    {
+      "id": "D03",
+      "area": "市场",
+      "dx": "version_diff（应用更新/在线更新）",
+      "dxSummary": "应用在线更新（发现/下载/验签/安装/回滚）",
+      "openarc": [
+        "electron/market-update-domain.cjs:61-66",
+        "electron/market-update-service.cjs",
+        "electron/market-update-sources.cjs"
+      ],
+      "status": "已实现",
+      "gap": "等价实现（验签→摘要→解压围栏→原子切换→回滚；两源适配器）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "D04",
+      "area": "开发者",
+      "dx": "matrix developer-studio（开发者平台本地能力）",
+      "dxSummary": "dx-app/v2 安装/启用/禁用/回滚/清单校验/凭据绑定/出网判定/运行时事件",
+      "openarc": [
+        "electron/developer-domain.cjs:223-262",
+        "electron/developer-service.cjs",
+        "src-vue/apps/DevApp.vue"
+      ],
+      "status": "已实现",
+      "gap": "等价实现（16 条基础命令 + 健康检查）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "D05",
+      "area": "开发者",
+      "dx": "matrix developer-studio（实验室/沙箱）",
+      "dxSummary": "开发者实验室草稿/模板/模拟安装/zip",
+      "openarc": [
+        "electron/developer-lab.cjs",
+        "electron/developer-domain.cjs:272-280",
+        "src-vue/apps/DevApp.vue:39-42"
+      ],
+      "status": "已实现",
+      "gap": "等价实现（lab 命令族并入 developer:command 白名单）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "D06",
+      "area": "开发者",
+      "dx": "matrix developer-studio（实时房间/协作）",
+      "dxSummary": "实时房间/协作项目邀请码/断线重放",
+      "openarc": [
+        "electron/developer-realtime.cjs:408-422",
+        "electron/developer-collab.cjs",
+        "src-vue/apps/DevApp.vue:279-301"
+      ],
+      "status": "已实现",
+      "gap": "等价实现，并有可选局域网入口（lanServer，需显式 authorize/ws）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "D07",
+      "area": "开发者",
+      "dx": "version_diff / developer-domain.cjs:30,39,519,545",
+      "dxSummary": "开发者 OAuth/PKCE、发布/审核/灰度、云市场字段",
+      "openarc": [
+        "electron/developer-domain.cjs:30",
+        "electron/developer-domain.cjs:39",
+        "electron/developer-domain.cjs:519",
+        "electron/developer-domain.cjs:545"
+      ],
+      "status": "不适用",
+      "gap": "产品决定不开放：manifest 出现 oauth/publish/gray/rollout 即拒绝（不是遗漏）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "D08",
+      "area": "市场",
+      "dx": "matrix app-exchange（/api/app-exchange*）",
+      "dxSummary": "应用互传（targets/get/inspect/exchange/images），只传引用",
+      "openarc": [
+        "electron/app-exchange-domain.cjs:209-215",
+        "electron/app-exchange-domain.cjs:61-77",
+        "electron/preload.cjs:440-442"
+      ],
+      "status": "部分",
+      "gap": "5 条命令已移植；DX 的 dev-photocraft target 映射到 image-studio，但 image-studio 未注册为应用。",
+      "confidence": "观察"
+    },
+    {
+      "id": "D09",
+      "area": "市场",
+      "dx": "matrix market/skill-packs",
+      "dxSummary": "Skill 包市场与在线导入",
+      "openarc": [
+        "electron/market-domain.cjs:44-52",
+        "electron/skill-import.cjs",
+        "electron/skill-pack.cjs"
+      ],
+      "status": "部分",
+      "gap": "本地 catalog skillPacks 与导入逻辑存在；在线来源/授权与 DX 的 ModelScope 在线导入未逐项核对。",
+      "confidence": "推断"
+    },
+    {
+      "id": "E01",
+      "area": "集成",
+      "dx": "matrix dingtalk + plugin registrar",
+      "dxSummary": "钉钉机器人/Stream Agent/OpenAPI",
+      "openarc": [
+        "electron/plugin-registry.cjs:125-150",
+        "electron/integration-dingtalk.cjs",
+        "electron/plugin-service.cjs:94-103",
+        "src-vue/apps/IntegrationsApp.vue"
+      ],
+      "status": "已实现",
+      "gap": "等价实现（凭据安全存储，默认关闭）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "E02",
+      "area": "集成",
+      "dx": "matrix lingxing",
+      "dxSummary": "领星 ERP：官方 MCP + 本地 SQLite 缓存 + 广告报表 + 汇率",
+      "openarc": [
+        "electron/plugin-registry.cjs:208-232",
+        "electron/integration-lingxing.cjs",
+        "electron/integration-lingxing-local-data.cjs",
+        "electron/plugin-service.cjs:106-126"
+      ],
+      "status": "已实现",
+      "gap": "等价实现（云同步需注入 transport）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "E03",
+      "area": "集成",
+      "dx": "matrix ziniao",
+      "dxSummary": "紫鸟浏览器 VC 数据下载（Python MCP/webdriver）",
+      "openarc": [
+        "electron/plugin-registry.cjs:234-290",
+        "electron/integration-ziniao.cjs",
+        "electron/plugin-service.cjs:127-136"
+      ],
+      "status": "部分",
+      "gap": "作业/导入/恢复命令齐全，但依赖 python3+requests+selenium+openpyxl，缺依赖时结构化拒绝。",
+      "confidence": "观察"
+    },
+    {
+      "id": "E04",
+      "area": "集成",
+      "dx": "matrix quark",
+      "dxSummary": "夸克网盘登录/搜索/浏览/上传/下载（CLI 子进程）",
+      "openarc": [
+        "electron/plugin-registry.cjs:292-314",
+        "electron/integration-quark.cjs",
+        "electron/plugin-service.cjs:140-153"
+      ],
+      "status": "已实现",
+      "gap": "等价实现（依赖 quark CLI 探测）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "E05",
+      "area": "集成",
+      "dx": "matrix weather/calendar（open-meteo/uapis.cn）",
+      "dxSummary": "天气与黄历在线查询",
+      "openarc": [
+        "electron/plugin-registry.cjs:151-205",
+        "electron/integration-weather.cjs",
+        "electron/integration-almanac.cjs",
+        "electron/weather-service.cjs"
+      ],
+      "status": "已实现",
+      "gap": "等价实现（网络依赖缺省关闭，需显式开启插件）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "E06",
+      "area": "集成",
+      "dx": "matrix api-settings（RunningHub/ModelScope/Agnes）",
+      "dxSummary": "RunningHub/ModelScope/Agnes 供应商与插件",
+      "openarc": [
+        "electron/plugin-runninghub.cjs",
+        "electron/plugin-modelscope.cjs",
+        "electron/plugin-agnes.cjs",
+        "electron/plugin-registry.cjs:340-408"
+      ],
+      "status": "已实现",
+      "gap": "以插件+供应商双形态存在；DX 的协议三元组/模型元数据口径未逐项核对。",
+      "confidence": "观察"
+    },
+    {
+      "id": "E07",
+      "area": "集成",
+      "dx": "matrix integrations（前端入口）",
+      "dxSummary": "第三方集成统一入口/健康/开关/审计",
+      "openarc": [
+        "src-vue/apps/IntegrationsApp.vue:20-25",
+        "electron/plugin-registry.cjs:1-30"
+      ],
+      "status": "已实现",
+      "gap": "等价实现（默认全关、依赖探测、缺依赖结构化拒绝、仅显式测试才 probeNetwork）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "F01",
+      "area": "AI",
+      "dx": "AI-ORG §2.1（Jarvis）",
+      "dxSummary": "全局助理 Jarvis：Dock orb → agent gateway SSE（profile system-jarvis）",
+      "openarc": [
+        "electron/preload.cjs:166-173",
+        "electron/agent-service.cjs:533-700",
+        "src/projects/TaskConsole.tsx"
+      ],
+      "status": "部分",
+      "gap": "agent 域与任务控制台在 React 侧；Vue 壳层未检出 Jarvis 悬浮入口与 agent 桥调用。",
+      "confidence": "观察"
+    },
+    {
+      "id": "F02",
+      "area": "AI",
+      "dx": "AI-ORG §2.1（对话）",
+      "dxSummary": "对话 App：/api/agent/gateway/run-stream + 工具预取",
+      "openarc": [
+        "src-vue/apps/ChatApp.vue:7-119",
+        "electron/task-service.cjs",
+        "electron/agent-runtime-manager.cjs"
+      ],
+      "status": "已实现",
+      "gap": "等价口径：DX 走 /api/agent/gateway/run-stream+SSE，OpenArc ChatApp 走 task 运行时（task/run|appendStep|get + task:event，ChatApp.vue:18-119）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "F03",
+      "area": "AI",
+      "dx": "AI-ORG §2.1（项目 Agent）",
+      "dxSummary": "项目文件助手：/api/projects/:id/converse，assistant/thinking/agent 三模式",
+      "openarc": [
+        "electron/task-service.cjs",
+        "electron/task-harness-orchestrator.cjs",
+        "electron/project-agent-mode.cjs",
+        "src-vue/apps/ProjectsApp.vue"
+      ],
+      "status": "部分",
+      "gap": "任务/项目域与 React 任务控制台存在；Vue 项目应用只接 resource 桥，Agent 入口待接。",
+      "confidence": "观察"
+    },
+    {
+      "id": "F04",
+      "area": "AI",
+      "dx": "AI-ORG §2.1（developer-app agent）",
+      "dxSummary": "第三方 App Agent：app.<id>.agent.run + capabilityBoundary 固定",
+      "openarc": [
+        "electron/developer-domain.cjs:1021-1065",
+        "electron/agent-service.cjs",
+        "electron/developer-service.cjs"
+      ],
+      "status": "部分",
+      "gap": "App 清单可声明并投影 agent-tool，运行期 agent 入口与 DX 的 developer-app profile 未逐项对齐。",
+      "confidence": "推断"
+    },
+    {
+      "id": "F05",
+      "area": "AI",
+      "dx": "AI-ORG §2.2（envelope/profile 准入）",
+      "dxSummary": "dx-agent-request/v1 envelope + 5 个内置 profile 白名单/能力交集",
+      "openarc": [
+        "electron/agent-runtime-envelope.cjs",
+        "electron/agent-runtime-profiles.cjs",
+        "electron/agent-runtime-manager.cjs",
+        "electron/agent-contracts.cjs"
+      ],
+      "status": "部分",
+      "gap": "envelope/profile/准入分层存在；profile 集与能力边界是否 1:1 未逐项核对。",
+      "confidence": "推断"
+    },
+    {
+      "id": "F06",
+      "area": "AI",
+      "dx": "AI-ORG §2.3（工具目录 7 类）",
+      "dxSummary": "toolCatalog 7 类（system/media/file/canvas/app/mcp/skill）+ x_dx_capability",
+      "openarc": [
+        "electron/agent-tool-catalog.cjs",
+        "electron/tool-registry.cjs",
+        "electron/tool-adapters.cjs",
+        "electron/capability-discovery.cjs"
+      ],
+      "status": "部分",
+      "gap": "工具目录与能力发现存在；7 类覆盖度与 schema 投影未逐条对齐。",
+      "confidence": "推断"
+    },
+    {
+      "id": "F07",
+      "area": "AI",
+      "dx": "AI-ORG §2.3（客户端执行器）",
+      "dxSummary": "客户端执行 open_app/music/画布/文件工具",
+      "openarc": [
+        "electron/canvas-dxos-capabilities.cjs",
+        "electron/desktop-executor.cjs",
+        "electron/agent-builtin-tools.cjs"
+      ],
+      "status": "部分",
+      "gap": "桌面执行端与画布能力存在；客户端执行器集合/回传 observations 语义未核对（desktop-executor 为并行新增文件）。",
+      "confidence": "推断"
+    },
+    {
+      "id": "F08",
+      "area": "AI",
+      "dx": "AI-ORG §2.4（模型路由回退）",
+      "dxSummary": "capabilityRouter+modelResolver 有序链 + 一次回退 + autoFallback 开关",
+      "openarc": [
+        "electron/capability-router.cjs",
+        "electron/capability-target-resolver.cjs",
+        "electron/progressive-capability-router.cjs",
+        "electron/model-resolver.cjs",
+        "electron/model-service.cjs"
+      ],
+      "status": "部分",
+      "gap": "路由/回退代码存在；modelResolver 为并行新增（工作树未提交），能力依赖不可用问题由 task-3 收口中。",
+      "confidence": "观察"
+    },
+    {
+      "id": "F09",
+      "area": "AI",
+      "dx": "AI-ORG §2.5（审批/确认）",
+      "dxSummary": "interactionPolicy/confirmation 记录型审批（DX 服务端只记录不强制）",
+      "openarc": [
+        "electron/side-effect-domain.cjs",
+        "electron/side-effect-service.cjs",
+        "electron/dx-task-approval-bridge.cjs",
+        "electron/task-authority.cjs"
+      ],
+      "status": "已实现",
+      "gap": "等价且更强制：审批网关 + 撤销 + 事件；DX 的“只记录”不是等价缺口。",
+      "confidence": "观察"
+    },
+    {
+      "id": "F10",
+      "area": "AI",
+      "dx": "AI-ORG §2.5（子代理/检查点）",
+      "dxSummary": "监督子代理（深度/并行/每 Run 上限）+ 检查点/验收",
+      "openarc": [
+        "electron/agent-kernel-supervisor.cjs",
+        "electron/agent-checkpoint-contract.cjs",
+        "electron/agent-kernel.cjs"
+      ],
+      "status": "部分",
+      "gap": "监督与检查点模块存在；深度/并行/每 Run 上限与 reviewer 门禁未逐项核对。",
+      "confidence": "推断"
+    },
+    {
+      "id": "F11",
+      "area": "组织",
+      "dx": "AI-ORG §4.1（账号/角色）",
+      "dxSummary": "auth.db 用户/部门/角色 + 会话",
+      "openarc": [
+        "electron/identity-service.cjs",
+        "electron/authorization-service.cjs",
+        "electron/local-account-service.cjs",
+        "src-vue/apps/GovernanceApp.vue",
+        "src-vue/identity/SetupScreen.vue"
+      ],
+      "status": "已实现",
+      "gap": "等价实现（本地账号引导 + 治理端）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "F12",
+      "area": "组织",
+      "dx": "AI-ORG §4.2（部门/资源范围）",
+      "dxSummary": "部门/资源 scope（PERSONAL/DEPARTMENT/ORGANIZATION）",
+      "openarc": [
+        "electron/authorization-domain.cjs",
+        "electron/governance-service.cjs",
+        "electron/resource-domain.cjs"
+      ],
+      "status": "已实现",
+      "gap": "等价实现（validateScope + 部门管理命令）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "F13",
+      "area": "组织",
+      "dx": "AI-ORG §4.3/4.4（App 授权/精细权限）",
+      "dxSummary": "app_access_rules + app_permission_policies + 工具级权限",
+      "openarc": [
+        "electron/governance-bootstrap.cjs:53-60",
+        "electron/authorization-service.cjs",
+        "electron/identity-service.cjs"
+      ],
+      "status": "已实现",
+      "gap": "等价且更细（grantAppAccess/getAppToolAccess/setAppStatus/审计）。",
+      "confidence": "观察"
+    },
+    {
+      "id": "F14",
+      "area": "组织",
+      "dx": "AI-ORG §4.5（配额）",
+      "dxSummary": "api-quotas.db：部门×平台金额/次数、模型白名单、reserve/settle",
+      "openarc": [
+        "electron/dxos-foundation-quota.cjs",
+        "electron/dxos-foundation-schema.cjs"
+      ],
+      "status": "部分",
+      "gap": "本地配额账本（reserved→spent/released）存在；部门×平台规则/模型白名单与 DX 计量口径未逐项对齐。",
+      "confidence": "推断"
+    },
+    {
+      "id": "F15",
+      "area": "组织",
+      "dx": "AI-ORG §4.6（数据隔离）",
+      "dxSummary": "fs ownerId+共享区、画布 ACL、资产库 ACL、线程可见性、project_members",
+      "openarc": [
+        "electron/resource-domain.cjs",
+        "electron/canvas-domain.cjs:315-331",
+        "electron/integration-service.cjs",
+        "electron/authorization-store.cjs"
+      ],
+      "status": "部分",
+      "gap": "各域各自实现隔离；跨域统一口径未逐表核对（integration-service 实际是 Projects/Canvas 集成服务）。",
+      "confidence": "推断"
+    },
+    {
+      "id": "F16",
+      "area": "组织",
+      "dx": "AI-ORG §1 结论 9（桌面自动超管会话）",
+      "dxSummary": "0.6.1 新增 ensureLocalAdminSession → /api/auth/desktop-session",
+      "openarc": [
+        "src-vue/identity/SetupScreen.vue:16,135",
+        "electron/local-account-service.cjs",
+        "electron/preload.cjs:50-57"
+      ],
+      "status": "部分",
+      "gap": "本地账号/绑定流程存在；是否等价“桌面壳自动超管会话 + 短期 secret”未核对。",
+      "confidence": "推断"
+    },
+    {
+      "id": "F17",
+      "area": "组织",
+      "dx": "AI-ORG §4.5/7.1（云权益/兑换/席位）",
+      "dxSummary": "api.dx-os.com Ed25519 权益、兑换码、席位/部门上限",
+      "openarc": [],
+      "status": "缺失",
+      "gap": "无云账号/权益/兑换/席位链路（本地部署形态）。",
+      "confidence": "观察"
+    }
+  ],
+  "appMatrix": [
+    {
+      "dxApp": "agent",
+      "dxName": "贾维斯",
+      "openarc": "agent 域 + src/projects/TaskConsole.tsx",
+      "status": "部分",
+      "note": "Vue 壳无 Jarvis 悬浮入口/agent 桥调用"
+    },
+    {
+      "dxApp": "welcome",
+      "dxName": "应用",
+      "openarc": "src-vue/apps/HomeApp.vue（应用中心）",
+      "status": "已实现",
+      "note": "合并为应用中心"
+    },
+    {
+      "dxApp": "files",
+      "dxName": "文件夹",
+      "openarc": "src-vue/apps/FilesApp.vue + openarc.files",
+      "status": "已实现",
+      "note": "等价"
+    },
+    {
+      "dxApp": "tasks",
+      "dxName": "对话",
+      "openarc": "src-vue/apps/ChatApp.vue + agent/task 域",
+      "status": "已实现",
+      "note": "走 task 运行时（task 桥），与 DX 的 agent gateway/SSE 口径不同"
+    },
+    {
+      "dxApp": "api-settings",
+      "dxName": "API 设置",
+      "openarc": "src-vue/apps/ProtocolApp.vue + settings/ModelSettings.vue",
+      "status": "已实现",
+      "note": "拆分为协议中心+模型设置"
+    },
+    {
+      "dxApp": "accounts",
+      "dxName": "账户管理",
+      "openarc": "src-vue/apps/GovernanceApp.vue + governance/authorization",
+      "status": "已实现",
+      "note": "更细的资源/App/工具授权"
+    },
+    {
+      "dxApp": "settings",
+      "dxName": "系统设置",
+      "openarc": "src-vue/settings/*（系统/外观/网络/字体/CLI/模型/协议）",
+      "status": "已实现",
+      "note": "含 0.6.1 字体/代理/CLI 面板"
+    },
+    {
+      "dxApp": "calendar",
+      "dxName": "日历",
+      "openarc": "src-vue/apps/CalendarApp.vue",
+      "status": "已实现",
+      "note": "黄历走 integration plugin"
+    },
+    {
+      "dxApp": "automations",
+      "dxName": "自动化",
+      "openarc": "src-vue/apps/AutomationApp.vue + automation 域",
+      "status": "已实现",
+      "note": "等价"
+    },
+    {
+      "dxApp": "mcp",
+      "dxName": "MCP 管理",
+      "openarc": "src-vue/apps/McpCenter.vue + mcp 域",
+      "status": "已实现",
+      "note": "含工具审批开关"
+    },
+    {
+      "dxApp": "skills",
+      "dxName": "Skill",
+      "openarc": "src-vue/apps/SkillsApp.vue + skill 域",
+      "status": "已实现",
+      "note": "等价"
+    },
+    {
+      "dxApp": "market",
+      "dxName": "应用市场",
+      "openarc": "src-vue/apps/MarketApp.vue + market/marketUpdate",
+      "status": "部分",
+      "note": "本地目录+在线更新，无云市场目录/审核/灰度"
+    },
+    {
+      "dxApp": "music",
+      "dxName": "音乐",
+      "openarc": "src-vue/apps/MusicApp.vue + media library",
+      "status": "部分",
+      "note": "无在线封面/歌词抓取等 DX 后处理"
+    },
+    {
+      "dxApp": "lingxing",
+      "dxName": "领星",
+      "openarc": "src-vue/apps/IntegrationsApp.vue + lingxing plugin",
+      "status": "已实现",
+      "note": "并入第三方集成"
+    },
+    {
+      "dxApp": "dingtalk",
+      "dxName": "钉钉",
+      "openarc": "src-vue/apps/IntegrationsApp.vue + dingtalk plugin",
+      "status": "已实现",
+      "note": "并入第三方集成"
+    },
+    {
+      "dxApp": "weather",
+      "dxName": "天气",
+      "openarc": "src-vue/apps/WeatherApp.vue + integration weather",
+      "status": "已实现",
+      "note": "等价（插件需开启）"
+    },
+    {
+      "dxApp": "photos",
+      "dxName": "相册",
+      "openarc": "src-vue/apps/PhotosApp.vue + photos 域",
+      "status": "已实现",
+      "note": "来源/虚拟文件夹/反推/抠图/特征/导入"
+    },
+    {
+      "dxApp": "text-editor",
+      "dxName": "文本编辑器",
+      "openarc": "src-vue/apps/NotesApp.vue + files writeText",
+      "status": "已实现",
+      "note": "等价"
+    },
+    {
+      "dxApp": "trash",
+      "dxName": "废纸篓",
+      "openarc": "src-vue/apps/TrashApp.vue + resource/files trash",
+      "status": "已实现",
+      "note": "等价"
+    },
+    {
+      "dxApp": "ziniao",
+      "dxName": "紫鸟浏览器",
+      "openarc": "src-vue/apps/IntegrationsApp.vue + ziniao plugin",
+      "status": "部分",
+      "note": "依赖 python 包，缺依赖结构化拒绝"
+    },
+    {
+      "dxApp": "short-drama",
+      "dxName": "视频工坊",
+      "openarc": "src-vue/apps/DramaApp.vue + media short-drama",
+      "status": "已实现",
+      "note": "等价（模型需注入）"
+    },
+    {
+      "dxApp": "comfyui",
+      "dxName": "ComfyUI",
+      "openarc": "（无应用入口）",
+      "status": "缺失",
+      "note": "无 ComfyUI 应用/画布 comfy 节点执行链路"
+    },
+    {
+      "dxApp": "canvas",
+      "dxName": "无限画布",
+      "openarc": "src/canvas/CanvasHost.tsx（ReactIsland）+ canvas 域",
+      "status": "部分",
+      "note": "见 A 组：Card 模型/插件/邀请码/云同步等缺口"
+    },
+    {
+      "dxApp": "snake",
+      "dxName": "贪吃蛇",
+      "openarc": "（无）",
+      "status": "缺失",
+      "note": "未移植"
+    },
+    {
+      "dxApp": "video-editor",
+      "dxName": "Agent 剪辑",
+      "openarc": "src-vue/apps/VideoApp.vue + media render",
+      "status": "已实现",
+      "note": "等价 ffmpeg 渲染"
+    },
+    {
+      "dxApp": "ai-image-declaration",
+      "dxName": "AI图片声明",
+      "openarc": "src-vue/apps/DeclareApp.vue + media ai-declaration",
+      "status": "已实现",
+      "note": "等价"
+    },
+    {
+      "dxApp": "figma",
+      "dxName": "Figma",
+      "openarc": "electron/media-figma-preview.cjs（模块）",
+      "status": "部分",
+      "note": "预览模块存在；无应用入口、无 figma MCP 插件登记"
+    },
+    {
+      "dxApp": "illustrator",
+      "dxName": "Illustrator",
+      "openarc": "electron/media-illustrator.cjs（模块）",
+      "status": "部分",
+      "note": "媒体模块存在；无应用入口"
+    },
+    {
+      "dxApp": "quark",
+      "dxName": "夸克网盘",
+      "openarc": "src-vue/apps/IntegrationsApp.vue + quark plugin",
+      "status": "已实现",
+      "note": "并入第三方集成"
+    },
+    {
+      "dxApp": "developer-studio",
+      "dxName": "DX Developer",
+      "openarc": "src-vue/apps/DevApp.vue + developer 域（70 命令）",
+      "status": "已实现",
+      "note": "本地能力等价；发布/OAuth/审核为产品决定不开放"
+    },
+    {
+      "dxApp": "（新增）resource-library",
+      "dxName": "资源库",
+      "openarc": "src-vue/apps/ResourceLibraryApp.vue + resource 域",
+      "status": "已实现",
+      "note": "DX 的 fs+资产库能力的整合面"
+    },
+    {
+      "dxApp": "（新增）projects/organization/integrations/protocols/browser/home",
+      "dxName": "项目/组织/第三方集成/协议中心/浏览器/应用中心",
+      "openarc": "src-vue/apps/*.vue",
+      "status": "已实现",
+      "note": "DX 对应能力拆分/整合，见 C 组"
+    }
+  ]
+}

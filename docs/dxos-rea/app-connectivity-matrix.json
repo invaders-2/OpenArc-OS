@@ -1,0 +1,1482 @@
+{
+  "meta": {
+    "target": "/Users/wepingli/Downloads/DXOS-Portable-0.5.1-mac-arm64/.dx-runtime/versions/runtime-0.6.1-c2699917-1363-460d-97c3-da88f6d3fbe5/DX OS.app/Contents/Resources/app.asar",
+    "target_sha256": "f14ed0a66f5ca0b5c3e244c37b25ca0fb663b7cade445cbe0a1feacee96d7933",
+    "frontend_dist": "…/app.asar.unpacked/dist (sha256 36c57d6ba263406c75711f30f4ba55b22113a1baea12080a4f836e69b632bf6b)",
+    "server_source": "…/app.asar.unpacked/server (TypeScript 源码，随包侧车，非 asar 内)",
+    "rea_evidence": {
+      "asar": "ev_3921218edff6ecf6f0668fb731f95c478843328643e3ca4c2b2e6e863871e16b",
+      "dist": "ev_9178e6af633b32894db81e4f74448e4aec964b1db5678e9116b61ce73e9c8217",
+      "dist_summary_view": "ev_027b5212ad469dd229d30e481460d34a1f5d756844aa155d0d14e8e3d25d778a",
+      "dist_modules_page_view": "ev_f3faa43f4e668c28dd757390b0bbb7beb67c36a904ec54b96cef517c2c8eb68c"
+    },
+    "rea_observations": {
+      "asar": "6502 相关文件 / 5074 解析 JS / 19933 findings / 19 parse failures；2 browser windows、1 preload、15 exposed API members、13 IPC 主进程 handler；364 条 unpacked 完整性矛盾（observed-untrusted）；graph 26944 nodes / 27929 edges",
+      "dist": "52 相关文件 / 49 解析 JS / 1087 findings / 0 parse failures；request 族 retained_relations=0（URL 动态），semantic 覆盖 partial",
+      "limitations": [
+        "app.asar 内不含 server/dist；前端与后端均在 app.asar.unpacked",
+        "dist 分析 52/281 文件为 REA 判定相关；≤ 部分模块关系因预算未完成",
+        "所有比较为静态阅读/REA 静态分析，未执行目标、未联网"
+      ]
+    },
+    "version_baseline": "0.5.5：DX-OS-完整逆向报告.md + _re_analysis/routes-0.5.5.tsv(584 路由) + _re_analysis/asar55(外壳源码) ；0.6.1 路由/表/前端 chunk 重新提取复核",
+    "method": "REA analyze_javascript_application（CLI 6.4.0 跑完→bundle 导入 MCP→inspect_analysis_view 取视图；MCP 直连因响应预算超时）；随包 server TS 与 dist 源码阅读用于 file:line；未启动目标、未联网、未修改目标",
+    "generated_at": "2026-10-17",
+    "require_app_open": {
+      "/api/providers|midjourney|runninghub|cli": "api-settings",
+      "/api/dingtalk": "dingtalk",
+      "/api/market": "market",
+      "/api/comfyui": "comfyui",
+      "/api/datasets": "dataset-maker",
+      "/api/quark": "quark",
+      "/api/ai-image-declaration": "ai-image-declaration",
+      "/api/video": "video-editor",
+      "evidence": "server/index.ts:1181-1190,1419"
+    }
+  },
+  "canvas": {
+    "frontend": {
+      "delivery": "dx-app（注册表占位 component:da / OnDemandAppPlaceholder；由 DeveloperAppHost 以 iframe/运行时令牌加载）",
+      "installed_package": "data/developer-apps/.versions/canvas/1.0.288+10288-d128aaae/source (dx-app/v2, entry index.html, backgroundMode keep-alive, multiInstance true)",
+      "api_allowlist": "dx-app.json.appApi 白名单：/canvas, /fs, /skills, /agent, /ai-tasks, /ai/tasks, /ai/models, /comfyui, /director3d, /protocols, /market/developer-apps, /canvas/plugins(/registry), /codex-canvas/*；permissions app.canvas.*"
+    },
+    "storage": {
+      "metadata": "ccs.db canvases (document_json + version + card_count + thumbnail) / canvas_members / canvas_invites(code_hash) / canvas_invite_members / canvas_cloud_sync_baselines",
+      "asset_library": "ccs.db developer_collab_projects(app_id='canvas', kind='asset-library') + developer_collab_members/invites；fs 目录 项目/无限画布/资产库/<库名>，share='asset-library:<libraryId>'",
+      "files": "fs.json(dx-fs/v2) 元数据 + blobs/<nodeId> 或 blobs/sha256/xx/<sha256>；画布文件目录 <项目>/画布数据/<canvasId>/{生成结果,...}",
+      "packages": "GET /api/canvas/:id/export → dx-canvas-package/v1 ZIP(canvas.json + assets/NNNNN-name)；POST /api/canvas/import 重建"
+    },
+    "asset_reference": {
+      "reference_form": "MediaRef = { nodeId, url:'/api/fs/raw/<nodeId>', role, kind, w,h, poster, generation }；库项 CanvasAssetLibraryItem.media = { nodeId, name, url:'/api/fs/raw/<nodeId>', kind }",
+      "import_copy": "导入画布来源/相册图片时服务端 copyNode 生成新文件（asset-library POST items 的 sourceNodeId/canUseSource；photos/import-image；canvas import 重映射）",
+      "dedup": "sourceKey（asset-source:<nodeId> / photo:<sourceId>）与 requestedId 决定 upsert 去重；库容量 MAX_ITEMS=1000",
+      "rename_delete": "POST /items 以 id+title(+group) upsert 完成重命名/分组；DELETE /items/:itemId?baseVersion；系统提示词（promptRole）禁止删除",
+      "visibility": "库 summary: access read/edit/owner，visibility private/public/restricted，publicAccess read/edit，members[{userId,access}]；fs 读取经 shareZoneOf→canSeeShare→canvasAssetLibraryAccess",
+      "canvas_media_rule": "canViewCanvasMedia 只覆盖画布文档实际引用的 nodeId，不授予父目录权限；canEditCanvas 控制编辑",
+      "cross_app": [
+        "相册 → 画布卡片：POST /api/photos/import-image destination='canvas'（复制文件+创建卡片+定位+broadcast）",
+        "相册 → 资产库：destination='library'（staged 文件→upsert item sourceKey photo:<id>）",
+        "画布/文件夹来源 → 资产库：POST /asset-libraries/:id/sync-sources（items[{nodeId,name,canvasId}]，owner-only）",
+        "画布 ↔ .dxcanvas 包（导出/导入）",
+        "Agent：canvas_* tools（canvas_create_node/operate/execute 等 14 个客户端受控工具）"
+      ]
+    },
+    "generation": {
+      "submit": "/api/canvas/generate（非 comfy/CLI → V2 AI 任务，extensions.protocolExecutionMode='agent'；comfy/CLI → legacy 路径）",
+      "task_store": "protocol-tasks.db: ai_protocol_tasks / ai_protocol_task_events / ai_protocol_artifacts（产物 artifacts/<sha256(taskId)>/<artifactId>.bin）",
+      "deliver": "saveCanvasProtocolArtifacts / saveCanvasJimengResults → 画布 生成结果 文件夹 → fs 节点 + saveBlob → 返回 MediaRef[]；前端写 card.result/history 再 sync",
+      "text": "/api/canvas/generate-text + query"
+    },
+    "collab": {
+      "ws": "WS /api/canvas/collab?canvasId&clientId（getAuth + getCanvasVersion 鉴权）；客户端仅可发 cursor；服务端广播 presence/cursor/patch",
+      "sync": "POST /api/canvas/:id/sync（upserts/patches/deletedIds/connections/viewport/assetLibrarySources；版本冲突 409）",
+      "invites": "POST /api/canvas/:id/invite（read/edit，code_hash 只存哈希）/ POST /api/canvas/invites/redeem"
+    },
+    "plugins": {
+      "source": "只来自开发者应用 manifest.canvas（listDeveloperApps）→ CanvasNodeRegistry；registry.json 持久化；卸载保留 tombstone",
+      "execution": "POST /api/canvas/plugins/execute（skill/mcp-tool/agent-tool/workflow；app-bridge 需前端容器 409；builtin 执行器 403）；插件数据/网络走 /plugins/:id/data 与 /plugins/:id/network/request（manifest.network 白名单）",
+      "builtin_nodes": 16,
+      "formats": [
+        "dx-canvas-nodes/v1|v2",
+        "dx-canvas-templates/v1",
+        "dx-canvas-plugin-registry/v1",
+        "dx-canvas-package/v1",
+        "dx-canvas-cloud/v1",
+        "dx-canvas-agent-workflows/v1"
+      ]
+    },
+    "cloud": "GET /api/canvas/cloud + /:id/cloud-sync/{progress,pause,diff,initialize,apply} + POST /api/canvas/cloud/:id/download；只有 owner 可操作；基线表 canvas_cloud_sync_baselines",
+    "codex_bridge": {
+      "bridge_file": "Resources/dxos-canvas-mcp.cjs (559,990 B)",
+      "installer": "server/codexCanvasInstaller.ts",
+      "routes": [
+        "GET /api/codex-canvas/setup",
+        "POST /api/codex-canvas/install",
+        "POST /api/codex-canvas/permissions/pair",
+        "POST /api/codex-canvas/permissions/revoke",
+        "POST /api/codex-canvas/relay",
+        "POST /api/codex-canvas/connect",
+        "GET /api/codex-canvas/snapshot",
+        "POST /api/codex-canvas/nodes/find|get|rename|edit",
+        "POST /api/codex-canvas/connections/change",
+        "POST /api/codex-canvas/cards",
+        "POST /api/codex-canvas/generation/preview|execute|query",
+        "GET /api/codex-canvas/generation/images"
+      ],
+      "restrictions": "loopback-only（除 relay 中继）+ Bearer grant；relay 用一次性码派生 AES-256-GCM 密钥 + nonce 防重放 + 固定操作白名单",
+      "evidence": "server/index.ts:1191-1310; server/codexCanvas.ts"
+    }
+  },
+  "apps": [
+    {
+      "id": "agent",
+      "name": "贾维斯",
+      "frontend": {
+        "kind": "dist-chunk",
+        "chunk": "index-DJDR-kWU.js",
+        "note": "全局助理（外壳内嵌 Assistant 组件，无独立 App chunk）"
+      },
+      "window": {
+        "appId": "agent",
+        "multiInstance": false,
+        "note": "悬浮面板/窗口，role:assistant（0.5.5 报告 §2 表；0.6.1 注册表 30 项不变）"
+      },
+      "routes": [
+        "/api/agent/capabilities/discover",
+        "/api/agent/gateway/run-stream",
+        "/api/agent/gateway/step-stream",
+        "/api/agent/gateway/runs/:id/complete",
+        "/api/agent/gateway/runs/:id/tool-results",
+        "/api/agent/runs/:id/cancel",
+        "/api/agent/tools",
+        "/api/agent/tools/:name/run",
+        "/api/assistant/bootstrap",
+        "/api/projects",
+        "/api/projects/:id/tasks",
+        "/api/tasks/:id/answer|cancel|continue|pause|resume",
+        "/api/skills/:id/run",
+        "/api/mcp/call"
+      ],
+      "services": [
+        "server/assistantDirect.ts",
+        "server/agent-kernel/*",
+        "server/agent-runtime/*",
+        "server/toolCatalog.ts",
+        "server/capabilityRouter.ts",
+        "server/taskStore.ts"
+      ],
+      "tables": [
+        "ccs.db: agent_runs/agent_run_events/agent_checkpoints/agent_turns/agent_delegations/agent_workspaces/tool_operations/projects/threads/thread_messages/tasks",
+        "protocol-tasks.db: ai_protocol_tasks/ai_protocol_task_events/ai_protocol_artifacts"
+      ],
+      "external": [
+        "模型站点（providers.json 配置，含 api.dx-os.com/OpenAI 兼容/百炼/Gemini 等）",
+        "MCP 服务器（stdio/http）"
+      ],
+      "mode": "mixed",
+      "evidence": [
+        "源码阅读: src-vue 主包 index chunk（/agent/gateway 等字面量）",
+        "REA ev_9178e6af633b32894db81e4f74448e4aec964b1db5678e9116b61ce73e9c8217"
+      ],
+      "unknown": [
+        "RunManager 具体深度/委派上限未在本次复核"
+      ]
+    },
+    {
+      "id": "welcome",
+      "name": "应用",
+      "frontend": {
+        "kind": "dist-chunk",
+        "chunk": "Welcome-D3hPRNIk.js"
+      },
+      "window": {
+        "appId": "welcome"
+      },
+      "routes": [],
+      "services": [
+        "（无后端）"
+      ],
+      "tables": [],
+      "external": [],
+      "mode": "local-only",
+      "evidence": [
+        "源码阅读: dist/assets/Welcome-D3hPRNIk.js 无 fetch/API 调用"
+      ],
+      "unknown": []
+    },
+    {
+      "id": "files",
+      "name": "文件夹",
+      "frontend": {
+        "kind": "dist-chunk",
+        "chunk": "Files-B0LBzpp0.js",
+        "note": "fs 操作主要在 index 共享模块"
+      },
+      "window": {
+        "appId": "files",
+        "multiInstance": true
+      },
+      "routes": [
+        "/api/fs",
+        "/api/fs/node/:id",
+        "/api/fs/count/:id",
+        "/api/fs/copy",
+        "/api/fs/search",
+        "/api/fs/tree",
+        "/api/fs/upload",
+        "/api/fs/download-zip",
+        "/api/fs/raw/:id",
+        "/api/fs/thumbnail/:id",
+        "/api/fs/video-poster/:id",
+        "/api/fs/trash*"
+      ],
+      "services": [
+        "server/fs.ts"
+      ],
+      "tables": [
+        "fs.json (dx-fs/v2, 元数据)",
+        "blobs/<nodeId> 与 blobs/sha256/<xx>/<sha256> (内容)",
+        "cache/fs-thumbnails"
+      ],
+      "external": [],
+      "mode": "local-only",
+      "evidence": [
+        "源码阅读: server/fs.ts:15-16,54-64,143-146,1009-1054; server/index.ts:6234-6311,6713-6920"
+      ],
+      "unknown": []
+    },
+    {
+      "id": "tasks",
+      "name": "对话",
+      "frontend": {
+        "kind": "dist-chunk",
+        "chunk": "Conversation-DB35y8Nt.js"
+      },
+      "window": {
+        "appId": "tasks",
+        "showInDock": false
+      },
+      "routes": [
+        "/api/tasks",
+        "/api/tasks/:id/events/stream",
+        "/api/agent/tools",
+        "/api/agent/tools/:name/run",
+        "/api/skills",
+        "/api/skills/:id/run",
+        "/api/assistant/bootstrap",
+        "/api/assistant/conversations/:id/cache",
+        "/api/providers"
+      ],
+      "services": [
+        "server/assistantDirect.ts",
+        "server/taskStore.ts",
+        "server/agent-kernel/*"
+      ],
+      "tables": [
+        "ccs.db: tasks/threads/thread_messages/task_steps/task_plans/task_events/task_attempts/task_checkpoints",
+        "protocol-tasks.db"
+      ],
+      "external": [
+        "模型站点"
+      ],
+      "mode": "mixed",
+      "evidence": [
+        "源码阅读: Conversation chunk get/post 字面量；server/index.ts /api/tasks 路由"
+      ],
+      "unknown": []
+    },
+    {
+      "id": "api-settings",
+      "name": "API 设置",
+      "frontend": {
+        "kind": "dist-chunk",
+        "chunk": "ApiSettings-IQGb5LPa.js"
+      },
+      "window": {
+        "appId": "api-settings",
+        "showInDock": false
+      },
+      "routes": [
+        "/api/providers",
+        "/api/providers/models",
+        "/api/providers/test",
+        "/api/providers/auto-fallback",
+        "/api/protocols",
+        "/api/protocols/models",
+        "/api/protocols/v2",
+        "/api/protocols/v2/compile|validate|coverage",
+        "/api/cli/:tool/status|login|logout|models|chat",
+        "/api/runninghub/*",
+        "/api/modelscope/keys",
+        "/api/agnes/keys",
+        "/api/ai/tasks/:id/events",
+        "/api/quick-settings/catalog"
+      ],
+      "services": [
+        "server/store.ts",
+        "server/protocols.ts",
+        "server/protocol-engine/*",
+        "server/cliTools.ts",
+        "server/agentCliTools.ts",
+        "server/runninghub.ts",
+        "server/modelscope.ts",
+        "server/agnes.ts"
+      ],
+      "tables": [
+        "providers.json",
+        "provider-settings.json",
+        "protocol fixtures"
+      ],
+      "external": [
+        "OpenAI/Anthropic/Gemini/xAI/MiniMax/火山方舟/百炼/APIMart/AGToken/ZKKI/ModelScope/Agnes/RunningHub/ComfyUI 等（chunk 中域名清单）"
+      ],
+      "mode": "mixed",
+      "evidence": [
+        "源码阅读: ApiSettings chunk 路由字面量；server/protocols.ts:283,2622"
+      ],
+      "unknown": [
+        "协议条目数量口径（旧报告 15+18）本次未按同一方法复算"
+      ]
+    },
+    {
+      "id": "accounts",
+      "name": "账户管理",
+      "frontend": {
+        "kind": "dist-chunk",
+        "chunk": "AccountsApp-C9kLuOmR.js"
+      },
+      "window": {
+        "appId": "accounts",
+        "showInDock": false
+      },
+      "routes": [
+        "/api/accounts/snapshot",
+        "/api/accounts/users*",
+        "/api/accounts/departments*",
+        "/api/app-permissions",
+        "/api/app-permissions/open/:appId",
+        "/api/app-permissions/policies/:code",
+        "/api/providers/quotas",
+        "/api/providers/quotas/models",
+        "/api/auth/*"
+      ],
+      "services": [
+        "server/auth.ts",
+        "server/authDb.ts",
+        "server/apiQuota.ts",
+        "server/appAccess.ts(shared)"
+      ],
+      "tables": [
+        "auth.db (users/departments/sessions 等 6 表，0.5.5 报告)",
+        "ccs.db: user_installed_apps/user_app_install_state",
+        "api-quotas.db"
+      ],
+      "external": [
+        "api.dx-os.com（云账号/权益/配额）"
+      ],
+      "mode": "mixed",
+      "evidence": [
+        "源码阅读: AccountsApp chunk 路由；server/index.ts:835-1096"
+      ],
+      "unknown": []
+    },
+    {
+      "id": "settings",
+      "name": "系统设置",
+      "frontend": {
+        "kind": "dist-chunk",
+        "chunk": "Settings-J_ijGC-J.js"
+      },
+      "window": {
+        "appId": "settings"
+      },
+      "routes": [
+        "/api/desktop/config",
+        "/api/desktop/update/status|check",
+        "/api/desktop/rollback",
+        "/api/desktop/proxy/detect",
+        "/api/fs/storage*",
+        "/api/system/fonts",
+        "/api/system/fonts/:id",
+        "/api/dxos/redeem",
+        "/api/dxos/credits/check-in",
+        "/api/preferences/*",
+        "/api/library/config",
+        "/api/cloud-account/*"
+      ],
+      "services": [
+        "server/userPreferences.ts",
+        "server/systemFonts.ts",
+        "server/localProxyDetection.ts",
+        "server/cloudAccount.ts",
+        "server/cloudEntitlement.ts"
+      ],
+      "tables": [
+        "ccs.db: user_preferences/system_preferences/user_wallpapers",
+        "data/wallpapers",
+        "desktop config 文件"
+      ],
+      "external": [
+        "api.dx-os.com",
+        "generativelanguage.googleapis.com（代理探测目标）"
+      ],
+      "mode": "mixed",
+      "evidence": [
+        "源码阅读: Settings chunk 路由；server/systemFonts.ts:11-15,115-121; server/localProxyDetection.ts:69-94"
+      ],
+      "unknown": [
+        "设置面板与 0.5.5 的逐控件差异未逐项核对"
+      ]
+    },
+    {
+      "id": "calendar",
+      "name": "日历",
+      "frontend": {
+        "kind": "dist-chunk",
+        "chunk": "Calendar-fmYVXHIK.js"
+      },
+      "window": {
+        "appId": "calendar",
+        "showInDock": false
+      },
+      "routes": [
+        "/api/calendar/almanac",
+        "/api/agent/step"
+      ],
+      "services": [
+        "server/calendarAlmanac.ts"
+      ],
+      "tables": [
+        "前端 localStorage: ccs-os:calendar（事件/提醒）",
+        "服务端仅黄历缓存（data 目录）"
+      ],
+      "external": [
+        "uapis.cn（节假日/黄历）",
+        "模型站点（/agent/step 自然语言解析）"
+      ],
+      "mode": "mixed",
+      "evidence": [
+        "源码阅读: Calendar chunk 调 /calendar/almanac 与 /agent/step；server/calendarAlmanac.ts:5；index chunk 含 ccs-os:calendar 键"
+      ],
+      "unknown": [
+        "提醒触达路径（通知）未在 0.6.1 前端代码中确证"
+      ]
+    },
+    {
+      "id": "automations",
+      "name": "自动化",
+      "frontend": {
+        "kind": "dist-chunk",
+        "chunk": "AutomationsApp-BBeEKtV2.js"
+      },
+      "window": {
+        "appId": "automations"
+      },
+      "routes": [
+        "/api/automations",
+        "/api/automations/catalog",
+        "/api/automations/:id",
+        "/api/automations/:id/run-now",
+        "/api/automations/claim",
+        "/api/automations/parse",
+        "/api/automation-runs/:id/complete"
+      ],
+      "services": [
+        "server/automations.ts",
+        "server/automationCatalog.ts",
+        "server/automationBusinessActions.ts"
+      ],
+      "tables": [
+        "ccs.db: automations/automation_runs"
+      ],
+      "external": [
+        "模型站点（AI 指令）",
+        "音乐/系统动作（catalog 声明）"
+      ],
+      "mode": "mixed",
+      "evidence": [
+        "源码阅读: server/automations.ts 导入 ccsDb；server/index.ts /api/automations 路由"
+      ],
+      "unknown": []
+    },
+    {
+      "id": "mcp",
+      "name": "MCP 管理",
+      "frontend": {
+        "kind": "dist-chunk",
+        "chunk": "McpManager-B1sFnCJb.js"
+      },
+      "window": {
+        "appId": "mcp"
+      },
+      "routes": [
+        "/api/mcp/servers",
+        "/api/mcp/servers/:id/enabled",
+        "/api/mcp/servers/:id/refresh",
+        "/api/mcp/import",
+        "/api/mcp/import/preview",
+        "/api/mcp/test-agent",
+        "/api/mcp/call",
+        "/api/mcp/call-direct",
+        "/api/mcp/agent-tools",
+        "/api/mcp/search-tools"
+      ],
+      "services": [
+        "server/mcp.ts"
+      ],
+      "tables": [
+        "data/mcp.json",
+        "data/mcp.system.json"
+      ],
+      "external": [
+        "MCP 服务器（stdio 子进程 / Streamable HTTP）"
+      ],
+      "mode": "mixed",
+      "evidence": [
+        "源码阅读: server/mcp.ts:14-15,249-251; McpManager chunk 路由"
+      ],
+      "unknown": []
+    },
+    {
+      "id": "skills",
+      "name": "Skill",
+      "frontend": {
+        "kind": "dist-chunk",
+        "chunk": "SkillsApp-BCwUvKLw.js"
+      },
+      "window": {
+        "appId": "skills"
+      },
+      "routes": [
+        "/api/skills",
+        "/api/skills/:id",
+        "/api/skills/:id/display",
+        "/api/skills/:id/run",
+        "/api/skills/model-options",
+        "/api/skills/agent-tools",
+        "/api/skill-packs",
+        "/api/skill-packs/:id/run|display|agent-run|translate",
+        "/api/skill-packs/import-online"
+      ],
+      "services": [
+        "server/skills.ts",
+        "server/skillPacks.ts",
+        "server/skillImport.ts",
+        "server/skillAnalyzer.ts"
+      ],
+      "tables": [
+        "data/skills.json",
+        "data/skill-packs/*",
+        "server/bundled-skill-packages"
+      ],
+      "external": [
+        "ModelScope（skills 在线导入，skillPacks.ts:96）",
+        "模型站点"
+      ],
+      "mode": "mixed",
+      "evidence": [
+        "源码阅读: server/skills.ts:51; server/skillPacks.ts:96"
+      ],
+      "unknown": []
+    },
+    {
+      "id": "market",
+      "name": "应用市场",
+      "frontend": {
+        "kind": "dist-chunk",
+        "chunk": "MarketApp-CvteOm7x.js"
+      },
+      "window": {
+        "appId": "market",
+        "permissionManaged": true
+      },
+      "routes": [
+        "/api/market/explore",
+        "/api/market/apps/:id",
+        "/api/market/version",
+        "/api/market/developer-apps*",
+        "/api/market/developer-lab/*",
+        "/api/market/updates/check",
+        "/api/market/reset-data",
+        "/api/apps/:id/tools",
+        "/api/developer/docs*",
+        "/api/mcp/servers"
+      ],
+      "services": [
+        "server/marketplace.ts",
+        "server/appReleases.ts",
+        "server/appUpdates.ts",
+        "server/developerDocs.ts",
+        "server/developerApps.ts"
+      ],
+      "tables": [
+        "ccs.db: app_market_releases/user_installed_apps/user_app_install_state",
+        "data/developer-apps/*"
+      ],
+      "external": [
+        "api.dx-os.com（市场目录/发布/更新）"
+      ],
+      "mode": "cloud",
+      "evidence": [
+        "源码阅读: server/marketplace.ts:1,112-122"
+      ],
+      "unknown": []
+    },
+    {
+      "id": "music",
+      "name": "音乐",
+      "frontend": {
+        "kind": "dist-chunk",
+        "chunk": "MusicApp-D__HK4w0.js"
+      },
+      "window": {
+        "appId": "music"
+      },
+      "routes": [
+        "/api/library/config",
+        "/api/library/tracks",
+        "/api/library/scan",
+        "/api/library/upload",
+        "/api/library/meta",
+        "/api/library/ai-classify-artists",
+        "/api/library/cache-artwork",
+        "/api/library/generate-artists-artwork",
+        "/api/library/scrape",
+        "/api/library/stream/:id",
+        "/api/library/lyrics/:id",
+        "/api/library/artwork/:id"
+      ],
+      "services": [
+        "server/library.ts"
+      ],
+      "tables": [
+        "data/library.json",
+        "library-meta.json",
+        "library-tags.json",
+        "library-lyrics.json",
+        "artwork/",
+        "library-artwork.json"
+      ],
+      "external": [
+        "itunes.apple.com（专辑封面/元数据）",
+        "api.deezer.com（歌词/封面）",
+        "本地音乐文件夹"
+      ],
+      "mode": "mixed",
+      "evidence": [
+        "源码阅读: server/library.ts:27-30,123-124,160"
+      ],
+      "unknown": []
+    },
+    {
+      "id": "lingxing",
+      "name": "领星",
+      "frontend": {
+        "kind": "dist-chunk",
+        "chunk": "LingxingApp-yAmJyzNg.js"
+      },
+      "window": {
+        "appId": "lingxing",
+        "accessScope": "external",
+        "version": "1.1.0"
+      },
+      "routes": [
+        "/api/lingxing/currency-rates",
+        "/api/lingxing/mapping",
+        "/api/lingxing/local-cache*",
+        "/api/lingxing/local-cache/advertising/*",
+        "/api/lingxing/local-cache/ziniao/*",
+        "/api/mcp/servers",
+        "/api/mcp/call-direct",
+        "/api/mcp/test-agent"
+      ],
+      "services": [
+        "server/lingxingLocalData.ts",
+        "server/lingxingMappings.ts",
+        "server/mcp.ts"
+      ],
+      "tables": [
+        "data/lingxing-local.db (6 表，0.5.5 报告)",
+        "data/ziniao-vc/*"
+      ],
+      "external": [
+        "openmcp.lingxing.com（官方 MCP）",
+        "api.frankfurter.app（汇率）",
+        "紫鸟浏览器（VC 数据）"
+      ],
+      "mode": "external-cloud",
+      "evidence": [
+        "源码阅读: lingxingLocalData.ts:9,20,276"
+      ],
+      "unknown": []
+    },
+    {
+      "id": "dingtalk",
+      "name": "钉钉",
+      "frontend": {
+        "kind": "dist-chunk",
+        "chunk": "DingTalkApp-Dh-WpOSD.js"
+      },
+      "window": {
+        "appId": "dingtalk",
+        "accessScope": "external"
+      },
+      "routes": [
+        "/api/dingtalk/channels",
+        "/api/dingtalk/send",
+        "/api/dingtalk/agent/config",
+        "/api/dingtalk/agent/status",
+        "/api/dingtalk/agent/test-ai"
+      ],
+      "services": [
+        "server/dingtalk.ts",
+        "server/dingtalkAgent.ts"
+      ],
+      "tables": [
+        "data/dingtalk.json（AES-GCM 加密，0.5.5 报告）"
+      ],
+      "external": [
+        "oapi.dingtalk.com（webhook/OpenAPI）",
+        "dingtalk-stream（Stream 模式）"
+      ],
+      "mode": "external-cloud",
+      "evidence": [
+        "源码阅读: server/dingtalk.ts:13"
+      ],
+      "unknown": []
+    },
+    {
+      "id": "weather",
+      "name": "天气",
+      "frontend": {
+        "kind": "dist-chunk",
+        "chunk": "WeatherApp-BuEInuVW.js",
+        "note": "共享模块 weather-OxlcHzRl.js 内含 /weather 调用"
+      },
+      "window": {
+        "appId": "weather",
+        "showInDock": false
+      },
+      "routes": [
+        "/api/weather"
+      ],
+      "services": [
+        "server/weather.ts"
+      ],
+      "tables": [
+        "内存缓存（weather.ts:44）"
+      ],
+      "external": [
+        "geocoding-api.open-meteo.com",
+        "api.open-meteo.com",
+        "nominatim.openstreetmap.org"
+      ],
+      "mode": "cloud",
+      "evidence": [
+        "源码阅读: server/weather.ts:5-7,44,87-97"
+      ],
+      "unknown": []
+    },
+    {
+      "id": "photos",
+      "name": "相册",
+      "frontend": {
+        "kind": "dist-chunk",
+        "chunk": "PhotosApp-B__Mar7O.js"
+      },
+      "window": {
+        "appId": "photos",
+        "multiInstance": true
+      },
+      "routes": [
+        "/api/photos/library",
+        "/api/photos/sources",
+        "/api/photos/sources/:id",
+        "/api/photos/folders",
+        "/api/photos/folders/:id",
+        "/api/photos/folders/assign",
+        "/api/photos/source-file/:id",
+        "/api/photos/source-thumbnail/:id",
+        "/api/photos/import-image",
+        "/api/photos/reverse-prompt",
+        "/api/photos/vision-models",
+        "/api/photos/source-features",
+        "/api/photos/source-features/query",
+        "/api/photos/source-related",
+        "/api/photos/source-related/query",
+        "/api/photos/background-removal",
+        "/api/photos/background-removal/models",
+        "/api/photos/background-removal/models/:id/download",
+        "/api/canvas/asset-libraries",
+        "/api/canvas",
+        "/api/ai/models",
+        "/api/fs/*"
+      ],
+      "services": [
+        "server/photoSources.ts",
+        "server/photoLibraryIndex.ts",
+        "server/photoSourceVisualFeatures.ts",
+        "server/backgroundRemoval.ts",
+        "server/canvasAssetLibrary.ts（导入资产库）",
+        "server/canvas.ts（导入画布）"
+      ],
+      "tables": [
+        "ccs.db: photo_source_visual_features/photo_source_related_rankings",
+        "data/photos/sources-*.json",
+        "data/models/background-removal",
+        "fs.json/blobs（导入画布/资产库后）"
+      ],
+      "external": [
+        "api.dx-os.com（抠图模型下载）",
+        "视觉/LLM 模型站点（反推提示词/相关排序）",
+        "onnxruntime-node 本地推理"
+      ],
+      "mode": "mixed",
+      "evidence": [
+        "源码阅读: server/index.ts:5924-5996（导入画布/资产库）,6074-6132（图库/反推）; backgroundRemoval.ts:28-29"
+      ],
+      "unknown": [
+        "/api/photocraft/* 与 /api/file-transfers/* 由 DeveloperAppHost（dev-photocraft）调用，不属于 photos 内置应用，见 version_diff.non_builtin_dx_apps"
+      ]
+    },
+    {
+      "id": "text-editor",
+      "name": "文本编辑器",
+      "frontend": {
+        "kind": "dist-chunk",
+        "chunk": "TextEditorApp-Dmnh_tb_.js"
+      },
+      "window": {
+        "appId": "text-editor",
+        "multiInstance": true
+      },
+      "routes": [
+        "/api/fs/raw/:id",
+        "/api/fs/:id (patch)",
+        "/api/fs",
+        "/api/fs/upload"
+      ],
+      "services": [
+        "server/fs.ts"
+      ],
+      "tables": [
+        "fs.json + blobs"
+      ],
+      "external": [],
+      "mode": "local-only",
+      "evidence": [
+        "源码阅读: TextEditor chunk rawUrl fetch；server/fs.ts"
+      ],
+      "unknown": []
+    },
+    {
+      "id": "trash",
+      "name": "废纸篓",
+      "frontend": {
+        "kind": "dist-chunk",
+        "chunk": "TrashApp-DGH8QGhk.js"
+      },
+      "window": {
+        "appId": "trash"
+      },
+      "routes": [
+        "/api/fs/trash",
+        "/api/fs/trash/:id/restore",
+        "/api/fs/trash/:id",
+        "/api/fs/trash/empty"
+      ],
+      "services": [
+        "server/fs.ts"
+      ],
+      "tables": [
+        "fs.json (trashed/trashedTs)"
+      ],
+      "external": [],
+      "mode": "local-only",
+      "evidence": [
+        "源码阅读: server/index.ts:6295-6311"
+      ],
+      "unknown": []
+    },
+    {
+      "id": "ziniao",
+      "name": "紫鸟浏览器",
+      "frontend": {
+        "kind": "inline",
+        "chunk": null,
+        "note": "注册表 component 为内联组件（0.5.5 报告 §2）"
+      },
+      "window": {
+        "appId": "ziniao",
+        "accessScope": "external"
+      },
+      "routes": [
+        "/api/ziniao/download-jobs",
+        "/api/ziniao/download-jobs/:id/control",
+        "/api/ziniao/download-jobs/delete",
+        "/api/ziniao/download-jobs/current",
+        "/api/ziniao/download-control",
+        "/api/lingxing/local-cache/ziniao/*",
+        "/api/mcp/*"
+      ],
+      "services": [
+        "server/ziniaoDownloadJobs.ts",
+        "server/lingxingLocalData.ts",
+        "server/mcp.ts"
+      ],
+      "tables": [
+        "data/ziniao-vc/*",
+        "lingxing-local.db"
+      ],
+      "external": [
+        "紫鸟浏览器（Python MCP / webdriver）",
+        "Vendor Central"
+      ],
+      "mode": "external-cloud",
+      "evidence": [
+        "源码阅读: server/index.ts:8457-8494; mcp.ts managedBy ziniao"
+      ],
+      "unknown": []
+    },
+    {
+      "id": "short-drama",
+      "name": "视频工坊",
+      "frontend": {
+        "kind": "dist-chunk",
+        "chunk": "ShortDramaApp-VJezH5SI.js"
+      },
+      "window": {
+        "appId": "short-drama"
+      },
+      "routes": [
+        "/api/short-drama/projects",
+        "/api/short-drama/projects/:id",
+        "/api/short-drama/projects/:id/outline",
+        "/api/short-drama/projects/:id/visual-design*",
+        "/api/short-drama/projects/:id/storyboards",
+        "/api/short-drama/projects/:id/shots*",
+        "/api/fs",
+        "/api/fs?parent="
+      ],
+      "services": [
+        "server/shortDrama.ts"
+      ],
+      "tables": [
+        "data/short-drama-projects.json",
+        "项目/短剧 目录 + fs.json/blobs"
+      ],
+      "external": [
+        "模型站点（剧本/图像编辑）"
+      ],
+      "mode": "mixed",
+      "evidence": [
+        "源码阅读: server/shortDrama.ts:11; server/index.ts:8947-8990"
+      ],
+      "unknown": []
+    },
+    {
+      "id": "comfyui",
+      "name": "ComfyUI",
+      "frontend": {
+        "kind": "dx-app",
+        "chunk": null,
+        "entry": "data/developer-apps/.versions/comfyui/1.4.30/source/index.html（本机已装，非 app.asar 静态内容）"
+      },
+      "window": {
+        "appId": "comfyui",
+        "multiInstance": false
+      },
+      "routes": [
+        "/api/comfyui/projects*",
+        "/api/comfyui/workflows*",
+        "/api/comfyui/workflow-runs*",
+        "/api/comfyui/agent-workflows",
+        "/api/comfyui/status",
+        "/api/comfyui/bridge/version"
+      ],
+      "services": [
+        "server/comfyui.ts",
+        "server/comfyWorkflows.ts",
+        "server/comfyProjects.ts",
+        "server/comfyBridge.ts"
+      ],
+      "tables": [
+        "data/comfyui.json",
+        "data/comfy-workflows.json",
+        "data/developer-apps"
+      ],
+      "external": [
+        "本地 ComfyUI 实例",
+        "bundled-comfy-workflows"
+      ],
+      "mode": "local-only",
+      "evidence": [
+        "源码阅读: server/index.ts:10592-10686,10757"
+      ],
+      "unknown": [
+        "dx-app 前端内部实现未在 app.asar 内"
+      ]
+    },
+    {
+      "id": "canvas",
+      "name": "无限画布",
+      "frontend": {
+        "kind": "dx-app",
+        "chunk": null,
+        "entry": "data/developer-apps/.versions/canvas/1.0.288/source/index.html + assets/index-BNPFwRtS.js（本机已装，非 app.asar 静态内容）"
+      },
+      "window": {
+        "appId": "canvas",
+        "multiInstance": true
+      },
+      "routes": [
+        "GET/POST /api/canvas",
+        "/api/canvas/:id",
+        "/api/canvas/:id/sync",
+        "/api/canvas/:id/sharing",
+        "/api/canvas/:id/version",
+        "/api/canvas/:id/export|import",
+        "/api/canvas/:id/invite",
+        "/api/canvas/invites/redeem",
+        "/api/canvas/:id/restore|purge",
+        "/api/canvas/trash",
+        "/api/canvas/project-pages*",
+        "/api/canvas/move",
+        "/api/canvas/directory",
+        "/api/canvas/engines",
+        "/api/canvas/asset-libraries*",
+        "/api/canvas/asset-libraries/:id/items",
+        "/api/canvas/asset-libraries/:id/members",
+        "/api/canvas/asset-libraries/:id/sync-sources",
+        "/api/canvas/plugins/*",
+        "/api/canvas/cloud*",
+        "/api/canvas/:id/cloud-sync/*",
+        "/api/canvas/public-media",
+        "/api/canvas/:id/..media/extract-audio|trim-audio",
+        "/api/canvas/agent-attachments",
+        "/api/canvas/generate",
+        "/api/canvas/query-generation",
+        "/api/canvas/generate-text",
+        "/api/codex-canvas/relay",
+        "/api/ai/tasks*",
+        "/api/fs/*",
+        "/api/agent/*",
+        "/api/skills/*",
+        "/api/codex-canvas/*"
+      ],
+      "services": [
+        "server/canvas.ts",
+        "server/canvasAssetLibrary.ts",
+        "server/canvasPackage.ts",
+        "server/canvasCollab.ts",
+        "server/canvasPlugins.ts",
+        "server/canvasCloudSync.ts",
+        "server/canvasAgentAttachments.ts",
+        "server/codexCanvas.ts",
+        "server/codexCanvasInstaller.ts",
+        "server/ai-tasks/*"
+      ],
+      "tables": [
+        "ccs.db: canvases/canvas_members/canvas_invites/canvas_invite_members/canvas_cloud_sync_baselines/developer_collab_projects/developer_collab_members/developer_collab_invites",
+        "protocol-tasks.db",
+        "fs.json + blobs"
+      ],
+      "external": [
+        "模型站点（图像/视频/LLM）",
+        "api.dx-os.com（云画布同步）",
+        "ComfyUI/RunningHub/CLI 适配器",
+        "Codex/Gemini CLI 桥（dxos-canvas-mcp.cjs）"
+      ],
+      "mode": "mixed",
+      "evidence": [
+        "REA ev_9178e6af633b32894db81e4f74448e4aec964b1db5678e9116b61ce73e9c8217 ; ev_027b5212ad469dd229d30e481460d34a1f5d756844aa155d0d14e8e3d25d778a ; ev_f3faa43f4e668c28dd757390b0bbb7beb67c36a904ec54b96cef517c2c8eb68c",
+        "源码阅读: server/canvas*.ts; data/developer-apps/.versions/canvas/1.0.288/source/assets/index-BNPFwRtS.js（运行态包，标注非 asar）"
+      ],
+      "unknown": [
+        "云端 /v1/canvas-cloud 请求/响应细节未在本次逐字段核对",
+        "canvas dx-app 前端完整源码未随 app.asar 提供"
+      ]
+    },
+    {
+      "id": "snake",
+      "name": "贪吃蛇",
+      "frontend": {
+        "kind": "dx-app",
+        "chunk": null,
+        "entry": "dx-app 占位（OnDemandAppPlaceholder）"
+      },
+      "window": {
+        "appId": "snake"
+      },
+      "routes": [
+        "WS /api/snake/room"
+      ],
+      "services": [
+        "server/snakeCollab.ts"
+      ],
+      "tables": [
+        "内存房间（无持久化）"
+      ],
+      "external": [],
+      "mode": "local-only",
+      "evidence": [
+        "源码阅读: server/snakeCollab.ts（WebSocket 房间/蛇状态）"
+      ],
+      "unknown": [
+        "前端包内容未读取"
+      ]
+    },
+    {
+      "id": "video-editor",
+      "name": "Agent 剪辑",
+      "frontend": {
+        "kind": "dist-chunk",
+        "chunk": "VideoEditorApp-DbcIEgBe.js"
+      },
+      "window": {
+        "appId": "video-editor",
+        "multiInstance": true
+      },
+      "routes": [
+        "/api/video/media/probe",
+        "/api/video/assets",
+        "/api/video/projects/:projectId/assets",
+        "/api/video/assets/:id",
+        "/api/video/render-jobs",
+        "/api/video/render-jobs/:id",
+        "/api/video/render-jobs/:id/cancel",
+        "/api/video/render-jobs/:id/file"
+      ],
+      "services": [
+        "server/video/videoStore.ts",
+        "server/video/renderPlan.ts",
+        "server/video/videoWorker.ts",
+        "server/video/mediaProbe.ts",
+        "server/video/posterCache.ts"
+      ],
+      "tables": [
+        "ccs.db: video_projects/video_assets/video_render_jobs",
+        "data/video/*"
+      ],
+      "external": [
+        "ffmpeg（本机）"
+      ],
+      "mode": "local-only",
+      "evidence": [
+        "源码阅读: server/video/videoStore.ts:11-37,80-162"
+      ],
+      "unknown": [
+        "Agent 粗剪动作是否已接运行时未确证（0.5.5 报告称等待接入）"
+      ]
+    },
+    {
+      "id": "ai-image-declaration",
+      "name": "AI图片声明",
+      "frontend": {
+        "kind": "dist-chunk",
+        "chunk": "AiImageDeclarationApp-CqSwoMcj.js"
+      },
+      "window": {
+        "appId": "ai-image-declaration",
+        "permissionManaged": true
+      },
+      "routes": [
+        "/api/ai-image-declaration/process"
+      ],
+      "services": [
+        "server/aiImageDeclaration.ts"
+      ],
+      "tables": [
+        "（无持久化，输出 ZIP 返回）"
+      ],
+      "external": [],
+      "mode": "local-only",
+      "evidence": [
+        "源码阅读: AiImageDeclaration chunk 调 /ai-image-declaration/process; server/index.ts:1190,6697; aiImageDeclaration.ts:1-8（sharp+zip+XMP）"
+      ],
+      "unknown": [
+        "0.5.5 报告称“纯前端本地处理”，但 0.5.5 routes-0.5.5.tsv:285 已列出 POST /api/ai-image-declaration/process；两处证据冲突，0.6.1 是否为“前移后端”未能确证"
+      ]
+    },
+    {
+      "id": "figma",
+      "name": "Figma",
+      "frontend": {
+        "kind": "dist-chunk",
+        "chunk": "FigmaApp-BpeiLJVQ.js"
+      },
+      "window": {
+        "appId": "figma",
+        "permissionManaged": true
+      },
+      "routes": [
+        "/api/figma/projects",
+        "/api/figma/generate-vue",
+        "/api/figma/generate-vue/:id",
+        "/api/mcp/servers",
+        "/api/mcp/servers/figma/enabled|refresh",
+        "/api/mcp/call-direct"
+      ],
+      "services": [
+        "server/figmaPreview.ts",
+        "server/mcp.ts"
+      ],
+      "tables": [
+        "data/figma-previews",
+        "前端 localStorage（0.5.5 报告：dx-os:figma:projects:v1）",
+        "data/mcp.json"
+      ],
+      "external": [
+        "figma.com（链接/Framelink MCP：npx figma-developer-mcp）",
+        "模型站点（生成 Vue）"
+      ],
+      "mode": "external-cloud",
+      "evidence": [
+        "源码阅读: mcp.ts:249-251; figmaPreview.ts:10"
+      ],
+      "unknown": []
+    },
+    {
+      "id": "illustrator",
+      "name": "Illustrator",
+      "frontend": {
+        "kind": "dist-chunk",
+        "chunk": "IllustratorApp-C2y_bzkg.js"
+      },
+      "window": {
+        "appId": "illustrator",
+        "permissionManaged": true
+      },
+      "routes": [
+        "/api/illustrator/config",
+        "/api/illustrator/templates/:id/thumbnail",
+        "/api/local/illustrator-previews",
+        "/api/local/illustrator-exports",
+        "/api/local/write-text",
+        "/api/local/close-illustrator",
+        "/api/mcp/servers",
+        "/api/mcp/call-direct"
+      ],
+      "services": [
+        "server/illustratorConfig.ts",
+        "server/illustratorTempExports.ts",
+        "server/mcp.ts"
+      ],
+      "tables": [
+        "data（illustrator 配置/模板）",
+        "data/mcp.json"
+      ],
+      "external": [
+        "本机 Adobe Illustrator",
+        "Illustrator MCP 服务器"
+      ],
+      "mode": "external-local",
+      "evidence": [
+        "源码阅读: illustratorConfig.ts; mcp.ts managedBy illustrator"
+      ],
+      "unknown": []
+    },
+    {
+      "id": "quark",
+      "name": "夸克网盘",
+      "frontend": {
+        "kind": "dist-chunk",
+        "chunk": "QuarkApp-wrpneGYt.js"
+      },
+      "window": {
+        "appId": "quark",
+        "accessScope": "external"
+      },
+      "routes": [
+        "/api/quark/status",
+        "/api/quark/login",
+        "/api/quark/logout",
+        "/api/quark/browse",
+        "/api/quark/search",
+        "/api/quark/search-history",
+        "/api/quark/search-history/clear"
+      ],
+      "services": [
+        "server/quark.ts",
+        "server/vendor/quark-drive.cjs"
+      ],
+      "tables": [
+        "data/quark（HOME 等运行环境重定向）"
+      ],
+      "external": [
+        "夸克网盘（子进程 CLI）"
+      ],
+      "mode": "external-cloud",
+      "evidence": [
+        "源码阅读: quark.ts:17（WORK_DIR=dataPath('quark')）"
+      ],
+      "unknown": []
+    },
+    {
+      "id": "developer-studio",
+      "name": "DX Developer",
+      "frontend": {
+        "kind": "dist-chunk",
+        "chunk": "DeveloperStudioApp-BFL_9N-r.js"
+      },
+      "window": {
+        "appId": "developer-studio",
+        "permissionManaged": true
+      },
+      "routes": [
+        "/api/market/developer-lab",
+        "/api/market/developer-lab/:id/file",
+        "/api/market/developer-lab/:id/install|publish|simulate-install|icon/auto|collab",
+        "/api/market/developer-lab/jobs*",
+        "/api/market/developer-apps*",
+        "/api/developer/docs*",
+        "WS /api/developer-realtime"
+      ],
+      "services": [
+        "server/developerLab.ts",
+        "server/developerApps.ts",
+        "server/developerRuntime.ts",
+        "server/developerRealtime.ts",
+        "server/developerOAuth.ts",
+        "server/developerFileTransfers.ts",
+        "server/developerNetwork.ts",
+        "server/developerCapabilitySdk.ts"
+      ],
+      "tables": [
+        "data/developer-apps/index.json + .versions/.history",
+        "ccs.db: app_credential_bindings/app_oauth_tokens/app_network_audit/app_runtime_events/app_exchanges"
+      ],
+      "external": [
+        "（本地开发为主；发布走 api.dx-os.com）"
+      ],
+      "mode": "local-only",
+      "evidence": [
+        "源码阅读: developerApps.ts:29-31; developerRealtime.ts; server/index.ts developer-lab 路由"
+      ],
+      "unknown": []
+    }
+  ],
+  "version_diff": {
+    "baseline": "0.5.5 (routes-0.5.5.tsv 584 条 + 报告 + asar55 外壳)",
+    "routes": {
+      "0.5.5": 584,
+      "0.6.1": 648,
+      "added_normalized": 70,
+      "removed_normalized": 8,
+      "note": "0.5.5 tsv 含 ${tool} 模板路由；0.6.1 提取为单引号路由，模板路由（index.ts:2289-2296）未计入。584/648 与 70/8 仅作方向性参考"
+    },
+    "added_groups": {
+      "/api/photos": 17,
+      "/api/photocraft": 16,
+      "/api/file-transfers": 5,
+      "/api/app-exchange": 4,
+      "/api/comfyui": 2,
+      "/api/ocr": 2,
+      "/api/system/fonts": 2,
+      "/api/canvas": 2,
+      "/api/other": 20
+    },
+    "new_tables": [
+      "photo_source_visual_features (migration 50)",
+      "photo_source_related_rankings (51)",
+      "photocraft_projects + photocraft_project_members (53)",
+      "app_exchanges (54)"
+    ],
+    "frontend": {
+      "assets_count": 118,
+      "registry_apps": 30,
+      "carrier": "18 个 *App-*.js chunk + 7 个非 App 命名 chunk(Welcome/Files/Conversation/ApiSettings/Settings/Calendar/McpManager) + 1 内联主包(agent) + 3 dx-app 占位(canvas/comfyui/snake) + 1 内联组件(ziniao) = 30",
+      "hashed_chunk_names": "0.5.5 与 0.6.1 应用 id/名称一致；chunk 哈希全部变化（如 PhotosApp-CfkZizAG→PhotosApp-B__Mar7O）"
+    },
+    "protocol": {
+      "paddleocr_vl": "protocols.ts:287,2627 新增 native adapter paddleocr-vl；shared/ocr.ts:17-21 PADDLE_OCR_PROTOCOL/MODEL；providerIdentity.ts:63 域名识别"
+    },
+    "ocr": {
+      "routes": [
+        "GET /api/ocr/providers",
+        "POST /api/ocr/recognize"
+      ],
+      "service": "server/ocr.ts + shared/ocr.ts",
+      "external": "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs",
+      "limits": "32MB/图片，4 并发/2 每用户，300s 超时，detect|recognize，boundingBoxes"
+    },
+    "system_fonts": {
+      "routes": [
+        "GET /api/system/fonts",
+        "GET /api/system/fonts/:id"
+      ],
+      "service": "server/systemFonts.ts",
+      "platforms": "macOS /System/Library/Fonts,/Library/Fonts,~/Library/Fonts；Windows Fonts；Linux /usr/share/fonts 等",
+      "limits": "≤64MB/字体，扫描 10000 文件，5min 刷新缓存"
+    },
+    "file_transfer": {
+      "routes": [
+        "POST /api/file-transfers",
+        "GET /api/file-transfers/:id",
+        "PUT /api/file-transfers/:id/chunks",
+        "POST /api/file-transfers/:id/complete",
+        "DELETE /api/file-transfers/:id",
+        "POST /api/photocraft/projects/:id/save-bundle"
+      ],
+      "service": "server/fileTransfers.ts + fileTransferRoutes.ts",
+      "purpose": "photocraft-save（source: image/vnd.adobe.photoshop, preview: image/png ≤16MiB）分块+断点+校验；data/file-transfers；每用户 2 并发/全局 16"
+    },
+    "cli": "CLI 路由仍在 index.ts:2218-2366（jimeng/dreamina-canvas/pippit/codex/gemini + /api/cli/:tool/*）；agentCliTools.ts:73 仅 codex|gemini；claudecode/config.json 存在但无后端调用点（0.5.5 报告同结论，本次复核未发现新调用点）",
+    "local_proxy": {
+      "route": "POST /api/desktop/proxy/detect（loopback-only）",
+      "service": "server/localProxyDetection.ts",
+      "behavior": "收集当前设置/env/系统代理(macOS scutil、Windows reg) + VPN 进程 loopback 监听(mihomo/clash/v2ray/sing-box/...)；用 Node 子进程以候选代理访问 generativelanguage.googleapis.com/v1beta/models 探测；≤12 候选"
+    },
+    "shell": {
+      "new_files": [
+        "direct-update-fetch.cjs"
+      ],
+      "main_cjs": "87,182 B（0.5.5: 82,935 B，+4,247）",
+      "preload_new_ipc": [
+        "dx-desktop:clipboard-has-image",
+        "dx-desktop:clipboard-read-image",
+        "dx-desktop:clipboard-write-image",
+        "dx-desktop:ensure-local-admin-session"
+      ],
+      "preload_members": "15（0.5.5: 9 channels）",
+      "resources": "dxos-canvas-mcp.cjs 559,990 B（0.5.5 已有 557,773 B，未新增）"
+    },
+    "other": [
+      "/api/app-exchange 系列 + app_exchanges 表（迁移 54）",
+      "/api/codex-canvas/relay + /api/codex-canvas/setup|install|permissions（Canvas Codex 桥）",
+      "/api/comfyui/bridge/version",
+      "POST /api/auth/desktop-session",
+      "/api/canvas/asset-libraries/:id/sync-sources（资产库导入来源）",
+      "/api/canvas/media/extract-audio|trim-audio、/api/canvas/public-media 在 0.5.5 routes-0.5.5.tsv 已存在，非 0.6.1 新增"
+    ],
+    "non_builtin_dx_apps": [
+      {
+        "id": "dev-photocraft",
+        "note": "开发者应用（dev- 前缀，宿主 DeveloperAppHost 内加载，图标徽标 PS），不是 30 个内置应用之一",
+        "frontend": "DeveloperAppHost-CZ47Yu1K.js（宿主桥）",
+        "routes": [
+          "/api/photocraft/projects*",
+          "/api/photocraft/groups",
+          "/api/photocraft/trash",
+          "/api/file-transfers*",
+          "/api/photocraft/projects/:id/save-bundle"
+        ],
+        "services": [
+          "server/photocraftProjects.ts",
+          "server/photocraftRuntime.ts",
+          "server/fileTransfers.ts",
+          "server/fileTransferRoutes.ts"
+        ],
+        "tables": [
+          "ccs.db: photocraft_projects/photocraft_project_members（迁移 53）",
+          "data/file-transfers"
+        ],
+        "external": [
+          "本机 Photoshop 类编辑器（dx-app）"
+        ],
+        "confidence": "观察（dist chunk + server 路由/服务），dx-app 包未在本机安装，前端细节未知",
+        "native_detail": "server/index.ts:1113-1149 对 dev-photocraft 提供原生产物分支（.tmp/photocraft-v0.5.0/.../dist/web，含 photocraft-web_bg.wasm 补丁与 snippets 资源）；本机 app.asar.unpacked 无 .tmp/photocraft-v0.5.0，且该 dx-app 未安装"
+      }
+    ]
+  },
+  "unknowns": [
+    "canvas/comfyui/snake 的 dx-app 前端实现不在 app.asar 内；本报告对画布前端的观察来自本机已安装包 1.0.288（运行态数据），已在正文标注",
+    "0.5.5 的前端 dist 未留档（仅 routes/报告/外壳），因此 0.6.1 的“仅前端”变化（文案/交互/样式）无法逐条 diff",
+    "app.asar 与 app.asar.unpacked 存在 364 条解包完整性矛盾（trust=observed-untrusted）；这些文件的字节不作为可等价凭据",
+    "REA dist 分析仅覆盖 52/281 文件、semantic 族为 partial；请求族 retained_relations=0（URL 动态），路由清单以源码字面量+server 路由为准",
+    "协议数量、系统字体实际渲染、OCR 真实识别质量、文件传输真实吞吐均未做运行时验证（未执行目标）",
+    "0.5.5 报告未列出 /api/canvas/media/extract-audio|trim-audio、/api/canvas/public-media 等是否 0.6.1 新增，未逐条与 0.5.5 routes tsv 对齐（tsv 中存在性未全部核对）"
+  ],
+  "conclusions": [
+    "画布是 dx-app（占位+DeveloperAppHost iframe），真实前端不在 app.asar",
+    "素材库/资源库 = ccs.db developer_collab_projects(kind=asset-library) + fs 目录 项目/无限画布/资产库/<库名>(share=asset-library:<id>)",
+    "画布引用素材 = FS nodeId + /api/fs/raw/<nodeId>；导入/复制在服务端 copyNode，画布 JSON 不内联二进制",
+    "画布权限 = private/public/restricted+members+邀请码；资产库权限 = access+visibility+publicAccess+members；fs 经 shareZoneOf→canSeeShare 继承",
+    "画布媒体可见性另有 canViewCanvasMedia 放宽：仅文档实际引用的 nodeId，不授予父目录",
+    "生成：/api/canvas/generate → V2 AI 任务(protocol-tasks.db) 或 legacy；产物落 画布数据/<id>/生成结果 fs 节点+blob 后回传 MediaRef[]",
+    "协作：WS /api/canvas/collab 上行仅 cursor；文档保存 /api/canvas/:id/sync 逐卡合并+409 版本冲突",
+    "插件只来自开发者应用 manifest.canvas；registry.json 持久化；tombstone 保留",
+    "30 个内置应用 0.6.1 零增删；画布/相册/文件传输/OCR/字体/代理/Codex 桥为 0.6.1 主要增量",
+    "0.6.1：0.5.5 584→648 路由（静态提取，方向性）；新表 4 张（migration 50/51/53/54）；preload 9→15 成员；main.cjs +4,247B"
+  ]
+}
