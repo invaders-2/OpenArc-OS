@@ -60,7 +60,7 @@ function valueOf(result: MediaResult): Record<string, unknown> | null {
 function mediaErrorText(result: MediaResult | null): string {
   if (!result) return "媒体服务没有返回结果";
   const code = String(result.error || "MEDIA_INTERNAL");
-  const message = typeof result.message === "string" && result.message.trim() ? result.message.trim() : MEDIA_ERROR_TEXT[code] || "媒体服务调用失败";
+  const message = typeof result.message === "string" && result.message.trim() ? result.message.trim() : t(MEDIA_ERROR_TEXT[code] || "媒体服务调用失败");
   const suffix = code === "NO_BRIDGE" ? "" : "（" + code + "）";
   return message + suffix;
 }
@@ -197,11 +197,13 @@ const libState = computed<"unavailable" | "loading" | "error" | "unconfigured" |
 });
 
 const libCountLabel = computed(() => {
-  if (!mediaBridge) return "媒体桥未接入";
-  if (!libConfigured.value) return "未配置扫描目录";
-  if (libScanning.value) return "正在扫描…";
-  if (libLoading.value) return "正在读取…";
-  return libTracks.value.length + " 首" + (libSessionTrackCount.value && libSessionTrackCount.value !== libTracks.value.length ? "（会话缓存 " + libSessionTrackCount.value + "）" : "");
+  if (!mediaBridge) return t("媒体桥未接入");
+  if (!libConfigured.value) return t("未配置扫描目录");
+  if (libScanning.value) return t("正在扫描…");
+  if (libLoading.value) return t("正在读取…");
+  return libSessionTrackCount.value && libSessionTrackCount.value !== libTracks.value.length
+    ? t("{n} 首（会话缓存 {count}）", { n: libTracks.value.length, count: libSessionTrackCount.value })
+    : t("{n} 首", { n: libTracks.value.length });
 });
 
 async function loadLibraryConfig() {
@@ -295,11 +297,11 @@ async function saveDirs(nextDirs: string[]) {
 async function addDir() {
   const path = dirsDraft.value.trim();
   if (!path) {
-    dirsError.value = "请填写一个绝对路径；空值不会提交。";
+    dirsError.value = t("请填写一个绝对路径；空值不会提交。");
     return;
   }
   if (libDirs.value.includes(path)) {
-    dirsError.value = "这个目录已经在扫描清单里。";
+    dirsError.value = t("这个目录已经在扫描清单里。");
     return;
   }
   await saveDirs([...libDirs.value, path]);
@@ -414,7 +416,7 @@ async function saveMeta() {
     return;
   }
   const updated = numberOf(valueOf(result)?.updated) || 0;
-  metaNotice.value = "已写入 " + updated + " 条元数据；正在重新扫描以应用覆盖层…";
+  metaNotice.value = t("已写入 {n} 条元数据；正在重新扫描以应用覆盖层…", { n: updated });
   await scanLibrary();
   metaBusy.value = false;
   metaNotice.value = "已保存并应用。元数据只写本机音乐库覆盖层（library-meta.json），不改音频文件本身。";
@@ -484,7 +486,7 @@ async function onArtworkFile(event: Event) {
       return;
     }
     const id = textOf(valueOf(result)?.id);
-    artNotice.value = "已写入本地封面缓存（id " + id + "）。当前版本没有读取封面字节的命令，界面无法预览这张图；重新扫描后曲目会记录 albumImage。";
+    artNotice.value = t("已写入本地封面缓存（id {id}）。当前版本没有读取封面字节的命令，界面无法预览这张图；重新扫描后曲目会记录 albumImage。", { id });
     await loadArtworkTargets();
     await scanLibrary();
   } catch (error) {
@@ -528,25 +530,25 @@ const filteredFinderTracks = computed(() => {
 const finderEmpty = computed(() => musicState.loaded && !musicState.loading && !finderFailure.value && finderTracks.value.length === 0);
 const finderNoResult = computed(() => musicState.loaded && finderTracks.value.length > 0 && filteredFinderTracks.value.length === 0);
 const libNoResult = computed(() => libTracks.value.length > 0 && filteredLibTracks.value.length === 0);
-const trackDialogTitle = computed(() => selectedLib.value?.title || "曲目详情");
+const trackDialogTitle = computed(() => selectedLib.value?.title || t("曲目详情"));
 const finderPlayingHint = computed(() => {
   const track = currentTrack.value;
   if (!track) return "";
   const name = baseNameOf(track.name);
-  return musicState.playing ? "桌面小组件与访达来源共用播放状态，正在播放：" + name : "访达当前曲目：" + name;
+  return musicState.playing ? t("桌面小组件与访达来源共用播放状态，正在播放：{name}", { name }) : t("访达当前曲目：{name}", { name });
 });
 const playerTitle = computed(() => {
-  if (source.value === "library") return selectedLib.value ? selectedLib.value.title : "未选择曲目";
-  return currentTrack.value ? baseNameOf(currentTrack.value.name) : "未在播放";
+  if (source.value === "library") return selectedLib.value ? selectedLib.value.title : t("未选择曲目");
+  return currentTrack.value ? baseNameOf(currentTrack.value.name) : t("未在播放");
 });
 const playerMeta = computed(() => {
   if (source.value === "library") {
     const track = selectedLib.value;
-    if (!track) return "在列表里选一首，可以看歌词、编辑元数据或补封面。";
+    if (!track) return t("在列表里选一首，可以看歌词、编辑元数据或补封面。");
     return [track.artist, track.album, track.ext.toUpperCase()].filter(Boolean).join(" · ");
   }
   if (musicState.error) return musicState.error;
-  return currentTrack.value ? currentTrack.value.folder + " · " + currentTrack.value.ext.toUpperCase() + " · " + sizeText(currentTrack.value.size) : "双击访达列表里的曲目开始播放。";
+  return currentTrack.value ? currentTrack.value.folder + " · " + currentTrack.value.ext.toUpperCase() + " · " + sizeText(currentTrack.value.size) : t("双击访达列表里的曲目开始播放。");
 });
 
 onMounted(() => {
@@ -610,10 +612,10 @@ onMounted(() => {
 
       <template v-if="source === 'library'">
         <DsPageState v-if="libState === 'unavailable'" kind="unavailable" :title="t('音乐库不可用')" description="当前环境没有 window.openarc.media 媒体桥；访达来源仍然可用。" data-music-unavailable="media-bridge" />
-        <DsPageState v-else-if="libState === 'loading'" kind="loading" :title="t('正在读取音乐库…')" description="第一次读取会扫描目录并解析标签，曲目多时需要一会儿；界面不显示假进度。" />
+        <DsPageState v-else-if="libState === 'loading'" kind="loading" :title="t('正在读取音乐库…')" :description="t('第一次读取会扫描目录并解析标签，曲目多时需要一会儿；界面不显示假进度。')" />
         <DsPageState v-else-if="libState === 'error'" kind="error" :title="t('读取音乐库失败')" :description="libFailure || ''" :on-action="() => loadLibraryTracks()" />
-        <DsPageState v-else-if="libState === 'unconfigured'" kind="empty" :title="t('还没有设置音乐库目录')" description="音乐库只读取你指定的本机文件夹（限深 6 层、单库 5000 首）；标签缺失时用文件名兜底。" action-label="设置扫描目录" :on-action="openDirs" data-music-empty="unconfigured" />
-        <DsPageState v-else-if="libState === 'empty'" kind="empty" :title="t('扫描目录里没有可识别的音频')" description="支持 mp3 / flac / wav / m4a / aac / ogg / opus / wma。换一个目录或把音频放进去后重新扫描。" action-label="重新扫描" :on-action="scanLibrary" data-music-empty="no-tracks" />
+        <DsPageState v-else-if="libState === 'unconfigured'" kind="empty" :title="t('还没有设置音乐库目录')" :description="t('音乐库只读取你指定的本机文件夹（限深 6 层、单库 5000 首）；标签缺失时用文件名兜底。')" :action-label="t('设置扫描目录')" :on-action="openDirs" data-music-empty="unconfigured" />
+        <DsPageState v-else-if="libState === 'empty'" kind="empty" :title="t('扫描目录里没有可识别的音频')" :description="t('支持 mp3 / flac / wav / m4a / aac / ogg / opus / wma。换一个目录或把音频放进去后重新扫描。')" :action-label="t('重新扫描')" :on-action="scanLibrary" data-music-empty="no-tracks" />
         <div v-else class="music-list" role="list" data-music-library-list>
           <div v-if="libNoResult" class="music-empty-inline">{{ t("没有匹配的曲目；搜索只作用于已载入的列表。") }}</div>
           <button
@@ -640,7 +642,7 @@ onMounted(() => {
       <template v-else>
         <DsPageState v-if="musicState.loading && !finderTracks.length" kind="loading" :title="t('正在读取访达里的音频…')" />
         <DsPageState v-else-if="finderFailure" kind="unavailable" :title="t('访达来源不可用')" :description="finderFailure" />
-        <DsPageState v-else-if="finderEmpty" kind="empty" :title="t('访达里还没有音频')" description="把 mp3 / m4a / wav 等音频拖进访达（桌面或任意文件夹），刷新后就能在这里播放。" :on-action="loadFinder" action-label="重新读取" />
+        <DsPageState v-else-if="finderEmpty" kind="empty" :title="t('访达里还没有音频')" :description="t('把 mp3 / m4a / wav 等音频拖进访达（桌面或任意文件夹），刷新后就能在这里播放。')" :on-action="loadFinder" :action-label="t('重新读取')" />
         <div v-else class="music-list" role="list" data-music-finder-list>
           <div v-if="finderNoResult" class="music-empty-inline">{{ t("没有匹配的音频；搜索只作用于已载入的列表。") }}</div>
           <button
@@ -694,7 +696,7 @@ onMounted(() => {
           </li>
         </ul>
         <p v-else class="music-hint">{{ t("还没有目录。") }}</p>
-        <DsTextField label="添加目录（绝对路径）" :model-value="dirsDraft" :placeholder="t('/Users/你的名字/Music')" hint="添加后会立刻重新扫描；完整路径只在主进程与这个输入框里使用。" @update:model-value="dirsDraft = $event" />
+        <DsTextField :label="t('添加目录（绝对路径）')" :model-value="dirsDraft" :placeholder="t('/Users/你的名字/Music')" :hint="t('添加后会立刻重新扫描；完整路径只在主进程与这个输入框里使用。')" @update:model-value="dirsDraft = $event" />
         <div class="music-actions">
           <DsButton size="sm" :status="dirsBusy ? 'loading' : 'idle'" :disabled="!dirsDraft.trim()" @click="addDir">
             <FolderOpen :size="14" :stroke-width="1.5" /> {{ t("添加并扫描") }}

@@ -6,6 +6,8 @@
  * 事实来自 canvas/agentAttachments/extract 的返回：扩展名命中时它给出结构化 parseError。
  * 这里只把那条真实结果归一成 UI 状态，不伪造"可用"，也不在两条命令之间做假缓存。
  */
+import { t } from "../i18n/index.ts";
+
 export type OfficeFormatStatus = { available: boolean; error: string | null };
 export type OfficeCapability = {
   checked: boolean;
@@ -63,12 +65,12 @@ export async function probeOfficeCapability(host: CanvasBridgeHost | null = type
 
 /** 界面一行摘要（正文只放结论，原始错误放 title / data-*）。 */
 export function officeCapabilityLabel(capability: OfficeCapability | null): string {
-  if (!capability) return "docx/xlsx：探测中…";
-  if (capability.failure) return "docx/xlsx：无法探测（" + capability.failure.code + "）";
+  if (!capability) return t("docx/xlsx：探测中…");
+  if (capability.failure) return t("docx/xlsx：无法探测（{code}）", { code: capability.failure.code });
   const docx = capability.docx.available;
   const xlsx = capability.xlsx.available;
-  if (docx && xlsx) return "docx/xlsx：可解析";
-  return "docx/xlsx：不可用（当前构建未包含解析依赖）";
+  if (docx && xlsx) return t("docx/xlsx：可解析");
+  return t("docx/xlsx：不可用（当前构建未包含解析依赖）");
 }
 
 /** 悬浮提示：把后端原文一并给出，避免只看到结论。 */

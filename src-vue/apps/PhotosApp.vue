@@ -1382,14 +1382,14 @@ async function submitSend() {
           <section class="photos-pane photos-pane--flat" :aria-label="t('照片网格')">
             <div class="photos-toolbar">
               <div class="photos-toolbar__grow">
-                <DsSearchField :value="query" :placeholder="t('按文件名筛选已载入的照片')" label="筛选照片" @update:value="query = $event" />
+                <DsSearchField :value="query" :placeholder="t('按文件名筛选已载入的照片')" :label="t('筛选照片')" @update:value="query = $event" />
               </div>
-              <span class="photos-count">{{ page.label }}{{ page.truncated ? t("（还有更多）") : "" }}</span>
+              <span class="photos-count">{{ t("已载入 {loaded} / {total}", { loaded: page.loaded, total: page.total }) }}{{ page.truncated ? t("（还有更多）") : "" }}</span>
               <DsButton variant="secondary" size="sm" :status="libBusy === 'reload' ? 'loading' : 'idle'" @click="loadPage(0)">
                 <RefreshCw :size="14" :stroke-width="1.5" /> {{ t("刷新") }}
               </DsButton>
               <DsButton variant="secondary" size="sm" :disabled="!page.hasNext || libBusy !== null" @click="loadPage(page.nextOffset)">{{ t("加载更多") }}</DsButton>
-              <DsButton variant="secondary" size="sm" :disabled="selection.length === 0" @click="openAssign">归入文件夹{{ selection.length ? "（" + selection.length + "）" : "" }}</DsButton>
+              <DsButton variant="secondary" size="sm" :disabled="selection.length === 0" @click="openAssign">{{ selection.length ? t("归入文件夹（{n}）", { n: selection.length }) : t("归入文件夹") }}</DsButton>
             </div>
 
             <p
@@ -1399,23 +1399,23 @@ async function submitSend() {
               :data-photos-office-docx="office.docx.available ? '1' : '0'"
               :data-photos-office-xlsx="office.xlsx.available ? '1' : '0'"
               :title="officeCapabilityDetail(office)"
-            >{{ officeCapabilityLabel(office) }} · 相册只索引图片/视频，不解析 Office 文档正文</p>
+            >{{ t(officeCapabilityLabel(office)) }} · {{ t("相册只索引图片/视频，不解析 Office 文档正文") }}</p>
             <p v-if="libNotice" class="photos-hint" :class="{ 'photos-error': libNotice.tone === 'error' }" :role="libNotice.tone === 'error' ? 'alert' : 'status'">{{ libNotice.text }}</p>
 
             <div v-if="libFailure && items.length > 0" class="photos-banner">
-              <p class="photos-error" role="alert" :data-photos-error-code="libFailure.code">刷新目录未完成：{{ photosErrorText(libFailure.code) }}</p>
+              <p class="photos-error" role="alert" :data-photos-error-code="libFailure.code">{{ t("刷新目录未完成：{reason}", { reason: photosErrorText(libFailure.code) }) }}</p>
             </div>
 
             <ul v-if="libNotices.length" class="photos-list-notices" data-photos-notices>
               <li v-for="notice in libNotices" :key="notice">{{ notice }}</li>
             </ul>
 
-            <p v-if="filterActive && items.length" class="photos-hint" data-photos-filter-note>筛选与搜索只作用于已载入的 {{ items.length }} 张照片；要继续用「加载更多」把后面的页取回来。</p>
+            <p v-if="filterActive && items.length" class="photos-hint" data-photos-filter-note>{{ t("筛选与搜索只作用于已载入的 {n} 张照片；要继续用「加载更多」把后面的页取回来。", { n: items.length }) }}</p>
 
-            <DsPageState v-if="libraryListState === 'loading'" kind="loading" :title="t('正在读取照片目录…')" description="来源、子目录与照片清单都由主进程按当前账号索引，界面不缓存宿主路径。" />
+            <DsPageState v-if="libraryListState === 'loading'" kind="loading" :title="t('正在读取照片目录…')" :description="t('来源、子目录与照片清单都由主进程按当前账号索引，界面不缓存宿主路径。')" />
             <DsPageState v-else-if="libraryListState === 'error'" kind="error" :title="t('读取照片目录失败')" :description="libFailure ? photosErrorText(libFailure.code) : ''" :on-action="() => loadPage(0)" />
             <DsPageState v-else-if="libraryListState === 'empty'" kind="empty" :title="filterActive ? t('当前筛选没有照片') : t('还没有照片')" :description="filterActive ? t('换一个来源或文件夹筛选，或者清空搜索词。列表里只统计已载入的页。') : t('添加一个本机文件夹作为来源后，应用会索引其中的图片与视频（只读，不改动原文件）。')" />
-            <DsPageState v-else-if="visibleItems.length === 0" kind="empty" :title="t('当前筛选没有照片')" description="换一个来源或文件夹筛选，或者清空搜索词。筛选与搜索只作用于已载入的页。" />
+            <DsPageState v-else-if="visibleItems.length === 0" kind="empty" :title="t('当前筛选没有照片')" :description="t('换一个来源或文件夹筛选，或者清空搜索词。筛选与搜索只作用于已载入的页。')" />
             <div v-else class="ds-scroll photos-scroll" data-ds-comp="scroll-area" tabindex="0" role="region" :aria-label="t('照片网格')">
               <ul ref="gridRoot" class="photos-grid" data-photos-grid>
                 <li v-for="item in visibleItems" :key="item.id" class="photos-card-host" :data-photo-id="item.id">
@@ -1538,7 +1538,7 @@ async function submitSend() {
                       <strong>{{ t("扩图") }}</strong>
                       <DsBadge tone="warning" size="sm">{{ t("不可用") }}</DsBadge>
                     </div>
-                    <DsPageState kind="unavailable" :title="t('扩图暂不可用')" description="这是后端能力缺失，不是加载失败；界面不会伪造扩图结果，也不会把原图发给任何模型。" :missing="OUTPAINT_MISSING" />
+                    <DsPageState kind="unavailable" :title="t('扩图暂不可用')" :description="t('这是后端能力缺失，不是加载失败；界面不会伪造扩图结果，也不会把原图发给任何模型。')" :missing="OUTPAINT_MISSING" />
                   </div>
 
                   <div class="photos-tools__block" data-photos-slice="1">
@@ -1546,7 +1546,7 @@ async function submitSend() {
                       <strong>{{ t("宫格切片") }}</strong>
                       <span>{{ t("本地 canvas") }}</span>
                     </div>
-                    <p class="photos-hint">把这张原图切成 {{ sliceGrid }}×{{ sliceGrid }} 张等分小图。全部在渲染层用 canvas 完成，不联网、不写回来源目录；导出统一打包成 ZIP。</p>
+                    <p class="photos-hint">{{ t("把这张原图切成 {n}×{n} 张等分小图。全部在渲染层用 canvas 完成，不联网、不写回来源目录；导出统一打包成 ZIP。", { n: sliceGrid }) }}</p>
                     <div class="photos-form__row">
                       <span>{{ t("切片规格") }}</span>
                       <div class="segmented text" role="group" :aria-label="t('切片规格')">
@@ -1588,7 +1588,7 @@ async function submitSend() {
                 <ul class="photos-list">
                   <li v-for="row in dependencyRows" :key="row.key" class="photos-row">
                     <span class="photos-row__main">
-                      <span class="photos-row__name" :title="row.hint">{{ row.label }}</span>
+                      <span class="photos-row__name" :title="t(row.hint)">{{ t(row.label) }}</span>
                       <span class="photos-row__facts">
                         <DsBadge :tone="row.available ? 'success' : 'warning'" size="sm">{{ row.available ? t("已装配") : t("未装配") }}</DsBadge>
                       </span>
@@ -1650,7 +1650,7 @@ async function submitSend() {
 
             <p v-if="studioNotice" class="photos-hint" :class="{ 'photos-error': studioNotice.tone === 'error' }" :role="studioNotice.tone === 'error' ? 'alert' : 'status'">{{ studioNotice.text }}</p>
 
-            <p v-if="studioFailure && studioPool.length" class="photos-error" role="alert" :data-photos-error-code="studioFailure.code">刷新项目未完成：{{ photocraftErrorText(studioFailure.code) }}</p>
+            <p v-if="studioFailure && studioPool.length" class="photos-error" role="alert" :data-photos-error-code="studioFailure.code">{{ t("刷新项目未完成：{reason}", { reason: photocraftErrorText(studioFailure.code) }) }}</p>
 
             <DsPageState v-if="studioListState === 'loading'" kind="loading" :title="t('正在读取项目…')" />
             <DsPageState v-else-if="studioListState === 'error' || studioListState === 'unavailable' || studioListState === 'unauthorized'" :kind="studioErrorKind" :title="t('读取项目失败')" :description="studioFailure ? photocraftErrorText(studioFailure.code) : ''" :on-action="studioReload" />
@@ -1807,7 +1807,7 @@ async function submitSend() {
         </DsDialog>
 
         <DsDialog :open="libDialog?.kind === 'remove-folder'" :title="t('删除虚拟文件夹')" @close="libDialog = null">
-          <p class="photos-hint">删除「{{ pendingRemoveFolder ? pendingRemoveFolder.name : "" }}」会级联删除它的全部子文件夹，并清空这些文件夹上的照片归类。照片本身不会被删除（来源里的原文件不动）。</p>
+          <p class="photos-hint">{{ t("删除「{name}」会级联删除它的全部子文件夹，并清空这些文件夹上的照片归类。照片本身不会被删除（来源里的原文件不动）。", { name: pendingRemoveFolder ? pendingRemoveFolder.name : "" }) }}</p>
           <template #footer>
             <DsButton variant="ghost" @click="libDialog = null">{{ t("取消") }}</DsButton>
             <DsButton variant="danger" :status="libBusy === 'remove-folder' ? 'loading' : 'idle'" @click="pendingRemoveFolder && submitRemoveFolder(pendingRemoveFolder)">{{ t("删除") }}</DsButton>
@@ -1815,7 +1815,7 @@ async function submitSend() {
         </DsDialog>
 
         <DsDialog :open="libDialog?.kind === 'remove-source'" :title="t('移除照片来源')" @close="libDialog = null">
-          <p class="photos-hint">只从应用的来源清单里移除「{{ pendingRemoveSource ? pendingRemoveSource.name : "" }}」；磁盘上的照片不会被删除，重新添加同一目录即可恢复。</p>
+          <p class="photos-hint">{{ t("只从应用的来源清单里移除「{name}」；磁盘上的照片不会被删除，重新添加同一目录即可恢复。", { name: pendingRemoveSource ? pendingRemoveSource.name : "" }) }}</p>
           <template #footer>
             <DsButton variant="ghost" @click="libDialog = null">{{ t("取消") }}</DsButton>
             <DsButton variant="danger" :status="libBusy === 'remove-source' ? 'loading' : 'idle'" @click="submitRemoveSource">{{ t("移除") }}</DsButton>
@@ -1898,7 +1898,7 @@ async function submitSend() {
         </DsDialog>
 
         <DsDialog :open="studioDialog?.kind === 'remove-group'" :title="t('删除分组')" @close="studioDialog = null">
-          <p class="photos-hint">删除「{{ pendingRemoveGroup ? pendingRemoveGroup.name : "" }}」后，里面的项目会被移回默认分组，项目本身不会被删除。</p>
+          <p class="photos-hint">{{ t("删除「{name}」后，里面的项目会被移回默认分组，项目本身不会被删除。", { name: pendingRemoveGroup ? pendingRemoveGroup.name : "" }) }}</p>
           <template #footer>
             <DsButton variant="ghost" @click="studioDialog = null">{{ t("取消") }}</DsButton>
             <DsButton variant="danger" :status="studioBusy === 'remove-group' ? 'loading' : 'idle'" @click="pendingRemoveGroup && submitRemoveGroup(pendingRemoveGroup)">{{ t("删除") }}</DsButton>
