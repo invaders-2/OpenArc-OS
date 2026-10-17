@@ -146,7 +146,7 @@ const DXOS_SKIPPED_TABLES = Object.freeze([
   "task_events"
 ]);
 
-/** dxosDdl() 实际会建的 58 张（DXOS_TABLES 去掉 DXOS_SKIPPED_TABLES）。含 0.6.1 增补 6 张。 */
+/** dxosDdl() 实际会建的 59 张（DXOS_TABLES 去掉 DXOS_SKIPPED_TABLES + 本仓 project_agent_jobs）。含 0.6.1 增补 6 张。 */
 const DXOS_CREATED_TABLES = Object.freeze([
   "schema_migrations",
   "threads",
@@ -205,7 +205,8 @@ const DXOS_CREATED_TABLES = Object.freeze([
   "photo_source_related_rankings",
   "photocraft_projects",
   "photocraft_project_members",
-  "app_exchanges"
+  "app_exchanges",
+  "project_agent_jobs"
 ]);
 
 /** 配额原语依赖的表（apiQuota.ts）。 */

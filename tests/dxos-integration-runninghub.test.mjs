@@ -63,7 +63,7 @@ function startStub(handler) {
 // ── ① 注册 / 默认关闭 / 持久化 / 依赖缺失文案 ─────────────────────────────
 test("注册：optionalPlugins 含 runninghub/modelscope/agnes，默认全关且启用后跨实例保持", async () => {
   // B7e3 起 Agnes 也并入 optionalPlugins（新增可选插件），三者的登记契约在此钉住。
-  assert.deepEqual(optionalPlugins().map((plugin) => plugin.id).sort(), ["agnes", "modelscope", "runninghub"]);
+  assert.deepEqual(optionalPlugins().map((plugin) => plugin.id).sort(), ["agnes", "figma", "illustrator", "modelscope", "runninghub"]);
   const dir = tempDir();
   const registry = createPluginRegistry({ userDataDir: dir, plugins: optionalPlugins(), capabilities: { fetch: async () => ({}), safeStorage: true } });
   const runninghub = registry.get("runninghub");

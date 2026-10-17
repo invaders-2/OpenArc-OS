@@ -46,7 +46,7 @@ function columnNames(db, table) {
 test("schema：抽取 63 张 DX 表，跳过与 OpenArc 重名的 5 张", () => {
   assert.equal(schema.DXOS_TABLES.length, 63);
   assert.deepEqual([...schema.DXOS_SKIPPED_TABLES].sort(), ["project_members", "projects", "task_events", "task_steps", "tasks"]);
-  assert.equal(schema.DXOS_CREATED_TABLES.length, 58);
+  assert.equal(schema.DXOS_CREATED_TABLES.length, 59);
   for (const skipped of schema.DXOS_SKIPPED_TABLES) assert.ok(!schema.DXOS_CREATED_TABLES.includes(skipped), skipped + " 不应出现在待建清单");
   for (const expected of ["schema_migrations", "agent_runs", "canvases", "ai_protocol_tasks", "legacy_ai_tasks", "api_quota_usage"]) {
     assert.ok(schema.DXOS_TABLES.includes(expected), "缺少 DX 表 " + expected);
@@ -55,14 +55,14 @@ test("schema：抽取 63 张 DX 表，跳过与 OpenArc 重名的 5 张", () => 
 
 test("schema：dxosDdl() 全部幂等语句，重复执行两次不报错且折叠列存在", () => {
   const ddl = schema.dxosDdl();
-  assert.equal(ddl.length, 118);
+  assert.equal(ddl.length, 121);
   for (const statement of ddl) assert.match(statement, /^(CREATE TABLE IF NOT EXISTS|CREATE (UNIQUE )?INDEX IF NOT EXISTS)/);
   const db = new DatabaseSync(":memory:");
   try {
     for (const statement of ddl) db.exec(statement);
     for (const statement of ddl) db.exec(statement);
     const names = tableNames(db);
-    assert.equal(names.length, 58);
+    assert.equal(names.length, 59);
     for (const table of schema.DXOS_CREATED_TABLES) assert.ok(names.includes(table), "缺少表 " + table);
     for (const skipped of schema.DXOS_SKIPPED_TABLES) assert.ok(!names.includes(skipped), skipped + " 不应被建出来");
     // ALTER 折叠的证据：这些列来自后续迁移，必须出现在最终建表语句里

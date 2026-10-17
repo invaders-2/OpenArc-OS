@@ -80,7 +80,7 @@ function newInMemoryDb() {
 
 test("schema：6 张 0.6.1 表进入清单，api_quota_rules_v2 刻意不加", () => {
   assert.equal(schema.DXOS_TABLES.length, 63);
-  assert.equal(schema.DXOS_CREATED_TABLES.length, 58);
+  assert.equal(schema.DXOS_CREATED_TABLES.length, 59);
   for (const table of NEW_TABLES) {
     assert.ok(schema.DXOS_TABLES.includes(table), "DXOS_TABLES 缺 " + table);
     assert.ok(schema.DXOS_CREATED_TABLES.includes(table), "DXOS_CREATED_TABLES 缺 " + table);

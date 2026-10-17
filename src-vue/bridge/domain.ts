@@ -12,7 +12,8 @@ export type DomainName =
   | "systemFonts"
   | "fileTransfer"
   | "desktop"
-  | "cli";
+  | "cli"
+  | "agent";
 
 export type CommandReply = Record<string, unknown> & { ok?: boolean };
 

@@ -39,7 +39,7 @@ export interface CliStatusView {
   detail: string;
 }
 
-import { t } from "../i18n";
+import { t } from "../i18n/index.ts";
 
 /** 冻结错误码 → 中文文案。原始码不上屏（只进 data-*）；英文经 t() 覆盖。 */
 export const CLI_ERROR_TEXT: Readonly<Record<string, string>> = {

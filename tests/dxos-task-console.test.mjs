@@ -128,7 +128,7 @@ const stripComments = (s) =>
    ══════════════════════════════════════════════════════════════════════════ */
 test("命令白名单逐条等于后端 agent-domain.cjs 的 AGENT_COMMANDS（含顺序与条数）", () => {
   const backend = Object.keys(domain.AGENT_COMMANDS);
-  assert.equal(backend.length, 28, "后端应有 28 条 agent 命令（27 + agent/health + agent/task/unified-list）");
+  assert.equal(backend.length, 28, "后端应有 28 条 agent 命令（gateway 复用 project/run，不扩白名单）");
   assert.deepEqual([...AGENT_COMMANDS], backend, "界面白名单必须与后端完全一致，不能多也不能少");
 });
 

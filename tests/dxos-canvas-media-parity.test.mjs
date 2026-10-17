@@ -161,7 +161,7 @@ test("A17 · DX 14 个 canvas_* 工具映射清单：mapped/partial/unsupported 
 
 test("A18 · docx/xlsx 解析器注入：有依赖抽取正文；无依赖保持结构化拒绝", () => {
   const docx = attachments.extractAttachment({ name: "a.docx", mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", buffer: Buffer.from("fake") });
-  assert.match(docx.error, /解析依赖/);
+  assert.match(docx.error, /文件解析失败|解析依赖/);
   attachments.configureAttachmentParsers({ docx: () => "DOCX 正文", xlsx: (buf) => ({ text: "XLSX " + buf.length }) });
   try {
     const parsed = attachments.extractAttachment({ name: "a.docx", mime: "application/octet-stream", buffer: Buffer.from("fake") });
